@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pi-agent-core"
+version = "0.1.0"
+description = "Python port of pi-agent-core with LangChain LLM adapter"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    "pydantic>=2.0",
+    "langchain-core>=0.3.0",
+]
+
+[project.optional-dependencies]
+openai = ["langchain-openai>=0.2.0"]
+anthropic = ["langchain-anthropic>=0.2.0"]
+all = ["langchain-openai>=0.2.0", "langchain-anthropic>=0.2.0"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["pi_agent_core"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["pi_agent_core/tests"]
