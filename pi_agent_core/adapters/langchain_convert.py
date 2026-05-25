@@ -66,9 +66,7 @@ def convert_to_langchain(
                 ai = AIMessage(content=ai.content, tool_calls=tool_calls)
             out.append(ai)
         elif isinstance(msg, ToolResultMessage):
-            text = " ".join(
-                b["text"] for b in msg.content if b.get("type") == "text"
-            )
+            text = " ".join(b["text"] for b in msg.content if b.get("type") == "text")
             out.append(
                 ToolMessage(
                     content=text or "(empty)",

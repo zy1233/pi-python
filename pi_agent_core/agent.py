@@ -5,16 +5,15 @@ from __future__ import annotations
 import asyncio
 import inspect
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
-from pi_agent_core.agent_loop import run_agent_loop, run_agent_loop_continue
 from pi_agent_core.adapters.langchain_convert import default_convert_to_llm
+from pi_agent_core.agent_loop import run_agent_loop, run_agent_loop_continue
 from pi_agent_core.messages import AssistantMessage, ImageContent, Usage, UserMessage
 from pi_agent_core.queues import PendingMessageQueue
 from pi_agent_core.types import (
-    AfterToolCallContext,
-    AfterToolCallResult,
     AgentContext,
     AgentEndEvent,
     AgentEvent,
@@ -22,12 +21,9 @@ from pi_agent_core.types import (
     AgentLoopTurnUpdate,
     AgentMessage,
     AgentTool,
-    BeforeToolCallContext,
-    BeforeToolCallResult,
     ConvertToLlmFn,
     MessageEndEvent,
     MessageStartEvent,
-    MessageUpdateEvent,
     Model,
     QueueMode,
     StreamFn,
@@ -361,9 +357,7 @@ class Agent:
         self._active_run = None
 
     async def _process_events(self, event: AgentEvent) -> None:
-        if event.type == "message_start":
-            self.streaming_message = event.message
-        elif event.type == "message_update":
+        if event.type == "message_start" or event.type == "message_update":
             self.streaming_message = event.message
         elif event.type == "message_end":
             self.streaming_message = None

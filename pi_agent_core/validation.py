@@ -23,6 +23,7 @@ def validate_tool_call(tool: AgentTool, tool_call: AgentToolCall) -> AgentToolCa
         validated = validate_tool_arguments(tool, tool_call)
         if validated is tool_call["arguments"]:
             return tool_call
-        return {**tool_call, "arguments": validated if isinstance(validated, dict) else validated.model_dump()}
+        args = validated if isinstance(validated, dict) else validated.model_dump()
+        return {**tool_call, "arguments": args}
     except ValidationError as e:
         raise ValueError(str(e)) from e
