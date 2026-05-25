@@ -284,7 +284,12 @@ async def _stream_assistant_response(
         resolved_api_key = await _maybe_await(config.get_api_key(config.model.provider))
     resolved_api_key = resolved_api_key or config.api_key
 
-    options = StreamOptions(api_key=resolved_api_key, signal=signal or config.signal)
+    options = StreamOptions(
+        api_key=resolved_api_key,
+        signal=signal or config.signal,
+        reasoning=config.thinking_level,
+        cost_calculator=config.cost_calculator,
+    )
     response = await _maybe_await(stream_function(config.model, llm_context, options))
 
     partial_message: AssistantMessage | None = None

@@ -54,6 +54,7 @@ class Usage(BaseModel):
     cacheRead: int = 0
     cacheWrite: int = 0
     totalTokens: int = 0
+    reasoningTokens: int = 0
     cost: UsageCost = Field(default_factory=UsageCost)
 
 
