@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
+
+if TYPE_CHECKING:
+    from pi_agent_core.event_stream import AssistantMessageEventStream
 
 from pydantic import BaseModel
 
@@ -152,18 +155,31 @@ class AgentLoopConfig:
         Callable[[ShouldStopAfterTurnContext], bool | Awaitable[bool]] | None
     ) = None
     prepare_next_turn: (
-        Callable[[ShouldStopAfterTurnContext], AgentLoopTurnUpdate | None | Awaitable[AgentLoopTurnUpdate | None]]
+        Callable[
+            [ShouldStopAfterTurnContext],
+            AgentLoopTurnUpdate | None | Awaitable[AgentLoopTurnUpdate | None],
+        ]
         | None
     ) = None
-    get_steering_messages: Callable[[], list[AgentMessage] | Awaitable[list[AgentMessage]]] | None = None
-    get_follow_up_messages: Callable[[], list[AgentMessage] | Awaitable[list[AgentMessage]]] | None = None
+    get_steering_messages: (
+        Callable[[], list[AgentMessage] | Awaitable[list[AgentMessage]]] | None
+    ) = None
+    get_follow_up_messages: (
+        Callable[[], list[AgentMessage] | Awaitable[list[AgentMessage]]] | None
+    ) = None
     tool_execution: ToolExecutionMode = "parallel"
     before_tool_call: (
-        Callable[[BeforeToolCallContext, Any | None], BeforeToolCallResult | None | Awaitable[BeforeToolCallResult | None]]
+        Callable[
+            [BeforeToolCallContext, Any | None],
+            BeforeToolCallResult | None | Awaitable[BeforeToolCallResult | None],
+        ]
         | None
     ) = None
     after_tool_call: (
-        Callable[[AfterToolCallContext, Any | None], AfterToolCallResult | None | Awaitable[AfterToolCallResult | None]]
+        Callable[
+            [AfterToolCallContext, Any | None],
+            AfterToolCallResult | None | Awaitable[AfterToolCallResult | None],
+        ]
         | None
     ) = None
     api_key: str | None = None
@@ -171,6 +187,7 @@ class AgentLoopConfig:
 
 
 # --- Assistant stream events ---
+
 
 class AssistantMessageEventBase(BaseModel):
     partial: AssistantMessage
@@ -208,6 +225,7 @@ AssistantMessageEvent = StartEvent | TextDeltaEvent | ToolCallDeltaEvent | DoneE
 
 
 # --- Agent events ---
+
 
 class AgentStartEvent(BaseModel):
     type: Literal["agent_start"] = "agent_start"
