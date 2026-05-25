@@ -18,6 +18,8 @@ from pi_agent_core.messages import (
     Message,
     TextContent,
     ToolResultMessage,
+    Usage,
+    UsageCost,
 )
 
 ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh"]
@@ -131,12 +133,16 @@ class AgentLoopTurnUpdate:
     thinking_level: ThinkingLevel | None = None
 
 
+CostCalculator = Callable[[Usage, Model], UsageCost]
+
+
 @dataclass
 class StreamOptions:
     api_key: str | None = None
     signal: Any | None = None
     session_id: str | None = None
     reasoning: ThinkingLevel | None = None
+    cost_calculator: CostCalculator | None = None
 
 
 ConvertToLlmFn = Callable[[list[AgentMessage]], list[Message] | Awaitable[list[Message]]]
@@ -184,6 +190,8 @@ class AgentLoopConfig:
     ) = None
     api_key: str | None = None
     signal: Any | None = None
+    thinking_level: ThinkingLevel | None = None
+    cost_calculator: CostCalculator | None = None
 
 
 # --- Assistant stream events ---

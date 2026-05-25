@@ -19,12 +19,19 @@ from pi_agent_core.messages import (
     ToolResultMessage,
     UserMessage,
 )
+from pi_agent_core.transform import (
+    downgrade_thinking,
+    normalize_tool_call_ids,
+    strip_unsupported_images,
+    transform_messages,
+)
 from pi_agent_core.types import (
     AgentContext,
     AgentEvent,
     AgentLoopConfig,
     AgentMessage,
     AgentToolResult,
+    CostCalculator,
     Model,
     StreamFn,
 )
@@ -37,6 +44,7 @@ __all__ = [
     "AgentMessage",
     "AgentToolResult",
     "AssistantMessage",
+    "CostCalculator",
     "Message",
     "Model",
     "StreamFn",
@@ -46,8 +54,12 @@ __all__ = [
     "agent_loop_continue",
     "convert_to_langchain",
     "default_convert_to_llm",
+    "downgrade_thinking",
     "langchain_stream",
+    "normalize_tool_call_ids",
     "resolve_chat_model",
     "run_agent_loop",
     "run_agent_loop_continue",
+    "strip_unsupported_images",
+    "transform_messages",
 ]
