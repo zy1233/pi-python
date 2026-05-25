@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-from typing import Any
 
 from pi_agent_core.event_stream import AssistantMessageEventStream
 from pi_agent_core.messages import AssistantMessage, ToolCallContent, Usage
@@ -85,7 +84,13 @@ async def mock_error_stream(
     partial.stopReason = "error"
     partial.errorMessage = "mock error"
     stream.push(StartEvent(partial=partial.model_copy(deep=True)))
-    stream.push(ErrorEvent(partial=partial.model_copy(deep=True), reason="error", error_message="mock error"))
+    stream.push(
+        ErrorEvent(
+            partial=partial.model_copy(deep=True),
+            reason="error",
+            error_message="mock error",
+        )
+    )
     stream.set_final_message(partial)
     stream.end()
     return stream

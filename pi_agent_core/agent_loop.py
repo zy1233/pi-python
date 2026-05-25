@@ -7,20 +7,17 @@ import inspect
 import time
 from typing import Any
 
-from pi_agent_core.event_stream import AssistantMessageEventStream, EventStream
+from pi_agent_core.event_stream import EventStream
 from pi_agent_core.messages import (
     AssistantMessage,
-    TextContent,
-    ToolCallContent,
     ToolResultMessage,
-    Usage,
-    UserMessage,
 )
 from pi_agent_core.types import (
     AfterToolCallContext,
     AfterToolCallResult,
     AgentContext,
     AgentEndEvent,
+    AgentEvent,
     AgentLoopConfig,
     AgentLoopTurnUpdate,
     AgentMessage,
@@ -71,12 +68,14 @@ def agent_loop(
 
     async def _run() -> None:
         try:
-            messages = await run_agent_loop(prompts, context, config, stream.push, signal, stream_fn)
+            messages = await run_agent_loop(
+                prompts, context, config, stream.push, signal, stream_fn
+            )
             stream.end(messages)
         except Exception:
             stream.end([])
 
-    asyncio.create_task(_run())
+    stream._task = asyncio.create_task(_run())
     return stream
 
 
@@ -99,12 +98,14 @@ def agent_loop_continue(
 
     async def _run() -> None:
         try:
-            messages = await run_agent_loop_continue(context, config, stream.push, signal, stream_fn)
+            messages = await run_agent_loop_continue(
+                context, config, stream.push, signal, stream_fn
+            )
             stream.end(messages)
         except Exception:
             stream.end([])
 
-    asyncio.create_task(_run())
+    stream._task = asyncio.create_task(_run())
     return stream
 
 
@@ -232,10 +233,11 @@ async def _run_loop(
                     if snapshot.model:
                         config.model = snapshot.model
 
-            if config.should_stop_after_turn:
-                if await _maybe_await(config.should_stop_after_turn(next_ctx)):
-                    await _emit(emit, AgentEndEvent(messages=new_messages))
-                    return
+            if config.should_stop_after_turn and await _maybe_await(
+                config.should_stop_after_turn(next_ctx)
+            ):
+                await _emit(emit, AgentEndEvent(messages=new_messages))
+                return
 
             pending_messages = []
             if config.get_steering_messages:
@@ -485,17 +487,18 @@ async def _finalize_executed_tool_call(
                 )
             )
             if isinstance(after, AfterToolCallResult):
+                term = after.terminate if after.terminate is not None else result.terminate
                 if after.content is not None:
                     result = AgentToolResult(
                         content=after.content,
                         details=result.details,
-                        terminate=after.terminate if after.terminate is not None else result.terminate,
+                        terminate=term,
                     )
                 elif after.details is not None:
                     result = AgentToolResult(
                         content=result.content,
                         details=after.details,
-                        terminate=after.terminate if after.terminate is not None else result.terminate,
+                        terminate=term,
                     )
                 if after.terminate is not None:
                     result = AgentToolResult(

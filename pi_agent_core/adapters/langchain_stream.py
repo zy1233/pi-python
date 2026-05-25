@@ -8,7 +8,7 @@ from typing import Any
 
 from pi_agent_core.adapters.langchain_convert import agent_tool_to_lc_schema, convert_to_langchain
 from pi_agent_core.event_stream import AssistantMessageEventStream
-from pi_agent_core.messages import AssistantMessage, TextContent, ToolCallContent, Usage
+from pi_agent_core.messages import AssistantMessage, ToolCallContent, Usage
 from pi_agent_core.types import (
     DoneEvent,
     ErrorEvent,
@@ -32,7 +32,9 @@ def resolve_chat_model(model: Model, api_key: str | None = None) -> Any:
         try:
             from langchain_openai import ChatOpenAI
         except ImportError as e:
-            raise ImportError("Install langchain-openai: pip install 'pi-agent-core[openai]'") from e
+            raise ImportError(
+                "Install langchain-openai: pip install 'pi-agent-core[openai]'"
+            ) from e
         return ChatOpenAI(**kwargs)
     if provider == "anthropic":
         try:
@@ -189,13 +191,17 @@ async def langchain_stream(
             partial.stopReason = "error"
             partial.errorMessage = str(e)
             stream.push(
-                ErrorEvent(partial=partial.model_copy(deep=True), reason="error", error_message=str(e))
+                ErrorEvent(
+                    partial=partial.model_copy(deep=True),
+                    reason="error",
+                    error_message=str(e),
+                )
             )
             stream.set_final_message(partial)
             stream.end()
 
     import asyncio
 
-    asyncio.create_task(_produce())
+    stream._task = asyncio.create_task(_produce())
     await asyncio.sleep(0)
     return stream
