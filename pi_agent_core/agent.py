@@ -22,6 +22,7 @@ from pi_agent_core.types import (
     AgentMessage,
     AgentTool,
     ConvertToLlmFn,
+    CostCalculator,
     MessageEndEvent,
     MessageStartEvent,
     Model,
@@ -60,6 +61,7 @@ class Agent:
         follow_up_mode: QueueMode = "one-at-a-time",
         session_id: str | None = None,
         tool_execution: ToolExecutionMode = "parallel",
+        cost_calculator: CostCalculator | None = None,
     ) -> None:
         state = initial_state or {}
         self._system_prompt: str = state.get("system_prompt", "")
@@ -85,6 +87,7 @@ class Agent:
         self.prepare_next_turn = prepare_next_turn
         self.session_id = session_id
         self.tool_execution = tool_execution
+        self.cost_calculator = cost_calculator
 
         self._steering_queue = PendingMessageQueue(steering_mode)
         self._follow_up_queue = PendingMessageQueue(follow_up_mode)
@@ -308,6 +311,8 @@ class Agent:
             get_steering_messages=get_steering,
             get_follow_up_messages=get_follow_up,
             tool_execution=self.tool_execution,
+            thinking_level=self._thinking_level,
+            cost_calculator=self.cost_calculator,
         )
 
     async def _run_with_lifecycle(self, executor: Callable[[Any], Any]) -> None:
