@@ -161,6 +161,12 @@ class StreamOptions:
     max_retries: int = 2
     retry_base_delay: float = 1.0
     retry_max_delay: float = 30.0
+    # Observability hooks (mirror pi's onPayload/onResponse). on_payload receives
+    # the outgoing request description before the LLM call; on_response receives
+    # the final AssistantMessage. Sync or async; exceptions propagate as error
+    # events (not swallowed), matching pi.
+    on_payload: Callable[[dict[str, Any]], Any] | None = None
+    on_response: Callable[[AssistantMessage], Any] | None = None
 
 
 ConvertToLlmFn = Callable[[list[AgentMessage]], list[Message] | Awaitable[list[Message]]]
@@ -217,6 +223,9 @@ class AgentLoopConfig:
     tool_timeout: float | None = None
     # Overrides StreamOptions.max_retries when set.
     max_retries: int | None = None
+    # Observability hooks forwarded into StreamOptions.
+    on_payload: Callable[[dict[str, Any]], Any] | None = None
+    on_response: Callable[[AssistantMessage], Any] | None = None
 
 
 # --- Assistant stream events ---
@@ -230,9 +239,25 @@ class StartEvent(AssistantMessageEventBase):
     type: Literal["start"] = "start"
 
 
+class TextStartEvent(AssistantMessageEventBase):
+    type: Literal["text_start"] = "text_start"
+    content_index: int = 0
+
+
 class TextDeltaEvent(AssistantMessageEventBase):
     type: Literal["text_delta"] = "text_delta"
     delta: str
+    content_index: int = 0
+
+
+class TextEndEvent(AssistantMessageEventBase):
+    type: Literal["text_end"] = "text_end"
+    content: str = ""
+    content_index: int = 0
+
+
+class ThinkingStartEvent(AssistantMessageEventBase):
+    type: Literal["thinking_start"] = "thinking_start"
     content_index: int = 0
 
 
@@ -242,10 +267,29 @@ class ThinkingDeltaEvent(AssistantMessageEventBase):
     content_index: int = 0
 
 
+class ThinkingEndEvent(AssistantMessageEventBase):
+    type: Literal["thinking_end"] = "thinking_end"
+    content: str = ""
+    content_index: int = 0
+
+
+class ToolCallStartEvent(AssistantMessageEventBase):
+    type: Literal["toolcall_start"] = "toolcall_start"
+    content_index: int = 0
+    tool_call_index: int = 0
+
+
 class ToolCallDeltaEvent(AssistantMessageEventBase):
     type: Literal["toolcall_delta"] = "toolcall_delta"
     delta: str
     content_index: int
+    tool_call_index: int = 0
+
+
+class ToolCallEndEvent(AssistantMessageEventBase):
+    type: Literal["toolcall_end"] = "toolcall_end"
+    tool_call: AgentToolCall | None = None
+    content_index: int = 0
     tool_call_index: int = 0
 
 
@@ -261,56 +305,78 @@ class ErrorEvent(AssistantMessageEventBase):
 
 
 AssistantMessageEvent = (
-    StartEvent | TextDeltaEvent | ThinkingDeltaEvent | ToolCallDeltaEvent | DoneEvent | ErrorEvent
+    StartEvent
+    | TextStartEvent
+    | TextDeltaEvent
+    | TextEndEvent
+    | ThinkingStartEvent
+    | ThinkingDeltaEvent
+    | ThinkingEndEvent
+    | ToolCallStartEvent
+    | ToolCallDeltaEvent
+    | ToolCallEndEvent
+    | DoneEvent
+    | ErrorEvent
 )
 
 
 # --- Agent events ---
 
 
-class AgentStartEvent(BaseModel):
+class AgentEventBase(BaseModel):
+    """Correlation fields stamped by the loop (observability, audit #6).
+
+    run_id groups every event of one run_agent_loop invocation; turn_id is the
+    1-based turn counter (0 for pre-turn events like agent_start).
+    """
+
+    run_id: str = ""
+    turn_id: int = 0
+
+
+class AgentStartEvent(AgentEventBase):
     type: Literal["agent_start"] = "agent_start"
 
 
-class AgentEndEvent(BaseModel):
+class AgentEndEvent(AgentEventBase):
     type: Literal["agent_end"] = "agent_end"
     messages: list[AgentMessage]
 
 
-class TurnStartEvent(BaseModel):
+class TurnStartEvent(AgentEventBase):
     type: Literal["turn_start"] = "turn_start"
 
 
-class TurnEndEvent(BaseModel):
+class TurnEndEvent(AgentEventBase):
     type: Literal["turn_end"] = "turn_end"
     message: AgentMessage
     tool_results: list[ToolResultMessage] = Field(default_factory=list)
 
 
-class MessageStartEvent(BaseModel):
+class MessageStartEvent(AgentEventBase):
     type: Literal["message_start"] = "message_start"
     message: AgentMessage
 
 
-class MessageUpdateEvent(BaseModel):
+class MessageUpdateEvent(AgentEventBase):
     type: Literal["message_update"] = "message_update"
     message: AgentMessage
     assistant_message_event: AssistantMessageEvent
 
 
-class MessageEndEvent(BaseModel):
+class MessageEndEvent(AgentEventBase):
     type: Literal["message_end"] = "message_end"
     message: AgentMessage
 
 
-class ToolExecutionStartEvent(BaseModel):
+class ToolExecutionStartEvent(AgentEventBase):
     type: Literal["tool_execution_start"] = "tool_execution_start"
     tool_call_id: str
     tool_name: str
     args: Any
 
 
-class ToolExecutionUpdateEvent(BaseModel):
+class ToolExecutionUpdateEvent(AgentEventBase):
     type: Literal["tool_execution_update"] = "tool_execution_update"
     tool_call_id: str
     tool_name: str
@@ -318,7 +384,7 @@ class ToolExecutionUpdateEvent(BaseModel):
     partial_result: Any
 
 
-class ToolExecutionEndEvent(BaseModel):
+class ToolExecutionEndEvent(AgentEventBase):
     type: Literal["tool_execution_end"] = "tool_execution_end"
     tool_call_id: str
     tool_name: str

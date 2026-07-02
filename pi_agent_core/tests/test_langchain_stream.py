@@ -142,6 +142,121 @@ async def test_thinking_delta_events_and_signature(monkeypatch):
     assert final.content[1] == {"type": "text", "text": "answer"}
 
 
+@pytest.mark.asyncio
+async def test_granular_start_end_event_sequence(monkeypatch):
+    """C3: thinking/text segments are wrapped in start/end events in pi's order."""
+    monkeypatch.setattr(ls_mod, "resolve_chat_model", lambda *a, **k: _FakeThinkingModel())
+
+    stream = await ls_mod.langchain_stream(
+        Model(provider="anthropic", model_id="claude-x", reasoning=True),
+        LlmContext(system_prompt=None, messages=[]),
+        StreamOptions(),
+    )
+    events = [e async for e in stream]
+    sequence = [e.type for e in events]
+
+    assert sequence == [
+        "start",
+        "thinking_start",
+        "thinking_delta",
+        "thinking_delta",
+        "thinking_end",
+        "text_start",
+        "text_delta",
+        "text_end",
+        "done",
+    ]
+    thinking_end = next(e for e in events if e.type == "thinking_end")
+    assert thinking_end.content == "step1 step2"
+    text_end = next(e for e in events if e.type == "text_end")
+    assert text_end.content == "answer"
+
+
+class _FakeToolCallModel:
+    """Streams one tool call split across chunks."""
+
+    async def astream(self, messages: Any):
+        yield AIMessageChunk(
+            content="",
+            tool_call_chunks=[
+                {"type": "tool_call_chunk", "index": 0, "id": "call_9", "name": "echo", "args": ""}
+            ],
+        )
+        yield AIMessageChunk(
+            content="",
+            tool_call_chunks=[
+                {"type": "tool_call_chunk", "index": 0, "id": None, "name": None, "args": '{"m":'}
+            ],
+        )
+        yield AIMessageChunk(
+            content="",
+            tool_call_chunks=[
+                {"type": "tool_call_chunk", "index": 0, "id": None, "name": None, "args": '"hi"}'}
+            ],
+        )
+
+
+@pytest.mark.asyncio
+async def test_toolcall_start_end_events(monkeypatch):
+    """C3: tool calls get toolcall_start on first chunk and toolcall_end with the block."""
+    monkeypatch.setattr(ls_mod, "resolve_chat_model", lambda *a, **k: _FakeToolCallModel())
+
+    stream = await ls_mod.langchain_stream(
+        Model(provider="openai", model_id="gpt-x"),
+        LlmContext(system_prompt=None, messages=[]),
+        StreamOptions(),
+    )
+    events = [e async for e in stream]
+    sequence = [e.type for e in events]
+
+    assert sequence == [
+        "start",
+        "toolcall_start",
+        "toolcall_delta",
+        "toolcall_delta",
+        "toolcall_end",
+        "done",
+    ]
+    end = next(e for e in events if e.type == "toolcall_end")
+    assert end.tool_call == {
+        "type": "toolCall",
+        "id": "call_9",
+        "name": "echo",
+        "arguments": {"m": "hi"},
+    }
+    assert events[-1].reason == "toolUse"
+
+
+@pytest.mark.asyncio
+async def test_on_payload_and_on_response_hooks(monkeypatch):
+    """#6: observability hooks receive the outgoing request and final message."""
+    monkeypatch.setattr(ls_mod, "resolve_chat_model", lambda *a, **k: _FakeListContentModel())
+
+    payloads: list[dict] = []
+    responses: list[Any] = []
+
+    async def on_payload(p: dict) -> None:
+        payloads.append(p)
+
+    def on_response(msg: Any) -> None:
+        responses.append(msg)
+
+    stream = await ls_mod.langchain_stream(
+        Model(provider="anthropic", model_id="claude-x"),
+        LlmContext(system_prompt="be nice", messages=[]),
+        StreamOptions(on_payload=on_payload, on_response=on_response),
+    )
+    final = await stream.message_result()
+
+    assert len(payloads) == 1
+    assert payloads[0]["provider"] == "anthropic"
+    assert payloads[0]["model"] == "claude-x"
+    assert payloads[0]["system_prompt"] == "be nice"
+    assert len(responses) == 1
+    assert responses[0].content == final.content
+    assert responses[0].stopReason == "stop"
+
+
 class _FakeSplitUsageModel:
     """Reports usage split across chunks (input on first, output+cache on last)."""
 

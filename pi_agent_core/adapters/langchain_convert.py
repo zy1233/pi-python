@@ -7,7 +7,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
 from pi_agent_core.messages import AssistantMessage, Message, ToolResultMessage, UserMessage
-from pi_agent_core.types import AgentMessage
+from pi_agent_core.types import AgentMessage, Model
 
 
 def default_convert_to_llm(messages: list[AgentMessage]) -> list[Message]:
@@ -19,6 +19,13 @@ def default_convert_to_llm(messages: list[AgentMessage]) -> list[Message]:
     return result
 
 
+def _image_block_to_lc(block: dict) -> dict:
+    return {
+        "type": "image_url",
+        "image_url": {"url": f"data:{block['mimeType']};base64,{block['data']}"},
+    }
+
+
 def _user_content_to_lc(content: str | list) -> str | list:
     if isinstance(content, str):
         return content
@@ -27,19 +34,25 @@ def _user_content_to_lc(content: str | list) -> str | list:
         if block.get("type") == "text":
             parts.append({"type": "text", "text": block["text"]})
         elif block.get("type") == "image":
-            parts.append(
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:{block['mimeType']};base64,{block['data']}"},
-                }
-            )
+            parts.append(_image_block_to_lc(block))
     return parts if parts else ""
 
 
 def convert_to_langchain(
     messages: list[Message],
     system_prompt: str | None = None,
+    model: Model | None = None,
 ) -> list[BaseMessage]:
+    """Convert pi messages to LangChain messages.
+
+    `model` drives provider-specific handling of tool-result images: Anthropic
+    accepts content blocks on tool messages natively, other providers get a
+    follow-up user message fallback, and models with supports_images=False get
+    a text placeholder instead.
+    """
+    provider = (model.provider if model else "").lower()
+    supports_images = model.supports_images if model else True
+
     out: list[BaseMessage] = []
     if system_prompt:
         out.append(SystemMessage(content=system_prompt))
@@ -83,13 +96,56 @@ def convert_to_langchain(
             out.append(ai)
         elif isinstance(msg, ToolResultMessage):
             text = " ".join(b["text"] for b in msg.content if b.get("type") == "text")
-            out.append(
-                ToolMessage(
-                    content=text or "(empty)",
-                    tool_call_id=msg.toolCallId,
-                    name=msg.toolName,
+            image_blocks = [b for b in msg.content if b.get("type") == "image"]
+
+            if image_blocks and not supports_images:
+                suffix = "[image content removed]"
+                out.append(
+                    ToolMessage(
+                        content=f"{text} {suffix}".strip(),
+                        tool_call_id=msg.toolCallId,
+                        name=msg.toolName,
+                    )
                 )
-            )
+            elif image_blocks and provider == "anthropic":
+                # Anthropic tool_result accepts content blocks natively.
+                blocks: list = []
+                if text:
+                    blocks.append({"type": "text", "text": text})
+                blocks.extend(_image_block_to_lc(b) for b in image_blocks)
+                out.append(
+                    ToolMessage(
+                        content=blocks,
+                        tool_call_id=msg.toolCallId,
+                        name=msg.toolName,
+                    )
+                )
+            elif image_blocks:
+                # Other providers reject non-string tool message content; send
+                # the image as a follow-up user message referencing the call.
+                out.append(
+                    ToolMessage(
+                        content=text or "(image output attached below)",
+                        tool_call_id=msg.toolCallId,
+                        name=msg.toolName,
+                    )
+                )
+                parts: list = [
+                    {
+                        "type": "text",
+                        "text": f"Image output of tool call {msg.toolCallId} ({msg.toolName}):",
+                    }
+                ]
+                parts.extend(_image_block_to_lc(b) for b in image_blocks)
+                out.append(HumanMessage(content=parts))
+            else:
+                out.append(
+                    ToolMessage(
+                        content=text or "(empty)",
+                        tool_call_id=msg.toolCallId,
+                        name=msg.toolName,
+                    )
+                )
     return out
 
 

@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import logging
 import time
+import uuid
 from dataclasses import replace
 from typing import Any
 
@@ -57,6 +58,25 @@ async def _emit(sink: Any, event: AgentEvent) -> None:
     result = sink(event)
     if inspect.isawaitable(result):
         await result
+
+
+def _tag_emitter(emit: Any, run_id: str) -> Any:
+    """Stamp correlation fields on every event (observability, audit #6).
+
+    run_id groups all events of one run; turn_id counts turn_start events
+    (pre-turn events such as agent_start carry turn_id=0).
+    """
+    turn = 0
+
+    async def tagged(event: AgentEvent) -> None:
+        nonlocal turn
+        if event.type == "turn_start":
+            turn += 1
+        event.run_id = run_id
+        event.turn_id = turn
+        await _emit(emit, event)
+
+    return tagged
 
 
 def agent_loop(
@@ -124,6 +144,7 @@ async def run_agent_loop(
     signal: Any | None = None,
     stream_fn: StreamFn | None = None,
 ) -> list[AgentMessage]:
+    emit = _tag_emitter(emit, str(uuid.uuid4()))
     new_messages: list[AgentMessage] = list(prompts)
     current_context = AgentContext(
         system_prompt=context.system_prompt,
@@ -154,6 +175,7 @@ async def run_agent_loop_continue(
     if getattr(last, "role", None) == "assistant":
         raise ValueError("Cannot continue from message role: assistant")
 
+    emit = _tag_emitter(emit, str(uuid.uuid4()))
     new_messages: list[AgentMessage] = []
     current_context = AgentContext(
         system_prompt=context.system_prompt,
@@ -311,6 +333,8 @@ async def _stream_assistant_response(
         signal=signal or config.signal,
         reasoning=config.thinking_level,
         cost_calculator=config.cost_calculator,
+        on_payload=config.on_payload,
+        on_response=config.on_response,
     )
     if config.max_retries is not None:
         options.max_retries = config.max_retries
@@ -325,7 +349,17 @@ async def _stream_assistant_response(
             context.messages.append(partial_message)
             added_partial = True
             await _emit(emit, MessageStartEvent(message=partial_message.model_copy(deep=True)))
-        elif event.type in ("text_delta", "thinking_delta", "toolcall_delta"):
+        elif event.type in (
+            "text_start",
+            "text_delta",
+            "text_end",
+            "thinking_start",
+            "thinking_delta",
+            "thinking_end",
+            "toolcall_start",
+            "toolcall_delta",
+            "toolcall_end",
+        ):
             if partial_message:
                 partial_message = event.partial
                 context.messages[-1] = partial_message

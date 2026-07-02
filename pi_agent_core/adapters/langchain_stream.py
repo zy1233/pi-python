@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import json
 import logging
 import random
@@ -27,9 +28,15 @@ from pi_agent_core.types import (
     StartEvent,
     StreamOptions,
     TextDeltaEvent,
+    TextEndEvent,
+    TextStartEvent,
     ThinkingDeltaEvent,
+    ThinkingEndEvent,
     ThinkingLevel,
+    ThinkingStartEvent,
     ToolCallDeltaEvent,
+    ToolCallEndEvent,
+    ToolCallStartEvent,
 )
 
 logger = logging.getLogger("pi_agent_core.langchain_stream")
@@ -316,11 +323,11 @@ async def langchain_stream(
         try:
             chat = resolve_chat_model(model, options.api_key, options.reasoning)
             transformed = transform_messages(context.messages, model)
-            lc_messages = convert_to_langchain(transformed, context.system_prompt)
+            lc_messages = convert_to_langchain(transformed, context.system_prompt, model)
 
             tools = context.tools or []
+            schemas: list[dict] = []
             if tools:
-                schemas = []
                 for t in tools:
                     schema = agent_tool_to_lc_schema(t)
                     if schema:
@@ -340,11 +347,28 @@ async def langchain_stream(
             if signal is not None and getattr(signal, "aborted", False):
                 raise _Aborted()
 
+            if options.on_payload:
+                hook_result = options.on_payload(
+                    {
+                        "provider": model.provider,
+                        "model": model.model_id,
+                        "system_prompt": context.system_prompt,
+                        "messages": lc_messages,
+                        "tools": schemas,
+                        "reasoning": options.reasoning,
+                    }
+                )
+                if inspect.isawaitable(hook_result):
+                    await hook_result
+
             text_index = 0
             tool_calls_acc: dict[int, dict] = {}
             full_text = ""
             full_thinking = ""
             thinking_signature = ""
+            text_started = False
+            thinking_started = False
+            thinking_ended = False
 
             stream.push(StartEvent(partial=partial.model_copy(deep=True)))
             stream.set_final_message(partial)
@@ -360,8 +384,21 @@ async def langchain_stream(
                     blocks.append({"type": "text", "text": full_text})
                 return blocks
 
+            def end_thinking_if_open() -> None:
+                nonlocal thinking_ended
+                if thinking_started and not thinking_ended:
+                    thinking_ended = True
+                    stream.push(
+                        ThinkingEndEvent(
+                            partial=partial.model_copy(deep=True),
+                            content=full_thinking,
+                            content_index=0,
+                        )
+                    )
+
             def handle_chunk(chunk: Any) -> None:
                 nonlocal full_text, full_thinking, thinking_signature
+                nonlocal text_started, thinking_started
 
                 meta = _get_attr(chunk, "usage_metadata")
                 if meta:
@@ -372,6 +409,13 @@ async def langchain_stream(
                 if sig:
                     thinking_signature += sig
                 if thinking_delta:
+                    if not thinking_started:
+                        thinking_started = True
+                        stream.push(
+                            ThinkingStartEvent(
+                                partial=partial.model_copy(deep=True), content_index=0
+                            )
+                        )
                     full_thinking += thinking_delta
                     partial.content = current_blocks()
                     stream.push(
@@ -385,6 +429,16 @@ async def langchain_stream(
 
                 text_delta = _extract_text_delta(chunk.content)
                 if text_delta:
+                    if not text_started:
+                        # Thinking streams ahead of text; close it before text opens.
+                        end_thinking_if_open()
+                        text_started = True
+                        stream.push(
+                            TextStartEvent(
+                                partial=partial.model_copy(deep=True),
+                                content_index=text_index,
+                            )
+                        )
                     full_text += text_delta
                     partial.content = current_blocks()
                     stream.push(
@@ -401,6 +455,13 @@ async def langchain_stream(
                         idx = tcc.get("index", 0)
                         if idx not in tool_calls_acc:
                             tool_calls_acc[idx] = {"id": "", "name": "", "args": ""}
+                            stream.push(
+                                ToolCallStartEvent(
+                                    partial=partial.model_copy(deep=True),
+                                    content_index=idx + 1,
+                                    tool_call_index=idx,
+                                )
+                            )
                         if tcc.get("id"):
                             tool_calls_acc[idx]["id"] = tcc["id"]
                         if tcc.get("name"):
@@ -475,6 +536,18 @@ async def langchain_stream(
                         await consume_task
                     raise _Aborted()
 
+            # Close still-open granular segments (thinking-only responses, text
+            # that ran to the end of the stream).
+            end_thinking_if_open()
+            if text_started:
+                stream.push(
+                    TextEndEvent(
+                        partial=partial.model_copy(deep=True),
+                        content=full_text,
+                        content_index=text_index,
+                    )
+                )
+
             content_blocks: list = current_blocks()
 
             stop_reason = "stop"
@@ -498,12 +571,25 @@ async def langchain_stream(
                 }
                 content_blocks.append(tc_block)
                 stop_reason = "toolUse"
+                stream.push(
+                    ToolCallEndEvent(
+                        partial=partial.model_copy(deep=True),
+                        tool_call=tc_block,
+                        content_index=idx + 1,
+                        tool_call_index=idx,
+                    )
+                )
 
             partial.content = content_blocks
             partial.stopReason = stop_reason  # type: ignore[assignment]
 
             if usage_meta_acc:
                 partial.usage = _apply_cost(_usage_from_meta(usage_meta_acc), model, options)
+
+            if options.on_response:
+                hook_result = options.on_response(partial.model_copy(deep=True))
+                if inspect.isawaitable(hook_result):
+                    await hook_result
 
             stream.push(
                 DoneEvent(

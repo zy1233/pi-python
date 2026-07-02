@@ -173,6 +173,45 @@ async def test_error_stop_reason():
 
 
 @pytest.mark.asyncio
+async def test_events_carry_run_id_and_turn_id():
+    """#6: every event of a run shares one run_id; turn_id counts turns."""
+
+    class P(BaseModel):
+        message: str = "x"
+
+    async def echo(_id, params, signal, on_update) -> AgentToolResult:
+        return AgentToolResult(content=[{"type": "text", "text": "ok"}], details={})
+
+    tool = SimpleTool(name="echo", description="", label="E", parameters=P, execute_fn=echo)
+    prompt = UserMessage(content="go", timestamp=int(time.time() * 1000))
+    ctx = AgentContext(system_prompt="", messages=[], tools=[tool])
+    config = AgentLoopConfig(model=_model(), convert_to_llm=default_convert_to_llm)
+
+    events = await _collect([prompt], ctx, config, mock_tool_stream)
+
+    run_ids = {e.run_id for e in events}
+    assert len(run_ids) == 1
+    assert run_ids.pop() != ""
+
+    assert events[0].type == "agent_start"
+    assert events[0].turn_id == 0  # pre-turn event
+
+    turn_ids = [e.turn_id for e in events if e.type == "turn_start"]
+    assert turn_ids == list(range(1, len(turn_ids) + 1))
+    assert len(turn_ids) >= 2  # tool turn + follow-up text turn
+
+    tool_events = [e for e in events if e.type.startswith("tool_execution")]
+    assert tool_events and all(e.turn_id == 1 for e in tool_events)
+    assert events[-1].type == "agent_end"
+    assert events[-1].turn_id == turn_ids[-1]
+
+    # A second run gets a fresh run_id.
+    ctx2 = AgentContext(system_prompt="", messages=[], tools=[tool])
+    events2 = await _collect([prompt], ctx2, config, mock_tool_stream)
+    assert events2[0].run_id != events[0].run_id
+
+
+@pytest.mark.asyncio
 async def test_parallel_tools_run_concurrently():
     """D1: parallel mode must overlap executions; end events fire in completion order,
     tool result messages persist in source order."""
