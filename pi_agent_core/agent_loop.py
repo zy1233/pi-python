@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import time
+from dataclasses import replace
 from typing import Any
 
 from pi_agent_core.event_stream import EventStream
@@ -41,6 +43,8 @@ from pi_agent_core.types import (
 )
 from pi_agent_core.validation import validate_tool_arguments
 
+logger = logging.getLogger("pi_agent_core.agent_loop")
+
 
 async def _maybe_await(value: Any) -> Any:
     if inspect.isawaitable(value):
@@ -73,6 +77,7 @@ def agent_loop(
             )
             stream.end(messages)
         except Exception:
+            logger.exception("agent_loop run failed")
             stream.end([])
 
     stream._task = asyncio.create_task(_run())
@@ -103,6 +108,7 @@ def agent_loop_continue(
             )
             stream.end(messages)
         except Exception:
+            logger.exception("agent_loop_continue run failed")
             stream.end([])
 
     stream._task = asyncio.create_task(_run())
@@ -230,8 +236,15 @@ async def _run_loop(
                 if snapshot and isinstance(snapshot, AgentLoopTurnUpdate):
                     if snapshot.context:
                         current_context = snapshot.context
+                    updates: dict[str, Any] = {}
                     if snapshot.model:
-                        config.model = snapshot.model
+                        updates["model"] = snapshot.model
+                    if snapshot.thinking_level is not None:
+                        updates["thinking_level"] = snapshot.thinking_level
+                    if updates:
+                        # Copy instead of mutating the caller-owned config (pi spreads
+                        # into a new object here as well).
+                        config = replace(config, **updates)
 
             if config.should_stop_after_turn and await _maybe_await(
                 config.should_stop_after_turn(next_ctx)
@@ -301,7 +314,7 @@ async def _stream_assistant_response(
             context.messages.append(partial_message)
             added_partial = True
             await _emit(emit, MessageStartEvent(message=partial_message.model_copy(deep=True)))
-        elif event.type in ("text_delta", "toolcall_delta"):
+        elif event.type in ("text_delta", "thinking_delta", "toolcall_delta"):
             if partial_message:
                 partial_message = event.partial
                 context.messages[-1] = partial_message
@@ -434,10 +447,18 @@ async def _prepare_tool_call(
 
 
 async def _execute_prepared_tool_call(prepared: dict, signal: Any | None, emit: Any) -> dict:
-    update_events: list[Any] = []
+    update_tasks: list[asyncio.Task] = []
+    accepting_updates = True
 
-    async def on_update(partial: AgentToolResult) -> None:
-        update_events.append(
+    def on_update(partial: AgentToolResult) -> asyncio.Task | None:
+        """Schedule the update event immediately (pi emits eagerly).
+
+        Synchronous by contract (AgentToolUpdateCallback); returns the delivery
+        task so legacy tools that `await on_update(...)` keep working.
+        """
+        if not accepting_updates:
+            return None
+        task = asyncio.ensure_future(
             _emit(
                 emit,
                 ToolExecutionUpdateEvent(
@@ -448,6 +469,8 @@ async def _execute_prepared_tool_call(prepared: dict, signal: Any | None, emit: 
                 ),
             )
         )
+        update_tasks.append(task)
+        return task
 
     try:
         result = await prepared["tool"].execute(
@@ -456,13 +479,17 @@ async def _execute_prepared_tool_call(prepared: dict, signal: Any | None, emit: 
             signal,
             on_update,
         )
-        for ev in update_events:
-            await ev
+        accepting_updates = False
+        if update_tasks:
+            await asyncio.gather(*update_tasks)
         return {"result": result, "is_error": False}
     except Exception as e:
-        for ev in update_events:
-            await ev
+        accepting_updates = False
+        if update_tasks:
+            await asyncio.gather(*update_tasks)
         return {"result": _create_error_tool_result(str(e)), "is_error": True}
+    finally:
+        accepting_updates = False
 
 
 async def _finalize_executed_tool_call(
@@ -492,25 +519,13 @@ async def _finalize_executed_tool_call(
                 )
             )
             if isinstance(after, AfterToolCallResult):
-                term = after.terminate if after.terminate is not None else result.terminate
-                if after.content is not None:
-                    result = AgentToolResult(
-                        content=after.content,
-                        details=result.details,
-                        terminate=term,
-                    )
-                elif after.details is not None:
-                    result = AgentToolResult(
-                        content=result.content,
-                        details=after.details,
-                        terminate=term,
-                    )
-                if after.terminate is not None:
-                    result = AgentToolResult(
-                        content=result.content,
-                        details=result.details,
-                        terminate=after.terminate,
-                    )
+                # Three-way merge mirroring pi's `?? ` semantics: each field falls
+                # back to the executed result independently.
+                result = AgentToolResult(
+                    content=after.content if after.content is not None else result.content,
+                    details=after.details if after.details is not None else result.details,
+                    terminate=after.terminate if after.terminate is not None else result.terminate,
+                )
                 if after.is_error is not None:
                     is_error = after.is_error
         except Exception as e:
@@ -646,10 +661,15 @@ async def _execute_tool_calls_parallel(
         if signal and getattr(signal, "aborted", False):
             break
 
+    # Start all pending executions concurrently (pi's Promise.all semantics):
+    # tool_execution_end fires in completion order, results are kept in source order.
+    started: list[dict | asyncio.Task] = [
+        asyncio.create_task(entry()) if callable(entry) else entry for entry in entries
+    ]
     ordered: list[dict] = []
-    for entry in entries:
-        if callable(entry):
-            ordered.append(await entry())
+    for entry in started:
+        if isinstance(entry, asyncio.Task):
+            ordered.append(await entry)
         else:
             ordered.append(entry)
 

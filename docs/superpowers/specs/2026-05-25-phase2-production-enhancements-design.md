@@ -13,20 +13,23 @@
 
 ### 提取映射
 
-在 `langchain_stream.py` 流式循环结束后，从最终 chunk 的 `usage_metadata` 提取：
+> 2026-07-02 修订（审计 B2）：原表按 provider 分支、且从"最终 chunk"读取，两点都是错的——
+> LangChain 已把各家字段标准化进 `usage_metadata`（Anthropic 的 cache 字段同样落在
+> `input_token_details`，见 langchain-anthropic `_create_usage_metadata`），且部分 provider
+> 将 usage 分片在多个 chunk 上报。现行实现：**逐 chunk 累加**（对齐 LangChain `add_usage`
+> 语义），全 provider 统一读标准化字段。
 
-| LangChain 字段 | Usage 字段 | 备注 |
-|---|---|---|
-| `input_tokens` | `usage.input` | |
-| `output_tokens` | `usage.output` | |
-| `input_token_details.cache_read` | `usage.cacheRead` | OpenAI |
-| `cache_read_input_tokens` | `usage.cacheRead` | Anthropic |
-| `input_token_details.cache_creation` | `usage.cacheWrite` | OpenAI |
-| `cache_creation_input_tokens` | `usage.cacheWrite` | Anthropic |
-| `total_tokens` | `usage.totalTokens` | |
-| `output_token_details.reasoning` | `usage.reasoningTokens` | OpenAI o-series |
+| LangChain 字段（标准化，provider 无关） | Usage 字段 |
+|---|---|
+| `input_tokens` | `usage.input` |
+| `output_tokens` | `usage.output` |
+| `input_token_details.cache_read` | `usage.cacheRead` |
+| `input_token_details.cache_creation` | `usage.cacheWrite` |
+| `total_tokens` | `usage.totalTokens` |
+| `output_token_details.reasoning` | `usage.reasoningTokens` |
 
-新增内部函数：`_extract_usage(chunk, provider: str) -> Usage`。按 provider 分支处理字段名差异。
+内部函数：`_merge_usage_meta(acc, meta)`（逐 chunk 逐字段累加）+ `_usage_from_meta(acc) -> Usage`。
+另：ChatOpenAI 需显式 `stream_usage=True`（旧版默认不随流返回 usage）。
 
 ### cost_calculator 回调
 
@@ -73,17 +76,22 @@ class StreamOptions:
 | high | 20,000 | "high" |
 | xhigh | 40,000 | "high" |
 
-传入方式：
-- **Anthropic**：`model_kwargs={"thinking": {"type": "enabled", "budget_tokens": N}}`
-- **OpenAI**：`model_kwargs={"reasoning_effort": "low|medium|high"}`，仅 o 系列模型
+传入方式（2026-07-02 修订，审计 B6/D5）：
+- **Anthropic**：顶层构造参数 `thinking={"type": "enabled", "budget_tokens": N}`，并联动
+  `max_tokens = budget + headroom`（Anthropic 要求 `max_tokens > budget_tokens`）
+- **OpenAI**：顶层构造参数 `reasoning_effort="low|medium|high"`
+- 二者均为显式构造参数，**不得**经 `model_kwargs` 注入（旧版 langchain-core 直接 ValueError）
+- 注入门槛：`model.reasoning=True` **且** `thinking_level != "off"`。能力位由用户在 Model
+  上声明（不按模型名硬编码，避免随新模型过时）；该开关同时控制 `transform_messages` 的
+  thinking 历史剥除，保证请求参数与消息回放一致。
 
-新增内部函数：`_apply_reasoning_params(kwargs: dict, model: Model, level: ThinkingLevel) -> dict`。
+内部函数：`_apply_reasoning_params(kwargs: dict, model: Model, level: ThinkingLevel) -> dict`。
 
 ### 捕获 thinking 内容
 
 | Provider | 行为 |
 |---|---|
-| Anthropic | 流式 chunk.content 中检测 `{"type": "thinking"}` 块，累积文本，最终写入 `AssistantMessage.content` 的 `ThinkingContent` |
+| Anthropic | 流式 chunk.content 中检测 `{"type": "thinking"}` 块，累积文本，最终写入 `AssistantMessage.content` 的 `ThinkingContent`；同时捕获 `signature` 写入 `ThinkingContent.signature`（多轮工具回放必需，审计 B7），增量以 `thinking_delta` 事件实时发射（审计 D6） |
 | OpenAI | 不返回 thinking 文本。从 `usage_metadata.output_token_details.reasoning` 读取 reasoning token 数，记录到 `Usage.reasoningTokens` |
 
 ### ThinkingContent 位置

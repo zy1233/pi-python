@@ -45,6 +45,10 @@ class EventStream(Generic[T]):
 
     async def _iter(self) -> AsyncIterator[T]:
         while True:
+            # Once the stream is done and drained, further iteration (e.g. a
+            # result() call after consuming events) must not block forever.
+            if self._done and self._queue.empty():
+                break
             item = await self._queue.get()
             if item is None:
                 break
@@ -68,8 +72,8 @@ class AssistantMessageEventStream(EventStream[AssistantMessageEvent]):
         self._final_message = message
 
     async def message_result(self) -> AssistantMessage:
-        if self._final_message is not None:
-            return self._final_message
+        # Drain until the stream ends; _final_message tracks the latest partial,
+        # so returning it early would hand back an incomplete message.
         async for _ in self:
             pass
         if self._final_message is None:

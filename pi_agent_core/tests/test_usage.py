@@ -1,29 +1,32 @@
-"""Tests for usage extraction and cost_calculator."""
+"""Tests for usage accumulation and cost_calculator (audit fix B2)."""
 
 from __future__ import annotations
 
 from types import SimpleNamespace
 
-from pi_agent_core.adapters.langchain_stream import _apply_cost, _extract_usage
+from pi_agent_core.adapters.langchain_stream import (
+    _apply_cost,
+    _merge_usage_meta,
+    _usage_from_meta,
+)
 from pi_agent_core.messages import Usage, UsageCost
 from pi_agent_core.types import Model, StreamOptions
 
 
-def _chunk(meta: dict) -> SimpleNamespace:
-    return SimpleNamespace(usage_metadata=meta)
-
-
-def test_extract_usage_openai():
-    chunk = _chunk(
+def test_usage_from_meta_standardized_fields():
+    """Cache/reasoning tokens use LangChain-normalized detail fields for every provider."""
+    acc: dict = {}
+    _merge_usage_meta(
+        acc,
         {
             "input_tokens": 100,
             "output_tokens": 50,
             "total_tokens": 150,
             "input_token_details": {"cache_read": 10, "cache_creation": 5},
             "output_token_details": {"reasoning": 20},
-        }
+        },
     )
-    usage = _extract_usage(chunk, "openai")
+    usage = _usage_from_meta(acc)
     assert usage.input == 100
     assert usage.output == 50
     assert usage.cacheRead == 10
@@ -32,22 +35,36 @@ def test_extract_usage_openai():
     assert usage.reasoningTokens == 20
 
 
-def test_extract_usage_anthropic():
-    chunk = _chunk(
+def test_usage_accumulates_across_chunks():
+    """Providers may split usage across chunks (e.g. input on first, output on last)."""
+    acc: dict = {}
+    _merge_usage_meta(
+        acc,
         {
             "input_tokens": 200,
-            "output_tokens": 80,
-            "total_tokens": 280,
-            "cache_read_input_tokens": 30,
-            "cache_creation_input_tokens": 15,
-        }
+            "output_tokens": 0,
+            "total_tokens": 200,
+            "input_token_details": {"cache_read": 30, "cache_creation": 15},
+        },
     )
-    usage = _extract_usage(chunk, "anthropic")
+    _merge_usage_meta(acc, {"input_tokens": 0, "output_tokens": 80, "total_tokens": 80})
+    usage = _usage_from_meta(acc)
     assert usage.input == 200
     assert usage.output == 80
+    assert usage.totalTokens == 280
     assert usage.cacheRead == 30
     assert usage.cacheWrite == 15
-    assert usage.totalTokens == 280
+
+
+def test_merge_usage_meta_accepts_object_chunks():
+    """usage_metadata may arrive as attribute-style objects instead of dicts."""
+    acc: dict = {}
+    meta = SimpleNamespace(input_tokens=7, output_tokens=3, total_tokens=10)
+    _merge_usage_meta(acc, meta)
+    usage = _usage_from_meta(acc)
+    assert usage.input == 7
+    assert usage.output == 3
+    assert usage.totalTokens == 10
 
 
 def test_cost_calculator_writes_cost():

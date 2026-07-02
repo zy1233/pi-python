@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 if TYPE_CHECKING:
     from pi_agent_core.event_stream import AssistantMessageEventStream
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from pi_agent_core.messages import (
     AgentToolCall,
@@ -51,7 +51,9 @@ class AgentToolResult(BaseModel):
     terminate: bool | None = None
 
 
-AgentToolUpdateCallback = Callable[[AgentToolResult], None]
+# Synchronous callback; returns an optional awaitable that resolves once the
+# update event has been delivered (awaiting it is not required).
+AgentToolUpdateCallback = Callable[[AgentToolResult], Any]
 
 
 class AgentTool(Protocol):
@@ -211,6 +213,12 @@ class TextDeltaEvent(AssistantMessageEventBase):
     content_index: int = 0
 
 
+class ThinkingDeltaEvent(AssistantMessageEventBase):
+    type: Literal["thinking_delta"] = "thinking_delta"
+    delta: str
+    content_index: int = 0
+
+
 class ToolCallDeltaEvent(AssistantMessageEventBase):
     type: Literal["toolcall_delta"] = "toolcall_delta"
     delta: str
@@ -229,7 +237,9 @@ class ErrorEvent(AssistantMessageEventBase):
     error_message: str | None = None
 
 
-AssistantMessageEvent = StartEvent | TextDeltaEvent | ToolCallDeltaEvent | DoneEvent | ErrorEvent
+AssistantMessageEvent = (
+    StartEvent | TextDeltaEvent | ThinkingDeltaEvent | ToolCallDeltaEvent | DoneEvent | ErrorEvent
+)
 
 
 # --- Agent events ---
@@ -251,7 +261,7 @@ class TurnStartEvent(BaseModel):
 class TurnEndEvent(BaseModel):
     type: Literal["turn_end"] = "turn_end"
     message: AgentMessage
-    tool_results: list[ToolResultMessage] = field(default_factory=list)
+    tool_results: list[ToolResultMessage] = Field(default_factory=list)
 
 
 class MessageStartEvent(BaseModel):

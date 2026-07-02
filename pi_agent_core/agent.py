@@ -292,8 +292,11 @@ class Agent:
         async def get_follow_up() -> list[AgentMessage]:
             return self._follow_up_queue.drain()
 
-        async def prepare() -> AgentLoopTurnUpdate | None:
-            if self.prepare_next_turn and self.signal:
+        async def prepare(next_turn_context: Any) -> AgentLoopTurnUpdate | None:
+            # agent_loop passes ShouldStopAfterTurnContext; the plain prepare_next_turn
+            # hook (mirroring pi's prepareNextTurn) only receives the abort signal.
+            del next_turn_context
+            if self.prepare_next_turn:
                 result = self.prepare_next_turn(self.signal)
                 if inspect.isawaitable(result):
                     return await result
@@ -319,7 +322,7 @@ class Agent:
         if self._active_run:
             raise RuntimeError("Agent is already processing.")
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         future: asyncio.Future = loop.create_future()
         abort_controller = _AbortController()
         self._active_run = _ActiveRun(promise=future, abort_controller=abort_controller)
@@ -396,10 +399,25 @@ class _AbortController:
     def __init__(self) -> None:
         self.signal = _AbortSignal()
 
+    def abort(self) -> None:
+        self.signal.abort()
+
 
 class _AbortSignal:
+    """Cooperative abort signal.
+
+    Exposes `aborted` for polling and `wait_aborted()` so async consumers
+    (e.g. langchain_stream) can race in-flight work against abort instead of
+    waiting for the next chunk.
+    """
+
     def __init__(self) -> None:
         self.aborted = False
+        self._event = asyncio.Event()
 
     def abort(self) -> None:
         self.aborted = True
+        self._event.set()
+
+    async def wait_aborted(self) -> None:
+        await self._event.wait()

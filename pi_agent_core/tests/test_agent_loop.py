@@ -173,6 +173,248 @@ async def test_error_stop_reason():
 
 
 @pytest.mark.asyncio
+async def test_parallel_tools_run_concurrently():
+    """D1: parallel mode must overlap executions; end events fire in completion order,
+    tool result messages persist in source order."""
+    import asyncio
+
+    from pi_agent_core.event_stream import AssistantMessageEventStream
+    from pi_agent_core.tests.mock_stream import _base_partial
+    from pi_agent_core.types import DoneEvent, StartEvent
+
+    async def slow(_id, params, signal, on_update) -> AgentToolResult:
+        await asyncio.sleep(0.4)
+        return AgentToolResult(content=[{"type": "text", "text": "slow"}], details={})
+
+    async def fast(_id, params, signal, on_update) -> AgentToolResult:
+        await asyncio.sleep(0.05)
+        return AgentToolResult(content=[{"type": "text", "text": "fast"}], details={})
+
+    tools = [
+        SimpleTool(name="slow", description="", label="S", parameters={}, execute_fn=slow),
+        SimpleTool(name="fast", description="", label="F", parameters={}, execute_fn=fast),
+    ]
+
+    async def two_tools_stream(model, context, options=None):
+        if any(getattr(m, "role", None) == "toolResult" for m in context.messages):
+            return await mock_text_stream(model, context, options)
+        stream = AssistantMessageEventStream()
+        partial = _base_partial(
+            model,
+            [
+                {"type": "toolCall", "id": "c_slow", "name": "slow", "arguments": {}},
+                {"type": "toolCall", "id": "c_fast", "name": "fast", "arguments": {}},
+            ],
+        )
+        partial.stopReason = "toolUse"
+        stream.push(StartEvent(partial=partial.model_copy(deep=True)))
+        stream.push(DoneEvent(partial=partial.model_copy(deep=True), reason="toolUse"))
+        stream.set_final_message(partial)
+        stream.end()
+        return stream
+
+    prompt = UserMessage(content="go", timestamp=int(time.time() * 1000))
+    ctx = AgentContext(system_prompt="", messages=[], tools=tools)
+    config = AgentLoopConfig(
+        model=_model(), convert_to_llm=default_convert_to_llm, tool_execution="parallel"
+    )
+
+    t0 = time.monotonic()
+    events = await _collect([prompt], ctx, config, two_tools_stream)
+    elapsed = time.monotonic() - t0
+
+    end_order = [e.tool_call_id for e in events if e.type == "tool_execution_end"]
+    result_order = [
+        e.message.toolCallId
+        for e in events
+        if e.type == "message_end" and getattr(e.message, "role", None) == "toolResult"
+    ]
+    # Sequential execution would finish c_slow first and take ~0.45s.
+    assert end_order == ["c_fast", "c_slow"]
+    assert result_order == ["c_slow", "c_fast"]
+    assert elapsed < 0.55
+
+
+def _single_tool_stream(tool_name: str, arguments: dict | None = None):
+    """One assistant message with a single tool call, then a final text response."""
+    from pi_agent_core.event_stream import AssistantMessageEventStream
+    from pi_agent_core.tests.mock_stream import _base_partial
+    from pi_agent_core.types import DoneEvent, StartEvent
+
+    async def stream_fn(model, context, options=None):
+        if any(getattr(m, "role", None) == "toolResult" for m in context.messages):
+            return await mock_text_stream(model, context, options)
+        stream = AssistantMessageEventStream()
+        partial = _base_partial(
+            model,
+            [{"type": "toolCall", "id": "c1", "name": tool_name, "arguments": arguments or {}}],
+        )
+        partial.stopReason = "toolUse"
+        stream.push(StartEvent(partial=partial.model_copy(deep=True)))
+        stream.push(DoneEvent(partial=partial.model_copy(deep=True), reason="toolUse"))
+        stream.set_final_message(partial)
+        stream.end()
+        return stream
+
+    return stream_fn
+
+
+@pytest.mark.asyncio
+async def test_tool_update_events_are_realtime():
+    """B3: sync on_update calls must deliver update events while the tool still runs."""
+    import asyncio
+    import time as time_mod
+
+    timeline: dict[str, float] = {}
+    t0 = time_mod.monotonic()
+
+    async def updater(_id, params, signal, on_update) -> AgentToolResult:
+        on_update(AgentToolResult(content=[{"type": "text", "text": "50%"}], details={}))
+        await asyncio.sleep(0.2)
+        timeline["tool_finished"] = time_mod.monotonic() - t0
+        return AgentToolResult(content=[{"type": "text", "text": "100%"}], details={})
+
+    tool = SimpleTool(name="u", description="", label="U", parameters={}, execute_fn=updater)
+    ctx = AgentContext(system_prompt="", messages=[], tools=[tool])
+    config = AgentLoopConfig(model=_model(), convert_to_llm=default_convert_to_llm)
+
+    events: list = []
+
+    async def emit(e):
+        events.append(e)
+        if e.type == "tool_execution_update":
+            timeline["update_emitted"] = time_mod.monotonic() - t0
+
+    await run_agent_loop(
+        [UserMessage(content="go", timestamp=int(time.time() * 1000))],
+        ctx,
+        config,
+        emit,
+        stream_fn=_single_tool_stream("u"),
+    )
+
+    assert "update_emitted" in timeline, "sync on_update call must not be dropped"
+    assert timeline["update_emitted"] < timeline["tool_finished"]
+
+
+@pytest.mark.asyncio
+async def test_tool_update_awaitable_backcompat():
+    """B3: legacy tools that await on_update's return value keep working."""
+    delivered = {"n": 0}
+
+    async def updater(_id, params, signal, on_update) -> AgentToolResult:
+        result = on_update(AgentToolResult(content=[{"type": "text", "text": "x"}], details={}))
+        if result is not None:
+            await result
+        return AgentToolResult(content=[{"type": "text", "text": "done"}], details={})
+
+    tool = SimpleTool(name="u", description="", label="U", parameters={}, execute_fn=updater)
+    ctx = AgentContext(system_prompt="", messages=[], tools=[tool])
+    config = AgentLoopConfig(model=_model(), convert_to_llm=default_convert_to_llm)
+
+    async def emit(e):
+        if e.type == "tool_execution_update":
+            delivered["n"] += 1
+
+    await run_agent_loop(
+        [UserMessage(content="go", timestamp=int(time.time() * 1000))],
+        ctx,
+        config,
+        emit,
+        stream_fn=_single_tool_stream("u"),
+    )
+    assert delivered["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_after_tool_call_merges_content_and_details():
+    """D4: content and details returned together must both apply."""
+    from pi_agent_core.types import AfterToolCallResult
+
+    async def t(_id, params, signal, on_update) -> AgentToolResult:
+        return AgentToolResult(content=[{"type": "text", "text": "orig"}], details={"orig": True})
+
+    async def after(ctx, signal):
+        return AfterToolCallResult(
+            content=[{"type": "text", "text": "replaced"}],
+            details={"replaced": True},
+        )
+
+    tool = SimpleTool(name="t", description="", label="T", parameters={}, execute_fn=t)
+    ctx = AgentContext(system_prompt="", messages=[], tools=[tool])
+    config = AgentLoopConfig(
+        model=_model(), convert_to_llm=default_convert_to_llm, after_tool_call=after
+    )
+
+    results = []
+
+    async def emit(e):
+        if e.type == "tool_execution_end":
+            results.append(e.result)
+
+    await run_agent_loop(
+        [UserMessage(content="go", timestamp=int(time.time() * 1000))],
+        ctx,
+        config,
+        emit,
+        stream_fn=_single_tool_stream("t"),
+    )
+    assert results[0].content == [{"type": "text", "text": "replaced"}]
+    assert results[0].details == {"replaced": True}
+
+
+@pytest.mark.asyncio
+async def test_prepare_next_turn_applies_thinking_level_without_mutating_config():
+    """D3: turn updates apply thinking_level and must not mutate the caller's config."""
+    from pi_agent_core.types import AgentLoopTurnUpdate
+
+    seen_reasoning: list = []
+
+    async def capture_stream(model, context, options=None):
+        seen_reasoning.append(options.reasoning if options else None)
+        if any(getattr(m, "role", None) == "toolResult" for m in context.messages):
+            return await mock_text_stream(model, context, options)
+        return await _single_tool_stream("echo", {"message": "hi"})(model, context, options)
+
+    class EchoParams(BaseModel):
+        message: str
+
+    async def echo(_id, params, signal, on_update) -> AgentToolResult:
+        return AgentToolResult(content=[{"type": "text", "text": params.message}], details={})
+
+    tool = SimpleTool(
+        name="echo", description="", label="E", parameters=EchoParams, execute_fn=echo
+    )
+
+    async def prepare(next_ctx):
+        return AgentLoopTurnUpdate(thinking_level="high")
+
+    ctx = AgentContext(system_prompt="", messages=[], tools=[tool])
+    config = AgentLoopConfig(
+        model=_model(),
+        convert_to_llm=default_convert_to_llm,
+        prepare_next_turn=prepare,
+        thinking_level="off",
+    )
+
+    async def emit(e):
+        pass
+
+    await run_agent_loop(
+        [UserMessage(content="go", timestamp=int(time.time() * 1000))],
+        ctx,
+        config,
+        emit,
+        stream_fn=capture_stream,
+    )
+
+    assert seen_reasoning[0] == "off"
+    assert seen_reasoning[1] == "high"
+    # caller-owned config must not be mutated
+    assert config.thinking_level == "off"
+
+
+@pytest.mark.asyncio
 async def test_continue_from_tool_result():
     from pi_agent_core.messages import AssistantMessage, ToolResultMessage
 

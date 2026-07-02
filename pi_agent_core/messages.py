@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 from pydantic import BaseModel, Field
 
@@ -26,6 +26,9 @@ class ImageContent(TypedDict):
 class ThinkingContent(TypedDict):
     type: Literal["thinking"]
     thinking: str
+    # Provider signature (Anthropic) required to replay thinking blocks alongside
+    # tool use in follow-up requests.
+    signature: NotRequired[str]
 
 
 class ToolCallContent(TypedDict):

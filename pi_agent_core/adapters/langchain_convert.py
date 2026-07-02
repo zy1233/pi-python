@@ -49,10 +49,18 @@ def convert_to_langchain(
             out.append(HumanMessage(content=_user_content_to_lc(msg.content)))
         elif isinstance(msg, AssistantMessage):
             text_parts: list[str] = []
+            thinking_blocks: list[dict] = []
             tool_calls: list[dict] = []
             for block in msg.content:
                 if block.get("type") == "text":
                     text_parts.append(block["text"])
+                elif block.get("type") == "thinking":
+                    # Replay thinking blocks (Anthropic requires them, with
+                    # signature, ahead of tool_use when thinking is enabled).
+                    tb: dict = {"type": "thinking", "thinking": block["thinking"]}
+                    if block.get("signature"):
+                        tb["signature"] = block["signature"]
+                    thinking_blocks.append(tb)
                 elif block.get("type") == "toolCall":
                     tool_calls.append(
                         {
@@ -61,9 +69,17 @@ def convert_to_langchain(
                             "args": block["arguments"],
                         }
                     )
-            ai = AIMessage(content="".join(text_parts) if text_parts else "")
+            content: str | list
+            if thinking_blocks:
+                content = list(thinking_blocks)
+                if text_parts:
+                    content.append({"type": "text", "text": "".join(text_parts)})
+            else:
+                content = "".join(text_parts) if text_parts else ""
             if tool_calls:
-                ai = AIMessage(content=ai.content, tool_calls=tool_calls)
+                ai = AIMessage(content=content, tool_calls=tool_calls)
+            else:
+                ai = AIMessage(content=content)
             out.append(ai)
         elif isinstance(msg, ToolResultMessage):
             text = " ".join(b["text"] for b in msg.content if b.get("type") == "text")
