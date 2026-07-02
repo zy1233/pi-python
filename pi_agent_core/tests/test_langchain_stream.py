@@ -260,3 +260,122 @@ async def test_abort_before_stream_starts(monkeypatch):
 
     assert final.stopReason == "aborted"
     assert called["n"] == 0
+
+
+class _FakeAPIError(Exception):
+    """Duck-typed SDK error: status_code + optional response.headers."""
+
+    def __init__(self, status_code: int, retry_after: float | None = None) -> None:
+        super().__init__(f"API error {status_code}")
+        self.status_code = status_code
+        if retry_after is not None:
+            self.response = types.SimpleNamespace(headers={"retry-after": str(retry_after)})
+
+
+class _FlakyModel:
+    """Fails the first `fail_times` astream calls before any chunk is produced."""
+
+    def __init__(self, fail_times: int, status_code: int = 429) -> None:
+        self.fail_times = fail_times
+        self.status_code = status_code
+        self.calls = 0
+
+    async def astream(self, messages: Any):
+        self.calls += 1
+        if self.calls <= self.fail_times:
+            raise _FakeAPIError(self.status_code)
+        yield AIMessageChunk(content="recovered")
+
+
+def _retry_options(max_retries: int) -> StreamOptions:
+    return StreamOptions(max_retries=max_retries, retry_base_delay=0.01, retry_max_delay=0.05)
+
+
+@pytest.mark.asyncio
+async def test_retry_before_first_token_recovers(monkeypatch):
+    """#1: transient pre-first-token failures are retried with backoff."""
+    fake = _FlakyModel(fail_times=2, status_code=429)
+    monkeypatch.setattr(ls_mod, "resolve_chat_model", lambda *a, **k: fake)
+
+    stream = await ls_mod.langchain_stream(
+        Model(provider="openai", model_id="gpt-x"),
+        LlmContext(system_prompt=None, messages=[]),
+        _retry_options(max_retries=3),
+    )
+    final = await stream.message_result()
+
+    assert final.stopReason == "stop"
+    assert final.content[0] == {"type": "text", "text": "recovered"}
+    assert fake.calls == 3
+
+
+@pytest.mark.asyncio
+async def test_no_retry_on_non_retryable_error(monkeypatch):
+    """#1: 4xx client errors (other than 408/429) fail immediately."""
+    fake = _FlakyModel(fail_times=99, status_code=400)
+    monkeypatch.setattr(ls_mod, "resolve_chat_model", lambda *a, **k: fake)
+
+    stream = await ls_mod.langchain_stream(
+        Model(provider="openai", model_id="gpt-x"),
+        LlmContext(system_prompt=None, messages=[]),
+        _retry_options(max_retries=3),
+    )
+    final = await stream.message_result()
+
+    assert final.stopReason == "error"
+    assert fake.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_retry_exhausted_surfaces_error(monkeypatch):
+    fake = _FlakyModel(fail_times=99, status_code=503)
+    monkeypatch.setattr(ls_mod, "resolve_chat_model", lambda *a, **k: fake)
+
+    stream = await ls_mod.langchain_stream(
+        Model(provider="openai", model_id="gpt-x"),
+        LlmContext(system_prompt=None, messages=[]),
+        _retry_options(max_retries=1),
+    )
+    final = await stream.message_result()
+
+    assert final.stopReason == "error"
+    assert fake.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_no_retry_after_first_chunk(monkeypatch):
+    """#1: once deltas were emitted, mid-stream failures must not restart the request."""
+
+    class _MidStreamFail:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def astream(self, messages: Any):
+            self.calls += 1
+            yield AIMessageChunk(content="partial")
+            raise _FakeAPIError(429)
+
+    fake = _MidStreamFail()
+    monkeypatch.setattr(ls_mod, "resolve_chat_model", lambda *a, **k: fake)
+
+    stream = await ls_mod.langchain_stream(
+        Model(provider="openai", model_id="gpt-x"),
+        LlmContext(system_prompt=None, messages=[]),
+        _retry_options(max_retries=3),
+    )
+    final = await stream.message_result()
+
+    assert final.stopReason == "error"
+    assert fake.calls == 1
+
+
+def test_retry_delay_respects_retry_after():
+    err = _FakeAPIError(429, retry_after=2.5)
+    assert ls_mod._retry_delay(err, 0, 1.0, 30.0) == 2.5
+    capped = _FakeAPIError(429, retry_after=120)
+    assert ls_mod._retry_delay(capped, 0, 1.0, 30.0) == 30.0
+
+
+def test_retry_delay_backoff_is_capped():
+    err = _FakeAPIError(503)
+    assert ls_mod._retry_delay(err, 10, 1.0, 30.0) <= 30.0

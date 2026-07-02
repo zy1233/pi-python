@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import random
 import time
 from typing import Any
 
@@ -55,9 +56,58 @@ _OPENAI_EFFORT: dict[ThinkingLevel, str | None] = {
 # the visible answer on top of the budget.
 _THINKING_OUTPUT_HEADROOM = 8192
 
+# Transient failures worth retrying: timeouts, rate limits, server errors,
+# Anthropic overloaded (529).
+_RETRYABLE_STATUS = {408, 429, 500, 502, 503, 504, 529}
+
+# Connection-level exceptions (openai/anthropic SDK and httpx) matched by name
+# so the optional provider packages are not imported here.
+_RETRYABLE_EXC_NAMES = frozenset(
+    {
+        "APIConnectionError",
+        "APITimeoutError",
+        "ConnectError",
+        "ConnectTimeout",
+        "ReadTimeout",
+        "ReadError",
+        "RemoteProtocolError",
+        "TimeoutException",
+    }
+)
+
 
 class _Aborted(Exception):
     """Internal marker: the stream was aborted via options.signal."""
+
+
+def _is_retryable_error(error: BaseException) -> bool:
+    status = getattr(error, "status_code", None)
+    if isinstance(status, int):
+        return status in _RETRYABLE_STATUS
+    return type(error).__name__ in _RETRYABLE_EXC_NAMES
+
+
+def _retry_after_seconds(error: BaseException) -> float | None:
+    """Read a numeric Retry-After header off an SDK error, if present."""
+    headers = getattr(getattr(error, "response", None), "headers", None)
+    if headers is None or not hasattr(headers, "get"):
+        return None
+    value = headers.get("retry-after")
+    if value is None:
+        return None
+    try:
+        return max(float(value), 0.0)
+    except (TypeError, ValueError):
+        return None
+
+
+def _retry_delay(error: BaseException, attempt: int, base: float, cap: float) -> float:
+    """Server-provided Retry-After wins; otherwise exponential backoff with jitter."""
+    retry_after = _retry_after_seconds(error)
+    if retry_after is not None:
+        return min(retry_after, cap)
+    delay = min(base * (2**attempt), cap)
+    return min(delay + random.uniform(0, delay * 0.25), cap)
 
 
 def _apply_reasoning_params(
@@ -366,12 +416,42 @@ async def langchain_stream(
                                 )
                             )
 
+            max_retries = max(options.max_retries, 0)
+
             async def consume() -> None:
-                async for chunk in chat.astream(lc_messages):
-                    # Poll-based abort for signals without wait_aborted support.
-                    if signal is not None and getattr(signal, "aborted", False):
-                        raise _Aborted()
-                    handle_chunk(chunk)
+                # Retry transient failures, but only while no chunk has been
+                # received: once deltas were emitted downstream they cannot be
+                # rolled back, so mid-stream failures surface as error events
+                # (mirrors pi's streamSimple retry scope).
+                attempt = 0
+                while True:
+                    got_chunk = False
+                    try:
+                        async for chunk in chat.astream(lc_messages):
+                            got_chunk = True
+                            # Poll-based abort for signals without wait_aborted support.
+                            if signal is not None and getattr(signal, "aborted", False):
+                                raise _Aborted()
+                            handle_chunk(chunk)
+                        return
+                    except _Aborted:
+                        raise
+                    except Exception as e:
+                        if got_chunk or attempt >= max_retries or not _is_retryable_error(e):
+                            raise
+                        delay = _retry_delay(
+                            e, attempt, options.retry_base_delay, options.retry_max_delay
+                        )
+                        attempt += 1
+                        logger.warning(
+                            "LLM stream failed before first token "
+                            "(attempt %d/%d, retrying in %.1fs): %s",
+                            attempt,
+                            max_retries,
+                            delay,
+                            e,
+                        )
+                        await asyncio.sleep(delay)
 
             wait_aborted = getattr(signal, "wait_aborted", None) if signal is not None else None
             if wait_aborted is None:

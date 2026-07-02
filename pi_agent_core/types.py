@@ -26,6 +26,17 @@ ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh"]
 ToolExecutionMode = Literal["sequential", "parallel"]
 QueueMode = Literal["all", "one-at-a-time"]
 
+
+class MaxTurnsExceededError(RuntimeError):
+    """Raised when the agent loop exceeds AgentLoopConfig.max_turns.
+
+    Mirrors OpenAI Agents SDK MaxTurnsExceeded semantics: hitting the guard is an
+    abnormal condition the caller must notice, not a silent graceful stop. The
+    Agent wrapper converts it into an error-stop assistant message and sets
+    `Agent.error_message`.
+    """
+
+
 # Extensible custom messages — apps can subclass or use TypedDict merging patterns
 CustomAgentMessages = dict[str, Any]
 AgentMessage = Message | Any
@@ -145,6 +156,11 @@ class StreamOptions:
     session_id: str | None = None
     reasoning: ThinkingLevel | None = None
     cost_calculator: CostCalculator | None = None
+    # Stream-level retries before the first token (transient errors only); the
+    # underlying provider SDK performs its own fast request-level retries on top.
+    max_retries: int = 2
+    retry_base_delay: float = 1.0
+    retry_max_delay: float = 30.0
 
 
 ConvertToLlmFn = Callable[[list[AgentMessage]], list[Message] | Awaitable[list[Message]]]
@@ -194,6 +210,13 @@ class AgentLoopConfig:
     signal: Any | None = None
     thinking_level: ThinkingLevel | None = None
     cost_calculator: CostCalculator | None = None
+    # Runaway protection: max total turns per run (raises MaxTurnsExceededError)
+    # and per-tool-call wall-clock timeout in seconds (times out into an error
+    # tool result the LLM can see).
+    max_turns: int | None = None
+    tool_timeout: float | None = None
+    # Overrides StreamOptions.max_retries when set.
+    max_retries: int | None = None
 
 
 # --- Assistant stream events ---

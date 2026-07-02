@@ -62,6 +62,9 @@ class Agent:
         session_id: str | None = None,
         tool_execution: ToolExecutionMode = "parallel",
         cost_calculator: CostCalculator | None = None,
+        max_turns: int | None = None,
+        tool_timeout: float | None = None,
+        max_retries: int | None = None,
     ) -> None:
         state = initial_state or {}
         self._system_prompt: str = state.get("system_prompt", "")
@@ -88,6 +91,9 @@ class Agent:
         self.session_id = session_id
         self.tool_execution = tool_execution
         self.cost_calculator = cost_calculator
+        self.max_turns = max_turns
+        self.tool_timeout = tool_timeout
+        self.max_retries = max_retries
 
         self._steering_queue = PendingMessageQueue(steering_mode)
         self._follow_up_queue = PendingMessageQueue(follow_up_mode)
@@ -316,6 +322,9 @@ class Agent:
             tool_execution=self.tool_execution,
             thinking_level=self._thinking_level,
             cost_calculator=self.cost_calculator,
+            max_turns=self.max_turns,
+            tool_timeout=self.tool_timeout,
+            max_retries=self.max_retries,
         )
 
     async def _run_with_lifecycle(self, executor: Callable[[Any], Any]) -> None:

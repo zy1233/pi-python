@@ -414,6 +414,116 @@ async def test_prepare_next_turn_applies_thinking_level_without_mutating_config(
     assert config.thinking_level == "off"
 
 
+def _endless_tool_stream():
+    """Always answers with a tool call — drives an infinite loop unless guarded."""
+    from pi_agent_core.event_stream import AssistantMessageEventStream
+    from pi_agent_core.tests.mock_stream import _base_partial
+    from pi_agent_core.types import DoneEvent, StartEvent
+
+    counter = {"n": 0}
+
+    async def stream_fn(model, context, options=None):
+        counter["n"] += 1
+        stream = AssistantMessageEventStream()
+        partial = _base_partial(
+            model,
+            [
+                {
+                    "type": "toolCall",
+                    "id": f"c{counter['n']}",
+                    "name": "noop",
+                    "arguments": {},
+                }
+            ],
+        )
+        partial.stopReason = "toolUse"
+        stream.push(StartEvent(partial=partial.model_copy(deep=True)))
+        stream.push(DoneEvent(partial=partial.model_copy(deep=True), reason="toolUse"))
+        stream.set_final_message(partial)
+        stream.end()
+        return stream
+
+    return stream_fn
+
+
+def _noop_tool() -> SimpleTool:
+    async def noop(_id, params, signal, on_update) -> AgentToolResult:
+        return AgentToolResult(content=[{"type": "text", "text": "ok"}], details={})
+
+    return SimpleTool(name="noop", description="", label="N", parameters={}, execute_fn=noop)
+
+
+@pytest.mark.asyncio
+async def test_max_turns_raises():
+    """#2: a tool loop that never converges must stop at max_turns."""
+    from pi_agent_core.types import MaxTurnsExceededError
+
+    ctx = AgentContext(system_prompt="", messages=[], tools=[_noop_tool()])
+    config = AgentLoopConfig(model=_model(), convert_to_llm=default_convert_to_llm, max_turns=3)
+
+    turn_starts = {"n": 0}
+
+    async def emit(e):
+        if e.type == "turn_start":
+            turn_starts["n"] += 1
+
+    with pytest.raises(MaxTurnsExceededError, match="max_turns=3"):
+        await run_agent_loop(
+            [UserMessage(content="go", timestamp=int(time.time() * 1000))],
+            ctx,
+            config,
+            emit,
+            stream_fn=_endless_tool_stream(),
+        )
+    assert turn_starts["n"] == 3
+
+
+@pytest.mark.asyncio
+async def test_max_turns_not_hit_on_normal_run():
+    """#2: runs that finish within the budget are unaffected."""
+    ctx = AgentContext(system_prompt="", messages=[], tools=[])
+    config = AgentLoopConfig(model=_model(), convert_to_llm=default_convert_to_llm, max_turns=5)
+    events = await _collect(
+        [UserMessage(content="hi", timestamp=int(time.time() * 1000))],
+        ctx,
+        config,
+        mock_text_stream,
+    )
+    assert events[-1].type == "agent_end"
+
+
+@pytest.mark.asyncio
+async def test_tool_timeout_produces_error_result():
+    """#2: a hung tool must time out into an error tool result the LLM can see."""
+    import asyncio
+
+    async def hang(_id, params, signal, on_update) -> AgentToolResult:
+        await asyncio.sleep(30)
+        return AgentToolResult(content=[{"type": "text", "text": "never"}], details={})
+
+    tool = SimpleTool(name="hang", description="", label="H", parameters={}, execute_fn=hang)
+    ctx = AgentContext(system_prompt="", messages=[], tools=[tool])
+    config = AgentLoopConfig(
+        model=_model(), convert_to_llm=default_convert_to_llm, tool_timeout=0.1
+    )
+
+    t0 = time.monotonic()
+    events = await _collect(
+        [UserMessage(content="go", timestamp=int(time.time() * 1000))],
+        ctx,
+        config,
+        _single_tool_stream("hang"),
+    )
+    elapsed = time.monotonic() - t0
+
+    ends = [e for e in events if e.type == "tool_execution_end"]
+    assert len(ends) == 1
+    assert ends[0].is_error is True
+    text = ends[0].result.content[0]["text"]
+    assert "timed out" in text
+    assert elapsed < 5
+
+
 @pytest.mark.asyncio
 async def test_continue_from_tool_result():
     from pi_agent_core.messages import AssistantMessage, ToolResultMessage

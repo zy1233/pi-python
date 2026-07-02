@@ -32,6 +32,7 @@ from pi_agent_core.types import (
     AgentMessage,
     AgentToolResult,
     CostCalculator,
+    MaxTurnsExceededError,
     Model,
     StreamFn,
 )
@@ -45,6 +46,7 @@ __all__ = [
     "AgentToolResult",
     "AssistantMessage",
     "CostCalculator",
+    "MaxTurnsExceededError",
     "Message",
     "Model",
     "StreamFn",

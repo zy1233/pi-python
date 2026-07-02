@@ -78,6 +78,51 @@ async def test_agent_steer_queue():
 
 
 @pytest.mark.asyncio
+async def test_agent_max_turns_sets_error_message():
+    """#2: hitting max_turns surfaces as error_message, with a complete event tail."""
+    from pi_agent_core.event_stream import AssistantMessageEventStream
+    from pi_agent_core.tests.mock_stream import _base_partial
+    from pi_agent_core.tools import SimpleTool
+    from pi_agent_core.types import AgentToolResult, DoneEvent, StartEvent
+
+    async def endless_stream(model, context, options=None):
+        stream = AssistantMessageEventStream()
+        partial = _base_partial(
+            model,
+            [{"type": "toolCall", "id": "c1", "name": "noop", "arguments": {}}],
+        )
+        partial.stopReason = "toolUse"
+        stream.push(StartEvent(partial=partial.model_copy(deep=True)))
+        stream.push(DoneEvent(partial=partial.model_copy(deep=True), reason="toolUse"))
+        stream.set_final_message(partial)
+        stream.end()
+        return stream
+
+    async def noop(_id, params, signal, on_update) -> AgentToolResult:
+        return AgentToolResult(content=[{"type": "text", "text": "ok"}], details={})
+
+    tool = SimpleTool(name="noop", description="", label="N", parameters={}, execute_fn=noop)
+    model = Model(provider="mock", model_id="m1")
+    agent = Agent(
+        initial_state={"model": model, "tools": [tool]},
+        stream_fn=endless_stream,
+        max_turns=2,
+    )
+
+    events: list[str] = []
+    agent.subscribe(lambda e, s: events.append(e.type))
+
+    await agent.prompt("go")
+    await agent.wait_for_idle()
+
+    assert agent.error_message is not None
+    assert "max_turns=2" in agent.error_message
+    assert agent.is_streaming is False
+    # settlement barrier still holds
+    assert events[-1] == "agent_end"
+
+
+@pytest.mark.asyncio
 async def test_abort_signal_supports_event_wait():
     """B4: the internal abort signal exposes wait_aborted() for race-based cancellation."""
     import asyncio

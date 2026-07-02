@@ -29,6 +29,7 @@ from pi_agent_core.types import (
     BeforeToolCallContext,
     BeforeToolCallResult,
     LlmContext,
+    MaxTurnsExceededError,
     MessageEndEvent,
     MessageStartEvent,
     MessageUpdateEvent,
@@ -178,6 +179,7 @@ async def _run_loop(
     current_context = initial_context
     config = initial_config
     first_turn = True
+    turn_count = 0
     pending_messages: list[AgentMessage] = []
     if config.get_steering_messages:
         pending_messages = list(await _maybe_await(config.get_steering_messages()) or [])
@@ -186,6 +188,13 @@ async def _run_loop(
         has_more_tool_calls = True
 
         while has_more_tool_calls or pending_messages:
+            # Runaway protection: counts every LLM turn across follow-ups too.
+            # Raising (instead of a graceful stop) mirrors OpenAI Agents SDK —
+            # the Agent wrapper turns this into an error-stop assistant message.
+            turn_count += 1
+            if config.max_turns is not None and turn_count > config.max_turns:
+                raise MaxTurnsExceededError(f"Agent loop exceeded max_turns={config.max_turns}")
+
             if not first_turn:
                 await _emit(emit, TurnStartEvent())
             else:
@@ -303,6 +312,8 @@ async def _stream_assistant_response(
         reasoning=config.thinking_level,
         cost_calculator=config.cost_calculator,
     )
+    if config.max_retries is not None:
+        options.max_retries = config.max_retries
     response = await _maybe_await(stream_function(config.model, llm_context, options))
 
     partial_message: AssistantMessage | None = None
@@ -446,7 +457,12 @@ async def _prepare_tool_call(
         }
 
 
-async def _execute_prepared_tool_call(prepared: dict, signal: Any | None, emit: Any) -> dict:
+async def _execute_prepared_tool_call(
+    prepared: dict,
+    signal: Any | None,
+    emit: Any,
+    timeout: float | None = None,
+) -> dict:
     update_tasks: list[asyncio.Task] = []
     accepting_updates = True
 
@@ -473,16 +489,31 @@ async def _execute_prepared_tool_call(prepared: dict, signal: Any | None, emit: 
         return task
 
     try:
-        result = await prepared["tool"].execute(
+        exec_coro = prepared["tool"].execute(
             prepared["tool_call"]["id"],
             prepared["args"],
             signal,
             on_update,
         )
+        if timeout is not None:
+            # wait_for cancels the tool's task on expiry.
+            result = await asyncio.wait_for(exec_coro, timeout=timeout)
+        else:
+            result = await exec_coro
         accepting_updates = False
         if update_tasks:
             await asyncio.gather(*update_tasks)
         return {"result": result, "is_error": False}
+    except TimeoutError:
+        # Caught separately: str(TimeoutError()) is empty, which would produce
+        # a blank error tool result.
+        accepting_updates = False
+        if update_tasks:
+            await asyncio.gather(*update_tasks)
+        return {
+            "result": _create_error_tool_result(f"Tool execution timed out after {timeout}s"),
+            "is_error": True,
+        }
     except Exception as e:
         accepting_updates = False
         if update_tasks:
@@ -595,7 +626,9 @@ async def _execute_tool_calls_sequential(
                 "is_error": preparation["is_error"],
             }
         else:
-            executed = await _execute_prepared_tool_call(preparation, signal, emit)
+            executed = await _execute_prepared_tool_call(
+                preparation, signal, emit, config.tool_timeout
+            )
             finalized = await _finalize_executed_tool_call(
                 current_context, assistant_message, preparation, executed, config, signal
             )
@@ -649,7 +682,7 @@ async def _execute_tool_calls_parallel(
             continue
 
         async def run_one(prep: dict = preparation) -> dict:
-            executed = await _execute_prepared_tool_call(prep, signal, emit)
+            executed = await _execute_prepared_tool_call(prep, signal, emit, config.tool_timeout)
             finalized = await _finalize_executed_tool_call(
                 current_context, assistant_message, prep, executed, config, signal
             )
