@@ -31,6 +31,7 @@ AgentMessage[] → transform_context() → convert_to_llm() → LangChain BaseMe
 | `pi_agent_core/adapters/langchain_convert.py`, `langchain_stream.py` | pi ⇄ LangChain conversion; `StreamFn` over `astream()` | `packages/ai/src/stream.ts` |
 | `pi_agent_core/transform.py` | Cross-provider replay (tool-call id normalization, thinking downgrade, image stripping) | `pi-ai` transforms |
 | `pi_agent_core/tools.py`, `validation.py`, `queues.py` | `SimpleTool` helper, argument validation, steering/follow-up queues | — |
+| `pi_agent_core/coding_tools/`, `adapters/langchain_tools.py` | Built-in coding tools (`read`/`write`/`ls`/`edit`/`grep`/`find` done; `bash` pending) + LangChain tool adapter | pi coding-agent built-in tools |
 | `packages/pi-agent-harness/pi_agent_harness` | Phase 3 harness package: sessions, AgentHarness, compaction, skills/templates, LocalExecutionEnv | `packages/agent/src/harness/` |
 
 ### Invariants (do not break)
@@ -45,7 +46,7 @@ AgentMessage[] → transform_context() → convert_to_llm() → LangChain BaseMe
 
 ### Status
 
-Phase 1 (MVP loop), Phase 2 (usage/cost, thinking/reasoning, transform_messages), Phase 2.5 (retries/backoff, `max_turns`/`tool_timeout`, observability, guardrail hooks, `ContextBudget`, structured output, `Model.base_url` + `deepseek` provider), and Phase 3 H1-H4 (`pi-agent-harness`: session tree, AgentHarness runtime, compaction/tree navigation, skills/templates/system prompt/LocalExecutionEnv) are complete. Real-API smoke (`scripts/smoke_real_api.py`) passed against SiliconFlow (OpenAI-compatible). P6 tool ecosystem is designed but not implemented — see `docs/superpowers/specs/2026-07-03-p6-tool-ecosystem-design.md`. Current test count: 107.
+Phase 1 (MVP loop), Phase 2 (usage/cost, thinking/reasoning, transform_messages), Phase 2.5 (retries/backoff, `max_turns`/`tool_timeout`, observability, guardrail hooks, `ContextBudget`, structured output, `Model.base_url` + `deepseek` provider), and Phase 3 H1-H4 (`pi-agent-harness`: session tree, AgentHarness runtime, compaction/tree navigation, skills/templates/system prompt/LocalExecutionEnv) are complete. Real-API smoke (`scripts/smoke_real_api.py`) passed against SiliconFlow (OpenAI-compatible). P6 tool ecosystem (`pi_agent_core/coding_tools/` + `adapters/langchain_tools.py`) is partially implemented — spec batches 1-3 and 5-7 are done (shared infra, `read`/`write`/`ls`, `edit`, `grep`/`find`, LangChain tool adapter, tool factories); `bash` (batch 4) and its factory slot remain — see `docs/superpowers/specs/2026-07-03-p6-tool-ecosystem-design.md`. Current test count: 239 (P6 work still landing; recount when `bash` lands).
 
 ## Cursor Cloud specific instructions
 
@@ -70,4 +71,4 @@ This is a Python monorepo with `pi-agent-core` and `pi-agent-harness`. There are
 - `pytest` and other scripts install to `~/.local/bin`. Ensure `PATH` includes this directory (it should already be on PATH in most shells, but if `pytest` is not found, run `export PATH="$HOME/.local/bin:$PATH"`).
 - All tests use a mock stream (`pi_agent_core/tests/mock_stream.py`) — **no API keys are needed** to run the test suite or the mock example.
 - `asyncio_mode = "auto"` is set in `pyproject.toml`, so async test functions are automatically detected by `pytest-asyncio`.
-- On a local Windows machine where the system Python is older than 3.11, create a dedicated venv instead of forcing compatibility: `uv venv --python 3.12 .venv-audit && uv pip install --python .venv-audit -e ".[dev]"`.
+- On a local Windows machine where the system Python is older than 3.11, create a dedicated venv instead of forcing compatibility: `uv venv --python 3.12 .venv-audit && uv pip install --python .venv-audit -e ".[dev]" -e "./packages/pi-agent-harness"` (the harness package must be installed too, or its tests fail to collect).

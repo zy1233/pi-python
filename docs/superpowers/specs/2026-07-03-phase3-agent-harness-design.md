@@ -80,7 +80,8 @@ on(type, handler)      ◄──   带返回值 hook（11 种）
 | `packages/pi-agent-harness/pi_agent_harness/session/session.py` | `session/session.ts`（含 `build_session_context`） | H1 |
 | `packages/pi-agent-harness/pi_agent_harness/session/jsonl_storage.py` | `session/jsonl-storage.ts` | H1 |
 | `packages/pi-agent-harness/pi_agent_harness/session/memory_storage.py` | `session/memory-storage.ts` | H1 |
-| `packages/pi-agent-harness/pi_agent_harness/session/jsonl_repo.py` | `session/jsonl-repo.ts` + `repo-utils.ts` | H1 |
+| `packages/pi-agent-harness/pi_agent_harness/session/jsonl_repo.py` | `session/jsonl-repo.ts` | H1 |
+| `packages/pi-agent-harness/pi_agent_harness/session/repo_utils.py` | `session/repo-utils.ts`（`getEntriesToFork`） | H1 |
 | `packages/pi-agent-harness/pi_agent_harness/session/memory_repo.py` | `session/memory-repo.ts` | H1 |
 | `packages/pi-agent-harness/pi_agent_harness/messages.py` | `harness/messages.ts` | H2 |
 | `packages/pi-agent-harness/pi_agent_harness/agent_harness.py` | `harness/agent-harness.ts` | H2 |
@@ -110,7 +111,7 @@ on(type, handler)      ◄──   带返回值 hook（11 种）
 - **entry id**：uuid7 前 8 位（时间有序、短），冲突时重试 100 次后回退完整 uuid7。Python 侧自实现 `uuid7()`（标准库 3.11/3.12 无；≈40 行，不引依赖）。
 - **树结构**：`parentId` 构成树；分支 = 从任意历史 entry 续写；当前叶子由**最后一行推导**——`leaf` entry 则取其 `targetId`，否则取该行自身 `id`。`leaf` entry 是"移动叶子指针"的持久化记录，天然支持 undo/redo 审计。
 - **消息序列化**：pydantic `model_dump(exclude_none=True)`。我们的 `Message` 字段名与 pi 一致（camelCase），`structured_output` 是 Python 版扩展字段——pi 读到会忽略，不破坏兼容。
-- **解析校验**（对齐 pi）：header 必须 `version==3` 且有 `id/timestamp/cwd`；entry 必须有 `type/id/timestamp`，`parentId` 为 null 或 str。校验失败抛 `SessionError("invalid_session"/"invalid_entry")`，消息含文件路径与行号。
+- **解析校验**（对齐 pi）：header 必须 `version==3` 且有 `id/timestamp/cwd`；entry 必须有 `type/id/timestamp`，`parentId` 为 null 或 str。校验失败抛 `SessionError("invalid_session"/"invalid_entry")`，消息含文件路径与行号。基础字段之外与 pi 同样宽容：**未知 entry 类型不拒读**（回退为 base entry 保留全部原始字段，回放时忽略、写回时原样保留），保证新版 pi / 其他实现写入的会话文件可打开（2026-07-03 H1 审计修正）。
 
 ### 3.2 SessionTreeEntry（11 种，pydantic discriminated union）
 
@@ -168,8 +169,9 @@ class SessionStorage(Protocol):
 
 ### 3.6 SessionRepo（create/open/list/delete/fork）
 
-- **JsonlSessionRepo(env, dir)**：文件名 `<timestamp>-<session-id>.jsonl`；`list(cwd?)` 读每文件首行 header 过滤；`fork(source, entry_id?, position?)` 复制 header（换新 id、记 `parentSession`）+ 截断到目标 entry 的路径。
+- **JsonlSessionRepo(env, dir)**：文件名 `<timestamp>-<session-id>.jsonl`；`list(cwd?)` 读每文件首行 header 过滤；`fork(source, entry_id?, position?)` 复制 header（换新 id、记 `parentSession`）+ 按 pi `getEntriesToFork` 语义截取 entries。
 - **MemorySessionRepo**：dict 存储。
+- **fork 语义**（对齐 pi `repo-utils.ts`，两 repo 共享 `session/repo_utils.py`，2026-07-03 H1 审计修正）：不传 `entry_id` 复制**全部 entries**（整棵树含分支与 leaf 记录）；`position="at"` 复制 root→目标的路径；默认 `position="before"`（编辑重发场景）要求目标是 **user message** entry（否则 `invalid_fork_target`），复制到其 parent。
 
 ---
 
@@ -418,7 +420,7 @@ class ExecutionEnv(FileSystem, Shell, Protocol): ...
 
 | 批次 | 内容 | 前置 | 交付判据 |
 |---|---|---|---|
-| **H1** | `harness/types.py`（错误层级 + entry 模型 + 协议）、`uuid7`、Session/build_session_context、Jsonl/Memory Storage+Repo、`JsonlStorageFs` 小协议 | 无 | ✅ 已实施（2026-07-03）：JSONL 往返 + 与手工构造的 pi v3 样例文件互读；树/分支/回放单测 |
+| **H1** | `harness/types.py`（错误层级 + entry 模型 + 协议）、`uuid7`、Session/build_session_context、Jsonl/Memory Storage+Repo、`JsonlStorageFs` 小协议 | 无 | ✅ 已实施（2026-07-03）：JSONL 往返 + 与手工构造的 pi v3 样例文件互读；树/分支/回放单测。审计修正（2026-07-03）：未知 entry 类型宽容读取（§3.1）、fork 对齐 pi 语义（§3.6）、根 entry 键序字节兼容（§10） |
 | **H2** | harness 消息 + `harness_convert_to_llm`、AgentHarness 主类（phase/队列/写缓冲/事件/hook/run 失败合成）、与 core loop 接线 | H1 | ✅ 已实施（2026-07-03）：mock stream 端到端 prompt；持久化时序（4.4 三条不变量）、hook/队列、turn 边界 setter、失败合成单测 |
 | **H3** | compaction utils/估算/cut point/摘要、`complete_simple`、compact()、branch summarization、navigate_tree、auto_compact | H2 | ✅ 已实施（2026-07-03）：cut point / toolResult 非切点 / LLM 摘要 / hook 自供摘要 / branch summary + navigate_tree / auto_compact 单测 |
 | **H4** | skills、prompt templates、system-prompt 注入、ExecutionEnv Local 完整实现、`pi-agent-harness` 依赖补齐 | H1（env 协议） | ✅ 已实施（2026-07-03）：LocalExecutionEnv 文件/shell 单测；skills frontmatter/ignore/校验/系统提示/显式调用单测；prompt template 参数替换与加载单测 |
@@ -429,7 +431,7 @@ class ExecutionEnv(FileSystem, Shell, Protocol): ...
 
 延续 mock stream 模式（无 API key）：
 
-- **格式兼容**：签入 `pi_agent_core/tests/fixtures/pi-v3-session.jsonl`（手工按 pi 格式构造，含分支/label/leaf/compaction），断言读取回放正确；我们写出的文件再读回 == 原树（往返）。
+- **格式兼容**：签入 `packages/pi-agent-harness/tests/fixtures/pi-v3-session.jsonl`（手工按 pi 格式构造，含 label/leaf/未知字段；compaction 与分支回放由内存存储单测覆盖），断言读取回放正确；我们写出的文件再读回 == 原树（往返），根 entry 的 `parentId: null` 与 leaf 的 `targetId: null` 按 pi 字面量键序落盘（字节兼容）；未知 entry 类型宽容读取 + 写回保留。
 - **时序不变量**：`message_end` 先落盘后广播（listener 内查 session 断言已存在）；turn 中 setter 延迟到下轮生效（`prepare_next_turn` 快照）；hook 异常回滚队列。
 - **cut point**：合成 entry 序列覆盖——纯对话 / toolResult 邻接不可切 / split-turn 前缀摘要 / 连续 compaction 迭代更新。
 - **run 失败合成**：mock stream 抛异常 → 断言合成失败消息落盘且事件流闭合（`agent_end` 可达、phase 回 idle）。
