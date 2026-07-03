@@ -206,6 +206,36 @@ excluded); results normalize to pi content blocks (plain strings, content-block 
 base64 images); `content_and_artifact` artifacts land in `details["artifact"]`; tool
 exceptions bubble into `is_error=True` tool results that the model can react to.
 
+## Custom messages
+
+`AgentMessage` is structurally open: anything with a string `role` flows through the
+loop and persists to the session (`AgentMessageProtocol`, a runtime-checkable Protocol
+in `pi_agent_harness`). The harness ships four custom roles — `bashExecution`,
+`custom`, `branchSummary`, `compactionSummary` — and `harness_convert_to_llm` decides
+how each role reaches the LLM; unknown roles are dropped at that boundary:
+
+```python
+from pydantic import BaseModel
+from pi_agent_harness import AgentMessageProtocol
+from pi_agent_harness.messages import BashExecutionMessage, harness_convert_to_llm
+
+# Built-in custom role: record a shell run in the session/context
+bash = BashExecutionMessage(command="pytest -q", output="97 passed", exitCode=0, timestamp=0)
+await harness.append_message(bash)  # persisted; replayed to the LLM as a user message
+
+# Your own role: any object with `role: str` satisfies the protocol
+class DeployNote(BaseModel):
+    role: str = "deployNote"
+    environment: str
+    timestamp: int
+
+assert isinstance(DeployNote(environment="staging", timestamp=0), AgentMessageProtocol)
+```
+
+To make a custom role visible to the LLM, wrap `harness_convert_to_llm` (or pass your
+own `convert_to_llm` to the core loop) and map it to a `UserMessage` — the same pattern
+the harness uses for its own roles.
+
 ## Events
 
 Agent events (all carry `run_id` and a 1-based `turn_id`):
