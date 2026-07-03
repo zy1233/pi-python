@@ -1,17 +1,19 @@
 """Built-in coding tools (port of pi ``packages/coding-agent/src/core/tools``).
 
 Design: ``docs/superpowers/specs/2026-07-03-p6-tool-ecosystem-design.md``.
-This batch ships the shared infrastructure (truncation, path helpers, per-file
-mutation mutex); the tool factories (``create_coding_tools`` /
-``create_read_only_tools`` / per-tool ``create_*_tool``) land with the tools.
+Shipped so far: shared infrastructure + the pure-filesystem tools
+(read/write/ls). Still to come: edit, bash, grep, find, and the group
+factories (``create_coding_tools`` / ``create_read_only_tools``).
 """
 
+from pi_agent_core.coding_tools.ls import create_ls_tool
 from pi_agent_core.coding_tools.mutation_queue import with_file_mutation_queue
 from pi_agent_core.coding_tools.path_utils import (
     detect_image_mime,
     glob_to_regex,
     resolve_to_cwd,
 )
+from pi_agent_core.coding_tools.read import create_read_tool
 from pi_agent_core.coding_tools.truncate import (
     DEFAULT_MAX_BYTES,
     DEFAULT_MAX_LINES,
@@ -22,12 +24,16 @@ from pi_agent_core.coding_tools.truncate import (
     truncate_line,
     truncate_tail,
 )
+from pi_agent_core.coding_tools.write import create_write_tool
 
 __all__ = [
     "DEFAULT_MAX_BYTES",
     "DEFAULT_MAX_LINES",
     "GREP_MAX_LINE_LENGTH",
     "TruncationResult",
+    "create_ls_tool",
+    "create_read_tool",
+    "create_write_tool",
     "detect_image_mime",
     "format_size",
     "glob_to_regex",
