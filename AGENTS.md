@@ -2,7 +2,7 @@
 
 ## Project overview
 
-`pi-agent-core` is a Python port of [`@earendil-works/pi-agent-core`](https://github.com/earendil-works/pi) with **LangChain replacing the `pi-ai` LLM layer**. Full design: `docs/DESIGN.md`; Phase 2 spec: `docs/superpowers/specs/2026-05-25-phase2-production-enhancements-design.md`; audit tracker: `docs/AUDIT-2026-07-02.md`.
+`pi-python` is an unofficial Python port inspired by [`@earendil-works/pi-agent-core`](https://github.com/earendil-works/pi), with **LangChain replacing the `pi-ai` LLM layer**. It is not affiliated with or endorsed by the official `pi` project. Full design: `docs/DESIGN.md`; Phase 2 spec: `docs/superpowers/specs/2026-05-25-phase2-production-enhancements-design.md`; Phase 3 harness spec: `docs/superpowers/specs/2026-07-03-phase3-agent-harness-design.md`; P6 tool-ecosystem spec: `docs/superpowers/specs/2026-07-03-p6-tool-ecosystem-design.md`; audit tracker: `docs/AUDIT-2026-07-02.md`.
 
 Guiding principles:
 
@@ -31,6 +31,7 @@ AgentMessage[] → transform_context() → convert_to_llm() → LangChain BaseMe
 | `pi_agent_core/adapters/langchain_convert.py`, `langchain_stream.py` | pi ⇄ LangChain conversion; `StreamFn` over `astream()` | `packages/ai/src/stream.ts` |
 | `pi_agent_core/transform.py` | Cross-provider replay (tool-call id normalization, thinking downgrade, image stripping) | `pi-ai` transforms |
 | `pi_agent_core/tools.py`, `validation.py`, `queues.py` | `SimpleTool` helper, argument validation, steering/follow-up queues | — |
+| `packages/pi-agent-harness/pi_agent_harness` | Phase 3 harness package: sessions, AgentHarness, compaction, skills/templates, LocalExecutionEnv | `packages/agent/src/harness/` |
 
 ### Invariants (do not break)
 
@@ -44,17 +45,17 @@ AgentMessage[] → transform_context() → convert_to_llm() → LangChain BaseMe
 
 ### Status
 
-Phase 1 (MVP loop), Phase 2 (usage/cost, thinking/reasoning, transform_messages), and Phase 2.5 (retries/backoff, `max_turns`/`tool_timeout`, `on_payload`/`on_response`, `run_id`/`turn_id` on all events, granular `*_start/*_end` stream events, tool-result images, `before/after_llm_call`/`on_agent_end` guardrail hooks, `ContextBudget` signal, `response_schema` structured output, `Model.base_url` + `deepseek` provider) are complete — 81 tests, CI green. Real-API smoke (`scripts/smoke_real_api.py`) passed against SiliconFlow (OpenAI-compatible). Phase 3 (AgentHarness: session tree with pi-v3-compatible JSONL, compaction, skills, prompt templates, ExecutionEnv) is designed but not implemented — see `docs/superpowers/specs/2026-07-03-phase3-agent-harness-design.md` for the full design and the H1–H4 implementation batches.
+Phase 1 (MVP loop), Phase 2 (usage/cost, thinking/reasoning, transform_messages), Phase 2.5 (retries/backoff, `max_turns`/`tool_timeout`, observability, guardrail hooks, `ContextBudget`, structured output, `Model.base_url` + `deepseek` provider), and Phase 3 H1-H4 (`pi-agent-harness`: session tree, AgentHarness runtime, compaction/tree navigation, skills/templates/system prompt/LocalExecutionEnv) are complete. Real-API smoke (`scripts/smoke_real_api.py`) passed against SiliconFlow (OpenAI-compatible). P6 tool ecosystem is designed but not implemented — see `docs/superpowers/specs/2026-07-03-p6-tool-ecosystem-design.md`. Current test count: 107.
 
 ## Cursor Cloud specific instructions
 
-This is a Python library (`pi-agent-core`). There are no services to start — it is a package installed in editable mode and tested via `pytest`.
+This is a Python monorepo with `pi-agent-core` and `pi-agent-harness`. There are no services to start — packages are installed in editable mode and tested via `pytest`.
 
 ### Key commands
 
 | Action | Command |
 |--------|---------|
-| Install (dev) | `pip install -e ".[dev]"` |
+| Install (dev) | `pip install -e ".[dev]" -e "./packages/pi-agent-harness"` |
 | Lint check | `ruff check .` |
 | Format check | `ruff format --check .` |
 | Auto-fix lint | `ruff check --fix .` |
