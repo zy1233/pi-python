@@ -10,6 +10,7 @@ lightweight core package:
 - harness-specific custom messages
 - hook, queue, and persistence orchestration
 - compaction, branch summaries, tree navigation, and optional auto compact
+- skills, prompt templates, system prompt injection, and `LocalExecutionEnv`
 
 Install it alongside core:
 

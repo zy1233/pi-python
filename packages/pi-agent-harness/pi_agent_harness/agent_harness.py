@@ -40,7 +40,10 @@ from pi_agent_harness.compaction import (
     should_compact,
 )
 from pi_agent_harness.messages import harness_convert_to_llm
+from pi_agent_harness.prompt_templates import substitute_args
 from pi_agent_harness.session.session import Session
+from pi_agent_harness.skills import format_skill_invocation
+from pi_agent_harness.system_prompt import build_harness_system_prompt
 from pi_agent_harness.types import (
     AgentHarnessError,
     AgentHarnessEvent,
@@ -291,6 +294,7 @@ class AgentHarness:
                     }
                 )
             )
+        system_prompt = build_harness_system_prompt(system_prompt, self.resources)
         return _TurnState(
             messages=list(context.messages),
             resources=self.resources.model_copy(deep=True),
@@ -885,11 +889,22 @@ class AgentHarness:
     async def skill(
         self, name: str, additional_instructions: str | None = None
     ) -> AssistantMessage:
-        raise AgentHarnessError("invalid_state", "skill() is implemented in Phase 3 H4")
+        skill = next((skill for skill in self.resources.skills or [] if skill.name == name), None)
+        if skill is None:
+            raise AgentHarnessError("invalid_argument", f"Skill {name} not found")
+        return await self.prompt(format_skill_invocation(skill, additional_instructions))
 
     async def prompt_from_template(
         self, name: str, args: list[str] | None = None
     ) -> AssistantMessage:
-        raise AgentHarnessError(
-            "invalid_state", "prompt_from_template() is implemented in Phase 3 H4"
+        template = next(
+            (
+                template
+                for template in self.resources.promptTemplates or []
+                if template.name == name
+            ),
+            None,
         )
+        if template is None:
+            raise AgentHarnessError("invalid_argument", f"Prompt template {name} not found")
+        return await self.prompt(substitute_args(template.content, args or []))

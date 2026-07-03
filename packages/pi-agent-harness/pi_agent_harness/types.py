@@ -288,6 +288,24 @@ class Skill(BaseModel):
     disableModelInvocation: bool = False
 
 
+class SkillDiagnostic(BaseModel):
+    type: Literal["warning"] = "warning"
+    code: Literal[
+        "file_info_failed",
+        "list_failed",
+        "read_failed",
+        "parse_failed",
+        "invalid_metadata",
+    ]
+    message: str
+    path: str
+
+
+class SkillLoadResult(BaseModel):
+    skills: list[Skill] = Field(default_factory=list)
+    diagnostics: list[SkillDiagnostic] = Field(default_factory=list)
+
+
 class AgentHarnessResources(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

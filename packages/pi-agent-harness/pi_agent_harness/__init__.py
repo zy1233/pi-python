@@ -2,6 +2,12 @@
 
 from pi_agent_core.messages import AssistantMessage, ToolResultMessage, UserMessage
 from pi_agent_harness.agent_harness import AgentHarness
+from pi_agent_harness.env import LocalExecutionEnv
+from pi_agent_harness.prompt_templates import (
+    load_prompt_templates,
+    parse_command_args,
+    substitute_args,
+)
 from pi_agent_harness.session import (
     JsonlSessionRepo,
     JsonlSessionStorage,
@@ -13,6 +19,13 @@ from pi_agent_harness.session import (
     load_jsonl_session_metadata,
     uuid7,
 )
+from pi_agent_harness.skills import (
+    format_skill_invocation,
+    format_skills_for_system_prompt,
+    load_skills,
+    load_sourced_skills,
+)
+from pi_agent_harness.system_prompt import build_harness_system_prompt
 from pi_agent_harness.types import (
     ActiveToolsChangeEntry,
     AgentHarnessError,
@@ -41,6 +54,8 @@ from pi_agent_harness.types import (
     SessionMetadata,
     SessionStorage,
     SessionTreeEntry,
+    SkillDiagnostic,
+    SkillLoadResult,
     ThinkingLevelChangeEntry,
 )
 
@@ -69,6 +84,7 @@ __all__ = [
     "JsonlStorageFs",
     "LabelEntry",
     "LeafEntry",
+    "LocalExecutionEnv",
     "MemorySessionRepo",
     "MemorySessionStorage",
     "MessageEntry",
@@ -80,10 +96,20 @@ __all__ = [
     "SessionMetadata",
     "SessionStorage",
     "SessionTreeEntry",
+    "SkillDiagnostic",
+    "SkillLoadResult",
     "ThinkingLevelChangeEntry",
     "ToolResultMessage",
     "UserMessage",
+    "build_harness_system_prompt",
     "build_session_context",
+    "format_skill_invocation",
+    "format_skills_for_system_prompt",
     "load_jsonl_session_metadata",
+    "load_prompt_templates",
+    "load_skills",
+    "load_sourced_skills",
+    "parse_command_args",
+    "substitute_args",
     "uuid7",
 ]
