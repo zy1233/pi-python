@@ -44,7 +44,7 @@ AgentMessage[] → transform_context() → convert_to_llm() → LangChain BaseMe
 
 ### Status
 
-Phase 1 (MVP loop), Phase 2 (usage/cost, thinking/reasoning, transform_messages), and Phase 2.5 (retries/backoff, `max_turns`/`tool_timeout`, `on_payload`/`on_response`, `run_id`/`turn_id` on all events, granular `*_start/*_end` stream events, tool-result images, `before/after_llm_call`/`on_agent_end` guardrail hooks, `ContextBudget` signal, `response_schema` structured output, `Model.base_url` + `deepseek` provider) are complete — 81 tests, CI green. Real-API smoke (`scripts/smoke_real_api.py`) passed against SiliconFlow (OpenAI-compatible). Phase 3 (AgentHarness: Session JSONL, compaction strategy on top of `before_llm_call` + `ContextBudget`, skills, `stream_proxy`) is not implemented yet.
+Phase 1 (MVP loop), Phase 2 (usage/cost, thinking/reasoning, transform_messages), and Phase 2.5 (retries/backoff, `max_turns`/`tool_timeout`, `on_payload`/`on_response`, `run_id`/`turn_id` on all events, granular `*_start/*_end` stream events, tool-result images, `before/after_llm_call`/`on_agent_end` guardrail hooks, `ContextBudget` signal, `response_schema` structured output, `Model.base_url` + `deepseek` provider) are complete — 81 tests, CI green. Real-API smoke (`scripts/smoke_real_api.py`) passed against SiliconFlow (OpenAI-compatible). Phase 3 (AgentHarness: session tree with pi-v3-compatible JSONL, compaction, skills, prompt templates, ExecutionEnv) is designed but not implemented — see `docs/superpowers/specs/2026-07-03-phase3-agent-harness-design.md` for the full design and the H1–H4 implementation batches.
 
 ## Cursor Cloud specific instructions
 

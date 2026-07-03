@@ -102,8 +102,9 @@ async def stream_fn(model, context: LlmContext, options) -> AssistantMessageEven
 - Phase 2.5（已完成）：重试/退避、`max_turns`/`tool_timeout`、`on_payload`/`on_response`、
   run_id/turn_id、粒度事件、工具结果图片、`before/after_llm_call`/`on_agent_end`、
   `ContextBudget`、`response_schema` 结构化输出（详见审计报告第三部分）
-- Phase 3（待启动）：AgentHarness——Session JSONL、Compaction 策略（挂
-  `before_llm_call` + `ContextBudget`）、Skills、`stream_proxy`
+- Phase 3（设计已完成，待实施）：AgentHarness——Session 树（pi v3 兼容 JSONL）、
+  Compaction、Skills、Prompt Templates、ExecutionEnv，详见
+  `docs/superpowers/specs/2026-07-03-phase3-agent-harness-design.md`（H1–H4 四批）
 
 ## 7. 测试策略
 

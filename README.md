@@ -191,7 +191,7 @@ python scripts/smoke_real_api.py
 - **Phase 1 (MVP loop)** — done
 - **Phase 2 (production enhancements)** — done: `transform_messages`, usage/cost, thinking
 - **Phase 2.5 (core hardening)** — done: retries, runaway protection, observability, granular events, guardrail hooks, `ContextBudget`, structured output, tool-result images
-- **Phase 3 (AgentHarness)** — next: session JSONL persistence, compaction strategy (hooks are ready: `before_llm_call` + `ContextBudget`), skills
+- **Phase 3 (AgentHarness)** — designed ([full design doc](docs/superpowers/specs/2026-07-03-phase3-agent-harness-design.md)), implementation next: session tree with pi-v3-compatible JSONL, compaction, skills, prompt templates, ExecutionEnv — in four batches (H1–H4)
 
 ## License
 
