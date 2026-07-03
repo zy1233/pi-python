@@ -29,6 +29,7 @@ from pi_agent_core.types import (
     AgentToolResult,
     BeforeToolCallContext,
     BeforeToolCallResult,
+    ContextBudget,
     LlmContext,
     MaxTurnsExceededError,
     MessageEndEvent,
@@ -190,6 +191,13 @@ async def run_agent_loop_continue(
     return new_messages
 
 
+async def _finish_run(config: AgentLoopConfig, new_messages: list[AgentMessage], emit: Any) -> None:
+    """on_agent_end hook (audit #5) then the terminal agent_end event."""
+    if config.on_agent_end:
+        await _maybe_await(config.on_agent_end(new_messages))
+    await _emit(emit, AgentEndEvent(messages=new_messages))
+
+
 async def _run_loop(
     initial_context: AgentContext,
     new_messages: list[AgentMessage],
@@ -202,6 +210,9 @@ async def _run_loop(
     config = initial_config
     first_turn = True
     turn_count = 0
+    # Budget signal for before_llm_call: derived from the previous LLM call's
+    # usage (audit C2 / #4 core half); None until the first response arrives.
+    last_budget: ContextBudget | None = None
     pending_messages: list[AgentMessage] = []
     if config.get_steering_messages:
         pending_messages = list(await _maybe_await(config.get_steering_messages()) or [])
@@ -230,15 +241,31 @@ async def _run_loop(
                     new_messages.append(message)
                 pending_messages = []
 
+            if config.before_llm_call:
+                replacement = await _maybe_await(
+                    config.before_llm_call(current_context, last_budget)
+                )
+                if replacement is not None:
+                    # Durable replacement: the compaction hook point. Subsequent
+                    # turns build on the replaced context (new_messages keeps
+                    # the full audit trail regardless).
+                    current_context = replacement
+
             message = await _stream_assistant_response(
                 current_context, config, signal, emit, stream_fn
             )
             new_messages.append(message)
+            last_budget = ContextBudget.from_usage(message.usage, config.model)
 
             if message.stopReason in ("error", "aborted"):
                 await _emit(emit, TurnEndEvent(message=message, tool_results=[]))
-                await _emit(emit, AgentEndEvent(messages=new_messages))
+                await _finish_run(config, new_messages, emit)
                 return
+
+            if config.after_llm_call:
+                # Guardrail tripwire: raising here aborts the run through the
+                # standard failure path (Agent surfaces error_message).
+                await _maybe_await(config.after_llm_call(current_context, message))
 
             tool_calls = [c for c in message.content if c.get("type") == "toolCall"]
             tool_results: list[ToolResultMessage] = []
@@ -280,7 +307,7 @@ async def _run_loop(
             if config.should_stop_after_turn and await _maybe_await(
                 config.should_stop_after_turn(next_ctx)
             ):
-                await _emit(emit, AgentEndEvent(messages=new_messages))
+                await _finish_run(config, new_messages, emit)
                 return
 
             pending_messages = []
@@ -295,7 +322,7 @@ async def _run_loop(
             continue
         break
 
-    await _emit(emit, AgentEndEvent(messages=new_messages))
+    await _finish_run(config, new_messages, emit)
 
 
 async def _stream_assistant_response(

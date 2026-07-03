@@ -56,6 +56,32 @@ class Model:
         return self.model_id
 
 
+class ContextBudget(BaseModel):
+    """Token budget signal for the context window (audit C2 / #4 core half).
+
+    Derived from the previous LLM call's usage: `used_tokens` is what occupied
+    the window on that call (Usage follows LangChain-standardized metadata, so
+    `input` already includes cache read/write tokens). Harness-layer compaction
+    strategies consume this via the before_llm_call hook; core only produces
+    the signal.
+    """
+
+    used_tokens: int = 0
+    context_window: int = 0
+
+    @property
+    def fraction(self) -> float:
+        """Fraction of the context window used (0.0 when unknown)."""
+        if self.context_window <= 0:
+            return 0.0
+        return self.used_tokens / self.context_window
+
+    @classmethod
+    def from_usage(cls, usage: Usage, model: Model) -> ContextBudget:
+        used = usage.totalTokens or (usage.input + usage.output)
+        return cls(used_tokens=used, context_window=model.context_window)
+
+
 class AgentToolResult(BaseModel):
     content: list[TextContent | ImageContent]
     details: Any = None
@@ -226,6 +252,24 @@ class AgentLoopConfig:
     # Observability hooks forwarded into StreamOptions.
     on_payload: Callable[[dict[str, Any]], Any] | None = None
     on_response: Callable[[AssistantMessage], Any] | None = None
+    # Lifecycle guardrail hooks (audit #5, OpenAI Agents SDK guardrail parity).
+    # before_llm_call fires before every LLM call with a ContextBudget signal
+    # derived from the previous call's usage (None on the first call);
+    # returning an AgentContext durably replaces the loop context — this is the
+    # compaction hook point (unlike transform_context, which re-runs on the
+    # full history every call and never persists).
+    before_llm_call: (
+        Callable[
+            [AgentContext, ContextBudget | None],
+            AgentContext | None | Awaitable[AgentContext | None],
+        ]
+        | None
+    ) = None
+    # after_llm_call fires after each completed assistant message, before tool
+    # execution; raise to abort the run (guardrail tripwire semantics).
+    after_llm_call: Callable[[AgentContext, AssistantMessage], Any] | None = None
+    # on_agent_end fires with the run's new messages just before agent_end.
+    on_agent_end: Callable[[list[AgentMessage]], Any] | None = None
 
 
 # --- Assistant stream events ---

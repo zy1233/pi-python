@@ -211,6 +211,185 @@ async def test_events_carry_run_id_and_turn_id():
     assert events2[0].run_id != events[0].run_id
 
 
+def _echo_tool() -> SimpleTool:
+    class P(BaseModel):
+        message: str = "x"
+
+    async def echo(_id, params, signal, on_update) -> AgentToolResult:
+        return AgentToolResult(content=[{"type": "text", "text": "ok"}], details={})
+
+    return SimpleTool(name="echo", description="", label="E", parameters=P, execute_fn=echo)
+
+
+@pytest.mark.asyncio
+async def test_before_llm_call_receives_budget_and_replaces_context_durably():
+    """#5 + C2: hook gets a ContextBudget from the previous call's usage and may
+    durably swap the loop context (the compaction hook point)."""
+    from pi_agent_core.event_stream import AssistantMessageEventStream
+    from pi_agent_core.messages import Usage
+    from pi_agent_core.tests.mock_stream import _base_partial
+    from pi_agent_core.types import DoneEvent, StartEvent
+
+    async def usage_tool_stream(model, context, options=None):
+        stream = AssistantMessageEventStream()
+        if any(getattr(m, "role", None) == "toolResult" for m in context.messages):
+            partial = _base_partial(model, [{"type": "text", "text": "done"}])
+        else:
+            partial = _base_partial(
+                model,
+                [{"type": "toolCall", "id": "call_1", "name": "echo", "arguments": {}}],
+            )
+            partial.stopReason = "toolUse"
+        partial.usage = Usage(input=900, output=100, totalTokens=1000)
+        stream.push(StartEvent(partial=partial.model_copy(deep=True)))
+        stream.push(
+            DoneEvent(
+                partial=partial.model_copy(deep=True),
+                reason="toolUse" if partial.stopReason == "toolUse" else "stop",
+            )
+        )
+        stream.set_final_message(partial)
+        stream.end()
+        return stream
+
+    calls: list = []
+    compacted = AgentContext(
+        system_prompt="",
+        messages=[UserMessage(content="compacted", timestamp=1)],
+        tools=[_echo_tool()],
+    )
+
+    def before_llm_call(context, budget):
+        calls.append((context, budget))
+        if budget is not None and budget.fraction >= 0.2:
+            return compacted
+        return None
+
+    prompt = UserMessage(content="go", timestamp=int(time.time() * 1000))
+    ctx = AgentContext(system_prompt="", messages=[], tools=[_echo_tool()])
+    config = AgentLoopConfig(
+        model=Model(provider="mock", model_id="mock-1", context_window=4000),
+        convert_to_llm=default_convert_to_llm,
+        before_llm_call=before_llm_call,
+    )
+
+    await _collect([prompt], ctx, config, usage_tool_stream)
+
+    # Turn 1: no budget yet. Turn 2: budget triggers the swap; the compacted
+    # context has no tool result so the fake model issues one more tool call,
+    # giving a third turn that proves the swap stuck.
+    assert len(calls) == 3
+    _, first_budget = calls[0]
+    assert first_budget is None  # no LLM call has happened yet
+    _, second_budget = calls[1]
+    assert second_budget is not None
+    assert second_budget.used_tokens == 1000
+    assert second_budget.context_window == 4000
+    assert second_budget.fraction == pytest.approx(0.25)
+    third_ctx, _ = calls[2]
+    assert third_ctx is compacted  # durable: the loop now builds on the replacement
+    assert str(compacted.messages[0].content) == "compacted"
+    assert any(getattr(m, "role", None) == "assistant" for m in compacted.messages)
+
+
+@pytest.mark.asyncio
+async def test_after_llm_call_fires_per_assistant_message():
+    """#5: after_llm_call sees each completed assistant message before tools run."""
+    seen: list = []
+
+    async def after_llm_call(context, message):
+        seen.append(message.stopReason)
+
+    prompt = UserMessage(content="go", timestamp=int(time.time() * 1000))
+    ctx = AgentContext(system_prompt="", messages=[], tools=[_echo_tool()])
+    config = AgentLoopConfig(
+        model=_model(),
+        convert_to_llm=default_convert_to_llm,
+        after_llm_call=after_llm_call,
+    )
+
+    await _collect([prompt], ctx, config, mock_tool_stream)
+    assert seen == ["toolUse", "stop"]
+
+
+@pytest.mark.asyncio
+async def test_after_llm_call_raise_aborts_run():
+    """#5: raising in after_llm_call is a guardrail tripwire that fails the run."""
+
+    class Tripwire(RuntimeError):
+        pass
+
+    def after_llm_call(context, message):
+        raise Tripwire("blocked output")
+
+    prompt = UserMessage(content="go", timestamp=int(time.time() * 1000))
+    ctx = AgentContext(system_prompt="", messages=[], tools=[])
+    config = AgentLoopConfig(
+        model=_model(),
+        convert_to_llm=default_convert_to_llm,
+        after_llm_call=after_llm_call,
+    )
+
+    async def emit(e):
+        pass
+
+    with pytest.raises(Tripwire):
+        await run_agent_loop([prompt], ctx, config, emit, stream_fn=mock_text_stream)
+
+
+@pytest.mark.asyncio
+async def test_after_llm_call_not_fired_on_error_stop():
+    """#5: error-stop responses skip after_llm_call (nothing to guard)."""
+    seen: list = []
+
+    def after_llm_call(context, message):
+        seen.append(message)
+
+    prompt = UserMessage(content="go", timestamp=int(time.time() * 1000))
+    ctx = AgentContext(system_prompt="", messages=[], tools=[])
+    config = AgentLoopConfig(
+        model=_model(),
+        convert_to_llm=default_convert_to_llm,
+        after_llm_call=after_llm_call,
+    )
+
+    events = await _collect([prompt], ctx, config, mock_error_stream)
+    assert seen == []
+    assert _event_types(events)[-1] == "agent_end"
+
+
+@pytest.mark.asyncio
+async def test_on_agent_end_receives_new_messages():
+    """#5: on_agent_end fires before agent_end with the run's new messages."""
+    received: list = []
+    order: list[str] = []
+
+    async def on_agent_end(messages):
+        received.append(list(messages))
+        order.append("hook")
+
+    prompt = UserMessage(content="go", timestamp=int(time.time() * 1000))
+    ctx = AgentContext(system_prompt="", messages=[], tools=[])
+    config = AgentLoopConfig(
+        model=_model(),
+        convert_to_llm=default_convert_to_llm,
+        on_agent_end=on_agent_end,
+    )
+
+    events: list = []
+
+    async def emit(e):
+        if e.type == "agent_end":
+            order.append("agent_end")
+        events.append(e)
+
+    result = await run_agent_loop([prompt], ctx, config, emit, stream_fn=mock_text_stream)
+
+    assert len(received) == 1
+    assert received[0] == result
+    assert order == ["hook", "agent_end"]
+
+
 @pytest.mark.asyncio
 async def test_parallel_tools_run_concurrently():
     """D1: parallel mode must overlap executions; end events fire in completion order,

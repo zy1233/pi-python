@@ -67,6 +67,9 @@ class Agent:
         max_retries: int | None = None,
         on_payload: Callable[[dict[str, Any]], Any] | None = None,
         on_response: Callable[[AssistantMessage], Any] | None = None,
+        before_llm_call: Callable[..., Any] | None = None,
+        after_llm_call: Callable[..., Any] | None = None,
+        on_agent_end: Callable[..., Any] | None = None,
     ) -> None:
         state = initial_state or {}
         self._system_prompt: str = state.get("system_prompt", "")
@@ -98,6 +101,9 @@ class Agent:
         self.max_retries = max_retries
         self.on_payload = on_payload
         self.on_response = on_response
+        self.before_llm_call = before_llm_call
+        self.after_llm_call = after_llm_call
+        self.on_agent_end = on_agent_end
 
         self._steering_queue = PendingMessageQueue(steering_mode)
         self._follow_up_queue = PendingMessageQueue(follow_up_mode)
@@ -331,6 +337,9 @@ class Agent:
             max_retries=self.max_retries,
             on_payload=self.on_payload,
             on_response=self.on_response,
+            before_llm_call=self.before_llm_call,
+            after_llm_call=self.after_llm_call,
+            on_agent_end=self.on_agent_end,
         )
 
     async def _run_with_lifecycle(self, executor: Callable[[Any], Any]) -> None:
