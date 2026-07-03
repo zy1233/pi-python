@@ -418,7 +418,7 @@ class ExecutionEnv(FileSystem, Shell, Protocol): ...
 
 | 批次 | 内容 | 前置 | 交付判据 |
 |---|---|---|---|
-| **H1** | `harness/types.py`（错误层级 + entry 模型 + 协议）、`uuid7`、Session/build_session_context、Jsonl/Memory Storage+Repo、`JsonlStorageFs` 小协议 | 无 | JSONL 往返 + 与手工构造的 pi v3 样例文件互读；树/分支/回放单测 |
+| **H1** | `harness/types.py`（错误层级 + entry 模型 + 协议）、`uuid7`、Session/build_session_context、Jsonl/Memory Storage+Repo、`JsonlStorageFs` 小协议 | 无 | ✅ 已实施（2026-07-03）：JSONL 往返 + 与手工构造的 pi v3 样例文件互读；树/分支/回放单测 |
 | **H2** | harness 消息 + `harness_convert_to_llm`、AgentHarness 主类（phase/队列/写缓冲/事件/hook/run 失败合成）、与 core loop 接线 | H1 | mock stream 驱动的端到端 prompt；持久化时序（4.4 三条不变量）与 hook 语义单测 |
 | **H3** | compaction utils/估算/cut point/摘要、`complete_simple`、compact()、branch summarization、navigate_tree、auto_compact | H2 | cut point 与 split-turn 单测（合成 entries）；摘要走 mock stream；SiliconFlow 实测一次真实压缩 |
 | **H4** | skills、prompt templates、system-prompt 注入、ExecutionEnv Local 完整实现、`harness` 可选依赖组 | H1（env 协议） | skills 加载诊断/ignore/校验单测；模板参数替换单测；示例 `examples/harness_agent.py` |

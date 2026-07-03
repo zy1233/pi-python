@@ -156,7 +156,7 @@ End events carry the aggregate (`content` full text / complete `tool_call` block
 ## Test
 
 ```bash
-pytest                 # 81 tests, no API keys needed
+pytest                 # 89 tests, no API keys needed
 ruff check . && ruff format --check .
 ```
 
@@ -191,7 +191,7 @@ python scripts/smoke_real_api.py
 - **Phase 1 (MVP loop)** — done
 - **Phase 2 (production enhancements)** — done: `transform_messages`, usage/cost, thinking
 - **Phase 2.5 (core hardening)** — done: retries, runaway protection, observability, granular events, guardrail hooks, `ContextBudget`, structured output, tool-result images
-- **Phase 3 (AgentHarness)** — designed ([full design doc](docs/superpowers/specs/2026-07-03-phase3-agent-harness-design.md)), implementation next: session tree with pi-v3-compatible JSONL, compaction, skills, prompt templates, ExecutionEnv — in four batches (H1–H4)
+- **Phase 3 (AgentHarness)** — designed ([full design doc](docs/superpowers/specs/2026-07-03-phase3-agent-harness-design.md)); H1 done (session tree + pi-v3-compatible JSONL + memory/jsonl repos), H2–H4 next (AgentHarness class, compaction, skills/templates/ExecutionEnv)
 
 ## License
 

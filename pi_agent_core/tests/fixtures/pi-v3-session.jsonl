@@ -1,0 +1,5 @@
+{"type":"session","version":3,"id":"sess_fixture","timestamp":"2026-07-03T00:00:00.000Z","cwd":"/workspace","parentSession":"/parent/session.jsonl"}
+{"type":"message","id":"00000001","parentId":null,"timestamp":"2026-07-03T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"Hello from pi"}],"timestamp":1751500001000},"futureField":"kept"}
+{"type":"message","id":"00000002","parentId":"00000001","timestamp":"2026-07-03T00:00:02.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Hi"}],"api":"langchain","provider":"openai","model":"gpt-4o-mini","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"stop","timestamp":1751500002000}}
+{"type":"label","id":"00000003","parentId":"00000002","timestamp":"2026-07-03T00:00:03.000Z","targetId":"00000001","label":"start"}
+{"type":"leaf","id":"00000004","parentId":"00000003","timestamp":"2026-07-03T00:00:04.000Z","targetId":"00000001"}
