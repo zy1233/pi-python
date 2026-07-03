@@ -6,7 +6,14 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from pi_agent_core.messages import ImageContent, Message, TextContent, UserMessage
+from pi_agent_core.messages import (
+    AssistantMessage,
+    ImageContent,
+    Message,
+    TextContent,
+    ToolResultMessage,
+    UserMessage,
+)
 from pi_agent_core.types import AgentMessage
 
 COMPACTION_SUMMARY_PREFIX = (
@@ -80,16 +87,34 @@ def _custom_content_to_user_content(content: str | list[TextContent | ImageConte
     return list(content)
 
 
+_CORE_MESSAGE_TYPES: dict[str, type[Message]] = {
+    "user": UserMessage,
+    "assistant": AssistantMessage,
+    "toolResult": ToolResultMessage,
+}
+
+
+def _role_of(message: AgentMessage) -> str | None:
+    # Session replay keeps harness/unknown roles as raw dicts (design §3.2);
+    # getattr alone would silently drop them here.
+    if isinstance(message, dict):
+        role = message.get("role")
+        return role if isinstance(role, str) else None
+    role = getattr(message, "role", None)
+    return role if isinstance(role, str) else None
+
+
 def harness_convert_to_llm(messages: list[AgentMessage]) -> list[Message]:
     """Convert harness custom roles to ordinary core messages.
 
-    This is the H2 landing point for the audit C4 custom AgentMessage protocol:
-    core stays permissive, while harness gives the known custom roles a typed
-    conversion boundary.
+    This is the H2 landing point for the audit C4 custom AgentMessage protocol
+    (`AgentMessageProtocol` in types.py): core stays permissive, while harness
+    gives the known custom roles a typed conversion boundary. Accepts both
+    typed messages and the dict shape produced by session replay.
     """
     result: list[Message] = []
     for message in messages:
-        role = getattr(message, "role", None)
+        role = _role_of(message)
         if role == "bashExecution":
             bash = BashExecutionMessage.model_validate(message)
             if not bash.excludeFromContext:
@@ -118,6 +143,9 @@ def harness_convert_to_llm(messages: list[AgentMessage]) -> list[Message]:
                     summary.timestamp,
                 )
             )
-        elif role in ("user", "assistant", "toolResult"):
-            result.append(message)
+        elif role in _CORE_MESSAGE_TYPES:
+            if isinstance(message, dict):
+                result.append(_CORE_MESSAGE_TYPES[role].model_validate(message))
+            else:
+                result.append(message)
     return result

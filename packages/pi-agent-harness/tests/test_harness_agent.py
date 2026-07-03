@@ -10,7 +10,7 @@ from pi_agent_core.messages import UserMessage
 from pi_agent_core.tests.mock_stream import _base_partial, mock_text_stream
 from pi_agent_core.tools import SimpleTool
 from pi_agent_core.types import AgentToolResult, DoneEvent, Model, StartEvent, StreamOptions
-from pi_agent_harness import AgentHarness, MemorySessionStorage, Session
+from pi_agent_harness import AgentHarness, AgentHarnessError, MemorySessionStorage, Session
 from pi_agent_harness.messages import (
     BashExecutionMessage,
     BranchSummaryMessage,
@@ -189,6 +189,71 @@ async def test_run_failure_is_reported_as_closed_event_stream_and_persisted():
     assert (await session.build_context()).messages[-1].stopReason == "error"
 
 
+@pytest.mark.asyncio
+async def test_hook_errors_normalize_to_hook_code():
+    session = await _memory_session()
+    harness = AgentHarness(session=session, model=_model(), stream_fn=mock_text_stream)
+
+    def boom(event):
+        raise RuntimeError("hook boom")
+
+    harness.on("before_agent_start", boom)
+    with pytest.raises(AgentHarnessError) as exc_info:
+        await harness.prompt("hi")
+
+    assert exc_info.value.code == "hook"
+    assert harness.phase == "idle"
+
+
+@pytest.mark.asyncio
+async def test_subscriber_errors_normalize_to_hook_code():
+    session = await _memory_session()
+    harness = AgentHarness(session=session, model=_model(), stream_fn=mock_text_stream)
+
+    def listener(event, signal=None):
+        if event.type == "queue_update":
+            raise RuntimeError("listener boom")
+
+    harness.subscribe(listener)
+    with pytest.raises(AgentHarnessError) as exc_info:
+        await harness.next_turn("x")
+
+    assert exc_info.value.code == "hook"
+
+
+@pytest.mark.asyncio
+async def test_provider_request_and_payload_hooks_chain_across_handlers():
+    session = await _memory_session()
+    seen: dict = {}
+
+    async def recording_stream(model, context, options=None):
+        seen["max_retries"] = options.max_retries
+        seen["retry_max_delay"] = options.retry_max_delay
+        seen["payload"] = await options.on_payload({"step": 0})
+        return await mock_text_stream(model, context, options)
+
+    harness = AgentHarness(session=session, model=_model(), stream_fn=recording_stream)
+    second_handler_snapshots: list[int | None] = []
+
+    harness.on("before_provider_request", lambda e: {"streamOptions": {"maxRetries": 9}})
+
+    def second_request_handler(event):
+        # Chained semantics: this handler must see the first handler's patch.
+        second_handler_snapshots.append(event.streamOptions.maxRetries)
+        return {"streamOptions": {"maxRetryDelayMs": 5000}}
+
+    harness.on("before_provider_request", second_request_handler)
+    harness.on("before_provider_payload", lambda e: {"payload": {"step": e.payload["step"] + 1}})
+    harness.on("before_provider_payload", lambda e: {"payload": {"step": e.payload["step"] + 1}})
+
+    await harness.prompt("hi")
+
+    assert second_handler_snapshots == [9]
+    assert seen["max_retries"] == 9
+    assert seen["retry_max_delay"] == 5.0
+    assert seen["payload"] == {"step": 2}
+
+
 def test_harness_convert_to_llm_maps_custom_roles():
     messages = [
         BashExecutionMessage(command="echo hi", output="hi", timestamp=1),
@@ -204,6 +269,53 @@ def test_harness_convert_to_llm_maps_custom_roles():
     assert converted[1].content == [{"type": "text", "text": "remember"}]
     assert "summary of a branch" in converted[2].content[0]["text"]
     assert "compacted" in converted[3].content[0]["text"]
+
+
+def test_agent_message_protocol_accepts_any_role_carrier():
+    from pi_agent_core.messages import AssistantMessage, ToolResultMessage
+    from pi_agent_harness import AgentMessageProtocol
+
+    class DeployNote(BaseModel):
+        role: str = "deployNote"
+        environment: str
+
+    satisfying = [
+        BashExecutionMessage(command="x", timestamp=1),
+        CustomMessage(customType="n", content="c", display=True, timestamp=2),
+        BranchSummaryMessage(summary="s", fromId="f", timestamp=3),
+        CompactionSummaryMessage(summary="s", tokensBefore=1, timestamp=4),
+        UserMessage(content="hi"),
+        AssistantMessage(content=[{"type": "text", "text": "hi"}]),
+        ToolResultMessage(toolCallId="1", toolName="t", content=[]),
+        DeployNote(environment="staging"),
+    ]
+    assert all(isinstance(m, AgentMessageProtocol) for m in satisfying)
+
+    class NoRole(BaseModel):
+        text: str = ""
+
+    assert not isinstance(NoRole(), AgentMessageProtocol)
+
+
+@pytest.mark.asyncio
+async def test_harness_convert_to_llm_handles_session_replayed_dicts():
+    # Session replay keeps harness/unknown roles as raw dicts (design §3.2);
+    # conversion must not silently drop them after a round-trip.
+    session = await _memory_session()
+    await session.append_message(
+        BashExecutionMessage(command="pytest -q", output="ok", exitCode=0, timestamp=1)
+    )
+    await session.append_message({"role": "user", "content": "hello", "timestamp": 2})
+    await session.append_message({"role": "unknownRole", "content": "x", "timestamp": 3})
+
+    replayed = (await session.build_context()).messages
+    assert isinstance(replayed[0], dict)
+
+    converted = harness_convert_to_llm(replayed)
+
+    assert [m.role for m in converted] == ["user", "user"]
+    assert "Ran `pytest -q`" in converted[0].content[0]["text"]
+    assert converted[1].content == "hello"
 
 
 async def _tool_once_stream(

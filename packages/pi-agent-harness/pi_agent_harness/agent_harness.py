@@ -255,15 +255,70 @@ class AgentHarness:
 
     async def _emit_any(self, event: AgentHarnessEvent, signal: Any | None = None) -> None:
         for subscriber in list(self._subscribers):
-            await _maybe_await(subscriber(event, signal))
+            try:
+                await _maybe_await(subscriber(event, signal))
+            except Exception as e:
+                # pi's normalizeHookError: listener failures are application
+                # bugs surfaced with a stable "hook" code, never swallowed.
+                raise normalize_harness_error(e, "hook") from e
 
     async def _emit_hook(self, event: Any) -> Any:
         result = None
         for handler in list(self._hooks.get(event.type, [])):
-            candidate = await _maybe_await(handler(event))
+            try:
+                candidate = await _maybe_await(handler(event))
+            except Exception as e:
+                raise normalize_harness_error(e, "hook") from e
             if candidate is not None:
                 result = candidate
         return result
+
+    async def _emit_before_provider_request(
+        self,
+        model: Model,
+        session_id: str,
+        stream_options: AgentHarnessStreamOptions,
+    ) -> AgentHarnessStreamOptions:
+        """Chained patch semantics (pi's emitBeforeProviderRequest).
+
+        Unlike _emit_hook's last-non-None rule, every handler's patch is applied
+        on top of the previous result, and each handler sees the options as
+        patched so far.
+        """
+        current = stream_options.model_copy(deep=True)
+        for handler in list(self._hooks.get("before_provider_request", [])):
+            try:
+                result = await _maybe_await(
+                    handler(
+                        BeforeProviderRequestEvent(
+                            model=model,
+                            sessionId=session_id,
+                            streamOptions=current.model_copy(deep=True),
+                        )
+                    )
+                )
+            except Exception as e:
+                raise normalize_harness_error(e, "hook") from e
+            if result is not None:
+                current = self._apply_stream_patch(current, result)
+        return current
+
+    async def _emit_before_provider_payload(self, model: Model, payload: Any) -> Any:
+        """Chained replacement (pi's emitBeforeProviderPayload): each handler
+        receives the previous handler's output."""
+        current = payload
+        for handler in list(self._hooks.get("before_provider_payload", [])):
+            try:
+                result = await _maybe_await(
+                    handler(BeforeProviderPayloadEvent(model=model, payload=current))
+                )
+            except Exception as e:
+                raise normalize_harness_error(e, "hook") from e
+            if isinstance(result, dict) and "payload" in result:
+                current = result["payload"]
+            elif result is not None and hasattr(result, "payload"):
+                current = result.payload
+        return current
 
     async def _emit_queue_update(self) -> None:
         await self._emit_any(
@@ -394,16 +449,9 @@ class AgentHarness:
         async def wrapped(model: Model, context, options: StreamOptions | None = None):
             options = options or StreamOptions()
             turn_state = get_turn_state()
-            request_options = turn_state.stream_options.model_copy(deep=True)
-            hook_result = await self._emit_hook(
-                BeforeProviderRequestEvent(
-                    model=model,
-                    sessionId=turn_state.session_id,
-                    streamOptions=request_options,
-                )
+            request_options = await self._emit_before_provider_request(
+                model, turn_state.session_id, turn_state.stream_options
             )
-            if hook_result:
-                request_options = self._apply_stream_patch(request_options, hook_result)
             if request_options.maxRetries is not None:
                 options.max_retries = request_options.maxRetries
             if request_options.maxRetryDelayMs is not None:
@@ -519,12 +567,7 @@ class AgentHarness:
             )
 
         async def on_payload(payload: dict[str, Any]):
-            result = await self._emit_hook(
-                BeforeProviderPayloadEvent(model=get_turn_state().model, payload=payload)
-            )
-            if isinstance(result, dict) and "payload" in result:
-                return result["payload"]
-            return payload
+            return await self._emit_before_provider_payload(get_turn_state().model, payload)
 
         async def on_response(message: AssistantMessage):
             from pi_agent_harness.types import AfterProviderResponseEvent

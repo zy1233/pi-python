@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Annotated, Any, Literal, Protocol, TypeVar
+from typing import Annotated, Any, Literal, Protocol, TypeVar, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
@@ -132,6 +132,21 @@ def normalize_harness_error(
     if isinstance(error, BranchSummaryError):
         return AgentHarnessError("branch_summary", str(error), error)
     return AgentHarnessError(fallback_code, str(error), error)
+
+
+@runtime_checkable
+class AgentMessageProtocol(Protocol):
+    """Structural contract for AgentMessage objects, custom roles included (audit C4).
+
+    Core keeps `AgentMessage = Message | Any` untouched (zero-change principle);
+    this is the harness-level shape check: anything carrying a string `role`
+    persists to the session and replays through the loop, while
+    `harness_convert_to_llm` decides how each role reaches the LLM (unknown
+    roles are dropped at that boundary). Raw dicts read back from foreign
+    session files intentionally bypass this check (permissive replay path).
+    """
+
+    role: str
 
 
 class FileInfo(BaseModel):
