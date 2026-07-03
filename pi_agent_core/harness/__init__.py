@@ -1,9 +1,10 @@
 """Phase 3 AgentHarness package.
 
-H1 exports the session tree / JSONL storage layer. The AgentHarness runtime,
-compaction, skills, and ExecutionEnv implementations land in later H-batches.
+H1 exports the session tree / JSONL storage layer. H2 adds the AgentHarness
+runtime. Compaction, skills, and ExecutionEnv implementations land later.
 """
 
+from pi_agent_core.harness.agent_harness import AgentHarness
 from pi_agent_core.harness.session import (
     JsonlSessionRepo,
     JsonlSessionStorage,
@@ -18,6 +19,8 @@ from pi_agent_core.harness.session import (
 from pi_agent_core.harness.types import (
     ActiveToolsChangeEntry,
     AgentHarnessError,
+    AgentHarnessResources,
+    AgentHarnessStreamOptions,
     BranchSummaryEntry,
     BranchSummaryError,
     CompactionEntry,
@@ -44,7 +47,10 @@ from pi_agent_core.messages import AssistantMessage, ToolResultMessage, UserMess
 
 __all__ = [
     "ActiveToolsChangeEntry",
+    "AgentHarness",
     "AgentHarnessError",
+    "AgentHarnessResources",
+    "AgentHarnessStreamOptions",
     "AssistantMessage",
     "BranchSummaryEntry",
     "BranchSummaryError",

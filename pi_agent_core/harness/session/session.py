@@ -7,6 +7,11 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from pi_agent_core.harness.messages import (
+    BranchSummaryMessage,
+    CompactionSummaryMessage,
+    CustomMessage,
+)
 from pi_agent_core.messages import AssistantMessage, ToolResultMessage, UserMessage
 from pi_agent_core.types import AgentMessage
 
@@ -65,35 +70,30 @@ def _message_from_raw(raw: Any) -> AgentMessage:
     return raw
 
 
-def create_branch_summary_message(summary: str, from_id: str, timestamp: str) -> dict[str, Any]:
-    return {
-        "role": "branchSummary",
-        "summary": summary,
-        "fromId": from_id,
-        "timestamp": iso_to_ms(timestamp),
-    }
+def create_branch_summary_message(
+    summary: str, from_id: str, timestamp: str
+) -> BranchSummaryMessage:
+    return BranchSummaryMessage(summary=summary, fromId=from_id, timestamp=iso_to_ms(timestamp))
 
 
 def create_compaction_summary_message(
     summary: str, tokens_before: int, timestamp: str
-) -> dict[str, Any]:
-    return {
-        "role": "compactionSummary",
-        "summary": summary,
-        "tokensBefore": tokens_before,
-        "timestamp": iso_to_ms(timestamp),
-    }
+) -> CompactionSummaryMessage:
+    return CompactionSummaryMessage(
+        summary=summary,
+        tokensBefore=tokens_before,
+        timestamp=iso_to_ms(timestamp),
+    )
 
 
-def create_custom_message(entry: CustomMessageEntry) -> dict[str, Any]:
-    return {
-        "role": "custom",
-        "customType": entry.customType,
-        "content": entry.content,
-        "display": entry.display,
-        "details": entry.details,
-        "timestamp": iso_to_ms(entry.timestamp),
-    }
+def create_custom_message(entry: CustomMessageEntry) -> CustomMessage:
+    return CustomMessage(
+        customType=entry.customType,
+        content=entry.content,
+        display=entry.display,
+        details=entry.details,
+        timestamp=iso_to_ms(entry.timestamp),
+    )
 
 
 def _append_message_from_entry(messages: list[AgentMessage], entry: SessionTreeEntry) -> None:

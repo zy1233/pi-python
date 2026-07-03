@@ -28,6 +28,10 @@ def _role(message):
     return getattr(message, "role", None) or message.get("role")
 
 
+def _field(message, name: str):
+    return getattr(message, name, None) if hasattr(message, name) else message.get(name)
+
+
 def test_uuid7_is_time_ordered_and_hexish():
     first = uuid7()
     second = uuid7()
@@ -70,7 +74,7 @@ async def test_memory_session_builds_context_with_state_and_compaction():
         "user",
         "assistant",
     ]
-    assert context.messages[0]["summary"] == "summary"
+    assert _field(context.messages[0], "summary") == "summary"
     assert context.messages[1].content == "kept request"
 
 

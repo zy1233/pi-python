@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Annotated, Any, Literal, Protocol, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from pi_agent_core.types import AgentMessage
+from pi_agent_core.messages import AssistantMessage, ImageContent, TextContent
+from pi_agent_core.types import AgentEvent, AgentMessage, Model, ThinkingLevel
 
 
 class HarnessError(Exception):
@@ -270,6 +272,166 @@ class JsonlSessionMetadata(SessionMetadata):
     cwd: str
     path: str
     parentSessionPath: str | None = None
+
+
+class PromptTemplate(BaseModel):
+    name: str
+    description: str | None = None
+    content: str
+
+
+class Skill(BaseModel):
+    name: str
+    description: str
+    content: str
+    filePath: str
+    disableModelInvocation: bool = False
+
+
+class AgentHarnessResources(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    promptTemplates: list[PromptTemplate] | None = None
+    skills: list[Skill] | None = None
+
+
+class AgentHarnessStreamOptions(BaseModel):
+    timeoutMs: int | None = None
+    maxRetries: int | None = None
+    maxRetryDelayMs: int | None = None
+    headers: dict[str, str] | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class AgentHarnessStreamOptionsPatch(BaseModel):
+    timeoutMs: int | None = None
+    maxRetries: int | None = None
+    maxRetryDelayMs: int | None = None
+    headers: dict[str, str | None] | None = None
+    metadata: dict[str, Any | None] | None = None
+
+
+class QueueUpdateEvent(BaseModel):
+    type: Literal["queue_update"] = "queue_update"
+    steer: list[AgentMessage]
+    followUp: list[AgentMessage]
+    nextTurn: list[AgentMessage]
+
+
+class SavePointEvent(BaseModel):
+    type: Literal["save_point"] = "save_point"
+    hadPendingMutations: bool
+
+
+class AbortEvent(BaseModel):
+    type: Literal["abort"] = "abort"
+    clearedSteer: list[AgentMessage]
+    clearedFollowUp: list[AgentMessage]
+
+
+class SettledEvent(BaseModel):
+    type: Literal["settled"] = "settled"
+    nextTurnCount: int
+
+
+class BeforeAgentStartEvent(BaseModel):
+    type: Literal["before_agent_start"] = "before_agent_start"
+    prompt: str
+    images: list[ImageContent] | None = None
+    systemPrompt: str
+    resources: AgentHarnessResources
+
+
+class ContextEvent(BaseModel):
+    type: Literal["context"] = "context"
+    messages: list[AgentMessage]
+
+
+class BeforeProviderRequestEvent(BaseModel):
+    type: Literal["before_provider_request"] = "before_provider_request"
+    model: Model
+    sessionId: str
+    streamOptions: AgentHarnessStreamOptions
+
+
+class BeforeProviderPayloadEvent(BaseModel):
+    type: Literal["before_provider_payload"] = "before_provider_payload"
+    model: Model
+    payload: Any
+
+
+class AfterProviderResponseEvent(BaseModel):
+    type: Literal["after_provider_response"] = "after_provider_response"
+    status: int = 0
+    headers: dict[str, str] = Field(default_factory=dict)
+    message: AssistantMessage | None = None
+
+
+class ToolCallEvent(BaseModel):
+    type: Literal["tool_call"] = "tool_call"
+    toolCallId: str
+    toolName: str
+    input: dict[str, Any]
+
+
+class ToolResultEvent(BaseModel):
+    type: Literal["tool_result"] = "tool_result"
+    toolCallId: str
+    toolName: str
+    input: dict[str, Any]
+    content: list[TextContent | ImageContent]
+    details: Any = None
+    isError: bool = False
+
+
+class ModelUpdateEvent(BaseModel):
+    type: Literal["model_update"] = "model_update"
+    model: Model
+    previousModel: Model | None = None
+    source: Literal["set", "restore"] = "set"
+
+
+class ThinkingLevelUpdateEvent(BaseModel):
+    type: Literal["thinking_level_update"] = "thinking_level_update"
+    level: ThinkingLevel
+    previousLevel: ThinkingLevel
+
+
+class ToolsUpdateEvent(BaseModel):
+    type: Literal["tools_update"] = "tools_update"
+    toolNames: list[str]
+    previousToolNames: list[str]
+    activeToolNames: list[str]
+    previousActiveToolNames: list[str]
+    source: Literal["set", "restore"] = "set"
+
+
+class ResourcesUpdateEvent(BaseModel):
+    type: Literal["resources_update"] = "resources_update"
+    resources: AgentHarnessResources
+    previousResources: AgentHarnessResources
+
+
+AgentHarnessOwnEvent = (
+    QueueUpdateEvent
+    | SavePointEvent
+    | AbortEvent
+    | SettledEvent
+    | BeforeAgentStartEvent
+    | ContextEvent
+    | BeforeProviderRequestEvent
+    | BeforeProviderPayloadEvent
+    | AfterProviderResponseEvent
+    | ToolCallEvent
+    | ToolResultEvent
+    | ModelUpdateEvent
+    | ThinkingLevelUpdateEvent
+    | ToolsUpdateEvent
+    | ResourcesUpdateEvent
+)
+
+AgentHarnessEvent = AgentEvent | AgentHarnessOwnEvent
+AgentHarnessHandler = Callable[[AgentHarnessEvent, Any | None], Any]
 
 
 TMetadata = TypeVar("TMetadata", bound=SessionMetadata)
