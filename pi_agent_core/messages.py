@@ -82,6 +82,9 @@ class AssistantMessage(BaseModel):
     stopReason: StopReason = "stop"
     errorMessage: str | None = None
     timestamp: int = Field(default_factory=_now_ms)
+    # Parsed JSON when StreamOptions.response_schema was set (None when absent
+    # or parsing failed); kept as plain JSON values so messages stay serializable.
+    structured_output: Any = None
 
 
 class ToolResultMessage(BaseModel):

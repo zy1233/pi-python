@@ -153,6 +153,55 @@ def _get_attr(obj: Any, key: str, default: Any = None) -> Any:
     return getattr(obj, key, default)
 
 
+def _normalize_response_schema(schema: dict[str, Any] | type | None) -> dict[str, Any] | None:
+    """Accept a JSON schema dict or a pydantic BaseModel subclass."""
+    if schema is None:
+        return None
+    if isinstance(schema, dict):
+        return schema
+    if isinstance(schema, type) and hasattr(schema, "model_json_schema"):
+        return schema.model_json_schema()
+    raise TypeError(
+        "response_schema must be a JSON schema dict or a pydantic BaseModel subclass, "
+        f"got {type(schema).__name__}"
+    )
+
+
+def _schema_instruction(schema: dict[str, Any]) -> str:
+    return (
+        "You must answer with a single JSON object that conforms to this JSON Schema "
+        "(no markdown fences, no explanations, JSON only):\n"
+        + json.dumps(schema, ensure_ascii=False)
+    )
+
+
+def _parse_structured_output(text: str, schema: dict[str, Any] | type | None) -> Any:
+    """Best-effort parse of the final text into JSON (audit #7).
+
+    Strips markdown fences if present. When the schema is a pydantic model,
+    validates and normalizes through it (filling defaults); validation failure
+    keeps the raw parsed JSON rather than discarding data. Returns None when
+    the text is not JSON at all.
+    """
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        first_newline = stripped.find("\n")
+        if first_newline != -1:
+            stripped = stripped[first_newline + 1 :]
+        stripped = stripped.removesuffix("```").strip()
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        logger.warning("response_schema set but final text is not valid JSON: %.200r", text)
+        return None
+    if isinstance(schema, type) and hasattr(schema, "model_validate"):
+        try:
+            return schema.model_validate(parsed).model_dump()
+        except Exception as e:
+            logger.warning("structured output failed schema validation: %s", e)
+    return parsed
+
+
 def _merge_usage_meta(acc: dict[str, Any], meta: Any) -> None:
     """Accumulate a chunk's usage_metadata into `acc` (per-field max).
 
@@ -363,7 +412,19 @@ async def langchain_stream(
         try:
             chat = resolve_chat_model(model, options.api_key, options.reasoning)
             transformed = transform_messages(context.messages, model)
-            lc_messages = convert_to_langchain(transformed, context.system_prompt, model)
+
+            # Structured output (#7): schema instructions go into the system
+            # prompt for every provider; OpenAI-style providers additionally
+            # get native response_format enforcement below.
+            response_schema = _normalize_response_schema(options.response_schema)
+            system_prompt = context.system_prompt
+            if response_schema is not None:
+                instruction = _schema_instruction(response_schema)
+                system_prompt = (
+                    f"{system_prompt}\n\n{instruction}" if system_prompt else instruction
+                )
+
+            lc_messages = convert_to_langchain(transformed, system_prompt, model)
 
             tools = context.tools or []
             schemas: list[dict] = []
@@ -384,6 +445,17 @@ async def langchain_stream(
                 if schemas:
                     chat = chat.bind_tools(schemas)
 
+            if response_schema is not None and model.provider.lower() in ("openai", "deepseek"):
+                # No strict:true — OpenAI's strict mode rejects many valid
+                # pydantic schemas (e.g. missing additionalProperties:false);
+                # the prompt instruction plus parse-time validation cover it.
+                chat = chat.bind(
+                    response_format={
+                        "type": "json_schema",
+                        "json_schema": {"name": "response", "schema": response_schema},
+                    }
+                )
+
             if signal is not None and getattr(signal, "aborted", False):
                 raise _Aborted()
 
@@ -392,10 +464,11 @@ async def langchain_stream(
                     {
                         "provider": model.provider,
                         "model": model.model_id,
-                        "system_prompt": context.system_prompt,
+                        "system_prompt": system_prompt,
                         "messages": lc_messages,
                         "tools": schemas,
                         "reasoning": options.reasoning,
+                        "response_schema": response_schema,
                     }
                 )
                 if inspect.isawaitable(hook_result):
@@ -624,6 +697,13 @@ async def langchain_stream(
 
             partial.content = content_blocks
             partial.stopReason = stop_reason  # type: ignore[assignment]
+
+            # Tool-call turns are not the final answer; only parse plain
+            # text completions into structured output.
+            if response_schema is not None and full_text and stop_reason == "stop":
+                partial.structured_output = _parse_structured_output(
+                    full_text, options.response_schema
+                )
 
             if usage_meta_acc:
                 partial.usage = _apply_cost(_usage_from_meta(usage_meta_acc), model, options)

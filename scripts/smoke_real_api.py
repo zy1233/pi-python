@@ -153,6 +153,34 @@ async def smoke_tool_loop() -> bool:
     return _report("tool loop", checks, notes)
 
 
+async def smoke_structured_output() -> bool:
+    """response_schema: native response_format + prompt injection + parsing."""
+
+    class Person(BaseModel):
+        name: str = Field(description="Full name")
+        age: int = Field(description="Age in years")
+        city: str = Field(description="Home city")
+
+    events: list = []
+
+    async def emit(e) -> None:
+        events.append(e)
+
+    prompt = UserMessage(content="Invent a fictional person from Shanghai in her thirties.")
+    ctx = AgentContext(system_prompt="You extract structured data.", messages=[], tools=[])
+    messages = await run_agent_loop([prompt], ctx, _config(response_schema=Person), emit)
+
+    final = messages[-1]
+    so = final.structured_output
+    checks = {
+        "structured_output parsed": isinstance(so, dict),
+        "schema fields present": isinstance(so, dict) and {"name", "age", "city"} <= set(so),
+        "age is int": isinstance(so, dict) and isinstance(so.get("age"), int),
+        "stopReason == stop": final.stopReason == "stop",
+    }
+    return _report("structured output", checks, [f"parsed: {so}"])
+
+
 class _Signal:
     def __init__(self) -> None:
         self.aborted = False
@@ -222,6 +250,7 @@ async def main() -> int:
     results = [
         await smoke_text_stream(),
         await smoke_tool_loop(),
+        await smoke_structured_output(),
         await smoke_abort(),
     ]
     await observe_raw_reasoning()

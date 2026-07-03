@@ -362,6 +362,7 @@ async def _stream_assistant_response(
         cost_calculator=config.cost_calculator,
         on_payload=config.on_payload,
         on_response=config.on_response,
+        response_schema=config.response_schema,
     )
     if config.max_retries is not None:
         options.max_retries = config.max_retries

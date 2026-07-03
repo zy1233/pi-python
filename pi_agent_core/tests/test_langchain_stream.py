@@ -233,6 +233,121 @@ async def test_reasoning_content_streams_as_thinking(monkeypatch):
     assert final.content[1] == {"type": "text", "text": "answer"}
 
 
+class _CapturingJsonModel:
+    """Records bind() kwargs and streams a JSON answer (optionally fenced)."""
+
+    def __init__(self, text: str = '{"name": "Ada", "age": 36}') -> None:
+        self.text = text
+        self.bound: dict[str, Any] = {}
+
+    def bind(self, **kwargs: Any):
+        self.bound.update(kwargs)
+        return self
+
+    async def astream(self, messages: Any):
+        self._messages = messages
+        yield AIMessageChunk(content=self.text)
+
+
+@pytest.mark.asyncio
+async def test_structured_output_openai_binds_and_parses(monkeypatch):
+    """#7: pydantic schema -> response_format bind + prompt injection + parsed output."""
+    from pydantic import BaseModel
+
+    class Person(BaseModel):
+        name: str
+        age: int
+
+    fake = _CapturingJsonModel()
+    monkeypatch.setattr(ls_mod, "resolve_chat_model", lambda *a, **k: fake)
+
+    stream = await ls_mod.langchain_stream(
+        Model(provider="openai", model_id="gpt-x"),
+        LlmContext(system_prompt="Extract the person.", messages=[]),
+        StreamOptions(response_schema=Person),
+    )
+    final = await stream.message_result()
+
+    rf = fake.bound["response_format"]
+    assert rf["type"] == "json_schema"
+    assert rf["json_schema"]["schema"]["properties"]["age"]["type"] == "integer"
+    system = fake._messages[0].content
+    assert "Extract the person." in system
+    assert "JSON Schema" in system
+    assert final.structured_output == {"name": "Ada", "age": 36}
+
+
+@pytest.mark.asyncio
+async def test_structured_output_anthropic_prompt_only(monkeypatch):
+    """#7: providers without response_format rely on prompt injection alone."""
+    fake = _CapturingJsonModel(text='```json\n{"name": "Bob", "age": 7}\n```')
+    monkeypatch.setattr(ls_mod, "resolve_chat_model", lambda *a, **k: fake)
+
+    stream = await ls_mod.langchain_stream(
+        Model(provider="anthropic", model_id="claude-x"),
+        LlmContext(system_prompt=None, messages=[]),
+        StreamOptions(response_schema={"type": "object"}),
+    )
+    final = await stream.message_result()
+
+    assert "response_format" not in fake.bound
+    assert "JSON Schema" in fake._messages[0].content
+    # Markdown fences are stripped before parsing.
+    assert final.structured_output == {"name": "Bob", "age": 7}
+
+
+@pytest.mark.asyncio
+async def test_structured_output_invalid_json_is_none(monkeypatch):
+    """#7: non-JSON answers leave structured_output as None (no crash)."""
+    fake = _CapturingJsonModel(text="I cannot answer in JSON, sorry.")
+    monkeypatch.setattr(ls_mod, "resolve_chat_model", lambda *a, **k: fake)
+
+    stream = await ls_mod.langchain_stream(
+        Model(provider="openai", model_id="gpt-x"),
+        LlmContext(system_prompt=None, messages=[]),
+        StreamOptions(response_schema={"type": "object"}),
+    )
+    final = await stream.message_result()
+    assert final.structured_output is None
+    assert final.content[0]["text"].startswith("I cannot")
+
+
+@pytest.mark.asyncio
+async def test_no_schema_no_injection(monkeypatch):
+    """#7: without response_schema nothing changes (no bind, no prompt suffix)."""
+    fake = _CapturingJsonModel(text="plain answer")
+    monkeypatch.setattr(ls_mod, "resolve_chat_model", lambda *a, **k: fake)
+
+    stream = await ls_mod.langchain_stream(
+        Model(provider="openai", model_id="gpt-x"),
+        LlmContext(system_prompt="sys", messages=[]),
+        StreamOptions(),
+    )
+    final = await stream.message_result()
+    assert "response_format" not in fake.bound
+    assert fake._messages[0].content == "sys"
+    assert final.structured_output is None
+
+
+def test_normalize_response_schema_rejects_bad_types():
+    with pytest.raises(TypeError):
+        ls_mod._normalize_response_schema("not a schema")  # type: ignore[arg-type]
+
+
+def test_parse_structured_output_pydantic_validation():
+    from pydantic import BaseModel
+
+    class Point(BaseModel):
+        x: int
+        y: int = 0
+
+    parsed = ls_mod._parse_structured_output('{"x": 3}', Point)
+    assert parsed == {"x": 3, "y": 0}  # defaults filled via validation
+    # Validation failure keeps raw JSON instead of discarding it.
+    raw = ls_mod._parse_structured_output('{"x": "not-an-int"}', Point)
+    assert raw == {"x": "not-an-int"}
+
+
 class _FakeToolCallModel:
     """Streams one tool call split across chunks."""
 

@@ -196,6 +196,11 @@ class StreamOptions:
     # events (not swallowed), matching pi.
     on_payload: Callable[[dict[str, Any]], Any] | None = None
     on_response: Callable[[AssistantMessage], Any] | None = None
+    # Structured output (audit #7): a JSON schema dict or pydantic BaseModel
+    # subclass. Providers with response_format get it natively (json_schema);
+    # others get schema instructions appended to the system prompt. The final
+    # text is parsed into AssistantMessage.structured_output.
+    response_schema: dict[str, Any] | type | None = None
 
 
 ConvertToLlmFn = Callable[[list[AgentMessage]], list[Message] | Awaitable[list[Message]]]
@@ -273,6 +278,8 @@ class AgentLoopConfig:
     after_llm_call: Callable[[AgentContext, AssistantMessage], Any] | None = None
     # on_agent_end fires with the run's new messages just before agent_end.
     on_agent_end: Callable[[list[AgentMessage]], Any] | None = None
+    # Structured output schema forwarded into StreamOptions (audit #7).
+    response_schema: dict[str, Any] | type | None = None
 
 
 # --- Assistant stream events ---

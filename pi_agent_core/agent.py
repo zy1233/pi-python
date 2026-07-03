@@ -70,6 +70,7 @@ class Agent:
         before_llm_call: Callable[..., Any] | None = None,
         after_llm_call: Callable[..., Any] | None = None,
         on_agent_end: Callable[..., Any] | None = None,
+        response_schema: dict[str, Any] | type | None = None,
     ) -> None:
         state = initial_state or {}
         self._system_prompt: str = state.get("system_prompt", "")
@@ -104,6 +105,7 @@ class Agent:
         self.before_llm_call = before_llm_call
         self.after_llm_call = after_llm_call
         self.on_agent_end = on_agent_end
+        self.response_schema = response_schema
 
         self._steering_queue = PendingMessageQueue(steering_mode)
         self._follow_up_queue = PendingMessageQueue(follow_up_mode)
@@ -340,6 +342,7 @@ class Agent:
             before_llm_call=self.before_llm_call,
             after_llm_call=self.after_llm_call,
             on_agent_end=self.on_agent_end,
+            response_schema=self.response_schema,
         )
 
     async def _run_with_lifecycle(self, executor: Callable[[Any], Any]) -> None:
