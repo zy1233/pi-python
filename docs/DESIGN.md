@@ -1,6 +1,12 @@
 # pi-agent-core Python 详细设计方案
 
 > 基于 [earendil-works/pi](https://github.com/earendil-works/pi) 的 `@earendil-works/pi-agent-core`，用 LangChain 替代 `pi-ai`。
+>
+> 本文是 Phase 1 的原始设计。Phase 2（usage/thinking/transform）见
+> `docs/superpowers/specs/2026-05-25-phase2-production-enhancements-design.md`；
+> Phase 2.5（重试/失控保护/观测/粒度事件/guardrail 钩子/预算信号/结构化输出）的
+> 设计决策与实施记录见 `docs/AUDIT-2026-07-02.md` 第三部分。当前 API 全貌以
+> README 为准。
 
 ## 1. 目标
 
@@ -58,9 +64,13 @@ agent_start → turn_start → message_start(user) → message_end(user)
 ```python
 @dataclass
 class Model:
-    provider: str   # openai, anthropic
+    provider: str   # openai, anthropic, deepseek（OpenAI 兼容网关）, 其他走 init_chat_model
     model_id: str
     api: str = "langchain"
+    context_window: int = 128_000   # ContextBudget 预算信号的分母
+    supports_images: bool = True
+    reasoning: bool = False         # thinking 参数注入与历史剥除的总开关
+    base_url: str | None = None     # OpenAI 兼容网关（对齐 pi 的 baseUrl）
 ```
 
 ### AgentTool
@@ -86,11 +96,14 @@ async def stream_fn(model, context: LlmContext, options) -> AssistantMessageEven
 3. `bound = model.bind_tools(lc_tools)`（工具执行仍在 agent_loop，非 ToolNode）
 4. `astream` → 映射 `text_delta`、`toolcall_delta`、`done`
 
-## 6. Phase 2/3（本次不实现）
+## 6. 后续阶段状态
 
-- `transform_messages` 跨厂商回放
-- AgentHarness：Session JSONL、Compaction、Skills
-- `stream_proxy`
+- Phase 2（已完成）：`transform_messages` 跨厂商回放、usage/cost、thinking/reasoning
+- Phase 2.5（已完成）：重试/退避、`max_turns`/`tool_timeout`、`on_payload`/`on_response`、
+  run_id/turn_id、粒度事件、工具结果图片、`before/after_llm_call`/`on_agent_end`、
+  `ContextBudget`、`response_schema` 结构化输出（详见审计报告第三部分）
+- Phase 3（待启动）：AgentHarness——Session JSONL、Compaction 策略（挂
+  `before_llm_call` + `ContextBudget`）、Skills、`stream_proxy`
 
 ## 7. 测试策略
 
@@ -114,8 +127,8 @@ Mock `stream_fn` 无需 API Key，镜像 pi `agent-loop.test.ts` 场景。
 | `pi_agent_core/agent_loop.py` | 完成 |
 | `pi_agent_core/agent.py` | 完成 |
 | `pi_agent_core/adapters/langchain_*.py` | 完成 |
-| `pi_agent_core/tests/` | 9 tests 通过 |
-| `examples/minimal_agent.py` | 完成 |
+| `pi_agent_core/tests/` | 完成（Phase 2.5 后共 80 tests） |
+| `examples/minimal_agent.py` | 完成（另见 `examples/production_agent.py`） |
 
 ## 10. 使用说明
 

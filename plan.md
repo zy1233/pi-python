@@ -25,6 +25,10 @@ isProject: false
 
 # pi-agent-core Python 实现计划
 
+> **历史文档**（Phase 1 规划原稿）。Phase 1/2/2.5 均已完成；当前状态与后续路线以
+> `docs/AUDIT-2026-07-02.md`（审计与增强追踪）和 README 为准。本文中 "Phase 2"
+> 指生产化增强（已完成），"Phase 3" 指 AgentHarness（待启动）。
+
 ## 调研结论
 
 [earendil-works/pi](https://github.com/earendil-works/pi) 是 TypeScript monorepo，与 agent 相关的核心包：

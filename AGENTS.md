@@ -39,10 +39,12 @@ AgentMessage[] → transform_context() → convert_to_llm() → LangChain BaseMe
 3. **terminate semantics** — skip the next LLM turn only when **all** finalized tool results in the batch have `terminate=True`.
 4. **StreamFn contract** — never raises to the caller; failures are encoded as an `error` event with `stop_reason=error|aborted`.
 5. **Thinking/reasoning gating** — reasoning params are injected iff `Model.reasoning=True` **and** `thinking_level != "off"`; the same flag drives thinking-history stripping in `transform_messages`, keeping request params and message replay consistent.
+6. **Usage accumulation is per-field max, not sum** — real providers report usage as a single final report, complementary splits (Anthropic), or cumulative per-chunk snapshots (SiliconFlow/vLLM gateways); summing inflates the last shape by orders of magnitude.
+7. **Structured output must not break streaming** — `response_schema` works via prompt injection + native `response_format` (OpenAI-style); never switch to `with_structured_output` (it replaces `AIMessageChunk` streaming and kills the event protocol).
 
 ### Status
 
-Phase 1 (MVP loop) and Phase 2 (usage/cost, thinking/reasoning, transform_messages) are complete; all audit findings in `docs/AUDIT-2026-07-02.md` are fixed. Phase 3 (AgentHarness: Session JSONL, compaction, skills, `stream_proxy`) is not implemented yet.
+Phase 1 (MVP loop), Phase 2 (usage/cost, thinking/reasoning, transform_messages), and Phase 2.5 (retries/backoff, `max_turns`/`tool_timeout`, `on_payload`/`on_response`, `run_id`/`turn_id` on all events, granular `*_start/*_end` stream events, tool-result images, `before/after_llm_call`/`on_agent_end` guardrail hooks, `ContextBudget` signal, `response_schema` structured output, `Model.base_url` + `deepseek` provider) are complete — 81 tests, CI green. Real-API smoke (`scripts/smoke_real_api.py`) passed against SiliconFlow (OpenAI-compatible). Phase 3 (AgentHarness: Session JSONL, compaction strategy on top of `before_llm_call` + `ContextBudget`, skills, `stream_proxy`) is not implemented yet.
 
 ## Cursor Cloud specific instructions
 

@@ -244,6 +244,10 @@ class _CapturingJsonModel:
         self.bound.update(kwargs)
         return self
 
+    def bind_tools(self, tools: Any):
+        self.bound["tools"] = tools
+        return self
+
     async def astream(self, messages: Any):
         self._messages = messages
         yield AIMessageChunk(content=self.text)
@@ -310,6 +314,38 @@ async def test_structured_output_invalid_json_is_none(monkeypatch):
     final = await stream.message_result()
     assert final.structured_output is None
     assert final.content[0]["text"].startswith("I cannot")
+
+
+@pytest.mark.asyncio
+async def test_structured_output_with_tools_skips_response_format(monkeypatch):
+    """Smoke finding: binding response_format alongside non-strict tools makes
+    langchain-openai use the SDK parse helper, which rejects the request
+    ("`x` is not strict"). With tools bound we rely on prompt injection only."""
+    from pydantic import BaseModel
+
+    from pi_agent_core.tools import SimpleTool
+
+    class P(BaseModel):
+        q: str
+
+    async def run(_id, params, signal, on_update):
+        raise AssertionError("not executed here")
+
+    tool = SimpleTool(name="lookup", description="d", label="L", parameters=P, execute_fn=run)
+    fake = _CapturingJsonModel()
+    monkeypatch.setattr(ls_mod, "resolve_chat_model", lambda *a, **k: fake)
+
+    stream = await ls_mod.langchain_stream(
+        Model(provider="openai", model_id="gpt-x"),
+        LlmContext(system_prompt=None, messages=[], tools=[tool]),
+        StreamOptions(response_schema={"type": "object"}),
+    )
+    final = await stream.message_result()
+
+    assert "tools" in fake.bound
+    assert "response_format" not in fake.bound
+    assert "JSON Schema" in fake._messages[0].content  # prompt injection still on
+    assert final.structured_output == {"name": "Ada", "age": 36}
 
 
 @pytest.mark.asyncio

@@ -445,10 +445,18 @@ async def langchain_stream(
                 if schemas:
                     chat = chat.bind_tools(schemas)
 
-            if response_schema is not None and model.provider.lower() in ("openai", "deepseek"):
+            if (
+                response_schema is not None
+                and not schemas
+                and model.provider.lower() in ("openai", "deepseek")
+            ):
                 # No strict:true — OpenAI's strict mode rejects many valid
                 # pydantic schemas (e.g. missing additionalProperties:false);
                 # the prompt instruction plus parse-time validation cover it.
+                # Skipped when tools are bound: langchain-openai then streams
+                # through the SDK's beta parse helper, which rejects
+                # non-strict tools ("... is not strict"); prompt injection
+                # still applies.
                 chat = chat.bind(
                     response_format={
                         "type": "json_schema",
