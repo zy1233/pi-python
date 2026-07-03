@@ -1,0 +1,69 @@
+"""Path resolution, glob translation, and image sniffing for coding tools."""
+
+from __future__ import annotations
+
+import os
+import re
+
+
+def resolve_to_cwd(path: str, cwd: str) -> str:
+    """Resolve *path* against the tool's bound *cwd*.
+
+    Absolute paths pass through; ``~`` expands to the user home; relative
+    paths are joined onto *cwd*. The result is OS-normalized.
+    """
+    expanded = os.path.expanduser(path)
+    if os.path.isabs(expanded):
+        return os.path.normpath(expanded)
+    return os.path.normpath(os.path.join(cwd, expanded))
+
+
+def glob_to_regex(pattern: str) -> re.Pattern[str]:
+    """Translate a glob into a regex over POSIX-style (``/``-separated) paths.
+
+    Mirrors the fd glob subset pi's find relies on: ``**/`` matches any number
+    of leading directories (including none), ``**`` matches anything, ``*``
+    matches within a path segment, ``?`` matches a single non-separator char.
+    Everything else is literal. Match with ``.fullmatch()``.
+    """
+    parts: list[str] = []
+    i = 0
+    n = len(pattern)
+    while i < n:
+        ch = pattern[i]
+        if ch == "*":
+            if pattern.startswith("**/", i):
+                parts.append("(?:.*/)?")
+                i += 3
+            elif pattern.startswith("**", i):
+                parts.append(".*")
+                i += 2
+            else:
+                parts.append("[^/]*")
+                i += 1
+        elif ch == "?":
+            parts.append("[^/]")
+            i += 1
+        else:
+            parts.append(re.escape(ch))
+            i += 1
+    return re.compile("".join(parts))
+
+
+def detect_image_mime(buffer: bytes) -> str | None:
+    """Sniff png/jpeg/gif/webp/bmp magic numbers.
+
+    Hand-rolled because stdlib ``imghdr`` was removed in Python 3.13.
+    Returns the MIME type, or None for non-image (or unsupported) content.
+    """
+    if buffer.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if buffer.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if buffer.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if len(buffer) >= 12 and buffer[:4] == b"RIFF" and buffer[8:12] == b"WEBP":
+        return "image/webp"
+    if buffer.startswith(b"BM"):
+        return "image/bmp"
+    return None
