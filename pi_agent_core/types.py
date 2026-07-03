@@ -50,6 +50,9 @@ class Model:
     context_window: int = 128_000
     supports_images: bool = True
     reasoning: bool = False
+    # Custom endpoint for OpenAI-compatible providers (mirrors pi's baseUrl),
+    # e.g. SiliconFlow/DeepSeek/vLLM gateways.
+    base_url: str | None = None
 
     @property
     def id(self) -> str:

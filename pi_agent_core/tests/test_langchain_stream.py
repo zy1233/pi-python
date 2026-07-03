@@ -97,6 +97,28 @@ def test_resolve_fallback_provider_no_duplicate_model(monkeypatch):
     assert captured["kwargs"]["api_key"] == "k"
 
 
+def test_resolve_passes_base_url(monkeypatch):
+    """Model.base_url reaches the chat model (OpenAI-compatible gateways)."""
+    captured: dict[str, Any] = {}
+
+    def fake_init_chat_model(model: str, *, model_provider: str | None = None, **kwargs: Any):
+        captured["kwargs"] = kwargs
+        return object()
+
+    fake_pkg = types.ModuleType("langchain")
+    fake_mod = types.ModuleType("langchain.chat_models")
+    fake_mod.init_chat_model = fake_init_chat_model
+    fake_pkg.chat_models = fake_mod
+    monkeypatch.setitem(sys.modules, "langchain", fake_pkg)
+    monkeypatch.setitem(sys.modules, "langchain.chat_models", fake_mod)
+
+    ls_mod.resolve_chat_model(
+        Model(provider="other", model_id="m", base_url="https://api.siliconflow.cn/v1"),
+        api_key="k",
+    )
+    assert captured["kwargs"]["base_url"] == "https://api.siliconflow.cn/v1"
+
+
 def test_resolve_fallback_missing_langchain(monkeypatch):
     """B5: missing 'langchain' package must raise a clear ImportError, not 'Unsupported'."""
     monkeypatch.setitem(sys.modules, "langchain", None)
@@ -170,6 +192,45 @@ async def test_granular_start_end_event_sequence(monkeypatch):
     assert thinking_end.content == "step1 step2"
     text_end = next(e for e in events if e.type == "text_end")
     assert text_end.content == "answer"
+
+
+class _FakeReasoningContentModel:
+    """DeepSeek-style stream: thinking arrives via additional_kwargs.reasoning_content."""
+
+    async def astream(self, messages: Any):
+        yield AIMessageChunk(content="", additional_kwargs={"reasoning_content": "think "})
+        yield AIMessageChunk(content="", additional_kwargs={"reasoning_content": "hard"})
+        yield AIMessageChunk(content="answer")
+
+
+@pytest.mark.asyncio
+async def test_reasoning_content_streams_as_thinking(monkeypatch):
+    """Smoke finding: DeepSeek-style providers put thinking in reasoning_content,
+    not content blocks; it must surface as thinking_delta events + thinking block."""
+    monkeypatch.setattr(ls_mod, "resolve_chat_model", lambda *a, **k: _FakeReasoningContentModel())
+
+    stream = await ls_mod.langchain_stream(
+        Model(provider="deepseek", model_id="deepseek-x", reasoning=True),
+        LlmContext(system_prompt=None, messages=[]),
+        StreamOptions(),
+    )
+    events = [e async for e in stream]
+    final = await stream.message_result()
+
+    sequence = [e.type for e in events]
+    assert sequence == [
+        "start",
+        "thinking_start",
+        "thinking_delta",
+        "thinking_delta",
+        "thinking_end",
+        "text_start",
+        "text_delta",
+        "text_end",
+        "done",
+    ]
+    assert final.content[0] == {"type": "thinking", "thinking": "think hard"}
+    assert final.content[1] == {"type": "text", "text": "answer"}
 
 
 class _FakeToolCallModel:

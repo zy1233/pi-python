@@ -36,7 +36,7 @@ def test_usage_from_meta_standardized_fields():
 
 
 def test_usage_accumulates_across_chunks():
-    """Providers may split usage across chunks (e.g. input on first, output on last)."""
+    """Complementary splits (Anthropic): input on first chunk, output on last."""
     acc: dict = {}
     _merge_usage_meta(
         acc,
@@ -54,6 +54,31 @@ def test_usage_accumulates_across_chunks():
     assert usage.totalTokens == 280
     assert usage.cacheRead == 30
     assert usage.cacheWrite == 15
+
+
+def test_usage_cumulative_snapshots_not_summed():
+    """Cumulative snapshots (SiliconFlow/vLLM gateways) must not be inflated.
+
+    Real-API smoke exposed this: such providers report usage on every chunk as
+    a running total (output=1,2,3,...); summing produced ~18k tokens for a
+    ~100-token reply. Per-field max is correct for every observed shape.
+    """
+    acc: dict = {}
+    for out in (1, 2, 3):
+        _merge_usage_meta(
+            acc,
+            {
+                "input_tokens": 12,
+                "output_tokens": out,
+                "total_tokens": 12 + out,
+                "output_token_details": {"reasoning": max(0, out - 1)},
+            },
+        )
+    usage = _usage_from_meta(acc)
+    assert usage.input == 12
+    assert usage.output == 3
+    assert usage.totalTokens == 15
+    assert usage.reasoningTokens == 2
 
 
 def test_merge_usage_meta_accepts_object_chunks():

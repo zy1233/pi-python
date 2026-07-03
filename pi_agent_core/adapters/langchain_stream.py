@@ -154,14 +154,21 @@ def _get_attr(obj: Any, key: str, default: Any = None) -> Any:
 
 
 def _merge_usage_meta(acc: dict[str, Any], meta: Any) -> None:
-    """Accumulate a chunk's usage_metadata into `acc`.
+    """Accumulate a chunk's usage_metadata into `acc` (per-field max).
 
-    Mirrors LangChain's `add_usage` (`full += chunk`) semantics: some providers
-    split usage across chunks (e.g. input tokens on the first, output tokens on
-    the last), so summing across all chunks is the only shape-agnostic approach.
+    Real streams report usage in three shapes:
+    - single final report (OpenAI with stream_options.include_usage),
+    - complementary splits (Anthropic: input on message_start, output on the
+      final message_delta — each field non-zero exactly once),
+    - cumulative snapshots on every chunk (SiliconFlow/vLLM-style
+      OpenAI-compatible gateways: output_tokens=1,2,3,...).
+
+    Per-field max is correct for all three; summing (LangChain's `add_usage`)
+    inflates the cumulative-snapshot shape by orders of magnitude (verified
+    against SiliconFlow: a ~100-token reply summed to ~18k output tokens).
     """
     for key in ("input_tokens", "output_tokens", "total_tokens"):
-        acc[key] = acc.get(key, 0) + int(_get_attr(meta, key) or 0)
+        acc[key] = max(acc.get(key, 0), int(_get_attr(meta, key) or 0))
     for details_key in ("input_token_details", "output_token_details"):
         details = _get_attr(meta, details_key)
         if not details:
@@ -171,7 +178,7 @@ def _merge_usage_meta(acc: dict[str, Any], meta: Any) -> None:
         acc_details: dict[str, int] = acc.setdefault(details_key, {})
         for k, v in details.items():
             if isinstance(v, int):
-                acc_details[k] = acc_details.get(k, 0) + v
+                acc_details[k] = max(acc_details.get(k, 0), v)
 
 
 def _usage_from_meta(meta: dict[str, Any]) -> Usage:
@@ -180,15 +187,21 @@ def _usage_from_meta(meta: dict[str, Any]) -> Usage:
     Cache and reasoning tokens live in input_token_details/output_token_details
     for every provider (LangChain normalizes them there — including Anthropic's
     cache_read_input_tokens/cache_creation_input_tokens).
+
+    totalTokens is input+output when that exceeds the reported total: with
+    complementary splits no single chunk carries the full total, so the max of
+    reported totals can undercount.
     """
     input_details = meta.get("input_token_details") or {}
     output_details = meta.get("output_token_details") or {}
+    input_tokens = int(meta.get("input_tokens") or 0)
+    output_tokens = int(meta.get("output_tokens") or 0)
     return Usage(
-        input=int(meta.get("input_tokens") or 0),
-        output=int(meta.get("output_tokens") or 0),
+        input=input_tokens,
+        output=output_tokens,
         cacheRead=int(input_details.get("cache_read") or 0),
         cacheWrite=int(input_details.get("cache_creation") or 0),
-        totalTokens=int(meta.get("total_tokens") or 0),
+        totalTokens=max(int(meta.get("total_tokens") or 0), input_tokens + output_tokens),
         reasoningTokens=int(output_details.get("reasoning") or 0),
     )
 
@@ -214,6 +227,19 @@ def _extract_thinking_delta(content: Any) -> str:
                     parts.append(text)
         return "".join(parts)
     return ""
+
+
+def _extract_reasoning_content_delta(chunk: Any) -> str:
+    """Thinking from additional_kwargs.reasoning_content.
+
+    DeepSeek-style OpenAI-compatible providers (DeepSeek, SiliconFlow, many
+    vLLM gateways) stream thinking as `delta.reasoning_content` instead of
+    content blocks. langchain-deepseek preserves it in additional_kwargs;
+    plain ChatOpenAI drops it (use provider="deepseek" for such endpoints).
+    """
+    ak = getattr(chunk, "additional_kwargs", None) or {}
+    value = ak.get("reasoning_content")
+    return value if isinstance(value, str) else ""
 
 
 def _extract_thinking_signature(content: Any) -> str:
@@ -260,6 +286,8 @@ def resolve_chat_model(
     kwargs: dict[str, Any] = {"model": model.model_id}
     if api_key:
         kwargs["api_key"] = api_key
+    if model.base_url:
+        kwargs["base_url"] = model.base_url
     kwargs = _apply_reasoning_params(kwargs, model, reasoning)
 
     provider = model.provider.lower()
@@ -281,6 +309,18 @@ def resolve_chat_model(
                 "Install langchain-anthropic: pip install 'pi-agent-core[anthropic]'"
             ) from e
         return ChatAnthropic(**kwargs)
+    if provider == "deepseek":
+        # Also the right provider for DeepSeek-style OpenAI-compatible gateways
+        # (SiliconFlow, vLLM, ...): unlike ChatOpenAI it preserves the
+        # reasoning_content thinking stream in additional_kwargs.
+        try:
+            from langchain_deepseek import ChatDeepSeek
+        except ImportError as e:
+            raise ImportError(
+                "Install langchain-deepseek: pip install 'pi-agent-core[deepseek]'"
+            ) from e
+        kwargs.setdefault("stream_usage", True)
+        return ChatDeepSeek(**kwargs)
 
     try:
         from langchain.chat_models import init_chat_model
@@ -404,7 +444,9 @@ async def langchain_stream(
                 if meta:
                     _merge_usage_meta(usage_meta_acc, meta)
 
-                thinking_delta = _extract_thinking_delta(chunk.content)
+                thinking_delta = _extract_thinking_delta(
+                    chunk.content
+                ) or _extract_reasoning_content_delta(chunk)
                 sig = _extract_thinking_signature(chunk.content)
                 if sig:
                     thinking_signature += sig
