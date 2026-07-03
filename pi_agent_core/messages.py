@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+# pydantic requires the typing_extensions variants on Python < 3.12 to build
+# schemas from TypedDicts (typing.TypedDict lacks the needed introspection);
+# NotRequired must come from the same module as TypedDict.
+from typing_extensions import NotRequired, TypedDict  # noqa: UP035
 
 
 def _now_ms() -> int:
