@@ -10,6 +10,8 @@ from pi_agent_core.adapters.langchain_convert import default_convert_to_llm
 from pi_agent_core.agent_loop import run_agent_loop
 from pi_agent_core.coding_tools import (
     ALL_TOOL_NAMES,
+    create_all_tools,
+    create_coding_tools,
     create_read_only_tools,
     create_tool,
 )
@@ -31,8 +33,8 @@ def test_all_tool_names_matches_spec():
     assert {"read", "bash", "edit", "write", "grep", "find", "ls"} == ALL_TOOL_NAMES
 
 
-def test_create_tool_dispatches_all_implemented_names(tmp_path):
-    for name in ("read", "edit", "write", "grep", "find", "ls"):
+def test_create_tool_dispatches_all_names(tmp_path):
+    for name in sorted(ALL_TOOL_NAMES):
         tool = create_tool(name, str(tmp_path))
         assert tool.name == name
 
@@ -47,15 +49,20 @@ def test_create_tool_unknown_name_raises(tmp_path):
         create_tool("cat", str(tmp_path))  # type: ignore[arg-type]
 
 
-def test_create_tool_bash_pending(tmp_path):
-    # Transitional: replaced by real assertions when the bash batch lands.
-    with pytest.raises(NotImplementedError, match="bash tool is not implemented yet"):
-        create_tool("bash", str(tmp_path))
+def test_coding_group_composition(tmp_path):
+    tools = create_coding_tools(str(tmp_path))
+    assert [t.name for t in tools] == ["read", "bash", "edit", "write"]
 
 
 def test_read_only_group_composition(tmp_path):
     tools = create_read_only_tools(str(tmp_path))
     assert [t.name for t in tools] == ["read", "grep", "find", "ls"]
+
+
+def test_create_all_tools_covers_every_name(tmp_path):
+    tools = create_all_tools(str(tmp_path))
+    assert set(tools) == ALL_TOOL_NAMES
+    assert all(tools[name].name == name for name in tools)
 
 
 # --- agent-loop integration (event-contract invariants, AGENTS.md #1/#2) ---

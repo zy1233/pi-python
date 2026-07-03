@@ -1,20 +1,19 @@
 """Built-in coding tools (port of pi ``packages/coding-agent/src/core/tools``).
 
 Design: ``docs/superpowers/specs/2026-07-03-p6-tool-ecosystem-design.md``.
-Shipped: shared infrastructure, read/write/ls/edit/grep/find, and the
-factories below. ``bash`` is the last pending tool — requesting it (directly
-or via ``create_coding_tools`` / ``create_all_tools``) raises
-``NotImplementedError`` until it lands.
+All seven tools (read/bash/edit/write/grep/find/ls) plus the shared
+infrastructure are implemented.
 
 Factory usage (mirrors pi's ``createAgentSession({ tools })`` consumption):
 
-    from pi_agent_core.coding_tools import create_read_only_tools
-    tools = create_read_only_tools("/path/to/project")
+    from pi_agent_core.coding_tools import create_coding_tools
+    tools = create_coding_tools("/path/to/project")
 """
 
 from collections.abc import Callable
 from typing import Any, Literal
 
+from pi_agent_core.coding_tools.bash import create_bash_tool
 from pi_agent_core.coding_tools.edit import create_edit_tool
 from pi_agent_core.coding_tools.find import create_find_tool
 from pi_agent_core.coding_tools.grep import create_grep_tool
@@ -54,6 +53,7 @@ READ_ONLY_TOOL_NAMES: tuple[ToolName, ...] = ("read", "grep", "find", "ls")
 
 _FACTORIES: dict[str, Callable[..., AgentTool]] = {
     "read": create_read_tool,
+    "bash": create_bash_tool,
     "edit": create_edit_tool,
     "write": create_write_tool,
     "grep": create_grep_tool,
@@ -65,14 +65,10 @@ _FACTORIES: dict[str, Callable[..., AgentTool]] = {
 def create_tool(name: ToolName, cwd: str, **options: Any) -> AgentTool:
     """Build one built-in tool by name, bound to *cwd*.
 
-    ``**options`` forwards to the per-tool factory (currently only grep's
-    ``use_fallback``); unknown names raise ``ValueError``.
+    ``**options`` forwards to the per-tool factory (e.g. grep's
+    ``use_fallback``, bash's ``shell_path``); unknown names raise
+    ``ValueError``.
     """
-    if name == "bash":
-        raise NotImplementedError(
-            "The bash tool is not implemented yet (P6 batch 4 pending); "
-            "see docs/superpowers/specs/2026-07-03-p6-tool-ecosystem-design.md §4.2."
-        )
     factory = _FACTORIES.get(name)
     if factory is None:
         raise ValueError(f"Unknown tool name: {name!r}. Valid names: {sorted(ALL_TOOL_NAMES)}")
@@ -106,6 +102,7 @@ __all__ = [
     "TruncationResult",
     "compile_glob",
     "create_all_tools",
+    "create_bash_tool",
     "create_coding_tools",
     "create_edit_tool",
     "create_find_tool",

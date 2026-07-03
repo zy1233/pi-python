@@ -36,9 +36,9 @@ This repository is a monorepo with two Python distributions:
 - Tool-result images: Anthropic native blocks, user-message fallback elsewhere, stripped when `supports_images=False`
 - OpenAI-compatible gateways via `Model.base_url` (SiliconFlow, vLLM, DeepSeek, ...)
 
-**Tool ecosystem** (P6, in progress)
+**Tool ecosystem** (P6)
 
-- Built-in coding tools (`pi_agent_core.coding_tools`): read / edit / write / grep / find / ls with pi-faithful truncation notices and `details` payloads (`bash` pending)
+- Built-in coding tools (`pi_agent_core.coding_tools`): read / bash / edit / write / grep / find / ls with pi-faithful truncation notices and `details` payloads
 - LangChain `BaseTool` → `AgentTool` adapter (`from_langchain_tool`) — MCP tools via `langchain-mcp-adapters` work out of the box
 
 ## Install
@@ -158,9 +158,10 @@ from the core runtime (tools consume the loop; they are not part of it). Factori
 each tool to a working directory:
 
 ```python
-from pi_agent_core.coding_tools import create_read_only_tools
+from pi_agent_core.coding_tools import create_coding_tools, create_read_only_tools
 
-tools = create_read_only_tools("/path/to/project")  # read / grep / find / ls
+tools = create_coding_tools("/path/to/project")        # read / bash / edit / write
+audit = create_read_only_tools("/path/to/project")     # read / grep / find / ls
 agent = Agent(initial_state={"model": model, "tools": tools}, stream_fn=langchain_stream)
 ```
 
@@ -169,7 +170,7 @@ agent = Agent(initial_state={"model": model, "tools": tools}, stream_fn=langchai
 | `read` | both | Text (2000-line / 50KB truncation, `offset`/`limit` paging) and images (magic-number sniffing → image blocks) |
 | `edit` | coding | Exact-text replacement with unique-match guarantee, fuzzy fallback (smart quotes/dashes/trailing whitespace), CRLF/BOM round-trip, unified-diff `details` |
 | `write` | coding | Create/overwrite with automatic parent dirs; per-file mutation queue serializes concurrent writes |
-| `bash` | coding | Not implemented yet (P6 batch 4) |
+| `bash` | coding | Real shell (`bash -c`; Git Bash on Windows, `shell_path` override), merged stdout+stderr, tail truncation with full output spilled to a temp file (`details.fullOutputPath`), timeout/abort kill the whole process tree, 100ms-throttled streaming updates |
 | `grep` | read-only | ripgrep-first (`--json` streaming, kills the process at the match limit); pure-Python fallback when `rg` is missing |
 | `find` | read-only | Pure-Python glob walk; basename patterns vs any-depth path patterns (`src/**/*.py`) |
 | `ls` | read-only | Case-insensitive sort, `/` dir suffix, dotfiles, entry limit |
@@ -254,7 +255,7 @@ End events carry the aggregate (`content` full text / complete `tool_call` block
 ## Test
 
 ```bash
-uv run --extra dev --extra harness python -m pytest  # 236 tests, no API keys needed
+uv run --extra dev --extra harness python -m pytest  # 273 tests, no API keys needed
 ruff check . && ruff format --check .
 ```
 
@@ -291,7 +292,7 @@ python scripts/smoke_real_api.py
 - **Phase 2 (production enhancements)** — done: `transform_messages`, usage/cost, thinking
 - **Phase 2.5 (core hardening)** — done: retries, runaway protection, observability, granular events, guardrail hooks, `ContextBudget`, structured output, tool-result images
 - **Phase 3 (AgentHarness)** — done: H1 session tree, H2 runtime, H3 compaction/tree navigation, H4 skills/templates/system prompt/LocalExecutionEnv ([design doc](docs/superpowers/specs/2026-07-03-phase3-agent-harness-design.md))
-- **P6 (tool ecosystem)** — in progress: 6 of 7 built-in tools, group factories, and the LangChain `BaseTool` adapter shipped; `bash` next ([design doc](docs/superpowers/specs/2026-07-03-p6-tool-ecosystem-design.md))
+- **P6 (tool ecosystem)** — done: all 7 built-in tools (read/bash/edit/write/grep/find/ls), group factories, and the LangChain `BaseTool` adapter ([design doc](docs/superpowers/specs/2026-07-03-p6-tool-ecosystem-design.md))
 
 ## License
 
