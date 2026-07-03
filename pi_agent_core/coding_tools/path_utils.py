@@ -5,6 +5,24 @@ from __future__ import annotations
 import os
 import re
 
+# Directories pruned by the pure-Python walkers (find, grep fallback). This is
+# the declared divergence from pi: a fixed ignore list instead of .gitignore.
+DEFAULT_IGNORE_DIRS = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        "node_modules",
+        "__pycache__",
+        ".venv",
+        "venv",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".tox",
+    }
+)
+
 
 def resolve_to_cwd(path: str, cwd: str) -> str:
     """Resolve *path* against the tool's bound *cwd*.
@@ -48,6 +66,26 @@ def glob_to_regex(pattern: str) -> re.Pattern[str]:
             parts.append(re.escape(ch))
             i += 1
     return re.compile("".join(parts))
+
+
+def compile_glob(pattern: str) -> tuple[re.Pattern[str], bool]:
+    """Compile a find/grep glob following pi's fd invocation semantics.
+
+    Returns ``(regex, matches_path)``. A pattern without ``/`` matches the
+    basename only; a pattern with ``/`` matches the relative POSIX path and is
+    auto-prefixed with ``**/`` so it hits at any depth — unless it is anchored
+    (leading ``/``, ``**/`` prefix, or exactly ``**``). A leading ``/`` anchors
+    at the search root (pi's fd anchors at the filesystem root; the search
+    root is the pure-Python equivalent). Match with ``regex.fullmatch``.
+    """
+    if "/" not in pattern:
+        return glob_to_regex(pattern), False
+    effective = pattern
+    if effective.startswith("/"):
+        effective = effective[1:]
+    elif not effective.startswith("**/") and effective != "**":
+        effective = "**/" + effective
+    return glob_to_regex(effective), True
 
 
 def detect_image_mime(buffer: bytes) -> str | None:
