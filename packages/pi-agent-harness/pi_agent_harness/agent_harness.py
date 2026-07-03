@@ -8,29 +8,6 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from pi_agent_core.agent_loop import run_agent_loop
-from pi_agent_core.harness.messages import harness_convert_to_llm
-from pi_agent_core.harness.session.session import Session
-from pi_agent_core.harness.types import (
-    AgentHarnessError,
-    AgentHarnessEvent,
-    AgentHarnessResources,
-    AgentHarnessStreamOptions,
-    AgentHarnessStreamOptionsPatch,
-    BeforeAgentStartEvent,
-    BeforeProviderPayloadEvent,
-    BeforeProviderRequestEvent,
-    ContextEvent,
-    ModelUpdateEvent,
-    QueueUpdateEvent,
-    ResourcesUpdateEvent,
-    SavePointEvent,
-    SettledEvent,
-    ThinkingLevelUpdateEvent,
-    ToolCallEvent,
-    ToolResultEvent,
-    ToolsUpdateEvent,
-    normalize_harness_error,
-)
 from pi_agent_core.messages import AssistantMessage, ImageContent, Usage, UserMessage
 from pi_agent_core.types import (
     AfterToolCallContext,
@@ -51,6 +28,29 @@ from pi_agent_core.types import (
     StreamOptions,
     ThinkingLevel,
     TurnEndEvent,
+)
+from pi_agent_harness.messages import harness_convert_to_llm
+from pi_agent_harness.session.session import Session
+from pi_agent_harness.types import (
+    AgentHarnessError,
+    AgentHarnessEvent,
+    AgentHarnessResources,
+    AgentHarnessStreamOptions,
+    AgentHarnessStreamOptionsPatch,
+    BeforeAgentStartEvent,
+    BeforeProviderPayloadEvent,
+    BeforeProviderRequestEvent,
+    ContextEvent,
+    ModelUpdateEvent,
+    QueueUpdateEvent,
+    ResourcesUpdateEvent,
+    SavePointEvent,
+    SettledEvent,
+    ThinkingLevelUpdateEvent,
+    ToolCallEvent,
+    ToolResultEvent,
+    ToolsUpdateEvent,
+    normalize_harness_error,
 )
 
 
@@ -478,7 +478,7 @@ class AgentHarness:
             return payload
 
         async def on_response(message: AssistantMessage):
-            from pi_agent_core.harness.types import AfterProviderResponseEvent
+            from pi_agent_harness.types import AfterProviderResponseEvent
 
             await self._emit_any(AfterProviderResponseEvent(message=message))
 
@@ -681,7 +681,7 @@ class AgentHarness:
         self._run_abort_controller and self._run_abort_controller.abort()
         await self._emit_queue_update()
         await self.wait_for_idle()
-        from pi_agent_core.harness.types import AbortEvent
+        from pi_agent_harness.types import AbortEvent
 
         await self._emit_any(
             AbortEvent(clearedSteer=cleared_steer, clearedFollowUp=cleared_follow_up)

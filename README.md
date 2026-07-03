@@ -6,6 +6,11 @@ Python port of [pi-agent-core](https://github.com/earendil-works/pi/tree/main/pa
 
 The loop semantics, event protocol, and tool execution are faithful ports of pi; LangChain is only a `StreamFn` boundary adapter — never a replacement for the agent loop.
 
+This repository is a monorepo with two Python distributions:
+
+- `pi-agent-core` / `pi_agent_core`: lightweight core loop, messages, tools, adapters.
+- `pi-agent-harness` / `pi_agent_harness`: Phase 3 harness runtime, sessions, queues, hooks, and future compaction/skills.
+
 ## Features
 
 **Core runtime** (Phase 1)
@@ -33,6 +38,7 @@ The loop semantics, event protocol, and tool execution are faithful ports of pi;
 
 ```bash
 pip install -e ".[dev]"
+pip install -e "./packages/pi-agent-harness"
 # Optional providers:
 pip install -e ".[openai]"      # ChatOpenAI
 pip install -e ".[anthropic]"   # ChatAnthropic
@@ -156,7 +162,7 @@ End events carry the aggregate (`content` full text / complete `tool_call` block
 ## Test
 
 ```bash
-pytest                 # 96 tests, no API keys needed
+uv run --extra dev --extra harness python -m pytest  # 96 tests, no API keys needed
 ruff check . && ruff format --check .
 ```
 
@@ -179,6 +185,7 @@ python scripts/smoke_real_api.py
 | pi (TypeScript) | pi-python |
 |-----------------|-----------|
 | `@earendil-works/pi-agent-core` | `pi_agent_core` |
+| `packages/agent/src/harness` | `pi_agent_harness` |
 | `@earendil-works/pi-ai` `streamSimple` | `langchain_stream` |
 | `AgentMessage` | `UserMessage` / `AssistantMessage` / `ToolResultMessage` + custom |
 | `Model.baseUrl` | `Model.base_url` |

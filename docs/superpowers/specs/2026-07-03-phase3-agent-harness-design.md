@@ -74,23 +74,23 @@ on(type, handler)      ◄──   带返回值 hook（11 种）
 
 | Python 模块 | pi (TS) | 批次 |
 |---|---|---|
-| `pi_agent_core/harness/__init__.py` | `harness/index` 导出面 | H1–H4 递增 |
-| `pi_agent_core/harness/types.py` | `harness/types.ts` | H1 |
-| `pi_agent_core/harness/session/uuid7.py` | `session/uuid.ts` | H1 |
-| `pi_agent_core/harness/session/session.py` | `session/session.ts`（含 `build_session_context`） | H1 |
-| `pi_agent_core/harness/session/jsonl_storage.py` | `session/jsonl-storage.ts` | H1 |
-| `pi_agent_core/harness/session/memory_storage.py` | `session/memory-storage.ts` | H1 |
-| `pi_agent_core/harness/session/jsonl_repo.py` | `session/jsonl-repo.ts` + `repo-utils.ts` | H1 |
-| `pi_agent_core/harness/session/memory_repo.py` | `session/memory-repo.ts` | H1 |
-| `pi_agent_core/harness/messages.py` | `harness/messages.ts` | H2 |
-| `pi_agent_core/harness/agent_harness.py` | `harness/agent-harness.ts` | H2 |
-| `pi_agent_core/harness/compaction/utils.py` | `compaction/utils.ts` | H3 |
-| `pi_agent_core/harness/compaction/compaction.py` | `compaction/compaction.ts` | H3 |
-| `pi_agent_core/harness/compaction/branch_summarization.py` | `compaction/branch-summarization.ts` | H3 |
-| `pi_agent_core/harness/skills.py` | `harness/skills.ts` | H4 |
-| `pi_agent_core/harness/prompt_templates.py` | `harness/prompt-templates.ts` | H4 |
-| `pi_agent_core/harness/system_prompt.py` | `harness/system-prompt.ts` | H4 |
-| `pi_agent_core/harness/env.py` | `harness/types.ts` 的 FileSystem/Shell + `env/` | H4（协议定义在 H1） |
+| `packages/pi-agent-harness/pi_agent_harness/__init__.py` | `harness/index` 导出面 | H1–H4 递增 |
+| `packages/pi-agent-harness/pi_agent_harness/types.py` | `harness/types.ts` | H1/H2 |
+| `packages/pi-agent-harness/pi_agent_harness/session/uuid7.py` | `session/uuid.ts` | H1 |
+| `packages/pi-agent-harness/pi_agent_harness/session/session.py` | `session/session.ts`（含 `build_session_context`） | H1 |
+| `packages/pi-agent-harness/pi_agent_harness/session/jsonl_storage.py` | `session/jsonl-storage.ts` | H1 |
+| `packages/pi-agent-harness/pi_agent_harness/session/memory_storage.py` | `session/memory-storage.ts` | H1 |
+| `packages/pi-agent-harness/pi_agent_harness/session/jsonl_repo.py` | `session/jsonl-repo.ts` + `repo-utils.ts` | H1 |
+| `packages/pi-agent-harness/pi_agent_harness/session/memory_repo.py` | `session/memory-repo.ts` | H1 |
+| `packages/pi-agent-harness/pi_agent_harness/messages.py` | `harness/messages.ts` | H2 |
+| `packages/pi-agent-harness/pi_agent_harness/agent_harness.py` | `harness/agent-harness.ts` | H2 |
+| `packages/pi-agent-harness/pi_agent_harness/compaction/utils.py` | `compaction/utils.ts` | H3 |
+| `packages/pi-agent-harness/pi_agent_harness/compaction/compaction.py` | `compaction/compaction.ts` | H3 |
+| `packages/pi-agent-harness/pi_agent_harness/compaction/branch_summarization.py` | `compaction/branch-summarization.ts` | H3 |
+| `packages/pi-agent-harness/pi_agent_harness/skills.py` | `harness/skills.ts` | H4 |
+| `packages/pi-agent-harness/pi_agent_harness/prompt_templates.py` | `harness/prompt-templates.ts` | H4 |
+| `packages/pi-agent-harness/pi_agent_harness/system_prompt.py` | `harness/system-prompt.ts` | H4 |
+| `packages/pi-agent-harness/pi_agent_harness/env.py` | `harness/types.ts` 的 FileSystem/Shell + `env/` | H4（协议定义在 H1） |
 
 ---
 
@@ -334,7 +334,7 @@ idle 检查 → `phase="compaction"` → `prepare_compaction(branch_entries, set
 
 ### 6.4 依赖
 
-`pyproject.toml` 新增可选依赖组 `harness`：`PyYAML>=6`、`pathspec>=0.11`（并入 `all`）。core 依赖不变——不装 `harness` 组时 `pi_agent_core.harness.skills` import 报友好错误（延迟 import + 提示信息）。
+H1/H2 完成后已将 harness 拆为同仓库独立发行包 `pi-agent-harness`（源码 `packages/pi-agent-harness/pi_agent_harness`），依赖 `pi-agent-core`。H4 的 `PyYAML>=6`、`pathspec>=0.11` 等依赖应加入 `pi-agent-harness`，core 依赖保持不变；`pi_agent_core.harness` 只保留兼容 re-export shim。
 
 ---
 
@@ -421,7 +421,7 @@ class ExecutionEnv(FileSystem, Shell, Protocol): ...
 | **H1** | `harness/types.py`（错误层级 + entry 模型 + 协议）、`uuid7`、Session/build_session_context、Jsonl/Memory Storage+Repo、`JsonlStorageFs` 小协议 | 无 | ✅ 已实施（2026-07-03）：JSONL 往返 + 与手工构造的 pi v3 样例文件互读；树/分支/回放单测 |
 | **H2** | harness 消息 + `harness_convert_to_llm`、AgentHarness 主类（phase/队列/写缓冲/事件/hook/run 失败合成）、与 core loop 接线 | H1 | ✅ 已实施（2026-07-03）：mock stream 端到端 prompt；持久化时序（4.4 三条不变量）、hook/队列、turn 边界 setter、失败合成单测 |
 | **H3** | compaction utils/估算/cut point/摘要、`complete_simple`、compact()、branch summarization、navigate_tree、auto_compact | H2 | cut point 与 split-turn 单测（合成 entries）；摘要走 mock stream；SiliconFlow 实测一次真实压缩 |
-| **H4** | skills、prompt templates、system-prompt 注入、ExecutionEnv Local 完整实现、`harness` 可选依赖组 | H1（env 协议） | skills 加载诊断/ignore/校验单测；模板参数替换单测；示例 `examples/harness_agent.py` |
+| **H4** | skills、prompt templates、system-prompt 注入、ExecutionEnv Local 完整实现、`pi-agent-harness` 依赖补齐 | H1（env 协议） | skills 加载诊断/ignore/校验单测；模板参数替换单测；示例 `examples/harness_agent.py` |
 
 每批次完成：ruff + 全量 pytest + 提交推送 + 审计报告勾选。
 

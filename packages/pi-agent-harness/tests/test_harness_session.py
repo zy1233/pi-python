@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from pi_agent_core.harness import (
+from pi_agent_core.messages import AssistantMessage
+from pi_agent_harness import (
     JsonlSessionRepo,
     JsonlSessionStorage,
     MemorySessionRepo,
@@ -18,8 +19,7 @@ from pi_agent_core.harness import (
     UserMessage,
     build_session_context,
 )
-from pi_agent_core.harness.session.uuid7 import uuid7
-from pi_agent_core.messages import AssistantMessage
+from pi_agent_harness.session.uuid7 import uuid7
 
 FIXTURE = Path(__file__).parent / "fixtures" / "pi-v3-session.jsonl"
 

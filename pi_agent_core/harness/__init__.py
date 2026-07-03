@@ -1,49 +1,51 @@
-"""Phase 3 AgentHarness package.
+"""Compatibility shim for the split ``pi-agent-harness`` package."""
 
-H1 exports the session tree / JSONL storage layer. H2 adds the AgentHarness
-runtime. Compaction, skills, and ExecutionEnv implementations land later.
-"""
-
-from pi_agent_core.harness.agent_harness import AgentHarness
-from pi_agent_core.harness.session import (
-    JsonlSessionRepo,
-    JsonlSessionStorage,
-    JsonlStorageFs,
-    MemorySessionRepo,
-    MemorySessionStorage,
-    Session,
-    build_session_context,
-    load_jsonl_session_metadata,
-    uuid7,
-)
-from pi_agent_core.harness.types import (
-    ActiveToolsChangeEntry,
-    AgentHarnessError,
-    AgentHarnessResources,
-    AgentHarnessStreamOptions,
-    BranchSummaryEntry,
-    BranchSummaryError,
-    CompactionEntry,
-    CompactionError,
-    CustomEntry,
-    CustomMessageEntry,
-    ExecutionError,
-    FileError,
-    FileInfo,
-    JsonlSessionMetadata,
-    LabelEntry,
-    LeafEntry,
-    MessageEntry,
-    ModelChangeEntry,
-    SessionContext,
-    SessionError,
-    SessionInfoEntry,
-    SessionMetadata,
-    SessionStorage,
-    SessionTreeEntry,
-    ThinkingLevelChangeEntry,
-)
-from pi_agent_core.messages import AssistantMessage, ToolResultMessage, UserMessage
+try:
+    from pi_agent_harness import (
+        ActiveToolsChangeEntry,
+        AgentHarness,
+        AgentHarnessError,
+        AgentHarnessResources,
+        AgentHarnessStreamOptions,
+        AssistantMessage,
+        BranchSummaryEntry,
+        BranchSummaryError,
+        CompactionEntry,
+        CompactionError,
+        CustomEntry,
+        CustomMessageEntry,
+        ExecutionError,
+        FileError,
+        FileInfo,
+        JsonlSessionMetadata,
+        JsonlSessionRepo,
+        JsonlSessionStorage,
+        JsonlStorageFs,
+        LabelEntry,
+        LeafEntry,
+        MemorySessionRepo,
+        MemorySessionStorage,
+        MessageEntry,
+        ModelChangeEntry,
+        Session,
+        SessionContext,
+        SessionError,
+        SessionInfoEntry,
+        SessionMetadata,
+        SessionStorage,
+        SessionTreeEntry,
+        ThinkingLevelChangeEntry,
+        ToolResultMessage,
+        UserMessage,
+        build_session_context,
+        load_jsonl_session_metadata,
+        uuid7,
+    )
+except ImportError as exc:  # pragma: no cover - only hit when harness is not installed.
+    raise ImportError(
+        "pi_agent_core.harness has moved to the optional pi-agent-harness package. "
+        "Install pi-agent-harness and import from pi_agent_harness."
+    ) from exc
 
 __all__ = [
     "ActiveToolsChangeEntry",

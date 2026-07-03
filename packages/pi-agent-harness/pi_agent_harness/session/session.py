@@ -7,13 +7,13 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from pi_agent_core.harness.messages import (
+from pi_agent_core.messages import AssistantMessage, ToolResultMessage, UserMessage
+from pi_agent_core.types import AgentMessage
+from pi_agent_harness.messages import (
     BranchSummaryMessage,
     CompactionSummaryMessage,
     CustomMessage,
 )
-from pi_agent_core.messages import AssistantMessage, ToolResultMessage, UserMessage
-from pi_agent_core.types import AgentMessage
 
 from ..types import (
     ActiveToolsChangeEntry,

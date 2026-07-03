@@ -6,18 +6,18 @@ import pytest
 from pydantic import BaseModel
 
 from pi_agent_core.event_stream import AssistantMessageEventStream
-from pi_agent_core.harness import AgentHarness, MemorySessionStorage, Session
-from pi_agent_core.harness.messages import (
+from pi_agent_core.messages import UserMessage
+from pi_agent_core.tests.mock_stream import _base_partial, mock_text_stream
+from pi_agent_core.tools import SimpleTool
+from pi_agent_core.types import AgentToolResult, DoneEvent, Model, StartEvent, StreamOptions
+from pi_agent_harness import AgentHarness, MemorySessionStorage, Session
+from pi_agent_harness.messages import (
     BashExecutionMessage,
     BranchSummaryMessage,
     CompactionSummaryMessage,
     CustomMessage,
     harness_convert_to_llm,
 )
-from pi_agent_core.messages import UserMessage
-from pi_agent_core.tests.mock_stream import _base_partial, mock_text_stream
-from pi_agent_core.tools import SimpleTool
-from pi_agent_core.types import AgentToolResult, DoneEvent, Model, StartEvent, StreamOptions
 
 
 def _model(model_id: str = "m1") -> Model:

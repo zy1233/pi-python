@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pi-agent-harness"
+version = "0.1.0"
+description = "AgentHarness runtime, session storage, and orchestration layer for pi-agent-core"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    "pi-agent-core==0.1.0",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.11"]
+
+[tool.uv.sources]
+pi-agent-core = { workspace = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["pi_agent_harness"]
