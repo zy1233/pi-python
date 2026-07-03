@@ -36,6 +36,11 @@ This repository is a monorepo with two Python distributions:
 - Tool-result images: Anthropic native blocks, user-message fallback elsewhere, stripped when `supports_images=False`
 - OpenAI-compatible gateways via `Model.base_url` (SiliconFlow, vLLM, DeepSeek, ...)
 
+**Tool ecosystem** (P6, in progress)
+
+- Built-in coding tools (`pi_agent_core.coding_tools`): read / edit / write / grep / find / ls with pi-faithful truncation notices and `details` payloads (`bash` pending)
+- LangChain `BaseTool` → `AgentTool` adapter (`from_langchain_tool`) — MCP tools via `langchain-mcp-adapters` work out of the box
+
 ## Install
 
 ```bash
@@ -146,6 +151,61 @@ agent = Agent(
 
 Runnable version: [`examples/production_agent.py`](examples/production_agent.py).
 
+## Built-in coding tools
+
+A port of pi's coding-agent tool suite lives in `pi_agent_core.coding_tools`, decoupled
+from the core runtime (tools consume the loop; they are not part of it). Factories bind
+each tool to a working directory:
+
+```python
+from pi_agent_core.coding_tools import create_read_only_tools
+
+tools = create_read_only_tools("/path/to/project")  # read / grep / find / ls
+agent = Agent(initial_state={"model": model, "tools": tools}, stream_fn=langchain_stream)
+```
+
+| Tool | Group | Behavior |
+|------|-------|----------|
+| `read` | both | Text (2000-line / 50KB truncation, `offset`/`limit` paging) and images (magic-number sniffing → image blocks) |
+| `edit` | coding | Exact-text replacement with unique-match guarantee, fuzzy fallback (smart quotes/dashes/trailing whitespace), CRLF/BOM round-trip, unified-diff `details` |
+| `write` | coding | Create/overwrite with automatic parent dirs; per-file mutation queue serializes concurrent writes |
+| `bash` | coding | Not implemented yet (P6 batch 4) |
+| `grep` | read-only | ripgrep-first (`--json` streaming, kills the process at the match limit); pure-Python fallback when `rg` is missing |
+| `find` | read-only | Pure-Python glob walk; basename patterns vs any-depth path patterns (`src/**/*.py`) |
+| `ls` | read-only | Case-insensitive sort, `/` dir suffix, dotfiles, entry limit |
+
+Groups mirror pi: `create_coding_tools(cwd)` (read/bash/edit/write — full file operations
+plus command execution) and `create_read_only_tools(cwd)` (read/grep/find/ls — inspection
+with a no-modification guarantee). Per-tool `create_*_tool(cwd)` factories and
+`create_tool(name, cwd)` / `create_all_tools(cwd)` cover custom mixes. Truncation limits
+are pi's (2000 lines / 50KB, grep lines capped at 500 chars) with actionable notices
+("Use offset=N to continue") so the model can page through anything that was cut.
+
+### Using LangChain / MCP tools
+
+Any LangChain `BaseTool` — including MCP tools produced by `langchain-mcp-adapters` —
+plugs into the same loop through the adapter:
+
+```python
+from langchain_core.tools import tool
+from pi_agent_core.adapters import from_langchain_tool, from_langchain_tools
+
+@tool
+def get_weather(city: str) -> str:
+    """Get the current weather for a city."""
+    return f"Sunny in {city}"
+
+agent = Agent(
+    initial_state={"model": model, "tools": [from_langchain_tool(get_weather)]},
+    stream_fn=langchain_stream,
+)
+```
+
+Parameter schemas come from `tool_call_schema` (LangChain-injected arguments are
+excluded); results normalize to pi content blocks (plain strings, content-block lists,
+base64 images); `content_and_artifact` artifacts land in `details["artifact"]`; tool
+exceptions bubble into `is_error=True` tool results that the model can react to.
+
 ## Events
 
 Agent events (all carry `run_id` and a 1-based `turn_id`):
@@ -164,7 +224,7 @@ End events carry the aggregate (`content` full text / complete `tool_call` block
 ## Test
 
 ```bash
-uv run --extra dev --extra harness python -m pytest  # 107 tests, no API keys needed
+uv run --extra dev --extra harness python -m pytest  # 236 tests, no API keys needed
 ruff check . && ruff format --check .
 ```
 
@@ -201,6 +261,7 @@ python scripts/smoke_real_api.py
 - **Phase 2 (production enhancements)** — done: `transform_messages`, usage/cost, thinking
 - **Phase 2.5 (core hardening)** — done: retries, runaway protection, observability, granular events, guardrail hooks, `ContextBudget`, structured output, tool-result images
 - **Phase 3 (AgentHarness)** — done: H1 session tree, H2 runtime, H3 compaction/tree navigation, H4 skills/templates/system prompt/LocalExecutionEnv ([design doc](docs/superpowers/specs/2026-07-03-phase3-agent-harness-design.md))
+- **P6 (tool ecosystem)** — in progress: 6 of 7 built-in tools, group factories, and the LangChain `BaseTool` adapter shipped; `bash` next ([design doc](docs/superpowers/specs/2026-07-03-p6-tool-ecosystem-design.md))
 
 ## License
 
