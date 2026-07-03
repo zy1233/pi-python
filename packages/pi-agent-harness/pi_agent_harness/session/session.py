@@ -302,7 +302,7 @@ class Session:
                 id=await self._storage.create_entry_id(),
                 parentId=entry_id,
                 timestamp=iso_now(),
-                fromId=entry_id or "root",
+                fromId=summary.get("fromId") or entry_id or "root",
                 summary=str(summary.get("summary", "")),
                 details=summary.get("details"),
                 fromHook=summary.get("fromHook"),

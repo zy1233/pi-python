@@ -1,7 +1,7 @@
 # Phase 3 AgentHarness — 设计方案
 
 > Scope: Session 树（JSONL v3）+ AgentHarness 主类 + Compaction + Skills / Prompt Templates + ExecutionEnv
-> 基于 Phase 1（core loop）+ Phase 2（usage/thinking/transform）+ Phase 2.5（重试/钩子/预算信号/结构化输出，96 tests）
+> 基于 Phase 1（core loop）+ Phase 2（usage/thinking/transform）+ Phase 2.5（重试/钩子/预算信号/结构化输出，101 tests）
 > 上游参照：[earendil-works/pi](https://github.com/earendil-works/pi) `packages/agent/src/harness/`（2026-07 main 分支，已逐文件核读）
 
 ---
@@ -420,7 +420,7 @@ class ExecutionEnv(FileSystem, Shell, Protocol): ...
 |---|---|---|---|
 | **H1** | `harness/types.py`（错误层级 + entry 模型 + 协议）、`uuid7`、Session/build_session_context、Jsonl/Memory Storage+Repo、`JsonlStorageFs` 小协议 | 无 | ✅ 已实施（2026-07-03）：JSONL 往返 + 与手工构造的 pi v3 样例文件互读；树/分支/回放单测 |
 | **H2** | harness 消息 + `harness_convert_to_llm`、AgentHarness 主类（phase/队列/写缓冲/事件/hook/run 失败合成）、与 core loop 接线 | H1 | ✅ 已实施（2026-07-03）：mock stream 端到端 prompt；持久化时序（4.4 三条不变量）、hook/队列、turn 边界 setter、失败合成单测 |
-| **H3** | compaction utils/估算/cut point/摘要、`complete_simple`、compact()、branch summarization、navigate_tree、auto_compact | H2 | cut point 与 split-turn 单测（合成 entries）；摘要走 mock stream；SiliconFlow 实测一次真实压缩 |
+| **H3** | compaction utils/估算/cut point/摘要、`complete_simple`、compact()、branch summarization、navigate_tree、auto_compact | H2 | ✅ 已实施（2026-07-03）：cut point / toolResult 非切点 / LLM 摘要 / hook 自供摘要 / branch summary + navigate_tree / auto_compact 单测 |
 | **H4** | skills、prompt templates、system-prompt 注入、ExecutionEnv Local 完整实现、`pi-agent-harness` 依赖补齐 | H1（env 协议） | skills 加载诊断/ignore/校验单测；模板参数替换单测；示例 `examples/harness_agent.py` |
 
 每批次完成：ruff + 全量 pytest + 提交推送 + 审计报告勾选。

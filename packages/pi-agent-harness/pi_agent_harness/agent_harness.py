@@ -29,6 +29,16 @@ from pi_agent_core.types import (
     ThinkingLevel,
     TurnEndEvent,
 )
+from pi_agent_harness.compaction import (
+    CompactionSettings,
+    collect_entries_for_branch_summary,
+    compact_preparation,
+    create_branch_summary,
+    estimate_context_tokens,
+    prepare_branch_entries,
+    prepare_compaction,
+    should_compact,
+)
 from pi_agent_harness.messages import harness_convert_to_llm
 from pi_agent_harness.session.session import Session
 from pi_agent_harness.types import (
@@ -40,11 +50,18 @@ from pi_agent_harness.types import (
     BeforeAgentStartEvent,
     BeforeProviderPayloadEvent,
     BeforeProviderRequestEvent,
+    CompactionResult,
     ContextEvent,
+    MessageEntry,
     ModelUpdateEvent,
+    NavigateTreeResult,
     QueueUpdateEvent,
     ResourcesUpdateEvent,
     SavePointEvent,
+    SessionBeforeCompactEvent,
+    SessionBeforeTreeEvent,
+    SessionCompactEvent,
+    SessionTreeEvent,
     SettledEvent,
     ThinkingLevelUpdateEvent,
     ToolCallEvent,
@@ -77,6 +94,27 @@ def _failure_message(model: Model, error: Exception, aborted: bool) -> Assistant
         stopReason="aborted" if aborted else "error",
         errorMessage=str(error),
     )
+
+
+def _get_result_field(result: Any, name: str, default: Any = None) -> Any:
+    if result is None:
+        return default
+    if isinstance(result, dict):
+        return result.get(name, default)
+    return getattr(result, name, default)
+
+
+def _editor_text_for_target(entry: Any) -> str | None:
+    if not isinstance(entry, MessageEntry):
+        return None
+    if entry.message.get("role") != "user":
+        return None
+    content = entry.message.get("content", "")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(block.get("text", "") for block in content if block.get("type") == "text")
+    return None
 
 
 class _AbortSignal:
@@ -133,6 +171,7 @@ class AgentHarness:
         active_tool_names: list[str] | None = None,
         steering_mode: QueueMode = "one-at-a-time",
         follow_up_mode: QueueMode = "one-at-a-time",
+        compaction: CompactionSettings | dict[str, Any] | None = None,
         max_turns: int | None = None,
         tool_timeout: float | None = None,
     ) -> None:
@@ -155,6 +194,11 @@ class AgentHarness:
         )
         self.max_turns = max_turns
         self.tool_timeout = tool_timeout
+        self.compaction = (
+            compaction
+            if isinstance(compaction, CompactionSettings)
+            else CompactionSettings.model_validate(compaction or {})
+        )
         self.phase: Literal["idle", "turn", "compaction", "branch_summary", "retry"] = "idle"
         self._tools = {tool.name: tool for tool in tools or []}
         self._validate_unique(list(self._tools), "Duplicate tool name(s)")
@@ -311,6 +355,7 @@ class AgentHarness:
             if event_error:
                 raise event_error
             await self._emit_any(SavePointEvent(hadPendingMutations=had_pending), signal)
+            await self._maybe_auto_compact(signal)
             return
         if event.type == "agent_end":
             await self._flush_pending_session_writes()
@@ -688,11 +733,154 @@ class AgentHarness:
         )
         return {"cleared_steer": cleared_steer, "cleared_follow_up": cleared_follow_up}
 
-    async def compact(self, custom_instructions: str | None = None) -> Any:
-        raise AgentHarnessError("invalid_state", "compact() is implemented in Phase 3 H3")
+    async def _maybe_auto_compact(self, signal: Any | None = None) -> None:
+        if not self.compaction.auto_compact or self.phase != "turn":
+            return
+        try:
+            context = await self.session.build_context()
+            tokens = estimate_context_tokens(context.messages)
+            if should_compact(tokens, self.model.context_window, self.compaction):
+                previous_phase = self.phase
+                self.phase = "compaction"
+                try:
+                    await self._compact_internal(None, signal)
+                finally:
+                    self.phase = previous_phase
+        except Exception:
+            # Auto-compaction is best-effort; manual compact() still surfaces errors.
+            return
+
+    async def _compact_internal(
+        self,
+        custom_instructions: str | None = None,
+        signal: Any | None = None,
+    ) -> CompactionResult:
+        preparation = prepare_compaction(await self.session.get_branch(), self.compaction)
+        if preparation is None:
+            raise AgentHarnessError("compaction", "Nothing to compact")
+        before_event = SessionBeforeCompactEvent(
+            preparation=preparation,
+            customInstructions=custom_instructions,
+        )
+        hook_result = await self._emit_hook(before_event)
+        if _get_result_field(hook_result, "cancel"):
+            raise AgentHarnessError("compaction", "Compaction cancelled")
+        supplied = _get_result_field(hook_result, "compaction")
+        if supplied is not None:
+            result = CompactionResult.model_validate(supplied).model_copy(update={"fromHook": True})
+        else:
+            result = await compact_preparation(
+                preparation,
+                self.stream_fn,
+                self.model,
+                custom_instructions,
+                StreamOptions(signal=signal),
+            )
+        await self.session.append_compaction(
+            result.summary,
+            result.firstKeptEntryId,
+            result.tokensBefore,
+            result.details,
+            result.fromHook,
+        )
+        await self._emit_any(SessionCompactEvent(result=result), signal)
+        return result
+
+    async def compact(self, custom_instructions: str | None = None) -> CompactionResult:
+        if self.phase != "idle":
+            raise AgentHarnessError("busy", "AgentHarness is busy")
+        self.phase = "compaction"
+        try:
+            return await self._compact_internal(custom_instructions)
+        except Exception as e:
+            raise normalize_harness_error(e, "compaction") from e
+        finally:
+            self.phase = "idle"
 
     async def navigate_tree(self, target_id: str, options: dict[str, Any] | None = None) -> Any:
-        raise AgentHarnessError("invalid_state", "navigate_tree() is implemented in Phase 3 H3")
+        if self.phase != "idle":
+            raise AgentHarnessError("busy", "AgentHarness is busy")
+        self.phase = "branch_summary"
+        options = options or {}
+        try:
+            return await self._navigate_tree_internal(
+                target_id,
+                summarize=bool(options.get("summarize")),
+                custom_instructions=options.get("custom_instructions")
+                or options.get("customInstructions"),
+                label=options.get("label"),
+            )
+        except Exception as e:
+            raise normalize_harness_error(e, "branch_summary") from e
+        finally:
+            self.phase = "idle"
+
+    async def _navigate_tree_internal(
+        self,
+        target_id: str,
+        summarize: bool = False,
+        custom_instructions: str | None = None,
+        label: str | None = None,
+    ) -> NavigateTreeResult:
+        old_leaf_id = await self.session.get_leaf_id()
+        target = await self.session.get_entry(target_id)
+        if target is None:
+            raise AgentHarnessError("invalid_argument", f"Entry {target_id} not found")
+        before_event = SessionBeforeTreeEvent(
+            targetId=target_id,
+            oldLeafId=old_leaf_id,
+            summarize=summarize,
+            customInstructions=custom_instructions,
+            label=label,
+        )
+        hook_result = await self._emit_hook(before_event)
+        if _get_result_field(hook_result, "cancel"):
+            raise AgentHarnessError("branch_summary", "Tree navigation cancelled")
+        label = _get_result_field(hook_result, "label", label)
+        custom_instructions = _get_result_field(
+            hook_result, "custom_instructions", custom_instructions
+        )
+        custom_instructions = _get_result_field(
+            hook_result, "customInstructions", custom_instructions
+        )
+        branch_summary = _get_result_field(hook_result, "summary")
+        summary_text: str | None = None
+        if summarize and branch_summary is None:
+            abandoned = collect_entries_for_branch_summary(
+                await self.session.get_entries(), old_leaf_id, target_id
+            )
+            budget = (self.model.context_window or 32_000) - self.compaction.reserve_tokens
+            branch_summary = await create_branch_summary(
+                prepare_branch_entries(abandoned, max(1, budget)),
+                self.stream_fn,
+                self.model,
+                custom_instructions,
+            )
+        if isinstance(branch_summary, CompactionResult):
+            summary_text = branch_summary.summary
+        elif isinstance(branch_summary, dict):
+            summary_text = str(branch_summary.get("summary", ""))
+        elif isinstance(branch_summary, str):
+            summary_text = branch_summary
+        editor_text = _editor_text_for_target(target)
+        leaf_id = target.parentId if editor_text is not None else target_id
+        if label:
+            await self.session.append_label(target_id, label)
+        branch_entry_id = await self.session.move_to(
+            leaf_id,
+            {"summary": summary_text, "fromId": old_leaf_id, "fromHook": hook_result is not None}
+            if summary_text
+            else None,
+        )
+        result = NavigateTreeResult(
+            targetId=target_id,
+            leafId=leaf_id,
+            editorText=editor_text,
+            summary=summary_text,
+            branchSummaryEntryId=branch_entry_id,
+        )
+        await self._emit_any(SessionTreeEvent(result=result))
+        return result
 
     async def skill(
         self, name: str, additional_instructions: str | None = None

@@ -311,6 +311,42 @@ class AgentHarnessStreamOptionsPatch(BaseModel):
     metadata: dict[str, Any | None] | None = None
 
 
+class CompactionSettings(BaseModel):
+    enabled: bool = True
+    reserve_tokens: int = 16_384
+    keep_recent_tokens: int = 20_000
+    auto_compact: bool = False
+
+
+class CompactionPreparation(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    entries: list[SessionTreeEntry]
+    messages: list[AgentMessage]
+    keptMessages: list[AgentMessage]
+    firstKeptEntryId: str
+    tokensBefore: int
+    splitTurnSummary: str | None = None
+    previousSummary: str | None = None
+    previousDetails: Any = None
+
+
+class CompactionResult(BaseModel):
+    summary: str
+    firstKeptEntryId: str
+    tokensBefore: int
+    details: Any = None
+    fromHook: bool = False
+
+
+class NavigateTreeResult(BaseModel):
+    targetId: str | None
+    leafId: str | None
+    editorText: str | None = None
+    summary: str | None = None
+    branchSummaryEntryId: str | None = None
+
+
 class QueueUpdateEvent(BaseModel):
     type: Literal["queue_update"] = "queue_update"
     steer: list[AgentMessage]
@@ -412,6 +448,31 @@ class ResourcesUpdateEvent(BaseModel):
     previousResources: AgentHarnessResources
 
 
+class SessionBeforeCompactEvent(BaseModel):
+    type: Literal["session_before_compact"] = "session_before_compact"
+    preparation: CompactionPreparation
+    customInstructions: str | None = None
+
+
+class SessionCompactEvent(BaseModel):
+    type: Literal["session_compact"] = "session_compact"
+    result: CompactionResult
+
+
+class SessionBeforeTreeEvent(BaseModel):
+    type: Literal["session_before_tree"] = "session_before_tree"
+    targetId: str | None
+    oldLeafId: str | None
+    summarize: bool = False
+    customInstructions: str | None = None
+    label: str | None = None
+
+
+class SessionTreeEvent(BaseModel):
+    type: Literal["session_tree"] = "session_tree"
+    result: NavigateTreeResult
+
+
 AgentHarnessOwnEvent = (
     QueueUpdateEvent
     | SavePointEvent
@@ -428,6 +489,10 @@ AgentHarnessOwnEvent = (
     | ThinkingLevelUpdateEvent
     | ToolsUpdateEvent
     | ResourcesUpdateEvent
+    | SessionBeforeCompactEvent
+    | SessionCompactEvent
+    | SessionBeforeTreeEvent
+    | SessionTreeEvent
 )
 
 AgentHarnessEvent = AgentEvent | AgentHarnessOwnEvent

@@ -9,6 +9,7 @@ lightweight core package:
 - session tree storage and repos
 - harness-specific custom messages
 - hook, queue, and persistence orchestration
+- compaction, branch summaries, tree navigation, and optional auto compact
 
 Install it alongside core:
 
