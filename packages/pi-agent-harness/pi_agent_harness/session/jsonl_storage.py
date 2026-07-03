@@ -14,6 +14,7 @@ from ..types import (
     SessionError,
     SessionTreeEntry,
     SessionTreeEntryAdapter,
+    SessionTreeEntryBase,
 )
 from .memory_storage import _generate_entry_id, _leaf_id_after_entry, _update_label_cache
 from .session import iso_now
@@ -127,7 +128,13 @@ def _entry_to_json(entry: SessionTreeEntry) -> str:
     data["parentId"] = entry.parentId
     if isinstance(entry, LeafEntry):
         data["targetId"] = entry.targetId
-    return _json_dumps(data)
+    # Match pi's byte layout: JSON.stringify of pi's entry literals emits keys
+    # in declaration order (type, id, parentId, timestamp, ...), while the
+    # exclude_none workaround above appends parentId/targetId at the end for
+    # null values. Rebuild in field order, unknown extra fields last.
+    ordered = {name: data.pop(name) for name in type(entry).model_fields if name in data}
+    ordered.update(data)
+    return _json_dumps(ordered)
 
 
 class JsonlSessionStorage:
@@ -177,8 +184,12 @@ class JsonlSessionStorage:
             raise _invalid_entry(file_path, line_number, "has invalid targetId")
         try:
             return SessionTreeEntryAdapter.validate_python(parsed)
-        except Exception as e:
-            raise _invalid_entry(file_path, line_number, f"has invalid shape: {e}", e) from e
+        except Exception:
+            # pi only validates the base fields above and accepts any entry type,
+            # so files written by newer pi versions (or other implementations)
+            # must stay readable. Keep the raw fields on a base entry; replay
+            # ignores it and extra="allow" preserves it on write-back.
+            return SessionTreeEntryBase.model_validate(parsed)
 
     @classmethod
     async def open(

@@ -16,7 +16,9 @@ from .uuid7 import uuid7
 
 
 def _leaf_id_after_entry(entry: SessionTreeEntry) -> str | None:
-    return entry.targetId if isinstance(entry, LeafEntry) else entry.id
+    # Keyed on the type string rather than isinstance so tolerated foreign
+    # "leaf"-shaped entries behave like pi's `entry.type === "leaf"` check.
+    return getattr(entry, "targetId", None) if entry.type == "leaf" else entry.id
 
 
 def _update_label_cache(labels_by_id: dict[str, str], entry: SessionTreeEntry) -> None:

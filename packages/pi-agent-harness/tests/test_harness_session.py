@@ -134,26 +134,38 @@ async def test_session_rejects_move_to_missing_entry():
 
 
 @pytest.mark.asyncio
-async def test_memory_repo_forks_before_or_at_target():
+async def test_memory_repo_fork_matches_pi_semantics():
     repo = MemorySessionRepo()
     source = await repo.create({"id": "source"})
     first_id = await source.append_message(UserMessage(content="first", timestamp=1))
     second_id = await source.append_message(UserMessage(content="second", timestamp=2))
-
-    fork_at = await repo.fork(
-        (await source.get_metadata()), {"id": "fork-at", "entryId": second_id}
+    assistant_id = await source.append_message(
+        AssistantMessage(content=[{"type": "text", "text": "answer"}], timestamp=3)
     )
+    await source.move_to(first_id)
+    metadata = await source.get_metadata()
+
+    fork_at = await repo.fork(metadata, {"id": "fork-at", "entryId": second_id, "position": "at"})
     assert [m.content for m in (await fork_at.build_context()).messages] == [
         "first",
         "second",
     ]
 
-    fork_before = await repo.fork(
-        (await source.get_metadata()),
-        {"id": "fork-before", "entryId": second_id, "position": "before"},
-    )
-    assert [m.content for m in (await fork_before.build_context()).messages] == ["first"]
-    assert first_id != second_id
+    # Default position is "before" (edit-and-resend): path up to the parent.
+    fork_default = await repo.fork(metadata, {"id": "fork-default", "entryId": second_id})
+    assert [m.content for m in (await fork_default.build_context()).messages] == ["first"]
+
+    # "before" requires the target to be a user message.
+    with pytest.raises(SessionError) as exc:
+        await repo.fork(metadata, {"id": "fork-bad", "entryId": assistant_id})
+    assert exc.value.code == "invalid_fork_target"
+
+    # No entryId: the whole tree is copied, including the abandoned branch and
+    # the persisted leaf position.
+    fork_all = await repo.fork(metadata, {"id": "fork-all"})
+    assert len(await fork_all.get_entries()) == len(await source.get_entries())
+    assert await fork_all.get_leaf_id() == first_id
+    assert await fork_all.get_entry(assistant_id) is not None
 
 
 @pytest.mark.asyncio
@@ -166,16 +178,112 @@ async def test_jsonl_repo_create_list_open_delete_and_fork(tmp_path: Path):
     listed = await repo.list({"cwd": "/workspace"})
     assert [m.id for m in listed] == ["source"]
 
-    fork = await repo.fork(listed[0], {"id": "fork", "entryId": second_id, "cwd": "/workspace"})
+    fork = await repo.fork(
+        listed[0], {"id": "fork", "entryId": second_id, "position": "at", "cwd": "/workspace"}
+    )
     assert [m.content for m in (await fork.build_context()).messages] == ["first", "second"]
     fork_metadata = await fork.get_metadata()
     assert fork_metadata.parentSessionPath == listed[0].path
+
+    fork_before = await repo.fork(
+        listed[0], {"id": "fork-b", "entryId": second_id, "cwd": "/workspace"}
+    )
+    assert [m.content for m in (await fork_before.build_context()).messages] == ["first"]
 
     reopened = await repo.open(fork_metadata)
     assert [m.content for m in (await reopened.build_context()).messages] == ["first", "second"]
 
     await repo.delete(fork_metadata)
-    assert [m.id for m in await repo.list()] == ["source"]
+    assert sorted(m.id for m in await repo.list()) == ["fork-b", "source"]
+
+
+@pytest.mark.asyncio
+async def test_jsonl_storage_tolerates_unknown_entry_types(tmp_path: Path):
+    path = tmp_path / "session.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "session",
+                        "version": 3,
+                        "id": "sess_future",
+                        "timestamp": "2026-07-03T00:00:00.000Z",
+                        "cwd": "/workspace",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "message",
+                        "id": "00000001",
+                        "parentId": None,
+                        "timestamp": "2026-07-03T00:00:01.000Z",
+                        "message": {"role": "user", "content": "hi", "timestamp": 1},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "future_entry",
+                        "id": "00000002",
+                        "parentId": "00000001",
+                        "timestamp": "2026-07-03T00:00:02.000Z",
+                        "payload": {"nested": True},
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    session = Session(await JsonlSessionStorage.open_path(path))
+
+    # The unknown entry stays on the tree (it is the current leaf and a valid
+    # parent link) but is ignored during replay, matching pi's tolerance.
+    assert await session.get_leaf_id() == "00000002"
+    unknown = await session.get_entry("00000002")
+    assert unknown is not None
+    assert unknown.model_dump(exclude_none=True)["payload"] == {"nested": True}
+    assert [m.content for m in (await session.build_context()).messages] == ["hi"]
+
+    # Appending after it keeps the chain intact.
+    await session.append_message(UserMessage(content="again", timestamp=2))
+    reopened = Session(await JsonlSessionStorage.open_path(path))
+    assert [m.content for m in (await reopened.build_context()).messages] == ["hi", "again"]
+    lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert lines[3]["parentId"] == "00000002"
+
+    # Re-serializing the tolerated entry (e.g. during fork) keeps the foreign
+    # fields and pi's base key order.
+    copy = await JsonlSessionStorage.create_path(
+        path.with_name("copy.jsonl"), cwd="/workspace", session_id="sess_copy"
+    )
+    await copy.append_entry(unknown.model_copy(deep=True))
+    copied = json.loads(path.with_name("copy.jsonl").read_text(encoding="utf-8").splitlines()[1])
+    assert list(copied.keys()) == ["type", "id", "parentId", "timestamp", "payload"]
+    assert copied["payload"] == {"nested": True}
+
+
+@pytest.mark.asyncio
+async def test_jsonl_entry_key_order_matches_pi(tmp_path: Path):
+    path = tmp_path / "session.jsonl"
+    storage = await JsonlSessionStorage.create_path(path, cwd="/w", session_id="sess_order")
+    session = Session(storage)
+    first_id = await session.append_message(UserMessage(content="hi", timestamp=1))
+    await session.move_to(None)
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    root_keys = list(json.loads(lines[1]).keys())
+    leaf_keys = list(json.loads(lines[2]).keys())
+
+    # pi writes entry literals as {type, id, parentId, timestamp, ...}; the
+    # null parentId of root entries and null leaf targetId must not be
+    # reordered to the end of the line.
+    assert root_keys == ["type", "id", "parentId", "timestamp", "message"]
+    assert leaf_keys == ["type", "id", "parentId", "timestamp", "targetId"]
+    assert json.loads(lines[1])["parentId"] is None
+    assert json.loads(lines[2])["targetId"] is None
+    assert json.loads(lines[2])["parentId"] == first_id
 
 
 def test_build_session_context_accepts_raw_entries_from_fixture():

@@ -12,6 +12,7 @@ from .jsonl_storage import (
     _PathJsonlStorageFs,
     load_jsonl_session_metadata,
 )
+from .repo_utils import get_entries_to_fork
 from .session import Session, iso_now
 from .uuid7 import uuid7
 
@@ -85,15 +86,7 @@ class JsonlSessionRepo:
     ) -> Session:
         options = options or {}
         source_session = await self.open(source)
-        target_id = options.get("entryId") or await source_session.get_leaf_id()
-        position = options.get("position", "at")
-        if target_id is not None and not await source_session.get_entry(target_id):
-            raise SessionError("invalid_fork_target", f"Entry {target_id} not found")
-        if position == "before" and target_id is not None:
-            target_entry = await source_session.get_entry(target_id)
-            target_id = target_entry.parentId if target_entry else None
-        elif position != "at":
-            raise SessionError("invalid_fork_target", f"Invalid fork position {position}")
+        forked_entries = await get_entries_to_fork(source_session.get_storage(), options)
 
         fork = await self.create(
             {
@@ -102,6 +95,6 @@ class JsonlSessionRepo:
                 "parentSessionPath": source.path,
             }
         )
-        for entry in await source_session.get_branch(target_id):
+        for entry in forked_entries:
             await fork.get_storage().append_entry(entry.model_copy(deep=True))
         return fork
