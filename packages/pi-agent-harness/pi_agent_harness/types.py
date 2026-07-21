@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Annotated, Any, Literal, Protocol, TypeVar, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
@@ -163,16 +164,63 @@ class ExecResult(BaseModel):
     exitCode: int
 
 
+@runtime_checkable
 class FileSystem(Protocol):
     cwd: str
 
-    async def read_text_file(self, path: str) -> str: ...
+    async def absolute_path(self, path: str | Path) -> str: ...
 
-    async def read_text_lines(self, path: str, max_lines: int | None = None) -> list[str]: ...
+    async def canonical_path(self, path: str | Path) -> str: ...
 
-    async def write_file(self, path: str, content: str | bytes) -> None: ...
+    async def exists(self, path: str | Path) -> bool: ...
 
-    async def append_file(self, path: str, content: str | bytes) -> None: ...
+    async def read_text_file(self, path: str | Path) -> str: ...
+
+    async def read_text_lines(
+        self, path: str | Path, max_lines: int | None = None
+    ) -> list[str]: ...
+
+    async def read_binary_file(self, path: str | Path) -> bytes: ...
+
+    async def write_file(self, path: str | Path, content: str | bytes) -> None: ...
+
+    async def append_file(self, path: str | Path, content: str | bytes) -> None: ...
+
+    async def file_info(self, path: str | Path) -> FileInfo: ...
+
+    async def list_dir(self, path: str | Path) -> list[FileInfo]: ...
+
+    async def create_dir(self, path: str | Path) -> None: ...
+
+    async def remove(self, path: str | Path) -> None: ...
+
+    async def create_temp_dir(self, prefix: str = "pi-harness-") -> str: ...
+
+    async def create_temp_file(self, prefix: str = "pi-harness-", suffix: str = "") -> str: ...
+
+    async def cleanup(self) -> None: ...
+
+
+@runtime_checkable
+class Shell(Protocol):
+    async def exec(
+        self,
+        command: str,
+        *,
+        cwd: str | Path | None = None,
+        env: dict[str, str] | None = None,
+        timeout: float | None = None,
+        signal: Any | None = None,
+        on_stdout: Callable[[str], Any] | None = None,
+        on_stderr: Callable[[str], Any] | None = None,
+    ) -> ExecResult: ...
+
+    async def cleanup(self) -> None: ...
+
+
+@runtime_checkable
+class ExecutionEnv(FileSystem, Shell, Protocol):
+    """Combined file-system and shell execution environment."""
 
 
 class SessionTreeEntryBase(BaseModel):

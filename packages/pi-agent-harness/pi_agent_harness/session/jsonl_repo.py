@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
-from ..types import JsonlSessionMetadata, SessionError
-from .jsonl_storage import (
-    JsonlSessionStorage,
-    _PathJsonlStorageFs,
-    load_jsonl_session_metadata,
-)
+from ..env import LocalExecutionEnv
+from ..types import FileError, FileInfo, JsonlSessionMetadata, SessionError
+from .jsonl_storage import JsonlSessionStorage, JsonlStorageFs, load_jsonl_session_metadata
 from .repo_utils import get_entries_to_fork
 from .session import Session, iso_now
 from .uuid7 import uuid7
+
+
+class JsonlRepoFs(JsonlStorageFs, Protocol):
+    async def exists(self, path: str | Path) -> bool: ...
+
+    async def list_dir(self, path: str | Path) -> list[FileInfo]: ...
+
+    async def remove(self, path: str | Path) -> None: ...
 
 
 def _safe_filename_timestamp(timestamp: str) -> str:
@@ -28,9 +32,9 @@ def _safe_filename_timestamp(timestamp: str) -> str:
 
 
 class JsonlSessionRepo:
-    def __init__(self, directory: str | Path) -> None:
+    def __init__(self, directory: str | Path, fs: JsonlRepoFs | None = None) -> None:
         self._directory = Path(directory)
-        self._fs = _PathJsonlStorageFs()
+        self._fs = fs if fs is not None else LocalExecutionEnv(Path.cwd())
 
     def _session_path(self, session_id: str, created_at: str) -> Path:
         return self._directory / f"{_safe_filename_timestamp(created_at)}-{session_id}.jsonl"
@@ -41,7 +45,7 @@ class JsonlSessionRepo:
         cwd = options.get("cwd") or str(Path.cwd())
         created_at = iso_now()
         path = self._session_path(session_id, created_at)
-        if path.exists():
+        if await self._fs.exists(path):
             raise SessionError("invalid_session", f"Session file {path} already exists")
         storage = await JsonlSessionStorage.create(
             self._fs,
@@ -53,31 +57,40 @@ class JsonlSessionRepo:
         return Session(storage)
 
     async def open(self, metadata: JsonlSessionMetadata) -> Session:
-        if not Path(metadata.path).exists():
+        if not await self._fs.exists(metadata.path):
             raise SessionError("not_found", f"Session file {metadata.path} not found")
         return Session(await JsonlSessionStorage.open(self._fs, metadata.path))
 
     async def list(self, options: dict[str, Any] | None = None) -> list[JsonlSessionMetadata]:
         options = options or {}
 
-        def files() -> list[Path]:
-            if not self._directory.exists():
+        try:
+            entries = await self._fs.list_dir(str(self._directory))
+        except FileError as exc:
+            if exc.code == "not_found":
                 return []
-            return sorted(self._directory.glob("*.jsonl"))
+            raise
 
         result: list[JsonlSessionMetadata] = []
-        for path in await asyncio.to_thread(files):
-            metadata = await load_jsonl_session_metadata(self._fs, str(path))
+        for info in sorted(
+            (
+                entry
+                for entry in entries
+                if entry.kind != "directory" and entry.name.endswith(".jsonl")
+            ),
+            key=lambda entry: entry.name,
+        ):
+            path = str(self._directory / info.name)
+            metadata = await load_jsonl_session_metadata(self._fs, path)
             if options.get("cwd") is not None and metadata.cwd != options["cwd"]:
                 continue
             result.append(metadata)
         return result
 
     async def delete(self, metadata: JsonlSessionMetadata) -> None:
-        path = Path(metadata.path)
-        if not path.exists():
+        if not await self._fs.exists(metadata.path):
             raise SessionError("not_found", f"Session file {metadata.path} not found")
-        await asyncio.to_thread(path.unlink)
+        await self._fs.remove(metadata.path)
 
     async def fork(
         self,

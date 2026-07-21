@@ -9,13 +9,19 @@ import pytest
 
 from pi_agent_core.messages import AssistantMessage
 from pi_agent_harness import (
+    ExecutionEnv,
+    FileError,
+    FileInfo,
+    FileSystem,
     JsonlSessionRepo,
     JsonlSessionStorage,
+    LocalExecutionEnv,
     MemorySessionRepo,
     MemorySessionStorage,
     MessageEntry,
     Session,
     SessionError,
+    Shell,
     UserMessage,
     build_session_context,
 )
@@ -296,3 +302,107 @@ def test_build_session_context_accepts_raw_entries_from_fixture():
     assert context.messages[0].role == "user"
     assert context.messages[1].role == "assistant"
     assert context.model == {"provider": "openai", "modelId": "gpt-4o-mini"}
+
+
+class InMemoryJsonlRepoFs:
+    """Pure in-memory JsonlRepoFs for injected-repo tests (no disk I/O)."""
+
+    def __init__(self) -> None:
+        self._files: dict[str, str] = {}
+
+    def _norm(self, path: str | Path) -> str:
+        return str(path).replace("\\", "/")
+
+    async def read_text_file(self, path: str) -> str:
+        key = self._norm(path)
+        if key not in self._files:
+            raise FileNotFoundError(key)
+        return self._files[key]
+
+    async def read_text_lines(self, path: str, max_lines: int | None = None) -> list[str]:
+        lines = (await self.read_text_file(path)).splitlines()
+        return lines[:max_lines] if max_lines is not None else lines
+
+    async def write_file(self, path: str, content: str | bytes) -> None:
+        text = content.decode("utf-8") if isinstance(content, bytes) else content
+        self._files[self._norm(path)] = text
+
+    async def append_file(self, path: str, content: str | bytes) -> None:
+        key = self._norm(path)
+        text = content.decode("utf-8") if isinstance(content, bytes) else content
+        self._files[key] = self._files.get(key, "") + text
+
+    async def exists(self, path: str | Path) -> bool:
+        return self._norm(path) in self._files
+
+    async def remove(self, path: str | Path) -> None:
+        del self._files[self._norm(path)]
+
+    async def list_dir(self, path: str | Path) -> list[FileInfo]:
+        dir_path = self._norm(path).rstrip("/")
+        prefix = f"{dir_path}/"
+        children: list[FileInfo] = []
+        for file_path, content in self._files.items():
+            if not file_path.startswith(prefix):
+                continue
+            rest = file_path[len(prefix) :]
+            if "/" in rest:
+                continue
+            children.append(
+                FileInfo(
+                    name=rest,
+                    path=rest,
+                    kind="file",
+                    size=len(content.encode("utf-8")),
+                    mtimeMs=0.0,
+                )
+            )
+        if not children:
+            raise FileError("not_found", f"Directory not found: {path}", dir_path)
+        return children
+
+
+def test_local_execution_env_satisfies_runtime_protocols():
+    env = LocalExecutionEnv("/tmp/workspace")
+    assert isinstance(env, FileSystem)
+    assert isinstance(env, Shell)
+    assert isinstance(env, ExecutionEnv)
+
+
+@pytest.mark.asyncio
+async def test_jsonl_repo_in_memory_fs_end_to_end():
+    fake = InMemoryJsonlRepoFs()
+    repo = JsonlSessionRepo("/virtual/sessions", fs=fake)
+
+    source = await repo.create({"id": "source", "cwd": "/workspace"})
+    await source.append_message(UserMessage(content="first", timestamp=1))
+    second_id = await source.append_message(UserMessage(content="second", timestamp=2))
+
+    listed = await repo.list({"cwd": "/workspace"})
+    assert [m.id for m in listed] == ["source"]
+    assert all(path.startswith("/virtual/sessions/") for path in fake._files)
+
+    fork = await repo.fork(
+        listed[0], {"id": "fork", "entryId": second_id, "position": "at", "cwd": "/workspace"}
+    )
+    assert [m.content for m in (await fork.build_context()).messages] == ["first", "second"]
+    fork_metadata = await fork.get_metadata()
+    assert fork_metadata.parentSessionPath == listed[0].path
+
+    fork_before = await repo.fork(
+        listed[0], {"id": "fork-b", "entryId": second_id, "cwd": "/workspace"}
+    )
+    assert [m.content for m in (await fork_before.build_context()).messages] == ["first"]
+
+    reopened = await repo.open(fork_metadata)
+    assert [m.content for m in (await reopened.build_context()).messages] == ["first", "second"]
+
+    await repo.delete(fork_metadata)
+    assert sorted(m.id for m in await repo.list()) == ["fork-b", "source"]
+
+
+@pytest.mark.asyncio
+async def test_jsonl_repo_list_missing_directory_returns_empty(tmp_path: Path):
+    missing = tmp_path / "does-not-exist"
+    repo = JsonlSessionRepo(missing)
+    assert await repo.list() == []

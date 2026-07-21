@@ -20,9 +20,9 @@ H1 主体忠实：11 种 entry 模型、错误层级、`SessionStorage` 协议�
 
 ---
 
-## 一、已修复（2026-07-03，commit `63e4e8c`）
+## 一、已修复
 
-### H1-1. 未知 entry 类型被拒读——前向兼容破坏
+### H1-1. 未知 entry 类型被拒读——前向兼容破坏（2026-07-03，commit `63e4e8c`）
 
 - [x] **已修复** ·（实质 · 探针实证）
 - 位置：`session/jsonl_storage.py` `parse_entry_line`
@@ -34,7 +34,7 @@ H1 主体忠实：11 种 entry 模型、错误层级、`SessionStorage` 协议�
   配套将 `_leaf_id_after_entry` 从 `isinstance(LeafEntry)` 改为 `type == "leaf"` 判断
   （对齐 pi 的字符串判别，兼容回退 entry），并删除 `memory_repo.py` 中的重复副本。
 
-### H1-2. fork 语义三处偏离 pi
+### H1-2. fork 语义三处偏离 pi（2026-07-03，commit `63e4e8c`）
 
 - [x] **已修复** ·（实质 · 上游源码核对）
 - 位置：`session/jsonl_repo.py` / `memory_repo.py`（现共享 `session/repo_utils.py`）
@@ -47,7 +47,7 @@ H1 主体忠实：11 种 entry 模型、错误层级、`SessionStorage` 协议�
 - 修复：新增 `session/repo_utils.py::get_entries_to_fork` 忠实移植，两 repo 共用；
   测试覆盖默认 before / 显式 at / 非 user-message 报错 / 全树复制 + leaf 位置保持。
 
-### H1-7. 根 entry 键序不符 pi 字节布局
+### H1-7. 根 entry 键序不符 pi 字节布局（2026-07-03，commit `63e4e8c`）
 
 - [x] **已修复** ·（中 · 探针实证）
 - 位置：`session/jsonl_storage.py` `_entry_to_json`
@@ -57,30 +57,30 @@ H1 主体忠实：11 种 entry 模型、错误层级、`SessionStorage` 协议�
 - 修复：按模型字段声明序重建 dict（未知外来字段排尾）。实测根 entry 键序为
   `type, id, parentId, timestamp, message`，与 pi 字面量 `JSON.stringify` 输出一致。
 
+### H1-3. `JsonlSessionRepo` 不支持注入 FileSystem（2026-07-21）
+
+- [x] **已修复** ·（中 · 代码审查）
+- 位置：`session/jsonl_repo.py`
+- 问题：设计写 `JsonlSessionRepo(env, dir)`（pi 亦为 `{fs, sessionsRoot}` 注入式）；实现只收
+  目录、内部硬编码 `_PathJsonlStorageFs`，`list`/`delete`/`create` 的存在性检查绕过文件系统抽象。
+- 修复：新增窄协议 `JsonlRepoFs`（`JsonlStorageFs` + `exists`/`list_dir`/`remove`）；构造器改为
+  `JsonlSessionRepo(directory, fs=None)`，默认 `LocalExecutionEnv(Path.cwd())` 保持相对路径语义；
+  全部 repo 文件系统操作改走 `self._fs`；导出 `JsonlRepoFs`；新增内存 fake 端到端单测与
+  `list` 缺目录返回 `[]` 回归断言。
+
+### H1-4. §8.1 完整协议未定义（2026-07-21）
+
+- [x] **已修复** ·（中 · 代码审查）
+- 位置：`types.py`；注解：`agent_harness.py`、`skills.py`、`prompt_templates.py`
+- 问题：只有 4 方法 mini `FileSystem` Protocol；§8.1 完整 `FileSystem`/`Shell`/`ExecutionEnv`
+  不存在；`skills.py`/`prompt_templates.py` 的 `env` 为 `Any`。
+- 修复：在 `types.py` 定义三个 `@runtime_checkable` 完整协议（签名对齐 `LocalExecutionEnv`）；
+  删除 mini `FileSystem`；`AgentHarness.env` 改为 `ExecutionEnv | None`，skills/templates 改为
+  `FileSystem`；从 `pi_agent_harness` 与 shim 导出三协议；新增 `isinstance` 协议一致性单测。
+
 ---
 
 ## 二、待处理
-
-### H1-3. `JsonlSessionRepo` 不支持注入 FileSystem（设计 §3.6 签名不符）
-
-- [ ] 待处理 ·（中 · 代码审查）
-- 位置：`session/jsonl_repo.py`
-- 设计写 `JsonlSessionRepo(env, dir)`（pi 亦为 `{fs, sessionsRoot}` 注入式）；实现只收
-  目录、内部硬编码 `_PathJsonlStorageFs`。存储层 `JsonlSessionStorage.open(fs, ...)`
-  可注入，repo 层断掉了"为远端存储留门"的路径。
-- 建议：构造器增加可选 `fs: JsonlStorageFs`（默认本地实现），并让 `list`/`delete`/
-  `create` 的文件系统操作走注入实例。
-
-### H1-4. §8.1 完整协议未定义（设计模块表称"协议定义在 H1"）
-
-- [ ] 待处理 ·（中 · 代码审查）
-- 位置：`types.py`
-- 现状：只有 4 方法 mini `FileSystem` Protocol（与 `jsonl_storage.JsonlStorageFs`
-  近乎重复定义），§8.1 的完整 `FileSystem`（15 方法）/`Shell`/`ExecutionEnv` Protocol
-  不存在；`LocalExecutionEnv` 是无协议约束的具体类，`skills.py`/`prompt_templates.py`
-  的 `env` 参数为 `Any`。
-- 建议：在 `types.py` 定义三个完整 Protocol，`LocalExecutionEnv` 声明实现之；
-  收敛 mini FileSystem 与 `JsonlStorageFs` 的重复。
 
 ### H1-5. `branch_summary.fromId` 落盘值与 pi 不同（需决策）
 

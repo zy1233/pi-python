@@ -5,15 +5,14 @@ from __future__ import annotations
 import re
 import shlex
 from pathlib import PurePosixPath
-from typing import Any
 
 from pi_agent_harness.frontmatter import parse_frontmatter
-from pi_agent_harness.types import PromptTemplate
+from pi_agent_harness.types import FileSystem, PromptTemplate
 
 ARG_PATTERN = re.compile(r"\$\{@:([0-9]+)(?::([0-9]+))?\}|\$([0-9]+)|\$@|\$ARGUMENTS")
 
 
-async def load_prompt_templates(env: Any, paths: list[str]) -> list[PromptTemplate]:
+async def load_prompt_templates(env: FileSystem, paths: list[str]) -> list[PromptTemplate]:
     templates: list[PromptTemplate] = []
     for path in paths:
         info = await env.file_info(path)
@@ -55,7 +54,7 @@ def substitute_args(content: str, args: list[str]) -> str:
     return ARG_PATTERN.sub(replace, content)
 
 
-async def _load_template_file(env: Any, path: str) -> PromptTemplate:
+async def _load_template_file(env: FileSystem, path: str) -> PromptTemplate:
     raw = await env.read_text_file(path)
     metadata, body = parse_frontmatter(raw)
     name = PurePosixPath(path).stem

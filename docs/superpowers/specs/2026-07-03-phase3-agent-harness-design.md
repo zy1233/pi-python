@@ -169,7 +169,7 @@ class SessionStorage(Protocol):
 
 ### 3.6 SessionRepo（create/open/list/delete/fork）
 
-- **JsonlSessionRepo(env, dir)**：文件名 `<timestamp>-<session-id>.jsonl`；`list(cwd?)` 读每文件首行 header 过滤；`fork(source, entry_id?, position?)` 复制 header（换新 id、记 `parentSession`）+ 按 pi `getEntriesToFork` 语义截取 entries。
+- **JsonlSessionRepo(dir, fs=None)**：文件名 `<timestamp>-<session-id>.jsonl`；`fs` 为 `JsonlRepoFs` 窄协议（`JsonlStorageFs` + `exists`/`list_dir`/`remove`），默认 `LocalExecutionEnv(Path.cwd())`，对齐 pi 的 `Pick<FileSystem,...>` 注入模式；`list(cwd?)` 读每文件首行 header 过滤；`fork(source, entry_id?, position?)` 复制 header（换新 id、记 `parentSession`）+ 按 pi `getEntriesToFork` 语义截取 entries。
 - **MemorySessionRepo**：dict 存储。
 - **fork 语义**（对齐 pi `repo-utils.ts`，两 repo 共享 `session/repo_utils.py`，2026-07-03 H1 审计修正）：不传 `entry_id` 复制**全部 entries**（整棵树含分支与 leaf 记录）；`position="at"` 复制 root→目标的路径；默认 `position="before"`（编辑重发场景）要求目标是 **user message** entry（否则 `invalid_fork_target`），复制到其 parent。
 
@@ -412,7 +412,7 @@ class ExecutionEnv(FileSystem, Shell, Protocol): ...
 
 ### 8.2 LocalExecutionEnv（默认实现）
 
-文件操作 = `pathlib` + `asyncio.to_thread`；shell = `asyncio.create_subprocess_shell`（Windows 用默认 shell，超时 kill 进程组）。协议放 H1（session 存储只依赖 FileSystem 的 4 个方法），完整 Local 实现放 H4（skills/shell 需要）。JsonlSessionStorage 对 FileSystem 的依赖收窄为 `Pick` 等价的小协议 `JsonlStorageFs`（read_text_file/read_text_lines/write_file/append_file），测试可用轻量 fake。
+文件操作 = `pathlib` + `asyncio.to_thread`；shell = `asyncio.create_subprocess_shell`（Windows 用默认 shell，超时 kill 进程组）。协议放 H1（session 存储只依赖 FileSystem 的 4 个方法），完整 Local 实现放 H4（skills/shell 需要）。JsonlSessionStorage 对 FileSystem 的依赖收窄为 `Pick` 等价的小协议 `JsonlStorageFs`（read_text_file/read_text_lines/write_file/append_file），测试可用轻量 fake。§8.1 完整 `FileSystem`/`Shell`/`ExecutionEnv` 协议已于 `types.py` 落地（`@runtime_checkable`，签名对齐 `LocalExecutionEnv`）。
 
 ---
 

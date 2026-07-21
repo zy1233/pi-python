@@ -4,17 +4,16 @@ from __future__ import annotations
 
 import re
 from pathlib import PurePosixPath
-from typing import Any
 
 from pathspec import PathSpec
 
 from pi_agent_harness.frontmatter import parse_frontmatter
-from pi_agent_harness.types import Skill, SkillDiagnostic, SkillLoadResult
+from pi_agent_harness.types import FileSystem, Skill, SkillDiagnostic, SkillLoadResult
 
 SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
-async def load_skills(env: Any, paths: list[str]) -> SkillLoadResult:
+async def load_skills(env: FileSystem, paths: list[str]) -> SkillLoadResult:
     result = SkillLoadResult()
     for path in paths:
         await _load_skill_path(env, _clean(path), result, [])
@@ -23,7 +22,7 @@ async def load_skills(env: Any, paths: list[str]) -> SkillLoadResult:
 
 
 async def load_sourced_skills(
-    env: Any, sources: dict[str, list[str]]
+    env: FileSystem, sources: dict[str, list[str]]
 ) -> dict[str, SkillLoadResult]:
     return {source: await load_skills(env, paths) for source, paths in sources.items()}
 
@@ -57,7 +56,7 @@ def format_skill_invocation(skill: Skill, additional_instructions: str | None = 
 
 
 async def _load_skill_path(
-    env: Any,
+    env: FileSystem,
     path: str,
     result: SkillLoadResult,
     inherited_patterns: list[str],
@@ -98,7 +97,9 @@ async def _load_skill_path(
             await _read_skill_file(env, child_path, PurePosixPath(child.name).stem, result)
 
 
-async def _read_skill_file(env: Any, path: str, default_name: str, result: SkillLoadResult) -> None:
+async def _read_skill_file(
+    env: FileSystem, path: str, default_name: str, result: SkillLoadResult
+) -> None:
     try:
         raw = await env.read_text_file(path)
         metadata, content = parse_frontmatter(raw)
@@ -125,7 +126,7 @@ async def _read_skill_file(env: Any, path: str, default_name: str, result: Skill
     )
 
 
-async def _read_ignore_patterns(env: Any, path: str) -> list[str]:
+async def _read_ignore_patterns(env: FileSystem, path: str) -> list[str]:
     patterns: list[str] = []
     for name in (".gitignore", ".ignore", ".fdignore"):
         ignore_path = _join(path, name)

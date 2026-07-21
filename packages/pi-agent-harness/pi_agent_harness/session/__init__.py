@@ -1,6 +1,6 @@
 """AgentHarness session storage and repositories."""
 
-from pi_agent_harness.session.jsonl_repo import JsonlSessionRepo
+from pi_agent_harness.session.jsonl_repo import JsonlRepoFs, JsonlSessionRepo
 from pi_agent_harness.session.jsonl_storage import (
     JsonlSessionStorage,
     JsonlStorageFs,
@@ -18,6 +18,7 @@ from pi_agent_harness.session.session import (
 from pi_agent_harness.session.uuid7 import uuid7
 
 __all__ = [
+    "JsonlRepoFs",
     "JsonlSessionRepo",
     "JsonlSessionStorage",
     "JsonlStorageFs",
