@@ -26,7 +26,7 @@ def _model() -> Model:
 
 
 async def _session() -> Session:
-    return Session(await MemorySessionStorage.create(cwd="/workspace", session_id="h4"))
+    return Session(await MemorySessionStorage.create(session_id="h4"))
 
 
 @pytest.mark.asyncio

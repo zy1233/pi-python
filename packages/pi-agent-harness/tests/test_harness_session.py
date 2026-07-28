@@ -9,10 +9,12 @@ import pytest
 
 from pi_agent_core.messages import AssistantMessage
 from pi_agent_harness import (
+    BranchSummaryEntry,
     ExecutionEnv,
     FileError,
     FileInfo,
     FileSystem,
+    JsonlSessionMetadata,
     JsonlSessionRepo,
     JsonlSessionStorage,
     LocalExecutionEnv,
@@ -21,6 +23,7 @@ from pi_agent_harness import (
     MessageEntry,
     Session,
     SessionError,
+    SessionMetadata,
     Shell,
     UserMessage,
     build_session_context,
@@ -28,6 +31,7 @@ from pi_agent_harness import (
 from pi_agent_harness.session.uuid7 import uuid7
 
 FIXTURE = Path(__file__).parent / "fixtures" / "pi-v3-session.jsonl"
+FIXTURE_TREE = Path(__file__).parent / "fixtures" / "pi-v3-session-tree.jsonl"
 
 
 def _role(message):
@@ -38,18 +42,21 @@ def _field(message, name: str):
     return getattr(message, name, None) if hasattr(message, name) else message.get(name)
 
 
-def test_uuid7_is_time_ordered_and_hexish():
+def test_uuid7_is_time_ordered_canonical_uuid():
     first = uuid7()
     second = uuid7()
 
-    assert len(first) == 32
-    assert int(first, 16) >= 0
+    # pi uses uuidv7's canonical hyphenated form (8-4-4-4-12).
+    assert len(first) == 36
+    assert [len(part) for part in first.split("-")] == [8, 4, 4, 4, 12]
+    assert first[14] == "7"
+    assert int(first.replace("-", ""), 16) >= 0
     assert first < second
 
 
 @pytest.mark.asyncio
 async def test_memory_session_builds_context_with_state_and_compaction():
-    storage = await MemorySessionStorage.create(cwd="/workspace", session_id="sess_mem")
+    storage = await MemorySessionStorage.create(session_id="sess_mem")
     session = Session(storage)
 
     user1 = UserMessage(content="old request", timestamp=1)
@@ -107,6 +114,32 @@ async def test_jsonl_storage_reads_pi_v3_fixture_and_preserves_extra_fields():
 
 
 @pytest.mark.asyncio
+async def test_jsonl_storage_replays_tree_fixture_with_compaction_and_abandoned_branch():
+    session = Session(await JsonlSessionStorage.open_path(FIXTURE_TREE))
+
+    # The label entry appended after the branch summary is the current leaf.
+    assert await session.get_leaf_id() == "10000009"
+    assert await session.get_label("10000008") == "alt-branch"
+    # The abandoned branch stays on the tree even though it is off-path.
+    assert await session.get_entry("10000006") is not None
+
+    context = await session.build_context()
+    assert [_role(m) for m in context.messages] == [
+        "compactionSummary",
+        "user",
+        "assistant",
+        "branchSummary",
+    ]
+    assert _field(context.messages[0], "summary") == "Earlier work summarized"
+    assert _field(context.messages[0], "tokensBefore") == 4200
+    assert context.messages[1].content[0]["text"] == "continue"
+    assert context.messages[2].content[0]["text"] == "continuing"
+    assert _field(context.messages[3], "summary") == "Abandoned: alternative attempt"
+    assert _field(context.messages[3], "fromId") == "10000005"
+    assert context.model == {"provider": "openai", "modelId": "gpt-4o-mini"}
+
+
+@pytest.mark.asyncio
 async def test_jsonl_storage_round_trips_and_keeps_append_only_leaf(tmp_path: Path):
     path = tmp_path / "session.jsonl"
     storage = await JsonlSessionStorage.create_path(path, cwd="/workspace", session_id="sess_json")
@@ -131,12 +164,47 @@ async def test_jsonl_storage_round_trips_and_keeps_append_only_leaf(tmp_path: Pa
 
 @pytest.mark.asyncio
 async def test_session_rejects_move_to_missing_entry():
-    session = Session(await MemorySessionStorage.create(cwd="/workspace", session_id="sess_mem"))
+    session = Session(await MemorySessionStorage.create(session_id="sess_mem"))
 
     with pytest.raises(SessionError) as exc:
         await session.move_to("missing")
 
     assert exc.value.code == "not_found"
+
+
+@pytest.mark.asyncio
+async def test_move_to_branch_summary_from_id_is_the_move_target():
+    session = Session(await MemorySessionStorage.create(session_id="sess_mem"))
+    first_id = await session.append_message(UserMessage(content="first", timestamp=1))
+    await session.append_message(UserMessage(content="second", timestamp=2))
+
+    # pi writes fromId = entryId ?? "root"; a summary-dict override is ignored.
+    entry_id = await session.move_to(
+        first_id, {"summary": "abandoned branch", "fromId": "override-attempt"}
+    )
+    entry = await session.get_entry(entry_id)
+    assert isinstance(entry, BranchSummaryEntry)
+    assert entry.fromId == first_id
+    assert entry.parentId == first_id
+
+    root_move_id = await session.move_to(None, {"summary": "back to root"})
+    root_entry = await session.get_entry(root_move_id)
+    assert isinstance(root_entry, BranchSummaryEntry)
+    assert root_entry.fromId == "root"
+
+
+@pytest.mark.asyncio
+async def test_session_name_folds_newlines_only_and_blank_reads_back_as_none():
+    session = Session(await MemorySessionStorage.create(session_id="sess_mem"))
+
+    # pi only folds newline runs into spaces; tabs and doubled spaces survive.
+    await session.append_session_name("  line1\r\nline2\ttab  spaces ")
+    assert await session.get_session_name() == "line1 line2\ttab  spaces"
+
+    # Whitespace-only names persist as "" and read back as absent, like pi's
+    # `name?.trim() || undefined`.
+    await session.append_session_name(" \r\n ")
+    assert await session.get_session_name() is None
 
 
 @pytest.mark.asyncio
@@ -175,6 +243,19 @@ async def test_memory_repo_fork_matches_pi_semantics():
 
 
 @pytest.mark.asyncio
+async def test_memory_repo_delete_is_idempotent():
+    repo = MemorySessionRepo()
+    session = await repo.create({"id": "victim"})
+    metadata = await session.get_metadata()
+
+    await repo.delete(metadata)
+    await repo.delete(metadata)  # pi: plain Map.delete, no error on repeat
+    await repo.delete(SessionMetadata(id="ghost", createdAt="2026-07-03T00:00:00.000Z"))
+
+    assert await repo.list() == []
+
+
+@pytest.mark.asyncio
 async def test_jsonl_repo_create_list_open_delete_and_fork(tmp_path: Path):
     repo = JsonlSessionRepo(tmp_path)
     source = await repo.create({"id": "source", "cwd": "/workspace"})
@@ -201,6 +282,52 @@ async def test_jsonl_repo_create_list_open_delete_and_fork(tmp_path: Path):
 
     await repo.delete(fork_metadata)
     assert sorted(m.id for m in await repo.list()) == ["fork-b", "source"]
+
+
+def _write_session_file(path: Path, session_id: str, timestamp: str) -> None:
+    header = {
+        "type": "session",
+        "version": 3,
+        "id": session_id,
+        "timestamp": timestamp,
+        "cwd": "/workspace",
+    }
+    path.write_text(json.dumps(header) + "\n", encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_jsonl_repo_list_skips_invalid_files_and_sorts_newest_first(tmp_path: Path):
+    # Alphabetical file order is the reverse of createdAt order on purpose.
+    _write_session_file(tmp_path / "a-old.jsonl", "old", "2026-07-03T00:00:01.000Z")
+    _write_session_file(tmp_path / "b-new.jsonl", "new", "2026-07-03T00:00:02.000Z")
+    (tmp_path / "c-broken.jsonl").write_text("not a session header\n", encoding="utf-8")
+    (tmp_path / "d-empty.jsonl").write_text("", encoding="utf-8")
+    (tmp_path / "notes.txt").write_text("ignored", encoding="utf-8")
+
+    repo = JsonlSessionRepo(tmp_path)
+
+    # pi: single invalid files are skipped, valid ones sort by createdAt desc.
+    assert [m.id for m in await repo.list()] == ["new", "old"]
+
+
+@pytest.mark.asyncio
+async def test_jsonl_repo_delete_is_idempotent(tmp_path: Path):
+    repo = JsonlSessionRepo(tmp_path)
+    session = await repo.create({"id": "victim", "cwd": "/workspace"})
+    metadata = await session.get_metadata()
+
+    await repo.delete(metadata)
+    await repo.delete(metadata)  # pi: remove with force semantics, no error
+    await repo.delete(
+        JsonlSessionMetadata(
+            id="ghost",
+            createdAt="2026-07-03T00:00:00.000Z",
+            cwd="/workspace",
+            path=str(tmp_path / "ghost.jsonl"),
+        )
+    )
+
+    assert await repo.list() == []
 
 
 @pytest.mark.asyncio
@@ -336,7 +463,8 @@ class InMemoryJsonlRepoFs:
         return self._norm(path) in self._files
 
     async def remove(self, path: str | Path) -> None:
-        del self._files[self._norm(path)]
+        # Force semantics per JsonlRepoFs: removing a missing path is a no-op.
+        self._files.pop(self._norm(path), None)
 
     async def list_dir(self, path: str | Path) -> list[FileInfo]:
         dir_path = self._norm(path).rstrip("/")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -197,7 +198,11 @@ class Session:
         if not entries:
             return None
         latest = entries[-1]
-        return latest.name.strip() if isinstance(latest, SessionInfoEntry) and latest.name else None
+        if not isinstance(latest, SessionInfoEntry) or not latest.name:
+            return None
+        # pi: `entries.at(-1)?.name?.trim() || undefined` - whitespace-only
+        # names read back as absent, not as "".
+        return latest.name.strip() or None
 
     async def _append_typed_entry(self, entry: SessionTreeEntry) -> str:
         await self._storage.append_entry(entry)
@@ -282,7 +287,9 @@ class Session:
         )
 
     async def append_session_name(self, name: str) -> str:
-        sanitized = " ".join(name.split()).strip()
+        # pi only folds newlines into spaces (`name.replace(/[\r\n]+/g, " ")`);
+        # other whitespace runs (tabs, doubled spaces) are preserved.
+        sanitized = re.sub(r"[\r\n]+", " ", name).strip()
         return await self._append_typed_entry(
             SessionInfoEntry(**await self._new_entry_base(), name=sanitized)
         )
@@ -302,7 +309,10 @@ class Session:
                 id=await self._storage.create_entry_id(),
                 parentId=entry_id,
                 timestamp=iso_now(),
-                fromId=summary.get("fromId") or entry_id or "root",
+                # pi writes the move target (`entryId ?? "root"`); the summary
+                # dict cannot override it, keeping persisted files identical to
+                # pi's for the same navigation.
+                fromId=entry_id if entry_id is not None else "root",
                 summary=str(summary.get("summary", "")),
                 details=summary.get("details"),
                 fromHook=summary.get("fromHook"),

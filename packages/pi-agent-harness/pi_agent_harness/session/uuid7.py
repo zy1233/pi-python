@@ -10,11 +10,12 @@ _SEQ = 0
 
 
 def uuid7() -> str:
-    """Return a 32-character hex UUIDv7-like value.
+    """Return a canonical 36-character hyphenated UUIDv7 string.
 
     Python 3.11/3.12 do not ship uuid.uuid7. This implementation preserves the
-    two properties the session layer needs: millisecond timestamp prefix and
-    monotonic lexical ordering for IDs generated within the same process.
+    properties the session layer needs: millisecond timestamp prefix, monotonic
+    lexical ordering for IDs generated within the same process, and pi's
+    `uuidv7()` textual format (8-4-4-4-12, lowercase hex).
     """
     global _LAST_MS, _SEQ
 
@@ -32,4 +33,5 @@ def uuid7() -> str:
     rand_b = secrets.randbits(62)
 
     value = (timestamp << 80) | (0x7 << 76) | (_SEQ << 64) | (0b10 << 62) | rand_b
-    return f"{value:032x}"
+    raw = f"{value:032x}"
+    return f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:]}"

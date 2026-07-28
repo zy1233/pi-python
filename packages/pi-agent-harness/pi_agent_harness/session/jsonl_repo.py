@@ -9,16 +9,31 @@ from ..env import LocalExecutionEnv
 from ..types import FileError, FileInfo, JsonlSessionMetadata, SessionError
 from .jsonl_storage import JsonlSessionStorage, JsonlStorageFs, load_jsonl_session_metadata
 from .repo_utils import get_entries_to_fork
-from .session import Session, iso_now
+from .session import Session, iso_now, iso_to_ms
 from .uuid7 import uuid7
 
 
 class JsonlRepoFs(JsonlStorageFs, Protocol):
+    """Narrow filesystem surface required by `JsonlSessionRepo`.
+
+    `remove` must have force semantics (removing a missing path is a no-op),
+    matching pi's `fs.remove(path, { force: true })`.
+    """
+
     async def exists(self, path: str | Path) -> bool: ...
 
     async def list_dir(self, path: str | Path) -> list[FileInfo]: ...
 
     async def remove(self, path: str | Path) -> None: ...
+
+
+def _created_at_ms(created_at: str) -> float:
+    # Foreign files can carry non-ISO timestamps; JS `new Date(...)` yields NaN
+    # there instead of throwing, so map unparseable values to a stable fallback.
+    try:
+        return iso_to_ms(created_at)
+    except ValueError:
+        return 0.0
 
 
 def _safe_filename_timestamp(timestamp: str) -> str:
@@ -81,15 +96,24 @@ class JsonlSessionRepo:
             key=lambda entry: entry.name,
         ):
             path = str(self._directory / info.name)
-            metadata = await load_jsonl_session_metadata(self._fs, path)
+            try:
+                metadata = await load_jsonl_session_metadata(self._fs, path)
+            except SessionError as exc:
+                # pi skips files that fail header validation so a stray file in
+                # the directory does not break the whole listing; other codes
+                # (not_found/storage) still propagate.
+                if exc.code == "invalid_session":
+                    continue
+                raise
             if options.get("cwd") is not None and metadata.cwd != options["cwd"]:
                 continue
             result.append(metadata)
+        # pi sorts newest-first by header createdAt.
+        result.sort(key=lambda metadata: _created_at_ms(metadata.createdAt), reverse=True)
         return result
 
     async def delete(self, metadata: JsonlSessionMetadata) -> None:
-        if not await self._fs.exists(metadata.path):
-            raise SessionError("not_found", f"Session file {metadata.path} not found")
+        # pi deletes with `force: true`: deleting a missing session is a no-op.
         await self._fs.remove(metadata.path)
 
     async def fork(

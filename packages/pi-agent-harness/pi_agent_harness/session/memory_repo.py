@@ -36,8 +36,8 @@ class MemorySessionRepo:
         return [await storage.get_metadata() for storage in self._storages.values()]
 
     async def delete(self, metadata: SessionMetadata) -> None:
-        if self._storages.pop(metadata.id, None) is None:
-            raise SessionError("not_found", f"Session {metadata.id} not found")
+        # pi: plain `Map.delete` - deleting a missing session is a no-op.
+        self._storages.pop(metadata.id, None)
 
     async def fork(
         self,

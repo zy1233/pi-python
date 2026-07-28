@@ -916,7 +916,7 @@ class AgentHarness:
             await self.session.append_label(target_id, label)
         branch_entry_id = await self.session.move_to(
             leaf_id,
-            {"summary": summary_text, "fromId": old_leaf_id, "fromHook": hook_result is not None}
+            {"summary": summary_text, "fromHook": hook_result is not None}
             if summary_text
             else None,
         )

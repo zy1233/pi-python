@@ -16,7 +16,8 @@ H1 主体忠实：11 种 entry 模型、错误层级、`SessionStorage` 协议�
 路径回放（含 compaction 分段回放）、label 缓存、JSONL 校验文案、ISO 毫秒时间戳、
 `exclude_none` 对齐 JS 省略 `undefined` 的语义——均与 pi 逐行等价；fixture 互读与
 往返单测符合 §9 交付判据。审计发现 2 个实质偏差、4 个中等偏差、若干 nits；
-实质项与字节序项已于当日修复（commit `63e4e8c`），其余在此追踪。
+实质项与字节序项已于当日修复（commit `63e4e8c`），H1-3/H1-4 于 2026-07-21 修复，
+其余（H1-5/H1-6/H1-8）于 2026-07-28 全部收尾——**本审计无遗留待办**。
 
 ---
 
@@ -78,47 +79,51 @@ H1 主体忠实：11 种 entry 模型、错误层级、`SessionStorage` 协议�
   删除 mini `FileSystem`；`AgentHarness.env` 改为 `ExecutionEnv | None`，skills/templates 改为
   `FileSystem`；从 `pi_agent_harness` 与 shim 导出三协议；新增 `isinstance` 协议一致性单测。
 
----
+### H1-5. `branch_summary.fromId` 落盘值与 pi 不同（2026-07-28）
 
-## 二、待处理
-
-### H1-5. `branch_summary.fromId` 落盘值与 pi 不同（需决策）
-
-- [ ] 待决策 ·（中 · 上游源码核对）
+- [x] **已修复** ·（中 · 上游源码核对）· 决策：**对齐 pi，丢弃覆盖能力**
 - 位置：`session/session.py` `move_to`（H3 `agent_harness.py` `navigate_tree` 为调用方）
-- pi 的 `Session.moveTo` 固定写 `fromId = entryId ?? "root"`（移动目标）；Python 的
-  `move_to` 接受 summary dict 的 `fromId` 覆盖，且 `navigate_tree` 传 `old_leaf_id`
-  （被放弃的分支）。语义上 Python 更合理，但同一操作两边写出的值不同，pi 生态 UI 若用
-  `fromId` 定位来源分支会指向不同节点。
-- 建议：二选一——对齐 pi（丢弃覆盖能力），或在 Phase 3 设计文档记录为有意改良。
+- 问题：pi 的 `Session.moveTo` 固定写 `fromId = entryId ?? "root"`（移动目标），summary
+  参数根本没有 `fromId` 键（`{summary, details, usage?, fromHook}`，`navigateTree` 亦不传）；
+  Python 曾接受 summary dict 的 `fromId` 覆盖，且 `navigate_tree` 传 `old_leaf_id`
+  （被放弃的分支）。同一操作两边落盘值不同，pi 生态 UI 若用 `fromId` 定位会指向不同节点。
+- 修复：`move_to` 忽略 summary dict 中的 `fromId`，固定写 `entry_id ?? "root"`；
+  `navigate_tree` 不再传 `fromId`。依据 AGENTS.md"忠实移植"原则选对齐而非记录偏差；
+  新增单测断言覆盖尝试被忽略、`move_to(None)` 写 `"root"`。
 
-### H1-6. Repo 细节行为与 pi 不一致（容错/排序/幂等）
+### H1-6. Repo 细节行为与 pi 不一致（容错/排序/幂等）（2026-07-28）
 
-- [ ] 待处理 ·（低-中 · 上游源码核对）
+- [x] **已修复** ·（低-中 · 上游源码核对）
 - 位置：`session/jsonl_repo.py` / `memory_repo.py`
-- 三点：
+- 三点（对照上游 `jsonl-repo.ts` / `memory-repo.ts`）：
   1. `list()`：pi 对单文件 `invalid_session` 跳过继续（目录混入非 session 文件不致命），
-     Python 一个坏文件炸整个 `list()`；
-  2. `list()` 排序：pi 按 `createdAt` 降序，Python 按文件名升序；
-  3. `delete()`：pi 幂等（force 删除，缺文件不报错），Python 抛 `not_found`
-     （memory repo 同）。
+     Python 曾一个坏文件炸整个 `list()`——现 try/except 跳过 `invalid_session`，
+     其他错误码（`not_found`/`storage`）仍上抛；
+  2. `list()` 排序：pi 按 `createdAt` 降序（`new Date(...)` 数值比较），Python 曾按文件名
+     升序——现按 header `createdAt` 毫秒值降序，无法解析的时间戳回退 0（对应 JS `NaN`
+     不炸排序），扫描仍按文件名序保证平局确定性；
+  3. `delete()`：pi 幂等（`remove(path, {force: true})` / `Map.delete`，缺文件不报错），
+     Python 曾抛 `not_found`——两 repo 均改为无检查直删，`JsonlRepoFs.remove` 协议注明
+     force 语义，内存 fake 同步 `pop(..., None)`。
+- 新增单测：坏文件/空文件/非 `.jsonl` 混入目录的 `list()`、`createdAt` 降序（文件名序
+  故意与时间序相反）、两 repo 重复删除与删除不存在会话。
 
-### H1-8. Nits（低，攒批处理）
+### H1-8. Nits（2026-07-28，攒批处理完成）
 
-- [ ] `append_session_name` 折叠所有空白（pi 只把 `[\r\n]+` 换空格）；
-  `get_session_name` 对全空白名返回 `""`，pi 返回 `undefined`（应为 `None`）。
-- [ ] `MemorySessionStorage.create(cwd=...)` 参数被静默忽略（元数据无此字段），
-  测试中还在传值，有误导性——删参或落到 metadata 扩展字段。
-- [ ] uuid 回退格式：短 id 冲突回退与 `create` 默认 session id 为 32 位无连字符 hex，
-  pi 为 36 位带连字符——互读无碍，风格不一。（短 id 的 65 秒窗口回退行为两边一致，
-  属 pi 固有行为，探针已实证，无需处理。）
-- [ ] fixture 内容：`packages/pi-agent-harness/tests/fixtures/pi-v3-session.jsonl` 无
-  compaction / 分叉 entry（当前由内存存储单测覆盖回放）；可补真实 pi 会话片段增强。
-- [ ] `pi_agent_core/harness/__pycache__/` 残留拆包前旧字节码，可清理。
+- [x] `append_session_name` 只把 `[\r\n]+` 换空格后 trim（不再折叠 tab/连续空格）；
+  `get_session_name` 对全空白名返回 `None`（对齐 pi `name?.trim() || undefined`）。
+- [x] `MemorySessionStorage.create` 删除被静默忽略的 `cwd` 参数（pi 的
+  `InMemorySessionStorage` 元数据即 `{id, createdAt}`），全部测试调用点同步。
+- [x] uuid 格式：`uuid7()` 改输出 36 位连字符规范格式（对齐 pi `uuidv7()`）；短 entry id
+  从前 8 位改为**随机尾 8 位**（对齐上游 `uuidv7().slice(-8)` 及其注释——前缀是时间戳
+  派生毫秒间几乎不变；此举同时消除审计原记录的 65 秒窗口回退现象，上游已同样修正）。
+- [x] fixture：新增 `pi-v3-session-tree.jsonl`（compaction + 放弃分支 + leaf 移动 +
+  branch_summary + label），单测断言分段回放消息序列、label 缓存、离路径 entry 保留。
+- [x] `pi_agent_core/harness/__pycache__/` 拆包前旧字节码已清理（本地未跟踪文件）。
 
 ---
 
-## 三、记录性（无需行动）
+## 二、记录性（无需行动）
 
 - [~] **目录布局 / 文件名 vs pi**：pi 按 `sessionsRoot/--encoded-cwd--/<ts>_<id>.jsonl`
   组织；Python 平铺 `<dir>/<ts>-<id>.jsonl` + 读 header 过滤——设计文档 §3.6 明确批准的
@@ -129,6 +134,8 @@ H1 主体忠实：11 种 entry 模型、错误层级、`SessionStorage` 协议�
 
 ## 验证状态
 
-修复后全量 pytest 通过（提交时 239 个，P6 批次仍在并行落地）、`ruff check` 与
-`ruff format --check` 全绿。相关新增单测：未知 entry 宽容读取 + 写回保留、
-fork 四语义（before/at/非 user 报错/全树）、根 entry 与 leaf 键序断言。
+修复后全量 pytest 通过（2026-07-03 提交时 239 个，P6 批次仍在并行落地；2026-07-28
+收尾时 282 个）、`ruff check` 与 `ruff format --check` 全绿。相关新增单测：未知 entry
+宽容读取 + 写回保留、fork 四语义（before/at/非 user 报错/全树）、根 entry 与 leaf 键序
+断言、注入 fs 端到端 + 协议 isinstance（H1-3/H1-4）、`fromId` 固定写移动目标、`list`
+容错与降序、幂等删除、会话名空白语义、树形 fixture 分段回放（H1-5/H1-6/H1-8）。

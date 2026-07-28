@@ -25,7 +25,7 @@ def _model(model_id: str = "m1") -> Model:
 
 
 async def _memory_session(session_id: str = "harness") -> Session:
-    return Session(await MemorySessionStorage.create(cwd="/workspace", session_id=session_id))
+    return Session(await MemorySessionStorage.create(session_id=session_id))
 
 
 @pytest.mark.asyncio

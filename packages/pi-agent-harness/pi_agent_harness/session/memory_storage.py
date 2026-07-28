@@ -33,7 +33,9 @@ def _update_label_cache(labels_by_id: dict[str, str], entry: SessionTreeEntry) -
 
 def _generate_entry_id(by_id: dict[str, SessionTreeEntry]) -> str:
     for _ in range(100):
-        candidate = uuid7()[:8]
+        # pi: `uuidv7().slice(-8)` - the uuidv7 prefix is timestamp-derived and
+        # nearly constant between calls, so short ids come from the random tail.
+        candidate = uuid7()[-8:]
         if candidate not in by_id:
             return candidate
     return uuid7()
@@ -55,7 +57,7 @@ class MemorySessionStorage:
         self._current_leaf_id = leaf_id
 
     @classmethod
-    async def create(cls, cwd: str = "", session_id: str | None = None) -> MemorySessionStorage:
+    async def create(cls, session_id: str | None = None) -> MemorySessionStorage:
         return cls(
             SessionMetadata(
                 id=session_id or uuid7(),
