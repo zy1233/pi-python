@@ -24,6 +24,15 @@ def _model(model_id: str = "m1") -> Model:
     return Model(provider="mock", model_id=model_id)
 
 
+def _user_text(message: UserMessage) -> str:
+    content = message.content
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(block.get("text", "") for block in content if block.get("type") == "text")
+    return str(content)
+
+
 async def _memory_session(session_id: str = "harness") -> Session:
     return Session(await MemorySessionStorage.create(session_id=session_id))
 
@@ -57,7 +66,7 @@ async def test_before_agent_start_and_context_hooks_can_add_and_replace_messages
 
     async def recording_stream(model, context, options=None):
         seen["messages"] = [
-            m.content for m in context.messages if getattr(m, "role", None) == "user"
+            _user_text(m) for m in context.messages if getattr(m, "role", None) == "user"
         ]
         return await mock_text_stream(model, context, options)
 
@@ -125,7 +134,7 @@ async def test_next_turn_messages_are_injected_before_prompt():
     seen: list[str] = []
 
     async def recording_stream(model, context, options=None):
-        seen.extend([m.content for m in context.messages if getattr(m, "role", None) == "user"])
+        seen.extend([_user_text(m) for m in context.messages if getattr(m, "role", None) == "user"])
         return await mock_text_stream(model, context, options)
 
     harness = AgentHarness(session=session, model=_model(), stream_fn=recording_stream)
@@ -354,7 +363,7 @@ async def test_next_turn_queue_rolls_back_when_queue_update_fails():
         await harness.prompt("prompt")
 
     assert exc_info.value.code == "hook"
-    assert [m.content for m in harness.next_turn_queue] == ["queued"]
+    assert [_user_text(m) for m in harness.next_turn_queue] == ["queued"]
 
 
 @pytest.mark.asyncio
@@ -387,7 +396,7 @@ async def test_steer_queue_drains_and_rolls_back_on_emit_failure():
     ready = asyncio.Event()
 
     async def recording_stream(model, context, options=None):
-        seen.extend([m.content for m in context.messages if getattr(m, "role", None) == "user"])
+        seen.extend([_user_text(m) for m in context.messages if getattr(m, "role", None) == "user"])
         if any(getattr(m, "role", None) == "toolResult" for m in context.messages):
             return await mock_text_stream(model, context, options)
         ready.set()
@@ -416,7 +425,7 @@ async def test_steer_queue_drains_and_rolls_back_on_emit_failure():
 
     assert result.stopReason == "error"
     assert "steer drain boom" in (result.errorMessage or "")
-    assert [m.content for m in harness.steer_queue] == ["steered"]
+    assert [_user_text(m) for m in harness.steer_queue] == ["steered"]
     assert "steered" not in seen
 
 
@@ -482,8 +491,8 @@ async def test_abort_clears_queues_and_emits_abort_event():
     cleared = await harness.abort()
     await run_task
 
-    assert [m.content for m in cleared["cleared_steer"]] == ["steer-me"]
-    assert [m.content for m in cleared["cleared_follow_up"]] == ["follow-me"]
+    assert [_user_text(m) for m in cleared["cleared_steer"]] == ["steer-me"]
+    assert [_user_text(m) for m in cleared["cleared_follow_up"]] == ["follow-me"]
     assert events.count("abort") == 1
     assert harness.steer_queue == []
     assert harness.follow_up_queue == []
@@ -566,3 +575,43 @@ async def test_double_run_failure_raises_unknown_with_both_causes():
     assert len(cause.exceptions) == 2
     assert str(cause.exceptions[0]) == "boom"
     assert str(cause.exceptions[1]) == "persist boom"
+
+
+@pytest.mark.asyncio
+async def test_wait_for_idle_blocks_until_run_completes():
+    import asyncio
+
+    ready = asyncio.Event()
+
+    async def slow_stream(model, context, options=None):
+        ready.set()
+        await asyncio.sleep(0.05)
+        return await mock_text_stream(model, context, options)
+
+    session = await _memory_session()
+    harness = AgentHarness(session=session, model=_model(), stream_fn=slow_stream)
+    run_task = asyncio.create_task(harness.prompt("hi"))
+    await ready.wait()
+    assert harness.phase == "turn"
+
+    wait_task = asyncio.create_task(harness.wait_for_idle())
+    await asyncio.sleep(0)
+    assert not wait_task.done()
+
+    await run_task
+    await wait_task
+    assert harness.phase == "idle"
+
+
+@pytest.mark.asyncio
+async def test_prompt_persists_user_message_as_text_block_array():
+    session = await _memory_session()
+    harness = AgentHarness(session=session, model=_model(), stream_fn=mock_text_stream)
+    await harness.prompt("hello")
+
+    user_entries = [
+        e
+        for e in await session.get_entries()
+        if e.type == "message" and e.message.get("role") == "user"
+    ]
+    assert user_entries[0].message["content"] == [{"type": "text", "text": "hello"}]

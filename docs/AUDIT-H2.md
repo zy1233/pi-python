@@ -198,17 +198,17 @@ H2 骨架忠实:§4.4 三条持久化时序不变量(message_end 先落盘后广
 
 ## 四、顺带发现(低优先级 / 跨批次)
 
-- [ ] `wait_for_idle()` 是 `asyncio.sleep(0)` 忙等自旋(等待网络响应期间空转
-  CPU);构造器 `_run_promise` 字段声明后从未赋值,是死代码。pi 用 runPromise
-  事件等待。建议改 `asyncio.Event` 或保存 run task。
-- [ ] `_create_user_message` 纯文本时 `content` 为 str;pi 恒为块数组。JSONL
-  互读不受影响(pi 类型允许 str),但写出的形状与 pi 不同。
+- [x] **已修复(2026-07-29)** · `wait_for_idle()` 改用 `_idle_event`（`asyncio.Event`）等待;
+  删除未使用的 `_run_promise` 字段;`_set_phase` 统一维护 phase/事件。回归测试 ×1
+  (`test_wait_for_idle_blocks_until_run_completes`)。
+- [x] **已修复(2026-07-29)** · `_create_user_message` 纯文本时 `content` 改为
+  `[{"type":"text","text":...}]` 块数组(对齐 pi)。回归测试 ×1
+  (`test_prompt_persists_user_message_as_text_block_array`)。
 - [ ]（H3 范围)`navigate_tree` 的 `editor_text` 只处理 user 消息目标,不处理
   `custom_message`(pi 两者都处理);`fromHook` 判定用 `hook_result is not None`
   过宽——hook 只返回 label 而摘要来自 LLM 时会误标 `fromHook=True`(pi 判
   `hookResult?.summary !== undefined`)。
-- [ ] `AGENTS.md` 状态段过时:P6 已实施多个批次,测试数远超所记 107(随 P6
-  收尾一并更新)。
+- [x] **已更新(2026-07-29)** · `AGENTS.md` 状态段:H2 审计收尾 + 测试数 293。
 
 ---
 
@@ -220,6 +220,6 @@ H2 骨架忠实:§4.4 三条持久化时序不变量(message_end 先落盘后广
 | 高(一次性补齐) | H2-1 C4 `AgentMessageProtocol` + README 示例 + C4 勾选 | ✅ 已修复(2026-07-03,回归 +2) |
 | 中(小修) | H2-4 next_turn 回滚、H2-5 abort 聚合 | ✅ 已修复(2026-07-29,回归 +3) |
 | 中(跨层) | H2-6 payload 替换(core 消费返回值) | ✅ 已修复(2026-07-29,回归 +1) |
-| 低 | H2-7 双重失败聚合、第四部分杂项 | H2-7 ✅(2026-07-29);杂项仍待 |
+| 低 | H2-7 双重失败聚合、第四部分杂项 | ✅ 已修复(2026-07-29);H3 navigate_tree 仍待 |
 | 文档 | H2-D1 ~ D4 一次文档修订 | ✅ 已修复(2026-07-29) |
 | 测试 | 第三部分缺口(steer/follow-up/block/abort) | ✅ 已补(2026-07-29,+8) |

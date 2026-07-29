@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from pi_agent_core.agent_loop import run_agent_loop
-from pi_agent_core.messages import AssistantMessage, ImageContent, Usage, UserMessage
+from pi_agent_core.messages import AssistantMessage, ImageContent, TextContent, Usage, UserMessage
 from pi_agent_core.types import (
     AfterToolCallContext,
     AfterToolCallResult,
@@ -82,9 +82,9 @@ async def _maybe_await(value: Any) -> Any:
 
 
 def _create_user_message(text: str, images: list[ImageContent] | None = None) -> UserMessage:
-    content: str | list = text
+    content: list[TextContent | ImageContent] = [{"type": "text", "text": text}]
     if images:
-        content = [{"type": "text", "text": text}, *images]
+        content.extend(images)
     return UserMessage(content=content)
 
 
@@ -204,6 +204,8 @@ class AgentHarness:
             else CompactionSettings.model_validate(compaction or {})
         )
         self.phase: Literal["idle", "turn", "compaction", "branch_summary", "retry"] = "idle"
+        self._idle_event = asyncio.Event()
+        self._idle_event.set()
         self._tools = {tool.name: tool for tool in tools or []}
         self._validate_unique(list(self._tools), "Duplicate tool name(s)")
         self.active_tool_names = active_tool_names or list(self._tools)
@@ -217,7 +219,15 @@ class AgentHarness:
         self._subscribers: list[Callable[[AgentHarnessEvent, Any | None], Any]] = []
         self._hooks: dict[str, list[Callable[[Any], Any]]] = {}
         self._run_abort_controller: _AbortController | None = None
-        self._run_promise: asyncio.Task | None = None
+
+    def _set_phase(
+        self, phase: Literal["idle", "turn", "compaction", "branch_summary", "retry"]
+    ) -> None:
+        self.phase = phase
+        if phase == "idle":
+            self._idle_event.set()
+        else:
+            self._idle_event.clear()
 
     def _validate_unique(self, names: list[str], message: str) -> None:
         duplicates = sorted({name for name in names if names.count(name) > 1})
@@ -429,7 +439,7 @@ class AgentHarness:
             return
         if event.type == "agent_end":
             await self._flush_pending_session_writes()
-            self.phase = "idle"
+            self._set_phase("idle")
             await self._emit_any(event, signal)
             await self._emit_any(SettledEvent(nextTurnCount=len(self.next_turn_queue)), signal)
             return
@@ -693,14 +703,14 @@ class AgentHarness:
     async def prompt(self, text: str, images: list[ImageContent] | None = None) -> AssistantMessage:
         if self.phase != "idle":
             raise AgentHarnessError("busy", "AgentHarness is busy")
-        self.phase = "turn"
+        self._set_phase("turn")
         try:
             return await self._execute_turn(await self._create_turn_state(), text, images)
         except AgentHarnessError:
-            self.phase = "idle"
+            self._set_phase("idle")
             raise
         except Exception as e:
-            self.phase = "idle"
+            self._set_phase("idle")
             raise normalize_harness_error(e, "unknown") from e
 
     async def steer(self, text: str, images: list[ImageContent] | None = None) -> None:
@@ -791,8 +801,7 @@ class AgentHarness:
         )
 
     async def wait_for_idle(self) -> None:
-        while self.phase != "idle":
-            await asyncio.sleep(0)
+        await self._idle_event.wait()
 
     async def abort(self) -> dict[str, list[AgentMessage]]:
         from pi_agent_harness.types import AbortEvent
@@ -827,11 +836,11 @@ class AgentHarness:
             tokens = estimate_context_tokens(context.messages)
             if should_compact(tokens, self.model.context_window, self.compaction):
                 previous_phase = self.phase
-                self.phase = "compaction"
+                self._set_phase("compaction")
                 try:
                     await self._compact_internal(None, signal)
                 finally:
-                    self.phase = previous_phase
+                    self._set_phase(previous_phase)
         except Exception:
             # Auto-compaction is best-effort; manual compact() still surfaces errors.
             return
@@ -875,18 +884,18 @@ class AgentHarness:
     async def compact(self, custom_instructions: str | None = None) -> CompactionResult:
         if self.phase != "idle":
             raise AgentHarnessError("busy", "AgentHarness is busy")
-        self.phase = "compaction"
+        self._set_phase("compaction")
         try:
             return await self._compact_internal(custom_instructions)
         except Exception as e:
             raise normalize_harness_error(e, "compaction") from e
         finally:
-            self.phase = "idle"
+            self._set_phase("idle")
 
     async def navigate_tree(self, target_id: str, options: dict[str, Any] | None = None) -> Any:
         if self.phase != "idle":
             raise AgentHarnessError("busy", "AgentHarness is busy")
-        self.phase = "branch_summary"
+        self._set_phase("branch_summary")
         options = options or {}
         try:
             return await self._navigate_tree_internal(
@@ -899,7 +908,7 @@ class AgentHarness:
         except Exception as e:
             raise normalize_harness_error(e, "branch_summary") from e
         finally:
-            self.phase = "idle"
+            self._set_phase("idle")
 
     async def _navigate_tree_internal(
         self,

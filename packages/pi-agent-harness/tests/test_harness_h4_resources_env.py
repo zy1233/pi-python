@@ -25,6 +25,15 @@ def _model() -> Model:
     return Model(provider="mock", model_id="m1")
 
 
+def _user_text(message) -> str:
+    content = message.content
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(block.get("text", "") for block in content if block.get("type") == "text")
+    return str(content)
+
+
 async def _session() -> Session:
     return Session(await MemorySessionStorage.create(session_id="h4"))
 
@@ -124,8 +133,9 @@ async def test_agent_harness_injects_skills_and_runs_skill_prompt():
 
     assert "writer" in str(seen["system_prompt"])
     user_messages = [m for m in seen["messages"] if getattr(m, "role", None) == "user"]
-    assert "Use concise prose." in user_messages[-1].content
-    assert "Answer in Chinese." in user_messages[-1].content
+    user_text = _user_text(user_messages[-1])
+    assert "Use concise prose." in user_text
+    assert "Answer in Chinese." in user_text
 
 
 @pytest.mark.asyncio
@@ -133,7 +143,7 @@ async def test_prompt_templates_load_substitute_and_prompt():
     seen: list[str] = []
 
     async def recording_stream(model, context, options=None):
-        seen.extend(m.content for m in context.messages if getattr(m, "role", None) == "user")
+        seen.extend(_user_text(m) for m in context.messages if getattr(m, "role", None) == "user")
         return await mock_text_stream(model, context, options)
 
     assert parse_command_args("'hello world' test") == ["hello world", "test"]
