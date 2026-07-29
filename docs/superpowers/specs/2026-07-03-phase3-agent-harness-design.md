@@ -271,9 +271,10 @@ AgentHarness(
 ```python
 class CompactionSettings(BaseModel):
     enabled: bool = True
-    reserve_tokens: int = 16384      # 摘要 prompt+输出预留
+    reserve_tokens: int = 16384  # 摘要 prompt+输出预留
     keep_recent_tokens: int = 20000  # 压缩后保留的近期上下文
-    auto_compact: bool = False       # Python 版扩展（§5.6）
+    auto_compact: bool = False  # Python 版扩展（§5.6）
+
 
 def should_compact(context_tokens, context_window, settings) -> bool:
     return settings.enabled and context_tokens > context_window - settings.reserve_tokens

@@ -64,13 +64,13 @@ agent_start → turn_start → message_start(user) → message_end(user)
 ```python
 @dataclass
 class Model:
-    provider: str   # openai, anthropic, deepseek（OpenAI 兼容网关）, 其他走 init_chat_model
+    provider: str  # openai, anthropic, deepseek（OpenAI 兼容网关）, 其他走 init_chat_model
     model_id: str
     api: str = "langchain"
-    context_window: int = 128_000   # ContextBudget 预算信号的分母
+    context_window: int = 128_000  # ContextBudget 预算信号的分母
     supports_images: bool = True
-    reasoning: bool = False         # thinking 参数注入与历史剥除的总开关
-    base_url: str | None = None     # OpenAI 兼容网关（对齐 pi 的 baseUrl）
+    reasoning: bool = False  # thinking 参数注入与历史剥除的总开关
+    base_url: str | None = None  # OpenAI 兼容网关（对齐 pi 的 baseUrl）
 ```
 
 ### AgentTool
@@ -140,13 +140,18 @@ from pydantic import BaseModel, Field
 from pi_agent_core.tools import SimpleTool
 from pi_agent_core.types import AgentToolResult
 
+
 class EchoParams(BaseModel):
     message: str = Field(description="text")
+
 
 async def echo(_id, params: EchoParams, signal, on_update) -> AgentToolResult:
     return AgentToolResult(content=[{"type": "text", "text": params.message}], details={})
 
-tool = SimpleTool(name="echo", description="Echo", label="Echo", parameters=EchoParams, execute_fn=echo)
+
+tool = SimpleTool(
+    name="echo", description="Echo", label="Echo", parameters=EchoParams, execute_fn=echo
+)
 ```
 
 ### 自定义 StreamFn（测试 / 代理）

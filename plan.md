@@ -159,7 +159,7 @@ examples/
 ```python
 @dataclass
 class Model:
-    provider: str      # "openai", "anthropic"
+    provider: str  # "openai", "anthropic"
     model_id: str
     # 可选: context_window, supports_images, reasoning
 ```
@@ -173,8 +173,7 @@ async def stream_fn(
     model: Model,
     context: AgentContext,
     options: StreamOptions,
-) -> AsyncIterator[AssistantMessageEvent]:
-    ...
+) -> AsyncIterator[AssistantMessageEvent]: ...
 ```
 
 实现要点：

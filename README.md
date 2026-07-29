@@ -60,6 +60,7 @@ import asyncio
 from pi_agent_core import Agent, Model
 from pi_agent_core.adapters import langchain_stream
 
+
 async def main():
     agent = Agent(
         initial_state={
@@ -73,6 +74,7 @@ async def main():
 
     await agent.prompt("Hello!")
     await agent.wait_for_idle()
+
 
 asyncio.run(main())
 ```
@@ -101,14 +103,16 @@ agent = Agent(initial_state={"model": model}, stream_fn=langchain_stream)
 ```python
 from pydantic import BaseModel
 
+
 class Person(BaseModel):
     name: str
     age: int
 
+
 agent = Agent(
     initial_state={"model": model},
     stream_fn=langchain_stream,
-    response_schema=Person,   # or a JSON schema dict
+    response_schema=Person,  # or a JSON schema dict
 )
 await agent.prompt("Invent a fictional person.")
 await agent.wait_for_idle()
@@ -125,24 +129,28 @@ the JSON text still flows as `text_delta` events.
 ```python
 from pi_agent_core import Agent, ContextBudget
 
-def on_payload(payload: dict):          # outgoing request (pre-call)
+
+def on_payload(payload: dict):  # outgoing request (pre-call)
     log.debug("LLM call", model=payload["model"], tools=len(payload["tools"]))
+
 
 async def before_llm_call(context, budget: ContextBudget | None):
     if budget and budget.fraction > 0.8:
-        return await my_compactor.compact(context)   # durably replaces loop context
+        return await my_compactor.compact(context)  # durably replaces loop context
     return None
 
+
 def after_llm_call(context, message):
-    if contains_pii(message):           # guardrail tripwire: raise to abort the run
+    if contains_pii(message):  # guardrail tripwire: raise to abort the run
         raise PiiDetected()
+
 
 agent = Agent(
     initial_state={"model": model, "tools": tools},
     stream_fn=langchain_stream,
-    max_turns=25,           # raises MaxTurnsExceededError -> agent.error_message
-    tool_timeout=120.0,     # per tool call, seconds; times out into an error tool result
-    max_retries=3,          # stream-level retries before the first token
+    max_turns=25,  # raises MaxTurnsExceededError -> agent.error_message
+    tool_timeout=120.0,  # per tool call, seconds; times out into an error tool result
+    max_retries=3,  # stream-level retries before the first token
     on_payload=on_payload,
     before_llm_call=before_llm_call,
     after_llm_call=after_llm_call,
@@ -160,8 +168,8 @@ each tool to a working directory:
 ```python
 from pi_agent_core.coding_tools import create_coding_tools, create_read_only_tools
 
-tools = create_coding_tools("/path/to/project")        # read / bash / edit / write
-audit = create_read_only_tools("/path/to/project")     # read / grep / find / ls
+tools = create_coding_tools("/path/to/project")  # read / bash / edit / write
+audit = create_read_only_tools("/path/to/project")  # read / grep / find / ls
 agent = Agent(initial_state={"model": model, "tools": tools}, stream_fn=langchain_stream)
 ```
 
@@ -191,10 +199,12 @@ plugs into the same loop through the adapter:
 from langchain_core.tools import tool
 from pi_agent_core.adapters import from_langchain_tool, from_langchain_tools
 
+
 @tool
 def get_weather(city: str) -> str:
     """Get the current weather for a city."""
     return f"Sunny in {city}"
+
 
 agent = Agent(
     initial_state={"model": model, "tools": [from_langchain_tool(get_weather)]},
@@ -224,11 +234,13 @@ from pi_agent_harness.messages import BashExecutionMessage, harness_convert_to_l
 bash = BashExecutionMessage(command="pytest -q", output="97 passed", exitCode=0, timestamp=0)
 await harness.append_message(bash)  # persisted; replayed to the LLM as a user message
 
+
 # Your own role: any object with `role: str` satisfies the protocol
 class DeployNote(BaseModel):
     role: str = "deployNote"
     environment: str
     timestamp: int
+
 
 assert isinstance(DeployNote(environment="staging", timestamp=0), AgentMessageProtocol)
 ```
