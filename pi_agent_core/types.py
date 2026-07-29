@@ -214,14 +214,14 @@ class AgentLoopConfig:
     model: Model
     convert_to_llm: ConvertToLlmFn
     transform_context: TransformContextFn | None = None
-    get_api_key: Callable[[str], str | None | Awaitable[str | None]] | None = None
+    get_api_key: Callable[[str], str | Awaitable[str | None] | None] | None = None
     should_stop_after_turn: (
         Callable[[ShouldStopAfterTurnContext], bool | Awaitable[bool]] | None
     ) = None
     prepare_next_turn: (
         Callable[
             [ShouldStopAfterTurnContext],
-            AgentLoopTurnUpdate | None | Awaitable[AgentLoopTurnUpdate | None],
+            AgentLoopTurnUpdate | Awaitable[AgentLoopTurnUpdate | None] | None,
         ]
         | None
     ) = None
@@ -235,14 +235,14 @@ class AgentLoopConfig:
     before_tool_call: (
         Callable[
             [BeforeToolCallContext, Any | None],
-            BeforeToolCallResult | None | Awaitable[BeforeToolCallResult | None],
+            BeforeToolCallResult | Awaitable[BeforeToolCallResult | None] | None,
         ]
         | None
     ) = None
     after_tool_call: (
         Callable[
             [AfterToolCallContext, Any | None],
-            AfterToolCallResult | None | Awaitable[AfterToolCallResult | None],
+            AfterToolCallResult | Awaitable[AfterToolCallResult | None] | None,
         ]
         | None
     ) = None
@@ -269,7 +269,7 @@ class AgentLoopConfig:
     before_llm_call: (
         Callable[
             [AgentContext, ContextBudget | None],
-            AgentContext | None | Awaitable[AgentContext | None],
+            AgentContext | Awaitable[AgentContext | None] | None,
         ]
         | None
     ) = None
@@ -459,7 +459,7 @@ AgentEvent = (
     | ToolExecutionEndEvent
 )
 
-AgentEventSink = Callable[[AgentEvent], None | Awaitable[None]]
+AgentEventSink = Callable[[AgentEvent], Awaitable[None] | None]
 
 StreamFn = Callable[
     [Model, LlmContext, StreamOptions],

@@ -166,7 +166,7 @@ class AgentHarness:
         model: Model,
         stream_fn: StreamFn,
         env: ExecutionEnv | None = None,
-        get_api_key: Callable[[str], str | None | Awaitable[str | None]] | None = None,
+        get_api_key: Callable[[str], str | Awaitable[str | None] | None] | None = None,
         tools: list[AgentTool] | None = None,
         resources: AgentHarnessResources | dict[str, Any] | None = None,
         system_prompt: str | Callable[[dict[str, Any]], str | Awaitable[str]] | None = None,
