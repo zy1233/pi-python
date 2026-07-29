@@ -480,7 +480,14 @@ async def langchain_stream(
                     }
                 )
                 if inspect.isawaitable(hook_result):
-                    await hook_result
+                    hook_result = await hook_result
+                if isinstance(hook_result, dict):
+                    payload = hook_result.get("payload", hook_result)
+                    if isinstance(payload, dict):
+                        if "system_prompt" in payload:
+                            system_prompt = payload["system_prompt"]
+                        if "messages" in payload:
+                            lc_messages = payload["messages"]
 
             text_index = 0
             tool_calls_acc: dict[int, dict] = {}

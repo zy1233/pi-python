@@ -469,6 +469,37 @@ async def test_on_payload_and_on_response_hooks(monkeypatch):
     assert responses[0].stopReason == "stop"
 
 
+class _FakeCaptureMessagesModel:
+    def __init__(self) -> None:
+        self.last_messages: Any = None
+
+    async def astream(self, messages: Any):
+        self.last_messages = messages
+        yield AIMessageChunk(content="ok")
+
+
+@pytest.mark.asyncio
+async def test_on_payload_return_value_replaces_outgoing_request(monkeypatch):
+    fake = _FakeCaptureMessagesModel()
+    monkeypatch.setattr(ls_mod, "resolve_chat_model", lambda *a, **k: fake)
+
+    async def on_payload(payload: dict) -> dict:
+        return {
+            **payload,
+            "system_prompt": "replaced",
+            "messages": [{"role": "user", "content": "replaced-user"}],
+        }
+
+    stream = await ls_mod.langchain_stream(
+        Model(provider="anthropic", model_id="claude-x"),
+        LlmContext(system_prompt="original", messages=[]),
+        StreamOptions(on_payload=on_payload),
+    )
+    await stream.message_result()
+
+    assert fake.last_messages == [{"role": "user", "content": "replaced-user"}]
+
+
 class _FakeSplitUsageModel:
     """Reports usage split across chunks (input on first, output+cache on last)."""
 

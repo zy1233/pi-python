@@ -39,7 +39,7 @@ core 层在 Phase 2.5 预留的接线点全部用上：
 | `AgentLoopConfig.transform_context` | 触发 `context` hook（应用可整体替换消息列表） |
 | `AgentLoopConfig.before_tool_call` / `after_tool_call` | 触发 `tool_call` / `tool_result` hook（block/patch） |
 | `StreamOptions.on_payload` / `on_response` | 触发 `before_provider_payload` / `after_provider_response` hook |
-| `before_llm_call` + `ContextBudget` | 自动压缩触发信号（§5.6） |
+| `before_llm_call` + `ContextBudget` | 预留（当前未接线；自动压缩走 §5.6 turn_end 后 `estimate_context_tokens` 路径） |
 | `run_agent_loop(prompts, context, config, emit, signal, stream_fn)` | harness 的 `_execute_turn` 直接调用，emit 指向 `_handle_agent_event` |
 
 **core 层零改动原则**：本阶段不修改 `pi_agent_core/`（harness 子包除外）。若实施中发现 core 缺口，回审计报告立项，不顺手改。
@@ -52,8 +52,8 @@ core 层在 Phase 2.5 预留的接线点全部用上：
 应用层                        AgentHarness                         core (既有)
 ────────                     ──────────────                       ────────────
 prompt/skill/template  ──►   phase 锁 + next_turn 队列
-subscribe('*')         ◄──   AgentEvent + 19 种自有事件
-on(type, handler)      ◄──   带返回值 hook（11 种）
+subscribe('*')         ◄──   AgentEvent + 11 种 broadcast harness 事件
+on(type, handler)      ◄──   8 种 hook 型事件（带返回值）
                              │
                              │ createTurnState: session.build_context()
                              │ + system_prompt 解析 + resources 快照
@@ -185,43 +185,47 @@ class AgentHarnessPhase:  # Literal["idle", "turn", "compaction", "branch_summar
 
 `prompt/skill/prompt_from_template` 要求 idle，否则抛 `AgentHarnessError("busy")`；`compact()`/`navigate_tree()` 同样要求 idle 并各自持锁。与 `Agent` 类的可重入队列语义不同——harness 是**单占用**模型（pi 语义，UI 层自己排队）。
 
-构造参数（对齐 pi `AgentHarnessOptions`）：
+构造参数（对齐 pi `AgentHarnessOptions`，Python 扩展项已标注）：
 
 ```python
 AgentHarness(
-    env: ExecutionEnv,
     session: Session,
+    model: Model,
     stream_fn: StreamFn,                      # pi 的 models: Models → 我们的 LangChain stream_fn
+    env: ExecutionEnv | None = None,          # pi 必填；Python 侧可选（skills/templates 等才需要）
     get_api_key: Callable | None = None,
     tools: list[AgentTool] | None = None,
     resources: AgentHarnessResources | None = None,   # skills + prompt_templates
     system_prompt: str | Callable | None = None,      # 静态或回调（收 env/session/model/thinking_level/active_tools/resources）
     stream_options: AgentHarnessStreamOptions | None = None,
-    model: Model,
     thinking_level: ThinkingLevel = "off",
     active_tool_names: list[str] | None = None,
-    steering_mode: QueueMode = "one-at-a-time",
+    steering_mode: QueueMode = "one-at-a-time",        # 公开属性（非 getter/setter）
     follow_up_mode: QueueMode = "one-at-a-time",
     compaction: CompactionSettings | None = None,     # Python 版扩展：含 auto_compact（§5.6）
+    max_turns: int | None = None,                     # Python 版扩展
+    tool_timeout: float | None = None,                # Python 版扩展
 )
 ```
+
+`_create_turn_state()` 末尾会调用 `build_harness_system_prompt` 自动注入 skills 到系统提示（H4 有意扩展；pi 留给应用回调）。
 
 `AgentHarnessStreamOptions`（harness 拥有、每 turn 快照）：`timeout_ms / max_retries / max_retry_delay_ms / headers / metadata`。H2 已映射到 core `StreamOptions` 的 `session_id / max_retries / retry_max_delay`；`headers/metadata` 先保留在 harness 快照与 hook patch 中，待后续 provider adapter 明确支持矩阵后再透传。
 
 ### 4.2 三队列与写缓冲
 
-- **steer / follow_up**：语义同 `Agent`，但 drain 时发 `queue_update` 事件；hook 抛异常则**回滚**（unshift 回队列）再抛 `AgentHarnessError("hook")`。
-- **next_turn**（harness 特有）：任何时刻可入队；下次 `prompt()` 时插在用户消息**之前**。
+- **steer / follow_up**：drain 时发 `queue_update` 事件；hook 抛异常则**回滚**（unshift 回队列）再抛 `AgentHarnessError("hook")`。**与 `Agent` 不同**：harness 在 idle 时调用 `steer()`/`follow_up()` 抛 `invalid_state`（pi 语义）；`Agent.steer()` 允许 idle 入队、由 `continue_()` 消费。
+- **next_turn**（harness 特有）：任何时刻可入队；下次 `prompt()` 时插在用户消息**之前**；drain 时同样发 `queue_update`，emit 失败则回滚队列。
 - **pending_session_writes**：turn 进行中调用 `set_model/set_thinking_level/set_tools/set_active_tools/append_message/...` 时不直接写 session（并发写会破坏 parentId 链），先入缓冲；flush 时机（见 4.4）按序重放。
 
 ### 4.3 事件与 hook 系统
 
-两条通道（对齐 pi）：
+两条通道（对齐 pi，**互斥**——同一事件只走一条通道）：
 
-1. **`subscribe(listener)` 广播**：收到全部 `AgentEvent`（core 透传）+ 19 种 harness 自有事件。listener 按注册顺序 await；异常包装为 `AgentHarnessError("hook")` 上抛（**不吞**——harness 与 core 的 StreamFn"不抛"契约不同，hook 错误是应用 bug，应显式失败）。
-2. **`on(type, handler)` 定向 hook**：带返回值，多 handler 顺序执行、**最后一个非 None 返回值生效**（`before_provider_request` 例外：patch 依次叠加）。
+1. **`subscribe(listener)` 广播**：收到全部 `AgentEvent`（core 透传）+ **11 种 broadcast harness 事件**：`queue_update / save_point / abort / settled / after_provider_response / session_compact / session_tree / model_update / thinking_level_update / tools_update / resources_update`。listener 按注册顺序 await；异常包装为 `AgentHarnessError("hook")` 上抛（**不吞**——harness 与 core 的 StreamFn"不抛"契约不同，hook 错误是应用 bug，应显式失败）。`on("save_point", …)` 等对 broadcast 事件**不会**触发。
+2. **`on(type, handler)` 定向 hook**：**8 种 hook 型事件**（`before_agent_start / context / before_provider_request / before_provider_payload / tool_call / tool_result / session_before_compact / session_before_tree`）；带返回值，多 handler 顺序执行、**最后一个非 None 返回值生效**（`before_provider_request` 例外：patch 依次叠加）。subscribe 订阅者**不可见** hook 型事件。
 
-自有事件（19 种）与 hook 返回值（11 种带返回值）沿用 pi 的 `AgentHarnessEventResultMap`：
+自有事件（19 种 = 11 broadcast + 8 hook）与 hook 返回值沿用 pi 的 `AgentHarnessEventResultMap`：
 
 | 事件 | 时机 | hook 返回值 |
 |---|---|---|
@@ -232,7 +236,7 @@ AgentHarness(
 | `before_agent_start` | prompt 组装后、loop 前 | `{messages?, system_prompt?}` 追加消息/换系统提示 |
 | `context` | 每次 LLM 调用前（接 `transform_context`） | `{messages}` 整体替换 |
 | `before_provider_request` | stream_fn 调用前 | stream options patch（叠加合并，`None` 值删除键） |
-| `before_provider_payload` | 接 core `on_payload` | 替换 payload（观测/脱敏） |
+| `before_provider_payload` | 接 core `on_payload` | 替换 payload（观测/脱敏）；core `langchain_stream` 消费返回值，至少 `system_prompt`/`messages` 字段生效 |
 | `after_provider_response` | 接 core `on_response` | — |
 | `tool_call` | 接 `before_tool_call` | `{block?, reason?}` |
 | `tool_result` | 接 `after_tool_call` | `{content?, details?, is_error?, terminate?}` patch |
@@ -250,7 +254,7 @@ AgentHarness(
 2. **`turn_end`** → 先广播（异常暂存），flush 写缓冲，再抛暂存异常，最后发 `save_point{had_pending_mutations}`。
 3. **`agent_end`** → flush、`phase = idle`、广播、发 `settled{next_turn_count}`。
 
-**run 失败合成**（loop 异常逃逸时）：构造 `stopReason="error"|"aborted"` 的失败 assistant 消息，按 `message_start → message_end → turn_end → agent_end` 完整走一遍 `_handle_agent_event`——事件流闭合 + 失败也落盘。双重失败（合成也抛）包 `AgentHarnessError("unknown")`。
+**run 失败合成**（loop 异常逃逸时）：构造 `stopReason="error"|"aborted"` 的失败 assistant 消息，按 `message_start → message_end → turn_end → agent_end` 完整走一遍 `_handle_agent_event`——事件流闭合 + 失败也落盘。双重失败（合成也抛）包 `AgentHarnessError("unknown")`，`cause` 为 `ExceptionGroup` 同时保留原错与合成错。
 
 ### 4.5 turn state 快照与 prepare_next_turn
 
@@ -258,9 +262,9 @@ AgentHarness(
 
 ### 4.6 API 面
 
-`prompt(text, images?) -> AssistantMessage`（含 next_turn 注入 + `before_agent_start` hook）、`skill(name, additional_instructions?)`、`prompt_from_template(name, args)`、`steer/follow_up/next_turn`、`append_message`、`compact(custom_instructions?)`、`navigate_tree(target_id, summarize?/custom_instructions?/label?)`、`abort() -> {cleared_steer, cleared_follow_up}`、`wait_for_idle()`、getter/setter × {model, thinking_level, tools, active_tools, resources, stream_options, steering_mode, follow_up_mode}。
+`prompt(text, images?) -> AssistantMessage`（含 next_turn 注入 + `before_agent_start` hook）、`skill(name, additional_instructions?)`、`prompt_from_template(name, args)`、`steer/follow_up/next_turn`、`append_message`、`compact(custom_instructions?)`、`navigate_tree(target_id, summarize?/custom_instructions?/label?)`、`abort() -> {cleared_steer, cleared_follow_up}`、`wait_for_idle()`、公开属性 × {model, thinking_level, tools, active_tools, resources, stream_options, steering_mode, follow_up_mode}（pi 为 getter/setter；Python 直接属性赋值无克隆语义，turn 内安全仅因 turn state 深拷贝）。
 
-工具名唯一性与 active 名单校验（`invalid_argument`）；`abort()` 清两队列 + 触发 run abort controller + 等 idle，收集全部错误后聚合上抛。
+工具名唯一性与 active 名单校验（`invalid_argument`）；`abort()` 清两队列 + 触发 run abort controller + 等 idle + 发 `abort` 事件；三步各自 try/catch，收集全部错误后聚合上抛（单错误直抛，多错误 `ExceptionGroup` → code=`hook`）。
 
 ---
 

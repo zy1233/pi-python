@@ -336,3 +336,233 @@ async def _tool_once_stream(
     stream.set_final_message(partial)
     stream.end()
     return stream
+
+
+@pytest.mark.asyncio
+async def test_next_turn_queue_rolls_back_when_queue_update_fails():
+    session = await _memory_session()
+    harness = AgentHarness(session=session, model=_model(), stream_fn=mock_text_stream)
+
+    def listener(event, signal=None):
+        if event.type == "queue_update" and harness.phase == "turn" and not event.nextTurn:
+            raise RuntimeError("queue boom")
+
+    harness.subscribe(listener)
+    await harness.next_turn("queued")
+
+    with pytest.raises(AgentHarnessError) as exc_info:
+        await harness.prompt("prompt")
+
+    assert exc_info.value.code == "hook"
+    assert [m.content for m in harness.next_turn_queue] == ["queued"]
+
+
+@pytest.mark.asyncio
+async def test_steer_and_follow_up_reject_idle_enqueue():
+    session = await _memory_session()
+    harness = AgentHarness(session=session, model=_model(), stream_fn=mock_text_stream)
+
+    with pytest.raises(AgentHarnessError) as exc_info:
+        await harness.steer("x")
+    assert exc_info.value.code == "invalid_state"
+
+    with pytest.raises(AgentHarnessError) as exc_info:
+        await harness.follow_up("x")
+    assert exc_info.value.code == "invalid_state"
+
+
+@pytest.mark.asyncio
+async def test_steer_queue_drains_and_rolls_back_on_emit_failure():
+    import asyncio
+
+    class EchoParams(BaseModel):
+        message: str = ""
+
+    async def echo(_id, params, signal, on_update):
+        return AgentToolResult(content=[{"type": "text", "text": "ok"}], details={})
+
+    session = await _memory_session()
+    seen: list[str] = []
+    steer_enqueued = False
+    ready = asyncio.Event()
+
+    async def recording_stream(model, context, options=None):
+        seen.extend([m.content for m in context.messages if getattr(m, "role", None) == "user"])
+        if any(getattr(m, "role", None) == "toolResult" for m in context.messages):
+            return await mock_text_stream(model, context, options)
+        ready.set()
+        await asyncio.sleep(0.05)
+        return await _tool_once_stream(model, context, options)
+
+    harness = AgentHarness(
+        session=session,
+        model=_model(),
+        stream_fn=recording_stream,
+        tools=[SimpleTool("echo", "", "Echo", EchoParams, echo)],
+    )
+
+    def listener(event, signal=None):
+        nonlocal steer_enqueued
+        if event.type == "queue_update" and event.steer:
+            steer_enqueued = True
+        if event.type == "queue_update" and steer_enqueued and not event.steer:
+            raise RuntimeError("steer drain boom")
+
+    harness.subscribe(listener)
+    run_task = asyncio.create_task(harness.prompt("go"))
+    await ready.wait()
+    await harness.steer("steered")
+    result = await run_task
+
+    assert result.stopReason == "error"
+    assert "steer drain boom" in (result.errorMessage or "")
+    assert [m.content for m in harness.steer_queue] == ["steered"]
+    assert "steered" not in seen
+
+
+@pytest.mark.asyncio
+async def test_tool_call_hook_can_block_execution():
+    class EchoParams(BaseModel):
+        message: str = ""
+
+    async def echo(_id, params, signal, on_update):
+        raise AssertionError("tool should not run")
+
+    tool = SimpleTool("echo", "", "Echo", EchoParams, echo)
+    session = await _memory_session()
+    harness = AgentHarness(
+        session=session,
+        model=_model(),
+        stream_fn=_tool_once_stream,
+        tools=[tool],
+    )
+    harness.on("tool_call", lambda _event: {"block": True, "reason": "blocked"})
+    await harness.prompt("use tool")
+
+    context = await session.build_context()
+    tool_results = [m for m in context.messages if getattr(m, "role", None) == "toolResult"]
+    assert len(tool_results) == 1
+    assert tool_results[0].isError is True
+    assert "blocked" in tool_results[0].content[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_abort_clears_queues_and_emits_abort_event():
+    import asyncio
+
+    class EchoParams(BaseModel):
+        message: str = ""
+
+    async def echo(_id, params, signal, on_update):
+        return AgentToolResult(content=[{"type": "text", "text": "ok"}], details={})
+
+    started = asyncio.Event()
+
+    async def slow_two_turn_stream(model, context, options=None):
+        if not any(getattr(m, "role", None) == "toolResult" for m in context.messages):
+            started.set()
+            await asyncio.sleep(0.05)
+            return await _tool_once_stream(model, context, options)
+        return await mock_text_stream(model, context, options)
+
+    session = await _memory_session()
+    harness = AgentHarness(
+        session=session,
+        model=_model(),
+        stream_fn=slow_two_turn_stream,
+        tools=[SimpleTool("echo", "", "Echo", EchoParams, echo)],
+    )
+    events: list[str] = []
+    harness.subscribe(lambda event, signal=None: events.append(event.type))
+
+    run_task = asyncio.create_task(harness.prompt("go"))
+    await started.wait()
+    await harness.steer("steer-me")
+    await harness.follow_up("follow-me")
+    cleared = await harness.abort()
+    await run_task
+
+    assert [m.content for m in cleared["cleared_steer"]] == ["steer-me"]
+    assert [m.content for m in cleared["cleared_follow_up"]] == ["follow-me"]
+    assert events.count("abort") == 1
+    assert harness.steer_queue == []
+    assert harness.follow_up_queue == []
+
+
+@pytest.mark.asyncio
+async def test_abort_aggregates_hook_errors_from_multiple_steps():
+    session = await _memory_session()
+    harness = AgentHarness(session=session, model=_model(), stream_fn=mock_text_stream)
+
+    def listener(event, signal=None):
+        if event.type == "queue_update":
+            raise RuntimeError("queue boom")
+        if event.type == "abort":
+            raise RuntimeError("abort boom")
+
+    harness.subscribe(listener)
+    with pytest.raises(AgentHarnessError) as exc_info:
+        await harness.abort()
+
+    assert exc_info.value.code == "hook"
+    cause = exc_info.value.__cause__
+    assert isinstance(cause, ExceptionGroup)
+    assert len(cause.exceptions) == 2
+
+
+@pytest.mark.asyncio
+async def test_turn_end_broadcast_failure_still_flushes_pending_writes():
+    class EchoParams(BaseModel):
+        message: str = ""
+
+    async def echo(_id, params, signal, on_update):
+        return AgentToolResult(content=[{"type": "text", "text": "ok"}], details={})
+
+    session = await _memory_session()
+    harness = AgentHarness(
+        session=session,
+        model=_model("first"),
+        stream_fn=_tool_once_stream,
+        tools=[SimpleTool("echo", "", "Echo", EchoParams, echo)],
+    )
+
+    async def change_model(_event):
+        await harness.set_model(_model("second"))
+
+    harness.on("tool_call", change_model)
+
+    def listener(event, signal=None):
+        if event.type == "turn_end":
+            raise RuntimeError("turn_end boom")
+
+    harness.subscribe(listener)
+    with pytest.raises(AgentHarnessError):
+        await harness.prompt("go")
+
+    model_changes = [e for e in await session.get_entries() if e.type == "model_change"]
+    assert len(model_changes) == 1
+    assert model_changes[0].modelId == "second"
+
+
+@pytest.mark.asyncio
+async def test_double_run_failure_raises_unknown_with_both_causes():
+    async def exploding_stream(model, context, options=None):
+        raise RuntimeError("boom")
+
+    session = await _memory_session()
+    harness = AgentHarness(session=session, model=_model(), stream_fn=exploding_stream)
+
+    def listener(event, signal=None):
+        if event.type == "message_end" and getattr(event.message, "stopReason", None) == "error":
+            raise RuntimeError("persist boom")
+
+    harness.subscribe(listener)
+    with pytest.raises(AgentHarnessError) as exc_info:
+        await harness.prompt("go")
+
+    assert exc_info.value.code == "unknown"
+    cause = exc_info.value.__cause__
+    assert isinstance(cause, ExceptionGroup)
+    assert len(cause.exceptions) == 2
+    assert str(cause.exceptions[0]) == "boom"
+    assert str(cause.exceptions[1]) == "persist boom"

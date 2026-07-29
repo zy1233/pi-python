@@ -372,6 +372,16 @@ class AgentHarness:
             tools=list(turn_state.active_tools),
         )
 
+    def _raise_hook_errors(self, errors: list[Exception]) -> None:
+        if not errors:
+            return
+        if len(errors) == 1:
+            raise normalize_harness_error(errors[0], "hook")
+        raise normalize_harness_error(
+            ExceptionGroup("AgentHarness hook failures", errors),
+            "hook",
+        )
+
     async def _drain_queue(self, queue: list[AgentMessage], mode: QueueMode) -> list[AgentMessage]:
         count = len(queue) if mode == "all" else min(1, len(queue))
         messages = queue[:count]
@@ -605,7 +615,11 @@ class AgentHarness:
         if self.next_turn_queue:
             queued = self.next_turn_queue[:]
             self.next_turn_queue.clear()
-            await self._emit_queue_update()
+            try:
+                await self._emit_queue_update()
+            except Exception:
+                self.next_turn_queue[:0] = queued
+                raise
             messages = [*queued, messages[0]]
         before_result = await self._emit_hook(
             BeforeAgentStartEvent(
@@ -650,12 +664,23 @@ class AgentHarness:
                 self._create_stream_fn(get_turn_state),
             )
         except Exception as e:
-            new_messages = await self._emit_run_failure(
-                active_turn_state.model,
-                e,
-                controller.signal.aborted,
-                controller.signal,
-            )
+            try:
+                new_messages = await self._emit_run_failure(
+                    active_turn_state.model,
+                    e,
+                    controller.signal.aborted,
+                    controller.signal,
+                )
+            except Exception as synth_e:
+                group = ExceptionGroup(
+                    "AgentHarness run failure synthesis failed",
+                    [e, synth_e],
+                )
+                raise AgentHarnessError(
+                    "unknown",
+                    "AgentHarness run failed and failure synthesis also failed",
+                    group,
+                ) from group
         finally:
             self._run_abort_controller = None
             await self._flush_pending_session_writes()
@@ -671,6 +696,9 @@ class AgentHarness:
         self.phase = "turn"
         try:
             return await self._execute_turn(await self._create_turn_state(), text, images)
+        except AgentHarnessError:
+            self.phase = "idle"
+            raise
         except Exception as e:
             self.phase = "idle"
             raise normalize_harness_error(e, "unknown") from e
@@ -767,18 +795,28 @@ class AgentHarness:
             await asyncio.sleep(0)
 
     async def abort(self) -> dict[str, list[AgentMessage]]:
+        from pi_agent_harness.types import AbortEvent
+
         cleared_steer = list(self.steer_queue)
         cleared_follow_up = list(self.follow_up_queue)
         self.steer_queue.clear()
         self.follow_up_queue.clear()
-        self._run_abort_controller and self._run_abort_controller.abort()
-        await self._emit_queue_update()
-        await self.wait_for_idle()
-        from pi_agent_harness.types import AbortEvent
+        if self._run_abort_controller:
+            self._run_abort_controller.abort()
 
-        await self._emit_any(
-            AbortEvent(clearedSteer=cleared_steer, clearedFollowUp=cleared_follow_up)
-        )
+        errors: list[Exception] = []
+        for step in (
+            self._emit_queue_update,
+            self.wait_for_idle,
+            lambda: self._emit_any(
+                AbortEvent(clearedSteer=cleared_steer, clearedFollowUp=cleared_follow_up)
+            ),
+        ):
+            try:
+                await step()
+            except Exception as e:
+                errors.append(e)
+        self._raise_hook_errors(errors)
         return {"cleared_steer": cleared_steer, "cleared_follow_up": cleared_follow_up}
 
     async def _maybe_auto_compact(self, signal: Any | None = None) -> None:

@@ -91,28 +91,31 @@ H2 骨架忠实:§4.4 三条持久化时序不变量(message_end 先落盘后广
 
 ### H2-4. next_turn 队列 drain 后无回滚
 
-- [ ] 待修复 ·(中 · 代码审查)
+- [x] **已修复(2026-07-29)** ·(中 · 运行时探针实测)
 - 位置:`agent_harness.py` `_execute_turn` 开头(next_turn drain 处)
 - 问题:steer/follow-up 的 `_drain_queue` 有回滚(§4.2 承诺),但 `_execute_turn`
   里 next_turn 是 `clear()` 后 `_emit_queue_update()`——任一订阅者抛异常,
   已取出的 `queued` 永久丢失。pi 在此处 catch → `unshift` 回滚 →
   `normalizeHookError`。
-- 修复方向:与 pi 对齐,emit 失败时 `self.next_turn_queue[:0] = queued` 再抛。
+- 修复:emit 失败时 `self.next_turn_queue[:0] = queued` 再抛。回归测试 ×1
+  (`test_next_turn_queue_rolls_back_when_queue_update_fails`)。
 
 ### H2-5. `abort()` 不聚合错误
 
-- [ ] 待修复 ·(中 · 代码审查)
+- [x] **已修复(2026-07-29)** ·(中 · 运行时探针实测)
 - 位置:`agent_harness.py` `abort()`
 - 问题:设计 §4.6 承诺"收集全部错误后聚合上抛";pi 对
   `emitQueueUpdate / waitForIdle / emit abort` 三步各自 try/catch 收集 errors,
   最后聚合(单错误直抛,多错误 `AggregateError`)为 code=`hook`。实现三步裸调用,
   任一步抛出即中断——后续等待与 `abort` 事件不再执行。
-- 修复方向:三步各自捕获入列;Python 侧用 `ExceptionGroup`(3.11+)或首错误
-  `__cause__` 链聚合后 `normalize_harness_error(..., "hook")`。
+- 修复:三步各自捕获入列;新增 `_raise_hook_errors`,多错误时
+  `ExceptionGroup` → `normalize_harness_error(..., "hook")`。回归测试 ×2
+  (`test_abort_clears_queues_and_emits_abort_event`、
+  `test_abort_aggregates_hook_errors_from_multiple_steps`)。
 
 ### H2-6. `before_provider_payload` 的"替换 payload"在 core 被丢弃
 
-- [ ] 待修复(core 立项)·(中 · 代码审查)
+- [x] **已修复(2026-07-29)** ·(core 最小改动 · 运行时探针实测)
 - 位置:harness 侧 `on_payload` 返回替换值;core
   `pi_agent_core/adapters/langchain_stream.py` L470-483 调用
   `options.on_payload(...)` 后**忽略返回值**
@@ -120,22 +123,23 @@ H2 骨架忠实:§4.4 三条持久化时序不变量(message_end 先落盘后广
   正确返回了替换值(H2-3 修复后为链式结果),但 core 丢弃;且该 payload 本是
   描述性 dict,不回写实际请求。当前架构下 hook 只能观测,"替换/脱敏"名不符实
   (pi-ai 的 `onPayload` 返回值是真替换)。
-- 修复方向:按"core 零改动"原则走两步——短期在设计文档 §4.3 将返回值语义改注
-  "观测(替换暂不生效)";core 侧在总审计报告立项:`langchain_stream` 消费
-  `on_payload` 返回值(至少对 system_prompt/messages 字段生效)后,再恢复文档
-  承诺。
+- 修复:`langchain_stream` 消费 `on_payload` 返回值,至少对
+  `system_prompt`/`messages` 字段生效后再传给 `chat.astream`;设计文档 §4.3
+  同步恢复"替换 payload"承诺。回归测试 ×1
+  (`test_on_payload_return_value_replaces_outgoing_request`)。
 
 ### H2-7. 双重失败缺 AggregateError 语义
 
-- [ ] 待修复 ·(低 · 代码审查)
+- [x] **已修复(2026-07-29)** ·(低 · 运行时探针实测)
 - 位置:`agent_harness.py` `_execute_turn` except 分支
 - 问题:设计 §4.4 说双重失败(run 失败且失败合成也抛)"包
   `AgentHarnessError("unknown")`"。实现里 `_emit_run_failure` 再抛时第二个异常
   直接传播:① 第一个异常信息完全丢失(pi 用 `AggregateError` 同时保留两个);
   ② 若第二个异常是 `SessionError`,最终 code 会是 `session` 而非承诺的
   `unknown`。
-- 修复方向:except 内再套 try/except,双抛时构造
+- 修复:except 内再套 try/except,双抛时构造
   `AgentHarnessError("unknown", ..., cause=ExceptionGroup([原错, 合成错]))`。
+  回归测试 ×1 (`test_double_run_failure_raises_unknown_with_both_causes`)。
 
 ---
 
@@ -143,7 +147,7 @@ H2 骨架忠实:§4.4 三条持久化时序不变量(message_end 先落盘后广
 
 ### H2-D1. §4.3「subscribe 收到全部 19 种自有事件」不成立
 
-- [~] 待改文档 ·(运行时探针实测,与 pi 语义一致)
+- [x] **已改文档(2026-07-29)** ·(运行时探针实测,与 pi 语义一致)
 - 实际只有 **11 种广播型事件**到达订阅者:`queue_update / save_point / abort /
   settled / after_provider_response / session_compact / session_tree /
   model_update / thinking_level_update / tools_update / resources_update`
@@ -156,20 +160,20 @@ H2 骨架忠实:§4.4 三条持久化时序不变量(message_end 先落盘后广
 
 ### H2-D2. §4.2「steer/follow_up 语义同 Agent」不准
 
-- [~] 待改文档 ·(运行时探针实测)
+- [x] **已改文档(2026-07-29)** ·(运行时探针实测)
 - harness 的 `steer()/follow_up()` 在 idle 时抛 `invalid_state`(pi 语义);
   `Agent.steer()` 允许 idle 入队、由 `continue_()` 消费。两者语义不同。
 
 ### H2-D3. §1.3 接线表 `before_llm_call + ContextBudget` 行过时
 
-- [~] 待改文档 ·(代码审查)
+- [x] **已改文档(2026-07-29)** ·(代码审查)
 - 表中写"自动压缩触发信号(§5.6)",但 H3 实施走的是 §5.6 自述的
   turn_end 后 `estimate_context_tokens` 路径,`before_llm_call`/`ContextBudget`
   在 harness 中完全未使用。该 core 接线点当前空置,表行应改注。
 
 ### H2-D4. §4.1 构造签名与 §4.6 setter 形式与实现不一致
 
-- [~] 待改文档 ·(代码审查)
+- [x] **已改文档(2026-07-29)** ·(代码审查)
 - ① 实现的 `env` 为可选 `Any`(文档为必填首参 `ExecutionEnv`);② 实现新增
   `max_turns` / `tool_timeout` 构造参数(Python 扩展,文档未记);③
   `stream_options / steering_mode / follow_up_mode` 以公开属性代替文档所列
@@ -182,11 +186,12 @@ H2 骨架忠实:§4.4 三条持久化时序不变量(message_end 先落盘后广
 
 ## 三、测试缺口(对照 §9 H2 交付判据与 §10 测试策略)
 
-- [ ] §10 明确列"hook 异常回滚队列",但 `test_harness_agent.py` 无任何
-  steer/follow-up 测试——drain、`queue_update` 事件、异常回滚均未覆盖。
-- [ ] `test_tool_hooks_block_or_patch_results` 名义测 block,实际 `tool_call`
-  handler 返回 None,block 路径未测。
-- [ ] `abort()` 无测试;turn_end 不变量 2(广播异常暂存后仍 flush)无直接测试。
+- [x] §10 明确列"hook 异常回滚队列",`test_harness_agent.py` 已补 steer/follow-up
+  drain、异常回滚、block、abort、turn_end flush 覆盖(2026-07-29,+8)。
+- [x] `test_tool_hooks_block_or_patch_results` 名义测 block,实际 `tool_call`
+  handler 返回 None,block 路径未测 → 已补 `test_tool_call_hook_can_block_execution`。
+- [x] `abort()` 无测试;turn_end 不变量 2(广播异常暂存后仍 flush)无直接测试
+  → 已补(2026-07-29)。
 - [x] hook 错误归一化、provider hook 链式已随 H2-2/H2-3 补测(2026-07-03,+3)。
 
 ---
@@ -213,8 +218,8 @@ H2 骨架忠实:§4.4 三条持久化时序不变量(message_end 先落盘后广
 |------|------|------|
 | 高(错误语义 / 承诺缺口) | H2-2 hook 错误归一化、H2-3 provider hook 链式 | ✅ 已修复(2026-07-03,回归 +3) |
 | 高(一次性补齐) | H2-1 C4 `AgentMessageProtocol` + README 示例 + C4 勾选 | ✅ 已修复(2026-07-03,回归 +2) |
-| 中(小修) | H2-4 next_turn 回滚、H2-5 abort 聚合 | 待修复 |
-| 中(跨层) | H2-6 payload 替换(文档改注 + core 立项) | 待修复 |
-| 低 | H2-7 双重失败聚合、第四部分杂项 | 待修复 |
-| 文档 | H2-D1 ~ D4 一次文档修订 | 待修复 |
-| 测试 | 第三部分缺口(steer/follow-up/block/abort) | 待补 |
+| 中(小修) | H2-4 next_turn 回滚、H2-5 abort 聚合 | ✅ 已修复(2026-07-29,回归 +3) |
+| 中(跨层) | H2-6 payload 替换(core 消费返回值) | ✅ 已修复(2026-07-29,回归 +1) |
+| 低 | H2-7 双重失败聚合、第四部分杂项 | H2-7 ✅(2026-07-29);杂项仍待 |
+| 文档 | H2-D1 ~ D4 一次文档修订 | ✅ 已修复(2026-07-29) |
+| 测试 | 第三部分缺口(steer/follow-up/block/abort) | ✅ 已补(2026-07-29,+8) |
