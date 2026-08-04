@@ -197,6 +197,8 @@ def _select_first_kept_entry(
 
 
 def _create_split_turn_summary(entries: list[SessionTreeEntry], first_kept_idx: int) -> str | None:
+    from pi_agent_harness.compaction.compaction import serialize_conversation
+
     first_kept = entries[first_kept_idx]
     if isinstance(first_kept, MessageEntry) and first_kept.message.get("role") == "user":
         return None
@@ -216,9 +218,4 @@ def _create_split_turn_summary(entries: list[SessionTreeEntry], first_kept_idx: 
     messages = build_session_context(entries[start_idx:first_kept_idx]).messages
     if not messages:
         return None
-    return "Turn Context:\n" + "\n".join(_serialize_message(message) for message in messages)
-
-
-def _serialize_message(message: AgentMessage) -> str:
-    role = getattr(message, "role", "message")
-    return f"[{role}]: {message}"
+    return "Turn Context:\n" + serialize_conversation(messages)

@@ -55,6 +55,7 @@ from pi_agent_harness.types import (
     BeforeProviderRequestEvent,
     CompactionResult,
     ContextEvent,
+    CustomMessageEntry,
     ExecutionEnv,
     MessageEntry,
     ModelUpdateEvent,
@@ -109,6 +110,15 @@ def _get_result_field(result: Any, name: str, default: Any = None) -> Any:
 
 
 def _editor_text_for_target(entry: Any) -> str | None:
+    if isinstance(entry, CustomMessageEntry):
+        content = entry.content
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return "".join(
+                block.get("text", "") for block in content if block.get("type") == "text"
+            )
+        return None
     if not isinstance(entry, MessageEntry):
         return None
     if entry.message.get("role") != "user":

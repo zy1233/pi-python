@@ -13,9 +13,11 @@ from pi_agent_harness.compaction import (
     CompactionSettings,
     collect_entries_for_branch_summary,
     estimate_context_tokens,
+    prepare_branch_entries,
     prepare_compaction,
 )
-from pi_agent_harness.types import BranchSummaryEntry, CompactionEntry
+from pi_agent_harness.compaction.compaction import build_compaction_prompt, extract_file_details
+from pi_agent_harness.types import AgentHarnessError, BranchSummaryEntry, CompactionEntry
 
 
 def _model(context_window: int = 1_000) -> Model:
@@ -183,6 +185,231 @@ async def test_auto_compact_runs_after_turn_when_enabled():
     await harness.prompt("new request")
 
     assert any(isinstance(entry, CompactionEntry) for entry in await session.get_entries())
+
+
+@pytest.mark.asyncio
+async def test_split_turn_summary_uses_structured_serialization():
+    """Split-turn prefix should use serialize_conversation, not raw repr (H3-1 fix)."""
+    session = await _memory_session()
+    await session.append_message(UserMessage(content="start turn", timestamp=1))
+    await session.append_message(
+        AssistantMessage(
+            content=[
+                {"type": "text", "text": "partial answer"},
+                {"type": "toolCall", "id": "c1", "name": "read", "arguments": {"path": "f.py"}},
+            ],
+            stopReason="toolUse",
+            timestamp=2,
+        )
+    )
+    await session.append_message(
+        ToolResultMessage(
+            toolCallId="c1",
+            toolName="read",
+            content=[{"type": "text", "text": "file content"}],
+            timestamp=3,
+        )
+    )
+    await session.append_message(
+        AssistantMessage(
+            content=[{"type": "text", "text": "continued " * 30}],
+            timestamp=4,
+        )
+    )
+    await session.append_message(UserMessage(content="next turn", timestamp=5))
+    await session.append_message(
+        AssistantMessage(content=[{"type": "text", "text": "final"}], timestamp=6)
+    )
+
+    preparation = prepare_compaction(
+        await session.get_branch(),
+        CompactionSettings(keep_recent_tokens=5),
+    )
+    assert preparation is not None
+    if preparation.splitTurnSummary:
+        assert "Turn Context:" in preparation.splitTurnSummary
+        assert "[User]:" in preparation.splitTurnSummary
+        assert "AssistantMessage" not in preparation.splitTurnSummary
+
+
+@pytest.mark.asyncio
+async def test_build_compaction_prompt_update_mode_includes_existing_summary():
+    """Iterative compaction uses UPDATE mode with existing summary."""
+    session = await _memory_session()
+    await session.append_message(UserMessage(content="first request", timestamp=1))
+    await session.append_message(
+        AssistantMessage(content=[{"type": "text", "text": "first answer"}], timestamp=2)
+    )
+    await session.append_compaction("Old summary text", "dummy", 100)
+    await session.append_message(UserMessage(content="second request", timestamp=3))
+    await session.append_message(
+        AssistantMessage(content=[{"type": "text", "text": "second answer"}], timestamp=4)
+    )
+    await session.append_message(UserMessage(content="third request", timestamp=5))
+    await session.append_message(
+        AssistantMessage(content=[{"type": "text", "text": "third answer"}], timestamp=6)
+    )
+
+    preparation = prepare_compaction(
+        await session.get_branch(),
+        CompactionSettings(keep_recent_tokens=5),
+    )
+    assert preparation is not None
+    assert preparation.previousSummary == "Old summary text"
+    prompt = build_compaction_prompt(preparation)
+    assert "Update the existing summary" in prompt
+    assert "Old summary text" in prompt
+
+
+def test_extract_file_details_accumulates_and_inherits():
+    """extract_file_details collects from toolCalls and inherits previous details."""
+    messages = [
+        AssistantMessage(
+            content=[
+                {"type": "toolCall", "id": "c1", "name": "read", "arguments": {"path": "/a.py"}},
+                {"type": "toolCall", "id": "c2", "name": "write", "arguments": {"path": "/b.py"}},
+            ],
+            timestamp=1,
+        ),
+        UserMessage(content="ignored", timestamp=2),
+        AssistantMessage(
+            content=[
+                {"type": "toolCall", "id": "c3", "name": "edit", "arguments": {"path": "/c.py"}},
+            ],
+            timestamp=3,
+        ),
+    ]
+    previous = {"readFiles": ["/old.py"], "modifiedFiles": []}
+    details = extract_file_details(messages, previous)
+    assert "/a.py" in details["readFiles"]
+    assert "/old.py" in details["readFiles"]
+    assert "/b.py" in details["modifiedFiles"]
+    assert "/c.py" in details["modifiedFiles"]
+
+
+@pytest.mark.asyncio
+async def test_navigate_tree_hook_can_cancel():
+    """session_before_tree hook can cancel navigation."""
+    session = await _memory_session()
+    await session.append_message(UserMessage(content="root", timestamp=1))
+    target_id = await session.append_message(UserMessage(content="target", timestamp=2))
+
+    harness = AgentHarness(session=session, model=_model(), stream_fn=mock_text_stream)
+    harness.on("session_before_tree", lambda event: {"cancel": True})
+
+    with pytest.raises(AgentHarnessError) as exc_info:
+        await harness.navigate_tree(target_id)
+    assert exc_info.value.code == "branch_summary"
+    assert await session.get_leaf_id() == target_id
+
+
+@pytest.mark.asyncio
+async def test_navigate_tree_hook_supplies_summary_and_label():
+    """session_before_tree hook can supply summary and label, skipping LLM."""
+    session = await _memory_session()
+    root_id = await session.append_message(UserMessage(content="root", timestamp=1))
+    branch_a = await session.append_message(UserMessage(content="branch a", timestamp=2))
+    await session.move_to(root_id)
+    await session.append_message(UserMessage(content="branch b", timestamp=3))
+
+    async def fail_stream(model, context, options=None):
+        raise AssertionError("stream should not be called")
+
+    harness = AgentHarness(session=session, model=_model(), stream_fn=fail_stream)
+
+    def hook(event):
+        return {"summary": "HOOK BRANCH SUMMARY", "label": "my-label"}
+
+    harness.on("session_before_tree", hook)
+
+    result = await harness.navigate_tree(branch_a, {"summarize": True})
+    assert result.summary == "HOOK BRANCH SUMMARY"
+    assert await session.get_label(branch_a) == "my-label"
+
+
+@pytest.mark.asyncio
+async def test_navigate_tree_custom_message_target_returns_editor_text():
+    """navigate_tree on custom_message target returns editorText and moves to parent (H3-2)."""
+    session = await _memory_session()
+    root_id = await session.append_message(UserMessage(content="root", timestamp=1))
+    cm_id = await session.append_custom_message_entry(
+        custom_type="prompt", content="custom prompt text", display=True
+    )
+
+    harness = AgentHarness(session=session, model=_model(), stream_fn=mock_text_stream)
+    result = await harness.navigate_tree(cm_id)
+
+    assert result.editorText == "custom prompt text"
+    assert result.leafId == root_id
+
+
+@pytest.mark.asyncio
+async def test_compact_raises_when_nothing_to_compact():
+    """compact() raises when there are fewer than 2 message entries."""
+    session = await _memory_session()
+    await session.append_message(UserMessage(content="only one", timestamp=1))
+
+    harness = AgentHarness(
+        session=session,
+        model=_model(),
+        stream_fn=mock_text_stream,
+        compaction=CompactionSettings(keep_recent_tokens=1),
+    )
+
+    with pytest.raises(AgentHarnessError) as exc_info:
+        await harness.compact()
+    assert exc_info.value.code == "compaction"
+    assert "Nothing to compact" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_auto_compact_failure_does_not_propagate_to_prompt():
+    """auto_compact failure is silently swallowed; prompt() still returns."""
+    session = await _memory_session()
+    await session.append_message(UserMessage(content="old " * 200, timestamp=1))
+
+    call_count = 0
+
+    async def failing_compact_stream(model, context, options=None):
+        nonlocal call_count
+        call_count += 1
+        if call_count > 1:
+            raise RuntimeError("compaction LLM failed")
+        return await mock_text_stream(model, context, options)
+
+    harness = AgentHarness(
+        session=session,
+        model=_model(context_window=50),
+        stream_fn=failing_compact_stream,
+        compaction=CompactionSettings(
+            reserve_tokens=10,
+            keep_recent_tokens=1,
+            auto_compact=True,
+        ),
+    )
+
+    result = await harness.prompt("new request")
+    assert result.role == "assistant"
+    assert call_count >= 2
+
+
+@pytest.mark.asyncio
+async def test_prepare_branch_entries_respects_token_budget():
+    """prepare_branch_entries trims from head when budget is exceeded."""
+    session = await _memory_session()
+    ids = []
+    for i in range(10):
+        ids.append(
+            await session.append_message(UserMessage(content=f"message {i} " * 50, timestamp=i))
+        )
+
+    all_entries = await session.get_branch()
+    small_budget = prepare_branch_entries(all_entries, token_budget=50)
+    full_budget = prepare_branch_entries(all_entries, token_budget=999_999)
+
+    assert len(small_budget) < len(full_budget)
+    assert len(full_budget) == len(all_entries)
+    assert small_budget[-1].id == all_entries[-1].id
 
 
 def _summary_stream(text: str):
