@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -74,6 +75,8 @@ from pi_agent_harness.types import (
     ToolsUpdateEvent,
     normalize_harness_error,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def _maybe_await(value: Any) -> Any:
@@ -852,7 +855,7 @@ class AgentHarness:
                 finally:
                     self._set_phase(previous_phase)
         except Exception:
-            # Auto-compaction is best-effort; manual compact() still surfaces errors.
+            logger.warning("Auto-compaction failed (best-effort); skipping", exc_info=True)
             return
 
     async def _compact_internal(
@@ -952,7 +955,9 @@ class AgentHarness:
         custom_instructions = _get_result_field(
             hook_result, "customInstructions", custom_instructions
         )
-        branch_summary = _get_result_field(hook_result, "summary")
+        hook_summary = _get_result_field(hook_result, "summary")
+        summary_from_hook = hook_summary is not None
+        branch_summary = hook_summary
         summary_text: str | None = None
         if summarize and branch_summary is None:
             abandoned = collect_entries_for_branch_summary(
@@ -977,9 +982,7 @@ class AgentHarness:
             await self.session.append_label(target_id, label)
         branch_entry_id = await self.session.move_to(
             leaf_id,
-            {"summary": summary_text, "fromHook": hook_result is not None}
-            if summary_text
-            else None,
+            {"summary": summary_text, "fromHook": summary_from_hook} if summary_text else None,
         )
         result = NavigateTreeResult(
             targetId=target_id,

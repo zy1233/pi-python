@@ -16,7 +16,11 @@ from pi_agent_harness.compaction import (
     prepare_branch_entries,
     prepare_compaction,
 )
-from pi_agent_harness.compaction.compaction import build_compaction_prompt, extract_file_details
+from pi_agent_harness.compaction.compaction import (
+    build_compaction_prompt,
+    extract_file_details,
+    format_file_details,
+)
 from pi_agent_harness.types import AgentHarnessError, BranchSummaryEntry, CompactionEntry
 
 
@@ -410,6 +414,169 @@ async def test_prepare_branch_entries_respects_token_budget():
     assert len(small_budget) < len(full_budget)
     assert len(full_budget) == len(all_entries)
     assert small_budget[-1].id == all_entries[-1].id
+
+
+@pytest.mark.asyncio
+async def test_navigate_tree_from_hook_false_when_summary_from_llm():
+    """fromHook is False when hook only provides a label but summary comes from LLM (H3-3)."""
+    session = await _memory_session()
+    root_id = await session.append_message(UserMessage(content="root", timestamp=1))
+    branch_a = await session.append_message(UserMessage(content="branch a", timestamp=2))
+    await session.move_to(root_id)
+    await session.append_message(UserMessage(content="branch b", timestamp=3))
+
+    harness = AgentHarness(
+        session=session, model=_model(), stream_fn=_summary_stream("LLM SUMMARY")
+    )
+    harness.on("session_before_tree", lambda event: {"label": "tag-only"})
+
+    result = await harness.navigate_tree(branch_a, {"summarize": True})
+    assert result.summary == "Summary of abandoned branch:\n\nLLM SUMMARY"
+    entries = await session.get_entries()
+    bs_entry = next(e for e in entries if isinstance(e, BranchSummaryEntry))
+    assert bs_entry.fromHook is False
+
+
+@pytest.mark.asyncio
+async def test_navigate_tree_from_hook_true_when_hook_supplies_summary():
+    """fromHook is True only when the hook actually supplies a summary (H3-3)."""
+    session = await _memory_session()
+    root_id = await session.append_message(UserMessage(content="root", timestamp=1))
+    branch_a = await session.append_message(UserMessage(content="branch a", timestamp=2))
+    await session.move_to(root_id)
+    await session.append_message(UserMessage(content="branch b", timestamp=3))
+
+    async def fail_stream(model, context, options=None):
+        raise AssertionError("stream should not be called")
+
+    harness = AgentHarness(session=session, model=_model(), stream_fn=fail_stream)
+    harness.on("session_before_tree", lambda event: {"summary": "HOOK ONLY"})
+
+    await harness.navigate_tree(branch_a, {"summarize": True})
+    entries = await session.get_entries()
+    bs_entry = next(e for e in entries if isinstance(e, BranchSummaryEntry))
+    assert bs_entry.fromHook is True
+
+
+@pytest.mark.asyncio
+async def test_cut_point_skips_backward_over_non_message_entries():
+    """Cut point step 3: non-message entries before the cut are absorbed (H3-4)."""
+    session = await _memory_session()
+    await session.append_message(UserMessage(content="old message " * 80, timestamp=1))
+    mc_id = await session.append_model_change("new-provider", "new-model")
+    await session.append_message(
+        AssistantMessage(content=[{"type": "text", "text": "old answer " * 80}], timestamp=3)
+    )
+    await session.append_message(UserMessage(content="recent", timestamp=4))
+    await session.append_message(
+        AssistantMessage(content=[{"type": "text", "text": "answer"}], timestamp=5)
+    )
+
+    preparation = prepare_compaction(
+        await session.get_branch(),
+        CompactionSettings(keep_recent_tokens=5),
+    )
+    assert preparation is not None
+    assert preparation.firstKeptEntryId == mc_id
+
+
+@pytest.mark.asyncio
+async def test_compact_summary_includes_file_details_block():
+    """Compaction summary includes <read-files>/<modified-files> blocks (H3-5)."""
+    session = await _memory_session()
+    await session.append_message(UserMessage(content="old request", timestamp=1))
+    await session.append_message(
+        AssistantMessage(
+            content=[
+                {"type": "toolCall", "id": "c1", "name": "read", "arguments": {"path": "/f.py"}},
+                {"type": "toolCall", "id": "c2", "name": "write", "arguments": {"path": "/g.py"}},
+            ],
+            stopReason="toolUse",
+            timestamp=2,
+        )
+    )
+    await session.append_message(
+        ToolResultMessage(
+            toolCallId="c1",
+            toolName="read",
+            content=[{"type": "text", "text": "ok"}],
+            timestamp=3,
+        )
+    )
+    await session.append_message(
+        ToolResultMessage(
+            toolCallId="c2",
+            toolName="write",
+            content=[{"type": "text", "text": "ok"}],
+            timestamp=4,
+        )
+    )
+    await session.append_message(UserMessage(content="recent", timestamp=5))
+    await session.append_message(
+        AssistantMessage(content=[{"type": "text", "text": "final"}], timestamp=6)
+    )
+
+    harness = AgentHarness(
+        session=session,
+        model=_model(),
+        stream_fn=_summary_stream("BASE SUMMARY"),
+        compaction=CompactionSettings(keep_recent_tokens=5),
+    )
+    result = await harness.compact()
+
+    assert "<read-files>" in result.summary
+    assert "/f.py" in result.summary
+    assert "<modified-files>" in result.summary
+    assert "/g.py" in result.summary
+    assert result.details["readFiles"] == ["/f.py"]
+    assert result.details["modifiedFiles"] == ["/g.py"]
+
+
+def test_format_file_details_produces_xml_blocks():
+    """format_file_details produces <read-files>/<modified-files> XML blocks."""
+    details = {"readFiles": ["/a.py", "/b.py"], "modifiedFiles": ["/c.py"]}
+    text = format_file_details(details)
+    assert "<read-files>" in text
+    assert "/a.py" in text
+    assert "<modified-files>" in text
+    assert "/c.py" in text
+
+    empty = format_file_details({"readFiles": [], "modifiedFiles": []})
+    assert empty == ""
+
+
+@pytest.mark.asyncio
+async def test_auto_compact_logs_warning_on_failure(caplog):
+    """auto_compact logs a warning when compaction fails (H3-9)."""
+    import logging
+
+    session = await _memory_session()
+    await session.append_message(UserMessage(content="old " * 200, timestamp=1))
+
+    call_count = 0
+
+    async def failing_compact_stream(model, context, options=None):
+        nonlocal call_count
+        call_count += 1
+        if call_count > 1:
+            raise RuntimeError("compaction LLM failed")
+        return await mock_text_stream(model, context, options)
+
+    harness = AgentHarness(
+        session=session,
+        model=_model(context_window=50),
+        stream_fn=failing_compact_stream,
+        compaction=CompactionSettings(
+            reserve_tokens=10,
+            keep_recent_tokens=1,
+            auto_compact=True,
+        ),
+    )
+
+    with caplog.at_level(logging.WARNING, logger="pi_agent_harness.agent_harness"):
+        await harness.prompt("new request")
+
+    assert any("Auto-compaction failed" in record.message for record in caplog.records)
 
 
 def _summary_stream(text: str):

@@ -158,6 +158,10 @@ def _entry_to_message(entry: SessionTreeEntry) -> AgentMessage | None:
     return None
 
 
+def _is_message_bearing_entry(entry: SessionTreeEntry) -> bool:
+    return isinstance(entry, MessageEntry | CustomMessageEntry | BranchSummaryEntry)
+
+
 def _is_legal_cut_entry(entry: SessionTreeEntry) -> bool:
     if isinstance(entry, CustomMessageEntry | BranchSummaryEntry):
         return True
@@ -189,11 +193,16 @@ def _select_first_kept_entry(
             break
     if candidate_idx is None:
         return None
+    cut_idx: int | None = None
     for idx in range(candidate_idx, len(entries)):
-        entry = entries[idx]
-        if _is_legal_cut_entry(entry):
-            return entry
-    return None
+        if _is_legal_cut_entry(entries[idx]):
+            cut_idx = idx
+            break
+    if cut_idx is None:
+        return None
+    while cut_idx > 0 and not _is_message_bearing_entry(entries[cut_idx - 1]):
+        cut_idx -= 1
+    return entries[cut_idx]
 
 
 def _create_split_turn_summary(entries: list[SessionTreeEntry], first_kept_idx: int) -> str | None:

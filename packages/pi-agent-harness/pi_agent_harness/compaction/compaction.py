@@ -59,6 +59,7 @@ async def compact_preparation(
     if preparation.splitTurnSummary:
         summary = f"{summary}\n\n{preparation.splitTurnSummary}".strip()
     details = extract_file_details(preparation.messages, preparation.previousDetails)
+    summary = _append_file_details_to_summary(summary, details)
     return CompactionResult(
         summary=summary,
         firstKeptEntryId=preparation.firstKeptEntryId,
@@ -230,6 +231,24 @@ def _content_text(content: Any) -> str:
         text = " ".join(str(block.get("text", "[image]")) for block in content)
         return text[:2000]
     return str(content)[:2000]
+
+
+def format_file_details(details: dict[str, list[str]]) -> str:
+    parts: list[str] = []
+    read_files = details.get("readFiles", [])
+    modified_files = details.get("modifiedFiles", [])
+    if read_files:
+        parts.append("<read-files>\n" + "\n".join(read_files) + "\n</read-files>")
+    if modified_files:
+        parts.append("<modified-files>\n" + "\n".join(modified_files) + "\n</modified-files>")
+    return "\n".join(parts)
+
+
+def _append_file_details_to_summary(summary: str, details: dict[str, list[str]]) -> str:
+    block = format_file_details(details)
+    if block:
+        return f"{summary}\n\n{block}"
+    return summary
 
 
 def _assistant_text(message: AssistantMessage) -> str:
