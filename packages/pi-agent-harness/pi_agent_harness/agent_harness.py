@@ -887,6 +887,8 @@ class AgentHarness:
         self._set_phase("compaction")
         try:
             return await self._compact_internal(custom_instructions)
+        except AgentHarnessError:
+            raise
         except Exception as e:
             raise normalize_harness_error(e, "compaction") from e
         finally:
@@ -905,6 +907,8 @@ class AgentHarness:
                 or options.get("customInstructions"),
                 label=options.get("label"),
             )
+        except AgentHarnessError:
+            raise
         except Exception as e:
             raise normalize_harness_error(e, "branch_summary") from e
         finally:
