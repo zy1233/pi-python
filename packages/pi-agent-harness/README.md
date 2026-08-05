@@ -15,7 +15,7 @@ lightweight core package:
 Install it alongside core:
 
 ```bash
-pip install pi-agent-core pi-agent-harness
+pip install pi-agent-core-lc pi-agent-harness-lc
 ```
 
 For local development from the monorepo:

@@ -1,6 +1,9 @@
 # pi-python
 
 [![CI](https://github.com/zy1233/pi-python/actions/workflows/ci.yml/badge.svg)](https://github.com/zy1233/pi-python/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/pi-agent-core-lc)](https://pypi.org/project/pi-agent-core-lc/)
+[![Python](https://img.shields.io/pypi/pyversions/pi-agent-core-lc)](https://pypi.org/project/pi-agent-core-lc/)
+[![License](https://img.shields.io/pypi/l/pi-agent-core-lc)](https://github.com/zy1233/pi-python/blob/main/LICENSE)
 
 > Unofficial project: this repository is not affiliated with, endorsed by, or maintained by the official [pi](https://github.com/earendil-works/pi) project or its maintainers.
 
@@ -10,8 +13,8 @@ The loop semantics, event protocol, and tool execution are faithful ports of pi;
 
 This repository is a monorepo with two Python distributions:
 
-- `pi-agent-core` / `pi_agent_core`: lightweight core loop, messages, tools, adapters.
-- `pi-agent-harness` / `pi_agent_harness`: Phase 3 harness runtime, sessions, queues, hooks, compaction, skills/templates, and local execution env.
+- `pi-agent-core-lc` / `pi_agent_core`: lightweight core loop, messages, tools, adapters.
+- `pi-agent-harness-lc` / `pi_agent_harness`: Phase 3 harness runtime, sessions, queues, hooks, compaction, skills/templates, and local execution env.
 
 ## Features
 
@@ -44,14 +47,25 @@ This repository is a monorepo with two Python distributions:
 ## Install
 
 ```bash
+pip install pi-agent-core-lc
+pip install pi-agent-harness-lc    # optional: session/harness runtime
+
+# Optional LLM providers:
+pip install pi-agent-core-lc[openai]      # ChatOpenAI
+pip install pi-agent-core-lc[anthropic]   # ChatAnthropic
+pip install pi-agent-core-lc[deepseek]    # ChatDeepSeek / OpenAI-compatible gateways
+pip install pi-agent-core-lc[all]         # all providers + harness
+```
+
+<details>
+<summary>Development install (editable)</summary>
+
+```bash
 pip install -e ".[dev]"
 pip install -e "./packages/pi-agent-harness"
-# Optional providers:
-pip install -e ".[openai]"      # ChatOpenAI
-pip install -e ".[anthropic]"   # ChatAnthropic
-pip install -e ".[deepseek]"    # ChatDeepSeek — also for OpenAI-compatible gateways
-                                # that stream reasoning_content (SiliconFlow, vLLM, ...)
 ```
+
+</details>
 
 ## Quick start
 
@@ -267,7 +281,7 @@ End events carry the aggregate (`content` full text / complete `tool_call` block
 ## Test
 
 ```bash
-uv run --extra dev --extra harness python -m pytest  # 273 tests, no API keys needed
+uv run --extra dev --extra harness python -m pytest  # 327 tests, no API keys needed
 ruff check . && ruff format --check .
 ```
 
