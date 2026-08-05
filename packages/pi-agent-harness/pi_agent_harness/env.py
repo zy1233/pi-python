@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import shutil
 import tempfile
@@ -133,12 +134,36 @@ class LocalExecutionEnv:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
+        abort_task: asyncio.Task[None] | None = None
+        aborted = False
+
+        async def _watch_signal() -> None:
+            nonlocal aborted
+            await signal.wait_aborted()
+            aborted = True
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+
+        if signal is not None and hasattr(signal, "wait_aborted"):
+            abort_task = asyncio.create_task(_watch_signal())
         try:
             stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         except TimeoutError as exc:
             proc.kill()
             await proc.wait()
             raise ExecutionError("timeout", f"Command timed out after {timeout}s", exc) from exc
+        except asyncio.CancelledError:
+            proc.kill()
+            await proc.wait()
+            raise
+        finally:
+            if abort_task is not None and not abort_task.done():
+                abort_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await abort_task
+        if aborted:
+            await proc.wait()
+            raise ExecutionError("aborted", "Execution aborted by signal")
         stdout = stdout_b.decode(errors="replace")
         stderr = stderr_b.decode(errors="replace")
         if on_stdout and stdout:
