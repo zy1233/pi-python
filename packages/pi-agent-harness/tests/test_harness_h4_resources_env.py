@@ -276,7 +276,7 @@ async def test_load_skills_yaml_parse_failure_produces_diagnostic(tmp_path):
 
     assert result.skills == []
     assert len(result.diagnostics) >= 1
-    assert result.diagnostics[0].code in ("read_failed", "parse_failed")
+    assert result.diagnostics[0].code == "parse_failed"
 
 
 # ---------------------------------------------------------------------------
@@ -523,3 +523,72 @@ async def test_local_execution_env_exec_signal_abort_mid_execution():
     abort_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await abort_task
+
+
+# ---------------------------------------------------------------------------
+# LocalExecutionEnv: exec on_stdout/on_stderr streaming per-line (H4-2 fix)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_local_execution_env_exec_streams_stdout_per_line():
+    env = LocalExecutionEnv(".")
+    lines_received: list[str] = []
+    result = await env.exec(
+        f'{PYTHON} -c "print(\'line1\'); print(\'line2\')"',
+        on_stdout=lines_received.append,
+        timeout=10,
+    )
+    assert result.stdout.splitlines() == ["line1", "line2"]
+    assert len(lines_received) == 2
+    assert lines_received[0].strip() == "line1"
+    assert lines_received[1].strip() == "line2"
+
+
+@pytest.mark.asyncio
+async def test_local_execution_env_exec_streams_stderr_per_line():
+    env = LocalExecutionEnv(".")
+    lines_received: list[str] = []
+    result = await env.exec(
+        f"""{PYTHON} -c "import sys; sys.stderr.write('err1\\nerr2\\n')" """,
+        on_stderr=lines_received.append,
+        timeout=10,
+    )
+    assert "err1" in result.stderr
+    assert len(lines_received) == 2
+    assert lines_received[0].strip() == "err1"
+    assert lines_received[1].strip() == "err2"
+
+
+# ---------------------------------------------------------------------------
+# Skills: YAML parse_failed diagnostic code (H4-4 fix)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_load_skills_yaml_parse_failure_uses_parse_failed_code(tmp_path):
+    env = LocalExecutionEnv(tmp_path)
+    await env.write_file(
+        "skills/broken/SKILL.md",
+        "---\n: [invalid yaml\n---\nBody.",
+    )
+
+    result = await load_skills(env, ["skills"])
+
+    assert result.skills == []
+    assert len(result.diagnostics) == 1
+    assert result.diagnostics[0].code == "parse_failed"
+
+
+# ---------------------------------------------------------------------------
+# Skill and PromptTemplate importable from package top level (H4-3 fix)
+# ---------------------------------------------------------------------------
+
+
+def test_skill_and_prompt_template_importable_from_package():
+    from pi_agent_harness import PromptTemplate, Skill
+
+    s = Skill(name="a", description="desc", content="body", filePath="/a/SKILL.md")
+    t = PromptTemplate(name="b", content="Hi $1")
+    assert s.name == "a"
+    assert t.name == "b"

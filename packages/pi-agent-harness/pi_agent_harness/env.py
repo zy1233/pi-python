@@ -6,12 +6,30 @@ import asyncio
 import contextlib
 import os
 import shutil
+import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from pi_agent_harness.types import ExecResult, ExecutionError, FileError, FileInfo
+
+_IS_WINDOWS = sys.platform == "win32"
+
+
+def _kill_process_tree(proc: asyncio.subprocess.Process) -> None:
+    """Kill process and its children.
+
+    On Unix (when started with ``start_new_session=True``), kills the entire
+    process group so child processes are not orphaned.  On Windows,
+    ``proc.kill()`` already calls ``TerminateProcess`` which terminates the
+    process tree.
+    """
+    with contextlib.suppress(ProcessLookupError, OSError):
+        if not _IS_WINDOWS and proc.pid is not None:
+            os.killpg(proc.pid, 9)  # SIGKILL
+        else:
+            proc.kill()
 
 
 class LocalExecutionEnv:
@@ -127,12 +145,16 @@ class LocalExecutionEnv:
         if signal is not None and getattr(signal, "aborted", False):
             raise ExecutionError("aborted", "Execution aborted before start")
         workdir = str(self._resolve(cwd or self.cwd))
+        kwargs: dict[str, Any] = {}
+        if not _IS_WINDOWS:
+            kwargs["start_new_session"] = True
         proc = await asyncio.create_subprocess_shell(
             command,
             cwd=workdir,
             env={**os.environ, **(env or {})},
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            **kwargs,
         )
         abort_task: asyncio.Task[None] | None = None
         aborted = False
@@ -141,19 +163,41 @@ class LocalExecutionEnv:
             nonlocal aborted
             await signal.wait_aborted()
             aborted = True
-            with contextlib.suppress(ProcessLookupError):
-                proc.kill()
+            _kill_process_tree(proc)
 
         if signal is not None and hasattr(signal, "wait_aborted"):
             abort_task = asyncio.create_task(_watch_signal())
+
+        async def _read_stream(
+            stream: asyncio.StreamReader, callback: Callable[[str], Any] | None
+        ) -> str:
+            parts: list[str] = []
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+                text = line.decode(errors="replace")
+                parts.append(text)
+                if callback:
+                    callback(text)
+            return "".join(parts)
+
         try:
-            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            assert proc.stdout is not None and proc.stderr is not None
+            stdout, stderr = await asyncio.wait_for(
+                asyncio.gather(
+                    _read_stream(proc.stdout, on_stdout),
+                    _read_stream(proc.stderr, on_stderr),
+                ),
+                timeout=timeout,
+            )
+            await proc.wait()
         except TimeoutError as exc:
-            proc.kill()
+            _kill_process_tree(proc)
             await proc.wait()
             raise ExecutionError("timeout", f"Command timed out after {timeout}s", exc) from exc
         except asyncio.CancelledError:
-            proc.kill()
+            _kill_process_tree(proc)
             await proc.wait()
             raise
         finally:
@@ -164,12 +208,6 @@ class LocalExecutionEnv:
         if aborted:
             await proc.wait()
             raise ExecutionError("aborted", "Execution aborted by signal")
-        stdout = stdout_b.decode(errors="replace")
-        stderr = stderr_b.decode(errors="replace")
-        if on_stdout and stdout:
-            on_stdout(stdout)
-        if on_stderr and stderr:
-            on_stderr(stderr)
         return ExecResult(stdout=stdout, stderr=stderr, exitCode=proc.returncode or 0)
 
     async def cleanup(self) -> None:

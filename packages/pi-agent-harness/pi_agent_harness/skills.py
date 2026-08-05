@@ -102,9 +102,13 @@ async def _read_skill_file(
 ) -> None:
     try:
         raw = await env.read_text_file(path)
-        metadata, content = parse_frontmatter(raw)
     except Exception as exc:
         _diagnose(result, "read_failed", str(exc), path)
+        return
+    try:
+        metadata, content = parse_frontmatter(raw)
+    except Exception as exc:
+        _diagnose(result, "parse_failed", str(exc), path)
         return
     name = str(metadata.get("name") or default_name)
     description = str(metadata.get("description") or "").strip()

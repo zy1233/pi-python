@@ -60,48 +60,37 @@ asyncio.to_thread 文件操作 + subprocess_shell 命令执行 + cleanup 尽力�
 
 ### H4-2. `on_stdout`/`on_stderr` 为批量一次性回调，非流式实时输出（中）
 
-- [ ] 待修复 ·（中 · 代码审查）
-- 位置：`env.py` `LocalExecutionEnv.exec` L144–147
+- [x] **已修复（2026-08-05）** ·（中 · 代码审查）
+- 位置：`env.py` `LocalExecutionEnv.exec`
 - 问题：设计 §8.1 `on_stdout`/`on_stderr` 回调与 pi 的实现均为**逐行流式**——进程执行
-  期间实时回调（pi 用 `readline` 循环）。当前实现等进程结束后一次性将全部 stdout/stderr
-  传入回调：
-  ```python
-  if on_stdout and stdout:
-      on_stdout(stdout)
-  ```
-  这使得依赖实时输出的场景（如 shell 工具的 streaming 显示、大文件编译进度）无法工作。
-- 建议修复：改用 `asyncio.StreamReader` 逐行读取 `proc.stdout`/`proc.stderr`，
-  每行回调一次；同时收集完整输出用于 `ExecResult`。
+  期间实时回调（pi 用 `readline` 循环）。原实现等进程结束后一次性将全部 stdout/stderr
+  传入回调。
+- 修复：用 `asyncio.StreamReader.readline()` 循环替换 `proc.communicate()`，在
+  两个并发的 `_read_stream` 协程中逐行读取 stdout/stderr，每读一行立即调用回调；
+  同时收集完整输出用于 `ExecResult`。通过 `asyncio.gather` 并发两路读取避免死锁。
+  回归测试 ×2（`test_local_execution_env_exec_streams_stdout_per_line` /
+  `test_local_execution_env_exec_streams_stderr_per_line`）。
 
 ### H4-3. `Skill` 和 `PromptTemplate` 类型未从包顶层导出（中）
 
-- [ ] 待修复 ·（中 · 代码审查）
+- [x] **已修复（2026-08-05）** ·（中 · 代码审查）
 - 位置：`__init__.py` 导出列表
-- 问题：`Skill` 和 `PromptTemplate` 是构造 `AgentHarnessResources` 的必备类型——
-  用户需要 `Skill(name=..., description=..., content=..., filePath=...)`
-  来构建 resources。当前这两个类型只能通过 `from pi_agent_harness.types import Skill`
-  访问。同时 `__all__` 列表中已导出 `SkillDiagnostic` 和 `SkillLoadResult`
-  但遗漏了 `Skill` 和 `PromptTemplate`，API 表面不完整。
-- 建议修复：在 `__init__.py` 的 import 和 `__all__` 中增加 `Skill` 和
-  `PromptTemplate`。
+- 问题：`Skill` 和 `PromptTemplate` 是构造 `AgentHarnessResources` 的必备类型，
+  但只能通过 `from pi_agent_harness.types import Skill` 访问。`__all__` 列表中已导出
+  `SkillDiagnostic` 和 `SkillLoadResult` 但遗漏了这两个。
+- 修复：在 `__init__.py` 的 import 和 `__all__` 中增加 `Skill` 和 `PromptTemplate`。
+  回归测试 ×1（`test_skill_and_prompt_template_importable_from_package`）。
 
 ### H4-4. `SkillDiagnostic.code` 的 `parse_failed` 从未使用（中）
 
-- [ ] 待修复 ·（中 · 代码审查）
-- 位置：`skills.py` `_read_skill_file`、`types.py` `SkillDiagnostic.code`
+- [x] **已修复（2026-08-05）** ·（中 · 代码审查）
+- 位置：`skills.py` `_read_skill_file`
 - 问题：设计 §6.1 诊断码列 `parse_failed` 用于 frontmatter 解析失败；types.py
   也声明了该 code。但 `_read_skill_file` 将读取和解析放在同一 try/except 中，
-  所有异常（含 YAML `ScannerError` 等解析错误）均报为 `read_failed`：
-  ```python
-  try:
-      raw = await env.read_text_file(path)
-      metadata, content = parse_frontmatter(raw)
-  except Exception as exc:
-      _diagnose(result, "read_failed", str(exc), path)
-  ```
-  `parse_failed` 永远不会被触发。
-- 建议修复：拆分 try/except，将 `parse_frontmatter` 的异常单独捕获并报为
-  `parse_failed`。
+  YAML `ScannerError` 等解析错误被报为 `read_failed`，`parse_failed` 永远不触发。
+- 修复：拆分 try/except 为两步——`read_text_file` 异常报 `read_failed`，
+  `parse_frontmatter` 异常单独捕获报 `parse_failed`。
+  回归测试 ×1（`test_load_skills_yaml_parse_failure_uses_parse_failed_code`）。
 
 ---
 
@@ -125,18 +114,15 @@ asyncio.to_thread 文件操作 + subprocess_shell 命令执行 + cleanup 尽力�
 
 ### H4-6. `exec()` 超时终止未使用进程组 kill
 
-- [~] 记录性 ·（低 · 代码审查）
-- 位置：`env.py` `LocalExecutionEnv.exec` L138–141
-- 问题：设计 §8.2 写 "超时 kill 进程组"；实现仅调用 `proc.kill()` 终止主进程：
-  ```python
-  except TimeoutError as exc:
-      proc.kill()
-      await proc.wait()
-  ```
-  在 Windows 上 `proc.kill()` 会终止进程树（TerminateProcess 行为），但在 Unix 上
-  仅终止主进程，子进程可能成为孤儿。
-- 影响：Unix 上长命令超时后可能残留子进程；Windows 上无影响。生产环境如需严格清理，
-  应使用 `os.killpg` 或 `signal.SIGKILL` 发送给进程组。
+- [x] **已修复（2026-08-05）** ·（低 · 代码审查）
+- 位置：`env.py` `LocalExecutionEnv.exec`
+- 问题：设计 §8.2 写 "超时 kill 进程组"；原实现仅调用 `proc.kill()` 终止主进程，
+  在 Unix 上子进程可能成为孤儿。
+- 修复：新增模块级 `_kill_process_tree` 辅助函数——Unix 上以 `start_new_session=True`
+  启动进程（创建独立进程组），超时/abort 时调用 `os.killpg(proc.pid, SIGKILL)`
+  终止整个进程组；Windows 上保持 `proc.kill()`（`TerminateProcess` 已终止进程树）。
+  timeout / signal abort / CancelledError 三条 kill 路径统一改用
+  `_kill_process_tree`。
 
 ### H4-7. `_validate_skill_metadata` 对非 SKILL.md 文件的 name 匹配校验过于严格
 
@@ -219,11 +205,11 @@ asyncio.to_thread 文件操作 + subprocess_shell 命令执行 + cleanup 尽力�
 | 级别 | 项目 | 状态 |
 |------|------|------|
 | 实质 | H4-1 exec signal 执行中中断 | ✅ 已修复（2026-08-05，回归 +2） |
-| 中 | H4-2 on_stdout/on_stderr 流式回调 | [ ] 待修复 |
-| 中 | H4-3 Skill/PromptTemplate 导出缺失 | [ ] 待修复 |
-| 中 | H4-4 parse_failed 诊断码未使用 | [ ] 待修复 |
+| 中 | H4-2 on_stdout/on_stderr 流式回调 | ✅ 已修复（2026-08-05，回归 +2） |
+| 中 | H4-3 Skill/PromptTemplate 导出缺失 | ✅ 已修复（2026-08-05，回归 +1） |
+| 中 | H4-4 parse_failed 诊断码未使用 | ✅ 已修复（2026-08-05，回归 +1） |
 | 低 | H4-5 Windows POSIX 路径 | [~] 记录性 |
-| 低 | H4-6 进程组 kill | [~] 记录性 |
+| 低 | H4-6 进程组 kill | ✅ 已修复（2026-08-05） |
 | 低 | H4-7 name 匹配校验范围 | [~] 记录性 |
 | 低 | H4-8 frontmatter 结束标记 | [~] 记录性 |
 | 低 | H4-9 模板加载异常 | [~] 记录性（忠实移植） |
@@ -232,5 +218,6 @@ asyncio.to_thread 文件操作 + subprocess_shell 命令执行 + cleanup 尽力�
 ## 验证状态
 
 审计时全量 pytest 308 通过（`.venv-audit` Python 3.12 / Windows），`ruff check` 全绿。
-第一轮修复（H4-1）+ 测试补全后全量 pytest 323 通过，H4 专项测试从 6 增至 21 个
-（`test_harness_h4_resources_env.py`）。
+第一轮修复（H4-1）+ 测试补全后全量 pytest 323 通过，H4 专项测试从 6 增至 21 个。
+第二轮修复（H4-2/H4-3/H4-4/H4-6）后全量 pytest 327 通过，H4 专项测试 25 个全通过
+（`test_harness_h4_resources_env.py`）。所有可修复偏差已关闭。
