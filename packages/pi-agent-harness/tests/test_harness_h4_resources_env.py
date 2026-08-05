@@ -535,7 +535,7 @@ async def test_local_execution_env_exec_streams_stdout_per_line():
     env = LocalExecutionEnv(".")
     lines_received: list[str] = []
     result = await env.exec(
-        f'{PYTHON} -c "print(\'line1\'); print(\'line2\')"',
+        f"{PYTHON} -c \"print('line1'); print('line2')\"",
         on_stdout=lines_received.append,
         timeout=10,
     )
