@@ -52,23 +52,71 @@ Phase 1 (MVP loop), Phase 2 (usage/cost, thinking/reasoning, transform_messages)
 
 This is a Python monorepo with `pi-agent-core` and `pi-agent-harness`. There are no services to start — packages are installed in editable mode and tested via `pytest`.
 
+### Virtual environments (uv)
+
+This project uses **uv** for dependency management and virtual environments. Existing venvs:
+
+| Venv | Purpose |
+|------|---------|
+| `.venv` | Primary development venv (Python 3.12, `[dev]` + harness) — unit tests, linting |
+| `.venv-test-real` | Real-LLM integration tests (PyPI deps + `langchain-deepseek`) |
+| `.venv-audit` | Audit/review work |
+| `.venv-ci-check` | CI lint/format checks |
+
+**ALWAYS use the existing venvs.** Never install packages globally with `pip` — use `uv pip install --python <venv> <pkg>` to add deps into the target venv.
+
+All `.venv-*` directories are in `.gitignore`. **API keys must ONLY be set via environment variables — never hardcode them in source files.**
+
+On Windows, invoke Python / pytest via the venv Scripts path:
+
+```powershell
+# Unit tests (mock, no API key needed)
+.venv\Scripts\python.exe -m pytest -v
+
+# Real-LLM integration tests (requires REAL_LLM_API_KEY env var)
+$env:REAL_LLM_API_KEY = 'sk-...'
+.venv-test-real\Scripts\python.exe -m pytest pi_agent_core/tests/test_real_llm.py -m real_llm -v
+
+# Smoke script
+$env:SMOKE_API_KEY = 'sk-...'
+.venv\Scripts\python.exe scripts/smoke_real_api.py
+```
+
+To recreate the real-LLM test venv from scratch:
+
+```powershell
+uv venv --python 3.12 .venv-test-real
+uv pip install --python .venv-test-real pytest pytest-asyncio pydantic "langchain-core>=0.3.0" "typing-extensions>=4.6" langchain-deepseek
+uv pip install --python .venv-test-real --no-deps -e .
+```
+
+To create a fresh dev venv (only if `.venv` is broken):
+
+```powershell
+uv venv --python 3.12 .venv
+uv pip install --python .venv -e ".[dev]" -e "./packages/pi-agent-harness"
+```
+
 ### Key commands
 
 | Action | Command |
 |--------|---------|
-| Install (dev) | `pip install -e ".[dev]" -e "./packages/pi-agent-harness"` |
+| Install (dev) | `uv pip install --python .venv -e ".[dev]" -e "./packages/pi-agent-harness"` |
+| Add a provider | `uv pip install --python .venv-test-real langchain-deepseek` |
 | Lint check | `ruff check .` |
 | Format check | `ruff format --check .` |
 | Auto-fix lint | `ruff check --fix .` |
 | Auto-format | `ruff format .` |
-| Run tests | `pytest` (or `pytest -v` for verbose) |
-| Run example (no API key) | `PI_USE_MOCK=1 python3 examples/minimal_agent.py` |
+| Run tests (mock) | `.venv\Scripts\python.exe -m pytest` (or `-v` for verbose) |
+| Run tests (real LLM) | `$env:REAL_LLM_API_KEY='sk-...'; .venv-test-real\Scripts\python.exe -m pytest -m real_llm -v` |
+| Run example (no API key) | `PI_USE_MOCK=1 .venv\Scripts\python.exe examples/minimal_agent.py` |
 
 ### Notes
 
 - **Ruff** is the linter and formatter. Config is in `pyproject.toml` under `[tool.ruff]`. Rules enabled: E, F, I, UP, B, SIM, RUF. Line length: 100. Target: Python 3.11.
-- **`python` is not on PATH** — always use `python3`.
-- `pytest` and other scripts install to `~/.local/bin`. Ensure `PATH` includes this directory (it should already be on PATH in most shells, but if `pytest` is not found, run `export PATH="$HOME/.local/bin:$PATH"`).
-- All tests use a mock stream (`pi_agent_core/tests/mock_stream.py`) — **no API keys are needed** to run the test suite or the mock example.
+- **Always use venv Python** — on Windows the system `python3` may point to the Windows Store stub. Use `.venv\Scripts\python.exe` or `.venv-test-real\Scripts\python.exe` explicitly.
+- All unit tests use a mock stream (`pi_agent_core/tests/mock_stream.py`) — **no API keys needed**.
+- Real-LLM integration tests (`pi_agent_core/tests/test_real_llm.py`) are marked with `@pytest.mark.real_llm`. They auto-skip when `REAL_LLM_API_KEY` is unset. Use the dedicated `.venv-test-real` venv with the env var set to run them.
+- **Never hardcode API keys in source.** All secrets go via environment variables (`REAL_LLM_API_KEY`, `SMOKE_API_KEY`, etc.).
 - `asyncio_mode = "auto"` is set in `pyproject.toml`, so async test functions are automatically detected by `pytest-asyncio`.
-- On a local Windows machine where the system Python is older than 3.11, create a dedicated venv instead of forcing compatibility: `uv venv --python 3.12 .venv-audit && uv pip install --python .venv-audit -e ".[dev]" -e "./packages/pi-agent-harness"` (the harness package must be installed too, or its tests fail to collect).
+- `langchain-deepseek` is the provider for SiliconFlow / DeepSeek-compatible endpoints (preserves `reasoning_content` thinking).
