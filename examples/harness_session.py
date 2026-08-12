@@ -25,7 +25,7 @@ USE_MOCK = os.environ.get("PI_USE_MOCK", "0") == "1"
 def _create_workspace() -> str:
     workspace = tempfile.mkdtemp(prefix="pi-harness-demo-")
     (Path(workspace) / "app.py").write_text(
-        'from flask import Flask\n\napp = Flask(__name__)\n\n'
+        "from flask import Flask\n\napp = Flask(__name__)\n\n"
         '@app.route("/")\ndef index():\n    return "Hello!"\n',
         encoding="utf-8",
     )
@@ -37,7 +37,6 @@ async def main() -> None:
         AgentHarness,
         LocalExecutionEnv,
         MemorySessionRepo,
-        Session,
     )
 
     workspace = _create_workspace()
@@ -115,8 +114,7 @@ async def main() -> None:
     if not USE_MOCK:
         print("=== Turn 2: Add a feature ===")
         await harness.prompt(
-            "Add a /health endpoint that returns JSON {'status': 'ok'}. "
-            "Edit app.py directly."
+            "Add a /health endpoint that returns JSON {'status': 'ok'}. Edit app.py directly."
         )
         print("\n")
 

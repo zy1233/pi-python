@@ -3,7 +3,7 @@
 These tests hit a live API and are skipped when the API key is not set.
 Run with (PowerShell):
     $env:REAL_LLM_API_KEY = 'sk-...'
-    .venv-test-real\\Scripts\\python.exe -m pytest pi_agent_core/tests/test_real_llm.py -m real_llm -v
+    .venv-test-real\\Scripts\\python.exe -m pytest -m real_llm -v
 
 Environment variables:
     REAL_LLM_API_KEY   — (required) SiliconFlow API key
@@ -57,8 +57,9 @@ def _config(**overrides) -> AgentLoopConfig:
     )
 
 
-async def _run_and_collect(prompt_text: str, *, system_prompt: str = "Be concise.", tools=None,
-                           config_overrides=None):
+async def _run_and_collect(
+    prompt_text: str, *, system_prompt: str = "Be concise.", tools=None, config_overrides=None
+):
     """Helper: run a single prompt through the loop, return (messages, events)."""
     events: list = []
 
@@ -75,6 +76,7 @@ async def _run_and_collect(prompt_text: str, *, system_prompt: str = "Be concise
 # ---------------------------------------------------------------------------
 # Test 1: Basic text streaming
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_text_stream_basic():
@@ -102,6 +104,7 @@ async def test_text_stream_basic():
 # Test 2: Multi-turn conversation context
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_multi_turn_context():
     """LLM correctly references prior conversation context."""
@@ -128,6 +131,7 @@ async def test_multi_turn_context():
 # ---------------------------------------------------------------------------
 # Test 3: Single tool call
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_single_tool_call():
@@ -177,6 +181,7 @@ async def test_single_tool_call():
 # Test 4: Multiple tool calls in sequence
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_multi_tool_sequence():
     """LLM can call tools across multiple turns to compose an answer."""
@@ -204,7 +209,7 @@ async def test_multi_tool_sequence():
         execute_fn=city_info,
     )
 
-    messages, events = await _run_and_collect(
+    messages, _events = await _run_and_collect(
         "Compare the populations of Beijing and Tokyo. "
         "Call city_info for each city separately, then summarize.",
         system_prompt="Use tools when asked. Call city_info once per city.",
@@ -224,6 +229,7 @@ async def test_multi_tool_sequence():
 # Test 5: Structured output (JSON schema)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_structured_output():
     """response_schema forces output into a validated Pydantic model."""
@@ -233,7 +239,7 @@ async def test_structured_output():
         rating: int = Field(description="Rating from 1 to 10")
         summary: str = Field(description="One-sentence summary")
 
-    messages, events = await _run_and_collect(
+    messages, _events = await _run_and_collect(
         "Write a brief review of the movie 'Inception'.",
         config_overrides={"response_schema": MovieReview},
     )
@@ -251,6 +257,7 @@ async def test_structured_output():
 # ---------------------------------------------------------------------------
 # Test 6: Abort mid-stream
 # ---------------------------------------------------------------------------
+
 
 class _Signal:
     def __init__(self) -> None:
@@ -299,12 +306,11 @@ async def test_abort_mid_stream():
 # Test 7: Usage / token counting
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_usage_token_counting():
     """Usage reports non-zero input and output tokens."""
-    messages, events = await _run_and_collect(
-        "What is 2+2? Reply with just the number."
-    )
+    messages, _events = await _run_and_collect("What is 2+2? Reply with just the number.")
 
     final = messages[-1]
     assert final.usage.input > 0, "input tokens should be > 0"
@@ -316,10 +322,11 @@ async def test_usage_token_counting():
 # Test 8: System prompt adherence
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_system_prompt_adherence():
     """LLM respects the system prompt instructions."""
-    messages, events = await _run_and_collect(
+    messages, _events = await _run_and_collect(
         "Tell me about Python.",
         system_prompt="You must respond in exactly 3 words. No more, no less.",
     )
@@ -333,6 +340,7 @@ async def test_system_prompt_adherence():
 # ---------------------------------------------------------------------------
 # Test 9: Empty tool result handling
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_empty_tool_result():
@@ -352,7 +360,7 @@ async def test_empty_tool_result():
         execute_fn=ping_execute,
     )
 
-    messages, events = await _run_and_collect(
+    messages, _events = await _run_and_collect(
         "Ping google.com using the ping tool, then confirm it succeeded.",
         tools=[tool],
         config_overrides={"max_turns": 4},
@@ -365,6 +373,7 @@ async def test_empty_tool_result():
 # ---------------------------------------------------------------------------
 # Test 10: Long output generation
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_long_output():

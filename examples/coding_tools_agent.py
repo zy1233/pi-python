@@ -145,7 +145,9 @@ async def main() -> None:
     agent.subscribe(on_event)
 
     print("--- Task: Explore the project structure ---")
-    await agent.prompt("List all files in the project, then read hello.py and summarize what it does.")
+    await agent.prompt(
+        "List all files in the project, then read hello.py and summarize what it does."
+    )
     await agent.wait_for_idle()
     print("\n")
 

@@ -17,16 +17,18 @@ import sys
 import tempfile
 from pathlib import Path
 
+from pydantic import BaseModel, Field
+
 from pi_agent_core import Model
 from pi_agent_core.coding_tools import create_read_only_tools
 from pi_agent_core.tools import SimpleTool
 from pi_agent_core.types import AgentToolResult
-from pydantic import BaseModel, Field
 
 USE_MOCK = os.environ.get("PI_USE_MOCK", "0") == "1"
 
 
 # --- Custom tool: search documentation ---
+
 
 class SearchDocsParams(BaseModel):
     query: str = Field(description="Search query for documentation")
@@ -36,7 +38,7 @@ async def search_docs(_id, params: SearchDocsParams, signal, on_update):
     """Simulated documentation search."""
     results = {
         "flask": "Flask is a micro web framework for Python. Key features: routing, "
-                 "templates, request/response objects, sessions.",
+        "templates, request/response objects, sessions.",
         "route": "@app.route(rule) - Decorator to bind a URL rule to a view function.",
         "json": "flask.jsonify(*args, **kwargs) - Creates a Response with JSON data.",
     }
@@ -48,7 +50,7 @@ async def search_docs(_id, params: SearchDocsParams, signal, on_update):
 def _create_workspace() -> str:
     workspace = tempfile.mkdtemp(prefix="pi-skills-demo-")
     (Path(workspace) / "app.py").write_text(
-        'from flask import Flask, jsonify\n\napp = Flask(__name__)\n\n'
+        "from flask import Flask, jsonify\n\napp = Flask(__name__)\n\n"
         '@app.route("/")\ndef index():\n    return jsonify(message="Hello!")\n',
         encoding="utf-8",
     )
@@ -89,7 +91,6 @@ async def main() -> None:
         LocalExecutionEnv,
         MemorySessionRepo,
         PromptTemplate,
-        Skill,
         load_skills,
     )
 
