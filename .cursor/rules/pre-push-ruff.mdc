@@ -1,0 +1,42 @@
+---
+description: 推送远端前在本地运行 ruff lint/format，与 CI 保持一致
+alwaysApply: true
+---
+
+# 推送前本地 Ruff 检查
+
+在运行 `git push`（或帮用户推送到远端）**之前**，必须先通过本地 Ruff 检查，避免 CI `lint` job 失败。
+
+## 必须执行的命令
+
+使用项目 venv 中的 ruff（Windows：`.venv\Scripts\ruff.exe`；Unix：`.venv/bin/ruff`）：
+
+```powershell
+# Windows
+.venv\Scripts\ruff.exe check .
+.venv\Scripts\ruff.exe format --check .
+```
+
+```bash
+# Unix
+.venv/bin/ruff check .
+.venv/bin/ruff format --check .
+```
+
+与 `.github/workflows/ci.yml` 的 `lint` job 一致（`ruff check` + `ruff format --check`）。
+
+## 工作流
+
+1. **推送前**：若本次会话将执行 `git push`，先运行上述两条命令。
+2. **失败时**：先尝试自动修复，再重跑检查：
+   - `ruff check --fix .`
+   - `ruff format .`
+   - 重新执行 `ruff check .` 与 `ruff format --check .`
+3. **仍失败**：不要推送；向用户报告剩余问题及修复建议。
+4. **通过后再推送**：仅在两项检查均通过后执行 `git push`。
+
+## 注意
+
+- 使用现有 `.venv`，不要用全局 `pip install ruff`。
+- 用户未要求推送时，不必每次改代码都跑 ruff；仅在即将 `git push` 时强制执行。
+- CI 还会跑 `pytest`；若改动较大或涉及核心逻辑，推送前建议额外运行 `.venv\Scripts\python.exe -m pytest`（或 Unix 等价命令）。

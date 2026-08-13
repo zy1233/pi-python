@@ -2,7 +2,19 @@
 
 ## Project overview
 
-`pi-python` is an unofficial Python port inspired by [`@earendil-works/pi-agent-core`](https://github.com/earendil-works/pi), with **LangChain replacing the `pi-ai` LLM layer**. It is not affiliated with or endorsed by the official `pi` project. Full design: `docs/DESIGN.md`; Phase 2 spec: `docs/superpowers/specs/2026-05-25-phase2-production-enhancements-design.md`; Phase 3 harness spec: `docs/superpowers/specs/2026-07-03-phase3-agent-harness-design.md`; P6 tool-ecosystem spec: `docs/superpowers/specs/2026-07-03-p6-tool-ecosystem-design.md`; audit tracker: `docs/AUDIT-2026-07-02.md`.
+`pi-python` is an unofficial Python port inspired by [`@earendil-works/pi-agent-core`](https://github.com/earendil-works/pi), with **LangChain replacing the `pi-ai` LLM layer**. It is not affiliated with or endorsed by the official `pi` project.
+
+Design documents:
+
+| Document | Contents |
+|----------|----------|
+| `docs/DESIGN.md` | Phase 1 core architecture (historical) |
+| `docs/PLAN-PHASE1.md` | Phase 1 original planning (historical, was `plan.md`) |
+| `docs/superpowers/specs/2026-05-25-phase2-production-enhancements-design.md` | Phase 2 spec |
+| `docs/superpowers/specs/2026-07-03-phase3-agent-harness-design.md` | Phase 3 harness spec |
+| `docs/superpowers/specs/2026-07-03-p6-tool-ecosystem-design.md` | P6 tool-ecosystem spec |
+| `docs/AUDIT-2026-07-02.md` | Core-layer audit tracker |
+| `docs/AUDIT-H1.md` ~ `docs/AUDIT-H4.md` | Harness batch audits |
 
 Guiding principles:
 
@@ -46,7 +58,9 @@ AgentMessage[] → transform_context() → convert_to_llm() → LangChain BaseMe
 
 ### Status
 
-Phase 1 (MVP loop), Phase 2 (usage/cost, thinking/reasoning, transform_messages), Phase 2.5 (retries/backoff, `max_turns`/`tool_timeout`, observability, guardrail hooks, `ContextBudget`, structured output, `Model.base_url` + `deepseek` provider), and Phase 3 H1-H4 (`pi-agent-harness`: session tree, AgentHarness runtime, compaction/tree navigation, skills/templates/system prompt/LocalExecutionEnv) are complete. Real-API smoke (`scripts/smoke_real_api.py`) passed against SiliconFlow (OpenAI-compatible). P6 tool ecosystem (`pi_agent_core/coding_tools/` + `adapters/langchain_tools.py`) is complete: all 7 built-in tools (`read`/`bash`/`edit`/`write`/`grep`/`find`/`ls`), group factories (`create_coding_tools` / `create_read_only_tools`), and the LangChain `BaseTool` adapter — see `docs/superpowers/specs/2026-07-03-p6-tool-ecosystem-design.md`. H1 session-layer audit (`docs/AUDIT-H1.md`) is fully closed as of 2026-07-28 (H1-5 `fromId` pi alignment, H1-6 repo list/delete semantics, H1-8 nits incl. hyphenated uuid7 + random-tail short ids). H2 harness audit (`docs/AUDIT-H2.md`) implementation backlog closed as of 2026-07-29. Current test count: 327.
+**Engine layer complete** — Phase 1 (MVP loop), Phase 2 (usage/cost, thinking/reasoning, transform_messages), Phase 2.5 (retries/backoff, `max_turns`/`tool_timeout`, observability, guardrail hooks, `ContextBudget`, structured output, `Model.base_url` + `deepseek` provider), Phase 3 H1-H4 (`pi-agent-harness`: session tree, AgentHarness runtime, compaction/tree navigation, skills/templates/system prompt/LocalExecutionEnv), and P6 tool ecosystem (all 7 built-in tools + LangChain adapter) are all complete. Real-API smoke (`scripts/smoke_real_api.py`) passed against SiliconFlow. All harness audits (H1–H4) closed. Current test count: 327.
+
+**Next: Coding Agent CLI** (Phase 4) — interactive REPL, rich terminal rendering, command system, permission confirmation, coding-agent system prompt. See README Roadmap for full plan.
 
 ## Cursor Cloud specific instructions
 

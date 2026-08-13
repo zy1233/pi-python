@@ -296,8 +296,16 @@ python scripts/smoke_real_api.py
 
 ## Documentation
 
-- [docs/DESIGN.md](docs/DESIGN.md) — architecture and porting notes
-- [docs/AUDIT-2026-07-02.md](docs/AUDIT-2026-07-02.md) — audit tracker: every finding, fix, and enhancement with status
+| Document | Contents |
+|----------|----------|
+| [AGENTS.md](AGENTS.md) | Project overview, module map, invariants, current status |
+| [docs/DESIGN.md](docs/DESIGN.md) | Phase 1 core architecture and porting notes (historical) |
+| [docs/PLAN-PHASE1.md](docs/PLAN-PHASE1.md) | Phase 1 original planning document (historical) |
+| [docs/AUDIT-2026-07-02.md](docs/AUDIT-2026-07-02.md) | Core-layer audit: findings, fixes, Phase 2.5 enhancements |
+| [docs/AUDIT-H1.md](docs/AUDIT-H1.md) ~ [H4](docs/AUDIT-H4.md) | Harness batch audits (H1 session, H2 runtime, H3 compaction, H4 skills/env) |
+| [Phase 2 spec](docs/superpowers/specs/2026-05-25-phase2-production-enhancements-design.md) | Usage/cost, thinking/reasoning, transform_messages |
+| [Phase 3 spec](docs/superpowers/specs/2026-07-03-phase3-agent-harness-design.md) | AgentHarness: sessions, compaction, skills, templates, ExecutionEnv |
+| [P6 spec](docs/superpowers/specs/2026-07-03-p6-tool-ecosystem-design.md) | Built-in coding tools + LangChain adapter |
 
 ## Concept mapping (pi → Python)
 
@@ -314,11 +322,19 @@ python scripts/smoke_real_api.py
 
 ## Roadmap
 
-- **Phase 1 (MVP loop)** — done
-- **Phase 2 (production enhancements)** — done: `transform_messages`, usage/cost, thinking
+### Completed
+
+- **Phase 1 (MVP loop)** — done: `Agent` + `agent_loop` + event protocol + tool execution
+- **Phase 2 (production enhancements)** — done: `transform_messages`, usage/cost, thinking/reasoning
 - **Phase 2.5 (core hardening)** — done: retries, runaway protection, observability, granular events, guardrail hooks, `ContextBudget`, structured output, tool-result images
 - **Phase 3 (AgentHarness)** — done: H1 session tree, H2 runtime, H3 compaction/tree navigation, H4 skills/templates/system prompt/LocalExecutionEnv ([design doc](docs/superpowers/specs/2026-07-03-phase3-agent-harness-design.md))
 - **P6 (tool ecosystem)** — done: all 7 built-in tools (read/bash/edit/write/grep/find/ls), group factories, and the LangChain `BaseTool` adapter ([design doc](docs/superpowers/specs/2026-07-03-p6-tool-ecosystem-design.md))
+
+### Next
+
+- **Phase 4 (Coding Agent CLI)** — planned: interactive REPL with rich terminal rendering (Markdown/diff/syntax highlighting), command system (`/compact`, `/model`, `/undo`, …), permission confirmation for dangerous operations, config file support
+- **Phase 5 (Coding Agent prompt engineering)** — planned: system prompt design for coding workflows, provider-specific prompt variants, integration with harness skills/templates
+- **Phase 6 (Extended integrations)** — planned: native MCP client, git-aware context injection, multi-provider production testing matrix
 
 ## License
 

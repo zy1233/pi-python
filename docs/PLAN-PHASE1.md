@@ -1,38 +1,12 @@
----
-name: pi-agent-core Python
-overview: 在空的 pi-python 工作区中，忠实移植 earendil-works/pi 的 pi-agent-core（Agent + agent-loop + 事件协议），用 LangChain 替代 pi-ai 作为 LLM/工具适配层；MVP 聚焦核心运行时，Harness 作为第二阶段。
-todos:
-  - id: scaffold-package
-    content: 创建 pyproject.toml、pi_agent_core 包骨架与 pi 风格 types/messages
-    status: completed
-  - id: mock-stream-tests
-    content: 实现 mock stream_fn 并编写 agent_loop 事件序列测试（对齐 pi test 场景）
-    status: completed
-  - id: port-agent-loop
-    content: 移植 agent_loop：内外层循环、工具执行、steering/follow-up、hooks
-    status: completed
-  - id: langchain-adapter
-    content: 实现 langchain_stream + message 互转，支持 OpenAI/Anthropic 流式与 bind_tools
-    status: completed
-  - id: port-agent-class
-    content: 移植 Agent 类：队列、subscribe 屏障、prompt/continue/abort
-    status: completed
-  - id: docs-example
-    content: 编写 README、minimal_agent 示例与 LangChain 配置说明
-    status: completed
-isProject: false
----
+# pi-agent-core Python 实现计划（Phase 1 历史文档）
 
-# pi-agent-core Python 实现计划
-
-> **历史文档**（Phase 1 规划原稿）。Phase 1/2/2.5 均已完成；当前状态与后续路线以
-> `docs/AUDIT-2026-07-02.md`（审计与增强追踪）和 README 为准。本文中 "Phase 2"
-> 指生产化增强（已完成），"Phase 3" 指 AgentHarness（待启动）。
+> **归档说明**：本文是 Phase 1 MVP 的原始规划文档（原 `plan.md`），仅保留历史参考价值。
+> Phase 1–P6 均已完成，当前项目状态以 `AGENTS.md` 和 `README.md` 为准。
+> 后续阶段设计文档见 `docs/superpowers/specs/` 目录。
 
 ## 调研结论
 
 [earendil-works/pi](https://github.com/earendil-works/pi) 是 TypeScript monorepo，与 agent 相关的核心包：
-
 
 | 包                 | 路径                            | 职责                                       |
 | ----------------- | ----------------------------- | ---------------------------------------- |
@@ -40,10 +14,7 @@ isProject: false
 | **pi-agent-core** | `packages/agent/`             | Agent 运行时：状态、事件流、工具循环、steering/follow-up |
 | **AgentHarness**  | `packages/agent/src/harness/` | 会话树 JSONL、Compaction、Skills、Hooks（可选上层）  |
 
-
-当前工作区 `[/workspace](/workspace)` 仅有 `[README.md](/workspace/README.md)` 桩（`pi-python`），需从零搭建。
-
-**默认范围（若你未另行指定）：**
+**默认范围：**
 
 - **MVP**：仅 pi-agent-core 核心（`Agent` + `agent-loop`）
 - **集成方式**：忠实移植 pi 的事件协议与循环语义；LangChain 只作 `StreamFn` / 工具绑定适配层（不用 LangGraph 替代主循环）
@@ -68,23 +39,21 @@ flowchart TB
   AgentLoop --> Tools
 ```
 
-
-
 ---
 
 ## pi-agent-core 核心架构（需移植的部分）
 
 ### 三层结构
 
-1. **低层 `agent-loop`**（`[packages/agent/src/agent-loop.ts](https://github.com/earendil-works/pi/blob/main/packages/agent/src/agent-loop.ts)`）
+1. **低层 `agent-loop`**（[`packages/agent/src/agent-loop.ts`](https://github.com/earendil-works/pi/blob/main/packages/agent/src/agent-loop.ts)）
   - 外层循环：follow-up 消息注入
   - 内层循环：LLM 流式响应 → 工具执行 → steering 轮询
   - 事件顺序是 UI 契约，必须严格保持（见 [agent README](https://github.com/earendil-works/pi/blob/main/packages/agent/README.md)）
-2. **中层 `Agent` 类**（`[packages/agent/src/agent.ts](https://github.com/earendil-works/pi/blob/main/packages/agent/src/agent.ts)`）
+2. **中层 `Agent` 类**（[`packages/agent/src/agent.ts`](https://github.com/earendil-works/pi/blob/main/packages/agent/src/agent.ts)）
   - `AgentState`、`prompt()` / `continue()` / `abort()`
   - steering / follow-up 队列（`one-at-a-time` | `all`）
   - `subscribe()` 监听器按序 await，`agent_end` 为 settlement 屏障
-3. **高层 Harness**（Phase 2，本次 MVP 不实现）
+3. **高层 Harness**（Phase 3，本次 MVP 不实现）
   - Session JSONL 树、Compaction、Skills、多 phase 锁
 
 ### 消息流水线（pi 的设计精髓）
@@ -99,7 +68,6 @@ AgentMessage[] → transformContext() → AgentMessage[] → convertToLlm() → 
 
 ### 对 pi-ai 的依赖边界（LangChain 替换点）
 
-
 | pi-ai 能力                          | Python 替代                                                |
 | --------------------------------- | -------------------------------------------------------- |
 | `streamSimple` / `StreamFn`       | `BaseChatModel.astream()` + 自定义事件适配器                     |
@@ -109,35 +77,7 @@ AgentMessage[] → transformContext() → AgentMessage[] → convertToLlm() → 
 | 多厂商 registry / OAuth              | `langchain-openai`、`langchain-anthropic` 等 + env API key |
 | `transformMessages` 跨厂商回放         | **Phase 1 简化**；换模型时 Phase 2 再 port                       |
 
-
 **不移植 pi-ai**：`models.generated.ts`、各 provider SSE 解析、OAuth 细节。
-
----
-
-## 推荐包结构
-
-在 `/workspace` 新建：
-
-```
-pi_agent_core/
-├── __init__.py              # 导出 Agent, agent_loop, 主要类型
-├── types.py                 # AgentState, AgentEvent, AgentTool, AgentLoopConfig
-├── messages.py              # pi 风格 Message / ContentBlock（与 LC 解耦）
-├── agent_loop.py            # run_agent_loop, stream_assistant_response, execute_tool_calls
-├── agent.py                 # Agent 类
-├── queues.py                # PendingMessageQueue (steering/follow-up)
-├── adapters/
-│   ├── __init__.py
-│   ├── langchain_stream.py  # StreamFn: LC astream → pi 风格 AssistantMessageEvent
-│   └── langchain_convert.py # convert_to_langchain / from_langchain
-└── tests/
-    ├── test_agent_loop.py   # mock stream_fn，无真实 API
-    └── test_agent.py
-
-pyproject.toml                 # Python >=3.11, langchain-core, langchain-openai, pydantic
-examples/
-    minimal_agent.py           # 单文件可运行示例
-```
 
 ---
 
@@ -166,7 +106,7 @@ class Model:
 
 ### 1.2 LangChain 适配层 [`adapters/langchain_stream.py`]
 
-`**StreamFn` 签名**（与 pi 注入点一致）：
+**`StreamFn` 签名**（与 pi 注入点一致）：
 
 ```python
 async def stream_fn(
@@ -191,8 +131,7 @@ async def stream_fn(
 
 ### 1.3 Agent 循环 [`agent_loop.py`]
 
-按 pi `[agent-loop.ts](https://github.com/earendil-works/pi/blob/main/packages/agent/src/agent-loop.ts)` 移植：
-
+按 pi [`agent-loop.ts`](https://github.com/earendil-works/pi/blob/main/packages/agent/src/agent-loop.ts) 移植：
 
 | 行为                                           | 必须保留                                            |
 | -------------------------------------------- | ----------------------------------------------- |
@@ -204,7 +143,6 @@ async def stream_fn(
 | `should_stop_after_turn`                     | turn_end 后优雅退出                                  |
 | `message_end` 屏障                             | 仅 `Agent` 类保证（非 raw loop）                       |
 
-
 提供：
 
 - `async def agent_loop(prompts, context, config) -> AsyncIterator[AgentEvent]`
@@ -213,7 +151,7 @@ async def stream_fn(
 
 ### 1.4 Agent 类 [`agent.py`]
 
-移植 `[agent.ts](https://github.com/earendil-works/pi/blob/main/packages/agent/src/agent.ts)`：
+移植 [`agent.ts`](https://github.com/earendil-works/pi/blob/main/packages/agent/src/agent.ts)：
 
 - `prompt(text | messages, images?)`, `continue()`, `abort()`, `wait_for_idle()`, `reset()`
 - `steer()`, `follow_up()`, 队列清理
@@ -222,7 +160,7 @@ async def stream_fn(
 
 ### 1.5 测试策略
 
-镜像 pi 的 `[packages/agent/test/agent-loop.test.ts](https://github.com/earendil-works/pi/blob/main/packages/agent/test/agent-loop.test.ts)`：
+镜像 pi 的 [`packages/agent/test/agent-loop.test.ts`](https://github.com/earendil-works/pi/blob/main/packages/agent/test/agent-loop.test.ts)：
 
 - **Mock `stream_fn`**：返回预设 `text_delta` / `toolcall_*` / `done`，无需 API key
 - 断言事件序列：纯对话、单/多工具、parallel vs sequential、steering、follow-up、abort、`should_stop_after_turn`
@@ -230,14 +168,14 @@ async def stream_fn(
 
 ### 1.6 示例与依赖
 
-`**pyproject.toml` 建议依赖：**
+**`pyproject.toml` 建议依赖：**
 
 - `langchain-core`（`BaseChatModel`, messages, tools）
 - `langchain-openai`, `langchain-anthropic`（按你常用厂商选 1–2 个起步）
 - `pydantic>=2`
 - 开发：`pytest`, `pytest-asyncio`
 
-`**examples/minimal_agent.py`：**
+**`examples/minimal_agent.py`：**
 
 ```python
 agent = Agent(initial_state={...}, convert_to_llm=default_filter)
@@ -247,8 +185,32 @@ await agent.prompt("Hello")
 
 ---
 
-## Phase 2：生产化增强
+## 推荐包结构
 
+```
+pi_agent_core/
+├── __init__.py              # 导出 Agent, agent_loop, 主要类型
+├── types.py                 # AgentState, AgentEvent, AgentTool, AgentLoopConfig
+├── messages.py              # pi 风格 Message / ContentBlock（与 LC 解耦）
+├── agent_loop.py            # run_agent_loop, stream_assistant_response, execute_tool_calls
+├── agent.py                 # Agent 类
+├── queues.py                # PendingMessageQueue (steering/follow-up)
+├── adapters/
+│   ├── __init__.py
+│   ├── langchain_stream.py  # StreamFn: LC astream → pi 风格 AssistantMessageEvent
+│   └── langchain_convert.py # convert_to_langchain / from_langchain
+└── tests/
+    ├── test_agent_loop.py   # mock stream_fn，无真实 API
+    └── test_agent.py
+
+pyproject.toml                 # Python >=3.11, langchain-core, langchain-openai, pydantic
+examples/
+    minimal_agent.py           # 单文件可运行示例
+```
+
+---
+
+## Phase 2：生产化增强
 
 | 模块                           | 说明                                                   |
 | ---------------------------- | ---------------------------------------------------- |
@@ -259,14 +221,13 @@ await agent.prompt("Hello")
 | **Usage / cost**             | 从 `response_metadata` / `usage_metadata` 聚合          |
 | **stream_proxy**             | 浏览器后端代理（可选）                                          |
 
-
 ---
 
 ## Phase 3：AgentHarness（可选）
 
 若需要 pi coding agent 级能力，再 port：
 
-- `[harness/agent-harness.ts](https://github.com/earendil-works/pi/blob/main/packages/agent/src/harness/agent-harness.ts)` — Session 树、phase 锁
+- [`harness/agent-harness.ts`](https://github.com/earendil-works/pi/blob/main/packages/agent/src/harness/agent-harness.ts) — Session 树、phase 锁
 - JSONL session repo、compaction（LangChain 摘要链）、Skills（`SKILL.md` + yaml frontmatter）
 - 工作量大，建议在核心 loop 稳定且有自己的用例后再做
 
@@ -290,12 +251,9 @@ flowchart LR
   T5 --> T6[example + README]
 ```
 
-
-
 ---
 
 ## 风险与缓解
-
 
 | 风险                                              | 缓解                                              |
 | ----------------------------------------------- | ----------------------------------------------- |
@@ -304,8 +262,22 @@ flowchart LR
 | 并行工具 `tool_execution_end` 顺序 vs toolResult 持久顺序 | 严格按 pi README：end 按完成顺序，message 按 assistant 源顺序 |
 | 跨厂商换模型上下文损坏                                     | Phase 1 文档注明限制；Phase 2 port transform_messages  |
 
-
 ---
+
+## Phase 1 实现清单（已完成）
+
+| 文件 | 状态 |
+|------|------|
+| `pi_agent_core/messages.py` | 完成 |
+| `pi_agent_core/types.py` | 完成 |
+| `pi_agent_core/event_stream.py` | 完成 |
+| `pi_agent_core/validation.py` | 完成 |
+| `pi_agent_core/queues.py` | 完成 |
+| `pi_agent_core/agent_loop.py` | 完成 |
+| `pi_agent_core/agent.py` | 完成 |
+| `pi_agent_core/adapters/langchain_*.py` | 完成 |
+| `pi_agent_core/tests/` | 完成 |
+| `examples/minimal_agent.py` | 完成 |
 
 ## 交付物
 
@@ -313,5 +285,3 @@ flowchart LR
 2. 通过 mock 测试的 `Agent` + `agent_loop`
 3. 一个 LangChain 真实调用示例（需用户配置 `OPENAI_API_KEY` 等）
 4. README：架构图、与 pi 的概念对照表、Phase 2/3 路线图
-
-

@@ -1,40 +1,82 @@
-# pi-agent-core Python 详细设计方案
+# pi-python 项目设计方案
 
-> 基于 [earendil-works/pi](https://github.com/earendil-works/pi) 的 `@earendil-works/pi-agent-core`，用 LangChain 替代 `pi-ai`。
+> 基于 [earendil-works/pi](https://github.com/earendil-works/pi) 的 `@earendil-works/pi-agent-core`，
+> 用 LangChain 替代 `pi-ai` 作为 LLM 层的 Python 移植。
 >
-> 本文是 Phase 1 的原始设计。Phase 2（usage/thinking/transform）见
-> `docs/superpowers/specs/2026-05-25-phase2-production-enhancements-design.md`；
-> Phase 2.5（重试/失控保护/观测/粒度事件/guardrail 钩子/预算信号/结构化输出）的
-> 设计决策与实施记录见 `docs/AUDIT-2026-07-02.md` 第三部分。当前 API 全貌以
-> README 为准。
+> 本文是项目整体设计文档，涵盖已完成的核心运行时、生产化增强、AgentHarness、工具生态，
+> 以及规划中的 Coding Agent CLI。各阶段的完整详细设计见独立 spec 文档（§11 索引）。
 
-## 1. 目标
+---
+
+## 1. 目标与原则
 
 | 项 | 说明 |
 |---|---|
-| 范围 | Phase 1 MVP：`Agent` + `agent_loop` + 事件协议 + 工具执行 |
+| 定位 | 非官方 Python 移植，忠实复现 pi 的 agent 循环语义，最终目标是构建完整的 Coding Agent CLI |
 | LLM 层 | LangChain `BaseChatModel.astream()`，不移植 pi-ai 多厂商 registry |
-| 原则 | 忠实移植 pi 循环语义；LangChain 仅作 `StreamFn` 边界适配 |
+| 核心原则 | **忠实移植 pi 循环语义**；**LangChain 仅作 StreamFn 边界适配**——工具执行、turn 管理、事件协议均在 `agent_loop.py`，不委托 LangChain agents/ToolNode |
 
-## 2. 架构
+---
+
+## 2. 整体架构
 
 ```
-AgentMessage[] → transform_context() → convert_to_llm() → LangChain BaseMessage[]
+┌─────────────────────────────────────────────────────────────────┐
+│                        Coding Agent CLI (Phase 4, planned)      │
+│         交互式 REPL · Rich 终端渲染 · 命令系统 · 权限确认                │
+├─────────────────────────────────────────────────────────────────┤
+│                        AgentHarness (Phase 3)                   │
+│  Session 树 · phase 锁 · 三队列 · 写缓冲 · 19 种事件/hook            │
+│  Compaction · Skills / Templates · SystemPrompt · ExecutionEnv  │
+├─────────────────────────────────────────────────────────────────┤
+│                        Tool Ecosystem (P6)                      │
+│  read · bash · edit · write · grep · find · ls                  │
+│  LangChain BaseTool 适配器 · MCP (via langchain-mcp-adapters)    │
+├─────────────────────────────────────────────────────────────────┤
+│                        Core Runtime (Phase 1–2.5)               │
+│  Agent · agent_loop · 事件协议 · StreamFn                         │
+│  transform_messages · usage/cost · thinking/reasoning           │
+│  retries · max_turns · guardrail hooks · ContextBudget          │
+│  structured output · tool-result images                         │
+├─────────────────────────────────────────────────────────────────┤
+│                        LangChain Adapter                        │
+│  langchain_stream · langchain_convert · resolve_chat_model      │
+│  OpenAI / Anthropic / DeepSeek / init_chat_model                │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 消息流水线
+
+```
+AgentMessage[] → transform_context() → convert_to_llm() → transform_messages()
+                                                              ↓
+                                                    convert_to_langchain()
                                                               ↓
                                                     stream_fn (LangChain astream)
                                                               ↓
                                                     AssistantMessageEvent → AgentEvent
 ```
 
-### 模块对照
+### 模块完整对照
 
-| pi (TS) | Python |
-|---------|--------|
-| `packages/agent/src/types.ts` | `pi_agent_core/types.py` |
-| `packages/agent/src/agent-loop.ts` | `pi_agent_core/agent_loop.py` |
-| `packages/agent/src/agent.ts` | `pi_agent_core/agent.py` |
-| `packages/ai/src/stream.ts` | `pi_agent_core/adapters/langchain_stream.py` |
-| `pi-ai` messages | `pi_agent_core/messages.py` |
+| Python 模块 | 职责 | pi (TS) 对应 |
+|---|---|---|
+| `pi_agent_core/messages.py` | 规范消息（user/assistant/toolResult）、content blocks、`Usage` | `pi-ai` messages |
+| `pi_agent_core/types.py` | `Model`、`AgentTool`、contexts、event types、`AgentLoopConfig` | `packages/agent/src/types.ts` |
+| `pi_agent_core/event_stream.py` | `EventStream` / `AssistantMessageEventStream` | `pi-ai` EventStream |
+| `pi_agent_core/agent_loop.py` | 核心循环：turns、工具执行、hooks、事件发射 | `packages/agent/src/agent-loop.ts` |
+| `pi_agent_core/agent.py` | 有状态 `Agent` 封装：prompt/steer/follow-up 队列、abort | `packages/agent/src/agent.ts` |
+| `pi_agent_core/transform.py` | 跨 provider 回放（tool-call id 规范化、thinking 降级、图片剥离） | `pi-ai` transforms |
+| `pi_agent_core/tools.py` | `SimpleTool` 辅助工厂 | — |
+| `pi_agent_core/validation.py` | Pydantic 参数校验（替代 pi 的 TypeBox） | — |
+| `pi_agent_core/queues.py` | steering / follow-up 消息队列 | — |
+| `pi_agent_core/adapters/langchain_stream.py` | `StreamFn`：LangChain `astream()` → pi 事件 | `packages/ai/src/stream.ts` |
+| `pi_agent_core/adapters/langchain_convert.py` | pi ⇄ LangChain 消息互转 | `packages/ai/src/stream.ts` |
+| `pi_agent_core/adapters/langchain_tools.py` | LangChain `BaseTool` → `AgentTool` 适配 | 无（Python 特有） |
+| `pi_agent_core/coding_tools/` | 7 个内置编码工具 + 截断/路径/互斥公共设施 | `packages/coding-agent/src/core/tools/` |
+| `pi_agent_harness/` | Session 树、AgentHarness、Compaction、Skills/Templates、Env | `packages/agent/src/harness/` |
+
+---
 
 ## 3. 事件契约（不可破坏）
 
@@ -46,124 +88,267 @@ agent_start → turn_start → message_start(user) → message_end(user)
 → turn_end → agent_end
 ```
 
-有工具时：在 `message_end(assistant)` 后插入 `tool_execution_*`，再 `message_start/end(toolResult)`，可能多轮 `turn_start`。
+有工具时：在 `message_end(assistant)` 后插入 `tool_execution_*` 与 `toolResult` message events，可能跨多轮 `turn_start`。
 
-### 并行工具顺序
+`message_update` 包装粒度 assistant-stream 事件：`text_start/delta/end`、`thinking_start/delta/end`、`toolcall_start/delta/end`。end 事件携带聚合结果。
 
-- `tool_execution_end`：按**完成顺序**发射
-- `toolResult` 消息：按 assistant 中 tool call **源顺序**持久化
+### 关键不变量
 
-### terminate 语义
+1. **并行工具顺序** — `tool_execution_end` 按**完成顺序**发射；`toolResult` 消息按 tool call **源顺序**持久化。
+2. **terminate 语义** — 仅当同一批次**全部** finalized 工具结果的 `terminate=True` 时，跳过下一轮 LLM。
+3. **StreamFn 契约** — 不向调用方抛异常；失败编码为 `error` 事件 + `stop_reason=error|aborted`。
+4. **Thinking/reasoning 门控** — reasoning 参数仅在 `Model.reasoning=True` **且** `thinking_level != "off"` 时注入；同一标志驱动 `transform_messages` 的 thinking 历史剥除。
+5. **Usage 累积取 per-field max** — 不求和（避免累积快照被放大）。
+6. **结构化输出不破坏流式** — `response_schema` 走 prompt 注入 + 原生 `response_format`；不用 `with_structured_output`。
 
-仅当同一批次**全部** finalized 工具结果的 `terminate=True` 时，跳过下一轮 LLM。
+---
 
-## 4. 类型设计
+## 4. Phase 1：核心运行时
 
-### Model
+> 详细设计原稿：`docs/PLAN-PHASE1.md`
+
+### 4.1 类型与消息模型 (`types.py`, `messages.py`)
+
+- **三种规范消息**：`UserMessage`、`AssistantMessage`、`ToolResultMessage`
+- **Content blocks**：`TextContent`、`ThinkingContent`、`ToolCallContent`、`ImageContent`
+- **事件联合类型**：`AgentEvent`（`agent_start/end`、`turn_start/end`、`message_*`、`tool_execution_*`）
+- **Model** dataclass：`provider`、`model_id`、`context_window`、`supports_images`、`reasoning`、`base_url`
+- **AgentTool** Protocol：`name`/`description`/`label`/`parameters`/`execute`/`execution_mode`/`prepare_arguments`
+
+### 4.2 Agent 循环 (`agent_loop.py`)
+
+忠实移植 pi `agent-loop.ts` 的双层循环：
+
+- **内层**：LLM 流式响应 → 解析 tool calls → validate → `before_tool_call` hook → 并行/串行执行 → `after_tool_call` → terminate 判定
+- **外层**：steering 消息注入（turn 边界）→ follow-up 消息注入（无 tool/steering 时）
+- **关键 hooks**：`should_stop_after_turn`、`prepare_next_turn`、`before/after_tool_call`
+
+### 4.3 Agent 类 (`agent.py`)
+
+有状态封装：`prompt()`/`continue_()`/`abort()`/`wait_for_idle()`/`reset()`/`steer()`/`follow_up()`。`subscribe()` 监听器按注册顺序 await，`agent_end` 为 settlement 屏障——`is_streaming` 在全部监听器完成后才清零。
+
+### 4.4 LangChain 适配层 (`adapters/`)
+
+- **`langchain_stream.py`**：`StreamFn` 实现——`resolve_chat_model(model)` 构造 `ChatOpenAI`/`ChatAnthropic`/`ChatDeepSeek`（或 `init_chat_model` 通用路径）；`bind_tools` 绑定工具 schema；`astream` 流式映射 `text_delta`/`toolcall_delta`/`done`/`error`
+- **`langchain_convert.py`**：pi `Message` ⇄ LangChain `BaseMessage` 双向转换；system prompt 注入；tool call id/content 规范化
+
+---
+
+## 5. Phase 2 / 2.5：生产化增强
+
+> 详细设计：`docs/superpowers/specs/2026-05-25-phase2-production-enhancements-design.md`
+> 审计与 P2.5 增强记录：`docs/AUDIT-2026-07-02.md`
+
+### 5.1 Usage / Cost 追踪
+
+从 LangChain 流式 chunk 的 `usage_metadata` 逐 chunk 累加（对齐 LangChain `add_usage` 语义），全 provider 统一读标准化字段。`cost_calculator` 回调将 token 数转为金额。三种真实 provider 报告形态（单次终报、互补分片、累积快照）均正确处理。
+
+### 5.2 Thinking / Reasoning
+
+`ThinkingLevel`（off/minimal/low/medium/high/xhigh）映射为 provider 参数：Anthropic `thinking.budget_tokens` + 联动 `max_tokens`；OpenAI `reasoning_effort`。Anthropic thinking 块流式捕获为 `ThinkingContent`（含 `signature` 用于多轮工具回放），以 `thinking_delta` 事件实时发射。DeepSeek `reasoning_content` 同样捕获。
+
+### 5.3 跨 Provider 消息回放 (`transform.py`)
+
+```
+messages → normalize_tool_call_ids → downgrade_thinking → strip_unsupported_images → result
+```
+
+- **normalize_tool_call_ids**：OpenAI `call_xxx` ⇄ Anthropic `toolu_xxx`，维护映射保证 toolCall/toolResult 配对
+- **downgrade_thinking**：`target_model.reasoning=False` 时剥除 `ThinkingContent`
+- **strip_unsupported_images**：`supports_images=False` 时移除 `ImageContent`，纯图片消息替换为占位文本
+
+### 5.4 流式重试与失控保护
+
+- **重试**：首 token 前指数退避 + 抖动（`Retry-After` 感知），可配 `max_retries`
+- **`max_turns`**：超限抛 `MaxTurnsExceededError`，Agent 转为 error-stop assistant message
+- **`tool_timeout`**：单工具超时 → error tool result（LLM 可见可自纠）
+
+### 5.5 Guardrail Hooks 与可观测性
+
+- **`before_llm_call(context, budget)`**：ContextBudget token 信号——压缩钩子挂载点
+- **`after_llm_call(context, message)`**：tripwire on raise（内容审查等）
+- **`on_agent_end(context, messages)`**：run 结束后收尾
+- **`on_payload` / `on_response`**：观测裸请求/响应
+- 每个事件携带 `run_id` / 1-based `turn_id`
+
+### 5.6 结构化输出
+
+`response_schema`（pydantic model 或 JSON schema dict）→ prompt 注入 + OpenAI-style 原生 `response_format` → 解析结果存 `AssistantMessage.structured_output`。流式不受影响——JSON 文本仍以 `text_delta` 发射。
+
+### 5.7 工具结果图片
+
+Anthropic 原生 image blocks；其他 provider 回退为 user-message 注入；`supports_images=False` 时自动剥离。
+
+---
+
+## 6. Phase 3：AgentHarness
+
+> 详细设计：`docs/superpowers/specs/2026-07-03-phase3-agent-harness-design.md`
+> 审计：`docs/AUDIT-H1.md` ~ `docs/AUDIT-H4.md`
+
+独立发行包 `pi-agent-harness`（`packages/pi-agent-harness/pi_agent_harness/`），依赖 `pi-agent-core`。
+
+### 6.1 Session 树与 JSONL v3 存储
+
+- **与 pi v3 字节兼容**的 append-only JSONL 格式：首行 header，之后每行一个 entry
+- **11 种 SessionTreeEntry**（pydantic discriminated union）：message、thinkingLevelChange、modelChange、activeToolsChange、compaction、branchSummary、custom、customMessage、label、sessionInfo、leaf
+- **树结构**：`parentId` 构成树；分支 = 从任意历史 entry 续写；leaf entry 实现叶子指针移动
+- **两种存储**：`JsonlSessionStorage`（文件 I/O + 内存索引）、`MemorySessionStorage`（纯内存，测试用）
+- **Repo**：create/open/list/delete/fork；fork 语义忠实对齐 pi `getEntriesToFork`
+
+### 6.2 AgentHarness 主类
+
+**平行于 `Agent`，不包 `Agent` 类**——两者都直接驱动 `run_agent_loop`。
+
+- **Phase 锁**：`idle`/`turn`/`compaction`/`branch_summary`/`retry`——单占用模型
+- **三队列**：steer、follow_up（drain 时发 `queue_update`）、next_turn（任何时刻可入队，下次 `prompt()` 时注入）
+- **写缓冲**：turn 中 setter 不直接写 session，flush 在 turn 边界按序重放
+- **事件系统**：11 种 broadcast + 8 种 hook（互斥通道，hook 带返回值）
+- **持久化时序不变量**：`message_end` → 先落盘后广播；`turn_end` → 先广播再 flush 再 `save_point`；`agent_end` → flush + idle + `settled`
+- **Run 失败合成**：loop 异常逃逸时构造失败 assistant message，完整走 `_handle_agent_event` 保证事件流闭合
+
+### 6.3 Compaction
+
+- **token 估算**：`estimate_context_tokens` 混合真实 usage + chars/4 启发式
+- **Cut point 算法**：从尾部向前累积直到 `keep_recent_tokens`，找合法切点（toolResult 不可切）；split-turn 检测 + 前缀单独摘要
+- **结构化摘要**：Goal / Constraints / Progress / Key Decisions / Next Steps / Critical Context；迭代更新模式保留旧信息
+- **auto_compact**（Python 扩展）：`turn_end` 后检查 `should_compact`，命中则在 turn 间隙执行——失败不打断 run
+
+### 6.4 分支导航 (`navigate_tree`)
+
+求两路径的最深公共祖先，收集被放弃分支 entries 生成 branch summary。`session_before_tree` hook 可 cancel / 自供 summary / 打 label。
+
+### 6.5 Skills 与 Prompt Templates
+
+- **Skills**：递归扫描目录，`SKILL.md` 为叶子；YAML frontmatter（name/description/disable-model-invocation）；`.gitignore`/`.ignore`/`.fdignore` 叠加忽略；诊断模型（warning 不阻断）
+- **Prompt Templates**：目录取 `.md` 子文件；`$1..$n`/`$@`/`$ARGUMENTS`/`${@:N:L}` 参数替换；shell 风格引号分词
+- **系统提示注入**：`format_skills_for_system_prompt` 输出 agentskills.io 风格 XML 块
+
+### 6.6 ExecutionEnv
+
+- **FileSystem + Shell 两个 Protocol**（`@runtime_checkable`）；Python 化：异常代替 pi 的 `Result<T,E>`
+- **LocalExecutionEnv**：`pathlib` + `asyncio.to_thread`（FS）；`asyncio.create_subprocess_shell`（Shell，Windows kill 进程组）
+- **错误层级**：`FileError`/`ExecutionError`/`SessionError`/`CompactionError`/`BranchSummaryError`/`AgentHarnessError`，归一化函数 `normalize_harness_error`
+
+### 6.7 Harness 自定义消息
+
+四种自定义 role：`bashExecution`、`custom`、`branchSummary`、`compactionSummary`。`harness_convert_to_llm` 决定各 role 如何到达 LLM（bashExecution → user 消息含代码块；未知 role → 丢弃）。
+
+---
+
+## 7. P6：工具生态
+
+> 详细设计：`docs/superpowers/specs/2026-07-03-p6-tool-ecosystem-design.md`
+
+### 7.1 内置编码工具
+
+归层在 `pi_agent_core/coding_tools/`——工具是 loop 的消费者，不是 loop 的一部分。7 个工具均实现 `AgentTool` 协议，不反向依赖 agent_loop/Agent。零新增运行时依赖。
+
+| 工具 | 归组 | 核心行为 |
+|---|---|---|
+| `read` | 编程 + 只读 | 文本 2000 行/50KB 截断 + offset/limit 分页；图片魔数嗅探 → ImageContent |
+| `bash` | 编程 | 真实 shell（bash -c / Git Bash on Windows）；合并 stdout+stderr 尾部截断；超时/abort 杀进程树；100ms 节流流式更新 |
+| `edit` | 编程 | 精确文本替换（唯一匹配保证、重叠拒绝、CRLF/BOM 往返）；unified-diff details |
+| `write` | 编程 | 创建/覆盖 + 自动递归建目录；经 mutation_queue 串行 |
+| `grep` | 只读 | ripgrep 优先（`--json` 流式解析）；纯 Python 回退；单行 500 字符截断 |
+| `find` | 只读 | 纯 Python glob walk；basename vs 路径 pattern 语义对齐 pi 对 fd 的调用 |
+| `ls` | 只读 | 大小写不敏感排序，`/` 目录后缀，含 dotfiles |
+
+### 7.2 公共设施
+
+- **`truncate.py`**：`truncate_head`/`truncate_tail`/`truncate_line` + `TruncationResult`，数值与 pi 逐项相同
+- **`mutation_queue.py`**：按 `realpath` 归一的 `asyncio.Lock` 注册表，write/edit 同文件互斥
+- **`path_utils.py`**：`resolve_to_cwd`、glob→regex 翻译、图片魔数嗅探（stdlib 实现，不依赖 Pillow）
+
+### 7.3 工厂 API
 
 ```python
-@dataclass
-class Model:
-    provider: str  # openai, anthropic, deepseek（OpenAI 兼容网关）, 其他走 init_chat_model
-    model_id: str
-    api: str = "langchain"
-    context_window: int = 128_000  # ContextBudget 预算信号的分母
-    supports_images: bool = True
-    reasoning: bool = False  # thinking 参数注入与历史剥除的总开关
-    base_url: str | None = None  # OpenAI 兼容网关（对齐 pi 的 baseUrl）
+create_coding_tools(cwd)       # read/bash/edit/write（pi 默认组）
+create_read_only_tools(cwd)    # read/grep/find/ls（无修改保证）
+create_tool(name, cwd)         # 按名构造单工具
+create_all_tools(cwd)          # 全部 7 个
 ```
 
-### AgentTool
+### 7.4 LangChain 工具适配器
 
-- `name`, `description`, `label`
-- `parameters`: `type[BaseModel]` 或 `dict`（JSON Schema，MVP 主要用 Pydantic）
-- `execute(tool_call_id, params, signal, on_update) -> AgentToolResult`
-- `execution_mode`: parallel | sequential
-- `prepare_arguments?`
+`from_langchain_tool(tool: BaseTool) -> AgentTool`：schema 提取（`tool_call_schema` 优先，剔除 LangChain 注入参数）、结果归一（str → text 块、content blocks 列表 → text/image 映射、artifact → details）、异常冒泡为 error tool result。MCP 工具经 `langchain-mcp-adapters` 产出的 `BaseTool` 走同一适配器。
 
-### StreamFn
+---
 
-```python
-async def stream_fn(model, context: LlmContext, options) -> AssistantMessageEventStream
-```
+## 8. Phase 4：Coding Agent CLI（规划中）
 
-契约：不向调用方抛异常；失败编码为 `error` 事件 + `stop_reason=error|aborted`。
+> 目标：将引擎层组装为可日常使用的交互式 Coding Agent（对标 Claude Code / Aider）
 
-## 5. LangChain 适配
+### 8.1 交互式 REPL
 
-1. `convert_to_langchain(messages)` → `HumanMessage` / `AIMessage` / `ToolMessage`
-2. `resolve_chat_model(model)` → `ChatOpenAI` / `ChatAnthropic`
-3. `bound = model.bind_tools(lc_tools)`（工具执行仍在 agent_loop，非 ToolNode）
-4. `astream` → 映射 `text_delta`、`toolcall_delta`、`done`
+- 用户输入 → AgentHarness.prompt() → 流式输出 → 等待下一轮
+- Rich 终端渲染：Markdown 渲染、代码高亮、diff 着色、spinner/进度条
+- 多行输入支持
 
-## 6. 后续阶段状态
+### 8.2 命令系统
 
-- Phase 2（已完成）：`transform_messages` 跨厂商回放、usage/cost、thinking/reasoning
-- Phase 2.5（已完成）：重试/退避、`max_turns`/`tool_timeout`、`on_payload`/`on_response`、
-  run_id/turn_id、粒度事件、工具结果图片、`before/after_llm_call`/`on_agent_end`、
-  `ContextBudget`、`response_schema` 结构化输出（详见审计报告第三部分）
-- Phase 3（设计已完成，待实施）：AgentHarness——Session 树（pi v3 兼容 JSONL）、
-  Compaction、Skills、Prompt Templates、ExecutionEnv，详见
-  `docs/superpowers/specs/2026-07-03-phase3-agent-harness-design.md`（H1–H4 四批）
+元命令（`/` 前缀）：`/compact`、`/model`、`/tools`、`/undo`、`/clear`、`/history`、`/config` 等。
 
-## 7. 测试策略
+### 8.3 权限确认
 
-Mock `stream_fn` 无需 API Key，镜像 pi `agent-loop.test.ts` 场景。
+对文件写入（edit/write）和 bash 执行弹出 `[y/N]` 确认；可通过配置设置 auto-approve 模式。
 
-## 8. 依赖
+### 8.4 Coding Agent 系统提示
 
-- 核心：`pydantic>=2`, `langchain-core`
-- 可选：`langchain-openai`, `langchain-anthropic`
-- 开发：`pytest`, `pytest-asyncio`
+精心设计的 system prompt：工具使用策略、错误自纠引导、代码规范约束、安全边界。与 harness skills/templates 集成。
 
-## 9. Phase 1 实现清单（已完成）
+### 8.5 配置管理
 
-| 文件 | 状态 |
-|------|------|
-| `pi_agent_core/messages.py` | 完成 |
-| `pi_agent_core/types.py` | 完成 |
-| `pi_agent_core/event_stream.py` | 完成 |
-| `pi_agent_core/validation.py` | 完成 |
-| `pi_agent_core/queues.py` | 完成 |
-| `pi_agent_core/agent_loop.py` | 完成 |
-| `pi_agent_core/agent.py` | 完成 |
-| `pi_agent_core/adapters/langchain_*.py` | 完成 |
-| `pi_agent_core/tests/` | 完成（Phase 2.5 后共 80 tests） |
-| `examples/minimal_agent.py` | 完成（另见 `examples/production_agent.py`） |
+`~/.pi-python/config.toml`：默认 model/provider、API key 来源、auto-approve 列表、自定义 skills 目录。
 
-## 10. 使用说明
+---
 
-### 定义工具
+## 9. 测试策略
 
-```python
-from pydantic import BaseModel, Field
-from pi_agent_core.tools import SimpleTool
-from pi_agent_core.types import AgentToolResult
+全量 Mock `stream_fn`，无需 API key，镜像 pi `agent-loop.test.ts` 场景。当前 **327 tests**。
 
+| 域 | 覆盖要点 |
+|---|---|
+| 核心循环 | 事件序列（纯对话/单工具/多工具/parallel/sequential）、steering、follow-up、abort、`should_stop_after_turn` |
+| Usage/Thinking | mock chunk 带 `usage_metadata`/thinking 块，验证提取与累积 |
+| Transform | tool-call id 跨 provider 重写、thinking 降级、图片剥离、端到端混合场景 |
+| Harness | JSONL 往返（与 pi v3 fixture 互读）、持久化时序不变量、hook/队列、turn 边界 setter、run 失败合成 |
+| Compaction | cut point / toolResult 非切点 / LLM 摘要 / hook 自供 / branch summary / auto_compact |
+| Skills/Templates | frontmatter 解析、ignore 规则、校验诊断、参数替换 |
+| 编码工具 | 截断边界、offset/limit 组合、图片魔数、edit 唯一匹配/重叠/CRLF 往返、bash 三终态、grep rg+回退、mutation queue 串行 |
+| LangChain 适配 | str/blocks/artifact 返回归一、schema 提取、异常冒泡 |
+| Real-API 冒烟 | `scripts/smoke_real_api.py` 对接 SiliconFlow（OpenAI 兼容） |
 
-class EchoParams(BaseModel):
-    message: str = Field(description="text")
+---
 
+## 10. 依赖
 
-async def echo(_id, params: EchoParams, signal, on_update) -> AgentToolResult:
-    return AgentToolResult(content=[{"type": "text", "text": params.message}], details={})
+### 核心 (`pi-agent-core-lc`)
 
+- `pydantic>=2.0`、`langchain-core>=0.3.0`、`typing-extensions>=4.6`
+- 可选 providers：`langchain-openai`、`langchain-anthropic`、`langchain-deepseek`
 
-tool = SimpleTool(
-    name="echo", description="Echo", label="Echo", parameters=EchoParams, execute_fn=echo
-)
-```
+### Harness (`pi-agent-harness-lc`)
 
-### 自定义 StreamFn（测试 / 代理）
+- 依赖 `pi-agent-core-lc`
+- `PyYAML>=6`（skills frontmatter）、`pathspec>=0.12`（gitignore 匹配）
 
-```python
-from pi_agent_core.tests.mock_stream import mock_text_stream
+### 开发
 
-agent = Agent(stream_fn=mock_text_stream, ...)
-```
+- `pytest>=8.0`、`pytest-asyncio>=0.24`、`ruff>=0.16`
 
-### 无 API Key 运行示例
+---
 
-```bash
-PI_USE_MOCK=1 python3 examples/minimal_agent.py
-```
+## 11. 文档索引
+
+| 文档 | 内容 |
+|---|---|
+| `AGENTS.md` | 项目总览、模块表、不变量、当前状态 |
+| `README.md` | 公开 README、Quick start、Roadmap |
+| `docs/DESIGN.md`（本文） | 项目整体设计方案 |
+| `docs/PLAN-PHASE1.md` | Phase 1 原始规划（历史） |
+| `docs/AUDIT-2026-07-02.md` | 核心层审计：缺陷修复 + Phase 2.5 增强追踪 |
+| `docs/AUDIT-H1.md` ~ `docs/AUDIT-H4.md` | Harness 各批次审计 |
+| `docs/superpowers/specs/2026-05-25-phase2-*.md` | Phase 2 详细设计：usage/cost、thinking、transform |
+| `docs/superpowers/specs/2026-07-03-phase3-*.md` | Phase 3 详细设计：Session 树、AgentHarness、Compaction、Skills、Env |
+| `docs/superpowers/specs/2026-07-03-p6-*.md` | P6 详细设计：7 个内置工具 + LangChain 适配器 |
