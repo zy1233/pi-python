@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pi-agent-cli-lc"
+version = "0.1.0"
+description = "Standard ACP agent over AgentHarness (no x.ai extensions)"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [
+    { name = "zy1233", email = "zy1233@users.noreply.github.com" },
+]
+dependencies = [
+    "pi-agent-core-lc==0.1.0",
+    "pi-agent-harness-lc==0.1.0",
+    "agent-client-protocol>=0.12.0",
+    "pydantic>=2.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/zy1233/pi-python"
+Repository = "https://github.com/zy1233/pi-python"
+
+[project.scripts]
+pi-agent-cli = "pi_agent_cli.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pi_agent_cli"]
+
+[tool.uv.sources]
+pi-agent-core-lc = { workspace = true }
+pi-agent-harness-lc = { workspace = true }

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Phase 4 P0–P2 (Coding Agent CLI)**: vendored grok-build TUI under `tui/` (Apache-2.0, excluded from wheels); `packages/pi-agent-cli` standard ACP agent over `AgentHarness` (no `x.ai/*`); TUI spawn `python -m pi_agent_cli`, skip xAI login, drop vendor extension RPCs, home `~/.pi-python`, product binary `pi`. TUI Cargo crates renamed `xai-*` → `pi-*` (upstream URLs and Apache NOTICE attribution unchanged).
+
 ## [0.1.0] - 2026-08-05
 
 Initial public release.

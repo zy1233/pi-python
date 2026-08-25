@@ -40,7 +40,7 @@ Issues = "https://github.com/zy1233/pi-python/issues"
 dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.11"]
 
 [tool.uv.sources]
-pi-agent-core = { workspace = true }
+pi-agent-core-lc = { workspace = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["pi_agent_harness"]

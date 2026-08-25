@@ -11,3 +11,6 @@ build/
 .venv-*/
 venv/
 .env
+# Rust TUI workspace (Apache-2.0 fork under tui/)
+tui/target/
+**/*.rs.bk

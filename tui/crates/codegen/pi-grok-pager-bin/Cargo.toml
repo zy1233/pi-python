@@ -1,0 +1,96 @@
+[package]
+name = "pi-grok-pager-bin"
+version = "1.0.8"
+edition.workspace = true
+license = "Apache-2.0"
+authors = ["pi"]
+default-run = "pi"
+
+# Composition-root binary for the pi TUI. The artifact is named `pi`.
+# This package exists so the binary can link both the pager library and the
+# optional `pi-grok-pager-minimal` render mode: `minimal` depends on
+# `pi-grok-pager`, so the pager library cannot depend back on it (cargo cycle).
+# The binary installs the minimal-mode IoC hooks at startup.
+[[bin]]
+name = "pi"
+path = "src/main.rs"
+
+[dependencies]
+# The pager library (all application logic + the public API main.rs drives).
+pi-grok-pager = { path = "../pi-grok-pager" }
+# Optional scrollback-native render mode, wired in via the fn-pointer seam.
+pi-grok-pager-minimal = { path = "../pi-grok-pager-minimal" }
+
+# Agent runtime + leader/stdio/headless entry points.
+pi-grok-shell = { workspace = true }
+pi-grok-update = { path = "../pi-grok-update" }
+pi-grok-version = { workspace = true }
+pi-grok-telemetry = { workspace = true }
+pi-grok-workspace = { workspace = true }
+pi-crash-handler = { path = "../pi-crash-handler" }
+pi-acp-lib = { workspace = true }
+
+# Async runtime + misc.
+tokio = { workspace = true, features = [
+    "sync",
+    "rt",
+    "macros",
+    "rt-multi-thread",
+    "signal",
+    "io-util",
+    "io-std",
+] }
+tokio-util = { workspace = true, features = ["compat"] }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde_json = { workspace = true }
+dunce = { workspace = true }
+semver = { workspace = true }
+pi-tty-utils = { workspace = true }
+# `collect_crashed()` for the startup crash notice.
+pi-grok-active-sessions = { workspace = true }
+pi-grok-config = { workspace = true }
+pi-grok-sandbox = { path = "../pi-grok-sandbox", default-features = false }
+pi-grok-extra-ca = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+# Default allocator on Unix; gated by the `jemalloc` feature (see main.rs
+# `#[global_allocator]`, cfg(all(feature = "jemalloc", unix))).
+# `stats` is binary-scoped only (not workspace-wide) so this CLI jemalloc
+# link gets --enable-stats for stats.allocated / stats.resident mallctl.
+tikv-jemallocator = { workspace = true, optional = true, features = ["stats"] }
+# Raw mallctl for the memory-cliff arena purge hook (see
+# `purge_jemalloc_retained_pages` + the `install_release_hook` call in
+# main.rs). Same version family as the
+# allocator; adds no new build units beyond what tikv-jemallocator pulls in.
+tikv-jemalloc-sys = { workspace = true, optional = true }
+# Heap-profile / stats mallctl helpers (prof.active, prof.dump, epoch, stats.*).
+tikv-jemalloc-ctl = { workspace = true, optional = true, features = ["stats", "use_std"] }
+
+[dev-dependencies]
+serial_test = { workspace = true }
+# `PagerArgs::try_parse_from` in the CLI-parsing unit tests (needs the
+# `clap::Parser` trait in scope).
+clap = { workspace = true, features = ["derive"] }
+tempfile = { workspace = true }
+
+[features]
+default = [
+    "jemalloc",
+    "sandbox-enforce",
+    ]
+default-bazel = [
+    "jemalloc",
+    "sandbox-enforce",
+    "local-workspace",
+    ]
+jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-sys", "dep:tikv-jemalloc-ctl"]
+sandbox-enforce = ["pi-grok-pager/sandbox-enforce"]
+local-workspace = ["pi-grok-pager/local-workspace"]
+release-dist = [
+    "pi-grok-pager/release-dist",
+    ]

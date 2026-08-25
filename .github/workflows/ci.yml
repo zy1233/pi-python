@@ -39,6 +39,6 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install packages (dev)
-        run: pip install -e ".[dev]" -e "./packages/pi-agent-harness"
+        run: pip install -e ".[dev]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent-cli"
       - name: Run tests
         run: pytest -v

@@ -1,0 +1,29 @@
+[package]
+license = "Apache-2.0"
+name = "pi-chat-state"
+version = "0.1.0"
+edition.workspace = true
+description = "Actor-based chat state management for pi agents"
+
+[features]
+default-bazel = []
+
+[dependencies]
+indexmap = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+strum = { workspace = true }
+tokio = { workspace = true, features = ["sync", "rt", "macros"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+# `CompactionDetail`, embedded in `CompactionMode::Segments`.
+pi-compaction-transcript = { workspace = true }
+pi-grok-compaction = { path = "../../common/pi-grok-compaction" }
+pi-grok-sampling-types = { path = "../pi-grok-sampling-types" }
+pi-token-estimation = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }
+
+[lints]
+workspace = true

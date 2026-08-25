@@ -13,8 +13,10 @@ Design documents:
 | `docs/specs/2026-05-25-phase2-production-enhancements-design.md` | Phase 2 spec |
 | `docs/specs/2026-07-03-phase3-agent-harness-design.md` | Phase 3 harness spec |
 | `docs/specs/2026-07-03-p6-tool-ecosystem-design.md` | P6 tool-ecosystem spec |
+| `docs/specs/2026-08-25-phase4-coding-agent-cli-design.md` | Phase 4 CLI: forked grok TUI + standard ACP |
 | `docs/AUDIT/AUDIT-2026-07-02.md` | Core-layer audit tracker |
 | `docs/AUDIT/AUDIT-H1.md` ~ `docs/AUDIT/AUDIT-H4.md` | Harness batch audits |
+| `docs/AUDIT/SPIKE-P0-GROK-TUI.md` | Phase 4 P0: pager `x.ai/*` strip list |
 
 Guiding principles:
 
@@ -45,6 +47,8 @@ AgentMessage[] → transform_context() → convert_to_llm() → LangChain BaseMe
 | `pi_agent_core/tools.py`, `validation.py`, `queues.py` | `SimpleTool` helper, argument validation, steering/follow-up queues | — |
 | `pi_agent_core/coding_tools/`, `adapters/langchain_tools.py` | Built-in coding tools (all 7: `read`/`bash`/`edit`/`write`/`grep`/`find`/`ls`) + LangChain tool adapter | pi coding-agent built-in tools |
 | `packages/pi-agent-harness/pi_agent_harness` | Phase 3 harness package: sessions, AgentHarness, compaction, skills/templates, LocalExecutionEnv | `packages/agent/src/harness/` |
+| `packages/pi-agent-cli/pi_agent_cli` | Phase 4 standard-ACP agent (`python -m pi_agent_cli`); no `x.ai/*` | — |
+| `tui/` | Phase 4 forked grok TUI (Apache-2.0 Cargo workspace, not in wheels). Product binary `pi` | grok-build pager |
 
 ### Invariants (do not break)
 
@@ -58,13 +62,13 @@ AgentMessage[] → transform_context() → convert_to_llm() → LangChain BaseMe
 
 ### Status
 
-**Engine layer complete** — Phase 1 (MVP loop), Phase 2 (usage/cost, thinking/reasoning, transform_messages), Phase 2.5 (retries/backoff, `max_turns`/`tool_timeout`, observability, guardrail hooks, `ContextBudget`, structured output, `Model.base_url` + `deepseek` provider), Phase 3 H1-H4 (`pi-agent-harness`: session tree, AgentHarness runtime, compaction/tree navigation, skills/templates/system prompt/LocalExecutionEnv), and P6 tool ecosystem (all 7 built-in tools + LangChain adapter) are all complete. Real-API smoke (`scripts/smoke_real_api.py`) passed against SiliconFlow. All harness audits (H1–H4) closed. Current test count: 327.
+**Engine layer complete** — Phase 1–3 + P6 as above. Real-API smoke (`scripts/smoke_real_api.py`) passed against SiliconFlow. All harness audits (H1–H4) closed.
 
-**Next: Coding Agent CLI** (Phase 4) — interactive REPL, rich terminal rendering, command system, permission confirmation, coding-agent system prompt. See README Roadmap for full plan.
+**Phase 4 (Coding Agent CLI) P0–P2 landed** — `tui/` vendored grok-build fork; `packages/pi-agent-cli` is standard-ACP-only over `AgentHarness`; TUI spawn is `python -m pi_agent_cli` (override `PI_AGENT_COMMAND` / `PI_PYTHON`), skips xAI login, drops outbound `x.ai/*`, home `~/.pi-python`. Product binary `pi` (`cargo check -p pi-grok-pager-bin`). P3 (`/new` `/resume`, local `@`, `pi -p` headless) and P4 (config polish / Windows notes) remain. See `docs/specs/2026-08-25-phase4-coding-agent-cli-design.md`.
 
 ## Cursor Cloud specific instructions
 
-This is a Python monorepo with `pi-agent-core` and `pi-agent-harness`. There are no services to start — packages are installed in editable mode and tested via `pytest`.
+This is a Python monorepo with `pi-agent-core`, `pi-agent-harness`, and `pi-agent-cli`, plus a Rust TUI workspace under `tui/` (vendored fork of grok-build). There are no services to start — Python packages are installed in editable mode and tested via `pytest`. TUI: `cd tui && cargo check -p pi-grok-pager-bin` (product binary `pi`; prefer `CARGO_TARGET_DIR` on a Linux filesystem, not `/mnt/d`).
 
 ### Virtual environments (uv)
 
@@ -108,14 +112,14 @@ To create a fresh dev venv (only if `.venv` is broken):
 
 ```powershell
 uv venv --python 3.12 .venv
-uv pip install --python .venv -e ".[dev]" -e "./packages/pi-agent-harness"
+uv pip install --python .venv -e ".[dev]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent-cli"
 ```
 
 ### Key commands
 
 | Action | Command |
 |--------|---------|
-| Install (dev) | `uv pip install --python .venv -e ".[dev]" -e "./packages/pi-agent-harness"` |
+| Install (dev) | `uv pip install --python .venv -e ".[dev]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent-cli"` |
 | Add a provider | `uv pip install --python .venv-test-real langchain-deepseek` |
 | Lint check | `ruff check .` |
 | Format check | `ruff format --check .` |
@@ -123,7 +127,7 @@ uv pip install --python .venv -e ".[dev]" -e "./packages/pi-agent-harness"
 | Auto-format | `ruff format .` |
 | Run tests (mock) | `.venv\Scripts\python.exe -m pytest` (or `-v` for verbose) |
 | Run tests (real LLM) | `$env:REAL_LLM_API_KEY='sk-...'; .venv-test-real\Scripts\python.exe -m pytest -m real_llm -v` |
-| Run example (no API key) | `PI_USE_MOCK=1 .venv\Scripts\python.exe examples/minimal_agent.py` |
+| TUI cargo check | WSL: `cd tui && CARGO_TARGET_DIR=~/grok-build-target cargo check -p pi-grok-pager-bin` (binary name `pi`) |
 
 ### Notes
 

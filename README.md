@@ -303,9 +303,11 @@ Use `.venv-test-real` for pytest real-LLM tests; the smoke script can run from t
 | [docs/PLAN/PLAN-PHASE1.md](docs/PLAN/PLAN-PHASE1.md) | Phase 1 original planning document (historical) |
 | [docs/AUDIT/AUDIT-2026-07-02.md](docs/AUDIT/AUDIT-2026-07-02.md) | Core-layer audit: findings, fixes, Phase 2.5 enhancements |
 | [docs/AUDIT/AUDIT-H1.md](docs/AUDIT/AUDIT-H1.md) ~ [H4](docs/AUDIT/AUDIT-H4.md) | Harness batch audits (H1 session, H2 runtime, H3 compaction, H4 skills/env) |
+| [P0 TUI spike](docs/AUDIT/SPIKE-P0-GROK-TUI.md) | grok pager `x.ai/*` strip inventory |
 | [Phase 2 spec](docs/specs/2026-05-25-phase2-production-enhancements-design.md) | Usage/cost, thinking/reasoning, transform_messages |
 | [Phase 3 spec](docs/specs/2026-07-03-phase3-agent-harness-design.md) | AgentHarness: sessions, compaction, skills, templates, ExecutionEnv |
 | [P6 spec](docs/specs/2026-07-03-p6-tool-ecosystem-design.md) | Built-in coding tools + LangChain adapter |
+| [Phase 4 spec](docs/specs/2026-08-25-phase4-coding-agent-cli-design.md) | Coding Agent CLI: forked grok TUI + standard ACP agent |
 
 ## Concept mapping (pi → Python)
 
@@ -332,10 +334,12 @@ Use `.venv-test-real` for pytest real-LLM tests; the smoke script can run from t
 
 ### Next
 
-- **Phase 4 (Coding Agent CLI)** — planned: interactive REPL with rich terminal rendering (Markdown/diff/syntax highlighting), command system (`/compact`, `/model`, `/undo`, …), permission confirmation for dangerous operations, config file support
+- **Phase 4 (Coding Agent CLI)** — P0–P2 done: `tui/` vendored; `pi_agent_cli` standard ACP agent; TUI spawn Python, skip xAI login, drop `x.ai/*`, home `~/.pi-python`, binary `pi`. P3/P4 (slash mapping, `pi -p`, config polish) still open. See [design doc](docs/specs/2026-08-25-phase4-coding-agent-cli-design.md)
 - **Phase 5 (Coding Agent prompt engineering)** — planned: system prompt design for coding workflows, provider-specific prompt variants, integration with harness skills/templates
 - **Phase 6 (Extended integrations)** — planned: native MCP client, git-aware context injection, multi-provider production testing matrix
 
 ## License
 
-MIT
+Python packages (`pi-agent-core-lc`, `pi-agent-harness-lc`, `pi-agent-cli-lc`) are **MIT**.
+
+The `tui/` directory is a vendored fork of [xai-org/grok-build](https://github.com/xai-org/grok-build) and remains **Apache License 2.0**. See `tui/LICENSE`, `tui/NOTICE`, and `tui/THIRD-PARTY-NOTICES`. `tui/` is not included in Python sdists or wheels.

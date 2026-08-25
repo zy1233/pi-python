@@ -1,0 +1,43 @@
+Apache License 2.0 — NOTICE
+===========================
+
+This directory (tui/) is a vendored fork of Grok Build:
+
+    https://github.com/xai-org/grok-build
+    Copyright 2023-2026 SpaceXAI
+    Licensed under the Apache License, Version 2.0
+
+It is not the official Grok Build product and is not affiliated with,
+endorsed by, or maintained by SpaceXAI / xAI.
+
+Upstream identifiers
+--------------------
+
+- grok-build git commit (GitHub, depth-1 clone used for this vendor):
+  c2ad97f87aea4303b6000a2c22128bc91ee76c9b
+- Upstream SOURCE_REV (SpaceXAI monorepo SHA, also in this directory):
+  437c7c928f3fcd13e9d37a51d887f41d7f84185d
+
+Modifications relative to upstream
+----------------------------------
+
+Tracked in the pi-python git history under tui/. At vendor time:
+
+- Relocated the Cargo workspace from the grok-build repository root into
+  tui/ of the pi-python monorepo.
+- Added this NOTICE and .gitattributes (LF for shebangs / Rust sources)
+  so Windows checkouts do not break bin/protoc.
+
+Phase 4 fork changes (also in git history under tui/):
+
+- Interactive spawn is `python -m pi_agent_cli` over standard ACP stdio
+  (override with `PI_AGENT_COMMAND` / `PI_PYTHON`). Home is `PI_HOME` /
+  `GROK_HOME` / `~/.pi-python`.
+- Outbound `x.ai/*` / `_x.ai/*` extension RPCs are dropped in `acp_send`
+  so they never reach the Python agent. Vendor `_meta` keys are not
+  written on initialize / session create.
+- Product binary is `pi` (`pi-grok-pager-bin`). PTY e2e crates
+  (`ptyctl`, `ptyctl-cli`, `pi-grok-pager-pty-harness`) were removed.
+
+See LICENSE (Apache-2.0) and THIRD-PARTY-NOTICES in this directory.
+The rest of the pi-python repository (Python packages) is MIT.

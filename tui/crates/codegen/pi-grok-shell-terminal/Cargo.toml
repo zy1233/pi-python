@@ -1,0 +1,49 @@
+[package]
+license = "Apache-2.0"
+name = "pi-grok-shell-terminal"
+version = "0.1.0"
+edition.workspace = true
+description = "Local, ACP, and PTY terminal runners extracted from pi-grok-shell so they compile in parallel."
+
+[dependencies]
+agent-client-protocol = { workspace = true }
+async-trait = { workspace = true }
+base64 = { workspace = true }
+chrono = { workspace = true }
+futures = { workspace = true }
+portable-pty = "0.9"
+process-wrap = { version = "9.0.0", features = ["tokio1", "job-object", "creation-flags"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+shlex = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = [
+    "fs",
+    "io-util",
+    "macros",
+    "process",
+    "sync",
+    "time",
+] }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["v7"] }
+pi-acp-lib = { workspace = true }
+pi-grok-config = { workspace = true }
+pi-grok-paths = { path = "../pi-grok-paths" }
+pi-grok-sandbox = { path = "../pi-grok-sandbox", default-features = false }
+pi-grok-tools = { workspace = true }
+pi-grok-workspace = { workspace = true }
+pi-tty-utils = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

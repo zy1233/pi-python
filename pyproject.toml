@@ -50,22 +50,27 @@ all = [
 dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.16"]
 
 [tool.uv.workspace]
-members = ["packages/pi-agent-harness"]
+members = ["packages/pi-agent-harness", "packages/pi-agent-cli"]
 
 [tool.uv.sources]
 pi-agent-harness-lc = { workspace = true }
+pi-agent-cli-lc = { workspace = true }
+
+[tool.hatch.build.targets.sdist]
+exclude = ["/tui"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["pi_agent_core"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["pi_agent_core/tests", "packages/pi-agent-harness/tests"]
+testpaths = ["pi_agent_core/tests", "packages/pi-agent-harness/tests", "packages/pi-agent-cli/tests"]
 markers = ["real_llm: tests that hit a live LLM API (deselected by default)"]
 
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+extend-exclude = ["tui"]
 
 [tool.ruff.lint]
 select = [
@@ -79,4 +84,4 @@ select = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["pi_agent_core", "pi_agent_harness"]
+known-first-party = ["pi_agent_core", "pi_agent_harness", "pi_agent_cli"]

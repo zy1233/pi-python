@@ -4,7 +4,7 @@
 > 用 LangChain 替代 `pi-ai` 作为 LLM 层的 Python 移植。
 >
 > 本文是项目整体设计文档，涵盖已完成的核心运行时、生产化增强、AgentHarness、工具生态，
-> 以及规划中的 Coding Agent CLI。各阶段的完整详细设计见独立 spec 文档（§11 索引）。
+> 以及 Phase 4 Coding Agent CLI（fork grok TUI + 标准 ACP）。各阶段的完整详细设计见独立 spec 文档（§11 索引）。
 
 ---
 
@@ -22,8 +22,9 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Coding Agent CLI (Phase 4, planned)      │
-│         交互式 REPL · Rich 终端渲染 · 命令系统 · 权限确认                │
+│              Coding Agent CLI (Phase 4, P0–P2 landed)           │
+│   forked grok TUI (ACP client) · pi_agent_cli (ACP agent)       │
+│              标准 ACP stdio · 权限确认 · JSONL v3                 │
 ├─────────────────────────────────────────────────────────────────┤
 │                        AgentHarness (Phase 3)                   │
 │  Session 树 · phase 锁 · 三队列 · 写缓冲 · 19 种事件/hook            │
@@ -275,37 +276,41 @@ create_all_tools(cwd)          # 全部 7 个
 
 ---
 
-## 8. Phase 4：Coding Agent CLI（规划中）
+## 8. Phase 4：Coding Agent CLI
 
-> 目标：将引擎层组装为可日常使用的交互式 Coding Agent（对标 Claude Code / Aider）
+> 详细设计：`docs/specs/2026-08-25-phase4-coding-agent-cli-design.md`
+> TUI 上游：[xai-org/grok-build](https://github.com/xai-org/grok-build)（Apache-2.0）；协议：[ACP](https://agentclientprotocol.com)
 
-### 8.1 交互式 REPL
+**不自研 Python TUI。** Fork grok-build 的 `pi-grok-pager` 作 ACP Client；本仓库 Python 作 ACP Agent，只走标准 ACP，**不实现 `x.ai/*`**。
 
-- 用户输入 → AgentHarness.prompt() → 流式输出 → 等待下一轮
-- Rich 终端渲染：Markdown 渲染、代码高亮、diff 着色、spinner/进度条
-- 多行输入支持
+### 8.1 进程边界
 
-### 8.2 命令系统
+```
+pi (Rust TUI)  --stdio 标准 ACP-->  python -m pi_agent_cli  -->  AgentHarness
+```
 
-元命令（`/` 前缀）：`/compact`、`/model`、`/tools`、`/undo`、`/clear`、`/history`、`/config` 等。
+- `pi`：全屏 TUI（Markdown/diff/权限 modal），spawn Python agent。
+- `pi acp` / Zed：同一 agent 给编辑器。
+- `pi -p`：纯 Python headless。
+- 会话真源：JSONL v3。TUI 本地缓存不是真源。
 
-### 8.3 权限确认
+### 8.2 仓库
 
-对文件写入（edit/write）和 bash 执行弹出 `[y/N]` 确认；可通过配置设置 auto-approve 模式。
+整棵 grok-build Cargo workspace 已放进 `tui/`（不要只拷 pager 两 crate）。`tui/` Apache-2.0，不进 Python sdist/wheel。
 
-### 8.4 Coding Agent 系统提示
+### 8.3 TUI 改造要点
 
-精心设计的 system prompt：工具使用策略、错误自纠引导、代码规范约束、安全边界。与 harness skills/templates 集成。
+spawn 默认为 `python -m pi_agent_cli`（`PI_AGENT_COMMAND` / `PI_PYTHON` 可覆盖）。`acp_send` 丢弃 `x.ai/*` 扩展 RPC；空 `auth_methods` 跳过 xAI 登录；auto-update 关闭；交互路径不装 otel。家目录 `PI_HOME` / `~/.pi-python`。无标准 ACP 对照的 slash（`/compact` `/model` `/rewind` 等）仍待 P3 从菜单拿掉。
 
-### 8.5 配置管理
+### 8.4 权限与配置
 
-`~/.pi-python/config.toml`：默认 model/provider、API key 来源、auto-approve 列表、自定义 skills 目录。
+`before_tool_call` 对 bash/edit/write 发 ACP `session/request_permission`。`~/.pi-python/config.toml`：model、permission 模式、skills、`agent.command`。
 
 ---
 
 ## 9. 测试策略
 
-全量 Mock `stream_fn`，无需 API key，镜像 pi `agent-loop.test.ts` 场景。当前 **327 tests**。
+全量 Mock `stream_fn`，无需 API key，镜像 pi `agent-loop.test.ts` 场景。
 
 | 域 | 覆盖要点 |
 |---|---|
@@ -349,6 +354,8 @@ create_all_tools(cwd)          # 全部 7 个
 | `docs/PLAN/PLAN-PHASE1.md` | Phase 1 原始规划（历史） |
 | `docs/AUDIT/AUDIT-2026-07-02.md` | 核心层审计：缺陷修复 + Phase 2.5 增强追踪 |
 | `docs/AUDIT/AUDIT-H1.md` ~ `docs/AUDIT/AUDIT-H4.md` | Harness 各批次审计 |
+| `docs/AUDIT/SPIKE-P0-GROK-TUI.md` | Phase 4 P0：pager `x.ai/*` 拆除清单 |
 | `docs/specs/2026-05-25-phase2-*.md` | Phase 2 详细设计：usage/cost、thinking、transform |
 | `docs/specs/2026-07-03-phase3-*.md` | Phase 3 详细设计：Session 树、AgentHarness、Compaction、Skills、Env |
 | `docs/specs/2026-07-03-p6-*.md` | P6 详细设计：7 个内置工具 + LangChain 适配器 |
+| `docs/specs/2026-08-25-phase4-coding-agent-cli-design.md` | Phase 4：fork grok TUI + 标准 ACP agent |
