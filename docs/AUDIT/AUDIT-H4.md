@@ -8,7 +8,7 @@
 > 以及 `pyproject.toml` 依赖声明与 `__init__.py` 公共导出。
 >
 > 对照 Phase 3 设计文档
-> （`docs/superpowers/specs/2026-07-03-phase3-agent-harness-design.md` §6/§8/§9/§10）
+> （`docs/specs/2026-07-03-phase3-agent-harness-design.md` §6/§8/§9/§10）
 > 与上游 [earendil-works/pi](https://github.com/earendil-works/pi)
 > `packages/agent/src/harness/{skills.ts, prompt-templates.ts, env/}` 逐段核对。
 >

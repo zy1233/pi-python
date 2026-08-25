@@ -294,7 +294,7 @@ def from_langchain_tools(tools: Sequence[BaseTool]) -> list[AgentTool]
 | `pi_agent_core/tests/test_coding_tools_*.py`（约 5 个） | 新建 | §8 分域 |
 | `pi_agent_core/tests/test_langchain_tools.py` | 新建 | §8 |
 | `README.md` | 修改 | 「内置工具」+「LangChain 工具接入」两节 |
-| `docs/AUDIT-2026-07-02.md` | 修改 | #8 行链接本 spec；实施后补记录 |
+| `docs/AUDIT/AUDIT-2026-07-02.md` | 修改 | #8 行链接本 spec；实施后补记录 |
 | `AGENTS.md` | 修改 | 文档索引 + 模块表补行 |
 
 核心运行时（`types.py`/`agent_loop.py`/`agent.py`/`messages.py`）**零改动**。

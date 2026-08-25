@@ -4,8 +4,8 @@
 > 的 `agent_harness.py`、`messages.py`、`types.py`(H2 相关部分)与 core loop 接线。
 >
 > 对照基准:① Phase 3 设计文档 §1.3/§4/§7/§9/§10
-> (`docs/superpowers/specs/2026-07-03-phase3-agent-harness-design.md`);
-> ② 总审计报告 C4 条目(`docs/AUDIT-2026-07-02.md`);
+> (`docs/specs/2026-07-03-phase3-agent-harness-design.md`);
+> ② 总审计报告 C4 条目(`docs/AUDIT/AUDIT-2026-07-02.md`);
 > ③ 上游 [earendil-works/pi](https://github.com/earendil-works/pi)
 > `packages/agent/src/harness/agent-harness.ts`(2026-07 main 分支,全文逐段比对)。
 >
@@ -33,7 +33,7 @@ H2 骨架忠实:§4.4 三条持久化时序不变量(message_end 先落盘后广
 
 - [x] **已修复(2026-07-03)** ·(高 · 全库 grep 实证)
 - 位置:`pi_agent_harness/types.py`(缺 `AgentMessageProtocol`)、`README.md`、
-  `docs/AUDIT-2026-07-02.md` C4 条目
+  `docs/AUDIT/AUDIT-2026-07-02.md` C4 条目
 - 问题:设计 §7 承诺三件事全部缺失——① 定义 runtime-checkable 的
   `AgentMessageProtocol`(带 `role: str`)放 `harness/types.py`;② README 增
   自定义消息示例;③ 审计报告 C4 标记"经 H2 落地"。现状:全库 grep

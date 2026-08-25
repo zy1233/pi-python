@@ -105,7 +105,7 @@ agent_start → turn_start → message_start(user) → message_end(user)
 
 ## 4. Phase 1：核心运行时
 
-> 详细设计原稿：`docs/PLAN-PHASE1.md`
+> 详细设计原稿：`docs/PLAN/PLAN-PHASE1.md`
 
 ### 4.1 类型与消息模型 (`types.py`, `messages.py`)
 
@@ -136,8 +136,8 @@ agent_start → turn_start → message_start(user) → message_end(user)
 
 ## 5. Phase 2 / 2.5：生产化增强
 
-> 详细设计：`docs/superpowers/specs/2026-05-25-phase2-production-enhancements-design.md`
-> 审计与 P2.5 增强记录：`docs/AUDIT-2026-07-02.md`
+> 详细设计：`docs/specs/2026-05-25-phase2-production-enhancements-design.md`
+> 审计与 P2.5 增强记录：`docs/AUDIT/AUDIT-2026-07-02.md`
 
 ### 5.1 Usage / Cost 追踪
 
@@ -183,8 +183,8 @@ Anthropic 原生 image blocks；其他 provider 回退为 user-message 注入；
 
 ## 6. Phase 3：AgentHarness
 
-> 详细设计：`docs/superpowers/specs/2026-07-03-phase3-agent-harness-design.md`
-> 审计：`docs/AUDIT-H1.md` ~ `docs/AUDIT-H4.md`
+> 详细设计：`docs/specs/2026-07-03-phase3-agent-harness-design.md`
+> 审计：`docs/AUDIT/AUDIT-H1.md` ~ `docs/AUDIT/AUDIT-H4.md`
 
 独立发行包 `pi-agent-harness`（`packages/pi-agent-harness/pi_agent_harness/`），依赖 `pi-agent-core`。
 
@@ -238,7 +238,7 @@ Anthropic 原生 image blocks；其他 provider 回退为 user-message 注入；
 
 ## 7. P6：工具生态
 
-> 详细设计：`docs/superpowers/specs/2026-07-03-p6-tool-ecosystem-design.md`
+> 详细设计：`docs/specs/2026-07-03-p6-tool-ecosystem-design.md`
 
 ### 7.1 内置编码工具
 
@@ -346,9 +346,9 @@ create_all_tools(cwd)          # 全部 7 个
 | `AGENTS.md` | 项目总览、模块表、不变量、当前状态 |
 | `README.md` | 公开 README、Quick start、Roadmap |
 | `docs/DESIGN.md`（本文） | 项目整体设计方案 |
-| `docs/PLAN-PHASE1.md` | Phase 1 原始规划（历史） |
-| `docs/AUDIT-2026-07-02.md` | 核心层审计：缺陷修复 + Phase 2.5 增强追踪 |
-| `docs/AUDIT-H1.md` ~ `docs/AUDIT-H4.md` | Harness 各批次审计 |
-| `docs/superpowers/specs/2026-05-25-phase2-*.md` | Phase 2 详细设计：usage/cost、thinking、transform |
-| `docs/superpowers/specs/2026-07-03-phase3-*.md` | Phase 3 详细设计：Session 树、AgentHarness、Compaction、Skills、Env |
-| `docs/superpowers/specs/2026-07-03-p6-*.md` | P6 详细设计：7 个内置工具 + LangChain 适配器 |
+| `docs/PLAN/PLAN-PHASE1.md` | Phase 1 原始规划（历史） |
+| `docs/AUDIT/AUDIT-2026-07-02.md` | 核心层审计：缺陷修复 + Phase 2.5 增强追踪 |
+| `docs/AUDIT/AUDIT-H1.md` ~ `docs/AUDIT/AUDIT-H4.md` | Harness 各批次审计 |
+| `docs/specs/2026-05-25-phase2-*.md` | Phase 2 详细设计：usage/cost、thinking、transform |
+| `docs/specs/2026-07-03-phase3-*.md` | Phase 3 详细设计：Session 树、AgentHarness、Compaction、Skills、Env |
+| `docs/specs/2026-07-03-p6-*.md` | P6 详细设计：7 个内置工具 + LangChain 适配器 |

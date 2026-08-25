@@ -1,6 +1,6 @@
 """Built-in coding tools (port of pi ``packages/coding-agent/src/core/tools``).
 
-Design: ``docs/superpowers/specs/2026-07-03-p6-tool-ecosystem-design.md``.
+Design: ``docs/specs/2026-07-03-p6-tool-ecosystem-design.md``.
 All seven tools (read/bash/edit/write/grep/find/ls) plus the shared
 infrastructure are implemented.
 

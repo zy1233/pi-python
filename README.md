@@ -285,27 +285,27 @@ uv run --extra dev --extra harness python -m pytest  # 327 tests, no API keys ne
 ruff check . && ruff format --check .
 ```
 
-Real-API smoke test against any OpenAI-compatible endpoint (key via env only):
+Real-API validation (key via env only; skipped when unset):
 
-```bash
-SMOKE_BASE_URL=https://api.siliconflow.cn/v1 \
-SMOKE_API_KEY=sk-... \
-SMOKE_MODEL=Qwen/Qwen3-8B \
-python scripts/smoke_real_api.py
-```
+| Purpose | Command | Env vars |
+|---------|---------|----------|
+| Automated regression | `pytest -m real_llm -v` | `REAL_LLM_API_KEY`, optional `REAL_LLM_BASE_URL` / `REAL_LLM_MODEL` |
+| Manual pre-release smoke | `python scripts/smoke_real_api.py` | `SMOKE_API_KEY` (or `REAL_LLM_API_KEY`), `SMOKE_BASE_URL`, `SMOKE_MODEL` |
+
+Use `.venv-test-real` for pytest real-LLM tests; the smoke script can run from the main `.venv`.
 
 ## Documentation
 
 | Document | Contents |
 |----------|----------|
 | [AGENTS.md](AGENTS.md) | Project overview, module map, invariants, current status |
-| [docs/DESIGN.md](docs/DESIGN.md) | Phase 1 core architecture and porting notes (historical) |
-| [docs/PLAN-PHASE1.md](docs/PLAN-PHASE1.md) | Phase 1 original planning document (historical) |
-| [docs/AUDIT-2026-07-02.md](docs/AUDIT-2026-07-02.md) | Core-layer audit: findings, fixes, Phase 2.5 enhancements |
-| [docs/AUDIT-H1.md](docs/AUDIT-H1.md) ~ [H4](docs/AUDIT-H4.md) | Harness batch audits (H1 session, H2 runtime, H3 compaction, H4 skills/env) |
-| [Phase 2 spec](docs/superpowers/specs/2026-05-25-phase2-production-enhancements-design.md) | Usage/cost, thinking/reasoning, transform_messages |
-| [Phase 3 spec](docs/superpowers/specs/2026-07-03-phase3-agent-harness-design.md) | AgentHarness: sessions, compaction, skills, templates, ExecutionEnv |
-| [P6 spec](docs/superpowers/specs/2026-07-03-p6-tool-ecosystem-design.md) | Built-in coding tools + LangChain adapter |
+| [docs/DESIGN.md](docs/DESIGN.md) | Project-wide architecture and module design |
+| [docs/PLAN/PLAN-PHASE1.md](docs/PLAN/PLAN-PHASE1.md) | Phase 1 original planning document (historical) |
+| [docs/AUDIT/AUDIT-2026-07-02.md](docs/AUDIT/AUDIT-2026-07-02.md) | Core-layer audit: findings, fixes, Phase 2.5 enhancements |
+| [docs/AUDIT/AUDIT-H1.md](docs/AUDIT/AUDIT-H1.md) ~ [H4](docs/AUDIT/AUDIT-H4.md) | Harness batch audits (H1 session, H2 runtime, H3 compaction, H4 skills/env) |
+| [Phase 2 spec](docs/specs/2026-05-25-phase2-production-enhancements-design.md) | Usage/cost, thinking/reasoning, transform_messages |
+| [Phase 3 spec](docs/specs/2026-07-03-phase3-agent-harness-design.md) | AgentHarness: sessions, compaction, skills, templates, ExecutionEnv |
+| [P6 spec](docs/specs/2026-07-03-p6-tool-ecosystem-design.md) | Built-in coding tools + LangChain adapter |
 
 ## Concept mapping (pi → Python)
 
@@ -327,8 +327,8 @@ python scripts/smoke_real_api.py
 - **Phase 1 (MVP loop)** — done: `Agent` + `agent_loop` + event protocol + tool execution
 - **Phase 2 (production enhancements)** — done: `transform_messages`, usage/cost, thinking/reasoning
 - **Phase 2.5 (core hardening)** — done: retries, runaway protection, observability, granular events, guardrail hooks, `ContextBudget`, structured output, tool-result images
-- **Phase 3 (AgentHarness)** — done: H1 session tree, H2 runtime, H3 compaction/tree navigation, H4 skills/templates/system prompt/LocalExecutionEnv ([design doc](docs/superpowers/specs/2026-07-03-phase3-agent-harness-design.md))
-- **P6 (tool ecosystem)** — done: all 7 built-in tools (read/bash/edit/write/grep/find/ls), group factories, and the LangChain `BaseTool` adapter ([design doc](docs/superpowers/specs/2026-07-03-p6-tool-ecosystem-design.md))
+- **Phase 3 (AgentHarness)** — done: H1 session tree, H2 runtime, H3 compaction/tree navigation, H4 skills/templates/system prompt/LocalExecutionEnv ([design doc](docs/specs/2026-07-03-phase3-agent-harness-design.md))
+- **P6 (tool ecosystem)** — done: all 7 built-in tools (read/bash/edit/write/grep/find/ls), group factories, and the LangChain `BaseTool` adapter ([design doc](docs/specs/2026-07-03-p6-tool-ecosystem-design.md))
 
 ### Next
 

@@ -1,6 +1,10 @@
 """Real-API smoke test for the LangChain adapter path (no mocks).
 
-Exercises the paths the unit suite can only fake: real streaming chunk shapes,
+Manual pre-release smoke script with human-readable PASS/FAIL output. For
+automated regression, use ``pi_agent_core/tests/test_real_llm.py`` instead
+(``pytest -m real_llm``; env ``REAL_LLM_*``; dedicated ``.venv-test-real``).
+
+Exercises paths the unit suite can only fake: real streaming chunk shapes,
 tool-call chunk splitting, usage metadata, abort mid-stream, and (as an
 observation) reasoning/thinking output of OpenAI-compatible providers.
 
@@ -11,6 +15,7 @@ Usage (PowerShell):
     python scripts/smoke_real_api.py
 
 The API key is read from the environment only; never hardcode it here.
+Also accepts ``REAL_LLM_API_KEY`` as a fallback for the smoke key.
 """
 
 from __future__ import annotations
@@ -27,7 +32,12 @@ from pi_agent_core.messages import UserMessage
 from pi_agent_core.tools import SimpleTool
 
 BASE_URL = os.environ.get("SMOKE_BASE_URL", "https://api.siliconflow.cn/v1")
-API_KEY = os.environ.get("SMOKE_API_KEY") or os.environ.get("SILICONFLOW_API_KEY") or ""
+API_KEY = (
+    os.environ.get("SMOKE_API_KEY")
+    or os.environ.get("REAL_LLM_API_KEY")
+    or os.environ.get("SILICONFLOW_API_KEY")
+    or ""
+)
 MODEL_ID = os.environ.get("SMOKE_MODEL", "Qwen/Qwen3-8B")
 # "deepseek" preserves reasoning_content thinking on OpenAI-compatible
 # gateways; set SMOKE_PROVIDER=openai to exercise the plain ChatOpenAI path.

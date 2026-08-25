@@ -1,7 +1,7 @@
 # AUDIT-H1：Phase 3 H1（session 层）实现审计（2026-07-03）
 
 > 审计范围：`packages/pi-agent-harness/pi_agent_harness/{types.py, session/}` 全部 H1 源码，
-> 对照 Phase 3 设计文档（`docs/superpowers/specs/2026-07-03-phase3-agent-harness-design.md`
+> 对照 Phase 3 设计文档（`docs/specs/2026-07-03-phase3-agent-harness-design.md`
 > §3/§8/§9/§10）与上游 [earendil-works/pi](https://github.com/earendil-works/pi)
 > `packages/agent/src/harness/session/` 六个 TS 源文件 + `harness/types.ts` 逐行核对。
 >

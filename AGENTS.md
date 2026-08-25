@@ -8,13 +8,13 @@ Design documents:
 
 | Document | Contents |
 |----------|----------|
-| `docs/DESIGN.md` | Phase 1 core architecture (historical) |
-| `docs/PLAN-PHASE1.md` | Phase 1 original planning (historical, was `plan.md`) |
-| `docs/superpowers/specs/2026-05-25-phase2-production-enhancements-design.md` | Phase 2 spec |
-| `docs/superpowers/specs/2026-07-03-phase3-agent-harness-design.md` | Phase 3 harness spec |
-| `docs/superpowers/specs/2026-07-03-p6-tool-ecosystem-design.md` | P6 tool-ecosystem spec |
-| `docs/AUDIT-2026-07-02.md` | Core-layer audit tracker |
-| `docs/AUDIT-H1.md` ~ `docs/AUDIT-H4.md` | Harness batch audits |
+| `docs/DESIGN.md` | Project-wide architecture and module design |
+| `docs/PLAN/PLAN-PHASE1.md` | Phase 1 original planning (historical, was `plan.md`) |
+| `docs/specs/2026-05-25-phase2-production-enhancements-design.md` | Phase 2 spec |
+| `docs/specs/2026-07-03-phase3-agent-harness-design.md` | Phase 3 harness spec |
+| `docs/specs/2026-07-03-p6-tool-ecosystem-design.md` | P6 tool-ecosystem spec |
+| `docs/AUDIT/AUDIT-2026-07-02.md` | Core-layer audit tracker |
+| `docs/AUDIT/AUDIT-H1.md` ~ `docs/AUDIT/AUDIT-H4.md` | Harness batch audits |
 
 Guiding principles:
 

@@ -3,7 +3,7 @@
 > 审计范围：`packages/pi-agent-harness/pi_agent_harness/compaction/{utils.py, compaction.py, __init__.py}`
 > 以及 `agent_harness.py` 中 H3 相关方法（`compact` / `navigate_tree` / `_maybe_auto_compact`
 > / `_compact_internal` / `_navigate_tree_internal`），对照 Phase 3 设计文档
-> （`docs/superpowers/specs/2026-07-03-phase3-agent-harness-design.md` §5/§9/§10）
+> （`docs/specs/2026-07-03-phase3-agent-harness-design.md` §5/§9/§10）
 > 与上游 [earendil-works/pi](https://github.com/earendil-works/pi)
 > `packages/agent/src/harness/compaction/` 三个 TS 源文件逐段核对。
 >

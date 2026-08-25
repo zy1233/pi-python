@@ -2,7 +2,7 @@
 
 > **归档说明**：本文是 Phase 1 MVP 的原始规划文档（原 `plan.md`），仅保留历史参考价值。
 > Phase 1–P6 均已完成，当前项目状态以 `AGENTS.md` 和 `README.md` 为准。
-> 后续阶段设计文档见 `docs/superpowers/specs/` 目录。
+> 后续阶段设计文档见 `docs/specs/` 目录。
 
 ## 调研结论
 
