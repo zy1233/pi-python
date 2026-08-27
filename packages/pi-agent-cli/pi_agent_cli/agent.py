@@ -34,7 +34,6 @@ from acp.schema import (
     TextContentBlock,
 )
 
-from pi_agent_core.coding_tools.path_utils import normalize_host_path
 from pi_agent_cli.config import CliConfig, load_config, pi_home
 from pi_agent_cli.events import project_event
 from pi_agent_cli.factory import create_session_harness, default_stream_fn, load_session_resources
@@ -44,6 +43,7 @@ from pi_agent_cli.permissions import (
     outcome_allows,
     permission_tool_call,
 )
+from pi_agent_core.coding_tools.path_utils import normalize_host_path
 from pi_agent_core.messages import ImageContent
 from pi_agent_core.types import StreamFn
 from pi_agent_harness import AgentHarness, JsonlSessionRepo, Session

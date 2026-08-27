@@ -338,6 +338,11 @@ spawn 默认为 `python -m pi_agent_cli`（`PI_AGENT_COMMAND` / `PI_PYTHON` 可�
 - 依赖 `pi-agent-core-lc`
 - `PyYAML>=6`（skills frontmatter）、`pathspec>=0.12`（gitignore 匹配）
 
+### CLI (`pi-agent-cli-lc`)
+
+- 依赖 `pi-agent-core-lc`、`pi-agent-harness-lc`、`agent-client-protocol>=0.12`
+- PyPI 发布（`.github/workflows/release.yml`）；Rust `zypi` TUI 不在 PyPI
+
 ### 开发
 
 - `pytest>=8.0`、`pytest-asyncio>=0.24`、`ruff>=0.16`

@@ -41,11 +41,13 @@ openai = ["langchain-openai>=0.2.0"]
 anthropic = ["langchain-anthropic>=0.2.0"]
 deepseek = ["langchain-deepseek>=0.1.0"]
 harness = ["pi-agent-harness-lc==0.1.0"]
+cli = ["pi-agent-cli-lc==0.1.0"]
 all = [
     "langchain-openai>=0.2.0",
     "langchain-anthropic>=0.2.0",
     "langchain-deepseek>=0.1.0",
     "pi-agent-harness-lc==0.1.0",
+    "pi-agent-cli-lc==0.1.0",
 ]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.16"]
 

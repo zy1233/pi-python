@@ -11,10 +11,11 @@ Python port of [pi-agent-core](https://github.com/earendil-works/pi/tree/main/pa
 
 The loop semantics, event protocol, and tool execution are faithful ports of pi; LangChain is only a `StreamFn` boundary adapter — never a replacement for the agent loop.
 
-This repository is a monorepo with two Python distributions:
+This repository is a monorepo with three Python distributions:
 
 - `pi-agent-core-lc` / `pi_agent_core`: lightweight core loop, messages, tools, adapters.
 - `pi-agent-harness-lc` / `pi_agent_harness`: Phase 3 harness runtime, sessions, queues, hooks, compaction, skills/templates, and local execution env.
+- `pi-agent-cli-lc` / `pi_agent_cli`: Phase 4 standard ACP agent (`python -m pi_agent_cli`, headless `-p`); PyPI only — the Rust `zypi` TUI is not published yet.
 
 ## Features
 
@@ -49,12 +50,13 @@ This repository is a monorepo with two Python distributions:
 ```bash
 pip install pi-agent-core-lc
 pip install pi-agent-harness-lc    # optional: session/harness runtime
+pip install pi-agent-cli-lc        # optional: ACP stdio / headless agent
 
 # Optional LLM providers:
 pip install pi-agent-core-lc[openai]      # ChatOpenAI
 pip install pi-agent-core-lc[anthropic]   # ChatAnthropic
 pip install pi-agent-core-lc[deepseek]    # ChatDeepSeek / OpenAI-compatible gateways
-pip install pi-agent-core-lc[all]         # all providers + harness
+pip install pi-agent-core-lc[all]         # all providers + harness + cli
 ```
 
 <details>
@@ -63,6 +65,7 @@ pip install pi-agent-core-lc[all]         # all providers + harness
 ```bash
 pip install -e ".[dev]"
 pip install -e "./packages/pi-agent-harness"
+pip install -e "./packages/pi-agent-cli"
 ```
 
 </details>

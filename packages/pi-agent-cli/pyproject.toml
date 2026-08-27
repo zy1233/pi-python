@@ -6,10 +6,23 @@ build-backend = "hatchling.build"
 name = "pi-agent-cli-lc"
 version = "0.1.0"
 description = "Standard ACP agent over AgentHarness (no x.ai extensions)"
+readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [
     { name = "zy1233", email = "zy1233@users.noreply.github.com" },
+]
+keywords = ["agent", "llm", "acp", "cli", "coding-agent", "ai"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
 ]
 dependencies = [
     "pi-agent-core-lc==0.1.0",
@@ -21,6 +34,8 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/zy1233/pi-python"
 Repository = "https://github.com/zy1233/pi-python"
+Issues = "https://github.com/zy1233/pi-python/issues"
+Changelog = "https://github.com/zy1233/pi-python/blob/main/CHANGELOG.md"
 
 [project.scripts]
 pi-agent-cli = "pi_agent_cli.__main__:main"
