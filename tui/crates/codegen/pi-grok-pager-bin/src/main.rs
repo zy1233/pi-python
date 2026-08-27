@@ -1178,7 +1178,7 @@ async fn run_agent_command(
         None,
     );
     if let Some(warning) = launch_yolo.blocked_warning {
-        eprintln!("grok: {warning}");
+        eprintln!("{}: {warning}", pi_grok_pager::brand::CLI_NAME);
     }
     agent_config.default_yolo_mode = launch_yolo.yolo;
     agent_config.default_auto_mode = pi_grok_shell::util::config::effective_auto_for_launch(
@@ -1948,7 +1948,7 @@ fn main() {
     pi_grok_pager::memory_trace::start(pi_grok_pager::memory_trace::default_dir());
     raise_fd_limit();
     if let Err(e) = pi_grok_config::validate_requirements() {
-        eprintln!("Couldn't start Grok: {e}");
+        eprintln!("Couldn't start {}: {e}", pi_grok_pager::brand::CLI_NAME);
         eprintln!();
         eprintln!(
             "Update Grok to a version the policy allows, or ask your administrator \
@@ -2276,7 +2276,7 @@ async fn async_main(args: PagerArgs) -> Result<()> {
             None,
         );
         if let Some(warning) = launch_yolo.blocked_warning {
-            eprintln!("grok: {warning}");
+            eprintln!("{}: {warning}", pi_grok_pager::brand::CLI_NAME);
         }
         let json_schema = args
             .json_schema
@@ -2354,9 +2354,12 @@ async fn async_main(args: PagerArgs) -> Result<()> {
         Ok(true) => {
             let adopted = bg_update_wait.lock().await.take();
             if finish_update_on_exit(adopted, &update_config).await {
-                eprintln!("Update installed. Run `grok` to start.");
+                eprintln!("Update installed. Run `{}` to start.", pi_grok_pager::brand::CLI_NAME);
             } else {
-                eprintln!("Update did not complete. Run `grok update` to retry.");
+                eprintln!(
+                    "Update did not complete. Run `{} update` to retry.",
+                    pi_grok_pager::brand::CLI_NAME
+                );
             }
             Ok(())
         }

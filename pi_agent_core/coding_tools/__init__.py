@@ -24,6 +24,7 @@ from pi_agent_core.coding_tools.path_utils import (
     compile_glob,
     detect_image_mime,
     glob_to_regex,
+    normalize_host_path,
     resolve_to_cwd,
 )
 from pi_agent_core.coding_tools.read import create_read_tool
@@ -115,6 +116,7 @@ __all__ = [
     "detect_image_mime",
     "format_size",
     "glob_to_regex",
+    "normalize_host_path",
     "resolve_to_cwd",
     "truncate_head",
     "truncate_line",

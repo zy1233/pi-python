@@ -7,7 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from pi_agent_cli.config import load_config, pi_home
-from pi_agent_cli.factory import create_session_harness, default_stream_fn
+from pi_agent_cli.factory import create_session_harness, default_stream_fn, load_session_resources
 from pi_agent_harness import JsonlSessionRepo
 
 
@@ -65,11 +65,13 @@ async def run_print(
     config = replace(load_config(home_path), permission="auto")
     repo = JsonlSessionRepo(sessions_dir)
     session = await repo.create({"cwd": cwd_s})
+    resources = await load_session_resources(cwd=cwd_s, config=config)
     harness = create_session_harness(
         session=session,
         cwd=cwd_s,
         config=config,
         stream_fn=default_stream_fn(),
+        resources=resources,
     )
     message = await harness.prompt(text)
     out = assistant_text(message)

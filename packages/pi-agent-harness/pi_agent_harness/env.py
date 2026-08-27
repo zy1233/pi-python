@@ -12,6 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from pi_agent_core.coding_tools.path_utils import normalize_host_path
 from pi_agent_harness.types import ExecResult, ExecutionError, FileError, FileInfo
 
 _IS_WINDOWS = sys.platform == "win32"
@@ -34,7 +35,7 @@ def _kill_process_tree(proc: asyncio.subprocess.Process) -> None:
 
 class LocalExecutionEnv:
     def __init__(self, cwd: str | Path) -> None:
-        self.cwd = str(Path(cwd).resolve())
+        self.cwd = str(Path(normalize_host_path(str(cwd))).resolve())
         self._temp_paths: list[Path] = []
 
     async def absolute_path(self, path: str | Path) -> str:

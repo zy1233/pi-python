@@ -11,6 +11,7 @@
 pub mod acp;
 pub mod actions;
 pub mod app;
+pub mod brand;
 pub mod client_identity;
 pub mod completions_cmd;
 mod config_toml_edit;

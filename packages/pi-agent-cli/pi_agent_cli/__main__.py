@@ -15,6 +15,7 @@ from pathlib import Path
 from acp import run_agent
 
 from pi_agent_cli.agent import PiAcpAgent
+from pi_agent_cli.config import load_local_env
 from pi_agent_cli.headless import resolve_print_prompt, run_print
 
 
@@ -56,6 +57,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    load_local_env()
     parser = _build_parser()
     args = parser.parse_args()
     headless = any(

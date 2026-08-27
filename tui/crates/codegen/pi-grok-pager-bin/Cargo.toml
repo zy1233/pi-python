@@ -4,15 +4,15 @@ version = "1.0.8"
 edition.workspace = true
 license = "Apache-2.0"
 authors = ["pi"]
-default-run = "pi"
+default-run = "zypi"
 
-# Composition-root binary for the pi TUI. The artifact is named `pi`.
+# Composition-root binary for the zypi TUI. The artifact is named `zypi`.
 # This package exists so the binary can link both the pager library and the
 # optional `pi-grok-pager-minimal` render mode: `minimal` depends on
 # `pi-grok-pager`, so the pager library cannot depend back on it (cargo cycle).
 # The binary installs the minimal-mode IoC hooks at startup.
 [[bin]]
-name = "pi"
+name = "zypi"
 path = "src/main.rs"
 
 [dependencies]

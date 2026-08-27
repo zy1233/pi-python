@@ -48,7 +48,7 @@ AgentMessage[] → transform_context() → convert_to_llm() → LangChain BaseMe
 | `pi_agent_core/coding_tools/`, `adapters/langchain_tools.py` | Built-in coding tools (all 7: `read`/`bash`/`edit`/`write`/`grep`/`find`/`ls`) + LangChain tool adapter | pi coding-agent built-in tools |
 | `packages/pi-agent-harness/pi_agent_harness` | Phase 3 harness package: sessions, AgentHarness, compaction, skills/templates, LocalExecutionEnv | `packages/agent/src/harness/` |
 | `packages/pi-agent-cli/pi_agent_cli` | Phase 4 standard-ACP agent (`python -m pi_agent_cli`); no `x.ai/*` | — |
-| `tui/` | Phase 4 forked grok TUI (Apache-2.0 Cargo workspace, not in wheels). Product binary `pi` | grok-build pager |
+| `tui/` | Phase 4 forked grok TUI (Apache-2.0 Cargo workspace, not in wheels). Product binary `zypi` | grok-build pager |
 
 ### Invariants (do not break)
 
@@ -64,11 +64,11 @@ AgentMessage[] → transform_context() → convert_to_llm() → LangChain BaseMe
 
 **Engine layer complete** — Phase 1–3 + P6 as above. Real-API smoke (`scripts/smoke_real_api.py`) passed against SiliconFlow. All harness audits (H1–H4) closed.
 
-**Phase 4 (Coding Agent CLI) P0–P3 landed** — `tui/` vendored grok-build fork; `packages/pi-agent-cli` is standard-ACP-only over `AgentHarness`; TUI spawn is `python -m pi_agent_cli` (override `PI_AGENT_COMMAND` / `PI_PYTHON`), skips xAI login, drops outbound `x.ai/*`, home `~/.pi-python`. Product binary `pi` (`cargo check -p pi-grok-pager-bin`). `/new` `/resume` `/quit` map to standard ACP; `@` is local directory listing; `pi -p` is Python headless. P4 (config polish / Windows notes) remains. See `docs/specs/2026-08-25-phase4-coding-agent-cli-design.md`.
+**Phase 4 (Coding Agent CLI) P0–P4 landed** — `tui/` vendored grok-build fork; `packages/pi-agent-cli` is standard-ACP-only over `AgentHarness`; TUI spawn is `python -m pi_agent_cli` (`PI_AGENT_COMMAND` / `[agent].command` / `PI_PYTHON`), skips xAI login, drops outbound `x.ai/*`, home `~/.pi-python`. Product binary `zypi` (`cargo check -p pi-grok-pager-bin`). `/new` `/resume` `/quit` map to standard ACP; `@` is local directory listing; `zypi -p` is Python headless. Config: `packages/pi-agent-cli/agent.example.toml` (Python agent; keep `config.toml` grok-safe or empty); Windows: `docs/WINDOWS.md`. See `docs/specs/2026-08-25-phase4-coding-agent-cli-design.md`.
 
 ## Cursor Cloud specific instructions
 
-This is a Python monorepo with `pi-agent-core`, `pi-agent-harness`, and `pi-agent-cli`, plus a Rust TUI workspace under `tui/` (vendored fork of grok-build). There are no services to start — Python packages are installed in editable mode and tested via `pytest`. TUI: `cd tui && cargo check -p pi-grok-pager-bin` (product binary `pi`; prefer `CARGO_TARGET_DIR` on a Linux filesystem, not `/mnt/d`).
+This is a Python monorepo with `pi-agent-core`, `pi-agent-harness`, and `pi-agent-cli`, plus a Rust TUI workspace under `tui/` (vendored fork of grok-build). There are no services to start — Python packages are installed in editable mode and tested via `pytest`. TUI: `cd tui && cargo check -p pi-grok-pager-bin` (product binary `zypi`; prefer `CARGO_TARGET_DIR` on a Linux filesystem, not `/mnt/d`).
 
 ### Virtual environments (uv)
 
@@ -127,7 +127,8 @@ uv pip install --python .venv -e ".[dev]" -e "./packages/pi-agent-harness" -e ".
 | Auto-format | `ruff format .` |
 | Run tests (mock) | `.venv\Scripts\python.exe -m pytest` (or `-v` for verbose) |
 | Run tests (real LLM) | `$env:REAL_LLM_API_KEY='sk-...'; .venv-test-real\Scripts\python.exe -m pytest -m real_llm -v` |
-| TUI cargo check | WSL: `cd tui && CARGO_TARGET_DIR=~/grok-build-target cargo check -p pi-grok-pager-bin` (binary name `pi`) |
+| Pelican TUI smoke | `$env:REAL_LLM_API_KEY='sk-...'; .venv\Scripts\python.exe scripts/smoke_pelican.py` — see `docs/benchmarks/PELCAN-BICYCLE.md` |
+| TUI cargo check | WSL: `cd tui && CARGO_TARGET_DIR=~/grok-build-target cargo check -p pi-grok-pager-bin` (binary name `zypi`) |
 
 ### Notes
 

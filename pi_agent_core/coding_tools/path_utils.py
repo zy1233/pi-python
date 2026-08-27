@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 
 # Directories pruned by the pure-Python walkers (find, grep fallback). This is
 # the declared divergence from pi: a fixed ignore list instead of .gitignore.
@@ -24,13 +25,40 @@ DEFAULT_IGNORE_DIRS = frozenset(
 )
 
 
+def wsl_mnt_path_to_windows(path: str) -> str | None:
+    """Map ``/mnt/<drive>/rest`` → ``<drive>:/rest`` (WSL bind mounts)."""
+    normalized = path.replace("\\", "/")
+    prefix = "/mnt/"
+    if not normalized.startswith(prefix) or len(normalized) <= len(prefix) + 2:
+        return None
+    body = normalized[len(prefix) :]
+    if body[1] != "/":
+        return None
+    drive = body[0].upper()
+    tail = body[2:]
+    return f"{drive}:/{tail}" if tail else f"{drive}:/"
+
+
+def normalize_host_path(path: str) -> str:
+    """On Windows, translate WSL ``/mnt/<drive>/...`` paths to native drive paths.
+
+    Without this, Windows resolves ``/mnt/d/work/foo`` as ``D:\\mnt\\d\\work\\foo``
+    (drive-relative POSIX path), not ``D:\\work\\foo``.
+    """
+    converted = wsl_mnt_path_to_windows(path)
+    if converted is None or sys.platform != "win32":
+        return path
+    return os.path.normpath(converted)
+
+
 def resolve_to_cwd(path: str, cwd: str) -> str:
     """Resolve *path* against the tool's bound *cwd*.
 
     Absolute paths pass through; ``~`` expands to the user home; relative
     paths are joined onto *cwd*. The result is OS-normalized.
     """
-    expanded = os.path.expanduser(path)
+    cwd = normalize_host_path(cwd)
+    expanded = normalize_host_path(os.path.expanduser(path))
     if os.path.isabs(expanded):
         return os.path.normpath(expanded)
     return os.path.normpath(os.path.join(cwd, expanded))

@@ -34,9 +34,10 @@ from acp.schema import (
     TextContentBlock,
 )
 
+from pi_agent_core.coding_tools.path_utils import normalize_host_path
 from pi_agent_cli.config import CliConfig, load_config, pi_home
 from pi_agent_cli.events import project_event
-from pi_agent_cli.factory import create_session_harness, default_stream_fn
+from pi_agent_cli.factory import create_session_harness, default_stream_fn, load_session_resources
 from pi_agent_cli.permissions import (
     PERMISSION_OPTIONS,
     needs_permission,
@@ -197,14 +198,18 @@ class PiAcpAgent(Agent):
         return None
 
     async def _bind_session(self, session_id: str, session: Session, cwd: str) -> None:
+        cwd = normalize_host_path(cwd)
+
         async def on_tool_call(event: Any) -> dict[str, Any] | None:
             return await self._handle_tool_call(session_id, event)
 
+        resources = await load_session_resources(cwd=cwd, config=self._config)
         harness = create_session_harness(
             session=session,
             cwd=cwd,
             config=self._config,
             stream_fn=self._stream_fn,
+            resources=resources,
             on_tool_call=on_tool_call,
         )
 

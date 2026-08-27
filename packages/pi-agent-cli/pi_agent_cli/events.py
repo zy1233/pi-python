@@ -37,6 +37,14 @@ def tool_kind(name: str) -> str:
 
 def project_event(event: AgentEvent) -> Iterator[SessionUpdate]:
     etype = getattr(event, "type", None)
+    if etype == "message_end":
+        message = getattr(event, "message", None)
+        stop = getattr(message, "stopReason", None)
+        err = getattr(message, "errorMessage", None)
+        if stop in ("error", "aborted") and err:
+            yield update_agent_message_text(f"Error: {err}")
+        return
+
     if etype == "message_update":
         ame = getattr(event, "assistant_message_event", None)
         ame_type = getattr(ame, "type", None)

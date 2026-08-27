@@ -1,0 +1,22 @@
+# Copy to ~/.pi-python/agent.toml (or set PI_HOME).
+# Python ACP agent settings ONLY — do not duplicate these keys in config.toml
+# (the Rust TUI parses config.toml as grok-shell config).
+# LLM keys are read from environment variables — never put secrets in this file.
+
+permission = "ask" # ask | auto | always-approve
+
+thinking_level = "off" # off | minimal | low | medium | high | xhigh
+max_turns = 50
+
+[model]
+provider = "deepseek"
+id = "deepseek-ai/DeepSeek-V4-Flash"
+base_url = "https://api.siliconflow.cn/v1"
+api_key_env = "REAL_LLM_API_KEY"
+
+[skills]
+paths = ["~/.pi-python/skills", ".pi/skills"]
+
+[agent]
+# Used by the Rust TUI when PI_AGENT_COMMAND is unset (Windows: prefer a venv python.exe).
+command = "python -m pi_agent_cli"

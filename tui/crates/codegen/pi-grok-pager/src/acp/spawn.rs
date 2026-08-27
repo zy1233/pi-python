@@ -200,16 +200,51 @@ pub async fn spawn_grok_shell(
     })
 }
 
+/// Resolve a spawn program path for the current host (WSL translates `D:/…` → `/mnt/d/…`).
+pub fn resolve_spawn_program(program: &std::ffi::OsStr) -> std::ffi::OsString {
+    if std::path::Path::new(program).exists() {
+        return program.to_os_string();
+    }
+    let raw = program.to_string_lossy();
+    if pi_tty_utils::is_wsl() {
+        if let Some(wsl) = windows_path_to_wsl(&raw) {
+            if wsl.exists() {
+                return wsl.into_os_string();
+            }
+        }
+    }
+    program.to_os_string()
+}
+
+/// `D:/foo/bar` or `D:\foo\bar` → `/mnt/d/foo/bar` (WSL interop).
+fn windows_path_to_wsl(path: &str) -> Option<std::path::PathBuf> {
+    let trimmed = path.trim();
+    let bytes = trimmed.as_bytes();
+    if bytes.len() < 3 || !bytes[0].is_ascii_alphabetic() || bytes[1] != b':' {
+        return None;
+    }
+    if bytes[2] != b'/' && bytes[2] != b'\\' {
+        return None;
+    }
+    let drive = bytes[0].to_ascii_lowercase() as char;
+    let rest = trimmed[3..].replace('\\', "/");
+    Some(std::path::PathBuf::from(format!("/mnt/{drive}/{rest}")))
+}
+
 /// Resolve the Python ACP agent command (`PI_AGENT_COMMAND` / `PI_PYTHON`).
 pub fn pi_agent_command() -> (std::ffi::OsString, Vec<std::ffi::OsString>) {
     if let Ok(raw) = std::env::var("PI_AGENT_COMMAND") {
         let mut parts = raw.split_whitespace();
         if let Some(prog) = parts.next() {
+            let program = resolve_spawn_program(std::ffi::OsStr::new(prog));
             return (
-                std::ffi::OsString::from(prog),
+                program,
                 parts.map(std::ffi::OsString::from).collect(),
             );
         }
+    }
+    if let Some((prog, args)) = agent_command_from_config(&grok_home()) {
+        return (resolve_spawn_program(&prog), args);
     }
     let python = std::env::var_os("PI_PYTHON").unwrap_or_else(|| {
         if cfg!(windows) {
@@ -218,7 +253,104 @@ pub fn pi_agent_command() -> (std::ffi::OsString, Vec<std::ffi::OsString>) {
             "python3".into()
         }
     });
-    (python, vec!["-m".into(), "pi_agent_cli".into()])
+    (
+        resolve_spawn_program(&python),
+        vec!["-m".into(), "pi_agent_cli".into()],
+    )
+}
+
+fn agent_command_from_config(
+    home: &std::path::Path,
+) -> Option<(std::ffi::OsString, Vec<std::ffi::OsString>)> {
+    for name in ["agent.toml", "config.toml"] {
+        if let Some(cmd) = agent_command_from_toml_file(&home.join(name)) {
+            return Some(cmd);
+        }
+    }
+    None
+}
+
+fn agent_command_from_toml_file(
+    path: &std::path::Path,
+) -> Option<(std::ffi::OsString, Vec<std::ffi::OsString>)> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let table: toml::Table = toml::from_str(&content).ok()?;
+    let agent = table.get("agent")?.as_table()?;
+    let cmd = agent.get("command")?.as_str()?.trim();
+    if cmd.is_empty() {
+        return None;
+    }
+    let mut parts = cmd.split_whitespace();
+    let prog = parts.next()?;
+    Some((
+        std::ffi::OsString::from(prog),
+        parts.map(std::ffi::OsString::from).collect(),
+    ))
+}
+
+#[cfg(test)]
+mod pi_agent_command_tests {
+    use super::*;
+
+    #[test]
+    fn agent_command_from_config_prefers_agent_toml() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("config.toml"),
+            "[agent]\ncommand = \"python -m wrong\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            tmp.path().join("agent.toml"),
+            "[agent]\ncommand = \"python -m pi_agent_cli\"\n",
+        )
+        .unwrap();
+        let (prog, args) = agent_command_from_config(tmp.path()).unwrap();
+        assert_eq!(prog, std::ffi::OsString::from("python"));
+        assert_eq!(
+            args,
+            vec![
+                std::ffi::OsString::from("-m"),
+                std::ffi::OsString::from("pi_agent_cli"),
+            ]
+        );
+    }
+
+    #[test]
+    fn agent_command_from_config_parses_agent_section() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("config.toml"),
+            "[agent]\ncommand = \"python -m pi_agent_cli\"\n",
+        )
+        .unwrap();
+        let (prog, args) = agent_command_from_config(tmp.path()).unwrap();
+        assert_eq!(prog, std::ffi::OsString::from("python"));
+        assert_eq!(
+            args,
+            vec![
+                std::ffi::OsString::from("-m"),
+                std::ffi::OsString::from("pi_agent_cli"),
+            ]
+        );
+    }
+
+    #[test]
+    fn windows_path_to_wsl_converts_drive_paths() {
+        assert_eq!(
+            super::windows_path_to_wsl("D:/work/pi-python/.venv/Scripts/python.exe"),
+            Some(std::path::PathBuf::from(
+                "/mnt/d/work/pi-python/.venv/Scripts/python.exe"
+            ))
+        );
+        assert_eq!(
+            super::windows_path_to_wsl(r"D:\work\pi-python\.venv\Scripts\python.exe"),
+            Some(std::path::PathBuf::from(
+                "/mnt/d/work/pi-python/.venv/Scripts/python.exe"
+            ))
+        );
+        assert!(super::windows_path_to_wsl("/usr/bin/python3").is_none());
+    }
 }
 
 async fn spawn_python_stdio_bridge(

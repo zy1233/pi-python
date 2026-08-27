@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Phase 4 P0–P3 (Coding Agent CLI)**: vendored grok-build TUI under `tui/` (Apache-2.0, excluded from wheels); `packages/pi-agent-cli` standard ACP agent over `AgentHarness` (no `x.ai/*`); TUI spawn `python -m pi_agent_cli`, skip xAI login, drop vendor extension RPCs, home `~/.pi-python`, product binary `pi`. TUI Cargo crates renamed `xai-*` → `pi-*` (upstream URLs and Apache NOTICE attribution unchanged). `/new`→`session/new`, `/resume`→`session/list`+`session/load`; `@` is in-process directory listing; `pi -p` / `python -m pi_agent_cli -p` is Python headless (not grok headless).
+- **Phase 4 P0–P4 (Coding Agent CLI)**: vendored grok-build TUI under `tui/` (Apache-2.0, excluded from wheels); `packages/pi-agent-cli` standard ACP agent over `AgentHarness` (no `x.ai/*`); TUI spawn `python -m pi_agent_cli`, skip xAI login, drop vendor extension RPCs, home `~/.pi-python`, product binary `pi`. TUI Cargo crates renamed `xai-*` → `pi-*` (upstream URLs and Apache NOTICE attribution unchanged). `/new`→`session/new`, `/resume`→`session/list`+`session/load`; `@` is in-process directory listing; `pi -p` / `python -m pi_agent_cli -p` is Python headless (not grok headless). P4: `config.toml` (model, permission, skills, `[agent].command`), coding system prompt + skills XML, Windows notes in `docs/WINDOWS.md`.
+- **Pelican-on-a-bicycle foundation benchmark**: `pi_agent_cli.benchmarks.pelican`, `scripts/smoke_pelican.py`, `docs/benchmarks/PELCAN-BICYCLE.md` — structural SVG smoke test for the pi TUI agent path.
 
 ## [0.1.0] - 2026-08-05
 

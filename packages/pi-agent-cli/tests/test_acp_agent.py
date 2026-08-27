@@ -86,6 +86,34 @@ async def test_initialize_has_empty_auth_and_standard_session_caps(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_message_end_error_surfaces_in_session_update(tmp_path):
+    from pi_agent_core.messages import AssistantMessage
+    from pi_agent_core.types import MessageEndEvent
+
+    agent = _agent(tmp_path)
+    client = FakeClient()
+    agent.on_connect(client)
+    err_msg = AssistantMessage(
+        role="assistant",
+        content=[],
+        api="langchain",
+        provider="mock",
+        model="mock",
+        usage={"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 0},
+        stopReason="error",
+        errorMessage="Missing credentials",
+        timestamp=0,
+    )
+    await agent._emit_updates("sess", MessageEndEvent(message=err_msg))
+    texts = [
+        getattr(u.content, "text", None)
+        for _, u in client.updates
+        if getattr(u, "session_update", None) == "agent_message_chunk"
+    ]
+    assert any("Missing credentials" in (t or "") for t in texts)
+
+
+@pytest.mark.asyncio
 async def test_ext_method_does_not_register_vendor_rpcs(tmp_path):
     agent = _agent(tmp_path)
     with pytest.raises(RequestError) as exc:

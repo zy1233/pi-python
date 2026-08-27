@@ -2,7 +2,7 @@
 
 > Scope: Fork [xai-org/grok-build](https://github.com/xai-org/grok-build) 的 Rust TUI，经 **标准 ACP** 驱动本仓库 `AgentHarness`。
 > Python 不实现任何 `x.ai/*` 扩展；不自研 Textual/Rich TUI。
-> 状态：P0 Spike 构建门禁已过；`tui/` 已迁入。P1 `pi-agent-cli` 已落地。P2 已接线：spawn Python、丢弃 `x.ai/*`、产品二进制 `pi`。Cargo crate 已从 `xai-*` 改名为 `pi-*`。P3：`/new`→`session/new`，`/resume`→`session/list`+`session/load`；`@` 本地列目录；`pi -p` 纯 Python headless。详见 `docs/AUDIT/SPIKE-P0-GROK-TUI.md`。
+> 状态：P0 Spike 构建门禁已过；`tui/` 已迁入。P1 `pi-agent-cli` 已落地。P2 已接线：spawn Python、丢弃 `x.ai/*`、产品二进制 `pi`。Cargo crate 已从 `xai-*` 改名为 `pi-*`。P3：`/new`→`session/new`，`/resume`→`session/list`+`session/load`；`@` 本地列目录；`pi -p` 纯 Python headless。P4：`config.toml`、coding system prompt、skills 注入、`[agent].command` spawn、Windows 说明（`docs/WINDOWS.md`）。详见 `docs/AUDIT/SPIKE-P0-GROK-TUI.md`。
 
 ---
 
@@ -155,7 +155,7 @@ Phase 4 带一版可用的 coding system prompt（工具策略、自纠、安全
 | P1 | `pi-agent-cli` 标准 ACP + 事件映射 + 权限 hook | 完成 |
 | P2 | `tui/` 接线：spawn Python、拆 x.ai 调用、关 auth/update；crate `xai-*`→`pi-*` | 完成 |
 | P3 | `/new` `/resume`；本地 `@`；`pi -p` headless | 完成 |
-| P4 | config、system prompt、Windows 发布说明 | 未做 |
+| P4 | config、system prompt、Windows 发布说明 | 完成 |
 
 P0 失败则改构建策略（WSL / CI 出 Windows 二进制），不改「TUI=ACP client、Python=ACP agent」架构。
 

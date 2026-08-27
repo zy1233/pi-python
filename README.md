@@ -291,6 +291,7 @@ Real-API validation (key via env only; skipped when unset):
 |---------|---------|----------|
 | Automated regression | `pytest -m real_llm -v` | `REAL_LLM_API_KEY`, optional `REAL_LLM_BASE_URL` / `REAL_LLM_MODEL` |
 | Manual pre-release smoke | `python scripts/smoke_real_api.py` | `SMOKE_API_KEY` (or `REAL_LLM_API_KEY`), `SMOKE_BASE_URL`, `SMOKE_MODEL` |
+| **pi TUI foundation case** | `python scripts/smoke_pelican.py` | `REAL_LLM_API_KEY`; saves SVG to `~/.pi-python/benchmarks/pelican/` — see [docs/benchmarks/PELCAN-BICYCLE.md](docs/benchmarks/PELCAN-BICYCLE.md) |
 
 Use `.venv-test-real` for pytest real-LLM tests; the smoke script can run from the main `.venv`.
 
@@ -308,6 +309,7 @@ Use `.venv-test-real` for pytest real-LLM tests; the smoke script can run from t
 | [Phase 3 spec](docs/specs/2026-07-03-phase3-agent-harness-design.md) | AgentHarness: sessions, compaction, skills, templates, ExecutionEnv |
 | [P6 spec](docs/specs/2026-07-03-p6-tool-ecosystem-design.md) | Built-in coding tools + LangChain adapter |
 | [Phase 4 spec](docs/specs/2026-08-25-phase4-coding-agent-cli-design.md) | Coding Agent CLI: forked grok TUI + standard ACP agent |
+| [Windows notes](docs/WINDOWS.md) | Phase 4 Windows setup, WSL TUI build, spawn/config |
 
 ## Concept mapping (pi → Python)
 
@@ -334,7 +336,7 @@ Use `.venv-test-real` for pytest real-LLM tests; the smoke script can run from t
 
 ### Next
 
-- **Phase 4 (Coding Agent CLI)** — P0–P2 done: `tui/` vendored; `pi_agent_cli` standard ACP agent; TUI spawn Python, skip xAI login, drop `x.ai/*`, home `~/.pi-python`, binary `pi`. P3/P4 (slash mapping, `pi -p`, config polish) still open. See [design doc](docs/specs/2026-08-25-phase4-coding-agent-cli-design.md)
+- **Phase 4 (Coding Agent CLI)** — done: `tui/` vendored; `pi_agent_cli` standard ACP agent; TUI spawn Python, skip xAI login, drop `x.ai/*`, home `~/.pi-python`, binary `pi`; slash/resume/headless; `config.toml` + Windows notes ([design doc](docs/specs/2026-08-25-phase4-coding-agent-cli-design.md), [Windows](docs/WINDOWS.md))
 - **Phase 5 (Coding Agent prompt engineering)** — planned: system prompt design for coding workflows, provider-specific prompt variants, integration with harness skills/templates
 - **Phase 6 (Extended integrations)** — planned: native MCP client, git-aware context injection, multi-provider production testing matrix
 

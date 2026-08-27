@@ -17,6 +17,7 @@ from pi_agent_core.coding_tools import (
     truncate_tail,
     with_file_mutation_queue,
 )
+from pi_agent_core.coding_tools.path_utils import wsl_mnt_path_to_windows
 
 # --- truncate: shared behavior ---
 
@@ -165,6 +166,22 @@ def test_resolve_relative_joins_cwd(tmp_path):
 def test_resolve_absolute_passes_through(tmp_path):
     absolute = str(tmp_path / "x.txt")
     assert resolve_to_cwd(absolute, "/elsewhere") == os.path.normpath(absolute)
+
+
+def test_wsl_mnt_path_to_windows():
+    assert wsl_mnt_path_to_windows("/mnt/d/work/pi-python") == "D:/work/pi-python"
+    assert wsl_mnt_path_to_windows("\\mnt\\c\\Users\\foo") == "C:/Users/foo"
+    assert wsl_mnt_path_to_windows("D:/work/foo") is None
+
+
+def test_resolve_wsl_cwd_on_windows(monkeypatch):
+    monkeypatch.setattr("pi_agent_core.coding_tools.path_utils.sys.platform", "win32")
+    assert resolve_to_cwd("pelican.svg", "/mnt/d/work/pi-python") == os.path.normpath(
+        "D:/work/pi-python/pelican.svg"
+    )
+    assert resolve_to_cwd("/mnt/d/work/pelican.svg", "/mnt/d/work/pi-python") == os.path.normpath(
+        "D:/work/pelican.svg"
+    )
 
 
 def test_resolve_expands_home():
