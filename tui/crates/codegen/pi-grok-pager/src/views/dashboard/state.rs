@@ -1331,11 +1331,17 @@ impl DashboardState {
         // /compact, /fork, /rewind — they make no sense with no session).
         let mut dispatch = PromptWidget::new();
         dispatch.hide_session_scoped_commands();
+        dispatch
+            .slash_controller
+            .enable_pi_standard_slash_menu();
         // The peek reply is a quick single-row input — compact mode
         // lowers the `[Pasted: N lines]` chip threshold to 2 lines so
         // multi-line pastes fold instead of overflowing the row.
         let mut peek_reply = PromptWidget::new();
         peek_reply.set_compact(true);
+        peek_reply
+            .slash_controller
+            .enable_pi_standard_slash_menu();
         Self {
             selected: None,
             hovered_row: None,

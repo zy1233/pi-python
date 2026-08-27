@@ -122,7 +122,8 @@ async def test_list_load_close_session(tmp_path):
     cwd = str(tmp_path.resolve())
     created = await agent.new_session(cwd=cwd)
     listed = await agent.list_sessions()
-    assert any(s.session_id == created.session_id for s in listed.sessions)
+    match = next(s for s in listed.sessions if s.session_id == created.session_id)
+    assert match.title
     loaded = await agent.load_session(cwd=cwd, session_id=created.session_id)
     assert loaded is not None
     await agent.close_session(session_id=created.session_id)

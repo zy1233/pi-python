@@ -64,7 +64,7 @@ AgentMessage[] → transform_context() → convert_to_llm() → LangChain BaseMe
 
 **Engine layer complete** — Phase 1–3 + P6 as above. Real-API smoke (`scripts/smoke_real_api.py`) passed against SiliconFlow. All harness audits (H1–H4) closed.
 
-**Phase 4 (Coding Agent CLI) P0–P2 landed** — `tui/` vendored grok-build fork; `packages/pi-agent-cli` is standard-ACP-only over `AgentHarness`; TUI spawn is `python -m pi_agent_cli` (override `PI_AGENT_COMMAND` / `PI_PYTHON`), skips xAI login, drops outbound `x.ai/*`, home `~/.pi-python`. Product binary `pi` (`cargo check -p pi-grok-pager-bin`). P3 (`/new` `/resume`, local `@`, `pi -p` headless) and P4 (config polish / Windows notes) remain. See `docs/specs/2026-08-25-phase4-coding-agent-cli-design.md`.
+**Phase 4 (Coding Agent CLI) P0–P3 landed** — `tui/` vendored grok-build fork; `packages/pi-agent-cli` is standard-ACP-only over `AgentHarness`; TUI spawn is `python -m pi_agent_cli` (override `PI_AGENT_COMMAND` / `PI_PYTHON`), skips xAI login, drops outbound `x.ai/*`, home `~/.pi-python`. Product binary `pi` (`cargo check -p pi-grok-pager-bin`). `/new` `/resume` `/quit` map to standard ACP; `@` is local directory listing; `pi -p` is Python headless. P4 (config polish / Windows notes) remains. See `docs/specs/2026-08-25-phase4-coding-agent-cli-design.md`.
 
 ## Cursor Cloud specific instructions
 

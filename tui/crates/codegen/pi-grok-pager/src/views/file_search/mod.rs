@@ -1,5 +1,8 @@
 //! @-provider: fuzzy file completion for `@foo/bar` references.
 //!
+//! Phase 4 P3: completion walks the local workspace in-process (the
+//! `FuzzyFileMatcherDaemon`). It does not call `x.ai/search/fuzzy`.
+//!
 //! # Architecture
 //!
 //! - [`context`] — parses `@query` tokens from text + cursor position

@@ -593,6 +593,10 @@ pub(crate) fn default_palette_entries(
         }
         true
     });
+    if slash.pi_standard_slash_menu() {
+        entries.retain(|entry| pi_standard_palette_kept(&entry.command));
+        entries = drop_empty_palette_sections(entries);
+    }
     if !screen_mode.is_minimal()
         && let Some(entry) = entries
             .iter_mut()
@@ -602,6 +606,46 @@ pub(crate) fn default_palette_entries(
     }
     entries
 }
+
+fn pi_standard_palette_kept(command: &PaletteCommand) -> bool {
+    match command {
+        PaletteCommand::NewSession
+        | PaletteCommand::Quit
+        | PaletteCommand::OpenSettings
+        | PaletteCommand::KeyboardShortcuts
+        | PaletteCommand::SectionHeader(_) => true,
+        PaletteCommand::SlashCommand(text) => {
+            let name = text
+                .trim()
+                .trim_start_matches('/')
+                .split_whitespace()
+                .next()
+                .unwrap_or("");
+            crate::slash::registry::PI_STANDARD_SLASH_NAMES.contains(&name)
+        }
+        _ => false,
+    }
+}
+
+fn drop_empty_palette_sections(entries: Vec<PaletteEntry>) -> Vec<PaletteEntry> {
+    let mut out = Vec::with_capacity(entries.len());
+    let mut i = 0;
+    while i < entries.len() {
+        if matches!(entries[i].command, PaletteCommand::SectionHeader(_)) {
+            let has_child = entries.get(i + 1).is_some_and(|next| {
+                !matches!(next.command, PaletteCommand::SectionHeader(_))
+            });
+            if has_child {
+                out.push(entries[i].clone());
+            }
+        } else {
+            out.push(entries[i].clone());
+        }
+        i += 1;
+    }
+    out
+}
+
 #[allow(clippy::collapsible_if)]
 /// Filter palette entries for search, preserving section headers when any item in the section matches.
 pub(crate) fn filter_palette_entries(

@@ -200,7 +200,8 @@ pub async fn spawn_grok_shell(
     })
 }
 
-fn pi_agent_command() -> (std::ffi::OsString, Vec<std::ffi::OsString>) {
+/// Resolve the Python ACP agent command (`PI_AGENT_COMMAND` / `PI_PYTHON`).
+pub fn pi_agent_command() -> (std::ffi::OsString, Vec<std::ffi::OsString>) {
     if let Ok(raw) = std::env::var("PI_AGENT_COMMAND") {
         let mut parts = raw.split_whitespace();
         if let Some(prog) = parts.next() {

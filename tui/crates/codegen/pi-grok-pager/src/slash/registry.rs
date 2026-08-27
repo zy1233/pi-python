@@ -29,6 +29,17 @@ pub(crate) const BLOCKED_ACP_NAMES: &[&str] = &[
     "reload-plugins",
 ];
 
+/// Slash names kept in the pi-python TUI (standard ACP + local chrome).
+pub(crate) const PI_STANDARD_SLASH_NAMES: &[&str] = &[
+    "new",
+    "resume",
+    "quit",
+    "help",
+    "theme",
+    "settings",
+    "multiline",
+];
+
 /// Source of a command in the registry. Used for precedence and replacement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandSource {
@@ -156,6 +167,9 @@ pub struct CommandRegistry {
     /// Extracted from `_meta.workflowSource` on the incoming list (including
     /// names skipped as reserved/claimed) so `/workflow` can suggest them.
     saved_workflows: Vec<WorkflowChoice>,
+    /// When true, only standard-ACP / local-TUI slash commands are offered
+    /// (`/new` `/resume` `/quit` plus `/help` `/theme` `/settings` `/multiline`).
+    pi_standard_slash: bool,
 }
 
 impl CommandRegistry {
@@ -191,6 +205,7 @@ impl CommandRegistry {
             restricted: HashSet::new(),
             available_tools: None,
             saved_workflows: Vec::new(),
+            pi_standard_slash: false,
         };
         reg.rebuild_triggers();
         reg
@@ -358,6 +373,18 @@ impl CommandRegistry {
     /// Number of unique commands (not triggers).
     pub fn command_count(&self) -> usize {
         self.commands.len()
+    }
+
+    /// Offer only `/new` `/resume` `/quit` and local TUI chrome. Commands
+    /// that needed grok `x.ai/*` RPCs stay compiled but are not listed or
+    /// dispatchable.
+    pub fn enable_pi_standard_slash_menu(&mut self) {
+        self.pi_standard_slash = true;
+        self.rebuild_triggers();
+    }
+
+    pub(crate) fn pi_standard_slash_enabled(&self) -> bool {
+        self.pi_standard_slash
     }
 
     /// Show or hide the /hooks and /plugins commands.
@@ -580,6 +607,12 @@ impl CommandRegistry {
 
             // Skip hidden commands — they don't get triggers or key_to_index entries.
             if self.hidden.contains(canonical) {
+                continue;
+            }
+
+            if self.pi_standard_slash
+                && !PI_STANDARD_SLASH_NAMES.contains(&canonical)
+            {
                 continue;
             }
 
@@ -1400,5 +1433,27 @@ mod tests {
         // Out-of-range returns None (boundary + far-out).
         assert!(registry.commands_by_index(2).is_none());
         assert!(registry.commands_by_index(usize::MAX).is_none());
+    }
+
+    #[test]
+    fn pi_standard_slash_hides_vendor_commands() {
+        let mut registry =
+            CommandRegistry::new(crate::slash::commands::builtin_commands());
+        assert!(registry.get("model").is_some());
+        assert!(registry.get("compact").is_some());
+        registry.enable_pi_standard_slash_menu();
+        assert!(registry.get("new").is_some());
+        assert!(registry.get("resume").is_some());
+        assert!(registry.get("quit").is_some());
+        assert!(registry.get("help").is_some());
+        assert!(registry.get("theme").is_some());
+        assert!(registry.get("settings").is_some());
+        assert!(registry.get("multiline").is_some());
+        assert!(registry.get("clear").is_some(), "/clear is an alias of /new");
+        assert!(registry.get("exit").is_some(), "/exit is an alias of /quit");
+        assert!(registry.get("model").is_none());
+        assert!(registry.get("compact").is_none());
+        assert!(registry.get("rewind").is_none());
+        assert!(registry.get("fork").is_none());
     }
 }

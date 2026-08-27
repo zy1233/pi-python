@@ -399,6 +399,9 @@ impl AgentView {
             InputMode::Vim
         };
         view.set_input_mode(mode);
+        view.prompt
+            .slash_controller
+            .enable_pi_standard_slash_menu();
         view
     }
     /// Establish read-only child identity before a view is stored or opened.

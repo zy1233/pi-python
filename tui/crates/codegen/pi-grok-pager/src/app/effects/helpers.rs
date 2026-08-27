@@ -867,6 +867,37 @@ pub(super) fn parse_session_picker_entries(
         })
         .collect()
 }
+
+/// Map a standard ACP `session/list` response onto picker rows.
+///
+/// Vendor `x.ai/session/list` extras (`query`, `allowRelax`, kind facets) are
+/// not on the wire; callers filter locally when the resume picker has a query.
+pub(super) fn session_picker_entries_from_acp(
+    resp: &acp::ListSessionsResponse,
+) -> Vec<crate::app::app_view::SessionPickerEntry> {
+    let fallback_updated = chrono::Utc::now().to_rfc3339();
+    let sessions: Vec<serde_json::Value> = resp
+        .sessions
+        .iter()
+        .map(|s| {
+            let title = s
+                .title
+                .as_deref()
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .unwrap_or(s.session_id.0.as_ref());
+            serde_json::json!({
+                "sessionId": s.session_id.0,
+                "cwd": s.cwd.to_string_lossy(),
+                "summary": title,
+                "updatedAt": s.updated_at.clone().unwrap_or_else(|| fallback_updated.clone()),
+                "source": "local",
+            })
+        })
+        .collect();
+    parse_session_picker_entries(&serde_json::json!({ "sessions": sessions }))
+}
+
 /// Convert a resume-picker session into a dormant dashboard roster row.
 ///
 /// Used by the non-leader dashboard fallback: local on-disk sessions have no

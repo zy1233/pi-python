@@ -300,7 +300,7 @@ pi (Rust TUI)  --stdio 标准 ACP-->  python -m pi_agent_cli  -->  AgentHarness
 
 ### 8.3 TUI 改造要点
 
-spawn 默认为 `python -m pi_agent_cli`（`PI_AGENT_COMMAND` / `PI_PYTHON` 可覆盖）。`acp_send` 丢弃 `x.ai/*` 扩展 RPC；空 `auth_methods` 跳过 xAI 登录；auto-update 关闭；交互路径不装 otel。家目录 `PI_HOME` / `~/.pi-python`。无标准 ACP 对照的 slash（`/compact` `/model` `/rewind` 等）仍待 P3 从菜单拿掉。
+spawn 默认为 `python -m pi_agent_cli`（`PI_AGENT_COMMAND` / `PI_PYTHON` 可覆盖）。`acp_send` 丢弃 `x.ai/*` 扩展 RPC；空 `auth_methods` 跳过 xAI 登录；auto-update 关闭；交互路径不装 otel。家目录 `PI_HOME` / `~/.pi-python`。斜杠菜单保留 `/new` `/resume` `/quit` 与本地 chrome（`/help` `/theme` `/settings` `/multiline`）；`/resume` 走标准 `session/list` + `session/load`。`pi -p` 转发到 `python -m pi_agent_cli -p`，不复用 grok headless。
 
 ### 8.4 权限与配置
 

@@ -1876,6 +1876,46 @@ fn dispatch_doctor_if_requested(args: &PagerArgs) -> bool {
     }
     true
 }
+
+/// Phase 4 P3: `pi -p` is pure Python headless, not grok `run_headless`.
+fn dispatch_python_print(args: &PagerArgs) -> Option<i32> {
+    if args.command.is_some() {
+        return None;
+    }
+    if args.single.is_none() && args.prompt_json.is_none() && args.prompt_file.is_none() {
+        return None;
+    }
+    Some(run_python_print(args))
+}
+
+fn run_python_print(args: &PagerArgs) -> i32 {
+    let (program, mut agent_args) = pi_grok_pager::acp::spawn::pi_agent_command();
+    if let Some(prompt) = &args.single {
+        agent_args.push("-p".into());
+        agent_args.push(prompt.into());
+    } else if let Some(json) = &args.prompt_json {
+        agent_args.push("--prompt-json".into());
+        agent_args.push(json.into());
+    } else if let Some(path) = &args.prompt_file {
+        agent_args.push("--prompt-file".into());
+        agent_args.push(path.into());
+    }
+    if let Some(cwd) = &args.cwd {
+        agent_args.push("--cwd".into());
+        agent_args.push(cwd.into());
+    }
+    match std::process::Command::new(&program).args(&agent_args).status() {
+        Ok(status) => status.code().unwrap_or(1),
+        Err(err) => {
+            eprintln!(
+                "failed to spawn ACP agent {program:?} {agent_args:?}: {err}\n\
+                 Set PI_AGENT_COMMAND or PI_PYTHON, and install pi-agent-cli-lc."
+            );
+            1
+        }
+    }
+}
+
 fn main() {
     pi_grok_version::set_full_version(env!("VERSION_WITH_COMMIT"));
     pi_grok_telemetry::startup::mark_process_start();
@@ -1889,6 +1929,9 @@ fn main() {
         pi_grok_update::channel_name().unwrap_or_default(),
     ));
     let args = PagerArgs::parse_cli();
+    if let Some(code) = dispatch_python_print(&args) {
+        std::process::exit(code);
+    }
     if dispatch_version_if_requested(&args) || dispatch_doctor_if_requested(&args) {
         return;
     }

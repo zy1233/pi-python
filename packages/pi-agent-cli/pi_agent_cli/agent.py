@@ -135,7 +135,7 @@ class PiAcpAgent(Agent):
             SessionInfo(
                 session_id=item.id,
                 cwd=item.cwd,
-                title=None,
+                title=_session_title(item.id, item.createdAt),
                 updated_at=item.createdAt,
             )
             for item in listed
@@ -235,6 +235,11 @@ class PiAcpAgent(Agent):
         if outcome_allows(response.outcome):
             return None
         return {"block": True, "reason": "User denied permission"}
+
+
+def _session_title(session_id: str, created_at: str) -> str:
+    short = session_id[:8] if len(session_id) > 8 else session_id
+    return f"{created_at} ({short})"
 
 
 def _prompt_to_text_images(

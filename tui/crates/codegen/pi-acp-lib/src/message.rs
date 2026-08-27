@@ -375,6 +375,11 @@ mod agent {
         acp::AGENT_METHOD_NAMES.session_load,
     );
     acp_define_request_response!(
+        acp::ListSessionsRequest,
+        acp::ListSessionsResponse,
+        acp::AGENT_METHOD_NAMES.session_list,
+    );
+    acp_define_request_response!(
         acp::SetSessionModeRequest,
         acp::SetSessionModeResponse,
         acp::AGENT_METHOD_NAMES.session_set_mode,
@@ -402,6 +407,7 @@ mod agent {
         Authenticate(AcpArgsGeneric<acp::AuthenticateRequest, S>),
         NewSession(AcpArgsGeneric<acp::NewSessionRequest, S>),
         LoadSession(AcpArgsGeneric<acp::LoadSessionRequest, S>),
+        ListSessions(AcpArgsGeneric<acp::ListSessionsRequest, S>),
         SetSessionMode(AcpArgsGeneric<acp::SetSessionModeRequest, S>),
         Prompt(AcpArgsGeneric<acp::PromptRequest, S>),
         Cancel(AcpArgsGeneric<acp::CancelNotification, S>),
@@ -422,6 +428,7 @@ mod agent {
                 Self::Authenticate(a) => a.method_name(),
                 Self::NewSession(a) => a.method_name(),
                 Self::LoadSession(a) => a.method_name(),
+                Self::ListSessions(a) => a.method_name(),
                 Self::SetSessionMode(a) => a.method_name(),
                 Self::Prompt(a) => a.method_name(),
                 Self::Cancel(a) => a.method_name(),
@@ -450,6 +457,9 @@ mod agent {
                     state.serialize_field("request", args.request.borrow())?
                 }
                 Self::LoadSession(args) => {
+                    state.serialize_field("request", args.request.borrow())?
+                }
+                Self::ListSessions(args) => {
                     state.serialize_field("request", args.request.borrow())?
                 }
                 Self::SetSessionMode(args) => {
@@ -502,6 +512,8 @@ mod agent {
                 parse!(NewSession)
             } else if method == acp::AGENT_METHOD_NAMES.session_load {
                 parse!(LoadSession)
+            } else if method == acp::AGENT_METHOD_NAMES.session_list {
+                parse!(ListSessions)
             } else if method == acp::AGENT_METHOD_NAMES.session_set_mode {
                 parse!(SetSessionMode)
             } else if method == acp::AGENT_METHOD_NAMES.session_prompt {
@@ -529,6 +541,7 @@ mod agent {
                 Self::Authenticate(args) => AcpAgentMessageBox::Authenticate(args.boxed()),
                 Self::NewSession(args) => AcpAgentMessageBox::NewSession(args.boxed()),
                 Self::LoadSession(args) => AcpAgentMessageBox::LoadSession(args.boxed()),
+                Self::ListSessions(args) => AcpAgentMessageBox::ListSessions(args.boxed()),
                 Self::SetSessionMode(args) => AcpAgentMessageBox::SetSessionMode(args.boxed()),
                 Self::Prompt(args) => AcpAgentMessageBox::Prompt(args.boxed()),
                 Self::Cancel(args) => AcpAgentMessageBox::Cancel(args.boxed()),
@@ -576,6 +589,15 @@ mod agent {
                         _ = args
                             .response_tx
                             .send(agent.load_session(args.request).await)
+                            .ok();
+                    }
+                    .boxed_local(),
+                ),
+                AcpAgentMessage::ListSessions(args) => spawn(
+                    async move {
+                        _ = args
+                            .response_tx
+                            .send(agent.list_sessions(args.request).await)
                             .ok();
                     }
                     .boxed_local(),

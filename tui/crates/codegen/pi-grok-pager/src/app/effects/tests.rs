@@ -1519,43 +1519,44 @@ async fn foreign_resume_detection_runs_as_task_result() {
         other => panic!("expected ForeignResumeHintDetected, got {other:?}"),
     }
 }
-/// `FetchSessionList` wire shape: search sends `query` (no `allowRelax`);
-/// browse opts into `allowRelax` and parses `x.ai/listScope`; all
-/// outcomes echo `seq`/`query`.
+/// `FetchSessionList` uses standard `session/list` (cwd filter on the wire;
+/// picker `query` is applied locally). Failures and `seq`/`query` are echoed.
 #[tokio::test]
-async fn fetch_session_list_pushes_query_and_echoes_seq() {
-    use std::sync::{Arc, Mutex};
+async fn fetch_session_list_uses_standard_session_list() {
     use pi_acp_lib::AcpAgentMessage;
-    let captured: Arc<Mutex<Vec<serde_json::Value>>> = Arc::default();
-    let captured_for_task = captured.clone();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
-            if let AcpAgentMessage::ExtMethod(args) = msg {
-                assert_eq!(args.request.method.as_ref(), "x.ai/session/list");
-                let params: serde_json::Value = serde_json::from_str(
-                        args.request.params.get(),
-                    )
-                    .expect("params JSON");
-                let fail = params.get("query").and_then(|q| q.as_str())
-                    == Some("fail-me");
-                let browse = params.get("query").is_none();
-                captured_for_task.lock().unwrap().push(params);
-                let body = if fail {
-                    serde_json::json!({ "error": "boom" })
-                } else if browse {
-                    serde_json::json!({
-                            "result": {
-                                "sessions": [],
-                                "_meta": { "x.ai/listScope": "repo" },
-                            }
-                        })
-                } else {
-                    serde_json::json!({ "result": { "sessions": [] } })
-                };
-                let raw = serde_json::value::RawValue::from_string(body.to_string())
-                    .expect("serialize list response");
-                let _ = args.response_tx.send(Ok(acp::ExtResponse::new(Arc::from(raw))));
+            if let AcpAgentMessage::ListSessions(args) = msg {
+                let cwd = args
+                    .request
+                    .cwd
+                    .as_ref()
+                    .expect("session/list should pass cwd")
+                    .to_string_lossy()
+                    .into_owned();
+                let recent = chrono::Utc::now().to_rfc3339();
+                let sessions = vec![
+                    serde_json::from_value(serde_json::json!({
+                        "sessionId": "sess-hit",
+                        "cwd": cwd,
+                        "title": "hit me",
+                        "updatedAt": recent,
+                    }))
+                    .expect("session info"),
+                    serde_json::from_value(serde_json::json!({
+                        "sessionId": "sess-other",
+                        "cwd": cwd,
+                        "title": "other",
+                        "updatedAt": recent,
+                    }))
+                    .expect("session info"),
+                ];
+                let resp = serde_json::from_value(serde_json::json!({
+                    "sessions": sessions,
+                }))
+                .expect("list response");
+                let _ = args.response_tx.send(Ok(resp));
             }
         }
     });
@@ -1579,13 +1580,11 @@ async fn fetch_session_list_pushes_query_and_echoes_seq() {
     });
     match tasks.join_next().await.expect("task").expect("no panic") {
         TaskResult::SessionListLoaded { sessions, scope, seq, query, .. } => {
-            assert!(sessions.is_empty());
             assert_eq!(seq, 7, "seq must be echoed, not reconstructed");
             assert_eq!(query.as_deref(), Some("hit"), "query must be echoed");
-            assert!(
-                    !scope.is_relaxed(),
-                    "search responses carry no relaxed scope"
-                );
+            assert!(!scope.is_relaxed(), "standard session/list stays cwd-scoped");
+            assert_eq!(sessions.len(), 1);
+            assert_eq!(sessions[0].id, "sess-hit");
         }
         other => panic!("expected SessionListLoaded, got {other:?}"),
     }
@@ -1595,73 +1594,69 @@ async fn fetch_session_list_pushes_query_and_echoes_seq() {
         kind_filter: None,
     });
     match tasks.join_next().await.expect("task").expect("no panic") {
-        TaskResult::SessionListLoaded { scope, seq, query, .. } => {
+        TaskResult::SessionListLoaded { sessions, scope, seq, query, .. } => {
             assert_eq!(seq, 8);
             assert_eq!(query, None);
-            assert!(
-                    scope.is_relaxed(),
-                    "_meta[\"x.ai/listScope\"] must parse into the task result"
-                );
+            assert!(!scope.is_relaxed());
+            assert_eq!(sessions.len(), 2);
         }
         other => panic!("expected SessionListLoaded, got {other:?}"),
     }
-    let mut tasks = run(Effect::FetchSessionList {
-        query: Some("fail-me".into()),
-        seq: 9,
-        kind_filter: None,
+}
+#[tokio::test]
+async fn fetch_session_list_echoes_query_on_error() {
+    use pi_acp_lib::AcpAgentMessage;
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            if let AcpAgentMessage::ListSessions(args) = msg {
+                let _ = args.response_tx.send(Err(acp::Error::new(
+                    acp::ErrorCode::InternalError.into(),
+                    "boom",
+                )));
+            }
+        }
     });
+    let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut tasks = JoinSet::new();
+    execute(
+        Effect::FetchSessionList {
+            query: Some("fail-me".into()),
+            seq: 9,
+            kind_filter: None,
+        },
+        &mut tasks,
+        &tx,
+        Path::new("."),
+        &SessionFlags::default(),
+        &progress_tx,
+    );
     match tasks.join_next().await.expect("task").expect("no panic") {
-        TaskResult::SessionListFailed { error, seq, query } => {
-            assert_eq!(error, "boom");
+        TaskResult::SessionListFailed { seq, query, .. } => {
             assert_eq!(seq, 9);
             assert_eq!(
-                    query.as_deref(),
-                    Some("fail-me"),
-                    "failure must echo the query (gates the indicator clear)"
-                );
+                query.as_deref(),
+                Some("fail-me"),
+                "failure must echo the query (gates the indicator clear)"
+            );
         }
         other => panic!("expected SessionListFailed, got {other:?}"),
     }
-    let captured = captured.lock().unwrap();
-    assert_eq!(captured.len(), 3);
-    assert_eq!(captured[0]["query"], "hit");
-    assert_eq!(captured[0]["limit"], 30);
-    assert!(captured[0]["cwd"].is_string());
-    assert!(
-            captured[0].get("allowRelax").is_none(),
-            "search fetches must not opt into relaxing: {:?}",
-            captured[0]
-        );
-    assert!(
-            captured[1].get("query").is_none(),
-            "plain fetch must not send a query key: {:?}",
-            captured[1]
-        );
-    assert_eq!(
-            captured[1]["allowRelax"], true,
-            "browse fetches opt into relaxing"
-        );
-    assert_eq!(captured[2]["query"], "fail-me");
 }
 #[tokio::test]
-async fn fetch_session_list_sends_kind_facet_filter() {
+async fn fetch_session_list_ignores_kind_facet_filter() {
     use std::sync::{Arc, Mutex};
     use pi_acp_lib::AcpAgentMessage;
-    let captured: Arc<Mutex<Vec<serde_json::Value>>> = Arc::default();
+    let captured: Arc<Mutex<usize>> = Arc::default();
     let captured_for_task = captured.clone();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
-            if let AcpAgentMessage::ExtMethod(args) = msg {
-                let params: serde_json::Value = serde_json::from_str(
-                        args.request.params.get(),
-                    )
-                    .expect("params JSON");
-                captured_for_task.lock().unwrap().push(params);
-                let body = serde_json::json!({ "result": { "sessions": [] } });
-                let raw = serde_json::value::RawValue::from_string(body.to_string())
-                    .expect("ser");
-                let _ = args.response_tx.send(Ok(acp::ExtResponse::new(Arc::from(raw))));
+            if let AcpAgentMessage::ListSessions(args) = msg {
+                *captured_for_task.lock().unwrap() += 1;
+                let resp = serde_json::from_value(serde_json::json!({ "sessions": [] }))
+                    .expect("list response");
+                let _ = args.response_tx.send(Ok(resp));
             }
         }
     });
@@ -1680,12 +1675,7 @@ async fn fetch_session_list_sends_kind_facet_filter() {
         &progress_tx,
     );
     let _ = tasks.join_next().await;
-    let captured = captured.lock().unwrap();
-    assert_eq!(captured.len(), 1);
-    assert_eq!(
-            captured[0]["_meta"]["x.ai/facetFilters"]["kind"],
-            serde_json::json!(["build"])
-        );
+    assert_eq!(*captured.lock().unwrap(), 1);
 }
 #[tokio::test]
 async fn fetch_workflows_list_sends_session_id() {

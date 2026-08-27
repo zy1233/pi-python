@@ -557,6 +557,15 @@ impl SlashController {
         Self::new(CommandRegistry::new(commands::builtin_commands()), cwd)
     }
 
+    /// Limit the dropdown to standard-ACP session commands and local TUI chrome.
+    pub fn enable_pi_standard_slash_menu(&mut self) {
+        self.registry.enable_pi_standard_slash_menu();
+    }
+
+    pub(crate) fn pi_standard_slash_menu(&self) -> bool {
+        self.registry.pi_standard_slash_enabled()
+    }
+
     /// Mutable access to the registry (for ACP sync).
     pub fn registry_mut(&mut self) -> &mut CommandRegistry {
         &mut self.registry

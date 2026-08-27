@@ -1497,6 +1497,9 @@ impl AppView {
         let mut welcome_prompt = PromptWidget::new();
         welcome_prompt.adopt_slash_mru(slash_mru.clone());
         welcome_prompt.adopt_command_tags(command_tags.clone());
+        welcome_prompt
+            .slash_controller
+            .enable_pi_standard_slash_menu();
         Self {
             pending_startup: None,
             active_view: ActiveView::Welcome,

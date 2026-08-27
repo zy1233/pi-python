@@ -559,10 +559,6 @@ pub(crate) fn execute(
             let mut meta = session_flags.to_meta();
             let is_chat_path = chat_kind || session_flags.chat_mode;
             finalize_chat_session_meta(&mut meta, is_chat_path, session_flags);
-            if let Some(rc) = session_flags.restore_code {
-                meta.get_or_insert_with(acp::Meta::new)
-                    .insert("x.ai/restore_code".into(), serde_json::Value::Bool(rc));
-            }
             let cwd = session_cwd.unwrap_or_else(|| cwd.to_path_buf());
             let mcp_started = std::time::Instant::now();
             let mcp_servers = pi_grok_shell::util::config::load_mcp_servers(
@@ -751,61 +747,28 @@ pub(crate) fn execute(
                     }
                 });
         }
-        Effect::FetchSessionList { query, seq, kind_filter } => {
+        Effect::FetchSessionList { query, seq, kind_filter: _ } => {
             let tx = acp_tx.clone();
             let cwd = cwd.to_path_buf();
             tasks
                 .spawn(async move {
-                    let mut params = serde_json::json!({
-                    "cwd": cwd.to_string_lossy(),
-                    "limit": 30,
-                });
-                    if let Some(q) = &query {
-                        params["query"] = serde_json::Value::String(q.clone());
-                    } else {
-                        params["allowRelax"] = serde_json::Value::Bool(true);
-                    }
-                    if let Some(kinds) = &kind_filter {
-                        params["_meta"] = serde_json::json!({
-                        "x.ai/facetFilters": { "kind": kinds },
-                    });
-                        tracing::info!(
-                        target: "grok.pager.workspace_mode",
-                        event = "session_list_fetch",
-                        kind_filter = ?kinds,
-                        query = ?query,
-                        seq,
-                        "FetchSessionList with kind facet filter"
-                    );
-                    }
-                    let request = acp::ExtRequest::new(
-                        "x.ai/session/list",
-                        serde_json::value::to_raw_value(&params)
-                            .expect("serialize session list params")
-                            .into(),
-                    );
+                    let request = acp::ListSessionsRequest::default().cwd(cwd.clone());
                     let result = acp_send(request, &tx).await;
                     match result {
                         Ok(resp) => {
-                            let wrapper: serde_json::Value = serde_json::from_str(
-                                    resp.0.get(),
-                                )
-                                .unwrap_or_default();
-                            if let Some(err) = wrapper.get("error") {
-                                return TaskResult::SessionListFailed {
-                                    error: err.as_str().unwrap_or("unknown error").to_string(),
-                                    seq,
-                                    query,
-                                };
+                            let mut sessions = session_picker_entries_from_acp(&resp);
+                            if let Some(q) = query.as_ref().filter(|s| !s.is_empty()) {
+                                let needle = q.to_lowercase();
+                                sessions.retain(|e| {
+                                    e.summary.to_lowercase().contains(&needle)
+                                        || e.id.to_lowercase().contains(&needle)
+                                        || e.cwd.to_lowercase().contains(&needle)
+                                });
                             }
-                            let payload = wrapper.get("result").unwrap_or(&wrapper);
-                            let sessions = parse_session_picker_entries(payload);
-                            let partial = parse_session_list_partial(payload);
-                            let scope = parse_session_list_scope(payload);
                             TaskResult::SessionListLoaded {
                                 sessions,
-                                partial,
-                                scope,
+                                partial: None,
+                                scope: pi_grok_shell::session::unified_list::ListScope::Cwd,
                                 seq,
                                 query,
                             }
@@ -875,29 +838,10 @@ pub(crate) fn execute(
             let cwd = cwd.to_path_buf();
             tasks
                 .spawn(async move {
-                    let params = serde_json::json!({
-                    "cwd": cwd.to_string_lossy(),
-                    "limit": 30,
-                });
-                    let request = acp::ExtRequest::new(
-                        "x.ai/session/list",
-                        serde_json::value::to_raw_value(&params)
-                            .expect("serialize session list params")
-                            .into(),
-                    );
+                    let request = acp::ListSessionsRequest::default().cwd(cwd);
                     match acp_send(request, &tx).await {
                         Ok(resp) => {
-                            let wrapper: serde_json::Value = serde_json::from_str(
-                                    resp.0.get(),
-                                )
-                                .unwrap_or_default();
-                            if wrapper.get("error").is_some() {
-                                return TaskResult::DashboardSessionsLoaded {
-                                    sessions: vec![],
-                                };
-                            }
-                            let payload = wrapper.get("result").unwrap_or(&wrapper);
-                            let sessions = parse_session_picker_entries(payload)
+                            let sessions = session_picker_entries_from_acp(&resp)
                                 .iter()
                                 .map(session_picker_entry_to_roster)
                                 .collect();
