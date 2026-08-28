@@ -1,6 +1,6 @@
 //! pi-chat-state — Actor-based chat state management for pi agents.
 //!
-//! This crate extracts conversation state management from `pi-grok-shell`'s
+//! This crate extracts conversation state management from `pi-shell`'s
 //! `acp_session.rs` into a standalone actor. It follows the same actor pattern
 //! as `pi-hunk-tracker`:
 //!

@@ -32,7 +32,7 @@ clap = { workspace = true }
 crossbeam = { workspace = true }
 dashmap = { workspace = true }
 dunce = { workspace = true }
-pi-grok-home = { workspace = true }
+pi-home = { workspace = true }
 gix = { workspace = true, features = ["status", "parallel"] }
 gix-status = { version = "0.30.0" }
 globset = { workspace = true }

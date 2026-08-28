@@ -12,7 +12,7 @@
 
 将已完成的引擎层（Phase 1–3 + P6）组装为可日常使用的 Coding Agent CLI：
 
-- 全屏 TUI：复用 grok-build 的 `pi-grok-pager`（scrollback、Markdown/diff、权限 modal、主题）。
+- 全屏 TUI：复用 grok-build 的 `pi-pager`（scrollback、Markdown/diff、权限 modal、主题）。
 - 引擎：`AgentHarness` + `coding_tools` + `langchain_stream`；循环语义仍在 `agent_loop.py`。
 - 边界：TUI 是 ACP **Client**；Python 是 ACP **Agent**。线上协议只走 [Agent Client Protocol](https://agentclientprotocol.com) 标准方法。
 
@@ -37,7 +37,7 @@
 ## 2. 架构
 
 ```
-User ──► pi (forked pi-grok-pager) ──标准 ACP stdio──► python -m pi_agent_cli
+User ──► pi (forked pi-pager) ──标准 ACP stdio──► python -m pi_agent_cli
 Zed/Neovim ──────────────────────────────────────────► python -m pi_agent_cli
                                                               │
                                                               ▼
@@ -89,18 +89,18 @@ pi-python/
     Cargo.toml                   # grok-build 生成的 workspace 根
     SOURCE_REV                   # 上游 commit SHA
     NOTICE                       # Apache §4 变更声明
-    crates/codegen/pi-grok-pager/
-    crates/codegen/pi-grok-pager-bin/
+    crates/codegen/pi-pager/
+    crates/codegen/pi-pager-bin/
     ...                          # 其余 crate 先全留
 ```
 
 操作顺序：
 
 1. `git clone` 到仓外（例如 `d:\work\grok-build`），**不进本仓**。
-2. 该目录 `cargo check -p pi-grok-pager-bin`，并列出 pager 的 `x.ai/*` 调用（TUI **拆除清单**）。
+2. 该目录 `cargo check -p pi-pager-bin`，并列出 pager 的 `x.ai/*` 调用（TUI **拆除清单**）。
 3. Spike 通过后，把整棵 workspace（`Cargo.lock`、`.cargo/`、`rust-toolchain.toml`、`third_party/`、`bin/`）放进 `tui/`。
 4. 根 `.gitignore` 含 `tui/target/`；hatch/wheel **不 include** `tui/`。
-5. 开发：Python 用 `.venv`；TUI 用 `cd tui && cargo run -p pi-grok-pager-bin`（产物二进制名 `pi`）。CI 可另加 cargo check job。
+5. 开发：Python 用 `.venv`；TUI 用 `cd tui && cargo run -p pi-pager-bin`（产物二进制名 `pi`）。CI 可另加 cargo check job。
 
 第一轮允许 pager **继续链接** `xai-grok-shell`（编译期），但运行时不走它的 loop。变瘦（减 member）不是迁入前提。
 
@@ -151,7 +151,7 @@ Phase 4 带一版可用的 coding system prompt（工具策略、自纠、安全
 
 | 批次 | 内容 | 状态 |
 |---|---|---|
-| P0 Spike | 仓外 clone；`cargo check -p pi-grok-pager-bin`；`x.ai/*` 拆除清单；迁入 `tui/` | 完成 |
+| P0 Spike | 仓外 clone；`cargo check -p pi-pager-bin`；`x.ai/*` 拆除清单；迁入 `tui/` | 完成 |
 | P1 | `pi-agent-cli` 标准 ACP + 事件映射 + 权限 hook | 完成 |
 | P2 | `tui/` 接线：spawn Python、拆 x.ai 调用、关 auth/update；crate `xai-*`→`pi-*` | 完成 |
 | P3 | `/new` `/resume`；本地 `@`；`pi -p` headless | 完成 |
@@ -186,11 +186,11 @@ P0 失败则改构建策略（WSL / CI 出 Windows 二进制），不改「TUI=A
 |---|---|
 | git HEAD | `c2ad97f87aea4303b6000a2c22128bc91ee76c9b`（`c2ad97f Synced from monorepo`） |
 | 上游 `SOURCE_REV` 文件 | `437c7c928f3fcd13e9d37a51d887f41d7f84185d` |
-| `cargo check -p pi-grok-pager-bin` | **通过**（WSL2，`rustc 1.94.0`，约 4m26s）。产物目录 `~/grok-build-target` |
+| `cargo check -p pi-pager-bin` | **通过**（WSL2，`rustc 1.94.0`，约 4m26s）。产物目录 `~/grok-build-target` |
 | 迁入 `tui/` | **已完成**（`git archive` HEAD `c2ad97f`，LF；含 `SOURCE_REV` / `LICENSE` / 新增 `NOTICE`） |
 
 WSL 代理：Clash 等监听 `0.0.0.0:10809`，但 **不要**用 WSL 网关 `172.26.176.1`（防火墙超时）。用主机局域网 IP（本次为 `172.20.35.30:10809`）。Windows 上 git clone 会使 `bin/protoc` 带 CRLF，Linux 上 shebang 变成 `dotslash\r`；check 前需 `sed -i 's/\r$//' bin/*`，并 `cargo install dotslash`。
 
-拆除清单（从 `pi-grok-pager/src` 抽出的 `"x.ai/…"` 字符串，含 RPC、通知、`_meta` 键）见 [docs/AUDIT/SPIKE-P0-GROK-TUI.md](../AUDIT/SPIKE-P0-GROK-TUI.md)。集中调度在 `src/app/effects/mod.rs`。启动认证走 `session_startup.rs` → `pi_grok_shell::auth::ensure_authenticated_or_noninteractive`。
+拆除清单（从 `pi-pager/src` 抽出的 `"x.ai/…"` 字符串，含 RPC、通知、`_meta` 键）见 [docs/AUDIT/SPIKE-P0-GROK-TUI.md](../AUDIT/SPIKE-P0-GROK-TUI.md)。集中调度在 `src/app/effects/mod.rs`。启动认证走 `session_startup.rs` → `pi_shell::auth::ensure_authenticated_or_noninteractive`。
 
 下一步：P1 `packages/pi-agent-cli`（标准 ACP only）；P2 再改 `tui/` 接线。

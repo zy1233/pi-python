@@ -304,7 +304,7 @@ fn open_null_fd(path: &std::path::Path) -> Option<std::os::fd::OwnedFd> {
 /// sees EOF — a child given it as stdin would block instead of starting
 /// cleanly. Since the descriptor is cached for the process's lifetime, that
 /// would be sticky, and a hang is a worse outcome than the `ENOENT` this
-/// fallback exists to avoid. Mirrors `os_pipe` in pi-grok-tools' shell_state,
+/// fallback exists to avoid. Mirrors `os_pipe` in pi-tools' shell_state,
 /// including the best-effort `fcntl` path where `pipe2` is unavailable.
 #[cfg(unix)]
 fn eof_pipe_fd() -> Option<std::os::fd::OwnedFd> {

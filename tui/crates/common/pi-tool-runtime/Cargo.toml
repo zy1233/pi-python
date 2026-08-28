@@ -13,7 +13,7 @@ schemars = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tokio-util = { workspace = true }
-pi-grok-tools-api = { workspace = true }
+pi-tools-api = { workspace = true }
 pi-tool-protocol = { workspace = true }
 pi-tool-types = { workspace = true }
 

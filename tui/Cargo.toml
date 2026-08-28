@@ -18,57 +18,57 @@ members = [
     "crates/codegen/pi-fsnotify",
     "crates/codegen/pi-fuzzy-file-search",
     "crates/codegen/pi-gix-status",
-    "crates/codegen/pi-grok-active-sessions",
-    "crates/codegen/pi-grok-agent",
-    "crates/codegen/pi-grok-announcements",
-    "crates/codegen/pi-grok-auth",
-    "crates/codegen/pi-grok-bundle",
-    "crates/codegen/pi-grok-config",
-    "crates/codegen/pi-grok-config-types",
-    "crates/codegen/pi-grok-diag-server",
-    "crates/codegen/pi-grok-env",
-    "crates/codegen/pi-grok-extra-ca",
-    "crates/codegen/pi-grok-foreign-sessions",
-    "crates/codegen/pi-grok-home",
-    "crates/codegen/pi-grok-hooks",
-    "crates/codegen/pi-grok-http",
-    "crates/codegen/pi-grok-markdown",
-    "crates/codegen/pi-grok-markdown-core",
-    "crates/codegen/pi-grok-mcp",
-    "crates/codegen/pi-grok-memory",
-    "crates/codegen/pi-grok-mermaid",
-    "crates/codegen/pi-grok-models",
-    "crates/codegen/pi-grok-pager",
-    "crates/codegen/pi-grok-pager-bin",
-    "crates/codegen/pi-grok-pager-diff",
-    "crates/codegen/pi-grok-pager-minimal",
-    "crates/codegen/pi-grok-pager-render",
-    "crates/codegen/pi-grok-paths",
-    "crates/codegen/pi-grok-plugin-marketplace",
-    "crates/codegen/pi-grok-sampler",
-    "crates/codegen/pi-grok-sampling-types",
-    "crates/codegen/pi-grok-sandbox",
-    "crates/codegen/pi-grok-secrets",
-    "crates/codegen/pi-grok-session-events",
-    "crates/codegen/pi-grok-session-search",
-    "crates/codegen/pi-grok-shared",
-    "crates/codegen/pi-grok-shell",
-    "crates/codegen/pi-grok-shell-base",
-    "crates/codegen/pi-grok-shell-session-support",
-    "crates/codegen/pi-grok-shell-terminal",
-    "crates/codegen/pi-grok-status-line",
-    "crates/codegen/pi-grok-subagent-resolution",
-    "crates/codegen/pi-grok-telemetry",
-    "crates/codegen/pi-grok-test-support",
-    "crates/codegen/pi-grok-tools",
-    "crates/codegen/pi-grok-tools-api",
-    "crates/codegen/pi-grok-update",
-    "crates/codegen/pi-grok-version",
-    "crates/codegen/pi-grok-voice",
-    "crates/codegen/pi-grok-workspace",
-    "crates/codegen/pi-grok-workspace-client",
-    "crates/codegen/pi-grok-workspace-daemon",
-    "crates/codegen/pi-grok-workspace-types",
+    "crates/codegen/pi-active-sessions",
+    "crates/codegen/pi-agent",
+    "crates/codegen/pi-announcements",
+    "crates/codegen/pi-auth",
+    "crates/codegen/pi-bundle",
+    "crates/codegen/pi-config",
+    "crates/codegen/pi-config-types",
+    "crates/codegen/pi-diag-server",
+    "crates/codegen/pi-env",
+    "crates/codegen/pi-extra-ca",
+    "crates/codegen/pi-foreign-sessions",
+    "crates/codegen/pi-home",
+    "crates/codegen/pi-hooks",
+    "crates/codegen/pi-http",
+    "crates/codegen/pi-markdown",
+    "crates/codegen/pi-markdown-core",
+    "crates/codegen/pi-mcp",
+    "crates/codegen/pi-memory",
+    "crates/codegen/pi-mermaid",
+    "crates/codegen/pi-models",
+    "crates/codegen/pi-pager",
+    "crates/codegen/pi-pager-bin",
+    "crates/codegen/pi-pager-diff",
+    "crates/codegen/pi-pager-minimal",
+    "crates/codegen/pi-pager-render",
+    "crates/codegen/pi-paths",
+    "crates/codegen/pi-plugin-marketplace",
+    "crates/codegen/pi-sampler",
+    "crates/codegen/pi-sampling-types",
+    "crates/codegen/pi-sandbox",
+    "crates/codegen/pi-secrets",
+    "crates/codegen/pi-session-events",
+    "crates/codegen/pi-session-search",
+    "crates/codegen/pi-shared",
+    "crates/codegen/pi-shell",
+    "crates/codegen/pi-shell-base",
+    "crates/codegen/pi-shell-session-support",
+    "crates/codegen/pi-shell-terminal",
+    "crates/codegen/pi-status-line",
+    "crates/codegen/pi-subagent-resolution",
+    "crates/codegen/pi-telemetry",
+    "crates/codegen/pi-test-support",
+    "crates/codegen/pi-tools",
+    "crates/codegen/pi-tools-api",
+    "crates/codegen/pi-update",
+    "crates/codegen/pi-version",
+    "crates/codegen/pi-voice",
+    "crates/codegen/pi-workspace",
+    "crates/codegen/pi-workspace-client",
+    "crates/codegen/pi-workspace-daemon",
+    "crates/codegen/pi-workspace-types",
     "crates/codegen/pi-hooks-plugins-types",
     "crates/codegen/pi-hunk-tracker",
     "crates/codegen/pi-mixpanel",
@@ -85,7 +85,7 @@ members = [
     "crates/common/pi-computer-hub-core",
     "crates/common/pi-computer-hub-mcp-adapter",
     "crates/common/pi-computer-hub-sdk",
-    "crates/common/pi-grok-compaction",
+    "crates/common/pi-compaction",
     "crates/common/pi-interjection-core",
     "crates/common/pi-test-utils",
     "crates/common/pi-tool-protocol",
@@ -310,42 +310,42 @@ pi-computer-hub-core = { path = "crates/common/pi-computer-hub-core" }
 pi-computer-hub-sdk = { path = "crates/common/pi-computer-hub-sdk" }
 pi-fuzzy-file-search = { path = "crates/codegen/pi-fuzzy-file-search" }
 pi-gix-status = { path = "crates/codegen/pi-gix-status" }
-pi-grok-active-sessions = { path = "crates/codegen/pi-grok-active-sessions" }
-pi-grok-agent = { path = "crates/codegen/pi-grok-agent" }
-pi-grok-announcements = { path = "crates/codegen/pi-grok-announcements" }
-pi-grok-auth = { path = "crates/codegen/pi-grok-auth" }
-pi-grok-bundle = { path = "crates/codegen/pi-grok-bundle" }
-pi-grok-config = { path = "crates/codegen/pi-grok-config" }
-pi-grok-config-types = { path = "crates/codegen/pi-grok-config-types" }
-pi-grok-diag-server = { path = "crates/codegen/pi-grok-diag-server" }
-pi-grok-env = { path = "crates/codegen/pi-grok-env" }
-pi-grok-extra-ca = { path = "crates/codegen/pi-grok-extra-ca" }
-pi-grok-foreign-sessions = { path = "crates/codegen/pi-grok-foreign-sessions" }
-pi-grok-home = { path = "crates/codegen/pi-grok-home" }
-pi-grok-http = { path = "crates/codegen/pi-grok-http" }
-pi-grok-markdown = { path = "crates/codegen/pi-grok-markdown" }
-pi-grok-markdown-core = { path = "crates/codegen/pi-grok-markdown-core" }
-pi-grok-mcp = { path = "crates/codegen/pi-grok-mcp" }
-pi-grok-memory = { path = "crates/codegen/pi-grok-memory" }
-pi-grok-mermaid = { path = "crates/codegen/pi-grok-mermaid" }
-pi-grok-models = { path = "crates/codegen/pi-grok-models" }
-pi-grok-sampler = { path = "crates/codegen/pi-grok-sampler" }
-pi-grok-secrets = { path = "crates/codegen/pi-grok-secrets" }
-pi-grok-session-events = { path = "crates/codegen/pi-grok-session-events" }
-pi-grok-session-search = { path = "crates/codegen/pi-grok-session-search" }
-pi-grok-shared = { path = "crates/codegen/pi-grok-shared" }
-pi-grok-shell = { path = "crates/codegen/pi-grok-shell" }
-pi-grok-shell-base = { path = "crates/codegen/pi-grok-shell-base" }
-pi-grok-shell-session-support = { path = "crates/codegen/pi-grok-shell-session-support" }
-pi-grok-shell-terminal = { path = "crates/codegen/pi-grok-shell-terminal" }
-pi-grok-status-line = { path = "crates/codegen/pi-grok-status-line" }
-pi-grok-telemetry = { path = "crates/codegen/pi-grok-telemetry" }
-pi-grok-test-support = { path = "crates/codegen/pi-grok-test-support" }
-pi-grok-tools = { path = "crates/codegen/pi-grok-tools" }
-pi-grok-tools-api = { path = "crates/codegen/pi-grok-tools-api" }
-pi-grok-version = { path = "crates/codegen/pi-grok-version" }
-pi-grok-workspace = { path = "crates/codegen/pi-grok-workspace" }
-pi-grok-workspace-types = { path = "crates/codegen/pi-grok-workspace-types" }
+pi-active-sessions = { path = "crates/codegen/pi-active-sessions" }
+pi-agent = { path = "crates/codegen/pi-agent" }
+pi-announcements = { path = "crates/codegen/pi-announcements" }
+pi-auth = { path = "crates/codegen/pi-auth" }
+pi-bundle = { path = "crates/codegen/pi-bundle" }
+pi-config = { path = "crates/codegen/pi-config" }
+pi-config-types = { path = "crates/codegen/pi-config-types" }
+pi-diag-server = { path = "crates/codegen/pi-diag-server" }
+pi-env = { path = "crates/codegen/pi-env" }
+pi-extra-ca = { path = "crates/codegen/pi-extra-ca" }
+pi-foreign-sessions = { path = "crates/codegen/pi-foreign-sessions" }
+pi-home = { path = "crates/codegen/pi-home" }
+pi-http = { path = "crates/codegen/pi-http" }
+pi-markdown = { path = "crates/codegen/pi-markdown" }
+pi-markdown-core = { path = "crates/codegen/pi-markdown-core" }
+pi-mcp = { path = "crates/codegen/pi-mcp" }
+pi-memory = { path = "crates/codegen/pi-memory" }
+pi-mermaid = { path = "crates/codegen/pi-mermaid" }
+pi-models = { path = "crates/codegen/pi-models" }
+pi-sampler = { path = "crates/codegen/pi-sampler" }
+pi-secrets = { path = "crates/codegen/pi-secrets" }
+pi-session-events = { path = "crates/codegen/pi-session-events" }
+pi-session-search = { path = "crates/codegen/pi-session-search" }
+pi-shared = { path = "crates/codegen/pi-shared" }
+pi-shell = { path = "crates/codegen/pi-shell" }
+pi-shell-base = { path = "crates/codegen/pi-shell-base" }
+pi-shell-session-support = { path = "crates/codegen/pi-shell-session-support" }
+pi-shell-terminal = { path = "crates/codegen/pi-shell-terminal" }
+pi-status-line = { path = "crates/codegen/pi-status-line" }
+pi-telemetry = { path = "crates/codegen/pi-telemetry" }
+pi-test-support = { path = "crates/codegen/pi-test-support" }
+pi-tools = { path = "crates/codegen/pi-tools" }
+pi-tools-api = { path = "crates/codegen/pi-tools-api" }
+pi-version = { path = "crates/codegen/pi-version" }
+pi-workspace = { path = "crates/codegen/pi-workspace" }
+pi-workspace-types = { path = "crates/codegen/pi-workspace-types" }
 pi-hooks-plugins-types = { path = "crates/codegen/pi-hooks-plugins-types" }
 pi-interjection-core = { path = "crates/common/pi-interjection-core" }
 pi-mixpanel = { path = "crates/codegen/pi-mixpanel" }

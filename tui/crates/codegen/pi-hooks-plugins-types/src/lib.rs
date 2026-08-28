@@ -2,7 +2,7 @@
 //!
 //! This crate defines the wire format for `x.ai/hooks/*` and `x.ai/plugins/*`
 //! ACP extension methods. It is dependency-free (only `serde`) so both
-//! `pi-grok-shell` and `pi-grok-pager` can depend on it without pulling
+//! `pi-shell` and `pi-pager` can depend on it without pulling
 //! in domain logic.
 //!
 //! Conversion from domain types (`HookSpec`, `LoadedPlugin`) to these DTOs
@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 /// Plugin scope.
 ///
-/// Maps from `PluginScope` in `pi-grok-agent`. Variant renames:
+/// Maps from `PluginScope` in `pi-agent`. Variant renames:
 /// - source `CliOverride` -> DTO `Cli` (matches Display output "cli")
 /// - source `ConfigPath` -> DTO `Config` (matches Display output "config")
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,7 +30,7 @@ pub enum PluginScope {
 
 /// The concrete discovery source a plugin came from.
 ///
-/// Maps from `PluginOrigin` in `pi-grok-agent`. Optional on [`PluginInfo`]
+/// Maps from `PluginOrigin` in `pi-agent`. Optional on [`PluginInfo`]
 /// so older shells (which don't send it) deserialize to `None`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -76,7 +76,7 @@ pub enum PluginOrigin {
 
 /// Hook event type.
 ///
-/// Maps from `HookEventName` in `pi-grok-hooks`. The source type's
+/// Maps from `HookEventName` in `pi-hooks`. The source type's
 /// `SubagentEnd` variant (backward-compat alias) is collapsed into
 /// `SubagentStop` during conversion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

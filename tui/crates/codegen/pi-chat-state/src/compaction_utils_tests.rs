@@ -1,6 +1,6 @@
 use super::*;
-use pi_grok_sampling_types::SyntheticReason;
-use pi_grok_sampling_types::{BackendToolCallItem, BackendToolKind, rs};
+use pi_sampling_types::SyntheticReason;
+use pi_sampling_types::{BackendToolCallItem, BackendToolKind, rs};
 #[test]
 fn summarization_prep_drops_backend_tool_calls() {
     let items = vec![
@@ -543,7 +543,7 @@ fn extract_last_real_user_query_skips_system_reminder_by_metadata() {
 }
 #[test]
 fn extract_messages_since_last_real_user_ignores_synthetic_boundary() {
-    use pi_grok_sampling_types::ToolCall;
+    use pi_sampling_types::ToolCall;
     let conv = vec![
         ConversationItem::user("<user_query>\ndo stuff\n</user_query>"),
         ConversationItem::assistant_tool_calls(vec![ToolCall {
@@ -822,7 +822,7 @@ async fn agent_message_before_latest_human_survives_compaction_exactly_once() {
 }
 #[tokio::test]
 async fn compaction_state_context_build_uses_real_user_and_real_tail() {
-    use pi_grok_sampling_types::ToolCall;
+    use pi_sampling_types::ToolCall;
     let conversation = vec![
         ConversationItem::system("sys"),
         ConversationItem::user(
@@ -975,7 +975,7 @@ async fn build_stores_and_for_compaction_preserves_todos() {
 /// a no-op.
 #[tokio::test]
 async fn for_compaction_drops_recent_messages_preserves_query() {
-    use pi_grok_sampling_types::ToolCall;
+    use pi_sampling_types::ToolCall;
     let conversation = vec![
         ConversationItem::system("sys"),
         ConversationItem::user(
@@ -1469,7 +1469,7 @@ fn format_compact_summary_malformed_tag_order_does_not_panic() {
 }
 #[test]
 fn sanitize_strips_orphaned_tool_result() {
-    use pi_grok_sampling_types::ToolCall;
+    use pi_sampling_types::ToolCall;
     let items = vec![
         ConversationItem::system("sys"),
         ConversationItem::user("prompt"),
@@ -1494,7 +1494,7 @@ fn sanitize_strips_orphaned_tool_result() {
 }
 #[test]
 fn sanitize_keeps_assistant_with_unanswered_tool_calls() {
-    use pi_grok_sampling_types::ToolCall;
+    use pi_sampling_types::ToolCall;
     let items = vec![
         ConversationItem::system("sys"),
         ConversationItem::user("prompt"),
@@ -1510,7 +1510,7 @@ fn sanitize_keeps_assistant_with_unanswered_tool_calls() {
 }
 #[test]
 fn sanitize_strips_result_before_call() {
-    use pi_grok_sampling_types::ToolCall;
+    use pi_sampling_types::ToolCall;
     let items = vec![
         ConversationItem::system("sys"),
         ConversationItem::tool_result("call_X", "premature result"),
@@ -1530,7 +1530,7 @@ fn sanitize_strips_result_before_call() {
 }
 #[test]
 fn validate_detects_result_before_call() {
-    use pi_grok_sampling_types::ToolCall;
+    use pi_sampling_types::ToolCall;
     let items = vec![
         ConversationItem::tool_result("call_X", "premature"),
         ConversationItem::assistant_tool_calls(vec![ToolCall {
@@ -1544,7 +1544,7 @@ fn validate_detects_result_before_call() {
 }
 #[test]
 fn validate_passes_valid_history() {
-    use pi_grok_sampling_types::ToolCall;
+    use pi_sampling_types::ToolCall;
     let items = vec![
         ConversationItem::system("sys"),
         ConversationItem::assistant_tool_calls(vec![ToolCall {
@@ -1558,7 +1558,7 @@ fn validate_passes_valid_history() {
 }
 #[test]
 fn sanitize_noop_on_valid_conversation() {
-    use pi_grok_sampling_types::ToolCall;
+    use pi_sampling_types::ToolCall;
     let items = vec![
         ConversationItem::system("sys"),
         ConversationItem::user("prompt"),
@@ -1574,8 +1574,8 @@ fn sanitize_noop_on_valid_conversation() {
     assert!(result.stripped_tool_call_ids.is_empty());
     assert_eq!(result.items.len(), 5);
 }
-fn call(id: &str) -> pi_grok_sampling_types::ToolCall {
-    pi_grok_sampling_types::ToolCall {
+fn call(id: &str) -> pi_sampling_types::ToolCall {
+    pi_sampling_types::ToolCall {
         id: id.into(),
         name: "read_file".to_string(),
         arguments: "{}".into(),
@@ -1900,7 +1900,7 @@ async fn build_compacted_history_transcript_hint() {
 }
 /// Full multi-turn conversation with parallel tool calls, then compaction.
 ///
-/// Simulates the exact conversation shape produced by pi-grok-shell:
+/// Simulates the exact conversation shape produced by pi-shell:
 ///
 /// Turn 1: user_query → assistant(2 tool calls) → 2 tool results
 /// Turn 2: user_query → assistant(2 tool calls) → 2 tool results
@@ -1911,7 +1911,7 @@ async fn build_compacted_history_transcript_hint() {
 /// are preserved or omitted.
 #[tokio::test]
 async fn build_compacted_history_multi_turn_with_parallel_tool_calls() {
-    use pi_grok_sampling_types::{AssistantItem, ToolCall};
+    use pi_sampling_types::{AssistantItem, ToolCall};
     let conversation = vec![
         // [0] System prompt
         ConversationItem::system("You are a helpful coding assistant."),
@@ -2298,7 +2298,7 @@ fn conversation_item_drops_tool_results() {
 /// against this guarantee by chaining `strip_reasoning_blocks` after.
 #[test]
 fn conversation_item_preserves_reasoning_siblings() {
-    use pi_grok_sampling_types::{AssistantItem, rs};
+    use pi_sampling_types::{AssistantItem, rs};
     let result = strip_tool_messages_for_conversation_item(vec![
         ConversationItem::system("system"),
         ConversationItem::Reasoning(rs::ReasoningItem {
@@ -2321,7 +2321,7 @@ fn conversation_item_preserves_reasoning_siblings() {
 }
 #[test]
 fn strip_reasoning_blocks_drops_reasoning_siblings() {
-    use pi_grok_sampling_types::{AssistantItem, rs};
+    use pi_sampling_types::{AssistantItem, rs};
     let result = strip_reasoning_blocks(vec![
         ConversationItem::Reasoning(rs::ReasoningItem {
             id: "r_123".to_string(),
@@ -2362,7 +2362,7 @@ fn strip_reasoning_blocks_passes_other_items_through() {
 /// the message must have no `reasoning` left for the provider to validate.
 #[test]
 fn prepare_for_summarization_drops_reasoning_sibling_on_mutated_assistant() {
-    use pi_grok_sampling_types::{AssistantItem, ToolCall, rs};
+    use pi_sampling_types::{AssistantItem, ToolCall, rs};
     let mk_reasoning = || {
         ConversationItem::Reasoning(rs::ReasoningItem {
             id: "r_123".to_string(),
@@ -2414,7 +2414,7 @@ fn prepare_for_summarization_drops_reasoning_sibling_on_mutated_assistant() {
 }
 #[test]
 fn prepare_for_summarization_drops_standalone_reasoning_sibling() {
-    use pi_grok_sampling_types::{AssistantItem, rs};
+    use pi_sampling_types::{AssistantItem, rs};
     let result = prepare_conversation_for_summarization(vec![
         ConversationItem::Reasoning(rs::ReasoningItem {
             id: "r_123".to_string(),
@@ -2442,7 +2442,7 @@ fn prepare_for_summarization_drops_standalone_reasoning_sibling() {
 /// Multi-assistant conversation with mixed reasoning/tool_calls states.
 #[test]
 fn prepare_for_summarization_handles_multi_assistant_mixed_conversation() {
-    use pi_grok_sampling_types::{AssistantItem, ToolCall, rs};
+    use pi_sampling_types::{AssistantItem, ToolCall, rs};
     let mk_reasoning = || {
         ConversationItem::Reasoning(rs::ReasoningItem {
             id: "r".to_string(),
@@ -2532,7 +2532,7 @@ fn prepare_for_summarization_handles_multi_assistant_mixed_conversation() {
 /// layers (e.g. memory flush + compaction both routing through it).
 #[test]
 fn prepare_for_summarization_is_idempotent() {
-    use pi_grok_sampling_types::{AssistantItem, ToolCall, rs};
+    use pi_sampling_types::{AssistantItem, ToolCall, rs};
     let input = vec![
         ConversationItem::system("system prompt"),
         ConversationItem::user("hello"),
@@ -2621,7 +2621,7 @@ fn test_prepare_for_summarization_strips_images() {
 /// it. Guards against anyone collapsing the two preps into one.
 #[test]
 fn prepare_conversation_for_segment_keeps_tool_io_unlike_summary() {
-    use pi_grok_sampling_types::ToolCall;
+    use pi_sampling_types::ToolCall;
     let mut user = ConversationItem::user("read a.rs");
     user.add_image("data:image/png;base64,iVBORw0KGgo=");
     let conv = vec![
@@ -2664,7 +2664,7 @@ fn prepare_conversation_for_segment_keeps_tool_io_unlike_summary() {
 /// Verbatim view keeps tool calls (with arguments) and results — no flattening, no dropped results.
 #[test]
 fn verbatim_keeps_tool_calls_args_and_results() {
-    use pi_grok_sampling_types::ToolCall;
+    use pi_sampling_types::ToolCall;
     let conv = vec![
         ConversationItem::system("sys"),
         ConversationItem::user("read a.rs"),
@@ -2699,7 +2699,7 @@ fn verbatim_keeps_tool_calls_args_and_results() {
 /// Reasoning kept on non-Messages backends, stripped on Messages — tool I/O survives either way.
 #[test]
 fn verbatim_reasoning_kept_unless_messages_backend() {
-    use pi_grok_sampling_types::{ToolCall, rs};
+    use pi_sampling_types::{ToolCall, rs};
     let mk = || {
         vec![
             ConversationItem::system("sys"),
@@ -2741,7 +2741,7 @@ fn verbatim_reasoning_kept_unless_messages_backend() {
 /// A trailing incomplete `tool_calls` turn is dropped; an earlier complete run is preserved.
 #[test]
 fn verbatim_truncates_trailing_incomplete_tool_call() {
-    use pi_grok_sampling_types::ToolCall;
+    use pi_sampling_types::ToolCall;
     let conv = vec![
         ConversationItem::system("sys"),
         ConversationItem::user("go"),
@@ -2772,7 +2772,7 @@ fn verbatim_truncates_trailing_incomplete_tool_call() {
 /// A conversation ending in a complete tool run (tail = `ToolResult`) is left untouched.
 #[test]
 fn verbatim_keeps_trailing_complete_tool_run() {
-    use pi_grok_sampling_types::ToolCall;
+    use pi_sampling_types::ToolCall;
     let conv = vec![
         ConversationItem::system("sys"),
         ConversationItem::assistant_tool_calls(vec![ToolCall {
@@ -2824,7 +2824,7 @@ fn fit_drops_oldest_turns_keeps_system_and_recent() {
 /// Trimming must not leave a leading orphan `ToolResult` whose assistant turn was dropped.
 #[test]
 fn fit_drops_leading_orphan_tool_result() {
-    use pi_grok_sampling_types::ToolCall;
+    use pi_sampling_types::ToolCall;
     let big = "y".repeat(2000);
     let conv = vec![
         ConversationItem::system("sys"),
@@ -2847,7 +2847,7 @@ fn fit_drops_leading_orphan_tool_result() {
 /// An oversized most-recent tool result is kept but truncated in place (with its `tool_use`), not dropped.
 #[test]
 fn fit_truncates_oversized_tail_result_in_place() {
-    use pi_grok_sampling_types::ToolCall;
+    use pi_sampling_types::ToolCall;
     let huge = "z".repeat(40_000);
     let conv = vec![
         ConversationItem::system("sys"),
@@ -2908,7 +2908,7 @@ fn fit_truncates_oversized_tail_text_item() {
 /// Incompactable-state regression: `fit` must charge images (765 each), so an image-heavy old turn is trimmed.
 #[test]
 fn fit_counts_user_images_against_budget() {
-    use pi_grok_sampling_types::ContentPart;
+    use pi_sampling_types::ContentPart;
     let mut img_user = ConversationItem::user("");
     for _ in 0..50 {
         img_user.add_image("data:image/png;base64,AAAA");
@@ -2936,7 +2936,7 @@ fn fit_counts_user_images_against_budget() {
 /// Incompactable-state regression: `fit` must charge encrypted-reasoning bytes (enc/4), so the old turn is trimmed.
 #[test]
 fn fit_counts_encrypted_reasoning_against_budget() {
-    use pi_grok_sampling_types::rs;
+    use pi_sampling_types::rs;
     let big_enc = "Z".repeat(40_000);
     let reasoning = ConversationItem::Reasoning(rs::ReasoningItem {
         id: "r1".to_string(),

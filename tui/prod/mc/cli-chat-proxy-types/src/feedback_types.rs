@@ -1,7 +1,7 @@
 //! Feedback API request and response types.
 //!
 //! These types support the feedback collection system for Grok sessions.
-//! The agent (pi-grok-shell) uses heuristics to determine when to request feedback,
+//! The agent (pi-shell) uses heuristics to determine when to request feedback,
 //! and clients submit feedback through these types to the feedback backend.
 
 use chrono::{DateTime, Utc};
@@ -482,7 +482,7 @@ pub struct FeedbackSubmission {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_version: Option<String>,
 
-    /// Shell (pi-grok-shell) version
+    /// Shell (pi-shell) version
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shell_version: Option<String>,
 

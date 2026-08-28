@@ -77,7 +77,7 @@ cd /mnt/d/work/pi-python/tui
 # Fix CRLF on vendored bin/* if cloned from Windows:
 sed -i 's/\r$//' bin/*
 cargo install dotslash   # once, if bin/protoc needs it
-CARGO_TARGET_DIR=$HOME/grok-build-target cargo build -p pi-grok-pager-bin --release
+CARGO_TARGET_DIR=$HOME/grok-build-target cargo build -p pi-pager-bin --release
 # binary: $HOME/grok-build-target/release/zypi
 ```
 

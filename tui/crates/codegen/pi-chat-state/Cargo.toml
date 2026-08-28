@@ -18,8 +18,8 @@ tokio-util = { workspace = true }
 tracing = { workspace = true }
 # `CompactionDetail`, embedded in `CompactionMode::Segments`.
 pi-compaction-transcript = { workspace = true }
-pi-grok-compaction = { path = "../../common/pi-grok-compaction" }
-pi-grok-sampling-types = { path = "../pi-grok-sampling-types" }
+pi-compaction = { path = "../../common/pi-compaction" }
+pi-sampling-types = { path = "../pi-sampling-types" }
 pi-token-estimation = { workspace = true }
 
 [dev-dependencies]

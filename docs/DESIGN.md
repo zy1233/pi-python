@@ -281,7 +281,7 @@ create_all_tools(cwd)  # 全部 7 个
 > 详细设计：`docs/specs/2026-08-25-phase4-coding-agent-cli-design.md`
 > TUI 上游：[xai-org/grok-build](https://github.com/xai-org/grok-build)（Apache-2.0）；协议：[ACP](https://agentclientprotocol.com)
 
-**不自研 Python TUI。** Fork grok-build 的 `pi-grok-pager` 作 ACP Client；本仓库 Python 作 ACP Agent，只走标准 ACP，**不实现 `x.ai/*`**。
+**不自研 Python TUI。** Fork grok-build 的 `pi-pager` 作 ACP Client；本仓库 Python 作 ACP Agent，只走标准 ACP，**不实现 `x.ai/*`**。
 
 ### 8.1 进程边界
 

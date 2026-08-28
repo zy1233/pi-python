@@ -12,7 +12,7 @@
 //! first-party clients whose encoders never emit `\/`.
 //!
 //! Downstream dependency: the leader bridge's replay sniff
-//! (`pi-grok-pager-bin/src/main.rs`, the `trimmed.contains("\"session/new\"")`
+//! (`pi-pager-bin/src/main.rs`, the `trimmed.contains("\"session/new\"")`
 //! checks) matches escaped Foundation input only because this normalization
 //! runs upstream of it.
 

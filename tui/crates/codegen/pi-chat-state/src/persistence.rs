@@ -8,7 +8,7 @@
 use std::io;
 
 use tokio::sync::{mpsc, oneshot};
-use pi_grok_sampling_types::ConversationItem;
+use pi_sampling_types::ConversationItem;
 
 use crate::commands::{StrictAppendAck, StrictAppendError};
 

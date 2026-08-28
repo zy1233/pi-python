@@ -13,15 +13,15 @@
 | 忽略入站 `x.ai/*` 通知 / ext_method | 已做 |
 | 停止写入 initialize / session `_meta` 的 `x.ai/*` 键 | 已做 |
 | 跳过空 `auth_methods` 登录墙；spawn `python -m pi_agent_cli` | 已做（P2） |
-| 产品二进制名 `pi`；去掉 pager-bin 的 obfstr/cryptify | 已做 |
-| 删除 pager-bin 运行时用不到的 PTY 包 | 已删 `ptyctl`、`ptyctl-cli`、`pi-grok-pager-pty-harness` |
+| 删除 grok CLI 子命令；`pi-grok-*` crate → `pi-*`；启动跳过 auth/prefetch | **已做**（P5 de-grok） |
 | Cargo crate `xai-*` → `pi-*` | **已改** |
+| 产品二进制名 `zypi`（crate `pi-pager-bin`） | **已做** |
 
 验收：欢迎页 → `initialize` → `session/new` → `session/prompt` 不得把上表 RPC 发到 Python。
 
 ## 构建
 
-WSL2 上 **`cargo check -p pi-grok-pager-bin` 已通过**（拆除后再次 check：`rustc 1.94.0`，`Finished dev` 约 3m02s）。产品二进制现为 **`pi`**（仍用 `-p pi-grok-pager-bin`）。
+WSL2 上 **`cargo check -p pi-pager-bin` 已通过**。产品二进制 **`zypi`**（`cargo check -p pi-pager-bin`）。
 
 注意：
 
@@ -31,7 +31,7 @@ WSL2 上 **`cargo check -p pi-grok-pager-bin` 已通过**（拆除后再次 chec
 
 ## 调度中枢
 
-TUI 扩展 RPC 大多从 `crates/codegen/pi-grok-pager/src/app/effects/mod.rs` 发出。认证：`src/app/session_startup.rs` 调用 `pi_grok_shell::auth::ensure_authenticated_or_noninteractive`。
+TUI 扩展 RPC 大多从 `crates/codegen/pi-pager/src/app/effects/mod.rs` 发出。标准 ACP（Python agent）无 grok 云认证；远程 session restore 已禁用。
 
 标准 ACP 已在用：`initialize`、`session/new`、`session/load`、`session/prompt`、`session/cancel`、`session/update`、`request_permission`。这些保留。
 

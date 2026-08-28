@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 
 use tokio::sync::{mpsc, oneshot};
-use pi_grok_sampling_types::{
+use pi_sampling_types::{
     ConversationItem, ConversationRequest, DanglingToolCallReason, SamplingConfig, TokenUsage,
     ToolSpec, TraceContext,
 };

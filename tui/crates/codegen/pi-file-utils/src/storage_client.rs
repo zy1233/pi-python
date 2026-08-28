@@ -27,7 +27,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::bytes::Bytes;
 use tokio_util::io::ReaderStream;
 use pi_circuit_breaker::{BreakerConfig, BreakerOpen, CircuitBreaker, Outcome, RetryPolicy};
-use pi_grok_auth::AuthCredentialProvider;
+use pi_auth::AuthCredentialProvider;
 
 use crate::circuit_breaker_observer::TracingObserver;
 
@@ -50,8 +50,8 @@ fn storage_breaker_config() -> BreakerConfig {
 /// Hook invoked by [`StorageClient`] at every 401 response site so that
 /// the embedding application can record auth-attribution telemetry.
 ///
-/// Mirrors the pattern in `pi-grok-sampler::Auth401AttributionCallback`
-/// and `pi-grok-tools::Auth401AttributionCallback`. The shell installs
+/// Mirrors the pattern in `pi-sampler::Auth401AttributionCallback`
+/// and `pi-tools::Auth401AttributionCallback`. The shell installs
 /// a bridge implementation that wires into
 /// `crate::auth::attribution::record_consumer_401`.
 ///
@@ -390,14 +390,14 @@ impl StaticGrokAuth {
     }
 }
 
-impl pi_grok_auth::HttpAuth for StaticGrokAuth {
+impl pi_auth::HttpAuth for StaticGrokAuth {
     fn apply(&self, builder: reqwest::RequestBuilder, _base_url: &str) -> reqwest::RequestBuilder {
         if let Some(ref key) = self.deployment_key {
             builder.header("Authorization", format!("Bearer {}", key))
         } else if let Some(ref token) = self.user_token {
             builder
                 .header("Authorization", format!("Bearer {}", token))
-                .header("X-PI-Token-Auth", "pi-grok-cli")
+                .header("X-PI-Token-Auth", "pi-cli")
         } else {
             builder
         }
@@ -426,7 +426,7 @@ mod static_grok_auth_tests {
 /// `crate::http::shared_upload_client()`) to `with_provider`.
 fn default_upload_client() -> Client {
     #[expect(clippy::expect_used)]
-    pi_grok_extra_ca::build_reqwest_client(|builder| builder)
+    pi_extra_ca::build_reqwest_client(|builder| builder)
         .expect("default reqwest client builds")
 }
 
@@ -476,7 +476,7 @@ impl StorageClient {
     pub fn new(proxy_base_url: &str, user_token: &str) -> Self {
         let creds = StaticGrokAuth::new(Some(user_token.to_owned()));
         let bearer = creds.wire_bearer();
-        let provider = Arc::new(pi_grok_auth::StaticAuthCredentialProvider::new(
+        let provider = Arc::new(pi_auth::StaticAuthCredentialProvider::new(
             Box::new(creds),
             bearer,
         ));
@@ -572,7 +572,7 @@ impl StorageClient {
     ///
     /// Preferred way to construct the client from the Grok shell/pager:
     ///   `build_storage_client_for_proxy(..., client_identifier)`
-    /// (see `pi-grok-shell/src/auth/credential_provider.rs`).
+    /// (see `pi-shell/src/auth/credential_provider.rs`).
     ///
     /// Direct callers (tests, load-test binaries, etc.) can use:
     ///   `StorageClient::with_provider(...).with_client_identity(version, identifier)`
@@ -1120,7 +1120,7 @@ impl StorageClient {
         let version = self
             .client_version
             .as_deref()
-            .unwrap_or(pi_grok_version::VERSION);
+            .unwrap_or(pi_version::VERSION);
         let mut builder = builder.header("x-grok-client-version", version);
 
         if let Some(id) = &self.client_identifier {
@@ -1996,7 +1996,7 @@ async fn upload_part_streaming(
         let mut request = client
             .post(&url)
             .header("Content-Type", "application/octet-stream")
-            .header("x-grok-client-version", pi_grok_version::VERSION)
+            .header("x-grok-client-version", pi_version::VERSION)
             .header("Content-Length", length.to_string());
         for (name, value) in crate::trace_context::trace_context_headers().iter() {
             request = request.header(name.clone(), value.clone());

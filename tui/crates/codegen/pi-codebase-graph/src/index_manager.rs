@@ -44,7 +44,7 @@ pub const MAX_INDEXABLE_FILE_SIZE: u64 = 5 * 1024 * 1024;
 use crossbeam::channel::{self, Receiver, Sender};
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
-use pi_grok_paths::to_relative_path;
+use pi_paths::to_relative_path;
 
 use crate::languages::LanguageRegistry;
 use crate::manager::IndexBuilder;

@@ -25,7 +25,7 @@ use tokio::io::{AsyncRead, ReadBuf};
 use tokio::sync::{Notify, mpsc, oneshot};
 use tracing::Instrument;
 use pi_circuit_breaker::{Disposition, RetryPolicy};
-use pi_grok_auth::AuthCredentialProvider;
+use pi_auth::AuthCredentialProvider;
 /// Resolves current upload credentials at upload time, plus optional
 /// hooks the queue worker uses to wire refresh-aware credentials and
 /// `auth_401_attribution` emission into the per-upload `StorageClient`.
@@ -264,7 +264,7 @@ pub const QUEUE_ITEM_SIDECAR_SCHEMA_VERSION: u32 = 1;
 /// [`UploadQueue::enqueue_bytes_blocking`] (the fire-and-forget paths write the
 /// temp file alone). It carries everything a fresh process needs to re-enqueue
 /// the upload after a restart — the temp-file name alone is lossy (truncated
-/// `session_id`, no GCS path). Read by `pi_grok_workspace::recovery`.
+/// `session_id`, no GCS path). Read by `pi_workspace::recovery`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct QueueItemSidecar {
     /// Manifest schema version (see [`QUEUE_ITEM_SIDECAR_SCHEMA_VERSION`]).

@@ -7663,6 +7663,53 @@ dependencies = [
 ]
 
 [[package]]
+name = "pi-active-sessions"
+version = "0.1.0"
+dependencies = [
+ "agent-client-protocol",
+ "chrono",
+ "fs2",
+ "libc",
+ "pi-config",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+ "windows 0.61.3",
+]
+
+[[package]]
+name = "pi-agent"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dirs 6.0.0",
+ "dunce",
+ "git2",
+ "ignore",
+ "minijinja",
+ "pi-config",
+ "pi-hooks",
+ "pi-sampling-types",
+ "pi-token-estimation",
+ "pi-tool-types",
+ "pi-tools",
+ "pi-tty-utils",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "serial_test",
+ "sha2 0.10.9",
+ "strum 0.27.2",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "zeroize",
+]
+
+[[package]]
 name = "pi-agent-lifecycle"
 version = "0.1.0"
 dependencies = [
@@ -7672,13 +7719,54 @@ dependencies = [
 ]
 
 [[package]]
+name = "pi-announcements"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "pi-tools",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "ts-rs",
+]
+
+[[package]]
+name = "pi-auth"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "http 1.4.0",
+ "mockito",
+ "reqwest 0.12.24",
+ "reqwest-middleware 0.4.2",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "pi-bundle"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "flate2",
+ "pi-config",
+ "prod-mc-cli-chat-proxy-types",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tar",
+ "tempfile",
+]
+
+[[package]]
 name = "pi-chat-state"
 version = "0.1.0"
 dependencies = [
  "indexmap",
+ "pi-compaction",
  "pi-compaction-transcript",
- "pi-grok-compaction",
- "pi-grok-sampling-types",
+ "pi-sampling-types",
  "pi-token-estimation",
  "serde",
  "serde_json",
@@ -7714,7 +7802,7 @@ dependencies = [
  "num_cpus",
  "once_cell",
  "petgraph 0.6.5",
- "pi-grok-paths",
+ "pi-paths",
  "rayon",
  "rustc-hash 2.1.1",
  "serde",
@@ -7732,10 +7820,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "pi-compaction"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "pi-compaction-transcript"
 version = "0.1.0"
 dependencies = [
- "pi-grok-sampling-types",
+ "pi-sampling-types",
  "regex",
  "serde_json",
  "strum 0.27.2",
@@ -7818,6 +7919,47 @@ dependencies = [
 ]
 
 [[package]]
+name = "pi-config"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "blake3",
+ "core-foundation",
+ "dunce",
+ "pi-home",
+ "pi-tty-utils",
+ "pi-version",
+ "prod-mc-cli-chat-proxy-types",
+ "ring",
+ "semver",
+ "serde",
+ "serde_json",
+ "shellexpand",
+ "tempfile",
+ "thiserror 2.0.18",
+ "toml",
+ "tracing",
+ "urlencoding",
+ "which",
+]
+
+[[package]]
+name = "pi-config-types"
+version = "0.1.0"
+dependencies = [
+ "agent-client-protocol",
+ "indexmap",
+ "pi-announcements",
+ "pi-config",
+ "pi-mcp",
+ "serde",
+ "serde_json",
+ "strum 0.27.2",
+ "toml",
+ "tracing",
+]
+
+[[package]]
 name = "pi-crash-handler"
 version = "0.1.0"
 dependencies = [
@@ -7826,6 +7968,43 @@ dependencies = [
  "tempfile",
  "tokio",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "pi-diag-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "pi-version",
+ "reqwest 0.12.24",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "pi-env"
+version = "0.1.0"
+dependencies = [
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "pi-extra-ca"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "rcgen",
+ "reqwest 0.12.24",
+ "rustls",
+ "rustls-native-certs",
+ "tempfile",
+ "tracing",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]
@@ -7846,7 +8025,7 @@ dependencies = [
  "nix 0.30.1",
  "num_cpus",
  "pi-gix-status",
- "pi-grok-home",
+ "pi-home",
  "pi-sqlite-journal",
  "pi-test-utils",
  "pi-tty-utils",
@@ -7881,11 +8060,11 @@ dependencies = [
  "indexmap",
  "opentelemetry",
  "opentelemetry_sdk",
+ "pi-auth",
  "pi-circuit-breaker",
- "pi-grok-auth",
- "pi-grok-extra-ca",
- "pi-grok-version",
+ "pi-extra-ca",
  "pi-test-utils",
+ "pi-version",
  "prod-mc-cli-chat-proxy-types",
  "reflink-copy",
  "reqwest 0.12.24",
@@ -7901,6 +8080,25 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-subscriber",
  "url",
+ "zstd",
+]
+
+[[package]]
+name = "pi-foreign-sessions"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dirs 6.0.0",
+ "dunce",
+ "filetime",
+ "git2",
+ "libc",
+ "md5",
+ "pi-sqlite-journal",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
+ "uuid",
  "zstd",
 ]
 
@@ -7949,205 +8147,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pi-grok-active-sessions"
-version = "0.1.0"
-dependencies = [
- "agent-client-protocol",
- "chrono",
- "fs2",
- "libc",
- "pi-grok-config",
- "serde",
- "serde_json",
- "tempfile",
- "tracing",
- "windows 0.61.3",
-]
-
-[[package]]
-name = "pi-grok-agent"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "dirs 6.0.0",
- "dunce",
- "git2",
- "ignore",
- "minijinja",
- "pi-grok-config",
- "pi-grok-hooks",
- "pi-grok-sampling-types",
- "pi-grok-tools",
- "pi-token-estimation",
- "pi-tool-types",
- "pi-tty-utils",
- "regex",
- "serde",
- "serde_json",
- "serde_yaml",
- "serial_test",
- "sha2 0.10.9",
- "strum 0.27.2",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "zeroize",
-]
-
-[[package]]
-name = "pi-grok-announcements"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "pi-grok-tools",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "ts-rs",
-]
-
-[[package]]
-name = "pi-grok-auth"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "http 1.4.0",
- "mockito",
- "reqwest 0.12.24",
- "reqwest-middleware 0.4.2",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "pi-grok-bundle"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "flate2",
- "pi-grok-config",
- "prod-mc-cli-chat-proxy-types",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tar",
- "tempfile",
-]
-
-[[package]]
-name = "pi-grok-compaction"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "pi-grok-config"
-version = "0.1.0"
-dependencies = [
- "base64",
- "blake3",
- "core-foundation",
- "dunce",
- "pi-grok-home",
- "pi-grok-version",
- "pi-tty-utils",
- "prod-mc-cli-chat-proxy-types",
- "ring",
- "semver",
- "serde",
- "serde_json",
- "shellexpand",
- "tempfile",
- "thiserror 2.0.18",
- "toml",
- "tracing",
- "urlencoding",
- "which",
-]
-
-[[package]]
-name = "pi-grok-config-types"
-version = "0.1.0"
-dependencies = [
- "agent-client-protocol",
- "indexmap",
- "pi-grok-announcements",
- "pi-grok-config",
- "pi-grok-mcp",
- "serde",
- "serde_json",
- "strum 0.27.2",
- "toml",
- "tracing",
-]
-
-[[package]]
-name = "pi-grok-diag-server"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "pi-grok-version",
- "reqwest 0.12.24",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "pi-grok-env"
-version = "0.1.0"
-dependencies = [
- "tracing",
- "url",
-]
-
-[[package]]
-name = "pi-grok-extra-ca"
-version = "0.1.0"
-dependencies = [
- "base64",
- "rcgen",
- "reqwest 0.12.24",
- "rustls",
- "rustls-native-certs",
- "tempfile",
- "tracing",
- "webpki-roots 0.26.11",
-]
-
-[[package]]
-name = "pi-grok-foreign-sessions"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "dirs 6.0.0",
- "dunce",
- "filetime",
- "git2",
- "libc",
- "md5",
- "pi-sqlite-journal",
- "rusqlite",
- "serde_json",
- "tempfile",
- "uuid",
- "zstd",
-]
-
-[[package]]
-name = "pi-grok-home"
+name = "pi-home"
 version = "0.1.0"
 dependencies = [
  "dirs 5.0.1",
@@ -8158,13 +8158,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "pi-grok-hooks"
+name = "pi-hooks"
 version = "0.1.0"
 dependencies = [
  "fastrand",
- "pi-grok-config",
- "pi-grok-extra-ca",
- "pi-grok-tools",
+ "pi-config",
+ "pi-extra-ca",
+ "pi-tools",
  "regex",
  "reqwest 0.12.24",
  "serde",
@@ -8180,15 +8180,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "pi-grok-http"
+name = "pi-hooks-plugins-types"
 version = "0.1.0"
 dependencies = [
- "pi-grok-auth",
- "pi-grok-extra-ca",
- "pi-grok-sampler",
- "pi-grok-telemetry",
- "pi-grok-version",
- "pi-grok-workspace",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "pi-http"
+version = "0.1.0"
+dependencies = [
+ "pi-auth",
+ "pi-extra-ca",
+ "pi-sampler",
+ "pi-telemetry",
+ "pi-version",
+ "pi-workspace",
  "rcgen",
  "reqwest 0.12.24",
  "reqwest-middleware 0.4.2",
@@ -8198,7 +8206,35 @@ dependencies = [
 ]
 
 [[package]]
-name = "pi-grok-markdown"
+name = "pi-hunk-tracker"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dunce",
+ "gix",
+ "pi-gix-status",
+ "pi-test-utils",
+ "rustc-hash 2.1.1",
+ "serde",
+ "serde_json",
+ "similar",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "pi-interjection-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "pi-markdown"
 version = "0.1.0"
 dependencies = [
  "anstyle",
@@ -8208,7 +8244,7 @@ dependencies = [
  "crossterm",
  "html-escape",
  "linkify",
- "pi-grok-markdown-core",
+ "pi-markdown-core",
  "pi-ratatui-textarea",
  "pretty_assertions",
  "pulldown-cmark",
@@ -8223,14 +8259,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "pi-grok-markdown-core"
+name = "pi-markdown-core"
 version = "0.1.0"
 dependencies = [
  "pulldown-cmark",
 ]
 
 [[package]]
-name = "pi-grok-mcp"
+name = "pi-mcp"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
@@ -8242,16 +8278,16 @@ dependencies = [
  "oauth2",
  "parking_lot",
  "pi-computer-hub-sdk",
- "pi-grok-config",
- "pi-grok-extra-ca",
- "pi-grok-session-events",
- "pi-grok-telemetry",
- "pi-grok-tools",
- "pi-grok-version",
- "pi-grok-workspace-types",
+ "pi-config",
+ "pi-extra-ca",
+ "pi-session-events",
+ "pi-telemetry",
  "pi-tool-protocol",
  "pi-tool-runtime",
  "pi-tool-types",
+ "pi-tools",
+ "pi-version",
+ "pi-workspace-types",
  "regex",
  "reqwest 0.13.4",
  "rmcp",
@@ -8269,7 +8305,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pi-grok-memory"
+name = "pi-memory"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -8283,13 +8319,13 @@ dependencies = [
  "git2",
  "nix 0.30.1",
  "notify",
- "pi-grok-auth",
- "pi-grok-config-types",
- "pi-grok-http",
- "pi-grok-tools",
- "pi-grok-version",
+ "pi-auth",
+ "pi-config-types",
+ "pi-http",
  "pi-sqlite-journal",
  "pi-token-estimation",
+ "pi-tools",
+ "pi-version",
  "reqwest 0.12.24",
  "reqwest-middleware 0.4.2",
  "rusqlite",
@@ -8303,7 +8339,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pi-grok-mermaid"
+name = "pi-mermaid"
 version = "0.1.0"
 dependencies = [
  "fontdb",
@@ -8321,7 +8357,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "pi-grok-models"
+name = "pi-mixpanel"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "pi-secrets",
+ "reqwest 0.12.24",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "pi-models"
 version = "0.1.0"
 dependencies = [
  "serde",
@@ -8329,7 +8376,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pi-grok-pager"
+name = "pi-pager"
 version = "1.0.8"
 dependencies = [
  "agent-client-protocol",
@@ -8359,35 +8406,36 @@ dependencies = [
  "obfstr",
  "parking_lot",
  "pi-acp-lib",
+ "pi-active-sessions",
+ "pi-agent",
+ "pi-announcements",
+ "pi-config",
  "pi-crash-handler",
+ "pi-extra-ca",
  "pi-fast-worktree",
  "pi-file-utils",
- "pi-grok-active-sessions",
- "pi-grok-agent",
- "pi-grok-announcements",
- "pi-grok-config",
- "pi-grok-extra-ca",
- "pi-grok-foreign-sessions",
- "pi-grok-markdown",
- "pi-grok-mermaid",
- "pi-grok-pager-diff",
- "pi-grok-pager-render",
- "pi-grok-plugin-marketplace",
- "pi-grok-sandbox",
- "pi-grok-shell",
- "pi-grok-status-line",
- "pi-grok-telemetry",
- "pi-grok-tools",
- "pi-grok-update",
- "pi-grok-version",
- "pi-grok-voice",
- "pi-grok-workspace",
+ "pi-foreign-sessions",
  "pi-hooks-plugins-types",
+ "pi-markdown",
+ "pi-mermaid",
+ "pi-pager-diff",
+ "pi-pager-render",
+ "pi-plugin-marketplace",
  "pi-prompt-queue",
  "pi-ratatui-inline",
  "pi-ratatui-textarea",
+ "pi-sandbox",
+ "pi-shell",
+ "pi-status-line",
+ "pi-telemetry",
+ "pi-test-support",
  "pi-token-estimation",
+ "pi-tools",
  "pi-tty-utils",
+ "pi-update",
+ "pi-version",
+ "pi-voice",
+ "pi-workspace",
  "portable-pty",
  "pretty_assertions",
  "rand 0.9.5",
@@ -8421,7 +8469,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pi-grok-pager-bin"
+name = "pi-pager-bin"
 version = "1.0.8"
 dependencies = [
  "anyhow",
@@ -8429,19 +8477,19 @@ dependencies = [
  "dunce",
  "libc",
  "pi-acp-lib",
+ "pi-active-sessions",
+ "pi-config",
  "pi-crash-handler",
- "pi-grok-active-sessions",
- "pi-grok-config",
- "pi-grok-extra-ca",
- "pi-grok-pager",
- "pi-grok-pager-minimal",
- "pi-grok-sandbox",
- "pi-grok-shell",
- "pi-grok-telemetry",
- "pi-grok-update",
- "pi-grok-version",
- "pi-grok-workspace",
+ "pi-extra-ca",
+ "pi-pager",
+ "pi-pager-minimal",
+ "pi-sandbox",
+ "pi-shell",
+ "pi-telemetry",
  "pi-tty-utils",
+ "pi-update",
+ "pi-version",
+ "pi-workspace",
  "semver",
  "serde_json",
  "serial_test",
@@ -8456,28 +8504,28 @@ dependencies = [
 ]
 
 [[package]]
-name = "pi-grok-pager-diff"
+name = "pi-pager-diff"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
- "pi-grok-tools",
+ "pi-tools",
  "serde_json",
  "similar",
  "tracing",
 ]
 
 [[package]]
-name = "pi-grok-pager-minimal"
+name = "pi-pager-minimal"
 version = "0.1.0"
 dependencies = [
  "chrono",
  "crossterm",
- "pi-grok-pager",
- "pi-grok-pager-diff",
- "pi-grok-shell",
- "pi-grok-version",
+ "pi-pager",
+ "pi-pager-diff",
  "pi-ratatui-inline",
+ "pi-shell",
  "pi-token-estimation",
+ "pi-version",
  "ratatui",
  "similar",
  "tracing",
@@ -8485,7 +8533,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pi-grok-pager-render"
+name = "pi-pager-render"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
@@ -8501,16 +8549,16 @@ dependencies = [
  "libc",
  "linkify",
  "notify",
- "pi-grok-config",
- "pi-grok-markdown",
- "pi-grok-paths",
- "pi-grok-shared",
- "pi-grok-telemetry",
- "pi-grok-tools",
- "pi-grok-workspace",
+ "pi-config",
+ "pi-markdown",
+ "pi-paths",
  "pi-ratatui-inline",
  "pi-ratatui-textarea",
+ "pi-shared",
+ "pi-telemetry",
+ "pi-tools",
  "pi-tty-utils",
+ "pi-workspace",
  "pretty_assertions",
  "ratatui",
  "ratatui-core",
@@ -8539,7 +8587,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pi-grok-paths"
+name = "pi-paths"
 version = "0.1.0"
 dependencies = [
  "camino",
@@ -8549,15 +8597,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "pi-grok-plugin-marketplace"
+name = "pi-plugin-marketplace"
 version = "0.1.0"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
  "dunce",
  "fs2",
- "pi-grok-agent",
- "pi-grok-config",
+ "pi-agent",
+ "pi-config",
  "pi-hooks-plugins-types",
  "pi-tty-utils",
  "serde",
@@ -8566,829 +8614,6 @@ dependencies = [
  "thiserror 2.0.18",
  "toml",
  "tracing",
-]
-
-[[package]]
-name = "pi-grok-sampler"
-version = "0.1.0"
-dependencies = [
- "async-openai",
- "async-stream",
- "axum",
- "chrono",
- "eventsource-stream",
- "futures-util",
- "indexmap",
- "pi-grok-auth",
- "pi-grok-extra-ca",
- "pi-grok-sampling-types",
- "pi-grok-test-support",
- "pi-grok-version",
- "reqwest 0.12.24",
- "serde",
- "serde_json",
- "tokio",
- "tokio-util",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "pi-grok-sampling-types"
-version = "0.1.0"
-dependencies = [
- "assert_matches",
- "async-openai",
- "chrono",
- "indexmap",
- "pi-circuit-breaker",
- "pi-grok-compaction",
- "pi-grok-tools",
- "reqwest 0.12.24",
- "schemars 1.0.4",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
-name = "pi-grok-sandbox"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "dirs 5.0.1",
- "dunce",
- "globset",
- "ignore",
- "libc",
- "nono",
- "pi-grok-config",
- "regex",
- "serde",
- "serde_json",
- "serial_test",
- "sha2 0.10.9",
- "thiserror 2.0.18",
- "toml",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "pi-grok-secrets"
-version = "0.1.0"
-dependencies = [
- "regex",
- "serde_json",
- "url",
-]
-
-[[package]]
-name = "pi-grok-session-events"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "serde",
- "serde_json",
- "strum 0.27.2",
- "tempfile",
- "tracing",
-]
-
-[[package]]
-name = "pi-grok-session-search"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "blake3",
- "chrono",
- "fs2",
- "parking_lot",
- "pi-grok-config",
- "pi-grok-telemetry",
- "pi-sqlite-journal",
- "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "pi-grok-shared"
-version = "0.0.0"
-dependencies = [
- "agent-client-protocol",
- "anyhow",
- "arboard",
- "base64",
- "dirs 6.0.0",
- "dunce",
- "image",
- "libc",
- "objc2 0.6.3",
- "parking_lot",
- "pi-grok-config-types",
- "pi-grok-models",
- "pi-grok-status-line",
- "pi-grok-tools",
- "pi-tty-utils",
- "prod-mc-cli-chat-proxy-types",
- "regex",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tracing",
- "urlencoding",
- "uuid",
- "wl-clipboard-rs",
-]
-
-[[package]]
-name = "pi-grok-shell"
-version = "1.0.8"
-dependencies = [
- "agent-client-protocol",
- "anyhow",
- "arc-swap",
- "async-openai",
- "async-trait",
- "axum",
- "backon",
- "base64",
- "blake3",
- "bm25",
- "bytes",
- "chrono",
- "clap",
- "criterion",
- "ctor",
- "dashmap",
- "dhat",
- "dirs 6.0.0",
- "dunce",
- "filetime",
- "flate2",
- "fs2",
- "futures",
- "futures-util",
- "gcloud-storage",
- "gethostname",
- "git2",
- "glob",
- "globset",
- "ignore",
- "image",
- "indexmap",
- "infer 0.15.0",
- "jsonschema",
- "jsonwebtoken",
- "kanal",
- "libc",
- "loom",
- "moka",
- "nix 0.30.1",
- "notify",
- "notify-debouncer-mini",
- "nucleo",
- "obfstr",
- "parking_lot",
- "pi-acp-lib",
- "pi-agent-lifecycle",
- "pi-chat-state",
- "pi-codebase-graph",
- "pi-compaction-transcript",
- "pi-computer-hub-sdk",
- "pi-fast-worktree",
- "pi-file-utils",
- "pi-fsnotify",
- "pi-grok-agent",
- "pi-grok-announcements",
- "pi-grok-auth",
- "pi-grok-bundle",
- "pi-grok-compaction",
- "pi-grok-config",
- "pi-grok-config-types",
- "pi-grok-extra-ca",
- "pi-grok-foreign-sessions",
- "pi-grok-hooks",
- "pi-grok-http",
- "pi-grok-mcp",
- "pi-grok-memory",
- "pi-grok-models",
- "pi-grok-paths",
- "pi-grok-plugin-marketplace",
- "pi-grok-sampler",
- "pi-grok-sampling-types",
- "pi-grok-sandbox",
- "pi-grok-session-events",
- "pi-grok-session-search",
- "pi-grok-shared",
- "pi-grok-shell-base",
- "pi-grok-shell-session-support",
- "pi-grok-shell-terminal",
- "pi-grok-status-line",
- "pi-grok-subagent-resolution",
- "pi-grok-telemetry",
- "pi-grok-test-support",
- "pi-grok-tools",
- "pi-grok-version",
- "pi-grok-workspace",
- "pi-hooks-plugins-types",
- "pi-hunk-tracker",
- "pi-interjection-core",
- "pi-prompt-queue",
- "pi-system-power",
- "pi-test-utils",
- "pi-token-estimation",
- "pi-tool-protocol",
- "pi-tool-runtime",
- "pi-tool-types",
- "pi-tracing-macros",
- "pi-tty-utils",
- "pi-workflow",
- "pretty_assertions",
- "prod-mc-cli-chat-proxy-types",
- "prost",
- "rand 0.9.5",
- "regex",
- "reqwest 0.12.24",
- "reqwest-middleware 0.4.2",
- "ring",
- "rsa",
- "rustls",
- "semver",
- "serde",
- "serde_ignored",
- "serde_json",
- "serial_test",
- "sha2 0.10.9",
- "similar",
- "siphasher",
- "strum 0.27.2",
- "tar",
- "tdigests",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-retry",
- "tokio-rustls",
- "tokio-stream",
- "tokio-tungstenite 0.27.0",
- "tokio-util",
- "toml",
- "toml_edit 0.22.27",
- "tonic",
- "tonic-prost",
- "tower-http",
- "tracing",
- "tracing-subscriber",
- "url",
- "urlencoding",
- "uuid",
- "walkdir",
- "webbrowser",
- "windows 0.61.3",
- "zstd",
-]
-
-[[package]]
-name = "pi-grok-shell-base"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "libc",
- "nix 0.30.1",
- "pi-grok-config",
- "pi-grok-env",
- "pi-grok-extra-ca",
- "pi-grok-shared",
- "pi-grok-version",
- "pi-tty-utils",
- "pprof",
- "reqwest 0.12.24",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "url",
- "windows 0.61.3",
-]
-
-[[package]]
-name = "pi-grok-shell-session-support"
-version = "0.1.0"
-dependencies = [
- "axum",
- "pi-file-utils",
- "pi-grok-http",
- "pi-grok-version",
- "reqwest 0.12.24",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "pi-grok-shell-terminal"
-version = "0.1.0"
-dependencies = [
- "agent-client-protocol",
- "async-trait",
- "base64",
- "chrono",
- "futures",
- "libc",
- "pi-acp-lib",
- "pi-grok-config",
- "pi-grok-paths",
- "pi-grok-sandbox",
- "pi-grok-tools",
- "pi-grok-workspace",
- "pi-tty-utils",
- "portable-pty",
- "process-wrap",
- "serde",
- "serde_json",
- "shlex",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
- "windows 0.61.3",
-]
-
-[[package]]
-name = "pi-grok-status-line"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "strum 0.27.2",
- "toml",
-]
-
-[[package]]
-name = "pi-grok-subagent-resolution"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "pi-grok-agent",
- "pi-grok-sampling-types",
- "pi-grok-tools",
- "pi-tool-types",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "toml",
- "tracing",
-]
-
-[[package]]
-name = "pi-grok-telemetry"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "axum",
- "axum-server",
- "base64",
- "bytes",
- "chrono",
- "ctor",
- "dirs 5.0.1",
- "filetime",
- "futures-executor",
- "git2",
- "http 1.4.0",
- "mid",
- "obfstr",
- "opentelemetry",
- "opentelemetry-http",
- "opentelemetry-otlp",
- "opentelemetry-proto",
- "opentelemetry_sdk",
- "parking_lot",
- "pi-file-utils",
- "pi-grok-auth",
- "pi-grok-config",
- "pi-grok-env",
- "pi-grok-extra-ca",
- "pi-grok-sampler",
- "pi-grok-secrets",
- "pi-grok-session-events",
- "pi-grok-version",
- "pi-mixpanel",
- "pi-token-estimation",
- "pi-tty-utils",
- "prost",
- "rcgen",
- "reqwest 0.12.24",
- "rustls",
- "sentry",
- "serde",
- "serde_json",
- "strum 0.27.2",
- "tempfile",
- "tokio",
- "tokio-stream",
- "tonic",
- "tracing",
- "tracing-appender",
- "tracing-chrome",
- "tracing-opentelemetry",
- "tracing-subscriber",
- "url",
- "uuid",
- "webpki-roots 0.26.11",
- "whoami",
-]
-
-[[package]]
-name = "pi-grok-test-support"
-version = "0.1.0"
-dependencies = [
- "agent-client-protocol",
- "anyhow",
- "async-trait",
- "axum",
- "clap",
- "futures-util",
- "libc",
- "pi-acp-lib",
- "pi-tty-utils",
- "portable-pty",
- "reqwest 0.12.24",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-tungstenite 0.27.0",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "url",
-]
-
-[[package]]
-name = "pi-grok-tools"
-version = "0.1.220-alpha.4"
-dependencies = [
- "anyhow",
- "arc-swap",
- "async-lsp",
- "async-openai",
- "async-stream",
- "async-trait",
- "base64",
- "chrono",
- "command-fds",
- "crc32fast",
- "derive_more 2.1.1",
- "dhat",
- "dirs 5.0.1",
- "dunce",
- "educe",
- "encoding_rs",
- "flate2",
- "fs2",
- "futures",
- "futures-util",
- "globset",
- "htmd",
- "ignore",
- "image",
- "indexmap",
- "infer 0.19.0",
- "kamadak-exif",
- "libc",
- "minijinja",
- "nix 0.30.1",
- "parking_lot",
- "pdf_oxide",
- "pi-computer-hub-core",
- "pi-computer-hub-sdk",
- "pi-file-utils",
- "pi-grok-auth",
- "pi-grok-config",
- "pi-grok-env",
- "pi-grok-extra-ca",
- "pi-grok-sandbox",
- "pi-grok-test-support",
- "pi-grok-tools-api",
- "pi-grok-version",
- "pi-grok-workspace-types",
- "pi-interjection-core",
- "pi-test-utils",
- "pi-token-estimation",
- "pi-tool-protocol",
- "pi-tool-runtime",
- "pi-tool-types",
- "pi-tty-utils",
- "pretty_assertions",
- "pulldown-cmark",
- "quick-xml 0.38.3",
- "regex",
- "reqwest 0.12.24",
- "schemars 1.0.4",
- "scraper",
- "serde",
- "serde_json",
- "serde_path_to_error",
- "serde_yaml",
- "sha2 0.10.9",
- "shellexpand",
- "similar",
- "strip-ansi-escapes",
- "strum 0.26.3",
- "tar",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tonic",
- "tracing",
- "tracing-subscriber",
- "unicode-normalization",
- "url",
- "uuid",
- "which",
- "wildmatch",
- "windows 0.61.3",
- "wiremock",
- "zip",
-]
-
-[[package]]
-name = "pi-grok-tools-api"
-version = "0.1.220-alpha.4"
-dependencies = [
- "pi-proto-build",
- "pi-tool-protocol",
- "prost",
- "serde",
- "serde_json",
- "tonic",
- "tonic-prost",
-]
-
-[[package]]
-name = "pi-grok-update"
-version = "0.1.220-alpha.4"
-dependencies = [
- "anyhow",
- "dunce",
- "futures",
- "indicatif",
- "libc",
- "pi-grok-extra-ca",
- "pi-grok-shell",
- "pi-grok-telemetry",
- "pi-grok-tools",
- "pi-grok-version",
- "reqwest 0.12.24",
- "semver",
- "serde",
- "serde_json",
- "serial_test",
- "tempfile",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "tracing",
- "url",
- "wiremock",
-]
-
-[[package]]
-name = "pi-grok-version"
-version = "1.0.8"
-dependencies = [
- "semver",
-]
-
-[[package]]
-name = "pi-grok-voice"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "cpal",
- "futures-util",
- "pi-grok-extra-ca",
- "pi-tty-utils",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tokio-tungstenite 0.27.0",
- "toml",
- "tracing",
- "tracing-subscriber",
- "url",
-]
-
-[[package]]
-name = "pi-grok-workspace"
-version = "0.1.220-alpha.4"
-dependencies = [
- "agent-client-protocol",
- "anyhow",
- "arc-swap",
- "async-stream",
- "async-trait",
- "axum",
- "base64",
- "bstr",
- "chrono",
- "clap",
- "dashmap",
- "dirs 6.0.0",
- "dunce",
- "fastrace",
- "flate2",
- "fs2",
- "futures",
- "git2",
- "glob",
- "hashbrown 0.16.1",
- "humantime-serde",
- "ignore",
- "indexmap",
- "infer 0.19.0",
- "libc",
- "nix 0.30.1",
- "nohash-hasher",
- "parking_lot",
- "pi-acp-lib",
- "pi-codebase-graph",
- "pi-computer-hub-mcp-adapter",
- "pi-computer-hub-sdk",
- "pi-fast-worktree",
- "pi-file-utils",
- "pi-fsnotify",
- "pi-fuzzy-file-search",
- "pi-grok-agent",
- "pi-grok-auth",
- "pi-grok-config",
- "pi-grok-config-types",
- "pi-grok-diag-server",
- "pi-grok-env",
- "pi-grok-extra-ca",
- "pi-grok-hooks",
- "pi-grok-mcp",
- "pi-grok-paths",
- "pi-grok-sandbox",
- "pi-grok-session-events",
- "pi-grok-telemetry",
- "pi-grok-tools",
- "pi-grok-tools-api",
- "pi-grok-version",
- "pi-grok-workspace-client",
- "pi-grok-workspace-daemon",
- "pi-grok-workspace-types",
- "pi-hunk-tracker",
- "pi-test-utils",
- "pi-tool-protocol",
- "pi-tool-runtime",
- "pi-tool-types",
- "pi-tracing",
- "pi-tty-utils",
- "prometheus",
- "rand 0.9.5",
- "regex",
- "reqwest 0.12.24",
- "rustc-hash 2.1.1",
- "serde",
- "serde_json",
- "sha1",
- "sha2 0.10.9",
- "smallvec",
- "tar",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-tungstenite 0.27.0",
- "tokio-util",
- "toml",
- "tonic",
- "tracing",
- "tracing-subscriber",
- "tree-sitter",
- "tree-sitter-bash",
- "url",
- "urlencoding",
- "uuid",
- "wait-timeout",
- "zip",
- "zstd",
-]
-
-[[package]]
-name = "pi-grok-workspace-client"
-version = "0.1.0"
-dependencies = [
- "pi-computer-hub-sdk",
- "pi-grok-workspace-types",
- "pi-tool-protocol",
- "pi-tool-runtime",
- "pi-tool-types",
- "schemars 1.0.4",
- "semver",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "pi-grok-workspace-daemon"
-version = "0.1.0"
-dependencies = [
- "clap",
- "fs2",
- "libc",
- "pi-computer-hub-sdk",
- "pi-tty-utils",
- "prometheus",
- "reqwest 0.12.24",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
- "windows 0.61.3",
-]
-
-[[package]]
-name = "pi-grok-workspace-types"
-version = "0.1.0"
-dependencies = [
- "base64",
- "chrono",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "pi-hooks-plugins-types"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "pi-hunk-tracker"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "dunce",
- "gix",
- "pi-gix-status",
- "pi-test-utils",
- "rustc-hash 2.1.1",
- "serde",
- "serde_json",
- "similar",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "pi-interjection-core"
-version = "0.1.0"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "pi-mixpanel"
-version = "0.1.0"
-dependencies = [
- "base64",
- "pi-grok-secrets",
- "reqwest 0.12.24",
- "serde_json",
- "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -9450,6 +8675,367 @@ dependencies = [
 ]
 
 [[package]]
+name = "pi-sampler"
+version = "0.1.0"
+dependencies = [
+ "async-openai",
+ "async-stream",
+ "axum",
+ "chrono",
+ "eventsource-stream",
+ "futures-util",
+ "indexmap",
+ "pi-auth",
+ "pi-extra-ca",
+ "pi-sampling-types",
+ "pi-test-support",
+ "pi-version",
+ "reqwest 0.12.24",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "pi-sampling-types"
+version = "0.1.0"
+dependencies = [
+ "assert_matches",
+ "async-openai",
+ "chrono",
+ "indexmap",
+ "pi-circuit-breaker",
+ "pi-compaction",
+ "pi-tools",
+ "reqwest 0.12.24",
+ "schemars 1.0.4",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "pi-sandbox"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "dirs 5.0.1",
+ "dunce",
+ "globset",
+ "ignore",
+ "libc",
+ "nono",
+ "pi-config",
+ "regex",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+ "toml",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "pi-secrets"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "serde_json",
+ "url",
+]
+
+[[package]]
+name = "pi-session-events"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "strum 0.27.2",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
+name = "pi-session-search"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "blake3",
+ "chrono",
+ "fs2",
+ "parking_lot",
+ "pi-config",
+ "pi-sqlite-journal",
+ "pi-telemetry",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "pi-shared"
+version = "0.0.0"
+dependencies = [
+ "agent-client-protocol",
+ "anyhow",
+ "arboard",
+ "base64",
+ "dirs 6.0.0",
+ "dunce",
+ "image",
+ "libc",
+ "objc2 0.6.3",
+ "parking_lot",
+ "pi-config-types",
+ "pi-models",
+ "pi-status-line",
+ "pi-tools",
+ "pi-tty-utils",
+ "prod-mc-cli-chat-proxy-types",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "urlencoding",
+ "uuid",
+ "wl-clipboard-rs",
+]
+
+[[package]]
+name = "pi-shell"
+version = "1.0.8"
+dependencies = [
+ "agent-client-protocol",
+ "anyhow",
+ "arc-swap",
+ "async-openai",
+ "async-trait",
+ "axum",
+ "backon",
+ "base64",
+ "blake3",
+ "bm25",
+ "bytes",
+ "chrono",
+ "clap",
+ "criterion",
+ "ctor",
+ "dashmap",
+ "dhat",
+ "dirs 6.0.0",
+ "dunce",
+ "filetime",
+ "flate2",
+ "fs2",
+ "futures",
+ "futures-util",
+ "gcloud-storage",
+ "gethostname",
+ "git2",
+ "glob",
+ "globset",
+ "ignore",
+ "image",
+ "indexmap",
+ "infer 0.15.0",
+ "jsonschema",
+ "jsonwebtoken",
+ "kanal",
+ "libc",
+ "loom",
+ "moka",
+ "nix 0.30.1",
+ "notify",
+ "notify-debouncer-mini",
+ "nucleo",
+ "obfstr",
+ "parking_lot",
+ "pi-acp-lib",
+ "pi-agent",
+ "pi-agent-lifecycle",
+ "pi-announcements",
+ "pi-auth",
+ "pi-bundle",
+ "pi-chat-state",
+ "pi-codebase-graph",
+ "pi-compaction",
+ "pi-compaction-transcript",
+ "pi-computer-hub-sdk",
+ "pi-config",
+ "pi-config-types",
+ "pi-extra-ca",
+ "pi-fast-worktree",
+ "pi-file-utils",
+ "pi-foreign-sessions",
+ "pi-fsnotify",
+ "pi-hooks",
+ "pi-hooks-plugins-types",
+ "pi-http",
+ "pi-hunk-tracker",
+ "pi-interjection-core",
+ "pi-mcp",
+ "pi-memory",
+ "pi-models",
+ "pi-paths",
+ "pi-plugin-marketplace",
+ "pi-prompt-queue",
+ "pi-sampler",
+ "pi-sampling-types",
+ "pi-sandbox",
+ "pi-session-events",
+ "pi-session-search",
+ "pi-shared",
+ "pi-shell-base",
+ "pi-shell-session-support",
+ "pi-shell-terminal",
+ "pi-status-line",
+ "pi-subagent-resolution",
+ "pi-system-power",
+ "pi-telemetry",
+ "pi-test-support",
+ "pi-test-utils",
+ "pi-token-estimation",
+ "pi-tool-protocol",
+ "pi-tool-runtime",
+ "pi-tool-types",
+ "pi-tools",
+ "pi-tracing-macros",
+ "pi-tty-utils",
+ "pi-version",
+ "pi-workflow",
+ "pi-workspace",
+ "pretty_assertions",
+ "prod-mc-cli-chat-proxy-types",
+ "prost",
+ "rand 0.9.5",
+ "regex",
+ "reqwest 0.12.24",
+ "reqwest-middleware 0.4.2",
+ "ring",
+ "rsa",
+ "rustls",
+ "semver",
+ "serde",
+ "serde_ignored",
+ "serde_json",
+ "serial_test",
+ "sha2 0.10.9",
+ "similar",
+ "siphasher",
+ "strum 0.27.2",
+ "tar",
+ "tdigests",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-retry",
+ "tokio-rustls",
+ "tokio-stream",
+ "tokio-tungstenite 0.27.0",
+ "tokio-util",
+ "toml",
+ "toml_edit 0.22.27",
+ "tonic",
+ "tonic-prost",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "urlencoding",
+ "uuid",
+ "walkdir",
+ "webbrowser",
+ "windows 0.61.3",
+ "zstd",
+]
+
+[[package]]
+name = "pi-shell-base"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "libc",
+ "nix 0.30.1",
+ "pi-config",
+ "pi-env",
+ "pi-extra-ca",
+ "pi-shared",
+ "pi-tty-utils",
+ "pi-version",
+ "pprof",
+ "reqwest 0.12.24",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "url",
+ "windows 0.61.3",
+]
+
+[[package]]
+name = "pi-shell-session-support"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "pi-file-utils",
+ "pi-http",
+ "pi-version",
+ "reqwest 0.12.24",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "pi-shell-terminal"
+version = "0.1.0"
+dependencies = [
+ "agent-client-protocol",
+ "async-trait",
+ "base64",
+ "chrono",
+ "futures",
+ "libc",
+ "pi-acp-lib",
+ "pi-config",
+ "pi-paths",
+ "pi-sandbox",
+ "pi-tools",
+ "pi-tty-utils",
+ "pi-workspace",
+ "portable-pty",
+ "process-wrap",
+ "serde",
+ "serde_json",
+ "shlex",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+ "windows 0.61.3",
+]
+
+[[package]]
 name = "pi-sqlite-journal"
 version = "0.1.0"
 dependencies = [
@@ -9461,11 +9047,125 @@ dependencies = [
 ]
 
 [[package]]
+name = "pi-status-line"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "strum 0.27.2",
+ "toml",
+]
+
+[[package]]
+name = "pi-subagent-resolution"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "pi-agent",
+ "pi-sampling-types",
+ "pi-tool-types",
+ "pi-tools",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml",
+ "tracing",
+]
+
+[[package]]
 name = "pi-system-power"
 version = "0.1.0"
 dependencies = [
  "windows-sys 0.59.0",
  "zbus",
+]
+
+[[package]]
+name = "pi-telemetry"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "axum-server",
+ "base64",
+ "bytes",
+ "chrono",
+ "ctor",
+ "dirs 5.0.1",
+ "filetime",
+ "futures-executor",
+ "git2",
+ "http 1.4.0",
+ "mid",
+ "obfstr",
+ "opentelemetry",
+ "opentelemetry-http",
+ "opentelemetry-otlp",
+ "opentelemetry-proto",
+ "opentelemetry_sdk",
+ "parking_lot",
+ "pi-auth",
+ "pi-config",
+ "pi-env",
+ "pi-extra-ca",
+ "pi-file-utils",
+ "pi-mixpanel",
+ "pi-sampler",
+ "pi-secrets",
+ "pi-session-events",
+ "pi-token-estimation",
+ "pi-tty-utils",
+ "pi-version",
+ "prost",
+ "rcgen",
+ "reqwest 0.12.24",
+ "rustls",
+ "sentry",
+ "serde",
+ "serde_json",
+ "strum 0.27.2",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tracing",
+ "tracing-appender",
+ "tracing-chrome",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
+ "url",
+ "uuid",
+ "webpki-roots 0.26.11",
+ "whoami",
+]
+
+[[package]]
+name = "pi-test-support"
+version = "0.1.0"
+dependencies = [
+ "agent-client-protocol",
+ "anyhow",
+ "async-trait",
+ "axum",
+ "clap",
+ "futures-util",
+ "libc",
+ "pi-acp-lib",
+ "pi-tty-utils",
+ "portable-pty",
+ "reqwest 0.12.24",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite 0.27.0",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "url",
 ]
 
 [[package]]
@@ -9499,9 +9199,9 @@ dependencies = [
  "anyhow",
  "async-trait",
  "futures",
- "pi-grok-tools-api",
  "pi-tool-protocol",
  "pi-tool-types",
+ "pi-tools-api",
  "schemars 1.0.4",
  "serde",
  "serde_json",
@@ -9517,6 +9217,108 @@ dependencies = [
  "schemars 1.0.4",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "pi-tools"
+version = "0.1.220-alpha.4"
+dependencies = [
+ "anyhow",
+ "arc-swap",
+ "async-lsp",
+ "async-openai",
+ "async-stream",
+ "async-trait",
+ "base64",
+ "chrono",
+ "command-fds",
+ "crc32fast",
+ "derive_more 2.1.1",
+ "dhat",
+ "dirs 5.0.1",
+ "dunce",
+ "educe",
+ "encoding_rs",
+ "flate2",
+ "fs2",
+ "futures",
+ "futures-util",
+ "globset",
+ "htmd",
+ "ignore",
+ "image",
+ "indexmap",
+ "infer 0.19.0",
+ "kamadak-exif",
+ "libc",
+ "minijinja",
+ "nix 0.30.1",
+ "parking_lot",
+ "pdf_oxide",
+ "pi-auth",
+ "pi-computer-hub-core",
+ "pi-computer-hub-sdk",
+ "pi-config",
+ "pi-env",
+ "pi-extra-ca",
+ "pi-file-utils",
+ "pi-interjection-core",
+ "pi-sandbox",
+ "pi-test-support",
+ "pi-test-utils",
+ "pi-token-estimation",
+ "pi-tool-protocol",
+ "pi-tool-runtime",
+ "pi-tool-types",
+ "pi-tools-api",
+ "pi-tty-utils",
+ "pi-version",
+ "pi-workspace-types",
+ "pretty_assertions",
+ "pulldown-cmark",
+ "quick-xml 0.38.3",
+ "regex",
+ "reqwest 0.12.24",
+ "schemars 1.0.4",
+ "scraper",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "serde_yaml",
+ "sha2 0.10.9",
+ "shellexpand",
+ "similar",
+ "strip-ansi-escapes",
+ "strum 0.26.3",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tonic",
+ "tracing",
+ "tracing-subscriber",
+ "unicode-normalization",
+ "url",
+ "uuid",
+ "which",
+ "wildmatch",
+ "windows 0.61.3",
+ "wiremock",
+ "zip",
+]
+
+[[package]]
+name = "pi-tools-api"
+version = "0.1.220-alpha.4"
+dependencies = [
+ "pi-proto-build",
+ "pi-tool-protocol",
+ "prost",
+ "serde",
+ "serde_json",
+ "tonic",
+ "tonic-prost",
 ]
 
 [[package]]
@@ -9564,6 +9366,61 @@ dependencies = [
 ]
 
 [[package]]
+name = "pi-update"
+version = "0.1.220-alpha.4"
+dependencies = [
+ "anyhow",
+ "dunce",
+ "futures",
+ "indicatif",
+ "libc",
+ "pi-extra-ca",
+ "pi-shell",
+ "pi-telemetry",
+ "pi-tools",
+ "pi-version",
+ "reqwest 0.12.24",
+ "semver",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "tempfile",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+ "url",
+ "wiremock",
+]
+
+[[package]]
+name = "pi-version"
+version = "1.0.8"
+dependencies = [
+ "semver",
+]
+
+[[package]]
+name = "pi-voice"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cpal",
+ "futures-util",
+ "pi-extra-ca",
+ "pi-tty-utils",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite 0.27.0",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+]
+
+[[package]]
 name = "pi-workflow"
 version = "0.1.0"
 dependencies = [
@@ -9577,6 +9434,150 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "pi-workspace"
+version = "0.1.220-alpha.4"
+dependencies = [
+ "agent-client-protocol",
+ "anyhow",
+ "arc-swap",
+ "async-stream",
+ "async-trait",
+ "axum",
+ "base64",
+ "bstr",
+ "chrono",
+ "clap",
+ "dashmap",
+ "dirs 6.0.0",
+ "dunce",
+ "fastrace",
+ "flate2",
+ "fs2",
+ "futures",
+ "git2",
+ "glob",
+ "hashbrown 0.16.1",
+ "humantime-serde",
+ "ignore",
+ "indexmap",
+ "infer 0.19.0",
+ "libc",
+ "nix 0.30.1",
+ "nohash-hasher",
+ "parking_lot",
+ "pi-acp-lib",
+ "pi-agent",
+ "pi-auth",
+ "pi-codebase-graph",
+ "pi-computer-hub-mcp-adapter",
+ "pi-computer-hub-sdk",
+ "pi-config",
+ "pi-config-types",
+ "pi-diag-server",
+ "pi-env",
+ "pi-extra-ca",
+ "pi-fast-worktree",
+ "pi-file-utils",
+ "pi-fsnotify",
+ "pi-fuzzy-file-search",
+ "pi-hooks",
+ "pi-hunk-tracker",
+ "pi-mcp",
+ "pi-paths",
+ "pi-sandbox",
+ "pi-session-events",
+ "pi-telemetry",
+ "pi-test-utils",
+ "pi-tool-protocol",
+ "pi-tool-runtime",
+ "pi-tool-types",
+ "pi-tools",
+ "pi-tools-api",
+ "pi-tracing",
+ "pi-tty-utils",
+ "pi-version",
+ "pi-workspace-client",
+ "pi-workspace-daemon",
+ "pi-workspace-types",
+ "prometheus",
+ "rand 0.9.5",
+ "regex",
+ "reqwest 0.12.24",
+ "rustc-hash 2.1.1",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2 0.10.9",
+ "smallvec",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite 0.27.0",
+ "tokio-util",
+ "toml",
+ "tonic",
+ "tracing",
+ "tracing-subscriber",
+ "tree-sitter",
+ "tree-sitter-bash",
+ "url",
+ "urlencoding",
+ "uuid",
+ "wait-timeout",
+ "zip",
+ "zstd",
+]
+
+[[package]]
+name = "pi-workspace-client"
+version = "0.1.0"
+dependencies = [
+ "pi-computer-hub-sdk",
+ "pi-tool-protocol",
+ "pi-tool-runtime",
+ "pi-tool-types",
+ "pi-workspace-types",
+ "schemars 1.0.4",
+ "semver",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "pi-workspace-daemon"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "fs2",
+ "libc",
+ "pi-computer-hub-sdk",
+ "pi-tty-utils",
+ "prometheus",
+ "reqwest 0.12.24",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "windows 0.61.3",
+]
+
+[[package]]
+name = "pi-workspace-types"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

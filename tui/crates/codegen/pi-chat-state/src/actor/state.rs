@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use pi_grok_sampling_types::{
+use pi_sampling_types::{
     ConversationItem, DanglingToolCallReason, SamplingConfig, TokenUsage, ToolSpec,
     dedup_duplicate_tool_results, repair_dangling_tool_calls,
 };
@@ -32,7 +32,7 @@ fn estimate_tool_tokens(
 
 /// Bytes/4 estimate of one tool definition (name + description + the
 /// JSON-serialized parameters).
-pub fn estimate_tool_definition_tokens(td: &pi_grok_sampling_types::ToolDefinition) -> u64 {
+pub fn estimate_tool_definition_tokens(td: &pi_sampling_types::ToolDefinition) -> u64 {
     estimate_tool_tokens(
         &td.function.name,
         td.function.description.as_deref(),
@@ -41,7 +41,7 @@ pub fn estimate_tool_definition_tokens(td: &pi_grok_sampling_types::ToolDefiniti
 }
 
 /// Sum [`estimate_tool_definition_tokens`] across a slice.
-pub fn estimate_tool_definitions_tokens(tds: &[pi_grok_sampling_types::ToolDefinition]) -> u64 {
+pub fn estimate_tool_definitions_tokens(tds: &[pi_sampling_types::ToolDefinition]) -> u64 {
     tds.iter().map(estimate_tool_definition_tokens).sum()
 }
 
@@ -59,7 +59,7 @@ pub fn estimate_tool_specs_tokens(tools: &[ToolSpec]) -> u64 {
 /// Shared by [`estimate_conversation_tokens`] and [`estimate_messages_tokens`]
 /// so the per-variant arithmetic stays in one place.
 pub fn estimate_item_tokens(item: &ConversationItem) -> u64 {
-    use pi_grok_sampling_types::ContentPart;
+    use pi_sampling_types::ContentPart;
     match item {
         ConversationItem::System(s) => pi_token_estimation::estimate_tokens(&s.content),
         ConversationItem::User(u) => {
@@ -90,7 +90,7 @@ pub fn estimate_item_tokens(item: &ConversationItem) -> u64 {
             // Summary + content text follow the standard bytes-per-token
             // estimate; encrypted blobs are base64 and don't survive
             // tokenization 1:1, so estimate at len/4 as well.
-            let text_bytes = pi_grok_sampling_types::reasoning_item_text(r).len();
+            let text_bytes = pi_sampling_types::reasoning_item_text(r).len();
             let enc_bytes = r.encrypted_content.as_deref().map(str::len).unwrap_or(0);
             ((text_bytes + enc_bytes) as u64) / pi_token_estimation::BYTES_PER_TOKEN
         }
@@ -103,7 +103,7 @@ pub fn estimate_conversation_tokens(items: &[ConversationItem]) -> u64 {
     items.iter().map(estimate_item_tokens).sum()
 }
 
-/// grok-build's [`ItemTokenCounter`](pi_grok_compaction::ItemTokenCounter)
+/// grok-build's [`ItemTokenCounter`](pi_compaction::ItemTokenCounter)
 /// for the shared compaction engine: the bytes/4 estimate grok-build already
 /// uses to drive its compaction triggers, exposed through the seam so the
 /// shared budgeting math gets the *same* trusted count.
@@ -114,7 +114,7 @@ pub fn estimate_conversation_tokens(items: &[ConversationItem]) -> u64 {
 /// one place.
 pub struct EstimatedItemTokenCounter;
 
-impl pi_grok_compaction::ItemTokenCounter<ConversationItem> for EstimatedItemTokenCounter {
+impl pi_compaction::ItemTokenCounter<ConversationItem> for EstimatedItemTokenCounter {
     fn count_item_tokens(&self, item: &ConversationItem) -> u32 {
         // The estimate is a `u64`; a single item never approaches `u32::MAX`
         // tokens, but saturate rather than wrap if one somehow does.
@@ -302,7 +302,7 @@ mod tests {
 
     #[test]
     fn estimated_item_token_counter_matches_estimate_item_tokens() {
-        use pi_grok_compaction::ItemTokenCounter;
+        use pi_compaction::ItemTokenCounter;
 
         let counter = EstimatedItemTokenCounter;
         let items = vec![
@@ -371,7 +371,7 @@ mod tests {
     #[test]
     fn estimate_tool_definition_tokens_counts_name_desc_params() {
         // Empty parameters serialize to "null" (4 bytes) in the JSON-string len
-        let td = pi_grok_sampling_types::ToolDefinition::function(
+        let td = pi_sampling_types::ToolDefinition::function(
             "search",
             Some("find a file"),
             serde_json::json!({}),
@@ -382,12 +382,12 @@ mod tests {
 
     #[test]
     fn estimate_tool_specs_tokens_counts_only_provided_specs() {
-        let kept = pi_grok_sampling_types::ToolDefinition::function(
+        let kept = pi_sampling_types::ToolDefinition::function(
             "search",
             Some("find a file"),
             serde_json::json!({"type": "object"}),
         );
-        let dropped = pi_grok_sampling_types::ToolDefinition::function(
+        let dropped = pi_sampling_types::ToolDefinition::function(
             "web_search",
             Some("search the web"),
             serde_json::json!({"type": "object"}),
@@ -428,12 +428,12 @@ mod tests {
 
     #[test]
     fn estimate_tool_definitions_tokens_sums_across_slice() {
-        let a = pi_grok_sampling_types::ToolDefinition::function(
+        let a = pi_sampling_types::ToolDefinition::function(
             "a",
             None::<&str>,
             serde_json::json!({}),
         );
-        let b = pi_grok_sampling_types::ToolDefinition::function(
+        let b = pi_sampling_types::ToolDefinition::function(
             "b",
             None::<&str>,
             serde_json::json!({}),

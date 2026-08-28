@@ -10,7 +10,7 @@ use std::sync::Arc;
 use anyhow::Context;
 
 use crate::UploadMethod;
-use pi_grok_auth::{AuthCredentialProvider, StaticAuthCredentialProvider};
+use pi_auth::{AuthCredentialProvider, StaticAuthCredentialProvider};
 
 use crate::storage_client::{Auth401AttributionCallback, StaticGrokAuth, StorageClient};
 

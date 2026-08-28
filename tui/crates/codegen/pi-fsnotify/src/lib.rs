@@ -1,5 +1,5 @@
 //! Local-filesystem event source. Single causal stream of wire-ready
-//! [`FsEvent`]s on one broadcast channel. The `pi-grok-workspace` layer
+//! [`FsEvent`]s on one broadcast channel. The `pi-workspace` layer
 //! translates these into `WorkspaceEvent`s with git-enrichment I/O.
 //!
 //! Single workspace root only; multi-root composition (parent + worktrees)

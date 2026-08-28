@@ -25,7 +25,7 @@ those as the source of truth when re-vendoring.
 Dependency shape:
 
 ```text
-pi-grok-mermaid
+pi-mermaid
   └── mermaid-to-svg          (MIT)
         ├── dagre_rust        (Apache-2.0)
         │     ├── graphlib_rust

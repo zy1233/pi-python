@@ -1,6 +1,6 @@
 //! ConversationRequest assembly — image compaction, pruning, repair, memory injection.
 
-use pi_grok_sampling_types::{ConversationItem, ConversationRequest, ToolSpec, TraceContext};
+use pi_sampling_types::{ConversationItem, ConversationRequest, ToolSpec, TraceContext};
 
 use super::ChatStateActor;
 use crate::events::ChatStateEvent;

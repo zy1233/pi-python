@@ -4,10 +4,10 @@ use std::collections::BTreeSet;
 use std::num::NonZeroU64;
 
 use serde::{Deserialize, Serialize};
-use pi_grok_sampling_types::{ConversationItem, SamplingConfig};
+use pi_sampling_types::{ConversationItem, SamplingConfig};
 
 /// Canonical marker for an injected memory-context block. Shared by the
-/// emitter in `pi-grok-shell` and the upsert/detection here — a drift would
+/// emitter in `pi-shell` and the upsert/detection here — a drift would
 /// silently break dedup and let blocks accumulate in the prompt prefix.
 /// Detection assumes the literal never appears in a system prompt except as
 /// an injected block.
@@ -112,7 +112,7 @@ pub enum AuthType {
 /// Credential/secret fields that the actor stores opaquely.
 ///
 /// These are fields from the shell's full `Config` that aren't part of
-/// `pi_grok_sampling_types::SamplingConfig` (which is secret-free).
+/// `pi_sampling_types::SamplingConfig` (which is secret-free).
 /// The actor just stores and returns them — it never interprets them.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Credentials {
@@ -210,7 +210,7 @@ mod tests {
 
     #[test]
     fn snapshot_round_trips_with_data() {
-        use pi_grok_sampling_types::ConversationItem;
+        use pi_sampling_types::ConversationItem;
 
         let snapshot = ChatStateSnapshot {
             conversation: vec![

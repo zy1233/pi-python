@@ -19,13 +19,13 @@ large-error-threshold = 256
 # repo-root config instead, so crates this file does not reach carry a
 # crate-level allow.
 disallowed-methods = [
-    { path = "reqwest::Client::new", reason = "bypasses the grok TLS policy (backend pin, OS roots, GROK_EXTRA_CA_BUNDLE); build through pi_grok_extra_ca; localhost-only clients allow with a reason" },
-    { path = "reqwest::blocking::Client::new", reason = "bypasses the grok TLS policy (backend pin, OS roots, GROK_EXTRA_CA_BUNDLE); build through pi_grok_extra_ca; localhost-only clients allow with a reason" },
-    { path = "reqwest::ClientBuilder::build", reason = "use pi_grok_extra_ca::build_reqwest_client: it applies the grok TLS policy and survives a broken OS store; localhost/test clients allow with a reason" },
-    { path = "reqwest::blocking::ClientBuilder::build", reason = "use pi_grok_extra_ca::build_blocking_reqwest_client: it applies the grok TLS policy and survives a broken OS store; localhost/test clients allow with a reason" },
+    { path = "reqwest::Client::new", reason = "bypasses the grok TLS policy (backend pin, OS roots, GROK_EXTRA_CA_BUNDLE); build through pi_extra_ca; localhost-only clients allow with a reason" },
+    { path = "reqwest::blocking::Client::new", reason = "bypasses the grok TLS policy (backend pin, OS roots, GROK_EXTRA_CA_BUNDLE); build through pi_extra_ca; localhost-only clients allow with a reason" },
+    { path = "reqwest::ClientBuilder::build", reason = "use pi_extra_ca::build_reqwest_client: it applies the grok TLS policy and survives a broken OS store; localhost/test clients allow with a reason" },
+    { path = "reqwest::blocking::ClientBuilder::build", reason = "use pi_extra_ca::build_blocking_reqwest_client: it applies the grok TLS policy and survives a broken OS store; localhost/test clients allow with a reason" },
     { path = "std::fs::canonicalize", reason = "returns \\\\?\\ verbatim paths on Windows; use dunce::canonicalize" },
     { path = "std::path::Path::canonicalize", reason = "returns \\\\?\\ verbatim paths on Windows; use dunce::canonicalize" },
-    { path = "tokio::fs::canonicalize", reason = "returns \\\\?\\ verbatim paths on Windows; use pi_grok_tools::util::fs helpers or spawn_blocking + dunce::canonicalize" },
+    { path = "tokio::fs::canonicalize", reason = "returns \\\\?\\ verbatim paths on Windows; use pi_tools::util::fs helpers or spawn_blocking + dunce::canonicalize" },
     { path = "std::process::Command::spawn", reason = "an unenrolled child outlives its session; use pi_tty_utils::ProcessScope::enroll" },
     { path = "tokio::process::Command::spawn", reason = "an unenrolled child outlives its session; use pi_tty_utils::ProcessScope::enroll" },
     { path = "portable_pty::SlavePty::spawn_command", reason = "an unenrolled pty child outlives its session; enroll the shell with pi_tty_utils::ProcessScope::enroll_terminal_pid" },

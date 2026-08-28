@@ -23,7 +23,7 @@ path = "src/bin/bench_file_listing.rs"
 [dependencies]
 # Path utilities
 dunce = { workspace = true }
-pi-grok-paths = { path = "../pi-grok-paths" }
+pi-paths = { path = "../pi-paths" }
 # Graph generation
 petgraph = { workspace = true }
 serde = { workspace = true, features = ["rc"] }

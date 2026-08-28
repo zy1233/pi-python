@@ -139,14 +139,14 @@ mod tests {
         };
         let frames = vec![ResolvedFrame {
             ip: 0xdead_beef,
-            symbol_name: Some("pi_grok_pager::main".to_string()),
+            symbol_name: Some("pi_pager::main".to_string()),
             filename: Some("src/main.rs".to_string()),
             lineno: Some(42),
         }];
         let report = format_report(&blob, &frames);
         assert!(report.contains("SIGBUS"));
         assert!(report.contains("BUS_ADRERR"));
-        assert!(report.contains("pi_grok_pager::main"));
+        assert!(report.contains("pi_pager::main"));
         assert!(report.contains("src/main.rs:42"));
     }
 }

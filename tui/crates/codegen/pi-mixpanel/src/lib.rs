@@ -52,7 +52,7 @@ impl Mixpanel {
         mut properties: HashMap<String, serde_json::Value>,
     ) -> HashMap<String, serde_json::Value> {
         for v in properties.values_mut() {
-            pi_grok_secrets::redact_json_string_values(v);
+            pi_secrets::redact_json_string_values(v);
         }
         properties.insert("token".to_owned(), serde_json::json!(self.token));
         properties
@@ -95,7 +95,7 @@ impl Mixpanel {
     ) -> Result<(), Error> {
         let mut scrubbed = set;
         for v in scrubbed.values_mut() {
-            pi_grok_secrets::redact_json_string_values(v);
+            pi_secrets::redact_json_string_values(v);
         }
 
         let payload = serde_json::json!([{
