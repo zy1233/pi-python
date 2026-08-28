@@ -51,6 +51,14 @@ def normalize_host_path(path: str) -> str:
     return os.path.normpath(converted)
 
 
+def _is_abs_host_path(path: str) -> bool:
+    """True for native absolutes and WSL paths already converted to ``D:/...`` form."""
+    if os.path.isabs(path):
+        return True
+    # After WSL→Windows conversion, ``D:/foo`` is absolute on Windows but not on Unix.
+    return len(path) >= 3 and path[0].isalpha() and path[1] == ":" and path[2] in "/\\"
+
+
 def resolve_to_cwd(path: str, cwd: str) -> str:
     """Resolve *path* against the tool's bound *cwd*.
 
@@ -59,7 +67,7 @@ def resolve_to_cwd(path: str, cwd: str) -> str:
     """
     cwd = normalize_host_path(cwd)
     expanded = normalize_host_path(os.path.expanduser(path))
-    if os.path.isabs(expanded):
+    if _is_abs_host_path(expanded):
         return os.path.normpath(expanded)
     return os.path.normpath(os.path.join(cwd, expanded))
 

@@ -264,10 +264,10 @@ Anthropic 原生 image blocks；其他 provider 回退为 user-message 注入；
 ### 7.3 工厂 API
 
 ```python
-create_coding_tools(cwd)       # read/bash/edit/write（pi 默认组）
-create_read_only_tools(cwd)    # read/grep/find/ls（无修改保证）
-create_tool(name, cwd)         # 按名构造单工具
-create_all_tools(cwd)          # 全部 7 个
+create_coding_tools(cwd)  # read/bash/edit/write（pi 默认组）
+create_read_only_tools(cwd)  # read/grep/find/ls（无修改保证）
+create_tool(name, cwd)  # 按名构造单工具
+create_all_tools(cwd)  # 全部 7 个
 ```
 
 ### 7.4 LangChain 工具适配器
