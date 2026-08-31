@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-31
+
 ### Added
 
-- **Phase 4 P0–P4 (Coding Agent CLI)**: vendored grok-build TUI under `tui/` (Apache-2.0, excluded from wheels); `packages/pi-agent-cli` standard ACP agent over `AgentHarness` (no `x.ai/*`); TUI spawn `python -m pi_agent_cli`, skip xAI login, drop vendor extension RPCs, home `~/.pi-python`, product binary `pi`. TUI Cargo crates renamed `xai-*` → `pi-*` (upstream URLs and Apache NOTICE attribution unchanged). `/new`→`session/new`, `/resume`→`session/list`+`session/load`; `@` is in-process directory listing; `pi -p` / `python -m pi_agent_cli -p` is Python headless (not grok headless). P4: `config.toml` (model, permission, skills, `[agent].command`), coding system prompt + skills XML, Windows notes in `docs/WINDOWS.md`.
+- **Phase 4 P0–P4 (Coding Agent CLI)**: vendored grok-build TUI under `tui/` (Apache-2.0, excluded from wheels); `packages/pi-agent-cli` standard ACP agent over `AgentHarness` (no `x.ai/*`); TUI spawn `python -m pi_agent_cli`, skip xAI login, drop vendor extension RPCs, home `~/.pi-python`, product binary `zypi`. TUI Cargo crates renamed `xai-*` → `pi-*`, then **P5 de-grok**: `pi-grok-*` → `pi-*`, grok CLI subcommands removed, auth/prefetch startup skipped when `auth_methods` is empty. `/new`→`session/new`, `/resume`→`session/list`+`session/load`; `@` is in-process directory listing; `zypi -p` / `python -m pi_agent_cli -p` is Python headless. P4: `config.toml` (model, permission, skills, `[agent].command`), coding system prompt + skills XML, Windows notes in `docs/WINDOWS.md`.
 - **Pelican-on-a-bicycle foundation benchmark**: `pi_agent_cli.benchmarks.pelican`, `scripts/smoke_pelican.py`, `docs/benchmarks/PELCAN-BICYCLE.md` — structural SVG smoke test for the pi TUI agent path.
 - **PyPI**: `pi-agent-cli-lc` included in the release workflow (tag `v*` builds and publishes core, harness, and cli wheels/sdists; Rust TUI excluded).
 
@@ -47,4 +49,5 @@ Initial public release.
 - **Compaction & tree navigation (H3)**: token-based compaction with branch summaries, `navigate_tree` for branch exploration.
 - **Skills, templates & env (H4)**: skill discovery, prompt templates, system prompt injection, `LocalExecutionEnv` for sandboxed execution.
 
+[0.2.0]: https://github.com/zy1233/pi-python/releases/tag/v0.2.0
 [0.1.0]: https://github.com/zy1233/pi-python/releases/tag/v0.1.0

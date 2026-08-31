@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pi-agent-cli-lc"
-version = "0.1.0"
+version = "0.2.0"
 description = "Standard ACP agent over AgentHarness (no x.ai extensions)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -25,8 +25,8 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "pi-agent-core-lc==0.1.0",
-    "pi-agent-harness-lc==0.1.0",
+    "pi-agent-core-lc==0.2.0",
+    "pi-agent-harness-lc==0.2.0",
     "agent-client-protocol>=0.12.0",
     "pydantic>=2.0",
 ]
