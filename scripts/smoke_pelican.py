@@ -53,7 +53,7 @@ async def _run(cwd: Path) -> bool:
     repo = JsonlSessionRepo(home / "sessions")
     session = await repo.create({"cwd": str(cwd.resolve())})
     resources = await load_session_resources(cwd=cwd, config=config)
-    harness = create_session_harness(
+    harness = await create_session_harness(
         session=session,
         cwd=cwd,
         config=config,

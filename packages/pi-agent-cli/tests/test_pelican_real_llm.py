@@ -44,7 +44,7 @@ async def test_pelican_on_bicycle_agent_path(tmp_path: Path, monkeypatch):
     repo = JsonlSessionRepo(tmp_path / "sessions")
     session = await repo.create({"cwd": str(tmp_path)})
     resources = await load_session_resources(cwd=tmp_path, config=config)
-    harness = create_session_harness(
+    harness = await create_session_harness(
         session=session,
         cwd=tmp_path,
         config=config,

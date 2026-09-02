@@ -80,6 +80,11 @@ class CliConfig:
     api_key_env: str | None = None
     skills_dirs: tuple[str, ...] = ()
     agent_command: str | None = None
+    no_context_files: bool = False
+    custom_system_prompt: str | None = None
+    custom_system_prompt_file: str | None = None
+    append_system_prompt: str | None = None
+    append_system_prompt_file: str | None = None
 
 
 def load_config(home: Path | str | None = None) -> CliConfig:
@@ -113,6 +118,7 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
     model = data.get("model") if isinstance(data.get("model"), dict) else {}
     skills = data.get("skills") if isinstance(data.get("skills"), dict) else {}
     agent = data.get("agent") if isinstance(data.get("agent"), dict) else {}
+    prompt = data.get("prompt") if isinstance(data.get("prompt"), dict) else {}
 
     permission = data.get("permission", "ask")
     if permission not in _VALID_PERMISSION:
@@ -133,6 +139,12 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
     if agent_command is not None:
         agent_command = str(agent_command).strip() or None
 
+    def _optional_str(value: object) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+
     return CliConfig(
         permission=permission,  # type: ignore[arg-type]
         provider=str(model.get("provider") or data.get("provider") or "mock"),
@@ -143,4 +155,9 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         api_key_env=model.get("api_key_env") or data.get("api_key_env"),
         skills_dirs=skills_dirs,
         agent_command=agent_command,
+        no_context_files=bool(prompt.get("no_context_files", False)),
+        custom_system_prompt=_optional_str(prompt.get("custom_system_prompt")),
+        custom_system_prompt_file=_optional_str(prompt.get("custom_system_prompt_file")),
+        append_system_prompt=_optional_str(prompt.get("append_system_prompt")),
+        append_system_prompt_file=_optional_str(prompt.get("append_system_prompt_file")),
     )

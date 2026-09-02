@@ -28,17 +28,32 @@ async def load_sourced_skills(
 
 
 def format_skills_for_system_prompt(skills: list[Skill]) -> str:
+    """Format skills for system prompt (pi ``formatSkillsForPrompt``)."""
     visible = [skill for skill in skills if not skill.disableModelInvocation]
     if not visible:
         return ""
-    lines = ["<skills>"]
+
+    lines = [
+        "",
+        "",
+        "The following skills provide specialized instructions for specific tasks.",
+        "Use the read tool to load a skill's file when the task matches its description.",
+        "When a skill file references a relative path, resolve it against the skill directory "
+        "(parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.",
+        "",
+        "<available_skills>",
+    ]
     for skill in visible:
-        lines.append(
-            f'  <skill name="{_xml_escape(skill.name)}" '
-            f'description="{_xml_escape(skill.description)}" '
-            f'filePath="{_xml_escape(skill.filePath)}" />'
+        lines.extend(
+            [
+                "  <skill>",
+                f"    <name>{_xml_escape(skill.name)}</name>",
+                f"    <description>{_xml_escape(skill.description)}</description>",
+                f"    <location>{_xml_escape(skill.filePath)}</location>",
+                "  </skill>",
+            ]
         )
-    lines.append("</skills>")
+    lines.append("</available_skills>")
     return "\n".join(lines)
 
 
@@ -170,5 +185,9 @@ def _relative_to_root(root: str, path: str) -> str:
 
 def _xml_escape(value: str) -> str:
     return (
-        value.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
+        value.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&apos;")
     )

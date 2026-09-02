@@ -3,12 +3,50 @@
 from __future__ import annotations
 
 import json
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
-from pi_agent_cli.config import load_config, pi_home
+from pi_agent_cli.config import CliConfig, load_config, pi_home
 from pi_agent_cli.factory import create_session_harness, default_stream_fn, load_session_resources
 from pi_agent_harness import JsonlSessionRepo
+
+
+@dataclass(frozen=True)
+class HeadlessPromptOverrides:
+    """CLI overrides for prompt assembly (headless only; wins over agent.toml)."""
+
+    system_prompt: str | None = None
+    system_prompt_file: str | Path | None = None
+    append_system_prompt: str | None = None
+    append_system_prompt_file: str | Path | None = None
+    no_context_files: bool | None = None
+
+
+def apply_prompt_overrides(
+    config: CliConfig,
+    overrides: HeadlessPromptOverrides,
+) -> CliConfig:
+    """Return config with headless CLI prompt flags applied."""
+    updates: dict[str, object] = {}
+
+    custom_prompt = overrides.system_prompt
+    if custom_prompt is None and overrides.system_prompt_file is not None:
+        custom_prompt = Path(overrides.system_prompt_file).read_text(encoding="utf-8")
+    if custom_prompt is not None:
+        updates["custom_system_prompt"] = custom_prompt
+        updates["custom_system_prompt_file"] = None
+
+    append_prompt = overrides.append_system_prompt
+    if append_prompt is None and overrides.append_system_prompt_file is not None:
+        append_prompt = Path(overrides.append_system_prompt_file).read_text(encoding="utf-8")
+    if append_prompt is not None:
+        updates["append_system_prompt"] = append_prompt
+        updates["append_system_prompt_file"] = None
+
+    if overrides.no_context_files is not None:
+        updates["no_context_files"] = overrides.no_context_files
+
+    return replace(config, **updates) if updates else config
 
 
 def assistant_text(message: object) -> str:
@@ -52,6 +90,7 @@ async def run_print(
     *,
     cwd: str | Path | None = None,
     home: str | Path | None = None,
+    prompt_overrides: HeadlessPromptOverrides | None = None,
 ) -> int:
     """Create a JSONL session, run one harness turn, print assistant text."""
     text = prompt.strip()
@@ -63,10 +102,12 @@ async def run_print(
     sessions_dir.mkdir(parents=True, exist_ok=True)
     cwd_s = str(Path(cwd).resolve() if cwd is not None else Path.cwd())
     config = replace(load_config(home_path), permission="auto")
+    if prompt_overrides is not None:
+        config = apply_prompt_overrides(config, prompt_overrides)
     repo = JsonlSessionRepo(sessions_dir)
     session = await repo.create({"cwd": cwd_s})
     resources = await load_session_resources(cwd=cwd_s, config=config)
-    harness = create_session_harness(
+    harness = await create_session_harness(
         session=session,
         cwd=cwd_s,
         config=config,

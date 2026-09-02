@@ -129,7 +129,7 @@ def test_format_skills_for_system_prompt_and_invocation():
     system_prompt = format_skills_for_system_prompt(skills)
     invocation = format_skill_invocation(skills[0], "Use Chinese.")
 
-    assert '<skill name="writer"' in system_prompt
+    assert "<name>writer</name>" in system_prompt
     assert "hidden" not in system_prompt
     assert "Use concise prose." in invocation
     assert "Use Chinese." in invocation
@@ -358,7 +358,7 @@ async def test_system_prompt_callback_receives_correct_params():
 
 
 # ---------------------------------------------------------------------------
-# System prompt: no skills → no <skills> block injected
+# System prompt: no skills → no <available_skills> block injected
 # ---------------------------------------------------------------------------
 
 
@@ -378,7 +378,7 @@ async def test_system_prompt_no_skills_omits_skills_block():
     await harness.prompt("hello")
 
     sp = str(seen["system_prompt"])
-    assert "<skills>" not in sp
+    assert "<available_skills>" not in sp
 
 
 # ---------------------------------------------------------------------------

@@ -14,6 +14,7 @@ Design documents:
 | `docs/specs/2026-07-03-phase3-agent-harness-design.md` | Phase 3 harness spec |
 | `docs/specs/2026-07-03-p6-tool-ecosystem-design.md` | P6 tool-ecosystem spec |
 | `docs/specs/2026-08-25-phase4-coding-agent-cli-design.md` | Phase 4 CLI: forked grok TUI + standard ACP |
+| `docs/specs/2026-09-02-phase5-prompt-engine-design.md` | Phase 5: pi-aligned coding-agent prompt engine |
 | `docs/AUDIT/AUDIT-2026-07-02.md` | Core-layer audit tracker |
 | `docs/AUDIT/AUDIT-H1.md` ~ `docs/AUDIT/AUDIT-H4.md` | Harness batch audits |
 | `docs/AUDIT/SPIKE-P0-GROK-TUI.md` | Phase 4 P0: pager `x.ai/*` strip list |
@@ -64,7 +65,9 @@ AgentMessage[] → transform_context() → convert_to_llm() → LangChain BaseMe
 
 **Engine layer complete** — Phase 1–3 + P6 as above. Real-API smoke (`scripts/smoke_real_api.py`) passed against SiliconFlow. All harness audits (H1–H4) closed.
 
-**Phase 4 (Coding Agent CLI) P0–P5 landed** — `tui/` vendored grok-build fork de-grokked: crates renamed `pi-*`, product binary `zypi` (`cargo check -p pi-pager-bin`); grok CLI subcommands removed; startup skips auth/prefetch; welcome uses zypi branding. `packages/pi-agent-cli` is standard-ACP-only over `AgentHarness`; TUI spawn is `python -m pi_agent_cli` (`PI_AGENT_COMMAND` / `[agent].command` / `PI_PYTHON`), skips xAI login, drops outbound `x.ai/*`, home `~/.pi-python`. `/new` `/resume` `/quit` map to standard ACP; `@` is local directory listing; `zypi -p` is Python headless. Config: `packages/pi-agent-cli/agent.example.toml` (Python agent; keep `config.toml` empty or pi-python-only); Windows: `docs/WINDOWS.md`. See `docs/specs/2026-08-25-phase4-coding-agent-cli-design.md`.
+**Phase 4 (Coding Agent CLI) P0–P4 landed** — `tui/` vendored grok-build fork de-grokked: crates renamed `pi-*`, product binary `zypi` (`cargo check -p pi-pager-bin`); grok CLI subcommands removed; startup skips auth/prefetch; welcome uses zypi branding. `packages/pi-agent-cli` is standard-ACP-only over `AgentHarness`; TUI spawn is `python -m pi_agent_cli` (`PI_AGENT_COMMAND` / `[agent].command` / `PI_PYTHON`), skips xAI login, drops outbound `x.ai/*`, home `~/.pi-python`. `/new` `/resume` `/quit` map to standard ACP; `@` is local directory listing; `zypi -p` is Python headless. Config: `packages/pi-agent-cli/agent.example.toml` (Python agent; keep `config.toml` empty or pi-python-only); Windows: `docs/WINDOWS.md`. See `docs/specs/2026-08-25-phase4-coding-agent-cli-design.md`.
+
+**Phase 5 (Coding Agent prompt engine) landed** — pi-aligned `build_system_prompt` / `build_coding_agent_harness_system_prompt` in `pi_agent_cli`; tool `prompt_snippet`/`prompt_guidelines` consumption; AGENTS.md context files; `<available_skills>` format; bash `PI_*` env. See `docs/specs/2026-09-02-phase5-prompt-engine-design.md`.
 
 ## Cursor Cloud specific instructions
 

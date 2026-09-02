@@ -20,6 +20,7 @@ import re
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -315,8 +316,38 @@ async def _wait_abort(signal: Any) -> None:
         await asyncio.sleep(0.05)
 
 
-def create_bash_tool(cwd: str, *, shell_path: str | None = None) -> AgentTool:
+def _bash_subprocess_env(
+    expose_session_environment: bool,
+    prepare_env: Callable[[], dict[str, str]] | None,
+) -> dict[str, str]:
+    env = dict(os.environ)
+    for key in (
+        "PI_SESSION_ID",
+        "PI_SESSION_FILE",
+        "PI_PROVIDER",
+        "PI_MODEL",
+        "PI_REASONING_LEVEL",
+    ):
+        env.pop(key, None)
+    if expose_session_environment and prepare_env is not None:
+        env.update(prepare_env())
+    return env
+
+
+def create_bash_tool(
+    cwd: str,
+    *,
+    shell_path: str | None = None,
+    expose_session_environment: bool = True,
+    prepare_env: Callable[[], dict[str, str]] | None = None,
+) -> AgentTool:
     """Build a bash tool bound to *cwd* (optionally pinning the shell binary)."""
+
+    prompt_guidelines = (
+        ["You can inspect PI_* environment variables for current model and session details."]
+        if expose_session_environment
+        else None
+    )
 
     async def execute(
         _tool_call_id: str,
@@ -347,6 +378,7 @@ def create_bash_tool(cwd: str, *, shell_path: str | None = None) -> AgentTool:
             "stdin": asyncio.subprocess.PIPE if transport_stdin else asyncio.subprocess.DEVNULL,
             "stdout": asyncio.subprocess.PIPE,
             "stderr": asyncio.subprocess.STDOUT,
+            "env": _bash_subprocess_env(expose_session_environment, prepare_env),
         }
         if sys.platform == "win32":
             spawn_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
@@ -467,8 +499,5 @@ def create_bash_tool(cwd: str, *, shell_path: str | None = None) -> AgentTool:
         parameters=BashParams,
         execute_fn=execute,
         prompt_snippet="Execute bash commands (ls, grep, find, etc.)",
-        prompt_guidelines=[
-            "Use bash for builds, tests, git, and other shell commands.",
-            "Prefer the dedicated read/edit/write tools for file content operations.",
-        ],
+        prompt_guidelines=prompt_guidelines or [],
     )

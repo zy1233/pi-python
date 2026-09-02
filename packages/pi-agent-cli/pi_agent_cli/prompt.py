@@ -1,24 +1,23 @@
-"""Coding-agent system prompt for Phase 4 (deeper prompt work is Phase 5)."""
+"""Deprecated static prompt — use ``build_coding_agent_harness_system_prompt`` instead."""
 
-CODING_SYSTEM_PROMPT = """You are pi, a coding agent working in the user's local workspace.
+from __future__ import annotations
 
-## Tools
-- Use read, grep, find, and ls to explore before changing code.
-- Prefer the smallest change that solves the request; re-read or run checks to verify.
-- Use bash for builds, tests, and one-off commands — not for bulk file edits.
+from pi_agent_cli.create_harness import build_coding_agent_harness_system_prompt
+from pi_agent_cli.system_prompt import BuildSystemPromptOptions
+from pi_agent_core.coding_tools import create_coding_tools
 
-## Self-correction
-- If a tool fails, read the error, adjust arguments or approach, and retry once with a fix.
-- Do not repeat the same failing call without a concrete change.
+__all__ = ["CODING_SYSTEM_PROMPT", "build_coding_agent_harness_system_prompt"]
 
-## Safety
-- Stay inside the workspace unless the user explicitly asks otherwise.
-- Do not exfiltrate secrets (.env, keys, tokens, credentials).
-- Destructive or irreversible shell commands require clear user intent.
 
-## Skills
-When skill metadata appears below in <skills>...</skills>, follow the matching skill file
-when the task fits.
+def _legacy_default_prompt() -> str:
+    cwd = "/workspace"
+    tools = create_coding_tools(cwd)
+    return build_coding_agent_harness_system_prompt(
+        cwd=cwd,
+        tools=tools,
+        active_tool_names=[tool.name for tool in tools],
+        system_prompt_options=BuildSystemPromptOptions(cwd=cwd),
+    )
 
-When finished, answer the user directly without calling more tools.
-"""
+
+CODING_SYSTEM_PROMPT = _legacy_default_prompt()

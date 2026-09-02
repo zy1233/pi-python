@@ -7,16 +7,11 @@ from pi_agent_harness.types import AgentHarnessResources
 
 
 def build_harness_system_prompt(base_prompt: str, resources: AgentHarnessResources) -> str:
-    parts = [base_prompt.strip() if base_prompt else "You are a helpful assistant."]
-    if resources.skills:
-        skills = format_skills_for_system_prompt(resources.skills)
-        if skills:
-            parts.extend(
-                [
-                    "",
-                    "Available skills. Use them when relevant; call harness.skill(name) only when "
-                    "the user explicitly asks to run a skill.",
-                    skills,
-                ]
-            )
-    return "\n".join(parts)
+    """Legacy shim: append skills when the base prompt has no ``<available_skills>`` block."""
+    prompt = base_prompt.strip() if base_prompt else "You are a helpful assistant."
+    if "<available_skills>" in prompt or not resources.skills:
+        return prompt
+    skills = format_skills_for_system_prompt(resources.skills)
+    if not skills:
+        return prompt
+    return f"{prompt}{skills}"

@@ -340,7 +340,7 @@ Use `.venv-test-real` for pytest real-LLM tests; the smoke script can run from t
 ### Next
 
 - **Phase 4 (Coding Agent CLI)** — done: `tui/` vendored; `pi_agent_cli` standard ACP agent; TUI spawn Python, skip xAI login, drop `x.ai/*`, home `~/.pi-python`, binary `pi`; slash/resume/headless; `config.toml` + Windows notes ([design doc](docs/specs/2026-08-25-phase4-coding-agent-cli-design.md), [Windows](docs/WINDOWS.md))
-- **Phase 5 (Coding Agent prompt engineering)** — planned: system prompt design for coding workflows, provider-specific prompt variants, integration with harness skills/templates
+- **Phase 5 (Coding Agent prompt engineering)** — done: pi-aligned `build_system_prompt` + tool contributions + context files + `<available_skills>` ([design doc](docs/specs/2026-09-02-phase5-prompt-engine-design.md))
 - **Phase 6 (Extended integrations)** — planned: native MCP client, git-aware context injection, multi-provider production testing matrix
 
 ## License

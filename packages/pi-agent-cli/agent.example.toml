@@ -20,3 +20,10 @@ paths = ["~/.pi-python/skills", ".pi/skills"]
 [agent]
 # Used by the Rust TUI when PI_AGENT_COMMAND is unset (Windows: prefer a venv python.exe).
 command = "python -m pi_agent_cli"
+
+[prompt]
+# no_context_files = false
+# custom_system_prompt = "You are a helpful assistant."
+# custom_system_prompt_file = "~/.pi-python/agent/SYSTEM.md"
+# append_system_prompt = "Always run tests after edits."
+# append_system_prompt_file = "~/.pi-python/agent/APPEND_SYSTEM.md"

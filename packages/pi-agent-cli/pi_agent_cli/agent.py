@@ -204,7 +204,7 @@ class PiAcpAgent(Agent):
             return await self._handle_tool_call(session_id, event)
 
         resources = await load_session_resources(cwd=cwd, config=self._config)
-        harness = create_session_harness(
+        harness = await create_session_harness(
             session=session,
             cwd=cwd,
             config=self._config,
