@@ -42,13 +42,13 @@ pub fn resolve_grok_home() -> Option<PathBuf> {
     )
 }
 
-/// The default `<home>/.grok`, used when `$GROK_HOME` is unset.
+/// The default `<home>/.pi-python`, used when neither `$PI_HOME` nor `$GROK_HOME` is set.
 pub fn default_grok_home() -> PathBuf {
     grok_home_in(&dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")))
 }
 
-/// The grok home, created if missing and cached for the process; falls back to
-/// [`default_grok_home`] when neither `$GROK_HOME` nor a home resolves.
+/// The pi-python home, created if missing and cached for the process; falls back to
+/// [`default_grok_home`] when neither `$PI_HOME` / `$GROK_HOME` nor a home resolves.
 pub fn grok_home() -> PathBuf {
     static GROK_HOME: OnceLock<PathBuf> = OnceLock::new();
     GROK_HOME

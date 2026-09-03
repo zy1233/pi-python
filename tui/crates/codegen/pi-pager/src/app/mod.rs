@@ -2309,21 +2309,22 @@ mod tests {
         assert!(!args.no_alt_screen);
     }
     #[test]
-    fn cli_command_name_is_pi() {
+    fn cli_command_name_is_zypi() {
         use clap::CommandFactory;
-        assert_eq!(PagerArgs::command().get_name(), "pi");
+        assert_eq!(PagerArgs::command().get_name(), crate::brand::CLI_NAME);
     }
     #[test]
     fn cli_help_output_header() {
         use clap::CommandFactory;
         let help = PagerArgs::command().render_long_help().to_string();
         let first_5: Vec<&str> = help.lines().take(5).collect();
+        let expected_usage = format!("Usage: {} [OPTIONS] [PROMPT] [COMMAND]", crate::brand::CLI_NAME);
         assert_eq!(
             first_5,
             vec![
-                "pi coding agent TUI",
+                crate::brand::ABOUT,
                 "",
-                "Usage: pi [OPTIONS] [PROMPT] [COMMAND]",
+                expected_usage.as_str(),
                 "",
                 "Arguments:",
             ]

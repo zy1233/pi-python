@@ -132,23 +132,11 @@ struct ExtEnvelope<T> {
     error: Option<serde_json::Value>,
 }
 async fn ext_call<T: serde::de::DeserializeOwned>(
-    tx: &pi_acp_lib::AcpAgentTx,
+    _tx: &pi_acp_lib::AcpAgentTx,
     method: &str,
-    params: &impl serde::Serialize,
+    _params: &impl serde::Serialize,
 ) -> Result<T> {
-    let req =
-        ext_request(method, params).map_err(|e| anyhow::anyhow!("failed to build request: {e}"))?;
-    let resp = acp_send(req, tx)
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let envelope: ExtEnvelope<T> = serde_json::from_str(resp.0.get())
-        .map_err(|e| anyhow::anyhow!("response parse error: {e}"))?;
-    if let Some(err) = envelope.error {
-        bail!("ACP error: {err}");
-    }
-    envelope
-        .result
-        .ok_or_else(|| anyhow::anyhow!("ACP response missing result field"))
+    bail!("Worktree commands are not supported in standard ACP mode ({method})");
 }
 async fn cmd_list(
     tx: &pi_acp_lib::AcpAgentTx,

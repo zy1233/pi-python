@@ -1,4 +1,4 @@
-//! `grok completions <shell>` — generate shell completion scripts.
+//! `zypi completions <shell>` — generate shell completion scripts.
 //!
 //! Used by the installers and npm postinstall; must stay side-effect free
 //! (no network, auth, tracing, or tokio).
@@ -10,18 +10,17 @@ use crate::app::PagerArgs;
 
 /// Generate and print the completion script for the given shell.
 pub fn run(shell: Shell) {
-    // Ensure the script always uses the public "grok" name (matches historical
-    // behavior and what the installers + docs expect).
-    let mut cmd = PagerArgs::command().name("grok");
+    let bin_name = crate::brand::CLI_NAME;
+    let mut cmd = PagerArgs::command().name(bin_name);
     if shell != Shell::Zsh {
-        generate(shell, &mut cmd, "grok", &mut std::io::stdout());
+        generate(shell, &mut cmd, bin_name, &mut std::io::stdout());
         return;
     }
     // zsh needs post-processing (see fix_zsh_root_prompt_positional).
     let mut buf = Vec::new();
-    generate(shell, &mut cmd, "grok", &mut buf);
+    generate(shell, &mut cmd, bin_name, &mut buf);
     match String::from_utf8(buf) {
-        Ok(script) => print!("{}", fix_zsh_root_prompt_positional(&script)),
+        Ok(script) => print!("{}", fix_zsh_root_prompt_positional(&script, bin_name)),
         // clap_complete output is generated from Rust strings, so this arm is
         // unreachable in practice — but the installers run this command, so
         // emit the unmodified script rather than panic.
@@ -39,7 +38,7 @@ pub fn run(shell: Shell) {
 /// The generated root `_arguments` spec emits a `'::prompt …'` slot before
 /// the subcommand slot but dispatches subcommands with `case $line[2]`. zsh
 /// assigns the typed subcommand to the *prompt* slot (`$line[1]`), leaves
-/// `$line[2]` empty, and the dispatch falls through — so `grok worktree <TAB>`
+/// `$line[2]` empty, and the dispatch falls through — so `zypi doctor <TAB>`
 /// re-offers every top-level command. (`hide = true` on the positional does
 /// not change the generated script.)
 ///
@@ -48,7 +47,7 @@ pub fn run(shell: Shell) {
 /// blocks already use `$line[1]` and are untouched; the three rewritten
 /// patterns are unique to the root block (pinned by the test below — delete
 /// this whole workaround once upstream fixes the generator).
-fn fix_zsh_root_prompt_positional(script: &str) -> String {
+fn fix_zsh_root_prompt_positional(script: &str, bin_name: &str) -> String {
     let mut out = String::with_capacity(script.len());
     script
         .lines()
@@ -58,14 +57,16 @@ fn fix_zsh_root_prompt_positional(script: &str) -> String {
             out.push_str(line);
             out.push('\n');
         });
+    let from_curcontext = format!(r#"curcontext="${{curcontext%:*:*}}:{bin_name}-command-$line[2]:""#);
+    let to_curcontext = format!(r#"curcontext="${{curcontext%:*:*}}:{bin_name}-command-$line[1]:""#);
     for (from, to) in [
         (
             r#"words=($line[2] "${words[@]}")"#,
             r#"words=($line[1] "${words[@]}")"#,
         ),
         (
-            r#"curcontext="${curcontext%:*:*}:grok-command-$line[2]:""#,
-            r#"curcontext="${curcontext%:*:*}:grok-command-$line[1]:""#,
+            from_curcontext.as_str(),
+            to_curcontext.as_str(),
         ),
         (r#"case $line[2] in"#, r#"case $line[1] in"#),
     ] {
@@ -80,18 +81,20 @@ mod tests {
 
     /// Generate the zsh completion script exactly like `run` does.
     fn zsh_script() -> String {
-        let mut cmd = PagerArgs::command().name("grok");
+        let bin_name = crate::brand::CLI_NAME;
+        let mut cmd = PagerArgs::command().name(bin_name);
         let mut buf = Vec::new();
-        generate(Shell::Zsh, &mut cmd, "grok", &mut buf);
+        generate(Shell::Zsh, &mut cmd, bin_name, &mut buf);
         String::from_utf8(buf).expect("completion script is UTF-8")
     }
 
     // The optional `[PROMPT]` positional (app/cli.rs) makes clap_complete emit
     // a `::prompt` slot before the subcommand slot and dispatch on `$line[2]`,
-    // so `grok worktree <TAB>` re-offered every top-level command (upstream
+    // so `zypi doctor <TAB>` re-offered every top-level command (upstream
     // clap-rs/clap#6282).
     #[test]
     fn zsh_completions_drop_prompt_slot_and_dispatch_on_line_1() {
+        let bin_name = crate::brand::CLI_NAME;
         let raw = zsh_script();
         // Preconditions: the workaround is still needed. If these start
         // failing, clap_complete fixed the positional handling — delete
@@ -102,7 +105,7 @@ mod tests {
             "raw root dispatch on $line[2]"
         );
 
-        let fixed = fix_zsh_root_prompt_positional(&raw);
+        let fixed = fix_zsh_root_prompt_positional(&raw, bin_name);
         assert!(
             !fixed.contains("::prompt"),
             "prompt positional must not appear in the emitted zsh script"
@@ -112,15 +115,18 @@ mod tests {
             "root dispatch must be shifted to $line[1]"
         );
         assert!(
-            fixed.contains(r#"curcontext="${curcontext%:*:*}:grok-command-$line[1]:""#),
+            fixed.contains(&format!(r#"curcontext="${{curcontext%:*:*}}:{bin_name}-command-$line[1]:""#)),
             "root dispatch context must use $line[1]"
         );
         // Subcommand dispatch blocks (already on $line[1]) must survive.
         assert!(
-            fixed.contains("grok-worktree-command-$line[1]"),
+            fixed.contains(&format!("{bin_name}-doctor-command-$line[1]")),
             "nested subcommand dispatch must be untouched"
         );
         // The subcommand list itself must still be offered at the root.
-        assert!(fixed.contains("_grok_commands"), "root command list intact");
+        assert!(
+            fixed.contains(&format!("_{bin_name}_commands")),
+            "root command list intact"
+        );
     }
 }

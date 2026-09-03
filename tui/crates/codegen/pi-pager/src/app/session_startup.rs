@@ -615,14 +615,15 @@ pub fn probe_advertised_tool_ids() -> Option<Vec<String>> {
 }
 #[cfg(feature = "local-workspace")]
 fn local_workspace_ack_path() -> Option<std::path::PathBuf> {
-    let home = std::env::var("GROK_HOME")
+    let home = std::env::var("PI_HOME")
+        .or_else(|_| std::env::var("GROK_HOME"))
         .ok()
         .filter(|s| !s.trim().is_empty())
         .map(std::path::PathBuf::from)
         .or_else(|| {
             dirs::home_dir()
                 .or_else(|| std::env::var_os("HOME").map(Into::into))
-                .map(|h| h.join(".grok"))
+                .map(|h| h.join(".pi-python"))
         })?;
     Some(home.join("local_workspace_ack"))
 }

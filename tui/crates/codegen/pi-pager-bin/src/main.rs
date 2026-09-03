@@ -59,7 +59,7 @@ fn process_identity(command: Option<&Command>, is_interactive: bool) -> Option<P
     })
 }
 use std::env;
-use pi_update::{UpdateConfig, auto_update, enforce_version_policy_or_exit};
+use pi_update::enforce_version_policy_or_exit;
 /// Entrypoint tag for `grok -p`; keys the quiet stderr default in `init_tracing_simple`.
 const HEADLESS_ENTRYPOINT: &str = "headless";
 /// Initialize simple tracing for non-TUI agent modes.
@@ -83,30 +83,13 @@ fn init_tracing_simple(app_entrypoint: &'static str) {
         .with_target(false)
         .with_ansi(true)
         .with_writer(std::io::stderr);
+    // Phase 4: otel export disabled per design §4.4; Python agent owns LLM telemetry if any.
     let registry = tracing_subscriber::registry()
         .with(fmt_layer.with_filter(env_filter))
         .with(pi_telemetry::sampling_log::layer())
         .with(pi_telemetry::instrumentation::layer())
-        .with(pi_telemetry::hooks_log::layer())
-        .with(pi_telemetry::otel_layer::build_otel_layer(
-            pi_telemetry::otel_layer::OtelClientInfo {
-                client_name: "zypi",
-                client_version: pi_version::VERSION,
-                service_version: env!("VERSION_WITH_COMMIT"),
-                app_entrypoint,
-            },
-            pi_shell::auth::credential_provider::build_default_otel_layer_config(),
-        ));
+        .with(pi_telemetry::hooks_log::layer());
     pi_telemetry::debug_log::install_firehose(registry, app_entrypoint);
-    pi_telemetry::external::init(
-        pi_shell::agent::config::resolve_external_otel_config(
-            pi_telemetry::external::config::ExternalClientInfo {
-                service_version: env!("VERSION_WITH_COMMIT").to_owned(),
-                client_version: pi_version::VERSION.to_owned(),
-                app_entrypoint: app_entrypoint.to_owned(),
-            },
-        ),
-    );
 }
 /// Flush observability, then exit. Used by the agent/headless signal handler.
 ///
@@ -159,12 +142,13 @@ fn raise_fd_limit() {
 #[cfg(not(unix))]
 fn raise_fd_limit() {}
 const RUNTIME_SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+const PI_WORKER_THREADS_ENV: &str = "PI_WORKER_THREADS";
 const GROK_WORKER_THREADS_ENV: &str = "GROK_WORKER_THREADS";
 /// tokio defaults to one worker per logical CPU. On a host with hundreds of
 /// CPUs that can exhaust a cgroup thread budget at startup and abort under
 /// `panic = "abort"`. A terminal UI is I/O-bound, so cap at 8.
 const DEFAULT_MAX_WORKER_THREADS: NonZeroUsize = NonZeroUsize::new(8).unwrap();
-/// How `GROK_WORKER_THREADS` resolved.
+/// How worker threads override resolved.
 #[derive(Debug, PartialEq, Eq)]
 enum WorkerCount {
     Accepted(NonZeroUsize),
@@ -185,6 +169,7 @@ impl WorkerCount {
         }
     }
     fn notice(&self) -> Option<String> {
+        let bin_name = pi_pager::brand::CLI_NAME;
         match self {
             Self::Accepted(_) => None,
             Self::Clamped {
@@ -192,17 +177,19 @@ impl WorkerCount {
                 used,
                 cores,
             } => Some(format!(
-                "grok: clamped {GROK_WORKER_THREADS_ENV}={requested} to {used} (valid range is 1..={cores})"
+                "{bin_name}: clamped {PI_WORKER_THREADS_ENV}={requested} to {used} (valid range is 1..={cores})"
             )),
             Self::Ignored { value, .. } => Some(format!(
-                "grok: ignoring {GROK_WORKER_THREADS_ENV}={value:?} (not a valid integer)"
+                "{bin_name}: ignoring {PI_WORKER_THREADS_ENV}={value:?} (not a valid integer)"
             )),
         }
     }
 }
 fn cli_worker_threads() -> NonZeroUsize {
     let cores = std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
-    let resolved = match std::env::var(GROK_WORKER_THREADS_ENV) {
+    let resolved = match std::env::var(PI_WORKER_THREADS_ENV)
+        .or_else(|_| std::env::var(GROK_WORKER_THREADS_ENV))
+    {
         Ok(value) => worker_threads_from(Some(&value), cores),
         Err(std::env::VarError::NotPresent) => worker_threads_from(None, cores),
         Err(std::env::VarError::NotUnicode(value)) => WorkerCount::Ignored {
@@ -378,7 +365,8 @@ fn install_heap_profile_hooks() {
 }
 fn version_text(channel_label: &str) -> String {
     format!(
-        "grok {}\n",
+        "{} {}\n",
+        pi_pager::brand::CLI_NAME,
         pi_version::display_version_with_commit(
             pi_version::full_version(),
             channel_label,
@@ -486,8 +474,9 @@ fn main() {
         eprintln!("Couldn't start {}: {e}", pi_pager::brand::CLI_NAME);
         eprintln!();
         eprintln!(
-            "Update Grok to a version the policy allows, or ask your administrator \
-             to fix the managed requirements."
+            "Update {} to a version the policy allows, or ask your administrator \
+             to fix the managed requirements.",
+            pi_pager::brand::CLI_NAME
         );
         std::process::exit(2);
     }
@@ -502,7 +491,7 @@ fn main() {
     if pi_shell::util::config::load_crash_handler_enabled_sync() {
         let crash_dir = pi_shell::util::grok_home::grok_home().join("crash");
         if let Some(report) = pi_crash_handler::check_previous_crash(&crash_dir) {
-            eprintln!("Grok crashed during your last session.");
+            eprintln!("{} crashed during your last session.", pi_pager::brand::CLI_NAME);
             eprintln!("  Signal:  {}", report.signal_name);
             eprintln!("  Version: {}", report.app_version);
             eprintln!("  Report:  {}", report.report_path.display());
@@ -530,7 +519,7 @@ fn main() {
     builder.worker_threads(workers.get()).enable_all();
     let runtime =
         pi_tty_utils::runtime::build_with_blocking_pool(&mut builder).unwrap_or_else(|e| {
-            eprintln!("grok: failed to start tokio runtime: {e}");
+            eprintln!("{}: failed to start tokio runtime: {e}", pi_pager::brand::CLI_NAME);
             shutdown_and_flush_telemetry(1);
         });
     let result = run_and_shutdown(runtime, async_main(args), RUNTIME_SHUTDOWN_GRACE);
@@ -564,7 +553,9 @@ async fn async_main(args: PagerArgs) -> Result<()> {
     }
     if let Some(ref path) = args.debug_file {
         unsafe {
+            std::env::set_var("PI_DEBUG_LOG", path);
             std::env::set_var("GROK_DEBUG_LOG", path);
+            std::env::remove_var("PI_LOG_FILE");
             std::env::remove_var("GROK_LOG_FILE");
         }
     }
@@ -574,7 +565,9 @@ async fn async_main(args: PagerArgs) -> Result<()> {
                 unsafe { std::env::set_var(k, v) };
             }
         };
+        set_if_unset("PI_DEBUG_LOG", "1");
         set_if_unset("GROK_DEBUG_LOG", "1");
+        set_if_unset("PI_HOOKS_LOG", "1");
         set_if_unset("GROK_HOOKS_LOG", "1");
     }
     if let Some(Command::Completions { shell }) = &args.command {
@@ -614,7 +607,6 @@ async fn async_main(args: PagerArgs) -> Result<()> {
     if let Some(identity) = process_identity(args.command.as_ref(), is_interactive) {
         set_identity(identity);
     }
-    let update_config = build_update_config();
     if let Some(command) = args.command.take() {
         match command {
             Command::Version { json } => {
@@ -637,7 +629,7 @@ async fn async_main(args: PagerArgs) -> Result<()> {
             }
             Command::DiskUsage(disk_usage_args) => {
                 init_tracing_simple("cli");
-                let _otel_guard = pi_telemetry::otel_layer::otel_guard();
+                let _otel_guard: Option<()> = None;
                 return pi_pager::disk_usage_cmd::run(disk_usage_args);
             }
             Command::Export(export_args) => {
@@ -660,7 +652,7 @@ async fn async_main(args: PagerArgs) -> Result<()> {
     )?;
     if let Some(prompt) = headless_prompt {
         init_tracing_simple(HEADLESS_ENTRYPOINT);
-        let _otel_guard = pi_telemetry::otel_layer::otel_guard();
+        let _otel_guard: Option<()> = None;
         enforce_version_policy_or_exit();
         let launch_yolo = pi_shell::util::config::effective_yolo_for_launch(
             args.yolo,
@@ -721,122 +713,24 @@ async fn async_main(args: PagerArgs) -> Result<()> {
     enforce_version_policy_or_exit();
     // Phase 4: no otel export from the pager; Python owns LLM telemetry if any.
     let _otel_guard: Option<()> = None;
-    type UpdateWaitHandle = tokio::task::JoinHandle<std::io::Result<std::process::ExitStatus>>;
-    let bg_update_wait: std::sync::Arc<tokio::sync::Mutex<Option<UpdateWaitHandle>>> =
-        std::sync::Arc::new(tokio::sync::Mutex::new(None));
-    let bg_update_rx: Option<tokio::sync::oneshot::Receiver<Option<auto_update::UpdateAvailable>>> =
-        if should_check_for_updates(args.no_auto_update) {
-            let update_config = update_config.clone();
-            let wait_slot = bg_update_wait.clone();
-            let (tx, rx) = tokio::sync::oneshot::channel();
-            tokio::spawn(async move {
-                let check = auto_update::check_update_background(&update_config).await;
-                if let Some(mut child) = check.download {
-                    *wait_slot.lock().await = Some(tokio::spawn(async move { child.wait().await }));
-                }
-                let _ = tx.send(check.update);
-            });
-            Some(rx)
-        } else {
-            None
-        };
+    // Phase 4: auto-update disabled per design §4.4
+    let bg_update_rx = None;
     let result = pi_pager::app::run(args, bg_update_rx).await;
     pi_sandbox::flush();
     match result {
         Ok(true) => {
-            let adopted = bg_update_wait.lock().await.take();
-            if finish_update_on_exit(adopted, &update_config).await {
-                eprintln!("Update installed. Run `{}` to start.", pi_pager::brand::CLI_NAME);
-            } else {
-                eprintln!(
-                    "Update did not complete. Run `{} update` to retry.",
-                    pi_pager::brand::CLI_NAME
-                );
-            }
+            eprintln!("Update is disabled in {}.", pi_pager::brand::CLI_NAME);
             Ok(())
         }
         Ok(false) => Ok(()),
         Err(e) => Err(e),
     }
 }
-/// Complete the update after a quit-for-update (Ctrl+U) exit. Returns `true`
-/// when an update path completed without a reported failure.
-///
-/// Prefers awaiting the parked waiter for the background `grok update` child
-/// spawned at startup — the download is usually already done or in flight.
-/// Only when there is no waiter (spawn failed, or no download was needed
-/// because the target was already on disk) or the child failed does this
-/// fall back to a fresh blocking `grok update`, which itself resolves to
-/// "Already up to date" without downloading when the disk is current.
-async fn finish_update_on_exit(
-    adopted: Option<tokio::task::JoinHandle<std::io::Result<std::process::ExitStatus>>>,
-    update_config: &UpdateConfig,
-) -> bool {
-    let run_blocking = |reason: Option<String>| async move {
-        if let Some(reason) = reason {
-            eprintln!("{reason}");
-        }
-        auto_update::run_update_if_available(
-            auto_update::UpdateRunMode::Blocking,
-            false,
-            auto_update::CliUpdateTrigger::UserCommand,
-            update_config,
-        )
-        .await
-        .is_ok()
-    };
-    match adopted {
-        Some(handle) => {
-            eprintln!("Waiting for the update download to finish...");
-            match handle.await {
-                Ok(Ok(status)) if status.success() => true,
-                Ok(Ok(status)) => {
-                    run_blocking(Some(format!(
-                        "Background update exited with {status}; retrying..."
-                    )))
-                    .await
-                }
-                Ok(Err(e)) => {
-                    run_blocking(Some(format!(
-                        "Could not wait for the background update ({e}); retrying..."
-                    )))
-                    .await
-                }
-                Err(join_err) => {
-                    run_blocking(Some(format!(
-                        "Background update waiter failed ({join_err}); retrying..."
-                    )))
-                    .await
-                }
-            }
-        }
-        None => run_blocking(None).await,
-    }
-}
-/// Build an [`UpdateConfig`] from the current environment and config files.
-fn build_update_config() -> UpdateConfig {
-    let environment = pi_shell::env::GrokBuildEnvironment::from_flags(false, false);
-    let mut config = UpdateConfig::from_environment(&environment);
-    config.deployment_key =
-        pi_shell::agent::config::EndpointsConfig::default().deployment_key;
-    config.npm_registry = std::env::var("GROK_NPM_REGISTRY")
-        .ok()
-        .or_else(pi_shell::util::config::load_npm_registry_sync);
-    if let Ok(root) = pi_shell::config::load_effective_config_disk_only()
-        && let Some(ch) = pi_shell::util::config::channel_from_toml_opt(&root)
-    {
-        config.channel = ch;
-    }
-    config
-}
-/// Central gate for auto-update checks; add new suppression rules here,
-/// not at call sites.
-fn should_check_for_updates(_no_auto_update_flag: bool) -> bool {
-    false
-}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser as _;
     #[test]
     fn default_caps_the_core_count() {
         let nz = |n| NonZeroUsize::new(n).unwrap();
@@ -901,7 +795,10 @@ mod tests {
         );
         assert_eq!(
             resolve_worker_override("100000", cores).notice().unwrap(),
-            "grok: clamped GROK_WORKER_THREADS=100000 to 360 (valid range is 1..=360)"
+            format!(
+                "{}: clamped {PI_WORKER_THREADS_ENV}=100000 to 360 (valid range is 1..=360)",
+                pi_pager::brand::CLI_NAME
+            )
         );
     }
     #[test]
@@ -914,7 +811,10 @@ mod tests {
         }
         assert_eq!(
             resolve_worker_override("abc", cores).notice().unwrap(),
-            "grok: ignoring GROK_WORKER_THREADS=\"abc\" (not a valid integer)"
+            format!(
+                "{}: ignoring {PI_WORKER_THREADS_ENV}=\"abc\" (not a valid integer)",
+                pi_pager::brand::CLI_NAME
+            )
         );
     }
     #[test]
@@ -928,20 +828,20 @@ mod tests {
             let mut output = Vec::new();
             write_version(&mut output, label).unwrap();
             let output = String::from_utf8(output).unwrap();
-            assert!(output.starts_with("grok "));
+            assert!(output.starts_with(&format!("{} ", pi_pager::brand::CLI_NAME)));
             assert!(output.contains(env!("VERSION_WITH_COMMIT")));
             assert!(output.ends_with(expected_suffix), "{output:?}");
         }
     }
     #[test]
     fn version_flags_and_doctor_are_distinct_early_intents() {
-        let version = PagerArgs::try_parse_from(["grok", "--version"]).unwrap();
+        let version = PagerArgs::try_parse_from(["zypi", "--version"]).unwrap();
         assert!(version.version);
         assert!(version.command.is_none());
-        let short = PagerArgs::try_parse_from(["grok", "-v"]).unwrap();
+        let short = PagerArgs::try_parse_from(["zypi", "-v"]).unwrap();
         assert!(short.version);
         assert!(short.command.is_none());
-        let subcommand = PagerArgs::try_parse_from(["grok", "version"]).unwrap();
+        let subcommand = PagerArgs::try_parse_from(["zypi", "version"]).unwrap();
         assert!(!subcommand.version);
         assert!(matches!(
             subcommand.command,
@@ -1092,261 +992,6 @@ mod tests {
         let dump = TempHeapDump::new("shell");
         pi_shell::heap_profile::dump_to_path(dump.path()).expect("shell dump");
         dump.assert_nonempty_dump();
-    }
-    /// Pins the gate composition; a dropped conjunct fails its named case.
-    #[test]
-    fn stdio_auto_update_requires_direct_stdio_enabled_and_managed() {
-        assert!(stdio_auto_update_enabled(true, false, true, true));
-        assert!(
-            !stdio_auto_update_enabled(true, true, true, true),
-            "leader bridge"
-        );
-        assert!(
-            !stdio_auto_update_enabled(false, false, true, true),
-            "non-stdio"
-        );
-        assert!(
-            !stdio_auto_update_enabled(true, false, false, true),
-            "updates off"
-        );
-        assert!(
-            !stdio_auto_update_enabled(true, false, true, false),
-            "pinned binary"
-        );
-    }
-    use clap::Parser as _;
-    /// `grok dashboard` flags the startup hook without forcing leader mode —
-    /// the dashboard is independent of leader mode, so the launch keeps
-    /// whatever leader setting the user (or config) chose.
-    #[serial_test::serial(GROK_AGENT_DASHBOARD)]
-    #[test]
-    fn dashboard_subcommand_flags_startup_without_forcing_leader() {
-        let mut args = PagerArgs::try_parse_from(["grok", "dashboard"]).unwrap();
-        assert!(!args.leader, "fixture: no explicit --leader");
-        flag_dashboard_at_startup_if_requested(&mut args).unwrap();
-        assert!(!args.leader, "dashboard must NOT force leader mode");
-        assert!(
-            args.command.is_none(),
-            "soft subcommand must be consumed so the interactive path runs",
-        );
-        assert_eq!(
-            std::env::var("GROK_OPEN_DASHBOARD_AT_STARTUP").as_deref(),
-            Ok("1"),
-            "startup hook flag must be set",
-        );
-        unsafe { std::env::remove_var("GROK_OPEN_DASHBOARD_AT_STARTUP") };
-    }
-    /// `grok dashboard --no-leader` is allowed — the dashboard does not
-    /// require a leader, so the combination launches into the dashboard in
-    /// non-leader mode.
-    #[serial_test::serial(GROK_AGENT_DASHBOARD)]
-    #[test]
-    fn dashboard_subcommand_allows_no_leader() {
-        let mut args = PagerArgs::try_parse_from(["grok", "--no-leader", "dashboard"]).unwrap();
-        flag_dashboard_at_startup_if_requested(&mut args)
-            .expect("--no-leader + dashboard must be allowed");
-        assert!(args.no_leader, "--no-leader must be preserved");
-        assert!(!args.leader, "dashboard must not force leader mode");
-        assert!(
-            args.command.is_none(),
-            "soft subcommand must be consumed so the interactive path runs",
-        );
-        assert_eq!(
-            std::env::var("GROK_OPEN_DASHBOARD_AT_STARTUP").as_deref(),
-            Ok("1"),
-            "startup hook flag must be set",
-        );
-        unsafe { std::env::remove_var("GROK_OPEN_DASHBOARD_AT_STARTUP") };
-    }
-    /// `GROK_AGENT_DASHBOARD=0` disables the feature — the subcommand
-    /// must error visibly before the TUI starts.
-    #[serial_test::serial(GROK_AGENT_DASHBOARD)]
-    #[test]
-    fn dashboard_subcommand_errors_when_disabled() {
-        unsafe { std::env::set_var("GROK_AGENT_DASHBOARD", "0") };
-        let mut args = PagerArgs::try_parse_from(["grok", "dashboard"]).unwrap();
-        let result = flag_dashboard_at_startup_if_requested(&mut args);
-        unsafe { std::env::remove_var("GROK_AGENT_DASHBOARD") };
-        let err = result.expect_err("disabled dashboard must error");
-        assert!(err.to_string().contains("disabled"), "got: {err}");
-        assert!(
-            std::env::var("GROK_OPEN_DASHBOARD_AT_STARTUP").is_err(),
-            "failure path must not flag the startup hook",
-        );
-    }
-    #[test]
-    fn workspace_command_gate_resolution() {
-        use pi_shell::util::config::RemoteSettings;
-        let on = RemoteSettings {
-            workspace_command_enabled: Some(true),
-            ..RemoteSettings::default()
-        };
-        let off = RemoteSettings::default();
-        assert_eq!(
-            workspace_command_gate(None, Some(&on)),
-            WorkspaceGate::Enabled
-        );
-        assert_eq!(
-            workspace_command_gate(None, Some(&off)),
-            WorkspaceGate::Disabled
-        );
-        assert_eq!(workspace_command_gate(None, None), WorkspaceGate::Unknown);
-        assert_eq!(
-            workspace_command_gate(Some(true), Some(&off)),
-            WorkspaceGate::Enabled
-        );
-        assert_eq!(
-            workspace_command_gate(Some(true), None),
-            WorkspaceGate::Enabled
-        );
-        assert_eq!(
-            workspace_command_gate(Some(false), Some(&on)),
-            WorkspaceGate::Disabled
-        );
-        assert_eq!(
-            workspace_command_gate(Some(false), None),
-            WorkspaceGate::Disabled
-        );
-    }
-    #[serial_test::serial(GROK_WORKSPACE_COMMAND)]
-    #[test]
-    fn workspace_command_env_override_parsing() {
-        unsafe { std::env::remove_var("GROK_WORKSPACE_COMMAND") };
-        assert_eq!(workspace_command_env_override(), None);
-        unsafe { std::env::set_var("GROK_WORKSPACE_COMMAND", "1") };
-        assert_eq!(workspace_command_env_override(), Some(true));
-        unsafe { std::env::set_var("GROK_WORKSPACE_COMMAND", "off") };
-        assert_eq!(workspace_command_env_override(), Some(false));
-        unsafe { std::env::remove_var("GROK_WORKSPACE_COMMAND") };
-    }
-    #[test]
-    fn cache_initialize_request() {
-        let state = make_state();
-        let msg = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#;
-        cache_outgoing_acp_state(msg, &state);
-        let s = state.lock().unwrap();
-        assert_eq!(s.initialize_json.as_deref(), Some(msg));
-    }
-    #[test]
-    fn cache_session_load_preserves_full_request() {
-        let state = make_state();
-        let msg = r#"{"jsonrpc":"2.0","id":2,"method":"session/load","params":{"sessionId":"s1","cwd":"/tmp","mcpServers":[]}}"#;
-        cache_outgoing_acp_state(msg, &state);
-        let s = state.lock().unwrap();
-        let (sid, cached) = &s.sessions[0];
-        assert_eq!(sid, "s1");
-        assert_eq!(cached.load_request_json.as_deref(), Some(msg));
-        assert_eq!(cached.cwd.as_deref(), Some("/tmp"));
-        assert!(cached.mcp_servers_json.is_some());
-        assert_eq!(s.last_session_id.as_deref(), Some("s1"));
-    }
-    #[test]
-    fn cache_session_new_is_pending_until_response_assigns_id() {
-        let state = make_state();
-        let load = r#"{"jsonrpc":"2.0","id":2,"method":"session/load","params":{"sessionId":"s1","cwd":"/tmp"}}"#;
-        cache_outgoing_acp_state(load, &state);
-        let new = r#"{"jsonrpc":"2.0","id":3,"method":"session/new","params":{"cwd":"/home"}}"#;
-        cache_outgoing_acp_state(new, &state);
-        {
-            let s = state.lock().unwrap();
-            assert_eq!(s.sessions.len(), 1);
-            assert_eq!(s.sessions[0].0, "s1");
-            assert!(s.pending_new.is_some());
-            assert_eq!(
-                s.pending_new.as_ref().unwrap().cwd.as_deref(),
-                Some("/home")
-            );
-        }
-        cache_incoming_session_id(
-            r#"{"jsonrpc":"2.0","id":3,"result":{"sessionId":"s2"}}"#,
-            &state,
-        );
-        let s = state.lock().unwrap();
-        assert!(s.pending_new.is_none());
-        assert_eq!(s.sessions.len(), 2);
-        assert_eq!(s.sessions[1].0, "s2");
-        assert_eq!(s.sessions[1].1.cwd.as_deref(), Some("/home"));
-        assert_eq!(s.last_session_id.as_deref(), Some("s2"));
-    }
-    #[test]
-    fn cache_session_close_stops_replaying_it() {
-        let state = make_state();
-        cache_outgoing_acp_state(
-            r#"{"jsonrpc":"2.0","id":2,"method":"session/load","params":{"sessionId":"s1","cwd":"/tmp"}}"#,
-            &state,
-        );
-        cache_outgoing_acp_state(
-            r#"{"jsonrpc":"2.0","id":3,"method":"_x.ai/session/close","params":{"sessionId":"s1"}}"#,
-            &state,
-        );
-        let s = state.lock().unwrap();
-        assert!(s.sessions.is_empty(), "closed session must not be replayed");
-        assert!(s.last_session_id.is_none());
-    }
-    /// The standard close spelling must stop the replay exactly like the ext
-    /// spelling: adopting `session/close` without teaching the cache would
-    /// resurrect closed sessions on every leader reconnect.
-    #[test]
-    fn cache_standard_session_close_stops_replaying_it() {
-        let state = make_state();
-        cache_outgoing_acp_state(
-            r#"{"jsonrpc":"2.0","id":2,"method":"session/load","params":{"sessionId":"s1","cwd":"/tmp"}}"#,
-            &state,
-        );
-        cache_outgoing_acp_state(
-            r#"{"jsonrpc":"2.0","id":3,"method":"session/close","params":{"sessionId":"s1"}}"#,
-            &state,
-        );
-        let s = state.lock().unwrap();
-        assert!(s.sessions.is_empty(), "closed session must not be replayed");
-        assert!(s.last_session_id.is_none());
-    }
-    /// A resume-only session must survive a leader restart: the cache
-    /// synthesizes a load entry, since a new leader has no turn to reattach to.
-    #[test]
-    fn cache_session_resume_registers_unknown_sessions_for_replay() {
-        let state = make_state();
-        cache_outgoing_acp_state(
-            r#"{"jsonrpc":"2.0","id":2,"method":"session/resume","params":{"sessionId":"s1","cwd":"/proj"}}"#,
-            &state,
-        );
-        let s = state.lock().unwrap();
-        let (sid, cached) = &s.sessions[0];
-        assert_eq!(sid, "s1");
-        assert_eq!(
-            cached.load_request_json, None,
-            "a resume must not be replayed verbatim; the replay synthesizes a load"
-        );
-        assert_eq!(cached.cwd.as_deref(), Some("/proj"));
-        assert_eq!(s.last_session_id.as_deref(), Some("s1"));
-    }
-    /// A resume must not displace the original load's entry: that entry
-    /// carries the client's `_meta`, which a synthesized load cannot reproduce.
-    #[test]
-    fn cache_session_resume_does_not_displace_the_original_load() {
-        let state = make_state();
-        let load = r#"{"jsonrpc":"2.0","id":2,"method":"session/load","params":{"sessionId":"s1","cwd":"/tmp","_meta":{"noReplay":true}}}"#;
-        cache_outgoing_acp_state(load, &state);
-        cache_outgoing_acp_state(
-            r#"{"jsonrpc":"2.0","id":3,"method":"session/resume","params":{"sessionId":"s1","cwd":"/tmp"}}"#,
-            &state,
-        );
-        let s = state.lock().unwrap();
-        assert_eq!(s.sessions.len(), 1, "one session, one replay entry");
-        assert_eq!(
-            s.sessions[0].1.load_request_json.as_deref(),
-            Some(load),
-            "the original load, with its _meta, must survive the resume"
-        );
-    }
-    #[test]
-    fn cache_incoming_ignores_non_session_response() {
-        let state = make_state();
-        let msg = r#"{"jsonrpc":"2.0","id":1,"result":{"models":[]}}"#;
-        cache_incoming_session_id(msg, &state);
-        let s = state.lock().unwrap();
-        assert!(s.last_session_id.is_none());
-        assert!(s.sessions.is_empty());
     }
     fn multi_thread_runtime() -> tokio::runtime::Runtime {
         tokio::runtime::Builder::new_multi_thread()

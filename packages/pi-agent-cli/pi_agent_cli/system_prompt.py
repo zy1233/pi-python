@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,7 +12,23 @@ from pi_agent_harness.types import Skill
 
 DEFAULT_SELECTED_TOOLS: tuple[str, ...] = ("read", "bash", "edit", "write")
 
-_PI_PYTHON_DOCS = Path(__file__).resolve().parents[3]
+
+def _find_repo_root() -> Path:
+    env_docs = os.getenv("PI_DOCS_DIR")
+    if env_docs:
+        p = Path(env_docs).resolve()
+        if p.exists():
+            return p
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        if (parent / "docs").is_dir() and (parent / "README.md").is_file():
+            return parent
+    if len(current.parents) >= 4:
+        return current.parents[3]
+    return current.parent
+
+
+_PI_PYTHON_DOCS = _find_repo_root()
 
 
 @dataclass(frozen=True)

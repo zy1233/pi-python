@@ -542,7 +542,7 @@ async fn open_session(
                     let mut m = acp::Meta::new();
                     m.insert("noReplay".into(), serde_json::Value::Bool(true));
                     if let Some(rc) = restore_code {
-                        m.insert("x.ai/restore_code".into(), serde_json::Value::Bool(rc));
+                        m.insert("restoreCode".into(), serde_json::Value::Bool(rc));
                     }
                     Some(m)
                 }),
@@ -618,22 +618,8 @@ async fn fork_then_open(
         ensure_session_id_available(nid, &new_cwd_str)?;
     }
     let parent_is_worktree = parent_session_is_worktree(parent_id, &write_cwd);
-    let payload = fork_session_params(parent_id, &write_cwd, new_id, parent_is_worktree);
-    let fork_params = serde_json::value::to_raw_value(&payload)
-        .map_err(|e| anyhow::anyhow!("serialize fork params: {e}"))?;
-    let req = acp::ExtRequest::new("x.ai/session/fork", fork_params.into());
-    let resp = acp_send(req, acp_tx).await?;
-    if let Some(err) = fork_response_error(resp.0.get()) {
-        anyhow::bail!("fork failed: {err}");
-    }
-    let child = fork_response_new_session_id(resp.0.get())
-        .ok_or_else(|| anyhow::anyhow!("fork response missing newSessionId"))?;
-    match open_session(acp_tx, &write_cwd, Some(&child), restore_code).await {
-        Ok(opened) => Ok(opened),
-        Err(e) => Err(anyhow::anyhow!(
-            "fork succeeded as {child} but load failed: {e}"
-        )),
-    }
+    let _payload = fork_session_params(parent_id, &write_cwd, new_id, parent_is_worktree);
+    anyhow::bail!("Session fork is not supported in standard ACP mode");
 }
 
 /// Apply `-m` / effort after session open. Effort is soft-ignored on a non-supporting
@@ -1339,55 +1325,36 @@ enum BackgroundWork {
     Subagent(String),
 }
 
-/// Ext request that kills one unit of background work (subagent cancel or task kill).
+/// Best-effort kill of background work still pending at exit so it never outlives the process.
+async fn reap_pending_background_tasks(
+    _pending_bg: &HashSet<BackgroundWork>,
+    _session_id: &acp::SessionId,
+    _acp_tx: &AcpAgentTx,
+) {
+}
+
+#[cfg(test)]
 fn reap_request_for_work(
     work: &BackgroundWork,
     session_id: &acp::SessionId,
-) -> serde_json::Result<acp::ExtRequest> {
-    let (method, params) = match work {
-        BackgroundWork::Subagent(id) => (
-            "x.ai/subagent/cancel",
-            serde_json::value::to_raw_value(&CancelSubagentRequest {
-                subagent_id: id.clone(),
-            })?,
-        ),
-        BackgroundWork::Task(id) => (
-            "x.ai/task/kill",
-            serde_json::value::to_raw_value(&KillTaskRequest {
-                session_id: session_id.0.to_string(),
-                task_id: id.clone(),
-                source: pi_shell::extensions::task::TaskKillSource::Teardown,
-            })?,
-        ),
-    };
-    Ok(acp::ExtRequest::new(method, params.into()))
-}
-
-/// Best-effort kill of background work still pending at exit so it never outlives the process.
-async fn reap_pending_background_tasks(
-    pending_bg: &HashSet<BackgroundWork>,
-    session_id: &acp::SessionId,
-    acp_tx: &AcpAgentTx,
-) {
-    for work in pending_bg {
-        let request = match reap_request_for_work(work, session_id) {
-            Ok(request) => request,
-            Err(e) => {
-                tracing::warn!(?work, error = %e, "headless: failed to build reap request");
-                continue;
-            }
-        };
-        let method = request.method.clone();
-        match tokio::time::timeout(Duration::from_secs(10), acp_send(request, acp_tx)).await {
-            Ok(Ok(_)) => {
-                tracing::debug!(?work, %method, "headless: reaped pending background work")
-            }
-            Ok(Err(e)) => {
-                tracing::warn!(?work, %method, error = %e, "headless: failed to reap background work")
-            }
-            Err(_) => {
-                tracing::warn!(?work, %method, "headless: timed out reaping background work")
-            }
+) -> Option<acp::ExtRequest> {
+    match work {
+        BackgroundWork::Task(task_id) => {
+            let params = serde_json::json!({
+                "sessionId": session_id.0.as_ref(),
+                "taskId": task_id,
+                "source": "teardown",
+            });
+            let raw = serde_json::value::to_raw_value(&params).ok()?;
+            Some(acp::ExtRequest::new("x.ai/task/kill", raw.into()))
+        }
+        BackgroundWork::Subagent(subagent_id) => {
+            let params = serde_json::json!({
+                "sessionId": session_id.0.as_ref(),
+                "subagentId": subagent_id,
+            });
+            let raw = serde_json::value::to_raw_value(&params).ok()?;
+            Some(acp::ExtRequest::new("x.ai/subagent/cancel", raw.into()))
         }
     }
 }

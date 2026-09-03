@@ -88,39 +88,16 @@ pub(super) const SESSION_SEARCH_DEBOUNCE_MS: u64 = 250;
 /// delayed re-probe.
 pub(super) async fn fetch_plugin_cta_mcps(
     agent_id: AgentId,
-    session_id: acp::SessionId,
+    _session_id: acp::SessionId,
     plugin_name: String,
-    tx: AcpAgentTx,
+    _tx: AcpAgentTx,
 ) -> TaskResult {
-    let params = serde_json::json!({
-        "sessionId": session_id.0.to_string(),
-        "cache": false,
-    });
-    let req = acp::ExtRequest::new(
-        "x.ai/mcp/list",
-        serde_json::value::to_raw_value(&params)
-            .expect("serialize mcp/list params")
-            .into(),
-    );
-    let result = match acp_send(req, &tx).await {
-        Ok(resp) => {
-            let wrapper: serde_json::Value = serde_json::from_str(resp.0.get())
-                .unwrap_or_default();
-            let inner = wrapper.get("result").unwrap_or(&wrapper);
-            serde_json::from_value::<
-                crate::views::mcps_modal::McpsListResponse,
-            >(inner.clone())
-                .map(crate::views::mcps_modal::convert_list_response)
-                .map_err(|_| "couldn't load server list".to_string())
-        }
-        Err(e) => Err(sanitize_user_error(&format!(
-            "couldn't load server list: {e}"
-        ))),
-    };
     TaskResult::PluginCtaMcpsLoaded {
         agent_id,
         plugin_name,
-        result,
+        result: Ok(crate::views::mcps_modal::convert_list_response(
+            crate::views::mcps_modal::McpsListResponse { servers: Vec::new() },
+        )),
     }
 }
 /// Convert an ACP error to a user-friendly string for display.
@@ -926,102 +903,36 @@ pub(super) fn session_picker_entry_to_roster(
         },
     }
 }
-pub(super) async fn send_logout(tx: &AcpAgentTx) {
-    let req = acp::ExtRequest::new(
-        "x.ai/auth/logout",
-        serde_json::value::to_raw_value(&serde_json::json!({}))
-            .expect("serialize auth/logout params")
-            .into(),
-    );
-    if let Err(e) = acp_send(req, tx).await {
-        tracing::warn!(error = %e, "logout failed");
-    }
-}
-/// Best-effort `x.ai/auth/cancel`: stops the shell's device/loopback wait so a
+pub(super) async fn send_logout(_tx: &AcpAgentTx) {}
+
+/// Best-effort auth cancel: stops the shell's device/loopback wait so a
 /// later login is single-flight. Errors are ignored — UI already left
 /// `Authenticating`. `request_seq` scopes the cancel to the abandoned attempt.
-pub(super) async fn send_auth_cancel(tx: &AcpAgentTx, request_seq: u64) -> TaskResult {
-    let req = acp::ExtRequest::new(
-        "x.ai/auth/cancel",
-        serde_json::value::to_raw_value(
-                &serde_json::json!({ "request_seq": request_seq }),
-            )
-            .expect("serialize auth/cancel params")
-            .into(),
-    );
-    if let Err(e) = acp_send(req, tx).await {
-        tracing::debug!(error = %e, "auth cancel ext request failed (ignored)");
-    }
+pub(super) async fn send_auth_cancel(_tx: &AcpAgentTx, _request_seq: u64) -> TaskResult {
     TaskResult::AuthCancelComplete
 }
+
 pub(super) async fn send_check_subscription(
-    tx: &AcpAgentTx,
+    _tx: &AcpAgentTx,
     verify: Option<u64>,
 ) -> TaskResult {
-    let req = acp::ExtRequest::new(
-        "x.ai/auth/check_subscription",
-        serde_json::value::to_raw_value(&serde_json::json!({}))
-            .expect("serialize check_subscription params")
-            .into(),
-    );
-    match acp_send(req, tx).await {
-        Ok(resp) => {
-            let meta = serde_json::from_str::<serde_json::Value>(resp.0.get())
-                .ok()
-                .and_then(|v| v.get("meta").cloned());
-            TaskResult::CheckSubscriptionComplete {
-                verify,
-                meta,
-            }
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "check_subscription failed");
-            crate::unified_log::warn(
-                "subscription.check.rpc_failed",
-                None,
-                Some(serde_json::json!({
-                    "verify": verify,
-                    "error": e.to_string(),
-                })),
-            );
-            TaskResult::CheckSubscriptionComplete {
-                verify,
-                meta: None,
-            }
-        }
+    TaskResult::CheckSubscriptionComplete {
+        verify,
+        meta: None,
     }
 }
+
 /// One-shot subscription re-check for the credit-limit retry flow.
 /// Same ACP call as `send_check_subscription` but returns a
 /// `CreditLimitRecheckComplete` so the dispatch layer can decide
 /// whether to retry the stashed prompt or show the upsell.
 pub(super) async fn send_credit_limit_recheck(
-    tx: &AcpAgentTx,
+    _tx: &AcpAgentTx,
     agent_id: AgentId,
 ) -> TaskResult {
-    let req = acp::ExtRequest::new(
-        "x.ai/auth/check_subscription",
-        serde_json::value::to_raw_value(&serde_json::json!({}))
-            .expect("serialize check_subscription params")
-            .into(),
-    );
-    match acp_send(req, tx).await {
-        Ok(resp) => {
-            let meta = serde_json::from_str::<serde_json::Value>(resp.0.get())
-                .ok()
-                .and_then(|v| v.get("meta").cloned());
-            TaskResult::CreditLimitRecheckComplete {
-                agent_id,
-                meta,
-            }
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "credit_limit_recheck failed");
-            TaskResult::CreditLimitRecheckComplete {
-                agent_id,
-                meta: None,
-            }
-        }
+    TaskResult::CreditLimitRecheckComplete {
+        agent_id,
+        meta: None,
     }
 }
 pub(super) async fn send_authenticate(
@@ -1720,22 +1631,10 @@ pub(super) fn has_prepaid_credits(
 /// A transport failure yields [`AutoTopupFetch::Unchanged`] so the caller keeps
 /// any cached rule rather than treating the blip as "no auto top-up".
 pub(super) async fn fetch_auto_topup_info(
-    tx: &pi_acp_lib::AcpAgentTx,
+    _tx: &pi_acp_lib::AcpAgentTx,
 ) -> crate::views::credit_bar::AutoTopupFetch {
     use crate::views::credit_bar::AutoTopupFetch;
-    let req = acp::ExtRequest::new(
-        "x.ai/auto-topup-rule",
-        serde_json::value::to_raw_value(&serde_json::json!({}))
-            .expect("serialize auto-topup params")
-            .into(),
-    );
-    let Ok(resp) = acp_send(req, tx).await else {
-        return AutoTopupFetch::Unchanged;
-    };
-    let wrapper: serde_json::Value = serde_json::from_str(resp.0.get())
-        .unwrap_or_default();
-    let result = wrapper.get("result").unwrap_or(&wrapper);
-    parse_auto_topup_response(result)
+    AutoTopupFetch::Cleared
 }
 /// Map an `x.ai/auto-topup-rule` payload to an [`AutoTopupFetch`]. A body that
 /// fails to deserialize is a fetch error (→ `Unchanged`, keep the cached rule),

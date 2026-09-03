@@ -20,30 +20,14 @@ fn ext_response_from<T: serde::Serialize>(value: &T) -> AcpResult<acp::ExtRespon
 /// methods get a policy reply; dropping `response_tx` instead would fail the
 /// whole turn with a channel `recv_failed` (GB-4969).
 pub(crate) fn reply_headless_ext_method(args: AcpArgsBox<acp::ExtRequest>) {
-    use pi_tools::implementations::grok_build::ask_user_question::AskUserQuestionExtResponse;
-    use pi_tools::implementations::grok_build::exit_plan_mode::ExitPlanModeExtResponse;
-
     let method = args.request.method.as_ref();
-    // Known methods are answered without parsing params: even a malformed
-    // request gets the policy reply rather than a dropped channel.
-    let response = match method {
-        // Model sees the tool's NO_OPERATOR_TEXT (headless sessions are
-        // non-interactive), not the interactive "user declined" cancel text.
-        "x.ai/ask_user_question" => ext_response_from(&AskUserQuestionExtResponse::Cancelled),
-        "x.ai/mcp/elicit" => {
-            use pi_tools::mcp_elicitation::McpElicitExtResponse;
-            ext_response_from(&McpElicitExtResponse::Cancel)
-        }
-        // Model sees "Your plan has been approved. You can now start coding.".
-        "x.ai/exit_plan_mode" => ext_response_from(&ExitPlanModeExtResponse {
-            outcome: "approved".to_string(),
-            feedback: None,
-        }),
-        other => Err(acp::Error::new(
-            -32601,
-            format!("Method not found: {other}"),
-        )),
-    };
+    if method.starts_with("x.ai/") || method.starts_with("_x.ai/") {
+        tracing::debug!(method, "ignoring vendor ext method in headless (standard ACP only)");
+    }
+    let response = Err(acp::Error::new(
+        -32601,
+        format!("Method not found: {method}"),
+    ));
     args.response_tx.send(response).ok();
 }
 
@@ -87,27 +71,18 @@ pub(crate) fn handle_ext_notification(
     notif: &pi_acp_lib::AcpArgsBox<acp::ExtNotification>,
 ) -> ExtEvent {
     let method = notif.request.method.as_ref();
+    if method.starts_with("x.ai/") || method.starts_with("_x.ai/") {
+        tracing::debug!(method, "ignoring vendor ext notification in headless (standard ACP only)");
+        return ExtEvent::None;
+    }
     let params = notif.request.params.get();
     if crate::acp::is_session_update_ext_method(method) {
         return decode_session_notification(method, params);
     }
-    match method {
-        "x.ai/task_backgrounded" => decode_task_backgrounded(method, params),
-        "x.ai/task_completed" => decode_task_completed(method, params),
-        "x.ai/monitor_event" => ExtEvent::MonitorEvent,
-        "x.ai/leader/version_mismatch" => {
-            match crate::acp::version_mismatch_banner(params) {
-                Some(banner) => tracing::warn!(%banner, "x.ai/leader/version_mismatch"),
-                None => {
-                    tracing::warn!("ignoring x.ai/leader/version_mismatch without usable versions")
-                }
-            }
-            ExtEvent::None
-        }
-        _ => ExtEvent::None,
-    }
+    ExtEvent::None
 }
 
+#[allow(dead_code)]
 fn decode_task_backgrounded(method: &str, params: &str) -> ExtEvent {
     #[derive(serde::Deserialize)]
     struct TaskBgEnvelope {
@@ -158,6 +133,7 @@ fn decode_task_backgrounded(method: &str, params: &str) -> ExtEvent {
     }
 }
 
+#[allow(dead_code)]
 fn decode_task_completed(method: &str, params: &str) -> ExtEvent {
     #[derive(serde::Deserialize)]
     struct TaskDoneEnvelope {

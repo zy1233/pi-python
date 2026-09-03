@@ -5,6 +5,7 @@ __pycache__/
 dist/
 build/
 .pytest_cache/
+.pytest-audit/
 .mypy_cache/
 .ruff_cache/
 .venv/

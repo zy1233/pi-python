@@ -71,7 +71,7 @@ AgentMessage[] → transform_context() → convert_to_llm() → LangChain BaseMe
 
 ## Cursor Cloud specific instructions
 
-This is a Python monorepo with `pi-agent-core`, `pi-agent-harness`, and `pi-agent-cli`, plus a Rust TUI workspace under `tui/` (vendored fork of grok-build). There are no services to start — Python packages are installed in editable mode and tested via `pytest`. TUI: `cd tui && cargo check -p pi-pager-bin` (product binary `zypi`; prefer `CARGO_TARGET_DIR` on a Linux filesystem, not `/mnt/d`).
+This is a Python monorepo with `pi-agent-core`, `pi-agent-harness`, and `pi-agent-cli`, plus a Rust TUI workspace under `tui/` (vendored fork of grok-build). There are no services to start — Python packages are installed in editable mode and tested via `pytest`. TUI: `cd tui && cargo check -p pi-pager-bin` (product binary `zypi`; `CARGO_TARGET_DIR` is set in WSL environment, do NOT explicitly specify or override it on the command line).
 
 ### Virtual environments (uv)
 
@@ -131,10 +131,11 @@ uv pip install --python .venv -e ".[dev]" -e "./packages/pi-agent-harness" -e ".
 | Run tests (mock) | `.venv\Scripts\python.exe -m pytest` (or `-v` for verbose) |
 | Run tests (real LLM) | `$env:REAL_LLM_API_KEY='sk-...'; .venv-test-real\Scripts\python.exe -m pytest -m real_llm -v` |
 | Pelican TUI smoke | `$env:REAL_LLM_API_KEY='sk-...'; .venv\Scripts\python.exe scripts/smoke_pelican.py` — see `docs/benchmarks/PELCAN-BICYCLE.md` |
-| TUI cargo check | WSL: `cd tui && CARGO_TARGET_DIR=~/grok-build-target cargo check -p pi-pager-bin` (binary name `zypi`) |
+| TUI cargo check | WSL: `cd tui && cargo check -p pi-pager-bin` (binary name `zypi`; uses WSL `$CARGO_TARGET_DIR` env) |
 
 ### Notes
 
+- **WSL Cargo Build**: The user has set the `CARGO_TARGET_DIR` environment variable in WSL. When compiling or running `cargo check`/`cargo test` in WSL, **never** specify or override `CARGO_TARGET_DIR` on the command line (e.g. do not pass `CARGO_TARGET_DIR=...`), let Cargo use the WSL environment variable directly.
 - **Ruff** is the linter and formatter. Config is in `pyproject.toml` under `[tool.ruff]`. Rules enabled: E, F, I, UP, B, SIM, RUF. Line length: 100. Target: Python 3.11.
 - **Always use venv Python** — on Windows the system `python3` may point to the Windows Store stub. Use `.venv\Scripts\python.exe` or `.venv-test-real\Scripts\python.exe` explicitly.
 - All unit tests use a mock stream (`pi_agent_core/tests/mock_stream.py`) — **no API keys needed**.

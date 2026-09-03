@@ -251,3 +251,19 @@ async def test_cancel_is_noop_for_unknown_and_safe_for_bound_session(tmp_path):
     await agent.cancel(session_id="missing")
     created = await agent.new_session(cwd=str(tmp_path.resolve()))
     await agent.cancel(session_id=created.session_id)
+
+
+def test_stop_reason_mapping():
+    from pi_agent_cli.agent import _stop_reason
+    from pi_agent_core.messages import AssistantMessage
+
+    assert _stop_reason(AssistantMessage(content=[], stopReason="stop")) == "end_turn"
+    assert _stop_reason(AssistantMessage(content=[], stopReason="aborted")) == "cancelled"
+    assert _stop_reason(AssistantMessage(content=[], stopReason="length")) == "max_tokens"
+    assert _stop_reason(AssistantMessage(content=[], stopReason="error")) == "end_turn"
+    assert (
+        _stop_reason(
+            AssistantMessage(content=[], stopReason="error", errorMessage="Content policy refusal")
+        )
+        == "refusal"
+    )

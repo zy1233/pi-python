@@ -90,21 +90,27 @@ use session_notification::{
 };
 
 pub(crate) use queue::PendingRunningAdoption;
+#[allow(unused_imports)]
 use queue::{handle_prompt_complete, handle_queue_changed};
 
+#[allow(unused_imports)]
 use background::{
     derive_child_cwd, handle_git_head_changed, handle_monitor_event, handle_scheduled_task_created,
     handle_scheduled_task_deleted, handle_scheduled_task_fired,
     handle_scheduled_task_inject_prompt, handle_task_backgrounded, handle_task_completed,
     route_bg_task_stdout,
 };
+#[allow(unused_imports)]
 use follow_ups::handle_follow_ups;
 pub(crate) use interactions::handle_ask_user_question;
+#[allow(unused_imports)]
 use interactions::{handle_exit_plan_mode, handle_mcp_elicit};
+#[allow(unused_imports)]
 use mcp::{
     handle_mcp_elicit_complete, handle_mcp_init_progress, handle_mcp_server_status,
     handle_mcp_servers_updated, handle_mcp_tools_changed, push_server_status_enabled,
 };
+#[allow(unused_imports)]
 use settings::{
     handle_announcements_update, handle_models_update, handle_sessions_changed,
     handle_settings_update,
@@ -711,36 +717,11 @@ fn handle_ext_notification(notif: &acp::ExtNotification, app: &mut AppView) -> b
     if crate::acp::is_session_update_ext_method(method) {
         return handle_session_notification(notif, app);
     }
-    match method {
-        "x.ai/follow_ups" => handle_follow_ups(notif, app),
-        "x.ai/task_backgrounded" => handle_task_backgrounded(notif, app),
-        "x.ai/task_completed" => handle_task_completed(notif, app),
-        "x.ai/models/update" => handle_models_update(notif, app),
-        "x.ai/settings/update" => handle_settings_update(notif, app),
-        "x.ai/sessions/changed" => handle_sessions_changed(notif, app),
-        "x.ai/queue/changed" => handle_queue_changed(notif, app),
-        // TODO(prompt_complete-deprecation): Legacy removal (gated): durable turn_completed is already consumed via finalize_turn_from_terminal; keep & re-point the lost-RPC reconcile to the durable rail before deleting.
-        "x.ai/session/prompt_complete" => handle_prompt_complete(notif, app),
-        "x.ai/session/interjection" => handle_interjection(notif, app),
-        "x.ai/monitor_event" => handle_monitor_event(notif, app),
-        "x.ai/scheduled_task_created" => handle_scheduled_task_created(notif, app),
-        "x.ai/scheduled_task_fired" => handle_scheduled_task_fired(notif, app),
-        "x.ai/scheduled_task_deleted" => handle_scheduled_task_deleted(notif, app),
-        "x.ai/scheduled_task_inject_prompt" => handle_scheduled_task_inject_prompt(notif, app),
-        "x.ai/announcements/update" => handle_announcements_update(notif, app),
-        "x.ai/git_head_changed" => handle_git_head_changed(notif, app),
-        "x.ai/leader/version_mismatch" => handle_version_mismatch(notif, app),
-        "x.ai/mcp/init_progress" => handle_mcp_init_progress(notif, app),
-        "x.ai/mcp/tools_changed" | "x.ai/mcp_initialized" => handle_mcp_tools_changed(notif, app),
-        "x.ai/mcp/server_status" if push_server_status_enabled() => {
-            handle_mcp_server_status(notif, app)
-        }
-        "x.ai/mcp/elicit_complete" => handle_mcp_elicit_complete(notif, app),
-        "x.ai/mcp/servers_updated" => handle_mcp_servers_updated(notif, app),
-        _ => false,
-    }
+    false
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 fn handle_version_mismatch(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
     let Some(banner) = crate::acp::version_mismatch_banner(notif.params.get()) else {
         tracing::warn!("ignoring x.ai/leader/version_mismatch without usable versions");
@@ -750,6 +731,8 @@ fn handle_version_mismatch(notif: &acp::ExtNotification, app: &mut AppView) -> b
     true
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 /// Handle `x.ai/session/interjection` — the leader broadcasts this
 /// sessionId-bearing notification to every attached client when a mid-turn
 /// interjection is queued (emitted from the session actor's `Interject`

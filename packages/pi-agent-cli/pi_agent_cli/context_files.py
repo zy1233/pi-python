@@ -69,21 +69,29 @@ def load_system_prompt_file(*, cwd: str | Path, home: Path | None = None) -> str
     """Load custom SYSTEM.md (project ``.pi/`` first, then global agent dir)."""
     resolved_cwd = Path(cwd).resolve()
     home_dir = pi_home(home)
-    for relative in (".pi/SYSTEM.md",):
+    project_paths, global_paths = SYSTEM_PROMPT_FILENAMES
+    for relative in project_paths:
         item = _read_if_exists(resolved_cwd / relative)
         if item is not None:
             return item.content
-    item = _read_if_exists(home_dir / "agent" / "SYSTEM.md")
-    return item.content if item is not None else None
+    for relative in global_paths:
+        item = _read_if_exists(home_dir / relative)
+        if item is not None:
+            return item.content
+    return None
 
 
 def load_append_system_prompt_file(*, cwd: str | Path, home: Path | None = None) -> str | None:
     """Load APPEND_SYSTEM.md (project ``.pi/`` first, then global agent dir)."""
     resolved_cwd = Path(cwd).resolve()
     home_dir = pi_home(home)
-    for relative in (".pi/APPEND_SYSTEM.md",):
+    project_paths, global_paths = APPEND_SYSTEM_PROMPT_FILENAMES
+    for relative in project_paths:
         item = _read_if_exists(resolved_cwd / relative)
         if item is not None:
             return item.content
-    item = _read_if_exists(home_dir / "agent" / "APPEND_SYSTEM.md")
-    return item.content if item is not None else None
+    for relative in global_paths:
+        item = _read_if_exists(home_dir / relative)
+        if item is not None:
+            return item.content
+    return None

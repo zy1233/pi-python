@@ -287,11 +287,19 @@ def _prompt_to_text_images(
 
 
 def _stop_reason(message: Any) -> str:
+    """Map internal AssistantMessage stopReason to ACP PromptResponse stop_reason.
+
+    ACP stopReason enum: 'end_turn' | 'max_tokens' | 'max_turn_requests' | 'refusal' | 'cancelled'.
+    Internal stopReason values: 'stop' | 'length' | 'toolUse' | 'error' | 'aborted'.
+    """
     reason = getattr(message, "stopReason", None) or "stop"
     if reason == "aborted":
         return "cancelled"
     if reason == "length":
         return "max_tokens"
     if reason == "error":
-        return "refusal"
+        err = str(getattr(message, "errorMessage", "") or "")
+        if any(w in err.lower() for w in ("refus", "policy", "filter", "safety")):
+            return "refusal"
+        return "end_turn"
     return "end_turn"

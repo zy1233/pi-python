@@ -180,7 +180,8 @@ fn json_array_or_empty<T: serde::Serialize>(value: &T) -> Value {
 fn tool_name_from(meta: Option<&proto::Meta>, title: &str, kind: Option<&str>) -> String {
     if let Some(meta) = meta
         && let Some(name) = meta
-            .get("x.ai/tool")
+            .get("tool")
+            .or_else(|| meta.get("x.ai/tool"))
             .and_then(|v| v.get("name"))
             .and_then(|v| v.as_str())
         && !name.is_empty()
@@ -215,7 +216,8 @@ fn is_backend_web_search(meta: Option<&proto::Meta>, raw_input: &Value) -> bool 
 fn tool_kind_from(meta: Option<&proto::Meta>, kind: proto::ToolKind) -> Option<String> {
     if let Some(meta) = meta
         && let Some(k) = meta
-            .get("x.ai/tool")
+            .get("tool")
+            .or_else(|| meta.get("x.ai/tool"))
             .and_then(|v| v.get("kind"))
             .and_then(|v| v.as_str())
         && !k.is_empty()

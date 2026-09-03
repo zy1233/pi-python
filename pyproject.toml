@@ -72,7 +72,7 @@ markers = ["real_llm: tests that hit a live LLM API (deselected by default)"]
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-extend-exclude = ["tui"]
+extend-exclude = ["tui", ".pytest-audit"]
 
 [tool.ruff.lint]
 select = [
