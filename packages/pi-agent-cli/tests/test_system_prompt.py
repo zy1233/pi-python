@@ -122,19 +122,27 @@ def test_project_context_in_custom_prompt():
 
 
 def test_golden_default_four_tool_snapshot():
+    from pi_agent_cli.system_prompt import _docs_paths
+
     tools = create_coding_tools(_CWD)
     prompt = build_coding_agent_harness_system_prompt(
         cwd=_CWD,
         tools=tools,
         active_tool_names=[tool.name for tool in tools],
     )
+    readme_path, docs_path, _ = _docs_paths()
+    normalized_prompt = (
+        prompt.replace(readme_path, "<PI_DOCS>/README.md")
+        .replace(docs_path, "<PI_DOCS>/docs")
+        .replace("\r\n", "\n")
+    )
     golden = Path(__file__).with_name("snapshots") / "default_coding_tools_prompt.txt"
     if not golden.exists():
         golden.parent.mkdir(parents=True, exist_ok=True)
-        golden.write_text(prompt, encoding="utf-8")
+        golden.write_text(normalized_prompt, encoding="utf-8")
         pytest.skip("golden snapshot created")
-    expected = golden.read_text(encoding="utf-8")
-    assert prompt == expected
+    expected = golden.read_text(encoding="utf-8").replace("\r\n", "\n")
+    assert normalized_prompt == expected
 
 
 def test_all_seven_tools_listed():

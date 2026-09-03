@@ -21,9 +21,9 @@ Guidelines:
 - Show file paths clearly when working with files
 
 Pi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):
-- Main documentation: D:\work\pi-python\README.md
-- Additional docs: D:\work\pi-python\docs
-- Examples: D:\work\pi-python\docs (extensions, custom tools, SDK)
+- Main documentation: <PI_DOCS>/README.md
+- Additional docs: <PI_DOCS>/docs
+- Examples: <PI_DOCS>/docs (extensions, custom tools, SDK)
 - When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory
 - When asked about: extensions, themes, skills, prompt templates, TUI components, keybindings, SDK integrations, custom providers, adding models, pi packages, environment variables
 - When working on pi topics, read the docs and follow .md cross-references before implementing

@@ -80,7 +80,7 @@ async def test_local_execution_env_file_operations_and_shell(tmp_path):
     listed = await env.list_dir("notes")
     assert [entry.name for entry in listed] == ["a.txt"]
 
-    result = await env.exec("python -c \"print('ok')\"", timeout=5)
+    result = await env.exec(f'"{sys.executable}" -c "print(\'ok\')"', timeout=5)
     assert result.exitCode == 0
     assert result.stdout.strip() == "ok"
 
