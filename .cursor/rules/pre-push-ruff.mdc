@@ -39,4 +39,6 @@ alwaysApply: true
 
 - 使用现有 `.venv`，不要用全局 `pip install ruff`。
 - 用户未要求推送时，不必每次改代码都跑 ruff；仅在即将 `git push` 时强制执行。
-- CI 还会跑 `pytest`；若改动较大或涉及核心逻辑，推送前建议额外运行 `.venv\Scripts\python.exe -m pytest`（或 Unix 等价命令）。
+- CI 还会跑 `pytest`（多 Python 版本且运行在 Linux 环境中）；若改动较大或涉及核心逻辑，推送前需保证**同时在 Windows 和 Linux（如 WSL）中运行 pytest 并全部通过**，避免因绝对路径硬编码、换行符、系统命令差异等跨平台问题导致 CI 失败：
+  - **Windows**: `.venv\Scripts\python.exe -m pytest`
+  - **Linux (WSL)**: `wsl bash -l -c "cd /mnt/d/work/pi-python && /tmp/wsl-venv/bin/pytest"`（或使用 WSL 内的 Python/uv 虚拟环境运行 `pytest`）
