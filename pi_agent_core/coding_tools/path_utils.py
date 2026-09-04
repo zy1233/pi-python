@@ -66,6 +66,15 @@ def resolve_to_cwd(path: str, cwd: str) -> str:
     paths are joined onto *cwd*. The result is OS-normalized.
     """
     cwd = normalize_host_path(cwd)
+    # Virtualize container root mounts (/app, /data) when not present on host
+    norm_slash = path.replace("\\", "/")
+    if (norm_slash.startswith("/app/") or norm_slash == "/app") and not os.path.isdir("/app"):
+        rel_tail = norm_slash[5:] if norm_slash.startswith("/app/") else ""
+        return os.path.normpath(os.path.join(cwd, rel_tail))
+    if (norm_slash.startswith("/data/") or norm_slash == "/data") and not os.path.isdir("/data"):
+        rel_tail = norm_slash[6:] if norm_slash.startswith("/data/") else ""
+        return os.path.normpath(os.path.join(cwd, "data", rel_tail))
+
     expanded = normalize_host_path(os.path.expanduser(path))
     if _is_abs_host_path(expanded):
         return os.path.normpath(expanded)

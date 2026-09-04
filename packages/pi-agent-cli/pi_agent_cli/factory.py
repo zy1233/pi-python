@@ -78,6 +78,7 @@ async def create_session_harness(
     resources: AgentHarnessResources | None = None,
     on_tool_call: Callable[[Any], Any | Awaitable[Any]] | None = None,
     home: Path | None = None,
+    tools: list[Any] | None = None,
 ) -> AgentHarness:
     cwd_s = str(Path(normalize_host_path(str(cwd))).resolve())
     home_path = pi_home(home)
@@ -86,11 +87,15 @@ async def create_session_harness(
     session_file = str(getattr(metadata, "path", "") or "")
 
     harness_holder: dict[str, AgentHarness | None] = {"harness": None}
-    tools = _build_tools(
-        cwd=cwd_s,
-        session_id=session_id,
-        session_file=session_file,
-        harness_holder=harness_holder,
+    tools_list = (
+        tools
+        if tools is not None
+        else _build_tools(
+            cwd=cwd_s,
+            session_id=session_id,
+            session_file=session_file,
+            harness_holder=harness_holder,
+        )
     )
     resolved_resources = resources or AgentHarnessResources()
     model = Model(
@@ -100,9 +105,9 @@ async def create_session_harness(
     )
 
     async def system_prompt_callback(ctx: dict[str, Any]) -> str:
-        active_tools = ctx.get("active_tools") or tools
+        active_tools = ctx.get("active_tools") or tools_list
         active_names = [tool.name for tool in active_tools]
-        all_tools = list(ctx.get("tools") or tools)
+        all_tools = list(ctx.get("tools") or tools_list)
         options = load_system_prompt_options(
             cwd=cwd_s,
             config=config,
@@ -121,7 +126,7 @@ async def create_session_harness(
         model=model,
         stream_fn=stream_fn,
         env=LocalExecutionEnv(cwd_s),
-        tools=tools,
+        tools=tools_list,
         resources=resolved_resources,
         get_api_key=make_get_api_key(config),
         system_prompt=system_prompt_callback,

@@ -77,6 +77,11 @@ def _parse_args() -> argparse.Namespace:
         help="Custom run ID (default: timestamp-based).",
     )
     parser.add_argument(
+        "--no-docker",
+        action="store_true",
+        help="Disable Docker sandbox execution even if Docker is available.",
+    )
+    parser.add_argument(
         "--max-turns",
         type=int,
         default=None,
@@ -161,6 +166,7 @@ async def main() -> int:
             home=home,
             max_turns=args.max_turns,
             verbose=True,
+            use_docker=not args.no_docker,
         )
         trials.append(trial)
 

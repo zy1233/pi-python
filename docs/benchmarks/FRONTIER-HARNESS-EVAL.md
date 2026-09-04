@@ -89,10 +89,22 @@ api_key_env = "REAL_LLM_API_KEY"
 .venv\Scripts\python.exe scripts/run_eval.py --tasks-dir .cache/terminal-bench-2-1/tasks --task regex-log
 ```
 
+#### 在 WSL 中使用 Docker 容器沙箱运行（支持 DeepSWE 与工业级环境）
+```powershell
+# 在 WSL 中使用 Docker 运行单个任务（自动拉取镜像并挂载沙箱）
+wsl bash -lc "cd /mnt/d/work/pi-python && /tmp/pi-eval-venv/bin/python scripts/run_eval.py --frontier-30 --task regex-log"
+
+# 运行 DeepSWE 开源仓库任务（自动在真实容器中运行 SWE-bench 完整测试套件）
+wsl bash -lc "cd /mnt/d/work/pi-python && /tmp/pi-eval-venv/bin/python scripts/run_eval.py --frontier-30 --task fastapi-deprecation-response-headers"
+```
+
 #### 自定义参数
 ```powershell
 # 限制单任务最大轮次为 15，并指定自定义运行 ID
 .venv\Scripts\python.exe scripts/run_eval.py --task calc-eval --max-turns 15 --run-id my-first-eval
+
+# 显式禁用 Docker，使用宿主机本地执行（本地轻量测试）
+.venv\Scripts\python.exe scripts/run_eval.py --frontier-30 --task regex-log --no-docker
 ```
 
 ---

@@ -13,9 +13,15 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from pi_agent_cli.benchmarks.docker_runner import (
+    DockerContainerSession,
+    create_docker_bash_tool,
+    get_docker_cmd,
+)
 from pi_agent_cli.benchmarks.models import BenchmarkTask, TrialResult
 from pi_agent_cli.config import CliConfig, load_config, pi_home
 from pi_agent_cli.factory import create_session_harness, default_stream_fn, load_session_resources
+from pi_agent_core.coding_tools import create_all_tools
 from pi_agent_core.messages import AssistantMessage
 from pi_agent_harness import JsonlSessionRepo
 
@@ -146,7 +152,10 @@ def _run_verifier(
 
     return (
         False,
-        "infra_invalid: No container/verifier infrastructure available for DeepSWE task in local environment",
+        (
+            "infra_invalid: No container/verifier infrastructure available "
+            "for DeepSWE task in local environment"
+        ),
     )
 
 
@@ -158,33 +167,60 @@ async def run_trial(
     home: Path | None = None,
     max_turns: int | None = None,
     verbose: bool = True,
+    use_docker: bool = True,
 ) -> TrialResult:
     """Execute a single task trial with AgentHarness and score it."""
     trial_dir.mkdir(parents=True, exist_ok=True)
     workspace = trial_dir / "workspace"
     workspace.mkdir(parents=True, exist_ok=True)
 
-    _copy_task_environment(task, workspace)
+    task_image = (
+        task.metadata.get("environment", {}).get("docker_image")
+        or task.metadata.get("environment", {}).get("image")
+    )
+    has_docker = get_docker_cmd() is not None
+    should_use_docker = use_docker and has_docker and bool(task_image)
 
-    # On Windows, bridge root /app and /data to workspace via NTFS junctions
+    docker_session: DockerContainerSession | None = None
+    custom_tools: list[Any] | None = None
     junctions: list[str] = []
-    if sys.platform == "win32":
-        drive = workspace.drive or "D:"
-        app_link = f"{drive}\\app"
-        data_link = f"{drive}\\data"
-        if not os.path.exists(app_link):
-            with contextlib.suppress(Exception):
-                import _winapi
 
-                _winapi.CreateJunction(str(workspace.resolve()), app_link)
-                junctions.append(app_link)
-        ws_data = workspace / "data"
-        if ws_data.is_dir() and not os.path.exists(data_link):
-            with contextlib.suppress(Exception):
-                import _winapi
+    if should_use_docker:
+        try:
+            docker_session = DockerContainerSession(task, workspace)
+            docker_session.setup()
+            _copy_task_environment(task, workspace)
+            tools_dict = create_all_tools(str(workspace.resolve()))
+            tools_dict["bash"] = create_docker_bash_tool(
+                docker_session.container_name, cwd="/app"
+            )
+            custom_tools = list(tools_dict.values())
+        except Exception as e:
+            if verbose:
+                print(f"[DOCKER] Failed to setup container: {e}. Falling back to local.")
+            docker_session = None
+            custom_tools = None
 
-                _winapi.CreateJunction(str(ws_data.resolve()), data_link)
-                junctions.append(data_link)
+    if docker_session is None:
+        _copy_task_environment(task, workspace)
+        # On Windows, bridge root /app and /data to workspace via NTFS junctions
+        if sys.platform == "win32":
+            drive = workspace.drive or "D:"
+            app_link = f"{drive}\\app"
+            data_link = f"{drive}\\data"
+            if not os.path.exists(app_link):
+                with contextlib.suppress(Exception):
+                    import _winapi
+
+                    _winapi.CreateJunction(str(workspace.resolve()), app_link)
+                    junctions.append(app_link)
+            ws_data = workspace / "data"
+            if ws_data.is_dir() and not os.path.exists(data_link):
+                with contextlib.suppress(Exception):
+                    import _winapi
+
+                    _winapi.CreateJunction(str(ws_data.resolve()), data_link)
+                    junctions.append(data_link)
 
     try:
         home_path = pi_home(home)
@@ -206,10 +242,12 @@ async def run_trial(
             stream_fn=default_stream_fn(),
             resources=resources,
             home=home_path,
+            tools=custom_tools,
         )
 
         if verbose:
-            print(f"\n[EVAL] Starting task: {task.id}")
+            mode_str = "Docker" if docker_session else "Local"
+            print(f"\n[EVAL] Starting task: {task.id} ({mode_str})")
             print(f"[EVAL] Model: {cfg.provider}:{cfg.model_id} | Max Turns: {effective_max_turns}")
             print(f"[EVAL] Workspace: {workspace}")
 
@@ -308,11 +346,17 @@ async def run_trial(
         # Run verifier
         if verbose:
             print("[EVAL] Running verifier...")
-        passed, verifier_output = _run_verifier(
-            task,
-            workspace,
-            timeout_sec=task.verifier_timeout_sec,
-        )
+
+        if docker_session is not None and docker_session.is_running:
+            passed, verifier_output = docker_session.run_verifier(
+                timeout_sec=task.verifier_timeout_sec
+            )
+        else:
+            passed, verifier_output = _run_verifier(
+                task,
+                workspace,
+                timeout_sec=task.verifier_timeout_sec,
+            )
 
         if "infra_invalid" in verifier_output:
             status: Any = "infra_invalid"
@@ -324,7 +368,10 @@ async def run_trial(
             status = "failure"
 
         if verbose:
-            print(f"[EVAL] Result: {status.upper()} (Duration: {duration:.1f}s, Turns: {total_turns})")
+            print(
+                f"[EVAL] Result: {status.upper()} "
+                f"(Duration: {duration:.1f}s, Turns: {total_turns})"
+            )
             cache_str = f"{cache_hit_rate * 100:.1f}%"
             print(f"[EVAL] Tokens: {total_tokens} (Cache: {cache_str}, Cost: ${cost_usd:.4f})")
 
@@ -361,6 +408,7 @@ async def run_trial(
                 "provider": cfg.provider,
                 "model_id": cfg.model_id,
                 "difficulty": task.difficulty,
+                "runtime": "docker" if docker_session else "local",
             },
         )
 
@@ -370,6 +418,8 @@ async def run_trial(
 
         return result
     finally:
+        if docker_session is not None:
+            docker_session.teardown()
         for j in junctions:
             with contextlib.suppress(Exception):
                 os.rmdir(j)

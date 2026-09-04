@@ -5,6 +5,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TB_ROOT = REPO_ROOT / ".cache" / "terminal-bench-2-1" / "tasks"
+DS_ROOT = REPO_ROOT / ".cache" / "deep-swe" / "tasks"
 FH_ROOT = REPO_ROOT / ".cache" / "frontier-harness-eval" / "tasks"
 DEST_ROOT = REPO_ROOT / "benchmarks" / "frontier_30"
 
@@ -47,7 +48,7 @@ DEEPSWE_TASKS = [
 ]
 
 
-def setup_tb_tasks():
+def setup_tb_tasks() -> None:
     for name in TB_TASKS:
         src = TB_ROOT / name
         dest = DEST_ROOT / f"terminal-bench_{name}"
@@ -67,12 +68,12 @@ def setup_tb_tasks():
                 if item.is_file():
                     shutil.copy2(item, dest_tests / item.name)
 
-        # Copy environment fixtures
+        # Copy environment fixtures and Dockerfile
         if (src / "environment").is_dir():
             dest_env = dest / "environment"
             dest_env.mkdir(parents=True, exist_ok=True)
             for item in (src / "environment").iterdir():
-                if item.name in ("Dockerfile", ".dockerignore", ".ruff_cache"):
+                if item.name in (".dockerignore", ".ruff_cache"):
                     continue
                 dest_item = dest_env / item.name
                 if item.is_dir():
@@ -82,9 +83,11 @@ def setup_tb_tasks():
         print(f"  [TB] {name} -> {dest.name}")
 
 
-def setup_deepswe_tasks():
+def setup_deepswe_tasks() -> None:
     for name in DEEPSWE_TASKS:
-        src = FH_ROOT / name
+        src = DS_ROOT / name
+        if not src.is_dir():
+            src = FH_ROOT / name
         dest = DEST_ROOT / f"datacurve_{name}"
         dest.mkdir(parents=True, exist_ok=True)
 
@@ -92,6 +95,25 @@ def setup_deepswe_tasks():
             shutil.copy2(src / "instruction.md", dest / "instruction.md")
         if (src / "task.toml").is_file():
             shutil.copy2(src / "task.toml", dest / "task.toml")
+
+        # Copy tests (grader.py, test.sh, config.json, test.patch, etc.)
+        if (src / "tests").is_dir():
+            dest_tests = dest / "tests"
+            dest_tests.mkdir(parents=True, exist_ok=True)
+            for item in (src / "tests").iterdir():
+                if item.is_file():
+                    shutil.copy2(item, dest_tests / item.name)
+
+        # Copy environment fixtures
+        if (src / "environment").is_dir():
+            dest_env = dest / "environment"
+            dest_env.mkdir(parents=True, exist_ok=True)
+            for item in (src / "environment").iterdir():
+                dest_item = dest_env / item.name
+                if item.is_dir():
+                    shutil.copytree(item, dest_item, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(item, dest_item)
         print(f"  [SWE] {name} -> {dest.name}")
 
 
