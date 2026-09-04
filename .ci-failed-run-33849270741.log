@@ -1,0 +1,14 @@
+﻿Ruff (lint + format)	Lint	锘?026-09-04T07:33:50.7473155Z ##[group]Run ruff check --output-format=github .
+Ruff (lint + format)	Lint	2026-09-04T07:33:50.7473548Z ^[[36;1mruff check --output-format=github .^[[0m
+Ruff (lint + format)	Lint	2026-09-04T07:33:50.7492657Z shell: /usr/bin/bash -e {0}
+Ruff (lint + format)	Lint	2026-09-04T07:33:50.7492940Z env:
+Ruff (lint + format)	Lint	2026-09-04T07:33:50.7493284Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+Ruff (lint + format)	Lint	2026-09-04T07:33:50.7493927Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+Ruff (lint + format)	Lint	2026-09-04T07:33:50.7494377Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+Ruff (lint + format)	Lint	2026-09-04T07:33:50.7494746Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+Ruff (lint + format)	Lint	2026-09-04T07:33:50.7495083Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+Ruff (lint + format)	Lint	2026-09-04T07:33:50.7495427Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+Ruff (lint + format)	Lint	2026-09-04T07:33:50.7495749Z ##[endgroup]
+Ruff (lint + format)	Lint	2026-09-04T07:33:50.7730564Z ##[error]ci_autofix_rehearsal.py:1:8: F401 `math` imported but unused
+Ruff (lint + format)	Lint	  help: Remove unused import: `math`
+Ruff (lint + format)	Lint	2026-09-04T07:33:50.7737897Z ##[error]Process completed with exit code 1.
