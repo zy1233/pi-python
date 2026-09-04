@@ -210,7 +210,7 @@ function Run-AutofixAttempt {
 
     $worktreeDir = Join-Path $WorktreeBaseDir ("{0}-attempt{1}-{2}" -f $SafeBranch, $Attempt, (Get-Date -Format "yyyyMMddHHmmss"))
 
-    Invoke-External `
+    $null = Invoke-External `
         -Exe "git" `
         -Args @("worktree", "add", "--force", "--detach", $worktreeDir, $CurrentSha) `
         -Cwd $RepoRoot
@@ -276,7 +276,7 @@ Return a short summary of what was fixed.
             throw "Autofix attempt produced no file changes."
         }
 
-        Invoke-External -Exe "git" -Args @("add", "-A") -Cwd $worktreeDir
+        $null = Invoke-External -Exe "git" -Args @("add", "-A") -Cwd $worktreeDir
         $commitMessage = "fix(ci): autofix run $RunId attempt $Attempt"
         $commitRes = Invoke-External -Exe "git" -Args @("commit", "-m", $commitMessage) -Cwd $worktreeDir -AllowFailure $true
         if ($commitRes.ExitCode -ne 0) {
