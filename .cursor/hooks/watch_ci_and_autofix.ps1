@@ -93,6 +93,11 @@ function Invoke-External {
     }
 }
 
+function Is-TransientGhError {
+    param([Parameter(Mandatory = $true)][string]$Message)
+    return $Message -match "(?i)tls handshake timeout|i/o timeout|timed out|connection reset|temporary failure|502 bad gateway|503 service unavailable"
+}
+
 function Get-CiRunForSha {
     param([Parameter(Mandatory = $true)][string]$Sha)
 
@@ -107,7 +112,17 @@ function Get-CiRunForSha {
                 "--json", "databaseId,headSha,status,conclusion,workflowName,createdAt,url",
                 "--limit", "100"
             ) `
-            -Cwd $RepoRoot
+            -Cwd $RepoRoot `
+            -AllowFailure $true
+
+        if ($runsRes.ExitCode -ne 0) {
+            if (Is-TransientGhError -Message $runsRes.Output) {
+                Write-Log ("Transient gh error while listing runs, retrying in {0}s: {1}" -f $PollIntervalSeconds, $runsRes.Output)
+                Start-Sleep -Seconds $PollIntervalSeconds
+                continue
+            }
+            throw "gh run list failed: $($runsRes.Output)"
+        }
 
         $runs = @()
         if (-not [string]::IsNullOrWhiteSpace($runsRes.Output)) {
@@ -139,7 +154,16 @@ function Wait-CiRunCompletion {
         $viewRes = Invoke-External `
             -Exe "gh" `
             -Args @("run", "view", $RunId, "--json", "status,conclusion,url,headSha,workflowName,updatedAt") `
-            -Cwd $RepoRoot
+            -Cwd $RepoRoot `
+            -AllowFailure $true
+        if ($viewRes.ExitCode -ne 0) {
+            if (Is-TransientGhError -Message $viewRes.Output) {
+                Write-Log ("Transient gh error while viewing run {0}, retrying in {1}s: {2}" -f $RunId, $PollIntervalSeconds, $viewRes.Output)
+                Start-Sleep -Seconds $PollIntervalSeconds
+                continue
+            }
+            throw "gh run view failed for runId=${RunId}: $($viewRes.Output)"
+        }
         $view = $viewRes.Output | ConvertFrom-Json
 
         if ($view.status -eq "completed") {
@@ -196,6 +220,8 @@ function Cleanup-Worktree {
             -AllowFailure $true
         if ($rmRes.ExitCode -ne 0) {
             Write-Log ("git worktree remove failed; forcing folder deletion: {0}" -f $WorktreeDir)
+        }
+        if (Test-Path -LiteralPath $WorktreeDir) {
             Remove-Item -LiteralPath $WorktreeDir -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
