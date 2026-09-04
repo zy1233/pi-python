@@ -1,0 +1,22 @@
+schema_version = "1.1"
+
+[task]
+name = "terminal-bench/regex-log"
+description = "Tests the ability to construct a complex regular expression that matches dates in log lines containing valid IPv4 addresses while handling edge cases and boundary conditions."
+keywords = ["regex", "string-parsing", "log-analysis", "data-processing"]
+
+[metadata]
+author_name = "Orfeas Menis Mastromichalakis"
+difficulty = "medium"
+category = "data-processing"
+tags = ["regex", "string-parsing", "log-analysis"]
+
+[verifier]
+timeout_sec = 180.0
+
+[agent]
+timeout_sec = 300.0
+max_turns = 20
+
+[environment]
+workdir = "."

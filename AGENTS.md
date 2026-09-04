@@ -131,6 +131,7 @@ uv pip install --python .venv -e ".[dev]" -e "./packages/pi-agent-harness" -e ".
 | Run tests (mock) | `.venv\Scripts\python.exe -m pytest` (or `-v` for verbose) |
 | Run tests (real LLM) | `$env:REAL_LLM_API_KEY='sk-...'; .venv-test-real\Scripts\python.exe -m pytest -m real_llm -v` |
 | Pelican TUI smoke | `$env:REAL_LLM_API_KEY='sk-...'; .venv\Scripts\python.exe scripts/smoke_pelican.py` — see `docs/benchmarks/PELCAN-BICYCLE.md` |
+| Harness benchmark eval | `$env:REAL_LLM_API_KEY='sk-...'; .venv\Scripts\python.exe scripts/run_eval.py --frontier-30 --task regex-log` — see `docs/benchmarks/FRONTIER-HARNESS-EVAL.md` and `docs/benchmarks/FRONTIER-HARNESS-30-EVAL-REPORT.md` |
 | TUI cargo check | WSL: `cd tui && cargo check -p pi-pager-bin` (binary name `zypi`; uses WSL `$CARGO_TARGET_DIR` env) |
 
 ### Notes

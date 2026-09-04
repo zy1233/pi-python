@@ -15,3 +15,19 @@ venv/
 # Rust TUI workspace (Apache-2.0 fork under tui/)
 tui/target/
 **/*.rs.bk
+
+# Benchmark evaluation cache and trial artifacts
+.cache/
+.pi-eval/
+
+# Temporary files, coverage and logs
+*.log
+*.tmp
+*.bak
+*.swp
+*.orig
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+

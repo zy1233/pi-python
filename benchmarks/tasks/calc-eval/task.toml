@@ -1,0 +1,21 @@
+schema_version = "1.1"
+
+[task]
+name = "terminal-bench/calc-eval"
+description = "Implement an arithmetic expression evaluator in Python without using eval() or exec()."
+keywords = ["python", "parser", "math", "ast"]
+
+[metadata]
+difficulty = "medium"
+category = "software-engineering"
+tags = ["parser", "algorithms", "arithmetic"]
+
+[verifier]
+timeout_sec = 60.0
+
+[agent]
+timeout_sec = 300.0
+max_turns = 15
+
+[environment]
+workdir = "."
