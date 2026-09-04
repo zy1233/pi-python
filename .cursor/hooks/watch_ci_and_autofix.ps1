@@ -4,6 +4,7 @@ param(
     [Parameter(Mandatory = $true)][string]$Branch,
     [Parameter(Mandatory = $true)][string]$HeadSha,
     [Parameter(Mandatory = $true)][string]$LockFile,
+    [string]$AutofixModel = "composer-2.5",
     [int]$MaxAttempts = 2,
     [int]$PollIntervalSeconds = 20,
     [int]$DiscoveryTimeoutMinutes = 15,
@@ -283,9 +284,10 @@ Return a short summary of what was fixed.
 "@
 
         Write-Log ("Starting agent autofix attempt={0}" -f $Attempt)
+        Write-Log ("Autofix model: {0}" -f $AutofixModel)
         $agentRes = Invoke-External `
             -Exe "agent" `
-            -Args @("-p", $prompt, "--output-format", "text", "--force") `
+            -Args @("-p", $prompt, "--model", $AutofixModel, "--output-format", "text", "--force") `
             -Cwd $worktreeDir `
             -AllowFailure $true
 
