@@ -26,6 +26,17 @@ APPEND_SYSTEM_PROMPT_FILENAMES: tuple[tuple[str, ...], tuple[str, ...]] = (
 )
 
 
+def _find_repo_root(start: Path) -> Path:
+    """Return the closest ancestor that owns ``.git``; fallback to ``start``."""
+    current = start
+    while True:
+        if (current / ".git").exists():
+            return current
+        if current.parent == current:
+            return start
+        current = current.parent
+
+
 def _read_if_exists(path: Path) -> ContextFile | None:
     if not path.is_file():
         return None
@@ -42,8 +53,9 @@ def _find_in_directory(directory: Path, filenames: tuple[str, ...]) -> list[Cont
 
 
 def discover_context_files(*, cwd: str | Path, home: Path | None = None) -> list[ContextFile]:
-    """Discover AGENTS/CLAUDE context files from global + cwd walk."""
+    """Discover AGENTS/CLAUDE files from global + cwd walk up to repo root."""
     resolved_cwd = Path(cwd).resolve()
+    repo_root = _find_repo_root(resolved_cwd)
     home_dir = pi_home(home)
     files: list[ContextFile] = []
 
@@ -58,6 +70,8 @@ def discover_context_files(*, cwd: str | Path, home: Path | None = None) -> list
             if item.path not in seen_paths:
                 files.append(item)
                 seen_paths.add(item.path)
+        if current == repo_root:
+            break
         if current.parent == current:
             break
         current = current.parent

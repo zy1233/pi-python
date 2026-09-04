@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from acp import PROTOCOL_VERSION, RequestError
 from acp.interfaces import Agent, Client
@@ -34,7 +35,7 @@ from acp.schema import (
     TextContentBlock,
 )
 
-from pi_agent_cli.config import CliConfig, load_config, pi_home
+from pi_agent_cli.config import CliConfig, PermissionMode, load_config, pi_home
 from pi_agent_cli.events import project_event
 from pi_agent_cli.factory import create_session_harness, default_stream_fn, load_session_resources
 from pi_agent_cli.permissions import (
@@ -181,6 +182,9 @@ class PiAcpAgent(Agent):
         raise RequestError.method_not_found(method)
 
     async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
+        mode = _permission_mode_from_notification(method, params)
+        if mode is not None:
+            self._config = replace(self._config, permission=mode)
         return None
 
     def _require_harness(self, session_id: str) -> AgentHarness:
@@ -303,3 +307,27 @@ def _stop_reason(message: Any) -> str:
             return "refusal"
         return "end_turn"
     return "end_turn"
+
+
+def _permission_mode_from_notification(
+    method: str, params: dict[str, Any] | None
+) -> PermissionMode | None:
+    """Best-effort permission mode sync for live sessions.
+
+    TUI settings changes are sent as extension notifications; we accept known
+    suffixes and update in-memory mode so the next tool call in this process
+    uses the new policy immediately.
+    """
+    suffix = method.rsplit("/", 1)[-1].strip().lower()
+    if suffix not in {"yolo_mode_changed", "permission_mode_changed"}:
+        return None
+    payload = params or {}
+    raw = payload.get("permission_mode")
+    if raw is None:
+        raw = payload.get("permissionMode")
+    if not isinstance(raw, str):
+        return None
+    normalized = raw.strip().lower()
+    if normalized not in {"ask", "auto", "always-approve"}:
+        return None
+    return cast(PermissionMode, normalized)

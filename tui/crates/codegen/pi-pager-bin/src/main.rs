@@ -427,6 +427,25 @@ fn run_python_print(args: &PagerArgs) -> i32 {
         agent_args.push("--cwd".into());
         agent_args.push(cwd.into());
     }
+    if let Some(system_prompt) = &args.system_prompt_override {
+        agent_args.push("--system-prompt".into());
+        agent_args.push(system_prompt.into());
+    }
+    if let Some(system_prompt_file) = &args.system_prompt_file {
+        agent_args.push("--system-prompt-file".into());
+        agent_args.push(system_prompt_file.into());
+    }
+    if let Some(append_prompt) = &args.rules {
+        agent_args.push("--append-system-prompt".into());
+        agent_args.push(append_prompt.into());
+    }
+    if let Some(append_prompt_file) = &args.append_system_prompt_file {
+        agent_args.push("--append-system-prompt-file".into());
+        agent_args.push(append_prompt_file.into());
+    }
+    if args.no_context_files {
+        agent_args.push("--no-context-files".into());
+    }
     match std::process::Command::new(&program).args(&agent_args).status() {
         Ok(status) => status.code().unwrap_or(1),
         Err(err) => {

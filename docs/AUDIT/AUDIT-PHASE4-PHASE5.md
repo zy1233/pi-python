@@ -14,7 +14,7 @@
 > - `docs/specs/2026-09-02-phase5-prompt-engine-design.md`
 >
 > 验证方式：`.venv` Python 3.12 全量 pytest `packages/pi-agent-cli/tests/`
-> 51 项（50 passed, 1 skipped），ruff clean；代码审查 + 设计文档逐段比对。
+> 55 项（54 passed, 1 skipped），ruff clean；代码审查 + 设计文档逐段比对。
 > 二次复核（2026-09-03 14:19）逐行交叉审计补充 4 项遗漏。
 > 三次回归验证（2026-09-03 17:20）：全仓库 pytest 391 collected → 380 passed,
 > 11 skipped；ruff check + format 全绿。
@@ -42,11 +42,12 @@ RPC 字符串。
 walk-up、`<available_skills>` XML 格式、bash `PI_*` env 注入均正确实现。headless
 CLI flags 对齐设计 §4 全部项。
 
-审计发现 3 个实质偏差、5 个中等偏差、7 个低影响偏差/记录性。
+审计发现 3 个实质偏差、5 个中等偏差、7 个低影响偏差/记录性；
+并在 2026-09-04 复核新增 4 项遗漏（P4P5-16 ~ P4P5-19）。
 
 截至 2026-09-03 三次回归验证：已修复实质偏差 2 项（P4P5-1 核心修复、P4P5-2）、
 中等偏差 4 项（P4P5-3 部分、P4P5-4、P4P5-13、P4P5-14）、回退修复 1 项（P4P5-5）
-以及全部低影响偏差 6 项（P4P5-6~P4P5-11）。P4P5-12 暂缓待讨论，P4P5-15 保留
+以及全部低影响偏差 6 项（P4P5-6~P4P5-11）。P4P5-12 已确认保留，P4P5-15 保留
 记录性说明。残留项：P4P5-1 结构性 `x.ai/` 字符串 103 文件、P4P5-3 `GROK_COMPACTION_*`
 缺 `PI_*` 等价。
 
@@ -92,7 +93,7 @@ CLI flags 对齐设计 §4 全部项。
 
 ### P4P5-12. TUI 未按设计裁撤无标准 ACP 对照的斜杠命令（实质 · Phase 4）
 
-- [ ] 待修复
+- [~] 设计偏差已确认保留（2026-09-04）
 - 位置：`tui/crates/codegen/pi-pager/src/slash/commands/mod.rs` L79–139
   `builtin_commands()`
 - 问题：设计 §1.2 明确 "无标准 ACP 对照的斜杠命令（`/compact`、`/model`、`/rewind`、
@@ -101,12 +102,12 @@ CLI flags 对齐设计 §4 全部项。
   `/rewind`（L103）、`/effort`（L91）、`/context`（L93）、`/fork`（L95），以及
   `/plugin`（L87）、`/share`（L111）、`/dashboard`（L84）、`/voice`（L88）、
   `/marketplace`（L123）等数十个无标准 ACP 支持的命令。
-- 运行时影响：用户在 TUI 菜单中选择 `/compact` 时，`Effect::Compact`（`effects/mod.rs`
-  L1520+）向 Python 发送 `x.ai/compact_conversation` 扩展调用；Python 端 `PiAcpAgent`
-  严格返回 `RequestError.method_not_found`，TUI 显示错误——用户体验出现预期落差。
-- 建议：从 `builtin_commands()` 移除所有无标准 ACP 对照的命令；保留
-  `/new`（→ `session/new`）、`/resume`（→ `session/load`）、`/quit`（退出），以及
-  纯 TUI 本地的显示/设置类命令（`/theme`、`/vim-mode` 等不走 ACP 的命令可保留）。
+- 运行时现状：`/compact` 已改为本地降级路径，`Effect::Compact` 直接回传
+  `TaskResult::CompactComplete { result: Ok(()) }`，UI 会显示 "Compaction completed"；
+  不再触发对 Python 侧的 `x.ai/compact_conversation` 调用与 `method_not_found` 报错。
+- 风险：`/compact` 目前是 no-op 成功语义，用户可能误以为完成了真实压缩。
+- 决策（用户确认）：继续保留 `/compact`、`/fork`、`/rewind` 等命令，该项转为记录性偏差，
+  暂不执行菜单裁撤。
 
 ---
 
@@ -150,6 +151,60 @@ CLI flags 对齐设计 §4 全部项。
 - 位置：`tui/crates/codegen/pi-pager/src/completions_cmd.rs` L15、L83 等
 - 修复：补全生成与 zsh 修复逻辑中均改为使用 `crate::brand::CLI_NAME`（"zypi"），
   测试断言同步更新。
+
+### P4P5-16. 权限模式切换无法在当前会话立即生效（中 · Phase 4）
+
+- [x] 已修复（2026-09-04）
+- 位置：`tui/.../app/effects/helpers.rs`（发送 `x.ai/yolo_mode_changed`）；
+  `packages/pi-agent-cli/pi_agent_cli/agent.py`（`ext_notification` 此前为 no-op）。
+- 现象：UI 切换 permission mode 后，已绑定会话不会同步更新 Python 侧权限判定。
+- 风险：会出现“UI 显示模式”与“实际权限拦截行为”不一致。
+- 修复内容：
+  - `PiAcpAgent.ext_notification()` 增加后缀通知解析（`.../yolo_mode_changed`、
+    `.../permission_mode_changed`），读取 `permission_mode` / `permissionMode`。
+  - 对合法值 `ask|auto|always-approve` 原地更新 in-memory `CliConfig.permission`，
+    下一次工具调用立即按新模式执行。
+  - 新增测试：
+    `test_permission_mode_notification_updates_live_session_policy`、
+    `test_invalid_permission_mode_notification_is_ignored`。
+
+### P4P5-17. context files 上溯范围越过 repo root（中 · Phase 5）
+
+- [x] 已修复（2026-09-04）
+- 位置：`packages/pi-agent-cli/pi_agent_cli/context_files.py` `discover_context_files()`
+- 现象：当前从 cwd 一直 walk 到文件系统根目录；repo 外祖先目录中的
+  `AGENTS.md` / `CLAUDE.md` 也会被注入 prompt。
+- 风险：项目边界外指令污染 system prompt，带来治理与安全风险。
+- 修复内容：
+  - 新增 `_find_repo_root()`，以最近祖先 `.git` 作为边界。
+  - `discover_context_files()` 上溯在 repo root 停止；无 `.git` 时 fail-closed 为仅扫描 cwd。
+  - 新增测试：`test_discover_context_files_stops_at_repo_root`。
+
+### P4P5-18. `zypi -p` 未透传 prompt override flags 到 Python（中 · Phase 4/5 交叉）
+
+- [x] 已修复（2026-09-04）
+- 位置：`pi-pager-bin/src/main.rs` `run_python_print()`
+- 现象：`--system-prompt*` / `--append-system-prompt*` / `--no-context-files`
+  在 TUI 二进制 headless 路径未转发给 `python -m pi_agent_cli`。
+- 风险：与 Phase 5 CLI 设计能力不一致，行为存在入口差异。
+- 修复内容：
+  - `run_python_print()` 新增透传：
+    `--system-prompt`、`--system-prompt-file`、
+    `--append-system-prompt`、`--append-system-prompt-file`、
+    `--no-context-files`。
+  - `PagerArgs` 补齐隐藏参数：
+    `--system-prompt-file`、`--append-system-prompt-file`、`--no-context-files`。
+
+### P4P5-19. `PI_AGENT_COMMAND`/`[agent].command` 空白分词易破坏 Windows 路径（中 · Phase 4）
+
+- [x] 已修复（2026-09-04）
+- 位置：`tui/.../acp/spawn.rs` `split_whitespace()`
+- 现象：命令行通过空白切分，`C:\Program Files\...` 这类路径可能被错误截断。
+- 风险：Windows 自定义 Python/agent command 在常见安装路径下启动失败。
+- 修复内容：
+  - 新增 `parse_agent_command()`：优先 `shlex::split` 解析引号命令，失败再回退空白分词。
+  - `PI_AGENT_COMMAND` 与 `[agent].command` 统一复用该解析逻辑。
+  - 新增测试：`parse_agent_command_supports_quoted_windows_paths`。
 
 ---
 
@@ -250,7 +305,7 @@ CLI flags 对齐设计 §4 全部项。
 |-------|------|------|------|
 | spawn 可配置命令 | ✅ | `acp::spawn::pi_agent_command()` | ✅ |
 | 拆除 x.ai/* 客户端调用 | ✅/⚠️ | 核心出站 RPC 已拆除；103 文件结构性残留 | **P4P5-1** [x/~] |
-| 裁撤无 ACP 对照的斜杠命令 | ⚠️ | `builtin_commands()` 仍保留全部 40+ 命令 | **P4P5-12** [ ] |
+| 裁撤无 ACP 对照的斜杠命令 | ⚠️ | `builtin_commands()` 仍保留全部 40+ 命令（用户确认保留） | **P4P5-12** [~] |
 | 跳过 xAI 登录 | ✅ | 设计确认已在 P2 完成 | ✅ |
 | 关掉 auto-update | ✅ | 死代码已删除（P4P5-10 修复） | ✅ |
 | 品牌：`zypi` + `~/.pi-python` | ✅ | 用户可见文本、测试、补全均已修复 | **P4P5-2, P4P5-13, P4P5-14** [x] |
@@ -315,15 +370,15 @@ CLI flags 对齐设计 §4 全部项。
 
 | 模块 | 测试文件 | 数量 | 状态 |
 |------|---------|------|------|
-| ACP agent | `test_acp_agent.py` | 13 | ✅ 全通过（含新增 `test_stop_reason_mapping`） |
+| ACP agent | `test_acp_agent.py` | 15 | ✅ 全通过（含新增 live permission-mode 同步测试） |
 | Config | `test_config.py` | 6 | ✅ 全通过 |
-| Context files | `test_context_files.py` | 3 | ✅ 全通过 |
+| Context files | `test_context_files.py` | 4 | ✅ 全通过（含 repo-root 边界测试） |
 | Factory skills | `test_factory_skills.py` | 1 | ✅ 全通过 |
 | Headless | `test_headless.py` | 11 | ✅ 全通过 |
 | System prompt | `test_system_prompt.py` | 12 | ✅ 全通过 |
 | Pelican benchmark | `test_pelican_benchmark.py` | 5 | ✅ 4 pass + 1 skip(real_llm) |
 | Pelican real LLM | `test_pelican_real_llm.py` | 1 | ⏭️ skip (no API key) |
-| **CLI 合计** | | **52** | **51 passed, 1 skipped** |
+| **CLI 合计** | | **55** | **54 passed, 1 skipped** |
 | **全仓库** | core + harness + CLI | **391** | **380 passed, 11 skipped** |
 
 ### 测试缺口
@@ -376,12 +431,16 @@ CLI flags 对齐设计 §4 全部项。
 |------|------|------|------|
 | 实质 | P4P5-1 | TUI x.ai/* 出站 RPC 拆除（103 文件结构性残留） | [x/~] |
 | 实质 | P4P5-2 | main.rs 用户可见 "grok" 文本 | [x] |
-| 实质 | P4P5-12 | TUI 斜杠命令未按设计裁撤（待讨论） | [ ] |
+| 实质 | P4P5-12 | TUI 斜杠命令未按设计裁撤（用户确认保留） | [~] |
 | 中 | P4P5-3 | GROK_* 环境变量名迁移（`COMPACTION_*` 残留） | [x] |
 | 中 | P4P5-4 | pi-home 文档注释 .grok vs .pi-python | [x] |
 | 中 | P4P5-5 | session_startup 回退路径改为 .pi-python | [x] |
 | 中 | P4P5-13 | TUI 单元测试断言改用 brand::CLI_NAME | [x] |
 | 中 | P4P5-14 | Shell 自动补全改用 brand::CLI_NAME | [x] |
+| 中 | P4P5-16 | 权限模式切换无法在当前会话立即生效 | [x] |
+| 中 | P4P5-17 | context files 上溯范围越过 repo root | [x] |
+| 中 | P4P5-18 | `zypi -p` 未透传 prompt override flags 到 Python | [x] |
+| 中 | P4P5-19 | `PI_AGENT_COMMAND`/`[agent].command` 使用空白分词，Windows 含空格路径易破坏 | [x] |
 | 低 | P4P5-6 | prompt.py 已删除 | [x] |
 | 低 | P4P5-7 | system_prompt.py 改用 _find_repo_root() | [x] |
 | 低 | P4P5-8 | context_files.py 函数引用常量 | [x] |
@@ -392,11 +451,22 @@ CLI flags 对齐设计 §4 全部项。
 
 ---
 
+## 九、2026-09-04 补充复核（决策）
+
+### 9.1 用户确认决策
+
+1. **P4P5-1、P4P5-15 作为遗留待定项继续跟踪**。
+2. **`/compact`、`/fork`、`/rewind` 等命令继续保留**（P4P5-12 由待修复转记录性偏差）。
+3. **权限模式切换必须在当前会话立即生效**（新增 P4P5-16，已完成修复）。
+4. **context files 发现范围限制在 repo root**（新增 P4P5-17，已完成修复）。
+
+---
+
 ## 验证状态
 
 修复后验证（2026-09-03 三次回归）：
 - 全仓库全量 pytest：`380 passed, 11 skipped`（均无 API Key 跳过），0 failed。
-  CLI 模块 52 项（51 passed, 1 skipped）。
+  CLI 模块 55 项（54 passed, 1 skipped）。
 - 代码检查：`.venv\Scripts\ruff.exe check .` All checks passed。
   `.venv\Scripts\ruff.exe format --check .` 102 files already formatted。
 - TUI 编译检查：WSL2 `cargo check -p pi-pager-bin` 与
@@ -404,3 +474,8 @@ CLI flags 对齐设计 §4 全部项。
 - `x.ai/` 残留统计：`rg "x\.ai/" tui/crates/codegen/pi-pager/src/ -l | wc -l` = 103
   （69 源码 + 34 测试），均为结构性残留（文档注释、元数据 key、入站过滤），
   无出站 vendor RPC。
+- 2026-09-04 增量验证：
+  - `.venv\Scripts\python.exe -m pytest packages/pi-agent-cli/tests -q` →
+    `54 passed, 1 skipped`。
+  - `wsl bash -lc "cd /mnt/d/work/pi-python/tui && cargo check -p pi-pager-bin"` 通过。
+  - `.venv\Scripts\ruff.exe check packages/pi-agent-cli/pi_agent_cli/agent.py packages/pi-agent-cli/pi_agent_cli/context_files.py packages/pi-agent-cli/tests/test_acp_agent.py packages/pi-agent-cli/tests/test_context_files.py` 通过。

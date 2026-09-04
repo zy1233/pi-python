@@ -190,6 +190,9 @@ pub struct PagerArgs {
     /// Extra rules to append to the system prompt.
     #[clap(long = "rules", alias = "append-system-prompt")]
     pub rules: Option<String>,
+    /// Skip AGENTS.md / CLAUDE.md context file discovery (headless only).
+    #[clap(long = "no-context-files", hide = true)]
+    pub no_context_files: bool,
     /// Compaction mode [summary|transcript|segments]: `summary` (default) adds
     /// no pointer; `transcript` points at the raw transcript; `segments`
     /// persists per-segment markdown to grep. Sets `GROK_COMPACTION_MODE`.
@@ -207,6 +210,24 @@ pub struct PagerArgs {
         value_name = "PROMPT"
     )]
     pub system_prompt_override: Option<String>,
+    /// Read system prompt override from a file (headless only).
+    #[arg(
+        long = "system-prompt-file",
+        value_name = "PATH",
+        value_hint = ValueHint::FilePath,
+        hide = true,
+        conflicts_with = "system_prompt_override"
+    )]
+    pub system_prompt_file: Option<PathBuf>,
+    /// Read append rules from a file (headless only).
+    #[arg(
+        long = "append-system-prompt-file",
+        value_name = "PATH",
+        value_hint = ValueHint::FilePath,
+        hide = true,
+        conflicts_with = "rules"
+    )]
+    pub append_system_prompt_file: Option<PathBuf>,
     /// Resume a session by ID or title, or the most recent if omitted.
     /// Non-ID values match session titles for the current directory
     /// (ignoring letter case; a sole renamed match wins among duplicates,

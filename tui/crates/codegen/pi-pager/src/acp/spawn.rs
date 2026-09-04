@@ -233,15 +233,10 @@ fn windows_path_to_wsl(path: &str) -> Option<std::path::PathBuf> {
 
 /// Resolve the Python ACP agent command (`PI_AGENT_COMMAND` / `PI_PYTHON`).
 pub fn pi_agent_command() -> (std::ffi::OsString, Vec<std::ffi::OsString>) {
-    if let Ok(raw) = std::env::var("PI_AGENT_COMMAND") {
-        let mut parts = raw.split_whitespace();
-        if let Some(prog) = parts.next() {
-            let program = resolve_spawn_program(std::ffi::OsStr::new(prog));
-            return (
-                program,
-                parts.map(std::ffi::OsString::from).collect(),
-            );
-        }
+    if let Ok(raw) = std::env::var("PI_AGENT_COMMAND")
+        && let Some((prog, args)) = parse_agent_command(&raw)
+    {
+        return (resolve_spawn_program(&prog), args);
     }
     if let Some((prog, args)) = agent_command_from_config(&grok_home()) {
         return (resolve_spawn_program(&prog), args);
@@ -277,10 +272,23 @@ fn agent_command_from_toml_file(
     let table: toml::Table = toml::from_str(&content).ok()?;
     let agent = table.get("agent")?.as_table()?;
     let cmd = agent.get("command")?.as_str()?.trim();
-    if cmd.is_empty() {
+    parse_agent_command(cmd)
+}
+
+fn parse_agent_command(raw: &str) -> Option<(std::ffi::OsString, Vec<std::ffi::OsString>)> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
         return None;
     }
-    let mut parts = cmd.split_whitespace();
+    if let Some(parts) = shlex::split(trimmed)
+        && let Some((prog, args)) = parts.split_first()
+    {
+        return Some((
+            std::ffi::OsString::from(prog),
+            args.iter().map(std::ffi::OsString::from).collect(),
+        ));
+    }
+    let mut parts = trimmed.split_whitespace();
     let prog = parts.next()?;
     Some((
         std::ffi::OsString::from(prog),
@@ -350,6 +358,25 @@ mod pi_agent_command_tests {
             ))
         );
         assert!(super::windows_path_to_wsl("/usr/bin/python3").is_none());
+    }
+
+    #[test]
+    fn parse_agent_command_supports_quoted_windows_paths() {
+        let (prog, args) = parse_agent_command(
+            r#""C:\Program Files\Python312\python.exe" -m pi_agent_cli"#,
+        )
+        .expect("quoted command should parse");
+        assert_eq!(
+            prog,
+            std::ffi::OsString::from(r"C:\Program Files\Python312\python.exe")
+        );
+        assert_eq!(
+            args,
+            vec![
+                std::ffi::OsString::from("-m"),
+                std::ffi::OsString::from("pi_agent_cli"),
+            ]
+        );
     }
 }
 

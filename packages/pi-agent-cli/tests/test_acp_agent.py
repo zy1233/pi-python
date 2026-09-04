@@ -202,6 +202,31 @@ async def test_permission_auto_skips_request(tmp_path):
     assert client.permission_calls == []
 
 
+@pytest.mark.asyncio
+async def test_permission_mode_notification_updates_live_session_policy(tmp_path):
+    agent = _agent(tmp_path, stream_fn=_bash_once_stream, permission="ask")
+    client = FakeClient(allow=False)
+    agent.on_connect(client)
+    created = await agent.new_session(cwd=str(tmp_path.resolve()))
+    await agent.ext_notification(
+        "x.ai/yolo_mode_changed",
+        {"permission_mode": "auto"},
+    )
+    await agent.prompt(session_id=created.session_id, prompt=[text_block("run")])
+    assert client.permission_calls == []
+
+
+@pytest.mark.asyncio
+async def test_invalid_permission_mode_notification_is_ignored(tmp_path):
+    agent = _agent(tmp_path, stream_fn=_bash_once_stream, permission="ask")
+    client = FakeClient(allow=False)
+    agent.on_connect(client)
+    created = await agent.new_session(cwd=str(tmp_path.resolve()))
+    await agent.ext_notification("x.ai/yolo_mode_changed", {"permission_mode": "bogus"})
+    await agent.prompt(session_id=created.session_id, prompt=[text_block("run")])
+    assert client.permission_calls
+
+
 def test_tool_kind_mapping():
     assert tool_kind("read") == "read"
     assert tool_kind("edit") == "edit"
