@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "afterShellExecution": [
+      {
+        "command": "powershell -NoProfile -ExecutionPolicy Bypass -File .cursor/hooks/on_git_push.ps1 -AutofixModel composer-2.5",
+        "matcher": "git\\s+push",
+        "timeout": 10
+      }
+    ]
+  }
+}
