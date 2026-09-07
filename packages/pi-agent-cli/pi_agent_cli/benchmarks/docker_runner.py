@@ -210,8 +210,12 @@ class DockerContainerSession:
                 ])
 
     def teardown(self) -> None:
-        """Stop and remove container."""
+        """Stop and remove container, copying back any modified workspace files."""
         if self.is_running:
+            # Sync files from container /app back to local workspace before tearing down
+            mount_ws = to_docker_mount_path(self.workspace)
+            with contextlib.suppress(Exception):
+                run_docker_sync(["cp", f"{self.container_name}:/app/.", mount_ws])
             run_docker_sync(["rm", "-f", self.container_name])
             self.is_running = False
             print(f"[DOCKER] Container {self.container_name} removed.")
@@ -259,7 +263,7 @@ class DockerContainerSession:
             return (res.returncode == 0, out)
 
         if test_py.is_file():
-            # Run pytest inside container
+            # Run pytest inside container.
             res = run_docker_sync(
                 [
                     "exec",

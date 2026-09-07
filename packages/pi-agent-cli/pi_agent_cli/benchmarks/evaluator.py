@@ -181,16 +181,29 @@ async def run_trial(
     has_docker = get_docker_cmd() is not None
     should_use_docker = use_docker and has_docker and bool(task_image)
 
+    # When running Docker in WSL or Linux where workspace is on a Windows 9p/drvfs mount (/mnt/...),
+    # drvfs does not support POSIX file permission modes (e.g. chmod 600 fails or is ignored).
+    # We use a temporary ext4 workspace under /tmp and sync back upon completion.
+    temp_ext4_ws: Path | None = None
+    if should_use_docker and sys.platform != "win32" and str(workspace.resolve()).startswith("/mnt/"):
+        import tempfile
+
+        clean_name = "".join(c if c.isalnum() or c in "-_" else "-" for c in task.id).strip("-")
+        temp_ext4_ws = Path(tempfile.mkdtemp(prefix=f"pi-ws-{clean_name}-"))
+        active_ws = temp_ext4_ws
+    else:
+        active_ws = workspace
+
     docker_session: DockerContainerSession | None = None
     custom_tools: list[Any] | None = None
     junctions: list[str] = []
 
     if should_use_docker:
         try:
-            docker_session = DockerContainerSession(task, workspace)
+            docker_session = DockerContainerSession(task, active_ws)
             docker_session.setup()
-            _copy_task_environment(task, workspace)
-            tools_dict = create_all_tools(str(workspace.resolve()))
+            _copy_task_environment(task, active_ws)
+            tools_dict = create_all_tools(str(active_ws.resolve()))
             tools_dict["bash"] = create_docker_bash_tool(
                 docker_session.container_name, cwd="/app"
             )
@@ -202,19 +215,19 @@ async def run_trial(
             custom_tools = None
 
     if docker_session is None:
-        _copy_task_environment(task, workspace)
+        _copy_task_environment(task, active_ws)
         # On Windows, bridge root /app and /data to workspace via NTFS junctions
         if sys.platform == "win32":
-            drive = workspace.drive or "D:"
+            drive = active_ws.drive or "D:"
             app_link = f"{drive}\\app"
             data_link = f"{drive}\\data"
             if not os.path.exists(app_link):
                 with contextlib.suppress(Exception):
                     import _winapi
 
-                    _winapi.CreateJunction(str(workspace.resolve()), app_link)
+                    _winapi.CreateJunction(str(active_ws.resolve()), app_link)
                     junctions.append(app_link)
-            ws_data = workspace / "data"
+            ws_data = active_ws / "data"
             if ws_data.is_dir() and not os.path.exists(data_link):
                 with contextlib.suppress(Exception):
                     import _winapi
@@ -232,12 +245,12 @@ async def run_trial(
         sessions_dir = trial_dir / "session"
         sessions_dir.mkdir(parents=True, exist_ok=True)
         repo = JsonlSessionRepo(sessions_dir)
-        session = await repo.create({"cwd": str(workspace.resolve())})
+        session = await repo.create({"cwd": str(active_ws.resolve())})
 
-        resources = await load_session_resources(cwd=workspace, config=cfg)
+        resources = await load_session_resources(cwd=active_ws, config=cfg)
         harness = await create_session_harness(
             session=session,
-            cwd=workspace,
+            cwd=active_ws,
             config=cfg,
             stream_fn=default_stream_fn(),
             resources=resources,
@@ -249,7 +262,7 @@ async def run_trial(
             mode_str = "Docker" if docker_session else "Local"
             print(f"\n[EVAL] Starting task: {task.id} ({mode_str})")
             print(f"[EVAL] Model: {cfg.provider}:{cfg.model_id} | Max Turns: {effective_max_turns}")
-            print(f"[EVAL] Workspace: {workspace}")
+            print(f"[EVAL] Workspace: {active_ws}")
 
         start_time = time.perf_counter()
         trial_error: str | None = None
@@ -354,7 +367,7 @@ async def run_trial(
         else:
             passed, verifier_output = _run_verifier(
                 task,
-                workspace,
+                active_ws,
                 timeout_sec=task.verifier_timeout_sec,
             )
 
@@ -420,6 +433,11 @@ async def run_trial(
     finally:
         if docker_session is not None:
             docker_session.teardown()
+        if temp_ext4_ws is not None and temp_ext4_ws.is_dir():
+            with contextlib.suppress(Exception):
+                # Sync back generated files to workspace before cleanup
+                shutil.copytree(temp_ext4_ws, workspace, dirs_exist_ok=True)
+                shutil.rmtree(temp_ext4_ws)
         for j in junctions:
             with contextlib.suppress(Exception):
                 os.rmdir(j)
