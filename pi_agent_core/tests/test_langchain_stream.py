@@ -295,7 +295,9 @@ async def test_structured_output_anthropic_prompt_only(monkeypatch):
     final = await stream.message_result()
 
     assert "response_format" not in fake.bound
-    assert "JSON Schema" in fake._messages[0].content
+    content = fake._messages[0].content
+    text = content if isinstance(content, str) else content[0].get("text", "")
+    assert "JSON Schema" in text
     # Markdown fences are stripped before parsing.
     assert final.structured_output == {"name": "Bob", "age": 7}
 

@@ -232,6 +232,11 @@ class AgentHarness:
         self._subscribers: list[Callable[[AgentHarnessEvent, Any | None], Any]] = []
         self._hooks: dict[str, list[Callable[[Any], Any]]] = {}
         self._run_abort_controller: _AbortController | None = None
+        self._cached_system_prompt: str | None = None
+
+    def invalidate_system_prompt_cache(self) -> None:
+        """Clear the cached system prompt so it will be regenerated on the next turn."""
+        self._cached_system_prompt = None
 
     def _set_phase(
         self, phase: Literal["idle", "turn", "compaction", "branch_summary", "retry"]
@@ -357,23 +362,27 @@ class AgentHarness:
         context = await self.session.build_context()
         metadata = await self.session.get_metadata()
         active_tools = [self._tools[name] for name in self.active_tool_names if name in self._tools]
-        system_prompt = "You are a helpful assistant."
-        if isinstance(self.system_prompt, str):
-            system_prompt = self.system_prompt
-        elif self.system_prompt:
-            system_prompt = await _maybe_await(
-                self.system_prompt(
-                    {
-                        "env": self.env,
-                        "session": self.session,
-                        "model": self.model,
-                        "thinking_level": self.thinking_level,
-                        "active_tools": active_tools,
-                        "resources": self.resources,
-                    }
+        if self._cached_system_prompt is not None:
+            system_prompt = self._cached_system_prompt
+        else:
+            system_prompt = "You are a helpful assistant."
+            if isinstance(self.system_prompt, str):
+                system_prompt = self.system_prompt
+            elif self.system_prompt:
+                system_prompt = await _maybe_await(
+                    self.system_prompt(
+                        {
+                            "env": self.env,
+                            "session": self.session,
+                            "model": self.model,
+                            "thinking_level": self.thinking_level,
+                            "active_tools": active_tools,
+                            "resources": self.resources,
+                        }
+                    )
                 )
-            )
-        system_prompt = build_harness_system_prompt(system_prompt, self.resources)
+            system_prompt = build_harness_system_prompt(system_prompt, self.resources)
+            self._cached_system_prompt = system_prompt
         return _TurnState(
             messages=list(context.messages),
             resources=self.resources.model_copy(deep=True),
@@ -749,6 +758,7 @@ class AgentHarness:
             self.pending_session_writes.append({"type": "message", "message": message})
 
     async def set_model(self, model: Model) -> None:
+        self.invalidate_system_prompt_cache()
         previous = self.model
         if self.phase == "idle":
             await self.session.append_model_change(model.provider, model.model_id)
@@ -760,6 +770,7 @@ class AgentHarness:
         await self._emit_any(ModelUpdateEvent(model=model, previousModel=previous))
 
     async def set_thinking_level(self, level: ThinkingLevel) -> None:
+        self.invalidate_system_prompt_cache()
         previous = self.thinking_level
         if self.phase == "idle":
             await self.session.append_thinking_level_change(level)
@@ -773,6 +784,7 @@ class AgentHarness:
     async def set_tools(
         self, tools: list[AgentTool], active_tool_names: list[str] | None = None
     ) -> None:
+        self.invalidate_system_prompt_cache()
         next_tools = {tool.name: tool for tool in tools}
         self._validate_unique(list(next_tools), "Duplicate tool name(s)")
         next_active = active_tool_names or self.active_tool_names
@@ -803,6 +815,7 @@ class AgentHarness:
         return self.resources.model_copy(deep=True)
 
     async def set_resources(self, resources: AgentHarnessResources | dict[str, Any]) -> None:
+        self.invalidate_system_prompt_cache()
         previous = self.get_resources()
         self.resources = (
             resources
@@ -984,6 +997,7 @@ class AgentHarness:
             leaf_id,
             {"summary": summary_text, "fromHook": summary_from_hook} if summary_text else None,
         )
+        self.invalidate_system_prompt_cache()
         result = NavigateTreeResult(
             targetId=target_id,
             leafId=leaf_id,

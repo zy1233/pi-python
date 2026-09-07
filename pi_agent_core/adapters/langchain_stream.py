@@ -245,10 +245,19 @@ def _usage_from_meta(meta: dict[str, Any]) -> Usage:
     output_details = meta.get("output_token_details") or {}
     input_tokens = int(meta.get("input_tokens") or 0)
     output_tokens = int(meta.get("output_tokens") or 0)
+    cache_read = int(input_details.get("cache_read") or 0)
+    cache_rate = (cache_read / input_tokens * 100.0) if input_tokens > 0 else 0.0
+    logger.debug(
+        "LLM usage: input=%d cached=%d (%.1f%%) output=%d",
+        input_tokens,
+        cache_read,
+        cache_rate,
+        output_tokens,
+    )
     return Usage(
         input=input_tokens,
         output=output_tokens,
-        cacheRead=int(input_details.get("cache_read") or 0),
+        cacheRead=cache_read,
         cacheWrite=int(input_details.get("cache_creation") or 0),
         totalTokens=max(int(meta.get("total_tokens") or 0), input_tokens + output_tokens),
         reasoningTokens=int(output_details.get("reasoning") or 0),

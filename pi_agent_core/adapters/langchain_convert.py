@@ -52,14 +52,53 @@ def convert_to_langchain(
     """
     provider = (model.provider if model else "").lower()
     supports_images = model.supports_images if model else True
+    is_anthropic = provider == "anthropic"
 
     out: list[BaseMessage] = []
     if system_prompt:
-        out.append(SystemMessage(content=system_prompt))
+        if is_anthropic:
+            out.append(
+                SystemMessage(
+                    content=[
+                        {
+                            "type": "text",
+                            "text": system_prompt,
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    ]
+                )
+            )
+        else:
+            out.append(SystemMessage(content=system_prompt))
 
-    for msg in messages:
+    # For Anthropic prompt caching: mark the last user or toolResult message
+    # before the current turn as a sliding cache breakpoint.
+    cache_breakpoint_idx: int | None = None
+    if is_anthropic and len(messages) > 1:
+        for i in range(len(messages) - 2, -1, -1):
+            if isinstance(messages[i], (UserMessage, ToolResultMessage)):
+                cache_breakpoint_idx = i
+                break
+
+    for idx, msg in enumerate(messages):
+        add_cache = is_anthropic and (idx == cache_breakpoint_idx)
         if isinstance(msg, UserMessage):
-            out.append(HumanMessage(content=_user_content_to_lc(msg.content)))
+            lc_content = _user_content_to_lc(msg.content)
+            if add_cache:
+                if isinstance(lc_content, str):
+                    lc_content = [
+                        {
+                            "type": "text",
+                            "text": lc_content,
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    ]
+                elif isinstance(lc_content, list) and lc_content:
+                    lc_content = [
+                        *lc_content[:-1],
+                        {**lc_content[-1], "cache_control": {"type": "ephemeral"}},
+                    ]
+            out.append(HumanMessage(content=lc_content))
         elif isinstance(msg, AssistantMessage):
             text_parts: list[str] = []
             thinking_blocks: list[dict] = []
@@ -107,12 +146,14 @@ def convert_to_langchain(
                         name=msg.toolName,
                     )
                 )
-            elif image_blocks and provider == "anthropic":
+            elif image_blocks and is_anthropic:
                 # Anthropic tool_result accepts content blocks natively.
                 blocks: list = []
                 if text:
                     blocks.append({"type": "text", "text": text})
                 blocks.extend(_image_block_to_lc(b) for b in image_blocks)
+                if add_cache and blocks:
+                    blocks[-1] = {**blocks[-1], "cache_control": {"type": "ephemeral"}}
                 out.append(
                     ToolMessage(
                         content=blocks,
@@ -138,6 +179,20 @@ def convert_to_langchain(
                 ]
                 parts.extend(_image_block_to_lc(b) for b in image_blocks)
                 out.append(HumanMessage(content=parts))
+            elif is_anthropic and add_cache:
+                out.append(
+                    ToolMessage(
+                        content=[
+                            {
+                                "type": "text",
+                                "text": text or "(empty)",
+                                "cache_control": {"type": "ephemeral"},
+                            }
+                        ],
+                        tool_call_id=msg.toolCallId,
+                        name=msg.toolName,
+                    )
+                )
             else:
                 out.append(
                     ToolMessage(

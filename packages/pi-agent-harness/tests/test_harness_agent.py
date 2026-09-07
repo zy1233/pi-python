@@ -615,3 +615,39 @@ async def test_prompt_persists_user_message_as_text_block_array():
         if e.type == "message" and e.message.get("role") == "user"
     ]
     assert user_entries[0].message["content"] == [{"type": "text", "text": "hello"}]
+
+
+@pytest.mark.asyncio
+async def test_system_prompt_cached_across_turns_and_invalidated():
+    session = await _memory_session()
+    call_count = 0
+
+    def get_sys_prompt(ctx):
+        nonlocal call_count
+        call_count += 1
+        return f"System prompt call {call_count}"
+
+    harness = AgentHarness(
+        session=session,
+        model=_model(),
+        stream_fn=mock_text_stream,
+        system_prompt=get_sys_prompt,
+    )
+
+    # First turn
+    await harness.prompt("turn 1")
+    assert call_count == 1
+
+    # Second turn (no change in tools/resources/model) -> cached
+    await harness.prompt("turn 2")
+    assert call_count == 1
+
+    # Invalidate cache manually
+    harness.invalidate_system_prompt_cache()
+    await harness.prompt("turn 3")
+    assert call_count == 2
+
+    # Change model -> invalidates cache
+    await harness.set_model(_model("m2"))
+    await harness.prompt("turn 4")
+    assert call_count == 3

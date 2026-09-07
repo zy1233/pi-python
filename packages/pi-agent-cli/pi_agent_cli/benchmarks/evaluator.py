@@ -52,6 +52,31 @@ def _calculate_cost(
     return cost
 
 
+def calculate_cache_hit_rate(
+    *,
+    total_input: int,
+    total_cached: int,
+    provider: str = "deepseek",
+) -> float:
+    """Calculate normalized prompt cache hit rate based on provider token semantics.
+
+    Provider semantics:
+    - Anthropic: input_tokens reports uncached tokens only; total prompt tokens = input + cached.
+      Hit rate = cached / (input + cached).
+    - OpenAI / DeepSeek / SiliconFlow: input_tokens already includes cached tokens
+      (input_tokens = uncached + cached).
+      Hit rate = cached / input.
+    """
+    if provider.lower() == "anthropic":
+        denominator = total_input + total_cached
+    else:
+        denominator = total_input
+
+    if denominator <= 0:
+        return 0.0
+    return min(1.0, max(0.0, total_cached / denominator))
+
+
 def _copy_task_environment(task: BenchmarkTask, workspace: Path) -> None:
     """Copy non-verifier fixtures from task directory into workspace."""
     env_dir = task.task_dir / "environment"
@@ -337,10 +362,10 @@ async def run_trial(
             if not action_calls:
                 no_action_turns += 1
 
-        cache_hit_rate = (
-            (total_cached / (total_input + total_cached))
-            if (total_input + total_cached) > 0
-            else 0.0
+        cache_hit_rate = calculate_cache_hit_rate(
+            total_input=total_input,
+            total_cached=total_cached,
+            provider=cfg.provider,
         )
 
         cost_usd = (

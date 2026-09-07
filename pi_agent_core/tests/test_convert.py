@@ -108,3 +108,53 @@ def test_tool_result_text_only_unchanged():
     msg = _tool_result({"type": "text", "text": "plain"})
     (tool_msg,) = convert_to_langchain([msg], model=Model(provider="openai", model_id="g"))
     assert tool_msg.content == "plain"
+
+
+def test_anthropic_system_prompt_gets_cache_control():
+    from langchain_core.messages import SystemMessage
+
+    model = Model(provider="anthropic", model_id="claude-3-7-sonnet")
+    out = convert_to_langchain([], system_prompt="You are a helper.", model=model)
+    assert len(out) == 1
+    sys_msg = out[0]
+    assert isinstance(sys_msg, SystemMessage)
+    assert sys_msg.content == [
+        {"type": "text", "text": "You are a helper.", "cache_control": {"type": "ephemeral"}}
+    ]
+
+
+def test_anthropic_sliding_cache_breakpoint():
+    from pi_agent_core.messages import UserMessage
+
+    model = Model(provider="anthropic", model_id="claude-3-7-sonnet")
+    m1 = UserMessage(content="First message", timestamp=1000)
+    m2 = _assistant({"type": "text", "text": "Reply 1"})
+    m3 = UserMessage(content="Second message", timestamp=2000)
+    out = convert_to_langchain([m1, m2, m3], system_prompt="Sys", model=model)
+
+    assert len(out) == 4
+    # out[0]: SystemMessage with cache_control
+    assert out[0].content[0]["cache_control"] == {"type": "ephemeral"}
+    # out[1]: HumanMessage (m1) is the last user message before current turn -> gets cache_control
+    assert isinstance(out[1], HumanMessage)
+    assert out[1].content == [
+        {"type": "text", "text": "First message", "cache_control": {"type": "ephemeral"}}
+    ]
+    # out[2]: AIMessage
+    assert isinstance(out[2], AIMessage)
+    # out[3]: HumanMessage (m3) is the latest message -> no cache_control
+    assert isinstance(out[3], HumanMessage)
+    assert out[3].content == "Second message"
+
+
+def test_non_anthropic_no_cache_control():
+    from pi_agent_core.messages import UserMessage
+
+    model = Model(provider="deepseek", model_id="deepseek-chat")
+    m1 = UserMessage(content="First message", timestamp=1000)
+    m2 = UserMessage(content="Second message", timestamp=2000)
+    out = convert_to_langchain([m1, m2], system_prompt="Sys", model=model)
+
+    assert out[0].content == "Sys"
+    assert out[1].content == "First message"
+    assert out[2].content == "Second message"
