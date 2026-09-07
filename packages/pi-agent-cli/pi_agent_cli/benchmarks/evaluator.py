@@ -174,10 +174,9 @@ async def run_trial(
     workspace = trial_dir / "workspace"
     workspace.mkdir(parents=True, exist_ok=True)
 
-    task_image = (
-        task.metadata.get("environment", {}).get("docker_image")
-        or task.metadata.get("environment", {}).get("image")
-    )
+    task_image = task.metadata.get("environment", {}).get("docker_image") or task.metadata.get(
+        "environment", {}
+    ).get("image")
     has_docker = get_docker_cmd() is not None
     should_use_docker = use_docker and has_docker and bool(task_image)
 
@@ -185,7 +184,8 @@ async def run_trial(
     # drvfs does not support POSIX file permission modes (e.g. chmod 600 fails or is ignored).
     # We use a temporary ext4 workspace under /tmp and sync back upon completion.
     temp_ext4_ws: Path | None = None
-    if should_use_docker and sys.platform != "win32" and str(workspace.resolve()).startswith("/mnt/"):
+    is_drvfs = str(workspace.resolve()).startswith("/mnt/")
+    if should_use_docker and sys.platform != "win32" and is_drvfs:
         import tempfile
 
         clean_name = "".join(c if c.isalnum() or c in "-_" else "-" for c in task.id).strip("-")
@@ -204,9 +204,7 @@ async def run_trial(
             docker_session.setup()
             _copy_task_environment(task, active_ws)
             tools_dict = create_all_tools(str(active_ws.resolve()))
-            tools_dict["bash"] = create_docker_bash_tool(
-                docker_session.container_name, cwd="/app"
-            )
+            tools_dict["bash"] = create_docker_bash_tool(docker_session.container_name, cwd="/app")
             custom_tools = list(tools_dict.values())
         except Exception as e:
             if verbose:
@@ -382,8 +380,7 @@ async def run_trial(
 
         if verbose:
             print(
-                f"[EVAL] Result: {status.upper()} "
-                f"(Duration: {duration:.1f}s, Turns: {total_turns})"
+                f"[EVAL] Result: {status.upper()} (Duration: {duration:.1f}s, Turns: {total_turns})"
             )
             cache_str = f"{cache_hit_rate * 100:.1f}%"
             print(f"[EVAL] Tokens: {total_tokens} (Cache: {cache_str}, Cost: ${cost_usd:.4f})")
@@ -434,10 +431,9 @@ async def run_trial(
         if docker_session is not None:
             docker_session.teardown()
         if temp_ext4_ws is not None and temp_ext4_ws.is_dir():
-            with contextlib.suppress(Exception):
-                # Sync back generated files to workspace before cleanup
-                shutil.copytree(temp_ext4_ws, workspace, dirs_exist_ok=True)
-                shutil.rmtree(temp_ext4_ws)
+            # For Docker tasks, results and trajectory are already fully collected into trial_dir
+            # Avoid copying massive starter repo (or root-owned build files) back into drvfs/NTFS
+            pass
         for j in junctions:
             with contextlib.suppress(Exception):
                 os.rmdir(j)

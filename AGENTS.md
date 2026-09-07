@@ -18,6 +18,8 @@ Design documents:
 | `docs/AUDIT/AUDIT-2026-07-02.md` | Core-layer audit tracker |
 | `docs/AUDIT/AUDIT-H1.md` ~ `docs/AUDIT/AUDIT-H4.md` | Harness batch audits |
 | `docs/AUDIT/SPIKE-P0-GROK-TUI.md` | Phase 4 P0: pager `x.ai/*` strip list |
+| `docs/benchmarks/FRONTIER-HARNESS-EVAL.md` | FrontierHarness evaluation architecture & methodology |
+| `docs/benchmarks/FRONTIER-HARNESS-30-EVAL-REPORT.md` | Full 30-task benchmark report & Pi baseline comparison |
 
 Guiding principles:
 
@@ -68,6 +70,8 @@ AgentMessage[] → transform_context() → convert_to_llm() → LangChain BaseMe
 **Phase 4 (Coding Agent CLI) P0–P4 landed** — `tui/` vendored grok-build fork de-grokked: crates renamed `pi-*`, product binary `zypi` (`cargo check -p pi-pager-bin`); grok CLI subcommands removed; startup skips auth/prefetch; welcome uses zypi branding. `packages/pi-agent-cli` is standard-ACP-only over `AgentHarness`; TUI spawn is `python -m pi_agent_cli` (`PI_AGENT_COMMAND` / `[agent].command` / `PI_PYTHON`), skips xAI login, drops outbound `x.ai/*`, home `~/.pi-python`. `/new` `/resume` `/quit` map to standard ACP; `@` is local directory listing; `zypi -p` is Python headless. Config: `packages/pi-agent-cli/agent.example.toml` (Python agent; keep `config.toml` empty or pi-python-only); Windows: `docs/WINDOWS.md`. See `docs/specs/2026-08-25-phase4-coding-agent-cli-design.md`.
 
 **Phase 5 (Coding Agent prompt engine) landed** — pi-aligned `build_system_prompt` / `build_coding_agent_harness_system_prompt` in `pi_agent_cli`; tool `prompt_snippet`/`prompt_guidelines` consumption; AGENTS.md context files; `<available_skills>` format; bash `PI_*` env. See `docs/specs/2026-09-02-phase5-prompt-engine-design.md`.
+
+**FrontierHarness 30 Benchmark Suite landed** — `scripts/run_eval.py` CLI evaluating code-agent harnesses across 30 frontier tasks (21 Terminal-Bench + 9 DeepSWE industrial repo fixes). Supports dual runtime: Windows local mode (NTFS junction `_winapi.CreateJunction` virtualizing `/app`) and WSL2 Docker sandboxing (`DockerContainerSession`, `create_docker_bash_tool`, adaptive ext4 `/tmp` workspace resolving Windows 9p/drvfs POSIX permission issues, transparent v2ray proxy for pulling AWS ECR / Docker Hub images). All 30 tasks evaluated end-to-end; comprehensive report in `docs/benchmarks/FRONTIER-HARNESS-30-EVAL-REPORT.md`.
 
 ## Cursor Cloud specific instructions
 
@@ -131,8 +135,21 @@ uv pip install --python .venv -e ".[dev]" -e "./packages/pi-agent-harness" -e ".
 | Run tests (mock) | `.venv\Scripts\python.exe -m pytest` (or `-v` for verbose) |
 | Run tests (real LLM) | `$env:REAL_LLM_API_KEY='sk-...'; .venv-test-real\Scripts\python.exe -m pytest -m real_llm -v` |
 | Pelican TUI smoke | `$env:REAL_LLM_API_KEY='sk-...'; .venv\Scripts\python.exe scripts/smoke_pelican.py` — see `docs/benchmarks/PELCAN-BICYCLE.md` |
-| Harness benchmark eval | `$env:REAL_LLM_API_KEY='sk-...'; .venv\Scripts\python.exe scripts/run_eval.py --frontier-30 --task regex-log` — see `docs/benchmarks/FRONTIER-HARNESS-EVAL.md` and `docs/benchmarks/FRONTIER-HARNESS-30-EVAL-REPORT.md` |
+| Harness benchmark eval (Windows local) | `$env:REAL_LLM_API_KEY='sk-...'; .venv\Scripts\python.exe scripts/run_eval.py --frontier-30 --task regex-log` |
+| Harness benchmark eval (WSL Docker) | `wsl env REAL_LLM_API_KEY='sk-...' /tmp/pi-eval-venv/bin/python /mnt/d/work/pi-python/scripts/run_eval.py --frontier-30 --task <task-id> --max-turns 20` |
 | TUI cargo check | WSL: `cd tui && cargo check -p pi-pager-bin` (binary name `zypi`; uses WSL `$CARGO_TARGET_DIR` env) |
+
+### Benchmark & Evaluation (FrontierHarness 30)
+
+The repository integrates a comprehensive benchmarking suite inspired by `frontier-harness-eval` for evaluating code-agent harnesses across 30 frontier tasks (21 `terminal-bench` + 9 `datacurve`/`swe-bench`).
+
+- **Entry point**: `scripts/run_eval.py`
+  - Arguments: `--frontier-30`, `--task <task-id>`, `--suite <suite>`, `--max-turns <n>`, `--model <model>`
+  - Output directory: `.pi-eval/runs/<timestamp>/` (contains `REPORT.md`, `eval-summary.json`, trajectories, and logs; ignored by git).
+- **Execution runtimes**:
+  - **Windows Local Mode**: Employs Windows NTFS Junctions (`_winapi.CreateJunction`) to map `/app` or `\app` transparently to the active workspace on drive root (`D:\app`), supporting local terminal/algorithm tasks without containers.
+  - **WSL2 Docker Sandbox Mode**: True Linux container isolation via `DockerContainerSession` and `create_docker_bash_tool`. Transparently routes through host v2ray proxy (`172.20.35.30:10809`) for pulling AWS ECR / Docker Hub images; automatically strips CRLF, handles Git `safe.directory`, adapts ext4 `/tmp/pi-ws-*` temporary worktree to support strict POSIX file permissions (`chmod 600`), and extracts verifier scores (`reward.json` / `reward.txt`).
+- **Reports & Analysis**: Full 30-task evaluation results, cost analysis, cache hit rates, and side-by-side comparison against official Pi are documented in `docs/benchmarks/FRONTIER-HARNESS-30-EVAL-REPORT.md`.
 
 ### Notes
 
