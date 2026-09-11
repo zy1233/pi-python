@@ -14,7 +14,22 @@ from pi_agent_core.coding_tools.bash import create_bash_tool
 from pi_agent_core.coding_tools.path_utils import normalize_host_path
 from pi_agent_core.types import Model, StreamFn
 from pi_agent_harness import AgentHarness, AgentHarnessResources, LocalExecutionEnv, Session
+from pi_agent_harness.compaction import CompactionSettings
 from pi_agent_harness.skills import load_skills
+
+
+def _detect_vlm_support(provider: str, model_id: str) -> bool:
+    """Auto-detect vision (VLM) support based on provider and model name.
+
+    Known text-only providers (DeepSeek, SiliconFlow via DeepSeek) default to
+    False unless the model name contains a VLM indicator (``vl``, ``vision``).
+    All other providers default to True (OpenAI, Anthropic, etc.).
+    """
+    _TEXT_ONLY_PROVIDERS = {"deepseek", "siliconflow"}
+    mid = model_id.lower()
+    if provider.lower() in _TEXT_ONLY_PROVIDERS:
+        return any(kw in mid for kw in ("vl", "vision"))
+    return True
 
 
 def default_stream_fn() -> StreamFn:
@@ -102,6 +117,7 @@ async def create_session_harness(
         provider=config.provider,
         model_id=config.model_id,
         base_url=config.base_url,
+        supports_images=_detect_vlm_support(config.provider, config.model_id),
     )
 
     async def system_prompt_callback(ctx: dict[str, Any]) -> str:
@@ -121,6 +137,7 @@ async def create_session_harness(
             system_prompt_options=options,
         )
 
+    auto_compact = config.max_turns is not None and config.max_turns >= 30
     harness = AgentHarness(
         session=session,
         model=model,
@@ -132,6 +149,7 @@ async def create_session_harness(
         system_prompt=system_prompt_callback,
         thinking_level=config.thinking_level,
         max_turns=config.max_turns,
+        compaction=CompactionSettings(auto_compact=auto_compact),
     )
     harness_holder["harness"] = harness
     if on_tool_call is not None:
