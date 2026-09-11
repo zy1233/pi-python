@@ -376,7 +376,7 @@ pub struct PagerArgs {
     pub disable_web_search: bool,
     /// Exit as soon as the first agent turn ends, without waiting for pending
     /// background bash/monitor tasks or background subagents (headless only).
-    /// Default for all `grok -p` runs is to wait (up to `--background-wait-timeout`)
+    /// Default for all `zypi -p` runs is to wait (up to `--background-wait-timeout`)
     /// so eval harnesses see full task completion. Use this for fast scripts that
     /// only need the first turn's text. Does not wait for server-side auto-wake
     /// output or persistent monitors (those hit the timeout).
@@ -438,7 +438,7 @@ pub struct PagerArgs {
     /// Experimental: scrollback-native rendering. Finalized blocks are printed
     /// into the terminal's native scrollback (use the terminal's own scroll /
     /// selection); a small pinned region holds the prompt + running turn.
-    /// Session-scoped only, does not write config. To default plain `grok` to
+    /// Session-scoped only, does not write config. To default plain `zypi` to
     /// minimal, set `[ui] screen_mode = "minimal"` in ~/.pi-python/config.toml.
     #[arg(long = "minimal")]
     pub minimal: bool,

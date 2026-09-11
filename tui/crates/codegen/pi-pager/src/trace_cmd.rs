@@ -577,7 +577,7 @@ impl UploadAttempt<'_> {
             eprintln!("Trace upload failed: {error}");
             eprintln!("  Bundle: {}", export_path.display());
             eprintln!("  Log:    {}", log_path.display());
-            eprintln!("  Retry:  grok trace {}", self.session_id);
+            eprintln!("  Retry:  zypi trace {}", self.session_id);
             println!("{}", export_path.display());
         }
 
@@ -592,7 +592,7 @@ impl UploadAttempt<'_> {
         let _ = writeln!(log, "Trace upload debug log");
         let _ = writeln!(log, "======================");
         let _ = writeln!(log, "Timestamp:    {}", chrono::Utc::now().to_rfc3339());
-        let _ = writeln!(log, "Grok version: {}", pi_version::full_version());
+        let _ = writeln!(log, "zypi version: {}", pi_version::full_version());
         let _ = writeln!(
             log,
             "OS:           {} {}",

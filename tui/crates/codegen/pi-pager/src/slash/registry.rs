@@ -38,6 +38,7 @@ pub(crate) const PI_STANDARD_SLASH_NAMES: &[&str] = &[
     "theme",
     "settings",
     "multiline",
+    "home",
 ];
 
 /// Source of a command in the registry. Used for precedence and replacement.
@@ -1449,6 +1450,8 @@ mod tests {
         assert!(registry.get("theme").is_some());
         assert!(registry.get("settings").is_some());
         assert!(registry.get("multiline").is_some());
+        assert!(registry.get("home").is_some());
+        assert!(registry.get("welcome").is_some(), "/welcome is an alias of /home");
         assert!(registry.get("clear").is_some(), "/clear is an alias of /new");
         assert!(registry.get("exit").is_some(), "/exit is an alias of /quit");
         assert!(registry.get("model").is_none());

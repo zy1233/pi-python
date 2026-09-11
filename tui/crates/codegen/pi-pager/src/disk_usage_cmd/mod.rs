@@ -26,9 +26,9 @@ const SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, clap::Args)]
 #[command(
-    after_help = "Lists every top-level directory in the grok home, largest first, then every \
+    after_help = "Lists every top-level directory in the zypi home, largest first, then every \
 worktree under `worktrees/` and `worktree_pool/` with its size, age, and label. To reclaim space, preview a sweep with \
-`grok worktree gc --max-age 7d --dry-run`: without `--max-age`, gc expires nothing, it \
+`zypi worktree gc --max-age 7d --dry-run`: without `--max-age`, gc expires nothing, it \
 visits only worktrees the registry tracks, and it keeps a worktree whose work \
 it cannot find elsewhere."
 )]

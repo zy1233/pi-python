@@ -80,16 +80,18 @@ CLI flags 对齐设计 §4 全部项。
 
 ### P4P5-2. TUI 用户可见文本仍输出 "grok" / "Grok"（实质 · Phase 4）
 
-- [x] 已修复（2026-09-03）
-- 位置：`tui/crates/codegen/pi-pager-bin/src/main.rs` 多处
+- [x] 已修复（2026-09-03 初步修复，2026-09-11 深度补齐）
+- 位置：`tui/crates/codegen/pi-pager-bin/src/main.rs`、`pi-pager/src/app/mod.rs`、`pi-pager/src/app/screen_mode_relaunch.rs`、`pi-pager/src/notifications/title.rs`、`pi-pager/src/notifications/config.rs` 等
 - 具体修复：
-  - L381 `version_text`: 输出改为 `format!("{} {}\n", pi_pager::brand::CLI_NAME, ...)`
-  - L489: 策略提示改为 `format!("Update {} to a version the policy allows...", pi_pager::brand::CLI_NAME)`
-  - L505: 崩溃提示改为 `eprintln!("{} crashed during your last session.", pi_pager::brand::CLI_NAME)`
-  - L533: tokio runtime 启动错误改为 `eprintln!("{}: failed to start tokio runtime: {e}", pi_pager::brand::CLI_NAME)`
-  - L904/917/931/938 等测试断言与 fixture 同步改为 `brand::CLI_NAME`（"zypi"）
+  - `main.rs`: 统一改为引用 `pi_pager::brand::CLI_NAME`（"zypi"）
+  - `app/mod.rs`: `terminal_title_string()` 终端窗口/标签页标题改为 `zypi` 与 `format!("{} - zypi", truncated)`；`print_exit_resume_hint()` 退出 resume 提示改为 `zypi --resume <id>` 与 `zypi --minimal --resume <id>`
+  - `screen_mode_relaunch.rs`: `screen_mode_relaunch_resume_hint()` 改为 `zypi {flag} --resume {session_id}`
+  - `notifications/title.rs` & `config.rs`: `TitleItem::Zypi`（加 `#[serde(alias = "grok")]` 兼容现有配置），终端标题更新、fallback 与 reset 统一输出 `zypi`
+  - `session_title_resolve.rs`: 多会话歧义提示与未匹配提示更新为 `zypi --resume <session-id>`
+  - `acp/version_mismatch.rs`: 版本不匹配提示更新为 `Restart zypi to match`
+  - `connect_timeout.rs` & `startup_failure/render.rs`: 超时重试命令与步骤指引更新为 `zypi`
 - 设计 §4.5: "品牌与家目录：`~/.grok` → `~/.pi-python`。产品二进制名 `pi`（后改
-  `zypi`）"。现已全部统一引用 `brand::CLI_NAME`。
+  `zypi`）"。现已全部统一引用 `brand::CLI_NAME` 与 `brand::PRODUCT_TITLE`。
 
 ### P4P5-12. TUI 未按设计裁撤无标准 ACP 对照的斜杠命令（实质 · Phase 4）
 

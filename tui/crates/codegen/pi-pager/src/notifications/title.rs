@@ -89,7 +89,7 @@ impl TitleManager {
 
         if !has_parts {
             self.composed.clear();
-            self.composed.push_str("grok");
+            self.composed.push_str("zypi");
         }
 
         let result = if self.composed != self.last_title {
@@ -113,9 +113,9 @@ impl TitleManager {
     }
 
     pub fn reset(&mut self) -> String {
-        let esc = build_title_escape("grok");
+        let esc = build_title_escape("zypi");
         self.last_title.clear();
-        self.last_title.push_str("grok");
+        self.last_title.push_str("zypi");
         self.spinner_frame = 0;
         self.tick_count = 0;
         esc
@@ -132,9 +132,9 @@ fn write_item(
     tick_count: u64,
 ) -> bool {
     match item {
-        TitleItem::Grok => {
+        TitleItem::Zypi => {
             push_separator(buf, has_parts);
-            buf.push_str("grok");
+            buf.push_str("zypi");
         }
         TitleItem::Spinner => {
             if !state.is_busy && state.activity.is_none() {
@@ -309,54 +309,54 @@ mod tests {
 
     #[test]
     fn grok_only_produces_just_grok() {
-        let cfg = config_with_items(vec![TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::Zypi]);
         let mut mgr = TitleManager::new(&cfg);
         let state = idle_state();
         mgr.update(&state);
-        assert_eq!(mgr.last_title, "grok");
+        assert_eq!(mgr.last_title, "zypi");
     }
 
     #[test]
     fn session_name_and_grok_joined_with_separator() {
-        let cfg = config_with_items(vec![TitleItem::SessionName, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::SessionName, TitleItem::Zypi]);
         let mut mgr = TitleManager::new(&cfg);
         let state = TitleState {
             session_name: Some("my project"),
             ..idle_state()
         };
         mgr.update(&state);
-        assert_eq!(mgr.last_title, "my project - grok");
+        assert_eq!(mgr.last_title, "my project - zypi");
     }
 
     #[test]
     fn missing_session_name_skipped() {
-        let cfg = config_with_items(vec![TitleItem::SessionName, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::SessionName, TitleItem::Zypi]);
         let mut mgr = TitleManager::new(&cfg);
         let state = idle_state();
         mgr.update(&state);
-        assert_eq!(mgr.last_title, "grok");
+        assert_eq!(mgr.last_title, "zypi");
     }
 
     #[test]
     fn empty_session_name_skipped() {
-        let cfg = config_with_items(vec![TitleItem::SessionName, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::SessionName, TitleItem::Zypi]);
         let mut mgr = TitleManager::new(&cfg);
         let state = TitleState {
             session_name: Some(""),
             ..idle_state()
         };
         mgr.update(&state);
-        assert_eq!(mgr.last_title, "grok");
+        assert_eq!(mgr.last_title, "zypi");
     }
 
     #[test]
     fn spinner_only_shown_when_active() {
-        let cfg = config_with_items(vec![TitleItem::Spinner, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::Spinner, TitleItem::Zypi]);
         let mut mgr = TitleManager::new(&cfg);
 
         // Idle: spinner absent
         mgr.update(&idle_state());
-        assert_eq!(mgr.last_title, "grok");
+        assert_eq!(mgr.last_title, "zypi");
 
         // Active: spinner present
         let activity = TurnActivity::Thinking;
@@ -365,7 +365,7 @@ mod tests {
             ..idle_state()
         };
         mgr.update(&state);
-        assert!(mgr.last_title.contains(" - grok"));
+        assert!(mgr.last_title.contains(" - zypi"));
         let spinner_part: String = mgr.last_title.chars().take(1).collect();
         assert!(
             TITLE_SPINNER.contains(&spinner_part.chars().next().unwrap()),
@@ -523,22 +523,22 @@ mod tests {
 
     #[test]
     fn activity_hidden_when_idle() {
-        let cfg = config_with_items(vec![TitleItem::Activity, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::Activity, TitleItem::Zypi]);
         let mut mgr = TitleManager::new(&cfg);
         mgr.update(&idle_state());
-        assert_eq!(mgr.last_title, "grok");
+        assert_eq!(mgr.last_title, "zypi");
     }
 
     #[test]
     fn spinner_shown_when_busy_without_activity() {
-        let cfg = config_with_items(vec![TitleItem::Spinner, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::Spinner, TitleItem::Zypi]);
         let mut mgr = TitleManager::new(&cfg);
         let state = TitleState {
             is_busy: true,
             ..idle_state()
         };
         mgr.update(&state);
-        assert!(mgr.last_title.contains(" - grok"));
+        assert!(mgr.last_title.contains(" - zypi"));
         let spinner_part: String = mgr.last_title.chars().take(1).collect();
         assert!(
             TITLE_SPINNER.contains(&spinner_part.chars().next().unwrap()),
@@ -549,19 +549,19 @@ mod tests {
 
     #[test]
     fn activity_shows_waiting_when_busy_without_activity() {
-        let cfg = config_with_items(vec![TitleItem::Activity, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::Activity, TitleItem::Zypi]);
         let mut mgr = TitleManager::new(&cfg);
         let state = TitleState {
             is_busy: true,
             ..idle_state()
         };
         mgr.update(&state);
-        assert_eq!(mgr.last_title, "Waiting - grok");
+        assert_eq!(mgr.last_title, "Waiting - zypi");
     }
 
     #[test]
     fn activity_prefers_specific_activity_over_waiting() {
-        let cfg = config_with_items(vec![TitleItem::Activity, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::Activity, TitleItem::Zypi]);
         let mut mgr = TitleManager::new(&cfg);
         let activity = TurnActivity::Thinking;
         let state = TitleState {
@@ -570,14 +570,14 @@ mod tests {
             ..idle_state()
         };
         mgr.update(&state);
-        assert_eq!(mgr.last_title, "Thinking - grok");
+        assert_eq!(mgr.last_title, "Thinking - zypi");
     }
 
     // --- Action Required blinking ---
 
     #[test]
     fn action_required_visible_on_first_tick() {
-        let cfg = config_with_items(vec![TitleItem::ActionRequired, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::ActionRequired, TitleItem::Zypi]);
         let mut mgr = TitleManager::new(&cfg);
         let state = TitleState {
             has_pending_permissions: true,
@@ -595,8 +595,7 @@ mod tests {
 
     #[test]
     fn action_required_blinks_across_ticks() {
-        let cfg = config_with_items(vec![TitleItem::ActionRequired, TitleItem::Grok]);
-        let mut mgr = TitleManager::new(&cfg);
+        let cfg = config_with_items(vec![TitleItem::ActionRequired, TitleItem::Zypi]);
         let state = TitleState {
             has_pending_permissions: true,
             focused: false, // unfocused → should blink
@@ -627,28 +626,28 @@ mod tests {
 
     #[test]
     fn action_required_hidden_when_no_permissions() {
-        let cfg = config_with_items(vec![TitleItem::ActionRequired, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::ActionRequired, TitleItem::Zypi]);
         let mut mgr = TitleManager::new(&cfg);
         let state = TitleState {
             has_pending_permissions: false,
             ..idle_state()
         };
         mgr.update(&state);
-        assert_eq!(mgr.last_title, "grok");
+        assert_eq!(mgr.last_title, "zypi");
         mgr.update(&state);
-        assert_eq!(mgr.last_title, "grok");
+        assert_eq!(mgr.last_title, "zypi");
     }
 
     // --- Dedup (no-op when unchanged) ---
 
     #[test]
     fn dedup_skips_emission_when_unchanged() {
-        let cfg = config_with_items(vec![TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::Zypi]);
         let mut mgr = TitleManager::new(&cfg);
         let state = idle_state();
 
         mgr.update(&state);
-        assert_eq!(mgr.last_title, "grok");
+        assert_eq!(mgr.last_title, "zypi");
 
         // Second update: title is identical, last_title stays the same (no re-emit).
         let title_before = mgr.last_title.clone();
@@ -663,69 +662,69 @@ mod tests {
         let cfg = config_with_items(vec![]);
         let mut mgr = TitleManager::new(&cfg);
         mgr.update(&idle_state());
-        assert_eq!(mgr.last_title, "grok");
+        assert_eq!(mgr.last_title, "zypi");
     }
 
     // --- Model item ---
 
     #[test]
     fn model_item_shown_when_present() {
-        let cfg = config_with_items(vec![TitleItem::Model, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::Model, TitleItem::Zypi]);
         let mut mgr = TitleManager::new(&cfg);
         let state = TitleState {
             model: Some("grok-3"),
             ..idle_state()
         };
         mgr.update(&state);
-        assert_eq!(mgr.last_title, "grok-3 - grok");
+        assert_eq!(mgr.last_title, "grok-3 - zypi");
     }
 
     #[test]
     fn model_item_hidden_when_none() {
-        let cfg = config_with_items(vec![TitleItem::Model, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::Model, TitleItem::Zypi]);
         let mut mgr = TitleManager::new(&cfg);
         mgr.update(&idle_state());
-        assert_eq!(mgr.last_title, "grok");
+        assert_eq!(mgr.last_title, "zypi");
     }
 
     // --- Cwd item ---
 
     #[test]
     fn cwd_shows_last_component() {
-        let cfg = config_with_items(vec![TitleItem::Cwd, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::Cwd, TitleItem::Zypi]);
         let mut mgr = TitleManager::new(&cfg);
         let state = TitleState {
             cwd: Some("/home/user/my-project"),
             ..idle_state()
         };
         mgr.update(&state);
-        assert_eq!(mgr.last_title, "my-project - grok");
+        assert_eq!(mgr.last_title, "my-project - zypi");
     }
 
     // --- TurnTimer item ---
 
     #[test]
     fn turn_timer_shown_when_above_one_second() {
-        let cfg = config_with_items(vec![TitleItem::TurnTimer, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::TurnTimer, TitleItem::Zypi]);
         let mut mgr = TitleManager::new(&cfg);
         let state = TitleState {
             turn_elapsed: Some(std::time::Duration::from_secs(42)),
             ..idle_state()
         };
         mgr.update(&state);
-        assert_eq!(mgr.last_title, "42s - grok");
+        assert_eq!(mgr.last_title, "42s - zypi");
     }
 
     #[test]
     fn turn_timer_hidden_when_under_one_second() {
-        let cfg = config_with_items(vec![TitleItem::TurnTimer, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::TurnTimer, TitleItem::Zypi]);
         let mut mgr = TitleManager::new(&cfg);
         let state = TitleState {
             turn_elapsed: Some(std::time::Duration::from_millis(500)),
             ..idle_state()
         };
         mgr.update(&state);
-        assert_eq!(mgr.last_title, "grok");
+        assert_eq!(mgr.last_title, "zypi");
     }
 
     // --- Truncation ---
@@ -761,7 +760,7 @@ mod tests {
 
     #[test]
     fn reset_clears_state_and_emits_grok() {
-        let cfg = config_with_items(vec![TitleItem::SessionName, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::SessionName, TitleItem::Zypi]);
         let mut mgr = TitleManager::new(&cfg);
         let activity = TurnActivity::Thinking;
         let state = TitleState {
@@ -770,10 +769,10 @@ mod tests {
             ..idle_state()
         };
         mgr.update(&state);
-        assert_ne!(mgr.last_title, "grok");
+        assert_ne!(mgr.last_title, "zypi");
 
         mgr.reset();
-        assert_eq!(mgr.last_title, "grok");
+        assert_eq!(mgr.last_title, "zypi");
         assert_eq!(mgr.spinner_frame, 0);
         assert_eq!(mgr.tick_count, 0);
     }
@@ -806,7 +805,7 @@ mod tests {
 
         // Both should contain the persistent parts.
         for t in [&t1, &t2] {
-            assert!(t.contains("grok"), "title missing 'grok': {t}");
+            assert!(t.contains("zypi"), "title missing 'zypi': {t}");
             assert!(t.contains("Responding"), "title missing 'Responding': {t}");
             assert!(t.contains("my-session"), "title missing session name: {t}");
         }
@@ -821,7 +820,7 @@ mod tests {
         let cfg = default_config();
         let mut mgr = TitleManager::new(&cfg);
         mgr.update(&idle_state());
-        assert_eq!(mgr.last_title, "grok");
+        assert_eq!(mgr.last_title, "zypi");
     }
 
     // --- Multi-item combinations ---
@@ -833,7 +832,7 @@ mod tests {
             TitleItem::SessionName,
             TitleItem::Model,
             TitleItem::Cwd,
-            TitleItem::Grok,
+            TitleItem::Zypi,
         ]);
         let mut mgr = TitleManager::new(&cfg);
         let activity = TurnActivity::Thinking;
@@ -847,7 +846,7 @@ mod tests {
         mgr.update(&state);
         assert_eq!(
             mgr.last_title,
-            "Thinking - proj - grok-3 - workspace - grok"
+            "Thinking - proj - grok-3 - workspace - zypi"
         );
     }
 

@@ -322,12 +322,12 @@ const SCREEN_MODE_CHOICES: &[EnumChoice] = &[
     EnumChoice {
         canonical: "fullscreen",
         display: "Fullscreen",
-        description: "Open plain grok in the standard fullscreen TUI. Default when unset.",
+        description: "Open plain zypi in the standard fullscreen TUI. Default when unset.",
     },
     EnumChoice {
         canonical: "minimal",
         display: "Minimal",
-        description: "Open plain grok in scrollback-native (minimal) mode.",
+        description: "Open plain zypi in scrollback-native (minimal) mode.",
     },
 ];
 
@@ -563,7 +563,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
             category: SettingCategory::Appearance,
             owner: SettingOwner::Shell,
             label: "Default screen mode",
-            description: "How plain grok opens next time: Fullscreen (default when unset) or \
+            description: "How plain zypi opens next time: Fullscreen (default when unset) or \
                           Minimal. Writes [ui] screen_mode in config.toml. Restart required. \
                           Switch this session only with /minimal or /fullscreen.",
             keywords: &[
@@ -1609,7 +1609,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
             category: SettingCategory::Advanced,
             owner: SettingOwner::Shell,
             label: "SSH wrap",
-            description: "Show a `/doctor` tip when an SSH session is not using `grok wrap`.",
+            description: "Show a `/doctor` tip when an SSH session is not using `zypi wrap`.",
             keywords: &[
                 "ssh",
                 "wrap",

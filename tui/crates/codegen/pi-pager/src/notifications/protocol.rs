@@ -78,10 +78,10 @@ fn notification_sequence(
     let body = sanitize_osc_text(body);
     Some(match protocol {
         // Body-only protocols fold the title (session name) into the body.
-        // OSC 777 already uses the tab title as subtitle, so keep "Grok".
+        // OSC 777 already uses the tab title as subtitle, so keep "Zypi".
         NotificationProtocol::Osc9 => format!("\x1b]9;{body} \u{b7} {title}\x07").into(),
-        NotificationProtocol::Osc99 => format!("\x1b]99;i=grok;{body} \u{b7} {title}\x1b\\").into(),
-        NotificationProtocol::Osc777 => format!("\x1b]777;notify;Grok;{body}\x1b\\").into(),
+        NotificationProtocol::Osc99 => format!("\x1b]99;i=zypi;{body} \u{b7} {title}\x1b\\").into(),
+        NotificationProtocol::Osc777 => format!("\x1b]777;notify;Zypi;{body}\x1b\\").into(),
         NotificationProtocol::Bel => Cow::Borrowed("\x07"),
         NotificationProtocol::None => return None,
     })
@@ -363,11 +363,11 @@ mod tests {
     fn notification_sequence_osc99_and_osc777_strip_controls() {
         let osc99 = notification_sequence(NotificationProtocol::Osc99, "t\x1b", "b\x07")
             .expect("osc99 yields a sequence");
-        assert_eq!(osc99.as_ref(), "\x1b]99;i=grok;b \u{b7} t\x1b\\");
+        assert_eq!(osc99.as_ref(), "\x1b]99;i=zypi;b \u{b7} t\x1b\\");
 
         let osc777 = notification_sequence(NotificationProtocol::Osc777, "ignored\x1b", "b\x1body")
             .expect("osc777 yields a sequence");
-        assert_eq!(osc777.as_ref(), "\x1b]777;notify;Grok;body\x1b\\");
+        assert_eq!(osc777.as_ref(), "\x1b]777;notify;Zypi;body\x1b\\");
     }
 
     #[test]

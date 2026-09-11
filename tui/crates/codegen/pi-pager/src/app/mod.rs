@@ -1125,9 +1125,14 @@ fn print_exit_resume_hint(info: &ExitInfo, max_width: usize, w: &mut impl Write)
     }
     let _ = writeln!(w, "Resume this session with:");
     if info.minimal {
-        let _ = writeln!(w, "  grok --minimal --resume {}", info.session_id);
+        let _ = writeln!(
+            w,
+            "  {} --minimal --resume {}",
+            crate::brand::CLI_NAME,
+            info.session_id
+        );
     } else {
-        let _ = writeln!(w, "  grok --resume {}", info.session_id);
+        let _ = writeln!(w, "  {} --resume {}", crate::brand::CLI_NAME, info.session_id);
     }
 }
 /// Screen-mode relaunch failure fallback (same quit tail as plain resume).
@@ -1713,10 +1718,13 @@ pub(crate) fn set_terminal_title(title: &str) {
 fn terminal_title_string(title: &str) -> String {
     let sanitized: String = title.chars().filter(|c| !c.is_control()).collect();
     if sanitized.is_empty() {
-        "grok".into()
+        crate::brand::PRODUCT_TITLE.into()
     } else {
-        let truncated: String = sanitized.chars().take(80 - 6).collect();
-        format!("{} - grok", truncated)
+        let truncated: String = sanitized
+            .chars()
+            .take(80 - (crate::brand::PRODUCT_TITLE.len() + 3))
+            .collect();
+        format!("{} - {}", truncated, crate::brand::PRODUCT_TITLE)
     }
 }
 /// Reads [`current_screen_mode`] at panic time — never capture a mode here,
@@ -1795,11 +1803,11 @@ mod tests {
     fn terminal_title_strips_control_characters() {
         assert_eq!(
             terminal_title_string("evil\x07\x1b]52;c;payload\x07title"),
-            "evil]52;c;payloadtitle - grok"
+            "evil]52;c;payloadtitle - zypi"
         );
-        assert_eq!(terminal_title_string("\x07\x1b\x00"), "grok");
-        assert_eq!(terminal_title_string(""), "grok");
-        assert_eq!(terminal_title_string("My chat"), "My chat - grok");
+        assert_eq!(terminal_title_string("\x07\x1b\x00"), "zypi");
+        assert_eq!(terminal_title_string(""), "zypi");
+        assert_eq!(terminal_title_string("My chat"), "My chat - zypi");
     }
     #[test]
     fn hunk_tracker_mode_nothing_set_is_none() {
@@ -2370,7 +2378,7 @@ mod tests {
         print_exit_resume_hint(&bare_exit_info("sess-abc", false), 80, &mut buf);
         assert_eq!(
             String::from_utf8(buf).unwrap(),
-            "\nResume this session with:\n  grok --resume sess-abc\n"
+            "\nResume this session with:\n  zypi --resume sess-abc\n"
         );
     }
     #[test]
@@ -2379,7 +2387,7 @@ mod tests {
         print_exit_resume_hint(&bare_exit_info("sess-abc", true), 80, &mut buf);
         assert_eq!(
             String::from_utf8(buf).unwrap(),
-            "\nResume this session with:\n  grok --minimal --resume sess-abc\n"
+            "\nResume this session with:\n  zypi --minimal --resume sess-abc\n"
         );
     }
     #[test]
@@ -2404,7 +2412,7 @@ mod tests {
                 "  Pinned the seed; 200 consecutive green runs.\n",
                 "\n",
                 "Resume this session with:\n",
-                "  grok --resume sess-abc\n",
+                "  zypi --resume sess-abc\n",
             )
         );
     }
@@ -2425,7 +2433,7 @@ mod tests {
         assert!(out.contains(&format!("\n{}…\n", "t".repeat(19))));
         assert!(out.contains(&format!("\n> {}…\n", "p".repeat(17))));
         assert!(out.contains(&format!("\n  {}…\n", "r".repeat(17))));
-        assert!(out.contains("  grok --resume sess-abc\n"));
+        assert!(out.contains("  zypi --resume sess-abc\n"));
     }
     #[test]
     fn print_relaunch_failure_hint_writes_expected_lines() {

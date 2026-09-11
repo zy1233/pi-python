@@ -80,7 +80,7 @@ impl Default for TitleConfig {
                 TitleItem::Spinner,
                 TitleItem::Activity,
                 TitleItem::SessionName,
-                TitleItem::Grok,
+                TitleItem::Zypi,
             ],
         }
     }
@@ -95,7 +95,8 @@ pub enum TitleItem {
     Cwd,
     Model,
     TurnTimer,
-    Grok,
+    #[serde(alias = "grok")]
+    Zypi,
     ActionRequired,
 }
 
@@ -177,8 +178,8 @@ session_recap_threshold_secs = 30
 # Set the terminal/tab title to reflect agent state.
 enabled = true
 # Items shown in the title. Options: action-required, spinner, activity,
-# session-name, cwd, model, turn-timer, grok
-items = [\"action-required\", \"spinner\", \"activity\", \"session-name\", \"grok\"]
+# session-name, cwd, model, turn-timer, zypi
+items = [\"action-required\", \"spinner\", \"activity\", \"session-name\", \"zypi\"]
 
 # [[ui.notifications.hooks]]
 # command = \"terminal-notifier -title 'Grok' -message '$GROK_MESSAGE'\"
@@ -210,7 +211,7 @@ mod tests {
             session_recap_threshold_secs: 90,
             title: TitleConfig {
                 enabled: false,
-                items: vec![TitleItem::Grok, TitleItem::Cwd],
+                items: vec![TitleItem::Zypi, TitleItem::Cwd],
             },
             hooks: vec![NotificationHook {
                 command: "notify-send".into(),
@@ -327,6 +328,17 @@ mod tests {
                 TitleItem::SessionName,
             ]
         );
+    }
+
+    #[test]
+    fn title_items_alias_grok_deserializes_to_zypi() {
+        let toml_str = r#"
+            [title]
+            enabled = true
+            items = ["grok", "zypi"]
+        "#;
+        let parsed: NotificationConfig = toml::from_str(toml_str).expect("deserialize");
+        assert_eq!(parsed.title.items, vec![TitleItem::Zypi, TitleItem::Zypi]);
     }
 
     #[test]
