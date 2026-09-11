@@ -109,10 +109,20 @@ async def main() -> int:
     home = pi_home()
     config = load_config(home)
 
-    if args.model:
-        config.model_id = args.model
-    if args.provider:
-        config.provider = args.provider
+    if args.model or args.provider:
+        from dataclasses import replace
+
+        overrides: dict[str, str] = {}
+        if args.model:
+            if ":" in args.model:
+                prov, mid = args.model.split(":", 1)
+                overrides["provider"] = prov
+                overrides["model_id"] = mid
+            else:
+                overrides["model_id"] = args.model
+        if args.provider:
+            overrides["provider"] = args.provider
+        config = replace(config, **overrides)
 
     key_env = config.api_key_env or "REAL_LLM_API_KEY"
     api_key = os.environ.get(key_env)

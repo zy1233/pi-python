@@ -66,12 +66,20 @@ def resolve_to_cwd(path: str, cwd: str) -> str:
     paths are joined onto *cwd*. The result is OS-normalized.
     """
     cwd = normalize_host_path(cwd)
-    # Virtualize container root mounts (/app, /data) when not present on host
+    # Virtualize container root mounts (/app, /data) when tools operate on a
+    # workspace that is *not* under /app itself (e.g. Docker mode with local
+    # file tools rooted at a host workspace).  The old check ``not
+    # os.path.isdir("/app")`` was fragile: if /app existed on the host (e.g.
+    # leftover from another container), the mapping silently failed, causing
+    # write/read/edit to hit a wrong or permission-denied path.
     norm_slash = path.replace("\\", "/")
-    if (norm_slash.startswith("/app/") or norm_slash == "/app") and not os.path.isdir("/app"):
+    cwd_slash = cwd.replace("\\", "/")
+    _should_virt_app = not os.path.isdir("/app") or not cwd_slash.startswith("/app")
+    _should_virt_data = not os.path.isdir("/data") or not cwd_slash.startswith("/data")
+    if (norm_slash.startswith("/app/") or norm_slash == "/app") and _should_virt_app:
         rel_tail = norm_slash[5:] if norm_slash.startswith("/app/") else ""
         return os.path.normpath(os.path.join(cwd, rel_tail))
-    if (norm_slash.startswith("/data/") or norm_slash == "/data") and not os.path.isdir("/data"):
+    if (norm_slash.startswith("/data/") or norm_slash == "/data") and _should_virt_data:
         rel_tail = norm_slash[6:] if norm_slash.startswith("/data/") else ""
         return os.path.normpath(os.path.join(cwd, "data", rel_tail))
 

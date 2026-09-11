@@ -23,8 +23,14 @@ from pi_agent_core.types import AgentTool, AgentToolResult, AgentToolUpdateCallb
 _DESCRIPTION = (
     "Execute a bash command inside the task container's /app directory. Returns stdout and stderr. "
     f"Output is truncated to last {DEFAULT_MAX_LINES} lines or {DEFAULT_MAX_BYTES // 1024}KB "
-    "(whichever is hit first). Optionally provide a timeout in seconds."
+    "(whichever is hit first). Optionally provide a timeout in seconds. "
+    "Note: package installation (apt-get, pip) can take several minutes in containers; "
+    "use a timeout of 300+ seconds or omit timeout entirely for such commands."
 )
+
+# Minimum enforced timeout for Docker bash commands to prevent premature kills
+# on slow container operations like apt-get.
+_DOCKER_MIN_TIMEOUT_SEC = 180.0
 
 
 def get_docker_cmd() -> list[str] | None:
@@ -98,14 +104,13 @@ class DockerContainerSession:
     def __init__(self, task: BenchmarkTask, workspace: Path) -> None:
         self.task = task
         self.workspace = workspace
-        clean_task_name = "".join(
-            c if c.isalnum() or c in "-_" else "-" for c in task.id
-        ).strip("-")
-        self.container_name = f"pi-eval-{clean_task_name}-{int(time.time())}"
-        self.image = (
-            task.metadata.get("environment", {}).get("docker_image")
-            or task.metadata.get("environment", {}).get("image")
+        clean_task_name = "".join(c if c.isalnum() or c in "-_" else "-" for c in task.id).strip(
+            "-"
         )
+        self.container_name = f"pi-eval-{clean_task_name}-{int(time.time())}"
+        self.image = task.metadata.get("environment", {}).get("docker_image") or task.metadata.get(
+            "environment", {}
+        ).get("image")
         self.is_running = False
 
     def setup(self) -> None:
@@ -119,9 +124,7 @@ class DockerContainerSession:
             print(f"[DOCKER] Pulling image: {self.image}...")
             pull = run_docker_sync(["pull", self.image], timeout=600.0)
             if pull.returncode != 0:
-                raise RuntimeError(
-                    f"Failed to pull image {self.image}: {pull.stderr.strip()}"
-                )
+                raise RuntimeError(f"Failed to pull image {self.image}: {pull.stderr.strip()}")
 
         # 2. Extract initial repository/environment from image /app if present
         tmp_init = f"init-{self.container_name}"
@@ -141,28 +144,34 @@ class DockerContainerSession:
             or "http://172.20.35.30:10809"
         )
         mount_arg = f"{to_docker_mount_path(self.workspace)}:/app"
-        run_res = run_docker_sync([
-            "run",
-            "-d",
-            "--name",
-            self.container_name,
-            "-e",
-            f"http_proxy={proxy_url}",
-            "-e",
-            f"https_proxy={proxy_url}",
-            "-e",
-            f"HTTP_PROXY={proxy_url}",
-            "-e",
-            f"HTTPS_PROXY={proxy_url}",
-            "-v",
-            mount_arg,
-            "-w",
-            "/app",
-            self.image,
-            "tail",
-            "-f",
-            "/dev/null",
-        ])
+        run_res = run_docker_sync(
+            [
+                "run",
+                "-d",
+                "--name",
+                self.container_name,
+                "-e",
+                f"http_proxy={proxy_url}",
+                "-e",
+                f"https_proxy={proxy_url}",
+                "-e",
+                f"HTTP_PROXY={proxy_url}",
+                "-e",
+                f"HTTPS_PROXY={proxy_url}",
+                "-e",
+                "no_proxy=127.0.0.1,localhost,::1",
+                "-e",
+                "NO_PROXY=127.0.0.1,localhost,::1",
+                "-v",
+                mount_arg,
+                "-w",
+                "/app",
+                self.image,
+                "tail",
+                "-f",
+                "/dev/null",
+            ]
+        )
         if run_res.returncode != 0:
             raise RuntimeError(
                 f"Failed to start container {self.container_name}: {run_res.stderr.strip()}"
@@ -171,43 +180,69 @@ class DockerContainerSession:
         print(f"[DOCKER] Container {self.container_name} started.")
 
         # Configure safe git directory inside container
-        run_docker_sync([
-            "exec",
-            self.container_name,
-            "git",
-            "config",
-            "--global",
-            "--add",
-            "safe.directory",
-            "*",
-        ])
+        run_docker_sync(
+            [
+                "exec",
+                self.container_name,
+                "git",
+                "config",
+                "--global",
+                "--add",
+                "safe.directory",
+                "*",
+            ]
+        )
 
         # 4. Copy tests if present
         tests_dir = self.task.task_dir / "tests"
         if tests_dir.is_dir():
-            cp_test = run_docker_sync([
-                "cp",
-                f"{to_docker_mount_path(tests_dir)}/.",
-                f"{self.container_name}:/tests/",
-            ])
+            cp_test = run_docker_sync(
+                [
+                    "cp",
+                    f"{to_docker_mount_path(tests_dir)}/.",
+                    f"{self.container_name}:/tests/",
+                ]
+            )
             if cp_test.returncode == 0:
-                # Strip CRLF line endings on Linux container files
-                run_docker_sync([
-                    "exec",
-                    self.container_name,
-                    "sh",
-                    "-c",
-                    "sed -i 's/\\r$//' /tests/* 2>/dev/null || true",
-                ])
+                # Strip CRLF line endings on Linux container files.
+                # Use ``tr -d '\r'`` as a fallback in case ``sed -i`` silently
+                # fails (e.g. glob expansion or overlay-fs issues).  The loop
+                # processes each file individually so a single failure cannot
+                # break the entire batch, and we log any remaining CRLF.
+                crlf_strip = run_docker_sync(
+                    [
+                        "exec",
+                        self.container_name,
+                        "bash",
+                        "-c",
+                        (
+                            "for f in /tests/*; do "
+                            '  [ -f "$f" ] || continue; '
+                            "  sed -i 's/\\r$//' \"$f\" 2>/dev/null "
+                            '  || { tmp=$(mktemp); tr -d \'\\r\' < "$f" > "$tmp" '
+                            '       && mv "$tmp" "$f"; }; '
+                            "done; "
+                            # Verify no CRLF remains (non-zero exit warns caller)
+                            "if grep -rPl '\\r$' /tests/ 2>/dev/null; then "
+                            "  echo '[WARN] CRLF still present in above files'; "
+                            "fi"
+                        ),
+                    ]
+                )
+                if crlf_strip.stdout and "CRLF still present" in crlf_strip.stdout:
+                    print(f"[DOCKER] WARNING: CRLF not fully stripped: {crlf_strip.stdout.strip()}")
+
                 # chmod +x on tests
-                run_docker_sync([
-                    "exec",
-                    self.container_name,
-                    "chmod",
-                    "-R",
-                    "+x",
-                    "/tests",
-                ])
+                run_docker_sync(
+                    [
+                        "exec",
+                        self.container_name,
+                        "chmod",
+                        "-R",
+                        "+x",
+                        "/tests",
+                    ]
+                )
 
     def teardown(self) -> None:
         """Stop and remove container, copying back any modified workspace files."""
@@ -235,8 +270,7 @@ class DockerContainerSession:
                 timeout=timeout_sec,
             )
             out = (
-                f"=== Docker test.sh Output (exit {res.returncode}) ===\n"
-                f"{res.stdout}\n{res.stderr}"
+                f"=== Docker test.sh Output (exit {res.returncode}) ===\n{res.stdout}\n{res.stderr}"
             )
 
             # Check reward.json or reward.txt
@@ -278,8 +312,7 @@ class DockerContainerSession:
                 timeout=timeout_sec,
             )
             out = (
-                f"=== Docker pytest Output (exit {res.returncode}) ===\n"
-                f"{res.stdout}\n{res.stderr}"
+                f"=== Docker pytest Output (exit {res.returncode}) ===\n{res.stdout}\n{res.stderr}"
             )
             return (res.returncode == 0, out)
 
@@ -303,7 +336,14 @@ def create_docker_bash_tool(
         on_update: AgentToolUpdateCallback | None = None,
     ) -> AgentToolResult:
         output = OutputAccumulator(temp_file_prefix="pi-docker-bash")
-        timeout = _resolve_timeout(params.timeout)
+        raw_timeout = _resolve_timeout(params.timeout)
+        # Enforce a minimum timeout in Docker to prevent premature kills
+        # on slow container operations (apt-get update, pip install, etc.).
+        timeout = (
+            max(raw_timeout, _DOCKER_MIN_TIMEOUT_SEC)
+            if raw_timeout is not None
+            else None
+        )
 
         if signal is not None and getattr(signal, "aborted", False):
             raise RuntimeError("Command aborted")

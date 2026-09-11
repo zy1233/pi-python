@@ -25,6 +25,22 @@ from pi_agent_core.coding_tools import create_all_tools
 from pi_agent_core.messages import AssistantMessage
 from pi_agent_harness import JsonlSessionRepo
 
+# Tiered default max turns per suite.
+# Terminal-Bench tasks are self-contained and solvable in ≤25 turns;
+# DeepSWE / industrial repo tasks need long-range refactoring (60+ turns).
+_SUITE_DEFAULT_TURNS: dict[str, int] = {
+    "terminal-bench": 25,
+    "datacurve": 60,
+    "swe-bench": 60,
+}
+_FALLBACK_MAX_TURNS = 25
+
+
+def _suite_default_turns(suite: str) -> int:
+    """Return the tiered max-turns default for *suite*."""
+    return _SUITE_DEFAULT_TURNS.get(suite, _FALLBACK_MAX_TURNS)
+
+
 # Default token prices (USD per 1M tokens) for cost calculation if provider doesn't report cost
 # DeepSeek / Moonshot / SiliconFlow typical reference pricing
 DEFAULT_PRICING = {
@@ -89,6 +105,37 @@ def _copy_task_environment(task: BenchmarkTask, workspace: Path) -> None:
                 shutil.copytree(item, dest, dirs_exist_ok=True)
             else:
                 shutil.copy2(item, dest)
+
+
+def _docker_env_prescan(container_name: str) -> str:
+    """Run a quick environment scan inside the Docker container.
+
+    Returns a concise summary of available tools and Python/system info so the
+    agent can skip 2-3 exploration turns.
+    """
+    scan_script = (
+        "echo '## System'; uname -m; cat /etc/os-release 2>/dev/null | head -2; "
+        "echo '## Available tools'; "
+        "for cmd in python python3 pip pip3 git gcc g++ make cmake node npm "
+        "perl ruby curl wget apt-get; do "
+        "  which $cmd 2>/dev/null && echo \"  $cmd: $($cmd --version 2>&1 | head -1)\"; "
+        "done; "
+        "echo '## Python packages'; "
+        "python3 -c 'import pkg_resources; "
+        "[print(f\"  {d.key}=={d.version}\") for d in pkg_resources.working_set]' "
+        "2>/dev/null || python -c 'import pkg_resources; "
+        "[print(f\"  {d.key}=={d.version}\") for d in pkg_resources.working_set]' "
+        "2>/dev/null || echo '  (no python)'; "
+        "echo '## Working directory'; pwd; ls /app/ 2>/dev/null | head -20"
+    )
+    try:
+        res = run_docker_sync(
+            ["exec", container_name, "bash", "-c", scan_script],
+            timeout=15.0,
+        )
+        return res.stdout.strip() if res.returncode == 0 else ""
+    except Exception:
+        return ""
 
 
 def _prepare_verifier_test(task: BenchmarkTask, workspace: Path) -> Path | None:
@@ -261,7 +308,7 @@ async def run_trial(
     try:
         home_path = pi_home(home)
         cfg = config or load_config(home_path)
-        effective_max_turns = max_turns or task.max_turns or cfg.max_turns or 25
+        effective_max_turns = max_turns or _suite_default_turns(task.suite)
         cfg = replace(cfg, permission="auto", max_turns=effective_max_turns)
 
         # Initialize session
@@ -290,10 +337,20 @@ async def run_trial(
         start_time = time.perf_counter()
         trial_error: str | None = None
 
+        # Pre-scan container environment and augment instruction
+        augmented_instruction = task.instruction
+        if docker_session is not None:
+            env_info = _docker_env_prescan(docker_session.container_name)
+            if env_info:
+                augmented_instruction = (
+                    f"{task.instruction}\n\n"
+                    f"<environment_info>\n{env_info}\n</environment_info>"
+                )
+
         try:
             # Prompt the agent to begin solving the task
             await asyncio.wait_for(
-                harness.prompt(task.instruction),
+                harness.prompt(augmented_instruction),
                 timeout=task.agent_timeout_sec,
             )
         except TimeoutError:
