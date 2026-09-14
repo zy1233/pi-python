@@ -26,6 +26,7 @@ from acp.schema import (
     PromptCapabilities,
     PromptResponse,
     ResourceContentBlock,
+    ResumeSessionResponse,
     SessionCapabilities,
     SessionCloseCapabilities,
     SessionInfo,
@@ -36,7 +37,7 @@ from acp.schema import (
 )
 
 from pi_agent_cli.config import CliConfig, PermissionMode, load_config, pi_home
-from pi_agent_cli.events import project_event
+from pi_agent_cli.events import project_event, project_message_replay
 from pi_agent_cli.factory import create_session_harness, default_stream_fn, load_session_resources
 from pi_agent_cli.permissions import (
     PERMISSION_OPTIONS,
@@ -112,7 +113,9 @@ class PiAcpAgent(Agent):
         session = await self._repo.create({"cwd": cwd})
         session_id = (await session.get_metadata()).id
         await self._bind_session(session_id, session, cwd)
-        return NewSessionResponse(session_id=session_id)
+        return NewSessionResponse(
+            session_id=session_id, field_meta=self._session_response_meta()
+        )
 
     async def load_session(
         self,
@@ -127,7 +130,12 @@ class PiAcpAgent(Agent):
             raise RequestError.resource_not_found(session_id)
         session = await self._repo.open(metadata)
         await self._bind_session(session_id, session, metadata.cwd or cwd)
-        return LoadSessionResponse()
+        if self._conn is not None:
+            context = await session.build_context()
+            for msg in context.messages:
+                for update in project_message_replay(msg):
+                    await self._conn.session_update(session_id=session_id, update=update)
+        return LoadSessionResponse(field_meta=self._session_response_meta())
 
     async def list_sessions(
         self, cwd: str | None = None, cursor: str | None = None, **kwargs: Any
@@ -143,6 +151,22 @@ class PiAcpAgent(Agent):
             for item in listed
         ]
         return ListSessionsResponse(sessions=sessions)
+
+    async def resume_session(
+        self,
+        session_id: str,
+        cwd: str,
+        additional_directories: list[str] | None = None,
+        mcp_servers: list[HttpMcpServer | SseMcpServer | McpServerStdio] | None = None,
+        **kwargs: Any,
+    ) -> ResumeSessionResponse:
+        metadata = await self._find_metadata(session_id)
+        if metadata is None:
+            raise RequestError.resource_not_found(session_id)
+        session = await self._repo.open(metadata)
+        await self._bind_session(session_id, session, metadata.cwd or cwd)
+        # ACP session/resume intentionally does not replay history.
+        return ResumeSessionResponse(field_meta=self._session_response_meta())
 
     async def close_session(self, session_id: str, **kwargs: Any) -> CloseSessionResponse | None:
         self._harnesses.pop(session_id, None)
@@ -179,6 +203,21 @@ class PiAcpAgent(Agent):
         task.add_done_callback(self._abort_tasks.discard)
 
     async def ext_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        if method == "pi/session/delete":
+            session_id_raw = params.get("sessionId", params.get("session_id"))
+            if not isinstance(session_id_raw, str) or not session_id_raw.strip():
+                raise RequestError.invalid_params(
+                    {"reason": "sessionId is required", "method": method}
+                )
+            session_id = session_id_raw.strip()
+            metadata = await self._find_metadata(session_id)
+            harness = self._harnesses.pop(session_id, None)
+            if harness is not None:
+                await harness.abort()
+            # Idempotent delete: missing session still returns success.
+            if metadata is not None:
+                await self._repo.delete(metadata)
+            return {"sessionId": session_id, "deleted": True}
         raise RequestError.method_not_found(method)
 
     async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
@@ -186,6 +225,19 @@ class PiAcpAgent(Agent):
         if mode is not None:
             self._config = replace(self._config, permission=mode)
         return None
+
+    def _session_response_meta(self) -> dict[str, Any] | None:
+        model_id = self._config.model_id.strip()
+        if not model_id:
+            return None
+        meta: dict[str, Any] = {
+            "pi/currentModelId": model_id,
+            "pi/currentModelDisplayName": model_id,
+        }
+        provider = self._config.provider.strip()
+        if provider:
+            meta["pi/provider"] = provider
+        return meta
 
     def _require_harness(self, session_id: str) -> AgentHarness:
         harness = self._harnesses.get(session_id)

@@ -215,6 +215,59 @@ pub(crate) fn parse_session_scheduler_background_loops(
         })
         .and_then(|v| v.as_bool())
 }
+/// Fallback model-state parser for standard ACP backends that cannot emit the
+/// unstable `SessionModelState` response field yet.
+///
+/// Priority:
+/// 1. Use `models` when present (native unstable payload).
+/// 2. Else read `_meta` keys (pi-python compatibility path) and synthesize a
+///    single-entry model catalog so status surfaces can render a real name.
+pub(super) fn parse_session_response_models(
+    models: Option<acp::SessionModelState>,
+    resp_meta: Option<&acp::Meta>,
+) -> Option<acp::SessionModelState> {
+    if models.is_some() {
+        return models;
+    }
+    let meta = resp_meta?;
+    let model_id = parse_non_empty_meta_string(
+        meta,
+        &["pi/currentModelId", "currentModelId", "modelId", "model"],
+    )?;
+    let display_name = parse_non_empty_meta_string(
+        meta,
+        &[
+            "pi/currentModelDisplayName",
+            "currentModelDisplayName",
+            "modelDisplayName",
+            "modelName",
+        ],
+    )
+    .unwrap_or_else(|| model_id.clone());
+
+    let id = acp::ModelId::new(model_id);
+    let mut info = acp::ModelInfo::new(id.clone(), display_name);
+    if let Some(provider) = parse_non_empty_meta_string(meta, &["pi/provider", "provider"]) {
+        info = info.meta(
+            serde_json::json!({
+                "provider": provider,
+            })
+            .as_object()
+            .cloned(),
+        );
+    }
+    Some(acp::SessionModelState::new(id, vec![info]))
+}
+
+fn parse_non_empty_meta_string(meta: &acp::Meta, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| {
+        meta.get(*key)
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToString::to_string)
+    })
+}
 /// Whether `raw` is (or wraps) a disk-full / ENOSPC failure.
 pub(crate) fn is_disk_full_error(raw: &str) -> bool {
     raw.contains(pi_fast_worktree::OUT_OF_DISK_CONTEXT)

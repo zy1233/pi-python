@@ -2476,7 +2476,7 @@ mod plan_approval_model_handoff_tests {
         agent.plan_approval_view = Some(make_plan_approval_view_state());
         agent.reopen_plan_approval();
         let reg = ActionRegistry::defaults();
-        agent.handle_input(&Event::Key(key!('m', CONTROL).to_key_event()), &reg);
+        agent.handle_input(&Event::Key(key!(F(4)).to_key_event()), &reg);
         assert!(matches!(
             agent.active_modal,
             Some(ActiveModal::ArgPicker { ref command, .. }) if command == "model"

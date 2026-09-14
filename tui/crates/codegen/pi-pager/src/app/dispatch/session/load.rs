@@ -409,6 +409,13 @@ pub(in crate::app::dispatch) fn dispatch_pick_session(
     if chat_kind {
         return dispatch_load_session(app, session_id, None, true);
     }
+    if focus_if_session_already_open(app, &session_id, false).is_some() {
+        #[cfg(feature = "local-workspace")]
+        {
+            app.welcome_history_load_as_build = false;
+        }
+        return vec![];
+    }
     let local_cwd = app.cwd.to_string_lossy().to_string();
     if pi_shell::session::resolve_local_session(&session_id, &local_cwd).is_some() {
         return dispatch_load_session(app, session_id, None, false);
@@ -422,24 +429,15 @@ pub(in crate::app::dispatch) fn dispatch_pick_session(
             false,
         );
     }
-    if source == "remote" || source == "both" {
-        if focus_if_session_already_open(app, &session_id, false).is_some() {
-            #[cfg(feature = "local-workspace")]
-            {
-                app.welcome_history_load_as_build = false;
-            }
-            return vec![];
-        }
-        app.show_toast("Restoring session from remote...");
-        dispatch_load_session_with_restore(app, session_id, cwd)
+    // In pi-python architecture, sessions are managed by the ACP agent backend (JsonlSessionRepo)
+    // rather than grok's legacy ~/.pi-python/sessions/<encoded_cwd>/<session_id>/summary.json.
+    // When selected from the session picker, the session is already known to the ACP agent.
+    let session_cwd = if cwd.is_empty() || cwd == local_cwd {
+        None
     } else {
-        #[cfg(feature = "local-workspace")]
-        {
-            app.welcome_history_load_as_build = false;
-        }
-        app.show_toast("Session not found locally");
-        vec![]
-    }
+        Some(std::path::PathBuf::from(cwd))
+    };
+    dispatch_load_session(app, session_id, session_cwd, false)
 }
 /// Pick a session from the picker and resume it in a new git worktree.
 pub(in crate::app::dispatch) fn dispatch_pick_session_in_worktree(
@@ -892,6 +890,9 @@ pub(in crate::app::dispatch) fn dispatch_pick_content_session(
     if chat_kind {
         return dispatch_load_session(app, session_id, None, true);
     }
+    if focus_if_session_already_open(app, &session_id, false).is_some() {
+        return vec![];
+    }
     let local_cwd = app.cwd.to_string_lossy().to_string();
     if pi_shell::session::resolve_local_session(&session_id, &local_cwd).is_some() {
         return dispatch_load_session(app, session_id, None, false);
@@ -905,11 +906,12 @@ pub(in crate::app::dispatch) fn dispatch_pick_content_session(
             false,
         );
     }
-    if focus_if_session_already_open(app, &session_id, false).is_some() {
-        return vec![];
-    }
-    app.show_toast("Restoring session from remote...");
-    dispatch_load_session_with_restore(app, session_id, cwd)
+    let session_cwd = if cwd.is_empty() || cwd == local_cwd {
+        None
+    } else {
+        Some(std::path::PathBuf::from(cwd))
+    };
+    dispatch_load_session(app, session_id, session_cwd, false)
 }
 /// Create a placeholder agent and restore a remote session before loading.
 /// Build rows only — conversation rows never reach the restore path.

@@ -38,6 +38,7 @@ pub(crate) const PI_STANDARD_SLASH_NAMES: &[&str] = &[
     "theme",
     "settings",
     "multiline",
+    "model",
     "home",
 ];
 
@@ -169,7 +170,7 @@ pub struct CommandRegistry {
     /// names skipped as reserved/claimed) so `/workflow` can suggest them.
     saved_workflows: Vec<WorkflowChoice>,
     /// When true, only standard-ACP / local-TUI slash commands are offered
-    /// (`/new` `/resume` `/quit` plus `/help` `/theme` `/settings` `/multiline`).
+    /// (`/new` `/resume` `/quit` plus `/help` `/theme` `/settings` `/multiline` `/model`).
     pi_standard_slash: bool,
 }
 
@@ -1450,11 +1451,11 @@ mod tests {
         assert!(registry.get("theme").is_some());
         assert!(registry.get("settings").is_some());
         assert!(registry.get("multiline").is_some());
+        assert!(registry.get("model").is_some());
         assert!(registry.get("home").is_some());
         assert!(registry.get("welcome").is_some(), "/welcome is an alias of /home");
         assert!(registry.get("clear").is_some(), "/clear is an alias of /new");
         assert!(registry.get("exit").is_some(), "/exit is an alias of /quit");
-        assert!(registry.get("model").is_none());
         assert!(registry.get("compact").is_none());
         assert!(registry.get("rewind").is_none());
         assert!(registry.get("fork").is_none());

@@ -771,7 +771,7 @@ pub enum Action {
         session_id: String,
         cwd: String,
     },
-    /// Delete a session from history (local + remote). Fired from the
+    /// Delete a session from history via the ACP backend. Fired from the
     /// session picker: `d` arms delete confirmation on the focused row,
     /// then `y` confirms (or `n`/other cancels).
     DeleteSession {
@@ -2116,8 +2116,7 @@ pub enum Effect {
         previous_display_name: Option<String>,
         previous_generated_title: Option<String>,
     },
-    /// Delete a session's stored data (local + remote) via
-    /// `x.ai/session/delete`.
+    /// Delete a session in the ACP backend repository.
     DeleteSession {
         source: String,
         session_id: String,

@@ -768,6 +768,50 @@ fn parse_session_load_restore_meta_rejects_unknown_degree() {
     let (_, _, degree) = parse_session_load_restore_meta(meta.as_object());
     assert!(degree.is_none());
 }
+#[test]
+fn parse_session_response_models_prefers_native_payload() {
+    let id = acp::ModelId::new(std::sync::Arc::from("native-model"));
+    let native = acp::SessionModelState::new(
+        id.clone(),
+        vec![acp::ModelInfo::new(id.clone(), "Native Model")],
+    );
+    let meta = serde_json::json!({
+        "pi/currentModelId": "meta-model",
+        "pi/currentModelDisplayName": "Meta Model",
+    });
+    let parsed = parse_session_response_models(
+        Some(native.clone()),
+        meta.as_object(),
+    );
+    assert_eq!(parsed, Some(native));
+}
+#[test]
+fn parse_session_response_models_falls_back_to_meta() {
+    let meta = serde_json::json!({
+        "pi/currentModelId": "deepseek-flash",
+        "pi/currentModelDisplayName": "DeepSeek Flash",
+        "pi/provider": "deepseek",
+    });
+    let parsed = parse_session_response_models(None, meta.as_object())
+        .expect("meta model fallback should build SessionModelState");
+    assert_eq!(parsed.current_model_id.0.as_ref(), "deepseek-flash");
+    assert_eq!(parsed.available_models.len(), 1);
+    assert_eq!(parsed.available_models[0].name, "DeepSeek Flash");
+    assert_eq!(
+        parsed.available_models[0]
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("provider"))
+            .and_then(|v| v.as_str()),
+        Some("deepseek")
+    );
+}
+#[test]
+fn parse_session_response_models_none_without_native_or_meta_model() {
+    let meta = serde_json::json!({ "pi/provider": "deepseek" });
+    let parsed = parse_session_response_models(None, meta.as_object());
+    assert!(parsed.is_none(), "no model id means no fallback state");
+}
 /// Unknown keys return a descriptive error.
 #[tokio::test]
 async fn persist_setting_unknown_key_returns_err() {

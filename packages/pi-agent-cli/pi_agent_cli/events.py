@@ -14,7 +14,13 @@ from acp.helpers import (
     update_agent_thought_text,
     update_tool_call,
 )
-from acp.schema import AgentMessageChunk, AgentThoughtChunk, ToolCallProgress, ToolCallStart
+from acp.schema import (
+    AgentMessageChunk,
+    AgentThoughtChunk,
+    ToolCallProgress,
+    ToolCallStart,
+    UserMessageChunk,
+)
 
 from pi_agent_core.types import AgentEvent
 
@@ -28,7 +34,9 @@ _KIND: dict[str, str] = {
     "ls": "search",
 }
 
-SessionUpdate = AgentMessageChunk | AgentThoughtChunk | ToolCallStart | ToolCallProgress
+SessionUpdate = (
+    AgentMessageChunk | AgentThoughtChunk | ToolCallStart | ToolCallProgress | UserMessageChunk
+)
 
 
 def tool_kind(name: str) -> str:
@@ -139,3 +147,115 @@ def _raw_output(result: Any) -> Any:
     if hasattr(result, "model_dump"):
         return result.model_dump(exclude_none=True)
     return result
+
+
+def project_message_replay(message: Any) -> Iterator[SessionUpdate]:
+    """Project a stored historical message onto ACP session_update events with replay meta."""
+    role = getattr(message, "role", None)
+    if role is None and isinstance(message, dict):
+        role = message.get("role")
+
+    replay_meta: dict[str, Any] = {"isReplay": True}
+
+    if role == "user":
+        content = getattr(message, "content", None)
+        if content is None and isinstance(message, dict):
+            content = message.get("content")
+        text = ""
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            parts = []
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    parts.append(str(item.get("text", "")))
+                elif getattr(item, "type", None) == "text":
+                    parts.append(str(getattr(item, "text", "")))
+            text = "".join(parts)
+        if text:
+            chunk = UserMessageChunk(
+                content=text_block(text),
+                session_update="user_message_chunk",
+                field_meta=replay_meta,
+            )
+            yield chunk
+        return
+
+    if role == "assistant":
+        content = getattr(message, "content", None)
+        if content is None and isinstance(message, dict):
+            content = message.get("content")
+        if not isinstance(content, list):
+            return
+
+        for block in content:
+            btype = block.get("type") if isinstance(block, dict) else getattr(block, "type", None)
+            if btype == "thinking":
+                t = (
+                    block.get("thinking")
+                    if isinstance(block, dict)
+                    else getattr(block, "thinking", None)
+                )
+                if t:
+                    chunk = update_agent_thought_text(str(t))
+                    chunk.field_meta = replay_meta
+                    yield chunk
+            elif btype == "text":
+                txt = block.get("text") if isinstance(block, dict) else getattr(block, "text", None)
+                if txt:
+                    chunk = update_agent_message_text(str(txt))
+                    chunk.field_meta = replay_meta
+                    yield chunk
+            elif btype == "toolCall":
+                tc_id = block.get("id") if isinstance(block, dict) else getattr(block, "id", None)
+                tc_name = (
+                    block.get("name") if isinstance(block, dict) else getattr(block, "name", None)
+                )
+                tc_args = (
+                    block.get("arguments")
+                    if isinstance(block, dict)
+                    else getattr(block, "arguments", None)
+                )
+                if tc_id and tc_name:
+                    tc = start_tool_call(
+                        str(tc_id),
+                        str(tc_name),
+                        kind=tool_kind(str(tc_name)),  # type: ignore[arg-type]
+                        status="completed",
+                        raw_input=tc_args,
+                    )
+                    tc.field_meta = replay_meta
+                    yield tc
+        return
+
+    if role == "toolResult":
+        tc_id = getattr(message, "toolCallId", None)
+        if tc_id is None and isinstance(message, dict):
+            tc_id = message.get("toolCallId")
+        tc_name = getattr(message, "toolName", None)
+        if tc_name is None and isinstance(message, dict):
+            tc_name = message.get("toolName")
+        is_err = getattr(message, "isError", False)
+        if is_err is False and isinstance(message, dict):
+            is_err = message.get("isError", False)
+        details = getattr(message, "details", None)
+        if details is None and isinstance(message, dict):
+            details = message.get("details")
+
+        if tc_id:
+            txt = _text_from_result(message)
+            content_list = None
+            if tc_name and tc_name in {"edit", "write"}:
+                content_list = _result_content(tc_name, details, message)
+            if not content_list and txt:
+                content_list = [tool_content(text_block(txt))]
+            status = "failed" if is_err else "completed"
+            update = update_tool_call(
+                str(tc_id),
+                status=status,
+                content=content_list,
+                raw_output=txt or None,
+            )
+            update.field_meta = replay_meta
+            yield update
+        return

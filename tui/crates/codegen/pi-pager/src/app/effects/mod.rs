@@ -228,7 +228,10 @@ pub(crate) fn execute(
                             TaskResult::SessionCreated {
                                 agent_id,
                                 session_id: resp.session_id,
-                                models: resp.models,
+                                models: parse_session_response_models(
+                                    resp.models,
+                                    resp.meta.as_ref(),
+                                ),
                                 scheduler_background_loops: parse_session_scheduler_background_loops(
                                     resp.meta.as_ref(),
                                 ),
@@ -321,7 +324,10 @@ pub(crate) fn execute(
                             TaskResult::SessionLoaded {
                                 agent_id,
                                 session_id: acp_session_id,
-                                models: resp.models,
+                                models: parse_session_response_models(
+                                    resp.models,
+                                    resp.meta.as_ref(),
+                                ),
                                 code_restored,
                                 restore_summary,
                                 restore_degree,
@@ -1882,12 +1888,40 @@ pub(crate) fn execute(
                     }
                 });
         }
-        Effect::DeleteSession { source, session_id, after, .. } => {
+        Effect::DeleteSession {
+            source,
+            session_id,
+            cwd,
+            after,
+        } => {
+            let tx = acp_tx.clone();
             tasks.spawn(async move {
-                TaskResult::DeleteSessionComplete {
-                    source,
-                    session_id,
-                    after,
+                let payload = serde_json::json!({
+                    "sessionId": session_id.clone(),
+                    "cwd": cwd.clone(),
+                    "source": source.clone(),
+                });
+                let ext = match serde_json::value::to_raw_value(&payload) {
+                    Ok(raw) => acp::ExtRequest::new("pi/session/delete", raw.into()),
+                    Err(error) => {
+                        return TaskResult::DeleteSessionFailed {
+                            source,
+                            session_id,
+                            error: sanitize_user_error(&error.to_string()),
+                        };
+                    }
+                };
+                match acp_send(ext, &tx).await {
+                    Ok(_) => TaskResult::DeleteSessionComplete {
+                        source,
+                        session_id,
+                        after,
+                    },
+                    Err(error) => TaskResult::DeleteSessionFailed {
+                        source,
+                        session_id,
+                        error: sanitize_user_error(&error.to_string()),
+                    },
                 }
             });
         }

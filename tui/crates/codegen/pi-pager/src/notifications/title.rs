@@ -596,6 +596,7 @@ mod tests {
     #[test]
     fn action_required_blinks_across_ticks() {
         let cfg = config_with_items(vec![TitleItem::ActionRequired, TitleItem::Zypi]);
+        let mut mgr = TitleManager::new(&cfg);
         let state = TitleState {
             has_pending_permissions: true,
             focused: false, // unfocused → should blink

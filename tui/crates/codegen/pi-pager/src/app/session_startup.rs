@@ -773,13 +773,56 @@ pub fn effective_fork_new_cwd(process_cwd: &str, parent_cwd: Option<&Path>) -> S
 /// Resolve most-recent session id for cwd, or error.
 async fn most_recent_session_id(cwd: &str) -> anyhow::Result<(String, Option<String>)> {
     let summaries = pi_shell::session::persistence::list_summaries(Some(cwd)).await?;
-    let first = summaries.first().ok_or_else(|| {
-        anyhow::anyhow!(
-            "No session found for current directory. \
-             Use 'grok' to start a new session."
-        )
-    })?;
-    Ok((first.info.id.to_string(), first.display_title_opt()))
+    if let Some(first) = summaries.first() {
+        return Ok((first.info.id.to_string(), first.display_title_opt()));
+    }
+    if let Some((id, title)) = find_most_recent_jsonl_session(cwd) {
+        return Ok((id, title));
+    }
+    anyhow::bail!(
+        "No session found for current directory. \
+         Use 'zypi' to start a new session."
+    )
+}
+
+fn find_most_recent_jsonl_session(target_cwd: &str) -> Option<(String, Option<String>)> {
+    let sessions_dir = pi_shell::util::grok_home::grok_home().join("sessions");
+    let read_dir = std::fs::read_dir(sessions_dir).ok()?;
+    let mut files: Vec<PathBuf> = read_dir
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| {
+            p.extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext == "jsonl")
+        })
+        .collect();
+    files.sort_by(|a, b| b.cmp(a));
+
+    let norm_target = normalize_cwd_for_comparison(target_cwd);
+
+    for path in files {
+        if let Ok(file) = std::fs::File::open(&path) {
+            use std::io::BufRead;
+            let mut reader = std::io::BufReader::new(file);
+            let mut first_line = String::new();
+            if reader.read_line(&mut first_line).is_ok() && !first_line.is_empty() {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&first_line) {
+                    if let Some(cwd) = v.get("cwd").and_then(|c| c.as_str()) {
+                        if normalize_cwd_for_comparison(cwd) == norm_target {
+                            if let Some(id) = v.get("id").and_then(|i| i.as_str()) {
+                                return Some((id.to_string(), None));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn normalize_cwd_for_comparison(cwd: &str) -> String {
+    cwd.replace('\\', "/").trim_end_matches('/').to_lowercase()
 }
 /// `AuthManager` for direct grok.com calls made outside the agent (pre-ACP
 /// `--continue` conversation listing, the GCS restore effect). Wires the
@@ -998,6 +1041,17 @@ async fn resolve_existing_session(
         && let Some(resolved) = resolve_session_by_title(session_id, cwd).await?
     {
         return Ok(resolved);
+    }
+    // In pi-python, if an explicit UUID target is requested without a worktree,
+    // allow delegating to the backend ACP agent without requiring legacy grok summary.json
+    if arg_is_uuid && !ctx.has_worktree {
+        return Ok(ResolvedExisting {
+            id: session_id.to_string(),
+            original_cwd: None,
+            title: None,
+            deferred_local_miss: false,
+            suppress_code_restore: false,
+        });
     }
     match plan_remote_miss(ctx, arg_is_uuid) {
         RemoteMissPlan::DeferToWorktree {

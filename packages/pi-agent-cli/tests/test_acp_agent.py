@@ -86,6 +86,25 @@ async def test_initialize_has_empty_auth_and_standard_session_caps(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_session_responses_include_model_meta(tmp_path):
+    agent = _agent(tmp_path)
+    agent.on_connect(FakeClient())
+    cwd = str(tmp_path.resolve())
+    created = await agent.new_session(cwd=cwd)
+    assert created.field_meta is not None
+    assert created.field_meta.get("pi/currentModelId") == "mock"
+
+    loaded = await agent.load_session(cwd=cwd, session_id=created.session_id)
+    assert loaded is not None
+    assert loaded.field_meta is not None
+    assert loaded.field_meta.get("pi/currentModelId") == "mock"
+
+    resumed = await agent.resume_session(session_id=created.session_id, cwd=cwd)
+    assert resumed.field_meta is not None
+    assert resumed.field_meta.get("pi/currentModelId") == "mock"
+
+
+@pytest.mark.asyncio
 async def test_message_end_error_surfaces_in_session_update(tmp_path):
     from pi_agent_core.messages import AssistantMessage
     from pi_agent_core.types import MessageEndEvent
@@ -125,6 +144,36 @@ async def test_ext_method_does_not_register_vendor_rpcs(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_ext_method_pi_session_delete_removes_repo_session(tmp_path):
+    agent = _agent(tmp_path)
+    agent.on_connect(FakeClient())
+    cwd = str(tmp_path.resolve())
+    created = await agent.new_session(cwd=cwd)
+    before = await agent.list_sessions()
+    assert any(s.session_id == created.session_id for s in before.sessions)
+
+    deleted = await agent.ext_method(
+        "pi/session/delete",
+        {"sessionId": created.session_id, "cwd": cwd, "source": "local"},
+    )
+    assert deleted["sessionId"] == created.session_id
+    assert deleted["deleted"] is True
+
+    after = await agent.list_sessions()
+    assert all(s.session_id != created.session_id for s in after.sessions)
+
+    deleted_again = await agent.ext_method("pi/session/delete", {"sessionId": created.session_id})
+    assert deleted_again["deleted"] is True
+
+
+@pytest.mark.asyncio
+async def test_ext_method_pi_session_delete_requires_session_id(tmp_path):
+    agent = _agent(tmp_path)
+    with pytest.raises(RequestError):
+        await agent.ext_method("pi/session/delete", {})
+
+
+@pytest.mark.asyncio
 async def test_prompt_projects_text_deltas(tmp_path):
     agent = _agent(tmp_path)
     client = FakeClient()
@@ -157,6 +206,42 @@ async def test_list_load_close_session(tmp_path):
     await agent.close_session(session_id=created.session_id)
     with pytest.raises(RequestError):
         await agent.prompt(session_id=created.session_id, prompt=[text_block("x")])
+
+
+@pytest.mark.asyncio
+async def test_load_session_replays_history(tmp_path):
+    client = FakeClient()
+    agent = _agent(tmp_path)
+    agent.on_connect(client)
+    cwd = str(tmp_path.resolve())
+    created = await agent.new_session(cwd=cwd)
+    await agent.prompt(session_id=created.session_id, prompt=[text_block("hi")])
+    await agent.close_session(session_id=created.session_id)
+
+    client.updates.clear()
+    loaded = await agent.load_session(cwd=cwd, session_id=created.session_id)
+    assert loaded is not None
+    assert len(client.updates) > 0
+    for sid, update in client.updates:
+        assert sid == created.session_id
+        meta = getattr(update, "field_meta", None)
+        assert meta is not None and meta.get("isReplay") is True
+
+
+@pytest.mark.asyncio
+async def test_resume_session_does_not_replay_history(tmp_path):
+    client = FakeClient()
+    agent = _agent(tmp_path)
+    agent.on_connect(client)
+    cwd = str(tmp_path.resolve())
+    created = await agent.new_session(cwd=cwd)
+    await agent.prompt(session_id=created.session_id, prompt=[text_block("hi")])
+    await agent.close_session(session_id=created.session_id)
+
+    client.updates.clear()
+    resumed = await agent.resume_session(session_id=created.session_id, cwd=cwd)
+    assert resumed is not None
+    assert client.updates == []
 
 
 async def _bash_once_stream(model, context, options=None):

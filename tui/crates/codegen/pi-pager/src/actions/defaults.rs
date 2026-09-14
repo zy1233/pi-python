@@ -713,7 +713,7 @@ pub(super) fn default_actions(
             hint_key_display: None,
             requires_confirmation: false,
             long_help: Some(
-                "Toggles a persistent multi-line prompt so the editor stays expanded for composing longer messages.\nInsert newlines with Shift+Enter or Alt+Enter (or a trailing backslash); bare Enter still sends.\nCtrl+M toggles multiline in the prompt; off the prompt it opens the model picker.",
+                "Toggles a persistent multi-line prompt so the editor stays expanded for composing longer messages.\nInsert newlines with Shift+Enter or Alt+Enter (or a trailing backslash); bare Enter still sends.\nCtrl+M toggles multiline in the prompt.",
             ),
         },
         ActionDef {
@@ -843,15 +843,15 @@ pub(super) fn default_actions(
             id: ActionId::ModelPicker,
             label: "model",
             description: "Pick model",
-            default_key: key!('m', CONTROL),
-            alt_keys: vec![],
+            default_key: key!(F(4)),
+            alt_keys: vec![key!('m', ALT)],
             category: Category::Session,
             context: When::AgentScreen,
             hint_priority: None,
             hint_key_display: None,
             requires_confirmation: false,
             long_help: Some(
-                "Opens the model picker to switch the model for this session; the choice applies to later turns.\nBound to Ctrl+M, but while the prompt is focused that chord toggles multiline instead.\nReach it from the scrollback or the command palette.",
+                "Opens the model picker to switch the model for this session; the choice applies to later turns.\nBound to F4 (Alt+M is an alias).\nReach it from the scrollback or the command palette.",
             ),
         },
         ActionDef {
