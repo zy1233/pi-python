@@ -89,3 +89,29 @@ def test_load_local_env_sets_missing_keys(tmp_path: Path, monkeypatch):
     rel.mkdir()
     got = expand_config_path(".pi/skills", cwd=tmp_path / "proj")
     assert got == str((tmp_path / "proj" / ".pi" / "skills").resolve())
+
+
+def test_load_config_parses_supports_images(tmp_path: Path):
+    config_path = tmp_path / "agent.toml"
+    config_path.write_text(
+        """
+[model]
+provider = "deepseek"
+id = "deepseek-flash"
+supports_images = true
+""".strip(),
+        encoding="utf-8",
+    )
+    config = load_config(tmp_path)
+    assert config.supports_images is True
+
+    # Test false
+    config_path.write_text(
+        """
+[model]
+supports_images = false
+""".strip(),
+        encoding="utf-8",
+    )
+    config2 = load_config(tmp_path)
+    assert config2.supports_images is False

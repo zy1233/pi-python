@@ -50,3 +50,28 @@ async def test_create_session_harness_loads_skills(tmp_path: Path, monkeypatch):
     )
     assert "<available_skills>" in prompt
     assert "<name>writer</name>" in prompt
+
+
+def test_detect_vlm_support_rules():
+    from pi_agent_cli.factory import _detect_vlm_support
+
+    # Explicit configuration takes precedence
+    assert _detect_vlm_support("deepseek", "deepseek-flash", configured=True) is True
+    assert _detect_vlm_support("deepseek", "deepseek-vl", configured=False) is False
+    assert _detect_vlm_support("openai", "gpt-4o", configured=False) is False
+
+    # DeepSeek / text-only providers auto-detect rules
+    # "flash" alone should NOT trigger VLM support (per user requirement)
+    assert _detect_vlm_support("deepseek", "deepseek-flash") is False
+    assert _detect_vlm_support("siliconflow", "deepseek-ai/deepseek-v3") is False
+
+    # But "4.1flash", "vl", "vision", "omni" DO trigger VLM support
+    assert _detect_vlm_support("deepseek", "deepseek-4.1flash") is True
+    assert _detect_vlm_support("deepseek", "deepseek-vl-7b") is True
+    assert _detect_vlm_support("siliconflow", "deepseek-ai/deepseek-vl2") is True
+    assert _detect_vlm_support("deepseek", "deepseek-v4-flash-vision-exp") is True
+    assert _detect_vlm_support("deepseek", "deepseek-omni") is True
+
+    # Other providers default to True
+    assert _detect_vlm_support("openai", "gpt-4o") is True
+    assert _detect_vlm_support("anthropic", "claude-3-7-sonnet") is True

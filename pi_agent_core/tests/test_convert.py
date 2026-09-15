@@ -93,6 +93,32 @@ def test_tool_result_image_openai_user_message_fallback():
     assert human.content[1]["type"] == "image_url"
 
 
+def test_parallel_tool_result_images_openai_order():
+    """Consecutive tool messages must not be interleaved with HumanMessages."""
+    ai = AssistantMessage(
+        content=[
+            {"type": "toolCall", "id": "c1", "name": "read", "arguments": {"path": "a.png"}},
+            {"type": "toolCall", "id": "c2", "name": "read", "arguments": {"path": "b.png"}},
+        ]
+    )
+    t1 = ToolResultMessage(
+        toolCallId="c1", toolName="read", content=[{"type": "text", "text": "img1"}, _IMG]
+    )
+    t2 = ToolResultMessage(
+        toolCallId="c2", toolName="read", content=[{"type": "text", "text": "img2"}, _IMG]
+    )
+    model = Model(provider="openai", model_id="gpt-x")
+    out = convert_to_langchain([ai, t1, t2], model=model)
+
+    # Expected: AIMessage, ToolMessage(c1), ToolMessage(c2), HumanMessage(c1), HumanMessage(c2)
+    assert len(out) == 5
+    assert isinstance(out[0], AIMessage)
+    assert isinstance(out[1], ToolMessage) and out[1].tool_call_id == "c1"
+    assert isinstance(out[2], ToolMessage) and out[2].tool_call_id == "c2"
+    assert isinstance(out[3], HumanMessage) and "c1" in out[3].content[0]["text"]
+    assert isinstance(out[4], HumanMessage) and "c2" in out[4].content[0]["text"]
+
+
 def test_tool_result_image_stripped_without_image_support():
     """C1/#9: supports_images=False models get a text placeholder, no image parts."""
     msg = _tool_result({"type": "text", "text": "captured"}, _IMG)

@@ -80,9 +80,17 @@ def convert_to_langchain(
                 cache_breakpoint_idx = i
                 break
 
+    pending_image_messages: list[HumanMessage] = []
+
+    def flush_pending_images() -> None:
+        if pending_image_messages:
+            out.extend(pending_image_messages)
+            pending_image_messages.clear()
+
     for idx, msg in enumerate(messages):
         add_cache = is_anthropic and (idx == cache_breakpoint_idx)
         if isinstance(msg, UserMessage):
+            flush_pending_images()
             lc_content = _user_content_to_lc(msg.content)
             if add_cache:
                 if isinstance(lc_content, str):
@@ -100,6 +108,7 @@ def convert_to_langchain(
                     ]
             out.append(HumanMessage(content=lc_content))
         elif isinstance(msg, AssistantMessage):
+            flush_pending_images()
             text_parts: list[str] = []
             thinking_blocks: list[dict] = []
             tool_calls: list[dict] = []
@@ -178,7 +187,7 @@ def convert_to_langchain(
                     }
                 ]
                 parts.extend(_image_block_to_lc(b) for b in image_blocks)
-                out.append(HumanMessage(content=parts))
+                pending_image_messages.append(HumanMessage(content=parts))
             elif is_anthropic and add_cache:
                 out.append(
                     ToolMessage(
@@ -201,6 +210,7 @@ def convert_to_langchain(
                         name=msg.toolName,
                     )
                 )
+    flush_pending_images()
     return out
 
 

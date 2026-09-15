@@ -18,17 +18,21 @@ from pi_agent_harness.compaction import CompactionSettings
 from pi_agent_harness.skills import load_skills
 
 
-def _detect_vlm_support(provider: str, model_id: str) -> bool:
+def _detect_vlm_support(provider: str, model_id: str, configured: bool | None = None) -> bool:
     """Auto-detect vision (VLM) support based on provider and model name.
 
+    If ``configured`` is explicitly provided, it takes precedence.
     Known text-only providers (DeepSeek, SiliconFlow via DeepSeek) default to
-    False unless the model name contains a VLM indicator (``vl``, ``vision``).
+    False unless the model name contains a VLM indicator (``vl``, ``vision``,
+    ``4.1flash``, ``omni``).
     All other providers default to True (OpenAI, Anthropic, etc.).
     """
+    if configured is not None:
+        return configured
     _TEXT_ONLY_PROVIDERS = {"deepseek", "siliconflow"}
     mid = model_id.lower()
     if provider.lower() in _TEXT_ONLY_PROVIDERS:
-        return any(kw in mid for kw in ("vl", "vision"))
+        return any(kw in mid for kw in ("vl", "vision", "4.1flash", "omni"))
     return True
 
 
@@ -117,7 +121,9 @@ async def create_session_harness(
         provider=config.provider,
         model_id=config.model_id,
         base_url=config.base_url,
-        supports_images=_detect_vlm_support(config.provider, config.model_id),
+        supports_images=_detect_vlm_support(
+            config.provider, config.model_id, config.supports_images
+        ),
     )
 
     async def system_prompt_callback(ctx: dict[str, Any]) -> str:

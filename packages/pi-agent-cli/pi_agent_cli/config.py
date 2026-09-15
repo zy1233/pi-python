@@ -78,6 +78,7 @@ class CliConfig:
     thinking_level: ThinkingLevel = "off"
     max_turns: int | None = None
     api_key_env: str | None = None
+    supports_images: bool | None = None
     skills_dirs: tuple[str, ...] = ()
     agent_command: str | None = None
     no_context_files: bool = False
@@ -135,6 +136,11 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
     if isinstance(raw_paths, list):
         skills_dirs = tuple(str(item) for item in raw_paths if str(item).strip())
 
+    supports_images_raw = model.get("supports_images")
+    if supports_images_raw is None:
+        supports_images_raw = data.get("supports_images")
+    supports_images = bool(supports_images_raw) if supports_images_raw is not None else None
+
     agent_command = agent.get("command")
     if agent_command is not None:
         agent_command = str(agent_command).strip() or None
@@ -153,6 +159,7 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         thinking_level=thinking,  # type: ignore[arg-type]
         max_turns=max_turns,
         api_key_env=model.get("api_key_env") or data.get("api_key_env"),
+        supports_images=supports_images,
         skills_dirs=skills_dirs,
         agent_command=agent_command,
         no_context_files=bool(prompt.get("no_context_files", False)),
