@@ -34,29 +34,50 @@ def format_markdown_report(summary: BenchmarkSummary) -> str:
         "| :--- | :--- | :--- |",
         f"| **Pass Rate** | **{pass_pct}** | Solved and verified tasks |",
         f"| **Effective Cost / Pass** | **{cost_per_pass}** | Amortized cost per passed task |",
-        f"| **Tokens / Solved** | **{tokens_per_pass}** | Amortized tokens per passed task |",
-        f"| **Total Cost** | ${summary.total_cost_usd:.4f} | Total API spend for the run |",
-        f"| **Typical Cache Hit Rate** | {cache_pct} | Prompt caching efficiency |",
-        f"| **Mean Turns** | {summary.mean_turns:.1f} | Average interaction turns |",
-        (
-            f"| **Mean No-Action Turns** | {summary.mean_no_action_turns:.1f} | "
-            "Turns without file/shell operations (overhead) |"
-        ),
-        f"| **Median Duration** | {summary.median_duration_seconds:.1f}s | Median elapsed time |",
-        "",
-        "## Task Results",
-        "",
-        "| Status | Task ID | Duration | Turns (No-Act) | Tokens | Cache | Cost |",
-        "| :---: | :--- | :---: | :---: | :---: | :---: | :---: |",
     ]
+    if summary.effective_cost_per_pass_kimi_k3 is not None:
+        md.append(
+            f"| **Normalized Cost / Pass (Kimi K3)** | "
+            f"**${summary.effective_cost_per_pass_kimi_k3:.4f}** | "
+            "Amortized cost normalized to official benchmark pricing |"
+        )
+    md.extend(
+        [
+            f"| **Tokens / Solved** | **{tokens_per_pass}** | Amortized tokens per passed task |",
+            f"| **Total Cost** | ${summary.total_cost_usd:.4f} | Total API spend for the run |",
+            f"| **Typical Cache Hit Rate** | {cache_pct} | Prompt caching efficiency |",
+            f"| **Mean Turns** | {summary.mean_turns:.1f} | Average interaction turns |",
+            (
+                f"| **Mean No-Action Turns** | {summary.mean_no_action_turns:.1f} | "
+                "Turns without file/shell operations (overhead) |"
+            ),
+            (
+                f"| **Median Duration** | {summary.median_duration_seconds:.1f}s | "
+                "Median elapsed time |"
+            ),
+            "",
+            "## Task Results",
+            "",
+            (
+                "| Status | Task ID | Duration | Turns (No-Act) | "
+                "Tokens | Cache | Cost | Norm Cost (K3) |"
+            ),
+            "| :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: |",
+        ]
+    )
 
     for t in summary.trials:
         icon = "✅" if t.success else "❌"
         cache_str = f"{t.cache_hit_rate_normalized * 100:.0f}%"
+        k3_cost = (
+            f"${t.cost_kimi_k3_normalized_usd:.4f}"
+            if t.cost_kimi_k3_normalized_usd is not None
+            else "N/A"
+        )
         md.append(
             f"| {icon} | `{t.id}` | {t.duration_seconds:.1f}s | "
             f"{t.turns} ({t.no_action_turns}) | {t.total_tokens:,} | "
-            f"{cache_str} | ${t.cost_first_cold_usd:.4f} |"
+            f"{cache_str} | ${t.cost_first_cold_usd:.4f} | {k3_cost} |"
         )
 
     md.append("")
@@ -78,6 +99,8 @@ def print_summary_table(summary: BenchmarkSummary) -> None:
     print("=" * 70)
     print(f"  Passed:         {summary.successful_tasks}/{summary.completed_tasks} ({pass_pct})")
     print(f"  Effective Cost: {cost_per_pass}")
+    if summary.effective_cost_per_pass_kimi_k3 is not None:
+        print(f"  Norm Cost (K3): ${summary.effective_cost_per_pass_kimi_k3:.4f}")
     print(f"  Total Cost:     ${summary.total_cost_usd:.4f}")
     print(f"  Typical Cache:  {summary.typical_cache_hit_rate * 100:.1f}%")
     print(f"  Mean Turns (No-Act):   {summary.mean_turns:.1f} ({summary.mean_no_action_turns:.1f})")

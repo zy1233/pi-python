@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -13,6 +12,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from pi_agent_cli.benchmarks.egress_policy import EgressPolicy, resolve_task_egress_policy
 from pi_agent_cli.benchmarks.models import BenchmarkTask
 from pi_agent_core.coding_tools._base import CodingTool
 from pi_agent_core.coding_tools.bash import BashParams, _format_timeout_seconds, _resolve_timeout
@@ -101,9 +101,22 @@ def run_docker_sync(
 class DockerContainerSession:
     """Manages the lifecycle of a task container."""
 
-    def __init__(self, task: BenchmarkTask, workspace: Path) -> None:
+    def __init__(
+        self,
+        task: BenchmarkTask,
+        workspace: Path,
+        *,
+        seeds_dir: Path | str | None = None,
+        egress_policy: EgressPolicy | None = None,
+        egress_mode: str = "auto",
+        provider_host: str | None = None,
+    ) -> None:
         self.task = task
         self.workspace = workspace
+        self.seeds_dir = Path(seeds_dir).resolve() if seeds_dir else None
+        self.egress_policy = egress_policy or resolve_task_egress_policy(
+            task, egress_mode=egress_mode, provider_host=provider_host
+        )
         clean_task_name = "".join(c if c.isalnum() or c in "-_" else "-" for c in task.id).strip(
             "-"
         )
@@ -126,58 +139,83 @@ class DockerContainerSession:
             if pull.returncode != 0:
                 raise RuntimeError(f"Failed to pull image {self.image}: {pull.stderr.strip()}")
 
-        # 2. Extract initial repository/environment from image /app if present
-        tmp_init = f"init-{self.container_name}"
-        with contextlib.suppress(Exception):
-            run_docker_sync(["create", "--name", tmp_init, self.image])
-            mount_ws = to_docker_mount_path(self.workspace)
-            cp_res = run_docker_sync(["cp", f"{tmp_init}:/app/.", mount_ws])
-            if cp_res.returncode == 0:
-                print(f"[DOCKER] Extracted starter repository into {self.workspace}")
-            run_docker_sync(["rm", "-f", tmp_init])
+        # 2. Extract or restore initial repository from Golden Seed if available
+        restored_from_seed = False
+        if self.seeds_dir:
+            from pi_agent_cli.benchmarks.golden_seed import get_seed_dir
 
-        # 3. Start container with workspace bind-mounted to /app and proxy env
-        proxy_url = (
-            os.environ.get("https_proxy")
-            or os.environ.get("HTTPS_PROXY")
-            or os.environ.get("http_proxy")
-            or "http://172.20.35.30:10809"
-        )
+            seed_path = get_seed_dir(self.seeds_dir, self.task)
+            if seed_path:
+                try:
+                    # On Linux / WSL ext4, try CoW clone (cp --reflink=auto)
+                    if sys.platform != "win32":
+                        res = subprocess.run(
+                            ["cp", "-a", "--reflink=auto", f"{seed_path}/.", str(self.workspace)],
+                            capture_output=True,
+                            text=True,
+                        )
+                        if res.returncode == 0:
+                            restored_from_seed = True
+                            print(f"[DOCKER] Fast-restored workspace from seed: {seed_path.name}")
+                    if not restored_from_seed:
+                        shutil.copytree(seed_path, self.workspace, dirs_exist_ok=True)
+                        restored_from_seed = True
+                        print(f"[DOCKER] Copied workspace from golden seed: {seed_path.name}")
+                except Exception as e:
+                    print(
+                        f"[DOCKER] Golden seed restore failed ({e}), "
+                        "falling back to image extraction."
+                    )
+
+        if not restored_from_seed:
+            tmp_init = f"init-{self.container_name}"
+            try:
+                create_res = run_docker_sync(["create", "--name", tmp_init, self.image])
+                if create_res.returncode != 0:
+                    print(
+                        f"[DOCKER] Warning: docker create failed for {self.image}: "
+                        f"{create_res.stderr.strip()}"
+                    )
+                else:
+                    mount_ws = to_docker_mount_path(self.workspace)
+                    cp_res = run_docker_sync(["cp", f"{tmp_init}:/app/.", mount_ws])
+                    if cp_res.returncode == 0:
+                        print(f"[DOCKER] Extracted starter repository into {self.workspace}")
+                    else:
+                        print(f"[DOCKER] Warning: docker cp failed: {cp_res.stderr.strip()}")
+                with contextlib.suppress(Exception):
+                    run_docker_sync(["rm", "-f", tmp_init])
+            except Exception as exc:
+                print(f"[DOCKER] Warning: fallback workspace extraction failed: {exc}")
+                with contextlib.suppress(Exception):
+                    run_docker_sync(["rm", "-f", tmp_init])
+
+        # 3. Start container with workspace bind-mounted to /app and resolved egress policy
         mount_arg = f"{to_docker_mount_path(self.workspace)}:/app"
-        run_res = run_docker_sync(
-            [
-                "run",
-                "-d",
-                "--name",
-                self.container_name,
-                "-e",
-                f"http_proxy={proxy_url}",
-                "-e",
-                f"https_proxy={proxy_url}",
-                "-e",
-                f"HTTP_PROXY={proxy_url}",
-                "-e",
-                f"HTTPS_PROXY={proxy_url}",
-                "-e",
-                "no_proxy=127.0.0.1,localhost,::1",
-                "-e",
-                "NO_PROXY=127.0.0.1,localhost,::1",
-                "-v",
-                mount_arg,
-                "-w",
-                "/app",
-                self.image,
-                "tail",
-                "-f",
-                "/dev/null",
-            ]
-        )
+        run_cmd = [
+            "run",
+            "-d",
+            "--name",
+            self.container_name,
+            *self.egress_policy.docker_run_args(),
+            "-v",
+            mount_arg,
+            "-w",
+            "/app",
+            self.image,
+            "tail",
+            "-f",
+            "/dev/null",
+        ]
+        run_res = run_docker_sync(run_cmd)
         if run_res.returncode != 0:
             raise RuntimeError(
                 f"Failed to start container {self.container_name}: {run_res.stderr.strip()}"
             )
         self.is_running = True
-        print(f"[DOCKER] Container {self.container_name} started.")
+        print(
+            f"[DOCKER] Container {self.container_name} started (Egress: {self.egress_policy.mode})."
+        )
 
         # Configure safe git directory inside container
         run_docker_sync(
@@ -339,11 +377,7 @@ def create_docker_bash_tool(
         raw_timeout = _resolve_timeout(params.timeout)
         # Enforce a minimum timeout in Docker to prevent premature kills
         # on slow container operations (apt-get update, pip install, etc.).
-        timeout = (
-            max(raw_timeout, _DOCKER_MIN_TIMEOUT_SEC)
-            if raw_timeout is not None
-            else None
-        )
+        timeout = max(raw_timeout, _DOCKER_MIN_TIMEOUT_SEC) if raw_timeout is not None else None
 
         if signal is not None and getattr(signal, "aborted", False):
             raise RuntimeError("Command aborted")

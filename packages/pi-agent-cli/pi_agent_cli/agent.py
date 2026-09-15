@@ -113,9 +113,7 @@ class PiAcpAgent(Agent):
         session = await self._repo.create({"cwd": cwd})
         session_id = (await session.get_metadata()).id
         await self._bind_session(session_id, session, cwd)
-        return NewSessionResponse(
-            session_id=session_id, field_meta=self._session_response_meta()
-        )
+        return NewSessionResponse(session_id=session_id, field_meta=self._session_response_meta())
 
     async def load_session(
         self,

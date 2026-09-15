@@ -17,6 +17,7 @@ from pi_agent_cli.benchmarks.docker_runner import (
     DockerContainerSession,
     create_docker_bash_tool,
     get_docker_cmd,
+    run_docker_sync,
 )
 from pi_agent_cli.benchmarks.models import BenchmarkTask, TrialResult
 from pi_agent_cli.config import CliConfig, load_config, pi_home
@@ -49,13 +50,20 @@ DEFAULT_PRICING = {
     "output_per_million": 2.0,
 }
 
+# Official FrontierHarness benchmark pricing table for Kimi K3 (pricing.json: kimi-k3-2026-08-20)
+KIMI_K3_PRICING = {
+    "input_per_million": 3.0,
+    "cached_input_per_million": 0.30,
+    "output_per_million": 15.0,
+}
+
 
 def _calculate_cost(
     *,
     input_tokens: int,
     cached_tokens: int,
     output_tokens: int,
-    provider: str,
+    provider: str = "",
     pricing: dict[str, float] | None = None,
 ) -> float:
     p = pricing or DEFAULT_PRICING
@@ -66,6 +74,32 @@ def _calculate_cost(
         + (output_tokens / 1_000_000.0) * p["output_per_million"]
     )
     return cost
+
+
+def calculate_first_cold_cost(
+    *,
+    input_tokens: int,
+    cached_tokens: int,
+    output_tokens: int,
+    first_turn_cached: int = 0,
+    pricing: dict[str, float] | None = None,
+) -> float:
+    """Calculate token cost with first-turn cache reads repriced at the fresh rate.
+
+    Aligns with FrontierHarness Eval: the initial prompt cache hit is considered
+    an artifact of pre-warming or runner initialization, and is repriced at cold rate.
+    """
+    p = pricing or DEFAULT_PRICING
+    base_cost = _calculate_cost(
+        input_tokens=input_tokens,
+        cached_tokens=cached_tokens,
+        output_tokens=output_tokens,
+        pricing=p,
+    )
+    cold_adjustment = (
+        first_turn_cached * (p["input_per_million"] - p["cached_input_per_million"]) / 1_000_000.0
+    )
+    return base_cost + cold_adjustment
 
 
 def calculate_cache_hit_rate(
@@ -83,10 +117,7 @@ def calculate_cache_hit_rate(
       (input_tokens = uncached + cached).
       Hit rate = cached / input.
     """
-    if provider.lower() == "anthropic":
-        denominator = total_input + total_cached
-    else:
-        denominator = total_input
+    denominator = total_input + total_cached if provider.lower() == "anthropic" else total_input
 
     if denominator <= 0:
         return 0.0
@@ -118,13 +149,13 @@ def _docker_env_prescan(container_name: str) -> str:
         "echo '## Available tools'; "
         "for cmd in python python3 pip pip3 git gcc g++ make cmake node npm "
         "perl ruby curl wget apt-get; do "
-        "  which $cmd 2>/dev/null && echo \"  $cmd: $($cmd --version 2>&1 | head -1)\"; "
+        '  which $cmd 2>/dev/null && echo "  $cmd: $($cmd --version 2>&1 | head -1)"; '
         "done; "
         "echo '## Python packages'; "
         "python3 -c 'import pkg_resources; "
-        "[print(f\"  {d.key}=={d.version}\") for d in pkg_resources.working_set]' "
+        '[print(f"  {d.key}=={d.version}") for d in pkg_resources.working_set]\' '
         "2>/dev/null || python -c 'import pkg_resources; "
-        "[print(f\"  {d.key}=={d.version}\") for d in pkg_resources.working_set]' "
+        '[print(f"  {d.key}=={d.version}") for d in pkg_resources.working_set]\' '
         "2>/dev/null || echo '  (no python)'; "
         "echo '## Working directory'; pwd; ls /app/ 2>/dev/null | head -20"
     )
@@ -240,6 +271,8 @@ async def run_trial(
     max_turns: int | None = None,
     verbose: bool = True,
     use_docker: bool = True,
+    seeds_dir: Path | str | None = None,
+    egress_mode: str = "auto",
 ) -> TrialResult:
     """Execute a single task trial with AgentHarness and score it."""
     trial_dir.mkdir(parents=True, exist_ok=True)
@@ -270,9 +303,15 @@ async def run_trial(
     custom_tools: list[Any] | None = None
     junctions: list[str] = []
 
+    effective_seeds_dir = seeds_dir or os.environ.get("PI_EVAL_SEEDS_DIR")
     if should_use_docker:
         try:
-            docker_session = DockerContainerSession(task, active_ws)
+            docker_session = DockerContainerSession(
+                task,
+                active_ws,
+                seeds_dir=effective_seeds_dir,
+                egress_mode=egress_mode,
+            )
             docker_session.setup()
             _copy_task_environment(task, active_ws)
             tools_dict = create_all_tools(str(active_ws.resolve()))
@@ -343,8 +382,7 @@ async def run_trial(
             env_info = _docker_env_prescan(docker_session.container_name)
             if env_info:
                 augmented_instruction = (
-                    f"{task.instruction}\n\n"
-                    f"<environment_info>\n{env_info}\n</environment_info>"
+                    f"{task.instruction}\n\n<environment_info>\n{env_info}\n</environment_info>"
                 )
 
         try:
@@ -419,6 +457,8 @@ async def run_trial(
             if not action_calls:
                 no_action_turns += 1
 
+        first_turn_cached = assistant_messages[0].usage.cacheRead if assistant_messages else 0
+
         cache_hit_rate = calculate_cache_hit_rate(
             total_input=total_input,
             total_cached=total_cached,
@@ -428,12 +468,21 @@ async def run_trial(
         cost_usd = (
             reported_cost
             if reported_cost > 0
-            else _calculate_cost(
+            else calculate_first_cold_cost(
                 input_tokens=total_input,
                 cached_tokens=total_cached,
                 output_tokens=total_output,
-                provider=cfg.provider,
+                first_turn_cached=first_turn_cached,
+                pricing=DEFAULT_PRICING,
             )
+        )
+
+        cost_kimi_k3_normalized = calculate_first_cold_cost(
+            input_tokens=total_input,
+            cached_tokens=total_cached,
+            output_tokens=total_output,
+            first_turn_cached=first_turn_cached,
+            pricing=KIMI_K3_PRICING,
         )
 
         # Run verifier
@@ -451,12 +500,19 @@ async def run_trial(
                 timeout_sec=task.verifier_timeout_sec,
             )
 
-        if "infra_invalid" in verifier_output:
-            status: Any = "infra_invalid"
-        elif passed:
-            status = "success"
+        # Determine trial status:
+        # A trial is only infra_invalid if the agent never started execution (total_turns == 0).
+        # Any crash, timeout, or exception after turns >= 1 is scored as a failure.
+        if passed:
+            status: Any = "success"
+        elif total_turns == 0:
+            status = "infra_invalid"
         elif trial_error:
-            status = "error"
+            status = "failure"
+        elif "infra_invalid" in verifier_output:
+            # total_turns == 0 is already handled above; here turns > 0,
+            # so verifier-reported infra_invalid is overridden to failure.
+            status = "failure"
         else:
             status = "failure"
 
@@ -485,6 +541,7 @@ async def run_trial(
             success=passed,
             duration_seconds=round(duration, 2),
             cost_first_cold_usd=round(cost_usd, 4),
+            cost_kimi_k3_normalized_usd=round(cost_kimi_k3_normalized, 4),
             turns=total_turns,
             no_action_turns=no_action_turns,
             cache_hit_rate_normalized=round(cache_hit_rate, 4),
@@ -501,6 +558,10 @@ async def run_trial(
                 "model_id": cfg.model_id,
                 "difficulty": task.difficulty,
                 "runtime": "docker" if docker_session else "local",
+                "cost_kimi_k3_normalized_usd": round(cost_kimi_k3_normalized, 4),
+                "egress_policy": (
+                    docker_session.egress_policy.to_dict() if docker_session else None
+                ),
             },
         )
 

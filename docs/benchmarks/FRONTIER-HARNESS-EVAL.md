@@ -37,13 +37,14 @@ flowchart TD
 | 字段 | 含义 | 说明 |
 | :--- | :--- | :--- |
 | `id` | 任务全称 | 如 `terminal-bench/regex-log` |
-| `status` | 执行状态 | `success` / `failure` / `error` / `infra_invalid` |
+| `status` | 执行状态 | `success` / `failure` / `error` / `infra_invalid`（仅当 `total_turns == 0` 时允许标记为 `infra_invalid`） |
 | `success` | 是否通过 | 基于任务对应的自动化验证器（Verifier）最终判定 |
 | `duration_seconds` | 耗时（秒） | 任务从开始到完成的实际墙钟时间 |
 | `turns` | 总交互轮数 | Harness 与模型交互的 Turn 总数 |
 | `no_action_turns` | 无动作轮数 | 模型仅产生推理思考或文本而未调用任何文件/命令工具的轮数 |
-| `cache_hit_rate_normalized`| Cache 命中率 | `cached_tokens / (input_tokens + cached_tokens)` |
-| `cost_first_cold_usd` | 单任务开销 | 依据实际 Token 用量与 Provider 费率折算的 API 成本 |
+| `cache_hit_rate_normalized`| Cache 命中率 | 排除首轮冷启动缓存后的归一化命中率 |
+| `cost_first_cold_usd` | 单任务实际开销 | 首轮缓存按冷启动重新计费后的实际折算成本（USD） |
+| `cost_kimi_k3_normalized_usd` | 官方标准对标开销 | 基于官方 Kimi K3 基准价格表（$3/$0.3/$15）折算的标准化成本 |
 | `input_tokens` / `output_tokens` / `cached_tokens` | Token 计数统计 | 细分输入、输出与缓存 Token |
 
 ---
@@ -98,14 +99,41 @@ wsl bash -lc "cd /mnt/d/work/pi-python && /tmp/pi-eval-venv/bin/python scripts/r
 wsl bash -lc "cd /mnt/d/work/pi-python && /tmp/pi-eval-venv/bin/python scripts/run_eval.py --frontier-30 --task fastapi-deprecation-response-headers"
 ```
 
-#### 自定义参数
+#### 自定义参数与高级选项
 ```powershell
 # 限制单任务最大轮次为 15，并指定自定义运行 ID
 .venv\Scripts\python.exe scripts/run_eval.py --task calc-eval --max-turns 15 --run-id my-first-eval
 
 # 显式禁用 Docker，使用宿主机本地执行（本地轻量测试）
 .venv\Scripts\python.exe scripts/run_eval.py --frontier-30 --task regex-log --no-docker
+
+# 指定网络出站隔离模式（auto / no-network / allowlist / open）
+.venv\Scripts\python.exe scripts/run_eval.py --frontier-30 --task regex-log --egress-mode allowlist
 ```
+
+### 3.3 本地化黄金快照（Golden Checkpoint）机制
+
+为了彻底消除测试间的跨任务文件污染、Page Cache 预热偏差与多次拉取解包带来的时间浪费，评测系统提供了本地化黄金快照与秒级还原体系：
+
+#### 1. 一键固化构建黄金种子（Golden Seed Provisioning）
+运行一次 `--provision`，评测系统会拉取所有评测任务 Docker 镜像并将其初始 `/app` 代码提取到只读种子目录中，同时生成环境指纹 `golden-manifest.json`：
+```powershell
+# 固化构建全部 FrontierHarness 30 题的工作区种子快照
+wsl bash -lc "cd /mnt/d/work/pi-python && /tmp/pi-eval-venv/bin/python scripts/run_eval.py --frontier-30 --provision --seeds-dir /tmp/pi-golden-seeds"
+```
+
+#### 2. 秒级 CoW (Copy-on-Write) 纯净还原
+当种子目录就绪后，每次执行评测任务时：
+- 系统优先调用 Linux ext4 文件的 `cp -a --reflink=auto`，实现**零耗时、零额外磁盘占用**的秒级全新工作区初始化；
+- 若未预先执行 `--provision`，系统会自动平滑降级至 `docker create` + `docker cp` 的即时提取路径。
+
+### 3.4 网络出站隔离策略（Egress Policy Guard）
+
+系统严格对齐官方 `frontier-harness-eval`（PR #7 & PR #11）的网络规范：
+
+- **`no-network` 严格断网**：对于 DeepSWE 等工业级任务（`network_mode: "no-network"`），容器启动时自动附加 `--network none`，容器内无法访问公网；Agent 与 LLM 交互由宿主机 `pi-python` 代理驱动。
+- **`allowlist` 白名单放行**：对于 Terminal-Bench 任务，通过透明代理放行官方 15 个域名白名单（包含 `astral.sh`、`github.com`、`pypi.org`、`*.ecr.aws` 等），保障基础依赖包安装的同时杜绝未经授权的网络访问。
+- 支持通过 `--egress-mode` 手动覆盖（`auto`、`no-network`、`allowlist`、`open`）。
 
 ---
 
@@ -115,6 +143,7 @@ wsl bash -lc "cd /mnt/d/work/pi-python && /tmp/pi-eval-venv/bin/python scripts/r
 
 ```text
 .pi-eval/runs/20260904-083153/
+├── run.json                 # 官方规范环境指纹清单（记录 Git commit、Egress 策略、硬件规格与标准归一化成本）
 ├── eval-summary.json        # 汇总评测结果（含所有题目的聚合指标）
 ├── REPORT.md                # 格式化 Markdown 评测报告与数据表格
 └── trials/

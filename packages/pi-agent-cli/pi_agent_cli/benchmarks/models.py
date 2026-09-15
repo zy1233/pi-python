@@ -46,6 +46,7 @@ class TrialResult:
     success: bool
     duration_seconds: float
     cost_first_cold_usd: float = 0.0
+    cost_kimi_k3_normalized_usd: float | None = None
     turns: int = 0
     no_action_turns: int = 0
     cache_hit_rate_normalized: float = 0.0
@@ -91,6 +92,7 @@ class BenchmarkSummary:
     mean_tokens_per_task: float
     tokens_per_solved: float | None
     typical_cache_hit_rate: float
+    effective_cost_per_pass_kimi_k3: float | None = None
     trials: list[TrialResult] = field(default_factory=list)
 
     @classmethod
@@ -116,6 +118,16 @@ class BenchmarkSummary:
 
         total_cost = sum(t.cost_first_cold_usd for t in scored)
         effective_cost_per_pass = (total_cost / successful) if successful > 0 else None
+
+        total_kimi_cost = sum(
+            (
+                t.cost_kimi_k3_normalized_usd
+                if t.cost_kimi_k3_normalized_usd is not None
+                else t.cost_first_cold_usd
+            )
+            for t in scored
+        )
+        effective_cost_per_pass_kimi = (total_kimi_cost / successful) if successful > 0 else None
 
         costs = sorted(t.cost_first_cold_usd for t in scored)
         median_cost = costs[len(costs) // 2] if costs else 0.0
@@ -149,6 +161,11 @@ class BenchmarkSummary:
             total_cost_usd=round(total_cost, 4),
             effective_cost_per_pass=(
                 round(effective_cost_per_pass, 4) if effective_cost_per_pass is not None else None
+            ),
+            effective_cost_per_pass_kimi_k3=(
+                round(effective_cost_per_pass_kimi, 4)
+                if effective_cost_per_pass_kimi is not None
+                else None
             ),
             median_cost_per_task=round(median_cost, 4),
             median_duration_seconds=round(median_duration, 1),

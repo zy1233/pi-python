@@ -19,10 +19,10 @@ FrontierHarness Eval 是当前业界评估 **Coding Agent Harness（脚手架/�
 
 1. **当前实测总体通过率与关键指标 (Overall Pass Rate & Performance)**：
    截止目前，`pi-python` 在 WSL2 隔离 Docker 沙箱与本地环境中已完成全部 30 题的 **100% 全量端到端真实评测**（覆盖 21 道 Terminal-Bench 与 9 道 DeepSWE 工业级真实代码仓库任务）：
-   - **全量总体通过率 (Overall Pass Rate)**：**56.7%** (17 / 30 PASS)
-   - **Terminal-Bench 任务集通过率**：**81.0%** (17 / 21 PASS，全量 21 题完毕)
-     - 通关任务 (17 题)：`regex-log`、`sqlite-db-truncate`、`openssl-selfsigned-cert`、`git-leak-recovery`、`log-summary-date-ranges`、`constraints-scheduling`、`db-wal-recovery`、`modernize-scientific-stack`、`multi-source-data-merger`、`vulnerable-secret`、`extract-elf`、`largest-eigenval` (突破官方失败点)、`polyglot-c-py`（修复基础设施 CRLF Bug 后通过）、`merge-diff-arc-agi-task`（25 轮额度重跑通过）、`kv-store-grpc`（修复 Docker 代理泄漏后 7/7 通过，突破官方失败点）、`chess-best-move`（修复非 VLM 模型图片降级后通过，突破官方失败点）、`code-from-image`（修复非 VLM 模型图片降级后通过，突破官方失败点）
-     - 未通关任务 (3 题)：`dna-insert`（缺primer3工具）、`gcode-to-text`（无多模态渲染，同官方）、`build-cython-ext`（numpy 2.x 弃用符号批量替换不完整）
+   - **全量总体通过率 (Overall Pass Rate)**：**60.0%** (18 / 30 PASS)
+   - **Terminal-Bench 任务集通过率**：**85.7%** (18 / 21 PASS，全量 21 题完毕)
+     - 通关任务 (18 题)：`regex-log`、`sqlite-db-truncate`、`openssl-selfsigned-cert`、`git-leak-recovery`、`log-summary-date-ranges`、`constraints-scheduling`、`db-wal-recovery`、`modernize-scientific-stack`、`multi-source-data-merger`、`vulnerable-secret`、`extract-elf`、`largest-eigenval` (突破官方失败点)、`polyglot-c-py`（修复基础设施 CRLF Bug 后通过）、`merge-diff-arc-agi-task`（25 轮额度重跑通过）、`kv-store-grpc`（修复 Docker 代理泄漏后 7/7 通过，突破官方失败点）、`chess-best-move`（修复非 VLM 模型图片降级后通过，突破官方失败点）、`code-from-image`（修复非 VLM 模型图片降级后通过，突破官方失败点）、`dna-insert`（黄金快照与出站白名单体系下，主动通过 apt 安装 primer3 并调用 oligotm 闭环自测通过）
+     - 未通关任务 (2 题)：`gcode-to-text`（无多模态渲染，同官方）、`build-cython-ext`（numpy 2.x 弃用符号批量替换不完整）
      - 特殊判定任务 (1 题)：`sanitize-git-repo`（清除工作全部完成且数据测试全通，但历史重写后基准 commit SHA 变动导致用例断言失败）
    - **DeepSWE 工业级代码集通过率**：**0.0%** (0 / 9 PASS，全量 9 题完毕)
      - `fastapi-deprecation-response-headers`：基底 3134 用例 100% 保持通过，未破坏已有系统，但 137 个新增断言未完工；
@@ -47,7 +47,7 @@ FrontierHarness Eval 是当前业界评估 **Coding Agent Harness（脚手架/�
      - `kv-store-grpc`：官方 Pi 72 轮 $0.54 失败 → `pi-python` 12 轮 $0.016 满分攻克（修复 Docker 代理泄漏）
      - `chess-best-move`：官方 Pi 17 轮 $0.17 失败 → `pi-python` 15 轮 $0.030 满分攻克（修复 VLM 检测 + 棋引擎）
      - `code-from-image`：官方 Pi 156 轮 $2.26 失败 → `pi-python` 23 轮 $0.027 满分攻克（修复 VLM 检测 + OCR 降级）
-   - **能力边界一：缺失预装工具链引发试错死循环**：在 `dna-insert` 中，因容器缺少 `primer3`，模型用尽 20 轮执行 `apt-get` 与手写 Perl 仿真脚本，暴露了缺少针对未知工具的快速自适应或降级策略；
+   - **能力边界一（已在黄金快照机制下攻克）：从依赖死循环到自主依赖闭环修复**：在早期评测中，`dna-insert` 因容器缺少 `primer3` 导致 20 轮探索超时；在启用黄金快照与 Egress 白名单网络策略后，智能体能够主动执行 `apt-get` 探测并安装 `primer3`，随后调用 `oligotm` 求解退火温度并编写 `verify.pl` 严密验证，31 轮满分攻克；
    - **能力边界二（已大幅修正）：多模态与渲染瓶颈已基本解决**：`polyglot-c-py` 已修复（CRLF 基础设施 Bug 误判），`merge-diff-arc-agi-task` 在 25 轮额度下已通过，`chess-best-move` 和 `code-from-image` 通过 VLM 检测 + 图片降级修复后已通过。剩余瓶颈仅在 `gcode-to-text` 中无渲染模块导致长程盲猜；
    - **能力边界三：超大型仓库的长程代码重构轮次瓶颈**：在 FastAPI、Python-Statemachine、Anko 等 SWE-bench 级任务中，数百至数千个测试的庞大工程给模型带来巨大的上下文认知负荷，在 20 轮限制下难以完成全局重构（官方 Pi 均需 80~120 轮长程交互）。
 
@@ -106,7 +106,7 @@ FrontierHarness Eval 是当前业界评估 **Coding Agent Harness（脚手架/�
 | 6 | `terminal-bench/log-summary-date-ranges` | Terminal-Bench | ✅ PASS | 3 | $0.0303 | 458.6s | ✅ PASS (Docker) | 7 | $0.0356 | **双双通过**。日志时间区间统计聚合。智能体在容器内编写高效 Python 日志解析器并对日期区间聚合计算，7 轮满分通过。 |
 | 7 | `terminal-bench/constraints-scheduling` | Terminal-Bench | ✅ PASS | 4 | $0.0469 | 559.4s | ✅ PASS (Docker) | 3 | $0.0220 | **双双极速通关，pi-python 胜出**。纯算法约束排程任务。智能体在首轮完成约束推演，编写满足算法并落盘验证，仅用 3 轮耗资 $0.0220 完工（官方 4 轮 $0.0469）。 |
 | 8 | `terminal-bench/gcode-to-text` | Terminal-Bench | ❌ FAIL | 24 | $0.3038 | 1558.0s | ❌ FAIL (Docker) | 21 | $0.0889 | **与官方 Pi 表现一致的失败点**。G-code 路径解析至文本打印机字符模拟。官方 Pi 耗费 24 轮 $0.3038 失败，`pi-python` 同样因缺乏几何渲染/多模态模块而在 21 轮耗尽，未能准确识别 flag。 |
-| 9 | `terminal-bench/dna-insert` | Terminal-Bench | ✅ PASS | 7 | $0.1096 | 486.0s | ❌ FAIL (Docker) | 21 | $0.0564 | **环境依赖探索超时**。任务要求引物设计，容器内缺少默认的 primer3/biopython 工具链，智能体耗费大量轮次执行 `apt-get install` 并自主尝试写 Perl 脚本仿真退火温度，未能在 20 轮内收敛产生 primers.fasta。官方 Pi 7 轮直接给出精确引物。 |
+| 9 | `terminal-bench/dna-insert` | Terminal-Bench | ✅ PASS | 7 | $0.1096 | 486.0s | ✅ PASS (Docker) | 31 | $0.3065 | **黄金快照与白名单出站机制下满分攻克**！任务要求 PCR 引物设计与退火温度约束。在黄金快照纯净秒级还原与 Egress 白名单网络策略支持下，智能体主动探索并成功通过 `apt-get` 安装 `primer3` 工具链，随后编写 Perl 脚本调用真实 `oligotm` 约束求解，并编写 `verify.pl` 闭环自测，31 轮满分通关（Reward 1，测试全部 PASS，Cache 98.7%）。官方 Pi 7 轮直接给出精确引物。 |
 | 10 | `terminal-bench/largest-eigenval` | Terminal-Bench | ❌ FAIL | 24 | $0.3967 | 624.2s | ✅ PASS (Docker) | 18 | $0.0540 | **重大突破：官方 Pi 失败点被成功攻克**！幂法/Lanczos 特征值求解数值计算。官方 Pi 因浮点收敛精度未达标在 24 轮失败（$0.3967）；`pi-python` 智能体在容器中编写并调试 scipy/numpy 幂迭代算法，18 轮满分通过（Reward 1，成本仅 $0.0540）。 |
 | 11 | `terminal-bench/merge-diff-arc-agi-task` | Terminal-Bench | ✅ PASS | 15 | $0.0709 | 374.7s | ✅ PASS (Docker) | 23 | $0.0843 | **重跑后 Docker 满分通过**。首次运行 20 轮耗尽（4 轮 apt 超时 + 5 轮 git ref 试错），冲突标记残留；第二次 25 轮额度下 23 轮完成 git bundle 提取→分支合并→冲突解决→ARC-AGI 模式泛化（`output[i][j]=d[(i+j)%3]`），5/5 测试通过（含隐藏用例），Cache 91.3%。 |
 | 12 | `terminal-bench/vulnerable-secret` | Terminal-Bench | ✅ PASS | 11 | $0.0872 | 501.5s | ✅ PASS (Docker) | 7 | $0.0151 | **双双满分通过，pi-python 轮次更少成本更低**。C 源码缓冲区溢出与认证绕过利用。智能体在容器中通过逆向输入边界精确触发目标分支提取 Secret，仅用 7 轮 $0.0151 满分通关（官方 Pi 11 轮 $0.0872）。 |
@@ -230,6 +230,31 @@ FrontierHarness Eval 是当前业界评估 **Coding Agent Harness（脚手架/�
   ```
 - **架构价值**：
   `pi-python` 智能体展现了惊人的分析效率：仅用 7 轮（官方为 11 轮），耗时仅 13 秒，花费 $0.0151（仅为官方的 17%），直接在工作区编写精确的 Python Exploit 脚本完成注入与 Flag 提取。
+
+---
+
+### 案例 6：`terminal-bench/dna-insert`（黄金快照与出站白名单体系下的依赖自愈）
+
+- **任务核心难点**：
+  给定环状质粒输入与输出 FASTA 序列，要求针对 NEB Q5 定向诱变试剂盒设计一对引物。引物退火部分长度需在 15~45 bp 之间，退火温度（Tm）在 58~72℃ 之间且温差 ≤5℃，并且明确要求以 `primer3` 的 `oligotm` 工具（参数 `-tp 1 -sc 1 -mv 50 -dv 2 -n 0.8 -d 500`）为绝对基准。然而初始容器镜像为极简 Ubuntu 24.04，容器内并未预装 `primer3` 与 `oligotm`。
+- **两端行为对比**：
+  ```
+  [Pi 官方 (Kimi K3)]:
+  Turns: 7  | Cost: $0.1096 | Duration: 486.0s | Cache: 78.0% | Status: ✅ PASS
+  
+  [pi-python 早期批次 (DeepSeek-V4-Pro / Flash, 无白名单 & 20 轮限制)]:
+  Turns: 21 | Cost: $0.0564 | Duration: 280.0s | Cache: 91.8% | Status: ❌ FAIL (探索超时)
+  
+  [pi-python 新模式 (黄金快照 CoW + Egress 白名单 + 自然轮次)]:
+  Turns: 31 | Cost: $0.3065 | Duration: 423.4s | Cache: 98.7% | Status: ✅ PASS (满分通关)
+  ```
+- **Harness 进化与轨迹透视**：
+  1. **早期失败根因**：在未引入网络策略与黄金快照的早期批次中，容器缺少预置工具且受制于人为指定的 `--max-turns 20` 限制，模型在发现没有 `python3` 和 `primer3` 后，转而尝试编写 Perl 脚本手工仿真退火温度公式，因字符串截断与引号转义反复耗费轮次，最终在第 21 轮截断未产出文件。
+  2. **新模式下的自主依赖安装**：在采用黄金快照（秒级 CoW 克隆）与 Egress 白名单网络策略后，智能体在首轮探索后敏锐发现系统缺少 `primer3` 与 `oligotm`，立即主动执行 `apt-get update && apt-cache search primer3`，成功安装官方 `primer3` 软件包。
+  3. **精确求解与闭环验证**：智能体编写 `scan.pl`，直接调用系统内真实 `oligotm` 工具以题干指定参数计算退火温度与重叠长度；随后编写 `verify.pl` 针对产物进行全量双向对齐校验（`product equals output? YES`）；最终生成符合格式的 `/app/primers.fasta`。
+  4. **Verifier 1.0 满分**：测试验证器运行 `pytest /tests/test_outputs.py` 一次性全部 PASS，Reward 获得 1.0 满分。
+- **架构价值**：
+  这一突破证明了：**黄金快照提供的纯净初始环境 + Egress 策略明确保障的官方依赖下载网络通道**，使 Code Agent Harness 能够彻底跨越“工具链缺失”带来的试错死循环，实现从“被动摸索环境”到“主动自愈工具链并收敛求解”的质的提升。
 
 ---
 
