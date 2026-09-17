@@ -4,6 +4,7 @@ __pycache__/
 .eggs/
 dist/
 build/
+!tui/crates/build/
 .pytest_cache/
 .pytest-audit/
 .mypy_cache/
