@@ -5,7 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-09-17
+
+### Added
+
+- **TUI binary in GitHub Releases (beta)**: prebuilt `zypi` Linux x86_64 binary is now included in GitHub Releases alongside Python wheels. Download `zypi-linux-x86_64` from the release assets page. Build from source for other platforms.
+- **Phase 5 (Coding Agent prompt engine)**: pi-aligned `build_system_prompt()` / `build_coding_agent_harness_system_prompt()` in `pi_agent_cli`; tool `prompt_snippet` / `prompt_guidelines` contributions; `AGENTS.md` / `CLAUDE.md` / `SYSTEM.md` / `APPEND_SYSTEM.md` context files; `<available_skills>` XML format; bash `PI_*` env.
+- **FrontierHarness 30-task evaluation**: `scripts/run_eval.py` CLI with 21 Terminal-Bench + 9 DeepSWE industrial tasks; dual runtime (Windows local NTFS junctions + WSL2 Docker sandbox); v2ray proxy integration; full report in `docs/benchmarks/FRONTIER-HARNESS-30-EVAL-REPORT.md`.
+- **TUI & Code-Agent guide**: new `docs/TUI-AND-CODE-AGENT.md` covering installation, configuration, and usage for both `zypi` TUI and `pi_agent_cli`.
+- **Release workflow**: `build-tui` job builds the Rust TUI binary (`cargo build --profile release-dist -p pi-pager-bin`) and uploads `zypi-linux-x86_64` to GitHub Releases.
 
 ### Changed
 
@@ -13,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Test regression fixes**: fixed 5 x.ai cleanup regressions where test data was over-renamed to `pi/` while handler code still used original constant names (`TITLE_IS_MANUAL_META_KEY`, `PI_SESSION_UPDATE_METHOD`, `is_vendor_meta_key`).
 - **Grok-specific tests marked `#[ignore]`**: 62 tests for features removed from pi-python (grok slash commands, `/loop` scheduler, `/share`, dashboard, `~/.grok` path, `agent` subcommand) annotated with `#[ignore = "pi-python: grok-specific feature not supported"]`.
 - TUI test result: `8880 passed, 0 failed, 72 ignored`.
+- TUI and code-agent marked as **beta** in README.
+- README restructured: added Status table, TUI install section, and updated roadmap.
 
 ## [0.2.0] - 2026-08-31
 
@@ -56,5 +66,6 @@ Initial public release.
 - **Compaction & tree navigation (H3)**: token-based compaction with branch summaries, `navigate_tree` for branch exploration.
 - **Skills, templates & env (H4)**: skill discovery, prompt templates, system prompt injection, `LocalExecutionEnv` for sandboxed execution.
 
+[0.3.0]: https://github.com/zy1233/pi-python/releases/tag/v0.3.0
 [0.2.0]: https://github.com/zy1233/pi-python/releases/tag/v0.2.0
 [0.1.0]: https://github.com/zy1233/pi-python/releases/tag/v0.1.0

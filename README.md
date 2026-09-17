@@ -11,11 +11,26 @@ Python port of [pi-agent-core](https://github.com/earendil-works/pi/tree/main/pa
 
 The loop semantics, event protocol, and tool execution are faithful ports of pi; LangChain is only a `StreamFn` boundary adapter — never a replacement for the agent loop.
 
-This repository is a monorepo with three Python distributions:
+This repository is a monorepo containing:
+
+**Python packages** (PyPI):
 
 - `pi-agent-core-lc` / `pi_agent_core`: lightweight core loop, messages, tools, adapters.
-- `pi-agent-harness-lc` / `pi_agent_harness`: Phase 3 harness runtime, sessions, queues, hooks, compaction, skills/templates, and local execution env.
-- `pi-agent-cli-lc` / `pi_agent_cli`: Phase 4 standard ACP agent (`python -m pi_agent_cli`, headless `-p`); PyPI only — the Rust `zypi` TUI is not published yet.
+- `pi-agent-harness-lc` / `pi_agent_harness`: harness runtime, sessions, queues, hooks, compaction, skills/templates, and local execution env.
+- `pi-agent-cli-lc` / `pi_agent_cli`: standard ACP coding agent (`python -m pi_agent_cli`, headless `-p`).
+
+**Rust TUI** (beta — prebuilt binary in [GitHub Releases](https://github.com/zy1233/pi-python/releases)):
+
+- `zypi`: full-screen terminal UI for interactive coding-agent sessions. Vendored fork of [grok-build](https://github.com/xai-org/grok-build) (Apache-2.0), with all `x.ai/*` vendor extensions removed. See [TUI & Code-Agent Guide](docs/TUI-AND-CODE-AGENT.md) for details.
+
+## Status
+
+| Component | Status | Distribution |
+|-----------|--------|--------------|
+| `pi-agent-core-lc` | **Stable** | [PyPI](https://pypi.org/project/pi-agent-core-lc/) |
+| `pi-agent-harness-lc` | **Stable** | [PyPI](https://pypi.org/project/pi-agent-harness-lc/) |
+| `pi-agent-cli-lc` | **Beta** | [PyPI](https://pypi.org/project/pi-agent-cli-lc/) |
+| `zypi` (Rust TUI) | **Beta** | [GitHub Releases](https://github.com/zy1233/pi-python/releases) (Linux x86_64) |
 
 ## Features
 
@@ -45,7 +60,29 @@ This repository is a monorepo with three Python distributions:
 - Built-in coding tools (`pi_agent_core.coding_tools`): read / bash / edit / write / grep / find / ls with pi-faithful truncation notices and `details` payloads
 - LangChain `BaseTool` → `AgentTool` adapter (`from_langchain_tool`) — MCP tools via `langchain-mcp-adapters` work out of the box
 
+**Coding Agent CLI** (Phase 4 — beta)
+
+- `pi_agent_cli`: standard ACP coding agent over `AgentHarness` — no `x.ai/*` vendor extensions
+- Headless mode: `python -m pi_agent_cli -p "prompt"` for scripting and CI
+- `/new`, `/resume`, `/quit` session commands; `@` local directory listing
+- pi-aligned system prompt engine with tool contributions, `AGENTS.md` context files, `<available_skills>` format
+
+**TUI — `zypi`** (Phase 4 — beta)
+
+- Full-screen Rust terminal UI for interactive coding-agent sessions
+- Spawns the Python ACP agent (`python -m pi_agent_cli`) as the backend
+- Session management, markdown rendering, Mermaid diagrams, MCP support
+- Prebuilt Linux x86_64 binary in [GitHub Releases](https://github.com/zy1233/pi-python/releases); build from source for other platforms
+- See [TUI & Code-Agent Guide](docs/TUI-AND-CODE-AGENT.md) for setup and usage
+
+**FrontierHarness Evaluation** (30-task benchmark)
+
+- 21 Terminal-Bench + 9 DeepSWE industrial tasks; Windows local + WSL2 Docker sandbox runtimes
+- Side-by-side comparison with official Pi; full report: [FRONTIER-HARNESS-30-EVAL-REPORT.md](docs/benchmarks/FRONTIER-HARNESS-30-EVAL-REPORT.md)
+
 ## Install
+
+### Python packages (PyPI)
 
 ```bash
 pip install pi-agent-core-lc
@@ -69,6 +106,23 @@ pip install -e "./packages/pi-agent-cli"
 ```
 
 </details>
+
+### TUI binary (`zypi`) — beta
+
+Download the prebuilt Linux x86_64 binary from [GitHub Releases](https://github.com/zy1233/pi-python/releases):
+
+```bash
+# Download and install (Linux x86_64)
+curl -L -o zypi https://github.com/zy1233/pi-python/releases/latest/download/zypi-linux-x86_64
+chmod +x zypi
+sudo mv zypi /usr/local/bin/
+
+# Or build from source (requires Rust toolchain)
+cd tui && cargo build --profile release-dist -p pi-pager-bin
+# binary at target/release-dist/zypi
+```
+
+After installing, set up config and start the TUI — see [TUI & Code-Agent Guide](docs/TUI-AND-CODE-AGENT.md).
 
 ## Quick start
 
@@ -284,7 +338,7 @@ End events carry the aggregate (`content` full text / complete `tool_call` block
 ## Test
 
 ```bash
-uv run --extra dev --extra harness python -m pytest  # 327 tests, no API keys needed
+uv run --extra dev --extra harness python -m pytest  # 418 tests, no API keys needed
 ruff check . && ruff format --check .
 ```
 
@@ -312,7 +366,10 @@ Use `.venv-test-real` for pytest real-LLM tests; the smoke script can run from t
 | [Phase 3 spec](docs/specs/2026-07-03-phase3-agent-harness-design.md) | AgentHarness: sessions, compaction, skills, templates, ExecutionEnv |
 | [P6 spec](docs/specs/2026-07-03-p6-tool-ecosystem-design.md) | Built-in coding tools + LangChain adapter |
 | [Phase 4 spec](docs/specs/2026-08-25-phase4-coding-agent-cli-design.md) | Coding Agent CLI: forked grok TUI + standard ACP agent |
+| [Phase 5 spec](docs/specs/2026-09-02-phase5-prompt-engine-design.md) | Coding Agent prompt engine: system prompt assembly |
+| [**TUI & Code-Agent Guide**](docs/TUI-AND-CODE-AGENT.md) | Installation, configuration, usage for `zypi` TUI and `pi_agent_cli` |
 | [Windows notes](docs/WINDOWS.md) | Phase 4 Windows setup, WSL TUI build, spawn/config |
+| [Benchmark report](docs/benchmarks/FRONTIER-HARNESS-30-EVAL-REPORT.md) | FrontierHarness 30-task evaluation & Pi comparison |
 
 ## Concept mapping (pi → Python)
 
@@ -336,12 +393,14 @@ Use `.venv-test-real` for pytest real-LLM tests; the smoke script can run from t
 - **Phase 2.5 (core hardening)** — done: retries, runaway protection, observability, granular events, guardrail hooks, `ContextBudget`, structured output, tool-result images
 - **Phase 3 (AgentHarness)** — done: H1 session tree, H2 runtime, H3 compaction/tree navigation, H4 skills/templates/system prompt/LocalExecutionEnv ([design doc](docs/specs/2026-07-03-phase3-agent-harness-design.md))
 - **P6 (tool ecosystem)** — done: all 7 built-in tools (read/bash/edit/write/grep/find/ls), group factories, and the LangChain `BaseTool` adapter ([design doc](docs/specs/2026-07-03-p6-tool-ecosystem-design.md))
+- **Phase 4 (Coding Agent CLI — beta)** — done: `tui/` vendored grok-build fork (Apache-2.0); `pi_agent_cli` standard ACP agent; TUI binary `zypi`; `x.ai/*` vendor RPCs removed; session management (`/new` `/resume` `/quit`); headless `-p`; `config.toml` + Windows notes ([design doc](docs/specs/2026-08-25-phase4-coding-agent-cli-design.md), [Windows](docs/WINDOWS.md), [TUI guide](docs/TUI-AND-CODE-AGENT.md))
+- **Phase 5 (Coding Agent prompt engine)** — done: pi-aligned `build_system_prompt` + tool contributions + context files + `<available_skills>` ([design doc](docs/specs/2026-09-02-phase5-prompt-engine-design.md))
+- **FrontierHarness Eval** — done: 30-task benchmark (21 Terminal-Bench + 9 DeepSWE); Windows + WSL Docker runtimes; side-by-side Pi comparison ([report](docs/benchmarks/FRONTIER-HARNESS-30-EVAL-REPORT.md))
 
 ### Next
 
-- **Phase 4 (Coding Agent CLI)** — done: `tui/` vendored; `pi_agent_cli` standard ACP agent; TUI spawn Python, skip xAI login, drop `x.ai/*`, home `~/.pi-python`, binary `pi`; slash/resume/headless; `config.toml` + Windows notes ([design doc](docs/specs/2026-08-25-phase4-coding-agent-cli-design.md), [Windows](docs/WINDOWS.md))
-- **Phase 5 (Coding Agent prompt engineering)** — done: pi-aligned `build_system_prompt` + tool contributions + context files + `<available_skills>` ([design doc](docs/specs/2026-09-02-phase5-prompt-engine-design.md))
 - **Phase 6 (Extended integrations)** — planned: native MCP client, git-aware context injection, multi-provider production testing matrix
+- **TUI platform expansion** — planned: prebuilt binaries for macOS (arm64/x86_64) and Windows; auto-update support
 
 ## License
 

@@ -29,7 +29,7 @@ jobs:
           ruff format --check .
 
   build:
-    name: Build packages
+    name: Build Python packages
     needs: test
     runs-on: ubuntu-latest
     steps:
@@ -55,6 +55,45 @@ jobs:
           name: dist
           path: dist/
 
+  build-tui:
+    name: Build TUI binary (Linux x86_64)
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tui/target
+          key: tui-release-${{ runner.os }}-${{ hashFiles('tui/Cargo.lock') }}
+          restore-keys: tui-release-${{ runner.os }}-
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "28.x"
+
+      - name: Build zypi (release-dist)
+        working-directory: tui
+        run: cargo build --profile release-dist -p pi-pager-bin
+
+      - name: Prepare binary artifact
+        run: |
+          cp tui/target/release-dist/zypi zypi-linux-x86_64
+          chmod +x zypi-linux-x86_64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tui-binary
+          path: zypi-linux-x86_64
+
   publish-pypi:
     name: Publish to PyPI
     needs: build
@@ -73,7 +112,7 @@ jobs:
 
   github-release:
     name: GitHub Release
-    needs: build
+    needs: [build, build-tui]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -84,6 +123,11 @@ jobs:
         with:
           name: dist
           path: dist/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: tui-binary
+          path: tui-bin/
 
       - name: Extract version from tag
         id: version
@@ -112,4 +156,4 @@ jobs:
           gh release create "${{ github.ref_name }}" \
             --title "pi-python ${{ github.ref_name }}" \
             --notes-file /tmp/release-body.md \
-            dist/*
+            dist/* tui-bin/*
