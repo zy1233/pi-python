@@ -756,12 +756,12 @@ pub struct AppView {
     /// Periodic billing poll requested (credits >= 99%).
     pub billing_poll_wanted: bool,
     /// Leader-mode session roster (FleetView dashboard). Populated from
-    /// `x.ai/sessions/list` polls and `x.ai/sessions/changed` broadcasts.
+ /// `legacy ext RPC` polls and `legacy ext RPC` broadcasts.
     /// Empty in non-leader mode, which naturally gates roster rendering.
     pub leader_roster: Vec<crate::app::roster::RosterEntry>,
     /// Local on-disk session list (dormant/idle sessions) surfaced on the
     /// dashboard when NOT in leader mode. There is no live leader roster to
-    /// poll outside leader mode, so we fetch the same `x.ai/session/list` the
+ /// poll outside leader mode, so we fetch the same `legacy ext RPC` the
     /// resume picker uses and render those as idle rows. Entries are stored as
     /// [`crate::app::roster::RosterEntry`] (activity `Dormant`) so they reuse
     /// the existing roster-row rendering / attach path. Empty in leader mode.
@@ -769,14 +769,14 @@ pub struct AppView {
     /// Whether the dashboard is currently loading local sessions (non-leader mode).
     pub dashboard_sessions_loading: bool,
     /// Server-authoritative shared prompt queues, keyed by `sessionId`
-    /// Reconciled from `x.ai/queue/changed` broadcasts so
+ /// Reconciled from `legacy ext RPC` broadcasts so
     /// every client renders the same ordered queue (including prompts queued
     /// by other clients). Empty in non-leader mode.
     pub shared_prompt_queues:
         std::collections::HashMap<String, Vec<crate::app::prompt_queue::QueueEntryWire>>,
     /// Optimistic echo rows for prompts the pager sent server-authoritatively
     /// (plain prompt typed while a turn is running) but for which the
-    /// confirming `x.ai/queue/changed` broadcast has not yet arrived. Keyed by
+ /// confirming `legacy ext RPC` broadcast has not yet arrived. Keyed by
     /// `sessionId`. Pinned into `shared_prompt_queues` on reconcile so the row
     /// doesn't flicker, and dropped once the authoritative broadcast reflects
     /// the id (or it starts running). Never persisted.
@@ -806,7 +806,7 @@ pub struct AppView {
     pub cancel_rewind_enabled: bool,
     /// Whether session recap (`/recap` + automatic away recap) is rolled out,
     /// resolved by the shell and advertised on ACP initialize (`sessionRecap`).
-    /// When false, the pager must not request recaps (zero `x.ai/recap` traffic).
+ /// When false, the pager must not request recaps (zero `legacy ext RPC` traffic).
     pub session_recap_available: bool,
     /// Shell-advertised eligibility for the `/feedback` trace-upload offer,
     /// exactly as received (initialize meta / auth-meta refreshes). Read it
@@ -1018,7 +1018,7 @@ pub struct AppView {
     /// Automatically enabled by `plan_mode`.
     pub ask_user: bool,
     /// Process-wide gateway light-frontend from CLI `--chat` only.
-    /// Stamps `_meta["x.ai/session"].kind = "chat"` and omits Build agent
+ /// Stamps `_meta key.kind = "chat"` and omits Build agent
     /// profiles on create/load while set. `/chat` does **not** set this
     /// (uses [`Self::deferred_startup`] one-shot state instead).
     pub chat_mode: bool,
@@ -1803,7 +1803,7 @@ impl AppView {
     /// lockstep. Mirrors [`Self::apply_voice_mode_enabled`].
     ///
     /// Called from [`Self::apply_auth_meta`] (startup / login) and from the
-    /// `x.ai/settings/update` handler when the subscription tier changes, so
+ /// `legacy ext RPC` handler when the subscription tier changes, so
     /// a mid-session upgrade lifts the restrictions without a restart.
     pub fn apply_tier_restrictions(&mut self) {
         let restricted = self.team_name.is_none()
@@ -2182,7 +2182,7 @@ impl AppView {
         }
     }
     /// Reconcile the shared prompt queue for a session from a
-    /// `x.ai/queue/changed` broadcast. The broadcast is
+ /// `legacy ext RPC` broadcast. The broadcast is
     /// authoritative: it fully replaces the previously-known queue for that
     /// session. An empty list clears the entry.
     ///
@@ -2254,7 +2254,7 @@ impl AppView {
     /// Push an optimistic echo row for a server-authoritative prompt the pager
     /// just sent (a plain prompt or agent-bound kind typed while a turn is
     /// running). The row is keyed by `prompt_id` so the authoritative
-    /// `x.ai/queue/changed` broadcast replaces it (matched by `id`) rather than
+ /// `legacy ext RPC` broadcast replaces it (matched by `id`) rather than
     /// duplicating it. `kind` (`"prompt"`/`"bash"`/…) drives the row's display
     /// and, on adoption, the turn-start shim's block + focus flag.
     pub fn push_optimistic_prompt_echo(

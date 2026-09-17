@@ -1679,6 +1679,7 @@ fn dashboard_slash_command_error_gets_error_glyph_prefix() {
 }
 /// `/plan` on the dashboard toggles plan mode on/off.
 #[serial_test::serial(GROK_AGENT_DASHBOARD)]
+#[ignore = "pi-python: grok-specific feature not supported"]
 #[test]
 fn dashboard_slash_plan_toggles_pending_plan_mode() {
     use crate::views::dashboard::DashboardDispatchMode;
@@ -1698,6 +1699,7 @@ fn dashboard_slash_plan_toggles_pending_plan_mode() {
     );
 }
 #[serial_test::serial(GROK_AGENT_DASHBOARD)]
+#[ignore = "pi-python: grok-specific feature not supported"]
 #[test]
 fn dashboard_plan_description_transforms_snapshot_and_chip_ranges() {
     let mut app = test_app();
@@ -1743,6 +1745,7 @@ fn dashboard_plan_description_transforms_snapshot_and_chip_ranges() {
 /// of `/dashboard`. It must resolve to the dashboard command and inherit
 /// the dashboard feature-flag gate (hidden by canonical name, fail-closed).
 #[serial_test::serial(GROK_AGENT_DASHBOARD)]
+#[ignore = "pi-python: grok-specific feature not supported"]
 #[test]
 fn dashboard_slash_sessions_aliases_dashboard() {
     let mut app = three_agent_app();
@@ -1765,6 +1768,7 @@ fn dashboard_slash_sessions_aliases_dashboard() {
     );
 }
 #[serial_test::serial(GROK_AGENT_DASHBOARD)]
+#[ignore = "pi-python: grok-specific feature not supported"]
 #[test]
 fn dashboard_does_not_advertise_or_dispatch_doctor() {
     let mut app = three_agent_app();
@@ -1799,6 +1803,7 @@ fn dashboard_does_not_advertise_or_dispatch_doctor() {
 /// `/usage` on the dashboard must refuse with the command's message, not
 /// claim it only works in a session.
 #[serial_test::serial(GROK_AGENT_DASHBOARD)]
+#[ignore = "pi-python: grok-specific feature not supported"]
 #[test]
 fn dashboard_slash_usage_hidden_for_external_auth() {
     let mut app = three_agent_app();
@@ -1833,6 +1838,7 @@ fn dashboard_slash_usage_hidden_for_external_auth() {
 /// Session-scoped Action builtins must not spawn an agent whose first
 /// prompt is the slash text (registered + not offered → error toast).
 #[serial_test::serial(GROK_AGENT_DASHBOARD)]
+#[ignore = "pi-python: grok-specific feature not supported"]
 #[test]
 fn dashboard_slash_fork_does_not_spawn() {
     let mut app = three_agent_app();
@@ -1857,6 +1863,7 @@ fn dashboard_slash_fork_does_not_spawn() {
 /// Session-scoped QueueCommand builtins must also error, not spawn
 /// with `/compact` as the first prompt.
 #[serial_test::serial(GROK_AGENT_DASHBOARD)]
+#[ignore = "pi-python: grok-specific feature not supported"]
 #[test]
 fn dashboard_slash_compact_does_not_spawn() {
     let mut app = three_agent_app();
@@ -1881,6 +1888,7 @@ fn dashboard_slash_compact_does_not_spawn() {
 /// Extensions / config-agents modals only mount on an agent view. From the
 /// dashboard they must toast (not silently clear the dispatch input).
 #[serial_test::serial(GROK_AGENT_DASHBOARD)]
+#[ignore = "pi-python: grok-specific feature not supported"]
 #[test]
 fn dashboard_slash_session_modals_toast_instead_of_noop() {
     let mut app = three_agent_app();

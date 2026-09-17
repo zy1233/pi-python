@@ -1,7 +1,7 @@
-//! Agent spawning — creates the agent process and ACP channels.
+//! Agent spawning — creates a Python stdio ACP bridge process and channels.
 //!
-//! Simplified to only support GrokShell (in-process) mode.
-//! Subprocess and remote modes can be added later if needed.
+//! Interactive TUI spawns `python -m pi_agent_cli` (or `[agent].command`) and
+//! bridges JSON-RPC over stdio into an [`AcpClientChannel`].
 
 use std::io::IsTerminal;
 use std::rc::Rc;

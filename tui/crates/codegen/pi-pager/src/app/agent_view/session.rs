@@ -637,7 +637,7 @@ impl AgentView {
         self.session.start_turn(&mut self.scrollback);
     }
     /// Adopt the in-flight turn another client is driving, conveyed by the
-    /// `session/load` response meta (`x.ai/runningPromptId`): enter
+ /// `session/load` response meta (`legacy ext RPC`): enter
     /// TurnRunning and match subsequent live deltas. No user-prompt block is
     /// pushed — the turn's prompt and prior chunks arrived via the replay.
     pub(crate) fn adopt_running_prompt(&mut self, prompt_id: String) {
@@ -1315,7 +1315,7 @@ impl AgentView {
         ));
         self.set_restricted_commands(restricted_commands);
     }
-    /// ACP `kind` for `x.ai/session/rename`: the lane this session opened on.
+ /// ACP `kind` for `legacy ext RPC`: the lane this session opened on.
     pub(crate) fn rename_kind(&self) -> pi_shell::session::unified_list::SessionKind {
         if self.conversation_entry {
             pi_shell::session::unified_list::SessionKind::Chat

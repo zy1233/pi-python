@@ -1306,13 +1306,13 @@ fn a_consent_link_opens_the_url_its_label_stands_for() {
             },
         ];
         notice.links = vec![
-            "https://x.ai/legal/tos".to_string(),
-            "https://x.ai/legal/aup".to_string(),
+            "https://example.com/legal/tos".to_string(),
+            "https://example.com/legal/aup".to_string(),
         ];
     }
     dispatch(Action::OpenConsentLink(1), &mut app);
     assert!(
-        opened().lines().any(|l| l == "https://x.ai/legal/aup"),
+        opened().lines().any(|l| l == "https://example.com/legal/aup"),
         "the second link must open the second url; got {:?}",
         opened(),
     );

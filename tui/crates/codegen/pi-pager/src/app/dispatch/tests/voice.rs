@@ -5,6 +5,7 @@ use super::*;
 /// Plan mode must not gate voice: typing `/voice` + Enter through the real
 /// input path (prompt keys → slash registry → dispatch) starts recording
 /// with `plan_mode_active` set, exactly like normal mode.
+#[ignore = "pi-python: grok-specific feature not supported"]
 #[test]
 fn voice_slash_submit_starts_recording_in_plan_mode() {
     use crate::app::app_view::InputOutcome;

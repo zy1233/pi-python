@@ -1684,7 +1684,7 @@ pub(in crate::app::dispatch) fn set_default_model_inner(
     // or `/clear` creates a fresh session by cloning `app.models`
     // (`dispatch_new_session_inner_with_id`), so without this the new session —
     // and the welcome card it commits — would show the previous default until
-    // the next `x.ai/models/update` roundtrip.
+    // the next `legacy/models/update` roundtrip.
     if app.models.available.contains_key(id) {
         app.models.set_current(id.clone(), None);
     }

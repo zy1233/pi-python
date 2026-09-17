@@ -1,4 +1,4 @@
-//! MCP elicitation card (`x.ai/mcp/elicit`): key/mouse/paste routing,
+//! MCP elicitation card (`legacy ext RPC`): key/mouse/paste routing,
 //! accept/decline/cancel resolution, the pending-request promotion chain,
 //! and the composer stash handoff.
 

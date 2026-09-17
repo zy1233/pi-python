@@ -14,7 +14,7 @@ fn notice() -> ConsentNotice {
             },
             ConsentSegment::Text(". Now's the time.".to_string()),
         ],
-        links: vec!["https://x.ai/legal/aup".to_string()],
+        links: vec!["https://example.com/legal/aup".to_string()],
         accept_label: "I accept".to_string(),
     }
 }

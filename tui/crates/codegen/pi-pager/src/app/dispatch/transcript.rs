@@ -842,7 +842,7 @@ pub(super) fn handle_skills_toggle_done(
             }
         }
     }
-    // The toggle effect already called x.ai/skills/refresh-baseline
+    // The toggle effect already called legacy/skills/refresh-baseline
     // which triggers the session to reload skills and push an
     // AvailableCommandsUpdate notification with the updated list.
     vec![]

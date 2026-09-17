@@ -511,7 +511,7 @@
             meta: Some(serde_json::json!({ "isReplay": false })),
         };
         let notif = acp::ExtNotification::new(
-            "x.ai/session/update",
+            "pi/session/update",
             std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
         );
 
@@ -1798,7 +1798,7 @@
             meta: None,
         };
         acp::ExtNotification::new(
-            "x.ai/session/update",
+            "pi/session/update",
             std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
         )
     }

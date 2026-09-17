@@ -1,4 +1,4 @@
-//! Mid-turn interjection dispatch: optimistic local echo, the `x.ai/interject` effect, and prompt-history recording.
+//! Mid-turn interjection dispatch: optimistic local echo, the `legacy ext RPC` effect, and prompt-history recording.
 
 use super::ctx::NO_SESSION_NOTICE;
 use super::voice::voice_stop_on_submit;
@@ -9,10 +9,10 @@ use crate::scrollback::block::RenderBlock;
 
 /// Send a mid-turn interjection. Pushes a standard user prompt block locally
 /// for instant feedback, records the text in prompt history, clears the
-/// prompt, and fires the `x.ai/interject` ext method carrying a client-minted
+/// prompt, and fires the `legacy ext RPC` ext method carrying a client-minted
 /// id.
 ///
-/// The shell broadcasts `x.ai/session/interjection` to every attached pane so
+/// The shell broadcasts `legacy ext RPC` to every attached pane so
 /// other clients viewing the same session render it too (multi-client /
 /// dashboard mode). Our own broadcast echoes back carrying the same id; the id
 /// is recorded in `self_interjection_ids` so `handle_interjection` drops the
@@ -61,7 +61,7 @@ pub(super) fn dispatch_interject_on(
     agent.record_prompt_in_history(&text);
 
     // Push a standard user prompt block locally for instant feedback, and
-    // record its id so the broadcast echo (`x.ai/session/interjection`) is
+    // record its id so the broadcast echo (`legacy/session/interjection`) is
     // deduped instead of rendering a second copy on this pane.
     let interjection_id = uuid::Uuid::new_v4().to_string();
     agent.self_interjection_ids.insert(interjection_id.clone());

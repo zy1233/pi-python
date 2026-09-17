@@ -1,5 +1,14 @@
 use pretty_assertions::assert_eq;
 
+fn vendor_method(suffix: &str) -> std::sync::Arc<str> {
+    std::sync::Arc::from(format!(
+        "{}{}",
+        crate::acp::vendor::VENDOR_EXT_PREFIX,
+        suffix
+    ))
+}
+
+
 #[test]
 fn lifecycle_tracking_is_independent_of_wait_flag() {
     let mut pending = std::collections::HashSet::new();
@@ -116,7 +125,7 @@ fn reap_request_for_task_kills_with_session_scope() {
     let session_id = acp::SessionId::new("sess-1");
     let work = super::BackgroundWork::Task("task-42".into());
     let request = super::reap_request_for_work(&work, &session_id).unwrap();
-    assert_eq!(request.method.as_ref(), "x.ai/task/kill");
+    assert_eq!(request.method.as_ref(), "legacy/task/kill");
     let params: serde_json::Value = serde_json::from_str(request.params.get()).unwrap();
     assert_eq!(params["sessionId"], "sess-1");
     assert_eq!(params["taskId"], "task-42");
@@ -133,7 +142,7 @@ fn numeric_task_id_is_decoded_tracked_and_reaped() {
     let raw = serde_json::value::to_raw_value(&payload).unwrap();
     let (tx, _rx) = tokio::sync::oneshot::channel();
     let notif = pi_acp_lib::AcpArgs {
-        request: acp::ExtNotification::new("x.ai/task_backgrounded", raw.into()),
+        request: acp::ExtNotification::new(vendor_method("task_backgrounded"), raw.into()),
         response_tx: tx,
     }
     .boxed();
@@ -148,7 +157,7 @@ fn numeric_task_id_is_decoded_tracked_and_reaped() {
     );
     let session_id = acp::SessionId::new("sess-1");
     let request = super::reap_request_for_work(&work, &session_id).unwrap();
-    assert_eq!(request.method.as_ref(), "x.ai/task/kill");
+    assert_eq!(request.method.as_ref(), "legacy/task/kill");
     let params: serde_json::Value = serde_json::from_str(request.params.get()).unwrap();
     assert_eq!(params["taskId"], "4242");
     assert_eq!(params["sessionId"], "sess-1");
@@ -160,7 +169,7 @@ fn reap_request_for_subagent_cancels_with_typed_id() {
     let session_id = acp::SessionId::new("sess-1");
     let work = super::BackgroundWork::Subagent("sub-7".into());
     let request = super::reap_request_for_work(&work, &session_id).unwrap();
-    assert_eq!(request.method.as_ref(), "x.ai/subagent/cancel");
+    assert_eq!(request.method.as_ref(), "legacy/subagent/cancel");
     let params: serde_json::Value = serde_json::from_str(request.params.get()).unwrap();
     assert_eq!(params["subagentId"], "sub-7");
 }
@@ -177,7 +186,7 @@ fn drain_records_task_backgrounded_delivered_at_exit() {
     let (resp_tx, _resp_rx) = tokio::sync::oneshot::channel();
     tx.send(pi_acp_lib::AcpClientMessage::ExtNotification(
         pi_acp_lib::AcpArgs {
-            request: acp::ExtNotification::new("x.ai/task_backgrounded", raw.into()),
+            request: acp::ExtNotification::new(vendor_method("task_backgrounded"), raw.into()),
             response_tx: resp_tx,
         },
     ))
@@ -507,11 +516,10 @@ fn parse_json_schema_rejects_non_objects_and_invalid_json() {
 #[test]
 fn handler_answers_ext_method_instead_of_dropping() {
     use agent_client_protocol as acp;
-    use pi_tools::implementations::grok_build::ask_user_question::AskUserQuestionExtResponse;
     let raw = serde_json::value::to_raw_value(&serde_json::json!({})).unwrap();
     let (tx, mut rx) = tokio::sync::oneshot::channel();
     let msg = pi_acp_lib::AcpClientMessage::ExtMethod(pi_acp_lib::AcpArgs {
-        request: acp::ExtRequest::new("x.ai/ask_user_question", raw.into()),
+        request: acp::ExtRequest::new(vendor_method("ask_user_question"), raw.into()),
         response_tx: tx,
     });
     let mut emitter = super::HeadlessEmitter::new(super::OutputFormat::Json, false);
@@ -527,11 +535,9 @@ fn handler_answers_ext_method_instead_of_dropping() {
         &mut pending,
         &mut completed,
     );
-    let resp = rx
+    let err = rx
         .try_recv()
         .expect("ExtMethod must be answered, never dropped")
-        .expect("policy reply, not an error");
-    let parsed: AskUserQuestionExtResponse =
-        serde_json::from_str(resp.0.get()).expect("typed wire reply");
-    assert!(matches!(parsed, AskUserQuestionExtResponse::Cancelled));
+        .expect_err("vendor ext method must be rejected");
+    assert_eq!(i32::from(err.code), -32601);
 }

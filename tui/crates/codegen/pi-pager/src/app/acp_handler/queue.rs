@@ -21,7 +21,7 @@ pub(crate) struct PendingRunningAdoption {
     pub turn_ended: bool,
 }
 
-/// Wire payload of `x.ai/session/prompt_complete`, emitted by
+/// Wire payload of `legacy/session/prompt_complete`, emitted by
 /// `MvpAgent::prompt()` on the shell after every turn.
 ///
 /// `Serialize` is derived so tests construct payloads through the same type
@@ -84,7 +84,7 @@ pub(super) fn handle_queue_changed(notif: &acp::ExtNotification, app: &mut AppVi
     let Ok(changed) =
         serde_json::from_str::<crate::app::prompt_queue::QueueChanged>(notif.params.get())
     else {
-        tracing::warn!("Failed to parse x.ai/queue/changed");
+        tracing::warn!("Failed to parse legacy/queue/changed");
         return false;
     };
 
@@ -146,7 +146,7 @@ pub(super) fn handle_queue_changed(notif: &acp::ExtNotification, app: &mut AppVi
         local_current_prompt_id = %local_current_prompt_id,
         entry_count = changed.entries.len(),
         entries = ?recv_entry_ids,
-        "received x.ai/queue/changed broadcast",
+        "received legacy/queue/changed broadcast",
     );
 
     let rekeyed_echo_ids = app.apply_queue_changed(changed);
@@ -447,7 +447,7 @@ pub(super) fn handle_queue_changed(notif: &acp::ExtNotification, app: &mut AppVi
 /// TODO(prompt_complete-deprecation): Legacy removal (gated): durable turn_completed is already consumed via finalize_turn_from_terminal; keep & re-point the lost-RPC reconcile to the durable rail before deleting.
 pub(super) fn handle_prompt_complete(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
     let Ok(payload) = serde_json::from_str::<PromptCompletePayload>(notif.params.get()) else {
-        tracing::warn!("Failed to parse x.ai/session/prompt_complete");
+        tracing::warn!("Failed to parse legacy/session/prompt_complete");
         return false;
     };
     let session_id = payload.session_id.as_str();

@@ -1000,7 +1000,7 @@ impl ScrollbackState {
         {
             // Replace output entirely — grok-shell sends full accumulated buffer each tick.
             // The shell now sends clean output (no ANSI codes) when the client sets
-            // x.ai/bashOutputNoColor: true, so no stripping is needed.
+            // legacy/bashOutputNoColor: true, so no stripping is needed.
             exec.output = Some(output.to_string());
             entry.invalidate_cache();
             self.dirty_heights.insert(id);

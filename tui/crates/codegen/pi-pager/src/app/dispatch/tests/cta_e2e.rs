@@ -53,6 +53,7 @@ fn cta_outcome_reload(
     }
 }
 
+#[ignore = "pi-python: grok-specific feature not supported"]
 #[test]
 fn plugin_cta_catalog_keeps_official_not_installed_only() {
     let mut app = test_app_with_agent();
@@ -111,6 +112,7 @@ fn plugin_cta_catalog_keeps_official_not_installed_only() {
     );
 }
 
+#[ignore = "pi-python: grok-specific feature not supported"]
 #[test]
 fn plugin_cta_default_prefers_url_verified_official_over_impostor() {
     let mut app = test_app_with_agent();

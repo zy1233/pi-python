@@ -64,7 +64,7 @@ mod tests {
         let prompt = Rect::new(0, 4, 40, 2);
         let mut buf = Buffer::empty(area);
         let long = crate::app::link_opener::browser_unavailable_line(
-            "https://x.ai/legal/terms-of-service",
+            "https://example.com/legal/terms-of-service",
             false,
         );
 
@@ -76,7 +76,7 @@ mod tests {
             "narrow width must truncate with ellipsis: {long_row:?}"
         );
         assert!(
-            long_row.contains("https://x.ai"),
+            long_row.contains("https://example.com"),
             "URL-first message should keep the URL prefix under truncation: {long_row:?}"
         );
         assert!(

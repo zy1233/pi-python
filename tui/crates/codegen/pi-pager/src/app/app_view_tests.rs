@@ -12,7 +12,7 @@ use crossterm::event::{
 fn welcome_show_toast_scrubs_control_chars() {
     let mut app = test_app();
     assert!(matches!(app.active_view, ActiveView::Welcome));
-    app.show_toast("a\nb\rc\thttps://x.ai");
+    app.show_toast("a\nb\rc\thttps://example.com");
     let toast = app
         .welcome_toast
         .as_ref()
@@ -22,7 +22,7 @@ fn welcome_show_toast_scrubs_control_chars() {
         !toast.chars().any(|c| c.is_control()),
         "control chars must be scrubbed at write: {toast:?}"
     );
-    assert!(toast.contains("https://x.ai"), "{toast:?}");
+    assert!(toast.contains("https://example.com"), "{toast:?}");
 }
 #[test]
 fn parse_esc_ttl_bounds() {
@@ -2231,8 +2231,8 @@ fn consent_pending_app() -> AppView {
                 },
             ],
             links: vec![
-                "https://x.ai/legal/tos".to_string(),
-                "https://x.ai/legal/aup".to_string(),
+                "https://example.com/legal/tos".to_string(),
+                "https://example.com/legal/aup".to_string(),
             ],
             accept_label: "Accept".to_string(),
         },

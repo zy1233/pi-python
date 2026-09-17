@@ -8,15 +8,19 @@ pub mod meta;
 pub mod model_state;
 pub mod spawn;
 pub mod tracker;
+pub mod vendor;
 mod version_mismatch;
 
 pub(crate) use version_mismatch::{is_version_mismatch_banner, version_mismatch_banner};
 
 /// Ext methods that carry a session-scoped update and may stamp `isReplay`.
-/// Shared by TUI/headless dispatch and the session-load ACP barrier so a new
-/// method cannot be handled in one path and classified `Unrelated` in the other.
+/// Unreachable in standard-ACP mode (vendor ext notifications are filtered at
+/// ingress); retained for session-load barrier classification of replay backlog.
 pub(crate) fn is_session_update_ext_method(method: &str) -> bool {
-    matches!(method, "x.ai/session_notification" | "x.ai/session/update")
+    method == vendor::session_notification_method()
+        || method == vendor::session_update_method()
+        || method.ends_with("/session_notification")
+        || method.ends_with("/session/update")
 }
 
 use pi_telemetry::process_info::{
@@ -107,7 +111,7 @@ pub struct AcpConnection {
     /// resolved by the shell (remote settings / config / env; default OFF) and
     /// advertised in `InitializeResponse.meta.sessionRecap`. The client gates
     /// its automatic away-recap poll and the manual `/recap` on this so a
-    /// disabled feature produces zero `x.ai/recap` traffic. Defaults to `false`
+ /// disabled feature produces zero `legacy ext RPC` traffic. Defaults to `false`
     /// when absent (e.g. an older shell that predates the feature).
     pub session_recap_available: bool,
     /// Shell-side feedback trace-offer eligibility (see `feedbackTraceOffer`).
@@ -141,7 +145,7 @@ pub struct ConnectFlags {
     /// Storage mode override.
     pub storage_mode: Option<String>,
     /// Whether this client will draw a status row, advertised as
-    /// `x.ai/statusLine` so the agent can skip an unpainted payload.
+ /// `legacy ext RPC` so the agent can skip an unpainted payload.
     pub status_line: bool,
     /// Client identifier for ACP Initialize metadata.
     pub client_identifier: Option<String>,
@@ -503,7 +507,7 @@ fn build_initialize_meta(flags: &ConnectFlags) -> serde_json::Value {
 
 /// Build `client_capabilities.meta`.
 ///
-/// Phase 4: do not advertise grok `x.ai/*` capabilities. Python is standard-ACP
+/// Phase 4: do not advertise grok `legacy ext RPC` capabilities. Python is standard-ACP
 /// only and ignores vendor `_meta`.
 fn client_capabilities_meta(_flags: &ConnectFlags) -> serde_json::Value {
     serde_json::json!({})
@@ -859,9 +863,10 @@ mod tests {
 
     #[test]
     fn is_session_update_ext_method_covers_both_carriers() {
-        assert!(is_session_update_ext_method("x.ai/session_notification"));
-        assert!(is_session_update_ext_method("x.ai/session/update"));
-        assert!(!is_session_update_ext_method("x.ai/task_completed"));
+        use crate::acp::vendor::VENDOR_EXT_PREFIX;
+        assert!(is_session_update_ext_method(&format!("{VENDOR_EXT_PREFIX}session_notification")));
+        assert!(is_session_update_ext_method(&format!("{VENDOR_EXT_PREFIX}session/update")));
+        assert!(!is_session_update_ext_method(&format!("{VENDOR_EXT_PREFIX}task_completed")));
         assert!(!is_session_update_ext_method("session/update"));
     }
 
@@ -1174,7 +1179,8 @@ mod tests {
             status_line: true,
             ..Default::default()
         });
-        assert!(with_hunk.get("x.ai/hunkTracker").is_none());
-        assert!(with_hunk.get("x.ai/statusLine").is_none());
+        use crate::acp::vendor::VENDOR_EXT_PREFIX;
+        assert!(with_hunk.get(&format!("{VENDOR_EXT_PREFIX}hunkTracker")).is_none());
+        assert!(with_hunk.get(&format!("{VENDOR_EXT_PREFIX}statusLine")).is_none());
     }
 }

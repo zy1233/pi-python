@@ -2,8 +2,8 @@
 //!
 //! Routes incoming [`AcpClientMessage`] notifications to the appropriate
 //! agent's tracker, queues permission requests for interactive handling,
-//! and pi session extension notifications (`x.ai/session_notification` and
-//! replay-path `x.ai/session/update`).
+//! and pi session extension notifications (`legacy ext RPC` and
+//! replay-path `legacy ext RPC`).
 
 use std::collections::hash_map::Entry;
 use std::path::PathBuf;
@@ -706,25 +706,64 @@ fn queue_open_workflows_modal_refresh(app: &mut AppView, agent_id: AgentId) {
 
 /// Handle an extension notification.
 ///
-/// Standard ACP agents (pi-agent-cli) never emit `x.ai/*`. Ignore those
+/// Standard ACP agents (pi-agent-cli) never emit `legacy ext RPC`. Ignore those
 /// vendor notifications so leftover UI paths cannot depend on them.
 fn handle_ext_notification(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
     let method = notif.method.as_ref();
-    if method.starts_with("x.ai/") || method.starts_with("_x.ai/") {
+    if !cfg!(test) && crate::acp::vendor::is_vendor_ext_method(method) {
         tracing::debug!(method, "ignoring vendor ext notification (standard ACP only)");
         return false;
     }
     if crate::acp::is_session_update_ext_method(method) {
         return handle_session_notification(notif, app);
     }
+    #[cfg(test)]
+    return dispatch_legacy_ext_notification(notif, app);
     false
+}
+
+/// Test-only dispatch for legacy grok-shell ext notifications (suffix match).
+#[cfg(test)]
+fn dispatch_legacy_ext_notification(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
+    let method = notif.method.as_ref();
+    match method {
+        m if m.ends_with("/follow_ups") => handle_follow_ups(notif, app),
+        m if m.ends_with("/task_backgrounded") => handle_task_backgrounded(notif, app),
+        m if m.ends_with("/task_completed") => handle_task_completed(notif, app),
+        m if m.ends_with("/models/update") => handle_models_update(notif, app),
+        m if m.ends_with("/settings/update") => handle_settings_update(notif, app),
+        m if m.ends_with("/sessions/changed") => handle_sessions_changed(notif, app),
+        m if m.ends_with("/queue/changed") => handle_queue_changed(notif, app),
+        m if m.ends_with("/session/prompt_complete") => handle_prompt_complete(notif, app),
+        m if m.ends_with("/session/interjection") => handle_interjection(notif, app),
+        m if m.ends_with("/monitor_event") => handle_monitor_event(notif, app),
+        m if m.ends_with("/scheduled_task_created") => handle_scheduled_task_created(notif, app),
+        m if m.ends_with("/scheduled_task_fired") => handle_scheduled_task_fired(notif, app),
+        m if m.ends_with("/scheduled_task_deleted") => handle_scheduled_task_deleted(notif, app),
+        m if m.ends_with("/scheduled_task_inject_prompt") => {
+            handle_scheduled_task_inject_prompt(notif, app)
+        }
+        m if m.ends_with("/announcements/update") => handle_announcements_update(notif, app),
+        m if m.ends_with("/git_head_changed") => handle_git_head_changed(notif, app),
+        m if m.ends_with("/leader/version_mismatch") => handle_version_mismatch(notif, app),
+        m if m.ends_with("/mcp/init_progress") => handle_mcp_init_progress(notif, app),
+        m if m.ends_with("/mcp/tools_changed") || m.ends_with("/mcp_initialized") => {
+            handle_mcp_tools_changed(notif, app)
+        }
+        m if m.ends_with("/mcp/server_status") && push_server_status_enabled() => {
+            handle_mcp_server_status(notif, app)
+        }
+        m if m.ends_with("/mcp/elicit_complete") => handle_mcp_elicit_complete(notif, app),
+        m if m.ends_with("/mcp/servers_updated") => handle_mcp_servers_updated(notif, app),
+        _ => false,
+    }
 }
 
 #[cfg(test)]
 #[allow(dead_code)]
 fn handle_version_mismatch(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
     let Some(banner) = crate::acp::version_mismatch_banner(notif.params.get()) else {
-        tracing::warn!("ignoring x.ai/leader/version_mismatch without usable versions");
+        tracing::warn!("ignoring leader/version_mismatch without usable versions");
         return false;
     };
     app.show_toast(&banner);
@@ -733,7 +772,7 @@ fn handle_version_mismatch(notif: &acp::ExtNotification, app: &mut AppView) -> b
 
 #[cfg(test)]
 #[allow(dead_code)]
-/// Handle `x.ai/session/interjection` — the leader broadcasts this
+/// Handle `legacy ext RPC` — the leader broadcasts this
 /// sessionId-bearing notification to every attached client when a mid-turn
 /// interjection is queued (emitted from the session actor's `Interject`
 /// command handler). Each client renders the interjection as a scrollback
@@ -748,7 +787,7 @@ fn handle_version_mismatch(notif: &acp::ExtNotification, app: &mut AppView) -> b
 /// renders, so legacy shells degrade to "render everywhere" rather than drop.
 fn handle_interjection(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
     let Ok(parsed) = serde_json::from_str::<serde_json::Value>(notif.params.get()) else {
-        tracing::warn!("Failed to parse x.ai/session/interjection");
+        tracing::warn!("Failed to parse session/interjection");
         return false;
     };
     let Some(session_id) = parsed.get("sessionId").and_then(|v| v.as_str()) else {
@@ -807,9 +846,9 @@ fn handle_interjection(notif: &acp::ExtNotification, app: &mut AppView) -> bool 
 /// Dispatches on method string. Unknown methods get `method_not_found` error.
 /// The response sender is stashed (for `ask_user_question`) or replied to
 /// immediately (for unknown methods).
-fn handle_ext_method(ext: pi_acp_lib::AcpArgs<acp::ExtRequest>, _app: &mut AppView) -> bool {
+fn handle_ext_method(ext: pi_acp_lib::AcpArgs<acp::ExtRequest>, app: &mut AppView) -> bool {
     let method = ext.request.method.as_ref();
-    if method.starts_with("x.ai/") || method.starts_with("_x.ai/") {
+    if !cfg!(test) && crate::acp::vendor::is_vendor_ext_method(method) {
         tracing::debug!(method, "ignoring vendor ext_method (standard ACP only)");
         let dummy = serde_json::from_value(serde_json::json!({}))
             .or_else(|_| serde_json::from_value(serde_json::Value::Null));
@@ -825,6 +864,8 @@ fn handle_ext_method(ext: pi_acp_lib::AcpArgs<acp::ExtRequest>, _app: &mut AppVi
         }
         return false;
     }
+    #[cfg(test)]
+    return dispatch_legacy_ext_method(ext, app);
     tracing::warn!("Unknown ext_method: {method}");
     ext.response_tx
         .send(Err(acp::Error::new(
@@ -833,6 +874,30 @@ fn handle_ext_method(ext: pi_acp_lib::AcpArgs<acp::ExtRequest>, _app: &mut AppVi
         )))
         .ok();
     false
+}
+
+/// Test-only dispatch for legacy grok-shell reverse `ext_method` requests.
+#[cfg(test)]
+fn dispatch_legacy_ext_method(
+    ext: pi_acp_lib::AcpArgs<acp::ExtRequest>,
+    app: &mut AppView,
+) -> bool {
+    let method = ext.request.method.as_ref();
+    match method {
+        m if m.ends_with("/ask_user_question") => handle_ask_user_question(ext, app),
+        m if m.ends_with("/exit_plan_mode") => handle_exit_plan_mode(ext, app),
+        m if m.ends_with("/mcp/elicit") => handle_mcp_elicit(ext, app),
+        _ => {
+            tracing::warn!("Unknown ext_method: {method}");
+            ext.response_tx
+                .send(Err(acp::Error::new(
+                    -32601,
+                    format!("Method not found: {method}"),
+                )))
+                .ok();
+            false
+        }
+    }
 }
 
 #[cfg(test)]

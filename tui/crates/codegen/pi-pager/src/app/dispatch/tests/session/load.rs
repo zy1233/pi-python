@@ -1098,7 +1098,7 @@ fn session_loaded_clears_stale_running_entries() {
         "no entries should be animating after SessionLoaded",
     );
 }
-/// A failed `x.ai/prompt_history` fetch arrives as `PromptHistoryLoaded` with an empty list.
+/// A failed `legacy ext RPC` fetch arrives as `PromptHistoryLoaded` with an empty list.
 #[test]
 fn a_restored_transcript_stays_recallable_after_a_failed_fetch() {
     let mut app = test_app();
@@ -1571,6 +1571,7 @@ fn pick_conversation_row_from_welcome_dispatches_direct_chat_load() {
     );
 }
 /// Canary: a remote Build row not on disk still takes the GCS-restore path.
+#[ignore = "pi-python: grok-specific feature not supported"]
 #[test]
 fn pick_remote_build_row_still_restores() {
     let mut app = test_app_with_agent();

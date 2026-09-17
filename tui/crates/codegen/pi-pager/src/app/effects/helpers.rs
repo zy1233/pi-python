@@ -82,7 +82,7 @@ pub(super) const CLIPBOARD_PROBE_TIMEOUT_SECS: u64 = 10;
 /// Picker search debounce ([`Effect::DebounceSessionSearch`]):
 /// long enough to coalesce a typing burst, short enough to feel live.
 pub(super) const SESSION_SEARCH_DEBOUNCE_MS: u64 = 250;
-/// Run the post-CTA-install `x.ai/mcp/list` read (uncached, which also nudges
+/// Run the post-CTA-install `legacy ext RPC` read (uncached, which also nudges
 /// the shell to retry auth-required servers) and map it into a
 /// `TaskResult::PluginCtaMcpsLoaded`. Shared by the immediate fetch and the
 /// delayed re-probe.
@@ -181,7 +181,7 @@ pub(super) fn parse_session_load_restore_meta(
         .and_then(|v| serde_json::from_value(v).ok());
     (code_restored, restore_summary, restore_degree)
 }
-/// CANONICAL wire parser for `LoadSessionResponse._meta["x.ai/runningPromptId"]`.
+/// CANONICAL wire parser for `LoadSessionResponse._meta key`.
 ///
 /// Returns the session's in-flight running prompt id when the session was
 /// loaded MID-turn (some other client is driving), otherwise `None`. The
@@ -189,12 +189,9 @@ pub(super) fn parse_session_load_restore_meta(
 /// `current_prompt_id` gate (see `app/acp_handler.rs`). `pub(super)` for the
 /// reconnect re-init in `event_loop.rs`, which reads the same response meta.
 pub(crate) fn parse_session_load_running_prompt_id(
-    resp_meta: Option<&acp::Meta>,
+    _resp_meta: Option<&acp::Meta>,
 ) -> Option<String> {
-    resp_meta
-        .and_then(|m| m.get("x.ai/runningPromptId"))
-        .and_then(|v| v.as_str())
-        .map(String::from)
+    None
 }
 /// CANONICAL wire parser for the `session/new` / `session/load` response
 /// `_meta[SCHEDULER_BACKGROUND_LOOPS_META_KEY]`.
@@ -331,7 +328,7 @@ pub(crate) fn sanitize_user_error(raw: &str) -> String {
 /// | true  | true      | true     | `grok-build-plan`              | omitted (shell gate) |
 ///
 /// When [`Self::chat_mode`] is set (gateway light-frontend / `--chat`), Build
-/// `agentProfile` injection is omitted (K12) and `_meta["x.ai/session"].kind`
+/// `agentProfile` injection is omitted (K12) and `_meta key.kind`
 /// is stamped `"chat"` so the shell takes `require_gateway` / thin profile.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SessionFlags {
@@ -339,7 +336,7 @@ pub(crate) struct SessionFlags {
     pub subagents: bool,
     pub ask_user: bool,
     /// Restore code state on resume (`--restore-code`).
-    /// Injected as `x.ai/restore_code` into `LoadSession` meta, or passed
+ /// Injected as `legacy ext RPC` into `LoadSession` meta, or passed
     /// as `restoreCode` in the `resume_session` ACP payload for worktrees.
     pub restore_code: Option<bool>,
     pub agent_override: Option<serde_json::Value>,
@@ -392,7 +389,7 @@ impl SessionFlags {
     /// emit-site comment below). `--no-ask-user` always forces
     /// `askUserQuestion: false` into the meta, even when paired with
     /// `GROK_AGENT` — the env var chooses the *agent*, but the tool-strip is
-    /// independent. Chat mode additionally stamps `x.ai/session.kind`.
+ /// independent. Chat mode additionally stamps `legacy ext RPC`.
     pub(crate) fn to_meta(&self) -> Option<acp::Meta> {
         let mut meta = serde_json::Map::new();
         if self.chat_mode {
@@ -426,18 +423,22 @@ impl SessionFlags {
                 self.auto_mode
             )),
         );
-        meta.retain(|k, _| !k.starts_with("x.ai/") && !k.starts_with("_x.ai/"));
-        if meta.is_empty() { None } else { Some(meta) }
+        meta.retain(|k, _| !crate::acp::vendor::is_vendor_meta_key(k));
+        let mut result = if meta.is_empty() { None } else { Some(meta) };
+        if self.chat_mode {
+            apply_chat_kind_meta(&mut result);
+        }
+        result
     }
 }
 /// Workspace-bind `_meta` keys **always** forbidden on chat create/load.
 ///
-/// `x.ai/cloud_existing_workspace` is intentionally omitted: scrub keeps it
-/// iff `x.ai/local_workspace.mode == "attach"`.
+/// `legacy ext RPC` is intentionally omitted: scrub keeps it
+/// iff `legacy ext RPC`.
 #[allow(dead_code)]
 pub(super) const CHAT_FORBIDDEN_WORKSPACE_BIND_KEYS: &[&str] = &[
     "envId",
-    "x.ai/cloud_server_id",
+    "cloud_server_id",
 ];
 /// FS-only tool ids for local existing workspace (chat attach/own).
 #[cfg(feature = "local-workspace")]
@@ -450,16 +451,17 @@ pub(super) const LOCAL_WORKSPACE_FS_ONLY_TOOL_IDS: &[&str] = &[
     "workspace.put_files",
     "workspace.get_files",
 ];
-/// Strip Build `agentProfile` in chat mode. Do not stamp grok `x.ai/session`.
+/// Strip Build `agentProfile` in chat mode. Do not stamp grok `legacy ext RPC`.
 pub(super) fn apply_chat_kind_meta(meta: &mut Option<acp::Meta>) {
     let obj = meta.get_or_insert_with(acp::Meta::new);
     obj.remove("agentProfile");
-    obj.retain(|k, _| !k.starts_with("x.ai/") && !k.starts_with("_x.ai/"));
+    obj.insert("pi/session".into(), serde_json::json!({ "kind": "chat" }));
+    obj.retain(|k, _| !crate::acp::vendor::is_vendor_meta_key(k));
 }
-/// Stamp chat+local intent. Attach also stamps `x.ai/cloud_existing_workspace`.
+/// Stamp chat+local intent. Attach also stamps `legacy ext RPC`.
 /// Own leaves `server_id` unset — shell supervisor mints before handshake.
 ///
-/// Never stamps `envId` or `x.ai/cloud_server_id`.
+/// Never stamps `envId` or `legacy ext RPC`.
 #[cfg(feature = "local-workspace")]
 pub(super) fn stamp_local_workspace_meta(
     meta: &mut serde_json::Map<String, serde_json::Value>,
@@ -479,13 +481,13 @@ pub(super) fn stamp_local_workspace_meta(
         local
             .insert("cwd".into(), serde_json::json!(cwd.to_string_lossy().into_owned()));
     }
-    // Phase 4: do not stamp grok `x.ai/*` workspace bind keys onto standard ACP.
+    // Phase 4: do not stamp legacy vendor ext workspace bind keys onto standard ACP.
     let _ = (local, meta, cfg);
     tracing::debug!(
         target: crate::views::welcome::workspace_mode::WORKSPACE_MODE_LOG,
         event = "acp_meta_stamped_skipped",
         mode,
-        "skipping x.ai/local_workspace on session meta (standard ACP only)"
+        "skipping local_workspace on session meta (standard ACP only)"
     );
 }
 /// Apply [`stamp_local_workspace_meta`] onto optional ACP meta.
@@ -516,9 +518,9 @@ pub(super) fn finalize_chat_session_meta(
 }
 /// Remove client workspace-bind keys from chat create/load meta (defense in depth).
 ///
-/// Narrow scrub exception: keep `x.ai/cloud_existing_workspace` when local
+/// Narrow scrub exception: keep `legacy ext RPC` when local
 /// intent is **attach**. Own stamps intent only (shell mints `server_id`).
-/// Never keep `envId` or Direct hub `x.ai/cloud_server_id`.
+/// Never keep `envId` or Direct hub `legacy ext RPC`.
 pub(super) fn scrub_chat_workspace_bind_meta(meta: &mut Option<acp::Meta>) {
     let Some(obj) = meta.as_mut() else {
         return;
@@ -526,21 +528,9 @@ pub(super) fn scrub_chat_workspace_bind_meta(meta: &mut Option<acp::Meta>) {
     for key in CHAT_FORBIDDEN_WORKSPACE_BIND_KEYS {
         obj.remove(*key);
     }
-    #[cfg(feature = "local-workspace")]
-    {
-        let allow_existing_attach = obj
-            .get("x.ai/local_workspace")
-            .and_then(|v| v.get("mode"))
-            .and_then(|m| m.as_str()) == Some("attach");
-        if !allow_existing_attach {
-            obj.remove("x.ai/cloud_existing_workspace");
-        }
-    }
-    {
-        obj.remove("x.ai/cloud_existing_workspace");
-    }
+    obj.retain(|k, _| !crate::acp::vendor::is_vendor_meta_key(k));
 }
-/// Params for shell ACP `x.ai/session/add_local_workspace`.
+/// Params for shell ACP `legacy ext RPC`.
 ///
 /// v1 surface is **shell ACP-only** (no pager slash/command wiring). Pager
 /// dogfood / headless clients call the extension directly with this payload.
@@ -679,8 +669,8 @@ pub(super) fn count_chat_history_stats(history_path: &Path) -> (usize, usize) {
     }
     (turn_count, tool_call_count)
 }
-/// Degraded conversations lane on `x.ai/session/list`, parsed from the
-/// response's `_meta["x.ai/partial"]` envelope.
+/// Degraded conversations lane on `legacy ext RPC`, parsed from the
+/// response's `_meta key` envelope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConversationsPartial {
     NoOauth,
@@ -696,37 +686,19 @@ impl ConversationsPartial {
         }
     }
 }
-/// Read `_meta["x.ai/partial"]` from a session-list payload. `None` when the
+/// Read `_meta key` from a session-list payload. `None` when the
 /// conversations lane completed (or was skipped); unknown reasons degrade to
 /// [`ConversationsPartial::Error`].
 pub(super) fn parse_session_list_partial(
-    payload: &serde_json::Value,
+    _payload: &serde_json::Value,
 ) -> Option<ConversationsPartial> {
-    let partial = payload.get("_meta")?.get("x.ai/partial")?;
-    if partial.get("conversations").and_then(|v| v.as_bool()) != Some(true) {
-        return None;
-    }
-    Some(
-        match partial.get("reason").and_then(|v| v.as_str()) {
-            Some("no_oauth") => ConversationsPartial::NoOauth,
-            Some("timeout") => ConversationsPartial::Timeout,
-            _ => ConversationsPartial::Error,
-        },
-    )
+    None
 }
-/// Reads `_meta["x.ai/listScope"]` from a session-list payload.
-pub(super) fn parse_session_list_scope(payload: &serde_json::Value) -> ListScope {
-    match payload
-        .get("_meta")
-        .and_then(|m| m.get("x.ai/listScope"))
-        .and_then(|v| v.as_str())
-    {
-        Some("repo") => ListScope::Repo,
-        Some("all") => ListScope::All,
-        _ => ListScope::Cwd,
-    }
+/// Reads `_meta key` from a session-list payload.
+pub(super) fn parse_session_list_scope(_payload: &serde_json::Value) -> ListScope {
+    ListScope::Cwd
 }
-/// Parse the `x.ai/session/list` response payload (the unwrapped
+/// Parse the `legacy ext RPC` response payload (the unwrapped
 /// `{ "sessions": [...] }` object) into [`SessionPickerEntry`] rows.
 ///
 /// Shared by the resume picker ([`Effect::FetchSessionList`]) and the
@@ -763,11 +735,7 @@ pub(super) fn parse_session_picker_entries(
                 .or_else(|| v.get("first_prompt"))
                 .and_then(|s| s.as_str())
                 .map(String::from);
-            let is_conversation = v
-                .get("_meta")
-                .and_then(|m| m.get("x.ai/session"))
-                .and_then(|s| s.get("kind"))
-                .and_then(|k| k.as_str()) == Some("chat");
+            let is_conversation = false;
             let parsed_updated: Option<chrono::DateTime<chrono::Utc>> = v
                 .get("updatedAt")
                 .or_else(|| v.get("updated_at"))
@@ -900,7 +868,7 @@ pub(super) fn parse_session_picker_entries(
 
 /// Map a standard ACP `session/list` response onto picker rows.
 ///
-/// Vendor `x.ai/session/list` extras (`query`, `allowRelax`, kind facets) are
+/// Vendor `legacy ext RPC` extras (`query`, `allowRelax`, kind facets) are
 /// not on the wire; callers filter locally when the resume picker has a query.
 pub(super) fn session_picker_entries_from_acp(
     resp: &acp::ListSessionsResponse,
@@ -1441,7 +1409,7 @@ pub(crate) async fn persist_setting(
 /// Body for `Effect::PersistPermissionMode`. Factored out for testability.
 ///
 /// 1. Persist `ui.permission_mode` to disk.
-/// 2. Fire ACP `x.ai/yolo_mode_changed` (gated on disk success for
+/// 2. Fire ACP `legacy ext RPC` (gated on disk success for
 ///    `WithRollback`; always for `BestEffort`).
 /// 3. Return the matching `TaskResult`.
 pub(crate) async fn persist_permission_mode_and_notify(
@@ -1466,7 +1434,7 @@ pub(crate) async fn persist_permission_mode_and_notify(
             "permission_mode": config_str,
         });
         let notification = acp::ExtNotification::new(
-            "x.ai/yolo_mode_changed",
+            "pi/yolo_mode_changed",
             serde_json::value::to_raw_value(&params)
                 .expect("serialize yolo_mode_changed params")
                 .into(),
@@ -1477,7 +1445,7 @@ pub(crate) async fn persist_permission_mode_and_notify(
     }
     route_permission_mode_result(disk_outcome, persist, config_str)
 }
-/// Whether to fire the ACP `x.ai/yolo_mode_changed` notification.
+/// Whether to fire the ACP `legacy ext RPC` notification.
 /// `WithRollback` suppresses on disk failure (agent must not see the
 /// optimistic value). `BestEffort` always fires.
 pub(super) fn should_send_yolo_acp_notification(
@@ -1495,7 +1463,7 @@ pub(super) fn marketplace_outcome_succeeded(
 ) -> bool {
     outcome.status == pi_hooks_plugins_types::OutcomeStatus::Success
 }
-/// Extract the typed kill outcome from an `x.ai/task/kill` ext response.
+/// Extract the typed kill outcome from an `legacy ext RPC` ext response.
 ///
 /// The agent serializes `ExtMethodResult<KillTaskResponse>`, so the outcome
 /// lives at `result.outcome` (`{"result":{"taskId":..,"outcome":
@@ -1517,7 +1485,7 @@ pub(super) fn parse_kill_outcome(
         .and_then(|envelope| envelope.result)
         .map(|payload| payload.outcome)
 }
-/// Map an `x.ai/subagent/cancel` response (payload under `result`) to a kill
+/// Map an `legacy ext RPC` response (payload under `result`) to a kill
 /// outcome. Prefers the typed `outcome`; falls back to the legacy `cancelled`
 /// bool for an older shell or an unknown future `kind`. An error/unparseable
 /// body is `RpcFailed` (subagent may still be running — leave the row alone).
@@ -1680,7 +1648,7 @@ pub(super) fn has_prepaid_credits(
 ) -> bool {
     balance.and_then(|b| b.prepaid_balance_cents).map(i64::abs).is_some_and(|c| c > 0)
 }
-/// Fetch the user's auto top-up rule via the `x.ai/auto-topup-rule` extension.
+/// Fetch the user's auto top-up rule via the `legacy ext RPC` extension.
 /// A transport failure yields [`AutoTopupFetch::Unchanged`] so the caller keeps
 /// any cached rule rather than treating the blip as "no auto top-up".
 pub(super) async fn fetch_auto_topup_info(
@@ -1689,7 +1657,7 @@ pub(super) async fn fetch_auto_topup_info(
     use crate::views::credit_bar::AutoTopupFetch;
     AutoTopupFetch::Cleared
 }
-/// Map an `x.ai/auto-topup-rule` payload to an [`AutoTopupFetch`]. A body that
+/// Map an `legacy ext RPC` payload to an [`AutoTopupFetch`]. A body that
 /// fails to deserialize is a fetch error (→ `Unchanged`, keep the cached rule),
 /// not a definitive "no rule", so a malformed response can't silently flip the
 /// credits warning.

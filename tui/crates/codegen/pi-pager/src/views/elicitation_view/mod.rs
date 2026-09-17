@@ -1,4 +1,4 @@
-//! MCP elicitation card (`x.ai/mcp/elicit`): form and URL elicitation with
+//! MCP elicitation card (`legacy ext RPC`): form and URL elicitation with
 //! the same lifecycle as the other HITL cards (permission / question / plan
 //! approval). State transitions live in [`state`], painting in [`render`].
 

@@ -82,7 +82,7 @@ pub enum QuestionFocus {
 }
 
 /// Pager-internal origin for a locally-opened question (one that was NOT
-/// driven by an ACP `x.ai/ask_user_question` request).
+/// driven by an ACP `legacy ext RPC` request).
 ///
 /// Drives what `submit_question_answers` returns when the user submits.
 /// Mutually exclusive with `QuestionViewState.response_tx`: a local
@@ -165,7 +165,7 @@ pub const FEEDBACK_TRACE_OPTION_NEVER_ASK: &str = "never_ask";
 
 /// Complete state for the question view overlay.
 ///
-/// Created when an `x.ai/ask_user_question` ext-method request arrives;
+/// Created when an `legacy ext RPC` ext-method request arrives;
 /// destroyed on submit, skip, or cancel.
 ///
 /// Not `Clone` because it owns a `oneshot::Sender` for the ACP response.
@@ -218,7 +218,7 @@ pub struct QuestionViewState {
     /// `Some(1)` = Skip interview.
     pub bottom_panel_index: Option<usize>,
     /// `Some` when this question was opened locally (e.g. by `/fork`)
-    /// instead of by an ACP `x.ai/ask_user_question` request. `None` for
+ /// instead of by an ACP `legacy ext RPC` request. `None` for
     /// ACP questions (preserves today's behaviour).
     ///
     /// Mutually exclusive with `response_tx`: a local question never has
@@ -268,7 +268,7 @@ impl QuestionViewState {
 
     /// Create a new question view state with an ACP response sender.
     ///
-    /// Called by the `ExtMethod` handler when a blocking `x.ai/ask_user_question`
+ /// Called by the `ExtMethod` handler when a blocking `legacy ext RPC`
     /// request arrives from the shell coordinator.
     pub fn with_response_tx(
         tool_call_id: String,

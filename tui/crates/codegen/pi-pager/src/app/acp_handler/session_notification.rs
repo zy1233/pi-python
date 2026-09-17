@@ -113,7 +113,7 @@ pub(super) fn advance_reconnect_cursor(agent: &mut AgentView, meta: &mut Notific
 fn terminal_meta_str<'a>(meta: Option<&'a serde_json::Value>, key: &str) -> Option<&'a str> {
     meta.and_then(|v| v.get(key)).and_then(|v| v.as_str())
 }
-/// Handle `x.ai/session_notification` and replay-path `x.ai/session/update`.
+/// Handle `legacy ext RPC` and replay-path `legacy ext RPC`.
 ///
 /// Routes by `session_id` so events for an inactive agent still mutate that
 /// agent's state. The redraw decision is gated on whether the matched agent
@@ -152,7 +152,7 @@ pub(super) fn handle_session_notification_with_origin(
             tracing::debug!(
                 session_id = session_notif.session_id.0.as_ref(),
                 method = notif.method.as_ref(),
-                "load-race: x.ai/session_notification DROPPED — no agent matches session_id"
+                "load-race: session_notification DROPPED — no agent matches session_id"
             );
             return false;
         }
@@ -178,7 +178,7 @@ pub(super) fn handle_session_notification_with_origin(
         agent,
         &meta,
         session_notif.session_id.0.as_ref(),
-        "x.ai/session/update",
+        "session/update",
     ) {
         return false;
     }
@@ -220,7 +220,7 @@ pub(super) fn handle_session_notification_with_origin(
             session_id = session_notif.session_id.0.as_ref(),
             event_seq = meta.event_seq,
             last_applied = agent.last_applied_pi_event_seq,
-            "x.ai/session update DROPPED by dedup highwater (event_seq <= last_applied)"
+            "session update DROPPED by dedup highwater (event_seq <= last_applied)"
         );
         return false;
     }

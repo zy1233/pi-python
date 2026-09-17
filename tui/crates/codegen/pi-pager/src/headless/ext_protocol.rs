@@ -1,4 +1,4 @@
-//! Decoding of the shell's `x.ai/*` extension notifications into the headless
+//! Decoding of legacy vendor extension notifications into the headless
 //! [`ExtEvent`] the orchestrator dispatches, plus the policy replies for
 //! reverse `ext_method` requests. Owns the wire envelope shapes and the
 //! method to event mapping, kept out of `headless.rs`.
@@ -21,7 +21,7 @@ fn ext_response_from<T: serde::Serialize>(value: &T) -> AcpResult<acp::ExtRespon
 /// whole turn with a channel `recv_failed` (GB-4969).
 pub(crate) fn reply_headless_ext_method(args: AcpArgsBox<acp::ExtRequest>) {
     let method = args.request.method.as_ref();
-    if method.starts_with("x.ai/") || method.starts_with("_x.ai/") {
+    if crate::acp::vendor::is_vendor_ext_method(method) {
         tracing::debug!(method, "ignoring vendor ext method in headless (standard ACP only)");
     }
     let response = Err(acp::Error::new(
@@ -71,18 +71,36 @@ pub(crate) fn handle_ext_notification(
     notif: &pi_acp_lib::AcpArgsBox<acp::ExtNotification>,
 ) -> ExtEvent {
     let method = notif.request.method.as_ref();
-    if method.starts_with("x.ai/") || method.starts_with("_x.ai/") {
+    if !cfg!(test) && crate::acp::vendor::is_vendor_ext_method(method) {
         tracing::debug!(method, "ignoring vendor ext notification in headless (standard ACP only)");
         return ExtEvent::None;
     }
-    let params = notif.request.params.get();
+    dispatch_ext_notification(method, notif.request.params.get())
+}
+
+fn dispatch_ext_notification(method: &str, params: &str) -> ExtEvent {
     if crate::acp::is_session_update_ext_method(method) {
         return decode_session_notification(method, params);
+    }
+    if method.ends_with("/task_backgrounded") {
+        return decode_task_backgrounded(method, params);
+    }
+    if method.ends_with("/task_completed") {
+        return decode_task_completed(method, params);
+    }
+    if method.ends_with("/monitor_event") {
+        return ExtEvent::MonitorEvent;
+    }
+    if method.ends_with("/leader/version_mismatch") {
+        match crate::acp::version_mismatch_banner(params) {
+            Some(banner) => tracing::warn!(%banner, "leader/version_mismatch"),
+            None => tracing::warn!("ignoring leader/version_mismatch without usable versions"),
+        }
+        return ExtEvent::None;
     }
     ExtEvent::None
 }
 
-#[allow(dead_code)]
 fn decode_task_backgrounded(method: &str, params: &str) -> ExtEvent {
     #[derive(serde::Deserialize)]
     struct TaskBgEnvelope {
@@ -114,7 +132,7 @@ fn decode_task_backgrounded(method: &str, params: &str) -> ExtEvent {
                 tracing::error!(
                     method,
                     payload = params,
-                    "headless: x.ai/task_backgrounded with mismatched sessionUpdate \
+                    "headless: legacy task_backgrounded with mismatched sessionUpdate \
                      tag; background task will not be tracked for reaping"
                 );
                 ExtEvent::None
@@ -125,7 +143,7 @@ fn decode_task_backgrounded(method: &str, params: &str) -> ExtEvent {
                 method,
                 error = %e,
                 payload = params,
-                "headless: undecodable x.ai/task_backgrounded notification; \
+                "headless: undecodable legacy task_backgrounded notification; \
                  background task will not be tracked for reaping"
             );
             ExtEvent::None
@@ -133,7 +151,6 @@ fn decode_task_backgrounded(method: &str, params: &str) -> ExtEvent {
     }
 }
 
-#[allow(dead_code)]
 fn decode_task_completed(method: &str, params: &str) -> ExtEvent {
     #[derive(serde::Deserialize)]
     struct TaskDoneEnvelope {
@@ -163,7 +180,7 @@ fn decode_task_completed(method: &str, params: &str) -> ExtEvent {
                 tracing::error!(
                     method,
                     payload = params,
-                    "headless: x.ai/task_completed with mismatched sessionUpdate \
+                    "headless: legacy task_completed with mismatched sessionUpdate \
                      tag; background task completion will not be recorded"
                 );
                 ExtEvent::None
@@ -174,7 +191,7 @@ fn decode_task_completed(method: &str, params: &str) -> ExtEvent {
                 method,
                 error = %e,
                 payload = params,
-                "headless: undecodable x.ai/task_completed notification; \
+                "headless: undecodable legacy task_completed notification; \
                  background task completion will not be recorded"
             );
             ExtEvent::None
@@ -251,7 +268,7 @@ fn decode_session_notification(method: &str, params: &str) -> ExtEvent {
             tracing::warn!(
                 method,
                 error = %e,
-                "headless: malformed x.ai session notification; ignoring"
+                "headless: malformed legacy session notification; ignoring"
             );
             return ExtEvent::None;
         }
@@ -320,7 +337,7 @@ fn decode_session_notification(method: &str, params: &str) -> ExtEvent {
                     tag,
                     payload = params,
                     "headless: background-task lifecycle tag on a session notification \
-                     (expected the dedicated x.ai/task_backgrounded|task_completed method); \
+                     (expected the dedicated task_backgrounded|task_completed method); \
                      background tracking will not be updated"
                 );
             }

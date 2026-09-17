@@ -18,7 +18,7 @@ use crate::terminal::{TerminalName, terminal_context};
 /// Fed from three places, all off the render path:
 ///   - [`cwd_git_info_lazy`] — a lazy, throttled refresh when a view reads a cwd.
 ///   - [`populate_from_cwd_async`] — an eager warm at startup / on a cwd change.
-///   - [`update_from_notification`] — the `x.ai/git_head_changed` ACP
+/// - [`update_from_notification`] — the `legacy ext RPC` ACP
 ///     notification, so a branch switch inside an agent reflects immediately
 ///     instead of waiting out [`CWD_GIT_REFRESH_TTL`].
 type CwdCacheEntry = (Option<CwdGitInfo>, Instant);

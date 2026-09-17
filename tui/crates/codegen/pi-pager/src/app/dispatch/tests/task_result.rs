@@ -903,7 +903,7 @@ fn confirmation_required_builds_plugins_confirmation_with_confirmed_true() {
     }
 }
 
-/// Regression (Bugbot): a failed `x.ai/subagent/cancel` RPC must NOT
+/// Regression (Bugbot): a failed `legacy ext RPC` RPC must NOT
 /// finalize the row — the subagent may still be running. Only a shell
 /// response of "nothing live" finalizes it.
 #[test]

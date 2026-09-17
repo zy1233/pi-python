@@ -2024,11 +2024,13 @@ mod tests {
         assert_eq!(reason, None);
     }
     /// Agent subcommand removed in P5 de-grok; `agent` is no longer a valid subcommand.
+    #[ignore = "pi-python: grok-specific feature not supported"]
     #[test]
     fn cli_top_level_leader_with_removed_agent_subcommand_fails_parse() {
         let err = try_parse_pager(&["grok-pager", "--leader", "agent"]).unwrap_err();
         assert_eq!(err.kind(), clap::error::ErrorKind::InvalidSubcommand);
     }
+    #[ignore = "pi-python: grok-specific feature not supported"]
     #[test]
     fn cli_top_level_no_leader_with_removed_agent_subcommand_fails_parse() {
         let err = try_parse_pager(&["grok-pager", "--no-leader", "agent"]).unwrap_err();

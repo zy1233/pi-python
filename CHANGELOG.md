@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **TUI `x.ai/` residual cleanup (P4P5-1 resolution)**: systematic purge of 680 `x.ai/` references across 115 files in `tui/crates/codegen/pi-pager/src/`. New `acp/vendor.rs` centralises vendor-prefix constants and helpers; 4 inbound filter sites use `vendor::is_vendor_ext_method()` as defensive guards; doc comments, test fixtures, views/dispatch literals all scrubbed. Only `vendor.rs` (4 constants) and `worktree_cmd/mod.rs` (20, deferred) retain `x.ai/` strings.
+- **Test regression fixes**: fixed 5 x.ai cleanup regressions where test data was over-renamed to `pi/` while handler code still used original constant names (`TITLE_IS_MANUAL_META_KEY`, `PI_SESSION_UPDATE_METHOD`, `is_vendor_meta_key`).
+- **Grok-specific tests marked `#[ignore]`**: 62 tests for features removed from pi-python (grok slash commands, `/loop` scheduler, `/share`, dashboard, `~/.grok` path, `agent` subcommand) annotated with `#[ignore = "pi-python: grok-specific feature not supported"]`.
+- TUI test result: `8880 passed, 0 failed, 72 ignored`.
+
 ## [0.2.0] - 2026-08-31
 
 ### Added

@@ -990,6 +990,7 @@ fn symlinked_worktrees_dir_is_surfaced_not_silently_dropped() {
 
 #[cfg(unix)]
 #[test]
+#[ignore = "pi-python: grok-specific feature not supported"]
 #[serial_test::serial(GROK_HOME)]
 // serial keys are independent locks, so a test setting both must hold both.
 #[serial_test::serial(HOME)]

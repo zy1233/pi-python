@@ -347,12 +347,12 @@ impl AgentView {
         }
         let (is_server, row) = self.resolve_queue_row(id);
         if is_server {
-            // Server row: the agent promotes it to run next (`x.ai/queue/interject`); any kind may send now.
+            // Server row: the agent promotes it to run next (`legacy/queue/interject`); any kind may send now.
             if let Some(row) = row.as_ref()
                 && let Some(server_id) = row.server_id.clone()
             {
                 // Still an optimistic echo: its `session/prompt` RPC is in flight, so an interject now would overtake the row shell-side and no-op.
-                // Park the intent; the confirming `x.ai/queue/changed` broadcast fires it with the row's authoritative version.
+                // Park the intent; the confirming `legacy/queue/changed` broadcast fires it with the row's authoritative version.
                 if self.optimistic_queue_ids.contains(&server_id) {
                     self.send_now_awaiting_confirm = Some(server_id);
                     return InputOutcome::Changed;
@@ -380,13 +380,13 @@ impl AgentView {
     }
 
     /// Reconcile this client's optimistic queue echoes against a raw
-    /// `x.ai/queue/changed` broadcast (pre-merge entries — the mirrored
+ /// `legacy ext RPC` broadcast (pre-merge entries — the mirrored
     /// snapshot re-pins unconfirmed echoes, so it can't tell confirmation
     /// apart), and resolve a parked queue-row send-now
     /// ([`Self::send_now_awaiting_confirm`]).
     ///
     /// Returns `Some((id, version))` when the parked row is now confirmed as
-    /// QUEUED — the caller fires `x.ai/queue/interject` with that
+ /// QUEUED — the caller fires `legacy ext RPC` with that
     /// authoritative version. A parked row confirmed as RUNNING clears the
     /// park with nothing to do (the natural drain won the race). A row in
     /// neither set stays parked (its RPC is still in flight).
@@ -526,7 +526,7 @@ impl AgentView {
 
         // Queue-specific actions (delete, edit, reorder). `x`/Delete = row delete.
         if let Some(event) = self.queue.handle_key(key, registry) {
-            // Server rows route to the agent as `x.ai/queue/*` commands (the rebroadcast is the source of truth); local rows mutate in place.
+            // Server rows route to the agent as `legacy/queue/*` commands (the rebroadcast is the source of truth); local rows mutate in place.
             let (is_server, row) = self.resolve_queue_row(Self::queue_event_id(&event));
 
             match event {
@@ -633,7 +633,7 @@ impl AgentView {
         }
     }
 
-    /// Reorder payload for `x.ai/queue/reorder`. Omit only running; include
+ /// Reorder payload for `legacy ext RPC`. Omit only running; include
     /// send-now in the list but do not swap past it (shell ranks missing ids last).
     fn server_queue_reordered(&self, selection_id: u64, up: bool) -> Option<Vec<String>> {
         let server_id = self.queue.row_ref(selection_id)?.server_id?;

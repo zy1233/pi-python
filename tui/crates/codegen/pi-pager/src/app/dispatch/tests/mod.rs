@@ -645,7 +645,7 @@ fn fork_test_app() -> AppView {
     app
 }
 /// Build a minimal `AcpArgs<acp::ExtRequest>` for an
-/// `x.ai/ask_user_question` ext-method request. Returns the args
+/// `legacy ext RPC` ext-method request. Returns the args
 /// plus the receiver half of the response oneshot so the test can
 /// assert the handler completes the ACP roundtrip.
 fn make_ask_user_question_args(
@@ -675,7 +675,7 @@ fn make_ask_user_question_args(
     };
     let (tx, rx) = tokio::sync::oneshot::channel();
     let ext = acp::ExtRequest::new(
-        "x.ai/ask_user_question",
+        "pi/ask_user_question",
         serde_json::value::to_raw_value(&req)
             .expect("serialize AskUserQuestionExtRequest")
             .into(),

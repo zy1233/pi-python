@@ -2301,7 +2301,7 @@ async fn session_rename_rpc(
     Err(format!("{verb} is not supported in standard ACP"))
 }
 /// Session title from local persistence: loads only this session's summary
-/// (`cwd` from the `x.ai/session/info` response), never the all-sessions list.
+/// (`cwd` from the `legacy ext RPC` response), never the all-sessions list.
 async fn lookup_session_title(session_id: &acp::SessionId, cwd: &str) -> Option<String> {
     lookup_session_title_in(
             pi_shell::util::grok_home::grok_home(),
@@ -2495,7 +2495,7 @@ pub(crate) fn rewind_execute_params(
         "mode": REWIND_MODE_WIRE,
     })
 }
-/// Build the `x.ai/interject` params. The optional structured `content`
+/// Build the `legacy ext RPC` params. The optional structured `content`
 /// (text + images) is omitted ENTIRELY when `None` so the legacy wire
 /// shape stays byte-identical. Extracted from the spawn for testability.
 fn build_interject_params(

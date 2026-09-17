@@ -1,7 +1,7 @@
 #![cfg_attr(rustfmt, rustfmt::skip)]
     use super::*;
 
-    /// Regression: a machine-wide `x.ai/models/update` broadcast
+ /// Regression: a machine-wide `legacy ext RPC` broadcast
     /// carries each model's static catalog-default effort (`high`), not the
     /// session's chosen `xhigh`, and must not clobber the per-session choice.
     #[test]
@@ -342,7 +342,7 @@
     /// `reasoning_effort` round-trips through the broadcast: the follower
     /// applies it alongside the model id so the prompt header / status bar
     /// show the right effort without waiting for a subsequent
-    /// `x.ai/models/update`.
+ /// `legacy ext RPC`.
     #[test]
     fn model_changed_applies_reasoning_effort_on_follower() {
         use pi_shell::sampling::types::ReasoningEffort;

@@ -170,7 +170,7 @@ fn open_fork_question(app: &mut AppView, directive: Option<String>) -> Vec<Effec
 /// `worktree == true` reuses the existing
 /// [`Effect::CreateWorktreeSession`] pipeline (with `load_session_id`
 /// set to the parent session id). `worktree == false` emits the new
-/// [`Effect::ForkSession`] which calls `x.ai/session/fork` directly.
+/// [`Effect::ForkSession`] which calls `legacy ext RPC` directly.
 pub(in crate::app::dispatch) fn dispatch_fork_resolved(
     app: &mut AppView,
     worktree: bool,

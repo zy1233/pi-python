@@ -1137,7 +1137,7 @@
             meta: Some(serde_json::json!({ "isReplay": true })),
         };
         let raw = serde_json::value::to_raw_value(&payload).unwrap();
-        let request = acp::ExtNotification::new("x.ai/session_notification", raw.into());
+        let request = acp::ExtNotification::new("pi/session_notification", raw.into());
         let changed = handle(
             AcpClientMessage::ExtNotification(pi_acp_lib::AcpArgs {
                 request,
@@ -1217,7 +1217,7 @@
             meta,
         };
         let raw = serde_json::value::to_raw_value(&notif).unwrap();
-        acp::ExtNotification::new("x.ai/session_notification", std::sync::Arc::from(raw))
+        acp::ExtNotification::new("pi/session_notification", std::sync::Arc::from(raw))
     }
 
     #[test]
@@ -1304,10 +1304,10 @@
             update: PiSessionUpdate::SessionSummaryGenerated {
                 session_summary: String::new(),
             },
-            meta: Some(serde_json::json!({ "x.ai/titleIsManual": false })),
+            meta: Some(serde_json::json!({ pi_shell::extensions::notification::TITLE_IS_MANUAL_META_KEY: false })),
         };
         let raw = serde_json::value::to_raw_value(&n).unwrap();
-        let notif = acp::ExtNotification::new("x.ai/session_notification", std::sync::Arc::from(raw));
+        let notif = acp::ExtNotification::new("pi/session_notification", std::sync::Arc::from(raw));
         assert!(handle_session_notification(&notif, &mut app));
         let agent = &app.agents[&AgentId(0)];
         assert!(
@@ -1331,10 +1331,10 @@
             update: PiSessionUpdate::SessionSummaryGenerated {
                 session_summary: String::new(),
             },
-            meta: Some(serde_json::json!({ "x.ai/titleIsManual": false })),
+            meta: Some(serde_json::json!({ pi_shell::extensions::notification::TITLE_IS_MANUAL_META_KEY: false })),
         };
         let raw = serde_json::value::to_raw_value(&n).unwrap();
-        let notif = acp::ExtNotification::new("x.ai/session_notification", std::sync::Arc::from(raw));
+        let notif = acp::ExtNotification::new("pi/session_notification", std::sync::Arc::from(raw));
         assert!(handle_session_notification(&notif, &mut app));
         let agent = &app.agents[&AgentId(0)];
         assert!(

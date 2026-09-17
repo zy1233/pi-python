@@ -378,7 +378,7 @@ impl CommandRegistry {
     }
 
     /// Offer only `/new` `/resume` `/quit` and local TUI chrome. Commands
-    /// that needed grok `x.ai/*` RPCs stay compiled but are not listed or
+ /// that needed grok `legacy ext RPC` RPCs stay compiled but are not listed or
     /// dispatchable.
     pub fn enable_pi_standard_slash_menu(&mut self) {
         self.pi_standard_slash = true;

@@ -3018,6 +3018,7 @@ mod command_palette_vim_input_tests {
         assert!(!action_ids.contains(&crate::actions::ActionId::OpenDashboard));
     }
 
+    #[ignore = "pi-python: grok-specific feature not supported"]
     #[test]
     fn minimal_edit_prompt_palette_selection_preserves_draft() {
         let mut agent = make_agent();

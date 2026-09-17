@@ -459,7 +459,7 @@ fn encode_feedback_images(
     (encoded, notice)
 }
 
-/// Send a raw remember note for LLM-powered rewriting via `x.ai/memory/rewrite`.
+/// Send a raw remember note for LLM-powered rewriting via `legacy ext RPC`.
 /// Clears remember mode and prompts the LLM to reformat the note with session
 /// context. Falls back to direct `SaveMemoryNote` when no session is available.
 fn send_remember_note(app: &mut AppView, text: String, record_in_history: bool) -> Vec<Effect> {
@@ -740,7 +740,7 @@ pub(crate) fn scrollback_has_user_messages(
 }
 
 /// Request a session recap. Bypasses the prompt queue — works even while the
-/// agent is mid-turn. Fires the `x.ai/recap` ext method; the recap arrives
+/// agent is mid-turn. Fires the `legacy ext RPC` ext method; the recap arrives
 /// asynchronously as a `SessionRecap` notification (rendered in scrollback).
 ///
 /// `auto` is `false` for an explicit `/recap` and `true` for the automatic
@@ -756,7 +756,7 @@ pub(super) fn dispatch_send_recap(app: &mut AppView, auto: bool) -> Vec<Effect> 
     };
 
     // Shell is authoritative (remote settings / config / env). Skip client requests
-    // entirely when the feature is off so we never hit `x.ai/recap`.
+    // entirely when the feature is off so we never hit `legacy/recap`.
     if !app.session_recap_available {
         if !auto {
             agent.show_toast("Session recap is not enabled");

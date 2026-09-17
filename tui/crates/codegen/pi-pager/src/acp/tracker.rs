@@ -374,7 +374,7 @@ pub struct AcpUpdateTracker {
     /// Tool call IDs marked as background (`is_background=true`).
     ///
     /// First-detection (no scrollback entry yet): defers entry creation until
-    /// `x.ai/task_backgrounded` creates a `BgTask` block.
+ /// `legacy ext RPC` creates a `BgTask` block.
     /// Late-detection (Execute block already exists): suppresses further output
     /// streaming; the existing block is demoted by `handle_task_backgrounded`.
     ///
@@ -2415,7 +2415,7 @@ fn task_ids_from_raw_input(raw: &serde_json::Value) -> Vec<String> {
 }
 /// Check if a tool call is a background execute (`is_background=true`).
 ///
-/// These are deferred from scrollback — the `x.ai/task_backgrounded`
+/// These are deferred from scrollback — the `legacy ext RPC`
 /// notification creates a `BgTask` block instead of an `Execute` block.
 ///
 /// Eager ACP messages often use `kind=Other` with `title=run_terminal_command`

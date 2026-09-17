@@ -406,7 +406,7 @@ fn cancel_agent_turn(
 
     // Server-authoritative queue: the agent owns the drain. On an interactive
     // cancel we only tear down the running turn and let the agent promote the
-    // FRONT queued prompt as the next turn — its `x.ai/queue/changed`
+    // FRONT queued prompt as the next turn — its `legacy/queue/changed`
     // rebroadcast (carrying `running_prompt_id`) is the source of truth, and the
     // pager adopts it via `handle_queue_changed` / `apply_turn_start_shim`. We
     // do NOT pull any queued prompt back into the input or predict the new queue
@@ -562,7 +562,7 @@ fn overdue_cancel_for_agent(agent: &mut AgentView) -> Option<Effect> {
     })
 }
 
-/// Grace window between a driver-side `x.ai/session/prompt_complete`
+/// Grace window between a driver-side `legacy ext RPC`
 /// broadcast and that turn's `session/prompt` RPC response, after which
 /// [`reconcile_overdue_turn_ends`] finishes the turn from the broadcast. The
 /// healthy-path gap is milliseconds (the shell emits the broadcast just
@@ -570,7 +570,7 @@ fn overdue_cancel_for_agent(agent: &mut AgentView) -> Option<Effect> {
 /// genuinely lost, not merely slow.
 pub(crate) const TURN_END_RECONCILE_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// Finish turns whose end was announced by `x.ai/session/prompt_complete`
+/// Finish turns whose end was announced by `legacy ext RPC`
 /// but whose `session/prompt` RPC response never arrived.
 ///
 /// The RPC response is the driver's only turn-state exit, and it can be lost

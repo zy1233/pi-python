@@ -421,7 +421,7 @@ pub(super) fn handle_gate_refreshed(
     }
 }
 
-/// `x.ai/auth/check_subscription` completed. Meta is authoritative
+/// `legacy ext RPC` completed. Meta is authoritative
 /// (`apply_auth_meta` also drops any deferred gate). A failed check only
 /// promotes the deferred gate it was verifying (`verify` generation);
 /// generic watch/focus/paywall-chain failures never touch it.
@@ -561,7 +561,7 @@ pub(super) fn dispatch_open_supergrok_url(app: &mut AppView) -> Vec<Effect> {
         .unwrap_or("https://grok.com/supergrok?referrer=grok-build");
     // Funnel attribution: tag CLI-originated SuperGrok upsell clicks
     // with `referrer=grok-build`, matching the OAuth consent flow and
-    // x.ai/cli marketing links. Applied even when the URL came from
+    // legacy/cli marketing links. Applied even when the URL came from
     // remote settings's `gate_url`, so we don't depend on the remote flag
     // being correctly configured. If the URL already specifies a
     // referrer it's left alone.

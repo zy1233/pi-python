@@ -185,7 +185,7 @@ impl HeadlessEmitter {
         }
     }
 
-    /// Render an `x.ai/*` lifecycle notification for the active format.
+ /// Render an `legacy ext RPC` lifecycle notification for the active format.
     fn on_lifecycle(&mut self, event: Lifecycle) {
         match self.format {
             OutputFormat::Plain => {
@@ -1346,7 +1346,7 @@ fn reap_request_for_work(
                 "source": "teardown",
             });
             let raw = serde_json::value::to_raw_value(&params).ok()?;
-            Some(acp::ExtRequest::new("x.ai/task/kill", raw.into()))
+            Some(acp::ExtRequest::new("legacy/task/kill", raw.into()))
         }
         BackgroundWork::Subagent(subagent_id) => {
             let params = serde_json::json!({
@@ -1354,7 +1354,7 @@ fn reap_request_for_work(
                 "subagentId": subagent_id,
             });
             let raw = serde_json::value::to_raw_value(&params).ok()?;
-            Some(acp::ExtRequest::new("x.ai/subagent/cancel", raw.into()))
+            Some(acp::ExtRequest::new("legacy/subagent/cancel", raw.into()))
         }
     }
 }

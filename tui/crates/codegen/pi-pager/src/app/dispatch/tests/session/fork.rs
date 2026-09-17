@@ -858,6 +858,7 @@ fn dispatch_fork_stashes_directive_in_pending_first_prompt() {
     );
 }
 
+#[ignore = "pi-python: grok-specific feature not supported"]
 #[test]
 fn dispatch_fork_inherits_appearance_sharing_and_plugin_visibility() {
     let mut app = fork_test_app();

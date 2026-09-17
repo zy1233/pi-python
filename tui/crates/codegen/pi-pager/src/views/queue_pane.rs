@@ -43,7 +43,7 @@ pub enum QueueRowOrigin {
     /// any idle-drained prompt). Edits mutate the local queue directly.
     Local,
     /// A server-authoritative `shared_prompt_queues` entry (plain prompt queued
-    /// while running). Edits route to the agent as `x.ai/queue/*`.
+ /// while running). Edits route to the agent as `legacy ext RPC`.
     Server,
 }
 

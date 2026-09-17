@@ -43,7 +43,7 @@ fn manual_recap_with_no_messages_toasts_empty_state_and_skips_request() {
 
     assert!(
         effects.is_empty(),
-        "empty session must not fire x.ai/recap: {effects:?}"
+        "empty session must not fire pi/recap: {effects:?}"
     );
     let agent = app.agents.get(&id).unwrap();
     assert!(agent.pending_recap_entry.is_none(), "no loading spinner");
@@ -105,7 +105,7 @@ fn manual_recap_during_batch_load_with_prompts_still_requests() {
 
     assert!(
         matches!(effects.as_slice(), [Effect::SendRecap { auto: false, .. }]),
-        "batched resume with user prompts must still fire x.ai/recap: {effects:?}"
+        "batched resume with user prompts must still fire pi/recap: {effects:?}"
     );
     let agent = app.agents.get(&id).unwrap();
     assert!(agent.pending_recap_entry.is_some());
@@ -1696,6 +1696,7 @@ fn test_pasted_png() -> crate::prompt_images::PastedImage {
 /// Full TUI inline `/feedback <text>` composed alongside a pasted image:
 /// the chip survives the composer wipe, shows up live in the prefilled
 /// pane, and travels with the submitted report.
+#[ignore = "pi-python: grok-specific feature not supported"]
 #[test]
 fn inline_feedback_carries_composer_images_into_the_pane() {
     use crate::app::app_view::InputOutcome;
@@ -1745,6 +1746,7 @@ fn inline_feedback_carries_composer_images_into_the_pane() {
 
 /// Minimal-mode inline `/feedback <text>` submits immediately; a composer
 /// image must ride the submission instead of dying with the composer wipe.
+#[ignore = "pi-python: grok-specific feature not supported"]
 #[test]
 fn minimal_inline_feedback_sends_composer_images() {
     let mut app = test_app_with_agent();

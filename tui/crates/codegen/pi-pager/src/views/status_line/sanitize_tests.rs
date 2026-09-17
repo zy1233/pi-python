@@ -33,9 +33,9 @@ fn scanner_strips_escapes_and_records_link_columns() {
         ),
         (
             "an st-terminated link whose colour paints no columns",
-            "\x1b]8;;https://x.ai\x1b\\\x1b[32mx.ai\x1b[0m\x1b]8;;\x1b\\",
+            "\x1b]8;;https://example.com\x1b\\\x1b[32mx.ai\x1b[0m\x1b]8;;\x1b\\",
             "\x1b[32mx.ai\x1b[0m",
-            &[(0, 4, "https://x.ai")],
+            &[(0, 4, "https://example.com")],
         ),
         (
             "two links on one line",
@@ -45,17 +45,17 @@ fn scanner_strips_escapes_and_records_link_columns() {
         ),
         (
             "an emoji ahead of the link is two columns wide, not one",
-            "\u{26a0}\u{fe0f}\x1b]8;;https://x.ai\x07ok\x1b]8;;\x07",
+            "\u{26a0}\u{fe0f}\x1b]8;;https://example.com\x07ok\x1b]8;;\x07",
             "\u{26a0}\u{fe0f}ok",
-            &[(2, 4, "https://x.ai")],
+            &[(2, 4, "https://example.com")],
         ),
         (
             // `tput sgr0` emits `ESC ( B`, which paints a literal `(B` if kept
             // and shifts the link right if counted.
             "a charset escape is swallowed and takes no columns",
-            "\x1b(B\x1b]8;;https://x.ai\x07x.ai\x1b]8;;\x07",
+            "\x1b(B\x1b]8;;https://example.com\x07x.ai\x1b]8;;\x07",
             "x.ai",
-            &[(0, 4, "https://x.ai")],
+            &[(0, 4, "https://example.com")],
         ),
         (
             "an erase csi never reaches the parser, the colour does",
@@ -67,9 +67,9 @@ fn scanner_strips_escapes_and_records_link_columns() {
             // Ends on a non-alphabetic final byte: stopping at the next letter
             // would swallow the text after it.
             "a csi ending in ~ is dropped whole and paints no columns",
-            "\x1b[3~\x1b]8;;https://x.ai\x07ok\x1b]8;;\x07",
+            "\x1b[3~\x1b]8;;https://example.com\x07ok\x1b]8;;\x07",
             "ok",
-            &[(0, 2, "https://x.ai")],
+            &[(0, 2, "https://example.com")],
         ),
     ];
 
@@ -86,21 +86,21 @@ fn scanner_strips_escapes_and_records_link_columns() {
 
 #[test]
 fn link_on_the_second_line_is_measured_from_that_line() {
-    let text = SanitizedText::new("first\nsee \x1b]8;;https://x.ai\x07x.ai\x1b]8;;\x07");
+    let text = SanitizedText::new("first\nsee \x1b]8;;https://example.com\x07x.ai\x1b]8;;\x07");
     let link = &text.links[0];
 
     assert_eq!(text.line_count(), 2);
     // Column 4 of the second line, not column 10 of the whole text.
     assert_eq!(
         (link.line, link.col_start, link.col_end, &*link.url),
-        (1, 4, 8, "https://x.ai")
+        (1, 4, 8, "https://example.com")
     );
 }
 
 #[test]
 fn link_is_dropped_with_the_line_the_cap_cuts() {
     let mut input = "x\n".repeat(MAX_STATUS_LINE_LINES as usize);
-    input.push_str("\x1b]8;;https://x.ai\x07late\x1b]8;;\x07");
+    input.push_str("\x1b]8;;https://example.com\x07late\x1b]8;;\x07");
     let (_, scanned) = extract_osc8_links(&input);
     let text = SanitizedText::new(&input);
 
@@ -148,6 +148,6 @@ fn script_cannot_smuggle_a_scheme_past_the_link_allowlist() {
     // The check trims, and falls back to a bare `://` test when `Url::parse`
     // refuses, so the validated and stored strings must be the same one.
     let (_, smuggled) =
-        extract_osc8_links("\x1b]8;;https://x.ai\x1b]52;c;cHduZWQ=\x07ok\x1b]8;;\x07");
+        extract_osc8_links("\x1b]8;;https://example.com\x1b]52;c;cHduZWQ=\x07ok\x1b]8;;\x07");
     assert!(smuggled.is_empty());
 }

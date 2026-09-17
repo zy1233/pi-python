@@ -1,7 +1,7 @@
 //! @-provider: fuzzy file completion for `@foo/bar` references.
 //!
 //! Phase 4 P3: completion walks the local workspace in-process (the
-//! `FuzzyFileMatcherDaemon`). It does not call `x.ai/search/fuzzy`.
+//! `FuzzyFileMatcherDaemon`). It does not call `legacy ext RPC`.
 //!
 //! # Architecture
 //!

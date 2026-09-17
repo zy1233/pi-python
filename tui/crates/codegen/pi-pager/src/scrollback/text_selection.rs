@@ -3008,13 +3008,13 @@ mod tests {
             }
         );
 
-        let urls = wrap_model(&[("see https://x.ai now", None)]);
+        let urls = wrap_model(&[("see https://example.com now", None)]);
         assert_eq!(
             semantic(&urls, 0, 6),
             SemanticSelection {
                 anchor: ep(0, 4),
-                head: ep(0, 15),
-                text: "https://x.ai".to_string(),
+                head: ep(0, 22),
+                text: "https://example.com".to_string(),
             }
         );
     }

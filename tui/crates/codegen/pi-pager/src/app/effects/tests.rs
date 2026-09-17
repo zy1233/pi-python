@@ -111,7 +111,7 @@ fn prompt_request_meta_omits_screen_mode_when_unset() {
     assert_eq!(meta, serde_json::json!({ "promptId": "p-2" }));
 }
 /// Text-only interjections must omit the `content` key entirely — the
-/// legacy `x.ai/interject` wire shape stays byte-identical.
+/// legacy `legacy ext RPC` wire shape stays byte-identical.
 #[test]
 fn interject_params_omit_content_when_no_blocks() {
     let sid = acp::SessionId::new("s1");
@@ -124,24 +124,24 @@ fn interject_params_omit_content_when_no_blocks() {
     assert_eq!(obj.len(), 3, "no extra keys on the legacy shape");
 }
 #[test]
-fn picker_keeps_conversation_with_empty_cwd_and_missing_updated_at() {
+fn picker_drops_conversation_without_updated_at_in_standard_acp_mode() {
     let payload = serde_json::json!({
             "sessions": [{
                 "sessionId": "conv_abc",
                 "cwd": "",
                 "summary": "Compare GPU vendors",
                 "source": "conversation",
-                "_meta": { "x.ai/session": { "kind": "chat" } }
+                "_meta": { "pi/session": { "kind": "chat" } }
             }]
         });
     let entries = parse_session_picker_entries(&payload);
-    assert_eq!(entries.len(), 1, "conversation must not vanish");
-    assert_eq!(entries[0].id, "conv_abc");
-    assert_eq!(entries[0].cwd, "");
-    assert_eq!(entries[0].source, "conversation");
+    assert!(
+        entries.is_empty(),
+        "legacy conversation rows without updatedAt are not special-cased"
+    );
 }
 #[test]
-fn picker_keeps_old_conversation_past_cutoff() {
+fn picker_drops_old_conversation_past_cutoff_in_standard_acp_mode() {
     let payload = serde_json::json!({
             "sessions": [{
                 "sessionId": "conv_old",
@@ -149,12 +149,14 @@ fn picker_keeps_old_conversation_past_cutoff() {
                 "summary": "Ancient chat",
                 "source": "conversation",
                 "updatedAt": "2020-01-01T00:00:00Z",
-                "_meta": { "x.ai/session": { "kind": "chat" } }
+                "_meta": { "pi/session": { "kind": "chat" } }
             }]
         });
     let entries = parse_session_picker_entries(&payload);
-    assert_eq!(entries.len(), 1, "old conversation must still render");
-    assert_eq!(entries[0].source, "conversation");
+    assert!(
+        entries.is_empty(),
+        "legacy conversation cutoff is not applied without vendor session kind"
+    );
 }
 #[test]
 fn picker_drops_local_with_missing_updated_at() {
@@ -172,9 +174,9 @@ fn picker_drops_local_with_missing_updated_at() {
             "local rows still require a parseable updatedAt"
         );
 }
-/// Untitled grok.com chats must stay listed, rendered as "Untitled".
+/// Untitled legacy conversation rows with empty summary are still dropped.
 #[test]
-fn picker_keeps_untitled_conversation_as_untitled() {
+fn picker_drops_untitled_conversation_with_empty_summary() {
     let payload = serde_json::json!({
             "sessions": [{
                 "sessionId": "conv_untitled",
@@ -182,13 +184,14 @@ fn picker_keeps_untitled_conversation_as_untitled() {
                 "summary": "",
                 "source": "conversation",
                 "updatedAt": "2026-07-01T00:00:00Z",
-                "_meta": { "x.ai/session": { "kind": "chat" } }
+                "_meta": { "pi/session": { "kind": "chat" } }
             }]
         });
     let entries = parse_session_picker_entries(&payload);
-    assert_eq!(entries.len(), 1, "untitled conversation must not vanish");
-    assert_eq!(entries[0].summary, "Untitled");
-    assert_eq!(entries[0].source, "conversation");
+    assert!(
+        entries.is_empty(),
+        "empty-summary rows stay dropped even with a timestamp"
+    );
 }
 /// The recap and last-turn summary ride the session-list wire and land on
 /// the picker entry so the expanded card can show them.
@@ -233,35 +236,26 @@ fn picker_still_drops_build_row_with_empty_summary() {
     assert!(entries.is_empty(), "empty-summary Build rows stay dropped");
 }
 #[test]
-fn session_list_partial_parses_reasons() {
+fn session_list_partial_is_not_parsed_in_standard_acp_mode() {
     let payload = |reason: &str| {
         serde_json::json!({
                 "sessions": [],
-                "_meta": { "x.ai/partial": { "conversations": true, "reason": reason } }
+                "_meta": { "pi/partial": { "conversations": true, "reason": reason } }
             })
     };
-    assert_eq!(
-            parse_session_list_partial(&payload("no_oauth")),
-            Some(ConversationsPartial::NoOauth)
+    for reason in ["no_oauth", "timeout", "error", "something_new"] {
+        assert_eq!(
+            parse_session_list_partial(&payload(reason)),
+            None,
+            "legacy partial meta is ignored ({reason})"
         );
-    assert_eq!(
-            parse_session_list_partial(&payload("timeout")),
-            Some(ConversationsPartial::Timeout)
-        );
-    assert_eq!(
-            parse_session_list_partial(&payload("error")),
-            Some(ConversationsPartial::Error)
-        );
-    assert_eq!(
-            parse_session_list_partial(&payload("something_new")),
-            Some(ConversationsPartial::Error)
-        );
+    }
 }
 #[test]
 fn session_list_partial_absent_for_healthy_or_meta_less_responses() {
     let healthy = serde_json::json!({
             "sessions": [],
-            "_meta": { "x.ai/partial": { "conversations": false } }
+            "_meta": { "pi/partial": { "conversations": false } }
         });
     assert_eq!(parse_session_list_partial(&healthy), None);
     let legacy = serde_json::json!({ "sessions": [] });
@@ -910,7 +904,7 @@ async fn persist_setting_type_mismatch_errors_simple_mode() {
 }
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-/// Spawn a fake ACP agent that counts `x.ai/yolo_mode_changed`
+/// Spawn a fake ACP agent that counts `legacy ext RPC`
 /// notifications. Exits when the channel closes.
 fn spawn_fake_acp_agent(
     mut rx: tokio::sync::mpsc::UnboundedReceiver<pi_acp_lib::AcpAgentMessage>,
@@ -920,7 +914,7 @@ fn spawn_fake_acp_agent(
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if let pi_acp_lib::AcpAgentMessage::ExtNotification(args) = msg {
-                if args.request.method.as_ref() == "x.ai/yolo_mode_changed" {
+                if args.request.method.as_ref() == "pi/yolo_mode_changed" {
                     counter_clone.fetch_add(1, Ordering::SeqCst);
                 }
                 let _ = args.response_tx.send(Ok(()));
@@ -1034,7 +1028,7 @@ async fn persist_permission_mode_acp_notification_fires_once_on_best_effort() {
     assert_eq!(
             counter.load(Ordering::SeqCst),
             1,
-            "ACP `x.ai/yolo_mode_changed` notification must fire exactly once \
+            "ACP `pi/yolo_mode_changed` notification must fire exactly once \
              on BestEffort path (regardless of disk outcome)",
         );
     assert!(
@@ -1360,7 +1354,7 @@ async fn check_marketplace_updates_dispatches_update_and_skips_failed_notificati
         while let Some(msg) = rx.recv().await {
             if let AcpAgentMessage::ExtMethod(args) = msg {
                 match args.request.method.as_ref() {
-                    "x.ai/marketplace/list" => {
+                    "pi/marketplace/list" => {
                         let response = serde_json::json!({
                                 "result": {
                                     "sources": [{
@@ -1394,7 +1388,7 @@ async fn check_marketplace_updates_dispatches_update_and_skips_failed_notificati
                             .response_tx
                             .send(Ok(acp::ExtResponse::new(Arc::from(raw))));
                     }
-                    "x.ai/marketplace/action" => {
+                    "pi/marketplace/action" => {
                         action_calls_for_task.fetch_add(1, Ordering::SeqCst);
                         let req: pi_hooks_plugins_types::MarketplaceActionRequest = serde_json::from_str(
                                 args.request.params.get(),
@@ -1427,7 +1421,7 @@ async fn check_marketplace_updates_dispatches_update_and_skips_failed_notificati
                             .response_tx
                             .send(Ok(acp::ExtResponse::new(Arc::from(raw))));
                     }
-                    "x.ai/plugins/notify-updates" => {
+                    "pi/plugins/notify-updates" => {
                         saw_success_notification_for_task.store(true, Ordering::SeqCst);
                         let raw = serde_json::value::RawValue::from_string("{}".into())
                             .expect("serialize notify response");
@@ -1471,8 +1465,12 @@ async fn check_marketplace_updates_dispatches_update_and_skips_failed_notificati
         }
         other => panic!("expected MarketplaceUpdatesAvailable, got {other:?}"),
     }
-    assert_eq!(action_calls.load(Ordering::SeqCst), 1);
-    assert!(saw_update.load(Ordering::SeqCst));
+    assert_eq!(
+        action_calls.load(Ordering::SeqCst),
+        0,
+        "standard ACP mode does not call legacy marketplace ext RPC"
+    );
+    assert!(!saw_update.load(Ordering::SeqCst));
     assert!(!saw_wrong_action.load(Ordering::SeqCst));
     assert!(!saw_success_notification.load(Ordering::SeqCst));
 }
@@ -1722,28 +1720,8 @@ async fn fetch_session_list_ignores_kind_facet_filter() {
     assert_eq!(*captured.lock().unwrap(), 1);
 }
 #[tokio::test]
-async fn fetch_workflows_list_sends_session_id() {
-    use std::sync::{Arc, Mutex};
-    use pi_acp_lib::AcpAgentMessage;
-    let captured: Arc<Mutex<Vec<serde_json::Value>>> = Arc::default();
-    let captured_for_task = captured.clone();
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::spawn(async move {
-        while let Some(msg) = rx.recv().await {
-            if let AcpAgentMessage::ExtMethod(args) = msg {
-                assert_eq!(args.request.method.as_ref(), "x.ai/workflows/list");
-                let params: serde_json::Value = serde_json::from_str(
-                        args.request.params.get(),
-                    )
-                    .expect("params JSON");
-                captured_for_task.lock().unwrap().push(params);
-                let body = serde_json::json!({ "result": { "workflows": [] } });
-                let raw = serde_json::value::RawValue::from_string(body.to_string())
-                    .expect("serialize workflows response");
-                let _ = args.response_tx.send(Ok(acp::ExtResponse::new(Arc::from(raw))));
-            }
-        }
-    });
+async fn fetch_workflows_list_returns_empty_in_standard_acp_mode() {
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let session_id = acp::SessionId::new(Arc::from("test-session"));
     let mut tasks = JoinSet::new();
     let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1770,10 +1748,6 @@ async fn fetch_workflows_list_sends_session_id() {
         }
         other => panic!("expected WorkflowsListLoaded, got {other:?}"),
     }
-    let captured = captured.lock().unwrap();
-    assert_eq!(captured.len(), 1);
-    assert_eq!(captured[0]["sessionId"], "test-session");
-    assert!(captured[0].get("cwd").is_none());
 }
 /// The debounce arm must echo `query` and `seq` exactly. Awaits the real
 /// 250 ms debounce (tokio's paused clock needs `test-util`, not enabled
@@ -2125,7 +2099,7 @@ fn to_meta_chat_mode_stamps_kind_and_omits_agent_profile() {
         ..Default::default()
     };
     let meta = flags.to_meta().expect("chat_mode must emit meta");
-    assert_eq!(meta["x.ai/session"]["kind"], "chat");
+    assert_eq!(meta["pi/session"]["kind"], "chat");
     assert!(
             meta.get("agentProfile").is_none(),
             "K12: chat mode must omit Build agentProfile"
@@ -2152,7 +2126,7 @@ fn load_meta_chat_kind_alone_stamps_kind_and_strips_profile() {
         scrub_chat_workspace_bind_meta(&mut meta);
     }
     let meta = meta.expect("chat_kind must produce meta");
-    assert_eq!(meta["x.ai/session"]["kind"], "chat");
+    assert_eq!(meta["pi/session"]["kind"], "chat");
     assert!(
             meta.get("agentProfile").is_none(),
             "entry chat_kind must strip Build agentProfile"
@@ -2186,7 +2160,7 @@ fn chat_create_meta_never_includes_workspace_bind_keys_when_cloud_fields_set() {
     apply_chat_kind_meta(&mut meta);
     scrub_chat_workspace_bind_meta(&mut meta);
     let meta = meta.expect("chat create must emit meta");
-    assert_eq!(meta["x.ai/session"]["kind"], "chat");
+    assert_eq!(meta["pi/session"]["kind"], "chat");
     assert_chat_meta_has_no_workspace_bind_keys(
         &serde_json::Value::Object(meta.clone()),
     );
@@ -2210,7 +2184,7 @@ fn chat_load_meta_never_includes_workspace_bind_keys() {
     }
     scrub_chat_workspace_bind_meta(&mut meta);
     let meta = meta.expect("chat load must emit meta");
-    assert_eq!(meta["x.ai/session"]["kind"], "chat");
+    assert_eq!(meta["pi/session"]["kind"], "chat");
     assert_chat_meta_has_no_workspace_bind_keys(
         &serde_json::Value::Object(meta.clone()),
     );
@@ -2224,17 +2198,17 @@ fn scrub_chat_workspace_matrix_attach_exception() {
     {
         let obj = meta.as_mut().unwrap();
         obj.insert("envId".into(), serde_json::json!("env-x"));
-        obj.insert("x.ai/cloud_server_id".into(), serde_json::json!("hub-x"));
+        obj.insert("pi/cloud_server_id".into(), serde_json::json!("hub-x"));
         obj.insert(
-            "x.ai/cloud_existing_workspace".into(),
+            "pi/cloud_existing_workspace".into(),
             serde_json::json!({"server_id": "srv-x", "cwd": "/ws"}),
         );
     }
     scrub_chat_workspace_bind_meta(&mut meta);
     let scrubbed = meta.as_ref().unwrap();
     assert!(scrubbed.get("envId").is_none());
-    assert!(scrubbed.get("x.ai/cloud_server_id").is_none());
-    assert!(scrubbed.get("x.ai/cloud_existing_workspace").is_none());
+    assert!(scrubbed.get("pi/cloud_server_id").is_none());
+    assert!(scrubbed.get("pi/cloud_existing_workspace").is_none());
     let mut meta = Some(acp::Meta::new());
     apply_local_workspace_meta(
         &mut meta,
@@ -2247,22 +2221,22 @@ fn scrub_chat_workspace_matrix_attach_exception() {
     {
         let obj = meta.as_mut().unwrap();
         obj.insert("envId".into(), serde_json::json!("env-must-go"));
-        obj.insert("x.ai/cloud_server_id".into(), serde_json::json!("hub-must-go"));
+        obj.insert("pi/cloud_server_id".into(), serde_json::json!("hub-must-go"));
     }
     scrub_chat_workspace_bind_meta(&mut meta);
     let scrubbed = meta.as_ref().unwrap();
     assert!(scrubbed.get("envId").is_none(), "envId must stay scrubbed");
     assert!(
-            scrubbed.get("x.ai/cloud_server_id").is_none(),
+            scrubbed.get("pi/cloud_server_id").is_none(),
             "Direct hub must stay scrubbed"
         );
     assert_eq!(
-            scrubbed["x.ai/cloud_existing_workspace"]["server_id"],
+            scrubbed["pi/cloud_existing_workspace"]["server_id"],
             "srv-dogfood"
         );
-    assert_eq!(scrubbed["x.ai/local_workspace"]["mode"], "attach");
-    assert_eq!(scrubbed["x.ai/local_workspace"]["server_id"], "srv-dogfood");
-    assert_eq!(scrubbed["x.ai/local_workspace"]["cwd"], "/tmp/repo");
+    assert_eq!(scrubbed["pi/local_workspace"]["mode"], "attach");
+    assert_eq!(scrubbed["pi/local_workspace"]["server_id"], "srv-dogfood");
+    assert_eq!(scrubbed["pi/local_workspace"]["cwd"], "/tmp/repo");
 }
 #[cfg(feature = "local-workspace")]
 #[test]
@@ -2278,11 +2252,11 @@ fn to_meta_chat_attach_stamps_local_and_existing() {
         ..Default::default()
     };
     let meta = flags.to_meta().expect("meta");
-    assert_eq!(meta["x.ai/session"]["kind"], "chat");
-    assert_eq!(meta["x.ai/local_workspace"]["mode"], "attach");
-    assert_eq!(meta["x.ai/cloud_existing_workspace"]["server_id"], "srv-1");
+    assert_eq!(meta["pi/session"]["kind"], "chat");
+    assert_eq!(meta["pi/local_workspace"]["mode"], "attach");
+    assert_eq!(meta["pi/cloud_existing_workspace"]["server_id"], "srv-1");
     assert!(meta.get("envId").is_none());
-    assert!(meta.get("x.ai/cloud_server_id").is_none());
+    assert!(meta.get("pi/cloud_server_id").is_none());
 }
 #[cfg(feature = "local-workspace")]
 #[test]
@@ -2298,11 +2272,11 @@ fn to_meta_chat_own_stamps_intent_without_existing() {
         ..Default::default()
     };
     let meta = flags.to_meta().expect("meta");
-    assert_eq!(meta["x.ai/local_workspace"]["mode"], "own");
-    assert_eq!(meta["x.ai/local_workspace"]["cwd"], "/tmp/repo-own");
-    assert!(meta["x.ai/local_workspace"].get("server_id").is_none());
+    assert_eq!(meta["pi/local_workspace"]["mode"], "own");
+    assert_eq!(meta["pi/local_workspace"]["cwd"], "/tmp/repo-own");
+    assert!(meta["pi/local_workspace"].get("server_id").is_none());
     assert!(
-            meta.get("x.ai/cloud_existing_workspace").is_none(),
+            meta.get("pi/cloud_existing_workspace").is_none(),
             "own must not stamp existing; shell mints server_id"
         );
     assert!(meta.get("envId").is_none());
@@ -2320,9 +2294,9 @@ fn mid_session_add_params_scrub_envid() {
         },
     );
     assert_eq!(params["sessionId"], "sess-1");
-    assert_eq!(params["meta"]["x.ai/local_workspace"]["mode"], "attach");
+    assert_eq!(params["meta"]["pi/local_workspace"]["mode"], "attach");
     assert_eq!(
-            params["meta"]["x.ai/cloud_existing_workspace"]["server_id"],
+            params["meta"]["pi/cloud_existing_workspace"]["server_id"],
             "srv-add"
         );
     assert!(params["meta"].get("envId").is_none());
@@ -2364,9 +2338,9 @@ fn finalize_chat_session_meta_stamps_attach_on_worktree_path() {
     let mut meta = flags.to_meta();
     finalize_chat_session_meta(&mut meta, true, &flags);
     let meta = meta.expect("meta");
-    assert_eq!(meta["x.ai/session"]["kind"], "chat");
-    assert_eq!(meta["x.ai/local_workspace"]["mode"], "attach");
-    assert_eq!(meta["x.ai/cloud_existing_workspace"]["server_id"], "srv-wt");
+    assert_eq!(meta["pi/session"]["kind"], "chat");
+    assert_eq!(meta["pi/local_workspace"]["mode"], "attach");
+    assert_eq!(meta["pi/cloud_existing_workspace"]["server_id"], "srv-wt");
     assert!(meta.get("envId").is_none());
 }
 #[test]
