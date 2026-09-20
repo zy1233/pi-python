@@ -377,3 +377,166 @@ def test_stop_reason_mapping():
         )
         == "refusal"
     )
+
+
+def test_tool_title_extraction():
+    from pi_agent_cli.events import tool_title
+
+    assert tool_title("bash", {"command": "echo hello"}) == "echo hello"
+    assert tool_title("bash", {}) == "bash"
+    assert tool_title("bash", None) == "bash"
+    assert tool_title("write", {"path": "a/b.py", "content": "..."}) == "write a/b.py"
+    assert tool_title("read", {"path": "a/b.py"}) == "read a/b.py"
+    assert tool_title("edit", {"path": "a/b.py"}) == "edit a/b.py"
+    assert tool_title("grep", {"pattern": "foo", "path": "src"}) == "grep foo src"
+    assert tool_title("grep", {"pattern": "foo"}) == "grep foo"
+    assert tool_title("find", {"pattern": "*.py"}) == "find *.py"
+    assert tool_title("ls", {"path": "src"}) == "ls src"
+    assert tool_title("custom_tool", {"foo": "bar"}) == "custom_tool"
+
+
+def test_project_event_bash_lifecycle_terminal_meta():
+    from pi_agent_core.types import (
+        AgentToolResult,
+        ToolExecutionEndEvent,
+        ToolExecutionStartEvent,
+        ToolExecutionUpdateEvent,
+    )
+
+    # 1. start
+    start_ev = ToolExecutionStartEvent(
+        tool_call_id="bash_123",
+        tool_name="bash",
+        args={"command": "python zh_experiment.py"},
+    )
+    start_updates = list(project_event(start_ev, cwd="/workspace/proj"))
+    assert len(start_updates) == 1
+    u_start = start_updates[0]
+    assert u_start.session_update == "tool_call"
+    assert u_start.title == "python zh_experiment.py"
+    assert u_start.kind == "execute"
+    assert u_start.field_meta == {
+        "terminal_info": {
+            "terminal_id": "bash_123",
+            "cwd": "/workspace/proj",
+        }
+    }
+    assert u_start.content[0].type == "terminal"
+    assert u_start.content[0].terminal_id == "bash_123"
+
+    # 2. update 1 (partial stdout)
+    upd_ev1 = ToolExecutionUpdateEvent(
+        tool_call_id="bash_123",
+        tool_name="bash",
+        partial_result=AgentToolResult(
+            content=[{"type": "text", "text": "Running test 1\n"}],
+            details=None,
+        ),
+        args={"command": "python zh_experiment.py"},
+    )
+    upd_updates1 = list(project_event(upd_ev1))
+    assert len(upd_updates1) == 1
+    u_upd1 = upd_updates1[0]
+    assert u_upd1.session_update == "tool_call_update"
+    assert u_upd1.field_meta == {
+        "terminal_output": {
+            "terminal_id": "bash_123",
+            "data": "Running test 1\n",
+        }
+    }
+    assert any(c.type == "terminal" for c in u_upd1.content)
+    assert any(
+        getattr(c, "content", None) and c.content.text == "Running test 1\n" for c in u_upd1.content
+    )
+
+    # 2. update 2 (incremental delta)
+    upd_ev2 = ToolExecutionUpdateEvent(
+        tool_call_id="bash_123",
+        tool_name="bash",
+        partial_result=AgentToolResult(
+            content=[{"type": "text", "text": "Running test 1\nRunning test 2\n"}],
+            details=None,
+        ),
+        args={"command": "python zh_experiment.py"},
+    )
+    upd_updates2 = list(project_event(upd_ev2))
+    assert len(upd_updates2) == 1
+    u_upd2 = upd_updates2[0]
+    assert u_upd2.field_meta == {
+        "terminal_output": {
+            "terminal_id": "bash_123",
+            "data": "Running test 2\n",
+        }
+    }
+
+    # 3. end (completed with remaining delta or exit)
+    end_ev = ToolExecutionEndEvent(
+        tool_call_id="bash_123",
+        tool_name="bash",
+        result=AgentToolResult(
+            content=[{"type": "text", "text": "Running test 1\nRunning test 2\nDone.\n"}],
+            details=None,
+        ),
+        is_error=False,
+    )
+    end_updates = list(project_event(end_ev))
+    assert len(end_updates) == 1
+    u_end = end_updates[0]
+    assert u_end.session_update == "tool_call_update"
+    assert u_end.status == "completed"
+    assert u_end.field_meta == {
+        "terminal_exit": {
+            "terminal_id": "bash_123",
+            "exit_code": 0,
+        },
+        "terminal_output": {
+            "terminal_id": "bash_123",
+            "data": "Done.\n",
+        },
+    }
+    assert any(c.type == "terminal" for c in u_end.content)
+    assert any(
+        getattr(c, "content", None) and c.content.text.startswith("Running test")
+        for c in u_end.content
+    )
+
+
+def test_project_message_replay_bash():
+    from pi_agent_cli.events import project_message_replay
+    from pi_agent_core.messages import AssistantMessage, ToolResultMessage
+
+    asst_msg = AssistantMessage(
+        content=[
+            {
+                "type": "toolCall",
+                "id": "tc_replay_bash",
+                "name": "bash",
+                "arguments": {"command": "pytest -v"},
+            }
+        ]
+    )
+    asst_updates = list(project_message_replay(asst_msg))
+    assert len(asst_updates) == 1
+    u_tc = asst_updates[0]
+    assert u_tc.session_update == "tool_call"
+    assert u_tc.title == "pytest -v"
+    assert u_tc.field_meta.get("terminal_info") == {"terminal_id": "tc_replay_bash"}
+
+    result_msg = ToolResultMessage(
+        toolCallId="tc_replay_bash",
+        toolName="bash",
+        content=[{"type": "text", "text": "collected 10 items\n10 passed"}],
+        isError=False,
+    )
+    res_updates = list(project_message_replay(result_msg))
+    assert len(res_updates) == 1
+    u_res = res_updates[0]
+    assert u_res.session_update == "tool_call_update"
+    assert u_res.field_meta.get("terminal_output") == {
+        "terminal_id": "tc_replay_bash",
+        "data": "collected 10 items\n10 passed",
+    }
+    assert u_res.field_meta.get("terminal_exit") == {
+        "terminal_id": "tc_replay_bash",
+        "exit_code": 0,
+    }

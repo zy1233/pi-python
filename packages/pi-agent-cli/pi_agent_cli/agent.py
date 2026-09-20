@@ -75,6 +75,9 @@ class PiAcpAgent(Agent):
         self._repo = repo if repo is not None else JsonlSessionRepo(sessions_dir)
         self._harnesses: dict[str, AgentHarness] = {}
         self._abort_tasks: set[asyncio.Task[Any]] = set()
+        self._session_cwds: dict[str, str] = {}
+        self._client_capabilities: ClientCapabilities | None = None
+        self._client_info: Implementation | None = None
 
     def on_connect(self, conn: Client) -> None:
         self._conn = conn
@@ -86,6 +89,8 @@ class PiAcpAgent(Agent):
         client_info: Implementation | None = None,
         **kwargs: Any,
     ) -> InitializeResponse:
+        self._client_capabilities = client_capabilities
+        self._client_info = client_info
         return InitializeResponse(
             protocol_version=min(protocol_version, PROTOCOL_VERSION),
             agent_capabilities=AgentCapabilities(
@@ -272,11 +277,13 @@ class PiAcpAgent(Agent):
 
         harness.subscribe(on_event)
         self._harnesses[session_id] = harness
+        self._session_cwds[session_id] = cwd
 
     async def _emit_updates(self, session_id: str, event: Any) -> None:
         if self._conn is None:
             return
-        for update in project_event(event):
+        cwd = self._session_cwds.get(session_id)
+        for update in project_event(event, cwd=cwd):
             await self._conn.session_update(session_id=session_id, update=update)
 
     async def _handle_tool_call(self, session_id: str, event: Any) -> dict[str, Any] | None:
