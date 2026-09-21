@@ -2,29 +2,12 @@
 
 ## Project overview
 
-`pi-python` is an unofficial Python port inspired by [`@earendil-works/pi-agent-core`](https://github.com/earendil-works/pi), with **LangChain replacing the `pi-ai` LLM layer**. It is not affiliated with or endorsed by the official `pi` project.
+`pi-python`: faithful Python port of [`@earendil-works/pi-agent-core`](https://github.com/earendil-works/pi), with LangChain as the `StreamFn` boundary adapter. Unofficial; unaffiliated with the official `pi` project.
 
-Design documents:
+- **Faithful port.** TS sources (`packages/agent/src/agent-loop.ts` / `agent.ts`) are the reference; match their behaviour.
+- **LangChain is boundary-only.** Tool execution, turn management, and the event protocol live in `agent_loop.py`.
 
-| Document | Contents |
-|----------|----------|
-| `docs/DESIGN.md` | Project-wide architecture and module design |
-| `docs/PLAN/PLAN-PHASE1.md` | Phase 1 original planning (historical, was `plan.md`) |
-| `docs/specs/2026-05-25-phase2-production-enhancements-design.md` | Phase 2 spec |
-| `docs/specs/2026-07-03-phase3-agent-harness-design.md` | Phase 3 harness spec |
-| `docs/specs/2026-07-03-p6-tool-ecosystem-design.md` | P6 tool-ecosystem spec |
-| `docs/specs/2026-08-25-phase4-coding-agent-cli-design.md` | Phase 4 CLI: forked grok TUI + standard ACP |
-| `docs/specs/2026-09-02-phase5-prompt-engine-design.md` | Phase 5: pi-aligned coding-agent prompt engine |
-| `docs/AUDIT/AUDIT-2026-07-02.md` | Core-layer audit tracker |
-| `docs/AUDIT/AUDIT-H1.md` ~ `docs/AUDIT/AUDIT-H4.md` | Harness batch audits |
-| `docs/AUDIT/SPIKE-P0-GROK-TUI.md` | Phase 4 P0: pager `x.ai/*` strip list |
-| `docs/benchmarks/FRONTIER-HARNESS-EVAL.md` | FrontierHarness evaluation architecture & methodology |
-| `docs/benchmarks/FRONTIER-HARNESS-30-EVAL-REPORT.md` | Full 30-task benchmark report & Pi baseline comparison |
-
-Guiding principles:
-
-- **Faithfully port pi's loop semantics.** The TS sources (`packages/agent/src/agent-loop.ts` / `agent.ts` upstream) are the reference; when in doubt, match their behavior.
-- **LangChain is only a `StreamFn` boundary adapter.** Tool execution, turn management, and the event protocol live in `agent_loop.py` — never delegate them to LangChain agents/ToolNode.
+Specs, audits, and benchmarks live under `docs/` — see `docs/DESIGN.md` for architecture, `docs/specs/` for phase designs (2–5, P6), `docs/AUDIT/` for audit trackers, `docs/benchmarks/` for FrontierHarness 30 evaluation.
 
 ### Architecture
 
@@ -38,126 +21,66 @@ AgentMessage[] → transform_context() → convert_to_llm() → LangChain BaseMe
 
 ### Module map
 
-| Module | Role | pi (TS) counterpart |
-|--------|------|---------------------|
-| `pi_agent_core/messages.py` | Canonical messages (user/assistant/toolResult), content blocks, `Usage` | `pi-ai` messages |
-| `pi_agent_core/types.py` | `Model`, `AgentTool`, contexts, event types, `AgentLoopConfig` | `packages/agent/src/types.ts` |
+| Module | Role | TS counterpart |
+|--------|------|----------------|
+| `pi_agent_core/messages.py` | Canonical messages, content blocks, `Usage` | `pi-ai` messages |
+| `pi_agent_core/types.py` | `Model`, `AgentTool`, contexts, events, `AgentLoopConfig` | `types.ts` |
 | `pi_agent_core/event_stream.py` | `EventStream` / `AssistantMessageEventStream` | `pi-ai` EventStream |
-| `pi_agent_core/agent_loop.py` | Core loop: turns, tool execution, hooks, event emission | `packages/agent/src/agent-loop.ts` |
-| `pi_agent_core/agent.py` | Stateful `Agent` wrapper: prompt/steer/follow-up queues, abort | `packages/agent/src/agent.ts` |
-| `pi_agent_core/adapters/langchain_convert.py`, `langchain_stream.py` | pi ⇄ LangChain conversion; `StreamFn` over `astream()` | `packages/ai/src/stream.ts` |
-| `pi_agent_core/transform.py` | Cross-provider replay (tool-call id normalization, thinking downgrade, image stripping) | `pi-ai` transforms |
-| `pi_agent_core/tools.py`, `validation.py`, `queues.py` | `SimpleTool` helper, argument validation, steering/follow-up queues | — |
-| `pi_agent_core/coding_tools/`, `adapters/langchain_tools.py` | Built-in coding tools (all 7: `read`/`bash`/`edit`/`write`/`grep`/`find`/`ls`) + LangChain tool adapter | pi coding-agent built-in tools |
-| `packages/pi-agent-harness/pi_agent_harness` | Phase 3 harness package: sessions, AgentHarness, compaction, skills/templates, LocalExecutionEnv | `packages/agent/src/harness/` |
-| `packages/pi-agent-cli/pi_agent_cli` | Phase 4 standard-ACP agent (`python -m pi_agent_cli`); no `x.ai/*` | — |
-| `tui/` | Phase 4 forked grok TUI (Apache-2.0 Cargo workspace, not in wheels). Product binary `zypi` | grok-build pager |
+| `pi_agent_core/agent_loop.py` | Core loop: turns, tool execution, hooks, events | `agent-loop.ts` |
+| `pi_agent_core/agent.py` | Stateful `Agent`: prompt/steer/follow-up queues, abort | `agent.ts` |
+| `pi_agent_core/adapters/` | pi ⇄ LangChain conversion; `StreamFn` over `astream()` | `stream.ts` |
+| `pi_agent_core/transform.py` | Cross-provider replay (id normalization, thinking downgrade, image stripping) | `pi-ai` transforms |
+| `pi_agent_core/tools.py`, `validation.py`, `queues.py` | `SimpleTool`, argument validation, queues | — |
+| `pi_agent_core/coding_tools/` | Built-in coding tools (`read`/`bash`/`edit`/`write`/`grep`/`find`/`ls`) | pi coding tools |
+| `packages/pi-agent-harness/` | Sessions, AgentHarness, compaction, skills, LocalExecutionEnv | `harness/` |
+| `packages/pi-agent-cli/` | Standard-ACP CLI (`python -m pi_agent_cli`); config `agent.example.toml`, home `~/.pi-python`; TUI binary `zypi` under `tui/`. See [`packages/pi-agent-cli/AGENTS.md`](packages/pi-agent-cli/AGENTS.md) for spawn, config, and prompt pipeline | — |
 
-### Invariants (do not break)
+### Invariants
 
-1. **Event contract** — `prompt()` without tools emits exactly: `agent_start → turn_start → message_start(user) → message_end(user) → message_start(assistant) → message_update* → message_end(assistant) → turn_end → agent_end`. With tools, `tool_execution_*` and `toolResult` message events are inserted after `message_end(assistant)`, possibly across multiple turns.
-2. **Parallel tool ordering** — `tool_execution_end` fires in **completion order**; `toolResult` messages persist in tool-call **source order**.
-3. **terminate semantics** — skip the next LLM turn only when **all** finalized tool results in the batch have `terminate=True`.
-4. **StreamFn contract** — never raises to the caller; failures are encoded as an `error` event with `stop_reason=error|aborted`.
-5. **Thinking/reasoning gating** — reasoning params are injected iff `Model.reasoning=True` **and** `thinking_level != "off"`; the same flag drives thinking-history stripping in `transform_messages`, keeping request params and message replay consistent.
-6. **Usage accumulation is per-field max, not sum** — real providers report usage as a single final report, complementary splits (Anthropic), or cumulative per-chunk snapshots (SiliconFlow/vLLM gateways); summing inflates the last shape by orders of magnitude.
-7. **Structured output must not break streaming** — `response_schema` works via prompt injection + native `response_format` (OpenAI-style); never switch to `with_structured_output` (it replaces `AIMessageChunk` streaming and kills the event protocol).
+1. **Event contract** — `prompt()` without tools: `agent_start → turn_start → message_start(user) → message_end(user) → message_start(assistant) → message_update* → message_end(assistant) → turn_end → agent_end`. With tools, `tool_execution_*` and `toolResult` events insert after `message_end(assistant)`, possibly across turns.
+2. **Parallel tool ordering** — `tool_execution_end` fires in completion order; `toolResult` messages persist in source order.
+3. **Terminate semantics** — skip next LLM turn only when **all** finalized tool results have `terminate=True`.
+4. **StreamFn contract** — never raises; failures encoded as `error` event (`stop_reason=error|aborted`).
+5. **Thinking gating** — reasoning params injected iff `Model.reasoning=True` and `thinking_level != "off"`; same flag drives thinking-history stripping in `transform_messages`.
+6. **Usage accumulation** — per-field max, not sum (providers report cumulative snapshots or complementary splits).
+7. **Structured output** — `response_schema` via prompt injection + `response_format`; `with_structured_output` kills streaming.
 
-### Status
+## Development
 
-**Engine layer complete** — Phase 1–3 + P6 as above. Real-API smoke (`scripts/smoke_real_api.py`) passed against SiliconFlow. All harness audits (H1–H4) closed.
-
-**Phase 4 (Coding Agent CLI) P0–P4 landed** — `tui/` vendored grok-build fork de-grokked: crates renamed `pi-*`, product binary `zypi` (`cargo check -p pi-pager-bin`); grok CLI subcommands removed; startup skips auth/prefetch; welcome uses zypi branding. `packages/pi-agent-cli` is standard-ACP-only over `AgentHarness`; TUI spawn is `python -m pi_agent_cli` (`PI_AGENT_COMMAND` / `[agent].command` / `PI_PYTHON`), skips xAI login, drops outbound `x.ai/*`, home `~/.pi-python`. `/new` `/resume` `/quit` map to standard ACP; `@` is local directory listing; `zypi -p` is Python headless. Config: `packages/pi-agent-cli/agent.example.toml` (Python agent; keep `config.toml` empty or pi-python-only); Windows: `docs/WINDOWS.md`. See `docs/specs/2026-08-25-phase4-coding-agent-cli-design.md`.
-
-**Phase 5 (Coding Agent prompt engine) landed** — pi-aligned `build_system_prompt` / `build_coding_agent_harness_system_prompt` in `pi_agent_cli`; tool `prompt_snippet`/`prompt_guidelines` consumption; AGENTS.md context files; `<available_skills>` format; bash `PI_*` env. See `docs/specs/2026-09-02-phase5-prompt-engine-design.md`.
-
-**FrontierHarness 30 Benchmark Suite landed** — `scripts/run_eval.py` CLI evaluating code-agent harnesses across 30 frontier tasks (21 Terminal-Bench + 9 DeepSWE industrial repo fixes). Supports dual runtime: Windows local mode (NTFS junction `_winapi.CreateJunction` virtualizing `/app`) and WSL2 Docker sandboxing (`DockerContainerSession`, `create_docker_bash_tool`, adaptive ext4 `/tmp` workspace resolving Windows 9p/drvfs POSIX permission issues, transparent v2ray proxy for pulling AWS ECR / Docker Hub images). All 30 tasks evaluated end-to-end; comprehensive report in `docs/benchmarks/FRONTIER-HARNESS-30-EVAL-REPORT.md`.
-
-## Cursor Cloud specific instructions
-
-This is a Python monorepo with `pi-agent-core`, `pi-agent-harness`, and `pi-agent-cli`, plus a Rust TUI workspace under `tui/` (vendored fork of grok-build). There are no services to start — Python packages are installed in editable mode and tested via `pytest`. TUI: `cd tui && cargo check -p pi-pager-bin` (product binary `zypi`; `CARGO_TARGET_DIR` is set in WSL environment, do NOT explicitly specify or override it on the command line).
+Python monorepo (`pi-agent-core`, `pi-agent-harness`, `pi-agent-cli`) + Rust TUI workspace `tui/` (vendored grok-build fork, binary `zypi`). Packages installed editable; tested via `pytest`. TUI: `cd tui && cargo check -p pi-pager-bin` (WSL; Cargo reads `CARGO_TARGET_DIR` from WSL env exclusively).
 
 ### Virtual environments (uv)
 
-This project uses **uv** for dependency management and virtual environments. Existing venvs:
-
 | Venv | Purpose |
 |------|---------|
-| `.venv` | Primary development venv (Python 3.12, `[dev]` + harness) — unit tests, linting |
-| `.venv-test-real` | Real-LLM integration tests (PyPI deps + `langchain-deepseek`) |
-| `.venv-audit` | Audit/review work |
-| `.venv-ci-check` | CI lint/format checks |
+| `.venv` | Primary dev (Python 3.12, `[dev]` + harness) — tests, linting |
+| `.venv-test-real` | Real-LLM integration (`langchain-deepseek` — preserves `reasoning_content`; needs `REAL_LLM_API_KEY`) |
 
-**ALWAYS use the existing venvs.** Never install packages globally with `pip` — use `uv pip install --python <venv> <pkg>` to add deps into the target venv.
+Add deps with `uv pip install --python <venv> <pkg>`. Pass secrets via env vars.
 
-All `.venv-*` directories are in `.gitignore`. **API keys must ONLY be set via environment variables — never hardcode them in source files.**
+### Commands
 
-On Windows, invoke Python / pytest via the venv Scripts path:
+Use venv Python — Windows `python3` may alias the Store stub.
 
-```powershell
-# Unit tests (mock, no API key needed)
-.venv\Scripts\python.exe -m pytest -v
+| Action | Command |
+|--------|---------|
+| Tests (mock) | `.venv\Scripts\python.exe -m pytest` |
+| Tests (real LLM) | `.venv-test-real\Scripts\python.exe -m pytest -m real_llm -v` |
+| Eval | `scripts/run_eval.py --frontier-30 --task <id>` — see `docs/benchmarks/` |
 
-# Real-LLM integration tests (requires REAL_LLM_API_KEY env var)
-$env:REAL_LLM_API_KEY = 'sk-...'
-.venv-test-real\Scripts\python.exe -m pytest pi_agent_core/tests/test_real_llm.py -m real_llm -v
+Lint/format: see `pre-push-ruff` rule. Config in `pyproject.toml` `[tool.ruff]`.
 
-# Smoke script
-$env:SMOKE_API_KEY = 'sk-...'
-.venv\Scripts\python.exe scripts/smoke_real_api.py
-```
+### Venv recovery
 
-To recreate the real-LLM test venv from scratch:
+Only if a venv is broken — recreate from scratch:
 
 ```powershell
+# Dev
+uv venv --python 3.12 .venv
+uv pip install --python .venv -e ".[dev]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent-cli"
+
+# Real-LLM
 uv venv --python 3.12 .venv-test-real
 uv pip install --python .venv-test-real pytest pytest-asyncio pydantic "langchain-core>=0.3.0" "typing-extensions>=4.6" langchain-deepseek
 uv pip install --python .venv-test-real --no-deps -e .
 ```
-
-To create a fresh dev venv (only if `.venv` is broken):
-
-```powershell
-uv venv --python 3.12 .venv
-uv pip install --python .venv -e ".[dev]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent-cli"
-```
-
-### Key commands
-
-| Action | Command |
-|--------|---------|
-| Install (dev) | `uv pip install --python .venv -e ".[dev]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent-cli"` |
-| Add a provider | `uv pip install --python .venv-test-real langchain-deepseek` |
-| Lint check | `ruff check .` |
-| Format check | `ruff format --check .` |
-| Auto-fix lint | `ruff check --fix .` |
-| Auto-format | `ruff format .` |
-| Run tests (mock) | `.venv\Scripts\python.exe -m pytest` (or `-v` for verbose) |
-| Run tests (real LLM) | `$env:REAL_LLM_API_KEY='sk-...'; .venv-test-real\Scripts\python.exe -m pytest -m real_llm -v` |
-| Pelican TUI smoke | `$env:REAL_LLM_API_KEY='sk-...'; .venv\Scripts\python.exe scripts/smoke_pelican.py` — see `docs/benchmarks/PELCAN-BICYCLE.md` |
-| Harness benchmark eval (Windows local) | `$env:REAL_LLM_API_KEY='sk-...'; .venv\Scripts\python.exe scripts/run_eval.py --frontier-30 --task regex-log` |
-| Harness benchmark eval (WSL Docker) | `wsl env REAL_LLM_API_KEY='sk-...' /tmp/pi-eval-venv/bin/python /mnt/d/work/pi-python/scripts/run_eval.py --frontier-30 --task <task-id> --max-turns 20` |
-| TUI cargo check | WSL: `cd tui && cargo check -p pi-pager-bin` (binary name `zypi`; uses WSL `$CARGO_TARGET_DIR` env) |
-
-### Benchmark & Evaluation (FrontierHarness 30)
-
-The repository integrates a comprehensive benchmarking suite inspired by `frontier-harness-eval` for evaluating code-agent harnesses across 30 frontier tasks (21 `terminal-bench` + 9 `datacurve`/`swe-bench`).
-
-- **Entry point**: `scripts/run_eval.py`
-  - Arguments: `--frontier-30`, `--task <task-id>`, `--suite <suite>`, `--max-turns <n>`, `--model <model>`
-  - Output directory: `.pi-eval/runs/<timestamp>/` (contains `REPORT.md`, `eval-summary.json`, trajectories, and logs; ignored by git).
-- **Execution runtimes**:
-  - **Windows Local Mode**: Employs Windows NTFS Junctions (`_winapi.CreateJunction`) to map `/app` or `\app` transparently to the active workspace on drive root (`D:\app`), supporting local terminal/algorithm tasks without containers.
-  - **WSL2 Docker Sandbox Mode**: True Linux container isolation via `DockerContainerSession` and `create_docker_bash_tool`. Transparently routes through host v2ray proxy (`172.20.35.30:10809`) for pulling AWS ECR / Docker Hub images; automatically strips CRLF, handles Git `safe.directory`, adapts ext4 `/tmp/pi-ws-*` temporary worktree to support strict POSIX file permissions (`chmod 600`), and extracts verifier scores (`reward.json` / `reward.txt`).
-- **Reports & Analysis**: Full 30-task evaluation results, cost analysis, cache hit rates, and side-by-side comparison against official Pi are documented in `docs/benchmarks/FRONTIER-HARNESS-30-EVAL-REPORT.md`.
-
-### Notes
-
-- **WSL Cargo Build**: The user has set the `CARGO_TARGET_DIR` environment variable in WSL. When compiling or running `cargo check`/`cargo test` in WSL, **never** specify or override `CARGO_TARGET_DIR` on the command line (e.g. do not pass `CARGO_TARGET_DIR=...`), let Cargo use the WSL environment variable directly.
-- **Ruff** is the linter and formatter. Config is in `pyproject.toml` under `[tool.ruff]`. Rules enabled: E, F, I, UP, B, SIM, RUF. Line length: 100. Target: Python 3.11.
-- **Always use venv Python** — on Windows the system `python3` may point to the Windows Store stub. Use `.venv\Scripts\python.exe` or `.venv-test-real\Scripts\python.exe` explicitly.
-- All unit tests use a mock stream (`pi_agent_core/tests/mock_stream.py`) — **no API keys needed**.
-- Real-LLM integration tests (`pi_agent_core/tests/test_real_llm.py`) are marked with `@pytest.mark.real_llm`. They auto-skip when `REAL_LLM_API_KEY` is unset. Use the dedicated `.venv-test-real` venv with the env var set to run them.
-- **Never hardcode API keys in source.** All secrets go via environment variables (`REAL_LLM_API_KEY`, `SMOKE_API_KEY`, etc.).
-- `asyncio_mode = "auto"` is set in `pyproject.toml`, so async test functions are automatically detected by `pytest-asyncio`.
-- `langchain-deepseek` is the provider for SiliconFlow / DeepSeek-compatible endpoints (preserves `reasoning_content` thinking).
