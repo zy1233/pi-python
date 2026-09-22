@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pi-goal-x-py"
+version = "0.1.0"
+description = "Goal-driven planning extension for pi-python (port of pi-goal-x)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [
+    { name = "zy1233", email = "zy1233@users.noreply.github.com" },
+]
+keywords = ["agent", "goal", "planning", "pi", "extension"]
+dependencies = [
+    "pi-agent-core-lc>=0.3.0",
+]
+
+[project.entry-points."pi_agent.extensions"]
+pi-goal-x = "pi_goal_x:activate"
+
+[project.urls]
+Homepage = "https://github.com/zy1233/pi-python"
+Repository = "https://github.com/zy1233/pi-python"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pi_goal_x"]
+
+[tool.uv.sources]
+pi-agent-core-lc = { workspace = true }

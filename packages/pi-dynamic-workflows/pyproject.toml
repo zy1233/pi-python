@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pi-dynamic-workflows-py"
+version = "0.1.0"
+description = "Dynamic workflow orchestration extension for pi-python (port of pi-dynamic-workflows)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [
+    { name = "zy1233", email = "zy1233@users.noreply.github.com" },
+]
+keywords = ["agent", "workflow", "orchestration", "subagent", "pi", "extension"]
+dependencies = [
+    "pi-agent-core-lc>=0.3.0",
+]
+
+[project.entry-points."pi_agent.extensions"]
+pi-dynamic-workflows = "pi_dynamic_workflows:activate"
+
+[project.urls]
+Homepage = "https://github.com/zy1233/pi-python"
+Repository = "https://github.com/zy1233/pi-python"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pi_dynamic_workflows"]
+
+[tool.uv.sources]
+pi-agent-core-lc = { workspace = true }

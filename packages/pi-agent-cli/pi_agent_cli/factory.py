@@ -156,6 +156,7 @@ async def create_session_harness(
         thinking_level=config.thinking_level,
         max_turns=config.max_turns,
         compaction=CompactionSettings(auto_compact=auto_compact),
+        auto_discover_extensions=True,
     )
     harness_holder["harness"] = harness
     if on_tool_call is not None:

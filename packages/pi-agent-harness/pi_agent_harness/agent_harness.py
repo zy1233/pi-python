@@ -9,6 +9,10 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from pi_agent_core.agent_loop import run_agent_loop
+from pi_agent_core.extensions._harness_bridge import HarnessBridge
+from pi_agent_core.extensions.loader import ActivateFn, ExtensionLoader
+from pi_agent_core.extensions.registry import ExtensionRegistry
+from pi_agent_core.extensions.types import ToolDefinition, ToolInfo
 from pi_agent_core.messages import AssistantMessage, ImageContent, TextContent, Usage, UserMessage
 from pi_agent_core.types import (
     AfterToolCallContext,
@@ -171,6 +175,34 @@ class _TurnState:
 PendingWrite = dict[str, Any]
 
 
+def _tool_from_definition(defn: ToolDefinition) -> AgentTool:
+    """Convert an extension ``ToolDefinition`` to the ``AgentTool`` protocol."""
+    from pi_agent_core.coding_tools._base import CodingTool
+
+    async def _execute(
+        tool_call_id: str,
+        params: Any,
+        signal: Any | None = None,
+        on_update: Any | None = None,
+    ) -> Any:
+        result = defn.execute(tool_call_id, params, signal, on_update)
+        if hasattr(result, "__await__"):
+            return await result
+        return result
+
+    return CodingTool(
+        name=defn.name,
+        description=defn.description,
+        label=defn.label or defn.name,
+        parameters=defn.parameters,
+        execute_fn=_execute,
+        execution_mode=defn.execution_mode,
+        prepare_arguments=defn.prepare_arguments,
+        prompt_snippet=defn.prompt_snippet,
+        prompt_guidelines=list(defn.prompt_guidelines),
+    )
+
+
 class AgentHarness:
     def __init__(
         self,
@@ -191,6 +223,10 @@ class AgentHarness:
         compaction: CompactionSettings | dict[str, Any] | None = None,
         max_turns: int | None = None,
         tool_timeout: float | None = None,
+        # Phase 7: Extension API
+        extensions: list[ActivateFn] | None = None,
+        extension_dirs: list[str] | None = None,
+        auto_discover_extensions: bool = False,
     ) -> None:
         self.env = env
         self.session = session
@@ -234,9 +270,150 @@ class AgentHarness:
         self._run_abort_controller: _AbortController | None = None
         self._cached_system_prompt: str | None = None
 
+        # Phase 7: Extension API
+        self._extension_registry = ExtensionRegistry()
+        self._extension_loader = ExtensionLoader(self._extension_registry)
+        self._extensions_loaded = False
+        self._extension_config = {
+            "extensions": extensions or [],
+            "extension_dirs": extension_dirs or [],
+            "auto_discover": auto_discover_extensions,
+        }
+
     def invalidate_system_prompt_cache(self) -> None:
         """Clear the cached system prompt so it will be regenerated on the next turn."""
         self._cached_system_prompt = None
+
+    # -- Phase 7: Extension lifecycle ----------------------------------------
+
+    def _ensure_extensions_loaded(self) -> None:
+        """Load extensions (once) before the first prompt."""
+        if self._extensions_loaded:
+            return
+        self._extensions_loaded = True
+
+        cfg = self._extension_config
+        cwd = self.env.cwd if self.env else None
+
+        # Discover extra directories (beyond default dirs)
+        extra_dirs: list[str] = list(cfg["extension_dirs"])
+        extra_fns: list[ActivateFn] = []
+        for d in extra_dirs:
+            extra_fns.extend(self._extension_loader.discover_directory(d))
+        extra_fns.extend(cfg["extensions"])
+
+        apis = self._extension_loader.load_all(
+            extra=extra_fns,
+            cwd=cwd,
+            auto_discover=cfg["auto_discover"],
+        )
+
+        bridge = self._create_bridge()
+        for api in apis:
+            api._set_bridge(bridge)
+
+        # Inject extension-registered tools into the harness
+        for defn in self._extension_registry.get_tools().values():
+            tool = _tool_from_definition(defn)
+            self._tools[tool.name] = tool
+            if tool.name not in self.active_tool_names:
+                self.active_tool_names.append(tool.name)
+        self.invalidate_system_prompt_cache()
+
+        # Wire extension event handlers into the subscribe pipeline
+        for event, registrations in self._extension_registry.get_all_event_handlers().items():
+            for reg in registrations:
+                self._hooks.setdefault(event, []).append(reg.handler)
+
+    def _create_bridge(self) -> HarnessBridge:
+        """Build the ``HarnessBridge`` implementation backed by this harness."""
+        harness = self
+
+        class _Bridge:
+            def inject_tool(self, definition: ToolDefinition) -> None:
+                tool = _tool_from_definition(definition)
+                harness._tools[tool.name] = tool
+                if tool.name not in harness.active_tool_names:
+                    harness.active_tool_names.append(tool.name)
+                harness.invalidate_system_prompt_cache()
+
+            def get_active_tool_names(self) -> list[str]:
+                return list(harness.active_tool_names)
+
+            def set_active_tool_names(self, names: list[str]) -> None:
+                harness.active_tool_names = list(names)
+                harness.invalidate_system_prompt_cache()
+
+            def get_all_tool_info(self) -> list[ToolInfo]:
+                infos: list[ToolInfo] = []
+                for name, tool in harness._tools.items():
+                    infos.append(
+                        ToolInfo(
+                            name=name,
+                            description=tool.description,
+                            source=(
+                                "extension"
+                                if name in harness._extension_registry.get_tools()
+                                else "builtin"
+                            ),
+                            prompt_snippet=getattr(tool, "prompt_snippet", None),
+                            prompt_guidelines=getattr(tool, "prompt_guidelines", []),
+                        )
+                    )
+                return infos
+
+            def send_message(self, text: str) -> None:
+                msg = _create_user_message(text)
+                harness.steer_queue.append(msg)
+
+            def append_entry(self, custom_type: str, data: Any) -> None:
+                harness.pending_session_writes.append(
+                    {"type": "custom_entry", "custom_type": custom_type, "data": data}
+                )
+
+            async def exec(
+                self,
+                command: str,
+                *,
+                cwd: str | None = None,
+                timeout: float | None = None,
+            ) -> Any:
+                if harness.env is None:
+                    raise AgentHarnessError(
+                        "invalid_state", "No ExecutionEnv configured — cannot exec()"
+                    )
+                return await harness.env.exec(command, cwd=cwd, timeout=timeout)
+
+            @property
+            def cwd(self) -> str:
+                if harness.env is None:
+                    return "."
+                return harness.env.cwd
+
+            @property
+            def session_id(self) -> str:
+                return ""
+
+        return _Bridge()
+
+    @property
+    def extension_registry(self) -> ExtensionRegistry:
+        """The extension registry (tools, commands, event handlers)."""
+        return self._extension_registry
+
+    def load_extension(self, activate: ActivateFn) -> None:
+        """Manually load an extension after construction."""
+        api = self._extension_loader.load_callable(activate, source="programmatic")
+        if self._extensions_loaded:
+            bridge = self._create_bridge()
+            api._set_bridge(bridge)
+            for defn in self._extension_registry.get_tools().values():
+                if defn.name not in self._tools:
+                    tool = _tool_from_definition(defn)
+                    self._tools[tool.name] = tool
+                    if tool.name not in self.active_tool_names:
+                        self.active_tool_names.append(tool.name)
+            self.invalidate_system_prompt_cache()
 
     def _set_phase(
         self, phase: Literal["idle", "turn", "compaction", "branch_summary", "retry"]
@@ -438,6 +615,10 @@ class AgentHarness:
                 await self.session.append_thinking_level_change(write["thinking_level"])
             elif kind == "active_tools_change":
                 await self.session.append_active_tools_change(write["active_tool_names"])
+            elif kind == "custom_entry":
+                await self.session.append_custom_entry(
+                    write["custom_type"], write.get("data")
+                )
 
     async def _handle_agent_event(self, event: AgentEvent, signal: Any | None = None) -> None:
         if event.type == "message_end":
@@ -725,6 +906,7 @@ class AgentHarness:
     async def prompt(self, text: str, images: list[ImageContent] | None = None) -> AssistantMessage:
         if self.phase != "idle":
             raise AgentHarnessError("busy", "AgentHarness is busy")
+        self._ensure_extensions_loaded()
         self._set_phase("turn")
         try:
             return await self._execute_turn(await self._create_turn_state(), text, images)
