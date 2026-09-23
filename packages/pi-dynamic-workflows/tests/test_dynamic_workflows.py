@@ -167,7 +167,7 @@ async def main():
     result(len(results))
 """
         run_result = await runtime.execute(script)
-        assert run_result.agent_count == 4  # 2 items × 2 stages
+        assert run_result.agent_count == 4  # 2 items x 2 stages
         assert run_result.result == 2
 
     async def test_phase_tracking(self) -> None:

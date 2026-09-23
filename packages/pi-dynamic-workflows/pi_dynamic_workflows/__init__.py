@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from pi_dynamic_workflows.builtin_workflows import (
     BUILTIN_WORKFLOW_NAMES,
     BUILTIN_WORKFLOWS,
-    resolve_builtin_workflow,
+)
+from pi_dynamic_workflows.builtin_workflows import (
+    resolve_builtin_workflow as resolve_builtin_workflow,
 )
 from pi_dynamic_workflows.workflow_tool import create_workflow_tool
 

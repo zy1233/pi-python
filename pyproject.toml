@@ -85,5 +85,8 @@ select = [
     "RUF",   # ruff-specific rules
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"packages/pi-dynamic-workflows/pi_dynamic_workflows/builtin_workflows.py" = ["E501"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["pi_agent_core", "pi_agent_harness", "pi_agent_cli"]

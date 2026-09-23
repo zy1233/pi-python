@@ -139,10 +139,10 @@ class ExtensionLoader:
             callables.append((fn, "programmatic"))
 
         for activate, source in callables:
-            try:
+            import contextlib
+
+            with contextlib.suppress(Exception):
                 self.load_callable(activate, source=source)
-            except Exception:
-                pass  # already logged in load_callable
 
         return list(self._apis)
 

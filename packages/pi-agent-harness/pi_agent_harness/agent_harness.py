@@ -616,9 +616,7 @@ class AgentHarness:
             elif kind == "active_tools_change":
                 await self.session.append_active_tools_change(write["active_tool_names"])
             elif kind == "custom_entry":
-                await self.session.append_custom_entry(
-                    write["custom_type"], write.get("data")
-                )
+                await self.session.append_custom_entry(write["custom_type"], write.get("data"))
 
     async def _handle_agent_event(self, event: AgentEvent, signal: Any | None = None) -> None:
         if event.type == "message_end":

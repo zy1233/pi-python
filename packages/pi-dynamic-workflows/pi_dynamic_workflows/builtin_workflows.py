@@ -264,10 +264,35 @@ async def main():
 # ---------------------------------------------------------------------------
 
 
+def _resolve_multi_perspective(args: Any) -> BuiltinWorkflowInvocation:
+    a = _as_record(args)
+    return BuiltinWorkflowInvocation(
+        script=generate_multi_perspective(
+            _require_str(a, "topic", "multi-perspective"),
+            a.get("perspectives", DEFAULT_MULTI_PERSPECTIVES),
+        ),
+        name="multi-perspective",
+    )
+
+
+def _resolve_codebase_audit(args: Any) -> BuiltinWorkflowInvocation:
+    a = _as_record(args)
+    return BuiltinWorkflowInvocation(
+        script=generate_codebase_audit(
+            _require_str(a, "scope", "codebase-audit"),
+            _require_str_list(a, "checks", "codebase-audit"),
+        ),
+        name="codebase-audit",
+    )
+
+
 BUILTIN_WORKFLOWS: dict[str, BuiltinWorkflowDescriptor] = {
     "deep-research": BuiltinWorkflowDescriptor(
         name="deep-research",
-        description="Research a question across the web with cross-checked sources. args: { question: str }.",
+        description=(
+            "Research a question across the web with "
+            "cross-checked sources. args: { question: str }."
+        ),
         resolve=lambda args: BuiltinWorkflowInvocation(
             script=generate_deep_research(),
             name="deep-research",
@@ -298,30 +323,14 @@ BUILTIN_WORKFLOWS: dict[str, BuiltinWorkflowDescriptor] = {
             "Analyze a topic from several perspectives, then synthesize. "
             "args: { topic: str, perspectives?: list[str] }."
         ),
-        resolve=lambda args: (
-            lambda a=_as_record(args): BuiltinWorkflowInvocation(
-                script=generate_multi_perspective(
-                    _require_str(a, "topic", "multi-perspective"),
-                    a.get("perspectives", DEFAULT_MULTI_PERSPECTIVES),
-                ),
-                name="multi-perspective",
-            )
-        )(),
+        resolve=_resolve_multi_perspective,
     ),
     "codebase-audit": BuiltinWorkflowDescriptor(
         name="codebase-audit",
         description=(
             "Run parallel checks against a codebase scope. args: { scope: str, checks: list[str] }."
         ),
-        resolve=lambda args: (
-            lambda a=_as_record(args): BuiltinWorkflowInvocation(
-                script=generate_codebase_audit(
-                    _require_str(a, "scope", "codebase-audit"),
-                    _require_str_list(a, "checks", "codebase-audit"),
-                ),
-                name="codebase-audit",
-            )
-        )(),
+        resolve=_resolve_codebase_audit,
     ),
 }
 
