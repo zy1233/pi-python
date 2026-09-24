@@ -45,12 +45,19 @@ CommandHandler = Callable[..., Any]
 
 @dataclass
 class CommandDef:
-    """A slash-command registered by an extension."""
+    """A slash-command registered by an extension.
+
+    When ``passthrough`` is True the command is advertised to clients (for
+    autocomplete) but **not** intercepted by the harness — the original
+    ``/command args`` text is forwarded to the LLM as a regular prompt so
+    the model can invoke the corresponding tool.
+    """
 
     name: str
     description: str
     handler: CommandHandler
     extension_name: str | None = None
+    passthrough: bool = False
 
 
 # ---------------------------------------------------------------------------

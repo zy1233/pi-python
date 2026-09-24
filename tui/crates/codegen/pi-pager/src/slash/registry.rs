@@ -614,6 +614,7 @@ impl CommandRegistry {
 
             if self.pi_standard_slash
                 && !PI_STANDARD_SLASH_NAMES.contains(&canonical)
+                && source != CommandSource::Acp
             {
                 continue;
             }
@@ -1459,5 +1460,48 @@ mod tests {
         assert!(registry.get("compact").is_none());
         assert!(registry.get("rewind").is_none());
         assert!(registry.get("fork").is_none());
+    }
+
+    #[test]
+    fn pi_standard_slash_allows_acp_commands_through() {
+        // Use a builtin whose name IS in PI_STANDARD_SLASH_NAMES.
+        let builtin: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
+            name: "model",
+            aliases: &[],
+        });
+        let mut registry = CommandRegistry::new(vec![builtin]);
+        registry.enable_pi_standard_slash_menu();
+
+        // Whitelisted builtin stays visible.
+        assert!(registry.get("model").is_some(), "/model is in the whitelist");
+
+        // A non-whitelisted builtin would be hidden — add one to verify.
+        // (DummyCommand "compact" is NOT in PI_STANDARD_SLASH_NAMES.)
+        // We can't easily add another builtin after construction, so we
+        // just verify ACP commands pass through.
+
+        // ACP commands from the Python agent should pass through the filter.
+        registry.set_acp_commands(&[
+            agent_client_protocol::AvailableCommand::new(
+                "workflows".to_string(),
+                "List workflows".to_string(),
+            ),
+            agent_client_protocol::AvailableCommand::new(
+                "deep-research".to_string(),
+                "Deep research workflow".to_string(),
+            ),
+        ]);
+        assert!(
+            registry.get("workflows").is_some(),
+            "ACP command must not be filtered by pi_standard_slash"
+        );
+        assert!(
+            registry.get("deep-research").is_some(),
+            "ACP command must not be filtered by pi_standard_slash"
+        );
+        assert!(
+            registry.triggers().iter().any(|t| t.canonical == "workflows"),
+            "ACP commands should have completion triggers"
+        );
     }
 }

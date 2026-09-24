@@ -57,8 +57,28 @@ def _check_goal_progress(pi: ExtensionAPI, state: GoalState, event: Any) -> None
 
 
 def _restore_goal_state(pi: ExtensionAPI, state: GoalState, event: Any) -> None:
-    """``session_start`` hook — restore goal from session entries (placeholder)."""
-    pass
+    """``session_start`` hook — restore goal from session entries."""
+    try:
+        entries = pi.get_custom_entries("goal_state")
+    except Exception:
+        logger.debug("Could not read goal_state entries for restore", exc_info=True)
+        return
+    if not entries:
+        return
+    last = entries[-1]
+    data = getattr(last, "data", None)
+    if not isinstance(data, dict):
+        return
+    try:
+        restored = GoalState.from_dict(data)
+        if restored.active:
+            state.description = restored.description
+            state.steps = restored.steps
+            state.completed = restored.completed
+            state.summary = restored.summary
+            logger.debug("Restored goal state: %s", state.description)
+    except Exception:
+        logger.debug("Failed to restore goal state from entry", exc_info=True)
 
 
 def activate(pi: ExtensionAPI) -> None:

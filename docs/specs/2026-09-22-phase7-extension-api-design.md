@@ -363,14 +363,20 @@ packages/pi-dynamic-workflows/
 | `multi-perspective` | `{ topic, perspectives? }` | 多角度分析 → 综合 |
 | `codebase-audit` | `{ scope, checks }` | 并行审计检查 → 交叉验证 |
 
-### 9.5 明确推迟项（TUI-only）
+### 9.5 后续实现项
 
-- Task panel / widget / UI 通知
-- Run persistence / journaling / resume
-- Background run delivery (`session_shutdown` 生命周期）
-- `workflow_control` 工具（pause/resume/stop）
-- Git worktree isolation
-- Saved workflow 存储
+以下各项已完成设计（§12–§16），按优先级排列。
+
+| 编号 | 项 | 前置依赖 | 优先级 |
+|------|-----|---------|--------|
+| §12 | SubagentExecutor 真实实现 | 无 | P0 — workflow 可用性的基本前提 |
+| §13 | Background run / result delivery | §12 | P1 — 长时间 workflow 不阻塞会话 |
+| §14 | Run persistence / resume | §12 | P1 — 避免重复执行、节省 token |
+| §15 | Git worktree isolation | §12 | P2 — 多 subagent 同时修改文件不冲突 |
+| §16 | Saved workflow 存储 | 无 | P2 — 用户自定义 workflow 持久化 |
+
+Task panel / widget / UI 通知、`workflow_control` 工具（pause/resume/stop）
+仍推迟至 TUI Python 原生版实现时再设计。
 
 ---
 
@@ -386,19 +392,19 @@ packages/pi-dynamic-workflows/
 | 子包 entry_points 声明 | ✅ | 3 个子包的 `pyproject.toml` 均声明 `[project.entry-points."pi_agent.extensions"]` |
 | System prompt 注入 | ✅ | 扩展注册的工具的 `prompt_snippet` / `prompt_guidelines` 自动进入 system prompt |
 | LLM 可用性 | ✅ | `workflow` / `web_search` / `fetch_url` / `goal_update` / `goal_complete` 工具在 TUI 会话中自动注册，LLM 可直接 tool_call |
+| Slash 命令路由 | ✅ | `AgentHarness.dispatch_command()` + `_try_slash_dispatch()` 拦截 `/command args`；`PiAcpAgent._advertise_commands()` 通过 `AvailableCommandsUpdate` 填充 TUI/Zed 自动补全 |
 
-### 10.2 尚未适配项（TUI 侧，推迟到有需求时）
+### 10.2 尚未适配项
 
 | 项 | 说明 | 影响 |
 |---|---|---|
-| **Slash 命令路由** | TUI（Rust `zypi`）的 `/` 自动补全由 TUI 自身管理，不读取 Python 侧的 `register_command` 注册表。扩展注册的 `/workflows`、`/goal`、`/deep-research` 等命令目前**不会出现在 TUI 的 `/` 补全列表**中 | 命令仍可通过 LLM 工具调用间接触发；直接输入斜杠命令则需 TUI 侧增加 ACP 通知机制 |
 | **`ctx.ui.*` API** | 上游 pi 的 `ctx.ui.confirm()` / `ctx.ui.select()` / `ctx.ui.notify()` / `ctx.ui.setWidget()` 等 TUI 交互 API 未实现 | 需要时扩展可通过 `send_message()` 降级实现文本反馈 |
-| **`SubagentExecutor` 真实实现** | `pi-dynamic-workflows` 的 `workflow` 工具目前使用 `MockSubagentExecutor`（返回固定文本）。真实 subagent 需要对接 `Agent` / `AgentHarness` 的独立实例 | workflow 工具可以注册但 subagent 实际调用不会产生真实 LLM 输出 |
-| **Background run / result delivery** | 上游 `pi-dynamic-workflows` 的后台运行 + 结果自动回注会话机制未移植 | workflow 目前仅支持同步（blocking）模式 |
-| **Task panel / widget** | TUI 侧的实时进度面板（显示各 subagent 状态、token 消耗等）未移植 | 纯文本结果输出替代 |
-| **Run persistence / resume** | workflow run 的 JSONL journal + `resumeFromRunId` 缓存命中机制未移植 | 每次 workflow 从头运行 |
-| **Git worktree isolation** | 上游的 `isolation: "worktree"` 选项在独立 git worktree 中运行 subagent 的机制未移植 | subagent 在同一 cwd 运行 |
-| **Saved workflow 存储** | 项目/用户级持久化 workflow 脚本 + 自动注册为斜杠命令的机制未移植 | 仅支持内置 5 个 pattern |
+| **SubagentExecutor 真实实现** | 详见 §12 | 当前使用 `MockSubagentExecutor` |
+| **Background run / result delivery** | 详见 §13 | 当前仅同步模式 |
+| **Run persistence / resume** | 详见 §14 | 每次从头运行 |
+| **Git worktree isolation** | 详见 §15 | subagent 共享 cwd |
+| **Saved workflow 存储** | 详见 §16 | 仅支持内置 pattern |
+| **Task panel / widget** | TUI 侧的实时进度面板未移植 | 纯文本结果输出替代 |
 
 ### 10.3 工作流链路（当前状态）
 
@@ -408,9 +414,9 @@ TUI (zypi) ──ACP stdio──> pi_agent_cli ──> factory.create_session_ha
                                                ▼
                                          AgentHarness(auto_discover_extensions=True)
                                                │
-                                               │ 首次 prompt() 时
+                                               │ _bind_session() 时
                                                ▼
-                                         _ensure_extensions_loaded()
+                                         load_extensions() + _advertise_commands()
                                                │
                                     ┌──────────┼──────────┐
                                     ▼          ▼          ▼
@@ -422,6 +428,17 @@ TUI (zypi) ──ACP stdio──> pi_agent_cli ──> factory.create_session_ha
                                                on(event)                ▼
                                                               system prompt 注入
                                                               LLM 可以 tool_call
+
+                              /command args → _try_slash_dispatch()
+                                    │                            │
+                                    ▼                            ▼
+                           dispatch_command()            未匹配 → LLM turn
+                                    │
+                                    ▼
+                         handler 执行 + 事件序列
+                                    │
+                                    ▼
+                         ACP session_update → TUI 显示
 ```
 
 ---
@@ -438,3 +455,76 @@ TUI (zypi) ──ACP stdio──> pi_agent_cli ──> factory.create_session_ha
 8. `packages/pi-goal-x/` — /goal 目标规划
 9. `packages/pi-dynamic-workflows/` — workflow 工具 + runtime + 5 built-in patterns
 10. `factory.py` — 开启 `auto_discover_extensions=True`，完成 TUI/CLI 集成
+
+---
+
+## 12. SubagentExecutor 真实实现 ✅
+
+`HarnessSubagentExecutor`（`subagent.py`）替代 `MockSubagentExecutor`。
+每次 `agent()` 创建独立 `MemorySessionStorage` + `AgentHarness`
+执行单次 prompt-to-completion。
+
+**关键行为**：model 显式指定 > tier 路由（`resolve_tier`）> 继承父 model；
+独立 session 不污染父会话；`timeout_ms` 通过 `asyncio.wait` 实现；
+`schema` 走 prompt 注入 + JSON 解析 → `AgentResult.structured`。
+
+**Bridge 扩展**：`HarnessBridge` 增加 `stream_fn` / `model` / `get_api_key_fn`
+只读属性，`activate()` 据此构造真实 executor。
+
+---
+
+## 13. Background run / result delivery ✅
+
+`WorkflowManager`（`manager.py`）管理后台 workflow 的 asyncio task。
+
+`WorkflowParams.background=True` → `asyncio.create_task(runtime.execute)` +
+返回 `AgentToolResult(terminate=True)`，turn 立即结束。完成后通过
+`bridge.send_message()` 将格式化结果推入 steer queue 触发新 turn。
+
+`cancel_all()` 取消所有后台 task；`shutdown(timeout)` 等待 pending
+runs 或超时后强制取消。
+
+---
+
+## 14. Run persistence / resume ✅
+
+`Journal`（`journal.py`）— append-only JSONL 日志，记录每个 `agent()` 调用的
+`hash_request("agent", {prompt, opts})` SHA-256 + 返回值。
+
+**重放**：`try_replay(kind, req_hash)` 按游标顺序匹配，命中返回缓存结果
+跳过 LLM 调用，不匹配则从该点截断（divergence）。上限 10000 条 / 64MB。
+
+**集成**：`WorkflowRuntime.__init__(journal=...)` → `agent_fn` 内先查
+journal，miss 时执行并 append。`WorkflowParams.resume_from_run_id`
+指定前次 run_id，journal 存储于 `~/.pi-python/workflow-journals/<run_id>.jsonl`。
+
+---
+
+## 15. Git worktree isolation ✅
+
+`WorktreeManager`（`worktree.py`）通过 `git worktree add --detach` 创建
+linked worktree，每个 subagent 在独立目录中运行。
+
+**Snapshot 模式**（默认）：`git diff HEAD` + `git diff --cached HEAD` 复制
+staged/unstaged 变更到 worktree。**Clean 模式**：从指定 ref checkout。
+
+`collect_diff()` 收集 worktree 变更；`apply_changes()` 将 diff apply 回源
+cwd；`cleanup()` / `cleanup_all()` 删除 worktree。
+
+**限制**：仅 git（非 jj）；不含 btrfs/overlay/NFS 优化；不复制 untracked 文件。
+
+---
+
+## 16. Saved workflow 存储 ✅
+
+`WorkflowStore`（`store.py`）扫描 `~/.pi-python/workflows/`（用户级）和
+`.pi-python/workflows/`（项目级）的 `.py` 脚本。
+
+**Meta 提取**：`extract_meta(script)` 通过 `ast.literal_eval` 安全解析脚本
+顶层 `meta = {...}` 字典，无需执行脚本。
+
+**注册**：`activate()` 中 `store.scan()` → 为每个 saved workflow 注册
+slash command，通过 `AvailableCommandsUpdate` 暴露给 TUI 自动补全。
+
+**安全**：名称 `[a-z0-9-]{1,64}`；256KB 上限；原子写入 + no-clobber；
+`save_project()` / `save_user()` 分别写入项目/用户目录。

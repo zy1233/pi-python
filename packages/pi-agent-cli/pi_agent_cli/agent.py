@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
@@ -12,6 +13,9 @@ from acp.interfaces import Agent, Client
 from acp.schema import (
     AgentCapabilities,
     AudioContentBlock,
+    AvailableCommand,
+    AvailableCommandInput,
+    AvailableCommandsUpdate,
     ClientCapabilities,
     CloseSessionResponse,
     EmbeddedResourceContentBlock,
@@ -34,6 +38,7 @@ from acp.schema import (
     SessionResumeCapabilities,
     SseMcpServer,
     TextContentBlock,
+    UnstructuredCommandInput,
 )
 
 from pi_agent_cli.config import CliConfig, PermissionMode, load_config, pi_home
@@ -50,6 +55,8 @@ from pi_agent_core.messages import ImageContent
 from pi_agent_core.types import StreamFn
 from pi_agent_harness import AgentHarness, JsonlSessionRepo, Session
 
+logger = logging.getLogger(__name__)
+
 _AGENT_INFO = Implementation(name="pi-agent-cli", title="pi-python ACP agent", version="0.1.0")
 
 
@@ -57,6 +64,7 @@ class PiAcpAgent(Agent):
     """Standard-ACP-only agent. Does not register any vendor extension methods."""
 
     _conn: Client | None
+    _commands_advertised: set[str]
 
     def __init__(
         self,
@@ -65,6 +73,7 @@ class PiAcpAgent(Agent):
         home: Path | str | None = None,
         config: CliConfig | None = None,
         repo: JsonlSessionRepo | None = None,
+        extensions: list[Any] | None = None,
     ) -> None:
         self._conn = None
         self._home = pi_home(home)
@@ -78,6 +87,9 @@ class PiAcpAgent(Agent):
         self._session_cwds: dict[str, str] = {}
         self._client_capabilities: ClientCapabilities | None = None
         self._client_info: Implementation | None = None
+        self._extensions: list[Any] = extensions or []
+        self._commands_advertised: set[str] = set()
+        self._background_tasks: set[asyncio.Task[Any]] = set()
 
     def on_connect(self, conn: Client) -> None:
         self._conn = conn
@@ -118,7 +130,15 @@ class PiAcpAgent(Agent):
         session = await self._repo.create({"cwd": cwd})
         session_id = (await session.get_metadata()).id
         await self._bind_session(session_id, session, cwd)
-        return NewSessionResponse(session_id=session_id, field_meta=self._session_response_meta())
+        # Defer available_commands_update: Zed only registers the session
+        # AFTER it receives NewSessionResponse, so notifications sent before
+        # that are silently dropped.  Schedule via create_task + sleep(0) so
+        # the response is flushed first.  (See zed#60199, zed#53161.)
+        self._schedule_deferred_advertise(session_id)
+        return NewSessionResponse(
+            session_id=session_id,
+            field_meta=self._session_response_meta(),
+        )
 
     async def load_session(
         self,
@@ -138,6 +158,7 @@ class PiAcpAgent(Agent):
             for msg in context.messages:
                 for update in project_message_replay(msg):
                     await self._conn.session_update(session_id=session_id, update=update)
+        self._schedule_deferred_advertise(session_id)
         return LoadSessionResponse(field_meta=self._session_response_meta())
 
     async def list_sessions(
@@ -169,10 +190,13 @@ class PiAcpAgent(Agent):
         session = await self._repo.open(metadata)
         await self._bind_session(session_id, session, metadata.cwd or cwd)
         # ACP session/resume intentionally does not replay history.
+        self._schedule_deferred_advertise(session_id)
         return ResumeSessionResponse(field_meta=self._session_response_meta())
 
     async def close_session(self, session_id: str, **kwargs: Any) -> CloseSessionResponse | None:
-        self._harnesses.pop(session_id, None)
+        harness = self._harnesses.pop(session_id, None)
+        if harness is not None:
+            await harness.close()
         return CloseSessionResponse()
 
     async def prompt(
@@ -188,6 +212,9 @@ class PiAcpAgent(Agent):
         **kwargs: Any,
     ) -> PromptResponse:
         harness = self._require_harness(session_id)
+        # Fallback: re-advertise commands if the deferred task was missed.
+        if session_id not in self._commands_advertised:
+            await self._advertise_commands(session_id)
         text, images = _prompt_to_text_images(prompt)
         try:
             message = await harness.prompt(text, images or None)
@@ -270,6 +297,7 @@ class PiAcpAgent(Agent):
             stream_fn=self._stream_fn,
             resources=resources,
             on_tool_call=on_tool_call,
+            extensions=self._extensions,
         )
 
         async def on_event(event: Any, signal: Any | None = None) -> None:
@@ -278,6 +306,60 @@ class PiAcpAgent(Agent):
         harness.subscribe(on_event)
         self._harnesses[session_id] = harness
         self._session_cwds[session_id] = cwd
+
+        # Eagerly load extensions so slash commands are available.
+        await harness.load_extensions()
+
+    def _schedule_deferred_advertise(self, session_id: str) -> None:
+        """Fire-and-forget: advertise commands after the current response flushes."""
+        task = asyncio.create_task(self._deferred_advertise_commands(session_id))
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+
+    async def _deferred_advertise_commands(self, session_id: str) -> None:
+        """Advertise commands after yielding the event loop.
+
+        Zed registers ACP sessions only after processing the response to
+        ``session/new``.  Notifications sent *before* that response are
+        silently dropped ("unknown session").  Yielding with ``sleep(0)``
+        lets the response flush first.  (See zed-industries/zed#60199.)
+        """
+        await asyncio.sleep(0)
+        await self._advertise_commands(session_id)
+
+    async def _advertise_commands(self, session_id: str) -> None:
+        """Send ``AvailableCommandsUpdate`` so ACP clients show slash commands."""
+        if self._conn is None:
+            return
+        harness = self._harnesses.get(session_id)
+        if harness is None:
+            return
+        commands = harness.extension_registry.get_commands()
+        if not commands:
+            return
+        available: list[AvailableCommand] = []
+        for name, cmd in commands.items():
+            ac = AvailableCommand(
+                name=name,
+                description=cmd.description,
+                input=AvailableCommandInput(
+                    root=UnstructuredCommandInput(hint="<args>"),
+                ),
+            )
+            available.append(ac)
+        logger.debug(
+            "_advertise_commands: sending %d commands: %s",
+            len(available),
+            [c.name for c in available],
+        )
+        await self._conn.session_update(
+            session_id=session_id,
+            update=AvailableCommandsUpdate(
+                session_update="available_commands_update",
+                available_commands=available,
+            ),
+        )
+        self._commands_advertised.add(session_id)
 
     async def _emit_updates(self, session_id: str, event: Any) -> None:
         if self._conn is None:

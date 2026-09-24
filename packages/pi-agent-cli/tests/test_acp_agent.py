@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -224,6 +225,9 @@ async def test_load_session_replays_history(tmp_path):
     assert len(client.updates) > 0
     for sid, update in client.updates:
         assert sid == created.session_id
+        # AvailableCommandsUpdate is infrastructure, not replay content
+        if getattr(update, "session_update", None) == "available_commands_update":
+            continue
         meta = getattr(update, "field_meta", None)
         assert meta is not None and meta.get("isReplay") is True
 
@@ -241,7 +245,13 @@ async def test_resume_session_does_not_replay_history(tmp_path):
     client.updates.clear()
     resumed = await agent.resume_session(session_id=created.session_id, cwd=cwd)
     assert resumed is not None
-    assert client.updates == []
+    # AvailableCommandsUpdate is infrastructure (command advertisement) — not replay
+    replay_updates = [
+        u
+        for _, u in client.updates
+        if getattr(u, "session_update", None) != "available_commands_update"
+    ]
+    assert replay_updates == []
 
 
 async def _bash_once_stream(model, context, options=None):
@@ -540,3 +550,96 @@ def test_project_message_replay_bash():
         "terminal_id": "tc_replay_bash",
         "exit_code": 0,
     }
+
+
+# ---------------------------------------------------------------------------
+# Slash command routing via ACP (P7-07 fix)
+# ---------------------------------------------------------------------------
+
+
+def _cmd_ext(pi):
+    """Extension that registers /hello and /status commands."""
+    pi.register_command(
+        "hello",
+        description="Say hello",
+        handler=lambda args: pi.send_message(f"Hi, {args.strip() or 'there'}!"),
+    )
+    pi.register_command(
+        "status",
+        description="Show status",
+        handler=lambda _args: pi.send_message("All systems operational."),
+    )
+
+
+def _agent_with_ext(tmp_path: Path) -> PiAcpAgent:
+    return PiAcpAgent(
+        stream_fn=mock_text_stream,
+        home=tmp_path,
+        config=CliConfig(permission="auto", provider="mock", model_id="mock"),
+        extensions=[_cmd_ext],
+    )
+
+
+@pytest.mark.asyncio
+async def test_slash_command_advertised_on_session_bind(tmp_path):
+    """AvailableCommandsUpdate is sent after session is created (deferred)."""
+    agent = _agent_with_ext(tmp_path)
+    client = FakeClient()
+    agent.on_connect(client)
+    cwd = str(tmp_path.resolve())
+    await agent.new_session(cwd=cwd)
+    # Commands are sent via asyncio.create_task + sleep(0) to work around
+    # the Zed race condition (zed#60199).  Two yields: one to let the
+    # deferred task wake from its sleep(0), another to let it complete.
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    acu = [
+        u
+        for _, u in client.updates
+        if getattr(u, "session_update", None) == "available_commands_update"
+    ]
+    assert len(acu) == 1
+    names = {c.name for c in acu[0].available_commands}
+    assert "hello" in names
+    assert "status" in names
+
+
+@pytest.mark.asyncio
+async def test_slash_command_dispatched_via_acp_prompt(tmp_path):
+    """prompt('/hello World') dispatches to handler and returns end_turn."""
+    agent = _agent_with_ext(tmp_path)
+    client = FakeClient()
+    agent.on_connect(client)
+    cwd = str(tmp_path.resolve())
+    created = await agent.new_session(cwd=cwd)
+    result = await agent.prompt(session_id=created.session_id, prompt=[text_block("/hello World")])
+    assert result.stop_reason == "end_turn"
+
+    # Check that the agent message chunk was emitted with the handler output
+    msg_chunks = [
+        u for _, u in client.updates if getattr(u, "session_update", None) == "agent_message_chunk"
+    ]
+    texts = [getattr(getattr(u, "content", None), "text", None) or "" for u in msg_chunks]
+    assert "Hi, World!" in "".join(texts)
+
+
+@pytest.mark.asyncio
+async def test_slash_command_unknown_falls_through_via_acp(tmp_path):
+    """prompt('/bogus') is not a registered command — passed to LLM."""
+    agent = _agent_with_ext(tmp_path)
+    client = FakeClient()
+    agent.on_connect(client)
+    cwd = str(tmp_path.resolve())
+    created = await agent.new_session(cwd=cwd)
+    result = await agent.prompt(
+        session_id=created.session_id, prompt=[text_block("/bogus something")]
+    )
+    assert result.stop_reason == "end_turn"
+
+    msg_chunks = [
+        u for _, u in client.updates if getattr(u, "session_update", None) == "agent_message_chunk"
+    ]
+    texts = [getattr(getattr(u, "content", None), "text", None) or "" for u in msg_chunks]
+    # LLM produces "Hello from mock"
+    assert "Hello from mock" in "".join(texts)

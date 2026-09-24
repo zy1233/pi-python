@@ -98,6 +98,7 @@ async def create_session_harness(
     on_tool_call: Callable[[Any], Any | Awaitable[Any]] | None = None,
     home: Path | None = None,
     tools: list[Any] | None = None,
+    extensions: list[Any] | None = None,
 ) -> AgentHarness:
     cwd_s = str(Path(normalize_host_path(str(cwd))).resolve())
     home_path = pi_home(home)
@@ -157,6 +158,7 @@ async def create_session_harness(
         max_turns=config.max_turns,
         compaction=CompactionSettings(auto_compact=auto_compact),
         auto_discover_extensions=True,
+        extensions=extensions or [],
     )
     harness_holder["harness"] = harness
     if on_tool_call is not None:

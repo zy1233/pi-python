@@ -102,21 +102,51 @@ class ExtensionLoader:
         *,
         name: str | None = None,
         source: str = "programmatic",
+        bridge: Any = None,
     ) -> ExtensionAPI:
-        """Load a single extension from an ``activate`` callable."""
+        """Load a single extension from an ``activate`` callable.
+
+        Args:
+            bridge: Optional ``HarnessBridge`` to bind *before* ``activate()``
+                so the extension can call ``pi.cwd`` etc. during init.
+        """
         ext_name = name or getattr(activate, "__module__", None) or "anonymous"
+        old_api: ExtensionAPI | None = None
         if ext_name in self._loaded_names:
-            logger.debug("Extension %r already loaded — skipping", ext_name)
-            existing = next((a for a in self._apis if a.extension_name == ext_name), None)
-            if existing is not None:
-                return existing
+            logger.debug("Extension %r already loaded — overriding", ext_name)
+            old_api = next((a for a in self._apis if a.extension_name == ext_name), None)
+
         meta = ExtensionMeta(name=ext_name, source=source)
         api = ExtensionAPI(registry=self.registry, meta=meta)
+
+        # P7-03: bind bridge BEFORE activate so pi.cwd etc. are usable
+        if bridge is not None:
+            api._set_bridge(bridge)
+
+        # Snapshot before any mutation so failure can roll back completely
+        snap = self.registry.snapshot()
+        old_apis_copy = list(self._apis)
+        old_names_copy = set(self._loaded_names)
+
+        # Remove old registrations (registry + harness live state)
+        if old_api is not None:
+            self.registry.remove_by_extension(ext_name)
+            if bridge is not None:
+                self._purge_live_harness(bridge, ext_name, snap)
+            self._apis = [a for a in self._apis if a.extension_name != ext_name]
+            self._loaded_names.discard(ext_name)
+
         try:
             activate(api)
         except Exception:
+            # Roll back to state before override attempt
+            self.registry.restore(snap)
+            self._apis = old_apis_copy
+            self._loaded_names = old_names_copy
             logger.error("Extension %r failed during activate()", ext_name, exc_info=True)
             raise
+
+        api._loading = False  # enable dynamic register_tool → bridge injection
         self._apis.append(api)
         self._loaded_names.add(ext_name)
         return api
@@ -127,8 +157,11 @@ class ExtensionLoader:
         extra: list[ActivateFn] | None = None,
         cwd: str | None = None,
         auto_discover: bool = True,
+        bridge: Any = None,
     ) -> list[ExtensionAPI]:
         """Discover and load all extensions.  Returns the list of ``ExtensionAPI`` instances."""
+        import contextlib
+
         callables: list[tuple[ActivateFn, str]] = []
         if auto_discover:
             for fn in self.discover_entry_points():
@@ -139,12 +172,32 @@ class ExtensionLoader:
             callables.append((fn, "programmatic"))
 
         for activate, source in callables:
-            import contextlib
-
             with contextlib.suppress(Exception):
-                self.load_callable(activate, source=source)
+                self.load_callable(activate, source=source, bridge=bridge)
 
         return list(self._apis)
+
+    @staticmethod
+    def _purge_live_harness(bridge: Any, ext_name: str, snap: dict[str, Any]) -> None:
+        """Remove old extension's tools and hooks from the live harness.
+
+        Compares the snapshot (before removal) with what the extension owned
+        and calls bridge methods to clean up runtime state.
+        """
+        import contextlib
+
+        old_tool_owners = snap.get("tool_owners", {})
+        for tool_name, owner in old_tool_owners.items():
+            if owner == ext_name:
+                with contextlib.suppress(Exception):
+                    bridge.remove_tool(tool_name)
+
+        old_handlers = snap.get("event_handlers", {})
+        for event, registrations in old_handlers.items():
+            for reg in registrations:
+                if getattr(reg, "extension_name", None) == ext_name:
+                    with contextlib.suppress(Exception):
+                        bridge.remove_hook(event, reg.handler)
 
     @property
     def apis(self) -> list[ExtensionAPI]:

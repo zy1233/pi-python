@@ -7,9 +7,12 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pi_dynamic_workflows.budget import TokenBudget
+
+if TYPE_CHECKING:
+    from pi_dynamic_workflows.journal import Journal
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +114,7 @@ class WorkflowRuntime:
         concurrency: int = MAX_CONCURRENCY,
         token_budget: int | None = None,
         timeout_ms: float | None = None,
+        journal: Journal | None = None,
     ) -> None:
         self.executor = executor
         self.cwd = cwd
@@ -118,9 +122,11 @@ class WorkflowRuntime:
         self.concurrency = concurrency
         self.budget = TokenBudget(total=token_budget)
         self.timeout_ms = timeout_ms
+        self._journal = journal
 
         self._agent_count = 0
         self._semaphore = asyncio.Semaphore(concurrency)
+        self._count_lock = asyncio.Lock()
         self._current_phase: str | None = None
         self._phases: list[str] = []
         self._logs: list[str] = []
@@ -130,10 +136,11 @@ class WorkflowRuntime:
         self,
         script: str,
         args: Any = None,
+        run_id: str | None = None,
     ) -> WorkflowRunResult:
         """Run the workflow script and return its result."""
         start = time.monotonic()
-        run_id = str(uuid.uuid4())[:12]
+        run_id = run_id or str(uuid.uuid4())[:12]
 
         result_holder: dict[str, Any] = {"value": None}
 
@@ -165,30 +172,63 @@ class WorkflowRuntime:
         runtime = self
 
         async def agent_fn(prompt: str, **opts: Any) -> str | Any:
-            if runtime._agent_count >= runtime.max_agents:
-                raise RuntimeError(
-                    f"Agent limit reached ({runtime.max_agents}). "
-                    "Increase maxAgents or reduce fan-out."
-                )
-            if runtime.budget.exceeded():
-                raise RuntimeError("Token budget exceeded")
+            from pi_dynamic_workflows.journal import _MISS, hash_request
+
+            # P7-09: atomically check + reserve under lock to prevent
+            # concurrent tasks from bypassing the max_agents limit.
+            async with runtime._count_lock:
+                if runtime._agent_count >= runtime.max_agents:
+                    raise RuntimeError(
+                        f"Agent limit reached ({runtime.max_agents}). "
+                        "Increase maxAgents or reduce fan-out."
+                    )
+                if runtime.budget.exceeded():
+                    raise RuntimeError("Token budget exceeded")
+                runtime._agent_count += 1
+
+            # Resolve implicit defaults so journal hash matches actual execution params.
+            resolved_phase = opts.get("phase") or runtime._current_phase
+            resolved_cwd = opts.get("cwd") or runtime.cwd
+            resolved_timeout = opts.get("timeout_ms") or runtime.timeout_ms
+
+            req_hash: str | None = None
+            if runtime._journal is not None:
+                deterministic_opts = {
+                    "tier": opts.get("tier"),
+                    "model": opts.get("model"),
+                    "label": opts.get("label"),
+                    "phase": resolved_phase,
+                    "schema": opts.get("schema"),
+                    "cwd": resolved_cwd,
+                }
+                req_hash = hash_request("agent", {"prompt": prompt, **deterministic_opts})
+                cached = runtime._journal.try_replay("agent", req_hash)
+                if cached is not _MISS:
+                    return cached
 
             async with runtime._semaphore:
-                runtime._agent_count += 1
                 result = await runtime.executor.run_agent(
                     prompt,
                     tier=opts.get("tier"),
                     model=opts.get("model"),
                     label=opts.get("label"),
-                    phase=opts.get("phase") or runtime._current_phase,
-                    timeout_ms=opts.get("timeout_ms") or runtime.timeout_ms,
+                    phase=resolved_phase,
+                    timeout_ms=resolved_timeout,
                     schema=opts.get("schema"),
-                    cwd=opts.get("cwd") or runtime.cwd,
+                    cwd=resolved_cwd,
                 )
                 runtime.budget.add(result.tokens_used)
                 if result.error:
-                    return None
-                return result.structured if result.structured is not None else result.text
+                    return_value = None
+                else:
+                    return_value = (
+                        result.structured if result.structured is not None else result.text
+                    )
+
+                if runtime._journal is not None and req_hash is not None:
+                    runtime._journal.append("agent", req_hash, return_value)
+
+                return return_value
 
         async def parallel_fn(thunks: list[Any]) -> list[Any]:
             tasks = [asyncio.ensure_future(fn()) for fn in thunks]

@@ -27,3 +27,19 @@ def activate(pi: ExtensionAPI) -> None:
 
     pi.register_tool(create_web_search_tool())
     pi.register_tool(create_fetch_url_tool())
+
+    # Passthrough: advertised for autocomplete but forwarded to LLM as a
+    # regular prompt so the model invokes the web_search / fetch_url tool.
+    _noop = lambda args: None  # noqa: E731
+    pi.register_command(
+        "web_search",
+        description="Search the web for real-time information",
+        handler=_noop,
+        passthrough=True,
+    )
+    pi.register_command(
+        "fetch_url",
+        description="Fetch and read the contents of a URL",
+        handler=_noop,
+        passthrough=True,
+    )

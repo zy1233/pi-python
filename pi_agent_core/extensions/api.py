@@ -43,6 +43,7 @@ class ExtensionAPI:
         self._registry = registry
         self._meta = meta
         self._bridge: HarnessBridge | None = None
+        self._loading = True  # suppresses bridge side-effects during activate
 
     # -- internal: set by harness after activation --------------------------
 
@@ -62,12 +63,13 @@ class ExtensionAPI:
     def register_tool(self, definition: ToolDefinition) -> None:
         """Register a custom tool callable by the LLM.
 
-        Can be called during ``activate()`` or dynamically later.
+        During ``activate()`` only writes to registry; the harness injects
+        all registered tools later via ``_apply_extension_registrations()``.
+        After loading, dynamically registered tools are injected immediately.
         """
         self._registry.add_tool(definition, extension_name=self._meta.name)
-        bridge = self._bridge
-        if bridge is not None:
-            bridge.inject_tool(definition)
+        if not self._loading and self._bridge is not None:
+            self._bridge.inject_tool(definition)
 
     # -- register_command ----------------------------------------------------
 
@@ -77,14 +79,21 @@ class ExtensionAPI:
         *,
         description: str = "",
         handler: CommandHandler,
+        passthrough: bool = False,
     ) -> None:
-        """Register a slash-command (e.g. ``/search``)."""
+        """Register a slash-command (e.g. ``/search``).
+
+        When *passthrough* is True the command appears in client autocomplete
+        but the text is forwarded to the LLM as a regular prompt instead of
+        being intercepted.  Use this for commands backed by LLM tools.
+        """
         self._registry.add_command(
             CommandDef(
                 name=name,
                 description=description,
                 handler=handler,
                 extension_name=self._meta.name,
+                passthrough=passthrough,
             )
         )
 
@@ -99,8 +108,14 @@ class ExtensionAPI:
         )
         self._registry.add_event_handler(registration)
 
+        # After initial loading, also inject into live harness hooks
+        if not self._loading and self._bridge is not None:
+            self._bridge.add_hook(event, handler)
+
         def unsubscribe() -> None:
             self._registry.remove_event_handler(registration)
+            if self._bridge is not None:
+                self._bridge.remove_hook(event, handler)
 
         return unsubscribe
 
@@ -129,6 +144,10 @@ class ExtensionAPI:
     def append_entry(self, custom_type: str, data: Any = None) -> None:
         """Persist a custom entry in the session tree (survives restart)."""
         self._require_bridge().append_entry(custom_type, data)
+
+    def get_custom_entries(self, custom_type: str) -> list[Any]:
+        """Read all persisted custom entries of *custom_type* from the session."""
+        return self._require_bridge().get_custom_entries(custom_type)
 
     # -- shell execution -----------------------------------------------------
 

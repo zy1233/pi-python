@@ -594,7 +594,7 @@ pub(crate) fn default_palette_entries(
         true
     });
     if slash.pi_standard_slash_menu() {
-        entries.retain(|entry| pi_standard_palette_kept(&entry.command));
+        entries.retain(|entry| pi_standard_palette_kept(&entry.command, slash.registry()));
         entries = drop_empty_palette_sections(entries);
     }
     if !screen_mode.is_minimal()
@@ -607,7 +607,10 @@ pub(crate) fn default_palette_entries(
     entries
 }
 
-fn pi_standard_palette_kept(command: &PaletteCommand) -> bool {
+fn pi_standard_palette_kept(
+    command: &PaletteCommand,
+    registry: &crate::slash::registry::CommandRegistry,
+) -> bool {
     match command {
         PaletteCommand::NewSession
         | PaletteCommand::Quit
@@ -622,6 +625,7 @@ fn pi_standard_palette_kept(command: &PaletteCommand) -> bool {
                 .next()
                 .unwrap_or("");
             crate::slash::registry::PI_STANDARD_SLASH_NAMES.contains(&name)
+                || !registry.is_builtin(name)
         }
         _ => false,
     }

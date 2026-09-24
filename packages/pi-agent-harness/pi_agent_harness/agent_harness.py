@@ -18,21 +18,27 @@ from pi_agent_core.types import (
     AfterToolCallContext,
     AfterToolCallResult,
     AgentContext,
+    AgentEndEvent,
     AgentEvent,
     AgentLoopConfig,
     AgentLoopTurnUpdate,
     AgentMessage,
+    AgentStartEvent,
     AgentTool,
     BeforeToolCallContext,
     BeforeToolCallResult,
     MessageEndEvent,
+    MessageStartEvent,
+    MessageUpdateEvent,
     Model,
     QueueMode,
     ShouldStopAfterTurnContext,
     StreamFn,
     StreamOptions,
+    TextDeltaEvent,
     ThinkingLevel,
     TurnEndEvent,
+    TurnStartEvent,
 )
 from pi_agent_harness.compaction import (
     CompactionSettings,
@@ -255,6 +261,8 @@ class AgentHarness:
         self.phase: Literal["idle", "turn", "compaction", "branch_summary", "retry"] = "idle"
         self._idle_event = asyncio.Event()
         self._idle_event.set()
+        self._bg_tasks: set[asyncio.Task[Any]] = set()
+        self._cleanup_callbacks: list[Any] = []
         self._tools = {tool.name: tool for tool in tools or []}
         self._validate_unique(list(self._tools), "Duplicate tool name(s)")
         self.active_tool_names = active_tool_names or list(self._tools)
@@ -274,6 +282,9 @@ class AgentHarness:
         self._extension_registry = ExtensionRegistry()
         self._extension_loader = ExtensionLoader(self._extension_registry)
         self._extensions_loaded = False
+        self._extension_bridge: Any = None
+        self._session_id: str = ""
+        self._cached_custom_entries: list[Any] = []
         self._extension_config = {
             "extensions": extensions or [],
             "extension_dirs": extension_dirs or [],
@@ -286,7 +297,7 @@ class AgentHarness:
 
     # -- Phase 7: Extension lifecycle ----------------------------------------
 
-    def _ensure_extensions_loaded(self) -> None:
+    async def _ensure_extensions_loaded(self) -> None:
         """Load extensions (once) before the first prompt."""
         if self._extensions_loaded:
             return
@@ -295,6 +306,14 @@ class AgentHarness:
         cfg = self._extension_config
         cwd = self.env.cwd if self.env else None
 
+        # P7-04: populate session_id BEFORE activate so pi.session_id works
+        metadata = await self.session.get_metadata()
+        self._session_id = metadata.id
+
+        # P7-03: create bridge BEFORE activate so extensions can use pi.cwd etc.
+        bridge = self._create_bridge()
+        self._extension_bridge = bridge
+
         # Discover extra directories (beyond default dirs)
         extra_dirs: list[str] = list(cfg["extension_dirs"])
         extra_fns: list[ActivateFn] = []
@@ -302,17 +321,26 @@ class AgentHarness:
             extra_fns.extend(self._extension_loader.discover_directory(d))
         extra_fns.extend(cfg["extensions"])
 
-        apis = self._extension_loader.load_all(
+        self._extension_loader.load_all(
             extra=extra_fns,
             cwd=cwd,
             auto_discover=cfg["auto_discover"],
+            bridge=bridge,
         )
 
-        bridge = self._create_bridge()
-        for api in apis:
-            api._set_bridge(bridge)
+        self._apply_extension_registrations()
 
-        # Inject extension-registered tools into the harness
+        # Cache custom entries so session_start handlers can read them
+        all_entries = await self.session.get_entries()
+        self._cached_custom_entries = [
+            e for e in all_entries if getattr(e, "type", None) == "custom"
+        ]
+
+        # P7R4-04: emit session_start so extensions can restore state
+        await self._emit_hook_simple("session_start")
+
+    def _apply_extension_registrations(self) -> None:
+        """Inject extension tools and wire event handlers into the runtime."""
         for defn in self._extension_registry.get_tools().values():
             tool = _tool_from_definition(defn)
             self._tools[tool.name] = tool
@@ -320,10 +348,11 @@ class AgentHarness:
                 self.active_tool_names.append(tool.name)
         self.invalidate_system_prompt_cache()
 
-        # Wire extension event handlers into the subscribe pipeline
         for event, registrations in self._extension_registry.get_all_event_handlers().items():
+            hooks_list = self._hooks.setdefault(event, [])
             for reg in registrations:
-                self._hooks.setdefault(event, []).append(reg.handler)
+                if reg.handler not in hooks_list:
+                    hooks_list.append(reg.handler)
 
     def _create_bridge(self) -> HarnessBridge:
         """Build the ``HarnessBridge`` implementation backed by this harness."""
@@ -337,12 +366,43 @@ class AgentHarness:
                     harness.active_tool_names.append(tool.name)
                 harness.invalidate_system_prompt_cache()
 
+            def remove_tool(self, name: str) -> None:
+                harness._tools.pop(name, None)
+                if name in harness.active_tool_names:
+                    harness.active_tool_names.remove(name)
+                harness.invalidate_system_prompt_cache()
+
             def get_active_tool_names(self) -> list[str]:
                 return list(harness.active_tool_names)
 
             def set_active_tool_names(self, names: list[str]) -> None:
+                unknown = [n for n in names if n not in harness._tools]
+                if unknown:
+                    raise ValueError(f"Unknown tool(s): {unknown}")
+                previous_active = list(harness.active_tool_names)
                 harness.active_tool_names = list(names)
                 harness.invalidate_system_prompt_cache()
+                harness.pending_session_writes.append(
+                    {"type": "active_tools_change", "active_tool_names": list(names)}
+                )
+
+                async def _emit_tools_update() -> None:
+                    await harness._emit_any(
+                        ToolsUpdateEvent(
+                            toolNames=list(harness._tools),
+                            previousToolNames=list(harness._tools),
+                            activeToolNames=list(names),
+                            previousActiveToolNames=previous_active,
+                        )
+                    )
+
+                try:
+                    loop = asyncio.get_running_loop()
+                    task = loop.create_task(_emit_tools_update())
+                    harness._bg_tasks.add(task)
+                    task.add_done_callback(harness._bg_tasks.discard)
+                except RuntimeError:
+                    pass
 
             def get_all_tool_info(self) -> list[ToolInfo]:
                 infos: list[ToolInfo] = []
@@ -365,6 +425,14 @@ class AgentHarness:
             def send_message(self, text: str) -> None:
                 msg = _create_user_message(text)
                 harness.steer_queue.append(msg)
+
+            def trigger_prompt(self, text: str) -> None:
+                if harness.phase == "idle":
+                    task = asyncio.create_task(harness.prompt(text))
+                    harness._bg_tasks.add(task)
+                    task.add_done_callback(harness._bg_tasks.discard)
+                else:
+                    harness.steer_queue.append(_create_user_message(text))
 
             def append_entry(self, custom_type: str, data: Any) -> None:
                 harness.pending_session_writes.append(
@@ -392,7 +460,34 @@ class AgentHarness:
 
             @property
             def session_id(self) -> str:
-                return ""
+                return harness._session_id
+
+            @property
+            def stream_fn(self) -> Any:
+                return harness.stream_fn
+
+            @property
+            def model(self) -> Any:
+                return harness.model
+
+            @property
+            def get_api_key_fn(self) -> Any:
+                return harness.get_api_key
+
+            def add_hook(self, event: str, handler: Any) -> None:
+                harness._hooks.setdefault(event, []).append(handler)
+
+            def remove_hook(self, event: str, handler: Any) -> None:
+                handlers = harness._hooks.get(event)
+                if handlers and handler in handlers:
+                    handlers.remove(handler)
+
+            def get_custom_entries(self, custom_type: str) -> list[Any]:
+                entries = harness._cached_custom_entries or []
+                return [e for e in entries if getattr(e, "customType", None) == custom_type]
+
+            def register_cleanup(self, callback: Any) -> None:
+                harness._cleanup_callbacks.append(callback)
 
         return _Bridge()
 
@@ -401,19 +496,122 @@ class AgentHarness:
         """The extension registry (tools, commands, event handlers)."""
         return self._extension_registry
 
+    async def load_extensions(self) -> None:
+        """Eagerly load extensions.
+
+        Called automatically on the first ``prompt()``, but callers (e.g. an
+        ACP agent) may invoke it earlier to advertise registered commands
+        before the first turn.
+        """
+        await self._ensure_extensions_loaded()
+
+    async def dispatch_command(self, name: str, args: str = "") -> str | None:
+        """Execute a registered extension slash command.
+
+        Returns the output text if a command was found and executed, ``None``
+        otherwise.  The handler's ``send_message()`` outputs are captured and
+        returned rather than remaining on the steer queue.
+
+        Passthrough commands (``CommandDef.passthrough=True``) always return
+        ``None`` so the original prompt text is forwarded to the LLM.
+        """
+        commands = self._extension_registry.get_commands()
+        cmd = commands.get(name)
+        if cmd is None:
+            return None
+        if cmd.passthrough:
+            return None
+
+        steer_before = len(self.steer_queue)
+        try:
+            result = cmd.handler(args)
+            if hasattr(result, "__await__"):
+                await result
+        except Exception as e:
+            logger.warning("Command /%s handler error: %s", name, e, exc_info=True)
+            return f"Error executing /{name}: {e}"
+
+        new_messages = self.steer_queue[steer_before:]
+        del self.steer_queue[steer_before:]
+
+        parts: list[str] = []
+        for msg in new_messages:
+            content = getattr(msg, "content", None)
+            if isinstance(content, str):
+                parts.append(content)
+            elif isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        parts.append(block.get("text", ""))
+        return "\n".join(parts) if parts else f"/{name} executed."
+
+    async def _try_slash_dispatch(
+        self, text: str, images: list[ImageContent] | None = None
+    ) -> AssistantMessage | None:
+        """Intercept ``/command args`` and dispatch to an extension command.
+
+        Emits a full event sequence (agent_start … agent_end) so subscribers
+        see a well-formed turn.  Returns the synthetic ``AssistantMessage`` if
+        a command was matched, ``None`` otherwise (fall through to LLM turn).
+        """
+        stripped = text.strip()
+        if not stripped.startswith("/"):
+            return None
+
+        without_slash = stripped[1:]
+        parts = without_slash.split(None, 1)
+        cmd_name = parts[0] if parts else ""
+        cmd_args = parts[1] if len(parts) > 1 else ""
+
+        if not cmd_name:
+            return None
+
+        output = await self.dispatch_command(cmd_name, cmd_args)
+        if output is None:
+            return None
+
+        user_msg = _create_user_message(text, images)
+        assistant_msg = AssistantMessage(
+            content=[{"type": "text", "text": output}],
+            stopReason="stop",
+            usage=Usage(),
+        )
+
+        self._set_phase("turn")
+        signal = _AbortController().signal
+        try:
+            await self._handle_agent_event(AgentStartEvent(), signal)
+            await self._handle_agent_event(TurnStartEvent(), signal)
+            await self._handle_agent_event(MessageStartEvent(message=user_msg), signal)
+            await self._handle_agent_event(MessageEndEvent(message=user_msg), signal)
+            await self._handle_agent_event(MessageStartEvent(message=assistant_msg), signal)
+            await self._handle_agent_event(
+                MessageUpdateEvent(
+                    message=assistant_msg,
+                    assistant_message_event=TextDeltaEvent(
+                        partial=assistant_msg,
+                        delta=output,
+                    ),
+                ),
+                signal,
+            )
+            await self._handle_agent_event(MessageEndEvent(message=assistant_msg), signal)
+            await self._handle_agent_event(
+                TurnEndEvent(message=assistant_msg, tool_results=[]), signal
+            )
+            await self._handle_agent_event(AgentEndEvent(messages=[assistant_msg]), signal)
+        except Exception:
+            self._set_phase("idle")
+            raise
+
+        return assistant_msg
+
     def load_extension(self, activate: ActivateFn) -> None:
         """Manually load an extension after construction."""
-        api = self._extension_loader.load_callable(activate, source="programmatic")
+        bridge = self._extension_bridge or self._create_bridge()
+        self._extension_loader.load_callable(activate, source="programmatic", bridge=bridge)
         if self._extensions_loaded:
-            bridge = self._create_bridge()
-            api._set_bridge(bridge)
-            for defn in self._extension_registry.get_tools().values():
-                if defn.name not in self._tools:
-                    tool = _tool_from_definition(defn)
-                    self._tools[tool.name] = tool
-                    if tool.name not in self.active_tool_names:
-                        self.active_tool_names.append(tool.name)
-            self.invalidate_system_prompt_cache()
+            self._apply_extension_registrations()
 
     def _set_phase(
         self, phase: Literal["idle", "turn", "compaction", "branch_summary", "retry"]
@@ -466,6 +664,15 @@ class AgentHarness:
             except Exception as e:
                 # pi's normalizeHookError: listener failures are application
                 # bugs surfaced with a stable "hook" code, never swallowed.
+                raise normalize_harness_error(e, "hook") from e
+
+    async def _emit_hook_simple(self, event_name: str) -> None:
+        """Fire handlers registered for *event_name* with a plain dict."""
+        event_obj = {"type": event_name}
+        for handler in list(self._hooks.get(event_name, [])):
+            try:
+                await _maybe_await(handler(event_obj))
+            except Exception as e:
                 raise normalize_harness_error(e, "hook") from e
 
     async def _emit_hook(self, event: Any) -> Any:
@@ -538,6 +745,7 @@ class AgentHarness:
     async def _create_turn_state(self) -> _TurnState:
         context = await self.session.build_context()
         metadata = await self.session.get_metadata()
+        self._session_id = metadata.id
         active_tools = [self._tools[name] for name in self.active_tool_names if name in self._tools]
         if self._cached_system_prompt is not None:
             system_prompt = self._cached_system_prompt
@@ -623,12 +831,14 @@ class AgentHarness:
             assert isinstance(event, MessageEndEvent)
             await self.session.append_message(event.message)
             await self._emit_any(event, signal)
+            await self._emit_hook(event)
             return
         if event.type == "turn_end":
             assert isinstance(event, TurnEndEvent)
             event_error: Exception | None = None
             try:
                 await self._emit_any(event, signal)
+                await self._emit_hook(event)
             except Exception as e:
                 event_error = e
             had_pending = bool(self.pending_session_writes)
@@ -642,9 +852,11 @@ class AgentHarness:
             await self._flush_pending_session_writes()
             self._set_phase("idle")
             await self._emit_any(event, signal)
+            await self._emit_hook(event)
             await self._emit_any(SettledEvent(nextTurnCount=len(self.next_turn_queue)), signal)
             return
         await self._emit_any(event, signal)
+        await self._emit_hook(event)
 
     async def _emit_run_failure(
         self,
@@ -653,13 +865,6 @@ class AgentHarness:
         aborted: bool,
         signal: Any,
     ) -> list[AgentMessage]:
-        from pi_agent_core.types import (
-            AgentEndEvent,
-            MessageEndEvent,
-            MessageStartEvent,
-            TurnEndEvent,
-        )
-
         failure = _failure_message(model, error, aborted)
         await self._handle_agent_event(MessageStartEvent(message=failure), signal)
         await self._handle_agent_event(MessageEndEvent(message=failure), signal)
@@ -904,7 +1109,13 @@ class AgentHarness:
     async def prompt(self, text: str, images: list[ImageContent] | None = None) -> AssistantMessage:
         if self.phase != "idle":
             raise AgentHarnessError("busy", "AgentHarness is busy")
-        self._ensure_extensions_loaded()
+        await self._ensure_extensions_loaded()
+
+        # Slash command dispatch — skip the LLM turn entirely when matched.
+        dispatched = await self._try_slash_dispatch(text, images)
+        if dispatched is not None:
+            return dispatched
+
         self._set_phase("turn")
         try:
             return await self._execute_turn(await self._create_turn_state(), text, images)
@@ -1033,6 +1244,21 @@ class AgentHarness:
                 errors.append(e)
         self._raise_hook_errors(errors)
         return {"cleared_steer": cleared_steer, "cleared_follow_up": cleared_follow_up}
+
+    async def close(self) -> None:
+        """Run registered cleanup callbacks and release resources.
+
+        Called by the session owner (e.g. ACP agent) when a session is
+        closed, so extensions can shut down background tasks, worktrees, etc.
+        """
+        for cb in self._cleanup_callbacks:
+            try:
+                result = cb()
+                if hasattr(result, "__await__"):
+                    await result
+            except Exception:
+                logger.warning("Cleanup callback failed", exc_info=True)
+        self._cleanup_callbacks.clear()
 
     async def _maybe_auto_compact(self, signal: Any | None = None) -> None:
         if not self.compaction.auto_compact or self.phase != "turn":

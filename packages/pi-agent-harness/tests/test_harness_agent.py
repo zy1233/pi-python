@@ -651,3 +651,333 @@ async def test_system_prompt_cached_across_turns_and_invalidated():
     await harness.set_model(_model("m2"))
     await harness.prompt("turn 4")
     assert call_count == 3
+
+
+# ---------------------------------------------------------------------------
+# P7-01: Extension lifecycle events reach hooks
+# ---------------------------------------------------------------------------
+
+
+async def test_extension_lifecycle_events_reach_hooks():
+    """Extension on('turn_end') / on('agent_end') handlers fire during prompt."""
+    fired: list[str] = []
+
+    def tracking_ext(pi):
+        pi.on("turn_start", lambda e: fired.append("turn_start"))
+        pi.on("turn_end", lambda e: fired.append("turn_end"))
+        pi.on("agent_end", lambda e: fired.append("agent_end"))
+        pi.on("message_start", lambda e: fired.append("message_start"))
+        pi.on("message_end", lambda e: fired.append("message_end"))
+
+    session = await _memory_session("ext-events")
+    harness = AgentHarness(
+        session=session,
+        model=_model(),
+        stream_fn=mock_text_stream,
+        extensions=[tracking_ext],
+    )
+    await harness.prompt("test")
+    await harness.wait_for_idle()
+    assert "turn_start" in fired
+    assert "turn_end" in fired
+    assert "agent_end" in fired
+    assert "message_start" in fired
+    assert "message_end" in fired
+
+
+# ---------------------------------------------------------------------------
+# P7-03: Bridge is available during activate
+# ---------------------------------------------------------------------------
+
+
+async def test_extension_bridge_available_during_activate():
+    """pi.cwd is accessible during activate() (bridge bound before activate)."""
+    captured_cwd: list[str] = []
+
+    def cwd_ext(pi):
+        captured_cwd.append(pi.cwd)
+
+    session = await _memory_session("ext-cwd")
+    harness = AgentHarness(
+        session=session,
+        model=_model(),
+        stream_fn=mock_text_stream,
+        extensions=[cwd_ext],
+    )
+    await harness.prompt("test")
+    assert len(captured_cwd) == 1
+    assert isinstance(captured_cwd[0], str)
+
+
+# ---------------------------------------------------------------------------
+# P7-02: Failed activate rolls back in harness integration
+# ---------------------------------------------------------------------------
+
+
+async def test_extension_failed_activate_no_residual_tools():
+    """A crashing extension must not leave ghost tools in the harness."""
+
+    async def ghost_execute(tool_call_id, params, **kw):
+        from pi_agent_core.types import AgentToolResult
+
+        return AgentToolResult(content=[{"type": "text", "text": "ghost"}])
+
+    from pi_agent_core.extensions import ToolDefinition
+
+    def ghost_ext(pi):
+        pi.register_tool(
+            ToolDefinition(
+                name="ghost_tool",
+                description="Should not survive",
+                parameters=None,
+                execute=ghost_execute,
+            )
+        )
+        raise RuntimeError("activate crash")
+
+    session = await _memory_session("ext-ghost")
+    harness = AgentHarness(
+        session=session,
+        model=_model(),
+        stream_fn=mock_text_stream,
+        extensions=[ghost_ext],
+    )
+    await harness.prompt("test")
+    assert "ghost_tool" not in harness._tools
+    assert "ghost_tool" not in harness.extension_registry.get_tools()
+
+
+# ---------------------------------------------------------------------------
+# P7-04: session_id populated after first prompt
+# ---------------------------------------------------------------------------
+
+
+async def test_extension_session_id_populated():
+    """session_id is available during activate() AND at turn_end."""
+    activate_sid: list[str] = []
+    hook_sid: list[str] = []
+
+    def sid_ext(pi):
+        activate_sid.append(pi.session_id)
+        pi.on("turn_end", lambda _e: hook_sid.append(pi.session_id))
+
+    session = await _memory_session("ext-sid")
+    harness = AgentHarness(
+        session=session,
+        model=_model(),
+        stream_fn=mock_text_stream,
+        extensions=[sid_ext],
+    )
+    await harness.prompt("test")
+    await harness.wait_for_idle()
+    # activate phase should already have session_id
+    assert len(activate_sid) == 1
+    assert activate_sid[0] != "", "session_id must be non-empty during activate"
+    # turn_end hook should also have it
+    assert len(hook_sid) == 1
+    assert hook_sid[0] == activate_sid[0]
+
+
+# ---------------------------------------------------------------------------
+# Slash command dispatch (P7-07 fix)
+# ---------------------------------------------------------------------------
+
+
+class TestSlashCommandDispatch:
+    """Verify slash command routing: /command args → extension handler."""
+
+    @staticmethod
+    def _greeting_ext(pi):
+        """Extension that registers /greet and /info commands."""
+        pi.register_command(
+            "greet",
+            description="Greet someone",
+            handler=lambda args: pi.send_message(f"Hello, {args.strip() or 'world'}!"),
+        )
+        pi.register_command(
+            "info",
+            description="Show info",
+            handler=lambda _args: pi.send_message("This is pi-python."),
+        )
+
+    @pytest.mark.asyncio
+    async def test_dispatch_command_returns_output(self):
+        """dispatch_command() returns captured send_message text."""
+        session = await _memory_session("cmd-dispatch")
+        harness = AgentHarness(
+            session=session,
+            model=_model(),
+            stream_fn=mock_text_stream,
+            extensions=[self._greeting_ext],
+        )
+        await harness.load_extensions()
+
+        result = await harness.dispatch_command("greet", "Alice")
+        assert result == "Hello, Alice!"
+        # steer_queue should be drained (not left for LLM)
+        assert len(harness.steer_queue) == 0
+
+    @pytest.mark.asyncio
+    async def test_dispatch_command_unknown_returns_none(self):
+        """dispatch_command() returns None for unregistered commands."""
+        session = await _memory_session("cmd-unknown")
+        harness = AgentHarness(
+            session=session,
+            model=_model(),
+            stream_fn=mock_text_stream,
+            extensions=[self._greeting_ext],
+        )
+        await harness.load_extensions()
+
+        result = await harness.dispatch_command("nonexistent", "")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_prompt_slash_skips_llm(self):
+        """prompt('/greet Bob') dispatches to handler, never calls LLM."""
+        llm_called = []
+
+        async def tracking_stream(model, context, options=None):
+            llm_called.append(True)
+            return await mock_text_stream(model, context, options)
+
+        session = await _memory_session("cmd-prompt")
+        harness = AgentHarness(
+            session=session,
+            model=_model(),
+            stream_fn=tracking_stream,
+            extensions=[self._greeting_ext],
+        )
+        result = await harness.prompt("/greet Bob")
+        await harness.wait_for_idle()
+
+        # Handler output should be the assistant message
+        assert result.role == "assistant"
+        text = result.content[0]["text"]
+        assert "Hello, Bob!" in text
+        # LLM should NOT have been called
+        assert len(llm_called) == 0
+
+    @pytest.mark.asyncio
+    async def test_prompt_slash_emits_full_event_sequence(self):
+        """Slash dispatch emits agent_start…agent_end for subscribers."""
+        events: list[str] = []
+
+        session = await _memory_session("cmd-events")
+        harness = AgentHarness(
+            session=session,
+            model=_model(),
+            stream_fn=mock_text_stream,
+            extensions=[self._greeting_ext],
+        )
+        harness.subscribe(lambda e, s=None: events.append(e.type))
+        await harness.prompt("/info")
+        await harness.wait_for_idle()
+
+        assert "agent_start" in events
+        assert "turn_start" in events
+        assert "message_update" in events
+        assert "agent_end" in events
+        assert "settled" in events
+
+    @pytest.mark.asyncio
+    async def test_prompt_slash_persists_messages(self):
+        """Both user and assistant messages are persisted to the session."""
+        session = await _memory_session("cmd-persist")
+        harness = AgentHarness(
+            session=session,
+            model=_model(),
+            stream_fn=mock_text_stream,
+            extensions=[self._greeting_ext],
+        )
+        await harness.prompt("/greet")
+        await harness.wait_for_idle()
+
+        context = await session.build_context()
+        roles = [m.role for m in context.messages]
+        assert roles == ["user", "assistant"]
+        # User message should contain the original slash text
+        user_text = _user_text(context.messages[0])
+        assert user_text == "/greet"
+
+    @pytest.mark.asyncio
+    async def test_unrecognized_slash_falls_through_to_llm(self):
+        """'/unknown' is not a registered command — passed through to LLM."""
+        llm_called = []
+
+        async def tracking_stream(model, context, options=None):
+            llm_called.append(True)
+            return await mock_text_stream(model, context, options)
+
+        session = await _memory_session("cmd-fallthrough")
+        harness = AgentHarness(
+            session=session,
+            model=_model(),
+            stream_fn=tracking_stream,
+            extensions=[self._greeting_ext],
+        )
+        await harness.prompt("/unknown stuff")
+        await harness.wait_for_idle()
+        assert len(llm_called) == 1
+
+    @pytest.mark.asyncio
+    async def test_dispatch_handler_error_returns_error_text(self):
+        """Handler exception is captured and returned as error text."""
+
+        def bad_ext(pi):
+            def bad_handler(args):
+                raise ValueError("boom")
+
+            pi.register_command("fail", description="Always fails", handler=bad_handler)
+
+        session = await _memory_session("cmd-error")
+        harness = AgentHarness(
+            session=session,
+            model=_model(),
+            stream_fn=mock_text_stream,
+            extensions=[bad_ext],
+        )
+        await harness.load_extensions()
+
+        result = await harness.dispatch_command("fail", "")
+        assert result is not None
+        assert "Error executing /fail" in result
+        assert "boom" in result
+
+    @pytest.mark.asyncio
+    async def test_dispatch_drains_steer_queue(self):
+        """Handler's send_message() calls are captured, not left in steer_queue."""
+
+        def multi_msg_ext(pi):
+            def handler(args):
+                pi.send_message("line 1")
+                pi.send_message("line 2")
+
+            pi.register_command("multi", description="Multiple messages", handler=handler)
+
+        session = await _memory_session("cmd-drain")
+        harness = AgentHarness(
+            session=session,
+            model=_model(),
+            stream_fn=mock_text_stream,
+            extensions=[multi_msg_ext],
+        )
+        await harness.load_extensions()
+
+        result = await harness.dispatch_command("multi", "")
+        assert result == "line 1\nline 2"
+        assert len(harness.steer_queue) == 0
+
+    @pytest.mark.asyncio
+    async def test_load_extensions_idempotent(self):
+        """Multiple load_extensions() calls do not double-register."""
+        session = await _memory_session("cmd-idempotent")
+        harness = AgentHarness(
+            session=session,
+            model=_model(),
+            stream_fn=mock_text_stream,
+            extensions=[self._greeting_ext],
+        )
+        await harness.load_extensions()
+        await harness.load_extensions()
+        assert harness.extension_registry.command_count == 2  # greet + info
