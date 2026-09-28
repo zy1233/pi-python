@@ -961,7 +961,7 @@ ruff check + format 通过。**
 P7R4-01、P7R4-05、P7R4-07 已关闭。P7R4-02、P7R4-03、P7R4-04、P7R4-06
 仍只完成了主修复的一部分，因此不能判定全部关闭。
 
-### P7R5-01. [x/~] 高：worktree 中的修改不会回写，隔离结果被丢弃
+### P7R5-01. [x] 高：worktree 中的修改不会回写，隔离结果被丢弃
 
 - 位置：
   - `packages/pi-dynamic-workflows/pi_dynamic_workflows/subagent.py:110-180`
@@ -1003,7 +1003,7 @@ P7R4-01、P7R4-05、P7R4-07 已关闭。P7R4-02、P7R4-03、P7R4-04、P7R4-06
 - 影响：session 恢复后目标状态仍丢失。
 - 建议：增加只读 session entry API 或在事件 payload 提供 entries，并实现恢复测试。
 
-### P7R5-04. [x/~] 中：同名覆盖只清 registry，不清理 live runtime；失败替换也无法回滚
+### P7R5-04. [x] 中：同名覆盖只清 registry，不清理 live runtime；失败替换也无法回滚
 
 - 位置：`pi_agent_core/extensions/loader.py:113-137`。
 - 独立复现：
@@ -1131,7 +1131,7 @@ P7R5-02、P7R5-03 已完整关闭；P7R5-01 在“源工作区干净”时可用
 snapshot + 源工作区已有未提交修改时仍会丢失 agent 修改；P7R5-04 的成功覆盖
 已关闭，失败回滚仍不完整。
 
-### P7R6-01. [ ] 高：snapshot worktree 的 dirty diff 无法安全 apply
+### P7R6-01. [x] 高：snapshot worktree 的 dirty diff 无法安全 apply
 
 - 位置：
   - `packages/pi-dynamic-workflows/pi_dynamic_workflows/worktree.py:73-111`
@@ -1166,7 +1166,7 @@ error: a.txt: patch does not apply
   - 应用时使用 3-way/冲突检测，并明确向 workflow 返回 apply 失败，
     不要 cleanup 后静默丢失。
 
-### P7R6-02. [ ] 中：同名扩展失败替换未恢复 live runtime
+### P7R6-02. [x] 中：同名扩展失败替换未恢复 live runtime
 
 - 位置：`pi_agent_core/extensions/loader.py:113-147`。
 - 现状：
@@ -1202,3 +1202,46 @@ same_failure_live ['old_tool'] 1 -> [] 0
 - 默认受控环境 workflow 包仍受真实 HOME/TEMP 权限影响，测试隔离问题未变。
 
 **第六次最终判定：P7R5-01、P7R5-04 仍有未关闭部分；当前不能判定 P7R5 全量修复。**
+
+---
+
+## 十五、P7R6-01～02 修复记录（2026-09-28）
+
+### P7R6-01 修复：snapshot worktree baseline commit — collect_diff 只返回 agent 增量
+
+- **根因**：`_apply_snapshot()` 将源 cwd 的 dirty 修改复制到 worktree 后，
+  `collect_diff()` 执行 `git diff HEAD`，返回的是相对原始 HEAD 的完整 diff
+  （包含预先存在的 dirty 修改 + agent 修改）。对已有 dirty 修改的源 cwd
+  执行 `git apply` 时，dirty 部分无法重复应用，导致 patch 失败。
+- **修复**：
+  - `worktree.py`：`_apply_snapshot()` 在复制 dirty 修改后，执行
+    `git add -A && git commit -m "pi-snapshot-baseline"`，将 dirty 状态
+    作为 baseline commit 固定到 worktree HEAD。
+  - 此后 `collect_diff()` 的 `git diff HEAD` 仅返回 agent 的增量修改
+    （相对于 baseline），不包含源 cwd 已有的 dirty 状态。
+  - `apply_changes()` 将纯 agent 增量 apply 到源 cwd，不再冲突。
+- **测试**：
+  - `TestWorktreeSnapshotBaseline::test_dirty_source_apply_succeeds` — 源 cwd
+    有 dirty 修改，agent 在 worktree 中修改同一文件，verify `apply_changes()`
+    成功且源文件更新为 agent 修改。
+  - `TestWorktreeSnapshotBaseline::test_clean_source_apply_succeeds` — clean
+    源 cwd，verify 标准路径不受影响。
+
+### P7R6-02 修复：同名替换失败时不再清理 live harness
+
+- **根因**：`_purge_live_harness()` 在 `activate()` 之前执行，一旦新扩展
+  activate 失败，旧扩展的 tools/hooks 已从 harness 删除且无法回滚。
+- **修复**：
+  - `loader.py`：将 `_purge_live_harness()` 从 activate 前移至 activate 成功后。
+  - 失败路径只执行 `registry.restore(snap)` + 恢复 `_apis`/`_loaded_names`。
+    由于 activate 期间 `_loading=True`，`register_tool()` 和 `on()` 均不会
+    注入到 live harness（只写 registry），因此 harness 运行时状态完整保留。
+  - 成功路径：activate 完成后才调用 `_purge_live_harness()` 清理旧 tools/hooks，
+    随后 `_apply_extension_registrations()` 注入新注册。
+- **测试**：
+  - `TestSameNameOverride::test_failed_override_preserves_live_harness` —
+    使用真实 AgentHarness，加载 ext_good（含 tool + hook），再加载失败的
+    ext_bad，验证 harness._tools 和 _hooks 完整保留。
+
+**验证：Windows `573 passed, 30 skipped`；WSL `567 passed, 4 skipped`；
+ruff check + format 通过。**

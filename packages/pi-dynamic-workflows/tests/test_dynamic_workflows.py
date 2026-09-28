@@ -1073,3 +1073,89 @@ class TestWorkflowStoreNoClobberAtomic:
 
         saved = (tmp_path / ".pi-python" / "workflows" / "race.py").read_text()
         assert saved == script_a
+
+
+# ---------------------------------------------------------------------------
+# P7R6-01: worktree snapshot baseline — collect_diff returns only agent delta
+# ---------------------------------------------------------------------------
+
+
+class TestWorktreeSnapshotBaseline:
+    """Verify that snapshot mode commits a baseline so apply_changes
+    only writes back the agent's delta, not the pre-existing dirty state."""
+
+    @pytest.fixture()
+    def git_repo(self, tmp_path: Path) -> Path:
+        """Create a minimal git repo with one committed file."""
+        import subprocess
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init"], cwd=str(repo), check=True, capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@test"],
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "test"],
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
+        )
+        (repo / "a.txt").write_text("original\n")
+        subprocess.run(["git", "add", "."], cwd=str(repo), check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "init"],
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
+        )
+        return repo
+
+    @pytest.mark.asyncio()
+    async def test_dirty_source_apply_succeeds(self, git_repo: Path) -> None:
+        """When source has dirty changes, apply_changes must still succeed."""
+        import uuid
+
+        from pi_dynamic_workflows.worktree import WorktreeManager
+
+        (git_repo / "a.txt").write_text("dirty\n")
+
+        mgr = WorktreeManager(str(git_repo))
+        wt = await mgr.create(session_id=f"dirty-{uuid.uuid4().hex[:8]}")
+
+        assert (Path(wt) / "a.txt").read_text() == "dirty\n"
+
+        (Path(wt) / "a.txt").write_text("agent-change\n")
+
+        diff = await mgr.collect_diff(wt)
+        assert "agent-change" in diff
+        assert "original" not in diff
+
+        await mgr.apply_changes(wt)
+        assert (git_repo / "a.txt").read_text() == "agent-change\n"
+
+        await mgr.cleanup(wt)
+
+    @pytest.mark.asyncio()
+    async def test_clean_source_apply_succeeds(self, git_repo: Path) -> None:
+        """Clean source (no dirty state) still works correctly."""
+        import uuid
+
+        from pi_dynamic_workflows.worktree import WorktreeManager
+
+        mgr = WorktreeManager(str(git_repo))
+        wt = await mgr.create(session_id=f"clean-{uuid.uuid4().hex[:8]}")
+
+        # Edit the tracked file (untracked files won't appear in git diff HEAD)
+        (Path(wt) / "a.txt").write_text("agent-only\n")
+
+        diff = await mgr.collect_diff(wt)
+        assert "agent-only" in diff
+
+        await mgr.apply_changes(wt)
+        assert (git_repo / "a.txt").read_text() == "agent-only\n"
+
+        await mgr.cleanup(wt)

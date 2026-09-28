@@ -716,6 +716,47 @@ class TestSameNameOverride:
         assert len(loader.apis) == 1
         assert loader.apis[0].extension_name == "same"
 
+    async def test_failed_override_preserves_live_harness(self) -> None:
+        """Failed override must NOT purge old extension's live runtime state."""
+        from pi_agent_core.tests.mock_stream import mock_text_stream
+        from pi_agent_core.types import Model
+        from pi_agent_harness import AgentHarness, MemorySessionStorage, Session
+
+        session = Session(await MemorySessionStorage.create())
+        harness = AgentHarness(
+            session=session,
+            model=Model(provider="mock", model_id="m1"),
+            stream_fn=mock_text_stream,
+        )
+
+        def ext_good(pi: ExtensionAPI) -> None:
+            pi.register_tool(
+                ToolDefinition(
+                    name="old-tool",
+                    description="old",
+                    parameters=GreetParams,
+                    execute=greet_execute,
+                )
+            )
+            pi.on("tool_call", lambda e: None)
+
+        def ext_bad(pi: ExtensionAPI) -> None:
+            raise RuntimeError("new activate crashed")
+
+        harness.load_extension(ext_good)
+        await harness._ensure_extensions_loaded()
+        assert "old-tool" in harness._tools
+        assert len(harness._hooks.get("tool_call", [])) == 1
+
+        with pytest.raises(RuntimeError, match="new activate crashed"):
+            harness.load_extension(ext_bad)
+
+        # Registry restored
+        assert "old-tool" in harness._extension_registry.get_tools()
+        # Live harness tools/hooks must also survive
+        assert "old-tool" in harness._tools
+        assert len(harness._hooks.get("tool_call", [])) == 1
+
 
 # ---------------------------------------------------------------------------
 # P7R5-02: dynamic on() enters live hooks

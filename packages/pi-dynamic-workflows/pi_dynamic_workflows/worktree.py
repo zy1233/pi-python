@@ -73,7 +73,12 @@ class WorktreeManager:
         return wt_dir
 
     async def _apply_snapshot(self, wt_dir: str) -> None:
-        """Copy staged + unstaged changes from source into the worktree."""
+        """Copy staged + unstaged changes from source into the worktree.
+
+        After applying dirty changes, creates a temporary baseline commit so
+        that ``collect_diff()`` only captures the agent's delta — not the
+        pre-existing dirty state that the source cwd already contains.
+        """
         _, diff_unstaged, _ = await _run_git(["diff", "HEAD"], cwd=self._source_cwd)
         if diff_unstaged.strip():
             rc, _, err = await _run_git(["apply", "--allow-empty"], cwd=wt_dir, stdin=diff_unstaged)
@@ -89,6 +94,23 @@ class WorktreeManager:
             )
             if rc != 0:
                 logger.warning("Snapshot staged apply failed: %s", err.decode().strip())
+
+        has_changes = bool(diff_unstaged.strip() or diff_staged.strip())
+        if has_changes:
+            await _run_git(["add", "-A"], cwd=wt_dir)
+            await _run_git(
+                [
+                    "-c",
+                    "user.email=pi@local",
+                    "-c",
+                    "user.name=pi",
+                    "commit",
+                    "--allow-empty",
+                    "-m",
+                    "pi-snapshot-baseline",
+                ],
+                cwd=wt_dir,
+            )
 
     async def collect_diff(self, worktree_path: str) -> str:
         """Return ``git diff HEAD`` from the worktree."""

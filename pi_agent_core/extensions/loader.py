@@ -128,23 +128,29 @@ class ExtensionLoader:
         old_apis_copy = list(self._apis)
         old_names_copy = set(self._loaded_names)
 
-        # Remove old registrations (registry + harness live state)
+        # Remove old registrations from registry only (NOT from live harness
+        # yet — we delay live purge until activate succeeds so a failure can
+        # leave the old extension's runtime state intact).
         if old_api is not None:
             self.registry.remove_by_extension(ext_name)
-            if bridge is not None:
-                self._purge_live_harness(bridge, ext_name, snap)
             self._apis = [a for a in self._apis if a.extension_name != ext_name]
             self._loaded_names.discard(ext_name)
 
         try:
             activate(api)
         except Exception:
-            # Roll back to state before override attempt
+            # Roll back registry + loader state.  Live harness was NOT
+            # modified (tools/hooks during activate() are registry-only
+            # because _loading=True), so old extension's runtime is intact.
             self.registry.restore(snap)
             self._apis = old_apis_copy
             self._loaded_names = old_names_copy
             logger.error("Extension %r failed during activate()", ext_name, exc_info=True)
             raise
+
+        # activate() succeeded — now purge old extension's live harness state
+        if old_api is not None and bridge is not None:
+            self._purge_live_harness(bridge, ext_name, snap)
 
         api._loading = False  # enable dynamic register_tool → bridge injection
         self._apis.append(api)
