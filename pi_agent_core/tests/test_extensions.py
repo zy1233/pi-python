@@ -840,3 +840,54 @@ class TestGoalRestore:
         result = await goal_update.execute("tc-1", GoalUpdateParams(step_index=0, status="done"))
         text = result.content[0]["text"]
         assert "No active goal" not in text
+
+
+# ---------------------------------------------------------------------------
+# P7-13: ExtensionLoader.load() accepts module or callable
+# ---------------------------------------------------------------------------
+
+
+class TestLoaderLoadAlias:
+    def test_load_callable(self) -> None:
+        """load() accepts a bare activate function."""
+
+        def my_activate(pi: ExtensionAPI) -> None:
+            pi.register_tool(
+                ToolDefinition(
+                    name="via-load",
+                    description="test",
+                    parameters=GreetParams,
+                    execute=greet_execute,
+                )
+            )
+
+        loader = ExtensionLoader()
+        api = loader.load(my_activate, name="test-ext")
+        assert "via-load" in loader.registry.get_tools()
+        assert api.extension_name == "test-ext"
+
+    def test_load_module_object(self) -> None:
+        """load() accepts a module-like object with an activate attribute."""
+        from types import SimpleNamespace
+
+        def activate(pi: ExtensionAPI) -> None:
+            pi.register_tool(
+                ToolDefinition(
+                    name="via-module",
+                    description="test",
+                    parameters=GreetParams,
+                    execute=greet_execute,
+                )
+            )
+
+        fake_module = SimpleNamespace(activate=activate)
+        loader = ExtensionLoader()
+        api = loader.load(fake_module, name="mod-ext")
+        assert "via-module" in loader.registry.get_tools()
+        assert api.extension_name == "mod-ext"
+
+    def test_load_rejects_invalid(self) -> None:
+        """load() raises TypeError for objects without activate."""
+        loader = ExtensionLoader()
+        with pytest.raises(TypeError, match="Cannot resolve"):
+            loader.load(42, name="bad")

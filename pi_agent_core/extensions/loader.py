@@ -96,6 +96,25 @@ class ExtensionLoader:
             results.extend(self.discover_directory(project_ext))
         return results
 
+    def load(
+        self,
+        module_or_callable: Any,
+        *,
+        name: str | None = None,
+        source: str = "programmatic",
+        bridge: Any = None,
+    ) -> ExtensionAPI:
+        """Load a single extension from a module or ``activate`` callable.
+
+        Accepts either a module object (must expose an ``activate`` function)
+        or a bare callable.  This is the public API matching the design doc;
+        ``load_callable`` is the underlying implementation.
+        """
+        activate = _resolve_activate(module_or_callable)
+        if activate is None:
+            raise TypeError(f"Cannot resolve an activate function from {module_or_callable!r}")
+        return self.load_callable(activate, name=name, source=source, bridge=bridge)
+
     def load_callable(
         self,
         activate: ActivateFn,

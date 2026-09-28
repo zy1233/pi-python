@@ -172,7 +172,7 @@ class ToolDefinition:
 | `pi.on(event)` | 匹配的 `AgentHarnessEvent.type` | 阻塞能力 |
 |---|---|---|
 | `"tool_call"` | `tool_call` (harness own) | 可返回 `{ block, reason }` |
-| `"tool_result"` | `tool_result` (harness own) | 只读 |
+| `"tool_result"` | `tool_result` (harness own) | 可返回 `AfterToolCallResult` 修改 content/terminate |
 | `"session_start"` | `before_agent_start` | 只读 |
 | `"agent_end"` | `agent_end` | 只读 |
 | `"turn_start"` | `turn_start` | 只读 |
@@ -197,7 +197,7 @@ class ToolDefinition:
    对齐上游 pi 的 `~/.pi/agent/extensions/` 和 `.pi/extensions/`。
    扫描目录下的 Python 模块，import 并查找 `activate` 函数。
 3. **编程注入**：`ExtensionLoader.load(module_or_callable)` ——
-   测试和嵌入场景，直接传入 `activate` 函数。
+   测试和嵌入场景，传入 module 对象或 `activate` 函数均可。
 
 ### 4.2 加载顺序
 
@@ -211,7 +211,7 @@ entry_points → 用户目录（`~/.pi-python/extensions/`）→ 项目目录
 ```python
 extensions: list[Callable[[ExtensionAPI], None]] | None = None
 extension_dirs: list[str] | None = None
-auto_discover_extensions: bool = True
+auto_discover_extensions: bool = False  # CLI/TUI 显式传 True
 ```
 
 在首次 `prompt()` 调用时（`_ensure_extensions_loaded`），执行：
@@ -235,7 +235,7 @@ auto_discover_extensions: bool = True
 |---|---|
 | 参数 | `query: str`, `provider: str \| None = None`, `max_results: int = 5` |
 | 提供商选择 | 环境变量自动检测：`BRAVE_API_KEY` → Brave；`TAVILY_API_KEY` → Tavily；`SEARXNG_URL` → SearXNG；未配置 → 报错说明 |
-| 返回 | `[{title, url, snippet}]` 文本列表，每条 `title: url\nsnippet` |
+| 返回 | `[{title, url, snippet}]` 编号列表，每条含序号、缩进 URL 和 snippet |
 | prompt_snippet | `"Search the web for real-time information"` |
 
 **`fetch_url`**
@@ -399,11 +399,11 @@ Task panel / widget / UI 通知、`workflow_control` 工具（pause/resume/stop�
 | 项 | 说明 | 影响 |
 |---|---|---|
 | **`ctx.ui.*` API** | 上游 pi 的 `ctx.ui.confirm()` / `ctx.ui.select()` / `ctx.ui.notify()` / `ctx.ui.setWidget()` 等 TUI 交互 API 未实现 | 需要时扩展可通过 `send_message()` 降级实现文本反馈 |
-| **SubagentExecutor 真实实现** | 详见 §12 | 当前使用 `MockSubagentExecutor` |
-| **Background run / result delivery** | 详见 §13 | 当前仅同步模式 |
-| **Run persistence / resume** | 详见 §14 | 每次从头运行 |
-| **Git worktree isolation** | 详见 §15 | subagent 共享 cwd |
-| **Saved workflow 存储** | 详见 §16 | 仅支持内置 pattern |
+| **SubagentExecutor 真实实现** | §12 ✅ | `HarnessSubagentExecutor` 已实现，含 coding tools + env |
+| **Background run / result delivery** | §13 ✅ | `trigger_prompt()` 空闲时触发新 turn；`register_cleanup()` 回收任务 |
+| **Run persistence / resume** | §14 ✅ | 首次 run 自动创建 Journal，按 run_id 恢复；格式校验防路径穿越 |
+| **Git worktree isolation** | §15 ✅ | `WorktreeManager` 创建隔离 worktree；snapshot baseline + apply_changes 回写 |
+| **Saved workflow 存储** | §16 ✅ | `WorkflowStore` scan/save，project 覆盖 user；`os.link` 原子 no-clobber |
 | **Task panel / widget** | TUI 侧的实时进度面板未移植 | 纯文本结果输出替代 |
 
 ### 10.3 工作流链路（当前状态）
