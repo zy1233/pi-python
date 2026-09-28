@@ -24,6 +24,7 @@ _PROMPT_CLI_FLAG_NAMES = (
     "append_system_prompt",
     "append_system_prompt_file",
     "no_context_files",
+    "no_git_context",
 )
 
 
@@ -94,6 +95,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip AGENTS.md / CLAUDE.md discovery (headless only).",
     )
+    parser.add_argument(
+        "--no-git-context",
+        action="store_true",
+        help="Omit the <git_status> section from the system prompt (headless only).",
+    )
     return parser
 
 
@@ -104,6 +110,7 @@ def _prompt_overrides_from_args(args: argparse.Namespace) -> HeadlessPromptOverr
         append_system_prompt=args.append_system_prompt,
         append_system_prompt_file=args.append_system_prompt_file,
         no_context_files=True if args.no_context_files else None,
+        no_git_context=True if args.no_git_context else None,
     )
 
 
@@ -120,8 +127,9 @@ def main() -> None:
     )
     if not headless and _has_prompt_cli_flags(args):
         print(
-            "error: --system-prompt, --append-system-prompt, and --no-context-files "
-            "require headless mode (-p, --prompt-json, or --prompt-file)",
+            "error: --system-prompt, --append-system-prompt, --no-context-files, "
+            "and --no-git-context require headless mode "
+            "(-p, --prompt-json, or --prompt-file)",
             file=sys.stderr,
         )
         raise SystemExit(2)

@@ -1,7 +1,7 @@
 """Agent with built-in coding tools (read/bash/edit/write/grep/find/ls).
 
 Demonstrates how to create a coding agent that can explore and modify
-files in a working directory, using the P6 built-in tool ecosystem.
+files in a working directory, using the Phase 3.5 built-in tool ecosystem.
 
 Usage:
     PI_USE_MOCK=1 python examples/coding_tools_agent.py          # mock (no API)

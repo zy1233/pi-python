@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-09-24
+
+### Added
+
+- **Phase 6 (git context)**: `pi_agent_cli` injects a bounded, read-only `<git_status>` block into the system prompt on every turn. Disable with `[git] enabled = false` or headless `--no-git-context`. Non-repos, timeouts, and git failures omit the section. MCP stays out of the product path; callers still adapt `langchain-mcp-adapters` tools with `from_langchain_tool()`.
+- **Provider matrix**: opt-in live tests for OpenAI, Anthropic, DeepSeek, and SiliconFlow (`pytest -m real_llm pi_agent_core/tests/test_provider_matrix.py`). Manual workflow `.github/workflows/provider-matrix.yml` (`workflow_dispatch` only; missing secrets skip).
+- **Phase 7 extension packages** are built and published with the release: `pi-web-access-py`, `pi-goal-x-py`, `pi-dynamic-workflows-py`. CI and the pre-release test job install all three.
+
+### Changed
+
+- `pi-agent-core-lc`, `pi-agent-harness-lc`, and `pi-agent-cli-lc` are version `0.4.0`.
+
 ## [0.3.0] - 2026-09-17
 
 ### Added
@@ -54,7 +66,7 @@ Initial public release.
   - Structured output: `response_schema` (Pydantic model or JSON schema).
   - Tool-result images: Anthropic native blocks, user-message fallback elsewhere.
   - OpenAI-compatible gateways via `Model.base_url`.
-- **Tool ecosystem (P6)**:
+- **Tool ecosystem (Phase 3.5)**:
   - 7 built-in coding tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`.
   - Group factories: `create_coding_tools()` / `create_read_only_tools()`.
   - LangChain `BaseTool` → `AgentTool` adapter (`from_langchain_tool`).
@@ -66,6 +78,7 @@ Initial public release.
 - **Compaction & tree navigation (H3)**: token-based compaction with branch summaries, `navigate_tree` for branch exploration.
 - **Skills, templates & env (H4)**: skill discovery, prompt templates, system prompt injection, `LocalExecutionEnv` for sandboxed execution.
 
+[0.4.0]: https://github.com/zy1233/pi-python/releases/tag/v0.4.0
 [0.3.0]: https://github.com/zy1233/pi-python/releases/tag/v0.3.0
 [0.2.0]: https://github.com/zy1233/pi-python/releases/tag/v0.2.0
 [0.1.0]: https://github.com/zy1233/pi-python/releases/tag/v0.1.0

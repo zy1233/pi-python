@@ -30,7 +30,7 @@
 │  Session 树 · phase 锁 · 三队列 · 写缓冲 · 19 种事件/hook            │
 │  Compaction · Skills / Templates · SystemPrompt · ExecutionEnv  │
 ├─────────────────────────────────────────────────────────────────┤
-│                        Tool Ecosystem (P6)                      │
+│                     Tool Ecosystem (Phase 3.5)                  │
 │  read · bash · edit · write · grep · find · ls                  │
 │  LangChain BaseTool 适配器 · MCP (via langchain-mcp-adapters)    │
 ├─────────────────────────────────────────────────────────────────┤
@@ -237,9 +237,9 @@ Anthropic 原生 image blocks；其他 provider 回退为 user-message 注入；
 
 ---
 
-## 7. P6：工具生态
+## 7. Phase 3.5：工具生态
 
-> 详细设计：`docs/specs/2026-07-03-p6-tool-ecosystem-design.md`
+> 详细设计：`docs/specs/2026-07-03-phase3.5-tool-ecosystem-design.md`
 
 ### 7.1 内置编码工具
 
@@ -362,5 +362,8 @@ spawn 默认为 `python -m pi_agent_cli`（`PI_AGENT_COMMAND` / `PI_PYTHON` 可�
 | `docs/AUDIT/SPIKE-P0-GROK-TUI.md` | Phase 4 P0：pager `x.ai/*` 拆除清单 |
 | `docs/specs/2026-05-25-phase2-*.md` | Phase 2 详细设计：usage/cost、thinking、transform |
 | `docs/specs/2026-07-03-phase3-*.md` | Phase 3 详细设计：Session 树、AgentHarness、Compaction、Skills、Env |
-| `docs/specs/2026-07-03-p6-*.md` | P6 详细设计：7 个内置工具 + LangChain 适配器 |
+| `docs/specs/2026-07-03-phase3.5-*.md` | Phase 3.5 详细设计：7 个内置工具 + LangChain 适配器 |
 | `docs/specs/2026-08-25-phase4-coding-agent-cli-design.md` | Phase 4：fork grok TUI + 标准 ACP agent |
+| `docs/specs/2026-09-02-phase5-prompt-engine-design.md` | Phase 5：system prompt 装配 |
+| `docs/specs/2026-09-24-phase6-extended-integrations-design.md` | Phase 6：Git 上下文与多提供商测试矩阵 |
+| `docs/specs/2026-09-22-phase7-extension-api-design.md` | Phase 7：ExtensionAPI 与扩展包 |

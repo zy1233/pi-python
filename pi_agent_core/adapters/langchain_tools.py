@@ -1,4 +1,4 @@
-"""LangChain ``BaseTool`` -> ``AgentTool`` adapter (P6 spec §6, audit #8).
+"""LangChain ``BaseTool`` -> ``AgentTool`` adapter (Phase 3.5 spec §6, audit #8).
 
 pi has no counterpart (its TS ecosystem uses extensions); this adapter is the
 Python-specific bridge that lets the LangChain tool ecosystem — including MCP

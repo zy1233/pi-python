@@ -10,7 +10,7 @@
 
 ### 1.1 目标
 
-将已完成的引擎层（Phase 1–3 + P6）组装为可日常使用的 Coding Agent CLI：
+将已完成的引擎层（Phase 1–3 + Phase 3.5）组装为可日常使用的 Coding Agent CLI：
 
 - 全屏 TUI：复用 grok-build 的 `pi-pager`（scrollback、Markdown/diff、权限 modal、主题）。
 - 引擎：`AgentHarness` + `coding_tools` + `langchain_stream`；循环语义仍在 `agent_loop.py`。
@@ -174,7 +174,7 @@ P0 失败则改构建策略（WSL / CI 出 Windows 二进制），不改「TUI=A
 
 - TUI / 运行时：[xai-org/grok-build](https://github.com/xai-org/grok-build)（Apache-2.0，不接受外部 PR）
 - ACP：[agentclientprotocol.com](https://agentclientprotocol.com)、[python-sdk](https://github.com/agentclientprotocol/python-sdk)
-- 本仓库引擎：`docs/DESIGN.md`、Phase 3 / P6 spec
+- 本仓库引擎：`docs/DESIGN.md`、Phase 3 / Phase 3.5 spec
 
 ---
 

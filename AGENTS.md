@@ -7,7 +7,7 @@
 - **Faithful port.** TS sources (`packages/agent/src/agent-loop.ts` / `agent.ts`) are the reference; match their behaviour.
 - **LangChain is boundary-only.** Tool execution, turn management, and the event protocol live in `agent_loop.py`.
 
-Specs, audits, and benchmarks live under `docs/` — see `docs/DESIGN.md` for architecture, `docs/specs/` for phase designs (2–5, P6), `docs/AUDIT/` for audit trackers, `docs/benchmarks/` for FrontierHarness 30 evaluation.
+Specs, audits, and benchmarks live under `docs/` — see `docs/DESIGN.md` for architecture, `docs/specs/` for phase designs (2–5, 3.5), `docs/AUDIT/` for audit trackers, `docs/benchmarks/` for FrontierHarness 30 evaluation.
 
 ### Architecture
 
@@ -77,7 +77,7 @@ Only if a venv is broken — recreate from scratch:
 ```powershell
 # Dev
 uv venv --python 3.12 .venv
-uv pip install --python .venv -e ".[dev]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent-cli"
+uv pip install --python .venv -e ".[dev]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent-cli" -e "./packages/pi-web-access" -e "./packages/pi-goal-x" -e "./packages/pi-dynamic-workflows"
 
 # Real-LLM
 uv venv --python 3.12 .venv-test-real

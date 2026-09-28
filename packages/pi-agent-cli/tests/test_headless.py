@@ -98,6 +98,14 @@ def test_apply_prompt_overrides_text_and_no_context(tmp_path: Path):
     assert config.no_context_files is True
 
 
+def test_apply_prompt_overrides_disables_git():
+    config = apply_prompt_overrides(
+        CliConfig(),
+        HeadlessPromptOverrides(no_git_context=True),
+    )
+    assert config.git_enabled is False
+
+
 def test_apply_prompt_overrides_reads_files(tmp_path: Path):
     system_path = tmp_path / "system.txt"
     append_path = tmp_path / "append.txt"

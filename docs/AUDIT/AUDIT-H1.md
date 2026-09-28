@@ -134,7 +134,7 @@ H1 主体忠实：11 种 entry 模型、错误层级、`SessionStorage` 协议�
 
 ## 验证状态
 
-修复后全量 pytest 通过（2026-07-03 提交时 239 个，P6 批次仍在并行落地；2026-07-28
+修复后全量 pytest 通过（2026-07-03 提交时 239 个，Phase 3.5 批次仍在并行落地；2026-07-28
 收尾时 282 个）、`ruff check` 与 `ruff format --check` 全绿。相关新增单测：未知 entry
 宽容读取 + 写回保留、fork 四语义（before/at/非 user 报错/全树）、根 entry 与 leaf 键序
 断言、注入 fs 端到端 + 协议 isinstance（H1-3/H1-4）、`fromId` 固定写移动目标、`list`

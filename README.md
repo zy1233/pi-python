@@ -18,6 +18,9 @@ This repository is a monorepo containing:
 - `pi-agent-core-lc` / `pi_agent_core`: lightweight core loop, messages, tools, adapters.
 - `pi-agent-harness-lc` / `pi_agent_harness`: harness runtime, sessions, queues, hooks, compaction, skills/templates, and local execution env.
 - `pi-agent-cli-lc` / `pi_agent_cli`: standard ACP coding agent (`python -m pi_agent_cli`, headless `-p`).
+- `pi-web-access-py` / `pi_web_access`: web search and URL fetch extension.
+- `pi-goal-x-py` / `pi_goal_x`: goal-planning extension.
+- `pi-dynamic-workflows-py` / `pi_dynamic_workflows`: workflow orchestration extension.
 
 **Rust TUI** (beta — prebuilt binary in [GitHub Releases](https://github.com/zy1233/pi-python/releases)):
 
@@ -30,6 +33,9 @@ This repository is a monorepo containing:
 | `pi-agent-core-lc` | **Stable** | [PyPI](https://pypi.org/project/pi-agent-core-lc/) |
 | `pi-agent-harness-lc` | **Stable** | [PyPI](https://pypi.org/project/pi-agent-harness-lc/) |
 | `pi-agent-cli-lc` | **Beta** | [PyPI](https://pypi.org/project/pi-agent-cli-lc/) |
+| `pi-web-access-py` | **Beta** | [PyPI](https://pypi.org/project/pi-web-access-py/) |
+| `pi-goal-x-py` | **Beta** | [PyPI](https://pypi.org/project/pi-goal-x-py/) |
+| `pi-dynamic-workflows-py` | **Beta** | [PyPI](https://pypi.org/project/pi-dynamic-workflows-py/) |
 | `zypi` (Rust TUI) | **Beta** | [GitHub Releases](https://github.com/zy1233/pi-python/releases) (Linux x86_64) |
 
 ## Features
@@ -55,7 +61,7 @@ This repository is a monorepo containing:
 - Tool-result images: Anthropic native blocks, user-message fallback elsewhere, stripped when `supports_images=False`
 - OpenAI-compatible gateways via `Model.base_url` (SiliconFlow, vLLM, DeepSeek, ...)
 
-**Tool ecosystem** (P6)
+**Tool ecosystem** (Phase 3.5)
 
 - Built-in coding tools (`pi_agent_core.coding_tools`): read / bash / edit / write / grep / find / ls with pi-faithful truncation notices and `details` payloads
 - LangChain `BaseTool` → `AgentTool` adapter (`from_langchain_tool`) — MCP tools via `langchain-mcp-adapters` work out of the box
@@ -66,6 +72,7 @@ This repository is a monorepo containing:
 - Headless mode: `python -m pi_agent_cli -p "prompt"` for scripting and CI
 - `/new`, `/resume`, `/quit` session commands; `@` local directory listing
 - pi-aligned system prompt engine with tool contributions, `AGENTS.md` context files, `<available_skills>` format
+- Git workspace context (`<git_status>`) refreshed each turn; `--no-git-context` or `[git] enabled = false` turns it off
 
 **TUI — `zypi`** (Phase 4 — beta)
 
@@ -88,6 +95,9 @@ This repository is a monorepo containing:
 pip install pi-agent-core-lc
 pip install pi-agent-harness-lc    # optional: session/harness runtime
 pip install pi-agent-cli-lc        # optional: ACP stdio / headless agent
+pip install pi-web-access-py       # optional: web search / fetch extension
+pip install pi-goal-x-py           # optional: goal planning extension
+pip install pi-dynamic-workflows-py  # optional: workflow extension
 
 # Optional LLM providers:
 pip install pi-agent-core-lc[openai]      # ChatOpenAI
@@ -103,6 +113,9 @@ pip install pi-agent-core-lc[all]         # all providers + harness + cli
 pip install -e ".[dev]"
 pip install -e "./packages/pi-agent-harness"
 pip install -e "./packages/pi-agent-cli"
+pip install -e "./packages/pi-web-access"
+pip install -e "./packages/pi-goal-x"
+pip install -e "./packages/pi-dynamic-workflows"
 ```
 
 </details>
@@ -364,9 +377,10 @@ Use `.venv-test-real` for pytest real-LLM tests; the smoke script can run from t
 | [P0 TUI spike](docs/AUDIT/SPIKE-P0-GROK-TUI.md) | grok pager `x.ai/*` strip inventory |
 | [Phase 2 spec](docs/specs/2026-05-25-phase2-production-enhancements-design.md) | Usage/cost, thinking/reasoning, transform_messages |
 | [Phase 3 spec](docs/specs/2026-07-03-phase3-agent-harness-design.md) | AgentHarness: sessions, compaction, skills, templates, ExecutionEnv |
-| [P6 spec](docs/specs/2026-07-03-p6-tool-ecosystem-design.md) | Built-in coding tools + LangChain adapter |
+| [Phase 3.5 spec](docs/specs/2026-07-03-phase3.5-tool-ecosystem-design.md) | Built-in coding tools + LangChain adapter |
 | [Phase 4 spec](docs/specs/2026-08-25-phase4-coding-agent-cli-design.md) | Coding Agent CLI: forked grok TUI + standard ACP agent |
 | [Phase 5 spec](docs/specs/2026-09-02-phase5-prompt-engine-design.md) | Coding Agent prompt engine: system prompt assembly |
+| [Phase 6 spec](docs/specs/2026-09-24-phase6-extended-integrations-design.md) | Git context injection and multi-provider test matrix |
 | [**TUI & Code-Agent Guide**](docs/TUI-AND-CODE-AGENT.md) | Installation, configuration, usage for `zypi` TUI and `pi_agent_cli` |
 | [Windows notes](docs/WINDOWS.md) | Phase 4 Windows setup, WSL TUI build, spawn/config |
 | [Benchmark report](docs/benchmarks/FRONTIER-HARNESS-30-EVAL-REPORT.md) | FrontierHarness 30-task evaluation & Pi comparison |
@@ -392,14 +406,15 @@ Use `.venv-test-real` for pytest real-LLM tests; the smoke script can run from t
 - **Phase 2 (production enhancements)** — done: `transform_messages`, usage/cost, thinking/reasoning
 - **Phase 2.5 (core hardening)** — done: retries, runaway protection, observability, granular events, guardrail hooks, `ContextBudget`, structured output, tool-result images
 - **Phase 3 (AgentHarness)** — done: H1 session tree, H2 runtime, H3 compaction/tree navigation, H4 skills/templates/system prompt/LocalExecutionEnv ([design doc](docs/specs/2026-07-03-phase3-agent-harness-design.md))
-- **P6 (tool ecosystem)** — done: all 7 built-in tools (read/bash/edit/write/grep/find/ls), group factories, and the LangChain `BaseTool` adapter ([design doc](docs/specs/2026-07-03-p6-tool-ecosystem-design.md))
+- **Phase 3.5 (tool ecosystem)** — done: all 7 built-in tools (read/bash/edit/write/grep/find/ls), group factories, and the LangChain `BaseTool` adapter ([design doc](docs/specs/2026-07-03-phase3.5-tool-ecosystem-design.md))
 - **Phase 4 (Coding Agent CLI — beta)** — done: `tui/` vendored grok-build fork (Apache-2.0); `pi_agent_cli` standard ACP agent; TUI binary `zypi`; `x.ai/*` vendor RPCs removed; session management (`/new` `/resume` `/quit`); headless `-p`; `config.toml` + Windows notes ([design doc](docs/specs/2026-08-25-phase4-coding-agent-cli-design.md), [Windows](docs/WINDOWS.md), [TUI guide](docs/TUI-AND-CODE-AGENT.md))
 - **Phase 5 (Coding Agent prompt engine)** — done: pi-aligned `build_system_prompt` + tool contributions + context files + `<available_skills>` ([design doc](docs/specs/2026-09-02-phase5-prompt-engine-design.md))
+- **Phase 6 (extended integrations)** — done: git workspace context in the system prompt; opt-in multi-provider live matrix. MCP stays a caller-side `BaseTool` import ([design doc](docs/specs/2026-09-24-phase6-extended-integrations-design.md))
+- **Phase 7 (extension packages)** — done: `pi-web-access-py`, `pi-goal-x-py`, `pi-dynamic-workflows-py` ([design doc](docs/specs/2026-09-22-phase7-extension-api-design.md))
 - **FrontierHarness Eval** — done: 30-task benchmark (21 Terminal-Bench + 9 DeepSWE); Windows + WSL Docker runtimes; side-by-side Pi comparison ([report](docs/benchmarks/FRONTIER-HARNESS-30-EVAL-REPORT.md))
 
 ### Next
 
-- **Phase 6 (Extended integrations)** — planned: native MCP client, git-aware context injection, multi-provider production testing matrix
 - **TUI platform expansion** — planned: prebuilt binaries for macOS (arm64/x86_64) and Windows; auto-update support
 
 ## License

@@ -20,6 +20,7 @@ class HeadlessPromptOverrides:
     append_system_prompt: str | None = None
     append_system_prompt_file: str | Path | None = None
     no_context_files: bool | None = None
+    no_git_context: bool | None = None
 
 
 def apply_prompt_overrides(
@@ -45,6 +46,8 @@ def apply_prompt_overrides(
 
     if overrides.no_context_files is not None:
         updates["no_context_files"] = overrides.no_context_files
+    if overrides.no_git_context:
+        updates["git_enabled"] = False
 
     return replace(config, **updates) if updates else config
 

@@ -91,6 +91,22 @@ def test_load_local_env_sets_missing_keys(tmp_path: Path, monkeypatch):
     assert got == str((tmp_path / "proj" / ".pi" / "skills").resolve())
 
 
+def test_load_config_parses_git_section(tmp_path: Path):
+    (tmp_path / "agent.toml").write_text(
+        """
+[git]
+enabled = false
+timeout_seconds = 1.5
+max_status_lines = 10
+""".strip(),
+        encoding="utf-8",
+    )
+    config = load_config(tmp_path)
+    assert config.git_enabled is False
+    assert config.git_timeout_seconds == 1.5
+    assert config.git_max_status_lines == 10
+
+
 def test_load_config_parses_supports_images(tmp_path: Path):
     config_path = tmp_path / "agent.toml"
     config_path.write_text(

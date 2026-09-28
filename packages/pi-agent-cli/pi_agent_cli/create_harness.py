@@ -60,5 +60,6 @@ def build_coding_agent_harness_system_prompt(
             append_system_prompt=base.append_system_prompt,
             context_files=base.context_files,
             skills=base.skills,
+            git_status=base.git_status,
         )
     )

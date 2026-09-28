@@ -19,7 +19,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install packages (dev)
-        run: pip install -e ".[dev]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent-cli"
+        run: pip install -e ".[dev]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent-cli" -e "./packages/pi-web-access" -e "./packages/pi-goal-x" -e "./packages/pi-dynamic-workflows"
       - name: Run tests
         run: pytest -v
       - name: Lint
@@ -49,6 +49,15 @@ jobs:
 
       - name: Build pi-agent-cli
         run: python -m build --outdir dist/ packages/pi-agent-cli
+
+      - name: Build pi-web-access
+        run: python -m build --outdir dist/ packages/pi-web-access
+
+      - name: Build pi-goal-x
+        run: python -m build --outdir dist/ packages/pi-goal-x
+
+      - name: Build pi-dynamic-workflows
+        run: python -m build --outdir dist/ packages/pi-dynamic-workflows
 
       - uses: actions/upload-artifact@v4
         with:

@@ -86,6 +86,9 @@ class CliConfig:
     custom_system_prompt_file: str | None = None
     append_system_prompt: str | None = None
     append_system_prompt_file: str | None = None
+    git_enabled: bool = True
+    git_timeout_seconds: float = 2.0
+    git_max_status_lines: int = 40
 
 
 def load_config(home: Path | str | None = None) -> CliConfig:
@@ -120,6 +123,7 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
     skills = data.get("skills") if isinstance(data.get("skills"), dict) else {}
     agent = data.get("agent") if isinstance(data.get("agent"), dict) else {}
     prompt = data.get("prompt") if isinstance(data.get("prompt"), dict) else {}
+    git = data.get("git") if isinstance(data.get("git"), dict) else {}
 
     permission = data.get("permission", "ask")
     if permission not in _VALID_PERMISSION:
@@ -167,4 +171,35 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         custom_system_prompt_file=_optional_str(prompt.get("custom_system_prompt_file")),
         append_system_prompt=_optional_str(prompt.get("append_system_prompt")),
         append_system_prompt_file=_optional_str(prompt.get("append_system_prompt_file")),
+        git_enabled=_as_bool(git.get("enabled"), True),
+        git_timeout_seconds=_as_float(git.get("timeout_seconds"), 2.0),
+        git_max_status_lines=_as_int(git.get("max_status_lines"), 40),
     )
+
+
+def _as_bool(value: object, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def _as_float(value: object, default: float) -> float:
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_int(value: object, default: int) -> int:
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default

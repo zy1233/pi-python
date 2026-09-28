@@ -27,3 +27,8 @@ command = "python -m pi_agent_cli"
 # custom_system_prompt_file = "~/.pi-python/agent/SYSTEM.md"
 # append_system_prompt = "Always run tests after edits."
 # append_system_prompt_file = "~/.pi-python/agent/APPEND_SYSTEM.md"
+
+[git]
+# enabled = true
+# timeout_seconds = 2
+# max_status_lines = 40

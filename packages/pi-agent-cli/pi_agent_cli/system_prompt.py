@@ -47,6 +47,7 @@ class BuildSystemPromptOptions:
     append_system_prompt: str | None = None
     context_files: list[ContextFile] | None = None
     skills: list[Skill] | None = field(default_factory=list)
+    git_status: str | None = None
 
 
 def _docs_paths() -> tuple[str, str, str]:
@@ -68,6 +69,7 @@ def build_system_prompt(options: BuildSystemPromptOptions) -> str:
         if append_section:
             prompt += append_section
         prompt = _append_project_context(prompt, context_files)
+        prompt = _append_git_status(prompt, options.git_status)
         custom_has_read = "read" in tools
         if custom_has_read and skills:
             prompt += format_skills_for_system_prompt(skills)
@@ -164,12 +166,19 @@ def build_system_prompt(options: BuildSystemPromptOptions) -> str:
         prompt += append_section
 
     prompt = _append_project_context(prompt, context_files)
+    prompt = _append_git_status(prompt, options.git_status)
 
     if has_read and skills:
         prompt += format_skills_for_system_prompt(skills)
 
     prompt += f"\nCurrent working directory: {prompt_cwd}"
     return prompt
+
+
+def _append_git_status(prompt: str, git_status: str | None) -> str:
+    if not git_status:
+        return prompt
+    return f"{prompt}\n\n{git_status}"
 
 
 def _append_project_context(prompt: str, context_files: list[ContextFile]) -> str:

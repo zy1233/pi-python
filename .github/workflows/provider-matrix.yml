@@ -1,0 +1,25 @@
+name: Provider matrix
+
+on:
+  workflow_dispatch:
+
+jobs:
+  matrix:
+    name: Live provider matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install packages
+        run: pip install -e ".[dev,openai,anthropic,deepseek]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent-cli"
+      - name: Run provider matrix
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          REAL_LLM_API_KEY: ${{ secrets.REAL_LLM_API_KEY }}
+          REAL_LLM_BASE_URL: ${{ secrets.REAL_LLM_BASE_URL }}
+        run: pytest -m real_llm pi_agent_core/tests/test_provider_matrix.py -v

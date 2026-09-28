@@ -7,7 +7,7 @@ Standard-ACP agent over `AgentHarness`. Two modes:
 | ACP stdio | `python -m pi_agent_cli` | TUI-spawned agent; `/new` `/resume` `/quit` map to ACP methods |
 | Headless | `python -m pi_agent_cli -p "prompt"` | One-shot turn, prints assistant text, exits |
 
-Headless flags: `--system-prompt`, `--append-system-prompt`, `--no-context-files` — see `--help`.
+Headless flags: `--system-prompt`, `--append-system-prompt`, `--no-context-files`, `--no-git-context` — see `--help`.
 
 ## Config
 
@@ -33,9 +33,10 @@ The Rust TUI (`zypi`) spawns the Python agent via (priority order):
 `build_system_prompt` (`system_prompt.py`) assembles:
 
 1. Base prompt with tool snippets and `prompt_guidelines`
-2. Context files — `context_files.py` walks cwd → repo root collecting `AGENTS.md`, `CLAUDE.md`, `.pi/SYSTEM.md`
-3. Skills from `[skills].paths`, formatted as `<available_skills>`
-4. `append_system_prompt` (config or CLI flag)
+2. `append_system_prompt` (config or CLI flag)
+3. Context files — `context_files.py` walks cwd → repo root collecting `AGENTS.md`, `CLAUDE.md`, `.pi/SYSTEM.md`
+4. Git status — `<git_status>` from `git_context.py` when cwd is a repo (`[git]` / `--no-git-context`)
+5. Skills from `[skills].paths`, formatted as `<available_skills>`
 
 `build_coding_agent_harness_system_prompt` (`create_harness.py`) wraps this for harness use.
 
@@ -48,6 +49,7 @@ The Rust TUI (`zypi`) spawns the Python agent via (priority order):
 | `factory.py` | `create_session_harness` — wires tools, model, stream_fn, skills into harness |
 | `system_prompt.py` | `build_system_prompt`, tool snippet/guideline consumption |
 | `context_files.py` | AGENTS.md / CLAUDE.md / .pi/SYSTEM.md discovery |
+| `git_context.py` | Read-only branch and `git status` snapshot for the system prompt |
 | `headless.py` | `-p` one-shot mode, prompt override application |
 | `events.py` | Internal events → ACP `session_update` projection |
 | `permissions.py` | Tool permission gating (ask / auto / always-approve) |

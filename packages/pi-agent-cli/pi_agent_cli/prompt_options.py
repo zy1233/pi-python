@@ -10,6 +10,7 @@ from pi_agent_cli.context_files import (
     load_append_system_prompt_file,
     load_system_prompt_file,
 )
+from pi_agent_cli.git_context import format_git_status, snapshot_git_context
 from pi_agent_cli.system_prompt import BuildSystemPromptOptions
 from pi_agent_harness.types import AgentHarnessResources
 
@@ -45,6 +46,7 @@ def load_system_prompt_options(
         None if config.no_context_files else discover_context_files(cwd=cwd_s, home=home_path)
     )
     skills = list(resources.skills) if resources and resources.skills else []
+    git_status = _git_status_block(cwd_s, config)
 
     return BuildSystemPromptOptions(
         cwd=cwd_s,
@@ -52,4 +54,18 @@ def load_system_prompt_options(
         append_system_prompt=append_prompt,
         context_files=context_files,
         skills=skills,
+        git_status=git_status,
     )
+
+
+def _git_status_block(cwd: str, config: CliConfig) -> str | None:
+    if not config.git_enabled:
+        return None
+    snapshot = snapshot_git_context(
+        cwd,
+        timeout_seconds=config.git_timeout_seconds,
+        max_lines=config.git_max_status_lines,
+    )
+    if snapshot is None:
+        return None
+    return format_git_status(snapshot)
