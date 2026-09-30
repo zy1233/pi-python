@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from acp import PROTOCOL_VERSION, RequestError
+from acp.helpers import update_agent_message_text
 from acp.interfaces import Agent, Client
 from acp.schema import (
     AgentCapabilities,
@@ -43,6 +44,7 @@ from acp.schema import (
 
 from pi_agent_cli.config import CliConfig, PermissionMode, load_config, pi_home
 from pi_agent_cli.events import project_event, project_message_replay
+from pi_agent_cli.extension_trust import skipped_extensions_notice
 from pi_agent_cli.factory import create_session_harness, default_stream_fn, load_session_resources
 from pi_agent_cli.permissions import (
     PERMISSION_OPTIONS,
@@ -90,6 +92,7 @@ class PiAcpAgent(Agent):
         self._extensions: list[Any] = extensions or []
         self._commands_advertised: set[str] = set()
         self._background_tasks: set[asyncio.Task[Any]] = set()
+        self._permission_locks: dict[str, asyncio.Lock] = {}
 
     def on_connect(self, conn: Client) -> None:
         self._conn = conn
@@ -195,6 +198,7 @@ class PiAcpAgent(Agent):
 
     async def close_session(self, session_id: str, **kwargs: Any) -> CloseSessionResponse | None:
         harness = self._harnesses.pop(session_id, None)
+        self._permission_locks.pop(session_id, None)
         if harness is not None:
             await harness.close()
         return CloseSessionResponse()
@@ -242,6 +246,7 @@ class PiAcpAgent(Agent):
             session_id = session_id_raw.strip()
             metadata = await self._find_metadata(session_id)
             harness = self._harnesses.pop(session_id, None)
+            self._permission_locks.pop(session_id, None)
             if harness is not None:
                 await harness.abort()
             # Idempotent delete: missing session still returns success.
@@ -317,7 +322,7 @@ class PiAcpAgent(Agent):
         task.add_done_callback(self._background_tasks.discard)
 
     async def _deferred_advertise_commands(self, session_id: str) -> None:
-        """Advertise commands after yielding the event loop.
+        """Advertise commands (and report skipped extensions) after yielding the event loop.
 
         Zed registers ACP sessions only after processing the response to
         ``session/new``.  Notifications sent *before* that response are
@@ -326,6 +331,24 @@ class PiAcpAgent(Agent):
         """
         await asyncio.sleep(0)
         await self._advertise_commands(session_id)
+        await self._notify_skipped_extensions(session_id)
+
+    async def _notify_skipped_extensions(self, session_id: str) -> None:
+        """Tell the user which project extensions were not loaded because the project is
+        untrusted (they were never imported), and how to enable them."""
+        harness = self._harnesses.get(session_id)
+        if self._conn is None or harness is None:
+            return
+        notice = skipped_extensions_notice(
+            harness.skipped_extensions,
+            cwd=self._session_cwds.get(session_id, ""),
+            home=self._home,
+        )
+        if notice is None:
+            return
+        await self._conn.session_update(
+            session_id=session_id, update=update_agent_message_text(notice)
+        )
 
     async def _advertise_commands(self, session_id: str) -> None:
         """Send ``AvailableCommandsUpdate`` so ACP clients show slash commands."""
@@ -375,11 +398,18 @@ class PiAcpAgent(Agent):
         if self._conn is None:
             return {"block": True, "reason": "No ACP client connected"}
         raw_input = dict(event.input or {})
-        response = await self._conn.request_permission(
-            session_id=session_id,
-            tool_call=permission_tool_call(event.toolCallId, name, raw_input),
-            options=list(PERMISSION_OPTIONS),
+        tool_call = permission_tool_call(
+            event.toolCallId, name, raw_input, origin=getattr(event, "origin", None)
         )
+        # One prompt at a time per session. Parallel workflow sub-agents would otherwise
+        # open several at once, and a client that shows a single dialog would leave the
+        # rest unanswered, hanging the workflow.
+        async with self._permission_locks.setdefault(session_id, asyncio.Lock()):
+            response = await self._conn.request_permission(
+                session_id=session_id,
+                tool_call=tool_call,
+                options=list(PERMISSION_OPTIONS),
+            )
         if outcome_allows(response.outcome):
             return None
         return {"block": True, "reason": "User denied permission"}

@@ -78,11 +78,20 @@ def _try_build_real_executor(pi: ExtensionAPI) -> tuple:
         from pi_dynamic_workflows.manager import WorkflowManager
         from pi_dynamic_workflows.subagent import HarnessSubagentExecutor
 
+        # Sub-agents run on harnesses of their own; the gate is how the session's
+        # tool_call policy (permission prompts, extension hooks) reaches their tool calls.
+        tool_call_gate = getattr(bridge, "tool_call_gate", None)
+        if tool_call_gate is None:
+            logger.warning(
+                "Harness bridge exposes no tool_call_gate: workflow sub-agents will run "
+                "outside the session's tool_call policy (permission prompts included)."
+            )
         executor = HarnessSubagentExecutor(
             stream_fn=stream_fn,
             parent_model=model,
             cwd=pi.cwd,
             get_api_key=get_api_key,
+            tool_call_gate=tool_call_gate,
         )
         manager = WorkflowManager(bridge)
         return executor, manager

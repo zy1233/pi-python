@@ -1087,3 +1087,193 @@ class TestSlashCommandDispatch:
         await harness.load_extensions()
         await harness.load_extensions()
         assert harness.extension_registry.command_count == 2  # greet + info
+
+
+# ---------------------------------------------------------------------------
+# check_tool_call: the tool_call policy chain, for calls made outside the loop
+# ---------------------------------------------------------------------------
+#
+# Extensions that run agents of their own (dynamic workflows) do so on fresh harnesses
+# that carry no hooks, so the session's permission layer never saw their tool calls.
+# ``check_tool_call`` lets them put each call through *this* harness's chain.
+
+
+async def _idle_harness(**kwargs) -> AgentHarness:
+    return AgentHarness(
+        session=await _memory_session("gate"),
+        model=_model(),
+        stream_fn=mock_text_stream,
+        **kwargs,
+    )
+
+
+@pytest.mark.asyncio
+async def test_check_tool_call_allows_when_no_hook_blocks():
+    harness = await _idle_harness()
+    harness.on("tool_call", lambda _event: None)
+    harness.on("tool_call", lambda _event: {})
+    harness.on("tool_call", lambda _event: {"block": False})
+
+    assert await harness.check_tool_call("c1", "bash", {"command": "ls"}) is None
+
+
+@pytest.mark.asyncio
+async def test_check_tool_call_allows_when_there_are_no_hooks():
+    harness = await _idle_harness()
+
+    assert await harness.check_tool_call("c1", "bash", {"command": "ls"}) is None
+
+
+@pytest.mark.asyncio
+async def test_check_tool_call_returns_the_first_block_and_stops():
+    harness = await _idle_harness()
+    later: list[str] = []
+    harness.on("tool_call", lambda _event: {"block": True, "reason": "no bash here"})
+    harness.on("tool_call", lambda _event: later.append("ran"))
+
+    verdict = await harness.check_tool_call("c1", "bash", {"command": "ls"})
+
+    assert verdict == {"block": True, "reason": "no bash here"}
+    assert later == []
+
+
+@pytest.mark.asyncio
+async def test_check_tool_call_normalizes_object_verdicts_to_a_dict():
+    harness = await _idle_harness()
+    harness.on("tool_call", lambda _event: BeforeToolCallResult(block=True, reason="object"))
+
+    assert await harness.check_tool_call("c1", "bash", {}) == {"block": True, "reason": "object"}
+
+
+@pytest.mark.asyncio
+async def test_check_tool_call_hands_hooks_the_call_and_where_it_came_from():
+    harness = await _idle_harness()
+    seen: list = []
+    harness.on("tool_call", seen.append)
+
+    origin = {"kind": "subagent", "cwd": "/work"}
+    await harness.check_tool_call("c1", "write", {"path": "a.txt"}, origin=origin)
+    await harness.check_tool_call("c2", "read", {"path": "b.txt"})
+
+    first, second = seen
+    assert (first.toolCallId, first.toolName, first.input) == ("c1", "write", {"path": "a.txt"})
+    assert first.origin == origin
+    assert second.origin is None  # the session's own calls carry no origin
+
+
+@pytest.mark.asyncio
+async def test_check_tool_call_hook_errors_normalize_to_hook_code():
+    """A policy backend that fails must not read as "allowed"."""
+    harness = await _idle_harness()
+
+    def broken_policy(_event):
+        raise RuntimeError("policy backend down")
+
+    harness.on("tool_call", broken_policy)
+
+    with pytest.raises(AgentHarnessError) as excinfo:
+        await harness.check_tool_call("c1", "bash", {})
+
+    assert excinfo.value.code == "hook"
+
+
+@pytest.mark.asyncio
+async def test_extension_bridge_exposes_the_tool_call_gate():
+    """An extension reaches the session's tool_call policy through the bridge."""
+    captured: dict = {}
+
+    def extension(pi):
+        captured["gate"] = pi._require_bridge().tool_call_gate
+
+    harness = await _idle_harness(extensions=[extension])
+    harness.on(
+        "tool_call",
+        lambda event: {"block": True, "reason": "policy"} if event.toolName == "bash" else None,
+    )
+    await harness.load_extensions()
+
+    gate = captured["gate"]
+    assert await gate("c1", "bash", {"command": "ls"}) == {"block": True, "reason": "policy"}
+    assert await gate("c2", "read", {"path": "a.txt"}) is None
+    origin = {"kind": "subagent", "cwd": "/w"}
+    assert await gate("c3", "bash", {}, origin=origin) == {"block": True, "reason": "policy"}
+
+
+# ---------------------------------------------------------------------------
+# Project-local extensions are opt-in (audit P7-02)
+# ---------------------------------------------------------------------------
+#
+# ``<cwd>/.pi-python/extensions`` ships with the repository and is imported (= executed)
+# when the first prompt loads extensions. With auto-discovery on, that directory is only
+# scanned when the harness is told to trust the project.
+
+
+def _project_with_extension(tmp_path, monkeypatch, name: str):
+    """A project whose extension leaves ``marker`` behind when it is *imported*."""
+    from pathlib import Path
+
+    from pi_agent_core.extensions import ExtensionLoader
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(ExtensionLoader, "discover_entry_points", lambda self: [])
+
+    project = tmp_path / "project"
+    extensions = project / ".pi-python" / "extensions"
+    extensions.mkdir(parents=True)
+    marker = tmp_path / "imported.marker"
+    (extensions / f"{name}.py").write_text(
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).write_text('imported')\n"
+        "def activate(pi):\n"
+        f"    pi.register_command({name!r}, description='ext', handler=lambda args: None)\n",
+        encoding="utf-8",
+    )
+    return project, marker
+
+
+async def _discovering_harness(project, **kwargs) -> AgentHarness:
+    from pi_agent_harness.env import LocalExecutionEnv
+
+    return AgentHarness(
+        session=await _memory_session("discover"),
+        model=_model(),
+        stream_fn=mock_text_stream,
+        env=LocalExecutionEnv(str(project)),
+        auto_discover_extensions=True,
+        **kwargs,
+    )
+
+
+@pytest.mark.asyncio
+async def test_auto_discovery_skips_untrusted_project_extensions(tmp_path, monkeypatch):
+    project, marker = _project_with_extension(tmp_path, monkeypatch, "harness_untrusted")
+    harness = await _discovering_harness(project)
+
+    await harness.load_extensions()
+
+    assert not marker.exists()  # never imported
+    assert "harness_untrusted" not in harness.extension_registry.get_commands()
+    ((skipped),) = harness.skipped_extensions
+    assert skipped.names == ("harness_untrusted.py",)
+    assert skipped.directory == project / ".pi-python" / "extensions"
+
+
+@pytest.mark.asyncio
+async def test_auto_discovery_loads_project_extensions_once_trusted(tmp_path, monkeypatch):
+    project, marker = _project_with_extension(tmp_path, monkeypatch, "harness_trusted")
+    harness = await _discovering_harness(project, trust_project_extensions=True)
+
+    await harness.load_extensions()
+
+    assert marker.exists()
+    assert "harness_trusted" in harness.extension_registry.get_commands()
+    assert harness.skipped_extensions == []
+
+
+@pytest.mark.asyncio
+async def test_skipped_extensions_is_empty_until_extensions_are_loaded():
+    harness = await _idle_harness()
+
+    assert harness.skipped_extensions == []

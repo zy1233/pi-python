@@ -7,7 +7,7 @@ Standard-ACP agent over `AgentHarness`. Two modes:
 | ACP stdio | `python -m pi_agent_cli` | TUI-spawned agent; `/new` `/resume` `/quit` map to ACP methods |
 | Headless | `python -m pi_agent_cli -p "prompt"` | One-shot turn, prints assistant text, exits |
 
-Headless flags: `--system-prompt`, `--append-system-prompt`, `--no-context-files`, `--no-git-context` — see `--help`.
+Headless flags: `--system-prompt`, `--append-system-prompt`, `--no-context-files`, `--no-git-context` — see `--help`. `--trust-project-extensions` works in both modes (see Project extensions).
 
 ## Config
 
@@ -19,6 +19,10 @@ Home: `~/.pi-python/` (override with `PI_HOME`). Two config files with distinct 
 | `config.toml` | Rust TUI only | grok-shell settings; Python-only keys break TUI parsing |
 
 `local.env` in home loads `KEY=VALUE` pairs into env without overwriting (secrets stay out of TOML). See `agent.example.toml` for all keys.
+
+## Project extensions
+
+`<cwd>/.pi-python/extensions` is imported — i.e. executed — when a session opens, so it is skipped unless the project is trusted (`extension_trust.project_extensions_trusted`): `[extensions] trusted_projects` (absolute paths; subdirectories count) or `trust_project_extensions = true` in the **home** `agent.toml`, `PI_TRUST_PROJECT_EXTENSIONS=1`, or `--trust-project-extensions`. Never read that decision from a file inside the project, or a repository could trust itself. Skipped extensions are logged and reported to the user (ACP agent message after `session/new`; headless stderr). Entry-point packages and `~/.pi-python/extensions` always load. Design: `docs/specs/2026-09-22-phase7-extension-api-design.md` §4.4.
 
 ## TUI spawn
 
@@ -47,6 +51,7 @@ The Rust TUI (`zypi`) spawns the Python agent via (priority order):
 | `agent.py` | `PiAcpAgent` — ACP methods, permission handling, event projection |
 | `config.py` | TOML loading, `pi_home()`, `CliConfig` dataclass |
 | `factory.py` | `create_session_harness` — wires tools, model, stream_fn, skills into harness |
+| `extension_trust.py` | Whether a project may load its own extensions; the "skipped extensions" notice |
 | `system_prompt.py` | `build_system_prompt`, tool snippet/guideline consumption |
 | `context_files.py` | AGENTS.md / CLAUDE.md / .pi/SYSTEM.md discovery |
 | `git_context.py` | Read-only branch and `git status` snapshot for the system prompt |

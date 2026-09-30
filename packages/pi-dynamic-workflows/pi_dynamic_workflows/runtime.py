@@ -1,4 +1,10 @@
-"""Workflow runtime — sandboxed Python script execution with agent/parallel/pipeline globals."""
+"""Workflow runtime — Python script execution with agent/parallel/pipeline globals.
+
+Scripts run in a restricted namespace. That steers a script towards orchestration; it is
+**not** a security boundary (attribute access on the objects it is given reaches far more
+than the namespace lists). What bounds the effect of a script is the ``tool_call`` policy
+every sub-agent tool call goes through (``HarnessSubagentExecutor``'s ``tool_call_gate``).
+"""
 
 from __future__ import annotations
 
@@ -92,7 +98,7 @@ class MockSubagentExecutor(SubagentExecutor):
 
 
 class WorkflowRuntime:
-    """Execute a Python workflow script with sandboxed globals.
+    """Execute a Python workflow script in a restricted namespace (not a security boundary).
 
     The script has access to:
       - ``agent(prompt, **opts)`` — spawn an isolated subagent
@@ -168,7 +174,7 @@ class WorkflowRuntime:
         )
 
     def _build_namespace(self, args: Any, result_holder: dict[str, Any]) -> dict[str, Any]:
-        """Build the sandboxed globals for the workflow script."""
+        """Build the restricted globals for the workflow script."""
         runtime = self
 
         async def agent_fn(prompt: str, **opts: Any) -> str | Any:

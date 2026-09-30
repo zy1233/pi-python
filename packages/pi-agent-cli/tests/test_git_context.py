@@ -8,9 +8,12 @@ from pathlib import Path
 import pytest
 
 from pi_agent_cli.config import CliConfig
-from pi_agent_cli.git_context import snapshot_git_context
+from pi_agent_cli.factory import create_session_harness
+from pi_agent_cli.git_context import GitSnapshot, format_git_status, snapshot_git_context
 from pi_agent_cli.prompt_options import load_system_prompt_options
 from pi_agent_cli.system_prompt import BuildSystemPromptOptions, ContextFile, build_system_prompt
+from pi_agent_core.tests.mock_stream import mock_text_stream
+from pi_agent_harness import JsonlSessionRepo
 from pi_agent_harness.types import Skill
 
 
@@ -188,6 +191,44 @@ def test_no_git_context_omits_section(tmp_path: Path):
     assert enabled.git_status is not None
     assert "<git_status>" in (enabled.git_status or "")
     assert disabled.git_status is None
+
+
+def test_format_git_status_declares_itself_a_session_snapshot():
+    block = format_git_status(
+        GitSnapshot(branch="main", status_porcelain="## main\n M a.py", truncated=False)
+    )
+
+    lines = block.splitlines()
+    assert lines[0] == "<git_status>"
+    assert "not refreshed" in lines[1] and "`git status`" in lines[1]
+    assert lines[2:] == ["Branch: main", "## main", " M a.py", "</git_status>"]
+
+
+@pytest.mark.asyncio
+async def test_git_block_is_a_stable_session_snapshot_and_says_so(tmp_path: Path):
+    """The harness caches the system prompt for the whole session (prefix-cache stability,
+    commit bee053c), so the block cannot track the working tree. It must tell the model
+    so, instead of presenting stale state as current."""
+    _init_repo(tmp_path)
+    prompts: list[str] = []
+
+    async def capture(model, context, options=None):
+        prompts.append(context.system_prompt)
+        return await mock_text_stream(model, context, options)
+
+    session = await JsonlSessionRepo(tmp_path / "sessions").create({"cwd": str(tmp_path)})
+    harness = await create_session_harness(
+        session=session, cwd=tmp_path, config=CliConfig(), stream_fn=capture, home=tmp_path
+    )
+
+    await harness.prompt("first")
+    (tmp_path / "later.txt").write_text("created mid-session\n", encoding="utf-8")
+    await harness.prompt("second")
+
+    assert prompts[0] == prompts[1]  # one system prompt per session: the cache prefix holds
+    assert "<git_status>" in prompts[1]
+    assert "not refreshed" in prompts[1]
+    assert "later.txt" not in prompts[1]
 
 
 def test_custom_prompt_still_includes_git_status():

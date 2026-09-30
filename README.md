@@ -72,7 +72,8 @@ This repository is a monorepo containing:
 - Headless mode: `python -m pi_agent_cli -p "prompt"` for scripting and CI
 - `/new`, `/resume`, `/quit` session commands; `@` local directory listing
 - pi-aligned system prompt engine with tool contributions, `AGENTS.md` context files, `<available_skills>` format
-- Git workspace context (`<git_status>`) refreshed each turn; `--no-git-context` or `[git] enabled = false` turns it off
+- Project-local extensions (`<project>/.pi-python/extensions`) run code when a session opens, so they load only for trusted projects: list the project under `[extensions] trusted_projects` in `~/.pi-python/agent.toml`, or run with `--trust-project-extensions` / `PI_TRUST_PROJECT_EXTENSIONS=1`. Installed extension packages are unaffected
+- Git workspace context (`<git_status>`) is a session-start snapshot in the system prompt (kept stable for the provider prompt cache; the block tells the model to run `git status` for live state); `--no-git-context` or `[git] enabled = false` turns it off
 
 **TUI — `zypi`** (Phase 4 — beta)
 

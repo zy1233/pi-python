@@ -190,6 +190,10 @@ class ToolDefinition:
 `emitToolCall`）；非阻断的返回值（`None` / `{}` / `{"block": False}`）一律忽略。因此后注册的
 扩展无法撤销权限层已作出的拒绝。其余事件仍沿用 `_emit_hook` 的 last-non-None 规则。
 
+`AgentHarness.check_tool_call(tool_call_id, tool_name, tool_input, *, origin=None)` 是同一条 hook 链的
+公开入口（`before_tool_call` 也走它），供在循环之外运行 agent 的扩展使用（`HarnessBridge.tool_call_gate`，
+见 §12「权限继承」）。`ToolCallEvent` 有可选字段 `origin`，会话自己的调用为 `None`。
+
 ---
 
 ## 4. 扩展发现与加载
@@ -201,13 +205,14 @@ class ToolDefinition:
 2. **目录扫描**：`~/.pi-python/extensions/` 和 `.pi-python/extensions/` ——
    对齐上游 pi 的 `~/.pi/agent/extensions/` 和 `.pi/extensions/`。
    扫描目录下的 Python 模块，import 并查找 `activate` 函数。
+   项目目录（`.pi-python/extensions/`）需要显式信任才会扫描，见 §4.4。
 3. **编程注入**：`ExtensionLoader.load(module_or_callable)` ——
    测试和嵌入场景，传入 module 对象或 `activate` 函数均可。
 
 ### 4.2 加载顺序
 
 entry_points → 用户目录（`~/.pi-python/extensions/`）→ 项目目录
-（`.pi-python/extensions/`）→ 编程注入。同名扩展后加载的覆盖先加载的（与上游一致）。
+（`.pi-python/extensions/`，仅当项目受信任，§4.4）→ 编程注入。同名扩展后加载的覆盖先加载的（与上游一致）。
 
 ### 4.3 与 AgentHarness 集成
 
@@ -217,16 +222,42 @@ entry_points → 用户目录（`~/.pi-python/extensions/`）→ 项目目录
 extensions: list[Callable[[ExtensionAPI], None]] | None = None
 extension_dirs: list[str] | None = None
 auto_discover_extensions: bool = False  # CLI/TUI 显式传 True
+trust_project_extensions: bool = False  # True 才会扫描 <cwd>/.pi-python/extensions（§4.4）
 ```
 
 在首次 `prompt()` 调用时（`_ensure_extensions_loaded`），执行：
 
-1. 如果 `auto_discover_extensions`，通过 `ExtensionLoader` 发现 entry_points + 目录扩展
+1. 如果 `auto_discover_extensions`，通过 `ExtensionLoader` 发现 entry_points + 用户目录扩展；`trust_project_extensions` 为真时再加上项目目录扩展
 2. 合并手动传入的 `extensions`
 3. 为每个扩展创建 `ExtensionAPI` 实例，调用 `activate(pi)`
 4. 收集所有 `register_tool` 注册的工具，合并到 `_tools` 字典
 5. 收集所有 `on()` 注册的事件处理器，挂接到 `subscribe()` 管道
 6. 发射 `session_start` 事件
+
+### 4.4 项目目录扩展需要显式信任
+
+import 一个扩展就是执行它的代码，而 `<项目>/.pi-python/extensions/` 随仓库分发。若无条件扫描，打开一个不受信任的仓库会在用户输入第一个字之前运行仓库里的代码——没有提示，也不经过权限层（加载扩展不是工具调用，§3.5 的 `tool_call` 链管不到它）。
+
+上游 pi 对此有「项目信任」（`packages/coding-agent/docs/security.md`）：信任决定作出之前只加载用户/全局扩展和命令行 `-e` 扩展，项目扩展在信任后才加载；非交互模式不弹提示，按 `defaultProjectTrust` 处理（`ask` / `never` 忽略项目资源，`always` 信任），`--approve` / `--no-approve` 单次覆盖；决定按目录保存（`~/.pi/agent/trust.json`），父目录的决定适用于子目录。本移植版实现其最小子集：**默认拒绝，只接受项目自己写不到的位置给出的授权**。
+
+| 授权来源 | 说明 |
+|---|---|
+| `~/.pi-python/agent.toml` → `[extensions] trusted_projects = ["/abs/path"]` | 绝对路径（或 `~`）白名单；Windows 请写正斜杠（`"C:/work/repo"`），TOML 双引号里的 `\U` 是语法错误，通知里给出的建议值已是正斜杠。名单内目录的子目录同样受信；相对路径被忽略并告警；比较前先解析符号链接（受信目录里指向别处的链接不继承信任） |
+| `[extensions] trust_project_extensions = true` | 全局开关，信任所有项目（≈ 上游 `defaultProjectTrust = "always"`） |
+| 环境变量 `PI_TRUST_PROJECT_EXTENSIONS=1`（`1/true/yes/on`）或命令行 `--trust-project-extensions` | 单次运行（≈ 上游 `--approve`），适合 headless / CI；后者只是前者的另一种写法，对 ACP 与 headless 都生效 |
+
+只读取家目录的 `agent.toml`，绝不读取项目内的配置文件，否则仓库可以给自己授信；`load_local_env` 同样只读 `~/.pi-python/local.env`。
+
+未受信的项目目录**不会被 import**：`ExtensionLoader` 只列出本会加载的模块名（`ExtensionLoader.skipped` / `AgentHarness.skipped_extensions`，元素为 `SkippedExtensions(directory, names)`），写一条 warning 日志，CLI 再告诉用户被跳过了什么、怎样启用（ACP：`session/new` 应答之后的一条 `agent_message_chunk`；headless：stderr，stdout 仍只有回答）。用户目录、entry_points、`extensions=` / `extension_dirs=` 不受影响：前两者由用户自己安装，后两者由嵌入方显式传入。
+
+`AgentHarness(trust_project_extensions=False)` 与 `ExtensionLoader.load_all(trust_project_extensions=False)` 默认都是拒绝；CLI 的 `create_session_harness` 通过 `extension_trust.project_extensions_trusted(config, cwd)` 得出该值。
+
+已知限制（相对上游）：
+
+- 没有交互式确认，也没有 `/trust` 持久化；白名单靠手写 `agent.toml`。后续可在 ACP 里加确认并写入信任库。
+- 信任按路径而非内容：白名单内的项目之后才出现的扩展（例如 `git pull` 带来的）会被直接运行。内容哈希信任库可以关闭这个口子。
+- 只拦了扩展。上游同样放在信任门后的 `.pi/SYSTEM.md`、`.pi/APPEND_SYSTEM.md` 和项目 skills（`[skills].paths` 里的相对路径，如 `.pi/skills`），在本移植版里仍被无条件读取：它们不执行代码，但会进入 system prompt（与上游同样不设门的 `AGENTS.md` 属同一类注入面）。
+- 授权以整个项目目录为单位，不区分单个扩展。
 
 ---
 
@@ -341,7 +372,7 @@ packages/pi-dynamic-workflows/
 └── pi_dynamic_workflows/
     ├── __init__.py              activate(pi) + /workflows 命令
     ├── workflow_tool.py         workflow 工具定义
-    ├── runtime.py               WorkflowRuntime 沙盒执行引擎
+    ├── runtime.py               WorkflowRuntime 脚本执行引擎（受限命名空间，非安全边界）
     ├── builtin_workflows.py     5 个内置 pattern
     ├── model_routing.py         tier 路由
     └── budget.py                token budget tracking
@@ -350,8 +381,10 @@ packages/pi-dynamic-workflows/
 ### 9.3 核心机制
 
 - **`workflow` 工具**：LLM 传入 Python 脚本或 `name`（内置 pattern）
-- **沙盒执行**：脚本在受限命名空间中执行，只能用 `agent()`, `parallel()`,
-  `pipeline()`, `phase()`, `log()`, `budget`, `args`, `cwd`
+- **受限命名空间（不是沙盒）**：脚本在只暴露 `agent()`, `parallel()`, `pipeline()`, `phase()`,
+  `log()`, `budget`, `args`, `cwd` 和一小组内建函数的命名空间中执行，用来引导脚本只做编排。
+  它**不是安全边界**：经由命名空间里已有对象的属性访问可以到达 `__import__` 等能力。真正约束脚本副作用的
+  是子代理工具调用所经过的权限策略（见 §12「权限继承」）。
 - **`agent(prompt, **opts)`**：spawn 隔离 subagent，支持 `tier`/`model`/`schema`/`label`
 - **`parallel(thunks)`**：并发运行 agent 调用
 - **`pipeline(items, *stages)`**：流水线：stage 串行、item 并行
@@ -394,6 +427,7 @@ Task panel / widget / UI 通知、`workflow_control` 工具（pause/resume/stop�
 | `AgentHarness` 扩展参数 | ✅ | `extensions` / `extension_dirs` / `auto_discover_extensions` 已实现 |
 | `_tool_from_definition` → `CodingTool` | ✅ | `prompt_snippet` / `prompt_guidelines` 正确转发 |
 | `factory.py` → `auto_discover_extensions=True` | ✅ | CLI/TUI 构造 harness 时开启 entry_point 自动发现 |
+| 项目目录扩展信任 | ✅ | `<cwd>/.pi-python/extensions` 默认不加载，需白名单 / 全局开关 / 环境变量 / `--trust-project-extensions`（§4.4） |
 | 子包 entry_points 声明 | ✅ | 3 个子包的 `pyproject.toml` 均声明 `[project.entry-points."pi_agent.extensions"]` |
 | System prompt 注入 | ✅ | 扩展注册的工具的 `prompt_snippet` / `prompt_guidelines` 自动进入 system prompt |
 | LLM 可用性 | ✅ | `workflow` / `web_search` / `fetch_url` / `goal_update` / `goal_complete` 工具在 TUI 会话中自动注册，LLM 可直接 tool_call |
@@ -410,6 +444,7 @@ Task panel / widget / UI 通知、`workflow_control` 工具（pause/resume/stop�
 | **Git worktree isolation** | §15 ✅ | `WorktreeManager` 创建隔离 worktree；snapshot baseline + apply_changes 回写 |
 | **Saved workflow 存储** | §16 ✅ | `WorkflowStore` scan/save，project 覆盖 user；`os.link` 原子 no-clobber |
 | **Task panel / widget** | TUI 侧的实时进度面板未移植 | 纯文本结果输出替代 |
+| **TUI 文件夹信任库 ↔ 项目扩展信任** | TUI 自己的信任库（`/hooks trust`）与 Python 端 §4.4 互不相通 | TUI 用户需在 `agent.toml` 白名单里登记项目，或带 `PI_TRUST_PROJECT_EXTENSIONS=1` 启动（环境变量会传给被拉起的 Python agent） |
 
 ### 10.3 工作流链路（当前状态）
 
@@ -487,7 +522,34 @@ TUI (zypi) ──ACP stdio──> pi_agent_cli ──> factory.create_session_ha
 - 已知限制：`provider/model` 按第一个 `/` 拆分，对自身含 `/` 的网关模型 id（如 `Qwen/Qwen3-8B`）
   有歧义；此类 id 需写成 `<provider>/Qwen/Qwen3-8B`。
 
-**Bridge 扩展**：`HarnessBridge` 增加 `stream_fn` / `model` / `get_api_key_fn`
+**权限继承（子代理的工具调用）**：子代理运行在各自的 `AgentHarness` 上，不带父会话的任何 hook，
+所以父会话的权限层（ACP `session/request_permission`）原本看不到它们的 `bash` / `edit` / `write`，
+`ask` 模式下也不会有任何询问。现在：
+
+- `workflow` 工具本身列入 `PERMISSION_TOOLS`：`ask` 模式下启动 workflow 需要用户批准；`auto` /
+  `always-approve` 不弹窗，与其它工具一致。
+- 桥接新增 `tool_call_gate`（即 `AgentHarness.check_tool_call`）：对父 harness 的 `tool_call` hook 链
+  （权限层 + 扩展 hook，首个 block 生效，见 §3.5）跑一遍，返回 `None`（放行）或
+  `{"block": True, "reason": ...}`。`HarnessSubagentExecutor(tool_call_gate=...)` 给每个子代理 harness
+  装一个 `tool_call` hook，把它的每次工具调用送进该 gate。**批准 `workflow` 不等于批准其子代理的写操作**：
+  每次调用逐个询问（只读工具 `read` / `grep` / `find` / `ls` 与会话自己一样不询问，但扩展 hook 照样生效）。
+- gate 抛异常按拒绝处理（fail-closed）：hook 异常在 harness 里表现为该调用失败，工具不会执行。
+- `ToolCallEvent.origin`：子代理的调用带 `{"kind": "subagent", "cwd": ..., "label": ...}`（会话自己的调用为
+  `None`）。权限弹窗标题据此写成 `write (workflow sub-agent in <cwd>)`：脚本可以用 `agent(..., cwd=)` 把
+  子代理指向任意目录，而弹窗只显示工具入参，相对路径本身看不出落点。`label` 是脚本自己起的文本，只进
+  `origin`，不进标题。
+- 工具调用 id 由模型生成（`call_1` …），会在父会话与各子代理之间重复，而权限弹窗以 id 为键，所以每次子代理
+  运行的 id 加前缀 `subagent-<8 hex>:`。
+- CLI 对同一会话的权限询问串行化（每会话一个锁）：并行子代理不会同时弹出多个弹窗。
+- 子代理等待权限回复的时间计入其 `timeout_ms`。
+- 没有 gate 的 executor（独立使用，或未实现 `tool_call_gate` 的旧 bridge）没有可继承的策略，子代理不受限；
+  `activate()` 发现 bridge 没有 `tool_call_gate` 时记录 warning。
+- `isolation=True` 用 `HarnessSubagentExecutor.with_worktree_manager()`（浅拷贝）派生 executor，gate 与其它配置
+  不会在派生时丢失（此前用构造函数重建，新增配置容易漏传）。
+- 已知限制：`auto` / `always-approve` 下子代理可执行一切，与会话自己一致；脚本可指定任意 `cwd`，目前只是
+  在弹窗里可见，未限制在工作区内；受限命名空间不是安全边界（见 §9.3）。
+
+**Bridge 扩展**：`HarnessBridge` 增加 `stream_fn` / `model` / `get_api_key_fn` / `tool_call_gate`
 只读属性，`activate()` 据此构造真实 executor。
 
 ---

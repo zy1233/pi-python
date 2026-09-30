@@ -14,7 +14,7 @@ from acp.schema import AllowedOutcome, DeniedOutcome, RequestPermissionResponse
 from pi_agent_cli.agent import PiAcpAgent
 from pi_agent_cli.config import CliConfig
 from pi_agent_cli.events import project_event, tool_kind
-from pi_agent_cli.permissions import PERMISSION_TOOLS, needs_permission
+from pi_agent_cli.permissions import PERMISSION_TOOLS, needs_permission, permission_tool_call
 from pi_agent_core.event_stream import AssistantMessageEventStream
 from pi_agent_core.messages import ToolCallContent
 from pi_agent_core.tests.mock_stream import _base_partial, mock_text_stream
@@ -328,7 +328,7 @@ def test_tool_kind_mapping():
     assert tool_kind("write") == "edit"
     assert tool_kind("bash") == "execute"
     assert tool_kind("grep") == "search"
-    assert {"bash", "edit", "write"} == PERMISSION_TOOLS
+    assert {"bash", "edit", "write", "workflow"} == PERMISSION_TOOLS
     assert needs_permission("bash", "ask")
     assert not needs_permission("read", "ask")
     assert not needs_permission("bash", "always-approve")
@@ -643,3 +643,301 @@ async def test_slash_command_unknown_falls_through_via_acp(tmp_path):
     texts = [getattr(getattr(u, "content", None), "text", None) or "" for u in msg_chunks]
     # LLM produces "Hello from mock"
     assert "Hello from mock" in "".join(texts)
+
+
+# ---------------------------------------------------------------------------
+# Workflow sub-agents obey the session's permission policy (audit P7-01)
+# ---------------------------------------------------------------------------
+#
+# A workflow fans work out to sub-agents that run on harnesses of their own. Those used
+# to carry no hooks, so in "ask" mode a sub-agent's bash/edit/write ran without a single
+# prompt. Now the ``workflow`` call is gated like bash/edit/write, and every tool call a
+# sub-agent makes goes through the same permission layer the session itself uses.
+
+
+def test_workflow_needs_permission_in_ask_mode_only():
+    assert needs_permission("workflow", "ask")
+    assert not needs_permission("workflow", "auto")
+    assert not needs_permission("workflow", "always-approve")
+
+
+def test_permission_prompt_says_where_a_subagent_call_runs():
+    plain = permission_tool_call("c1", "write", {"path": "a.txt"})
+    assert plain.title == "write"
+
+    origin = {"kind": "subagent", "cwd": "/srv/elsewhere", "label": "trusted-setup"}
+    prompt = permission_tool_call("c2", "write", {"path": "a.txt"}, origin=origin)
+
+    assert prompt.title.split()[0] == "write"
+    assert "sub-agent" in prompt.title
+    assert "/srv/elsewhere" in prompt.title  # a relative path means nothing without this
+    assert "trusted-setup" not in prompt.title  # the label is text the workflow script chose
+    assert prompt.raw_input == {"path": "a.txt"}  # what the tool will receive, untouched
+    assert prompt.kind == plain.kind
+
+
+def _tool_call_stream(model, name: str, arguments: dict[str, Any], call_id: str = "call_1"):
+    stream = AssistantMessageEventStream()
+    tc: ToolCallContent = {"type": "toolCall", "id": call_id, "name": name, "arguments": arguments}
+    partial = _base_partial(model, [tc])
+    partial.stopReason = "toolUse"
+    stream.push(StartEvent(partial=partial.model_copy(deep=True)))
+    stream.push(DoneEvent(partial=partial.model_copy(deep=True), reason="toolUse"))
+    stream.set_final_message(partial)
+    stream.end()
+    return stream
+
+
+def _first_user_text(context: Any) -> str:
+    content = context.messages[0].content
+    if isinstance(content, str):
+        return content
+    return "".join(
+        block.get("text", "")
+        for block in content
+        if isinstance(block, dict) and block.get("type") == "text"
+    )
+
+
+class _Scenario:
+    """Scripted LLM: the session runs one workflow whose sub-agents each write a file.
+
+    A sub-agent's prompt is the path it must write; every call uses the tool call id
+    ``call_1``, like the parent's ``workflow`` call, so id clashes are visible.
+    """
+
+    def __init__(self, script: str, args: dict[str, Any]) -> None:
+        self.script = script
+        self.args = args
+        self.writes_issued = 0  # sub-agent write calls asked for so far
+        self.subagent_replies: list[tuple[bool, str]] = []  # what sub-agents were told
+
+    async def stream(self, model, context, options=None):
+        results = [m for m in context.messages if getattr(m, "role", None) == "toolResult"]
+        if "workflow" in {tool.name for tool in context.tools or []}:  # the session itself
+            if results:
+                return await mock_text_stream(model, context, options)
+            return _tool_call_stream(model, "workflow", {"script": self.script, "args": self.args})
+        if results:  # a sub-agent, after its write was decided
+            self.subagent_replies.extend((r.isError, r.content[0]["text"]) for r in results)
+            return await mock_text_stream(model, context, options)
+        target = _first_user_text(context)
+        self.writes_issued += 1
+        return _tool_call_stream(model, "write", {"path": target, "content": "written\n"})
+
+
+_ONE_WRITER = (
+    'meta = {"name": "one-writer"}\n'
+    "async def main():\n"
+    '    await agent(args["paths"][0])\n'
+    '    result("done")\n'
+)
+_PARALLEL_WRITERS = (
+    'meta = {"name": "parallel-writers"}\n'
+    "async def main():\n"
+    '    await parallel([lambda p=p: agent(p) for p in args["paths"]])\n'
+    '    result("done")\n'
+)
+_WRITER_IN_OTHER_DIR = (
+    'meta = {"name": "writer-elsewhere"}\n'
+    "async def main():\n"
+    '    await agent(args["paths"][0], cwd=args["cwd"])\n'
+    '    result("done")\n'
+)
+
+
+class _PickyClient(FakeClient):
+    """A user who rejects the tools named in ``reject`` and takes a moment to answer.
+
+    ``hold_writes_until``: answer ``write`` prompts only once this returns true, so that
+    prompts from parallel sub-agents provably overlap, unless something serializes them.
+    """
+
+    def __init__(self, reject: set[str] | None = None) -> None:
+        super().__init__(allow=True)
+        self.reject = reject or set()
+        self.hold_writes_until: Any = None
+        self.open_requests = 0
+        self.max_open_requests = 0
+
+    async def request_permission(self, session_id, tool_call, options, **kwargs):
+        self.open_requests += 1
+        self.max_open_requests = max(self.max_open_requests, self.open_requests)
+        try:
+            self.permission_calls.append(
+                {"session_id": session_id, "tool_call": tool_call, "options": options}
+            )
+            tool = tool_call.title.split()[0]
+            await asyncio.sleep(0.01)
+            if tool == "write" and self.hold_writes_until is not None:
+                for _ in range(400):  # at most ~2s, so a broken test fails instead of hanging
+                    if self.hold_writes_until():
+                        break
+                    await asyncio.sleep(0.005)
+            if tool in self.reject:
+                return RequestPermissionResponse(outcome=DeniedOutcome(outcome="cancelled"))
+            return RequestPermissionResponse(
+                outcome=AllowedOutcome(outcome="selected", option_id="allow-once")
+            )
+        finally:
+            self.open_requests -= 1
+
+    def asked_about(self) -> list[str]:
+        return [call["tool_call"].title.split()[0] for call in self.permission_calls]
+
+
+async def _run_workflow(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    script: str,
+    args: dict[str, Any],
+    client: FakeClient,
+    permission: str = "ask",
+    workspace: Path | None = None,
+    scenario: _Scenario | None = None,
+) -> tuple[_Scenario, PiAcpAgent, str]:
+    pytest.importorskip("pi_dynamic_workflows")
+    # Workflow journals and extension discovery use Path.home(); keep both off the real HOME.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+
+    scenario = scenario or _Scenario(script, args)
+    agent = _agent(tmp_path, stream_fn=scenario.stream, permission=permission)
+    agent.on_connect(client)
+    created = await agent.new_session(cwd=str((workspace or tmp_path).resolve()))
+    await agent.prompt(session_id=created.session_id, prompt=[text_block("run the workflow")])
+    return scenario, agent, created.session_id
+
+
+@pytest.mark.asyncio
+async def test_workflow_call_needs_permission_and_a_denial_stops_it(tmp_path, monkeypatch):
+    target = tmp_path / "a.txt"
+    client = _PickyClient(reject={"workflow"})
+
+    await _run_workflow(
+        tmp_path, monkeypatch, script=_ONE_WRITER, args={"paths": [str(target)]}, client=client
+    )
+
+    assert client.asked_about() == ["workflow"]
+    assert not target.exists()  # the workflow never started, so no sub-agent got to write
+
+
+@pytest.mark.asyncio
+async def test_subagent_write_is_authorized_per_call_and_a_denial_holds(tmp_path, monkeypatch):
+    target = tmp_path / "a.txt"
+    client = _PickyClient(reject={"write"})
+
+    scenario, _, _ = await _run_workflow(
+        tmp_path, monkeypatch, script=_ONE_WRITER, args={"paths": [str(target)]}, client=client
+    )
+
+    assert client.asked_about() == ["workflow", "write"]
+    assert not target.exists()
+    ((is_error, text),) = scenario.subagent_replies  # the sub-agent was told, and carried on
+    assert is_error is True
+    assert "User denied permission" in text
+
+
+@pytest.mark.asyncio
+async def test_subagent_write_runs_once_the_user_allows_it(tmp_path, monkeypatch):
+    """Control for the denial test: the write really happens when it is allowed."""
+    target = tmp_path / "a.txt"
+    client = _PickyClient()
+
+    await _run_workflow(
+        tmp_path, monkeypatch, script=_ONE_WRITER, args={"paths": [str(target)]}, client=client
+    )
+
+    assert client.asked_about() == ["workflow", "write"]
+    assert target.read_text(encoding="utf-8") == "written\n"
+
+
+@pytest.mark.asyncio
+async def test_permission_auto_lets_workflow_subagents_run_without_prompts(tmp_path, monkeypatch):
+    target = tmp_path / "a.txt"
+    client = _PickyClient(reject={"workflow", "write"})  # would refuse, if it were asked
+
+    await _run_workflow(
+        tmp_path,
+        monkeypatch,
+        script=_ONE_WRITER,
+        args={"paths": [str(target)]},
+        client=client,
+        permission="auto",
+    )
+
+    assert client.permission_calls == []
+    assert target.read_text(encoding="utf-8") == "written\n"
+
+
+@pytest.mark.asyncio
+async def test_subagent_permission_requests_do_not_reuse_the_sessions_tool_call_ids(
+    tmp_path, monkeypatch
+):
+    """Every call here is named ``call_1`` (the parent's workflow call, and both sub-agents'
+    writes). The client keys its permission cards by id, so ids must not collide."""
+    paths = [str(tmp_path / "a.txt"), str(tmp_path / "b.txt")]
+    client = _PickyClient()
+
+    await _run_workflow(
+        tmp_path, monkeypatch, script=_PARALLEL_WRITERS, args={"paths": paths}, client=client
+    )
+
+    ids = [call["tool_call"].tool_call_id for call in client.permission_calls]
+    assert ids[0] == "call_1"  # the session's own workflow call keeps its id
+    write_ids = ids[1:]
+    assert len(write_ids) == 2
+    assert len(set(write_ids)) == 2
+    assert "call_1" not in write_ids
+
+
+@pytest.mark.asyncio
+async def test_parallel_subagents_get_one_permission_prompt_at_a_time(tmp_path, monkeypatch):
+    """Parallel sub-agents would otherwise open several prompts at once, and a client
+    that shows one dialog at a time would leave the others unanswered forever."""
+    paths = [str(tmp_path / f"{name}.txt") for name in ("a", "b", "c")]
+    scenario = _Scenario(_PARALLEL_WRITERS, {"paths": paths})
+    client = _PickyClient()
+    # Hold every write prompt open until all three sub-agents have asked to write, so the
+    # prompts overlap unless the agent serializes them.
+    client.hold_writes_until = lambda: scenario.writes_issued >= 3
+
+    await _run_workflow(
+        tmp_path,
+        monkeypatch,
+        script=_PARALLEL_WRITERS,
+        args={"paths": paths},
+        client=client,
+        scenario=scenario,
+    )
+
+    assert client.asked_about() == ["workflow", "write", "write", "write"]
+    assert client.max_open_requests == 1
+    assert all(Path(p).exists() for p in paths)
+
+
+@pytest.mark.asyncio
+async def test_subagent_prompt_names_the_directory_the_call_runs_in(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    elsewhere = tmp_path / "elsewhere"  # outside the session's workspace
+    workspace.mkdir()
+    elsewhere.mkdir()
+    client = _PickyClient()
+
+    _, agent, session_id = await _run_workflow(
+        tmp_path,
+        monkeypatch,
+        script=_WRITER_IN_OTHER_DIR,
+        args={"paths": ["note.txt"], "cwd": str(elsewhere)},
+        client=client,
+        workspace=workspace,
+    )
+
+    workflow_prompt, write_prompt = (call["tool_call"] for call in client.permission_calls)
+    assert workflow_prompt.title == "workflow"  # the session's own call carries no origin
+    assert "sub-agent" in write_prompt.title
+    assert str(elsewhere) in write_prompt.title  # the script chose this, not the session
+    assert agent._session_cwds[session_id] not in write_prompt.title
+    assert (elsewhere / "note.txt").exists()

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import json
 import logging
 import time
+import uuid
 from typing import Any
 
 from pi_dynamic_workflows.model_routing import resolve_tier
@@ -59,6 +61,14 @@ class HarnessSubagentExecutor(SubagentExecutor):
     ``AgentHarness`` that runs a single prompt-to-completion cycle.
     When *worktree_manager* is provided, each subagent runs in an
     isolated git worktree that is cleaned up after completion.
+
+    A sub-agent's harness is new and carries none of the parent session's hooks, so by
+    itself its ``bash``/``edit``/``write`` calls would run outside the parent's
+    permission policy. *tool_call_gate* (the parent harness's ``check_tool_call``, via
+    the bridge) closes that gap: every tool call a sub-agent makes is put through it
+    before it runs. Time spent waiting for a verdict (a permission prompt) counts
+    against ``timeout_ms``. With no gate there is no policy to inherit and sub-agents
+    run unrestricted.
     """
 
     def __init__(
@@ -70,6 +80,7 @@ class HarnessSubagentExecutor(SubagentExecutor):
         get_api_key: Any | None = None,
         tiers: dict[str, str] | None = None,
         worktree_manager: Any | None = None,
+        tool_call_gate: Any | None = None,
     ) -> None:
         self._stream_fn = stream_fn
         self._parent_model = parent_model
@@ -77,6 +88,41 @@ class HarnessSubagentExecutor(SubagentExecutor):
         self._get_api_key = get_api_key
         self._tiers = tiers
         self._worktree_manager = worktree_manager
+        self._tool_call_gate = tool_call_gate
+
+    def with_worktree_manager(self, worktree_manager: Any) -> HarnessSubagentExecutor:
+        """The same executor, with each sub-agent running in a worktree of *worktree_manager*.
+
+        A copy rather than a re-construction: nothing configured on this executor (the
+        gate above all) can be dropped by forgetting to pass it along.
+        """
+        derived = copy.copy(self)
+        derived._worktree_manager = worktree_manager
+        return derived
+
+    def _tool_call_hook(self, cwd: str, label: str | None) -> Any:
+        """A ``tool_call`` hook that puts one sub-agent run's calls through the gate.
+
+        Tool call ids come from the model (``call_1``, ...) and repeat across sub-agents
+        and the parent session, while a permission prompt is keyed by id, so each run gets
+        its own prefix. The gate's verdict is returned as is; if it raises, the harness
+        fails the call (an error result), so "no answer" is never taken as "allowed".
+        """
+        gate = self._tool_call_gate
+        run_id = f"subagent-{uuid.uuid4().hex[:8]}"
+        origin: dict[str, Any] = {"kind": "subagent", "cwd": cwd}
+        if label:
+            origin["label"] = label
+
+        async def authorize(event: Any) -> Any:
+            return await gate(
+                f"{run_id}:{event.toolCallId}",
+                event.toolName,
+                dict(event.input),
+                origin=dict(origin),
+            )
+
+        return authorize
 
     def _resolve_model(self, tier: str | None, model: str | None) -> Any:
         if model:
@@ -138,6 +184,8 @@ class HarnessSubagentExecutor(SubagentExecutor):
             env=env,
             tools=tools,
         )
+        if self._tool_call_gate is not None:
+            harness.on("tool_call", self._tool_call_hook(effective_cwd, label))
 
         prompt_text = prompt
         if phase:

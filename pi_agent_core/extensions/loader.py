@@ -5,7 +5,10 @@ Three discovery mechanisms (evaluated in order):
 1. **entry_points** — ``[project.entry-points."pi_agent.extensions"]``
    in installed packages (standard setuptools mechanism).
 2. **Directory scan** — ``~/.pi-python/extensions/`` (user) and
-   ``.pi-python/extensions/`` (project-local).
+   ``.pi-python/extensions/`` (project-local). Importing an extension executes its
+   code, and the project directory ships with the repository, so it is scanned only
+   when the caller says the project is trusted (``trust_project``); otherwise nothing
+   in it is imported and what was skipped is reported in ``ExtensionLoader.skipped``.
 3. **Programmatic** — ``load_callable(activate_fn)`` for tests / embedding.
 """
 
@@ -16,6 +19,7 @@ import importlib.util
 import logging
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +34,14 @@ ENTRY_POINT_GROUP = "pi_agent.extensions"
 ActivateFn = Callable[[ExtensionAPI], None]
 
 
+@dataclass(frozen=True)
+class SkippedExtensions:
+    """Extensions found in a directory that was deliberately not imported."""
+
+    directory: Path
+    names: tuple[str, ...]
+
+
 class ExtensionLoader:
     """Discovers and loads extensions into a shared ``ExtensionRegistry``."""
 
@@ -37,6 +49,7 @@ class ExtensionLoader:
         self.registry = registry or ExtensionRegistry()
         self._apis: list[ExtensionAPI] = []
         self._loaded_names: set[str] = set()
+        self.skipped: list[SkippedExtensions] = []
 
     # -- public API ----------------------------------------------------------
 
@@ -71,30 +84,51 @@ class ExtensionLoader:
     def discover_directory(self, directory: str | Path) -> list[ActivateFn]:
         """Scan a directory for Python extension modules."""
         results: list[ActivateFn] = []
-        path = Path(directory)
-        if not path.is_dir():
-            return results
-
-        for item in sorted(path.iterdir()):
-            activate: ActivateFn | None = None
-            if item.is_file() and item.suffix == ".py" and not item.name.startswith("_"):
-                activate = _load_module_from_file(item)
-            elif item.is_dir() and (item / "__init__.py").is_file():
-                activate = _load_module_from_file(item / "__init__.py", package_name=item.name)
+        for name, module_file, package_name in _extension_sources(Path(directory)):
+            activate = _load_module_from_file(module_file, package_name=package_name)
             if activate is not None:
                 results.append(activate)
-                logger.debug("Discovered directory extension: %s", item.name)
+                logger.debug("Discovered directory extension: %s", name)
         return results
 
-    def discover_default_dirs(self, cwd: str | None = None) -> list[ActivateFn]:
-        """Scan the standard extension directories."""
+    def discover_default_dirs(
+        self, cwd: str | None = None, *, trust_project: bool = False
+    ) -> list[ActivateFn]:
+        """Scan the standard extension directories.
+
+        The user directory is the user's own. The project directory
+        (``<cwd>/.pi-python/extensions``) comes with the repository and importing it runs
+        its code as soon as a session opens, so it is scanned only when *trust_project*
+        is true. Otherwise nothing in it is imported; it is recorded in ``skipped`` and
+        logged as a warning.
+        """
         results: list[ActivateFn] = []
         home_ext = Path.home() / ".pi-python" / "extensions"
         results.extend(self.discover_directory(home_ext))
         if cwd:
             project_ext = Path(cwd) / ".pi-python" / "extensions"
-            results.extend(self.discover_directory(project_ext))
+            if _same_directory(project_ext, home_ext):
+                pass  # cwd is the home directory: this is the user's own directory, scanned above
+            elif trust_project:
+                results.extend(self.discover_directory(project_ext))
+            else:
+                self._skip_untrusted(project_ext)
         return results
+
+    def _skip_untrusted(self, directory: Path) -> None:
+        """Record (without importing anything) what *directory* would have loaded."""
+        names = tuple(name for name, _, _ in _extension_sources(directory))
+        if not names:
+            return
+        self.skipped = [s for s in self.skipped if s.directory != directory]
+        self.skipped.append(SkippedExtensions(directory=directory, names=names))
+        logger.warning(
+            "Skipped %d extension(s) in %s because the project is not trusted "
+            "(importing them would run their code): %s",
+            len(names),
+            directory,
+            ", ".join(names),
+        )
 
     def load(
         self,
@@ -182,16 +216,21 @@ class ExtensionLoader:
         extra: list[ActivateFn] | None = None,
         cwd: str | None = None,
         auto_discover: bool = True,
+        trust_project_extensions: bool = False,
         bridge: Any = None,
     ) -> list[ExtensionAPI]:
-        """Discover and load all extensions.  Returns the list of ``ExtensionAPI`` instances."""
+        """Discover and load all extensions.  Returns the list of ``ExtensionAPI`` instances.
+
+        ``trust_project_extensions`` decides whether ``<cwd>/.pi-python/extensions`` is
+        scanned (see ``discover_default_dirs``); it is off unless the caller opts in.
+        """
         import contextlib
 
         callables: list[tuple[ActivateFn, str]] = []
         if auto_discover:
             for fn in self.discover_entry_points():
                 callables.append((fn, "entry_point"))
-            for fn in self.discover_default_dirs(cwd):
+            for fn in self.discover_default_dirs(cwd, trust_project=trust_project_extensions):
                 callables.append((fn, "directory"))
         for fn in extra or []:
             callables.append((fn, "programmatic"))
@@ -243,6 +282,30 @@ def _resolve_activate(obj: Any) -> ActivateFn | None:
     if callable(obj):
         return obj  # type: ignore[return-value]
     return None
+
+
+def _same_directory(a: Path, b: Path) -> bool:
+    try:
+        return a.resolve() == b.resolve()
+    except OSError:
+        return False
+
+
+def _extension_sources(path: Path) -> list[tuple[str, Path, str | None]]:
+    """What a directory scan would import: ``(name, module file, package name)``.
+
+    Listing only; nothing is imported. ``discover_directory`` loads exactly these, and
+    the untrusted-project report names exactly these.
+    """
+    if not path.is_dir():
+        return []
+    sources: list[tuple[str, Path, str | None]] = []
+    for item in sorted(path.iterdir()):
+        if item.is_file() and item.suffix == ".py" and not item.name.startswith("_"):
+            sources.append((item.name, item, None))
+        elif item.is_dir() and (item / "__init__.py").is_file():
+            sources.append((item.name, item / "__init__.py", item.name))
+    return sources
 
 
 def _load_module_from_file(

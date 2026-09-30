@@ -89,6 +89,10 @@ class CliConfig:
     git_enabled: bool = True
     git_timeout_seconds: float = 2.0
     git_max_status_lines: int = 40
+    # Project-local extensions (<project>/.pi-python/extensions) run arbitrary Python when
+    # loaded. They are skipped unless the project is trusted; see ``extension_trust``.
+    trust_project_extensions: bool = False
+    trusted_projects: tuple[str, ...] = ()
 
 
 def load_config(home: Path | str | None = None) -> CliConfig:
@@ -133,6 +137,7 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
     agent = data.get("agent") if isinstance(data.get("agent"), dict) else {}
     prompt = data.get("prompt") if isinstance(data.get("prompt"), dict) else {}
     git = data.get("git") if isinstance(data.get("git"), dict) else {}
+    extensions = data.get("extensions") if isinstance(data.get("extensions"), dict) else {}
 
     permission = data.get("permission", "ask")
     if permission not in _VALID_PERMISSION:
@@ -164,6 +169,11 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         text = str(value).strip()
         return text or None
 
+    raw_trusted = extensions.get("trusted_projects")
+    trusted_projects: tuple[str, ...] = ()
+    if isinstance(raw_trusted, list):
+        trusted_projects = tuple(str(item).strip() for item in raw_trusted if str(item).strip())
+
     return CliConfig(
         permission=permission,  # type: ignore[arg-type]
         provider=str(model.get("provider") or data.get("provider") or "mock"),
@@ -183,6 +193,8 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         git_enabled=_as_bool(git.get("enabled"), True),
         git_timeout_seconds=_as_float(git.get("timeout_seconds"), 2.0),
         git_max_status_lines=_as_int(git.get("max_status_lines"), 40),
+        trust_project_extensions=_as_bool(extensions.get("trust_project_extensions"), False),
+        trusted_projects=trusted_projects,
     )
 
 

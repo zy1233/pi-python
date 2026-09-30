@@ -14,7 +14,7 @@
 
 ### 1.1 目标
 
-1. **Git 上下文注入。** 当 cwd 位于 git 工作区时，在 system prompt 中附上只读、有界的分支与工作区状态，每个 turn 刷新。
+1. **Git 上下文注入。** 当 cwd 位于 git 工作区时，在 system prompt 中附上只读、有界的分支与工作区状态；这是**会话开始时的快照**，运行期间不随文件变化刷新（见 §4.3）。
 2. **多提供商生产测试矩阵。** 在现有 `openai` / `anthropic` / `deepseek`（含 OpenAI 兼容网关）上，用同一组能力断言覆盖真实 API；缺密钥的格子跳过，不进入默认 CI。
 
 ### 1.2 非目标
@@ -30,7 +30,7 @@
 ### 1.3 已确认决策
 
 1. **MCP 与上游一致，留在进程外。** 产品路径不连接 MCP。调用方用 `langchain-mcp-adapters` 得到 `BaseTool`，再 `from_langchain_tool()` / `from_langchain_tools()` 交给 `Agent` 或 `create_session_harness(tools=...)`。连接、重连、关进程都由调用方负责。
-2. **Git 段只进 system prompt，不写入 JSONL。** `create_session_harness` 已在每个 turn 调用 `system_prompt` callable，状态放这里才不会把过期 diff 固化进会话。
+2. **Git 段只进 system prompt，不写入 JSONL。** 状态放这里才不会把过期 diff 固化进会话历史。注意 `AgentHarness` 会在会话内缓存 system prompt（提交 `bee053c`，为保持 provider 提示前缀缓存稳定），所以这一段实际上是快照，而不是逐 turn 刷新，见 §4.3。
 3. **矩阵是 opt-in 集成测试，不是 PR 门禁。** 默认 `pytest` 保持 mock。`real_llm` 用例在密钥缺失时 `skip`，不失败。
 
 ---
@@ -93,7 +93,7 @@ agent_tools = from_langchain_tools(lc_tools)  # BaseTool → AgentTool
 
 `zypi` / `python -m pi_agent_cli` 默认不加载任何 MCP 服务器。Phase 7 扩展若要提供 MCP，应在自己的 `activate()` 里做上面的转换再 `register_tool`，而不是要求 core 识别 MCP。
 
-权限：导入后的工具与其他自定义工具一样。`ask` 模式今天只对 `bash` / `edit` / `write` 弹权限；MCP 工具不因为来自 MCP 而自动进入这个名单。调用方若要门禁，用已有的 `before_tool_call` / `tool_call` 钩子。
+权限：导入后的工具与其他自定义工具一样。`ask` 模式今天只对 `bash` / `edit` / `write` / `workflow` 弹权限（`workflow` 的子代理的每次工具调用同样逐个询问，见 Phase 7 spec §12）；MCP 工具不因为来自 MCP 而自动进入这个名单。调用方若要门禁，用已有的 `before_tool_call` / `tool_call` 钩子。
 
 ---
 
@@ -135,6 +135,7 @@ def snapshot_git_context(cwd: str, *, timeout_seconds: float, max_lines: int) ->
 
 ```
 <git_status>
+Snapshot taken at the start of this session; it is not refreshed as files change. Run `git status` for the current state.
 Branch: main
 ## main...origin/main
  M packages/pi-agent-cli/pi_agent_cli/factory.py
@@ -148,7 +149,11 @@ Branch: main
 
 ### 4.3 刷新
 
-`load_system_prompt_options` 每次被 callable 调用时取一次快照。不缓存跨 turn：用户或模型可能刚改过文件。单次 turn 内只调用一次，避免同一次装配里跑两遍 git。
+**这是会话级快照，不是逐 turn 刷新。** `load_system_prompt_options` 在 system prompt callable 被调用时取一次快照，而 `AgentHarness._create_turn_state` 把 callable 的结果缓存到 `_cached_system_prompt`（提交 `bee053c`）：只有 `invalidate_system_prompt_cache()`（工具集变化、动态加载扩展等）才会重算。
+
+这是有意的取舍。provider 的提示缓存按请求前缀匹配，system prompt 在最前面：git 块一旦变化，它之后的全部内容（skills 段与整段对话历史）都会失去缓存命中。agent 每改一次文件 git 状态就变，逐 turn 重算等于每个 turn 都在为整段历史重新付费。因此块内以固定文案声明「会话开始时的快照、不随文件刷新，最新状态请运行 `git status`」，让模型不把旧状态当作当前状态。
+
+该文案不含时间戳，保证同一会话内 system prompt 字节级稳定。若将来要做「状态变化时追加尾部消息」的新鲜度方案，需要新的注入机制并处理各 provider 对消息顺序的要求，不在本阶段范围。
 
 ### 4.4 配置
 

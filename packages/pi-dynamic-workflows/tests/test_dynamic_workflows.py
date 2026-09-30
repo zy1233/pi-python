@@ -494,6 +494,10 @@ class _BridgeStub:
     def get_api_key_fn(self):
         return None
 
+    @property
+    def tool_call_gate(self):
+        return None
+
 
 class TestActivate:
     def test_activate_registers_tool_and_commands(self) -> None:
@@ -1257,3 +1261,272 @@ class TestWorktreeSnapshotBaseline:
         assert (git_repo / "a.txt").read_text() == "agent-only\n"
 
         await mgr.cleanup(wt)
+
+
+# ---------------------------------------------------------------------------
+# Sub-agent tool calls go through the parent's tool_call gate (audit P7-01)
+# ---------------------------------------------------------------------------
+#
+# Each sub-agent runs on a fresh harness with no hooks, so the session's permission
+# layer never saw its bash/edit/write calls. The executor takes the parent's
+# ``tool_call_gate`` and puts every sub-agent tool call through it.
+
+_ONE_AGENT = (
+    'meta = {"name": "one"}\nasync def main():\n    await agent("go")\n    result("done")\n'
+)
+
+
+def _write_once_stream(path: str, replies: list[tuple[bool, str]] | None = None):
+    """A sub-agent LLM that asks to write ``path`` once (call id ``call_1``), then answers.
+
+    ``replies`` collects what the sub-agent was told about its call: ``(isError, text)``.
+    """
+    from pi_agent_core.event_stream import AssistantMessageEventStream
+    from pi_agent_core.tests.mock_stream import _base_partial, mock_text_stream
+    from pi_agent_core.types import DoneEvent, StartEvent
+
+    async def stream(model, context, options=None):
+        results = [m for m in context.messages if getattr(m, "role", None) == "toolResult"]
+        if results:
+            if replies is not None:
+                replies.extend((r.isError, r.content[0]["text"]) for r in results)
+            return await mock_text_stream(model, context, options)
+        call = {
+            "type": "toolCall",
+            "id": "call_1",
+            "name": "write",
+            "arguments": {"path": path, "content": "written\n"},
+        }
+        partial = _base_partial(model, [call])
+        partial.stopReason = "toolUse"
+        events = AssistantMessageEventStream()
+        events.push(StartEvent(partial=partial.model_copy(deep=True)))
+        events.push(DoneEvent(partial=partial.model_copy(deep=True), reason="toolUse"))
+        events.set_final_message(partial)
+        events.end()
+        return events
+
+    return stream
+
+
+def _gated_executor(stream_fn: Any, cwd: Path, gate: Any = None) -> Any:
+    from pi_dynamic_workflows.subagent import HarnessSubagentExecutor
+
+    from pi_agent_core.types import Model
+
+    return HarnessSubagentExecutor(
+        stream_fn=stream_fn,
+        parent_model=Model(provider="mock", model_id="m1"),
+        cwd=str(cwd),
+        tool_call_gate=gate,
+    )
+
+
+class TestSubagentToolCallGate:
+    async def test_a_blocked_call_never_runs_and_the_subagent_is_told(self, tmp_path: Path):
+        target = tmp_path / "blocked.txt"
+        replies: list[tuple[bool, str]] = []
+        calls: list[tuple[str, str, dict[str, Any], Any]] = []
+
+        async def gate(tool_call_id, tool_name, tool_input, *, origin=None):
+            calls.append((tool_call_id, tool_name, tool_input, origin))
+            return {"block": True, "reason": "User denied permission"}
+
+        executor = _gated_executor(_write_once_stream(str(target), replies), tmp_path, gate)
+        result = await executor.run_agent("write it", label="writer")
+
+        assert result.error is None
+        assert not target.exists()
+        ((is_error, text),) = replies
+        assert is_error is True
+        assert "User denied permission" in text
+        ((_, tool_name, tool_input, origin),) = calls
+        assert tool_name == "write"
+        assert tool_input["path"] == str(target)
+        assert origin == {"kind": "subagent", "cwd": str(tmp_path), "label": "writer"}
+
+    async def test_an_allowed_call_runs(self, tmp_path: Path):
+        target = tmp_path / "allowed.txt"
+        calls: list[str] = []
+
+        async def gate(tool_call_id, tool_name, tool_input, *, origin=None):
+            calls.append(tool_name)
+            return None
+
+        executor = _gated_executor(_write_once_stream(str(target)), tmp_path, gate)
+        result = await executor.run_agent("write it")
+
+        assert result.error is None
+        assert calls == ["write"]
+        assert target.read_text(encoding="utf-8") == "written\n"
+
+    async def test_the_origin_carries_no_label_when_the_script_gave_none(self, tmp_path: Path):
+        origins: list[Any] = []
+
+        async def gate(tool_call_id, tool_name, tool_input, *, origin=None):
+            origins.append(origin)
+            return None
+
+        executor = _gated_executor(_write_once_stream(str(tmp_path / "x.txt")), tmp_path, gate)
+        await executor.run_agent("write it")
+
+        assert origins == [{"kind": "subagent", "cwd": str(tmp_path)}]
+
+    async def test_without_a_gate_there_is_no_policy_to_inherit(self, tmp_path: Path):
+        """Library default for a standalone executor; the extension always passes the gate."""
+        target = tmp_path / "free.txt"
+
+        executor = _gated_executor(_write_once_stream(str(target)), tmp_path)
+        await executor.run_agent("write it")
+
+        assert target.read_text(encoding="utf-8") == "written\n"
+
+    async def test_a_failing_gate_fails_closed(self, tmp_path: Path):
+        target = tmp_path / "unknown.txt"
+        replies: list[tuple[bool, str]] = []
+
+        async def gate(tool_call_id, tool_name, tool_input, *, origin=None):
+            raise RuntimeError("permission backend down")
+
+        executor = _gated_executor(_write_once_stream(str(target), replies), tmp_path, gate)
+        await executor.run_agent("write it")
+
+        assert not target.exists()  # no verdict is not a yes
+        assert [is_error for is_error, _ in replies] == [True]
+
+    async def test_tool_call_ids_do_not_clash_across_subagent_runs(self, tmp_path: Path):
+        """Every sub-agent LLM here calls its tool ``call_1``; parallel runs and the parent
+        session would all share that id, and permission cards are keyed by it."""
+        ids: list[str] = []
+
+        async def gate(tool_call_id, tool_name, tool_input, *, origin=None):
+            ids.append(tool_call_id)
+            return {"block": True, "reason": "no"}
+
+        stream = _write_once_stream(str(tmp_path / "x.txt"))
+        executor = _gated_executor(stream, tmp_path, gate)
+        await asyncio.gather(executor.run_agent("a"), executor.run_agent("b"))
+
+        assert len(ids) == 2
+        assert len(set(ids)) == 2
+        assert "call_1" not in ids
+        assert all(i.endswith("call_1") for i in ids)  # the model's own id is still visible
+
+    def test_with_worktree_manager_keeps_every_setting_including_the_gate(self):
+        from pi_agent_core.types import Model
+
+        async def gate(tool_call_id, tool_name, tool_input, *, origin=None):
+            return None
+
+        base = _gated_executor(None, Path("/w"), gate)
+        base._get_api_key = lambda provider: "k"
+        base._tiers = {"small": "mock/x"}
+        base._parent_model = Model(provider="mock", model_id="m1")
+        manager = object()
+
+        derived = base.with_worktree_manager(manager)
+
+        assert derived is not base
+        assert derived._worktree_manager is manager
+        assert base._worktree_manager is None
+        for name in ("_stream_fn", "_parent_model", "_cwd", "_get_api_key", "_tiers"):
+            assert getattr(derived, name) is getattr(base, name), name
+        assert derived._tool_call_gate is gate
+
+    async def test_isolated_subagents_still_go_through_the_gate(self, tmp_path: Path):
+        """``isolation=True`` rebuilds the executor around a worktree manager; the gate
+        must survive that (it is a security control, not a tuning knob)."""
+        import subprocess
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        for args in (
+            ["init"],
+            ["config", "user.email", "test@test"],
+            ["config", "user.name", "test"],
+        ):
+            subprocess.run(["git", *args], cwd=str(repo), check=True, capture_output=True)
+        (repo / "a.txt").write_text("original\n")
+        subprocess.run(["git", "add", "."], cwd=str(repo), check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "init"], cwd=str(repo), check=True, capture_output=True
+        )
+
+        calls: list[tuple[str, Any]] = []
+
+        async def gate(tool_call_id, tool_name, tool_input, *, origin=None):
+            calls.append((tool_name, origin))
+            return {"block": True, "reason": "User denied permission"}
+
+        executor = _gated_executor(_write_once_stream("note.txt"), repo, gate)
+        tool = create_workflow_tool(executor=executor, cwd=str(repo))
+        result = await tool.execute("tc-1", WorkflowParams(script=_ONE_AGENT, isolation=True))
+
+        assert "completed" in result.content[0]["text"]
+        assert [name for name, _ in calls] == ["write"]
+        assert calls[0][1]["cwd"] != str(repo)  # it ran in the worktree, and was still asked
+        assert not (repo / "note.txt").exists()
+
+
+class TestExecutorGateWiring:
+    @staticmethod
+    def _pi(bridge: Any) -> Any:
+        class _Pi:
+            cwd = "."
+
+            def _require_bridge(self):
+                return bridge
+
+        return _Pi()
+
+    def test_the_extension_hands_the_bridges_gate_to_the_executor(self):
+        from pi_dynamic_workflows import _try_build_real_executor
+
+        from pi_agent_core.tests.mock_stream import mock_text_stream
+        from pi_agent_core.types import Model
+
+        async def gate(tool_call_id, tool_name, tool_input, *, origin=None):
+            return None
+
+        class _GatedBridge(_BridgeStub):
+            @property
+            def stream_fn(self):
+                return mock_text_stream
+
+            @property
+            def model(self):
+                return Model(provider="mock", model_id="m1")
+
+            @property
+            def tool_call_gate(self):
+                return gate
+
+        executor, _manager = _try_build_real_executor(self._pi(_GatedBridge()))
+
+        assert executor is not None
+        assert executor._tool_call_gate is gate
+
+    def test_a_bridge_without_a_gate_is_reported(self, caplog: pytest.LogCaptureFixture):
+        """An old or third-party harness has nothing to inherit; say so instead of
+        silently running sub-agents outside the session's policy."""
+        import logging
+
+        from pi_dynamic_workflows import _try_build_real_executor
+
+        from pi_agent_core.tests.mock_stream import mock_text_stream
+        from pi_agent_core.types import Model
+
+        class _NoGateBridge:
+            stream_fn = staticmethod(mock_text_stream)
+            model = Model(provider="mock", model_id="m1")
+            get_api_key_fn = None
+
+            def register_cleanup(self, callback):
+                pass
+
+        with caplog.at_level(logging.WARNING, logger="pi_dynamic_workflows"):
+            executor, _ = _try_build_real_executor(self._pi(_NoGateBridge()))
+
+        assert executor is not None
+        assert executor._tool_call_gate is None
+        assert any("tool_call_gate" in record.getMessage() for record in caplog.records)

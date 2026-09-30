@@ -7,7 +7,7 @@ Public surface:
 """
 
 from pi_agent_core.extensions.api import ExtensionAPI
-from pi_agent_core.extensions.loader import ExtensionLoader
+from pi_agent_core.extensions.loader import ExtensionLoader, SkippedExtensions
 from pi_agent_core.extensions.registry import ExtensionRegistry
 from pi_agent_core.extensions.types import (
     CommandDef,
@@ -26,6 +26,7 @@ __all__ = [
     "ExtensionLoader",
     "ExtensionMeta",
     "ExtensionRegistry",
+    "SkippedExtensions",
     "ToolDefinition",
     "ToolInfo",
 ]

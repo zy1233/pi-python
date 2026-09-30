@@ -209,18 +209,11 @@ def _make_workflow_execute(
         # Wire up worktree isolation when requested.
         run_executor = _executor
         wt_mgr = None
-        if params.isolation and hasattr(_executor, "_worktree_manager"):
+        if params.isolation and hasattr(_executor, "with_worktree_manager"):
             from pi_dynamic_workflows.worktree import WorktreeManager
 
             wt_mgr = WorktreeManager(cwd)
-            run_executor = _executor.__class__(
-                stream_fn=_executor._stream_fn,
-                parent_model=_executor._parent_model,
-                cwd=cwd,
-                get_api_key=_executor._get_api_key,
-                tiers=_executor._tiers,
-                worktree_manager=wt_mgr,
-            )
+            run_executor = _executor.with_worktree_manager(wt_mgr)
 
         runtime = WorkflowRuntime(
             run_executor,

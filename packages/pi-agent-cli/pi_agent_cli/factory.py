@@ -8,6 +8,7 @@ from typing import Any
 
 from pi_agent_cli.config import CliConfig, expand_config_path, make_get_api_key, pi_home
 from pi_agent_cli.create_harness import build_coding_agent_harness_system_prompt
+from pi_agent_cli.extension_trust import project_extensions_trusted
 from pi_agent_cli.prompt_options import load_system_prompt_options
 from pi_agent_core.coding_tools import create_all_tools
 from pi_agent_core.coding_tools.bash import create_bash_tool
@@ -171,6 +172,7 @@ async def create_session_harness(
         max_turns=config.max_turns,
         compaction=CompactionSettings(auto_compact=auto_compact),
         auto_discover_extensions=True,
+        trust_project_extensions=project_extensions_trusted(config, cwd_s),
         extensions=extensions or [],
     )
     harness_holder["harness"] = harness

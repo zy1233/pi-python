@@ -70,6 +70,19 @@ class HarnessBridge(Protocol):
         """The parent harness's get_api_key callback (or None)."""
         ...
 
+    @property
+    def tool_call_gate(self) -> Any:
+        """Async ``(tool_call_id, tool_name, tool_input, *, origin=None)`` callable that runs
+        the parent harness's ``tool_call`` policy chain (permission layer, extension hooks)
+        for a tool call made *outside* the harness's own loop.
+
+        Extensions that run agents of their own (dynamic workflows) put every tool call of
+        those agents through it. It returns ``None`` to allow, or
+        ``{"block": True, "reason": ...}`` to deny; it raises when the policy cannot decide,
+        which callers must treat as a denial.
+        """
+        ...
+
     def add_hook(self, event: str, handler: Any) -> None:
         """Add *handler* to the harness's live hook list for *event*.
 

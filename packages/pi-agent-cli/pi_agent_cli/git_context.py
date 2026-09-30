@@ -62,9 +62,20 @@ def snapshot_git_context(
     return GitSnapshot(branch=branch, status_porcelain="\n".join(lines), truncated=truncated)
 
 
+SNAPSHOT_NOTICE = (
+    "Snapshot taken at the start of this session; it is not refreshed as files change. "
+    "Run `git status` for the current state."
+)
+
+
 def format_git_status(snapshot: GitSnapshot) -> str:
-    """Render the ``<git_status>`` block inserted into the system prompt."""
-    parts = ["<git_status>", f"Branch: {snapshot.branch}"]
+    """Render the ``<git_status>`` block inserted into the system prompt.
+
+    The harness caches the system prompt for the whole session (stable prefix for the
+    provider's prompt cache), so this block cannot track the working tree. The notice
+    says so, rather than letting the model take stale state for the current one.
+    """
+    parts = ["<git_status>", SNAPSHOT_NOTICE, f"Branch: {snapshot.branch}"]
     if snapshot.status_porcelain:
         parts.append(snapshot.status_porcelain)
     parts.append("</git_status>")

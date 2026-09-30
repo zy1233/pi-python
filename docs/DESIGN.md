@@ -304,7 +304,7 @@ spawn 默认为 `python -m pi_agent_cli`（`PI_AGENT_COMMAND` / `PI_PYTHON` 可�
 
 ### 8.4 权限与配置
 
-`before_tool_call` 对 bash/edit/write 发 ACP `session/request_permission`。Python agent：`~/.pi-python/agent.toml`（model、permission、skills、`[agent].command`）。Rust TUI：`config.toml` 仅 grok 格式（勿写 Python 的 `permission = "ask"`）。示例见 `packages/pi-agent-cli/agent.example.toml`；Windows 见 `docs/WINDOWS.md`。
+`before_tool_call` 对 bash/edit/write/workflow 发 ACP `session/request_permission`（`workflow` 子代理的每次工具调用经桥接的 `tool_call_gate` 走同一权限层，见 Phase 7 spec §12）。Python agent：`~/.pi-python/agent.toml`（model、permission、skills、`[agent].command`）。Rust TUI：`config.toml` 仅 grok 格式（勿写 Python 的 `permission = "ask"`）。示例见 `packages/pi-agent-cli/agent.example.toml`；Windows 见 `docs/WINDOWS.md`。
 
 ---
 

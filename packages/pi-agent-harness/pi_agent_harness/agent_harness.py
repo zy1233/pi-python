@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from pi_agent_core.agent_loop import run_agent_loop
 from pi_agent_core.extensions._harness_bridge import HarnessBridge
-from pi_agent_core.extensions.loader import ActivateFn, ExtensionLoader
+from pi_agent_core.extensions.loader import ActivateFn, ExtensionLoader, SkippedExtensions
 from pi_agent_core.extensions.registry import ExtensionRegistry
 from pi_agent_core.extensions.types import ToolDefinition, ToolInfo
 from pi_agent_core.messages import AssistantMessage, ImageContent, TextContent, Usage, UserMessage
@@ -240,6 +240,7 @@ class AgentHarness:
         extensions: list[ActivateFn] | None = None,
         extension_dirs: list[str] | None = None,
         auto_discover_extensions: bool = False,
+        trust_project_extensions: bool = False,
     ) -> None:
         self.env = env
         self.session = session
@@ -292,10 +293,13 @@ class AgentHarness:
         self._extension_bridge: Any = None
         self._session_id: str = ""
         self._cached_custom_entries: list[Any] = []
+        # ``trust_project_extensions``: with auto-discovery, also import (= run)
+        # ``<cwd>/.pi-python/extensions``. Off unless the caller vouches for the project.
         self._extension_config = {
             "extensions": extensions or [],
             "extension_dirs": extension_dirs or [],
             "auto_discover": auto_discover_extensions,
+            "trust_project_extensions": trust_project_extensions,
         }
 
     def invalidate_system_prompt_cache(self) -> None:
@@ -332,6 +336,7 @@ class AgentHarness:
             extra=extra_fns,
             cwd=cwd,
             auto_discover=cfg["auto_discover"],
+            trust_project_extensions=cfg["trust_project_extensions"],
             bridge=bridge,
         )
 
@@ -481,6 +486,10 @@ class AgentHarness:
             def get_api_key_fn(self) -> Any:
                 return harness.get_api_key
 
+            @property
+            def tool_call_gate(self) -> Any:
+                return harness.check_tool_call
+
             def add_hook(self, event: str, handler: Any) -> None:
                 harness._hooks.setdefault(event, []).append(handler)
 
@@ -502,6 +511,14 @@ class AgentHarness:
     def extension_registry(self) -> ExtensionRegistry:
         """The extension registry (tools, commands, event handlers)."""
         return self._extension_registry
+
+    @property
+    def skipped_extensions(self) -> list[SkippedExtensions]:
+        """Extension directories found but deliberately not imported (untrusted project).
+
+        Empty until extensions have been loaded.
+        """
+        return list(self._extension_loader.skipped)
 
     async def load_extensions(self) -> None:
         """Eagerly load extensions.
@@ -710,6 +727,42 @@ class AgentHarness:
             if _is_blocking_result(candidate):
                 return candidate
         return None
+
+    async def check_tool_call(
+        self,
+        tool_call_id: str,
+        tool_name: str,
+        tool_input: dict[str, Any],
+        *,
+        origin: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Run this harness's ``tool_call`` hook chain for a call made outside its own loop.
+
+        Extensions that run agents of their own (dynamic workflows) put every tool call of
+        those agents through here, so the session's permission layer and extension policies
+        apply to them as well. *origin* says where the call came from (see
+        ``ToolCallEvent.origin``).
+
+        Returns ``None`` when no handler blocks, else ``{"block": True, "reason": ...}``.
+        A handler that raises surfaces as ``AgentHarnessError`` (code ``"hook"``): callers
+        must treat that as "not allowed", never as "allowed".
+        """
+        result = await self._emit_tool_call_hook(
+            ToolCallEvent(
+                toolCallId=tool_call_id,
+                toolName=tool_name,
+                input=dict(tool_input),
+                origin=origin,
+            )
+        )
+        if result is None:
+            return None
+        # _emit_tool_call_hook only ever returns a blocking verdict.
+        if isinstance(result, dict):
+            reason = result.get("reason")
+        else:
+            reason = getattr(result, "reason", None)
+        return {"block": True, "reason": reason}
 
     async def _emit_before_provider_request(
         self,
@@ -964,21 +1017,14 @@ class AgentHarness:
             return messages
 
         async def before_tool_call(ctx: BeforeToolCallContext, signal: Any | None):
-            result = await self._emit_tool_call_hook(
-                ToolCallEvent(
-                    toolCallId=ctx.tool_call["id"],
-                    toolName=ctx.tool_call["name"],
-                    input=dict(ctx.args or {}),
-                )
+            verdict = await self.check_tool_call(
+                ctx.tool_call["id"],
+                ctx.tool_call["name"],
+                dict(ctx.args or {}),
             )
-            if result is None:
+            if verdict is None:
                 return None
-            # _emit_tool_call_hook only ever returns a blocking verdict.
-            if isinstance(result, dict):
-                reason = result.get("reason")
-            else:
-                reason = getattr(result, "reason", None)
-            return BeforeToolCallResult(block=True, reason=reason)
+            return BeforeToolCallResult(block=True, reason=verdict["reason"])
 
         async def after_tool_call(ctx: AfterToolCallContext, signal: Any | None):
             result = await self._emit_hook(

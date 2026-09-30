@@ -32,3 +32,13 @@ command = "python -m pi_agent_cli"
 # enabled = true
 # timeout_seconds = 2
 # max_status_lines = 40
+
+[extensions]
+# Extensions in <project>/.pi-python/extensions run arbitrary Python as soon as a session opens,
+# so they are skipped unless you trust the project. Only this file is read for that decision
+# (never a config inside the project). Installed extension packages and ~/.pi-python/extensions
+# are not affected.
+# trusted_projects = ["~/work/my-repo"] # absolute or ~ paths; subdirectories are trusted too
+#                                       # (Windows: use forward slashes, e.g. "C:/work/my-repo")
+# trust_project_extensions = false      # true trusts every project
+# One-off alternatives: --trust-project-extensions, or PI_TRUST_PROJECT_EXTENSIONS=1

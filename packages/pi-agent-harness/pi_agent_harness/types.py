@@ -489,6 +489,10 @@ class ToolCallEvent(BaseModel):
     toolCallId: str
     toolName: str
     input: dict[str, Any]
+    origin: dict[str, Any] | None = None
+    """Where the call came from when it is not this session's own agent, e.g.
+    ``{"kind": "subagent", "cwd": ..., "label": ...}`` for a workflow sub-agent
+    (``label`` is text the workflow script chose). ``None`` for the session's own calls."""
 
 
 class ToolResultEvent(BaseModel):
