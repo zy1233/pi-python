@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`<git_status>` on non-UTF-8 locales (Phase 6)**: git output was decoded with the locale codec (cp936 on Chinese Windows), so a branch such as `功` crashed the snapshot (`AttributeError` from a failed reader thread, failing the turn) and others such as `功能` were rendered as mojibake. Git now runs with `encoding="utf-8", errors="replace"` and `core.quotePath=false` (non-ASCII paths appear verbatim instead of as `"\344\270\255..."` escapes), and any failure omits the section instead of failing the turn.
+- **`tool_call` hooks can no longer overturn a denial**: `AgentHarness` used a last-non-`None`-wins rule, so an extension registered after the permission layer could un-deny a call by returning `{}` or `{"block": False}`. Dispatch now stops at the first blocking verdict, like upstream pi's `emitToolCall`.
+- **Extension tools in the system prompt**: `prompt_snippet` / `prompt_guidelines` of extension-registered tools (`workflow` gating guideline, `goal_update`, `web_search`, ...) were never rendered by the CLI; the tools reached the LLM but were missing from the prompt's tool list and guidelines. Because `pi-goal-x` registers its tools in every session, its guidelines were reworded so they hold when no goal is active (they no longer state "You are in goal-driven mode"; the tools apply only after `/goal`).
+- **Sub-agent model routing and credentials (`pi-dynamic-workflows`)**: a `tier` resolved to an Anthropic model whatever the parent ran on, and the single configured API key was handed to every provider, so a DeepSeek session sent its key to Anthropic. A model override on the parent's own provider also lost the parent's `base_url`.
+
+### Changed
+
+- `resolve_tier(tier, tiers=None, *, provider=None)`: built-in tier defaults are now per parent provider (`DEFAULT_MODEL_TIERS_BY_PROVIDER`, currently `anthropic` only; `DEFAULT_MODEL_TIERS` is removed). With any other parent provider a `tier` inherits the parent model. An explicit `tiers` mapping still wins and may name any provider.
+- `make_get_api_key(config)` returns the key only for `config.provider`; other providers get `None`, so their SDK reads its own standard variable (for example `ANTHROPIC_API_KEY`). Export that variable when a workflow routes sub-agents to another provider.
+- Sub-agent models keep the parent's `base_url` only when they stay on the parent's provider.
+
 ## [0.4.0] - 2026-09-24
 
 ### Added

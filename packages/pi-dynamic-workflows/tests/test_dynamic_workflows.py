@@ -105,10 +105,29 @@ class TestModelRouting:
         assert resolve_model_for_phase("review-code", config) == "claude"
 
     def test_resolve_tier(self) -> None:
-        assert resolve_tier("small") is not None
-        assert resolve_tier("big") is not None
-        assert resolve_tier("unknown") is None
-        assert resolve_tier(None) is None
+        # Built-in defaults are per provider (DEFAULT_MODEL_TIERS_BY_PROVIDER).
+        assert resolve_tier("small", provider="anthropic") == "anthropic/claude-sonnet-4-20250514"
+        assert resolve_tier("medium", provider="anthropic") == "anthropic/claude-sonnet-4-20250514"
+        assert resolve_tier("big", provider="anthropic") == "anthropic/claude-opus-4-20250514"
+        assert resolve_tier("unknown", provider="anthropic") is None
+        assert resolve_tier(None, provider="anthropic") is None
+
+    @pytest.mark.parametrize("provider", ["deepseek", "openai", "mock", "", None])
+    @pytest.mark.parametrize("tier", ["small", "medium", "big"])
+    def test_default_tiers_never_leave_the_parent_provider(
+        self, provider: str | None, tier: str
+    ) -> None:
+        """The defaults used to name Anthropic models for *every* parent, so a DeepSeek
+        run silently became an Anthropic run (and was sent the DeepSeek key)."""
+        assert resolve_tier(tier, provider=provider) is None
+
+    def test_default_tier_lookup_ignores_provider_case(self) -> None:
+        assert resolve_tier("big", provider="Anthropic") == "anthropic/claude-opus-4-20250514"
+
+    def test_explicit_tiers_win_and_do_not_fall_back_to_defaults(self) -> None:
+        tiers = {"small": "openai/gpt-4o-mini"}
+        assert resolve_tier("small", tiers, provider="anthropic") == "openai/gpt-4o-mini"
+        assert resolve_tier("big", tiers, provider="anthropic") is None
 
 
 # ---------------------------------------------------------------------------
@@ -736,6 +755,85 @@ class TestHarnessSubagentExecutor:
         )
         result = await executor.run_agent("Hello", tier="small")
         assert result.error is None
+
+    def test_tier_keeps_a_non_anthropic_parent_on_its_own_model(self) -> None:
+        from pi_dynamic_workflows.subagent import HarnessSubagentExecutor
+
+        from pi_agent_core.types import Model
+
+        parent = Model(provider="deepseek", model_id="deepseek-chat", base_url="https://gw/v1")
+        executor = HarnessSubagentExecutor(stream_fn=None, parent_model=parent)
+
+        for tier in ("small", "medium", "big"):
+            assert executor._resolve_model(tier, None) is parent
+
+    def test_tier_uses_anthropic_defaults_only_for_an_anthropic_parent(self) -> None:
+        from pi_dynamic_workflows.subagent import HarnessSubagentExecutor
+
+        from pi_agent_core.types import Model
+
+        parent = Model(provider="anthropic", model_id="claude-haiku", base_url="https://gw/v1")
+        executor = HarnessSubagentExecutor(stream_fn=None, parent_model=parent)
+
+        big = executor._resolve_model("big", None)
+
+        assert (big.provider, big.model_id) == ("anthropic", "claude-opus-4-20250514")
+        assert big.base_url == "https://gw/v1"  # same provider => same endpoint
+
+    def test_model_override_on_the_same_provider_keeps_the_parent_endpoint(self) -> None:
+        from pi_dynamic_workflows.subagent import HarnessSubagentExecutor
+
+        from pi_agent_core.types import Model
+
+        parent = Model(provider="openai", model_id="gpt-4o", base_url="https://gw/v1")
+        executor = HarnessSubagentExecutor(stream_fn=None, parent_model=parent)
+
+        for spec in ("gpt-4o-mini", "openai/gpt-4o-mini"):
+            model = executor._resolve_model(None, spec)
+            assert (model.provider, model.model_id) == ("openai", "gpt-4o-mini")
+            assert model.base_url == "https://gw/v1"
+
+    def test_model_override_on_another_provider_drops_the_parent_endpoint(self) -> None:
+        from pi_dynamic_workflows.subagent import HarnessSubagentExecutor
+
+        from pi_agent_core.types import Model
+
+        parent = Model(provider="openai", model_id="gpt-4o", base_url="https://gw/v1")
+        executor = HarnessSubagentExecutor(stream_fn=None, parent_model=parent)
+
+        model = executor._resolve_model(None, "anthropic/claude-sonnet-4-20250514")
+
+        assert (model.provider, model.model_id) == ("anthropic", "claude-sonnet-4-20250514")
+        assert model.base_url is None  # the parent's gateway must not front another vendor
+
+    async def test_subagent_asks_for_the_key_of_the_provider_it_actually_uses(self) -> None:
+        """End to end: which provider a sub-agent runs on, and which key it is handed."""
+        from pi_dynamic_workflows.subagent import HarnessSubagentExecutor
+
+        from pi_agent_core.tests.mock_stream import mock_text_stream
+        from pi_agent_core.types import Model
+
+        seen: list[tuple[str, str, str | None]] = []
+
+        async def recording_stream(model, context, options=None):
+            seen.append((model.provider, model.model_id, options.api_key if options else None))
+            return await mock_text_stream(model, context, options)
+
+        keys = {"deepseek": "deepseek-secret"}  # provider-scoped, like make_get_api_key
+        executor = HarnessSubagentExecutor(
+            stream_fn=recording_stream,
+            parent_model=Model(provider="deepseek", model_id="deepseek-chat"),
+            cwd=".",
+            get_api_key=lambda provider: keys.get(provider),
+        )
+
+        await executor.run_agent("hi", tier="small")  # must stay on the parent's provider
+        await executor.run_agent("hi", model="anthropic/claude-x")  # explicit override
+
+        assert seen == [
+            ("deepseek", "deepseek-chat", "deepseek-secret"),
+            ("anthropic", "claude-x", None),
+        ]
 
     async def test_timeout(self) -> None:
         from pi_dynamic_workflows.subagent import HarnessSubagentExecutor

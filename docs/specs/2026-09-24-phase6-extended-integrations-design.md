@@ -114,13 +114,20 @@ def snapshot_git_context(cwd: str, *, timeout_seconds: float, max_lines: int) ->
     """非仓库、git 不在 PATH、或命令失败时返回 None。"""
 ```
 
-调用（均 `git -C <cwd>`，不经 shell）：
+调用（均 `git -C <cwd> -c core.quotePath=false`，不经 shell）：
 
 1. `git rev-parse --is-inside-work-tree` — 非 `true` 则返回 `None`
 2. `git rev-parse --abbrev-ref HEAD` 与（仅当结果为 `HEAD`）`git rev-parse --short HEAD`
 3. `git --no-optional-locks status --porcelain=v1 -b --untracked-files=normal`（`--no-optional-locks` 是 git 全局选项，避免锁 index）
 
 超时默认 2 秒。超时或非零退出返回 `None`（prompt 里不出现空段，也不出现错误堆栈）。不递归子模块，不跑 `git diff`。
+
+编码：git 输出固定按 UTF-8 解码（`encoding="utf-8", errors="replace"`），**不依赖系统 locale**——
+中文 Windows 的 locale 是 cp936，`text=True` 会让 `功` 这类分支名在 reader 线程里抛
+`UnicodeDecodeError`（`stdout=None` → `AttributeError`），`功能` 这类则静默变成乱码。
+`core.quotePath=false` 让非 ASCII 路径原样输出，而不是 `"\344\270\255..."` 八进制转义（引号、反斜杠、
+控制字符仍会被转义）。`_git()` 吞掉**所有**异常（含解码失败与 `stdout=None`）并返回 `None`：
+这一段只是可选上下文，任何故障都不能让 turn 失败。
 
 ### 4.2 注入位置
 

@@ -66,9 +66,34 @@ command = "python -m pi_agent_cli"
 
 def test_make_get_api_key_reads_env(monkeypatch):
     monkeypatch.setenv("MY_KEY", "secret")
-    getter = make_get_api_key(CliConfig(api_key_env="MY_KEY"))  # type: ignore[arg-type]
+    getter = make_get_api_key(CliConfig(provider="deepseek", api_key_env="MY_KEY"))
     assert getter is not None
     assert getter("deepseek") == "secret"
+
+
+def test_make_get_api_key_is_scoped_to_the_configured_provider(monkeypatch):
+    """``api_key_env`` is the key of ``provider`` only.
+
+    A sub-agent routed to another provider must not receive it; returning ``None`` lets
+    that provider's SDK fall back to its own standard env var (e.g. ANTHROPIC_API_KEY).
+    """
+    monkeypatch.setenv("MY_KEY", "secret")
+    getter = make_get_api_key(CliConfig(provider="deepseek", api_key_env="MY_KEY"))
+    assert getter is not None
+    assert getter("anthropic") is None
+    assert getter("openai") is None
+    assert getter("DeepSeek") == "secret"  # provider names compare case-insensitively
+
+
+def test_make_get_api_key_returns_none_when_env_is_unset(monkeypatch):
+    monkeypatch.delenv("MY_KEY", raising=False)
+    getter = make_get_api_key(CliConfig(provider="deepseek", api_key_env="MY_KEY"))
+    assert getter is not None
+    assert getter("deepseek") is None
+
+
+def test_make_get_api_key_is_none_without_api_key_env():
+    assert make_get_api_key(CliConfig(provider="deepseek")) is None
 
 
 def test_load_local_env_does_not_override_existing(tmp_path: Path, monkeypatch):

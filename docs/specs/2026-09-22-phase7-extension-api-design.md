@@ -185,6 +185,11 @@ class ToolDefinition:
 `tool_call` 是唯一具有阻塞能力的事件（返回 `{"block": True, "reason": "..."}` 等价于
 `BeforeToolCallResult(block=True, reason=...)`），与上游 pi 行为一致。
 
+**分发语义**：`tool_call` 按注册顺序（ACP 权限层先注册，扩展后注册）逐个调用 handler，
+**首个返回 block 的 handler 立即终止分发**（`AgentHarness._emit_tool_call_hook`，对应上游
+`emitToolCall`）；非阻断的返回值（`None` / `{}` / `{"block": False}`）一律忽略。因此后注册的
+扩展无法撤销权限层已作出的拒绝。其余事件仍沿用 `_emit_hook` 的 last-non-None 规则。
+
 ---
 
 ## 4. 扩展发现与加载
@@ -467,6 +472,20 @@ TUI (zypi) ──ACP stdio──> pi_agent_cli ──> factory.create_session_ha
 **关键行为**：model 显式指定 > tier 路由（`resolve_tier`）> 继承父 model；
 独立 session 不污染父会话；`timeout_ms` 通过 `asyncio.wait` 实现；
 `schema` 走 prompt 注入 + JSON 解析 → `AgentResult.structured`。
+
+**tier 与凭据的边界**（防止静默换厂商、把 A 厂商的 key 发给 B 厂商）：
+
+- 内置 tier 默认值按**父 model 的 provider** 限定（`DEFAULT_MODEL_TIERS_BY_PROVIDER`，目前只有
+  `anthropic`）；父 provider 没有条目时，`tier` 解析为 `None`，即继承父 model。显式传入的
+  `tiers` 映射优先、可指向任意 provider，且不回退到内置默认。
+- 模型 id 为 `provider/model`，无 `/` 表示与父 model 同 provider。`base_url` 是 provider 级属性：
+  仅当子代理留在父 provider 上才继承，跨 provider 一律丢弃。`supports_images` / `reasoning`
+  是模型级属性，不继承。
+- 循环按子代理**实际使用的 provider** 调用 `get_api_key(provider)`。CLI 的 `make_get_api_key`
+  仅对 `[model].provider` 返回 `api_key_env` 的值，其它 provider 返回 `None`，由其 SDK 读取自己的
+  标准环境变量（如 `ANTHROPIC_API_KEY`）。
+- 已知限制：`provider/model` 按第一个 `/` 拆分，对自身含 `/` 的网关模型 id（如 `Qwen/Qwen3-8B`）
+  有歧义；此类 id 需写成 `<provider>/Qwen/Qwen3-8B`。
 
 **Bridge 扩展**：`HarnessBridge` 增加 `stream_fn` / `model` / `get_api_key_fn`
 只读属性，`activate()` 据此构造真实 executor。

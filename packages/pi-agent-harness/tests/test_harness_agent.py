@@ -9,7 +9,14 @@ from pi_agent_core.event_stream import AssistantMessageEventStream
 from pi_agent_core.messages import UserMessage
 from pi_agent_core.tests.mock_stream import _base_partial, mock_text_stream
 from pi_agent_core.tools import SimpleTool
-from pi_agent_core.types import AgentToolResult, DoneEvent, Model, StartEvent, StreamOptions
+from pi_agent_core.types import (
+    AgentToolResult,
+    BeforeToolCallResult,
+    DoneEvent,
+    Model,
+    StartEvent,
+    StreamOptions,
+)
 from pi_agent_harness import AgentHarness, AgentHarnessError, MemorySessionStorage, Session
 from pi_agent_harness.messages import (
     BashExecutionMessage,
@@ -453,6 +460,105 @@ async def test_tool_call_hook_can_block_execution():
     assert len(tool_results) == 1
     assert tool_results[0].isError is True
     assert "blocked" in tool_results[0].content[0]["text"]
+
+
+async def _run_echo_with_tool_call_hooks(*hooks):
+    """Run one echo tool call through ``hooks`` (registered in order).
+
+    Returns ``(times the tool actually ran, the toolResult message)``.
+    """
+
+    class EchoParams(BaseModel):
+        message: str = ""
+
+    ran: list[str] = []
+
+    async def echo(_id, params, signal, on_update):
+        ran.append("echo")
+        return AgentToolResult(content=[{"type": "text", "text": "raw"}], details={})
+
+    tool = SimpleTool("echo", "", "Echo", EchoParams, echo)
+    session = await _memory_session()
+    harness = AgentHarness(
+        session=session, model=_model(), stream_fn=_tool_once_stream, tools=[tool]
+    )
+    for hook in hooks:
+        harness.on("tool_call", hook)
+    await harness.prompt("use tool")
+
+    context = await session.build_context()
+    tool_results = [m for m in context.messages if getattr(m, "role", None) == "toolResult"]
+    assert len(tool_results) == 1
+    return len(ran), tool_results[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "later_verdict",
+    [None, {}, {"block": False}, {"block": None}, {"reason": "looks fine"}],
+    ids=["none", "empty-dict", "block-false", "block-none", "reason-only"],
+)
+async def test_tool_call_block_is_final_and_later_hooks_cannot_override_it(later_verdict):
+    """pi's emitToolCall returns on the first ``block``.
+
+    The ACP permission layer registers first and extensions after it; an extension
+    must not be able to un-deny a call by returning a non-blocking verdict.
+    """
+    later_calls: list[str] = []
+
+    def permission_layer(_event):
+        return {"block": True, "reason": "denied by permission layer"}
+
+    def later_extension(_event):
+        later_calls.append("called")
+        return later_verdict
+
+    ran, result = await _run_echo_with_tool_call_hooks(permission_layer, later_extension)
+
+    assert ran == 0
+    assert result.isError is True
+    assert "denied by permission layer" in result.content[0]["text"]
+    assert later_calls == []  # dispatch stops at the first block, like pi
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "earlier_verdict",
+    [None, {}, {"block": False}],
+    ids=["none", "empty-dict", "block-false"],
+)
+async def test_tool_call_later_hook_can_still_block_after_non_blocking_hooks(earlier_verdict):
+    ran, result = await _run_echo_with_tool_call_hooks(
+        lambda _event: earlier_verdict,
+        lambda _event: {"block": True, "reason": "blocked by extension"},
+    )
+
+    assert ran == 0
+    assert result.isError is True
+    assert "blocked by extension" in result.content[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_tool_call_block_verdict_may_be_an_object_and_is_still_final():
+    ran, result = await _run_echo_with_tool_call_hooks(
+        lambda _event: BeforeToolCallResult(block=True, reason="object verdict"),
+        lambda _event: {},
+    )
+
+    assert ran == 0
+    assert "object verdict" in result.content[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_tool_call_without_any_block_still_runs_the_tool():
+    ran, result = await _run_echo_with_tool_call_hooks(
+        lambda _event: None,
+        lambda _event: {},
+        lambda _event: {"block": False},
+    )
+
+    assert ran == 1
+    assert result.isError is False
 
 
 @pytest.mark.asyncio

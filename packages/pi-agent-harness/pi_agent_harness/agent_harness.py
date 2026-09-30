@@ -95,6 +95,13 @@ async def _maybe_await(value: Any) -> Any:
     return value
 
 
+def _is_blocking_result(result: Any) -> bool:
+    """True when a ``tool_call`` hook verdict blocks the call (dict or object form)."""
+    if isinstance(result, dict):
+        return bool(result.get("block"))
+    return bool(getattr(result, "block", None))
+
+
 def _create_user_message(text: str, images: list[ImageContent] | None = None) -> UserMessage:
     content: list[TextContent | ImageContent] = [{"type": "text", "text": text}]
     if images:
@@ -686,6 +693,24 @@ class AgentHarness:
                 result = candidate
         return result
 
+    async def _emit_tool_call_hook(self, event: Any) -> Any:
+        """Dispatch ``tool_call`` with pi's short-circuit rule (``emitToolCall``).
+
+        The first handler that blocks wins: it is returned at once and later handlers
+        are not invoked. Non-blocking verdicts are ignored. This is deliberately not
+        ``_emit_hook``'s last-non-None rule: the permission layer registers first and
+        extensions after it, so with last-wins any extension could overturn a denial
+        just by returning ``{}`` or ``{"block": False}``.
+        """
+        for handler in list(self._hooks.get(event.type, [])):
+            try:
+                candidate = await _maybe_await(handler(event))
+            except Exception as e:
+                raise normalize_harness_error(e, "hook") from e
+            if _is_blocking_result(candidate):
+                return candidate
+        return None
+
     async def _emit_before_provider_request(
         self,
         model: Model,
@@ -939,22 +964,21 @@ class AgentHarness:
             return messages
 
         async def before_tool_call(ctx: BeforeToolCallContext, signal: Any | None):
-            result = await self._emit_hook(
+            result = await self._emit_tool_call_hook(
                 ToolCallEvent(
                     toolCallId=ctx.tool_call["id"],
                     toolName=ctx.tool_call["name"],
                     input=dict(ctx.args or {}),
                 )
             )
-            if not result:
+            if result is None:
                 return None
+            # _emit_tool_call_hook only ever returns a blocking verdict.
             if isinstance(result, dict):
-                block = result.get("block")
                 reason = result.get("reason")
             else:
-                block = getattr(result, "block", None)
                 reason = getattr(result, "reason", None)
-            return BeforeToolCallResult(block=block, reason=reason)
+            return BeforeToolCallResult(block=True, reason=reason)
 
         async def after_tool_call(ctx: AfterToolCallContext, signal: Any | None):
             result = await self._emit_hook(

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -88,6 +88,15 @@ def _build_tools(
     return list(tools_dict.values())
 
 
+def _merge_tools_by_name(*groups: Iterable[Any]) -> list[Any]:
+    """Union of tool groups keyed by name; a later group wins on a name collision."""
+    merged: dict[str, Any] = {}
+    for group in groups:
+        for tool in group:
+            merged[tool.name] = tool
+    return list(merged.values())
+
+
 async def create_session_harness(
     *,
     session: Session,
@@ -130,7 +139,11 @@ async def create_session_harness(
     async def system_prompt_callback(ctx: dict[str, Any]) -> str:
         active_tools = ctx.get("active_tools") or tools_list
         active_names = [tool.name for tool in active_tools]
-        all_tools = list(ctx.get("tools") or tools_list)
+        # Prompt snippets/guidelines are looked up by name in this table. Extension tools
+        # are registered after `tools_list` is fixed and the harness passes no "tools" key,
+        # so they only exist in `active_tools`; without them every extension tool would be
+        # exposed to the LLM but silently missing from the prompt.
+        all_tools = _merge_tools_by_name(tools_list, ctx.get("tools") or (), active_tools)
         options = load_system_prompt_options(
             cwd=cwd_s,
             config=config,

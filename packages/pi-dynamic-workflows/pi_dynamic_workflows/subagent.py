@@ -16,22 +16,25 @@ logger = logging.getLogger(__name__)
 
 
 def _parse_model_id(model_id: str, parent_model: Any) -> Any:
-    """Parse ``"provider/model_id"`` into a ``Model``, falling back to parent settings."""
+    """Parse ``"provider/model_id"`` into a ``Model``, falling back to parent settings.
+
+    A bare id (no ``/``) means "same provider as the parent". The endpoint (``base_url``)
+    belongs to the provider, not the model: it carries over when the provider is the
+    parent's and is dropped otherwise, so the parent's gateway never fronts another vendor.
+    Model-specific capabilities (``supports_images``, ``reasoning``) are not inherited.
+    """
     from pi_agent_core.types import Model
 
-    parts = model_id.split("/", 1)
-    if len(parts) == 2:
-        return Model(
-            provider=parts[0],
-            model_id=parts[1],
-            api=parent_model.api,
-            context_window=parent_model.context_window,
-        )
+    provider, sep, name = model_id.partition("/")
+    if not sep:
+        provider, name = parent_model.provider, model_id
+    same_provider = provider.casefold() == str(parent_model.provider).casefold()
     return Model(
-        provider=parent_model.provider,
-        model_id=model_id,
+        provider=parent_model.provider if same_provider else provider,
+        model_id=name,
         api=parent_model.api,
         context_window=parent_model.context_window,
+        base_url=getattr(parent_model, "base_url", None) if same_provider else None,
     )
 
 
@@ -79,7 +82,7 @@ class HarnessSubagentExecutor(SubagentExecutor):
         if model:
             return _parse_model_id(model, self._parent_model)
         if tier:
-            resolved = resolve_tier(tier, self._tiers)
+            resolved = resolve_tier(tier, self._tiers, provider=self._parent_model.provider)
             if resolved:
                 return _parse_model_id(resolved, self._parent_model)
         return self._parent_model

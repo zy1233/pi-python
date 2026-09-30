@@ -12,7 +12,7 @@ max_turns = 50
 provider = "deepseek"
 id = "deepseek-ai/DeepSeek-V4-Flash"
 base_url = "https://api.siliconflow.cn/v1"
-api_key_env = "REAL_LLM_API_KEY"
+api_key_env = "REAL_LLM_API_KEY" # key for `provider` only; other providers use their own (e.g. ANTHROPIC_API_KEY)
 
 [skills]
 paths = ["~/.pi-python/skills", ".pi/skills"]

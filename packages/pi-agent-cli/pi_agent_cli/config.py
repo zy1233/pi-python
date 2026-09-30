@@ -108,11 +108,20 @@ def load_config(home: Path | str | None = None) -> CliConfig:
 def make_get_api_key(
     config: CliConfig,
 ) -> Callable[[str], str | None] | None:
+    """Build the ``get_api_key`` callback; ``None`` when no ``api_key_env`` is configured.
+
+    ``api_key_env`` is the key of ``config.provider`` only. Any other provider (e.g. a
+    sub-agent routed elsewhere) gets ``None`` so its SDK falls back to its own standard
+    env var (``ANTHROPIC_API_KEY`` ...) instead of receiving a credential meant for a
+    different vendor.
+    """
     env_name = config.api_key_env
     if not env_name:
         return None
 
-    def get_api_key(_provider: str) -> str | None:
+    def get_api_key(provider: str) -> str | None:
+        if provider.casefold() != config.provider.casefold():
+            return None
         return os.environ.get(env_name) or None
 
     return get_api_key

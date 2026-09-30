@@ -5,8 +5,11 @@ Failures, timeouts, and non-repos omit the section. Nothing is written to the se
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -69,17 +72,28 @@ def format_git_status(snapshot: GitSnapshot) -> str:
 
 
 def _git(cwd: str, args: list[str], timeout_seconds: float) -> str | None:
+    """Run one read-only git command; ``None`` on any failure.
+
+    The result feeds an optional prompt section, so nothing that goes wrong here
+    (missing git, timeout, undecodable output, ...) may escape and fail the turn.
+    """
     try:
         completed = subprocess.run(
-            ["git", "-C", cwd, *args],
+            # quotePath=false: emit non-ASCII paths as UTF-8 rather than "\344\270\255" escapes.
+            ["git", "-C", cwd, "-c", "core.quotePath=false", *args],
             check=False,
             capture_output=True,
-            text=True,
+            # `text=True` alone decodes with the *locale* codec (cp936 on Chinese Windows),
+            # but git writes UTF-8: that raised on some branch names and turned the rest
+            # into mojibake. Pin the codec; `replace` makes decoding infallible.
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout_seconds,
             stdin=subprocess.DEVNULL,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except Exception:
+        logger.debug("git %s failed; omitting git context", args, exc_info=True)
         return None
-    if completed.returncode != 0:
+    if completed.returncode != 0 or completed.stdout is None:
         return None
     return completed.stdout.replace("\r\n", "\n").strip()

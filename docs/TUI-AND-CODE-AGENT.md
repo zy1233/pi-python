@@ -104,7 +104,7 @@ Key settings:
 [model]
 provider = "deepseek"                              # or "openai", "anthropic"
 model_id = "deepseek-ai/DeepSeek-V3"
-api_key_env = "REAL_LLM_API_KEY"                   # env var name holding your API key
+api_key_env = "REAL_LLM_API_KEY"                   # env var holding the key for `provider` only
 base_url = "https://api.siliconflow.cn/v1"         # for OpenAI-compatible gateways
 context_window = 65536
 
