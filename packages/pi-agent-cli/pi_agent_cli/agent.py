@@ -44,7 +44,8 @@ from acp.schema import (
 
 from pi_agent_cli.config import CliConfig, PermissionMode, load_config, pi_home
 from pi_agent_cli.events import project_event, project_message_replay
-from pi_agent_cli.extension_trust import skipped_extensions_notice
+from pi_agent_cli.extension_notices import failed_extensions_notice
+from pi_agent_cli.extension_trust import skipped_project_resources, untrusted_project_notice
 from pi_agent_cli.factory import create_session_harness, default_stream_fn, load_session_resources
 from pi_agent_cli.permissions import (
     PERMISSION_OPTIONS,
@@ -248,7 +249,10 @@ class PiAcpAgent(Agent):
             harness = self._harnesses.pop(session_id, None)
             self._permission_locks.pop(session_id, None)
             if harness is not None:
+                # Deleting ends the session, like ``session/close``: stop the turn, then run
+                # the extensions' cleanup (background workflows, worktrees).
                 await harness.abort()
+                await harness.close()
             # Idempotent delete: missing session still returns success.
             if metadata is not None:
                 await self._repo.delete(metadata)
@@ -322,7 +326,7 @@ class PiAcpAgent(Agent):
         task.add_done_callback(self._background_tasks.discard)
 
     async def _deferred_advertise_commands(self, session_id: str) -> None:
-        """Advertise commands (and report skipped extensions) after yielding the event loop.
+        """Advertise commands (and report what did not load) after yielding.
 
         Zed registers ACP sessions only after processing the response to
         ``session/new``.  Notifications sent *before* that response are
@@ -331,19 +335,36 @@ class PiAcpAgent(Agent):
         """
         await asyncio.sleep(0)
         await self._advertise_commands(session_id)
-        await self._notify_skipped_extensions(session_id)
+        await self._notify_untrusted_project(session_id)
+        await self._notify_failed_extensions(session_id)
 
-    async def _notify_skipped_extensions(self, session_id: str) -> None:
-        """Tell the user which project extensions were not loaded because the project is
-        untrusted (they were never imported), and how to enable them."""
+    async def _notify_untrusted_project(self, session_id: str) -> None:
+        """Tell the user which project extensions, prompt files and skills were left out
+        because the project is untrusted (extensions were never imported), and how to
+        enable them."""
+        harness = self._harnesses.get(session_id)
+        cwd = self._session_cwds.get(session_id)
+        if self._conn is None or harness is None or cwd is None:
+            return
+        notice = untrusted_project_notice(
+            extensions=harness.skipped_extensions,
+            resources=skipped_project_resources(self._config, cwd),
+            cwd=cwd,
+            home=self._home,
+        )
+        if notice is None:
+            return
+        await self._conn.session_update(
+            session_id=session_id, update=update_agent_message_text(notice)
+        )
+
+    async def _notify_failed_extensions(self, session_id: str) -> None:
+        """Tell the user which extensions failed to load: the session carries on without
+        them, and stderr (where the traceback goes) is not something an ACP client shows."""
         harness = self._harnesses.get(session_id)
         if self._conn is None or harness is None:
             return
-        notice = skipped_extensions_notice(
-            harness.skipped_extensions,
-            cwd=self._session_cwds.get(session_id, ""),
-            home=self._home,
-        )
+        notice = failed_extensions_notice(harness.failed_extensions)
         if notice is None:
             return
         await self._conn.session_update(

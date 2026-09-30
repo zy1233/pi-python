@@ -18,9 +18,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from pi_agent_core.home import pi_home as resolve_pi_home
+
 logger = logging.getLogger(__name__)
 
-NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+# Matched with ``fullmatch``: ``$`` would also accept a trailing newline, and the name
+# becomes a file name.
+NAME_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
 MAX_SCRIPT_BYTES = 256 * 1024  # 256 KB
 
 
@@ -40,9 +44,10 @@ def extract_meta(script: str) -> dict[str, Any]:
         for target in node.targets:
             if isinstance(target, ast.Name) and target.id == "meta":
                 try:
-                    return ast.literal_eval(node.value)  # type: ignore[arg-type]
+                    value = ast.literal_eval(node.value)  # type: ignore[arg-type]
                 except (ValueError, TypeError):
                     return {}
+                return value if isinstance(value, dict) else {}
     return {}
 
 
@@ -57,14 +62,28 @@ class SavedWorkflow:
 
 
 class WorkflowStore:
-    """Discover and manage saved workflow scripts."""
+    """Discover and manage saved workflow scripts.
 
-    def __init__(self, cwd: str = ".", home: Path | None = None) -> None:
+    The user directory is ``<pi home>/workflows``. ``pi_home`` names that home directory
+    (``PI_HOME`` / ``~/.pi-python`` when omitted). ``home`` is the older spelling and names
+    the *user* home, with ``.pi-python`` below it; ``pi_home`` wins when both are given.
+    """
+
+    def __init__(
+        self,
+        cwd: str = ".",
+        home: Path | None = None,
+        *,
+        pi_home: Path | str | None = None,
+    ) -> None:
         self._cwd = cwd
-        self._home = home or Path.home()
+        self._pi_home = pi_home
+        self._home = home
 
     def _user_dir(self) -> Path:
-        return self._home / ".pi-python" / "workflows"
+        if self._pi_home is None and self._home is not None:
+            return self._home / ".pi-python" / "workflows"
+        return resolve_pi_home(self._pi_home) / "workflows"
 
     def _project_dir(self) -> Path:
         return Path(self._cwd) / ".pi-python" / "workflows"
@@ -106,7 +125,7 @@ class WorkflowStore:
         return self._save(self._user_dir(), name, script)
 
     def _save(self, directory: Path, name: str, script: str) -> Path:
-        if not NAME_RE.match(name):
+        if not NAME_RE.fullmatch(name):
             raise ValueError(f"Invalid workflow name {name!r}: must match [a-z0-9-]{{1,64}}")
         if len(script.encode()) > MAX_SCRIPT_BYTES:
             raise ValueError(f"Script exceeds {MAX_SCRIPT_BYTES // 1024}KB limit")
@@ -148,7 +167,9 @@ class WorkflowStore:
 
         meta = extract_meta(script)
         name = meta.get("name") or path.stem
-        if not NAME_RE.match(name):
+        # A script's own ``meta`` is untrusted input: a non-text name (``{"name": 5}``) used
+        # to raise out of the scan and hide every saved workflow.
+        if not isinstance(name, str) or not NAME_RE.fullmatch(name):
             logger.debug("Skipping %s: invalid name %r", path, name)
             return None
 

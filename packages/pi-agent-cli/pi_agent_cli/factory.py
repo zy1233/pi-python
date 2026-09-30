@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable, Iterable
 from pathlib import Path
 from typing import Any
 
-from pi_agent_cli.config import CliConfig, expand_config_path, make_get_api_key, pi_home
+from pi_agent_cli.config import (
+    CliConfig,
+    expand_config_path,
+    is_project_relative_path,
+    make_get_api_key,
+    pi_home,
+)
 from pi_agent_cli.create_harness import build_coding_agent_harness_system_prompt
 from pi_agent_cli.extension_trust import project_extensions_trusted
 from pi_agent_cli.prompt_options import load_system_prompt_options
@@ -53,8 +60,15 @@ async def load_session_resources(*, cwd: str | Path, config: CliConfig) -> Agent
     if not config.skills_dirs:
         return AgentHarnessResources()
     cwd_s = str(Path(normalize_host_path(str(cwd))).resolve())
+    # An entry relative to the project (".pi/skills") finds the project's own skills, and a
+    # skill's text goes into the system prompt: only for a trusted project. Absolute and
+    # ``~`` entries are the user's own.
+    trusted = project_extensions_trusted(config, cwd_s)
+    entries = [item for item in config.skills_dirs if trusted or not is_project_relative_path(item)]
+    if not entries:
+        return AgentHarnessResources()
     env = LocalExecutionEnv(cwd_s)
-    paths = [expand_config_path(item, cwd=cwd_s) for item in config.skills_dirs]
+    paths = [expand_config_path(item, cwd=cwd_s) for item in entries]
     result = await load_skills(env, paths)
     return AgentHarnessResources(skills=result.skills)
 
@@ -145,7 +159,11 @@ async def create_session_harness(
         # so they only exist in `active_tools`; without them every extension tool would be
         # exposed to the LLM but silently missing from the prompt.
         all_tools = _merge_tools_by_name(tools_list, ctx.get("tools") or (), active_tools)
-        options = load_system_prompt_options(
+        # Reads prompt files and runs `git` (up to a few seconds on a slow filesystem). On the
+        # event loop that froze everything else in the process, ACP cancellation and
+        # permission replies included.
+        options = await asyncio.to_thread(
+            load_system_prompt_options,
             cwd=cwd_s,
             config=config,
             resources=ctx.get("resources") or resolved_resources,
@@ -173,6 +191,7 @@ async def create_session_harness(
         compaction=CompactionSettings(auto_compact=auto_compact),
         auto_discover_extensions=True,
         trust_project_extensions=project_extensions_trusted(config, cwd_s),
+        home=home_path,
         extensions=extensions or [],
     )
     harness_holder["harness"] = harness

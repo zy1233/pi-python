@@ -72,8 +72,9 @@ This repository is a monorepo containing:
 - Headless mode: `python -m pi_agent_cli -p "prompt"` for scripting and CI
 - `/new`, `/resume`, `/quit` session commands; `@` local directory listing
 - pi-aligned system prompt engine with tool contributions, `AGENTS.md` context files, `<available_skills>` format
-- Project-local extensions (`<project>/.pi-python/extensions`) run code when a session opens, so they load only for trusted projects: list the project under `[extensions] trusted_projects` in `~/.pi-python/agent.toml`, or run with `--trust-project-extensions` / `PI_TRUST_PROJECT_EXTENSIONS=1`. Installed extension packages are unaffected
-- Git workspace context (`<git_status>`) is a session-start snapshot in the system prompt (kept stable for the provider prompt cache; the block tells the model to run `git status` for live state); `--no-git-context` or `[git] enabled = false` turns it off
+- Project trust: a project's own extensions (`<project>/.pi-python/extensions`, which run code when a session opens), `.pi/SYSTEM.md`, `.pi/APPEND_SYSTEM.md` and project-relative skills load only for trusted projects. List the project under `[extensions] trusted_projects` in `~/.pi-python/agent.toml`, or run with `--trust-project-extensions` / `PI_TRUST_PROJECT_EXTENSIONS=1`. Installed extension packages, `AGENTS.md`, and absolute or `~` skills paths are unaffected
+- Extensions that fail to load (import error, bad entry point, `activate()` raising, invalid tool name) are skipped, and the agent says so at session start (ACP agent message; headless stderr) instead of just not having them. `PI_HOME` moves the whole home: config, `extensions/`, saved workflows and workflow journals
+- Git workspace context (`<git_status>`) is a session-start snapshot in the system prompt (kept stable for the provider prompt cache; the block tells the model to run `git status` for live state); `--no-git-context` or `[git] enabled = false` turns it off. The block (branch name and the paths of changed and untracked files) goes to the model provider with the rest of the system prompt, so turn it off if such names are sensitive
 
 **TUI — `zypi`** (Phase 4 — beta)
 
@@ -356,11 +357,12 @@ uv run --extra dev --extra harness python -m pytest  # 418 tests, no API keys ne
 ruff check . && ruff format --check .
 ```
 
-Real-API validation (key via env only; skipped when unset):
+Real-API validation (key via env only). A plain `pytest` leaves the `real_llm` tests out, so keys in your shell never cost anything by accident; `-m real_llm` selects them, and each skips when its key is unset:
 
 | Purpose | Command | Env vars |
 |---------|---------|----------|
 | Automated regression | `pytest -m real_llm -v` | `REAL_LLM_API_KEY`, optional `REAL_LLM_BASE_URL` / `REAL_LLM_MODEL` |
+| Provider matrix (OpenAI, Anthropic, DeepSeek, SiliconFlow) | `pytest -m real_llm pi_agent_core/tests/test_provider_matrix.py -v` | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `REAL_LLM_API_KEY`; CI runs it weekly (`provider-matrix.yml`) |
 | Manual pre-release smoke | `python scripts/smoke_real_api.py` | `SMOKE_API_KEY` (or `REAL_LLM_API_KEY`), `SMOKE_BASE_URL`, `SMOKE_MODEL` |
 | **pi TUI foundation case** | `python scripts/smoke_pelican.py` | `REAL_LLM_API_KEY`; saves SVG to `~/.pi-python/benchmarks/pelican/` — see [docs/benchmarks/PELCAN-BICYCLE.md](docs/benchmarks/PELCAN-BICYCLE.md) |
 

@@ -8,7 +8,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from pi_agent_cli.config import CliConfig, load_config, pi_home
-from pi_agent_cli.extension_trust import skipped_extensions_notice
+from pi_agent_cli.extension_notices import failed_extensions_notice
+from pi_agent_cli.extension_trust import skipped_project_resources, untrusted_project_notice
 from pi_agent_cli.factory import create_session_harness, default_stream_fn, load_session_resources
 from pi_agent_harness import JsonlSessionRepo
 
@@ -121,9 +122,17 @@ async def run_print(
     )
     await harness.load_extensions()
     # stderr: stdout carries only the assistant's answer.
-    notice = skipped_extensions_notice(harness.skipped_extensions, cwd=cwd_s, home=home_path)
+    notice = untrusted_project_notice(
+        extensions=harness.skipped_extensions,
+        resources=skipped_project_resources(config, cwd_s),
+        cwd=cwd_s,
+        home=home_path,
+    )
     if notice is not None:
         print(notice, file=sys.stderr, flush=True)
+    failed = failed_extensions_notice(harness.failed_extensions)
+    if failed is not None:
+        print(failed, file=sys.stderr, flush=True)
     message = await harness.prompt(text)
     out = assistant_text(message)
     print(out, end="" if out.endswith("\n") else "\n")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -22,7 +23,10 @@ from pi_goal_x.prompts import (
 class GoalUpdateParams(BaseModel):
     step_index: int | None = Field(
         default=None,
-        description="Index of the step to update (0-based). If omitted, a new step is appended.",
+        description=(
+            "Index of the step to update, as shown in brackets in the goal status (0-based). "
+            "If omitted, a new step is appended."
+        ),
     )
     description: str | None = Field(
         default=None,
@@ -38,7 +42,7 @@ class GoalUpdateParams(BaseModel):
     )
 
 
-def _make_goal_update_execute(state: GoalState) -> Any:
+def _make_goal_update_execute(state: GoalState, on_change: Callable[[], None] | None) -> Any:
     async def goal_update_execute(
         tool_call_id: str,
         params: Any,
@@ -55,12 +59,16 @@ def _make_goal_update_execute(state: GoalState) -> Any:
                 ]
             )
 
+        # A step that does not exist, or a new one without a description, raises ValueError:
+        # the agent loop reports it to the model as a failed tool call, and nothing changed.
         step = state.update_step(
             params.step_index,
             description=params.description,
             status=params.status,
             details=params.details,
         )
+        if on_change is not None:
+            on_change()
 
         return AgentToolResult(
             content=[
@@ -88,7 +96,7 @@ class GoalCompleteParams(BaseModel):
     )
 
 
-def _make_goal_complete_execute(state: GoalState) -> Any:
+def _make_goal_complete_execute(state: GoalState, on_change: Callable[[], None] | None) -> Any:
     async def goal_complete_execute(
         tool_call_id: str,
         params: Any,
@@ -106,6 +114,8 @@ def _make_goal_complete_execute(state: GoalState) -> Any:
             )
 
         state.complete(params.summary)
+        if on_change is not None:
+            on_change()
 
         return AgentToolResult(
             content=[
@@ -125,28 +135,34 @@ def _make_goal_complete_execute(state: GoalState) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def create_goal_update_tool(state: GoalState) -> Any:
+def create_goal_update_tool(
+    state: GoalState, *, on_change: Callable[[], None] | None = None
+) -> Any:
+    """The ``goal_update`` tool. *on_change* is called after every change to *state*."""
     from pi_agent_core.extensions.types import ToolDefinition
 
     return ToolDefinition(
         name="goal_update",
         description="Report progress on a goal step — create, update status, or add details",
         parameters=GoalUpdateParams,
-        execute=_make_goal_update_execute(state),
+        execute=_make_goal_update_execute(state, on_change),
         label="Goal Update",
         prompt_snippet=GOAL_UPDATE_SNIPPET,
         prompt_guidelines=GOAL_SYSTEM_GUIDELINES,
     )
 
 
-def create_goal_complete_tool(state: GoalState) -> Any:
+def create_goal_complete_tool(
+    state: GoalState, *, on_change: Callable[[], None] | None = None
+) -> Any:
+    """The ``goal_complete`` tool. *on_change* is called after *state* is completed."""
     from pi_agent_core.extensions.types import ToolDefinition
 
     return ToolDefinition(
         name="goal_complete",
         description="Mark the current goal as completed and provide a summary",
         parameters=GoalCompleteParams,
-        execute=_make_goal_complete_execute(state),
+        execute=_make_goal_complete_execute(state, on_change),
         label="Goal Complete",
         prompt_snippet=GOAL_COMPLETE_SNIPPET,
     )

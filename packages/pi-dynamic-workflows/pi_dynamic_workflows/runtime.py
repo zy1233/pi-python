@@ -9,9 +9,11 @@ every sub-agent tool call goes through (``HarnessSubagentExecutor``'s ``tool_cal
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -90,6 +92,41 @@ class MockSubagentExecutor(SubagentExecutor):
 
     async def run_agent(self, prompt: str, **kwargs: Any) -> AgentResult:
         return AgentResult(text=f"[mock agent response to: {prompt[:80]}]", tokens_used=100)
+
+
+class UnavailableSubagentExecutor(SubagentExecutor):
+    """Stands in when sub-agents cannot run in this session; ``reason`` says why.
+
+    The ``workflow`` tool checks for it and refuses to run a script. Falling back to
+    ``MockSubagentExecutor`` instead made a workflow "complete" with canned
+    ``[mock agent response to: ...]`` text, indistinguishable from real work.
+    """
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+
+    async def run_agent(self, prompt: str, **kwargs: Any) -> AgentResult:
+        return AgentResult(error=f"Sub-agents are unavailable: {self.reason}")
+
+
+async def _settle(starts: list[Callable[[], Any]]) -> list[Any]:
+    """Run everything *starts* create at the same time; a failure is that one's result.
+
+    Nothing started here outlives the call. If it is cancelled (the run was aborted), every
+    task is cancelled and awaited before the cancel goes on. The same when one of *starts*
+    cannot be started (a thunk that fails, or does not return an awaitable): the tasks
+    already scheduled must not run on, spending tokens, with nobody waiting for their answer.
+    """
+    tasks: list[asyncio.Future[Any]] = []
+    try:
+        for start in starts:
+            tasks.append(asyncio.ensure_future(start()))
+        return list(await asyncio.gather(*tasks, return_exceptions=True))
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -225,11 +262,10 @@ class WorkflowRuntime:
                 )
                 runtime.budget.add(result.tokens_used)
                 if result.error:
-                    return_value = None
-                else:
-                    return_value = (
-                        result.structured if result.structured is not None else result.text
-                    )
+                    # The script gets None. The journal gets nothing: a failure is not an
+                    # answer, and a resume (provider back up, timeout raised) must retry it.
+                    return None
+                return_value = result.structured if result.structured is not None else result.text
 
                 if runtime._journal is not None and req_hash is not None:
                     runtime._journal.append("agent", req_hash, return_value)
@@ -237,8 +273,7 @@ class WorkflowRuntime:
                 return return_value
 
         async def parallel_fn(thunks: list[Any]) -> list[Any]:
-            tasks = [asyncio.ensure_future(fn()) for fn in thunks]
-            return list(await asyncio.gather(*tasks, return_exceptions=True))
+            return await _settle(list(thunks))
 
         async def pipeline_fn(items: list[Any], *stages: Any) -> list[Any]:
             async def run_item(item: Any, index: int) -> Any:
@@ -247,8 +282,9 @@ class WorkflowRuntime:
                     value = await stage(value, item, index)
                 return value
 
-            tasks = [asyncio.ensure_future(run_item(item, i)) for i, item in enumerate(items)]
-            return list(await asyncio.gather(*tasks, return_exceptions=True))
+            return await _settle(
+                [functools.partial(run_item, item, i) for i, item in enumerate(items)]
+            )
 
         def phase_fn(title: str, **opts: Any) -> None:
             runtime._current_phase = title

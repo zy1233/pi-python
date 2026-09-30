@@ -79,15 +79,21 @@ def discover_context_files(*, cwd: str | Path, home: Path | None = None) -> list
     return files
 
 
-def load_system_prompt_file(*, cwd: str | Path, home: Path | None = None) -> str | None:
-    """Load custom SYSTEM.md (project ``.pi/`` first, then global agent dir)."""
-    resolved_cwd = Path(cwd).resolve()
+def _load_prompt_file(
+    filenames: tuple[tuple[str, ...], tuple[str, ...]],
+    *,
+    cwd: str | Path,
+    home: Path | None,
+    include_project: bool,
+) -> str | None:
+    project_paths, global_paths = filenames
+    if include_project:
+        resolved_cwd = Path(cwd).resolve()
+        for relative in project_paths:
+            item = _read_if_exists(resolved_cwd / relative)
+            if item is not None:
+                return item.content
     home_dir = pi_home(home)
-    project_paths, global_paths = SYSTEM_PROMPT_FILENAMES
-    for relative in project_paths:
-        item = _read_if_exists(resolved_cwd / relative)
-        if item is not None:
-            return item.content
     for relative in global_paths:
         item = _read_if_exists(home_dir / relative)
         if item is not None:
@@ -95,17 +101,36 @@ def load_system_prompt_file(*, cwd: str | Path, home: Path | None = None) -> str
     return None
 
 
-def load_append_system_prompt_file(*, cwd: str | Path, home: Path | None = None) -> str | None:
-    """Load APPEND_SYSTEM.md (project ``.pi/`` first, then global agent dir)."""
-    resolved_cwd = Path(cwd).resolve()
-    home_dir = pi_home(home)
-    project_paths, global_paths = APPEND_SYSTEM_PROMPT_FILENAMES
-    for relative in project_paths:
-        item = _read_if_exists(resolved_cwd / relative)
-        if item is not None:
-            return item.content
-    for relative in global_paths:
-        item = _read_if_exists(home_dir / relative)
-        if item is not None:
-            return item.content
-    return None
+def load_system_prompt_file(
+    *, cwd: str | Path, home: Path | None = None, include_project: bool = True
+) -> str | None:
+    """Load custom SYSTEM.md (project ``.pi/`` first, then global agent dir).
+
+    ``include_project=False`` skips the project's file: whether the project may speak for
+    the user is the caller's decision (see ``extension_trust``).
+    """
+    return _load_prompt_file(
+        SYSTEM_PROMPT_FILENAMES, cwd=cwd, home=home, include_project=include_project
+    )
+
+
+def load_append_system_prompt_file(
+    *, cwd: str | Path, home: Path | None = None, include_project: bool = True
+) -> str | None:
+    """Load APPEND_SYSTEM.md (project ``.pi/`` first, then global agent dir).
+
+    ``include_project=False`` skips the project's file, as for ``load_system_prompt_file``.
+    """
+    return _load_prompt_file(
+        APPEND_SYSTEM_PROMPT_FILENAMES, cwd=cwd, home=home, include_project=include_project
+    )
+
+
+def project_system_prompt_file(cwd: str | Path) -> Path:
+    """Where the project's own ``SYSTEM.md`` would be."""
+    return Path(cwd).resolve() / SYSTEM_PROMPT_FILENAMES[0][0]
+
+
+def project_append_system_prompt_file(cwd: str | Path) -> Path:
+    """Where the project's own ``APPEND_SYSTEM.md`` would be."""
+    return Path(cwd).resolve() / APPEND_SYSTEM_PROMPT_FILENAMES[0][0]

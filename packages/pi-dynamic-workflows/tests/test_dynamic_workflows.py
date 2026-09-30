@@ -40,7 +40,8 @@ from pi_dynamic_workflows.workflow_tool import (
 
 @pytest.fixture(autouse=True)
 def _isolate_home(tmp_path: Path, monkeypatch: Any) -> None:
-    """Redirect Path.home() to tmp_path so tests never touch the real HOME."""
+    """Redirect Path.home() to tmp_path so tests never touch the real HOME (nor a PI_HOME)."""
+    monkeypatch.delenv("PI_HOME", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
     if os.name == "nt":
         monkeypatch.setenv("USERPROFILE", str(tmp_path))
@@ -302,6 +303,43 @@ async def main():
             await runtime.execute(script)
         assert runtime._agent_count <= 2
 
+    async def test_parallel_hands_a_failing_thunk_back_as_its_result(self) -> None:
+        """A failure is that thunk's result; the others still run to completion."""
+        executor = RecordingExecutor()
+        runtime = WorkflowRuntime(executor)
+
+        script = """
+async def boom():
+    raise ValueError("no")
+
+async def main():
+    results = await parallel([lambda: agent("a"), boom, lambda: agent("b")])
+    result([isinstance(r, ValueError) for r in results])
+"""
+        run_result = await runtime.execute(script)
+
+        assert run_result.result == [False, True, False]
+        assert len(executor.calls) == 2
+
+    async def test_pipeline_hands_a_failing_item_back_as_its_result(self) -> None:
+        executor = RecordingExecutor()
+        runtime = WorkflowRuntime(executor)
+
+        script = """
+async def stage(prev, orig, idx):
+    if orig == "bad":
+        raise ValueError("no")
+    return await agent("ok " + orig)
+
+async def main():
+    results = await pipeline(["good", "bad", "fine"], stage)
+    result([isinstance(r, ValueError) for r in results])
+"""
+        run_result = await runtime.execute(script)
+
+        assert run_result.result == [False, True, False]
+        assert len(executor.calls) == 2
+
 
 # ---------------------------------------------------------------------------
 # Built-in workflows
@@ -456,6 +494,9 @@ class _BridgeStub:
     def trigger_prompt(self, text):
         pass
 
+    def trigger_message(self, custom_type, text, *, details=None):
+        pass
+
     def add_hook(self, event, handler):
         pass
 
@@ -544,20 +585,7 @@ class TestJournal:
         result = journal.try_replay("agent", h)
         assert result is _MISS
 
-    def test_divergence_truncates(self) -> None:
-        journal = Journal()
-        h1 = hash_request("agent", {"prompt": "a"})
-        h2 = hash_request("agent", {"prompt": "b"})
-        journal.append("agent", h1, "r1")
-        journal.append("agent", h2, "r2")
-        assert journal.entry_count == 2
-
-        journal2 = Journal()
-        journal2._entries = list(journal._entries)
-        different_hash = hash_request("agent", {"prompt": "c"})
-        result = journal2.try_replay("agent", different_hash)
-        assert result is _MISS
-        assert journal2.entry_count == 0
+    # What a miss does (nothing) and how requests are matched: test_journal_replay.py.
 
     def test_persistence_round_trip(self, tmp_path: Path) -> None:
         path = tmp_path / "test.jsonl"
@@ -870,9 +898,12 @@ class TestWorkflowManager:
 
         class FakeBridge:
             def send_message(self, text: str) -> None:
-                messages.append(text)
+                pass
 
             def trigger_prompt(self, text: str) -> None:
+                pass
+
+            def trigger_message(self, custom_type: str, text: str, *, details: Any = None) -> None:
                 messages.append(text)
 
             def register_cleanup(self, callback: Any) -> None:
@@ -904,6 +935,9 @@ class TestWorkflowManager:
                 pass
 
             def trigger_prompt(self, text: str) -> None:
+                pass
+
+            def trigger_message(self, custom_type: str, text: str, *, details: Any = None) -> None:
                 pass
 
             def register_cleanup(self, callback: Any) -> None:
@@ -943,6 +977,9 @@ class TestWorkflowToolExtended:
                 pass
 
             def trigger_prompt(self, text: str) -> None:
+                pass
+
+            def trigger_message(self, custom_type: str, text: str, *, details: Any = None) -> None:
                 pass
 
             def register_cleanup(self, callback: Any) -> None:
@@ -1233,8 +1270,8 @@ class TestWorktreeSnapshotBaseline:
         (Path(wt) / "a.txt").write_text("agent-change\n")
 
         diff = await mgr.collect_diff(wt)
-        assert "agent-change" in diff
-        assert "original" not in diff
+        assert b"agent-change" in diff
+        assert b"original" not in diff
 
         await mgr.apply_changes(wt)
         assert (git_repo / "a.txt").read_text() == "agent-change\n"
@@ -1251,11 +1288,10 @@ class TestWorktreeSnapshotBaseline:
         mgr = WorktreeManager(str(git_repo))
         wt = await mgr.create(session_id=f"clean-{uuid.uuid4().hex[:8]}")
 
-        # Edit the tracked file (untracked files won't appear in git diff HEAD)
         (Path(wt) / "a.txt").write_text("agent-only\n")
 
         diff = await mgr.collect_diff(wt)
-        assert "agent-only" in diff
+        assert b"agent-only" in diff
 
         await mgr.apply_changes(wt)
         assert (git_repo / "a.txt").read_text() == "agent-only\n"

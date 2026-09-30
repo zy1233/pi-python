@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["agent", "web-search", "fetch", "pi", "extension"]
 dependencies = [
-    "pi-agent-core-lc>=0.3.0",
+    "pi-agent-core-lc>=0.4.0",
     "httpx>=0.27",
 ]
 

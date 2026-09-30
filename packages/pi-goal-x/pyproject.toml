@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["agent", "goal", "planning", "pi", "extension"]
 dependencies = [
-    "pi-agent-core-lc>=0.3.0",
+    "pi-agent-core-lc>=0.4.0",
 ]
 
 [project.entry-points."pi_agent.extensions"]

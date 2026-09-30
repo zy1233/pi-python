@@ -146,7 +146,7 @@ agent_start → turn_start → message_start(user) → message_end(user)
 
 ### 5.2 Thinking / Reasoning
 
-`ThinkingLevel`（off/minimal/low/medium/high/xhigh）映射为 provider 参数：Anthropic `thinking.budget_tokens` + 联动 `max_tokens`；OpenAI `reasoning_effort`。Anthropic thinking 块流式捕获为 `ThinkingContent`（含 `signature` 用于多轮工具回放），以 `thinking_delta` 事件实时发射。DeepSeek `reasoning_content` 同样捕获。
+`ThinkingLevel`（off/minimal/low/medium/high/xhigh）映射为 provider 参数：Anthropic `thinking.budget_tokens` + 联动 `max_tokens`；OpenAI `reasoning_effort`；DeepSeek 官方 API 经 `extra_body` 发 `thinking: enabled|disabled` 与 `reasoning_effort`（它默认开启思考，所以闸门关闭时显式发 `disabled`；网关不发。见 Phase 6 规格 §5.4）。Anthropic thinking 块流式捕获为 `ThinkingContent`（含 `signature` 用于多轮工具回放），以 `thinking_delta` 事件实时发射。DeepSeek `reasoning_content` 同样捕获。
 
 ### 5.3 跨 Provider 消息回放 (`transform.py`)
 

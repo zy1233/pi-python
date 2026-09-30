@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import itertools
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from pi_agent_cli import git_context
 from pi_agent_cli.config import CliConfig
 from pi_agent_cli.factory import create_session_harness
 from pi_agent_cli.git_context import GitSnapshot, format_git_status, snapshot_git_context
@@ -229,6 +231,126 @@ async def test_git_block_is_a_stable_session_snapshot_and_says_so(tmp_path: Path
     assert "<git_status>" in prompts[1]
     assert "not refreshed" in prompts[1]
     assert "later.txt" not in prompts[1]
+
+
+def test_snapshot_of_a_repository_without_commits(tmp_path: Path):
+    """``git rev-parse --abbrev-ref HEAD`` fails on an unborn HEAD, which used to drop the
+    whole section for every freshly ``git init``-ed project."""
+    _git(tmp_path, "init", "-b", "main")
+    (tmp_path / "new.txt").write_text("x\n", encoding="utf-8")
+
+    snapshot = snapshot_git_context(str(tmp_path), timeout_seconds=5, max_lines=40)
+
+    assert snapshot is not None
+    assert snapshot.branch == "main (no commits yet)"
+    first = snapshot.status_porcelain.splitlines()[0]
+    assert first.startswith("##") and "main" in first
+    assert "new.txt" in snapshot.status_porcelain
+    assert "Branch: main (no commits yet)" in format_git_status(snapshot)
+
+
+def test_a_repository_without_commits_and_without_a_branch_name_omits_the_section(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def _fake_run(cmd, **_kwargs):
+        # Only the branch name is unobtainable; `status` works, so a snapshot *could* be built.
+        if "--is-inside-work-tree" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout="true\n", stderr="")
+        if "status" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout="## HEAD (no branch)\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 128, stdout="", stderr="fatal")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    assert snapshot_git_context("/repo", timeout_seconds=5, max_lines=40) is None
+
+
+def _clocked_git(monkeypatch: pytest.MonkeyPatch, cost: float) -> list[float]:
+    """Fake git on a fake clock: every command costs ``cost`` seconds. Returns the
+    ``timeout`` each command was started with."""
+    from types import SimpleNamespace
+
+    clock = {"now": 100.0}
+    timeouts: list[float] = []
+    outputs = {"--is-inside-work-tree": "true\n", "--abbrev-ref": "main\n", "status": "## main\n"}
+
+    def _fake_run(cmd, **kwargs):
+        timeouts.append(kwargs["timeout"])
+        clock["now"] += cost
+        stdout = next(text for key, text in outputs.items() if key in cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    monkeypatch.setattr(git_context, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
+    return timeouts
+
+
+def test_the_timeout_is_one_budget_for_the_whole_snapshot(monkeypatch: pytest.MonkeyPatch):
+    """Per command, three commands could hold the session for 3 x timeout."""
+    timeouts = _clocked_git(monkeypatch, cost=0.3)
+
+    snapshot = snapshot_git_context("/repo", timeout_seconds=1.0, max_lines=40)
+
+    assert snapshot is not None
+    assert timeouts == pytest.approx([1.0, 0.7, 0.4])
+
+
+def test_an_exhausted_budget_starts_no_further_git_command(monkeypatch: pytest.MonkeyPatch):
+    timeouts = _clocked_git(monkeypatch, cost=0.2)
+
+    assert snapshot_git_context("/repo", timeout_seconds=0.25, max_lines=40) is None
+
+    assert len(timeouts) == 2  # the third command was never started
+
+
+@pytest.mark.asyncio
+async def test_building_the_prompt_does_not_block_the_event_loop(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """Three synchronous ``git`` subprocesses in the prompt callback froze the loop, and with
+    it ACP cancellation and permission replies, for as long as git took."""
+    import asyncio
+    import time
+
+    from pi_agent_core.extensions import ExtensionLoader
+
+    monkeypatch.setattr(ExtensionLoader, "discover_entry_points", lambda self: [])
+    outputs = {"--is-inside-work-tree": "true\n", "--abbrev-ref": "main\n", "status": "## main\n"}
+    window: dict[str, bool] = {}
+
+    def _slow_git(cmd, **_kwargs):
+        window["asked"] = True
+        time.sleep(0.2)  # three of these: 0.6 s if they run on the loop
+        stdout = next(text for key, text in outputs.items() if key in cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+    session = await JsonlSessionRepo(tmp_path / "sessions").create({"cwd": str(tmp_path)})
+    harness = await create_session_harness(
+        session=session,
+        cwd=tmp_path,
+        config=CliConfig(),
+        stream_fn=mock_text_stream,
+        home=tmp_path,
+    )
+    monkeypatch.setattr(subprocess, "run", _slow_git)
+
+    ticks: list[float] = []
+    stop = asyncio.Event()
+
+    async def _heartbeat() -> None:
+        while not stop.is_set():
+            await asyncio.sleep(0.005)
+            ticks.append(time.monotonic())
+
+    beat = asyncio.create_task(_heartbeat())
+    await asyncio.sleep(0.02)
+    await harness.prompt("hi")
+    stop.set()
+    await beat
+
+    assert window.get("asked"), "git was never asked"
+    longest_stall = max(later - earlier for earlier, later in itertools.pairwise(ticks))
+    assert longest_stall < 0.3  # ~0.6 s when the three git commands ran on the loop
 
 
 def test_custom_prompt_still_includes_git_status():

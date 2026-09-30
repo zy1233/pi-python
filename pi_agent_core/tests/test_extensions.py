@@ -283,6 +283,9 @@ class TestBridgeDuringActivate:
             def trigger_prompt(self, text: str) -> None:
                 pass
 
+            def trigger_message(self, custom_type: str, text: str, *, details: Any = None) -> None:
+                pass
+
             def add_hook(self, event: str, handler: Any) -> None:
                 pass
 
@@ -380,6 +383,9 @@ class TestBridgeToolValidation:
             def trigger_prompt(self, text: str) -> None:
                 pass
 
+            def trigger_message(self, custom_type: str, text: str, *, details: Any = None) -> None:
+                pass
+
             def add_hook(self, event: str, handler: Any) -> None:
                 pass
 
@@ -463,6 +469,9 @@ class TestUnsubscribeRemovesHook:
                 pass
 
             def trigger_prompt(self, text: str) -> None:
+                pass
+
+            def trigger_message(self, custom_type: str, text: str, *, details: Any = None) -> None:
                 pass
 
             def add_hook(self, event: str, handler: Any) -> None:
@@ -690,12 +699,12 @@ class TestSameNameOverride:
                 )
             )
 
-        harness.load_extension(ext_old)
+        harness.load_extension(ext_old, name="same")
         await harness._ensure_extensions_loaded()
         assert "old-tool" in harness._tools
         assert len(harness._hooks.get("tool_call", [])) == 1
 
-        harness.load_extension(ext_new)
+        harness.load_extension(ext_new, name="same")
         assert "old-tool" not in harness._tools
         assert "new-tool" in harness._tools
         assert len(harness._hooks.get("tool_call", [])) == 0
@@ -755,13 +764,13 @@ class TestSameNameOverride:
         def ext_bad(pi: ExtensionAPI) -> None:
             raise RuntimeError("new activate crashed")
 
-        harness.load_extension(ext_good)
+        harness.load_extension(ext_good, name="same")
         await harness._ensure_extensions_loaded()
         assert "old-tool" in harness._tools
         assert len(harness._hooks.get("tool_call", [])) == 1
 
         with pytest.raises(RuntimeError, match="new activate crashed"):
-            harness.load_extension(ext_bad)
+            harness.load_extension(ext_bad, name="same")
 
         # Registry restored
         assert "old-tool" in harness._extension_registry.get_tools()

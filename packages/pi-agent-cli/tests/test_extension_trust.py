@@ -22,7 +22,7 @@ from pi_agent_cli.config import CliConfig, load_config
 from pi_agent_cli.extension_trust import (
     TRUST_ENV,
     project_extensions_trusted,
-    skipped_extensions_notice,
+    untrusted_project_notice,
 )
 from pi_agent_cli.factory import create_session_harness
 from pi_agent_core.extensions import ExtensionLoader
@@ -319,7 +319,7 @@ def test_the_notice_says_what_was_skipped_and_how_to_enable_it(tmp_path: Path):
         SkippedExtensions(directory=tmp_path / ".pi-python" / "extensions", names=("a.py", "pkg"))
     ]
 
-    notice = skipped_extensions_notice(skipped, cwd=tmp_path, home=tmp_path / "home")
+    notice = untrusted_project_notice(extensions=skipped, cwd=tmp_path, home=tmp_path / "home")
 
     assert notice is not None
     assert str(tmp_path / ".pi-python" / "extensions") in notice
@@ -331,7 +331,7 @@ def test_the_notice_says_what_was_skipped_and_how_to_enable_it(tmp_path: Path):
 
 
 def test_there_is_no_notice_when_nothing_was_skipped(tmp_path: Path):
-    assert skipped_extensions_notice([], cwd=tmp_path, home=tmp_path) is None
+    assert untrusted_project_notice(cwd=tmp_path, home=tmp_path) is None
 
 
 def test_the_suggested_allow_list_entry_can_be_pasted_into_agent_toml(tmp_path: Path):
@@ -344,7 +344,7 @@ def test_the_suggested_allow_list_entry_can_be_pasted_into_agent_toml(tmp_path: 
     project.mkdir()
     skipped = [SkippedExtensions(directory=project / ".pi-python" / "extensions", names=("a.py",))]
 
-    notice = skipped_extensions_notice(skipped, cwd=project, home=tmp_path)
+    notice = untrusted_project_notice(extensions=skipped, cwd=project, home=tmp_path)
 
     assert notice is not None
     match = re.search(r'add "([^"]+)" to `trusted_projects`', notice)

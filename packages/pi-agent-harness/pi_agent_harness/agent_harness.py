@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal
 
 from pi_agent_core.agent_loop import run_agent_loop
 from pi_agent_core.extensions._harness_bridge import HarnessBridge
-from pi_agent_core.extensions.loader import ActivateFn, ExtensionLoader, SkippedExtensions
+from pi_agent_core.extensions.loader import (
+    ActivateFn,
+    ExtensionLoader,
+    FailedExtension,
+    SkippedExtensions,
+)
 from pi_agent_core.extensions.registry import ExtensionRegistry
 from pi_agent_core.extensions.types import ToolDefinition, ToolInfo
 from pi_agent_core.messages import AssistantMessage, ImageContent, TextContent, Usage, UserMessage
@@ -50,7 +57,7 @@ from pi_agent_harness.compaction import (
     prepare_compaction,
     should_compact,
 )
-from pi_agent_harness.messages import harness_convert_to_llm
+from pi_agent_harness.messages import CustomMessage, harness_convert_to_llm
 from pi_agent_harness.prompt_templates import substitute_args
 from pi_agent_harness.session.session import Session
 from pi_agent_harness.skills import format_skill_invocation
@@ -87,6 +94,10 @@ from pi_agent_harness.types import (
 )
 
 logger = logging.getLogger(__name__)
+
+# How long ``close()`` gives the turns it started itself to wind down after the abort
+# signal before it cancels them.
+CLOSE_GRACE_S = 5.0
 
 
 async def _maybe_await(value: Any) -> Any:
@@ -241,6 +252,7 @@ class AgentHarness:
         extension_dirs: list[str] | None = None,
         auto_discover_extensions: bool = False,
         trust_project_extensions: bool = False,
+        home: Path | str | None = None,
     ) -> None:
         self.env = env
         self.session = session
@@ -271,6 +283,7 @@ class AgentHarness:
         self._idle_event.set()
         self._bg_tasks: set[asyncio.Task[Any]] = set()
         self._cleanup_callbacks: list[Any] = []
+        self._closed = False
         self._tools = {tool.name: tool for tool in tools or []}
         self._validate_unique(list(self._tools), "Duplicate tool name(s)")
         self.active_tool_names = active_tool_names or list(self._tools)
@@ -288,7 +301,10 @@ class AgentHarness:
 
         # Phase 7: Extension API
         self._extension_registry = ExtensionRegistry()
-        self._extension_loader = ExtensionLoader(self._extension_registry)
+        # ``home``: the pi-python home directory (``PI_HOME`` / ``~/.pi-python`` when omitted).
+        # Its ``extensions/`` is the user's extension directory, and extensions see it as
+        # ``pi.home``, so one session never reads from one home and writes to another.
+        self._extension_loader = ExtensionLoader(self._extension_registry, home=home)
         self._extensions_loaded = False
         self._extension_bridge: Any = None
         self._session_id: str = ""
@@ -439,12 +455,32 @@ class AgentHarness:
                 harness.steer_queue.append(msg)
 
             def trigger_prompt(self, text: str) -> None:
+                if harness._closed:
+                    return
                 if harness.phase == "idle":
-                    task = asyncio.create_task(harness.prompt(text))
-                    harness._bg_tasks.add(task)
-                    task.add_done_callback(harness._bg_tasks.discard)
+                    harness._start_background(
+                        lambda: harness._deliver(_create_user_message(text), text, slash=True),
+                        "prompt",
+                    )
                 else:
                     harness.steer_queue.append(_create_user_message(text))
+
+            def trigger_message(self, custom_type: str, text: str, *, details: Any = None) -> None:
+                if harness._closed:
+                    return
+                message = CustomMessage(
+                    customType=custom_type,
+                    content=text,
+                    display=True,
+                    details=details,
+                    timestamp=int(time.time() * 1000),
+                )
+                if harness.phase == "idle":
+                    harness._start_background(
+                        lambda: harness._deliver(message, text, slash=False), "message"
+                    )
+                else:
+                    harness.steer_queue.append(message)
 
             def append_entry(self, custom_type: str, data: Any) -> None:
                 harness.pending_session_writes.append(
@@ -508,6 +544,51 @@ class AgentHarness:
         return _Bridge()
 
     @property
+    def closed(self) -> bool:
+        """True once ``close()`` has run: extensions can no longer start turns."""
+        return self._closed
+
+    def _start_background(self, work: Callable[[], Awaitable[Any]], what: str) -> None:
+        """Run ``work()`` as a task of this harness, which ``close()`` stops.
+
+        Nobody awaits the outcome, so a failure is logged here rather than left to the event
+        loop's "exception was never retrieved" at garbage collection.
+        """
+
+        async def run() -> None:
+            if self._closed:  # closed between scheduling and starting
+                return
+            try:
+                await work()
+            except Exception:
+                logger.warning("Background %s failed", what, exc_info=True)
+
+        task = asyncio.create_task(run())
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+
+    async def _deliver(self, message: AgentMessage, text: str, *, slash: bool) -> None:
+        """Start a turn with *message*, or join the one that began since this was scheduled.
+
+        The bridge saw the harness idle, but a prompt of the user's may have begun in the
+        meantime: the message then goes to the running turn instead of being dropped as "busy".
+        *slash*: *text* is a typed prompt (a ``/command`` runs) rather than a custom message.
+        """
+        if self.phase != "idle":
+            self.steer_queue.append(message)
+        elif slash:
+            await self.prompt(text)
+        else:
+            await self._prompt_with_message(message, text)
+
+    async def _prompt_with_message(self, message: AgentMessage, text: str) -> AssistantMessage:
+        """A turn that opens with *message* (a custom one): never a slash command."""
+        if self.phase != "idle":
+            raise AgentHarnessError("busy", "AgentHarness is busy")
+        await self._ensure_extensions_loaded()
+        return await self._run_turn(text, None, message=message)
+
+    @property
     def extension_registry(self) -> ExtensionRegistry:
         """The extension registry (tools, commands, event handlers)."""
         return self._extension_registry
@@ -519,6 +600,16 @@ class AgentHarness:
         Empty until extensions have been loaded.
         """
         return list(self._extension_loader.skipped)
+
+    @property
+    def failed_extensions(self) -> list[FailedExtension]:
+        """Extensions that failed to load: the module raised as it was imported, an entry
+        point resolved to nothing, or ``activate()`` raised (and was rolled back). The
+        others still loaded.
+
+        Empty until extensions have been loaded.
+        """
+        return list(self._extension_loader.failed)
 
     async def load_extensions(self) -> None:
         """Eagerly load extensions.
@@ -630,10 +721,18 @@ class AgentHarness:
 
         return assistant_msg
 
-    def load_extension(self, activate: ActivateFn) -> None:
-        """Manually load an extension after construction."""
+    def load_extension(self, activate: ActivateFn, *, name: str | None = None) -> None:
+        """Manually load an extension after construction.
+
+        Loading under a *name* that is already taken replaces that extension (and removes
+        its tools and hooks from the live session). Without a name the extension is
+        identified by its callable (``module.qualname``; see ``ExtensionLoader``), so two
+        different functions never replace each other by accident.
+        """
         bridge = self._extension_bridge or self._create_bridge()
-        self._extension_loader.load_callable(activate, source="programmatic", bridge=bridge)
+        self._extension_loader.load_callable(
+            activate, name=name, source="programmatic", bridge=bridge
+        )
         if self._extensions_loaded:
             self._apply_extension_registrations()
 
@@ -1094,10 +1193,18 @@ class AgentHarness:
         )
 
     async def _execute_turn(
-        self, turn_state: _TurnState, text: str, images: list[ImageContent] | None = None
+        self,
+        turn_state: _TurnState,
+        text: str,
+        images: list[ImageContent] | None = None,
+        *,
+        message: AgentMessage | None = None,
     ) -> AssistantMessage:
+        """Run a turn opening with *message*, or with the user message *text* makes."""
         active_turn_state = turn_state
-        messages: list[AgentMessage] = [_create_user_message(text, images)]
+        messages: list[AgentMessage] = [
+            message if message is not None else _create_user_message(text, images)
+        ]
         if self.next_turn_queue:
             queued = self.next_turn_queue[:]
             self.next_turn_queue.clear()
@@ -1132,6 +1239,9 @@ class AgentHarness:
 
         controller = _AbortController()
         self._run_abort_controller = controller
+        if self._closed:
+            # close() ran while this turn was still being set up, so it found no run to abort.
+            controller.abort()
 
         def get_turn_state() -> _TurnState:
             return active_turn_state
@@ -1177,6 +1287,8 @@ class AgentHarness:
         raise AgentHarnessError("invalid_state", "AgentHarness prompt completed without assistant")
 
     async def prompt(self, text: str, images: list[ImageContent] | None = None) -> AssistantMessage:
+        if self._closed:
+            raise AgentHarnessError("invalid_state", "AgentHarness is closed")
         if self.phase != "idle":
             raise AgentHarnessError("busy", "AgentHarness is busy")
         await self._ensure_extensions_loaded()
@@ -1186,9 +1298,20 @@ class AgentHarness:
         if dispatched is not None:
             return dispatched
 
+        return await self._run_turn(text, images)
+
+    async def _run_turn(
+        self,
+        text: str,
+        images: list[ImageContent] | None = None,
+        *,
+        message: AgentMessage | None = None,
+    ) -> AssistantMessage:
         self._set_phase("turn")
         try:
-            return await self._execute_turn(await self._create_turn_state(), text, images)
+            return await self._execute_turn(
+                await self._create_turn_state(), text, images, message=message
+            )
         except AgentHarnessError:
             self._set_phase("idle")
             raise
@@ -1316,19 +1439,40 @@ class AgentHarness:
         return {"cleared_steer": cleared_steer, "cleared_follow_up": cleared_follow_up}
 
     async def close(self) -> None:
-        """Run registered cleanup callbacks and release resources.
+        """End the session: stop what is running, run the cleanup callbacks, release tasks.
 
-        Called by the session owner (e.g. ACP agent) when a session is
-        closed, so extensions can shut down background tasks, worktrees, etc.
+        Called by the session owner (e.g. the ACP agent) when a session is closed or deleted.
+        The turn in flight is aborted, as ``abort()`` does, but not waited for: whoever called
+        ``prompt()`` sees it end as aborted. Then the callbacks extensions registered run
+        (background work, worktrees), and the turns this harness started for extensions
+        (``trigger_prompt`` / ``trigger_message``) get ``CLOSE_GRACE_S`` to wind down before
+        they are cancelled. From here on extensions cannot start turns. A second call does
+        nothing: the callbacks are handed out once, and no task is left to stop.
         """
-        for cb in self._cleanup_callbacks:
+        self._closed = True
+        if self._run_abort_controller is not None:
+            self._run_abort_controller.abort()
+        callbacks, self._cleanup_callbacks = self._cleanup_callbacks, []
+        for cb in callbacks:
             try:
                 result = cb()
                 if hasattr(result, "__await__"):
                     await result
             except Exception:
                 logger.warning("Cleanup callback failed", exc_info=True)
-        self._cleanup_callbacks.clear()
+        await self._stop_background_tasks()
+
+    async def _stop_background_tasks(self) -> None:
+        """Wait ``CLOSE_GRACE_S`` for the tasks ``_start_background`` made, then cancel them."""
+        current = asyncio.current_task()
+        tasks = [task for task in self._bg_tasks if task is not current]
+        if not tasks:
+            return
+        _, pending = await asyncio.wait(tasks, timeout=CLOSE_GRACE_S)
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.wait(pending, timeout=CLOSE_GRACE_S)
 
     async def _maybe_auto_compact(self, signal: Any | None = None) -> None:
         if not self.compaction.auto_compact or self.phase != "turn":

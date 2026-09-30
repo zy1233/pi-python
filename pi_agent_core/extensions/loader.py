@@ -4,12 +4,17 @@ Three discovery mechanisms (evaluated in order):
 
 1. **entry_points** — ``[project.entry-points."pi_agent.extensions"]``
    in installed packages (standard setuptools mechanism).
-2. **Directory scan** — ``~/.pi-python/extensions/`` (user) and
-   ``.pi-python/extensions/`` (project-local). Importing an extension executes its
-   code, and the project directory ships with the repository, so it is scanned only
-   when the caller says the project is trusted (``trust_project``); otherwise nothing
-   in it is imported and what was skipped is reported in ``ExtensionLoader.skipped``.
+2. **Directory scan** — ``<home>/extensions/`` (user; ``home`` is ``~/.pi-python`` unless
+   ``PI_HOME`` or the ``home`` argument says otherwise) and ``.pi-python/extensions/``
+   (project-local). Importing an extension executes its code, and the project directory
+   ships with the repository, so it is scanned only when the caller says the project is
+   trusted (``trust_project``); otherwise nothing in it is imported and what was skipped
+   is reported in ``ExtensionLoader.skipped``.
 3. **Programmatic** — ``load_callable(activate_fn)`` for tests / embedding.
+
+An extension that fails — the module raises as it is imported, an entry point resolves to
+nothing, or ``activate()`` raises — is logged and recorded in ``ExtensionLoader.failed``;
+the others still load.
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ from typing import Any
 from pi_agent_core.extensions.api import ExtensionAPI
 from pi_agent_core.extensions.registry import ExtensionRegistry
 from pi_agent_core.extensions.types import ExtensionMeta
+from pi_agent_core.home import pi_home
 
 logger = logging.getLogger(__name__)
 
@@ -42,14 +48,47 @@ class SkippedExtensions:
     names: tuple[str, ...]
 
 
-class ExtensionLoader:
-    """Discovers and loads extensions into a shared ``ExtensionRegistry``."""
+@dataclass(frozen=True)
+class FailedExtension:
+    """An extension that failed to load. It was rolled back; the others still loaded.
 
-    def __init__(self, registry: ExtensionRegistry | None = None) -> None:
+    ``name`` is what identifies it at the stage it failed: the entry-point name, the file or
+    package name in a scanned directory, or (once its module imported and ``activate()``
+    raised) the extension's own name. ``source`` is ``entry_point``, ``directory`` or
+    ``programmatic``; ``error`` reads ``ExceptionType: message``.
+    """
+
+    name: str
+    source: str
+    error: str
+
+
+class ExtensionLoader:
+    """Discovers and loads extensions into a shared ``ExtensionRegistry``.
+
+    ``home`` is the pi-python home directory (``pi_home()`` when omitted): its
+    ``extensions/`` subdirectory is the user's extension directory, and every extension
+    sees it as ``ExtensionAPI.home``.
+    """
+
+    def __init__(
+        self,
+        registry: ExtensionRegistry | None = None,
+        *,
+        home: Path | str | None = None,
+    ) -> None:
         self.registry = registry or ExtensionRegistry()
+        self._home = home
         self._apis: list[ExtensionAPI] = []
         self._loaded_names: set[str] = set()
+        self._activations: dict[str, ActivateFn] = {}
         self.skipped: list[SkippedExtensions] = []
+        self.failed: list[FailedExtension] = []
+
+    @property
+    def home(self) -> Path:
+        """The pi-python home directory this loader (and its extensions) work under."""
+        return pi_home(self._home)
 
     # -- public API ----------------------------------------------------------
 
@@ -72,20 +111,35 @@ class ExtensionLoader:
 
         for ep in eps:
             try:
-                obj = ep.load()
-                activate = _resolve_activate(obj)
-                if activate is not None:
-                    results.append(activate)
-                    logger.debug("Discovered entry_point extension: %s", ep.name)
-            except Exception:
+                activate = _resolve_activate(ep.load())
+            except Exception as exc:
                 logger.warning("Failed to load entry_point %s", ep.name, exc_info=True)
+                self._record_failure(ep.name, "entry_point", _describe(exc))
+                continue
+            if activate is None:
+                # Declaring an entry point claims to be an extension; do not drop it silently.
+                logger.warning("Entry point %s does not resolve to an activate() function", ep.name)
+                self._record_failure(ep.name, "entry_point", "no activate() function found")
+                continue
+            results.append(activate)
+            logger.debug("Discovered entry_point extension: %s", ep.name)
         return results
 
     def discover_directory(self, directory: str | Path) -> list[ActivateFn]:
-        """Scan a directory for Python extension modules."""
+        """Scan a directory for Python extension modules.
+
+        A module that raises as it is imported is logged and recorded in ``failed``; the
+        others are still found. (A file without an ``activate`` is not an error: helper
+        modules live next to extensions. Prefix them with ``_`` to keep them unscanned.)
+        """
         results: list[ActivateFn] = []
         for name, module_file, package_name in _extension_sources(Path(directory)):
-            activate = _load_module_from_file(module_file, package_name=package_name)
+            try:
+                activate = _load_module_from_file(module_file, package_name=package_name)
+            except Exception as exc:
+                logger.warning("Failed to import extension from %s", module_file, exc_info=True)
+                self._record_failure(name, "directory", _describe(exc))
+                continue
             if activate is not None:
                 results.append(activate)
                 logger.debug("Discovered directory extension: %s", name)
@@ -103,7 +157,7 @@ class ExtensionLoader:
         logged as a warning.
         """
         results: list[ActivateFn] = []
-        home_ext = Path.home() / ".pi-python" / "extensions"
+        home_ext = self.home / "extensions"
         results.extend(self.discover_directory(home_ext))
         if cwd:
             project_ext = Path(cwd) / ".pi-python" / "extensions"
@@ -159,18 +213,24 @@ class ExtensionLoader:
     ) -> ExtensionAPI:
         """Load a single extension from an ``activate`` callable.
 
+        An extension is identified by *name*, else by ``_default_name(activate)``. Loading
+        under a name that is taken replaces the earlier extension (reloading the same
+        callable, or a project extension overriding a user one, relies on it) and is logged
+        as a warning when the replacement is a different callable.
+
         Args:
             bridge: Optional ``HarnessBridge`` to bind *before* ``activate()``
                 so the extension can call ``pi.cwd`` etc. during init.
         """
-        ext_name = name or getattr(activate, "__module__", None) or "anonymous"
+        ext_name = name or _default_name(activate)
         old_api: ExtensionAPI | None = None
+        replaces_another = False
         if ext_name in self._loaded_names:
-            logger.debug("Extension %r already loaded — overriding", ext_name)
             old_api = next((a for a in self._apis if a.extension_name == ext_name), None)
+            replaces_another = self._activations.get(ext_name) is not activate
 
         meta = ExtensionMeta(name=ext_name, source=source)
-        api = ExtensionAPI(registry=self.registry, meta=meta)
+        api = ExtensionAPI(registry=self.registry, meta=meta, home=self._home)
 
         # P7-03: bind bridge BEFORE activate so pi.cwd etc. are usable
         if bridge is not None:
@@ -208,6 +268,15 @@ class ExtensionLoader:
         api._loading = False  # enable dynamic register_tool → bridge injection
         self._apis.append(api)
         self._loaded_names.add(ext_name)
+        self._activations[ext_name] = activate
+        if replaces_another:
+            logger.warning(
+                "Extension %r replaces a different extension loaded under the same name "
+                "(its tools, commands and hooks are gone). Give them distinct names to keep both.",
+                ext_name,
+            )
+        elif old_api is not None:
+            logger.debug("Extension %r reloaded", ext_name)
         return api
 
     def load_all(
@@ -223,9 +292,12 @@ class ExtensionLoader:
 
         ``trust_project_extensions`` decides whether ``<cwd>/.pi-python/extensions`` is
         scanned (see ``discover_default_dirs``); it is off unless the caller opts in.
-        """
-        import contextlib
 
+        An extension that fails (its module raising as it is imported, an entry point that
+        resolves to nothing, or ``activate()`` raising) is logged and recorded in ``failed``;
+        one that got as far as ``activate()`` is also rolled back. The others still load: an
+        extension must not vanish silently, and must not take the rest down.
+        """
         callables: list[tuple[ActivateFn, str]] = []
         if auto_discover:
             for fn in self.discover_entry_points():
@@ -236,10 +308,16 @@ class ExtensionLoader:
             callables.append((fn, "programmatic"))
 
         for activate, source in callables:
-            with contextlib.suppress(Exception):
+            try:
                 self.load_callable(activate, source=source, bridge=bridge)
+            except Exception as exc:
+                # load_callable already rolled back and logged the traceback.
+                self._record_failure(_default_name(activate), source, _describe(exc))
 
         return list(self._apis)
+
+    def _record_failure(self, name: str, source: str, error: str) -> None:
+        self.failed.append(FailedExtension(name=name, source=source, error=error))
 
     @staticmethod
     def _purge_live_harness(bridge: Any, ext_name: str, snap: dict[str, Any]) -> None:
@@ -271,6 +349,24 @@ class ExtensionLoader:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _default_name(activate: ActivateFn) -> str:
+    """The identity of an extension whose caller gave no name.
+
+    A module-level function called ``activate`` is the extension *module's* activation
+    hook (entry points and directory extensions): it is named after the module. Any other
+    callable is named ``module.qualname``. The module alone is not an identity, since two
+    extensions may be defined side by side in one module, and the second used to silently
+    replace the first.
+    """
+    module = getattr(activate, "__module__", None)
+    qualname = getattr(activate, "__qualname__", None)
+    if not module:
+        return qualname or "anonymous"
+    if not qualname or qualname == "activate":
+        return module
+    return f"{module}.{qualname}"
 
 
 def _resolve_activate(obj: Any) -> ActivateFn | None:
@@ -308,20 +404,24 @@ def _extension_sources(path: Path) -> list[tuple[str, Path, str | None]]:
     return sources
 
 
+def _describe(exc: BaseException) -> str:
+    """One-line description of a failure, as shown to the user: ``ExcType: message``."""
+    return f"{type(exc).__name__}: {exc}"
+
+
 def _load_module_from_file(
     path: Path,
     package_name: str | None = None,
 ) -> ActivateFn | None:
-    """Import a Python file and return its ``activate`` function (if any)."""
+    """Import a Python file and return its ``activate`` function (if any).
+
+    Raises whatever the module raises as it is imported; the caller decides what that means.
+    """
     module_name = f"_pi_ext_{package_name or path.stem}"
-    try:
-        spec = importlib.util.spec_from_file_location(module_name, str(path))
-        if spec is None or spec.loader is None:
-            return None
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
-        spec.loader.exec_module(module)
-        return _resolve_activate(module)
-    except Exception:
-        logger.warning("Failed to import extension from %s", path, exc_info=True)
+    spec = importlib.util.spec_from_file_location(module_name, str(path))
+    if spec is None or spec.loader is None:
         return None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return _resolve_activate(module)

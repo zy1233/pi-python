@@ -41,7 +41,7 @@ AgentMessage[] → transform_context() → convert_to_llm() → LangChain BaseMe
 2. **Parallel tool ordering** — `tool_execution_end` fires in completion order; `toolResult` messages persist in source order.
 3. **Terminate semantics** — skip next LLM turn only when **all** finalized tool results have `terminate=True`.
 4. **StreamFn contract** — never raises; failures encoded as `error` event (`stop_reason=error|aborted`).
-5. **Thinking gating** — reasoning params injected iff `Model.reasoning=True` and `thinking_level != "off"`; same flag drives thinking-history stripping in `transform_messages`.
+5. **Thinking gating** — reasoning params injected iff `Model.reasoning=True` and `thinking_level != "off"`; same flag drives thinking-history stripping in `transform_messages`. One exception: DeepSeek's own API (no `base_url`, or one on `deepseek.com`) thinks by default, so with the gate closed it gets an explicit `thinking: disabled`; gateways serving DeepSeek models get nothing. Thinking plus tools on that API is not supported (needs `reasoning_content` replay).
 6. **Usage accumulation** — per-field max, not sum (providers report cumulative snapshots or complementary splits).
 7. **Structured output** — `response_schema` via prompt injection + `response_format`; `with_structured_output` kills streaming.
 
@@ -64,7 +64,7 @@ Use venv Python — Windows `python3` may alias the Store stub.
 
 | Action | Command |
 |--------|---------|
-| Tests (mock) | `.venv\Scripts\python.exe -m pytest` |
+| Tests (mock) | `.venv\Scripts\python.exe -m pytest` (`real_llm` tests are left out by `addopts`; a later `-m` overrides it) |
 | Tests (real LLM) | `.venv-test-real\Scripts\python.exe -m pytest -m real_llm -v` |
 | Eval | `scripts/run_eval.py --frontier-30 --task <id>` — see `docs/benchmarks/` |
 

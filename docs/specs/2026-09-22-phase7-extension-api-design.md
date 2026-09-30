@@ -139,6 +139,7 @@ def activate(pi: ExtensionAPI) -> None:
 | `exec` | `async (command, *, cwd, timeout) -> ExecResult` | `pi.exec()` | 委托 `ExecutionEnv.exec()` |
 | `cwd` | `@property -> str` | `pi.cwd` | 从 harness env 读取 |
 | `session_id` | `@property -> str` | `pi.sessionId` | 从 session metadata 读取 |
+| `home` | `@property -> Path` | —（本移植版新增） | 会话使用的 pi-python 家目录（`PI_HOME` 或 `~/.pi-python`）；扩展的用户级文件放这里，不要自己拼 `Path.home()`（§4.5） |
 
 ### 3.3 明确不实现项（TUI-only，推迟到有需求时）
 
@@ -202,7 +203,8 @@ class ToolDefinition:
 
 1. **entry_points**：`[project.entry-points."pi_agent.extensions"]` —— 标准
    setuptools/pip 机制，`pip install pi-web-access-py` 后自动发现。
-2. **目录扫描**：`~/.pi-python/extensions/` 和 `.pi-python/extensions/` ——
+2. **目录扫描**：`<家目录>/extensions/`（家目录默认 `~/.pi-python`，可由 `PI_HOME` 或
+   `home=` 参数改变，见 §4.5）和 `.pi-python/extensions/` ——
    对齐上游 pi 的 `~/.pi/agent/extensions/` 和 `.pi/extensions/`。
    扫描目录下的 Python 模块，import 并查找 `activate` 函数。
    项目目录（`.pi-python/extensions/`）需要显式信任才会扫描，见 §4.4。
@@ -211,8 +213,9 @@ class ToolDefinition:
 
 ### 4.2 加载顺序
 
-entry_points → 用户目录（`~/.pi-python/extensions/`）→ 项目目录
-（`.pi-python/extensions/`，仅当项目受信任，§4.4）→ 编程注入。同名扩展后加载的覆盖先加载的（与上游一致）。
+entry_points → 用户目录（`<家目录>/extensions/`）→ 项目目录
+（`.pi-python/extensions/`，仅当项目受信任，§4.4）→ 编程注入。同名扩展后加载的覆盖先加载的（与上游一致）；
+什么算「同名」见 §4.5。
 
 ### 4.3 与 AgentHarness 集成
 
@@ -240,6 +243,15 @@ import 一个扩展就是执行它的代码，而 `<项目>/.pi-python/extension
 
 上游 pi 对此有「项目信任」（`packages/coding-agent/docs/security.md`）：信任决定作出之前只加载用户/全局扩展和命令行 `-e` 扩展，项目扩展在信任后才加载；非交互模式不弹提示，按 `defaultProjectTrust` 处理（`ask` / `never` 忽略项目资源，`always` 信任），`--approve` / `--no-approve` 单次覆盖；决定按目录保存（`~/.pi/agent/trust.json`），父目录的决定适用于子目录。本移植版实现其最小子集：**默认拒绝，只接受项目自己写不到的位置给出的授权**。
 
+同一个信任决定还管着项目里另外几样会改变模型所见内容的东西（上游同样把它们放在信任门后）。它们不执行代码，但一个克隆来的仓库不该只因为被打开就能改写 system prompt：
+
+| 受信任门约束（未受信项目被忽略） | 不受约束 |
+|---|---|
+| `<项目>/.pi-python/extensions`（扩展，会执行代码） | entry_points 扩展、`~/.pi-python/extensions`、`extensions=` / `extension_dirs=` |
+| `<项目>/.pi/SYSTEM.md`、`<项目>/.pi/APPEND_SYSTEM.md`（回退到家目录的 `agent/SYSTEM.md` / `agent/APPEND_SYSTEM.md`） | `agent.toml` 里直接给出的 `custom_system_prompt*` / `append_system_prompt*`；家目录的 prompt 文件 |
+| `[skills].paths` 里相对项目的条目（如 `.pi/skills`） | `[skills].paths` 里的绝对路径与 `~` 条目 |
+| | `AGENTS.md` / `CLAUDE.md`（上游同样不设门） |
+
 | 授权来源 | 说明 |
 |---|---|
 | `~/.pi-python/agent.toml` → `[extensions] trusted_projects = ["/abs/path"]` | 绝对路径（或 `~`）白名单；Windows 请写正斜杠（`"C:/work/repo"`），TOML 双引号里的 `\U` 是语法错误，通知里给出的建议值已是正斜杠。名单内目录的子目录同样受信；相对路径被忽略并告警；比较前先解析符号链接（受信目录里指向别处的链接不继承信任） |
@@ -248,16 +260,28 @@ import 一个扩展就是执行它的代码，而 `<项目>/.pi-python/extension
 
 只读取家目录的 `agent.toml`，绝不读取项目内的配置文件，否则仓库可以给自己授信；`load_local_env` 同样只读 `~/.pi-python/local.env`。
 
-未受信的项目目录**不会被 import**：`ExtensionLoader` 只列出本会加载的模块名（`ExtensionLoader.skipped` / `AgentHarness.skipped_extensions`，元素为 `SkippedExtensions(directory, names)`），写一条 warning 日志，CLI 再告诉用户被跳过了什么、怎样启用（ACP：`session/new` 应答之后的一条 `agent_message_chunk`；headless：stderr，stdout 仍只有回答）。用户目录、entry_points、`extensions=` / `extension_dirs=` 不受影响：前两者由用户自己安装，后两者由嵌入方显式传入。
+未受信的项目目录**不会被 import**：`ExtensionLoader` 只列出本会加载的模块名（`ExtensionLoader.skipped` / `AgentHarness.skipped_extensions`，元素为 `SkippedExtensions(directory, names)`），写一条 warning 日志。CLI 再告诉用户被跳过了什么（扩展，以及存在且本会生效的 prompt 文件与 skills 目录，`extension_trust.skipped_project_resources`）、怎样启用（ACP：`session/new` 应答之后的一条 `agent_message_chunk`；headless：stderr，stdout 仍只有回答）。
 
-`AgentHarness(trust_project_extensions=False)` 与 `ExtensionLoader.load_all(trust_project_extensions=False)` 默认都是拒绝；CLI 的 `create_session_harness` 通过 `extension_trust.project_extensions_trusted(config, cwd)` 得出该值。
+`AgentHarness(trust_project_extensions=False)` 与 `ExtensionLoader.load_all(trust_project_extensions=False)` 默认都是拒绝；CLI 通过 `extension_trust.project_extensions_trusted(config, cwd)` 得出该值，`create_session_harness`（扩展）、`load_system_prompt_options`（prompt 文件）与 `load_session_resources`（skills）共用它。配置项沿用 `extensions` 之名，实际管的是上表的整组项目资源。
 
 已知限制（相对上游）：
 
 - 没有交互式确认，也没有 `/trust` 持久化；白名单靠手写 `agent.toml`。后续可在 ACP 里加确认并写入信任库。
 - 信任按路径而非内容：白名单内的项目之后才出现的扩展（例如 `git pull` 带来的）会被直接运行。内容哈希信任库可以关闭这个口子。
-- 只拦了扩展。上游同样放在信任门后的 `.pi/SYSTEM.md`、`.pi/APPEND_SYSTEM.md` 和项目 skills（`[skills].paths` 里的相对路径，如 `.pi/skills`），在本移植版里仍被无条件读取：它们不执行代码，但会进入 system prompt（与上游同样不设门的 `AGENTS.md` 属同一类注入面）。
-- 授权以整个项目目录为单位，不区分单个扩展。
+- 授权以整个项目目录为单位，不区分单个扩展或资源。
+- 上游还把 `.pi/settings.json`、`.pi/prompts`、`.pi/themes` 放在信任门后；本移植版没有这些项目级资源，无需处理。
+
+### 4.5 扩展的身份、失败、工具名、家目录与打包
+
+**身份（名称）。** 调用方没给名字时：模块级的 `activate` 函数（entry point 与目录扩展都是这种）以**模块名**为名；其余可调用对象以 `module.qualname` 为名。以前一律用 `activate.__module__`，同一模块里并排定义的两个扩展会互相覆盖，后者悄悄顶掉前者。同名重载仍然允许（重载同一扩展、项目扩展覆盖用户扩展都依赖它）；被**另一个**可调用对象顶替时，在激活成功之后写一条 warning（激活失败则回滚、原扩展保持不变，不会声称发生过替换）。`AgentHarness.load_extension(activate, name=...)` 可显式命名。
+
+**失败不再无声。** 三种失败——目录里的模块/包在 import 时抛错、entry point 加载失败或解析不出 `activate`、`activate()` 抛错——都会写日志（含 traceback），并记入 `ExtensionLoader.failed` / `AgentHarness.failed_extensions`（`FailedExtension(name, source, error)`；`source` 为 `entry_point` / `directory` / `programmatic`，`error` 为 `ExceptionType: message`）。走到 `activate()` 才失败的扩展整体回滚，其余扩展照常加载。CLI 把失败告诉用户（`extension_notices.failed_extensions_notice`：ACP 在 `session/new` 应答之后发一条 `agent_message_chunk`；headless 写 stderr，stdout 仍只有回答），每条错误只取首行并截短。一个没有 `activate` 的普通 `.py`（辅助模块）不算错误；不想被扫描就以 `_` 开头命名。
+
+**工具名。** `register_tool` 要求名字匹配 `[a-zA-Z0-9_-]{1,128}`（模型 provider 只接受这个）。不合法时在注册处抛 `ValueError`（指明扩展与规则），该扩展整体回滚。否则一个坏名字会让此后每个请求都被 provider 拒绝，整个会话不可用。
+
+**一个「家」。** `pi_agent_core.home.pi_home(override=None)` 是唯一的解析器：参数 > `$PI_HOME` > `~/.pi-python`。CLI、`ExtensionLoader(home=)`、`AgentHarness(home=)`、`ExtensionAPI.home`（`pi.home`）和 pi-dynamic-workflows（journal、saved workflow）都走它。以前 CLI 认 `PI_HOME`，而 loader 与 workflow 扩展直接用 `Path.home() / ".pi-python"`：设了 `PI_HOME` 的会话会从一处读配置、从另一处读扩展、往第三处写 journal。
+
+**打包。** 扩展包与核心一同发布，所以 `pi-agent-core-lc` 的下限就是仓库里的核心版本（旧下限 `>=0.3.0`，而 `pi_agent_core.extensions` 到 0.4.0 才出现）。用到 `pi_agent_harness` 的包（pi-dynamic-workflows）必须声明 `pi-agent-harness-lc`，并在 `[tool.uv.sources]` 里指向工作区；否则 `pip install` 之后 workflow 工具只能回答「sub-agents unavailable」。`pi_agent_core/tests/test_extension_packaging.py` 检查这三点：发版时抬高核心版本却忘了抬下限，会在 CI 里失败，而不是发布之后才暴露。
 
 ---
 
@@ -279,14 +303,53 @@ import 一个扩展就是执行它的代码，而 `<项目>/.pi-python/extension
 | 字段 | 值 |
 |---|---|
 | 参数 | `url: str`, `extract_text: bool = True`, `max_length: int \| None = None` |
-| 实现 | `httpx.AsyncClient.get(url)` → 如 `extract_text` 则用简单 HTML tag 剥离（无重依赖）→ `truncate_head` 截断 |
-| 返回 | 页面文本内容 |
+| 实现 | 见 §5.3：校验 URL → 逐跳校验并（直连时）固定解析到的地址 → `client.stream()` 带上限读取 → 如 `extract_text` 则转成文本（装了 `trafilatura` 用它，否则用自带的线性扫描器）→ `truncate_head` 截断 |
+| 返回 | 页面文本内容；被截断时末尾附说明 |
 | prompt_snippet | `"Fetch and read the contents of a URL"` |
 
 ### 5.2 依赖
 
 - `httpx`（HTTP 客户端，已是 Python 生态主流，无 C 扩展）
 - `trafilatura`（可选，`pip install pi-web-access-py[readability]`）
+
+### 5.3 `fetch_url` 的安全边界与上限（审计 P7-09）
+
+URL 由模型给出，而模型可能是在别人写的网页里读到它的。所以 `fetch_url` 不能成为「替陌生人让本机发请求」的通道。原实现对任何地址发请求、自动跟随重定向、把整个响应读进内存，还用一组在畸形标记上二次方退化的正则清洗 HTML（8000 个 `<script>` 要 2.5 s，16000 个要 10 s，且跑在事件循环上）；输出一旦被截断（超过 2000 行或 50 KB），它读了 `TruncationResult` 上并不存在的 `outputLines` / `totalLines`，于是任何较大的页面都以 `Failed to fetch …` 收场。
+
+**只访问公网**
+
+- 拒绝 loopback、私网、link-local（含云元数据 `169.254.169.254`）、CGNAT（`100.64.0.0/10`）、组播、保留段和 IPv6 site-local。IPv4 映射、6to4、NAT64（`64:ff9b::/96`）的地址按其中内嵌的 IPv4 判断。
+- 字面量地址不论怎么写都会被识别：`127.1`、`2130706433`、`0x7f.1`、`0177.0.0.1`、`[::ffff:7f00:1]`、`127.0.0.1.`（先按 `ipaddress`，再按 `inet_aton` 的规则）。
+- 按惯例指向本机或内网的名字不做解析、直接拒绝：`localhost`、`*.localhost`、`*.local`、`*.internal`、`*.localdomain`、`*.home.arpa`，以及不含点的单标签名。含 `%` 的主机名也拒绝（代理可能把 `%31%32%37.0.0.1` 解码成别的东西）。
+- 只接受 `http` / `https`；URL 里带凭据（`user:pw@host`）或没有主机名一律拒绝。
+- 拒绝文案只说「不在公网」，不透露名字解析到了什么地址（否则可以借工具探测内网 DNS）。
+- 没有关闭开关（不提供 `allow_private` 之类的选项）；确有必要访问内网时，交给用户授权的工具（如 `bash` 里的 `curl`）去做。
+
+**直连（没有代理）**：名字只解析一次，**所有**答案都必须是公网地址（有一个不是就整体拒绝，空答案也拒绝）。随后请求直接发往这个已校验的地址（IPv4 优先，仅在 `ConnectError` / `ConnectTimeout` 时换下一个地址），`Host` 头与 TLS SNI / 证书校验仍用原名字（httpx 的 `sni_hostname` 扩展）。没有第二次解析，DNS rebinding 无从下手；对 badssl.com 的过期证书、主机名不符证书实测会失败。
+
+**经代理**（`HTTP(S)_PROXY` / `ALL_PROXY` / Windows 系统代理，沿用原有行为；`NO_PROXY` 与系统绕过规则命中时走直连）：域名由代理解析。本地解析既不能说明请求会落在哪里（在被污染的 DNS 下甚至是错的），也拿不到代理实际连接的地址，所以不做本地解析、不固定地址，只拒绝无需解析就能判断的东西：字面量地址与上面的本地名字。
+
+> **已知限制**：代理把一个公网域名解析到内网地址时，工具拦不住；经代理时也没有「校验的地址即连接的地址」的保证（代理一侧的 rebinding 窗口）。需要更强保证的部署应在代理一侧限制出口，或不设代理走直连。
+
+**重定向**：手动跟随，最多 5 跳。每一跳（scheme、凭据、字面量、名字、解析结果）都重新完整校验之后才发请求；相对 `Location` 以原 URL（名字）为基准，而不是以被固定的 IP；每一跳新建 client，不跨跳复用连接；`Location` 非法时由 httpx 报错，表现为 `Failed to fetch …`。
+
+**上限**
+
+| 项 | 值 |
+|---|---|
+| 正文 | 5 MiB：`client.stream()` + `aiter_bytes()`，读到上限即停，不读完（正好 5 MiB 的正文不算被截断）；被截断时输出末尾说明 |
+| 重定向 | 5 跳 |
+| 总耗时 | 30 s：`asyncio.wait_for` 覆盖整条重定向链与 HTML 转换；分步超时 connect / write / pool 10 s、read 20 s |
+| 编码 | 请求 `Accept-Encoding: identity`；charset 取自响应头（未知则按 UTF-8，`errors="replace"`） |
+| 输出 | `truncate_head` 的 2000 行 / 50 KB，`max_length` 只能把行数改小；被截断时说明「显示了多少行 / 为什么」；第一行就超过 50 KB（压缩过的 JSON 之类）时给出它的前 50 KB（在 UTF-8 字符边界处截断），而不是空内容 |
+
+**HTML → 文本**：装了 `trafilatura` 时优先用它，任何异常或空结果都回退到自带实现；两者都在 `asyncio.to_thread` 里跑，不占事件循环。自带实现是单遍线性扫描器：丢弃标签、注释、声明以及 `<script>` / `<style>` 的内容，块级标签变成换行，字符引用解码；没有闭合的标签、注释、脚本会吞掉其后的全部内容（与浏览器一致）；引号里的 `>` 会让标签提前结束，其余的属性值显示为文本（近似值，装了 `trafilatura` 时不受影响）。不用标准库的 `HTMLParser`，是因为它在畸形输入上同样是超线性的（实测）；数字字符引用过长（十进制 ≥ 8 位、十六进制 ≥ 7 位）先替换为 U+FFFD，因为 `html.unescape` 对超过 4300 位的十进制引用会抛 `ValueError`。
+
+**明确的偏差与残余风险**
+
+- 工具不响应回合的 abort 信号，靠总耗时停止（与 `web_search` 相同）；超时后 `trafilatura` 的工作线程会自己跑完，无法中断。
+- 服务端无视 `Accept-Encoding: identity` 而发压缩正文时，由 httpx 解压：一次读取至多 64 KiB 压缩数据，按 zlib 的最大压缩比（约 1000:1）单块解压后瞬时可达约 64 MiB，之后被 5 MiB 上限截断。
+- 见上面「经代理」的已知限制。
 
 ---
 
@@ -296,11 +359,11 @@ import 一个扩展就是执行它的代码，而 `<项目>/.pi-python/extension
 
 - `/goal <description>` 命令启动目标模式
 - 注入 prompt_guidelines 告诉 LLM 使用 `goal_update` 和 `goal_complete` 工具
-- `goal_update(step, status, details)` — 报告步骤进度
+- `goal_update(step_index, description, status, details)` — 报告步骤进度。`step_index` 从 0 开始，与状态清单方括号里的编号一致（`⬜ [0] 设计`）；省略则追加新步骤，此时 `description` 必填。索引不存在、或新步骤没有 `description` 时，`GoalState.update_step` 抛 `ValueError`（消息里写明现有步骤的编号范围），工具调用以错误结果返回给模型，状态不变（审计 P7-11：原先会追加一个 `Unnamed step` 并报告成功；状态清单又从 1 开始编号，正好诱导模型传错）
 - `goal_complete(summary)` — 标记目标完成
-- `on("turn_end")` 检查是否所有步骤完成，未完成时追加提醒
-- `append_entry("goal_state", data)` 持久化状态
-- `on("session_start")` 恢复已有目标状态（从 session entries 读取）
+- `on("turn_end")`：所有步骤都是 done、模型却没有调用 `goal_complete` 时，发一条提醒（`send_message`，会引出下一轮）。**最多提醒 2 次**（`MAX_COMPLETION_REMINDERS`），之后不再提醒；某个 `turn_end` 上步骤不再全部 done、或用 `/goal` 重新开始，计数清零；对已完成的步骤再做 `goal_update` 不清零（否则会话会在「更新—提醒」里循环）。原实现每轮都提醒：harness 与 CLI 默认都没有回合上限（`max_turns` 为 `None`），无视提醒的模型会一直被提醒到用户中断；审计复现时配了 `max_turns = 12`，打满 12 次 LLM 调用后以 error 收场
+- 持久化：状态**每次变化时**用 `append_entry("goal_state", data)` 保存（`/goal`、`goal_update`、`goal_complete`），所以最后一条就是当前状态；没有变化的回合不写。`append_entry` 先排队，在回合结束或 `agent_end` 时落盘。原实现只在还有未完成步骤的回合末保存，`goal_complete` 从不保存，于是已完成的目标在恢复会话时又变回「进行中」
+- `on("session_start")` 恢复已有目标状态：读最后一条 `goal_state` entry；已完成的目标不恢复
 
 ### 6.2 GoalState
 
@@ -316,6 +379,7 @@ class GoalState:
     description: str | None = None
     steps: list[GoalStep] = field(default_factory=list)
     completed: bool = False
+    reminders_sent: int = 0   # 只在本进程内计数（提醒上限），不随状态保存
 ```
 
 ### 6.3 依赖
@@ -350,7 +414,7 @@ class GoalState:
 |---|---|
 | ExtensionAPI | mock 扩展 register_tool → 工具出现在 harness；register_command → 命令可调用；on("tool_call") → 返回 block 阻止工具执行 |
 | ExtensionLoader | entry_points mock；目录扫描 tmp_path；编程注入 |
-| pi-web-access | mock httpx 响应 → 验证输出格式；多提供商切换；无 API key 时报错文案 |
+| pi-web-access | mock httpx 响应 → 验证输出格式；多提供商切换；无 API key 时报错文案；`fetch_url`（`test_fetch_url_safety.py`）：非公网地址（各种写法）、本地名字、凭据、非 web scheme 一律拒绝且不发请求，DNS 固定与 SNI，重定向逐跳校验，经代理，正文 / 重定向 / 总耗时上限，输出截断说明，HTML 转换的线性性；另有一组对真实 httpx 客户端的回环服务器测试 |
 | pi-goal-x | GoalState 状态机转换；append_entry 持久化 → session_start 恢复；turn_end 进度检查 |
 | pi-dynamic-workflows | WorkflowRuntime agent/parallel/pipeline 编排；TokenBudget 限额；5 个 built-in pattern 脚本语法校验；workflow tool 参数解析 |
 
@@ -439,7 +503,7 @@ Task panel / widget / UI 通知、`workflow_control` 工具（pause/resume/stop�
 |---|---|---|
 | **`ctx.ui.*` API** | 上游 pi 的 `ctx.ui.confirm()` / `ctx.ui.select()` / `ctx.ui.notify()` / `ctx.ui.setWidget()` 等 TUI 交互 API 未实现 | 需要时扩展可通过 `send_message()` 降级实现文本反馈 |
 | **SubagentExecutor 真实实现** | §12 ✅ | `HarnessSubagentExecutor` 已实现，含 coding tools + env |
-| **Background run / result delivery** | §13 ✅ | `trigger_prompt()` 空闲时触发新 turn；`register_cleanup()` 回收任务 |
+| **Background run / result delivery** | §13 ✅ | `trigger_message()`（带类型的自定义消息）空闲时触发新 turn、运行中并入当前 turn；`register_cleanup()` 在会话 `close()` 时回收任务 |
 | **Run persistence / resume** | §14 ✅ | 首次 run 自动创建 Journal，按 run_id 恢复；格式校验防路径穿越 |
 | **Git worktree isolation** | §15 ✅ | `WorktreeManager` 创建隔离 worktree；snapshot baseline + apply_changes 回写 |
 | **Saved workflow 存储** | §16 ✅ | `WorkflowStore` scan/save，project 覆盖 user；`os.link` 原子 no-clobber |
@@ -508,6 +572,8 @@ TUI (zypi) ──ACP stdio──> pi_agent_cli ──> factory.create_session_ha
 独立 session 不污染父会话；`timeout_ms` 通过 `asyncio.wait` 实现；
 `schema` 走 prompt 注入 + JSON 解析 → `AgentResult.structured`。
 
+**造不出执行器时不再退回 mock。** 没有 harness、harness 没给 `model` / `stream_fn`、或构造时抛错，`activate` 就注册一个 `UnavailableSubagentExecutor(reason)`：`workflow` 工具（含 built-in 名称与后台请求）直接回答 `The workflow tool cannot run in this session: sub-agents are unavailable (<reason>).`，原因同时写 warning 日志。以前静默退回 `MockSubagentExecutor`，脚本用罐头答案「跑完」并且报告成功。`MockSubagentExecutor` 只留给不传执行器的 `create_workflow_tool()`（测试替身）。
+
 **tier 与凭据的边界**（防止静默换厂商、把 A 厂商的 key 发给 B 厂商）：
 
 - 内置 tier 默认值按**父 model 的 provider** 限定（`DEFAULT_MODEL_TIERS_BY_PROVIDER`，目前只有
@@ -550,20 +616,62 @@ TUI (zypi) ──ACP stdio──> pi_agent_cli ──> factory.create_session_ha
   在弹窗里可见，未限制在工作区内；受限命名空间不是安全边界（见 §9.3）。
 
 **Bridge 扩展**：`HarnessBridge` 增加 `stream_fn` / `model` / `get_api_key_fn` / `tool_call_gate`
-只读属性，`activate()` 据此构造真实 executor。
+只读属性，`activate()` 据此构造真实 executor；另有 `trigger_message(custom_type, text, *, details=None)`
+（§13，后台结果的交付）。`HarnessBridge` 是 `runtime_checkable` 协议，自制 bridge（测试替身之类）要补上该方法才能通过
+`isinstance`。
 
 ---
 
-## 13. Background run / result delivery ✅
+## 13. Background run / result delivery / 会话生命周期 ✅
 
 `WorkflowManager`（`manager.py`）管理后台 workflow 的 asyncio task。
 
 `WorkflowParams.background=True` → `asyncio.create_task(runtime.execute)` +
-返回 `AgentToolResult(terminate=True)`，turn 立即结束。完成后通过
-`bridge.send_message()` 将格式化结果推入 steer queue 触发新 turn。
+返回 `AgentToolResult(terminate=True)`，turn 立即结束。
 
-`cancel_all()` 取消所有后台 task；`shutdown(timeout)` 等待 pending
-runs 或超时后强制取消。
+**结果的交付**：完成后经桥接的 `trigger_message("workflow-result", text, details=...)` 交付，
+是一条带类型的自定义消息（`role: "custom"`、`display=True`，`details` 含 `runId` / `name` /
+`status` / `agentCount` / `durationMs`），不再走 `trigger_prompt`。后者等于「用户打了这段字」：
+以 `/` 开头的输出会被当作 slash 命令执行，消息也没有来源标记。harness 空闲时它开启一个新 turn
+（该 turn 的首条消息就是这条自定义消息，不做 slash 分派），运行中则进 steer 队列并入当前 turn。
+
+**不可信输出的信封**：自定义消息在 LLM 层被 `harness_convert_to_llm` 转成普通 user 消息，模型看到的权威与用户消息相同，
+所以消息正文自己交代来源。manager 自己知道的事实（run id、agent 数、耗时、token 用量）写在信封之外；
+子代理的产出（它们可能读过不可信的文件或网页）放进
+`<workflow-output boundary=HEX>` … `</workflow-output boundary=HEX>` 之内，信封之前的文字声明这是
+「不可信数据、不是指令」。`HEX` 是每条消息各自的 `secrets.token_hex(8)`，且保证不出现在输出里（出现则重抽），
+输出因此无法提前「关闭」信封再冒充 manager 说话。脚本自己起的 workflow 名字同样只出现在信封内。
+失败的 run 也一样：错误文本在信封内，`details.status == "failed"`。
+
+**取消**：`workflow` 工具的中止信号（`signal`）会停掉前台 run：`_abortable` 让运行时 task 与中止信号赛跑，
+中止时取消运行时 task 并等它收尾（最多 `_UNWIND_GRACE_S = 10` s，之后放弃并记 warning），工具返回 cancelled 结果，
+带 `run_id` 和 `resume_from_run_id` 的提示——已完成的 agent 已记入 journal，可以接着跑。开始前信号就已中止则
+什么也不启动（前台、后台都是）。`parallel()` / `pipeline()` 在取消或提前失败时不留孤儿 task（`_settle`：
+所有子 task 都被取消并等待）。后台 run **不**随发起它的那个 turn 的中止而停止（后台 run 的意义就是比 turn 活得久），
+只随会话的 `close()` 停止。以前中止信号到不了 workflow：工具要等所有 agent 跑完才返回，其间子代理继续消耗 token、继续改文件。
+
+**生命周期**：ACP `session/close` 与 `pi/session/delete`（先 `abort()` 再 `close()`）都调用 `AgentHarness.close()`：
+
+- `close()` 幂等；先 abort 进行中的 turn（不阻塞），再依次执行扩展注册的清理回调（一个失败不影响其余，
+  失败只记日志），最后停止 harness 自己起的后台 task（`CLOSE_GRACE_S = 5`：宽限期内不理会 abort 的 task 被取消并放弃）。
+  此前它只跑清理回调，进行中的 turn 继续跑。
+- `closed` 属性；关闭后 `prompt()` 抛 `AgentHarnessError("invalid_state")`，桥接的 `trigger_prompt` /
+  `trigger_message` 什么也不做（也不入队）；已排入但尚未开始的触发、`close()` 时仍在准备中的 turn 同样不会跑起来
+  （后者一建好 abort controller 就被中止）。
+- 扩展的清理回调是 `WorkflowManager.close(timeout=5)`：取消所有后台 run 并等它们收尾（run 的 `finally`
+  会清理 worktree）；超时未停的 run 记 warning 后放弃。此后不再交付任何结果，`start_background()` 抛
+  `RuntimeError`。以前的回调是 `shutdown()`——最多等 30 s 让 run 跑完，而 run 的结果随后会在已结束的会话上
+  开启一个新的 LLM turn。
+- `cancel_all()`（只取消、不等待）与 `shutdown(timeout)`（等 pending 或超时后取消）保留，会话收尾不再使用。
+
+**已知限制**：
+
+- 自定义消息在 LLM 层是 user 角色（与 `bashExecution` 等一致）；信封是文本约定，不是协议级隔离。
+- 后台结果触发的 turn 没有对应的 `session/prompt` 请求。ACP v1 没有禁止 turn 之外的 `session/update`，
+  但客户端未必渲染；v2 草案的 `state_update`（idle / running）正是为此设计的，本项目未处理。
+- 自定义消息只进 session 与 LLM 上下文，`project_message_replay`（`session/load` 的历史回放）不含它，
+  与实时 UI 一致（实时 UI 也不显示自定义消息）。
+- 不合作的 run（脚本吞掉取消）在宽限期后被放弃：它仍在后台运行，直到自己结束，但不再交付结果。
 
 ---
 
@@ -572,12 +680,23 @@ runs 或超时后强制取消。
 `Journal`（`journal.py`）— append-only JSONL 日志，记录每个 `agent()` 调用的
 `hash_request("agent", {prompt, opts})` SHA-256 + 返回值。
 
-**重放**：`try_replay(kind, req_hash)` 按游标顺序匹配，命中返回缓存结果
-跳过 LLM 调用，不匹配则从该点截断（divergence）。上限 10000 条 / 64MB。
+**重放**：journal 是「按请求索引的缓存」，不是逐步对账的记录。`try_replay(kind, req_hash)` 返回**同一请求**
+中本次 run 尚未用过的最早一条记录（命中则跳过 LLM 调用），与记录顺序无关（`parallel()` 按完成顺序写入），
+也与脚本其它部分是否改动无关；相同请求按记录顺序依次回放。未命中什么都不改：不丢弃记录，也不重写文件
+（以前是按游标顺序匹配、不匹配就从该点截断：并行 run 的 resume 一条也命中不了，一个改动过的步骤还会让其后
+所有已完成的记录被删掉）。本次 run 自己新追加的记录不会回放给自己：可回放的集合，是回放开始时文件里已有的。
+上限 10000 条 / 64MB。`Journal.truncate_from` 已移除。失败的 `agent()` 调用（`result.error`）不写入
+journal：失败不是答案，resume 时（provider 恢复、超时放宽之后）应当重试；脚本本身照旧拿到 `None`。
+（以前失败被记成成功的 `None`，resume 时原样回放。）
+
+**已知限制**：请求未变的步骤照样回放，即使它前面的步骤因为改动而重跑了；被回放的步骤当初对工作区做过的事
+（比如改文件）不会重做。
 
 **集成**：`WorkflowRuntime.__init__(journal=...)` → `agent_fn` 内先查
 journal，miss 时执行并 append。`WorkflowParams.resume_from_run_id`
-指定前次 run_id，journal 存储于 `~/.pi-python/workflow-journals/<run_id>.jsonl`。
+指定前次 run_id，journal 存储于 `<家目录>/workflow-journals/<run_id>.jsonl`（家目录即会话的
+`pi.home`，见 §4.5）。`run_id` 按 `fullmatch(r"[a-zA-Z0-9_-]{1,128}")` 校验（run_id 会变成文件名；
+`$` 会放过结尾换行）。
 
 ---
 
@@ -586,26 +705,36 @@ journal，miss 时执行并 append。`WorkflowParams.resume_from_run_id`
 `WorktreeManager`（`worktree.py`）通过 `git worktree add --detach` 创建
 linked worktree，每个 subagent 在独立目录中运行。
 
-**Snapshot 模式**（默认）：`git diff HEAD` + `git diff --cached HEAD` 复制
-staged/unstaged 变更到 worktree。**Clean 模式**：从指定 ref checkout。
+**Snapshot 模式**（默认）：`git diff --binary HEAD` + `git diff --binary --cached HEAD` 复制
+staged/unstaged 变更到 worktree（`--binary`：否则改过的二进制文件只是一行 `git apply` 拒绝的
+「Binary files differ」，连累整个快照）。**Clean 模式**：从指定 ref checkout。
 
-`collect_diff()` 收集 worktree 变更；`apply_changes()` 将 diff apply 回源
-cwd；`cleanup()` / `cleanup_all()` 删除 worktree。
+`collect_diff()` 返回 `bytes`：先 `git add -A`，再 `git diff --binary --cached HEAD`。子代理**新建**的文件
+因此在补丁里（`git diff HEAD` 只列已跟踪文件），二进制文件靠 `--binary` 带上；补丁全程是 bytes、从不解码
+（非 UTF-8 文件经 decode/encode 往返会损坏，`git apply` 随后拒绝整个补丁）。`apply_changes()` 把补丁 apply 回
+源 cwd；`cleanup()` / `cleanup_all()` 删除 worktree。
 
-**限制**：仅 git（非 jj）；不含 btrfs/overlay/NFS 优化；不复制 untracked 文件。
+**清理**：`HarnessSubagentExecutor` 在 `finally` 中删除本次调用创建的 worktree（回答、超时、异常、取消都算），
+只有拿到回答才 apply 变更。前台 run 结束（含被中止）时 `workflow_execute` 的 `finally` 调 `cleanup_all()`；
+后台 run 由 manager 的 `cleanup=` 回调在 run 结束时清理（完成、失败、取消都会跑）。
+
+**限制**：仅 git（非 jj）；不含 btrfs/overlay/NFS 优化；快照不复制源目录里**未跟踪**的文件（子代理看不到它们）；
+apply 失败（例如补丁与源目录此刻的状态冲突）时记 warning，该子代理的变更丢失。
 
 ---
 
 ## 16. Saved workflow 存储 ✅
 
-`WorkflowStore`（`store.py`）扫描 `~/.pi-python/workflows/`（用户级）和
-`.pi-python/workflows/`（项目级）的 `.py` 脚本。
+`WorkflowStore`（`store.py`）扫描 `<家目录>/workflows/`（用户级，家目录即会话的 `pi.home`，
+见 §4.5）和 `.pi-python/workflows/`（项目级）的 `.py` 脚本。构造函数的旧参数 `home=`
+仍表示「用户主目录」（其下再拼 `.pi-python`）；新参数 `pi_home=` 直接给出家目录，两者同时给出时以 `pi_home` 为准。
 
 **Meta 提取**：`extract_meta(script)` 通过 `ast.literal_eval` 安全解析脚本
-顶层 `meta = {...}` 字典，无需执行脚本。
+顶层 `meta = {...}` 字典，无需执行脚本。`meta` 不是 dict（如 `meta = 5`）或 `name` 不是字符串时按「没有 meta」处理，
+一个写坏的脚本不会让整个目录的扫描失败。
 
 **注册**：`activate()` 中 `store.scan()` → 为每个 saved workflow 注册
 slash command，通过 `AvailableCommandsUpdate` 暴露给 TUI 自动补全。
 
-**安全**：名称 `[a-z0-9-]{1,64}`；256KB 上限；原子写入 + no-clobber；
+**安全**：名称 `fullmatch(r"[a-z0-9][a-z0-9-]{0,63}")`（名称会变成文件名；`$` 会放过结尾换行）；256KB 上限；原子写入 + no-clobber；
 `save_project()` / `save_user()` 分别写入项目/用户目录。

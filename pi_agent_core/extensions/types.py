@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -15,6 +16,24 @@ from pi_agent_core.types import AgentToolResult, ToolExecutionMode
 # ---------------------------------------------------------------------------
 
 ExecuteFn = Callable[..., Awaitable[AgentToolResult] | AgentToolResult]
+
+TOOL_NAME_PATTERN = re.compile(r"[a-zA-Z0-9_-]{1,128}")
+"""What model providers accept as a function name (OpenAI, DeepSeek and others)."""
+
+
+def validate_tool_name(name: str, *, extension: str | None = None) -> None:
+    """Raise ``ValueError`` unless *name* is a tool name every provider accepts.
+
+    A name outside ``[a-zA-Z0-9_-]{1,128}`` is not rejected locally but by the provider,
+    on *every* request from then on, so the whole session stops working. Fail at
+    registration instead, where the culprit is known.
+    """
+    if not isinstance(name, str) or TOOL_NAME_PATTERN.fullmatch(name) is None:
+        origin = f" from extension {extension!r}" if extension else ""
+        raise ValueError(
+            f"Invalid tool name {name!r}{origin}: a tool name must match "
+            "[a-zA-Z0-9_-]{1,128}; model providers reject any other name on every request."
+        )
 
 
 @dataclass

@@ -1,13 +1,20 @@
 """Opt-in live matrix over openai / anthropic / deepseek / SiliconFlow.
 
-Skipped when the row's API key is unset. Not a default CI gate; run with:
+The live cases are marked ``real_llm``, which the pytest configuration leaves out of a plain
+run (``addopts``), so keys that happen to be in a developer's shell never turn ``pytest`` into
+paid API calls. They also skip when the row's API key is unset. Not a CI gate; run with:
 
     pytest -m real_llm pi_agent_core/tests/test_provider_matrix.py -v
+
+The unmarked tests at the end of the file run offline: they check the table and the workflow.
+``test_real_llm_selection.py`` checks that a plain run leaves the live cases out.
 """
 
 from __future__ import annotations
 
 import asyncio
+import re
+from pathlib import Path
 
 import pytest
 from pydantic import BaseModel, Field
@@ -19,7 +26,7 @@ from pi_agent_core.tests.provider_matrix import MATRIX, ProviderRow, resolve_row
 from pi_agent_core.tools import SimpleTool
 from pi_agent_core.types import AgentToolResult
 
-pytestmark = pytest.mark.real_llm
+_ROOT = Path(__file__).resolve().parents[2]
 
 _CASES = [
     pytest.param(row, capability, id=f"{row.id}-{capability}")
@@ -101,6 +108,7 @@ async def _run(row: ProviderRow, prompt: str, *, reasoning: bool = False, tools=
     return messages, events
 
 
+@pytest.mark.real_llm
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("row", "capability"), _CASES)
 async def test_provider_capability(row: ProviderRow, capability: str):
@@ -199,3 +207,39 @@ def test_unconfigured_row_skips(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv(row.api_key_env, raising=False)
     with pytest.raises(pytest.skip.Exception):
         _model(row)
+
+
+def test_no_row_asks_for_a_model_deepseek_has_retired():
+    """``deepseek-chat`` and ``deepseek-reasoner`` were retired on 2026-07-24 (audit P6-03).
+
+    ``deepseek-chat`` was also the non-thinking alias, so the row's thinking case could not pass.
+    """
+    assert {row.model_id for row in MATRIX} & {"deepseek-chat", "deepseek-reasoner"} == set()
+
+
+class TestWorkflow:
+    """``.github/workflows/provider-matrix.yml``, read as text (no YAML parser needed)."""
+
+    @pytest.fixture
+    def text(self) -> str:
+        return (_ROOT / ".github" / "workflows" / "provider-matrix.yml").read_text(encoding="utf-8")
+
+    def test_it_can_still_be_started_by_hand(self, text: str):
+        assert re.search(r"^\s*workflow_dispatch:", text, re.MULTILINE)
+
+    def test_it_also_runs_on_a_schedule(self, text: str):
+        """Nobody notices a provider drifting if the matrix only ever runs by hand (P6-03)."""
+        match = re.search(
+            r"^\s*schedule:[ \t]*\n"
+            r"(?:[ \t]*#[^\n]*\n)*"  # comment lines may sit between the key and the entry
+            r"[ \t]*-[ \t]*cron:[ \t]*['\"]([^'\"\n]+)['\"]",
+            text,
+            re.MULTILINE,
+        )
+
+        assert match, "no cron schedule"
+        assert len(match.group(1).split()) == 5, match.group(1)
+
+    def test_it_asks_for_the_live_cases_itself(self, text: str):
+        """A plain run leaves them out, so this one has to select them."""
+        assert re.search(r"^\s*run: pytest .*-m real_llm\b", text, re.MULTILINE)

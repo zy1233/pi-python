@@ -196,10 +196,13 @@ async def test_workflow_subagents_stay_on_the_parent_provider_and_get_no_foreign
     an explicit cross-provider model gets no key from the parent (its SDK uses its own).
     """
     pytest.importorskip("pi_dynamic_workflows")
-    # Workflow journals are written under Path.home(); keep the test off the real HOME.
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("USERPROFILE", str(tmp_path))
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    # Journals follow the session's home (``tmp_path``, which ``_make_harness`` passes). A
+    # stand-in user home keeps a regression off the real one, and is asserted untouched.
+    fake_user = tmp_path / "fake-user"
+    monkeypatch.delenv("PI_HOME", raising=False)
+    monkeypatch.setenv("HOME", str(fake_user))
+    monkeypatch.setenv("USERPROFILE", str(fake_user))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_user))
     monkeypatch.setenv("PI_WIRING_KEY", "deepseek-secret")
 
     script = (
@@ -235,6 +238,9 @@ async def test_workflow_subagents_stay_on_the_parent_provider_and_get_no_foreign
         ("deepseek", "deepseek-chat", "deepseek-secret"),
         ("anthropic", "claude-x", None),
     ]
+    journals = list((tmp_path / "workflow-journals").glob("*.jsonl"))
+    assert len(journals) == 1  # written under the session's home ...
+    assert not fake_user.exists()  # ... and nothing went to the user's own
 
 
 @pytest.mark.asyncio
@@ -259,3 +265,42 @@ async def test_goal_guidelines_do_not_claim_goal_mode_before_a_goal_is_started(t
     assert "goal_update" in prompt  # the contribution is rendered ...
     assert "You are in goal-driven mode" not in prompt  # ... without claiming a mode
     assert "/goal" in prompt  # and says when the tools apply
+
+
+def _write_command_extension(directory: Path, command: str) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{command}.py").write_text(
+        "def activate(pi):\n"
+        f"    pi.register_command({command!r}, description='x', handler=lambda args: None)\n",
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.asyncio
+async def test_user_extensions_come_from_the_home_the_session_was_given(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Audit P7-13: the CLI read its config from ``PI_HOME`` / the ``home`` it was given, but
+    the extension loader went to ``Path.home()`` directly, so one session used two homes."""
+    given_home = tmp_path / "given-home"
+    real_user = tmp_path / "real-user"
+    _write_command_extension(given_home / "extensions", "from_given_home")
+    _write_command_extension(real_user / ".pi-python" / "extensions", "from_real_home")
+    monkeypatch.delenv("PI_HOME", raising=False)
+    monkeypatch.setenv("HOME", str(real_user))
+    monkeypatch.setenv("USERPROFILE", str(real_user))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: real_user))
+    session = await JsonlSessionRepo(tmp_path / "sessions").create({"cwd": str(tmp_path)})
+
+    harness = await create_session_harness(
+        session=session,
+        cwd=tmp_path,
+        config=CliConfig(),
+        stream_fn=mock_text_stream,
+        home=given_home,
+    )
+    await harness.load_extensions()
+
+    commands = harness.extension_registry.get_commands()
+    assert "from_given_home" in commands
+    assert "from_real_home" not in commands

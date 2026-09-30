@@ -1277,3 +1277,52 @@ async def test_skipped_extensions_is_empty_until_extensions_are_loaded():
     harness = await _idle_harness()
 
     assert harness.skipped_extensions == []
+
+
+# ---------------------------------------------------------------------------
+# An extension that fails to load is reported, not lost (audit P7-12)
+# ---------------------------------------------------------------------------
+
+
+def _raising_extension(pi) -> None:
+    raise RuntimeError("cannot start")
+
+
+@pytest.mark.asyncio
+async def test_failed_extensions_lists_extensions_that_could_not_start_and_keeps_the_rest():
+    def fine(pi) -> None:
+        pi.register_command("still-here", description="x", handler=lambda args: None)
+
+    harness = await _idle_harness(extensions=[_raising_extension, fine])
+
+    assert harness.failed_extensions == []  # nothing is known until they are loaded
+    await harness.load_extensions()
+
+    ((failure),) = harness.failed_extensions
+    assert failure.name.endswith("_raising_extension")
+    assert failure.source == "programmatic"
+    assert failure.error == "RuntimeError: cannot start"
+    assert "still-here" in harness.extension_registry.get_commands()
+
+
+@pytest.mark.asyncio
+async def test_failed_extensions_includes_an_extension_dir_whose_module_cannot_be_imported(
+    tmp_path,
+):
+    """``extension_dirs`` are scanned by the harness itself, ahead of ``load_all``."""
+    extra = tmp_path / "extra"
+    extra.mkdir()
+    (extra / "typo.py").write_text("import no_such_module_anywhere\n", encoding="utf-8")
+    (extra / "fine.py").write_text(
+        "def activate(pi):\n"
+        "    pi.register_command('from-dir', description='x', handler=lambda args: None)\n",
+        encoding="utf-8",
+    )
+    harness = await _idle_harness(extension_dirs=[str(extra)])
+
+    await harness.load_extensions()
+
+    ((failure),) = harness.failed_extensions
+    assert (failure.name, failure.source) == ("typo.py", "directory")
+    assert "no_such_module_anywhere" in failure.error
+    assert "from-dir" in harness.extension_registry.get_commands()

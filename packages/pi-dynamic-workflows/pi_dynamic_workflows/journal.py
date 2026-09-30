@@ -1,8 +1,14 @@
 """Append-only JSONL journal for workflow run replay.
 
-Records each host call (``agent()``, ``phase()``, ``log()``) with a SHA-256
-request hash so that re-running the same workflow can skip LLM calls whose
-inputs have not changed.
+Records the result of each ``agent()`` call under a SHA-256 hash of its request, so that
+re-running a workflow can skip the calls it already has an answer to.
+
+The journal is a request-keyed cache, not a transcript. A call is answered by the earliest
+recorded answer to the *same* request that this run has not used yet, whatever order the
+answers were recorded in (``parallel()`` records in completion order) and whatever else in
+the script changed. Two things follow: identical requests replay in the order they were
+recorded, and a step whose request is unchanged is replayed even when an earlier step had to
+run again, so what a replayed step did to the workspace (files it edited) is not redone.
 """
 
 from __future__ import annotations
@@ -11,6 +17,7 @@ import hashlib
 import json
 import logging
 import time
+from collections import deque
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -44,17 +51,21 @@ class JournalEntry:
 
 
 class Journal:
-    """Append-only JSONL journal for deterministic replay.
+    """Append-only JSONL journal for replay (see the module docstring).
 
-    * ``try_replay(kind, req_hash)`` — returns cached result on hash match,
-      or ``_MISS`` on divergence (auto-truncates).
-    * ``append(kind, req_hash, result)`` — records a new entry.
+    * ``try_replay(kind, req_hash)`` — the earliest unused recorded answer to that request,
+      or ``_MISS``. A miss changes nothing: no entry is dropped and the file is not rewritten.
+    * ``append(kind, req_hash, result)`` — records a new answer. It is never handed back to
+      the run that recorded it: only what was on file when replay began can be replayed.
     """
 
     def __init__(self, path: Path | None = None) -> None:
         self._entries: list[JournalEntry] = []
         self._path = path
-        self._cursor = 0
+        # Recorded entries (indexes into ``_entries``) by request, oldest first, minus those
+        # already replayed. Built by ``_replay_queues`` when replay first needs it.
+        self._replay: dict[tuple[str, str], deque[int]] | None = None
+        self._replayed = 0
 
     # -- persistence ---------------------------------------------------------
 
@@ -85,33 +96,27 @@ class Journal:
             j._entries.clear()
         return j
 
-    def _flush_to_disk(self) -> None:
-        if self._path is None:
-            return
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self._path, "w", encoding="utf-8") as fh:
-            for entry in self._entries:
-                fh.write(json.dumps(asdict(entry), ensure_ascii=False) + "\n")
-
     # -- replay / record -----------------------------------------------------
 
-    def try_replay(self, kind: str, req_hash: str) -> Any:
-        """Return cached result if the next entry matches, else ``_MISS``.
+    def _replay_queues(self) -> dict[tuple[str, str], deque[int]]:
+        """What can be replayed: the entries on file when this is first needed."""
+        if self._replay is None:
+            self._replay = {}
+            for index, entry in enumerate(self._entries):
+                self._replay.setdefault((entry.kind, entry.req_hash), deque()).append(index)
+        return self._replay
 
-        On hash mismatch the journal is truncated from the current cursor
-        position so subsequent calls will record fresh entries.
-        """
-        if self._cursor >= len(self._entries):
+    def try_replay(self, kind: str, req_hash: str) -> Any:
+        """The earliest recorded answer to this request not yet replayed, else ``_MISS``."""
+        queue = self._replay_queues().get((kind, req_hash))
+        if not queue:
             return _MISS
-        entry = self._entries[self._cursor]
-        if entry.kind == kind and entry.req_hash == req_hash:
-            self._cursor += 1
-            return entry.result
-        self.truncate_from(self._cursor)
-        return _MISS
+        self._replayed += 1
+        return self._entries[queue.popleft()].result
 
     def append(self, kind: str, req_hash: str, result: Any) -> None:
         """Record a new host-call result."""
+        self._replay_queues()  # fix what may be replayed before this run adds to the journal
         if len(self._entries) >= MAX_ENTRIES:
             logger.warning("Journal entry cap (%d) reached; skipping append", MAX_ENTRIES)
             return
@@ -134,14 +139,6 @@ class Journal:
             with open(self._path, "a", encoding="utf-8") as fh:
                 fh.write(line)
         self._entries.append(entry)
-        self._cursor = len(self._entries)
-
-    def truncate_from(self, seq: int) -> None:
-        """Discard entries from *seq* onwards (divergence)."""
-        if seq < len(self._entries):
-            self._entries = self._entries[:seq]
-            self._cursor = seq
-            self._flush_to_disk()
 
     # -- introspection -------------------------------------------------------
 
@@ -151,4 +148,5 @@ class Journal:
 
     @property
     def replayed_count(self) -> int:
-        return self._cursor
+        """How many calls were answered from the journal."""
+        return self._replayed

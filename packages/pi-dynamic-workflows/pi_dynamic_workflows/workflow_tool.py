@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import logging
+import re
 import uuid
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from pydantic import BaseModel, Field
 
+from pi_agent_core.home import pi_home
 from pi_agent_core.types import AgentToolResult
 from pi_dynamic_workflows.builtin_workflows import (
     BUILTIN_WORKFLOW_NAMES,
@@ -19,8 +24,17 @@ from pi_dynamic_workflows.runtime import (
     MAX_CONCURRENCY,
     MockSubagentExecutor,
     SubagentExecutor,
+    UnavailableSubagentExecutor,
     WorkflowRuntime,
 )
+
+logger = logging.getLogger(__name__)
+
+# How long an aborted run may take to wind down (sub-agents stop, worktrees are removed)
+# before the tool stops waiting for it and answers anyway.
+_UNWIND_GRACE_S = 10.0
+
+_T = TypeVar("_T")
 
 WORKFLOW_GATE_GUIDELINE = (
     "The `workflow` tool runs multi-agent orchestration — it fans decomposable work "
@@ -135,18 +149,94 @@ def _format_run_result(run_result: Any) -> tuple[str, dict[str, Any]]:
     return text, details
 
 
-_RUN_ID_RE = __import__("re").compile(r"^[a-zA-Z0-9_-]{1,128}$")
+class _Aborted(Exception):
+    """The turn that started the workflow was aborted while it was running."""
 
 
-def _journal_dir() -> Path:
-    return Path.home() / ".pi-python" / "workflow-journals"
+async def _wait_abort(signal: Any) -> None:
+    """Return once *signal* is aborted: it offers ``wait_aborted()``, or only a flag."""
+    wait_aborted = getattr(signal, "wait_aborted", None)
+    if callable(wait_aborted):
+        await wait_aborted()
+        return
+    while not getattr(signal, "aborted", False):
+        await asyncio.sleep(0.05)
 
 
-def _resolve_journal(run_id: str, *, resume: bool = False) -> Any:
+def _retrieve(task: asyncio.Future[Any]) -> None:
+    """Mark the exception of a finished task as seen: nobody is left to await it."""
+    if not task.cancelled():
+        task.exception()
+
+
+async def _stop(task: asyncio.Future[Any]) -> None:
+    """Cancel *task* and give it ``_UNWIND_GRACE_S`` to wind down (its ``finally`` blocks)."""
+    task.cancel()
+    await asyncio.wait({task}, timeout=_UNWIND_GRACE_S)
+    if task.done():
+        _retrieve(task)
+        return
+    logger.warning(
+        "A workflow run did not stop within %.0fs of the abort; leaving it to end on its own",
+        _UNWIND_GRACE_S,
+    )
+    task.add_done_callback(_retrieve)
+
+
+async def _abortable(start: Callable[[], Awaitable[_T]], signal: Any) -> _T:
+    """Run ``start()``. If *signal* is aborted first, stop the run and raise ``_Aborted``.
+
+    The run is stopped by cancelling it, so it unwinds the way any cancelled task does:
+    sub-agents stop, worktrees are removed. This returns only after that (or the grace
+    period). It also stops the run when this call is itself cancelled.
+    """
+    if signal is None:
+        return await start()
+    task = asyncio.ensure_future(start())
+    watcher = asyncio.ensure_future(_wait_abort(signal))
+    try:
+        await asyncio.wait({task, watcher}, return_when=asyncio.FIRST_COMPLETED)
+        if task.done():
+            return task.result()
+        await _stop(task)
+        raise _Aborted
+    except asyncio.CancelledError:
+        await _stop(task)
+        raise
+    finally:
+        watcher.cancel()
+
+
+def _cancelled_result(script_name: str, run_id: str) -> AgentToolResult:
+    return AgentToolResult(
+        content=[
+            {
+                "type": "text",
+                "text": (
+                    f"Workflow **{script_name}** was cancelled (run_id: {run_id}); no more "
+                    "agents will start. Agents that had already finished are journaled: to carry "
+                    f"on, call the tool again with resume_from_run_id={run_id}."
+                ),
+            }
+        ],
+        details={"cancelled": True, "runId": run_id},
+    )
+
+
+# ``fullmatch``: ``$`` would also accept a trailing newline, and the id is a file name.
+_RUN_ID_RE = re.compile(r"[a-zA-Z0-9_-]{1,128}")
+
+
+def _journal_dir(home: Path | str | None = None) -> Path:
+    """``<pi home>/workflow-journals`` for the session's home (``PI_HOME`` by default)."""
+    return pi_home(home) / "workflow-journals"
+
+
+def _resolve_journal(run_id: str, *, resume: bool = False, home: Path | str | None = None) -> Any:
     """Load (resume) or create (first run) a journal for *run_id*."""
     from pi_dynamic_workflows.journal import Journal
 
-    jdir = _journal_dir()
+    jdir = _journal_dir(home)
     jdir.mkdir(parents=True, exist_ok=True)
     path = jdir / f"{run_id}.jsonl"
     if resume:
@@ -158,8 +248,15 @@ def _make_workflow_execute(
     executor: SubagentExecutor | None = None,
     cwd: str = ".",
     manager: Any | None = None,
+    *,
+    home: Path | str | None = None,
 ) -> Any:
-    """Build the workflow tool's execute function."""
+    """Build the workflow tool's execute function.
+
+    ``executor=None`` means the mock (tests). The extension itself passes an
+    ``UnavailableSubagentExecutor`` when it cannot build a real one; the tool then says so
+    instead of running scripts against canned answers.
+    """
     _executor = executor or MockSubagentExecutor()
 
     async def workflow_execute(
@@ -168,6 +265,19 @@ def _make_workflow_execute(
         signal: Any = None,
         on_update: Any = None,
     ) -> AgentToolResult:
+        if isinstance(_executor, UnavailableSubagentExecutor):
+            return AgentToolResult(
+                content=[
+                    {
+                        "type": "text",
+                        "text": (
+                            "The workflow tool cannot run in this session: sub-agents are "
+                            f"unavailable ({_executor.reason})."
+                        ),
+                    }
+                ]
+            )
+
         script: str | None = None
         script_name = "workflow"
 
@@ -196,15 +306,15 @@ def _make_workflow_execute(
 
         # Assign a stable run_id first; resume reuses the caller's id.
         if params.resume_from_run_id:
-            if not _RUN_ID_RE.match(params.resume_from_run_id):
+            if not _RUN_ID_RE.fullmatch(params.resume_from_run_id):
                 return AgentToolResult(
                     content=[{"type": "text", "text": "Invalid resume_from_run_id format."}]
                 )
             run_id = params.resume_from_run_id
-            journal = _resolve_journal(run_id, resume=True)
+            journal = _resolve_journal(run_id, resume=True, home=home)
         else:
             run_id = uuid.uuid4().hex[:12]
-            journal = _resolve_journal(run_id)
+            journal = _resolve_journal(run_id, home=home)
 
         # Wire up worktree isolation when requested.
         run_executor = _executor
@@ -239,6 +349,9 @@ def _make_workflow_execute(
                 ]
             )
 
+        if getattr(signal, "aborted", False):  # cancelled before it began: start nothing
+            return _cancelled_result(script_name, run_id)
+
         if params.background and manager is not None:
             await manager.start_background(
                 runtime,
@@ -247,6 +360,7 @@ def _make_workflow_execute(
                 run_id=run_id,
                 tool_call_id=tool_call_id,
                 script_name=script_name,
+                cleanup=wt_mgr.cleanup_all if wt_mgr is not None else None,
             )
             return AgentToolResult(
                 content=[
@@ -262,7 +376,11 @@ def _make_workflow_execute(
             )
 
         try:
-            run_result = await runtime.execute(script, params.args, run_id=run_id)
+            run_result = await _abortable(
+                lambda: runtime.execute(script, params.args, run_id=run_id), signal
+            )
+        except _Aborted:
+            return _cancelled_result(script_name, run_id)
         except Exception as e:
             return AgentToolResult(content=[{"type": "text", "text": f"Workflow failed: {e}"}])
         finally:
@@ -296,8 +414,14 @@ def create_workflow_tool(
     executor: SubagentExecutor | None = None,
     cwd: str = ".",
     manager: Any | None = None,
+    *,
+    home: Path | str | None = None,
 ) -> Any:
-    """Return a ToolDefinition for the workflow tool."""
+    """Return a ToolDefinition for the workflow tool.
+
+    ``home`` is the pi-python home directory (``PI_HOME`` / ``~/.pi-python`` when omitted);
+    run journals are written below it. ``executor=None`` uses the mock executor (tests).
+    """
     from pi_agent_core.extensions.types import ToolDefinition
 
     return ToolDefinition(
@@ -307,7 +431,7 @@ def create_workflow_tool(
             "agent(), optionally composing calls with parallel() and pipeline()."
         ),
         parameters=WorkflowParams,
-        execute=_make_workflow_execute(executor, cwd, manager),
+        execute=_make_workflow_execute(executor, cwd, manager, home=home),
         label="Workflow",
         prompt_snippet=(
             "Delegate substantive independent or staged work to subagents with "

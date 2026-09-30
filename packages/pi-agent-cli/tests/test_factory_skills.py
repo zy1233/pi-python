@@ -23,7 +23,11 @@ async def test_create_session_harness_loads_skills(tmp_path: Path, monkeypatch):
         encoding="utf-8",
     )
     config_path = tmp_path / "agent.toml"
-    config_path.write_text('[skills]\npaths = ["skills"]\n', encoding="utf-8")
+    # "skills" is relative to the project, so its skills load only for a trusted project.
+    config_path.write_text(
+        '[skills]\npaths = ["skills"]\n[extensions]\ntrust_project_extensions = true\n',
+        encoding="utf-8",
+    )
     monkeypatch.setenv("PI_USE_MOCK", "1")
     monkeypatch.setenv("PI_HOME", str(tmp_path))
 

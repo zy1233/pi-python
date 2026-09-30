@@ -14,6 +14,15 @@ from pi_agent_cli.config import (
 )
 
 
+def test_the_cli_and_the_extension_loader_share_one_pi_home():
+    """The CLI honoured PI_HOME while the extension loader and the workflow extension went
+    to ``Path.home()`` directly; one resolver keeps them from drifting apart again."""
+    from pi_agent_cli import config as cli_config
+    from pi_agent_core import home as core_home
+
+    assert cli_config.pi_home is core_home.pi_home
+
+
 def test_load_config_defaults_when_missing(tmp_path: Path):
     assert load_config(tmp_path) == CliConfig()
 

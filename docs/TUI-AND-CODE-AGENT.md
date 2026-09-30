@@ -118,11 +118,12 @@ enabled = true
 command = "python -m pi_agent_cli"
 
 [extensions]
-# Projects allowed to run their own <project>/.pi-python/extensions (arbitrary Python).
+# Projects allowed to use their own <project>/.pi-python/extensions (arbitrary Python),
+# .pi/SYSTEM.md, .pi/APPEND_SYSTEM.md and project-relative skills.
 trusted_projects = ["~/work/my-repo"]
 ```
 
-Project-local extensions are skipped unless the project is listed under `trusted_projects` (subdirectories count), or you start with `PI_TRUST_PROJECT_EXTENSIONS=1` / `--trust-project-extensions`. The agent tells you in the session when it skipped some. Extension packages installed with `pip` and `~/.pi-python/extensions` always load. The TUI's own folder trust (`/hooks trust`) does not apply here.
+A project's own extensions, `.pi/SYSTEM.md`, `.pi/APPEND_SYSTEM.md` and project-relative skills (such as `.pi/skills`) are skipped unless the project is listed under `trusted_projects` (subdirectories count), or you start with `PI_TRUST_PROJECT_EXTENSIONS=1` / `--trust-project-extensions`. The agent tells you in the session when it skipped some. Extension packages installed with `pip`, `~/.pi-python/extensions`, `AGENTS.md`, and skills paths that are absolute or start with `~` always load. The TUI's own folder trust (`/hooks trust`) does not apply here.
 
 ### `config.toml` — TUI-only config (optional)
 

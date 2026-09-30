@@ -145,16 +145,9 @@ class HarnessSubagentExecutor(SubagentExecutor):
         schema: dict[str, Any] | None = None,
         cwd: str | None = None,
     ) -> AgentResult:
-        from pi_agent_harness.agent_harness import AgentHarness
-        from pi_agent_harness.session.memory_storage import MemorySessionStorage
-        from pi_agent_harness.session.session import Session
-
         start = time.monotonic()
         effective_model = self._resolve_model(tier, model)
         effective_cwd = cwd or self._cwd
-
-        from pi_agent_core.coding_tools import create_all_tools
-        from pi_agent_harness.env import LocalExecutionEnv
 
         wt_path: str | None = None
         if self._worktree_manager is not None:
@@ -170,6 +163,44 @@ class HarnessSubagentExecutor(SubagentExecutor):
                     error=f"worktree creation failed: {wt_exc}",
                     duration_ms=(time.monotonic() - start) * 1000,
                 )
+
+        try:
+            return await self._run_in(
+                prompt,
+                effective_model=effective_model,
+                effective_cwd=effective_cwd,
+                wt_path=wt_path,
+                label=label,
+                phase=phase,
+                timeout_ms=timeout_ms,
+                schema=schema,
+                start=start,
+            )
+        finally:
+            # The worktree this call created goes with the call, whatever ended it: an
+            # answer, a timeout, an error, a cancel. Only an answer's changes were applied.
+            if wt_path is not None:
+                await self._remove_worktree(wt_path)
+
+    async def _run_in(
+        self,
+        prompt: str,
+        *,
+        effective_model: Any,
+        effective_cwd: str,
+        wt_path: str | None,
+        label: str | None,
+        phase: str | None,
+        timeout_ms: float | None,
+        schema: dict[str, Any] | None,
+        start: float,
+    ) -> AgentResult:
+        """One sub-agent run in *effective_cwd* (the worktree, when *wt_path* is set)."""
+        from pi_agent_core.coding_tools import create_all_tools
+        from pi_agent_harness.agent_harness import AgentHarness
+        from pi_agent_harness.env import LocalExecutionEnv
+        from pi_agent_harness.session.memory_storage import MemorySessionStorage
+        from pi_agent_harness.session.session import Session
 
         storage = await MemorySessionStorage.create()
         session = Session(storage)
@@ -202,8 +233,9 @@ class HarnessSubagentExecutor(SubagentExecutor):
                 done, _ = await asyncio.wait([task], timeout=timeout_ms / 1000)
                 if not done:
                     task.cancel()
-                    with contextlib.suppress(asyncio.CancelledError, Exception):
-                        await task
+                    # gather, not ``suppress(CancelledError)``: a cancel of *this* call while
+                    # it waits here must still get through.
+                    await asyncio.gather(task, return_exceptions=True)
                     elapsed = (time.monotonic() - start) * 1000
                     return AgentResult(error="timeout", duration_ms=elapsed)
                 assistant = task.result()
@@ -233,14 +265,6 @@ class HarnessSubagentExecutor(SubagentExecutor):
                     wt_path,
                     exc_info=True,
                 )
-            try:
-                await self._worktree_manager.cleanup(wt_path)
-            except Exception:
-                logger.debug(
-                    "Worktree cleanup failed for %s",
-                    wt_path,
-                    exc_info=True,
-                )
 
         return AgentResult(
             text=text,
@@ -248,3 +272,12 @@ class HarnessSubagentExecutor(SubagentExecutor):
             tokens_used=tokens,
             duration_ms=(time.monotonic() - start) * 1000,
         )
+
+    async def _remove_worktree(self, wt_path: str) -> None:
+        """Remove *wt_path*; a failure is logged, never raised over the run's own outcome."""
+        if self._worktree_manager is None:
+            return
+        try:
+            await self._worktree_manager.cleanup(wt_path)
+        except Exception:
+            logger.warning("Worktree cleanup failed for %s", wt_path, exc_info=True)

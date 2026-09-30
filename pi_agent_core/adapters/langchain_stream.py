@@ -7,9 +7,11 @@ import contextlib
 import inspect
 import json
 import logging
+import os
 import random
 import time
 from typing import Any
+from urllib.parse import urlsplit
 
 from pi_agent_core.adapters.langchain_convert import agent_tool_to_lc_schema, convert_to_langchain
 from pi_agent_core.event_stream import AssistantMessageEventStream
@@ -57,6 +59,18 @@ _OPENAI_EFFORT: dict[ThinkingLevel, str | None] = {
     "medium": "medium",
     "high": "high",
     "xhigh": "high",
+}
+
+# DeepSeek's own mapping for pi ("reasoningEffortMap" in
+# https://api-docs.deepseek.com/quick_start/agent_integrations/pi_mono): every level below
+# xhigh is "high", xhigh is "max".
+_DEEPSEEK_EFFORT: dict[ThinkingLevel, str | None] = {
+    "off": None,
+    "minimal": "high",
+    "low": "high",
+    "medium": "high",
+    "high": "high",
+    "xhigh": "max",
 }
 
 # Anthropic requires max_tokens to exceed the thinking budget; reserve room for
@@ -128,11 +142,19 @@ def _apply_reasoning_params(
     without it reject these params at the API), and `level` is the per-request
     switch. This also keeps request params consistent with transform_messages,
     which strips thinking history for models with reasoning=False.
+
+    The one exception is DeepSeek's own API, which thinks unless told not to: there the
+    absence of a parameter means "think", so not thinking is an explicit request too
+    (`_apply_deepseek_thinking`).
     """
+    provider = model.provider.lower()
+    if provider == "deepseek" and _is_deepseek_api(model.base_url):
+        thinking_level = level if level != "off" and model.reasoning else None
+        return _apply_deepseek_thinking(kwargs, thinking_level)
+
     if not level or level == "off" or not model.reasoning:
         return kwargs
 
-    provider = model.provider.lower()
     if provider == "anthropic":
         budget = _ANTHROPIC_BUDGET.get(level)
         if budget is not None:
@@ -142,6 +164,44 @@ def _apply_reasoning_params(
         effort = _OPENAI_EFFORT.get(level)
         if effort is not None:
             kwargs = {**kwargs, "reasoning_effort": effort}
+    return kwargs
+
+
+def _is_deepseek_api(base_url: str | None) -> bool:
+    """True for DeepSeek's own API: no custom endpoint, or one on deepseek.com.
+
+    A gateway that serves DeepSeek models (SiliconFlow, vLLM, ...) has its own idea of
+    "thinking" and may refuse these parameters, so it is left alone. Without a `base_url`,
+    ChatDeepSeek reads DEEPSEEK_API_BASE, so that decides the same way.
+    """
+    url = (base_url or os.environ.get("DEEPSEEK_API_BASE") or "").strip()
+    if not url:
+        return True
+    host = urlsplit(url if "://" in url else f"//{url}").hostname or ""
+    return host == "deepseek.com" or host.endswith(".deepseek.com")
+
+
+def _apply_deepseek_thinking(kwargs: dict[str, Any], level: ThinkingLevel | None) -> dict[str, Any]:
+    """Switch DeepSeek's thinking mode on (with an effort) or off; *level* None means off.
+
+    Its API takes `thinking: {"type": "enabled" | "disabled"}` (default: enabled) and
+    `reasoning_effort`. Neither is a standard OpenAI parameter, so the first goes through
+    `extra_body`.
+
+    Known limit: with thinking on, requests that carry tools must send `reasoning_content`
+    back on the earlier assistant messages, or the API answers 400. ChatDeepSeek (checked
+    with 1.1.0 and 1.1.1) does not send it, so thinking together with tools fails after the
+    first tool round; thinking without tools, and no thinking at all, are fine.
+    """
+    extra_body = dict(kwargs.get("extra_body") or {})
+    if level is None:
+        extra_body["thinking"] = {"type": "disabled"}
+        return {**kwargs, "extra_body": extra_body}
+    extra_body["thinking"] = {"type": "enabled"}
+    kwargs = {**kwargs, "extra_body": extra_body}
+    effort = _DEEPSEEK_EFFORT.get(level)
+    if effort is not None:
+        kwargs["reasoning_effort"] = effort
     return kwargs
 
 

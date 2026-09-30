@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from pi_agent_core.home import pi_home
 from pi_agent_core.types import ThinkingLevel
 
 PermissionMode = Literal["ask", "auto", "always-approve"]
@@ -19,14 +20,8 @@ PermissionMode = Literal["ask", "auto", "always-approve"]
 _VALID_PERMISSION: set[str] = {"ask", "auto", "always-approve"}
 _VALID_THINKING: set[str] = {"off", "minimal", "low", "medium", "high", "xhigh"}
 
-
-def pi_home(override: Path | str | None = None) -> Path:
-    if override is not None:
-        return Path(override).expanduser()
-    raw = os.environ.get("PI_HOME")
-    if raw:
-        return Path(raw).expanduser()
-    return Path.home() / ".pi-python"
+# ``pi_home`` (imported above and re-exported from here) is the one place that decides where
+# pi-python keeps its files; the extension loader and the extensions use the same function.
 
 
 def load_local_env(home: Path | str | None = None) -> None:
@@ -67,6 +62,15 @@ def expand_config_path(raw: str, *, cwd: str | Path) -> str:
     if not path.is_absolute():
         path = Path(cwd) / path
     return str(path.resolve())
+
+
+def is_project_relative_path(raw: str) -> bool:
+    """Does ``expand_config_path`` resolve *raw* against the project (cwd)?
+
+    Such an entry points into whatever project is open, so what it finds is the project's
+    own content, not the user's.
+    """
+    return not Path(os.path.expanduser(raw)).is_absolute()
 
 
 @dataclass(frozen=True)

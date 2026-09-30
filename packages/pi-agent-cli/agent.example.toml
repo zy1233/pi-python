@@ -15,6 +15,7 @@ base_url = "https://api.siliconflow.cn/v1"
 api_key_env = "REAL_LLM_API_KEY" # key for `provider` only; other providers use their own (e.g. ANTHROPIC_API_KEY)
 
 [skills]
+# ".pi/skills" is relative to the project, so it loads only for a trusted project (see [extensions]).
 paths = ["~/.pi-python/skills", ".pi/skills"]
 
 [agent]
@@ -29,14 +30,19 @@ command = "python -m pi_agent_cli"
 # append_system_prompt_file = "~/.pi-python/agent/APPEND_SYSTEM.md"
 
 [git]
+# A `git status` snapshot (branch name and the paths of changed and untracked files) is added to
+# the system prompt at the start of a session, so it is sent to the model provider with every
+# request. Set enabled = false if such names are sensitive.
 # enabled = true
-# timeout_seconds = 2
+# timeout_seconds = 2   # one budget for the whole snapshot (up to four git commands), not per command
 # max_status_lines = 40
 
 [extensions]
-# Extensions in <project>/.pi-python/extensions run arbitrary Python as soon as a session opens,
-# so they are skipped unless you trust the project. Only this file is read for that decision
-# (never a config inside the project). Installed extension packages and ~/.pi-python/extensions
+# Project trust. Extensions in <project>/.pi-python/extensions run arbitrary Python as soon as a
+# session opens, and the project's .pi/SYSTEM.md, .pi/APPEND_SYSTEM.md and project-relative
+# [skills] paths decide what the model is told, so all of them are skipped unless you trust the
+# project. Only this file is read for that decision (never a config inside the project).
+# Installed extension packages, ~/.pi-python/extensions, AGENTS.md and absolute or ~ skills paths
 # are not affected.
 # trusted_projects = ["~/work/my-repo"] # absolute or ~ paths; subdirectories are trusted too
 #                                       # (Windows: use forward slashes, e.g. "C:/work/my-repo")

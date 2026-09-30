@@ -41,6 +41,11 @@ async def _run_git(
     return proc.returncode or 0, stdout or b"", stderr or b""
 
 
+def _text(output: bytes) -> str:
+    """Git's stderr as text for a message. (Patches are never decoded: they are bytes.)"""
+    return output.decode("utf-8", errors="replace").strip()
+
+
 class WorktreeManager:
     """Create and manage git linked worktrees for isolated execution."""
 
@@ -64,7 +69,7 @@ class WorktreeManager:
             cwd=self._source_cwd,
         )
         if rc != 0:
-            raise RuntimeError(f"git worktree add failed: {stderr.decode().strip()}")
+            raise RuntimeError(f"git worktree add failed: {_text(stderr)}")
 
         if config.copy_mode == "snapshot":
             await self._apply_snapshot(wt_dir)
@@ -79,13 +84,17 @@ class WorktreeManager:
         that ``collect_diff()`` only captures the agent's delta — not the
         pre-existing dirty state that the source cwd already contains.
         """
-        _, diff_unstaged, _ = await _run_git(["diff", "HEAD"], cwd=self._source_cwd)
+        # ``--binary``: without it a changed binary file is a "Binary files differ" line that
+        # ``git apply`` refuses, and that one file costs the worktree the whole snapshot.
+        _, diff_unstaged, _ = await _run_git(["diff", "--binary", "HEAD"], cwd=self._source_cwd)
         if diff_unstaged.strip():
             rc, _, err = await _run_git(["apply", "--allow-empty"], cwd=wt_dir, stdin=diff_unstaged)
             if rc != 0:
-                logger.warning("Snapshot unstaged apply failed: %s", err.decode().strip())
+                logger.warning("Snapshot unstaged apply failed: %s", _text(err))
 
-        _, diff_staged, _ = await _run_git(["diff", "--cached", "HEAD"], cwd=self._source_cwd)
+        _, diff_staged, _ = await _run_git(
+            ["diff", "--binary", "--cached", "HEAD"], cwd=self._source_cwd
+        )
         if diff_staged.strip():
             rc, _, err = await _run_git(
                 ["apply", "--cached", "--allow-empty"],
@@ -93,7 +102,7 @@ class WorktreeManager:
                 stdin=diff_staged,
             )
             if rc != 0:
-                logger.warning("Snapshot staged apply failed: %s", err.decode().strip())
+                logger.warning("Snapshot staged apply failed: %s", _text(err))
 
         has_changes = bool(diff_unstaged.strip() or diff_staged.strip())
         if has_changes:
@@ -112,10 +121,25 @@ class WorktreeManager:
                 cwd=wt_dir,
             )
 
-    async def collect_diff(self, worktree_path: str) -> str:
-        """Return ``git diff HEAD`` from the worktree."""
-        _, stdout, _ = await _run_git(["diff", "HEAD"], cwd=worktree_path)
-        return stdout.decode(errors="replace")
+    async def collect_diff(self, worktree_path: str) -> bytes:
+        """The sub-agent's changes in the worktree, as a patch (bytes: never decoded).
+
+        Everything git does not ignore is staged first, so files the agent *created* are in
+        the patch; ``git diff HEAD`` alone lists tracked files only. ``--binary`` carries
+        binary files, and bytes carry files that are not UTF-8: a decode/encode round trip
+        damages them and ``git apply`` then refuses the patch. HEAD is the source's commit,
+        or the snapshot baseline when the source was dirty, so a dirty source's own changes
+        are not part of the patch.
+        """
+        rc, _, err = await _run_git(["add", "-A"], cwd=worktree_path)
+        if rc != 0:
+            raise RuntimeError(f"git add failed: {_text(err)}")
+        rc, stdout, err = await _run_git(
+            ["diff", "--binary", "--cached", "HEAD"], cwd=worktree_path
+        )
+        if rc != 0:
+            raise RuntimeError(f"git diff failed: {_text(err)}")
+        return stdout
 
     async def apply_changes(
         self,
@@ -128,9 +152,9 @@ class WorktreeManager:
         if not diff.strip():
             return
         dest = target or self._source_cwd
-        rc, _, err = await _run_git(["apply", "--allow-empty"], cwd=dest, stdin=diff.encode())
+        rc, _, err = await _run_git(["apply", "--allow-empty"], cwd=dest, stdin=diff)
         if rc != 0:
-            raise RuntimeError(f"apply_changes failed: {err.decode().strip()}")
+            raise RuntimeError(f"apply_changes failed: {_text(err)}")
 
     async def cleanup(self, worktree_path: str) -> None:
         """Remove a linked worktree."""
@@ -139,7 +163,7 @@ class WorktreeManager:
             cwd=self._source_cwd,
         )
         if rc != 0:
-            logger.warning("worktree remove failed: %s", err.decode().strip())
+            logger.warning("worktree remove failed: %s", _text(err))
         if worktree_path in self._active:
             self._active.remove(worktree_path)
 
