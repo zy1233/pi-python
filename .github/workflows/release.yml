@@ -103,6 +103,45 @@ jobs:
           name: tui-binary
           path: zypi-linux-x86_64
 
+  build-tui-macos-arm:
+    name: Build TUI binary (macOS arm64)
+    needs: test
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tui/target
+          key: tui-release-${{ runner.os }}-arm64-${{ hashFiles('tui/Cargo.lock') }}
+          restore-keys: tui-release-${{ runner.os }}-arm64-
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "28.x"
+
+      - name: Build zypi (release-dist)
+        working-directory: tui
+        run: cargo build --profile release-dist -p pi-pager-bin
+
+      - name: Prepare binary artifact
+        run: |
+          cp tui/target/release-dist/zypi zypi-macos-arm64
+          chmod +x zypi-macos-arm64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tui-binary-macos-arm64
+          path: zypi-macos-arm64
+
   publish-pypi:
     name: Publish to PyPI
     needs: build
@@ -122,7 +161,7 @@ jobs:
 
   github-release:
     name: GitHub Release
-    needs: [build, build-tui]
+    needs: [build, build-tui, build-tui-macos-arm]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -137,6 +176,11 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: tui-binary
+          path: tui-bin/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: tui-binary-macos-arm64
           path: tui-bin/
 
       - name: Extract version from tag
