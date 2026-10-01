@@ -40,11 +40,21 @@ command = "python -m pi_agent_cli"
 [extensions]
 # Project trust. Extensions in <project>/.pi-python/extensions run arbitrary Python as soon as a
 # session opens, and the project's .pi/SYSTEM.md, .pi/APPEND_SYSTEM.md and project-relative
-# [skills] paths decide what the model is told, so all of them are skipped unless you trust the
-# project. Only this file is read for that decision (never a config inside the project).
-# Installed extension packages, ~/.pi-python/extensions, AGENTS.md and absolute or ~ skills paths
-# are not affected.
-# trusted_projects = ["~/work/my-repo"] # absolute or ~ paths; subdirectories are trusted too
-#                                       # (Windows: use forward slashes, e.g. "C:/work/my-repo")
-# trust_project_extensions = false      # true trusts every project
+# [skills] paths decide what the model is told, so none of them is used until the project is
+# trusted. Only this file, the command line and your own answers decide that (never a config
+# inside the project). Installed extension packages, ~/.pi-python/extensions, AGENTS.md and
+# absolute or ~ skills paths are not affected.
+#
+# An ACP client (the TUI) asks about a project that ships such files, once per directory.
+# "Trust and remember" is saved in ~/.pi-python/agent/trust.json with a fingerprint of those
+# files, so you are asked again when one of them changes (after a git pull, say). Delete the
+# project's entry from that file to take the trust back. Headless (-p) runs never ask, but
+# honour an answer given earlier for the same files.
+# default_project_trust = "ask"         # "ask" (default): ask in an ACP client
+#                                       # "never": do not ask; only the entries and answers below apply
+#                                       # "always": trust every project without asking
+# trusted_projects = ["~/work/my-repo"] # absolute or ~ paths, never asked about; subdirectories are
+#                                       # trusted too (Windows: use forward slashes, "C:/work/my-repo")
+# trust_project_extensions = false      # older switch: true means default_project_trust = "always"
+#                                       # (an explicit default_project_trust wins)
 # One-off alternatives: --trust-project-extensions, or PI_TRUST_PROJECT_EXTENSIONS=1

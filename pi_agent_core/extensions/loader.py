@@ -387,6 +387,16 @@ def _same_directory(a: Path, b: Path) -> bool:
         return False
 
 
+def extension_module_names(directory: str | Path) -> tuple[str, ...]:
+    """The names a scan of *directory* would import (``()``: nothing, or no such directory).
+
+    Listing only; nothing is imported. It is the same list ``discover_directory`` loads and
+    ``SkippedExtensions.names`` reports, so whatever describes a directory to the user (the
+    project trust prompt) says exactly what would run.
+    """
+    return tuple(name for name, _, _ in _extension_sources(Path(directory)))
+
+
 def _extension_sources(path: Path) -> list[tuple[str, Path, str | None]]:
     """What a directory scan would import: ``(name, module file, package name)``.
 

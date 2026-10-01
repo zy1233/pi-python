@@ -324,6 +324,22 @@ class AgentHarness:
 
     # -- Phase 7: Extension lifecycle ----------------------------------------
 
+    def set_trust_project_extensions(self, trusted: bool) -> None:
+        """Decide whether ``<cwd>/.pi-python/extensions`` may be imported (= run).
+
+        For a caller that cannot know when it builds the harness: an ACP agent has to open the
+        session before it may ask the user about the project. Accepted only until the
+        extensions have loaded, which happens once, at ``load_extensions()`` or the first
+        prompt; afterwards the code either ran or was left out, and a change would misreport
+        which.
+        """
+        if self._extensions_loaded:
+            raise AgentHarnessError(
+                "invalid_state",
+                "Extensions are already loaded; project trust can no longer change",
+            )
+        self._extension_config["trust_project_extensions"] = trusted
+
     async def _ensure_extensions_loaded(self) -> None:
         """Load extensions (once) before the first prompt."""
         if self._extensions_loaded:

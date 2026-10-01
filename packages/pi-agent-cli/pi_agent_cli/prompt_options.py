@@ -22,14 +22,20 @@ def load_system_prompt_options(
     config: CliConfig,
     resources: AgentHarnessResources | None = None,
     home: Path | None = None,
+    trusted: bool | None = None,
 ) -> BuildSystemPromptOptions:
-    """Build prompt options from agent.toml, context files, and loaded skills."""
+    """Build prompt options from agent.toml, context files, and loaded skills.
+
+    *trusted*: whether the project's own prompt files may be used. The session knows (the
+    user may have said yes in a prompt); when it does not say, the configuration decides.
+    """
     cwd_s = str(Path(cwd).resolve())
     home_path = pi_home(home)
     # The project's own .pi/SYSTEM.md and .pi/APPEND_SYSTEM.md decide what the model is
     # told, so they count only for a trusted project (AGENTS.md / CLAUDE.md do not, as
     # upstream loads those whatever the trust).
-    trusted = project_extensions_trusted(config, cwd_s)
+    if trusted is None:
+        trusted = project_extensions_trusted(config, cwd_s)
 
     custom_prompt = config.custom_system_prompt
     if custom_prompt is None and config.custom_system_prompt_file:

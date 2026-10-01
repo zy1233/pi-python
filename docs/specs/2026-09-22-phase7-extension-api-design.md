@@ -241,7 +241,7 @@ trust_project_extensions: bool = False  # True 才会扫描 <cwd>/.pi-python/ext
 
 import 一个扩展就是执行它的代码，而 `<项目>/.pi-python/extensions/` 随仓库分发。若无条件扫描，打开一个不受信任的仓库会在用户输入第一个字之前运行仓库里的代码——没有提示，也不经过权限层（加载扩展不是工具调用，§3.5 的 `tool_call` 链管不到它）。
 
-上游 pi 对此有「项目信任」（`packages/coding-agent/docs/security.md`）：信任决定作出之前只加载用户/全局扩展和命令行 `-e` 扩展，项目扩展在信任后才加载；非交互模式不弹提示，按 `defaultProjectTrust` 处理（`ask` / `never` 忽略项目资源，`always` 信任），`--approve` / `--no-approve` 单次覆盖；决定按目录保存（`~/.pi/agent/trust.json`），父目录的决定适用于子目录。本移植版实现其最小子集：**默认拒绝，只接受项目自己写不到的位置给出的授权**。
+上游 pi 对此有「项目信任」（`packages/coding-agent/docs/security.md`）：信任决定作出之前只加载用户/全局扩展和命令行 `-e` 扩展，项目扩展在信任后才加载；非交互模式不弹提示，按 `defaultProjectTrust` 处理（`ask` / `never` 忽略项目资源，`always` 信任），`--approve` / `--no-approve` 单次覆盖；决定按目录保存（`~/.pi/agent/trust.json`），父目录的决定适用于子目录。本移植版实现其子集：**默认不使用项目资源，授权只来自项目自己写不到的地方——用户的配置与命令行，以及用户自己在交互式提示里给出、并绑定到文件内容的回答**（回答保存在 `~/.pi-python/agent/trust.json`，见下文「交互式确认与内容指纹」）。
 
 同一个信任决定还管着项目里另外几样会改变模型所见内容的东西（上游同样把它们放在信任门后）。它们不执行代码，但一个克隆来的仓库不该只因为被打开就能改写 system prompt：
 
@@ -255,19 +255,45 @@ import 一个扩展就是执行它的代码，而 `<项目>/.pi-python/extension
 | 授权来源 | 说明 |
 |---|---|
 | `~/.pi-python/agent.toml` → `[extensions] trusted_projects = ["/abs/path"]` | 绝对路径（或 `~`）白名单；Windows 请写正斜杠（`"C:/work/repo"`），TOML 双引号里的 `\U` 是语法错误，通知里给出的建议值已是正斜杠。名单内目录的子目录同样受信；相对路径被忽略并告警；比较前先解析符号链接（受信目录里指向别处的链接不继承信任） |
-| `[extensions] trust_project_extensions = true` | 全局开关，信任所有项目（≈ 上游 `defaultProjectTrust = "always"`） |
+| `[extensions] default_project_trust = "ask"` / `"never"` / `"always"`（默认 `ask`） | ≈ 上游 `defaultProjectTrust`：`ask` 在 ACP 客户端里询问；`never` 不询问也不授信（白名单、命令行、已保存的回答仍然有效）；`always` 信任所有项目、不询问 |
+| `[extensions] trust_project_extensions = true` | 旧的全局开关，等价于 `default_project_trust = "always"`；显式写了 `default_project_trust` 时以后者为准 |
 | 环境变量 `PI_TRUST_PROJECT_EXTENSIONS=1`（`1/true/yes/on`）或命令行 `--trust-project-extensions` | 单次运行（≈ 上游 `--approve`），适合 headless / CI；后者只是前者的另一种写法，对 ACP 与 headless 都生效 |
+| ACP 里的回答「Trust and remember」→ `<home>/agent/trust.json` | 绑定到受门约束文件的内容指纹；文件变了就失效、重新询问（见下） |
 
 只读取家目录的 `agent.toml`，绝不读取项目内的配置文件，否则仓库可以给自己授信；`load_local_env` 同样只读 `~/.pi-python/local.env`。
 
 未受信的项目目录**不会被 import**：`ExtensionLoader` 只列出本会加载的模块名（`ExtensionLoader.skipped` / `AgentHarness.skipped_extensions`，元素为 `SkippedExtensions(directory, names)`），写一条 warning 日志。CLI 再告诉用户被跳过了什么（扩展，以及存在且本会生效的 prompt 文件与 skills 目录，`extension_trust.skipped_project_resources`）、怎样启用（ACP：`session/new` 应答之后的一条 `agent_message_chunk`；headless：stderr，stdout 仍只有回答）。
 
-`AgentHarness(trust_project_extensions=False)` 与 `ExtensionLoader.load_all(trust_project_extensions=False)` 默认都是拒绝；CLI 通过 `extension_trust.project_extensions_trusted(config, cwd)` 得出该值，`create_session_harness`（扩展）、`load_system_prompt_options`（prompt 文件）与 `load_session_resources`（skills）共用它。配置项沿用 `extensions` 之名，实际管的是上表的整组项目资源。
+`AgentHarness(trust_project_extensions=False)` 与 `ExtensionLoader.load_all(trust_project_extensions=False)` 默认都是拒绝；CLI 通过 `extension_trust.decide_project_trust(config, cwd, home=)` 得出该值并放进会话的 `ProjectTrust`（`project_extensions_trusted` 是只看配置与命令行、不读文件的子集），`create_session_harness`（扩展）、`load_system_prompt_options`（prompt 文件）与 `load_session_resources`（skills）共用它。配置项沿用 `extensions` 之名，实际管的是上表的整组项目资源。
+
+**交互式确认与内容指纹（ACP）。** 信任决定由 `extension_trust.decide_project_trust(config, cwd, home=)` 作出（会读文件并哈希，须在事件循环之外调用），先命中者为准：
+
+| 顺序 | 条件 | 结果 |
+|---|---|---|
+| 1 | `PI_TRUST_PROJECT_EXTENSIONS` / `--trust-project-extensions` | 受信（`override`） |
+| 2 | `default_project_trust = "always"`，或未设它时的旧开关 | 受信（`always`） |
+| 3 | `trusted_projects` | 受信（`allow-list`） |
+| 4 | 项目没有任何受门约束的资源 | 无需信任（`nothing`） |
+| 5 | 资源太多 / 太大 / 读不了，取不出指纹 | 不受信、不提问（`unpinnable`）：回答无从可靠地记住，请写入 `trusted_projects` |
+| 6 | `trust.json` 里有该目录的记录且指纹一致 | 受信（`saved`） |
+| 7 | `default_project_trust = "never"` | 不受信、不提问（`never`） |
+| 8 | 其余 | 有记录但指纹不同为 `changed`，无记录为 `undecided`：ACP 客户端会被询问，headless 不受信 |
+
+- **提问方式。** 只有 ACP agent 会问，且仅当决定可询问、并连着客户端。先发一条普通 `agent_message_chunk`（`trust_prompt.trust_explanation`：目录、涉及的文件及各自的作用；TUI 只渲染权限请求的标题与选项，不渲染其 `content`，所以 tool call 不带 `content`）。这段文字里的名字来自被审查的仓库，而 Linux 上的文件名可以含换行、转义序列与方向控制符，所以不可打印字符写成转义（`\n`、`\x1b`），名字放进代码片段（栅栏比名字里最长的反引号串更长，名字关不掉它），扩展文件名清单最多 300 个字符并以 `…` 标明——仓库没办法给这段话添行。这条消息发不出去（多半是连接已断）就不再发问题：没被告知内容的是与否毫无价值。然后发 `session/request_permission`：合成的 tool call，标题 `loading this project's extensions and prompt files`（TUI 渲染成 “Allow …?”），两个选项——`Don't trust`（`reject_once`，排第一）与 `Trust and remember`（`allow_always`）。**刻意没有 `allow_once`**：ACP 允许客户端代用户批准权限请求，TUI 的 YOLO 模式会自动选第一个 `allow_once`，而是否运行一个仓库的代码不该由为工具调用开的模式代答；没有该选项，YOLO 无从自动选择，问题就落到真人面前。只有「选中且 id 恰为 `trust-project`」算同意（不复用 `permissions.outcome_allows`，它把一切不以 `reject` 开头的 id 当同意）；取消、未知 id、客户端报错一律视为不信任。不论 `permission` 模式（`auto` / `always-approve`）是什么都会询问——询问不等于自动授信。`raw_input` 只含 `project` / `resources` / `changed`，刻意避开 TUI 会据以推断含义的键（`command`、`file_path` 等）。
+- **时机。** 在 `session/new`（及 `load` / `resume`）应答发出之后（客户端会丢弃对尚未登记的会话的请求，与 `available_commands_update` 同理，`agent._deferred_session_setup`）；得到回答之前不加载任何项目资源（扩展不被 import），会话的第一个 `prompt` 等待回答——`session/cancel` 结束此刻所有在等的 `prompt` 并让它们返回 `cancelled`（每次取消换一个新的事件，之后再来的 `prompt` 照常等），关闭 / 删除会话撤回问题。同目录并发打开的会话依次询问（按项目加锁；后到的会话在锁内重新判定：前一个答了「信任」就直接命中 `saved`，前一个拒绝了则再问一次，因为拒绝不被记住）。会话的信任由 `ProjectTrust` 承载，`create_session_harness` / `load_system_prompt_options` / `load_session_resources` 都读它，所以回答无需重建会话即生效（`AgentHarness.set_trust_project_extensions(bool)`，仅在扩展加载前有效）。
+- **记住。** 选「Trust and remember」后，先对磁盘上的文件重新取指纹（对话框可能开了很久）：与提问时不同则不信任、不保存（通知原因为 `modified`）；相同才写入 `trust.json`。拒绝不被记住，下次仍会问。
+- **指纹。** `trust_fingerprint.fingerprint_resources`：对所有受门约束资源的**文件内容**取 SHA-256（扩展目录递归；跳过 `__pycache__` 与 `.git`；跟随符号链接并防环；只哈希普通文件；条目上限 2000、总量上限 64 MiB，超出即取不出）。用内容而非 mtime：`touch` 不会让信任失效，`git pull` 改了文件会。
+- **存储。** `trust.json` = `{"version": 1, "projects": {<目录键>: {"project", "fingerprint", "trusted_at", "resources"}}}`，按**精确目录**记录（键为 `normcase(realpath)`），不像白名单那样覆盖子目录。原子写（临时文件 + `os.replace`）；读取即关闭（缺失、读不了、不是 JSON、形状不对、版本不符都等于没有记录）；损坏的文件在下一次保存时先改名为 `trust.json.corrupt` 而不是被默默覆盖，读不了的文件保持原样并让保存报错。保存失败（目录只读等）时本次会话仍受信，并告诉用户「下次还会再问，想避免请写入 `trusted_projects`」。
+- **headless** 从不提问（与上游的非交互模式一致），但承认指纹仍然一致的已保存回答。
+- **通知带原因**（`untrusted_project_notice(why=)`）：未决定 / 自上次信任后已改变 / 提问期间已改变 / 你选择了不信任 / 无法询问客户端 / `default_project_trust` 为 `never` / 文件太多太大无法检查。
 
 已知限制（相对上游）：
 
-- 没有交互式确认，也没有 `/trust` 持久化；白名单靠手写 `agent.toml`。后续可在 ACP 里加确认并写入信任库。
-- 信任按路径而非内容：白名单内的项目之后才出现的扩展（例如 `git pull` 带来的）会被直接运行。内容哈希信任库可以关闭这个口子。
+- 没有 `/trust` 命令，也没有「对此项目永不信任」的持久化；收回信任要手工删除 `trust.json` 里该项目的条目（`TrustStore.forget` 只是库函数）。
+- 指纹只在会话开始时核对（以及对话框关闭后复核一次）：会话进行中再改文件不会撤销信任，已 import 的扩展也收不回。
+- 换行符转换（`core.autocrlf` 切换、换分支带来的 CRLF/LF 差异）会改变内容哈希并触发重新询问：宁可多问。
+- 客户端可以自动批准 `session/request_permission`（ACP 允许）。问题的形状已排除「自动选第一个 `allow_once`」这类做法，但没有协议层面的办法阻止一个无条件点同意的客户端；TUI 还会按「上次确认的选项类型」粘性预选光标，上次选的是 “always” 类时，「Trust and remember」会是高亮行。
+- 客户端丢弃这个请求（例如尚未登记会话）时，取消被当作拒绝并在通知里说明；重新打开会话会再问一次。
 - 授权以整个项目目录为单位，不区分单个扩展或资源。
 - 上游还把 `.pi/settings.json`、`.pi/prompts`、`.pi/themes` 放在信任门后；本移植版没有这些项目级资源，无需处理。
 
@@ -491,7 +517,7 @@ Task panel / widget / UI 通知、`workflow_control` 工具（pause/resume/stop�
 | `AgentHarness` 扩展参数 | ✅ | `extensions` / `extension_dirs` / `auto_discover_extensions` 已实现 |
 | `_tool_from_definition` → `CodingTool` | ✅ | `prompt_snippet` / `prompt_guidelines` 正确转发 |
 | `factory.py` → `auto_discover_extensions=True` | ✅ | CLI/TUI 构造 harness 时开启 entry_point 自动发现 |
-| 项目目录扩展信任 | ✅ | `<cwd>/.pi-python/extensions` 默认不加载，需白名单 / 全局开关 / 环境变量 / `--trust-project-extensions`（§4.4） |
+| 项目目录扩展信任 | ✅ | `<cwd>/.pi-python/extensions` 默认不加载；ACP 里询问并按内容指纹记住，或白名单 / `default_project_trust` / 环境变量 / `--trust-project-extensions`（§4.4） |
 | 子包 entry_points 声明 | ✅ | 3 个子包的 `pyproject.toml` 均声明 `[project.entry-points."pi_agent.extensions"]` |
 | System prompt 注入 | ✅ | 扩展注册的工具的 `prompt_snippet` / `prompt_guidelines` 自动进入 system prompt |
 | LLM 可用性 | ✅ | `workflow` / `web_search` / `fetch_url` / `goal_update` / `goal_complete` 工具在 TUI 会话中自动注册，LLM 可直接 tool_call |
@@ -508,7 +534,7 @@ Task panel / widget / UI 通知、`workflow_control` 工具（pause/resume/stop�
 | **Git worktree isolation** | §15 ✅ | `WorktreeManager` 创建隔离 worktree；snapshot baseline + apply_changes 回写 |
 | **Saved workflow 存储** | §16 ✅ | `WorkflowStore` scan/save，project 覆盖 user；`os.link` 原子 no-clobber |
 | **Task panel / widget** | TUI 侧的实时进度面板未移植 | 纯文本结果输出替代 |
-| **TUI 文件夹信任库 ↔ 项目扩展信任** | TUI 自己的信任库（`/hooks trust`）与 Python 端 §4.4 互不相通 | TUI 用户需在 `agent.toml` 白名单里登记项目，或带 `PI_TRUST_PROJECT_EXTENSIONS=1` 启动（环境变量会传给被拉起的 Python agent） |
+| **TUI 文件夹信任库 ↔ 项目扩展信任** | TUI 自己的信任库（`/hooks trust`）与 Python 端 §4.4 互不相通 | TUI 用户会在 ACP 会话里被询问（§4.4）；也可在 `agent.toml` 白名单里登记项目，或带 `PI_TRUST_PROJECT_EXTENSIONS=1` 启动（环境变量会传给被拉起的 Python agent）。`/hooks trust` 的记录不会被 Python 端读取 |
 
 ### 10.3 工作流链路（当前状态）
 

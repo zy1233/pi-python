@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -45,7 +45,16 @@ from acp.schema import (
 from pi_agent_cli.config import CliConfig, PermissionMode, load_config, pi_home
 from pi_agent_cli.events import project_event, project_message_replay
 from pi_agent_cli.extension_notices import failed_extensions_notice
-from pi_agent_cli.extension_trust import skipped_project_resources, untrusted_project_notice
+from pi_agent_cli.extension_trust import (
+    NoticeReason,
+    ProjectTrust,
+    ProjectTrustDecision,
+    decide_project_trust,
+    notice_reason,
+    skipped_project_resources,
+    unsaved_trust_notice,
+    untrusted_project_notice,
+)
 from pi_agent_cli.factory import create_session_harness, default_stream_fn, load_session_resources
 from pi_agent_cli.permissions import (
     PERMISSION_OPTIONS,
@@ -53,6 +62,13 @@ from pi_agent_cli.permissions import (
     outcome_allows,
     permission_tool_call,
 )
+from pi_agent_cli.trust_prompt import (
+    trust_explanation,
+    trust_options,
+    trust_outcome_grants,
+    trust_tool_call,
+)
+from pi_agent_cli.trust_store import TrustStore
 from pi_agent_core.coding_tools.path_utils import normalize_host_path
 from pi_agent_core.messages import ImageContent
 from pi_agent_core.types import StreamFn
@@ -61,6 +77,31 @@ from pi_agent_harness import AgentHarness, JsonlSessionRepo, Session
 logger = logging.getLogger(__name__)
 
 _AGENT_INFO = Implementation(name="pi-agent-cli", title="pi-python ACP agent", version="0.1.0")
+
+
+@dataclass
+class _SessionTrust:
+    """One session's standing on its project's own extensions, prompt files and skills.
+
+    ``trust`` is what the session's resource loaders consult. The project's files are hashed
+    when the session opens; when the answer is the user's to give, the question is put after
+    ``session/new`` (or load/resume) has been answered, and ``settled`` is set once it is
+    closed: answered, or never to be asked.
+    """
+
+    trust: ProjectTrust
+    # Why things were left out, for the notice (``None``: nothing was, or nothing to explain).
+    why: NoticeReason | None = None
+    # Extensions load, and the first prompt proceeds, only after this is set.
+    settled: asyncio.Event = field(default_factory=asyncio.Event)
+    # Set by ``session/cancel`` to end the prompts held back by the question. Each cancel uses
+    # one up and puts a fresh one here, so it never outlives the prompts it was meant for
+    # (and a cancel that finds none waiting leaves nothing behind).
+    cancelled: asyncio.Event = field(default_factory=asyncio.Event)
+    # Why the answer could not be saved (it holds for this session regardless).
+    save_error: str | None = None
+    # The deferred setup that puts the question; cancelled when the session goes away.
+    task: asyncio.Task[Any] | None = None
 
 
 class PiAcpAgent(Agent):
@@ -94,6 +135,8 @@ class PiAcpAgent(Agent):
         self._commands_advertised: set[str] = set()
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._permission_locks: dict[str, asyncio.Lock] = {}
+        self._trust: dict[str, _SessionTrust] = {}
+        self._project_locks: dict[str, asyncio.Lock] = {}
 
     def on_connect(self, conn: Client) -> None:
         self._conn = conn
@@ -137,8 +180,9 @@ class PiAcpAgent(Agent):
         # Defer available_commands_update: Zed only registers the session
         # AFTER it receives NewSessionResponse, so notifications sent before
         # that are silently dropped.  Schedule via create_task + sleep(0) so
-        # the response is flushed first.  (See zed#60199, zed#53161.)
-        self._schedule_deferred_advertise(session_id)
+        # the response is flushed first.  (See zed#60199, zed#53161.)  The same goes
+        # for the question about trusting the project, a request to the client.
+        self._schedule_deferred_setup(session_id)
         return NewSessionResponse(
             session_id=session_id,
             field_meta=self._session_response_meta(),
@@ -162,7 +206,7 @@ class PiAcpAgent(Agent):
             for msg in context.messages:
                 for update in project_message_replay(msg):
                     await self._conn.session_update(session_id=session_id, update=update)
-        self._schedule_deferred_advertise(session_id)
+        self._schedule_deferred_setup(session_id)
         return LoadSessionResponse(field_meta=self._session_response_meta())
 
     async def list_sessions(
@@ -194,12 +238,13 @@ class PiAcpAgent(Agent):
         session = await self._repo.open(metadata)
         await self._bind_session(session_id, session, metadata.cwd or cwd)
         # ACP session/resume intentionally does not replay history.
-        self._schedule_deferred_advertise(session_id)
+        self._schedule_deferred_setup(session_id)
         return ResumeSessionResponse(field_meta=self._session_response_meta())
 
     async def close_session(self, session_id: str, **kwargs: Any) -> CloseSessionResponse | None:
         harness = self._harnesses.pop(session_id, None)
         self._permission_locks.pop(session_id, None)
+        self._drop_trust(session_id)
         if harness is not None:
             await harness.close()
         return CloseSessionResponse()
@@ -217,6 +262,10 @@ class PiAcpAgent(Agent):
         **kwargs: Any,
     ) -> PromptResponse:
         harness = self._require_harness(session_id)
+        # Until the user has answered the question about the project, nothing of it is
+        # loaded, and a prompt would run without it (and then again with it, differently).
+        if not await self._wait_for_trust(session_id, harness):
+            return PromptResponse(stop_reason="cancelled")
         # Fallback: re-advertise commands if the deferred task was missed.
         if session_id not in self._commands_advertised:
             await self._advertise_commands(session_id)
@@ -230,6 +279,13 @@ class PiAcpAgent(Agent):
         return PromptResponse(stop_reason=_stop_reason(message))
 
     async def cancel(self, session_id: str, **kwargs: Any) -> None:
+        state = self._trust.get(session_id)
+        if state is not None:
+            # Prompts may be held back by the question about the project, with no turn in the
+            # harness to abort yet: this is what ends them (all of them: they hold this very
+            # event). A prompt put afterwards waits on the fresh one.
+            state.cancelled.set()
+            state.cancelled = asyncio.Event()
         harness = self._harnesses.get(session_id)
         if harness is None:
             return
@@ -248,6 +304,7 @@ class PiAcpAgent(Agent):
             metadata = await self._find_metadata(session_id)
             harness = self._harnesses.pop(session_id, None)
             self._permission_locks.pop(session_id, None)
+            self._drop_trust(session_id)
             if harness is not None:
                 # Deleting ends the session, like ``session/close``: stop the turn, then run
                 # the extensions' cleanup (background workflows, worktrees).
@@ -298,7 +355,13 @@ class PiAcpAgent(Agent):
         async def on_tool_call(event: Any) -> dict[str, Any] | None:
             return await self._handle_tool_call(session_id, event)
 
-        resources = await load_session_resources(cwd=cwd, config=self._config)
+        # Decide about the project's own extensions, prompt files and skills before any of
+        # them is read.
+        decision = await self._decide_trust(cwd)
+        state = _SessionTrust(trust=ProjectTrust(decision), why=notice_reason(decision))
+        resources = await load_session_resources(
+            cwd=cwd, config=self._config, trusted=state.trust.trusted
+        )
         harness = await create_session_harness(
             session=session,
             cwd=cwd,
@@ -307,56 +370,206 @@ class PiAcpAgent(Agent):
             resources=resources,
             on_tool_call=on_tool_call,
             extensions=self._extensions,
+            home=self._home,
+            trust=state.trust,
         )
 
         async def on_event(event: Any, signal: Any | None = None) -> None:
             await self._emit_updates(session_id, event)
 
         harness.subscribe(on_event)
+        self._drop_trust(session_id)  # binding again: a question still open is for the old one
         self._harnesses[session_id] = harness
         self._session_cwds[session_id] = cwd
+        self._trust[session_id] = state
 
+        if decision.can_ask:
+            # The user decides, and can only be asked once the client knows the session
+            # (see ``_deferred_session_setup``). Extensions are code: they load with the answer.
+            # (With no client to ask, that setup settles it as untrusted.)
+            return
+        state.settled.set()
         # Eagerly load extensions so slash commands are available.
         await harness.load_extensions()
 
-    def _schedule_deferred_advertise(self, session_id: str) -> None:
-        """Fire-and-forget: advertise commands after the current response flushes."""
-        task = asyncio.create_task(self._deferred_advertise_commands(session_id))
+    def _schedule_deferred_setup(self, session_id: str) -> None:
+        """Fire-and-forget: finish setting the session up after the current response flushes."""
+        task = asyncio.create_task(self._deferred_session_setup(session_id))
+        state = self._trust.get(session_id)
+        if state is not None:
+            state.task = task
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
 
-    async def _deferred_advertise_commands(self, session_id: str) -> None:
-        """Advertise commands (and report what did not load) after yielding.
+    async def _deferred_session_setup(self, session_id: str) -> None:
+        """Ask about the project if need be, advertise commands, report what did not load.
 
         Zed registers ACP sessions only after processing the response to
         ``session/new``.  Notifications sent *before* that response are
         silently dropped ("unknown session").  Yielding with ``sleep(0)``
-        lets the response flush first.  (See zed-industries/zed#60199.)
+        lets the response flush first.  (See zed-industries/zed#60199.)  A request
+        to the client is no different.
         """
         await asyncio.sleep(0)
+        await self._settle_project_trust(session_id)
         await self._advertise_commands(session_id)
         await self._notify_untrusted_project(session_id)
         await self._notify_failed_extensions(session_id)
 
+    async def _settle_project_trust(self, session_id: str) -> None:
+        """Put the question about the project to the user, act on the answer, load extensions.
+
+        Whatever happens, the session ends up settled, so a prompt held back by the question
+        is released: to run with the project's resources if the user said yes, without them
+        if not (or if asking failed; the session is still useful).
+        """
+        state = self._trust.get(session_id)
+        harness = self._harnesses.get(session_id)
+        cwd = self._session_cwds.get(session_id)
+        if state is None or harness is None or cwd is None or state.settled.is_set():
+            return
+        try:
+            try:
+                await self._ask_about_project(session_id, state, harness, cwd)
+            except Exception:
+                logger.warning("Could not ask about trusting %s", cwd, exc_info=True)
+                state.why = "unasked"
+            try:
+                await harness.load_extensions()
+            except Exception:
+                logger.exception("Loading extensions failed for session %s", session_id)
+        finally:
+            state.settled.set()
+
+    async def _ask_about_project(
+        self, session_id: str, state: _SessionTrust, harness: AgentHarness, cwd: str
+    ) -> None:
+        """Decide afresh and, when it is the user's call, ask; trust the session on a yes.
+
+        Nothing here is left half done: the session becomes trusted only at the end, after
+        the answer was checked against what is on disk now.
+        """
+        if self._conn is None:
+            return
+        project = str(Path(cwd).resolve())
+        # One question per project at a time. Sessions opened together in one directory would
+        # otherwise stack identical dialogs, and the later ones can then rely on the answer.
+        async with self._project_locks.setdefault(project, asyncio.Lock()):
+            # Afresh: another session may have answered while this one waited, and the files
+            # may have changed since this one opened.
+            decision = await self._decide_trust(cwd)
+            state.why = notice_reason(decision)
+            if not decision.trusted:
+                if not decision.can_ask or decision.fingerprint is None:
+                    return  # nothing to put to the user (``never``, unpinnable, nothing gated)
+                # What the user decides about goes first, as a message: the TUI shows a
+                # request's title and options and nothing else of it. If it cannot be
+                # delivered, nothing is asked (a yes or no about what one was not told).
+                await self._conn.session_update(
+                    session_id=session_id,
+                    update=update_agent_message_text(trust_explanation(project, decision)),
+                )
+                answer = await self._conn.request_permission(
+                    session_id=session_id,
+                    tool_call=trust_tool_call(project, decision),
+                    options=trust_options(),
+                )
+                if not trust_outcome_grants(answer.outcome):
+                    state.why = "declined"
+                    return
+                # The dialog can stay open for a long time, and the answer is about what it
+                # described. Trust nothing that is not that.
+                current = await self._decide_trust(cwd)
+                if current.fingerprint != decision.fingerprint:
+                    state.why = "modified"
+                    return
+                state.save_error = await self._remember_trust(
+                    project, decision.fingerprint, [item.describe() for item in decision.resources]
+                )
+        state.why = None
+        state.trust.grant()
+        harness.set_trust_project_extensions(True)
+        await harness.set_resources(
+            await load_session_resources(cwd=cwd, config=self._config, trusted=True)
+        )
+
+    async def _decide_trust(self, cwd: str) -> ProjectTrustDecision:
+        """Decide about a project, in a worker thread: that reads and hashes files, which on
+        the event loop would stall every other session and the client's traffic."""
+        return await asyncio.to_thread(decide_project_trust, self._config, cwd, home=self._home)
+
+    async def _remember_trust(
+        self, project: str, fingerprint: str, resources: list[str]
+    ) -> str | None:
+        """Save a "yes" against the files it was about. The error text, if that failed: the
+        session is trusted regardless, only the next one will have to ask again."""
+        try:
+            await asyncio.to_thread(
+                TrustStore(self._home).remember, project, fingerprint, resources=resources
+            )
+        except OSError as exc:
+            logger.warning("Could not save the trust decision for %s: %s", project, exc)
+            return str(exc)
+        return None
+
+    async def _wait_for_trust(self, session_id: str, harness: AgentHarness) -> bool:
+        """Hold a prompt back while the question about the project is open.
+
+        ``False`` when the prompt must end as cancelled instead: ``session/cancel`` came in,
+        or the session was closed, while it waited.
+        """
+        state = self._trust.get(session_id)
+        if state is None or state.settled.is_set():
+            return True
+        cancel = state.cancelled  # this prompt's own: ``cancel`` swaps in a fresh one after use
+        settled = asyncio.ensure_future(state.settled.wait())
+        cancelled = asyncio.ensure_future(cancel.wait())
+        try:
+            await asyncio.wait({settled, cancelled}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            settled.cancel()
+            cancelled.cancel()
+        if cancel.is_set():
+            return False
+        return self._harnesses.get(session_id) is harness
+
+    def _drop_trust(self, session_id: str) -> None:
+        """Forget a session's standing on its project. A question still open is withdrawn,
+        and a prompt held back by it is let go."""
+        state = self._trust.pop(session_id, None)
+        if state is None:
+            return
+        if state.task is not None:
+            state.task.cancel()
+        state.settled.set()
+
     async def _notify_untrusted_project(self, session_id: str) -> None:
         """Tell the user which project extensions, prompt files and skills were left out
         because the project is untrusted (extensions were never imported), and how to
-        enable them."""
+        enable them; and if a yes could not be saved, that it will have to be given again."""
         harness = self._harnesses.get(session_id)
         cwd = self._session_cwds.get(session_id)
-        if self._conn is None or harness is None or cwd is None:
+        state = self._trust.get(session_id)
+        if self._conn is None or harness is None or cwd is None or state is None:
             return
         notice = untrusted_project_notice(
             extensions=harness.skipped_extensions,
-            resources=skipped_project_resources(self._config, cwd),
+            resources=skipped_project_resources(self._config, cwd, trusted=state.trust.trusted),
             cwd=cwd,
             home=self._home,
+            why=state.why,
         )
-        if notice is None:
-            return
-        await self._conn.session_update(
-            session_id=session_id, update=update_agent_message_text(notice)
-        )
+        if notice is not None:
+            await self._conn.session_update(
+                session_id=session_id, update=update_agent_message_text(notice)
+            )
+        if state.save_error is not None:
+            await self._conn.session_update(
+                session_id=session_id,
+                update=update_agent_message_text(
+                    unsaved_trust_notice(error=state.save_error, cwd=cwd, home=self._home)
+                ),
+            )
 
     async def _notify_failed_extensions(self, session_id: str) -> None:
         """Tell the user which extensions failed to load: the session carries on without

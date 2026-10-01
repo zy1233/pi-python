@@ -19,6 +19,7 @@ from pi_agent_cli.agent import PiAcpAgent
 from pi_agent_cli.config import CliConfig, is_project_relative_path
 from pi_agent_cli.extension_trust import (
     TRUST_ENV,
+    ProjectTrust,
     skipped_project_resources,
     untrusted_project_notice,
 )
@@ -172,7 +173,9 @@ async def test_the_users_own_skill_directories_load_whatever_the_trust(
 # ---------------------------------------------------------------------------
 
 
-async def _system_prompt_sent_to_the_llm(world: Any, config: CliConfig) -> str:
+async def _system_prompt_sent_to_the_llm(
+    world: Any, config: CliConfig, *, home: Path | None = None
+) -> str:
     seen: list[str] = []
 
     async def capturing_stream(model, context, options=None):
@@ -188,7 +191,7 @@ async def _system_prompt_sent_to_the_llm(world: Any, config: CliConfig) -> str:
         config=config,
         stream_fn=capturing_stream,
         resources=resources,
-        home=world.pi_home,
+        home=world.pi_home if home is None else home,
     )
     await harness.prompt("hi")
     return seen[-1]
@@ -213,6 +216,120 @@ async def test_the_llm_is_told_what_a_trusted_project_says(world: Any):
     assert "Project system" in prompt
     assert "Project append" in prompt
     assert "<name>shipped</name>" in prompt
+
+
+@pytest.mark.asyncio
+async def test_the_llm_is_told_what_the_home_it_was_given_says(world: Any):
+    """An untrusted project falls back to the user's prompt files, from the session's home."""
+    elsewhere = world.tmp / "elsewhere"
+    (elsewhere / "agent").mkdir(parents=True)
+    (elsewhere / "agent" / "APPEND_SYSTEM.md").write_text("Elsewhere append", encoding="utf-8")
+    (world.pi_home / "agent").mkdir(parents=True)  # what the default home would have said
+    (world.pi_home / "agent" / "APPEND_SYSTEM.md").write_text("Default append", encoding="utf-8")
+
+    prompt = await _system_prompt_sent_to_the_llm(world, CliConfig(), home=elsewhere)
+
+    assert "Elsewhere append" in prompt
+    assert "Default append" not in prompt
+    assert "Project append" not in prompt
+
+
+# ---------------------------------------------------------------------------
+# A session's own trust (a prompt's answer) overrides what the configuration says
+# ---------------------------------------------------------------------------
+
+
+def test_prompt_files_follow_the_sessions_trust_when_it_is_given(world: Any):
+    yes = load_system_prompt_options(
+        cwd=world.project, config=CliConfig(), home=world.pi_home, trusted=True
+    )
+    no = load_system_prompt_options(
+        cwd=world.project, config=_trusting(world), home=world.pi_home, trusted=False
+    )
+
+    assert (yes.custom_prompt, yes.append_system_prompt) == ("Project system", "Project append")
+    assert (no.custom_prompt, no.append_system_prompt) == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_skills_follow_the_sessions_trust_when_it_is_given(world: Any):
+    skills = (".pi/skills",)
+
+    yes = await load_session_resources(
+        cwd=world.project, config=CliConfig(skills_dirs=skills), trusted=True
+    )
+    no = await load_session_resources(
+        cwd=world.project, config=_trusting(world, skills_dirs=skills), trusted=False
+    )
+
+    assert _skill_names(yes) == ["shipped"]
+    assert _skill_names(no) == []
+
+
+@pytest.mark.asyncio
+async def test_a_session_harness_follows_the_trust_object_it_is_given(world: Any):
+    granted = ProjectTrust()
+    granted.grant()
+    seen: dict[str, str] = {}
+
+    async def capturing(model, context, options=None):
+        seen["prompt"] = context.system_prompt
+        return await mock_text_stream(model, context, options)
+
+    for name, trust, config in (
+        ("granted", granted, CliConfig()),  # the user said yes; the config had said nothing
+        ("withheld", ProjectTrust(), _trusting(world)),  # the config trusts; the session does not
+    ):
+        session = await JsonlSessionRepo(world.tmp / f"sessions-{name}").create(
+            {"cwd": str(world.project)}
+        )
+        harness = await create_session_harness(
+            session=session,
+            cwd=world.project,
+            config=config,
+            stream_fn=capturing,
+            home=world.pi_home,
+            trust=trust,
+        )
+        await harness.prompt("hi")
+        seen[name] = seen["prompt"]
+
+    assert "Project system" in seen["granted"]
+    assert "Project system" not in seen["withheld"]
+
+
+@pytest.mark.asyncio
+async def test_the_system_prompt_picks_up_trust_granted_after_the_session_started(world: Any):
+    """The prompt dialog is answered after the harness exists; the next turn must show it."""
+    trust = ProjectTrust()
+    prompts: list[str] = []
+
+    async def capturing(model, context, options=None):
+        prompts.append(context.system_prompt)
+        return await mock_text_stream(model, context, options)
+
+    session = await JsonlSessionRepo(world.tmp / "sessions").create({"cwd": str(world.project)})
+    harness = await create_session_harness(
+        session=session,
+        cwd=world.project,
+        config=CliConfig(skills_dirs=(".pi/skills",)),
+        stream_fn=capturing,
+        home=world.pi_home,
+        trust=trust,
+    )
+    await harness.prompt("before")
+    trust.grant()
+    await harness.set_resources(
+        await load_session_resources(
+            cwd=world.project, config=CliConfig(skills_dirs=(".pi/skills",)), trusted=True
+        )
+    )
+    await harness.prompt("after")
+
+    assert "Project system" not in prompts[0]
+    assert "shipped" not in prompts[0]
+    assert "Project system" in prompts[1]
+    assert "<name>shipped</name>" in prompts[1]
 
 
 # ---------------------------------------------------------------------------
@@ -300,14 +417,18 @@ async def _open_session(world: Any, config: CliConfig) -> _RecordingClient:
     client = _RecordingClient()
     agent.on_connect(client)
     await agent.new_session(cwd=str(world.project))
-    for _ in range(4):
-        await asyncio.sleep(0)
+    # Notices go out after the session/new response has flushed (Zed drops earlier ones).
+    await asyncio.gather(*agent._background_tasks)
     return client
 
 
 @pytest.mark.asyncio
 async def test_the_acp_client_is_told_which_project_resources_were_skipped(world: Any):
-    client = await _open_session(world, CliConfig(permission="auto", skills_dirs=(".pi/skills",)))
+    # ``never``: an untrusted project, settled without a question (this client answers none).
+    config = CliConfig(
+        permission="auto", default_project_trust="never", skills_dirs=(".pi/skills",)
+    )
+    client = await _open_session(world, config)
 
     text = client.agent_text()
     assert "SYSTEM.md" in text

@@ -15,7 +15,7 @@ from pi_agent_cli.config import (
     pi_home,
 )
 from pi_agent_cli.create_harness import build_coding_agent_harness_system_prompt
-from pi_agent_cli.extension_trust import project_extensions_trusted
+from pi_agent_cli.extension_trust import ProjectTrust, project_extensions_trusted
 from pi_agent_cli.prompt_options import load_system_prompt_options
 from pi_agent_core.coding_tools import create_all_tools
 from pi_agent_core.coding_tools.bash import create_bash_tool
@@ -56,14 +56,18 @@ def default_stream_fn() -> StreamFn:
     return langchain_stream
 
 
-async def load_session_resources(*, cwd: str | Path, config: CliConfig) -> AgentHarnessResources:
+async def load_session_resources(
+    *, cwd: str | Path, config: CliConfig, trusted: bool | None = None
+) -> AgentHarnessResources:
     if not config.skills_dirs:
         return AgentHarnessResources()
     cwd_s = str(Path(normalize_host_path(str(cwd))).resolve())
     # An entry relative to the project (".pi/skills") finds the project's own skills, and a
     # skill's text goes into the system prompt: only for a trusted project. Absolute and
-    # ``~`` entries are the user's own.
-    trusted = project_extensions_trusted(config, cwd_s)
+    # ``~`` entries are the user's own. The session says whether the project is trusted (the
+    # user may have said yes in a prompt); without that the configuration decides.
+    if trusted is None:
+        trusted = project_extensions_trusted(config, cwd_s)
     entries = [item for item in config.skills_dirs if trusted or not is_project_relative_path(item)]
     if not entries:
         return AgentHarnessResources()
@@ -123,7 +127,16 @@ async def create_session_harness(
     home: Path | None = None,
     tools: list[Any] | None = None,
     extensions: list[Any] | None = None,
+    trust: ProjectTrust | None = None,
 ) -> AgentHarness:
+    """Build the harness for one session.
+
+    *trust*: whether the project's own extensions, prompt files and skills may be used. It is
+    read again whenever the system prompt is built, so an answer given after the session
+    started takes effect on the next turn (extensions are the exception: they load once, so
+    the caller passes the answer on with ``AgentHarness.set_trust_project_extensions``
+    before that). Without one, the configuration decides.
+    """
     cwd_s = str(Path(normalize_host_path(str(cwd))).resolve())
     home_path = pi_home(home)
     metadata = await session.get_metadata()
@@ -168,6 +181,7 @@ async def create_session_harness(
             config=config,
             resources=ctx.get("resources") or resolved_resources,
             home=home_path,
+            trusted=trust.trusted if trust is not None else None,
         )
         return build_coding_agent_harness_system_prompt(
             cwd=cwd_s,
@@ -190,7 +204,9 @@ async def create_session_harness(
         max_turns=config.max_turns,
         compaction=CompactionSettings(auto_compact=auto_compact),
         auto_discover_extensions=True,
-        trust_project_extensions=project_extensions_trusted(config, cwd_s),
+        trust_project_extensions=(
+            trust.trusted if trust is not None else project_extensions_trusted(config, cwd_s)
+        ),
         home=home_path,
         extensions=extensions or [],
     )

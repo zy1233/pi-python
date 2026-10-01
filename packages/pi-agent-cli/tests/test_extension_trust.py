@@ -21,6 +21,7 @@ from pi_agent_cli.agent import PiAcpAgent
 from pi_agent_cli.config import CliConfig, load_config
 from pi_agent_cli.extension_trust import (
     TRUST_ENV,
+    ProjectTrust,
     project_extensions_trusted,
     untrusted_project_notice,
 )
@@ -113,6 +114,30 @@ def test_malformed_extensions_table_stays_untrusted(tmp_path: Path):
 
     assert config.trust_project_extensions is False
     assert config.trusted_projects == ()
+
+
+def test_the_default_project_trust_is_not_set_unless_the_user_sets_it(tmp_path: Path):
+    assert load_config(tmp_path).default_project_trust is None
+    assert CliConfig().default_project_trust is None
+
+
+@pytest.mark.parametrize("value", ["ask", "never", "always", "Never", " ALWAYS "])
+def test_the_default_project_trust_parses(tmp_path: Path, value: str):
+    (tmp_path / "agent.toml").write_text(
+        f'[extensions]\ndefault_project_trust = "{value}"\n', encoding="utf-8"
+    )
+
+    assert load_config(tmp_path).default_project_trust == value.strip().lower()
+
+
+@pytest.mark.parametrize("raw", ['"sometimes"', "true", "1", '""', '["ask"]'])
+def test_an_unrecognised_default_project_trust_is_ignored(tmp_path: Path, raw: str):
+    """A typo must not silently pick a side: it is as if the key were absent."""
+    (tmp_path / "agent.toml").write_text(
+        f"[extensions]\ndefault_project_trust = {raw}\n", encoding="utf-8"
+    )
+
+    assert load_config(tmp_path).default_project_trust is None
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +306,58 @@ async def test_the_environment_variable_runs_project_extensions(
     assert "shipped" in harness.extension_registry.get_commands()
 
 
+async def _harness_with_trust(world: Any, config: CliConfig, trust: ProjectTrust):
+    repo = JsonlSessionRepo(world.tmp / "sessions")
+    session = await repo.create({"cwd": str(world.project)})
+    harness = await create_session_harness(
+        session=session,
+        cwd=world.project,
+        config=config,
+        stream_fn=mock_text_stream,
+        home=world.pi_home,
+        trust=trust,
+    )
+    return harness
+
+
+@pytest.mark.asyncio
+async def test_a_session_that_was_trusted_by_a_prompt_runs_the_extension(world: Any):
+    trust = ProjectTrust()
+    trust.grant()
+    harness = await _harness_with_trust(world, CliConfig(), trust)
+
+    await harness.load_extensions()
+
+    assert world.marker.exists()
+    assert "shipped" in harness.extension_registry.get_commands()
+
+
+@pytest.mark.asyncio
+async def test_the_configuration_cannot_trust_what_the_session_has_not(world: Any):
+    harness = await _harness_with_trust(
+        world, CliConfig(trust_project_extensions=True), ProjectTrust()
+    )
+
+    await harness.load_extensions()
+
+    assert not world.marker.exists()
+    assert len(harness.skipped_extensions) == 1
+
+
+@pytest.mark.asyncio
+async def test_an_answer_that_arrives_before_the_extensions_load_is_honoured(world: Any):
+    """The prompt is answered after the harness exists and before extensions load."""
+    trust = ProjectTrust()
+    harness = await _harness_with_trust(world, CliConfig(), trust)
+    assert not world.marker.exists()
+
+    trust.grant()
+    harness.set_trust_project_extensions(trust.trusted)
+    await harness.load_extensions()
+
+    assert world.marker.exists()
+
+
 @pytest.mark.asyncio
 async def test_trusting_another_project_does_not_trust_this_one(world: Any):
     other = world.tmp / "other"
@@ -377,14 +454,14 @@ async def _open_session(world: Any, config: CliConfig) -> _RecordingClient:
     agent.on_connect(client)
     await agent.new_session(cwd=str(world.project))
     # Notices go out after the session/new response has flushed (Zed drops earlier ones).
-    for _ in range(4):
-        await asyncio.sleep(0)
+    await asyncio.gather(*agent._background_tasks)
     return client
 
 
 @pytest.mark.asyncio
 async def test_the_acp_client_is_told_which_project_extensions_were_skipped(world: Any):
-    client = await _open_session(world, CliConfig(permission="auto"))
+    # ``never``: an untrusted project, settled without a question (this client answers none).
+    client = await _open_session(world, CliConfig(permission="auto", default_project_trust="never"))
 
     text = client.agent_text()
     assert "shipped.py" in text

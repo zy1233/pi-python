@@ -140,18 +140,20 @@ class _RecordingClient:
         ]
 
 
-async def _open_session(world: Any, extensions: list[Any]) -> _RecordingClient:
+async def _open_session(
+    world: Any, extensions: list[Any], config: CliConfig | None = None
+) -> _RecordingClient:
     agent = PiAcpAgent(
         stream_fn=mock_text_stream,
         home=world.pi_home,
-        config=CliConfig(permission="auto"),
+        config=config if config is not None else CliConfig(permission="auto"),
         extensions=extensions,
     )
     client = _RecordingClient()
     agent.on_connect(client)
     await agent.new_session(cwd=str(world.project))
-    for _ in range(4):
-        await asyncio.sleep(0)
+    # Notices go out after the session/new response has flushed (Zed drops earlier ones).
+    await asyncio.gather(*agent._background_tasks)
     return client
 
 
@@ -192,7 +194,9 @@ async def test_the_untrusted_project_notice_and_the_failure_notice_both_arrive(w
     shipped.mkdir(parents=True)
     (shipped / "from_repo.py").write_text("def activate(pi):\n    pass\n", encoding="utf-8")
 
-    client = await _open_session(world, [broken_extension])
+    # ``never``: an untrusted project, settled without a question (this client answers none).
+    config = CliConfig(permission="auto", default_project_trust="never")
+    client = await _open_session(world, [broken_extension], config)
 
     text = "\n".join(client.agent_messages())
     assert "trusted_projects" in text  # the project's extension was not loaded

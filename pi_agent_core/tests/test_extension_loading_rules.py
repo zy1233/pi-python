@@ -12,7 +12,7 @@ import pytest
 from pydantic import BaseModel
 
 from pi_agent_core.extensions import ExtensionAPI, ExtensionLoader, ToolDefinition
-from pi_agent_core.extensions.loader import ENTRY_POINT_GROUP
+from pi_agent_core.extensions.loader import ENTRY_POINT_GROUP, extension_module_names
 from pi_agent_core.home import HOME_ENV
 from pi_agent_core.types import AgentToolResult
 
@@ -429,3 +429,49 @@ class TestExtensionHome:
 
         assert "from_project" not in loader.registry.get_commands()
         assert [s.names for s in loader.skipped] == [("from_project.py",)]
+
+
+# ---------------------------------------------------------------------------
+# What a scan of a directory would import (the trust prompt names exactly this)
+# ---------------------------------------------------------------------------
+
+
+class TestExtensionModuleNames:
+    def test_it_lists_the_modules_and_packages_a_scan_imports(self, tmp_path: Path):
+        (tmp_path / "b.py").write_text("x = 1\n", encoding="utf-8")
+        (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+        (tmp_path / "pack").mkdir()
+        (tmp_path / "pack" / "__init__.py").write_text("x = 1\n", encoding="utf-8")
+
+        assert extension_module_names(tmp_path) == ("a.py", "b.py", "pack")
+
+    def test_it_leaves_out_what_a_scan_ignores(self, tmp_path: Path):
+        (tmp_path / "_private.py").write_text("x = 1\n", encoding="utf-8")
+        (tmp_path / "notes.txt").write_text("hello\n", encoding="utf-8")
+        (tmp_path / "not_a_package").mkdir()
+        (tmp_path / "not_a_package" / "mod.py").write_text("x = 1\n", encoding="utf-8")
+
+        assert extension_module_names(tmp_path) == ()
+
+    def test_a_missing_directory_has_none(self, tmp_path: Path):
+        assert extension_module_names(tmp_path / "nope") == ()
+
+    def test_it_imports_nothing(self, tmp_path: Path):
+        marker = tmp_path / "ran"
+        (tmp_path / "boom.py").write_text(
+            f"from pathlib import Path\nPath({str(marker)!r}).write_text('x')\n", encoding="utf-8"
+        )
+
+        assert extension_module_names(tmp_path) == ("boom.py",)
+        assert not marker.exists()
+
+    def test_it_names_what_the_untrusted_report_names(self, tmp_path: Path):
+        project_ext = tmp_path / "project" / ".pi-python" / "extensions"
+        project_ext.mkdir(parents=True)
+        (project_ext / "one.py").write_text("x = 1\n", encoding="utf-8")
+        (project_ext / "_two.py").write_text("x = 1\n", encoding="utf-8")
+        loader = ExtensionLoader(home=tmp_path / "home")
+
+        loader.discover_default_dirs(str(tmp_path / "project"))
+
+        assert [s.names for s in loader.skipped] == [extension_module_names(project_ext)]

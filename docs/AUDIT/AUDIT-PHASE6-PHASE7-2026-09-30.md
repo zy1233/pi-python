@@ -1,6 +1,6 @@
 # AUDIT：Phase 6 / Phase 7 设计与实现审计（2026-09-30）
 
-> **审计日期**：2026-09-30（发现与三批修复在同一天完成）
+> **审计日期**：2026-09-30（发现与四批修复在同一天完成）
 >
 > **审计范围**：
 > - Phase 6：`packages/pi-agent-cli/pi_agent_cli/{git_context,prompt_options,system_prompt,factory}.py`、`pi_agent_core/adapters/langchain_stream.py`、`pi_agent_core/tests/{provider_matrix,test_provider_matrix}.py`、`.github/workflows/provider-matrix.yml`
@@ -10,11 +10,11 @@
 >
 > **方法**：代码阅读；在 Windows（zh-CN 区域设置）上用探针脚本实测；provider 文档（DeepSeek 等）对照核对。探针是临时脚本，没有入库；每一项的回归测试入库，并且都先红后绿。
 >
-> **修复批次**：批 1 `4c28f4e`、批 2 `6f687b5`、批 3 随本文档一起提交（`git log -- docs/AUDIT/AUDIT-PHASE6-PHASE7-2026-09-30.md`）
+> **修复批次**：批 1 `4c28f4e`、批 2 `6f687b5`、批 3 `7e53482`、批 4（P7-02 的交互式信任提示与内容哈希）随本文档的这次更新一起提交（`git log -- docs/AUDIT/AUDIT-PHASE6-PHASE7-2026-09-30.md`）
 >
 > **最终测试状态**：
-> - Windows：`1352 passed, 30 deselected`（审计开始时 `576 passed, 30 skipped`）
-> - WSL：`1347 passed, 5 skipped, 30 deselected`（4 个 skip 是 WSL 里没有 `rg`，1 个是只在 Windows 上有意义的路径大小写用例）
+> - Windows：`1677 passed, 5 skipped, 30 deselected`（5 个 skip 是只在 POSIX 上有意义的用例：符号链接的显示路径、命名管道、权限位 2 个、非法文件名；审计开始时 `576 passed, 30 skipped`）
+> - WSL：`1675 passed, 7 skipped, 30 deselected`（4 个 skip 是 WSL 里没有 `rg`，3 个是只在 Windows 上有意义的路径大小写用例）
 > - `ruff check .` + `ruff format --check .`：All checks passed
 >
 > **状态图例**：`[x]` 已修复并验证 · `[x/~]` 主路径已修复，有已记录的残留（见第五节）
@@ -33,7 +33,7 @@
 | P6-01 | Windows 中文区域设置下 git 快照编码错误：会话不可用或分支名乱码 | 1 | `[x]` |
 | P6-02 | `<git_status>` 在会话内被冻结，与规格「每个 turn 刷新」相反 | 2 | `[x]` |
 | P7-01 | `workflow` 等价于无需授权的任意代码执行，子 agent 绕过 `ask` 权限 | 2 | `[x/~]` |
-| P7-02 | 项目目录中的扩展无需信任确认，打开项目即执行 | 2 + 3 | `[x/~]` |
+| P7-02 | 项目目录中的扩展无需信任确认，打开项目即执行 | 2 + 3 + 4 | `[x/~]` |
 | P7-03 | 内置 workflow 的 tier 默认指向 Anthropic，并把其他厂商的 API key 发给它 | 1 | `[x]` |
 
 ### 中危
@@ -68,6 +68,7 @@
 | 项 | 说明 | 状态 |
 |----|------|------|
 | 项目提示文件与 skills 的信任 | 上游 pi 把项目的 `.pi/SYSTEM.md`、`.pi/APPEND_SYSTEM.md`、项目相对的 skills 与项目扩展放在同一信任规则之后；本仓库此前只门控了扩展 | `[x]` |
+| 项目信任的交互式确认与内容指纹（批 4） | 上游 pi 的 `defaultProjectTrust = ask` 会在交互模式里询问并按目录保存决定；批 2 只做了不提示、按路径的最小子集 | `[x]` |
 
 ---
 
@@ -98,11 +99,12 @@
 ### P7-02. [x/~] 项目目录中的扩展无需信任确认
 
 - **问题**：`<cwd>/.pi-python/extensions` 在 `session/new` 时立即 `exec_module`：克隆一个恶意仓库并打开，就会在用户权限下执行仓库里的 Python 代码。
-- **决策**（用户选择）：默认不加载，靠显式开关信任；不做交互式提示。
+- **决策**（用户选择）：批 2 默认不加载、靠显式开关信任，不做交互式提示；批 4 按用户要求补上交互式提示与内容指纹（见下）。
 - **修复**（批 2）：项目扩展默认不导入（连模块都不加载）。信任只来自项目自己写不到的地方：home 的 `agent.toml` 里的 `[extensions] trusted_projects = [...]`（含子目录）/ `trust_project_extensions = true`、环境变量 `PI_TRUST_PROJECT_EXTENSIONS=1`、命令行 `--trust-project-extensions`（ACP 与 headless 都有）。被跳过的扩展会记日志，并告诉用户（ACP 在 `session/new` 之后发一条 agent 消息，headless 写 stderr）。顺带修复了 cwd 为 home 时 `~/.pi-python/extensions` 被扫描两次。库 API：`AgentHarness(trust_project_extensions=False)`、`ExtensionLoader.load_all(trust_project_extensions=False)`、`skipped`。
 - **修复**（批 3，对齐上游）：项目的 `.pi/SYSTEM.md`、`.pi/APPEND_SYSTEM.md` 和项目相对的 `[skills].paths`（如 `.pi/skills`）同样受这条信任规则约束；不受信任时回落到用户自己的 `~/.pi-python/agent/SYSTEM.md` / `APPEND_SYSTEM.md`；通知里也列出这些文件。
-- **验证**：批 2 的信任判定 14 个变异体、批 3 的提示文件 / skills 14 个变异体，全部被杀。
-- **规格**：Phase 7 规格新增 §4.4（信任模型）。
+- **修复**（批 4，信任的交互与内容指纹）：ACP 里，项目带有受门约束的资源、而配置 / 命令行 / 白名单 / 已保存的回答都没有决定它时，agent 在 `session/new`（及 `load` / `resume`）应答之后先发一条普通的 agent 消息说明（目录、文件、各自作用；TUI 只显示权限请求的标题与选项、不显示其 `content`，所以说明放在消息里；文件名由仓库决定，可能带换行、转义序列或方向控制符，所以不可打印字符写成转义、名字放进代码片段；说明发不出去就不提问），再发 `session/request_permission`：`Don't trust`（`reject_once`，排第一）与 `Trust and remember`（`allow_always`），**没有 `allow_once`**——ACP 允许客户端代答，TUI 的 YOLO 会自动选第一个 `allow_once`，没有该选项则问题落到真人面前。只有选中且 id 恰为 trust 选项才算同意，取消 / 未知 id / 客户端报错一律不信任，拒绝不被记住。得到回答之前项目资源一概不加载，首个 `prompt` 等待回答（`cancel` 结束此刻所有在等的 prompt，关闭会话也结束等待）；同目录多个会话依次询问，一次「信任」就回答了所有会话；对话框关闭后对磁盘重新取指纹，对话框期间文件变了就不信任。「记住」写入 `<home>/agent/trust.json`：按精确目录保存文件内容的 SHA-256 指纹（不是 mtime），`git pull` 改了文件就重新询问并说明「自上次信任后已改变」；文件读取失败即关闭，损坏的文件另存为 `trust.json.corrupt`，保存失败时本次会话仍受信并告知用户。新增 `[extensions] default_project_trust = "ask" | "never" | "always"`（默认 `ask`，旧开关 `trust_project_extensions` 等价于 `always`）。取不出指纹（文件过多 / 过大 / 读不了）的项目不提问，请写入 `trusted_projects`。headless 不提问，但承认指纹仍然匹配的已保存回答，其「被跳过」通知带原因。顺带修复：`PiAcpAgent(home=)` 与 `run_print(home=)` 没把 home 传给 `create_session_harness`，用户扩展目录读错了地方。
+- **验证**：批 2 的信任判定 14 个变异体、批 3 的提示文件 / skills 14 个变异体，全部被杀；批 4 新增 330 个用例（存储、指纹、判定、提示、ACP 全流程、headless、harness 各一组）与 210 个变异体，全部被杀，分簇的数字见第六节。
+- **规格**：Phase 7 规格新增 §4.4（信任模型，含批 4 的交互式确认与内容指纹）。
 - **残留**：见第五节 4–6。
 
 ### P7-03. [x] tier 路由默认指向 Anthropic，并把其他厂商的 key 发给它
@@ -234,9 +236,9 @@
 
 | 审计时归纳的缺口 | 现状 |
 |------------------|------|
-| 没有信任 / 能力模型：只定义了发现与覆盖，没有回答「谁的代码可以运行」「嵌套调用如何过权限」；权限是按工具名的白名单 | 项目信任（P7-02，最小子集，按路径）与子 agent 的权限继承（P7-01）已补上；权限仍是按工具名的白名单（第五节 3） |
+| 没有信任 / 能力模型：只定义了发现与覆盖，没有回答「谁的代码可以运行」「嵌套调用如何过权限」；权限是按工具名的白名单 | 项目信任（P7-02：ACP 里询问，回答绑定到文件内容）与子 agent 的权限继承（P7-01）已补上；权限仍是按工具名的白名单（第五节 3） |
 | 特性之间没有对账：提示缓存与每 turn 刷新；tier 路由与 provider / key；`trigger_prompt` 与 `close()` 及 ACP turn 模型 | 三处都已对账：git 段标注为会话快照（P6-02）；tier 与 key 按 provider 限定（P7-03）；`close()` 之后不再开启 turn，后台结果改用 custom 消息（P7-07） |
-| 「忠实移植」在扩展语义上有偏差：`tool_call` 不做首个 block 短路、嵌套调用不过钩子、没有 `project_trust` | 首个 block 短路（P7-08）；子 agent 的调用过钩子（P7-01）；`project_trust` 的最小子集（P7-02，无提示、无 `/trust`） |
+| 「忠实移植」在扩展语义上有偏差：`tool_call` 不做首个 block 短路、嵌套调用不过钩子、没有 `project_trust` | 首个 block 短路（P7-08）；子 agent 的调用过钩子（P7-01）；`project_trust`（P7-02：有提示与内容指纹，无 `/trust`） |
 | 失败语义不统一：有的静默降级（Mock 回退、journal 缓存 `None`、`suppress(Exception)`），有的硬失败（git 编码） | 不再退回 Mock（P7-14）；失败不入 journal（P7-05）；git 失败省略该段（P6-01）；扩展加载失败对用户可见（P7-12）。其他位置的 `suppress(Exception)` 不在本次修复范围 |
 
 ### 审计确认没有问题的部分
@@ -255,7 +257,7 @@
 | 1 | P7-01 | workflow 运行时是受限命名空间，不是沙箱；需要隔离要用独立进程加资源限制 |
 | 2 | P7-01 | 脚本用 `agent(..., cwd=)` 给子 agent 指定的工作目录会显示在授权提示里，但不限制在工作区内 |
 | 3 | P7-01 | `auto` / `always-approve` 模式下，子 agent 可以做会话允许的一切；没有 gate 的 executor（独立使用，或 bridge 没有 `tool_call_gate`）里的子 agent 不受限，`activate()` 只记一条 warning；权限本身仍是按工具名的白名单，审计建议的「默认需授权、按 annotations 放行只读工具」没有做 |
-| 4 | P7-02 | 信任按路径判断，不按内容：白名单内的项目之后才出现的扩展（例如 `git pull` 带来的）会被直接运行；授权以整个项目目录为单位，不区分单个扩展或资源；没有交互式信任提示，也没有内容哈希存储；TUI 自己的目录信任（`/hooks trust`）不适用于此；`[extensions]` 这个配置名同时管所有项目资源（扩展、提示文件、skills） |
+| 4 | P7-02 | 授权以整个项目目录为单位，不区分单个扩展或资源；保存的回答只适用于精确目录，不像白名单那样覆盖子目录；没有 `/trust` 命令，也没有「对此项目永不信任」的持久化（收回信任要手工删 `trust.json` 里的条目）；指纹只在会话开始时核对（加上对话框关闭后复核一次），会话进行中再改文件不会撤销信任；换行符转换（`core.autocrlf`）会改变内容哈希而触发重新询问；客户端可以自动批准 `session/request_permission`（ACP 允许；问题没有 `allow_once` 以避开 TUI 的 YOLO，但 TUI 按上次确认的选项类型粘性预选光标，上次选 “always” 类时高亮的就是「Trust and remember」）；客户端丢弃请求时，取消被当作拒绝；TUI 自己的目录信任（`/hooks trust`）不适用于此；`[extensions]` 这个配置名同时管所有项目资源（扩展、提示文件、skills）。（批 4 之前这一条还包括「按路径而非内容」「没有交互式提示」，已解决） |
 | 5 | P7-02 | `AGENTS.md` / `CLAUDE.md`（上游不论信任与否都会加载）、`agent.toml` 里直接给出的 prompt、绝对路径或 `~` 开头的 skills 路径不受门控 |
 | 6 | P7-02 | 项目扩展一旦被信任，就是完整的进程内代码执行 |
 | 7 | P7-05、P7-10 | journal 重放不会重做「请求没变的步骤」曾对工作区做的事（比如改过的文件）；worktree 回写失败（补丁与源目录此刻的状态冲突）时，该子 agent 的改动丢失；快照不复制源目录里未跟踪的文件 |
@@ -273,8 +275,8 @@
 
 ## 六、验证方法与结果
 
-- **先红后绿**：每项修复的回归测试在修复前必须失败。批 1 共 52 个，批 2 含经真实 ACP agent / 真实 workflow 扩展 / 真实 git worktree 的端到端用例，批 3 每一簇都先写测试再改实现。
-- **手工变异检查**：改坏实现的一处，跑对应测试，看有没有被抓住；幸存的变异体要么补测试、要么证明是等价变异。下表是在提交前的最终代码上重跑的结果（重跑时有 5 个变异体的匹配模式因后来的重构或格式化失效，已更新后单独重跑，均被杀）。
+- **先红后绿**：每项修复的回归测试在修复前必须失败。批 1 共 52 个，批 2 含经真实 ACP agent / 真实 workflow 扩展 / 真实 git worktree 的端到端用例，批 3 每一簇都先写测试再改实现，批 4 同样：ACP 流程用真实的 `PiAcpAgent` 加脚本化的客户端（能应答、延迟应答、抛错、丢请求、报错），headless 用真实的 `run_print`，指纹与存储用真实的文件系统（含符号链接、循环、命名管道、损坏的文件）。
+- **手工变异检查**：改坏实现的一处，跑对应测试，看有没有被抓住；幸存的变异体要么补测试、要么证明是等价变异。批 1 至 3 的行是在批 3 提交前的最终代码上重跑的结果（重跑时有 5 个变异体的匹配模式因后来的重构或格式化失效，已更新后单独重跑，均被杀）；批 4 的行是在批 4 最终代码上把全部变异体整套重跑的结果：有 5 个变异体的匹配模式因后来的重构或格式化而失效（取消标志与 `waiting` 计数的旧设计 2 个、`_decide_trust` 抽出之前的写法 1 个、旧的悬空链接标记 1 个，都已按新代码换成对应的变异体；「空扩展目录也算受门约束」1 个因格式化换行而更新了写法，被杀）；整套重跑时另外补了一类「遍历提前结束」的变异体（在悬空链接、`.git` / `__pycache__`、符号链接环、用户级 skills 条目处把 `continue` 换成 `break`），其中「悬空链接」一个幸存，说明没有用例保证排在它后面的文件仍被指纹覆盖（仓库自己起文件名，可以借此让后来改动的文件不影响指纹），已补 `test_nothing_in_a_directory_hides_the_files_listed_after_it`（强制两种目录列出顺序）与 `test_a_skills_entry_after_the_users_own_is_still_gated`，随后全部被杀。
 
   | 簇 | 变异体 | 结果 |
   |----|--------|------|
@@ -288,17 +290,23 @@
   | P7-11 goal-x | 44 | 全部被杀 |
   | P6-03 DeepSeek 思考开关 | 35 | 全部被杀 |
   | P6-03 矩阵配置 | 11 | 10 被杀；1 个无法自检（见 P6-03） |
-  | 合计 | 383 | 382 被杀 |
+  | P7-02（批 4）信任存储 `trust_store` | 20 | 全部被杀 |
+  | P7-02（批 4）指纹 `trust_fingerprint` | 26 | 全部被杀；「非常规文件也被读取」只能在 POSIX 上被杀（Windows 没有命名管道），在 WSL 里验证 |
+  | P7-02（批 4）判定 `decide_project_trust` | 20 | 全部被杀 |
+  | P7-02（批 4）ACP 流程 `agent.py` | 52 | 全部被杀；「说明里写的是未解析路径」在 Windows 上是等价变异（符号链接用例在 Windows 上跳过），在 WSL 里被杀 |
+  | P7-02（批 4）提示与说明 `trust_prompt` | 42 | 全部被杀 |
+  | P7-02（批 4）接线（factory、prompt_options、headless、harness、通知、config） | 50 | 全部被杀 |
+  | 合计 | 593 | 592 被杀 |
 
 - **探针重跑**：审计时用探针脚本复现问题，修复后重跑，行为已变成预期（探针是临时脚本，没有入库；对应的回归测试入库）。
-- **跨平台**：Windows 与 WSL 各跑一遍全量。WSL 首跑暴露了 4 个失败：这台机器的 WSL 导出了 `PI_HOME`，让「把 `Path.home()` 指向临时目录」的测试读到真实目录（P7-13 让加载器也认 `PI_HOME` 之后才出现）。根目录 `conftest.py` 现在为每个测试清掉 `PI_HOME`，`test_home.py` 里有回归测试。
+- **跨平台**：Windows 与 WSL 各跑一遍全量。WSL 首跑暴露了 4 个失败：这台机器的 WSL 导出了 `PI_HOME`，让「把 `Path.home()` 指向临时目录」的测试读到真实目录（P7-13 让加载器也认 `PI_HOME` 之后才出现）。根目录 `conftest.py` 现在为每个测试清掉 `PI_HOME`，`test_home.py` 里有回归测试。批 4 里有 5 个用例只在 POSIX 上有意义（符号链接的显示路径、命名管道、权限位、非法文件名），Windows 上跳过、在 WSL 里跑；对应的两个只能在 POSIX 上被杀的变异体也在 WSL 里重跑过。根目录 `conftest.py` 现在还清掉 `PI_TRUST_PROJECT_EXTENSIONS`（同类泄漏：开发者为自己的项目导出它，所有「项目不受信任」的用例就会随 shell 而变）。
 - **provider 文档**：DeepSeek 的模型名与下线日期、`thinking` / `reasoning_effort` 参数、`reasoning_content` 回传要求，以及 DeepSeek 为 pi 写的接入文档（`reasoningEffortMap`），都对照官方文档核对过；与真实 API 的对接没有验证（没有密钥）。
 
 ---
 
 ## 七、后续工作（未做，按价值排序）
 
-1. **信任的交互与内容哈希**：ACP 里的交互式信任提示，加上路径与内容哈希的存储，替代目前的纯路径信任（第五节 4、5）。
+1. ~~**信任的交互与内容哈希**~~：已在批 4 完成（P7-02；剩余的限制见第五节 4）。
 2. **子 agent 的 `cwd` 约束**：把脚本选的 `cwd` 限制在项目内（第五节 2）。
 3. **workflow 真正的隔离**：独立进程加资源限制，取代受限命名空间（第五节 1）。
 4. **DeepSeek 的 `reasoning_content` 回放**，并在 CLI 里接入 `Model.reasoning`（第五节 13）。

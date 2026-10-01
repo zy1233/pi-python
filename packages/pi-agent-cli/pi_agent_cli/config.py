@@ -16,8 +16,11 @@ from pi_agent_core.home import pi_home
 from pi_agent_core.types import ThinkingLevel
 
 PermissionMode = Literal["ask", "auto", "always-approve"]
+# What to do about a project nobody has vouched for: ask the user, leave it alone, or trust it.
+DefaultProjectTrust = Literal["ask", "never", "always"]
 
 _VALID_PERMISSION: set[str] = {"ask", "auto", "always-approve"}
+_VALID_DEFAULT_TRUST: set[str] = {"ask", "never", "always"}
 _VALID_THINKING: set[str] = {"off", "minimal", "low", "medium", "high", "xhigh"}
 
 # ``pi_home`` (imported above and re-exported from here) is the one place that decides where
@@ -97,6 +100,9 @@ class CliConfig:
     # loaded. They are skipped unless the project is trusted; see ``extension_trust``.
     trust_project_extensions: bool = False
     trusted_projects: tuple[str, ...] = ()
+    # ``None``: not set. Then the older ``trust_project_extensions`` decides ("always" if it is
+    # on), and otherwise the answer is "ask". See ``extension_trust.effective_default_trust``.
+    default_project_trust: DefaultProjectTrust | None = None
 
 
 def load_config(home: Path | str | None = None) -> CliConfig:
@@ -199,7 +205,17 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         git_max_status_lines=_as_int(git.get("max_status_lines"), 40),
         trust_project_extensions=_as_bool(extensions.get("trust_project_extensions"), False),
         trusted_projects=trusted_projects,
+        default_project_trust=_default_project_trust(extensions.get("default_project_trust")),
     )
+
+
+def _default_project_trust(value: object) -> DefaultProjectTrust | None:
+    """``ask``, ``never`` or ``always``; anything else is treated as if it were not set, so a
+    typo never quietly picks a side."""
+    if not isinstance(value, str):
+        return None
+    text = value.strip().lower()
+    return text if text in _VALID_DEFAULT_TRUST else None  # type: ignore[return-value]
 
 
 def _as_bool(value: object, default: bool) -> bool:
