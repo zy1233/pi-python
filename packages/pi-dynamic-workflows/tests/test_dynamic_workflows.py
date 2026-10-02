@@ -922,7 +922,10 @@ class TestWorkflowManager:
         )
         assert manager.pending_count == 1
 
-        await asyncio.sleep(0.1)
+        for _ in range(1000):  # the script runs in a process of its own: allow it time to start
+            if manager.pending_count == 0:
+                break
+            await asyncio.sleep(0.01)
         assert manager.pending_count == 0
         assert len(messages) == 1
         assert "bg-test" in messages[0]

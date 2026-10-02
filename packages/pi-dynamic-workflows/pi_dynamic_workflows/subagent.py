@@ -12,6 +12,7 @@ import uuid
 from typing import Any
 
 from pi_dynamic_workflows.model_routing import resolve_tier
+from pi_dynamic_workflows.paths import resolve_subagent_cwd
 from pi_dynamic_workflows.runtime import AgentResult, SubagentExecutor
 
 logger = logging.getLogger(__name__)
@@ -147,7 +148,9 @@ class HarnessSubagentExecutor(SubagentExecutor):
     ) -> AgentResult:
         start = time.monotonic()
         effective_model = self._resolve_model(tier, model)
-        effective_cwd = cwd or self._cwd
+        # Whoever calls this (the runtime does its own check first), the directory a
+        # sub-agent works in is this executor's to vouch for: inside its project or not at all.
+        effective_cwd = resolve_subagent_cwd(cwd, self._cwd) if cwd else self._cwd
 
         wt_path: str | None = None
         if self._worktree_manager is not None:

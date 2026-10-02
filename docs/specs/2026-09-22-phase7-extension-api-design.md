@@ -452,7 +452,7 @@ class GoalState:
 
 上游 [`@quintinshaw/pi-dynamic-workflows`](https://github.com/QuintinShaw/pi-dynamic-workflows)
 是 Pi 最大的第三方扩展之一（600KB+ TS），核心是让 LLM 编写脚本来编排 subagent 并行执行。
-Python 移植将脚本语言从 JavaScript 改为 Python，运行在受限命名空间中。
+Python 移植将脚本语言从 JavaScript 改为 Python，运行在独立的子进程里（§9.3）。
 
 ### 9.2 包结构
 
@@ -462,7 +462,12 @@ packages/pi-dynamic-workflows/
 └── pi_dynamic_workflows/
     ├── __init__.py              activate(pi) + /workflows 命令
     ├── workflow_tool.py         workflow 工具定义
-    ├── runtime.py               WorkflowRuntime 脚本执行引擎（受限命名空间，非安全边界）
+    ├── runtime.py               WorkflowRuntime：把脚本交给沙盒运行，并做宿主一侧的事（子 agent、预算、journal）
+    ├── sandbox/                 脚本沙盒：独立进程 + 资源限制（设计见 2026-10-01-workflow-sandbox-design.md）
+    │   ├── host.py              宿主侧：起进程、协议校验、限制、生命周期
+    │   ├── child.py             脚本进程里运行的程序（只依赖标准库）
+    │   └── winjob.py            Windows Job Object
+    ├── paths.py                 子 agent 的 cwd 约束
     ├── builtin_workflows.py     5 个内置 pattern
     ├── model_routing.py         tier 路由
     └── budget.py                token budget tracking
@@ -471,10 +476,15 @@ packages/pi-dynamic-workflows/
 ### 9.3 核心机制
 
 - **`workflow` 工具**：LLM 传入 Python 脚本或 `name`（内置 pattern）
-- **受限命名空间（不是沙盒）**：脚本在只暴露 `agent()`, `parallel()`, `pipeline()`, `phase()`,
-  `log()`, `budget`, `args`, `cwd` 和一小组内建函数的命名空间中执行，用来引导脚本只做编排。
-  它**不是安全边界**：经由命名空间里已有对象的属性访问可以到达 `__import__` 等能力。真正约束脚本副作用的
-  是子代理工具调用所经过的权限策略（见 §12「权限继承」）。
+- **独立进程里的沙盒**（`sandbox/`，完整设计见 `2026-10-01-workflow-sandbox-design.md`）：脚本在一个只有标准库的
+  子进程里运行，命名空间只暴露 `agent()`, `parallel()`, `pipeline()`, `phase()`, `log()`, `budget`, `args`,
+  `cwd`, `result` 和一小组内建函数，用来引导脚本只做编排。有副作用的事（起子代理、日志、预算）都走管道，
+  由宿主执行，宿主把管道另一头当作不可信输入。子进程有清空的环境、空的工作目录和内核限制（POSIX 的 rlimit 与
+  `NO_NEW_PRIVS`；Windows 的 Job Object 与低完整性），再加一个审计钩子。
+  钩子是速度栏，不是边界：走出命名空间的脚本在各平台上还能做什么（Linux 上读文件、联网、读同用户进程的
+  环境变量；Windows 上读文件、联网），见该规格 §9。真正约束脚本副作用的仍是子代理工具调用所经过的权限策略
+  （见 §12「权限继承」）。
+  *（此前是进程内 `exec` + 受限命名空间，审计 P7-01 实测有两条路径走出命名空间，且 `while True` 会冻住宿主的事件循环。）*
 - **`agent(prompt, **opts)`**：spawn 隔离 subagent，支持 `tier`/`model`/`schema`/`label`
 - **`parallel(thunks)`**：并发运行 agent 调用
 - **`pipeline(items, *stages)`**：流水线：stage 串行、item 并行
@@ -628,8 +638,8 @@ TUI (zypi) ──ACP stdio──> pi_agent_cli ──> factory.create_session_ha
 - gate 抛异常按拒绝处理（fail-closed）：hook 异常在 harness 里表现为该调用失败，工具不会执行。
 - `ToolCallEvent.origin`：子代理的调用带 `{"kind": "subagent", "cwd": ..., "label": ...}`（会话自己的调用为
   `None`）。权限弹窗标题据此写成 `write (workflow sub-agent in <cwd>)`：脚本可以用 `agent(..., cwd=)` 把
-  子代理指向任意目录，而弹窗只显示工具入参，相对路径本身看不出落点。`label` 是脚本自己起的文本，只进
-  `origin`，不进标题。
+  子代理指向项目内的某个子目录，而弹窗只显示工具入参，相对路径本身看不出落点。`label` 是脚本自己起的文本，
+  只进 `origin`，不进标题。（`cwd` 被限制在项目目录内，见下面的「已知限制」。）
 - 工具调用 id 由模型生成（`call_1` …），会在父会话与各子代理之间重复，而权限弹窗以 id 为键，所以每次子代理
   运行的 id 加前缀 `subagent-<8 hex>:`。
 - CLI 对同一会话的权限询问串行化（每会话一个锁）：并行子代理不会同时弹出多个弹窗。
@@ -638,8 +648,12 @@ TUI (zypi) ──ACP stdio──> pi_agent_cli ──> factory.create_session_ha
   `activate()` 发现 bridge 没有 `tool_call_gate` 时记录 warning。
 - `isolation=True` 用 `HarnessSubagentExecutor.with_worktree_manager()`（浅拷贝）派生 executor，gate 与其它配置
   不会在派生时丢失（此前用构造函数重建，新增配置容易漏传）。
-- 已知限制：`auto` / `always-approve` 下子代理可执行一切，与会话自己一致；脚本可指定任意 `cwd`，目前只是
-  在弹窗里可见，未限制在工作区内；受限命名空间不是安全边界（见 §9.3）。
+- **`cwd` 约束**：脚本给 `agent(..., cwd=)` 的目录必须落在项目目录之内（相对路径相对项目目录解析，符号链接与
+  目录联接跟随后再比较）。越界在占用 agent 名额与查 journal 之前就报错，所以收紧后的策略不会被一次 resume 绕过；
+  `HarnessSubagentExecutor` 在建 worktree 之前也检查一次，独立使用时同样受约束。规则见沙盒规格 §8.1。
+- 已知限制：`auto` / `always-approve` 下子代理可执行一切，与会话自己一致；`isolation=True`（worktree）时子代理
+  在 worktree 根运行，`cwd` 的子目录被忽略；脚本进程里的审计钩子可被绕过，钩子被绕过之后脚本在各平台上还能做
+  什么见沙盒规格 §9（§9.3 的脚本运行方式）。
 
 **Bridge 扩展**：`HarnessBridge` 增加 `stream_fn` / `model` / `get_api_key_fn` / `tool_call_gate`
 只读属性，`activate()` 据此构造真实 executor；另有 `trigger_message(custom_type, text, *, details=None)`

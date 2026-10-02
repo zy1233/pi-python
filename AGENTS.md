@@ -33,6 +33,7 @@ AgentMessage[] → transform_context() → convert_to_llm() → LangChain BaseMe
 | `pi_agent_core/tools.py`, `validation.py`, `queues.py` | `SimpleTool`, argument validation, queues | — |
 | `pi_agent_core/coding_tools/` | Built-in coding tools (`read`/`bash`/`edit`/`write`/`grep`/`find`/`ls`) | pi coding tools |
 | `packages/pi-agent-harness/` | Sessions, AgentHarness, compaction, skills, LocalExecutionEnv | `harness/` |
+| `packages/pi-dynamic-workflows/` | `workflow` tool and runtime. Scripts run in a child process (`sandbox/host.py` ⇄ stdlib-only `sandbox/child.py`, JSON lines): the kernel limits are the boundary, the audit hook is a speed bump. Sandbox work starts from `docs/specs/2026-10-01-workflow-sandbox-design.md` and runs `tests/test_sandbox_*.py` on Windows **and** WSL (the layers differ per platform) | `@quintinshaw/pi-dynamic-workflows` |
 | `packages/pi-agent-cli/` | Standard-ACP CLI (`python -m pi_agent_cli`); config `agent.example.toml`, home `~/.pi-python`; TUI binary `zypi` under `tui/`. See [`packages/pi-agent-cli/AGENTS.md`](packages/pi-agent-cli/AGENTS.md) for spawn, config, and prompt pipeline | — |
 
 ### Invariants

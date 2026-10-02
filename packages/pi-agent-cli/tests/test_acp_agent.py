@@ -921,12 +921,38 @@ async def test_parallel_subagents_get_one_permission_prompt_at_a_time(tmp_path, 
 @pytest.mark.asyncio
 async def test_subagent_prompt_names_the_directory_the_call_runs_in(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
-    elsewhere = tmp_path / "elsewhere"  # outside the session's workspace
+    package = workspace / "pkg"  # inside the workspace, but not where the session started
+    workspace.mkdir()
+    package.mkdir()
+    client = _PickyClient()
+
+    _, agent, session_id = await _run_workflow(
+        tmp_path,
+        monkeypatch,
+        script=_WRITER_IN_OTHER_DIR,
+        args={"paths": ["note.txt"], "cwd": str(package)},
+        client=client,
+        workspace=workspace,
+    )
+
+    workflow_prompt, write_prompt = (call["tool_call"] for call in client.permission_calls)
+    assert workflow_prompt.title == "workflow"  # the session's own call carries no origin
+    assert "sub-agent" in write_prompt.title
+    assert str(package) in write_prompt.title  # the script chose this, not the session
+    assert (package / "note.txt").exists()
+    assert session_id in agent._session_cwds
+
+
+@pytest.mark.asyncio
+async def test_a_workflow_cannot_send_a_subagent_outside_the_workspace(tmp_path, monkeypatch):
+    """The prompt names the directory, but a "yes" to a write must not reach beyond the project."""
+    workspace = tmp_path / "workspace"
+    elsewhere = tmp_path / "elsewhere"
     workspace.mkdir()
     elsewhere.mkdir()
     client = _PickyClient()
 
-    _, agent, session_id = await _run_workflow(
+    await _run_workflow(
         tmp_path,
         monkeypatch,
         script=_WRITER_IN_OTHER_DIR,
@@ -935,9 +961,5 @@ async def test_subagent_prompt_names_the_directory_the_call_runs_in(tmp_path, mo
         workspace=workspace,
     )
 
-    workflow_prompt, write_prompt = (call["tool_call"] for call in client.permission_calls)
-    assert workflow_prompt.title == "workflow"  # the session's own call carries no origin
-    assert "sub-agent" in write_prompt.title
-    assert str(elsewhere) in write_prompt.title  # the script chose this, not the session
-    assert agent._session_cwds[session_id] not in write_prompt.title
-    assert (elsewhere / "note.txt").exists()
+    assert client.asked_about() == ["workflow"]  # no sub-agent ever got as far as a write
+    assert not (elsewhere / "note.txt").exists()
