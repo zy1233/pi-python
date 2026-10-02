@@ -14,7 +14,7 @@ from acp.schema import AllowedOutcome, DeniedOutcome, RequestPermissionResponse
 from pi_agent_cli.agent import PiAcpAgent
 from pi_agent_cli.config import CliConfig
 from pi_agent_cli.events import project_event, tool_kind
-from pi_agent_cli.permissions import PERMISSION_TOOLS, needs_permission, permission_tool_call
+from pi_agent_cli.permissions import needs_permission, permission_tool_call
 from pi_agent_core.event_stream import AssistantMessageEventStream
 from pi_agent_core.messages import ToolCallContent
 from pi_agent_core.tests.mock_stream import _base_partial, mock_text_stream
@@ -328,10 +328,13 @@ def test_tool_kind_mapping():
     assert tool_kind("write") == "edit"
     assert tool_kind("bash") == "execute"
     assert tool_kind("grep") == "search"
-    assert {"bash", "edit", "write", "workflow"} == PERMISSION_TOOLS
-    assert needs_permission("bash", "ask")
-    assert not needs_permission("read", "ask")
-    assert not needs_permission("bash", "always-approve")
+
+
+def test_permission_ask_mode_asks_unless_the_tool_declares_itself_harmless():
+    assert needs_permission("ask", None)
+    assert needs_permission("ask", {"readOnlyHint": False})
+    assert not needs_permission("ask", {"readOnlyHint": True})
+    assert not needs_permission("always-approve", None)
 
 
 def test_project_event_text_delta():
@@ -656,9 +659,10 @@ async def test_slash_command_unknown_falls_through_via_acp(tmp_path):
 
 
 def test_workflow_needs_permission_in_ask_mode_only():
-    assert needs_permission("workflow", "ask")
-    assert not needs_permission("workflow", "auto")
-    assert not needs_permission("workflow", "always-approve")
+    workflow = pytest.importorskip("pi_dynamic_workflows.workflow_tool").create_workflow_tool()
+    assert needs_permission("ask", workflow.annotations)
+    assert not needs_permission("auto", workflow.annotations)
+    assert not needs_permission("always-approve", workflow.annotations)
 
 
 def test_permission_prompt_says_where_a_subagent_call_runs():

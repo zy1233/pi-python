@@ -6,6 +6,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
+from pi_agent_core.adapters.deepseek_replay import REASONING_CONTENT, reasoning_text
 from pi_agent_core.messages import AssistantMessage, Message, ToolResultMessage, UserMessage
 from pi_agent_core.types import AgentMessage, Model
 
@@ -137,10 +138,14 @@ def convert_to_langchain(
                     content.append({"type": "text", "text": "".join(text_parts)})
             else:
                 content = "".join(text_parts) if text_parts else ""
+            # DeepSeek wants its thinking back as ``reasoning_content`` (see deepseek_replay);
+            # the chat model decides whether this request sends it.
+            kept = reasoning_text(msg.content) if provider == "deepseek" else ""
+            extra = {REASONING_CONTENT: kept} if kept else {}
             if tool_calls:
-                ai = AIMessage(content=content, tool_calls=tool_calls)
+                ai = AIMessage(content=content, tool_calls=tool_calls, additional_kwargs=extra)
             else:
-                ai = AIMessage(content=content)
+                ai = AIMessage(content=content, additional_kwargs=extra)
             out.append(ai)
         elif isinstance(msg, ToolResultMessage):
             text = " ".join(b["text"] for b in msg.content if b.get("type") == "text")

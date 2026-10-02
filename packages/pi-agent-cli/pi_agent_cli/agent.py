@@ -72,7 +72,7 @@ from pi_agent_cli.trust_store import TrustStore
 from pi_agent_core.coding_tools.path_utils import normalize_host_path
 from pi_agent_core.messages import ImageContent
 from pi_agent_core.types import StreamFn
-from pi_agent_harness import AgentHarness, JsonlSessionRepo, Session
+from pi_agent_harness import AgentHarness, AgentHarnessError, JsonlSessionRepo, Session
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +135,7 @@ class PiAcpAgent(Agent):
         self._commands_advertised: set[str] = set()
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._permission_locks: dict[str, asyncio.Lock] = {}
+        self._prompts_in_flight: dict[str, int] = {}
         self._trust: dict[str, _SessionTrust] = {}
         self._project_locks: dict[str, asyncio.Lock] = {}
 
@@ -270,13 +271,40 @@ class PiAcpAgent(Agent):
         if session_id not in self._commands_advertised:
             await self._advertise_commands(session_id)
         text, images = _prompt_to_text_images(prompt)
-        try:
-            message = await harness.prompt(text, images or None)
-        except Exception as exc:
-            if type(exc).__name__ == "AgentHarnessError" and getattr(exc, "code", None) == "busy":
-                raise RequestError.invalid_params({"reason": "busy"}) from exc
-            raise
+        message = await self._run_prompt(session_id, harness, text, images)
+        if message is None:
+            return PromptResponse(stop_reason="cancelled")
         return PromptResponse(stop_reason=_stop_reason(message))
+
+    async def _run_prompt(
+        self, session_id: str, harness: AgentHarness, text: str, images: list[ImageContent]
+    ) -> Any | None:
+        """Run a prompt; ``None`` when it was cancelled (or the session closed) while it waited.
+
+        A turn the client did not start, an extension delivering a background result, holds
+        the harness, and ACP v1 has no way to tell the client so: ``state_update`` is a v2
+        draft notification, which neither the Python SDK nor the crate behind the TUI can
+        parse, and this agent never claims protocol 2. A prompt that finds the harness busy
+        with such a turn therefore waits for it instead of failing. A prompt that finds
+        another one of the client's own in flight is a client error and is refused as busy.
+        """
+        in_flight = self._prompts_in_flight
+        in_flight[session_id] = in_flight.get(session_id, 0) + 1
+        try:
+            while True:
+                try:
+                    return await harness.prompt(text, images or None)
+                except Exception as exc:
+                    if not _is_busy(exc):
+                        raise
+                    if in_flight[session_id] > 1:
+                        raise RequestError.invalid_params({"reason": "busy"}) from exc
+                if not await self._wait_until_idle(session_id, harness):
+                    return None
+        finally:
+            in_flight[session_id] -= 1
+            if not in_flight[session_id]:
+                del in_flight[session_id]
 
     async def cancel(self, session_id: str, **kwargs: Any) -> None:
         state = self._trust.get(session_id)
@@ -533,6 +561,25 @@ class PiAcpAgent(Agent):
             return False
         return self._harnesses.get(session_id) is harness
 
+    async def _wait_until_idle(self, session_id: str, harness: AgentHarness) -> bool:
+        """Hold a prompt back while the harness runs a turn the client did not start.
+
+        ``False`` when the prompt must end as cancelled instead: ``session/cancel`` came in,
+        or the session was closed, while it waited.
+        """
+        state = self._trust.get(session_id)
+        cancel = state.cancelled if state is not None else asyncio.Event()
+        idle = asyncio.ensure_future(harness.wait_for_idle())
+        cancelled = asyncio.ensure_future(cancel.wait())
+        try:
+            await asyncio.wait({idle, cancelled}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            idle.cancel()
+            cancelled.cancel()
+        if cancel.is_set():
+            return False
+        return self._harnesses.get(session_id) is harness
+
     def _drop_trust(self, session_id: str) -> None:
         """Forget a session's standing on its project. A question still open is withdrawn,
         and a prompt held back by it is let go."""
@@ -627,7 +674,7 @@ class PiAcpAgent(Agent):
 
     async def _handle_tool_call(self, session_id: str, event: Any) -> dict[str, Any] | None:
         name = event.toolName
-        if not needs_permission(name, self._config.permission):
+        if not needs_permission(self._config.permission, getattr(event, "annotations", None)):
             return None
         if self._conn is None:
             return {"block": True, "reason": "No ACP client connected"}
@@ -691,6 +738,11 @@ def _prompt_to_text_images(
                 }
             )
     return "".join(texts), images
+
+
+def _is_busy(exc: Exception) -> bool:
+    """Whether *exc* is the harness saying it is running something else."""
+    return isinstance(exc, AgentHarnessError) and exc.code == "busy"
 
 
 def _stop_reason(message: Any) -> str:

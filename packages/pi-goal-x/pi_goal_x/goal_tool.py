@@ -15,6 +15,11 @@ from pi_goal_x.prompts import (
     GOAL_UPDATE_SNIPPET,
 )
 
+# Both tools write, but only the agent's own notes (the goal, kept as session entries): they
+# touch nothing of the user's and reach nowhere, so the CLI's ``ask`` mode has no reason to
+# stop for them. (Hints in the MCP vocabulary; see ``pi_agent_core.types.ToolAnnotations``.)
+_KEEPS_NOTES = {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False}
+
 # ---------------------------------------------------------------------------
 # goal_update
 # ---------------------------------------------------------------------------
@@ -149,6 +154,7 @@ def create_goal_update_tool(
         label="Goal Update",
         prompt_snippet=GOAL_UPDATE_SNIPPET,
         prompt_guidelines=GOAL_SYSTEM_GUIDELINES,
+        annotations=dict(_KEEPS_NOTES),
     )
 
 
@@ -165,4 +171,5 @@ def create_goal_complete_tool(
         execute=_make_goal_complete_execute(state, on_change),
         label="Goal Complete",
         prompt_snippet=GOAL_COMPLETE_SNIPPET,
+        annotations=dict(_KEEPS_NOTES),
     )

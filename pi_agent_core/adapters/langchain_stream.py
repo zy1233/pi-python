@@ -13,6 +13,7 @@ import time
 from typing import Any
 from urllib.parse import urlsplit
 
+from pi_agent_core.adapters.deepseek_replay import replaying_chat_deepseek
 from pi_agent_core.adapters.langchain_convert import agent_tool_to_lc_schema, convert_to_langchain
 from pi_agent_core.event_stream import AssistantMessageEventStream
 from pi_agent_core.messages import (
@@ -149,8 +150,7 @@ def _apply_reasoning_params(
     """
     provider = model.provider.lower()
     if provider == "deepseek" and _is_deepseek_api(model.base_url):
-        thinking_level = level if level != "off" and model.reasoning else None
-        return _apply_deepseek_thinking(kwargs, thinking_level)
+        return _apply_deepseek_thinking(kwargs, _deepseek_thinking_level(model, level))
 
     if not level or level == "off" or not model.reasoning:
         return kwargs
@@ -181,6 +181,15 @@ def _is_deepseek_api(base_url: str | None) -> bool:
     return host == "deepseek.com" or host.endswith(".deepseek.com")
 
 
+def _deepseek_thinking_level(model: Model, level: ThinkingLevel | None) -> ThinkingLevel | None:
+    """The level DeepSeek's own API is asked to think at, or None when it is told not to.
+
+    Both gates must be open, as for every provider: the model has to be able to reason
+    (`model.reasoning`) and the request has to ask for it (`level` is not "off").
+    """
+    return level if level != "off" and model.reasoning else None
+
+
 def _apply_deepseek_thinking(kwargs: dict[str, Any], level: ThinkingLevel | None) -> dict[str, Any]:
     """Switch DeepSeek's thinking mode on (with an effort) or off; *level* None means off.
 
@@ -188,10 +197,9 @@ def _apply_deepseek_thinking(kwargs: dict[str, Any], level: ThinkingLevel | None
     `reasoning_effort`. Neither is a standard OpenAI parameter, so the first goes through
     `extra_body`.
 
-    Known limit: with thinking on, requests that carry tools must send `reasoning_content`
-    back on the earlier assistant messages, or the API answers 400. ChatDeepSeek (checked
-    with 1.1.0 and 1.1.1) does not send it, so thinking together with tools fails after the
-    first tool round; thinking without tools, and no thinking at all, are fine.
+    With thinking on, a request that carries tools must send `reasoning_content` back on the
+    earlier assistant messages, or the API answers 400. ChatDeepSeek (checked with 1.1.0 and
+    1.1.1) does not; `resolve_chat_model` builds one that does (`deepseek_replay`).
     """
     extra_body = dict(kwargs.get("extra_body") or {})
     if level is None:
@@ -432,13 +440,17 @@ def resolve_chat_model(
         # (SiliconFlow, vLLM, ...): unlike ChatOpenAI it preserves the
         # reasoning_content thinking stream in additional_kwargs.
         try:
-            from langchain_deepseek import ChatDeepSeek
+            chat_cls = replaying_chat_deepseek()
         except ImportError as e:
             raise ImportError(
                 "Install langchain-deepseek: pip install 'pi-agent-core[deepseek]'"
             ) from e
         kwargs.setdefault("stream_usage", True)
-        return ChatDeepSeek(**kwargs)
+        # Its own API wants the thinking back on the earlier assistant messages whenever it
+        # was asked to think (and gets nothing it did not ask for); a gateway is left alone.
+        thinks = _deepseek_thinking_level(model, reasoning) is not None
+        kwargs["replay_reasoning"] = _is_deepseek_api(model.base_url) and thinks
+        return chat_cls(**kwargs)
 
     try:
         from langchain.chat_models import init_chat_model

@@ -72,7 +72,7 @@ Zed/Neovim ───────────────────────
 
 工具 `kind`：`read`→read；`edit`/`write`→edit（`details` 中 unified-diff 填 ACP diff）；`bash`→execute；`grep`/`find`/`ls`→search。TUI 按 kind+title+diff 渲染，不改 coding_tools 名称去迎合 grok 的 `read_file` / `run_terminal_command`。
 
-权限：harness `before_tool_call` 对 `bash`/`edit`/`write` 发 `session/request_permission`；拒绝则 `block=True`。（Phase 7 起还包括 `workflow` 及其子代理的每次工具调用，见 Phase 7 spec §12。）always-approve 走我方 config，不走 grok `_meta`。
+权限：harness `before_tool_call` 对 `bash`/`edit`/`write` 发 `session/request_permission`；拒绝则 `block=True`。（Phase 7 起改为：`ask` 模式下除非工具自己声明无害，否则都问——所以还包括 `workflow` 及其子代理的每次工具调用、不带 annotations 的扩展工具，见 Phase 7 spec §12「权限模型」。）always-approve 走我方 config，不走 grok `_meta`。
 
 ---
 

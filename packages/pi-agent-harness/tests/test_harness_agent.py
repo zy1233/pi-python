@@ -6,6 +6,7 @@ import pytest
 from pydantic import BaseModel
 
 from pi_agent_core.event_stream import AssistantMessageEventStream
+from pi_agent_core.extensions.types import ToolDefinition
 from pi_agent_core.messages import UserMessage
 from pi_agent_core.tests.mock_stream import _base_partial, mock_text_stream
 from pi_agent_core.tools import SimpleTool
@@ -1197,6 +1198,134 @@ async def test_extension_bridge_exposes_the_tool_call_gate():
     assert await gate("c2", "read", {"path": "a.txt"}) is None
     origin = {"kind": "subagent", "cwd": "/w"}
     assert await gate("c3", "bash", {}, origin=origin) == {"block": True, "reason": "policy"}
+
+
+# ---------------------------------------------------------------------------
+# Tool annotations reach the tool_call hooks
+# ---------------------------------------------------------------------------
+#
+# The CLI's permission layer asks about a call unless the tool says it only reads. A hook
+# is handed the call's name and input; the harness adds what the registered tool declares
+# about itself, whichever way the call arrives (its own loop, or ``check_tool_call`` for the
+# sub-agents of a workflow).
+
+
+class _PeekParams(BaseModel):
+    message: str = ""
+
+
+def _peek_tool(**kwargs) -> SimpleTool:
+    async def execute(_id, params, signal, on_update):
+        return AgentToolResult(content=[{"type": "text", "text": "peeked"}], details={})
+
+    return SimpleTool("echo", "", "Echo", _PeekParams, execute, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_a_tool_call_hook_sees_what_the_called_tool_declares():
+    tool = _peek_tool(annotations={"readOnlyHint": True, "openWorldHint": False})
+    harness = AgentHarness(
+        session=await _memory_session(),
+        model=_model(),
+        stream_fn=_tool_once_stream,
+        tools=[tool],
+    )
+    seen: list = []
+    harness.on("tool_call", seen.append)
+
+    await harness.prompt("use tool")
+
+    (event,) = seen
+    assert event.annotations == {"readOnlyHint": True, "openWorldHint": False}
+
+
+@pytest.mark.asyncio
+async def test_a_tool_that_declares_nothing_has_no_annotations_on_the_event():
+    harness = AgentHarness(
+        session=await _memory_session(),
+        model=_model(),
+        stream_fn=_tool_once_stream,
+        tools=[_peek_tool()],
+    )
+    seen: list = []
+    harness.on("tool_call", seen.append)
+
+    await harness.prompt("use tool")
+
+    (event,) = seen
+    assert event.annotations is None
+
+
+@pytest.mark.asyncio
+async def test_check_tool_call_looks_the_annotations_up_by_tool_name():
+    harness = await _idle_harness(tools=[_peek_tool(annotations={"readOnlyHint": True})])
+    seen: list = []
+    harness.on("tool_call", seen.append)
+
+    origin = {"kind": "subagent", "cwd": "/w"}
+    await harness.check_tool_call("c1", "echo", {}, origin=origin)
+    await harness.check_tool_call("c2", "mystery", {}, origin=origin)
+
+    known, unknown = seen
+    assert known.annotations == {"readOnlyHint": True}
+    assert unknown.annotations is None  # not a tool of this session: nothing to take at its word
+
+
+@pytest.mark.asyncio
+async def test_annotations_that_are_not_a_mapping_count_as_none():
+    harness = await _idle_harness(tools=[_peek_tool(annotations=["readOnlyHint"])])
+    seen: list = []
+    harness.on("tool_call", seen.append)
+
+    await harness.check_tool_call("c1", "echo", {})
+
+    assert seen[0].annotations is None
+
+
+@pytest.mark.asyncio
+async def test_a_hook_cannot_rewrite_what_a_tool_declares():
+    tool = _peek_tool(annotations={"readOnlyHint": True})
+    harness = await _idle_harness(tools=[tool])
+
+    def tamper(event):
+        event.annotations["readOnlyHint"] = False
+
+    harness.on("tool_call", tamper)
+    await harness.check_tool_call("c1", "echo", {})
+
+    assert tool.annotations == {"readOnlyHint": True}
+
+
+@pytest.mark.asyncio
+async def test_an_extension_tool_keeps_the_annotations_it_was_registered_with():
+    async def execute(_id, params, signal, on_update):
+        return AgentToolResult(content=[{"type": "text", "text": "peeked"}], details={})
+
+    def extension(pi):
+        pi.register_tool(
+            ToolDefinition(
+                name="peek",
+                description="",
+                parameters=_PeekParams,
+                execute=execute,
+                annotations={"readOnlyHint": True},
+            )
+        )
+        pi.register_tool(
+            ToolDefinition(name="poke", description="", parameters=_PeekParams, execute=execute)
+        )
+
+    harness = await _idle_harness(extensions=[extension])
+    await harness.load_extensions()
+    seen: list = []
+    harness.on("tool_call", seen.append)
+
+    await harness.check_tool_call("c1", "peek", {})
+    await harness.check_tool_call("c2", "poke", {})
+
+    peek, poke = seen
+    assert peek.annotations == {"readOnlyHint": True}
+    assert poke.annotations is None
 
 
 # ---------------------------------------------------------------------------

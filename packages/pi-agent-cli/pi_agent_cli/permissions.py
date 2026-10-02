@@ -1,7 +1,19 @@
-"""Map bash/edit/write/workflow tool_call hooks to ACP session/request_permission."""
+"""Map tool_call hooks to ACP session/request_permission.
+
+In ``ask`` mode a call is put to the user unless the tool says it is harmless. What a tool
+says about itself is its ``annotations`` (MCP-style hints, see ``ToolAnnotations``), which
+the harness puts on the ``tool_call`` event. There is no list of tool names to keep up to
+date: a tool nobody thought of, an extension's say, is asked about until it declares itself.
+
+``workflow`` declares nothing, so starting one is a decision of its own; it fans work out to
+sub-agents that can run ``bash`` / ``edit`` / ``write`` themselves. Their tool calls are
+asked about individually (the harness bridge's ``tool_call_gate``), not covered by allowing
+the workflow.
+"""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from acp.schema import AllowedOutcome, DeniedOutcome, PermissionOption, ToolCallUpdate
@@ -9,21 +21,42 @@ from acp.schema import AllowedOutcome, DeniedOutcome, PermissionOption, ToolCall
 from pi_agent_cli.config import PermissionMode
 from pi_agent_cli.events import tool_kind
 
-# ``workflow`` fans work out to sub-agents that can run bash/edit/write themselves, so
-# starting one is a decision of its own. Their tool calls are asked about individually
-# (the harness bridge's ``tool_call_gate``), not covered by allowing the workflow.
-PERMISSION_TOOLS = frozenset({"bash", "edit", "write", "workflow"})
-
 PERMISSION_OPTIONS = [
     PermissionOption(option_id="allow-once", name="Allow once", kind="allow_once"),
     PermissionOption(option_id="reject-once", name="Reject", kind="reject_once"),
 ]
 
 
-def needs_permission(tool_name: str, mode: PermissionMode) -> bool:
+def _declares_itself_harmless(annotations: Any) -> bool:
+    """Whether a tool's own hints put it outside the prompt.
+
+    Two things qualify: ``readOnlyHint: true``, or ``destructiveHint: false`` together with
+    ``openWorldHint: false`` (a write that stays in the agent's own books, such as the goal
+    tools' notes in the session). Each hint has to be a real boolean: ``"true"`` and ``1``
+    are not claims to act on. A hint that is missing is not read in the tool's favour (the
+    MCP defaults are destructive and open world), and a tool that declares nothing, or
+    something that is not a mapping, is asked about.
+
+    The hints are the tool author's word. Built-in and shipped tools are ours; an extension
+    is code the user chose to load, and could do worse than mislabel a tool.
+    """
+    if not isinstance(annotations, Mapping):
+        return False
+    if annotations.get("readOnlyHint") is True:
+        return True
+    return annotations.get("destructiveHint") is False and annotations.get("openWorldHint") is False
+
+
+def needs_permission(mode: PermissionMode, annotations: Mapping[str, Any] | None = None) -> bool:
+    """Whether a tool call has to be put to the user.
+
+    ``auto`` and ``always-approve`` never ask. In ``ask`` mode everything is asked about
+    except a tool that declares itself harmless (*annotations*, from the ``tool_call``
+    event); a tool the session does not know has no annotations and is asked about.
+    """
     if mode in {"auto", "always-approve"}:
         return False
-    return tool_name in PERMISSION_TOOLS
+    return not _declares_itself_harmless(annotations)
 
 
 def _prompt_title(tool_name: str, origin: dict[str, Any] | None) -> str:

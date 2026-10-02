@@ -92,6 +92,22 @@ def _has_thinking(message: object) -> bool:
     )
 
 
+def _echo_tool() -> SimpleTool:
+    class EchoParams(BaseModel):
+        text: str = Field(description="Text to echo back")
+
+    async def echo(_tool_call_id, params: EchoParams, _signal, _on_update):
+        return AgentToolResult(content=[{"type": "text", "text": f"echo:{params.text}"}])
+
+    return SimpleTool(
+        name="echo",
+        description="Echo the given text exactly. Always call this tool.",
+        label="echo",
+        parameters=EchoParams,
+        execute_fn=echo,
+    )
+
+
 async def _run(row: ProviderRow, prompt: str, *, reasoning: bool = False, tools=None, signal=None):
     events: list = []
 
@@ -125,25 +141,30 @@ async def test_provider_capability(row: ProviderRow, capability: str):
         assert usage.input > 0 or usage.totalTokens > 0
         return
 
-    if capability == "tools":
-
-        class EchoParams(BaseModel):
-            text: str = Field(description="Text to echo back")
-
-        async def echo(_tool_call_id, params: EchoParams, _signal, _on_update):
-            return AgentToolResult(content=[{"type": "text", "text": f"echo:{params.text}"}])
-
-        tool = SimpleTool(
-            name="echo",
-            description="Echo the given text exactly. Always call this tool.",
-            label="echo",
-            parameters=EchoParams,
-            execute_fn=echo,
-        )
+    if capability == "thinking_tools":
+        # What audit P6-03 left open: with thinking on, a request that carries tools must send
+        # the earlier assistant messages' reasoning_content back, or DeepSeek answers 400 once
+        # the first tool round is over. The adapter sends it (``deepseek_replay``); this is
+        # where that is checked against the real API.
         messages, _events = await _run(
             row,
             "Call the echo tool with text matrix-token. Then repeat the tool result.",
-            tools=[tool],
+            reasoning=True,
+            tools=[_echo_tool()],
+        )
+        final = messages[-1]
+        assert final.stopReason == "stop", getattr(final, "errorMessage", None)
+        assert [m for m in messages if getattr(m, "role", None) == "toolResult"], (
+            "model did not call the echo tool"
+        )
+        assert "matrix-token" in _text(final)
+        return
+
+    if capability == "tools":
+        messages, _events = await _run(
+            row,
+            "Call the echo tool with text matrix-token. Then repeat the tool result.",
+            tools=[_echo_tool()],
         )
         combined = " ".join(_text(message) for message in messages)
         assert "echo:matrix-token" in combined or any(
@@ -199,6 +220,14 @@ def test_matrix_rows_cover_spec():
     assert by_id["deepseek"].require_thinking is True
     assert by_id["siliconflow"].require_thinking is True
     assert by_id["siliconflow"].base_url == "https://api.siliconflow.cn/v1"
+
+
+def test_thinking_with_tools_is_checked_on_deepseeks_own_api_only():
+    """The reasoning_content replay is for DeepSeek's own API; a gateway is left as it was."""
+    by_id = {row.id: row for row in MATRIX}
+
+    assert "thinking_tools" in by_id["deepseek"].capabilities
+    assert all("thinking_tools" not in row.capabilities for row in MATRIX if row.id != "deepseek")
 
 
 def test_unconfigured_row_skips(monkeypatch: pytest.MonkeyPatch):

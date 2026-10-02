@@ -136,4 +136,5 @@ def create_read_tool(cwd: str) -> AgentTool:
         execute_fn=execute,
         prompt_snippet="Read file contents",
         prompt_guidelines=["Use read to examine files instead of cat or sed."],
+        annotations={"readOnlyHint": True},
     )

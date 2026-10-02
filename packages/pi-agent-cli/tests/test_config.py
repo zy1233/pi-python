@@ -165,3 +165,37 @@ supports_images = false
     )
     config2 = load_config(tmp_path)
     assert config2.supports_images is False
+
+
+def test_reasoning_is_not_set_unless_the_file_says_so(tmp_path: Path):
+    assert load_config(tmp_path).reasoning is None
+    (tmp_path / "agent.toml").write_text('[model]\nid = "m"\n', encoding="utf-8")
+
+    assert load_config(tmp_path).reasoning is None
+
+
+def test_load_config_parses_reasoning(tmp_path: Path):
+    config_path = tmp_path / "agent.toml"
+
+    for text, expected in [
+        ("[model]\nreasoning = true\n", True),
+        ("[model]\nreasoning = false\n", False),
+        ('[model]\nreasoning = "false"\n', False),
+        ('[model]\nreasoning = "yes"\n', True),
+        ("reasoning = true\n", True),
+        ("reasoning = true\n[model]\nreasoning = false\n", False),
+    ]:
+        config_path.write_text(text, encoding="utf-8")
+
+        assert load_config(tmp_path).reasoning is expected, text
+
+
+def test_model_reasoning_follows_the_thinking_level_unless_set():
+    """Asking for a thinking level is how a user says the model can reason; an explicit
+    ``reasoning`` setting overrides that either way."""
+    assert CliConfig().model_reasoning is False
+    assert CliConfig(thinking_level="off").model_reasoning is False
+    for level in ("minimal", "low", "medium", "high", "xhigh"):
+        assert CliConfig(thinking_level=level).model_reasoning is True  # type: ignore[arg-type]
+    assert CliConfig(thinking_level="high", reasoning=False).model_reasoning is False
+    assert CliConfig(thinking_level="off", reasoning=True).model_reasoning is True

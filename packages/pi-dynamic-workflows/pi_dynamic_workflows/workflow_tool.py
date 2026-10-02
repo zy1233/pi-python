@@ -439,6 +439,9 @@ def create_workflow_tool(
             "pipeline(), or both"
         ),
         prompt_guidelines=[WORKFLOW_GATE_GUIDELINE],
+        # No ``annotations``, deliberately: the sub-agents can write files and run commands,
+        # so starting a workflow is a decision for the user, and the CLI's ``ask`` mode asks
+        # about every tool that declares nothing.
     )
 
 

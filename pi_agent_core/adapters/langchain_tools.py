@@ -10,6 +10,9 @@ Mapping rules:
 - ``parameters`` comes from ``tool.tool_call_schema`` (injected args such as
   ``InjectedToolCallId`` are already excluded), falling back to
   ``args_schema``, then to an empty dict schema.
+- ``annotations`` come from the MCP hints in ``tool.metadata`` (``readOnlyHint``,
+  ``destructiveHint``, ``idempotentHint``, ``openWorldHint``; booleans only), which is where
+  ``langchain-mcp-adapters`` puts an MCP tool's annotations; no hints, no annotations.
 - Execution invokes ``tool.ainvoke`` with a ToolCall-shaped input so the
   result is always a ``ToolMessage``: ``content_and_artifact`` artifacts are
   preserved (a plain-dict invocation would drop them) and injected
@@ -43,10 +46,12 @@ from pi_agent_core.types import (
     AgentTool,
     AgentToolResult,
     AgentToolUpdateCallback,
+    ToolAnnotations,
     ToolExecutionMode,
 )
 
 _DATA_URL_RE = re.compile(r"data:([^;,]+);base64,(.*)", re.DOTALL)
+_ANNOTATION_HINTS = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
 
 
 def _extract_parameters(tool: BaseTool) -> type[BaseModel] | dict[str, Any]:
@@ -61,6 +66,26 @@ def _extract_parameters(tool: BaseTool) -> type[BaseModel] | dict[str, Any]:
     # Minimal (truthy) object schema: an empty dict would make the stream
     # adapter skip binding the tool entirely.
     return {"type": "object", "properties": {}}
+
+
+def _extract_annotations(tool: BaseTool) -> ToolAnnotations | None:
+    """The MCP hints a tool carries, or ``None`` when it declares none.
+
+    ``langchain-mcp-adapters`` copies an MCP tool's annotations into ``tool.metadata``
+    under their MCP names. Only the four boolean hints are taken, and only when they really
+    are booleans: a server's ``"readOnlyHint": "yes"`` is not a claim the permission layer
+    should act on.
+
+    The MCP specification says clients must treat annotations as untrusted unless they come
+    from a server they trust, because a hostile server can mislabel a destructive tool as
+    read-only. They are passed on as they are: a caller that connects MCP servers it does not
+    trust has to remove the hints from ``tool.metadata`` first.
+    """
+    metadata = getattr(tool, "metadata", None)
+    if not isinstance(metadata, dict):
+        return None
+    hints = {key: metadata[key] for key in _ANNOTATION_HINTS if isinstance(metadata.get(key), bool)}
+    return ToolAnnotations(**hints) if hints else None  # type: ignore[typeddict-item]
 
 
 def _normalize_block(item: Any) -> TextContent | ImageContent:
@@ -111,6 +136,7 @@ class _LangChainAgentTool:
     parameters: type[BaseModel] | dict[str, Any]
     execution_mode: ToolExecutionMode | None = None
     prepare_arguments: Callable[[Any], Any] | None = None
+    annotations: ToolAnnotations | None = None
 
     async def execute(
         self,
@@ -156,6 +182,7 @@ def from_langchain_tool(tool: BaseTool) -> AgentTool:
         description=tool.description,
         label=tool.name,
         parameters=_extract_parameters(tool),
+        annotations=_extract_annotations(tool),
     )
 
 

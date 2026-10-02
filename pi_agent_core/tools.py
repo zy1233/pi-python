@@ -8,7 +8,12 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from pi_agent_core.types import AgentToolResult, AgentToolUpdateCallback, ToolExecutionMode
+from pi_agent_core.types import (
+    AgentToolResult,
+    AgentToolUpdateCallback,
+    ToolAnnotations,
+    ToolExecutionMode,
+)
 
 
 @dataclass
@@ -20,6 +25,7 @@ class SimpleTool:
     execute_fn: Callable[..., Any]
     execution_mode: ToolExecutionMode | None = None
     prepare_arguments: Callable[[Any], Any] | None = None
+    annotations: ToolAnnotations | None = None
 
     async def execute(
         self,

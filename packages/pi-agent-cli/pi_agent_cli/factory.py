@@ -162,6 +162,7 @@ async def create_session_harness(
         supports_images=_detect_vlm_support(
             config.provider, config.model_id, config.supports_images
         ),
+        reasoning=config.model_reasoning,
     )
 
     async def system_prompt_callback(ctx: dict[str, Any]) -> str:

@@ -9,7 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from pi_agent_core.types import AgentToolResult, ToolExecutionMode
+from pi_agent_core.types import AgentToolResult, ToolAnnotations, ToolExecutionMode
 
 # ---------------------------------------------------------------------------
 # Tool definitions
@@ -53,6 +53,10 @@ class ToolDefinition:
     prompt_guidelines: list[str] = field(default_factory=list)
     execution_mode: ToolExecutionMode | None = None
     prepare_arguments: Callable[[Any], Any] | None = None
+    annotations: ToolAnnotations | None = None
+    """MCP-style hints about the tool (``readOnlyHint`` ...). In the CLI's ``ask`` mode a
+    call is asked about unless the tool declares ``readOnlyHint: true`` (or
+    ``destructiveHint: false`` with ``openWorldHint: false``); no annotations, no exemption."""
 
 
 # ---------------------------------------------------------------------------

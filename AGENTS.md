@@ -24,7 +24,7 @@ AgentMessage[] → transform_context() → convert_to_llm() → LangChain BaseMe
 | Module | Role | TS counterpart |
 |--------|------|----------------|
 | `pi_agent_core/messages.py` | Canonical messages, content blocks, `Usage` | `pi-ai` messages |
-| `pi_agent_core/types.py` | `Model`, `AgentTool`, contexts, events, `AgentLoopConfig` | `types.ts` |
+| `pi_agent_core/types.py` | `Model`, `AgentTool`, `ToolAnnotations`, contexts, events, `AgentLoopConfig` | `types.ts` |
 | `pi_agent_core/event_stream.py` | `EventStream` / `AssistantMessageEventStream` | `pi-ai` EventStream |
 | `pi_agent_core/agent_loop.py` | Core loop: turns, tool execution, hooks, events | `agent-loop.ts` |
 | `pi_agent_core/agent.py` | Stateful `Agent`: prompt/steer/follow-up queues, abort | `agent.ts` |
@@ -42,9 +42,10 @@ AgentMessage[] → transform_context() → convert_to_llm() → LangChain BaseMe
 2. **Parallel tool ordering** — `tool_execution_end` fires in completion order; `toolResult` messages persist in source order.
 3. **Terminate semantics** — skip next LLM turn only when **all** finalized tool results have `terminate=True`.
 4. **StreamFn contract** — never raises; failures encoded as `error` event (`stop_reason=error|aborted`).
-5. **Thinking gating** — reasoning params injected iff `Model.reasoning=True` and `thinking_level != "off"`; same flag drives thinking-history stripping in `transform_messages`. One exception: DeepSeek's own API (no `base_url`, or one on `deepseek.com`) thinks by default, so with the gate closed it gets an explicit `thinking: disabled`; gateways serving DeepSeek models get nothing. Thinking plus tools on that API is not supported (needs `reasoning_content` replay).
+5. **Thinking gating** — reasoning params injected iff `Model.reasoning=True` and `thinking_level != "off"`; same flag drives thinking-history stripping in `transform_messages`. One exception: DeepSeek's own API (no `base_url`, or one on `deepseek.com`) thinks by default, so with the gate closed it gets an explicit `thinking: disabled`; gateways serving DeepSeek models get nothing. With thinking on, that API wants every earlier assistant message's `reasoning_content` back (400 otherwise): `adapters/deepseek_replay.py` sends it, on that API only and only while thinking is asked for (not verified against the real API).
 6. **Usage accumulation** — per-field max, not sum (providers report cumulative snapshots or complementary splits).
 7. **Structured output** — `response_schema` via prompt injection + `response_format`; `with_structured_output` kills streaming.
+8. **Permission by declaration** — the CLI's `ask` mode asks about a tool call unless the tool's `annotations` (`ToolAnnotations`, MCP's hints) declare it harmless (`readOnlyHint`, or neither destructive nor open-world); no annotations means asked. A new tool that only reads should say so; `bash`/`edit`/`write`/`workflow` say nothing on purpose. See `packages/pi-agent-cli/AGENTS.md`.
 
 ## Development
 

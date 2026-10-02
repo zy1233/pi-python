@@ -131,4 +131,5 @@ def create_find_tool(cwd: str) -> AgentTool:
         parameters=FindParams,
         execute_fn=execute,
         prompt_snippet="Find files by glob pattern (respects .gitignore)",
+        annotations={"readOnlyHint": True},
     )

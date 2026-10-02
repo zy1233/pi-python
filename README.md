@@ -184,6 +184,11 @@ agent = Agent(initial_state={"model": model}, stream_fn=langchain_stream)
 # pass the key explicitly or via env: DEEPSEEK_API_KEY
 ```
 
+On DeepSeek's own API (no `base_url`, or one on `deepseek.com`) the thinking switch follows
+`Model.reasoning` and `thinking_level`, and while thinking is on the earlier assistant
+messages' `reasoning_content` is sent back with every request, which DeepSeek requires once
+tools are involved. A gateway gets neither: it is left to its own defaults.
+
 ### Structured output
 
 ```python

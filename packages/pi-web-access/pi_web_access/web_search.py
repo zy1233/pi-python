@@ -141,4 +141,5 @@ def create_web_search_tool() -> dict[str, Any]:
             "or information that may not be in your training data.",
             "Prefer web_search over guessing when you are unsure about facts.",
         ],
+        annotations={"readOnlyHint": True, "openWorldHint": True},
     )

@@ -248,13 +248,39 @@ DeepSeek 官方 API 默认开启思考（V4 起），开关是请求体里的 `t
 
 「官方 API」的判定（`_is_deepseek_api`）：先取生效的地址——`Model.base_url`，没有则取 `DEEPSEEK_API_BASE`（`ChatDeepSeek` 自己会读它）；地址为空，或主机名是 `deepseek.com` / `*.deepseek.com`，即为官方。`api.deepseek.com.evil.example` 这类仿冒名不算。SiliconFlow、vLLM 等网关不满足，**行为不变**：它们对 `thinking` 的理解各不相同，也可能拒收。这与 AGENTS.md 的不变量 5 相比是唯一的例外：闸门关闭时通常什么都不发，而官方 DeepSeek 因为默认开启，必须显式关。
 
-**已知限制（未修复）**：
-
-- 开启思考且请求带工具时，DeepSeek 文档要求把之前 assistant 消息的 `reasoning_content` 原样传回，否则返回 400。`langchain-deepseek`（已用 1.1.0 与 1.1.1 核对）不回传，所以在官方 API 上「思考 + 工具」预期在第一轮工具调用之后失败；只思考不带工具、或不思考，都没问题。要支持它，需要在 `convert_to_langchain` 里把 thinking 块写回 assistant 消息，并让 `ChatDeepSeek` 的请求转换保留它。
-- CLI 构造 `Model` 时从不设 `reasoning`，所以经 CLI 使用官方 DeepSeek 时 `thinking_level` 没有作用，模型始终以 `disabled` 运行。
-- 以上都没有在真实 API 上验证过（没有 `DEEPSEEK_API_KEY`）；矩阵的 `deepseek` 行是第一次会去验证它的地方。
+这一节最初留下两个限制：开启思考且带工具时 `reasoning_content` 没有回传（§5.5 处理），CLI 从不设 `Model.reasoning`（§5.6 处理）。
 
 测试：`pi_agent_core/tests/test_deepseek_thinking.py`（参数映射、官方与网关的判定、`ChatDeepSeek` 请求体里确实带上这些参数）；配置面由 `test_provider_matrix.py`（行、workflow）与 `test_real_llm_selection.py`（默认不收集、`-m real_llm` 能选中）覆盖。
+
+### 5.5 回传 `reasoning_content`（审计 P6-03，后续 4）
+
+DeepSeek 的文档：思考模式下，请求带 `tools` 时，之前**所有** assistant 消息的 `reasoning_content` 都要原样传回（连没有调用工具的那几轮也算），否则返回 400（"The `reasoning_content` in the thinking mode must be passed back to the API"）；请求不带 `tools` 时，传了也会被忽略。适配器本来就把 `reasoning_content` 收成 `thinking` 块，但 `ChatDeepSeek` 收得进、发不出（`langchain-deepseek` 1.1.0 核对过：请求转换里没有这个字段），所以官方 API 上「思考 + 工具」在第一轮工具调用之后必然失败。
+
+做法分两层，照 pi 自己的 OpenAI 兼容 provider 对 DeepSeek 的处理（thinking 块写回 `reasoning_content`；`requiresReasoningContentOnAssistantMessages` 打开时，没有的消息补一个空串）：
+
+1. `convert_to_langchain`：`provider="deepseek"` 的 assistant 消息，把内容非空的 thinking 块用换行连起来，放进 `AIMessage.additional_kwargs["reasoning_content"]`。`content` 的形状不变；没有 thinking 就不放；其他 provider 不碰。
+2. `ChatDeepSeek` 的子类（`adapters/deepseek_replay.py` 的 `replaying_chat_deepseek()`，首次使用时才构造，因为 `langchain-deepseek` 是可选依赖），覆盖 `_get_request_payload`：`replay_reasoning` 打开时，给每条 `role == "assistant"` 的请求消息写入 `reasoning_content`（上面那份文本，没有则 `""`）；带 `tool_calls` 而 `content` 为 `null` 的，把 `content` 改成 `""`（DeepSeek 自己的示例发的就是 `""`，LangChain 默认发 `null`）。请求消息与 LangChain 消息数量对不上时（某个 LangChain 版本合并或丢弃了消息）什么都不改：缺字段是已知的旧行为，放错位置更糟。
+
+`replay_reasoning` 由 `resolve_chat_model` 决定：**指向 DeepSeek 官方 API，且这次请求要求思考**（`Model.reasoning=True` 且 `thinking_level` 不是 `off`，与 §5.4 是同一个判定，共用 `_deepseek_thinking_level`）。关闭思考（`disabled`）、`Model.reasoning=False`、网关，都不回传。网关不回传是有意的：同 §5.4，网关对这些字段的态度各不相同，也可能拒收；要支持某个网关，得先在那个网关上验证。pi 的上游把 DeepSeek 系的网关也算进去（按模型名里含 `deepseek` 判定），这里没有跟，理由同上。
+
+AGENTS.md 不变量 5 的相应一句已改。
+
+**限制**：没有在真实 API 上验证（没有 `DEEPSEEK_API_KEY`）。矩阵的 `deepseek` 行新增 `thinking_tools` 用例（思考开启、带工具、跑完一轮工具调用，最终 `stopReason` 必须是 `stop`），它是第一次会去验证的地方。
+
+测试：`pi_agent_core/tests/test_deepseek_replay.py`——转换（只对 deepseek、块的连接、空白块、`content` 形状）；请求消息的改写（各角色、补空串、`content`、数量对不上）；`ChatDeepSeek` 的请求体（每档思考、`off`、`Model.reasoning=False`、网关、官方地址）；一次完整的工具往返（假的 `async_client`：流式收到 `reasoning_content`，下一次请求带着它）。
+
+### 5.6 CLI 接入 `Model.reasoning`（审计 P6-03，后续 4）
+
+CLI 构造 `Model` 时从不设 `reasoning`：`thinking_level` 在 OpenAI / Anthropic 上被闸门挡掉，在官方 DeepSeek 上则永远是 `disabled`。现在 `CliConfig` 带 `reasoning`（`[model] reasoning = true|false`，也认顶层键，同 `supports_images`），`model_reasoning` 决定 `Model.reasoning`：
+
+| 配置 | `Model.reasoning` |
+|---|---|
+| `reasoning` 已设 | 就是它 |
+| 未设 | `thinking_level != "off"`（用户要了思考档位，就等于说这个模型能推理） |
+
+**行为变化**：配置里 `thinking_level` 不是 `off` 的用户，此前这个设置经 CLI 什么都不做，现在会真正生效；模型若不接受推理参数（比如 OpenAI 的非推理模型），在 `[model]` 里写 `reasoning = false` 即可。默认（`off`）不变。子 agent 仍不继承 `reasoning`（`subagent.py` 的既有规则）。
+
+测试：`packages/pi-agent-cli/tests/test_config.py`（解析、优先级）、`test_model_reasoning.py`（`create_session_harness` 造出的模型）。
 
 ---
 
@@ -269,11 +295,17 @@ DeepSeek 官方 API 默认开启思考（V4 起），开关是请求体里的 `t
 | `pi_agent_core/tests/test_provider_matrix.py` | 新建，§5；`real_llm` 标记只放在实时用例上，另有离线用例检查表与 workflow |
 | `pi_agent_core/tests/test_real_llm_selection.py` | 新建：默认不收集实时用例，`-m real_llm` 能选中（审计 P6-03） |
 | `pi_agent_core/tests/test_deepseek_thinking.py` | 新建，§5.4 |
-| `pi_agent_core/adapters/langchain_stream.py` | `_apply_reasoning_params` 增加 DeepSeek 官方 API 分支，§5.4（审计 P6-03） |
+| `pi_agent_core/adapters/langchain_stream.py` | `_apply_reasoning_params` 增加 DeepSeek 官方 API 分支，§5.4（审计 P6-03）；`resolve_chat_model` 对 deepseek 用回传 `reasoning_content` 的子类，§5.5 |
+| `pi_agent_core/adapters/deepseek_replay.py` | 新建，§5.5：thinking 文本的取法、请求消息改写、`ChatDeepSeek` 子类 |
+| `pi_agent_core/adapters/langchain_convert.py` | deepseek 的 assistant 消息带上 `reasoning_content`，§5.5 |
+| `pi_agent_core/tests/test_deepseek_replay.py` | 新建，§5.5 |
+| `pi_agent_core/tests/provider_matrix.py`、`test_provider_matrix.py` | `deepseek` 行加 `thinking_tools` 用例，§5.5 |
+| `packages/pi-agent-cli/pi_agent_cli/{config,factory}.py`、`agent.example.toml` | `reasoning` 配置与 `Model.reasoning`，§5.6 |
+| `packages/pi-agent-cli/tests/{test_config,test_model_reasoning}.py` | §5.6 |
 | `pyproject.toml` | `addopts = "-m 'not real_llm'"`（审计 P6-03） |
 | `.github/workflows/provider-matrix.yml` | 手动触发，另每周定时 |
 
-不新增 MCP 包、extra 或 CLI 配置。`agent_loop.py`、`types.py` 的 `AgentTool`、`langchain_tools.py` 不改；`langchain_stream.py` 只在 `_apply_reasoning_params` 里加了 DeepSeek 官方 API 的思考开关（§5.4），openai / anthropic 分支不变。
+不新增 MCP 包或 extra；CLI 配置只多了 `[model] reasoning`（§5.6）。`agent_loop.py`、`types.py` 的 `AgentTool`、`langchain_tools.py` 不改；`langchain_stream.py` 只在 `_apply_reasoning_params` 里加了 DeepSeek 官方 API 的思考开关（§5.4），并让 deepseek 走回传 `reasoning_content` 的子类（§5.5），openai / anthropic 分支不变。
 
 ---
 
@@ -285,6 +317,8 @@ DeepSeek 官方 API 默认开启思考（V4 起），开关是请求体里的 `t
 | Prompt | `<git_status>` 位于 `<project_context>` 与 skills 之间；`--no-git-context` 不出现该段 | 现有 prompt 测试 |
 | 提供商矩阵 | §5，选中后密钥缺失 skip；普通 `pytest` 不收集（`addopts`） | `.venv-test-real`，非 PR 门禁（每周定时与手动触发除外） |
 | DeepSeek 思考开关 | §5.4：各档位到 `thinking` / `reasoning_effort` 的映射；官方与网关的判定；已有 `extra_body` 不被改动；`ChatDeepSeek` 请求体确实带上这些参数 | 无网络，`langchain-deepseek` 缺失时请求体用例 skip |
+| DeepSeek 回传 `reasoning_content` | §5.5：转换、请求消息改写、各档位与网关的请求体、一次完整工具往返（假 `async_client`） | 无网络，`langchain-deepseek` 缺失时请求体与往返用例 skip |
+| CLI `Model.reasoning` | §5.6：配置解析与优先级；`create_session_harness` 造出的模型 | 无网络 |
 
 不新增 MCP 测试。`from_langchain_tool()` 的现有单测继续覆盖 BaseTool 结果归一，不启动 MCP 服务器。
 

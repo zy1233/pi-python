@@ -86,6 +86,9 @@ class CliConfig:
     max_turns: int | None = None
     api_key_env: str | None = None
     supports_images: bool | None = None
+    # Whether the model can reason (``Model.reasoning``). ``None``: not set, and then asking
+    # for a thinking level is taken as saying so (``model_reasoning``).
+    reasoning: bool | None = None
     skills_dirs: tuple[str, ...] = ()
     agent_command: str | None = None
     no_context_files: bool = False
@@ -103,6 +106,19 @@ class CliConfig:
     # ``None``: not set. Then the older ``trust_project_extensions`` decides ("always" if it is
     # on), and otherwise the answer is "ask". See ``extension_trust.effective_default_trust``.
     default_project_trust: DefaultProjectTrust | None = None
+
+    @property
+    def model_reasoning(self) -> bool:
+        """``Model.reasoning`` for the configured model.
+
+        The adapter asks a provider to think only when the model can (this) and the request
+        asks for it (``thinking_level`` other than ``off``). The level comes from the same
+        file, so a user who sets one has said the model can reason, unless ``reasoning``
+        says otherwise.
+        """
+        if self.reasoning is not None:
+            return self.reasoning
+        return self.thinking_level != "off"
 
 
 def load_config(home: Path | str | None = None) -> CliConfig:
@@ -169,6 +185,11 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         supports_images_raw = data.get("supports_images")
     supports_images = bool(supports_images_raw) if supports_images_raw is not None else None
 
+    reasoning_raw = model.get("reasoning")
+    if reasoning_raw is None:
+        reasoning_raw = data.get("reasoning")
+    reasoning = _as_bool(reasoning_raw, False) if reasoning_raw is not None else None
+
     agent_command = agent.get("command")
     if agent_command is not None:
         agent_command = str(agent_command).strip() or None
@@ -193,6 +214,7 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         max_turns=max_turns,
         api_key_env=model.get("api_key_env") or data.get("api_key_env"),
         supports_images=supports_images,
+        reasoning=reasoning,
         skills_dirs=skills_dirs,
         agent_command=agent_command,
         no_context_files=bool(prompt.get("no_context_files", False)),

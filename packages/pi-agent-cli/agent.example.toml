@@ -4,6 +4,9 @@
 # LLM keys are read from environment variables — never put secrets in this file.
 
 permission = "ask" # ask | auto | always-approve
+# `ask` asks before each tool call, except for tools that declare themselves harmless: read-only
+# or only keeping the agent's own notes (read, grep, find, ls, web_search, fetch_url, goal_*).
+# A tool that declares nothing is asked about; bash, edit, write and workflow always are.
 
 thinking_level = "off" # off | minimal | low | medium | high | xhigh
 max_turns = 50
@@ -13,6 +16,9 @@ provider = "deepseek"
 id = "deepseek-ai/DeepSeek-V4-Flash"
 base_url = "https://api.siliconflow.cn/v1"
 api_key_env = "REAL_LLM_API_KEY" # key for `provider` only; other providers use their own (e.g. ANTHROPIC_API_KEY)
+# Can the model reason? A thinking_level other than "off" is sent to the provider only if so.
+# Unset: any level but "off" says it can. `false` keeps a model that rejects reasoning parameters out of them.
+# reasoning = true
 
 [skills]
 # ".pi/skills" is relative to the project, so it loads only for a trusted project (see [extensions]).

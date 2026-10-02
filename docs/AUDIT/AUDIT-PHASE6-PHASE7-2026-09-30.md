@@ -1,6 +1,6 @@
 # AUDIT：Phase 6 / Phase 7 设计与实现审计（2026-09-30）
 
-> **审计日期**：2026-09-30（发现与四批修复在同一天完成）
+> **审计日期**：2026-09-30（发现与前三批修复在同一天完成；批 4 在 10 月 1 日，批 5、6 在 10 月 2 日）
 >
 > **审计范围**：
 > - Phase 6：`packages/pi-agent-cli/pi_agent_cli/{git_context,prompt_options,system_prompt,factory}.py`、`pi_agent_core/adapters/langchain_stream.py`、`pi_agent_core/tests/{provider_matrix,test_provider_matrix}.py`、`.github/workflows/provider-matrix.yml`
@@ -10,12 +10,12 @@
 >
 > **方法**：代码阅读；在 Windows（zh-CN 区域设置）上用探针脚本实测；provider 文档（DeepSeek 等）对照核对。探针是临时脚本，没有入库；每一项的回归测试入库，并且都先红后绿。
 >
-> **修复批次**：批 1 `6aaf29a`、批 2 `cf92422`、批 3 `b3de95f`、批 4（P7-02 的交互式信任提示与内容哈希）`0a1dd67`、批 5（P7-01 的子 agent `cwd` 约束与脚本沙盒）随本文档的这次更新一起提交（`git log -- docs/AUDIT/AUDIT-PHASE6-PHASE7-2026-09-30.md`）
+> **修复批次**：批 1 `6aaf29a`、批 2 `cf92422`、批 3 `b3de95f`、批 4（P7-02 的交互式信任提示与内容哈希）`0a1dd67`、批 5（P7-01 的子 agent `cwd` 约束与脚本沙盒）`9baefa6`、批 6（第七节的 4–6：DeepSeek 的 `reasoning_content` 回放与 CLI 的 `Model.reasoning`、按 annotations 放行的权限模型、后台 turn 期间到达的 prompt）随本文档的这次更新一起提交（`git log -- docs/AUDIT/AUDIT-PHASE6-PHASE7-2026-09-30.md`）
 >
 > **最终测试状态**：
-> - Windows：`1862 passed, 10 skipped, 30 deselected`（10 个 skip 是只在 POSIX 上有意义的用例：批 4 的 5 个（符号链接的显示路径、命名管道、权限位 2 个、非法文件名），批 5 的 5 个（`RLIMIT_NPROC`、rlimit 数值、`prctl`、文件描述符上限、信号名）；审计开始时 `576 passed, 30 skipped`）
-> - WSL：`1857 passed, 15 skipped, 30 deselected`（4 个 skip 是 WSL 里没有 `rg`，3 个是只在 Windows 上有意义的路径大小写用例，8 个是批 5 里只在 Windows 上有意义的用例：Job Object 3 个、低完整性 3 个、驱动器号与路径大小写 / 斜杠各 1 个）
-> - WSL，Python 3.11 与 3.13（CI 的矩阵；各用一个临时 venv）：`1854 passed, 18 skipped, 30 deselected`（比 3.12 多出的 3 个 skip 是这些 venv 没装 `langchain-deepseek`）
+> - Windows：`1980 passed, 10 skipped, 31 deselected`（10 个 skip 是只在 POSIX 上有意义的用例：批 4 的 5 个（符号链接的显示路径、命名管道、权限位 2 个、非法文件名），批 5 的 5 个（`RLIMIT_NPROC`、rlimit 数值、`prctl`、文件描述符上限、信号名）；31 个 deselected 是 `real_llm` 用例，批 6 起矩阵的 `deepseek` 行多一项 `thinking_tools`；审计开始时 `576 passed, 30 skipped`）
+> - WSL：`1975 passed, 15 skipped, 31 deselected`（4 个 skip 是 WSL 里没有 `rg`，3 个是只在 Windows 上有意义的路径大小写用例，8 个是批 5 里只在 Windows 上有意义的用例：Job Object 3 个、低完整性 3 个、驱动器号与路径大小写 / 斜杠各 1 个）
+> - WSL，Python 3.11 与 3.13（CI 的矩阵；各用一个临时 venv）：`1956 passed, 34 skipped, 31 deselected`（比 3.12 多出的 19 个 skip 是这些 venv 没装 `langchain-deepseek`，CI 也不装它；装上之后，DeepSeek 相关的 145 个用例在两个版本上都通过）
 > - `ruff check .` + `ruff format --check .`：All checks passed（本地 0.15.20，也用 CI 钉住的 0.16.0 跑过一遍）
 >
 > **状态图例**：`[x]` 已修复并验证 · `[x/~]` 主路径已修复，有已记录的残留（见第五节）
@@ -92,9 +92,10 @@
 ### P7-01. [x/~] `workflow` 等价于无需授权的任意代码执行
 
 - **问题**：`PERMISSION_TOOLS` 只有 `bash` / `edit` / `write`，`workflow` 不在其中；子 agent 由全新的 harness 创建，不挂任何 `tool_call` 钩子，实测 `ask` 模式下子 agent 直接 `write` 成功，没有授权请求。「沙盒」只是收窄 `__builtins__`，实测两条路径都成功在沙盒外写出文件（`agent.__globals__['__builtins__']['__import__']`，以及 `().__class__.__base__.__subclasses__()` 走到 `catch_warnings.__init__.__globals__`）。
-- **修复**（批 2）：`workflow` 加入 `PERMISSION_TOOLS`（`ask` 模式下启动 workflow 要用户批准）；子 agent 的每次工具调用都走父会话的 `tool_call` 链（`AgentHarness.check_tool_call`，扩展经 `HarnessBridge.tool_call_gate` 使用；出错时拒绝），调用 id 为 `subagent-<hex>:<model>`，`ToolCallEvent.origin = {"kind": "subagent", "cwd": ..., "label": ...}`，ACP 授权提示注明来自子 agent 与它的工作目录；批准 `workflow` 不等于批准它的子 agent 写文件，每次调用逐个询问（只读工具与会话自己一样不询问，但扩展 hook 照样生效）；同一会话的授权提示串行，并行子 agent 不会叠出多个对话框。文档不再称运行时为「沙盒」。
+- **修复**（批 2）：`workflow` 加入 `PERMISSION_TOOLS`（`ask` 模式下启动 workflow 要用户批准；批 6 起名单换成 annotations，见下）；子 agent 的每次工具调用都走父会话的 `tool_call` 链（`AgentHarness.check_tool_call`，扩展经 `HarnessBridge.tool_call_gate` 使用；出错时拒绝），调用 id 为 `subagent-<hex>:<model>`，`ToolCallEvent.origin = {"kind": "subagent", "cwd": ..., "label": ...}`，ACP 授权提示注明来自子 agent 与它的工作目录；批准 `workflow` 不等于批准它的子 agent 写文件，每次调用逐个询问（只读工具与会话自己一样不询问，但扩展 hook 照样生效）；同一会话的授权提示串行，并行子 agent 不会叠出多个对话框。文档不再称运行时为「沙盒」。
 - **修复**（批 5，子 agent 的 `cwd`）：`agent(..., cwd=)` 给的目录必须落在项目目录内：相对路径相对项目目录解析（不是进程的当前目录），符号链接与目录联接跟随后再比较，越界是脚本里可以 `except` 的 `ValueError`（非字符串是 `TypeError`，含 NUL 字符是 `ValueError`）。检查在占用 agent 名额与查 journal 之前，所以收紧后的策略不会被一次 resume 绕过；journal 哈希仍用脚本给的原始 `cwd`；`HarnessSubagentExecutor` 在建 worktree 之前再检查一次，独立使用执行器也受约束。新模块 `paths.resolve_subagent_cwd`。
 - **修复**（批 5，脚本沙盒）：脚本不再在宿主的解释器里 `exec`，每次 `WorkflowRuntime.execute()` 起一个子进程运行它（`python -I -S -B -X utf8 sandbox/child.py`：只有标准库、清空的环境、空的临时工作目录，fd 0 / 1 指向空设备），有副作用的事都经管道（行式 JSON，协议 v1）请求宿主去做，宿主把管道另一头当作不可信输入：超长 / 非法 / 嵌套过深的消息、未知消息、字段类型不对、重复的调用 id、乱序消息都会结束这次运行并杀进程；在途调用数、日志行数与字符数、phase 个数都有上限（调用堆积时宿主不再读，而不是拒绝）。钩子之下是内核限制：POSIX 的 `RLIMIT_CORE` / `AS` / `CPU` / `NOFILE` / `FSIZE`（软硬同值，脚本改不回去），Linux 另有 `PR_SET_NO_NEW_PRIVS` 与 `RLIMIT_NPROC=0`（不能 `fork`、不能再起线程；root 不受约束）；Windows 的 Job Object（进程内存与 CPU 时间、只允许一个进程、UI 限制、宿主放手时一并结束）与低完整性（脚本不能再写用户能写的地方、读宿主的内存、复制它的句柄）。墙钟（`SandboxLimits.wall_seconds`，默认关闭）到点杀进程；宿主被杀后不留脚本进程。同时加固了审计钩子（它仍然只是速度栏）：子进程设置限制用过 `ctypes` 之后把它从 `sys.modules` 里摘掉，让钩子能看到后来的 `import`。脚本抛异常 → `WorkflowScriptError`（`RuntimeError`，`str()` 是脚本自己的消息，另有 `error_type`、`line`）；被限制终止 / 起不来 → `SandboxError` 的子类。**行为变化**：值以 JSON 过边界（`args`、`result()`、`agent()` 的返回值），脚本里的 `budget` 是只读视图，每次运行多一次进程启动（Linux 约 0.06 s，Windows 约 0.14 s），Windows 上要求默认的 Proactor 事件循环。一次 `agent()` 调用带上它发出时的 phase（宿主用任务处理调用，轮到它时并行的另一个 thunk 可能已经让脚本进入下一个 phase；这是迁移时发现并补上的一处语义回归）。
+- **修复**（批 6，权限模型）：`ask` 模式不再是一张工具名白名单（`PERMISSION_TOOLS` 删除），改为默认询问、工具自己声明无害才放行。工具带 `ToolAnnotations`（MCP 的四个提示；`SimpleTool` / `CodingTool` / `ToolDefinition` 都有该字段，LangChain 工具从 `tool.metadata` 取）；放行条件是 `readOnlyHint is True`，或 `destructiveHint is False` 且 `openWorldHint is False`；没声明、声明了别的、值不是真正的布尔、annotations 不是映射，一律询问。`AgentHarness.check_tool_call` 按工具名在会话自己的工具表里查，把 annotations 放在 `ToolCallEvent.annotations` 上；会话自己的循环与子 agent 的调用走同一条路径，所以子 agent 的调用按父会话里同名工具判定，父会话没有的名字要问。内置的 `read` / `grep` / `find` / `ls`、`web_search` / `fetch_url`（只读，但联网）、`goal_update` / `goal_complete`（只在会话里记笔记）声明自己；`bash` / `edit` / `write` / `workflow` 刻意不声明。**行为变化**：`ask` 模式下，不声明 annotations 的扩展工具现在会询问，此前直接执行。
 - **验证**：先红后绿，包括经真实 ACP agent、真实 workflow 扩展、真实 git worktree 的端到端用例；批 5 的沙盒用「走出命名空间的脚本」（`sandbox_support.PRELUDE`，即审计里的第一条逃逸）当作攻击者，分别在钩子打开与关闭两种情况下检查剩下的是什么：钩子关闭时只剩内核层，各层都有独立的用例。批 5 共 115 个变异体（`cwd` 15 个、沙盒 100 个；Windows 与 WSL 上都跑过），全部被杀，分簇的数字与首轮幸存的 13 个见第六节。
 - **规格**：Phase 7 规格 §9.3、§12（权限继承）；沙盒的完整设计、协议、逐平台的层与钩子被绕过后的残余能力见 `docs/specs/2026-10-01-workflow-sandbox-design.md`。
 - **残留**：见第五节 1–3。
@@ -131,8 +132,9 @@
   - `provider-matrix.yml` 加每周一 03:00 UTC 的 `schedule`。
 - **验证**：DeepSeek 分支 35 个变异体全部被杀；配置面 11 个变异体中 10 个被杀，幸存的一个是把 `addopts` 写成反向选择——那样整套用例都被取消选择，没有任何用例能自检。
 - **规格**：Phase 6 规格 §1.3、§5、新增 §5.4。
-- **残留**：见第五节 13。**没有对真实 API 验证**（没有 `DEEPSEEK_API_KEY`）；每周矩阵是第一次会验证它的地方。
+- **残留**：见第五节 13。批 3 与批 6 对 DeepSeek 的修复**都没有对真实 API 验证**（没有 `DEEPSEEK_API_KEY`）；每周矩阵（`deepseek` 行，批 6 起含 `thinking_tools`）是第一次会验证它们的地方。
 - **行为变化**：官方 DeepSeek 上 `off`（默认）与 `Model.reasoning=False` 现在发 `thinking: disabled`，此前什么都不发。
+- **修复**（批 6，思考与工具同用）：开启思考且带工具时，DeepSeek 要求此前所有 assistant 消息（没有工具调用的回合也算）带回 `reasoning_content`，否则 400，而 `ChatDeepSeek` 不回传（1.1.0 / 1.1.1 都不）。现在 `convert_to_langchain` 把 DeepSeek 回合的 thinking 放进 `AIMessage.additional_kwargs["reasoning_content"]`，`resolve_chat_model` 构造的 `ChatDeepSeek` 子类（`adapters/deepseek_replay.py`）把它写回请求里的每一条 assistant 消息：没有就写空串（与 pi 自己的 provider 一致），带工具调用的消息用 `content: ""` 而不是 `null`（与 DeepSeek 自己的样例一致）。只在官方 API 且请求了思考时生效，网关上的 DeepSeek 模型不动。CLI 现在设置 `Model.reasoning`（`[model] reasoning = true|false`，缺省为 `thinking_level != "off"`），所以 `thinking_level` 经 CLI 才真正生效。验证：37 个变异体全部被杀（第六节）。**行为变化**：`thinking_level` 设为非 `off` 的用户现在得到所要求的思考；模型拒绝推理参数（比如不会推理的 OpenAI 模型）时用 `reasoning = false`。规格：Phase 6 规格 §5.5。
 
 ### P6-04. [x] 事件循环内同步执行 git 子进程
 
@@ -171,8 +173,9 @@
   - `WorkflowManager.close(timeout=5)` 取消后台运行并等待收尾，5 秒后仍不停的运行会被放弃并记 warning；关闭之后不再投递任何结果。
   - ACP `session/close` 与 `pi/session/delete` 都走 `close()`。
   - 后台结果改用新的 `HarnessBridge.trigger_message(custom_type, text, *, details=None)`，以带类型的 `workflow-result` custom 消息投递（不会被当作斜杠命令，`details` 里有 `runId` / `name` / `status`），输出包在 `<workflow-output boundary=...>` 信封里：边界是输出无法包含的随机串，前面说明这是不可信的数据、不是指令。遇到已在运行的 turn 时并入该 turn，不丢弃。
-- **验证**：`test_harness_lifecycle.py`、`test_workflow_lifecycle.py`、`test_session_lifecycle.py`；53 个变异体全部被杀。
-- **规格**：Phase 7 规格 §12（Bridge 扩展）、§13（结果交付、不可信输出的信封、生命周期）。
+- **修复**（批 6，turn 之外到达的 prompt）：后台结果触发的 turn 没有 `session/prompt` 在背后，客户端不知道会话被占着，期间发来的 prompt 以前被 `busy` 拒绝。现在 `session/prompt` 等该 turn 结束再运行；`session/cancel` 或关闭会话结束等待（`cancelled`）；同一客户端并发的第二个 `session/prompt`（不论前一个在运行还是在等待）仍是 `busy`。ACP 的 `state_update`（idle / running）**刻意不发**：它只存在于协议 v2（不稳定的破坏性草案：`session/prompt` 改为受理即返回，回合结束由 idle 的 `state_update` 报告），Python SDK 与 TUI 所用的 Rust crate（`agent-client-protocol-schema` 0.11.4，`SessionUpdate` 既无此变体也无兜底变体）都读不了它，在 v1 会话里发出去会被拒收；本 agent 对 `initialize` 总是回答不大于 1 的版本。`test_state_update_is_not_a_session_update_the_sdk_can_read` 是个绊线：SDK 学会它之后会失败，提醒重新评估。
+- **验证**：`test_harness_lifecycle.py`、`test_workflow_lifecycle.py`、`test_session_lifecycle.py`；53 个变异体全部被杀。批 6：`test_background_turns.py`（10 个用例），15 个变异体全部被杀。
+- **规格**：Phase 7 规格 §12（Bridge 扩展）、§13（结果交付、不可信输出的信封、生命周期、turn 之外的 prompt）。
 - **残留**：见第五节 9、10。
 
 ### P7-08. [x] 扩展 hook 可以覆盖权限拒绝
@@ -239,7 +242,7 @@
 
 | 审计时归纳的缺口 | 现状 |
 |------------------|------|
-| 没有信任 / 能力模型：只定义了发现与覆盖，没有回答「谁的代码可以运行」「嵌套调用如何过权限」；权限是按工具名的白名单 | 项目信任（P7-02：ACP 里询问，回答绑定到文件内容）与子 agent 的权限继承（P7-01）已补上；权限仍是按工具名的白名单（第五节 3） |
+| 没有信任 / 能力模型：只定义了发现与覆盖，没有回答「谁的代码可以运行」「嵌套调用如何过权限」；权限是按工具名的白名单 | 项目信任（P7-02：ACP 里询问，回答绑定到文件内容）与子 agent 的权限继承（P7-01）已补上；权限模型由按工具名的白名单改为默认询问、按工具自己声明的 annotations 放行（批 6；提示是作者的一面之词，第五节 3） |
 | 特性之间没有对账：提示缓存与每 turn 刷新；tier 路由与 provider / key；`trigger_prompt` 与 `close()` 及 ACP turn 模型 | 三处都已对账：git 段标注为会话快照（P6-02）；tier 与 key 按 provider 限定（P7-03）；`close()` 之后不再开启 turn，后台结果改用 custom 消息（P7-07） |
 | 「忠实移植」在扩展语义上有偏差：`tool_call` 不做首个 block 短路、嵌套调用不过钩子、没有 `project_trust` | 首个 block 短路（P7-08）；子 agent 的调用过钩子（P7-01）；`project_trust`（P7-02：有提示与内容指纹，无 `/trust`） |
 | 失败语义不统一：有的静默降级（Mock 回退、journal 缓存 `None`、`suppress(Exception)`），有的硬失败（git 编码） | 不再退回 Mock（P7-14）；失败不入 journal（P7-05）；git 失败省略该段（P6-01）；扩展加载失败对用户可见（P7-12）。其他位置的 `suppress(Exception)` 不在本次修复范围 |
@@ -259,17 +262,17 @@
 |---|------|------|
 | 1 | P7-01 | 脚本现在跑在独立进程里并受内核限制（批 5），但审计钩子是 Python，写给它的脚本能把它拆掉，所以这仍**不是**对抗恶意脚本的安全边界。钩子被绕过后：Linux 上脚本能读用户可读的一切文件（含宿主与同用户其他进程的 `/proc/<pid>/environ`，没有 Yama 时还能 `ptrace` 宿主、读它的内存）、截断 / 删除 / 改名文件（写不了内容）、联网、杀宿主；Windows 上能读文件、联网、杀宿主（写文件、起进程、读宿主内存、复制宿主句柄都被拒）。root 不受 `RLIMIT_NPROC` 约束；Windows 的 CPU 限制检查很粗（1 s 的限制约 8 s 才生效，墙钟更及时但默认关闭）；macOS 没有验证。没做：Landlock 或用户 / 挂载命名空间（隔离 Linux 的文件系统与 `/proc`；本机 WSL 内核 5.10 没有 Landlock，无法验证）、seccomp、Windows 的 AppContainer / 受限令牌（后两者按机制推断会很脆弱，没有尝试）。要对抗这类脚本，请在容器里运行 agent。详见沙盒规格 §9 |
 | 2 | P7-01 | 子 agent 的 `cwd` 已限制在项目内（批 5）。残留：`isolation=True`（worktree）时子 agent 在 worktree 根运行，`cwd` 的子目录被忽略；检查与使用之间的符号链接竞态（TOCTOU）：脚本自己不能写文件，要改只能经受权限策略约束的子 agent |
-| 3 | P7-01 | `auto` / `always-approve` 模式下，子 agent 可以做会话允许的一切；没有 gate 的 executor（独立使用，或 bridge 没有 `tool_call_gate`）里的子 agent 不受限，`activate()` 只记一条 warning；权限本身仍是按工具名的白名单，审计建议的「默认需授权、按 annotations 放行只读工具」没有做 |
+| 3 | P7-01 | `auto` / `always-approve` 模式下，子 agent 可以做会话允许的一切；没有 gate 的 executor（独立使用，或 bridge 没有 `tool_call_gate`）里的子 agent 不受限，`activate()` 只记一条 warning。权限模型已按审计的建议改为「默认需授权、按 annotations 放行」（批 6），残留：annotations 是工具作者的一面之词，运行时不验证；`agent.toml` 没有按工具放行的配置，想放行一个没声明的第三方工具只能补上 annotations 或改用 `auto`；子 agent 的调用按父会话里同名工具判定，父会话没有的名字要问；CLI 不接 MCP 服务器（`session/new` 的 `mcpServers` 被忽略），所以 MCP 工具的提示目前不会被读到（MCP 规范要求把不受信任的服务器的 annotations 当作不可信；`from_langchain_tool` 原样转交，库用户自己接入不信任的 MCP 服务器时要先去掉这些提示）；`ask` 模式下不声明 annotations 的扩展工具会让用户被询问（这是有意的行为变化） |
 | 4 | P7-02 | 授权以整个项目目录为单位，不区分单个扩展或资源；保存的回答只适用于精确目录，不像白名单那样覆盖子目录；没有 `/trust` 命令，也没有「对此项目永不信任」的持久化（收回信任要手工删 `trust.json` 里的条目）；指纹只在会话开始时核对（加上对话框关闭后复核一次），会话进行中再改文件不会撤销信任；换行符转换（`core.autocrlf`）会改变内容哈希而触发重新询问；客户端可以自动批准 `session/request_permission`（ACP 允许；问题没有 `allow_once` 以避开 TUI 的 YOLO，但 TUI 按上次确认的选项类型粘性预选光标，上次选 “always” 类时高亮的就是「Trust and remember」）；客户端丢弃请求时，取消被当作拒绝；TUI 自己的目录信任（`/hooks trust`）不适用于此；`[extensions]` 这个配置名同时管所有项目资源（扩展、提示文件、skills）。（批 4 之前这一条还包括「按路径而非内容」「没有交互式提示」，已解决） |
 | 5 | P7-02 | `AGENTS.md` / `CLAUDE.md`（上游不论信任与否都会加载）、`agent.toml` 里直接给出的 prompt、绝对路径或 `~` 开头的 skills 路径不受门控 |
 | 6 | P7-02 | 项目扩展一旦被信任，就是完整的进程内代码执行 |
 | 7 | P7-05、P7-10 | journal 重放不会重做「请求没变的步骤」曾对工作区做的事（比如改过的文件）；worktree 回写失败（补丁与源目录此刻的状态冲突）时，该子 agent 的改动丢失；快照不复制源目录里未跟踪的文件 |
 | 8 | P7-06 | 不合作的运行（脚本吞掉取消）在 10 秒宽限期后被放弃并记 warning：它仍在后台跑到自己结束，但不再交付结果 |
 | 9 | P7-07 | custom 消息在 LLM 层仍是 user 角色，信封是文本约定，不是协议级隔离；它只进会话与 LLM 上下文，不进 `session/load` 的历史回放 |
-| 10 | P7-07 | 后台结果触发的 turn 没有对应的 `session/prompt` 请求：ACP v1 没有禁止 turn 之外的 `session/update`，但客户端未必渲染；v2 草案的 `state_update`（idle / running）没有处理，客户端兼容性风险未验证 |
+| 10 | P7-07 | 后台结果触发的 turn 没有对应的 `session/prompt` 请求：ACP v1 没有禁止 turn 之外的 `session/update`，但客户端未必渲染；v2 草案的 `state_update`（idle / running）刻意不发（只存在于协议 v2，SDK 与 TUI 的 crate 都读不了，见 P7-07 的批 6 修复）；期间到达的 `session/prompt` 改为等待该 turn 结束（批 6）。客户端（尤其是 Rust TUI，这里无法运行它）怎样渲染 turn 之外的 `session/update` 仍未验证；等 SDK 与客户端支持 v2 之后重新评估 |
 | 11 | P7-09 | 走代理时，代理把公开域名解析到私网地址拦不住，也没有「校验的地址即连接的地址」的保证（需要更强保证就在代理一侧限制出口，或不设代理走直连）；工具不响应 turn 的 abort 信号，靠 30 秒总时限兜底，超时后 `trafilatura` 的工作线程会自己跑完；服务端无视 `Accept-Encoding: identity` 发压缩正文时，一次读取的 64 KiB 压缩数据最多瞬时膨胀到约 64 MiB，之后被 5 MiB 上限截断 |
 | 12 | P7-11 | 提醒次数只在本进程内计，不随状态保存 |
-| 13 | P6-03 | 官方 DeepSeek 上，开启思考且带工具时需要回传 `reasoning_content`，`langchain-deepseek` 1.1.0 / 1.1.1 都不回传，预期第一轮工具调用后 400；CLI 从不设置 `Model.reasoning`，经 CLI 使用官方 DeepSeek 始终不思考；以上都没有对真实 API 验证 |
+| 13 | P6-03 | 官方 DeepSeek 上开启思考且带工具时回传 `reasoning_content`（批 6）与 CLI 的 `Model.reasoning` 接线都**没有对真实 API 验证**（没有密钥；矩阵 `deepseek` 行的 `thinking_tools` 用例是第一次真实检验）。请求的形状取自 DeepSeek 的文档与样例；测试走已安装的 `langchain-deepseek` 真实的请求构造路径（`_get_request_payload`）与一次完整的工具往返（伪造的只是网络那一端）。网关上的 DeepSeek 模型（SiliconFlow、vLLM 等）刻意不回放：它们各自的要求不同，也没有验证 |
 | 14 | P7-15 | 扩展的版本下限必须随下一次核心发布一起上调（测试会拦住），这批扩展用到了比 0.4.0 更新的 API（`ExtensionAPI.home`、`pi_agent_core.home`、`HarnessBridge.tool_call_gate`、`HarnessBridge.trigger_message`） |
 | 15 | P7-03 | 模型 id 写成 `provider/model`，按第一个 `/` 拆分，对自身含 `/` 的网关模型 id（如 `Qwen/Qwen3-8B`）有歧义，需写成 `<provider>/Qwen/Qwen3-8B` |
 | 16 | 编号 | 本文件与 `AUDIT-PHASE7-EXTENSION-API.md` 的编号重名，见文件开头的说明 |
@@ -278,7 +281,7 @@
 
 ## 六、验证方法与结果
 
-- **先红后绿**：每项修复的回归测试在修复前必须失败。批 1 共 52 个，批 2 含经真实 ACP agent / 真实 workflow 扩展 / 真实 git worktree 的端到端用例，批 3 每一簇都先写测试再改实现，批 4 同样：ACP 流程用真实的 `PiAcpAgent` 加脚本化的客户端（能应答、延迟应答、抛错、丢请求、报错），headless 用真实的 `run_print`，指纹与存储用真实的文件系统（含符号链接、循环、命名管道、损坏的文件）。
+- **先红后绿**：每项修复的回归测试在修复前必须失败。批 1 共 52 个，批 2 含经真实 ACP agent / 真实 workflow 扩展 / 真实 git worktree 的端到端用例，批 3 每一簇都先写测试再改实现，批 4 同样：ACP 流程用真实的 `PiAcpAgent` 加脚本化的客户端（能应答、延迟应答、抛错、丢请求、报错），headless 用真实的 `run_print`，指纹与存储用真实的文件系统（含符号链接、循环、命名管道、损坏的文件）。批 6 同样：权限模型用真实的 `PiAcpAgent` 加脚本化的客户端，端到端地检查问或不问（含 workflow 子 agent 的调用）；turn 之外的 prompt 用真实的 harness 和一个可以被扣住的假模型；DeepSeek 回放走已安装的 `langchain-deepseek` 真实的请求构造路径。
 - **手工变异检查**：改坏实现的一处，跑对应测试，看有没有被抓住；幸存的变异体要么补测试、要么证明是等价变异。批 1 至 3 的行是在批 3 提交前的最终代码上重跑的结果（重跑时有 5 个变异体的匹配模式因后来的重构或格式化失效，已更新后单独重跑，均被杀）；批 4 的行是在批 4 最终代码上把全部变异体整套重跑的结果：有 5 个变异体的匹配模式因后来的重构或格式化而失效（取消标志与 `waiting` 计数的旧设计 2 个、`_decide_trust` 抽出之前的写法 1 个、旧的悬空链接标记 1 个，都已按新代码换成对应的变异体；「空扩展目录也算受门约束」1 个因格式化换行而更新了写法，被杀）；整套重跑时另外补了一类「遍历提前结束」的变异体（在悬空链接、`.git` / `__pycache__`、符号链接环、用户级 skills 条目处把 `continue` 换成 `break`），其中「悬空链接」一个幸存，说明没有用例保证排在它后面的文件仍被指纹覆盖（仓库自己起文件名，可以借此让后来改动的文件不影响指纹），已补 `test_nothing_in_a_directory_hides_the_files_listed_after_it`（强制两种目录列出顺序）与 `test_a_skills_entry_after_the_users_own_is_still_gated`，随后全部被杀。
 
   | 簇 | 变异体 | 结果 |
@@ -304,9 +307,15 @@
   | P7-01（批 5）沙盒子进程 `sandbox/child.py` | 39 | 全部被杀 |
   | P7-01（批 5）Windows Job Object `sandbox/winjob.py` | 3 | 全部被杀 |
   | P7-01（批 5）运行时衔接 `runtime.py` | 13 | 全部被杀 |
-  | 合计 | 708 | 707 被杀 |
+  | P6-03（批 6）DeepSeek 思考回放 `deepseek_replay` | 15 | 全部被杀 |
+  | P6-03（批 6）转换与流式适配器 `langchain_convert` / `langchain_stream` | 11 | 全部被杀 |
+  | P6-03（批 6）CLI 的 `Model.reasoning` 接线（`config`、`factory`） | 11 | 全部被杀 |
+  | P7-01（批 6）权限模型：annotations 字段、LangChain 转换、harness 查询、CLI 判定、随包工具的声明 | 35 | 全部被杀（首轮幸存 1 个等价变异，见下） |
+  | P7-07（批 6）turn 之外到达的 prompt（`agent.py`） | 15 | 全部被杀 |
+  | 合计 | 795 | 794 被杀 |
 
 - **批 5 的变异检查**：沙盒的变异体在 Windows（87 个）与 WSL（89 个）上各整套跑了一遍，其中 76 个两边相同；Windows 另有 11 个（Job Object、低完整性、Windows 的环境清理与启动器），WSL 另有 13 个（各项 rlimit、`NO_NEW_PRIVS`、信号名、POSIX 的环境清理），所以上表的 100 个是两边的并集。`cwd` 的 15 个也在两个平台上跑过：Windows 上全部被杀，WSL 上 14 个被杀，剩下的「NUL 字符」是 POSIX 上的等价变异（POSIX 的 `realpath` 自己就因 NUL 抛 `ValueError`；Windows 的则原样返回，所以那里需要显式的检查）；其中运行时衔接的 5 个在沙盒重写运行时之后按新代码重新写过（旧写法已经匹配不上，运行时报告的是 SKIP，不是幸存）。Windows 首轮 87 个里幸存 13 个，全是用例的毛病，不是实现的：① 审计钩子名单里 `shutil` / `socket` / `subprocess` / `ctypes` 掉出去没有人察觉——原有的「连接服务器」用例其实是被 `create_connection` 途中加载 `idna` 编码时的 `open` 拦下的，并没有碰到 `socket` 本身；`shutil`（最终要 `open`）与 `subprocess`（最终是 `_winapi.CreateProcess`）身后各有第二道墙，更不会被察觉。补了逐条列出策略的用例（每个被拒的事件族和被拒的导入各一例，再各一个放行的反例），连接服务器改成直接 `socket().connect`；② 「任意函数名都能调用」的用例用的调用 id 恰与随后那次 `agent()` 撞车，被「重复 id」的同一句错误提前拦下；日志字符上限的用例里没有任何一行跨在上限上；③ 预算视图的「恰在总额处就算用尽」「剩余不为负」没有用例；④ `parallel()` 里有 thunk 起不来时，已经起了的任务应当被取消，而不是留下来继续向宿主发请求；⑤ 经 `WorkflowRuntime` 的用例没有检查脚本拿到的 `cwd` 与预算总额（新用例连 `args` 一并检查），也没有检查 phase 只列一次；⑥ 系统拒绝降低完整性级别时，不该把它记为一层（用一个换掉 `SetTokenInformation` 的一次性解释器来测）。逐项补了用例之后这 13 个都被杀。WSL 上 89 个里 88 个被杀，幸存的是 `-X utf8`：脚本进程的环境是清空的，区域设置成了 C，Python 本来就会启用 UTF-8 模式，所以它在 POSIX 上是等价变异；在 Windows 上它被杀（stderr 里的中文要按 UTF-8 读出来）。WSL 上有 4 个变异体把用例挂住、由超时判死（调用 id 可以重复、已完成的调用留在在途表里、结束时不取消在途调用、stdin 没有指向空设备）；为了让这类回归变成失败而不是挂住整套用例，沙盒用例的 `run()` 在没有别的限制时给 120 s 的墙钟（重跑其中两个，已改为用例失败）。另外还有一项不是变异体发现的：随包带的五个工作流（`deep-research` 等）原先只检查过「是合法的 Python」，从没在沙盒里跑过；现在 `test_the_bundled_workflows_run` 逐个跑它们（去掉命名空间里的 `zip` 就会失败），并要求新增的内置工作流在该表里登记参数。
+- **批 6 的变异检查**：87 个变异体都在最终代码上整套跑过（思考回放与 `Model.reasoning` 接线 37、权限模型 35、turn 之外的 prompt 15）。思考回放有 3 个变异体的匹配模式因后来把条件拆成 `thinks` 变量而失效（运行时报告 SKIP，不是幸存），按新代码重写后单独重跑，均被杀。权限模型首轮 35 个里幸存 1 个，「harness 不复制工具的 hints 就放进事件」，它是等价变异：事件是 pydantic 模型，校验时本来就会复制字典字段（实测：事件上的字典不是工具持有的那个对象，改它不影响工具，`MappingProxyType` 也被接受），显式的 `dict(hints)` 是多余的，已删掉改成一行注释，并换成「不查是否为映射就放行」等变异体，全部被杀。权限模型的变异体覆盖：每个只读内置工具与每个会改东西的工具（声称只读）、三种工具类型各自缺字段、LangChain 转换（不传、任意类型都取、丢掉某个提示、不查 metadata）、harness 的查询与映射检查、判定规则的每一处（`and` 换 `or`、真值代替 `is True`、只查一个提示、`auto` / `always-approve` 询问、`ask` 从不 / 总是询问、事件上的 annotations 被忽略）、随包五个工具各自的声明（`workflow` 声称只读、`goal_*` 声称联网）。turn 之外的 prompt：总是 / 从不 `busy`、阈值、计数泄漏与残留的零项、取消与关闭会话被忽略、不等空闲、每次新建取消事件、吞掉非 `busy` 的错误、`busy` 判反、`cancelled` 映射成 `end_turn`、重试前不等待、`initialize` 声称请求的版本。
 - **探针重跑**：审计时用探针脚本复现问题，修复后重跑，行为已变成预期（探针是临时脚本，没有入库；对应的回归测试入库）。
 - **跨平台**：Windows 与 WSL 各跑一遍全量。WSL 首跑暴露了 4 个失败：这台机器的 WSL 导出了 `PI_HOME`，让「把 `Path.home()` 指向临时目录」的测试读到真实目录（P7-13 让加载器也认 `PI_HOME` 之后才出现）。根目录 `conftest.py` 现在为每个测试清掉 `PI_HOME`，`test_home.py` 里有回归测试。批 4 里有 5 个用例只在 POSIX 上有意义（符号链接的显示路径、命名管道、权限位、非法文件名），Windows 上跳过、在 WSL 里跑；对应的两个只能在 POSIX 上被杀的变异体也在 WSL 里重跑过。根目录 `conftest.py` 现在还清掉 `PI_TRUST_PROJECT_EXTENSIONS`（同类泄漏：开发者为自己的项目导出它，所有「项目不受信任」的用例就会随 shell 而变）。批 5 的沙盒用例里有 5 个只在 POSIX 上有意义（Linux 的 rlimit 数值与 `RLIMIT_NPROC`、`prctl`、文件描述符上限、信号名），8 个只在 Windows 上有意义（Job Object、低完整性、驱动器号与 Windows 的路径规则），各在对应的平台上跑，其余在两边都跑；平台独有的变异体也只在对应的平台上跑（见上）。
 - **provider 文档**：DeepSeek 的模型名与下线日期、`thinking` / `reasoning_effort` 参数、`reasoning_content` 回传要求，以及 DeepSeek 为 pi 写的接入文档（`reasoningEffortMap`），都对照官方文档核对过；与真实 API 的对接没有验证（没有密钥）。
@@ -318,7 +327,9 @@
 1. ~~**信任的交互与内容哈希**~~：已在批 4 完成（P7-02；剩余的限制见第五节 4）。
 2. ~~**子 agent 的 `cwd` 约束**~~：已在批 5 完成（P7-01；残留见第五节 2）。
 3. ~~**workflow 真正的隔离**~~：独立进程加资源限制，已在批 5 完成（P7-01；钩子被绕过后脚本还能做什么见第五节 1）。接下来的加固方向：Linux 的 Landlock（或用户 / 挂载命名空间）隔离文件系统与 `/proc`，需要 ≥ 5.13 的内核才能验证；其后是 seccomp。
-4. **DeepSeek 的 `reasoning_content` 回放**，并在 CLI 里接入 `Model.reasoning`（第五节 13）。
-5. **默认需授权的权限模型**：按工具 annotations 放行只读工具（第五节 3）。
-6. **ACP `state_update`**（第五节 10）。
+4. ~~**DeepSeek 的 `reasoning_content` 回放**，并在 CLI 里接入 `Model.reasoning`~~：已在批 6 完成（P6-03；仍未对真实 API 验证，第五节 13）。
+5. ~~**默认需授权的权限模型**：按工具 annotations 放行只读工具~~：已在批 6 完成（P7-01；残留见第五节 3）。
+6. ~~**ACP `state_update`**~~：调查后**决定不发**（它只存在于协议 v2，SDK 与 TUI 的 crate 都读不了），改为让 turn 之外到达的 prompt 等该 turn 结束（批 6，P7-07；第五节 10）。
 7. **发布时**：上调三个扩展包的版本下限（第五节 14）。
+
+第 7 项要等到发布时才做，版本号与 tag 由发布者决定。其余没有已排期的后续工作；仍然开放的是：第 3 项里写的加固方向（Landlock / 用户与挂载命名空间、seccomp，需要 ≥ 5.13 的 Linux 内核才能验证，本机 WSL 是 5.10）、用真实的 DeepSeek API 验证批 6 的回放（第五节 13）、以及 TUI 怎样渲染 turn 之外的更新（第五节 10）。

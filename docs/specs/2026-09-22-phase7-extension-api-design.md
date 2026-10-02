@@ -163,10 +163,11 @@ class ToolDefinition:
     prompt_guidelines: list[str] = field(default_factory=list)
     execution_mode: ToolExecutionMode | None = None
     prepare_arguments: Callable[[Any], Any] | None = None
+    annotations: ToolAnnotations | None = None  # MCP 风格的提示，见 §12「权限模型」
 ```
 
 `ToolDefinition` → `CodingTool`（或 `SimpleTool`）的映射在 `register_tool` 内部完成，
-调用者无需关心内部工具实现类型。
+调用者无需关心内部工具实现类型。`annotations` 一并转发：CLI 的 `ask` 模式据此决定要不要问用户。
 
 ### 3.5 事件映射
 
@@ -628,13 +629,13 @@ TUI (zypi) ──ACP stdio──> pi_agent_cli ──> factory.create_session_ha
 所以父会话的权限层（ACP `session/request_permission`）原本看不到它们的 `bash` / `edit` / `write`，
 `ask` 模式下也不会有任何询问。现在：
 
-- `workflow` 工具本身列入 `PERMISSION_TOOLS`：`ask` 模式下启动 workflow 需要用户批准；`auto` /
-  `always-approve` 不弹窗，与其它工具一致。
+- `workflow` 工具本身不声明 annotations，所以 `ask` 模式下启动 workflow 需要用户批准（规则见下面的「权限模型」）；
+  `auto` / `always-approve` 不弹窗，与其它工具一致。
 - 桥接新增 `tool_call_gate`（即 `AgentHarness.check_tool_call`）：对父 harness 的 `tool_call` hook 链
   （权限层 + 扩展 hook，首个 block 生效，见 §3.5）跑一遍，返回 `None`（放行）或
   `{"block": True, "reason": ...}`。`HarnessSubagentExecutor(tool_call_gate=...)` 给每个子代理 harness
   装一个 `tool_call` hook，把它的每次工具调用送进该 gate。**批准 `workflow` 不等于批准其子代理的写操作**：
-  每次调用逐个询问（只读工具 `read` / `grep` / `find` / `ls` 与会话自己一样不询问，但扩展 hook 照样生效）。
+  每次调用逐个询问（声明只读的工具 `read` / `grep` / `find` / `ls` 与会话自己一样不询问，但扩展 hook 照样生效）。
 - gate 抛异常按拒绝处理（fail-closed）：hook 异常在 harness 里表现为该调用失败，工具不会执行。
 - `ToolCallEvent.origin`：子代理的调用带 `{"kind": "subagent", "cwd": ..., "label": ...}`（会话自己的调用为
   `None`）。权限弹窗标题据此写成 `write (workflow sub-agent in <cwd>)`：脚本可以用 `agent(..., cwd=)` 把
@@ -654,6 +655,32 @@ TUI (zypi) ──ACP stdio──> pi_agent_cli ──> factory.create_session_ha
 - 已知限制：`auto` / `always-approve` 下子代理可执行一切，与会话自己一致；`isolation=True`（worktree）时子代理
   在 worktree 根运行，`cwd` 的子目录被忽略；脚本进程里的审计钩子可被绕过，钩子被绕过之后脚本在各平台上还能做
   什么见沙盒规格 §9（§9.3 的脚本运行方式）。
+
+**权限模型（默认询问，按工具自述放行）**：`ask` 模式原来是一张工具名白名单（`PERMISSION_TOOLS = {bash, edit, write,
+workflow}`），名单之外的工具——包括任何扩展注册的——不问就执行。现在反过来：每次调用都询问，除非工具自己声明无害。
+
+- 工具带 `annotations`（`pi_agent_core.types.ToolAnnotations`，名字与含义同 Model Context Protocol：`readOnlyHint` /
+  `destructiveHint` / `idempotentHint` / `openWorldHint`，全部可选，缺省 = 未声明）。`SimpleTool` / `CodingTool` /
+  `ToolDefinition` 都有该字段；`from_langchain_tool` 从 `tool.metadata` 取这四个布尔提示（`langchain-mcp-adapters` 把
+  MCP 工具的 annotations 放在那里；值不是真正布尔的不取）。循环本身不读 annotations，只有权限层读。
+- 放行规则（`pi_agent_cli.permissions.needs_permission(mode, annotations)`）：`auto` / `always-approve` 从不询问；`ask` 下
+  `readOnlyHint is True` 放行，或 `destructiveHint is False` **且** `openWorldHint is False` 放行（MCP 的含义：只做增量
+  更新、交互范围是封闭的，例如把笔记记进会话的目标跟踪工具）；其余一律询问——没声明、声明了别的、值是 `"true"` / `1`
+  这类非布尔、annotations 不是映射，都问。MCP 规范对缺省值同样按最坏情况算（非只读、有破坏性、开放世界）。注意第二条
+  比「只读」宽：一个自称只做增量、范围封闭的工具，即使往项目里新建文件也不会被问，全凭作者的声明（见下）。
+- harness 在 `tool_call` 事件上带 `ToolCallEvent.annotations`：`AgentHarness.check_tool_call` 按工具名在**自己的**工具表里查
+  （会话自己的循环与 workflow 子代理的调用走同一条路径）；工具表里没有该名字、或工具没声明就是 `None`。事件上的字典是
+  副本，hook 改不到工具自己的。所以子代理的调用按父会话里**同名工具**判定，父会话没有的名字没有 annotations，要问。
+- 内置：`read` / `grep` / `find` / `ls` 声明 `readOnlyHint: true`（与 `READ_ONLY_TOOL_NAMES` 一致，测试钉住）；`bash` /
+  `edit` / `write` 不声明。随包扩展：`web_search` / `fetch_url` 声明 `readOnlyHint` + `openWorldHint`（只读，但会联网）；
+  `goal_update` / `goal_complete` 声明 `readOnlyHint: false, destructiveHint: false, openWorldHint: false`（只在会话里
+  记笔记）；`workflow` 刻意不声明——启动它是用户的决定（它的子代理能写文件、跑命令）。
+- 提示是工具作者的一面之词，运行时不验证。内置与随包工具是我们自己的；扩展是用户选择加载的代码（它本来就能做更糟的
+  事，标错一个提示并没有让它多出能力）。MCP 规范要求客户端把 annotations 视为不可信，除非来自受信任的服务器（恶意服务器
+  可以把破坏性的工具标成只读）；`from_langchain_tool` 原样转交 `tool.metadata` 里的提示，所以连接了不信任的 MCP 服务器的
+  调用者要先去掉这些提示。本 CLI 目前不把 ACP `session/new` 的 `mcpServers` 接成工具（该参数被忽略），不受此影响。
+  没有按工具放行的配置项：想放行一个没声明的第三方工具，只能补上 annotations，或改用 `auto` 模式。
+- 行为变化：`ask` 模式下，不声明 annotations 的扩展工具现在会询问（此前直接执行）。
 
 **Bridge 扩展**：`HarnessBridge` 增加 `stream_fn` / `model` / `get_api_key_fn` / `tool_call_gate`
 只读属性，`activate()` 据此构造真实 executor；另有 `trigger_message(custom_type, text, *, details=None)`
@@ -708,7 +735,14 @@ TUI (zypi) ──ACP stdio──> pi_agent_cli ──> factory.create_session_ha
 
 - 自定义消息在 LLM 层是 user 角色（与 `bashExecution` 等一致）；信封是文本约定，不是协议级隔离。
 - 后台结果触发的 turn 没有对应的 `session/prompt` 请求。ACP v1 没有禁止 turn 之外的 `session/update`，
-  但客户端未必渲染；v2 草案的 `state_update`（idle / running）正是为此设计的，本项目未处理。
+  但客户端未必渲染。v2 草案的 `state_update`（idle / running）正是为此设计的，**本项目不发**：它只存在于协议 v2，而 v2
+  仍是需要显式选择的不稳定草案，并且是破坏性的（`session/prompt` 改为受理即返回用户消息的 `messageId`，回合结束改由
+  idle 的 `state_update` 报告）。Python SDK（`acp.schema.SessionNotification`）与 TUI 所用的 Rust crate
+  （`agent-client-protocol-schema` 0.11.4 的 `SessionUpdate`：没有此变体，也没有兜底变体）都读不了它，在 v1 会话里发出去
+  会被拒收；本 agent 对 `initialize` 总是回答不大于 1 的版本。等 SDK 与客户端支持 v2 之后再重新评估
+  （`test_state_update_is_not_a_session_update_the_sdk_can_read` 是个绊线）。
+  v1 里能做的是：客户端并不知道会话正被这样一个 turn 占着，此时到达的 `session/prompt` 不再以 `busy` 失败，而是等该 turn
+  结束再运行（等待期间 `session/cancel` 或关闭会话让它以 `cancelled` 结束；同一客户端同时发出两个 prompt 仍是 `busy`）。
 - 自定义消息只进 session 与 LLM 上下文，`project_message_replay`（`session/load` 的历史回放）不含它，
   与实时 UI 一致（实时 UI 也不显示自定义消息）。
 - 不合作的 run（脚本吞掉取消）在宽限期后被放弃：它仍在后台运行，直到自己结束，但不再交付结果。

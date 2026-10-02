@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -224,6 +224,7 @@ def _tool_from_definition(defn: ToolDefinition) -> AgentTool:
         prepare_arguments=defn.prepare_arguments,
         prompt_snippet=defn.prompt_snippet,
         prompt_guidelines=list(defn.prompt_guidelines),
+        annotations=defn.annotations,
     )
 
 
@@ -861,13 +862,20 @@ class AgentHarness:
         Returns ``None`` when no handler blocks, else ``{"block": True, "reason": ...}``.
         A handler that raises surfaces as ``AgentHarnessError`` (code ``"hook"``): callers
         must treat that as "not allowed", never as "allowed".
+
+        The event carries what this harness's tool of that name declares about itself
+        (``ToolCallEvent.annotations``): for the session's own loop and for sub-agents alike,
+        the hooks judge a call by the session's tool, and a name the session lacks has none.
         """
+        hints = getattr(self._tools.get(tool_name), "annotations", None)
         result = await self._emit_tool_call_hook(
             ToolCallEvent(
                 toolCallId=tool_call_id,
                 toolName=tool_name,
                 input=dict(tool_input),
                 origin=origin,
+                # The event validates into a dict of its own: a hook cannot reach the tool's.
+                annotations=hints if isinstance(hints, Mapping) else None,
             )
         )
         if result is None:

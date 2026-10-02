@@ -468,4 +468,5 @@ def create_fetch_url_tool() -> Any:
             "Use fetch_url to read the full content of a web page when you have a specific URL.",
             "Combine with web_search: search first, then fetch relevant URLs for details.",
         ],
+        annotations={"readOnlyHint": True, "openWorldHint": True},
     )
