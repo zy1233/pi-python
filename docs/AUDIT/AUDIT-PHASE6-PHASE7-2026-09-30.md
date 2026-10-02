@@ -1,6 +1,6 @@
 # AUDIT：Phase 6 / Phase 7 设计与实现审计（2026-09-30）
 
-> **审计日期**：2026-09-30（发现与前三批修复在同一天完成；批 4 在 10 月 1 日，批 5、6 在 10 月 2 日）
+> **审计日期**：2026-09-30（发现与前三批修复在同一天完成；批 4 在 10 月 1 日，批 5 至 7 在 10 月 2 日）
 >
 > **审计范围**：
 > - Phase 6：`packages/pi-agent-cli/pi_agent_cli/{git_context,prompt_options,system_prompt,factory}.py`、`pi_agent_core/adapters/langchain_stream.py`、`pi_agent_core/tests/{provider_matrix,test_provider_matrix}.py`、`.github/workflows/provider-matrix.yml`
@@ -10,7 +10,7 @@
 >
 > **方法**：代码阅读；在 Windows（zh-CN 区域设置）上用探针脚本实测；provider 文档（DeepSeek 等）对照核对。探针是临时脚本，没有入库；每一项的回归测试入库，并且都先红后绿。
 >
-> **修复批次**：批 1 `6aaf29a`、批 2 `cf92422`、批 3 `b3de95f`、批 4（P7-02 的交互式信任提示与内容哈希）`0a1dd67`、批 5（P7-01 的子 agent `cwd` 约束与脚本沙盒）`9baefa6`、批 6（第七节的 4–6：DeepSeek 的 `reasoning_content` 回放与 CLI 的 `Model.reasoning`、按 annotations 放行的权限模型、后台 turn 期间到达的 prompt）随本文档的这次更新一起提交（`git log -- docs/AUDIT/AUDIT-PHASE6-PHASE7-2026-09-30.md`）
+> **修复批次**：批 1 `6aaf29a`、批 2 `cf92422`、批 3 `b3de95f`、批 4（P7-02 的交互式信任提示与内容哈希）`0a1dd67`、批 5（P7-01 的子 agent `cwd` 约束与脚本沙盒）`9baefa6`、批 6（第七节的 4–6：DeepSeek 的 `reasoning_content` 回放与 CLI 的 `Model.reasoning`、按 annotations 放行的权限模型、后台 turn 期间到达的 prompt）`d4ab3f8`、批 7（第七节的 7：发布准备，版本 0.5.0）随本文档的这次更新一起提交（`git log -- docs/AUDIT/AUDIT-PHASE6-PHASE7-2026-09-30.md`）
 >
 > **最终测试状态**：
 > - Windows：`1980 passed, 10 skipped, 31 deselected`（10 个 skip 是只在 POSIX 上有意义的用例：批 4 的 5 个（符号链接的显示路径、命名管道、权限位 2 个、非法文件名），批 5 的 5 个（`RLIMIT_NPROC`、rlimit 数值、`prctl`、文件描述符上限、信号名）；31 个 deselected 是 `real_llm` 用例，批 6 起矩阵的 `deepseek` 行多一项 `thinking_tools`；审计开始时 `576 passed, 30 skipped`）
@@ -273,7 +273,7 @@
 | 11 | P7-09 | 走代理时，代理把公开域名解析到私网地址拦不住，也没有「校验的地址即连接的地址」的保证（需要更强保证就在代理一侧限制出口，或不设代理走直连）；工具不响应 turn 的 abort 信号，靠 30 秒总时限兜底，超时后 `trafilatura` 的工作线程会自己跑完；服务端无视 `Accept-Encoding: identity` 发压缩正文时，一次读取的 64 KiB 压缩数据最多瞬时膨胀到约 64 MiB，之后被 5 MiB 上限截断 |
 | 12 | P7-11 | 提醒次数只在本进程内计，不随状态保存 |
 | 13 | P6-03 | 官方 DeepSeek 上开启思考且带工具时回传 `reasoning_content`（批 6）与 CLI 的 `Model.reasoning` 接线都**没有对真实 API 验证**（没有密钥；矩阵 `deepseek` 行的 `thinking_tools` 用例是第一次真实检验）。请求的形状取自 DeepSeek 的文档与样例；测试走已安装的 `langchain-deepseek` 真实的请求构造路径（`_get_request_payload`）与一次完整的工具往返（伪造的只是网络那一端）。网关上的 DeepSeek 模型（SiliconFlow、vLLM 等）刻意不回放：它们各自的要求不同，也没有验证 |
-| 14 | P7-15 | 扩展的版本下限必须随下一次核心发布一起上调（测试会拦住），这批扩展用到了比 0.4.0 更新的 API（`ExtensionAPI.home`、`pi_agent_core.home`、`HarnessBridge.tool_call_gate`、`HarnessBridge.trigger_message`） |
+| 14 | P7-15 | 扩展的版本下限必须随核心发布一起上调（`test_extension_packaging.py` 会拦住不同步的情况）。批 7 把核心、`pi-agent-harness-lc`、`pi-agent-cli-lc` 升到 0.5.0，三个扩展包的下限同步成 `>=0.5.0`，并把扩展包自己的版本从 0.1.0 升到 0.2.0（发布工作流的 PyPI 步骤带 `skip-existing`，版本号不变就会让 PyPI 上已有的旧构建原样留着）；六个包都用 `uv build` 构建过，wheel 元数据的版本与依赖符合预期。**只做了本地提交：没有打 tag、没有发布、没有推送**；0.5.0 这个版本号与扩展包的 0.2.0 是按惯例选的，发布者可以改。今后每次发布都要重复这一步。另外 ACP 的 `agentInfo.version`（`agent.py` 的 `_AGENT_INFO`）一直硬编码为 `0.1.0`，与包版本早就对不上，这次没有改 |
 | 15 | P7-03 | 模型 id 写成 `provider/model`，按第一个 `/` 拆分，对自身含 `/` 的网关模型 id（如 `Qwen/Qwen3-8B`）有歧义，需写成 `<provider>/Qwen/Qwen3-8B` |
 | 16 | 编号 | 本文件与 `AUDIT-PHASE7-EXTENSION-API.md` 的编号重名，见文件开头的说明 |
 
@@ -330,6 +330,6 @@
 4. ~~**DeepSeek 的 `reasoning_content` 回放**，并在 CLI 里接入 `Model.reasoning`~~：已在批 6 完成（P6-03；仍未对真实 API 验证，第五节 13）。
 5. ~~**默认需授权的权限模型**：按工具 annotations 放行只读工具~~：已在批 6 完成（P7-01；残留见第五节 3）。
 6. ~~**ACP `state_update`**~~：调查后**决定不发**（它只存在于协议 v2，SDK 与 TUI 的 crate 都读不了），改为让 turn 之外到达的 prompt 等该 turn 结束（批 6，P7-07；第五节 10）。
-7. **发布时**：上调三个扩展包的版本下限（第五节 14）。
+7. ~~**发布时**：上调三个扩展包的版本下限~~：已在批 7 完成（核心 0.5.0，扩展包 0.2.0；只做了本地提交，没有打 tag、没有发布；第五节 14）。
 
-第 7 项要等到发布时才做，版本号与 tag 由发布者决定。其余没有已排期的后续工作；仍然开放的是：第 3 项里写的加固方向（Landlock / 用户与挂载命名空间、seccomp，需要 ≥ 5.13 的 Linux 内核才能验证，本机 WSL 是 5.10）、用真实的 DeepSeek API 验证批 6 的回放（第五节 13）、以及 TUI 怎样渲染 turn 之外的更新（第五节 10）。
+以上各项做完之后，没有已排期的后续工作；仍然开放的是：第 3 项里写的加固方向（Landlock / 用户与挂载命名空间、seccomp，需要 ≥ 5.13 的 Linux 内核才能验证，本机 WSL 是 5.10）、用真实的 DeepSeek API 验证批 6 的回放（第五节 13）、以及 TUI 怎样渲染 turn 之外的更新（第五节 10）。

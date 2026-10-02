@@ -308,7 +308,7 @@ import 一个扩展就是执行它的代码，而 `<项目>/.pi-python/extension
 
 **一个「家」。** `pi_agent_core.home.pi_home(override=None)` 是唯一的解析器：参数 > `$PI_HOME` > `~/.pi-python`。CLI、`ExtensionLoader(home=)`、`AgentHarness(home=)`、`ExtensionAPI.home`（`pi.home`）和 pi-dynamic-workflows（journal、saved workflow）都走它。以前 CLI 认 `PI_HOME`，而 loader 与 workflow 扩展直接用 `Path.home() / ".pi-python"`：设了 `PI_HOME` 的会话会从一处读配置、从另一处读扩展、往第三处写 journal。
 
-**打包。** 扩展包与核心一同发布，所以 `pi-agent-core-lc` 的下限就是仓库里的核心版本（旧下限 `>=0.3.0`，而 `pi_agent_core.extensions` 到 0.4.0 才出现）。用到 `pi_agent_harness` 的包（pi-dynamic-workflows）必须声明 `pi-agent-harness-lc`，并在 `[tool.uv.sources]` 里指向工作区；否则 `pip install` 之后 workflow 工具只能回答「sub-agents unavailable」。`pi_agent_core/tests/test_extension_packaging.py` 检查这三点：发版时抬高核心版本却忘了抬下限，会在 CI 里失败，而不是发布之后才暴露。
+**打包。** 扩展包与核心一同发布，所以 `pi-agent-core-lc` 的下限就是仓库里的核心版本（旧下限 `>=0.3.0`，而 `pi_agent_core.extensions` 到 0.4.0 才出现；0.5.0 起是 `>=0.5.0`：扩展用到了 `ToolAnnotations` 等 0.4.0 没有的接口）。扩展包自己的版本号也要随发布抬高（0.5.0 时三个都从 0.1.0 到 0.2.0）：发布工作流的 PyPI 步骤带 `skip-existing`，版本号不变就会让已发布的旧构建原样留在 PyPI 上。用到 `pi_agent_harness` 的包（pi-dynamic-workflows）必须声明 `pi-agent-harness-lc`，并在 `[tool.uv.sources]` 里指向工作区；否则 `pip install` 之后 workflow 工具只能回答「sub-agents unavailable」。`pi_agent_core/tests/test_extension_packaging.py` 检查这三点：发版时抬高核心版本却忘了抬下限，会在 CI 里失败，而不是发布之后才暴露。
 
 ---
 

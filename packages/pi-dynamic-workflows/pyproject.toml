@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pi-dynamic-workflows-py"
-version = "0.1.0"
+version = "0.2.0"
 description = "Dynamic workflow orchestration extension for pi-python (port of pi-dynamic-workflows)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -14,9 +14,9 @@ authors = [
 ]
 keywords = ["agent", "workflow", "orchestration", "subagent", "pi", "extension"]
 dependencies = [
-    "pi-agent-core-lc>=0.4.0",
+    "pi-agent-core-lc>=0.5.0",
     # Sub-agents run on their own AgentHarness (subagent.py imports pi_agent_harness).
-    "pi-agent-harness-lc>=0.4.0",
+    "pi-agent-harness-lc>=0.5.0",
 ]
 
 [project.entry-points."pi_agent.extensions"]
