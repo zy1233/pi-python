@@ -62,21 +62,25 @@ python scripts/tui_baseline.py release           # release-dist 构建 + 体积 
 
 macOS 环境：Apple Silicon，Homebrew `cargo` / `rustc` 1.96.1（**不是**钉的 1.94.0）。依赖图节点数只取决于 `Cargo.lock` 与目标三元组，与工具链版本无关；告警数与耗时会随工具链漂移，所以只当参考。
 
+「拆除后」一栏是 `9add266` 时的数。之后清理 leader 的 UI 残留和 1.R3 的命名（计划 r4）又让 `tui/crates` 的 `.rs` 行数降到 1,252,374；依赖图节点数（995）、消费者构建告警（20）和 `--workspace --tests`（0 个错误）在末态复测，没有变化。
+
 ### 3.2 测试
 
 macOS 实测，`env -u NO_COLOR TERM=xterm-256color COLORTERM=truecolor`（沙箱默认的 `NO_COLOR=1`、`TERM=dumb` 会让约 10 个颜色 / 光标断言失败）。
 
 | suite（`cargo test -p …`） | 目标 | 通过 | 失败 | 忽略 | 说明 |
 |---|---|---|---|---|---|
-| `pi-shell` | `--lib` + 2 个集成 | 1,141 | 0 | 8 | 1,136 + 2 + 3 |
-| `pi-pager` | `--lib` + 3 个集成 | 8,887 | 2 | 66 | 8,606 + 277 + 2 + 2；失败项见下 |
+| `pi-shell` | `--lib` + 2 个集成 | 1,140 | 0 | 8 | 1,135 + 2 + 3 |
+| `pi-pager` | `--lib` + 3 个集成 | 8,870 | 2 | 66 | 8,589 + 277 + 2 + 2；失败项见下 |
 | `pi-pager-bin` | `--bin zypi` | 14 | 0 | 0 | |
 | `pi-acp-lib` | `--lib` | 21 | 0 | 0 | 跳过 1 个会永久挂起的用例 |
 | `pi-http` | `--lib` | 13 | 0 | 0 | |
 | `pi-telemetry` | `--lib` | 244 | 0 | 0 | |
 | `pi-file-utils` | `--lib` | 217 | 0 | 6 | |
 | `pi-sampling-types` | `--lib` | 320 | 0 | 0 | |
-| **合计** | | **10,857** | **2（已知）** | **80** | |
+| **合计** | | **10,839** | **2（已知）** | **80** | |
+
+这组数字测于清理 leader 的 UI 残留（计划 A.2 的尾巴）之后。第一次测得的是 10,857（`pi-shell` 1,141、`pi-pager` 8,887），少的 18 个（`pi-pager` 17、`pi-shell` 1）是随被删代码一起删掉的测试——重连守卫、leader 名册与 `leader_mode` 路径（`pi-pager`），以及写入 `[cli].use_leader` 的配置测试（`pi-shell`）——不是回归。
 
 **清单里的已知失败 / 跳过，及原因**
 
