@@ -78,9 +78,9 @@ pub struct AcpConnection {
     pub auth_methods: Vec<acp::AuthMethod>,
     /// Cancellation token to stop the agent.
     pub cancel: CancellationToken,
-    /// In-process agent worker thread (`connect` only). Join after cancel so
-    /// session actors can flush SessionEnd hooks.
-    pub agent_thread: Option<std::thread::JoinHandle<anyhow::Result<()>>>,
+    /// Thread running the stdio bridge that owns the agent process. Taken by
+    /// [`spawn::AgentProcessGuard`], which cancels and joins it on exit.
+    pub bridge_thread: Option<std::thread::JoinHandle<anyhow::Result<()>>>,
     /// ACP-advertised slash commands parsed from `InitializeResponse.meta.availableCommands`.
     /// Seeded into every new `AgentSession` so autocomplete has shell builtins
     /// and skills immediately, before any `AvailableCommandsUpdate` arrives.
@@ -213,8 +213,7 @@ pub async fn connect(cancel: &CancellationToken, flags: ConnectFlags) -> Result<
         interactivity: Interactivity::Interactive,
     });
 
-    let memory_config = agent_config.memory_config.clone();
-    let spawned = spawn::spawn_grok_shell(agent_config, cancel, memory_config).await?;
+    let spawned = spawn::spawn_agent_process(agent_config, cancel).await?;
     let auth_manager = spawned.auth_manager.clone();
     let (tx, rx) = (spawned.channel.tx, spawned.channel.rx);
 
@@ -254,7 +253,7 @@ pub async fn connect(cancel: &CancellationToken, flags: ConnectFlags) -> Result<
         is_grok_shell,
         auth_methods,
         cancel: spawned.cancel,
-        agent_thread: Some(spawned.thread_handle),
+        bridge_thread: Some(spawned.bridge_thread),
         available_commands,
         needs_login,
         login_label,

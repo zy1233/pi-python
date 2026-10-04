@@ -802,7 +802,7 @@ pub async fn run(
         }
     };
     let agent_guard =
-        crate::acp::spawn::AgentShutdownGuard::new(cancel.clone(), connection.agent_thread.take());
+        crate::acp::spawn::AgentProcessGuard::new(cancel.clone(), connection.bridge_thread.take());
     let effective_args = PagerArgs {
         resume_session: None,
         load_session: None,

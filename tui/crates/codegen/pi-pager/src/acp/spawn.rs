@@ -20,112 +20,111 @@ use pi_shell::{
     util::grok_home::grok_home,
 };
 
-/// Budget for the ACP agent child to wind down after cancel (the bridge kills
-/// the child and reaps it). Matches the historical process-exit flush bound so
-/// the pager's overall exit budget (`app::exit_timeout`) is unchanged.
-const SESSION_FLUSH_GRACE: Duration = Duration::from_secs(10);
+/// Upper bound for the agent process to be killed and reaped after cancel.
+///
+/// Today the bridge SIGKILLs the child at once (a graceful stdin-EOF exit is
+/// plan item 1.P2), so this only bounds a wedged reap. It is also the budget a
+/// graceful exit would get before the kill. Kept at the historical value so the
+/// pager's overall exit budget (`app::exit_timeout`) is unchanged.
+const AGENT_EXIT_GRACE: Duration = Duration::from_secs(10);
 
-/// Extra slack when joining the agent OS thread after cancel so the flush
-/// can finish and the thread can unwind.
-const AGENT_JOIN_SLACK: Duration = Duration::from_secs(2);
+/// Extra slack when joining the bridge thread after the agent process has been
+/// reaped, so the thread can unwind.
+const BRIDGE_JOIN_SLACK: Duration = Duration::from_secs(2);
 
 /// How long the join stays silent before telling an interactive user why exit
 /// is taking a moment. Short joins (the common case) print nothing.
 const JOIN_NOTICE_AFTER: Duration = Duration::from_millis(1500);
 
-/// Stderr notice after a slow join. Covers the whole SessionEnd pipeline
-/// (hooks, telemetry sync, upload drain, memory, optional dream) — not
-/// hooks alone, so the copy is intentionally not "session hooks".
-const JOIN_NOTICE: &str = "Finishing session…";
+/// Stderr notice after a slow join: the agent process is not gone yet.
+const JOIN_NOTICE: &str = "Stopping agent…";
 
-/// Result of spawning a child agent.
-pub struct SpawnedAgent {
-    /// Agent worker OS thread. Hand to [`AgentShutdownGuard`] so the worker is
-    /// cancelled and joined — letting session actors finish SessionEnd teardown
-    /// (hooks, telemetry, uploads, memory) — on every exit path.
-    pub thread_handle: thread::JoinHandle<Result<()>>,
+/// A spawned ACP agent process, seen from the pager.
+pub struct AgentProcess {
+    /// OS thread running the stdio bridge, which owns the child process: on
+    /// cancel it kills and reaps the child, then returns. Hand it to
+    /// [`AgentProcessGuard`] so every exit path stops the agent.
+    pub bridge_thread: thread::JoinHandle<Result<()>>,
     pub channel: AcpClientChannel,
     pub cancel: CancellationToken,
-    /// The agent's `AuthManager`, shared so pager-side consumers (e.g. the voice
-    /// channel) resolve the same refreshing bearer as chat traffic.
+    /// An `AuthManager` for pager-side consumers (e.g. the voice channel) that
+    /// resolve a refreshing bearer.
     pub auth_manager: std::sync::Arc<AuthManager>,
 }
 
-/// The single teardown mechanism for an in-process agent: cancels the worker
-/// and joins it on drop, so session actors always get
-/// `SessionCommand::Shutdown` (SessionEnd hooks, telemetry drain, memory)
-/// before the process exits — on normal return, `?` bail, or panic unwind alike.
+/// The single teardown mechanism for the agent process: cancels the bridge and
+/// joins its thread on drop, so the child is killed and reaped before the pager
+/// exits — on normal return, `?` bail, or panic unwind alike.
 ///
-/// Hold one from every site that calls [`spawn_grok_shell`] (headless, the TUI,
-/// `models`, `worktree`, `share`). Scope-end drop is the default; the TUI is the
-/// one caller that drops it explicitly, because the join has to happen before
-/// background processes are reaped (see `app::run`).
-pub struct AgentShutdownGuard {
+/// Only `app::run` owns one. It drops it explicitly, after the terminal is
+/// restored and before the telemetry drain and the process-scope sweep, so the
+/// child is gone first.
+pub struct AgentProcessGuard {
     cancel: CancellationToken,
     thread: Option<thread::JoinHandle<Result<()>>>,
 }
 
-impl AgentShutdownGuard {
-    /// Guard an in-process agent worker. A `None` thread makes the guard a
-    /// no-op cancel (leader mode has no in-process worker to join).
+impl AgentProcessGuard {
+    /// Guard the bridge thread of a spawned agent process. A `None` thread
+    /// makes the guard cancel-only (nothing to join).
     pub fn new(cancel: CancellationToken, thread: Option<thread::JoinHandle<Result<()>>>) -> Self {
         Self { cancel, thread }
     }
 }
 
-impl Drop for AgentShutdownGuard {
+impl Drop for AgentProcessGuard {
     fn drop(&mut self) {
         self.cancel.cancel();
         let Some(handle) = self.thread.take() else {
             return;
         };
-        let timeout = SESSION_FLUSH_GRACE + AGENT_JOIN_SLACK;
-        match join_agent_thread(handle, timeout) {
+        let timeout = AGENT_EXIT_GRACE + BRIDGE_JOIN_SLACK;
+        match join_bridge_thread(handle, timeout) {
             JoinOutcome::Joined => {}
             JoinOutcome::Failed(error) => {
-                tracing::warn!(%error, "agent worker exited with error after cancel");
+                tracing::warn!(%error, "agent bridge exited with error after cancel");
             }
             JoinOutcome::Panicked(panic) => {
-                tracing::warn!(%panic, "agent worker panicked after cancel");
+                tracing::warn!(%panic, "agent bridge panicked after cancel");
             }
             JoinOutcome::TimedOut => {
                 tracing::warn!(
                     timeout_ms = timeout.as_millis() as u64,
-                    "agent worker did not exit within grace after cancel; \
-                     SessionEnd teardown (hooks/telemetry/uploads) may be incomplete"
+                    "agent bridge did not exit within the budget after cancel; \
+                     the agent process may still be running"
                 );
             }
             JoinOutcome::HelperLost => {
-                tracing::warn!("agent worker join helper disappeared; proceeding");
+                tracing::warn!("agent bridge join helper disappeared; proceeding");
             }
         }
     }
 }
 
 /// Why the join ended, so each case is explicit at the call site (and callers
-/// can tell a completed flush from an abandoned one).
+/// can tell a reaped agent from an abandoned one).
 #[derive(Debug, PartialEq, Eq)]
 enum JoinOutcome {
-    /// Worker returned cleanly: session actors flushed within the grace.
+    /// Bridge returned cleanly: the agent process was killed and reaped.
     Joined,
-    /// Worker returned an error; the flush may be incomplete.
+    /// Bridge returned an error; the agent process may still be running.
     Failed(String),
-    /// Worker panicked, with the payload rendered as text.
+    /// Bridge panicked, with the payload rendered as text.
     Panicked(String),
-    /// Worker was still running when the budget elapsed.
+    /// Bridge was still running when the budget elapsed.
     TimedOut,
     /// The join helper vanished without reporting (helper thread itself died).
     HelperLost,
 }
 
-/// Wait up to `timeout` for a cancelled agent worker to exit.
+/// Wait up to `timeout` for a cancelled bridge thread to exit.
 ///
 /// The blocking `join` runs on a helper thread so this stays callable from
 /// `Drop` — which cannot await — while every caller sits on the async runtime.
 /// On timeout that helper is abandoned rather than joined; this is safe **only
 /// because every caller is on its way out of the process**, so the OS reaps the
 /// thread at exit. Do not reuse this outside teardown.
-fn join_agent_thread(handle: thread::JoinHandle<Result<()>>, timeout: Duration) -> JoinOutcome {
+fn join_bridge_thread(handle: thread::JoinHandle<Result<()>>, timeout: Duration) -> JoinOutcome {
     use std::sync::mpsc::RecvTimeoutError;
 
     let (tx, rx) = std::sync::mpsc::channel();
@@ -134,8 +133,8 @@ fn join_agent_thread(handle: thread::JoinHandle<Result<()>>, timeout: Duration) 
     });
 
     // Two-phase wait: silent for a short join (overwhelmingly the common case),
-    // then a one-line notice so a slow SessionEnd pipeline does not look like a
-    // frozen exit. Only for a terminal — piped/JSON consumers stay clean.
+    // then a one-line notice so a slow stop does not look like a frozen exit.
+    // Only for a terminal — piped/JSON consumers stay clean.
     let quiet = timeout.min(JOIN_NOTICE_AFTER);
     match rx.recv_timeout(quiet) {
         Ok(result) => return classify_join(result),
@@ -173,17 +172,16 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
     }
 }
 
-/// Spawn the standard-ACP Python agent (`python -m pi_agent_cli` by default)
-/// and bridge its stdio JSON-RPC into an [`AcpClientChannel`].
+/// Spawn the standard-ACP agent (`python -m pi_agent_cli` by default) as a child
+/// process and bridge its stdio JSON-RPC into an [`AcpClientChannel`].
 ///
-/// In-process grok-shell is no longer the interactive runtime. `AuthManager`
-/// is still constructed for pager fields that expect it, but pi login is
-/// not performed — LLM credentials live in the Python process environment.
-pub async fn spawn_grok_shell(
+/// The agent runs out of process. `AuthManager` is still constructed for pager
+/// fields that expect it (voice), but pi login is not performed — LLM
+/// credentials live in the agent's own environment.
+pub async fn spawn_agent_process(
     agent_config: AgentConfig,
     cancel: &CancellationToken,
-    _memory_config: Option<pi_shell::config::MemoryConfig>,
-) -> Result<SpawnedAgent> {
+) -> Result<AgentProcess> {
     let auth_manager = std::sync::Arc::new(AuthManager::new(
         &grok_home(),
         agent_config.grok_com_config.clone(),
@@ -193,10 +191,10 @@ pub async fn spawn_grok_shell(
     let (acp_client, acp_agent) = acp_channels();
 
     startup::enter(StartupPhase::WorkerSpawn);
-    let handle = spawn_python_stdio_bridge(acp_agent, agent_cancel.clone()).await?;
+    let bridge_thread = spawn_python_stdio_bridge(acp_agent, agent_cancel.clone()).await?;
 
-    Ok(SpawnedAgent {
-        thread_handle: handle,
+    Ok(AgentProcess {
+        bridge_thread,
         channel: acp_client,
         cancel: agent_cancel,
         auth_manager,
@@ -383,6 +381,12 @@ mod pi_agent_command_tests {
     }
 }
 
+/// Spawn the agent child and the thread that bridges its stdio to `channel`.
+///
+/// The returned thread owns the child: on `cancel` it kills the child (SIGKILL —
+/// there is no graceful exit yet, plan 1.P2), reaps it, and returns. The child
+/// inherits this process's stderr, so anything it prints lands on the terminal
+/// (plan 1.R3 leaves its destination open).
 async fn spawn_python_stdio_bridge(
     channel: AcpAgentChannel,
     cancel: CancellationToken,
@@ -518,40 +522,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn join_reports_clean_worker_exit() {
+    fn join_reports_clean_bridge_exit() {
         let handle = thread::spawn(|| Ok(()));
         assert_eq!(
-            join_agent_thread(handle, Duration::from_secs(5)),
+            join_bridge_thread(handle, Duration::from_secs(5)),
             JoinOutcome::Joined
         );
     }
 
     #[test]
-    fn join_reports_worker_error() {
-        let handle = thread::spawn(|| Err(anyhow::anyhow!("flush failed")));
+    fn join_reports_bridge_error() {
+        let handle = thread::spawn(|| Err(anyhow::anyhow!("reap failed")));
         assert_eq!(
-            join_agent_thread(handle, Duration::from_secs(5)),
-            JoinOutcome::Failed("flush failed".to_string())
+            join_bridge_thread(handle, Duration::from_secs(5)),
+            JoinOutcome::Failed("reap failed".to_string())
         );
     }
 
-    /// The timeout branch the built-binary e2e cannot reach: a wedged worker
-    /// (e.g. a hung SessionEnd hook) is abandoned once the budget elapses
-    /// instead of holding the process open indefinitely.
+    /// The timeout branch the built-binary e2e cannot reach: a wedged bridge
+    /// (e.g. a reap stuck on an unkillable child) is abandoned once the budget
+    /// elapses instead of holding the process open indefinitely.
     #[test]
-    fn join_abandons_wedged_worker_at_budget() {
+    fn join_abandons_wedged_bridge_at_budget() {
         let handle = thread::spawn(|| {
             thread::sleep(Duration::from_secs(30));
             Ok(())
         });
         let started = std::time::Instant::now();
         assert_eq!(
-            join_agent_thread(handle, Duration::from_millis(50)),
+            join_bridge_thread(handle, Duration::from_millis(50)),
             JoinOutcome::TimedOut
         );
         assert!(
             started.elapsed() < Duration::from_secs(5),
-            "join must return at its budget, not wait out the worker"
+            "join must return at its budget, not wait out the bridge"
         );
     }
 

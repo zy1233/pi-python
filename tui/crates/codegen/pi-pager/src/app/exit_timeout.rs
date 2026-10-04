@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 // From the earliest arm site (a signal, before loop unwind): the agent
-// join bound (SESSION_FLUSH_GRACE + slack, 12s) plus flushes and headroom.
+// stop bound (AGENT_EXIT_GRACE + BRIDGE_JOIN_SLACK, 12s) plus flushes and headroom.
 const DEFAULT_EXIT_TIMEOUT: Duration = Duration::from_secs(20);
 const EXIT_TIMEOUT_ENV: &str = "GROK_EXIT_TIMEOUT_SECS";
 const HARD_EXIT_GRACE: Duration = Duration::from_secs(5);
