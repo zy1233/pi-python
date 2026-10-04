@@ -112,7 +112,7 @@ macOS 实测，`env -u NO_COLOR TERM=xterm-256color COLORTERM=truecolor`（沙�
 ## 5. 第一次 Linux 运行之后要做的事
 
 1. 触发 `TUI CI`（push / PR 命中 `tui/**` 即自动运行；或手动 `workflow_dispatch`）。看 job summary 或下载 artifact `tui-baseline-check` / `tui-baseline-test`。
-2. `check`：看工具链是否按钉安装（`rustc --version --verbose` 应为 1.94.0）、依赖图节点数、`--workspace --tests` 的错误列表（macOS 上从未编译过的 `cfg(target_os = "linux")` 代码会在这里暴露）。
+2. `check`：看工具链是否按钉安装（`rustc --version --verbose` 应为 1.94.0）、依赖图节点数、`--workspace --tests` 的错误列表（macOS 上从未编译过的 `cfg(target_os = "linux")` 代码会在这里暴露）。系统库已预查：`cargo tree -p pi-pager-bin --target x86_64-unknown-linux-gnu` 里的 `-sys` crate 要么内置源码（`libsqlite3-sys` 开了 `bundled`，另有 `zstd-sys`、`aws-lc-sys`、`libgit2-sys`、`tikv-jemalloc-sys`、`libmimalloc-sys`），要么在没有系统库时回退到源码构建（`libz-sys`），图里没有 `alsa-sys`、`openssl-sys`、`libudev-sys`、`dbus-sys`；所以 workflow 和 `release.yml`（v0.4.0 就是这样在 `ubuntu-24.04` 上构建成功的）一样只装 `protoc`。这只覆盖 `pi-pager-bin` 的图，没有逐个核对其他 suite 的 dev-dependencies；若 `test` job 在链接阶段报缺系统库，在 `Install protoc` 之后加一步 `apt-get install`。
 3. `test`：把每个意外失败分诊为「修」或「加入 `known_failures` / `skip` 并写明原因」；用 Linux 的通过数设置各 suite 的 `reference_passed` 与 `min_passed`。
 4. 翻开开关：`[test] enforce = true`、`[check] enforce_workspace_tests = true`；按实测设置 `max_warnings`，并把 `[graph.max_nodes]` 的 `PROVISIONAL` 值换成 Linux 实测值。
 5. 手动运行一次 `release_baseline`，把 `zypi` 体积、构建耗时与 `--version` 延迟填进 §3.1。
