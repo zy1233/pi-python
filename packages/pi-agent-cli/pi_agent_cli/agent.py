@@ -33,17 +33,32 @@ from acp.schema import (
     ResumeSessionResponse,
     SessionCapabilities,
     SessionCloseCapabilities,
+    SessionConfigOptionSelect,
+    SessionConfigSelectOption,
     SessionInfo,
     SessionListCapabilities,
     SessionResumeCapabilities,
+    SetSessionConfigOptionResponse,
     SseMcpServer,
     TextContentBlock,
     UnstructuredCommandInput,
 )
 
-from pi_agent_cli.config import CliConfig, PermissionMode, load_config, pi_home
+from pi_agent_cli.config import (
+    CliConfig,
+    ModelChoice,
+    PermissionMode,
+    api_key_getter,
+    load_config,
+    pi_home,
+)
 from pi_agent_cli.events import project_event, project_message_replay
-from pi_agent_cli.factory import create_session_harness, default_stream_fn, load_session_resources
+from pi_agent_cli.factory import (
+    create_session_harness,
+    default_stream_fn,
+    load_session_resources,
+    model_for_choice,
+)
 from pi_agent_cli.permissions import (
     PERMISSION_OPTIONS,
     needs_permission,
@@ -58,6 +73,9 @@ from pi_agent_harness import AgentHarness, JsonlSessionRepo, Session
 logger = logging.getLogger(__name__)
 
 _AGENT_INFO = Implementation(name="pi-agent-cli", title="pi-python ACP agent", version="0.1.0")
+
+# ACP Session Config Option id for the model selector (``session/set_config_option``).
+MODEL_CONFIG_ID = "model"
 
 
 class PiAcpAgent(Agent):
@@ -85,6 +103,7 @@ class PiAcpAgent(Agent):
         self._harnesses: dict[str, AgentHarness] = {}
         self._abort_tasks: set[asyncio.Task[Any]] = set()
         self._session_cwds: dict[str, str] = {}
+        self._session_models: dict[str, ModelChoice] = {}
         self._client_capabilities: ClientCapabilities | None = None
         self._client_info: Implementation | None = None
         self._extensions: list[Any] = extensions or []
@@ -137,7 +156,8 @@ class PiAcpAgent(Agent):
         self._schedule_deferred_advertise(session_id)
         return NewSessionResponse(
             session_id=session_id,
-            field_meta=self._session_response_meta(),
+            config_options=self._config_options(session_id),
+            field_meta=self._session_response_meta(session_id),
         )
 
     async def load_session(
@@ -159,7 +179,10 @@ class PiAcpAgent(Agent):
                 for update in project_message_replay(msg):
                     await self._conn.session_update(session_id=session_id, update=update)
         self._schedule_deferred_advertise(session_id)
-        return LoadSessionResponse(field_meta=self._session_response_meta())
+        return LoadSessionResponse(
+            config_options=self._config_options(session_id),
+            field_meta=self._session_response_meta(session_id),
+        )
 
     async def list_sessions(
         self, cwd: str | None = None, cursor: str | None = None, **kwargs: Any
@@ -191,9 +214,13 @@ class PiAcpAgent(Agent):
         await self._bind_session(session_id, session, metadata.cwd or cwd)
         # ACP session/resume intentionally does not replay history.
         self._schedule_deferred_advertise(session_id)
-        return ResumeSessionResponse(field_meta=self._session_response_meta())
+        return ResumeSessionResponse(
+            config_options=self._config_options(session_id),
+            field_meta=self._session_response_meta(session_id),
+        )
 
     async def close_session(self, session_id: str, **kwargs: Any) -> CloseSessionResponse | None:
+        self._session_models.pop(session_id, None)
         harness = self._harnesses.pop(session_id, None)
         if harness is not None:
             await harness.close()
@@ -232,6 +259,25 @@ class PiAcpAgent(Agent):
         self._abort_tasks.add(task)
         task.add_done_callback(self._abort_tasks.discard)
 
+    async def set_config_option(
+        self, config_id: str, session_id: str, value: str | bool, **kwargs: Any
+    ) -> SetSessionConfigOptionResponse | None:
+        """``session/set_config_option``: only the ``model`` selector is supported."""
+        harness = self._require_harness(session_id)
+        if config_id != MODEL_CONFIG_ID:
+            raise RequestError.invalid_params(
+                {"configId": config_id, "reason": "unknown config option"}
+            )
+        choice = self._choice_by_id(value) if isinstance(value, str) else None
+        if choice is None:
+            raise RequestError.invalid_params(
+                {"configId": config_id, "value": value, "reason": "unknown model"}
+            )
+        await harness.set_model(model_for_choice(choice))
+        harness.get_api_key = api_key_getter(choice.api_key_env)
+        self._session_models[session_id] = choice
+        return SetSessionConfigOptionResponse(config_options=self._config_options(session_id))
+
     async def ext_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         if method == "pi/session/delete":
             session_id_raw = params.get("sessionId", params.get("session_id"))
@@ -256,18 +302,65 @@ class PiAcpAgent(Agent):
             self._config = replace(self._config, permission=mode)
         return None
 
-    def _session_response_meta(self) -> dict[str, Any] | None:
-        model_id = self._config.model_id.strip()
+    def _choice_by_id(self, model_id: str) -> ModelChoice | None:
+        for choice in self._config.model_choices():
+            if choice.id == model_id:
+                return choice
+        return None
+
+    def _current_choice(self, session_id: str) -> ModelChoice:
+        return self._session_models.get(session_id) or self._config.default_choice()
+
+    def _config_options(self, session_id: str) -> list[SessionConfigOptionSelect]:
+        """ACP Session Config Options: a ``model`` select (category ``model``) for ``/model``."""
+        choices = list(self._config.model_choices())
+        current = self._current_choice(session_id)
+        if all(choice.id != current.id for choice in choices):
+            choices.insert(0, current)  # e.g. a persisted model no longer listed in agent.toml
+        return [
+            SessionConfigOptionSelect(
+                id=MODEL_CONFIG_ID,
+                name="Model",
+                category="model",
+                type="select",
+                current_value=current.id,
+                options=[
+                    SessionConfigSelectOption(value=choice.id, name=choice.name or choice.id)
+                    for choice in choices
+                ],
+            )
+        ]
+
+    def _session_response_meta(self, session_id: str) -> dict[str, Any] | None:
+        """Legacy ``pi/*`` model hints (kept for clients that predate config options)."""
+        current = self._current_choice(session_id)
+        model_id = current.id.strip()
         if not model_id:
             return None
         meta: dict[str, Any] = {
             "pi/currentModelId": model_id,
-            "pi/currentModelDisplayName": model_id,
+            "pi/currentModelDisplayName": current.name or model_id,
         }
-        provider = self._config.provider.strip()
+        provider = (current.provider or "").strip()
         if provider:
             meta["pi/provider"] = provider
         return meta
+
+    async def _restored_choice(self, session: Session) -> ModelChoice | None:
+        """Model persisted in the session, if it is still configured.
+
+        Taken from the latest model change or assistant message.
+        """
+        context = await session.build_context()
+        persisted = context.model or {}
+        model_id = persisted.get("modelId")
+        if not model_id:
+            return None
+        provider = persisted.get("provider")
+        for choice in self._config.model_choices():
+            if choice.id == model_id and (not provider or choice.provider == provider):
+                return choice
+        return None
 
     def _require_harness(self, session_id: str) -> AgentHarness:
         harness = self._harnesses.get(session_id)
@@ -290,6 +383,7 @@ class PiAcpAgent(Agent):
             return await self._handle_tool_call(session_id, event)
 
         resources = await load_session_resources(cwd=cwd, config=self._config)
+        choice = await self._restored_choice(session) or self._config.default_choice()
         harness = await create_session_harness(
             session=session,
             cwd=cwd,
@@ -298,7 +392,9 @@ class PiAcpAgent(Agent):
             resources=resources,
             on_tool_call=on_tool_call,
             extensions=self._extensions,
+            model_choice=choice,
         )
+        self._session_models[session_id] = choice
 
         async def on_event(event: Any, signal: Any | None = None) -> None:
             await self._emit_updates(session_id, event)

@@ -12,7 +12,7 @@ from acp import RequestError, text_block
 from acp.schema import AllowedOutcome, DeniedOutcome, RequestPermissionResponse
 
 from pi_agent_cli.agent import PiAcpAgent
-from pi_agent_cli.config import CliConfig
+from pi_agent_cli.config import CliConfig, ModelChoice
 from pi_agent_cli.events import project_event, tool_kind
 from pi_agent_cli.permissions import PERMISSION_TOOLS, needs_permission
 from pi_agent_core.event_stream import AssistantMessageEventStream
@@ -103,6 +103,89 @@ async def test_session_responses_include_model_meta(tmp_path):
     resumed = await agent.resume_session(session_id=created.session_id, cwd=cwd)
     assert resumed.field_meta is not None
     assert resumed.field_meta.get("pi/currentModelId") == "mock"
+
+
+def _multi_model_agent(tmp_path: Path) -> PiAcpAgent:
+    return PiAcpAgent(
+        stream_fn=mock_text_stream,
+        home=tmp_path,
+        config=CliConfig(
+            provider="mock",
+            model_id="mock",
+            models=(ModelChoice(id="mock-pro", name="Mock Pro"),),
+        ),
+    )
+
+
+def _model_option(options):
+    assert options is not None
+    (option,) = [o for o in options if o.id == "model"]
+    return option
+
+
+@pytest.mark.asyncio
+async def test_session_responses_advertise_model_config_option(tmp_path):
+    agent = _multi_model_agent(tmp_path)
+    agent.on_connect(FakeClient())
+    cwd = str(tmp_path.resolve())
+
+    created = await agent.new_session(cwd=cwd)
+    option = _model_option(created.config_options)
+    assert option.type == "select"
+    assert option.category == "model"
+    assert option.current_value == "mock"
+    assert [(o.value, o.name) for o in option.options] == [
+        ("mock", "mock"),
+        ("mock-pro", "Mock Pro"),
+    ]
+
+    loaded = await agent.load_session(cwd=cwd, session_id=created.session_id)
+    assert loaded is not None
+    assert _model_option(loaded.config_options).current_value == "mock"
+    resumed = await agent.resume_session(session_id=created.session_id, cwd=cwd)
+    assert _model_option(resumed.config_options).current_value == "mock"
+
+
+@pytest.mark.asyncio
+async def test_set_config_option_switches_model_and_persists(tmp_path):
+    agent = _multi_model_agent(tmp_path)
+    agent.on_connect(FakeClient())
+    cwd = str(tmp_path.resolve())
+    created = await agent.new_session(cwd=cwd)
+    sid = created.session_id
+
+    resp = await agent.set_config_option(config_id="model", session_id=sid, value="mock-pro")
+    assert resp is not None
+    assert _model_option(resp.config_options).current_value == "mock-pro"
+    assert agent._harnesses[sid].model.model_id == "mock-pro"
+    # legacy pi/* hints follow the switch
+    assert agent._session_response_meta(sid)["pi/currentModelId"] == "mock-pro"
+    assert agent._session_response_meta(sid)["pi/currentModelDisplayName"] == "Mock Pro"
+
+    # a fresh agent process resuming the same session restores the persisted model
+    agent2 = _multi_model_agent(tmp_path)
+    agent2.on_connect(FakeClient())
+    resumed = await agent2.resume_session(session_id=sid, cwd=cwd)
+    assert _model_option(resumed.config_options).current_value == "mock-pro"
+    assert agent2._harnesses[sid].model.model_id == "mock-pro"
+
+
+@pytest.mark.asyncio
+async def test_set_config_option_rejects_unknown_option_and_model(tmp_path):
+    agent = _multi_model_agent(tmp_path)
+    agent.on_connect(FakeClient())
+    created = await agent.new_session(cwd=str(tmp_path.resolve()))
+    sid = created.session_id
+
+    with pytest.raises(RequestError):
+        await agent.set_config_option(config_id="nope", session_id=sid, value="mock")
+    with pytest.raises(RequestError):
+        await agent.set_config_option(config_id="model", session_id=sid, value="missing")
+    with pytest.raises(RequestError):
+        await agent.set_config_option(config_id="model", session_id=sid, value=True)
+    with pytest.raises(RequestError):
+        await agent.set_config_option(config_id="model", session_id="unknown", value="mock")
+    assert agent._harnesses[sid].model.model_id == "mock"
 
 
 @pytest.mark.asyncio

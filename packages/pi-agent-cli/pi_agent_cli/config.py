@@ -70,6 +70,23 @@ def expand_config_path(raw: str, *, cwd: str | Path) -> str:
 
 
 @dataclass(frozen=True)
+class ModelChoice:
+    """One selectable model (the ``/model`` picker; ACP session config option ``model``).
+
+    In ``[[models]]`` entries unset fields inherit from the default ``[model]`` table, but
+    ``base_url`` / ``api_key_env`` / ``supports_images`` are only inherited when ``provider``
+    is unset or equals the default provider (credentials never leak across providers).
+    """
+
+    id: str
+    name: str | None = None
+    provider: str | None = None
+    base_url: str | None = None
+    api_key_env: str | None = None
+    supports_images: bool | None = None
+
+
+@dataclass(frozen=True)
 class CliConfig:
     permission: PermissionMode = "ask"
     provider: str = "mock"
@@ -89,6 +106,44 @@ class CliConfig:
     git_enabled: bool = True
     git_timeout_seconds: float = 2.0
     git_max_status_lines: int = 40
+    models: tuple[ModelChoice, ...] = ()
+
+    def default_choice(self) -> ModelChoice:
+        """The ``[model]`` table as a fully-resolved choice."""
+        return ModelChoice(
+            id=self.model_id,
+            provider=self.provider,
+            base_url=self.base_url,
+            api_key_env=self.api_key_env,
+            supports_images=self.supports_images,
+        )
+
+    def model_choices(self) -> tuple[ModelChoice, ...]:
+        """Selectable models: the default first, then ``[[models]]`` (resolved, unique by id)."""
+        out = [self.default_choice()]
+        seen = {self.model_id}
+        for item in self.models:
+            if item.id in seen:
+                continue
+            seen.add(item.id)
+            same_provider = item.provider is None or item.provider == self.provider
+            out.append(
+                ModelChoice(
+                    id=item.id,
+                    name=item.name,
+                    provider=item.provider or self.provider,
+                    base_url=item.base_url
+                    if item.base_url is not None or not same_provider
+                    else self.base_url,
+                    api_key_env=item.api_key_env
+                    if item.api_key_env is not None or not same_provider
+                    else self.api_key_env,
+                    supports_images=item.supports_images
+                    if item.supports_images is not None or not same_provider
+                    else self.supports_images,
+                )
+            )
+        return tuple(out)
 
 
 def load_config(home: Path | str | None = None) -> CliConfig:
@@ -105,10 +160,8 @@ def load_config(home: Path | str | None = None) -> CliConfig:
     return CliConfig()
 
 
-def make_get_api_key(
-    config: CliConfig,
-) -> Callable[[str], str | None] | None:
-    env_name = config.api_key_env
+def api_key_getter(env_name: str | None) -> Callable[[str], str | None] | None:
+    """``get_api_key`` hook reading ``env_name`` from the environment (``None`` when unset)."""
     if not env_name:
         return None
 
@@ -116,6 +169,12 @@ def make_get_api_key(
         return os.environ.get(env_name) or None
 
     return get_api_key
+
+
+def make_get_api_key(
+    config: CliConfig,
+) -> Callable[[str], str | None] | None:
+    return api_key_getter(config.api_key_env)
 
 
 def _from_toml(data: dict[str, Any]) -> CliConfig:
@@ -155,6 +214,27 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         text = str(value).strip()
         return text or None
 
+    models: list[ModelChoice] = []
+    raw_models = data.get("models")
+    if isinstance(raw_models, list):
+        for item in raw_models:
+            if not isinstance(item, dict):
+                continue
+            model_id = _optional_str(item.get("id") or item.get("model_id"))
+            if model_id is None:
+                continue
+            images = item.get("supports_images")
+            models.append(
+                ModelChoice(
+                    id=model_id,
+                    name=_optional_str(item.get("name")),
+                    provider=_optional_str(item.get("provider")),
+                    base_url=_optional_str(item.get("base_url")),
+                    api_key_env=_optional_str(item.get("api_key_env")),
+                    supports_images=bool(images) if images is not None else None,
+                )
+            )
+
     return CliConfig(
         permission=permission,  # type: ignore[arg-type]
         provider=str(model.get("provider") or data.get("provider") or "mock"),
@@ -174,6 +254,7 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         git_enabled=_as_bool(git.get("enabled"), True),
         git_timeout_seconds=_as_float(git.get("timeout_seconds"), 2.0),
         git_max_status_lines=_as_int(git.get("max_status_lines"), 40),
+        models=tuple(models),
     )
 
 

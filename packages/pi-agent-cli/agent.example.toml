@@ -14,6 +14,19 @@ id = "deepseek-ai/DeepSeek-V4-Flash"
 base_url = "https://api.siliconflow.cn/v1"
 api_key_env = "REAL_LLM_API_KEY"
 
+# Extra models for the TUI `/model` picker (ACP session config option "model").
+# `[model]` above is always offered first; unset fields inherit from it, but
+# base_url / api_key_env / supports_images only when `provider` is unset or the same.
+# [[models]]
+# id = "deepseek-ai/DeepSeek-V4-Pro"
+# name = "DeepSeek V4 Pro"
+#
+# [[models]]
+# provider = "openai"
+# id = "gpt-4.1"
+# base_url = "https://api.openai.com/v1"
+# api_key_env = "OPENAI_API_KEY"
+
 [skills]
 paths = ["~/.pi-python/skills", ".pi/skills"]
 

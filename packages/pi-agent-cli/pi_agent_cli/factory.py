@@ -6,7 +6,13 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from pi_agent_cli.config import CliConfig, expand_config_path, make_get_api_key, pi_home
+from pi_agent_cli.config import (
+    CliConfig,
+    ModelChoice,
+    api_key_getter,
+    expand_config_path,
+    pi_home,
+)
 from pi_agent_cli.create_harness import build_coding_agent_harness_system_prompt
 from pi_agent_cli.prompt_options import load_system_prompt_options
 from pi_agent_core.coding_tools import create_all_tools
@@ -34,6 +40,20 @@ def _detect_vlm_support(provider: str, model_id: str, configured: bool | None = 
     if provider.lower() in _TEXT_ONLY_PROVIDERS:
         return any(kw in mid for kw in ("vl", "vision", "4.1flash", "omni"))
     return True
+
+
+def model_for_choice(choice: ModelChoice) -> Model:
+    """Harness ``Model`` for a resolved ``ModelChoice``.
+
+    The choice is the ``[model]`` default or a ``[[models]]`` entry.
+    """
+    provider = choice.provider or "mock"
+    return Model(
+        provider=provider,
+        model_id=choice.id,
+        base_url=choice.base_url,
+        supports_images=_detect_vlm_support(provider, choice.id, choice.supports_images),
+    )
 
 
 def default_stream_fn() -> StreamFn:
@@ -99,6 +119,7 @@ async def create_session_harness(
     home: Path | None = None,
     tools: list[Any] | None = None,
     extensions: list[Any] | None = None,
+    model_choice: ModelChoice | None = None,
 ) -> AgentHarness:
     cwd_s = str(Path(normalize_host_path(str(cwd))).resolve())
     home_path = pi_home(home)
@@ -118,14 +139,8 @@ async def create_session_harness(
         )
     )
     resolved_resources = resources or AgentHarnessResources()
-    model = Model(
-        provider=config.provider,
-        model_id=config.model_id,
-        base_url=config.base_url,
-        supports_images=_detect_vlm_support(
-            config.provider, config.model_id, config.supports_images
-        ),
-    )
+    choice = model_choice or config.default_choice()
+    model = model_for_choice(choice)
 
     async def system_prompt_callback(ctx: dict[str, Any]) -> str:
         active_tools = ctx.get("active_tools") or tools_list
@@ -152,7 +167,7 @@ async def create_session_harness(
         env=LocalExecutionEnv(cwd_s),
         tools=tools_list,
         resources=resolved_resources,
-        get_api_key=make_get_api_key(config),
+        get_api_key=api_key_getter(choice.api_key_env),
         system_prompt=system_prompt_callback,
         thinking_level=config.thinking_level,
         max_turns=config.max_turns,
