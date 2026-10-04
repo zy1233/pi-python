@@ -107,7 +107,6 @@ User-level configuration lives in `$GROK_HOME/config.toml` (default `~/.grok/con
 | `cli.session_picker_grouped` | `boolean` | `yes` | `user` | Group sessions by repo in the picker and CLI listings. |
 | `cli.session_registry` | `boolean` | `yes` | `user` | Participate in the cross-process session registry. |
 | `cli.show_tips` | `boolean` | `pin` | `user` | Startup tips. |
-| `cli.use_leader` | `boolean` | `pin` | `user` | Use the leader process for config reload and MCP watches. |
 | `cli.worktree_type` | `string` | `yes` | `user` | Worktree implementation preference. |
 
 ### `compat`

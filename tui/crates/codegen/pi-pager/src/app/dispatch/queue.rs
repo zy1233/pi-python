@@ -43,15 +43,16 @@ fn combine_queued_prompts_enabled() -> bool {
 ///
 /// **Server-busy — `is_turn_running() || !shared_queue.is_empty()`:** the
 /// immediate-send path is for prompts that must queue server-side rather than
-/// start a turn locally. It is NOT enough to check `is_turn_running()`: in
-/// leader mode there is a turn-end window where this client has processed the
-/// turn-end (so it is locally `Idle`, `current_prompt_id` cleared) but has not
-/// yet adopted the leader's broadcast that the next prompt was promoted. In
+/// start a turn locally. It is NOT enough to check `is_turn_running()`: when
+/// the agent drains a server-side queue there is a turn-end window where this
+/// client has processed the turn-end (so it is locally `Idle`,
+/// `current_prompt_id` cleared) but has not yet adopted the agent's broadcast
+/// that the next prompt was promoted. In
 /// that window `is_turn_running()` is false, yet the agent is busy and its
 /// queue is non-empty — which this client sees as a non-empty `shared_queue`
 /// mirror. Without the queue check, a prompt sent then takes the local
 /// drip-feed path and is optimistically promoted to a running turn on THIS
-/// client, while the leader appends it BEHIND the existing queue — it shows as
+/// client, while the agent appends it BEHIND the existing queue — it shows as
 /// running here but queued on every other client (confirmed via qtrace:
 /// `send_route_plain immediate=false is_turn_running=false shared_queue_len=5`
 /// followed by `local_drain`). Treating a non-empty `shared_queue` as
@@ -71,13 +72,12 @@ fn combine_queued_prompts_enabled() -> bool {
 /// later prompts behind the older ones (they join the local queue and drain in
 /// order), preserving FIFO.
 ///
-/// **Leader / follow-up Steer gate:** the shared queue exists to hold every
-/// attached client to one order. `[ui].follow_up_behavior = "steer"` also
-/// takes this path so the shell can promote the row to a mid-turn
-/// interjection at the next tool batch or model step.
-pub(super) fn immediate_server_send_eligible(agent: &AgentView, leader_mode: bool) -> bool {
+/// **Follow-up Steer gate:** only `[ui].follow_up_behavior = "steer"` takes
+/// this path, so the agent can promote the row to a mid-turn interjection at
+/// the next tool batch or model step.
+pub(super) fn immediate_server_send_eligible(agent: &AgentView) -> bool {
     let server_busy = agent.session.state.is_turn_running() || !agent.shared_queue.is_empty();
-    (leader_mode || crate::appearance::cache::load_follow_up_steer())
+    crate::appearance::cache::load_follow_up_steer()
         && server_busy
         && agent.session.session_id.is_some()
         && agent.session.pending_prompts.is_empty()
@@ -249,11 +249,6 @@ pub(crate) fn maybe_release_queued_prompt_into_turn(
         return Vec::new();
     };
     if !agent.session.state.is_turn_running() || agent.session.session_id.is_none() {
-        return Vec::new();
-    }
-    // Mid-outage: the interject effect has no requeue path, so a row released
-    // into a dead channel is simply lost. Leave it queued.
-    if app.reconnect_pending {
         return Vec::new();
     }
     if !agent.is_parked_on_sendable_wait() {
@@ -1118,9 +1113,6 @@ pub(crate) fn maybe_drain_queue_and_note_peek(app: &mut AppView, agent_id: Agent
 
 /// Try to drain the next queued prompt (triggered after editing completes).
 pub(super) fn dispatch_drain_queue(app: &mut AppView) -> Vec<Effect> {
-    if app.reconnect_pending {
-        return vec![];
-    }
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };
@@ -1181,12 +1173,6 @@ pub(super) fn dispatch_run_edited_queued_command(
     server: Option<crate::app::actions::SharedQueueTarget>,
     text: String,
 ) -> Vec<Effect> {
-    if app.reconnect_pending {
-        // Nothing runs and nothing drains while reconnecting (see `dispatch_drain_queue`), so the
-        // row just stays put.
-        app.show_toast(super::prompt::RECONNECTING_NOTICE);
-        return vec![];
-    }
     // The send half is bound to the active view (the dashboard popup forwards keys to an attached
     // agent without switching it), so resolve the removal target the same way. The edit exit has
     // already taken the composer text, so a silent bail would drop the command without a trace.
@@ -1535,21 +1521,6 @@ mod tests {
                 ("/compact", QueueEntryKind::Command),
             ]
         );
-    }
-
-    /// Reconnecting: the guard bails before the removal, so the row survives for a retry.
-    #[test]
-    fn run_edited_queued_command_while_reconnecting_keeps_row() {
-        let mut app = test_app_with_agent();
-        let id = AgentId(0);
-        enqueue_local(&mut app, id, "what is the default");
-        let local_id = app.agents[&id].session.pending_prompts[0].id;
-        app.reconnect_pending = true;
-
-        let effects = run_edited_queued_command(&mut app, local_id, None, "/btw why");
-
-        assert!(effects.is_empty());
-        assert_eq!(app.agents[&id].session.queue_len(), 1);
     }
 
     /// The dashboard popup forwards keys to an attached agent without making it the active view.
@@ -2854,69 +2825,6 @@ mod tests {
         // p4 should still be in queue.
         assert_eq!(app.agents[&id].session.queue_len(), 1);
         assert_eq!(app.agents[&id].session.pending_prompts[0].text, "p4");
-    }
-
-    #[test]
-    fn drain_queue_blocked_during_reconnect() {
-        let mut app = test_app_with_agent();
-        let id = AgentId(0);
-
-        // Enqueue a prompt while not reconnecting so it's queued.
-        app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
-        enqueue_local(&mut app, id, "queued");
-        assert_eq!(app.agents[&id].session.queue_len(), 1);
-
-        // Set idle + reconnect_pending: DrainQueue should be blocked.
-        app.agents.get_mut(&id).unwrap().session.state = AgentState::Idle;
-        app.reconnect_pending = true;
-
-        let effects = dispatch(Action::DrainQueue, &mut app);
-        assert!(effects.is_empty());
-        assert_eq!(app.agents[&id].session.queue_len(), 1);
-    }
-
-    /// Regression (leader mode): a prompt queued during a turn must drain once
-    /// the leader connection reconnects. Every normal drain trigger
-    /// (PromptResponse / DrainQueue / send-prompt / session-created)
-    /// early-returns while `reconnect_pending` is set, deferring the drain to
-    /// the event loop's reconnect-complete arm. That arm clears
-    /// `reconnect_pending`, force-idles the agent, then dispatches
-    /// `Action::DrainQueue`. This test exercises that final drain step and
-    /// guards against the queue silently stalling after a reconnect.
-    #[test]
-    fn drain_queue_after_reconnect_sends_queued_prompt() {
-        let mut app = test_app_with_agent();
-        let id = AgentId(0);
-
-        // A prompt was queued behind a running turn before the outage.
-        app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
-        enqueue_local(&mut app, id, "queued");
-        assert_eq!(app.agents[&id].session.queue_len(), 1);
-
-        // During the outage every drain trigger is suppressed.
-        app.reconnect_pending = true;
-        let blocked = dispatch(Action::DrainQueue, &mut app);
-        assert!(blocked.is_empty(), "drain must stay blocked mid-reconnect");
-        assert_eq!(app.agents[&id].session.queue_len(), 1);
-
-        // Reconnect completes: the event loop clears `reconnect_pending` and
-        // force-idles the agent, then dispatches DrainQueue. Mirror that here.
-        app.reconnect_pending = false;
-        app.agents.get_mut(&id).unwrap().session.state = AgentState::Idle;
-
-        let effects = dispatch(Action::DrainQueue, &mut app);
-        assert_eq!(
-            effects.len(),
-            1,
-            "queued prompt must drain once reconnect clears"
-        );
-        assert!(matches!(&effects[0], Effect::SendPrompt { .. }));
-        assert!(app.agents[&id].session.state.is_turn_running());
-        assert_eq!(
-            app.agents[&id].session.queue_len(),
-            0,
-            "queue must be empty after the post-reconnect drain"
-        );
     }
 
     #[test]

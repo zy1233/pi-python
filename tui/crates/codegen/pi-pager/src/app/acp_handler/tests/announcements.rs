@@ -35,22 +35,18 @@
         );
     }
 
-    /// The watermark is connection-scoped: the event loop's leader-reconnected
-    /// branch resets it to 0, so a re-elected shell's fresh (possibly lower)
-    /// gen sequence applies, and a duplicate broadcast seed copy stays a no-op.
+    /// The first push (gen 1, watermark 0) applies through the notification
+    /// path, and a duplicate delivery of the same gen stays a no-op.
     #[test]
-    fn announcements_update_applies_after_reconnect_watermark_reset() {
+    fn announcements_update_applies_first_push_and_ignores_duplicate_delivery() {
         let mut app = make_app_with_agent("sess-ann");
-        // Watermark from the previous connection, ahead of the new shell's gens.
-        app.announcements_last_gen = 9_999_999_999;
-        // The leader-reconnected branch's connection-scoped reset.
-        app.announcements_last_gen = 0;
+        assert_eq!(app.announcements_last_gen, 0);
 
         let first = handle_ext_notification(
             &announcements_update_notif(1, &[critical_announcement("fresh")]),
             &mut app,
         );
-        assert!(first, "gen 1 must apply after the reconnect reset");
+        assert!(first, "gen 1 must apply on a fresh watermark");
         assert_eq!(app.announcements_last_gen, 1);
         assert!(
             app.active_announcements
@@ -59,7 +55,7 @@
             "pushed announcement must land"
         );
 
-        // The per-client seed broadcast can deliver the same gen twice.
+        // A broadcast can deliver the same gen twice.
         let dup = handle_ext_notification(
             &announcements_update_notif(1, &[critical_announcement("fresh")]),
             &mut app,

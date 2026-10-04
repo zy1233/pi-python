@@ -934,16 +934,15 @@
         );
     }
 
-    /// Characterization (leader-relaunch orphan rows): a reconnect reload whose
+    /// Characterization (orphan subagent rows): a reconnect reload whose
     /// replay contains `SubagentSpawned` with NO `SubagentFinished` (the
-    /// subagent died with the old leader, or is still running on the surviving
-    /// one) leaves the row `finished == false` after the success swap — the
-    /// window finalize force-idles only the ROOT transcript, nothing resolves
-    /// or expires subagent rows. Pager-side child tracking itself stays
-    /// functional: a live child update delivered after the swap still renders
-    /// into the child view, so a post-reconnect freeze would be leader route
-    /// loss (see the `leader::server` child-route backfill tests), not pager
-    /// state.
+    /// subagent died with the old agent process, or is still running on the
+    /// surviving one) leaves the row `finished == false` after the success
+    /// swap — the window finalize force-idles only the ROOT transcript,
+    /// nothing resolves or expires subagent rows. Pager-side child tracking
+    /// itself stays functional: a live child update delivered after the swap
+    /// still renders into the child view, so a post-reconnect freeze would be
+    /// agent-side route loss, not pager state.
     #[test]
     fn reload_replayed_spawn_without_finished_keeps_unresolved_running_row() {
         let mut app = make_app_with_agent("sess-sub");

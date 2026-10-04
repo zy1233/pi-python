@@ -610,7 +610,6 @@ const CLI_CONFIG_OPTION_FIELDS: &[&str] = &[
     "installer",
     "npm_registry",
     "channel",
-    "use_leader",
     "show_tips",
     "worktree_type",
     "session_registry",
@@ -654,6 +653,8 @@ fn cli_config_serializes_only_some_fields() {
 fn merge_section_cli_only_updates_set_fields_preserves_unmodeled() {
     let mut table = TomlMap::new();
     let mut cli = TomlMap::new();
+    // A key the schema no longer models (the retired `use_leader`) must
+    // survive a merge rather than being dropped from the user's file.
     cli.insert("use_leader".into(), TomlValue::Boolean(true));
     cli.insert("show_tips".into(), TomlValue::Boolean(false));
     cli.insert(
@@ -679,15 +680,7 @@ fn merge_section_cli_only_updates_set_fields_preserves_unmodeled() {
         c.get("custom_pager_key").and_then(|v| v.as_str()),
         Some("keep-this")
     );
-    assert_cli_option_fields_absent(
-        c,
-        &[
-            "auto_update",
-            "dismissed_version",
-            "use_leader",
-            "show_tips",
-        ],
-    );
+    assert_cli_option_fields_absent(c, &["auto_update", "dismissed_version", "show_tips"]);
 }
 #[test]
 fn merge_section_models_only_updates_set_fields_preserves_others() {
@@ -789,21 +782,6 @@ fn merge_section_cli_auto_update_writes_under_cli_section() {
         c.get("auto_update").and_then(|v| v.as_bool()),
         Some(false),
         "set_auto_update must persist Some(false) at `[cli].auto_update`"
-    );
-}
-#[test]
-fn merge_section_cli_use_leader_writes_under_cli_section() {
-    let mut table = TomlMap::new();
-    let cfg = crate::agent::config::CliConfig {
-        use_leader: Some(true),
-        ..Default::default()
-    };
-    merge_section(&mut table, "cli", &cfg);
-    let c = table.get("cli").unwrap().as_table().unwrap();
-    assert_eq!(
-        c.get("use_leader").and_then(|v| v.as_bool()),
-        Some(true),
-        "Some(true) must round-trip to `[cli].use_leader`"
     );
 }
 /// Verify `Option<bool>` + `skip_serializing_if` prevents one

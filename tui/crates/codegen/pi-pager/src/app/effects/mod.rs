@@ -7,7 +7,6 @@
 //! back through dispatch.
 mod helpers;
 use super::actions;
-use super::session_title_resolve::worktree_resume_failure_message;
 #[allow(unused_imports)]
 use super::{agent, dispatch};
 pub use helpers::ConversationsPartial;
@@ -21,7 +20,7 @@ pub(crate) use helpers::{
 #[cfg(feature = "local-workspace")]
 pub(crate) use helpers::reject_non_fs_only_advertised_tools;
 use helpers::*;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use agent_client_protocol as acp;
 use tokio::task::JoinSet;
 use pi_acp_lib::{AcpAgentTx, acp_send};
@@ -38,7 +37,7 @@ use actions::PermissionModePersist;
 use agent::AgentId;
 use crate::unified_log as ulog;
 use pi_shell::sampling::error::http_status_from_error;
-use pi_shell::session::{ExtMethodResult, SessionInfoResponse};
+use pi_shell::session::SessionInfoResponse;
 fn apply_permission_mode_override(
     meta: &mut Option<acp::Meta>,
     permission_mode_override: Option<PermissionModeKind>,
@@ -514,13 +513,6 @@ pub(crate) fn execute(
                         seq,
                     }
                 });
-        }
-        Effect::FetchRoster => {
-            tasks.spawn(async move {
-                TaskResult::RosterLoaded {
-                    sessions: Vec::new(),
-                }
-            });
         }
         Effect::FetchDashboardSessions => {
             let tx = acp_tx.clone();

@@ -10,7 +10,6 @@ pub(super) fn log_dashboard_opened(app: &AppView) {
     log_event(DashboardOpened {
         agents: app.agents.len(),
         subagents,
-        leader_mode: app.leader_mode,
     });
 }
 

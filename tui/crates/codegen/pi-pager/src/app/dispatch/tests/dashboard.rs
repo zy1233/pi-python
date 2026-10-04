@@ -1440,26 +1440,20 @@ fn dashboard_open_detects_standalone_grok_worktree() {
         Some(crate::test_util::collapsed_path_display(&main.path).as_str())
     );
 }
-/// Leader-mode independence: opening the dashboard works even when NOT in
-/// leader mode. The dashboard renders local sessions regardless; leader
-/// mode only adds the roster poll. Every entry point funnels through
-/// `Action::OpenDashboard`, so this covers `/dashboard`, `Ctrl+\`,
-/// `grok dashboard`, and the startup hook.
+/// Opening the dashboard needs nothing beyond the local sessions. Every entry
+/// point funnels through `Action::OpenDashboard`, so this covers `/dashboard`,
+/// `Ctrl+\`, and the startup hook.
 #[serial_test::serial(GROK_AGENT_DASHBOARD)]
 #[test]
-fn dashboard_open_works_without_leader() {
+fn dashboard_open_creates_dashboard_state() {
     let mut app = test_app_with_agent();
-    app.leader_mode = false;
     app.active_view = ActiveView::Agent(AgentId(0));
     let _ = dispatch_open_dashboard(&mut app);
     assert!(
         matches!(app.active_view, ActiveView::AgentDashboard),
-        "dashboard must open outside leader mode",
+        "dashboard must open",
     );
-    assert!(
-        app.dashboard.is_some(),
-        "dashboard state should be created outside leader mode",
-    );
+    assert!(app.dashboard.is_some(), "dashboard state should be created");
 }
 /// Build a dormant roster entry for the local idle-session tests.
 fn idle_roster_entry(session_id: &str, title: &str) -> crate::app::roster::RosterEntry {
@@ -1477,103 +1471,41 @@ fn idle_roster_entry(session_id: &str, title: &str) -> crate::app::roster::Roste
         origin: crate::app::roster::RosterOrigin::default(),
     }
 }
-/// Without a leader there is no live roster to poll, so opening the
-/// dashboard must kick off a fetch of the local on-disk idle sessions so
-/// the view isn't empty.
+/// Opening the dashboard must kick off a fetch of the local on-disk idle
+/// sessions (the only roster source), and show "Loading sessions" until the
+/// fetch lands so the view isn't mistaken for empty.
 #[serial_test::serial(GROK_AGENT_DASHBOARD)]
 #[test]
-fn dashboard_open_without_leader_fetches_local_sessions() {
+fn dashboard_open_fetches_local_sessions() {
     let mut app = test_app_with_agent();
-    app.leader_mode = false;
     app.active_view = ActiveView::Agent(AgentId(0));
     let effects = dispatch_open_dashboard(&mut app);
     assert!(
         effects
             .iter()
             .any(|e| matches!(e, Effect::FetchDashboardSessions)),
-        "non-leader dashboard open must fetch the local idle-session list",
-    );
-}
-/// In leader mode the live FleetView roster is the source, so opening must
-/// fetch that roster immediately (not wait for the poll tick) and must NOT
-/// also fetch the local on-disk list.
-#[serial_test::serial(GROK_AGENT_DASHBOARD)]
-#[test]
-fn dashboard_open_with_leader_fetches_roster_not_local_sessions() {
-    let mut app = test_app_with_agent();
-    app.leader_mode = true;
-    app.active_view = ActiveView::Agent(AgentId(0));
-    let effects = dispatch_open_dashboard(&mut app);
-    assert!(
-        effects.iter().any(|e| matches!(e, Effect::FetchRoster)),
-        "leader dashboard open must fetch the live roster immediately",
-    );
-    assert!(
-        !effects
-            .iter()
-            .any(|e| matches!(e, Effect::FetchDashboardSessions)),
-        "leader dashboard open must not fetch the local on-disk list",
+        "dashboard open must fetch the local idle-session list",
     );
     assert!(
         app.dashboard_sessions_loading,
-        "leader open must show Loading sessions until RosterLoaded",
+        "open must show Loading sessions until DashboardSessionsLoaded",
     );
 }
+/// `DashboardSessionsLoaded` stores the local idle sessions and clears the
+/// loading flag.
 #[test]
-fn roster_loaded_clears_dashboard_sessions_loading() {
+fn dashboard_sessions_loaded_feeds_roster() {
     let mut app = test_app();
-    app.leader_mode = true;
     app.dashboard_sessions_loading = true;
-    let _ = dispatch(
-        Action::TaskComplete(TaskResult::RosterLoaded {
-            sessions: vec![idle_roster_entry("sess-live", "Working agent")],
-        }),
-        &mut app,
-    );
-    assert!(!app.dashboard_sessions_loading);
-    assert_eq!(app.leader_roster.len(), 1);
-}
-#[test]
-fn roster_failed_clears_dashboard_sessions_loading() {
-    let mut app = test_app();
-    app.leader_mode = true;
-    app.dashboard_sessions_loading = true;
-    let _ = dispatch(
-        Action::TaskComplete(TaskResult::RosterFailed {
-            error: "timeout".into(),
-        }),
-        &mut app,
-    );
-    assert!(!app.dashboard_sessions_loading);
-}
-/// `DashboardSessionsLoaded` stores the local idle sessions, and
-/// `dashboard_roster()` surfaces them when not in leader mode.
-#[test]
-fn dashboard_sessions_loaded_feeds_non_leader_roster() {
-    let mut app = test_app();
-    app.leader_mode = false;
     let _ = dispatch(
         Action::TaskComplete(TaskResult::DashboardSessionsLoaded {
             sessions: vec![idle_roster_entry("sess-idle", "Fix login")],
         }),
         &mut app,
     );
+    assert!(!app.dashboard_sessions_loading);
     assert_eq!(app.dashboard_local_sessions.len(), 1);
-    let roster = app.dashboard_roster();
-    assert_eq!(roster.len(), 1, "non-leader roster uses local sessions");
-    assert_eq!(roster[0].session_id, "sess-idle");
-}
-/// `dashboard_roster()` switches source on `leader_mode`: the live leader
-/// roster in leader mode, the local idle-session list otherwise.
-#[test]
-fn dashboard_roster_switches_on_leader_mode() {
-    let mut app = test_app();
-    app.leader_roster = vec![idle_roster_entry("leader-sess", "Leader")];
-    app.dashboard_local_sessions = vec![idle_roster_entry("local-sess", "Local")];
-    app.leader_mode = true;
-    assert_eq!(app.dashboard_roster()[0].session_id, "leader-sess");
-    app.leader_mode = false;
-    assert_eq!(app.dashboard_roster()[0].session_id, "local-sess");
+    assert_eq!(app.dashboard_local_sessions[0].session_id, "sess-idle");
 }
 /// Seed a model into the app catalog for `/model` tests.
 fn seed_model(app: &mut AppView, id: &str, name: &str) {
@@ -3174,7 +3106,7 @@ fn insert_second_agent(app: &mut AppView) -> AgentId {
     id
 }
 /// Multi-agent: Ctrl+\ out of the dashboard restores the agent we left,
-/// not insertion-order first (empty older sessions under leader mode).
+/// not insertion-order first (older sessions may still be empty).
 #[serial_test::serial(GROK_AGENT_DASHBOARD)]
 #[test]
 fn dashboard_ctrl_backslash_returns_to_same_agent() {
@@ -3344,7 +3276,7 @@ fn dashboard_overlay_stop_closes_session_and_returns_to_dashboard() {
         effects
             .iter()
             .any(|e| matches!(e, Effect::UnregisterActiveSession { .. })),
-        "close must unregister the session from the leader roster",
+        "close must unregister the session from the active-session registry",
     );
     assert_eq!(
         app.dashboard.as_ref().unwrap().error_toast.as_deref(),
@@ -6234,7 +6166,6 @@ fn dashboard_attach_roster_focuses_existing_local_agent() {
 #[test]
 fn dashboard_attach_conversation_roster_row_loads_as_chat() {
     let mut app = test_app();
-    app.leader_mode = false;
     let mut entry = idle_roster_entry("conv-dash-1", "Backend chat");
     entry.cwd = String::new();
     entry.origin.kind = "conversation".into();
@@ -6262,7 +6193,6 @@ fn dashboard_attach_conversation_roster_row_loads_as_chat() {
 #[test]
 fn dashboard_attach_build_roster_row_keeps_disk_resume() {
     let mut app = test_app();
-    app.leader_mode = false;
     app.dashboard_local_sessions = vec![idle_roster_entry("build-dash-1", "Fix login")];
     let effects = dispatch_dashboard_attach(
         &mut app,

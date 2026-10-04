@@ -28,8 +28,6 @@ pub enum AgentMode {
     Stdio,
     /// Server mode - WebSocket server for external clients
     Serve,
-    /// Leader mode - IPC server for follower clients
-    Leader,
     /// Generic/unknown mode
     #[default]
     Generic,
@@ -809,8 +807,6 @@ pub struct CliConfig {
     pub npm_registry: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub channel: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub use_leader: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub show_tips: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]

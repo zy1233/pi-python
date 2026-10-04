@@ -23,9 +23,9 @@ fn demote_dispatch_keeps_turn_session_and_execute_guards() {
     assert!(dispatch(Action::DemoteToBackground, &mut app).is_empty());
 }
 
-/// Regression (leader mode): a queued prompt's parked `session/prompt` RPC
+/// Regression (Steer): a queued prompt's parked `session/prompt` RPC
 /// can resolve as an *error* — e.g. its `respond_to` is dropped on the
-/// leader when the prompt is removed from the shared queue, surfacing as
+/// agent when the prompt is removed from the shared queue, surfacing as
 /// `Internal error: "session failed to respond"`. An `acp::Error` carries
 /// no `promptId`, so before the Err-arm gate this error was misattributed
 /// to the running turn and rendered as a spurious "Turn failed", detonating
@@ -34,6 +34,7 @@ fn demote_dispatch_keeps_turn_session_and_execute_guards() {
 /// running turn is discarded; the running turn is left untouched.
 #[test]
 fn queued_prompt_rpc_error_does_not_kill_running_turn() {
+    let _steer = SteerFollowUp::enter();
     let mut app = test_app_with_agent();
     let id = AgentId(0);
 
@@ -50,7 +51,7 @@ fn queued_prompt_rpc_error_does_not_kill_running_turn() {
     );
 
     // Second prompt typed while running → immediate server-authoritative
-    // send (queued at the leader). Capture its prompt_id.
+    // send (queued at the agent). Capture its prompt_id.
     let effects = dispatch(Action::SendPrompt("queued".into()), &mut app);
     let queued_pid = match &effects[0] {
         Effect::SendPrompt { prompt_id, .. } => prompt_id.clone(),

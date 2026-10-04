@@ -362,7 +362,7 @@ Grok discovers plugins from these locations, in priority order. The `.claude/plu
 | `~/.grok/plugins/` | User, every project | Trusted automatically |
 | `[plugins].paths` (config) | Custom directories you add | Depends on location |
 
-The `_meta.pluginDirs` field on the `session/new` and `session/load` requests loads plugins for a single session; because the caller supplies the directory, those plugins are trusted automatically and do not persist after the session. `--plugin-dir` is the process-wide equivalent for a dedicated `grok agent … stdio` process, repeatable (`grok agent --no-leader --plugin-dir A --plugin-dir B stdio`), and ignored in leader mode, where the shared leader discovers its own plugins.
+The `_meta.pluginDirs` field on the `session/new` and `session/load` requests loads plugins for a single session; because the caller supplies the directory, those plugins are trusted automatically and do not persist after the session. `--plugin-dir` is the process-wide equivalent for a dedicated `grok agent … stdio` process, repeatable (`grok agent --plugin-dir A --plugin-dir B stdio`).
 
 ### Environment variables in plugin hooks
 

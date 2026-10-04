@@ -25,14 +25,13 @@ fn sent_texts(effects: &[Effect]) -> Vec<String> {
         .collect()
 }
 
-/// Force the local drip-feed send path so a mid-turn Enter enqueues locally
-/// instead of the server-authoritative send.
+/// Force the local drip-feed send path (`follow_up_behavior = queue`) so a
+/// mid-turn Enter enqueues locally instead of the server-authoritative send.
 struct LocalQueueMode {
     previous: crate::appearance::FollowUpBehavior,
 }
 impl LocalQueueMode {
-    fn enter(app: &mut AppView) -> Self {
-        app.leader_mode = false;
+    fn enter() -> Self {
         let previous = crate::appearance::cache::load_follow_up_behavior();
         crate::appearance::cache::set_follow_up_behavior(
             crate::appearance::FollowUpBehavior::Queue,
@@ -51,7 +50,7 @@ impl Drop for LocalQueueMode {
 #[test]
 fn send_while_waiting_goes_through_when_btw_overlay_is_open() {
     let mut app = running_turn_app();
-    let _mode = LocalQueueMode::enter(&mut app);
+    let _mode = LocalQueueMode::enter();
     {
         let agent = app.agents.get_mut(&AgentId(0)).unwrap();
         simulate_task_output_wait(agent, "task-1");
@@ -126,7 +125,7 @@ fn btw_response_does_not_flush_an_unrelated_queued_prompt() {
 #[test]
 fn send_while_waiting_releases_the_new_prompt_not_an_older_queued_row() {
     let mut app = running_turn_app();
-    let _mode = LocalQueueMode::enter(&mut app);
+    let _mode = LocalQueueMode::enter();
     enqueue_local(&mut app, AgentId(0), "queued while thinking");
     {
         let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -152,7 +151,7 @@ fn send_while_waiting_releases_the_new_prompt_not_an_older_queued_row() {
 #[test]
 fn send_while_thinking_stays_queued() {
     let mut app = running_turn_app();
-    let _mode = LocalQueueMode::enter(&mut app);
+    let _mode = LocalQueueMode::enter();
 
     let effects = dispatch_send_prompt(&mut app, "later".into());
 

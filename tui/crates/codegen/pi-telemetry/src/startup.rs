@@ -27,7 +27,6 @@ pub enum StartupPhase {
     Bootstrap,
     ModelCatalog,
     WorkerSpawn,
-    LeaderConnect,
     AcpInitialize,
     EagerAuth,
     AppInit,
@@ -85,7 +84,6 @@ pub enum Owner {
 #[serde(rename_all = "snake_case")]
 pub enum AgentKind {
     Embedded,
-    Leader,
 }
 
 impl AgentKind {
@@ -486,8 +484,8 @@ pub(crate) fn reset_for_tests() {
     *subphases() = SubphaseTimings::default();
 }
 
-/// Lazily installs an agent-owned timer, covering the standalone leader
-/// and agent server; a no-op once startup is done.
+/// Lazily installs an agent-owned timer, covering the standalone agent
+/// server; a no-op once startup is done.
 pub fn enter(phase: StartupPhase) {
     if DONE.load(Ordering::Relaxed) {
         return;

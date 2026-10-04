@@ -1,6 +1,6 @@
 //! Dedicated-thread reader for the ACP stdio transport's standard input.
 //!
-//! Every ACP client (VS Code extension, grok-desktop, the leader bridge) drives
+//! Every ACP client (VS Code extension, grok-desktop, the pager) drives
 //! the agent over a **persistent, bidirectional** newline-delimited JSON-RPC
 //! stream on stdio: it writes requests on the child's stdin and reads responses
 //! on stdout, keeping **stdin open for the whole session**.
@@ -33,11 +33,9 @@
 //! duplicate** of the real stdin handle and then points the process's standard
 //! input at **`NUL`**. The reader keeps reading the client's bytes through its
 //! private handle, while every *other* `std::io::stdin()` read in the process
-//! observes immediate EOF instead of deadlocking on the lock. This mirrors what
-//! already makes leader mode safe (the agent subprocess is spawned with
-//! `stdin = NUL`, so its stray reads EOF instantly). Unix keeps reading
-//! `std::io::stdin()` directly — it has no second stdin reader on these paths
-//! and the extra FFI/`dup` would add risk for no benefit.
+//! observes immediate EOF instead of deadlocking on the lock. Unix keeps
+//! reading `std::io::stdin()` directly — it has no second stdin reader on these
+//! paths and the extra FFI/`dup` would add risk for no benefit.
 //!
 //! # Escaped-slash normalization (acp 0.6 wire workaround)
 //!
@@ -71,8 +69,8 @@ const STDIN_LINE_CHANNEL_DEPTH: usize = 64;
 ///
 /// The channel closes (so [`recv`](mpsc::Receiver::recv) returns `None`) when
 /// stdin reaches EOF, the read fails, or the [`Receiver`](mpsc::Receiver) is
-/// dropped. The reader is meant to be the **sole** stdin consumer in the
-/// agent-stdio / leader-bridge paths; on Windows it enforces that by redirecting
+/// dropped. The reader is meant to be the **sole** stdin consumer in an
+/// agent-stdio process; on Windows it enforces that by redirecting
 /// the process's standard input to `NUL` so stray readers can't deadlock on it
 /// (see the [module docs](self)).
 pub fn spawn_stdin_line_reader() -> mpsc::Receiver<Vec<u8>> {

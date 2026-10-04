@@ -826,7 +826,7 @@ pub struct AgentView {
     /// plain prompt was queued server-side while a turn was running.
     pub shared_queue: Vec<crate::app::prompt_queue::QueueEntryWire>,
     /// True when this session was opened via `session/load` (session picker
-    /// resume, `/resume`, or a leader dashboard roster attach) rather than
+    /// resume, `/resume`, or a dashboard roster attach) rather than
     /// created locally — i.e. this client is *viewing* a session it did not
     /// start. While set, the ACP gate adopts the prompt id of incoming live
     /// `session/update` deltas (the driver's turn) instead of dropping them,
@@ -2342,6 +2342,31 @@ pub(crate) mod test_fixtures {
     use crate::scrollback::state::ScrollbackState;
     use agent_client_protocol as acp;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    /// Scopes `[ui].follow_up_behavior` to `Steer` for one test: a prompt or
+    /// bash command typed while a turn runs is then sent to the agent at once
+    /// (server-authoritative queue echo) instead of joining the local
+    /// drip-feed queue, which is the default. Restores the previous behavior
+    /// on drop, because the cache is thread-local and a `--test-threads=1` run
+    /// reuses one thread across tests.
+    pub(crate) struct SteerFollowUp {
+        previous: crate::appearance::FollowUpBehavior,
+    }
+    impl SteerFollowUp {
+        pub(crate) fn enter() -> Self {
+            let previous = crate::appearance::cache::load_follow_up_behavior();
+            crate::appearance::cache::set_follow_up_behavior(
+                crate::appearance::FollowUpBehavior::Steer,
+            );
+            Self { previous }
+        }
+    }
+    impl Drop for SteerFollowUp {
+        fn drop(&mut self) {
+            crate::appearance::cache::set_follow_up_behavior(self.previous);
+        }
+    }
+
     pub(crate) fn make_followup_permission_state()
     -> crate::views::permission_view::PermissionViewState {
         let (response_tx, _rx) = tokio::sync::oneshot::channel();

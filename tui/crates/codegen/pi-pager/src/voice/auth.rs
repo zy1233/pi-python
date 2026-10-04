@@ -4,9 +4,8 @@
 //! and attributes per-user billing for OAuth, so the voice channel just reuses
 //! the same bearer the agent uses for chat — no separate env var.
 //!
-//! Resolved per request: the agent's refreshing manager in direct-spawn mode,
-//! or a non-refreshing one that adopts the agent's rotated `auth.json` token
-//! under the file lock in leader mode (see [`crate::acp`]).
+//! Resolved per request from the agent's refreshing manager (see
+//! [`crate::acp`]).
 
 use std::future::Future;
 use std::pin::Pin;

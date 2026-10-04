@@ -111,10 +111,7 @@ use mcp::{
     handle_mcp_servers_updated, handle_mcp_tools_changed, push_server_status_enabled,
 };
 #[allow(unused_imports)]
-use settings::{
-    handle_announcements_update, handle_models_update, handle_sessions_changed,
-    handle_settings_update,
-};
+use settings::{handle_announcements_update, handle_models_update, handle_settings_update};
 
 // Test-only bare-name surface for `tests/*` (`use super::*`).
 #[cfg(test)]
@@ -732,7 +729,6 @@ fn dispatch_legacy_ext_notification(notif: &acp::ExtNotification, app: &mut AppV
         m if m.ends_with("/task_completed") => handle_task_completed(notif, app),
         m if m.ends_with("/models/update") => handle_models_update(notif, app),
         m if m.ends_with("/settings/update") => handle_settings_update(notif, app),
-        m if m.ends_with("/sessions/changed") => handle_sessions_changed(notif, app),
         m if m.ends_with("/queue/changed") => handle_queue_changed(notif, app),
         m if m.ends_with("/session/prompt_complete") => handle_prompt_complete(notif, app),
         m if m.ends_with("/session/interjection") => handle_interjection(notif, app),

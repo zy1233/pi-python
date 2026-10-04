@@ -35,9 +35,9 @@ pub enum DashboardRowId {
         parent: AgentId,
         child_session_id: String,
     },
-    /// A leader-roster-only row: a session hosted by the leader (or a
-    /// remote host) that this client is NOT locally attached to. Keyed
-    /// by the roster `session_id`. Not locally controllable.
+    /// A roster-only row: an on-disk session that this process has no
+    /// live agent view for. Keyed by the roster `session_id`. Not locally
+    /// controllable until it is attached.
     Roster {
         session_id: String,
     },

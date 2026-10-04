@@ -1,5 +1,6 @@
 #![cfg_attr(rustfmt, rustfmt::skip)]
     use super::*;
+    use crate::app::agent_view::test_fixtures::SteerFollowUp;
 
     /// The pager reconciles the authoritative shared prompt queue from the
  /// `legacy ext RPC` broadcast, and an empty broadcast clears it.
@@ -152,7 +153,9 @@
     /// Arm the rapid double-Enter race: a bash command sent mid-turn (its
     /// server row still an optimistic echo) followed immediately by Enter on
     /// the empty composer. Returns the echo's prompt id after asserting the
-    /// send-now was PARKED (not fired) against the unconfirmed row.
+    /// send-now was PARKED (not fired) against the unconfirmed row. The caller
+    /// must hold a [`SteerFollowUp`]: only Steer sends a mid-turn bash command
+    /// server-authoritatively.
     fn park_send_now_on_optimistic_bash_row(app: &mut AppView) -> String {
         use crate::app::actions::{Action, Effect};
         use crate::app::app_view::InputOutcome;
@@ -208,6 +211,7 @@
     fn parked_send_now_fires_on_confirming_broadcast() {
         use crate::app::actions::Effect;
 
+        let _steer = SteerFollowUp::enter();
         let mut app = make_app_with_agent("sess-1");
         let echo_id = park_send_now_on_optimistic_bash_row(&mut app);
         assert!(
@@ -252,6 +256,7 @@
     fn parked_send_now_clears_when_row_confirmed_running() {
         use crate::app::actions::Effect;
 
+        let _steer = SteerFollowUp::enter();
         let mut app = make_app_with_agent("sess-1");
         let echo_id = park_send_now_on_optimistic_bash_row(&mut app);
 
@@ -276,6 +281,7 @@
     fn parked_send_now_survives_unrelated_broadcast() {
         use crate::app::actions::Effect;
 
+        let _steer = SteerFollowUp::enter();
         let mut app = make_app_with_agent("sess-1");
         let echo_id = park_send_now_on_optimistic_bash_row(&mut app);
 
@@ -576,7 +582,7 @@
         assert!(!agent.attached_as_viewer);
     }
 
-    /// FIFO handoff: the leader's running broadcast for the next prompt
+    /// FIFO handoff: the agent's running broadcast for the next prompt
     /// can arrive BEFORE the previous turn's PromptResponse. The pager must NOT
     /// corrupt the in-flight turn — it stashes the adoption and applies it once
     /// PromptResponse clears `current_prompt_id`.
@@ -585,6 +591,7 @@
         use crate::app::dispatch::dispatch;
         use crate::app::actions::{Action, Effect, TaskResult};
 
+        let _steer = SteerFollowUp::enter();
         let mut app = make_app_with_agent("sess-1");
         let id = AgentId(0);
 
@@ -612,7 +619,7 @@
         };
         assert_eq!(app.agents[&id].session.queue_len(), 0);
 
-        // Leader drains p2 and broadcasts running=p2 BEFORE p1's PromptResponse.
+        // The agent drains p2 and broadcasts running=p2 BEFORE p1's PromptResponse.
         assert!(handle_queue_changed(
             &queue_changed_running("sess-1", &[], Some(&pid_second)),
             &mut app
@@ -656,7 +663,7 @@
         );
     }
 
-    /// Regression: in the FIFO handoff the leader's user-echo (no `promptId`)
+    /// Regression: in the FIFO handoff the agent's user-echo (no `promptId`)
     /// arrives before the deferred turn-start shim arms `expect_user_echo`, so
     /// without arming it at stash time the 2nd queued prompt renders twice.
     #[test]
@@ -664,7 +671,7 @@
         use crate::app::dispatch::dispatch;
         use crate::app::actions::{Action, Effect, TaskResult};
 
-        // A user-echo as the leader emits it: a text block, meta with no `promptId`.
+        // A user-echo as the agent emits it: a text block, meta with no `promptId`.
         fn user_echo(app: &mut AppView, text: &str) {
             let (tx, _rx) = tokio::sync::oneshot::channel();
             let request = acp::SessionNotification::new(
@@ -697,6 +704,7 @@
                 .count()
         }
 
+        let _steer = SteerFollowUp::enter();
         let mut app = make_app_with_agent("sess-1");
         let id = AgentId(0);
 
@@ -713,7 +721,7 @@
             other => panic!("expected immediate SendPrompt, got {other:?}"),
         };
 
-        // Leader broadcasts running=p2 before p1's PromptResponse, then p2's echo.
+        // The agent broadcasts running=p2 before p1's PromptResponse, then p2's echo.
         assert!(handle_queue_changed(
             &queue_changed_running("sess-1", &[], Some(&pid_second)),
             &mut app
@@ -1746,36 +1754,6 @@
         assert!(agent.session.current_prompt_id.is_none());
         assert!(agent.pending_adoption_updates.is_empty());
         assert_eq!(tool_call_block_count(agent), 0, "nothing flushed");
-    }
-
-    /// The `reconnect_pending` early return discards the dropped adoption's buffer.
-    #[test]
-    fn reconnect_pending_response_discards_adoption_buffer() {
-        let mut app = app_with_running_p1_and_stashed_b1();
-        let id = AgentId(0);
-        send_tool_call_update(&mut app, "b1", "bash-mode-1", Some("sess-1-7"));
-
-        app.reconnect_pending = true;
-        prompt_response(&mut app, "p1");
-
-        let agent = app.agents.get(&id).unwrap();
-        assert!(
-            !app.pending_running_adoptions.contains_key(&id),
-            "the adoption is dropped on the reconnect teardown"
-        );
-        assert!(
-            agent.pending_adoption_updates.is_empty(),
-            "its buffered updates must be discarded, not orphaned"
-        );
-        assert_eq!(
-            agent.last_seen_event_id, None,
-            "the cursor never advanced for the unapplied updates — replay heals"
-        );
-        assert_eq!(
-            tool_call_block_count(agent),
-            0,
-            "nothing was applied out-of-band"
-        );
     }
 
     /// `adopt_running_prompt` must not leave `start_turn`'s user-echo skip

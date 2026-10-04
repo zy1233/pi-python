@@ -110,31 +110,9 @@ pub(super) fn dispatch_send_prompt_now(
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };
-    let reconnect_pending = app.reconnect_pending;
     let Some(agent) = app.agents.get_mut(&id) else {
         return vec![];
     };
-
-    // Mid-outage guard (mirrors the plain prompt path): the producers already
-    // consumed the payload (composer text / queue row), so requeue it locally
-    // instead of firing into a dead channel and losing the message.
-    if reconnect_pending {
-        let queue_id = agent.session.next_queue_id;
-        agent.session.next_queue_id += 1;
-        agent
-            .session
-            .pending_prompts
-            .push_front(crate::app::agent::QueuedPrompt {
-                images,
-                ..crate::app::agent::QueuedPrompt::plain(
-                    queue_id,
-                    &text,
-                    crate::app::agent::QueueEntryKind::Prompt,
-                )
-            });
-        agent.show_toast("Reconnecting, please wait...");
-        return vec![];
-    }
 
     // Submitting retires any edit-contextual ephemeral tip.
     agent.ephemeral_tip.clear_on_submit();

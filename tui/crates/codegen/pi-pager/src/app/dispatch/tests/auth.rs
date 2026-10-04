@@ -194,11 +194,12 @@ fn cta_mcps_loaded_later_needs_auth_opens_handoff() {
 
 // ── agent-bound kinds (bash) ─────────
 
-/// A bash command typed while a turn is RUNNING takes the
+/// With Steer, a bash command typed while a turn is RUNNING takes the
 /// server-authoritative immediate path (Effect + optimistic echo, no local
 /// queue entry).
 #[test]
 fn bash_while_running_is_server_authoritative() {
+    let _steer = SteerFollowUp::enter();
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;

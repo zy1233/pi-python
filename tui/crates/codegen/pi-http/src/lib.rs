@@ -47,16 +47,6 @@ const _: () = assert!(
     "SETTINGS_REAPPLY_TIMEOUT must exceed STARTUP_FETCH_TIMEOUT * (1 + MAX_ATTEMPTS)"
 );
 
-/// Lower bound for a client's leader-connect timeout: a slow-but-valid boot
-/// (bounded startup auth plus the rest of leader startup and the connect
-/// handshake) must never be aborted. The pager bounds its connect by this value,
-/// reached via the shell's `http` re-export.
-pub const MIN_CLIENT_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
-const _: () = assert!(
-    MIN_CLIENT_CONNECT_TIMEOUT.as_millis() >= 2 * STARTUP_AUTH_TIMEOUT.as_millis(),
-    "MIN_CLIENT_CONNECT_TIMEOUT must stay >= 2x STARTUP_AUTH_TIMEOUT"
-);
-
 /// Startup span timer, local to this crate.
 ///
 /// Replaces `pi_shell::instrumentation_timer!`, which cannot be referenced

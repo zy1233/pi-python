@@ -806,7 +806,7 @@ pub struct AgentSession {
     /// drops the in-flight RPC — else a lost completion jams the queue forever.
     pub model_switch_pending: bool,
     /// Model the user chose this session via `/model` / the model picker, or
-    /// the last successfully applied live remote `ModelChanged` (leader-mode
+    /// the last successfully applied live remote `ModelChanged` (multi-client
     /// fan-out). Survives reconnect (`begin_session_reload` does **not** clear
     /// it). History-replay silent-revert of a prior choice is suppressed on the
     /// shell side via `ReconnectState::user_selected_model`; the pager still

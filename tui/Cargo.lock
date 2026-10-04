@@ -8848,7 +8848,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
- "clap",
  "futures-util",
  "libc",
  "pi-acp-lib",
@@ -8859,10 +8858,8 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
- "tokio-tungstenite 0.27.0",
  "tokio-util",
  "tracing",
- "tracing-subscriber",
  "url",
 ]
 

@@ -1280,7 +1280,7 @@ impl AgentView {
     /// Show or hide the `/dashboard` slash command in this agent's registry.
     /// Driven by the dashboard feature flag
     /// (`crate::views::dashboard::dashboard_enabled()`) at agent-creation
-    /// time — independent of leader mode.
+    /// time.
     pub fn set_dashboard_visible(&mut self, visible: bool) {
         self.prompt
             .slash_controller

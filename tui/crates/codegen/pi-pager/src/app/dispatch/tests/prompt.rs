@@ -1053,7 +1053,16 @@ fn chip_submit_while_enqueued_clears_follow_up_chips() {
 }
 
 #[test]
-fn send_prompt_while_running_queues_without_drain() {
+fn send_prompt_while_running_sends_to_server_when_follow_up_steer() {
+    struct ResetFollowUp(crate::appearance::FollowUpBehavior);
+    impl Drop for ResetFollowUp {
+        fn drop(&mut self) {
+            crate::appearance::cache::set_follow_up_behavior(self.0);
+        }
+    }
+    let _reset = ResetFollowUp(crate::appearance::cache::load_follow_up_behavior());
+    crate::appearance::cache::set_follow_up_behavior(crate::appearance::FollowUpBehavior::Steer);
+
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     // Simulate a running turn.
@@ -1061,9 +1070,10 @@ fn send_prompt_while_running_queues_without_drain() {
 
     let effects = dispatch(Action::SendPrompt("queued".into()), &mut app);
 
-    // A plain prompt typed while a turn is running is sent to the
-    // agent IMMEDIATELY (server-authoritative) rather than held in the
-    // local drip-feed queue. It does NOT start a concurrent turn.
+    // With Steer, a plain prompt typed while a turn is running is sent to
+    // the agent IMMEDIATELY (server-authoritative) rather than held in the
+    // local drip-feed queue. It does NOT start a concurrent turn and does
+    // not interject yet — the agent promotes it at the next safe point.
     assert_eq!(effects.len(), 1);
     let pid = match &effects[0] {
         Effect::SendPrompt {
@@ -1087,34 +1097,7 @@ fn send_prompt_while_running_queues_without_drain() {
 }
 
 #[test]
-fn send_prompt_while_running_queues_on_server_when_follow_up_steer() {
-    struct ResetFollowUp(crate::appearance::FollowUpBehavior);
-    impl Drop for ResetFollowUp {
-        fn drop(&mut self) {
-            crate::appearance::cache::set_follow_up_behavior(self.0);
-        }
-    }
-    let _reset = ResetFollowUp(crate::appearance::cache::load_follow_up_behavior());
-    crate::appearance::cache::set_follow_up_behavior(crate::appearance::FollowUpBehavior::Steer);
-
-    let mut app = test_app_with_agent();
-    app.leader_mode = false;
-    let id = AgentId(0);
-    app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
-
-    let effects = dispatch(Action::SendPrompt("steer me".into()), &mut app);
-    assert!(
-        matches!(
-            effects.as_slice(),
-            [Effect::SendPrompt { text, .. }] if text == "steer me"
-        ),
-        "Steer should server-queue, not interject yet, got {effects:?}"
-    );
-    assert_eq!(app.agents[&id].session.queue_len(), 0);
-}
-
-#[test]
-fn send_prompt_while_running_with_follow_up_queue_stays_local_when_not_leader() {
+fn send_prompt_while_running_with_follow_up_queue_stays_local() {
     struct ResetFollowUp(crate::appearance::FollowUpBehavior);
     impl Drop for ResetFollowUp {
         fn drop(&mut self) {
@@ -1125,7 +1108,6 @@ fn send_prompt_while_running_with_follow_up_queue_stays_local_when_not_leader() 
     crate::appearance::cache::set_follow_up_behavior(crate::appearance::FollowUpBehavior::Queue);
 
     let mut app = test_app_with_agent();
-    app.leader_mode = false;
     let id = AgentId(0);
     app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
 
@@ -1136,7 +1118,7 @@ fn send_prompt_while_running_with_follow_up_queue_stays_local_when_not_leader() 
             .all(|e| !matches!(e, Effect::SendInterject { .. })),
         "Queue must not interject mid-turn, got {effects:?}"
     );
-    // Non-leader + Queue: local drip-feed path (not server-immediate).
+    // Queue: local drip-feed path (not server-immediate).
     assert_eq!(app.agents[&id].session.queue_len(), 1);
 }
 
@@ -1155,7 +1137,6 @@ fn send_while_running_with_pending_local_and_steer_preserves_fifo() {
     crate::appearance::cache::set_follow_up_behavior(crate::appearance::FollowUpBehavior::Steer);
 
     let mut app = test_app_with_agent();
-    app.leader_mode = false;
     let id = AgentId(0);
     {
         let agent = app.agents.get_mut(&id).unwrap();
@@ -1194,7 +1175,6 @@ fn send_prompt_with_images_while_running_and_steer_stays_local() {
     crate::appearance::cache::set_follow_up_behavior(crate::appearance::FollowUpBehavior::Steer);
 
     let mut app = test_app_with_agent();
-    app.leader_mode = false;
     let id = AgentId(0);
     {
         let agent = app.agents.get_mut(&id).unwrap();
@@ -1281,11 +1261,13 @@ fn send_while_running_with_pending_local_prompt_preserves_fifo() {
 
 #[test]
 fn turn_end_drains_next_queued_prompt() {
-    // A plain prompt typed while running is sent server-authoritatively
-    // and drained by the leader, not by the local queue. The leader's
-    // `running_prompt_id` broadcast (modeled here by a stashed adoption that
-    // arrived before the previous turn's PromptResponse) is adopted by the
-    // PromptResponse handler after `finish_turn`, rendering its user block.
+    // With Steer, a plain prompt typed while running is sent
+    // server-authoritatively and drained by the agent, not by the local
+    // queue. The agent's `running_prompt_id` broadcast (modeled here by a
+    // stashed adoption that arrived before the previous turn's
+    // PromptResponse) is adopted by the PromptResponse handler after
+    // `finish_turn`, rendering its user block.
+    let _steer = SteerFollowUp::enter();
     let mut app = test_app_with_agent();
     let id = AgentId(0);
 
@@ -1308,7 +1290,7 @@ fn turn_end_drains_next_queued_prompt() {
     };
     assert_eq!(app.agents[&id].session.queue_len(), 0);
 
-    // Model the leader's running=second broadcast arriving before first's
+    // Model the agent's running=second broadcast arriving before first's
     // PromptResponse: stash the adoption (FIFO handoff race).
     app.pending_running_adoptions.insert(
         id,
@@ -1637,47 +1619,6 @@ fn turn_end_with_draft_does_not_fetch_prompt_suggestion() {
             .iter()
             .any(|e| matches!(e, Effect::FetchPromptSuggestion { .. })),
         "a draft suppresses the suggestion fetch: {effects:?}"
-    );
-}
-
-/// The reconnect-pending early return skips the fetch gate, but the turn
-/// boundary must still wipe a stale ghost — the wipe runs before the early
-/// returns.
-#[test]
-fn reconnect_pending_turn_end_still_wipes_prompt_suggestion() {
-    crate::appearance::cache::set_prompt_suggestions(true);
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    app.reconnect_pending = true;
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.session.state = AgentState::TurnRunning;
-        agent.turn_started_at = Some(std::time::Instant::now());
-        agent
-            .prompt
-            .prompt_suggestion
-            .set_suggestion_for_test("stale suggestion");
-    }
-
-    let effects = dispatch(
-        Action::TaskComplete(TaskResult::PromptResponse {
-            agent_id: id,
-            result: Ok(acp::PromptResponse::new(acp::StopReason::EndTurn)),
-            http_status: None,
-            prompt_id: None,
-        }),
-        &mut app,
-    );
-
-    assert!(
-        !effects
-            .iter()
-            .any(|e| matches!(e, Effect::FetchPromptSuggestion { .. })),
-        "reconnect-pending turn end must not fetch a suggestion: {effects:?}"
-    );
-    assert!(
-        !app.agents[&id].prompt.prompt_suggestion.has_suggestion(),
-        "turn boundary wipes the stale suggestion even on the reconnect path"
     );
 }
 
@@ -2131,6 +2072,7 @@ fn prompt_response_routes_idle_title_through_frame_pipeline() {
 
 #[test]
 fn turn_complete_notification_suppressed_when_queue_non_empty() {
+    let _steer = SteerFollowUp::enter();
     let mut app = test_app_with_agent();
     let id = AgentId(0);
 
@@ -2146,7 +2088,7 @@ fn turn_complete_notification_suppressed_when_queue_non_empty() {
         Effect::SendPrompt { prompt_id, .. } => prompt_id.clone(),
         other => panic!("expected immediate SendPrompt, got {other:?}"),
     };
-    // Model the leader's running=second broadcast arriving before first's
+    // Model the agent's running=second broadcast arriving before first's
     // PromptResponse (stashed adoption ⇒ next turn is about to start).
     app.pending_running_adoptions.insert(
         id,
@@ -2710,84 +2652,6 @@ fn bash_before_the_session_binds_is_queued_and_recorded() {
         Some("! ls -la"),
         "up-arrow history must record the command"
     );
-}
-
-// ── Reconnect-pending dispatch guards ─────────────────────────────
-
-#[test]
-fn send_prompt_blocked_during_reconnect() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    app.reconnect_pending = true;
-
-    let effects = dispatch(Action::SendPrompt("hello".into()), &mut app);
-    assert!(effects.is_empty());
-    // Prompt is not enqueued.
-    assert_eq!(app.agents[&id].session.queue_len(), 0);
-    // Toast shown.
-    assert!(app.agents[&id].toast.is_some());
-}
-
-#[test]
-fn send_bash_command_blocked_during_reconnect() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    app.reconnect_pending = true;
-
-    let effects = dispatch(Action::SendBashCommand("ls".into()), &mut app);
-    assert!(effects.is_empty());
-    assert_eq!(app.agents[&id].session.queue_len(), 0);
-    assert!(app.agents[&id].toast.is_some());
-}
-
-#[test]
-fn prompt_response_does_not_drain_during_reconnect() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-
-    // Start a turn and enqueue a second prompt.
-    dispatch(Action::SendPrompt("first".into()), &mut app);
-    assert!(app.agents[&id].session.state.is_turn_running());
-    enqueue_local(&mut app, id, "second");
-    assert_eq!(app.agents[&id].session.queue_len(), 1);
-
-    // Simulate reconnect_pending before PromptResponse arrives.
-    app.reconnect_pending = true;
-    let effects = dispatch(
-        Action::TaskComplete(TaskResult::PromptResponse {
-            agent_id: id,
-            result: Ok(acp::PromptResponse::new(acp::StopReason::EndTurn)),
-            http_status: None,
-            prompt_id: None,
-        }),
-        &mut app,
-    );
-
-    // "second" must NOT be drained.
-    assert!(
-        effects
-            .iter()
-            .all(|e| !matches!(e, Effect::SendPrompt { .. })),
-        "should not drain queue during reconnect, got: {effects:?}"
-    );
-    assert_eq!(app.agents[&id].session.queue_len(), 1);
-}
-
-#[test]
-fn send_prompt_works_after_reconnect_clears() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-
-    app.reconnect_pending = true;
-    let effects = dispatch(Action::SendPrompt("blocked".into()), &mut app);
-    assert!(effects.is_empty());
-
-    // Clear reconnect_pending — prompt should work now.
-    app.reconnect_pending = false;
-    let effects = dispatch(Action::SendPrompt("hello".into()), &mut app);
-    assert_eq!(effects.len(), 1);
-    assert!(matches!(&effects[0], Effect::SendPrompt { .. }));
-    assert!(app.agents[&id].session.state.is_turn_running());
 }
 
 #[test]
@@ -3699,6 +3563,7 @@ fn send_prompt_now_dispatch_arms_expectation_and_suppresses_marker() {
 fn plain_send_during_blocking_wait_does_not_arm_and_meta_less_cancel_is_visible() {
     use crate::app::agent_view::test_fixtures::simulate_task_output_wait;
 
+    let _steer = SteerFollowUp::enter();
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     dispatch(Action::SendPrompt("first".into()), &mut app);
@@ -3740,6 +3605,7 @@ fn plain_send_during_blocking_wait_does_not_arm_and_meta_less_cancel_is_visible(
 fn plain_send_during_blocking_wait_trusts_wire_send_now_trigger() {
     use crate::app::agent_view::test_fixtures::simulate_task_output_wait;
 
+    let _steer = SteerFollowUp::enter();
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     dispatch(Action::SendPrompt("first".into()), &mut app);
@@ -3773,6 +3639,7 @@ fn plain_send_during_pending_subagent_wait_keeps_confirmed_queue_row_reachable()
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     use pi_acp_lib::AcpClientMessage;
 
+    let _steer = SteerFollowUp::enter();
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     dispatch(Action::SendPrompt("first".into()), &mut app);
@@ -4132,43 +3999,6 @@ fn goal_send_now_painted_block_survives_queue_changed_removal() {
     );
 }
 
-/// Send-now during a reconnect outage must not fire into the dead channel —
-/// the payload is requeued locally (the producer already consumed it).
-#[test]
-fn send_prompt_now_during_reconnect_requeues_locally() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    dispatch(Action::SendPrompt("first".into()), &mut app);
-    app.reconnect_pending = true;
-
-    let effects = dispatch(
-        Action::SendPromptNow {
-            text: "typed mid-outage".into(),
-            images: vec![],
-        },
-        &mut app,
-    );
-    assert!(
-        effects.is_empty(),
-        "no effect may fire while reconnecting, got {effects:?}"
-    );
-    let agent = &app.agents[&id];
-    assert_eq!(
-        agent
-            .session
-            .pending_prompts
-            .front()
-            .map(|p| p.text.as_str()),
-        Some("typed mid-outage"),
-        "the consumed payload must be requeued at the front"
-    );
-    assert!(
-        agent.expect_send_now_cancel.is_none(),
-        "no expectation may be armed for a send that never left"
-    );
-    assert!(agent.toast.is_some(), "the outage must explain itself");
-}
-
 /// A failed send-now RPC requeues its payload (front) instead of silently
 /// dropping the message, and retires the optimistic queue echo.
 #[test]
@@ -4228,13 +4058,14 @@ fn failed_send_now_requeues_payload_and_retires_echo() {
     assert!(agent.toast.is_some(), "the failure must explain itself");
 }
 
-/// An image-bearing prompt submitted during a parked sendable wait routes
-/// through send-now (images ride as content blocks) instead of silently
-/// holding in the local queue behind the wait.
+/// With Steer, an image-bearing prompt submitted during a parked sendable
+/// wait routes through send-now (images ride as content blocks) instead of
+/// silently holding in the local queue behind the wait.
 #[test]
 fn image_prompt_during_sendable_wait_routes_to_send_now() {
     use crate::app::agent_view::test_fixtures::simulate_task_output_wait;
 
+    let _steer = SteerFollowUp::enter();
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     dispatch(Action::SendPrompt("first".into()), &mut app);
@@ -5061,9 +4892,9 @@ mod prompt_stash_dispatch_tests {
         assert!(agent.prompt_stash.is_some(), "the stash must stay put");
     }
 
-    /// A handler that rejects the action never consumed the draft, so the stash must stay put.
+    /// A send deferred behind an in-flight paste probe never consumed the draft, so the stash must stay put.
     #[test]
-    fn a_rejected_send_does_not_restore_the_stash() {
+    fn a_deferred_send_does_not_restore_the_stash() {
         let mut app = test_app_with_agent();
         let id = AgentId(0);
         {
@@ -5071,8 +4902,8 @@ mod prompt_stash_dispatch_tests {
             agent.prompt.set_text("stashed thought");
             agent.stash_prompt_draft(StashCause::Chord);
             agent.prompt.set_text("never sent");
+            agent.paste_probe_in_flight = 1;
         }
-        app.reconnect_pending = true;
 
         dispatch(Action::SendPrompt("never sent".into()), &mut app);
 
@@ -5084,7 +4915,7 @@ mod prompt_stash_dispatch_tests {
         );
         assert!(
             agent.prompt_stash.is_some(),
-            "a refused send must not hand the stash back"
+            "a deferred send must not hand the stash back"
         );
     }
 

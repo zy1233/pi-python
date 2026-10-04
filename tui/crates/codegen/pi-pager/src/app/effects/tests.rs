@@ -1,6 +1,9 @@
 #![cfg_attr(rustfmt, rustfmt::skip)]
 use super::*;
+use super::super::session_title_resolve::worktree_resume_failure_message;
 use pi_shell::extensions::billing::{BillingConfig, Cent, UsagePeriod};
+use pi_shell::session::ExtMethodResult;
+use std::path::PathBuf;
 /// The invalid-params server detail survives `attach_prompt_usage`
 /// wrapping `error.data` as `{message, promptUsage}`.
 #[test]

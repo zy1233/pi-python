@@ -487,12 +487,11 @@ pub(super) fn handle_scheduled_task_inject_prompt(
     let human_schedule = payload["humanSchedule"].as_str().unwrap_or("unknown");
     tracing::debug!(task_id, human_schedule, "Enqueuing scheduled cron prompt");
 
-    // Only the driver injects + runs the scheduled prompt. In leader mode the
-    // `legacy/scheduled_task_inject_prompt` notification is routed by the leader
-    // to the SINGLE session driver (see `is_scheduled_task_inject_prompt` in
-    // leader/server.rs), so any client that receives it IS the driver and must
-    // enqueue + run it — including a client that attached via `session/load`
-    // (`attached_as_viewer == true`) but is the designated driver. We therefore
+    // Only the driver injects + runs the scheduled prompt. The
+    // `legacy/scheduled_task_inject_prompt` notification is routed by the agent
+    // to the SINGLE session driver, so any client that receives it IS the
+    // driver and must enqueue + run it — including a client that attached via
+    // `session/load` (`attached_as_viewer == true`) but is the designated driver. We therefore
     // do NOT skip on `attached_as_viewer` here: that latched flag wrongly
     // suppressed cron on an attacher-driver, leaving the loop stuck with no
     // output. The other clients render the resulting turn from the broadcast

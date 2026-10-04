@@ -446,16 +446,6 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
         TaskResult::SessionSearchDebounceExpired { query, seq } => {
             handle_session_search_debounce_expired(app, query, seq)
         }
-        TaskResult::RosterLoaded { sessions } => {
-            app.leader_roster = sessions;
-            app.dashboard_sessions_loading = false;
-            vec![]
-        }
-        TaskResult::RosterFailed { error } => {
-            tracing::debug!(error = %error, "leader roster fetch failed");
-            app.dashboard_sessions_loading = false;
-            vec![]
-        }
         TaskResult::DashboardSessionsLoaded { sessions } => {
             app.dashboard_local_sessions = sessions;
             app.dashboard_sessions_loading = false;
@@ -1072,8 +1062,6 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             if after == AfterSessionDelete::Stay {
                 app.dashboard_local_sessions
                     .retain(|entry| entry.session_id != session_id);
-                app.leader_roster
-                    .retain(|entry| entry.session_id != session_id);
                 app.show_toast("Session deleted");
                 return vec![];
             }
@@ -1104,8 +1092,6 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
                 None
             };
             app.dashboard_local_sessions
-                .retain(|entry| entry.session_id != session_id);
-            app.leader_roster
                 .retain(|entry| entry.session_id != session_id);
             let attached_was_removed = app
                 .dashboard

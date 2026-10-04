@@ -50,12 +50,11 @@ pub(super) fn handle_settings_update(notif: &acp::ExtNotification, app: &mut App
         return false;
     };
 
-    // Reseed this process's remote-campaign cache. In leader mode no in-process
-    // agent seeds the TUI process, and the bounded startup prefetch can miss —
-    // without this reseed a remote campaign stays invisible to
+    // Reseed this process's remote-campaign cache. No in-process agent seeds
+    // the TUI process, and the bounded startup prefetch can miss — without
+    // this reseed a remote campaign stays invisible to
     // `resolve_dismissable_campaigns`, so a `/model` pick never records its
-    // dismissal and the leader re-nudges every new session. Idempotent in
-    // embedded mode, where the in-process agent seeds the same cache.
+    // dismissal and the agent re-nudges every new session.
     if let Some(campaigns) = update.campaigns.clone() {
         let rs = pi_shell::util::config::RemoteSettings {
             campaigns,
@@ -66,7 +65,7 @@ pub(super) fn handle_settings_update(notif: &acp::ExtNotification, app: &mut App
 
     if let Some(v) = update.auto_permission_mode_enabled {
         // Keep the pager's auto-permission-mode gate live with the remote settings
-        // remote tier (the leader caches it agent-side; the pager process needs
+        // remote tier (the agent caches it agent-side; the pager process needs
         // its own copy). Refresh the startup snapshot so the Shift+Tab cycle and
         // the settings modal both reflect a remote-only enablement/kill-switch
         // without a restart.
@@ -413,26 +412,6 @@ pub(super) fn notify_sessions_leave_auto(app: &AppView, session_ids: &[acp::Sess
         response_tx,
     };
     let _ = app.acp_tx.send(args.into());
-}
-
-/// Handle `legacy/sessions/changed` — the leader broadcasts roster
-/// upserts/removals to all clients (FleetView dashboard).
-pub(super) fn handle_sessions_changed(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
-    let Ok(changed) = serde_json::from_str::<crate::app::roster::RosterChanged>(notif.params.get())
-    else {
-        tracing::warn!("Failed to parse legacy/sessions/changed");
-        return false;
-    };
-    let mut affected = false;
-    for entry in changed.upserted {
-        app.upsert_roster_entry(entry);
-        affected = true;
-    }
-    for sid in changed.removed {
-        app.remove_roster_entry(&sid);
-        affected = true;
-    }
-    affected
 }
 
 pub(super) fn handle_announcements_update(notif: &acp::ExtNotification, app: &mut AppView) -> bool {

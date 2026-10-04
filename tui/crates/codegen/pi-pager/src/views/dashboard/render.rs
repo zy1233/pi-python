@@ -105,11 +105,11 @@ pub fn render_dashboard(
     // quit" for Ctrl+Q / Ctrl+C / Ctrl+D). Threaded to the footer so the
     // session-less dashboard shows the same feedback the agent view does.
     pending_hint: Option<crate::views::shortcuts_bar::PendingHint>,
-    // Leader-mode session roster (FleetView). Empty in non-leader mode,
-    // which naturally gates the appended roster-only rows.
+    // On-disk sessions without a live agent view (the appended roster-only
+    // rows). Empty until the dashboard's session fetch lands.
     roster: &[crate::app::roster::RosterEntry],
-    // Whether the local on-disk session roster is still being fetched
-    // (non-leader mode). When true and there's nothing to show yet, the
+    // Whether the local on-disk session roster is still being fetched.
+    // When true and there's nothing to show yet, the
     // empty body reads "Loading sessions…" instead of the "no agents
     // yet" hint so a fresh open doesn't flash an empty-looking screen.
     dashboard_sessions_loading: bool,

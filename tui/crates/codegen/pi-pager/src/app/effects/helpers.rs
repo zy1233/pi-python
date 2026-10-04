@@ -757,7 +757,7 @@ pub(super) fn parse_session_list_scope(_payload: &serde_json::Value) -> ListScop
 /// `{ "sessions": [...] }` object) into [`SessionPickerEntry`] rows.
 ///
 /// Shared by the resume picker ([`Effect::FetchSessionList`]) and the
-/// dashboard's non-leader idle-session fallback
+/// dashboard's local idle-session list
 /// ([`Effect::FetchDashboardSessions`]) so both produce identical labels.
 /// Sessions older than 30 days, and sessions with no usable user prompt
 /// (empty `summary` after fallbacks), are dropped.
@@ -953,7 +953,7 @@ pub(super) fn session_picker_entries_from_acp(
 
 /// Convert a resume-picker session into a dormant dashboard roster row.
 ///
-/// Used by the non-leader dashboard fallback: local on-disk sessions have no
+/// Used by the dashboard's session list: local on-disk sessions have no
 /// live activity signal, so they map to [`RosterActivity::Dormant`] and render
 /// in the dashboard's **Inactive** group. The label, cwd, model, and worktree
 /// badge all come straight from the picker entry.

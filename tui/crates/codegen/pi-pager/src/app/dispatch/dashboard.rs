@@ -127,10 +127,9 @@ fn configure_dashboard_state(app: &mut AppView) {
 
 /// Open the dashboard view. Respects the
 /// [`crate::views::dashboard::dashboard_enabled`] feature flag (env var
-/// override + persisted setting). The dashboard is independent of leader
-/// mode: it renders local sessions from `app.agents` and, when connected
-/// via a leader, additionally polls the leader roster (see the roster-poll
-/// gate in the event loop).
+/// override + persisted setting). It renders the sessions hosted in
+/// `app.agents` plus the local on-disk session list (fetched here and
+/// re-polled by the event loop while the dashboard is open).
 pub(super) fn dispatch_open_dashboard(app: &mut AppView) -> Vec<Effect> {
     use crate::views::dashboard::dashboard_enabled;
 
@@ -242,9 +241,6 @@ pub(super) fn dispatch_open_dashboard(app: &mut AppView) -> Vec<Effect> {
     app.active_view = ActiveView::AgentDashboard;
     log_dashboard_opened(app);
     app.dashboard_sessions_loading = true;
-    if app.leader_mode {
-        return vec![Effect::FetchRoster];
-    }
     vec![Effect::FetchDashboardSessions]
 }
 
@@ -416,20 +412,15 @@ pub(super) fn dispatch_dashboard_attach(
             surface_yolo_launch_block_notice(app, parent);
         }
         DashboardRowId::Roster { session_id } => {
-            // A roster row is a leader-hosted session this client is not
-            // locally attached to. Attaching issues an ACP `session/load`,
-            // which the leader join-not-steal-subscribes: it adds this
-            // client to the session's subscriber set (replay + live
-            // broadcast) instead of stealing ownership. Mirror the session
-            // picker's strict resume path — inserting a
-            // leader-hosted, possibly cross-cwd session into THIS cwd's
-            // recent list would be wrong.
+            // A roster row is a listed session this client is not locally
+            // attached to. Attaching issues an ACP `session/load`. Mirror the
+            // session picker's strict resume path — inserting a possibly
+            // cross-cwd session into THIS cwd's recent list would be wrong.
 
             // Resolve cwd + origin first (also drives kind for focus-if-open).
             let (session_cwd, conversation_entry) = app
-                .leader_roster
+                .dashboard_local_sessions
                 .iter()
-                .chain(app.dashboard_local_sessions.iter())
                 .find(|e| e.session_id == session_id)
                 .map(|e| {
                     let is_conversation = e.origin.kind == "conversation";
@@ -1961,11 +1952,7 @@ pub(super) fn dashboard_neighbor_row(
     use crate::views::dashboard::Focusable;
     let d = app.dashboard.as_ref()?;
     let home = crate::views::dashboard::render::cached_home();
-    let roster: &[crate::app::roster::RosterEntry] = if app.leader_mode {
-        &app.leader_roster
-    } else {
-        &app.dashboard_local_sessions
-    };
+    let roster: &[crate::app::roster::RosterEntry] = &app.dashboard_local_sessions;
     let rows = crate::views::dashboard::build_rows_with_roster(
         &app.agents,
         &d.pinned,
@@ -2062,9 +2049,8 @@ pub(super) fn dispatch_dashboard_stop(app: &mut AppView) -> Vec<Effect> {
         }
         DashboardRowId::Roster { session_id } => {
             let entry = app
-                .leader_roster
+                .dashboard_local_sessions
                 .iter()
-                .chain(app.dashboard_local_sessions.iter())
                 .find(|e| e.session_id == session_id.as_str());
             match entry {
                 None => {
@@ -2246,9 +2232,8 @@ fn delete_dashboard_row(
         }
         DashboardRowId::Roster { session_id } => {
             let Some(entry) = app
-                .leader_roster
+                .dashboard_local_sessions
                 .iter()
-                .chain(app.dashboard_local_sessions.iter())
                 .find(|e| e.session_id == session_id)
                 .cloned()
             else {
@@ -2289,14 +2274,10 @@ pub(super) fn dispatch_dashboard_select(app: &mut AppView, next: bool) {
     // Use the shared `cached_home()` instead of
     // re-reading the env var on every keystroke.
     let home = crate::views::dashboard::render::cached_home();
-    // Same roster source the renderer uses, so navigation matches the visible
-    // rows: leader roster in leader mode, local idle sessions otherwise.
-    // Disjoint field borrows (`app.dashboard` is held mutably via `d`).
-    let roster: &[crate::app::roster::RosterEntry] = if app.leader_mode {
-        &app.leader_roster
-    } else {
-        &app.dashboard_local_sessions
-    };
+    // Same roster source the renderer uses (the local idle sessions), so
+    // navigation matches the visible rows. Disjoint field borrows
+    // (`app.dashboard` is held mutably via `d`).
+    let roster: &[crate::app::roster::RosterEntry] = &app.dashboard_local_sessions;
     let rows = crate::views::dashboard::build_rows_with_roster(
         &app.agents,
         &d.pinned,

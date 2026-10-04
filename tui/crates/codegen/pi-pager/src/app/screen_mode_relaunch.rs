@@ -440,7 +440,7 @@ mod tests {
         for flag in [
             "--minimal",
             "--fullscreen",
-            "--no-leader",
+            "--no-plan",
             "--continue",
             "-c",
             "--fork-session",
@@ -451,10 +451,10 @@ mod tests {
 
     #[test]
     fn adds_minimal_and_resume() {
-        let out = build_screen_mode_relaunch_args(args(&["grok", "--no-leader"]), "abc", true);
+        let out = build_screen_mode_relaunch_args(args(&["grok", "--no-plan"]), "abc", true);
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "abc", "--minimal"]
+            vec!["--no-plan", "--resume", "abc", "--minimal"]
         );
     }
 
@@ -462,10 +462,10 @@ mod tests {
     /// resolution still works without the env override.
     #[test]
     fn adds_fullscreen_and_resume() {
-        let out = build_screen_mode_relaunch_args(args(&["grok", "--no-leader"]), "abc", false);
+        let out = build_screen_mode_relaunch_args(args(&["grok", "--no-plan"]), "abc", false);
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "abc", "--fullscreen"]
+            vec!["--no-plan", "--resume", "abc", "--fullscreen"]
         );
     }
 
@@ -480,14 +480,14 @@ mod tests {
                 "grok",
                 "--session-id",
                 "11111111-1111-1111-1111-111111111111",
-                "--no-leader",
+                "--no-plan",
             ]),
             "new",
             true,
         );
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "new", "--minimal"]
+            vec!["--no-plan", "--resume", "new", "--minimal"]
         );
 
         let out = build_screen_mode_relaunch_args(
@@ -513,14 +513,14 @@ mod tests {
                 "--restore-code",
                 "--resume",
                 "old",
-                "--no-leader",
+                "--no-plan",
             ]),
             "new",
             false,
         );
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "new", "--fullscreen"]
+            vec!["--no-plan", "--resume", "new", "--fullscreen"]
         );
     }
 
@@ -534,14 +534,14 @@ mod tests {
                 "--worktree=wt",
                 "--worktree-ref=main",
                 "--ref=main",
-                "--no-leader",
+                "--no-plan",
             ]),
             "new",
             false,
         );
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "new", "--fullscreen"]
+            vec!["--no-plan", "--resume", "new", "--fullscreen"]
         );
     }
 
@@ -550,26 +550,26 @@ mod tests {
     #[test]
     fn strips_bare_worktree_without_eating_next_flag() {
         let out = build_screen_mode_relaunch_args(
-            args(&["grok", "--worktree", "--no-leader"]),
+            args(&["grok", "--worktree", "--no-plan"]),
             "new",
             false,
         );
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "new", "--fullscreen"]
+            vec!["--no-plan", "--resume", "new", "--fullscreen"]
         );
     }
 
     #[test]
     fn strips_prior_minimal_and_resume() {
         let out = build_screen_mode_relaunch_args(
-            args(&["grok", "--minimal", "--resume", "old", "--no-leader"]),
+            args(&["grok", "--minimal", "--resume", "old", "--no-plan"]),
             "new",
             false,
         );
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "new", "--fullscreen"]
+            vec!["--no-plan", "--resume", "new", "--fullscreen"]
         );
         assert!(!as_strs(&out).iter().any(|s| s == "--minimal"));
     }
@@ -581,13 +581,13 @@ mod tests {
     #[test]
     fn strips_prior_fullscreen_flag() {
         let out = build_screen_mode_relaunch_args(
-            args(&["grok", "--fullscreen", "--resume", "old", "--no-leader"]),
+            args(&["grok", "--fullscreen", "--resume", "old", "--no-plan"]),
             "new",
             true,
         );
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "new", "--minimal"]
+            vec!["--no-plan", "--resume", "new", "--minimal"]
         );
         assert!(!as_strs(&out).iter().any(|s| s == "--fullscreen"));
     }
@@ -595,57 +595,57 @@ mod tests {
     #[test]
     fn strips_short_resume_and_continue() {
         let out = build_screen_mode_relaunch_args(
-            args(&["grok", "-r", "old", "-c", "--no-leader"]),
+            args(&["grok", "-r", "old", "-c", "--no-plan"]),
             "sid",
             true,
         );
-        // `-c` and `-r old` gone; `--minimal --resume sid` added; `--no-leader` kept.
+        // `-c` and `-r old` gone; `--minimal --resume sid` added; `--no-plan` kept.
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "sid", "--minimal"]
+            vec!["--no-plan", "--resume", "sid", "--minimal"]
         );
     }
 
     #[test]
     fn strips_resume_equals_form() {
         let out = build_screen_mode_relaunch_args(
-            args(&["grok", "--resume=old-id", "--no-leader"]),
+            args(&["grok", "--resume=old-id", "--no-plan"]),
             "sid",
             false,
         );
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "sid", "--fullscreen"]
+            vec!["--no-plan", "--resume", "sid", "--fullscreen"]
         );
     }
 
     #[test]
     fn strips_positional_prompt() {
         let out = build_screen_mode_relaunch_args(
-            args(&["grok", "--no-leader", "fix the bug"]),
+            args(&["grok", "--no-plan", "fix the bug"]),
             "sid",
             true,
         );
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "sid", "--minimal"]
+            vec!["--no-plan", "--resume", "sid", "--minimal"]
         );
         assert!(!as_strs(&out).iter().any(|s| s.contains("fix")));
     }
 
     #[test]
     fn double_dash_and_following_positionals_dropped() {
-        // `grok --no-leader -- "fix the bug"`: everything after `--` is the
+        // `grok --no-plan -- "fix the bug"`: everything after `--` is the
         // prompt. The separator itself must go too, or the appended
         // `--resume <id>` would be parsed as positional prompt words.
         let out = build_screen_mode_relaunch_args(
-            args(&["grok", "--no-leader", "--", "fix the bug"]),
+            args(&["grok", "--no-plan", "--", "fix the bug"]),
             "sid",
             false,
         );
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "sid", "--fullscreen"]
+            vec!["--no-plan", "--resume", "sid", "--fullscreen"]
         );
     }
 
@@ -662,7 +662,7 @@ mod tests {
                 "/tmp/proj",
                 "--debug-file",
                 "/tmp/debug.log",
-                "--no-leader",
+                "--no-plan",
                 "fix the bug",
             ]),
             "sid",
@@ -677,7 +677,7 @@ mod tests {
                 "/tmp/proj",
                 "--debug-file",
                 "/tmp/debug.log",
-                "--no-leader",
+                "--no-plan",
                 "--resume",
                 "sid",
                 "--minimal",
@@ -689,7 +689,7 @@ mod tests {
     #[test]
     fn keeps_equals_form_and_short_model_flag() {
         let out = build_screen_mode_relaunch_args(
-            args(&["grok", "-m", "grok-4", "--cwd=/tmp/proj", "--no-leader"]),
+            args(&["grok", "-m", "grok-4", "--cwd=/tmp/proj", "--no-plan"]),
             "sid",
             false,
         );
@@ -699,7 +699,7 @@ mod tests {
                 "-m",
                 "grok-4",
                 "--cwd=/tmp/proj",
-                "--no-leader",
+                "--no-plan",
                 "--resume",
                 "sid",
                 "--fullscreen",
@@ -709,30 +709,30 @@ mod tests {
 
     #[test]
     fn boolean_flag_does_not_eat_following_positional() {
-        // `--no-leader` is boolean; the bare word after it is the prompt and
+        // `--no-plan` is boolean; the bare word after it is the prompt and
         // must be dropped, not attached as a spurious value.
         let out = build_screen_mode_relaunch_args(
-            args(&["grok", "--no-leader", "fix the bug"]),
+            args(&["grok", "--no-plan", "fix the bug"]),
             "sid",
             false,
         );
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "sid", "--fullscreen"]
+            vec!["--no-plan", "--resume", "sid", "--fullscreen"]
         );
     }
 
     #[test]
     fn resume_without_value_then_flag_is_not_eaten() {
-        // `grok --resume --no-leader` (resume most-recent; next token is a flag).
+        // `grok --resume --no-plan` (resume most-recent; next token is a flag).
         let out = build_screen_mode_relaunch_args(
-            args(&["grok", "--resume", "--no-leader"]),
+            args(&["grok", "--resume", "--no-plan"]),
             "sid",
             false,
         );
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "sid", "--fullscreen"]
+            vec!["--no-plan", "--resume", "sid", "--fullscreen"]
         );
     }
 

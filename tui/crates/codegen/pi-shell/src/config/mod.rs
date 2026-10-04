@@ -1002,7 +1002,6 @@ fn apply_requirements_inner(
         }
     }
     enforce_opt!("cli", "auto_update", config.cli.auto_update);
-    enforce_opt!("cli", "use_leader", config.cli.use_leader);
     enforce_opt!("cli", "show_tips", config.cli.show_tips);
     enforce_opt!("memory", "enabled", config.memory.enabled);
     enforce_val!("subagents", "enabled", config.subagents.enabled);

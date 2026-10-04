@@ -13,8 +13,7 @@
 //! dashboard feature is enabled (`dashboard_enabled()`), via
 //! [`crate::app::agent_view::AgentView::set_dashboard_visible`]. When
 //! `[dashboard].enabled = false` or `GROK_AGENT_DASHBOARD=0` is set, the
-//! dispatcher prints a friendly toast and refuses to open. The dashboard is
-//! independent of leader mode.
+//! dispatcher prints a friendly toast and refuses to open.
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};

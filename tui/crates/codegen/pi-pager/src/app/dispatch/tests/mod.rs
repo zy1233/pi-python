@@ -61,6 +61,7 @@ use crate::acp::model_state::ModelState;
 use crate::acp::tracker::AcpUpdateTracker;
 use crate::app::actions::{Action, Effect, SubagentKillOutcome, SwitchModelError, TaskResult};
 use crate::app::agent::{AgentId, AgentSession, AgentState};
+use crate::app::agent_view::test_fixtures::SteerFollowUp;
 use crate::app::agent_view::{ActivePane, AgentView, PromptMode};
 use crate::app::app_view::{
     ActiveView, AppView, AuthMode, AuthState, TrustState, VoiceState, VoiceTarget,
@@ -269,7 +270,6 @@ fn test_app() -> AppView {
         pending_pager_path: None,
         pending_pager_ansi: false,
         minimal_state: crate::minimal_api::MinimalState::default(),
-        reconnect_pending: false,
         show_resolved_model: true,
         sharing_enabled: false,
         plugin_cta_enabled: false,
@@ -278,11 +278,9 @@ fn test_app() -> AppView {
         usage_visible: true,
         has_external_auth_provider: false,
         tier_restricted_commands: Vec::new(),
-        leader_mode: true,
         credit_balance: None,
         auto_topup: None,
         billing_poll_wanted: false,
-        leader_roster: Vec::new(),
         dashboard_local_sessions: Vec::new(),
         dashboard_sessions_loading: false,
         shared_prompt_queues: std::collections::HashMap::new(),
@@ -945,11 +943,7 @@ fn open_dashboard(app: &mut AppView) {
 fn dashboard_row_order(app: &AppView) -> Vec<crate::views::dashboard::DashboardRowId> {
     let d = app.dashboard.as_ref().unwrap();
     let home = crate::views::dashboard::render::cached_home();
-    let roster: &[crate::app::roster::RosterEntry] = if app.leader_mode {
-        &app.leader_roster
-    } else {
-        &app.dashboard_local_sessions
-    };
+    let roster: &[crate::app::roster::RosterEntry] = &app.dashboard_local_sessions;
     let rows = crate::views::dashboard::build_rows_with_roster(
         &app.agents,
         &d.pinned,

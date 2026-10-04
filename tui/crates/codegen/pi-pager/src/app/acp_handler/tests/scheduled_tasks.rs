@@ -51,7 +51,7 @@
 
     #[test]
     fn inject_prompt_drives_even_when_attached_as_viewer() {
-        // The leader routes `pi/scheduled_task_inject_prompt` to the SINGLE
+        // The agent routes `pi/scheduled_task_inject_prompt` to the SINGLE
         // session driver, so any client that receives it IS the driver and must
         // enqueue + run it — even one that attached via `session/load`
         // (`attached_as_viewer == true`). Previously this handler latched on

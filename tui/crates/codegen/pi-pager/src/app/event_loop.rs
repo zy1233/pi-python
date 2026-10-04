@@ -13,12 +13,10 @@ use tokio::task::JoinSet;
 use tokio::time::{Instant, sleep_until};
 
 use crate::appearance::ConfigWatcher;
-use crate::client_identity::{PAGER_CLIENT_TYPE, PAGER_CLIENT_VERSION};
 use crate::theme::system_appearance::{self, SystemAppearanceWatcher};
 use crate::theme::{Theme, ThemeKind, cache as theme_cache};
 
-use agent_client_protocol as acp;
-use pi_acp_lib::{AcpClientMessage, acp_send};
+use pi_acp_lib::AcpClientMessage;
 
 use super::actions::{Action, Effect, TaskResult};
 use super::app_view::{
@@ -1872,12 +1870,11 @@ pub(crate) async fn run(
         None
     };
 
-    // Leader-mode roster poll (FleetView dashboard). Only fires while the
-    // dashboard is open AND we're connected via a leader. Armed to fire
-    // immediately at loop start so an already-open dashboard refreshes
-    // without waiting a full interval.
-    const ROSTER_POLL_INTERVAL: Duration = Duration::from_secs(1);
-    let mut roster_poll_at: Option<Instant> = Some(Instant::now());
+    // Dashboard session-list poll. Only fires while the dashboard is open.
+    // Armed to fire immediately at loop start so an already-open dashboard
+    // refreshes without waiting a full interval.
+    const DASHBOARD_POLL_INTERVAL: Duration = Duration::from_secs(1);
+    let mut dashboard_poll_at: Option<Instant> = Some(Instant::now());
 
     // Pre-generate the automatic "return-from-away" recap while the terminal is
     // unfocused, so it's already in the scrollback (instant) when the user
@@ -2304,15 +2301,14 @@ pub(crate) async fn run(
             app.gboom_release_all_games();
         }
 
-        // Re-arm the dashboard roster poll when the dashboard is open but the
-        // poll has gone dormant — i.e. the dashboard was just opened. The poll
-        // arm leaves `roster_poll_at = None` only when it fired with the
+        // Re-arm the dashboard poll when the dashboard is open but the poll
+        // has gone dormant — i.e. the dashboard was just opened. The poll arm
+        // leaves `dashboard_poll_at = None` only when it fired with the
         // dashboard closed, so this fires an immediate refresh exactly on the
-        // closed→open transition rather than every iteration. Applies in both
-        // modes: leader mode polls the live roster, non-leader mode polls the
-        // local on-disk idle-session list.
-        if roster_poll_at.is_none() && matches!(app.active_view, ActiveView::AgentDashboard) {
-            roster_poll_at = Some(Instant::now());
+        // closed→open transition rather than every iteration. The poll
+        // refreshes the local on-disk idle-session list.
+        if dashboard_poll_at.is_none() && matches!(app.active_view, ActiveView::AgentDashboard) {
+            dashboard_poll_at = Some(Instant::now());
         }
 
         // (Re-)arm the subscription watch on the dormant→wanted transition
@@ -2412,8 +2408,8 @@ pub(crate) async fn run(
             }
         };
 
-        let roster_poll = async {
-            match roster_poll_at {
+        let dashboard_poll = async {
+            match dashboard_poll_at {
                 Some(at) => sleep_until(at).await,
                 None => std::future::pending().await,
             }
@@ -2808,20 +2804,19 @@ pub(crate) async fn run(
                 }
             }
 
-            _ = roster_poll => {
-                roster_poll_at = None;
+            _ = dashboard_poll => {
+                dashboard_poll_at = None;
                 // Only poll while the dashboard is open. When it is not active
                 // we deliberately do NOT re-arm, so the loop isn't woken once
-                // per second forever. In leader mode we poll the live FleetView
-                // roster; outside leader mode we poll the local on-disk
-                // idle-session list so the dashboard still shows idle sessions.
+                // per second forever. The poll refreshes the local on-disk
+                // idle-session list so the dashboard shows idle sessions.
                 let dashboard_open = matches!(app.active_view, ActiveView::AgentDashboard);
                 if dashboard_open {
                     let eff = Effect::FetchDashboardSessions;
                     if process_effects(vec![eff], &mut tasks, &mut app, &progress_tx) {
                         break;
                     }
-                    roster_poll_at = Some(Instant::now() + ROSTER_POLL_INTERVAL);
+                    dashboard_poll_at = Some(Instant::now() + DASHBOARD_POLL_INTERVAL);
                 }
             }
 
@@ -3972,7 +3967,7 @@ pub(crate) fn retarget_suppress_code_restore(app: &mut AppView, from: &str, to: 
     }
 }
 
-/// Shared [`SessionFlags`] builder (interactive loop + leader-cluster).
+/// Shared [`SessionFlags`] builder for the interactive loop.
 ///
 /// Permission seeds come from the global mirrors (`default_yolo`,
 /// `current_ui.permission_mode`). Pre-session `CycleMode` / `SetPermissionMode`

@@ -508,6 +508,7 @@ fn follow_up_chip_does_not_execute_exit_alias() {
 }
 #[test]
 fn chip_submit_while_running_clears_follow_up_chips() {
+    let _steer = SteerFollowUp::enter();
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     {
@@ -525,37 +526,6 @@ fn chip_submit_while_running_clears_follow_up_chips() {
     assert!(
         app.agents[&id].follow_ups.is_none(),
         "immediate-send chip path must clear chips"
-    );
-}
-#[test]
-fn chip_submit_while_reconnect_pending_keeps_chips_and_does_not_send() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    app.agents
-        .get_mut(&id)
-        .unwrap()
-        .apply_follow_ups("resp-1".into(), vec!["Summarize".into()]);
-    app.reconnect_pending = true;
-    let effects = dispatch(Action::SubmitFollowUp("Summarize".into()), &mut app);
-    assert!(
-        effects.is_empty(),
-        "a reconnect-pending submit must emit no effect, got {effects:?}"
-    );
-    assert_eq!(app.agents[&id].session.queue_len(), 0);
-    assert!(
-        app.agents[&id].follow_ups.is_some(),
-        "reconnect-pending submit must NOT clear the chips"
-    );
-    app.reconnect_pending = false;
-    app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
-    let effects2 = dispatch(Action::SubmitFollowUp("Summarize".into()), &mut app);
-    assert!(
-        matches!(&effects2[..], [Effect::SendPrompt { text, .. }] if text == "Summarize"),
-        "after reconnect clears, the chip must submit, got {effects2:?}"
-    );
-    assert!(
-        app.agents[&id].follow_ups.is_none(),
-        "a proceeding submit must clear the chips"
     );
 }
 #[test]
@@ -2094,8 +2064,8 @@ fn find_agent_by_session_id_finds_inactive_agent() {
 /// Verifies that the dispatcher routes each Action to the
 /// correct setter (catches a copy-paste registration bug
 /// where two setters were swapped). The original 5-setting
-/// matrix shrank to 2 after the user-feedback drop of
-/// `session_picker_grouped` / `load_envrc` / `use_leader`.
+/// matrix shrank to 2 after the user-feedback drop of three of the settings
+/// (`session_picker_grouped`, `load_envrc` and a process-model toggle).
 #[test]
 fn pr13_each_setter_writes_to_its_own_mirror() {
     let mut app = test_app_with_agent();

@@ -1549,14 +1549,9 @@ pub enum Effect {
     /// expiry acts only if `seq` is still current (Build: FTS5 deep search
     /// against the deep-search seq; chat: server refetch against the list seq).
     DebounceSessionSearch { query: String, seq: u64 },
-    /// Fetch the leader session roster (FleetView dashboard) via
- /// `legacy ext RPC`. Only issued in leader mode while the
-    /// dashboard is open.
-    FetchRoster,
     /// Fetch the local on-disk session list (dormant/idle sessions) for the
- /// dashboard via `legacy ext RPC` — the non-leader fallback for the
-    /// FleetView roster. Issued while the dashboard is open and NOT in leader
-    /// mode so the dashboard shows idle sessions instead of being empty.
+    /// dashboard via ACP `session/list`. Issued while the dashboard is open
+    /// so it shows idle sessions instead of being empty.
     FetchDashboardSessions,
     /// Load card detail for a specific session (lazy, reads chat history from disk).
     LoadCardDetail {
@@ -2472,18 +2467,10 @@ pub enum TaskResult {
         query: String,
         seq: u64,
     },
- /// Leader session roster loaded via `legacy ext RPC`.
-    RosterLoaded {
-        sessions: Vec<crate::app::roster::RosterEntry>,
-    },
-    /// Leader session roster fetch failed (silent — no error modal).
-    RosterFailed {
-        error: String,
-    },
-    /// Local on-disk session list loaded for the dashboard (non-leader
-    /// fallback). Entries are pre-converted to `RosterEntry` (activity
-    /// `Dormant`) so they reuse the roster-row rendering path. A fetch
-    /// failure yields an empty list (silent — the next poll retries).
+    /// Local on-disk session list loaded for the dashboard. Entries are
+    /// pre-converted to `RosterEntry` (activity `Dormant`) so they reuse the
+    /// roster-row rendering path. A fetch failure yields an empty list
+    /// (silent — the next poll retries).
     DashboardSessionsLoaded {
         sessions: Vec<crate::app::roster::RosterEntry>,
     },

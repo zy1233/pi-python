@@ -132,15 +132,15 @@ pub fn build_rows(
 /// [`super::render::render_dashboard`] and keyboard navigation in
 /// `dispatch_dashboard_select` both go through here).
 ///
-/// Like [`build_rows`] but (a) appends "roster-only" rows for leader
-/// sessions this client is NOT locally attached to (FleetView dashboard)
-/// and (b) does NOT surface subagents as their own rows — only top-level
-/// agents and roster sessions are listed (see [`build_local_rows`]).
+/// Like [`build_rows`] but (a) appends "roster-only" rows for on-disk
+/// sessions this process has no live `AgentView` for and (b) does NOT
+/// surface subagents as their own rows — only top-level agents and roster
+/// sessions are listed (see [`build_local_rows`]).
 ///
 /// Local `AgentView` rows are built first (richest data). Then, for each
 /// [`RosterEntry`] whose `session_id` is not already represented by a
-/// local agent, a synthetic [`DashboardRow`] is appended. In non-leader
-/// mode `roster` is empty.
+/// local agent, a synthetic [`DashboardRow`] is appended. `roster` is empty
+/// until the dashboard's session fetch lands.
 #[allow(clippy::too_many_arguments)]
 pub fn build_rows_with_roster(
     agents: &IndexMap<AgentId, AgentView>,
@@ -252,7 +252,7 @@ fn build_local_rows(
     }
     rows
 }
-/// Map a leader [`RosterActivity`] to the dashboard's coarse [`RowState`].
+/// Map a [`RosterActivity`] to the dashboard's coarse [`RowState`].
 /// Public so the dispatcher can gate roster-row deletion through the very
 /// same `RowState::allows_delete` predicate the renderer paints `[✗]` with.
 pub fn roster_activity_to_state(activity: RosterActivity) -> RowState {
@@ -264,7 +264,7 @@ pub fn roster_activity_to_state(activity: RosterActivity) -> RowState {
         RosterActivity::Dead => RowState::Failed,
     }
 }
-/// Append "roster-only" rows for leader sessions not represented by a
+/// Append "roster-only" rows for on-disk sessions not represented by a
 /// local `AgentView`. Skips any roster entry whose `session_id` already
 /// matches a locally-attached agent (those carry richer data via
 /// [`build_local_rows`]).

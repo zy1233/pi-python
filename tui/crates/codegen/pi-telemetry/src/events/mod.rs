@@ -1974,7 +1974,6 @@ pub struct NotificationEmitted {
 pub struct DashboardOpened {
     pub agents: usize,
     pub subagents: usize,
-    pub leader_mode: bool,
 }
 
 /// User pressed an allowlisted registry shortcut.

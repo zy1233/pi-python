@@ -61,14 +61,14 @@ unset_env = ["NO_COLOR"]
 TERM = "xterm-256color"
 COLORTERM = "truecolor"
 
-# `reference_passed` is the macOS result after the runtime removal (docs/baselines/tui.md); the
-# summary flags a Linux count that deviates by more than 5 %. `min_passed` (floor) is unset until
-# Linux numbers exist.
+# `reference_passed` is the macOS result after the runtime removal and the leader-residue cleanup
+# (docs/baselines/tui.md); the summary flags a Linux count that deviates by more than 5 %.
+# `min_passed` (floor) is unset until Linux numbers exist.
 
 [[test.suite]]
 package = "pi-shell"
 targets = ["--lib", "--test", "sandbox_requirements_pin", "--test", "test_config_update_isolation"]
-reference_passed = 1141 # 1136 lib + 2 + 3
+reference_passed = 1140 # 1135 lib + 2 + 3
 
 [[test.suite]]
 package = "pi-pager"
@@ -88,7 +88,7 @@ known_failures = [
     "render_footer_multiline_empty_create_uses_shift_or_alt_enter",
     "render_footer_multiline_mode_send_uses_shift_or_alt_enter",
 ]
-reference_passed = 8887 # 8606 lib + 277 + 2 + 2
+reference_passed = 8870 # 8589 lib + 277 + 2 + 2
 
 [[test.suite]]
 package = "pi-pager-bin"

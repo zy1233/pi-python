@@ -446,10 +446,6 @@ pub struct ConsentGate {
 /// - Callers can distinguish "server said false" from "server didn't say"
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct RemoteSettings {
-    /// When `Some(true)`, the server recommends enabling leader mode.
-    /// Used as a fallback when the user hasn't set `[cli] use_leader` locally.
-    #[serde(default)]
-    pub leader_mode: Option<bool>,
     #[serde(default)]
     pub max_upload_file_bytes: Option<u64>,
     #[serde(default)]
@@ -1342,10 +1338,14 @@ mod tests {
             serde_json::to_value(&WorktreeKindMaxAge::Never).unwrap(),
             serde_json::Value::String("never".into())
         );
-        let nested_bad = r#"{"leader_mode":true,"worktree_auto_gc":"not-an-object"}"#;
+        let nested_bad = r#"{"max_upload_file_bytes":4096,"worktree_auto_gc":"not-an-object"}"#;
         let s: RemoteSettings = serde_json::from_str(nested_bad).unwrap();
-        assert_eq!(s.leader_mode, Some(true));
+        assert_eq!(s.max_upload_file_bytes, Some(4096));
         assert_eq!(s.worktree_auto_gc, None);
+        // A retired field from an older server is ignored, not an error.
+        let retired = r#"{"leader_mode":true,"max_upload_file_bytes":8}"#;
+        let s: RemoteSettings = serde_json::from_str(retired).unwrap();
+        assert_eq!(s.max_upload_file_bytes, Some(8));
     }
     #[test]
     fn remote_settings_vendor_sessions_round_trip_and_default_absent() {

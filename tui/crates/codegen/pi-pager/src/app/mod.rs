@@ -75,7 +75,6 @@ use std::panic;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio_util::sync::CancellationToken;
 pub(crate) use turn_completion::CANCELLATION_CATEGORY_KEY;
-use pi_shell::util::config;
 /// Tracks the extra Kitty keyboard layer pushed while the `/gboom` game is
 /// open (see [`push_gboom_keyboard_flags`]). Kept separate from the base layer
 /// (`terminal::kitty_keyboard`) so teardown pops both, in LIFO order.
@@ -420,7 +419,7 @@ pub(crate) struct ExitSummary {
 }
 /// Join early prefetch to get remote settings (with timeout).
 ///
-/// Remote settings come from the product settings API and contain `leader_mode`,
+/// Remote settings come from the product settings API and contain
 /// announcements, etc.  Waits up to 2 s for the background thread.
 pub fn join_early_prefetch(
     handle: Option<pi_shell::agent::models::EarlyPrefetchHandle>,
@@ -461,21 +460,18 @@ struct ConnectFailure {
     outcome: crate::acp::StartupOutcome,
     error: anyhow::Error,
     timeout_secs: Option<u64>,
-    longest_step: Option<crate::acp::StartupPhase>,
 }
 /// Bound connect so a hung agent spawn cannot blank-screen forever.
 async fn bounded_connect(
     cancel: &CancellationToken,
     timeout: std::time::Duration,
     target: crate::acp::AgentKind,
-    attempt: startup_failure::ConnectAttempt,
     timer: &crate::acp::StartupTimer,
     connect: impl std::future::Future<Output = anyhow::Result<crate::acp::AcpConnection>>,
 ) -> Result<crate::acp::AcpConnection, ConnectFailure> {
     use crate::acp::StartupOutcome;
     let context = || startup_failure::Context {
         target,
-        attempt,
         version: pi_version::display_version_with_commit(
             pi_version::full_version(),
             pi_update::channel_label(),
@@ -488,17 +484,14 @@ async fn bounded_connect(
             outcome: StartupOutcome::Cancelled,
             error: anyhow::Error::new(startup_failure::StartupFailure::cancelled(context())),
             timeout_secs: None,
-            longest_step: None,
         }),
         connected = connect => connected.map_err(|error| ConnectFailure {
             outcome: StartupOutcome::Error,
             error,
             timeout_secs: None,
-            longest_step: None,
         }),
         () = tokio::time::sleep(timeout) => {
             let timings = timer.phase_snapshot();
-            let longest_step = timings.longest_step();
             // `connect_target`: tracing reserves bare `target=`.
             tracing::error!(
                 connect_target = target.label(),
@@ -516,7 +509,6 @@ async fn bounded_connect(
                     timings,
                 )),
                 timeout_secs: Some(timeout.as_secs()),
-                longest_step,
             })
         }
     }
@@ -782,7 +774,6 @@ pub async fn run(
         &cancel,
         connect_ui_timeout,
         connect_target,
-        startup_failure::ConnectAttempt::First,
         &timer,
         async { crate::acp::connect(&cancel, connect_flags).await },
     )

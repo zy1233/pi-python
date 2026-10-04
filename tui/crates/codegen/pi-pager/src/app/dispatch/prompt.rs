@@ -27,9 +27,6 @@ use crate::slash::command::DoctorRequest;
 use agent_client_protocol as acp;
 use pi_telemetry::session_ctx::log_event;
 
-/// Shared by every submit guard that refuses while the session reconnects.
-pub(super) const RECONNECTING_NOTICE: &str = "Reconnecting, please wait...";
-
 /// Chat kind for the next create: CLI `--chat` (`app.chat_mode`) or one-shot
 /// `/chat` (`deferred_startup.pending_chat`, consumed here).
 pub(super) fn consume_chat_kind(app: &mut AppView) -> bool {
@@ -446,11 +443,6 @@ pub(super) fn dispatch_send_prompt_inner(
         text
     };
 
-    if app.reconnect_pending {
-        app.show_toast(RECONNECTING_NOTICE);
-        return vec![];
-    }
-
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };
@@ -468,7 +460,6 @@ pub(super) fn dispatch_send_prompt_inner(
     let voice_stt_language_from_app = app.voice_config.language.clone();
     let scheduler_background_loops_seed = app.scheduler_background_loops_seed;
     let login_method_id_from_app = app.login_method_id.as_ref().map(|id| id.0.to_string());
-    let leader_mode = app.leader_mode;
     let Some(agent) = app.agents.get_mut(&id) else {
         return vec![];
     };
@@ -783,11 +774,10 @@ pub(super) fn dispatch_send_prompt_inner(
         //
         // A follow-up chip submission supersedes the current response's
         // suggestions: clear the visible chips here — INSIDE the send/enqueue
-        // path, after the `reconnect_pending` and active-agent early-return
-        // guards — so the chips are cleared ONLY when the suggestion actually
-        // sends/enqueues. Placing it before those guards (the prior fix) cleared
-        // the chips even when `reconnect_pending` aborted with a toast and no
-        // send, losing both the chips and the submit. This single clear covers
+        // path, after the active-agent early-return guard — so the chips are
+        // cleared ONLY when the suggestion actually sends/enqueues. Clearing
+        // them before the guard would lose the chips even when no send happens
+        // (e.g. the agent is gone). This single clear covers
         // BOTH the immediate-send and enqueue subpaths below; `clear_follow_ups`
         // is idempotent (so the immediate-send branch's own clear is a no-op)
         // and keeps `follow_up_seen` (a stale re-delivery stays rejected).
@@ -814,7 +804,7 @@ pub(super) fn dispatch_send_prompt_inner(
             .recognized_token_ranges(&text, &agent.session.models);
 
         let immediate_server_send =
-            immediate_server_send_eligible(agent, leader_mode) && agent.prompt.images.is_empty();
+            immediate_server_send_eligible(agent) && agent.prompt.images.is_empty();
         tracing::debug!(
             target: "qtrace",
             pid = std::process::id(),
@@ -836,7 +826,7 @@ pub(super) fn dispatch_send_prompt_inner(
 
         // Images can't ride immediate server-send; empty-held park still send-nows.
         if !immediate_server_send
-            && immediate_server_send_eligible(agent, leader_mode)
+            && immediate_server_send_eligible(agent)
             && !agent.prompt.images.is_empty()
             && parked_sendable_wait
             && !hold_behind_existing_queue
@@ -964,15 +954,9 @@ pub(super) fn dispatch_send_prompt_inner(
 /// just with `QueueEntryKind::BashCommand`. No scrollback block is pushed here;
 /// the execute block from the shell IS the visual entry.
 pub(super) fn dispatch_send_bash_command(app: &mut AppView, command: String) -> Vec<Effect> {
-    if app.reconnect_pending {
-        app.show_toast(RECONNECTING_NOTICE);
-        return vec![];
-    }
-
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };
-    let leader_mode = app.leader_mode;
     let Some(agent) = app.agents.get_mut(&id) else {
         return vec![];
     };
@@ -990,7 +974,7 @@ pub(super) fn dispatch_send_bash_command(app: &mut AppView, command: String) -> 
     // into the shared queue with `kind="bash"`. On `running_prompt_id`
     // adoption the turn-start shim sets `bash_turn` (no user block). The IDLE
     // case is unchanged: enqueue locally + drain instantly.
-    let bash_immediate = immediate_server_send_eligible(agent, leader_mode);
+    let bash_immediate = immediate_server_send_eligible(agent);
     tracing::debug!(
         target: "qtrace",
         pid = std::process::id(),
@@ -1501,12 +1485,6 @@ pub(super) fn handle_prompt_response(
         // through the same drain path as normal completions.
         // `maybe_drain_queue` keeps the idle-only and editing-front
         // guards so we do not send from under the user.
-        if app.reconnect_pending {
-            if let Some(p) = pending_adoption {
-                agent.discard_pending_adoption_updates(&p.prompt_id);
-            }
-            return vec![];
-        }
 
         // Credit-limit (403 legacy / 402 pool): strip stale error
         // blocks, then do a one-shot subscription re-check. If the
@@ -1673,9 +1651,6 @@ pub(super) fn handle_compact_complete(
         agent.activity_started_at = None;
         agent.last_activity = None;
 
-        if app.reconnect_pending {
-            return vec![];
-        }
         let drain = maybe_drain_queue(agent);
         note_peek_page_flip(app, agent_id, drain.page_flip_entry);
         return drain.effects;

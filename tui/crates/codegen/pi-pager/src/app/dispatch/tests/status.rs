@@ -2,17 +2,18 @@
 
 use super::*;
 
-/// Regression (leader-mode turn-end race): when this client is briefly Idle
+/// Regression (Steer turn-end race): when this client is briefly Idle
 /// (`is_turn_running() == false`, `current_prompt_id` cleared) but the server
 /// still has queued prompts — visible as a non-empty `shared_queue` mirror —
 /// a newly-sent prompt must route to the SERVER (immediate-send), NOT be
 /// locally drained as a phantom running turn. The failure mode: a
 /// `send_route_plain immediate=false is_turn_running=false shared_queue_len=5`
 /// path taking `local_drain`, leaving the prompt shown running on the sender
-/// while it was actually queued behind the existing entries on the leader and
+/// while it was actually queued behind the existing entries on the agent and
 /// every other client.
 #[test]
 fn send_while_idle_with_nonempty_shared_queue_routes_to_server() {
+    let _steer = SteerFollowUp::enter();
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     // Two prompts already queued on the server (as a broadcast would leave

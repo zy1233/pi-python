@@ -358,8 +358,8 @@ impl VoiceState {
         matches!(self, Self::ColdStart { hold, .. } | Self::Recording { hold, .. } if *hold)
     }
 }
-/// Entry from the session list wire: welcome/resume pickers and non-leader
-/// dashboard roster fallback (`session_picker_entry_to_roster`).
+/// Entry from the session list wire: welcome/resume pickers and the
+/// dashboard's roster rows (`session_picker_entry_to_roster`).
 #[derive(Debug, Clone)]
 pub struct SessionPickerEntry {
     pub id: String,
@@ -381,7 +381,7 @@ pub struct SessionPickerEntry {
     pub worktree_label: Option<String>,
     /// Per-turn secondary line (`lastTurnSummary` on the session/list wire).
     /// Shown as the "Last turn" line on the expanded resume card and used for
-    /// non-leader dashboard roster rows.
+    /// dashboard roster rows.
     pub last_turn_summary: Option<String>,
     /// Latest session recap (`lastRecap` on the session/list wire), shown on the
     /// expanded resume card whenever available. Distinct from `last_turn_summary`.
@@ -737,12 +737,6 @@ pub struct AppView {
     /// and fanned out to every slash registry (welcome prompt, agents,
     /// dashboard); deny wins over all other visibility gates.
     pub tier_restricted_commands: Vec<String>,
-    /// Legacy gate for the fleet dashboard entry points (`/dashboard`,
-    /// `Ctrl+\`, the startup hook). It was set from the shared-leader
-    /// connection, which no longer exists, so it is always `false` and the
-    /// dashboard stays hidden. Removing the dashboard + roster code is tracked
-    /// in the Rust-runtime-removal plan.
-    pub leader_mode: bool,
     /// App-level credit balance used to show the usage warning on the
     /// welcome screen before any agent session exists.
     pub credit_balance: Option<crate::views::credit_bar::CreditBalance>,
@@ -750,23 +744,19 @@ pub struct AppView {
     pub auto_topup: Option<crate::views::credit_bar::AutoTopupInfo>,
     /// Periodic billing poll requested (credits >= 99%).
     pub billing_poll_wanted: bool,
-    /// Leader-mode session roster (FleetView dashboard). Populated from
- /// `legacy ext RPC` polls and `legacy ext RPC` broadcasts.
-    /// Empty in non-leader mode, which naturally gates roster rendering.
-    pub leader_roster: Vec<crate::app::roster::RosterEntry>,
     /// Local on-disk session list (dormant/idle sessions) surfaced on the
-    /// dashboard when NOT in leader mode. There is no live leader roster to
- /// poll outside leader mode, so we fetch the same `legacy ext RPC` the
-    /// resume picker uses and render those as idle rows. Entries are stored as
-    /// [`crate::app::roster::RosterEntry`] (activity `Dormant`) so they reuse
-    /// the existing roster-row rendering / attach path. Empty in leader mode.
+    /// dashboard: the same list the resume picker uses, rendered as idle
+    /// rows. Entries are stored as [`crate::app::roster::RosterEntry`]
+    /// (activity `Dormant`) so they reuse the roster-row rendering / attach
+    /// path.
     pub dashboard_local_sessions: Vec<crate::app::roster::RosterEntry>,
-    /// Whether the dashboard is currently loading local sessions (non-leader mode).
+    /// Whether the dashboard is currently loading the local session list.
     pub dashboard_sessions_loading: bool,
     /// Server-authoritative shared prompt queues, keyed by `sessionId`
  /// Reconciled from `legacy ext RPC` broadcasts so
     /// every client renders the same ordered queue (including prompts queued
-    /// by other clients). Empty in non-leader mode.
+    /// by other clients). Empty until a prompt is queued server-side
+    /// (follow-up Steer).
     pub shared_prompt_queues:
         std::collections::HashMap<String, Vec<crate::app::prompt_queue::QueueEntryWire>>,
     /// Optimistic echo rows for prompts the pager sent server-authoritatively
@@ -1191,8 +1181,6 @@ pub struct AppView {
     pub pending_gate_verification: Option<pi_shell::auth::GateInfo>,
     /// Generation stamp of the current gate verification.
     pub gate_verify_gen: u64,
-    /// Whether a leader reconnect is in progress (blocks prompt submission).
-    pub reconnect_pending: bool,
     /// Structured startup warnings collected from the terminal diagnostics
     /// engine at launch. Empty when the environment is healthy.
     pub startup_warnings: Vec<crate::startup::StartupWarning>,
@@ -1674,7 +1662,6 @@ impl AppView {
             subscription_watch_interval_secs: None,
             pending_gate_verification: None,
             gate_verify_gen: 0,
-            reconnect_pending: false,
             startup_warnings: Vec::new(),
             is_api_key_auth: false,
             pending_update_version: None,
@@ -1695,11 +1682,9 @@ impl AppView {
             usage_visible: true,
             has_external_auth_provider: false,
             tier_restricted_commands: Vec::new(),
-            leader_mode: false,
             credit_balance: None,
             auto_topup: None,
             billing_poll_wanted: false,
-            leader_roster: Vec::new(),
             dashboard_local_sessions: Vec::new(),
             dashboard_sessions_loading: false,
             shared_prompt_queues: std::collections::HashMap::new(),
@@ -2119,34 +2104,6 @@ impl AppView {
                     std::time::Instant::now() + WELCOME_TOAST_DURATION,
                 ));
             }
-        }
-    }
-    /// Insert or replace a leader roster entry, keyed by `session_id`.
-    pub fn upsert_roster_entry(&mut self, entry: crate::app::roster::RosterEntry) {
-        if let Some(existing) = self
-            .leader_roster
-            .iter_mut()
-            .find(|e| e.session_id == entry.session_id)
-        {
-            *existing = entry;
-        } else {
-            self.leader_roster.push(entry);
-        }
-    }
-    /// Remove a leader roster entry by `session_id`.
-    pub fn remove_roster_entry(&mut self, sid: &str) {
-        self.leader_roster.retain(|e| e.session_id != sid);
-    }
-    /// The roster source the dashboard renders alongside locally-hosted
-    /// agents. In leader mode this is the live leader roster (FleetView). With
-    /// no leader there is nothing to poll, so we fall back to the local
-    /// on-disk session list ([`Self::dashboard_local_sessions`]) so the
-    /// dashboard still shows idle/dormant sessions instead of being empty.
-    pub fn dashboard_roster(&self) -> &[crate::app::roster::RosterEntry] {
-        if self.leader_mode {
-            &self.leader_roster
-        } else {
-            &self.dashboard_local_sessions
         }
     }
     /// Reconcile the shared prompt queue for a session from a
@@ -5022,11 +4979,7 @@ impl AppView {
                                 }
                             }
                             let dashboard_roster: &[crate::app::roster::RosterEntry] =
-                                if self.leader_mode {
-                                    &self.leader_roster
-                                } else {
-                                    &self.dashboard_local_sessions
-                                };
+                                &self.dashboard_local_sessions;
                             let dash_upgrade_cta = crate::views::announcements::promo_cta(
                                 &self.active_announcements,
                                 &self.hidden_announcement_ids,
