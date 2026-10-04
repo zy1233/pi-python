@@ -24,10 +24,6 @@ use pi_workspace::permission::ClientType;
 /// Per-attempt ceiling for a startup `/settings` or `/v1/models` fetch; raising
 /// it delays how soon the background refresh gives up and retries.
 pub const STARTUP_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-/// Cap on non-interactive boot auth (token refresh or cold-start mint); a mint
-/// that exceeds it leaves the leader session-less and is retried off the
-/// readiness path.
-pub const STARTUP_AUTH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 /// Ceiling on a single startup token-refresh round trip, kept separate from
 /// `STARTUP_FETCH_TIMEOUT` so the two tune independently; on timeout the caller
 /// proceeds with cached or no credentials and re-auths later.

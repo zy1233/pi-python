@@ -10,10 +10,11 @@ pub mod context;
 /// `clientCapabilities._meta`. Absent means off.
 pub const STATUS_LINE_CAPABILITY: &str = "x.ai/statusLine";
 
-/// The per-session spelling of [`STATUS_LINE_CAPABILITY`], injected by a leader
-/// into `session/new`, `session/load` and `session/resume` `_meta`. A leader
-/// multiplexes clients, so the answer travels with the session, not the
-/// process.
+/// The per-session spelling of [`STATUS_LINE_CAPABILITY`], for the `_meta` of
+/// `session/new`, `session/load` and `session/resume` when one agent process
+/// serves several clients, so the answer travels with the session, not the
+/// process. Nothing in this workspace reads or writes it since the Rust agent
+/// runtime was removed.
 pub const CLIENT_STATUS_LINE_META: &str = "clientStatusLine";
 
 /// Re-exported to the root, where a caller looks for it, from the module whose
