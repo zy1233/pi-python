@@ -196,120 +196,12 @@ pub(crate) struct RunResult {
     pub relaunch: Option<super::app_view::ScreenModeRelaunch>,
 }
 
-/// In-flight reconnect re-initialization, tied to the agents whose reload
-/// windows it opened so completion lands on them even if the user switches
-/// views (or closes one) while the re-init runs.
-struct ReconnectReinit {
-    rx: tokio::sync::oneshot::Receiver<ReinitOutcome>,
-    /// Agents being reloaded, active tab first; empty when the reconnect
-    /// happened with no open sessions (init/auth are still re-run).
-    agent_ids: Vec<super::agent::AgentId>,
-    /// Reconnect generation that opened the reload windows.
-    generation: u64,
-}
 
-/// Result of a reconnect re-initialization task.
-struct ReinitOutcome {
-    /// Whether initialize/authenticate succeeded; when false no load was
-    /// attempted and `loads` is empty (every window finalizes as failed).
-    init_ok: bool,
-    loads: Vec<AgentLoadOutcome>,
-}
 
-/// Per-agent `session/load` outcome from the re-init task.
-struct AgentLoadOutcome {
-    agent_id: super::agent::AgentId,
-    success: bool,
- /// `legacy ext RPC` from the reload response: the turn another
-    /// client is driving mid-reconnect, adopted at finalize (mirrors the
-    /// `SessionLoaded` adoption in `dispatch.rs`).
-    running_prompt_id: Option<String>,
- /// `legacy ext RPC` from the reload response. A reconnect
-    /// re-spawns the session actor, which re-pins the fire mode, so the
-    /// pre-reconnect value can be stale — adopt the reloaded one or `/loop`
-    /// describes a runtime the new actor will not use.
-    scheduler_background_loops: Option<bool>,
-}
 
-/// Fields of the reconnect `session/load`, derived from the agent being
-/// reloaded. `None` when the agent has no session yet.
-struct ReconnectLoadPlan {
-    session_id: acp::SessionId,
-    /// The session's own cwd — its on-disk storage key — falling back to the
-    /// pager cwd only when unset. The pager cwd only matches sessions started
-    /// in it; worktree/cross-cwd sessions would fail to reload.
-    cwd: std::path::PathBuf,
-    /// `yoloMode` plus the optional reconnect `cursor`: the agent replays
-    /// only the post-cursor tail (as live updates) when it finds the eventId,
-    /// and full-replays when it doesn't.
-    meta: serde_json::Value,
-}
 
-fn restore_dashboard_peek_before_reload(
-    dashboard: &mut Option<crate::views::dashboard::DashboardState>,
-    agents: &mut indexmap::IndexMap<super::agent::AgentId, super::agent_view::AgentView>,
-) {
-    if let Some(dashboard) = dashboard.as_mut() {
-        dashboard.restore_peek_viewport(agents);
-    }
-}
 
-fn plan_reconnect_load(
-    agent: &super::agent_view::AgentView,
-    fallback_cwd: &std::path::Path,
-) -> Option<ReconnectLoadPlan> {
-    let session_id = agent.session.session_id.clone()?;
-    let cwd = if agent.session.cwd.as_os_str().is_empty() {
-        fallback_cwd.to_path_buf()
-    } else {
-        agent.session.cwd.clone()
-    };
-    let yolo = agent.session.is_yolo();
-    // Set BOTH yoloMode and autoMode explicitly. The leader's capability injection
-    // only fills ABSENT keys, so omitting autoMode here lets a stale launch-time
-    // `ClientCapabilities.auto_mode` re-enable Auto after the user left it (e.g.
-    // Shift+Tab to Ask). Auto is per-agent (symmetric with yolo) — derive it from
-    // this agent's own `auto_mode` so a background tab reconnects with ITS mode,
-    // not the active tab's global `current_ui` mirror.
-    let auto = super::dispatch::effective_auto(yolo, agent.session.is_auto());
-    let mut meta = serde_json::json!({ "yoloMode": yolo, "autoMode": auto });
-    if let Some(ref cursor) = agent.last_seen_event_id {
-        meta["cursor"] = serde_json::Value::String(cursor.clone());
-    }
-    Some(ReconnectLoadPlan {
-        session_id,
-        cwd,
-        meta,
-    })
-}
 
-/// Resolve the two post-reconnect restore outcomes from the per-agent
-/// `session/load` results.
-///
-/// - `all_restored` (AND across every reloaded tab, plus `init_ok`) drives the
-///   user-facing toast: it reports whether the WHOLE reconnect came back.
-/// - `active_restored` is per-agent: the ACTIVE tab's OWN reload succeeded. It
-///   gates that tab's post-reconnect queue drain. Gating the drain on
-///   `all_restored` would let one failed background tab strand prompts queued
-///   on a healthy active tab — the drain (`dispatch_drain_queue`) only ever
-///   touches the active agent, so a background failure has no bearing on it.
-///
-/// `loads` maps each reloaded agent to `(success, running_prompt_id)`; an agent
-/// in `pending_agent_ids` but absent from `loads` is treated as failed
-/// (mirrors the `unwrap_or((false, _))` at the finalize site).
-fn reconnect_restore_outcome(
-    init_ok: bool,
-    pending_agent_ids: &[super::agent::AgentId],
-    loads: &std::collections::HashMap<super::agent::AgentId, (bool, Option<String>, Option<bool>)>,
-    active_agent_id: Option<super::agent::AgentId>,
-) -> (bool, bool) {
-    let load_ok =
-        |id: &super::agent::AgentId| -> bool { loads.get(id).is_some_and(|(ok, ..)| *ok) };
-    let all_restored = init_ok && pending_agent_ids.iter().all(load_ok);
-    let active_restored = init_ok
-        && active_agent_id.is_some_and(|aid| pending_agent_ids.contains(&aid) && load_ok(&aid));
-    (all_restored, active_restored)
-}
 
 /// Compute the folder-trust verdict for the session cwd and seed
 /// [`AppView::trust_state`]. Pager-side mirror of the agent's resolve: read the
@@ -1081,11 +973,6 @@ pub(crate) async fn run(
     // Startup terminal height for the auto-compact derivation; kept fresh by
     // `Event::Resize` from here on. 0 (probe failure) never forces compact.
     app.last_known_terminal_rows = crossterm::terminal::size().map(|(_, r)| r).unwrap_or(0);
-    // Leader mode: a live `leader_status_rx` means the pager is connected via a
-    // leader. The dashboard itself is NOT gated on this flag (it renders local
-    // sessions regardless); `leader_mode` only controls whether we additionally
-    // poll the leader roster (see the roster-poll arm below).
-    app.leader_mode = connection.leader_status_rx.is_some();
     app.screen_mode = term_state.screen_mode;
     // `AppView::new` precedes the terminal's resolved screen mode. Rebuild the
     // registry at this I/O boundary; the later config-aware rebuild preserves
@@ -1167,8 +1054,8 @@ pub(crate) async fn run(
     }
     app.restore_code = args.restore_code.then_some(true);
     if let Some(ref agent) = args.agent {
-        match crate::headless::resolve_agent_arg(agent) {
-            crate::headless::ResolvedAgent::FilePath(path) => {
+        match super::cli::resolve_agent_arg(agent) {
+            super::cli::ResolvedAgent::FilePath(path) => {
                 match pi_shell::agent::config::AgentDefinition::from_file(&path) {
                     Ok(def) => app.agent_override = Some(def.to_json_value()),
                     Err(e) => {
@@ -1176,7 +1063,7 @@ pub(crate) async fn run(
                     }
                 }
             }
-            crate::headless::ResolvedAgent::Name(name) => {
+            super::cli::ResolvedAgent::Name(name) => {
                 app.agent_override = Some(serde_json::Value::String(name));
             }
         }
@@ -1934,7 +1821,6 @@ pub(crate) async fn run(
     });
     let mut acp_rx = connection.rx;
     let connection_cancel = connection.cancel;
-    let mut leader_status_rx = connection.leader_status_rx;
     let mut tasks: JoinSet<TaskResult> = JoinSet::new();
     let mut session_load_barrier = SessionLoadBarrier::new();
     let mut acp_peek: Option<AcpClientMessage> = None;
@@ -2245,13 +2131,6 @@ pub(crate) async fn run(
     // unbounded drain during a token firehose.
     const ACP_DRAIN_BATCH_MAX: usize = 32;
 
-    let mut reconnect_reinit: Option<ReconnectReinit> = None;
-    let mut reconnect_abort_handle: Option<tokio::task::AbortHandle> = None;
-    // Highest `Connected` generation already handled. Starts at 0 — the
-    // initial pre-reconnect watch value — so startup never triggers a reload;
-    // any greater generation is a reconnect, even when the intermediate
-    // `Reconnecting` state was coalesced away by the watch channel.
-    let mut last_leader_generation: u64 = 0;
 
     // Persistent CSI fragment filter — carries parsing state across
     // drain_and_process calls so a mouse report split across batches is still
@@ -2570,9 +2449,9 @@ pub(crate) async fn run(
         tokio::select! {
             biased;
 
-            // Leader disconnect: the bridge fires cancel when the IPC
-            // channel closes.  Without this arm the loop would hang
-            // because AppView holds the client-side tx, keeping acp_rx open.
+            // Agent disconnect: the stdio bridge fires cancel when the agent
+            // process exits.  Without this arm the loop would hang because
+            // AppView holds the client-side tx, keeping acp_rx open.
             _ = connection_cancel.cancelled() => {
                 break;
             }
@@ -2938,11 +2817,7 @@ pub(crate) async fn run(
                 // idle-session list so the dashboard still shows idle sessions.
                 let dashboard_open = matches!(app.active_view, ActiveView::AgentDashboard);
                 if dashboard_open {
-                    let eff = if leader_status_rx.is_some() {
-                        Effect::FetchRoster
-                    } else {
-                        Effect::FetchDashboardSessions
-                    };
+                    let eff = Effect::FetchDashboardSessions;
                     if process_effects(vec![eff], &mut tasks, &mut app, &progress_tx) {
                         break;
                     }
@@ -3019,333 +2894,6 @@ pub(crate) async fn run(
                         presenter.request(false);
                     }
                 }
-            }
-
-            // Leader connection status changes (reconnect lifecycle).
-            Ok(()) = async {
-                match leader_status_rx.as_mut() {
-                    Some(rx) => rx.changed().await.map_err(|_| ()),
-                    None => std::future::pending::<Result<(), ()>>().await,
-                }
-            } => {
-                use crate::acp::leader_bridge::ConnectionStatus;
-
-                let Some(rx) = leader_status_rx.as_mut() else {
-                    // Guard: the async block above pends when None, but
-                    // defensive code should never .unwrap() in production.
-                    continue;
-                };
-                let status = rx.borrow_and_update().clone();
-                match status {
-                    ConnectionStatus::Reconnecting { attempt } => {
-                        // Unified-log marker: an IPC reconnect mints a new leader-side
-                        // ClientId, which orphans responses to this client's in-flight
-                        // RPCs and drops outbound lines held across the swap — the
-                        // root trigger of the stuck-cancel bug.
-                        // Without this marker the reconnect is invisible in the
-                        // unified log (it only surfaced as ghost `session loaded`
-                        // replays with no matching `session.load.start`).
-                        crate::unified_log::warn(
-                            "leader.ipc.reconnecting",
-                            None,
-                            Some(serde_json::json!({ "attempt": attempt })),
-                        );
-                        app.show_toast(&format!(
-                            "Disconnected. Reconnecting... (attempt {attempt})"
-                        ));
-                        presenter.request(false);
-                    }
-                    ConnectionStatus::Connected { generation }
-                        if generation > last_leader_generation =>
-                    {
-                        crate::unified_log::warn(
-                            "leader.ipc.reconnected",
-                            None,
-                            Some(serde_json::json!({
-                                "generation": generation,
-                                "open_sessions": app
-                                    .agents
-                                    .values()
-                                    .filter_map(|a| {
-                                        a.session.session_id.as_ref().map(|s| s.0.to_string())
-                                    })
-                                    .collect::<Vec<_>>(),
-                            })),
-                        );
-                        last_leader_generation = generation;
-                        app.reconnect_pending = true;
-                        // Connection-scoped: a re-elected shell reseeds its push gen from wall clock,
-                        // so a surviving higher watermark would silently drop its fresh pushes.
-                        app.announcements_last_gen = 0;
-
-                        // Cancel any in-flight re-init from a previous reconnect
-                        // cycle and restore those agents' stashed transcripts —
-                        // their load requests rode the now-dead connection.
-                        if let Some(handle) = reconnect_abort_handle.take() {
-                            handle.abort();
-                        }
-                        if let Some(prev) = reconnect_reinit.take() {
-                            restore_dashboard_peek_before_reload(
-                                &mut app.dashboard,
-                                &mut app.agents,
-                            );
-                            for prev_id in prev.agent_ids {
-                                if let Some(agent) = app.agents.get_mut(&prev_id) {
-                                    agent.finish_session_reload(prev.generation, false);
-                                }
-                            }
-                        }
-
-                        // Open a reload window on EVERY agent with a session
-                        // (active tab first so the visible one restores
-                        // fastest): a freshly (re-)elected leader has no
-                        // sessions in memory, so reloading only the active
-                        // session would leave every other tab on a session id
-                        // the new leader has never seen ("unknown session id"
-                        // on its next prompt). Replay is staged into fresh
-                        // state per agent and each existing transcript stays
-                        // recoverable until its load outcome is known.
-                        let fallback_cwd = app.cwd.clone();
-                        let active_agent_id = match app.active_view {
-                            ActiveView::Agent(id) => Some(id),
-                            _ => None,
-                        };
-                        let mut agent_ids: Vec<super::agent::AgentId> =
-                            app.agents.keys().copied().collect();
-                        agent_ids.sort_by_key(|id| Some(*id) != active_agent_id);
-                        let mut reload_agent_ids = Vec::new();
-                        let mut load_plans = Vec::new();
-                        restore_dashboard_peek_before_reload(
-                            &mut app.dashboard,
-                            &mut app.agents,
-                        );
-                        for id in agent_ids {
-                            let Some(agent) = app.agents.get_mut(&id) else {
-                                continue;
-                            };
-                            let Some(plan) = plan_reconnect_load(agent, &fallback_cwd) else {
-                                continue;
-                            };
-                            // Keep the per-session display flag in lockstep with the
-                            // enforcement value (`autoMode`) we just re-seeded on this
-                            // agent (yolo wins, computed inside `plan_reconnect_load`).
-                            agent.session.auto_mode =
-                                plan.meta["autoMode"].as_bool().unwrap_or(false);
-                            agent.begin_session_reload(generation);
-                            // The reload adoption supersedes a pre-disconnect stash.
-                            app.pending_running_adoptions.remove(&id);
-                            reload_agent_ids.push(id);
-                            load_plans.push((id, plan));
-                        }
-                        let any_reload = !reload_agent_ids.is_empty();
-                        // Per-agent `auto_mode` was just re-seeded from the reload
-                        // meta; keep `/auto` feature-gate slash visibility in sync.
-                        app.sync_permission_mode_slash_gate();
-
-                        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
-                        reconnect_reinit = Some(ReconnectReinit {
-                            rx: done_rx,
-                            agent_ids: reload_agent_ids,
-                            generation,
-                        });
-
-                        let acp_tx = app.acp_tx.clone();
-                        let join_handle = tokio::spawn(async move {
-                            // 30 s for initialize/authenticate plus a budget per
-                            // session/load (each load replays history and may
-                            // respawn MCP servers on the new leader).
-                            let timeout = Duration::from_secs(
-                                (30 + 30 * load_plans.len() as u64).min(300),
-                            );
-
-                            // Inner result: `None` = init/auth failure (no
-                            // load was attempted); `Some(loads)` = per-agent
-                            // load outcomes with the optional mid-turn running
-                            // prompt id from each reload response.
-                            let ok = tokio::time::timeout(timeout, async {
-                                let init_req = acp::InitializeRequest::new(acp::ProtocolVersion::V1).client_capabilities(acp::ClientCapabilities::new().fs(acp::FileSystemCapabilities::new()).terminal(false)).meta(serde_json::json!({
-                                        "clientType": PAGER_CLIENT_TYPE,
-                                        "clientVersion": PAGER_CLIENT_VERSION,
-                                    }).as_object().cloned());
-                                if let Err(e) = acp_send(init_req, &acp_tx).await {
-                                    tracing::error!(error = %e, "reconnect: re-initialize failed");
-                                    return None;
-                                }
-
-                                let auth_req = acp::AuthenticateRequest::new(acp::AuthMethodId::new(crate::obf::auth::CACHED_TOKEN!()));
-                                if let Err(e) = acp_send(auth_req, &acp_tx).await {
-                                    tracing::warn!(error = %e, "reconnect: re-authenticate failed");
-                                }
-
-                                let mut loads = Vec::with_capacity(load_plans.len());
-                                for (agent_id, plan) in load_plans {
-                                    // Reconnect path — no resolved compat in scope; default
-                                    // (all-on) preserves existing behavior.
-                                    let mcp_servers = pi_shell::util::config::load_mcp_servers(
-                                        &plan.cwd,
-                                        &pi_tools::types::compat::CompatConfig::default(),
-                                    );
-                                    let load_req = acp::LoadSessionRequest::new(plan.session_id, plan.cwd).mcp_servers(mcp_servers).meta(plan.meta.as_object().cloned());
-                                    match acp_send(load_req, &acp_tx).await {
-                                        Ok(resp) => {
-                                            loads.push(AgentLoadOutcome {
-                                                agent_id,
-                                                success: true,
-                                                running_prompt_id:
-                                                    effects::parse_session_load_running_prompt_id(
-                                                        resp.meta.as_ref(),
-                                                    ),
-                                                scheduler_background_loops:
-                                                    effects::parse_session_scheduler_background_loops(
-                                                        resp.meta.as_ref(),
-                                                    ),
-                                            });
-                                        }
-                                        Err(e) => {
-                                            tracing::error!(error = %e, "reconnect: reload session failed");
-                                            // Keep restoring the remaining sessions —
-                                            // one broken session must not doom the rest.
-                                            loads.push(AgentLoadOutcome {
-                                                agent_id,
-                                                success: false,
-                                                running_prompt_id: None,
-                                                scheduler_background_loops: None,
-                                            });
-                                        }
-                                    }
-                                }
-                                Some(loads)
-                            })
-                            .await;
-
-                            let outcome = match ok {
-                                Ok(Some(loads)) => ReinitOutcome {
-                                    init_ok: true,
-                                    loads,
-                                },
-                                Ok(None) => ReinitOutcome {
-                                    init_ok: false,
-                                    loads: Vec::new(),
-                                },
-                                Err(_) => {
-                                    tracing::error!("reconnect re-initialization timed out");
-                                    ReinitOutcome {
-                                        init_ok: false,
-                                        loads: Vec::new(),
-                                    }
-                                }
-                            };
-                            let _ = done_tx.send(outcome);
-                        });
-                        reconnect_abort_handle = Some(join_handle.abort_handle());
-
-                        app.show_toast(if any_reload {
-                            "Reconnected. Reloading session..."
-                        } else {
-                            "Reconnected. Re-initializing..."
-                        });
-                        presenter.request(false);
-                    }
-                    ConnectionStatus::Failed { ref error } => {
-                        app.show_toast(&format!("Connection failed: {error}"));
-                        presenter.request(false);
-                    }
-                    _ => {}
-                }
-            }
-
-            // Reconnect re-initialization completed (or failed).
-            result = async {
-                match reconnect_reinit.as_mut() {
-                    Some(pending) => (&mut pending.rx).await,
-                    None => std::future::pending::<Result<ReinitOutcome, _>>().await,
-                }
-            } => {
-                let Some(pending) = reconnect_reinit.take() else {
-                    continue;
-                };
-                reconnect_abort_handle = None;
-                app.reconnect_pending = false;
-
-                let outcome = match result {
-                    Ok(outcome) => outcome,
-                    Err(_) => {
-                        tracing::error!("reconnect re-init task failed (sender dropped)");
-                        ReinitOutcome { init_ok: false, loads: Vec::new() }
-                    }
-                };
-
-                // Finalize the reload windows on the agents the re-init was
-                // started for — NOT whatever view is active now (see
-                // `SessionReload` for the outcome handling). Each window
-                // resolves on ITS load outcome (one broken session must not
-                // discard the other tabs' replayed transcripts), then a
-                // mid-reconnect running turn is adopted, mirroring the
-                // `SessionLoaded` adoption in dispatch.rs.
-                let mut loads: std::collections::HashMap<_, _> = outcome
-                    .loads
-                    .into_iter()
-                    .map(|l| {
-                        (
-                            l.agent_id,
-                            (l.success, l.running_prompt_id, l.scheduler_background_loops),
-                        )
-                    })
-                    .collect();
-                // Resolved BEFORE the finalize loop drains `loads` via `remove`
-                // (see `reconnect_restore_outcome`).
-                let active_agent_id = match app.active_view {
-                    ActiveView::Agent(id) => Some(id),
-                    _ => None,
-                };
-                let (restored, active_restored) = reconnect_restore_outcome(
-                    outcome.init_ok,
-                    &pending.agent_ids,
-                    &loads,
-                    active_agent_id,
-                );
-                restore_dashboard_peek_before_reload(&mut app.dashboard, &mut app.agents);
-                for id in &pending.agent_ids {
-                    let (ok, running_prompt_id, scheduler_background_loops) =
-                        loads.remove(id).unwrap_or((false, None, None));
-                    if let Some(agent) = app.agents.get_mut(id) {
-                        // The reloaded actor re-pinned the fire mode; a failed
-                        // load leaves the previous value rather than guessing.
-                        if let Some(mode) = scheduler_background_loops {
-                            agent.scheduler_background_loops = Some(mode);
-                        }
-                        agent.finalize_reload_and_maybe_adopt(
-                            pending.generation,
-                            ok,
-                            running_prompt_id,
-                        );
-                    }
-                }
-
-                if pending.agent_ids.is_empty() {
-                    // Nothing was reloaded (no open sessions at reconnect).
-                    app.show_toast("Reconnected.");
-                } else if restored {
-                    app.show_toast("Session restored. In-progress tools and terminals were lost.");
-                } else {
-                    app.show_toast("Session restore failed. Kept the existing transcript.");
-                }
-
-                // Re-trigger the queue drain suppressed during the outage: every
-                // normal trigger (PromptResponse, DrainQueue, send-prompt,
-                // session-created) early-returns while `reconnect_pending` is set
-                // and defers here, and the agent was just force-idled above. Gate
-                // on the active tab's own restore (see `reconnect_restore_outcome`):
-                // a failed active restore suppresses the drain, since sending into
-                // an unrestored session would be wrong.
-                if active_restored {
-                    let drain_effects = dispatch::dispatch(Action::DrainQueue, &mut app);
-                    if process_effects(drain_effects, &mut tasks, &mut app, &progress_tx) {
-                        return Ok(finish_run_with_stall_flush(&mut app, &mut stall_rollup));
-                    }
-                }
-
-                presenter.request(false);
             }
 
             // Voice STT — DELIBERATELY THE LAST (lowest-priority) arm. In a
@@ -5098,220 +4646,6 @@ mod tests {
                 "voice_chord_claims_event({kind:?},{enabled},{owned})"
             );
         }
-    }
-
-    // ── plan_reconnect_load ──────────────────────────────────────────────
-
-    #[test]
-    fn plan_reconnect_load_requires_session_id() {
-        let agent = crate::test_util::make_agent_view(None, "/work/project");
-        assert!(plan_reconnect_load(&agent, std::path::Path::new("/pager/cwd")).is_none());
-    }
-
-    /// The session's own cwd keys its on-disk storage — the pager cwd
-    /// is only a fallback for agents without one.
-    #[test]
-    fn plan_reconnect_load_prefers_session_cwd_over_fallback() {
-        let agent = crate::test_util::make_agent_view(Some("sess-1"), "/work/worktree-a");
-        let plan = plan_reconnect_load(&agent, std::path::Path::new("/pager/cwd")).unwrap();
-        assert_eq!(plan.session_id.0.as_ref(), "sess-1");
-        assert_eq!(plan.cwd, std::path::PathBuf::from("/work/worktree-a"));
-
-        let agent = crate::test_util::make_agent_view(Some("sess-1"), "");
-        let plan = plan_reconnect_load(&agent, std::path::Path::new("/pager/cwd")).unwrap();
-        assert_eq!(plan.cwd, std::path::PathBuf::from("/pager/cwd"));
-    }
-
-    /// The reconnect cursor rides `_meta.cursor` when known; yolo mode
-    /// always rides `_meta.yoloMode`. Auto rides `_meta.autoMode` per-agent.
-    #[test]
-    fn plan_reconnect_load_meta_carries_cursor_and_yolo() {
-        let mut agent = crate::test_util::make_agent_view(Some("sess-1"), "/work");
-        let plan = plan_reconnect_load(&agent, std::path::Path::new("/pager/cwd")).unwrap();
-        assert_eq!(plan.meta["yoloMode"], serde_json::json!(false));
-        assert!(
-            plan.meta.get("cursor").is_none(),
-            "no cursor key before any event was applied"
-        );
-        // autoMode is always set explicitly (false when not in auto) so the leader's
-        // capability injection can't re-enable Auto on reconnect.
-        assert_eq!(plan.meta["autoMode"], serde_json::json!(false));
-
-        agent.last_seen_event_id = Some("sess-1-42".into());
-        agent.session.yolo_mode = true;
-        let plan = plan_reconnect_load(&agent, std::path::Path::new("/pager/cwd")).unwrap();
-        assert_eq!(plan.meta["yoloMode"], serde_json::json!(true));
-        assert_eq!(plan.meta["cursor"], serde_json::json!("sess-1-42"));
-    }
-
-    #[test]
-    fn plan_reconnect_load_meta_carries_auto_mode_from_session() {
-        // Auto rides `_meta.autoMode`, derived from THIS agent's own
-        // `auto_mode` (per-agent, symmetric with yolo) — not the global UI mirror.
-        let mut agent = crate::test_util::make_agent_view(Some("sess-1"), "/work");
-        agent.session.auto_mode = true;
-        let plan = plan_reconnect_load(&agent, std::path::Path::new("/pager/cwd")).unwrap();
-        assert_eq!(plan.meta["yoloMode"], serde_json::json!(false));
-        assert_eq!(plan.meta["autoMode"], serde_json::json!(true));
-
-        // Yolo wins: autoMode is explicitly false even if the session is in auto.
-        let mut agent = crate::test_util::make_agent_view(Some("sess-1"), "/work");
-        agent.session.auto_mode = true;
-        agent.session.yolo_mode = true;
-        let plan = plan_reconnect_load(&agent, std::path::Path::new("/pager/cwd")).unwrap();
-        assert_eq!(plan.meta["yoloMode"], serde_json::json!(true));
-        assert_eq!(plan.meta["autoMode"], serde_json::json!(false));
-    }
-
-    /// Multi-agent reconnect must seed each tab's `autoMode` from ITS OWN
-    /// session, not a shared global mirror: an active Auto tab and a background
-    /// Ask tab reconnect with `autoMode:true` and `autoMode:false` respectively.
-    #[test]
-    fn plan_reconnect_load_multi_agent_uses_per_agent_auto() {
-        let mut active = crate::test_util::make_agent_view(Some("sess-active"), "/work");
-        active.session.auto_mode = true;
-        let background = crate::test_util::make_agent_view(Some("sess-bg"), "/work");
-        // background.session.auto_mode stays false (Ask).
-
-        let active_plan = plan_reconnect_load(&active, std::path::Path::new("/pager/cwd")).unwrap();
-        let background_plan =
-            plan_reconnect_load(&background, std::path::Path::new("/pager/cwd")).unwrap();
-
-        assert_eq!(active_plan.meta["autoMode"], serde_json::json!(true));
-        assert_eq!(
-            background_plan.meta["autoMode"],
-            serde_json::json!(false),
-            "background Ask tab must reconnect with autoMode:false regardless of the active tab"
-        );
-    }
-
-    #[test]
-    fn reconnect_restores_dashboard_peek_before_replacing_scrollback() {
-        use crate::scrollback::block::RenderBlock;
-        use crate::views::dashboard::{DashboardRowId, DashboardState};
-        use indexmap::IndexMap;
-
-        let id = super::super::agent::AgentId(0);
-        let mut agent = crate::test_util::make_agent_view(Some("sess-1"), "/work");
-        agent
-            .scrollback
-            .push_block(RenderBlock::user_prompt("before reconnect"));
-        agent.scrollback.prepare_layout(80, 24);
-        agent.scrollback.set_selected(Some(0));
-        agent.scrollback.set_scroll_offset(0);
-        let mut agents = IndexMap::new();
-        agents.insert(id, agent);
-        let mut dashboard = Some(DashboardState::new());
-        dashboard
-            .as_mut()
-            .unwrap()
-            .begin_peek_viewport(DashboardRowId::TopLevel(id), &mut agents);
-        assert!(dashboard.as_ref().unwrap().peek_viewport.is_some());
-        assert!(agents[&id].scrollback.is_follow_mode());
-
-        restore_dashboard_peek_before_reload(&mut dashboard, &mut agents);
-
-        assert!(dashboard.as_ref().unwrap().peek_viewport.is_none());
-        assert_eq!(agents[&id].scrollback.selected(), Some(0));
-        assert!(!agents[&id].scrollback.is_follow_mode());
-    }
-
-    // ── reconnect_restore_outcome ────────────────────────────────────────
-
-    /// The regression guard: one background tab fails, the active tab
-    /// succeeds. The whole-reconnect flag goes false (toast says "failed"),
-    /// but the active tab's OWN drain must still fire — a failed background tab
-    /// must not strand prompts queued on the healthy active tab.
-    #[test]
-    fn reconnect_drain_gates_on_active_agent_not_all_agents() {
-        use super::super::agent::AgentId;
-        let active = AgentId(0);
-        let background = AgentId(1);
-        let mut loads = std::collections::HashMap::new();
-        loads.insert(active, (true, None, None));
-        loads.insert(background, (false, None, None));
-        let pending = vec![active, background];
-
-        let (all_restored, active_restored) =
-            reconnect_restore_outcome(true, &pending, &loads, Some(active));
-        assert!(
-            !all_restored,
-            "a failed background tab keeps the whole-reconnect flag false (toast)"
-        );
-        assert!(
-            active_restored,
-            "the active tab's own success still drains its queue"
-        );
-    }
-
-    /// The active tab's OWN reload failed: its drain stays suppressed even
-    /// though a background tab succeeded.
-    #[test]
-    fn reconnect_drain_blocked_when_active_agent_failed() {
-        use super::super::agent::AgentId;
-        let active = AgentId(0);
-        let background = AgentId(1);
-        let mut loads = std::collections::HashMap::new();
-        loads.insert(active, (false, None, None));
-        loads.insert(background, (true, None, None));
-        let pending = vec![active, background];
-
-        let (all_restored, active_restored) =
-            reconnect_restore_outcome(true, &pending, &loads, Some(active));
-        assert!(!all_restored);
-        assert!(
-            !active_restored,
-            "the active tab's own failure must block its drain"
-        );
-    }
-
-    /// Single-agent behavior is preserved: the lone active tab succeeds → both
-    /// flags true (toast "restored" + drain).
-    #[test]
-    fn reconnect_drain_single_agent_success_preserved() {
-        use super::super::agent::AgentId;
-        let active = AgentId(0);
-        let mut loads = std::collections::HashMap::new();
-        loads.insert(active, (true, None, None));
-        let pending = vec![active];
-
-        let (all_restored, active_restored) =
-            reconnect_restore_outcome(true, &pending, &loads, Some(active));
-        assert!(all_restored);
-        assert!(active_restored);
-    }
-
-    /// A failed init (`init_ok == false`, empty `loads`) suppresses everything.
-    #[test]
-    fn reconnect_drain_blocked_when_init_failed() {
-        use super::super::agent::AgentId;
-        let active = AgentId(0);
-        let loads = std::collections::HashMap::new();
-        let pending = vec![active];
-
-        let (all_restored, active_restored) =
-            reconnect_restore_outcome(false, &pending, &loads, Some(active));
-        assert!(!all_restored);
-        assert!(!active_restored);
-    }
-
-    /// No active agent (dashboard/welcome view): nothing to drain, even when
-    /// every reloaded tab restored.
-    #[test]
-    fn reconnect_drain_blocked_when_no_active_agent() {
-        use super::super::agent::AgentId;
-        let background = AgentId(1);
-        let mut loads = std::collections::HashMap::new();
-        loads.insert(background, (true, None, None));
-        let pending = vec![background];
-
-        let (all_restored, active_restored) =
-            reconnect_restore_outcome(true, &pending, &loads, None);
-        assert!(all_restored);
-        assert!(
-            !active_restored,
-            "no active agent → no active-tab drain to fire"
-        );
     }
 
     fn timed(event: Event, arrived_at: std::time::Instant) -> TimedInputEvent {

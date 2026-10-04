@@ -1,5 +1,5 @@
 use super::super::load::load_config_from_toml;
-use super::super::mcp::{McpConfig, parse_mcp_config_with_oauth};
+use super::super::mcp::{McpConfig};
 use super::*;
 use toml::Value as TomlValue;
 use toml::map::Map as TomlMap;
@@ -153,31 +153,6 @@ fn transport_oauth_client_id_takes_priority_over_block() {
     let svc = config.mcp_servers.get("svc").unwrap();
     let oauth = svc.oauth_config().expect("oauth_config");
     assert_eq!(oauth.client_id.as_deref(), Some("transport-client"));
-}
-#[test]
-fn parse_mcp_config_with_oauth_extracts_byo_client_id() {
-    let json = r#"{
-            "mcpServers": {
-                "slack": {
-                    "type": "http",
-                    "url": "https://mcp.slack.example/mcp",
-                    "oauth": { "clientId": "slack-byo-client" }
-                },
-                "plain": {
-                    "type": "http",
-                    "url": "https://plain.example/mcp"
-                }
-            }
-        }"#;
-    let config: McpConfig = serde_json::from_str(json).expect("parse .mcp.json");
-    let (servers, oauth) = parse_mcp_config_with_oauth(&config, "test", &|s| s.to_string());
-    assert_eq!(servers.len(), 2);
-    assert_eq!(oauth.len(), 1);
-    assert_eq!(
-        oauth.get("slack").unwrap().client_id.as_deref(),
-        Some("slack-byo-client")
-    );
-    assert!(!oauth.contains_key("plain"));
 }
 /// The merge recurses into nested tables and only ever inserts, so a key
 /// inside `[ui.status_line]` that this build does not model is not at risk
@@ -866,254 +841,18 @@ fn merge_section_session_load_envrc_does_not_drag_auto_compact() {
     );
 }
 mod resolve_auto_compact {
-    use super::super::super::RemoteSettings;
-    use super::super::super::resolve::{
-        DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT, ENV_AUTO_COMPACT_THRESHOLD_PERCENT,
-        resolve_auto_compact_threshold_percent,
-    };
-    use crate::agent::config::{Config, ConfigModelOverride, ModelInfo};
+    
+    
+    
     use std::sync::Mutex;
-    const TEST_MODEL: &str = "grok-4.5";
-    const OTHER_MODEL: &str = "grok-4.3";
     /// Serialize tests that mutate `GROK_AUTO_COMPACT_THRESHOLD_PERCENT`.
     static ENV_LOCK: Mutex<()> = Mutex::new(());
-    /// Build a `Config` populated with optional per-source values for the
-    /// `TEST_MODEL`. Any `None` argument means "that source is unset".
-    fn make_cfg(
-        user_session: Option<u8>,
-        user_per_model: Option<u8>,
-        gb_global: Option<u8>,
-    ) -> Config {
-        let mut cfg = Config::default();
-        cfg.session.auto_compact_threshold_percent = user_session;
-        if let Some(v) = user_per_model {
-            cfg.config_models.insert(
-                TEST_MODEL.to_owned(),
-                ConfigModelOverride {
-                    auto_compact_threshold_percent: Some(v),
-                    ..ConfigModelOverride::default()
-                },
-            );
-        }
-        if let Some(v) = gb_global {
-            cfg.remote_settings = Some(RemoteSettings {
-                auto_compact_threshold_percent: Some(v),
-                ..RemoteSettings::default()
-            });
-        }
-        cfg
-    }
-    /// ModelInfo populated with the GB per-model value (or none).
-    fn model_info(gb_per_model: Option<u8>) -> ModelInfo {
-        let mut info = ModelInfo::fallback(TEST_MODEL);
-        info.auto_compact_threshold_percent = gb_per_model;
-        info
-    }
-    /// Run the resolver against the assembled inputs.
-    fn resolve(cfg: &Config, gb_per_model: Option<u8>) -> u8 {
-        let info = model_info(gb_per_model);
-        resolve_auto_compact_threshold_percent(cfg, TEST_MODEL, Some(&info))
-    }
     /// RAII guard that swaps the env var for the duration of a test and
     /// restores the previous value on drop. Acquires `ENV_LOCK` so two
     /// env-var tests never run concurrently.
     struct EnvVarGuard {
         _lock: std::sync::MutexGuard<'static, ()>,
         prev: Option<String>,
-    }
-    impl EnvVarGuard {
-        fn set(value: &str) -> Self {
-            let lock = ENV_LOCK
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let prev = std::env::var(ENV_AUTO_COMPACT_THRESHOLD_PERCENT).ok();
-            unsafe { std::env::set_var(ENV_AUTO_COMPACT_THRESHOLD_PERCENT, value) };
-            Self { _lock: lock, prev }
-        }
-        fn unset() -> Self {
-            let lock = ENV_LOCK
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let prev = std::env::var(ENV_AUTO_COMPACT_THRESHOLD_PERCENT).ok();
-            unsafe { std::env::remove_var(ENV_AUTO_COMPACT_THRESHOLD_PERCENT) };
-            Self { _lock: lock, prev }
-        }
-    }
-    impl Drop for EnvVarGuard {
-        fn drop(&mut self) {
-            match self.prev.take() {
-                Some(v) => unsafe { std::env::set_var(ENV_AUTO_COMPACT_THRESHOLD_PERCENT, v) },
-                None => unsafe { std::env::remove_var(ENV_AUTO_COMPACT_THRESHOLD_PERCENT) },
-            }
-        }
-    }
-    #[test]
-    fn all_unset_returns_default_85() {
-        let _g = EnvVarGuard::unset();
-        let cfg = make_cfg(None, None, None);
-        assert_eq!(resolve(&cfg, None), DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT);
-    }
-    #[test]
-    fn all_unset_no_model_info_returns_default_85() {
-        let _g = EnvVarGuard::unset();
-        let cfg = make_cfg(None, None, None);
-        assert_eq!(
-            resolve_auto_compact_threshold_percent(&cfg, TEST_MODEL, None),
-            DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT
-        );
-    }
-    #[test]
-    fn gb_global_only() {
-        let _g = EnvVarGuard::unset();
-        let cfg = make_cfg(None, None, Some(40));
-        assert_eq!(resolve(&cfg, None), 40);
-    }
-    #[test]
-    fn gb_per_model_beats_gb_global() {
-        let _g = EnvVarGuard::unset();
-        let cfg = make_cfg(None, None, Some(40));
-        assert_eq!(resolve(&cfg, Some(90)), 90);
-    }
-    #[test]
-    fn user_session_beats_gb_per_model() {
-        let _g = EnvVarGuard::unset();
-        let cfg = make_cfg(Some(75), None, None);
-        assert_eq!(resolve(&cfg, Some(90)), 75);
-    }
-    #[test]
-    fn user_session_beats_gb_global() {
-        let _g = EnvVarGuard::unset();
-        let cfg = make_cfg(Some(75), None, Some(40));
-        assert_eq!(resolve(&cfg, None), 75);
-    }
-    #[test]
-    fn user_per_model_beats_user_session() {
-        let _g = EnvVarGuard::unset();
-        let cfg = make_cfg(Some(75), Some(70), None);
-        assert_eq!(resolve(&cfg, None), 70);
-    }
-    #[test]
-    fn user_per_model_beats_gb_per_model() {
-        let _g = EnvVarGuard::unset();
-        let cfg = make_cfg(None, Some(70), None);
-        assert_eq!(resolve(&cfg, Some(90)), 70);
-    }
-    #[test]
-    fn user_per_model_beats_gb_global() {
-        let _g = EnvVarGuard::unset();
-        let cfg = make_cfg(None, Some(70), Some(40));
-        assert_eq!(resolve(&cfg, None), 70);
-    }
-    #[test]
-    fn user_per_model_beats_everything_below_env() {
-        let _g = EnvVarGuard::unset();
-        let cfg = make_cfg(Some(75), Some(70), Some(40));
-        assert_eq!(resolve(&cfg, Some(90)), 70);
-    }
-    #[test]
-    fn env_beats_user_per_model() {
-        let _g = EnvVarGuard::set("50");
-        let cfg = make_cfg(Some(75), Some(70), Some(40));
-        assert_eq!(resolve(&cfg, Some(90)), 50);
-    }
-    #[test]
-    fn env_at_lower_bound_is_honored() {
-        let _g = EnvVarGuard::set("0");
-        let cfg = make_cfg(Some(75), None, None);
-        assert_eq!(resolve(&cfg, None), 0);
-    }
-    #[test]
-    fn env_at_upper_bound_is_honored() {
-        let _g = EnvVarGuard::set("100");
-        let cfg = make_cfg(Some(75), None, None);
-        assert_eq!(resolve(&cfg, None), 100);
-    }
-    #[test]
-    fn env_out_of_range_high_falls_through() {
-        let _g = EnvVarGuard::set("101");
-        let cfg = make_cfg(Some(75), None, None);
-        assert_eq!(resolve(&cfg, None), 75);
-    }
-    #[test]
-    fn env_out_of_range_negative_falls_through() {
-        let _g = EnvVarGuard::set("-1");
-        let cfg = make_cfg(Some(75), None, None);
-        assert_eq!(resolve(&cfg, None), 75);
-    }
-    #[test]
-    fn env_unparseable_falls_through() {
-        let _g = EnvVarGuard::set("not-a-number");
-        let cfg = make_cfg(Some(75), None, None);
-        assert_eq!(resolve(&cfg, None), 75);
-    }
-    #[test]
-    fn env_empty_falls_through_to_default() {
-        let _g = EnvVarGuard::set("");
-        let cfg = make_cfg(None, None, None);
-        assert_eq!(resolve(&cfg, None), DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT);
-    }
-    #[test]
-    fn user_per_model_for_other_model_does_not_match() {
-        let _g = EnvVarGuard::unset();
-        let mut cfg = Config::default();
-        cfg.session.auto_compact_threshold_percent = None;
-        cfg.config_models.insert(
-            OTHER_MODEL.to_owned(),
-            ConfigModelOverride {
-                auto_compact_threshold_percent: Some(70),
-                ..ConfigModelOverride::default()
-            },
-        );
-        assert_eq!(resolve(&cfg, None), DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT);
-    }
-    #[test]
-    fn user_per_model_for_other_model_falls_through_to_user_session() {
-        let _g = EnvVarGuard::unset();
-        let mut cfg = Config::default();
-        cfg.session.auto_compact_threshold_percent = Some(75);
-        cfg.config_models.insert(
-            OTHER_MODEL.to_owned(),
-            ConfigModelOverride {
-                auto_compact_threshold_percent: Some(70),
-                ..ConfigModelOverride::default()
-            },
-        );
-        assert_eq!(resolve(&cfg, None), 75);
-    }
-    #[test]
-    fn missing_model_info_falls_through_to_gb_global() {
-        let _g = EnvVarGuard::unset();
-        let cfg = make_cfg(None, None, Some(40));
-        assert_eq!(
-            resolve_auto_compact_threshold_percent(&cfg, TEST_MODEL, None),
-            40
-        );
-    }
-    #[test]
-    fn no_remote_settings_falls_through_to_default() {
-        let _g = EnvVarGuard::unset();
-        let cfg = Config {
-            remote_settings: None,
-            ..Config::default()
-        };
-        assert_eq!(resolve(&cfg, None), DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT);
-    }
-    #[test]
-    fn apply_does_not_merge_auto_compact_threshold_percent_into_model_info() {
-        use crate::agent::config::{EndpointsConfig, ModelEntry};
-        let endpoints = EndpointsConfig::default();
-        let base = ModelEntry::fallback(TEST_MODEL, &endpoints);
-        let over = ConfigModelOverride {
-            auto_compact_threshold_percent: Some(42),
-            ..ConfigModelOverride::default()
-        };
-        let merged = over.apply(TEST_MODEL, Some(base), &endpoints);
-        assert_eq!(
-            merged.info.auto_compact_threshold_percent, None,
-            "ConfigModelOverride::apply must NOT merge `auto_compact_threshold_percent` \
-             into ModelInfo — the resolver depends on the field staying empty so \
-             user-per-model and GB-per-model remain distinguishable tiers"
-        );
     }
 }
 #[test]

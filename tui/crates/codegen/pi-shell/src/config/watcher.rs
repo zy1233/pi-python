@@ -279,53 +279,6 @@ impl ConfigFileWatcher {
         ))
     }
 
-    /// Register `<cwd>/` and `<cwd>/.grok/` as **non-recursive** watch
-    /// targets, in addition to whatever was passed to [`Self::start`].
-    ///
-    /// Intended for the session-open path: when a session opens in a cwd
-    /// the leader hasn't seen before, calling this method ensures edits to
-    /// `<cwd>/.mcp.json` and `<cwd>/.grok/config.toml` trigger a
-    /// [`ConfigChangeEvent`] (and downstream [`ConfigUpdate::
-    /// ProjectMcpServersChanged`](super::reloader::ConfigUpdate::
-    /// ProjectMcpServersChanged)) within the debounce window.
-    ///
-    /// **Non-recursive by design.** Watching `<cwd>` recursively would
-    /// walk `node_modules/`, `target/`, `.git/`, etc. and easily exhaust
-    /// the per-user inotify quota (`fs.inotify.max_user_watches`,
-    /// commonly 8192 by default) on a large repo. If `notify` cannot register the watch (e.g.
-    /// the directory doesn't exist yet, or the OS quota is reached) the
-    /// error is logged and swallowed — the leader continues to rely on
-    /// the user-triggered refresh as the fallback.
-    pub fn watch_path(&mut self, cwd: &Path) {
-        // Idempotent at our layer: skip the redundant
-        // `notify` watch-add when this cwd is already registered, so
-        // re-opening sessions in the same directory doesn't churn the
-        // OS watcher. `notify` de-dups internally too, but tracking the
-        // set here also enables `unwatch_path`.
-        if self.watched_cwds.contains(cwd) {
-            return;
-        }
-        watch_cwd_dirs(&mut self.debouncer, cwd);
-        self.watched_cwds.insert(cwd.to_path_buf());
-    }
-
-    /// Remove the two non-recursive watches (`<cwd>/` and
-    /// `<cwd>/.grok/`) previously registered for `cwd` via
-    /// [`Self::start`] / [`Self::watch_path`].
-    ///
-    /// Best-effort and idempotent: a `cwd` that was never registered
-    /// (or already unwatched) is a no-op. Intended for the
-    /// session-teardown path so a long-lived leader that opens sessions
-    /// across many directories doesn't accumulate inotify watches for
-    /// cwds with no live sessions. **Callers must ref-count**: only
-    /// unwatch once the *last* session sharing this cwd closes —
-    /// `ConfigFileWatcher` tracks distinct cwds, not session counts.
-    pub fn unwatch_path(&mut self, cwd: &Path) {
-        if !self.watched_cwds.remove(cwd) {
-            return;
-        }
-        unwatch_cwd_dirs(&mut self.debouncer, cwd);
-    }
 }
 
 /// Component-aware "is `parent` the directory `dir`?" that tolerates
@@ -366,19 +319,6 @@ fn watch_cwd_dirs(debouncer: &mut Debouncer<AccessFilteredWatcher>, cwd: &Path) 
             &e,
             "failed to watch project .grok directory (non-recursive)",
         );
-    }
-}
-
-/// Remove the two non-recursive watches added by [`watch_cwd_dirs`].
-/// Best-effort: a `WatchNotFound` (never watched / already removed) is
-/// expected and logged at `debug!`.
-fn unwatch_cwd_dirs(debouncer: &mut Debouncer<AccessFilteredWatcher>, cwd: &Path) {
-    if let Err(e) = debouncer.watcher().unwatch(cwd) {
-        tracing::debug!(error = %e, "failed to unwatch project cwd");
-    }
-    let grok_dir = cwd.join(".grok");
-    if let Err(e) = debouncer.watcher().unwatch(&grok_dir) {
-        tracing::debug!(error = %e, "failed to unwatch project .grok directory");
     }
 }
 
@@ -469,13 +409,6 @@ fn vendor_skill_refresh_dirs(config_dir: &Path) -> [(PathBuf, RecursiveMode); 3]
         (config_dir.join("commands"), RecursiveMode::NonRecursive),
         (config_dir.join("workflows"), RecursiveMode::NonRecursive),
     ]
-}
-
-fn project_grok_refresh_dirs(project_root: &Path) -> Vec<(PathBuf, RecursiveMode)> {
-    let project_grok = project_root.join(".grok");
-    let mut dirs = vec![(project_grok.clone(), RecursiveMode::NonRecursive)];
-    dirs.extend(vendor_skill_refresh_dirs(&project_grok));
-    dirs
 }
 
 fn attach_new_refresh_dirs(
@@ -581,86 +514,6 @@ fn plan_skills_watch_targets(
     }
 }
 
-/// Watches project `.grok` skills/commands/workflows for mid-session discovery.
-///
-/// After a [`DiscoveryChange`], call [`Self::refresh_new_dirs`] so newly created
-/// seed dirs get watches attached.
-pub(crate) struct ProjectDiscoveryWatcher {
-    debouncer: Debouncer<AccessFilteredWatcher>,
-    refresh_dirs: Vec<(PathBuf, RecursiveMode)>,
-    refreshed_dirs: HashSet<PathBuf>,
-}
-
-impl ProjectDiscoveryWatcher {
-    pub(crate) fn start(cwd: &Path) -> Option<(Self, mpsc::UnboundedReceiver<DiscoveryChange>)> {
-        let project_root = crate::session::workflow::registry::project_root(cwd);
-        let project_grok = project_root.join(".grok");
-        let (tx, rx) = mpsc::unbounded_channel();
-        let project_grok_for_events = project_grok.clone();
-        let mut debouncer =
-            new_filtered_debouncer(SKILLS_DEBOUNCE, move |res: DebounceEventResult| {
-                let Ok(events) = res else { return };
-                let mut change = None;
-                for event in events
-                    .iter()
-                    .filter(|event| event.path.starts_with(&project_grok_for_events))
-                {
-                    let next = discovery_change_for_path(&event.path)
-                        .unwrap_or(DiscoveryChange::Workflows);
-                    if next == DiscoveryChange::Skills {
-                        change = Some(next);
-                        break;
-                    }
-                    change = Some(next);
-                }
-                if let Some(change) = change {
-                    let _ = tx.send(change);
-                }
-            })
-            .map_err(|error| tracing::warn!(%error, "failed to create project workflow watcher"))
-            .ok()?;
-
-        let initial = if project_grok.is_dir() {
-            project_grok.clone()
-        } else {
-            project_root.clone()
-        };
-        if let Err(error) = debouncer
-            .watcher()
-            .watch(&initial, RecursiveMode::NonRecursive)
-        {
-            log_watch_error(&error, "failed to watch project workflow parent");
-            return None;
-        }
-        let refresh_dirs = project_grok_refresh_dirs(&project_root);
-        let mut refreshed_dirs = HashSet::from([initial]);
-        attach_new_refresh_dirs(
-            &mut debouncer,
-            &refresh_dirs,
-            &mut refreshed_dirs,
-            "failed to watch project discovery dir",
-        );
-        Some((
-            Self {
-                debouncer,
-                refresh_dirs,
-                refreshed_dirs,
-            },
-            rx,
-        ))
-    }
-
-    /// Attach watches for seed dirs that now exist (call after a discovery event).
-    pub(crate) fn refresh_new_dirs(&mut self) {
-        attach_new_refresh_dirs(
-            &mut self.debouncer,
-            &self.refresh_dirs,
-            &mut self.refreshed_dirs,
-            "failed to watch newly-created project workflow dir",
-        );
-    }
-}
-
 /// Watches skill/command/workflow discovery dirs and classifies disk changes.
 pub struct SkillsFileWatcher {
     debouncer: Debouncer<AccessFilteredWatcher>,
@@ -701,7 +554,7 @@ impl SkillsFileWatcher {
     /// Production code should prefer [`Self::start`], which collects the same
     /// dir set discovery uses. After a [`DiscoveryChange`], call
     /// [`Self::refresh_new_discovery_dirs`].
-    pub fn start_with_dirs(
+    pub(crate) fn start_with_dirs(
         dirs_to_watch: &[PathBuf],
         grok_home: &Path,
         project_root: Option<&Path>,
@@ -843,25 +696,6 @@ mod tests {
                 (root.join("workflows"), RecursiveMode::NonRecursive),
             ]
         );
-    }
-
-    #[test]
-    fn project_grok_refresh_dirs_matches_vendor_layout() {
-        let project = Path::new("/tmp/repo");
-        let grok = project.join(".grok");
-        let dirs = project_grok_refresh_dirs(project);
-
-        assert_eq!(dirs.len(), 4);
-        assert_eq!(dirs[0], (grok.clone(), RecursiveMode::NonRecursive));
-        assert_eq!(
-            &dirs[1..],
-            [
-                (grok.join("skills"), RecursiveMode::Recursive),
-                (grok.join("commands"), RecursiveMode::NonRecursive),
-                (grok.join("workflows"), RecursiveMode::NonRecursive),
-            ]
-        );
-        assert_eq!(dirs[1..], vendor_skill_refresh_dirs(&grok));
     }
 
     #[test]
@@ -1770,95 +1604,4 @@ mod tests {
         );
     }
 
-    /// [`ConfigFileWatcher::watch_path`] registered after
-    /// `start` must light up `<new_cwd>/.grok/config.toml` writes
-    /// identically to a cwd passed in at `start`. Exercises the
-    /// session-open registration path where the leader learns about a
-    /// new project root after the watcher is already running.
-    #[test]
-    #[cfg_attr(
-        target_os = "macos",
-        ignore = "flaky on macOS: FSEvents does not reliably deliver events in test harness"
-    )]
-    fn watch_path_dynamic_registration() {
-        let grok_home = TempDir::new().unwrap();
-        let new_cwd = TempDir::new().unwrap();
-        let project_grok = new_cwd.path().join(".grok");
-        fs::create_dir_all(&project_grok).unwrap();
-        fs::write(project_grok.join("config.toml"), "").unwrap();
-
-        let (mut watcher, mut rx) = ConfigFileWatcher::start(
-            grok_home.path(),
-            &[],
-            None,
-            Some(Duration::from_millis(100)),
-        )
-        .expect("watcher should start");
-
-        watcher.watch_path(new_cwd.path());
-
-        fs::write(
-            project_grok.join("config.toml"),
-            "[mcp_servers.y]\ncommand = \"/bin/true\"",
-        )
-        .unwrap();
-
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
-        let mut found = false;
-        while std::time::Instant::now() < deadline {
-            if let Ok(evt) = rx.try_recv()
-                && matches!(evt, ConfigChangeEvent::ProjectConfigChanged { .. })
-            {
-                found = true;
-                break;
-            }
-            wait_ms(50);
-        }
-        assert!(
-            found,
-            "watch_path-registered cwd must surface ProjectConfigChanged within 2s"
-        );
-    }
-
-    /// Bookkeeping-only (no OS event delivery, so deterministic on
-    /// every platform): `watch_path` records the cwd in `watched_cwds`
-    /// and is idempotent; `unwatch_path` removes it and is a no-op for
-    /// an unknown cwd. Guards the set that backs `unwatch_path` and the
-    /// `watch_path` de-dup.
-    #[test]
-    fn watch_and_unwatch_path_bookkeeping() {
-        let grok_home = TempDir::new().unwrap();
-        let cwd = TempDir::new().unwrap();
-        let Some((mut watcher, _rx)) = ConfigFileWatcher::start(
-            grok_home.path(),
-            &[],
-            None,
-            Some(Duration::from_millis(100)),
-        ) else {
-            // OS watcher unavailable in this environment; nothing to assert.
-            return;
-        };
-        let p = cwd.path();
-        assert!(!watcher.watched_cwds.contains(p));
-
-        watcher.watch_path(p);
-        assert!(watcher.watched_cwds.contains(p));
-
-        // Idempotent: a second registration doesn't duplicate the entry.
-        watcher.watch_path(p);
-        assert_eq!(
-            watcher
-                .watched_cwds
-                .iter()
-                .filter(|c| c.as_path() == p)
-                .count(),
-            1,
-        );
-
-        // Unwatch removes it; a second unwatch is a no-op.
-        watcher.unwatch_path(p);
-        assert!(!watcher.watched_cwds.contains(p));
-        watcher.unwatch_path(p);
-        assert!(!watcher.watched_cwds.contains(p));
-    }
 }

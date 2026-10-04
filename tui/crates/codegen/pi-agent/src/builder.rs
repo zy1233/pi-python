@@ -524,8 +524,7 @@ impl AgentBuilder {
     /// from any of those tools emits an `auth_401_attribution`
     /// event with `consumer` of `"ImageGen"` / `"VideoGen.start"` /
     /// `"VideoGen.poll"` / `"WebSearch"`. Callers should pass the
-    /// same `ShellAttribution` instance they wire into
-    /// `pi_sampler::SamplerConfig::attribution_callback` so
+    /// shell's `ShellAttribution` instance so
     /// all 401s share the same `AuthManager` reference and land in
     /// the same Axiom dataset.
     pub fn with_attribution_callback(

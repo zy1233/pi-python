@@ -6,7 +6,6 @@ mod consent;
 mod hints;
 mod load;
 mod mcp;
-mod mcp_reenable;
 mod permissions;
 mod persist;
 mod resolve;
@@ -24,7 +23,6 @@ pub use consent::*;
 pub use hints::*;
 pub use load::*;
 pub use mcp::*;
-pub(crate) use mcp_reenable::reenableable_disabled_stubs;
 pub use permissions::*;
 pub use persist::*;
 // `remote` extracted to the `pi-config-types` crate (dependency inversion);
@@ -32,7 +30,7 @@ pub use persist::*;
 pub use resolve::*;
 pub use settings_writes::*;
 pub use tips::*;
-pub use worktree::*;
+pub(crate) use worktree::*;
 pub use pi_config_types::{
     CampaignOverride, ConsentGate, ContextualHintsRemote, DisplayRefreshSettings,
     DoomLoopRecoverySettings, GoalRoleModel, RemoteSettings, WorktreeAutoGcSettings,

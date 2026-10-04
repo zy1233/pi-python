@@ -1,11 +1,20 @@
 //! Origin/client identification used by the telemetry engine.
 //!
-//! [`OriginClientInfo`] is owned by `pi-sampler` (so `SamplerConfig`
-//! can use it without depending on shell). Re-exported here so the telemetry
-//! engine can label events without depending on shell or sampler internals
-//! beyond the type itself.
+//! [`OriginClientInfo`] identifies the client that originated a request (used
+//! for User-Agent rendering and event labelling). It is defined here, in a
+//! leaf crate, so neither the telemetry engine nor the HTTP helpers depend on
+//! shell internals.
 
-pub use pi_sampler::OriginClientInfo;
+use serde::{Deserialize, Serialize};
+
+/// Identity of the client that originated the request, used for
+/// User-Agent rendering. The shell layer composes this with platform
+/// info into a final UA string.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct OriginClientInfo {
+    pub product: String,
+    pub version: Option<String>,
+}
 
 /// Construct an [`OriginClientInfo`] from `GROK_CLIENT_NAME` /
 /// `GROK_CLIENT_VERSION` env vars. Returns `None` when `GROK_CLIENT_NAME`

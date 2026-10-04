@@ -139,7 +139,7 @@ fn permission_mode_from_layers(
 ///   permission_mode = "default"         (maps to Ask at runtime)
 ///   approval_mode = "always-approve"   (legacy)
 ///   yolo = true                        (legacy)
-pub fn load_permission_mode(remote_permission_mode: Option<&str>) -> PermissionMode {
+pub(crate) fn load_permission_mode(remote_permission_mode: Option<&str>) -> PermissionMode {
     load_selected_permission_mode(remote_permission_mode).unwrap_or(PermissionMode::Ask)
 }
 
@@ -189,28 +189,6 @@ pub fn effective_yolo_for_launch(
     resolve_launch_yolo(
         resolve_effective_yolo(cli_always_approve, cli_permission_mode, config_yolo),
         yolo_disabled_by_policy(),
-    )
-}
-
-/// Whether this launch should start in **auto** permission mode (LLM/heuristic
-/// classifier — not always-approve). CLI `--permission-mode auto` beats config.
-/// Mutually exclusive with effective yolo (yolo / `--yolo` wins if both requested).
-///
-/// `remote_permission_mode` same contract as [`effective_yolo_for_launch`].
-/// When nothing selects a mode the launch is NOT auto — this is the resolver
-/// for headless / stdio / leader agents, whose prompts are auto-cancelled, so
-/// auto's escalations could never be answered and scripted `--allow` recipes
-/// keep ask-mode semantics.
-pub fn effective_auto_for_launch(
-    cli_always_approve: bool,
-    cli_permission_mode: Option<&str>,
-    remote_permission_mode: Option<&str>,
-) -> bool {
-    effective_auto_for_launch_impl(
-        cli_always_approve,
-        cli_permission_mode,
-        remote_permission_mode,
-        false,
     )
 }
 
@@ -269,21 +247,6 @@ fn effective_auto_for_launch_impl(
         Some(mode) => mode.is_auto(),
         None => unset_defaults_auto,
     }
-}
-
-/// Whether a session should activate the **auto** permission mode: the feature
-/// gate must be enabled, auto must be requested (via CLI/config/`default_auto_mode`
-/// or a client's `_meta.autoMode`), and yolo (always-approve) must not be set —
-/// yolo wins. Pure so the agent's activation seam (session spawn + runtime
-/// `SetAutoMode`) is unit-testable without a live session. This is the
-/// authoritative agent-side gate: when it returns `false`, the permission
-/// manager is never flipped to auto and the classifier never wires.
-pub(crate) fn auto_mode_session_active(
-    gate_enabled: bool,
-    requested_auto: bool,
-    session_yolo: bool,
-) -> bool {
-    gate_enabled && requested_auto && !session_yolo
 }
 
 /// Pure precedence logic (testable).
@@ -702,76 +665,6 @@ mod tests {
         );
         assert_eq!(resolved_display_permission_mode(None, Some("auto")), "ask");
         assert_eq!(resolved_display_permission_mode(None, None), "ask");
-    }
-
-    #[test]
-    fn effective_auto_for_launch_cli_auto_not_yolo() {
-        // This function is feature-gated; force the gate ON (and serialize with
-        // the other env-sensitive gate tests) so the auto-activation paths run.
-        let _g = crate::util::config::resolve::AUTO_PERMISSION_MODE_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        unsafe { std::env::set_var("GROK_AUTO_PERMISSION_MODE", "1") };
-        assert!(effective_auto_for_launch(false, Some("auto"), None));
-        assert!(
-            !effective_auto_for_launch(true, Some("auto"), None),
-            "--yolo beats auto"
-        );
-        assert!(!effective_auto_for_launch(
-            false,
-            Some("always-approve"),
-            None
-        ));
-        assert!(!effective_auto_for_launch(false, Some("ask"), None));
-        unsafe { std::env::remove_var("GROK_AUTO_PERMISSION_MODE") };
-    }
-
-    /// The authoritative agent-side gate (used at the `set_auto_mode` seam):
-    /// auto activates only when the feature gate is ON, auto is requested, and
-    /// yolo is not set. Gate OFF must never activate, even with a client
-    /// `_meta.autoMode=true` (the `requested_auto=true` case).
-    #[test]
-    fn auto_mode_session_active_requires_gate_request_and_no_yolo() {
-        assert!(
-            !auto_mode_session_active(false, true, false),
-            "gate OFF must not activate auto even when requested"
-        );
-        assert!(
-            auto_mode_session_active(true, true, false),
-            "gate ON + requested + no yolo activates auto"
-        );
-        assert!(
-            !auto_mode_session_active(true, true, true),
-            "yolo wins over auto"
-        );
-        assert!(
-            !auto_mode_session_active(true, false, false),
-            "not requested ⇒ inactive"
-        );
-    }
-
-    /// With the gate forced OFF (`GROK_AUTO_PERMISSION_MODE=0`), explicit
-    /// `--permission-mode auto` / config auto is inert so the classifier never
-    /// launches. (Compiled-in default is ON; this pins the env kill-switch.)
-    #[test]
-    fn effective_auto_for_launch_inert_when_gate_off() {
-        let _g = crate::util::config::resolve::AUTO_PERMISSION_MODE_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        unsafe { std::env::set_var("GROK_AUTO_PERMISSION_MODE", "0") };
-        assert!(
-            !effective_auto_for_launch(false, Some("auto"), None),
-            "gate OFF: explicit --permission-mode auto must not activate auto"
-        );
-        assert!(
-            !effective_auto_for_launch(false, None, None),
-            "gate OFF: config-driven auto must not activate auto"
-        );
-        assert!(
-            !effective_auto_for_launch_interactive(false, None, None),
-            "gate OFF: the interactive soft default must be inert (remote kill-switch)"
-        );
-        unsafe { std::env::remove_var("GROK_AUTO_PERMISSION_MODE") };
     }
 
     /// The seam the interactive auto soft-default hangs on: `None` only when

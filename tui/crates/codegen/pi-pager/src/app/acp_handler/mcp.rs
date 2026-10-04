@@ -294,9 +294,8 @@ pub(super) fn handle_mcp_elicit_complete(notif: &acp::ExtNotification, app: &mut
 
 /// Handle `legacy/mcp/servers_updated`.
 ///
-/// Emitted by the shell from `MvpAgent` on managed-config resolve and
-/// on config reload (`crates/codegen/pi-shell/src/agent/mvp_agent.rs`
-/// → `notify_servers_updated`). The shell's
+/// Emitted by the (now removed) in-process Rust agent runtime on
+/// managed-config resolve and on config reload; no current agent sends it. The shell's
 /// `McpServersUpdated` wire shape (`{ mcpServers: [...] }`) is
 /// intentionally session-agnostic by design
 /// An attempt to route by

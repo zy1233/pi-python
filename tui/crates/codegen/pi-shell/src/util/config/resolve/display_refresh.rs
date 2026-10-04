@@ -5,8 +5,8 @@ use serde::Deserialize;
 use toml::Value as TomlValue;
 use pi_config_types::DisplayRefreshSettings;
 
-pub const ENV_DISPLAY_REFRESH_PROBE_ENABLED: &str = "GROK_DISPLAY_REFRESH_PROBE_ENABLED";
-pub const ENV_DISPLAY_REFRESH_AUTO_CADENCE: &str = "GROK_DISPLAY_REFRESH_AUTO_CADENCE";
+pub(crate) const ENV_DISPLAY_REFRESH_PROBE_ENABLED: &str = "GROK_DISPLAY_REFRESH_PROBE_ENABLED";
+pub(crate) const ENV_DISPLAY_REFRESH_AUTO_CADENCE: &str = "GROK_DISPLAY_REFRESH_AUTO_CADENCE";
 
 /// Default motion paint cadence (~60 Hz) when env and auto-cadence do not apply.
 pub const DISPLAY_REFRESH_DEFAULT_CADENCE_MS: u64 = 16;
@@ -14,12 +14,12 @@ pub const DISPLAY_REFRESH_DEFAULT_CADENCE_MS: u64 = 16;
 /// Client defaults for [`DisplayRefreshPolicy`].
 /// Auto on + max_hz 240: `display_refresh_probe` telemetry showed ~0.4% error
 /// and common 120/144/165/180/240 Hz rates that clamp cleanly to 8–16 ms.
-pub const DISPLAY_REFRESH_DEFAULT_PROBE_ENABLED: bool = true;
+pub(crate) const DISPLAY_REFRESH_DEFAULT_PROBE_ENABLED: bool = true;
 pub const DISPLAY_REFRESH_DEFAULT_AUTO_CADENCE_ENABLED: bool = true;
-pub const DISPLAY_REFRESH_DEFAULT_FLOOR_MS: u32 = 8;
-pub const DISPLAY_REFRESH_DEFAULT_CEILING_MS: u32 = 16;
-pub const DISPLAY_REFRESH_DEFAULT_MIN_HZ: u32 = 55;
-pub const DISPLAY_REFRESH_DEFAULT_MAX_HZ: u32 = 240;
+pub(crate) const DISPLAY_REFRESH_DEFAULT_FLOOR_MS: u32 = 8;
+pub(crate) const DISPLAY_REFRESH_DEFAULT_CEILING_MS: u32 = 16;
+pub(crate) const DISPLAY_REFRESH_DEFAULT_MIN_HZ: u32 = 55;
+pub(crate) const DISPLAY_REFRESH_DEFAULT_MAX_HZ: u32 = 240;
 
 /// Same band as env cadence knobs (`GROK_MIN_DRAW_MS` / `GROK_SCROLL_CADENCE_MS`).
 const CADENCE_MS_MIN: u32 = 1;

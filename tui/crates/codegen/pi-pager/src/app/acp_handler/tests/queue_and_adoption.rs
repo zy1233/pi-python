@@ -318,72 +318,6 @@
         );
     }
 
-    /// Correlation wiring: `handle_queue_changed` adopts `current_prompt_id` from
-    /// `runningPromptId` only when it was `None`, never overriding an already-set one.
-    #[test]
-    fn queue_changed_adopts_running_prompt_id_only_when_unset() {
-        // Shell and pager share the pi-prompt-queue type, so serializing the payload as the
-        // shell emits it pins the wire shape the handler consumes, not cross-crate compat.
-        let shell_payload = pi_shell::session::prompt_queue::QueueChanged {
-            session_id: "sess-1".to_string(),
-            entries: Vec::new(),
-            running_prompt_id: Some("prompt-running".to_string()),
-            running_text: None,
-            running_kind: None,
-            running_combined_texts: None,
-        };
-        let raw = serde_json::value::to_raw_value(&shell_payload).unwrap();
-        let json_str = raw.get().to_string();
-        assert!(json_str.contains("runningPromptId"));
-        let mirror: crate::app::prompt_queue::QueueChanged =
-            serde_json::from_str(&json_str).unwrap();
-        assert_eq!(mirror.running_prompt_id.as_deref(), Some("prompt-running"));
-
-        let notif = acp::ExtNotification::new("pi/queue/changed", raw.into());
-
-        // Case 1: current_prompt_id is None -> adopt it.
-        let mut app = make_app_with_agent("sess-1");
-        assert!(
-            app.agents
-                .get(&AgentId(0))
-                .unwrap()
-                .session
-                .current_prompt_id
-                .is_none()
-        );
-        assert!(handle_queue_changed(&notif, &mut app));
-        assert_eq!(
-            app.agents
-                .get(&AgentId(0))
-                .unwrap()
-                .session
-                .current_prompt_id
-                .as_deref(),
-            Some("prompt-running"),
-            "adopts running_prompt_id when current_prompt_id was None"
-        );
-
-        // Case 2: current_prompt_id already set (the single-client drip-feed
-        // case) -> must NOT be overridden, behaviorally inert.
-        let mut app = make_app_with_agent("sess-1");
-        app.agents
-            .get_mut(&AgentId(0))
-            .unwrap()
-            .session
-            .current_prompt_id = Some("local-already".to_string());
-        assert!(handle_queue_changed(&notif, &mut app));
-        assert_eq!(
-            app.agents
-                .get(&AgentId(0))
-                .unwrap()
-                .session
-                .current_prompt_id
-                .as_deref(),
-            Some("local-already"),
-            "never overrides an already-set current_prompt_id"
-        );
-    }
-
     /// When nothing is running locally (`current_prompt_id == None`), a
     /// `running_prompt_id` broadcast is adopted directly and the turn-start
     /// shim renders the queued prompt's user block + sets `TurnRunning`.
@@ -506,7 +440,7 @@
     }
 
     /// Cron (`scheduler-fired-…`) is a synthetic id but is client-driven via
-    /// `MvpAgent::prompt()` and DOES emit `prompt_complete`, so the queue-changed
+    /// the agent's `prompt` handler and DOES emit `prompt_complete`, so the queue-changed
     /// adoption must STILL fire for it (the exit exists, so it won't strand).
     /// This is the counterpart to the auto-wake skip above.
     #[test]
@@ -1476,49 +1410,6 @@
         );
     }
 
-    /// The entry `kind` survives serialization, and on adoption a `bash` entry drives the bash
-    /// turn-start shim (`bash_turn = true`, no user block).
-    #[test]
-    fn bash_kind_round_trips_and_adoption_sets_bash_turn() {
-        // Shell and pager share the pi-prompt-queue type; pin kind through a serde cycle.
-        let shell = pi_shell::session::prompt_queue::QueueChanged {
-            session_id: "sess-1".to_string(),
-            entries: vec![pi_shell::session::prompt_queue::QueueEntryWire {
-                id: "b1".to_string(),
-                version: 0,
-                owner: None,
-                last_editor: None,
-                kind: "bash".to_string(),
-                text: "ls -la".to_string(),
-                position: 0,
-                combined_texts: None,
-            }],
-            running_prompt_id: None,
-            running_text: None,
-            running_kind: None,
-            running_combined_texts: None,
-        };
-        let json = serde_json::to_string(&shell).unwrap();
-        let mirror: crate::app::prompt_queue::QueueChanged = serde_json::from_str(&json).unwrap();
-        assert_eq!(mirror.entries[0].kind, "bash");
-
-        // Adoption: seed the shared queue with the bash entry, then the leader
-        // reports it running → bash turn-start shim fires.
-        let mut app = make_app_with_agent("sess-1");
-        let id = AgentId(0);
-        app.push_optimistic_prompt_echo("sess-1", "b1", "ls -la", "bash");
-        let scroll_before = app.agents[&id].scrollback.len();
-
-        handle_queue_changed(&queue_changed_running("sess-1", &[], Some("b1")), &mut app);
-
-        let agent = app.agents.get(&id).unwrap();
-        assert!(agent.bash_turn, "bash adoption must set bash_turn");
-        assert_eq!(agent.session.current_prompt_id.as_deref(), Some("b1"));
-        assert!(agent.session.state.is_turn_running());
-        // Bash pushes NO user/display block.
-        assert_eq!(agent.scrollback.len(), scroll_before);
-    }
-
     /// The gate buffers an instant promoted turn's stream and the adoption flushes it.
     #[test]
     fn fifo_handoff_buffers_instant_bash_turn_and_flushes_on_adoption() {
@@ -2245,7 +2136,7 @@
     fn viewer_enters_turn_running_for_scheduler_fired_cron_turn() {
         // A `/loop` (scheduled-task) turn has a synthetic `scheduler-fired-…`
         // prompt id, but UNLIKE auto-wake turns it is client-driven via
-        // `MvpAgent::prompt()` and DOES emit `pi/session/prompt_complete`. So a
+        // the agent's `prompt` handler and DOES emit `pi/session/prompt_complete`. So a
         // viewer MUST enter TurnRunning for it — otherwise the dashboard's
         // locally-tracked row for a running `/loop` session never shows Working.
         let mut app = make_app_with_agent("sess-view");

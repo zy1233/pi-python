@@ -1096,8 +1096,10 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
                         if let ActiveView::Agent(aid) = app.active_view
                             && let Some(sid) = session_id
                         {
+                            let mut config_option_id = None;
                             if let Some(agent) = app.agents.get_mut(&aid) {
                                 agent.session.model_switch_pending = true;
+                                config_option_id = agent.session.models.config_option_id.clone();
                             }
                             companion_effects.push(Effect::SwitchModel {
                                 agent_id: aid,
@@ -1105,6 +1107,7 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
                                 model_id: id,
                                 effort: None,
                                 prev_model_id: None,
+                                config_option_id,
                             });
                         }
                     }

@@ -2112,19 +2112,6 @@ pub(super) fn make_servers_updated_notif() -> acp::ExtNotification {
     let raw = serde_json::value::to_raw_value(&payload).unwrap();
     acp::ExtNotification::new("pi/mcp/servers_updated", std::sync::Arc::from(raw))
 }
-/// Real post-handshake / auth-recovery wire shape:
-/// `McpToolsChanged { sessionId, serverName, tools }`.
-pub(super) fn make_tools_changed_notif_post_h2(
-    session_id: &str,
-) -> acp::ExtNotification {
-    let payload = pi_shell::extensions::mcp::McpToolsChanged {
-        session_id: session_id.to_string(),
-        server_name: "grok_com_linear".to_string(),
-        tools: Vec::new(),
-    };
-    let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("pi/mcp/tools_changed", std::sync::Arc::from(raw))
-}
 /// Legacy / forward-compat wire shape: older shells emit
 /// `{ serverName, tools }` with NO sessionId. The pager must fall
 /// back to active_view for this shape.
@@ -2192,4 +2179,3 @@ mod background_tasks;
 mod models;
 mod mcp;
 mod git_head;
-mod version_mismatch;

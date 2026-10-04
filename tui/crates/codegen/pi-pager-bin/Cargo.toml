@@ -21,14 +21,14 @@ pi-pager = { path = "../pi-pager" }
 # Optional scrollback-native render mode, wired in via the fn-pointer seam.
 pi-pager-minimal = { path = "../pi-pager-minimal" }
 
-# Agent runtime + leader/stdio/headless entry points.
+# TUI-side services (config, auth, sessions UI plumbing); the agent runtime is
+# an external ACP agent (`pi_agent_cli`), not linked into this binary.
 pi-shell = { workspace = true }
 pi-update = { path = "../pi-update" }
 pi-version = { workspace = true }
 pi-telemetry = { workspace = true }
 pi-workspace = { workspace = true }
 pi-crash-handler = { path = "../pi-crash-handler" }
-pi-acp-lib = { workspace = true }
 
 # Async runtime + misc.
 tokio = { workspace = true, features = [
@@ -40,13 +40,10 @@ tokio = { workspace = true, features = [
     "io-util",
     "io-std",
 ] }
-tokio-util = { workspace = true, features = ["compat"] }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 serde_json = { workspace = true }
-dunce = { workspace = true }
-semver = { workspace = true }
 pi-tty-utils = { workspace = true }
 # `collect_crashed()` for the startup crash notice.
 pi-active-sessions = { workspace = true }

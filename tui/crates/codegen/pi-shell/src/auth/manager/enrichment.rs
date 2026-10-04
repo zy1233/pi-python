@@ -123,14 +123,6 @@ async fn fetch_user_info(manager: &AuthManager, key: &str, log_label: &str) -> O
     }
 }
 
-/// Blocking login-time enrichment: merge `/user` fields before the first save.
-pub(super) async fn enrich_inline(manager: &AuthManager, auth: &mut GrokAuth) {
-    let Some(ui) = fetch_user_info(manager, &auth.key, "auth login enrichment").await else {
-        return;
-    };
-    apply_user_info_enrichment(auth, ui);
-}
-
 async fn run_user_info_enrichment(manager: &AuthManager, auth: GrokAuth) {
     let started = std::time::Instant::now();
     let Some(user_info) = fetch_user_info(manager, &auth.key, "auth update enrichment").await

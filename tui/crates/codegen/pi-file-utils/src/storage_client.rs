@@ -50,8 +50,7 @@ fn storage_breaker_config() -> BreakerConfig {
 /// Hook invoked by [`StorageClient`] at every 401 response site so that
 /// the embedding application can record auth-attribution telemetry.
 ///
-/// Mirrors the pattern in `pi-sampler::Auth401AttributionCallback`
-/// and `pi-tools::Auth401AttributionCallback`. The shell installs
+/// Mirrors the pattern in `pi-tools::Auth401AttributionCallback`. The shell installs
 /// a bridge implementation that wires into
 /// `crate::auth::attribution::record_consumer_401`.
 ///

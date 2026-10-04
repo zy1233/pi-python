@@ -1083,40 +1083,6 @@ async fn fetch_bundle_falls_back_on_archive_503() {
     }
     server.abort();
 }
-/// `BackendClient::save_session_data` resolves auth from the attached
-/// `AuthManager` and sends the token as `Bearer <key>` on the wire.
-/// This is the writeback path used on every session flush.
-#[tokio::test(flavor = "current_thread")]
-async fn backend_client_resolves_auth_from_auth_manager() {
-    let captured_auth = Arc::new(Mutex::new(None::<String>));
-    let captured = captured_auth.clone();
-    let app = Router::new().route(
-        "/sessions/{id}/data",
-        axum::routing::post(move |headers: HeaderMap| async move {
-            *captured.lock().unwrap() = headers
-                .get("authorization")
-                .and_then(|v| v.to_str().ok())
-                .map(str::to_owned);
-            StatusCode::OK
-        }),
-    );
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    let am = test_auth_manager();
-    let client = BackendClient::with_base_url(format!("http://{addr}")).with_auth_manager(am);
-    client
-        .save_session_data("test-session", &[], None)
-        .await
-        .unwrap();
-    let sent = captured_auth
-        .lock()
-        .unwrap()
-        .clone()
-        .expect("server must receive Authorization header");
-    assert_eq!(sent, "Bearer token", "must use token from AuthManager");
-    server.abort();
-}
 #[tokio::test(flavor = "current_thread")]
 async fn fetch_bundle_propagates_legacy_error_after_fallback() {
     let (proxy_base_url, server) = start_dual_bundle_server(DualBundleServerState {
@@ -1135,27 +1101,4 @@ async fn fetch_bundle_propagates_legacy_error_after_fallback() {
         BackendError::RequestFailed { status: 401, .. }
     ));
     server.abort();
-}
-/// Regression: reqwest .header() appends — duplicate
-/// or overlapping headers cause Cloudflare to reject the request.
-#[tokio::test(flavor = "current_thread")]
-#[allow(clippy::disallowed_methods)]
-async fn auth_headers_do_not_collide_with_json() {
-    let client =
-        BackendClient::with_base_url("http://localhost").with_auth_manager(test_auth_manager());
-    let auth_headers = client.auth_header_map().await.unwrap();
-    assert!(
-        !auth_headers.contains_key("content-type"),
-        "content-type in auth map would overwrite .json()"
-    );
-    let request = reqwest::Client::new()
-        .put("http://localhost/sessions/test")
-        .json(&serde_json::json!({"test": true}))
-        .headers(auth_headers)
-        .build()
-        .unwrap();
-    for name in request.headers().keys() {
-        let count = request.headers().get_all(name).iter().count();
-        assert_eq!(count, 1, "duplicate header {name}");
-    }
 }

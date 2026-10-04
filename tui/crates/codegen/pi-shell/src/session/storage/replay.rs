@@ -152,10 +152,6 @@ impl ReplayToolCollapser {
             .map(acp::SessionUpdate::ToolCall)
     }
 
-    #[cfg(test)]
-    pub(crate) fn pending_len(&self) -> usize {
-        self.pending.len()
-    }
 }
 
 /// Load replay-ready typed ACP updates for a session, or `None` when the
@@ -576,15 +572,3 @@ pub fn prepare_replay_lines<'a>(contents: &'a str, cursor: Option<&str>) -> Prep
     }
 }
 
-/// Blank-strip, drop redundant command catalogs and InProgress tool updates,
-/// and rewind-filter a raw `updates.jsonl` segment. Shared by the delta-replay
-/// path (which has no reconnect cursor); the initial replay path is
-/// [`prepare_replay_lines`], which additionally resolves a cursor (and so must
-/// see ACUs / InProgress lines) before dropping them.
-pub(crate) fn filter_delta_replay_lines(contents: &str) -> Vec<&str> {
-    let live: Vec<&str> = contents
-        .lines()
-        .filter(|l| !l.trim().is_empty() && !line_is_dropped_on_replay(l))
-        .collect();
-    filter_rewind_lines(live)
-}

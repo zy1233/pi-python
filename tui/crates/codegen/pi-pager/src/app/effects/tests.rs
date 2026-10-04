@@ -775,6 +775,7 @@ fn parse_session_response_models_prefers_native_payload() {
     });
     let parsed = parse_session_response_models(
         Some(native.clone()),
+        None,
         meta.as_object(),
     );
     assert_eq!(parsed, Some(native));
@@ -786,7 +787,7 @@ fn parse_session_response_models_falls_back_to_meta() {
         "pi/currentModelDisplayName": "DeepSeek Flash",
         "pi/provider": "deepseek",
     });
-    let parsed = parse_session_response_models(None, meta.as_object())
+    let parsed = parse_session_response_models(None, None, meta.as_object())
         .expect("meta model fallback should build SessionModelState");
     assert_eq!(parsed.current_model_id.0.as_ref(), "deepseek-flash");
     assert_eq!(parsed.available_models.len(), 1);
@@ -803,8 +804,101 @@ fn parse_session_response_models_falls_back_to_meta() {
 #[test]
 fn parse_session_response_models_none_without_native_or_meta_model() {
     let meta = serde_json::json!({ "pi/provider": "deepseek" });
-    let parsed = parse_session_response_models(None, meta.as_object());
+    let parsed = parse_session_response_models(None, None, meta.as_object());
     assert!(parsed.is_none(), "no model id means no fallback state");
+}
+/// The `model` option exactly as the Python `pi_agent_cli` agent serializes it
+/// (`SessionConfigOptionSelect`, category `model`).
+fn python_agent_model_config_option() -> acp::SessionConfigOption {
+    serde_json::from_value(serde_json::json!({
+        "id": "model",
+        "name": "Model",
+        "category": "model",
+        "type": "select",
+        "currentValue": "qwen/qwen3.8-27b:free",
+        "options": [
+            { "value": "qwen/qwen3.8-27b:free", "name": "Qwen 27B (free)" },
+            { "value": "deepseek/deepseek-chat", "name": "DeepSeek Chat", "description": "fast" },
+        ],
+    }))
+    .expect("Python agent model option must deserialize into the Rust schema")
+}
+#[test]
+fn parse_session_response_models_reads_model_config_option() {
+    let options = vec![python_agent_model_config_option()];
+    let parsed = parse_session_response_models(None, Some(options.as_slice()), None)
+        .expect("a `model` select config option must yield a model catalog");
+    assert_eq!(parsed.current_model_id.0.as_ref(), "qwen/qwen3.8-27b:free");
+    assert_eq!(parsed.available_models.len(), 2);
+    assert_eq!(parsed.available_models[0].name, "Qwen 27B (free)");
+    assert_eq!(
+        parsed.available_models[1].description.as_deref(),
+        Some("fast")
+    );
+    // The config option id must travel with the state so `/model` can address
+    // `session/set_config_option`.
+    let state = crate::acp::model_state::ModelState::from(Some(parsed));
+    assert_eq!(state.config_option_id.as_deref(), Some("model"));
+    assert_eq!(state.available.len(), 2);
+}
+#[test]
+fn parse_session_response_models_prefers_native_over_config_option() {
+    let id = acp::ModelId::new(std::sync::Arc::from("native-model"));
+    let native = acp::SessionModelState::new(
+        id.clone(),
+        vec![acp::ModelInfo::new(id, "Native Model")],
+    );
+    let options = vec![python_agent_model_config_option()];
+    let parsed =
+        parse_session_response_models(Some(native.clone()), Some(options.as_slice()), None);
+    assert_eq!(parsed, Some(native));
+}
+#[test]
+fn parse_session_response_models_ignores_non_model_config_options() {
+    let mode = acp::SessionConfigOption::select(
+        "mode",
+        "Mode",
+        "ask",
+        vec![
+            acp::SessionConfigSelectOption::new("ask", "Ask"),
+            acp::SessionConfigSelectOption::new("code", "Code"),
+        ],
+    )
+    .category(acp::SessionConfigOptionCategory::Mode);
+    let options = vec![mode];
+    let parsed = parse_session_response_models(None, Some(options.as_slice()), None);
+    assert!(parsed.is_none(), "only category=model options feed /model");
+}
+#[test]
+fn parse_session_response_models_flattens_grouped_model_options() {
+    let option = acp::SessionConfigOption::select(
+        "model",
+        "Model",
+        "b",
+        acp::SessionConfigSelectOptions::Grouped(vec![
+            acp::SessionConfigSelectGroup::new(
+                "g1",
+                "Group 1",
+                vec![acp::SessionConfigSelectOption::new("a", "A")],
+            ),
+            acp::SessionConfigSelectGroup::new(
+                "g2",
+                "Group 2",
+                vec![acp::SessionConfigSelectOption::new("b", "B")],
+            ),
+        ]),
+    )
+    .category(acp::SessionConfigOptionCategory::Model);
+    let options = vec![option];
+    let parsed = parse_session_response_models(None, Some(options.as_slice()), None)
+        .expect("grouped options flatten into one catalog");
+    assert_eq!(parsed.current_model_id.0.as_ref(), "b");
+    let ids: Vec<&str> = parsed
+        .available_models
+        .iter()
+        .map(|m| m.model_id.0.as_ref())
+        .collect();
+    assert_eq!(ids, ["a", "b"]);
 }
 /// Unknown keys return a descriptive error.
 #[tokio::test]

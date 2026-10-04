@@ -7,10 +7,9 @@
 //! shell-specific gateway-bridge env vars.
 //!
 //! # Gateway-bridge mode (env-only)
-//! - `GROK_GATEWAY_URL` — when set to a valid URL, `MvpAgent` spawns a
-//!   per-session gateway bridge actor and routes prompts through
-//!   it. Unset → falls back to [`GrokBuildEnvironment::gateway_ws_url`] for
-//!   sessions created in gateway mode; otherwise local-mode (unchanged).
+//! - `GROK_GATEWAY_URL` — legacy opt-in for the per-session gateway bridge of the
+//!   (now removed) in-process Rust agent runtime. This build only logs a warning
+//!   when it is set; see [`parse_gateway_url`].
 pub use pi_env::{
     GrokBuildEnvironment, PROD_ASSET_SERVER_URL, PROD_CLI_CHAT_PROXY_BASE_URL, PROD_GATEWAY_WS_URL,
     PROD_RELAY_WS_URL, PROD_WS_ORIGIN,

@@ -276,10 +276,6 @@ pub const SLOW_TICK_INTERVAL: Duration = Duration::from_millis(83);
 /// Welcome toast lifetime (wall clock, so the duration holds whether the
 /// event loop is ticking Slow or Fast).
 const WELCOME_TOAST_DURATION: Duration = Duration::from_secs(2);
-fn reconnect_success_hides_mismatch(current: Option<&str>, incoming: &str) -> bool {
-    current.is_some_and(crate::acp::is_version_mismatch_banner)
-        && (incoming.starts_with("Reconnected.") || incoming.starts_with("Session restored."))
-}
 /// Which prompt box in-flight voice dictation appends its finalized text to.
 /// Captured when recording **starts** so a trailing STT final still lands where
 /// the user was dictating, even if they navigate away — or toggle a dashboard
@@ -741,12 +737,11 @@ pub struct AppView {
     /// and fanned out to every slash registry (welcome prompt, agents,
     /// dashboard); deny wins over all other visibility gates.
     pub tier_restricted_commands: Vec<String>,
-    /// Whether the pager is connected via a leader (leader mode). The Agent
-    /// Dashboard entry points (`/dashboard`, `Ctrl+\`, `grok dashboard`, the
-    /// startup hook) are only meaningful when a leader is coordinating a
-    /// fleet of sessions, so they are gated on this flag. Set in
-    /// `event_loop::run` from `connection.leader_status_rx.is_some()`;
-    /// defaults to `false` (non-leader, dashboard hidden).
+    /// Legacy gate for the fleet dashboard entry points (`/dashboard`,
+    /// `Ctrl+\`, the startup hook). It was set from the shared-leader
+    /// connection, which no longer exists, so it is always `false` and the
+    /// dashboard stays hidden. Removing the dashboard + roster code is tracked
+    /// in the Rust-runtime-removal plan.
     pub leader_mode: bool,
     /// App-level credit balance used to show the usage warning on the
     /// welcome screen before any agent session exists.
@@ -2100,12 +2095,6 @@ impl AppView {
     /// error slot. From an agent view the existing per-agent toast machinery
     /// fires. On welcome, an overlay above the prompt for
     /// [`WELCOME_TOAST_DURATION`].
-    ///
-    /// Reconnect success copy is skipped when a leader version-mismatch toast
-    /// is already showing: registration (and thus the mismatch notif) finishes
-    /// during reconnect, and the later "Reconnected." / "Session restored…"
-    /// line would hide a still-true skew. Restore-failed and connection-failed
-    /// toasts still replace it.
     pub fn show_toast(&mut self, msg: &str) {
         match self.active_view {
             ActiveView::Agent(id) => {
@@ -2113,39 +2102,18 @@ impl AppView {
                     if let Some(child_sid) = agent.active_subagent.clone()
                         && let Some(child) = agent.subagent_views.get_mut(&child_sid)
                     {
-                        if reconnect_success_hides_mismatch(
-                            child.toast.as_ref().map(|(m, _)| m.as_str()),
-                            msg,
-                        ) {
-                            return;
-                        }
                         child.show_toast(msg);
                     } else {
-                        if reconnect_success_hides_mismatch(
-                            agent.toast.as_ref().map(|(m, _)| m.as_str()),
-                            msg,
-                        ) {
-                            return;
-                        }
                         agent.show_toast(msg);
                     }
                 }
             }
             ActiveView::AgentDashboard => {
                 if let Some(d) = self.dashboard.as_mut() {
-                    if reconnect_success_hides_mismatch(d.error_toast.as_deref(), msg) {
-                        return;
-                    }
                     d.error_toast = Some(crate::glyphs::sanitize_toast_message(msg).into_owned());
                 }
             }
             ActiveView::Welcome => {
-                if reconnect_success_hides_mismatch(
-                    self.welcome_toast.as_ref().map(|(m, _)| m.as_str()),
-                    msg,
-                ) {
-                    return;
-                }
                 self.welcome_toast = Some((
                     crate::glyphs::sanitize_toast_message(msg).into_owned(),
                     std::time::Instant::now() + WELCOME_TOAST_DURATION,

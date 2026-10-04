@@ -10,36 +10,10 @@
 //!   telemetry crate exposes the shutdown helper, so this thin wrapper just
 //!   plumbs it together with `process::exit`.
 
-pub use pi_telemetry::instrumentation::{
-    ChromeTraceOptions, InstrumentationFinalizer, InstrumentationMode, InstrumentationTimer,
-    TARGET, current_mode, finalize, finalizer, generate_chrome_trace, install_panic_hook, layer,
-    timer,
+pub(crate) use pi_telemetry::instrumentation::{
+    InstrumentationMode, InstrumentationTimer,
+    TARGET, current_mode,
 };
-
-/// Final cleanup before terminating the process.
-///
-/// Logs an exit event, flushes instrumentation guards, shuts down the
-/// OpenTelemetry pipeline, and exits with `code`.
-///
-/// Stays in shell so callers can keep calling `pi_shell::instrumentation::finalize_and_exit`.
-pub fn finalize_and_exit(code: i32) -> ! {
-    let signal_name = match code {
-        130 => "SIGINT",
-        143 => "SIGTERM",
-        _ => "other",
-    };
-    tracing::info!(
-        event_type = "process_exit",
-        signal = signal_name,
-        exit_code = code,
-        "Exiting process"
-    );
-    let _ = finalize();
-    pi_telemetry::otel_layer::shutdown_otel();
-    // Flush the --debug firehose; this exits via process::exit, bypassing main's flush.
-    pi_telemetry::debug_log::flush();
-    std::process::exit(code);
-}
 
 /// Time a block under the instrumentation target.
 ///

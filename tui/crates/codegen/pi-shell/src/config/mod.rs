@@ -176,73 +176,8 @@ impl SubagentsConfig {
             }
         }
     }
-    /// Check if a subagent is enabled.
-    /// Returns `true` if the agent is not in the toggle map (default enabled).
-    pub fn is_subagent_enabled(&self, name: &str) -> bool {
-        self.toggle.get(name).copied().unwrap_or(true)
-    }
-    /// Look up a role by name.
-    pub fn get_role(&self, name: &str) -> Option<&SubagentRole> {
-        self.roles.get(name)
-    }
-    /// Look up a persona by name.
-    pub fn get_persona(&self, name: &str) -> Option<&SubagentPersona> {
-        self.personas.get(name)
-    }
-    /// Discover personas from `.grok/personas/` directory.
-    ///
-    /// File-based personas are loaded from `{cwd}/.grok/personas/*.toml`.
-    /// Each file defines a single `SubagentPersona`. The file stem becomes
-    /// the persona name. Inline config takes precedence.
-    pub(crate) fn discover_personas(&mut self, cwd: &std::path::Path) {
-        let dir = cwd.join(".grok").join("personas");
-        self.discover_personas_in_dir(&dir);
-    }
-    /// Validate all role definitions. Returns a list of (role_name, error_message)
-    /// for invalid entries.
-    pub fn validate_roles(&self) -> Vec<(String, String)> {
-        let valid_modes = ["read-only", "read-write", "execute", "all"];
-        let mut errors = Vec::new();
-        for (name, role) in &self.roles {
-            if role.description.is_empty() {
-                errors.push((name.clone(), "description is required".to_string()));
-            }
-            if let Some(ref mode) = role.default_capability_mode
-                && !valid_modes.contains(&mode.as_str())
-            {
-                errors.push((
-                    name.clone(),
-                    format!(
-                        "invalid default_capability_mode \"{mode}\", \
-                         must be one of: {}",
-                        valid_modes.join(", ")
-                    ),
-                ));
-            }
-            if let Some(ref pf) = role.prompt_file
-                && pf.trim().is_empty()
-            {
-                errors.push((
-                    name.clone(),
-                    "prompt_file must not be empty or whitespace".to_string(),
-                ));
-            }
-        }
-        errors
-    }
-    /// Discover roles from `.grok/roles/` directory and merge with inline config.
-    ///
-    /// File-based roles are loaded from `{cwd}/.grok/roles/*.toml`. Each file
-    /// defines a single `SubagentRole` (same schema as inline `[subagents.roles.*]`).
-    /// The file stem becomes the role name.
-    ///
-    /// Precedence: inline config roles override file-based roles with the same name.
-    pub(crate) fn discover_roles(&mut self, cwd: &std::path::Path) {
-        let roles_dir = cwd.join(".grok").join("roles");
-        self.discover_roles_in_dir(&roles_dir);
-    }
-    pub const ENV_MAX_DEPTH: &'static str = "GROK_SUBAGENTS_MAX_DEPTH";
-    pub const DEFAULT_MAX_DEPTH: u32 = 1;
+    pub(crate) const ENV_MAX_DEPTH: &'static str = "GROK_SUBAGENTS_MAX_DEPTH";
+    pub(crate) const DEFAULT_MAX_DEPTH: u32 = 1;
     /// Clamp to `1..=u32::MAX`. Values below 1 (including 0 / negatives) warn
     /// and become 1 so nesting is never accidentally disabled.
     pub(crate) fn clamp_max_depth(raw: i64, source: &str) -> u32 {
@@ -293,10 +228,10 @@ impl SubagentsConfig {
         }
         Self::DEFAULT_MAX_DEPTH
     }
-    pub const ENV_MAX_CONCURRENT: &'static str = "GROK_MAX_CONCURRENT_SUBAGENTS";
-    pub const ENV_SAMPLING_LIMIT: &'static str = "GROK_SUBAGENT_SAMPLING_LIMIT";
-    pub const ENV_LIMIT_BEHAVIOR: &'static str = "GROK_SUBAGENT_LIMIT_BEHAVIOR";
-    pub const ENV_WORKFLOW_MAX_CONCURRENT: &'static str = "GROK_WORKFLOW_MAX_CONCURRENT_AGENTS";
+    pub(crate) const ENV_MAX_CONCURRENT: &'static str = "GROK_MAX_CONCURRENT_SUBAGENTS";
+    pub(crate) const ENV_SAMPLING_LIMIT: &'static str = "GROK_SUBAGENT_SAMPLING_LIMIT";
+    pub(crate) const ENV_LIMIT_BEHAVIOR: &'static str = "GROK_SUBAGENT_LIMIT_BEHAVIOR";
+    pub(crate) const ENV_WORKFLOW_MAX_CONCURRENT: &'static str = "GROK_WORKFLOW_MAX_CONCURRENT_AGENTS";
     pub(crate) fn resolve_max_concurrent(
         env: Option<&str>,
         config: Option<i64>,
@@ -321,7 +256,9 @@ impl SubagentsConfig {
         remote: Option<u32>,
         default: usize,
     ) -> usize {
-        let max = crate::agent::subagent::MAX_SUBAGENT_SAMPLING_LIMIT;
+        /// Hard ceiling for the concurrent subagent sampling limit.
+        const MAX_SUBAGENT_SAMPLING_LIMIT: usize = 512;
+        let max = MAX_SUBAGENT_SAMPLING_LIMIT;
         let resolved =
             resolve_positive_count(Self::ENV_SAMPLING_LIMIT, env, config, remote, default);
         if resolved > max {
@@ -381,7 +318,7 @@ impl SubagentsConfig {
     ///
     /// Project files are excluded from this trust-independent base; Task
     /// boundaries overlay them using the parent cwd's authoritative trust verdict.
-    pub fn resolve(cli_flag: bool, config: &toml::Value) -> Self {
+    pub(crate) fn resolve(cli_flag: bool, config: &toml::Value) -> Self {
         let user_grok_root = pi_config::user_grok_home();
         Self::resolve_base_with_sources(
             cli_flag,
@@ -417,32 +354,6 @@ impl SubagentsConfig {
         result.discover_personas_in_dir(&bundled_root.join("personas"));
         result
     }
-    pub(crate) fn effective_definition_maps(
-        roles: &std::collections::HashMap<String, SubagentRole>,
-        personas: &std::collections::HashMap<String, SubagentPersona>,
-        cwd: &std::path::Path,
-        project_trusted: bool,
-    ) -> (
-        std::collections::HashMap<String, SubagentRole>,
-        std::collections::HashMap<String, SubagentPersona>,
-    ) {
-        let mut project = Self::default();
-        if project_trusted {
-            project.discover_roles(cwd);
-            project.discover_personas(cwd);
-        }
-        for (name, role) in roles {
-            if role.source_dir.is_none() || !project.roles.contains_key(name) {
-                project.roles.insert(name.clone(), role.clone());
-            }
-        }
-        for (name, persona) in personas {
-            if persona.source_path.is_none() || !project.personas.contains_key(name) {
-                project.personas.insert(name.clone(), persona.clone());
-            }
-        }
-        (project.roles, project.personas)
-    }
 }
 /// Managed MCP connector fetching config (`[managed_mcps]` in config.toml).
 ///
@@ -463,7 +374,7 @@ impl Default for ManagedMcpsConfig {
 }
 impl ManagedMcpsConfig {
     /// Priority: env var > TOML > remote > default (enabled interactive, disabled headless).
-    pub fn resolve(
+    pub(crate) fn resolve(
         config: &toml::Value,
         remote: Option<&crate::util::config::RemoteSettings>,
         is_headless: bool,
@@ -691,8 +602,8 @@ pub struct ToolsConfig {
     pub media_gen: MediaGenToolsConfig,
 }
 impl ToolsConfig {
-    pub const ENV_MAX_PARALLEL_IMAGE_GEN_CALLS: &'static str = "GROK_MAX_PARALLEL_IMAGE_GEN_CALLS";
-    pub const ENV_MAX_PARALLEL_VIDEO_GEN_CALLS: &'static str = "GROK_MAX_PARALLEL_VIDEO_GEN_CALLS";
+    pub(crate) const ENV_MAX_PARALLEL_IMAGE_GEN_CALLS: &'static str = "GROK_MAX_PARALLEL_IMAGE_GEN_CALLS";
+    pub(crate) const ENV_MAX_PARALLEL_VIDEO_GEN_CALLS: &'static str = "GROK_MAX_PARALLEL_VIDEO_GEN_CALLS";
     /// Resolve the final tools config, in priority order:
     /// 1. Env vars `GROK_RESPECT_GITIGNORE` and
     ///    `GROK_DISABLE_ZDR_INCOMPATIBLE_TOOLS` (`0`/`false` off,
@@ -703,7 +614,7 @@ impl ToolsConfig {
     /// Fields are read individually so a malformed
     /// `[tools.zdr_video_output_s3]` cannot wipe `disable_zdr_incompatible_tools`
     /// (or any other tools flag) via whole-table deserialize failure.
-    pub fn resolve(config: &toml::Value) -> Self {
+    pub(crate) fn resolve(config: &toml::Value) -> Self {
         let tools = config.get("tools");
         let mut result = Self {
             respect_gitignore: tools
@@ -872,7 +783,7 @@ pub enum StorageMode {
 }
 impl StorageMode {
     /// Resolve from all sources: CLI > env var > remote settings > default (Local).
-    pub fn resolve(
+    pub(crate) fn resolve(
         cli_override: Option<&str>,
         remote: Option<&crate::util::config::RemoteSettings>,
     ) -> Self {
@@ -897,21 +808,8 @@ impl StorageMode {
         }
         Self::Local
     }
-    /// Resolve from remote settings, enforcing the rule that `Writeback`
-    /// requires grok.com auth (it syncs to grok-code-backend). This is the
-    /// single home for that gate, used at boot ([`crate::agent::init`]) and by
-    /// the post-readiness self-heal (`MvpAgent::reapply_storage_mode`).
-    pub(crate) fn from_remote_gated(
-        remote: Option<&crate::util::config::RemoteSettings>,
-        has_pi_auth: bool,
-    ) -> Self {
-        match Self::resolve(None, remote) {
-            Self::Writeback if !has_pi_auth => Self::Local,
-            mode => mode,
-        }
-    }
 }
-pub use pi_config::ConfigLayers;
+pub(crate) use pi_config::ConfigLayers;
 pub use pi_config::{
     GROK_CONFIG_ENV, GROK_CONFIG_PATH_ENV, MDM_REQUIREMENTS_SOURCE, OverlaySource,
     RequirementsLayer, RequirementsSource, ResolvedOverlay, ServingIdentity, SyncMarker,
@@ -923,85 +821,18 @@ pub use pi_config::{
     normalize_identity, requirements_layers, resolved_env_overlay, system_config_dir,
     user_grok_home,
 };
-/// Map of "dotted.path" to which config file the value came from.
-pub(crate) fn config_origins(
-    layers: &ConfigLayers,
-) -> std::collections::HashMap<String, crate::agent::config::ConfigSource> {
-    use crate::agent::config::ConfigSource;
-    let mut origins = std::collections::HashMap::new();
-    if layers.has_system_managed() {
-        walk_toml(
-            &layers.system_managed,
-            &mut vec![],
-            ConfigSource::SystemManagedConfig,
-            &mut origins,
-        );
-    }
-    if layers.has_managed() {
-        walk_toml(
-            &layers.managed,
-            &mut vec![],
-            ConfigSource::ManagedConfig,
-            &mut origins,
-        );
-    }
-    walk_toml(
-        &layers.user,
-        &mut vec![],
-        ConfigSource::UserConfig,
-        &mut origins,
-    );
-    if let Some(overlay) = &layers.env_overlay {
-        walk_toml(overlay, &mut vec![], ConfigSource::EnvOverlay, &mut origins);
-    }
-    origins
-}
-fn walk_toml(
-    value: &toml::Value,
-    path: &mut Vec<String>,
-    source: crate::agent::config::ConfigSource,
-    origins: &mut std::collections::HashMap<String, crate::agent::config::ConfigSource>,
-) {
-    match value {
-        toml::Value::Table(table) => {
-            for (k, v) in table {
-                path.push(k.clone());
-                walk_toml(v, path, source, origins);
-                path.pop();
-            }
-        }
-        _ => {
-            origins.insert(path.join("."), source);
-        }
-    }
-}
 /// The `[skills]` table from an effective config, shared by the reload
 /// dispatch and `grok inspect`.
-pub(crate) use crate::config::reloader::parse_skills_config;
 /// Effective config: layers + campaign overlay (remote cache + `GROK_CAMPAIGNS_OVERRIDE`).
 pub use crate::util::config::load_effective_config;
-/// Effective config with disk campaigns only — for one-shot entrypoints that
-/// never fetch remote settings (avoids resolving against a never-seeded cache).
-pub use crate::util::config::load_effective_config_disk_only;
 /// Where a requirement or permission rule was loaded from.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RequirementSource {
+pub(crate) enum RequirementSource {
     Unknown,
     Requirements { path: std::path::PathBuf },
     ManagedSettings { path: std::path::PathBuf },
     Config { path: std::path::PathBuf },
     Settings { path: std::path::PathBuf },
-}
-impl RequirementSource {
-    pub fn path(&self) -> Option<&std::path::Path> {
-        match self {
-            Self::Unknown => None,
-            Self::Requirements { path }
-            | Self::ManagedSettings { path }
-            | Self::Config { path }
-            | Self::Settings { path } => Some(path),
-        }
-    }
 }
 impl std::fmt::Display for RequirementSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1016,12 +847,6 @@ impl std::fmt::Display for RequirementSource {
         }
     }
 }
-/// A value paired with the source it came from.
-#[derive(Debug, Clone)]
-pub struct Sourced<T> {
-    pub value: T,
-    pub source: RequirementSource,
-}
 /// A config field clamped by requirements.
 #[derive(Debug, Clone)]
 pub(crate) struct EnforcedField {
@@ -1032,62 +857,6 @@ pub(crate) struct EnforcedField {
 impl std::fmt::Display for EnforcedField {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} = {} ({})", self.path, self.value, self.source)
-    }
-}
-/// Apply overrides from external `managed-settings.json`.
-/// Called before `apply_requirements()` so requirements.toml can override.
-pub(crate) fn apply_managed_settings_features(
-    config: &mut crate::agent::config::Config,
-) -> Vec<EnforcedField> {
-    let ms = pi_workspace::permission::resolution::managed_settings();
-    apply_managed_settings_features_inner(config, &ms.features)
-}
-fn apply_managed_settings_features_inner(
-    config: &mut crate::agent::config::Config,
-    features: &pi_workspace::permission::resolution::ManagedSettingsFeatures,
-) -> Vec<EnforcedField> {
-    let Some(ref path) = features.source_path else {
-        return Vec::new();
-    };
-    let source = RequirementSource::ManagedSettings { path: path.clone() };
-    let mut enforced: Vec<EnforcedField> = Vec::new();
-    if features.disable_telemetry == Some(true) {
-        config.features.telemetry = Some(crate::agent::config::TelemetryMode::Disabled);
-        enforced.push(EnforcedField {
-            path: "features.telemetry",
-            value: "false (DISABLE_TELEMETRY)".to_string(),
-            source: source.clone(),
-        });
-    }
-    if features.disable_feedback == Some(true) {
-        use crate::agent::config::Feature;
-        config.feature_values.insert(Feature::Feedback, false);
-        enforced.push(EnforcedField {
-            path: Feature::Feedback.path(),
-            value: "false (DISABLE_FEEDBACK_COMMAND)".to_string(),
-            source: source.clone(),
-        });
-    }
-    enforced
-}
-/// Load the on-disk config for a one-shot command and clamp it with policy. Without the clamp a
-/// pinned value reads as an ordinary config value, which the environment outranks.
-pub fn load_agent_config_disk_only() -> Result<crate::agent::config::Config, String> {
-    let effective = load_effective_config_disk_only().map_err(|e| e.to_string())?;
-    let mut config = crate::agent::config::Config::new_from_toml_cfg(&effective)?;
-    apply_policy(&mut config);
-    Ok(config)
-}
-/// Clamp a config with managed settings and then requirements pins, logging each field a policy
-/// took over. Requirements run second so a pin wins a conflict.
-pub(crate) fn apply_policy(config: &mut crate::agent::config::Config) {
-    let managed = apply_managed_settings_features(config);
-    let pinned = apply_requirements(config);
-    for field in managed.iter().chain(&pinned) {
-        tracing::info!(
-            field = %field.path, value = %field.value, source = %field.source,
-            "policy override"
-        );
     }
 }
 /// Clamp `AgentConfig` fields per `requirements.toml`. No-op if absent.
@@ -1548,7 +1317,7 @@ pub fn apply_sandbox(
         sandbox.install();
     }
 }
-pub use pi_workspace::project_config::find_project_configs;
+pub(crate) use pi_workspace::project_config::find_project_configs;
 /// Resolve the effective `[plugins]` config for a working directory the same
 /// way a session does at reload time: global/user config
 /// ([`load_effective_config`]) plus every ancestor project `.grok/config.toml`
@@ -1585,139 +1354,7 @@ pub(crate) fn resolve_effective_plugins_config(
     plugins_cfg.merge_claude_enabled_plugins(Some(cwd));
     plugins_cfg
 }
-pub use pi_config::{deep_merge_toml, expand_env_vars_in_string, expand_env_vars_in_toml};
-/// Add a plugin path to `[plugins].paths` in `~/.grok/config.toml`.
-///
-/// Creates the `[plugins]` section and `paths` array if they don't exist.
-/// Deduplicates: if the path is already present, this is a no-op.
-pub(crate) fn add_plugin_path(path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let config_path = crate::util::grok_home::grok_home().join("config.toml");
-    let content = std::fs::read_to_string(&config_path).unwrap_or_default();
-    let mut config: toml::Value = if content.is_empty() {
-        toml::Value::Table(toml::map::Map::new())
-    } else {
-        toml::from_str(&content).map_err(|e| format!("failed to parse config.toml: {e}"))?
-    };
-    let table = config
-        .as_table_mut()
-        .ok_or("config.toml root is not a table")?;
-    if !table.contains_key("plugins") {
-        table.insert(
-            "plugins".to_string(),
-            toml::Value::Table(toml::map::Map::new()),
-        );
-    }
-    let plugins = table
-        .get_mut("plugins")
-        .and_then(|v| v.as_table_mut())
-        .ok_or("[plugins] is not a table")?;
-    if !plugins.contains_key("paths") {
-        plugins.insert("paths".to_string(), toml::Value::Array(vec![]));
-    }
-    let paths = plugins
-        .get_mut("paths")
-        .and_then(|v| v.as_array_mut())
-        .ok_or("[plugins].paths is not an array")?;
-    let already_present = paths.iter().any(|v| v.as_str().is_some_and(|s| s == path));
-    if !already_present {
-        paths.push(toml::Value::String(path.to_string()));
-    }
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&config_path, toml::to_string_pretty(&config)?)?;
-    Ok(())
-}
-/// Remove a plugin path from `[plugins].paths` in `~/.grok/config.toml`.
-///
-/// If the path is not found, this is a no-op (returns Ok).
-pub(crate) fn remove_plugin_path(path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let config_path = crate::util::grok_home::grok_home().join("config.toml");
-    let content = match std::fs::read_to_string(&config_path) {
-        Ok(c) => c,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(e.into()),
-    };
-    let mut config: toml::Value =
-        toml::from_str(&content).map_err(|e| format!("failed to parse config.toml: {e}"))?;
-    if let Some(plugins) = config
-        .as_table_mut()
-        .and_then(|t| t.get_mut("plugins"))
-        .and_then(|v| v.as_table_mut())
-        && let Some(paths) = plugins.get_mut("paths").and_then(|v| v.as_array_mut())
-    {
-        paths.retain(|v| v.as_str().is_none_or(|s| s != path));
-    }
-    std::fs::write(&config_path, toml::to_string_pretty(&config)?)?;
-    Ok(())
-}
-/// Add a plugin to `[plugins].disabled` in `~/.grok/config.toml`.
-///
-/// Creates the `[plugins]` section and `disabled` array if they don't exist.
-/// Deduplicates: if already present, this is a no-op.
-pub fn add_disabled_plugin(plugin_id: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let config_path = crate::util::grok_home::grok_home().join("config.toml");
-    let content = std::fs::read_to_string(&config_path).unwrap_or_default();
-    let mut config: toml::Value = if content.is_empty() {
-        toml::Value::Table(toml::map::Map::new())
-    } else {
-        toml::from_str(&content).map_err(|e| format!("failed to parse config.toml: {e}"))?
-    };
-    let table = config
-        .as_table_mut()
-        .ok_or("config.toml root is not a table")?;
-    if !table.contains_key("plugins") {
-        table.insert(
-            "plugins".to_string(),
-            toml::Value::Table(toml::map::Map::new()),
-        );
-    }
-    let plugins = table
-        .get_mut("plugins")
-        .and_then(|v| v.as_table_mut())
-        .ok_or("[plugins] is not a table")?;
-    if !plugins.contains_key("disabled") {
-        plugins.insert("disabled".to_string(), toml::Value::Array(vec![]));
-    }
-    let disabled = plugins
-        .get_mut("disabled")
-        .and_then(|v| v.as_array_mut())
-        .ok_or("[plugins].disabled is not an array")?;
-    let already = disabled
-        .iter()
-        .any(|v| v.as_str().is_some_and(|s| s == plugin_id));
-    if !already {
-        disabled.push(toml::Value::String(plugin_id.to_string()));
-    }
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&config_path, toml::to_string_pretty(&config)?)?;
-    Ok(())
-}
-/// Remove a plugin from `[plugins].disabled` in `~/.grok/config.toml`.
-///
-/// If the plugin is not in the disabled list, this is a no-op.
-pub fn remove_disabled_plugin(plugin_id: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let config_path = crate::util::grok_home::grok_home().join("config.toml");
-    let content = match std::fs::read_to_string(&config_path) {
-        Ok(c) => c,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(e.into()),
-    };
-    let mut config: toml::Value =
-        toml::from_str(&content).map_err(|e| format!("failed to parse config.toml: {e}"))?;
-    if let Some(plugins) = config
-        .as_table_mut()
-        .and_then(|t| t.get_mut("plugins"))
-        .and_then(|v| v.as_table_mut())
-        && let Some(disabled) = plugins.get_mut("disabled").and_then(|v| v.as_array_mut())
-    {
-        disabled.retain(|v| v.as_str().is_none_or(|s| s != plugin_id));
-    }
-    std::fs::write(&config_path, toml::to_string_pretty(&config)?)?;
-    Ok(())
-}
+pub(crate) use pi_config::{deep_merge_toml, expand_env_vars_in_string};
 /// Add a plugin to `[plugin_cta].dismissed` in `~/.grok/config.toml`.
 ///
 /// Creates the `[plugin_cta]` section and `dismissed` array if they don't exist.
@@ -1801,208 +1438,6 @@ pub fn dismissed_plugin_ctas_in_file(
                 .collect()
         })
         .unwrap_or_default()
-}
-/// Validate that a hook path is safe to add to `~/.grok/hooks-paths`.
-///
-/// CWE-427: Only paths under `~/.grok/` are allowed to prevent
-/// arbitrary hook path injection that bypasses the project trust gate.
-/// Paths are canonicalized (resolving symlinks and `..`) before checking.
-pub(crate) fn validate_hooks_path(path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let candidate = std::path::Path::new(path);
-    if !candidate.is_absolute() {
-        return Err("Hook path must be absolute.".into());
-    }
-    let grok_home = crate::util::grok_home::grok_home();
-    let canonical = dunce::canonicalize(candidate)
-        .or_else(|_| {
-            let mut base = candidate.to_path_buf();
-            let mut tail = Vec::new();
-            while !base.exists() {
-                if let Some(file_name) = base.file_name() {
-                    tail.push(file_name.to_os_string());
-                    base.pop();
-                } else {
-                    break;
-                }
-            }
-            let mut resolved = dunce::canonicalize(&base)?;
-            for component in tail.into_iter().rev() {
-                resolved.push(component);
-            }
-            Ok(resolved)
-        })
-        .map_err(|e: std::io::Error| format!("Cannot resolve hook path: {e}"))?;
-    let canonical_home = dunce::canonicalize(&grok_home).unwrap_or_else(|_| grok_home.clone());
-    if !canonical.starts_with(&canonical_home) {
-        return Err(format!(
-            "Hook path must be under ~/.grok/ ({}). Got: {}",
-            canonical_home.display(),
-            canonical.display()
-        )
-        .into());
-    }
-    Ok(())
-}
-/// Post-install steps for a newly installed plugin repo.
-///
-/// Auto-enables all plugins in the repo so they are active after the next reload.
-/// Returns `(plugin_names, warnings)` for status messaging.
-pub(crate) fn post_install_plugin(repo_key: &str) -> (Vec<String>, Vec<String>) {
-    let registry = pi_agent::plugins::InstallRegistry::load();
-    let Some(repo) = registry.get_repo(repo_key) else {
-        return (
-            vec![],
-            vec![format!("repo not found in registry: {repo_key}")],
-        );
-    };
-    let names: Vec<String> = repo.plugins.keys().cloned().collect();
-    let mut warnings = Vec::new();
-    for name in &names {
-        if let Err(e) = add_enabled_plugin(name) {
-            warnings.push(format!("auto-enable {name}: {e}"));
-        }
-    }
-    (names, warnings)
-}
-/// Add a plugin to `[plugins].enabled` in `~/.grok/config.toml`.
-///
-/// Used for project-scope plugins that are disabled by default.
-/// Deduplicates: if already present, this is a no-op.
-pub fn add_enabled_plugin(plugin_id: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let config_path = crate::util::grok_home::grok_home().join("config.toml");
-    let content = std::fs::read_to_string(&config_path).unwrap_or_default();
-    let mut config: toml::Value = if content.is_empty() {
-        toml::Value::Table(toml::map::Map::new())
-    } else {
-        toml::from_str(&content).map_err(|e| format!("failed to parse config.toml: {e}"))?
-    };
-    let table = config
-        .as_table_mut()
-        .ok_or("config.toml root is not a table")?;
-    if !table.contains_key("plugins") {
-        table.insert(
-            "plugins".to_string(),
-            toml::Value::Table(toml::map::Map::new()),
-        );
-    }
-    let plugins = table
-        .get_mut("plugins")
-        .and_then(|v| v.as_table_mut())
-        .ok_or("[plugins] is not a table")?;
-    if !plugins.contains_key("enabled") {
-        plugins.insert("enabled".to_string(), toml::Value::Array(Vec::new()));
-    }
-    let enabled = plugins
-        .get_mut("enabled")
-        .and_then(|v| v.as_array_mut())
-        .ok_or("[plugins].enabled is not an array")?;
-    let already = enabled
-        .iter()
-        .any(|v| v.as_str().is_some_and(|s| s == plugin_id));
-    if !already {
-        enabled.push(toml::Value::String(plugin_id.to_string()));
-    }
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&config_path, toml::to_string_pretty(&config)?)?;
-    Ok(())
-}
-/// Remove a plugin from `[plugins].enabled` in `~/.grok/config.toml`.
-pub fn remove_enabled_plugin(plugin_id: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let config_path = crate::util::grok_home::grok_home().join("config.toml");
-    let content = match std::fs::read_to_string(&config_path) {
-        Ok(c) => c,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(e.into()),
-    };
-    let mut config: toml::Value =
-        toml::from_str(&content).map_err(|e| format!("failed to parse config.toml: {e}"))?;
-    if let Some(plugins) = config
-        .as_table_mut()
-        .and_then(|t| t.get_mut("plugins"))
-        .and_then(|v| v.as_table_mut())
-        && let Some(enabled) = plugins.get_mut("enabled").and_then(|v| v.as_array_mut())
-    {
-        enabled.retain(|v| v.as_str().is_none_or(|s| s != plugin_id));
-    }
-    std::fs::write(&config_path, toml::to_string_pretty(&config)?)?;
-    Ok(())
-}
-/// Add a hook path to `~/.grok/hooks-paths` (one path per line).
-///
-/// If the path is already present (exact string match), this is a no-op.
-/// CWE-427: The path is validated to be under `~/.grok/` before writing.
-pub(crate) fn add_hooks_path(path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    validate_hooks_path(path)?;
-    add_hooks_path_to_file(
-        path,
-        &crate::util::grok_home::grok_home().join("hooks-paths"),
-    )
-}
-/// Add a hook path to a specific file (for tests).
-pub(crate) fn add_hooks_path_to_file(
-    path: &str,
-    paths_file: &std::path::Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if let Some(parent) = paths_file.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let existing = std::fs::read_to_string(paths_file).unwrap_or_default();
-    if existing.lines().any(|l| l.trim() == path) {
-        return Ok(());
-    }
-    use std::io::Write;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(paths_file)?;
-    writeln!(file, "{}", path)?;
-    Ok(())
-}
-/// Remove a hook path from `~/.grok/hooks-paths`.
-///
-/// If the path is not found (exact string match), this is a no-op.
-/// Matches the same exact-string behavior as `add_hooks_path`.
-pub(crate) fn remove_hooks_path(path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    remove_hooks_path_from_file(
-        path,
-        &crate::util::grok_home::grok_home().join("hooks-paths"),
-    )
-}
-/// Remove a hook path from a specific file (for tests).
-pub(crate) fn remove_hooks_path_from_file(
-    path: &str,
-    paths_file: &std::path::Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let content = match std::fs::read_to_string(paths_file) {
-        Ok(c) => c,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(e.into()),
-    };
-    let mut found = false;
-    let new_lines: Vec<&str> = content
-        .lines()
-        .filter(|l| {
-            if l.trim() == path {
-                found = true;
-                false
-            } else {
-                true
-            }
-        })
-        .collect();
-    if !found {
-        return Ok(());
-    }
-    if let Some(parent) = paths_file.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(
-        paths_file,
-        new_lines.join("\n") + (if new_lines.is_empty() { "" } else { "\n" }),
-    )?;
-    Ok(())
 }
 #[cfg(test)]
 mod tests;

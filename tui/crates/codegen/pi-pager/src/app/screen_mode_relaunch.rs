@@ -76,7 +76,7 @@ fn flag_takes_value(flag: &str) -> bool {
 /// Strips prior session-selection / mode flags, one-shot session-creation
 /// directives, and any bare positional prompt so a cold-start
 /// `grok "do the thing"` does not re-submit on resume. Keeps everything else
-/// (e.g. `--no-leader`, `--model`, endpoint overrides) intact, including the
+/// (e.g. `--model`, endpoint overrides) intact, including the
 /// value token that follows value-taking flags.
 ///
 /// One-shot startup directives must not survive into the rebuilt argv:
@@ -430,7 +430,6 @@ mod tests {
             "--model",
             "-m",
             "--cwd",
-            "--leader-socket",
             "--resume",
             "-r",
             "--load",
@@ -661,8 +660,6 @@ mod tests {
                 "grok-4",
                 "--cwd",
                 "/tmp/proj",
-                "--leader-socket",
-                "/tmp/leader.sock",
                 "--debug-file",
                 "/tmp/debug.log",
                 "--no-leader",
@@ -678,8 +675,6 @@ mod tests {
                 "grok-4",
                 "--cwd",
                 "/tmp/proj",
-                "--leader-socket",
-                "/tmp/leader.sock",
                 "--debug-file",
                 "/tmp/debug.log",
                 "--no-leader",

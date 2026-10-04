@@ -1,7 +1,7 @@
 //! In-memory registry of active plugins.
 //!
 //! The `PluginRegistry` is the single source of truth for which plugins
-//! are loaded in a session.  It is built once during `MvpAgent` initialization
+//! are loaded in a session.  It is built once during agent initialization
 //! and can be rebuilt via `/plugins reload`.  Each session receives a snapshot.
 
 use std::collections::HashMap;

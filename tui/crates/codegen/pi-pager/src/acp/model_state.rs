@@ -46,12 +46,21 @@ impl EffortTokenError {
     }
 }
 
+/// `_meta` key on the synthesized [`acp::SessionModelState`] carrying the id of the ACP Session
+/// Config Option (category `model`) the catalog came from, so `/model` can address
+/// `session/set_config_option`.
+pub(crate) const MODEL_CONFIG_ID_META_KEY: &str = "pi/modelConfigId";
+
 /// Per-agent model state.
 #[derive(Debug, Clone, Default)]
 pub struct ModelState {
     pub available: IndexMap<acp::ModelId, acp::ModelInfo>,
     pub current: Option<acp::ModelId>,
     pub reasoning_effort: Option<ReasoningEffort>,
+    /// Id of the agent's model Session Config Option (standard ACP model selection). `None` when
+    /// the catalog came from the unstable `models` payload or `_meta` hints, in which case the
+    /// switch falls back to `session/set_model`.
+    pub config_option_id: Option<String>,
     /// External override for the context window size (tokens).
     /// When set, `get_context_window()` returns this instead of
     /// reading from the current model's metadata. Used for subagent
@@ -296,10 +305,17 @@ impl From<Option<acp::SessionModelState>> for ModelState {
                     .as_ref()
                     .and_then(|id| models.get(id))
                     .and_then(|info| parse_reasoning_effort_meta(info.meta.as_ref()));
+                let config_option_id = state
+                    .meta
+                    .as_ref()
+                    .and_then(|meta| meta.get(MODEL_CONFIG_ID_META_KEY))
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned);
                 Self {
                     available: models,
                     current: current_model,
                     reasoning_effort,
+                    config_option_id,
                     context_window_override: None,
                 }
             })

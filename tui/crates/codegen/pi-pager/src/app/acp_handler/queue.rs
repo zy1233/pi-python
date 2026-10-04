@@ -22,7 +22,7 @@ pub(crate) struct PendingRunningAdoption {
 }
 
 /// Wire payload of `legacy/session/prompt_complete`, emitted by
-/// `MvpAgent::prompt()` on the shell after every turn.
+/// the agent's `prompt` handler after every turn.
 ///
 /// `Serialize` is derived so tests construct payloads through the same type
 /// they are parsed into (shape drift fails at compile time, not at runtime).

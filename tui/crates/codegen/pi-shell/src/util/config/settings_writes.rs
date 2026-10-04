@@ -46,45 +46,6 @@ pub fn set_follow_up_steer_cache(steer: bool) {
     FOLLOW_UP_STEER_MTIME_NS.store(follow_up_config_mtime_ns(), Ordering::Relaxed);
 }
 
-/// Whether Steer is enabled in this process.
-///
-/// Hits disk only when the cache is cold or `config.toml` mtime has changed
-/// since the last resolve, so the pager can toggle Follow-up behavior live
-/// without restarting the shell agent. A failed effective-config load does
-/// not pin Queue: previous cache is kept, or cold failure returns false for
-/// this call only without writing QUEUE+mtime.
-pub async fn follow_up_steer_enabled() -> bool {
-    let mtime = follow_up_config_mtime_ns();
-    let cached_mtime = FOLLOW_UP_STEER_MTIME_NS.load(Ordering::Relaxed);
-    let cached = FOLLOW_UP_STEER_CACHE.load(Ordering::Relaxed);
-    if cached != FOLLOW_UP_CACHE_UNKNOWN && mtime != 0 && mtime == cached_mtime {
-        return cached == FOLLOW_UP_CACHE_STEER;
-    }
-    let root = match crate::config::load_effective_config() {
-        Ok(root) => root,
-        Err(_) => {
-            // Transient load failure: do not cache Queue against this mtime.
-            if cached != FOLLOW_UP_CACHE_UNKNOWN {
-                return cached == FOLLOW_UP_CACHE_STEER;
-            }
-            return false;
-        }
-    };
-    let enabled = super::load::load_config_from_toml(&root)
-        .ui
-        .follow_up_steer_enabled();
-    FOLLOW_UP_STEER_CACHE.store(
-        if enabled {
-            FOLLOW_UP_CACHE_STEER
-        } else {
-            FOLLOW_UP_CACHE_QUEUE
-        },
-        Ordering::Relaxed,
-    );
-    FOLLOW_UP_STEER_MTIME_NS.store(mtime, Ordering::Relaxed);
-    enabled
-}
-
 /// Persist `[ui].compact_mode` via `update_config`.
 pub async fn set_compact_mode(value: bool) -> Result<()> {
     update_config(|cfg| cfg.ui.compact_mode = value).await
@@ -186,7 +147,7 @@ pub async fn set_auto_light_theme(value: String) -> Result<()> {
 
 /// Maximum length (in bytes) accepted by [`set_default_model`].
 /// Defense against callers bypassing catalog validation.
-pub const MAX_DEFAULT_MODEL_LEN: usize = 256;
+pub(crate) const MAX_DEFAULT_MODEL_LEN: usize = 256;
 
 /// Persist `[models].default` and dismiss any active campaign nudging it (an
 /// explicit user pick wins over the soft campaign default).

@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use std::io::{self, BufRead, BufReader, Seek};
+use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use crate::extensions::notification::SessionNotification;
@@ -19,13 +19,7 @@ pub(crate) mod relocation;
 mod replay;
 #[cfg(test)]
 mod replay_tests;
-pub mod search;
-mod search_content;
 pub(crate) mod summary_write;
-
-/// The session search index moved to its own crate; re-exported here so
-/// `session::storage::search_fts::…` keeps resolving for its consumers.
-pub use pi_session_search::fts as search_fts;
 
 /// On-disk file names, relative to a session directory. Single source of truth for
 /// the storage adapter and the session/state and session/import extensions.
@@ -104,12 +98,6 @@ fn to_jsonl_bytes<T: serde::Serialize>(items: &[T]) -> io::Result<Vec<u8>> {
         content.push(b'\n');
     }
     Ok(content)
-}
-
-/// Write `items` as newline-delimited JSON to `path`, atomically (see
-/// [`write_bytes_atomic`]).
-pub(crate) fn write_jsonl_atomic<T: serde::Serialize>(path: &Path, items: &[T]) -> io::Result<()> {
-    write_bytes_atomic(path, &to_jsonl_bytes(items)?)
 }
 
 /// Async sibling of [`write_jsonl_atomic`].
@@ -474,7 +462,7 @@ pub(crate) mod chat_rebuild {
 
 /// Iterator that streams session updates from a JSONL file without loading all into memory.
 /// Each call to `next()` reads and parses one line.
-pub struct UpdatesIterator {
+pub(crate) struct UpdatesIterator {
     reader: BufReader<std::fs::File>,
     line_buffer: String,
 }
@@ -493,13 +481,6 @@ impl UpdatesIterator {
         }))
     }
 
-    /// Returns the current byte position in the underlying file.
-    /// After iterating, this is the offset of the next unread byte (i.e., EOF
-    /// if all updates were consumed). Used to record the replay end offset for
-    /// subsequent delta replay.
-    pub fn stream_position(&mut self) -> io::Result<u64> {
-        self.reader.stream_position()
-    }
 }
 
 impl Iterator for UpdatesIterator {
@@ -823,22 +804,6 @@ impl Default for CopySessionOptions {
     }
 }
 
-/// Chunk `_meta.promptIndex` on an ACP `UserMessageChunk`, if present.
-fn acp_user_chunk_prompt_index(update: &SessionUpdate) -> Option<usize> {
-    let SessionUpdate::Acp(n) = update else {
-        return None;
-    };
-    let acp::SessionUpdate::UserMessageChunk(chunk) = &n.update else {
-        return None;
-    };
-    chunk
-        .meta
-        .as_ref()
-        .and_then(|m| m.get("promptIndex"))
-        .and_then(|v| v.as_u64())
-        .map(|v| v as usize)
-}
-
 pub(crate) const HOST_TURN_META_KEY: &str = "hostTurn";
 
 pub(crate) fn is_host_turn_chunk(chunk: &acp::ContentChunk) -> bool {
@@ -848,23 +813,6 @@ pub(crate) fn is_host_turn_chunk(chunk: &acp::ContentChunk) -> bool {
         .and_then(|m| m.get(HOST_TURN_META_KEY))
         .and_then(|v| v.as_bool())
         == Some(true)
-}
-
-fn is_host_turn_update(update: &SessionUpdate) -> bool {
-    let SessionUpdate::Acp(n) = update else {
-        return false;
-    };
-    let acp::SessionUpdate::UserMessageChunk(chunk) = &n.update else {
-        return false;
-    };
-    is_host_turn_chunk(chunk)
-}
-
-fn is_acp_user_message_chunk(update: &SessionUpdate) -> bool {
-    matches!(
-        update,
-        SessionUpdate::Acp(n) if matches!(n.update, acp::SessionUpdate::UserMessageChunk(_))
-    )
 }
 
 /// Tracks user-message runs for turn counting (updates truncate / filter_rewind).
@@ -966,7 +914,7 @@ pub enum AppendCwdSwitchError {
 }
 
 impl AppendUpdateError {
-    pub fn into_io_error(self) -> io::Error {
+    pub(crate) fn into_io_error(self) -> io::Error {
         match self {
             Self::NotCommitted(error) | Self::Committed(error) => error,
         }
@@ -1296,19 +1244,6 @@ pub trait StorageAdapter: Send + Sync {
     ) -> io::Result<crate::extensions::notification::CompactionCheckpointFile>;
 }
 
-/// Backup-gated strip rewrite: the destructive rewrite runs only when the
-/// backup landed, so recoverability can never be silently forfeited (full
-/// disk, read-only volume). Factored out of the persistence actor so the
-/// gate ordering is testable against a real adapter.
-pub(crate) async fn strip_rewrite_gated(
-    storage: &dyn StorageAdapter,
-    info: &Info,
-    messages: &[ConversationItem],
-) -> io::Result<()> {
-    storage.backup_chat_history_before_strip(info).await?;
-    storage.replace_chat_history(info, messages).await
-}
-
 pub use jsonl::JsonlStorageAdapter;
 #[cfg(any(test, feature = "test-support"))]
 pub use replay::load_updates_for_replay_at;
@@ -1317,7 +1252,6 @@ pub use replay::{
     load_updates_for_replay, prepare_replay_lines, replay_would_emit, stream_replay_updates_at,
     stream_replay_updates_at_hinted,
 };
-pub(crate) use replay::{ReplayToolCollapser, filter_delta_replay_lines};
 
 /// Extracts `method` and raw `params` from an updates.jsonl envelope
 /// without parsing the notification payload.
@@ -1438,26 +1372,6 @@ fn rewind_step_for_line(line: &str) -> RewindStep {
     RewindStep::Other
 }
 
-/// Classify a typed `SessionUpdate`.
-fn rewind_step_for_update(update: &SessionUpdate) -> RewindStep {
-    if let SessionUpdate::Pi(n) = update
-        && let crate::extensions::notification::SessionUpdate::RewindMarker {
-            target_prompt_index,
-            ..
-        } = &n.update
-    {
-        return RewindStep::Rewind {
-            target: *target_prompt_index,
-        };
-    }
-    if is_acp_user_message_chunk(update) && !is_host_turn_update(update) {
-        return RewindStep::UserChunk {
-            prompt_index: acp_user_chunk_prompt_index(update),
-        };
-    }
-    RewindStep::Other
-}
-
 /// Filter rewind dead branches from raw JSONL lines.
 ///
 /// Canonical raw-line rewind filter used by the initial and delta replay paths.
@@ -1469,33 +1383,13 @@ pub(crate) fn filter_rewind_lines(lines: Vec<&str>) -> Vec<&str> {
     filter_rewind_by(lines, |line| rewind_step_for_line(line))
 }
 
-/// Filter rewind dead branches from typed `SessionUpdate` values.
-///
-/// Typed equivalent of [`filter_rewind_lines`] over the same
-/// [`filter_rewind_by`] driver, operating on fully-deserialized updates.
-pub fn filter_rewind_updates(updates: Vec<SessionUpdate>) -> Vec<SessionUpdate> {
-    let has_rewinds = updates.iter().any(|u| {
-        matches!(
-            u,
-            SessionUpdate::Pi(n) if matches!(
-                n.update,
-                crate::extensions::notification::SessionUpdate::RewindMarker { .. }
-            )
-        )
-    });
-    if !has_rewinds {
-        return updates;
-    }
-    filter_rewind_by(updates, rewind_step_for_update)
-}
-
 /// Strip `<fork-context>` and `<resume-context>` XML wrappers from user
 /// message chunks so replayed/exported prompts show clean text.
 ///
 /// Only modifies `UserMessageChunk` text content; all other update types
 /// pass through unchanged. The tags are injected by the subagent fork/resume
 /// logic in `subagent.rs`.
-pub fn strip_context_wrappers(update: acp::SessionUpdate) -> acp::SessionUpdate {
+pub(crate) fn strip_context_wrappers(update: acp::SessionUpdate) -> acp::SessionUpdate {
     let acp::SessionUpdate::UserMessageChunk(mut chunk) = update else {
         return update;
     };
@@ -1533,7 +1427,7 @@ pub(crate) fn replay_updates_path_in_dir(
 /// Each event represents the minimal information extracted from one
 /// `updates.jsonl` line without deserializing the full typed notification.
 #[derive(Debug, PartialEq)]
-pub enum PromptExtractEvent {
+pub(crate) enum PromptExtractEvent {
     /// A text chunk from a `UserMessageChunk` ACP update.
     ///
     /// Multiple consecutive `UserTextChunk` events belong to the same user
@@ -1554,22 +1448,6 @@ pub enum PromptExtractEvent {
     NotUserMessage,
 }
 
-impl PromptExtractEvent {
-    pub fn user_text(text: impl Into<String>) -> Self {
-        Self::UserTextChunk {
-            text: text.into(),
-            prompt_index: None,
-        }
-    }
-
-    pub fn user_text_pi(text: impl Into<String>, prompt_index: usize) -> Self {
-        Self::UserTextChunk {
-            text: text.into(),
-            prompt_index: Some(prompt_index),
-        }
-    }
-}
-
 /// Iterator that streams [`PromptExtractEvent`]s from a `updates.jsonl` file.
 ///
 /// Unlike [`UpdatesIterator`], this never materialises a full
@@ -1586,7 +1464,7 @@ impl PromptExtractEvent {
 /// `NotUserMessage` (matching the "skip malformed line" behavior of the
 /// original [`UpdatesIterator`]-based path, but safely terminating any
 /// in-progress user-message accumulation).
-pub struct PromptExtractIterator {
+pub(crate) struct PromptExtractIterator {
     reader: std::io::BufReader<std::fs::File>,
     line_buffer: String,
 }
@@ -1646,7 +1524,7 @@ impl Iterator for PromptExtractIterator {
 /// The resulting `Vec` is the resume `prompt_texts` / rewind-picker index
 /// space: `prompt_index == prompts.len()` after load, matching live turn
 /// stamping (not raw user-message count).
-pub fn collect_prompts_from_events(iter: impl Iterator<Item = PromptExtractEvent>) -> Vec<String> {
+pub(crate) fn collect_prompts_from_events(iter: impl Iterator<Item = PromptExtractEvent>) -> Vec<String> {
     let mut prompts: Vec<String> = Vec::new();
     let mut current = String::new();
     let mut in_user = false;
@@ -1755,7 +1633,7 @@ pub fn collect_prompts_from_events(iter: impl Iterator<Item = PromptExtractEvent
 /// Note: This collector does not honor rewind markers (unlike PromptExtractIterator).
 /// Rewound-away branches may still contribute to FTS index. This is a known limitation;
 /// fix by using a rewind-aware replay model (future work).
-pub fn collect_assistant_text(
+pub(crate) fn collect_assistant_text(
     iter: impl Iterator<Item = io::Result<SessionUpdate>>,
 ) -> Vec<String> {
     const MAX_CHARS: usize = 100_000;
@@ -1850,7 +1728,7 @@ pub fn collect_assistant_text(
 /// Note: This collector does not honor rewind markers (unlike PromptExtractIterator).
 /// Rewound-away branches may still contribute to FTS index. This is a known limitation;
 /// fix by using a rewind-aware replay model (future work).
-pub fn collect_tool_metadata(iter: impl Iterator<Item = io::Result<SessionUpdate>>) -> Vec<String> {
+pub(crate) fn collect_tool_metadata(iter: impl Iterator<Item = io::Result<SessionUpdate>>) -> Vec<String> {
     let mut meta: Vec<String> = Vec::new();
     let mut tool_call_count = 0usize;
     let mut chars_emitted = 0usize;
@@ -2071,39 +1949,6 @@ mod tests {
     // ── parse_prompt_extract_event unit tests ─────────────────────────────────
 
     #[test]
-    fn acp_user_text_chunk_yields_user_text() {
-        let line = acp_envelope(
-            r#"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"hello"}}"#,
-        );
-        assert_eq!(
-            parse_prompt_extract_event(&line),
-            PromptExtractEvent::user_text("hello")
-        );
-    }
-
-    #[test]
-    fn acp_user_text_chunk_with_json_escapes_yields_user_text() {
-        // Escaped JSON strings cannot be borrowed as &str; a regression to a
-        // borrowed peek field would drop this prompt from extraction.
-        let line = acp_envelope(
-            r#"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"multi\nline \"quoted\" caf\u00e9"}}"#,
-        );
-        assert_eq!(
-            parse_prompt_extract_event(&line),
-            PromptExtractEvent::user_text("multi\nline \"quoted\" caf\u{e9}")
-        );
-        // An escaped bash command now parses too and must be excluded by the
-        // bash_command predicate (it used to be excluded by the parse failure).
-        let bash = acp_envelope(
-            r#"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"! echo \"hi\"","_meta":{"bash_command":"echo \"hi\""}}}"#,
-        );
-        assert_eq!(
-            parse_prompt_extract_event(&bash),
-            PromptExtractEvent::NotUserMessage
-        );
-    }
-
-    #[test]
     fn acp_agent_message_chunk_yields_not_user() {
         let line = acp_envelope(
             r#"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"reply"}}"#,
@@ -2197,20 +2042,6 @@ mod tests {
         );
     }
 
-    /// Legacy format: raw `acp::SessionNotification` without an outer envelope.
-    ///
-    /// Old sessions wrote `{"sessionId":"s","update":{"sessionUpdate":"user_message_chunk",...}}`
-    /// directly without the `method`/`params` envelope.  The parser must still
-    /// extract user text from these lines.
-    #[test]
-    fn legacy_format_user_message_chunk() {
-        let line = r#"{"sessionId":"s","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"legacy prompt"}}}"#;
-        assert_eq!(
-            parse_prompt_extract_event(line),
-            PromptExtractEvent::user_text("legacy prompt")
-        );
-    }
-
     #[test]
     fn legacy_format_non_user_update() {
         let line = r#"{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hi"}}}"#;
@@ -2230,93 +2061,6 @@ mod tests {
             writeln!(f, "{line}").unwrap();
         }
         f
-    }
-
-    fn collect_events(path: &std::path::Path) -> Vec<PromptExtractEvent> {
-        PromptExtractIterator::open(path)
-            .unwrap()
-            .unwrap()
-            .collect()
-    }
-
-    #[test]
-    fn iterator_single_user_prompt() {
-        let chunk = acp_envelope(
-            r#"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"hello world"}}"#,
-        );
-        let other = acp_envelope(
-            r#"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"reply"}}"#,
-        );
-        let f = write_updates_file(&[&chunk, &other]);
-
-        let events = collect_events(f.path());
-        assert_eq!(events[0], PromptExtractEvent::user_text("hello world"));
-        assert_eq!(events[1], PromptExtractEvent::NotUserMessage);
-    }
-
-    #[test]
-    fn iterator_multi_chunk_user_message() {
-        let c1 = acp_envelope(
-            r#"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"part1 "}}"#,
-        );
-        let c2 = acp_envelope(
-            r#"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"part2"}}"#,
-        );
-        let end = acp_envelope(
-            r#"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hi"}}"#,
-        );
-        let f = write_updates_file(&[&c1, &c2, &end]);
-
-        let events = collect_events(f.path());
-        assert_eq!(events[0], PromptExtractEvent::user_text("part1 "));
-        assert_eq!(events[1], PromptExtractEvent::user_text("part2"));
-        assert_eq!(events[2], PromptExtractEvent::NotUserMessage);
-    }
-
-    #[test]
-    fn iterator_rewind_marker_truncates() {
-        let chunk = acp_envelope(
-            r#"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"p1"}}"#,
-        );
-        let end = acp_envelope(
-            r#"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"a1"}}"#,
-        );
-        let rewind = pi_envelope(
-            r#"{"sessionUpdate":"rewind_marker","target_prompt_index":0,"created_at":"2024-01-01"}"#,
-        );
-        let f = write_updates_file(&[&chunk, &end, &rewind]);
-
-        let events = collect_events(f.path());
-        assert_eq!(events[0], PromptExtractEvent::user_text("p1"));
-        assert_eq!(events[1], PromptExtractEvent::NotUserMessage);
-        assert_eq!(events[2], PromptExtractEvent::RewindTo(0));
-    }
-
-    #[test]
-    fn iterator_skips_blank_lines() {
-        let chunk = acp_envelope(
-            r#"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"hello"}}"#,
-        );
-        let f = write_updates_file(&["", "   ", &chunk, ""]);
-
-        let events = collect_events(f.path());
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0], PromptExtractEvent::user_text("hello"));
-    }
-
-    #[test]
-    fn iterator_malformed_line_does_not_panic() {
-        let bad = "this is not json !!!";
-        let good = acp_envelope(
-            r#"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"ok"}}"#,
-        );
-        let f = write_updates_file(&[bad, &good]);
-
-        let events = collect_events(f.path());
-        // bad line → NotUserMessage; good line → UserTextChunk
-        assert_eq!(events.len(), 2);
-        assert_eq!(events[0], PromptExtractEvent::NotUserMessage);
-        assert_eq!(events[1], PromptExtractEvent::user_text("ok"));
     }
 
     #[test]
@@ -2366,197 +2110,6 @@ mod tests {
             collect_prompts_from_events(PromptExtractIterator::open(f.path()).unwrap().unwrap());
 
         assert_eq!(prompts, vec!["first prompt", "new second prompt"]);
-    }
-
-    #[test]
-    fn collect_prompts_ignores_unmarked_phantoms_when_markers_present() {
-        let events = [
-            PromptExtractEvent::user_text_pi("hi", 0),
-            PromptExtractEvent::NotUserMessage,
-            PromptExtractEvent::user_text("!pwd phantom"),
-            PromptExtractEvent::NotUserMessage,
-            PromptExtractEvent::user_text_pi("echo hello", 1),
-            PromptExtractEvent::NotUserMessage,
-            PromptExtractEvent::user_text("echo hi instead"),
-            PromptExtractEvent::NotUserMessage,
-            PromptExtractEvent::user_text_pi("ty ty", 2),
-            PromptExtractEvent::NotUserMessage,
-        ];
-        let prompts = collect_prompts_from_events(events.into_iter());
-        assert_eq!(prompts, vec!["hi", "echo hello", "ty ty"]);
-    }
-
-    #[test]
-    fn collect_prompts_mixed_unmarked_prefix_then_markers() {
-        let events = [
-            PromptExtractEvent::user_text("old0"),
-            PromptExtractEvent::NotUserMessage,
-            PromptExtractEvent::user_text("old1"),
-            PromptExtractEvent::NotUserMessage,
-            PromptExtractEvent::user_text_pi("new2", 2),
-            PromptExtractEvent::NotUserMessage,
-            PromptExtractEvent::user_text("!pwd"),
-            PromptExtractEvent::NotUserMessage,
-            PromptExtractEvent::user_text_pi("new3", 3),
-            PromptExtractEvent::NotUserMessage,
-        ];
-        let prompts = collect_prompts_from_events(events.into_iter());
-        assert_eq!(prompts, vec!["old0", "old1", "new2", "new3"]);
-    }
-
-    #[test]
-    fn parse_extracts_prompt_index_from_update_meta() {
-        let line = acp_envelope(
-            r#"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"hi"},"_meta":{"promptIndex":3}}"#,
-        );
-        assert_eq!(
-            parse_prompt_extract_event(&line),
-            PromptExtractEvent::user_text_pi("hi", 3)
-        );
-    }
-
-    fn user_chunk(text: &str, prompt_index: Option<usize>) -> SessionUpdate {
-        let mut chunk = acp::ContentChunk::new(acp::ContentBlock::Text(acp::TextContent::new(
-            text.to_string(),
-        )));
-        if let Some(pi) = prompt_index {
-            chunk = chunk.meta(
-                serde_json::json!({ "promptIndex": pi })
-                    .as_object()
-                    .cloned(),
-            );
-        }
-        SessionUpdate::Acp(Box::new(acp::SessionNotification::new(
-            acp::SessionId::new("s"),
-            acp::SessionUpdate::UserMessageChunk(chunk),
-        )))
-    }
-
-    fn agent_chunk(text: &str) -> SessionUpdate {
-        SessionUpdate::Acp(Box::new(acp::SessionNotification::new(
-            acp::SessionId::new("s"),
-            acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk::new(acp::ContentBlock::Text(
-                acp::TextContent::new(text.to_string()),
-            ))),
-        )))
-    }
-
-    /// The fork copy classifies raw lines while replay parity tests classify
-    /// typed updates; a divergence between the two classifiers would silently
-    /// shift fork truncation boundaries.
-    #[test]
-    fn rewind_step_classifiers_agree_on_serialized_updates() {
-        let rewind = SessionUpdate::Pi(Box::new(
-            crate::extensions::notification::SessionNotification {
-                session_id: acp::SessionId::new("s"),
-                update: crate::extensions::notification::SessionUpdate::RewindMarker {
-                    target_prompt_index: 2,
-                    created_at: "2026-01-01T00:00:00Z".to_string(),
-                },
-                meta: None,
-            },
-        ));
-        let host_turn_chunk = {
-            let chunk = acp::ContentChunk::new(acp::ContentBlock::Text(acp::TextContent::new(
-                "host".to_string(),
-            )))
-            .meta(serde_json::json!({ "hostTurn": true }).as_object().cloned());
-            SessionUpdate::Acp(Box::new(acp::SessionNotification::new(
-                acp::SessionId::new("s"),
-                acp::SessionUpdate::UserMessageChunk(chunk),
-            )))
-        };
-        for update in [
-            user_chunk("plain", None),
-            user_chunk("marked", Some(4)),
-            host_turn_chunk,
-            agent_chunk("agent"),
-            rewind,
-        ] {
-            let envelope = SessionUpdateEnvelope::from_update(&update).unwrap();
-            let line = serde_json::to_string(&envelope).unwrap();
-            assert_eq!(
-                rewind_step_for_line(&line),
-                rewind_step_for_update(&update),
-                "raw and typed classification must agree for {line}"
-            );
-        }
-    }
-
-    #[test]
-    fn updates_truncate_ignores_unmarked_phantoms_when_markers_present() {
-        let updates = vec![
-            user_chunk("P0", Some(0)),
-            agent_chunk("A0"),
-            user_chunk("!pwd", None),
-            agent_chunk("out"),
-            user_chunk("P1", Some(1)),
-            agent_chunk("A1"),
-            user_chunk("P2", Some(2)),
-            agent_chunk("A2"),
-        ];
-        // Keep through P1 (indices 0,1); cut at start of P2 run.
-        let cut = truncate_for_prompt_by(&updates, 1, rewind_step_for_update);
-        assert_eq!(cut, 6);
-        assert!(matches!(
-            &updates[cut],
-            SessionUpdate::Acp(n) if matches!(
-                &n.update,
-                acp::SessionUpdate::UserMessageChunk(c)
-                    if matches!(&c.content, acp::ContentBlock::Text(t) if t.text == "P2")
-            )
-        ));
-    }
-
-    #[test]
-    fn updates_truncate_splits_consecutive_marked_prompts_without_agent() {
-        let updates: Vec<_> = (0..6)
-            .map(|i| user_chunk(&format!("P{i}"), Some(i)))
-            .collect();
-        // Target 2 keeps turns 0 and 1; cut at P2 (index 2).
-        assert_eq!(
-            truncate_for_prompt_by(&updates, 1, rewind_step_for_update),
-            2
-        );
-        assert_eq!(
-            truncate_for_prompt_by(&updates, 2, rewind_step_for_update),
-            3
-        );
-        assert_eq!(
-            truncate_for_prompt_by(&updates, 5, rewind_step_for_update),
-            6
-        );
-    }
-
-    /// Mixed stream: unmarked runs before the first promptIndex still count.
-    #[test]
-    fn updates_truncate_mixed_unmarked_prefix_then_markers() {
-        let updates = vec![
-            user_chunk("old0", None),
-            agent_chunk("A0"),
-            user_chunk("old1", None),
-            agent_chunk("A1"),
-            user_chunk("new2", Some(2)),
-            agent_chunk("A2"),
-            user_chunk("!pwd", None),
-            agent_chunk("out"),
-            user_chunk("new3", Some(3)),
-            agent_chunk("A3"),
-        ];
-        // Target 1 keeps old0+old1; cut at new2.
-        assert_eq!(
-            truncate_for_prompt_by(&updates, 1, rewind_step_for_update),
-            4
-        );
-        // Target 2 keeps through A2 (and phantom run does not add a turn); cut at new3.
-        assert_eq!(
-            truncate_for_prompt_by(&updates, 2, rewind_step_for_update),
-            8
-        );
-        assert_eq!(
-            truncate_for_prompt_by(&updates, 0, rewind_step_for_update),
-            2
-        );
     }
 
     #[test]
@@ -2842,64 +2395,6 @@ mod tests {
         assert!(result[0].contains("p1"));
         assert!(result[1].contains("r1"));
         assert!(result[2].contains("final"));
-    }
-
-    /// The raw-line filter and the typed filter must truncate an identical
-    /// rewind timeline to the same surviving updates, in the same order.
-    #[test]
-    fn filter_rewind_lines_and_updates_agree() {
-        let u1 = acp_envelope(
-            r#"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"p1"}}"#,
-        );
-        let a1 = acp_envelope(
-            r#"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"r1"}}"#,
-        );
-        let u2 = acp_envelope(
-            r#"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"p2"}}"#,
-        );
-        let a2 = acp_envelope(
-            r#"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"r2"}}"#,
-        );
-        let rw1 = pi_envelope(
-            r#"{"sessionUpdate":"rewind_marker","target_prompt_index":2,"created_at":"2024-01-01"}"#,
-        );
-        let u3 = acp_envelope(
-            r#"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"p3"}}"#,
-        );
-        let a3 = acp_envelope(
-            r#"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"r3"}}"#,
-        );
-        let rw2 = pi_envelope(
-            r#"{"sessionUpdate":"rewind_marker","target_prompt_index":1,"created_at":"2024-01-01"}"#,
-        );
-        let u4 = acp_envelope(
-            r#"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"final"}}"#,
-        );
-
-        let lines = vec![
-            u1.as_str(),
-            a1.as_str(),
-            u2.as_str(),
-            a2.as_str(),
-            rw1.as_str(),
-            u3.as_str(),
-            a3.as_str(),
-            rw2.as_str(),
-            u4.as_str(),
-        ];
-
-        let ser = |u: &SessionUpdate| serde_json::to_string(u).unwrap();
-        let via_lines: Vec<String> = filter_rewind_lines(lines.clone())
-            .iter()
-            .map(|l| ser(&SessionUpdateEnvelope::from_str(l).unwrap()))
-            .collect();
-        let typed: Vec<SessionUpdate> = lines
-            .iter()
-            .map(|l| SessionUpdateEnvelope::from_str(l).unwrap())
-            .collect();
-        let via_updates: Vec<String> = filter_rewind_updates(typed).iter().map(ser).collect();
-
-        assert_eq!(via_lines, via_updates);
     }
 
     /// An out-of-range rewind target folds to `result.len()` (the

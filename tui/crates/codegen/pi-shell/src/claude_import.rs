@@ -21,15 +21,6 @@ use pi_workspace::permission::types::{PatternMode, PermissionRule, RuleAction, T
 
 // Types
 
-/// Scope for an import operation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ImportScope {
-    /// User-level: writes to `~/.grok/config.toml`.
-    Global,
-    /// Project-level: writes to `<repo>/.grok/config.toml`.
-    Project,
-}
-
 /// Which `[paths]` field a `PathEntry` populates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathKind {
@@ -73,10 +64,6 @@ pub struct ImportPlan {
 }
 
 impl ImportPlan {
-    /// Total number of items across both scopes.
-    pub fn total_items(&self) -> usize {
-        self.global_items.len() + self.project_items.len()
-    }
 
     /// Whether there's nothing to import.
     pub fn is_empty(&self) -> bool {
@@ -1590,36 +1577,6 @@ mod tests {
 
     #[test]
     #[serial]
-    fn discover_hook_source_paths_skips_claude_when_marker_set() {
-        let _g = MarkerGuard;
-        refresh_marker_cache(true);
-        let dir = tempfile::tempdir().unwrap();
-        let compat = pi_tools::types::compat::CompatConfig::default();
-        let paths = crate::util::hooks::discover_hook_source_paths(Some(dir.path()), &compat);
-        let project_strs: Vec<String> = paths
-            .project
-            .iter()
-            .map(|p| p.to_string_lossy().to_string())
-            .collect();
-        assert!(
-            !project_strs.iter().any(|s| s.contains(".claude")),
-            "project sources should not include .claude/ when marker set; got {:?}",
-            project_strs
-        );
-        let global_strs: Vec<String> = paths
-            .global
-            .iter()
-            .map(|p| p.to_string_lossy().to_string())
-            .collect();
-        assert!(
-            !global_strs.iter().any(|s| s.contains("/.claude/")),
-            "global sources should not include ~/.claude/ when marker set; got {:?}",
-            global_strs
-        );
-    }
-
-    #[test]
-    #[serial]
     fn gate_load_claude_env_returns_empty_when_marker_set() {
         let _g = MarkerGuard;
         refresh_marker_cache(true);
@@ -1631,209 +1588,6 @@ mod tests {
         assert!(
             env.is_empty(),
             "load_claude_env_with_project should be empty when marker set"
-        );
-    }
-
-    #[test]
-    #[serial]
-    fn discover_hook_source_paths_includes_claude_when_marker_unset() {
-        let _g = MarkerGuard;
-        refresh_marker_cache(false);
-        let dir = tempfile::tempdir().unwrap();
-        let compat = pi_tools::types::compat::CompatConfig::default();
-        let paths = crate::util::hooks::discover_hook_source_paths(Some(dir.path()), &compat);
-        let project_strs: Vec<String> = paths
-            .project
-            .iter()
-            .map(|p| p.to_string_lossy().to_string())
-            .collect();
-        assert!(
-            project_strs.iter().any(|s| s.contains(".claude")),
-            "project sources should include .claude/ when marker unset; got {:?}",
-            project_strs
-        );
-    }
-
-    #[test]
-    #[serial]
-    fn discover_hook_source_paths_includes_cursor_hooks_json() {
-        let _g = MarkerGuard;
-        refresh_marker_cache(false);
-        let dir = tempfile::tempdir().unwrap();
-        let compat = pi_tools::types::compat::CompatConfig::default();
-        let paths = crate::util::hooks::discover_hook_source_paths(Some(dir.path()), &compat);
-        let global_strs: Vec<String> = paths
-            .global
-            .iter()
-            .map(|p| p.to_string_lossy().to_string())
-            .collect();
-        assert!(
-            global_strs
-                .iter()
-                .any(|s| s.contains(".cursor") && s.ends_with("hooks.json")),
-            "global sources should include ~/.cursor/hooks.json; got {:?}",
-            global_strs
-        );
-        let project_strs: Vec<String> = paths
-            .project
-            .iter()
-            .map(|p| p.to_string_lossy().to_string())
-            .collect();
-        assert!(
-            project_strs
-                .iter()
-                .any(|s| s.contains(".cursor") && s.ends_with("hooks.json")),
-            "project sources should include .cursor/hooks.json; got {:?}",
-            project_strs
-        );
-    }
-
-    #[test]
-    #[serial]
-    fn discover_hook_source_paths_skips_cursor_when_disabled() {
-        let _g = MarkerGuard;
-        refresh_marker_cache(false);
-        let dir = tempfile::tempdir().unwrap();
-        let mut compat = pi_tools::types::compat::CompatConfig::default();
-        compat.cursor.hooks = false;
-        let paths = crate::util::hooks::discover_hook_source_paths(Some(dir.path()), &compat);
-        let global_strs: Vec<String> = paths
-            .global
-            .iter()
-            .map(|p| p.to_string_lossy().to_string())
-            .collect();
-        assert!(
-            !global_strs.iter().any(|s| s.contains(".cursor")),
-            "global sources should not include .cursor/ when disabled; got {:?}",
-            global_strs
-        );
-        let project_strs: Vec<String> = paths
-            .project
-            .iter()
-            .map(|p| p.to_string_lossy().to_string())
-            .collect();
-        assert!(
-            !project_strs.iter().any(|s| s.contains(".cursor")),
-            "project sources should not include .cursor/ when disabled; got {:?}",
-            project_strs
-        );
-    }
-
-    #[test]
-    #[serial]
-    fn discover_hook_source_paths_skips_claude_when_compat_disabled() {
-        let _g = MarkerGuard;
-        // Do NOT set the marker — test the compat gate in isolation.
-        refresh_marker_cache(false);
-        let dir = tempfile::tempdir().unwrap();
-        let mut compat = pi_tools::types::compat::CompatConfig::default();
-        compat.claude.hooks = false;
-        let paths = crate::util::hooks::discover_hook_source_paths(Some(dir.path()), &compat);
-        let global_strs: Vec<String> = paths
-            .global
-            .iter()
-            .map(|p| p.to_string_lossy().to_string())
-            .collect();
-        assert!(
-            !global_strs.iter().any(|s| s.contains("/.claude/")),
-            "global sources should not include ~/.claude/ when compat disabled; got {:?}",
-            global_strs
-        );
-        let project_strs: Vec<String> = paths
-            .project
-            .iter()
-            .map(|p| p.to_string_lossy().to_string())
-            .collect();
-        assert!(
-            !project_strs.iter().any(|s| s.contains(".claude")),
-            "project sources should not include .claude/ when compat disabled; got {:?}",
-            project_strs
-        );
-    }
-
-    #[test]
-    #[serial]
-    fn as_sources_gates_project_sources_on_trust() {
-        // Trust gating lives in `HookSourcePaths::as_sources`: project sources are
-        // dropped when untrusted and kept when trusted. Assert on project sources
-        // (git_root-relative) since global sources use the real, non-injectable home.
-        let _g = MarkerGuard;
-        refresh_marker_cache(false);
-        let dir = tempfile::tempdir().unwrap();
-        let compat = pi_tools::types::compat::CompatConfig::default();
-        let paths = crate::util::hooks::discover_hook_source_paths(Some(dir.path()), &compat);
-        assert!(
-            !paths.project.is_empty(),
-            "project source paths should be non-empty for a git_root"
-        );
-
-        let (global_untrusted, project) = paths.as_sources(false);
-        assert_eq!(
-            global_untrusted.len(),
-            paths.global.len(),
-            "global sources must survive untrusted"
-        );
-        assert!(
-            project.is_empty(),
-            "untrusted: as_sources(false) must drop all project sources"
-        );
-
-        let (_global, project) = paths.as_sources(true);
-        assert!(
-            !project.is_empty(),
-            "trusted: as_sources(true) must keep project sources"
-        );
-    }
-
-    #[test]
-    #[serial]
-    fn discover_hooks_honors_claude_compat_gate() {
-        // Pins the single load entry point every startup/reload site uses: with
-        // `compat.claude.hooks = false` a project `.claude/settings.json` hook must
-        // NOT load, and with it true it MUST. A pager e2e is disproportionate — the
-        // spawn/agent_ops wiring just forwards the resolved compat into this entry point.
-        let _g = MarkerGuard;
-        // Marker unset so the Phase-2 import cutoff doesn't independently skip
-        // `.claude` — isolates the compat gate.
-        refresh_marker_cache(false);
-
-        // `discover_hooks` takes git_root directly (no git discovery), so a plain
-        // temp dir with a project `.claude/settings.json` suffices.
-        let git_root = tempfile::tempdir().unwrap();
-        let claude_dir = git_root.path().join(".claude");
-        std::fs::create_dir_all(&claude_dir).unwrap();
-        std::fs::write(
-            claude_dir.join("settings.json"),
-            r#"{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"claude_compat_gate_probe.sh"}]}]}}"#,
-        )
-        .unwrap();
-
-        // Identify the probe by its unique raw command so real global hooks on the
-        // test host (from the non-injectable ~/.claude, ~/.grok) don't interfere.
-        let has_probe = |reg: &pi_hooks::discovery::HookRegistry| {
-            reg.all_hooks().iter().any(|h| {
-                h.command_raw
-                    .as_deref()
-                    .unwrap_or_default()
-                    .contains("claude_compat_gate_probe")
-            })
-        };
-
-        // Trusted so project sources are included; vary only the compat toggle.
-        let mut compat = pi_tools::types::compat::CompatConfig::default();
-
-        compat.claude.hooks = false;
-        let (reg, _errs) = crate::util::hooks::discover_hooks(Some(git_root.path()), &compat, true);
-        assert!(
-            !has_probe(&reg),
-            "compat.claude.hooks=false: project .claude hook must NOT be loaded"
-        );
-
-        compat.claude.hooks = true;
-        let (reg, _errs) = crate::util::hooks::discover_hooks(Some(git_root.path()), &compat, true);
-        assert!(
-            has_probe(&reg),
-            "compat.claude.hooks=true: project .claude hook must be loaded"
         );
     }
 
@@ -2067,33 +1821,6 @@ extra_rule_dirs = ["/c/rules"]
         let global = dunce::canonicalize(home.join(".claude").join("skills")).unwrap();
         let project = dunce::canonicalize(home.join(".claude").join("skills")).unwrap();
         assert_eq!(global, project, "sanity: paths canonicalize to the same");
-    }
-
-    #[test]
-    #[serial]
-    fn gate_load_mcp_json_servers_returns_empty_when_marker_set() {
-        let _g = MarkerGuard;
-        refresh_marker_cache(true);
-        let dir = tempfile::tempdir().unwrap();
-        let servers = crate::util::config::load_mcp_json_servers(dir.path());
-        assert!(
-            servers.is_empty(),
-            "load_mcp_json_servers should be empty when marker set"
-        );
-    }
-
-    #[test]
-    #[serial]
-    fn gate_load_claude_json_mcp_servers_returns_empty_when_marker_set() {
-        let _g = MarkerGuard;
-        refresh_marker_cache(true);
-        let dir = tempfile::tempdir().unwrap();
-        let compat = pi_tools::types::compat::CompatConfig::default();
-        let servers = crate::util::config::load_claude_json_mcp_servers(dir.path(), &compat);
-        assert!(
-            servers.is_empty(),
-            "load_claude_json_mcp_servers should be empty when marker set"
-        );
     }
 
     #[tokio::test]

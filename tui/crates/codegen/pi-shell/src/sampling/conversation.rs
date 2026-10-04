@@ -9,19 +9,6 @@ pub use pi_sampling_types::conversation::*;
 #[path = "conversation_tests.rs"]
 mod tests;
 
-/// Tracing context for conversation requests; satisfies `TraceContext`
-/// through its blanket impl. Lives in grok-shell because it references
-/// shell-internal config and upload types.
-#[derive(Debug, Clone)]
-pub struct ConversationRequestTrace {
-    pub gcs_config: crate::session::repo_changes::TraceExportConfig,
-    #[expect(
-        dead_code,
-        reason = "retained for snapshot compat; wire when sampler path uploads traces"
-    )]
-    pub(crate) artifact_tracker: Option<crate::upload::manifest::ArtifactTracker>,
-}
-
 /// Fork-safety filter for copied chat history: drops synthetic user messages,
 /// then truncates at the last complete turn so the child never sees a partial
 /// one. A turn is complete when the Assistant's tool calls are all answered;

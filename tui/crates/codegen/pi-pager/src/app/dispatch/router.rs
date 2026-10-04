@@ -958,6 +958,7 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
                 model_id,
                 effort,
                 prev_model_id: None,
+                config_option_id: agent.session.models.config_option_id.clone(),
             }]
         }
         Action::AnnouncementsHide => {

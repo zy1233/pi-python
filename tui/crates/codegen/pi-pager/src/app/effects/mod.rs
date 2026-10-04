@@ -230,6 +230,7 @@ pub(crate) fn execute(
                                 session_id: resp.session_id,
                                 models: parse_session_response_models(
                                     resp.models,
+                                    resp.config_options.as_deref(),
                                     resp.meta.as_ref(),
                                 ),
                                 scheduler_background_loops: parse_session_scheduler_background_loops(
@@ -326,6 +327,7 @@ pub(crate) fn execute(
                                 session_id: acp_session_id,
                                 models: parse_session_response_models(
                                     resp.models,
+                                    resp.config_options.as_deref(),
                                     resp.meta.as_ref(),
                                 ),
                                 code_restored,
@@ -1107,6 +1109,7 @@ pub(crate) fn execute(
             model_id,
             effort,
             prev_model_id,
+            config_option_id,
         } => {
             let tx = acp_tx.clone();
             tasks
@@ -1123,14 +1126,29 @@ pub(crate) fn execute(
                             );
                             m
                         });
-                    let req = acp::SetSessionModelRequest::new(
-                            session_id,
-                            model_id.clone(),
-                        )
-                        .meta(meta);
-                    let result = acp_send(req, &tx)
-                        .await
-                        .map(|_| ())
+                    // Standard ACP: the agent advertised a `model` Session Config Option →
+                    // select the value through `session/set_config_option`. Otherwise fall
+                    // back to the unstable `session/set_model`.
+                    let sent = match config_option_id {
+                        Some(config_id) => {
+                            let req = acp::SetSessionConfigOptionRequest::new(
+                                    session_id,
+                                    config_id,
+                                    &*model_id.0,
+                                )
+                                .meta(meta);
+                            acp_send(req, &tx).await.map(|_| ())
+                        }
+                        None => {
+                            let req = acp::SetSessionModelRequest::new(
+                                    session_id,
+                                    model_id.clone(),
+                                )
+                                .meta(meta);
+                            acp_send(req, &tx).await.map(|_| ())
+                        }
+                    };
+                    let result = sent
                         .map_err(|e| {
                             use pi_shell::agent::config::ModelSwitchIncompatibleAgentError;
                             if let Some(typed) = ModelSwitchIncompatibleAgentError::from_acp_error(

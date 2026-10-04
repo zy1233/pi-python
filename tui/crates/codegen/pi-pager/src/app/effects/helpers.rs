@@ -5,6 +5,7 @@ use tokio::task::JoinSet;
 use pi_acp_lib::{AcpAgentTx, acp_send};
 use super::actions::{PermissionModePersist, SubagentKillOutcome, TaskResult};
 use super::agent::AgentId;
+use crate::acp::model_state::MODEL_CONFIG_ID_META_KEY;
 use crate::unified_log as ulog;
 use pi_shell::sampling::error::{
     RATE_LIMITED_ERROR_CODE, error_detail_from_data, format_rate_limited_user_message,
@@ -212,19 +213,25 @@ pub(crate) fn parse_session_scheduler_background_loops(
         })
         .and_then(|v| v.as_bool())
 }
-/// Fallback model-state parser for standard ACP backends that cannot emit the
-/// unstable `SessionModelState` response field yet.
+/// Model-state parser for the `session/new` / `session/load` responses.
 ///
 /// Priority:
-/// 1. Use `models` when present (native unstable payload).
-/// 2. Else read `_meta` keys (pi-python compatibility path) and synthesize a
-///    single-entry model catalog so status surfaces can render a real name.
+/// 1. `models` when present (native unstable payload).
+/// 2. The standard ACP Session Config Option with `category: model` (a `select`):
+///    its values become the `/model` catalog and its id is remembered so the switch can
+///    use `session/set_config_option`.
+/// 3. Else read `_meta` keys (legacy pi-python hints) and synthesize a single-entry
+///    model catalog so status surfaces can render a real name.
 pub(super) fn parse_session_response_models(
     models: Option<acp::SessionModelState>,
+    config_options: Option<&[acp::SessionConfigOption]>,
     resp_meta: Option<&acp::Meta>,
 ) -> Option<acp::SessionModelState> {
     if models.is_some() {
         return models;
+    }
+    if let Some(state) = config_options.and_then(model_state_from_config_options) {
+        return Some(state);
     }
     let meta = resp_meta?;
     let model_id = parse_non_empty_meta_string(
@@ -254,6 +261,54 @@ pub(super) fn parse_session_response_models(
         );
     }
     Some(acp::SessionModelState::new(id, vec![info]))
+}
+
+/// Synthesize a model catalog from the first `select` Session Config Option whose category
+/// is `model`. The option id is stored in the state's `_meta` ([`MODEL_CONFIG_ID_META_KEY`]).
+fn model_state_from_config_options(
+    options: &[acp::SessionConfigOption],
+) -> Option<acp::SessionModelState> {
+    let (option, select) = options.iter().find_map(|option| {
+        match (&option.category, &option.kind) {
+            (
+                Some(acp::SessionConfigOptionCategory::Model),
+                acp::SessionConfigKind::Select(select),
+            ) => Some((option, select)),
+            _ => None,
+        }
+    })?;
+    let flat: Vec<&acp::SessionConfigSelectOption> = match &select.options {
+        acp::SessionConfigSelectOptions::Ungrouped(opts) => opts.iter().collect(),
+        acp::SessionConfigSelectOptions::Grouped(groups) => {
+            groups.iter().flat_map(|group| group.options.iter()).collect()
+        }
+        _ => Vec::new(),
+    };
+    let available: Vec<acp::ModelInfo> = flat
+        .into_iter()
+        .map(|value| {
+            let info = acp::ModelInfo::new(
+                acp::ModelId::new(value.value.0.clone()),
+                value.name.clone(),
+            );
+            match &value.description {
+                Some(description) => info.description(description.clone()),
+                None => info,
+            }
+        })
+        .collect();
+    if available.is_empty() {
+        return None;
+    }
+    let mut meta = acp::Meta::new();
+    meta.insert(
+        MODEL_CONFIG_ID_META_KEY.to_string(),
+        serde_json::Value::String(option.id.0.to_string()),
+    );
+    Some(
+        acp::SessionModelState::new(acp::ModelId::new(select.current_value.0.clone()), available)
+            .meta(meta),
+    )
 }
 
 fn parse_non_empty_meta_string(meta: &acp::Meta, keys: &[&str]) -> Option<String> {

@@ -4,7 +4,6 @@
 //! bridges JSON-RPC over stdio into an [`AcpClientChannel`].
 
 use std::io::IsTerminal;
-use std::rc::Rc;
 use std::thread;
 use std::time::Duration;
 
@@ -13,14 +12,18 @@ use tokio_util::sync::CancellationToken;
 use pi_telemetry::startup::{self, StartupPhase};
 
 use pi_acp_lib::{
-    AcpAgentChannel, AcpClientChannel, AcpClientTx, AcpGatewayReceiver, AcpGatewaySender,
-    acp_channels,
+    AcpAgentChannel, AcpClientChannel, AcpGatewayReceiver, AcpGatewaySender, acp_channels,
 };
 use pi_shell::{
-    agent::{MvpAgent, activity::SESSION_FLUSH_GRACE, config::Config as AgentConfig},
+    agent::config::Config as AgentConfig,
     auth::AuthManager,
     util::grok_home::grok_home,
 };
+
+/// Budget for the ACP agent child to wind down after cancel (the bridge kills
+/// the child and reaps it). Matches the historical process-exit flush bound so
+/// the pager's overall exit budget (`app::exit_timeout`) is unchanged.
+const SESSION_FLUSH_GRACE: Duration = Duration::from_secs(10);
 
 /// Extra slack when joining the agent OS thread after cancel so the flush
 /// can finish and the thread can unwind.
@@ -509,89 +512,6 @@ async fn spawn_python_stdio_bridge(
         })?)
 }
 
-/// Spawn an in-process grok-shell agent (unused; kept for reference during the
-/// fork). Interactive TUI now uses [`spawn_grok_shell`] → Python stdio.
-#[allow(dead_code)]
-async fn spawn_agent_thread_direct(
-    spawn_agent: Box<dyn FnOnce(AcpClientTx) -> Result<Rc<MvpAgent>> + Send + 'static>,
-    channel: AcpAgentChannel,
-    cancel: CancellationToken,
-    skills_paths: Vec<String>,
-) -> Result<thread::JoinHandle<Result<()>>> {
-    // Off the UI worker: failure must fail spawn, not start ACP.
-    let rt = tokio::task::spawn_blocking(|| {
-        let mut builder = tokio::runtime::Builder::new_current_thread();
-        pi_tty_utils::runtime::build_with_blocking_pool(builder.enable_all())
-    })
-    .await
-    .map_err(|e| anyhow::anyhow!("agent runtime worker join: {e}"))?
-    .map_err(|e| {
-        tracing::error!(error = %e, "failed to start agent runtime");
-        anyhow::anyhow!("failed to start agent runtime: {e}")
-    })?;
-    Ok(thread::Builder::new()
-        .name("acp-agent-worker".into())
-        .spawn(move || -> Result<()> {
-            let local = tokio::task::LocalSet::new();
-            local.block_on(&rt, async move {
-                let client_tx = channel.tx.clone();
-                let agent_rc = spawn_agent(client_tx)?;
-
-                // Direct dispatch: RPC requests go straight to the agent
-                let gw_rx =
-                    AcpGatewayReceiver::new(channel.rx, agent_rc.clone()).with_tracing(true);
-                tokio::task::spawn_local(gw_rx.run());
-
-                let _skills_watcher = {
-                    let cwd = std::env::current_dir().unwrap_or_default();
-                    let workspace_user_dir =
-                        pi_agent::prompt::workspace_user::optional_workspace_user_dir();
-                    pi_shell::config::watcher::SkillsFileWatcher::start(
-                        Some(cwd.as_path()),
-                        workspace_user_dir.as_deref(),
-                        &skills_paths,
-                    )
-                    .map(|(mut watcher, mut skills_rx)| {
-                        let agent = agent_rc.clone();
-                        tokio::task::spawn_local(async move {
-                            while let Some(change) = skills_rx.recv().await {
-                                let created_discovery_dir = watcher.refresh_new_discovery_dirs();
-                                match change {
-                                    pi_shell::config::watcher::DiscoveryChange::Skills => {
-                                        tracing::info!(
-                                            "skill directory changed on disk; reloading skills for all sessions"
-                                        );
-                                        agent.reload_skills_all_sessions();
-                                        if created_discovery_dir {
-                                            agent.advertise_commands_all_sessions();
-                                        }
-                                    }
-                                    pi_shell::config::watcher::DiscoveryChange::Workflows => {
-                                        tracing::info!(
-                                            "workflow directory changed on disk; re-advertising commands for all sessions"
-                                        );
-                                        agent.advertise_commands_all_sessions();
-                                    }
-                                }
-                            }
-                        })
-                    })
-                };
-                tokio::task::yield_now().await;
-
-                // Keep running until cancelled, then flush every live session
-                // actor (SessionEnd hooks + memory save) before the LocalSet /
-                // agent drop. Session actors live on dedicated OS threads and
-                // only exit cleanly on SessionCommand::Shutdown; without this
-                // flush, /exit and headless quit race process death and skip
-                // SessionEnd. Mirrors leader auto-update / relaunch.
-                cancel.cancelled().await;
-                agent_rc.flush_all_sessions(SESSION_FLUSH_GRACE).await;
-                pi_telemetry::session_ctx::drain_at_process_exit().await;
-                anyhow::Result::Ok(())
-            })
-        })?)
-}
 
 #[cfg(test)]
 mod tests {

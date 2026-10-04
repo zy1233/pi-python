@@ -13,12 +13,11 @@ mod ui;
 mod version;
 
 pub use auto_mode::*;
-pub use compaction::*;
+pub(crate) use compaction::*;
 pub use crash_handler::*;
 pub use display_refresh::*;
 pub use features::*;
 pub use mcp::*;
-pub use system_prompt::*;
 pub use tool_approvals::*;
 pub use toolset::*;
 pub use ui::*;

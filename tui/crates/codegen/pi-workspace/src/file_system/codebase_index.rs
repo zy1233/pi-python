@@ -149,7 +149,7 @@ mod tests {
     // `CodebaseIndexManager::get()` returns None before the index is created,
     // which maps to `x.ai/code/status` reporting `reason: notStarted`.
     // `get_or_create()` is the lazy-start entry point called by
-    // `MvpAgent::start_codebase_index_for_code_nav` on the first code-nav
+    // the agent runtime's code-nav startup path on the first code-nav
     // request for an eligible session.
     // =========================================================================
 

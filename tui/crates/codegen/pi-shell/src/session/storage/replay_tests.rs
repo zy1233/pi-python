@@ -5,16 +5,13 @@ use agent_client_protocol as acp;
 
 use super::replay::{
     ReplayLookupFallback, ReplayPathHint, ReplayToolCollapser, ReplayedUpdate,
-    collect_unfinished_subagents, filter_delta_replay_lines, for_each_replay_update_in_file,
+    collect_unfinished_subagents,
     line_is_available_commands_update, line_is_dropped_on_replay,
     line_is_in_progress_tool_call_update, prepare_replay_lines, replay_would_emit,
-    resolve_replay_updates_path, stream_replay_updates_at, stream_replay_updates_at_hinted,
-};
+    resolve_replay_updates_path, stream_replay_updates_at, stream_replay_updates_at_hinted};
 use super::{
     PromptExtractEvent, ReplayEmission, SUMMARY_FILE, SessionUpdate, SessionUpdateEnvelope,
-    UPDATES_FILE, filter_rewind_lines, filter_rewind_updates, parse_prompt_extract_event,
-    strip_context_wrappers,
-};
+    UPDATES_FILE, filter_rewind_lines, parse_prompt_extract_event};
 use crate::session::wire_tags::AVAILABLE_COMMANDS_UPDATE;
 
 fn acp_envelope(session_update_json: &str) -> String {
@@ -66,57 +63,6 @@ fn stream_replay_updates_at_surfaces_read_errors() {
     assert!(
         result.is_err(),
         "read fault must surface, not fold to Empty: {result:?}"
-    );
-}
-
-/// End-to-end: the streaming core (`for_each_replay_update_in_file`, what
-/// `stream_replay_updates_at` wraps) applies rewind over a real file and
-/// yields the same survivors as the typed parse-all path.
-#[test]
-fn streaming_replay_applies_rewind_like_the_typed_path() {
-    let u1 = acp_envelope(
-        r#"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"p1"}}"#,
-    );
-    let a1 = acp_envelope(
-        r#"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"r1"}}"#,
-    );
-    let u2 = acp_envelope(
-        r#"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"p2"}}"#,
-    );
-    // Rewind to prompt 1 drops p2.
-    let rw = pi_envelope(
-        r#"{"sessionUpdate":"rewind_marker","target_prompt_index":1,"created_at":"2024-01-01"}"#,
-    );
-    let u3 = acp_envelope(
-        r#"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"final"}}"#,
-    );
-    let raw = format!("{u1}\n{a1}\n{u2}\n{rw}\n{u3}\n");
-
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join(UPDATES_FILE);
-    std::fs::write(&path, &raw).unwrap();
-
-    let mut streamed = Vec::new();
-    let forwarded = for_each_replay_update_in_file(&path, |u| streamed.push(u)).unwrap();
-    assert!(forwarded);
-
-    // Typed reference: parse all, rewind-filter, map ACP survivors.
-    let typed: Vec<SessionUpdate> = raw
-        .lines()
-        .map(|l| SessionUpdateEnvelope::from_str(l).unwrap())
-        .collect();
-    let reference: Vec<acp::SessionUpdate> = filter_rewind_updates(typed)
-        .into_iter()
-        .filter_map(|u| match u {
-            SessionUpdate::Acp(notif) => Some(strip_context_wrappers(notif.update)),
-            SessionUpdate::Pi(_) => None,
-        })
-        .collect();
-
-    let ser = |u: &acp::SessionUpdate| serde_json::to_string(u).unwrap();
-    assert_eq!(
-        streamed.iter().map(ser).collect::<Vec<_>>(),
-        reference.iter().map(ser).collect::<Vec<_>>(),
     );
 }
 
@@ -437,40 +383,6 @@ fn fast_reject_handles_discriminant_substring_in_content() {
     );
 }
 
-/// A `rewind_marker` appearing only inside content must NEVER become a
-/// `RewindTo` (which would corrupt prompt_index / turn numbering).
-#[test]
-fn fast_reject_rewind_marker_in_content() {
-    // (a) agent message mentioning rewind_marker → NotUserMessage.
-    let agent = acp_envelope(
-        r#"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"about rewind_marker semantics"}}"#,
-    );
-    assert_eq!(
-        parse_prompt_extract_event(&agent),
-        PromptExtractEvent::NotUserMessage
-    );
-
-    // (b) an ACP (non-pi) update carrying rewind_marker in content is NOT a
-    // real pi rewind_marker → NotUserMessage (no RewindTo).
-    let acp_rewindish = acp_envelope(
-        r#"{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"rewind_marker"}}"#,
-    );
-    assert_eq!(
-        parse_prompt_extract_event(&acp_rewindish),
-        PromptExtractEvent::NotUserMessage
-    );
-
-    // (c) a user_message_chunk whose text contains rewind_marker → still the
-    // user text (the discriminant is user_message_chunk).
-    let user = acp_envelope(
-        r#"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"explain rewind_marker please"}}"#,
-    );
-    assert_eq!(
-        parse_prompt_extract_event(&user),
-        PromptExtractEvent::user_text("explain rewind_marker please")
-    );
-}
-
 /// A user prompt whose text contains the literal escaped-JSON ACU
 /// discriminant must NOT be dropped as an `available_commands_update` — the
 /// `"update":{` anchor only matches the real structural discriminant, not the
@@ -594,44 +506,6 @@ fn prepare_replay_rewind_then_cursor_with_acu() {
     assert!(prepared.lines[0].contains("a1"));
     assert_eq!(prepared.last_tokens, 12); // last token-bearing survivor
     assert_eq!(prepared.total_live, 2); // ACU-free survivors: u1, a1
-}
-
-/// The delta-replay helper (shared with the initial path) drops blanks + ACUs
-/// and applies the canonical rewind filter.
-#[test]
-fn filter_delta_replay_drops_blank_acu_and_rewinds() {
-    let u1 = acp_envelope(
-        r#"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"p1"}}"#,
-    );
-    let acu =
-        acp_envelope(r#"{"sessionUpdate":"available_commands_update","availableCommands":[]}"#);
-    let a1 = acp_envelope(
-        r#"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"a1"}}"#,
-    );
-    // A second prompt that a trailing rewind_marker then discards.
-    let u2 = acp_envelope(
-        r#"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"p2-dead"}}"#,
-    );
-    let a2 = acp_envelope(
-        r#"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"a2-dead"}}"#,
-    );
-    let rw = pi_envelope(
-        r#"{"sessionUpdate":"rewind_marker","target_prompt_index":1,"created_at":"2024-01-01"}"#,
-    );
-    let raw = format!("{u1}\n\n{acu}\n{a1}\n{u2}\n{a2}\n{rw}\n");
-
-    let live = filter_delta_replay_lines(&raw);
-    // Blank + ACU dropped; the rewind to prompt 1 truncates the dead branch
-    // (u2/a2) and consumes the marker, leaving only p1/a1.
-    assert_eq!(live.len(), 2);
-    assert!(
-        live.iter()
-            .all(|l| !l.contains("available_commands_update"))
-    );
-    assert!(live[0].contains("p1"));
-    assert!(live[1].contains("a1"));
-    assert!(live.iter().all(|l| !l.contains("dead")));
-    assert!(live.iter().all(|l| !l.contains("rewind_marker")));
 }
 
 #[test]
@@ -891,24 +765,6 @@ fn prepare_replay_id_less_in_progress_in_tail_does_not_force_full_replay() {
         "a trailing id-less InProgress update must not force a full replay"
     );
     assert!(prepared.lines.is_empty());
-}
-
-#[test]
-fn filter_delta_replay_drops_in_progress_tool_call_update() {
-    let u = acp_envelope(
-        r#"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"hi"}}"#,
-    );
-    let ip = acp_envelope(
-        r#"{"sessionUpdate":"tool_call_update","toolCallId":"t","status":"in_progress"}"#,
-    );
-    let done = acp_envelope(
-        r#"{"sessionUpdate":"tool_call_update","toolCallId":"t","status":"completed"}"#,
-    );
-    let raw = format!("{u}\n{ip}\n{done}\n");
-    let live = filter_delta_replay_lines(&raw);
-    assert_eq!(live.len(), 2);
-    assert!(live[0].contains("hi"));
-    assert!(live[1].contains("completed"));
 }
 
 #[test]

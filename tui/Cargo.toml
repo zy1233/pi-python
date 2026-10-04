@@ -45,7 +45,6 @@ members = [
     "crates/codegen/pi-pager-render",
     "crates/codegen/pi-paths",
     "crates/codegen/pi-plugin-marketplace",
-    "crates/codegen/pi-sampler",
     "crates/codegen/pi-sampling-types",
     "crates/codegen/pi-sandbox",
     "crates/codegen/pi-secrets",
@@ -329,7 +328,6 @@ pi-mcp = { path = "crates/codegen/pi-mcp" }
 pi-memory = { path = "crates/codegen/pi-memory" }
 pi-mermaid = { path = "crates/codegen/pi-mermaid" }
 pi-models = { path = "crates/codegen/pi-models" }
-pi-sampler = { path = "crates/codegen/pi-sampler" }
 pi-secrets = { path = "crates/codegen/pi-secrets" }
 pi-session-events = { path = "crates/codegen/pi-session-events" }
 pi-session-search = { path = "crates/codegen/pi-session-search" }

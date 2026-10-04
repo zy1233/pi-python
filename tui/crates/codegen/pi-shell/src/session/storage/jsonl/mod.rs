@@ -52,36 +52,6 @@ impl JsonlStorageAdapter {
             update_append_probe: None,
         }
     }
-    /// Create an adapter that writes directly to `session_dir`, bypassing
-    /// the `{root}/sessions/{cwd}/{id}/` path computation. Used for subagent
-    /// child sessions (top-level dirs; only their metadata nests under the
-    /// parent's session dir).
-    pub fn with_explicit_session_dir(session_dir: PathBuf) -> Self {
-        Self {
-            dir_mode: SessionDirMode::Explicit(session_dir),
-            #[cfg(test)]
-            update_append_probe: None,
-        }
-    }
-    #[cfg(test)]
-    pub(crate) fn with_update_append_probe(
-        session_dir: PathBuf,
-        append_probe: impl Fn(AppendDurability) -> io::Result<()> + Send + Sync + 'static,
-    ) -> Self {
-        Self {
-            dir_mode: SessionDirMode::Explicit(session_dir),
-            update_append_probe: Some(std::sync::Arc::new(append_probe)),
-        }
-    }
-    /// Load chat history from a specific directory.
-    /// Used by fork bootstrap to load the copied parent conversation.
-    pub fn load_chat_history_from_dir(
-        &self,
-        dir: &std::path::Path,
-    ) -> std::io::Result<Vec<ConversationItem>> {
-        let chat_file = dir.join(super::CHAT_HISTORY_FILE);
-        self.read_chat_history_sync(chat_file, CHAT_FORMAT_VERSION)
-    }
     fn session_dir(&self, info: &Info) -> PathBuf {
         match &self.dir_mode {
             SessionDirMode::FromRoot(root) => {
@@ -204,7 +174,7 @@ impl JsonlStorageAdapter {
     /// only reads the top `limit` files. On a machine with ~12K sessions
     /// this reduces cold-boot `workspace_list` from ~3s to ~200ms.
     /// Final order among candidates uses `last_active_at` else `updated_at`.
-    pub async fn list_sessions_recent(&self, limit: usize) -> io::Result<Vec<Summary>> {
+    pub(crate) async fn list_sessions_recent(&self, limit: usize) -> io::Result<Vec<Summary>> {
         let session_dirs = self.scan_session_dirs(None)?;
         let mut candidates: Vec<(PathBuf, std::time::SystemTime)> =
             Vec::with_capacity(session_dirs.len());

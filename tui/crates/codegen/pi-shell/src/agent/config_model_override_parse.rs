@@ -472,33 +472,6 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_compactions_keys_keeps_model() {
-        let cfg = parse_cfg(
-            r#"
-            [model."grok-4.5"]
-            model = "grok-4.5"
-            env_key = "ANTHROPIC_AUTH_TOKEN"
-            compactions_remaining = 1
-            send_compactions_remaining = true
-            "#,
-        );
-        let model = cfg
-            .config_models
-            .get("grok-4.5")
-            .expect("grok-4.5 must remain in catalog");
-        assert_eq!(
-            model.compactions_remaining,
-            Some(CompactionsRemaining::Fixed(1))
-        );
-        assert!(cfg.config_warnings.iter().any(|w| {
-            w.kind == ConfigWarningKind::DuplicateAlias
-                && w.field() == Some("send_compactions_remaining")
-        }));
-        let resolved = crate::agent::config::resolve_model_list(&cfg, None);
-        assert!(resolved.contains_key("grok-4.5"));
-    }
-
-    #[test]
     fn legacy_alias_alone_parses_without_warning() {
         let cfg = parse_cfg(
             r#"

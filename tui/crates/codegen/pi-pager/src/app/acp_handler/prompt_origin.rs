@@ -10,7 +10,7 @@ pub(crate) fn is_server_initiated_prompt(prompt_id: &str) -> bool {
 ///
 /// Cron turns are synthetic (so [`is_server_initiated_prompt`] is also true for
 /// them), but UNLIKE auto-wake / subagent-completion turns they are
-/// CLIENT-driven via `MvpAgent::prompt()` and therefore DO emit a matching
+/// CLIENT-driven via the agent's `prompt` handler and therefore DO emit a matching
 /// `legacy ext RPC` turn-end signal. A viewer can thus safely
 /// enter `TurnRunning` for them (the exit exists, so it won't strand) — which is
 /// what lets the dashboard show a running `/loop` session as Working.
@@ -44,7 +44,7 @@ pub(crate) fn is_wake_prompt(prompt_id: &str) -> bool {
 /// adoptable iff the turn emits a terminal `legacy ext RPC`, the
 /// only non-interactive way a viewer leaves `TurnRunning`. That holds for
 /// user-driven turns and `/loop` (`scheduler-fired-…`) fires — both run via
-/// `MvpAgent::prompt()` — and is false for actor-run synthetic turns
+/// the agent's `prompt` handler — and is false for actor-run synthetic turns
 /// (task-completed / subagent-completion / notification-drain / goal-*), which
 /// have no such exit, so adopting one strands the viewer in `TurnRunning`.
 ///

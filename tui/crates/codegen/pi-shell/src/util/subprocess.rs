@@ -1,9 +1,6 @@
 //! Shared subprocess helpers: a TTY-detached async runner with a wall-clock
 //! timeout and concurrent pipe draining, plus the hermetic `git` binary path.
 
-use std::env;
-use std::ffi::OsString;
-use std::path::PathBuf;
 use std::process::Output;
 use std::process::Stdio;
 use std::time::Duration;
@@ -33,23 +30,6 @@ const POST_EXIT_BUDGET: Duration = Duration::from_secs(2);
 /// Grace between SIGTERM and SIGKILL when tearing down a timed-out process
 /// group, so a signal-aware child can exit cleanly before it is force-killed.
 const TERM_GRACE: Duration = Duration::from_millis(500);
-
-/// Resolve the `git` binary: `GIT_BIN_PATH` (Bazel's hermetic-git data dep;
-/// runfiles-relative, so resolved against the cwd) or bare `git` on `PATH`.
-pub(crate) fn git_bin() -> OsString {
-    let Some(raw) = env::var_os("GIT_BIN_PATH") else {
-        return OsString::from("git");
-    };
-    let path = PathBuf::from(&raw);
-    if path.is_relative() {
-        match env::current_dir() {
-            Ok(cwd) => cwd.join(&path).into_os_string(),
-            Err(_) => raw,
-        }
-    } else {
-        raw
-    }
-}
 
 /// Run a config-provided command string through the platform shell: `sh -c`
 /// on unix, `cmd /C` on Windows. The escape hatch shared by the auth

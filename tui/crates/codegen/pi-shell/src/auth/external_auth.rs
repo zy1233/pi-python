@@ -121,46 +121,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_output_issuer_claim_enables_pi_auth() {
-        let ok = |stdout: &str| std::process::Output {
-            status: std::process::Command::new("true").status().unwrap(),
-            stdout: stdout.as_bytes().to_vec(),
-            stderr: vec![],
-        };
-
-        // x.ai issuer claim → first-party session (relay-eligible).
-        let auth = parse_output(&ok(
-            r#"{"access_token":"t","expires_in":900,"issuer":"https://auth.x.ai"}"#,
-        ))
-        .unwrap();
-        assert_eq!(auth.oidc_issuer.as_deref(), Some("https://auth.x.ai"));
-        assert!(auth.is_pi_auth());
-
-        // Non-x.ai issuer is stored but stays third-party.
-        let auth = parse_output(&ok(
-            r#"{"access_token":"t","issuer":"https://idp.acme.example"}"#,
-        ))
-        .unwrap();
-        assert_eq!(
-            auth.oidc_issuer.as_deref(),
-            Some("https://idp.acme.example")
-        );
-        assert!(!auth.is_pi_auth());
-
-        // Missing / empty / whitespace issuer → None.
-        let auth = parse_output(&ok(r#"{"access_token":"t"}"#)).unwrap();
-        assert_eq!(auth.oidc_issuer, None);
-        assert!(!auth.is_pi_auth());
-        let auth = parse_output(&ok(r#"{"access_token":"t","issuer":"  "}"#)).unwrap();
-        assert_eq!(auth.oidc_issuer, None);
-
-        // Bare-token output never carries an issuer.
-        let auth = parse_output(&ok("bare-token")).unwrap();
-        assert_eq!(auth.oidc_issuer, None);
-        assert!(!auth.is_pi_auth());
-    }
-
-    #[test]
     fn parse_output_json_shaped_but_invalid_is_err() {
         let output = std::process::Output {
             status: std::process::Command::new("true").status().unwrap(),
@@ -181,29 +141,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(auth.key, "1");
-    }
-
-    #[tokio::test]
-    async fn refresh_carries_zdr_flags_forward() {
-        let prev = GrokAuth {
-            user_blocked_reason: Some("BLOCKED_REASON_OTHER".into()),
-            team_blocked_reasons: vec!["BLOCKED_REASON_NO_LOGS".into()],
-            coding_data_retention_opt_out: true,
-            organization_id: Some("org-1".into()),
-            ..GrokAuth::test_default()
-        };
-        let auth = refresh_with_command("echo fresh-token", &prev)
-            .await
-            .unwrap();
-        assert_eq!(auth.key, "fresh-token");
-        assert!(auth.is_zdr_team(), "ZDR flag must survive refresh");
-        assert!(auth.coding_data_retention_opt_out);
-        assert_eq!(
-            auth.user_blocked_reason.as_deref(),
-            Some("BLOCKED_REASON_OTHER")
-        );
-        assert_eq!(auth.user_id, "test-user", "profile must survive refresh");
-        assert_eq!(auth.organization_id.as_deref(), Some("org-1"));
     }
 
     #[tokio::test]

@@ -9,7 +9,6 @@
 //! `crate::sampling` and `crate::session::helpers::session_compact`) and is
 //! not part of the relocatable core engine.
 
-pub mod hooks;
 
 pub use pi_memory::{
     EndpointScopedCredentials, MemoryBackendImpl, MemoryBackendParams, MemoryIndex, MemoryScope,

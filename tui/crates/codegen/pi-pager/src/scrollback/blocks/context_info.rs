@@ -1057,55 +1057,6 @@ mod tests {
     }
 
     #[test]
-    fn build_lines_renders_usage_categories_with_details() {
-        let mut snap = snapshot();
-        snap.usage_categories = vec![
-            TokenUsageCategory::skills_listing(&"x".repeat(9_600), 21),
-            TokenUsageCategory::mcp_servers(&"y".repeat(1_200), 4),
-        ];
-        let block = ContextInfoBlock::new(snap, "grok-4");
-        let theme = test_theme();
-        let lines = block.build_lines(&theme, BarLayout::WIDE);
-        let all = all_text(&lines);
-        assert!(
-            all.contains("Skills") && all.contains("21 skills"),
-            "skills row missing:\n{all}"
-        );
-        assert!(
-            all.contains("MCP servers") && all.contains("4 servers"),
-            "mcp row missing:\n{all}"
-        );
-        assert!(all.contains("\u{00b7} 12 tools"), "tools count:\n{all}");
-        let (_, tools, _, total) = count_bar_glyphs(&lines, BarLayout::WIDE);
-        assert_eq!(total, 100);
-        assert_eq!(tools, 0, "usage categories must never enter the bar");
-
-        // Token, percent, and count columns line up across all rows;
-        // single-digit counts are right-aligned ("·  4 servers").
-        let is_row = |l: &&str| {
-            (l.starts_with('\u{25C6}') || l.starts_with('\u{25C8}') || l.starts_with('\u{25C7}'))
-                && l.contains(" tokens ")
-        };
-        let cols = |needle: &str| -> Vec<usize> {
-            all.lines()
-                .filter(is_row)
-                .filter_map(|l| l.find(needle))
-                .collect()
-        };
-        for needle in [" tokens ", ")"] {
-            let positions = cols(needle);
-            assert!(
-                positions.windows(2).all(|w| w[0] == w[1]),
-                "{needle:?} column misaligned: {positions:?}\n{all}"
-            );
-        }
-        assert!(
-            all.contains("\u{00b7}  4 servers"),
-            "single-digit count must be right-aligned:\n{all}"
-        );
-    }
-
-    #[test]
     fn percent_of_window_returns_dash_for_zero_total() {
         // Exercised the `total == 0` early return — pct can't be computed.
         assert_eq!(percent_of_window(100, 0), "-");

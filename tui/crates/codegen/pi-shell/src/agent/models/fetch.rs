@@ -23,20 +23,6 @@ pub(crate) fn build_prefetched_map(
     map
 }
 
-/// Fetch remote models. Checks disk cache first; persists after fetch.
-pub(crate) fn prefetch_models_blocking(
-    endpoints: &config::EndpointsConfig,
-    auth: Option<&GrokAuth>,
-    fetch_auth: ModelFetchAuth,
-) -> Option<IndexMap<String, ModelEntry>> {
-    prefetch_models_blocking_gated(
-        endpoints,
-        auth,
-        fetch_auth,
-        crate::util::config::resolve_remote_fetch_enabled(),
-    )
-}
-
 /// Blocking models + `/v1/settings` prefetch pair, shared by the early
 pub(crate) fn prefetch_models_and_settings_blocking(
     endpoints: &config::EndpointsConfig,

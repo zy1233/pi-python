@@ -34,9 +34,6 @@ impl FacetValue {
         }
     }
 
-    pub fn intersects(&self, allowed: &[serde_json::Value]) -> bool {
-        self.values().into_iter().any(|v| allowed.contains(v))
-    }
 }
 
 pub type FacetMap = BTreeMap<String, FacetValue>;

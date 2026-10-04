@@ -3,11 +3,9 @@
 //! and the doom-loop categorizer) stay here since they need shell-local
 //! types.
 
-pub(crate) use pi_session_events::tracker::EventTracker;
 pub(crate) use pi_session_events::types::{
-    CancellationCategory, EVENT_SCHEMA_VERSION, Event, GoalClassifierVerdictTelemetry,
-    GoalPauseReasonTelemetry, InterjectionSource, Phase, RedirectKind, SessionRelationship,
-    ToolCompletedSource, ToolOutcome, TurnOutcomeLabel,
+    GoalClassifierVerdictTelemetry,
+    GoalPauseReasonTelemetry,
 };
 
 // ── Laziness detector (Layer 3) discriminator vocabulary ─────────────
@@ -109,32 +107,6 @@ pub(crate) enum LazinessCategory {
 }
 
 impl LazinessCategory {
-    /// Returns the `LAZINESS_*` string for this variant. Exhaustive
-    /// `match` — adding a variant forces a new const + arm.
-    pub(crate) fn as_const_str(self) -> &'static str {
-        match self {
-            Self::StalledNarration => LAZINESS_STALLED_NARRATION,
-            Self::StalledPermissionAsking => LAZINESS_STALLED_PERMISSION_ASKING,
-            Self::StalledNoTodosButTaskInFlight => LAZINESS_STALLED_NO_TODOS_BUT_TASK_IN_FLIGHT,
-            Self::StalledFalseCompletion => LAZINESS_STALLED_FALSE_COMPLETION,
-            Self::NotStalledComplete => LAZINESS_NOT_STALLED_COMPLETE,
-            Self::NotStalledWaitingOnBackground => LAZINESS_NOT_STALLED_WAITING_BG,
-            Self::NotStalledWaitingOnUser => LAZINESS_NOT_STALLED_WAITING_USER,
-        }
-    }
-
-    /// Four variants count as "stalled" and are eligible for a nudge.
-    pub(crate) fn is_stalled(self) -> bool {
-        match self {
-            Self::StalledNarration
-            | Self::StalledPermissionAsking
-            | Self::StalledNoTodosButTaskInFlight
-            | Self::StalledFalseCompletion => true,
-            Self::NotStalledComplete
-            | Self::NotStalledWaitingOnBackground
-            | Self::NotStalledWaitingOnUser => false,
-        }
-    }
 
     /// Every variant of this enum. Used by the producer-consistency
     /// tests to enumerate the closed set rather than a hand-coded
@@ -193,25 +165,6 @@ const _: () = assert!(
     "TodoGate discriminator consts must be non-empty",
 );
 
-/// Map a [`CancellationCategory`] to the [`PriorTurnInterrupt`] marker stamped
-/// onto the *next* real user turn — but only for the user-interruption subset.
-/// Automatic terminations (doom-loop, hook-denied) return `None`: they are not
-/// user interruptions, so the follow-up user message carries no marker.
-/// Exhaustive `match` (no wildcard) so a new `CancellationCategory` forces an
-/// explicit decision here. (Interjection has no `CancellationCategory` — it
-/// never cancels a turn — so it is mapped directly at the drain site.)
-pub(crate) fn prior_turn_interrupt_from_cancellation(
-    category: CancellationCategory,
-) -> Option<pi_sampling_types::PriorTurnInterrupt> {
-    use pi_sampling_types::PriorTurnInterrupt;
-    match category {
-        CancellationCategory::MidTurnAbort => Some(PriorTurnInterrupt::MidTurnAbort),
-        CancellationCategory::PermissionRejected => Some(PriorTurnInterrupt::PermissionRejected),
-        CancellationCategory::PermissionCancelled => Some(PriorTurnInterrupt::PermissionCancelled),
-        CancellationCategory::HookDenied => None,
-    }
-}
-
 // ── GoalClassifier discriminator vocabulary ───────────────────────────
 //
 // Single source of truth for the `reason` field on
@@ -263,70 +216,6 @@ const _: () = assert!(
     "GoalClassifier discriminator consts must be non-empty",
 );
 
-/// Closed set of fail-open reasons. Variants are INFRA-class:
-/// the harness could not verify the verdict and treats the goal as
-/// achieved to avoid blocking the user on an internal failure.
-///
-/// `Timeout` is a legacy wire string production no longer emits; kept so
-/// dashboards joining on the historical string still parse cleanly.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum GoalClassifierFailOpenReason {
-    /// Legacy wire only — no production emitter today.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "legacy wire string for dashboard joins; not emitted"
-        )
-    )]
-    Timeout,
-    SamplerError,
-    /// Retained for wire/dashboard compatibility; no emitter today.
-    #[expect(dead_code, reason = "wire vocabulary; no production emitter today")]
-    Aborted,
-    FileWriteFailed,
-    GoalNotActiveAtResolve,
-}
-
-impl GoalClassifierFailOpenReason {
-    pub(crate) fn as_const_str(self) -> &'static str {
-        match self {
-            Self::Timeout => GOAL_CLASSIFIER_FAIL_OPEN_TIMEOUT,
-            Self::SamplerError => GOAL_CLASSIFIER_FAIL_OPEN_SAMPLER_ERROR,
-            Self::Aborted => GOAL_CLASSIFIER_FAIL_OPEN_ABORTED,
-            Self::FileWriteFailed => GOAL_CLASSIFIER_FAIL_OPEN_FILE_WRITE_FAILED,
-            Self::GoalNotActiveAtResolve => GOAL_CLASSIFIER_FAIL_OPEN_GOAL_NOT_ACTIVE,
-        }
-    }
-}
-
-/// PARSE-class fail-closed reasons. The verification stage routes
-/// per-skeptic parse failures (malformed terminal token, missing
-/// verdict JSON) through synthetic refute votes instead of this event
-/// vocabulary — so the only live variants here are the drain-path
-/// race guards (`ConcurrentInFlight`, `PendingQueueFull`).
-///
-/// No longer emitted: `MalformedTerminalResponse`, `MissingDetailsFile`,
-/// `ChangesCaptureFailed`. A future strict-diff mode (where a `git
-/// diff` failure must fail-closed instead of degrading to
-/// `(unavailable)`) would re-add `ChangesCaptureFailed` here plus the
-/// `GOAL_CLASSIFIER_FAIL_CLOSED_CHANGES_CAPTURE_FAILED` wire constant
-/// and the matching `as_const_str` arm.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum GoalClassifierFailClosedReason {
-    ConcurrentInFlight,
-    PendingQueueFull,
-}
-
-impl GoalClassifierFailClosedReason {
-    pub(crate) fn as_const_str(self) -> &'static str {
-        match self {
-            Self::ConcurrentInFlight => GOAL_CLASSIFIER_FAIL_CLOSED_CONCURRENT,
-            Self::PendingQueueFull => GOAL_CLASSIFIER_FAIL_CLOSED_PENDING_QUEUE_FULL,
-        }
-    }
-}
-
 // ── GoalPlanner discriminator vocabulary ──────────────────────────────
 //
 // The planner is fail-CLOSED by design (the opposite of the classifier).
@@ -358,29 +247,6 @@ const _: () = assert!(
     "GoalPlanner discriminator consts must be non-empty",
 );
 
-/// Closed set of planner fail-closed reasons. All variants pause the
-/// goal — there is no fail-open variant by design.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum GoalPlannerFailClosedReason {
-    Transport,
-    Runtime,
-    Aborted,
-    MissingPlan,
-    FileWriteFailed,
-}
-
-impl GoalPlannerFailClosedReason {
-    pub(crate) fn as_const_str(self) -> &'static str {
-        match self {
-            Self::Transport => GOAL_PLANNER_FAIL_CLOSED_TRANSPORT,
-            Self::Runtime => GOAL_PLANNER_FAIL_CLOSED_RUNTIME,
-            Self::Aborted => GOAL_PLANNER_FAIL_CLOSED_ABORTED,
-            Self::MissingPlan => GOAL_PLANNER_FAIL_CLOSED_MISSING_PLAN,
-            Self::FileWriteFailed => GOAL_PLANNER_FAIL_CLOSED_FILE_WRITE_FAILED,
-        }
-    }
-}
-
 // ── GoalStrategist discriminator vocabulary ───────────────────────────
 //
 // The strategist is fail-OPEN by design (the opposite of the planner).
@@ -409,27 +275,6 @@ const _: () = assert!(
     "GoalStrategist discriminator consts must be non-empty",
 );
 
-/// Closed set of strategist fail-open reasons. All variants are logged
-/// and ignored — the goal is never paused on strategist failure.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum GoalStrategistFailReason {
-    Transport,
-    Runtime,
-    Aborted,
-    MissingStrategy,
-}
-
-impl GoalStrategistFailReason {
-    pub(crate) fn as_const_str(self) -> &'static str {
-        match self {
-            Self::Transport => GOAL_STRATEGIST_FAILED_TRANSPORT,
-            Self::Runtime => GOAL_STRATEGIST_FAILED_RUNTIME,
-            Self::Aborted => GOAL_STRATEGIST_FAILED_ABORTED,
-            Self::MissingStrategy => GOAL_STRATEGIST_FAILED_MISSING_STRATEGY,
-        }
-    }
-}
-
 /// The plan.md restore-guard could not put the contract back. A
 /// write to plan.md failed.
 pub(crate) const GOAL_STRATEGIST_RESTORE_WRITE_FAILED: &str = "write_failed";
@@ -448,25 +293,6 @@ const _: () = assert!(
         && !GOAL_STRATEGIST_RESTORE_SYMLINK_TAMPER.is_empty(),
     "GoalStrategist restore discriminator consts must be non-empty",
 );
-
-/// Why the plan.md-safety guard could not guarantee the contract. Drives
-/// the `reason` on `Event::GoalStrategistContractRestoreFailed`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum GoalStrategistRestoreFailReason {
-    WriteFailed,
-    RemoveFailed,
-    SymlinkTamper,
-}
-
-impl GoalStrategistRestoreFailReason {
-    pub(crate) fn as_const_str(self) -> &'static str {
-        match self {
-            Self::WriteFailed => GOAL_STRATEGIST_RESTORE_WRITE_FAILED,
-            Self::RemoveFailed => GOAL_STRATEGIST_RESTORE_REMOVE_FAILED,
-            Self::SymlinkTamper => GOAL_STRATEGIST_RESTORE_SYMLINK_TAMPER,
-        }
-    }
-}
 
 // ── GoalSummarizer discriminator vocabulary ───────────────────────────
 //
@@ -495,27 +321,6 @@ const _: () = assert!(
         && !GOAL_SUMMARIZER_FAIL_OPEN_EMPTY_SUMMARY.is_empty(),
     "GoalSummarizer discriminator consts must be non-empty",
 );
-
-/// Closed set of summarizer fail-open reasons. All variants are logged
-/// and ignored — the goal is never un-achieved on summarizer failure.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum GoalSummarizerFailReason {
-    Transport,
-    Runtime,
-    Aborted,
-    EmptySummary,
-}
-
-impl GoalSummarizerFailReason {
-    pub(crate) fn as_const_str(self) -> &'static str {
-        match self {
-            Self::Transport => GOAL_SUMMARIZER_FAIL_OPEN_TRANSPORT,
-            Self::Runtime => GOAL_SUMMARIZER_FAIL_OPEN_RUNTIME,
-            Self::Aborted => GOAL_SUMMARIZER_FAIL_OPEN_ABORTED,
-            Self::EmptySummary => GOAL_SUMMARIZER_FAIL_OPEN_EMPTY_SUMMARY,
-        }
-    }
-}
 
 // ── GoalRoleModel discriminator vocabulary ────────────────────────────
 //
@@ -605,19 +410,6 @@ pub(crate) enum GoalRoleModelFailOpenReason {
 }
 
 impl GoalRoleModelFailOpenReason {
-    pub(crate) fn as_const_str(self) -> &'static str {
-        match self {
-            Self::ModelUnknown => GOAL_ROLE_MODEL_FAIL_OPEN_MODEL_UNKNOWN,
-            Self::ModelUnauthorized => GOAL_ROLE_MODEL_FAIL_OPEN_MODEL_UNAUTHORIZED,
-            Self::ToolsetUnknown => GOAL_ROLE_MODEL_FAIL_OPEN_TOOLSET_UNKNOWN,
-            Self::ToolsetNotAllowed => GOAL_ROLE_MODEL_FAIL_OPEN_TOOLSET_NOT_ALLOWED,
-            Self::ToolsetDisabled => GOAL_ROLE_MODEL_FAIL_OPEN_TOOLSET_DISABLED,
-            Self::ToolsetUnavailable => GOAL_ROLE_MODEL_FAIL_OPEN_TOOLSET_UNAVAILABLE,
-            Self::ToolsetIncapable => GOAL_ROLE_MODEL_FAIL_OPEN_TOOLSET_INCAPABLE,
-            Self::SpawnFailed => GOAL_ROLE_MODEL_FAIL_OPEN_SPAWN_FAILED,
-            Self::HarnessFlavorUnsupported => GOAL_ROLE_MODEL_FAIL_OPEN_HARNESS_FLAVOR_UNSUPPORTED,
-        }
-    }
 
     /// Every variant of this enum, enumerated alongside a compiler-
     /// enforced exhaustive `match` so adding a variant is a compile error
@@ -689,29 +481,6 @@ impl From<crate::session::goal_tracker::GoalPauseReason> for GoalPauseReasonTele
 mod tests {
     use super::*;
     use crate::session::goal_tracker::GoalPauseReason;
-
-    #[test]
-    fn prior_turn_interrupt_from_cancellation_maps_user_interrupts_only() {
-        use pi_sampling_types::PriorTurnInterrupt;
-        // The three user-interrupt causes map to a marker.
-        assert_eq!(
-            prior_turn_interrupt_from_cancellation(CancellationCategory::MidTurnAbort),
-            Some(PriorTurnInterrupt::MidTurnAbort)
-        );
-        assert_eq!(
-            prior_turn_interrupt_from_cancellation(CancellationCategory::PermissionRejected),
-            Some(PriorTurnInterrupt::PermissionRejected)
-        );
-        assert_eq!(
-            prior_turn_interrupt_from_cancellation(CancellationCategory::PermissionCancelled),
-            Some(PriorTurnInterrupt::PermissionCancelled)
-        );
-        // Automatic terminations are NOT user interrupts → no marker.
-        assert_eq!(
-            prior_turn_interrupt_from_cancellation(CancellationCategory::HookDenied),
-            None
-        );
-    }
 
     #[test]
     fn goal_pause_reason_telemetry_mirrors_all_variants() {
@@ -797,95 +566,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn laziness_category_round_trip_through_const_str_and_serde() {
-        // Single source of truth: every variant maps to one and only
-        // one const, and the same const deserializes back to the
-        // variant. Drives off `LazinessCategory::all()` so a new
-        // variant must be added there (compiler-enforced via
-        // `_assert_exhaustive`) for this test to even see it.
-        for &(variant, expected_const) in EXPECTED_CATEGORY_CONSTS {
-            assert_eq!(variant.as_const_str(), expected_const);
-            let json = format!("\"{expected_const}\"");
-            let parsed: LazinessCategory =
-                serde_json::from_str(&json).expect("deserialize const back to variant");
-            assert_eq!(parsed, variant);
-        }
-        let unique: std::collections::BTreeSet<&'static str> = LazinessCategory::all()
-            .iter()
-            .map(|c| c.as_const_str())
-            .collect();
-        assert_eq!(unique.len(), LazinessCategory::all().len());
-    }
-
-    #[test]
-    fn laziness_stalled_false_completion_const_value_and_round_trip() {
-        // Pin the wire string for the new category and prove the
-        // const ↔ enum mapping is bijective.
-        assert_eq!(
-            LAZINESS_STALLED_FALSE_COMPLETION,
-            "stalled_false_completion"
-        );
-        assert_eq!(
-            LazinessCategory::StalledFalseCompletion.as_const_str(),
-            LAZINESS_STALLED_FALSE_COMPLETION,
-        );
-        let parsed: LazinessCategory =
-            serde_json::from_str("\"stalled_false_completion\"").expect("deserialize");
-        assert_eq!(parsed, LazinessCategory::StalledFalseCompletion);
-        assert!(LazinessCategory::StalledFalseCompletion.is_stalled());
-    }
-
-    #[test]
-    fn laziness_is_stalled_matches_stalled_consts_only() {
-        // Drive off `all()` so a new variant must be classified as
-        // stalled or not-stalled — no variant escapes the test.
-        let stalled_consts: std::collections::BTreeSet<&'static str> = [
-            LAZINESS_STALLED_NARRATION,
-            LAZINESS_STALLED_PERMISSION_ASKING,
-            LAZINESS_STALLED_NO_TODOS_BUT_TASK_IN_FLIGHT,
-            LAZINESS_STALLED_FALSE_COMPLETION,
-        ]
-        .into_iter()
-        .collect();
-        for &variant in LazinessCategory::all() {
-            let expected = stalled_consts.contains(variant.as_const_str());
-            assert_eq!(
-                variant.is_stalled(),
-                expected,
-                "is_stalled() disagrees with stalled-const set for {variant:?}",
-            );
-        }
-    }
-
-    #[test]
-    fn laziness_abort_reason_consts_are_distinct() {
-        // Driven off `LazinessAbortReason::all()` so a new variant
-        // must be added there (compiler-enforced via the exhaustive
-        // match in `as_const_str`) before this test can see it. The
-        // closed-set guarantee then lives in code, not in a hand-coded
-        // test array. Note: the const array here is preserved
-        // separately so a desync between `as_const_str` and the
-        // `pub const` set is caught.
-        let from_enum: std::collections::BTreeSet<&'static str> =
-            crate::session::acp_session::LazinessAbortReason::all()
-                .iter()
-                .map(|r| r.as_const_str())
-                .collect();
-        let from_consts: std::collections::BTreeSet<&'static str> = [
-            LAZINESS_ABORT_USER_INPUT,
-            LAZINESS_ABORT_MODEL_SWITCH,
-            LAZINESS_ABORT_TIMEOUT,
-            LAZINESS_ABORT_CLASSIFIER_ERROR,
-        ]
-        .into_iter()
-        .collect();
-        assert_eq!(
-            from_enum, from_consts,
-            "LazinessAbortReason variants must map 1:1 to LAZINESS_ABORT_* consts",
-        );
-    }
-
     /// Hand-curated `(variant, literal_str, const)` triples. `literal_str`
     /// is a HARDCODED string independent of the `pub const`, so a typo in
     /// a const *value* (e.g. `"model_unknown"` → `"model_unkown"`) is
@@ -955,54 +635,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn goal_role_model_fail_open_reason_const_strs_are_snake_case_and_distinct() {
-        // Pin every variant's wire string to a hardcoded literal (catches
-        // a const-value typo), confirm it equals the `pub const`, that
-        // it's snake_case, and that all are distinct. Driven off the
-        // expected table whose length is tied to `all()`, so no variant
-        // escapes the assertions.
-        let mut seen = std::collections::BTreeSet::new();
-        for &(variant, literal_str, wire_const) in EXPECTED_FAIL_OPEN_CONSTS {
-            // Independent literal pin — fails if a const value drifts.
-            assert_eq!(
-                variant.as_const_str(),
-                literal_str,
-                "{variant:?} wire string drifted from its pinned literal",
-            );
-            // And the const must agree with the literal.
-            assert_eq!(
-                wire_const, literal_str,
-                "const for {variant:?} drifted from its pinned literal",
-            );
-            // snake_case wire strings only (lowercase + underscore).
-            assert!(
-                literal_str
-                    .chars()
-                    .all(|c| c.is_ascii_lowercase() || c == '_'),
-                "wire string {literal_str:?} is not snake_case",
-            );
-            assert!(seen.insert(variant.as_const_str()), "duplicate wire string");
-        }
-        assert_eq!(
-            seen.len(),
-            GoalRoleModelFailOpenReason::all().len(),
-            "every fail-open reason must map to a distinct wire string",
-        );
-    }
-
-    #[test]
-    fn goal_summarizer_fail_reason_wire_strings() {
-        // Table pins each variant's wire string to a hardcoded literal so a
-        // const-value typo (e.g. on the e2e-exercised `runtime`) is caught.
-        use GoalSummarizerFailReason as R;
-        for (variant, literal) in [
-            (R::Transport, "transport"),
-            (R::Runtime, "runtime"),
-            (R::Aborted, "aborted"),
-            (R::EmptySummary, "empty_summary"),
-        ] {
-            assert_eq!(variant.as_const_str(), literal, "{variant:?} drifted");
-        }
-    }
 }

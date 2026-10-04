@@ -1,8 +1,60 @@
 //! CLI argument parsing for the pager.
-pub use crate::headless::OutputFormat;
-use clap::{ArgAction, Parser, Subcommand, ValueHint};
+use clap::{ArgAction, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
 use std::path::PathBuf;
+
+/// `--output-format` values. The flag is still parsed for CLI compatibility;
+/// `-p` is executed by the Python ACP agent, which owns output rendering.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ValueEnum)]
+pub enum OutputFormat {
+    #[default]
+    Plain,
+    Json,
+    /// NDJSON of the agent native ACP session updates.
+    #[value(name = "streaming-json")]
+    StreamingJson,
+    /// NDJSON in the Anthropic Messages API wire format.
+    #[value(name = "streaming-messages-json")]
+    StreamingMessagesJson,
+}
+
+/// Parse `--allow` / `--deny` permission rules, warning on (and skipping) invalid entries.
+pub fn parse_permission_rules_lenient(
+    allow: &[String],
+    deny: &[String],
+) -> Vec<pi_workspace::permission::types::PermissionRule> {
+    use pi_workspace::permission::rules::parse_permission_rule;
+    use pi_workspace::permission::types::RuleAction;
+
+    let mut rules = Vec::new();
+    // Deny before allow is cosmetic: the policy evaluator is order-independent (deny > ask > allow).
+    for (flag, rule_str, action) in deny
+        .iter()
+        .map(|r| ("--deny", r, RuleAction::Deny))
+        .chain(allow.iter().map(|r| ("--allow", r, RuleAction::Allow)))
+    {
+        match parse_permission_rule(rule_str, action) {
+            Ok(rule) => rules.push(rule),
+            Err(e) => eprintln!("warning: {flag} \"{rule_str}\": {e}, skipping"),
+        }
+    }
+    rules
+}
+
+/// How a `--agent` argument resolves: an existing file path or a bare profile name.
+pub(crate) enum ResolvedAgent {
+    FilePath(PathBuf),
+    Name(String),
+}
+
+pub(crate) fn resolve_agent_arg(agent: &str) -> ResolvedAgent {
+    let path = std::path::Path::new(agent);
+    if path.exists() && path.is_file() {
+        ResolvedAgent::FilePath(dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()))
+    } else {
+        ResolvedAgent::Name(agent.to_string())
+    }
+}
 /// Top-level commands for the pager binary.
 #[derive(Debug, Clone, Subcommand)]
 pub enum Command {
@@ -89,14 +141,6 @@ pub struct PagerArgs {
     /// Working directory.
     #[arg(long)]
     pub cwd: Option<PathBuf>,
-    /// Use a custom leader socket path instead of the default `~/.pi-python/leader.sock`.
-    #[arg(
-        long = "leader-socket",
-        value_name = "PATH",
-        global = true,
-        value_hint = ValueHint::FilePath
-    )]
-    pub leader_socket: Option<PathBuf>,
     /// Enable debug logging.
     #[arg(long = "debug", global = true)]
     pub debug: bool,
@@ -457,12 +501,6 @@ pub struct PagerArgs {
     /// Use OAuth when the welcome screen starts authentication.
     #[arg(long = "oauth")]
     pub oauth: bool,
-    /// Connect to a shared leader process.
-    #[arg(long, conflicts_with = "no_leader", hide = true)]
-    pub leader: bool,
-    /// Run standalone even when leader mode is configured.
-    #[arg(long, conflicts_with = "leader", hide = true)]
-    pub no_leader: bool,
     /// Initial prompt for the interactive session, e.g. `zypi "fix the bug"` or `zypi --worktree=feat "create this feature"`.
     #[arg(
         value_name = "PROMPT",
@@ -520,15 +558,6 @@ impl PagerArgs {
             None
         }
     }
-    pub(crate) fn memory_override_flag(&self) -> Option<&'static str> {
-        if self.experimental_memory {
-            Some("--experimental-memory")
-        } else if self.no_memory {
-            Some("--no-memory")
-        } else {
-            None
-        }
-    }
     /// Parse CLI arguments without applying side effects.
     pub fn parse_cli() -> Self {
         let bin_name = std::env::args()
@@ -549,9 +578,6 @@ impl PagerArgs {
         self.apply_cwd_from(launch_dir.as_deref())
     }
     fn apply_cwd_from(mut self, launch_dir: Option<&std::path::Path>) -> anyhow::Result<Self> {
-        if let Some(socket) = self.leader_socket.take() {
-            self.leader_socket = Some(anchor_to_launch_dir(socket, launch_dir));
-        }
         if let Some(file) = self.debug_file.take() {
             self.debug_file = Some(anchor_to_launch_dir(file, launch_dir));
         }
@@ -931,20 +957,10 @@ mod tests {
     }
     #[test]
     fn launch_directory_anchoring_precedes_cwd_change() {
-        let args = PagerArgs::try_parse_from([
-            "zypi",
-            "--leader-socket",
-            "relative.sock",
-            "--debug-file",
-            "relative.log",
-        ])
-        .unwrap()
-        .apply_cwd_from(Some(std::path::Path::new("/launch")))
-        .unwrap();
-        assert_eq!(
-            args.leader_socket.as_deref(),
-            Some(std::path::Path::new("/launch/relative.sock"))
-        );
+        let args = PagerArgs::try_parse_from(["zypi", "--debug-file", "relative.log"])
+            .unwrap()
+            .apply_cwd_from(Some(std::path::Path::new("/launch")))
+            .unwrap();
         assert_eq!(
             args.debug_file.as_deref(),
             Some(std::path::Path::new("/launch/relative.log"))
@@ -953,9 +969,9 @@ mod tests {
     #[test]
     fn launch_directory_anchoring_normalizes_dot_components() {
         for (input, expected) in [
-            ("./leader.sock", "/launch/leader.sock"),
+            ("./debug.log", "/launch/debug.log"),
             ("logs/../debug.log", "/launch/logs/../debug.log"),
-            ("../leader.sock", "/launch/../leader.sock"),
+            ("../debug.log", "/launch/../debug.log"),
         ] {
             assert_eq!(
                 anchor_to_launch_dir(PathBuf::from(input), Some(std::path::Path::new("/launch"))),
@@ -963,34 +979,6 @@ mod tests {
                 "input: {input}"
             );
         }
-    }
-    #[test]
-    fn leader_socket_flag_parses_at_root() {
-        let args = PagerArgs::try_parse_from(["zypi", "--leader-socket", "/tmp/leader-x.sock"])
-            .expect("--leader-socket parses at the root");
-        assert_eq!(
-            args.leader_socket.as_deref(),
-            Some(std::path::Path::new("/tmp/leader-x.sock"))
-        );
-    }
-    #[test]
-    fn leader_socket_flag_is_global_for_subcommands() {
-        let args = PagerArgs::try_parse_from([
-            "zypi",
-            "doctor",
-            "--leader-socket",
-            "/tmp/leader-y.sock",
-        ])
-        .expect("--leader-socket parses after a subcommand (global)");
-        assert_eq!(
-            args.leader_socket.as_deref(),
-            Some(std::path::Path::new("/tmp/leader-y.sock"))
-        );
-    }
-    #[test]
-    fn leader_socket_flag_defaults_to_none() {
-        let args = PagerArgs::try_parse_from(["zypi"]).expect("bare grok parses");
-        assert!(args.leader_socket.is_none());
     }
     #[test]
     fn debug_file_flag_parses_and_is_global() {

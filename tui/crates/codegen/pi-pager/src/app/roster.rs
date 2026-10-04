@@ -105,90 +105,6 @@ pub fn parse_roster_list_response(body: &str) -> Option<RosterListResponse> {
 mod tests {
     use super::*;
 
-    /// Build a representative agent-side roster entry with every field set to
-    /// a non-default value so the round-trip exercises name/case mapping.
-    fn agent_entry() -> pi_shell::agent::roster::RosterEntry {
-        use pi_shell::agent::roster as agent;
-        agent::RosterEntry {
-            session_id: "sess-abc".to_string(),
-            title: Some("Fix the roster".to_string()),
-            cwd: "/repo/worktree".to_string(),
-            is_worktree: true,
-            model_id: Some("grok-4".to_string()),
-            reasoning_effort: None,
-            yolo: true,
-            activity: agent::RosterActivity::Working,
-            last_turn_summary: Some("Fixed the roster merge".to_string()),
-            resident: true,
-            last_change_unix_ms: 1_725_000_000_123,
-            origin: agent::RosterOrigin::Local,
-        }
-    }
-
-    /// Serialize the agent's `RosterListResponse` EXACTLY as
-    /// `handle_roster_list` does — through
-    /// `ExtMethodResult::success(..).to_ext_response()` — and confirm the
-    /// pager recovers the session.
-    ///
-    /// This reproduces the production bug: the agent wraps the payload in a
-    /// `{ "result": { "sessions": [...] } }` envelope, and the pager's first
-    /// parse attempt used to be a direct `from_str::<RosterListResponse>` that
-    /// silently succeeded with an EMPTY roster (the `naive` assertion below).
-    /// Before the fix `parse_roster_list_response` used that same direct parse
-    /// first, so this test FAILED (0 sessions); after the fix it unwraps
-    /// `result` first and PASSES.
-    #[test]
-    fn roster_list_response_survives_result_envelope() {
-        use pi_shell::agent::roster as agent;
-        use pi_shell::session::ExtMethodResult;
-
-        let agent_resp = agent::RosterListResponse {
-            sessions: vec![agent_entry()],
-        };
-
-        // Exact wire bytes the agent emits for `legacy/sessions/list`.
-        let ext_response = ExtMethodResult::success(agent_resp)
-            .to_ext_response()
-            .expect("agent serializes the roster response");
-        let body: &str = ext_response.0.get();
-        assert!(
-            body.contains("\"result\""),
-            "agent wraps the payload in a `result` envelope: {body}"
-        );
-
-        // Repro of the original bug mechanism: a naive direct deserialize of
-        // the wrapped body succeeds but drops every session.
-        let naive: RosterListResponse =
-            serde_json::from_str(body).expect("naive parse succeeds (that is the trap)");
-        assert!(
-            naive.sessions.is_empty(),
-            "naive direct parse silently drops sessions from the envelope"
-        );
-
-        // The fixed parser unwraps `result` first and recovers the session.
-        let parsed = parse_roster_list_response(body).expect("fixed parser must parse");
-        assert_eq!(
-            parsed.sessions.len(),
-            1,
-            "session must survive the `result` envelope"
-        );
-        let e = &parsed.sessions[0];
-        assert_eq!(e.session_id, "sess-abc");
-        assert_eq!(e.title.as_deref(), Some("Fix the roster"));
-        assert_eq!(e.cwd, "/repo/worktree");
-        assert!(e.is_worktree);
-        assert_eq!(e.model_id.as_deref(), Some("grok-4"));
-        assert!(e.yolo);
-        assert_eq!(e.activity, RosterActivity::Working);
-        assert_eq!(
-            e.last_turn_summary.as_deref(),
-            Some("Fixed the roster merge")
-        );
-        assert!(e.resident);
-        assert_eq!(e.last_change_unix_ms, 1_725_000_000_123);
-        assert_eq!(e.origin.kind, "local");
-    }
-
     /// A bare `{ "sessions": [...] }` body (no `result` envelope) must still
     /// parse — the parser tolerates both shapes.
     #[test]
@@ -199,27 +115,4 @@ mod tests {
         assert_eq!(parsed.sessions[0].session_id, "s1");
     }
 
- /// `legacy ext RPC` round-trip: serialize the agent's `RosterChanged`
-    /// exactly as `emit_roster_changed` does (bare params, no `result`
-    /// envelope) and confirm the pager's `RosterChanged` recovers `upserted` /
-    /// `removed` and the nested entry fields (camelCase). Regression guard for
-    /// the broadcast path's wire shape.
-    #[test]
-    fn roster_changed_round_trips() {
-        use pi_shell::agent::roster as agent;
-
-        let agent_changed = agent::RosterChanged {
-            upserted: vec![agent_entry()],
-            removed: vec!["sess-gone".to_string()],
-        };
-        // `emit_roster_changed` serializes the bare payload (no envelope).
-        let params = serde_json::to_string(&agent_changed).expect("serialize RosterChanged");
-
-        let parsed: RosterChanged =
-            serde_json::from_str(&params).expect("pager parses the broadcast params");
-        assert_eq!(parsed.upserted.len(), 1, "upserted entry must survive");
-        assert_eq!(parsed.upserted[0].session_id, "sess-abc");
-        assert_eq!(parsed.upserted[0].activity, RosterActivity::Working);
-        assert_eq!(parsed.removed, vec!["sess-gone".to_string()]);
-    }
 }

@@ -745,7 +745,6 @@ fn dispatch_legacy_ext_notification(notif: &acp::ExtNotification, app: &mut AppV
         }
         m if m.ends_with("/announcements/update") => handle_announcements_update(notif, app),
         m if m.ends_with("/git_head_changed") => handle_git_head_changed(notif, app),
-        m if m.ends_with("/leader/version_mismatch") => handle_version_mismatch(notif, app),
         m if m.ends_with("/mcp/init_progress") => handle_mcp_init_progress(notif, app),
         m if m.ends_with("/mcp/tools_changed") || m.ends_with("/mcp_initialized") => {
             handle_mcp_tools_changed(notif, app)
@@ -759,16 +758,6 @@ fn dispatch_legacy_ext_notification(notif: &acp::ExtNotification, app: &mut AppV
     }
 }
 
-#[cfg(test)]
-#[allow(dead_code)]
-fn handle_version_mismatch(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
-    let Some(banner) = crate::acp::version_mismatch_banner(notif.params.get()) else {
-        tracing::warn!("ignoring leader/version_mismatch without usable versions");
-        return false;
-    };
-    app.show_toast(&banner);
-    true
-}
 
 #[cfg(test)]
 #[allow(dead_code)]

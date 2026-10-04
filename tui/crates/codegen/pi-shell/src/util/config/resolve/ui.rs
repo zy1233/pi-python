@@ -2,7 +2,7 @@ use crate::util::config::RemoteSettings;
 use toml::Value as TomlValue;
 
 /// Env override for showing agent thinking blocks in the TUI.
-pub const ENV_SHOW_THINKING_BLOCKS: &str = "GROK_SHOW_THINKING_BLOCKS";
+pub(crate) const ENV_SHOW_THINKING_BLOCKS: &str = "GROK_SHOW_THINKING_BLOCKS";
 
 #[cfg(test)]
 static SHOW_THINKING_BLOCKS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -52,7 +52,7 @@ pub fn resolve_show_thinking_blocks(
 }
 
 /// Env override for grouping consecutive non-destructive tool calls in the TUI.
-pub const ENV_GROUP_TOOL_VERBS: &str = "GROK_GROUP_TOOL_VERBS";
+pub(crate) const ENV_GROUP_TOOL_VERBS: &str = "GROK_GROUP_TOOL_VERBS";
 
 #[cfg(test)]
 static GROUP_TOOL_VERBS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -81,7 +81,7 @@ pub fn resolve_group_tool_verbs(
 }
 
 /// Env override for the collapsed-Edit-blocks default in the TUI.
-pub const ENV_COLLAPSED_EDIT_BLOCKS: &str = "GROK_COLLAPSED_EDIT_BLOCKS";
+pub(crate) const ENV_COLLAPSED_EDIT_BLOCKS: &str = "GROK_COLLAPSED_EDIT_BLOCKS";
 
 #[cfg(test)]
 static COLLAPSED_EDIT_BLOCKS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

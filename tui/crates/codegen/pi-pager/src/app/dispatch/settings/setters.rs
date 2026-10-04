@@ -1789,8 +1789,10 @@ pub(in crate::app::dispatch) fn set_default_model(
     if let Some(sid) = session_id {
         // We already hold a reference path to the agent above; re-borrow
         // mutably here to flip `model_switch_pending`.
+        let mut config_option_id = None;
         if let Some(agent) = app.agents.get_mut(&aid) {
             agent.session.model_switch_pending = true;
+            config_option_id = agent.session.models.config_option_id.clone();
         }
         effects.push(Effect::SwitchModel {
             agent_id: aid,
@@ -1798,6 +1800,7 @@ pub(in crate::app::dispatch) fn set_default_model(
             model_id: new_id,
             effort: None,
             prev_model_id: prev_id.clone(),
+            config_option_id,
         });
     } else if let Some(agent) = app.agents.get_mut(&aid) {
         // No session id yet — stash for

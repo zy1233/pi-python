@@ -2,8 +2,7 @@
 //!
 //! The subscription tier reaches the client as a free-form **display-name
 //! string** (from CCP `/settings` `subscription_tier_display`, or the numeric
-//! JWT `tier` claim mapped to a display-style string by
-//! [`crate::agent::mvp_agent::jwt_tier_claim`]). There is no shared enum, so
+//! JWT `tier` claim mapped to a display-style string). There is no shared enum, so
 //! gating decisions classify the string here in ONE place so the pager's
 //! cosmetic slash-command gate and the shell's capability (toolset) gate can't
 //! drift apart.

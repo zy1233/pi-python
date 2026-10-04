@@ -26,20 +26,9 @@ mod jemalloc_malloc_conf {
     static MALLOC_CONF: MallocConfPtr = MallocConfPtr(CONF.as_ptr());
 }
 use anyhow::Result;
-use std::net::SocketAddr;
 use std::num::NonZeroUsize;
-use tokio_util::sync::CancellationToken;
 use pi_pager::app::{Command, PagerArgs};
 use pi_pager::client_identity::PAGER_CLIENT_VERSION;
-use pi_shell::agent::app::{run_headless, run_leader, run_stdio_agent};
-use pi_shell::agent::config::Config as AgentConfig;
-use pi_shell::leader::{
-    ClientCapabilities, ClientMode, ControlCommand, LeaderCapabilities, LeaderDescriptor,
-    LeaderRegistration, LeaderTarget, leader_is_older_than,
-};
-use pi_shell::leader::{
-    ControlPayload, LeaderClient, LeaderEnvUrls, connect_or_spawn, socket_path_for_ws_url,
-};
 use pi_telemetry::process_info::{
     Entrypoint, Interactivity, ProcessIdentity, ReleaseChannel, set_identity, set_release_channel,
 };
@@ -567,9 +556,6 @@ async fn async_main(args: PagerArgs) -> Result<()> {
             std::env::set_var(pi_shell::agent::chat_modes::GROK_CHAT_MODE_ENV, "1");
         }
     }
-    if let Some(ref socket) = args.leader_socket {
-        unsafe { std::env::set_var(pi_shell::leader::LEADER_SOCKET_ENV, socket) };
-    }
     if let Some(ref path) = args.debug_file {
         unsafe {
             std::env::set_var("PI_DEBUG_LOG", path);
@@ -663,71 +649,6 @@ async fn async_main(args: PagerArgs) -> Result<()> {
                 return Ok(());
             }
         }
-    }
-    let headless_prompt = pi_pager::headless::HeadlessPrompt::from_args(
-        args.single.as_deref(),
-        args.prompt_json.as_deref(),
-        args.prompt_file.as_deref(),
-    )?;
-    if let Some(prompt) = headless_prompt {
-        init_tracing_simple(HEADLESS_ENTRYPOINT);
-        let _otel_guard: Option<()> = None;
-        enforce_version_policy_or_exit();
-        let launch_yolo = pi_shell::util::config::effective_yolo_for_launch(
-            args.yolo,
-            args.permission_mode_flag.as_deref(),
-            None,
-        );
-        if let Some(warning) = launch_yolo.blocked_warning {
-            eprintln!("{}: {warning}", pi_pager::brand::CLI_NAME);
-        }
-        let json_schema = args
-            .json_schema
-            .as_deref()
-            .map(pi_pager::headless::parse_json_schema)
-            .transpose()?;
-        if json_schema.is_some()
-            && args.output_format == pi_pager::headless::OutputFormat::Plain
-        {
-            args.output_format = pi_pager::headless::OutputFormat::Json;
-        }
-        return pi_pager::headless::run_single_turn(
-            prompt,
-            args.verbatim,
-            pi_pager::headless::HeadlessOptions {
-                session_id: args.session_id.clone(),
-                resume: args.resume_session.or(args.load_session),
-                resume_title_pinned: args.resume_target_pinned,
-                cwd: args.cwd,
-                yolo: launch_yolo.yolo,
-                trust: args.trust,
-                output_format: args.output_format,
-                include_partial_messages: args.include_partial_messages,
-                json_schema,
-                model: args.model,
-                rules: args.rules,
-                system_prompt_override: args.system_prompt_override.clone(),
-                continue_last_session: args.continue_last_session,
-                fork_session: args.fork_session,
-                worktree: args.worktree,
-                restore_code: args.restore_code,
-                agent: args.agent.clone(),
-                agents_json: args.agents_json.clone(),
-                cli_tools: args.cli_tools.clone(),
-                cli_disallowed_tools: args.cli_disallowed_tools.clone(),
-                disable_web_search: args.disable_web_search,
-                allow_rules: args.allow_rules.clone(),
-                deny_rules: args.deny_rules.clone(),
-                max_turns: args.max_turns,
-                permission_mode_flag: args.permission_mode_flag.clone(),
-                reasoning_effort: args.reasoning_effort.clone(),
-                wait_for_background: !args.no_wait_for_background,
-                background_wait_timeout: std::time::Duration::from_secs(
-                    args.background_wait_timeout_secs,
-                ),
-            },
-        )
-        .await;
     }
     enforce_version_policy_or_exit();
     // Phase 4: no otel export from the pager; Python owns LLM telemetry if any.

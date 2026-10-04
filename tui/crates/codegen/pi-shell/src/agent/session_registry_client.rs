@@ -7,7 +7,7 @@
 
 use anyhow::{Context, Result};
 use reqwest::RequestBuilder;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 // ============================================================================
 // Request / response types (local — not in cli-chat-proxy since these
@@ -70,67 +70,6 @@ pub struct UpdateRequest {
 // ============================================================================
 // Response types
 // ============================================================================
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionRecord {
-    pub session_id: String,
-    pub summary: String,
-    pub first_prompt: Option<String>,
-    pub model_id: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-    pub last_turn_number: i32,
-    /// Present on servers that have applied the restorable-turn migration.
-    /// `None` when talking to an older server — callers should fall back to
-    /// `last_turn_number` in that case.
-    #[serde(default)]
-    pub restorable_turn_number: Option<i32>,
-    pub cwd: String,
-    pub repo_remote_url: Option<String>,
-    pub hostname: Option<String>,
-    pub status: String,
-    pub gcs_trace_prefix: String,
-    pub gcs_bucket: String,
-    #[serde(default)]
-    pub last_active_at: Option<String>,
-}
-
-impl From<crate::session::persistence::Summary> for SessionRecord {
-    fn from(s: crate::session::persistence::Summary) -> Self {
-        Self {
-            session_id: s.info.id.to_string(),
-            summary: s.session_summary,
-            first_prompt: None,
-            model_id: Some(s.current_model_id.to_string()),
-            created_at: s.created_at.to_rfc3339(),
-            updated_at: s.updated_at.to_rfc3339(),
-            last_turn_number: s.num_messages as i32,
-            restorable_turn_number: None,
-            cwd: s.info.cwd,
-            repo_remote_url: None,
-            hostname: None,
-            status: "local".to_string(),
-            gcs_trace_prefix: String::new(),
-            gcs_bucket: String::new(),
-            last_active_at: s.last_active_at.map(|t| t.to_rfc3339()),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SearchResponse {
-    pub sessions: Vec<SessionRecord>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DownloadResponse {
-    pub download_url: String,
-    pub file: String,
-    pub turn: i32,
-}
 
 // ============================================================================
 // Client
@@ -254,10 +193,6 @@ impl SessionRegistryClient {
         self.add_common_headers(self.raw_client.post(url))
     }
 
-    fn get(&self, url: &str) -> RequestBuilder {
-        self.add_common_headers(self.raw_client.get(url))
-    }
-
     /// POST /v1/sessions/register (idempotent via ON CONFLICT)
     pub async fn register(&self, req: &RegisterRequest) -> Result<()> {
         let url = format!("{}/sessions/register", self.base_url);
@@ -282,117 +217,6 @@ impl SessionRegistryClient {
         Ok(())
     }
 
-    /// POST /v1/sessions/{id}/replicas/finalize
-    pub async fn finalize(&self, session_id: &str) -> Result<()> {
-        let url = format!(
-            "{}/sessions/{}/replicas/finalize",
-            self.base_url, session_id
-        );
-        let (response, stamp) = self
-            .send_authed(self.post(&url), "session finalize")
-            .await?;
-        if !response.status().is_success() {
-            return Err(self.check_response(response, stamp.as_ref(), "session finalize"));
-        }
-        Ok(())
-    }
-
-    /// GET /v1/sessions/search
-    pub async fn search(&self, query: Option<&str>, limit: i64) -> Result<Vec<SessionRecord>> {
-        let url = format!("{}/sessions/search", self.base_url);
-        let mut builder = self.get(&url).query(&[("limit", limit.to_string())]);
-        if let Some(q) = query {
-            builder = builder.query(&[("query", q)]);
-        }
-        let (response, stamp) = self.send_authed(builder, "session search").await?;
-        if !response.status().is_success() {
-            return Err(self.check_response(response, stamp.as_ref(), "session search"));
-        }
-        let resp: SearchResponse = response.json().await.context("parse search response")?;
-        Ok(resp.sessions)
-    }
-
-    /// GET /v1/sessions/{id}/replicas
-    pub async fn get_session(&self, session_id: &str) -> Result<SessionRecord> {
-        let url = format!("{}/sessions/{}/replicas", self.base_url, session_id);
-        let (response, stamp) = self.send_authed(self.get(&url), "session get").await?;
-        if !response.status().is_success() {
-            return Err(self.check_response(response, stamp.as_ref(), "session get"));
-        }
-        response.json().await.context("parse session response")
-    }
-
-    /// GET /v1/sessions/{id}/download — returns a signed GCS URL without downloading.
-    pub(crate) async fn get_download_url(
-        &self,
-        session_id: &str,
-        file: &str,
-        turn: i32,
-    ) -> Result<String> {
-        let url = format!("{}/sessions/{}/download", self.base_url, session_id);
-        let builder = self
-            .get(&url)
-            .query(&[("file", file), ("turn", &turn.to_string())]);
-        let (response, stamp) = self.send_authed(builder, "session download url").await?;
-        if !response.status().is_success() {
-            return Err(self.check_response(response, stamp.as_ref(), "session download url"));
-        }
-        let resp: DownloadResponse = response.json().await.context("parse download response")?;
-        Ok(resp.download_url)
-    }
-
-    /// GET /v1/sessions/{id}/download — returns a signed URL, then streams to dest file.
-    pub async fn download_file(
-        &self,
-        session_id: &str,
-        file: &str,
-        turn: i32,
-        dest: &std::path::Path,
-    ) -> Result<()> {
-        let url = format!("{}/sessions/{}/download", self.base_url, session_id);
-        let builder = self
-            .get(&url)
-            .query(&[("file", file), ("turn", &turn.to_string())]);
-        let (response, stamp) = self.send_authed(builder, "session download").await?;
-        if !response.status().is_success() {
-            return Err(self.check_response(response, stamp.as_ref(), "session download"));
-        }
-        let resp: DownloadResponse = response.json().await.context("parse download response")?;
-
-        // Stream from the signed GCS URL directly to disk (archives can be hundreds of MB)
-        let mut gcs_response = self
-            .raw_client
-            .get(&resp.download_url)
-            .send()
-            .await
-            .context("download from GCS")?;
-        if !gcs_response.status().is_success() {
-            anyhow::bail!("GCS download failed: {}", gcs_response.status());
-        }
-        if let Some(parent) = dest.parent() {
-            tokio::fs::create_dir_all(parent).await?;
-        }
-        let mut out = tokio::fs::File::create(dest)
-            .await
-            .context("create dest file")?;
-        let chunk_timeout = std::time::Duration::from_secs(60);
-        loop {
-            match tokio::time::timeout(chunk_timeout, gcs_response.chunk()).await {
-                Ok(Ok(Some(chunk))) => {
-                    tokio::io::AsyncWriteExt::write_all(&mut out, &chunk)
-                        .await
-                        .context("write chunk to disk")?;
-                }
-                Ok(Ok(None)) => break,
-                Ok(Err(e)) => return Err(e).context("read GCS chunk"),
-                Err(_) => anyhow::bail!(
-                    "GCS download stalled: no data received for {chunk_timeout:?} \
-                     while downloading {file}"
-                ),
-            }
-        }
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -530,51 +354,6 @@ mod tests {
     // The field is `#[serde(default)]` so it must deserialize as `None` when
     // absent, keeping new clients compatible with old servers.
 
-    #[test]
-    fn session_record_without_restorable_turn_deserializes_as_none() {
-        let json = serde_json::json!({
-            "sessionId": "sess-abc",
-            "summary": "hello",
-            "firstPrompt": null,
-            "modelId": null,
-            "createdAt": "2026-01-01T00:00:00Z",
-            "updatedAt": "2026-01-01T00:00:00Z",
-            "lastTurnNumber": 3,
-            "cwd": "/home/user/repo",
-            "repoRemoteUrl": null,
-            "hostname": null,
-            "status": "active",
-            "gcsTracePrefix": "sessions/sess-abc",
-            "gcsBucket": "my-bucket"
-        });
-        let record: SessionRecord = serde_json::from_value(json).unwrap();
-        assert_eq!(record.last_turn_number, 3);
-        assert_eq!(record.restorable_turn_number, None);
-    }
-
-    #[test]
-    fn session_record_with_restorable_turn_deserializes_correctly() {
-        let json = serde_json::json!({
-            "sessionId": "sess-xyz",
-            "summary": "hello",
-            "firstPrompt": null,
-            "modelId": null,
-            "createdAt": "2026-01-01T00:00:00Z",
-            "updatedAt": "2026-01-01T00:00:00Z",
-            "lastTurnNumber": 7,
-            "restorableTurnNumber": 6,
-            "cwd": "/home/user/repo",
-            "repoRemoteUrl": null,
-            "hostname": null,
-            "status": "active",
-            "gcsTracePrefix": "sessions/sess-xyz",
-            "gcsBucket": "my-bucket"
-        });
-        let record: SessionRecord = serde_json::from_value(json).unwrap();
-        assert_eq!(record.last_turn_number, 7);
-        assert_eq!(record.restorable_turn_number, Some(6));
-    }
-
     /// Verify per-request auth resolve picks up rotated tokens.
     #[tokio::test]
     async fn session_registry_client_uses_active_auth_for_each_request() {
@@ -643,28 +422,4 @@ mod tests {
         );
     }
 
-    // Verify the split-pointer invariant: last_turn_number can be ahead of
-    // restorable_turn_number (codebase best-effort means a turn may be "done"
-    // but not yet restorable if session-state upload is still in flight).
-    #[test]
-    fn session_record_allows_last_turn_ahead_of_restorable() {
-        let json = serde_json::json!({
-            "sessionId": "sess-lag",
-            "summary": "",
-            "firstPrompt": null,
-            "modelId": null,
-            "createdAt": "2026-01-01T00:00:00Z",
-            "updatedAt": "2026-01-01T00:00:00Z",
-            "lastTurnNumber": 10,
-            "restorableTurnNumber": 8,
-            "cwd": "/repo",
-            "repoRemoteUrl": null,
-            "hostname": null,
-            "status": "active",
-            "gcsTracePrefix": "sessions/sess-lag",
-            "gcsBucket": "bucket"
-        });
-        let record: SessionRecord = serde_json::from_value(json).unwrap();
-        assert!(record.last_turn_number > record.restorable_turn_number.unwrap_or(0));
-    }
 }

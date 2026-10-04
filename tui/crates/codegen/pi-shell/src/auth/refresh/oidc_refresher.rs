@@ -7,8 +7,6 @@ use crate::auth::oidc::OidcRefreshResult;
 
 use super::{AuthSnapshot, DiagnosticUploader, RefreshOutcome, TokenRefresher};
 
-#[cfg(test)]
-use crate::auth::manager::AuthManager;
 
 /// Escalate to `PermanentFailure` after this many consecutive transient
 /// failures (then `PERMANENT_FAILURE_TTL` allows recovery). OIDC tolerates more
@@ -345,6 +343,3 @@ fn spawn_diagnostic_upload(
 #[path = "oidc_refresher_tests.rs"]
 mod tests;
 
-#[cfg(test)]
-#[path = "auth_backend_contract_tests.rs"]
-mod auth_backend_contract_tests;

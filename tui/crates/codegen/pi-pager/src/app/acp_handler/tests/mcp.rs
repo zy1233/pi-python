@@ -674,33 +674,6 @@
         );
     }
 
-    #[test]
-    fn tools_changed_post_h2_routes_to_owning_agent_not_active_view() {
-        let mut app = make_app_two_agents();
-        seed_owner_agent_with_open_modal(&mut app);
-        // Active agent has NO modal — a route-by-active-view path
-        // would no-op. Routing by sessionId must schedule a fetch
-        // against the OWNER agent (agent 0).
-        let notif = make_tools_changed_notif_post_h2("sess-owner");
-        let _ = handle_mcp_tools_changed(&notif, &mut app);
-
-        assert_eq!(
-            app.pending_effects.len(),
-            1,
-            "tools_changed with sessionId must route to the owner"
-        );
-        let Effect::FetchMcpsList { agent_id, .. } =
-            app.pending_effects.first().expect("effect scheduled")
-        else {
-            panic!("expected FetchMcpsList");
-        };
-        assert_eq!(
-            *agent_id,
-            AgentId(0),
-            "tools_changed with sessionId must route to the owner, not the active view"
-        );
-    }
-
     /// Forward/backward-compat guard: older shells emit
     /// `{ serverName, tools }` with NO sessionId. The pager must
     /// gracefully fall back to `active_view`.

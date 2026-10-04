@@ -7,7 +7,6 @@
 //! points that can still be reached directly (`grok login --devbox`) return a
 //! descriptive error.
 
-use super::manager::AuthManager;
 use super::model::GrokAuth;
 
 const UNAVAILABLE: &str =
@@ -21,19 +20,7 @@ pub(crate) fn is_devbox_environment() -> bool {
 
 /// Unreachable in practice (guarded by [`is_devbox_environment`]); errors
 /// defensively if called.
-pub(crate) async fn mint_devbox_auth(_auth_manager: &AuthManager) -> anyhow::Result<GrokAuth> {
-    anyhow::bail!(UNAVAILABLE)
-}
-
-/// Unreachable in practice (guarded by [`is_devbox_environment`]); errors
-/// defensively if called.
 pub(super) async fn mint_devbox_auth_raw() -> anyhow::Result<GrokAuth> {
     anyhow::bail!(UNAVAILABLE)
 }
 
-/// `grok login --devbox` entry point: always errors in this build.
-pub(crate) async fn run_devbox_login(
-    _config: &crate::agent::config::Config,
-) -> anyhow::Result<GrokAuth> {
-    anyhow::bail!(UNAVAILABLE)
-}

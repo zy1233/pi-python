@@ -113,10 +113,7 @@ pi-foreign-sessions = { workspace = true }
 pi-token-estimation = { workspace = true }
 pi-telemetry = { workspace = true }
 pi-fast-worktree = { path = "../pi-fast-worktree", features = ["metadata"] }
-backon = { workspace = true }
 chrono = { workspace = true }
-flate2 = { workspace = true }
-tar = { workspace = true }
 pi-tools = { workspace = true }
 pi-agent = { workspace = true }
 pi-plugin-marketplace = { path = "../pi-plugin-marketplace" }
@@ -184,8 +181,6 @@ criterion = { workspace = true }
 tempfile = { workspace = true }
 serial_test = { workspace = true }
 pi-agent = { workspace = true }
-# Provider install for the in-process leader-cluster tests.
-pi-extra-ca = { workspace = true }
 
 [[bench]]
 name = "render"

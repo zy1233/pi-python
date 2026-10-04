@@ -4,9 +4,10 @@ Shared test infrastructure for the grok-build crates: mock inference server,
 SSE wire-format generators, ACP stdio clients, headless runner, and the shared
 `TestSandbox` filesystem/environment plus `TestProcess` subprocess owners. PR3
 owns test subprocesses only; production spawning, leader protocol, and startup
-behavior are unchanged. Consumed by `pi-shell`
-integration tests, `pi-pager-pty-harness` (`ContentController`), and
-`pi-sampler` tests.
+behavior are unchanged. Consumed by `pi-shell` and `pi-pager` unit tests and
+`pi-pager-pty-harness` (`ContentController`). (The `pi-shell` integration
+tests and the `pi-sampler` tests that used to consume it were removed together
+with the Rust agent runtime.)
 
 > **Freshness rule:** update this README in the same PR that changes `src/` —
 > reviewers should treat a `src/` diff without a README diff as incomplete.
@@ -37,8 +38,6 @@ test-support surface.
 |----------|------|-------|
 | `pi-shell` `tests/*.rs` | `TestSandbox`, `TestProcess` through ACP/leader/headless wrappers, mock server | Binary-driving tests share the same path/env owner; multi-process restart and leader fixtures retain one sandbox across clients. Raw Tokio child ownership is centralized in the wrappers. |
 | `pi-pager-pty-harness` | `TestSandbox`, `TestProcessTree`, `MockInferenceServer`, `MockModelEntry` | `ContentController` owns the sandbox and server. `spawn_with_content[_env][_in_dir]` applies that sandbox followed by explicit last-wins overrides. OAuth tests use `EnvOp::Remove` for `PI_API_KEY`; ordinary overrides use `EnvOp::Set`. `portable-pty` remains the concrete child/wait/signal owner; `TestProcessTree` attaches by PID. Unix gets process-group teardown; Windows attachment is best effort, non-atomic, and reported in diagnostics. PTY exit status is cached so every wait is idempotent; PID/signals disappear after reap; Drop uses a bounded direct-child reap wait. |
-| `pi-sampler` `tests/test_actor.rs` | `sse` generators | Happy-path payloads only; the actor keeps its own router for stall/conditional fixtures. |
-
 ## Sandbox contract
 
 - Keep the `TestSandbox` alive at least as long as every child using its paths.

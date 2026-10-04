@@ -1644,6 +1644,9 @@ pub enum Effect {
         /// (no optimistic update). Threaded through to
         /// `SwitchModelComplete` so `IncompatibleAgent` can roll back.
         prev_model_id: Option<acp::ModelId>,
+        /// Id of the agent's model Session Config Option (`ModelState::config_option_id`).
+        /// `Some` → `session/set_config_option`; `None` → legacy `session/set_model`.
+        config_option_id: Option<String>,
     },
     /// Fetch changelog from CDN (both markdown + structured JSON).
     /// Runs off the render path via `spawn_blocking`. Result is cached

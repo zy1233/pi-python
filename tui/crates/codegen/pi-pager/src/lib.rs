@@ -22,31 +22,24 @@ pub mod doctor_cmd;
 pub mod export_cmd;
 pub(crate) mod fs_size;
 pub mod git_info;
-pub mod headless;
 pub mod hyperlink_route;
 pub mod inline_media_ffmpeg;
 pub mod input;
 pub mod input_log;
-pub mod mcp_cmd;
-pub mod memory_cmd;
 pub mod memory_release;
 pub mod memory_trace;
 #[path = "minimal/api.rs"]
 pub mod minimal_api;
 #[path = "minimal/hook.rs"]
 pub mod minimal_hook;
-pub mod models;
 pub mod notifications;
 #[allow(unused_imports, unused_macros)]
 pub mod obf;
-pub mod plugin_cmd;
 pub mod pty_wrap;
 pub mod recent_dirs;
 pub mod scrollback;
 pub mod search;
-pub mod sessions_cmd;
 pub mod settings;
-pub mod share_cmd;
 pub mod slash;
 pub mod startup;
 pub mod tips;
@@ -62,9 +55,7 @@ pub use pi_pager_render::{
 };
 #[cfg(test)]
 pub mod test_util;
-pub mod trace_cmd;
 pub mod tracing;
 pub mod unified_log;
 pub mod views;
 pub mod voice;
-pub mod worktree_cmd;

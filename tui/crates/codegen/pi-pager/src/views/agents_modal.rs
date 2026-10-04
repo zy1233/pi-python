@@ -732,18 +732,59 @@ fn load_agent_selection_config() -> AgentSelectionConfig {
 fn load_config_agent_name() -> Option<String> {
     load_agent_selection_config().name.filter(|s| !s.is_empty())
 }
-/// Resolve the agent name new sessions would start with — mirrors
-/// `MvpAgent::resolve_agent_definition` in pi-shell.
+/// Resolve the persona name new sessions would start with.
+///
+/// Precedence (carried over from the removed in-process runtime's agent
+/// resolution, minus the ACP `_meta` / `--agent-profile` inputs the pager never
+/// supplied): strict-harness model `agent_type` → `[agent] definition` file →
+/// `[agent] name` → `GROK_AGENT` env → built-in default.
 pub fn resolve_default_agent_name(cwd: &Path, model_agent_type: Option<&str>) -> String {
+    use pi_agent::AgentDefinition;
+
     let agent_config = load_agent_selection_config();
-    pi_shell::agent::mvp_agent::MvpAgent::resolve_agent_definition(
-        cwd,
-        None,
-        &agent_config,
-        None,
-        model_agent_type,
-    )
-    .name
+    let env_agent = std::env::var("GROK_AGENT")
+        .ok()
+        .filter(|s| !s.trim().is_empty());
+    // A model-mandated harness only wins when the user did not pick a persona.
+    let strict_required = if env_agent.is_none() && agent_config.name.is_none() {
+        model_agent_type.filter(|t| pi_agent::config::is_strict_harness_agent_type(t))
+    } else {
+        None
+    };
+
+    if let Some(required) = strict_required
+        && let Some(def) = pi_agent::discovery::by_name_in_cwd(required, cwd)
+    {
+        return def.name;
+    }
+    if let Some(path) = &agent_config.definition
+        && let Ok(def) = AgentDefinition::from_file(path)
+    {
+        return def.name;
+    }
+    if let Some(name) = &agent_config.name
+        && let Some(def) = pi_agent::discovery::by_name_in_cwd(name, cwd)
+    {
+        return def.name;
+    }
+    let resolved = match env_agent.as_deref() {
+        Some("browser-use") | Some("browser_use") => AgentDefinition::browser_use(),
+        Some("grok-build-concise") | Some("grok_build_concise") => {
+            AgentDefinition::grok_build_concise()
+        }
+        Some(path) if Path::new(path).is_absolute() => AgentDefinition::from_file(path)
+            .unwrap_or_else(|_| AgentDefinition::grok_build_plan()),
+        Some(name) => pi_agent::discovery::by_name_in_cwd(name, cwd)
+            .unwrap_or_else(AgentDefinition::grok_build_plan),
+        None => AgentDefinition::grok_build_plan(),
+    };
+    if let Some(required) = strict_required
+        && resolved.name != required
+        && let Some(def) = pi_agent::discovery::by_name_in_cwd(required, cwd)
+    {
+        return def.name;
+    }
+    resolved.name
 }
 fn refresh_default_agent(state: &mut AgentsModalState) {
     let model_agent_type = state.model_agent_type.as_deref();

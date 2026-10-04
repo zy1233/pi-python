@@ -1181,6 +1181,7 @@ pub(in crate::app::dispatch) fn handle_session_loaded(
                 model_id: switch.model_id,
                 effort: switch.effort,
                 prev_model_id: switch.prev_model_id,
+                config_option_id: agent.session.models.config_option_id.clone(),
             });
         }
         if std::mem::take(&mut agent.pending_extensions_fetch)

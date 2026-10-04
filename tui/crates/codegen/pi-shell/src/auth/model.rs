@@ -3,8 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use pi_auth::bearer_suffix;
 
-use super::is_pi_oauth2_issuer;
-
 pub(crate) const TOKEN_TTL: Duration = Duration::days(30);
 const DEFAULT_EARLY_INVALIDATION_SECS: u64 = 300; // 5 minutes
 
@@ -13,9 +11,6 @@ pub(super) const LEGACY_SCOPE: &str = "https://accounts.x.ai/sign-in";
 
 /// auth.json scope key for plain API key auth (desktop login, `grok login --api-key`).
 pub(super) const API_KEY_SCOPE: &str = "pi::api_key";
-
-const BLOCKED_REASON_NO_LOGS: &str = "BLOCKED_REASON_NO_LOGS";
-const BLOCKED_REASON_NO_LOGS_MODERATED: &str = "BLOCKED_REASON_NO_LOGS_MODERATED";
 
 /// Fresh-credential / missing-field default: opted out until the user or
 /// server enrichment opts in. Single source for `GrokAuth`, `AuthMeta`, and
@@ -133,60 +128,8 @@ impl GrokAuth {
             .num_seconds()
     }
 
-    /// `true` when the token comes from a first-party pi account —
-    /// either an OIDC login against https://auth.x.ai (or the local-dev
-    /// equivalent), or an external auth provider that declared an pi
-    /// issuer for its token.
-    ///
-    /// The issuer is a client-side hint, not a trust assertion: everything
-    /// it unlocks still authenticates the actual token server-side, and it
-    /// never influences endpoints.
-    pub fn is_pi_auth(&self) -> bool {
-        match self.auth_mode {
-            AuthMode::Oidc | AuthMode::External => self
-                .oidc_issuer
-                .as_deref()
-                .is_some_and(is_pi_oauth2_issuer),
-            AuthMode::ApiKey | AuthMode::WebLogin => false,
-        }
-    }
-
-    /// `true` when this auth can access grok.com managed MCP connectors.
-    pub fn is_managed_mcp_eligible(&self) -> bool {
-        self.is_pi_auth() || self.auth_mode == AuthMode::WebLogin
-    }
-
-    /// Whether this credential can access `supported_in_api: false` models.
-    ///
-    /// Session logins (WebLogin, OIDC — including enterprise issuers) always
-    /// qualify; external-provider credentials qualify only when first-party
-    /// (`is_pi_auth`), matching the built-in devbox login they replace.
-    /// Plain API keys never do.
-    pub(crate) fn is_session_auth(&self) -> bool {
-        match self.auth_mode {
-            AuthMode::WebLogin | AuthMode::Oidc => true,
-            AuthMode::External => self.is_pi_auth(),
-            AuthMode::ApiKey => false,
-        }
-    }
-
-    pub fn is_team_principal(&self) -> bool {
+    pub(crate) fn is_team_principal(&self) -> bool {
         self.principal_type.as_deref() == Some(TEAM_PRINCIPAL_TYPE) && self.team_id.is_some()
-    }
-
-    /// `true` when the team has Zero Data Retention (ZDR) enabled.
-    pub fn is_zdr_team(&self) -> bool {
-        self.team_blocked_reasons
-            .iter()
-            .any(|r| r == BLOCKED_REASON_NO_LOGS || r == BLOCKED_REASON_NO_LOGS_MODERATED)
-    }
-
-    /// `true` when the team has ZDR or the user opted out of coding data
-    /// retention. Use this for trace-upload and research-data gates.
-    /// Product analytics (`telemetry_enabled`) and user-facing sync
-    /// features should use `is_zdr_team()` directly.
-    pub(crate) fn is_data_collection_disabled(&self) -> bool {
-        self.is_zdr_team() || self.coding_data_retention_opt_out
     }
 
     /// Carry `/user`-derived fields from a previous auth so refresh rebuilds don't drop them.
@@ -378,51 +321,6 @@ mod tests {
             oidc_issuer: None,
             oidc_client_id: None,
         }
-    }
-
-    #[test]
-    fn is_pi_auth_matrix() {
-        use crate::auth::PI_OAUTH2_ISSUER;
-        let with_issuer = |mode: AuthMode, issuer: Option<&str>| GrokAuth {
-            oidc_issuer: issuer.map(str::to_owned),
-            ..make_auth(mode)
-        };
-
-        // Only Oidc/External qualify, and only with an x.ai issuer.
-        assert!(with_issuer(AuthMode::Oidc, Some(PI_OAUTH2_ISSUER)).is_pi_auth());
-        assert!(with_issuer(AuthMode::External, Some(PI_OAUTH2_ISSUER)).is_pi_auth());
-        assert!(!with_issuer(AuthMode::Oidc, None).is_pi_auth());
-        assert!(!with_issuer(AuthMode::External, None).is_pi_auth());
-        assert!(!with_issuer(AuthMode::Oidc, Some("https://idp.acme.example")).is_pi_auth());
-        assert!(!with_issuer(AuthMode::External, Some("https://idp.acme.example")).is_pi_auth());
-
-        // ApiKey / WebLogin stay false even with an x.ai issuer set.
-        assert!(!with_issuer(AuthMode::ApiKey, Some(PI_OAUTH2_ISSUER)).is_pi_auth());
-        assert!(!with_issuer(AuthMode::WebLogin, Some(PI_OAUTH2_ISSUER)).is_pi_auth());
-    }
-
-    #[test]
-    fn is_session_auth_requires_first_party_for_external() {
-        use crate::auth::PI_OAUTH2_ISSUER;
-        let with_issuer = |mode: AuthMode, issuer: Option<&str>| GrokAuth {
-            oidc_issuer: issuer.map(str::to_owned),
-            ..make_auth(mode)
-        };
-
-        // Session logins qualify regardless of issuer (incl. enterprise OIDC).
-        assert!(with_issuer(AuthMode::WebLogin, None).is_session_auth());
-        assert!(with_issuer(AuthMode::Oidc, None).is_session_auth());
-        assert!(with_issuer(AuthMode::Oidc, Some("https://idp.acme.example")).is_session_auth());
-
-        // External qualifies only when first-party (devbox-login parity).
-        assert!(with_issuer(AuthMode::External, Some(PI_OAUTH2_ISSUER)).is_session_auth());
-        assert!(!with_issuer(AuthMode::External, None).is_session_auth());
-        assert!(
-            !with_issuer(AuthMode::External, Some("https://idp.acme.example")).is_session_auth()
-        );
-
-        // Plain API keys never do.
-        assert!(!with_issuer(AuthMode::ApiKey, Some(PI_OAUTH2_ISSUER)).is_session_auth());
     }
 
     #[test]
