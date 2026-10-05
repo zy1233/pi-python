@@ -64,8 +64,6 @@ pub enum Action {
     FetchSessionList,
     /// Load a selected session from the session picker.
     PickSession(usize),
-    /// Load a selected session from the session picker into a new worktree.
-    PickSessionInWorktree(usize),
     /// Copy the selected session's ID to the clipboard.
     CopySessionId(usize),
     /// Toggle expanded card view for a session in the picker.
@@ -89,8 +87,6 @@ pub enum Action {
         /// Optional branch/tag/commit to base the worktree on (CLI `--ref` / `--worktree-ref`).
         git_ref: Option<String>,
     },
-    /// Open the "New Worktree" popup dialog on the welcome screen.
-    OpenNewWorktreeDialog,
     /// Load (resume) an existing session by ID (strict — never create).
     /// The optional `PathBuf` overrides the CWD for sessions stored under a
     /// different directory (e.g., a worktree).

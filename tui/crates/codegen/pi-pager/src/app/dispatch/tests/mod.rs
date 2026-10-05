@@ -94,7 +94,6 @@ fn test_app() -> AppView {
         subagents: false,
         ask_user: false,
         mouse_captured: true,
-        new_worktree_dialog: None,
         contextual_hints: Default::default(),
         remote_contextual_hints: None,
         tip_seen_counts: Default::default(),

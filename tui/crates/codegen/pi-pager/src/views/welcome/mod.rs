@@ -1610,16 +1610,8 @@ fn render_welcome_done(
         gate_menu = [(key_g, cta), (key_l, "Logout"), (key_q, "Quit")];
         &gate_menu
     } else {
-        let (key_w, key_resume, key_q) = (
-            "ctrl+w",
-            "f3",
-            if in_vscode_family { "ctrl+d" } else { "ctrl+q" },
-        );
-        owned_menu = [
-            (key_w, "New worktree"),
-            (key_resume, "Resume session"),
-            (key_q, "Quit"),
-        ];
+        let (key_resume, key_q) = ("f3", if in_vscode_family { "ctrl+d" } else { "ctrl+q" });
+        owned_menu = [(key_resume, "Resume session"), (key_q, "Quit")];
         &owned_menu
     };
 
@@ -2081,19 +2073,11 @@ pub(crate) fn render_session_picker(
     };
 
     // Build shortcuts for fullscreen mode.
-    let worktree_shortcut: &'static str = "ctrl+w";
     use crate::views::shortcuts_bar::HintItem;
     let mut default_shortcuts: Vec<HintItem> = vec![
         HintItem::new(crate::key!(Esc), "back"),
         HintItem::new(crate::key!(Enter), "select"),
     ];
-    default_shortcuts.push(HintItem {
-        keys: vec![],
-        label: "worktree".into(),
-        custom_display: Some(worktree_shortcut),
-        description: None,
-        pinned: false,
-    });
     default_shortcuts.push(HintItem {
         keys: vec![],
         label: "navigate".into(),

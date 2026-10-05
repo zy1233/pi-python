@@ -24,85 +24,6 @@ use pi_acp_lib::AcpAgentTx;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-/// State for the "New Worktree" popup dialog on the welcome screen.
-#[derive(Debug, Default)]
-pub struct NewWorktreeDialogState {
-    /// Text input for the worktree label (empty = auto-generated name).
-    label: LineEditor,
-}
-const MAX_WORKTREE_LABEL_BYTES: usize = 100;
-impl NewWorktreeDialogState {
-    pub fn new() -> Self {
-        Self {
-            label: LineEditor::default(),
-        }
-    }
-    pub fn label(&self) -> &str {
-        self.label.text()
-    }
-    pub(crate) fn viewport(&self, width: usize) -> pi_ratatui_textarea::SingleLineViewport {
-        self.label.viewport(width)
-    }
-    #[cfg(test)]
-    pub(crate) fn set_label(&mut self, label: impl Into<String>) {
-        self.label.set_text(label);
-    }
-    #[cfg(test)]
-    pub(crate) fn set_cursor_byte(&mut self, cursor_byte: usize) -> LineEditOutcome {
-        self.label.set_cursor_byte(cursor_byte)
-    }
-    pub fn insert_paste(&mut self, text: &str) -> NewWorktreeDialogOutcome {
-        Self::from_line_edit(
-            self.label
-                .insert_paste_with_byte_limit(text, MAX_WORKTREE_LABEL_BYTES),
-        )
-    }
-    /// Handle a key event. Returns the dialog outcome.
-    pub fn handle_key(&mut self, key: &crossterm::event::KeyEvent) -> NewWorktreeDialogOutcome {
-        use crossterm::event::{KeyCode, KeyModifiers};
-        if crate::input::key::is_paste_key(key) {
-            return crate::clipboard::system_clipboard_get()
-                .map_or(NewWorktreeDialogOutcome::Unchanged, |text| {
-                    self.insert_paste(&text)
-                });
-        }
-        if key.modifiers.contains(KeyModifiers::CONTROL)
-            && !crate::input::key::is_altgr(key.modifiers)
-            && matches!(key.code, KeyCode::Char('c' | 'd' | 'q'))
-        {
-            return NewWorktreeDialogOutcome::Cancelled;
-        }
-        if key.code == KeyCode::Enter && !key.modifiers.is_empty() {
-            return NewWorktreeDialogOutcome::Unchanged;
-        }
-        match key.code {
-            KeyCode::Enter if key.modifiers.is_empty() => {
-                let label = self.label().trim().to_string();
-                NewWorktreeDialogOutcome::Submitted(if label.is_empty() {
-                    None
-                } else {
-                    Some(label)
-                })
-            }
-            KeyCode::Esc => NewWorktreeDialogOutcome::Cancelled,
-            _ => {
-                let remaining = MAX_WORKTREE_LABEL_BYTES.saturating_sub(self.label().len());
-                let outcome = self.label.handle_key_with_insert_policy(key, |character| {
-                    character.len_utf8() <= remaining
-                });
-                Self::from_line_edit(outcome)
-            }
-        }
-    }
-    fn from_line_edit(outcome: LineEditOutcome) -> NewWorktreeDialogOutcome {
-        match outcome {
-            LineEditOutcome::TextChanged
-            | LineEditOutcome::CursorChanged
-            | LineEditOutcome::HandledNoChange => NewWorktreeDialogOutcome::Changed,
-            LineEditOutcome::Unhandled => NewWorktreeDialogOutcome::Unchanged,
-        }
-    }
-}
 /// Per-visit announcement UI state on the welcome screen. Reset on every
 /// return-to-welcome transition (see `show_welcome`) so a previously expanded
 /// announcement can't leak into a freshly shown screen; the non-`expanded`
@@ -117,19 +38,6 @@ pub struct WelcomeAnnouncementState {
     pub truncated: bool,
     /// Hit-test rect for the full announcement block (click anywhere to toggle).
     pub rect: Option<ratatui::layout::Rect>,
-}
-/// Outcome of handling input in the new-worktree dialog.
-#[derive(Debug)]
-pub enum NewWorktreeDialogOutcome {
-    /// User pressed Enter — create the worktree.
-    /// `None` means auto-generate the name.
-    Submitted(Option<String>),
-    /// User pressed Esc — close without creating.
-    Cancelled,
-    /// Input changed (redraw needed).
-    Changed,
-    /// Nothing happened.
-    Unchanged,
 }
 /// Persisted worktree preference for `/new` and `/fork`.
 ///
@@ -841,8 +749,6 @@ pub struct AppView {
     /// Whether mouse capture is currently enabled. Disabled during the
     /// Authenticating state so the terminal handles native text selection.
     pub mouse_captured: bool,
-    /// Active "New Worktree" dialog on the welcome screen.
-    pub new_worktree_dialog: Option<NewWorktreeDialogState>,
     /// Resolved per-tip gates for the contextual ephemeral hints (undo tip,
     /// plan nudge, clipboard-image tip). Default all ON; resolved
     /// at startup and on settings toggles from `GROK_CONTEXTUAL_HINTS` (master)
@@ -1313,7 +1219,6 @@ impl AppView {
             subagents: false,
             ask_user: false,
             mouse_captured: true,
-            new_worktree_dialog: None,
             contextual_hints: Default::default(),
             remote_contextual_hints: None,
             tip_seen_counts: Default::default(),
@@ -1926,10 +1831,11 @@ impl AppView {
                     auth_code_input: &mut self.auth_code_input,
                     prompt: &mut self.welcome_prompt,
                     prompt_focused: &mut self.welcome_prompt_focused,
-                    new_worktree_dialog: &mut self.new_worktree_dialog,
                     menu_index: &mut self.welcome_menu_index,
                     menu_rects: &self.welcome_menu_rects,
-                    menu_count: if zdr_blocked { 2 } else { 3 },
+                    // Access gate: CTA / Logout / Quit; otherwise Resume / Quit (or
+                    // Logout / Quit when ZDR-blocked).
+                    menu_count: if !zdr_blocked && !has_access { 3 } else { 2 },
                     prompt_rect: self.welcome_prompt_rect.as_ref(),
                     auth_url_rect: self.welcome_auth_url_rect.as_ref(),
                     auth_fallback_rect: self.welcome_auth_fallback_rect.as_ref(),
@@ -1954,7 +1860,6 @@ impl AppView {
                     sp_state: &mut self.session_picker_state,
                     welcome_doc_viewer: &mut self.welcome_doc_viewer,
                     has_pending_update: self.pending_update_version.is_some(),
-                    cwd_has_git_ancestor: self.cwd_has_git_ancestor,
                     session_picker_grouped: self.session_picker_grouped,
                     sp_pending_delete: &mut self.session_picker_pending_delete,
                 },
@@ -2142,8 +2047,7 @@ impl AppView {
 }
 pub(crate) use crate::views::session_picker::filter_session_entries;
 use crate::views::session_picker::{
-    PickerItem, SessionPickerWorktreeSelection, build_entry_map, session_picker_worktree_selection,
-    sync_session_picker_query_expansion,
+    PickerItem, build_entry_map, sync_session_picker_query_expansion,
 };
 /// Context for welcome-view input handling.
 struct WelcomeInputCtx<'a> {
@@ -2161,7 +2065,6 @@ struct WelcomeInputCtx<'a> {
     auth_code_input: &'a mut LineEditor,
     prompt: &'a mut PromptWidget,
     prompt_focused: &'a mut bool,
-    new_worktree_dialog: &'a mut Option<NewWorktreeDialogState>,
     menu_index: &'a mut Option<usize>,
     menu_rects: &'a [ratatui::layout::Rect],
     menu_count: usize,
@@ -2201,7 +2104,6 @@ struct WelcomeInputCtx<'a> {
     sp_state: &'a mut crate::views::picker::PickerState,
     welcome_doc_viewer: &'a mut Option<crate::views::modal::ActiveModal>,
     has_pending_update: bool,
-    cwd_has_git_ancestor: bool,
     session_picker_grouped: bool,
     sp_pending_delete: &'a mut Option<crate::views::session_picker::PendingDelete>,
 }
@@ -2254,32 +2156,6 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
             }
         }
         return InputOutcome::Unchanged;
-    }
-    if let Some(dialog) = ctx.new_worktree_dialog.as_mut() {
-        let outcome = match ev {
-            Event::Key(key) if key.kind != crossterm::event::KeyEventKind::Release => {
-                dialog.handle_key(key)
-            }
-            Event::Paste(text) => dialog.insert_paste(text),
-            Event::Resize(_, _) => return InputOutcome::Changed,
-            _ => NewWorktreeDialogOutcome::Unchanged,
-        };
-        match outcome {
-            NewWorktreeDialogOutcome::Submitted(label) => {
-                *ctx.new_worktree_dialog = None;
-                return InputOutcome::Action(Action::NewWorktreeSession {
-                    load_session_id: None,
-                    label,
-                    git_ref: None,
-                });
-            }
-            NewWorktreeDialogOutcome::Cancelled => {
-                *ctx.new_worktree_dialog = None;
-                return InputOutcome::Changed;
-            }
-            NewWorktreeDialogOutcome::Changed => return InputOutcome::Changed,
-            NewWorktreeDialogOutcome::Unchanged => return InputOutcome::Unchanged,
-        }
     }
     if matches!(ctx.auth_state, AuthState::Done)
         && ctx.has_access
@@ -2372,22 +2248,6 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                 && (key!('c', CONTROL).matches(key) || key!('d', CONTROL).matches(key))
             {
                 return InputOutcome::Action(Action::Quit);
-            }
-            if let Some(selection) = session_picker_worktree_selection(
-                key,
-                ctx.sp_state,
-                &entry_map,
-                &non_selectable_flags,
-                ctx.sp_entries.as_deref(),
-            ) {
-                return InputOutcome::Action(match selection {
-                    SessionPickerWorktreeSelection::Fuzzy(original_index) => {
-                        Action::PickSessionInWorktree(original_index)
-                    }
-                    SessionPickerWorktreeSelection::Unavailable => {
-                        return InputOutcome::Changed;
-                    }
-                });
             }
         }
         let selected_before = ctx.sp_state.selected;
@@ -2509,9 +2369,6 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
             return InputOutcome::Action(Action::NewSession);
         }
         if matches!(ctx.auth_state, AuthState::Done) {
-            if key!('w', CONTROL).matches(key) && ctx.cwd_has_git_ancestor {
-                return InputOutcome::Action(Action::OpenNewWorktreeDialog);
-            }
             if key!(F(3)).matches(key) {
                 return InputOutcome::Action(Action::FetchSessionList);
             }
@@ -2869,12 +2726,11 @@ fn dispatch_access_gate_menu_action(index: usize) -> InputOutcome {
 }
 /// Dispatch an action for a welcome menu item by index.
 ///
-/// Menu order: New worktree, Resume session, Quit.
+/// Menu order: Resume session, Quit.
 fn dispatch_menu_action(index: usize) -> InputOutcome {
     match index {
-        0 => InputOutcome::Action(Action::OpenNewWorktreeDialog),
-        1 => InputOutcome::Action(Action::FetchSessionList),
-        2 => InputOutcome::Action(Action::Quit),
+        0 => InputOutcome::Action(Action::FetchSessionList),
+        1 => InputOutcome::Action(Action::Quit),
         _ => InputOutcome::Unchanged,
     }
 }
@@ -3226,13 +3082,6 @@ impl AppView {
                         self.welcome_announcement.truncated = result.announcement_truncated;
                         self.welcome_announcement.rect = result.announcement_rect;
                         self.session_picker_state.hit_areas = result.session_picker_hit_areas;
-                        if let Some(dialog) = self.new_worktree_dialog.as_ref() {
-                            crate::views::new_worktree_dialog::render_new_worktree_dialog(
-                                view_area,
-                                f.buffer_mut(),
-                                dialog,
-                            );
-                        }
                         if let Some(crate::views::modal::ActiveModal::DocViewer {
                             ref title,
                             ref content,
@@ -3496,12 +3345,9 @@ impl AppView {
 impl AppView {
     /// True when any modal that should swallow scroll input is open.
     fn is_scroll_blocking_modal_open(&self) -> bool {
-        let cloud_modal_open = false;
         matches!(self.active_view, ActiveView::Agent(id) if self.agents.get(&id).is_some_and(|a| a.active_modal.is_some()))
-            || self.new_worktree_dialog.is_some()
             || self.welcome_doc_viewer.is_some()
             || self.tutorial.is_some()
-            || cloud_modal_open
     }
     /// Store the resolved per-tip gates and propagate the prompt-relevant tips
     /// (undo + plan nudge) to every agent's prompt. Reused by startup and the

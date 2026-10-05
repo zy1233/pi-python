@@ -1,5 +1,4 @@
 //! Session loading, session pickers, and deep-search dispatchers.
-use super::lifecycle::dispatch_new_worktree_session;
 use super::session_list::dispatch_fetch_session_list;
 use crate::acp::tracker::AcpUpdateTracker;
 use crate::app::actions::Effect;
@@ -243,55 +242,6 @@ pub(in crate::app::dispatch) fn dispatch_pick_session(
         Some(std::path::PathBuf::from(cwd))
     };
     dispatch_load_session(app, session_id, session_cwd)
-}
-/// Pick a session from the picker and resume it in a new git worktree.
-pub(in crate::app::dispatch) fn dispatch_pick_session_in_worktree(
-    app: &mut AppView,
-    index: usize,
-) -> Vec<Effect> {
-    use crate::views::modal::ActiveModal;
-    let mut picker_dismissed = false;
-    let entry_data = if let Some(agent) = get_active_agent_mut(app) {
-        if let Some(ActiveModal::SessionPicker { entries, .. }) = agent.active_modal.as_mut() {
-            let data = entries
-                .as_ref()
-                .and_then(|s| s.get(index))
-                .map(|e| e.id.clone());
-            agent.active_modal = None;
-            picker_dismissed = true;
-            data
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-    if picker_dismissed {
-        invalidate_picker_fetch_on_dismiss(app);
-    }
-    let session_id = match entry_data {
-        Some(d) => d,
-        None => {
-            let sessions = match app.session_picker_entries.take() {
-                Some(s) => s,
-                None => return vec![],
-            };
-            if !picker_dismissed {
-                invalidate_picker_fetch_on_dismiss(app);
-            }
-            let entry = match sessions.get(index) {
-                Some(e) => e,
-                None => return vec![],
-            };
-            let d = entry.id.clone();
-            app.session_picker_loading = false;
-            app.session_picker_state.set_query("");
-            app.session_picker_state.search_active = false;
-            app.session_picker_state.expanded.clear();
-            d
-        }
-    };
-    dispatch_new_worktree_session(app, Some(session_id), None, None, None, None, None)
 }
 fn keep_picker_entry(
     entry: &crate::app::app_view::SessionPickerEntry,

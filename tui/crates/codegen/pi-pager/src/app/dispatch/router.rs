@@ -26,9 +26,8 @@ use super::session::lifecycle::{
     open_new_session_question,
 };
 use super::session::load::{
-    dispatch_load_session, dispatch_pick_session, dispatch_pick_session_in_worktree,
-    dispatch_session_picker_closed, dispatch_show_session_picker, session_picker_entry_matches,
-    toggle_session_card,
+    dispatch_load_session, dispatch_pick_session, dispatch_session_picker_closed,
+    dispatch_show_session_picker, session_picker_entry_matches, toggle_session_card,
 };
 use super::session::session_list::dispatch_fetch_session_list;
 use super::session::worktree_mode::apply_persist_worktree_mode;
@@ -118,10 +117,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             label,
             git_ref,
         } => dispatch_new_worktree_session(app, load_session_id, label, None, None, git_ref, None),
-        Action::OpenNewWorktreeDialog => {
-            app.new_worktree_dialog = Some(crate::app::app_view::NewWorktreeDialogState::new());
-            vec![]
-        }
         Action::LoadSession(session_id, session_cwd) => {
             dispatch_load_session(app, session_id, session_cwd)
         }
@@ -130,7 +125,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::ShowSessionPicker => dispatch_show_session_picker(app),
         Action::SessionPickerClosed => dispatch_session_picker_closed(app),
         Action::PickSession(index) => dispatch_pick_session(app, index),
-        Action::PickSessionInWorktree(index) => dispatch_pick_session_in_worktree(app, index),
         Action::CopySessionId(index) => dispatch_copy_session_id(app, index),
         Action::ExpandSessionCard { source, session_id } => {
             toggle_session_card(app, &source, &session_id)

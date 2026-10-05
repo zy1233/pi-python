@@ -778,8 +778,7 @@ impl AgentView {
                 ..
             } => {
                 use crate::views::session_picker::{
-                    PickerItem, SessionPickerWorktreeSelection, build_entry_map,
-                    session_picker_worktree_selection, sync_session_picker_query_expansion,
+                    PickerItem, build_entry_map, sync_session_picker_query_expansion,
                 };
 
                 // Build grouped mapping using shared helper.
@@ -828,25 +827,6 @@ impl AgentView {
                     }
                     crate::views::session_picker::PendingDeleteKey::Disarmed
                     | crate::views::session_picker::PendingDeleteKey::NotArmed => {}
-                }
-
-                if let crossterm::event::Event::Key(key) = ev
-                    && let Some(selection) = session_picker_worktree_selection(
-                        key,
-                        state,
-                        &entry_map,
-                        &non_sel,
-                        entries.as_deref(),
-                    )
-                {
-                    return InputOutcome::Action(match selection {
-                        SessionPickerWorktreeSelection::Fuzzy(original_index) => {
-                            Action::PickSessionInWorktree(original_index)
-                        }
-                        SessionPickerWorktreeSelection::Unavailable => {
-                            return InputOutcome::Changed;
-                        }
-                    });
                 }
 
                 let selected_before = state.selected;
@@ -1970,24 +1950,6 @@ mod session_picker_delete_tests {
             "close must emit the fetch-invalidation action, got {out:?}"
         );
         assert!(agent.active_modal.is_none(), "modal cleared on close");
-    }
-
-    #[test]
-    fn ctrl_w_resumes_session_while_search_is_focused() {
-        let mut agent = make_agent();
-        open_picker(&mut agent, vec![entry("s0")]);
-        if let Some(ActiveModal::SessionPicker { state, .. }) = agent.active_modal.as_mut() {
-            state.selected = 1;
-            state.search_active = true;
-            state.set_query("s");
-        }
-
-        let worktree = Event::Key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
-        let outcome = agent.handle_palette_or_arg_input(&worktree);
-        assert!(matches!(
-            outcome,
-            InputOutcome::Action(Action::PickSessionInWorktree(0))
-        ));
     }
 
     /// Entries are fuzzy-filtered locally: a row whose title does not match

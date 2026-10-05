@@ -66,31 +66,6 @@ impl LineEditor {
         Self::from_edit_outcome(self.buffer.insert_str(&accepted))
     }
 
-    pub(crate) fn insert_paste_with_byte_limit(
-        &mut self,
-        text: &str,
-        max_total_bytes: usize,
-    ) -> LineEditOutcome {
-        let cleaned = sanitize_single_line(text);
-        let remaining = max_total_bytes.saturating_sub(self.buffer.text().len());
-        let mut accepted_bytes = 0usize;
-        let accepted = cleaned
-            .chars()
-            .take_while(|character| {
-                let next = accepted_bytes + character.len_utf8();
-                if next > remaining {
-                    return false;
-                }
-                accepted_bytes = next;
-                true
-            })
-            .collect::<String>();
-        if accepted.is_empty() {
-            return LineEditOutcome::HandledNoChange;
-        }
-        Self::from_edit_outcome(self.buffer.insert_str(&accepted))
-    }
-
     pub(crate) fn handle_key(&mut self, key: &KeyEvent) -> LineEditOutcome {
         self.handle_key_with_insert_policy(key, |_| true)
     }
@@ -226,19 +201,6 @@ mod tests {
         );
         assert_eq!(editor.text(), "d");
         assert_eq!(editor.cursor_byte(), 0);
-    }
-
-    #[test]
-    fn paste_byte_limit_keeps_whole_characters_at_cursor() {
-        let mut editor = LineEditor::default();
-        editor.set_text("ab");
-        let _ = editor.set_cursor_byte(1);
-        assert_eq!(
-            editor.insert_paste_with_byte_limit("中x", 5),
-            LineEditOutcome::TextChanged
-        );
-        assert_eq!(editor.text(), "a中b");
-        assert_eq!(editor.cursor_byte(), "a中".len());
     }
 
     #[test]

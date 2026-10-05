@@ -15,7 +15,6 @@ pub(crate) mod history_search;
 pub(crate) mod list_pane;
 pub mod modal;
 pub mod modal_window;
-pub(crate) mod new_worktree_dialog;
 pub(crate) mod overlay;
 pub(crate) mod overlay_list;
 pub mod permission_view;

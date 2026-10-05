@@ -132,7 +132,6 @@ pub(crate) fn test_app() -> AppView {
         subagents: false,
         ask_user: false,
         mouse_captured: true,
-        new_worktree_dialog: None,
         contextual_hints: Default::default(),
         remote_contextual_hints: None,
         tip_seen_counts: Default::default(),
@@ -1346,18 +1345,6 @@ fn open_welcome_session_picker(app: &mut AppView) {
     app.session_picker_state.search_active = true;
 }
 #[test]
-fn welcome_session_picker_ctrl_w_resumes_in_worktree_while_search_is_focused() {
-    let mut app = test_app();
-    open_welcome_session_picker(&mut app);
-    app.session_picker_state.set_query("session");
-    let outcome = app.handle_input(&key_event(KeyCode::Char('w'), KeyModifiers::CONTROL));
-    assert!(matches!(
-        outcome,
-        InputOutcome::Action(Action::PickSessionInWorktree(0))
-    ));
-    assert_eq!(app.session_picker_state.query(), "session");
-}
-#[test]
 fn welcome_session_picker_ctrl_d_keeps_global_quit_precedence() {
     let mut app = test_app();
     open_welcome_session_picker(&mut app);
@@ -1388,23 +1375,6 @@ fn welcome_session_picker_ctrl_u_kills_to_cursor() {
     let _ = app.handle_input(&key_event(KeyCode::Char('u'), KeyModifiers::CONTROL));
     assert_eq!(app.session_picker_state.query(), "n");
     assert_eq!(app.session_picker_state.query_cursor(), 0);
-}
-#[test]
-fn welcome_ctrl_w_opens_new_worktree_dialog() {
-    let mut app = test_app();
-    app.cwd_has_git_ancestor = true;
-    let outcome = app.handle_input(&key_event(KeyCode::Char('w'), KeyModifiers::CONTROL));
-    assert!(matches!(
-        outcome,
-        InputOutcome::Action(Action::OpenNewWorktreeDialog)
-    ));
-}
-#[test]
-fn welcome_ctrl_w_noop_outside_git_repo() {
-    let mut app = test_app();
-    app.cwd_has_git_ancestor = false;
-    let outcome = app.handle_input(&key_event(KeyCode::Char('w'), KeyModifiers::CONTROL));
-    assert!(matches!(outcome, InputOutcome::Unchanged));
 }
 #[test]
 fn welcome_trust_decline_keys_quit() {
@@ -1469,14 +1439,10 @@ fn welcome_ctrl_d_requires_confirmation() {
 fn menu_action_indices_without_import() {
     assert!(matches!(
         dispatch_menu_action(0),
-        InputOutcome::Action(Action::OpenNewWorktreeDialog)
-    ));
-    assert!(matches!(
-        dispatch_menu_action(1),
         InputOutcome::Action(Action::FetchSessionList)
     ));
     assert!(matches!(
-        dispatch_menu_action(2),
+        dispatch_menu_action(1),
         InputOutcome::Action(Action::Quit)
     ));
     // Past the last row there is nothing to do.
@@ -2723,17 +2689,6 @@ fn welcome_done_n_starts_session() {
     ));
 }
 #[test]
-fn welcome_done_ctrl_w_opens_new_worktree_dialog() {
-    let mut app = test_app();
-    app.auth_state = AuthState::Done;
-    app.cwd_has_git_ancestor = true;
-    let outcome = app.handle_input(&key_event(KeyCode::Char('w'), KeyModifiers::CONTROL));
-    assert!(matches!(
-        outcome,
-        InputOutcome::Action(Action::OpenNewWorktreeDialog)
-    ));
-}
-#[test]
 fn welcome_ctrl_v_creates_normal_session() {
     let mut app = test_app();
     app.auth_state = AuthState::Done;
@@ -2754,120 +2709,6 @@ fn welcome_cmd_v_creates_normal_session() {
         outcome,
         InputOutcome::ActionThenForward(Action::NewSession)
     ));
-}
-#[test]
-fn worktree_dialog_enter_creates_worktree_session() {
-    let mut app = test_app();
-    app.auth_state = AuthState::Done;
-    app.new_worktree_dialog = Some(NewWorktreeDialogState::new());
-    let outcome = app.handle_input(&key_event(KeyCode::Enter, KeyModifiers::NONE));
-    assert!(matches!(
-        outcome,
-        InputOutcome::Action(Action::NewWorktreeSession {
-            load_session_id: None,
-            label: None,
-            git_ref: None,
-        })
-    ));
-    assert!(app.new_worktree_dialog.is_none());
-}
-#[test]
-fn worktree_dialog_modified_enter_is_ignored() {
-    let mut app = test_app();
-    app.auth_state = AuthState::Done;
-    app.new_worktree_dialog = Some(NewWorktreeDialogState::new());
-    let outcome = app.handle_input(&key_event(KeyCode::Enter, KeyModifiers::CONTROL));
-    assert!(matches!(outcome, InputOutcome::Unchanged));
-    assert!(app.new_worktree_dialog.is_some());
-    let outcome = app.handle_input(&key_event(KeyCode::Char('w'), KeyModifiers::SHIFT));
-    assert!(matches!(outcome, InputOutcome::Changed));
-    assert_eq!(app.new_worktree_dialog.as_ref().unwrap().label(), "W");
-}
-#[test]
-fn worktree_dialog_enter_threads_label() {
-    let mut app = test_app();
-    app.auth_state = AuthState::Done;
-    app.new_worktree_dialog = Some(NewWorktreeDialogState::new());
-    for c in "wolves".chars() {
-        app.handle_input(&key_event(KeyCode::Char(c), KeyModifiers::NONE));
-    }
-    let outcome = app.handle_input(&key_event(KeyCode::Enter, KeyModifiers::NONE));
-    assert!(matches!(
-        outcome,
-        InputOutcome::Action(Action::NewWorktreeSession {
-            load_session_id: None,
-            label: Some(ref l),
-            git_ref: None,
-        }) if l == "wolves"
-    ));
-    assert!(app.new_worktree_dialog.is_none());
-}
-#[test]
-fn worktree_dialog_esc_closes() {
-    let mut app = test_app();
-    app.auth_state = AuthState::Done;
-    app.new_worktree_dialog = Some(NewWorktreeDialogState::new());
-    let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
-    assert!(matches!(outcome, InputOutcome::Changed));
-    assert!(app.new_worktree_dialog.is_none());
-}
-#[test]
-fn worktree_dialog_typing_updates_label() {
-    let mut app = test_app();
-    app.auth_state = AuthState::Done;
-    app.new_worktree_dialog = Some(NewWorktreeDialogState::new());
-    let outcome = app.handle_input(&key_event(KeyCode::Char('h'), KeyModifiers::NONE));
-    assert!(matches!(outcome, InputOutcome::Changed));
-    assert_eq!(app.new_worktree_dialog.as_ref().unwrap().label(), "h");
-    let outcome = app.handle_input(&key_event(KeyCode::Char('i'), KeyModifiers::NONE));
-    assert!(matches!(outcome, InputOutcome::Changed));
-    assert_eq!(app.new_worktree_dialog.as_ref().unwrap().label(), "hi");
-}
-#[test]
-fn worktree_dialog_backspace_removes_char() {
-    let mut app = test_app();
-    app.auth_state = AuthState::Done;
-    let mut dialog = NewWorktreeDialogState::new();
-    dialog.set_label("test");
-    app.new_worktree_dialog = Some(dialog);
-    let outcome = app.handle_input(&key_event(KeyCode::Backspace, KeyModifiers::NONE));
-    assert!(matches!(outcome, InputOutcome::Changed));
-    assert_eq!(app.new_worktree_dialog.as_ref().unwrap().label(), "tes");
-}
-#[test]
-fn worktree_dialog_enforces_byte_cap_for_typing_and_middle_paste() {
-    let mut app = test_app();
-    app.auth_state = AuthState::Done;
-    let mut dialog = NewWorktreeDialogState::new();
-    dialog.set_label("a".repeat(98));
-    let _ = dialog.set_cursor_byte(1);
-    app.new_worktree_dialog = Some(dialog);
-    let outcome = app.handle_input(&Event::Paste("éx".to_owned()));
-    assert!(matches!(outcome, InputOutcome::Changed));
-    let dialog = app.new_worktree_dialog.as_ref().unwrap();
-    assert_eq!(dialog.label().len(), 100);
-    assert_eq!(&dialog.label()[1.."aé".len()], "é");
-    let outcome = app.handle_input(&key_event(KeyCode::Char('中'), KeyModifiers::NONE));
-    assert!(matches!(outcome, InputOutcome::Changed));
-    assert_eq!(app.new_worktree_dialog.as_ref().unwrap().label().len(), 100);
-    let mut dialog = NewWorktreeDialogState::new();
-    dialog.set_label("a".repeat(99));
-    app.new_worktree_dialog = Some(dialog);
-    let _ = app.handle_input(&key_event(KeyCode::Char('é'), KeyModifiers::NONE));
-    assert_eq!(app.new_worktree_dialog.as_ref().unwrap().label().len(), 99);
-}
-#[test]
-fn worktree_dialog_paste_is_scoped_away_from_welcome_prompt() {
-    let mut app = test_app();
-    app.auth_state = AuthState::Done;
-    let mut dialog = NewWorktreeDialogState::new();
-    dialog.set_label("ab");
-    let _ = dialog.set_cursor_byte(1);
-    app.new_worktree_dialog = Some(dialog);
-    let outcome = app.handle_input(&Event::Paste("中".to_owned()));
-    assert!(matches!(outcome, InputOutcome::Changed));
-    assert_eq!(app.new_worktree_dialog.as_ref().unwrap().label(), "a中b");
-    assert!(app.welcome_prompt.text().is_empty());
 }
 #[test]
 fn authenticating_loopback_esc_quits() {
@@ -3392,7 +3233,7 @@ fn scroll_event_stashes_origin_for_residual_flush() {
 #[test]
 fn scroll_event_does_not_stash_when_blocking_modal_open() {
     let mut app = test_app();
-    app.new_worktree_dialog = Some(NewWorktreeDialogState::new());
+    app.tutorial = Some(crate::views::tutorial::TutorialState::new());
     assert!(app.is_scroll_blocking_modal_open());
     let _ = app.handle_input(&scroll_event(MouseEventKind::ScrollDown, 42, 17));
     assert!(

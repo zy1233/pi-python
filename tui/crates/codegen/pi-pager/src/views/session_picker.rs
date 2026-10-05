@@ -357,43 +357,6 @@ pub(crate) fn build_entry_map(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum SessionPickerWorktreeSelection {
-    Fuzzy(usize),
-    Unavailable,
-}
-
-/// Resolve Ctrl+W before generic editing because the line editor binds it to delete-word.
-pub(crate) fn session_picker_worktree_selection(
-    key: &crossterm::event::KeyEvent,
-    state: &mut PickerState,
-    entry_map: &[Option<PickerItem>],
-    non_selectable: &[bool],
-    entries: Option<&[SessionPickerEntry]>,
-) -> Option<SessionPickerWorktreeSelection> {
-    if key.kind != crossterm::event::KeyEventKind::Press || !crate::key!('w', CONTROL).matches(key)
-    {
-        return None;
-    }
-    if entry_map.is_empty() {
-        return Some(SessionPickerWorktreeSelection::Unavailable);
-    }
-    crate::views::picker::clamp_picker_selection(state, entry_map.len(), non_selectable);
-    Some(
-        match entry_map
-            .get(state.selected)
-            .and_then(|entry| entry.as_ref())
-        {
-            Some(PickerItem::Fuzzy { original_index }) => entries
-                .and_then(|entries| entries.get(*original_index))
-                .map_or(SessionPickerWorktreeSelection::Unavailable, |_| {
-                    SessionPickerWorktreeSelection::Fuzzy(*original_index)
-                }),
-            None => SessionPickerWorktreeSelection::Unavailable,
-        },
-    )
-}
-
 /// Rebuild backing-index expansion after a session query changes.
 pub(crate) fn sync_session_picker_query_expansion(
     entries: Option<&[SessionPickerEntry]>,
