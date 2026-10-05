@@ -149,23 +149,6 @@ pub(crate) fn presandbox_resume_target(
         .unwrap_or(PinnedResumeTarget::Unresolved))
 }
 
-/// Failure message for a worktree resume. `local_miss_target` is `Some(arg)`
-/// only when materialization deferred exactly this target after missing local
-/// id/title resolution — provenance is threaded, never inferred from id
-/// shape, so a resolved legacy non-UUID id gets no false no-match hint.
-/// `detail` must already be user-sanitized: sanitizing the composed message
-/// instead would collapse disk-full chains whole and erase the appended hint.
-pub(crate) fn worktree_resume_failure_message(
-    local_miss_target: Option<&str>,
-    detail: &str,
-) -> String {
-    let msg = format!("couldn't resume worktree session: {detail}");
-    match local_miss_target {
-        Some(target) => format!("{msg}; {}", title_miss_hint(target)),
-        None => msg,
-    }
-}
-
 #[cfg(test)]
 #[path = "session_title_resolve_tests.rs"]
 mod tests;

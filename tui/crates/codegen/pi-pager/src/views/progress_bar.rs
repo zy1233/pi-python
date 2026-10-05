@@ -11,7 +11,6 @@
 //! render_progress_bar(buf, x, y, 5, 0.42, fg_color, bg_color);
 //! ```
 
-use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Style};
 use ratatui::text::Span;
 
@@ -71,79 +70,9 @@ pub fn progress_bar_spans(width: u16, value: f32, fg: Color, bg: Color) -> Vec<S
         .collect()
 }
 
-/// Render a progress bar into the buffer at the given position.
-///
-/// - `width`: number of character cells for the bar
-/// - `value`: fill fraction in `0.0..=1.0` (clamped)
-/// - `fg`: color for the filled portion
-/// - `bg`: background color for the track (filled + empty cells)
-pub fn render_progress_bar(
-    buf: &mut Buffer,
-    x: u16,
-    y: u16,
-    width: u16,
-    value: f32,
-    fg: Color,
-    bg: Color,
-) {
-    let fg_style = Style::default().fg(fg).bg(bg);
-    let bg_style = Style::default().bg(bg);
-    for (i, (symbol, filled)) in bar_cells(width, value).enumerate() {
-        let Some(cell) = buf.cell_mut((x + i as u16, y)) else {
-            continue;
-        };
-        cell.set_symbol(symbol);
-        cell.set_style(if filled { fg_style } else { bg_style });
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::layout::Rect;
-
-    #[test]
-    fn test_empty_bar() {
-        let area = Rect::new(0, 0, 10, 1);
-        let mut buf = Buffer::empty(area);
-        render_progress_bar(&mut buf, 0, 0, 5, 0.0, Color::White, Color::Black);
-        for i in 0..5u16 {
-            assert_eq!(buf[(i, 0)].symbol(), " ");
-        }
-    }
-
-    #[test]
-    fn test_full_bar() {
-        let area = Rect::new(0, 0, 10, 1);
-        let mut buf = Buffer::empty(area);
-        render_progress_bar(&mut buf, 0, 0, 5, 1.0, Color::White, Color::Black);
-        for i in 0..5u16 {
-            assert_eq!(buf[(i, 0)].symbol(), "█");
-        }
-    }
-
-    #[test]
-    fn test_half_bar() {
-        let area = Rect::new(0, 0, 10, 1);
-        let mut buf = Buffer::empty(area);
-        render_progress_bar(&mut buf, 0, 0, 4, 0.5, Color::White, Color::Black);
-        // 50% of 4 cells = 2 full blocks
-        assert_eq!(buf[(0, 0)].symbol(), "█");
-        assert_eq!(buf[(1, 0)].symbol(), "█");
-        assert_eq!(buf[(2, 0)].symbol(), " ");
-        assert_eq!(buf[(3, 0)].symbol(), " ");
-    }
-
-    #[test]
-    fn test_partial_block() {
-        let area = Rect::new(0, 0, 10, 1);
-        let mut buf = Buffer::empty(area);
-        // 25% of 4 cells = 1 full block (8 eighths). Actually 0.25*4*8 = 8 = 1 full.
-        // Let's use 12.5% of 4 cells = 0.125*4*8 = 4 eighths = half block on cell 0
-        render_progress_bar(&mut buf, 0, 0, 4, 0.125, Color::White, Color::Black);
-        assert_eq!(buf[(0, 0)].symbol(), "▌"); // 4/8 = half
-        assert_eq!(buf[(1, 0)].symbol(), " ");
-    }
 
     #[test]
     fn cell_breakdown_keeps_eighths_resolution() {

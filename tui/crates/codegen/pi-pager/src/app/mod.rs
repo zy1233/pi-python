@@ -38,7 +38,6 @@ pub(crate) mod status_line;
 mod status_line_policy;
 pub(crate) mod subagent;
 pub(crate) mod subscription;
-pub(crate) use effects::sanitize_user_error;
 mod event_loop;
 mod event_loop_stall;
 mod exit_timeout;
@@ -73,7 +72,6 @@ use std::io::{self, Write};
 use std::panic;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio_util::sync::CancellationToken;
-pub(crate) use turn_completion::CANCELLATION_CATEGORY_KEY;
 /// Tracks the extra Kitty keyboard layer pushed while the `/gboom` game is
 /// open (see [`push_gboom_keyboard_flags`]). Kept separate from the base layer
 /// (`terminal::kitty_keyboard`) so teardown pops both, in LIFO order.
@@ -1585,9 +1583,6 @@ mod tests {
             cursor_style_policy(Some(false)),
             CursorStylePolicy::ForceSteady
         );
-    }
-    fn empty_config() -> toml::Value {
-        toml::Value::Table(Default::default())
     }
     #[test]
     fn terminal_title_strips_control_characters() {

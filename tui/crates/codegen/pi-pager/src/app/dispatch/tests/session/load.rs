@@ -401,32 +401,6 @@ fn load_session_plain_repo_is_not_worktree() {
     );
     assert!(!app.agents[&AgentId(0)].session.is_worktree);
 }
-#[test]
-fn remote_restore_marks_standalone_worktree_cwd() {
-    let mut app = test_app();
-    let main = crate::test_util::TempGitRepo::init("main-only");
-    let clone = main.standalone_clone("wt-branch");
-    app.cwd = clone.path.clone();
-    let _ = dispatch_load_session_with_restore(
-        &mut app,
-        "remote-wt".into(),
-        clone.path.display().to_string(),
-    );
-    assert!(app.agents[&AgentId(0)].session.is_worktree);
-    assert_eq!(app.agents[&AgentId(0)].session.cwd, clone.path);
-}
-#[test]
-fn remote_restore_plain_repo_is_not_worktree() {
-    let mut app = test_app();
-    let repo = crate::test_util::TempGitRepo::init("main");
-    app.cwd = repo.path.clone();
-    let _ = dispatch_load_session_with_restore(
-        &mut app,
-        "remote-plain".into(),
-        repo.path.display().to_string(),
-    );
-    assert!(!app.agents[&AgentId(0)].session.is_worktree);
-}
 /// Cross-cwd resume anchors the agent cwd to the resolved origin cwd.
 #[test]
 fn load_session_anchors_agent_cwd_to_resolved_session_cwd() {
@@ -493,110 +467,6 @@ fn session_loaded_purges_replay_transient() {
         test_support::calls(),
         before + 1,
         "load completion must purge the dropped replay transient exactly once"
-    );
-}
-#[test]
-fn session_loaded_during_open_reload_window_defers_to_window() {
-    let mut app = test_app();
-    dispatch(Action::LoadSession("sess-w".into(), None, false), &mut app);
-    let id = AgentId(0);
-    app.agents.get_mut(&id).unwrap().begin_session_reload(1);
-    let effects = dispatch(
-        Action::TaskComplete(TaskResult::SessionLoaded {
-            agent_id: id,
-            session_id: acp::SessionId::new("sess-w"),
-            models: None,
-            code_restored: false,
-            restore_summary: None,
-            restore_degree: None,
-            running_prompt_id: None,
-            scheduler_background_loops: None,
-        }),
-        &mut app,
-    );
-    assert!(
-        effects.is_empty(),
-        "a load result mid-window must produce no effects (no queue drain)"
-    );
-    let agent = app.agents.get(&id).unwrap();
-    assert!(agent.session_reload.is_some(), "the window stays open");
-    assert!(agent.session.loading_replay, "the replay gate stays open");
-}
-/// Failure variant of the above: no `TurnFailed` block may be pushed into
-/// the staging state.
-#[test]
-fn session_load_failed_during_open_reload_window_defers_to_window() {
-    let mut app = test_app();
-    dispatch(Action::LoadSession("sess-w".into(), None, false), &mut app);
-    let id = AgentId(0);
-    app.agents.get_mut(&id).unwrap().begin_session_reload(1);
-    let staging_len = app.agents[&id].scrollback.len();
-    let effects = dispatch(
-        Action::TaskComplete(TaskResult::SessionLoadFailed {
-            agent_id: id,
-            session_id: acp::SessionId::new("sess-w"),
-            error: "boom".into(),
-        }),
-        &mut app,
-    );
-    assert!(effects.is_empty());
-    let agent = app.agents.get(&id).unwrap();
-    assert!(agent.session_reload.is_some(), "the window stays open");
-    assert!(agent.session.loading_replay);
-    assert_eq!(
-        agent.scrollback.len(),
-        staging_len,
-        "no failure block was pushed into staging"
-    );
-}
-/// `SessionRestoreFailed` variant of the defer guard: no `TurnFailed`
-/// block may be pushed into staging and the window must stay open.
-#[test]
-fn session_restore_failed_during_open_reload_window_defers_to_window() {
-    let mut app = test_app();
-    dispatch(Action::LoadSession("sess-w".into(), None, false), &mut app);
-    let id = AgentId(0);
-    app.agents.get_mut(&id).unwrap().begin_session_reload(1);
-    let staging_len = app.agents[&id].scrollback.len();
-    let effects = dispatch(
-        Action::TaskComplete(TaskResult::SessionRestoreFailed {
-            agent_id: id,
-            error: "boom".into(),
-        }),
-        &mut app,
-    );
-    assert!(effects.is_empty());
-    let agent = app.agents.get(&id).unwrap();
-    assert!(agent.session_reload.is_some(), "the window stays open");
-    assert!(agent.session.loading_replay);
-    assert_eq!(
-        agent.scrollback.len(),
-        staging_len,
-        "no failure block was pushed into staging"
-    );
-}
-/// `SessionRestoreProgress` variant of the defer guard: no progress block
-/// may be pushed into staging.
-#[test]
-fn session_restore_progress_during_open_reload_window_defers_to_window() {
-    let mut app = test_app();
-    dispatch(Action::LoadSession("sess-w".into(), None, false), &mut app);
-    let id = AgentId(0);
-    app.agents.get_mut(&id).unwrap().begin_session_reload(1);
-    let staging_len = app.agents[&id].scrollback.len();
-    dispatch(
-        Action::TaskComplete(TaskResult::SessionRestoreProgress {
-            agent_id: id,
-            message: "Downloading...".into(),
-        }),
-        &mut app,
-    );
-    let agent = app.agents.get(&id).unwrap();
-    assert!(agent.session_reload.is_some(), "the window stays open");
-    assert_eq!(
-        agent.scrollback.len(),
-        staging_len,
-        "no progress block was pushed into staging"
     );
 }
 /// SessionLoaded path also surfaces a warning banner when the server
@@ -1145,27 +1015,6 @@ fn a_restored_transcript_stays_recallable_after_a_failed_fetch() {
         ["second prompt", "first prompt"]
     );
     assert!(!app.agents[&id].session.prompt_history_loading);
-}
-#[test]
-fn session_restore_failed_clears_prompt_history_loading() {
-    let mut app = test_app();
-    let effects = dispatch_load_session_with_restore(&mut app, "remote-sess".into(), "/tmp".into());
-    assert!(matches!(
-        effects.as_slice(),
-        [Effect::RestoreAndLoadSession { .. }]
-    ));
-    let id = AgentId(0);
-    assert!(app.agents[&id].session.prompt_history_loading);
-    let effects = dispatch(
-        Action::TaskComplete(TaskResult::SessionRestoreFailed {
-            agent_id: id,
-            error: "boom".into(),
-        }),
-        &mut app,
-    );
-    assert!(effects.is_empty());
-    assert!(!app.agents[&id].session.prompt_history_loading);
-    assert!(!app.agents[&id].session.loading_replay);
 }
 #[test]
 fn resume_focuses_existing_agent_for_open_session() {

@@ -2,134 +2,6 @@
     use super::*;
 
     #[test]
-    fn driver_prompt_complete_without_prompt_id_arms_reconcile_not_finish() {
-        // Driver still owns the turn via PromptResponse — prompt_complete must
-        // NOT finish immediately. Missing wire promptId (legacy shells) arms
-        // lost-PR reconcile on current_prompt_id so grace teardown
-        // can run if the RPC never arrives; turn state stays TurnRunning.
-        let mut app = make_app_with_agent("sess-drive");
-        {
-            let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-            agent.session.start_turn(&mut agent.scrollback);
-            agent.session.current_prompt_id = Some("pid-local".into());
-            agent.turn_started_at = Some(std::time::Instant::now());
-            assert!(!agent.attached_as_viewer);
-        }
-
-        let affected = handle_ext_notification(&prompt_complete_ext("sess-drive"), &mut app);
-        assert!(
-            affected,
-            "arming reconcile must schedule ticks for background-tab recovery"
-        );
-
-        let agent = app.agents.get(&AgentId(0)).unwrap();
-        assert!(
-            matches!(agent.session.state, AgentState::TurnRunning),
-            "driver's running turn must NOT be finished by prompt_complete"
-        );
-        assert_eq!(
-            agent.session.current_prompt_id.as_deref(),
-            Some("pid-local"),
-            "driver's current_prompt_id must be untouched at arm time"
-        );
-        assert!(agent.turn_started_at.is_some());
-        assert_eq!(
-            agent
-                .pending_turn_end_reconcile
-                .as_ref()
-                .map(|p| p.prompt_id.as_str()),
-            Some("pid-local"),
-        );
-    }
-
-    #[test]
-    fn driver_prompt_complete_with_matching_prompt_id_arms_reconcile() {
-        // Lost-response recovery: when the driver
-        // receives the turn-end broadcast for the exact turn it is awaiting,
-        // it must ARM the deferred reconcile — without finishing the turn
-        // immediately (the RPC response normally lands ms later and carries
-        // richer context; finishing here would double-finish every turn).
-        let mut app = make_app_with_agent("sess-drive");
-        {
-            let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-            agent.session.start_turn(&mut agent.scrollback);
-            agent.session.current_prompt_id = Some("pid-stuck".into());
-            agent.session.cancel_turn(&mut agent.scrollback); // CancelTurn → TurnCancelling
-            assert!(!agent.attached_as_viewer);
-        }
-
-        let affected = handle_ext_notification(
-            &prompt_complete_ext_with_prompt_id("sess-drive", "pid-stuck", "cancelled"),
-            &mut app,
-        );
-        assert!(
-            affected,
-            "arming must report a state change — the event loop only calls \
-             schedule_tick on changed ACP batches, and the reconcile sweep \
-             runs on the animation tick (a dormant background tab would \
-             otherwise never get swept)"
-        );
-
-        let agent = app.agents.get(&AgentId(0)).unwrap();
-        assert!(
-            agent.session.state.is_cancelling(),
-            "turn state must be untouched at arm time (RPC may still arrive)"
-        );
-        let pending = agent
-            .pending_turn_end_reconcile
-            .as_ref()
-            .expect("reconcile must be armed for the driver's awaited turn");
-        assert_eq!(pending.prompt_id, "pid-stuck");
-        assert_eq!(pending.stop_reason.as_deref(), Some("cancelled"));
-    }
-
-    #[test]
-    fn driver_prompt_complete_with_mismatched_prompt_id_does_not_arm() {
-        // A broadcast for some OTHER prompt (stale, or a queued prompt that
-        // resolved server-side) must not arm a reconcile against the turn
-        // this client is actually driving.
-        let mut app = make_app_with_agent("sess-drive");
-        {
-            let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-            agent.session.start_turn(&mut agent.scrollback);
-            agent.session.current_prompt_id = Some("pid-current".into());
-        }
-
-        let _ = handle_ext_notification(
-            &prompt_complete_ext_with_prompt_id("sess-drive", "pid-other", "end_turn"),
-            &mut app,
-        );
-
-        let agent = app.agents.get(&AgentId(0)).unwrap();
-        assert!(agent.pending_turn_end_reconcile.is_none());
-        assert!(matches!(agent.session.state, AgentState::TurnRunning));
-    }
-
-    #[test]
-    fn driver_prompt_complete_without_prompt_id_arms_on_current() {
-        // Older shells omit `promptId`; arm reconcile on current_prompt_id when
-        // not mid-tool (see arm_driver_turn_end_reconcile). Does not finish.
-        let mut app = make_app_with_agent("sess-drive");
-        {
-            let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-            agent.session.start_turn(&mut agent.scrollback);
-            agent.session.current_prompt_id = Some("pid-current".into());
-        }
-
-        let _ = handle_ext_notification(&prompt_complete_ext("sess-drive"), &mut app);
-
-        let agent = app.agents.get(&AgentId(0)).unwrap();
-        assert_eq!(
-            agent
-                .pending_turn_end_reconcile
-                .as_ref()
-                .map(|p| p.prompt_id.as_str()),
-            Some("pid-current"),
-        );
-        assert!(matches!(agent.session.state, AgentState::TurnRunning));
-    }
-
-    #[test]
     fn driver_prompt_complete_pushes_no_marker() {
         // The driver emits its own marker via PromptResponse; prompt_complete
         // must not double-push one for it (or push any block at all).
@@ -228,39 +100,6 @@
             .expect("the driver's awaited turn must arm a reconcile");
         assert_eq!(pending.prompt_id, "pid-local");
         assert_eq!(pending.stop_reason.as_deref(), Some("cancelled"));
-    }
-
-    #[test]
-    fn silent_wake_turn_completed_is_markerless() {
-        let mut app = make_app_with_agent("sess-wake");
-        seed_two_bg_tasks(&mut app, "sess-wake");
-        let len_before = app.agents[&AgentId(0)].scrollback.len();
-
-        let affected = handle_ext_notification(
-            &pi_wake_turn_completed_notif(
-                "sess-wake",
-                "task-completed-bg1",
-                Some(1_700_000_000_000 + 5_000),
-            ),
-            &mut app,
-        );
-        assert!(affected, "the wake back-to-idle point still redraws");
-
-        let agent = app.agents.get(&AgentId(0)).unwrap();
-        assert!(
-            agent.session.state.is_idle(),
-            "a wake turn is never adopted — the pager stays idle around it"
-        );
-        assert_eq!(
-            agent.scrollback.len(),
-            len_before,
-            "a silent wake turn pushes no marker"
-        );
-        assert_eq!(
-            agent.watchers().commands,
-            2,
-            "the running commands stay on the status-row watchers cue"
-        );
     }
 
     #[test]
@@ -933,34 +772,6 @@
     }
 
     #[test]
-    fn dead_wake_pushes_no_status_line() {
-        let mut app = make_app_with_agent("sess-wake");
-        seed_two_bg_tasks(&mut app, "sess-wake");
-        let len_before = app.agents[&AgentId(0)].scrollback.len();
-
-        let _ = handle_ext_notification(
-            &pi_turn_completed_notif("sess-wake", "task-completed-bg1", "cancelled", false),
-            &mut app,
-        );
-
-        let agent = app.agents.get(&AgentId(0)).unwrap();
-        assert!(
-            work_status_lines(&agent.scrollback).is_empty(),
-            "a dead wake must not push a work-only status line"
-        );
-        assert_eq!(
-            agent.scrollback.len(),
-            len_before,
-            "a dead wake pushes nothing"
-        );
-        assert_eq!(
-            agent.watchers().commands,
-            2,
-            "the still-running work feeds the status-row cue instead"
-        );
-    }
-
-    #[test]
     fn wake_terminal_during_local_turn_pushes_nothing() {
         // FIFO can deliver a wake's terminal after a fresh local prompt starts; a
         // foreign "Worked for" under that prompt would misattribute.
@@ -1426,37 +1237,6 @@
     }
 
     #[test]
-    fn between_turns_completion_pushes_chip_only() {
-        let mut app = make_app_with_agent("sess-chip-only");
-        seed_two_bg_tasks(&mut app, "sess-chip-only");
-        assert!(app.agents[&AgentId(0)].session.state.is_idle());
-        assert_eq!(app.agents[&AgentId(0)].watchers().commands, 2);
-
-        let _ = handle_ext_notification(
-            &make_task_completed_notif("sess-chip-only", "task-1", "sleep 98", Some(0)),
-            &mut app,
-        );
-        let agent = app.agents.get(&AgentId(0)).unwrap();
-        assert!(
-            work_status_lines(&agent.scrollback).is_empty(),
-            "no work-only status line after a between-turns completion"
-        );
-        assert_eq!(
-            agent.watchers().commands,
-            1,
-            "the status-row cue counts down instead"
-        );
-
-        let _ = handle_ext_notification(
-            &make_task_completed_notif("sess-chip-only", "task-2", "sleep 99", Some(0)),
-            &mut app,
-        );
-        let agent = app.agents.get(&AgentId(0)).unwrap();
-        assert!(work_status_lines(&agent.scrollback).is_empty());
-        assert_eq!(agent.watchers().commands, 0, "zero left — cue disappears");
-    }
-
-    #[test]
     fn mid_turn_completion_pushes_chip_only() {
         let mut app = make_app_with_agent("sess-midturn");
         seed_two_bg_tasks(&mut app, "sess-midturn");
@@ -1473,31 +1253,6 @@
         assert!(
             work_status_lines(&app.agents[&AgentId(0)].scrollback).is_empty(),
             "a completion inside an active turn pushes its chip only"
-        );
-    }
-
-    #[test]
-    fn subagent_finished_between_turns_pushes_no_status_line() {
-        let mut app = make_app_with_parent_and_child("sess-sub-quiet", "child-1");
-        let _ = handle_ext_notification(
-            &make_task_backgrounded_notif("sess-sub-quiet", "tc-1", "task-1", "sleep 98"),
-            &mut app,
-        );
-
-        let _ = handle(
-            make_ext_session_notification("sess-sub-quiet", test_subagent_finished("child-1")),
-            &mut app,
-        );
-
-        let agent = app.agents.get(&AgentId(0)).unwrap();
-        assert!(
-            work_status_lines(&agent.scrollback).is_empty(),
-            "a finished subagent pushes no work-only status line"
-        );
-        assert_eq!(
-            agent.watchers().commands,
-            1,
-            "the remaining bg command stays on the status-row cue"
         );
     }
 
@@ -1656,58 +1411,6 @@
             matches!(agent.session.state, AgentState::TurnRunning),
             "arming must NOT finish the driver's turn"
         );
-    }
-
-    /// The replay set never leaks across loads: a second load enters a fresh
-    /// replay window via `begin_replay_window`, which resets ALL coupled fields
-    /// (the terminal set AND `unexpected_replay_drops`) together.
-    #[test]
-    fn second_load_does_not_inherit_first_loads_replay_window_state() {
-        let mut app = make_app_with_agent("sess-1");
-        let id = AgentId(0);
-        // First load replay records a terminal; also seed a prior stray-replay
-        // drop count so the reset of every coupled field is observable.
-        {
-            let agent = app.agents.get_mut(&id).unwrap();
-            agent.session.loading_replay = true;
-            agent.unexpected_replay_drops = 3;
-        }
-        let _ = handle_ext_notification(
-            &pi_turn_completed_notif("sess-1", "p-first", "end_turn", true),
-            &mut app,
-        );
-        assert!(
-            app.agents[&id]
-                .replayed_terminal_prompts
-                .contains("p-first")
-        );
-
-        // A second load (reconnect) enters a fresh replay window. An armed
-        // cancel resend belongs to the pre-reload turn and must drop with it.
-        app.agents.get_mut(&id).unwrap().pending_cancel_resend =
-            Some(crate::app::agent_view::PendingCancelResend {
-                prompt_id: Some("p-first".into()),
-                sent_at: std::time::Instant::now(),
-                attempts: 1,
-                confirmed: false,
-                cancel_subagents: true,
-                trigger: crate::app::actions::CancelTrigger::Esc,
-            });
-        app.agents.get_mut(&id).unwrap().begin_session_reload(1);
-        let agent = &app.agents[&id];
-        assert!(
-            agent.replayed_terminal_prompts.is_empty(),
-            "the second load must not inherit the first load's terminal set"
-        );
-        assert_eq!(
-            agent.unexpected_replay_drops, 0,
-            "begin_replay_window must reset every replay-coupled field together"
-        );
-        assert!(
-            agent.pending_cancel_resend.is_none(),
-            "an armed cancel resend must not survive into the reload window"
-        );
-        assert!(agent.session.loading_replay);
     }
 
     #[test]

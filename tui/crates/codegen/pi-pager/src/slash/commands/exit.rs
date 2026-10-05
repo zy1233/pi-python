@@ -30,10 +30,6 @@ impl SlashCommand for ExitCommand {
         "Quit the application"
     }
 
-    fn usage(&self) -> &str {
-        "/quit"
-    }
-
     fn run(&self, _ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {
         CommandResult::Action(Action::Quit)
     }

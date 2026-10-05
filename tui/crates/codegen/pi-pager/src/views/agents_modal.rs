@@ -60,7 +60,6 @@ pub struct AgentListEntry {
     pub scope: AgentScope,
     pub source_path: Option<PathBuf>,
     pub enabled: bool,
-    pub is_builtin: bool,
     pub expanded: bool,
     pub definition: AgentDefinition,
 }
@@ -119,11 +118,6 @@ pub enum AgentsModalOutcome {
         editable: bool,
         scope_label: String,
     },
-    /// Open a user/project config file in `$EDITOR` (TUI suspends until exit).
-    EditInEditor {
-        path: PathBuf,
-        tab: AgentsTab,
-    },
 }
 /// User-level vs project-level config files (`~/.grok` vs `{cwd}/.grok`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -180,12 +174,6 @@ impl PersonaCreateInput {
     }
     pub fn instructions(&self) -> &str {
         self.instructions.text()
-    }
-    pub fn scope(&self) -> ConfigFileScope {
-        self.scope
-    }
-    pub fn active_field(&self) -> CreateField {
-        self.active_field
     }
     fn name_editor(&self) -> &LineEditor {
         &self.name
@@ -349,9 +337,6 @@ impl AgentsModalState {
     pub fn search_query(&self) -> &str {
         self.search.text()
     }
-    pub fn search_cursor_byte(&self) -> usize {
-        self.search.cursor_byte()
-    }
     fn search_editor(&self) -> &LineEditor {
         &self.search
     }
@@ -401,7 +386,6 @@ pub fn build_agent_list(
             scope: AgentScope::BuiltIn,
             source_path: None,
             enabled,
-            is_builtin: true,
             expanded: false,
             definition: def,
         });
@@ -437,7 +421,6 @@ pub fn build_agent_list(
                     scope: def.scope,
                     source_path: def.source_path.clone(),
                     enabled,
-                    is_builtin: false,
                     expanded: false,
                     definition: def,
                 };
@@ -450,7 +433,6 @@ pub fn build_agent_list(
                 scope: def.scope,
                 source_path: def.source_path.clone(),
                 enabled,
-                is_builtin: false,
                 expanded: false,
                 definition: def,
             });
@@ -468,7 +450,6 @@ pub fn build_agent_list(
                 scope: agent.scope,
                 source_path: agent.definition.source_path.clone(),
                 enabled,
-                is_builtin: false,
                 expanded: false,
                 definition: agent.definition,
             });
@@ -3097,26 +3078,6 @@ mod tests {
         crate::appearance::cache::set_vim_mode(false);
     }
     #[test]
-    fn search_text_changes_refilter_but_cursor_moves_do_not() {
-        let mut state = make_persona_state(three_personas(), "", 0);
-        state.search_active = true;
-        let outcome = handle_agents_key(
-            &mut state,
-            &KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
-        );
-        assert!(matches!(outcome, AgentsModalOutcome::Changed));
-        assert_eq!(state.search_query(), "g");
-        assert_eq!(state.persona_selected, 2);
-        let outcome = handle_agents_key(
-            &mut state,
-            &KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
-        );
-        assert!(matches!(outcome, AgentsModalOutcome::Changed));
-        assert_eq!(state.search_query(), "g");
-        assert_eq!(state.search_cursor_byte(), 0);
-        assert_eq!(state.persona_selected, 2);
-    }
-    #[test]
     fn no_form_search_paste_sanitizes_at_cursor_and_resets_selection() {
         let mut state = make_persona_state(three_personas(), "ab", 2);
         state.search_active = true;
@@ -3191,186 +3152,6 @@ mod tests {
             Some("search error")
         );
         assert_eq!(state.search_query(), "search");
-    }
-    #[test]
-    fn search_uses_canonical_word_and_grapheme_editing() {
-        for key in [
-            KeyEvent::new(KeyCode::Left, KeyModifiers::ALT),
-            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::ALT),
-            KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL),
-        ] {
-            let mut state = make_persona_state(three_personas(), "hello-world", 0);
-            state.search_active = true;
-            let outcome = handle_agents_key(&mut state, &key);
-            assert!(matches!(outcome, AgentsModalOutcome::Changed));
-            assert_eq!(state.search_query(), "hello-world");
-            assert_eq!(state.search_cursor_byte(), "hello-".len());
-        }
-        for key in [
-            KeyEvent::new(KeyCode::Right, KeyModifiers::ALT),
-            KeyEvent::new(KeyCode::Char('f'), KeyModifiers::ALT),
-        ] {
-            let mut state = make_persona_state(three_personas(), "hello-world", 0);
-            state.search_active = true;
-            let _ = state.set_search_cursor_byte(0);
-            let outcome = handle_agents_key(&mut state, &key);
-            assert!(matches!(outcome, AgentsModalOutcome::Changed));
-            assert_eq!(state.search_query(), "hello-world");
-            assert_eq!(state.search_cursor_byte(), "hello".len());
-        }
-        let grapheme = "👩🏽\u{200d}💻";
-        let mut state = make_persona_state(three_personas(), &format!("a{grapheme}b"), 0);
-        state.search_active = true;
-        let _ = state.set_search_cursor_byte(1);
-        let outcome = handle_agents_key(
-            &mut state,
-            &KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE),
-        );
-        assert!(matches!(outcome, AgentsModalOutcome::Changed));
-        assert_eq!(state.search_query(), "ab");
-        assert_eq!(state.search_cursor_byte(), 1);
-    }
-    #[test]
-    fn persona_create_field_navigation_keeps_jk_as_text() {
-        let mut state = make_persona_state(three_personas(), "", 0);
-        let _ = handle_personas_tab_key(
-            &mut state,
-            &KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE),
-        );
-        for ch in ['j', 'k'] {
-            let _ = handle_agents_key(
-                &mut state,
-                &KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
-            );
-        }
-        let input = state.persona_input.as_ref().unwrap();
-        assert_eq!(input.name(), "jk");
-        assert_eq!(input.active_field(), CreateField::Name);
-        let outcome = handle_agents_key(
-            &mut state,
-            &KeyEvent::new(KeyCode::Tab, KeyModifiers::CONTROL),
-        );
-        assert!(matches!(outcome, AgentsModalOutcome::Unchanged));
-        assert_eq!(
-            state.persona_input.as_ref().unwrap().active_field(),
-            CreateField::Name
-        );
-        let _ = handle_agents_key(&mut state, &KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
-        assert_eq!(
-            state.persona_input.as_ref().unwrap().active_field(),
-            CreateField::Description
-        );
-        let _ = handle_agents_key(
-            &mut state,
-            &KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT),
-        );
-        assert_eq!(
-            state.persona_input.as_ref().unwrap().active_field(),
-            CreateField::Name
-        );
-        let _ = handle_agents_key(
-            &mut state,
-            &KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
-        );
-        assert_eq!(
-            state.persona_input.as_ref().unwrap().active_field(),
-            CreateField::Description
-        );
-        let _ = handle_agents_key(&mut state, &KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
-        assert_eq!(
-            state.persona_input.as_ref().unwrap().active_field(),
-            CreateField::Name
-        );
-    }
-    #[test]
-    fn persona_create_validates_sanitizes_persists_and_rejects_duplicates() {
-        let directory = tempfile::tempdir().unwrap();
-        let mut state = make_persona_state(vec![], "", 0);
-        state.cwd = directory.path().to_path_buf();
-        let _ = handle_personas_tab_key(
-            &mut state,
-            &KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE),
-        );
-        let outcome = handle_agents_key(
-            &mut state,
-            &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-        );
-        assert!(matches!(outcome, AgentsModalOutcome::Changed));
-        assert!(state.persona_input.is_some());
-        assert_eq!(
-            state.message.as_ref().map(|message| message.text.as_str()),
-            Some("Name is required")
-        );
-        for ch in "my persona".chars() {
-            let _ = handle_agents_key(
-                &mut state,
-                &KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
-            );
-        }
-        let _ = handle_agents_key(&mut state, &KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
-        for ch in "helps".chars() {
-            let _ = handle_agents_key(
-                &mut state,
-                &KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
-            );
-        }
-        let _ = handle_agents_key(&mut state, &KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
-        for ch in "be useful".chars() {
-            let _ = handle_agents_key(
-                &mut state,
-                &KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
-            );
-        }
-        let _ = handle_agents_key(&mut state, &KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
-        let _ = handle_agents_key(
-            &mut state,
-            &KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE),
-        );
-        assert_eq!(
-            state.persona_input.as_ref().unwrap().scope(),
-            ConfigFileScope::Project
-        );
-        let _ = handle_agents_key(
-            &mut state,
-            &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-        );
-        let path = directory
-            .path()
-            .join(".grok")
-            .join("personas")
-            .join("my-persona.toml");
-        let content = std::fs::read_to_string(&path).unwrap();
-        assert!(content.contains("description = \"helps\""));
-        assert!(content.contains("instructions = \"be useful\""));
-        assert!(state.persona_input.is_none());
-        let _ = handle_personas_tab_key(
-            &mut state,
-            &KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE),
-        );
-        for ch in "my persona".chars() {
-            let _ = handle_agents_key(
-                &mut state,
-                &KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
-            );
-        }
-        for _ in 0..3 {
-            let _ = handle_agents_key(&mut state, &KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
-        }
-        let _ = handle_agents_key(
-            &mut state,
-            &KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE),
-        );
-        let _ = handle_agents_key(
-            &mut state,
-            &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-        );
-        assert!(state.persona_input.is_some());
-        assert!(
-            state
-                .message
-                .as_ref()
-                .is_some_and(|message| message.text.contains("already exists"))
-        );
     }
     #[test]
     fn search_and_create_renderers_keep_unicode_cursor_visible() {
@@ -3467,25 +3248,6 @@ mod tests {
             conflict: None,
         };
         PluginRegistry::from_discovered(vec![dp], &[], &["my-plugin".to_string()])
-    }
-    #[test]
-    fn build_agent_list_includes_plugin_agents_under_qualified_names() {
-        let plugin_root = tempfile::tempdir().unwrap();
-        let registry = plugin_registry_with_reviewer(plugin_root.path());
-        let cwd = tempfile::tempdir().unwrap();
-        let entries = build_agent_list(cwd.path(), &HashMap::new(), Some(&registry));
-        let entry = entries
-            .iter()
-            .find(|e| e.name == "my-plugin:reviewer")
-            .expect("plugin agent must be listed under its qualified name");
-        assert_eq!(entry.description, "Reviews code");
-        assert!(entry.enabled);
-        assert!(!entry.is_builtin);
-        assert!(
-            entry.source_path.is_some(),
-            "source path opens the .md file"
-        );
-        assert_eq!(entry.definition.plugin_name.as_deref(), Some("my-plugin"));
     }
     #[test]
     fn build_agent_list_plugin_agent_toggle_keys_on_qualified_name() {

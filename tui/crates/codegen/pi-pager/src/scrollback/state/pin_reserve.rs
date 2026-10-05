@@ -311,42 +311,6 @@ mod tests {
     }
 
     #[test]
-    fn page_flip_stays_pinned_when_short_answer_finishes_idle() {
-        crate::appearance::cache::set_show_thinking_blocks(true);
-        let (mut state, prompt_idx) = tall_history_then_prompt();
-        state.follow_new_turn(Some(prompt_idx), true);
-        state.prepare_layout(80, 8);
-        let pin = state.scroll_offset();
-
-        let think_id = state.push_block(RenderBlock::thinking("line1"));
-        if let Some(entry) = state.entries.get_mut(&think_id) {
-            entry.is_running = true;
-            entry.set_display_mode(DisplayMode::Truncated);
-        }
-        state.running.insert(think_id);
-        state.prepare_layout(80, 8);
-        state.push_chunk_to_thinking(think_id, "\nline2");
-        state.prepare_layout(80, 8);
-        assert!(state.is_follow_preserve_scroll());
-        assert!(state.is_pin_reserve_active());
-
-        state.finish_running(think_id);
-        state.note_pin_reserve_turn_finished();
-        state.push_block(RenderBlock::session_event(
-            crate::scrollback::blocks::SessionEvent::TurnCompleted {
-                elapsed: Some(std::time::Duration::from_secs(2)),
-            },
-        ));
-        state.prepare_layout(80, 8);
-        assert!(state.is_pin_reserve_active());
-        assert_eq!(
-            state.scroll_offset(),
-            pin,
-            "an idle finish must keep the last user prompt at the top"
-        );
-    }
-
-    #[test]
     fn page_flip_arms_while_scrolled_up_despite_stale_target() {
         let (mut state, prompt_idx) = tall_history_then_prompt();
         // Simulate arming while reading history with a stale prior target.

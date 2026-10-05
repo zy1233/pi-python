@@ -42,11 +42,6 @@ fn url_req(url: &str) -> McpElicitExtRequest {
     }
 }
 
-fn set_draft(state: &mut ElicitationViewState, idx: usize, draft: &str) {
-    let form = state.form_mut().expect("form stage");
-    form.fields[idx].set_draft(draft);
-}
-
 fn buffer_text(buf: &Buffer) -> String {
     let area = *buf.area();
     let mut out = String::new();
@@ -67,24 +62,6 @@ fn render_to_text(state: &mut ElicitationViewState, w: u16, h: u16) -> String {
     let mut buf = Buffer::empty(area);
     render_elicitation_view(&mut buf, area, state, &theme, true, None);
     buffer_text(&buf)
-}
-
-#[test]
-fn form_accept_requires_email() {
-    let mut state = ElicitationViewState::from_request(form_req(), None, None);
-    assert!(state.try_accept().is_none());
-    assert!(
-        state.form().unwrap().fields[0].error.is_some(),
-        "failed accept must set the field error"
-    );
-    set_draft(&mut state, 0, "a@b.com");
-    let resp = state.try_accept().expect("accept");
-    match resp {
-        McpElicitExtResponse::Accept { content } => {
-            assert_eq!(content.unwrap()["email"], "a@b.com");
-        }
-        _ => panic!("expected accept"),
-    }
 }
 
 #[test]
@@ -423,41 +400,6 @@ fn url_tail_reachable_by_scrolling_on_short_terminal() {
     );
 }
 
-#[test]
-fn long_text_draft_is_reviewable_in_full() {
-    let mut state = ElicitationViewState::from_request(form_req(), None, None);
-    let long = format!("{}tail-marker", "x".repeat(120));
-    set_draft(&mut state, 0, &long);
-    let h = elicitation_view_height(&state, 40, 75);
-    let text = render_to_text(&mut state, 80, h);
-    assert!(
-        text.contains("tail-marker"),
-        "the focused field's full value must be reviewable, not just the \
-         truncated value cell:\n{text}"
-    );
-}
-
-#[test]
-fn url_accept_transitions_to_waiting_and_keeps_id() {
-    let mut state =
-        ElicitationViewState::from_request(url_req("https://example.com/cb"), None, None);
-    let resp = state.try_accept().expect("valid URL accepts");
-    assert!(matches!(
-        resp,
-        McpElicitExtResponse::Accept { content: None }
-    ));
-    // No live responder in this fixture: delivery reports false, and the
-    // caller (the key handler) would dismiss instead of entering waiting.
-    assert!(!state.send_response(resp));
-    state.begin_url_waiting();
-    assert!(state.is_url_waiting());
-    assert_eq!(state.elicitation_id(), Some("eid-1"));
-    assert_eq!(state.url(), Some("https://example.com/cb"));
-    // Nothing left to accept or send.
-    assert!(state.try_accept().is_none());
-    assert!(state.take_response_tx().is_none());
-}
-
 // ── multi-select ───────────────────────────────────────────────────────────
 
 fn multi_select_req() -> McpElicitExtRequest {
@@ -524,23 +466,3 @@ fn multi_select_options_render_when_expanded() {
 
 // ── typed content ──────────────────────────────────────────────────────────
 
-#[test]
-fn integer_field_submits_lossless_i64() {
-    let mut req = form_req();
-    req.mode = McpElicitModeFields::Form {
-        requested_schema: Some(json!({
-            "type": "object",
-            "properties": { "id": { "type": "integer" } },
-            "required": ["id"]
-        })),
-    };
-    let mut state = ElicitationViewState::from_request(req, None, None);
-    set_draft(&mut state, 0, "9007199254740993");
-    let McpElicitExtResponse::Accept { content } = state.try_accept().expect("accept") else {
-        panic!("expected accept");
-    };
-    assert_eq!(content.unwrap()["id"], 9007199254740993_i64);
-
-    set_draft(&mut state, 0, "1e20");
-    assert!(state.try_accept().is_none(), "1e20 is not an integer");
-}

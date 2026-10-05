@@ -2049,21 +2049,6 @@ pub(crate) fn allow_scope_label(
     }
 }
 
-/// Plain-string form of [`dynamic_option_label`] for surfaces without span
-/// styling (dashboard peek). Keeps every render surface on the one label
-/// source so what is shown always equals the scope the dispatch persists.
-pub(crate) fn option_label_for_selection(
-    option: &acp::PermissionOption,
-    selected_words: Option<&str>,
-    mcp_scope: Option<&McpScopeState>,
-) -> String {
-    let (prefix, scope_text) = dynamic_option_label(option, selected_words, mcp_scope);
-    match scope_text {
-        Some(scope) => format!("{prefix}{scope}"),
-        None => prefix,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3013,38 +2998,6 @@ mod tests {
         let (prefix, scope_text) = dynamic_option_label(&opt, Some("cargo test"), None);
         assert_eq!(prefix, "Never allow: ");
         assert_eq!(scope_text.as_deref(), Some("cargo test"));
-    }
-
-    #[test]
-    fn option_label_for_selection_matches_persisted_scope() {
-        // Peek surface contract: the composed label must show exactly the
-        // words the dispatch meta will persist, not the static full name.
-        let opt = acp::PermissionOption::new(
-            acp::PermissionOptionId::new(Arc::from("reject-always-command")),
-            "Never allow: cargo test --workspace".to_owned(),
-            acp::PermissionOptionKind::RejectAlways,
-        )
-        .meta(
-            serde_json::to_value(BashCommandPermission {
-                prompt_prefix: "Never allow:".to_owned(),
-            })
-            .ok()
-            .and_then(|v| v.as_object().cloned()),
-        );
-        assert_eq!(
-            option_label_for_selection(&opt, Some("cargo"), None),
-            "Never allow: cargo"
-        );
-        // Options without scope meta keep their static name.
-        let plain = acp::PermissionOption::new(
-            acp::PermissionOptionId::new(Arc::from("allow-once")),
-            "Yes, proceed".to_owned(),
-            acp::PermissionOptionKind::AllowOnce,
-        );
-        assert_eq!(
-            option_label_for_selection(&plain, Some("cargo"), None),
-            "Yes, proceed"
-        );
     }
 
     #[test]

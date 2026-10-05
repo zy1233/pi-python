@@ -192,11 +192,6 @@ fn read_file_capped(path: &std::path::Path, max_bytes: u64) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
-/// Resolve a tool path against session cwd for compatibility callers.
-pub fn resolve_edit_abs_path(path: &str, session_cwd: Option<&std::path::Path>) -> PathBuf {
-    resolve_edit_target_path(path, session_cwd).unwrap_or_else(|| PathBuf::from(path))
-}
-
 fn resolve_edit_target_path(path: &str, session_cwd: Option<&std::path::Path>) -> Option<PathBuf> {
     crate::render::tool_paths::resolve_tool_path_target(path, session_cwd)
 }
@@ -424,22 +419,6 @@ mod tests {
         assert_eq!(coalesced.get(&e1).unwrap().job_id, 2);
         assert_eq!(coalesced.get(&e1).unwrap().abs_path, PathBuf::from("/a2"));
         assert_eq!(coalesced.get(&e2).unwrap().job_id, 3);
-    }
-
-    #[test]
-    fn public_edit_highlight_path_api_remains_source_compatible() {
-        let job = EditHlJob {
-            job_id: 1,
-            entry_id: EntryId::new(1),
-            abs_path: PathBuf::from("/repo/src/lib.rs"),
-            path: "src/lib.rs".into(),
-            hunks: sample_hunks(),
-        };
-        assert_eq!(job.abs_path, PathBuf::from("/repo/src/lib.rs"));
-        assert_eq!(
-            resolve_edit_abs_path("src/lib.rs", Some(std::path::Path::new("/repo"))),
-            PathBuf::from("/repo/src/lib.rs")
-        );
     }
 
     #[test]

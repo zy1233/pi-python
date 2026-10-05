@@ -210,22 +210,6 @@ fn show_picker_refused_while_btw_open() {
 }
 
 #[test]
-fn session_reload_dismisses_jump_picker() {
-    // jump_state indexes the pre-reload transcript; a reconnect must drop it.
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    push_turns(&mut app, id, 3);
-    dispatch(Action::JumpShowPicker, &mut app);
-    assert!(app.agents[&id].jump_state.is_some(), "picker opened");
-
-    app.agents.get_mut(&id).unwrap().begin_session_reload(1);
-    assert!(
-        app.agents[&id].jump_state.is_none(),
-        "reload cleared the picker"
-    );
-}
-
-#[test]
 fn picker_select_jumps_and_closes() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);

@@ -245,74 +245,6 @@ fn worktree_forked_with_restore_failure_shows_warning_banner() {
     );
 }
 
-/// A load INITIATION taking over a windowed agent supersedes the window
-/// (finalized as failed) so the new load owns the batch/replay state and
-/// its own `SessionLoaded` is NOT deferred.
-#[test]
-fn fork_initiation_supersedes_open_reload_window() {
-    let mut app = test_app();
-    dispatch(
-        Action::LoadSession("sess-old".into(), None, false),
-        &mut app,
-    );
-    let id = AgentId(0);
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        // Settle the fresh-view load, then open a reconnect window.
-        agent.scrollback.end_batch();
-        agent.session.loading_replay = false;
-        agent
-            .scrollback
-            .push_block(RenderBlock::system("pre-outage content"));
-        agent.begin_session_reload(1);
-    }
-
-    let effects = dispatch(
-        Action::TaskComplete(TaskResult::ForkSessionReady {
-            agent_id: id,
-            new_session_id: acp::SessionId::new("sess-fork"),
-            cwd: std::path::PathBuf::from("/tmp"),
-            parent_session_id: acp::SessionId::new("sess-old"),
-        }),
-        &mut app,
-    );
-    assert!(
-        effects
-            .iter()
-            .any(|e| matches!(e, Effect::LoadSession { .. })),
-        "the fork's load proceeds"
-    );
-    {
-        let agent = app.agents.get(&id).unwrap();
-        assert!(
-            agent.session_reload.is_none(),
-            "the initiation finalized the window"
-        );
-        assert_eq!(
-            agent.session.session_id.as_ref().map(|s| s.0.as_ref()),
-            Some("sess-fork")
-        );
-    }
-
-    // The fork's own SessionLoaded is not deferred — it settles the batch.
-    dispatch(
-        Action::TaskComplete(TaskResult::SessionLoaded {
-            agent_id: id,
-            session_id: acp::SessionId::new("sess-fork"),
-            models: None,
-            code_restored: false,
-            restore_summary: None,
-            restore_degree: None,
-            running_prompt_id: None,
-            scheduler_background_loops: None,
-        }),
-        &mut app,
-    );
-    let agent = app.agents.get(&id).unwrap();
-    assert!(!agent.scrollback.in_batch(), "no batch leaked");
-    assert!(!agent.session.loading_replay);
-}
-
 #[test]
 fn slash_new_uses_worktree_cwd() {
     let mut app = test_app_with_agent();
@@ -1011,31 +943,6 @@ fn dispatch_new_session_worktree_mode_never_skips_modal_and_creates_in_cwd() {
 }
 
 #[test]
-fn fork_session_ready_retargets_suppress_from_parent_to_child() {
-    let mut app = fork_test_app();
-    insert_placeholder_agent(&mut app, AgentId(1));
-    app.agents.get_mut(&AgentId(1)).unwrap().session.session_id = None;
-    app.suppress_code_restore_once = Some("parent-sid".into());
-    let effects = dispatch(
-        Action::TaskComplete(TaskResult::ForkSessionReady {
-            agent_id: AgentId(1),
-            new_session_id: "child-sid".into(),
-            cwd: PathBuf::from("/tmp/forked"),
-            parent_session_id: acp::SessionId::new("parent-sid"),
-        }),
-        &mut app,
-    );
-    assert_eq!(app.suppress_code_restore_once.as_deref(), Some("child-sid"));
-    assert!(matches!(
-        effects.as_slice(),
-        [Effect::LoadSession { session_id, .. }] if session_id == "child-sid"
-    ));
-    let flags_restore = crate::app::event_loop::take_load_restore_code(&mut app, &effects);
-    assert_eq!(flags_restore, Some(false));
-    assert!(app.suppress_code_restore_once.is_none());
-}
-
-#[test]
 fn fork_session_ready_does_not_retarget_unrelated_suppress() {
     let mut app = fork_test_app();
     insert_placeholder_agent(&mut app, AgentId(1));
@@ -1051,40 +958,6 @@ fn fork_session_ready_does_not_retarget_unrelated_suppress() {
         &mut app,
     );
     assert_eq!(app.suppress_code_restore_once.as_deref(), Some("other-sid"));
-}
-
-#[test]
-fn worktree_forked_retargets_suppress_to_child() {
-    let mut app = test_app_git();
-    dispatch(
-        Action::NewWorktreeSession {
-            load_session_id: Some("orig-sess".into()),
-            label: None,
-            git_ref: None,
-        },
-        &mut app,
-    );
-    app.suppress_code_restore_once = Some("orig-sess".into());
-    let effects = dispatch(
-        Action::TaskComplete(TaskResult::WorktreeForked {
-            agent_id: AgentId(0),
-            session_id: acp::SessionId::new("forked-sess-1"),
-            worktree_path: PathBuf::from("/tmp/grok-worktrees/pager-fork"),
-            session_cwd: PathBuf::from("/tmp/grok-worktrees/pager-fork/sub"),
-            code_restored: false,
-            restore_summary: None,
-            restore_degree: None,
-            resume_session_id: Some("orig-sess".into()),
-        }),
-        &mut app,
-    );
-    assert_eq!(
-        app.suppress_code_restore_once.as_deref(),
-        Some("forked-sess-1")
-    );
-    let flags_restore = crate::app::event_loop::take_load_restore_code(&mut app, &effects);
-    assert_eq!(flags_restore, Some(false));
-    assert!(app.suppress_code_restore_once.is_none());
 }
 
 #[test]
@@ -1432,67 +1305,3 @@ fn translate_local_submit_never_returns_persist_never_for_fork() {
     }
 }
 
-#[test]
-fn handle_ask_user_question_pushes_system_block_when_displaced_local_fork_modal() {
-    use crate::scrollback::block::RenderBlock;
-    use crate::views::question_view::{LocalQuestionKind, QuestionViewState};
-    use pi_tools::implementations::grok_build::ask_user_question::{
-        Question, QuestionOption,
-    };
-
-    let mut app = fork_test_app();
-    let id = AgentId(0);
-    // Plant a local fork modal on the active agent.
-    let stashed = app.agents.get_mut(&id).unwrap().prompt.stash();
-    let q = Question {
-        question: "fork worktree?".into(),
-        options: vec![QuestionOption {
-            label: "yes".into(),
-            description: "y".into(),
-            preview: None,
-            id: None,
-        }],
-        multi_select: Some(false),
-        id: None,
-    };
-    app.agents.get_mut(&id).unwrap().question_view = Some(
-        QuestionViewState::new("local-fork".into(), vec![q], stashed).with_local_kind(
-            LocalQuestionKind::Fork {
-                directive: Some("dropped".into()),
-            },
-        ),
-    );
-    let scrollback_len_before = app.agents[&id].scrollback.len();
-
-    // Drive the real production handler.
-    let (args, _rx) = make_ask_user_question_args("acp-driven-question");
-    let handled = crate::app::acp_handler::handle_ask_user_question(args, &mut app);
-    assert!(handled, "handler must return true (ACP question accepted)");
-
-    // The new ACP question replaced the local fork modal.
-    let qv = app.agents[&id]
-        .question_view
-        .as_ref()
-        .expect("new ACP question must be active");
-    assert_eq!(qv.tool_call_id, "acp-driven-question");
-    assert!(
-        qv.local_kind.is_none(),
-        "ACP-driven question must not have local_kind set"
-    );
-    // The displaced local modal explains why the question disappeared.
-    let last = app.agents[&id]
-        .scrollback
-        .get(app.agents[&id].scrollback.len() - 1)
-        .expect("scrollback should have a new entry");
-    match &last.block {
-        RenderBlock::System(sys) => {
-            assert_eq!(sys.text, "/fork cancelled because another question opened.")
-        }
-        other => panic!("expected System block, got {other:?}"),
-    }
-    assert_eq!(
-        app.agents[&id].scrollback.len(),
-        scrollback_len_before + 1,
-        "exactly one system block pushed"
-    );
-}

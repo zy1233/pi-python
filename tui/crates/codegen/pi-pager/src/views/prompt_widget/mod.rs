@@ -516,47 +516,6 @@ impl StashedPrompt {
         )
     }
 
-    pub(crate) fn with_transformed_text(mut self, text: String) -> Self {
-        if self.text == text {
-            return self;
-        }
-        let Some(start) = self.text.rfind(&text) else {
-            crate::prompt_images::drain_and_cleanup(&mut self.images);
-            crate::prompt_images::drain_and_cleanup(&mut self.image_undo_stash);
-            self.text = text;
-            self.cursor = self.text.len();
-            self.chip_elements.clear();
-            self.image_counter = 0;
-            return self;
-        };
-        let end = start + text.len();
-        let mut image_numbers = std::collections::HashSet::new();
-        self.chip_elements.retain_mut(|chip| {
-            if chip.range.start < start || chip.range.end > end {
-                return false;
-            }
-            chip.range = chip.range.start - start..chip.range.end - start;
-            if chip.kind == KIND_IMAGE
-                && let Some(number) = parse_image_display_number(&text[chip.range.clone()])
-            {
-                image_numbers.insert(number);
-            }
-            true
-        });
-        self.images.retain(|image| {
-            if image_numbers.contains(&image.display_number) {
-                true
-            } else {
-                crate::prompt_images::cleanup_temp_file(image);
-                false
-            }
-        });
-        crate::prompt_images::drain_and_cleanup(&mut self.image_undo_stash);
-        self.text = text;
-        self.cursor = self.text.len();
-        self.image_counter = images_high_water(&self.images);
-        self
-    }
 }
 
 /// Reusable text prompt component.
@@ -679,7 +638,7 @@ impl PromptWidget {
             file_search: FileSearchState::new(cwd),
             pending_viewer_request: None,
             history_search: HistorySearchState::new(),
-            slash_controller: crate::slash::SlashController::with_builtins(cwd.to_path_buf()),
+            slash_controller: crate::slash::SlashController::with_builtins(),
             slash_state: crate::slash::SlashState::default(),
             slash_hovered: None,
             last_input_delta: crate::input_log::LastInputDelta::default(),

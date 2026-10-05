@@ -255,45 +255,6 @@ pub(super) fn handle_task_backgrounded(notif: &acp::ExtNotification, app: &mut A
     is_active
 }
 
-/// Handle `legacy/monitor_event` — background task or monitor emitted new output.
-pub(super) fn handle_monitor_event(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
-    let Ok(session_notif) = serde_json::from_str::<SessionNotification>(notif.params.get()) else {
-        return false;
-    };
-    let (task_id, _description, event_text) = match session_notif.update {
-        PiSessionUpdate::MonitorEvent {
-            task_id,
-            description,
-            event_text,
-        } => (task_id, description, event_text),
-        _ => return false,
-    };
-    let (matched, is_active, agent) = match resolve_notif_agent(app, &session_notif.session_id) {
-        Some(t) => t,
-        None => return false,
-    };
-
-    let child_sid: &str = session_notif.session_id.0.as_ref();
-    let session = if matches!(matched, SessionMatch::Child(_)) {
-        match agent.subagent_views.get_mut(child_sid) {
-            Some(child_view) => &mut child_view.session,
-            None => return false,
-        }
-    } else {
-        &mut agent.session
-    };
-
-    // Append the event text to the bg task's stdout buffer so the
-    // block viewer shows it (same as bash output chunks for bg tasks).
-    // `append_stdout` handles the trim, flips `truncated` on overflow,
-    // and refreshes `stdout_line_count`.
-    if let Some(task) = session.bg_tasks.get_mut(&task_id) {
-        task.append_stdout(&event_text);
-    }
-
-    is_active
-}
-
 pub(super) fn handle_scheduled_task_created(
     notif: &acp::ExtNotification,
     app: &mut AppView,
@@ -347,61 +308,6 @@ pub(super) fn handle_scheduled_task_created(
         }
     }
 
-    is_active
-}
-
-pub(super) fn handle_scheduled_task_fired(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
-    let Ok(session_notif) = serde_json::from_str::<SessionNotification>(notif.params.get()) else {
-        return false;
-    };
-    let (task_id, prompt, human_schedule, next_fire_at, subagent_id) = match session_notif.update {
-        PiSessionUpdate::ScheduledTaskFired {
-            task_id,
-            prompt,
-            human_schedule,
-            next_fire_at,
-            subagent_id,
-        } => (task_id, prompt, human_schedule, next_fire_at, subagent_id),
-        _ => return false,
-    };
-    let matched = match find_session_match(app, &session_notif.session_id) {
-        Some(m) => m,
-        None => return false,
-    };
-    let agent_id = matched.agent_id();
-    let is_active = is_matched_agent_active(app, agent_id);
-    let agent = app
-        .agents
-        .get_mut(&agent_id)
-        .expect("find_session_match returned an existing AgentId");
-
-    // Self-heal: if the task is unknown (e.g. a regression of the shell-side
-    // re-announce on session restore), insert a fresh entry from the fire
-    // payload so the tasks pane still shows the loop.
-    match agent.session.scheduled_tasks.entry(task_id) {
-        Entry::Occupied(mut e) => {
-            let info = e.get_mut();
-            info.next_fire_at = next_fire_at;
-            if subagent_id.is_some() {
-                info.last_subagent_id = subagent_id;
-            }
-        }
-        Entry::Vacant(e) => {
-            if next_fire_at.is_none() {
-                return is_active;
-            }
-            let task_id = e.key().clone();
-            e.insert(crate::app::agent::ScheduledTaskInfo {
-                task_id,
-                prompt,
-                human_schedule,
-                created_at: std::time::Instant::now(),
-                next_fire_at,
-                tag: "loop".into(),
-                last_subagent_id: subagent_id,
-            });
-        }
-    }
     is_active
 }
 
@@ -464,78 +370,6 @@ fn expired_task_notice(info: &crate::app::agent::ScheduledTaskInfo) -> String {
     )
 }
 
-pub(super) fn handle_scheduled_task_inject_prompt(
-    notif: &acp::ExtNotification,
-    app: &mut AppView,
-) -> bool {
-    let payload: serde_json::Value = match serde_json::from_str(notif.params.get()) {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(error = %e, "Failed to parse legacy/scheduled_task_inject_prompt");
-            return false;
-        }
-    };
-    let Some(session_id) = payload["sessionId"].as_str() else {
-        tracing::warn!("legacy/scheduled_task_inject_prompt: missing or non-string sessionId");
-        return false;
-    };
-    let Some(prompt) = payload["prompt"].as_str().filter(|s| !s.is_empty()) else {
-        tracing::warn!("legacy/scheduled_task_inject_prompt: missing or empty prompt");
-        return false;
-    };
-    let task_id = payload["taskId"].as_str().unwrap_or("unknown");
-    let human_schedule = payload["humanSchedule"].as_str().unwrap_or("unknown");
-    tracing::debug!(task_id, human_schedule, "Enqueuing scheduled cron prompt");
-
-    // Only the driver injects + runs the scheduled prompt. The
-    // `legacy/scheduled_task_inject_prompt` notification is routed by the agent
-    // to the SINGLE session driver, so any client that receives it IS the
-    // driver and must enqueue + run it — including a client that attached via
-    // `session/load` (`attached_as_viewer == true`) but is the designated driver. We therefore
-    // do NOT skip on `attached_as_viewer` here: that latched flag wrongly
-    // suppressed cron on an attacher-driver, leaving the loop stuck with no
-    // output. The other clients render the resulting turn from the broadcast
-    // deltas. (The de-dup guards below still prevent a double enqueue.)
-    let agent_id = {
-        let agent = app.agents.values_mut().find(|a| {
-            a.session
-                .session_id
-                .as_ref()
-                .is_some_and(|sid| sid.0.as_ref() == session_id)
-        });
-        let Some(agent) = agent else {
-            return false;
-        };
-
-        // Skip if this specific task is already running or queued.
-        if agent.cron_task_id.as_deref() == Some(task_id) {
-            tracing::debug!(task_id, "cron prompt skipped: task already running");
-            return true;
-        }
-        let already_queued = agent
-            .session
-            .pending_prompts
-            .iter()
-            .any(|p| p.task_id.as_deref() == Some(task_id));
-        if already_queued {
-            tracing::debug!(task_id, "cron prompt already queued, skipping duplicate");
-            return true;
-        }
-
-        let agent_id = agent.session.id;
-        agent.session.enqueue_cron_prompt(
-            prompt.to_string(),
-            task_id.to_string(),
-            human_schedule.to_string(),
-        );
-        agent_id
-    };
-    let effects = super::super::dispatch::drain_queue_for_agent(app, agent_id);
-    app.pending_effects.extend(effects);
-
-    true
-}
-
 /// Derive the effective CWD and worktree flag for a child session.
 ///
 /// Each field is derived independently: `child_cwd` controls the path,
@@ -551,62 +385,6 @@ pub(super) fn derive_child_cwd(
         .unwrap_or_else(|| parent_cwd.to_path_buf());
     let is_worktree = info.is_some_and(|i| i.worktree_path.is_some());
     (cwd, is_worktree)
-}
-
-/// Updates the cached branch/worktree display on the matching agent so the
-/// status bar can render without spawning `git` on every frame.
-pub(super) fn handle_git_head_changed(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
-    let Ok(params) = serde_json::from_str::<pi_workspace::session::git::GitHeadChanged>(
-        notif.params.get(),
-    ) else {
-        return false;
-    };
-
-    // Find the agent by ACP session id (not local AgentId) and update its git display cache
-    if let Some(agent) = app.agents.values_mut().find(|a| {
-        a.session
-            .session_id
-            .as_ref()
-            .is_some_and(|s| s.0.as_ref() == params.session_id.as_str())
-    }) {
-        // Refresh the shared per-cwd git cache so views keyed on this
-        // directory (the header / top bar when it's the process cwd) pick
-        // up the new branch without spawning subprocesses; the agent's own
-        // fields below drive its status bar / dashboard row directly.
-        crate::git_info::update_from_notification(
-            &agent.session.cwd,
-            params.branch.as_deref(),
-            params.main_repo.clone(),
-            params.is_worktree,
-        );
-        agent.current_branch = params.branch;
-        agent.is_worktree = params.is_worktree;
-        agent.main_repo = params.main_repo;
-        return true;
-    }
-
-    // Fallback: check child subagent views.
-    for agent in app.agents.values_mut() {
-        if let Some(child_view) = agent.subagent_views.values_mut().find(|cv| {
-            cv.session
-                .session_id
-                .as_ref()
-                .is_some_and(|s| s.0.as_ref() == params.session_id.as_str())
-        }) {
-            crate::git_info::update_from_notification(
-                &child_view.session.cwd,
-                params.branch.as_deref(),
-                params.main_repo.clone(),
-                params.is_worktree,
-            );
-            child_view.current_branch = params.branch;
-            child_view.is_worktree = params.is_worktree;
-            child_view.main_repo = params.main_repo;
-            return true;
-        }
-    }
-
-    false
 }
 
 pub(super) fn handle_task_completed(notif: &acp::ExtNotification, app: &mut AppView) -> bool {

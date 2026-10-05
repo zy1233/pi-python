@@ -266,27 +266,6 @@ impl AgentView {
         }
     }
 
-    /// A `Some` `server_name` must additionally equal the card's verbatim
-    /// wire server name, so one server cannot dismiss another's waiting card
-    /// by guessing its elicitation id. `None` (older shells) matches by id
-    /// alone.
-    pub(crate) fn dismiss_waiting_elicitation(
-        &mut self,
-        elicitation_id: &str,
-        server_name: Option<&str>,
-    ) -> bool {
-        let matches = self.elicitation_view.as_ref().is_some_and(|ev| {
-            ev.is_url_waiting()
-                && ev.elicitation_id().is_some_and(|id| id == elicitation_id)
-                && server_name.is_none_or(|name| name == ev.server_name_wire)
-        });
-        if !matches {
-            return false;
-        }
-        let _ = self.dismiss_elicitation_view();
-        true
-    }
-
     /// Remove the card without answering (URL waiting already answered;
     /// there is nothing left to send). Restores the stashed draft and
     /// promotes any parked request.

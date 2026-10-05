@@ -345,33 +345,6 @@ pub(crate) fn render_line_editor_search_bar(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn render_picker_search_bar_with_label(
-    buf: &mut Buffer,
-    x: u16,
-    y: u16,
-    width: u16,
-    theme: &Theme,
-    label: &str,
-    state: &PickerState,
-    active: bool,
-    show_hint: bool,
-    bg: Option<ratatui::style::Color>,
-) {
-    render_line_editor_search_bar_with_label(
-        buf,
-        x,
-        y,
-        width,
-        theme,
-        label,
-        &state.query,
-        active,
-        show_hint,
-        bg,
-    );
-}
-
-#[allow(clippy::too_many_arguments)]
 fn render_line_editor_search_bar_with_label(
     buf: &mut Buffer,
     x: u16,

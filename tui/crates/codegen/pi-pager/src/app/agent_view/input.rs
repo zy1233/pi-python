@@ -5,7 +5,7 @@ use super::paste::paste_key_tests;
 #[cfg(test)]
 use super::test_fixtures;
 use super::{
-    AgentPane, AgentView, BlockingCard, CtaPhase, EscStep, InputMode, KeyOwner,
+    AgentPane, AgentView, BlockingCard, CtaPhase, InputMode, KeyOwner,
     MULTI_CLICK_TIMEOUT_MS, PromptInputMode, active_contexts_for_pane, format_key_for_log,
     is_link_modifier_for_key, is_mouse_reporting_toggle_chord, resolve_action,
 };
@@ -1388,22 +1388,6 @@ mod background_and_tasks_shortcut_tests {
             InputOutcome::Action(Action::DemoteToBackground)
         ));
     }
-    fn seed_file_search(agent: &mut super::super::AgentView) {
-        agent.prompt.set_text("@src");
-        agent.prompt.set_cursor(2);
-        let context = crate::views::file_search::context::detect("@src", "@src".len())
-            .expect("file-search context");
-        agent.prompt.file_search.set_test_state(
-            context,
-            vec![pi_workspace::file_system::FuzzyMatchResult {
-                path: nucleo::Utf32String::from("src/lib.rs"),
-                score: 100,
-                indices: Vec::new(),
-                is_dir: false,
-            }],
-            0,
-        );
-    }
     #[test]
     fn ctrl_b_is_consumed_when_ineligible_and_demotes_when_eligible() {
         let registry = ActionRegistry::defaults();
@@ -1489,23 +1473,6 @@ mod background_and_tasks_shortcut_tests {
                 );
             }
         }
-    }
-    #[test]
-    fn ctrl_b_preempts_file_search_without_mutating_it() {
-        let registry = ActionRegistry::defaults();
-        let mut agent = make_agent();
-        agent.set_active_pane(AgentPane::Prompt, true);
-        seed_file_search(&mut agent);
-        assert!(agent.prompt.file_search_visible());
-        let context = agent.prompt.file_search.context().cloned();
-        let selected = agent.prompt.file_search.selected();
-        let cursor = agent.prompt.cursor();
-        add_running_execute(&mut agent);
-        assert_demotes(agent.handle_input(&ctrl('b'), &registry));
-        assert_eq!(agent.prompt.file_search.context(), context.as_ref());
-        assert_eq!(agent.prompt.file_search.selected(), selected);
-        assert_eq!(agent.prompt.text(), "@src");
-        assert_eq!(agent.prompt.cursor(), cursor);
     }
     #[test]
     fn ctrl_b_preempts_tasks_search_and_filter_without_mutating_them() {

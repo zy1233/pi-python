@@ -67,22 +67,6 @@ impl SafeAbsoluteDirectory {
 }
 
 impl FixRequest {
-    #[cfg(test)]
-    pub(crate) fn new_for_test(
-        id: DiagnosticId,
-        home: &Path,
-        shell: Option<PathBuf>,
-        validator: Option<PathBuf>,
-        byobu_config_dir: Option<PathBuf>,
-    ) -> Result<Self, FixError> {
-        Ok(Self {
-            id,
-            home: SafeAbsoluteDirectory::parse(home.to_path_buf(), "HOME")?,
-            shell,
-            validator,
-            byobu_config_dir,
-        })
-    }
 
     pub fn from_environment(id: DiagnosticId) -> Result<Self, FixError> {
         let home =
@@ -221,23 +205,6 @@ pub struct FixOutcome {
 }
 
 impl FixOutcome {
-    #[cfg(test)]
-    pub(crate) fn new_for_test(
-        id: DiagnosticId,
-        status: FixStatus,
-        path: PathBuf,
-        backup_path: Option<PathBuf>,
-        activation: FixActivation,
-        shell: Option<ShellKind>,
-    ) -> Self {
-        Self::new(
-            id,
-            status,
-            ChangedFile { path, backup_path },
-            activation,
-            shell,
-        )
-    }
 
     fn new(
         id: DiagnosticId,
@@ -534,22 +501,11 @@ pub(crate) fn human_fix_command(id: DiagnosticId) -> Option<String> {
     fix_spec(id).map(|spec| format!("grok doctor fix {}", spec.handle))
 }
 
-pub(crate) fn automatic_fix_choices()
--> impl Iterator<Item = (DiagnosticId, &'static str, &'static str)> {
-    FIX_REGISTRY
-        .iter()
-        .map(|spec| (spec.id, spec.handle, spec.label))
-}
-
 pub(crate) fn automatic_remediation_for(id: DiagnosticId) -> Option<AutomaticRemediation> {
     fix_spec(id).map(|spec| AutomaticRemediation {
         fix_id: id,
         command: spec.command,
     })
-}
-
-pub fn ssh_wrap_automatic_remediation() -> AutomaticRemediation {
-    automatic_remediation_for(SSH_WRAP_ID).expect("registered SSH wrap fix")
 }
 
 pub(crate) fn select_fix_plan(
@@ -1590,16 +1546,6 @@ pub fn configured_report(mut report: DiagnosticReport, configured: bool) -> Diag
         report.findings.retain(|finding| finding.id != SSH_WRAP_ID);
     }
     report
-}
-
-#[cfg(test)]
-pub(crate) fn test_fix_plan(home: &Path) -> FixPlan {
-    plan_fix(
-        tests::request(home, "/bin/bash"),
-        &tests::report(),
-        &TerminalContext::default(),
-    )
-    .unwrap()
 }
 
 #[cfg(test)]

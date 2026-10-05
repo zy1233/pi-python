@@ -27,10 +27,6 @@ impl SlashCommand for MultilineCommand {
         "Toggle multiline input mode (swap Enter and Shift+Enter)"
     }
 
-    fn usage(&self) -> &str {
-        "/multiline"
-    }
-
     fn run(&self, ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {
         let new = !ctx.pager_state.multiline_mode;
         CommandResult::Action(Action::SetMultilineMode(new))
@@ -41,21 +37,15 @@ impl SlashCommand for MultilineCommand {
 mod tests {
     use super::*;
     use crate::acp::model_state::ModelState;
-    use crate::app::bundle::BundleState;
     use crate::settings::PagerLocalSnapshot;
 
     fn make_ctx<'a>(
         models: &'a ModelState,
-        bundle: &'a BundleState,
         multiline_mode: bool,
     ) -> CommandExecCtx<'a> {
         CommandExecCtx {
             models,
-            session_id: None,
-            bundle_state: bundle,
             screen_mode: crate::app::ScreenMode::Inline,
-            billing_surface_visible: true,
-            usage_command_visible: true,
             pager_state: PagerLocalSnapshot {
                 multiline_mode,
                 yolo_mode: false,
@@ -69,8 +59,7 @@ mod tests {
     fn run_when_off_dispatches_set_to_true() {
         let cmd = MultilineCommand;
         let models = ModelState::default();
-        let bundle = BundleState::default();
-        let mut ctx = make_ctx(&models, &bundle, false);
+        let mut ctx = make_ctx(&models, false);
         let result = cmd.run(&mut ctx, "");
         match result {
             CommandResult::Action(Action::SetMultilineMode(b)) => {
@@ -85,8 +74,7 @@ mod tests {
     fn run_when_on_dispatches_set_to_false() {
         let cmd = MultilineCommand;
         let models = ModelState::default();
-        let bundle = BundleState::default();
-        let mut ctx = make_ctx(&models, &bundle, true);
+        let mut ctx = make_ctx(&models, true);
         let result = cmd.run(&mut ctx, "");
         match result {
             CommandResult::Action(Action::SetMultilineMode(b)) => {
@@ -101,8 +89,7 @@ mod tests {
     fn run_ignores_args() {
         let cmd = MultilineCommand;
         let models = ModelState::default();
-        let bundle = BundleState::default();
-        let mut ctx = make_ctx(&models, &bundle, false);
+        let mut ctx = make_ctx(&models, false);
         let result = cmd.run(&mut ctx, "extra args ignored");
         assert!(matches!(
             result,

@@ -36,9 +36,6 @@ pub enum ElicitationActionFocus {
 pub struct ElicitationViewState {
     pub tool_call_id: String,
     pub server_name: String,
-    /// Verbatim wire `serverName` for equality against later notifications
-    /// (the display `server_name` above is sanitized/truncated).
-    pub server_name_wire: String,
     pub message: String,
     pub stage: ElicitationStage,
     pub focus: ElicitationFocus,
@@ -72,13 +69,11 @@ pub struct UrlConsentStage {
     /// embedded credentials). `Some` disables Accept — the server can then
     /// only receive Decline or Cancel, never a false `accept`.
     pub invalid: Option<String>,
-    pub elicitation_id: String,
     pub response_tx: Option<ElicitResponseTx>,
 }
 
 pub struct UrlWaitingStage {
     pub display: UrlDisplay,
-    pub elicitation_id: String,
 }
 
 /// The URL as shown (and opened): normalized by the `url` crate when it
@@ -190,14 +185,6 @@ impl FormFieldUi {
         match &self.value {
             FieldValueUi::Text { draft } => draft,
             _ => "",
-        }
-    }
-
-    /// Replace a text field's draft (tests and paste-preload paths).
-    pub fn set_draft(&mut self, draft: impl Into<String>) {
-        if let FieldValueUi::Text { draft: d } = &mut self.value {
-            *d = draft.into();
-            self.error = None;
         }
     }
 
@@ -364,7 +351,6 @@ impl ElicitationViewState {
                 let stage = ElicitationStage::UrlConsent(UrlConsentStage {
                     display,
                     invalid,
-                    elicitation_id,
                     response_tx,
                 });
                 (stage, ElicitationFocus::Actions)
@@ -374,7 +360,6 @@ impl ElicitationViewState {
         Self {
             tool_call_id: req.tool_call_id,
             server_name: sanitize_server_text(&req.server_name, MAX_ELICIT_TITLE_CHARS),
-            server_name_wire: req.server_name,
             message: sanitize_server_text(&req.message, MAX_ELICIT_MESSAGE_CHARS),
             stage,
             focus,
@@ -429,14 +414,6 @@ impl ElicitationViewState {
         match &self.stage {
             ElicitationStage::UrlConsent(consent) => Some(consent.display.url.as_str()),
             ElicitationStage::UrlWaiting(waiting) => Some(waiting.display.url.as_str()),
-            ElicitationStage::Form(_) => None,
-        }
-    }
-
-    pub fn elicitation_id(&self) -> Option<&str> {
-        match &self.stage {
-            ElicitationStage::UrlConsent(consent) => Some(consent.elicitation_id.as_str()),
-            ElicitationStage::UrlWaiting(waiting) => Some(waiting.elicitation_id.as_str()),
             ElicitationStage::Form(_) => None,
         }
     }
@@ -739,10 +716,8 @@ impl ElicitationViewState {
                 host: consent.display.host.take(),
                 punycode_host: consent.display.punycode_host,
             };
-            let elicitation_id = std::mem::take(&mut consent.elicitation_id);
             self.stage = ElicitationStage::UrlWaiting(UrlWaitingStage {
                 display,
-                elicitation_id,
             });
             self.action_focus = ElicitationActionFocus::Accept;
             self.scroll = 0;

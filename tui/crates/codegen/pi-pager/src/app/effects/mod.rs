@@ -2422,37 +2422,5 @@ fn prompt_request_meta(
     }
     serde_json::Value::Object(map)
 }
-pub(crate) const REWIND_MODE_WIRE: &str = "conversation_only";
-pub(crate) fn rewind_execute_params(
-    session_id: &str,
-    target_prompt_index: usize,
-) -> serde_json::Value {
-    serde_json::json!({
-        "sessionId": session_id,
-        "targetPromptIndex": target_prompt_index,
-        "force": true,
-        "mode": REWIND_MODE_WIRE,
-    })
-}
-/// Build the `legacy ext RPC` params. The optional structured `content`
-/// (text + images) is omitted ENTIRELY when `None` so the legacy wire
-/// shape stays byte-identical. Extracted from the spawn for testability.
-fn build_interject_params(
-    session_id: &acp::SessionId,
-    text: &str,
-    interjection_id: &str,
-    blocks: Option<&[acp::ContentBlock]>,
-) -> serde_json::Value {
-    let mut params = serde_json::json!({
-        "sessionId": session_id.0.to_string(),
-        "text": text,
-        "interjectionId": interjection_id,
-    });
-    if let Some(blocks) = blocks {
-        params["content"] = serde_json::to_value(blocks)
-            .expect("serialize interject content");
-    }
-    params
-}
 #[cfg(test)]
 mod tests;

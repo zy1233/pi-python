@@ -14,8 +14,8 @@ use std::time::{Duration, Instant};
 const PROGRESS_KEEPALIVE: Duration = Duration::from_secs(5);
 
 pub use config::{
-    NotificationCondition, NotificationConfig, NotificationEventKind, NotificationHook,
-    NotificationMethod, TitleConfig, TitleItem,
+    NotificationCondition, NotificationConfig, NotificationEventKind, 
+    NotificationMethod, 
 };
 pub use title::TitleState;
 

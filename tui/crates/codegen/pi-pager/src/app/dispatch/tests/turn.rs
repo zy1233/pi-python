@@ -1729,7 +1729,6 @@ fn reconcile_applies_stashed_running_adoption() {
             text: Some("queued prompt".into()),
             combined_texts: None,
             kind: "prompt".into(),
-            turn_ended: false,
         },
     );
     arm_reconcile(

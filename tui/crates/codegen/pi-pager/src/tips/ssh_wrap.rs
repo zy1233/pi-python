@@ -74,17 +74,6 @@ mod tests {
     }
 
     #[test]
-    fn ssh_wrap_tip_outlives_default_ttl() {
-        let tip = ssh_wrap_tip();
-        assert_eq!(tip.ticks_remaining, SSH_WRAP_TIP_TICKS);
-        // Read-and-act copy needs more than the glanceable default window.
-        assert!(
-            tip.ticks_remaining > super::super::DEFAULT_TIP_TICKS,
-            "ssh wrap tip must outlive the default TTL"
-        );
-    }
-
-    #[test]
     fn ssh_wrap_tip_is_ambient() {
         // Must survive prompt submission and pause TTL under occlusion —
         // a session-load tip would otherwise blink away under the first

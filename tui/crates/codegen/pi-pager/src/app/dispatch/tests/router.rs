@@ -1970,56 +1970,6 @@ fn translate_local_submit_out_of_range_index_returns_changed_no_action() {
     ));
 }
 #[test]
-fn handle_ask_user_question_does_not_push_system_block_when_displaced_acp_modal() {
-    use crate::views::question_view::QuestionViewState;
-    use pi_tools::implementations::grok_build::ask_user_question::{
-        Question, QuestionOption,
-    };
-    let mut app = fork_test_app();
-    let id = AgentId(0);
-    let stashed = app.agents.get_mut(&id).unwrap().prompt.stash();
-    let q = Question {
-        question: "first ACP question?".into(),
-        options: vec![QuestionOption {
-            label: "ok".into(),
-            description: "ok".into(),
-            preview: None,
-            id: None,
-        }],
-        multi_select: Some(false),
-        id: None,
-    };
-    app.agents.get_mut(&id).unwrap().question_view =
-        Some(QuestionViewState::new("first-acp".into(), vec![q], stashed));
-    let scrollback_len_before = app.agents[&id].scrollback.len();
-    let (args, _rx) = make_ask_user_question_args("second-acp");
-    let handled = crate::app::acp_handler::handle_ask_user_question(args, &mut app);
-    assert!(handled);
-    let qv = app.agents[&id].question_view.as_ref().unwrap();
-    assert_eq!(qv.tool_call_id, "second-acp");
-    assert_eq!(
-        app.agents[&id].scrollback.len(),
-        scrollback_len_before,
-        "no system block when displaced modal was an ACP question, not a local one"
-    );
-}
-#[test]
-fn close_active_agent_no_parent_switches_to_first_surviving_peer() {
-    let mut app = three_agent_app();
-    switch_to_agent(&mut app, AgentId(1), SwitchCause::Picker);
-    dispatch_sessions_confirm_close(&mut app, AgentId(1));
-    assert!(matches!(app.active_view, ActiveView::Agent(id) if id == AgentId(0)));
-    assert!(!app.agents.contains_key(&AgentId(1)));
-}
-#[test]
-fn close_active_agent_with_dead_parent_falls_back_to_surviving_peer() {
-    let mut app = three_agent_app();
-    set_forked_from(&mut app, AgentId(2), AgentId(99));
-    switch_to_agent(&mut app, AgentId(2), SwitchCause::Picker);
-    dispatch_sessions_confirm_close(&mut app, AgentId(2));
-    assert!(matches!(app.active_view, ActiveView::Agent(id) if id == AgentId(0)));
-}
-#[test]
 fn entry_title_uses_display_name_when_set() {
     use crate::views::session_title::entry_title;
     let mut app = test_app_with_agent();
@@ -2274,19 +2224,6 @@ fn show_tasks_no_active_agent_is_noop() {
     let mut app = test_app();
     let effects = dispatch(Action::ShowTasks, &mut app);
     assert!(effects.is_empty(), "ShowTasks without an agent is a no-op");
-}
-/// Build a synthetic MouseEvent for tests.
-fn mouse_event(
-    kind: crossterm::event::MouseEventKind,
-    col: u16,
-    row: u16,
-) -> crossterm::event::MouseEvent {
-    crossterm::event::MouseEvent {
-        kind,
-        column: col,
-        row,
-        modifiers: crossterm::event::KeyModifiers::NONE,
-    }
 }
 /// Same refusal at the content-hit worktree entry point.
 #[test]

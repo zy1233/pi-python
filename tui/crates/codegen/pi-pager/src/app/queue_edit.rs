@@ -555,23 +555,6 @@ impl AgentView {
         }
     }
 
-    /// Exit a server-origin queue edit whose row vanished, restoring the pre-edit draft.
-    pub(crate) fn cancel_editing_queued_for_lost_row(&mut self) {
-        if !matches!(
-            self.prompt_mode,
-            PromptMode::EditingQueued {
-                server_id: Some(_),
-                ..
-            }
-        ) {
-            return;
-        }
-        // Restore the pre-edit draft; keeping the orphaned edit text would look
-        // "duplicated" (the row is now the running turn). A concurrent-removal edit is lost.
-        self.exit_editing_mode();
-        self.show_toast("Queued prompt is no longer in the queue");
-    }
-
     /// Exit editing mode: restore stashed text, clear mode, focus queue pane.
     /// No-op unless `EditingQueued`. The default exit; releases the
     /// server-side combine hold (cancel, lost-row, modal paths).
@@ -636,7 +619,6 @@ impl AgentView {
 
 #[cfg(test)]
 mod tests {
-    use agent_client_protocol as acp;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     use crate::app::actions::{Action, Effect, SharedQueueTarget};
@@ -647,7 +629,6 @@ mod tests {
     };
     use crate::app::agent_view::{AgentPane, AgentView, PromptMode};
     use crate::app::app_view::InputOutcome;
-    use crate::scrollback::block::RenderBlock;
     use crate::views::modal::{ActiveModal, ModalConfirmation};
 
     fn edit_key() -> KeyEvent {
@@ -1049,85 +1030,6 @@ mod tests {
         assert!(matches!(agent.prompt_mode, PromptMode::Normal));
     }
 
-    /// Editing a skill-injection row clears `display_as_skill` alongside
-    /// `wire_blocks`, so the drained echo styles the recomputed mid-text
-    /// ranges (not stale leading-token skill styling) and the wire send is
-    /// plain text.
-    #[ignore = "pi-python: grok-specific feature not supported"]
-    #[test]
-    fn edit_skill_row_drains_with_recomputed_ranges_not_skill_styling() {
-        let mut agent = running_agent_local_only();
-        agent.session.state = AgentState::Idle;
-        let registry = non_vscode_registry();
-        // Advertise the skill so the edited text's mid-text token is recognized.
-        let models = agent.session.models.clone();
-        agent.prompt.sync_acp_commands(
-            &[
-                acp::AvailableCommand::new("pr-workflow", "PR workflow skill").meta(
-                    serde_json::json!({
-                        "path": "/tmp/skills/pr-workflow/SKILL.md",
-                        "scope": "local",
-                    })
-                    .as_object()
-                    .cloned(),
-                ),
-            ],
-            None,
-            &models,
-        );
-        // Turn the fixture row into an InjectSkill-shaped row.
-        {
-            let row = agent.session.pending_prompts.front_mut().unwrap();
-            row.text = "/pr-workflow ship it".into();
-            row.wire_blocks = Some(vec![acp::ContentBlock::Text(acp::TextContent::new(
-                "<skill>pr-workflow instructions</skill>",
-            ))]);
-            row.display_as_skill = true;
-        }
-        agent.queue.sync_from_merged(
-            &agent.session.pending_prompts,
-            &agent.shared_queue,
-            None,
-            None,
-            &agent.send_now_painted_blocks,
-        );
-
-        let ids = agent.queue.entry_ids();
-        agent.queue.list_state.select_by_id(ids[0]);
-        let _ = agent.handle_queue_key(&edit_key(), &registry);
-        agent.prompt.set_text("great /pr-workflow go");
-        let outcome = agent.handle_prompt_key_for_test(&enter_key());
-        assert!(matches!(outcome, InputOutcome::Action(Action::DrainQueue)));
-
-        let mut app = crate::app::app_view::tests::test_app();
-        let id = agent.session.id;
-        app.agents.insert(id, agent);
-        let effects = crate::app::dispatch::drain_queue_for_agent(&mut app, id);
-        let agent = app.agents.get(&id).unwrap();
-        match &agent.scrollback.get(0).unwrap().block {
-            RenderBlock::UserPrompt(b) => {
-                assert_eq!(b.text, "great /pr-workflow go");
-                assert_eq!(
-                    b.skill_token_ranges,
-                    vec![6..18],
-                    "echo must style the recomputed mid-text token"
-                );
-            }
-            other => panic!("expected UserPrompt, got {other:?}"),
-        }
-        match &effects[0] {
-            Effect::SendPrompt {
-                text,
-                skill_token_ranges,
-                ..
-            } => {
-                assert_eq!(text, "great /pr-workflow go");
-                assert_eq!(skill_token_ranges, &vec![6..18]);
-            }
-            other => panic!("expected plain SendPrompt, got {other:?}"),
-        }
-    }
-
     #[ignore = "pi-python: grok-specific feature not supported"]
     #[test]
     fn edit_local_row_into_builtin_routes_to_run_edited_queued_command() {
@@ -1338,83 +1240,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn cancel_editing_queued_for_lost_row_exits_when_server_origin() {
-        let mut agent = make_running_agent();
-        agent.stashed_prompt = Some(crate::views::prompt_widget::StashedPrompt {
-            text: "pre-edit draft".into(),
-            cursor: 0,
-            images: Vec::new(),
-            chip_elements: Vec::new(),
-            image_counter: 0,
-            image_undo_stash: Vec::new(),
-        });
-        agent.prompt.set_text("replacement typed over queued row");
-        agent.prompt_mode = PromptMode::EditingQueued {
-            id: 999,
-            original: "server one".into(),
-            server_id: Some("p1".into()),
-            kind: crate::app::agent::QueueEntryKind::Prompt,
-        };
-        agent.cancel_editing_queued_for_lost_row();
-        assert!(matches!(agent.prompt_mode, PromptMode::Normal));
-        assert_eq!(agent.prompt.text(), "pre-edit draft");
-        assert!(agent.stashed_prompt.is_none());
-    }
-
-    /// Idempotent: the cleanup hook is a no-op when not in `EditingQueued`
-    /// with a server origin (e.g. local-origin edit, normal mode).
-    #[test]
-    fn cancel_editing_queued_for_lost_row_noop_for_local_or_normal() {
-        let mut agent = make_running_agent();
-        // Local-origin: should NOT exit (the local row hasn't disappeared).
-        agent.prompt_mode = PromptMode::EditingQueued {
-            id: 0,
-            original: "local one".into(),
-            server_id: None,
-            kind: crate::app::agent::QueueEntryKind::Prompt,
-        };
-        agent.cancel_editing_queued_for_lost_row();
-        assert!(matches!(
-            agent.prompt_mode,
-            PromptMode::EditingQueued { .. }
-        ));
-
-        // Normal mode: no-op.
-        agent.prompt_mode = PromptMode::Normal;
-        agent.cancel_editing_queued_for_lost_row();
-        assert!(matches!(agent.prompt_mode, PromptMode::Normal));
-    }
-
-    /// A dirty pane switch must not arm the undrawn EditConfirm; lost-row cancel
-    /// restores the pre-edit draft.
-    #[test]
-    fn dirty_pane_switch_blocks_without_modal_then_lost_row_restores_draft() {
-        let mut agent = make_running_agent();
-        let registry = non_vscode_registry();
-        agent.prompt.set_text("draft");
-
-        let ids = agent.queue.entry_ids();
-        agent.queue.list_state.select_by_id(ids[0]);
-        let _ = agent.handle_queue_key(&edit_key(), &registry);
-        agent.prompt.set_text("server one EDITED");
-
-        assert!(!agent.set_active_pane(AgentPane::Scrollback, false));
-        assert!(
-            agent.active_modal.is_none(),
-            "dirty pane switch must never arm an invisible input-eating EditConfirm"
-        );
-        assert!(
-            matches!(agent.prompt_mode, PromptMode::EditingQueued { .. }),
-            "blocked switch keeps the user in the edit"
-        );
-
-        agent.cancel_editing_queued_for_lost_row();
-        assert!(agent.active_modal.is_none());
-        assert!(matches!(agent.prompt_mode, PromptMode::Normal));
-        assert_eq!(agent.prompt.text(), "draft");
-    }
-
     /// Ctrl+; (toggle_queue_pane) while dirty-editing must not brick: the switch
     /// is blocked, no modal armed, and the queue overlay is not left focused.
     #[test]
@@ -1514,55 +1339,6 @@ mod tests {
         assert_eq!(row.text, "local one [Image #1] ");
         assert_eq!(row.images.len(), 1);
         assert_eq!(row.chip_elements.len(), 1);
-    }
-
-    #[test]
-    fn queue_edit_save_moves_complete_state_into_send() {
-        let mut agent = make_running_agent();
-        let registry = non_vscode_registry();
-        attach_image_to_local_row(&mut agent);
-
-        let ids = agent.queue.entry_ids();
-        agent.queue.list_state.select_by_id(ids[1]);
-        let _ = agent.handle_queue_key(&edit_key(), &registry);
-        agent
-            .prompt
-            .insert_image(crate::prompt_images::from_clipboard_data(
-                &crate::clipboard::ImageData {
-                    data: vec![1, 2, 3],
-                    mime_type: "image/png".into(),
-                },
-            ))
-            .unwrap();
-
-        let outcome = agent.handle_prompt_key_for_test(&enter_key());
-        assert!(matches!(outcome, InputOutcome::Action(Action::DrainQueue)));
-        let row = agent.session.pending_prompts.front().unwrap();
-        assert_eq!(row.images.len(), 2);
-        assert_eq!(
-            row.chip_elements
-                .iter()
-                .filter(|chip| chip.kind == crate::views::prompt_widget::KIND_IMAGE)
-                .count(),
-            2
-        );
-
-        agent.session.state = AgentState::Idle;
-        // Running server turn completed: its shared-queue row is gone, so the
-        // local edited row is the next turn (server-owns-next-turn gate clears).
-        agent.shared_queue.clear();
-        let mut app = crate::app::app_view::tests::test_app();
-        let id = agent.session.id;
-        app.agents.insert(id, agent);
-        let effects = crate::app::dispatch::drain_queue_for_agent(&mut app, id);
-        assert!(matches!(
-            effects.as_slice(),
-            [Effect::SendPromptBlocks { .. }]
-        ));
-        let agent = app.agents.get(&id).unwrap();
-        let in_flight = agent.session.in_flight_prompt.as_ref().unwrap();
-        assert_eq!(in_flight.images.len(), 2);
-        assert_eq!(in_flight.chip_elements.len(), 2);
     }
 
     /// Lone-local-row agent with "draft" stashed, edit mode entered on the

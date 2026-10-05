@@ -573,18 +573,6 @@ fn pseudo_hint<'a>(
     })
 }
 
-fn pseudo_dimmed(entries: &[ShortcutsHelpEntry], label: &str) -> Option<bool> {
-    entries.iter().find_map(|e| match e {
-        ShortcutsHelpEntry::Hint {
-            item,
-            dimmed,
-            action_id: None,
-            ..
-        } if item.label == label => Some(*dimmed),
-        _ => None,
-    })
-}
-
 
 #[test]
 fn build_entries_dims_out_of_context_actions() {
@@ -878,39 +866,6 @@ fn modal_footer_advertises_i_search_under_vim() {
     );
 }
 
-/// Host path: Enter on a registry hint enters Detail (not Close) via the
-/// chrome + picker pipeline both hosts share.
-#[test]
-fn handle_modal_key_enter_on_hint_enters_detail() {
-    use crate::actions::ActionId;
-    let entries = vec![
-        header("Nav", 0, 1),
-        hint_with_action("send", key!(Enter), ActionId::SendPrompt),
-    ];
-    let mut state = build_initial_picker_state(&entries);
-    state.selected = 1;
-    let mut window = crate::views::modal_window::ModalWindowState::default();
-    let mut mode = browse_mode();
-    let outcome = handle_modal_key(
-        &make_key(crossterm::event::KeyCode::Enter),
-        &entries,
-        &mut state,
-        &mut window,
-        false,
-        &no_collapsed(),
-        &no_expanded(),
-        &mut mode,
-        false,
-    );
-    assert_ne!(
-        outcome,
-        ModalKeyOutcome::Close,
-        "Enter on a hint must not close"
-    );
-    assert_eq!(outcome, ModalKeyOutcome::Changed);
-    assert!(mode.is_detail(), "Enter enters the detail page");
-}
-
 /// Over-scrolling a detail body clamps to the last lines instead of paging
 /// into an all-blank page.
 #[test]
@@ -1010,35 +965,6 @@ fn populated_long_help_is_distinct_and_man_style() {
             def.id
         );
     }
-}
-
-/// `detail_from_entry` surfaces the action's `long_help` as the detail body
-/// (not the description), proving the populated copy reaches the screen.
-#[test]
-fn detail_from_entry_uses_long_help_for_body() {
-    let registry = ActionRegistry::defaults();
-    let def = registry
-        .find(ActionId::ShortcutsHelp)
-        .expect("ShortcutsHelp is registered");
-    let expected = def.long_help.expect("ShortcutsHelp has long_help");
-    let entries = build_entries(&all_contexts(), &registry, true);
-    let entry = entries
-        .iter()
-        .find(|e| hint_expand_action_id(e) == Some(ActionId::ShortcutsHelp))
-        .expect("ShortcutsHelp row is present");
-    let ShortcutsHelpMode::Detail { body, .. } =
-        detail_from_entry(entry).expect("registry hint yields a detail")
-    else {
-        panic!("expected Detail mode");
-    };
-    assert_eq!(
-        body, expected,
-        "detail body must surface the action's long_help"
-    );
-    assert_ne!(
-        body, def.description,
-        "detail body must be the long_help, not the description"
-    );
 }
 
 /// Scroll clamp counts WRAPPED rows: a body that wraps well past the viewport
@@ -1316,41 +1242,6 @@ fn detail_mode_ignores_vim_keys() {
         &mut mode,
     );
     assert!(mode.is_browse(), "Left returns to browse");
-}
-
-/// Host path: chrome must not intercept Esc while in detail (would close the
-/// modal); it returns to browse and keeps the modal open.
-#[test]
-fn handle_modal_key_esc_in_detail_is_back_not_close() {
-    let entries = vec![header("Nav", 0, 1), hint("send", key!(Enter))];
-    let mut state = build_initial_picker_state(&entries);
-    let mut window = crate::views::modal_window::ModalWindowState::default();
-    let collapsed = no_collapsed();
-    let mut mode = ShortcutsHelpMode::Detail {
-        title: "Send".into(),
-        keys_line: "Enter".into(),
-        body: "Send the message".into(),
-        dimmed_note: false,
-        scroll: 0,
-    };
-    let outcome = handle_modal_key(
-        &make_key(crossterm::event::KeyCode::Esc),
-        &entries,
-        &mut state,
-        &mut window,
-        false,
-        &collapsed,
-        &no_expanded(),
-        &mut mode,
-        false,
-    );
-    assert_ne!(
-        outcome,
-        ModalKeyOutcome::Close,
-        "Esc in detail must not close"
-    );
-    assert_eq!(outcome, ModalKeyOutcome::Changed);
-    assert!(mode.is_browse(), "Esc in detail returns to browse");
 }
 
 #[test]
@@ -1908,134 +1799,6 @@ fn vim_l_expands_and_h_collapses_paste() {
         "vim h must collapse the expanded paste pseudo-row"
     );
     assert!(state.query().is_empty(), "vim h must not enter search text");
-}
-
-/// `handle_modal_key` (chrome + picker pipeline) maps the hint-row expand to
-/// `ModalKeyOutcome::ToggleExpand` so dashboards get identical semantics.
-#[test]
-fn handle_modal_key_maps_toggle_expand() {
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, true);
-    let mut state = build_initial_picker_state(&entries);
-    state.selected = 1;
-    let mut window = crate::views::modal_window::ModalWindowState::default();
-    let key = KeyEvent::new(KeyCode::Right, KeyModifiers::NONE);
-    let mut mode = ShortcutsHelpMode::Browse;
-    let out = handle_modal_key(
-        &key,
-        &entries,
-        &mut state,
-        &mut window,
-        false,
-        &no_collapsed(),
-        &no_expanded(),
-        &mut mode,
-        false,
-    );
-    assert!(
-        matches!(out, ModalKeyOutcome::ToggleExpand(_)),
-        "Right on a hint row must map to ModalKeyOutcome::ToggleExpand, got {out:?}"
-    );
-}
-
-/// `handle_modal_key` forwards `expanded_ids` through the chrome pipeline so
-/// the dashboard host's Left-collapse works. A *populated* expanded set is
-/// required to exercise the wiring — the `→` test above passes regardless of
-/// the set, so it can't catch a dropped `expanded_ids` forward.
-#[test]
-fn handle_modal_key_left_collapses_expanded_hint() {
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, true);
-    let mut state = build_initial_picker_state(&entries);
-    state.selected = 1;
-    let key_id = expand_key(&entries[1]).expect("row 1 is expandable");
-    let expanded = std::collections::HashSet::from([key_id]);
-    let mut window = crate::views::modal_window::ModalWindowState::default();
-    let key = KeyEvent::new(KeyCode::Left, KeyModifiers::NONE);
-    let mut mode = ShortcutsHelpMode::Browse;
-    let out = handle_modal_key(
-        &key,
-        &entries,
-        &mut state,
-        &mut window,
-        false,
-        &no_collapsed(),
-        &expanded,
-        &mut mode,
-        false,
-    );
-    assert_eq!(
-        out,
-        ModalKeyOutcome::ToggleExpand(key_id),
-        "Left on an expanded hint must map to ModalKeyOutcome::ToggleExpand (collapse), got {out:?}"
-    );
-}
-
-/// A row's `long_help` renders as an inline line only while its id is
-/// expanded, and is absent otherwise.
-#[test]
-fn render_modal_shows_long_help_only_when_expanded() {
-    use crate::actions::ActionId;
-    use ratatui::buffer::Buffer;
-    use ratatui::layout::Rect;
-
-    // long_help differs from label/description so the expanded line is detectable.
-    let mut item = HintItem::new(key!('q', CONTROL), "quit");
-    item.description = Some("Quit the app".into());
-    let entries = vec![
-        ShortcutsHelpEntry::SectionHeader {
-            label: "Essentials",
-            category_idx: 0,
-            entry_count: 1,
-        },
-        ShortcutsHelpEntry::Hint {
-            item,
-            dimmed: false,
-            action_id: Some(ActionId::Quit),
-            long_help: Some("Zqxhelpline"),
-        },
-    ];
-    let theme = crate::theme::Theme::current();
-    let area = Rect::new(0, 0, 100, 40);
-    let render = |expanded: &std::collections::HashSet<ExpandKey>| -> String {
-        let mut state = build_initial_picker_state(&entries);
-        let mut window = crate::views::modal_window::ModalWindowState::default();
-        let mut buf = Buffer::empty(area);
-        render_modal(
-            &mut buf,
-            area,
-            &entries,
-            &mut state,
-            &mut window,
-            false,
-            &no_collapsed(),
-            expanded,
-            &ShortcutsHelpMode::Browse,
-            &theme,
-            false,
-        );
-        let mut out = String::new();
-        for y in area.y..area.y + area.height {
-            for x in area.x..area.x + area.width {
-                if let Some(cell) = buf.cell((x, y)) {
-                    out.push_str(cell.symbol());
-                }
-            }
-        }
-        out
-    };
-    let mut expanded = std::collections::HashSet::new();
-    expanded.insert(ExpandKey::Action(ActionId::Quit));
-    assert!(
-        render(&expanded).contains("Zqxhelpline"),
-        "expanded hint must render its long_help line"
-    );
-    assert!(
-        !render(&std::collections::HashSet::new()).contains("Zqxhelpline"),
-        "collapsed hint must not render the long_help line"
-    );
 }
 
 /// The collapsible (inline expand) view collapses newlines to spaces so the

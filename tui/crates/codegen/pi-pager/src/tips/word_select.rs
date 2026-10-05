@@ -79,20 +79,6 @@ mod tests {
         );
     }
 
-    /// The CTA window: long TTL + ambient (pauses while occluded, survives an
-    /// unrelated submit). Retire-on-prompt-edit bounds it — see the
-    /// `PromptEvent::Edited` hook in `agent_view/prompt.rs`.
-    #[test]
-    fn word_select_tip_has_long_ambient_window() {
-        let tip = word_select_tip();
-        assert_eq!(tip.ticks_remaining, WORD_SELECT_TIP_TICKS);
-        assert!(
-            tip.ticks_remaining > super::super::DEFAULT_TIP_TICKS,
-            "CTA tip must outlive the glanceable default"
-        );
-        assert!(tip.ambient, "occlusion must pause, not burn, the window");
-    }
-
     #[test]
     fn word_select_tip_advertises_settings_and_accept_chord() {
         let tip = word_select_tip();

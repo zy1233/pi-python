@@ -3,7 +3,7 @@ use std::path::Path;
 use agent_client_protocol as acp;
 use tokio::task::JoinSet;
 use pi_acp_lib::{AcpAgentTx, acp_send};
-use super::actions::{PermissionModePersist, SubagentKillOutcome, TaskResult};
+use super::actions::{PermissionModePersist, TaskResult};
 use super::agent::AgentId;
 use crate::acp::model_state::MODEL_CONFIG_ID_META_KEY;
 use crate::unified_log as ulog;
@@ -11,8 +11,6 @@ use pi_shell::sampling::error::{
     RATE_LIMITED_ERROR_CODE, error_detail_from_data, format_rate_limited_user_message,
     http_status_from_error,
 };
-use pi_shell::session::ExtMethodResult;
-use pi_shell::session::unified_list::ListScope;
 /// Floor for the session create/load RPCs.
 const SESSION_RPC_FLOOR: std::time::Duration = std::time::Duration::from_secs(180);
 /// Headroom over the agent-side `.envrc` budget for the rest of session setup.
@@ -140,26 +138,6 @@ pub(super) fn format_restore_elapsed(d: std::time::Duration) -> String {
     } else {
         format!("{}.{:01}s", secs, d.subsec_millis() / 100)
     }
-}
-/// CANONICAL wire parser for the worktree resume response. Any other code
-/// consuming the `codeRestored` / `restoreSummary` / `restoreDegree` shape
-/// MUST go through this function — do not re-implement.
-pub(super) fn parse_worktree_restore_payload(
-    result_obj: &serde_json::Value,
-) -> (bool, Option<String>, Option<pi_workspace::session::git::RestoreDegree>) {
-    let code_restored = result_obj
-        .get("codeRestored")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let restore_summary = result_obj
-        .get("restoreSummary")
-        .and_then(|v| v.as_str())
-        .map(String::from);
-    let restore_degree = result_obj
-        .get("restoreDegree")
-        .cloned()
-        .and_then(|v| serde_json::from_value(v).ok());
-    (code_restored, restore_summary, restore_degree)
 }
 /// CANONICAL wire parser for `LoadSessionResponse._meta.codeRestore`. Any
 /// other code consuming this shape MUST go through this function — do not
@@ -390,10 +368,6 @@ pub(crate) struct SessionFlags {
     pub plan_mode: bool,
     pub subagents: bool,
     pub ask_user: bool,
-    /// Restore code state on resume (`--restore-code`).
- /// Injected as `legacy ext RPC` into `LoadSession` meta, or passed
-    /// as `restoreCode` in the `resume_session` ACP payload for worktrees.
-    pub restore_code: Option<bool>,
     pub agent_override: Option<serde_json::Value>,
     /// Always-approve for this session (`_meta.yoloMode`).
     pub yolo_mode: bool,
@@ -415,10 +389,6 @@ pub(crate) struct SessionFlags {
     /// Active auth is API key (not OAuth/session). Drives rate-limit copy in
     /// `format_acp_error`. Default `false` (OAuth copy) for tests.
     pub is_api_key_auth: bool,
-    /// Startup resume target deferred to the worktree handler after missing
-    /// local id/title resolution. Worktree failure messages append the
-    /// no-match hint only when the failing target equals this value.
-    pub resume_local_miss: Option<String>,
 }
 impl SessionFlags {
     /// Resolve the agent profile name from the flags.
@@ -740,18 +710,6 @@ impl ConversationsPartial {
             Self::Timeout | Self::Error => "Couldn't load conversations: retry",
         }
     }
-}
-/// Read `_meta key` from a session-list payload. `None` when the
-/// conversations lane completed (or was skipped); unknown reasons degrade to
-/// [`ConversationsPartial::Error`].
-pub(super) fn parse_session_list_partial(
-    _payload: &serde_json::Value,
-) -> Option<ConversationsPartial> {
-    None
-}
-/// Reads `_meta key` from a session-list payload.
-pub(super) fn parse_session_list_scope(_payload: &serde_json::Value) -> ListScope {
-    ListScope::Cwd
 }
 /// Parse the `legacy ext RPC` response payload (the unwrapped
 /// `{ "sessions": [...] }` object) into [`SessionPickerEntry`] rows.
@@ -1483,11 +1441,6 @@ pub(super) fn should_send_yolo_acp_notification(
         (Err(_), PermissionModePersist::WithRollback(_)) => false,
     }
 }
-pub(super) fn marketplace_outcome_succeeded(
-    outcome: &pi_hooks_plugins_types::ActionOutcome,
-) -> bool {
-    outcome.status == pi_hooks_plugins_types::OutcomeStatus::Success
-}
 /// Extract the typed kill outcome from an `legacy ext RPC` ext response.
 ///
 /// The agent serializes `ExtMethodResult<KillTaskResponse>`, so the outcome
@@ -1509,44 +1462,6 @@ pub(super) fn parse_kill_outcome(
         .ok()
         .and_then(|envelope| envelope.result)
         .map(|payload| payload.outcome)
-}
-/// Map an `legacy ext RPC` response (payload under `result`) to a kill
-/// outcome. Prefers the typed `outcome`; falls back to the legacy `cancelled`
-/// bool for an older shell or an unknown future `kind`. An error/unparseable
-/// body is `RpcFailed` (subagent may still be running — leave the row alone).
-pub(super) fn parse_subagent_kill_outcome(resp: &str) -> SubagentKillOutcome {
-    use pi_shell::extensions::task::{
-        CancelSubagentResponse, SubagentCancelOutcomeDto,
-    };
-    let Some(payload) = serde_json::from_str::<
-        ExtMethodResult<CancelSubagentResponse>,
-    >(resp)
-        .ok()
-        .and_then(|envelope| envelope.result) else {
-        return SubagentKillOutcome::RpcFailed;
-    };
-    match payload.outcome {
-        Some(SubagentCancelOutcomeDto::Cancelled) => SubagentKillOutcome::StoppedLive,
-        Some(SubagentCancelOutcomeDto::AlreadyFinished { status }) => {
-            SubagentKillOutcome::NothingLive {
-                status: Some(status),
-            }
-        }
-        Some(SubagentCancelOutcomeDto::NotFound) => {
-            SubagentKillOutcome::NothingLive {
-                status: None,
-            }
-        }
-        Some(SubagentCancelOutcomeDto::Unknown) | None => {
-            if payload.cancelled {
-                SubagentKillOutcome::StoppedLive
-            } else {
-                SubagentKillOutcome::NothingLive {
-                        status: None,
-                    }
-            }
-        }
-    }
 }
 /// Map disk-write outcome + persist variant to the correct `TaskResult`.
 pub(super) fn route_permission_mode_result(
@@ -1600,114 +1515,6 @@ pub(super) fn persist_hint(
             }
             TaskResult::CancelComplete
         });
-}
-/// Map a billing config into a [`CreditBalance`].
-///
-/// Prefers the newer credits-config fields (`credit_usage_percent`,
-/// `current_period`) and falls back to the deprecated
-/// `monthly_limit`/`used`/`billing_period_end`. Shared by `Effect::FetchBilling`
-/// and `Effect::FetchAppBilling` so every pager UI path derives identical usage
-/// values from the same config.
-pub(super) fn credit_balance_from_config(
-    c: pi_shell::extensions::billing::BillingConfig,
-) -> crate::views::credit_bar::CreditBalance {
-    let limit = c.monthly_limit.map(|v| v.val).unwrap_or(0);
-    let used = c.used.map(|v| v.val).unwrap_or(0);
-    let has_credit_pct = c.credit_usage_percent.is_some();
-    let usage_pct = match c.credit_usage_percent {
-        Some(pct) => pct.clamp(0.0, 100.0),
-        None if limit > 0 => (used as f64 / limit as f64 * 100.0).min(100.0),
-        None => 0.0,
-    };
-    let period_end_display = c
-        .current_period
-        .as_ref()
-        .and_then(|p| p.end.clone())
-        .or(c.billing_period_end)
-        .and_then(|s| {
-            chrono::DateTime::parse_from_rfc3339(&s)
-                .ok()
-                .map(|dt| {
-                    dt.with_timezone(&chrono::Local).format("%B %-d, %H:%M").to_string()
-                })
-        });
-    let on_demand_val = c.on_demand_cap.map(|v| v.val).unwrap_or(0);
-    let pay_as_you_go = on_demand_val > 0;
-    let on_demand_cap_cents = if on_demand_val > 0 { Some(on_demand_val) } else { None };
-    let on_demand_used_cents = c
-        .on_demand_used
-        .map(|v| v.val)
-        .unwrap_or_else(|| (used - limit).max(0));
-    let effective_usage_pct = if on_demand_val > 0 {
-        if usage_pct >= 100.0 {
-            (on_demand_used_cents as f64 / on_demand_val as f64 * 100.0).min(100.0)
-        } else if has_credit_pct {
-            usage_pct
-        } else {
-            let total_budget = limit + on_demand_val;
-            if total_budget > 0 {
-                (used as f64 / total_budget as f64 * 100.0).min(100.0)
-            } else {
-                0.0
-            }
-        }
-    } else {
-        usage_pct
-    };
-    let period_type = c.current_period.as_ref().and_then(|p| p.period_type.clone());
-    crate::views::credit_bar::CreditBalance {
-        usage_pct,
-        effective_usage_pct,
-        period_end_display,
-        pay_as_you_go,
-        on_demand_cap_cents,
-        on_demand_used_cents: Some(on_demand_used_cents),
-        prepaid_balance_cents: c.prepaid_balance.map(|v| v.val),
-        period_type,
-        is_unified_billing_user: c.is_unified_billing_user,
-    }
-}
-/// Whether the balance carries a non-zero prepaid credit balance (signed cents).
-pub(super) fn has_prepaid_credits(
-    balance: Option<&crate::views::credit_bar::CreditBalance>,
-) -> bool {
-    balance.and_then(|b| b.prepaid_balance_cents).map(i64::abs).is_some_and(|c| c > 0)
-}
-/// Fetch the user's auto top-up rule via the `legacy ext RPC` extension.
-/// A transport failure yields [`AutoTopupFetch::Unchanged`] so the caller keeps
-/// any cached rule rather than treating the blip as "no auto top-up".
-pub(super) async fn fetch_auto_topup_info(
-    _tx: &pi_acp_lib::AcpAgentTx,
-) -> crate::views::credit_bar::AutoTopupFetch {
-    use crate::views::credit_bar::AutoTopupFetch;
-    AutoTopupFetch::Cleared
-}
-/// Map an `legacy ext RPC` payload to an [`AutoTopupFetch`]. A body that
-/// fails to deserialize is a fetch error (→ `Unchanged`, keep the cached rule),
-/// not a definitive "no rule", so a malformed response can't silently flip the
-/// credits warning.
-pub(super) fn parse_auto_topup_response(
-    result: &serde_json::Value,
-) -> crate::views::credit_bar::AutoTopupFetch {
-    use crate::views::credit_bar::{AutoTopupFetch, AutoTopupInfo};
-    use pi_shell::extensions::billing::GetAutoTopupRuleResponse;
-    match serde_json::from_value::<GetAutoTopupRuleResponse>(result.clone()) {
-        Ok(parsed) => {
-            AutoTopupFetch::Resolved(
-                parsed
-                    .rule
-                    .map_or_else(
-                        AutoTopupInfo::disabled,
-                        |rule| AutoTopupInfo {
-                            enabled: rule.enabled,
-                            topup_amount_cents: rule.topup_amount.map(|c| c.val),
-                            max_amount_cents: rule.max_amount_per_month.map(|c| c.val),
-                        },
-                    ),
-            )
-        }
-        Err(_) => AutoTopupFetch::Unchanged,
-    }
 }
 /// A blocking flock on the shared, possibly-network `~/.grok` lock must never
 /// stall the event-loop thread (and would hang exit on `/quit`); the registry

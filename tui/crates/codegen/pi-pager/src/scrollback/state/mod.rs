@@ -386,11 +386,6 @@ impl ScrollbackState {
         (self.generation, self.content_generation)
     }
 
-    /// Whether a [`begin_batch`](Self::begin_batch) is currently open.
-    pub(crate) fn in_batch(&self) -> bool {
-        self.batch_depth > 0
-    }
-
     /// Append all entries from `tail` (a
     /// [`fresh_continuation`](Self::fresh_continuation) sibling of this state)
     /// after the existing content, preserving their `EntryId`s so tracker

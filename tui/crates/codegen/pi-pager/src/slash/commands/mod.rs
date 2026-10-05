@@ -61,25 +61,10 @@ mod tests {
         models.current = Some(id_fast);
         models
     }
-    static DEFAULT_BUNDLE_STATE: crate::app::bundle::BundleState =
-        crate::app::bundle::BundleState {
-            has_cache: false,
-            version: String::new(),
-            personas: Vec::new(),
-            roles: Vec::new(),
-            agents: Vec::new(),
-            skills: Vec::new(),
-            persona_details: Vec::new(),
-            role_details: Vec::new(),
-        };
     pub(crate) fn make_ctx(models: &ModelState) -> CommandExecCtx<'_> {
         CommandExecCtx {
             models,
-            session_id: None,
-            bundle_state: &DEFAULT_BUNDLE_STATE,
             screen_mode: crate::app::ScreenMode::Inline,
-            billing_surface_visible: true,
-            usage_command_visible: true,
             pager_state: crate::settings::PagerLocalSnapshot {
                 multiline_mode: false,
                 yolo_mode: false,
@@ -264,15 +249,7 @@ mod tests {
         let models = sample_models();
         let ctx = crate::slash::command::AppCtx {
             models: &models,
-            cwd: std::path::Path::new("."),
-            has_session_announcements: false,
-            billing_surface_visible: true,
-            usage_command_visible: true,
-            workflows_available: true,
-            saved_workflows: &[],
-            workflow_runs: &[],
             screen_mode: crate::app::ScreenMode::Fullscreen,
-            current_title: None,
         };
         let cmd = model::ModelCommand;
         let items = cmd.suggest_args(&ctx, "").expect("should have suggestions");
@@ -293,15 +270,7 @@ mod tests {
         let models = ModelState::default();
         let ctx = crate::slash::command::AppCtx {
             models: &models,
-            cwd: std::path::Path::new("."),
-            has_session_announcements: false,
-            billing_surface_visible: true,
-            usage_command_visible: true,
-            workflows_available: true,
-            saved_workflows: &[],
-            workflow_runs: &[],
             screen_mode: crate::app::ScreenMode::Fullscreen,
-            current_title: None,
         };
         let cmd = model::ModelCommand;
         assert!(cmd.suggest_args(&ctx, "").is_none());

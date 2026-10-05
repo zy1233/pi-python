@@ -14,10 +14,6 @@ impl SlashCommand for ResumeCommand {
         "Resume a previous session"
     }
 
-    fn usage(&self) -> &str {
-        "/resume"
-    }
-
     fn run(&self, _ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {
         CommandResult::Action(Action::ShowSessionPicker)
     }

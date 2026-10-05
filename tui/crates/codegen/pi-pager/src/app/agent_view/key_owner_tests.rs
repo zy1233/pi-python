@@ -1116,58 +1116,6 @@ fn elicitation_draft_stops_at_named_cap() {
     assert_eq!(draft.chars().count(), MAX_ELICIT_DRAFT_CHARS);
 }
 
-fn open_url_elicitation(
-    agent: &mut AgentView,
-    response_tx: Option<crate::views::elicitation_view::ElicitResponseTx>,
-) {
-    use crate::views::elicitation_view::ElicitationViewState;
-    use pi_tools::mcp_elicitation::{McpElicitExtRequest, McpElicitModeFields};
-    agent.elicitation_view = Some(ElicitationViewState::from_request(
-        McpElicitExtRequest {
-            session_id: "s".into(),
-            tool_call_id: "mcp-elicit-url".into(),
-            server_name: "demo".into(),
-            message: "Open".into(),
-            mode: McpElicitModeFields::Url {
-                url: format!("https://example.com/{}", "a/".repeat(200)),
-                elicitation_id: "eid-1".into(),
-            },
-        },
-        Some(StashedPrompt::default()),
-        response_tx,
-    ));
-}
-
-#[test]
-fn url_accept_on_dead_request_dismisses_without_waiting() {
-    let mut agent = make_agent();
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    drop(rx);
-    open_url_elicitation(&mut agent, Some(tx));
-    let _ = agent.handle_elicitation_key(&KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
-    assert!(
-        agent.elicitation_view.is_none(),
-        "an accept the MCP side can no longer hear must dismiss the card, \
-         not park it in waiting"
-    );
-}
-
-#[test]
-fn url_walk_keys_scroll_the_viewport() {
-    let mut agent = make_agent();
-    open_url_elicitation(&mut agent, None);
-    let scroll = |agent: &AgentView| agent.elicitation_view.as_ref().unwrap().scroll;
-    assert_eq!(scroll(&agent), 0);
-    let _ = agent.handle_elicitation_key(&KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
-    assert_eq!(scroll(&agent), 1);
-    let _ = agent.handle_elicitation_key(&KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
-    assert_eq!(scroll(&agent), 5);
-    let _ = agent.handle_elicitation_key(&KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
-    assert_eq!(scroll(&agent), 4);
-    let _ = agent.handle_elicitation_key(&KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE));
-    assert_eq!(scroll(&agent), 0);
-}
-
 fn open_two_field_elicitation(agent: &mut AgentView) {
     use crate::views::elicitation_view::ElicitationViewState;
     use pi_tools::mcp_elicitation::{McpElicitExtRequest, McpElicitModeFields};

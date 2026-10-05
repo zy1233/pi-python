@@ -14,11 +14,10 @@ mod layout;
 mod render;
 mod state;
 
-pub use crate::search::QueryKind;
-pub use layout::{ListLayoutCache, WrapMode};
+pub use layout::{ WrapMode};
 pub use render::ListPane;
 pub use state::{
-    FilterMatcher, InputBarMode, ListFilter, ListMatcher, ListPaneConfig, ListPaneState, MatchMode,
+    InputBarMode, ListPaneConfig, ListPaneState, 
 };
 
 use ratatui::buffer::Buffer;

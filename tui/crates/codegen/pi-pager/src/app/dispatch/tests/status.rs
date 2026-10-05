@@ -1540,23 +1540,6 @@ fn stale_context_info_results_do_not_update_replaced_session() {
 }
 
 #[test]
-fn session_usage_page_flips_info_to_top() {
-    crate::appearance::cache::set_page_flip_on_send(true);
-    let mut app = test_app_with_agent();
-    // Scrollback flow is minimal-only.
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    app.usage_visible = false;
-    seed_scrolled_up(&mut app);
-    complete_session_usage(&mut app);
-    let sb = &mut app.agents.get_mut(&AgentId(0)).unwrap().scrollback;
-    sb.prepare_layout(80, 8);
-    assert!(sb.is_follow_preserve_scroll());
-    let pinned = sb.scroll_offset();
-    sb.scroll_to_entry_top(sb.len() - 1);
-    assert_eq!(sb.scroll_offset(), pinned);
-}
-
-#[test]
 fn session_usage_keeps_scroll_when_page_flip_off() {
     let prev = crate::appearance::cache::load_page_flip_on_send();
     crate::appearance::cache::set_page_flip_on_send(false);

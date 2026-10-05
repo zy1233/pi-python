@@ -30,7 +30,7 @@ pub use pi_telemetry::startup::{
 use anyhow::Result;
 use tokio_util::sync::CancellationToken;
 
-use crate::client_identity::{HEADLESS_CLIENT_TYPE, PAGER_CLIENT_TYPE, PAGER_CLIENT_VERSION};
+use crate::client_identity::{ PAGER_CLIENT_TYPE, PAGER_CLIENT_VERSION};
 use agent_client_protocol as acp;
 use pi_acp_lib::{AcpAgentTx, AcpClientRx, acp_send};
 use pi_shell::agent::auth_method::AuthMethodKind;

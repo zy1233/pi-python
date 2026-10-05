@@ -452,11 +452,6 @@ pub(crate) enum PasteProvenance {
     #[allow(dead_code)]
     X11Primary,
 }
-impl PasteProvenance {
-    pub(crate) fn may_probe_clipboard_attachments(self) -> bool {
-        matches!(self, Self::Terminal)
-    }
-}
 /// A pending action awaiting double-press confirmation.
 ///
 /// Set when a `requires_confirmation` action is triggered. The shortcuts bar
@@ -3876,14 +3871,6 @@ impl AppView {
         self.maybe_trigger_small_screen_tip();
         self.maybe_trigger_ssh_wrap_tip();
         let compact = self.appearance.prompt.compact;
-        let (header_pad_left, header_pad_right, header_pad_top) = {
-            let layout_cfg = &self.appearance.scrollback.layout;
-            (
-                layout_cfg.eff_hpad_left(compact),
-                layout_cfg.eff_hpad_right(compact),
-                layout_cfg.eff_outer_vpad(compact),
-            )
-        };
         let zdr_blocked_for_draw = self.is_zdr_blocked();
         let has_access = self.has_access();
         let privacy_banner = self.privacy_banner_should_show();

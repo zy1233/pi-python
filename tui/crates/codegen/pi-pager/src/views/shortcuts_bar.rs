@@ -201,11 +201,6 @@ impl<'a> ShortcutsBar<'a> {
         self
     }
 
-    /// Set right-aligned text (e.g. team name).
-    pub fn with_right_text(mut self, text: Option<&'a str>) -> Self {
-        self.right_text = text;
-        self
-    }
 }
 
 impl Widget for ShortcutsBar<'_> {

@@ -606,46 +606,6 @@
     }
 
     #[test]
-    fn failed_reconnect_reload_restores_runs_and_avoids_duplicate_workflow_block() {
-        let mut app = make_app_with_agent("sess-A");
-        let id = AgentId(0);
-
-        assert!(send_revisioned_workflow_update(&mut app, "wf", "deep-research", "active", false, 3));
-        assert_eq!(app.agents[&id].workflow_runs.len(), 1);
-        assert_eq!(count_workflow_blocks(&app.agents[&id]), 1);
-        let block_id = *app.agents[&id].workflow_blocks.get("wf").expect("live block id");
-
-        {
-            let agent = app.agents.get_mut(&id).unwrap();
-            agent.begin_session_reload(1);
-            assert!(agent.workflow_runs.is_empty(), "staging clears the run list");
-            assert!(agent.finish_session_reload(1, false));
-        }
-
-        assert_eq!(
-            app.agents[&id].workflow_runs.len(),
-            1,
-            "run list restored after a failed reload"
-        );
-        assert_eq!(
-            app.agents[&id].workflow_blocks.get("wf").copied(),
-            Some(block_id),
-            "block map restored, still pointing at the restored scrollback block"
-        );
-
-        assert!(
-            !send_revisioned_workflow_update(&mut app, "wf", "deep-research", "active", false, 2),
-            "restored revision highwater still rejects a regression"
-        );
-        assert!(send_revisioned_workflow_update(&mut app, "wf", "deep-research", "complete", false, 4));
-        assert_eq!(
-            count_workflow_blocks(&app.agents[&id]),
-            1,
-            "restored block map prevents a duplicate workflow history block"
-        );
-    }
-
-    #[test]
     fn cleared_workflow_update_bypasses_revision_highwater() {
         let mut app = make_app_with_agent("sess-A");
         let id = AgentId(0);

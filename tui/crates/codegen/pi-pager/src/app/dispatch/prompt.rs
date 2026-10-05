@@ -22,7 +22,6 @@ use crate::app::cancel_latency::TurnEnd;
 use crate::notifications::{NotificationEvent, NotificationEventKind};
 use crate::scrollback::block::RenderBlock;
 use crate::scrollback::blocks::SessionEvent;
-use crate::slash::command::DoctorRequest;
 use agent_client_protocol as acp;
 use pi_telemetry::session_ctx::log_event;
 
@@ -55,85 +54,6 @@ pub(crate) fn dispatch_initial_prompt(app: &mut AppView, prompt: String) -> Vec<
     }
     effects.extend(dispatch(Action::SendPrompt(prompt), app));
     effects
-}
-
-pub(super) fn collect_live_doctor_report_for_terminal(
-    app: &AppView,
-    agent_id: AgentId,
-    terminal: &crate::terminal::TerminalContext,
-) -> Option<crate::diagnostics::DiagnosticReport> {
-    let agent = app.agents.get(&agent_id)?;
-    let runtime = crate::diagnostics::TuiRuntimeRequest {
-        workspace: &agent.session.cwd,
-        notification_method: app.notification_service.config().method,
-        notification_protocol: app.notification_service.protocol(),
-        notification_condition: app.notification_service.config().condition,
-    };
-    let query = crate::diagnostics::probes::LiveTmuxProbe;
-    let snapshot = crate::diagnostics::probes::collect_doctor_tui(
-        terminal,
-        crate::diagnostics::probes::TuiProbeEvidence {
-            fullscreen_active: app.screen_mode.is_fullscreen(),
-            kitty_flags_pushed: crate::app::kitty_flags_pushed(),
-            xtversion: crate::terminal::xtversion::detected(),
-        },
-        &query,
-    );
-    let runtime_findings = crate::diagnostics::collect_tui_runtime_findings(
-        &snapshot.common,
-        runtime.notification_method,
-        runtime.notification_protocol,
-        runtime.notification_condition,
-        runtime.workspace,
-    );
-    let mut report = crate::diagnostics::view(snapshot.into());
-    crate::diagnostics::merge_tui_runtime_findings(&mut report, runtime_findings);
-    if crate::app::voice_mode_enabled() {
-        crate::diagnostics::apply_voice_probe(&mut report, true);
-    }
-    Some(report)
-}
-
-fn doctor_fix_target(agent: &AgentView) -> DoctorFixTarget {
-    DoctorFixTarget {
-        agent_id: agent.session.id,
-        session_id: agent.session.session_id.clone(),
-        session_binding_epoch: agent.session_binding_epoch,
-        cwd: agent.session.cwd.clone(),
-    }
-}
-
-pub(super) fn dispatch_doctor(request: DoctorRequest, app: &mut AppView) -> Vec<Effect> {
-    let ActiveView::Agent(agent_id) = app.active_view else {
-        return vec![];
-    };
-    let terminal = crate::terminal::terminal_context().clone();
-    let Some(report) = collect_live_doctor_report_for_terminal(app, agent_id, &terminal) else {
-        return vec![];
-    };
-
-    match request {
-        DoctorRequest::Report => {
-            if let Some(agent) = app.agents.get_mut(&agent_id) {
-                agent.scrollback.push_block(RenderBlock::system(
-                    crate::diagnostics::format_doctor(&report),
-                ));
-            }
-        }
-        DoctorRequest::ListFixes | DoctorRequest::Fix(_) => {
-            let Some(agent) = app.agents.get(&agent_id) else {
-                return vec![];
-            };
-            let target = doctor_fix_target(agent);
-            return vec![Effect::PlanDoctorFix {
-                target,
-                report: Box::new(report),
-                terminal,
-                request,
-            }];
-        }
-    }
-    vec![]
 }
 
 pub(super) fn open_doctor_fix_question(
@@ -548,11 +468,7 @@ pub(super) fn dispatch_send_prompt_inner(
         let exec_result = {
             let mut ctx = CommandExecCtx {
                 models: &agent.session.models,
-                session_id: agent.session.session_id.as_ref(),
-                bundle_state: &app.bundle_state,
                 screen_mode: app.screen_mode,
-                billing_surface_visible: app.usage_visible,
-                usage_command_visible: !app.has_external_auth_provider,
                 // PAGER-owned snapshot for slash commands.
                 pager_state: crate::settings::PagerLocalSnapshot {
                     multiline_mode: agent.multiline_mode,
@@ -641,12 +557,6 @@ pub(super) fn dispatch_send_prompt_inner(
         // Map CommandResult to pager behavior. (MRU persistence is queued
         // off-thread inside `record_command_use` above.)
         match exec_result {
-            CommandResult::Handled | CommandResult::HandledNoOp => {
-                if consume_input {
-                    agent.prompt.set_text("");
-                }
-                return vec![];
-            }
             CommandResult::Error(msg) => {
                 if consume_input {
                     agent.prompt.set_text("");
@@ -660,12 +570,6 @@ pub(super) fn dispatch_send_prompt_inner(
                 }
                 push_and_page_flip(&mut agent.scrollback, RenderBlock::system(msg));
                 return vec![];
-            }
-            CommandResult::Doctor(request) => {
-                if consume_input {
-                    agent.prompt.set_text("");
-                }
-                return dispatch_doctor(request, app);
             }
             CommandResult::Action(Action::ExitSession) => {
                 if consume_input {
@@ -700,9 +604,6 @@ pub(super) fn dispatch_send_prompt_inner(
                     agent.prompt.set_text("");
                 }
                 return dispatch(action, app);
-            }
-            CommandResult::QueueCommand(cmd_text) => {
-                agent.session.enqueue_command(cmd_text);
             }
             CommandResult::InjectSkill {
                 display_text,

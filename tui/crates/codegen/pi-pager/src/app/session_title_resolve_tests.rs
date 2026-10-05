@@ -122,22 +122,6 @@ fn title_miss_hint_escapes_arg_and_suggests_search() {
     );
 }
 
-/// The worktree defer drops the local zero-match context; the failure
-/// message restores it only for a threaded deferred-miss target. A resolved
-/// legacy non-UUID id (no threaded miss) must not get a false no-match hint.
-#[test]
-fn worktree_failure_message_hint_follows_threaded_provenance() {
-    let msg = worktree_resume_failure_message(Some("typo title"), "restore failed");
-    assert!(msg.contains("couldn't resume worktree session: restore failed"));
-    assert!(msg.contains("no session id or title matched"), "{msg}");
-    assert!(msg.contains("zypi --resume"), "{msg}");
-    let resolved_msg = worktree_resume_failure_message(None, "restore failed");
-    assert_eq!(
-        resolved_msg,
-        "couldn't resume worktree session: restore failed"
-    );
-}
-
 /// Regression (production wiring): pinning rewrites the `-r` title to the
 /// canonical id, the profile peek sees the saved profile, and a conflicting
 /// explicit profile is refused exactly like id resume.

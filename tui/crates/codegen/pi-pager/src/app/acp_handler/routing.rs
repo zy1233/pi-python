@@ -46,45 +46,6 @@ pub(super) fn resolve_notif_agent<'a>(
     Some((matched, is_active, agent))
 }
 
-/// Resolve the agent an MCP-lifecycle notification (`init_progress` /
-/// `mcp_initialized`) targets.
-///
-/// Routes by the payload's `sessionId` so a background session's progress
-/// updates and completion signal land on *its* agent rather than whichever
-/// agent happens to be foregrounded — otherwise a background agent's
-/// "Connecting MCPs (N/M)…" spinner is never cleared and sticks forever.
-/// Falls back to the active agent when the payload omits a `sessionId`.
-///
-/// Returns the owning agent plus whether it is the currently displayed one
-/// (used to decide whether the notification warrants a redraw).
-///
-/// Only resolves to a `Root` agent: `mcp_init_progress` is a per-root-agent
-/// indicator with no per-subagent slot, so notifications whose sessionId
-/// matches a subagent (`Child`) are dropped — otherwise a subagent's own MCP
-/// init would clobber its parent's spinner.
-pub(super) fn mcp_target_agent<'a>(
-    app: &'a mut AppView,
-    session_id: Option<&str>,
-) -> Option<(bool, &'a mut AgentView)> {
-    match session_id {
-        Some(sid) => {
-            let sid = acp::SessionId::new(sid);
-            let (matched, is_active, agent) = resolve_notif_agent(app, &sid)?;
-            if matches!(matched, SessionMatch::Child(_)) {
-                return None;
-            }
-            Some((is_active, agent))
-        }
-        None => {
-            let ActiveView::Agent(id) = app.active_view else {
-                return None;
-            };
-            let agent = app.agents.get_mut(&id)?;
-            Some((true, agent))
-        }
-    }
-}
-
 /// Given a matched session and the owning agent, borrow the correct
 /// `(session, scrollback)` pair — the child view's when the notification
 /// targets a subagent, the root agent's otherwise.
@@ -172,22 +133,3 @@ pub(super) fn is_matched_agent_active(app: &AppView, matched_agent: AgentId) -> 
     matches!(app.active_view, ActiveView::Agent(id) if id == matched_agent)
 }
 
-/// Resolve the `AgentId` that should own an interactive modal
-/// (`ask_user_question` / `exit_plan_mode`) for `session_id`.
-///
-/// Routes by the request's session id via [`find_session_match`] — exactly like
-/// `session/update` notifications — so a modal raised by a **background**
-/// session lands on its own view even when the user is on the dashboard or a
-/// different session, instead of being gated on `app.active_view`. A child
-/// (subagent) match resolves to its parent agent, which owns the overlay.
-///
-/// Returns `None` when no local view exists for that session; the caller must
-/// then leave the reverse-request unanswered (drop, do NOT error) and rely on
-/// the leader's replay-on-attach.
-pub(super) fn interaction_target_agent(app: &AppView, session_id: &str) -> Option<AgentId> {
-    let sid = acp::SessionId::new(session_id.to_owned());
-    match find_session_match(app, &sid) {
-        Some(SessionMatch::Root(id) | SessionMatch::Child(id)) => Some(id),
-        None => None,
-    }
-}

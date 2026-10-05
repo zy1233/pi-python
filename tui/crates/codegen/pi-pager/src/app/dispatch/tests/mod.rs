@@ -29,15 +29,15 @@ use super::cta::{
 use super::ctx::{find_agent_by_session_id, get_active_agent, get_active_agent_mut};
 use super::modes::{
     YOLO_ON_UNDER_PLAN_TOAST, active_agent_plan_nudge_state, dispatch_cycle_mode_and_sync,
-    downgrade_displayed_auto_if_gated, permission_mode_toast,
+    permission_mode_toast,
 };
 use super::permissions::drain_permission_queue;
-use super::prompt::{dispatch_doctor, dispatch_send_prompt, dispatch_send_prompt_inner};
+use super::prompt::{ dispatch_send_prompt, dispatch_send_prompt_inner};
 use super::session::fork::build_child_fork_marker;
-use super::session::lifecycle::{dispatch_new_session_inner, drain_startup_actions, finish_trust};
-use super::session::load::{dispatch_load_session_with_restore, reanchor_grouped_selection};
+use super::session::lifecycle::{ drain_startup_actions, finish_trust};
+use super::session::load::{ reanchor_grouped_selection};
 use super::session::modal::{
-    dispatch_rename_session, dispatch_reset_session_title, dispatch_sessions_confirm_close,
+    dispatch_rename_session, dispatch_reset_session_title, 
 };
 use super::settings::setters::set_default_model_inner;
 use super::settings::ui::{action_for_reset, apply_setting_rollback};
@@ -608,55 +608,6 @@ fn fork_test_app() -> AppView {
     app.agents.get_mut(&AgentId(0)).unwrap().current_branch = Some("main".into());
     app
 }
-/// Build a minimal `AcpArgs<acp::ExtRequest>` for an
-/// `legacy ext RPC` ext-method request. Returns the args
-/// plus the receiver half of the response oneshot so the test can
-/// assert the handler completes the ACP roundtrip.
-fn make_ask_user_question_args(
-    tool_call_id: &str,
-) -> (
-    pi_acp_lib::AcpArgs<acp::ExtRequest>,
-    tokio::sync::oneshot::Receiver<pi_acp_lib::AcpResult<acp::ExtResponse>>,
-) {
-    use pi_tools::implementations::grok_build::ask_user_question::{
-        AskUserQuestionExtRequest, Question, QuestionOption,
-    };
-    let req = AskUserQuestionExtRequest {
-        session_id: "test-session".into(),
-        tool_call_id: tool_call_id.into(),
-        mode: pi_tools::implementations::grok_build::ask_user_question::AskUserQuestionMode::Default,
-        questions: vec![Question {
-                question: "ACP-driven question".into(),
-                options: vec![QuestionOption {
-                    label: "ok".into(),
-                    description: "ok".into(),
-                    preview: None,
-                    id: None,
-                }],
-                multi_select: Some(false),
-                            id: None,
-            }],
-    };
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    let ext = acp::ExtRequest::new(
-        "pi/ask_user_question",
-        serde_json::value::to_raw_value(&req)
-            .expect("serialize AskUserQuestionExtRequest")
-            .into(),
-    );
-    (
-        pi_acp_lib::AcpArgs {
-            request: ext,
-            response_tx: tx,
-        },
-        rx,
-    )
-}
-fn set_forked_from(app: &mut AppView, child: AgentId, parent: AgentId) {
-    if let Some(agent) = app.agents.get_mut(&child) {
-        agent.session.forked_from = Some(parent);
-    }
-}
 fn make_bg_task(task_id: &str) -> crate::app::agent::BgTaskState {
     crate::app::agent::BgTaskState {
         task_id: task_id.into(),
@@ -899,70 +850,6 @@ fn agent_scrollback_len(app: &AppView) -> usize {
     app.agents.get(&AgentId(0)).unwrap().scrollback.len()
 }
 use crate::scrollback::blocks::UserPromptBlock;
-/// Build a synthetic `PermissionViewState` with the given id and
-/// options. Pushes it to the agent's permission_queue.
-///
-/// Returns the response receiver so tests can verify
-/// the response was actually `send`'d through the oneshot. The
-/// previous version dropped the receiver (`_rx`), which let
-/// "happy-path" tests assert the queue was popped but masked
-/// regressions where the pop happened without the corresponding
-/// send.
-fn push_synthetic_permission(
-    agent: &mut crate::app::agent_view::AgentView,
-    id: usize,
-    options: Vec<(&str, &str)>,
-) -> tokio::sync::oneshot::Receiver<Result<acp::RequestPermissionResponse, acp::Error>> {
-    use crate::views::permission_view::{PermissionFocus, PermissionViewState};
-    let (tx, rx) =
-        tokio::sync::oneshot::channel::<Result<acp::RequestPermissionResponse, acp::Error>>();
-    let request = pi_acp_lib::AcpArgs {
-        request: acp::RequestPermissionRequest::new(
-            acp::SessionId::new(std::sync::Arc::from("sess-1")),
-            acp::ToolCallUpdate::new(
-                acp::ToolCallId::new(std::sync::Arc::from("tc-1")),
-                acp::ToolCallUpdateFields::default(),
-            ),
-            options
-                .iter()
-                .map(|(oid, name)| {
-                    acp::PermissionOption::new(
-                        acp::PermissionOptionId::new(std::sync::Arc::from(*oid)),
-                        name.to_string(),
-                        if *oid == "reject" {
-                            acp::PermissionOptionKind::RejectOnce
-                        } else {
-                            acp::PermissionOptionKind::AllowOnce
-                        },
-                    )
-                })
-                .collect(),
-        ),
-        response_tx: tx,
-    };
-    let opts = request.request.options.clone();
-    let state = PermissionViewState {
-        request,
-        id,
-        focus: PermissionFocus::Options,
-        options: opts,
-        active_idx: 0,
-        bash_highlights: None,
-        bash_selection_count: 0,
-        bash_deny_selection_count: 0,
-        bash_command_raw: None,
-        mcp_scope: None,
-        title: "Test permission".to_string(),
-        description: Vec::new(),
-        args_expanded: false,
-        desc_scroll: 0,
-        subagent_label: None,
-        options_area_height: 0,
-        options_scroll_offset: 0,
-    };
-    agent.permission_queue.push_back(state);
-    rx
-}
 const MOUSE_OFF_STICKY: &str = crate::app::MOUSE_OFF_HINT_SCROLLBACK;
 fn reset_mouse_capture_enabled(on: bool) {
     crate::app::MOUSE_CAPTURE_ENABLED.store(on, std::sync::atomic::Ordering::Release);

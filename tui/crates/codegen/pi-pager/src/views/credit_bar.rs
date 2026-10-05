@@ -3,11 +3,6 @@
 //! Shows the user's coding credit usage as a compact status bar item.
 //! Fetches real data from the `legacy ext RPC` agent extension.
 
-use ratatui::style::Style;
-use ratatui::text::{Line, Span};
-
-use crate::theme::Theme;
-
 /// Credit balance state from the billing API.
 #[derive(Debug, Clone)]
 pub struct CreditBalance {
@@ -239,45 +234,6 @@ pub fn usage_warning_for_session(
             .map(i64::abs)
             .and_then(|amt| (credits_cents < amt).then(credits_warning)),
     }
-}
-
-/// Build the credit balance indicator as a `Line<'static>`.
-///
-/// Shows `Credits used: XX%` in the status bar.
-///
-/// Gateway light-frontend (`kind: "chat"`) sessions must not show Build coding
-/// credits — use [`credit_bar_line_for_session`] with `gateway_chat = true`
-/// (returns `None`). remote settings / managed opt-in for chat entry can share the
-/// same gate later; for now it only zeros/suppresses misleading local telemetry.
-pub fn credit_bar_line(balance: &CreditBalance, hovered: bool, theme: &Theme) -> Line<'static> {
-    credit_bar_line_for_session(balance, hovered, theme, false)
-        .expect("non-chat credit_bar_line always renders")
-}
-
-/// Like [`credit_bar_line`], but returns `None` for gateway/chat-kind sessions
-/// so the status bar never implies Build sampler / coding-credit usage.
-pub fn credit_bar_line_for_session(
-    balance: &CreditBalance,
-    _hovered: bool,
-    theme: &Theme,
-    gateway_chat: bool,
-) -> Option<Line<'static>> {
-    if gateway_chat {
-        return None;
-    }
-    let pct = balance.usage_pct;
-    let color = if pct >= 100.0 {
-        theme.accent_error
-    } else if pct >= 80.0 {
-        theme.warning
-    } else {
-        theme.accent_success
-    };
-
-    let text = format!("Credits used: {pct:.0}%");
-
-    let style = Style::default().fg(color).bg(theme.bg_base);
-    Some(Line::from(Span::styled(text, style)))
 }
 
 #[cfg(test)]
@@ -716,102 +672,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_credit_bar_line_shows_percentage() {
-        let theme = Theme::default();
-        let line = credit_bar_line(&bal(24.0), false, &theme);
-        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert_eq!(text, "Credits used: 24%");
-    }
-
-    #[test]
-    fn test_color_thresholds() {
-        let theme = Theme::default();
-
-        let low = credit_bar_line(&bal(50.0), false, &theme);
-        assert_eq!(low.spans[0].style.fg, Some(theme.accent_success));
-
-        let high = credit_bar_line(&bal(85.0), false, &theme);
-        assert_eq!(high.spans[0].style.fg, Some(theme.warning));
-
-        let over = credit_bar_line(&bal(100.0), false, &theme);
-        assert_eq!(over.spans[0].style.fg, Some(theme.accent_error));
-    }
-
-    #[test]
-    fn test_zero_percent() {
-        let theme = Theme::default();
-        let line = credit_bar_line(&bal(0.0), false, &theme);
-        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert_eq!(text, "Credits used: 0%");
-        assert_eq!(line.spans[0].style.fg, Some(theme.accent_success));
-    }
-
-    #[test]
-    fn test_boundary_at_80_percent() {
-        let theme = Theme::default();
-        // Exactly 80% should be warning (yellow).
-        let at_80 = credit_bar_line(&bal(80.0), false, &theme);
-        assert_eq!(at_80.spans[0].style.fg, Some(theme.warning));
-
-        // Just below 80% should be success (green).
-        let below_80 = credit_bar_line(&bal(79.9), false, &theme);
-        assert_eq!(below_80.spans[0].style.fg, Some(theme.accent_success));
-    }
-
-    #[test]
-    fn test_boundary_at_100_percent() {
-        let theme = Theme::default();
-        // Exactly 100% should be error (red).
-        let at_100 = credit_bar_line(&bal(100.0), false, &theme);
-        assert_eq!(at_100.spans[0].style.fg, Some(theme.accent_error));
-
-        // Just below 100% should be warning (yellow).
-        let below_100 = credit_bar_line(&bal(99.9), false, &theme);
-        assert_eq!(below_100.spans[0].style.fg, Some(theme.warning));
-    }
-
-    #[test]
-    fn test_over_100_percent() {
-        let theme = Theme::default();
-        let line = credit_bar_line(&bal(150.0), false, &theme);
-        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert_eq!(text, "Credits used: 150%");
-        assert_eq!(line.spans[0].style.fg, Some(theme.accent_error));
-    }
-
-    #[test]
-    fn test_fractional_percentage_rounds_display() {
-        let theme = Theme::default();
-        let line = credit_bar_line(&bal(33.7), false, &theme);
-        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert_eq!(text, "Credits used: 34%");
-    }
-
-    #[test]
-    fn test_credit_balance_with_on_demand_fields() {
-        let balance = CreditBalance {
-            effective_usage_pct: 25.0,
-            period_end_display: Some("Jun 1, 00:00".into()),
-            pay_as_you_go: true,
-            on_demand_cap_cents: Some(2000),
-            on_demand_used_cents: Some(500),
-            ..bal(50.0)
-        };
-        let theme = Theme::default();
-        // The credit bar uses usage_pct (not effective_usage_pct).
-        let line = credit_bar_line(&balance, false, &theme);
-        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert_eq!(text, "Credits used: 50%");
-    }
-
-    #[test]
-    fn gateway_chat_suppresses_credit_bar_and_usage_warning() {
-        let theme = Theme::default();
-        let b = bal(90.0);
-        assert!(credit_bar_line_for_session(&b, false, &theme, true).is_none());
-        assert!(usage_warning_for_session(&b, None, true, true).is_none());
-        // Build path still renders.
-        assert!(credit_bar_line_for_session(&b, false, &theme, false).is_some());
-    }
 }

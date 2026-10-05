@@ -126,13 +126,6 @@ impl ListMatcher {
 // Backward-compatible aliases
 // ---------------------------------------------------------------------------
 
-/// Backward-compatible alias for [`ListMatcher`].
-///
-/// Existing code that constructs `FilterMatcher::substring(...)` or
-/// `FilterMatcher::regex(...)` continues to work via these helper methods.
-/// New code should use [`ListMatcher::new`] directly.
-pub type FilterMatcher = ListMatcher;
-
 impl ListMatcher {
     /// Build a substring filter matcher (backward-compatible).
     pub fn substring(query: impl Into<String>) -> Self {

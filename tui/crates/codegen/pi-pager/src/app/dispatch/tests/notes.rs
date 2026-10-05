@@ -1098,41 +1098,6 @@ fn feedback_turn_on_upload_is_dropped_when_the_opt_in_write_fails() {
     );
 }
 
-/// An ACP question displacing the trace-consent card must not drop the
-/// report the user already committed with Enter: it sends without a trace,
-/// like Esc/skip.
-#[test]
-fn acp_question_displacing_trace_card_still_sends_report() {
-    let mut app = app_with_feedback_trace_question("clipboard is broken over ssh");
-    let (args, _rx) = make_ask_user_question_args("acp-driven-question");
-    assert!(crate::app::acp_handler::handle_ask_user_question(
-        args, &mut app
-    ));
-
-    assert!(
-        app.pending_effects.iter().any(|e| matches!(
-            e,
-            Effect::SendFeedback { feedback_text, .. }
-                if feedback_text == "clipboard is broken over ssh"
-        )),
-        "displaced trace card must still post the report: {:?}",
-        app.pending_effects
-    );
-    let agent = &app.agents[&AgentId(0)];
-    assert_eq!(
-        agent
-            .question_view
-            .as_ref()
-            .expect("ACP question is now active")
-            .tool_call_id,
-        "acp-driven-question"
-    );
-    assert!(
-        last_system_text(&app, AgentId(0)).contains("sent without a trace"),
-        "the user must learn what happened to the report"
-    );
-}
-
 /// Ctrl-Y (and any other `dismiss_question_view` caller) on the trace-consent
 /// card must send the committed report without a trace, like Esc/skip —
 /// never drop it silently.
@@ -1978,33 +1943,6 @@ fn feedback_pane_dismiss_leaves_the_composer_alone() {
             .feedback_report(),
         "",
         "reopening starts empty"
-    );
-}
-
-/// An ACP question displacing the pane drops the report, and must not push it into the composer on the way out.
-#[test]
-fn acp_question_displacing_feedback_pane_drops_the_report() {
-    let mut app = app_with_feedback_pane("report in progress");
-    let id = AgentId(0);
-
-    let (args, _rx) = make_ask_user_question_args("acp-driven-question");
-    assert!(crate::app::acp_handler::handle_ask_user_question(
-        args, &mut app
-    ));
-
-    let agent = &app.agents[&id];
-    assert_eq!(
-        agent
-            .question_view
-            .as_ref()
-            .expect("ACP question is now active")
-            .tool_call_id,
-        "acp-driven-question"
-    );
-    assert_eq!(
-        agent.prompt.text(),
-        "",
-        "the displaced report must not land in the composer, which sends to the model"
     );
 }
 

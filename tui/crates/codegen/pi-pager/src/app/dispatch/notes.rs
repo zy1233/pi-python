@@ -135,10 +135,6 @@ pub(super) fn dispatch_open_feedback_pane(
     vec![]
 }
 
-/// How long the background trace upload may run before it is reported as
-/// failed; longer than the shell's own upload timeout so its error wins.
-pub(crate) const FEEDBACK_TRACE_UPLOAD_TIMEOUT_MS: u64 = 150_000;
-
 /// The `[telemetry] trace_upload = true` write the /feedback card's "Yes"
 /// collects.
 pub(super) fn persist_trace_upload_consent() -> Effect {

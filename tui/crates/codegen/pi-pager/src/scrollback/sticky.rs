@@ -47,10 +47,6 @@ pub struct PromptDescriptor {
     pub sticky: bool,
 }
 
-/// Minimum height for pinned headers.
-/// This is a reasonable default - blocks should be at least this tall.
-pub const MIN_PINNED_HEIGHT: u16 = 4;
-
 /// A prompt to be rendered in the sticky header area.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RenderedPrompt {

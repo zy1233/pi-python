@@ -152,7 +152,6 @@ mod tests {
             branch: Some("main".into()),
             is_worktree: false,
             main_repo: None,
-            worktree_label: None,
         };
         assert_eq!(
             format_cwd_display(Path::new("/work/pi/frontend/apps"), Some(&info)),
@@ -168,7 +167,6 @@ mod tests {
             branch: Some("kevin/x".into()),
             is_worktree: true,
             main_repo: Some("~/pi".into()),
-            worktree_label: Some("location-picker".into()),
         };
         assert_eq!(
             format_cwd_display(Path::new("/work/wt/location-picker/frontend"), Some(&info)),

@@ -7,7 +7,7 @@
 //! - Bottom margin
 
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Alignment, Constraint, Flex, Layout, Position, Rect};
+use ratatui::layout::{Alignment, Constraint, Flex, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Padding, Paragraph, Widget, Wrap};
@@ -33,7 +33,6 @@ pub(crate) use logo::shimmer_frame;
 use logo::{logo_line_count, render_logo};
 use menu::render_menu;
 pub(crate) use toast::paint_welcome_toast;
-pub(crate) use top_bar::location_line_at;
 use top_bar::render_top_bar;
 #[cfg(feature = "local-workspace")]
 pub use workspace_mode::{

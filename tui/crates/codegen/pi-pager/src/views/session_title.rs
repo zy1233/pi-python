@@ -8,7 +8,6 @@
 //!    is established yet).
 
 use std::borrow::Cow;
-use std::time::Duration;
 
 use crate::app::agent_view::AgentView;
 use crate::scrollback::block::RenderBlock;
@@ -52,16 +51,6 @@ pub fn entry_title(agent: &AgentView) -> String {
         }
         None => "loading...".to_string(),
     }
-}
-
-/// Real session title for rename prefill / `/rename` ghost-prefill.
-///
-/// Deliberately **not** [`entry_title`]: that chain falls back to the first
-/// prompt and `"session <id8>"`, which would Tab-accept a synthetic label
-/// (and a 60-char truncation). Same derivation as the dashboard `Ctrl+R`
-/// editor: non-blank `display_name`, else `generated_session_title`.
-pub fn rename_source_title(agent: &AgentView) -> Option<String> {
-    rename_source_title_raw(agent).map(|s| sanitize_display_text(s).into_owned())
 }
 
 pub(crate) fn rename_source_title_raw(agent: &AgentView) -> Option<&str> {
@@ -190,28 +179,6 @@ pub(crate) fn sanitize_display_text(s: &str) -> Cow<'_, str> {
     }
 }
 
-/// Format an elapsed duration as a compact relative label (`now`, `30s ago`,
-/// `5m ago`, `2h ago`, `3d ago`).
-pub(crate) fn format_relative_time(elapsed: Duration) -> String {
-    let secs = elapsed.as_secs();
-    if secs < 1 {
-        return "now".to_string();
-    }
-    if secs < 60 {
-        return format!("{secs}s ago");
-    }
-    let mins = secs / 60;
-    if mins < 60 {
-        return format!("{mins}m ago");
-    }
-    let hours = mins / 60;
-    if hours < 24 {
-        return format!("{hours}h ago");
-    }
-    let days = hours / 24;
-    format!("{days}d ago")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -297,45 +264,6 @@ mod tests {
 
     // ── rename_source_title ─────────────────────────────────────────
 
-    #[test]
-    fn rename_source_title_prefers_display_name() {
-        let mut agent =
-            crate::app::agent_view::test_agent_view(Some("test-session"), "/tmp".into());
-        agent.display_name = Some("  Manual  ".into());
-        agent.generated_session_title = Some("Generated".into());
-        agent
-            .scrollback
-            .push_block(RenderBlock::user_prompt("first prompt text"));
-        assert_eq!(rename_source_title(&agent).as_deref(), Some("Manual"));
-    }
-
-    #[test]
-    fn rename_source_title_falls_through_blank_display_name() {
-        let mut agent =
-            crate::app::agent_view::test_agent_view(Some("test-session"), "/tmp".into());
-        agent.display_name = Some("   ".into());
-        agent.generated_session_title = Some("Generated".into());
-        assert_eq!(rename_source_title(&agent).as_deref(), Some("Generated"));
-    }
-
-    #[test]
-    fn rename_source_title_none_without_real_title() {
-        let mut agent =
-            crate::app::agent_view::test_agent_view(Some("test-session"), "/tmp".into());
-        agent.scrollback.push_block(RenderBlock::user_prompt(
-            "first prompt that entry_title would use",
-        ));
-        assert!(
-            rename_source_title(&agent).is_none(),
-            "must not prefill first-prompt or session-id fallbacks"
-        );
-        let shown = entry_title(&agent);
-        assert!(
-            shown.starts_with("first prompt") || shown.starts_with("session "),
-            "entry_title still has synthetic fallbacks: {shown}"
-        );
-    }
-
     // ── truncate_title ──────────────────────────────────────────────
 
     #[test]
@@ -366,52 +294,4 @@ mod tests {
 
     // ── format_relative_time ────────────────────────────────────────
 
-    #[test]
-    fn format_relative_time_sub_second_is_now() {
-        assert_eq!(format_relative_time(Duration::from_millis(0)), "now");
-        assert_eq!(format_relative_time(Duration::from_millis(500)), "now");
-        assert_eq!(format_relative_time(Duration::from_millis(999)), "now");
-    }
-
-    #[test]
-    fn format_relative_time_seconds() {
-        assert_eq!(format_relative_time(Duration::from_secs(1)), "1s ago");
-        assert_eq!(format_relative_time(Duration::from_secs(30)), "30s ago");
-        assert_eq!(format_relative_time(Duration::from_secs(59)), "59s ago");
-    }
-
-    #[test]
-    fn format_relative_time_minutes() {
-        assert_eq!(format_relative_time(Duration::from_secs(60)), "1m ago");
-        assert_eq!(format_relative_time(Duration::from_secs(120)), "2m ago");
-        assert_eq!(
-            format_relative_time(Duration::from_secs(59 * 60)),
-            "59m ago"
-        );
-    }
-
-    #[test]
-    fn format_relative_time_hours() {
-        assert_eq!(format_relative_time(Duration::from_secs(60 * 60)), "1h ago");
-        assert_eq!(
-            format_relative_time(Duration::from_secs(2 * 60 * 60)),
-            "2h ago"
-        );
-        assert_eq!(
-            format_relative_time(Duration::from_secs(23 * 60 * 60)),
-            "23h ago"
-        );
-    }
-
-    #[test]
-    fn format_relative_time_days() {
-        assert_eq!(
-            format_relative_time(Duration::from_secs(24 * 60 * 60)),
-            "1d ago"
-        );
-        assert_eq!(
-            format_relative_time(Duration::from_secs(3 * 24 * 60 * 60)),
-            "3d ago"
-        );
-    }
 }

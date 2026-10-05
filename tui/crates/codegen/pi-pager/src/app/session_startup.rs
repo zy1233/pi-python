@@ -55,33 +55,6 @@ impl DeferredStartupActions {
         std::mem::take(self)
     }
 }
-/// Build `legacy ext RPC` params shared by TUI effects and headless.
-///
-/// `new_cwd` is the write namespace for the child (parent session cwd when
-/// cross-cwd); preflight must use the same path via [`effective_fork_new_cwd`].
-pub fn fork_session_params(
-    parent_session_id: &str,
-    parent_cwd: &Path,
-    new_session_id: Option<&str>,
-    parent_is_worktree: bool,
-) -> serde_json::Value {
-    let parent_cwd_str = parent_cwd.to_string_lossy().into_owned();
-    let source_cwd = pi_shell::session::resolve_local_session_any_cwd(parent_session_id)
-        .unwrap_or_else(|| parent_cwd_str.clone());
-    let mut payload = serde_json::json!({
-        "sourceSessionId": parent_session_id,
-        "sourceCwd": source_cwd,
-        "newCwd": parent_cwd_str.clone(),
-        "sessionKind": "fork",
-    });
-    if let Some(nid) = new_session_id {
-        payload["newSessionId"] = serde_json::Value::String(nid.to_string());
-    }
-    if parent_is_worktree {
-        payload["sourceWorkspaceDir"] = serde_json::Value::String(parent_cwd_str);
-    }
-    payload
-}
 /// Whether a persisted session (or its cwd) is worktree-backed.
 /// Mirrors in-session `/fork` reading `agent.session.is_worktree`.
 pub fn parent_session_is_worktree(session_id: &str, cwd: &Path) -> bool {
@@ -125,28 +98,6 @@ pub fn parent_session_is_worktree(session_id: &str, cwd: &Path) -> bool {
         }
     }
     false
-}
-/// Parse `newSessionId` from an `legacy ext RPC` ACP response body.
-pub fn fork_response_new_session_id(resp_json: &str) -> Option<String> {
-    let v: serde_json::Value = serde_json::from_str(resp_json).unwrap_or_default();
-    if v.get("error").is_some_and(|e| !e.is_null()) {
-        return None;
-    }
-    v.get("newSessionId")
-        .and_then(|x| x.as_str())
-        .or_else(|| {
-            v.get("result")
-                .and_then(|r| r.get("newSessionId"))
-                .and_then(|x| x.as_str())
-        })
-        .map(|s| s.to_string())
-}
-/// Error string from a fork response, if present.
-pub fn fork_response_error(resp_json: &str) -> Option<String> {
-    let v: serde_json::Value = serde_json::from_str(resp_json).ok()?;
-    v.get("error")
-        .filter(|e| !e.is_null())
-        .map(|e| e.to_string())
 }
 /// Pure interpretation of session-selection CLI flags (no I/O).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -383,10 +334,6 @@ pub fn active_local_workspace() -> anyhow::Result<Option<LocalWorkspaceConfig>> 
         .map_err(|_| {
             anyhow::anyhow!("local-workspace intent mutex poisoned; refuse attach (fail closed)")
         })
-}
-#[cfg(not(feature = "local-workspace"))]
-pub fn active_local_workspace() -> anyhow::Result<Option<()>> {
-    Ok(None)
 }
 #[cfg(feature = "local-workspace")]
 fn env_truthy(name: &str) -> bool {
@@ -638,15 +585,6 @@ pub fn local_build_session_on_disk(session_id: &str, cwd: &Path) -> bool {
     let cwd_str = cwd.to_string_lossy();
     pi_shell::session::resolve_local_session(session_id, &cwd_str).is_some()
 }
-/// Pure policy: process-wide `--chat` refuses a local Build disk row unless the
-/// caller marked an explicit conversation entry (picker `source == "conversation"`).
-pub fn chat_mode_refuses_local_build(
-    chat_mode: bool,
-    conversation_entry: bool,
-    is_local_build_on_disk: bool,
-) -> bool {
-    chat_mode && !conversation_entry && is_local_build_on_disk
-}
 /// Process-wide `--chat` must not load (or coerce) local Build disk rows.
 ///
 /// `conversation_entry` is true only for picker/list rows with
@@ -832,9 +770,6 @@ pub(crate) fn pre_acp_auth_manager(
     );
     auth
 }
-/// Pre-TUI remote restore (session state + memory only). Codebase checkout is
-/// never applied on this path; `--restore-code` requires `--worktree`.
-const REMOTE_RESTORE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
 /// `--restore-code` without `--worktree` on a remote miss: refuse in-place checkout.
 const REMOTE_RESTORE_NEEDS_WORKTREE: &str = "--restore-code on a remote session requires --worktree \
      (refusing to check out snapshot code into the current directory)";
@@ -1087,8 +1022,7 @@ async fn resolve_existing_session(
             anyhow::bail!("Session does not exist")
         }
         RemoteMissPlan::RestoreConversation => {
-            let restored =
-                restore_session_from_remote(session_id, cwd, ctx.restore_progress_on_stdout).await;
+            let restored = restore_session_from_remote(session_id).await;
             if arg_is_uuid {
                 return restored;
             }
@@ -1159,11 +1093,7 @@ pub(crate) fn plan_remote_miss(ctx: MaterializeCtx, arg_is_uuid: bool) -> Remote
 ///
 /// On timeout the future is cancelled; partial JSONL may already be on disk
 /// and is recovered via a local-child scan of the remote id.
-async fn restore_session_from_remote(
-    session_id: &str,
-    cwd: &str,
-    progress_on_stdout: bool,
-) -> anyhow::Result<ResolvedExisting> {
+async fn restore_session_from_remote(session_id: &str) -> anyhow::Result<ResolvedExisting> {
     let raw_config = pi_shell::config::load_effective_config()
         .map_err(|e| anyhow::anyhow!("Failed to load config: {}", e))?;
     if let Some((false, source)) =
@@ -1178,51 +1108,6 @@ async fn restore_session_from_remote(
         "Session {session_id:?} not found locally; remote restore is not available in {}",
         crate::brand::CLI_NAME,
     );
-}
-fn emit_pre_tui_restore_line(on_stdout: bool, line: &str) {
-    use std::io::Write;
-    if on_stdout {
-        println!("{line}");
-        let _ = std::io::stdout().flush();
-    } else {
-        eprintln!("{line}");
-        let _ = std::io::stderr().flush();
-    }
-}
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum RemoteRestoreOutcome {
-    Restored { local_session_id: String },
-    RecoveredAfterFailure { local_session_id: String },
-    Failed(String),
-}
-pub(crate) fn classify_remote_restore(
-    timed_out: bool,
-    local_session_id: Option<&str>,
-    restore_err: Option<&str>,
-    recovered_local_id: Option<&str>,
-) -> RemoteRestoreOutcome {
-    if let Some(id) = local_session_id.filter(|s| !s.is_empty()) {
-        return RemoteRestoreOutcome::Restored {
-            local_session_id: id.to_string(),
-        };
-    }
-    if let Some(id) = recovered_local_id.filter(|s| !s.is_empty()) {
-        return RemoteRestoreOutcome::RecoveredAfterFailure {
-            local_session_id: id.to_string(),
-        };
-    }
-    if timed_out {
-        return RemoteRestoreOutcome::Failed(format!(
-            "Timed out restoring session from remote after {}s. Conversation cannot be recovered.",
-            REMOTE_RESTORE_TIMEOUT.as_secs()
-        ));
-    }
-    if let Some(e) = restore_err {
-        return RemoteRestoreOutcome::Failed(format!("Failed to restore session from remote: {e}"));
-    }
-    RemoteRestoreOutcome::Failed(
-        "Failed to restore session from remote: conversation history was unavailable.".to_string(),
-    )
 }
 /// Resolve a non-id resume arg as a session title among local sessions for `cwd`.
 ///
@@ -1380,13 +1265,6 @@ mod tests {
         assert!(snapshot.pending_chat);
     }
     #[test]
-    fn chat_mode_refuses_only_local_build_non_conversation() {
-        assert!(chat_mode_refuses_local_build(true, false, true));
-        assert!(!chat_mode_refuses_local_build(true, false, false));
-        assert!(!chat_mode_refuses_local_build(true, true, true));
-        assert!(!chat_mode_refuses_local_build(false, false, true));
-    }
-    #[test]
     fn intent_default_is_new_auto() {
         assert_eq!(
             parse(&["grok"]).session_startup_intent().unwrap(),
@@ -1516,39 +1394,6 @@ mod tests {
             "/proj-a"
         );
         assert_eq!(effective_fork_new_cwd("/proj-b", None), "/proj-b");
-    }
-    #[test]
-    fn fork_session_params_sets_new_session_id_and_workspace_dir() {
-        let cwd = PathBuf::from("/wt");
-        let p = fork_session_params("parent-1", &cwd, Some("child-uuid"), true);
-        assert_eq!(p["sourceSessionId"], "parent-1");
-        assert_eq!(p["newCwd"], "/wt");
-        assert_eq!(p["newSessionId"], "child-uuid");
-        assert_eq!(p["sourceWorkspaceDir"], "/wt");
-        assert_eq!(p["sessionKind"], "fork");
-    }
-    #[test]
-    fn fork_session_params_omits_workspace_dir_when_not_worktree() {
-        let cwd = PathBuf::from("/proj");
-        let p = fork_session_params("parent-1", &cwd, None, false);
-        assert!(p.get("sourceWorkspaceDir").is_none());
-        assert!(p.get("newSessionId").is_none());
-    }
-    #[test]
-    fn fork_response_parses_nested_and_top_level_id() {
-        assert_eq!(
-            fork_response_new_session_id(r#"{"newSessionId":"a"}"#).as_deref(),
-            Some("a")
-        );
-        assert_eq!(
-            fork_response_new_session_id(r#"{"result":{"newSessionId":"b"}}"#).as_deref(),
-            Some("b")
-        );
-        assert!(fork_response_new_session_id(r#"{"error":"nope"}"#).is_none());
-        assert_eq!(
-            fork_response_error(r#"{"error":"boom"}"#).as_deref(),
-            Some("\"boom\"")
-        );
     }
     #[test]
     fn deferred_session_intent_variants_are_distinct() {
@@ -1711,56 +1556,6 @@ mod tests {
                 deferred_local_miss: true,
             }
         );
-    }
-    #[test]
-    fn classify_remote_restore_prefers_returned_local_id() {
-        assert_eq!(
-            classify_remote_restore(false, Some("child"), Some("boom"), Some("other")),
-            RemoteRestoreOutcome::Restored {
-                local_session_id: "child".into(),
-            }
-        );
-    }
-    #[test]
-    fn classify_remote_restore_recovers_disk_child_on_timeout_or_error() {
-        assert_eq!(
-            classify_remote_restore(true, None, None, Some("child")),
-            RemoteRestoreOutcome::RecoveredAfterFailure {
-                local_session_id: "child".into(),
-            }
-        );
-        assert_eq!(
-            classify_remote_restore(false, Some(""), Some("network"), Some("child")),
-            RemoteRestoreOutcome::RecoveredAfterFailure {
-                local_session_id: "child".into(),
-            }
-        );
-    }
-    #[test]
-    fn classify_remote_restore_errors_when_conversation_missing() {
-        match classify_remote_restore(true, None, None, None) {
-            RemoteRestoreOutcome::Failed(msg) => {
-                assert!(msg.contains("Timed out"), "{msg}");
-                assert!(msg.contains("cannot be recovered"), "{msg}");
-            }
-            other => panic!("expected Failed, got {other:?}"),
-        }
-        match classify_remote_restore(false, None, Some("registry 404"), None) {
-            RemoteRestoreOutcome::Failed(msg) => {
-                assert!(msg.contains("Failed to restore"), "{msg}");
-                assert!(msg.contains("registry 404"), "{msg}");
-            }
-            other => panic!("expected Failed, got {other:?}"),
-        }
-        match classify_remote_restore(false, Some(""), None, None) {
-            RemoteRestoreOutcome::Failed(msg) => {
-                assert!(
-                    msg.contains("conversation history was unavailable"),
-                    "{msg}"
-                );
-            }
-            other => panic!("expected Failed, got {other:?}"),
-        }
     }
     #[test]
     fn worktree_no_restore_code_notice_mentions_flag() {

@@ -68,12 +68,6 @@ impl AgentView {
                 self.persona_detail = detail;
                 InputOutcome::Changed
             }
-            crate::views::agents_modal::AgentsModalOutcome::EditInEditor { path, tab } => {
-                InputOutcome::Action(Action::SuspendForEditor {
-                    path,
-                    refresh_agents_modal: Some(tab),
-                })
-            }
             crate::views::agents_modal::AgentsModalOutcome::Changed => InputOutcome::Changed,
             crate::views::agents_modal::AgentsModalOutcome::Unchanged => InputOutcome::Unchanged,
         }
@@ -102,8 +96,7 @@ impl AgentView {
                 InputOutcome::Changed
             }
             crate::views::agents_modal::AgentsModalOutcome::ViewAgent { .. }
-            | crate::views::agents_modal::AgentsModalOutcome::OpenPersonaDetail { .. }
-            | crate::views::agents_modal::AgentsModalOutcome::EditInEditor { .. } => {
+            | crate::views::agents_modal::AgentsModalOutcome::OpenPersonaDetail { .. } => {
                 // Mouse interactions don't trigger view/edit — ignore.
                 InputOutcome::Unchanged
             }

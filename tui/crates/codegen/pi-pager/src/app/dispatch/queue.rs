@@ -200,14 +200,12 @@ fn format_cron_prompt(prompt: &str, task_id: &str, human_schedule: &str) -> Stri
 /// - **Cron**: pushes cron prompt block to scrollback, starts turn, returns `Effect::SendPrompt`
 pub(super) struct QueueDrain {
     pub(super) effects: Vec<Effect>,
-    pub(super) page_flip_entry: Option<EntryId>,
 }
 
 impl QueueDrain {
     fn blocked() -> Self {
         Self {
             effects: Vec::new(),
-            page_flip_entry: None,
         }
     }
 }
@@ -546,7 +544,6 @@ pub(super) fn maybe_drain_queue(agent: &mut AgentView) -> QueueDrain {
             };
             QueueDrain {
                 effects,
-                page_flip_entry: flip.then_some(prompt_entry_id),
             }
         }
         QueueEntryKind::Command => {
@@ -561,7 +558,6 @@ pub(super) fn maybe_drain_queue(agent: &mut AgentView) -> QueueDrain {
                     agent_id,
                     session_id,
                 }],
-                page_flip_entry: None,
             }
         }
         QueueEntryKind::BashCommand => {
@@ -580,7 +576,6 @@ pub(super) fn maybe_drain_queue(agent: &mut AgentView) -> QueueDrain {
                     command: queued.text,
                     prompt_id,
                 }],
-                page_flip_entry: None,
             }
         }
         QueueEntryKind::Cron => {
@@ -588,7 +583,7 @@ pub(super) fn maybe_drain_queue(agent: &mut AgentView) -> QueueDrain {
             agent.note_self_originated_prompt(&prompt_id);
             agent.start_turn_boundary(Some(&prompt_id));
             agent.session.current_prompt_id = Some(prompt_id.clone());
-            let prompt_entry_id = agent
+            agent
                 .scrollback
                 .push_block(RenderBlock::cron_prompt(&queued.text));
             agent.turn_started_at = Some(Instant::now());
@@ -623,7 +618,6 @@ pub(super) fn maybe_drain_queue(agent: &mut AgentView) -> QueueDrain {
                     blocks,
                     prompt_id,
                 }],
-                page_flip_entry: flip.then_some(prompt_entry_id),
             }
         }
     }
@@ -1648,54 +1642,6 @@ mod tests {
     }
 
     #[test]
-    fn drain_scroll_honors_page_flip_setting() {
-        fn app_at_bottom() -> AppView {
-            let mut app = test_app_with_agent();
-            let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-            for i in 0..40 {
-                agent
-                    .scrollback
-                    .push_block(RenderBlock::agent_message(format!("filler {i}")));
-            }
-            agent.scrollback.prepare_layout(80, 8);
-            agent.scrollback.goto_bottom();
-            app
-        }
-
-        crate::appearance::cache::set_page_flip_on_send(false);
-        let mut app = app_at_bottom();
-        let bottom = app.agents[&AgentId(0)].scrollback.scroll_offset();
-        dispatch(Action::SendPrompt("go".into()), &mut app);
-        let sb = &app.agents[&AgentId(0)].scrollback;
-        assert!(sb.is_follow_mode());
-        assert!(!sb.is_follow_preserve_scroll());
-        assert_eq!(sb.scroll_offset(), bottom);
-        assert_eq!(sb.selected(), Some(sb.len() - 1));
-
-        let mut app = app_at_bottom();
-        let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-        agent.scrollback.scroll_up(10);
-        let reading = agent.scrollback.scroll_offset();
-        dispatch(Action::SendPrompt("go".into()), &mut app);
-        let sb = &app.agents[&AgentId(0)].scrollback;
-        assert!(!sb.is_follow_mode());
-        assert_eq!(sb.scroll_offset(), reading);
-        assert_eq!(sb.selected(), Some(sb.len() - 1));
-
-        crate::appearance::cache::set_page_flip_on_send(true);
-        let mut app = app_at_bottom();
-        dispatch(Action::SendPrompt("go".into()), &mut app);
-        let sb = &app.agents[&AgentId(0)].scrollback;
-        assert!(sb.is_follow_mode());
-        assert!(sb.is_follow_preserve_scroll());
-        assert_eq!(sb.selected(), Some(sb.len() - 1));
-
-        crate::appearance::cache::set_page_flip_on_send(
-            pi_shell::agent::config::UiConfig::PAGE_FLIP_ON_SEND_DEFAULT,
-        );
-    }
-
-    #[test]
     fn drain_queue_when_empty_does_nothing() {
         let mut app = test_app_with_agent();
         let effects = dispatch(Action::DrainQueue, &mut app);
@@ -1938,25 +1884,6 @@ mod tests {
             }
             other => panic!("expected user bubble, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn drain_reports_page_flip_only_when_prompt_starts() {
-        crate::appearance::cache::set_page_flip_on_send(true);
-        let mut app = test_app_with_agent();
-        let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-        agent.session.enqueue_prompt("first".into());
-        let started = maybe_drain_queue(agent);
-        let entry_id = started.page_flip_entry.expect("prompt starts a page flip");
-        assert_eq!(
-            agent.scrollback.index_of_id(entry_id),
-            agent.scrollback.selected()
-        );
-
-        agent.session.enqueue_prompt("queued".into());
-        let blocked = maybe_drain_queue(agent);
-        assert!(blocked.effects.is_empty());
-        assert!(blocked.page_flip_entry.is_none());
     }
 
     /// Turn-start path: the leader/viewer adoption shim

@@ -379,39 +379,6 @@ impl AgentView {
         InputOutcome::Changed
     }
 
-    /// Reconcile this client's optimistic queue echoes against a raw
- /// `legacy ext RPC` broadcast (pre-merge entries — the mirrored
-    /// snapshot re-pins unconfirmed echoes, so it can't tell confirmation
-    /// apart), and resolve a parked queue-row send-now
-    /// ([`Self::send_now_awaiting_confirm`]).
-    ///
-    /// Returns `Some((id, version))` when the parked row is now confirmed as
- /// QUEUED — the caller fires `legacy ext RPC` with that
-    /// authoritative version. A parked row confirmed as RUNNING clears the
-    /// park with nothing to do (the natural drain won the race). A row in
-    /// neither set stays parked (its RPC is still in flight).
-    pub(crate) fn resolve_send_now_awaiting_confirm(
-        &mut self,
-        broadcast_entries: &[(String, u64)],
-        running_prompt_id: Option<&str>,
-    ) -> Option<(String, u64)> {
-        // Confirmed ids (queued or running) leave the optimistic set.
-        self.optimistic_queue_ids.retain(|id| {
-            running_prompt_id != Some(id.as_str())
-                && !broadcast_entries.iter().any(|(eid, _)| eid == id)
-        });
-        let awaiting = self.send_now_awaiting_confirm.as_deref()?;
-        if running_prompt_id == Some(awaiting) {
-            self.send_now_awaiting_confirm = None;
-            return None;
-        }
-        if let Some((id, version)) = broadcast_entries.iter().find(|(eid, _)| eid == awaiting) {
-            self.send_now_awaiting_confirm = None;
-            return Some((id.clone(), *version));
-        }
-        None
-    }
-
     /// A server-queue echo resolved without landing (RPC failed / removed /
     /// cancelled): forget it, and drop any send-now parked on it — there is
     /// no row left to promote.
@@ -432,27 +399,6 @@ impl AgentView {
         // Retired ids never adopt — drop the painted block with the id.
         // (Re-keys route through `note_queue_echo_rekeyed` instead.)
         self.retire_send_now_painted_block(prompt_id);
-    }
-
-    /// Re-key: `old_id` is dead but the message lives on under `new_id` —
-    /// move (never retire) its painted block so the new adoption reuses it.
-    pub(crate) fn note_queue_echo_rekeyed(&mut self, old_id: &str, new_id: &str) {
-        self.optimistic_queue_ids.remove(old_id);
-        if self.send_now_awaiting_confirm.as_deref() == Some(old_id) {
-            self.send_now_awaiting_confirm = None;
-        }
-        if let Some(entry) = self.send_now_painted_blocks.remove(old_id) {
-            match self.send_now_painted_blocks.entry(new_id.to_string()) {
-                std::collections::hash_map::Entry::Vacant(slot) => {
-                    slot.insert(entry);
-                }
-                // Re-key collision (identical texts): remove the losing
-                // block instead of orphaning it.
-                std::collections::hash_map::Entry::Occupied(_) => {
-                    self.scrollback.remove_entry(entry.0);
-                }
-            }
-        }
     }
 
     /// Remove the optimistic block for a send-now'd prompt that will never

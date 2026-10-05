@@ -665,7 +665,6 @@ impl BlockContent for ContextInfoBlock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pi_shell::session::TokenUsageCategory;
 
     fn snapshot() -> ContextInfo {
         ContextInfo {

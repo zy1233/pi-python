@@ -29,8 +29,8 @@ use registry::{CommandRegistry, CommandSource, CommandTrigger};
 use pi_tools::implementations::skills::types::SkillScope;
 
 pub use command::{
-    AppCtx, ArgItem, CommandExecCtx, CommandProvenance, CommandResult, SlashCommand,
-    WorkflowChoice, WorkflowRunChoice,
+    AppCtx, ArgItem, CommandProvenance, SlashCommand,
+    
 };
 pub use mode_support::{ModeSupport, Remedy};
 
@@ -350,7 +350,6 @@ impl SlashState {
 pub struct SlashController {
     registry: CommandRegistry,
     matcher: FuzzyMatcher,
-    cwd: std::path::PathBuf,
     /// Offer `/announcements` when session announcements (critical or promo) exist.
     has_session_announcements: bool,
     /// Consumer billing surface — gates `/usage` subcommands. Default `true`.
@@ -382,25 +381,23 @@ pub struct SlashController {
 }
 
 impl SlashController {
-    /// Create a new controller with the given registry and working directory.
+    /// Create a new controller with the given registry.
     ///
     /// The MRU store defaults to an isolated, in-memory (non-persisting) store.
     /// Production injects the shared store via [`Self::set_mru`].
-    pub fn new(registry: CommandRegistry, cwd: std::path::PathBuf) -> Self {
+    pub fn new(registry: CommandRegistry) -> Self {
         let mru = std::rc::Rc::new(std::cell::RefCell::new(mru::SlashMru::new_in_memory()));
-        Self::with_mru(registry, cwd, mru)
+        Self::with_mru(registry, mru)
     }
 
     /// Controller with an explicit MRU store (tests/production injection).
     pub fn with_mru(
         registry: CommandRegistry,
-        cwd: std::path::PathBuf,
         mru: std::rc::Rc<std::cell::RefCell<mru::SlashMru>>,
     ) -> Self {
         Self {
             registry,
             matcher: FuzzyMatcher::new(),
-            cwd,
             has_session_announcements: false,
             billing_surface_visible: true,
             usage_command_visible: true,
@@ -443,32 +440,16 @@ impl SlashController {
         self.billing_surface_visible = visible;
     }
 
-    pub fn billing_surface_visible(&self) -> bool {
-        self.billing_surface_visible
-    }
-
     pub fn set_usage_command_visible(&mut self, visible: bool) {
         self.usage_command_visible = visible;
-    }
-
-    pub fn usage_command_visible(&self) -> bool {
-        self.usage_command_visible
     }
 
     pub fn set_workflows_available(&mut self, available: bool) {
         self.workflows_available = available;
     }
 
-    pub fn workflows_available(&self) -> bool {
-        self.workflows_available
-    }
-
     pub fn set_workflow_runs(&mut self, runs: Vec<crate::slash::command::WorkflowRunChoice>) {
         self.workflow_runs = runs;
-    }
-
-    pub fn workflow_runs(&self) -> &[crate::slash::command::WorkflowRunChoice] {
-        &self.workflow_runs
     }
 
     /// Record the process's effective screen mode (see the field doc).
@@ -495,15 +476,7 @@ impl SlashController {
     pub(crate) fn app_ctx<'a>(&'a self, models: &'a ModelState) -> AppCtx<'a> {
         AppCtx {
             models,
-            cwd: &self.cwd,
-            has_session_announcements: self.has_session_announcements,
-            billing_surface_visible: self.billing_surface_visible,
-            usage_command_visible: self.usage_command_visible,
-            workflows_available: self.workflows_available,
-            saved_workflows: self.registry.saved_workflows(),
-            workflow_runs: &self.workflow_runs,
             screen_mode: self.screen_mode,
-            current_title: self.current_title.as_deref(),
         }
     }
 
@@ -546,8 +519,8 @@ impl SlashController {
     }
 
     /// Create a controller pre-loaded with pager builtin commands.
-    pub fn with_builtins(cwd: std::path::PathBuf) -> Self {
-        Self::new(CommandRegistry::new(commands::builtin_commands()), cwd)
+    pub fn with_builtins() -> Self {
+        Self::new(CommandRegistry::new(commands::builtin_commands()))
     }
 
     /// Mutable access to the registry (for ACP sync).
@@ -565,13 +538,6 @@ impl SlashController {
     /// commands are true toggles (re-running the active mode turns it off).
     pub fn set_auto_mode_available(&mut self, available: bool) {
         self.registry.set_auto_mode_available(available);
-    }
-
-    /// Whether `command` should be offered for completion or execution
-    /// given the command's own visibility gates. See [`command_offered`].
-    pub fn is_command_offered(&self, command: &dyn SlashCommand, models: &ModelState) -> bool {
-        let ctx = self.app_ctx(models);
-        command_offered(command, &ctx)
     }
 
     /// Recompute the snapshot from prompt text + cursor position.
@@ -689,7 +655,7 @@ impl SlashController {
             models,
             previous,
         } = p;
-        // Drop app_ctx before any &mut self call (it borrows self.cwd).
+        // Drop app_ctx before any &mut self call (it borrows self).
         // Same gate as the leading-`/` path and recognized_token_ranges, so
         // the under-cursor teal (command_recognized) can't disagree with the
         // token-range highlight on scope-restricted surfaces.
@@ -1643,6 +1609,7 @@ mod tests {
 
     use crate::acp::model_state::ModelState;
 
+    use super::command::{CommandExecCtx, CommandResult};
     use super::registry::CommandRegistry;
     use super::*;
 
@@ -1763,7 +1730,7 @@ mod tests {
 
     #[test]
     fn controller_surfaces_commands_without_query() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let models = ModelState::default();
 
@@ -1775,7 +1742,7 @@ mod tests {
 
     #[test]
     fn controller_suggests_partial_command() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let models = ModelState::default();
 
@@ -1790,66 +1757,8 @@ mod tests {
     }
 
     #[test]
-    fn shell_prequalified_skill_appears_beside_builtin() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
-        let meta = serde_json::json!({
-            "scope": "plugin",
-            "path": "/plugins/acme/skills/theme/SKILL.md",
-            "bareName": "theme",
-            "pluginName": "acme",
-        })
-        .as_object()
-        .cloned()
-        .unwrap();
-        ctrl.registry_mut()
-            .set_acp_commands(&[agent_client_protocol::AvailableCommand::new(
-                "acme:theme".to_string(),
-                "Acme brand theme".to_string(),
-            )
-            .meta(meta)]);
-
-        let state = SlashState::default();
-        let models = ModelState::default();
-        ctrl.refresh(&state, "/theme", 6, &models);
-        let snapshot = state.snapshot();
-        let theme = snapshot
-            .matches
-            .iter()
-            .find(|row| row.display == "/theme")
-            .expect("builtin /theme");
-        assert_eq!(theme.provenance, Some(CommandProvenance::Builtin));
-        assert!(!theme.description.contains("built-in"));
-        let skill = snapshot
-            .matches
-            .iter()
-            .find(|row| row.display == "/acme:theme")
-            .expect("qualified skill");
-        assert_eq!(
-            skill.provenance,
-            Some(CommandProvenance::Skill {
-                source: "acme".to_string()
-            })
-        );
-        assert_eq!(skill.description, "Acme brand theme");
-        assert!(ctrl.registry().get("theme").is_some_and(|c| !c.is_skill()));
-        assert!(
-            ctrl.registry()
-                .get("acme:theme")
-                .is_some_and(|c| c.is_skill())
-        );
-
-        ctrl.refresh(&state, "/acme:theme", 11, &models);
-        let snapshot = state.snapshot();
-        assert_eq!(
-            snapshot.selection().map(|row| row.display.as_str()),
-            Some("/acme:theme"),
-            "exact qualified query should select the skill"
-        );
-    }
-
-    #[test]
     fn controller_silences_double_slash() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let models = ModelState::default();
 
@@ -1864,7 +1773,7 @@ mod tests {
     /// like `/` on an empty composer.
     #[test]
     fn slash_typed_before_existing_text_opens_full_menu() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let models = ModelState::default();
 
@@ -1887,7 +1796,7 @@ mod tests {
     /// cursor-clamped prefix instead of staying closed.
     #[test]
     fn cursor_inside_leading_command_with_args_filters_by_prefix() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let models = ModelState::default();
 
@@ -1907,7 +1816,7 @@ mod tests {
     /// inline ghost is drawn over the existing text.
     #[test]
     fn cursor_inside_recognized_command_with_args_opens_menu() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let models = ModelState::default();
 
@@ -1927,7 +1836,7 @@ mod tests {
 
     #[test]
     fn controller_close_hides_matches() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let models = ModelState::default();
 
@@ -1942,7 +1851,7 @@ mod tests {
 
     #[test]
     fn controller_suggests_alias_display_for_alias() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let models = ModelState::default();
 
@@ -1956,7 +1865,7 @@ mod tests {
 
     #[test]
     fn controller_suggests_model_args() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let mut models = ModelState::default();
         let model_id = acp::ModelId::new(Arc::from("example"));
@@ -1984,7 +1893,7 @@ mod tests {
         // Cursor ends up right at the start of the args ("hello"), so
         // args_query is empty but the args range is non-empty.
         // The placeholder must NOT appear.
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let models = ModelState::default();
 
@@ -2004,7 +1913,7 @@ mod tests {
 
     #[test]
     fn controller_selection_wraps_around() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let models = ModelState::default();
 
@@ -2025,7 +1934,7 @@ mod tests {
 
     #[test]
     fn controller_scroll_clamps_at_edges() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let models = ModelState::default();
 
@@ -2046,7 +1955,7 @@ mod tests {
 
     #[test]
     fn non_slash_text_produces_inactive_snapshot() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let models = ModelState::default();
 
@@ -2058,7 +1967,7 @@ mod tests {
 
     #[test]
     fn file_path_not_recognized_as_command() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let models = ModelState::default();
 
@@ -2074,7 +1983,7 @@ mod tests {
 
     #[test]
     fn recognized_command_sets_command_recognized() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let models = ModelState::default();
 
@@ -2139,7 +2048,7 @@ mod tests {
 
     #[test]
     fn inline_ghost_for_partial_command() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let models = ModelState::default();
 
@@ -2157,7 +2066,7 @@ mod tests {
 
     #[test]
     fn leading_slash_ghost_tracks_dropdown_selection() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let models = ModelState::default();
 
@@ -2227,11 +2136,8 @@ mod tests {
         fn description(&self) -> &str {
             ""
         }
-        fn usage(&self) -> &str {
-            ""
-        }
         fn run(&self, _ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {
-            CommandResult::Handled
+            CommandResult::Message(String::new())
         }
     }
 
@@ -2244,10 +2150,7 @@ mod tests {
         for (cmd, ts) in seeds {
             store.seed_for_test("", cmd, *ts);
         }
-        let mut ctrl = SlashController::new(
-            CommandRegistry::new(commands),
-            std::path::PathBuf::from("."),
-        );
+        let mut ctrl = SlashController::new(CommandRegistry::new(commands));
         ctrl.set_mru(std::rc::Rc::new(std::cell::RefCell::new(store)));
         ctrl
     }
@@ -2286,7 +2189,7 @@ mod tests {
     /// upsell (covered by the dispatch-level tests).
     #[test]
     fn restricted_commands_stay_visible_in_dropdown() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         ctrl.registry_mut()
             .set_restricted_commands(&["theme".to_string()]);
         assert!(
@@ -2307,7 +2210,7 @@ mod tests {
 
     #[test]
     fn move_selection_updates_inline_ghost() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let models = ModelState::default();
         ctrl.refresh(&state, "/h", 2, &models);
@@ -2338,182 +2241,9 @@ mod tests {
     }
 
     #[test]
-    fn ghost_tracks_selection_when_skill_wins_mru_tie() {
-        // Repro of the reported "/p shows ghost `pager-headless` but Tab inserts
-        // `personas`" divergence: a builtin (`personas`) and an ACP skill
-        // (`pager-headless`) tie on fuzzy score for `/p`, MRU favors the skill.
-        // The ghost must equal the selected (Tab-accepted) row in every case.
-        let mut ctrl = SlashController::new(
-            CommandRegistry::new(vec![Arc::new(TieCmd("personas"))]),
-            std::path::PathBuf::from("."),
-        );
-        ctrl.registry_mut()
-            .set_acp_commands(&[agent_client_protocol::AvailableCommand::new(
-                "pager-headless".to_string(),
-                String::new(),
-            )]);
-        let mut store = mru::SlashMru::new_in_memory();
-        store.seed_for_test("", "pager-headless", 1_700_000_900);
-        ctrl.set_mru(std::rc::Rc::new(std::cell::RefCell::new(store)));
-
-        let state = SlashState::default();
-        let models = ModelState::default();
-        ctrl.refresh(&state, "/p", 2, &models);
-        let snap = state.snapshot();
-
-        let selected = snap
-            .selection()
-            .expect("dropdown open")
-            .command_name()
-            .to_string();
-        let ghost = snap.inline_ghost.as_ref().expect("ghost present for /p");
-        assert_eq!(
-            ghost.full_name, selected,
-            "ghost must complete the selected row, not a separate ranker's pick"
-        );
-        assert_eq!(
-            selected, "pager-headless",
-            "MRU should make the recently-used skill win the /p tie"
-        );
-    }
-
-    #[test]
-    fn colliding_plugin_skill_appears_beside_builtin() {
-        let mut ctrl = SlashController::new(
-            CommandRegistry::new(vec![Arc::new(TieCmd("login"))]),
-            std::path::PathBuf::from("."),
-        );
-        let meta = serde_json::json!({
-            "scope": "plugin",
-            "path": "/plugins/acme/skills/login/SKILL.md",
-            "pluginName": "acme",
-        })
-        .as_object()
-        .cloned()
-        .unwrap();
-        ctrl.registry_mut()
-            .set_acp_commands(&[agent_client_protocol::AvailableCommand::new(
-                "acme:login".to_string(),
-                "Acme SSO helper".to_string(),
-            )
-            .meta(meta)]);
-
-        let state = SlashState::default();
-        let models = ModelState::default();
-        ctrl.refresh(&state, "/login", 6, &models);
-        let snap = state.snapshot();
-
-        let builtin = snap
-            .matches
-            .iter()
-            .find(|r| r.display == "/login")
-            .expect("builtin /login stays listed");
-        assert_eq!(builtin.provenance, Some(CommandProvenance::Builtin));
-
-        let skill = snap
-            .matches
-            .iter()
-            .find(|r| r.display == "/acme:login")
-            .expect("colliding plugin skill listed as /acme:login");
-        assert_eq!(
-            skill.provenance,
-            Some(CommandProvenance::Skill {
-                source: "acme".to_string()
-            })
-        );
-        assert_eq!(skill.description, "Acme SSO helper");
-
-        assert_eq!(snap.matches[0].display, "/login");
-
-        assert!(
-            !skill.indices.is_empty(),
-            "bare-suffix match must still highlight the row"
-        );
-        assert!(
-            skill
-                .indices
-                .iter()
-                .all(|i| (*i as usize) < "/acme:login".len()),
-            "indices must land within the display text: {:?}",
-            skill.indices
-        );
-
-        ctrl.record_command_use("acme:login", "acme:login");
-        ctrl.refresh(&state, "/login", 6, &models);
-        assert_eq!(
-            state.snapshot().matches[0].display,
-            "/login",
-            "recently-used colliding skill must not hijack the typed builtin name"
-        );
-    }
-
-    struct AliasCmd;
-    impl SlashCommand for AliasCmd {
-        fn name(&self) -> &str {
-            "compact"
-        }
-        fn aliases(&self) -> &[&str] {
-            &["clear"]
-        }
-        fn description(&self) -> &str {
-            "compact desc"
-        }
-        fn usage(&self) -> &str {
-            "/compact"
-        }
-        fn run(&self, _ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {
-            CommandResult::Handled
-        }
-    }
-
-    #[test]
-    fn alias_collision_badges_canonical_builtin_row() {
-        let mut ctrl = SlashController::new(
-            CommandRegistry::new(vec![Arc::new(AliasCmd)]),
-            std::path::PathBuf::from("."),
-        );
-        let meta = serde_json::json!({
-            "scope": "plugin",
-            "path": "/plugins/acme/skills/clear/SKILL.md",
-            "pluginName": "acme",
-        })
-        .as_object()
-        .cloned()
-        .unwrap();
-        ctrl.registry_mut()
-            .set_acp_commands(&[agent_client_protocol::AvailableCommand::new(
-                "acme:clear".to_string(),
-                "Acme clear".to_string(),
-            )
-            .meta(meta)]);
-
-        let state = SlashState::default();
-        let models = ModelState::default();
-        ctrl.refresh(&state, "/", 1, &models);
-        let snap = state.snapshot();
-        let builtin = snap
-            .matches
-            .iter()
-            .find(|row| row.display == "/compact")
-            .expect("empty menu keeps the canonical builtin row");
-        assert_eq!(builtin.provenance, Some(CommandProvenance::Builtin));
-        let skill = snap
-            .matches
-            .iter()
-            .find(|row| row.display == "/acme:clear")
-            .expect("qualified skill listed");
-        assert_eq!(
-            skill.provenance,
-            Some(CommandProvenance::Skill {
-                source: "acme".to_string()
-            })
-        );
-    }
-
-    #[test]
     fn record_command_use_stores_canonical_for_alias() {
         // Default controller store is already isolated + in-memory.
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         ctrl.record_command_use("e", "exit");
         ctrl.record_command_use("q", "/quit");
         assert!(ctrl.mru_last_used("", "quit") > 0);
@@ -2587,51 +2317,6 @@ mod tests {
         );
     }
 
-    /// Build a skill-shaped ACP command in `scope`.
-    fn skill_cmd(name: &str, scope: &str) -> agent_client_protocol::AvailableCommand {
-        let meta =
-            serde_json::json!({ "scope": scope, "path": format!("/skills/{name}/SKILL.md") })
-                .as_object()
-                .cloned()
-                .expect("skill meta is an object");
-        agent_client_protocol::AvailableCommand::new(name.to_string(), String::new()).meta(meta)
-    }
-
-    /// Bundled skills sort above the other scopes, both alphabetized, and the whole skill block sits below the commands.
-    #[test]
-    fn empty_query_sinks_skills_below_commands_alphabetized() {
-        let mut ctrl = tie_controller(&["alpha", "bravo"], &[]);
-        ctrl.registry_mut().set_acp_commands(&[
-            skill_cmd("zeta-user", "user"),
-            skill_cmd("beta-bundled", "bundled"),
-            skill_cmd("alpha-user", "user"),
-            skill_cmd("apex-bundled", "bundled"),
-        ]);
-        let state = SlashState::default();
-        let models = ModelState::default();
-
-        ctrl.refresh(&state, "/", 1, &models);
-
-        let order: Vec<String> = state
-            .snapshot()
-            .matches
-            .iter()
-            .map(|r| r.display.clone())
-            .collect();
-        assert_eq!(
-            order,
-            vec![
-                "/alpha",
-                "/bravo",
-                "/apex-bundled",
-                "/beta-bundled",
-                "/alpha-user",
-                "/zeta-user",
-            ],
-            "commands, then bundled skills, then the rest"
-        );
-    }
-
     /// A curated tag outranks recency, so `MenuKey` must keep `untagged` above `recency`.
     #[test]
     fn empty_query_puts_a_tagged_command_above_a_recent_one() {
@@ -2649,27 +2334,6 @@ mod tests {
             .map(|r| r.display.clone())
             .collect();
         assert_eq!(order, vec!["/alpha", "/bravo"]);
-    }
-
-    /// A tag lifts a skill only inside its own band; the bands come first.
-    #[test]
-    fn empty_query_keeps_a_tagged_skill_below_the_commands() {
-        let mut ctrl = tie_controller(&["alpha"], &[]);
-        ctrl.registry_mut()
-            .set_acp_commands(&[skill_cmd("zulu", "bundled")]);
-        set_tags(&mut ctrl, &[("zulu", "new")]);
-        let state = SlashState::default();
-        let models = ModelState::default();
-
-        ctrl.refresh(&state, "/", 1, &models);
-
-        let order: Vec<String> = state
-            .snapshot()
-            .matches
-            .iter()
-            .map(|r| r.display.clone())
-            .collect();
-        assert_eq!(order, vec!["/alpha", "/zulu"]);
     }
 
     /// Within the command group the menu leads with what you actually use.
@@ -2697,49 +2361,6 @@ mod tests {
         );
     }
 
-    /// ACP commands — including bundled skills that arrive as skill-shaped ACP
-    /// commands — tag from the map the same way as builtins.
-    #[test]
-    fn acp_and_skill_commands_tag_from_map() {
-        let mut ctrl = SlashController::new(
-            CommandRegistry::new(vec![
-                Arc::new(TieCmd("builtin-cmd")) as Arc<dyn SlashCommand>
-            ]),
-            std::path::PathBuf::from("."),
-        );
-        // A skill arrives as an ACP command carrying skill meta (scope + path).
-        let skill_meta = serde_json::json!({
-            "scope": "local",
-            "path": "/home/user/.grok/skills/skill-cmd/SKILL.md",
-        })
-        .as_object()
-        .cloned()
-        .expect("skill meta is an object");
-        let skill_cmd =
-            agent_client_protocol::AvailableCommand::new("skill-cmd".to_string(), String::new())
-                .meta(skill_meta);
-        ctrl.registry_mut().set_acp_commands(&[
-            agent_client_protocol::AvailableCommand::new("acp-command".to_string(), String::new()),
-            skill_cmd,
-        ]);
-        assert!(
-            ctrl.registry()
-                .get("skill-cmd")
-                .expect("skill command present")
-                .is_skill(),
-            "skill-shaped ACP command must classify as a skill"
-        );
-
-        set_tags(&mut ctrl, &[("acp-command", "beta"), ("skill-cmd", "new")]);
-        let state = SlashState::default();
-        let models = ModelState::default();
-        ctrl.refresh(&state, "/", 1, &models);
-        let snap = state.snapshot();
-        assert_eq!(row_tag(&snap, "/acp-command"), Some("beta".to_string()));
-        assert_eq!(row_tag(&snap, "/skill-cmd"), Some("new".to_string()));
-        assert_eq!(row_tag(&snap, "/builtin-cmd"), None);
-    }
-
     #[test]
     fn flat_mru_boosts_recent_command_regardless_of_typed_prefix() {
         // Flat schema (hermetic): using `plan` recently boosts it even when
@@ -2763,14 +2384,14 @@ mod tests {
 
     #[test]
     fn submit_records_canonical_for_ranking() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         ctrl.record_command_use("pager-headless", "pager-headless");
         assert!(ctrl.mru_last_used("", "pager-headless") > 0);
     }
 
     #[test]
     fn no_ghost_for_fully_recognized_command() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let models = ModelState::default();
 
@@ -2786,7 +2407,7 @@ mod tests {
 
     #[test]
     fn no_ghost_for_unmatched_prefix() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let models = ModelState::default();
 
@@ -2800,7 +2421,7 @@ mod tests {
 
     #[test]
     fn inline_ghost_multiline() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let models = ModelState::default();
 
@@ -2818,7 +2439,7 @@ mod tests {
 
     #[test]
     fn recognized_tokens_highlighted() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let models = ModelState::default();
 
@@ -2831,7 +2452,7 @@ mod tests {
     fn recognized_token_ranges_matches_composer_refresh() {
         // Parity pin: the submit-time helper must produce exactly the ranges
         // the composer highlighted while typing (same registry + gates).
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let models = ModelState::default();
 
@@ -2846,7 +2467,7 @@ mod tests {
 
     #[test]
     fn recognized_token_ranges_excludes_unknown_and_paths() {
-        let ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let ctrl = SlashController::with_builtins();
         let models = ModelState::default();
 
         assert!(
@@ -2867,7 +2488,7 @@ mod tests {
 
     #[test]
     fn mid_text_slash_on_second_line_uses_token_range() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let models = ModelState::default();
 
@@ -2892,7 +2513,7 @@ mod tests {
 
     #[test]
     fn leading_slash_on_second_line_after_first_command() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let models = ModelState::default();
 
@@ -2906,7 +2527,7 @@ mod tests {
 
     #[test]
     fn mid_text_slash_args_after_token() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let models = ModelState::default();
 
@@ -2927,7 +2548,7 @@ mod tests {
 
     #[test]
     fn mid_text_cursor_in_first_slash_stays_in_command_mode() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut ctrl = SlashController::with_builtins();
         let state = SlashState::default();
         let models = ModelState::default();
 
@@ -2958,9 +2579,6 @@ mod tests {
         fn description(&self) -> &str {
             "test chain"
         }
-        fn usage(&self) -> &str {
-            "/chain <a> <b>"
-        }
         fn takes_args(&self) -> bool {
             true
         }
@@ -2985,16 +2603,13 @@ mod tests {
             ])
         }
         fn run(&self, _ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {
-            CommandResult::Handled
+            CommandResult::Message(String::new())
         }
     }
 
     #[test]
     fn suggest_args_chains_or_terminates_based_on_typed_query() {
-        let mut ctrl = SlashController::new(
-            CommandRegistry::new(vec![Arc::new(ChainCmd)]),
-            std::path::PathBuf::from("."),
-        );
+        let mut ctrl = SlashController::new(CommandRegistry::new(vec![Arc::new(ChainCmd)]));
         let state = SlashState::default();
         let models = ModelState::default();
 
@@ -3036,7 +2651,7 @@ mod tests {
     fn completion_offers_only_commands_that_support_the_mode() {
         let models = ModelState::default();
         let offered = |mode, query: &str| {
-            let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+            let mut ctrl = SlashController::with_builtins();
             ctrl.set_screen_mode(mode);
             let state = SlashState::default();
             ctrl.refresh(&state, query, query.len(), &models);
@@ -3063,7 +2678,7 @@ mod tests {
     fn mid_text_arg_suggestions_respect_the_mode() {
         let models = ModelState::default();
         let arg_rows = |mode| {
-            let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+            let mut ctrl = SlashController::with_builtins();
             ctrl.set_screen_mode(mode);
             let state = SlashState::default();
             let text = "look at this /theme ";

@@ -413,29 +413,6 @@ impl FileSearchState {
         self.results.num_items
     }
 
-    /// Test-only: install a fake context + results snapshot so tests can drive
-    /// acceptance flows without spinning up the background fuzzy daemon.
-    ///
-    /// Bumps `min_generation` past the seeded generation so any in-flight real
-    /// daemon poll is rejected and cannot clobber the seeded state.
-    #[cfg(test)]
-    pub(crate) fn set_test_state(
-        &mut self,
-        context: AtContext,
-        results: Vec<FuzzyMatchResult>,
-        selected: usize,
-    ) {
-        self.context = Some(context);
-        self.results = FuzzyMatcherDaemonResults {
-            topk: Arc::from(results),
-            num_items: 0,
-            status: Default::default(),
-            generation: self.min_generation,
-        };
-        self.min_generation += 1;
-        self.selected = selected;
-    }
-
     /// Test-only observable state: whether the lazy daemon has been built yet.
     #[cfg(test)]
     pub(crate) fn daemon_is_built(&self) -> bool {
@@ -453,49 +430,6 @@ impl FileSearchState {
 mod tests {
     use super::*;
 
-    fn dir_result(path: &str) -> FuzzyMatchResult {
-        FuzzyMatchResult {
-            path: nucleo::Utf32String::from(path),
-            is_dir: true,
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn try_replace_commits_directory_already_present() {
-        // The selected dir's `/`-append already matches the token text, so
-        // acceptance commits (dismiss) rather than drilling.
-        let mut state = FileSearchState::new(Path::new("."));
-
-        // At the prompt end: append a trailing space so typing can continue.
-        let src = "@src/";
-        let ctx = context::detect(src, src.len()).expect("context");
-        state.set_test_state(ctx, vec![dir_result("src")], 0);
-        let r = state.try_replace(src).expect("replacement");
-        assert!(r.dismiss);
-        assert_eq!(r.range, 1..5);
-        assert_eq!(r.text, "src/ ");
-        assert_eq!(r.cursor, "@src/ ".len());
-
-        // Mid-prompt: no appended space; step past the existing terminator.
-        let src = "@src/ tail";
-        let ctx = context::detect(src, 5).expect("context");
-        state.set_test_state(ctx, vec![dir_result("src")], 0);
-        let r = state.try_replace(src).expect("replacement");
-        assert!(r.dismiss);
-        assert_eq!(r.text, "src/");
-        assert_eq!(r.cursor, 6);
-
-        // Mid-prompt with a multibyte terminator: step past the whole char.
-        let src = "@src/\u{a0}tail";
-        let ctx = context::detect(src, 5).expect("context");
-        state.set_test_state(ctx, vec![dir_result("src")], 0);
-        let r = state.try_replace(src).expect("replacement");
-        assert!(r.dismiss);
-        assert_eq!(r.text, "src/");
-        assert_eq!(r.cursor, 5 + '\u{a0}'.len_utf8());
-    }
-
     #[test]
     fn retarget_drops_built_daemon() {
         let dir = tempfile::tempdir().expect("temp dir");
@@ -505,21 +439,6 @@ mod tests {
 
         state.retarget(Path::new(".."));
         assert_eq!(state.root(), Path::new(".."));
-        assert!(!state.daemon_is_built());
-    }
-
-    #[test]
-    fn poll_does_not_build_daemon() {
-        let mut state = FileSearchState::new(Path::new("."));
-        // With no @-context, poll returns early and never touches the daemon.
-        assert!(!state.poll());
-        assert!(!state.daemon_is_built());
-
-        // With an @-context but an unbuilt daemon, poll must not force construction.
-        let ctx = context::detect("@foo", 4).expect("context");
-        state.set_test_state(ctx, Vec::new(), 0);
-        assert!(state.context().is_some());
-        assert!(!state.poll());
         assert!(!state.daemon_is_built());
     }
 

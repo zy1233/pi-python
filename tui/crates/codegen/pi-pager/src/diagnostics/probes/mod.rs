@@ -73,7 +73,6 @@ pub struct DoctorProbeSnapshot<'a> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ColorPassthroughProbe {
     Skip,
-    Run,
 }
 
 pub struct TmuxProbeFacts {
@@ -124,35 +123,6 @@ pub fn collect_startup_tui<'a>(
         is_wayland,
         native_tool,
     )
-}
-
-pub fn collect_doctor_tui<'a>(
-    terminal: &'a TerminalContext,
-    runtime: TuiProbeEvidence<'a>,
-    tmux: &dyn TmuxOptionQuery,
-) -> DoctorProbeSnapshot<'a> {
-    let is_wayland = crate::host::DisplayServer::current() == crate::host::DisplayServer::Wayland;
-    let native_tool = pi_shell::util::clipboard::native_tool_name();
-    DoctorProbeSnapshot {
-        common: collect_common(
-            terminal,
-            runtime,
-            None,
-            ColorPassthroughProbe::Run,
-            tmux,
-            is_wayland,
-            Some(native_tool),
-        ),
-        clipboard: ClipboardProbeFacts {
-            route: crate::clipboard::clipboard_route().clone(),
-            native_tool,
-            osc52_sink_active: osc52_sink_active(),
-        },
-        host_os: crate::host::HostOs::current(),
-        display_server: crate::host::DisplayServer::current(),
-        container_no_display: pi_shell::util::clipboard::is_containerized_without_display(),
-        color_level: crate::theme::color_support::get(),
-    }
 }
 
 /// Collect standalone evidence without running live tmux subprocesses; skipped
@@ -381,7 +351,6 @@ fn collect_tmux(
             .map(TmuxProbeResult::Available)
             .unwrap_or_else(|| tmux.control_mode()),
         client_features: match color_probe {
-            ColorPassthroughProbe::Run => tmux.client_features(),
             ColorPassthroughProbe::Skip => TmuxProbeResult::Unavailable,
         },
     }
@@ -441,14 +410,6 @@ mod tests {
         }
     }
 
-    fn empty_fake() -> FakeTmuxQuery {
-        FakeTmuxQuery {
-            values: HashMap::new(),
-            control_mode: TmuxProbeResult::Unavailable,
-            calls: RefCell::new(Vec::new()),
-        }
-    }
-
     #[test]
     fn supplied_control_mode_is_the_only_snapshot_fact() {
         let terminal = TerminalContext {
@@ -494,61 +455,6 @@ mod tests {
                 "set-clipboard"
             ]
         );
-    }
-
-    #[test]
-    fn missing_control_mode_uses_backend() {
-        let terminal = TerminalContext {
-            multiplexer: crate::terminal::MultiplexerKind::Tmux,
-            ..Default::default()
-        };
-        let fake = FakeTmuxQuery {
-            control_mode: TmuxProbeResult::Available(true),
-            ..empty_fake()
-        };
-        let snapshot = collect_common(
-            &terminal,
-            runtime(),
-            None,
-            ColorPassthroughProbe::Run,
-            &fake,
-            false,
-            None,
-        );
-
-        assert_eq!(snapshot.tmux.control_mode, TmuxProbeResult::Available(true));
-        assert_eq!(
-            fake.calls.into_inner(),
-            [
-                "support:allow-passthrough",
-                "extended-keys",
-                "set-clipboard",
-                "control-mode",
-                "client-features",
-            ]
-        );
-    }
-
-    #[test]
-    fn non_tmux_snapshot_skips_tmux_backend() {
-        let terminal = TerminalContext::default();
-        let fake = FakeTmuxQuery {
-            control_mode: TmuxProbeResult::Error("must not run".to_owned()),
-            ..empty_fake()
-        };
-        let snapshot = collect_common(
-            &terminal,
-            runtime(),
-            None,
-            ColorPassthroughProbe::Run,
-            &fake,
-            false,
-            None,
-        );
-
-        assert_eq!(snapshot.tmux.set_clipboard, TmuxProbeResult::Unavailable);
-        assert_eq!(snapshot.tmux.control_mode, TmuxProbeResult::Unavailable);
-        assert!(fake.calls.into_inner().is_empty());
     }
 
     #[test]

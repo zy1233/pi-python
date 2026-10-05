@@ -33,21 +33,16 @@ use crate::scrollback::blocks::SessionEvent;
 use crate::views::permission_view::{
     McpScope, McpScopeState, PermissionFocus, PermissionViewState, SubagentInfo,
 };
-use crate::views::plan_approval_view::PlanReviewSource;
 
 use super::agent_view::{AgentPane, AgentView, InputMode};
 use super::app_view::{ActiveView, AppView};
 
 mod background;
-mod follow_ups;
-mod interactions;
-mod mcp;
 mod permissions;
 mod prompt_origin;
 mod queue;
 mod routing;
 mod session_notification;
-mod settings;
 mod subagent_activity;
 mod subagent_lifecycle;
 mod workflow_ingest;
@@ -61,8 +56,8 @@ use permissions::{
 
 // Hub + child modules (via `use super::*`) need sibling symbols in this scope.
 use routing::{
-    SessionMatch, find_session_match, interaction_target_agent, is_matched_agent_active,
-    mcp_target_agent, resolve_notif_agent, resolve_target_view,
+    SessionMatch, find_session_match, is_matched_agent_active,
+    resolve_notif_agent, resolve_target_view,
 };
 
 use prompt_origin::{finish_wake_turn, viewer_turn_anchor};
@@ -91,41 +86,17 @@ use session_notification::{
 
 pub(crate) use queue::PendingRunningAdoption;
 #[allow(unused_imports)]
-use queue::{handle_prompt_complete, handle_queue_changed};
-
-#[allow(unused_imports)]
 use background::{
-    derive_child_cwd, handle_git_head_changed, handle_monitor_event, handle_scheduled_task_created,
-    handle_scheduled_task_deleted, handle_scheduled_task_fired,
-    handle_scheduled_task_inject_prompt, handle_task_backgrounded, handle_task_completed,
+    derive_child_cwd, handle_scheduled_task_created,
+    handle_scheduled_task_deleted, 
+    handle_task_backgrounded, handle_task_completed,
     route_bg_task_stdout,
 };
-#[allow(unused_imports)]
-use follow_ups::handle_follow_ups;
-pub(crate) use interactions::handle_ask_user_question;
-#[allow(unused_imports)]
-use interactions::{handle_exit_plan_mode, handle_mcp_elicit};
-#[allow(unused_imports)]
-use mcp::{
-    handle_mcp_elicit_complete, handle_mcp_init_progress, handle_mcp_server_status,
-    handle_mcp_servers_updated, handle_mcp_tools_changed, push_server_status_enabled,
-};
-#[allow(unused_imports)]
-use settings::{handle_announcements_update, handle_models_update, handle_settings_update};
 
 // Test-only bare-name surface for `tests/*` (`use super::*`).
 #[cfg(test)]
 #[allow(unused_imports)]
 use background::*;
-#[cfg(test)]
-#[allow(unused_imports)]
-use follow_ups::*;
-#[cfg(test)]
-#[allow(unused_imports)]
-use interactions::*;
-#[cfg(test)]
-#[allow(unused_imports)]
-use mcp::*;
 #[cfg(test)]
 #[allow(unused_imports)]
 use prompt_origin::*;
@@ -138,9 +109,6 @@ use routing::*;
 #[cfg(test)]
 #[allow(unused_imports)]
 use session_notification::*;
-#[cfg(test)]
-#[allow(unused_imports)]
-use settings::*;
 #[cfg(test)]
 #[allow(unused_imports)]
 use subagent_activity::*;
@@ -582,7 +550,7 @@ pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
             ext.response_tx.send(Ok(())).ok();
             affected
         }
-        AcpClientMessage::ExtMethod(ext) => handle_ext_method(ext, app),
+        AcpClientMessage::ExtMethod(ext) => handle_ext_method(ext),
         AcpClientMessage::WaitForTerminalExit(args) => {
             args.response_tx
                 .send(Err(crate::acp::wait_for_exit_not_supported("pager")))
@@ -703,137 +671,28 @@ fn queue_open_workflows_modal_refresh(app: &mut AppView, agent_id: AgentId) {
 
 /// Handle an extension notification.
 ///
-/// Standard ACP agents (pi-agent-cli) never emit `legacy ext RPC`. Ignore those
-/// vendor notifications so leftover UI paths cannot depend on them.
+/// Standard ACP agents (pi-agent-cli) never emit the legacy vendor namespace.
+/// Ignore those notifications so leftover UI paths cannot depend on them.
 fn handle_ext_notification(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
     let method = notif.method.as_ref();
-    if !cfg!(test) && crate::acp::vendor::is_vendor_ext_method(method) {
+    if crate::acp::vendor::is_vendor_ext_method(method) {
         tracing::debug!(method, "ignoring vendor ext notification (standard ACP only)");
         return false;
     }
     if crate::acp::is_session_update_ext_method(method) {
         return handle_session_notification(notif, app);
     }
-    #[cfg(test)]
-    return dispatch_legacy_ext_notification(notif, app);
     false
-}
-
-/// Test-only dispatch for legacy grok-shell ext notifications (suffix match).
-#[cfg(test)]
-fn dispatch_legacy_ext_notification(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
-    let method = notif.method.as_ref();
-    match method {
-        m if m.ends_with("/follow_ups") => handle_follow_ups(notif, app),
-        m if m.ends_with("/task_backgrounded") => handle_task_backgrounded(notif, app),
-        m if m.ends_with("/task_completed") => handle_task_completed(notif, app),
-        m if m.ends_with("/models/update") => handle_models_update(notif, app),
-        m if m.ends_with("/settings/update") => handle_settings_update(notif, app),
-        m if m.ends_with("/queue/changed") => handle_queue_changed(notif, app),
-        m if m.ends_with("/session/prompt_complete") => handle_prompt_complete(notif, app),
-        m if m.ends_with("/session/interjection") => handle_interjection(notif, app),
-        m if m.ends_with("/monitor_event") => handle_monitor_event(notif, app),
-        m if m.ends_with("/scheduled_task_created") => handle_scheduled_task_created(notif, app),
-        m if m.ends_with("/scheduled_task_fired") => handle_scheduled_task_fired(notif, app),
-        m if m.ends_with("/scheduled_task_deleted") => handle_scheduled_task_deleted(notif, app),
-        m if m.ends_with("/scheduled_task_inject_prompt") => {
-            handle_scheduled_task_inject_prompt(notif, app)
-        }
-        m if m.ends_with("/announcements/update") => handle_announcements_update(notif, app),
-        m if m.ends_with("/git_head_changed") => handle_git_head_changed(notif, app),
-        m if m.ends_with("/mcp/init_progress") => handle_mcp_init_progress(notif, app),
-        m if m.ends_with("/mcp/tools_changed") || m.ends_with("/mcp_initialized") => {
-            handle_mcp_tools_changed(notif, app)
-        }
-        m if m.ends_with("/mcp/server_status") && push_server_status_enabled() => {
-            handle_mcp_server_status(notif, app)
-        }
-        m if m.ends_with("/mcp/elicit_complete") => handle_mcp_elicit_complete(notif, app),
-        m if m.ends_with("/mcp/servers_updated") => handle_mcp_servers_updated(notif, app),
-        _ => false,
-    }
-}
-
-
-#[cfg(test)]
-#[allow(dead_code)]
-/// Handle `legacy ext RPC` — the leader broadcasts this
-/// sessionId-bearing notification to every attached client when a mid-turn
-/// interjection is queued (emitted from the session actor's `Interject`
-/// command handler). Each client renders the interjection as a scrollback
-/// block.
-///
-/// The originating pager renders an optimistic block immediately in
-/// `dispatch_interject` and records the interjection id in
-/// `self_interjection_ids`; when its own broadcast echoes back here it is
-/// deduped (dropped) by that id. Other panes (which never minted the id) render
-/// the block — fixing the multi-client bug where an interjection typed in one
-/// pane was invisible in the others. A `null`/absent id (older shell) always
-/// renders, so legacy shells degrade to "render everywhere" rather than drop.
-fn handle_interjection(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
-    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(notif.params.get()) else {
-        tracing::warn!("Failed to parse session/interjection");
-        return false;
-    };
-    let Some(session_id) = parsed.get("sessionId").and_then(|v| v.as_str()) else {
-        return false;
-    };
-    let Some(text) = parsed.get("text").and_then(|v| v.as_str()) else {
-        return false;
-    };
-    let interjection_id = parsed.get("interjectionId").and_then(|v| v.as_str());
-
-    let sid = acp::SessionId::new(session_id.to_string());
-    let Some(SessionMatch::Root(id)) = find_session_match(app, &sid) else {
-        return false;
-    };
-    let is_active = is_matched_agent_active(app, id);
-    let Some(agent) = app.agents.get_mut(&id) else {
-        return false;
-    };
-
-    if let Some(iid) = interjection_id {
-        // Two self-message flows land here, painted differently on the
-        // originator: a direct interjection (already an interjection block,
-        // tracked by `self_interjection_ids`) is a pure dedup — drop it; a goal
-        // Send Now (a plain user-prompt block in `send_now_painted_blocks`) must
-        // instead be converted to interjection styling.
-        if agent.self_interjection_ids.remove(iid) {
-            return false;
-        }
-        // `edited` is ignored: the painted block already holds the authoritative
-        // (possibly edited) text — we only restyle it. Drift resolution via
-        // `edited` matters only on the turn-start adoption path.
-        if agent.is_self_originated_prompt(iid)
-            && let Some((entry_id, _)) = agent.send_now_painted_blocks.remove(iid)
-        {
-            agent.clear_send_now_expectation();
-            if let Some(index) = agent.scrollback.index_of_id(entry_id)
-                && let Some(RenderBlock::UserPrompt(block)) = agent
-                    .scrollback
-                    .entry_mut(index)
-                    .map(|entry| &mut entry.block)
-            {
-                block.is_interjection = true;
-            }
-            return false;
-        }
-    }
-
-    agent
-        .scrollback
-        .push_block(RenderBlock::interjection_prompt(text));
-    is_active
 }
 
 /// Handle an ACP `ext_method` request (blocking request that expects a response).
 ///
-/// Dispatches on method string. Unknown methods get `method_not_found` error.
-/// The response sender is stashed (for `ask_user_question`) or replied to
-/// immediately (for unknown methods).
-fn handle_ext_method(ext: pi_acp_lib::AcpArgs<acp::ExtRequest>, app: &mut AppView) -> bool {
+/// The pager registers no reverse `ext_method` handlers: every request gets a
+/// `method_not_found` error. Legacy vendor requests are acknowledged with an
+/// empty result so a stray vendor agent is not left waiting on a reply.
+fn handle_ext_method(ext: pi_acp_lib::AcpArgs<acp::ExtRequest>) -> bool {
     let method = ext.request.method.as_ref();
-    if !cfg!(test) && crate::acp::vendor::is_vendor_ext_method(method) {
+    if crate::acp::vendor::is_vendor_ext_method(method) {
         tracing::debug!(method, "ignoring vendor ext_method (standard ACP only)");
         let dummy = serde_json::from_value(serde_json::json!({}))
             .or_else(|_| serde_json::from_value(serde_json::Value::Null));
@@ -849,8 +708,6 @@ fn handle_ext_method(ext: pi_acp_lib::AcpArgs<acp::ExtRequest>, app: &mut AppVie
         }
         return false;
     }
-    #[cfg(test)]
-    return dispatch_legacy_ext_method(ext, app);
     tracing::warn!("Unknown ext_method: {method}");
     ext.response_tx
         .send(Err(acp::Error::new(
@@ -859,30 +716,6 @@ fn handle_ext_method(ext: pi_acp_lib::AcpArgs<acp::ExtRequest>, app: &mut AppVie
         )))
         .ok();
     false
-}
-
-/// Test-only dispatch for legacy grok-shell reverse `ext_method` requests.
-#[cfg(test)]
-fn dispatch_legacy_ext_method(
-    ext: pi_acp_lib::AcpArgs<acp::ExtRequest>,
-    app: &mut AppView,
-) -> bool {
-    let method = ext.request.method.as_ref();
-    match method {
-        m if m.ends_with("/ask_user_question") => handle_ask_user_question(ext, app),
-        m if m.ends_with("/exit_plan_mode") => handle_exit_plan_mode(ext, app),
-        m if m.ends_with("/mcp/elicit") => handle_mcp_elicit(ext, app),
-        _ => {
-            tracing::warn!("Unknown ext_method: {method}");
-            ext.response_tx
-                .send(Err(acp::Error::new(
-                    -32601,
-                    format!("Method not found: {method}"),
-                )))
-                .ok();
-            false
-        }
-    }
 }
 
 #[cfg(test)]
