@@ -33,12 +33,7 @@
 //!       turn cancelling → CancelTurn in every mode (retry lost ack;
 //!         Ctrl+C escalates to Quit)
 //!       idle + non-empty prompt, prompt pane only → ArmPending ClearPrompt (2× within 800ms, hint)
-//!       idle + empty + messages, either pane (Normal composer mode, no
-//!         needs-input overlay pending, no open history search, and not
-//!         within ESC_CANCEL_REWIND_GRACE of an Esc-fired cancel) →
-//!         ArmPending RewindShowPicker (2×, silent)
-//!       idle otherwise (scrollback-pane draft / latent mode / pending overlay /
-//!         open history search / post-cancel grace, or empty + no messages) →
+//!       idle otherwise (scrollback-pane draft or empty prompt) →
 //!         Changed (swallow Esc; not FocusScrollback)
 //!   → 4. return Unchanged → bubbles to app_view for global actions (quit)
 //! ```
@@ -157,7 +152,6 @@ mod cta;
 mod input;
 pub(crate) use input::ExternalPromptEditorAccess;
 mod interactions;
-mod jump;
 mod key_owner;
 pub(crate) use key_owner::{BlockingCard, EscStep, KeyOwner};
 mod links;
@@ -173,7 +167,6 @@ pub use prompt_stash::{PromptStashEntry, StashCause};
 mod queue;
 mod render;
 pub use render::AppRenderParams;
-mod rewind;
 mod selection;
 mod session;
 mod shell_completion;
@@ -540,16 +533,6 @@ pub(crate) struct PendingStopHooks {
     /// (`stop_failure` before `stop` on error turns).
     pub groups: Vec<(String, Vec<crate::scrollback::blocks::tool::HookRunEntry>)>,
 }
-/// Components for the deferred fork banner. Stored by
-/// `dispatch_fork_resolved` and formatted into the final banner text
-/// in `TaskResult::SessionLoaded` once the child's session id is known.
-#[derive(Debug, Clone)]
-pub(crate) struct PendingForkBanner {
-    /// Full session id of the parent session.
-    pub parent_sid: String,
-    /// Whether the fork created a new worktree.
-    pub worktree: bool,
-}
 /// In-flight reconnect session reload.
 ///
 /// Opened by [`AgentView::begin_session_reload`]: the pre-outage scrollback
@@ -569,36 +552,12 @@ pub(crate) struct PendingForkBanner {
 /// failed window dangles into the discarded staging state (harmless no-op
 /// lookups; never aliased, thanks to the shared `EntryId` space).
 pub(crate) struct SessionReload {
-    /// Pre-outage transcript, tracker, todo, and workflow state: the same
-    /// [`ReplayRebuiltState`] every replay detaches, stashed for
-    /// restore-on-failure.
-    stash: ReplayRebuiltState,
-    /// Reconnect cursor as of window open, restored with the stash so a
-    /// later reload doesn't skip events the restored transcript never got.
-    last_seen_event_id: Option<String>,
-    /// Parsed counter of [`Self::last_seen_event_id`] (same restore rationale).
-    last_seen_event_seq: Option<u64>,
-    /// Live dedup highwaters (ACP + pi) as of window open (same restore
-    /// rationale).
-    last_applied_event_seq: Option<u64>,
-    last_applied_pi_event_seq: Option<u64>,
     /// Whether any `isReplay` update applied during this window. False means
     /// the agent resolved the cursor and sent only a live post-cursor tail.
     saw_replay: bool,
     /// Whether a Plan update applied during this window: the cursor-merge
     /// outcome then keeps the staging todo list (newer) instead of the stash.
     saw_todo_update: bool,
-    /// Expiry notices staged by replayed tombstones during this window. The keep-stash finalize
-    /// drops staged copies of a line only up to the count the stash already shows (two tasks can
-    /// share identical notice text).
-    replayed_expiry_notices: Vec<crate::scrollback::entry::EntryId>,
-}
-/// The `AgentView` state a session replay rebuilds from disk, detached by
-/// [`AgentView::take_replay_rebuilt_state`] (see its doc for the contract).
-pub(crate) struct ReplayRebuiltState {
-    pub(crate) scrollback: ScrollbackState,
-    pub(crate) tracker: crate::acp::tracker::AcpUpdateTracker,
-    pub(crate) todo: TodoPane,
 }
 /// Follow-up suggestion chips for the latest assistant response
 /// (`legacy ext RPC`). Streaming-only: never persisted, does not survive a
@@ -1215,16 +1174,6 @@ pub struct AgentView {
     /// Set by the key/mouse handler, consumed by `do_cancel_turn` / the
     /// cancel-retry path so `session/cancel` carries `_meta.cancelTrigger`.
     pub(crate) cancel_trigger_hint: Option<crate::app::actions::CancelTrigger>,
-    pub(crate) rewind_state: Option<crate::views::rewind::RewindState>,
-    pub(crate) rewind_points: Option<Vec<crate::views::rewind::RewindPointInfo>>,
-    /// In-place edit of a previous user prompt. See `inline_edit.rs`.
-    pub(crate) inline_edit: Option<crate::app::inline_edit::InlineEditState>,
-    /// Edited text awaiting its rewind; `dispatch_rewind_success` resubmits it.
-    /// Set only when the rewind flow emits `Effect::RewindExecute` while the
-    /// inline editor is open (see `stash_inline_resubmit_if_editing`).
-    pub(crate) pending_inline_resubmit: Option<String>,
-    /// `/jump` picker overlay (pure client-side turn navigation).
-    pub(crate) jump_state: Option<crate::views::jump::JumpState>,
     /// Timeline sidebar rail geometry for the current frame (`None` =
     /// hidden). Set by the renderer, consumed by mouse hit-testing.
     pub(crate) timeline_rail: Option<crate::views::timeline::TimelineRail>,
@@ -1258,30 +1207,6 @@ pub struct AgentView {
     /// Cleared on any non-`d` key press, after 500ms expiry, or once
     /// `try_handle_esc_policy` consumes the Esc. `pub(crate)` for policy tests.
     pub(crate) esc_pressed_at: Option<std::time::Instant>,
-    /// Post-cancel grace deadline: while `now` is before it, the Esc policy
-    /// holds the idle rewind ARM so Esc-mashing past a cancel cannot
-    /// silently arm the rewind picker. Set (`now + ESC_CANCEL_REWIND_GRACE`)
-    /// by `suppress_rewind_arm` on every Esc-fired cancel, consumed and
-    /// retired-on-expiry by `rewind_arm_suppressed`. `pub(crate)` for policy
-    /// tests.
-    pub(crate) rewind_suppress_deadline: Option<std::time::Instant>,
-    /// First prompt to enqueue once the session finishes loading replay.
-    /// Set by `/fork` when a directive is provided; drained in the
-    /// `TaskResult::SessionLoaded` arm via `enqueue_prompt_front` so the
-    /// directive runs ahead of any prompts the user typed during the
-    /// placeholder window.
-    pub(crate) pending_first_prompt: Option<String>,
-    /// Deferred fork banner to push at the bottom of the scrollback once
-    /// the fork session finishes loading (in `TaskResult::SessionLoaded`).
-    /// Set by `dispatch_fork_resolved`; stores the parent session id and
-    /// worktree flag so the banner can be formatted with the child's
-    /// session id (not known until `SessionLoaded`). `None` for non-fork
-    /// sessions.
-    ///
-    /// Cleared on all failure paths: `SessionLoadFailed`,
-    /// `WorktreeSessionFailed` (non-orphan branch), and
-    /// `ForkSessionFailed`.
-    pub(crate) pending_fork_banner: Option<PendingForkBanner>,
     /// Entry ID of the "Loading session ..." placeholder block pushed
     /// by `dispatch_load_session_inner`. Cleared by the `SessionLoaded`
     /// handler so the placeholder doesn't linger on screen when the
@@ -1462,16 +1387,6 @@ fn translate_local_submit(
         return InputOutcome::Changed;
     };
     match kind {
-        LocalQuestionKind::Fork { directive } => {
-            let Some((worktree, persist_mode)) = worktree_choice_from_index(*idx) else {
-                return InputOutcome::Changed;
-            };
-            InputOutcome::Action(Action::ForkAnswered {
-                worktree,
-                directive,
-                persist_mode,
-            })
-        }
         LocalQuestionKind::NewSession => {
             let Some((worktree, persist_mode)) = worktree_choice_from_index(*idx) else {
                 return InputOutcome::Changed;
@@ -2514,21 +2429,6 @@ pub(crate) mod test_fixtures {
             "resp-run",
             "the running turn's chips re-render after adoption without a server resend"
         );
-    }
-    /// A full reload reset (no running turn to preserve) clears the pending
-    /// buffer too — the reconnect-reload finalize path.
-    #[test]
-    fn reset_for_reload_clears_pending_buffer() {
-        let mut agent = make_agent();
-        agent.session.current_prompt_id = Some("cur".into());
-        assert!(!agent.apply_follow_ups_with_prompt("r".into(), Some("future"), vec!["a".into()],));
-        assert!(agent.follow_up_pending.contains_key("future"));
-        agent.reset_follow_ups_for_reload();
-        assert!(
-            agent.follow_up_pending.is_empty(),
-            "a full reload reset clears the pending buffer"
-        );
-        assert!(agent.follow_up_pending_order.is_empty());
     }
     #[test]
     fn follow_up_chip_click_maps_to_suggestion_text() {

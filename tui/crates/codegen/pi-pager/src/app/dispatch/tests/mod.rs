@@ -1,12 +1,10 @@
 //! Tests for the dispatch module tree: shared fixtures and per-domain test modules.
 mod auth;
 mod billing;
-mod jump;
 mod modes;
 mod notes;
 mod permissions;
 mod prompt;
-mod rewind;
 mod router;
 mod session;
 mod settings;
@@ -20,14 +18,13 @@ use super::billing::{
     CreditLimitUpsellMode, credit_limit_upsell_mode, is_max_tier, open_credit_limit_upsell,
     open_free_usage_upsell,
 };
-use super::ctx::{ get_active_agent, get_active_agent_mut};
 use super::modes::{
     YOLO_ON_UNDER_PLAN_TOAST, active_agent_plan_nudge_state, dispatch_cycle_mode_and_sync,
     permission_mode_toast,
 };
+use super::ctx::{get_active_agent, get_active_agent_mut};
 use super::permissions::drain_permission_queue;
 use super::prompt::{ dispatch_send_prompt, dispatch_send_prompt_inner};
-use super::session::fork::build_child_fork_marker;
 use super::session::lifecycle::{ drain_startup_actions, finish_trust};
 use super::session::load::{ reanchor_grouped_selection};
 use super::session::modal::{
@@ -204,26 +201,13 @@ fn test_app() -> AppView {
         session_picker_state: crate::views::picker::PickerState::with_mode(
             crate::views::picker::PickerMode::FullScreen,
         ),
-        session_picker_source_filter: crate::views::session_picker::SourceFilter::default(),
-        session_picker_relaxed_notified_for: None,
-        session_picker_content_results: None,
-        session_picker_content_loading: false,
-        session_picker_deep_search_seq: 0,
         session_picker_list_seq: 0,
-        foreign_session_compat: Default::default(),
-        foreign_session_scan_seq: 0,
-        foreign_scan_coordinator: Default::default(),
-        session_picker_lanes: Default::default(),
-        session_picker_detail_generation: 0,
-        session_picker_entries_query: None,
         session_picker_pending_delete: None,
         welcome_tick: 0,
         welcome_shimmer_frame: 0,
         startup_warnings: Vec::new(),
         is_api_key_auth: false,
         pending_update_version: None,
-        foreign_resume_launch_generation: 0,
-        foreign_resume_launch: None,
         quit_for_update: false,
         relaunch: None,
         welcome_doc_viewer: None,
@@ -431,16 +415,6 @@ fn insert_placeholder_agent(app: &mut AppView, id: AgentId) {
     agent.active_pane = ActivePane::Scrollback;
     app.agents.insert(id, agent);
 }
-/// Build a single-agent app for the `/fork` dispatcher tests.
-///
-/// Sets `current_branch` to `Some("main")` so the agent appears to be
-/// inside a git repo. This is required because `dispatch_fork` skips
-/// the worktree question when `current_branch` is `None` (non-git cwd).
-fn fork_test_app() -> AppView {
-    let mut app = test_app_with_agent();
-    app.agents.get_mut(&AgentId(0)).unwrap().current_branch = Some("main".into());
-    app
-}
 /// Test helper: open Settings then OpenResetConfirm for `key`.
 /// Extracted so individual tests don't have to repeat the
 /// open-then-open ritual.
@@ -482,7 +456,7 @@ fn make_conversation_entry(id: &str) -> crate::app::app_view::SessionPickerEntry
     e.source = "conversation".into();
     e
 }
-/// Open a SessionPicker modal on the active agent seeded with `entries`.
+/// Open the modal `/resume` picker on the active agent with `entries` loaded.
 fn open_session_picker_with(
     app: &mut AppView,
     entries: Vec<crate::app::app_view::SessionPickerEntry>,
@@ -493,14 +467,8 @@ fn open_session_picker_with(
         state: crate::views::picker::PickerState::default(),
         entries: Some(entries),
         loading: false,
-        lanes: Default::default(),
         previous_palette: None,
         window: crate::views::modal_window::ModalWindowState::new(),
-        content_results: None,
-        content_loading: false,
-        deep_search_seq: 0,
-        entries_query: None,
-        source_filter: crate::views::session_picker::SourceFilter::default(),
         pending_delete: None,
     });
 }
@@ -604,7 +572,6 @@ fn with_theme_test_env(f: impl FnOnce()) {
 fn agent_scrollback_len(app: &AppView) -> usize {
     app.agents.get(&AgentId(0)).unwrap().scrollback.len()
 }
-use crate::scrollback::blocks::UserPromptBlock;
 const MOUSE_OFF_STICKY: &str = crate::app::MOUSE_OFF_HINT_SCROLLBACK;
 fn reset_mouse_capture_enabled(on: bool) {
     crate::app::MOUSE_CAPTURE_ENABLED.store(on, std::sync::atomic::Ordering::Release);

@@ -12,7 +12,6 @@ mod timeline;
 mod types;
 pub(crate) mod verb_group;
 
-pub(crate) use layout::ScrollAnchor;
 pub use layout::compute_paint_window;
 pub use timeline::TimelineEntry;
 pub use types::*;
@@ -355,67 +354,6 @@ impl ScrollbackState {
         fresh.generation = self.generation.wrapping_add(1);
         fresh.content_generation = self.content_generation.wrapping_add(1);
         fresh
-    }
-
-    /// Lowest `EntryId` value a future [`push`](Self::push) may assign.
-    pub(crate) fn id_floor(&self) -> u64 {
-        self.next_id
-    }
-
-    /// Ensure future `EntryId`s are allocated at or above `floor`.
-    ///
-    /// Called when a stashed state is swapped back in after a
-    /// [`fresh_continuation`](Self::fresh_continuation) sibling allocated ids,
-    /// so ids handed out by the discarded sibling are never reused.
-    pub(crate) fn raise_id_floor(&mut self, floor: u64) {
-        self.next_id = self.next_id.max(floor);
-    }
-
-    /// Advance the invalidation generations strictly past a discarded
-    /// [`fresh_continuation`](Self::fresh_continuation) sibling's, so caches
-    /// keyed on counter equality (link map, search index) that last saw the
-    /// sibling cannot mistake this state for it after a restore swap.
-    pub(crate) fn raise_invalidation_floor(&mut self, sibling: (u64, u64)) {
-        self.generation = self.generation.max(sibling.0);
-        self.content_generation = self.content_generation.max(sibling.1);
-        self.bump_content_generation();
-    }
-
-    /// The invalidation-generation pair, for [`Self::raise_invalidation_floor`].
-    pub(crate) fn invalidation_generations(&self) -> (u64, u64) {
-        (self.generation, self.content_generation)
-    }
-
-    /// Append all entries from `tail` (a
-    /// [`fresh_continuation`](Self::fresh_continuation) sibling of this state)
-    /// after the existing content, preserving their `EntryId`s so tracker
-    /// references into the tail stay valid.
-    ///
-    /// Used by the cursor-found reconnect reload: nothing was replayed, so the
-    /// pre-outage transcript is kept and only the post-cursor live tail that
-    /// accumulated in the staging state is attached below it.
-    pub(crate) fn append_entries_from(&mut self, tail: ScrollbackState) {
-        debug_assert!(
-            tail.next_id >= self.next_id,
-            "append_entries_from requires a fresh_continuation sibling (shared id space)"
-        );
-        self.entries.extend(tail.entries);
-        self.running.extend(tail.running);
-        self.dirty_heights.extend(tail.dirty_heights);
-        // Carry the tail's committed frontier: with a per-entry flag this
-        // traveled with the entry; as an id-set it must be merged explicitly so
-        // already-committed tail blocks are not re-emitted after the reload.
-        self.committed.extend(tail.committed);
-        self.expanded_groups.extend(tail.expanded_groups);
-        self.next_id = self.next_id.max(tail.next_id);
-        // The tail (live during the window) is what equality-cached consumers
-        // last saw — the merged state must read as newer than both halves.
-        self.generation = self.generation.max(tail.generation);
-        self.content_generation = self.content_generation.max(tail.content_generation);
-        self.rebuild_turns();
-        self.gaps_may_be_dirty = true;
-        self.invalidate_layout_cache();
-        self.bump_content_generation();
     }
 
     /// Update the appearance configuration.
@@ -1377,11 +1315,6 @@ impl ScrollbackState {
     /// Get the index of an entry by its ID. O(1) average via IndexMap.
     pub fn index_of_id(&self, id: EntryId) -> Option<usize> {
         self.entries.get_index_of(&id)
-    }
-
-    /// Re-pin the viewport to a bookmark from [`Self::capture_scroll_bookmark`].
-    pub(crate) fn restore_scroll_bookmark(&mut self, bookmark: ScrollAnchor) {
-        self.restore_scroll_anchor(bookmark);
     }
 
     /// Mark an entry as finished (no longer running).
@@ -2700,84 +2633,6 @@ mod tests {
 
         state.select_prev();
         assert_eq!(state.selected(), Some(0));
-    }
-
-    /// `fresh_continuation` shares the id space with its source, and
-    /// `append_entries_from` merges a sibling's entries below the existing
-    /// content with ids (and the running set) intact.
-    #[test]
-    fn fresh_continuation_and_append_share_id_space() {
-        let mut original = ScrollbackState::new();
-        let kept = original.push_block(stub_block("kept"));
-
-        let mut staging = original.fresh_continuation();
-        assert!(staging.is_empty());
-        let tail_id = staging.push_block(stub_block("tail"));
-        assert_ne!(tail_id, kept, "continuation must not reuse existing ids");
-        staging.set_last_running(true);
-
-        original.append_entries_from(staging);
-        assert_eq!(original.len(), 2);
-        assert_eq!(original.index_of_id(kept), Some(0));
-        assert_eq!(original.index_of_id(tail_id), Some(1));
-        assert!(
-            original.get_by_id(tail_id).unwrap().is_running,
-            "running state survives the merge"
-        );
-        let next = original.push_block(stub_block("after"));
-        assert!(
-            next != kept && next != tail_id,
-            "post-merge allocation continues past both id ranges"
-        );
-    }
-
-    /// `raise_id_floor` prevents a restored stash from re-issuing ids a
-    /// discarded continuation sibling already handed out.
-    #[test]
-    fn raise_id_floor_skips_ids_allocated_by_discarded_sibling() {
-        let mut stash = ScrollbackState::new();
-        stash.push_block(stub_block("old"));
-
-        let mut discarded = stash.fresh_continuation();
-        let sibling_id = discarded.push_block(stub_block("partial replay"));
-
-        stash.raise_id_floor(discarded.id_floor());
-        let new_id = stash.push_block(stub_block("new"));
-        assert_ne!(
-            new_id, sibling_id,
-            "restored state must not alias ids the sibling allocated"
-        );
-    }
-
-    /// The invalidation generations never regress across a continuation swap,
-    /// a failure restore, or a merge — consumers (link map, search index)
-    /// cache them and compare by EQUALITY, so a regressed-equal counter would
-    /// read stale state as fresh.
-    #[test]
-    fn continuation_swaps_never_regress_invalidation_generations() {
-        let mut original = ScrollbackState::new();
-        original.push_block(stub_block("kept"));
-        let orig = original.invalidation_generations();
-
-        // Swap-in (begin window): staging reads as newer than the source.
-        let staging = original.fresh_continuation();
-        let staged = staging.invalidation_generations();
-        assert!(staged.0 > orig.0 && staged.1 > orig.1);
-
-        // Failure restore: the stash advances past the discarded staging.
-        original.raise_invalidation_floor(staged);
-        let restored = original.invalidation_generations();
-        assert!(restored.0 > staged.0 && restored.1 > staged.1);
-
-        // Merge: the kept stash advances past the consumed tail.
-        let mut base = ScrollbackState::new();
-        base.push_block(stub_block("kept"));
-        let mut tail = base.fresh_continuation();
-        tail.push_block(stub_block("tail"));
-        let tail_gens = tail.invalidation_generations();
-        base.append_entries_from(tail);
-        let merged = base.invalidation_generations();
-        assert!(merged.0 > tail_gens.0 && merged.1 > tail_gens.1);
     }
 
     /// User view preferences survive a continuation swap, matching

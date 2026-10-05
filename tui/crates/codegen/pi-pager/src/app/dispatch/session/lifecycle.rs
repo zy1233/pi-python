@@ -1,10 +1,10 @@
 //! New, exit, cloud, and worktree session dispatchers plus trust and startup actions.
-use super::fork::{dispatch_startup_fork_session, worktree_persist_options};
+use super::worktree_mode::worktree_persist_options;
 use super::load::dispatch_load_session;
 use super::modal::remove_agent_and_cleanup;
 use crate::acp::model_state::{EffortTokenError, ModelState};
 use crate::acp::tracker::AcpUpdateTracker;
-use crate::app::actions::{Action, Effect, SwitchModelError};
+use crate::app::actions::{ Effect, SwitchModelError};
 use crate::app::agent::{AgentCommand, AgentId, AgentSession, AgentState, DeferredModelSwitch};
 use crate::app::agent_view::{ActivePane, AgentView};
 use crate::app::app_view::{ActiveView, AppView, TrustState};
@@ -15,7 +15,6 @@ use crate::app::dispatch::ctx::{
 use crate::app::dispatch::modes::inherit_auto_mode;
 use crate::app::dispatch::prompt::{consume_chat_kind, dispatch_initial_prompt};
 use crate::app::dispatch::queue::maybe_drain_queue;
-use crate::app::dispatch::router::dispatch;
 use crate::app::dispatch::status::notify_session_ready;
 use crate::app::dispatch::task_result::unregister_session_effect;
 use crate::scrollback::block::RenderBlock;
@@ -476,8 +475,6 @@ pub(in crate::app::dispatch) fn dispatch_exit_session(app: &mut AppView) -> Vec<
     app.session_picker_entries = None;
     app.session_picker_loading = false;
     app.session_picker_state.selected = 0;
-    app.session_picker_content_results = None;
-    app.session_picker_content_loading = false;
     app.exit_session_pending = None;
     effects
 }
@@ -570,18 +567,6 @@ pub(in crate::app::dispatch) fn drain_startup_actions(app: &mut AppView) -> Vec<
     } = app.deferred_startup.take();
     let mut effects = Vec::new();
     match deferred {
-        Some(DeferredSessionStartup::Fork {
-            parent_session_id,
-            parent_cwd,
-            new_session_id,
-        }) => {
-            effects.extend(dispatch_startup_fork_session(
-                app,
-                parent_session_id,
-                parent_cwd,
-                new_session_id,
-            ));
-        }
         Some(DeferredSessionStartup::Load {
             session_id,
             session_cwd,
@@ -630,16 +615,6 @@ pub(in crate::app::dispatch) fn drain_startup_actions(app: &mut AppView) -> Vec<
             } else {
                 effects.extend(dispatch_new_session_with_id(app, session_id));
             }
-        }
-        Some(DeferredSessionStartup::ForeignResume { tool, native_id }) => {
-            effects.extend(dispatch_new_session_inner(app, None));
-            effects.extend(dispatch(
-                Action::SendPrompt(
-                    crate::app::foreign_sessions::ForeignPickerSource::from_tool(tool)
-                        .resume_prompt(&native_id),
-                ),
-                app,
-            ));
         }
         None => {
             if pending_chat {
@@ -896,32 +871,6 @@ pub(in crate::app::dispatch) fn dispatch_new_session_with_id(
     let (_agent_id, effects) = dispatch_new_session_inner_with_id(app, None);
     effects
 }
-/// Tear down a placeholder agent that must not proceed under sticky `--chat`
-/// (local Build refuse). Never leave a half-loaded slot with a bound session id.
-pub(in crate::app::dispatch) fn refuse_chat_mode_build_agent(app: &mut AppView, agent_id: AgentId) {
-    app.show_toast(crate::app::session_startup::CHAT_MODE_LOCAL_BUILD_REFUSAL);
-    let fallback = app.agents.keys().copied().find(|id| *id != agent_id);
-    remove_agent_and_cleanup(app, agent_id);
-    if let Some(target) = fallback {
-        switch_to_agent(app, target, SwitchCause::Picker);
-    } else {
-        show_welcome(app);
-        app.welcome_prompt_focused = true;
-        app.session_picker_entries = None;
-        app.session_picker_loading = false;
-        app.session_picker_state.selected = 0;
-        app.session_picker_content_results = None;
-        app.session_picker_content_loading = false;
-        let msg = crate::app::session_startup::CHAT_MODE_LOCAL_BUILD_REFUSAL.to_string();
-        if !app.startup_warnings.iter().any(|w| w.message == msg) {
-            app.startup_warnings.push(crate::startup::StartupWarning {
-                severity: crate::startup::WarningSeverity::Warning,
-                message: msg,
-                action: None,
-            });
-        }
-    }
-}
 pub(in crate::app::dispatch) fn handle_session_created(
     app: &mut AppView,
     agent_id: AgentId,
@@ -959,7 +908,6 @@ pub(in crate::app::dispatch) fn handle_session_created(
         effects.push(Effect::FetchBilling {
             agent_id,
             silent: true,
-            nonce: Default::default(),
         });
         if let Some(switch) = deferred {
             effects.push(Effect::SwitchModel {
@@ -1029,8 +977,6 @@ pub(in crate::app::dispatch) fn handle_session_failed(
             app.session_picker_entries = None;
             app.session_picker_loading = false;
             app.session_picker_state.selected = 0;
-            app.session_picker_content_results = None;
-            app.session_picker_content_loading = false;
             push_session_create_failure_warning(app, &msg);
         }
     } else if let Some(agent) = app.agents.get_mut(&agent_id) {
@@ -1038,8 +984,6 @@ pub(in crate::app::dispatch) fn handle_session_failed(
         agent.session.finish_command();
         let elapsed = agent.turn_elapsed();
         agent.mark_turn_finished(TurnEnd::Aborted);
-        agent.pending_first_prompt = None;
-        agent.pending_fork_banner = None;
         agent.show_toast(&msg);
         agent
             .scrollback
@@ -1071,8 +1015,6 @@ pub(in crate::app::dispatch) fn handle_worktree_session_failed(
             app.session_picker_entries = None;
             app.session_picker_loading = false;
             app.session_picker_state.selected = 0;
-            app.session_picker_content_results = None;
-            app.session_picker_content_loading = false;
         }
         let msg = format!("Cannot create worktree: {error}");
         if !app.startup_warnings.iter().any(|w| w.message == msg) {
@@ -1087,8 +1029,6 @@ pub(in crate::app::dispatch) fn handle_worktree_session_failed(
         agent.session.finish_command();
         let elapsed = agent.turn_elapsed();
         agent.mark_turn_finished(TurnEnd::Aborted);
-        agent.pending_first_prompt = None;
-        agent.pending_fork_banner = None;
         agent
             .scrollback
             .push_block(RenderBlock::session_event(SessionEvent::TurnFailed {

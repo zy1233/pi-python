@@ -941,28 +941,6 @@ fn entry_title_strips_skill_xml_from_first_prompt() {
 
 
 #[test]
-fn fork_failure_force_idle_drops_a_live_cancel_anchor() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
-    let _ = super::super::turn::do_cancel_turn(
-        &mut app,
-        crate::app::cancel_latency::CancelOrigin::UserGesture,
-    );
-    assert!(
-        app.agents[&id].cancel_latency.is_some(),
-        "the cancel armed the anchor"
-    );
-
-    let _ = super::super::session::fork::handle_fork_session_failed(&mut app, id, "boom".into());
-
-    assert!(
-        app.agents[&id].cancel_latency.is_none(),
-        "the fork teardown drops the anchor (no leak into a later settle)"
-    );
-}
-
-#[test]
 fn settled_cancel_emits_latency_from_arm_anchor_once() {
     use crate::app::cancel_latency::{CancelLatency, CancelOrigin, TurnEnd};
     use std::time::{Duration, Instant};

@@ -776,7 +776,6 @@ fn run_pending_mode_switch(
     input_rx: &mut tokio::sync::mpsc::UnboundedReceiver<TimedInputEvent>,
     presenter: &mut Presenter,
     tasks: &mut JoinSet<TaskResult>,
-    progress_tx: &tokio::sync::mpsc::UnboundedSender<effects::RestoreProgressMsg>,
     status_line_refresh_interval: &mut Option<Duration>,
     status_line_refresh_at: &mut Option<Instant>,
 ) -> bool {
@@ -881,7 +880,7 @@ fn run_pending_mode_switch(
                     })
                 })
                 .collect();
-            let _ = process_effects(effs, tasks, app, progress_tx);
+            let _ = process_effects(effs, tasks, app);
             true
         }
     }
@@ -1257,15 +1256,6 @@ pub(crate) async fn run(
             tracing::debug!(error = %e, "failed to load effective config, using partial layers");
             None
         }
-    };
-    let compat = pi_shell::agent::config::resolve_compat_sessions_from_raw(
-        effective_config.as_ref().ok_or(()),
-        remote_settings.as_ref(),
-    );
-    app.foreign_session_compat = pi_foreign_sessions::EnabledForeignSessionSources {
-        claude: compat.claude.sessions,
-        codex: compat.codex.sessions,
-        cursor: compat.cursor.sessions,
     };
 
     // Load notification config from [ui.notifications] in config.toml.
@@ -1766,8 +1756,6 @@ pub(crate) async fn run(
     let mut tasks: JoinSet<TaskResult> = JoinSet::new();
     let mut session_load_barrier = SessionLoadBarrier::new();
     let mut acp_peek: Option<AcpClientMessage> = None;
-    let (progress_tx, mut progress_rx) =
-        tokio::sync::mpsc::unbounded_channel::<effects::RestoreProgressMsg>();
 
     // Voice STT pipeline is started lazily on first successful `/voice` (see
     // `VoiceState::ColdStart`), not at launch — avoids background work for users
@@ -1832,7 +1820,7 @@ pub(crate) async fn run(
         // Fetch billing early so the welcome screen can show a credit warning.
         if app.usage_visible {
             let effs = vec![super::actions::Effect::FetchAppBilling];
-            if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+            if process_effects(effs, &mut tasks, &mut app) {
                 return Ok(finish_run(&mut app));
             }
         }
@@ -1842,7 +1830,7 @@ pub(crate) async fn run(
     }
 
     if !post_render_effects.is_empty()
-        && process_effects(post_render_effects, &mut tasks, &mut app, &progress_tx)
+        && process_effects(post_render_effects, &mut tasks, &mut app)
     {
         return Ok(finish_run(&mut app));
     }
@@ -1907,22 +1895,6 @@ pub(crate) async fn run(
         MaterializedStartup::NewWithId { session_id } => {
             Some(Action::NewSessionWithId(session_id.clone()))
         }
-        MaterializedStartup::Fork {
-            parent_session_id,
-            parent_cwd,
-            new_session_id,
-            suppress_code_restore,
-            ..
-        } => {
-            if *suppress_code_restore {
-                app.suppress_code_restore_once = Some(parent_session_id.clone());
-            }
-            Some(Action::StartupForkSession {
-                parent_session_id: parent_session_id.clone(),
-                parent_cwd: parent_cwd.clone().or(session_cwd.clone()),
-                new_session_id: new_session_id.clone(),
-            })
-        }
         MaterializedStartup::NewAuto if args.worktree.is_some() => {
             Some(Action::NewWorktreeSession {
                 load_session_id: None,
@@ -1935,7 +1907,7 @@ pub(crate) async fn run(
 
     if let Some(action) = startup_action {
         let effs = dispatch::dispatch(action, &mut app);
-        if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+        if process_effects(effs, &mut tasks, &mut app) {
             return Ok(finish_run(&mut app));
         }
         presenter.request_presentation(&mut app, terminal, false);
@@ -1949,7 +1921,7 @@ pub(crate) async fn run(
             },
             &mut app,
         );
-        if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+        if process_effects(effs, &mut tasks, &mut app) {
             return Ok(finish_run(&mut app));
         }
         presenter.request_presentation(&mut app, terminal, false);
@@ -1969,7 +1941,7 @@ pub(crate) async fn run(
             app.deferred_startup.prompt = Some(initial_prompt.to_string());
         } else if !app.is_zdr_blocked() {
             let effs = dispatch::dispatch_initial_prompt(&mut app, initial_prompt.to_string());
-            if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+            if process_effects(effs, &mut tasks, &mut app) {
                 return Ok(finish_run(&mut app));
             }
             presenter.request_presentation(&mut app, terminal, false);
@@ -1990,7 +1962,7 @@ pub(crate) async fn run(
             // Already authenticated + trusted: open the empty session now so the
             // user lands directly at the prompt.
             let effs = dispatch::dispatch(Action::NewSession, &mut app);
-            if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+            if process_effects(effs, &mut tasks, &mut app) {
                 return Ok(finish_run(&mut app));
             }
             presenter.request_presentation(&mut app, terminal, false);
@@ -2003,13 +1975,6 @@ pub(crate) async fn run(
             // sign-in screen.
             app.deferred_startup.new_session = true;
         }
-    }
-
-    // Startup intents are now fully classified; only an untouched welcome can nudge.
-    if let Some(effect) = app.begin_foreign_resume_detection()
-        && process_effects(vec![effect], &mut tasks, &mut app, &progress_tx)
-    {
-        return Ok(finish_run(&mut app));
     }
 
     // Schedule the first animation tick so live updates start immediately
@@ -2072,7 +2037,7 @@ pub(crate) async fn run(
         let mut quit_after_deferred_load = false;
         for result in ready_loads {
             let effs = dispatch::dispatch(Action::TaskComplete(result), &mut app);
-            if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+            if process_effects(effs, &mut tasks, &mut app) {
                 quit_after_deferred_load = true;
                 break;
             }
@@ -2117,7 +2082,6 @@ pub(crate) async fn run(
             &mut input_rx,
             &mut presenter,
             &mut tasks,
-            &progress_tx,
             &mut status_line_refresh_interval,
             &mut status_line_refresh_at,
         ) {
@@ -2328,7 +2292,7 @@ pub(crate) async fn run(
             // biased order so a SIGTERM quit isn't starved by an ACP firehose.
             _ = quit_notify.notified() => {
                 let effs = dispatch::dispatch(Action::Quit, &mut app);
-                let _ = process_effects(effs, &mut tasks, &mut app, &progress_tx);
+                let _ = process_effects(effs, &mut tasks, &mut app);
                 break;
             }
 
@@ -2374,7 +2338,7 @@ pub(crate) async fn run(
                 let mut state_changed = acp_handler::handle(msg, &mut app);
                 if !app.pending_effects.is_empty() {
                     let effs = std::mem::take(&mut app.pending_effects);
-                    if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+                    if process_effects(effs, &mut tasks, &mut app) {
                         break;
                     }
                 }
@@ -2392,7 +2356,7 @@ pub(crate) async fn run(
                     state_changed |= acp_handler::handle(msg, &mut app);
                     if !app.pending_effects.is_empty() {
                         let effs = std::mem::take(&mut app.pending_effects);
-                        if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+                        if process_effects(effs, &mut tasks, &mut app) {
                             return Ok(finish_run_with_stall_flush(&mut app, &mut stall_rollup));
                         }
                     }
@@ -2441,7 +2405,7 @@ pub(crate) async fn run(
                             continue;
                         };
                         let effs = dispatch::dispatch(Action::TaskComplete(result), &mut app);
-                        if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+                        if process_effects(effs, &mut tasks, &mut app) {
                             break;
                         }
                         after_task_complete_dispatch(
@@ -2465,18 +2429,6 @@ pub(crate) async fn run(
                         }
                     }
                 }
-            }
-
-            Some(msg) = progress_rx.recv() => {
-                let result = TaskResult::SessionRestoreProgress {
-                    agent_id: msg.agent_id,
-                    message: msg.message,
-                };
-                let effs = dispatch::dispatch(Action::TaskComplete(result), &mut app);
-                if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
-                    break;
-                }
-                presenter.request(false);
             }
 
             // Background update check completed.
@@ -2514,7 +2466,7 @@ pub(crate) async fn run(
                     super::event_loop_stall::input_wait(ev.arrived_at, handled_at, loop_entry);
                 let stall_activity = super::event_loop_stall::StallActivity::read();
                 let result = drain_and_process(
-                    ev, &mut input_rx, &mut app, &mut tasks, &progress_tx,
+                    ev, &mut input_rx, &mut app, &mut tasks,
                     &mut csi_filter, &mut xt_filter,
                 ).await;
                 if let Some(window) =
@@ -2527,7 +2479,7 @@ pub(crate) async fn run(
                 }
                 if !app.pending_effects.is_empty() {
                     let effs = std::mem::take(&mut app.pending_effects);
-                    if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+                    if process_effects(effs, &mut tasks, &mut app) {
                         break;
                     }
                 }
@@ -2601,7 +2553,7 @@ pub(crate) async fn run(
                 // `needs_animation()` keeps ticks alive while either recovery
                 // is armed, so these checks cannot be starved.
                 if let Some(resends) = dispatch::reconcile_overdue_cancels(&mut app)
-                    && process_effects(resends, &mut tasks, &mut app, &progress_tx)
+                    && process_effects(resends, &mut tasks, &mut app)
                 {
                     break;
                 }
@@ -2611,7 +2563,7 @@ pub(crate) async fn run(
                 // (see `dispatch::reconcile_overdue_turn_ends`).
                 let reconciled = dispatch::reconcile_overdue_turn_ends(&mut app);
                 if let Some(effs) = reconciled {
-                    if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+                    if process_effects(effs, &mut tasks, &mut app) {
                         break;
                     }
                     presenter.request(false);
@@ -2629,9 +2581,8 @@ pub(crate) async fn run(
                     let effs = vec![Effect::FetchBilling {
                         agent_id: id,
                         silent: true,
-                        nonce: Default::default(),
                     }];
-                    if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+                    if process_effects(effs, &mut tasks, &mut app) {
                         break;
                     }
                 }
@@ -2643,7 +2594,7 @@ pub(crate) async fn run(
             _ = gate_poll => {
                 gate_poll_at = None;
                 let effs = vec![Effect::RefreshGate];
-                if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+                if process_effects(effs, &mut tasks, &mut app) {
                     break;
                 }
                 if !app.has_access() {
@@ -2671,7 +2622,7 @@ pub(crate) async fn run(
             _ = subscription_watch => {
                 subscription_watch_at = None;
                 let effs = app.fire_subscription_check("watch");
-                if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+                if process_effects(effs, &mut tasks, &mut app) {
                     break;
                 }
             }
@@ -2761,7 +2712,7 @@ pub(crate) async fn run(
                         }
                         if !app.pending_effects.is_empty() {
                             let effs = std::mem::take(&mut app.pending_effects);
-                            if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+                            if process_effects(effs, &mut tasks, &mut app) {
                                 break;
                             }
                         }
@@ -2791,7 +2742,7 @@ pub(crate) async fn run(
         // still drain inline when it needs the effects applied sooner.
         if !app.pending_effects.is_empty() {
             let effs = std::mem::take(&mut app.pending_effects);
-            if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+            if process_effects(effs, &mut tasks, &mut app) {
                 break;
             }
         }
@@ -3065,7 +3016,6 @@ async fn drain_and_process(
     input_rx: &mut tokio::sync::mpsc::UnboundedReceiver<TimedInputEvent>,
     app: &mut AppView,
     tasks: &mut JoinSet<TaskResult>,
-    progress_tx: &tokio::sync::mpsc::UnboundedSender<effects::RestoreProgressMsg>,
     csi_filter: &mut super::csi_filter::CsiFragmentFilter,
     xt_filter: &mut super::xt_filter::XtversionFilter,
 ) -> DrainResult {
@@ -3142,7 +3092,7 @@ async fn drain_and_process(
                 // The user may have just subscribed in the browser and
                 // tabbed back.
                 let effs = app.fire_subscription_check("focus");
-                if process_effects(effs, tasks, app, progress_tx) {
+                if process_effects(effs, tasks, app) {
                     return true;
                 }
                 // Restore Prompt on refocus: needs-input overlay always, else idle non-vim.
@@ -3213,7 +3163,7 @@ async fn drain_and_process(
             );
             if let Some(action) = action {
                 let effs = dispatch::dispatch(action, app);
-                if process_effects(effs, tasks, app, progress_tx) {
+                if process_effects(effs, tasks, app) {
                     return true;
                 }
                 needs_draw = true;
@@ -3229,7 +3179,7 @@ async fn drain_and_process(
         ) {
             InputOutcome::Action(action) => {
                 let effs = dispatch::dispatch(action, app);
-                if process_effects(effs, tasks, app, progress_tx) {
+                if process_effects(effs, tasks, app) {
                     return true;
                 }
                 needs_draw = true;
@@ -3244,7 +3194,7 @@ async fn drain_and_process(
                     routed.paste_provenance,
                     app,
                 );
-                if process_effects(effs, tasks, app, progress_tx) {
+                if process_effects(effs, tasks, app) {
                     return true;
                 }
                 needs_draw = true;
@@ -3253,11 +3203,11 @@ async fn drain_and_process(
             InputOutcome::ActionPair(first, second) => {
                 // Effect barrier: first must fully resolve before second (e.g. revert preview then open reset).
                 let effs = dispatch::dispatch(first, app);
-                if process_effects(effs, tasks, app, progress_tx) {
+                if process_effects(effs, tasks, app) {
                     return true;
                 }
                 let effs = dispatch::dispatch(second, app);
-                if process_effects(effs, tasks, app, progress_tx) {
+                if process_effects(effs, tasks, app) {
                     return true;
                 }
                 needs_draw = true;
@@ -3795,11 +3745,10 @@ fn process_effects(
     effs: Vec<super::actions::Effect>,
     tasks: &mut JoinSet<TaskResult>,
     app: &mut AppView,
-    progress_tx: &tokio::sync::mpsc::UnboundedSender<effects::RestoreProgressMsg>,
 ) -> bool {
     let flags = session_flags_for_effects(app, &effs);
     for eff in effs {
-        let (quit, meta) = effects::execute(eff, tasks, &app.acp_tx, &app.cwd, &flags, progress_tx);
+        let (quit, meta) = effects::execute(eff, tasks, &app.acp_tx, &app.cwd, &flags);
         // Install auth abort handle if the current auth state still matches.
         if let Some((seq, abort_handle)) = meta.auth_abort_handle
             && let super::app_view::AuthState::Authenticating {
@@ -4058,15 +4007,12 @@ mod tests {
                 ..
             }
         )));
-        let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut tasks = JoinSet::new();
 
         assert!(!process_effects(
             create_effects,
             &mut tasks,
-            &mut app,
-            &progress_tx
-        ));
+            &mut app));
 
         let request = match acp_rx.recv().await.expect("session/new request") {
             pi_acp_lib::AcpAgentMessage::NewSession(args) => args.request,
@@ -4149,7 +4095,6 @@ mod tests {
         app.acp_tx = acp_tx;
         let (input_tx, mut input_rx) = tokio::sync::mpsc::unbounded_channel();
         drop(input_tx);
-        let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut tasks = JoinSet::new();
         let mut csi_filter = super::super::csi_filter::CsiFragmentFilter::new();
         let mut xt_filter = super::super::xt_filter::XtversionFilter::new();
@@ -4159,7 +4104,6 @@ mod tests {
             &mut input_rx,
             &mut app,
             &mut tasks,
-            &progress_tx,
             &mut csi_filter,
             &mut xt_filter,
         )
@@ -4191,7 +4135,6 @@ mod tests {
         let _ = input_tx.send(press(KeyCode::Char('b')));
         let _ = input_tx.send(press(KeyCode::Char('c')));
         drop(input_tx);
-        let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut tasks = JoinSet::new();
         let mut csi_filter = super::super::csi_filter::CsiFragmentFilter::new();
         let mut xt_filter = super::super::xt_filter::XtversionFilter::new();
@@ -4201,7 +4144,6 @@ mod tests {
             &mut input_rx,
             &mut app,
             &mut tasks,
-            &progress_tx,
             &mut csi_filter,
             &mut xt_filter,
         )

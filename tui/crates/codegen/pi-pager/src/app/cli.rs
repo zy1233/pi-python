@@ -314,15 +314,10 @@ pub struct PagerArgs {
     pub continue_last_session: bool,
     /// Use a specific session UUID for a **new** conversation (must be a valid
     /// UUID and must not already exist under the target session directory).
-    /// With `--resume`/`--continue`, only valid together with `--fork-session`
-    /// (names the forked session). Does not resume existing sessions, use
-    /// `--resume` / `--continue` instead.
+    /// Not valid together with `--resume` / `--continue`. Does not resume
+    /// existing sessions, use `--resume` / `--continue` instead.
     #[arg(short = 's', long = "session-id", value_name = "SESSION_ID")]
     pub session_id: Option<String>,
-    /// When resuming (`--resume` / `--continue`), create a new session ID
-    /// instead of reusing the original (optionally set via `--session-id`).
-    #[arg(long = "fork-session")]
-    pub fork_session: bool,
     /// Start the session in a new git worktree, optionally named.
     /// With `--resume` of a remote session, pass `--restore-code` to apply
     /// the snapshot codebase (conversation is restored either way).
@@ -527,9 +522,9 @@ pub enum SandboxStartup {
 /// Derived from [`PagerArgs::session_startup_intent`]; new-with-id is not a resume.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ResumeTarget {
-    /// Resume (or fork-from) a specific session id.
+    /// Resume a specific session id.
     SessionId(String),
-    /// Resume (or fork-from) the most recent session for the current directory.
+    /// Resume the most recent session for the current directory.
     MostRecentForCwd,
     /// Not resuming an existing session (new auto or new-with-id).
     None,
@@ -632,16 +627,8 @@ impl PagerArgs {
             Ok(SessionStartupIntent::Resume {
                 session_id: Some(id),
                 ..
-            })
-            | Ok(SessionStartupIntent::ForkFrom {
-                source_session_id: Some(id),
-                ..
             }) => ResumeTarget::SessionId(id),
             Ok(SessionStartupIntent::Resume {
-                most_recent_for_cwd: true,
-                ..
-            })
-            | Ok(SessionStartupIntent::ForkFrom {
                 most_recent_for_cwd: true,
                 ..
             }) => ResumeTarget::MostRecentForCwd,
@@ -882,12 +869,6 @@ mod tests {
                 .unwrap()
                 .resume_target(),
             ResumeTarget::None
-        );
-        assert_eq!(
-            PagerArgs::try_parse_from(["zypi", "-r", "old", "--fork-session"])
-                .unwrap()
-                .resume_target(),
-            ResumeTarget::SessionId("old".to_string())
         );
     }
     /// The screen-mode flags are mutually exclusive: the pair exists so one

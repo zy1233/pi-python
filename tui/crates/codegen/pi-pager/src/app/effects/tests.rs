@@ -1,6 +1,5 @@
 #![cfg_attr(rustfmt, rustfmt::skip)]
 use super::*;
-use std::path::PathBuf;
 /// The invalid-params server detail survives `attach_prompt_usage`
 /// wrapping `error.data` as `{message, promptUsage}`.
 #[test]
@@ -460,17 +459,6 @@ async fn persist_setting_type_mismatch_errors_page_flip_on_send() {
         );
 }
 #[tokio::test]
-async fn persist_setting_type_mismatch_errors_confirm_before_rewind() {
-    use crate::settings::SettingValue;
-    let r = persist_setting("confirm_before_rewind", SettingValue::String("nope".into()))
-        .await;
-    let err = r.expect_err("confirm_before_rewind with String payload must return Err");
-    assert!(
-            err.contains("persist_setting(confirm_before_rewind) expected Bool"),
-            "got: {err}",
-        );
-}
-#[tokio::test]
 async fn persist_setting_type_mismatch_errors_combine_queued_prompts() {
     use crate::settings::SettingValue;
     let r = persist_setting(
@@ -910,95 +898,8 @@ fn route_permission_mode_result_err_best_effort_routes_to_dedicated_variant() {
         }
     }
 }
-#[tokio::test]
-async fn foreign_scan_task_echoes_sequence_without_enabled_sources() {
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut tasks = JoinSet::new();
-    let app_coordinator = crate::app::ForeignScanCoordinator::default();
-    app_coordinator.begin_request(41);
-    execute(
-        Effect::ScanForeignSessions {
-            cwd: PathBuf::from("/path/that/must/not/be-read"),
-            compat: pi_foreign_sessions::EnabledForeignSessionSources::default(),
-            grok_home: PathBuf::from("/path/that/must/not/be-read"),
-            coordinator: app_coordinator.clone(),
-            seq: 41,
-        },
-        &mut tasks,
-        &tx,
-        Path::new("."),
-        &SessionFlags::default(),
-        &progress_tx,
-    );
-    match tasks.join_next().await.expect("task").expect("no panic") {
-        TaskResult::ForeignSessionsScanned { entries, seq } => {
-            assert!(entries.is_empty());
-            assert_eq!(seq, 41);
-        }
-        other => panic!("expected ForeignSessionsScanned, got {other:?}"),
-    }
-    drop(app_coordinator);
-}
-#[tokio::test]
-async fn foreign_resume_detection_runs_as_task_result() {
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut tasks = JoinSet::new();
-    let (quit, _) = execute(
-        Effect::CanonicalizeForeignResumeCwd {
-            requested_cwd: PathBuf::from("/path/that/does-not-exist"),
-            launch_token: 7,
-        },
-        &mut tasks,
-        &tx,
-        Path::new("."),
-        &SessionFlags::default(),
-        &progress_tx,
-    );
-    assert!(!quit);
-    match tasks.join_next().await.expect("task").expect("no panic") {
-        TaskResult::ForeignResumeCwdCanonicalized {
-            canonical_cwd,
-            launch_token,
-            ..
-        } => {
-            assert!(canonical_cwd.is_none());
-            assert_eq!(launch_token, 7);
-        }
-        other => panic!("expected ForeignResumeCwdCanonicalized, got {other:?}"),
-    }
-    let canonical_cwd = dunce::canonicalize(tempfile::tempdir().unwrap().path())
-        .unwrap();
-    let (quit, _) = execute(
-        Effect::DetectForeignResumeHint {
-            canonical_cwd: canonical_cwd.clone(),
-            compat: pi_foreign_sessions::EnabledForeignSessionSources::default(),
-            grok_home: PathBuf::from("/path/that/must/not-be-read"),
-            launch_token: 8,
-        },
-        &mut tasks,
-        &tx,
-        Path::new("."),
-        &SessionFlags::default(),
-        &progress_tx,
-    );
-    assert!(!quit);
-    match tasks.join_next().await.expect("task").expect("no panic") {
-        TaskResult::ForeignResumeHintDetected {
-            canonical_cwd: result_cwd,
-            launch_token,
-            hint,
-        } => {
-            assert_eq!(result_cwd, canonical_cwd);
-            assert_eq!(launch_token, 8);
-            assert!(hint.is_none());
-        }
-        other => panic!("expected ForeignResumeHintDetected, got {other:?}"),
-    }
-}
 /// `FetchSessionList` uses standard `session/list` (cwd filter on the wire;
-/// picker `query` is applied locally). Failures and `seq`/`query` are echoed.
+/// the picker query is applied locally). The `seq` is echoed back.
 #[tokio::test]
 async fn fetch_session_list_uses_standard_session_list() {
     use pi_acp_lib::AcpAgentMessage;
@@ -1038,51 +939,26 @@ async fn fetch_session_list_uses_standard_session_list() {
             }
         }
     });
-    let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
-    let run = |effect: Effect| {
-        let mut tasks = JoinSet::new();
-        execute(
-            effect,
-            &mut tasks,
-            &tx,
-            Path::new("."),
-            &SessionFlags::default(),
-            &progress_tx,
-        );
-        tasks
-    };
-    let mut tasks = run(Effect::FetchSessionList {
-        query: Some("hit".into()),
-        seq: 7,
-        kind_filter: None,
-    });
+    let mut tasks = JoinSet::new();
+    execute(
+        Effect::FetchSessionList { seq: 8 },
+        &mut tasks,
+        &tx,
+        Path::new("."),
+        &SessionFlags::default(),
+    );
     match tasks.join_next().await.expect("task").expect("no panic") {
-        TaskResult::SessionListLoaded { sessions, scope, seq, query, .. } => {
-            assert_eq!(seq, 7, "seq must be echoed, not reconstructed");
-            assert_eq!(query.as_deref(), Some("hit"), "query must be echoed");
-            assert!(!scope.is_relaxed(), "standard session/list stays cwd-scoped");
-            assert_eq!(sessions.len(), 1);
-            assert_eq!(sessions[0].id, "sess-hit");
-        }
-        other => panic!("expected SessionListLoaded, got {other:?}"),
-    }
-    let mut tasks = run(Effect::FetchSessionList {
-        query: None,
-        seq: 8,
-        kind_filter: None,
-    });
-    match tasks.join_next().await.expect("task").expect("no panic") {
-        TaskResult::SessionListLoaded { sessions, scope, seq, query, .. } => {
-            assert_eq!(seq, 8);
-            assert_eq!(query, None);
-            assert!(!scope.is_relaxed());
-            assert_eq!(sessions.len(), 2);
+        TaskResult::SessionListLoaded { sessions, seq } => {
+            assert_eq!(seq, 8, "seq must be echoed, not reconstructed");
+            let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
+            assert_eq!(ids.len(), 2, "both sessions are returned unfiltered");
+            assert!(ids.contains(&"sess-hit") && ids.contains(&"sess-other"));
         }
         other => panic!("expected SessionListLoaded, got {other:?}"),
     }
 }
 #[tokio::test]
-async fn fetch_session_list_echoes_query_on_error() {
+async fn fetch_session_list_echoes_seq_on_error() {
     use pi_acp_lib::AcpAgentMessage;
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     tokio::spawn(async move {
@@ -1095,28 +971,18 @@ async fn fetch_session_list_echoes_query_on_error() {
             }
         }
     });
-    let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
     let mut tasks = JoinSet::new();
     execute(
-        Effect::FetchSessionList {
-            query: Some("fail-me".into()),
-            seq: 9,
-            kind_filter: None,
-        },
+        Effect::FetchSessionList { seq: 9 },
         &mut tasks,
         &tx,
         Path::new("."),
         &SessionFlags::default(),
-        &progress_tx,
     );
     match tasks.join_next().await.expect("task").expect("no panic") {
-        TaskResult::SessionListFailed { seq, query, .. } => {
-            assert_eq!(seq, 9);
-            assert_eq!(
-                query.as_deref(),
-                Some("fail-me"),
-                "failure must echo the query (gates the indicator clear)"
-            );
+        TaskResult::SessionListFailed { seq, error } => {
+            assert_eq!(seq, 9, "seq must be echoed on failure too");
+            assert!(error.contains("boom"), "error text is surfaced: {error}");
         }
         other => panic!("expected SessionListFailed, got {other:?}"),
     }
@@ -1138,49 +1004,18 @@ async fn fetch_session_list_ignores_kind_facet_filter() {
             }
         }
     });
-    let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
     let mut tasks = JoinSet::new();
     execute(
         Effect::FetchSessionList {
-            query: None,
             seq: 1,
-            kind_filter: Some(vec!["build".into()]),
         },
         &mut tasks,
         &tx,
         Path::new("."),
         &SessionFlags::default(),
-        &progress_tx,
     );
     let _ = tasks.join_next().await;
     assert_eq!(*captured.lock().unwrap(), 1);
-}
-/// The debounce arm must echo `query` and `seq` exactly. Awaits the real
-/// 250 ms debounce (tokio's paused clock needs `test-util`, not enabled
-/// in this crate).
-#[tokio::test]
-async fn debounce_session_search_echoes_query_and_seq() {
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut tasks = JoinSet::new();
-    execute(
-        Effect::DebounceSessionSearch {
-            query: "abc".into(),
-            seq: 9,
-        },
-        &mut tasks,
-        &tx,
-        Path::new("."),
-        &SessionFlags::default(),
-        &progress_tx,
-    );
-    match tasks.join_next().await.expect("task").expect("no panic") {
-        TaskResult::SessionSearchDebounceExpired { query, seq } => {
-            assert_eq!(query, "abc");
-            assert_eq!(seq, 9);
-        }
-        other => panic!("expected SessionSearchDebounceExpired, got {other:?}"),
-    }
 }
 /// Verify that every profile name produced by `SessionFlags::agent_profile()`
 /// is a valid `BuiltinAgentName` that the shell can resolve.

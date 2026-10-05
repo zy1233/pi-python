@@ -352,7 +352,6 @@ pub(super) fn handle_billing_fetched(
     silent: bool,
     subscription_tier: Option<String>,
     autotopup: crate::views::credit_bar::AutoTopupFetch,
-    nonce: u64,
 ) -> Vec<Effect> {
     // Parse/transport failures route to `BillingError`, so a `None`
     // balance here means the response carried no billing config. Clear
@@ -529,7 +528,6 @@ pub(super) fn handle_credit_limit_recheck_complete(
     drain.effects.push(Effect::FetchBilling {
         agent_id,
         silent: true,
-        nonce: Default::default(),
     });
     drain.effects
 }

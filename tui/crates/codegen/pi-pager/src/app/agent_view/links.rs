@@ -1337,7 +1337,7 @@ mod link_click_tests {
     /// Enter with a previous user prompt selected enters inline edit mode
     /// (edit-and-resubmit) instead of falling through to OpenBlockViewer.
     #[test]
-    fn enter_on_selected_user_prompt_enters_inline_edit() {
+    fn enter_on_selected_user_prompt_opens_block_viewer() {
         let mut agent = make_agent();
         agent
             .scrollback
@@ -1352,19 +1352,12 @@ mod link_click_tests {
         let registry = ActionRegistry::defaults();
         let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
         let outcome = agent.handle_scrollback_key(&enter, &registry);
-        if crate::app::inline_edit::INLINE_EDIT_ENABLED {
-            assert!(matches!(outcome, InputOutcome::Changed), "got {outcome:?}");
-            assert!(agent.inline_edit.is_some(), "Enter must start inline edit");
-        } else {
-            assert!(agent.inline_edit.is_none(), "feature gated off: no edit");
-            assert!(
-                matches!(outcome, InputOutcome::Action(Action::OpenBlockViewer)),
-                "gated off: Enter must fall through to OpenBlockViewer, got {outcome:?}"
-            );
-        }
+        assert!(
+            matches!(outcome, InputOutcome::Action(Action::OpenBlockViewer)),
+            "Enter must fall through to OpenBlockViewer, got {outcome:?}"
+        );
     }
-    /// Bash prompts are not inline-editable: Enter falls through to the
-    /// registry (OpenBlockViewer) exactly as before.
+    /// Enter on a selected bash prompt opens the block viewer.
     #[test]
     fn enter_on_selected_bash_prompt_falls_through() {
         let mut agent = make_agent();
@@ -1376,42 +1369,10 @@ mod link_click_tests {
         let registry = ActionRegistry::defaults();
         let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
         let outcome = agent.handle_scrollback_key(&enter, &registry);
-        assert!(agent.inline_edit.is_none());
         assert!(
             matches!(outcome, InputOutcome::Action(Action::OpenBlockViewer)),
             "expected fall-through to OpenBlockViewer, got {outcome:?}"
         );
-    }
-    /// Double-click on a user prompt: enters inline edit when the feature is
-    /// enabled; while gated off it does NOT edit (falls through to the fold
-    /// arm), leaving the prompt free for text selection. Written for both flag
-    /// states so it stays valid when INLINE_EDIT_ENABLED is flipped back on.
-    #[test]
-    fn double_click_on_user_prompt_enters_inline_edit() {
-        let mut agent = make_agent();
-        agent
-            .scrollback
-            .push_block(crate::scrollback::block::RenderBlock::user_prompt(
-                "fix the bug",
-            ));
-        agent
-            .scrollback
-            .push_block(crate::scrollback::block::RenderBlock::agent_message("done"));
-        agent.scrollback.prepare_layout(80, 40);
-        let now = std::time::Instant::now();
-        (agent.last_click, _) = agent.handle_scrollback_click(now, 0, false);
-        let _ = agent.handle_scrollback_click(now + std::time::Duration::from_millis(10), 0, false);
-        if crate::app::inline_edit::INLINE_EDIT_ENABLED {
-            assert!(
-                agent.inline_edit.is_some(),
-                "double-click must start inline edit"
-            );
-        } else {
-            assert!(
-                agent.inline_edit.is_none(),
-                "feature gated off: double-click must not edit"
-            );
-        }
     }
     #[test]
     fn single_click_on_plan_tool_group_header_does_not_open_plan_preview() {

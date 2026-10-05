@@ -148,13 +148,6 @@ pub struct FixPlan {
     payload: FixPayload,
 }
 
-impl FixPlan {
-    pub fn id(&self) -> DiagnosticId {
-        self.id
-    }
-
-}
-
 #[derive(Clone, Debug)]
 enum FixPayload {
     SshWrap(SshWrapPlan),
@@ -219,10 +212,6 @@ impl FixOutcome {
         self.id
     }
 
-    pub fn status(&self) -> FixStatus {
-        self.status
-    }
-
     pub fn activation(&self) -> FixActivation {
         self.activation
     }
@@ -233,11 +222,6 @@ impl FixOutcome {
 
     pub fn backup_path(&self) -> Option<&Path> {
         self.changed_file.backup_path.as_deref()
-    }
-
-    /// Shell that planned and applied this fix, when the fix is shell-scoped.
-    pub fn shell(&self) -> Option<ShellKind> {
-        self.shell
     }
 
     /// Whether the SSH-wrap managed alias is present for the shell that applied

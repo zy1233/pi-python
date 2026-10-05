@@ -65,14 +65,13 @@ fn paintable_btw_area(frame_area: Rect, area: Rect) -> Option<Rect> {
 /// Shared with [`super::overlay::sync_viewport`] so viewport sizing measures the
 /// prompt's height exactly as the live region will draw it.
 ///
-/// `input_mode` wires special composer modes (bash `! `, feedback `~ `,
-/// remember `# `) the same way the full TUI does — without this, `!` on an
-/// empty prompt would flip mode invisibly (key consumed, default `❯` remains).
+/// `input_mode` wires the bash composer mode (`! `) the same way the full TUI
+/// does — without this, `!` on an empty prompt would flip mode invisibly (key
+/// consumed, default `❯` remains).
 pub(super) fn prompt_style(
     appearance: &pi_pager::appearance::AppearanceConfig,
     input_mode: pi_pager::app::agent_view::PromptInputMode,
     theme: &Theme,
-    multiline: bool,
 ) -> PromptStyle {
     PromptStyle {
         focused: true,
@@ -87,7 +86,7 @@ pub(super) fn prompt_style(
         border_color_override: None,
         prefix_override: input_mode.prefix_override(theme),
         placeholder_when_focused: false,
-        placeholder_override: input_mode.placeholder_override(multiline),
+        placeholder_override: None,
         show_accent_line: false,
         show_borders: false,
         title: None,
@@ -125,11 +124,11 @@ pub fn draw_live(app: &mut AppView, terminal: &mut PagerTerminal) {
     let theme = Theme::current();
     let commit_app = super::commit::committed_appearance(appearance);
     let compact = appearance.prompt.compact;
-    let (input_mode, multiline) = agent_id
+    let input_mode = agent_id
         .and_then(|id| agents.get(&id))
-        .map(|a| (a.prompt_input_mode, a.multiline_mode))
+        .map(|a| a.prompt_input_mode)
         .unwrap_or_default();
-    let style = prompt_style(appearance, input_mode, &theme, multiline);
+    let style = prompt_style(appearance, input_mode, &theme);
     let row_inset = live_left_inset(appearance);
     let layout_cfg = &appearance.scrollback.layout;
     let term_h = terminal.last_known_area().height;
@@ -996,11 +995,11 @@ mod tests {
         use pi_pager::appearance::AppearanceConfig;
         let appearance = AppearanceConfig::default();
         let theme = Theme::current();
-        let normal = prompt_style(&appearance, PromptInputMode::Normal, &theme, false);
+        let normal = prompt_style(&appearance, PromptInputMode::Normal, &theme);
         assert!(normal.prefix_override.is_none());
         assert!(normal.accent_color_override.is_none());
         assert!(normal.placeholder_override.is_none());
-        let bash = prompt_style(&appearance, PromptInputMode::Bash, &theme, false);
+        let bash = prompt_style(&appearance, PromptInputMode::Bash, &theme);
         assert_eq!(
             bash.prefix_override,
             Some(("! ", theme.command)),

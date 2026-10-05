@@ -796,18 +796,6 @@ pub struct AppView {
     pub session_picker_loading: bool,
     /// Unified picker state for the session picker.
     pub session_picker_state: crate::views::picker::PickerState,
-    /// Source filter for the welcome-screen session picker.
-    pub session_picker_source_filter: crate::views::session_picker::SourceFilter,
-    /// Directory whose relaxed-scope notice has fired, keyed by the browse cwd
-    /// (`app.cwd`); a cwd-scoped browse clears it so a later relax re-notifies.
-    pub session_picker_relaxed_notified_for: Option<std::path::PathBuf>,
-    /// Content-based (deep search) results from ACP session search.
-    pub session_picker_content_results:
-        Option<Vec<pi_shell::extensions::session_search::SearchSessionHit>>,
-    /// Whether a deep search is currently in flight.
-    pub session_picker_content_loading: bool,
-    /// Monotonically increasing sequence number for deep search requests.
-    pub session_picker_deep_search_seq: u64,
     /// Monotonically increasing sequence number for session list fetches
     /// (`Effect::FetchSessionList`): only the seq-current response is
     /// applied, so a stale completion can't clobber newer results. Bumped
@@ -815,21 +803,6 @@ pub struct AppView {
     /// stays 0 so plain list responses keep their pre-existing
     /// last-write-wins behavior.
     pub session_picker_list_seq: u64,
-    /// Resolved compat-session cells used before checking resume-skill paths.
-    pub(crate) foreign_session_compat: pi_foreign_sessions::EnabledForeignSessionSources,
-    /// Monotonic picker scan sequence, bumped on every open and close.
-    pub(crate) foreign_session_scan_seq: u64,
-    /// Coalesces obsolete foreign scans across welcome and modal pickers.
-    pub(crate) foreign_scan_coordinator: crate::app::ForeignScanCoordinator,
-    /// Foreign lane completion and deferred native-lane notice.
-    pub(crate) session_picker_lanes: crate::views::session_picker::SessionPickerLanes,
-    /// Invalidates detail reads when picker rows or filters change.
-    pub(crate) session_picker_detail_generation: u64,
-    /// The search query `session_picker_entries` were server-fetched with
-    /// (`None` = unfiltered fetch). Via
-    /// [`crate::views::session_picker::effective_filter_query`], skips the
-    /// local fuzzy re-filter for server search results.
-    pub session_picker_entries_query: Option<String>,
     pub session_picker_pending_delete: Option<crate::views::session_picker::PendingDelete>,
     /// Tick counter for welcome screen spinner animation.
     pub welcome_tick: u64,
@@ -1052,9 +1025,6 @@ pub struct AppView {
     /// When true, the event loop should exit so the user can relaunch
     /// to pick up the downloaded update.
     pub quit_for_update: bool,
-    /// Generation and state for the one launch-scoped foreign resume detection.
-    pub(crate) foreign_resume_launch_generation: u64,
-    pub(crate) foreign_resume_launch: Option<crate::app::foreign_sessions::ForeignResumeLaunch>,
     /// When set, the event loop should exit and the process re-exec into the
     /// other screen mode. Driven by `/minimal` and `/fullscreen`. Captures the
     /// session id at action time so a later teardown cannot drop `--resume`.
@@ -1364,18 +1334,7 @@ impl AppView {
             session_picker_state: crate::views::picker::PickerState::with_mode(
                 crate::views::picker::PickerMode::FullScreen,
             ),
-            session_picker_source_filter: crate::views::session_picker::SourceFilter::default(),
-            session_picker_relaxed_notified_for: None,
-            session_picker_content_results: None,
-            session_picker_content_loading: false,
-            session_picker_deep_search_seq: 0,
             session_picker_list_seq: 0,
-            foreign_session_compat: Default::default(),
-            foreign_session_scan_seq: 0,
-            foreign_scan_coordinator: Default::default(),
-            session_picker_lanes: Default::default(),
-            session_picker_detail_generation: 0,
-            session_picker_entries_query: None,
             session_picker_pending_delete: None,
             welcome_tick: 0,
             welcome_shimmer_frame: 0,
@@ -1456,8 +1415,6 @@ impl AppView {
             startup_warnings: Vec::new(),
             is_api_key_auth: false,
             pending_update_version: None,
-            foreign_resume_launch_generation: 0,
-            foreign_resume_launch: None,
             quit_for_update: false,
             relaunch: None,
             welcome_doc_viewer: None,
@@ -1958,10 +1915,8 @@ impl AppView {
         if let Some(key) = key_event
             && let Some(pending) = &self.pending_action
         {
-            let stale_idle_arm_while_busy = matches!(
-                pending.action,
-                Action::ClearPrompt | Action::RewindShowPicker
-            ) && matches!(
+            let stale_idle_arm_while_busy = matches!(pending.action, Action::ClearPrompt)
+                && matches!(
                 self.active_view,
                 ActiveView::Agent(id) if self.agents.get(&id).is_some_and(|a| {
                     a.session.state.is_turn_running()
@@ -2010,12 +1965,9 @@ impl AppView {
         }
         let zdr_blocked = self.is_zdr_blocked();
         let has_access = self.has_access();
-        let has_foreign_resume = self.foreign_resume_hint().is_some();
         let sp_loading = crate::views::session_picker::loading_spinner_active(
             self.session_picker_entries.as_deref(),
-            self.session_picker_source_filter,
             self.session_picker_loading,
-            &self.session_picker_lanes,
         );
         #[cfg(feature = "local-workspace")]
         let session_picker_open = self.session_picker_entries.is_some() || sp_loading;
@@ -2025,7 +1977,6 @@ impl AppView {
                 &mut WelcomeInputCtx {
                     auth_state: &self.auth_state,
                     trust_state: &self.trust_state,
-                    arrived_at,
                     cwd: &self.cwd,
                     mid_session_login: self.auth_return_view.is_some(),
                     auth_code_input: &mut self.auth_code_input,
@@ -2057,15 +2008,10 @@ impl AppView {
                     sp_entries: &mut self.session_picker_entries,
                     sp_loading,
                     sp_state: &mut self.session_picker_state,
-                    sp_content_results: &self.session_picker_content_results,
-                    sp_content_loading: self.session_picker_content_loading,
-                    sp_entries_query: &self.session_picker_entries_query,
                     welcome_doc_viewer: &mut self.welcome_doc_viewer,
                     has_pending_update: self.pending_update_version.is_some(),
-                    has_foreign_resume,
                     cwd_has_git_ancestor: self.cwd_has_git_ancestor,
                     session_picker_grouped: self.session_picker_grouped,
-                    sp_source_filter: &mut self.session_picker_source_filter,
                     sp_pending_delete: &mut self.session_picker_pending_delete,
                     chat_mode: self.chat_mode,
                     #[cfg(feature = "local-workspace")]
@@ -2269,7 +2215,7 @@ impl AppView {
 }
 pub(crate) use crate::views::session_picker::filter_session_entries;
 use crate::views::session_picker::{
-    CONTENT_EXPAND_OFFSET, PickerItem, SessionPickerWorktreeSelection, build_entry_map,
+    PickerItem, SessionPickerWorktreeSelection, build_entry_map,
     session_picker_worktree_selection, sync_session_picker_query_expansion,
 };
 /// Context for welcome-view input handling.
@@ -2278,8 +2224,6 @@ struct WelcomeInputCtx<'a> {
     /// Folder-trust state. When `Pending` (and auth is `Done`), the trust
     /// question intercepts keys and swallows the rest so no session starts.
     trust_state: &'a TrustState,
-    /// When this event reached the process, so a key typed before the notice painted is no answer.
-    arrived_at: Instant,
     /// Live working directory (tracks `Effect::SetWorkingDir`), used to pin
     /// the current repo's group to the top of the session picker.
     cwd: &'a std::path::Path,
@@ -2328,22 +2272,13 @@ struct WelcomeInputCtx<'a> {
     /// picker still owns input (Esc must dismiss it, not hit the hidden menu).
     sp_loading: bool,
     sp_state: &'a mut crate::views::picker::PickerState,
-    sp_content_results:
-        &'a Option<Vec<pi_shell::extensions::session_search::SearchSessionHit>>,
-    sp_content_loading: bool,
-    /// The query `sp_entries` were server-fetched with (see
-    /// [`crate::views::session_picker::effective_filter_query`]).
-    sp_entries_query: &'a Option<String>,
     welcome_doc_viewer: &'a mut Option<crate::views::modal::ActiveModal>,
     has_pending_update: bool,
-    /// A recent foreign session is available to resume when no update is pending.
-    has_foreign_resume: bool,
     cwd_has_git_ancestor: bool,
     session_picker_grouped: bool,
-    sp_source_filter: &'a mut crate::views::session_picker::SourceFilter,
     sp_pending_delete: &'a mut Option<crate::views::session_picker::PendingDelete>,
-    /// Process-wide `--chat`: the session picker hides its source filter
-    /// (conversations-only list), so `f` must not cycle it.
+    /// Process-wide `--chat`: the session picker is conversations-only
+    /// (no delete action).
     chat_mode: bool,
     #[cfg(feature = "local-workspace")]
     workspace_mode: &'a mut crate::views::welcome::WelcomeWorkspaceMode,
@@ -2559,36 +2494,16 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
     }
     if (ctx.sp_entries.is_some() || ctx.sp_loading) && matches!(ctx.auth_state, AuthState::Done) {
         use crate::views::picker::{PickerConfig, PickerOutcome, handle_picker_input};
-        let source_filter = *ctx.sp_source_filter;
         let current_repo =
             crate::views::session_picker::repo_name_from_cwd(&ctx.cwd.to_string_lossy());
         let entry_map = build_entry_map(
             ctx.sp_entries.as_deref(),
-            ctx.sp_content_results.as_deref(),
-            crate::views::session_picker::effective_filter_query(
-                ctx.sp_state.query(),
-                ctx.sp_entries_query.as_deref(),
-            ),
+            ctx.sp_state.query(),
             ctx.session_picker_grouped,
-            ctx.sp_content_loading,
-            source_filter,
             Some(current_repo.as_str()),
         );
         let entry_count = entry_map.len();
         let non_selectable_flags: Vec<bool> = entry_map.iter().map(|e| e.is_none()).collect();
-        let focused_is_foreign = match entry_map
-            .get(ctx.sp_state.selected)
-            .and_then(|entry| entry.as_ref())
-        {
-            Some(PickerItem::Fuzzy { original_index }) => ctx
-                .sp_entries
-                .as_ref()
-                .and_then(|entries| entries.get(*original_index))
-                .is_some_and(|entry| {
-                    crate::app::foreign_sessions::is_foreign_picker_source(&entry.source)
-                }),
-            _ => false,
-        };
         let config = PickerConfig {
             title: Some("Resume session"),
             show_search_hint: true,
@@ -2601,11 +2516,7 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
             shortcuts_area: None,
             tabs: None,
             active_tab: 0,
-            filter_label: (!ctx.chat_mode).then(|| source_filter.label()),
-            filter_key_hint: (!ctx.chat_mode).then_some("f"),
-            filter_active: !ctx.chat_mode && source_filter.is_active(),
-            header_note: None,
-            action_keys: if ctx.chat_mode || focused_is_foreign {
+            action_keys: if ctx.chat_mode {
                 &[]
             } else {
                 &[('d', "delete")]
@@ -2641,14 +2552,10 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                 &entry_map,
                 &non_selectable_flags,
                 ctx.sp_entries.as_deref(),
-                ctx.sp_content_results.as_deref(),
             ) {
                 return InputOutcome::Action(match selection {
                     SessionPickerWorktreeSelection::Fuzzy(original_index) => {
                         Action::PickSessionInWorktree(original_index)
-                    }
-                    SessionPickerWorktreeSelection::Content { session_id, cwd } => {
-                        Action::PickContentSessionInWorktree { session_id, cwd }
                     }
                     SessionPickerWorktreeSelection::Unavailable => {
                         return InputOutcome::Changed;
@@ -2666,17 +2573,6 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                 Some(PickerItem::Fuzzy { original_index }) => {
                     return InputOutcome::Action(Action::PickSession(*original_index));
                 }
-                Some(PickerItem::Content { hit_index }) => {
-                    if let Some(hits) = ctx.sp_content_results.as_ref()
-                        && let Some(hit) = hits.get(*hit_index)
-                    {
-                        return InputOutcome::Action(Action::PickContentSession {
-                            session_id: hit.session_id.clone(),
-                            cwd: hit.cwd.clone(),
-                        });
-                    }
-                    return InputOutcome::Changed;
-                }
                 None => return InputOutcome::Changed,
             },
             PickerOutcome::SubmitQuery => {
@@ -2690,7 +2586,6 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
             PickerOutcome::Closed => {
                 *ctx.sp_entries = None;
                 ctx.sp_state.reset();
-                *ctx.sp_source_filter = crate::views::session_picker::SourceFilter::default();
                 *ctx.sp_pending_delete = None;
                 return InputOutcome::Action(Action::SessionPickerClosed);
             }
@@ -2699,23 +2594,10 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                     Some(PickerItem::Fuzzy { original_index }) => {
                         if let Some(ents) = ctx.sp_entries.as_ref()
                             && let Some(entry) = ents.get(*original_index)
-                            && !crate::app::foreign_sessions::is_foreign_picker_source(
-                                &entry.source,
-                            )
                         {
                             return InputOutcome::Action(Action::ExpandSessionCard {
                                 source: entry.source.clone(),
                                 session_id: entry.id.clone(),
-                            });
-                        }
-                    }
-                    Some(PickerItem::Content { hit_index }) => {
-                        if let Some(hits) = ctx.sp_content_results.as_ref()
-                            && let Some(hit) = hits.get(*hit_index)
-                        {
-                            return InputOutcome::Action(Action::ExpandSessionCard {
-                                source: "local".into(),
-                                session_id: hit.session_id.clone(),
                             });
                         }
                     }
@@ -2736,18 +2618,6 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                             });
                         }
                     }
-                    Some(PickerItem::Content { hit_index }) => {
-                        let key = CONTENT_EXPAND_OFFSET + hit_index;
-                        if ctx.sp_state.expanded.contains(&key)
-                            && let Some(hits) = ctx.sp_content_results.as_ref()
-                            && let Some(hit) = hits.get(*hit_index)
-                        {
-                            return InputOutcome::Action(Action::ExpandSessionCard {
-                                source: "local".into(),
-                                session_id: hit.session_id.clone(),
-                            });
-                        }
-                    }
                     None => {}
                 }
                 return InputOutcome::Changed;
@@ -2761,37 +2631,20 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
             PickerOutcome::QueryChanged => {
                 sync_session_picker_query_expansion(
                     ctx.sp_entries.as_deref(),
-                    ctx.sp_content_results.as_deref(),
-                    ctx.sp_entries_query.as_deref(),
                     ctx.sp_state,
                     ctx.session_picker_grouped,
-                    ctx.sp_content_loading,
-                    source_filter,
                     Some(current_repo.as_str()),
                 );
-                return InputOutcome::Action(Action::TriggerDeepSearch);
+                return InputOutcome::Changed;
             }
             PickerOutcome::Changed => return InputOutcome::Changed,
-            PickerOutcome::Unchanged => {
-                if let Event::Key(key) = ev
-                    && key.kind == KeyEventKind::Press
-                    && key!('/', CONTROL).matches(key)
-                    && !ctx.sp_state.query().trim().is_empty()
-                {
-                    return InputOutcome::Action(Action::ForceDeepSearch);
-                }
-                return InputOutcome::Unchanged;
-            }
-            PickerOutcome::FilterCycled => {
-                return InputOutcome::Action(Action::CycleSessionSourceFilter);
-            }
+            PickerOutcome::Unchanged => return InputOutcome::Unchanged,
             PickerOutcome::Action('d') => {
                 *ctx.sp_pending_delete =
                     crate::views::session_picker::pending_delete_from_selection(
                         ctx.sp_state.selected,
                         &entry_map,
                         ctx.sp_entries.as_deref(),
-                        ctx.sp_content_results.as_deref(),
                     );
                 return InputOutcome::Changed;
             }
@@ -2837,9 +2690,6 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
             }
             if ctx.has_pending_update && key!('u', CONTROL).matches(key) {
                 return InputOutcome::Action(Action::QuitForUpdate);
-            }
-            if ctx.has_foreign_resume && key!('u', CONTROL).matches(key) {
-                return InputOutcome::Action(Action::ResumeForeignSession);
             }
         }
         if matches!(ctx.auth_state, AuthState::Done) && crate::input::key::is_shift_tab(key) {
@@ -3393,7 +3243,6 @@ impl AppView {
         let scroll_debug_panel = self.scroll_debug_panel();
         let dev_fps_rows = self.dev_fps_rows();
         let fps_overlay = self.fps_hud.overlay(dev_fps_rows);
-        let foreign_resume_hint = self.foreign_resume_hint().cloned();
         let privacy_banner_agent = self.privacy_banner_should_show()
             && !crate::views::announcements::has_critical_session_announcement(
                 &self.active_announcements,
@@ -3513,27 +3362,16 @@ impl AppView {
                             session_picker_loading:
                                 crate::views::session_picker::loading_spinner_active(
                                     self.session_picker_entries.as_deref(),
-                                    self.session_picker_source_filter,
                                     self.session_picker_loading,
-                                    &self.session_picker_lanes,
                                 ),
                             compact,
                             pending_hint,
                             startup_warnings: &self.startup_warnings,
                             pending_update_version: self.pending_update_version.as_deref(),
-                            foreign_resume_hint: foreign_resume_hint.as_ref(),
-                            session_picker_content_results: self
-                                .session_picker_content_results
-                                .as_deref(),
-                            session_picker_content_loading: self.session_picker_content_loading,
-                            session_picker_entries_query: self
-                                .session_picker_entries_query
-                                .as_deref(),
                             welcome_tick: self.welcome_tick,
                             gate: self.gate.as_ref(),
                             subscription_tier: self.subscription_tier.as_deref(),
                             session_picker_grouped: self.session_picker_grouped,
-                            session_picker_source_filter: self.session_picker_source_filter,
                             session_picker_pending_delete: self
                                 .session_picker_pending_delete
                                 .is_some(),
@@ -4058,14 +3896,10 @@ impl AppView {
                 }
                 needs_redraw = true;
             }
-            if self.session_picker_content_loading
-                || crate::views::session_picker::loading_spinner_active(
-                    self.session_picker_entries.as_deref(),
-                    self.session_picker_source_filter,
-                    self.session_picker_loading,
-                    &self.session_picker_lanes,
-                )
-            {
+            if crate::views::session_picker::loading_spinner_active(
+                self.session_picker_entries.as_deref(),
+                self.session_picker_loading,
+            ) {
                 needs_redraw = true;
             } else {
                 let frame = crate::views::welcome::shimmer_frame();
@@ -4106,14 +3940,10 @@ impl AppView {
                 Some(crate::views::modal::ActiveModal::SessionPicker {
                     entries,
                     loading,
-                    lanes,
-                    source_filter,
                     ..
                 }) if crate::views::session_picker::loading_spinner_active(
                     entries.as_deref(),
-                    *source_filter,
                     *loading,
-                    lanes,
                 )
             ) && spinner_frame_tick;
             needs_redraw |= agent.drain_blocked();
@@ -4364,9 +4194,6 @@ impl AppView {
         if self.voice_listening() {
             return TickDemand::Fast;
         }
-        if self.session_picker_content_loading {
-            return TickDemand::Fast;
-        }
         if self.agents.values().any(|agent| agent.edit_hl_needs_tick()) {
             return TickDemand::Fast;
         }
@@ -4409,14 +4236,10 @@ impl AppView {
                         Some(crate::views::modal::ActiveModal::SessionPicker {
                             entries,
                             loading,
-                            lanes,
-                            source_filter,
                             ..
                         }) if crate::views::session_picker::loading_spinner_active(
                             entries.as_deref(),
-                            *source_filter,
                             *loading,
-                            lanes,
                         )
                     );
                 if fast {

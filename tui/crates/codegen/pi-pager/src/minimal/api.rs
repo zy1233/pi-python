@@ -42,8 +42,7 @@ use crate::views::picker::{PickerEntry, PickerField, PickerState};
 use crate::views::plan_approval_view::PlanApprovalViewState;
 use crate::views::prompt_widget::PromptWidget;
 use crate::views::question_view::QuestionViewState;
-use crate::views::rewind::RewindState;
-use crate::views::session_picker::{SessionEntryData, SourceFilter};
+use crate::views::session_picker::SessionEntryData;
 use crate::views::suggestion_controller::SuggestionController;
 
 /// The shared renderer's minimum `/btw` panel dimensions.
@@ -346,7 +345,6 @@ pub fn minimal_btw_surface_available(v: &AgentView) -> bool {
         && v.block_viewer.is_none()
         && v.active_modal.is_none()
         && v.no_input_overlay_pending()
-        && v.rewind_state.is_none()
 }
 
 /// Start a correlated minimal `/btw` loading panel on this agent.
@@ -478,11 +476,6 @@ pub fn btw_focused(v: &AgentView) -> bool {
     v.btw_focused
 }
 
-/// `AgentView::rewind_state`.
-pub fn rewind_state(v: &AgentView) -> Option<&RewindState> {
-    v.rewind_state.as_ref()
-}
-
 // ── AgentView method wrappers ────────────────────────────────────────────────
 
 /// [`AgentView::resolve_turn_activity`].
@@ -592,9 +585,8 @@ pub fn repo_name_from_cwd(cwd: &str) -> String {
 pub fn filter_session_entries(
     entries: Option<&[SessionPickerEntry]>,
     query: &str,
-    source_filter: SourceFilter,
 ) -> Vec<usize> {
-    crate::views::session_picker::filter_session_entries(entries, query, source_filter)
+    crate::views::session_picker::filter_session_entries(entries, query)
 }
 
 /// [`crate::views::session_picker::build_session_entry_data`].
@@ -610,14 +602,6 @@ pub fn build_session_entry_data(
         state,
         content_width,
     )
-}
-
-/// [`crate::views::session_picker::hidden_external_hint`].
-pub fn hidden_external_hint(
-    entries: Option<&[SessionPickerEntry]>,
-    source_filter: SourceFilter,
-) -> Option<String> {
-    crate::views::session_picker::hidden_external_hint(entries, source_filter)
 }
 
 /// [`crate::views::session_picker::build_grouped_picker_entries`].

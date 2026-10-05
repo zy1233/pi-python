@@ -184,24 +184,10 @@ pub enum ActiveModal {
         entries: Option<Vec<crate::app::app_view::SessionPickerEntry>>,
         /// Whether the session list is being fetched.
         loading: bool,
-        /// Foreign lane completion and deferred native-lane notice.
-        lanes: crate::views::session_picker::SessionPickerLanes,
         /// Previous command palette state (if opened from palette). Restored on Esc.
         previous_palette: Option<PaletteSnapshot>,
         /// Shared modal window chrome state.
         window: ModalWindowState,
-        /// Content-based (deep search) results from ACP session search.
-        content_results: Option<Vec<pi_shell::extensions::session_search::SearchSessionHit>>,
-        /// Whether a deep search is currently in flight.
-        content_loading: bool,
-        /// Monotonically increasing sequence number for deep search requests.
-        deep_search_seq: u64,
-        /// The search query `entries` were server-fetched with (`None` =
-        /// unfiltered fetch). See
-        /// [`crate::views::session_picker::effective_filter_query`].
-        entries_query: Option<String>,
-        /// Source filter for the modal session picker.
-        source_filter: crate::views::session_picker::SourceFilter,
         /// Session armed for delete via `d` (see
         /// [`crate::views::session_picker::PendingDelete`]).
         pending_delete: Option<crate::views::session_picker::PendingDelete>,
@@ -252,10 +238,6 @@ pub enum ActiveModal {
         expanded_ids: std::collections::HashSet<crate::views::shortcuts_help::ExpandKey>,
         /// Browse list vs in-modal detail page (pattern B).
         mode: crate::views::shortcuts_help::ShortcutsHelpMode,
-    },
-    /// Memory browser modal (/memory).
-    MemoryBrowser {
-        state: Box<crate::views::memory_modal::MemoryModalState>,
     },
     /// Settings modal (F2, /settings, palette). Boxed — large state.
     Settings {
@@ -482,7 +464,6 @@ impl ActiveModal {
             | ActiveModal::DocPicker { .. }
             | ActiveModal::DocViewer { .. }
             | ActiveModal::ShortcutsHelp { .. }
-            | ActiveModal::MemoryBrowser { .. }
             | ActiveModal::Settings { .. } => vec![],
         }
     }
@@ -510,7 +491,6 @@ impl ActiveModal {
             ActiveModal::DocPicker { .. } => "How-to Guides",
             ActiveModal::DocViewer { title, .. } => title.as_str(),
             ActiveModal::ShortcutsHelp { .. } => "Keyboard Shortcuts",
-            ActiveModal::MemoryBrowser { .. } => "Memory",
             ActiveModal::Settings { .. } => crate::views::settings_modal::MODAL_TITLE,
             ActiveModal::ResetSettingsConfirm { .. } => "Reset setting?",
         }

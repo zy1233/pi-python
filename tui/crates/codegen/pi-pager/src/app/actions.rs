@@ -8,7 +8,6 @@
 //! - [`TaskResult`] — produced by spawned tasks, fed back into dispatch.
 use super::agent::AgentId;
 use crate::app::status_line::StatusLineRun;
-use crate::scrollback::entry::EntryId;
 use agent_client_protocol as acp;
 use pi_shell::sampling::types::ReasoningEffort;
 use pi_shell::session::unified_list::SessionKind;
@@ -39,8 +38,6 @@ pub enum Action {
     Quit,
     /// Restart the binary to pick up a downloaded update.
     QuitForUpdate,
-    /// Resume the recent foreign session offered on the launch welcome screen.
-    ResumeForeignSession,
     /// Quit without double-press confirmation (e.g., from command palette or pre-login screens).
     QuitConfirmed,
     /// Create a new session from the welcome screen.
@@ -66,8 +63,6 @@ pub enum Action {
     OpenPrevLink,
     /// Fetch the session list for the session picker on the welcome screen.
     FetchSessionList,
-    /// Cycle the active session picker's source filter.
-    CycleSessionSourceFilter,
     /// Load a selected session from the session picker.
     PickSession(usize),
     /// Load a selected session from the session picker into a new worktree.
@@ -112,13 +107,6 @@ pub enum Action {
     ConfirmWelcomeLocalWorkspaceAck,
     /// Create a new session with a client-chosen session ID (`--session-id`).
     NewSessionWithId(String),
-    /// Startup `--fork-session`: fork `parent` then load the child.
-    /// Optional second string is the desired new session ID.
-    StartupForkSession {
-        parent_session_id: String,
-        parent_cwd: Option<std::path::PathBuf>,
-        new_session_id: Option<String>,
-    },
     /// Send the current prompt text to the agent.
     SendPrompt(String),
     /// Submit a clicked follow-up suggestion chip as a LITERAL model prompt.
@@ -339,8 +327,6 @@ pub enum Action {
     SetTimeline(bool),
     /// Set `[ui].page_flip_on_send` (default ON). Persists via `Effect::PersistSetting`.
     SetPageFlipOnSend(bool),
-    /// Set `[ui].confirm_before_rewind` (default ON). Persists via `Effect::PersistSetting`.
-    SetConfirmBeforeRewind(bool),
     /// Set whether the drain call site merges the run of leading queued
     /// `Prompt` entries into one turn instead of sending them one by one.
     /// SHARED-owned: updates the process-wide cache mirror (read by the
@@ -464,16 +450,6 @@ pub enum Action {
     /// to config.toml). `/plan <desc>` uses `EnterPlanMode` instead
     /// because it also starts a turn.
     SetPlanMode(PlanModeKind),
-    /// Pick a session from content (deep search) results.
-    PickContentSession {
-        session_id: String,
-        cwd: String,
-    },
-    /// Pick a session from content (deep search) results and resume in a worktree.
-    PickContentSessionInWorktree {
-        session_id: String,
-        cwd: String,
-    },
     /// Delete a session from history via the ACP backend. Fired from the
     /// session picker: `d` arms delete confirmation on the focused row,
     /// then `y` confirms (or `n`/other cancels).
@@ -481,19 +457,6 @@ pub enum Action {
         source: String,
         session_id: String,
         cwd: String,
-    },
-    /// Trigger a deep content search for sessions matching the picker query.
-    TriggerDeepSearch,
-    /// Force an immediate deep content search, skipping the debounce.
-    ForceDeepSearch,
-    /// Submit-path action emitted by the local fork worktree question
-    /// modal. Routes directly to `dispatch_fork_resolved`.
-    ForkAnswered {
-        worktree: bool,
-        directive: Option<String>,
-        /// When `Some`, also persist this worktree mode preference so
-        /// future `/fork` invocations skip the popup.
-        persist_mode: Option<crate::app::app_view::WorktreeMode>,
     },
     /// Submit-path action emitted by the local `/new` worktree question
     /// modal. `worktree: true` creates the new session in a worktree;
@@ -514,25 +477,8 @@ pub enum Action {
         model_id: acp::ModelId,
         effort: Option<ReasoningEffort>,
     },
-    /// Persist the memory modal fullscreen preference to config.toml.
-    PersistMemoryFullscreen(bool),
     /// Edit the current minimal-mode composer draft in an external editor.
     EditPromptExternal,
-    RewindShowPicker,
-    RewindPickerSelect(usize),
-    RewindConfirm(usize),
-    /// Confirm rewind and turn off `confirm_before_rewind` for future rewinds.
-    RewindConfirmNeverAsk(usize),
-    RewindCancelOffer,
-    RewindDismiss,
-    RewindDismissError,
-    /// Submit an inline edit: conversation-only rewind to that prompt, then
-    /// resubmit the edited text (state lives on `AgentView::inline_edit`).
-    InlineEditSubmit,
-    /// Jump to a turn by its prompt's stable id and close the picker.
-    JumpPickerSelect(EntryId),
-    /// Close the picker and restore the stashed viewport.
-    JumpDismiss,
 }
 /// Persist-and-notify semantics for [`Effect::PersistPermissionMode`].
 ///
@@ -943,59 +889,12 @@ pub enum Effect {
         /// Conversation-entry bit (`source == "conversation"`), not sticky `--chat`.
         chat_kind: bool,
     },
-    /// Scan enabled foreign session stores without delaying the native list.
-    ScanForeignSessions {
-        cwd: std::path::PathBuf,
-        compat: pi_foreign_sessions::EnabledForeignSessionSources,
-        grok_home: std::path::PathBuf,
-        coordinator: crate::app::ForeignScanCoordinator,
-        seq: u64,
-    },
-    /// Canonicalize the launch cwd off the event-loop thread before store access.
-    CanonicalizeForeignResumeCwd {
-        requested_cwd: std::path::PathBuf,
-        launch_token: u64,
-    },
-    /// Detect the newest resumable foreign session without delaying first paint.
-    DetectForeignResumeHint {
-        canonical_cwd: std::path::PathBuf,
-        compat: pi_foreign_sessions::EnabledForeignSessionSources,
-        grok_home: std::path::PathBuf,
-        launch_token: u64,
-    },
     /// Fetch session list for the welcome screen session picker.
     FetchSessionList {
- /// Text search pushed down to `legacy ext RPC` as `query` (chat
-        /// mode: forwarded to the backend conversations search). `None`
-        /// fetches the unfiltered list.
-        query: Option<String>,
         /// Snapshot of [`crate::app::app_view::AppView::session_picker_list_seq`];
         /// the response is dropped when no longer current, so out-of-order
         /// completions can't clobber newer results.
         seq: u64,
-        /// Optional unified-list `kind` facet filter (`"chat"` / `"build"`).
- /// When set, stamped as `_meta key.kind` so the shell
-        /// honors multi-source history under `--chat` instead of forcing chat-only.
-        kind_filter: Option<Vec<String>>,
-    },
-    /// Coalesce picker search keystrokes: fires
-    /// [`TaskResult::SessionSearchDebounceExpired`] after a short sleep; the
-    /// expiry acts only if `seq` is still current (Build: FTS5 deep search
-    /// against the deep-search seq; chat: server refetch against the list seq).
-    DebounceSessionSearch { query: String, seq: u64 },
-    /// Load card detail for a specific session (lazy, reads chat history from disk).
-    LoadCardDetail {
-        source: String,
-        session_id: String,
-        cwd: String,
-        generation: u64,
-    },
-    /// Restore a remote session from GCS then load it. Only Build rows reach
-    /// this effect: conversation rows have no GCS archive.
-    RestoreAndLoadSession {
-        agent_id: AgentId,
-        session_id: String,
-        session_cwd: String,
     },
     /// Send a prompt to the agent.
     SendPrompt {
@@ -1047,8 +946,6 @@ pub enum Effect {
         /// `Some` → `session/set_config_option`; `None` → legacy `session/set_model`.
         config_option_id: Option<String>,
     },
-    /// Persist memory modal fullscreen preference to `[hints]` in config.toml.
-    PersistMemoryFullscreen { fullscreen: bool },
     /// Persist a per-command worktree mode preference to `[hints]` in
     /// config.toml. `config_key` is the TOML key under `[hints]`
     /// (`"new_session_worktree_mode"` or `"fork_worktree_mode"`).
@@ -1155,34 +1052,6 @@ pub enum Effect {
         cwd: String,
         after: AfterSessionDelete,
     },
-    /// Deep-search sessions by content (FTS via ACP).
-    DeepSearchSessions { query: String, seq: u64 },
- /// Call `legacy ext RPC` to create a peer session that resumes
-    /// from `parent_session_id` in the same cwd (no worktree). Mirror of
-    /// the worktree branch of [`Effect::CreateWorktreeSession`]; the
-    /// worktree-fork path reuses `CreateWorktreeSession { load_session_id }`
-    /// directly so we get worktree creation + code restore for free.
-    ForkSession {
-        agent_id: AgentId,
-    },
-    /// Read session display fields from local `summary.json` after load/resume:
-    /// title (and `/rename` manual-ness) plus last-turn summary.
-    HydrateSessionMetaFromDisk {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        cwd: std::path::PathBuf,
-        /// [`crate::app::agent_view::AgentView::last_turn_summary_gen`] at enqueue;
-        /// the disk result applies only when this still matches on completion.
-        last_turn_summary_gen: u64,
-    },
-    FetchRewindPoints {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-    },
-    RewindExecute {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-    },
  /// Fetch billing/credit usage from the agent's `legacy ext RPC` extension.
     /// When `silent` is true the result updates `credit_balance` without
     /// pushing a system message into scrollback (used for automatic refreshes
@@ -1190,9 +1059,6 @@ pub enum Effect {
     FetchBilling {
         agent_id: AgentId,
         silent: bool,
-        /// Usage-modal fetch generation (`0` = background refresh; those
-        /// never touch the modal's loading/error flags).
-        nonce: u64,
     },
     /// Fetch billing data at the app level (no agent required).
     /// Used on startup to populate the welcome-screen credit warning.
@@ -1314,90 +1180,17 @@ pub enum TaskResult {
         session_id: acp::SessionId,
         error: String,
     },
-    /// Local `summary.json` display fields for [`Effect::HydrateSessionMetaFromDisk`].
-    SessionMetaFromDisk {
-        agent_id: AgentId,
-        /// The display title paired with whether it came from a manual
-        /// `/rename` (`summary.title_is_manual`, restores the prompt-border
-        /// title) — manual-ness cannot exist without a title.
-        title: Option<(String, bool)>,
-        /// Persisted per-turn summary, so a resumed session's row
-        /// shows it without waiting for the next turn.
-        last_turn_summary: Option<String>,
-        /// Generation captured when the hydrate effect was enqueued.
-        last_turn_summary_gen: u64,
-    },
     /// Session list fetched for the welcome screen picker.
     SessionListLoaded {
         sessions: Vec<crate::app::app_view::SessionPickerEntry>,
- /// Degraded conversations lane (`_meta key`), surfaced
-        /// as an actionable picker notice instead of a silent empty list.
-        partial: Option<crate::app::effects::ConversationsPartial>,
- /// Directory scope `sessions` were drawn from (`legacy ext RPC`).
-        scope: pi_shell::session::unified_list::ListScope,
         /// Echo of [`Effect::FetchSessionList::seq`]; stale results are dropped.
         seq: u64,
-        /// Echo of [`Effect::FetchSessionList::query`]. `Some` marks the
-        /// sessions as server-side search results: stamped so the local fuzzy
-        /// re-filter doesn't hide content-only hits, with zero hits a normal
-        /// outcome rather than an empty-directory error.
-        query: Option<String>,
-    },
-    /// A background foreign-session scan completed.
-    ForeignSessionsScanned {
-        entries: Vec<crate::app::app_view::SessionPickerEntry>,
-        seq: u64,
-    },
-    /// Launch cwd canonicalization completed before foreign store access.
-    ForeignResumeCwdCanonicalized {
-        requested_cwd: std::path::PathBuf,
-        canonical_cwd: Option<std::path::PathBuf>,
-        launch_token: u64,
-    },
-    /// Launch-time foreign resume detection completed.
-    ForeignResumeHintDetected {
-        canonical_cwd: std::path::PathBuf,
-        launch_token: u64,
-        hint: Option<pi_foreign_sessions::RecentForeignSession>,
     },
     /// Session list fetch failed.
     SessionListFailed {
         error: String,
         /// Echo of [`Effect::FetchSessionList::seq`]; stale failures are dropped.
         seq: u64,
-        /// Echo of [`Effect::FetchSessionList::query`]. `Some` (a failed
-        /// search) clears the search in-flight indicator; `None` must leave
-        /// it alone — in Build mode the flag belongs to the FTS5 deep search.
-        query: Option<String>,
-    },
-    /// Picker search debounce elapsed ([`Effect::DebounceSessionSearch`]).
-    SessionSearchDebounceExpired {
-        query: String,
-        seq: u64,
-    },
-    /// Card detail loaded for a session in the picker.
-    CardDetailLoaded {
-        source: String,
-        session_id: String,
-        generation: u64,
-        detail: crate::app::app_view::CardDetail,
-    },
-    /// Remote session restored successfully — now load it. Always a Build
-    /// disk row (see [`Effect::RestoreAndLoadSession`]).
-    SessionRestored {
-        agent_id: AgentId,
-        /// The local session ID (may differ from remote ID).
-        local_session_id: String,
-    },
-    /// Remote session restore failed.
-    SessionRestoreFailed {
-        agent_id: AgentId,
-        error: String,
-    },
-    /// Incremental progress during remote session restore.
-    SessionRestoreProgress {
-        agent_id: AgentId,
-        message: String,
     },
     /// Prompt response received (turn ended).
     PromptResponse {
@@ -1505,24 +1298,6 @@ pub enum TaskResult {
     AuthCopyFeedbackTimeout {
         generation: u64,
     },
-    DeepSearchResults {
-        results: Vec<pi_shell::extensions::session_search::SearchSessionHit>,
-        seq: u64,
-    },
- /// `legacy ext RPC` failed. The placeholder agent stays in
-    /// `app.agents` with no `session_id` so the user can switch away.
-    ForkSessionFailed {
-        agent_id: AgentId,
-        error: String,
-    },
-    RewindPointsLoaded {
-        agent_id: AgentId,
-        points: Vec<crate::views::rewind::RewindPointInfo>,
-    },
-    RewindExecuteFailed {
-        agent_id: AgentId,
-        error: String,
-    },
     /// Billing data fetched from the agent.
     BillingFetched {
         agent_id: AgentId,
@@ -1533,8 +1308,6 @@ pub enum TaskResult {
         subscription_tier: Option<String>,
         /// Auto top-up rule fetch result; `Unchanged` keeps any cached rule.
         autotopup: crate::views::credit_bar::AutoTopupFetch,
-        /// Usage-modal fetch generation (`0` = background refresh).
-        nonce: u64,
     },
     /// App-level billing data (welcome screen).
     AppBillingFetched {

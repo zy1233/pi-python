@@ -1,9 +1,7 @@
-//! Tests for session lifecycle, loading, pickers, modals, forking, and trust.
+//! Tests for session lifecycle, loading, pickers, modals, and trust.
 
 use super::*;
 
-mod foreign;
-mod fork;
 mod lifecycle;
 mod load;
 mod modal;
@@ -22,7 +20,7 @@ fn test_app_git() -> AppView {
 /// Build a single-agent app for the `/new` dispatcher tests.
 ///
 /// Sets `current_branch` to `Some("main")` so the agent appears to be
-/// inside a git repo (mirrors `fork_test_app`).
+/// inside a git repo.
 fn new_session_test_app() -> AppView {
     let mut app = test_app_with_agent();
     app.agents.get_mut(&AgentId(0)).unwrap().current_branch = Some("main".into());

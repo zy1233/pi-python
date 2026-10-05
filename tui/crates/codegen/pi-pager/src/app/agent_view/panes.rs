@@ -41,18 +41,6 @@ impl AgentView {
             self.highlighted_link_idx = None;
             return InputOutcome::Action(Action::OpenLink(target));
         }
-        if crate::app::inline_edit::INLINE_EDIT_ENABLED
-            && key!(Enter).matches(key)
-            && !self.scrollback.is_selected_group_header()
-            && let Some(idx) = self.scrollback.selected()
-            && self
-                .scrollback
-                .entry(idx)
-                .is_some_and(|e| e.block.is_user_prompt())
-            && self.enter_inline_edit(idx)
-        {
-            return InputOutcome::Changed;
-        }
         if key.code == KeyCode::Esc
             && key.modifiers.is_empty()
             && self.persistent_text_selection.take().is_some()
@@ -310,19 +298,6 @@ impl AgentView {
         }
         if let Some(ref mut viewer) = self.block_viewer {
             viewer.handle_scroll(lines);
-            return;
-        }
-        if self.rewind_state.is_some() {
-            if let Some(ref mut rw) = self.rewind_state {
-                crate::views::rewind::move_cursor(&mut rw.phase, lines.signum());
-                self.sync_rewind_anchor_to_picker();
-            }
-            return;
-        }
-        self.dismiss_jump_picker_if_suppressed();
-        if let Some(ref mut js) = self.jump_state {
-            crate::views::jump::move_cursor(js, lines.signum());
-            self.sync_jump_preview();
             return;
         }
         if let Some(ref mut viewer) = self.line_viewer {

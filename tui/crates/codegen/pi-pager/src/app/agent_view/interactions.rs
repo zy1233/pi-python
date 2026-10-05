@@ -21,6 +21,38 @@ enum QuestionSwitch {
     Prev,
 }
 impl AgentView {
+    /// Refresh the scrollback's "awaiting user input" marks so the renderer
+    /// can swap the running-spinner bullet for a pulsing-circle bullet on
+    /// tool entries that are blocked on a permission prompt or
+    /// `ask_user_question`.
+    ///
+    /// Recomputed every frame because the queue/question state is fully
+    /// owned by `AgentView` and changes asynchronously; doing a fresh
+    /// clear+rebuild keeps the mark and the view of record from drifting
+    /// out of sync (e.g. on Cancelled requests we never observe a
+    /// matching "pop" event).
+    ///
+    /// Cheap: O(entries) for the clear plus O(permission_queue +
+    /// question_view) lookups via the tracker, both tiny in practice.
+    ///
+    /// Called once per frame from `AgentView::draw` in the full TUI; minimal
+    /// mode bypasses that draw path, so its commit pass
+    /// ([`crate::minimal::commit::commit_active`]) calls this itself to keep a
+    /// tool blocked on a permission/question out of the committed frontier.
+    pub(crate) fn sync_pending_user_input_marks(&mut self) {
+        self.scrollback.clear_all_pending_user_input();
+        for perm in &self.permission_queue {
+            let tc_id = perm.request.request.tool_call.tool_call_id.0.as_ref();
+            if let Some(entry_id) = self.session.tracker.pending_tool_entry_id(tc_id) {
+                self.scrollback.set_pending_user_input(entry_id, true);
+            }
+        }
+        if let Some(qv) = self.question_view.as_ref()
+            && let Some(entry_id) = self.session.tracker.pending_tool_entry_id(&qv.tool_call_id)
+        {
+            self.scrollback.set_pending_user_input(entry_id, true);
+        }
+    }
     /// Handle key input for the permission card. Like the question card it has
     /// an option-row mode and text modes (a followup message to the agent, and
     /// a hand-written always-allow pattern); `Esc` is the ladder back down
@@ -1010,14 +1042,6 @@ impl AgentView {
             return true;
         }
         false
-    }
-    /// Test-only access to [`submit_question_answers`] so dispatch tests
-    /// can verify the full submit/cancel pipeline (including
-    /// `prompt.restore` and `cleanup_question_state`) for local
-    /// questions, not just the inner `translate_local_submit` shim.
-    #[cfg(test)]
-    pub(crate) fn submit_question_answers_for_test(&mut self, skipped: bool) -> InputOutcome {
-        self.submit_question_answers(skipped)
     }
     #[cfg(test)]
     pub(crate) fn handle_question_key_for_test(&mut self, key: &KeyEvent) -> InputOutcome {

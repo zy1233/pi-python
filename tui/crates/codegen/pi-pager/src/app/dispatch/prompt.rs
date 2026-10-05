@@ -637,29 +637,6 @@ pub(super) fn defer_to_open_reload_window(
     true
 }
 
-/// The initiation-side counterpart of [`defer_to_open_reload_window`]: a load
-/// INITIATION that takes over the agent (fork/worktree-fork/remote-restore
-/// binding a session) finalizes any open reload window as failed first, so
-/// the new load owns the agent's batch/replay state and its results are not
-/// deferred. Unreachable through today's flows (these arms target freshly
-/// created `session_id: None` agents, which can never host a window) —
-/// defense in depth against future initiation paths on live agents.
-pub(super) fn supersede_open_reload_window(
-    agent: &mut AgentView,
-    agent_id: AgentId,
-    initiation: &str,
-) {
-    if agent.session_reload.is_none() {
-        return;
-    }
-    tracing::warn!(
-        agent = ?agent_id,
-        initiation,
-        "load initiation supersedes an open reload window (finalizing as failed)"
-    );
-    agent.abort_session_reload();
-}
-
 // TaskResult handlers.
 
 pub(super) fn handle_prompt_response(
@@ -1044,7 +1021,6 @@ pub(super) fn handle_prompt_response(
         effects.push(Effect::FetchBilling {
             agent_id,
             silent: true,
-            nonce: Default::default(),
         });
         return effects;
     }

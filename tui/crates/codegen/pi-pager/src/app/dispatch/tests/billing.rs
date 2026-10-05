@@ -43,19 +43,12 @@ fn last_credit_limit_block(
 }
 
 /// Dispatch a `BillingFetched` task result with sensible defaults.
-fn open_usage_modal_nonce(app: &AppView) -> u64 {
-    match app.agents[&AgentId(0)].active_modal.as_ref() {
-        _ => 0,
-    }
-}
-
 fn dispatch_billing(
     app: &mut AppView,
     balance: Option<crate::views::credit_bar::CreditBalance>,
     silent: bool,
     subscription_tier: Option<String>,
 ) {
-    let nonce = open_usage_modal_nonce(app);
     dispatch(
         Action::TaskComplete(TaskResult::BillingFetched {
             agent_id: AgentId(0),
@@ -63,7 +56,6 @@ fn dispatch_billing(
             silent,
             subscription_tier,
             autotopup: crate::views::credit_bar::AutoTopupFetch::Unchanged,
-            nonce,
         }),
         app,
     );

@@ -49,10 +49,6 @@ pub struct UiConfig {
     /// Written by the pager's settings modal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page_flip_on_send: Option<bool>,
-    /// Ask before rewinding conversation history. `None` = on (default).
-    /// Written by the pager's settings modal / rewind "Yes, and don't ask again".
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub confirm_before_rewind: Option<bool>,
     /// Theme to use when the OS is in dark mode. Written by the pager's theme persist module.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_dark_theme: Option<String>,
@@ -265,7 +261,6 @@ impl Default for UiConfig {
             show_timestamps: None,
             show_timeline: None,
             page_flip_on_send: None,
-            confirm_before_rewind: None,
             auto_dark_theme: None,
             auto_light_theme: None,
             scroll_speed: None,
@@ -323,14 +318,6 @@ impl UiConfig {
     pub fn page_flip_on_send_enabled(&self) -> bool {
         self.page_flip_on_send
             .unwrap_or(Self::PAGE_FLIP_ON_SEND_DEFAULT)
-    }
-
-    /// Default for [`Self::confirm_before_rewind`] when unset.
-    pub const CONFIRM_BEFORE_REWIND_DEFAULT: bool = true;
-
-    pub fn confirm_before_rewind_enabled(&self) -> bool {
-        self.confirm_before_rewind
-            .unwrap_or(Self::CONFIRM_BEFORE_REWIND_DEFAULT)
     }
 
     /// True when the highlight should not timer-dismiss (`hold` / `word_select`,
@@ -408,16 +395,6 @@ mod tests {
             ..Default::default()
         };
         assert!(!off.page_flip_on_send_enabled());
-    }
-
-    #[test]
-    fn confirm_before_rewind_defaults_on() {
-        assert!(UiConfig::default().confirm_before_rewind_enabled());
-        let off = UiConfig {
-            confirm_before_rewind: Some(false),
-            ..Default::default()
-        };
-        assert!(!off.confirm_before_rewind_enabled());
     }
 
     #[test]

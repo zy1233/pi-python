@@ -9,12 +9,11 @@ mod helpers;
 use super::actions;
 #[allow(unused_imports)]
 use super::{agent, dispatch};
-pub use helpers::ConversationsPartial;
 pub(super) use helpers::{
     parse_session_load_running_prompt_id, parse_session_scheduler_background_loops,
 };
 pub(crate) use helpers::{
-    EffectMeta, RestoreProgressMsg, SessionFlags, is_disk_full_error,
+    EffectMeta, SessionFlags, is_disk_full_error,
     persist_permission_mode_and_notify, persist_setting, sanitize_user_error,
 };
 #[cfg(feature = "local-workspace")]
@@ -51,7 +50,6 @@ pub(crate) fn execute(
     acp_tx: &AcpAgentTx,
     cwd: &Path,
     session_flags: &SessionFlags,
-    progress_tx: &tokio::sync::mpsc::UnboundedSender<RestoreProgressMsg>,
 ) -> (bool, EffectMeta) {
     let mut meta = EffectMeta::default();
     match effect {
@@ -346,116 +344,7 @@ pub(crate) fn execute(
                     }
                 });
         }
-        Effect::ScanForeignSessions { cwd, compat, grok_home, coordinator, seq } => {
-            if coordinator.latest_seq() != seq {
-                return (false, meta);
-            }
-            let semaphore = coordinator.semaphore();
-            let latest_seq = coordinator.latest_seq_handle();
-            let abort_handle = tasks
-                .spawn(async move {
-                    let Ok(permit) = semaphore.acquire_owned().await else {
-                        return TaskResult::ForeignSessionsScanned {
-                            entries: Vec::new(),
-                            seq,
-                        };
-                    };
-                    if latest_seq.load(std::sync::atomic::Ordering::Acquire) != seq {
-                        return TaskResult::ForeignSessionsScanned {
-                            entries: Vec::new(),
-                            seq,
-                        };
-                    }
-                    let enabled = crate::app::foreign_sessions::gated_sources_async(
-                            compat,
-                            &grok_home,
-                        )
-                        .await;
-                    if latest_seq.load(std::sync::atomic::Ordering::Acquire) != seq
-                        || !(enabled.claude || enabled.codex || enabled.cursor)
-                    {
-                        return TaskResult::ForeignSessionsScanned {
-                            entries: Vec::new(),
-                            seq,
-                        };
-                    }
-                    let summaries = tokio::task::spawn_blocking(move || {
-                            let _permit = permit;
-                            pi_foreign_sessions::scan_foreign_sessions(
-                                &cwd,
-                                enabled,
-                            )
-                        })
-                        .await
-                        .unwrap_or_else(|error| {
-                            tracing::warn!(%error, "foreign session scan task failed");
-                            Vec::new()
-                        });
-                    let entries = summaries
-                        .into_iter()
-                        .map(crate::app::foreign_sessions::map_summary)
-                        .collect();
-                    TaskResult::ForeignSessionsScanned {
-                        entries,
-                        seq,
-                    }
-                });
-            coordinator.install_abort_handle(seq, abort_handle);
-        }
-        Effect::CanonicalizeForeignResumeCwd { requested_cwd, launch_token } => {
-            tasks
-                .spawn(async move {
-                    let cwd_for_task = requested_cwd.clone();
-                    let canonical_cwd = tokio::task::spawn_blocking(move || {
-                            dunce::canonicalize(cwd_for_task).ok()
-                        })
-                        .await
-                        .unwrap_or_else(|error| {
-                            tracing::warn!(%error, "foreign resume cwd canonicalization task failed");
-                            None
-                        });
-                    TaskResult::ForeignResumeCwdCanonicalized {
-                        requested_cwd,
-                        canonical_cwd,
-                        launch_token,
-                    }
-                });
-        }
-        Effect::DetectForeignResumeHint {
-            canonical_cwd,
-            compat,
-            grok_home,
-            launch_token,
-        } => {
-            tasks
-                .spawn(async move {
-                    let cwd_for_scan = canonical_cwd.clone();
-                    let recent = crate::app::foreign_sessions::with_gated_sources_async(
-                            compat,
-                            &grok_home,
-                            |enabled| async move {
-                                tokio::task::spawn_blocking(move || pi_foreign_sessions::most_recent_foreign_session(
-                                        &cwd_for_scan,
-                                        enabled,
-                                        crate::app::foreign_sessions::RESUME_HINT_WINDOW,
-                                    ))
-                                    .await
-                                    .unwrap_or_else(|error| {
-                                        tracing::warn!(%error, "foreign resume detection task failed");
-                                        None
-                                    })
-                            },
-                        )
-                        .await
-                        .flatten();
-                    TaskResult::ForeignResumeHintDetected {
-                        canonical_cwd,
-                        launch_token,
-                        hint: recent,
-                    }
-                });
-        }
-        Effect::FetchSessionList { query, seq, kind_filter: _ } => {
+        Effect::FetchSessionList { seq } => {
             let tx = acp_tx.clone();
             let cwd = cwd.to_path_buf();
             tasks
@@ -463,238 +352,14 @@ pub(crate) fn execute(
                     let request = acp::ListSessionsRequest::default().cwd(cwd.clone());
                     let result = acp_send(request, &tx).await;
                     match result {
-                        Ok(resp) => {
-                            let mut sessions = session_picker_entries_from_acp(&resp);
-                            if let Some(q) = query.as_ref().filter(|s| !s.is_empty()) {
-                                let needle = q.to_lowercase();
-                                sessions.retain(|e| {
-                                    e.summary.to_lowercase().contains(&needle)
-                                        || e.id.to_lowercase().contains(&needle)
-                                        || e.cwd.to_lowercase().contains(&needle)
-                                });
-                            }
-                            TaskResult::SessionListLoaded {
-                                sessions,
-                                partial: None,
-                                scope: pi_shell::session::unified_list::ListScope::Cwd,
-                                seq,
-                                query,
-                            }
-                        }
-                        Err(e) => {
-                            TaskResult::SessionListFailed {
-                                error: sanitize_user_error(&format!("{e}")),
-                                seq,
-                                query,
-                            }
-                        }
-                    }
-                });
-        }
-        Effect::DebounceSessionSearch { query, seq } => {
-            tasks
-                .spawn(async move {
-                    tokio::time::sleep(
-                            std::time::Duration::from_millis(SESSION_SEARCH_DEBOUNCE_MS),
-                        )
-                        .await;
-                    TaskResult::SessionSearchDebounceExpired {
-                        query,
-                        seq,
-                    }
-                });
-        }
-        Effect::RestoreAndLoadSession { agent_id, session_id, session_cwd: _ } => {
-            use pi_shell::agent::session_registry_client::SessionRegistryClient;
-            use pi_shell::session::restore::restore_session_with_storage;
-            let setup_started = std::time::Instant::now();
-            let raw_config = pi_shell::config::load_effective_config();
-            let setup = raw_config
-                .ok()
-                .and_then(|raw| {
-                    let cfg = pi_shell::agent::config::Config::new_from_toml_cfg(
-                            &raw,
-                        )
-                        .ok()?;
-                    let proxy_base = cfg.endpoints.proxy_url();
-                    let deployment_key = cfg.endpoints.deployment_key.clone();
-                    let alpha_test_key = cfg.endpoints.alpha_test_key.clone();
-                    let auth_manager = crate::app::session_startup::pre_acp_auth_manager(
-                        &cfg,
-                    );
-                    let registry = SessionRegistryClient::new(&proxy_base, String::new())
-                        .with_deployment_key(deployment_key.clone())
-                        .with_alpha_test_key(alpha_test_key.clone())
-                        .with_session_id(session_id.clone())
-                        .with_auth(auth_manager.clone());
-                    let storage = pi_shell::auth::credential_provider::build_storage_client_for_proxy(
-                        &proxy_base,
-                        deployment_key,
-                        alpha_test_key,
-                        Some(auth_manager.clone()),
-                        None,
-                        Some(session_id.clone()),
-                        "grok-pager",
-                    );
-                    Some((auth_manager, registry, storage))
-                });
-            tracing::info!(
-                elapsed_ms = setup_started.elapsed().as_millis() as u64,
-                ok = setup.is_some(),
-                "restore: auth/client setup"
-            );
-            let target_cwd = cwd.to_path_buf();
-            let ptx = progress_tx.clone();
-            tasks
-                .spawn(async move {
-                    let Some((auth_manager, registry_client, storage_client)) = setup
-                    else {
-                        return TaskResult::SessionRestoreFailed {
-                            agent_id,
-                            error: "Failed to load configuration.".into(),
-                        };
-                    };
-                    let _ = auth_manager.auth().await;
-                    let progress: Option<
-                        pi_shell::session::restore::ProgressCallback,
-                    > = {
-                        use pi_shell::session::restore::{PhaseStep, RestorePhase};
-                        Some(
-                            Box::new(move |event| {
-                                let msg = match (event.phase, event.step) {
-                                    (RestorePhase::Download, PhaseStep::Start) => {
-                                        Some("Downloading session archives...".to_string())
-                                    }
-                                    (RestorePhase::Download, PhaseStep::End) => {
-                                        Some(
-                                            format!(
-                                "Downloads finished ({}).",
-                                format_restore_elapsed(event.elapsed),
-                            ),
-                                        )
-                                    }
-                                    (RestorePhase::Codebase, PhaseStep::Start) => {
-                                        Some("Restoring code...".to_string())
-                                    }
-                                    (RestorePhase::Codebase, PhaseStep::End) => {
-                                        event
-                                            .detail
-                                            .as_ref()
-                                            .map(|detail| format!("Code restored ({detail})."))
-                                    }
-                                    (RestorePhase::Memory, PhaseStep::Start) => {
-                                        Some("Restoring memory...".to_string())
-                                    }
-                                    (RestorePhase::SessionState, PhaseStep::Start) => {
-                                        Some("Restoring session state...".to_string())
-                                    }
-                                    (RestorePhase::SessionState, PhaseStep::End) => {
-                                        event
-                                            .detail
-                                            .as_ref()
-                                            .map(|detail| format!("Session state restored ({detail})."))
-                                    }
-                                    (RestorePhase::Finalize, _) => {
-                                        let elapsed_secs = event.elapsed.as_secs();
-                                        let status = if event.incomplete {
-                                            "Restore incomplete"
-                                        } else {
-                                            "Restore complete"
-                                        };
-                                        if elapsed_secs >= 60 {
-                                            Some(
-                                                format!(
-                                        "{status} ({}m{:02}s).",
-                                        elapsed_secs / 60,
-                                        elapsed_secs % 60
-                                    ),
-                                            )
-                                        } else {
-                                            Some(format!("{status} ({elapsed_secs}s)."))
-                                        }
-                                    }
-                                    _ => None,
-                                };
-                                if let Some(text) = msg {
-                                    let _ = ptx
-                                        .send(RestoreProgressMsg {
-                                            agent_id,
-                                            message: text,
-                                        });
-                                }
-                            }),
-                        )
-                    };
-                    let cwd_str = target_cwd.to_string_lossy().to_string();
-                    match restore_session_with_storage(
-                            &registry_client,
-                            &storage_client,
-                            &session_id,
-                            &cwd_str,
-                            pi_shell::session::restore::RestoreSessionOpts {
-                                turn_override: None,
-                                progress,
-                                restore_code: true,
-                            },
-                        )
-                        .await
-                    {
-                        Ok(result) => {
-                            let effective_id = if result.local_session_id.is_empty() {
-                                session_id
-                            } else {
-                                result.local_session_id
-                            };
-                            TaskResult::SessionRestored {
-                                agent_id,
-                                local_session_id: effective_id,
-                            }
-                        }
-                        Err(e) => {
-                            TaskResult::SessionRestoreFailed {
-                                agent_id,
-                                error: format!("{e:#}"),
-                            }
-                        }
-                    }
-                });
-        }
-        Effect::LoadCardDetail { source, session_id, cwd, generation } => {
-            tasks
-                .spawn(async move {
-                    use crate::app::app_view::CardDetail;
-                    let result_session_id = session_id.clone();
-                    let detail = tokio::task::spawn_blocking(move || {
-                            let info = pi_shell::session::info::Info {
-                                id: acp::SessionId::new(session_id),
-                                cwd,
-                            };
-                            let history_path = pi_shell::session::persistence::session_dir(
-                                    &info,
-                                )
-                                .join("chat_history.jsonl");
-                            let first_prompt_preview = extract_first_user_prompt(&info)
-                                .unwrap_or_default();
-                            let (turn_count, tool_call_count) = count_chat_history_stats(
-                                &history_path,
-                            );
-                            CardDetail {
-                                turn_count,
-                                tool_call_count,
-                                first_prompt_preview,
-                            }
-                        })
-                        .await
-                        .unwrap_or(CardDetail {
-                            turn_count: 0,
-                            tool_call_count: 0,
-                            first_prompt_preview: String::new(),
-                        });
-                    TaskResult::CardDetailLoaded {
-                        source,
-                        session_id: result_session_id,
-                        generation,
-                        detail,
+                        Ok(resp) => TaskResult::SessionListLoaded {
+                            sessions: session_picker_entries_from_acp(&resp),
+                            seq,
+                        },
+                        Err(e) => TaskResult::SessionListFailed {
+                            error: sanitize_user_error(&format!("{e}")),
+                            seq,
+                        },
                     }
                 });
         }
@@ -1091,14 +756,6 @@ pub(crate) fn execute(
                     TaskResult::PromptImagePreviewPrepared
                 });
         }
-        Effect::PersistMemoryFullscreen { fullscreen } => {
-            persist_hint(
-                tasks,
-                "memory_modal_fullscreen",
-                fullscreen,
-                "memory fullscreen",
-            );
-        }
         Effect::PersistWorktreeMode { mode, config_key } => {
             debug_assert!(
                 config_key == "fork_worktree_mode" || config_key == "new_session_worktree_mode",
@@ -1261,84 +918,7 @@ pub(crate) fn execute(
                 }
             });
         }
-        Effect::FetchRewindPoints { agent_id, .. } => {
-            tasks.spawn(async move {
-                TaskResult::RewindPointsLoaded {
-                    agent_id,
-                    points: vec![],
-                }
-            });
-        }
-        Effect::RewindExecute { agent_id, .. } => {
-            tasks.spawn(async move {
-                TaskResult::RewindExecuteFailed {
-                    agent_id,
-                    error: "Rewind is not supported in standard ACP".to_string(),
-                }
-            });
-        }
-        Effect::DeepSearchSessions { seq, .. } => {
-            tasks.spawn(async move {
-                TaskResult::DeepSearchResults {
-                    results: Vec::new(),
-                    seq,
-                }
-            });
-        }
-        Effect::ForkSession {
-            agent_id,
-            ..
-        } => {
-            tasks.spawn(async move {
-                TaskResult::ForkSessionFailed {
-                    agent_id,
-                    error: "Session fork is not supported in standard ACP mode".to_string(),
-                }
-            });
-        }
-        Effect::HydrateSessionMetaFromDisk {
-            agent_id,
-            session_id,
-            cwd,
-            last_turn_summary_gen,
-        } => {
-            tasks
-                .spawn(async move {
-                    let info = pi_shell::session::info::Info {
-                        id: session_id,
-                        cwd: cwd.to_string_lossy().to_string(),
-                    };
-                    let path = pi_shell::session::persistence::session_dir(&info)
-                        .join("summary.json");
-                    type DiskTitle = (Option<(String, bool)>, Option<String>);
-                    let (title, last_turn_summary) = tokio::task::spawn_blocking(move || -> Option<
-                            DiskTitle,
-                        > {
-                            let raw = std::fs::read_to_string(path).ok()?;
-                            let summary: pi_shell::session::persistence::Summary = serde_json::from_str(
-                                    &raw,
-                                )
-                                .ok()?;
-                            let manual = summary.manual_title_opt();
-                            let is_manual = manual.is_some();
-                            let title = manual
-                                .or_else(|| summary.display_title_opt())
-                                .map(|t| (t, is_manual));
-                            Some((title, summary.last_turn_summary))
-                        })
-                        .await
-                        .ok()
-                        .flatten()
-                        .unwrap_or((None, None));
-                    TaskResult::SessionMetaFromDisk {
-                        agent_id,
-                        title,
-                        last_turn_summary,
-                        last_turn_summary_gen,
-                    }
-                });
-        }
-        Effect::FetchBilling { agent_id, silent, nonce } => {
+        Effect::FetchBilling { agent_id, silent } => {
             tasks.spawn(async move {
                 TaskResult::BillingFetched {
                     agent_id,
@@ -1346,7 +926,6 @@ pub(crate) fn execute(
                     silent,
                     subscription_tier: None,
                     autotopup: crate::views::credit_bar::AutoTopupFetch::Cleared,
-                    nonce,
                 }
             });
         }

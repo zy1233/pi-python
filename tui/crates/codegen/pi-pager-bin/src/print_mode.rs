@@ -57,7 +57,6 @@ pub(crate) fn ignored_flags(args: &PagerArgs) -> Vec<&'static str> {
         ("--load", args.load_session.is_some()),
         ("--continue", args.continue_last_session),
         ("--session-id", args.session_id.is_some()),
-        ("--fork-session", args.fork_session),
         ("--worktree", args.worktree.is_some()),
         ("--no-plan", args.no_plan),
         ("--no-subagents", args.no_subagents),

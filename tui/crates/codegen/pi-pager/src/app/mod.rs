@@ -39,8 +39,6 @@ mod event_loop;
 mod event_loop_stall;
 mod exit_timeout;
 pub(crate) mod external_editor;
-mod foreign_sessions;
-mod inline_edit;
 mod modals;
 pub(crate) mod mode_switch;
 mod mouse;
@@ -58,10 +56,6 @@ use crossterm::event;
 use crossterm::execute;
 use crossterm::terminal::{
     self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, SetTitle,
-};
-pub use foreign_sessions::ForeignScanCoordinator;
-pub(crate) use foreign_sessions::{
-    badge_for_picker_source, foreign_tool_display_label, is_foreign_picker_source,
 };
 use ratatui::backend::CrosstermBackend;
 pub use startup_failure::StartupFailure;
@@ -541,9 +535,7 @@ pub async fn run(
             }
         }
     }
-    if let Some(err) =
-        session_startup::chat_mode_flag_conflict(args.chat(), args.fork_session, args.restore_code)
-    {
+    if let Some(err) = session_startup::chat_mode_flag_conflict(args.chat(), args.restore_code) {
         anyhow::bail!("{err}");
     }
     #[cfg(feature = "local-workspace")]
@@ -578,20 +570,13 @@ pub async fn run(
         }
     }
     let mut session_title = match &materialized {
-        session_startup::MaterializedStartup::Resume { title, .. }
-        | session_startup::MaterializedStartup::Fork {
-            parent_title: title,
-            ..
-        } => title.clone(),
+        session_startup::MaterializedStartup::Resume { title, .. } => title.clone(),
         _ => None,
     };
     let title_lookup_id = match &materialized {
         session_startup::MaterializedStartup::Resume { session_id, .. } => {
             Some(session_id.as_str())
         }
-        session_startup::MaterializedStartup::Fork {
-            parent_session_id, ..
-        } => Some(parent_session_id.as_str()),
         _ => None,
     };
     if session_title.is_none()
@@ -606,11 +591,7 @@ pub async fn run(
         }
     }
     let session_cwd = match &materialized {
-        session_startup::MaterializedStartup::Resume { original_cwd, .. }
-        | session_startup::MaterializedStartup::Fork {
-            parent_cwd: original_cwd,
-            ..
-        } => original_cwd.clone(),
+        session_startup::MaterializedStartup::Resume { original_cwd, .. } => original_cwd.clone(),
         _ => None,
     };
     let env_hunk_tracker_mode = std::env::var("GROK_HUNK_TRACKER").ok();
@@ -802,7 +783,6 @@ pub async fn run(
         load_session: None,
         continue_last_session: false,
         session_id: None,
-        fork_session: false,
         ..args
     };
     let term_state = event_loop::TerminalState {
@@ -1828,20 +1808,21 @@ mod tests {
         assert_eq!(args.session_id.as_deref(), Some("my-id"));
     }
     #[test]
-    fn cli_session_id_with_resume_requires_fork() {
+    fn cli_session_id_with_resume_is_rejected() {
         let args = try_parse_pager(&["grok-pager", "-s", "a", "--resume", "b"]).unwrap();
         assert!(args.session_startup_intent().is_err());
     }
     #[test]
-    fn cli_session_id_with_continue_requires_fork() {
+    fn cli_session_id_with_continue_is_rejected() {
         let args = try_parse_pager(&["grok-pager", "-s", "a", "--continue"]).unwrap();
         assert!(args.session_startup_intent().is_err());
     }
     #[test]
-    fn cli_session_id_with_resume_and_fork_ok() {
-        let args =
-            try_parse_pager(&["grok-pager", "-s", "a", "--resume", "b", "--fork-session"]).unwrap();
-        assert!(args.session_startup_intent().is_ok());
+    fn cli_fork_session_flag_is_removed() {
+        assert!(
+            try_parse_pager(&["grok-pager", "-s", "a", "--resume", "b", "--fork-session"])
+                .is_err()
+        );
     }
     #[test]
     fn cli_session_id_default_none() {

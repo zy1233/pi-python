@@ -49,12 +49,6 @@ where
         }
     }
 }
-/// Typed progress message for session restore.
-/// Keeps the progress channel from accepting arbitrary `TaskResult` variants.
-pub(crate) struct RestoreProgressMsg {
-    pub agent_id: AgentId,
-    pub message: String,
-}
 pub(super) fn log_prompt_result(
     session_id: &acp::SessionId,
     result: &Result<acp::PromptResponse, acp::Error>,
@@ -74,9 +68,6 @@ pub(super) fn log_prompt_result(
 /// Upper bound on the off-thread clipboard-attachment probe. A wedged osascript
 /// read must not pin `paste_probe_in_flight` and silently stash every later send.
 pub(super) const CLIPBOARD_PROBE_TIMEOUT_SECS: u64 = 10;
-/// Picker search debounce ([`Effect::DebounceSessionSearch`]):
-/// long enough to coalesce a typing burst, short enough to feel live.
-pub(super) const SESSION_SEARCH_DEBOUNCE_MS: u64 = 250;
 /// Convert an ACP error to a user-friendly string for display.
 /// Rate-limit errors: free-usage paywall, else server detail (with API-key
 /// rewrite when the body pushes personal SuperGrok), else auth-aware fallback
@@ -107,15 +98,6 @@ pub(super) fn format_acp_error(err: &acp::Error, is_api_key_auth: bool) -> Strin
             &raw,
         )
         .message()
-}
-/// Format a Duration for user-visible restore progress messages.
-pub(super) fn format_restore_elapsed(d: std::time::Duration) -> String {
-    let secs = d.as_secs();
-    if secs >= 60 {
-        format!("{}m{:02}s", secs / 60, secs % 60)
-    } else {
-        format!("{}.{:01}s", secs, d.subsec_millis() / 100)
-    }
 }
 /// CANONICAL wire parser for `LoadSessionResponse._meta.codeRestore`. Any
 /// other code consuming this shape MUST go through this function — do not
@@ -649,43 +631,6 @@ pub(super) fn extract_first_user_prompt(
     }
     None
 }
-/// Typed deserialization so schema drift is caught at compile time.
-/// Synthetic user messages (auto-continue, doom-loop) are excluded.
-pub(super) fn count_chat_history_stats(history_path: &Path) -> (usize, usize) {
-    use std::io::BufRead;
-    use pi_shell::sampling::{AssistantItem, ConversationItem, UserItem};
-    let mut turn_count = 0usize;
-    let mut tool_call_count = 0usize;
-    let Ok(file) = std::fs::File::open(history_path) else {
-        return (0, 0);
-    };
-    for line in std::io::BufReader::new(file).lines().map_while(Result::ok) {
-        match serde_json::from_str::<ConversationItem>(&line) {
-            Ok(ConversationItem::User(UserItem { synthetic_reason: None, .. })) => {
-                turn_count += 1;
-            }
-            Ok(ConversationItem::Assistant(AssistantItem { ref tool_calls, .. })) => {
-                tool_call_count += tool_calls.len();
-            }
-            _ => {}
-        }
-    }
-    (turn_count, tool_call_count)
-}
-/// Degraded conversations lane on `legacy ext RPC`, parsed from the
-/// response's `_meta key` envelope.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConversationsPartial {
-    Error,
-}
-impl ConversationsPartial {
-    /// Actionable picker notice for a degraded conversations lane.
-    pub(crate) fn picker_notice(self) -> &'static str {
-        match self {
-            Self::Error => "Couldn't load conversations: retry",
-        }
-    }
-}
 /// Parse the `legacy ext RPC` response payload (the unwrapped
 /// `{ "sessions": [...] }` object) into [`SessionPickerEntry`] rows.
 ///
@@ -985,14 +930,6 @@ pub(crate) async fn persist_setting(
                 return Err(kind_mismatch("page_flip_on_send", "Bool", &value));
             };
             pi_shell::util::config::set_page_flip_on_send(b)
-                .await
-                .map_err(|e| e.to_string())
-        }
-        "confirm_before_rewind" => {
-            let SettingValue::Bool(b) = value else {
-                return Err(kind_mismatch("confirm_before_rewind", "Bool", &value));
-            };
-            pi_shell::util::config::set_confirm_before_rewind(b)
                 .await
                 .map_err(|e| e.to_string())
         }

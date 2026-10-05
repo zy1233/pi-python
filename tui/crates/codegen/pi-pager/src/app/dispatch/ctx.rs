@@ -136,9 +136,6 @@ pub(super) fn restore_auth_return_view(app: &mut AppView, return_view: ActiveVie
 /// Why a switch from one [`ActiveView::Agent`] to another is happening.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SwitchCause {
-    /// Triggered by `/fork` (post-resolution) creating + switching to a
-    /// child.
-    Fork,
     /// Triggered by `/new` (fresh agent).
     New,
     /// Triggered by `/resume` (resuming a prior session) and the

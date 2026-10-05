@@ -796,7 +796,6 @@ fn click_from_search_opens_detail_and_clears_query() {
         item_rects: vec![Rect::new(0, 2, 20, 1)],
         entry_indices: vec![hint_pos],
         tab_rects: vec![],
-        filter_rect: None,
     });
     let click = MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),

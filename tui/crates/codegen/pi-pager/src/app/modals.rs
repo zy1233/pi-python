@@ -5,7 +5,7 @@
 //! Extracted from `agent_view.rs` as a sibling `impl AgentView` block (same
 //! pattern as `queue_edit.rs` and `mouse.rs`).
 
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
@@ -297,36 +297,6 @@ impl AgentView {
             }
         }
 
-        // MemoryBrowser: route through ModalWindow chrome, then delegate.
-        if let ActiveModal::MemoryBrowser { state } = modal {
-            // When the filter input is focused, Esc exits filter mode
-            // instead of closing the modal. Handle before modal chrome.
-            if matches!(
-                state.mode,
-                crate::views::memory_modal::MemoryModalMode::FilterFocused
-            ) {
-                return crate::views::memory_modal::handle_memory_key(state, key);
-            }
-            let chrome_cfg = mw::ModalWindowConfig {
-                title: "",
-                tabs: None,
-                shortcuts: &[],
-                sizing: mw::ModalSizing::default(),
-                fold_info: None,
-            };
-            let outcome = mw::handle_modal_key(&mut state.window, key, &chrome_cfg);
-            match outcome {
-                ModalWindowOutcome::CloseRequested => {
-                    self.active_modal = None;
-                    return InputOutcome::Changed;
-                }
-                ModalWindowOutcome::Unhandled => {
-                    return crate::views::memory_modal::handle_memory_key(state, key);
-                }
-                _ => return InputOutcome::Changed,
-            }
-        }
-
         // Settings: route through ModalWindow chrome, then delegate.
         if let ActiveModal::Settings { state } = modal {
             // Sub-mode short-circuit: FilterFocused, PickingEnum, PickingGroup,
@@ -410,7 +380,6 @@ impl AgentView {
             | ActiveModal::DocPicker { .. }
             | ActiveModal::DocViewer { .. }
             | ActiveModal::ShortcutsHelp { .. }
-            | ActiveModal::MemoryBrowser { .. }
             | ActiveModal::Settings { .. }
             | ActiveModal::ResetSettingsConfirm { .. } => unreachable!(),
         }
@@ -445,9 +414,6 @@ impl AgentView {
                 }
                 _ => InputOutcome::Unchanged,
             };
-        }
-        if let Some(ActiveModal::MemoryBrowser { state }) = self.active_modal.as_mut() {
-            return crate::views::memory_modal::handle_memory_paste(state, text);
         }
         let settings_outcome = match self.active_modal.as_mut() {
             Some(ActiveModal::Settings { state }) => Some(
@@ -498,10 +464,6 @@ impl AgentView {
             shortcuts_area: None,
             tabs: None,
             active_tab: 0,
-            filter_label: None,
-            filter_key_hint: None,
-            filter_active: false,
-            header_note: None,
             action_keys: &[],
             disable_search: false,
             compact_bottom_bar: false,
@@ -658,10 +620,6 @@ impl AgentView {
                     shortcuts_area: None,
                     tabs: None,
                     active_tab: 0,
-                    filter_label: None,
-                    filter_key_hint: None,
-                    filter_active: false,
-                    header_note: None,
                     action_keys: &[],
                     disable_search: false,
                     compact_bottom_bar: false,
@@ -734,15 +692,8 @@ impl AgentView {
                                         state: crate::views::picker::PickerState::default(),
                                         entries: None,
                                         loading: true,
-                                        lanes: Default::default(),
                                         previous_palette: prev,
                                         window: crate::views::modal_window::ModalWindowState::new(),
-                                        content_results: None,
-                                        content_loading: false,
-                                        deep_search_seq: 0,
-                                        entries_query: None,
-                                        source_filter:
-                                            crate::views::session_picker::SourceFilter::default(),
                                         pending_delete: None,
                                     });
                                     return InputOutcome::Action(Action::FetchSessionList);
@@ -823,50 +774,30 @@ impl AgentView {
                 state,
                 loading: _,
                 previous_palette,
-                content_results,
-                content_loading,
-                entries_query,
-                source_filter,
                 pending_delete,
                 ..
             } => {
                 use crate::views::session_picker::{
-                    CONTENT_EXPAND_OFFSET, PickerItem, SessionPickerWorktreeSelection,
-                    build_entry_map, effective_filter_query, session_picker_worktree_selection,
-                    sync_session_picker_query_expansion,
+                    PickerItem, SessionPickerWorktreeSelection, build_entry_map,
+                    session_picker_worktree_selection, sync_session_picker_query_expansion,
                 };
 
-                // Build grouped mapping using shared helper (now with content).
+                // Build grouped mapping using shared helper.
                 // Pin the current session's repo group using the live agent cwd.
                 let current_repo = crate::views::session_picker::repo_name_from_cwd(
                     &self.session.cwd.to_string_lossy(),
                 );
                 let entry_map = build_entry_map(
                     entries.as_deref(),
-                    content_results.as_deref(),
-                    effective_filter_query(state.query(), entries_query.as_deref()),
+                    state.query(),
                     true,
-                    *content_loading,
-                    *source_filter,
                     Some(current_repo.as_str()),
                 );
                 let entry_count = entry_map.len();
                 let non_sel: Vec<bool> = entry_map.iter().map(|e| e.is_none()).collect();
-                let focused_is_foreign = match entry_map
-                    .get(state.selected)
-                    .and_then(|entry| entry.as_ref())
-                {
-                    Some(PickerItem::Fuzzy { original_index }) => entries
-                        .as_ref()
-                        .and_then(|entries| entries.get(*original_index))
-                        .is_some_and(|entry| {
-                            crate::app::foreign_sessions::is_foreign_picker_source(&entry.source)
-                        }),
-                    _ => false,
-                };
 
-                // Chat-mode picker lists conversations only: the source
-                // filter and local-disk delete are dead weight there.
+                // Chat-mode picker lists conversations only: local-disk
+                // delete is dead weight there.
                 let chat_mode = self.app_chat_mode;
                 let config = PickerConfig {
                     title: Some("Resume session"),
@@ -880,11 +811,7 @@ impl AgentView {
                     shortcuts_area: None,
                     tabs: None,
                     active_tab: 0,
-                    filter_label: (!chat_mode).then(|| source_filter.label()),
-                    filter_key_hint: (!chat_mode).then_some("f"),
-                    filter_active: !chat_mode && source_filter.is_active(),
-                    header_note: None,
-                    action_keys: if chat_mode || focused_is_foreign {
+                    action_keys: if chat_mode {
                         &[]
                     } else {
                         &[('d', "delete")]
@@ -917,15 +844,11 @@ impl AgentView {
                         &entry_map,
                         &non_sel,
                         entries.as_deref(),
-                        content_results.as_deref(),
                     )
                 {
                     return InputOutcome::Action(match selection {
                         SessionPickerWorktreeSelection::Fuzzy(original_index) => {
                             Action::PickSessionInWorktree(original_index)
-                        }
-                        SessionPickerWorktreeSelection::Content { session_id, cwd } => {
-                            Action::PickContentSessionInWorktree { session_id, cwd }
                         }
                         SessionPickerWorktreeSelection::Unavailable => {
                             return InputOutcome::Changed;
@@ -945,18 +868,6 @@ impl AgentView {
                                 // Don't clear active_modal here — dispatch_pick_session
                                 // reads entries from it before clearing.
                                 InputOutcome::Action(Action::PickSession(*original_index))
-                            }
-                            Some(PickerItem::Content { hit_index }) => {
-                                if let Some(hits) = content_results.as_ref()
-                                    && let Some(hit) = hits.get(*hit_index)
-                                {
-                                    InputOutcome::Action(Action::PickContentSession {
-                                        session_id: hit.session_id.clone(),
-                                        cwd: hit.cwd.clone(),
-                                    })
-                                } else {
-                                    InputOutcome::Changed
-                                }
                             }
                             None => InputOutcome::Changed,
                         }
@@ -994,26 +905,11 @@ impl AgentView {
                         Some(PickerItem::Fuzzy { original_index }) => {
                             if let Some(ents) = entries.as_ref()
                                 && let Some(entry) = ents.get(*original_index)
-                                && !crate::app::foreign_sessions::is_foreign_picker_source(
-                                    &entry.source,
-                                )
                                 && !state.expanded.contains(original_index)
                             {
                                 InputOutcome::Action(Action::ExpandSessionCard {
                                     source: entry.source.clone(),
                                     session_id: entry.id.clone(),
-                                })
-                            } else {
-                                InputOutcome::Changed
-                            }
-                        }
-                        Some(PickerItem::Content { hit_index }) => {
-                            if let Some(hits) = content_results.as_ref()
-                                && let Some(hit) = hits.get(*hit_index)
-                            {
-                                InputOutcome::Action(Action::ExpandSessionCard {
-                                    source: "local".into(),
-                                    session_id: hit.session_id.clone(),
                                 })
                             } else {
                                 InputOutcome::Changed
@@ -1035,20 +931,6 @@ impl AgentView {
                                 InputOutcome::Changed
                             }
                         }
-                        Some(PickerItem::Content { hit_index }) => {
-                            let key = CONTENT_EXPAND_OFFSET + hit_index;
-                            if state.expanded.contains(&key)
-                                && let Some(hits) = content_results.as_ref()
-                                && let Some(hit) = hits.get(*hit_index)
-                            {
-                                InputOutcome::Action(Action::ExpandSessionCard {
-                                    source: "local".into(),
-                                    session_id: hit.session_id.clone(),
-                                })
-                            } else {
-                                InputOutcome::Changed
-                            }
-                        }
                         None => InputOutcome::Changed,
                     },
                     PickerOutcome::Copy(i) => {
@@ -1061,37 +943,20 @@ impl AgentView {
                     PickerOutcome::QueryChanged => {
                         sync_session_picker_query_expansion(
                             entries.as_deref(),
-                            content_results.as_deref(),
-                            entries_query.as_deref(),
                             state,
                             true,
-                            *content_loading,
-                            *source_filter,
                             Some(current_repo.as_str()),
                         );
-                        InputOutcome::Action(Action::TriggerDeepSearch)
+                        InputOutcome::Changed
                     }
                     PickerOutcome::Changed => InputOutcome::Changed,
-                    PickerOutcome::Unchanged => {
-                        if let crossterm::event::Event::Key(key) = ev
-                            && key.kind == KeyEventKind::Press
-                            && crate::key!('/', CONTROL).matches(key)
-                            && !state.query().trim().is_empty()
-                        {
-                            return InputOutcome::Action(Action::ForceDeepSearch);
-                        }
-                        InputOutcome::Unchanged
-                    }
-                    PickerOutcome::FilterCycled => {
-                        InputOutcome::Action(Action::CycleSessionSourceFilter)
-                    }
+                    PickerOutcome::Unchanged => InputOutcome::Unchanged,
                     PickerOutcome::Action('d') => {
                         *pending_delete =
                             crate::views::session_picker::pending_delete_from_selection(
                                 state.selected,
                                 &entry_map,
                                 entries.as_deref(),
-                                content_results.as_deref(),
                             );
                         InputOutcome::Changed
                     }
@@ -1171,10 +1036,6 @@ impl AgentView {
                 shortcuts_area: None,
                 tabs: None,
                 active_tab: 0,
-                filter_label: None,
-                filter_key_hint: None,
-                filter_active: false,
-                header_note: None,
                 action_keys: &[],
                 disable_search: false,
                 compact_bottom_bar: false,
@@ -1384,28 +1245,6 @@ impl AgentView {
                     }
                     let ev = crossterm::event::Event::Mouse(*mouse);
                     return self.handle_palette_or_arg_input_with_registry(&ev, registry);
-                }
-                _ => return InputOutcome::Changed,
-            }
-        }
-
-        // MemoryBrowser: route through ModalWindow chrome, then delegate.
-        if let Some(ActiveModal::MemoryBrowser { state }) = &mut self.active_modal {
-            let outcome =
-                mw::handle_modal_mouse(&mut state.window, mouse.kind, mouse.column, mouse.row);
-            match outcome {
-                ModalWindowOutcome::CloseRequested => {
-                    self.active_modal = None;
-                    return InputOutcome::Changed;
-                }
-                ModalWindowOutcome::Handled => return InputOutcome::Changed,
-                ModalWindowOutcome::Unhandled => {
-                    return crate::views::memory_modal::handle_memory_mouse(
-                        state,
-                        mouse.kind,
-                        mouse.column,
-                        mouse.row,
-                    );
                 }
                 _ => return InputOutcome::Changed,
             }
@@ -1698,12 +1537,7 @@ impl AgentView {
                 entries,
                 state,
                 loading,
-                lanes,
                 window,
-                content_results,
-                content_loading,
-                entries_query,
-                source_filter,
                 pending_delete,
                 ..
             } = active_modal
@@ -1711,13 +1545,10 @@ impl AgentView {
                 // Session picker: ModalWindow chrome + picker content.
                 use crate::app::app_view::filter_session_entries;
                 use crate::views::picker::PickerField;
-                use crate::views::session_picker::{
-                    build_content_entry_data, build_content_header_label,
-                };
                 // While a delete confirmation is armed, the footer swaps to a
                 // "y confirm / n cancel" prompt. Otherwise show the normal
                 // hints plus the `d delete` action. Chat mode drops the
-                // deep-search / filter / delete hints (local-disk-row actions).
+                // delete hint (local-disk-row action).
                 let chat_mode = self.app_chat_mode;
                 let mut session_shortcuts: Vec<Shortcut> = if pending_delete.is_some() {
                     vec![
@@ -1733,40 +1564,29 @@ impl AgentView {
                         },
                     ]
                 } else {
-                    let external =
-                        *source_filter == crate::views::session_picker::SourceFilter::External;
-                    let mut shortcuts = vec![Shortcut {
-                        label: "\u{2191}\u{2193} nav",
-                        clickable: false,
-                        id: 0,
-                    }];
-                    if !external {
-                        shortcuts.extend([
-                            Shortcut {
-                                label: "e expand",
-                                clickable: false,
-                                id: 0,
-                            },
-                            Shortcut {
-                                label: "/ search",
-                                clickable: false,
-                                id: 0,
-                            },
-                        ]);
-                    }
+                    let mut shortcuts = vec![
+                        Shortcut {
+                            label: "\u{2191}\u{2193} nav",
+                            clickable: false,
+                            id: 0,
+                        },
+                        Shortcut {
+                            label: "e expand",
+                            clickable: false,
+                            id: 0,
+                        },
+                        Shortcut {
+                            label: "/ search",
+                            clickable: false,
+                            id: 0,
+                        },
+                    ];
                     if !chat_mode {
                         shortcuts.push(Shortcut {
-                            label: "f filter",
+                            label: "d delete",
                             clickable: false,
                             id: 0,
                         });
-                        if !external {
-                            shortcuts.push(Shortcut {
-                                label: "d delete",
-                                clickable: false,
-                                id: 0,
-                            });
-                        }
                     }
                     shortcuts
                 };
@@ -1805,24 +1625,6 @@ impl AgentView {
                         true,
                         Some(theme.bg_base),
                     );
-                    // Render filter indicator on the search bar row (hidden in
-                    // chat mode — every row is a conversation).
-                    if chat_mode {
-                        state.filter_area = None;
-                    } else {
-                        let filter_rect = picker::render_filter_indicator(
-                            buf,
-                            content_area.x,
-                            content_area.y,
-                            content_area.width,
-                            &theme,
-                            source_filter.label(),
-                            "f",
-                            source_filter.is_active(),
-                            state.filter_hovered,
-                        );
-                        state.filter_area = Some(filter_rect);
-                    }
                     // Divider — spans full inner width.
                     let sep_y = content_area.y + 1;
                     if sep_y < content_area.y + content_area.height {
@@ -1840,17 +1642,13 @@ impl AgentView {
                         Rect::new(content_area.x, content_area.y, content_area.width, 1);
 
                     // Build session picker entries (shared helper). The same
-                    // effective query must drive filtering AND the content
-                    // header/rows gates below, or this render disagrees with
-                    // the input handler's `build_entry_map` (which receives
-                    // the effective query) on row indices.
-                    let filter_query = crate::views::session_picker::effective_filter_query(
-                        state.query(),
-                        entries_query.as_deref(),
-                    );
+                    // query must drive filtering here and in the input
+                    // handler's `build_entry_map`, or this render disagrees
+                    // with it on row indices.
+                    let filter_query = state.query();
                     let entries_data = entries.as_deref().unwrap_or(&[]);
                     let filtered_indices =
-                        filter_session_entries(entries.as_deref(), filter_query, *source_filter);
+                        filter_session_entries(entries.as_deref(), filter_query);
                     let built = crate::views::session_picker::build_session_entry_data(
                         entries_data,
                         &filtered_indices,
@@ -1869,7 +1667,7 @@ impl AgentView {
                     let current_repo = crate::views::session_picker::repo_name_from_cwd(
                         &self.session.cwd.to_string_lossy(),
                     );
-                    let (mut picker_entries, mut non_sel_flags) =
+                    let (picker_entries, non_sel_flags) =
                         crate::views::session_picker::build_grouped_picker_entries(
                             entries_data,
                             &filtered_indices,
@@ -1879,90 +1677,7 @@ impl AgentView {
                             Some(current_repo.as_str()),
                         );
 
-                    // Append content search result rows (same pattern as welcome).
-                    let content_start = picker_entries.len() + 1;
-                    let content_entry_data = if let Some(hits) = content_results.as_deref()
-                        && *source_filter != crate::views::session_picker::SourceFilter::External
-                        && !filter_query.is_empty()
-                    {
-                        build_content_entry_data(
-                            hits,
-                            entries_data,
-                            &filtered_indices,
-                            state,
-                            content_start,
-                        )
-                    } else {
-                        Vec::new()
-                    };
-                    let has_content_rows = !content_entry_data.is_empty();
-                    let effective_content_loading = *content_loading
-                        && *source_filter != crate::views::session_picker::SourceFilter::External;
-                    let spinner_label = build_content_header_label(
-                        effective_content_loading,
-                        has_content_rows,
-                        self.scrollback.tick_count(),
-                    );
-                    let show_content_header = has_content_rows
-                        || (effective_content_loading && !filter_query.trim().is_empty());
-                    if show_content_header {
-                        picker_entries.push(PickerEntry::Header {
-                            label: &spinner_label,
-                        });
-                        non_sel_flags.push(true);
-                    }
-                    let content_fields: Vec<Vec<PickerField>> = content_entry_data
-                        .iter()
-                        .map(|b| {
-                            b.field_data
-                                .iter()
-                                .map(|(l, v)| PickerField { label: l, value: v })
-                                .collect()
-                        })
-                        .collect();
-                    let content_snippets: Vec<[&str; 1]> = content_entry_data
-                        .iter()
-                        .map(|b| [b.snippet_preview.as_deref().unwrap_or("")])
-                        .collect();
-
-                    for (i, (b, fields)) in content_entry_data
-                        .iter()
-                        .zip(content_fields.iter())
-                        .enumerate()
-                    {
-                        let has_snippet = b.snippet_preview.is_some();
-                        picker_entries.push(PickerEntry::Row(PickerRow {
-                            label: &b.summary,
-                            right_label: &b.right_text,
-                            selected: b.is_selected,
-                            expanded: b.is_expanded,
-                            fields,
-                            description_lines: if has_snippet {
-                                &content_snippets[i]
-                            } else {
-                                &[]
-                            },
-                            summary_lines: &[],
-                            dimmed: false,
-                            indent: 1,
-                            badge: if has_snippet { "match" } else { "" },
-                            badge_color: Some(theme.accent_user),
-                            collapsible: true,
-                            underline_last_desc: false,
-                        }));
-                        non_sel_flags.push(false);
-                    }
-
-                    let hidden_hint = if chat_mode {
-                        None
-                    } else {
-                        crate::views::session_picker::hidden_external_hint(
-                            entries.as_deref(),
-                            *source_filter,
-                        )
-                    };
-
-                    let mut entries_area = Rect {
+                    let entries_area = Rect {
                         x: content_area.x,
                         y: entries_start_y,
                         width: content_area.width,
@@ -1970,22 +1685,6 @@ impl AgentView {
                             .height
                             .saturating_sub(entries_start_y.saturating_sub(content_area.y)),
                     };
-                    // Pinned above the list so it stays visible regardless of scroll.
-                    if let Some(hint) = hidden_hint.as_deref()
-                        && entries_area.height > 0
-                    {
-                        buf.set_stringn(
-                            entries_area.x + 1,
-                            entries_area.y,
-                            hint,
-                            entries_area.width.saturating_sub(1) as usize,
-                            ratatui::style::Style::default()
-                                .fg(theme.gray_dim)
-                                .bg(theme.bg_base),
-                        );
-                        entries_area.y += 1;
-                        entries_area.height -= 1;
-                    }
                     let content_hit = picker::render_picker_content_with_scrollbar_x(
                         buf,
                         entries_area,
@@ -1997,9 +1696,7 @@ impl AgentView {
                         Some(theme.bg_base),
                         crate::views::session_picker::loading_spinner_active(
                             entries.as_deref(),
-                            *source_filter,
                             *loading,
-                            lanes,
                         ),
                         self.scrollback.tick_count(),
                         mca.inner_x + mca.inner_width - 1,
@@ -2010,7 +1707,6 @@ impl AgentView {
                         item_rects: content_hit.item_rects,
                         entry_indices: content_hit.entry_indices,
                         tab_rects: vec![],
-                        filter_rect: None,
                     });
                 }
             } else if let modal::ActiveModal::DocPicker {
@@ -2095,8 +1791,6 @@ impl AgentView {
                         !searching,
                     );
                 }
-            } else if let modal::ActiveModal::MemoryBrowser { state: mem_state } = active_modal {
-                crate::views::memory_modal::render_memory_modal(buf, area, mem_state, compact);
             } else if let modal::ActiveModal::Settings {
                 state: settings_state,
             } = active_modal
@@ -2172,14 +1866,8 @@ mod session_picker_delete_tests {
             state: crate::views::picker::PickerState::default(),
             entries: Some(entries),
             loading: false,
-            lanes: Default::default(),
             previous_palette: None,
             window: crate::views::modal_window::ModalWindowState::new(),
-            content_results: None,
-            content_loading: false,
-            deep_search_seq: 0,
-            entries_query: None,
-            source_filter: crate::views::session_picker::SourceFilter::default(),
             pending_delete: None,
         });
     }
@@ -2281,8 +1969,8 @@ mod session_picker_delete_tests {
     }
 
     /// Plain close (Esc) must surface `SessionPickerClosed` so the dispatch
-    /// layer can invalidate an in-flight list/search fetch — its landing
-    /// surface (the modal) is gone.
+    /// layer can invalidate an in-flight list fetch — its landing surface
+    /// (the modal) is gone.
     #[test]
     fn esc_close_emits_session_picker_closed_action() {
         let mut agent = make_agent();
@@ -2294,32 +1982,6 @@ mod session_picker_delete_tests {
             "close must emit the fetch-invalidation action, got {out:?}"
         );
         assert!(agent.active_modal.is_none(), "modal cleared on close");
-    }
-
-    /// Chat-mode picker is conversations-only: `d` (local delete) must not
-    /// arm a confirmation and `f` must not cycle the hidden source filter.
-    #[test]
-    fn chat_mode_disables_delete_and_filter_keys() {
-        let mut agent = make_agent();
-        agent.app_chat_mode = true;
-        open_picker(&mut agent, vec![entry("c0"), entry("c1")]);
-
-        agent.handle_palette_or_arg_input(&key('d'));
-        assert!(
-            pending(&agent).is_none(),
-            "d must not arm delete under chat mode"
-        );
-
-        agent.handle_palette_or_arg_input(&key('f'));
-        let filter = match agent.active_modal.as_ref() {
-            Some(ActiveModal::SessionPicker { source_filter, .. }) => *source_filter,
-            _ => panic!("expected open session picker"),
-        };
-        assert_eq!(
-            filter,
-            crate::views::session_picker::SourceFilter::Grok,
-            "f must not cycle the hidden source filter under chat mode"
-        );
     }
 
     #[test]
@@ -2340,89 +2002,13 @@ mod session_picker_delete_tests {
         ));
     }
 
+    /// Entries are fuzzy-filtered locally: a row whose title does not match
+    /// the query stays hidden from Enter.
     #[test]
-    fn foreign_row_refuses_delete_detail_and_worktree_actions() {
+    fn local_fuzzy_filter_hides_unrelated_title_from_enter() {
         let mut agent = make_agent();
-        let mut foreign = entry("codex-session");
-        foreign.source = "codex".into();
-        open_picker(&mut agent, vec![foreign]);
-        // Pin All: the refusals only fire when the foreign row is focusable.
-        if let Some(ActiveModal::SessionPicker { source_filter, .. }) = agent.active_modal.as_mut()
-        {
-            *source_filter = crate::views::session_picker::SourceFilter::All;
-        }
-
-        let delete = agent.handle_palette_or_arg_input(&key('d'));
-        assert!(matches!(delete, InputOutcome::Changed));
-        assert!(pending(&agent).is_none(), "foreign delete must not arm");
-
-        let expand = agent.handle_palette_or_arg_input(&key('e'));
-        assert!(
-            !matches!(
-                expand,
-                InputOutcome::Action(Action::ExpandSessionCard { .. })
-            ),
-            "foreign rows have no transcript detail"
-        );
-
-        let worktree = Event::Key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
-        let outcome = agent.handle_palette_or_arg_input(&worktree);
-        assert!(
-            !matches!(
-                outcome,
-                InputOutcome::Action(Action::PickSessionInWorktree(_))
-            ),
-            "foreign rows cannot be resumed in worktrees"
-        );
-        assert!(
-            agent.active_modal.is_some(),
-            "refused actions keep picker open"
-        );
-    }
-
-    /// A server search matches conversation *content* too: a hit whose title
-    /// doesn't fuzzy-match the query must stay pickable in the modal
-    /// (`effective_filter_query` skips the local re-filter).
-    #[test]
-    fn server_search_hit_with_unrelated_title_is_pickable() {
-        let mut agent = make_agent();
-        agent.app_chat_mode = true;
-        let mut e = entry("conv-content-1");
-        e.summary = "Quarterly roadmap notes".into(); // no "hit" in the title
-        e.source = "conversation".into();
-        open_picker(&mut agent, vec![e]);
-        if let Some(ActiveModal::SessionPicker {
-            state,
-            entries_query,
-            content_loading,
-            ..
-        }) = agent.active_modal.as_mut()
-        {
-            state.set_query("hit");
-            *entries_query = Some("hit".into());
-            // A re-search of the stamped query may be in flight: with the
-            // effective query empty, the input map appends NO "Searching…"
-            // header (same gate the renders use), so indices don't shift.
-            *content_loading = true;
-            // Grouped map: [repo header, row] — the row sits at index 1.
-            state.selected = 1;
-        }
-        let out = agent.handle_palette_or_arg_input(&key_code(KeyCode::Enter));
-        assert!(
-            matches!(out, InputOutcome::Action(Action::PickSession(0))),
-            "content-only search hit must be pickable, got {out:?}"
-        );
-    }
-
-    /// Canary: entries WITHOUT a matching fetch-query stamp keep the local
-    /// fuzzy filter — an unrelated title stays hidden from Enter.
-    #[test]
-    fn unstamped_entries_keep_local_fuzzy_filter() {
-        let mut agent = make_agent();
-        agent.app_chat_mode = true;
-        let mut e = entry("conv-content-1");
+        let mut e = entry("sess-1");
         e.summary = "Quarterly roadmap notes".into();
-        e.source = "conversation".into();
         open_picker(&mut agent, vec![e]);
         if let Some(ActiveModal::SessionPicker { state, .. }) = agent.active_modal.as_mut() {
             state.set_query("hit");
@@ -2431,7 +2017,7 @@ mod session_picker_delete_tests {
         let out = agent.handle_palette_or_arg_input(&key_code(KeyCode::Enter));
         assert!(
             !matches!(out, InputOutcome::Action(Action::PickSession(_))),
-            "unstamped entries must still be fuzzy-filtered, got {out:?}"
+            "unrelated title must stay filtered out, got {out:?}"
         );
     }
 
@@ -2829,14 +2415,13 @@ mod command_palette_vim_input_tests {
 }
 
 #[cfg(test)]
-mod settings_memory_paste_routing_tests {
+mod settings_paste_routing_tests {
     use std::sync::Arc;
 
     use crate::actions::ActionRegistry;
     use crate::app::agent_view::test_fixtures::make_agent;
     use crate::app::app_view::InputOutcome;
     use crate::settings::{PagerLocalSnapshot, SettingsRegistry};
-    use crate::views::memory_modal::{MemoryModalMode, MemoryModalState};
     use crate::views::modal::ActiveModal;
     use crate::views::settings_modal::SettingsModalState;
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
@@ -2847,7 +2432,7 @@ mod settings_memory_paste_routing_tests {
     }
 
     #[test]
-    fn settings_and_memory_paste_only_into_focused_filters() {
+    fn settings_paste_only_into_focused_filter() {
         let registry = ActionRegistry::defaults();
         let mut agent = make_agent();
         agent.prompt.set_text("hidden prompt");
@@ -2867,21 +2452,6 @@ mod settings_memory_paste_routing_tests {
         assert!(matches!(outcome, InputOutcome::Changed));
         let Some(ActiveModal::Settings { state }) = agent.active_modal.as_ref() else {
             panic!("settings modal remains open");
-        };
-        assert_eq!(state.query(), "a中b");
-        assert_eq!(agent.prompt.text(), "hidden prompt");
-
-        let mut memory = MemoryModalState::new(Vec::new());
-        memory.mode = MemoryModalMode::FilterFocused;
-        agent.active_modal = Some(ActiveModal::MemoryBrowser {
-            state: Box::new(memory),
-        });
-        let _ = agent.handle_input(&Event::Paste("ab".to_owned()), &registry);
-        let _ = agent.handle_input(&left(), &registry);
-        let outcome = agent.handle_input(&Event::Paste("中\r\n".to_owned()), &registry);
-        assert!(matches!(outcome, InputOutcome::Changed));
-        let Some(ActiveModal::MemoryBrowser { state }) = agent.active_modal.as_ref() else {
-            panic!("memory modal remains open");
         };
         assert_eq!(state.query(), "a中b");
         assert_eq!(agent.prompt.text(), "hidden prompt");

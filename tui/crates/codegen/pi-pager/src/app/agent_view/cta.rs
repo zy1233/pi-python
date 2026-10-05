@@ -278,15 +278,6 @@ impl AgentView {
         self.hovered_follow_up_chip = None;
     }
 
-    /// Full follow-up reset for a session reload. Unlike [`clear_follow_ups`]
-    /// (turn boundary — keeps `follow_up_seen` so a stale re-delivery stays
-    /// rejected), a reload starts a fresh streaming session: follow-ups never
-    /// persist, so the prior session's seen ids must also be dropped or they
-    /// would suppress chips streamed after the reload.
-    pub(crate) fn reset_follow_ups_for_reload(&mut self) {
-        self.reset_follow_ups_for_reload_preserving(None);
-    }
-
     /// Reload reset that PRESERVES the running turn's follow-ups for
     /// `keep_prompt_id` (the turn the load is about to adopt). On `SessionLoaded`
  /// the running turn's `legacy ext RPC` arrive on the ext channel DURING

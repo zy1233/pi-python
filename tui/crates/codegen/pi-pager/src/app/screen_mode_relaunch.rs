@@ -80,9 +80,9 @@ fn flag_takes_value(flag: &str) -> bool {
 /// value token that follows value-taking flags.
 ///
 /// One-shot startup directives must not survive into the rebuilt argv:
-/// `--session-id` combined with the appended `--resume` (without
-/// `--fork-session`) is rejected at startup (`SessionIdRequiresFork`), so the
-/// relaunched process would exit immediately; a kept `--worktree` /
+/// `--session-id` combined with the appended `--resume` is rejected at
+/// startup (`SessionIdWithResume`), so the relaunched process would exit
+/// immediately; a kept `--worktree` /
 /// `--worktree-ref` would create a *second* worktree on relaunch; a kept
 /// `--restore-code` would re-checkout the original session commit. All of
 /// them already did their job in the process being replaced.
@@ -121,7 +121,6 @@ pub(crate) fn build_screen_mode_relaunch_args(
                 | "--fullscreen"
                 | "--continue"
                 | "-c"
-                | "--fork-session"
                 | "--restore-code"
         ) {
             continue;
@@ -142,7 +141,7 @@ pub(crate) fn build_screen_mode_relaunch_args(
         // Session-selection / one-shot session-creation flags with an
         // optional/required following value — drop flag and value; we rebind
         // via a fresh `--resume <id>` below. `--session-id` would make the
-        // appended `--resume` an invalid combo (SessionIdRequiresFork) and
+        // appended `--resume` an invalid combo (SessionIdWithResume) and
         // kill the relaunch at startup; `--worktree`/`--worktree-ref` would
         // create a second worktree.
         if matches!(
@@ -436,7 +435,6 @@ mod tests {
             "--no-plan",
             "--continue",
             "-c",
-            "--fork-session",
         ] {
             assert!(!tokens.contains(flag), "boolean flag misclassified: {flag}");
         }
@@ -463,9 +461,9 @@ mod tests {
     }
 
     /// `--session-id` must not survive the rebuild: combined with the appended
-    /// `--resume` (and no `--fork-session`) startup rejects the combo
-    /// (`SessionIdRequiresFork`), so the relaunched process would exit
-    /// immediately instead of reopening the session.
+    /// `--resume` startup rejects the combo (`SessionIdWithResume`), so the
+    /// relaunched process would exit immediately instead of reopening the
+    /// session.
     #[test]
     fn strips_session_id_flag() {
         let out = build_screen_mode_relaunch_args(

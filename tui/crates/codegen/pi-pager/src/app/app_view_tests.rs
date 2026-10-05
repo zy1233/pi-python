@@ -233,26 +233,13 @@ pub(crate) fn test_app() -> AppView {
         session_picker_state: crate::views::picker::PickerState::with_mode(
             crate::views::picker::PickerMode::FullScreen,
         ),
-        session_picker_source_filter: crate::views::session_picker::SourceFilter::default(),
-        session_picker_relaxed_notified_for: None,
-        session_picker_content_results: None,
-        session_picker_content_loading: false,
-        session_picker_deep_search_seq: 0,
         session_picker_list_seq: 0,
-        foreign_session_compat: Default::default(),
-        foreign_session_scan_seq: 0,
-        foreign_scan_coordinator: Default::default(),
-        session_picker_lanes: Default::default(),
-        session_picker_detail_generation: 0,
-        session_picker_entries_query: None,
         session_picker_pending_delete: None,
         welcome_tick: 0,
         welcome_shimmer_frame: 0,
         startup_warnings: Vec::new(),
         is_api_key_auth: false,
         pending_update_version: None,
-        foreign_resume_launch_generation: 0,
-        foreign_resume_launch: None,
         quit_for_update: false,
         relaunch: None,
         welcome_doc_viewer: None,
@@ -595,21 +582,17 @@ fn tick_demand_fast_while_wake_turn_streams() {
     );
 }
 /// The welcome screen shimmer only advances ~12fps, so a resting welcome
-/// screen must demand Slow ticks — not a 30fps loop; the deep-search
-/// spinner upgrades it to Fast while loading.
+/// screen must demand Slow ticks — not a 30fps loop.
 #[test]
-fn tick_demand_welcome_is_slow_unless_loading() {
-    let mut app = test_app();
+fn tick_demand_welcome_is_slow() {
+    let app = test_app();
     assert_eq!(app.active_view, ActiveView::Welcome);
     assert_eq!(app.tick_demand(), TickDemand::Slow);
     assert!(app.needs_animation(), "slow still counts as animating");
-    app.session_picker_content_loading = true;
-    assert_eq!(app.tick_demand(), TickDemand::Fast);
 }
 /// An open modal session picker that is still fetching keeps fast ticks
-/// alive on an otherwise-idle agent (its loading spinner must animate) —
-/// including after the fast foreign scan lands rows the default Grok
-/// filter hides; once the native list settles the demand parks again.
+/// alive on an otherwise-idle agent (its loading spinner must animate);
+/// once the list settles the demand parks again.
 #[test]
 fn tick_demand_fast_while_modal_session_picker_loads() {
     let mut app = test_app_with_agent();
@@ -620,48 +603,14 @@ fn tick_demand_fast_while_modal_session_picker_loads() {
             state: crate::views::picker::PickerState::default(),
             entries: None,
             loading: true,
-            lanes: Default::default(),
             previous_palette: None,
             window: crate::views::modal_window::ModalWindowState::new(),
-            content_results: None,
-            content_loading: false,
-            deep_search_seq: 0,
-            entries_query: None,
-            source_filter: crate::views::session_picker::SourceFilter::default(),
             pending_delete: None,
         });
     assert_eq!(
         app.tick_demand(),
         TickDemand::Fast,
         "loading modal picker must keep the spinner animating"
-    );
-    let foreign_entry = SessionPickerEntry {
-        id: "claude-1".into(),
-        summary: "claude".into(),
-        updated_at: chrono::Utc::now(),
-        created_at: chrono::Utc::now(),
-        cwd: String::new(),
-        hostname: None,
-        source: "claude".into(),
-        model_id: None,
-        num_messages: 0,
-        last_active_at: None,
-        branch: None,
-        repo_name: "r".into(),
-        worktree_label: None,
-        last_turn_summary: None,
-        last_recap: None,
-        card_detail: None,
-    };
-    if let Some(crate::views::modal::ActiveModal::SessionPicker { entries, .. }) =
-        app.agents.get_mut(&id).unwrap().active_modal.as_mut()
-    {
-        *entries = Some(vec![foreign_entry]);
-    }
-    assert_eq!(
-        app.tick_demand(),
-        TickDemand::Fast,
-        "foreign rows hidden by the Grok filter must not end the loading spinner"
     );
     if let Some(crate::views::modal::ActiveModal::SessionPicker { loading, .. }) =
         app.agents.get_mut(&id).unwrap().active_modal.as_mut()
@@ -1267,46 +1216,6 @@ fn welcome_ctrl_q_requires_confirmation() {
     );
 }
 #[test]
-fn welcome_ctrl_u_update_keeps_priority_over_foreign_resume() {
-    let mut app = test_app();
-    app.foreign_session_compat = pi_foreign_sessions::EnabledForeignSessionSources {
-        cursor: true,
-        ..Default::default()
-    };
-    let crate::app::actions::Effect::CanonicalizeForeignResumeCwd {
-        requested_cwd,
-        launch_token,
-    } = app.begin_foreign_resume_detection().unwrap()
-    else {
-        panic!("expected canonicalization effect");
-    };
-    let canonical_cwd = dunce::canonicalize(&requested_cwd).unwrap();
-    assert!(app.accept_foreign_resume_canonical_cwd(
-        launch_token,
-        &requested_cwd,
-        Some(canonical_cwd.clone()),
-    ));
-    app.apply_foreign_resume_detection(
-        launch_token,
-        &canonical_cwd,
-        Some(pi_foreign_sessions::RecentForeignSession {
-            tool: pi_foreign_sessions::ForeignSessionTool::Cursor,
-            native_id: "cursor-session".into(),
-            age: std::time::Duration::from_secs(30),
-        }),
-    );
-    let key = key_event(KeyCode::Char('u'), KeyModifiers::CONTROL);
-    assert!(matches!(
-        app.handle_input(&key),
-        InputOutcome::Action(Action::ResumeForeignSession)
-    ));
-    app.pending_update_version = Some("9.9.9".into());
-    assert!(matches!(
-        app.handle_input(&key),
-        InputOutcome::Action(Action::QuitForUpdate)
-    ));
-}
-#[test]
 fn minimal_ctrl_g_edits_prompt_while_full_tui_leaves_it_unbound() {
     let event = key_event(KeyCode::Char('g'), KeyModifiers::CONTROL);
     let mut minimal = test_app_with_agent();
@@ -1475,7 +1384,7 @@ fn welcome_session_picker_ctrl_d_keeps_global_quit_precedence() {
     assert_eq!(app.session_picker_state.query(), "session");
 }
 #[test]
-fn welcome_session_picker_cursor_motion_does_not_trigger_deep_search() {
+fn welcome_session_picker_cursor_motion_keeps_query() {
     let mut app = test_app();
     open_welcome_session_picker(&mut app);
     app.session_picker_state.set_query("session");
@@ -1484,16 +1393,12 @@ fn welcome_session_picker_cursor_motion_does_not_trigger_deep_search() {
     assert_eq!(app.session_picker_state.query(), "session");
 }
 #[test]
-fn welcome_session_picker_ctrl_u_kills_to_cursor_and_triggers_deep_search() {
+fn welcome_session_picker_ctrl_u_kills_to_cursor() {
     let mut app = test_app();
     open_welcome_session_picker(&mut app);
     app.session_picker_state.set_query("session");
     let _ = app.handle_input(&key_event(KeyCode::Left, KeyModifiers::NONE));
-    let outcome = app.handle_input(&key_event(KeyCode::Char('u'), KeyModifiers::CONTROL));
-    assert!(matches!(
-        outcome,
-        InputOutcome::Action(Action::TriggerDeepSearch)
-    ));
+    let _ = app.handle_input(&key_event(KeyCode::Char('u'), KeyModifiers::CONTROL));
     assert_eq!(app.session_picker_state.query(), "n");
     assert_eq!(app.session_picker_state.query_cursor(), 0);
 }
@@ -1990,10 +1895,7 @@ fn esc_cancels_running_wake_turn_while_pane_is_idle() {
         matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
         "Esc during a wake turn must cancel, got {outcome:?}"
     );
-    assert!(
-        app.pending_action.is_none(),
-        "must not arm idle clear/rewind"
-    );
+    assert!(app.pending_action.is_none(), "must not arm idle clear");
     assert_eq!(
         app.agents[&id].cancel_trigger_hint,
         Some(crate::app::actions::CancelTrigger::Esc)
@@ -2150,7 +2052,7 @@ fn esc_while_cancelling_retries_cancel() {
     );
 }
 #[test]
-fn esc_cancel_grace_holds_rewind_arm_then_expires() {
+fn esc_after_cancel_swallows_with_empty_prompt() {
     let mut app = test_app_with_agent();
     let id = super::super::agent::AgentId(0);
     let agent = app.agents.get_mut(&id).unwrap();
@@ -2164,31 +2066,18 @@ fn esc_cancel_grace_holds_rewind_arm_then_expires() {
         ));
     let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
     assert!(matches!(outcome, InputOutcome::Action(Action::CancelTurn)));
-    assert!(app.agents[&id].rewind_suppress_deadline.is_some());
     app.agents.get_mut(&id).unwrap().session.state = AgentState::Idle;
-    let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
-    assert!(
-        matches!(outcome, InputOutcome::Changed),
-        "Esc within the post-cancel grace must swallow, got {outcome:?}"
-    );
-    assert!(
-        app.pending_action.is_none(),
-        "post-cancel Esc must not arm the rewind picker"
-    );
-    app.agents.get_mut(&id).unwrap().rewind_suppress_deadline = Some(std::time::Instant::now());
-    let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
-    assert!(matches!(outcome, InputOutcome::Changed));
-    assert!(
-        matches!(
-            app.pending_action.as_ref().map(|p| &p.action),
-            Some(Action::RewindShowPicker)
-        ),
-        "expired grace must restore the idle rewind arm"
-    );
-    assert!(
-        app.agents[&id].rewind_suppress_deadline.is_none(),
-        "the expired deadline must be cleared on the consult"
-    );
+    for _ in 0..2 {
+        let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(
+            matches!(outcome, InputOutcome::Changed),
+            "idle Esc with an empty prompt must swallow, got {outcome:?}"
+        );
+        assert!(
+            app.pending_action.is_none(),
+            "idle Esc with an empty prompt must not arm anything"
+        );
+    }
 }
 #[test]
 fn idle_non_empty_double_esc_clears_prompt() {
@@ -2221,7 +2110,7 @@ fn idle_non_empty_double_esc_clears_prompt() {
     );
 }
 #[test]
-fn idle_empty_with_messages_double_esc_opens_rewind_silent() {
+fn idle_empty_with_messages_esc_is_swallowed() {
     let mut app = test_app_with_agent();
     let id = super::super::agent::AgentId(0);
     let agent = app.agents.get_mut(&id).unwrap();
@@ -2231,20 +2120,17 @@ fn idle_empty_with_messages_double_esc_opens_rewind_silent() {
         .push_block(crate::scrollback::block::RenderBlock::user_prompt(
             "earlier",
         ));
-    let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
-    assert!(matches!(outcome, InputOutcome::Changed));
-    let pending = app.pending_action.as_ref().expect("arm rewind");
-    assert!(
-        pending.label.is_none(),
-        "first Esc for rewind must be silent"
-    );
-    assert!(matches!(pending.action, Action::RewindShowPicker));
-    let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
-    assert!(matches!(
-        outcome,
-        InputOutcome::Action(Action::RewindShowPicker)
-    ));
-    assert!(app.pending_action.is_none());
+    for _ in 0..2 {
+        let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(
+            matches!(outcome, InputOutcome::Changed),
+            "idle empty Esc must swallow, got {outcome:?}"
+        );
+        assert!(
+            app.pending_action.is_none(),
+            "idle empty Esc must not arm anything, even with messages"
+        );
+    }
 }
 #[test]
 fn idle_empty_no_messages_esc_is_swallowed() {
@@ -2384,41 +2270,6 @@ fn stale_idle_clear_arm_never_fires_on_busy_agent() {
     );
 }
 #[test]
-fn stale_idle_rewind_arm_never_fires_on_busy_agent() {
-    let mut app = test_app_with_agent();
-    let id = super::super::agent::AgentId(0);
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.active_pane = crate::views::agent::ActivePane::Prompt;
-        agent.vim_mode = true;
-        agent
-            .scrollback
-            .push_block(crate::scrollback::block::RenderBlock::user_prompt(
-                "earlier",
-            ));
-    }
-    let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
-    assert!(matches!(outcome, InputOutcome::Changed));
-    assert!(matches!(
-        app.pending_action.as_ref().expect("arm rewind").action,
-        Action::RewindShowPicker
-    ));
-    app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
-    let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
-    assert!(
-        matches!(outcome, InputOutcome::Changed),
-        "Esc on a busy agent must swallow, not fire the stale rewind arm, got {outcome:?}",
-    );
-    assert!(
-        !matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
-        "Esc must not cancel mid-turn",
-    );
-    assert!(
-        app.pending_action.is_none(),
-        "the stale arm must be dropped"
-    );
-}
-#[test]
 fn stale_idle_clear_arm_never_fires_on_wake_turn() {
     let mut app = test_app_with_agent();
     let id = super::super::agent::AgentId(0);
@@ -2534,12 +2385,12 @@ fn idle_images_only_double_esc_arms_clear() {
         "an images-only (empty-text) clear records nothing in prompt history"
     );
 }
-/// Scrollback-pane double-Esc, idle + empty prompt + messages: first Esc
-/// arms `RewindShowPicker` silently, second within the TTL opens the
-/// picker. Driven per scrollback nav mode because the routing differs —
-/// vim resolves through `lookup_with_mode(vim=true)`, non-vim adds the
-/// bare-letter forward-to-prompt fallback — and neither may consume Esc.
-fn assert_scrollback_double_esc_opens_rewind(vim: bool) {
+/// Scrollback-pane Esc, idle + empty prompt + messages: Esc is swallowed
+/// and arms nothing. Driven per scrollback nav mode because the routing
+/// differs — vim resolves through `lookup_with_mode(vim=true)`, non-vim adds
+/// the bare-letter forward-to-prompt fallback — and neither may consume Esc
+/// into a side effect.
+fn assert_scrollback_idle_esc_swallows(vim: bool) {
     let mut app = test_app_with_agent();
     let id = super::super::agent::AgentId(0);
     let agent = app.agents.get_mut(&id).unwrap();
@@ -2556,43 +2407,32 @@ fn assert_scrollback_double_esc_opens_rewind(vim: bool) {
             "earlier",
         ));
     assert!(agent.prompt.textarea.text().is_empty());
-    let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
-    assert!(
-        matches!(outcome, InputOutcome::Changed),
-        "vim={vim}: first scrollback Esc must arm silently, got {outcome:?}"
-    );
-    let pending = app
-        .pending_action
-        .as_ref()
-        .expect("scrollback-pane idle Esc must arm rewind");
-    assert!(
-        pending.label.is_none(),
-        "vim={vim}: first Esc for rewind must be silent"
-    );
-    assert!(matches!(pending.action, Action::RewindShowPicker));
-    let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
-    assert!(
-        matches!(outcome, InputOutcome::Action(Action::RewindShowPicker)),
-        "vim={vim}: second Esc from scrollback must open the rewind picker, got {outcome:?}"
-    );
-    assert!(app.pending_action.is_none());
+    for _ in 0..2 {
+        let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(
+            matches!(outcome, InputOutcome::Changed),
+            "vim={vim}: scrollback Esc must swallow, got {outcome:?}"
+        );
+        assert!(
+            app.pending_action.is_none(),
+            "vim={vim}: scrollback Esc must not arm anything"
+        );
+    }
 }
-/// Non-vim (simple) scrollback nav: double-Esc from scrollback opens rewind.
+/// Non-vim (simple) scrollback nav: idle Esc from scrollback is swallowed.
 #[test]
-fn idle_scrollback_pane_double_esc_opens_rewind() {
-    assert_scrollback_double_esc_opens_rewind(false);
+fn idle_scrollback_pane_empty_prompt_esc_swallows() {
+    assert_scrollback_idle_esc_swallows(false);
 }
 /// Vim scrollback nav consumes no plain Esc, so the same flow must work.
 #[test]
-fn idle_scrollback_pane_double_esc_opens_rewind_vim_mode() {
-    assert_scrollback_double_esc_opens_rewind(true);
+fn idle_scrollback_pane_empty_prompt_esc_swallows_vim_mode() {
+    assert_scrollback_idle_esc_swallows(true);
 }
 /// From the SCROLLBACK pane an idle Esc with a draft in the (unfocused)
 /// composer arms NOTHING and leaves the draft intact: clear is skipped by
-/// the prompt-pane gate, and rewind is skipped by the global
-/// empty-composer gate even with turns present — never clear or
-/// rewind-stash a draft the reader has scrolled past. The Esc is
-/// swallowed (no pending, no global quit/back-out).
+/// the prompt-pane gate — never clear a draft the reader has scrolled
+/// past. The Esc is swallowed (no pending, no global quit/back-out).
 #[test]
 fn idle_scrollback_pane_esc_with_draft_and_messages_swallows() {
     let mut app = test_app_with_agent();
@@ -2612,7 +2452,7 @@ fn idle_scrollback_pane_esc_with_draft_and_messages_swallows() {
     assert!(matches!(outcome, InputOutcome::Changed));
     assert!(
         app.pending_action.is_none(),
-        "scrollback-pane Esc with a draft must arm neither clear nor rewind"
+        "scrollback-pane Esc with a draft must not arm clear"
     );
     assert_eq!(
         app.agents[&id].prompt.textarea.text(),
@@ -2620,12 +2460,11 @@ fn idle_scrollback_pane_esc_with_draft_and_messages_swallows() {
         "scrollback-pane Esc must leave the composer draft intact"
     );
 }
-/// A pending needs-input overlay blocks the scrollback rewind arm: the
-/// overlay intercepts exempt the scrollback pane, so its Esc reaches the
-/// policy — which must swallow rather than arm a picker that would
-/// key-starve the pending overlay. The overlay must survive the Esc.
+/// A pending needs-input overlay: the overlay intercepts exempt the
+/// scrollback pane, so its Esc reaches the policy — which must swallow
+/// without arming anything. The overlay must survive the Esc.
 #[test]
-fn idle_scrollback_pane_esc_with_pending_input_overlay_does_not_arm_rewind() {
+fn idle_scrollback_pane_esc_with_pending_input_overlay_arms_nothing() {
     type OverlayInstaller = (&'static str, fn(&mut AgentView));
     let installers: [OverlayInstaller; 1] = [
         ("question_view", |a| {
@@ -2660,7 +2499,7 @@ fn idle_scrollback_pane_esc_with_pending_input_overlay_does_not_arm_rewind() {
         );
         assert!(
             app.pending_action.is_none(),
-            "{name}: must not arm rewind under a pending needs-input overlay"
+            "{name}: must not arm anything under a pending needs-input overlay"
         );
         assert!(
             !app.agents[&id].no_input_overlay_pending(),
@@ -2668,10 +2507,10 @@ fn idle_scrollback_pane_esc_with_pending_input_overlay_does_not_arm_rewind() {
         );
     }
 }
-/// A latent Bash/Remember composer mode blocks the scrollback rewind arm: a rewind restore must not drop conversation text into a still-armed
-/// `!` composer. The Esc must swallow WITHOUT exiting the mode: mode exit stays a prompt-pane (step 0e) affordance.
+/// A latent Bash composer mode: the scrollback Esc must swallow WITHOUT
+/// exiting the mode — mode exit stays a prompt-pane (step 0e) affordance.
 #[test]
-fn idle_scrollback_pane_esc_in_bash_mode_does_not_arm_rewind() {
+fn idle_scrollback_pane_esc_in_bash_mode_arms_nothing() {
     let mut app = test_app_with_agent();
     let id = super::super::agent::AgentId(0);
     let agent = app.agents.get_mut(&id).unwrap();
@@ -2690,7 +2529,7 @@ fn idle_scrollback_pane_esc_in_bash_mode_does_not_arm_rewind() {
     );
     assert!(
         app.pending_action.is_none(),
-        "must not arm rewind while the composer is in bash mode"
+        "must not arm anything while the composer is in bash mode"
     );
     assert_eq!(
         app.agents[&id].prompt_input_mode,
@@ -2698,12 +2537,12 @@ fn idle_scrollback_pane_esc_in_bash_mode_does_not_arm_rewind() {
         "scrollback Esc must not exit the composer mode either"
     );
 }
-/// An active prompt history search blocks the scrollback rewind arm — the
-/// step 0b intercept is prompt-pane-only, so a scrollback Esc reaches the
-/// policy while the search overlay is open and must swallow rather than
-/// stack a rewind arm under it. The search must survive the Esc.
+/// An active prompt history search — the step 0b intercept is
+/// prompt-pane-only, so a scrollback Esc reaches the policy while the
+/// search overlay is open and must swallow without arming anything. The
+/// search must survive the Esc.
 #[test]
-fn idle_scrollback_pane_esc_with_history_search_does_not_arm_rewind() {
+fn idle_scrollback_pane_esc_with_history_search_arms_nothing() {
     let mut app = test_app_with_agent();
     let id = super::super::agent::AgentId(0);
     let agent = app.agents.get_mut(&id).unwrap();
@@ -2730,7 +2569,7 @@ fn idle_scrollback_pane_esc_with_history_search_does_not_arm_rewind() {
     );
     assert!(
         app.pending_action.is_none(),
-        "must not arm rewind while history search is open"
+        "must not arm anything while history search is open"
     );
     assert!(
         app.agents[&id].prompt.history_search.is_active(),
@@ -3755,52 +3594,6 @@ fn minimal_double_ctrl_c_arms_then_quits() {
         matches!(o2, InputOutcome::Action(crate::app::actions::Action::Quit)),
         "second Ctrl+C should quit (o2={o2:?})"
     );
-}
-/// Chat mode hides the welcome picker's source filter, so `f` must not
-/// cycle it; Build mode keeps the cycle.
-#[test]
-fn welcome_picker_f_cycle_disabled_under_chat_mode() {
-    let conversation_entry = SessionPickerEntry {
-        id: "conv-welcome-f".into(),
-        summary: "chat".into(),
-        updated_at: chrono::Utc::now(),
-        created_at: chrono::Utc::now(),
-        cwd: String::new(),
-        hostname: None,
-        source: "conversation".into(),
-        model_id: None,
-        num_messages: 0,
-        last_active_at: None,
-        branch: None,
-        repo_name: "r".into(),
-        worktree_label: None,
-        last_turn_summary: None,
-        last_recap: None,
-        card_detail: None,
-    };
-    let f_key = Event::Key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE));
-    crate::appearance::cache::set_vim_mode(false);
-    let mut app = test_app();
-    app.session_picker_entries = Some(vec![conversation_entry]);
-    app.chat_mode = true;
-    let _ = app.handle_input(&f_key);
-    assert_eq!(
-        app.session_picker_source_filter,
-        crate::views::session_picker::SourceFilter::Grok,
-        "f must not cycle the hidden source filter under chat mode"
-    );
-    assert_eq!(
-        app.session_picker_state.query(),
-        "f",
-        "under chat mode `f` keeps its normal typing/search meaning"
-    );
-    app.session_picker_state.reset();
-    app.chat_mode = false;
-    let outcome = app.handle_input(&f_key);
-    assert!(matches!(
-        outcome,
-        InputOutcome::Action(Action::CycleSessionSourceFilter)
-    ));
 }
 #[cfg(feature = "local-workspace")]
 #[test]

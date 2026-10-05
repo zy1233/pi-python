@@ -613,24 +613,13 @@ pub struct WelcomeRenderParams<'a> {
     pub pending_hint: Option<crate::views::shortcuts_bar::PendingHint>,
     pub startup_warnings: &'a [StartupWarning],
     pub pending_update_version: Option<&'a str>,
-    /// Recent foreign session offered on ctrl+u, suppressed by a pending update.
-    pub foreign_resume_hint: Option<&'a pi_foreign_sessions::RecentForeignSession>,
     pub is_api_key_auth: bool,
-    pub session_picker_content_results:
-        Option<&'a [pi_shell::extensions::session_search::SearchSessionHit]>,
-    pub session_picker_content_loading: bool,
-    /// The query the picker entries were server-fetched with (see
-    /// [`crate::views::session_picker::effective_filter_query`]).
-    pub session_picker_entries_query: Option<&'a str>,
     pub welcome_tick: u64,
     pub gate: Option<&'a pi_shell::auth::GateInfo>,
     pub subscription_tier: Option<&'a str>,
     pub session_picker_grouped: bool,
-    /// Source filter for the session picker.
-    pub session_picker_source_filter: crate::views::session_picker::SourceFilter,
     pub session_picker_pending_delete: bool,
-    /// Process-wide `--chat`: the picker lists backend conversations only, so
-    /// the source filter and local deep search are hidden.
+    /// Process-wide `--chat`: the picker lists backend conversations only.
     pub chat_mode: bool,
     /// Live working directory (tracks `Effect::SetWorkingDir`), used to pin
     /// the current repo's session group to the top of the picker.
@@ -1613,9 +1602,8 @@ fn render_welcome_done(
         msg_lines + action_line + 1 // +1 for buffer spacing
     });
     let has_update_tip = p.pending_update_version.is_some();
-    let has_resume_tip = !has_update_tip && p.foreign_resume_hint.is_some();
     // Tip slot precedence: pending update > privacy banner (wraps, so its
-    // height depends on width) > resume hint > random tip. The update
+    // height depends on width) > random tip. The update
     // outranks the upsell so a ready update is never invisible; the banner
     // takes the slot back once it's applied.
     let tip_height = if !show_picker {
@@ -1626,8 +1614,6 @@ fn render_welcome_done(
             // and the wrapped row count can't drift.
             let inset = prompt::prompt_inset(p.compact);
             crate::views::privacy_banner::height(content_area.width.saturating_sub(inset * 2))
-        } else if has_resume_tip {
-            1u16
         } else if let Some(tip_text) = p.tip {
             let inset = prompt::prompt_inset(welcome_compact);
             let tip_width = content_area.width.saturating_sub(inset * 2);
@@ -1685,16 +1671,7 @@ fn render_welcome_done(
         if p.session_picker_loading {
             1
         } else {
-            // Reserve a row for the pinned hidden-external hint when shown.
-            let hint_row = u16::from(
-                !p.chat_mode
-                    && crate::views::session_picker::hidden_external_hint(
-                        p.session_picker,
-                        p.session_picker_source_filter,
-                    )
-                    .is_some(),
-            );
-            (picker_count as u16).min(15) + 3 + hint_row // +3 for title + search + gap
+            (picker_count as u16).min(15) + 3 // +3 for title + search + gap
         }
     } else {
         0
@@ -1744,12 +1721,8 @@ fn render_welcome_done(
                 loading: p.session_picker_loading,
                 pending_hint: p.pending_hint,
                 shortcuts_area: None,
-                content_results: p.session_picker_content_results,
-                content_loading: p.session_picker_content_loading,
-                entries_query: p.session_picker_entries_query,
                 tick: p.welcome_tick,
                 grouped: p.session_picker_grouped,
-                source_filter: p.session_picker_source_filter,
                 pending_delete: p.session_picker_pending_delete,
                 chat_mode: p.chat_mode,
                 cwd: p.cwd,
@@ -2023,47 +1996,6 @@ fn render_welcome_done(
                 .render(tip_inset, buf);
         }
 
-        // Recent foreign session: offer a one-click resume in the tip area
-        // (only when no update is pending — the update shares ctrl+u and wins).
-        if !p.privacy_banner
-            && p.pending_update_version.is_none()
-            && let Some(hint) = p.foreign_resume_hint
-            && layout.tip.height > 0
-        {
-            let [_, tip_centered, _] = Layout::horizontal([
-                Constraint::Min(0),
-                Constraint::Length(content_area.width),
-                Constraint::Min(0),
-            ])
-            .flex(Flex::Center)
-            .areas(layout.tip);
-            let inset = prompt::prompt_inset(p.compact);
-            let tip_inset = Rect {
-                x: tip_centered.x + inset,
-                y: tip_centered.y,
-                width: tip_centered.width.saturating_sub(inset * 2),
-                height: tip_centered.height,
-            };
-            let mins = hint.age.as_secs() / 60;
-            let when = if mins == 0 {
-                "moments ago".to_string()
-            } else {
-                format!("{mins}m ago")
-            };
-            let accent = Style::default().fg(theme.accent_user);
-            let accent_bold = accent.add_modifier(Modifier::BOLD);
-            let tool = crate::app::foreign_tool_display_label(hint.tool);
-            let line = Line::from(vec![
-                Span::styled("Coming from ", accent),
-                Span::styled(tool, accent_bold),
-                Span::styled(format!("? Resume your session from {when} using "), accent),
-                Span::styled("ctrl+u", accent_bold),
-            ]);
-            Paragraph::new(line)
-                .style(Style::default().bg(theme.bg_base))
-                .render(tip_inset, buf);
-        }
-
         let warning = p.credit_balance.and_then(|bal| {
             crate::views::credit_bar::usage_warning(bal, p.auto_topup, p.usage_visible)
         });
@@ -2087,11 +2019,8 @@ fn render_welcome_done(
             p.prompt_focus,
             prompt,
             &usage_info,
-            if p.privacy_banner
-                || p.pending_update_version.is_some()
-                || p.foreign_resume_hint.is_some()
-            {
-                // Banner/update/resume tip already rendered above with custom styling.
+            if p.privacy_banner || p.pending_update_version.is_some() {
+                // Banner/update tip already rendered above with custom styling.
                 None
             } else {
                 p.tip
@@ -2141,20 +2070,11 @@ pub(crate) struct SessionPickerRenderCtx<'a> {
     pub(crate) loading: bool,
     pub(crate) pending_hint: Option<crate::views::shortcuts_bar::PendingHint>,
     pub(crate) shortcuts_area: Option<Rect>,
-    pub(crate) content_results:
-        Option<&'a [pi_shell::extensions::session_search::SearchSessionHit]>,
-    pub(crate) content_loading: bool,
-    /// The query `sessions` were server-fetched with (see
-    /// [`crate::views::session_picker::effective_filter_query`]).
-    pub(crate) entries_query: Option<&'a str>,
     pub(crate) tick: u64,
     /// When true, entries are grouped by `repo_name` with non-selectable headers.
     pub(crate) grouped: bool,
-    /// Source filter for filtering session entries.
-    pub(crate) source_filter: crate::views::session_picker::SourceFilter,
     pub(crate) pending_delete: bool,
-    /// Process-wide `--chat`: hides the source-filter chip and the
-    /// deep-search/filter footer hints (see `WelcomeRenderParams::chat_mode`).
+    /// Process-wide `--chat` (see `WelcomeRenderParams::chat_mode`).
     pub(crate) chat_mode: bool,
 }
 
@@ -2169,23 +2089,18 @@ pub(crate) fn render_session_picker(
     ctx: &mut SessionPickerRenderCtx<'_>,
 ) -> crate::views::picker::PickerHitAreas {
     use crate::views::picker::{self, PickerConfig, PickerEntry, PickerField, PickerRow};
-    use crate::views::session_picker::{
-        SessionEntryData, build_grouped_picker_entries, build_session_entry_data,
-    };
+    use crate::views::session_picker::{build_grouped_picker_entries, build_session_entry_data};
 
     let entries_data = match ctx.sessions {
         Some(s) => s,
         None => &[],
     };
 
-    // Filter entries by query and source (shared helper). The same effective
-    // query must drive filtering AND the content header/rows gates below, or
-    // this render disagrees with `handle_welcome_input`'s `build_entry_map`
-    // (which receives the effective query) on row indices.
-    let filter_query =
-        crate::views::session_picker::effective_filter_query(ctx.state.query(), ctx.entries_query);
+    // Filter entries by query (shared helper). The same query must drive
+    // filtering here and in `handle_welcome_input`'s `build_entry_map`, or
+    // this render disagrees with it on row indices.
     let filtered_indices =
-        crate::app::app_view::filter_session_entries(ctx.sessions, filter_query, ctx.source_filter);
+        crate::app::app_view::filter_session_entries(ctx.sessions, ctx.state.query());
 
     let content_width = area.width; // approximate for truncation
     let built = build_session_entry_data(entries_data, &filtered_indices, ctx.state, content_width);
@@ -2202,7 +2117,7 @@ pub(crate) fn render_session_picker(
         .collect();
 
     // Build picker entries, optionally grouped by repo_name.
-    let (mut picker_entries, non_selectable_indices) = if ctx.grouped {
+    let (picker_entries, non_selectable_indices) = if ctx.grouped {
         let current_repo =
             crate::views::session_picker::repo_name_from_cwd(&ctx.cwd.to_string_lossy());
         build_grouped_picker_entries(
@@ -2238,95 +2153,8 @@ pub(crate) fn render_session_picker(
         (entries, Vec::new())
     };
 
-    // Append content search result rows (shared helper handles dedup).
-    use crate::views::session_picker::{build_content_entry_data, build_content_header_label};
-    // Content rows will start after fuzzy rows + 1 header row.
-    let content_start = picker_entries.len() + 1;
-    let content_entry_data: Vec<SessionEntryData> = if let Some(hits) = ctx.content_results
-        && ctx.source_filter != crate::views::session_picker::SourceFilter::External
-        && !filter_query.is_empty()
-    {
-        build_content_entry_data(
-            hits,
-            entries_data,
-            &filtered_indices,
-            ctx.state,
-            content_start,
-        )
-    } else {
-        Vec::new()
-    };
-
-    // Show header only if there are actual deduped content rows to display.
-    let has_content_rows = !content_entry_data.is_empty();
-    let content_loading = ctx.content_loading
-        && ctx.source_filter != crate::views::session_picker::SourceFilter::External;
-    let spinner_label = build_content_header_label(content_loading, has_content_rows, ctx.tick);
-    // Only show the header when content results exist or when content
-    // search is in progress with a non-empty query.  This must match the
-    // header condition inside `build_entry_map` as called from
-    // `handle_welcome_input` (app_view.rs) so the input handler's
-    // `entry_count` agrees with the rendered entry list — a mismatch causes
-    // arrow-key selection to target the wrong row. Both sides therefore gate
-    // on the same EFFECTIVE query (`filter_query`), not the live one.
-    let show_content_header =
-        has_content_rows || (content_loading && !filter_query.trim().is_empty());
-    if show_content_header {
-        picker_entries.push(PickerEntry::Header {
-            label: &spinner_label,
-        });
-    }
-
-    let content_fields: Vec<Vec<PickerField>> = content_entry_data
-        .iter()
-        .map(|b| {
-            b.field_data
-                .iter()
-                .map(|(l, v)| PickerField { label: l, value: v })
-                .collect()
-        })
-        .collect();
-
-    let content_snippets: Vec<[&str; 1]> = content_entry_data
-        .iter()
-        .map(|b| [b.snippet_preview.as_deref().unwrap_or("")])
-        .collect();
-
-    for (i, (b, fields)) in content_entry_data
-        .iter()
-        .zip(content_fields.iter())
-        .enumerate()
-    {
-        let has_snippet = b.snippet_preview.is_some();
-        picker_entries.push(PickerEntry::Row(PickerRow {
-            label: &b.summary,
-            right_label: &b.right_text,
-            selected: b.is_selected,
-            expanded: b.is_expanded,
-            fields,
-            description_lines: if has_snippet {
-                &content_snippets[i]
-            } else {
-                &[]
-            },
-            summary_lines: &[],
-            dimmed: false,
-            indent: 1,
-            badge: if has_snippet { "match" } else { "" },
-            badge_color: Some(theme.accent_user),
-            collapsible: true,
-            underline_last_desc: false,
-        }));
-    }
-
-    let hidden_hint = if ctx.chat_mode {
-        None
-    } else {
-        crate::views::session_picker::hidden_external_hint(ctx.sessions, ctx.source_filter)
-    };
-
-    // Build shortcuts for fullscreen mode. Chat mode drops the worktree /
-    // deep-search / filter hints (local-Build-row actions).
+    // Build shortcuts for fullscreen mode. Chat mode drops the worktree
+    // hint (local-Build-row action).
     let worktree_shortcut: &'static str = "ctrl+w";
     use crate::views::shortcuts_bar::HintItem;
     let mut default_shortcuts: Vec<HintItem> = vec![
@@ -2368,13 +2196,6 @@ pub(crate) fn render_session_picker(
     } else if !ctx.chat_mode {
         default_shortcuts.push(HintItem {
             keys: vec![],
-            label: "filter".into(),
-            custom_display: Some("f"),
-            description: None,
-            pinned: false,
-        });
-        default_shortcuts.push(HintItem {
-            keys: vec![],
             label: "delete".into(),
             custom_display: Some("d"),
             description: None,
@@ -2394,10 +2215,6 @@ pub(crate) fn render_session_picker(
         shortcuts_area: ctx.shortcuts_area,
         tabs: None,
         active_tab: 0,
-        filter_label: (!ctx.chat_mode).then(|| ctx.source_filter.label()),
-        filter_key_hint: (!ctx.chat_mode).then_some("f"),
-        filter_active: !ctx.chat_mode && ctx.source_filter.is_active(),
-        header_note: hidden_hint.as_deref(),
         action_keys: if ctx.chat_mode || ctx.pending_delete {
             &[]
         } else {
@@ -2738,16 +2555,11 @@ mod tests {
             pending_hint: None,
             startup_warnings: &[],
             pending_update_version: None,
-            foreign_resume_hint: None,
             is_api_key_auth: false,
-            session_picker_content_results: None,
-            session_picker_content_loading: false,
-            session_picker_entries_query: None,
             welcome_tick: 0,
             gate: None,
             subscription_tier: None,
             session_picker_grouped: false,
-            session_picker_source_filter: crate::views::session_picker::SourceFilter::default(),
             session_picker_pending_delete: false,
             chat_mode: false,
             cwd: std::path::Path::new("/repo"),
@@ -2775,46 +2587,14 @@ mod tests {
     }
 
     #[test]
-    fn foreign_resume_tip_names_each_tool_and_age() {
-        use pi_foreign_sessions::ForeignSessionTool;
-
+    fn pending_update_shows_available_version() {
         let auth = AuthState::Done;
         let trust = TrustState::Done;
-        for (tool, label) in [
-            (ForeignSessionTool::Claude, "Claude Code"),
-            (ForeignSessionTool::Codex, "Codex"),
-            (ForeignSessionTool::Cursor, "Cursor"),
-        ] {
-            let hint = pi_foreign_sessions::RecentForeignSession {
-                tool,
-                native_id: "native-id".into(),
-                age: std::time::Duration::from_secs(125),
-            };
-            let mut params = render_params(&auth, &trust, None);
-            params.foreign_resume_hint = Some(&hint);
-            let text = render_done_text(&params);
-            assert!(text.contains(&format!("Coming from {label}?")), "{text}");
-            assert!(text.contains("2m ago"), "{text}");
-            assert!(text.contains("ctrl+u"), "{text}");
-        }
-    }
-
-    #[test]
-    fn pending_update_suppresses_foreign_resume_tip() {
-        let auth = AuthState::Done;
-        let trust = TrustState::Done;
-        let hint = pi_foreign_sessions::RecentForeignSession {
-            tool: pi_foreign_sessions::ForeignSessionTool::Cursor,
-            native_id: "native-id".into(),
-            age: std::time::Duration::from_secs(30),
-        };
         let mut params = render_params(&auth, &trust, None);
-        params.foreign_resume_hint = Some(&hint);
         params.pending_update_version = Some("9.9.9");
 
         let text = render_done_text(&params);
         assert!(text.contains("v9.9.9 available"), "{text}");
-        assert!(!text.contains("Coming from Cursor?"), "{text}");
     }
 
     fn png() -> [u8; 8] {
@@ -2889,156 +2669,6 @@ mod tests {
 
         let result = render_welcome(area, &mut buf, &params, &mut prompt, &mut picker);
         assert_promptless_clear(result, 82);
-    }
-
-    /// RENDER half of the header-gate invariant (input half:
-    /// `session_picker::tests::grouped_entry_map_empty_query_with_loading_has_no_header`):
-    /// with stamp==live and a re-search in flight, the "Searching…" header
-    /// must NOT render — a render-only header row shifts arrow-key row
-    /// indices. Control leg: the same search WITHOUT the stamp keeps it.
-    #[test]
-    fn render_header_gate_uses_effective_query() {
-        use ratatui::buffer::Buffer;
-        use ratatui::layout::Rect;
-
-        let theme = crate::theme::Theme::default();
-        let area = Rect::new(0, 0, 80, 20);
-        // Content-only hit: title shares nothing with the query "hit".
-        let entries = vec![make_entry("conv-1", "Quarterly roadmap notes", "repo")];
-
-        let render = |entries_query: Option<&str>| -> String {
-            let mut buf = Buffer::empty(area);
-            let mut state = PickerState::default();
-            state.set_query("hit");
-            render_session_picker(
-                area,
-                &mut buf,
-                &theme,
-                &mut SessionPickerRenderCtx {
-                    state: &mut state,
-                    sessions: Some(&entries),
-                    cwd: std::path::Path::new("/repo"),
-                    loading: false,
-                    pending_hint: None,
-                    shortcuts_area: None,
-                    content_results: None,
-                    content_loading: true,
-                    entries_query,
-                    tick: 0,
-                    grouped: false,
-                    source_filter: crate::views::session_picker::SourceFilter::default(),
-                    pending_delete: false,
-                    chat_mode: true,
-                },
-            );
-            (0..area.height)
-                .map(|y| {
-                    (0..area.width)
-                        .map(|x| {
-                            buf.cell((x, y))
-                                .map_or(' ', |c| c.symbol().chars().next().unwrap_or(' '))
-                        })
-                        .collect::<String>()
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
-
-        let stamped = render(Some("hit"));
-        assert!(
-            !stamped.contains("Searching session content"),
-            "stamp==live must not render the search header:\n{stamped}"
-        );
-        assert!(
-            stamped.contains("Quarterly roadmap notes"),
-            "stamped server hit must render:\n{stamped}"
-        );
-
-        // Control: unstamped in-flight search keeps the header, proving the
-        // negative assertion above exercises the gate.
-        let unstamped = render(None);
-        assert!(
-            unstamped.contains("Searching session content"),
-            "in-flight search without the stamp must render the header:\n{unstamped}"
-        );
-    }
-
-    /// The hidden-external hint stays pinned on the welcome picker's default
-    /// Grok view when scanned foreign rows exist — even when the native list
-    /// overflows the viewport — and never renders under `--chat` (foreign
-    /// scanning is disabled there, so the hint is dead weight).
-    #[test]
-    fn hidden_external_hint_renders_outside_chat_mode() {
-        use ratatui::buffer::Buffer;
-        use ratatui::layout::Rect;
-
-        let theme = crate::theme::Theme::default();
-        let area = Rect::new(0, 0, 80, 20);
-        // More native rows than the viewport fits: a trailing list row would
-        // scroll out of view, a pinned row must not.
-        let mut entries: Vec<SessionPickerEntry> = (0..30)
-            .map(|i| make_entry(&format!("s{i}"), &format!("native session {i}"), "repo"))
-            .collect();
-        let mut foreign = make_entry("f1", "Claude work", "repo");
-        foreign.source = "claude".into();
-        entries.push(foreign);
-
-        let render = |chat_mode: bool| -> String {
-            let mut buf = Buffer::empty(area);
-            let mut state = PickerState::default();
-            render_session_picker(
-                area,
-                &mut buf,
-                &theme,
-                &mut SessionPickerRenderCtx {
-                    state: &mut state,
-                    sessions: Some(&entries),
-                    cwd: std::path::Path::new("/repo"),
-                    loading: false,
-                    pending_hint: None,
-                    shortcuts_area: None,
-                    content_results: None,
-                    content_loading: false,
-                    entries_query: None,
-                    tick: 0,
-                    grouped: false,
-                    source_filter: crate::views::session_picker::SourceFilter::default(),
-                    pending_delete: false,
-                    chat_mode,
-                },
-            );
-            (0..area.height)
-                .map(|y| {
-                    (0..area.width)
-                        .map(|x| {
-                            buf.cell((x, y))
-                                .map_or(' ', |c| c.symbol().chars().next().unwrap_or(' '))
-                        })
-                        .collect::<String>()
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
-
-        let build_mode = render(false);
-        assert!(
-            build_mode.contains("1 external session hidden \u{b7} f to show"),
-            "default Grok filter must pin the hidden-external hint:\n{build_mode}"
-        );
-        assert!(
-            build_mode.find("external session hidden") < build_mode.find("native session 0"),
-            "the hint must be pinned above the first list row:\n{build_mode}"
-        );
-        assert!(
-            !build_mode.contains("Claude work"),
-            "the foreign row itself stays hidden under the default filter:\n{build_mode}"
-        );
-
-        let chat = render(true);
-        assert!(
-            !chat.contains("external session"),
-            "chat mode must not render the hidden-external hint:\n{chat}"
-        );
     }
 
     #[test]
@@ -3180,10 +2810,6 @@ mod tests {
             shortcuts_area: None,
             tabs: None,
             active_tab: 0,
-            filter_label: None,
-            filter_key_hint: None,
-            filter_active: false,
-            header_note: None,
             action_keys: &[],
             disable_search: false,
             compact_bottom_bar: false,

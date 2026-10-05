@@ -595,14 +595,6 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
             }
             actually_changed
         }
-        PiSessionUpdate::MemoryFiles { files } => {
-            let entries = crate::views::memory_modal::build_entries(files);
-            let modal_state = crate::views::memory_modal::MemoryModalState::new(entries);
-            agent.active_modal = Some(crate::views::modal::ActiveModal::MemoryBrowser {
-                state: Box::new(modal_state),
-            });
-            true
-        }
         PiSessionUpdate::InteractionResolved { tool_call_id } => {
             agent.dismiss_resolved_interaction(&tool_call_id)
         }

@@ -291,124 +291,11 @@ fn editor_failure_targets_original_agent_and_vanished_agent_is_safe() {
     crate::app::external_editor::report_prompt_failure(&mut app, id, "ignored");
     assert!(app.agents.is_empty());
 }
-fn seed_foreign_resume_hint(
-    app: &mut AppView,
-    tool: pi_foreign_sessions::ForeignSessionTool,
-) {
-    app.foreign_session_compat = pi_foreign_sessions::EnabledForeignSessionSources {
-        claude: true,
-        codex: true,
-        cursor: true,
-    };
-    let Effect::CanonicalizeForeignResumeCwd {
-        requested_cwd,
-        launch_token,
-    } = app.begin_foreign_resume_detection().unwrap()
-    else {
-        panic!("expected canonicalization effect");
-    };
-    let canonical_cwd = dunce::canonicalize(&requested_cwd).unwrap();
-    assert!(app.accept_foreign_resume_canonical_cwd(
-        launch_token,
-        &requested_cwd,
-        Some(canonical_cwd.clone()),
-    ));
-    app.apply_foreign_resume_detection(
-        launch_token,
-        &canonical_cwd,
-        Some(pi_foreign_sessions::RecentForeignSession {
-            tool,
-            native_id: "native-id".into(),
-            age: std::time::Duration::from_secs(60),
-        }),
-    );
-}
 #[test]
 fn quit_returns_quit_effect() {
     let mut app = test_app();
     let effects = dispatch(Action::Quit, &mut app);
     assert!(matches!(effects.as_slice(), [Effect::Quit]));
-}
-#[test]
-fn resume_foreign_session_consumes_hint_and_uses_each_tools_prompt() {
-    use pi_foreign_sessions::ForeignSessionTool;
-    for (tool, prompt) in [
-        (ForeignSessionTool::Claude, "/resume-claude native-id"),
-        (ForeignSessionTool::Codex, "/resume-codex native-id"),
-        (ForeignSessionTool::Cursor, "/resume-cursor native-id"),
-    ] {
-        let mut app = test_app();
-        seed_foreign_resume_hint(&mut app, tool);
-        let effects = dispatch(Action::ResumeForeignSession, &mut app);
-        assert!(app.foreign_resume_hint().is_none());
-        assert!(
-            effects
-                .iter()
-                .any(|effect| matches!(effect, Effect::CreateSession { .. }))
-        );
-        assert_eq!(
-            app.agents[&AgentId(0)]
-                .session
-                .pending_prompts
-                .front()
-                .map(|pending| pending.text.as_str()),
-            Some(prompt)
-        );
-    }
-}
-#[test]
-fn resume_foreign_session_without_hint_is_noop() {
-    let mut app = test_app();
-    assert!(app.foreign_resume_hint().is_none());
-    let effects = dispatch(Action::ResumeForeignSession, &mut app);
-    assert!(effects.is_empty(), "no hint → no effects");
-    assert!(app.foreign_resume_hint().is_none());
-}
-#[test]
-fn resume_foreign_session_stashes_prompt_behind_trust_and_auth() {
-    use pi_foreign_sessions::ForeignSessionTool;
-    for (tool, prompt, auth_pending) in [
-        (ForeignSessionTool::Codex, "/resume-codex native-id", false),
-        (ForeignSessionTool::Cursor, "/resume-cursor native-id", true),
-    ] {
-        let mut app = test_app();
-        if auth_pending {
-            app.auth_state = AuthState::Pending { error: None };
-        } else {
-            app.trust_state = TrustState::Pending {
-                workspace: std::path::PathBuf::from("/work/proj"),
-            };
-        }
-        seed_foreign_resume_hint(&mut app, tool);
-        app.deferred_startup.session =
-            Some(crate::app::session_startup::DeferredSessionStartup::Load {
-                session_id: "must-not-load".into(),
-                session_cwd: Some(std::path::PathBuf::from("/other")),
-                chat_kind: true,
-            });
-        app.deferred_startup.worktree = true;
-        app.deferred_startup.worktree_label = Some("stale".into());
-        app.deferred_startup.worktree_ref = Some("stale-ref".into());
-        app.deferred_startup.preferred_session_id = Some("stale-id".into());
-        app.deferred_startup.new_session = true;
-        app.deferred_startup.prompt = Some("stale prompt".into());
-        app.deferred_startup.pending_chat = true;
-        assert!(
-            app.foreign_resume_hint().is_some(),
-            "the explicit nudge remains available to supersede deferred intents"
-        );
-        let effects = dispatch(Action::ResumeForeignSession, &mut app);
-        assert!(effects.is_empty());
-        assert!(app.foreign_resume_hint().is_none());
-        assert_eq!(app.deferred_startup.prompt.as_deref(), Some(prompt));
-        assert!(app.deferred_startup.session.is_none());
-        assert!(!app.deferred_startup.worktree);
-        assert!(app.deferred_startup.worktree_label.is_none());
-        assert!(app.deferred_startup.worktree_ref.is_none());
-        assert!(app.deferred_startup.preferred_session_id.is_none());
-        assert!(!app.deferred_startup.new_session);
-        assert!(!app.deferred_startup.pending_chat);
-    }
 }
 #[test]
 fn follow_up_chip_does_not_execute_slash_command() {
@@ -1393,100 +1280,6 @@ fn chat_mode_allows_conversation_entry_even_if_local_path() {
     );
 }
 #[test]
-fn translate_local_submit_skipped_returns_changed_with_no_action() {
-    use crate::views::question_view::{LocalQuestionKind, QuestionViewState};
-    use pi_tools::implementations::grok_build::ask_user_question::{
-        Question, QuestionOption,
-    };
-    let q = Question {
-        question: "?".into(),
-        options: vec![QuestionOption {
-            label: "x".into(),
-            description: "x".into(),
-            preview: None,
-            id: None,
-        }],
-        multi_select: Some(false),
-        id: None,
-    };
-    let state = QuestionViewState::new(
-        "x".into(),
-        vec![q],
-        crate::views::prompt_widget::StashedPrompt::default(),
-    );
-    let kind = LocalQuestionKind::Fork {
-        directive: Some("dropped".into()),
-    };
-    let outcome = crate::app::agent_view::translate_local_submit_for_test(&state, kind, true);
-    assert!(matches!(
-        outcome,
-        crate::app::app_view::InputOutcome::Changed
-    ));
-}
-#[test]
-fn translate_local_submit_no_selection_returns_changed_no_action() {
-    use crate::views::question_view::{LocalQuestionKind, QuestionViewState};
-    use pi_tools::implementations::grok_build::ask_user_question::{
-        Question, QuestionOption,
-    };
-    let q = Question {
-        question: "?".into(),
-        options: (0..2)
-            .map(|_| QuestionOption {
-                label: "opt".into(),
-                description: String::new(),
-                preview: None,
-                id: None,
-            })
-            .collect(),
-        multi_select: Some(false),
-        id: None,
-    };
-    let state = QuestionViewState::new(
-        "x".into(),
-        vec![q],
-        crate::views::prompt_widget::StashedPrompt::default(),
-    );
-    let kind = LocalQuestionKind::Fork { directive: None };
-    let outcome = crate::app::agent_view::translate_local_submit_for_test(&state, kind, false);
-    assert!(matches!(
-        outcome,
-        crate::app::app_view::InputOutcome::Changed
-    ));
-}
-#[test]
-fn translate_local_submit_out_of_range_index_returns_changed_no_action() {
-    use crate::views::question_view::{LocalQuestionKind, QuestionViewState};
-    use pi_tools::implementations::grok_build::ask_user_question::{
-        Question, QuestionOption,
-    };
-    let q = Question {
-        question: "?".into(),
-        options: (0..2)
-            .map(|_| QuestionOption {
-                label: "opt".into(),
-                description: String::new(),
-                preview: None,
-                id: None,
-            })
-            .collect(),
-        multi_select: Some(false),
-        id: None,
-    };
-    let mut state = QuestionViewState::new(
-        "x".into(),
-        vec![q],
-        crate::views::prompt_widget::StashedPrompt::default(),
-    );
-    state.selections[0] = crate::views::question_view::QuestionSelection::Single(Some(99));
-    let kind = LocalQuestionKind::Fork { directive: None };
-    let outcome = crate::app::agent_view::translate_local_submit_for_test(&state, kind, false);
-    assert!(matches!(
-        outcome,
-        crate::app::app_view::InputOutcome::Changed
-    ));
-}
-#[test]
 fn entry_title_uses_display_name_when_set() {
     use crate::views::session_title::entry_title;
     let mut app = test_app_with_agent();
@@ -1674,116 +1467,59 @@ fn switch_to_agent_reanchors_stale_global_auto() {
     );
     assert!(!app.agents[&id2].session.is_auto());
 }
-/// Same refusal at the content-hit worktree entry point.
+/// Expanding a session card only toggles the row open/closed; it never
+/// fetches transcript detail.
 #[test]
-fn pick_content_session_in_worktree_refuses_conversation_row() {
-    let mut app = test_app_with_agent();
-    open_session_picker_with(&mut app, vec![make_conversation_entry("conv-wt-2")]);
-    let effects = dispatch(
-        Action::PickContentSessionInWorktree {
-            session_id: "conv-wt-2".into(),
-            cwd: String::new(),
-        },
-        &mut app,
-    );
-    assert!(effects.is_empty(), "no worktree effects, got {effects:?}");
-    assert!(
-        !app.deferred_startup.pending_chat,
-        "refusal must not set the one-shot chat bit"
-    );
-    assert!(read_toast(&app).contains("worktree"));
-}
-/// Delete acts on local disk + registry; conversation rows have neither.
-#[test]
-fn delete_session_refuses_conversation_row() {
-    let mut app = test_app_with_agent();
-    open_session_picker_with(&mut app, vec![make_conversation_entry("conv-del-1")]);
-    let effects = dispatch(
-        Action::DeleteSession {
-            source: "conversation".into(),
-            session_id: "conv-del-1".into(),
-            cwd: String::new(),
-        },
-        &mut app,
-    );
-    assert!(
-        effects.is_empty(),
-        "no DeleteSession effect for a conversation row, got {effects:?}"
-    );
-    assert!(read_toast(&app).contains("isn't supported"));
-}
-/// Expanding a conversation card must not read `chat_history.jsonl`
-/// (it doesn't exist); the row still toggles open.
-#[test]
-fn expand_conversation_card_skips_detail_load() {
+fn expand_session_card_toggles_modal_row() {
     use crate::views::modal::ActiveModal;
     let mut app = test_app_with_agent();
-    open_session_picker_with(&mut app, vec![make_conversation_entry("conv-exp-1")]);
-    let effects = dispatch(
-        Action::ExpandSessionCard {
-            source: "conversation".into(),
-            session_id: "conv-exp-1".into(),
-        },
-        &mut app,
-    );
-    assert!(
-        effects.is_empty(),
-        "no LoadCardDetail for a conversation row, got {effects:?}"
-    );
-    let agent = get_active_agent(&app).expect("active agent");
-    let Some(ActiveModal::SessionPicker { state, .. }) = agent.active_modal.as_ref() else {
-        panic!("expected SessionPicker modal");
-    };
-    assert!(state.expanded.contains(&0), "row still toggles open");
-}
-/// Canary: Build rows still lazy-load card detail on expand.
-#[test]
-fn expand_build_card_still_loads_detail() {
-    let mut app = test_app_with_agent();
     open_session_picker_with(&mut app, vec![make_picker_entry("local-exp-1", "/r")]);
-    let effects = dispatch(
-        Action::ExpandSessionCard {
-            source: "local".into(),
-            session_id: "local-exp-1".into(),
-        },
-        &mut app,
-    );
-    assert!(
-        matches!(&effects[..], [Effect::LoadCardDetail { .. }]),
-        "expected LoadCardDetail, got {effects:?}"
-    );
+    let expand = |app: &mut AppView| {
+        dispatch(
+            Action::ExpandSessionCard {
+                source: "local".into(),
+                session_id: "local-exp-1".into(),
+            },
+            app,
+        )
+    };
+    let is_expanded = |app: &AppView| {
+        let agent = get_active_agent(app).expect("active agent");
+        let Some(ActiveModal::SessionPicker { state, .. }) = agent.active_modal.as_ref() else {
+            panic!("expected SessionPicker modal");
+        };
+        state.expanded.contains(&0)
+    };
+
+    let effects = expand(&mut app);
+    assert!(effects.is_empty(), "no detail fetch, got {effects:?}");
+    assert!(is_expanded(&app), "first expand opens the row");
+
+    let effects = expand(&mut app);
+    assert!(effects.is_empty(), "no detail fetch, got {effects:?}");
+    assert!(!is_expanded(&app), "second expand collapses the row");
 }
-/// Welcome-screen variants of the conversation-card expand exemption.
+
+/// Welcome-screen variant of the card toggle.
 #[test]
-fn welcome_expand_conversation_card_skips_detail_load() {
-    let mut app = test_app();
-    app.session_picker_entries = Some(vec![make_conversation_entry("conv-exp-w1")]);
-    let effects = dispatch(
-        Action::ExpandSessionCard {
-            source: "conversation".into(),
-            session_id: "conv-exp-w1".into(),
-        },
-        &mut app,
-    );
-    assert!(
-        effects.is_empty(),
-        "no LoadCardDetail for a welcome conversation row, got {effects:?}"
-    );
-    assert!(
-        app.session_picker_state.expanded.contains(&0),
-        "row still toggles open"
-    );
+fn expand_session_card_toggles_welcome_row() {
     let mut app = test_app();
     app.session_picker_entries = Some(vec![make_picker_entry("local-exp-w1", "/r")]);
-    let effects = dispatch(
-        Action::ExpandSessionCard {
-            source: "local".into(),
-            session_id: "local-exp-w1".into(),
-        },
-        &mut app,
-    );
-    assert!(
-        matches!(&effects[..], [Effect::LoadCardDetail { .. }]),
-        "expected LoadCardDetail, got {effects:?}"
-    );
+    let expand = |app: &mut AppView| {
+        dispatch(
+            Action::ExpandSessionCard {
+                source: "local".into(),
+                session_id: "local-exp-w1".into(),
+            },
+            app,
+        )
+    };
+
+    let effects = expand(&mut app);
+    assert!(effects.is_empty(), "no detail fetch, got {effects:?}");
+    assert!(app.session_picker_state.expanded.contains(&0));
+
+    let effects = expand(&mut app);
+    assert!(effects.is_empty(), "no detail fetch, got {effects:?}");
+    assert!(!app.session_picker_state.expanded.contains(&0));
 }

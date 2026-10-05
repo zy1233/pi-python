@@ -137,19 +137,13 @@ fn render_divider(buf: &mut Buffer, row: Rect, theme: &Theme) {
 
 /// Exact body height (display rows) for the session-picker list.
 fn resume_body_rows(agent: &AgentView, width: u16) -> u16 {
-    let Some(ActiveModal::SessionPicker {
-        entries,
-        state,
-        source_filter,
-        ..
-    }) = &agent.active_modal
-    else {
+    let Some(ActiveModal::SessionPicker { entries, state, .. }) = &agent.active_modal else {
         return 0;
     };
     let entries_data = entries.as_deref().unwrap_or(&[]);
     let content_width = width.saturating_sub(2);
     let filtered =
-        minimal_api::filter_session_entries(entries.as_deref(), state.query(), *source_filter);
+        minimal_api::filter_session_entries(entries.as_deref(), state.query());
     let built =
         minimal_api::build_session_entry_data(entries_data, &filtered, state, content_width);
     let fields_vecs: Vec<Vec<PickerField>> = built
@@ -170,12 +164,7 @@ fn resume_body_rows(agent: &AgentView, width: u16) -> u16 {
         state,
         Some(current_repo.as_str()),
     );
-    // Reserve a row for the pinned hidden-external hint when shown.
-    let hint_row = u16::from(
-        !agent.app_chat_mode
-            && minimal_api::hidden_external_hint(entries.as_deref(), *source_filter).is_some(),
-    );
-    measure_entries(&picker_entries).saturating_add(hint_row)
+    measure_entries(&picker_entries)
 }
 
 fn render_resume(
@@ -185,22 +174,15 @@ fn render_resume(
     theme: &Theme,
 ) -> Option<(u16, u16)> {
     let cwd = agent.session.cwd.to_string_lossy().to_string();
-    let chat_mode = agent.app_chat_mode;
-    let Some(ActiveModal::SessionPicker {
-        entries,
-        state,
-        source_filter,
-        ..
-    }) = &mut agent.active_modal
-    else {
+    let Some(ActiveModal::SessionPicker { entries, state, .. }) = &mut agent.active_modal else {
         return None;
     };
-    let (title_row, search_row, divider_row, mut list_area, footer_row) = chrome_layout(area);
+    let (title_row, search_row, divider_row, list_area, footer_row) = chrome_layout(area);
 
     let entries_data = entries.as_deref().unwrap_or(&[]);
     let content_width = area.width.saturating_sub(2);
     let filtered =
-        minimal_api::filter_session_entries(entries.as_deref(), state.query(), *source_filter);
+        minimal_api::filter_session_entries(entries.as_deref(), state.query());
     let built =
         minimal_api::build_session_entry_data(entries_data, &filtered, state, content_width);
     let fields_vecs: Vec<Vec<PickerField>> = built
@@ -221,9 +203,6 @@ fn render_resume(
         state,
         Some(current_repo.as_str()),
     );
-    let hidden_hint = (!chat_mode)
-        .then(|| minimal_api::hidden_external_hint(entries.as_deref(), *source_filter))
-        .flatten();
 
     render_title(buf, title_row, theme, "Resume session");
     // Focus-aware search bar (cursor only when search is focused).
@@ -241,21 +220,6 @@ fn render_resume(
         None,
     );
     render_divider(buf, divider_row, theme);
-
-    // Pinned above the list so it stays visible regardless of list scroll.
-    if let Some(hint) = hidden_hint.as_deref() {
-        render_dim_line(
-            buf,
-            Rect {
-                height: 1,
-                ..list_area
-            },
-            theme,
-            hint,
-        );
-        list_area.y += 1;
-        list_area.height = list_area.height.saturating_sub(1);
-    }
 
     let nsc = vec![false; picker_entries.len()];
     let hit = picker::render_picker_content(
@@ -275,7 +239,6 @@ fn render_resume(
         item_rects: hit.item_rects,
         entry_indices: hit.entry_indices,
         tab_rects: vec![],
-        filter_rect: None,
     });
 
     render_footer(buf, footer_row, theme, RESUME_FOOTER);
@@ -348,15 +311,9 @@ mod tests {
             state: picker::PickerState::default(),
             entries: Some(entries),
             loading: false,
-            lanes: Default::default(),
             previous_palette: None,
             window: pi_pager::views::modal_window::ModalWindowState::new(),
-            content_results: None,
-            content_loading: false,
-            deep_search_seq: 0,
-            source_filter: pi_pager::views::session_picker::SourceFilter::default(),
             pending_delete: None,
-            entries_query: None,
         });
         a
     }
@@ -397,37 +354,6 @@ mod tests {
         assert!(
             !text.contains("r refresh"),
             "resume footer must stay session-picker copy:\n{text}"
-        );
-    }
-
-    #[test]
-    fn resume_panel_pins_hidden_external_hint_above_scrolling_list() {
-        // More native rows than the panel fits: the hint must stay pinned
-        // above the list instead of scrolling away with it.
-        let mut entries: Vec<_> = (0..20)
-            .map(|i| session_entry(&format!("native-{i}")))
-            .collect();
-        let mut foreign = session_entry("claude-session");
-        foreign.source = "claude".into();
-        entries.push(foreign);
-        let mut a = with_resume(entries);
-        let theme = Theme::current();
-        let area = Rect::new(0, 0, 80, 10);
-        let mut buf = Buffer::empty(area);
-        render(&mut buf, area, &mut a, ListPanel::Resume, &theme);
-
-        let text = buffer_text(&buf);
-        assert!(
-            text.contains("1 external session hidden \u{b7} f to show"),
-            "hidden foreign rows must stay explained while the list scrolls:\n{text}"
-        );
-        assert!(
-            text.find("external session hidden") < text.find("native-"),
-            "the hint must be pinned above the first list row:\n{text}"
-        );
-        assert!(
-            !text.contains("claude-session"),
-            "foreign row stays hidden under the default filter:\n{text}"
         );
     }
 

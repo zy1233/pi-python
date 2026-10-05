@@ -4,8 +4,8 @@
 use super::test_agent_view;
 use super::{
     ActivePane, AgentView, InlineMediaHitAreas, InputMode, PaneAreas,
-    PromptInputMode, PromptMode, REWOUND_PROMPT_ID_CAP, ReplayRebuiltState,
-    SELF_ORIGINATED_PROMPT_CAP, SessionReload,
+    PromptInputMode, PromptMode, REWOUND_PROMPT_ID_CAP, 
+    SELF_ORIGINATED_PROMPT_CAP, 
 };
 use crate::app::agent::AgentSession;
 use crate::app::app_view::InputOutcome;
@@ -300,11 +300,6 @@ impl AgentView {
             casual_editing_comment_id: None,
             casual_stashed_prompt: None,
             cancel_trigger_hint: None,
-            rewind_state: None,
-            rewind_points: None,
-            inline_edit: None,
-            pending_inline_resubmit: None,
-            jump_state: None,
             timeline_rail: None,
             timeline_hover: None,
             timeline_hover_preview: None,
@@ -314,9 +309,6 @@ impl AgentView {
             usage_command_visible: true,
             input_log: crate::input_log::InputRingBuffer::new(),
             esc_pressed_at: None,
-            rewind_suppress_deadline: None,
-            pending_first_prompt: None,
-            pending_fork_banner: None,
             loading_placeholder_id: None,
             pending_recap_entry: None,
             display_name: None,
@@ -437,19 +429,6 @@ impl AgentView {
         self.pending_stop_hooks = None;
         self.front_message_committed = true;
     }
-    /// Put a taken [`ReplayRebuiltState`] back: the counterpart of
-    /// [`Self::take_replay_rebuilt_state`] for callers whose rebuild failed
-    /// and who would otherwise leave a bare view where content used to be.
-    /// Used by the subagent restore path and the reload failure outcome.
-    pub(crate) fn restore_replay_rebuilt_state(&mut self, mut taken: ReplayRebuiltState) {
-        taken.scrollback.raise_id_floor(self.scrollback.id_floor());
-        taken
-            .scrollback
-            .raise_invalidation_floor(self.scrollback.invalidation_generations());
-        self.scrollback = taken.scrollback;
-        self.session.tracker = taken.tracker;
-        self.todo = taken.todo;
-    }
     /// Record that an `isReplay` update applied while a reload window is open.
     /// No-op otherwise.
     pub(crate) fn mark_reload_replay_seen(&mut self) {
@@ -486,20 +465,6 @@ impl AgentView {
         self.turn_started_at = Some(Instant::now());
         self.scrollback.enable_follow_with_preserve();
         self.flush_pending_follow_ups(&prompt_id);
-    }
-    /// Finalize any open reload window as FAILED, regardless of generation.
-    ///
-    /// For load initiations that take over the agent (fork/worktree/restore
-    /// binding a new session): the stash belongs to the superseded
-    /// pre-reconnect state, and an open window would corrupt the incoming
-    /// load's batch/replay bookkeeping — and defer its results. The window's
-    /// pending re-init completion later no-ops (generation gone).
-    pub(crate) fn abort_session_reload(&mut self) {
-        if let Some(reload) = self.session_reload.take()
-            && self.apply_reload_outcome(reload, false)
-        {
-            crate::memory_release::release_retained_memory("reload-abort");
-        }
     }
     /// Whether a running prompt reported on a `session/load` (resume /
     /// reconnect) is adoptable by THIS agent: the pure synthetic-turn guard
@@ -575,90 +540,6 @@ impl AgentView {
                 &crate::app::agent::AgentState::TurnRunning
             }
         })
-    }
-    /// Resolve a closed window per the [`SessionReload`] outcome trichotomy.
-    ///
-    /// Returns whether a heavy transient was dropped — the stashed pre-reload
-    /// scrollback (success + full replay) or the staged partial replay
-    /// (failure). The success+cursor branch *reuses* the stash and moves the
-    /// tail entries into it: nothing multi-MB drops, so callers must NOT
-    /// purge for it (a full-arena purge there would madvise away warm pages
-    /// on the most common reconnect outcome, once per open tab).
-    #[must_use = "purge retained memory iff a heavy transient dropped"]
-    fn apply_reload_outcome(&mut self, reload: SessionReload, success: bool) -> bool {
-        if let Some(pid) = self.loading_placeholder_id.take() {
-            self.scrollback.remove_entry(pid);
-        }
-        let dropped_heavy;
-        if success && reload.saw_replay {
-            self.scrollback.end_batch();
-            dropped_heavy = true;
-        } else if success {
-            let stash = reload.stash;
-            let mut tail = std::mem::replace(&mut self.scrollback, stash.scrollback);
-            let mut dedupe_budget: HashMap<String, usize> = HashMap::new();
-            for entry_id in &reload.replayed_expiry_notices {
-                let staged_text = (0..tail.len()).find_map(|i| {
-                    let entry = tail.get(i)?;
-                    if entry.id != *entry_id {
-                        return None;
-                    }
-                    match &entry.block {
-                        crate::scrollback::block::RenderBlock::System(block) => {
-                            Some(block.text.clone())
-                        }
-                        _ => None,
-                    }
-                });
-                let Some(staged_text) = staged_text else {
-                    continue;
-                };
-                let budget = dedupe_budget.entry(staged_text.clone()).or_insert_with(|| {
-                    (0..self.scrollback.len())
-                        .filter(|i| {
-                            matches!(
-                                self.scrollback.get(*i).map(|e| &e.block),
-                                Some(crate::scrollback::block::RenderBlock::System(block))
-                                    if block.text == staged_text
-                            )
-                        })
-                        .count()
-                });
-                if *budget > 0 {
-                    *budget -= 1;
-                    tail.remove_entry(*entry_id);
-                }
-            }
-            self.scrollback.append_entries_from(tail);
-            if !reload.saw_todo_update {
-                self.todo = stash.todo;
-            }
-            dropped_heavy = false;
-        } else {
-            self.restore_replay_rebuilt_state(reload.stash);
-            self.last_seen_event_id = reload.last_seen_event_id;
-            self.last_seen_event_seq = reload.last_seen_event_seq;
-            self.last_applied_event_seq = reload.last_applied_event_seq;
-            self.last_applied_pi_event_seq = reload.last_applied_pi_event_seq;
-            dropped_heavy = true;
-        }
-        self.session.loading_replay = false;
-        if success {
-            self.arm_late_replay_grace();
-        } else {
-            self.late_replay_until = None;
-        }
-        self.session.tracker.clear_user_echo_skip();
-        self.session.finish_turn(&mut self.scrollback);
-        self.scrollback.finish_all_running();
-        if let Some(id) = self.pending_recap_entry.take() {
-            self.scrollback.remove_entry(id);
-        }
-        self.mark_turn_finished(TurnEnd::Aborted);
-        self.activity_started_at = None;
-        self.last_activity = None;
-        self.reset_follow_ups_for_reload();
-        dropped_heavy
     }
     /// Effective turn elapsed time, excluding time spent in question views
     /// (accumulated pauses plus the currently open one, on both clocks).

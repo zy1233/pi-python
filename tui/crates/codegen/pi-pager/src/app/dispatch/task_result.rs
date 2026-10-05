@@ -9,26 +9,20 @@ use super::billing::{
 };
 use super::ctx::{ get_active_agent_mut};
 use super::prompt::{
-    defer_to_open_reload_window, handle_prompt_response,
-};
-use super::rewind::{
-    handle_rewind_execute_failed, handle_rewind_points_loaded,
+    handle_prompt_response,
 };
 use super::router::{dispatch, };
-use super::session::foreign::{
-    handle_foreign_sessions_scanned, handle_session_list_failed, handle_session_list_loaded,
-};
-use super::session::fork::{
-    handle_fork_session_failed, 
+use super::session::session_list::{
+    handle_session_list_failed, handle_session_list_loaded,
 };
 use super::session::lifecycle::{
     dispatch_exit_session, handle_session_created, handle_session_failed,
     handle_switch_model_complete, handle_worktree_session_failed,
 };
 use super::session::load::{
-    handle_card_detail_loaded, handle_deep_search_results, handle_session_load_failed,
-    handle_session_loaded, handle_session_restore_failed, handle_session_restored,
-    handle_session_search_debounce_expired, remove_session_from_pickers,
+    handle_session_load_failed,
+    handle_session_loaded, 
+    remove_session_from_pickers,
 };
 use super::session::modal::remove_agent_and_cleanup;
 use super::settings::ui::apply_setting_rollback;
@@ -170,16 +164,12 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
         TaskResult::WorktreeSessionFailed { agent_id, error } => {
             handle_worktree_session_failed(app, agent_id, error)
         }
-        TaskResult::ForkSessionFailed { agent_id, error } => {
-            handle_fork_session_failed(app, agent_id, error)
-        }
         TaskResult::BillingFetched {
             agent_id,
             balance,
             silent,
             subscription_tier,
             autotopup,
-            nonce,
         } => handle_billing_fetched(
             app,
             agent_id,
@@ -187,7 +177,6 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             silent,
             subscription_tier,
             autotopup,
-            nonce,
         ),
         TaskResult::AppBillingFetched { balance, autotopup } => {
             app.credit_balance = balance;
@@ -215,100 +204,16 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             running_prompt_id,
             scheduler_background_loops,
         ),
-        TaskResult::SessionMetaFromDisk {
-            agent_id,
-            title,
-            last_turn_summary,
-            last_turn_summary_gen,
-        } => {
-            if let Some(agent) = app.agents.get_mut(&agent_id) {
-                if let Some((raw, is_manual)) = title
-                    && let Some(t) =
-                        pi_shell::session::persistence::sanitize_and_cap_title(&raw)
-                {
-                    if is_manual && agent.display_name.is_none() {
-                        agent.display_name = Some(t.clone());
-                    }
-                    if agent.generated_session_title.is_none() {
-                        agent.generated_session_title = Some(t);
-                    }
-                }
-                if agent.last_turn_summary_gen == last_turn_summary_gen
-                    && agent.last_turn_summary.is_none()
-                {
-                    agent.last_turn_summary = last_turn_summary;
-                }
-            }
-            vec![]
-        }
         TaskResult::SessionLoadFailed {
             agent_id,
             session_id,
             error,
         } => handle_session_load_failed(app, agent_id, session_id, error),
-        TaskResult::SessionListLoaded {
-            sessions,
-            partial,
-            scope,
-            seq,
-            query,
-        } => handle_session_list_loaded(app, sessions, partial, scope, seq, query),
-        TaskResult::ForeignSessionsScanned { entries, seq } => {
-            handle_foreign_sessions_scanned(app, entries, seq)
+        TaskResult::SessionListLoaded { sessions, seq } => {
+            handle_session_list_loaded(app, sessions, seq)
         }
-        TaskResult::ForeignResumeCwdCanonicalized {
-            requested_cwd,
-            canonical_cwd,
-            launch_token,
-        } => {
-            let accepted_cwd = canonical_cwd.clone();
-            if app.accept_foreign_resume_canonical_cwd(launch_token, &requested_cwd, canonical_cwd)
-                && let Some(canonical_cwd) = accepted_cwd
-            {
-                vec![Effect::DetectForeignResumeHint {
-                    canonical_cwd,
-                    compat: app.foreign_session_compat,
-                    grok_home: pi_tools::util::grok_home::grok_home(),
-                    launch_token,
-                }]
-            } else {
-                vec![]
-            }
-        }
-        TaskResult::ForeignResumeHintDetected {
-            canonical_cwd,
-            launch_token,
-            hint,
-        } => {
-            app.apply_foreign_resume_detection(launch_token, &canonical_cwd, hint);
-            vec![]
-        }
-        TaskResult::SessionListFailed { error, seq, query } => {
-            handle_session_list_failed(app, error, seq, query)
-        }
-        TaskResult::SessionSearchDebounceExpired { query, seq } => {
-            handle_session_search_debounce_expired(app, query, seq)
-        }
-        TaskResult::CardDetailLoaded {
-            source,
-            session_id,
-            generation,
-            detail,
-        } => handle_card_detail_loaded(app, source, session_id, generation, detail),
-        TaskResult::SessionRestored {
-            agent_id,
-            local_session_id,
-        } => handle_session_restored(app, agent_id, local_session_id),
-        TaskResult::SessionRestoreFailed { agent_id, error } => {
-            handle_session_restore_failed(app, agent_id, error)
-        }
-        TaskResult::SessionRestoreProgress { agent_id, message } => {
-            if let Some(agent) = app.agents.get_mut(&agent_id)
-                && !defer_to_open_reload_window(agent, agent_id, "SessionRestoreProgress")
-            {
-                agent.scrollback.push_block(RenderBlock::system(message));
-            }
-            vec![]
+        TaskResult::SessionListFailed { error, seq } => {
+            handle_session_list_failed(app, error, seq)
         }
         TaskResult::PromptResponse {
             agent_id,
@@ -510,15 +415,6 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             let effects = dispatch_exit_session(app);
             app.welcome_prompt_focused = false;
             effects
-        }
-        TaskResult::DeepSearchResults { results, seq } => {
-            handle_deep_search_results(app, results, seq)
-        }
-        TaskResult::RewindPointsLoaded { agent_id, points } => {
-            handle_rewind_points_loaded(app, agent_id, points)
-        }
-        TaskResult::RewindExecuteFailed { agent_id, error } => {
-            handle_rewind_execute_failed(app, agent_id, error)
         }
         TaskResult::SettingPersisted { key, value } => {
             tracing::trace!(target: "settings", ?key, ?value, "setting persisted");

@@ -1,14 +1,14 @@
 //! Canonical session-selection CLI intent.
 //!
 //! Built once from CLI flags and consumed by interactive resolve, the event
-//! loop, and headless mode so resume / new-with-id / fork are not re-derived
+//! loop, and headless mode so resume / new-with-id are not re-derived
 //! in three places.
 use super::cli::PagerArgs;
 use std::path::{Path, PathBuf};
 /// Session-create intent deferred until [`AppView::session_startup_allowed`].
 ///
-/// Replaces the prior matrix of `startup_load_session` + cwd + `startup_fork`
-/// tuple + ad-hoc preferred-only replay.
+/// Replaces the prior matrix of `startup_load_session` + cwd tuple + ad-hoc
+/// preferred-only replay.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeferredSessionStartup {
     /// Strict resume (`-r` / `-c` / picker load).
@@ -20,17 +20,6 @@ pub enum DeferredSessionStartup {
     },
     /// Client-chosen id (`--session-id`), also mirrored into `preferred_session_id`.
     NewWithId { session_id: String },
-    /// Startup `--fork-session` after parent resolve.
-    Fork {
-        parent_session_id: String,
-        parent_cwd: Option<PathBuf>,
-        new_session_id: Option<String>,
-    },
-    /// Fresh plain Grok session whose first prompt resumes a foreign tool session.
-    ForeignResume {
-        tool: pi_foreign_sessions::ForeignSessionTool,
-        native_id: String,
-    },
 }
 /// One owner for every action deferred behind auth/folder-trust startup gates.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -56,7 +45,6 @@ impl DeferredStartupActions {
     }
 }
 /// Whether a persisted session (or its cwd) is worktree-backed.
-/// Mirrors in-session `/fork` reading `agent.session.is_worktree`.
 pub fn parent_session_is_worktree(session_id: &str, cwd: &Path) -> bool {
     let cwd_str = cwd.to_string_lossy();
     let sessions_root = pi_shell::util::grok_home::grok_home().join("sessions");
@@ -112,39 +100,20 @@ pub enum SessionStartupIntent {
         session_id: Option<String>,
         most_recent_for_cwd: bool,
     },
-    /// Resolve source like resume, then fork; optional forced ID for the child.
-    ForkFrom {
-        source_session_id: Option<String>,
-        most_recent_for_cwd: bool,
-        new_session_id: Option<String>,
-    },
 }
 /// Flag combinations that clap allows but we reject at runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StartupFlagError {
-    /// `--session-id` with resume/continue/load without `--fork-session`.
-    SessionIdRequiresFork,
-    /// `--fork-session` without resume/continue/load.
-    ForkRequiresResumeOrContinue,
-    /// `--fork-session` with `--worktree` (not supported yet).
-    ForkWithWorktree,
+    /// `--session-id` together with resume/continue/load.
+    SessionIdWithResume,
 }
 impl std::fmt::Display for StartupFlagError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::SessionIdRequiresFork => {
+            Self::SessionIdWithResume => {
                 write!(
                     f,
-                    "Error: --session-id can only be used with --continue or --resume if --fork-session is also specified."
-                )
-            }
-            Self::ForkRequiresResumeOrContinue => {
-                write!(f, "Error: --fork-session requires --resume or --continue.")
-            }
-            Self::ForkWithWorktree => {
-                write!(
-                    f,
-                    "Error: --fork-session cannot be combined with --worktree."
+                    "Error: --session-id cannot be combined with --continue or --resume."
                 )
             }
         }
@@ -160,9 +129,6 @@ pub struct SessionStartupFlags<'a> {
     /// `--resume` with no value (most recent for cwd).
     pub resume_most_recent: bool,
     pub continue_last_session: bool,
-    pub fork_session: bool,
-    /// True when `--worktree` is set (any label, including empty default).
-    pub has_worktree: bool,
 }
 /// Classify session-selection flags into a single intent (no I/O).
 pub fn session_startup_intent_from_flags(
@@ -171,32 +137,12 @@ pub fn session_startup_intent_from_flags(
     let has_resume_id = f.resume_session_id.is_some();
     let most_recent = f.resume_most_recent || f.continue_last_session;
     let has_resume_or_continue = has_resume_id || most_recent;
-    if f.fork_session && f.has_worktree {
-        return Err(StartupFlagError::ForkWithWorktree);
-    }
-    if f.fork_session && !has_resume_or_continue {
-        return Err(StartupFlagError::ForkRequiresResumeOrContinue);
-    }
     if let Some(sid) = f.session_id {
-        if has_resume_or_continue && !f.fork_session {
-            return Err(StartupFlagError::SessionIdRequiresFork);
-        }
-        if f.fork_session {
-            return Ok(SessionStartupIntent::ForkFrom {
-                source_session_id: f.resume_session_id.map(|s| s.to_owned()),
-                most_recent_for_cwd: most_recent && !has_resume_id,
-                new_session_id: Some(sid.to_owned()),
-            });
+        if has_resume_or_continue {
+            return Err(StartupFlagError::SessionIdWithResume);
         }
         return Ok(SessionStartupIntent::NewWithId {
             session_id: sid.to_owned(),
-        });
-    }
-    if f.fork_session {
-        return Ok(SessionStartupIntent::ForkFrom {
-            source_session_id: f.resume_session_id.map(|s| s.to_owned()),
-            most_recent_for_cwd: most_recent && !has_resume_id,
-            new_session_id: None,
         });
     }
     if let Some(id) = f.resume_session_id {
@@ -221,32 +167,20 @@ impl PagerArgs {
             resume_session_id: self.session_to_resume(),
             resume_most_recent: self.resume_most_recent(),
             continue_last_session: self.continue_last_session,
-            fork_session: self.fork_session,
-            has_worktree: self.worktree.is_some(),
         })
     }
 }
 /// User-facing refusal when process-wide `--chat` would open a local Build disk row.
 pub const CHAT_MODE_LOCAL_BUILD_REFUSAL: &str = "cannot open a local Build session while --chat is active; \
 resume a conversation or start a new chat (/chat)";
-/// User-facing error for `--fork-session` + `--chat` (forking is a Build disk
-/// concept; chat sessions have no local copy to fork).
-pub const CHAT_MODE_FORK_CONFLICT: &str = "--fork-session is not supported with --chat";
 /// User-facing error for `--restore-code` + `--chat` (code restore is a
 /// Build/worktree concept; chat sessions carry no codebase).
 pub const CHAT_MODE_RESTORE_CODE_CONFLICT: &str = "--restore-code is not supported with --chat";
 /// Flag validation: Build-lifecycle flags that cannot combine with `--chat`.
 /// Always `None` when `chat_mode` is false, so call sites need no `cfg`.
-pub fn chat_mode_flag_conflict(
-    chat_mode: bool,
-    fork_session: bool,
-    restore_code: bool,
-) -> Option<&'static str> {
+pub fn chat_mode_flag_conflict(chat_mode: bool, restore_code: bool) -> Option<&'static str> {
     if !chat_mode {
         return None;
-    }
-    if fork_session {
-        return Some(CHAT_MODE_FORK_CONFLICT);
     }
     if restore_code {
         return Some(CHAT_MODE_RESTORE_CODE_CONFLICT);
@@ -625,16 +559,6 @@ pub enum MaterializedStartup {
         /// cannot checkout in-place on the new local child.
         suppress_code_restore: bool,
     },
-    /// Fork from a resolved parent, then load the child.
-    Fork {
-        parent_session_id: String,
-        parent_cwd: Option<PathBuf>,
-        parent_title: Option<String>,
-        new_session_id: Option<String>,
-        /// Same one-shot as [`Self::Resume::suppress_code_restore`]: the
-        /// follow-up child `LoadSession` must not inherit agent restore-code.
-        suppress_code_restore: bool,
-    },
 }
 /// Whether materialization may resolve a non-id resume arg by title locally.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -690,15 +614,6 @@ impl MaterializeCtx {
         }
     }
 }
-/// Cwd where a forked child session is written (interactive + headless SSOT).
-///
-/// When the parent lives under another directory, the fork effect sets
-/// `newCwd` to that parent session cwd — preflight must use the same path.
-pub fn effective_fork_new_cwd(process_cwd: &str, parent_cwd: Option<&Path>) -> String {
-    parent_cwd
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|| process_cwd.to_string())
-}
 /// Resolve most-recent session id for cwd, or error.
 async fn most_recent_session_id(cwd: &str) -> anyhow::Result<(String, Option<String>)> {
     let summaries = pi_shell::session::persistence::list_summaries(Some(cwd)).await?;
@@ -753,23 +668,6 @@ fn find_most_recent_jsonl_session(target_cwd: &str) -> Option<(String, Option<St
 fn normalize_cwd_for_comparison(cwd: &str) -> String {
     cwd.replace('\\', "/").trim_end_matches('/').to_lowercase()
 }
-/// `AuthManager` for direct grok.com calls made outside the agent (pre-ACP
-/// `--continue` conversation listing, the GCS restore effect). Wires the
-/// auth-provider refresher before the first `auth()`: without it, environments
-/// that mint credentials via `auth_provider_command` report `NoOauth`.
-pub(crate) fn pre_acp_auth_manager(
-    agent_config: &pi_shell::agent::config::Config,
-) -> std::sync::Arc<pi_shell::auth::AuthManager> {
-    let auth = std::sync::Arc::new(pi_shell::auth::AuthManager::new(
-        &pi_shell::util::grok_home::grok_home(),
-        agent_config.grok_com_config.clone(),
-    ));
-    auth.configure_refresher(
-        agent_config.grok_com_config.auth_provider_command.clone(),
-        None,
-    );
-    auth
-}
 /// `--restore-code` without `--worktree` on a remote miss: refuse in-place checkout.
 const REMOTE_RESTORE_NEEDS_WORKTREE: &str = "--restore-code on a remote session requires --worktree \
      (refusing to check out snapshot code into the current directory)";
@@ -806,9 +704,6 @@ pub async fn materialize_startup_for_cwd(
     intent: SessionStartupIntent,
     cwd: &str,
 ) -> anyhow::Result<MaterializedStartup> {
-    if ctx.chat_mode && matches!(intent, SessionStartupIntent::ForkFrom { .. }) {
-        anyhow::bail!("{CHAT_MODE_FORK_CONFLICT}");
-    }
     match intent {
         SessionStartupIntent::NewAuto => Ok(MaterializedStartup::NewAuto),
         SessionStartupIntent::NewWithId { session_id } => {
@@ -841,23 +736,6 @@ pub async fn materialize_startup_for_cwd(
                 suppress_code_restore: false,
             })
         }
-        SessionStartupIntent::ForkFrom {
-            source_session_id: None,
-            most_recent_for_cwd: true,
-            new_session_id,
-        } => {
-            if let Some(ref nid) = new_session_id {
-                ensure_session_id_available(nid, cwd)?;
-            }
-            let (id, title) = most_recent_session_id(cwd).await?;
-            Ok(MaterializedStartup::Fork {
-                parent_session_id: id,
-                parent_cwd: None,
-                parent_title: title,
-                new_session_id,
-                suppress_code_restore: false,
-            })
-        }
         SessionStartupIntent::Resume {
             session_id: Some(session_id),
             ..
@@ -883,32 +761,9 @@ pub async fn materialize_startup_for_cwd(
                 suppress_code_restore: r.suppress_code_restore,
             })
         }
-        SessionStartupIntent::ForkFrom {
-            source_session_id: Some(session_id),
-            new_session_id,
-            ..
-        } => {
-            let r = resolve_existing_session(ctx, &session_id, cwd).await?;
-            if let Some(ref nid) = new_session_id {
-                let new_cwd = effective_fork_new_cwd(cwd, r.original_cwd.as_deref());
-                ensure_session_id_available(nid, &new_cwd)?;
-            }
-            Ok(MaterializedStartup::Fork {
-                parent_session_id: r.id,
-                parent_cwd: r.original_cwd,
-                parent_title: r.title,
-                new_session_id,
-                suppress_code_restore: r.suppress_code_restore,
-            })
-        }
         SessionStartupIntent::Resume {
             session_id: None,
             most_recent_for_cwd: false,
-        }
-        | SessionStartupIntent::ForkFrom {
-            source_session_id: None,
-            most_recent_for_cwd: false,
-            ..
         } => {
             anyhow::bail!("internal: invalid session startup intent (unreachable from CLI flags)")
         }
@@ -1249,9 +1104,8 @@ mod tests {
     #[test]
     fn deferred_startup_owner_take_is_atomic() {
         let mut actions = DeferredStartupActions {
-            session: Some(DeferredSessionStartup::ForeignResume {
-                tool: pi_foreign_sessions::ForeignSessionTool::Cursor,
-                native_id: "cursor-id".into(),
+            session: Some(DeferredSessionStartup::NewWithId {
+                session_id: "client-id".into(),
             }),
             prompt: Some("prompt".into()),
             pending_chat: true,
@@ -1317,62 +1171,20 @@ mod tests {
         );
     }
     #[test]
-    fn intent_session_id_with_resume_without_fork_errors() {
+    fn intent_session_id_with_resume_errors() {
         let err = parse(&["grok", "-r", "a", "-s", "b"])
             .session_startup_intent()
             .unwrap_err();
-        assert_eq!(err, StartupFlagError::SessionIdRequiresFork);
-    }
-    #[test]
-    fn intent_fork_with_resume() {
-        assert_eq!(
-            parse(&["grok", "-r", "old", "--fork-session"])
-                .session_startup_intent()
-                .unwrap(),
-            SessionStartupIntent::ForkFrom {
-                source_session_id: Some("old".into()),
-                most_recent_for_cwd: false,
-                new_session_id: None,
-            }
-        );
-    }
-    #[test]
-    fn intent_fork_with_resume_and_new_id() {
-        assert_eq!(
-            parse(&["grok", "-r", "old", "--fork-session", "-s", "new"])
-                .session_startup_intent()
-                .unwrap(),
-            SessionStartupIntent::ForkFrom {
-                source_session_id: Some("old".into()),
-                most_recent_for_cwd: false,
-                new_session_id: Some("new".into()),
-            }
-        );
-    }
-    #[test]
-    fn intent_fork_alone_errors() {
-        let err = parse(&["grok", "--fork-session"])
-            .session_startup_intent()
-            .unwrap_err();
-        assert_eq!(err, StartupFlagError::ForkRequiresResumeOrContinue);
-    }
-    #[test]
-    fn intent_fork_with_worktree_errors() {
-        let err = parse(&["grok", "-r", "a", "--fork-session", "-w"])
-            .session_startup_intent()
-            .unwrap_err();
-        assert_eq!(err, StartupFlagError::ForkWithWorktree);
+        assert_eq!(err, StartupFlagError::SessionIdWithResume);
     }
     #[test]
     fn intent_from_flags_matches_pager_args() {
-        let args = parse(&["grok", "-r", "old", "--fork-session", "-s", "new"]);
+        let args = parse(&["grok", "-r", "old"]);
         let from_flags = session_startup_intent_from_flags(SessionStartupFlags {
-            session_id: Some("new"),
+            session_id: None,
             resume_session_id: Some("old"),
             resume_most_recent: false,
             continue_last_session: false,
-            fork_session: true,
-            has_worktree: false,
         })
         .unwrap();
         assert_eq!(from_flags, args.session_startup_intent().unwrap());
@@ -1385,15 +1197,6 @@ mod tests {
             msg.contains("must be a valid UUID"),
             "unexpected message: {msg}"
         );
-    }
-    #[test]
-    fn effective_fork_new_cwd_prefers_parent() {
-        let parent = PathBuf::from("/proj-a");
-        assert_eq!(
-            effective_fork_new_cwd("/proj-b", Some(parent.as_path())),
-            "/proj-a"
-        );
-        assert_eq!(effective_fork_new_cwd("/proj-b", None), "/proj-b");
     }
     #[test]
     fn deferred_session_intent_variants_are_distinct() {
@@ -1420,19 +1223,11 @@ mod tests {
     #[test]
     fn chat_mode_flag_conflict_matrix() {
         assert_eq!(
-            chat_mode_flag_conflict(true, true, false),
-            Some(CHAT_MODE_FORK_CONFLICT)
-        );
-        assert_eq!(
-            chat_mode_flag_conflict(true, false, true),
+            chat_mode_flag_conflict(true, true),
             Some(CHAT_MODE_RESTORE_CODE_CONFLICT)
         );
-        assert_eq!(
-            chat_mode_flag_conflict(true, true, true),
-            Some(CHAT_MODE_FORK_CONFLICT)
-        );
-        assert_eq!(chat_mode_flag_conflict(true, false, false), None);
-        assert_eq!(chat_mode_flag_conflict(false, true, true), None);
+        assert_eq!(chat_mode_flag_conflict(true, false), None);
+        assert_eq!(chat_mode_flag_conflict(false, true), None);
     }
     #[test]
     fn materialize_ctx_chat_mode_from_args() {
@@ -1713,26 +1508,6 @@ mod tests {
             err.to_string().contains("does not exist"),
             "unexpected error: {err}"
         );
-    }
-    #[tokio::test]
-    async fn materialize_fork_refused_under_chat_mode() {
-        for intent in [
-            SessionStartupIntent::ForkFrom {
-                source_session_id: Some("conv-1".into()),
-                most_recent_for_cwd: false,
-                new_session_id: None,
-            },
-            SessionStartupIntent::ForkFrom {
-                source_session_id: None,
-                most_recent_for_cwd: true,
-                new_session_id: None,
-            },
-        ] {
-            let err = materialize_startup_for_cwd(chat_ctx(), intent, "/tmp")
-                .await
-                .unwrap_err();
-            assert_eq!(err.to_string(), CHAT_MODE_FORK_CONFLICT);
-        }
     }
     /// The chat passthrough does not bypass the cwd-collision refusal that
     /// `app/mod.rs` runs on the materialized id.

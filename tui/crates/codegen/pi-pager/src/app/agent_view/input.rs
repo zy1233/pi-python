@@ -43,9 +43,6 @@ impl AgentView {
             || self.blocking_card().is_some()
             || self.plan_approval_view.is_some()
             || self.casual_commenting_range.is_some()
-            || self.rewind_state.is_some()
-            || self.inline_edit.is_some()
-            || self.jump_state.is_some()
             || self.prompt.any_dropdown_open();
         if owned_elsewhere {
             ExternalPromptEditorAccess::OwnedElsewhere
@@ -108,9 +105,7 @@ impl AgentView {
     pub(crate) fn no_esc_consumer_pending(&self) -> bool {
         self.persistent_text_selection.is_none()
             && self.highlighted_link_idx.is_none()
-            && self.rewind_state.is_none()
             && self.btw_state.is_none()
-            && self.jump_state.is_none()
     }
     /// Effective screen mode of this process, as injected per agent at
     /// session creation (`apply_app_scoped_gates` →
@@ -157,7 +152,6 @@ impl AgentView {
         };
         pane_clear
             && matches!(self.prompt_mode, crate::app::queue_edit::PromptMode::Normal)
-            && self.inline_edit.is_none()
             && self.no_esc_consumer_pending()
             && self.no_input_overlay_pending()
     }
@@ -187,20 +181,8 @@ impl AgentView {
         match self.handle_minimal_btw_input(ev) {
             crate::minimal_api::MinimalBtwInput::Handled(outcome) => *outcome,
             crate::minimal_api::MinimalBtwInput::Occluded => {
-                let jump_dismissed = self.dismiss_jump_picker_if_suppressed();
                 let suspended = crate::minimal_api::suspend_minimal_btw(self);
-                let outcome = if jump_dismissed
-                    && matches!(
-                        ev,
-                        Event::Key(key)
-                            if key.kind != KeyEventKind::Release
-                                && key.code == KeyCode::Esc
-                                && key.modifiers.is_empty()
-                    ) {
-                    InputOutcome::Changed
-                } else {
-                    self.handle_input(ev, registry)
-                };
+                let outcome = self.handle_input(ev, registry);
                 if let Some(suspended) = suspended {
                     crate::minimal_api::restore_minimal_btw(self, suspended);
                 }
@@ -292,14 +274,6 @@ impl AgentView {
                 }) => self.finish_stuck_drag_as_lost_up(),
                 _ => self.clear_stuck_scrollback_drag(),
             }
-        }
-        if self.dismiss_jump_picker_if_suppressed()
-            && let Event::Key(key) = ev
-            && key.kind != KeyEventKind::Release
-            && key.code == KeyCode::Esc
-            && key.modifiers.is_empty()
-        {
-            return InputOutcome::Changed;
         }
         if let Event::Paste(text) = ev
             && let Some(outcome) = self.try_handle_wrap_host_image_paste(text)
@@ -726,55 +700,6 @@ impl AgentView {
                 _ => InputOutcome::Changed,
             };
         }
-        if self.rewind_state.is_some() {
-            return match ev {
-                Event::Key(key) if key.kind != crossterm::event::KeyEventKind::Release => {
-                    if key!('q', CONTROL).matches(key) {
-                        return InputOutcome::Unchanged;
-                    }
-                    self.handle_rewind_key(key)
-                }
-                Event::Mouse(mouse) => self.handle_rewind_mouse(mouse),
-                _ => InputOutcome::Unchanged,
-            };
-        }
-        if self.inline_edit.is_some() {
-            return match ev {
-                Event::Key(key) if key.kind != crossterm::event::KeyEventKind::Release => {
-                    if key!('q', CONTROL).matches(key) {
-                        return InputOutcome::Unchanged;
-                    }
-                    self.handle_inline_edit_key(key)
-                }
-                Event::Mouse(mouse) => self.handle_inline_edit_mouse(mouse),
-                Event::Paste(text) => {
-                    if let Some(ref mut edit) = self.inline_edit {
-                        edit.textarea.insert_str(text);
-                    }
-                    InputOutcome::Changed
-                }
-                _ => InputOutcome::Unchanged,
-            };
-        }
-        if self.jump_state.is_some() {
-            return match ev {
-                Event::Key(key) if key.kind != crossterm::event::KeyEventKind::Release => {
-                    if key!('q', CONTROL).matches(key) {
-                        return InputOutcome::Unchanged;
-                    }
-                    if registry.matches_id(ActionId::CancelTurn, key)
-                        && (self.stoppable_activity_running() || self.any_cancel_pending())
-                    {
-                        self.dismiss_jump_picker();
-                        return self
-                            .handle_agent_action_with_registry(ActionId::CancelTurn, registry);
-                    }
-                    self.handle_jump_key(key)
-                }
-                Event::Mouse(mouse) => self.handle_jump_mouse(mouse),
-                _ => InputOutcome::Unchanged,
-            };
-        }
         if let Event::Key(key) = ev
             && key.kind != KeyEventKind::Release
             && key!('y', CONTROL).matches(key)
@@ -854,14 +779,8 @@ impl AgentView {
                 state: crate::views::picker::PickerState::default(),
                 entries: None,
                 loading: true,
-                lanes: Default::default(),
                 previous_palette: None,
                 window: crate::views::modal_window::ModalWindowState::new(),
-                content_results: None,
-                content_loading: false,
-                deep_search_seq: 0,
-                entries_query: None,
-                source_filter: crate::views::session_picker::SourceFilter::default(),
                 pending_delete: None,
             });
             return InputOutcome::Action(Action::FetchSessionList);
@@ -1170,7 +1089,6 @@ mod btw_focus_tests {
     use crate::actions::ActionRegistry;
     use crate::app::app_view::InputOutcome;
     use crate::views::btw_overlay::BtwOverlayState;
-    use crate::views::jump::{JumpRestore, JumpState};
     use crossterm::event::{
         Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
     };
@@ -1392,38 +1310,6 @@ mod btw_focus_tests {
         agent.handle_minimal_input(&key(KeyCode::Down), &reg);
         assert_eq!(done_scroll_offset(&agent), 0);
     }
-    /// A hidden `/jump` picker shadowed by the `/btw` panel must not let one Esc
-    /// close both: the first Esc drops the shadowed picker (and is spent there),
-    /// the panel survives, and only a second Esc dismisses it.
-    #[test]
-    fn esc_over_shadowed_jump_picker_spares_btw_panel() {
-        let mut agent = prompt_focused_agent();
-        let reg = ActionRegistry::defaults();
-        agent.btw_state = Some(BtwOverlayState::done("q".into(), long_btw_answer()));
-        agent.jump_state = Some(JumpState {
-            entries: Vec::new(),
-            selected: 0,
-            restore: JumpRestore {
-                bookmark: None,
-                selected: None,
-                follow_mode: false,
-            },
-        });
-        agent.handle_input(&key(KeyCode::Esc), &reg);
-        assert!(
-            agent.jump_state.is_none(),
-            "first Esc drops the shadowed picker"
-        );
-        assert!(
-            agent.btw_state.is_some(),
-            "the /btw panel survives the picker-dismissing Esc"
-        );
-        agent.handle_input(&key(KeyCode::Esc), &reg);
-        assert!(
-            agent.btw_state.is_none(),
-            "a second Esc dismisses the /btw panel"
-        );
-    }
     #[test]
     fn clicking_panel_refocuses_it() {
         let mut agent = prompt_focused_agent();
@@ -1579,33 +1465,6 @@ mod esc_would_cancel_turn_tests {
         assert!(!running_agent(false).esc_would_cancel_turn(true));
     }
     #[test]
-    fn queued_edit_and_inline_edit_steal_esc() {
-        let mut agent = running_agent(false);
-        agent.prompt_mode = crate::app::queue_edit::PromptMode::EditingQueued {
-            id: 1,
-            original: "queued row".into(),
-            kind: crate::app::agent::QueueEntryKind::Prompt,
-        };
-        assert!(
-            !agent.esc_would_cancel_turn(false),
-            "queued-prompt editing owns Esc (discard edit), not cancel"
-        );
-        let mut agent = running_agent(false);
-        agent.inline_edit = Some(crate::app::inline_edit::InlineEditState {
-            entry_id: crate::scrollback::entry::EntryId::new(1),
-            prompt_index: 0,
-            original: "sent".into(),
-            textarea: pi_ratatui_textarea::TextArea::new(),
-            textarea_state: pi_ratatui_textarea::TextAreaState::default(),
-            last_text_area: None,
-            last_rect: None,
-        });
-        assert!(
-            !agent.esc_would_cancel_turn(false),
-            "an open inline prompt edit owns Esc (dismiss), not cancel"
-        );
-    }
-    #[test]
     fn bare_scrollback_true_but_open_search_steals_esc() {
         let mut agent = running_agent(false);
         agent.active_pane = AgentPane::Scrollback;
@@ -1647,63 +1506,28 @@ mod esc_would_cancel_turn_tests {
     }
 }
 #[cfg(test)]
-mod jump_backout_key_tests {
+mod ctrl_c_key_tests {
     use super::test_fixtures::make_agent;
-    use super::AgentView;
     use crate::actions::ActionRegistry;
     use crate::app::actions::Action;
     use crate::app::agent::{AgentCommand, AgentState};
     use crate::app::app_view::InputOutcome;
-    use crate::views::jump::{JumpRestore, JumpState};
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-    fn open_jump(agent: &mut AgentView) {
-        agent.jump_state = Some(JumpState {
-            entries: Vec::new(),
-            selected: 0,
-            restore: JumpRestore {
-                bookmark: None,
-                selected: None,
-                follow_mode: false,
-            },
-        });
-    }
     fn ctrl_c() -> Event {
         Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL))
     }
-    /// The open `/jump` picker must count as an Esc consumer so Esc dismisses
-    /// it (restoring the viewport) instead of falling through to the
-    /// turn-cancel policy and leaving the picker latent.
+    /// Ctrl+C cancels a running `/compact` — same hatch as a running turn.
     #[test]
-    fn jump_picker_is_an_esc_consumer() {
-        let mut agent = make_agent();
-        assert!(
-            agent.no_esc_consumer_pending(),
-            "baseline: no Esc consumer pending"
-        );
-        open_jump(&mut agent);
-        assert!(
-            !agent.no_esc_consumer_pending(),
-            "an open /jump picker consumes Esc"
-        );
-    }
-    /// `/jump` must not swallow Ctrl+C while `/compact` is running — same
-    /// hatch as a running turn.
-    #[test]
-    fn jump_picker_ctrl_c_cancels_compact() {
+    fn ctrl_c_cancels_running_compact() {
         let mut agent = make_agent();
         agent.session.state = AgentState::CommandRunning {
             command: AgentCommand::Compact,
             started_at: std::time::Instant::now(),
         };
-        open_jump(&mut agent);
         let outcome = agent.handle_input(&ctrl_c(), &ActionRegistry::defaults());
         assert!(
-            agent.jump_state.is_none(),
-            "Ctrl+C during /compact must dismiss the jump picker"
-        );
-        assert!(
             matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
-            "Ctrl+C during /compact with /jump open must cancel, got {outcome:?}"
+            "Ctrl+C during /compact must cancel, got {outcome:?}"
         );
     }
     /// Once a wake cancel is in flight, Ctrl+C must reach the same quit
@@ -1804,41 +1628,6 @@ mod voice_stop_click_during_plan_review_tests {
             matches!(outcome, InputOutcome::Action(Action::VoiceToggle)),
             "[stop] click during plan feedback must dispatch VoiceToggle, got {outcome:?}"
         );
-    }
-}
-#[cfg(test)]
-mod rich_textarea_paste_routing_tests {
-    use super::test_fixtures::make_agent;
-    use crate::actions::ActionRegistry;
-    use crate::app::inline_edit::InlineEditState;
-    use crate::scrollback::entry::EntryId;
-    use crossterm::event::Event;
-    use pi_ratatui_textarea::{TextArea, TextAreaState};
-    #[test]
-    fn inline_edit_receives_raw_multiline_paste_without_touching_prompt() {
-        let mut agent = make_agent();
-        agent.prompt.set_text("hidden prompt");
-        let mut textarea = TextArea::new();
-        textarea.set_text("ab");
-        textarea.set_cursor(1);
-        agent.inline_edit = Some(InlineEditState {
-            entry_id: EntryId::new(1),
-            prompt_index: 0,
-            original: "ab".to_owned(),
-            textarea,
-            textarea_state: TextAreaState::default(),
-            last_text_area: None,
-            last_rect: None,
-        });
-        let _ = agent.handle_input(
-            &Event::Paste("中\nline".to_owned()),
-            &ActionRegistry::defaults(),
-        );
-        assert_eq!(
-            agent.inline_edit.as_ref().map(|edit| edit.textarea.text()),
-            Some("a中\nlineb")
-        );
-        assert_eq!(agent.prompt.text(), "hidden prompt");
     }
 }
 /// Pasting while the scrollback pane holds the keyboard (prompt unfocused) must land in

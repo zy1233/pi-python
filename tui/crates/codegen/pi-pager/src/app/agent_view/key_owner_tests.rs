@@ -774,12 +774,10 @@ fn vim_mode_permission_tab_and_esc_match_default() {
 }
 
 #[test]
-fn question_keys_win_over_rewind() {
-    use crate::views::rewind::RewindState;
+fn question_card_consumes_navigation_keys() {
     use crossterm::event::Event;
     let mut agent = make_agent();
     open_question(&mut agent);
-    agent.rewind_state = Some(RewindState::new_cancel_offer(0, None, None));
     let registry = ActionRegistry::defaults();
     let _ = agent.handle_input(
         &Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
@@ -787,8 +785,4 @@ fn question_keys_win_over_rewind() {
     );
     let qv = agent.question_view.as_ref().expect("question stays open");
     assert_eq!(qv.cursor(), 1, "the question card consumed the key");
-    assert!(
-        agent.rewind_state.is_some(),
-        "the cancel-offer stays parked behind the card"
-    );
 }

@@ -5,10 +5,9 @@ use super::auth::{
 };
 use super::billing::dispatch_open_supergrok_url;
 use super::ctx::{
-    get_active_agent_mut, navigate_clearing_selection, open_url_or_show, sync_sleep_inhibitor,
+    navigate_clearing_selection, open_url_or_show, sync_sleep_inhibitor,
     with_active_agent, with_scrollback,
 };
-use super::jump::{dispatch_jump_dismiss, dispatch_jump_picker_select, };
 use super::modes::{
     dispatch_cycle_mode, 
     set_permission_mode, set_plan_mode, set_yolo_mode,
@@ -23,35 +22,25 @@ use super::prompt::{
 };
 use super::queue;
 use super::queue::dispatch_drain_queue;
-use super::rewind::{
-    dispatch_inline_edit_submit, dispatch_rewind_cancel_offer,
-    dispatch_rewind_confirm, dispatch_rewind_confirm_never_ask, dispatch_rewind_dismiss,
-    dispatch_rewind_dismiss_error, dispatch_rewind_picker_select, dispatch_rewind_show_picker,
-};
-use super::session::foreign::dispatch_fetch_session_list;
-use super::session::fork::{
-    apply_persist_worktree_mode, dispatch_fork_resolved,
-    dispatch_startup_fork_session,
-};
+use super::session::session_list::dispatch_fetch_session_list;
+use super::session::worktree_mode::apply_persist_worktree_mode;
 use super::session::lifecycle::{
-    clear_startup_actions, dispatch_agent_type_mismatch_answered,
+    dispatch_agent_type_mismatch_answered,
     dispatch_delete_current_session_answered, dispatch_exit_session, dispatch_new_session,
     dispatch_new_session_inner, dispatch_new_session_with_id, dispatch_new_worktree_session,
     dispatch_trust_folder, open_new_session_question,
 };
 use super::session::load::{
-    dispatch_cycle_session_source_filter, dispatch_load_session, dispatch_pick_content_session,
-    dispatch_pick_content_session_in_worktree, dispatch_pick_session,
-    dispatch_pick_session_in_worktree, dispatch_session_picker_closed,
-    dispatch_show_session_picker, dispatch_trigger_deep_search, session_picker_entry_matches,
-    session_picker_external_filter_active,
+    dispatch_load_session, dispatch_pick_session, dispatch_pick_session_in_worktree,
+    dispatch_session_picker_closed, dispatch_show_session_picker, session_picker_entry_matches,
+    toggle_session_card,
 };
 use super::session::modal::{dispatch_rename_session, };
 use super::settings::setters::{
     clear_default_model, clear_fork_secondary_model, preview_auto_dark_theme,
     preview_auto_light_theme, preview_theme, set_ask_user_question_timeout_enabled,
     set_auto_dark_theme, set_auto_light_theme, set_auto_update, set_collapsed_edit_blocks,
-    set_combine_queued_prompts, set_compact_mode, set_confirm_before_rewind,
+    set_combine_queued_prompts, set_compact_mode, 
     set_contextual_hint_image_input, set_contextual_hint_plan_mode,
     set_contextual_hint_small_screen, set_contextual_hint_ssh_wrap, set_contextual_hint_undo,
     set_contextual_hint_word_select, set_default_model, set_default_selected_permission,
@@ -85,7 +74,6 @@ use crate::app::actions::{Action, Effect};
 use crate::app::agent_view::ActivePane;
 use crate::app::app_view::{ActiveView, AppView, AuthState};
 use crate::scrollback::types::DisplayMode;
-use crate::views::session_picker::CONTENT_EXPAND_OFFSET;
 use pi_telemetry::session_ctx::log_event;
 pub(super) fn dispatch_copy_auth_url(
     app: &mut AppView,
@@ -115,7 +103,6 @@ pub(super) fn dispatch_copy_auth_url(
 /// and start flowing through the tail. The fat inline arms stayed inline for
 /// this reason; audit an arm's `return`s before moving it.
 pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
-    app.reconcile_foreign_resume_launch();
     let effects = match action {
         Action::Quit | Action::QuitConfirmed => {
             if let Some(tx) = &app.voice_cmd_tx {
@@ -130,24 +117,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             app.quit_for_update = true;
             effects.push(Effect::Quit);
             effects
-        }
-        Action::ResumeForeignSession => {
-            let Some(hint) = app.take_foreign_resume_hint() else {
-                return vec![];
-            };
-            clear_startup_actions(app);
-            let source = crate::app::foreign_sessions::ForeignPickerSource::from_tool(hint.tool);
-            tracing::info!(
-                tool = source.picker_source(),
-                age_secs = hint.age.as_secs(),
-                "foreign_resume accepted"
-            );
-            let prompt = source.resume_prompt(&hint.native_id);
-            if !app.session_startup_allowed() {
-                app.deferred_startup.prompt = Some(prompt);
-                return vec![];
-            }
-            super::dispatch_initial_prompt(app, prompt)
         }
         Action::NewSession => dispatch_new_session(app),
         #[cfg(feature = "local-workspace")]
@@ -217,116 +186,14 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             dispatch_load_session(app, session_id, session_cwd, chat_kind)
         }
         Action::NewSessionWithId(session_id) => dispatch_new_session_with_id(app, session_id),
-        Action::StartupForkSession {
-            parent_session_id,
-            parent_cwd,
-            new_session_id,
-        } => dispatch_startup_fork_session(app, parent_session_id, parent_cwd, new_session_id),
         Action::FetchSessionList => dispatch_fetch_session_list(app),
-        Action::CycleSessionSourceFilter => dispatch_cycle_session_source_filter(app),
         Action::ShowSessionPicker => dispatch_show_session_picker(app),
         Action::SessionPickerClosed => dispatch_session_picker_closed(app),
         Action::PickSession(index) => dispatch_pick_session(app, index),
         Action::PickSessionInWorktree(index) => dispatch_pick_session_in_worktree(app, index),
         Action::CopySessionId(index) => dispatch_copy_session_id(app, index),
         Action::ExpandSessionCard { source, session_id } => {
-            let native_source = matches!(source.as_str(), "local" | "remote" | "both");
-            let conversation_source = source == "conversation";
-            if session_picker_external_filter_active(app)
-                || crate::app::foreign_sessions::is_foreign_picker_source(&source)
-                || (!native_source && !conversation_source)
-            {
-                return vec![];
-            }
-            use crate::views::modal::ActiveModal;
-            let detail_generation = app.session_picker_detail_generation;
-            let from_modal = if let Some(agent) = get_active_agent_mut(app) {
-                if let Some(ActiveModal::SessionPicker {
-                    entries: Some(ref entries),
-                    ref mut state,
-                    ref content_results,
-                    ..
-                }) = agent.active_modal
-                {
-                    let expanded_idx = entries
-                        .iter()
-                        .position(|entry| entry.source == source && entry.id == session_id);
-                    if let Some(idx) = expanded_idx {
-                        if state.expanded.contains(&idx) {
-                            state.expanded.remove(&idx);
-                            return vec![];
-                        }
-                        state.expanded.insert(idx);
-                        let entry = &entries[idx];
-                        if native_source && entry.card_detail.is_none() {
-                            return vec![Effect::LoadCardDetail {
-                                source: entry.source.clone(),
-                                session_id: entry.id.clone(),
-                                cwd: entry.cwd.clone(),
-                                generation: detail_generation,
-                            }];
-                        }
-                        return vec![];
-                    } else if native_source
-                        && let Some(hits) = content_results.as_ref()
-                        && let Some(hit_idx) = hits.iter().position(|h| h.session_id == session_id)
-                    {
-                        let key = CONTENT_EXPAND_OFFSET + hit_idx;
-                        if state.expanded.contains(&key) {
-                            state.expanded.remove(&key);
-                        } else {
-                            state.expanded.insert(key);
-                        }
-                        return vec![];
-                    }
-                    true
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
-            if from_modal {
-                return vec![];
-            }
-            let expanded_idx = app.session_picker_entries.as_ref().and_then(|entries| {
-                entries
-                    .iter()
-                    .position(|entry| entry.source == source && entry.id == session_id)
-            });
-            if let Some(idx) = expanded_idx {
-                if app.session_picker_state.expanded.contains(&idx) {
-                    app.session_picker_state.expanded.remove(&idx);
-                    return vec![];
-                }
-                app.session_picker_state.expanded.insert(idx);
-                if native_source
-                    && let Some(entry) = app
-                        .session_picker_entries
-                        .as_ref()
-                        .and_then(|entries| entries.get(idx))
-                    && entry.card_detail.is_none()
-                {
-                    return vec![Effect::LoadCardDetail {
-                        source: entry.source.clone(),
-                        session_id: entry.id.clone(),
-                        cwd: entry.cwd.clone(),
-                        generation: detail_generation,
-                    }];
-                }
-            } else if native_source
-                && let Some(hits) = app.session_picker_content_results.as_ref()
-                && let Some(hit_idx) = hits.iter().position(|h| h.session_id == session_id)
-            {
-                let key = CONTENT_EXPAND_OFFSET + hit_idx;
-                if app.session_picker_state.expanded.contains(&key) {
-                    app.session_picker_state.expanded.remove(&key);
-                } else {
-                    app.session_picker_state.expanded.insert(key);
-                }
-                return vec![];
-            }
-            vec![]
+            toggle_session_card(app, &source, &session_id)
         }
         Action::SendPrompt(text) => dispatch_send_prompt(app, text),
         Action::SubmitFollowUp(text) => dispatch_send_prompt_inner(app, text, false, true, true),
@@ -602,7 +469,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::SetTimestamps(v) => set_timestamps(app, v),
         Action::SetTimeline(v) => set_timeline(app, v),
         Action::SetPageFlipOnSend(v) => set_page_flip_on_send(app, v),
-        Action::SetConfirmBeforeRewind(v) => set_confirm_before_rewind(app, v),
         Action::SetCombineQueuedPrompts(v) => set_combine_queued_prompts(app, v),
 
         Action::SetSimpleMode(v) => set_simple_mode(app, v),
@@ -696,26 +562,11 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             vec![]
         }
         Action::TrustFolder => dispatch_trust_folder(app),
-        Action::TriggerDeepSearch => dispatch_trigger_deep_search(app, false),
-        Action::ForceDeepSearch => dispatch_trigger_deep_search(app, true),
-        Action::PickContentSession { session_id, cwd } => {
-            dispatch_pick_content_session(app, session_id, cwd)
-        }
-        Action::PickContentSessionInWorktree { session_id, cwd } => {
-            dispatch_pick_content_session_in_worktree(app, session_id, cwd)
-        }
         Action::DeleteSession {
             source,
             session_id,
             cwd,
         } => {
-            if session_picker_external_filter_active(app) {
-                return vec![];
-            }
-            if crate::app::foreign_sessions::is_foreign_picker_source(&source) {
-                app.show_toast("External sessions can't be deleted");
-                return vec![];
-            }
             if source == "conversation" {
                 app.show_toast("Deleting chat conversations isn't supported yet");
                 return vec![];
@@ -732,20 +583,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
                 cwd,
                 after: crate::app::actions::AfterSessionDelete::Stay,
             }]
-        }
-        Action::ForkAnswered {
-            worktree,
-            directive,
-            persist_mode,
-        } => {
-            let mut effects = dispatch_fork_resolved(app, worktree, directive);
-            apply_persist_worktree_mode(
-                &mut app.fork_worktree_mode,
-                &mut effects,
-                persist_mode,
-                "fork_worktree_mode",
-            );
-            effects
         }
         Action::NewSessionAnswered {
             worktree,
@@ -769,26 +606,10 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             model_id,
             effort,
         } => dispatch_agent_type_mismatch_answered(app, start_new, model_id, effort),
-        Action::PersistMemoryFullscreen(fs) => {
-            vec![Effect::PersistMemoryFullscreen { fullscreen: fs }]
-        }
         Action::EditPromptExternal => super::external_editor::dispatch_edit_prompt_external(app),
         Action::TaskComplete(result) => dispatch_task_result(result, app),
-        Action::RewindShowPicker => dispatch_rewind_show_picker(app),
-        Action::RewindPickerSelect(prompt_index) => {
-            dispatch_rewind_picker_select(app, prompt_index)
-        }
-        Action::RewindConfirm(target) => dispatch_rewind_confirm(app, target),
-        Action::RewindConfirmNeverAsk(target) => dispatch_rewind_confirm_never_ask(app, target),
-        Action::RewindCancelOffer => dispatch_rewind_cancel_offer(app),
-        Action::RewindDismiss => dispatch_rewind_dismiss(app),
-        Action::RewindDismissError => dispatch_rewind_dismiss_error(app),
-        Action::InlineEditSubmit => dispatch_inline_edit_submit(app),
-        Action::JumpPickerSelect(turn_idx) => dispatch_jump_picker_select(app, turn_idx),
-        Action::JumpDismiss => dispatch_jump_dismiss(app),
     };
     restore_stash_where_the_draft_was_consumed(app);
-    app.reconcile_foreign_resume_launch();
     sync_sleep_inhibitor(app);
     effects
 }

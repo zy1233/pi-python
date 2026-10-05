@@ -137,15 +137,11 @@ fn list_picker_config() -> PickerConfig<'static> {
         non_selectable_clickable: &[],
         tabs: None,
         active_tab: 0,
-        filter_label: None,
-        filter_key_hint: None,
-        filter_active: false,
         action_keys: &[],
         disable_search: true,
         compact_bottom_bar: false,
         search_only_on_slash: false,
         vim_normal_first: false,
-        header_note: None,
     }
 }
 
@@ -517,7 +513,6 @@ fn render_list(buf: &mut Buffer, area: Rect, st: &mut TutorialState, compact: bo
         item_rects: content_hit.item_rects,
         entry_indices: content_hit.entry_indices,
         tab_rects: vec![],
-        filter_rect: None,
     });
 }
 

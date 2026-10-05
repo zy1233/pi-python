@@ -5,7 +5,6 @@ use super::super::task_result::{
     wrap_host_image_request_eligible,
 };
 use super::*;
-use pi_shell::session::unified_list::ListScope;
 
 #[test]
 fn stale_auth_copy_timeout_does_not_clear_newer_feedback() {
@@ -65,136 +64,6 @@ fn stale_auth_copy_timeout_does_not_clear_newer_feedback() {
         &mut app,
     );
     assert_eq!(app.auth_clipboard_delivery, None);
-}
-
-fn foreign_resume_hint(
-    tool: pi_foreign_sessions::ForeignSessionTool,
-) -> pi_foreign_sessions::RecentForeignSession {
-    pi_foreign_sessions::RecentForeignSession {
-        tool,
-        native_id: "native-session".into(),
-        age: std::time::Duration::from_secs(30),
-    }
-}
-
-#[test]
-fn foreign_resume_results_require_launch_token_and_canonical_cwd() {
-    let mut launch = test_app();
-    launch.foreign_session_compat = pi_foreign_sessions::EnabledForeignSessionSources {
-        cursor: true,
-        ..Default::default()
-    };
-    let Effect::CanonicalizeForeignResumeCwd {
-        requested_cwd,
-        launch_token,
-    } = launch
-        .begin_foreign_resume_detection()
-        .expect("pristine launch schedules canonicalization")
-    else {
-        panic!("expected canonicalization effect");
-    };
-    let canonical_cwd = dunce::canonicalize(&requested_cwd).unwrap();
-    let effects = dispatch(
-        Action::TaskComplete(TaskResult::ForeignResumeCwdCanonicalized {
-            requested_cwd: requested_cwd.clone(),
-            canonical_cwd: Some(canonical_cwd.clone()),
-            launch_token,
-        }),
-        &mut launch,
-    );
-    assert!(matches!(
-        effects.as_slice(),
-        [Effect::DetectForeignResumeHint {
-            canonical_cwd: effect_cwd,
-            launch_token: effect_token,
-            ..
-        }] if effect_cwd == &canonical_cwd && *effect_token == launch_token
-    ));
-    assert!(launch.foreign_resume_hint().is_none());
-
-    dispatch(
-        Action::TaskComplete(TaskResult::ForeignResumeHintDetected {
-            canonical_cwd: canonical_cwd.clone(),
-            launch_token,
-            hint: Some(foreign_resume_hint(
-                pi_foreign_sessions::ForeignSessionTool::Cursor,
-            )),
-        }),
-        &mut launch,
-    );
-    assert_eq!(
-        launch.foreign_resume_hint().map(|hint| hint.tool),
-        Some(pi_foreign_sessions::ForeignSessionTool::Cursor)
-    );
-
-    let mut stale = test_app();
-    stale.foreign_session_compat = launch.foreign_session_compat;
-    let Effect::CanonicalizeForeignResumeCwd {
-        requested_cwd,
-        launch_token,
-    } = stale.begin_foreign_resume_detection().unwrap()
-    else {
-        panic!("expected canonicalization effect");
-    };
-    let canonical_cwd = dunce::canonicalize(&requested_cwd).unwrap();
-    dispatch(
-        Action::TaskComplete(TaskResult::ForeignResumeHintDetected {
-            canonical_cwd: canonical_cwd.clone(),
-            launch_token: launch_token + 1,
-            hint: Some(foreign_resume_hint(
-                pi_foreign_sessions::ForeignSessionTool::Codex,
-            )),
-        }),
-        &mut stale,
-    );
-    assert!(stale.foreign_resume_hint().is_none());
-
-    stale.cwd = tempfile::tempdir().unwrap().path().to_path_buf();
-    dispatch(
-        Action::TaskComplete(TaskResult::ForeignResumeCwdCanonicalized {
-            requested_cwd,
-            canonical_cwd: Some(canonical_cwd),
-            launch_token,
-        }),
-        &mut stale,
-    );
-    assert!(stale.foreign_resume_hint().is_none());
-}
-
-#[test]
-fn foreign_resume_result_rejects_startup_conflict_before_completion() {
-    let mut app = test_app();
-    app.foreign_session_compat = pi_foreign_sessions::EnabledForeignSessionSources {
-        cursor: true,
-        ..Default::default()
-    };
-    let Effect::CanonicalizeForeignResumeCwd {
-        requested_cwd,
-        launch_token,
-    } = app.begin_foreign_resume_detection().unwrap()
-    else {
-        panic!("expected canonicalization effect");
-    };
-    let canonical_cwd = dunce::canonicalize(&requested_cwd).unwrap();
-    assert!(app.accept_foreign_resume_canonical_cwd(
-        launch_token,
-        &requested_cwd,
-        Some(canonical_cwd.clone()),
-    ));
-    app.deferred_startup.new_session = true;
-
-    dispatch(
-        Action::TaskComplete(TaskResult::ForeignResumeHintDetected {
-            canonical_cwd,
-            launch_token,
-            hint: Some(foreign_resume_hint(
-                pi_foreign_sessions::ForeignSessionTool::Cursor,
-            )),
-        }),
-        &mut app,
-    );
-
-    assert!(app.foreign_resume_hint().is_none());
 }
 
 #[test]
@@ -864,281 +733,6 @@ fn no_deferred_switch_means_no_extra_effect() {
 // -- Session deletion from the /resume picker -----------------------
 
 #[test]
-fn delete_session_complete_removes_only_matching_source_and_id() {
-    use crate::views::modal::ActiveModal;
-    let mut app = test_app_with_agent();
-    let mut foreign_same_id = make_picker_entry("s1", "/r");
-    foreign_same_id.source = "codex".into();
-    let mut remote_same_id = make_picker_entry("s1", "/r");
-    remote_same_id.source = "remote".into();
-    open_session_picker_with(
-        &mut app,
-        vec![
-            make_picker_entry("s0", "/r"),
-            foreign_same_id,
-            make_picker_entry("s1", "/r"),
-            remote_same_id,
-            make_picker_entry("s2", "/r"),
-        ],
-    );
-    let mut welcome_foreign = make_picker_entry("s1", "/r");
-    welcome_foreign.source = "codex".into();
-    let mut welcome_remote = make_picker_entry("s1", "/r");
-    welcome_remote.source = "remote".into();
-    app.session_picker_entries = Some(vec![
-        welcome_foreign,
-        make_picker_entry("s1", "/r"),
-        welcome_remote,
-    ]);
-    if let Some(ActiveModal::SessionPicker { pending_delete, .. }) = get_active_agent_mut(&mut app)
-        .unwrap()
-        .active_modal
-        .as_mut()
-    {
-        *pending_delete = Some(crate::views::session_picker::PendingDelete {
-            source: "local".into(),
-            session_id: "s1".into(),
-            cwd: "/r".into(),
-        });
-    }
-
-    let _ = dispatch_task_result(
-        TaskResult::DeleteSessionComplete {
-            source: "local".into(),
-            session_id: "s1".into(),
-            after: crate::app::actions::AfterSessionDelete::Stay,
-        },
-        &mut app,
-    );
-
-    let agent = get_active_agent(&app).expect("active agent");
-    let Some(ActiveModal::SessionPicker {
-        entries: Some(list),
-        pending_delete,
-        ..
-    }) = agent.active_modal.as_ref()
-    else {
-        panic!("expected SessionPicker modal");
-    };
-    let identities: Vec<_> = list
-        .iter()
-        .map(|entry| (entry.source.as_str(), entry.id.as_str()))
-        .collect();
-    assert_eq!(
-        identities,
-        vec![
-            ("local", "s0"),
-            ("codex", "s1"),
-            ("remote", "s1"),
-            ("local", "s2"),
-        ]
-    );
-    assert!(
-        pending_delete.is_none(),
-        "pending_delete must be cleared after deletion completes"
-    );
-    let welcome_identities: Vec<_> = app
-        .session_picker_entries
-        .as_ref()
-        .unwrap()
-        .iter()
-        .map(|entry| (entry.source.as_str(), entry.id.as_str()))
-        .collect();
-    assert_eq!(welcome_identities, vec![("codex", "s1"), ("remote", "s1")]);
-}
-
-#[test]
-fn delete_both_session_clears_modal_and_welcome_content_hits() {
-    use crate::views::modal::ActiveModal;
-    use crate::views::session_picker::{PickerItem, SourceFilter, build_entry_map};
-
-    let mut app = test_app_with_agent();
-    let mut both = make_picker_entry("shared", "/r");
-    both.source = "both".into();
-    let mut foreign = make_picker_entry("shared", "/r");
-    foreign.source = "codex".into();
-    open_session_picker_with(&mut app, vec![both.clone(), foreign.clone()]);
-    let hit = pi_shell::extensions::session_search::SearchSessionHit {
-        session_id: "shared".into(),
-        summary: "shared".into(),
-        cwd: "/r".into(),
-        updated_at: chrono::Utc::now().to_rfc3339(),
-        snippet: Some("deleted content".into()),
-        score: 1.0,
-        matched_fields: vec![],
-    };
-    if let Some(ActiveModal::SessionPicker {
-        state,
-        content_results,
-        ..
-    }) = get_active_agent_mut(&mut app)
-        .unwrap()
-        .active_modal
-        .as_mut()
-    {
-        state.set_query("shared");
-        *content_results = Some(vec![hit.clone()]);
-    }
-    app.session_picker_entries = Some(vec![both, foreign]);
-    app.session_picker_state.set_query("shared");
-    app.session_picker_content_results = Some(vec![hit]);
-
-    let _ = dispatch_task_result(
-        TaskResult::DeleteSessionComplete {
-            source: "both".into(),
-            session_id: "shared".into(),
-            after: crate::app::actions::AfterSessionDelete::Stay,
-        },
-        &mut app,
-    );
-
-    let agent = get_active_agent(&app).unwrap();
-    let Some(ActiveModal::SessionPicker {
-        entries: Some(modal_entries),
-        content_results: Some(modal_hits),
-        state: modal_state,
-        ..
-    }) = agent.active_modal.as_ref()
-    else {
-        panic!("expected modal picker");
-    };
-    assert_eq!(
-        modal_entries
-            .iter()
-            .map(|entry| (entry.source.as_str(), entry.id.as_str()))
-            .collect::<Vec<_>>(),
-        vec![("codex", "shared")]
-    );
-    assert!(modal_hits.is_empty());
-    let modal_map = build_entry_map(
-        Some(modal_entries),
-        Some(modal_hits),
-        "shared",
-        true,
-        false,
-        SourceFilter::All,
-        None,
-    );
-    assert!(
-        !modal_map
-            .iter()
-            .any(|item| matches!(item, Some(PickerItem::Content { .. })))
-    );
-    assert_eq!(modal_state.query(), "shared");
-
-    let welcome_entries = app.session_picker_entries.as_deref().unwrap();
-    let welcome_hits = app.session_picker_content_results.as_deref().unwrap();
-    assert_eq!(
-        welcome_entries
-            .iter()
-            .map(|entry| (entry.source.as_str(), entry.id.as_str()))
-            .collect::<Vec<_>>(),
-        vec![("codex", "shared")]
-    );
-    assert!(welcome_hits.is_empty());
-    let welcome_map = build_entry_map(
-        Some(welcome_entries),
-        Some(welcome_hits),
-        "shared",
-        false,
-        false,
-        SourceFilter::All,
-        None,
-    );
-    assert!(
-        !welcome_map
-            .iter()
-            .any(|item| matches!(item, Some(PickerItem::Content { .. })))
-    );
-}
-
-#[test]
-fn delete_remote_session_clears_modal_and_welcome_content_hits() {
-    use crate::views::modal::ActiveModal;
-
-    let mut app = test_app_with_agent();
-    let mut remote = make_picker_entry("remote-only", "/r");
-    remote.source = "remote".into();
-    open_session_picker_with(&mut app, vec![remote.clone()]);
-    let hit = pi_shell::extensions::session_search::SearchSessionHit {
-        session_id: "remote-only".into(),
-        summary: "remote-only".into(),
-        cwd: "/r".into(),
-        updated_at: chrono::Utc::now().to_rfc3339(),
-        snippet: Some("stale deleted content".into()),
-        score: 1.0,
-        matched_fields: vec![],
-    };
-    if let Some(ActiveModal::SessionPicker {
-        content_results, ..
-    }) = get_active_agent_mut(&mut app)
-        .unwrap()
-        .active_modal
-        .as_mut()
-    {
-        *content_results = Some(vec![hit.clone()]);
-    }
-    app.session_picker_entries = Some(vec![remote]);
-    app.session_picker_content_results = Some(vec![hit]);
-
-    let _ = dispatch_task_result(
-        TaskResult::DeleteSessionComplete {
-            source: "remote".into(),
-            session_id: "remote-only".into(),
-            after: crate::app::actions::AfterSessionDelete::Stay,
-        },
-        &mut app,
-    );
-
-    let Some(ActiveModal::SessionPicker {
-        entries: Some(modal_entries),
-        content_results: Some(modal_hits),
-        ..
-    }) = app.agents[&AgentId(0)].active_modal.as_ref()
-    else {
-        panic!("expected modal picker");
-    };
-    assert!(modal_entries.is_empty());
-    assert!(modal_hits.is_empty());
-    assert!(app.session_picker_entries.as_ref().unwrap().is_empty());
-    assert!(
-        app.session_picker_content_results
-            .as_ref()
-            .unwrap()
-            .is_empty()
-    );
-}
-
-#[test]
-fn delete_session_failed_keeps_all_entries() {
-    use crate::views::modal::ActiveModal;
-    let mut app = test_app_with_agent();
-    open_session_picker_with(
-        &mut app,
-        vec![make_picker_entry("s0", "/r"), make_picker_entry("s1", "/r")],
-    );
-
-    let _ = dispatch_task_result(
-        TaskResult::DeleteSessionFailed {
-            source: "local".into(),
-            session_id: "s1".into(),
-            error: "boom".into(),
-        },
-        &mut app,
-    );
-
-    let agent = get_active_agent(&app).expect("active agent");
-    let Some(ActiveModal::SessionPicker {
-        entries: Some(list),
-        ..
-    }) = agent.active_modal.as_ref()
-    else {
-        panic!("expected SessionPicker modal");
-    };
-    assert_eq!(list.len(), 2, "a failed delete must not remove any entry");
-}
-
-#[test]
 fn rename_session_failed_keeps_local_display_name_and_pushes_system_block() {
     // Pins the documented design decision: a failed on-disk rename
     // does NOT roll back the local `display_name` cache (the cache
@@ -1769,138 +1363,258 @@ fn rollback_to_always_approve_blocked_by_policy_pin() {
     assert!(!app.default_yolo);
 }
 
-// -- Degraded conversations lane (SessionListLoaded.partial) ----------
+// -- Session list completion (`SessionListLoaded` / `SessionListFailed`) ----------
 
-/// Notice fires once per relaxed run; survives search, re-arms on a cwd-scoped browse.
-#[test]
-fn session_list_relax_surfaces_notice_once() {
-    let relax_response = || {
-        Action::TaskComplete(TaskResult::SessionListLoaded {
-            scope: ListScope::Repo,
-            sessions: vec![make_picker_entry("local-other-cwd-1", "/elsewhere")],
-            partial: None,
-            seq: 0,
-            query: None,
-        })
+fn modal_picker(app: &AppView) -> (&Option<Vec<crate::app::app_view::SessionPickerEntry>>, bool) {
+    use crate::views::modal::ActiveModal;
+    let agent = get_active_agent(app).expect("active agent");
+    let Some(ActiveModal::SessionPicker {
+        entries, loading, ..
+    }) = agent.active_modal.as_ref()
+    else {
+        panic!("expected SessionPicker modal");
     };
-
-    let mut app = test_app_with_agent();
-    open_session_picker_with(&mut app, vec![]);
-    let _ = dispatch(relax_response(), &mut app);
-    assert!(
-        read_toast(&app).contains("this repo"),
-        "the relaxed scope must be explained"
-    );
-
-    app.agents.get_mut(&AgentId(0)).unwrap().toast = None;
-    let _ = dispatch(relax_response(), &mut app);
-    assert!(
-        app.agents[&AgentId(0)].toast.is_none(),
-        "the relax notice must not repeat while the scope is unchanged"
-    );
-
-    let _ = dispatch(
-        Action::TaskComplete(TaskResult::SessionListLoaded {
-            scope: ListScope::Cwd,
-            sessions: vec![],
-            partial: None,
-            seq: 0,
-            query: Some("needle".into()),
-        }),
-        &mut app,
-    );
-    let _ = dispatch(relax_response(), &mut app);
-    assert!(
-        app.agents[&AgentId(0)].toast.is_none(),
-        "a search response must not re-arm the relax notice"
-    );
-
-    let _ = dispatch(
-        Action::TaskComplete(TaskResult::SessionListLoaded {
-            scope: ListScope::Cwd,
-            sessions: vec![make_picker_entry("local-here-1", "/here")],
-            partial: None,
-            seq: 0,
-            query: None,
-        }),
-        &mut app,
-    );
-    let _ = dispatch(relax_response(), &mut app);
-    assert!(
-        read_toast(&app).contains("this repo"),
-        "a scope change back to relaxed must notify again"
-    );
+    (entries, *loading)
 }
 
-/// Welcome view can't render toasts, so the one-shot notice must not latch there.
+fn set_modal_picker_loading(app: &mut AppView, value: bool) {
+    use crate::views::modal::ActiveModal;
+    if let Some(ActiveModal::SessionPicker { loading, .. }) = get_active_agent_mut(app)
+        .expect("active agent")
+        .active_modal
+        .as_mut()
+    {
+        *loading = value;
+    }
+}
+
+/// A current-seq list replaces the modal's entries and clears its spinner;
+/// the welcome picker is left alone while the modal owns the fetch.
 #[test]
-fn session_list_relax_on_welcome_does_not_latch() {
+fn session_list_loaded_lands_on_modal_and_clears_loading() {
+    let mut app = test_app_with_agent();
+    open_session_picker_with(&mut app, vec![]);
+    set_modal_picker_loading(&mut app, true);
+    let _ = dispatch(
+        Action::TaskComplete(TaskResult::SessionListLoaded {
+            sessions: vec![make_picker_entry("a", "/r"), make_picker_entry("b", "/r")],
+            seq: 0,
+        }),
+        &mut app,
+    );
+    let (entries, loading) = modal_picker(&app);
+    let ids: Vec<&str> = entries
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(|e| e.id.as_str())
+        .collect();
+    assert_eq!(ids, ["a", "b"]);
+    assert!(!loading, "landing the list clears the modal spinner");
+    assert!(app.session_picker_entries.is_none());
+}
+
+/// Without a modal, the list lands on the welcome-screen picker.
+#[test]
+fn session_list_loaded_lands_on_welcome_picker_without_modal() {
     let mut app = test_app();
-    assert!(matches!(app.active_view, ActiveView::Welcome));
+    app.session_picker_loading = true;
     let _ = dispatch(
         Action::TaskComplete(TaskResult::SessionListLoaded {
-            scope: ListScope::All,
-            sessions: vec![make_picker_entry("local-other-cwd-1", "/elsewhere")],
-            partial: None,
+            sessions: vec![make_picker_entry("w1", "/r")],
             seq: 0,
-            query: None,
         }),
         &mut app,
     );
-    assert!(
-        app.session_picker_relaxed_notified_for.is_none(),
-        "a notice that cannot render must not latch"
-    );
+    let ids: Vec<&str> = app
+        .session_picker_entries
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(|e| e.id.as_str())
+        .collect();
+    assert_eq!(ids, ["w1"]);
+    assert!(!app.session_picker_loading);
 }
 
-/// The notice is keyed by browse cwd: a different directory re-notifies even
-/// though the prior latch is set.
+/// An empty list leaves the modal without entries and shows the generic toast.
 #[test]
-fn session_list_relax_renotifies_when_cwd_changes() {
-    let relax = || {
-        Action::TaskComplete(TaskResult::SessionListLoaded {
-            scope: ListScope::Repo,
-            sessions: vec![make_picker_entry("local-other-cwd-1", "/elsewhere")],
-            partial: None,
-            seq: 0,
-            query: None,
-        })
-    };
-
+fn session_list_empty_shows_generic_toast() {
     let mut app = test_app_with_agent();
-    open_session_picker_with(&mut app, vec![]);
-
-    app.cwd = std::path::PathBuf::from("/repo/a");
-    let _ = dispatch(relax(), &mut app);
-    assert!(
-        read_toast(&app).contains("this repo"),
-        "the first cwd must notify"
-    );
-
-    app.agents.get_mut(&AgentId(0)).unwrap().toast = None;
-    app.cwd = std::path::PathBuf::from("/repo/b");
-    let _ = dispatch(relax(), &mut app);
-    assert!(
-        read_toast(&app).contains("this repo"),
-        "a different cwd must re-notify even with the prior latch set"
-    );
-}
-
-/// Canary: an empty list without a degraded lane keeps the generic toast.
-#[test]
-fn session_list_empty_without_partial_keeps_generic_toast() {
-    let mut app = test_app_with_agent();
-    open_session_picker_with(&mut app, vec![]);
+    open_session_picker_with(&mut app, vec![make_picker_entry("old", "/r")]);
+    set_modal_picker_loading(&mut app, true);
     let _ = dispatch(
         Action::TaskComplete(TaskResult::SessionListLoaded {
-            scope: ListScope::Cwd,
             sessions: vec![],
-            partial: None,
             seq: 0,
-            query: None,
         }),
         &mut app,
     );
     assert!(read_toast(&app).contains("No sessions found"));
+    let (entries, loading) = modal_picker(&app);
+    assert!(entries.is_none(), "an empty list clears the entries");
+    assert!(!loading);
 }
 
+/// A failed fetch surfaces the error, clears the spinner and drops the entries.
+#[test]
+fn session_list_failure_toasts_and_clears_loading() {
+    let mut app = test_app_with_agent();
+    open_session_picker_with(&mut app, vec![]);
+    set_modal_picker_loading(&mut app, true);
+    let _ = dispatch(
+        Action::TaskComplete(TaskResult::SessionListFailed {
+            error: "boom".into(),
+            seq: 0,
+        }),
+        &mut app,
+    );
+    assert!(read_toast(&app).contains("boom"));
+    let (entries, loading) = modal_picker(&app);
+    assert!(entries.is_none());
+    assert!(!loading);
+}
+
+/// Out-of-order completions: only the response for the current seq lands;
+/// stale successes and failures are both dropped silently.
+#[test]
+fn stale_session_list_responses_are_dropped() {
+    let mut app = test_app_with_agent();
+    open_session_picker_with(&mut app, vec![make_picker_entry("current", "/r")]);
+    set_modal_picker_loading(&mut app, true);
+    app.session_picker_list_seq = 3;
+
+    let _ = dispatch(
+        Action::TaskComplete(TaskResult::SessionListLoaded {
+            sessions: vec![make_picker_entry("stale", "/r")],
+            seq: 2,
+        }),
+        &mut app,
+    );
+    let (entries, loading) = modal_picker(&app);
+    assert_eq!(entries.as_deref().map(<[_]>::len), Some(1));
+    assert_eq!(entries.as_deref().unwrap()[0].id, "current");
+    assert!(loading, "a stale result must not clear the spinner");
+
+    let _ = dispatch(
+        Action::TaskComplete(TaskResult::SessionListFailed {
+            error: "boom".into(),
+            seq: 2,
+        }),
+        &mut app,
+    );
+    assert!(
+        app.agents[&AgentId(0)].toast.is_none(),
+        "a stale failure must not toast"
+    );
+
+    let _ = dispatch(
+        Action::TaskComplete(TaskResult::SessionListLoaded {
+            sessions: vec![make_picker_entry("fresh", "/r")],
+            seq: 3,
+        }),
+        &mut app,
+    );
+    let (entries, loading) = modal_picker(&app);
+    assert_eq!(entries.as_deref().unwrap()[0].id, "fresh");
+    assert!(!loading);
+}
+
+// -- Session deletion from the /resume picker -----------------------
+
+#[test]
+fn delete_session_complete_removes_only_matching_source_and_id() {
+    use crate::views::modal::ActiveModal;
+    let mut app = test_app_with_agent();
+    let mut other_source_same_id = make_picker_entry("s1", "/r");
+    other_source_same_id.source = "archive".into();
+    open_session_picker_with(
+        &mut app,
+        vec![
+            make_picker_entry("s0", "/r"),
+            other_source_same_id.clone(),
+            make_picker_entry("s1", "/r"),
+            make_picker_entry("s2", "/r"),
+        ],
+    );
+    app.session_picker_entries = Some(vec![other_source_same_id, make_picker_entry("s1", "/r")]);
+    if let Some(ActiveModal::SessionPicker { pending_delete, .. }) = get_active_agent_mut(&mut app)
+        .unwrap()
+        .active_modal
+        .as_mut()
+    {
+        *pending_delete = Some(crate::views::session_picker::PendingDelete {
+            source: "local".into(),
+            session_id: "s1".into(),
+            cwd: "/r".into(),
+        });
+    }
+
+    let _ = dispatch_task_result(
+        TaskResult::DeleteSessionComplete {
+            source: "local".into(),
+            session_id: "s1".into(),
+            after: crate::app::actions::AfterSessionDelete::Stay,
+        },
+        &mut app,
+    );
+
+    let agent = get_active_agent(&app).expect("active agent");
+    let Some(ActiveModal::SessionPicker {
+        entries: Some(list),
+        pending_delete,
+        ..
+    }) = agent.active_modal.as_ref()
+    else {
+        panic!("expected SessionPicker modal");
+    };
+    let identities: Vec<_> = list
+        .iter()
+        .map(|entry| (entry.source.as_str(), entry.id.as_str()))
+        .collect();
+    assert_eq!(
+        identities,
+        vec![("local", "s0"), ("archive", "s1"), ("local", "s2")]
+    );
+    assert!(
+        pending_delete.is_none(),
+        "pending_delete must be cleared after deletion completes"
+    );
+    let welcome_identities: Vec<_> = app
+        .session_picker_entries
+        .as_ref()
+        .unwrap()
+        .iter()
+        .map(|entry| (entry.source.as_str(), entry.id.as_str()))
+        .collect();
+    assert_eq!(welcome_identities, vec![("archive", "s1")]);
+}
+
+#[test]
+fn delete_session_failed_keeps_all_entries() {
+    use crate::views::modal::ActiveModal;
+    let mut app = test_app_with_agent();
+    open_session_picker_with(
+        &mut app,
+        vec![make_picker_entry("s0", "/r"), make_picker_entry("s1", "/r")],
+    );
+
+    let _ = dispatch_task_result(
+        TaskResult::DeleteSessionFailed {
+            source: "local".into(),
+            session_id: "s1".into(),
+            error: "boom".into(),
+        },
+        &mut app,
+    );
+
+    let agent = get_active_agent(&app).expect("active agent");
+    let Some(ActiveModal::SessionPicker {
+        entries: Some(list),
+        ..
+    }) = agent.active_modal.as_ref()
+    else {
+        panic!("expected SessionPicker modal");
+    };
+    assert_eq!(list.len(), 2, "a failed delete must not remove any entry");
+}

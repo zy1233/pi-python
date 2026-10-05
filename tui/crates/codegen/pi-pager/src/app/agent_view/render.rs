@@ -639,24 +639,6 @@ impl AgentView {
         } else {
             0
         };
-        let rewind_view_h = if permission_view_h == 0 && question_view_h == 0 {
-                if let Some(ref rw) = self.rewind_state {
-                    crate::views::rewind::rewind_overlay_height(&rw.phase, area.height)
-                } else {
-                    0
-                }
-            } else {
-                0
-            };
-        let jump_view_h = if !self.jump_slot_taken() {
-            if let Some(ref js) = self.jump_state {
-                crate::views::jump::jump_overlay_height(js, area.height)
-            } else {
-                0
-            }
-        } else {
-            0
-        };
         let is_question_input_mode = self
             .question_view
             .as_ref()
@@ -730,10 +712,6 @@ impl AgentView {
             question_view_h.saturating_sub(freeform_offset)
                 + question_prompt_body_h
                 + question_footer_h
-        } else if rewind_view_h > 0 {
-            rewind_view_h
-        } else if jump_view_h > 0 {
-            jump_view_h
         } else {
             base_prompt_height
         };
@@ -807,14 +785,11 @@ impl AgentView {
                 .height
                 .saturating_sub(search_reserved_rows);
         }
-        let overlay_blocks_rail_hover = self.jump_state.is_some()
-            || self.rewind_state.is_some()
-            || self.blocking_card().is_some()
+        let overlay_blocks_rail_hover = self.blocking_card().is_some()
             || self.block_viewer.is_some();
         if layout.timeline_width > 0 {
             self.sync_pending_user_input_marks();
             self.scrollback.set_cwd(Some(self.session.cwd.clone()));
-            let _ = self.sync_inline_edit_layout(layout.scrollback_content.width);
             self.scrollback.prepare_layout(
                 layout.scrollback_content.width,
                 layout.scrollback_content.height,
@@ -1072,18 +1047,14 @@ impl AgentView {
         let dropdown_open = self.prompt.any_dropdown_open();
         self.hit_upgrade_cta
             .set_unless_dropdown(upgrade_cta_rect, dropdown_open);
-        let mut inline_edit_cursor: Option<(u16, u16)> = None;
         let sticky_gap_row: Option<u16>;
         {
             self.sync_pending_user_input_marks();
             self.scrollback.set_cwd(Some(self.session.cwd.clone()));
-            let inline_edit_dim_from =
-                self.sync_inline_edit_layout(layout.scrollback_content.width);
             self.scrollback.prepare_layout(
                 layout.scrollback_content.width,
                 layout.scrollback_content.height,
             );
-            let rewind_dim_from = self.rewind_dim_from_entry().or(inline_edit_dim_from);
             let sb_focused = self.active_pane == ActivePane::Scrollback && !overlay_focused;
             let search_highlight = if search_active {
                 self.scrollback_search
@@ -1096,7 +1067,6 @@ impl AgentView {
             let sb_rendered = crate::scrollback::ScrollbackPane::new()
                 .active(sb_focused)
                 .with_mouse_pos(self.last_mouse_pos)
-                .with_dim_from(rewind_dim_from)
                 .with_hovered_entry(self.hovered_entry)
                 .with_search_highlight(search_highlight)
                 .with_media_paths(self.media_link_paths.clone())
@@ -1113,12 +1083,6 @@ impl AgentView {
                 sb_rendered.selection_boundaries,
             );
             self.reclamp_drag_head_post_render(false);
-            if self.inline_edit.is_some() {
-                let cursor = self.render_inline_edit(buf, layout.scrollback_content);
-                if self.rewind_state.is_none() {
-                    inline_edit_cursor = cursor;
-                }
-            }
             if search_reserved_rows > 0
                 && let Some(search) = self.scrollback_search.as_ref()
             {
@@ -2222,19 +2186,6 @@ impl AgentView {
                 self.hit_question_scrollbar.set(sb_rect);
             } else {
                 self.hit_question_scrollbar.clear();
-            }
-        } else if rewind_view_h > 0 {
-            if let Some(ref rw) = self.rewind_state {
-                crate::views::rewind::render_rewind_overlay(
-                    buf,
-                    layout.prompt,
-                    &rw.phase,
-                    prompt_focused,
-                );
-            }
-        } else if jump_view_h > 0 {
-            if let Some(ref js) = self.jump_state {
-                crate::views::jump::render_jump_overlay(buf, layout.prompt, js, prompt_focused);
             }
         } else {
             let collapsed = !prompt_focused && appearance.prompt.collapse_unfocused;
@@ -3579,12 +3530,7 @@ impl AgentView {
                 }
             }
         }
-        let cursor = if self.inline_edit.is_some() {
-            inline_edit_cursor
-        } else {
-            prompt_cursor_pos
-        };
-        (cursor, prompt_post_flush)
+        (prompt_cursor_pos, prompt_post_flush)
     }
 }
 /// Draw one ▼/▲ scroll-indicator arrow centered on row `y`, or clear its
@@ -3885,9 +3831,6 @@ mod permission_hint_tests {
             );
         }
     }
-}
-#[cfg(test)]
-mod feedback_input_tests {
 }
 #[cfg(test)]
 mod status_line_draw_tests {
