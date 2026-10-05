@@ -1,6 +1,5 @@
 //! Fork dispatchers and fork placeholder builders.
-use super::lifecycle::{dispatch_new_session_inner_with_id, refuse_chat_mode_build_agent};
-use super::load::session_opens_as_chat;
+use super::lifecycle::{dispatch_new_session_inner_with_id, };
 use crate::acp::tracker::AcpUpdateTracker;
 use crate::app::actions::Effect;
 use crate::app::agent::{AgentCommand, AgentId, AgentSession, AgentState};
@@ -9,75 +8,10 @@ use crate::app::app_view::{ActiveView, AppView};
 use crate::app::cancel_latency::TurnEnd;
 use crate::app::dispatch::ctx::{SwitchCause, switch_to_agent};
 use crate::app::dispatch::modes::inherit_auto_mode;
-use crate::app::dispatch::prompt::supersede_open_reload_window;
 use crate::scrollback::block::RenderBlock;
 use crate::scrollback::blocks::SessionEvent;
 use crate::scrollback::state::ScrollbackState;
-use agent_client_protocol as acp;
 use std::time::Instant;
-/// Top-level `/fork` dispatcher. Resolves the worktree decision: an
-/// explicit `--worktree` / `--no-worktree` flag short-circuits to
-/// [`dispatch_fork_resolved`]. When no flag is given and a persisted
-/// `fork_worktree_mode` preference is set (`Always` / `Never`), the
-/// popup is skipped and the corresponding path is taken directly. The
-/// `Ask` default opens the [`open_fork_question`] modal so the user is
-/// asked.
-///
-/// When the parent session's working directory is **not** inside a git
-/// repository (indicated by the absence of a `git_head_changed`
-/// notification — `current_branch` is `None`):
-/// - `--worktree` is rejected with a toast (nothing to create a worktree from).
-/// - No flag (regardless of `fork_worktree_mode`): the worktree question
-///   is skipped and the fork proceeds with `worktree = false`.
-///
-/// Note: if the notification has not arrived yet (rare — user forks
-/// before the shell sends `git_head_changed`), the fallback to
-/// `worktree = false` is safe and the worktree can be created manually
-/// afterwards.
-///
-/// Two failure surfaces:
-/// - Active view is not an agent: toast and return.
-/// - Active agent has no `session_id` (still being created): toast and
-///   return. Both rejections are deliberate -- queueing the fork until
-///   `SessionLoaded` would require persisting `ForkArgs` across the
-///   `TaskResult` and is deferred to v2.
-pub(in crate::app::dispatch) fn dispatch_fork(
-    app: &mut AppView,
-    args: crate::app::actions::ForkArgs,
-) -> Vec<Effect> {
-    let ActiveView::Agent(parent_id) = app.active_view else {
-        app.show_toast("/fork only works inside a session");
-        return vec![];
-    };
-    let (has_session, in_git_repo) = app
-        .agents
-        .get(&parent_id)
-        .map(|a| (a.session.session_id.is_some(), a.current_branch.is_some()))
-        .unwrap_or((false, false));
-    if !has_session {
-        app.show_toast("Cannot fork: session is still being created");
-        return vec![];
-    }
-    match args.worktree_override {
-        Some(true) if !in_git_repo => {
-            app.show_toast("Cannot create worktree: not in a git repository");
-            vec![]
-        }
-        Some(worktree) => dispatch_fork_resolved(app, worktree, args.directive),
-        None => {
-            if in_git_repo {
-                use crate::app::app_view::WorktreeMode;
-                match app.fork_worktree_mode {
-                    WorktreeMode::Always => dispatch_fork_resolved(app, true, args.directive),
-                    WorktreeMode::Never => dispatch_fork_resolved(app, false, args.directive),
-                    WorktreeMode::Ask => open_fork_question(app, args.directive),
-                }
-            } else {
-                dispatch_fork_resolved(app, false, args.directive)
-            }
-        }
-    }
-}
 /// If `persist_mode` is `Some`, write `mode` into `*field` and append
 /// a [`Effect::PersistWorktreeMode`] to `effects` with the given
 /// `config_key`.
@@ -111,57 +45,6 @@ pub(super) fn worktree_persist_options()
             id: None,
         },
     ]
-}
-/// Open the local worktree question modal on the active agent. Refuses
-/// if a question (ACP or local) is already on screen, surfacing a toast
-/// instead -- the modal-collision protocol.
-fn open_fork_question(app: &mut AppView, directive: Option<String>) -> Vec<Effect> {
-    use crate::views::question_view::{LocalQuestionKind, QuestionViewState};
-    use pi_tools::implementations::grok_build::ask_user_question::{
-        Question, QuestionOption,
-    };
-    let ActiveView::Agent(id) = app.active_view else {
-        return vec![];
-    };
-    let Some(agent) = app.agents.get_mut(&id) else {
-        return vec![];
-    };
-    if agent.question_view.is_some() {
-        app.show_toast("Finish answering the current question first");
-        return vec![];
-    }
-    let mut options = vec![
-        QuestionOption {
-            label: "Yes".into(),
-            description: "Fork in a new isolated git worktree".into(),
-            preview: None,
-            id: None,
-        },
-        QuestionOption {
-            label: "No".into(),
-            description: "Fork in the current cwd".into(),
-            preview: None,
-            id: None,
-        },
-    ];
-    options.extend(worktree_persist_options());
-    let question = Question {
-        question: "Run this fork in an isolated git worktree?".into(),
-        id: None,
-        options,
-        multi_select: Some(false),
-    };
-    let agent = app.agents.get_mut(&id).expect("agent present (re-borrow)");
-    let stashed = agent.prompt.stash();
-    let state = QuestionViewState::new(
-        format!("fork-{}", uuid::Uuid::new_v4()),
-        vec![question],
-        stashed,
-    )
-    .with_local_kind(LocalQuestionKind::Fork { directive });
-    agent.question_view = Some(state);
-    agent.prompt.set_text("");
-    vec![]
 }
 /// Construct the placeholder agent, push discoverability markers, flip
 /// the discovery gate, switch to the new agent, and emit the appropriate
@@ -260,10 +143,6 @@ pub(in crate::app::dispatch) fn dispatch_fork_resolved(
     } else {
         vec![Effect::ForkSession {
             agent_id: new_id,
-            parent_session_id,
-            parent_cwd,
-            parent_is_worktree,
-            new_session_id: None,
         }]
     }
 }
@@ -382,145 +261,8 @@ pub(in crate::app::dispatch) fn dispatch_startup_fork_session(
         crate::app::session_startup::parent_session_is_worktree(&parent_session_id, &cwd);
     effects.push(Effect::ForkSession {
         agent_id,
-        parent_session_id: acp::SessionId::new(parent_session_id),
-        parent_cwd: cwd,
-        parent_is_worktree,
-        new_session_id,
     });
     effects
-}
-#[allow(clippy::too_many_arguments)]
-pub(in crate::app::dispatch) fn handle_worktree_forked(
-    app: &mut AppView,
-    agent_id: AgentId,
-    session_id: acp::SessionId,
-    worktree_path: std::path::PathBuf,
-    session_cwd: std::path::PathBuf,
-    code_restored: bool,
-    restore_summary: Option<String>,
-    restore_degree: Option<pi_workspace::session::git::RestoreDegree>,
-    resume_session_id: Option<String>,
-) -> Vec<Effect> {
-    let session_id_str = session_id.0.to_string();
-    let pending_entry = std::mem::take(&mut app.deferred_startup.pending_chat);
-    let agent_entry = app
-        .agents
-        .get(&agent_id)
-        .is_some_and(|a| a.conversation_entry);
-    let conversation_entry = pending_entry || agent_entry;
-    if crate::app::session_startup::chat_mode_refuses_local_build_load(
-        app.chat_mode,
-        conversation_entry,
-        &session_id_str,
-        &app.cwd,
-    ) {
-        refuse_chat_mode_build_agent(app, agent_id);
-        return vec![];
-    }
-    let rename_entry = session_opens_as_chat(app, conversation_entry);
-    if let Some(agent) = app.agents.get_mut(&agent_id) {
-        supersede_open_reload_window(agent, agent_id, "WorktreeForked");
-        agent.session.finish_command();
-        agent.mark_turn_finished(TurnEnd::Aborted);
-        agent.bind_session_id(session_id);
-        agent.scrollback.begin_batch();
-        agent.begin_replay_window();
-        agent.session.restore_degree = restore_degree;
-        agent.session.cwd = session_cwd.clone();
-        agent.session.is_worktree = true;
-        agent.current_branch = None;
-        agent.main_repo = None;
-        agent.is_worktree = true;
-        crate::git_info::populate_from_cwd_async(session_cwd.clone());
-        app.restore_code = None;
-        agent.prompt.file_search.retarget(&session_cwd);
-        agent.scrollback.push_block(RenderBlock::system(format!(
-            "Worktree ready: {}",
-            worktree_path.display()
-        )));
-        match (code_restored, restore_summary.as_deref()) {
-            (true, Some(s)) => {
-                agent
-                    .scrollback
-                    .push_block(RenderBlock::system(format!("\u{2713} Code restored: {s}")));
-            }
-            (false, Some(s)) => {
-                agent.scrollback.push_block(RenderBlock::system(format!(
-                    "\u{26A0} Code restore failed: {s}"
-                )));
-            }
-            _ => {}
-        }
-        let effective_chat = conversation_entry || app.chat_mode;
-        agent.chat_kind = effective_chat;
-        agent.conversation_entry = rename_entry;
-        agent.apply_credit_balance(app.credit_balance.clone(), app.auto_topup.clone());
-    } else {
-        return vec![];
-    }
-    if let Some(resume_id) = resume_session_id.as_deref() {
-        crate::app::event_loop::retarget_suppress_code_restore(
-            app,
-            resume_id,
-            session_id_str.clone(),
-        );
-    }
-    vec![Effect::LoadSession {
-        agent_id,
-        session_id: session_id_str,
-        session_cwd: Some(session_cwd),
-        chat_kind: conversation_entry,
-    }]
-}
-pub(in crate::app::dispatch) fn handle_fork_session_ready(
-    app: &mut AppView,
-    agent_id: AgentId,
-    new_session_id: acp::SessionId,
-    cwd: std::path::PathBuf,
-    parent_session_id: acp::SessionId,
-) -> Vec<Effect> {
-    let session_id_str = new_session_id.0.to_string();
-    let pending_entry = std::mem::take(&mut app.deferred_startup.pending_chat);
-    let agent_entry = app
-        .agents
-        .get(&agent_id)
-        .is_some_and(|a| a.conversation_entry);
-    let conversation_entry = pending_entry || agent_entry;
-    if crate::app::session_startup::chat_mode_refuses_local_build_load(
-        app.chat_mode,
-        conversation_entry,
-        &session_id_str,
-        &app.cwd,
-    ) {
-        refuse_chat_mode_build_agent(app, agent_id);
-        return vec![];
-    }
-    let rename_entry = session_opens_as_chat(app, conversation_entry);
-    if let Some(agent) = app.agents.get_mut(&agent_id) {
-        supersede_open_reload_window(agent, agent_id, "ForkSessionReady");
-        agent.session.finish_command();
-        agent.mark_turn_finished(TurnEnd::Aborted);
-        agent.bind_session_id(new_session_id);
-        agent.scrollback.begin_batch();
-        agent.begin_replay_window();
-        agent.session.cwd = cwd.clone();
-        let effective_chat = conversation_entry || app.chat_mode;
-        agent.chat_kind = effective_chat;
-        agent.conversation_entry = rename_entry;
-    } else {
-        return vec![];
-    }
-    crate::app::event_loop::retarget_suppress_code_restore(
-        app,
-        parent_session_id.0.as_ref(),
-        session_id_str.clone(),
-    );
-    vec![Effect::LoadSession {
-        agent_id,
-        session_id: session_id_str,
-        session_cwd: Some(cwd),
-        chat_kind: conversation_entry,
-    }]
 }
 pub(in crate::app::dispatch) fn handle_fork_session_failed(
     app: &mut AppView,

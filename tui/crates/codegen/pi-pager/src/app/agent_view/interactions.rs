@@ -1169,10 +1169,6 @@ impl AgentView {
     pub(crate) fn handle_question_key_for_test(&mut self, key: &KeyEvent) -> InputOutcome {
         self.handle_question_key(key)
     }
-    #[cfg(test)]
-    pub(crate) fn handle_question_mouse_for_test(&mut self, mouse: &MouseEvent) -> InputOutcome {
-        self.handle_question_mouse(mouse)
-    }
     /// Give back the draft a card displaced when it opened.
     ///
     /// Permission open: write into `permission_stashed_prompt`. Question open:

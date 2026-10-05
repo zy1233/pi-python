@@ -24,7 +24,7 @@ pub use fix::{
 };
 pub(crate) use fix::{
     automatic_remediation_for, format_applicable_automatic_fixes,
-    format_fix_preview, format_fix_success, human_fix_command, select_fix_plan,
+    format_fix_preview, format_fix_success, human_fix_command, 
 };
 pub(crate) use model::probe_requires_live_tui;
 pub(crate) use model::{

@@ -698,16 +698,13 @@ pub(super) fn count_chat_history_stats(history_path: &Path) -> (usize, usize) {
 /// response's `_meta key` envelope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConversationsPartial {
-    NoOauth,
-    Timeout,
     Error,
 }
 impl ConversationsPartial {
     /// Actionable picker notice for a degraded conversations lane.
     pub(crate) fn picker_notice(self) -> &'static str {
         match self {
-            Self::NoOauth => "Couldn't load your chats: log in with /login",
-            Self::Timeout | Self::Error => "Couldn't load conversations: retry",
+            Self::Error => "Couldn't load conversations: retry",
         }
     }
 }

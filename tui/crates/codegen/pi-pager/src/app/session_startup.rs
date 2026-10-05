@@ -1561,41 +1561,6 @@ mod tests {
     fn worktree_no_restore_code_notice_mentions_flag() {
         assert!(WORKTREE_NO_RESTORE_CODE_NOTICE.contains("--restore-code"));
     }
-    /// `--restore-code` without `--worktree` must fail before any in-place checkout.
-    #[ignore = "pi-python: grok-specific feature not supported"]
-    #[tokio::test]
-    async fn remote_miss_restore_code_without_worktree_errors() {
-        let err = materialize_startup_for_cwd(
-            remote_miss_ctx(true, false),
-            SessionStartupIntent::Resume {
-                session_id: Some("99999999-9999-4999-8999-999999999999".into()),
-                most_recent_for_cwd: false,
-            },
-            "/nonexistent/cwd/for/remote-miss-code-no-wt",
-        )
-        .await
-        .unwrap_err();
-        assert!(
-            err.to_string().contains("--worktree"),
-            "unexpected error: {err}"
-        );
-        let title_err = materialize_startup_for_cwd(
-            remote_miss_ctx(true, false),
-            SessionStartupIntent::Resume {
-                session_id: Some("no such title".into()),
-                most_recent_for_cwd: false,
-            },
-            "/nonexistent/cwd/for/remote-miss-code-no-wt-title",
-        )
-        .await
-        .unwrap_err()
-        .to_string();
-        assert!(title_err.contains("--worktree"), "{title_err}");
-        assert!(
-            title_err.contains("no session id or title matched"),
-            "{title_err}"
-        );
-    }
     /// `--restore-code --worktree` stays on the existing defer path.
     #[tokio::test]
     async fn remote_miss_restore_code_with_worktree_defers() {

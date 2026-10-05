@@ -2943,25 +2943,6 @@ mod tests {
         assert!(agent.deferred_text_press.is_none(), "prompt is a pane");
     }
 
-    /// With the block viewer open the band must not arm: the modal owns the
-    /// screen while the scrollback model beneath keeps rebuilding, so an
-    /// armed latch would convert on (and copy) text hidden under it.
-    #[test]
-    fn strip_press_with_block_viewer_open_arms_nothing() {
-        let mut agent = agent_with_above_prompt_strip();
-        let reg = ActionRegistry::defaults();
-        agent.block_viewer = Some(crate::views::block_viewer::BlockViewerPane::for_plain_text(
-            "t", "content",
-        ));
-
-        let _ = agent.handle_input(&Event::Mouse(mouse_down(10, 17)), &reg);
-        assert!(agent.deferred_text_press.is_none(), "viewer owns the press");
-
-        let _ = agent.handle_input(&Event::Mouse(mouse_drag(14, 6)), &reg);
-        assert!(agent.drag_selection.is_none(), "nothing converts");
-        assert!(agent.persistent_text_selection.is_none());
-    }
-
     /// A strip press keeps focus where it was (deliberate), so with the
     /// prompt focused the un-converted motion crosses the prompt box — the
     /// armed gesture must own that motion: nothing may leak into the prompt

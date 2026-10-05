@@ -9,7 +9,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::StatefulWidget;
 use pi_workspace::permission::mcp_titleize_segment;
@@ -699,75 +699,6 @@ impl BlockViewerPane {
             last_generation: stdout.len() as u64,
             was_running: is_running,
             bg_task_id: Some(task_id.to_string()),
-            last_theme: Theme::current_kind(),
-            modal: ModalWindowState::new(),
-            prepend_items: Vec::new(),
-            text_drag: None,
-            drag_copy_text: None,
-            cached_unified: Vec::new(),
-        }
-    }
-
-    /// Create a viewer for plain text content (e.g., catalog entry).
-    pub fn for_plain_text(title: &str, text: &str) -> Self {
-        let config = ListPaneConfig {
-            follow_enabled: false,
-            wrap_toggle_enabled: true,
-            search_enabled: true,
-            copy_enabled: true,
-            show_selection_when_unfocused: false,
-            visual_select_enabled: true,
-            filter_enabled: true,
-            goto_line_enabled: false,
-        };
-        let mut list_state = ListPaneState::new_with_config(WrapMode::Wrap, false, config);
-        list_state.set_clipboard_provider(Box::new(SystemClipboard));
-
-        let theme = Theme::current();
-        let title_style = Style::default()
-            .fg(theme.accent_user)
-            .add_modifier(Modifier::BOLD);
-        let style = Style::default().fg(theme.text_primary);
-
-        let mut items = vec![
-            ContentLine {
-                content: Line::from(Span::styled(title.to_owned(), title_style)),
-                plain_text: title.to_owned(),
-                id: u64::MAX,
-                bg: None,
-            },
-            ContentLine {
-                content: Line::default(),
-                plain_text: String::new(),
-                id: u64::MAX - 1,
-                bg: None,
-            },
-        ];
-        items.extend(text.lines().enumerate().map(|(i, line)| ContentLine {
-            content: Line::from(Span::styled(line.to_owned(), style)),
-            plain_text: line.to_owned(),
-            id: i as u64,
-            bg: None,
-        }));
-
-        Self {
-            entry_id: EntryId::new(0),
-            kind: ViewerKind::PlainText,
-            list_state,
-            list_style: ListPaneStyle {
-                uniform_visual_bg: true,
-                ..ListPaneStyle::default()
-            },
-            items,
-            last_content_area: Rect::default(),
-
-            raw_toggle_pending: false,
-            copy_meta_pending: false,
-            copy_content_pending: false,
-            diff_meta: Vec::new(),
-            last_generation: 0,
-            was_running: false,
-            bg_task_id: None,
             last_theme: Theme::current_kind(),
             modal: ModalWindowState::new(),
             prepend_items: Vec::new(),

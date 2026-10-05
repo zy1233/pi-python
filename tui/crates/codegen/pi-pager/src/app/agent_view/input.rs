@@ -1819,59 +1819,6 @@ mod btw_focus_tests {
         );
     }
     #[test]
-    fn minimal_modal_and_viewers_own_esc_over_hidden_btw() {
-        let reg = ActionRegistry::defaults();
-        let mut agents = minimal_btw_agent();
-        agents.agents_modal = Some(crate::views::agents_modal::AgentsModalState::new(
-            std::path::Path::new("/nonexistent"),
-            &std::collections::HashMap::new(),
-            &crate::app::bundle::BundleState::default(),
-            None,
-            None,
-            None,
-        ));
-        agents.handle_minimal_input(&key(KeyCode::Esc), &reg);
-        assert!(agents.agents_modal.is_none(), "agents modal handled Esc");
-        assert_minimal_btw_active(&agents, "agents modal");
-        let mut block = minimal_btw_agent();
-        block.block_viewer = Some(crate::views::block_viewer::BlockViewerPane::for_plain_text(
-            "t", "content",
-        ));
-        block.handle_minimal_input(&key(KeyCode::Esc), &reg);
-        assert!(block.block_viewer.is_none(), "block viewer handled Esc");
-        assert_minimal_btw_active(&block, "block viewer");
-        let mut video = minimal_btw_agent();
-        video.video_viewer = Some(crate::prompt_images::VideoViewerState::test_stub());
-        video.handle_minimal_input(&key(KeyCode::Esc), &reg);
-        assert!(video.video_viewer.is_none(), "video viewer handled Esc");
-        assert_minimal_btw_active(&video, "video viewer");
-        let mut goal = minimal_btw_agent();
-        goal.goal_state = Some(crate::app::agent::GoalDisplayState::test_stub());
-        goal.show_goal_detail = true;
-        goal.handle_minimal_input(&key(KeyCode::Esc), &reg);
-        assert!(!goal.show_goal_detail, "goal detail handled Esc");
-        assert_minimal_btw_active(&goal, "goal detail");
-    }
-    #[test]
-    fn minimal_btw_surface_owner_covers_shared_modal_cascade() {
-        let mut agent = minimal_btw_agent();
-        assert!(crate::minimal_api::minimal_btw_surface_available(&agent));
-        agent.image_viewer = Some(
-            crate::prompt_images::ImageViewerState::open_from_path_deferred(std::path::Path::new(
-                "x.png",
-            )),
-        );
-        assert!(!crate::minimal_api::minimal_btw_surface_available(&agent));
-        agent.image_viewer = None;
-        agent.gboom = Some(crate::gboom::GboomState::new());
-        assert!(!crate::minimal_api::minimal_btw_surface_available(&agent));
-        agent.gboom = None;
-        agent.block_viewer = Some(crate::views::block_viewer::BlockViewerPane::for_plain_text(
-            "t", "content",
-        ));
-        assert!(!crate::minimal_api::minimal_btw_surface_available(&agent));
-    }
-    #[test]
     fn fullscreen_keeps_btw_first_esc_precedence() {
         let mut agent = prompt_focused_agent();
         let reg = ActionRegistry::defaults();

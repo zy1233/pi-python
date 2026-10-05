@@ -1,122 +1,11 @@
 //! Plan, yolo, auto, and permission mode transitions and toasts.
 
-use super::ctx::{NO_SESSION_NOTICE, with_active_agent};
-use super::queue::maybe_drain_queue;
+use super::ctx::{NO_SESSION_NOTICE, };
 use super::settings::ui::{refresh_open_settings_modals, save_success_toast};
 use crate::app::actions::Effect;
 use crate::app::app_view::{ActiveView, AppView};
 use agent_client_protocol as acp;
 use pi_telemetry::session_ctx::log_event;
-
-/// Show the current plan: if a plan file exists, open it in the preview
-/// overlay popover. If no plan has been written yet, show a toast.
-///
-/// Delegates to `AgentView::show_plan_preview()` which reads the plan file
-/// from `~/.grok/sessions/<urlencoded_cwd>/<session_id>/plan.md`.
-pub(super) fn dispatch_show_plan(app: &mut AppView) -> Vec<Effect> {
-    with_active_agent(app, |agent| {
-        if agent.plan_approval_view.is_some() {
-            agent.reopen_plan_approval();
-        } else {
-            agent.show_plan_preview();
-        }
-    });
-    vec![]
-}
-
-/// Enter plan mode via `/plan`.
-///
-/// When not in plan mode: emits `SetSessionMode` (or `SetModeThenPrompt`
-/// if a description is provided). When already in plan mode: no-op with toast.
-/// Use `/view-plan` to open the current saved plan preview.
-///
-/// When a description is present, the mode switch and prompt send must be
-/// ordered: the mode switch ACP call must complete before the prompt is
-/// dispatched. `SetModeThenPrompt` bundles both into a single spawned task
-/// to guarantee this ordering.
-pub(super) fn dispatch_enter_plan_mode(
-    app: &mut AppView,
-    description: Option<String>,
-) -> Vec<Effect> {
-    let ActiveView::Agent(id) = app.active_view else {
-        return vec![];
-    };
-    let Some(agent) = app.agents.get_mut(&id) else {
-        return vec![];
-    };
-
-    let in_plan = agent.plan_mode_pending.unwrap_or(agent.plan_mode_active);
-    if in_plan {
-        app.show_toast("Already in plan mode. Use /view-plan to view the current plan.");
-        return vec![];
-    }
-
-    let agent = app.agents.get_mut(&id).unwrap();
-    let Some(session_id) = agent.session.session_id.clone() else {
-        agent.show_toast(NO_SESSION_NOTICE);
-        return vec![];
-    };
-
-    // Set optimistic pending state (same pattern as dispatch_cycle_mode).
-    agent.plan_mode_pending = Some(true);
-    tracing::info!("Plan mode entered via /plan slash command");
-
-    let mode_id = acp::SessionModeId::new("plan");
-
-    if let Some(desc) = description {
-        // Enqueue and drain: maybe_drain_queue does all synchronous turn
-        // setup (scrollback, start_turn, prompt_id) and returns a SendPrompt.
-        // We combine it with the mode switch into a single sequential effect
-        // so the mode switch completes before the prompt is sent.
-        // The description is a plain prompt: capture composer-recognized
-        // tokens like the normal submit path (offsets recomputed against
-        // `desc` since the leading `/plan ` was stripped).
-        let skill_token_ranges = agent
-            .prompt
-            .slash_controller
-            .recognized_token_ranges(&desc, &agent.session.models);
-        agent
-            .session
-            .enqueue_prompt_with_skill_tokens(desc, skill_token_ranges);
-        let drain = maybe_drain_queue(agent);
-        let mut effects = Vec::with_capacity(1);
-        for eff in drain.effects {
-            match eff {
-                Effect::SendPrompt {
-                    agent_id,
-                    text,
-                    prompt_id,
-                    skill_token_ranges,
-                    ..
-                } => {
-                    effects.push(Effect::SetModeThenPrompt {
-                        session_id: session_id.clone(),
-                        mode_id: mode_id.clone(),
-                        agent_id,
-                        text,
-                        prompt_id,
-                        skill_token_ranges,
-                    });
-                }
-                other => effects.push(other),
-            }
-        }
-        // If drain was empty (not idle), just emit the mode switch — the
-        // prompt stays queued and will drain naturally when the agent idles.
-        if effects.is_empty() {
-            effects.push(Effect::SetSessionMode {
-                session_id,
-                mode_id,
-            });
-        }
-        effects
-    } else {
-        vec![Effect::SetSessionMode {
-            session_id,
-            mode_id,
-        }]
-    }
-}
 
 /// Set plan mode (on / off). PAGER-owned + ACP-mediated, per-session.
 ///
@@ -503,20 +392,6 @@ fn yolo_toast(new: bool) -> String {
         // OFF restores safe default — uniform ✓ glyph.
         save_success_toast("Always-approve", false)
     }
-}
-
-/// Toggle YOLO mode (Ctrl+O keybinding path). Delegates to the
-/// registry-driven `set_yolo_mode` so permission-queue draining,
-/// telemetry, and persistence all flow through a single code path.
-pub(super) fn dispatch_toggle_yolo(app: &mut AppView) -> Vec<Effect> {
-    let ActiveView::Agent(id) = app.active_view else {
-        return vec![];
-    };
-    let Some(agent) = app.agents.get(&id) else {
-        return vec![];
-    };
-    let new = !agent.session.yolo_mode;
-    set_yolo_mode(app, new)
 }
 
 /// Shift+Tab mode cycle from the agent chat view: the shared cycle body plus

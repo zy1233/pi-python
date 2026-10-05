@@ -53,109 +53,6 @@ fn cta_outcome_reload(
     }
 }
 
-#[ignore = "pi-python: grok-specific feature not supported"]
-#[test]
-fn plugin_cta_catalog_keeps_official_not_installed_only() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-
-    let response = pi_hooks_plugins_types::MarketplaceListResponse {
-        sources: vec![
-            pi_hooks_plugins_types::MarketplaceScanResult {
-                source_name: pi_plugin_marketplace::OFFICIAL_SOURCE_NAME.into(),
-                source_kind: "git".into(),
-                source_url_or_path: pi_plugin_marketplace::OFFICIAL_SOURCE_GIT_URL.into(),
-                plugins: vec![
-                    cta_entry("keep-me", "not_installed"),
-                    cta_entry("already-installed", "installed"),
-                    cta_entry("has-update", "update_available"),
-                ],
-                error: None,
-            },
-            pi_hooks_plugins_types::MarketplaceScanResult {
-                source_name: "Third Party".into(),
-                source_kind: "git".into(),
-                source_url_or_path: "https://github.com/other/repo.git".into(),
-                plugins: vec![cta_entry("third-party", "not_installed")],
-                error: None,
-            },
-            pi_hooks_plugins_types::MarketplaceScanResult {
-                source_name: "Custom Mirror".into(),
-                source_kind: "git".into(),
-                source_url_or_path: "git@github.com:pi-org/plugin-marketplace.git".into(),
-                plugins: vec![cta_entry("url-official", "not_installed")],
-                error: None,
-            },
-        ],
-    };
-
-    let effects = dispatch(
-        Action::TaskComplete(TaskResult::PluginCtaCatalogLoaded {
-            agent_id: id,
-            result: Ok(response),
-        }),
-        &mut app,
-    );
-    assert!(effects.is_empty());
-
-    let cta = &app.agents[&id].plugin_cta;
-    let names: Vec<&str> = cta.candidates.iter().map(|p| p.name.as_str()).collect();
-    // One source wins: both the first source and "Custom Mirror" are
-    // URL-verified official, so the first-registered one supplies the
-    // candidates and the install target.
-    assert_eq!(names, vec!["keep-me"]);
-    assert_eq!(cta.candidates[0].install_status, "not_installed");
-    assert_eq!(
-        cta.source_url_or_path.as_deref(),
-        Some(pi_plugin_marketplace::OFFICIAL_SOURCE_GIT_URL),
-        "without an override the install target stays the official source"
-    );
-}
-
-#[ignore = "pi-python: grok-specific feature not supported"]
-#[test]
-fn plugin_cta_default_prefers_url_verified_official_over_impostor() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-
-    // A first-listed source that merely calls itself "pi Official" must not
-    // become the install root; the URL-verified official source wins even
-    // when registered later.
-    let response = pi_hooks_plugins_types::MarketplaceListResponse {
-        sources: vec![
-            pi_hooks_plugins_types::MarketplaceScanResult {
-                source_name: pi_plugin_marketplace::OFFICIAL_SOURCE_NAME.into(),
-                source_kind: "path".into(),
-                source_url_or_path: "/srv/impostor-marketplace".into(),
-                plugins: vec![cta_entry("impostor", "not_installed")],
-                error: None,
-            },
-            pi_hooks_plugins_types::MarketplaceScanResult {
-                source_name: pi_plugin_marketplace::OFFICIAL_SOURCE_NAME.into(),
-                source_kind: "git".into(),
-                source_url_or_path: pi_plugin_marketplace::OFFICIAL_SOURCE_GIT_URL.into(),
-                plugins: vec![cta_entry("genuine", "not_installed")],
-                error: None,
-            },
-        ],
-    };
-    dispatch(
-        Action::TaskComplete(TaskResult::PluginCtaCatalogLoaded {
-            agent_id: id,
-            result: Ok(response),
-        }),
-        &mut app,
-    );
-
-    let cta = &app.agents[&id].plugin_cta;
-    let names: Vec<&str> = cta.candidates.iter().map(|p| p.name.as_str()).collect();
-    assert_eq!(names, vec!["genuine"]);
-    assert_eq!(
-        cta.source_url_or_path.as_deref(),
-        Some(pi_plugin_marketplace::OFFICIAL_SOURCE_GIT_URL)
-    );
-}
-
 #[test]
 fn plugin_cta_default_name_only_official_mirror_selected() {
     let mut app = test_app_with_agent();
@@ -268,59 +165,6 @@ fn plugin_cta_marketplace_duplicate_named_sources_first_wins() {
         cta.source_url_or_path.as_deref(),
         Some("/srv/spacex-marketplace")
     );
-}
-
-#[test]
-fn plugin_cta_marketplace_override_install_targets_named_source() {
-    use crate::app::agent_view::CtaPhase;
-    let mut app = test_app_with_agent();
-    app.plugin_cta_enabled = true;
-    app.plugin_cta_marketplace = Some("SpaceX Marketplace".into());
-    let id = AgentId(0);
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.session.session_id = Some("sess-1".to_string().into());
-        // Unique name so a real config's dismissed set can't suppress the match.
-        agent.prompt.set_text("try zzspacexcta now");
-    }
-
-    let mut entry = cta_entry("zzspacexcta", "not_installed");
-    entry.keywords = vec!["zzspacexcta".into()];
-    let response = pi_hooks_plugins_types::MarketplaceListResponse {
-        sources: vec![pi_hooks_plugins_types::MarketplaceScanResult {
-            source_name: "SpaceX Marketplace".into(),
-            source_kind: "path".into(),
-            source_url_or_path: "/srv/spacex-marketplace".into(),
-            plugins: vec![entry],
-            error: None,
-        }],
-    };
-    dispatch(
-        Action::TaskComplete(TaskResult::PluginCtaCatalogLoaded {
-            agent_id: id,
-            result: Ok(response),
-        }),
-        &mut app,
-    );
-
-    let agent = app.agents.get_mut(&id).unwrap();
-    assert!(matches!(
-        &agent.plugin_cta.phase,
-        CtaPhase::Matched { name, .. } if name == "zzspacexcta"
-    ));
-    agent.connect_matched_plugin();
-    assert_eq!(agent.pending_effects.len(), 1);
-    match &agent.pending_effects[0] {
-        Effect::InstallPluginFromCta {
-            source_url_or_path,
-            plugin_relative_path,
-            ..
-        } => {
-            assert_eq!(source_url_or_path, "/srv/spacex-marketplace");
-            assert_eq!(plugin_relative_path, "plugins/zzspacexcta");
-        }
-        other => panic!("expected InstallPluginFromCta, got {other:?}"),
-    }
 }
 
 #[test]
@@ -1636,8 +1480,7 @@ mod cta_e2e {
     use crate::app::app_view::{AppView, InputOutcome};
     use crate::app::dispatch::cta::{CTA_MCP_POLL_MAX_ATTEMPTS, plugin_cta_phase_for};
     use crate::app::dispatch::dispatch;
-    use crate::views::extensions_modal::{ExtensionsTab, TabDataState};
-    use crate::views::mcps_modal::{McpSectionId, McpServerDisplayStatus, section_key};
+    use crate::views::mcps_modal::{ McpServerDisplayStatus, };
     use pi_hooks_plugins_types::OutcomeStatus;
 
     const PROMPT: &str = "please open figma now";
@@ -1734,108 +1577,6 @@ mod cta_e2e {
             }
         );
         app
-    }
-
-    #[test]
-    fn happy_path_with_auth_handoff() {
-        let mut app = app_matched();
-        let id = AgentId(0);
-
-        let effects = connect(&mut app);
-        match effects.as_slice() {
-            [
-                Effect::InstallPluginFromCta {
-                    source_url_or_path,
-                    plugin_relative_path,
-                    ..
-                },
-            ] => {
-                assert_eq!(
-                    source_url_or_path,
-                    pi_plugin_marketplace::OFFICIAL_SOURCE_GIT_URL
-                );
-                assert_eq!(plugin_relative_path, "plugins/figma");
-            }
-            other => panic!("expected InstallPluginFromCta, got {other:?}"),
-        }
-
-        let effects = dispatch(
-            Action::TaskComplete(TaskResult::CtaPluginInstallDone {
-                agent_id: id,
-                plugin_name: "figma".into(),
-                result: Ok(cta_outcome_reload(OutcomeStatus::Success, "installed")),
-            }),
-            &mut app,
-        );
-        assert_eq!(
-            app.agents[&id].plugin_cta.phase,
-            CtaPhase::AwaitingReload {
-                name: "figma".into()
-            }
-        );
-        assert!(matches!(
-            effects.as_slice(),
-            [Effect::ReloadPluginsForCta { plugin_name, .. }] if plugin_name == "figma"
-        ));
-
-        let effects = dispatch(
-            Action::TaskComplete(TaskResult::CtaPluginReloadDone {
-                agent_id: id,
-                plugin_name: "figma".into(),
-                result: Ok(cta_outcome(OutcomeStatus::Success, "reloaded")),
-            }),
-            &mut app,
-        );
-        assert_eq!(
-            app.agents[&id].plugin_cta.phase,
-            CtaPhase::AwaitingMcps {
-                name: "figma".into()
-            }
-        );
-        assert!(matches!(
-            effects.as_slice(),
-            [Effect::FetchPluginCtaMcps { plugin_name, .. }] if plugin_name == "figma"
-        ));
-
-        let servers = vec![
-            cta_mcp_server("grok_com_managed", None, McpServerDisplayStatus::Ready),
-            cta_mcp_server("local-srv", None, McpServerDisplayStatus::Ready),
-            cta_mcp_server("other-srv", Some("slack"), McpServerDisplayStatus::Ready),
-            cta_mcp_server(
-                "figma-srv",
-                Some("figma"),
-                McpServerDisplayStatus::NeedsAuth,
-            ),
-        ];
-        let effects = dispatch(
-            Action::TaskComplete(TaskResult::PluginCtaMcpsLoaded {
-                agent_id: id,
-                plugin_name: "figma".into(),
-                result: Ok(servers),
-            }),
-            &mut app,
-        );
-        assert_eq!(app.agents[&id].plugin_cta.phase, CtaPhase::Hidden);
-        let modal = app.agents[&id]
-            .extensions_modal
-            .as_ref()
-            .expect("extensions modal should be open");
-        assert_eq!(modal.active_tab, ExtensionsTab::McpServers);
-        match &modal.mcps_data {
-            TabDataState::Loaded(servers) => assert_eq!(servers.len(), 4),
-            other => panic!("expected mcps_data Loaded, got {other:?}"),
-        }
-        let collapsed = &modal.mcps_collapsed_sections;
-        assert!(collapsed.contains(&section_key(&McpSectionId::Managed)));
-        assert!(collapsed.contains(&section_key(&McpSectionId::Local)));
-        assert!(collapsed.contains(&section_key(&McpSectionId::Plugin("slack".into()))));
-        assert!(!collapsed.contains(&section_key(&McpSectionId::Plugin("figma".into()))));
-        assert!(modal.mcps_section_collapse_initialized);
-        assert!(
-            effects
-                .iter()
-                .any(|e| matches!(e, Effect::FetchPluginCtaCatalog { .. }))
-        );
     }
 
     #[test]

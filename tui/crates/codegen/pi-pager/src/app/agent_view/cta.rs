@@ -618,7 +618,6 @@ impl AgentView {
             .push(super::actions::Effect::InstallPluginFromCta {
                 agent_id: self.session.id,
                 session_id,
-                source_url_or_path,
                 plugin_relative_path,
             });
     }
@@ -721,69 +720,6 @@ mod plugin_cta_notify_tests {
             Some(crate::app::actions::Effect::DebouncePluginCta { generation: 1, .. })
         ));
         assert_eq!(agent.plugin_cta.debounce_generation, 1);
-    }
-
-    #[test]
-    fn connect_matched_enters_installing_and_emits_effect() {
-        use crate::app::actions::Effect;
-        use crate::app::agent_view::CtaPhase;
-        let mut agent = make_agent();
-        agent.session.session_id = Some("sess-1".to_string().into());
-        agent.plugin_cta.source_url_or_path =
-            Some(pi_plugin_marketplace::OFFICIAL_SOURCE_GIT_URL.into());
-        agent.plugin_cta.phase = CtaPhase::Matched {
-            plugin_relative_path: "plugins/figma".into(),
-            name: "figma".into(),
-        };
-        agent.connect_matched_plugin();
-
-        match &agent.plugin_cta.phase {
-            CtaPhase::Installing {
-                plugin_relative_path,
-                name,
-            } => {
-                assert_eq!(name.as_str(), "figma");
-                assert_eq!(plugin_relative_path.as_str(), "plugins/figma");
-            }
-            other => panic!("expected Installing, got {other:?}"),
-        }
-        assert_eq!(agent.pending_effects.len(), 1);
-        match &agent.pending_effects[0] {
-            Effect::InstallPluginFromCta {
-                source_url_or_path,
-                plugin_relative_path,
-                ..
-            } => {
-                assert_eq!(
-                    source_url_or_path,
-                    pi_plugin_marketplace::OFFICIAL_SOURCE_GIT_URL
-                );
-                assert_eq!(plugin_relative_path.as_str(), "plugins/figma");
-            }
-            other => panic!("expected InstallPluginFromCta, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn connect_uses_cta_source_url_when_set() {
-        use crate::app::actions::Effect;
-        use crate::app::agent_view::CtaPhase;
-        let mut agent = make_agent();
-        agent.session.session_id = Some("sess-1".to_string().into());
-        agent.plugin_cta.source_url_or_path = Some("/srv/spacex-marketplace".into());
-        agent.plugin_cta.phase = CtaPhase::Matched {
-            plugin_relative_path: "plugins/starlink".into(),
-            name: "starlink".into(),
-        };
-        agent.connect_matched_plugin();
-
-        assert_eq!(agent.pending_effects.len(), 1);
-        match &agent.pending_effects[0] {
-            Effect::InstallPluginFromCta {
-                source_url_or_path, ..
-            } => assert_eq!(source_url_or_path, "/srv/spacex-marketplace"),
-            other => panic!("expected InstallPluginFromCta, got {other:?}"),
-        }
     }
 
     #[test]

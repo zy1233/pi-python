@@ -3,17 +3,17 @@
 use super::setters::{
     pr13_effective_default, set_ask_user_question_timeout_enabled_inner, set_auto_dark_theme_inner,
     set_auto_light_theme_inner, set_auto_update_inner, set_collapsed_edit_blocks_inner,
-    set_combine_queued_prompts_inner, set_compact_mode, set_compact_mode_inner,
+    set_combine_queued_prompts_inner, set_compact_mode_inner,
     set_confirm_before_rewind_inner, set_contextual_hint_inner, set_default_model_inner,
     set_default_selected_permission_inner, set_display_refresh_auto_cadence_inner,
     set_follow_up_behavior_inner, set_fork_secondary_model_inner, set_group_tool_verbs_inner,
     set_hunk_tracker_mode_inner, set_invert_scroll_inner, set_keep_text_selection_inner,
-    set_max_thoughts_width_inner, set_multiline_mode, set_page_flip_on_send_inner,
+    set_max_thoughts_width_inner, set_page_flip_on_send_inner,
     set_prompt_suggestions_inner, set_remember_tool_approvals_inner, set_render_mermaid_inner,
     set_respect_manual_folds_inner, set_screen_mode_inner, set_scroll_lines_inner,
     set_scroll_mode_inner, set_scroll_speed_inner, set_show_thinking_blocks_inner,
     set_show_tips_inner, set_simple_mode_inner, set_theme_inner, set_timeline_inner,
-    set_timestamps, set_timestamps_inner, set_vim_mode_inner, set_voice_capture_mode_inner,
+    set_timestamps_inner, set_vim_mode_inner, set_voice_capture_mode_inner,
     set_voice_keybind_enabled_inner, set_voice_stt_language_inner,
 };
 use crate::app::actions::{Action, Effect};
@@ -22,7 +22,6 @@ use crate::app::dispatch::ctx::with_active_agent;
 use crate::app::dispatch::modes::{set_yolo_mode_inner, sync_active_auto_flag};
 use crate::app::dispatch::router::dispatch;
 use crate::app::dispatch::turn::apply_cancel_subagents_preference_global;
-use crate::scrollback::block::RenderBlock;
 use agent_client_protocol as acp;
 
 /// Format a "✓ Label: value" success toast.
@@ -129,23 +128,6 @@ pub(in crate::app::dispatch) fn dispatch_open_command_palette(app: &mut AppView)
         state: crate::views::picker::PickerState::input_active(),
         window: crate::views::modal_window::ModalWindowState::new(),
     });
-    vec![]
-}
-
-/// Open the How-to Guides doc picker (`/docs`). Toggles closed if already open.
-pub(in crate::app::dispatch) fn dispatch_open_howto_guides(app: &mut AppView) -> Vec<Effect> {
-    use crate::views::modal::ActiveModal;
-    let ActiveView::Agent(id) = app.active_view else {
-        return vec![];
-    };
-    let Some(agent) = app.agents.get_mut(&id) else {
-        return vec![];
-    };
-    if matches!(&agent.active_modal, Some(ActiveModal::DocPicker { .. })) {
-        agent.active_modal = None;
-        return vec![];
-    }
-    agent.active_modal = Some(crate::views::modal::howto_list_modal(None));
     vec![]
 }
 
@@ -448,88 +430,6 @@ pub(in crate::app::dispatch) fn dispatch_confirm_reset_setting(
             dispatch(action, app)
         }
     }
-}
-
-/// Toggle multiline input mode (Ctrl+M keybinding path). Delegates
-/// to `set_multiline_mode` (PAGER-OWNED, per-agent ephemeral).
-pub(in crate::app::dispatch) fn dispatch_toggle_multiline(app: &mut AppView) -> Vec<Effect> {
-    let ActiveView::Agent(id) = app.active_view else {
-        return vec![];
-    };
-    let Some(agent) = app.agents.get(&id) else {
-        return vec![];
-    };
-    let new = !agent.multiline_mode;
-    set_multiline_mode(app, new)
-}
-
-/// Toggle compact mode (keybinding path). Delegates to the
-/// registry-driven `set_compact_mode` so the cache, modal snapshot,
-/// and `Effect::PersistSetting` all flow through one path.
-pub(in crate::app::dispatch) fn dispatch_toggle_compact_mode(app: &mut AppView) -> Vec<Effect> {
-    // Toggle the USER value: `appearance.prompt.compact` is the derived render
-    // value, which auto-compact forces on short terminals regardless of it.
-    let new = !app.current_ui.compact_mode;
-    set_compact_mode(app, new)
-}
-
-/// Toggle vim-style scrollback keybindings (`/vim-mode` slash command path).
-///
-/// When OFF (default): bare-letter and Shift+letter scrollback bindings
-/// (j/k/h/l/g/G/y/Y/o/O/r/x/e/E/L/H plus the `i` FocusPrompt alt) are
-/// suppressed; users get a "letter pressed in scrollback jumps to prompt
-/// and types the character" behaviour instead. Arrow/Tab/Esc/Space/PgUp/
-/// PgDn and all Ctrl+letter bindings remain active in both modes.
-///
-/// Delegates to the registry-driven `set_vim_mode` so the cache, modal
-/// snapshot, toast, and `Effect::PersistSetting` (which writes
-/// `[ui].vim_mode` to config.toml) all flow through one path — matching
-/// the `dispatch_toggle_multiline` / `dispatch_toggle_compact_mode` /
-/// `dispatch_toggle_timestamps` pattern.
-pub(in crate::app::dispatch) fn dispatch_toggle_vim_mode(app: &mut AppView) -> Vec<Effect> {
-    // Toggle the EFFECTIVE value (the pager cache) so the toggle works
-    // from ANY view, not only while an agent is active.
-    let prev = crate::appearance::cache::load_vim_mode();
-    let enabled = !prev;
-    // Propagate to every agent AND every nested subagent view (so
-    // background + open subagent views pick up the change without a
-    // restart) and mirror the pager cache. Shares `set_vim_mode_inner`
-    // with the `SetVimMode` settings path.
-    set_vim_mode_inner(app, enabled);
-    refresh_open_settings_modals(app);
-    let msg = if enabled {
-        "Vim mode: on"
-    } else {
-        "Vim mode: off"
-    };
-    tracing::info!(vim_mode = enabled, "Vim mode toggled");
-    match app.active_view {
-        ActiveView::Agent(id) => {
-            if let Some(agent) = app.agents.get_mut(&id) {
-                agent
-                    .scrollback
-                    .push_block(RenderBlock::system(msg.to_string()));
-            }
-        }
-        _ => {
-            app.show_toast(msg);
-        }
-    }
-    // Persist like the shared setter so `/vim-mode` survives a restart
-    // (writes `[ui].vim_mode` to config.toml).
-    vec![Effect::PersistSetting {
-        key: "vim_mode",
-        value: crate::settings::SettingValue::Bool(enabled),
-        rollback_value: crate::settings::SettingValue::Bool(prev),
-    }]
-}
-
-/// Toggle timestamps (Ctrl+? keybinding path). Delegates to the
-/// registry-driven `set_timestamps` so persistence + cache + UI
-/// reconciliation all flow through a single code path.
-pub(in crate::app::dispatch) fn dispatch_toggle_timestamps(app: &mut AppView) -> Vec<Effect> {
-    let show = !app.appearance.show_timestamps;
-    set_timestamps(app, show)
 }
 
 /// Toggle terminal mouse reporting (crossterm mouse capture) at the user's

@@ -12,12 +12,6 @@ use crate::app::app_view::{ActiveView, AppView};
 use crate::notifications::{NotificationEvent, NotificationEventKind};
 use crate::scrollback::block::RenderBlock;
 
-/// Temporary kill switch: client share links are disabled.
-pub(super) fn dispatch_share_session(app: &mut AppView) -> Vec<Effect> {
-    app.show_toast("Session sharing is temporarily disabled");
-    vec![]
-}
-
 /// Monotonic generation for usage-modal fetches. Each open stamps the modal
 /// and its effects with a fresh value so a reply from a previous open (same
 /// session, modal closed and reopened) can't overwrite newer results. `0` is
@@ -110,32 +104,6 @@ pub(super) fn open_usage_info_modal(
         state: Box::new(state),
     });
     effects
-}
-
-/// `/session-info` — open the usage modal on its "Session info" tab, or
-/// fetch-and-show in scrollback in minimal mode.
-pub(super) fn dispatch_show_session_info(app: &mut AppView) -> Vec<Effect> {
-    if !app.screen_mode.is_minimal() {
-        return open_usage_info_modal(app, crate::views::usage_modal::UsageInfoTab::SessionInfo);
-    }
-    let ActiveView::Agent(id) = app.active_view else {
-        return vec![];
-    };
-    let Some(agent) = app.agents.get_mut(&id) else {
-        return vec![];
-    };
-    let Some(session_id) = agent.session.session_id.clone() else {
-        // No active session — error should have been caught by slash command,
-        // but guard here just in case.
-        return vec![];
-    };
-
-    vec![Effect::ShowSessionInfo {
-        agent_id: id,
-        session_id,
-        show_resolved_model: app.show_resolved_model,
-        nonce: Default::default(),
-    }]
 }
 
 /// State-only mutation for `coding_data_sharing`. SHELL-owned.
@@ -288,7 +256,6 @@ pub(super) fn set_coding_data_sharing_tracked(
     effects.push(Effect::SetCodingDataSharing {
         agent_id,
         opted_in,
-        rollback_to_opted_in: prev,
         seq,
     });
     (effects, SharingWriteOutcome::Claimed(seq))
@@ -332,41 +299,6 @@ pub(super) fn dispatch_show_context_info(app: &mut AppView) -> Vec<Effect> {
         session_id,
         nonce: Default::default(),
     }]
-}
-
-/// `/usage` — open the usage modal on its "Usage limit" tab. Minimal mode
-/// keeps the scrollback flow: session token/cost, then consumer credits.
-pub(super) fn dispatch_show_usage(app: &mut AppView) -> Vec<Effect> {
-    if !app.screen_mode.is_minimal() {
-        return open_usage_info_modal(app, crate::views::usage_modal::UsageInfoTab::UsageLimit);
-    }
-    let ActiveView::Agent(id) = app.active_view else {
-        return vec![];
-    };
-    let session_id = {
-        let Some(agent) = app.agents.get_mut(&id) else {
-            return vec![];
-        };
-        agent.session.session_id.clone()
-    };
-    match session_id {
-        Some(session_id) => vec![Effect::FetchSessionUsage {
-            agent_id: id,
-            session_id,
-            nonce: Default::default(),
-        }],
-        None => {
-            if let Some(agent) = app.agents.get_mut(&id) {
-                push_and_page_flip(
-                    &mut agent.scrollback,
-                    RenderBlock::system(
-                        "Session usage is unavailable until the session starts.".to_string(),
-                    ),
-                );
-            }
-            append_consumer_billing_surface(app, id)
-        }
-    }
 }
 
 /// Route a session-usage result (success or failure text) into the open
@@ -440,17 +372,6 @@ pub(super) fn append_consumer_billing_surface(app: &mut AppView, agent_id: Agent
     }]
 }
 
-/// `/usage manage` — open consumer billing. No-op when the surface is hidden.
-pub(super) fn dispatch_manage_billing(app: &mut AppView) -> Vec<Effect> {
-    if !app.usage_visible {
-        return vec![];
-    }
-    super::router::dispatch(
-        crate::app::actions::Action::OpenUrl("https://grok.com/?_s=usage".to_string()),
-        app,
-    )
-}
-
 /// Commit a one-line "update available" notice into the active agent's
 /// scrollback. Minimal mode has no welcome screen (the full TUI's update
 /// surface), so the background update check's result is shown here instead
@@ -476,54 +397,6 @@ pub(super) fn dispatch_show_queue(app: &mut AppView) -> Vec<Effect> {
         let text = crate::app::status_blocks::queue_block_text(agent);
         agent.scrollback.push_block(RenderBlock::system(text));
     }
-    vec![]
-}
-
-/// `/tasks` — commit a read-only list of background tasks, subagents, and
-/// scheduled (`/loop`) tasks as a system block. The text is built by
-/// [`crate::app::status_blocks::tasks_block_text`]; this just resolves the
-/// active agent and pushes it. Works in every render mode; the primary snapshot
-/// surface in minimal, which has no interactive `TasksPane`.
-pub(super) fn dispatch_show_tasks(app: &mut AppView) -> Vec<Effect> {
-    if let ActiveView::Agent(id) = app.active_view
-        && let Some(agent) = app.agents.get_mut(&id)
-    {
-        let text = crate::app::status_blocks::tasks_block_text(agent);
-        agent.scrollback.push_block(RenderBlock::system(text));
-    }
-    vec![]
-}
-
-/// Open the hidden `/gboom` easter egg as a modal over the active agent
-/// view. Requires a graphics-capable terminal (kitty protocol or iTerm2);
-/// otherwise a toast explains why nothing happened. On session-less
-/// surfaces (dashboard, welcome) this is a silent no-op.
-///
-/// Targets the top-level agent view (where the prompt lives), not a
-/// focused subagent view: the modal's tick/draw plumbing runs on the
-/// top-level view, mirroring the video viewer.
-pub(super) fn dispatch_open_gboom(app: &mut AppView) -> Vec<Effect> {
-    use crate::terminal::image::{GraphicsProtocol, detect_graphics_protocol};
-    let ActiveView::Agent(id) = app.active_view else {
-        return vec![];
-    };
-    let Some(agent) = app.agents.get_mut(&id) else {
-        return vec![];
-    };
-    if detect_graphics_protocol() == GraphicsProtocol::None {
-        agent.show_toast(
-            "No demons here: GBOOM needs a graphics-capable terminal \
-             (kitty, Ghostty, WezTerm, iTerm2)",
-        );
-        return vec![];
-    }
-    // Close other media modals: they share the kitty placement id. Drop the
-    // image viewer's in-flight loader too (its close path clears both —
-    // a leaked rx would mis-feed the next image viewer's poll loop).
-    agent.image_viewer = None;
-    agent.image_load_rx = None;
-    agent.video_viewer = None;
-    agent.gboom = Some(crate::gboom::GboomState::new());
     vec![]
 }
 
@@ -600,48 +473,6 @@ pub(super) fn handle_coding_data_sharing_updated(
         }
     }
     effects
-}
-
-pub(super) fn handle_coding_data_sharing_failed(
-    app: &mut AppView,
-    agent_id: AgentId,
-    error: String,
-    rollback_to_opted_in: bool,
-    seq: u64,
-) -> Vec<Effect> {
-    // The opt-in never landed: drop the parked upload (the storage proxy
-    // would still refuse it) and undo the in-session latch — nothing was
-    // persisted, so a later /feedback may offer the card again.
-    if take_pending_feedback_trace_upload(app, seq).is_some() {
-        app.feedback_trace_choice_latched = false;
-    }
-    // A superseded failure must not revert: `rollback_to_opted_in` predates
-    // the newer write, so applying it would undo a change the user made
-    // after this one was sent. It must not toast either — nothing the user
-    // is looking at failed.
-    if !is_current_coding_data_write(app, seq, agent_id) {
-        return vec![];
-    }
-    // Revert optimistic mutation: inner → refresh → toast. `agent_id`
-    // discarded — privacy is global.
-    set_coding_data_sharing_inner(app, rollback_to_opted_in);
-    refresh_open_settings_modals(app);
-    // Scrub long/unsafe error strings before toasting.
-    let scrubbed = scrub_error_for_toast(&error);
-    app.show_toast(&format!(
-        "\u{2717} Couldn't update coding data sharing: {scrubbed}"
-    ));
-    tracing::warn!(
-        target: "settings",
-        key = "coding_data_sharing",
-        ?agent_id,
-        rollback_to_opted_in,
-        %error,
-        "ACP update failed; reverted optimistic mutation",
-    );
-    // Opt-in failure: no ack; clear inflight so the banner stays.
-    app.privacy_banner_opt_in_inflight = false;
-    vec![]
 }
 
 /// Stamp `[privacy].privacy_banner_acked` (in-memory + disk).
@@ -750,49 +581,3 @@ pub(super) fn dispatch_copy_session_id(app: &mut AppView, index: usize) -> Vec<E
     vec![]
 }
 
-/// Open the onboarding tutorial overlay (top-level modal — works over both
-/// the welcome screen and an agent session). Toggles: dispatching while
-/// open closes instead of stacking.
-pub(super) fn dispatch_open_tutorial(app: &mut AppView) -> Vec<Effect> {
-    // Minimal mode has no modal host: the overlay would render nothing
-    // while the app-level intercept swallowed all input.
-    if app.screen_mode.is_minimal() {
-        return vec![];
-    }
-    if app.tutorial.is_some() {
-        app.tutorial = None;
-        return vec![];
-    }
-    app.tutorial = Some(crate::views::tutorial::TutorialState::new());
-    vec![]
-}
-
-pub(super) fn dispatch_show_doc(app: &mut AppView, title: String, content: String) -> Vec<Effect> {
-    match app.active_view {
-        ActiveView::Agent(id) => {
-            if let Some(agent) = app.agents.get_mut(&id) {
-                agent.active_modal = Some(crate::views::modal::ActiveModal::DocViewer {
-                    title,
-                    content,
-                    scroll: 0,
-                    window: crate::views::modal_window::ModalWindowState::new(),
-                    cached_lines: None,
-                    previous_palette: None,
-                    standalone: true,
-                });
-            }
-        }
-        ActiveView::Welcome => {
-            app.welcome_doc_viewer = Some(crate::views::modal::ActiveModal::DocViewer {
-                title,
-                content,
-                scroll: 0,
-                window: crate::views::modal_window::ModalWindowState::new(),
-                cached_lines: None,
-                previous_palette: None,
-                standalone: true,
-            });
-        }
-    }
-    vec![]
-}

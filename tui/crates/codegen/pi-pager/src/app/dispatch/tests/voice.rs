@@ -2,47 +2,6 @@
 
 use super::*;
 
-/// Plan mode must not gate voice: typing `/voice` + Enter through the real
-/// input path (prompt keys → slash registry → dispatch) starts recording
-/// with `plan_mode_active` set, exactly like normal mode.
-#[ignore = "pi-python: grok-specific feature not supported"]
-#[test]
-fn voice_slash_submit_starts_recording_in_plan_mode() {
-    use crate::app::app_view::InputOutcome;
-    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-    if !pi_voice::AUDIO_SUPPORTED {
-        return;
-    }
-    let mut app = test_app_with_agent();
-    let (tx, _rx) = tokio::sync::mpsc::channel(8);
-    app.voice_cmd_tx = Some(tx);
-    // Production reveal path: flips the flag AND the per-surface `/voice`
-    // registry visibility together.
-    app.apply_voice_mode_enabled(true);
-    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-    agent.plan_mode_active = true;
-    agent.set_active_pane(crate::views::agent::ActivePane::Prompt, false);
-
-    for ch in "/voice".chars() {
-        app.handle_input(&Event::Key(KeyEvent::new(
-            KeyCode::Char(ch),
-            KeyModifiers::NONE,
-        )));
-    }
-    let out = app.handle_input(&Event::Key(KeyEvent::new(
-        KeyCode::Enter,
-        KeyModifiers::NONE,
-    )));
-    let InputOutcome::Action(action) = out else {
-        panic!("Enter on /voice must produce a submit action, got {out:?}");
-    };
-    dispatch(action, &mut app);
-    assert!(
-        app.voice_listening(),
-        "typed /voice + Enter must start recording in plan mode"
-    );
-}
-
 #[test]
 fn voice_on_welcome_noop_when_startup_gated() {
     // Auth/folder-trust unresolved: voice must not create a session (that would

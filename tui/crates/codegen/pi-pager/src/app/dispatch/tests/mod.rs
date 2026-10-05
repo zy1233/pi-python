@@ -37,7 +37,7 @@ use super::session::fork::build_child_fork_marker;
 use super::session::lifecycle::{ drain_startup_actions, finish_trust};
 use super::session::load::{ reanchor_grouped_selection};
 use super::session::modal::{
-    dispatch_rename_session, dispatch_reset_session_title, 
+    dispatch_rename_session, 
 };
 use super::settings::setters::set_default_model_inner;
 use super::settings::ui::{action_for_reset, apply_setting_rollback};
@@ -590,13 +590,6 @@ pub(super) fn three_agent_app() -> AppView {
     insert_placeholder_agent(&mut app, AgentId(1));
     insert_placeholder_agent(&mut app, AgentId(2));
     app
-}
-use crate::app::actions::ForkArgs;
-fn fork_args(worktree_override: Option<bool>, directive: Option<&str>) -> ForkArgs {
-    ForkArgs {
-        worktree_override,
-        directive: directive.map(String::from),
-    }
 }
 /// Build a single-agent app for the `/fork` dispatcher tests.
 ///

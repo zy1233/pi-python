@@ -327,28 +327,6 @@ pub fn promo_cta_target<'a>(
     promo_cta(announcements, hidden_ids).map(|(owner, _label, url)| (owner, url))
 }
 
-/// Hide keys of every live (non-expired) session-surfaced announcement
-/// (critical or promo) — the set `/announcements show` clears, matching the
-/// selection's meaning of visible; prune owns cleanup of keys for
-/// expired-but-still-listed items.
-pub fn session_announcement_hide_keys(
-    announcements: &[pi_announcements::RemoteAnnouncement],
-) -> Vec<String> {
-    session_announcement_hide_keys_at(announcements, chrono::Utc::now())
-}
-
-/// [`session_announcement_hide_keys`] with an injectable clock.
-pub fn session_announcement_hide_keys_at(
-    announcements: &[pi_announcements::RemoteAnnouncement],
-    now: chrono::DateTime<chrono::Utc>,
-) -> Vec<String> {
-    visible_announcements(announcements)
-        .into_iter()
-        .filter(|a| is_live_session_announcement(a, now))
-        .map(pi_announcements::announcement_hide_key)
-        .collect()
-}
-
 /// Slash-gate predicate: any live session-surfaced announcement (critical or
 /// promo) exists, deliberately IGNORING the hidden set (unlike the banner
 /// selection above) so `/announcements show` stays reachable while
@@ -812,53 +790,6 @@ mod tests {
         assert!(
             first_critical_session_announcement_at(&only_expired, &no_hidden(), expiry).is_none(),
             "all-expired list must close the banner slot"
-        );
-    }
-
-    /// Show's clear set matches the selection's meaning of visible: live
-    /// (non-expired) criticals and promos only — expired keys are prune's job.
-    #[test]
-    fn session_hide_keys_cover_live_criticals_and_promos_only() {
-        let mut expired_promo = promo("promo-expired", "gone promo", None);
-        expired_promo.expires_at = Some("2000-01-01T00:00:00Z".into());
-        let list = vec![
-            ann(Some("info"), Some("skip me")),
-            RemoteAnnouncement {
-                id: Some("crit-1".into()),
-                severity: Some("critical".into()),
-                message: Some("one".into()),
-                ..Default::default()
-            },
-            RemoteAnnouncement {
-                id: None,
-                title: Some("T".into()),
-                severity: Some("critical".into()),
-                message: Some("two".into()),
-                ..Default::default()
-            },
-            RemoteAnnouncement {
-                id: Some("crit-expired".into()),
-                severity: Some("critical".into()),
-                message: Some("gone".into()),
-                expires_at: Some("2000-01-01T00:00:00Z".into()),
-                ..Default::default()
-            },
-            ann(Some("critical"), None), // no message → not visible
-            promo("promo-1", "upsell", Some(("Go", "https://example.com"))),
-            expired_promo,
-        ];
-        let now = chrono::DateTime::parse_from_rfc3339("2020-01-01T00:00:00Z")
-            .unwrap()
-            .with_timezone(&chrono::Utc);
-        let keys = session_announcement_hide_keys_at(&list, now);
-        assert_eq!(
-            keys,
-            vec![
-                "crit-1".to_string(),
-                "content:T\u{1f}two".to_string(),
-                "promo-1".to_string(),
-            ],
-            "expired keys must not be cleared by show; live promo keys must be"
         );
     }
 

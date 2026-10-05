@@ -472,30 +472,6 @@ pub(super) fn handle_mcp_auth_trigger_done(
         modal.pending_action = None;
         modal.pending_entry_index = None;
         match result {
-            Ok(crate::app::actions::McpAuthTriggerOutcome::Authenticated) => {}
-            Ok(crate::app::actions::McpAuthTriggerOutcome::SetupRequired(setup)) => {
-                let setup_values = match &modal.mcps_data {
-                    crate::views::extensions_modal::TabDataState::Loaded(servers) => servers
-                        .iter()
-                        .find(|server| server.name == server_name)
-                        .map(|server| server.setup_values.clone())
-                        .unwrap_or_default(),
-                    _ => std::collections::HashMap::new(),
-                };
-                if let Some(form) = crate::views::extensions_modal::McpSetupFormState::from_setup(
-                    server_name.clone(),
-                    setup,
-                    setup_values,
-                ) {
-                    modal.mcp_setup = Some(form);
-                } else {
-                    modal.modal_message =
-                        Some(crate::views::extensions_modal::ModalMessage::Error(
-                            format!("{server_name}: setup schema is not supported in this UI"),
-                        ));
-                }
-                return vec![];
-            }
             Err(e) => {
                 let msg = if e.starts_with("To authenticate") {
                     format!("{server_name}: {e}")

@@ -3873,13 +3873,6 @@ pub(crate) fn welcome_history_build_bypass_consume(
     })
 }
 
-/// If one-shot suppress is armed for `from`, point it at `to`.
-pub(crate) fn retarget_suppress_code_restore(app: &mut AppView, from: &str, to: impl Into<String>) {
-    if app.suppress_code_restore_once.as_deref() == Some(from) {
-        app.suppress_code_restore_once = Some(to.into());
-    }
-}
-
 /// Shared [`SessionFlags`] builder for the interactive loop.
 ///
 /// Permission seeds come from the global mirrors (`default_yolo`,

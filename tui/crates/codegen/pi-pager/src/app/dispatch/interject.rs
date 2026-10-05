@@ -92,7 +92,6 @@ pub(super) fn dispatch_interject_on(
         agent_id: id,
         session_id,
         text,
-        interjection_id,
         blocks,
     }]
 }

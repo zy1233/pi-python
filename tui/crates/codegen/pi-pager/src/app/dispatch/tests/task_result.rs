@@ -656,50 +656,6 @@ fn confirmation_required_builds_plugins_confirmation_with_confirmed_true() {
     }
 }
 
-/// Regression (Bugbot): a failed `legacy ext RPC` RPC must NOT
-/// finalize the row — the subagent may still be running. Only a shell
-/// response of "nothing live" finalizes it.
-#[test]
-fn kill_rpc_failure_does_not_finalize_but_nothing_live_does() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    let sid = acp::SessionId::new("test-session".to_owned());
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        let mut info = make_test_subagent("child-1", "sa-1");
-        info.pending_kill = true;
-        agent.subagent_sessions.insert("child-1".into(), info);
-    }
-
-    // RPC failed → leave the row (the subagent may still be running).
-    dispatch_task_result(
-        TaskResult::KillSubagentComplete {
-            session_id: sid.clone(),
-            subagent_id: "sa-1".into(),
-            outcome: SubagentKillOutcome::RpcFailed,
-        },
-        &mut app,
-    );
-    assert!(
-        !app.agents[&id].subagent_sessions["child-1"].finished,
-        "a failed cancel RPC must not finalize the row"
-    );
-
-    // Nothing live → no finish coming, so the pager finalizes the row.
-    dispatch_task_result(
-        TaskResult::KillSubagentComplete {
-            session_id: sid,
-            subagent_id: "sa-1".into(),
-            outcome: SubagentKillOutcome::NothingLive { status: None },
-        },
-        &mut app,
-    );
-    assert!(
-        app.agents[&id].subagent_sessions["child-1"].finished,
-        "nothing-live must finalize the orphan row"
-    );
-}
-
 /// An already-finished orphan's real terminal status (`NothingLive { status:
 /// Some(..) }`) is forwarded to the finalized row, not flattened to "cancelled".
 #[test]
@@ -1020,7 +976,6 @@ fn switch_model_incompatible_agent_shows_question_modal() {
             effort: None,
             result: Err(SwitchModelError::IncompatibleAgent {
                 error: err,
-                prev_model_id: None,
             }),
             prev_model_id: None,
         }),
@@ -1083,7 +1038,6 @@ fn incompatible_agent_rollback_restores_previous_model() {
             effort: None,
             result: Err(SwitchModelError::IncompatibleAgent {
                 error: err,
-                prev_model_id: Some(prev_model.clone()),
             }),
             prev_model_id: Some(prev_model.clone()),
         }),
@@ -1129,7 +1083,6 @@ fn incompatible_agent_closes_active_modal() {
             effort: None,
             result: Err(SwitchModelError::IncompatibleAgent {
                 error: err,
-                prev_model_id: None,
             }),
             prev_model_id: None,
         }),
@@ -1258,102 +1211,6 @@ fn no_deferred_switch_means_no_extra_effect() {
 }
 
 #[test]
-fn session_success_arms_finish_startup_obligation() {
-    pi_telemetry::unified_log::redirect_to_temp_for_tests();
-    let id = AgentId(0);
-    let results = [
-        TaskResult::SessionCreated {
-            agent_id: id,
-            session_id: "new-session".into(),
-            models: None,
-            scheduler_background_loops: None,
-        },
-        TaskResult::SessionLoaded {
-            agent_id: id,
-            session_id: "resumed-session".into(),
-            models: None,
-            code_restored: false,
-            restore_summary: None,
-            restore_degree: None,
-            running_prompt_id: None,
-            scheduler_background_loops: None,
-        },
-        TaskResult::WorktreeSessionCreated {
-            agent_id: id,
-            session_id: "worktree-session".into(),
-            worktree_path: std::path::PathBuf::from("/tmp/wt"),
-            session_cwd: std::path::PathBuf::from("/tmp/wt"),
-            models: None,
-            scheduler_background_loops: None,
-        },
-        TaskResult::WorktreeForked {
-            agent_id: id,
-            session_id: "forked-session".into(),
-            worktree_path: std::path::PathBuf::from("/tmp/wt"),
-            session_cwd: std::path::PathBuf::from("/tmp/wt"),
-            code_restored: false,
-            restore_summary: None,
-            restore_degree: None,
-            resume_session_id: None,
-        },
-    ];
-
-    for result in results {
-        let mut app = test_app_with_agent();
-        app.agents.get_mut(&id).unwrap().session.session_id = None;
-        app.pending_startup = Some(pi_telemetry::startup::PendingStartup::new());
-        let label = format!("{result:?}");
-
-        dispatch(Action::TaskComplete(result), &mut app);
-
-        assert!(
-            app.pending_startup.is_none(),
-            "a usable session must take the startup obligation: {label}",
-        );
-    }
-}
-
-#[test]
-fn bundle_status_ready_populates_state() {
-    let mut app = test_app();
-
-    dispatch(
-        Action::TaskComplete(TaskResult::BundleStatusReady {
-            has_cache: true,
-            version: Some("v2".into()),
-            personas: vec!["researcher".into(), "auditor".into()],
-            roles: vec!["reviewer".into()],
-            agents: vec!["default".into()],
-            skills: vec!["commit".into(), "code-review".into()],
-            persona_details: vec![crate::app::bundle::PersonaDetail {
-                name: "researcher".into(),
-                description: Some("thorough researcher".into()),
-                has_inputs: true,
-                has_outputs: false,
-                source_path: None,
-                scope_label: None,
-            }],
-            role_details: vec![crate::app::bundle::RoleDetail {
-                name: "reviewer".into(),
-                description: "code reviewer".into(),
-            }],
-        }),
-        &mut app,
-    );
-
-    assert!(app.bundle_state.has_cache);
-    assert_eq!(app.bundle_state.version, "v2");
-    assert_eq!(app.bundle_state.personas, vec!["researcher", "auditor"]);
-    assert_eq!(app.bundle_state.roles, vec!["reviewer"]);
-    assert_eq!(app.bundle_state.agents, vec!["default"]);
-    assert_eq!(app.bundle_state.skills, vec!["commit", "code-review"]);
-    assert_eq!(app.bundle_state.persona_details.len(), 1);
-    assert_eq!(app.bundle_state.persona_details[0].name, "researcher");
-    assert_eq!(app.bundle_state.role_details.len(), 1);
-    assert_eq!(app.bundle_state.role_details[0].name, "reviewer");
-}
-
-#[test]
 fn bundle_status_failed_logs_but_keeps_state() {
     let mut app = test_app();
     app.bundle_state.has_cache = true;
@@ -1368,31 +1225,6 @@ fn bundle_status_failed_logs_but_keeps_state() {
 
     assert!(app.bundle_state.has_cache);
     assert_eq!(app.bundle_state.version, "keep-me");
-}
-
-#[test]
-fn catalog_entry_ready_opens_viewer() {
-    let mut app = test_app_with_agent();
-
-    dispatch(
-        Action::TaskComplete(TaskResult::CatalogEntryReady {
-            kind: "persona".into(),
-            name: "researcher".into(),
-            content: "instructions = \"deep research\"".into(),
-        }),
-        &mut app,
-    );
-
-    let ActiveView::Agent(id) = app.active_view else {
-        panic!("expected agent view");
-    };
-    let agent = app.agents.get(&id).unwrap();
-    assert!(agent.block_viewer.is_some());
-    let viewer = agent.block_viewer.as_ref().unwrap();
-    assert_eq!(
-        viewer.kind,
-        crate::views::block_viewer::ViewerKind::PlainText
-    );
 }
 
 #[test]
@@ -1790,133 +1622,6 @@ fn rename_session_failed_keeps_local_display_name_and_pushes_system_block() {
     assert!(
         text.contains("Couldn't rename session: boom"),
         "system block must surface the error; got: {text:?}"
-    );
-}
-
-#[test]
-fn reset_session_title_failed_restores_pin_and_pushes_system_block() {
-    let mut app = test_app_with_agent();
-    if let Some(a) = app.agents.get_mut(&AgentId(0)) {
-        a.display_name = Some("Manual".into());
-        a.generated_session_title = Some("Auto".into());
-    }
-    let _ = dispatch_reset_session_title(&mut app);
-    assert!(app.agents[&AgentId(0)].display_name.is_none());
-    assert_eq!(
-        app.agents[&AgentId(0)].generated_session_title.as_deref(),
-        Some("Auto")
-    );
-    let scrollback_len_before = app.agents[&AgentId(0)].scrollback.len();
-
-    let _effects = dispatch_task_result(
-        TaskResult::ResetSessionTitleFailed {
-            agent_id: AgentId(0),
-            error: "boom".into(),
-            previous_display_name: Some("Manual".into()),
-            previous_generated_title: Some("Auto".into()),
-        },
-        &mut app,
-    );
-
-    assert_eq!(
-        app.agents[&AgentId(0)].display_name.as_deref(),
-        Some("Manual"),
-        "failed unpin must restore the optimistic-cleared pin"
-    );
-    assert_eq!(
-        app.agents[&AgentId(0)].generated_session_title.as_deref(),
-        Some("Auto"),
-        "failed unpin must restore the pre-clear generated title"
-    );
-    let scrollback = &app.agents[&AgentId(0)].scrollback;
-    assert_eq!(
-        scrollback.len(),
-        scrollback_len_before + 1,
-        "system block must be appended"
-    );
-    let last = scrollback.entry(scrollback.len() - 1).expect("last entry");
-    let text = match &last.block {
-        crate::scrollback::block::RenderBlock::System(b) => b.text.clone(),
-        other => panic!("expected System block, got {other:?}"),
-    };
-    assert!(
-        text.contains("Couldn't reset session title: boom"),
-        "system block must surface the error; got: {text:?}"
-    );
-}
-
-#[test]
-fn reset_session_title_failed_does_not_restore_after_unpin_fanout() {
-    let mut app = test_app_with_agent();
-    if let Some(a) = app.agents.get_mut(&AgentId(0)) {
-        a.display_name = Some("Manual".into());
-        a.generated_session_title = Some("Auto".into());
-    }
-    let _ = dispatch_reset_session_title(&mut app);
-    if let Some(a) = app.agents.get_mut(&AgentId(0)) {
-        a.title_unpin_committed = true;
-        a.display_name = None;
-        a.generated_session_title = Some("Auto".into());
-    }
-
-    let _effects = dispatch_task_result(
-        TaskResult::ResetSessionTitleFailed {
-            agent_id: AgentId(0),
-            error: "transport dropped".into(),
-            previous_display_name: Some("Manual".into()),
-            previous_generated_title: Some("Auto".into()),
-        },
-        &mut app,
-    );
-
-    let agent = &app.agents[&AgentId(0)];
-    assert!(
-        agent.display_name.is_none(),
-        "dropped RPC after fan-out must not re-pin"
-    );
-    assert_eq!(agent.generated_session_title.as_deref(), Some("Auto"));
-    assert!(!agent.title_unpin_committed);
-    let last = agent
-        .scrollback
-        .entry(agent.scrollback.len() - 1)
-        .expect("last entry");
-    let text = match &last.block {
-        crate::scrollback::block::RenderBlock::System(b) => b.text.clone(),
-        other => panic!("expected System block, got {other:?}"),
-    };
-    assert!(
-        text.contains("Session title reset to auto"),
-        "committed unpin should confirm, not error; got: {text:?}"
-    );
-}
-
-#[test]
-fn reset_session_title_complete_pushes_system_block() {
-    let mut app = test_app_with_agent();
-    if let Some(a) = app.agents.get_mut(&AgentId(0)) {
-        a.display_name = None;
-        a.generated_session_title = None;
-    }
-    let scrollback_len_before = app.agents[&AgentId(0)].scrollback.len();
-
-    let _effects = dispatch_task_result(
-        TaskResult::ResetSessionTitleComplete {
-            agent_id: AgentId(0),
-        },
-        &mut app,
-    );
-
-    assert!(app.agents[&AgentId(0)].display_name.is_none());
-    let scrollback = &app.agents[&AgentId(0)].scrollback;
-    assert_eq!(scrollback.len(), scrollback_len_before + 1);
-    let last = scrollback.entry(scrollback.len() - 1).expect("last entry");
-    let text = match &last.block {
-        crate::scrollback::block::RenderBlock::System(b) => b.text.clone(),
-        other => panic!("expected System block, got {other:?}"),
-    };
-    assert!(
-        text.contains("Session title reset to auto"),
-        "got: {text:?}"
     );
 }
 
@@ -2507,28 +2212,6 @@ fn rollback_to_always_approve_blocked_by_policy_pin() {
 
 // -- Degraded conversations lane (SessionListLoaded.partial) ----------
 
-/// A degraded conversations lane surfaces an actionable notice instead of
-/// the misleading "No sessions found" toast.
-#[test]
-fn session_list_partial_no_oauth_surfaces_login_hint() {
-    let mut app = test_app_with_agent();
-    open_session_picker_with(&mut app, vec![]);
-    let _ = dispatch(
-        Action::TaskComplete(TaskResult::SessionListLoaded {
-            scope: ListScope::Cwd,
-            sessions: vec![],
-            partial: Some(crate::app::effects::ConversationsPartial::NoOauth),
-            seq: 0,
-            query: None,
-        }),
-        &mut app,
-    );
-    assert!(
-        read_toast(&app).contains("/login"),
-        "no_oauth must point at /login"
-    );
-}
-
 /// Notice fires once per relaxed run; survives search, re-arms on a cwd-scoped browse.
 #[test]
 fn session_list_relax_surfaces_notice_once() {
@@ -2662,98 +2345,3 @@ fn session_list_empty_without_partial_keeps_generic_toast() {
     assert!(read_toast(&app).contains("No sessions found"));
 }
 
-/// Non-empty degraded list under chat mode (welcome-fallback branch):
-/// entries land AND the retry notice surfaces; Build mode stays silent.
-#[test]
-fn session_list_nonempty_partial_toasts_retry_in_chat_mode_only() {
-    let mut app = test_app_with_agent();
-    app.chat_mode = true;
-    let _ = dispatch(
-        Action::TaskComplete(TaskResult::SessionListLoaded {
-            scope: ListScope::Cwd,
-            sessions: vec![make_conversation_entry("conv-part-1")],
-            partial: Some(crate::app::effects::ConversationsPartial::Timeout),
-            seq: 0,
-            query: None,
-        }),
-        &mut app,
-    );
-    assert!(
-        app.session_picker_entries.is_some(),
-        "entries must still land on a degraded lane"
-    );
-    assert!(
-        read_toast(&app).contains("retry"),
-        "timeout must surface the retry notice"
-    );
-
-    // Build-mode canary: stays silent on a degraded lane.
-    let mut app = test_app_with_agent();
-    let _ = dispatch(
-        Action::TaskComplete(TaskResult::SessionListLoaded {
-            scope: ListScope::Cwd,
-            sessions: vec![make_picker_entry("local-part-1", "/r")],
-            partial: Some(crate::app::effects::ConversationsPartial::Timeout),
-            seq: 0,
-            query: None,
-        }),
-        &mut app,
-    );
-    assert!(
-        app.agents[&AgentId(0)].toast.is_none(),
-        "Build-mode non-empty degraded list stays silent"
-    );
-}
-
-/// Modal variant of the non-empty degraded-lane notice: same chat-mode-only
-/// gating as the welcome-fallback branch.
-#[test]
-fn session_list_nonempty_partial_modal_toasts_in_chat_mode_only() {
-    use crate::views::modal::ActiveModal;
-    let mut app = test_app_with_agent();
-    app.chat_mode = true;
-    open_session_picker_with(&mut app, vec![]);
-    let _ = dispatch(
-        Action::TaskComplete(TaskResult::SessionListLoaded {
-            scope: ListScope::Cwd,
-            sessions: vec![make_conversation_entry("conv-part-m1")],
-            partial: Some(crate::app::effects::ConversationsPartial::Timeout),
-            seq: 0,
-            query: None,
-        }),
-        &mut app,
-    );
-    let agent = get_active_agent(&app).expect("active agent");
-    assert!(
-        matches!(
-            agent.active_modal.as_ref(),
-            Some(ActiveModal::SessionPicker {
-                entries: Some(list),
-                ..
-            }) if list.len() == 1
-        ),
-        "entries must land in the open modal on a degraded lane"
-    );
-    assert!(
-        read_toast(&app).contains("retry"),
-        "chat-mode modal must surface the retry notice"
-    );
-
-    // Build-mode canary: the open modal stays silent.
-    let mut app = test_app_with_agent();
-    open_session_picker_with(&mut app, vec![]);
-    let _ = dispatch(
-        Action::TaskComplete(TaskResult::SessionListLoaded {
-            scope: ListScope::Cwd,
-            sessions: vec![make_picker_entry("local-part-m1", "/r")],
-            partial: Some(crate::app::effects::ConversationsPartial::Timeout),
-            seq: 0,
-            query: None,
-        }),
-        &mut app,
-    );
-    assert!(
-        app.agents[&AgentId(0)].toast.is_none(),
-        "Build-mode modal non-empty degraded list stays silent"
-    );
-}

@@ -725,7 +725,6 @@ pub(super) fn dispatch_cancel_scheduled_task(app: &mut AppView, task_id: String)
 
     vec![Effect::DeleteScheduledTask {
         session_id,
-        task_id,
     }]
 }
 
@@ -805,7 +804,6 @@ pub(super) fn dispatch_demote_to_background(app: &mut AppView) -> Vec<Effect> {
 
     vec![Effect::DemoteToBackground {
         session_id,
-        tool_call_id,
     }]
 }
 

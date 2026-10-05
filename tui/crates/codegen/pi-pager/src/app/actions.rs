@@ -23,25 +23,9 @@ pub enum SwitchModelError {
     /// `acp::Error.data`.
     IncompatibleAgent {
         error: pi_shell::agent::config::ModelSwitchIncompatibleAgentError,
-        /// The model that was active before the optimistic UI update
-        /// (if any). Used to roll back `models.current` when the user
-        /// declines to start a new session.
-        prev_model_id: Option<acp::ModelId>,
     },
     /// Any other failure (network, auth, server error, etc.).
     Other(String),
-}
-/// Arguments of an in-session fork request ([`Action::Fork`]).
-///
-/// The `/fork` slash command that parsed these is gone; the type stays only
-/// until the in-session fork flow itself is removed.
-#[derive(Debug, Default, PartialEq, Eq)]
-pub struct ForkArgs {
-    /// `None` opens the worktree question; `Some(true)` / `Some(false)`
-    /// force a worktree / no worktree.
-    pub worktree_override: Option<bool>,
-    /// Optional first prompt for the new session.
-    pub directive: Option<String>,
 }
 
 /// Synchronous, side-effect-free user intent.
@@ -57,10 +41,6 @@ pub enum Action {
     QuitForUpdate,
     /// Resume the recent foreign session offered on the launch welcome screen.
     ResumeForeignSession,
-    /// Re-exec into the other screen mode (`true` = minimal).
-    RelaunchInScreenMode {
-        minimal: bool,
-    },
     /// Quit without double-press confirmation (e.g., from command palette or pre-login screens).
     QuitConfirmed,
     /// Create a new session from the welcome screen.
@@ -69,10 +49,6 @@ pub enum Action {
     ChooseNewSessionMode,
     /// Exit the current session and return to the welcome screen.
     ExitSession,
-    /// Exit session without double-press confirmation (e.g., from command palette).
-    ExitSessionConfirmed,
-    /// `/delete`: confirm, then delete history; return to welcome.
-    DeleteCurrentSession,
     DeleteCurrentSessionAnswered {
         confirmed: bool,
     },
@@ -234,9 +210,6 @@ pub enum Action {
     QueueReorderShared {
         ordered_ids: Vec<String>,
     },
-    /// Clear the caller's server-authoritative (shared) queued prompts.
- /// Routed as `legacy ext RPC`.
-    QueueClearShared,
     /// Replace the text of a server-authoritative (shared) queued prompt.
  /// Routed to the agent as `legacy ext RPC`; the rebroadcast of
  /// `legacy ext RPC` is the source of truth. Last write wins via the
@@ -244,14 +217,6 @@ pub enum Action {
     QueueEditShared {
         id: String,
         new_text: String,
-    },
-    /// Hold a server-authoritative row out of combine-on-promote while editing.
-    QueueHoldEditShared {
-        id: String,
-    },
-    /// Release a previous [`Self::QueueHoldEditShared`].
-    QueueReleaseEditShared {
-        id: String,
     },
     /// Interject a server-authoritative (shared) queued prompt into the running
     /// turn: the agent atomically removes it from the queue and
@@ -290,11 +255,6 @@ pub enum Action {
     /// Clear the prompt (history-aware). Armed by idle Esc double-press via
     /// [`super::app_view::InputOutcome::ArmPending`] (no ActionDef; not a keybinding).
     ClearPrompt,
-    /// Focus the scrollback pane and open an incremental search over it.
-    /// Drives the `/find` slash command so simple-mode users (where a bare
-    /// `/` goes to the prompt) reach the same search as the vim `/` key.
-    /// Carries the optional `/find <word>` argument to pre-fill the bar.
-    OpenScrollbackSearch(Option<String>),
     /// Select next entry in scrollback.
     SelectNext,
     /// Select previous entry.
@@ -340,41 +300,13 @@ pub enum Action {
     /// re-enabling restores in-app mouse handling. Bound to Ctrl+R while the
     /// scrollback pane is focused.
     ToggleMouseCapture,
-    /// Toggle the scroll-diagnostics HUD (hidden `/scroll-debug` command,
-    /// also `/debug scroll`; `GROK_SCROLL_DEBUG=1` enables it from startup).
-    ToggleScrollDebugHud,
-    /// Toggle the release-safe FPS HUD (`/debug fps`).
-    ToggleFpsHud,
-    /// Toggle the scroll flight recorder at runtime (`/debug log`;
-    /// `GROK_SCROLL_LOG=1` enables it from startup).
-    ToggleScrollLog,
-    /// Print the `/debug` toggles and their on/off state to the transcript.
-    ShowDebugStatus,
     /// Copy selected block's content to clipboard.
     CopyBlockContent,
-    /// Copy the Nth most recent assistant message (1 = latest).
-    /// `None` => clipboard (with file fallback on failure); `Some(p)` => write UTF-8 file.
-    CopyAssistantMessage {
-        n: usize,
-        file_path: Option<std::path::PathBuf>,
-    },
-    /// Export the active (sub)agent's conversation transcript as Markdown.
-    /// `None` => copy to clipboard (with route-aware toast + stats); `Some(p)` => write UTF-8 file
-    /// (all ~ expansion, parent dir creation, and fs::write live in the dispatch handler).
-    ExportConversation {
-        file_path: Option<std::path::PathBuf>,
-    },
     /// Render the active (sub)agent's full transcript to a temp Markdown file and
     /// open it in `$PAGER` (default `less`), suspending the inline TUI for the
     /// duration. The dispatch handler renders + writes the file and arms
     /// `AppView::pending_pager_path`; the event loop does the suspend/restore.
     OpenTranscriptPager,
-    /// Minimal mode (`grok --minimal`): re-print the most-recently committed
-    /// folded block (collapsed reasoning / truncated tool output) into native
-    /// scrollback, fully expanded, below the conversation (design decision K10).
-    /// Bound to `Ctrl+E` and the `/expand` command. No-op outside minimal mode
-    /// or when nothing folded remains to expand.
-    MinimalExpandLast,
     /// Copy selected block's metadata (e.g., command for execute blocks).
     CopyBlockMeta,
     /// Open the selected block in the fullscreen viewer.
@@ -384,9 +316,6 @@ pub enum Action {
         tab: crate::views::extensions_modal::ExtensionsTab,
         trigger: pi_telemetry::events::ExtensionsModalTrigger,
     },
-    /// Open the agents modal (listing all agent definitions).
-    /// Optionally opens directly on a specific tab.
-    OpenConfigAgentsModal(Option<crate::views::agents_modal::AgentsTab>),
     /// Trigger OAuth for an MCP server from the modal.
     McpAuthTrigger {
         server_name: String,
@@ -457,8 +386,6 @@ pub enum Action {
     },
     /// Hide the announcements banner.
     AnnouncementsHide,
-    /// Show the announcements banner.
-    AnnouncementsShow,
     /// Open the promo CTA link (url resolved from current state at dispatch
     /// time, mirroring how `AnnouncementsHide` resolves its target). The
     /// payload records which surface activated it, for telemetry.
@@ -467,8 +394,6 @@ pub enum Action {
     /// Normal (Auto skipped when the feature gate is off).
     /// Plan mode sends a signal to the shell; always-approve is local.
     CycleMode,
-    /// Toggle YOLO mode (auto-approve all permissions). Ctrl+O.
-    ToggleYolo,
     /// Set YOLO (auto-approve / `always-approve`) mode.
     SetYoloMode(bool),
     /// Set the permission mode by canonical kind (`always-approve` /
@@ -476,22 +401,13 @@ pub enum Action {
     /// that preserves the `default` canonical (the `bool` variant
     /// collapses `default` to `ask`).
     SetPermissionMode(PermissionModeKind),
-    /// Toggle multiline input mode (swap Enter and Shift+Enter behavior).
-    ToggleMultiline,
     /// Set multiline input mode (swap Enter and Shift+Enter behavior).
     /// Pager-owned, NOT persisted to disk — reset each session.
     SetMultilineMode(bool),
-    /// Open the prompt-history search panel on the active agent (composer
-    /// as filter query). Dispatched by `/history`.
-    OpenHistorySearch,
     /// Set how ` ```mermaid ` code blocks are rendered (auto/on/off).
     /// SHELL-owned: updates the process-wide cache mirror and persists to
     /// `[ui].render_mermaid` in config.toml via `Effect::PersistSetting`.
     SetRenderMermaid(crate::appearance::RenderMermaid),
-    /// Toggle vim-style scrollback keybindings (j/k, h/l, g/G, y/Y, etc.).
-    /// Delegates to `set_vim_mode` so the new value is persisted to
-    /// `[ui].vim_mode` in config.toml — same path as the settings modal.
-    ToggleVimMode,
     /// Set vim-style scrollback keybindings. SHELL-owned: persisted to
     /// `[ui].vim_mode` in config.toml via `Effect::PersistSetting`.
     /// Used by the settings modal; the `ToggleVimMode` variant covers
@@ -557,10 +473,6 @@ pub enum Action {
     /// Set the voice STT language (catalog code or `auto`). SHELL-owned; persisted
     /// to `[ui].voice_stt_language`. Takes effect for the next voice capture.
     SetVoiceSttLanguage(String),
-    /// Toggle timestamp display on messages.
-    ToggleTimestamps,
-    /// Toggle compact mode (reduce user message padding).
-    ToggleCompactMode,
     /// Set compact mode (reduce user message padding).
     SetCompactMode(bool),
     /// Set timestamp display on messages.
@@ -638,11 +550,6 @@ pub enum Action {
     /// Open the settings modal (F2, `/settings`, command palette).
     /// If already open, closes it instead of stacking.
     OpenSettings,
-    /// Open settings on a registry key: its chooser, or the browse row when
-    /// the setting is locked.
-    OpenSettingsFocus {
-        key: &'static str,
-    },
     /// Privacy banner `[Opt in]` (ack only after ACP success).
     PrivacyBannerOptIn,
     /// Privacy banner `[Opt out]` (ack now, then record the decline).
@@ -651,11 +558,6 @@ pub enum Action {
     /// directly in `handle_agent_action`; this lets a slash command reach the
     /// same modal through dispatch.
     OpenCommandPalette,
-    /// Open the in-TUI How-to Guides doc picker (`/docs`, palette "How-to Guides").
-    OpenHowtoGuides,
-    /// Open the onboarding tutorial overlay (`/tutorial` or the command
-    /// palette).
-    OpenTutorial,
     /// Open the reset-settings confirmation dialog for a specific key.
     /// Moves the Settings modal state into `ResetSettingsConfirm` so
     /// the underlying modal survives the confirm dialog.
@@ -706,52 +608,19 @@ pub enum Action {
     OpenConsentLink(usize),
     /// A spawned task completed.
     TaskComplete(TaskResult),
-    /// Share the current session via URL.
-    ShareSession,
-    /// Show session info (auth, ID, cwd, model, context usage) instantly.
-    ShowSessionInfo,
-    /// Show a markdown document (`/docs`) in a modal.
-    ShowDoc {
-        title: String,
-        content: String,
-    },
     /// Rename the current session's title/summary.
     RenameSession {
         title: String,
     },
-    /// Unpin the current session title (`/rename --auto`).
-    ResetSessionTitleToAuto,
     /// Show detailed context usage (progress bar, token breakdown, stats).
     ShowContextInfo,
-    /// `/usage` — session token/cost, plus consumer credits when visible.
-    ShowUsage,
-    /// `/usage manage` — open consumer billing (no-op if surface hidden).
-    ManageBilling,
     /// Commit a read-only list of the queued prompts as a system block
     /// (`/queue`). The surface minimal mode uses in place of the `QueuePane`.
     ShowQueue,
-    /// Commit a read-only list of background tasks, subagents, and scheduled
-    /// tasks as a system block (`/tasks`). The surface minimal mode uses in
-    /// place of the `TasksPane`.
-    ShowTasks,
-    /// Show the current plan: preview popover if exists, toast if not.
-    ShowPlan,
-    /// Enter plan mode. If a description is provided, also start a turn
-    /// with that text as the prompt.
-    EnterPlanMode {
-        description: Option<String>,
-    },
     /// Set plan mode on/off. Per-session, ACP-mediated (not persisted
     /// to config.toml). `/plan <desc>` uses `EnterPlanMode` instead
     /// because it also starts a turn.
     SetPlanMode(PlanModeKind),
-    /// Open the freeform feedback card. `images` carries composer
-    /// attachments drained at slash-execution time (inline `/feedback`
-    /// composed alongside pasted images); the pane adopts them as chips.
-    OpenFeedbackPane {
-        prefill: Option<String>,
-        images: crate::views::prompt_widget::FeedbackImages,
-    },
     /// Submit feedback (minimal inline `/feedback <text>`, or card
     /// submit). `trace` is `None` when no trace-consent card was shown.
     SendFeedback {
@@ -759,15 +628,11 @@ pub enum Action {
         images: crate::views::prompt_widget::FeedbackImages,
         trace: Option<FeedbackTraceChoice>,
     },
-    /// Enter remember mode (visual prompt change, not a send).
-    EnterRememberMode,
     /// Send a remember note from # mode. Routes through LLM rewrite when a
     /// session is active; falls back to direct save otherwise.
     SendRememberNote(String),
     /// Save the currently displayed remember note from the review modal.
     SaveRememberNoteFromModal,
-    /// Send a /btw side question (bypasses queue, works while agent is busy).
-    SendBtw(String),
     /// Request a session recap ("where was I" summary). `auto` is `true` for
     /// the automatic return-from-away recap, `false` for an explicit `/recap`.
     /// Bypasses the prompt queue (works while the agent is busy).
@@ -799,10 +664,6 @@ pub enum Action {
     SetCodingDataSharing {
         opted_in: bool,
     },
-    /// In-session fork request. The dispatcher resolves the worktree
-    /// question (via flag or the local QuestionView modal) before
-    /// constructing the placeholder.
-    Fork(ForkArgs),
     /// Submit-path action emitted by the local fork worktree question
     /// modal. Routes directly to `dispatch_fork_resolved`.
     ForkAnswered {
@@ -838,10 +699,6 @@ pub enum Action {
     DoctorFixCancelled(DoctorFixTarget),
     /// Persist the memory modal fullscreen preference to config.toml.
     PersistMemoryFullscreen(bool),
-    /// Open the memory browser modal.
-    OpenMemoryModal,
-    /// Open the hidden `/gboom` easter egg (DOOM-style raycaster modal).
-    OpenGboom,
     /// Suspend the TUI and open a configuration file in `$EDITOR`.
     SuspendForEditor {
         path: std::path::PathBuf,
@@ -853,7 +710,6 @@ pub enum Action {
     /// Toggle the expanded goal detail overlay.
     ToggleGoalDetail,
     ToggleWorkflows,
-    Rewind,
     RewindShowPicker,
     RewindPickerSelect(usize),
     RewindConfirm(usize),
@@ -865,8 +721,6 @@ pub enum Action {
     /// Submit an inline edit: conversation-only rewind to that prompt, then
     /// resubmit the edited text (state lives on `AgentView::inline_edit`).
     InlineEditSubmit,
-    /// Open the `/jump` turn picker.
-    JumpShowPicker,
     /// Jump to a turn by its prompt's stable id and close the picker.
     JumpPickerSelect(EntryId),
     /// Close the picker and restore the stashed viewport.
@@ -1008,14 +862,6 @@ impl PlanModeKind {
         match self {
             Self::On => "on",
             Self::Off => "off",
-        }
-    }
-    /// Display label used in the toast and the picker. Mirrors
-    /// `EnumChoice.display`.
-    pub fn as_display(self) -> &'static str {
-        match self {
-            Self::On => "On",
-            Self::Off => "Off",
         }
     }
     /// Bool projection — `On → true`, `Off → false`. Used by the
@@ -1425,12 +1271,10 @@ pub enum Effect {
     },
     DeleteScheduledTask {
         session_id: acp::SessionId,
-        task_id: String,
     },
     /// Demote a foreground execute tool to background.
     DemoteToBackground {
         session_id: acp::SessionId,
-        tool_call_id: String,
     },
     /// Switch active model.
     SwitchModel {
@@ -1512,23 +1356,16 @@ pub enum Effect {
         /// See [`Effect::SendPrompt::prompt_id`].
         prompt_id: String,
     },
-    /// Toggle plan mode — fire-and-forget signal to the shell.
-    TogglePlanMode { session_id: acp::SessionId },
     /// Remove a server-owned queued prompt: fire-and-forget
  /// `legacy ext RPC`. The agent re-broadcasts the authoritative queue.
     QueueRemove {
         session_id: acp::SessionId,
         id: String,
-        expected_version: u64,
     },
  /// Reorder server-owned queued prompts: fire-and-forget `legacy ext RPC`.
     QueueReorder {
         session_id: acp::SessionId,
-        ordered_ids: Vec<String>,
     },
-    /// Clear the caller's server-owned queued prompts: fire-and-forget
- /// `legacy ext RPC`.
-    QueueClear { session_id: acp::SessionId },
     /// Replace the text of a server-owned queued prompt in place: fire-and-forget
  /// `legacy ext RPC`. The session actor's serialized mailbox makes this
     /// last-writer-wins for concurrent edits; the rebroadcast of
@@ -1536,7 +1373,6 @@ pub enum Effect {
     QueueEdit {
         session_id: acp::SessionId,
         id: String,
-        new_text: String,
     },
     /// Hold a server-owned row out of combine-on-promote while the composer
  /// edits it: fire-and-forget `legacy ext RPC`.
@@ -1561,25 +1397,11 @@ pub enum Effect {
     QueueInterject {
         session_id: acp::SessionId,
         id: String,
-        expected_version: u64,
-        new_text: Option<String>,
     },
     /// Set the session mode via ACP `session/set_mode`.
     SetSessionMode {
         session_id: acp::SessionId,
         mode_id: acp::SessionModeId,
-    },
-    /// Set session mode then send a prompt, sequentially in one task.
-    /// Used by `/plan <desc>` to guarantee the mode switch ACP call
-    /// completes before the prompt is dispatched.
-    SetModeThenPrompt {
-        session_id: acp::SessionId,
-        mode_id: acp::SessionModeId,
-        agent_id: AgentId,
-        text: String,
-        prompt_id: String,
-        /// See [`Effect::SendPrompt::skill_token_ranges`].
-        skill_token_ranges: Vec<std::ops::Range<usize>>,
     },
     /// Fetch prompt history for the current session from the ACP agent.
     /// `session_id` scopes the per-CWD history file to this session (the agent's
@@ -1638,13 +1460,11 @@ pub enum Effect {
     HooksAction {
         agent_id: AgentId,
         session_id: acp::SessionId,
-        action: pi_hooks_plugins_types::HooksAction,
     },
     /// Execute a plugins management action via ACP.
     PluginsAction {
         agent_id: AgentId,
         session_id: acp::SessionId,
-        action: pi_hooks_plugins_types::PluginsAction,
     },
     /// Fetch marketplace plugin list from the shell.
     FetchMarketplaceList {
@@ -1675,21 +1495,18 @@ pub enum Effect {
     ToggleSkill {
         agent_id: AgentId,
         session_id: acp::SessionId,
-        skill_name: String,
         enabled: bool,
     },
     /// Execute a marketplace action (install/uninstall/refresh) via ACP.
     MarketplaceAction {
         agent_id: AgentId,
         session_id: acp::SessionId,
-        action: pi_hooks_plugins_types::MarketplaceAction,
     },
  /// Install a plugin from the inline CTA via `legacy ext RPC`,
     /// reported back via `TaskResult::CtaPluginInstallDone`.
     InstallPluginFromCta {
         agent_id: AgentId,
         session_id: acp::SessionId,
-        source_url_or_path: String,
         plugin_relative_path: String,
     },
  /// Reload plugins after a CTA install via `legacy ext RPC`
@@ -1727,33 +1544,23 @@ pub enum Effect {
         agent_id: AgentId,
         session_id: acp::SessionId,
         name: String,
-        config: Box<pi_shell::util::config::McpServerConfig>,
     },
  /// Delete an MCP server via legacy ext RPC
     DeleteMcpServer {
         agent_id: AgentId,
         session_id: acp::SessionId,
-        server_name: String,
     },
  /// Live-toggle an MCP server via legacy ext RPC (no restart needed).
     ToggleMcpServer {
         agent_id: AgentId,
         session_id: acp::SessionId,
-        server_name: String,
         enabled: bool,
     },
  /// Toggle a single MCP tool via legacy ext RPC
     ToggleMcpTool {
         agent_id: AgentId,
         session_id: acp::SessionId,
-        server_name: String,
-        tool_name: String,
         enabled: bool,
-    },
-    /// Share the current session via URL.
-    ShareSession {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
     },
  /// Fetch and display session info via legacy ext RPC
     /// Auth lines are derived in the effect from SessionFlags + env (not Effect fields).
@@ -1779,8 +1586,6 @@ pub enum Effect {
     SendFeedback {
         agent_id: AgentId,
         session_id: acp::SessionId,
-        feedback_text: String,
-        images: Vec<pi_shell::session::FeedbackImage>,
     },
     /// One-shot session archive for a feedback report (after the text POST).
     UploadFeedbackTrace {
@@ -1800,7 +1605,6 @@ pub enum Effect {
         agent_id: AgentId,
         session_id: acp::SessionId,
         raw_text: String,
-        context_summary: String,
         /// Monotonic nonce to correlate this request with the modal that
         /// opened it, so stale results don't populate a different review.
         nonce: u64,
@@ -1814,14 +1618,6 @@ pub enum Effect {
         agent_id: AgentId,
         session_id: acp::SessionId,
     },
- /// Fire a /btw side question via legacy ext RPC ext method.
-    SendBtw {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        question: String,
-        /// Correlates minimal responses; fullscreen leaves this unset.
-        minimal_request_id: Option<uuid::Uuid>,
-    },
  /// Request a session recap via the legacy ext RPC ext method. Fire-and-forget:
     /// the recap arrives later as a `SessionRecap` notification.
     SendRecap {
@@ -1833,9 +1629,6 @@ pub enum Effect {
         agent_id: AgentId,
         session_id: acp::SessionId,
         text: String,
- /// Client-minted id echoed back on the `legacy ext RPC`
-        /// broadcast so the originator can dedup its optimistic local block.
-        interjection_id: String,
         /// Structured text + image content blocks. `None` for text-only
         /// interjections — the wire shape stays byte-identical to legacy.
         blocks: Option<Vec<acp::ContentBlock>>,
@@ -1882,8 +1675,6 @@ pub enum Effect {
     SetCodingDataSharing {
         agent_id: AgentId,
         opted_in: bool,
-        /// Pre-toggle value to revert to on failure.
-        rollback_to_opted_in: bool,
         /// Write generation, echoed back on the `TaskResult`. Writes to this
         /// endpoint are concurrent, so a result that isn't the newest must
         /// not touch state: its `rollback_to_opted_in` was captured against
@@ -1897,16 +1688,6 @@ pub enum Effect {
         title: String,
         cwd: std::path::PathBuf,
         kind: SessionKind,
-    },
-    /// Unpin the current session title (`/rename --auto`).
-    ResetSessionTitle {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        cwd: std::path::PathBuf,
-        kind: SessionKind,
-        /// Pre-clear caches so `ResetSessionTitleFailed` can restore the pin.
-        previous_display_name: Option<String>,
-        previous_generated_title: Option<String>,
     },
     /// Delete a session in the ACP backend repository.
     DeleteSession {
@@ -1924,15 +1705,6 @@ pub enum Effect {
     /// directly so we get worktree creation + code restore for free.
     ForkSession {
         agent_id: AgentId,
-        parent_session_id: acp::SessionId,
-        parent_cwd: std::path::PathBuf,
-        /// Whether the parent session lives in a git worktree. When `true`,
-        /// the fork payload sets `sourceWorkspaceDir` so the shell preserves
-        /// prompt-display provenance.
-        parent_is_worktree: bool,
-        /// Optional client-chosen ID for the forked session (`--session-id`
-        /// with `--fork-session`).
-        new_session_id: Option<String>,
     },
     /// Read session display fields from local `summary.json` after load/resume:
     /// title (and `/rename` manual-ness) plus last-turn summary.
@@ -1951,7 +1723,6 @@ pub enum Effect {
     RewindExecute {
         agent_id: AgentId,
         session_id: acp::SessionId,
-        target_prompt_index: usize,
     },
  /// Fetch billing/credit usage from the agent's `legacy ext RPC` extension.
     /// When `silent` is true the result updates `credit_balance` without
@@ -1988,16 +1759,8 @@ pub enum Effect {
     FetchShellSuggestions {
         agent_id: AgentId,
         text: String,
-        cursor: usize,
         cwd: String,
-        generation: u64,
-        limit: usize,
-        include_ai: bool,
-        ai_model: Option<String>,
         session_id: Option<String>,
-        /// Deterministic Tab fetches run only the shell's token providers
-        /// (path/file); the as-you-type surface keeps all of them.
-        token_only: bool,
     },
  /// Send an ACP `legacy ext RPC` request to the shell — predict the
     /// user's likely next prompt after a completed turn (tab autocomplete
@@ -2005,9 +1768,6 @@ pub enum Effect {
     FetchPromptSuggestion {
         agent_id: AgentId,
         generation: u64,
-        /// Suggestion model resolved by the pager (`grok-build-0.1` when the
-        /// catalog offers it); `None` = shell falls back to the session model.
-        model: Option<String>,
         session_id: Option<String>,
     },
     /// Probe the clipboard for an attachment off the event-loop thread
@@ -2024,12 +1784,6 @@ pub enum Effect {
     /// Prepare terminal preview bytes off the event-loop thread.
     PreparePromptImagePreview {
         preparation: crate::prompt_images::PromptImagePreviewPreparation,
-    },
-    PlanDoctorFix {
-        target: DoctorFixTarget,
-        report: Box<crate::diagnostics::DiagnosticReport>,
-        terminal: crate::terminal::TerminalContext,
-        request: crate::slash::command::DoctorRequest,
     },
     ApplyDoctorFix {
         target: DoctorFixTarget,
@@ -2065,41 +1819,19 @@ impl RenameSessionRequest {
             reset_to_auto: false,
         }
     }
-    pub(crate) fn for_reset(session_id: String, cwd: String, kind: SessionKind) -> Self {
-        Self {
-            session_id,
-            title: String::new(),
-            cwd,
-            kind,
-            reset_to_auto: true,
-        }
-    }
 }
 /// Outcome of an `legacy ext RPC` request, telling dispatch whether the
 /// pager must finalize the subagent row itself.
 #[derive(Debug)]
 pub enum SubagentKillOutcome {
-    /// Shell stopped a live subagent — a real `SubagentFinished` is coming.
-    StoppedLive,
     /// Nothing live to stop (orphan / already finished) — no finish coming, so
     /// the pager finalizes the row. `status` = the real terminal status for an
     /// already-finished orphan, else `None` (unknown id / older shell) →
     /// "cancelled".
     NothingLive { status: Option<String> },
-    /// The cancel RPC failed; the subagent may still be running, so leave the
-    /// row alone rather than show a false terminal state.
-    RpcFailed,
 }
 #[derive(Debug)]
 pub enum McpAuthTriggerOutcome {
-    Authenticated,
-    SetupRequired(crate::views::mcps_modal::McpSetupConfig),
-}
-#[derive(Clone, Debug)]
-pub enum DoctorPlanningOutcome {
-    Listing(String),
-    Plan(Box<crate::diagnostics::FixPlan>),
-    RunLocally(String),
 }
 /// Result from a completed async [`Effect`].
 ///
@@ -2111,10 +1843,7 @@ impl TaskResult {
     pub fn ends_startup(&self) -> bool {
         matches!(
             self,
-            TaskResult::SessionCreated { .. }
-                | TaskResult::SessionLoaded { .. }
-                | TaskResult::WorktreeSessionCreated { .. }
-                | TaskResult::WorktreeForked { .. }
+            TaskResult::SessionCreated { .. } | TaskResult::SessionLoaded { .. }
         )
     }
 }
@@ -2142,32 +1871,6 @@ pub enum TaskResult {
     SessionFailed {
         agent_id: AgentId,
         error: String,
-    },
-    /// Worktree session was created successfully (worktree + ACP session).
-    WorktreeSessionCreated {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        /// Root of the created worktree (for display).
-        worktree_path: std::path::PathBuf,
-        /// Effective cwd inside the worktree (preserves subdirectory offset).
-        session_cwd: std::path::PathBuf,
-        models: Option<acp::SessionModelState>,
-        /// See [`TaskResult::SessionCreated::scheduler_background_loops`].
-        scheduler_background_loops: Option<bool>,
-    },
-    /// Worktree created and session forked, but not yet loaded.
-    /// The dispatch handler sets session_id eagerly, then emits LoadSession.
-    WorktreeForked {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        worktree_path: std::path::PathBuf,
-        session_cwd: std::path::PathBuf,
-        code_restored: bool,
-        restore_summary: Option<String>,
-        restore_degree: Option<pi_workspace::session::git::RestoreDegree>,
-        /// Resume/parent id this worktree was created from (`load_session_id`).
-        /// Used to retarget one-shot restore-code suppress onto the child.
-        resume_session_id: Option<String>,
     },
     /// Worktree session creation failed.
     WorktreeSessionFailed {
@@ -2348,12 +2051,6 @@ pub enum TaskResult {
         task_id: String,
         outcome: Option<pi_tools::types::KillOutcome>,
     },
-    /// Background task kill failed.
-    BgTaskKillFailed {
-        session_id: String,
-        task_id: String,
-        error: String,
-    },
     /// Model switch completed (effort, if any, was applied in the same request).
     SwitchModelComplete {
         agent_id: AgentId,
@@ -2501,16 +2198,6 @@ pub enum TaskResult {
         agent_id: AgentId,
         result: Result<(), String>,
     },
-    /// Share session completed successfully.
-    ShareSessionComplete {
-        agent_id: AgentId,
-        share_url: String,
-    },
-    /// Share session failed.
-    ShareSessionFailed {
-        agent_id: AgentId,
-        error: String,
-    },
     /// Session info fetched successfully.
     SessionInfoComplete {
         agent_id: AgentId,
@@ -2535,13 +2222,6 @@ pub enum TaskResult {
         opted_in: bool,
         seq: u64,
     },
-    /// Coding data sharing update failed.
-    CodingDataSharingFailed {
-        agent_id: AgentId,
-        error: String,
-        rollback_to_opted_in: bool,
-        seq: u64,
-    },
     /// Session rename completed successfully.
     RenameSessionComplete {
         agent_id: AgentId,
@@ -2551,17 +2231,6 @@ pub enum TaskResult {
     RenameSessionFailed {
         agent_id: AgentId,
         error: String,
-    },
-    /// `/rename --auto` completed successfully.
-    ResetSessionTitleComplete {
-        agent_id: AgentId,
-    },
-    /// `/rename --auto` failed.
-    ResetSessionTitleFailed {
-        agent_id: AgentId,
-        error: String,
-        previous_display_name: Option<String>,
-        previous_generated_title: Option<String>,
     },
     /// Session delete completed successfully.
     DeleteSessionComplete {
@@ -2607,11 +2276,6 @@ pub enum TaskResult {
     FeedbackComplete {
         agent_id: AgentId,
     },
-    /// Feedback submission failed. The shell already persisted the report locally, so only the error is surfaced.
-    FeedbackFailed {
-        agent_id: AgentId,
-        error: String,
-    },
     /// One-shot feedback trace archive finished (or was skipped).
     FeedbackTraceUploaded {
         agent_id: AgentId,
@@ -2631,37 +2295,13 @@ pub enum TaskResult {
         /// the modal's `rewrite_nonce` before populating enhanced_content.
         nonce: u64,
     },
-    /// Bundle status fetched successfully.
-    BundleStatusReady {
-        has_cache: bool,
-        version: Option<String>,
-        personas: Vec<String>,
-        roles: Vec<String>,
-        agents: Vec<String>,
-        skills: Vec<String>,
-        persona_details: Vec<super::bundle::PersonaDetail>,
-        role_details: Vec<super::bundle::RoleDetail>,
-    },
     /// Bundle status fetch failed.
     BundleStatusFailed {
         error: String,
     },
-    /// Catalog entry content fetched successfully.
-    CatalogEntryReady {
-        kind: String,
-        name: String,
-        content: String,
-    },
     /// Catalog entry fetch failed.
     CatalogEntryFailed {
         error: String,
-    },
-    /// Side question (/btw) response received.
-    BtwResponse {
-        agent_id: AgentId,
-        result: Result<String, String>,
-        /// Correlates minimal responses; fullscreen leaves this unset.
-        minimal_request_id: Option<uuid::Uuid>,
     },
  /// `legacy ext RPC` request acknowledged (fire-and-forget). The recap itself
     /// arrives separately as a `SessionRecap` notification; this only carries
@@ -2674,10 +2314,6 @@ pub enum TaskResult {
         /// loading spinner, so only a manual failure needs to clear one.
         auto: bool,
         error: Option<String>,
-    },
-    /// Interjection queued acknowledgement.
-    InterjectQueued {
-        agent_id: AgentId,
     },
     /// Interjection send failed. Carries the payload so the dispatcher can
     /// requeue it (mirrors the batch path's `failed_local` requeue) — the
@@ -2725,17 +2361,6 @@ pub enum TaskResult {
         results: Vec<pi_shell::extensions::session_search::SearchSessionHit>,
         seq: u64,
     },
- /// `legacy ext RPC` completed (no-worktree path). The pager adopts
-    /// the new session id and emits [`Effect::LoadSession`] to start the
-    /// replay. Mirrors [`TaskResult::WorktreeForked`] in shape.
-    ForkSessionReady {
-        agent_id: AgentId,
-        new_session_id: acp::SessionId,
-        cwd: std::path::PathBuf,
-        /// Parent session id the fork was taken from (for one-shot
-        /// restore-code suppress retarget).
-        parent_session_id: acp::SessionId,
-    },
  /// `legacy ext RPC` failed. The placeholder agent stays in
     /// `app.agents` with no `session_id` so the user can switch away.
     ForkSessionFailed {
@@ -2745,14 +2370,6 @@ pub enum TaskResult {
     RewindPointsLoaded {
         agent_id: AgentId,
         points: Vec<crate::views::rewind::RewindPointInfo>,
-    },
-    RewindPointsFailed {
-        agent_id: AgentId,
-        error: String,
-    },
-    RewindExecuteComplete {
-        agent_id: AgentId,
-        response: crate::views::rewind::RewindResponse,
     },
     RewindExecuteFailed {
         agent_id: AgentId,
@@ -2779,15 +2396,6 @@ pub enum TaskResult {
     GateRefreshed {
         settings: Option<pi_shell::util::config::RemoteSettings>,
     },
-    /// Billing fetch failed with an error message.
-    BillingError {
-        agent_id: AgentId,
-        error: String,
-        /// When true, swallow the error silently (background refresh).
-        silent: bool,
-        /// Usage-modal fetch generation (`0` = background refresh).
-        nonce: u64,
-    },
     /// Debounce timer for shell suggestions expired. Routed by the arming
     /// `agent_id`, like the sibling `PluginCtaDebounceExpired`.
     SuggestionDebounceExpired {
@@ -2798,17 +2406,6 @@ pub enum TaskResult {
     PluginCtaDebounceExpired {
         agent_id: AgentId,
         generation: u64,
-    },
- /// Shell suggestions loaded from ACP `legacy ext RPC`. `request_text` /
-    /// `request_cursor` echo what the request was built from — the anchor
-    /// the items' `replaceRange` offsets index into and the position Tab
-    /// targets, paired atomically with them; `agent_id` routes the landing
-    /// to the agent that fetched.
-    ShellSuggestionsLoaded {
-        agent_id: AgentId,
-        response: crate::views::suggestion_controller::SuggestResponseParsed,
-        request_text: String,
-        request_cursor: usize,
     },
  /// Predicted next prompt loaded from ACP `legacy ext RPC`.
     /// `suggestion` is `None` when the shell had nothing to suggest.
@@ -2846,10 +2443,6 @@ pub enum TaskResult {
     },
     /// Shared prompt-image preview state was resolved off-thread.
     PromptImagePreviewPrepared,
-    DoctorFixPlanned {
-        target: DoctorFixTarget,
-        result: Result<DoctorPlanningOutcome, String>,
-    },
     DoctorFixApplied {
         target: DoctorFixTarget,
         result: Result<crate::diagnostics::FixOutcome, String>,
@@ -2864,12 +2457,6 @@ mod tests {
     fn plan_mode_kind_as_canonical() {
         assert_eq!(PlanModeKind::On.as_canonical(), "on");
         assert_eq!(PlanModeKind::Off.as_canonical(), "off");
-    }
-    /// `as_display` must return user-visible picker labels.
-    #[test]
-    fn plan_mode_kind_as_display() {
-        assert_eq!(PlanModeKind::On.as_display(), "On");
-        assert_eq!(PlanModeKind::Off.as_display(), "Off");
     }
     /// `to_bool` must project `On → true`, `Off → false`.
     #[test]

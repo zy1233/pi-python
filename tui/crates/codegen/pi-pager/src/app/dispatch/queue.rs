@@ -1116,8 +1116,6 @@ pub(super) fn dispatch_queue_interject_shared(
             vec![Effect::QueueInterject {
                 session_id,
                 id,
-                expected_version,
-                new_text,
             }]
         }
         None => vec![],
@@ -1199,7 +1197,6 @@ pub(super) fn dispatch_run_edited_queued_command(
                 Some(server) => effects.push(Effect::QueueRemove {
                     session_id,
                     id: server.id,
-                    expected_version: server.expected_version,
                 }),
                 None => {
                     if let Some(removed) = agent.remove_local_queue_row(local_id) {
@@ -1246,7 +1243,7 @@ mod tests {
     };
     use crate::app::dispatch::router::dispatch;
     use crate::app::dispatch::tests::{
-        end_turn, enqueue_local, last_system_text, test_app_with_agent,
+        end_turn, enqueue_local, test_app_with_agent,
     };
 
     /// A running background bash task for the work-count fixtures.
@@ -1397,107 +1394,6 @@ mod tests {
         })
     }
 
-    #[ignore = "pi-python: grok-specific feature not supported"]
-    #[test]
-    fn run_edited_queued_command_drops_local_row_then_runs_command() {
-        let mut app = test_app_with_agent();
-        let id = AgentId(0);
-        app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
-        enqueue_local(&mut app, id, "what is the default");
-        let local_id = app.agents[&id].session.pending_prompts[0].id;
-
-        let effects =
-            run_edited_queued_command(&mut app, local_id, None, "/btw what is the default");
-
-        assert!(
-            matches!(effects.as_slice(), [Effect::SendBtw { .. }]),
-            "expected the command to run"
-        );
-        assert_eq!(app.agents[&id].session.queue_len(), 0);
-    }
-
-    /// Server row: a versioned remove, then the command. The shared mirror is never mutated
-    /// client-side: the rebroadcast is the source of truth.
-    #[ignore = "pi-python: grok-specific feature not supported"]
-    #[test]
-    fn run_edited_queued_command_removes_server_row_then_runs_command() {
-        let mut app = test_app_with_agent();
-        let id = AgentId(0);
-        seed_shared_row(&mut app, id);
-
-        let effects = run_edited_queued_command(&mut app, 7, shared_target(), "/btw why");
-
-        match effects.as_slice() {
-            [
-                Effect::QueueRemove {
-                    id: removed,
-                    expected_version,
-                    ..
-                },
-                Effect::SendBtw { .. },
-            ] => {
-                assert_eq!(removed, "p1");
-                assert_eq!(*expected_version, 2);
-            }
-            other => panic!("expected [QueueRemove, SendBtw], got {other:?}"),
-        }
-        assert_eq!(app.agents[&id].shared_queue.len(), 1);
-    }
-
-    /// A command that returns without starting a turn must not strand the rows queued behind
-    /// the one it replaced.
-    #[ignore = "pi-python: grok-specific feature not supported"]
-    #[test]
-    fn run_edited_queued_command_drains_the_row_behind_it() {
-        let mut app = test_app_with_agent();
-        let id = AgentId(0);
-        enqueue_local(&mut app, id, "front");
-        enqueue_local(&mut app, id, "behind");
-        let local_id = app.agents[&id].session.pending_prompts[0].id;
-
-        let effects = run_edited_queued_command(&mut app, local_id, None, "/btw why");
-
-        assert!(
-            matches!(
-                effects.as_slice(),
-                [Effect::SendBtw { .. }, Effect::SendPrompt { text, .. }] if text == "behind"
-            ),
-            "expected the command then the next row's turn"
-        );
-        assert_eq!(app.agents[&id].session.queue_len(), 0);
-    }
-
-    /// An enqueueing builtin re-enters the local queue at the tail, so the row's
-    /// position is not preserved.
-    #[ignore = "pi-python: grok-specific feature not supported"]
-    #[test]
-    fn run_edited_queued_command_with_enqueueing_builtin_re_adds_at_the_tail() {
-        use crate::app::agent::QueueEntryKind;
-        let mut app = test_app_with_agent();
-        let id = AgentId(0);
-        app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
-        enqueue_local(&mut app, id, "edited into a command");
-        enqueue_local(&mut app, id, "behind");
-        let local_id = app.agents[&id].session.pending_prompts[0].id;
-
-        let effects = run_edited_queued_command(&mut app, local_id, None, "/compact");
-
-        assert!(effects.is_empty(), "no turn starts mid-turn");
-        let rows: Vec<(&str, QueueEntryKind)> = app.agents[&id]
-            .session
-            .pending_prompts
-            .iter()
-            .map(|p| (p.text.as_str(), p.kind))
-            .collect();
-        assert_eq!(
-            rows,
-            vec![
-                ("behind", QueueEntryKind::Prompt),
-                ("/compact", QueueEntryKind::Command),
-            ]
-        );
-    }
-
     /// With no agent view active the send half would no-op, so nothing runs and the row keeps
     /// its text.
     #[test]
@@ -1512,50 +1408,6 @@ mod tests {
 
         assert!(effects.is_empty());
         assert_eq!(app.agents[&id].session.queue_len(), 1);
-    }
-
-    /// A command the current screen mode refuses is a pre-execution refusal: the user gets the hint
-    /// and the row keeps its pre-edit text.
-    #[ignore = "pi-python: grok-specific feature not supported"]
-    #[test]
-    fn run_edited_queued_command_refused_by_screen_mode_keeps_row() {
-        let mut app = test_app_with_agent();
-        let id = AgentId(0);
-        // Mid-turn so the surviving row is observable rather than drained.
-        app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
-        enqueue_local(&mut app, id, "what is the default");
-        let local_id = app.agents[&id].session.pending_prompts[0].id;
-
-        // `/fullscreen` is minimal-only and the fixture's mode is not minimal.
-        let effects = run_edited_queued_command(&mut app, local_id, None, "/fullscreen");
-
-        assert!(effects.is_empty());
-        assert_eq!(
-            app.agents[&id].session.pending_prompts[0].text, "what is the default",
-            "the row survives with its pre-edit text"
-        );
-        assert!(last_system_text(&app, id).contains("already in fullscreen"));
-    }
-
-    /// A refusal releases the edit lock too, so the queue must not park behind the row
-    /// that was not removed.
-    #[ignore = "pi-python: grok-specific feature not supported"]
-    #[test]
-    fn run_edited_queued_command_refusal_still_drains_the_queue() {
-        let mut app = test_app_with_agent();
-        let id = AgentId(0);
-        enqueue_local(&mut app, id, "what is the default");
-        let local_id = app.agents[&id].session.pending_prompts[0].id;
-
-        let effects = run_edited_queued_command(&mut app, local_id, None, "/fullscreen");
-
-        assert!(
-            matches!(
-                effects.as_slice(),
-                [Effect::SendPrompt { text, .. }] if text == "what is the default"
-            ),
-            "expected the kept row to drain"
-        );
     }
 
     /// Fail closed while the session is binding: the row survives (a server row's removal has no
@@ -1602,25 +1454,6 @@ mod tests {
         );
     }
 
-    /// Row already gone (a rebroadcast or a concurrent delete): nothing to remove, but the command
-    /// the user typed still runs.
-    #[ignore = "pi-python: grok-specific feature not supported"]
-    #[test]
-    fn run_edited_queued_command_with_unknown_local_id_still_runs() {
-        let mut app = test_app_with_agent();
-        let id = AgentId(0);
-        app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
-        enqueue_local(&mut app, id, "someone else's row");
-
-        let effects = run_edited_queued_command(&mut app, 9999, None, "/btw why");
-
-        assert!(
-            matches!(effects.as_slice(), [Effect::SendBtw { .. }]),
-            "expected the command to run"
-        );
-        assert_eq!(app.agents[&id].session.queue_len(), 1);
-    }
-
     #[test]
     fn drain_queue_action_sends_front_prompt() {
         let mut app = test_app_with_agent();
@@ -1646,147 +1479,6 @@ mod tests {
         let mut app = test_app_with_agent();
         let effects = dispatch(Action::DrainQueue, &mut app);
         assert!(effects.is_empty());
-    }
-
-    /// Server-queue edit Actions map to fire-and-forget Effects scoped to
-    /// the active agent's session.
-    #[test]
-    fn queue_edit_actions_map_to_scoped_effects() {
-        let mut app = test_app_with_agent();
-
-        let effects = dispatch(
-            Action::QueueRemoveShared {
-                id: "p1".into(),
-                expected_version: 4,
-            },
-            &mut app,
-        );
-        match effects.as_slice() {
-            [
-                Effect::QueueRemove {
-                    session_id,
-                    id,
-                    expected_version,
-                },
-            ] => {
-                assert_eq!(session_id.0.as_ref(), "test-session");
-                assert_eq!(id, "p1");
-                assert_eq!(*expected_version, 4);
-            }
-            other => panic!("expected QueueRemove, got {other:?}"),
-        }
-
-        let effects = dispatch(
-            Action::QueueReorderShared {
-                ordered_ids: vec!["p2".into(), "p1".into()],
-            },
-            &mut app,
-        );
-        match effects.as_slice() {
-            [
-                Effect::QueueReorder {
-                    session_id,
-                    ordered_ids,
-                },
-            ] => {
-                assert_eq!(session_id.0.as_ref(), "test-session");
-                assert_eq!(ordered_ids, &vec!["p2".to_string(), "p1".to_string()]);
-            }
-            other => panic!("expected QueueReorder, got {other:?}"),
-        }
-
-        let effects = dispatch(Action::QueueClearShared, &mut app);
-        match effects.as_slice() {
-            [Effect::QueueClear { session_id }] => {
-                assert_eq!(session_id.0.as_ref(), "test-session");
-            }
-            other => panic!("expected QueueClear, got {other:?}"),
-        }
-
-        let effects = dispatch(
-            Action::QueueEditShared {
-                id: "p1".into(),
-                new_text: "new body".into(),
-            },
-            &mut app,
-        );
-        match effects.as_slice() {
-            [
-                Effect::QueueEdit {
-                    session_id,
-                    id,
-                    new_text,
-                },
-            ] => {
-                assert_eq!(session_id.0.as_ref(), "test-session");
-                assert_eq!(id, "p1");
-                assert_eq!(new_text, "new body");
-            }
-            other => panic!("expected QueueEdit, got {other:?}"),
-        }
-
-        let effects = dispatch(
-            Action::QueueInterjectShared {
-                id: "p1".into(),
-                expected_version: 5,
-                new_text: None,
-            },
-            &mut app,
-        );
-        match effects.as_slice() {
-            [
-                Effect::QueueInterject {
-                    session_id,
-                    id,
-                    expected_version,
-                    new_text,
-                },
-            ] => {
-                assert_eq!(session_id.0.as_ref(), "test-session");
-                assert_eq!(id, "p1");
-                assert_eq!(*expected_version, 5);
-                assert_eq!(*new_text, None, "plain interject carries no override");
-            }
-            other => panic!("expected QueueInterject, got {other:?}"),
-        }
-        // Plain interjects re-send an existing queue row: no history insert.
-        assert!(app.agents[&AgentId(0)].session.prompt_history.is_empty());
-
-        // Edited interject: the same arm carrying the edited text as the
-        // newText override.
-        let effects = dispatch(
-            Action::QueueInterjectShared {
-                id: "p1".into(),
-                expected_version: 5,
-                new_text: Some("edited body".into()),
-            },
-            &mut app,
-        );
-        match effects.as_slice() {
-            [
-                Effect::QueueInterject {
-                    session_id,
-                    id,
-                    expected_version,
-                    new_text,
-                },
-            ] => {
-                assert_eq!(session_id.0.as_ref(), "test-session");
-                assert_eq!(id, "p1");
-                assert_eq!(*expected_version, 5);
-                assert_eq!(new_text.as_deref(), Some("edited body"));
-            }
-            other => panic!("expected single QueueInterject with newText, got {other:?}"),
-        }
-        // The user typed the edited text — it must be Ctrl+R recallable.
-        assert_eq!(
-            app.agents[&AgentId(0)]
-                .session
-                .prompt_history
-                .first()
-                .map(String::as_str),
-            Some("edited body")
-        );
     }
 
     #[test]

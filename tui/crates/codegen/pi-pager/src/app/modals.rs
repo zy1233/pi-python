@@ -2953,37 +2953,6 @@ mod command_palette_vim_input_tests {
         assert!(action_ids.contains(&crate::actions::ActionId::ToggleMouseCapture));
     }
 
-    #[ignore = "pi-python: grok-specific feature not supported"]
-    #[test]
-    fn minimal_edit_prompt_palette_selection_preserves_draft() {
-        let mut agent = make_agent();
-        agent
-            .prompt
-            .set_screen_mode(crate::app::ScreenMode::Minimal);
-        agent.prompt.set_text("keep this draft");
-        agent.active_modal = Some(ActiveModal::CommandPalette {
-            entries: crate::views::modal::default_palette_entries(
-                agent.sharing_enabled,
-                &agent.prompt.slash_controller,
-            ),
-            state: {
-                let mut state = PickerState::input_active();
-                // Contiguous substring of the label ("Edit Prompt in External Editor").
-                state.set_query("external editor");
-                state.selected = 1; // matching section header is row 0
-                state
-            },
-            window: crate::views::modal_window::ModalWindowState::new(),
-        });
-        let out = agent.handle_modal_key(&KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        assert!(matches!(
-            out,
-            InputOutcome::Action(crate::app::actions::Action::EditPromptExternal)
-        ));
-        assert_eq!(agent.prompt.text(), "keep this draft");
-        assert!(agent.active_modal.is_none());
-    }
-
     /// Headline command-palette vim flow — a CI-runnable mirror of the ignored
     /// PTY scenario `vim_modal_command_palette.yaml`. Drives the real modal seam
     /// (`handle_modal_key`) so both the chrome Esc handling and the picker's

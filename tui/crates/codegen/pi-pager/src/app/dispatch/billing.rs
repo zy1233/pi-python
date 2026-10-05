@@ -338,7 +338,6 @@ pub(super) fn apply_auto_topup(
 ) {
     use crate::views::credit_bar::AutoTopupFetch;
     match fetch {
-        AutoTopupFetch::Resolved(rule) => *slot = Some(rule.clone()),
         AutoTopupFetch::Cleared => *slot = None,
         AutoTopupFetch::Unchanged => {}
     }

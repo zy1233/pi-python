@@ -197,13 +197,6 @@ pub(crate) fn build_screen_mode_relaunch_args(
     out
 }
 
-/// `GROK_SCREEN_MODE_SWITCH=exec` forces the legacy re-exec switch.
-pub(crate) const SCREEN_MODE_SWITCH_ENV: &str = "GROK_SCREEN_MODE_SWITCH";
-
-pub(crate) fn exec_switch_forced() -> bool {
-    std::env::var(SCREEN_MODE_SWITCH_ENV).is_ok_and(|v| v.trim().eq_ignore_ascii_case("exec"))
-}
-
 /// Env value written for a screen-mode relaunch (`minimal` / `fullscreen`).
 pub(crate) fn screen_mode_env_value(want_minimal: bool) -> &'static str {
     if want_minimal {

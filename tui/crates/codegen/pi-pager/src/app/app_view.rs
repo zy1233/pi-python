@@ -2470,9 +2470,6 @@ impl AppView {
         if let InputOutcome::Action(Action::QuitConfirmed) = &outcome {
             return InputOutcome::Action(Action::Quit);
         }
-        if let InputOutcome::Action(Action::ExitSessionConfirmed) = &outcome {
-            return InputOutcome::Action(Action::ExitSession);
-        }
         if let InputOutcome::ArmPending {
             action,
             shortcut,

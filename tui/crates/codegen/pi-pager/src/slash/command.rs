@@ -28,13 +28,6 @@ pub struct ScheduledTaskPreview {
     pub tag: String,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DoctorRequest {
-    Report,
-    ListFixes,
-    Fix(crate::diagnostics::DiagnosticId),
-}
-
 /// Result of running a slash command.
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]

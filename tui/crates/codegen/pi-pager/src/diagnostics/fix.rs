@@ -508,20 +508,6 @@ pub(crate) fn automatic_remediation_for(id: DiagnosticId) -> Option<AutomaticRem
     })
 }
 
-pub(crate) fn select_fix_plan(
-    id: DiagnosticId,
-    report: &DiagnosticReport,
-    terminal: &TerminalContext,
-) -> Result<Option<FixPlan>, FixError> {
-    let spec = fix_spec(id).ok_or_else(|| FixError::UnknownId(id.to_string()))?;
-    if matches!(spec.kind, FixKind::SshWrap)
-        && (terminal.is_ssh || terminal.is_official_vscode_remote || report.facts.ssh)
-    {
-        return Ok(None);
-    }
-    plan_fix(FixRequest::from_environment(id)?, report, terminal).map(Some)
-}
-
 pub(crate) fn applicable_automatic_fixes(
     report: &DiagnosticReport,
     terminal: &TerminalContext,

@@ -1,15 +1,13 @@
 //! Feedback, remember-note, btw, and recap dispatchers.
 
-use super::ctx::{NO_SESSION_NOTICE, with_active_agent};
+use super::ctx::{NO_SESSION_NOTICE, };
 use crate::app::actions::{Effect, FeedbackTraceChoice};
 use crate::app::agent::AgentId;
 use crate::app::agent_view::{AgentView, PromptInputMode};
 use crate::app::app_view::{ActiveView, AppView};
 use crate::scrollback::block::RenderBlock;
 use crate::scrollback::blocks::{SessionEvent, ToolCallBlock};
-use crate::views::question_view::{LocalQuestionKind, QuestionViewState};
 use std::sync::atomic::{AtomicU64, Ordering};
-use pi_tools::implementations::grok_build::ask_user_question::Question;
 
 /// Monotonic counter for correlating async rewrite responses with the modal
 /// that requested them. Prevents stale results from populating a different
@@ -20,121 +18,6 @@ fn next_rewrite_nonce() -> u64 {
     REWRITE_NONCE.fetch_add(1, Ordering::Relaxed)
 }
 
-pub(crate) use crate::views::question_view::FEEDBACK_QUESTION_LABEL;
-
-/// Minimal mode has no toast surface, so the notice goes to the transcript instead.
-fn feedback_notice(app: &mut AppView, message: &str) {
-    if app.screen_mode.is_minimal() {
-        with_active_agent(app, |agent| {
-            agent
-                .scrollback
-                .push_block(RenderBlock::system(message.to_string()));
-        });
-    } else {
-        app.show_toast(message);
-    }
-}
-
-/// Why the bare `/feedback` pane refuses to open, if anything blocks it.
-fn feedback_pane_blocked(agent: &AgentView) -> Option<&'static str> {
-    if agent.active_subagent.is_some() {
-        // A fullscreen subagent view hides the prompt, so the pane would have nowhere to draw while still swallowing every key.
-        Some("Close the subagent view before sending feedback")
-    } else if agent.question_view.is_some() {
-        Some("Finish answering the current question first")
-    } else if !agent.no_input_overlay_pending()
-        || agent.key_owner() != crate::app::agent_view::KeyOwner::Pane
-    {
-        // Two ways the pane cannot work here. A permission or plan approval holds the composer, even parked in the scrollback, so the
-        // pane would hand it the wrong draft on the way out. A viewer outranks every card for keys, so the box would be untypeable.
-        Some("Close or answer what's open before sending feedback")
-    } else if agent.session.session_id.is_none() {
-        Some(NO_SESSION_NOTICE)
-    } else {
-        None
-    }
-}
-
-/// Open the freeform report pane. Early exits drop `images`, whose owner
-/// cleans up the staged temp files.
-pub(super) fn dispatch_open_feedback_pane(
-    app: &mut AppView,
-    prefill: Option<String>,
-    mut images: crate::views::prompt_widget::FeedbackImages,
-) -> Vec<Effect> {
-    let ActiveView::Agent(id) = app.active_view else {
-        return vec![];
-    };
-
-    let blocked = {
-        let Some(agent) = app.agents.get(&id) else {
-            return vec![];
-        };
-        feedback_pane_blocked(agent)
-    };
-    if let Some(message) = blocked {
-        feedback_notice(app, message);
-        return vec![];
-    }
-
-    // An individual coding-data opt-out does not suppress the offer: the card
-    // is how opted-out users switch sharing back on. ZDR/team locks have no
-    // self-serve path, so they still suppress it. Minimal mode never offers:
-    // its `/feedback <text>` path documents sends without a consent card.
-    let offer_trace = app.feedback_trace_offer()
-        && app.coding_data_sharing_lock().is_none()
-        && app.team_name.is_none()
-        && !app.is_zdr
-        && !app.screen_mode.is_minimal();
-    let offer_reenables_sharing = app.coding_data_retention_opt_out;
-    let Some(agent) = app.agents.get_mut(&id) else {
-        return vec![];
-    };
-    let question = Question {
-        question: FEEDBACK_QUESTION_LABEL.to_string(),
-        options: vec![],
-        multi_select: Some(false),
-        id: None,
-    };
-    let stashed = agent.prompt.stash();
-    let mut state = QuestionViewState::new(
-        format!("feedback-{}", uuid::Uuid::new_v4()),
-        vec![question],
-        stashed,
-    )
-    .with_local_kind(LocalQuestionKind::Feedback);
-    state.feedback_offer_trace = offer_trace;
-    state.feedback_offer_reenables_sharing = offer_reenables_sharing;
-    let prefill_text = prefill.filter(|s| !s.is_empty());
-    if let Some(text) = prefill_text.as_ref()
-        && let Some(slot) = state.per_question_freeform.get_mut(0)
-    {
-        *slot = text.clone();
-    }
-    let freeform = state.activate_freeform_input();
-    agent.prompt.set_text_preserving(&freeform);
-    // Inline `/feedback` composed alongside pasted images: the prefill kept
-    // their `[Image #N]` placeholders as plain text, so rebind the drained
-    // records to them and the pane shows live, removable chips.
-    let image_count = images.len();
-    agent.prompt.adopt_images(images.take());
-
-    let session_id = agent.session.session_id.clone();
-    let report = prefill_text.unwrap_or_default();
-    crate::unified_log::info(
-        "feedback.pane_open",
-        session_id.as_ref().map(|s| s.0.as_ref()),
-        Some(serde_json::json!({
-            "prefill_chars": report.chars().count(),
-            "prefill_images": image_count,
-            "offer_trace": offer_trace,
-            "screen_mode": app.screen_mode.meta_label(),
-        })),
-    );
-    agent.question_view = Some(state);
-    vec![]
-}
-
 /// The `[telemetry] trace_upload = true` write the /feedback card's "Yes"
 /// collects.
 pub(super) fn persist_trace_upload_consent() -> Effect {
@@ -143,16 +26,6 @@ pub(super) fn persist_trace_upload_consent() -> Effect {
         value: crate::settings::SettingValue::Bool(true),
         rollback_value: crate::settings::SettingValue::Bool(false),
     }
-}
-
-/// Enter remember mode: visual change to prompt bar (remember accent, `#` prefix).
-/// No side effects — the user types a memory note and presses Enter to send.
-pub(super) fn dispatch_enter_remember_mode(app: &mut AppView) -> Vec<Effect> {
-    with_active_agent(app, |agent| {
-        agent.prompt_input_mode = PromptInputMode::Remember;
-        agent.prompt.set_text("");
-    });
-    vec![]
 }
 
 /// Close the trace-consent funnel opened by `FeedbackTraceCardShown`. Every
@@ -194,8 +67,6 @@ pub(crate) fn feedback_send_effect(
     Effect::SendFeedback {
         agent_id,
         session_id,
-        feedback_text: text,
-        images,
     }
 }
 
@@ -525,7 +396,6 @@ fn send_remember_note(app: &mut AppView, text: String, record_in_history: bool) 
         agent_id: id,
         session_id,
         raw_text: trimmed,
-        context_summary,
         nonce,
     }]
 }
@@ -661,57 +531,6 @@ fn extract_session_context(agent: &AgentView) -> String {
     parts.join("\n")
 }
 
-/// Send a /btw side question. Bypasses the prompt queue — works even while
-/// the agent is mid-turn. Fires an ACP ext method and shows a loading overlay.
-pub(super) fn dispatch_send_btw(app: &mut AppView, question: String) -> Vec<Effect> {
-    let ActiveView::Agent(id) = app.active_view else {
-        return vec![];
-    };
-    let minimal = app.screen_mode.is_minimal();
-    let (session_id, minimal_request_id) = {
-        let Some(agent) = app.agents.get_mut(&id) else {
-            return vec![];
-        };
-        let Some(session_id) = agent.session.session_id.clone() else {
-            if minimal {
-                agent
-                    .scrollback
-                    .push_block(crate::scrollback::block::RenderBlock::system(
-                        NO_SESSION_NOTICE,
-                    ));
-            } else {
-                agent.show_toast(NO_SESSION_NOTICE);
-            }
-            return vec![];
-        };
-
-        // Composer clearing belongs to the submit funnel: `dispatch_send_prompt_inner` clears it
-        // when `consume_input` is set, so draft-preserving callers (palette, edited
-        // queue row) keep theirs.
-        let minimal_request_id = if minimal {
-            Some(crate::minimal_api::start_minimal_btw(
-                agent,
-                question.clone(),
-            ))
-        } else {
-            agent.btw_state = Some(crate::views::btw_overlay::BtwOverlayState::Loading {
-                question: question.clone(),
-            });
-            // Prompt keeps focus while the answer is in flight (panel focuses on Done).
-            agent.btw_focused = false;
-            None
-        };
-        (session_id, minimal_request_id)
-    };
-
-    vec![Effect::SendBtw {
-        agent_id: id,
-        session_id,
-        question,
-        minimal_request_id,
-    }]
-}
-
 /// Toast when a manual `/recap` produces no summary. Empty sessions get a clear
 /// empty-state message; anything else (model failure, empty summary, etc.) keeps
 /// the generic failure toast.
@@ -844,35 +663,3 @@ pub(super) fn handle_memory_note_saved(
     vec![]
 }
 
-pub(super) fn handle_btw_response(
-    app: &mut AppView,
-    agent_id: AgentId,
-    result: Result<String, String>,
-    minimal_request_id: Option<uuid::Uuid>,
-) -> Vec<Effect> {
-    if let Some(agent) = app.agents.get_mut(&agent_id) {
-        use crate::views::btw_overlay::BtwOverlayState;
-        if let Some(request_id) = minimal_request_id {
-            crate::minimal_api::finish_minimal_btw(agent, request_id, result);
-            return vec![];
-        }
-        let question = match &agent.btw_state {
-            Some(BtwOverlayState::Loading { question }) => question.clone(),
-            _ => String::new(),
-        };
-        match result {
-            Ok(response) => {
-                // Answer arrived: show it (until Esc) and focus the panel
-                // so Up/Down scroll it until the user returns to the prompt.
-                agent.btw_state = Some(BtwOverlayState::done(question, response));
-                agent.btw_focused = true;
-            }
-            Err(error) => {
-                // Error stays until Esc; nothing to scroll, keep prompt focus.
-                agent.btw_state = Some(BtwOverlayState::Error { question, error });
-                agent.btw_focused = false;
-            }
-        }
-    }
-    vec![]
-}

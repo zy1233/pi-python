@@ -621,7 +621,7 @@ impl AgentView {
 mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-    use crate::app::actions::{Action, Effect, SharedQueueTarget};
+    use crate::app::actions::{Action, };
     use crate::app::agent::AgentState;
     use crate::app::agent_view::test_fixtures::{
         force_interject_key, make_running_agent, non_vscode_registry, running_agent_local_only,
@@ -1030,80 +1030,6 @@ mod tests {
         assert!(matches!(agent.prompt_mode, PromptMode::Normal));
     }
 
-    #[ignore = "pi-python: grok-specific feature not supported"]
-    #[test]
-    fn edit_local_row_into_builtin_routes_to_run_edited_queued_command() {
-        let mut agent = enter_edit_local_row();
-        let row_id = agent.session.pending_prompts[0].id;
-        agent.prompt.set_text("/btw what is the default");
-
-        let outcome = agent.handle_prompt_key_for_test(&enter_key());
-        match outcome {
-            InputOutcome::Action(Action::RunEditedQueuedCommand {
-                local_id,
-                server,
-                text,
-            }) => {
-                assert_eq!(local_id, row_id);
-                assert_eq!(server, None);
-                assert_eq!(text, "/btw what is the default");
-            }
-            other => panic!("expected RunEditedQueuedCommand, got {other:?}"),
-        }
-        assert!(matches!(agent.prompt_mode, PromptMode::Normal));
-        assert_eq!(
-            agent.session.pending_prompts[0].text, "local one",
-            "the view must not remove the row: dispatch drops it after its guards pass"
-        );
-    }
-
-    #[ignore = "pi-python: grok-specific feature not supported"]
-    #[test]
-    fn builtin_accepted_from_dropdown_mid_edit_runs_on_the_next_enter() {
-        let mut agent = enter_edit_local_row();
-        agent.prompt.set_text("/btw");
-        agent.prompt.set_cursor(4);
-        agent.prompt.refresh_slash(&agent.session.models);
-        assert!(agent.prompt.slash_open(), "menu must be live in edit mode");
-        // Highlight `/btw` explicitly: the ranker's order is not under test.
-        let idx = agent
-            .prompt
-            .slash_snapshot()
-            .matches
-            .iter()
-            .position(|row| row.display == "/btw")
-            .expect("/btw in the slash menu");
-        for _ in 0..idx {
-            agent.prompt.slash_move_selection(1);
-        }
-
-        let outcome = agent.handle_prompt_key_for_test(&enter_key());
-        assert!(
-            matches!(outcome, InputOutcome::Changed),
-            "accepting the menu row must not save, got {outcome:?}"
-        );
-        assert!(matches!(
-            agent.prompt_mode,
-            PromptMode::EditingQueued { .. }
-        ));
-        assert!(agent.prompt.text().starts_with("/btw"));
-
-        // Type the question so the slash state tracks the edit, as it does live.
-        for ch in "why".chars() {
-            let _ = agent
-                .handle_prompt_key_for_test(&KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
-        }
-        assert_eq!(agent.prompt.text(), "/btw why");
-        let outcome = agent.handle_prompt_key_for_test(&enter_key());
-        assert!(
-            matches!(
-                outcome,
-                InputOutcome::Action(Action::RunEditedQueuedCommand { .. })
-            ),
-            "expected RunEditedQueuedCommand, got {outcome:?}"
-        );
-    }
-
     /// Fail-closed: only a complete builtin invocation at position 0 is hijacked. Everything else
     /// saves as text exactly as before.
     #[test]
@@ -1153,91 +1079,6 @@ mod tests {
         let row = &agent.session.pending_prompts[0];
         assert_eq!(row.text, "/btw why");
         assert_eq!(row.kind, QueueEntryKind::BashCommand, "kind must survive");
-    }
-
-    /// Server row: the hijack carries the row's `expected_version` and never mutates the shared
-    /// mirror (the rebroadcast is the source of truth).
-    #[ignore = "pi-python: grok-specific feature not supported"]
-    #[test]
-    fn edit_server_row_into_builtin_carries_versioned_removal() {
-        let mut agent = make_running_agent();
-        let registry = non_vscode_registry();
-        let ids = agent.queue.entry_ids();
-        agent.queue.list_state.select_by_id(ids[0]);
-        let _ = agent.handle_queue_key(&edit_key(), &registry);
-        agent.prompt.set_text("/btw why");
-
-        let outcome = agent.handle_prompt_key_for_test(&enter_key());
-        match outcome {
-            InputOutcome::Action(Action::RunEditedQueuedCommand { server, text, .. }) => {
-                assert_eq!(
-                    server,
-                    Some(SharedQueueTarget {
-                        id: "p1".into(),
-                        expected_version: 2,
-                    })
-                );
-                assert_eq!(text, "/btw why");
-            }
-            other => panic!("expected RunEditedQueuedCommand, got {other:?}"),
-        }
-        assert_eq!(agent.shared_queue.len(), 1);
-        assert_eq!(agent.shared_queue[0].text, "server one");
-        assert!(matches!(agent.prompt_mode, PromptMode::Normal));
-    }
-
-    /// The hijack sends no edit, so the combine hold must be released exactly once.
-    #[ignore = "pi-python: grok-specific feature not supported"]
-    #[test]
-    fn edit_server_row_into_builtin_releases_combine_hold_once() {
-        let mut agent = make_running_agent();
-        let registry = non_vscode_registry();
-        let ids = agent.queue.entry_ids();
-        agent.queue.list_state.select_by_id(ids[0]);
-        let _ = agent.handle_queue_key(&edit_key(), &registry);
-        agent.pending_effects.clear();
-        agent.prompt.set_text("/btw why");
-
-        let _ = agent.handle_prompt_key_for_test(&enter_key());
-        assert_eq!(
-            agent
-                .pending_effects
-                .iter()
-                .filter(|e| matches!(e, Effect::QueueReleaseEdit { .. }))
-                .count(),
-            1,
-            "an abandoned hold would pin the row out of combine forever"
-        );
-    }
-
-    /// Server row dropped by a rebroadcast mid-edit: there is no version to check, so the hijack
-    /// carries no removal instead of guessing one.
-    #[ignore = "pi-python: grok-specific feature not supported"]
-    #[test]
-    fn edit_vanished_server_row_into_builtin_carries_no_removal() {
-        let mut agent = make_running_agent();
-        let registry = non_vscode_registry();
-        let ids = agent.queue.entry_ids();
-        agent.queue.list_state.select_by_id(ids[0]);
-        let _ = agent.handle_queue_key(&edit_key(), &registry);
-
-        agent.shared_queue.clear();
-        agent.queue.sync_from_merged(
-            &agent.session.pending_prompts,
-            &agent.shared_queue,
-            None,
-            None,
-            &agent.send_now_painted_blocks,
-        );
-        agent.prompt.set_text("/btw why");
-
-        let outcome = agent.handle_prompt_key_for_test(&enter_key());
-        match outcome {
-            InputOutcome::Action(Action::RunEditedQueuedCommand { server, .. }) => {
-                assert_eq!(server, None);
-            }
-            other => panic!("expected RunEditedQueuedCommand, got {other:?}"),
-        }
     }
 
     /// Ctrl+; (toggle_queue_pane) while dirty-editing must not brick: the switch

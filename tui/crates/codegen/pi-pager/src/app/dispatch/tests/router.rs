@@ -751,34 +751,6 @@ fn cta_impressions_cover_welcome_surface() {
     assert!(!logged.contains(&("q".to_string(), AnnouncementCtaSurface::Welcome)));
     assert_eq!(logged.len(), 1);
 }
-#[ignore = "pi-python: grok-specific feature not supported"]
-#[test]
-fn dispatch_send_prompt_announcements_via_registry() {
-    let mut app = test_app_with_agent();
-    let agent_id = AgentId(0);
-    switch_to_agent(&mut app, agent_id, SwitchCause::New);
-    app.active_announcements = vec![critical_announcement("crit-a")];
-    let effects = dispatch(Action::SendPrompt("/announcements hide".into()), &mut app);
-    assert!(
-            effects.iter().any(
-                |e| matches!(e, Effect::PersistAnnouncementsHidden { hidden_ids } if hidden_ids.contains("crit-a"))
-            ),
-            "expected persist effect carrying the hidden id, got {effects:?}"
-        );
-    assert!(app.hidden_announcement_ids.contains("crit-a"));
-    assert_eq!(shown_banner_id(&app), None, "hidden critical closes banner");
-    assert!(app.agents[&agent_id].prompt.text().is_empty());
-    let initial_scrollback_len = app.agents[&agent_id].scrollback.len();
-    let initial_queue_len = app.agents[&agent_id].session.queue_len();
-    let effects = dispatch(Action::SendPrompt("/announcements foo".into()), &mut app);
-    assert!(effects.is_empty(), "expected no effects, got {effects:?}");
-    assert_eq!(app.agents[&agent_id].session.queue_len(), initial_queue_len);
-    assert_eq!(
-        app.agents[&agent_id].scrollback.len(),
-        initial_scrollback_len + 1,
-        "expected usage message in scrollback"
-    );
-}
 /// Hide records only the currently-SHOWN critical's id: with `[A, B]`,
 /// hiding A reveals B, hiding B closes the banner, and a later push with a
 /// new id (C) re-arms it without any user action.
@@ -810,34 +782,6 @@ fn announcements_hide_is_per_id_so_new_critical_reappears() {
         Some("outage-c"),
         "new critical id must re-arm the banner"
     );
-}
-/// Show clears the hide keys of every live critical (stacked hides
-/// un-hide in one step) and leaves unrelated ids alone.
-#[test]
-fn announcements_show_clears_visible_critical_ids_only() {
-    let mut app = test_app();
-    app.hidden_announcement_ids = ["outage-a".to_string(), "unrelated".to_string()]
-        .into_iter()
-        .collect();
-    app.active_announcements = vec![critical_announcement("outage-a")];
-    assert_eq!(shown_banner_id(&app), None);
-    let effects = dispatch(Action::AnnouncementsShow, &mut app);
-    assert!(
-            effects.iter().any(
-                |e| matches!(e, Effect::PersistAnnouncementsHidden { hidden_ids } if !hidden_ids.contains("outage-a"))
-            ),
-            "expected persist effect without the un-hidden id, got {effects:?}"
-        );
-    assert_eq!(shown_banner_id(&app).as_deref(), Some("outage-a"));
-    assert!(
-        app.hidden_announcement_ids.contains("unrelated"),
-        "ids not currently visible must survive show (prune owns cleanup)"
-    );
-    let effects = dispatch(Action::AnnouncementsShow, &mut app);
-    assert!(effects.is_empty(), "expected no effects, got {effects:?}");
-    app.active_announcements.clear();
-    let effects = dispatch(Action::AnnouncementsHide, &mut app);
-    assert!(effects.is_empty(), "expected no effects, got {effects:?}");
 }
 /// Hide targets the banner-slot item: the critical while one owns the slot,
 /// then the promo the slot reveals — each per-ID with a persist effect.
@@ -902,28 +846,6 @@ fn announcements_hide_noops_for_non_dismissible_owner() {
     assert_eq!(effects.len(), 1);
     assert!(app.hidden_announcement_ids.contains("promo-a"));
     assert_eq!(shown_banner_id(&app), None);
-}
-/// Show also clears hidden promo keys (one show un-hides the whole slot).
-#[test]
-fn announcements_show_clears_hidden_promo_ids() {
-    let mut app = test_app();
-    app.hidden_announcement_ids = ["promo-a".to_string(), "unrelated".to_string()]
-        .into_iter()
-        .collect();
-    app.active_announcements = vec![promo_announcement("promo-a")];
-    assert_eq!(shown_banner_id(&app), None);
-    let effects = dispatch(Action::AnnouncementsShow, &mut app);
-    assert!(
-        effects.iter().any(
-            |e| matches!(e, Effect::PersistAnnouncementsHidden { hidden_ids } if !hidden_ids.contains("promo-a"))
-        ),
-        "expected persist effect without the un-hidden promo id, got {effects:?}"
-    );
-    assert_eq!(shown_banner_id(&app).as_deref(), Some("promo-a"));
-    assert!(
-        app.hidden_announcement_ids.contains("unrelated"),
-        "ids not currently visible must survive show (prune owns cleanup)"
-    );
 }
 #[test]
 fn switch_model_dispatch_produces_effect_and_sets_pending() {
@@ -1132,16 +1054,6 @@ fn slash_model_no_args_produces_scrollback_error() {
     let effects = dispatch(Action::SendPrompt("/model".into()), &mut app);
     assert!(effects.is_empty());
     assert_eq!(app.agents[&id].scrollback.len(), initial_scrollback + 1);
-}
-#[ignore = "pi-python: grok-specific feature not supported"]
-#[test]
-fn slash_hooks_opens_modal() {
-    let mut app = test_app_with_agent();
-    app.appearance.disable_plugins = false;
-    let id = AgentId(0);
-    let effects = dispatch(Action::SendPrompt("/hooks".into()), &mut app);
-    assert!(app.agents[&id].extensions_modal.is_some());
-    assert_eq!(effects.len(), 6);
 }
 #[ignore = "pi-python: grok-specific feature not supported"]
 #[test]
@@ -1578,50 +1490,6 @@ fn request_bundle_status_emits_effect() {
     assert_eq!(effects.len(), 1);
     assert!(matches!(&effects[0], Effect::FetchBundleStatus));
 }
-/// Conversation-entry resume stamps LoadSession.chat_kind; process chat_mode
-/// alone does not set the entry bit (effects still stamp via SessionFlags).
-#[test]
-fn conversation_entry_load_sets_chat_kind_bit() {
-    let mut app = test_app();
-    let effects = dispatch(Action::LoadSession("conv-id".into(), None, true), &mut app);
-    assert!(matches!(
-        &effects[..],
-        [Effect::LoadSession {
-            session_id,
-            chat_kind: true,
-            ..
-        }] if session_id == "conv-id"
-    ));
-    let agent = app.agents.values().next().expect("agent");
-    assert!(agent.chat_kind, "conversation entry → agent chat_kind");
-    assert!(
-        agent.conversation_entry,
-        "conversation entry must stamp conversation_entry for rename kind"
-    );
-    assert_eq!(
-        agent.rename_kind(),
-        pi_shell::session::unified_list::SessionKind::Chat
-    );
-    let rename = dispatch(
-        Action::RenameSession {
-            title: "conv title".into(),
-        },
-        &mut app,
-    );
-    assert!(
-        matches!(
-            &rename[..],
-            [Effect::RenameSession { kind, .. }]
-                if *kind == pi_shell::session::unified_list::SessionKind::Chat
-        ),
-        "conversation-entry rename must send kind=chat, got {rename:?}"
-    );
-    let reset = dispatch(Action::ResetSessionTitleToAuto, &mut app);
-    assert!(
-        reset.is_empty(),
-        "conversation-entry --auto must refuse client-side, got {reset:?}"
-    );
-}
 /// Process-wide `--chat` + non-conversation resume of a non-disk id still
 /// loads (gateway conversation) with agent chat_kind from sticky mode.
 #[test]
@@ -1797,83 +1665,6 @@ fn view_catalog_entry_emits_fetch_effect() {
         Effect::FetchCatalogEntry { kind, name }
         if kind == "persona" && name == "researcher"
     ));
-}
-/// End-to-end regression test for the "always re-asks" requirement.
-///
-/// Drives the full user-visible production pipeline twice, with no
-/// manual modal poking between rounds:
-///   round 1: dispatch(Action::Fork) -> modal opens.
-///            select option 0 ("Yes") on the modal.
-///            submit_question_answers(skipped=false)
-///              -> InputOutcome::Action(ForkAnswered { worktree=true })
-///              -> question_view cleared by the same submit call.
-///            dispatch(inner Action) -> placeholder + Effect.
-///   round 2: switch focus back to parent (Y-inert, picker cause).
-///            dispatch(Action::Fork) -> modal MUST re-open.
-///
-/// This catches BOTH:
-///   (a) "no persistence in dispatch_fork" -- the only remaining
-///       source of truth for whether the modal opens is the absence
-///       of `args.worktree_override`; and
-///   (b) "submit_question_answers clears question_view" -- a future
-///       refactor that breaks the clear would also break "always
-///       re-asks" in production (open_fork_question refuses when a
-///       question is already on screen), so we exercise it here.
-#[test]
-fn dispatch_fork_no_flag_always_reopens_modal_after_previous_answer() {
-    use crate::views::question_view::QuestionSelection;
-    let mut app = fork_test_app();
-    app.fork_worktree_mode = crate::app::app_view::WorktreeMode::Ask;
-    let effects = dispatch(Action::Fork(fork_args(None, None)), &mut app);
-    assert!(effects.is_empty(), "round 1: no effects until answered");
-    let qv1 = app.agents[&AgentId(0)]
-        .question_view
-        .as_ref()
-        .expect("round 1: modal opened");
-    assert_eq!(
-        qv1.questions[0].options.len(),
-        4,
-        "round 1: modal offers exactly 4 options (Yes/No/Always/Never)"
-    );
-    {
-        let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-        let qv = agent.question_view.as_mut().expect("modal still present");
-        qv.selections[0] = QuestionSelection::Single(Some(0));
-    }
-    let outcome = app
-        .agents
-        .get_mut(&AgentId(0))
-        .unwrap()
-        .submit_question_answers_for_test(false);
-    let inner = match outcome {
-        crate::app::app_view::InputOutcome::Action(a) => a,
-        other => panic!("expected InputOutcome::Action, got {other:?}"),
-    };
-    assert!(
-        matches!(inner, Action::ForkAnswered { worktree: true, .. }),
-        "submit must produce ForkAnswered with worktree=true, got {inner:?}"
-    );
-    assert!(
-        app.agents[&AgentId(0)].question_view.is_none(),
-        "submit must clear question_view on the parent agent"
-    );
-    let effects = dispatch(inner, &mut app);
-    assert!(matches!(
-        effects.as_slice(),
-        [Effect::CreateWorktreeSession { .. }]
-    ));
-    switch_to_agent(&mut app, AgentId(0), SwitchCause::Picker);
-    let effects = dispatch(Action::Fork(fork_args(None, None)), &mut app);
-    assert!(effects.is_empty(), "round 2: no effects until answered");
-    let qv2 = app.agents[&AgentId(0)]
-        .question_view
-        .as_ref()
-        .expect("round 2: modal must re-open (choice never persisted)");
-    assert_eq!(
-        qv2.questions[0].options.len(),
-        4,
-        "round 2: modal still offers exactly 4 options (Yes/No/Always/Never)"
-    );
 }
 #[test]
 fn translate_local_submit_skipped_returns_changed_with_no_action() {
@@ -2178,53 +1969,6 @@ fn switch_to_agent_reanchors_stale_global_auto() {
     );
     assert!(!app.agents[&id2].session.is_auto());
 }
-#[test]
-fn show_tasks_empty_commits_empty_message() {
-    let mut app = test_app_with_agent();
-    let before = agent_scrollback_len(&app);
-    let effects = dispatch(Action::ShowTasks, &mut app);
-    assert!(effects.is_empty(), "got: {effects:?}");
-    assert_eq!(agent_scrollback_len(&app), before + 1);
-    assert_eq!(
-        last_system_text(&app, AgentId(0)),
-        "No background tasks, workflows, or subagents."
-    );
-}
-#[test]
-fn show_tasks_lists_a_scheduled_task() {
-    use crate::app::agent::ScheduledTaskInfo;
-    let mut app = test_app_with_agent();
-    {
-        let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-        agent.session.scheduled_tasks.insert(
-            "t1".to_string(),
-            ScheduledTaskInfo {
-                task_id: "t1".to_string(),
-                prompt: "check CI status".to_string(),
-                human_schedule: "every 5m".to_string(),
-                created_at: std::time::Instant::now(),
-                next_fire_at: None,
-                tag: "loop".to_string(),
-                last_subagent_id: None,
-            },
-        );
-    }
-    let effects = dispatch(Action::ShowTasks, &mut app);
-    assert!(effects.is_empty(), "got: {effects:?}");
-    let text = last_system_text(&app, AgentId(0));
-    assert!(text.contains("Task (1):"), "got: {text:?}");
-    assert!(
-        text.contains("loop · every 5m · check CI status"),
-        "got: {text:?}"
-    );
-    assert!(text.contains("scheduled"), "got: {text:?}");
-}
-#[test]
-fn show_tasks_no_active_agent_is_noop() {
-    let mut app = test_app();
-    let effects = dispatch(Action::ShowTasks, &mut app);
-    assert!(effects.is_empty(), "ShowTasks without an agent is a no-op");
-}
 /// Same refusal at the content-hit worktree entry point.
 #[test]
 fn pick_content_session_in_worktree_refuses_conversation_row() {
@@ -2336,71 +2080,5 @@ fn welcome_expand_conversation_card_skips_detail_load() {
     assert!(
         matches!(&effects[..], [Effect::LoadCardDetail { .. }]),
         "expected LoadCardDetail, got {effects:?}"
-    );
-}
-/// Collect the active agent's system-block texts.
-fn system_texts(app: &AppView, id: AgentId) -> Vec<String> {
-    app.agents[&id]
-        .scrollback
-        .iter_entries()
-        .filter_map(|(_, e)| match &e.block {
-            crate::scrollback::block::RenderBlock::System(s) => Some(s.text.clone()),
-            _ => None,
-        })
-        .collect()
-}
-#[test]
-fn toggle_fps_hud_round_trips() {
-    let mut app = test_app();
-    assert!(!app.fps_hud.enabled(), "FPS HUD must start off");
-    let _ = dispatch(Action::ToggleFpsHud, &mut app);
-    assert!(app.fps_hud.enabled());
-    let _ = dispatch(Action::ToggleFpsHud, &mut app);
-    assert!(!app.fps_hud.enabled());
-}
-/// `/debug` bare: one system line reporting every toggle's state.
-#[test]
-fn show_debug_status_emits_toggle_states_to_transcript() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    if app.scroll_state.scroll_log_active() {
-        let _ = app.scroll_state.toggle_scroll_log();
-    }
-    let _ = dispatch(Action::ToggleFpsHud, &mut app);
-    let _ = dispatch(Action::ShowDebugStatus, &mut app);
-    let texts = system_texts(&app, id);
-    let status = texts
-        .iter()
-        .find(|t| t.starts_with("debug toggles:"))
-        .unwrap_or_else(|| panic!("status line missing, got {texts:?}"));
-    assert!(status.contains("fps on"), "got: {status}");
-    assert!(status.contains("log off"), "got: {status}");
-    assert!(
-        status.contains("/debug"),
-        "must point at the command: {status}"
-    );
-}
-/// `/debug log`: the toggle flips the recorder and echoes where it writes.
-#[test]
-fn toggle_scroll_log_flips_recorder_and_reports_path() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    if app.scroll_state.scroll_log_active() {
-        let _ = app.scroll_state.toggle_scroll_log();
-    }
-    let _ = dispatch(Action::ToggleScrollLog, &mut app);
-    assert!(app.scroll_state.scroll_log_active());
-    let _ = dispatch(Action::ToggleScrollLog, &mut app);
-    assert!(!app.scroll_state.scroll_log_active());
-    let texts = system_texts(&app, id);
-    assert!(
-        texts
-            .iter()
-            .any(|t| t.starts_with("scroll log: recording to")),
-        "enable must echo the log path, got {texts:?}"
-    );
-    assert!(
-        texts.iter().any(|t| t == "scroll log: off"),
-        "disable must be confirmed, got {texts:?}"
     );
 }

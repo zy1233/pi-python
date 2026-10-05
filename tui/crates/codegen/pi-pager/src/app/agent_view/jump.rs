@@ -143,38 +143,5 @@ impl AgentView {
 
 #[cfg(test)]
 mod tests {
-    use crate::scrollback::block::RenderBlock;
-    use crate::views::jump::{JumpRestore, JumpState};
 
-    #[test]
-    fn preview_scrolls_to_cursor_turn() {
-        let mut agent = crate::test_util::make_agent_view(None, "/tmp");
-        agent.scrollback.push_block(RenderBlock::user_prompt("Q1"));
-        for i in 0..20 {
-            agent
-                .scrollback
-                .push_block(RenderBlock::agent_message(format!("para {i}")));
-        }
-        agent.scrollback.push_block(RenderBlock::user_prompt("Q2"));
-        agent.scrollback.push_block(RenderBlock::agent_message("a"));
-        agent.scrollback.prepare_layout(80, 6);
-        agent.scrollback.goto_bottom();
-        let at_bottom = agent.scrollback.scroll_offset();
-
-        agent.jump_state = Some(JumpState {
-            entries: agent.scrollback.timeline_entries(),
-            selected: 0,
-            restore: JumpRestore {
-                bookmark: agent.scrollback.capture_scroll_bookmark(),
-                selected: None,
-                follow_mode: true,
-            },
-        });
-
-        agent.sync_jump_preview();
-        assert!(
-            agent.scrollback.scroll_offset() < at_bottom,
-            "previewing turn 1 scrolls the transcript up"
-        );
-    }
 }

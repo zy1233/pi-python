@@ -939,16 +939,10 @@ pub(crate) fn execute(
                     TaskResult::CancelComplete
                 });
         }
-        Effect::TogglePlanMode { .. } => {
-            tasks.spawn(async move { TaskResult::CancelComplete });
-        }
         Effect::QueueRemove { .. } => {
             tasks.spawn(async move { TaskResult::CancelComplete });
         }
         Effect::QueueReorder { .. } => {
-            tasks.spawn(async move { TaskResult::CancelComplete });
-        }
-        Effect::QueueClear { .. } => {
             tasks.spawn(async move { TaskResult::CancelComplete });
         }
         Effect::QueueEdit { .. } => {
@@ -972,53 +966,6 @@ pub(crate) fn execute(
                         tracing::warn!("Failed to set session mode: {e}");
                     }
                     TaskResult::CancelComplete
-                });
-        }
-        Effect::SetModeThenPrompt {
-            session_id,
-            mode_id,
-            agent_id,
-            text,
-            prompt_id,
-            skill_token_ranges,
-        } => {
-            let tx = acp_tx.clone();
-            let screen_mode = session_flags.screen_mode_label;
-            let is_api_key_auth = session_flags.is_api_key_auth;
-            tasks
-                .spawn(async move {
-                    let mode_req = acp::SetSessionModeRequest::new(
-                        session_id.clone(),
-                        mode_id,
-                    );
-                    if let Err(e) = acp_send(mode_req, &tx).await {
-                        tracing::warn!("Failed to set session mode: {e}");
-                    }
-                    ulog::info(
-                        "prompt submitted",
-                        Some(&session_id.0),
-                        Some(serde_json::json!({"len": text.len()})),
-                    );
-                    let prompt = vec![plain_prompt_content_block(text, &skill_token_ranges)];
-                    let req = acp::PromptRequest::new(session_id.clone(), prompt)
-                        .meta(
-                            prompt_request_meta(&prompt_id, screen_mode)
-                                .as_object()
-                                .cloned(),
-                        );
-                    let result = acp_send(req, &tx).await;
-                    log_prompt_result(&session_id, &result);
-                    let http_status = result
-                        .as_ref()
-                        .err()
-                        .and_then(http_status_from_error);
-                    TaskResult::PromptResponse {
-                        agent_id,
-                        result: result
-                            .map_err(|e| format_acp_error(&e, is_api_key_auth)),
-                        http_status,
-                        prompt_id: Some(prompt_id),
-                    }
                 });
         }
         Effect::Compact { agent_id, .. } => {
@@ -1119,7 +1066,6 @@ pub(crate) fn execute(
                             ) {
                                 SwitchModelError::IncompatibleAgent {
                                     error: typed,
-                                    prev_model_id: prev_model_id.clone(),
                                 }
                             } else {
                                 SwitchModelError::Other(sanitize_user_error(&e.to_string()))
@@ -1228,53 +1174,6 @@ pub(crate) fn execute(
                         preview.mark_failed();
                     }
                     TaskResult::PromptImagePreviewPrepared
-                });
-        }
-        Effect::PlanDoctorFix { target, report, terminal, request } => {
-            tasks
-                .spawn(async move {
-                    let result = tokio::task::spawn_blocking(move || match request {
-                            crate::slash::command::DoctorRequest::ListFixes => {
-                                Ok(
-                                    actions::DoctorPlanningOutcome::Listing(
-                                        crate::diagnostics::format_applicable_automatic_fixes(
-                                            &report,
-                                            &terminal,
-                                        ),
-                                    ),
-                                )
-                            }
-                            crate::slash::command::DoctorRequest::Fix(id) => {
-                                match crate::diagnostics::select_fix_plan(
-                                    id,
-                                    &report,
-                                    &terminal,
-                                ) {
-                                    Ok(Some(plan)) => {
-                                        Ok(actions::DoctorPlanningOutcome::Plan(Box::new(plan)))
-                                    }
-                                    Ok(None) => {
-                                        Ok(
-                                            actions::DoctorPlanningOutcome::RunLocally(
-                                                crate::diagnostics::human_fix_command(id)
-                                                    .unwrap_or_else(|| id.to_string()),
-                                            ),
-                                        )
-                                    }
-                                    Err(error) => Err(error.to_string()),
-                                }
-                            }
-                            crate::slash::command::DoctorRequest::Report => {
-                                unreachable!("report does not enter the planning effect")
-                            }
-                        })
-                        .await
-                        .map_err(|error| format!("Could not prepare the fix: {error}"))
-                        .and_then(|result| result);
-                    TaskResult::DoctorFixPlanned {
-                        target,
-                        result,
-                    }
                 });
         }
         Effect::ApplyDoctorFix { target, plan } => {
@@ -1689,14 +1588,6 @@ pub(crate) fn execute(
                 }
             });
         }
-        Effect::ShareSession { agent_id, .. } => {
-            tasks.spawn(async move {
-                TaskResult::ShareSessionFailed {
-                    agent_id,
-                    error: "Share session is not supported in standard ACP".to_string(),
-                }
-            });
-        }
         Effect::FetchSessionAgentName { agent_id, session_id } => {
             let tx = acp_tx.clone();
             tasks
@@ -1785,43 +1676,6 @@ pub(crate) fn execute(
                             TaskResult::RenameSessionFailed {
                                 agent_id,
                                 error,
-                            }
-                        }
-                    }
-                });
-        }
-        Effect::ResetSessionTitle {
-            agent_id,
-            session_id,
-            cwd,
-            kind,
-            previous_display_name,
-            previous_generated_title,
-        } => {
-            let tx = acp_tx.clone();
-            tasks
-                .spawn(async move {
-                    match session_rename_rpc(
-                            &tx,
-                            actions::RenameSessionRequest::for_reset(
-                                session_id.0.to_string(),
-                                cwd.to_string_lossy().to_string(),
-                                kind,
-                            ),
-                        )
-                        .await
-                    {
-                        Ok(()) => {
-                            TaskResult::ResetSessionTitleComplete {
-                                agent_id,
-                            }
-                        }
-                        Err(error) => {
-                            TaskResult::ResetSessionTitleFailed {
-                                agent_id,
-                                error,
-                                previous_display_name,
-                                previous_generated_title,
                             }
                         }
                     }
@@ -1975,19 +1829,6 @@ pub(crate) fn execute(
                         result,
                     }
                 });
-        }
-        Effect::SendBtw {
-            agent_id,
-            minimal_request_id,
-            ..
-        } => {
-            tasks.spawn(async move {
-                TaskResult::BtwResponse {
-                    agent_id,
-                    result: Err("BTW is not supported in standard ACP".into()),
-                    minimal_request_id,
-                }
-            });
         }
         Effect::SendRecap { session_id, auto } => {
             tasks.spawn(async move {

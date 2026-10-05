@@ -75,51 +75,6 @@ fn send_while_waiting_goes_through_when_btw_overlay_is_open() {
     );
 }
 
-/// A prompt queued *before* `/btw` (a thinking-turn follow-up) must stay
-/// queued when the answer lands. The send path is what releases a message
-/// typed while parked; `/btw` completion must not flush the queue.
-#[test]
-fn btw_response_does_not_flush_an_unrelated_queued_prompt() {
-    let mut app = running_turn_app();
-    {
-        let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-        simulate_task_output_wait(agent, "task-1");
-        agent.btw_state = Some(BtwOverlayState::Loading {
-            question: "status?".into(),
-        });
-    }
-    enqueue_local(&mut app, AgentId(0), "queued before btw");
-
-    let effects = dispatch_task_result(
-        TaskResult::BtwResponse {
-            agent_id: AgentId(0),
-            result: Ok("still waiting".into()),
-            minimal_request_id: None,
-        },
-        &mut app,
-    );
-
-    assert!(
-        sent_texts(&effects).is_empty(),
-        "btw completion must not interject a pre-queued follow-up, got {effects:?}"
-    );
-    assert_eq!(
-        app.agents[&AgentId(0)]
-            .session
-            .pending_prompts
-            .front()
-            .map(|p| p.text.as_str()),
-        Some("queued before btw")
-    );
-    assert!(
-        matches!(
-            app.agents[&AgentId(0)].btw_state,
-            Some(BtwOverlayState::Done { .. })
-        ),
-        "the overlay must still show the answer",
-    );
-}
-
 /// Enter during a wait must interject the message just typed, not an
 /// earlier follow-up that was queued while the model was still thinking.
 #[test]

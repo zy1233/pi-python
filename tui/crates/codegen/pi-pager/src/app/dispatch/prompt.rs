@@ -14,7 +14,7 @@ use super::queue::{
 };
 use super::router::dispatch;
 use super::voice::{merge_prompt_with_voice_interim, voice_stop_on_submit};
-use crate::app::actions::{Action, DoctorFixTarget, Effect};
+use crate::app::actions::{Action, Effect};
 use crate::app::agent::{AgentCommand, AgentId, AgentState};
 use crate::app::agent_view::AgentView;
 use crate::app::app_view::{ActiveView, AppView};
@@ -56,54 +56,6 @@ pub(crate) fn dispatch_initial_prompt(app: &mut AppView, prompt: String) -> Vec<
     effects
 }
 
-pub(super) fn open_doctor_fix_question(
-    app: &mut AppView,
-    target: DoctorFixTarget,
-    plan: Box<crate::diagnostics::FixPlan>,
-) {
-    use crate::views::question_view::{LocalQuestionKind, QuestionViewState};
-    use pi_tools::implementations::grok_build::ask_user_question::{
-        Question, QuestionOption,
-    };
-
-    let Some(agent) = app.agents.get_mut(&target.agent_id) else {
-        return;
-    };
-    if agent.question_view.is_some() {
-        agent.scrollback.push_block(RenderBlock::system(
-            "Close the current question before applying this fix.",
-        ));
-        return;
-    }
-    let preview = crate::diagnostics::format_fix_preview(&plan);
-    let question = Question {
-        question: "Apply this fix?".to_owned(),
-        options: vec![
-            QuestionOption {
-                label: "Apply".to_owned(),
-                description: "Make the changes shown above.".to_owned(),
-                preview: Some(preview),
-                id: None,
-            },
-            QuestionOption {
-                label: "Cancel".to_owned(),
-                description: "Do not change the configuration.".to_owned(),
-                preview: None,
-                id: None,
-            },
-        ],
-        multi_select: Some(false),
-        id: None,
-    };
-    let stashed = agent.prompt.stash();
-    agent.question_view = Some(
-        QuestionViewState::new("doctor-fix".to_owned(), vec![question], stashed)
-            .with_local_kind(LocalQuestionKind::DoctorFix { target, plan })
-            .with_no_freeform(),
-    );
-    agent.prompt.set_text("");
-}
-
 pub(super) fn dispatch_send_prompt(app: &mut AppView, text: String) -> Vec<Effect> {
     crate::unified_log::info(
         "prompt.enqueue",
@@ -123,26 +75,6 @@ pub(super) fn dispatch_clear_prompt(app: &mut AppView) -> Vec<Effect> {
     with_active_agent(app, |agent| {
         // Recoverable with the stash chord, but Esc-Esc is a discard: it never comes back on its own.
         agent.stash_prompt_draft(crate::app::agent_view::StashCause::ClearedDraft);
-    });
-    vec![]
-}
-
-/// Open the prompt-history search panel on the active agent (composer as
-/// filter query). Dispatched by `/history`; the slash pipeline has already
-/// cleared the composer, so the panel opens with an empty query.
-pub(super) fn dispatch_open_history_search(app: &mut AppView) -> Vec<Effect> {
-    with_active_agent(app, |agent| {
-        let history = agent.combined_prompt_history();
-        let current_text = agent.prompt.text().to_string();
-        let opened = agent
-            .prompt
-            .history_search
-            .activate(&history, &current_text);
-        if !opened {
-            // Matcher thread didn't start: the overlay stays closed on
-            // purpose (nothing could ever populate it).
-            tracing::debug!("history search unavailable: matcher spawn failed");
-        }
     });
     vec![]
 }
@@ -596,9 +528,7 @@ pub(super) fn dispatch_send_prompt_inner(
                     // Inline `/feedback` composed alongside pasted images:
                     // the chips belong to the report, so drain them into the
                     // action before the composer wipe destroys them.
-                    if let Action::SendFeedback { images, .. }
-                    | Action::OpenFeedbackPane { images, .. } = &mut action
-                    {
+                    if let Action::SendFeedback { images, .. } = &mut action {
                         *images = agent.prompt.drain_images().into();
                     }
                     agent.prompt.set_text("");
@@ -1488,7 +1418,6 @@ pub(super) fn handle_prompt_response(
             effects.push(Effect::FetchPromptSuggestion {
                 agent_id,
                 generation,
-                model,
                 session_id: Some(session_id),
             });
         }
@@ -1592,14 +1521,7 @@ pub(super) fn handle_suggestion_debounce_expired(
     vec![Effect::FetchShellSuggestions {
         agent_id,
         text,
-        cursor,
         cwd,
-        generation,
-        limit: crate::views::suggestion_controller::SHELL_SUGGEST_WIRE_LIMIT,
-        include_ai,
-        ai_model,
         session_id,
-        // The as-you-type (ghost) surface keeps history/AI providers.
-        token_only: false,
     }]
 }

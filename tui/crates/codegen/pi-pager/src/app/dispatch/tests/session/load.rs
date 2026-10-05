@@ -801,45 +801,6 @@ fn auth_complete_restores_view_after_mid_session_login() {
     assert!(matches!(app.auth_state, AuthState::Done));
 }
 #[test]
-fn session_loaded_drains_pending_first_prompt_to_front() {
-    let mut app = fork_test_app();
-    dispatch(
-        Action::Fork(fork_args(Some(false), Some("first directive"))),
-        &mut app,
-    );
-    let new_id = AgentId(1);
-    app.agents
-        .get_mut(&new_id)
-        .unwrap()
-        .session
-        .enqueue_prompt("user-typed prompt".into());
-    app.agents.get_mut(&new_id).unwrap().session.session_id = Some("new-fork-sid".into());
-    dispatch(
-        Action::TaskComplete(TaskResult::SessionLoaded {
-            agent_id: new_id,
-            session_id: "new-fork-sid".into(),
-            models: None,
-            code_restored: false,
-            restore_summary: None,
-            restore_degree: None,
-            running_prompt_id: None,
-            scheduler_background_loops: None,
-        }),
-        &mut app,
-    );
-    let queue: Vec<_> = app.agents[&new_id]
-        .session
-        .pending_prompts
-        .iter()
-        .map(|p| p.text.clone())
-        .collect();
-    assert_eq!(queue, vec!["user-typed prompt".to_string()]);
-    assert!(
-        app.agents[&new_id].pending_first_prompt.is_none(),
-        "drained prompt must be cleared"
-    );
-}
-#[test]
 fn session_loaded_with_no_pending_first_prompt_does_not_enqueue() {
     let mut app = fork_test_app();
     let id = AgentId(0);
@@ -1127,48 +1088,6 @@ fn resume_conversation_does_not_focus_build_id_collision() {
     )));
     assert!(!app.agents[&agent_0].chat_kind);
 }
-#[test]
-fn duplicate_load_unbind_invalidates_old_minimal_btw_response() {
-    let mut app = test_app();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    dispatch(Action::NewSession, &mut app);
-    let old_owner = AgentId(0);
-    dispatch(
-        Action::TaskComplete(TaskResult::SessionCreated {
-            agent_id: old_owner,
-            session_id: "shared-id".into(),
-            models: None,
-            scheduler_background_loops: None,
-        }),
-        &mut app,
-    );
-    let request_id = match dispatch(Action::SendBtw("old question".into()), &mut app).as_slice() {
-        [
-            Effect::SendBtw {
-                minimal_request_id: Some(id),
-                ..
-            },
-        ] => *id,
-        other => panic!("expected correlated minimal /btw effect, got {other:?}"),
-    };
-    dispatch(
-        Action::LoadSession("shared-id".into(), None, true),
-        &mut app,
-    );
-    assert!(app.agents[&old_owner].session.session_id.is_none());
-    assert!(app.agents[&old_owner].btw_state.is_none());
-    assert!(app.agents[&old_owner].minimal_btw_lifecycle.is_none());
-    dispatch(
-        Action::TaskComplete(TaskResult::BtwResponse {
-            agent_id: old_owner,
-            result: Ok("old answer".into()),
-            minimal_request_id: Some(request_id),
-        }),
-        &mut app,
-    );
-    assert!(app.agents[&old_owner].btw_state.is_none());
-    assert!(app.agents[&old_owner].minimal_btw_lifecycle.is_none());
-}
 /// Under sticky `--chat`, agents stamp `chat_kind=true` even for build loads;
 /// resume with conversation-entry false must still focus the open agent.
 #[test]
@@ -1334,24 +1253,6 @@ fn pick_conversation_row_from_welcome_dispatches_direct_chat_load() {
             }] if session_id == "conv-pick-2"
         ),
         "expected a direct chat LoadSession, got {effects:?}"
-    );
-}
-/// Canary: a remote Build row not on disk still takes the GCS-restore path.
-#[ignore = "pi-python: grok-specific feature not supported"]
-#[test]
-fn pick_remote_build_row_still_restores() {
-    let mut app = test_app_with_agent();
-    let id = format!("remote-only-{}", std::process::id());
-    let mut e = make_picker_entry(&id, "/r");
-    e.source = "remote".into();
-    open_session_picker_with(&mut app, vec![e]);
-    let effects = dispatch(Action::PickSession(0), &mut app);
-    assert!(
-        matches!(
-            &effects[..],
-            [Effect::RestoreAndLoadSession { session_id, .. }] if *session_id == id
-        ),
-        "expected RestoreAndLoadSession, got {effects:?}"
     );
 }
 /// A content-search hit matching a co-displayed conversation row also

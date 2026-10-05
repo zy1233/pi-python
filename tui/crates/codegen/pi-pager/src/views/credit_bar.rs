@@ -69,9 +69,6 @@ impl AutoTopupInfo {
 /// previously cached rule.
 #[derive(Debug, Clone)]
 pub enum AutoTopupFetch {
-    /// A definitive rule state (a real rule, or [`AutoTopupInfo::disabled`] when
-    /// the backend reports none). Stored as the *known* auto top-up state.
-    Resolved(AutoTopupInfo),
     /// Fetch failed — keep the cached value (last-known-good). A stored `None`
     /// therefore means "not yet known", not "no auto top-up".
     Unchanged,

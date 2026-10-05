@@ -2,27 +2,6 @@
 
 use super::*;
 
-#[test]
-fn demote_dispatch_keeps_turn_session_and_execute_guards() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-
-    assert!(dispatch(Action::DemoteToBackground, &mut app).is_empty());
-
-    crate::app::agent_view::test_fixtures::add_running_execute(app.agents.get_mut(&id).unwrap());
-    let effects = dispatch(Action::DemoteToBackground, &mut app);
-    assert!(matches!(
-        effects.as_slice(),
-        [Effect::DemoteToBackground {
-            session_id,
-            tool_call_id,
-        }] if session_id.0.as_ref() == "test-session" && tool_call_id == "exec-1"
-    ));
-
-    app.agents.get_mut(&id).unwrap().session.state = AgentState::Idle;
-    assert!(dispatch(Action::DemoteToBackground, &mut app).is_empty());
-}
-
 /// Regression (Steer): a queued prompt's parked `session/prompt` RPC
 /// can resolve as an *error* — e.g. its `respond_to` is dropped on the
 /// agent when the prompt is removed from the shared queue, surfacing as
@@ -2276,24 +2255,6 @@ fn kill_bg_task_action_emits_client_ui_source() {
         ),
         "single-task [×] must stay ClientUi, got {effects:?}"
     );
-}
-
-#[test]
-fn bg_task_kill_failed_clears_pending_kill_on_inactive_agent() {
-    let mut app = two_agent_app_with_bg_task();
-
-    dispatch(
-        Action::TaskComplete(TaskResult::BgTaskKillFailed {
-            session_id: "sess-B".into(),
-            task_id: "task-B-1".into(),
-            error: "connection lost".into(),
-        }),
-        &mut app,
-    );
-
-    let task = &app.agents[&AgentId(1)].session.bg_tasks["task-B-1"];
-    assert!(!task.pending_kill);
-    assert!(task.kill_requested_at.is_none());
 }
 
 

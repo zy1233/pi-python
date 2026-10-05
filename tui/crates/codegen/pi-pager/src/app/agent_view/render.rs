@@ -4819,184 +4819,6 @@ mod permission_hint_tests {
 }
 #[cfg(test)]
 mod feedback_input_tests {
-    use super::super::test_fixtures::make_agent;
-    use super::AgentView;
-    use crate::actions::ActionRegistry;
-    use crate::app::bundle::BundleState;
-    use crate::scrollback::render::ScratchBuffer;
-    use crate::views::question_view::{LocalQuestionKind, QuestionViewState, feedback_input};
-    use ratatui::buffer::Buffer;
-    use ratatui::layout::Rect;
-    use pi_tools::implementations::grok_build::ask_user_question::Question;
-    /// Agent with the bare `/feedback` pane open and focused for typing.
-    fn feedback_agent() -> AgentView {
-        let mut agent = make_agent();
-        let stashed = agent.prompt.stash();
-        let mut state = QuestionViewState::new(
-            "feedback-test".into(),
-            vec![Question {
-                question: crate::app::dispatch::FEEDBACK_QUESTION_LABEL.into(),
-                options: vec![],
-                multi_select: Some(false),
-                id: None,
-            }],
-            stashed,
-        )
-        .with_local_kind(LocalQuestionKind::Feedback);
-        let freeform = state.activate_freeform_input();
-        agent.prompt.set_text_preserving(&freeform);
-        agent.question_view = Some(state);
-        agent
-    }
-    fn render_text(agent: &mut AgentView) -> String {
-        render_text_sized(agent, 100, 40)
-    }
-    fn render_text_sized(agent: &mut AgentView, width: u16, height: u16) -> String {
-        let reg = ActionRegistry::defaults();
-        let area = Rect::new(0, 0, width, height);
-        let mut buf = Buffer::empty(area);
-        let mut scratch = ScratchBuffer::new();
-        agent.draw(
-            area,
-            &mut buf,
-            &reg,
-            &mut scratch,
-            None,
-            false,
-            crate::app::agent_view::BannerSlotParams::none(),
-            &BundleState::default(),
-            &mut Vec::new(),
-            super::AppRenderParams::default(),
-        );
-        (0..area.height)
-            .map(|y| {
-                (0..area.width)
-                    .filter_map(|x| buf.cell((x, y)).map(|c| c.symbol().to_string()))
-                    .collect::<String>()
-                    + "\n"
-            })
-            .collect()
-    }
-    /// The feedback pane keeps the question card, and puts a multi-line report area where the options and the one-line freeform row would be.
-    #[test]
-    fn feedback_pane_renders_report_area_in_the_card() {
-        let mut agent = feedback_agent();
-        let screen = render_text(&mut agent);
-        assert!(
-            screen.contains(crate::app::dispatch::FEEDBACK_QUESTION_LABEL),
-            "label missing\n{screen}"
-        );
-        assert!(
-            screen.contains(feedback_input::PLACEHOLDER),
-            "placeholder must stay visible in the empty focused input\n{screen}"
-        );
-        assert!(
-            !screen.contains("(\u{25cb})"),
-            "the freeform radio row has no place in the feedback pane\n{screen}"
-        );
-        assert!(
-            !screen.contains("navigate"),
-            "there is nothing to navigate in the feedback pane\n{screen}"
-        );
-        assert!(
-            screen.contains("Enter:send"),
-            "footer must offer the send action\n{screen}"
-        );
-        let top = screen
-            .lines()
-            .position(|l| l.contains('\u{256d}'))
-            .expect("report box needs a top rule");
-        let bottom = screen
-            .lines()
-            .position(|l| l.contains('\u{2570}'))
-            .expect("report box needs a bottom rule");
-        let box_rows = (bottom - top + 1) as u16;
-        assert_eq!(
-            box_rows,
-            feedback_input::HEIGHT,
-            "report box should be {} rows, got {box_rows}\n{screen}",
-            feedback_input::HEIGHT
-        );
-        let sides = screen
-            .lines()
-            .skip(top + 1)
-            .take(bottom - top - 1)
-            .filter(|l| l.matches('\u{2502}').count() >= 2)
-            .count();
-        assert_eq!(
-            sides,
-            bottom - top - 1,
-            "every text row of the box needs both side rules\n{screen}"
-        );
-    }
-    #[test]
-    fn feedback_trace_question_renders_options() {
-        let mut agent = feedback_agent();
-        {
-            let qv = agent.question_view.as_mut().expect("pane");
-            qv.begin_feedback_trace_stage("clipboard is broken over ssh".into(), vec![]);
-        }
-        let screen = render_text(&mut agent);
-        for fragment in ["Opt-in to provide your trace", "retain and train"] {
-            assert!(
-                screen.contains(fragment),
-                "trace question label missing ({fragment})\n{screen}"
-            );
-        }
-        for option in ["Opt in", "Opt out this time"] {
-            assert!(screen.contains(option), "{option} missing\n{screen}");
-        }
-        let selected_row = screen
-            .lines()
-            .find(|l| l.contains("Opt in") && !l.contains("Opt out"))
-            .expect("first option row");
-        assert!(
-            selected_row.contains('\u{25cf}'),
-            "turning trace upload on must render preselected\n{screen}"
-        );
-        assert!(
-            screen.contains("Enter:send"),
-            "footer must offer send\n{screen}"
-        );
-        assert!(
-            !screen.contains("dismiss"),
-            "the trace card cannot be dismissed without sending; the bar must \
-             not promise it\n{screen}"
-        );
-    }
-    /// A shrunk box must not paint over the shortcuts bar or leave the user typing into a pane that renders nothing.
-    #[test]
-    fn feedback_report_box_shrinks_on_a_short_terminal() {
-        for height in [10u16, 11, 12, 13, 14, 16, 18, 20] {
-            let mut agent = feedback_agent();
-            let screen = render_text_sized(&mut agent, 100, height);
-            let rows: Vec<&str> = screen.lines().collect();
-            let card_visible = screen.contains(crate::glyphs::accent_bar());
-            if card_visible {
-                assert!(
-                    screen.contains(feedback_input::PLACEHOLDER)
-                        || screen.contains(crate::glyphs::prompt_arrow()),
-                    "card renders without its report input at height {height}\n{screen}"
-                );
-            }
-            let Some(bottom) = rows.iter().position(|l| l.contains('\u{2570}')) else {
-                assert!(
-                    !screen.contains('\u{256d}'),
-                    "a top rule without a bottom rule means a clipped box (height {height})\n{screen}"
-                );
-                continue;
-            };
-            let top = rows
-                .iter()
-                .position(|l| l.contains('\u{256d}'))
-                .expect("a bottom rule implies a top rule");
-            assert!(top < bottom, "box rules out of order (height {height})");
-            assert!(
-                bottom + 1 < rows.len(),
-                "box must leave room below the panel (height {height})\n{screen}"
-            );
-        }
-    }
 }
 #[cfg(test)]
 mod status_line_draw_tests {
@@ -5005,12 +4827,10 @@ mod status_line_draw_tests {
     use crate::actions::ActionRegistry;
     use crate::app::bundle::BundleState;
     use crate::scrollback::render::ScratchBuffer;
-    use crate::views::question_view::{LocalQuestionKind, QuestionViewState};
     use crate::views::status_line::{SanitizedText, StatusLineDisplay, StatusLineFrame};
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
     use ratatui::style::Color;
-    use pi_tools::implementations::grok_build::ask_user_question::Question;
     fn draw_script(output: &str, rows: u16) -> Buffer {
         draw_script_for(&mut make_agent(), output, rows)
     }
@@ -5059,27 +4879,6 @@ mod status_line_draw_tests {
         let (x, y) = find(&buf, "RED").expect("the script row is on screen");
         assert_eq!(buf[(x, y)].bg, Color::Red);
     }
-    /// Agent with the bare `/feedback` pane open and focused, which asks for
-    /// most of the screen.
-    fn question_agent() -> AgentView {
-        let mut agent = make_agent();
-        let stashed = agent.prompt.stash();
-        let mut state = QuestionViewState::new(
-            "status_line-test".into(),
-            vec![Question {
-                question: crate::app::dispatch::FEEDBACK_QUESTION_LABEL.into(),
-                options: vec![],
-                multi_select: Some(false),
-                id: None,
-            }],
-            stashed,
-        )
-        .with_local_kind(LocalQuestionKind::Feedback);
-        let freeform = state.activate_freeform_input();
-        agent.prompt.set_text_preserving(&freeform);
-        agent.question_view = Some(state);
-        agent
-    }
     fn dump(buf: &Buffer) -> String {
         let area = *buf.area();
         (area.y..area.bottom())
@@ -5116,39 +4915,6 @@ mod status_line_draw_tests {
         );
     }
     const ONE_ROW_SCRIPT: &str = "solo-row";
-    #[test]
-    fn fullscreen_question_panel_leaves_the_row_its_rows() {
-        let buf = draw_script_for(&mut question_agent(), FIVE_ROW_SCRIPT, 24);
-        let screen = dump(&buf);
-        let present: Vec<u16> = (1..=5)
-            .filter_map(|i| find(&buf, &format!("row-{i}")).map(|(_, y)| y))
-            .collect();
-        assert_eq!(
-            present.len(),
-            5,
-            "the panel shrinks by the rows the script asks for, got rows at {present:?}\n{screen}"
-        );
-        assert!(
-            find(&buf, "Esc:dismiss").is_some(),
-            "the shortcuts bar keeps its row\n{screen}"
-        );
-    }
-    #[test]
-    fn fullscreen_question_panel_leaves_a_one_row_script_its_row() {
-        let buf = draw_script_for(&mut question_agent(), ONE_ROW_SCRIPT, 24);
-        let screen = dump(&buf);
-        let row_y = find(&buf, ONE_ROW_SCRIPT)
-            .map(|(_, y)| y)
-            .unwrap_or_else(|| panic!("the panel must leave the single row on screen\n{screen}"));
-        let bar_y = find(&buf, "Esc:dismiss")
-            .map(|(_, y)| y)
-            .unwrap_or_else(|| panic!("the shortcuts bar keeps its row\n{screen}"));
-        assert_eq!(
-            bar_y,
-            row_y + 1,
-            "the shortcuts bar sits directly under the row\n{screen}"
-        );
-    }
     #[test]
     fn row_clamped_away_by_the_prompt_keeps_the_exported_size() {
         let mut agent = make_agent();

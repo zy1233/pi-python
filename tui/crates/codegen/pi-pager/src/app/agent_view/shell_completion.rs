@@ -36,18 +36,6 @@ impl AgentView {
         true
     }
 
-    /// Terminal-like Tab over a closed dropdown's completion items: decide
-    /// via `SuggestionController::tab_decision`, then execute. Used by the
-    /// pending-Tab landing (where `Nothing` — stale/empty items — must do
-    /// nothing rather than fetch again).
-    pub(in crate::app) fn shell_completion_tab(&mut self) {
-        let action = self
-            .prompt
-            .suggestions
-            .tab_decision(self.prompt.text(), self.prompt.cursor());
-        self.execute_tab_action(action);
-    }
-
     /// View-side executor for a [`TabAction`] (the policy lives in the
     /// controller's `tab_decision`).
     pub(super) fn execute_tab_action(&mut self, action: TabAction) {
@@ -99,17 +87,8 @@ impl AgentView {
             .push(super::actions::Effect::FetchShellSuggestions {
                 agent_id: self.session.id,
                 text: self.prompt.text().to_owned(),
-                cursor: self.prompt.cursor(),
                 cwd: self.session.cwd.to_string_lossy().into_owned(),
-                generation,
-                limit: crate::views::suggestion_controller::SHELL_SUGGEST_WIRE_LIMIT,
-                include_ai: false,
-                ai_model: None,
                 session_id: self.session.session_id.as_ref().map(|s| s.0.to_string()),
-                // Deterministic Tab surface: token providers only (a
-                // history row would make the set mixed and kill
-                // insta-accept/LCP).
-                token_only: true,
             });
     }
 
@@ -335,34 +314,6 @@ mod shell_suggestion_key_tests {
 
     // -- always-on Tab fetch (no GROK_SUGGESTIONS) --------------------------
 
-    /// Tab in bash mode with no fetched candidates fires a deterministic
-    /// fetch — no env flag, no AI, dropdown-scale limit.
-    #[test]
-    fn tab_without_items_fires_deterministic_fetch() {
-        let mut agent = bash_agent_always_on("cat no");
-        let outcome = agent.handle_prompt_key_for_test(&key(KeyCode::Tab));
-        assert!(matches!(outcome, InputOutcome::Changed));
-
-        let fetch = agent.pending_effects.iter().find_map(|e| match e {
-            Effect::FetchShellSuggestions {
-                include_ai,
-                generation,
-                limit,
-                text,
-                token_only,
-                ..
-            } => Some((*include_ai, *generation, *limit, text.clone(), *token_only)),
-            _ => None,
-        });
-        let (include_ai, generation, limit, text, token_only) =
-            fetch.expect("Tab must fire a fetch");
-        assert!(!include_ai, "Tab completion is deterministic (no AI)");
-        assert!(token_only, "Tab fetches run only the token providers");
-        assert_eq!(limit, 50);
-        assert_eq!(text, "cat no");
-        assert_eq!(generation, agent.prompt.suggestions.generation());
-    }
-
     /// Repeat Tab while the armed fetch is still in flight is a no-op: one
     /// RPC, one landing that runs the Tab semantics once.
     #[test]
@@ -446,28 +397,6 @@ mod shell_suggestion_key_tests {
         assert_eq!(agent.prompt.text(), "cat notes.md");
         assert_eq!(agent.prompt.cursor(), "cat notes.md".len());
         assert!(!agent.prompt.completion_dropdown_open());
-    }
-
-    /// The same insta-accept with the pipeline OFF: the refetch kick is a
-    /// direct deterministic fetch instead of a debounce.
-    #[test]
-    fn tab_single_candidate_accepts_and_kicks_fetch_always_on() {
-        let mut agent = bash_agent_always_on("cat no");
-        agent.prompt.suggestions.dropdown.items = vec![file_item("cat notes.md", "notes.md", 4..6)];
-
-        let outcome = agent.handle_prompt_key_for_test(&key(KeyCode::Tab));
-        assert!(matches!(outcome, InputOutcome::Changed));
-        assert_eq!(agent.prompt.text(), "cat notes.md");
-        assert!(
-            agent.pending_effects.iter().any(|e| matches!(
-                e,
-                Effect::FetchShellSuggestions {
-                    include_ai: false,
-                    ..
-                }
-            )),
-            "accept must kick a deterministic refetch"
-        );
     }
 
     /// A single HISTORY item keeps the plain dropdown-open behavior:
@@ -596,30 +525,6 @@ mod shell_suggestion_key_tests {
         assert!(matches!(outcome, InputOutcome::Changed));
         assert!(agent.prompt.completion_dropdown_open());
         assert_eq!(agent.prompt.text(), "cat alpha_");
-    }
-
-    /// The fill's refetch with the pipeline OFF is a direct deterministic
-    /// fetch (no debounce to ride on).
-    #[test]
-    fn tab_fill_kicks_deterministic_fetch_always_on() {
-        let mut agent = bash_agent_always_on("cat al");
-        agent.prompt.suggestions.dropdown.items = vec![
-            file_item("cat alpha_one.txt", "alpha_one.txt", 4..6),
-            file_item("cat alpha_two.txt", "alpha_two.txt", 4..6),
-        ];
-
-        let _ = agent.handle_prompt_key_for_test(&key(KeyCode::Tab));
-        assert_eq!(agent.prompt.text(), "cat alpha_");
-        assert!(
-            agent.pending_effects.iter().any(|e| matches!(
-                e,
-                Effect::FetchShellSuggestions {
-                    include_ai: false,
-                    ..
-                }
-            )),
-            "fill must kick a deterministic refetch"
-        );
     }
 
     /// Bash-mode agent whose draft is a paste CHIP (atomic element), with
@@ -826,36 +731,6 @@ mod shell_suggestion_key_tests {
                 .any(|e| matches!(e, Effect::DebounceSuggestions { .. })),
             "bash-mode typing debounces a suggest request"
         );
-    }
-
-    /// Esc closes a dropdown the Tab-armed landing opened (the always-on
-    /// dismissal path), and the draft survives.
-    #[test]
-    fn esc_closes_tab_fetched_dropdown() {
-        let mut agent = bash_agent_always_on("git st");
-        let _ = agent.handle_prompt_key_for_test(&key(KeyCode::Tab));
-        let generation = agent.prompt.suggestions.generation();
-        agent.prompt.suggestions.on_suggestions_loaded(
-            crate::views::suggestion_controller::SuggestResponseParsed {
-                ghost: None,
-                completions: vec![
-                    history_item("git status --porcelain-A", 0..6),
-                    history_item("git status --porcelain-B", 0..6),
-                ],
-                generation,
-            },
-            "git st",
-            "git st".len(),
-        );
-        assert!(agent.prompt.suggestions.take_pending_tab(generation));
-        agent.shell_completion_tab();
-        assert!(agent.prompt.completion_dropdown_open());
-
-        let outcome = agent.handle_prompt_key_for_test(&key(KeyCode::Esc));
-        assert!(matches!(outcome, InputOutcome::Changed));
-        assert!(!agent.prompt.completion_dropdown_open());
-        assert_eq!(agent.prompt.text(), "git st");
-        assert_eq!(agent.prompt_input_mode, PromptInputMode::Bash);
     }
 
     /// With the pipeline OFF, typing invalidates Tab-fetched state instead:

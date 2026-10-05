@@ -13,41 +13,41 @@ use super::import_claude::{
     dispatch_import_claude_confirm,
 };
 use super::interject::dispatch_interject;
-use super::jump::{dispatch_jump_dismiss, dispatch_jump_picker_select, dispatch_jump_show_picker};
+use super::jump::{dispatch_jump_dismiss, dispatch_jump_picker_select, };
 use super::modes::{
-    dispatch_cycle_mode, dispatch_enter_plan_mode, dispatch_show_plan, dispatch_toggle_yolo,
+    dispatch_cycle_mode, 
     set_permission_mode, set_plan_mode, set_yolo_mode,
 };
 use super::notes::{
-    dispatch_enter_remember_mode, dispatch_open_feedback_pane,
-    dispatch_save_remember_note_from_modal, dispatch_send_btw, dispatch_send_feedback,
+    
+    dispatch_save_remember_note_from_modal, dispatch_send_feedback,
     dispatch_send_recap, dispatch_send_remember_note,
 };
 use super::permissions::{
     dispatch_permission_cancel, dispatch_permission_followup, dispatch_permission_select,
 };
 use super::prompt::{
-    dispatch_accept_word_select_tip, dispatch_clear_prompt, dispatch_open_history_search,
+    dispatch_accept_word_select_tip, dispatch_clear_prompt, 
     dispatch_send_bash_command, dispatch_send_prompt, dispatch_send_prompt_inner,
     dispatch_show_plan_nudge, dispatch_show_undo_tip, dispatch_show_word_select_tip,
 };
 use super::queue;
 use super::queue::dispatch_drain_queue;
 use super::rewind::{
-    dispatch_inline_edit_submit, dispatch_rewind, dispatch_rewind_cancel_offer,
+    dispatch_inline_edit_submit, dispatch_rewind_cancel_offer,
     dispatch_rewind_confirm, dispatch_rewind_confirm_never_ask, dispatch_rewind_dismiss,
     dispatch_rewind_dismiss_error, dispatch_rewind_picker_select, dispatch_rewind_show_picker,
 };
 use super::session::foreign::dispatch_fetch_session_list;
 use super::session::fork::{
-    apply_persist_worktree_mode, dispatch_fork, dispatch_fork_resolved,
+    apply_persist_worktree_mode, dispatch_fork_resolved,
     dispatch_startup_fork_session,
 };
 use super::session::lifecycle::{
     clear_startup_actions, dispatch_accept_consent, dispatch_agent_type_mismatch_answered,
     dispatch_delete_current_session_answered, dispatch_exit_session, dispatch_new_session,
     dispatch_new_session_inner, dispatch_new_session_with_id, dispatch_new_worktree_session,
-    dispatch_trust_folder, open_delete_current_session_question, open_new_session_question,
+    dispatch_trust_folder, open_new_session_question,
 };
 use super::session::load::{
     dispatch_cycle_session_source_filter, dispatch_load_session, dispatch_pick_content_session,
@@ -56,7 +56,7 @@ use super::session::load::{
     dispatch_show_session_picker, dispatch_trigger_deep_search, session_picker_entry_matches,
     session_picker_external_filter_active,
 };
-use super::session::modal::{dispatch_rename_session, dispatch_reset_session_title};
+use super::session::modal::{dispatch_rename_session, };
 use super::settings::setters::{
     clear_default_model, clear_fork_secondary_model, preview_auto_dark_theme,
     preview_auto_light_theme, preview_theme, set_ask_user_question_timeout_enabled,
@@ -74,22 +74,21 @@ use super::settings::setters::{
     set_voice_keybind_enabled, set_voice_stt_language,
 };
 use super::settings::ui::{
-    dispatch_confirm_reset_setting, dispatch_open_command_palette, dispatch_open_howto_guides,
-    dispatch_open_reset_confirm, dispatch_open_settings, dispatch_toggle_compact_mode,
-    dispatch_toggle_mouse_capture, dispatch_toggle_multiline, dispatch_toggle_timestamps,
-    dispatch_toggle_vim_mode,
+    dispatch_confirm_reset_setting, dispatch_open_command_palette, 
+    dispatch_open_reset_confirm, dispatch_open_settings, 
+    dispatch_toggle_mouse_capture, 
 };
 use super::status::{
-    dispatch_copy_session_id, dispatch_manage_billing, dispatch_open_gboom, dispatch_open_tutorial,
-    dispatch_privacy_banner_opt_in, dispatch_privacy_banner_opt_out, dispatch_share_session,
-    dispatch_show_context_info, dispatch_show_doc, dispatch_show_queue, dispatch_show_session_info,
-    dispatch_show_tasks, dispatch_show_usage, set_coding_data_sharing,
+    dispatch_copy_session_id, 
+    dispatch_privacy_banner_opt_in, dispatch_privacy_banner_opt_out, 
+    dispatch_show_context_info, dispatch_show_queue, 
+    set_coding_data_sharing,
 };
 use super::task_result::{dispatch_task_result, unregister_all_active_sessions};
 use super::transcript::{
-    dispatch_copy_assistant_message, dispatch_copy_block_content, dispatch_copy_block_meta,
-    dispatch_dump_input_log, dispatch_export_conversation, dispatch_open_block_viewer,
-    dispatch_open_config_agents_modal, dispatch_open_extensions_modal,
+    dispatch_copy_block_content, dispatch_copy_block_meta,
+    dispatch_dump_input_log, dispatch_open_block_viewer,
+    dispatch_open_extensions_modal,
     dispatch_open_transcript_pager,
 };
 use super::turn::{
@@ -166,25 +165,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             }
             super::dispatch_initial_prompt(app, prompt)
         }
-        Action::RelaunchInScreenMode { minimal } => {
-            if !crate::app::screen_mode_relaunch::exec_switch_forced() {
-                app.pending_screen_mode_switch = Some(if minimal {
-                    crate::app::ScreenMode::Minimal
-                } else {
-                    crate::app::ScreenMode::Fullscreen
-                });
-                return vec![];
-            }
-            if let Some(session_id) = app.active_session_id().map(str::to_owned) {
-                app.relaunch = Some(crate::app::app_view::ScreenModeRelaunch {
-                    minimal,
-                    session_id,
-                });
-            }
-            let mut effects = unregister_all_active_sessions(app);
-            effects.push(Effect::Quit);
-            effects
-        }
         Action::NewSession => dispatch_new_session(app),
         #[cfg(feature = "local-workspace")]
         Action::ConfirmWelcomeLocalWorkspaceAck => {
@@ -236,8 +216,7 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             }
         }
         Action::ChooseNewSessionMode => open_new_session_question(app),
-        Action::ExitSession | Action::ExitSessionConfirmed => dispatch_exit_session(app),
-        Action::DeleteCurrentSession => open_delete_current_session_question(app),
+        Action::ExitSession => dispatch_exit_session(app),
         Action::DeleteCurrentSessionAnswered { confirmed } => {
             dispatch_delete_current_session_answered(app, confirmed)
         }
@@ -395,7 +374,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
                 vec![Effect::QueueRemove {
                     session_id,
                     id,
-                    expected_version,
                 }]
             }
             None => vec![],
@@ -404,29 +382,15 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             Some(session_id) => {
                 vec![Effect::QueueReorder {
                     session_id,
-                    ordered_ids,
                 }]
             }
-            None => vec![],
-        },
-        Action::QueueClearShared => match active_agent_session_id(app) {
-            Some(session_id) => vec![Effect::QueueClear { session_id }],
             None => vec![],
         },
         Action::QueueEditShared { id, new_text } => match active_agent_session_id(app) {
             Some(session_id) => vec![Effect::QueueEdit {
                 session_id,
                 id,
-                new_text,
             }],
-            None => vec![],
-        },
-        Action::QueueHoldEditShared { id } => match active_agent_session_id(app) {
-            Some(session_id) => vec![Effect::QueueHoldEdit { session_id, id }],
-            None => vec![],
-        },
-        Action::QueueReleaseEditShared { id } => match active_agent_session_id(app) {
-            Some(session_id) => vec![Effect::QueueReleaseEdit { session_id, id }],
             None => vec![],
         },
         Action::QueueInterjectShared {
@@ -452,13 +416,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             vec![]
         }
         Action::ClearPrompt => dispatch_clear_prompt(app),
-        Action::OpenHistorySearch => dispatch_open_history_search(app),
-        Action::OpenScrollbackSearch(query) => {
-            with_active_agent(app, |agent| {
-                agent.open_scrollback_search(query.as_deref());
-            });
-            vec![]
-        }
         Action::SelectNext => {
             navigate_clearing_selection(app, |s| s.select_next());
             vec![]
@@ -574,59 +531,12 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             dispatch_toggle_mouse_capture(app);
             vec![]
         }
-        Action::ToggleScrollDebugHud => {
-            app.scroll_debug_hud.toggle();
-            vec![]
-        }
-        Action::ToggleFpsHud => {
-            app.fps_hud.toggle();
-            vec![]
-        }
-        Action::ToggleScrollLog => {
-            let msg = match app.scroll_state.toggle_scroll_log() {
-                Some(path) => format!("scroll log: recording to {}", path.display()),
-                None => "scroll log: off".to_string(),
-            };
-            if let Some(agent) = get_active_agent_mut(app) {
-                agent
-                    .scrollback
-                    .push_block(crate::scrollback::block::RenderBlock::system(msg));
-            }
-            vec![]
-        }
-        Action::ShowDebugStatus => {
-            let on = |b: bool| if b { "on" } else { "off" };
-            let msg = format!(
-                "debug toggles: scroll {} \u{00b7} fps {} \u{00b7} log {}. Toggle with /debug <scroll|fps|log>",
-                on(app.scroll_debug_hud.enabled()),
-                on(app.fps_hud.enabled()),
-                on(app.scroll_state.scroll_log_active()),
-            );
-            if let Some(agent) = get_active_agent_mut(app) {
-                agent
-                    .scrollback
-                    .push_block(crate::scrollback::block::RenderBlock::system(msg));
-            }
-            vec![]
-        }
         Action::CopyBlockContent => {
             dispatch_copy_block_content(app);
             vec![]
         }
-        Action::CopyAssistantMessage { n, file_path } => {
-            dispatch_copy_assistant_message(app, n, file_path);
-            vec![]
-        }
-        Action::ExportConversation { file_path } => {
-            dispatch_export_conversation(app, file_path);
-            vec![]
-        }
         Action::OpenTranscriptPager => {
             dispatch_open_transcript_pager(app);
-            vec![]
-        }
-        Action::MinimalExpandLast => {
-            app.minimal_expand_last();
             vec![]
         }
         Action::CopyBlockMeta => {
@@ -676,7 +586,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             }
             dispatch_open_extensions_modal(app, tab, trigger)
         }
-        Action::OpenConfigAgentsModal(tab) => dispatch_open_config_agents_modal(app, tab),
         Action::McpAuthTrigger { server_name } => {
             let ActiveView::Agent(id) = app.active_view else {
                 return vec![];
@@ -770,7 +679,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             vec![Effect::HooksAction {
                 agent_id: id,
                 session_id,
-                action,
             }]
         }
         Action::ExecutePluginsAction(action) => {
@@ -786,7 +694,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             vec![Effect::PluginsAction {
                 agent_id: id,
                 session_id,
-                action,
             }]
         }
         Action::ExecuteMarketplaceAction(action) => {
@@ -802,7 +709,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             vec![Effect::MarketplaceAction {
                 agent_id: id,
                 session_id,
-                action,
             }]
         }
         Action::UpsertMcpServer { name, config } => {
@@ -819,7 +725,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
                 agent_id: id,
                 session_id,
                 name,
-                config,
             }]
         }
         Action::DeleteMcpServer { server_name } => {
@@ -835,7 +740,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             vec![Effect::DeleteMcpServer {
                 agent_id: id,
                 session_id,
-                server_name,
             }]
         }
         Action::ToggleSkill {
@@ -854,7 +758,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             vec![Effect::ToggleSkill {
                 agent_id: id,
                 session_id,
-                skill_name,
                 enabled,
             }]
         }
@@ -874,7 +777,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             vec![Effect::ToggleMcpServer {
                 agent_id: id,
                 session_id,
-                server_name,
                 enabled,
             }]
         }
@@ -895,8 +797,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             vec![Effect::ToggleMcpTool {
                 agent_id: id,
                 session_id,
-                server_name,
-                tool_name,
                 enabled,
             }]
         }
@@ -963,21 +863,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
                 vec![]
             }
         }
-        Action::AnnouncementsShow => {
-            let mut changed = false;
-            for key in crate::views::announcements::session_announcement_hide_keys(
-                &app.active_announcements,
-            ) {
-                changed |= app.hidden_announcement_ids.remove(&key);
-            }
-            if changed {
-                vec![Effect::PersistAnnouncementsHidden {
-                    hidden_ids: app.hidden_announcement_ids.clone(),
-                }]
-            } else {
-                vec![]
-            }
-        }
         Action::AnnouncementsOpenCta(surface) => {
             if let Some((promo, url)) = crate::views::announcements::promo_cta_target(
                 &app.active_announcements,
@@ -1004,42 +889,23 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             vec![Effect::FetchCatalogEntry { kind, name }]
         }
         Action::CycleMode => dispatch_cycle_mode(app),
-        Action::ShareSession => dispatch_share_session(app),
-        Action::ShowSessionInfo => dispatch_show_session_info(app),
-        Action::ShowDoc { title, content } => dispatch_show_doc(app, title, content),
-        Action::OpenTutorial => dispatch_open_tutorial(app),
         Action::RenameSession { title } => dispatch_rename_session(app, title),
-        Action::ResetSessionTitleToAuto => dispatch_reset_session_title(app),
         Action::ShowContextInfo => dispatch_show_context_info(app),
-        Action::ShowUsage => dispatch_show_usage(app),
-        Action::ManageBilling => dispatch_manage_billing(app),
         Action::ShowQueue => dispatch_show_queue(app),
-        Action::ShowTasks => dispatch_show_tasks(app),
-        Action::ShowPlan => dispatch_show_plan(app),
-        Action::EnterPlanMode { description } => dispatch_enter_plan_mode(app, description),
         Action::SetPlanMode(kind) => set_plan_mode(app, kind),
-        Action::OpenFeedbackPane { prefill, images } => {
-            dispatch_open_feedback_pane(app, prefill, images)
-        }
         Action::SendFeedback {
             text,
             images,
             trace,
         } => dispatch_send_feedback(app, text, images, trace),
-        Action::EnterRememberMode => dispatch_enter_remember_mode(app),
         Action::SendRememberNote(text) => dispatch_send_remember_note(app, text),
         Action::SaveRememberNoteFromModal => dispatch_save_remember_note_from_modal(app),
-        Action::SendBtw(question) => dispatch_send_btw(app, question),
         Action::SendRecap { auto } => dispatch_send_recap(app, auto),
         Action::SetCodingDataSharing { opted_in } => set_coding_data_sharing(
             app,
             opted_in,
             pi_telemetry::events::CodingDataConsentSource::Settings,
         ),
-        Action::ToggleYolo => dispatch_toggle_yolo(app),
-        Action::ToggleMultiline => dispatch_toggle_multiline(app),
-        Action::ToggleCompactMode => dispatch_toggle_compact_mode(app),
-        Action::ToggleVimMode => dispatch_toggle_vim_mode(app),
         Action::SetVimMode(v) => set_vim_mode(app, v),
         Action::SetRememberToolApprovals(v) => set_remember_tool_approvals(app, v),
         Action::SetAskUserQuestionTimeoutEnabled(v) => {
@@ -1061,7 +927,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::SetVoiceKeybindEnabled(v) => set_voice_keybind_enabled(app, v),
         Action::SetVoiceCaptureMode(s) => set_voice_capture_mode(app, s),
         Action::SetVoiceSttLanguage(s) => set_voice_stt_language(app, s),
-        Action::ToggleTimestamps => dispatch_toggle_timestamps(app),
         Action::SetYoloMode(v) => set_yolo_mode(app, v),
         Action::SetPermissionMode(kind) => set_permission_mode(app, kind),
         Action::SetMultilineMode(v) => set_multiline_mode(app, v),
@@ -1096,11 +961,9 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::PreviewAutoDarkTheme(v) => preview_auto_dark_theme(app, v),
         Action::PreviewAutoLightTheme(v) => preview_auto_light_theme(app, v),
         Action::OpenSettings => dispatch_open_settings(app, None),
-        Action::OpenSettingsFocus { key } => dispatch_open_settings(app, Some(key)),
         Action::PrivacyBannerOptIn => dispatch_privacy_banner_opt_in(app),
         Action::PrivacyBannerOptOut => dispatch_privacy_banner_opt_out(app),
         Action::OpenCommandPalette => dispatch_open_command_palette(app),
-        Action::OpenHowtoGuides => dispatch_open_howto_guides(app),
         Action::OpenResetConfirm { key } => dispatch_open_reset_confirm(app, key),
         Action::ConfirmResetSetting { choice } => dispatch_confirm_reset_setting(app, choice),
         Action::DumpInputLog => dispatch_dump_input_log(app),
@@ -1221,7 +1084,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
                 after: crate::app::actions::AfterSessionDelete::Stay,
             }]
         }
-        Action::Fork(args) => dispatch_fork(app, args),
         Action::ForkAnswered {
             worktree,
             directive,
@@ -1289,22 +1151,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::PersistMemoryFullscreen(fs) => {
             vec![Effect::PersistMemoryFullscreen { fullscreen: fs }]
         }
-        Action::OpenMemoryModal => {
-            if let ActiveView::Agent(id) = app.active_view
-                && let Some(agent) = app.agents.get(&id)
-                && let Some(session_id) = agent.session.session_id.clone()
-            {
-                return vec![Effect::SendPrompt {
-                    agent_id: id,
-                    session_id,
-                    text: "/memory".to_string(),
-                    prompt_id: uuid::Uuid::new_v4().to_string(),
-                    skill_token_ranges: Vec::new(),
-                }];
-            }
-            vec![]
-        }
-        Action::OpenGboom => dispatch_open_gboom(app),
         Action::SuspendForEditor {
             path,
             refresh_agents_modal,
@@ -1349,7 +1195,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             });
             vec![]
         }
-        Action::Rewind => dispatch_rewind(app),
         Action::RewindShowPicker => dispatch_rewind_show_picker(app),
         Action::RewindPickerSelect(prompt_index) => {
             dispatch_rewind_picker_select(app, prompt_index)
@@ -1360,7 +1205,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::RewindDismiss => dispatch_rewind_dismiss(app),
         Action::RewindDismissError => dispatch_rewind_dismiss_error(app),
         Action::InlineEditSubmit => dispatch_inline_edit_submit(app),
-        Action::JumpShowPicker => dispatch_jump_show_picker(app),
         Action::JumpPickerSelect(turn_idx) => dispatch_jump_picker_select(app, turn_idx),
         Action::JumpDismiss => dispatch_jump_dismiss(app),
     };
@@ -1431,7 +1275,6 @@ pub(super) fn dispatch_action_result(
                         effects.push(Effect::PluginsAction {
                             agent_id,
                             session_id,
-                            action: pi_hooks_plugins_types::PluginsAction::Reload,
                         });
                     } else if let Some(modal) = agent.extensions_modal.as_mut() {
                         effects.push(Effect::FetchHooksList {
