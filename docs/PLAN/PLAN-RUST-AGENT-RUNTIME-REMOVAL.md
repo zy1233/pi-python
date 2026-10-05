@@ -1,7 +1,7 @@
 # Rust Agent Runtime 剥离计划
 
-> 状态：r4。r2 的计划稿之上，**已拆除 Rust runtime 并恢复 `/model`（r3）；r4 补了阶段 0 的 Linux CI 与基线工具（尚未在 Linux 上运行）、清掉 leader 的 UI 状态残留、完成 1.R3 的命名**。全部已提交到本地分支，**未 push**；执行记录见 §10。§1–§9 保留 r2 原文作为决策依据，与 §10 冲突处以 §10 和 ADR3（r3）为准。负责人：待指派。
-> 基线：分支 `codex/rust-agent-runtime-removal-plan`；r2 / r3 的比较基线是 HEAD `07a3574`，r4 的提交见 §10。
+> 状态：r5。r2 的计划稿之上，**已拆除 Rust runtime 并恢复 `/model`（r3）；r4 补了阶段 0 的 Linux CI 与基线工具、清掉 leader 的 UI 状态残留、完成 1.R3 的命名；r5 在 Linux CI 上跑通并启用了基线，执行入口审计（0.6）并完成阶段 A（A.3、A.4）——又删了约 23 万行 Rust、8 个 crate，消费者构建 0 告警**。分支已 push，draft PR [#7](https://github.com/zy1233/pi-python/pull/7)；执行记录见 §10。§1–§9 保留 r2 原文作为决策依据，与 §10 冲突处以 §10 和 ADR3（r3）为准。负责人：待指派。
+> 基线：分支 `codex/rust-agent-runtime-removal-plan`；r2 / r3 的比较基线是 HEAD `07a3574`，r4 / r5 的提交见 §10。
 > 验证方式：r2 为静态分析（源码阅读、`Cargo.toml` 解析、模块级引用统计，复现方法见附录 B）；r3 起拆除结果由 `cargo check`（macOS 本机，消费者构建 `pi-pager-bin` / `pi-pager-minimal` / `pi-update` 及 `pi-shell` / `pi-pager` 的 `--tests` 类型检查）、`cargo test`（触及的 crate）、Python 侧 pytest，以及伪终端里 `zypi` ↔ `pi_agent_cli` ↔ OpenRouter 的真实会话（含 `/model` 切换）验证。标「需实测」的其余结论仍是静态推断；Linux / Windows 的 `cfg` 代码本机无法编译，见 §10.4。
 > 与既有文档的关系：承接 [Phase 4 设计](../specs/2026-08-25-phase4-coding-agent-cli-design.md) §3「第一轮允许 pager 继续链接 `xai-grok-shell`……变瘦不是迁入前提」和 [`AUDIT-PHASE4-PHASE5.md`](../AUDIT/AUDIT-PHASE4-PHASE5.md) 的「TUI 瘦身长期里程碑」，是 Phase 4 的第二轮。与既有决定的张力见 §3。
 
@@ -149,12 +149,12 @@ zypi（Rust）                                     pi_agent_cli（Python，通�
 
 ### 阶段 0：基线与门禁（先于任何删除，不改产品行为）
 
-- [ ] 0.1 **Rust CI job**：`cargo check -p pi-pager-bin` + 选定 crate 的 `cargo test`（Linux，ADR6）。（r4 已写好 `.github/workflows/tui-ci.yml`：`check`、`test`、手动的 `release-baseline` 三个 job，执行器是 `scripts/tui_baseline.py`，actionlint 与单测通过，本机 macOS 全部跑通；**尚未在 Linux 上运行**，所以不勾选，第一次运行之后的收尾步骤见 [`docs/baselines/tui.md`](../baselines/tui.md) §5。）
-- [ ] 0.2 **基线报告**入库：测试通过 / 失败 / 忽略数、`cargo tree -p pi-pager-bin` 节点数、release 二进制体积、冷编译与启动耗时、去掉全局 allow 后的告警数。（r4 已入库 [`docs/baselines/tui.md`](../baselines/tui.md)：拆除前（v0.4.0）与拆除后（macOS）的依赖图节点数、告警数、8 个 suite 的测试数、v0.4.0 的 release 体积与构建耗时；**Linux 一栏、拆除后的 release 体积 / 冷编译耗时 / `--version` 延迟待首次运行回填**，「到欢迎页」的启动耗时需要 PTY 载体，未测。「去掉全局 allow 后的告警数」随 A.4 做。）
+- [x] 0.1（r5 已做：Linux 上跑通且阻塞——`TUI CI` run [37379203134](https://github.com/zy1233/pi-python/actions/runs/37379203134) 全绿，门禁、消费者构建、`--workspace --tests`、8 个 suite；`enforce = true`、`enforce_workspace_tests = true`）**Rust CI job**：`cargo check -p pi-pager-bin` + 选定 crate 的 `cargo test`（Linux，ADR6）。（r4 已写好 `.github/workflows/tui-ci.yml`：`check`、`test`、手动的 `release-baseline` 三个 job，执行器是 `scripts/tui_baseline.py`，actionlint 与单测通过，本机 macOS 全部跑通；**尚未在 Linux 上运行**，所以不勾选，第一次运行之后的收尾步骤见 [`docs/baselines/tui.md`](../baselines/tui.md) §5。）
+- [ ] 0.2（r5：Linux 一栏的依赖图、告警、测试数已回填，告警清零；**仍缺** release 体积 / 冷编译耗时 / `--version` 延迟，要手动触发 `release_baseline`）**基线报告**入库：测试通过 / 失败 / 忽略数、`cargo tree -p pi-pager-bin` 节点数、release 二进制体积、冷编译与启动耗时、去掉全局 allow 后的告警数。（r4 已入库 [`docs/baselines/tui.md`](../baselines/tui.md)：拆除前（v0.4.0）与拆除后（macOS）的依赖图节点数、告警数、8 个 suite 的测试数、v0.4.0 的 release 体积与构建耗时；**Linux 一栏、拆除后的 release 体积 / 冷编译耗时 / `--version` 延迟待首次运行回填**，「到欢迎页」的启动耗时需要 PTY 载体，未测。「去掉全局 allow 后的告警数」随 A.4 做。）
 - [ ] 0.3 **ACP 契约 / e2e 载体**：Rust client ↔ Python mock agent（脚本化 `stream_fn` 的 `PiAcpAgent` stdio 进程），覆盖 initialize、new、prompt 流式、权限往返、cancel、list、load、Python 缺失时报错、子进程退出；不依赖 PTY（PTY 烟测可选）。
 - [x] 0.4（r4 已做）**deny-list**：硬性 `pi-sampler`；条件性 `async-openai`、`pi-sampling-types`（由阶段 D 决定）；对 `pi-tools`、`pi-agent`、`pi-workspace`、`pi-hooks`、`pi-mcp` 逐个写「保留理由或缩减方案」。（`pi-sampler` 及 `MvpAgent` / `acp_session_impl` / `SamplerActor` 三个词是 `tui_baseline.py gates` 的阻塞门禁；七个条件性 crate 的直接依赖者、理由与缩减方案见 [`docs/baselines/tui.md`](../baselines/tui.md) §4，依赖者列表每次 `check` 重新生成。）
 - [ ] 0.5 **模块级调用图 → support 保留清单**：把附录 B.2 的脚本入库为工具，取代「举例」式清单。
-- [ ] 0.6 **入口审计**：从 `Effect` / `Action` 枚举与键位表出发，逐入口标注可达性、所需 ACP 方法、决策（保留｜隐藏｜删除）；覆盖斜杠、键位、模态、欢迎页、dashboard、状态栏，并复用现有 19 处「standard ACP」降级点。
+- [x] 0.6（r5 已做：用户选「直接按附录 A 默认执行，不逐项确认」；结果是 A.3 的删除，分类见 §10.7，附录 A 的「r5 结果」列）**入口审计**：从 `Effect` / `Action` 枚举与键位表出发，逐入口标注可达性、所需 ACP 方法、决策（保留｜隐藏｜删除）；覆盖斜杠、键位、模态、欢迎页、dashboard、状态栏，并复用现有 19 处「standard ACP」降级点。
 - [ ] 0.7 **磁盘读取点清单**（约 19 个文件）与 ADR1 的落地设计。
 - [ ] 0.8 **能力矩阵定稿**（附录 A）与 **ACP 版本配对表**（两端各方法的支持情况、升级策略；Python 侧不得依赖 Rust 端 unstable 方法）。
 - [ ] 0.9 **实测结案**：子进程是否继承沙箱；`zypi export <python-session-id>`；`/model` 经 `session/set_config_option` 的真机切换（r3 已用 OpenRouter 实测 Python 侧，见 §10.3；TUI 全屏交互仍需 PTY 实测）；子进程 `stderr` 对全屏 TUI 的影响；退出后是否残留 Python / bash 进程；`config.toml` 的解析严格性。
@@ -165,10 +165,10 @@ zypi（Rust）                                     pi_agent_cli（Python，通�
 
 - [x] A.1（r3 已做）删除 8 个无入口模块（4.6k 行）、`headless.rs` + `headless/`（约 7.5k 行）及 `main.rs:667-731`、`spawn_agent_thread_direct`、`warm_async_http_client()`、`main.rs` 的 `run_*` / leader 导入。
 - [x] A.2（r3 主体已做，r4 清掉 pager 的 UI 状态残留；仍带 leader 字样的代码是别的东西，见 §10.4）leader 全链路：pager 侧 `--leader` / `--no-leader` / `--leader-socket`、`[cli].use_leader`、`resolve_leader_mode`（`app/mod.rs:435-506`，单测在 `:1917-1937` 一带）、`kill_stale_reachable_leaders`、`connect_via_leader`（`acp/mod.rs:288-420`）及 `app/mod.rs:954-976` 的 leader→embedded 回退、`acp/leader_bridge.rs`、`acp/version_mismatch.rs`、`AcpConnection.leader_status_rx`、`app/leader_cluster`；shell 侧 `leader/`（8.7k 行）与 5 个 `test_leader_*.rs`；内嵌文档中的 leader 段落（8 个文件 22 处）。
-- [ ] A.3（r3 未做：没有执行入口审计，只删了 runtime 与连带死代码；`agents_modal.rs` 仅去掉了对 `MvpAgent` 的引用）白名单外的斜杠命令模块（约 7.7k 行）及 `builtin_commands()` 注册；入口审计判为「删除」的 dashboard、agents modal（`agents_modal.rs:739` 是 `MvpAgent` 的非 spawn 引用）等。
-- [ ] A.4（r3 未做：消费者构建还有 20 条 `dead_code` 警告，crate 根的 `#![allow(...)]` 原样保留）去掉四个 crate 根的 `#![allow(unused_imports, …, dead_code)]` 并清零告警；死 `pub mod` 降为 `pub(crate)`。
+- [x] A.3（r5 已做；r3 没做：没有执行入口审计，只删了 runtime 与连带死代码）白名单外的斜杠命令模块（`6983c99`，77 个文件）及 `builtin_commands()` 注册；入口审计判为「删除」的 dashboard（`2bef92d`）、agents / extensions / persona 模态、tasks / 后台 / 定时任务、subagents / workflows / goals、共享 prompt 队列与 steer、MCP 模态 / elicitation / Claude 导入、hooks / plugins / marketplace、rewind / fork / jump / 外部会话、recap / feedback / consent 等，以及 session rename 的整条死链路和恒假的 `chat_mode` 世界。**没做**（有意留着，见 §10.7）：认证 / 计费界面（3d-4，归阶段 D.3）、CLI 旗标瘦身（`--worktree`、`--restore-code` 等，3d-6）、plan 审批 / btw / cta（3f）。
+- [x] A.4（r5 已做；r3 没做：消费者构建还有 20 条 `dead_code` 警告）去掉四个 crate 根的 `#![allow(unused_imports, …, dead_code)]` 并清零告警（`4eb9f11`）；死 `pub mod` 降为 `pub(crate)`（pi-shell，`ab77740`）；未用依赖（`fbcaf14`）与无人依赖的 crate（`86ea4c9`、`886d5af`）；`cfg(feature = "local-workspace")` 代码与 Cargo feature（`0e71894`）。基线 `max_warnings` 20 → 0。其余 crate 的 `pub` 瘦身没有做（pi-shell-base 等，见 §10.7 的遗留）。
 
-**退出条件（机检）**：`rg -w MvpAgent tui/crates/codegen/pi-pager tui/crates/codegen/pi-pager-bin` 无命中；无全局 allow 的 `cargo check -p pi-pager-bin` 零告警；测试与基线对比不退化（被删代码的测试除外）；CI 绿。（r3 对照：`rg` ✓；零告警 ✗，仍有 20 条 `dead_code`；基线对比与 CI ✗，阶段 0 未做。）
+**退出条件（机检）**：`rg -w MvpAgent tui/crates/codegen/pi-pager tui/crates/codegen/pi-pager-bin` 无命中；无全局 allow 的 `cargo check -p pi-pager-bin` 零告警；测试与基线对比不退化（被删代码的测试除外）；CI 绿。（r3 对照：`rg` ✓；零告警 ✗，仍有 20 条 `dead_code`；基线对比与 CI ✗，阶段 0 未做。**r5 对照**：`rg` ✓；零告警 ✓（Linux CI 与 macOS 都是 0）；基线对比 ✓（`min_passed` 下限已设，被删代码的测试已在清单里按 Linux 数重定基线）；CI ✓。）
 
 ### 阶段 1：协议与 Python（依赖 Python）
 
@@ -247,9 +247,9 @@ Rust（pager）：
 - 新增 TUI 功能（MCP、queue、subagent UI 等）——另立计划并过 P2 准入。（`/model` 不在此列：r3 已按 ADR3 经 Session Config Options 恢复。）
 - 多会话共享进程（leader 的替代方案）。
 
-## 10. 执行记录（r3、r4）
+## 10. 执行记录（r3、r4、r5）
 
-r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名。全部已提交到本地分支 `codex/rust-agent-runtime-removal-plan`，**未 push**：
+r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
 | 提交 | 内容 |
 |---|---|
@@ -341,7 +341,7 @@ r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶�
 - **文档**：内嵌 user-guide 仍描述已移除的命令（C.2）；`tui/NOTICE`、`THIRD-PARTY-NOTICES` 未更新（C.3）。
 - **其他**：`tests/test_pelican_real_llm.py` 在该机环境下失败，与本次改动无关，未深查；rustdoc 的 intra-doc 链接没有用 `cargo doc` 核对（`tier.rs` 里一处指向已删函数的悬空链接已手工改成纯文字）。
 
-**建议的后续顺序**（r4 更新）：① 在 Linux 上跑第一次 `TUI CI`（0.1 / 0.2 已写好、未运行），把 `cfg` 代码的错误和失败清单跑出来，按 [`docs/baselines/tui.md`](../baselines/tui.md) §5 收尾；② 1.R3 剩下的行为部分：`stderr` 去向、优雅退出（1.P2）、残留进程实测，配 PTY 烟测；③ 入口审计（0.6 → A.3），ADR4 的去留决定顺带处理共享会话协议的词汇；④ A.4 去掉全局 `#![allow]`；⑤ 文档（C.2 / C.3）；⑥ 视基线决定阶段 D。
+**建议的后续顺序**（r4 更新；r5 的现状与顺序见 §10.7 末尾）：① 在 Linux 上跑第一次 `TUI CI`（0.1 / 0.2 已写好、未运行），把 `cfg` 代码的错误和失败清单跑出来，按 [`docs/baselines/tui.md`](../baselines/tui.md) §5 收尾；② 1.R3 剩下的行为部分：`stderr` 去向、优雅退出（1.P2）、残留进程实测，配 PTY 烟测；③ 入口审计（0.6 → A.3），ADR4 的去留决定顺带处理共享会话协议的词汇；④ A.4 去掉全局 `#![allow]`；⑤ 文档（C.2 / C.3）；⑥ 视基线决定阶段 D。
 
 ### 10.5 为 pi-rust 铺路
 
@@ -377,6 +377,84 @@ r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶�
 
 **这一轮没有验证的**：Linux、Windows；`tui-ci.yml` 在 GitHub 上的真实运行；`stderr` 去向、优雅退出（1.P2）；agent 正在跑 bash / MCP 子进程时 `/exit`、崩溃、`kill -9 zypi` 之后，Python 的孙进程会不会残留（上面只有一次没有孙进程的观测）。
 
+### 10.7 r5 追加：Linux CI、入口审计与阶段 A 收口
+
+**起点与决定。** r4 的末态推到远端并开了 draft PR [#7](https://github.com/zy1233/pi-python/pull/7)；第一次 Linux 运行（`TUI CI` run [37263077643](https://github.com/zy1233/pi-python/actions/runs/37263077643)，`e20af45`）全绿：依赖图 995，消费者构建 20 条告警，`--workspace --tests` 0 个错误，8 个 suite 10,851 通过 / 0 失败 / 75 忽略。用户的四个决定：① 豁免 Windows / WSL 的 pytest，推送前以 CI（Linux，Python 3.11–3.13）为准；② 入口审计「直接按附录 A 默认执行（删 dashboard / MCP / 队列 / 子代理 / hooks / plugins 入口，隐藏 session rename），不逐项确认」；③ changelog / What's new 功能删除；④ `-p` 带 `--sandbox` 立即报错退出，其余未支持的旗标先在 stderr 警告，完整契约留给 1.P6。
+
+**方法（r3 的延续，加两样）。** 仍是编译器驱动：删入口 → 全 target 的 `cargo check` → 按 `dead_code` / `unused` 诊断逐轮删 → 清扫空壳模块与失效测试。新增的两样：
+
+- **rustc 看不见的「恒假」代码**——靠数据或常量恒定、而不是靠可达性死掉的：`PagerArgs::chat()` / `process_chat_mode_enabled()` 恒为 false 的 `chat_mode` 世界（ACP `session/list` 的行恒为 `"source": "local"`，所以 `"conversation"` 行也是死的）；没有任何 crate 开启的 `cfg(feature = "local-workspace")`。做法是一个基于 `syn` 的布尔常量折叠器（`if false`、`x || false`、`!false` 等，迭代到不动点）先把它们折掉，再让编译器收尾。
+- **平台门控的代码**在 macOS 上编译不到，靠「被删名字在未参与编译的文件里是否还有残留」的检查，再由 Linux CI 兜底（没有交叉编译）。
+
+驱动脚本与折叠器在 `/tmp/rr`，**不在仓库中**（与 r3 一致）。
+
+**提交**（`61126ed` 之后；文件 / 行数是各提交的 `--shortstat`，只写了有意义的数字）：
+
+| 提交 | 内容 | 文件 / 行 |
+|---|---|---|
+| `e20af45` `0a58b81` | 基线工具不再依赖默认文本编码；`-p` 拒绝无沙箱运行并报告被丢弃的旗标（ADR7 的最小版本） | 3 / +84 −20；4 / +292 |
+| `57c0d80` | 删 changelog / release-notes 功能及其 x.ai 取数 | 281 / −10,988 |
+| `56550ac` | 首次 Linux 全绿后，基线转为阻塞 | 2 |
+| `6983c99` | 删白名单外、本就不可达的内置斜杠命令 | 77 / −9,142 |
+| `2bef92d` | 删 agent dashboard | 97 / −42,418 |
+| `2273c3e` `c90e6fc` `a6aeccc` | pi-pager 去掉 crate 根 allow，按 rustc 诊断级联删死代码（`Action` / `Effect` / `TaskResult`） | −133；135 / −23,205；64 / −11,871 |
+| `c92e170` `0c07c52` | 删 tasks / background / interject / extensions / rewind 的 ActionId 与键位；删 extensions / agents / persona 模态 | −2,191；44 / −18,627 |
+| `936c7f7` `078a2b1` `9389daa` | 删 tasks 窗格与后台 / 定时任务；subagents / workflows / goals / catalog 窗格；取消轮次的 subagent 面板与等待链路 | −11,369；−16,446；−2,226 |
+| `63f0e3b` | 删共享 prompt 队列、interject、send-now、steer | 82 / −8,784 |
+| `056085f` `5652d3a` `0ffd8d3` | 删 plugin CTA 与 marketplace 更新；MCP 模态、MCP init seed、elicitation 卡片、Claude 导入；桩 effect、recap、feedback、consent、coding-data-sharing | −3,956；−5,647；−12,433 |
+| `25dbe3c` | 删 rewind / fork / jump / 外部会话与会话选择器的来源机制 | 85 / −16,844 |
+| `86ea4c9` `98e29c9` | 删 5 个无人依赖的 crate；删 hooks / plugins UI、`HookDenied` 取消路径与 `pi-hooks-plugins-types` | −16,848；−6,035 |
+| `7ff908b` | 删 session rename 的死链路 | 12 / −408 |
+| `4eb9f11` `ab77740` | 去掉其余 crate 根的 `#![allow(unused/dead_code)]` 并删被藏起来的死代码；`pi-shell` 的 `pub mod` 降级、删其后的死代码（A.4） | −362；62 / −6,079 |
+| `fbcaf14` `886d5af` | 删未用依赖；删 `pi-memory`、`pi-fsnotify` 与 20 个无人使用的 workspace 依赖 | −267；−17,876 |
+| `0e71894` | 删 `cfg(feature = "local-workspace")` 代码与 Cargo feature | 27 / −3,684 |
+| `5fcec14` | 删恒假的 `chat_mode` 世界（`--chat`、`chat_kind`、`pending_chat`、`_meta.kind = "chat"`、`conversation` 行、`pi-shell::agent::chat_modes`） | 33 / −1,063 |
+| `27df705` | 基线按 Linux 实测收紧：图 995 → 980，告警 20 → 0，`min_passed` 下限 | 2 |
+| `fe1fc65` | rustfmt，只动本分支改过的 216 个文件 | +776 −1,360 |
+
+**入口审计的结果（0.6，按附录 A 的默认）。**
+
+- **删除**：dashboard；agents / extensions / persona 模态；tasks、后台与定时任务；subagents、workflows、goals、catalog 窗格；共享 prompt 队列、interject、send-now、steer；MCP 模态 / init seed / elicitation 卡片 / Claude 导入；hooks、plugins、marketplace、plugin CTA；rewind、fork、jump、外部会话；recap、feedback、consent、coding-data-sharing；changelog / What's new；白名单外的全部斜杠命令；`--chat` 世界；`local-workspace` 代码。
+- **隐藏 / 删死链路**：session rename（pager 侧恒返回「not supported in standard ACP」，入口与整条链路已删，不新增）。
+- **保留**：斜杠命令 `/settings`、`/new`、`/model`、`/resume`、`/theme`、`/multiline`、`/home`、`/help`、`/exit`；会话 new / load / resume / list / delete、prompt / cancel、权限请求、模型选择（`configOptions`）、skills、image、状态栏。
+- **有意没动**：认证 / 计费界面（3d-4，归阶段 D.3）；CLI 旗标瘦身（3d-6）；plan 审批 / btw / cta（3f）。它们在标准 ACP 下要么恒不触发、要么还没有对应的 Python 能力，等阶段 1 的协议决定后再删更稳。
+
+**规模（r4 末态 → r5 末态）。**
+
+| 指标 | r4 | r5 |
+|---|---|---|
+| `tui/crates` 下 `.rs` 行数 | 1,252,374 | 1,019,816（−232,558，−18.6%；格式化后） |
+| `crates/codegen` 下的 crate 数 | 73 | 65（删 `pi-agent-lifecycle`、`pi-foreign-sessions`、`pi-fsnotify`、`pi-hooks-plugins-types`、`pi-memory`、`pi-plugin-marketplace`、`pi-session-search`、`pi-shell-session-support`） |
+| `Cargo.lock` 包数 | 1,285 | 1,257 |
+| 依赖图唯一包数（`x86_64-unknown-linux-gnu`） | 995 | 980（`aarch64-unknown-linux-gnu` 979；`aarch64-apple-darwin` 943；`x86_64-apple-darwin` 944；`x86_64-pc-windows-msvc` 926） |
+| 消费者构建告警 | 20 | 0（Linux CI 与 macOS 一致） |
+| 测试通过（Linux，8 个 suite） | 10,851 | 7,478（`0e71894`） |
+| `git diff --shortstat 0a081f4..HEAD -- tui` | — | 914 个文件，+4,868 / −249,996 |
+
+测试数掉了 31%，是随被删功能（dashboard、队列、subagent、tasks、rewind / fork、MCP 模态……）一起删掉的用例，不是静默丢失：清单里每个 suite 现在都有 `min_passed` 下限，今后少于下限必须改清单。
+
+**验证。**
+
+| 环境 | 检查 | 结果 |
+|---|---|---|
+| Linux CI，`0e71894` | `TUI CI` run [37379203134](https://github.com/zy1233/pi-python/actions/runs/37379203134)（check 8 m 51 s，test 26 m 38 s） | ✓ 门禁全过；依赖图 980；消费者构建 0 告警；`cargo check --workspace --tests` 0 个错误；8 个 suite 共 7,478 通过 / 0 失败 / 20 忽略（`pi-shell` 1,056、`pi-pager` 5,593、`pi-pager-bin` 20、`pi-acp-lib` 21、`pi-http` 13、`pi-telemetry` 239、`pi-file-utils` 216、`pi-sampling-types` 320） |
+| Linux CI，`0e71894` | `CI`（Python）run 37379203149 | ✓ |
+| macOS 本机，`5fcec14` | 消费者构建与 `pi-pager` / `pi-pager-bin` / `pi-pager-minimal` / `pi-shell` 全 target 检查 | ✓ 0 错误 0 告警 |
+| macOS 本机，`5fcec14` | `cargo test -p pi-pager --lib`（`--test-threads=2`）与 `--test settings_e2e` / `grok_home_paths` / `selection_model_public_api` | ✓ 5,327 通过 / 0 失败 / 13 忽略；251；2；2 |
+| macOS 本机，`fe1fc65` | rustfmt 之后重跑消费者构建 | ✓ 0 错误 0 告警 |
+| 本机 | `pytest scripts/tests/test_tui_baseline.py`；`ruff check .` / `ruff format --check .` | ✓ 19 通过；通过 |
+
+**这一轮没有验证的**：Windows；`5fcec14` 之后的 Linux 运行（`fe1fc65` 推送后的 CI 结果见 `docs/baselines/tui.md` 状态块）；删完 UI 之后的 PTY 烟测（见下一条）；`release_baseline`（体积 / 冷编译耗时 / `--version` 延迟）。
+
+**遗留与建议的顺序。**
+
+1. **PTY 烟测**：A.3、A.4 合计删了约 23 万行（大头是 UI），单测之外要在伪终端里跑一遍欢迎页 → prompt → `/model` → `/resume` → `/exit`，对着 `pi_agent_cli` + OpenRouter。
+2. **`release_baseline`**：最后一次 push 之后手动触发一次，回填 `docs/baselines/tui.md` §3.1，0.2 勾选。
+3. **A.3 的尾巴**（可选，同样的折叠器办法）：3d-6 CLI 旗标瘦身——标准 ACP 下 `Effect::CreateWorktreeSession` 恒返回 `WorktreeSessionFailed`，`--worktree`、`--restore-code`、`allow_remote_restore` / `suppress_code_restore` 的「远端恢复」世界同样恒假；3f plan 审批 / btw / cta；3d-4 认证 / 计费界面归阶段 D.3。
+4. **A.4 的尾巴**（可选）：`pi-shell-base` 等其余 crate 的 `pub` 瘦身（没做过）；`pi-shell-base/src/env.rs` 里死掉的 gateway-bridge 常量；约 25 处局部 `#[allow(dead_code | unused*)]`（有的是平台门控，要看 Linux）；`pi-shell/src/session/storage` 的 `relocation`（`#[allow(dead_code)]`，归 D.2）。
+5. **阶段 1 一点没动**：1.P1–P7、1.R1–R5；阶段 0 的 0.3（ACP 契约 / e2e）、0.5、0.7–0.9。这些是功能工作，不是删除；下一步该做它们，而不是继续挖死代码。
+6. **文档与声明**：C.2 内嵌 user-guide；C.3 `tui/NOTICE` 与 `THIRD-PARTY-NOTICES`（依赖已少了 28 个包，需要重新生成；对外发布二进制前由用户定措辞）。
+
 ## 附录 A：能力矩阵（阶段 0.8 的初稿）
 
 | 能力 | pager 侧 | Python 现状 | 默认决策 |
@@ -399,6 +477,12 @@ r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶�
 | status line | `ConnectFlags.status_line` | 无 | 阶段 0 决策 |
 | 历史回放 | `load_session` | 已覆盖（`resume` 不回放） | 保留 |
 | `initialize._meta` 键 | `modelState`、`grokShell`、`availableCommands`、`cancelRewind`、`sessionRecap`、`feedbackTraceOffer` | 无 `_meta` | 逐键：删除解码或登记 |
+
+**r5 执行结果（对照上表的「默认决策」）**：
+
+- **已按默认执行**：MCP——UI 已删（模态、init seed、elicitation 卡片、Claude 导入；`pi/mcp/*` 只剩 `pi-mcp` 自己的测试里出现）；queue / interjection——已删（含 steer、send-now）；subagents / 后台任务——已删（tasks 窗格、定时任务、workflows、goals）；hooks / plugins / marketplace——已删（含 `pi-plugin-marketplace` 与 `pi-hooks-plugins-types` 两个 crate）；session rename——入口与整条链路已删。
+- **仍是阶段 1 的待办，r5 没动**：session list 的 Python 补齐（1.P1）；模式切换的映射（1.P3）；compaction 的降级展示；权限 allow-always；status line；`initialize._meta` 的解码精简（1.R5：`acp/mod.rs` 仍在解 `grokShell`、`modelState`、`cancelRewind`、`availableCommands`，其中 `cancelRewind` 对应的功能已删）。
+- **新增的删除（表里没有）**：dashboard、recap / feedback / consent / coding-data-sharing、rewind / fork / jump / 外部会话、changelog、`--chat` 世界、`local-workspace`。它们都是入口审计里「Python 不路由、pager 也无法触发」的类别。
 
 ## 附录 B：复现方法
 
@@ -632,3 +716,4 @@ LoC 用 `python3` 递归统计 `*.rs` 行数（沙箱内 `xargs wc -l` 可能失
 - r2：吸收源码核查与架构评估。主要变化：终态拆成行为层 / 依赖图层；新增原则 P1–P7、与既有架构的关系（§3）、决策记录（§6）、改动规模（§5）；阶段重排为「基线 → 死代码先行 → 协议与 Python → 拆 runtime → 收口 →（可选）依赖图瘦身」；`pi/` 扩展改准入制、会话数据改纯 ACP、leader 直接放弃；更正 `-p` / headless、证据失真（`*_cmd` 是死代码）、文档目标等事实；退出条件改为可机检。
 - r3：在工作区执行 Rust runtime 拆除并恢复 `/model`（当时未提交，现已本地提交，见 §10）。主要变化：新增 §10 执行记录；ADR3 推翻 r2 的「`/model` 从白名单移除」，改为经 ACP Session Config Options 恢复（Python 公布 `configOptions` 并路由 `session/set_config_option`，pager 读 `configOptions`、无该配置项时退回旧 `session/set_model`）；P1 增补「任何 runtime（含将来的 pi-rust）都必须作为独立 ACP agent 位于 ACP 之后」；§7 勾选 A.1、A.2（主体）、B.1、B.5、B.6，A.3、A.4、B.3 未做，B.2、B.4 换了做法或只做了一部分；§4.4 关于「出站 `x.ai/*` 被 `channel.rs` 丢弃」的判断被实测推翻（§10.4）。验证以消费者构建、单测、PTY 真机 `/model` 切换与 OpenRouter 真实会话为准，没有 Linux / Windows 结果，阶段 0（CI、基线、契约 / e2e）仍未做。
 - r4：把 r3 的工作区改动提交到本地分支（**未 push**），并补三件事：① 阶段 0 的 0.1 / 0.2 / 0.4——Linux CI workflow、基线执行器与清单、基线报告 `docs/baselines/tui.md`（0.4 勾选；0.1 / 0.2 因为 workflow 没在 Linux 上跑过而不勾选）；② 清掉 leader 的 UI 状态残留（A.2 的尾巴），生产行为不变，测试夹具改用生产默认值；③ 1.R3 的命名与提示语（行为不变，`stderr` 去向、优雅退出、残留进程实测仍未做）。同时把 §10.4 的 leader 残留改写为四类「不是 UI 残留」的剩余（273 行 / 80 个文件），新增 §10.6，并更正测试基线（清理 leader 时随被删代码删掉 18 个测试，10,857 → 10,839）。验证仍是 macOS 一台机器：门禁、`--workspace --tests`、8 个 suite、PTY 烟测；没有 Linux / Windows 结果。
+- r5：推送分支、开 draft PR [#7](https://github.com/zy1233/pi-python/pull/7)，并完成阶段 A 与阶段 0 的 0.1 / 0.6。① 第一次 Linux `TUI CI` 全绿后把基线转为阻塞，依赖图上限 995 → 980、告警上限 20 → 0、各 suite 设 `min_passed`；② 入口审计（0.6）按附录 A 的默认执行，A.3 删除 dashboard、白名单外的斜杠命令、agents / extensions / persona 模态、tasks / 后台 / 定时任务、subagents / workflows / goals、共享 prompt 队列、MCP / hooks / plugins / marketplace 入口、rewind / fork / jump、recap / feedback / consent、changelog、`--chat` 世界、session rename 的死链路；③ A.4 去掉各 crate 根的 `#![allow]`（消费者构建 0 告警）、`pi-shell` 的 `pub mod` 降级、删未用依赖与 8 个无人依赖的 crate、删 `cfg(feature = "local-workspace")` 代码；④ `-p` 无沙箱时拒绝运行（ADR7 的最小版本）。净效果：`tui/crates` 的 `.rs` 从 1,252,374 行降到 1,019,816 行，`Cargo.lock` 1,285 → 1,257 个包，Linux 依赖图 995 → 980。新增 §10.7 与附录 A 的 r5 结果。验证：Linux CI（`0e71894`）与 macOS 本机；`5fcec14` 之后的 Linux 结果、PTY 烟测、`release_baseline` 回填后补。阶段 1（协议与 Python）和 0.3 / 0.5 / 0.7–0.9 仍未开始。

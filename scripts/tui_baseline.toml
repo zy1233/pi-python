@@ -90,11 +90,6 @@ targets = [
 ]
 # doctor_cmd:: probes the audio input device (hangs on a macOS CoreAudio query without mic access).
 skip = ["doctor_cmd::"]
-# macOS renders Alt as "Opt", so these footer assertions only fail there (Linux passes them).
-known_failures = [
-    "render_footer_multiline_empty_create_uses_shift_or_alt_enter",
-    "render_footer_multiline_mode_send_uses_shift_or_alt_enter",
-]
 reference_passed = 5593
 min_passed = 5300
 
