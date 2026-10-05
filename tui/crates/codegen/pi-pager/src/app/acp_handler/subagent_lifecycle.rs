@@ -176,7 +176,6 @@ pub(super) fn defer_subagent_finish(
     deferred
         .entry(child_session_id.to_owned())
         .or_insert(DeferredSubagentFinish {
-            notification,
             inserted_at: now,
         });
     tracing::debug!(
@@ -187,21 +186,6 @@ pub(super) fn defer_subagent_finish(
         "legacy/session lifecycle update DEFERRED until spawn"
     );
     LifecycleDelivery::AwaitSpawn
-}
-
-/// Take a deferred finish, enforcing the TTL at observe time so an entry is
-/// not applied after expiry merely because nothing else deferred in between.
-pub(super) fn take_deferred_subagent_finish(
-    deferred: &mut HashMap<String, DeferredSubagentFinish>,
-    child_session_id: &str,
-    now: Instant,
-) -> Option<SessionNotification> {
-    let entry = deferred.remove(child_session_id)?;
-    if now.saturating_duration_since(entry.inserted_at) >= DEFERRED_FINISH_TTL {
-        tracing::debug!(child_session_id, "deferred subagent finish expired on take");
-        return None;
-    }
-    Some(entry.notification)
 }
 
 pub(super) fn redispatched_subagent_finish(
@@ -308,45 +292,6 @@ mod tests {
     }
 
     #[test]
-    fn deferred_finish_strips_output_and_evicts_oldest() {
-        let mut deferred = HashMap::new();
-        let t0 = Instant::now();
-        for i in 0..MAX_DEFERRED_SUBAGENT_FINISHES {
-            let child = format!("child-{i}");
-            defer_subagent_finish(
-                &mut deferred,
-                &child,
-                finish_notification(&child, Some("keep-out".into())),
-                "sess-parent",
-                None,
-                t0 + Duration::from_millis(i as u64),
-            );
-        }
-        assert_eq!(deferred.len(), MAX_DEFERRED_SUBAGENT_FINISHES);
-        assert!(
-            deferred
-                .values()
-                .all(|entry| match &entry.notification.update {
-                    PiSessionUpdate::SubagentFinished { output, .. } => output.is_none(),
-                    _ => false,
-                })
-        );
-
-        defer_subagent_finish(
-            &mut deferred,
-            "child-newest",
-            finish_notification("child-newest", Some("drop-me".into())),
-            "sess-parent",
-            None,
-            t0 + Duration::from_secs(1),
-        );
-        assert_eq!(deferred.len(), MAX_DEFERRED_SUBAGENT_FINISHES);
-        assert!(!deferred.contains_key("child-0"));
-        assert!(deferred.contains_key("child-newest"));
-        assert!(deferred.contains_key(&format!("child-{}", MAX_DEFERRED_SUBAGENT_FINISHES - 1)));
-    }
-
-    #[test]
     fn deferred_finish_expires_stale_entries() {
         let mut deferred = HashMap::new();
         let t0 = Instant::now();
@@ -370,49 +315,4 @@ mod tests {
         assert!(deferred.contains_key("child-fresh"));
     }
 
-    #[test]
-    fn take_deferred_finish_enforces_ttl() {
-        let mut deferred = HashMap::new();
-        let t0 = Instant::now();
-        defer_subagent_finish(
-            &mut deferred,
-            "child-stale",
-            finish_notification("child-stale", None),
-            "sess-parent",
-            None,
-            t0,
-        );
-        assert!(
-            take_deferred_subagent_finish(
-                &mut deferred,
-                "child-stale",
-                t0 + DEFERRED_FINISH_TTL + Duration::from_secs(1),
-            )
-            .is_none(),
-            "expired deferred finish must not apply on take"
-        );
-        assert!(
-            !deferred.contains_key("child-stale"),
-            "expired entry must be removed from the map on take"
-        );
-
-        defer_subagent_finish(
-            &mut deferred,
-            "child-fresh",
-            finish_notification("child-fresh", None),
-            "sess-parent",
-            None,
-            t0,
-        );
-        assert!(
-            take_deferred_subagent_finish(
-                &mut deferred,
-                "child-fresh",
-                t0 + Duration::from_secs(1)
-            )
-            .is_some(),
-            "fresh deferred finish must still apply"
-        );
-        assert!(deferred.is_empty());
-    }
 }

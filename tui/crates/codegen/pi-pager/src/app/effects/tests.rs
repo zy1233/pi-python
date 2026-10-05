@@ -222,52 +222,6 @@ fn picker_still_drops_build_row_with_empty_summary() {
     let entries = parse_session_picker_entries(&payload);
     assert!(entries.is_empty(), "empty-summary Build rows stay dropped");
 }
-/// The agent serializes `ExtMethodResult<KillTaskResponse>`: the outcome
-/// lives at `result.outcome`. Probing the top level (the pre-fix code)
-/// was why the tasks-pane ✗ never removed stale (`not_found`) rows after
-/// a session resume.
-#[test]
-fn parse_kill_outcome_reads_result_envelope() {
-    use pi_tools::types::KillOutcome;
-    let resp = r#"{"result":{"taskId":"t-1","outcome":"not_found"}}"#;
-    assert_eq!(parse_kill_outcome(resp), Some(KillOutcome::NotFound));
-    let resp = r#"{"result":{"taskId":"t-1","outcome":"killed"}}"#;
-    assert_eq!(parse_kill_outcome(resp), Some(KillOutcome::Killed));
-    let resp = r#"{"result":{"taskId":"t-1","outcome":"already_exited"}}"#;
-    assert_eq!(parse_kill_outcome(resp), Some(KillOutcome::AlreadyExited));
-}
-/// Round-trip through the agent's own serializer: what
-/// `extensions::task::respond()` produces must parse back to the same
-/// typed outcome (guards against the two sides drifting apart).
-#[test]
-fn parse_kill_outcome_round_trips_agent_serialization() {
-    use pi_shell::extensions::task::KillTaskResponse;
-    use pi_shell::session::result::ExtMethodResult;
-    use pi_tools::types::KillOutcome;
-    let wire = serde_json::to_string(
-            &ExtMethodResult::success(KillTaskResponse {
-                task_id: "t-1".into(),
-                outcome: KillOutcome::NotFound,
-            }),
-        )
-        .unwrap();
-    assert_eq!(parse_kill_outcome(&wire), Some(KillOutcome::NotFound));
-}
-/// Error envelopes and malformed payloads yield `None` (clear pending
-/// state, keep the row).
-#[test]
-fn parse_kill_outcome_none_for_error_or_malformed() {
-    assert_eq!(
-            parse_kill_outcome(r#"{"result":null,"error":"session not found"}"#),
-            None
-        );
-    assert_eq!(parse_kill_outcome("not json"), None);
-    assert_eq!(parse_kill_outcome("{}"), None);
-    assert_eq!(
-            parse_kill_outcome(r#"{"result":{"taskId":"t-1","outcome":"exploded"}}"#),
-            None
-        );
-}
 #[test]
 fn parse_session_load_restore_meta_full_shape() {
     use pi_workspace::session::git::RestoreDegree;

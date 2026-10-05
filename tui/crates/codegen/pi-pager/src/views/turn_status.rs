@@ -552,7 +552,7 @@ pub fn render_turn_status(
                 let first_line = detail.lines().next().unwrap_or(detail);
                 let display = truncate_str(first_line, max_cmd);
                 left_spans.push(Span::styled(prefix, Style::default().fg(theme.gray)));
-                left_spans.extend(crate::views::tasks_pane::highlight_bash_command(&display));
+                left_spans.extend(crate::views::bash_highlight::highlight_bash_command(&display));
             }
         }
     } else {

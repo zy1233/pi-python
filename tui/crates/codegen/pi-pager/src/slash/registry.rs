@@ -317,14 +317,6 @@ impl CommandRegistry {
             })
     }
 
-    /// Current deny list (normalized). Used to mirror the gate onto child
-    /// registries (subagent views), same as the `set_*_visible` gates.
-    pub fn restricted_commands(&self) -> Vec<String> {
-        let mut names: Vec<String> = self.restricted.iter().cloned().collect();
-        names.sort();
-        names
-    }
-
     /// True when `cmd.required_tools()` is empty, or the toolset is
     /// known and every required tool is in the advertised set.
     ///
@@ -689,50 +681,6 @@ mod tests {
         assert!(registry.get("share").is_none());
         assert!(registry.get_for_dispatch("share").is_some());
         assert!(!registry.triggers().iter().any(|t| t.canonical == "share"));
-    }
-
-    #[test]
-    fn restricted_commands_hide_and_restore() {
-        let usage: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
-            name: "usage",
-            aliases: &[],
-        });
-        let other: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
-            name: "exit",
-            aliases: &[],
-        });
-        let mut registry = CommandRegistry::new(vec![usage, other]);
-        assert!(registry.get("usage").is_some());
-
-        registry.set_restricted_commands(&["usage".to_string()]);
-        // Execution is blocked …
-        assert!(registry.get("usage").is_none());
-        // … but the command stays listed (dropdown/completion
-        // discoverability — invoking shows the upsell instead).
-        assert!(registry.triggers().iter().any(|t| t.canonical == "usage"));
-        // Other commands unaffected.
-        assert!(registry.get("exit").is_some());
-        assert_eq!(registry.restricted_commands(), vec!["usage"]);
-
-        // Clearing the deny list restores execution.
-        registry.set_restricted_commands(&[]);
-        assert!(registry.get("usage").is_some());
-        assert!(registry.restricted_commands().is_empty());
-    }
-
-    #[test]
-    fn restricted_entries_are_normalized() {
-        let usage: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
-            name: "usage",
-            aliases: &[],
-        });
-        let mut registry = CommandRegistry::new(vec![usage]);
-
-        // Leading slash, whitespace, and case are all tolerated; empty
-        // entries are dropped rather than denying the "" name.
-        registry.set_restricted_commands(&[" /Usage ".to_string(), String::new(), "/".to_string()]);
-        assert!(registry.get("usage").is_none());
-        assert_eq!(registry.restricted_commands(), vec!["usage"]);
     }
 
     /// `is_restricted` scans the command list (not `key_to_index`, which

@@ -401,39 +401,6 @@ fn clipboard_failure_routes_to_originating_agent_without_duplicate() {
 }
 
 
-/// An already-finished orphan's real terminal status (`NothingLive { status:
-/// Some(..) }`) is forwarded to the finalized row, not flattened to "cancelled".
-#[test]
-fn kill_nothing_live_with_status_stamps_real_terminal_status() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    let sid = acp::SessionId::new("test-session".to_owned());
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        let mut info = make_test_subagent("child-1", "sa-1");
-        info.pending_kill = true;
-        agent.subagent_sessions.insert("child-1".into(), info);
-    }
-
-    dispatch_task_result(
-        TaskResult::KillSubagentComplete {
-            session_id: sid,
-            subagent_id: "sa-1".into(),
-            outcome: SubagentKillOutcome::NothingLive {
-                status: Some("completed".into()),
-            },
-        },
-        &mut app,
-    );
-    let info = &app.agents[&id].subagent_sessions["child-1"];
-    assert!(info.finished, "already-finished orphan must be finalized");
-    assert_eq!(
-        info.status.as_deref(),
-        Some("completed"),
-        "the shell's real terminal status must be stamped, not 'cancelled'"
-    );
-}
-
 #[test]
 fn cancel_complete_does_nothing() {
     let mut app = test_app_with_agent();

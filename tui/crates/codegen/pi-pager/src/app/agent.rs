@@ -8,7 +8,7 @@ use crate::acp::tracker::{AcpUpdateTracker, TurnActivity};
 use crate::scrollback::EntryId;
 use crate::scrollback::state::ScrollbackState;
 use agent_client_protocol as acp;
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime};
 use pi_acp_lib::AcpAgentTx;
@@ -814,14 +814,6 @@ pub struct AgentSession {
     pub user_model_preference: Option<acp::ModelId>,
     /// `/model X [effort]` issued before the session was ready, applied on SessionCreated.
     pub deferred_model_switch: Option<DeferredModelSwitch>,
-    /// Central bg task state, keyed by task_id.
-    pub bg_tasks: BTreeMap<String, BgTaskState>,
-    /// Correlation map: tool_call_id → task_id.
-    /// Used to route stdout chunks (which arrive keyed by tool_call_id) to the
-    /// correct bg task in `bg_tasks`.
-    pub bg_tool_call_to_task: HashMap<String, String>,
-    /// Active scheduled tasks, keyed by task_id.
-    pub scheduled_tasks: HashMap<String, ScheduledTaskInfo>,
     /// Plain-text prompt currently in flight, captured at send time and
     /// cleared as soon as the server emits any activity (chunk, tool call,
     /// retry, etc.). Used by `do_cancel_turn` to "rewind" a prompt back to
@@ -926,15 +918,6 @@ impl AgentSession {
         self.in_flight_prompt = None;
         self.compact_held_prompt = None;
         self.current_prompt_id = None;
-    }
-    /// Whether any background task is still running (vs. completed/failed).
-    /// Used to defer the automatic away-recap: a running task can wake the
-    /// agent (auto-wake on completion), so we don't pre-generate a recap while
-    /// one is live and could change the session out from under it.
-    pub fn has_running_bg_tasks(&self) -> bool {
-        self.bg_tasks
-            .values()
-            .any(|t| t.status == BgTaskStatus::Running)
     }
     /// Cancel the current turn: cleanup tracker, set state to Cancelling.
     pub fn cancel_turn(&mut self, scrollback: &mut ScrollbackState) {
@@ -1205,9 +1188,6 @@ mod tests {
             model_switch_pending: false,
             user_model_preference: None,
             deferred_model_switch: None,
-            bg_tasks: BTreeMap::new(),
-            bg_tool_call_to_task: HashMap::new(),
-            scheduled_tasks: HashMap::new(),
             in_flight_prompt: None,
             compact_held_prompt: None,
             current_prompt_id: None,

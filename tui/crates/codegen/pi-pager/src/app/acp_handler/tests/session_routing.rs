@@ -222,60 +222,6 @@
     }
 
     #[test]
-    fn bg_task_stdout_for_inactive_agent_lands_in_its_bg_tasks() {
-        let mut app = make_app_with_agent("sess-A");
-        insert_agent(&mut app, AgentId(1), Some("sess-B"));
-        switch_active_to(&mut app, AgentId(1));
-
-        // Pre-register a bg task on A so route_bg_task_stdout has a target.
-        let task_id = "task-A-1";
-        let tool_call_id = "call-A-1";
-        {
-            let agent_a = app.agents.get_mut(&AgentId(0)).unwrap();
-            agent_a.session.bg_tasks.insert(
-                task_id.into(),
-                BgTaskState {
-                    task_id: task_id.into(),
-                    tool_call_id: tool_call_id.into(),
-                    command: "sleep 5".into(),
-                    description: None,
-                    cwd: "/tmp".into(),
-                    output_file: "/tmp/out".into(),
-                    status: BgTaskStatus::Running,
-                    start_time: std::time::SystemTime::now(),
-                    end_time: None,
-                    exit_code: None,
-                    signal: None,
-                    stdout: String::new(),
-                    stdout_line_count: 0,
-                    truncated: false,
-                    pending_kill: false,
-                    kill_requested_at: None,
-                    scrollback_entry_id: None,
-                    is_monitor: false,
-                    restored_from_replay: false,
-                },
-            );
-            agent_a
-                .session
-                .bg_tool_call_to_task
-                .insert(tool_call_id.into(), task_id.into());
-        }
-
-        let _ = handle(
-            make_bash_stdout_message("sess-A", tool_call_id, "stdout-from-A"),
-            &mut app,
-        );
-
-        let agent_a = app.agents.get(&AgentId(0)).unwrap();
-        assert_eq!(
-            agent_a.session.bg_tasks.get(task_id).unwrap().stdout,
-            "stdout-from-A",
-            "Bash stdout must land in A's bg_tasks even when B is active"
-        );
-    }
-
-    #[test]
     fn acp_chunks_for_two_agents_dont_cross_contaminate() {
         // Send chunks to both A and B in sequence; each landing in its own
         // scrollback proves the demux works in both directions regardless

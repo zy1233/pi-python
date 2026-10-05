@@ -1,6 +1,6 @@
 //! Turn cancellation, task and subagent kills, and overdue turn reconciliation.
 
-use super::ctx::{active_subagent_view_mut, find_agent_by_session_id};
+use super::ctx::active_subagent_view_mut;
 use super::permissions::drain_permission_queue;
 use super::queue::{apply_turn_start_shim, maybe_drain_queue};
 use crate::app::actions::Effect;
@@ -709,49 +709,6 @@ pub(crate) fn reconcile_overdue_turn_ends(app: &mut AppView) -> Option<Vec<Effec
     fired.then_some(effects)
 }
 
-pub(super) fn dispatch_cancel_scheduled_task(app: &mut AppView, task_id: String) -> Vec<Effect> {
-    let ActiveView::Agent(id) = app.active_view else {
-        return vec![];
-    };
-    let Some(agent) = app.agents.get_mut(&id) else {
-        return vec![];
-    };
-    let Some(session_id) = agent.session.session_id.clone() else {
-        return vec![];
-    };
-
-    // Remove from local state immediately (optimistic).
-    agent.session.scheduled_tasks.remove(&task_id);
-
-    vec![Effect::DeleteScheduledTask {
-        session_id,
-    }]
-}
-
-pub(super) fn dispatch_kill_bg_task(app: &mut AppView, task_id: String) -> Vec<Effect> {
-    let ActiveView::Agent(id) = app.active_view else {
-        return vec![];
-    };
-    let Some(agent) = app.agents.get_mut(&id) else {
-        return vec![];
-    };
-    let Some(session_id) = agent.session.session_id.clone() else {
-        return vec![];
-    };
-
-    // Mark as pending_kill for UI feedback
-    if let Some(task) = agent.session.bg_tasks.get_mut(&task_id) {
-        task.pending_kill = true;
-        task.kill_requested_at = Some(Instant::now());
-    }
-
-    vec![Effect::KillBgTask {
-        session_id,
-        task_id,
-        source: pi_shell::extensions::task::TaskKillSource::ClientUi,
-    }]
-}
-
 pub(super) fn dispatch_kill_subagent(app: &mut AppView, subagent_id: String) -> Vec<Effect> {
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
@@ -777,81 +734,5 @@ pub(super) fn dispatch_kill_subagent(app: &mut AppView, subagent_id: String) -> 
     }]
 }
 
-pub(super) fn dispatch_demote_to_background(app: &mut AppView) -> Vec<Effect> {
-    let ActiveView::Agent(id) = app.active_view else {
-        return vec![];
-    };
-    let Some(agent) = app.agents.get_mut(&id) else {
-        return vec![];
-    };
-    if !agent.session.state.is_turn_running() {
-        return vec![];
-    }
-    let Some(session_id) = agent.session.session_id.clone() else {
-        return vec![];
-    };
-    // Get the tool_call_id of the currently running execute tool
-    let Some(tool_call_id) = agent
-        .session
-        .tracker
-        .running_execute_tool_call_id()
-        .map(|s| s.to_string())
-    else {
-        return vec![];
-    };
-
-    tracing::info!(tool_call_id = %tool_call_id, "Demoting execute tool to background");
-
-    vec![Effect::DemoteToBackground {
-        session_id,
-    }]
-}
-
 // TaskResult handlers.
 
-pub(super) fn handle_bg_task_killed(
-    app: &mut AppView,
-    session_id: String,
-    task_id: String,
-    outcome: Option<pi_tools::types::KillOutcome>,
-) -> Vec<Effect> {
-    use pi_tools::types::KillOutcome;
-    if let Some(agent) = find_agent_by_session_id(&mut app.agents, &session_id) {
-        match outcome {
-            Some(KillOutcome::Killed) => {
-                // Stay in pending_kill state — task_completed notification
-                // will arrive and clear it.
-                tracing::info!(task_id = %task_id, "Kill signal sent");
-            }
-            Some(KillOutcome::AlreadyExited) => {
-                if let Some(task) = agent.session.bg_tasks.get_mut(&task_id) {
-                    task.pending_kill = false;
-                    task.kill_requested_at = None;
-                }
-            }
-            Some(KillOutcome::NotFound) => {
-                // Stale row (e.g. restored from a resume replay but the
-                // process belongs to a previous session lifetime): the
-                // agent has nothing to kill, so drop the row and finish
-                // its "Task started" scrollback entry (stops the
-                // running accent that the replay restore turned on).
-                tracing::info!(task_id = %task_id, "Task not found, removing");
-                if let Some(task) = agent.session.bg_tasks.remove(&task_id)
-                    && let Some(entry_id) = task.scrollback_entry_id
-                {
-                    agent.scrollback.finish_running(entry_id);
-                }
-            }
-            None => {
-                // Error envelope or unparseable payload: clear the
-                // pending state so the user can retry, keep the row.
-                tracing::warn!(task_id = %task_id, "Kill outcome missing or unparseable");
-                if let Some(task) = agent.session.bg_tasks.get_mut(&task_id) {
-                    task.pending_kill = false;
-                    task.kill_requested_at = None;
-                }
-            }
-        }
-    }
-    vec![]
-}

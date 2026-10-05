@@ -539,7 +539,6 @@ pub(super) fn dispatch_send_prompt_inner(
                 display_text,
                 prompt_blocks,
                 display_as_skill,
-                scheduled_task_preview,
             } => {
                 // Enqueue with display text for scrollback but wire_blocks
                 // for the actual prompt sent to the model. Leading skill
@@ -558,27 +557,6 @@ pub(super) fn dispatch_send_prompt_inner(
                             crate::app::agent::QueueEntryKind::Prompt,
                         )
                     });
-
-                // Insert a provisional scheduled task so the tasks pane shows
-                // it immediately, before the LLM round-trips through
-                // scheduler_create. Keyed by a provisional ID; replaced when
-                // the real ScheduledTaskCreated notification arrives.
-                if let Some(preview) = scheduled_task_preview {
-                    use crate::app::agent::ScheduledTaskInfo;
-                    let provisional_id = format!("provisional-{}", id);
-                    agent.session.scheduled_tasks.insert(
-                        provisional_id.clone(),
-                        ScheduledTaskInfo {
-                            task_id: provisional_id,
-                            prompt: preview.prompt,
-                            human_schedule: preview.human_schedule,
-                            created_at: std::time::Instant::now(),
-                            next_fire_at: preview.next_fire_at,
-                            tag: preview.tag,
-                            last_subagent_id: None,
-                        },
-                    );
-                }
             }
             CommandResult::PassThrough(pass_text) => {
                 // A recognized token later in the passthrough text still styles the echo.

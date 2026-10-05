@@ -28,7 +28,6 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use serde::Deserialize;
 use pi_shell::session::storage::{
     ReplayEmission, ReplayLookupFallback, ReplayPathHint, ReplayedUpdate, replay_would_emit,
     stream_replay_updates_at_hinted,
@@ -180,15 +179,6 @@ impl ChildTranscript {
         }
     }
 
-    /// The child is terminal, so disk is final and the cached empty read is
-    /// worth one more try. A proven `DiskBacked` or `MemoryOnly` state is
-    /// untouched.
-    pub(crate) fn retry_disk_after_finish(&mut self) {
-        if matches!(self, Self::DiskEmptyWhileRunning) {
-            *self = Self::NeedsReplay;
-        }
-    }
-
     /// The view was reset to the task-prompt baseline: rebuild on next open.
     pub(crate) fn evicted(&mut self) {
         debug_assert!(
@@ -229,17 +219,6 @@ impl SubagentInfo {
     }
 }
 
-/// Pager-side slice of the shell's on-disk `SubagentMeta`.
-#[derive(Debug, Deserialize)]
-struct SubagentMetaSlice {
-    #[serde(default)]
-    prompt: Option<String>,
-    #[serde(default)]
-    child_cwd: Option<String>,
-    #[serde(default)]
-    worktree_path: Option<String>,
-}
-
 /// Grok home for the replay path (overridable in tests).
 #[cfg(not(test))]
 fn effective_grok_home() -> std::path::PathBuf {
@@ -264,50 +243,6 @@ fn effective_grok_home() -> std::path::PathBuf {
         return home;
     }
     pi_shell::util::grok_home::grok_home()
-}
-
-/// Best-effort enrichment from the shell's on-disk `meta.json`.
-pub(crate) fn enrich_from_meta(
-    info: &mut SubagentInfo,
-    parent_cwd: &std::path::Path,
-    parent_session_id: &str,
-) {
-    enrich_from_meta_with_home(info, &effective_grok_home(), parent_cwd, parent_session_id);
-}
-
-fn enrich_from_meta_with_home(
-    info: &mut SubagentInfo,
-    grok_home: &std::path::Path,
-    parent_cwd: &std::path::Path,
-    parent_session_id: &str,
-) {
-    let meta_path = grok_home
-        .join("sessions")
-        .join(urlencoding::encode(&parent_cwd.to_string_lossy()).as_ref())
-        .join(parent_session_id)
-        .join("subagents")
-        .join(info.subagent_id.as_ref())
-        .join("meta.json");
-
-    let content = match std::fs::read_to_string(&meta_path) {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::debug!(error = %e, "meta.json not found");
-            return;
-        }
-    };
-
-    let meta: SubagentMetaSlice = match serde_json::from_str(&content) {
-        Ok(m) => m,
-        Err(e) => {
-            tracing::debug!(error = %e, "meta.json parse failed");
-            return;
-        }
-    };
-
-    info.prompt = meta.prompt.map(Arc::from);
-    info.child_cwd = meta.child_cwd.map(Arc::from);
-    info.worktree_path = meta.worktree_path.map(Arc::from);
 }
 
 /// Best-effort streamed replay of a child's inherited conversation.

@@ -1438,28 +1438,6 @@ pub(super) fn should_send_yolo_acp_notification(
         (Err(_), PermissionModePersist::WithRollback(_)) => false,
     }
 }
-/// Extract the typed kill outcome from an `legacy ext RPC` ext response.
-///
-/// The agent serializes `ExtMethodResult<KillTaskResponse>`, so the outcome
-/// lives at `result.outcome` (`{"result":{"taskId":..,"outcome":
-/// "not_found"}}`). Deserializes through the same wire DTOs the agent
-/// serializes (`pi_shell::extensions::task::KillTaskResponse` +
-/// `pi_shell::session::result::ExtMethodResult`) so the contract stays
-/// typed end-to-end. Returns `None` — which the dispatcher treats as "clear
-/// pending state, keep the row" — for error envelopes (`result: null`) or
-/// unparseable payloads. Probing the top level with untyped JSON here was
-/// why the tasks-pane ✗ never removed stale (`not_found`) rows after a
-/// session resume.
-pub(super) fn parse_kill_outcome(
-    resp: &str,
-) -> Option<pi_tools::types::KillOutcome> {
-    use pi_shell::extensions::task::KillTaskResponse;
-    use pi_shell::session::result::ExtMethodResult;
-    serde_json::from_str::<ExtMethodResult<KillTaskResponse>>(resp)
-        .ok()
-        .and_then(|envelope| envelope.result)
-        .map(|payload| payload.outcome)
-}
 /// Map disk-write outcome + persist variant to the correct `TaskResult`.
 pub(super) fn route_permission_mode_result(
     disk_outcome: Result<(), String>,

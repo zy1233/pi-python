@@ -274,19 +274,6 @@ impl AgentView {
     /// [`crate::views::turn_status::Watchers`].
     pub(crate) fn watchers(&self) -> crate::views::turn_status::Watchers {
         let mut watchers = crate::views::turn_status::Watchers::default();
-        for task in self
-            .session
-            .bg_tasks
-            .values()
-            .filter(|t| t.status == crate::app::agent::BgTaskStatus::Running)
-        {
-            if task.is_monitor {
-                watchers.monitors += 1;
-            } else {
-                watchers.commands += 1;
-            }
-        }
-        watchers.loops = self.session.scheduled_tasks.len();
         watchers.subagents = self
             .subagent_sessions
             .values()
@@ -1267,57 +1254,6 @@ mod watcher_tests {
             pause_message: None,
             result_summary: None,
         }
-    }
-
-    fn insert_bg_task(
-        agent: &mut crate::app::agent_view::AgentView,
-        task_id: &str,
-        is_monitor: bool,
-    ) {
-        agent.session.bg_tasks.insert(
-            task_id.into(),
-            crate::app::agent::BgTaskState {
-                task_id: task_id.into(),
-                tool_call_id: format!("call-{task_id}"),
-                command: "sleep 5".into(),
-                description: None,
-                cwd: "/tmp".into(),
-                output_file: "/tmp/out".into(),
-                status: crate::app::agent::BgTaskStatus::Running,
-                start_time: std::time::SystemTime::now(),
-                end_time: None,
-                exit_code: None,
-                signal: None,
-                stdout: String::new(),
-                stdout_line_count: 0,
-                truncated: false,
-                pending_kill: false,
-                kill_requested_at: None,
-                scrollback_entry_id: None,
-                is_monitor,
-                restored_from_replay: false,
-            },
-        );
-    }
-
-    #[test]
-    fn watchers_counts_monitors_apart_from_commands() {
-        let mut agent = test_agent_view(Some("s1"), std::path::PathBuf::from("/tmp"));
-        insert_bg_task(&mut agent, "bg-1", false);
-        insert_bg_task(&mut agent, "mon-1", true);
-        insert_bg_task(&mut agent, "done-1", false);
-        agent.session.bg_tasks.get_mut("done-1").unwrap().status =
-            crate::app::agent::BgTaskStatus::Done;
-        assert_eq!(
-            agent.watchers(),
-            Watchers {
-                commands: 1,
-                monitors: 1,
-                loops: 0,
-                subagents: 0,
-                workflows: 0,
-            }
-        );
     }
 
     #[test]

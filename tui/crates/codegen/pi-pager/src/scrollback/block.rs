@@ -14,7 +14,7 @@ use pi_pager_diff::DiffHunk;
 
 use super::blocks::mermaid_content::DiagramAffordance;
 use super::blocks::{
-    AgentMessageBlock, BgTaskBlock, BtwBlock, ContextInfoBlock, CreditLimitBlock,
+    AgentMessageBlock, BtwBlock, ContextInfoBlock, CreditLimitBlock,
     EditToolCallBlock, ExecuteToolCallBlock, LineRange, ListDirToolCallBlock, OtherToolCallBlock,
     ReadToolCallBlock, SearchFileMatch, SearchToolCallBlock, SessionEvent, SessionEventBlock,
     SubagentBlock, SubagentBlockKind, SystemMessageBlock, ThinkingBlock, ToolCallBlock,
@@ -383,8 +383,6 @@ pub enum RenderBlock {
     System(SystemMessageBlock),
     /// Session-level event (typed: turn completed, cancelled, failed, etc.).
     SessionEvent(SessionEventBlock),
-    /// Background task (always collapsed, animated bullet while running).
-    BgTask(BgTaskBlock),
     /// Subagent lifecycle (started / completed / failed).
     Subagent(SubagentBlock),
     Workflow(WorkflowBlock),
@@ -407,7 +405,6 @@ macro_rules! delegate_block {
             RenderBlock::Thinking(b) => b.$method($($arg),*),
             RenderBlock::System(b) => b.$method($($arg),*),
             RenderBlock::SessionEvent(b) => b.$method($($arg),*),
-            RenderBlock::BgTask(b) => b.$method($($arg),*),
             RenderBlock::Subagent(b) => b.$method($($arg),*),
             RenderBlock::Workflow(b) => b.$method($($arg),*),
             RenderBlock::Btw(b) => b.$method($($arg),*),
@@ -797,41 +794,6 @@ impl RenderBlock {
         RenderBlock::CreditLimit(CreditLimitBlock::new(heading, action, url))
     }
 
-    /// Create a "Task started" background task block.
-    pub fn bg_task(command: impl Into<String>, task_id: impl Into<String>) -> Self {
-        RenderBlock::BgTask(BgTaskBlock::started(command, task_id))
-    }
-
-    /// Create a "Task completed" background task block.
-    pub fn bg_task_completed(
-        command: impl Into<String>,
-        task_id: impl Into<String>,
-        elapsed: std::time::Duration,
-    ) -> Self {
-        RenderBlock::BgTask(BgTaskBlock::completed(command, task_id, elapsed))
-    }
-
-    /// Create a "Task failed" background task block.
-    pub fn bg_task_failed(
-        command: impl Into<String>,
-        task_id: impl Into<String>,
-        elapsed: std::time::Duration,
-        exit_code: Option<i32>,
-        signal: Option<String>,
-    ) -> Self {
-        RenderBlock::BgTask(BgTaskBlock::failed(
-            command, task_id, elapsed, exit_code, signal,
-        ))
-    }
-
-    /// Set the description on a `BgTask` block (builder pattern, no-op for other variants).
-    pub fn with_bg_task_description(mut self, description: Option<String>) -> Self {
-        if let RenderBlock::BgTask(ref mut b) = self {
-            b.description = description;
-        }
-        self
-    }
-
     /// Get mutable access to a StubBlock if this is one.
     pub fn as_stub_mut(&mut self) -> Option<&mut StubBlock> {
         match self {
@@ -899,14 +861,6 @@ impl RenderBlock {
     /// the thinking header text undims on selection.
     pub fn is_thinking(&self) -> bool {
         matches!(self, RenderBlock::Thinking(_))
-    }
-
-    /// Check if this block is a BgTask block.
-    ///
-    /// Used by the entry cache for the same reason as `is_tool_call`:
-    /// the bold "Task" label undims on selection.
-    pub fn is_bg_task(&self) -> bool {
-        matches!(self, RenderBlock::BgTask(_))
     }
 
     /// Check if this block is a Subagent block.
@@ -1011,13 +965,6 @@ impl RenderBlock {
                 }
             }
             RenderBlock::Thinking(_) => Some(theme.accent_thinking),
-            RenderBlock::BgTask(block) => {
-                if block.is_running() {
-                    Some(theme.accent_running)
-                } else {
-                    None
-                }
-            }
             RenderBlock::Subagent(block) => {
                 if block.is_running() {
                     Some(theme.accent_running)
@@ -1044,8 +991,7 @@ impl RenderBlock {
             | RenderBlock::ToolCall(ToolCallBlock::WebFetch(_))
             | RenderBlock::ToolCall(ToolCallBlock::WebSearch(_))
             | RenderBlock::ToolCall(ToolCallBlock::IntegrationSearch(_))
-            | RenderBlock::ToolCall(ToolCallBlock::UseTool(_))
-            | RenderBlock::BgTask(_) => true,
+            | RenderBlock::ToolCall(ToolCallBlock::UseTool(_)) => true,
             RenderBlock::ToolCall(ToolCallBlock::Read(b)) => b.has_content(),
             RenderBlock::ToolCall(ToolCallBlock::Search(b)) => b.error.is_none(),
             RenderBlock::ToolCall(ToolCallBlock::ListDir(b)) => {
@@ -1119,7 +1065,6 @@ impl RenderBlock {
             RenderBlock::ToolCall(ToolCallBlock::WebFetch(b)) => Some(b.url.clone()),
             RenderBlock::ToolCall(ToolCallBlock::WebSearch(b)) => Some(b.query.clone()),
             RenderBlock::ToolCall(ToolCallBlock::Search(b)) => Some(b.pattern.clone()),
-            RenderBlock::BgTask(b) => Some(b.command.clone()),
             _ => None,
         }
     }
@@ -1146,9 +1091,6 @@ impl RenderBlock {
             RenderBlock::Thinking(b) => join_searchable([Some(b.copy_text(false))]),
             RenderBlock::System(b) => join_searchable([Some(b.text.clone())]),
             RenderBlock::SessionEvent(b) => join_searchable([Some(b.event.message())]),
-            RenderBlock::BgTask(b) => {
-                join_searchable([Some(b.command.clone()), b.description.clone()])
-            }
             RenderBlock::Workflow(b) => {
                 join_searchable([Some(b.name.clone()), Some(b.objective.clone())])
             }
@@ -1511,15 +1453,6 @@ mod searchable_text_tests {
         });
         let text = block.searchable_text().expect("session event text");
         assert!(text.contains("connection reset"), "got: {text:?}");
-    }
-
-    #[test]
-    fn bg_task_indexes_command_and_description() {
-        let block = RenderBlock::bg_task("cargo build --release", "task-1")
-            .with_bg_task_description(Some("compile in release mode".into()));
-        let text = block.searchable_text().expect("bg task text");
-        assert!(text.contains("cargo build --release"), "got: {text:?}");
-        assert!(text.contains("compile in release mode"), "got: {text:?}");
     }
 
     #[test]

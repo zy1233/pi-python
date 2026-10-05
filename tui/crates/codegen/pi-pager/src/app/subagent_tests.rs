@@ -8,7 +8,7 @@ use crate::app::agent_view::AgentView;
 use crate::scrollback::block::RenderBlock;
 use crate::scrollback::state::ScrollbackState;
 use agent_client_protocol as acp;
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
 fn make_min_child_view() -> AgentView {
@@ -41,9 +41,6 @@ fn make_min_child_view() -> AgentView {
         model_switch_pending: false,
         user_model_preference: None,
         deferred_model_switch: None,
-        bg_tasks: BTreeMap::new(),
-        bg_tool_call_to_task: HashMap::new(),
-        scheduled_tasks: HashMap::new(),
         in_flight_prompt: None,
         compact_held_prompt: None,
         current_prompt_id: None,
@@ -134,49 +131,6 @@ fn replay_reports_live_blocks_and_unknown_children_distinctly() {
         ensure_subagent_child_replayed(&mut parent, "no-such-child"),
         ChildReplayOutcome::UnknownChild
     );
-}
-#[test]
-fn empty_read_of_a_running_child_is_cached_until_it_finishes() {
-    let mut parent = make_min_child_view();
-    let child_sid = "child-empty-cache";
-    parent
-        .subagent_views
-        .insert(child_sid.to_string(), Box::new(make_min_child_view()));
-    let mut info = make_info();
-    info.child_session_id = child_sid.into();
-    parent.subagent_sessions.insert(child_sid.to_string(), info);
-    let home = tempfile::tempdir().unwrap();
-    set_replay_grok_home_for_tests(Some(home.path().to_path_buf()));
-    let before = test_support::transcript_reads();
-    assert_eq!(
-        ensure_subagent_child_replayed(&mut parent, child_sid),
-        ChildReplayOutcome::FoundNothingOnDisk
-    );
-    assert_eq!(
-        parent.subagent_sessions[child_sid].transcript,
-        ChildTranscript::DiskEmptyWhileRunning
-    );
-    assert_eq!(
-        ensure_subagent_child_replayed(&mut parent, child_sid),
-        ChildReplayOutcome::NothingToRead
-    );
-    assert_eq!(
-        test_support::transcript_reads(),
-        before + 1,
-        "the cached empty result must not re-read the transcript"
-    );
-    parent
-        .subagent_sessions
-        .get_mut(child_sid)
-        .unwrap()
-        .transcript
-        .retry_disk_after_finish();
-    assert_eq!(
-        parent.subagent_sessions[child_sid].transcript,
-        ChildTranscript::NeedsReplay,
-        "the finish must allow one more read for a late persistence flush"
-    );
-    set_replay_grok_home_for_tests(None);
 }
 #[test]
 fn an_empty_read_of_a_running_resumed_child_stays_needs_replay_and_retries() {

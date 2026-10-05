@@ -1,25 +1,6 @@
 use super::test_support::make_info;
 use super::*;
 
-fn write_meta_json(dir: &std::path::Path, subagent_id: &str, json: &str) {
-    let meta_dir = dir.join("subagents").join(subagent_id);
-    std::fs::create_dir_all(&meta_dir).unwrap();
-    std::fs::write(meta_dir.join("meta.json"), json).unwrap();
-}
-
-fn setup_enrichment_dir(
-    grok_home: &std::path::Path,
-    cwd: &std::path::Path,
-    session_id: &str,
-) -> std::path::PathBuf {
-    let sessions_dir = grok_home
-        .join("sessions")
-        .join(urlencoding::encode(&cwd.to_string_lossy()).as_ref())
-        .join(session_id);
-    std::fs::create_dir_all(&sessions_dir).unwrap();
-    sessions_dir
-}
-
 #[test]
 fn subagent_meta_line_joins_present_fields() {
     let cases = [
@@ -300,76 +281,3 @@ fn activity_label_rendered_for_each_turn_activity() {
     }
 }
 
-#[test]
-fn enrichment_reads_prompt_and_paths_from_meta_json() {
-    struct Case {
-        meta_json: Option<&'static str>,
-        prompt: Option<&'static str>,
-        child_cwd: Option<&'static str>,
-        worktree: Option<&'static str>,
-    }
-    let cases = [
-        Case {
-            meta_json: Some(
-                r#"{"prompt":"do stuff","child_cwd":"/tmp/work","worktree_path":"/tmp/wt"}"#,
-            ),
-            prompt: Some("do stuff"),
-            child_cwd: Some("/tmp/work"),
-            worktree: Some("/tmp/wt"),
-        },
-        Case {
-            meta_json: Some(r#"{"prompt":"only prompt"}"#),
-            prompt: Some("only prompt"),
-            child_cwd: None,
-            worktree: None,
-        },
-        // Unknown/extra fields are ignored via `#[serde(default)]` on the slice.
-        Case {
-            meta_json: Some(r#"{"prompt":"hi","unknown_field":42,"nested":{"a":1}}"#),
-            prompt: Some("hi"),
-            child_cwd: None,
-            worktree: None,
-        },
-        Case {
-            meta_json: Some("not json{{{"),
-            prompt: None,
-            child_cwd: None,
-            worktree: None,
-        },
-        Case {
-            meta_json: None,
-            prompt: None,
-            child_cwd: None,
-            worktree: None,
-        },
-    ];
-    let cwd = std::path::Path::new("/home/user/project");
-    for (idx, c) in cases.iter().enumerate() {
-        let tmp = tempfile::tempdir().unwrap();
-        let session_id = format!("sess-{idx}");
-        if let Some(json) = c.meta_json {
-            let dir = setup_enrichment_dir(tmp.path(), cwd, &session_id);
-            write_meta_json(&dir, "sa-1", json);
-        }
-        let mut info = make_info();
-        enrich_from_meta_with_home(&mut info, tmp.path(), cwd, &session_id);
-        assert_eq!(
-            info.prompt.as_deref(),
-            c.prompt,
-            "prompt for {:?}",
-            c.meta_json
-        );
-        assert_eq!(
-            info.child_cwd.as_deref(),
-            c.child_cwd,
-            "child_cwd for {:?}",
-            c.meta_json
-        );
-        assert_eq!(
-            info.worktree_path.as_deref(),
-            c.worktree,
-            "worktree for {:?}",
-            c.meta_json
-        );
-    }
-}

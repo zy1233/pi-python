@@ -229,40 +229,6 @@ fn revised_plan_anchors_to_its_own_tool_row_and_neither_plan_re_emits() {
 }
 
 #[test]
-fn bg_task_started_commits_while_running_and_does_not_wedge_frontier() {
-    // A fresh background task is pushed as a running "started" block
-    // (`set_last_running(true)`). Its `is_running` flag is animation-only —
-    // the block is a finalized lifecycle event whose content never changes —
-    // so it must commit immediately even mid-turn. Otherwise it wedges the
-    // frontier and the task (plus everything after it) stays hidden in the
-    // live tail until the task finishes (the reported dogfood bug).
-    let mut s = ScrollbackState::new();
-    s.push(finalized("a"));
-    s.push(ScrollbackEntry::running(RenderBlock::bg_task(
-        "sleep 60", "task-1",
-    )));
-    s.push(running("later tool")); // more turn output after the bg task
-
-    // "a" + the running bg task commit; only the trailing running tool stays.
-    assert_eq!(commit_collect(&mut s), vec![0, 1]);
-    assert!(minimal_api::is_committed(&s, s.get(1).unwrap()));
-    assert!(!minimal_api::is_committed(&s, s.get(2).unwrap()));
-}
-
-#[test]
-fn bg_task_started_commits_as_last_running_entry() {
-    // Even as the last entry of a still-running turn the bg "started" block
-    // commits — a lifecycle block never streams more content (completion is
-    // a separate block).
-    let mut s = ScrollbackState::new();
-    s.push(finalized("a"));
-    s.push(ScrollbackEntry::running(RenderBlock::bg_task(
-        "sleep 60", "task-1",
-    )));
-    assert_eq!(commit_collect(&mut s), vec![0, 1]);
-}
-
-#[test]
 fn no_double_commit_after_mid_list_shift_remove() {
     let mut s = ScrollbackState::new();
     let a = s.push(finalized("a"));
@@ -649,7 +615,6 @@ fn committed_blocks_fit_desired_height() {
         );
         assert_committed_fits("search", RenderBlock::search("TODO", 0, vec![]), width);
         assert_committed_fits("system", RenderBlock::system("Session restored"), width);
-        assert_committed_fits("bg_task", RenderBlock::bg_task("sleep 30", "task-1"), width);
     }
 }
 

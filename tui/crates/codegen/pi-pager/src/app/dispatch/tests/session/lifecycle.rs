@@ -1769,20 +1769,6 @@ fn entry_title_falls_back_to_short_session_id_when_no_prompt() {
     let title = entry_title(&app.agents[&AgentId(0)]);
     assert_eq!(title, "session abcdef01");
 }
-#[test]
-fn bg_task_killed_no_op_for_unknown_session() {
-    let mut app = two_agent_app_with_bg_task();
-    let effects = dispatch(
-        Action::TaskComplete(TaskResult::BgTaskKilled {
-            session_id: "nonexistent".into(),
-            task_id: "task-B-1".into(),
-            outcome: Some(pi_tools::types::KillOutcome::AlreadyExited),
-        }),
-        &mut app,
-    );
-    assert!(effects.is_empty());
-    assert!(app.agents[&AgentId(1)].session.bg_tasks["task-B-1"].pending_kill);
-}
 /// Mutual exclusion: enabling always-approve via the dispatch seam clears
 /// the per-session `auto_mode` display flag (yolo wins).
 #[test]

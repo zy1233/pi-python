@@ -3008,7 +3008,6 @@ fn should_pregenerate_away_recap(app: &AppView) -> bool {
             && agent.active_modal.is_none()
             && agent.question_view.is_none()
             && agent.session.session_id.is_some()
-            && !agent.session.has_running_bg_tasks()
     })
 }
 
@@ -3302,7 +3301,6 @@ async fn drain_and_process(
                                 && agent.active_modal.is_none()
                                 && agent.question_view.is_none()
                                 && agent.session.session_id.is_some()
-                                && !agent.session.has_running_bg_tasks()
                         });
                         if recap_due && eligible {
                             let effs = dispatch::dispatch(

@@ -44,7 +44,7 @@ pub(crate) mod status_bar;
 pub mod status_line;
 pub(crate) mod subagent_catalog_pane;
 pub mod suggestion_controller;
-pub(crate) mod tasks_pane;
+pub(crate) mod bash_highlight;
 pub(crate) mod timeline;
 pub mod todo_pane;
 pub mod turn_status;

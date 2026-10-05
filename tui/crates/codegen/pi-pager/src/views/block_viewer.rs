@@ -106,8 +106,6 @@ pub enum ViewerKind {
     Execute,
     /// Edit tool call (diff).
     Edit,
-    /// Background task (stdout from central store).
-    BgTask,
     /// Web fetch tool call (fetched content).
     WebFetch,
     /// Web search tool call (search results + citations).
@@ -157,8 +155,6 @@ pub struct BlockViewerPane {
     /// Whether the block was running when the viewer last checked.
     /// Used to detect the running→finished transition (disable follow once).
     was_running: bool,
-    /// Task ID for BgTask viewers (for looking up stdout in central store).
-    pub bg_task_id: Option<String>,
     /// Last theme kind seen — used to detect theme switches and restyle.
     last_theme: ThemeKind,
     /// Modal chrome state (close button hover, popup area, etc.).
@@ -270,7 +266,6 @@ impl BlockViewerPane {
             diff_meta: Vec::new(),
             last_generation: generation,
             was_running: entry.is_running,
-            bg_task_id: None,
             last_theme: Theme::current_kind(),
             modal: ModalWindowState::new(),
             prepend_items: Vec::new(),
@@ -324,7 +319,6 @@ impl BlockViewerPane {
             diff_meta: Vec::new(),
             last_generation: last_output_len as u64, // reuse generation field for output length
             was_running: entry.is_running,
-            bg_task_id: None,
             last_theme: Theme::current_kind(),
             modal: ModalWindowState::new(),
             prepend_items: Vec::new(),
@@ -377,7 +371,6 @@ impl BlockViewerPane {
             diff_meta: Vec::new(),
             last_generation: 0,
             was_running: false,
-            bg_task_id: None,
             last_theme: Theme::current_kind(),
             modal: ModalWindowState::new(),
             prepend_items: Vec::new(),
@@ -656,87 +649,6 @@ impl BlockViewerPane {
         ))
     }
 
-    /// Create a viewer for a background task (stdout from central store).
-    ///
-    /// Unlike other viewers that read from the scrollback entry, this one
-    /// takes stdout directly and stores the `task_id` for streaming updates.
-    pub fn for_bg_task(entry_id: EntryId, task_id: &str, stdout: &str, is_running: bool) -> Self {
-        let config = ListPaneConfig {
-            follow_enabled: is_running,
-            wrap_toggle_enabled: true,
-            search_enabled: true,
-            copy_enabled: true,
-            show_selection_when_unfocused: false,
-            visual_select_enabled: true,
-            filter_enabled: true,
-            goto_line_enabled: false,
-        };
-        let mut list_state = ListPaneState::new_with_config(WrapMode::Wrap, is_running, config);
-        list_state.set_clipboard_provider(Box::new(SystemClipboard));
-
-        let theme = Theme::current();
-        let items = Self::build_execute_items(Some(stdout).filter(|s| !s.is_empty()), &theme);
-
-        let list_style = ListPaneStyle {
-            selection_bg: theme.bg_highlight,
-            visual_select_bg: theme.bg_visual,
-            uniform_visual_bg: true,
-            ..ListPaneStyle::default()
-        };
-
-        Self {
-            entry_id,
-            kind: ViewerKind::BgTask,
-            list_state,
-            list_style,
-            items,
-            last_content_area: Rect::default(),
-
-            raw_toggle_pending: false,
-            copy_meta_pending: false,
-            copy_content_pending: false,
-            diff_meta: Vec::new(),
-            last_generation: stdout.len() as u64,
-            was_running: is_running,
-            bg_task_id: Some(task_id.to_string()),
-            last_theme: Theme::current_kind(),
-            modal: ModalWindowState::new(),
-            prepend_items: Vec::new(),
-            text_drag: None,
-            drag_copy_text: None,
-            cached_unified: Vec::new(),
-        }
-    }
-
-    /// Update a BgTask viewer with new stdout content.
-    ///
-    /// Called from the tick path when stdout in the central store has changed.
-    /// Returns `true` if a redraw is needed.
-    pub fn tick_bg_task(&mut self, stdout: &str, is_running: bool) -> bool {
-        let mut needs_redraw = false;
-        let current_len = stdout.len() as u64;
-
-        if current_len != self.last_generation {
-            self.last_generation = current_len;
-            let theme = Theme::current();
-            self.items = Self::build_execute_items(Some(stdout).filter(|s| !s.is_empty()), &theme);
-            self.list_state.invalidate_layout();
-            needs_redraw = true;
-        }
-
-        // Running → finished transition: disable follow
-        if self.was_running && !is_running {
-            self.was_running = false;
-            self.list_state.disable_follow_permanently();
-            if let Some(last) = self.items.last() {
-                self.list_state.select_by_id(last.stable_id());
-            }
-            needs_redraw = true;
-        }
-
-        needs_redraw
-    }
-
     /// Build content lines from execute stdout output.
     fn build_execute_items(output: Option<&str>, theme: &Theme) -> Vec<ContentLine> {
         let Some(output) = output else {
@@ -797,7 +709,6 @@ impl BlockViewerPane {
             diff_meta,
             last_generation: 0,
             was_running: false,
-            bg_task_id: None,
             last_theme: Theme::current_kind(),
             modal: ModalWindowState::new(),
             prepend_items: Vec::new(),
@@ -913,7 +824,6 @@ impl BlockViewerPane {
                 }
             }
             ViewerKind::Edit => {}
-            ViewerKind::BgTask => {}
             ViewerKind::Read
             | ViewerKind::Grep
             | ViewerKind::WebFetch
@@ -1011,7 +921,6 @@ impl BlockViewerPane {
             ViewerKind::Grep => {
                 hints.push(HintItem::new(crate::key!('Y'), "copy pattern"));
             }
-            ViewerKind::BgTask => {}
             ViewerKind::IntegrationSearch | ViewerKind::UseTool | ViewerKind::PlainText => {}
         }
         hints
@@ -1676,7 +1585,7 @@ impl BlockViewerPane {
         if current_theme != self.last_theme {
             self.last_theme = current_theme;
             self.list_style = match self.kind {
-                ViewerKind::BgTask | ViewerKind::Execute => ListPaneStyle {
+                ViewerKind::Execute => ListPaneStyle {
                     selection_bg: theme.bg_highlight,
                     visual_select_bg: theme.bg_visual,
                     uniform_visual_bg: true,
@@ -1695,9 +1604,6 @@ impl BlockViewerPane {
                         &theme,
                     );
                     self.list_state.invalidate_layout();
-                }
-                ViewerKind::BgTask => {
-                    self.last_generation = u64::MAX;
                 }
                 _ => {}
             }

@@ -383,7 +383,7 @@ impl ScrollbackEntry {
         is_selected: bool,
         cwd: Option<&Path>,
     ) {
-        // UserPrompt, ToolCall, Thinking, BgTask and Subagent vary their
+        // UserPrompt, ToolCall, Thinking and Subagent vary their
         // output() based on is_selected — for all other blocks the output
         // is identical regardless of selection state. Normalize to false
         // for those blocks so selection changes don't thrash the cache.
@@ -391,7 +391,6 @@ impl ScrollbackEntry {
             && (self.block.is_user_prompt()
                 || self.block.is_tool_call()
                 || self.block.is_thinking()
-                || self.block.is_bg_task()
                 || self.block.is_subagent());
 
         let current_theme = theme_cache::current_kind();

@@ -49,7 +49,6 @@ use super::transcript::{
     handle_marketplace_updates_available,
     
 };
-use super::turn::handle_bg_task_killed;
 use crate::app::actions::{
     ClipboardPasteCompletion, ClipboardPasteContext, ClipboardPasteFailure, ClipboardPasteTarget,
     DoctorFixTarget, Effect, ProbedAttachment, SubagentKillOutcome,
@@ -492,11 +491,6 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             result,
             prev_model_id,
         } => handle_switch_model_complete(app, agent_id, model_id, effort, result, prev_model_id),
-        TaskResult::BgTaskKilled {
-            session_id,
-            task_id,
-            outcome,
-        } => handle_bg_task_killed(app, session_id, task_id, outcome),
         TaskResult::ClipboardAttachmentProbed {
             ctx,
             image,

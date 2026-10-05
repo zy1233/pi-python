@@ -147,7 +147,6 @@ use crate::views::prompt_widget::{PromptWidget, StashedPrompt};
 use crate::views::question_view::QuestionViewState;
 use crate::views::queue_pane::QueuePane;
 use crate::views::subagent_catalog_pane::SubagentCatalogPane;
-use crate::views::tasks_pane::TasksPane;
 use crate::views::todo_pane::TodoPane;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -181,8 +180,6 @@ mod rewind;
 mod selection;
 mod session;
 mod shell_completion;
-#[cfg(test)]
-mod task_status_tests;
 mod viewer;
 mod workflows_overlay;
 use super::actions;
@@ -644,7 +641,6 @@ pub(crate) struct PendingForkBanner {
 /// A finish held until its spawn arrives. Output is stripped at insert.
 #[derive(Debug, Clone)]
 pub(crate) struct DeferredSubagentFinish {
-    pub notification: pi_shell::extensions::notification::SessionNotification,
     pub inserted_at: std::time::Instant,
 }
 /// In-flight reconnect session reload.
@@ -808,7 +804,6 @@ pub struct AgentView {
     /// Sticky: once the user types in the prompt, hide the tip for the session.
     pub tip_typing_dismissed: bool,
     pub todo: TodoPane,
-    pub tasks: TasksPane,
     pub catalog: SubagentCatalogPane,
     pub queue: QueuePane,
     /// Per-agent mirror of the server-authoritative shared prompt queue
@@ -1199,8 +1194,6 @@ pub struct AgentView {
     /// Still-running watcher cue on the turn-status row (click opens the
     /// tasks pane, same as `Ctrl+G`).
     pub hit_watching_cue: HitArea,
-    /// One-time Ctrl+G toast already fired for a watching-cue click.
-    pub(crate) watching_cue_toast_shown: bool,
     /// `[hide]` button on the announcement banner (click == `/announcements hide`).
     pub hit_announcement_hide: HitArea,
     /// `[label]` CTA button on the promo banner row (click opens its link).
@@ -2569,40 +2562,6 @@ pub(crate) mod test_fixtures {
             })
             .count()
     }
-    pub fn add_running_bg_task(agent: &mut AgentView) {
-        agent.session.bg_tasks.insert(
-            "task-1".into(),
-            crate::app::agent::BgTaskState {
-                task_id: "task-1".into(),
-                tool_call_id: "tool-1".into(),
-                command: "sleep 5".into(),
-                description: None,
-                cwd: String::new(),
-                output_file: String::new(),
-                status: crate::app::agent::BgTaskStatus::Running,
-                start_time: std::time::SystemTime::now(),
-                end_time: None,
-                exit_code: None,
-                signal: None,
-                stdout: String::new(),
-                stdout_line_count: 0,
-                truncated: false,
-                pending_kill: false,
-                kill_requested_at: None,
-                scrollback_entry_id: None,
-                is_monitor: false,
-                restored_from_replay: false,
-            },
-        );
-        agent.tasks.sync(
-            &agent.session.bg_tasks,
-            &agent.subagent_sessions,
-            &agent.session.scheduled_tasks,
-            None,
-            &std::collections::HashSet::new(),
-            &agent.workflow_runs,
-        );
-    }
     pub fn add_running_execute(agent: &mut AgentView) {
         use crate::acp::meta::NotificationMeta;
         use std::sync::Arc;
@@ -2649,9 +2608,6 @@ pub(crate) mod test_fixtures {
             model_switch_pending: false,
             user_model_preference: None,
             deferred_model_switch: None,
-            bg_tasks: std::collections::BTreeMap::new(),
-            bg_tool_call_to_task: std::collections::HashMap::new(),
-            scheduled_tasks: std::collections::HashMap::new(),
             in_flight_prompt: None,
             compact_held_prompt: None,
             current_prompt_id: None,
@@ -2712,9 +2668,6 @@ pub(crate) mod test_fixtures {
                 model_switch_pending: false,
                 user_model_preference: None,
                 deferred_model_switch: None,
-                bg_tasks: std::collections::BTreeMap::new(),
-                bg_tool_call_to_task: std::collections::HashMap::new(),
-                scheduled_tasks: std::collections::HashMap::new(),
                 in_flight_prompt: None,
                 compact_held_prompt: None,
                 current_prompt_id: None,
@@ -3271,9 +3224,6 @@ pub(crate) fn test_agent_view(session_id: Option<&str>, cwd: std::path::PathBuf)
             model_switch_pending: false,
             user_model_preference: None,
             deferred_model_switch: None,
-            bg_tasks: std::collections::BTreeMap::new(),
-            bg_tool_call_to_task: std::collections::HashMap::new(),
-            scheduled_tasks: std::collections::HashMap::new(),
             in_flight_prompt: None,
             compact_held_prompt: None,
             current_prompt_id: None,

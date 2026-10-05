@@ -23,22 +23,7 @@ pub(super) fn dispatch_copy_block_content(app: &mut AppView) {
             return;
         };
 
-        // BgTask blocks: copy stdout from central store
-        let text = if let RenderBlock::BgTask(block) = &entry.block {
-            let stdout = agent
-                .session
-                .bg_tasks
-                .get(&block.task_id)
-                .map(|t| t.stdout.clone())
-                .unwrap_or_default();
-            if stdout.is_empty() {
-                None
-            } else {
-                Some(stdout)
-            }
-        } else {
-            entry.block.copy_text(entry.raw)
-        };
+        let text = entry.block.copy_text(entry.raw);
 
         if let Some(text) = text
             && !text.is_empty()
@@ -173,25 +158,6 @@ pub(super) fn dispatch_open_block_viewer(app: &mut AppView) {
             }
             RenderBlock::ToolCall(ToolCallBlock::UseTool(_)) => {
                 BlockViewerPane::for_use_tool(entry.id, entry)
-            }
-            RenderBlock::BgTask(block) => {
-                let stdout = agent
-                    .session
-                    .bg_tasks
-                    .get(&block.task_id)
-                    .map(|t| t.stdout.as_str())
-                    .unwrap_or("");
-                let is_running = agent
-                    .session
-                    .bg_tasks
-                    .get(&block.task_id)
-                    .is_some_and(|t| t.status == crate::app::agent::BgTaskStatus::Running);
-                Some(BlockViewerPane::for_bg_task(
-                    entry.id,
-                    &block.task_id,
-                    stdout,
-                    is_running,
-                ))
             }
             _ => None,
         };

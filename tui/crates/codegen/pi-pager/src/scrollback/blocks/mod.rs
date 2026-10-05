@@ -3,7 +3,6 @@
 //! Each block type represents a different kind of content in the scrollback.
 
 mod agent;
-mod bg_task;
 mod btw;
 mod context_info;
 mod credit_limit;
@@ -19,7 +18,6 @@ mod user;
 mod workflow;
 
 pub use agent::AgentMessageBlock;
-pub use bg_task::{BgTaskBlock, BgTaskKind};
 pub use btw::BtwBlock;
 pub use context_info::ContextInfoBlock;
 pub use credit_limit::{CreditLimitBlock, CreditLimitCardAction};

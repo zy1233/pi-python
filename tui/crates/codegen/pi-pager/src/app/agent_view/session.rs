@@ -15,7 +15,6 @@ use crate::scrollback::text_selection::ResolvedSelectionModel;
 use crate::views::prompt_widget::PromptWidget;
 use crate::views::queue_pane::QueuePane;
 use crate::views::subagent_catalog_pane::SubagentCatalogPane;
-use crate::views::tasks_pane::TasksPane;
 use crate::views::todo_pane::TodoPane;
 use ratatui::layout::Rect;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -123,7 +122,6 @@ impl AgentView {
             prompt,
             tip_typing_dismissed: false,
             todo: TodoPane::new(),
-            tasks: TasksPane::new(),
             catalog: SubagentCatalogPane::new(),
             queue: QueuePane::new(),
             shared_queue: Vec::new(),
@@ -249,7 +247,6 @@ impl AgentView {
             hit_cwd: Default::default(),
             hit_cancel_button: Default::default(),
             hit_watching_cue: Default::default(),
-            watching_cue_toast_shown: false,
             hit_announcement_hide: Default::default(),
             hit_announcement_cta: Default::default(),
             privacy_banner: Default::default(),
@@ -400,15 +397,6 @@ impl AgentView {
     pub(crate) fn mark_as_subagent_view(&mut self) {
         self.is_subagent_view = true;
     }
-    /// Register a child view and establish its read-only subagent identity.
-    pub(crate) fn insert_subagent_view(
-        &mut self,
-        child_sid: String,
-        mut child_view: Box<AgentView>,
-    ) {
-        child_view.mark_as_subagent_view();
-        self.subagent_views.insert(child_sid, child_view);
-    }
     /// Called at every turn-termination site; clears the wall anchor so a turn
     /// that reuses a prompt id cannot wall-max against a prior attempt.
     pub(crate) fn mark_turn_finished(&mut self, end: TurnEnd) {
@@ -546,16 +534,6 @@ impl AgentView {
     pub(crate) fn mark_reload_replay_seen(&mut self) {
         if let Some(reload) = self.session_reload.as_mut() {
             reload.saw_replay = true;
-        }
-    }
-    /// Record a staged expiry notice for the keep-stash finalize dedupe. No-op outside a
-    /// reconnect reload window (a fresh `session/load` has no stash to duplicate against).
-    pub(crate) fn note_replayed_expiry_notice(
-        &mut self,
-        entry_id: crate::scrollback::entry::EntryId,
-    ) {
-        if let Some(reload) = self.session_reload.as_mut() {
-            reload.replayed_expiry_notices.push(entry_id);
         }
     }
     /// Record that a Plan update applied while a reload window is open.
@@ -931,26 +909,11 @@ impl AgentView {
     /// stuffing a wall of shell into the status line. Descriptions are kept
     /// but clamped by the caller via [`clamp_activity_subject`].
     fn lookup_task_subject(&self, task_id: &str) -> Option<String> {
-        use crate::acp::tracker::MAX_ACTIVITY_SUBJECT_CHARS;
         fn first_nonempty_line(s: &str) -> &str {
             s.lines()
                 .map(str::trim)
                 .find(|line| !line.is_empty())
                 .unwrap_or(s)
-        }
-        if let Some(task) = self.session.bg_tasks.get(task_id) {
-            if let Some(desc) = task
-                .description
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-            {
-                return Some(first_nonempty_line(desc).to_string());
-            }
-            let cmd = first_nonempty_line(task.command.trim());
-            if !cmd.is_empty() && cmd.chars().count() <= MAX_ACTIVITY_SUBJECT_CHARS {
-                return Some(cmd.to_string());
-            }
         }
         if let Some(info) = self.subagent_sessions.get(task_id) {
             let desc = info.description.trim();
@@ -1105,7 +1068,6 @@ impl AgentView {
             ActivePane::Todo => ActivePaneSnapshot::Todo,
             ActivePane::Queue => ActivePaneSnapshot::Queue,
             ActivePane::Prompt => ActivePaneSnapshot::Prompt,
-            ActivePane::Tasks => ActivePaneSnapshot::Tasks,
             ActivePane::Catalog => ActivePaneSnapshot::Catalog,
         };
         let outcome_snap = match outcome {
@@ -1674,268 +1636,6 @@ mod resolve_turn_activity_tests {
         };
         assert_eq!(reason.label(), "Subagent: scan src/…");
     }
-    /// When waiting on task output, the spinner subject is the bg task's
-    /// description (preferred over the raw command).
-    #[test]
-    fn task_output_wait_uses_bg_task_description() {
-        use crate::acp::meta::NotificationMeta;
-        use crate::app::agent::{BgTaskState, BgTaskStatus};
-        use agent_client_protocol as acp;
-        use std::sync::Arc;
-        use std::time::SystemTime;
-        let mut view = running_view();
-        view.session.bg_tasks.insert(
-            "bg-1".into(),
-            BgTaskState {
-                task_id: "bg-1".into(),
-                tool_call_id: "tc-1".into(),
-                command: "cargo test --release".into(),
-                description: Some("run release tests".into()),
-                cwd: String::new(),
-                output_file: String::new(),
-                status: BgTaskStatus::Running,
-                start_time: SystemTime::now(),
-                end_time: None,
-                exit_code: None,
-                signal: None,
-                stdout: String::new(),
-                stdout_line_count: 0,
-                truncated: false,
-                pending_kill: false,
-                kill_requested_at: None,
-                scrollback_entry_id: None,
-                is_monitor: false,
-                restored_from_replay: false,
-            },
-        );
-        let meta = NotificationMeta::default();
-        view.session.handle_update(
-            acp::SessionUpdate::ToolCall(
-                acp::ToolCall::new(
-                    acp::ToolCallId::new(Arc::from("wait-1")),
-                    "get_command_or_subagent_output",
-                )
-                .kind(acp::ToolKind::Other)
-                .status(acp::ToolCallStatus::Pending)
-                .content(vec![])
-                .locations(vec![]),
-            ),
-            &meta,
-            &mut view.scrollback,
-        );
-        view.session.handle_update(
-            acp::SessionUpdate::ToolCallUpdate(acp::ToolCallUpdate::new(
-                acp::ToolCallId::new(Arc::from("wait-1")),
-                acp::ToolCallUpdateFields::new().raw_input(Some(serde_json::json!({
-                    "task_ids": ["bg-1"],
-                    "timeout_ms": 30_000,
-                }))),
-            )),
-            &meta,
-            &mut view.scrollback,
-        );
-        let activity = view.resolve_turn_activity();
-        assert_eq!(
-            activity,
-            Some(TurnActivity::Waiting(WaitingReason::TaskOutput {
-                task_ids: vec!["bg-1".into()],
-                subject: Some("run release tests".into()),
-                waits: true,
-            }))
-        );
-        assert_eq!(activity.as_ref().unwrap().as_label(), "waiting_task_output");
-        let TurnActivity::Waiting(reason) = activity.unwrap() else {
-            panic!("expected waiting activity");
-        };
-        assert_eq!(reason.label(), "run release tests…");
-    }
-    /// Without a description, a short command is used as the subject.
-    #[test]
-    fn task_output_wait_falls_back_to_short_command() {
-        use crate::acp::meta::NotificationMeta;
-        use crate::app::agent::{BgTaskState, BgTaskStatus};
-        use agent_client_protocol as acp;
-        use std::sync::Arc;
-        use std::time::SystemTime;
-        let mut view = running_view();
-        view.session.bg_tasks.insert(
-            "bg-2".into(),
-            BgTaskState {
-                task_id: "bg-2".into(),
-                tool_call_id: "tc-2".into(),
-                command: "sleep 30".into(),
-                description: None,
-                cwd: String::new(),
-                output_file: String::new(),
-                status: BgTaskStatus::Running,
-                start_time: SystemTime::now(),
-                end_time: None,
-                exit_code: None,
-                signal: None,
-                stdout: String::new(),
-                stdout_line_count: 0,
-                truncated: false,
-                pending_kill: false,
-                kill_requested_at: None,
-                scrollback_entry_id: None,
-                is_monitor: false,
-                restored_from_replay: false,
-            },
-        );
-        let meta = NotificationMeta::default();
-        view.session.handle_update(
-            acp::SessionUpdate::ToolCall(
-                acp::ToolCall::new(acp::ToolCallId::new(Arc::from("wait-2")), "get_task_output")
-                    .kind(acp::ToolKind::Other)
-                    .status(acp::ToolCallStatus::Pending)
-                    .content(vec![])
-                    .raw_input(Some(serde_json::json!({
-                        "task_ids": ["bg-2"],
-                        "timeout_ms": 5_000,
-                    })))
-                    .locations(vec![]),
-            ),
-            &meta,
-            &mut view.scrollback,
-        );
-        let activity = view.resolve_turn_activity().expect("activity");
-        let TurnActivity::Waiting(reason) = activity else {
-            panic!("expected waiting: {activity:?}");
-        };
-        assert_eq!(reason.label(), "sleep 30…");
-    }
-    /// Multi-id waits use full task_ids.len() for "+ N more", not just resolved count.
-    #[test]
-    fn task_output_wait_multi_id_uses_full_task_count() {
-        use crate::acp::meta::NotificationMeta;
-        use crate::app::agent::{BgTaskState, BgTaskStatus};
-        use agent_client_protocol as acp;
-        use std::sync::Arc;
-        use std::time::SystemTime;
-        let mut view = running_view();
-        view.session.bg_tasks.insert(
-            "bg-a".into(),
-            BgTaskState {
-                task_id: "bg-a".into(),
-                tool_call_id: "tc-a".into(),
-                command: "echo a".into(),
-                description: Some("alpha task".into()),
-                cwd: String::new(),
-                output_file: String::new(),
-                status: BgTaskStatus::Running,
-                start_time: SystemTime::now(),
-                end_time: None,
-                exit_code: None,
-                signal: None,
-                stdout: String::new(),
-                stdout_line_count: 0,
-                truncated: false,
-                pending_kill: false,
-                kill_requested_at: None,
-                scrollback_entry_id: None,
-                is_monitor: false,
-                restored_from_replay: false,
-            },
-        );
-        let meta = NotificationMeta::default();
-        view.session.handle_update(
-            acp::SessionUpdate::ToolCall(
-                acp::ToolCall::new(
-                    acp::ToolCallId::new(Arc::from("wait-multi")),
-                    "get_task_output",
-                )
-                .kind(acp::ToolKind::Other)
-                .status(acp::ToolCallStatus::Pending)
-                .content(vec![])
-                .raw_input(Some(serde_json::json!({
-                    "task_ids": ["bg-a", "missing-b", "missing-c"],
-                    "timeout_ms": 5_000,
-                })))
-                .locations(vec![]),
-            ),
-            &meta,
-            &mut view.scrollback,
-        );
-        let activity = view.resolve_turn_activity().expect("activity");
-        let TurnActivity::Waiting(reason) = activity else {
-            panic!("expected waiting: {activity:?}");
-        };
-        assert_eq!(
-            reason.label(),
-            "alpha task + 2 more…",
-            "N more is based on full task_ids length, not resolved count"
-        );
-    }
-    /// Long first subjects still keep the multi-task suffix after clamping.
-    #[test]
-    fn task_output_wait_multi_id_preserves_suffix_when_first_is_long() {
-        use crate::acp::meta::NotificationMeta;
-        use crate::acp::tracker::MAX_ACTIVITY_SUBJECT_CHARS;
-        use crate::app::agent::{BgTaskState, BgTaskStatus};
-        use agent_client_protocol as acp;
-        use std::sync::Arc;
-        use std::time::SystemTime;
-        let long_desc = "L".repeat(80);
-        let mut view = running_view();
-        view.session.bg_tasks.insert(
-            "bg-long".into(),
-            BgTaskState {
-                task_id: "bg-long".into(),
-                tool_call_id: "tc-long".into(),
-                command: "echo long".into(),
-                description: Some(long_desc),
-                cwd: String::new(),
-                output_file: String::new(),
-                status: BgTaskStatus::Running,
-                start_time: SystemTime::now(),
-                end_time: None,
-                exit_code: None,
-                signal: None,
-                stdout: String::new(),
-                stdout_line_count: 0,
-                truncated: false,
-                pending_kill: false,
-                kill_requested_at: None,
-                scrollback_entry_id: None,
-                is_monitor: false,
-                restored_from_replay: false,
-            },
-        );
-        let meta = NotificationMeta::default();
-        view.session.handle_update(
-            acp::SessionUpdate::ToolCall(
-                acp::ToolCall::new(
-                    acp::ToolCallId::new(Arc::from("wait-long-multi")),
-                    "get_task_output",
-                )
-                .kind(acp::ToolKind::Other)
-                .status(acp::ToolCallStatus::Pending)
-                .content(vec![])
-                .raw_input(Some(serde_json::json!({
-                    "task_ids": ["bg-long", "missing-b"],
-                    "timeout_ms": 5_000,
-                })))
-                .locations(vec![]),
-            ),
-            &meta,
-            &mut view.scrollback,
-        );
-        let activity = view.resolve_turn_activity().expect("activity");
-        let TurnActivity::Waiting(reason) = activity else {
-            panic!("expected waiting: {activity:?}");
-        };
-        let label = reason.label();
-        assert!(
-            label.contains(" + 1 more"),
-            "multi-task suffix must survive clamp: {label}"
-        );
-        assert!(label.ends_with('…'));
-        let body = label.strip_suffix('…').unwrap();
-        assert!(
-            body.chars().count() <= MAX_ACTIVITY_SUBJECT_CHARS + 20,
-            "unexpectedly long body: {body}"
-        );
-    }
     /// get_task_output often passes subagent_id, not the child_session_id map key.
     #[test]
     fn task_output_wait_resolves_subagent_by_subagent_id() {
@@ -2012,78 +1712,6 @@ mod resolve_turn_activity_tests {
             panic!("expected waiting: {activity:?}");
         };
         assert_eq!(reason.label(), "explore the auth module…");
-    }
-    /// Long bare commands are not used as subjects — keep the original label.
-    #[test]
-    fn task_output_wait_long_command_keeps_generic_label() {
-        use crate::acp::meta::NotificationMeta;
-        use crate::app::agent::{BgTaskState, BgTaskStatus};
-        use agent_client_protocol as acp;
-        use std::sync::Arc;
-        use std::time::SystemTime;
-        let long_cmd = "cargo test --release --workspace --all-features -- --nocapture".to_string();
-        assert!(
-            long_cmd.chars().count() > 40,
-            "fixture must exceed the short-command threshold"
-        );
-        let mut view = running_view();
-        view.session.bg_tasks.insert(
-            "bg-3".into(),
-            BgTaskState {
-                task_id: "bg-3".into(),
-                tool_call_id: "tc-3".into(),
-                command: long_cmd,
-                description: None,
-                cwd: String::new(),
-                output_file: String::new(),
-                status: BgTaskStatus::Running,
-                start_time: SystemTime::now(),
-                end_time: None,
-                exit_code: None,
-                signal: None,
-                stdout: String::new(),
-                stdout_line_count: 0,
-                truncated: false,
-                pending_kill: false,
-                kill_requested_at: None,
-                scrollback_entry_id: None,
-                is_monitor: false,
-                restored_from_replay: false,
-            },
-        );
-        let meta = NotificationMeta::default();
-        view.session.handle_update(
-            acp::SessionUpdate::ToolCall(
-                acp::ToolCall::new(acp::ToolCallId::new(Arc::from("wait-3")), "get_task_output")
-                    .kind(acp::ToolKind::Other)
-                    .status(acp::ToolCallStatus::Pending)
-                    .content(vec![])
-                    .raw_input(Some(serde_json::json!({
-                        "task_ids": ["bg-3"],
-                        "timeout_ms": 5_000,
-                    })))
-                    .locations(vec![]),
-            ),
-            &meta,
-            &mut view.scrollback,
-        );
-        let activity = view.resolve_turn_activity().expect("activity");
-        let TurnActivity::Waiting(reason) = activity else {
-            panic!("expected waiting: {activity:?}");
-        };
-        assert_eq!(
-            reason.label(),
-            "Waiting on task output…",
-            "long command without description must not become the spinner subject"
-        );
-        assert_eq!(
-            reason,
-            WaitingReason::TaskOutput {
-                task_ids: vec!["bg-3".into()],
-                subject: None,
-                waits: true,
-            }
-        );
     }
 }
 #[cfg(test)]

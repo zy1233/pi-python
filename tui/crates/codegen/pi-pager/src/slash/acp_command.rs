@@ -137,7 +137,6 @@ impl SlashCommand for AcpSlashCommand {
                 display_text: text.clone(),
                 prompt_blocks: vec![acp::ContentBlock::Text(acp::TextContent::new(text))],
                 display_as_skill: true,
-                scheduled_task_preview: None,
             },
         }
     }

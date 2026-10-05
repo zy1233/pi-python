@@ -394,9 +394,6 @@ pub(in crate::app::dispatch) fn dispatch_new_session_inner_with_id(
             model_switch_pending: false,
             user_model_preference: None,
             deferred_model_switch: app.deferred_model_switch_from_cli(),
-            bg_tasks: std::collections::BTreeMap::new(),
-            bg_tool_call_to_task: std::collections::HashMap::new(),
-            scheduled_tasks: std::collections::HashMap::new(),
             in_flight_prompt: None,
             compact_held_prompt: None,
             current_prompt_id: None,
@@ -503,17 +500,10 @@ pub(in crate::app::dispatch) fn dispatch_delete_current_session_answered(
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };
-    let Some((session_id, cwd, running_bg_tasks)) = app.agents.get(&id).and_then(|agent| {
+    let Some((session_id, cwd)) = app.agents.get(&id).and_then(|agent| {
         let session_id = agent.session.session_id.clone()?;
         let cwd = agent.session.cwd.display().to_string();
-        let running_bg_tasks: Vec<String> = agent
-            .session
-            .bg_tasks
-            .values()
-            .filter(|t| t.status == crate::app::agent::BgTaskStatus::Running)
-            .map(|t| t.task_id.clone())
-            .collect();
-        Some((session_id, cwd, running_bg_tasks))
+        Some((session_id, cwd))
     }) else {
         app.show_toast("No active session to delete");
         return vec![];
@@ -525,15 +515,6 @@ pub(in crate::app::dispatch) fn dispatch_delete_current_session_answered(
         trigger: None,
         rewind_prompt_id: None,
     }];
-    effects.extend(
-        running_bg_tasks
-            .into_iter()
-            .map(|task_id| Effect::KillBgTask {
-                session_id: session_id.clone(),
-                task_id,
-                source: pi_shell::extensions::task::TaskKillSource::Teardown,
-            }),
-    );
     app.show_toast("Deleting session\u{2026}");
     effects.push(Effect::DeleteSession {
         source: "current".into(),
@@ -864,9 +845,6 @@ pub(in crate::app::dispatch) fn dispatch_new_worktree_session(
             model_switch_pending: false,
             user_model_preference: None,
             deferred_model_switch: app.deferred_model_switch_from_cli(),
-            bg_tasks: std::collections::BTreeMap::new(),
-            bg_tool_call_to_task: std::collections::HashMap::new(),
-            scheduled_tasks: std::collections::HashMap::new(),
             in_flight_prompt: None,
             compact_held_prompt: None,
             current_prompt_id: None,

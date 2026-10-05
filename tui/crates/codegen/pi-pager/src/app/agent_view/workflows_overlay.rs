@@ -54,17 +54,6 @@ fn transcript_target(
 }
 
 impl AgentView {
-    pub(crate) fn open_workflow_detail(&mut self, name: &str) {
-        let Some(run_id) = self
-            .workflow_runs
-            .iter()
-            .find(|r| r.name == name)
-            .map(|r| r.run_id.clone())
-        else {
-            return;
-        };
-        self.open_workflow_detail_by_run_id(&run_id);
-    }
 
     pub(crate) fn open_workflow_detail_by_run_id(&mut self, run_id: &str) {
         if !self.workflow_runs.iter().any(|r| r.run_id == run_id) {

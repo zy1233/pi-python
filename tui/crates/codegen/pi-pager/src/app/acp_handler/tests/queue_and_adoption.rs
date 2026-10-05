@@ -584,11 +584,6 @@
         agent.deferred_subagent_finishes.insert(
             "child-stale".into(),
             crate::app::agent_view::DeferredSubagentFinish {
-                notification: pi_shell::extensions::notification::SessionNotification {
-                    session_id: acp::SessionId::new("sess-a"),
-                    update: test_subagent_finished("child-stale"),
-                    meta: None,
-                },
                 inserted_at: std::time::Instant::now(),
             },
         );

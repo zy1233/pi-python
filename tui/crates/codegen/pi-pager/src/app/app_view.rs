@@ -4604,7 +4604,6 @@ impl AppView {
         {
             needs_redraw |= agent.scrollback.tick();
             needs_redraw |= agent.todo.list_state.tick();
-            needs_redraw |= agent.tasks.tick();
             for child_view in agent.subagent_views.values_mut() {
                 needs_redraw |= child_view.scrollback.tick();
                 needs_redraw |= child_view.tick_toast();
@@ -4862,13 +4861,7 @@ impl AppView {
     fn tick_agent_block_viewer(agent: &mut AgentView) -> bool {
         let mut needs_redraw = false;
         if let Some(ref mut viewer) = agent.block_viewer {
-            if viewer.kind == crate::views::block_viewer::ViewerKind::BgTask
-                && let Some(ref task_id) = viewer.bg_task_id.clone()
-                && let Some(task) = agent.session.bg_tasks.get(task_id)
-            {
-                let is_running = task.status == crate::app::agent::BgTaskStatus::Running;
-                needs_redraw |= viewer.tick_bg_task(&task.stdout, is_running);
-            } else if let Some(entry) = agent.scrollback.get_by_id(viewer.entry_id) {
+            if let Some(entry) = agent.scrollback.get_by_id(viewer.entry_id) {
                 needs_redraw |= viewer.tick(entry);
             } else {
                 agent.block_viewer = None;
@@ -4938,7 +4931,6 @@ impl AppView {
                 };
                 let fast = agent.scrollback.needs_animation()
                     || agent.todo.list_state.needs_tick()
-                    || agent.tasks.needs_tick()
                     || agent.acp_synced_generation != agent.session.available_commands_generation
                     || !agent.session.state.is_idle()
                     || agent.wake_turn_active()

@@ -984,16 +984,6 @@ pub(crate) fn execute(
                 }
             });
         }
-        Effect::KillBgTask { session_id, task_id, .. } => {
-            let sid = session_id.0.to_string();
-            tasks.spawn(async move {
-                TaskResult::BgTaskKilled {
-                    session_id: sid,
-                    task_id,
-                    outcome: parse_kill_outcome("{}"),
-                }
-            });
-        }
         Effect::KillSubagent { session_id, subagent_id } => {
             tasks.spawn(async move {
                 TaskResult::KillSubagentComplete {
@@ -1001,16 +991,6 @@ pub(crate) fn execute(
                     subagent_id,
                     outcome: SubagentKillOutcome::NothingLive { status: None },
                 }
-            });
-        }
-        Effect::DeleteScheduledTask { .. } => {
-            tasks.spawn(async move {
-                TaskResult::CancelComplete
-            });
-        }
-        Effect::DemoteToBackground { .. } => {
-            tasks.spawn(async move {
-                TaskResult::CancelComplete
             });
         }
         Effect::SwitchModel {

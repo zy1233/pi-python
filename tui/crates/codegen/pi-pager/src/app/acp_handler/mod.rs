@@ -5,8 +5,7 @@
 //! and pi session extension notifications (`legacy ext RPC` and
 //! replay-path `legacy ext RPC`).
 
-use std::collections::hash_map::Entry;
-use std::path::PathBuf;
+#[cfg(test)]
 use std::sync::Arc;
 
 use agent_client_protocol as acp;
@@ -16,16 +15,11 @@ use pi_shell::extensions::notification::{
     SessionNotification, SessionUpdate as PiSessionUpdate, is_reauthable_failure,
 };
 use pi_shell::tools::todo::todo_item_from_plan_entry;
-use pi_tools::notification::ScheduledTaskRemovedReason;
 use pi_workspace::permission::bash_command_splitting::BashCommandHighlights;
 
 use crate::acp::meta::NotificationMeta;
-use crate::acp::tracker::AcpUpdateTracker;
 use crate::acp::tracker::TurnActivity;
-use crate::app::agent::{
-    AgentId, AgentSession, AgentState, BgTaskState, BgTaskStatus, GoalDisplayPhase,
-    GoalDisplayState, GoalDisplayStatus,
-};
+use crate::app::agent::{AgentId, AgentSession, AgentState, GoalDisplayPhase, GoalDisplayState, GoalDisplayStatus};
 use crate::notifications::{NotificationEvent, NotificationEventKind};
 use crate::scrollback::block::RenderBlock;
 use crate::scrollback::blocks::SessionEvent;
@@ -33,10 +27,9 @@ use crate::views::permission_view::{
     McpScope, McpScopeState, PermissionFocus, PermissionViewState, SubagentInfo,
 };
 
-use super::agent_view::{AgentPane, AgentView, InputMode};
+use super::agent_view::{AgentPane, AgentView};
 use super::app_view::{ActiveView, AppView};
 
-mod background;
 mod permissions;
 mod prompt_origin;
 mod queue;
@@ -54,10 +47,7 @@ use permissions::{
 };
 
 // Hub + child modules (via `use super::*`) need sibling symbols in this scope.
-use routing::{
-    SessionMatch, find_session_match, is_matched_agent_active,
-    resolve_notif_agent, resolve_target_view,
-};
+use routing::{SessionMatch, find_session_match, is_matched_agent_active};
 
 use prompt_origin::{finish_wake_turn, viewer_turn_anchor};
 pub(crate) use prompt_origin::{
@@ -67,10 +57,7 @@ pub(crate) use prompt_origin::{
 
 pub(crate) use subagent_activity::finalize_killed_subagent;
 use subagent_activity::{subagent_activity_label, sync_subagent_activity};
-use subagent_lifecycle::{
-    LifecycleDelivery, LifecycleOrigin, classify_subagent_lifecycle, gate_subagent_lifecycle,
-    redispatched_subagent_finish, take_deferred_subagent_finish,
-};
+use subagent_lifecycle::{LifecycleDelivery, LifecycleOrigin, classify_subagent_lifecycle, gate_subagent_lifecycle, redispatched_subagent_finish};
 
 use workflow_ingest::ingest_workflow_update;
 
@@ -84,18 +71,7 @@ use session_notification::{
 };
 
 pub(crate) use queue::PendingRunningAdoption;
-#[allow(unused_imports)]
-use background::{
-    derive_child_cwd, handle_scheduled_task_created,
-    handle_scheduled_task_deleted, 
-    handle_task_backgrounded, handle_task_completed,
-    route_bg_task_stdout,
-};
 
-// Test-only bare-name surface for `tests/*` (`use super::*`).
-#[cfg(test)]
-#[allow(unused_imports)]
-use background::*;
 #[cfg(test)]
 #[allow(unused_imports)]
 use prompt_origin::*;
@@ -254,13 +230,6 @@ pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
                             .collect();
                         agent.todo.update_todos(items);
                         agent.mark_reload_todo_update();
-                        advance_reconnect_cursor(agent, &mut meta);
-                        !meta.is_replay && !agent.session.loading_replay
-                    } else if let acp::SessionUpdate::ToolCallUpdate(ref tcu) = notif.request.update
-                        && route_bg_task_stdout(tcu, &mut agent.session)
-                    {
-                        // Stdout chunk for a bg task — routed to central store,
-                        // not to the scrollback tracker.
                         advance_reconnect_cursor(agent, &mut meta);
                         !meta.is_replay && !agent.session.loading_replay
                     } else if !meta.is_replay

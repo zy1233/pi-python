@@ -46,7 +46,7 @@ use super::task_result::dispatch_task_result;
 use super::*;
 use crate::acp::model_state::ModelState;
 use crate::acp::tracker::AcpUpdateTracker;
-use crate::app::actions::{Action, Effect, SubagentKillOutcome, SwitchModelError, TaskResult};
+use crate::app::actions::{Action, Effect, SwitchModelError, TaskResult};
 use crate::app::agent::{AgentId, AgentSession, AgentState};
 use crate::app::agent_view::test_fixtures::SteerFollowUp;
 use crate::app::agent_view::{ActivePane, AgentView, PromptMode};
@@ -318,9 +318,6 @@ fn make_test_agent_session(app: &AppView, id: AgentId, sid: &str) -> AgentSessio
         model_switch_pending: false,
         user_model_preference: None,
         deferred_model_switch: app.deferred_model_switch_from_cli(),
-        bg_tasks: std::collections::BTreeMap::new(),
-        bg_tool_call_to_task: std::collections::HashMap::new(),
-        scheduled_tasks: std::collections::HashMap::new(),
         in_flight_prompt: None,
         compact_held_prompt: None,
         current_prompt_id: None,
@@ -570,9 +567,6 @@ fn insert_placeholder_agent(app: &mut AppView, id: AgentId) {
             model_switch_pending: false,
             user_model_preference: None,
             deferred_model_switch: None,
-            bg_tasks: std::collections::BTreeMap::new(),
-            bg_tool_call_to_task: std::collections::HashMap::new(),
-            scheduled_tasks: std::collections::HashMap::new(),
             in_flight_prompt: None,
             compact_held_prompt: None,
             current_prompt_id: None,
@@ -601,36 +595,13 @@ fn fork_test_app() -> AppView {
     app.agents.get_mut(&AgentId(0)).unwrap().current_branch = Some("main".into());
     app
 }
-fn make_bg_task(task_id: &str) -> crate::app::agent::BgTaskState {
-    crate::app::agent::BgTaskState {
-        task_id: task_id.into(),
-        tool_call_id: String::new(),
-        command: "sleep 99".into(),
-        description: None,
-        cwd: String::new(),
-        output_file: String::new(),
-        status: crate::app::agent::BgTaskStatus::Running,
-        start_time: std::time::SystemTime::now(),
-        end_time: None,
-        exit_code: None,
-        signal: None,
-        stdout: String::new(),
-        stdout_line_count: 0,
-        truncated: false,
-        pending_kill: false,
-        kill_requested_at: None,
-        scrollback_entry_id: None,
-        is_monitor: false,
-        restored_from_replay: false,
-    }
-}
 /// Set up a two-agent app: agent 0 is active with "sess-A",
-/// agent 1 is inactive with "sess-B" and a bg task.
-fn two_agent_app_with_bg_task() -> AppView {
+/// agent 1 is inactive with "sess-B".
+fn two_agent_app() -> AppView {
     let mut app = test_app_with_agent();
     app.agents[&AgentId(0)].session.session_id = Some(acp::SessionId::new("sess-A"));
     let id1 = AgentId(1);
-    let mut agent1 = AgentView::new(
+    let agent1 = AgentView::new(
         AgentSession {
             id: id1,
             acp_tx: app.acp_tx.clone(),
@@ -659,9 +630,6 @@ fn two_agent_app_with_bg_task() -> AppView {
             model_switch_pending: false,
             user_model_preference: None,
             deferred_model_switch: None,
-            bg_tasks: std::collections::BTreeMap::new(),
-            bg_tool_call_to_task: std::collections::HashMap::new(),
-            scheduled_tasks: std::collections::HashMap::new(),
             in_flight_prompt: None,
             compact_held_prompt: None,
             current_prompt_id: None,
@@ -669,10 +637,6 @@ fn two_agent_app_with_bg_task() -> AppView {
         },
         ScrollbackState::new(),
     );
-    let mut task = make_bg_task("task-B-1");
-    task.pending_kill = true;
-    task.kill_requested_at = Some(std::time::Instant::now());
-    agent1.session.bg_tasks.insert("task-B-1".into(), task);
     app.agents.insert(id1, agent1);
     app.next_agent_id = 2;
     assert!(matches!(app.active_view, ActiveView::Agent(AgentId(0))));

@@ -104,7 +104,6 @@ impl AgentView {
                 match target {
                     AgentPane::Queue => self.queue.overlay.focused = false,
                     AgentPane::Todo => self.todo.overlay.focused = false,
-                    AgentPane::Tasks => self.tasks.overlay.focused = false,
                     AgentPane::Catalog => self.catalog.overlay.focused = false,
                     _ => {}
                 }

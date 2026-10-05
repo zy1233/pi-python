@@ -879,20 +879,6 @@ impl AgentView {
                 continue;
             }
 
-            // BgTask: copy stdout from session state when available.
-            if let crate::scrollback::block::RenderBlock::BgTask(ref block) = entry.block {
-                let stdout = self
-                    .session
-                    .bg_tasks
-                    .get(&block.task_id)
-                    .map(|t| &t.stdout)
-                    .filter(|s| !s.is_empty());
-                if let Some(stdout) = stdout {
-                    parts.push(stdout.clone());
-                    continue;
-                }
-            }
-
             // Find the content width from the resolved model's visible block geometry.
             let content_width = self
                 .last_scrollback_selection_model
@@ -961,8 +947,6 @@ impl AgentView {
         };
 
         let entry_block = self.scrollback.entry(idx).map(|e| &e.block);
-        let is_bg_task = entry_block
-            .is_some_and(|b| matches!(b, crate::scrollback::block::RenderBlock::BgTask(_)));
         let is_subagent = entry_block
             .is_some_and(|b| matches!(b, crate::scrollback::block::RenderBlock::Subagent(_)));
         let is_workflow = entry_block
@@ -1035,25 +1019,6 @@ impl AgentView {
         match click_count {
             1 if is_plan_tool => {
                 self.show_plan_preview();
-            }
-            2 if is_bg_task => {
-                // Double-click bg task: open block viewer (same as Enter).
-                if let Some(entry) = self.scrollback.entry(idx)
-                    && let crate::scrollback::block::RenderBlock::BgTask(ref bt) = entry.block
-                    && let Some(task) = self.session.bg_tasks.get(&bt.task_id)
-                {
-                    let eid = task
-                        .scrollback_entry_id
-                        .unwrap_or_else(|| crate::scrollback::entry::EntryId::new(0));
-                    let is_running = task.status == crate::app::agent::BgTaskStatus::Running;
-                    self.block_viewer =
-                        Some(crate::views::block_viewer::BlockViewerPane::for_bg_task(
-                            eid,
-                            &bt.task_id,
-                            &task.stdout,
-                            is_running,
-                        ));
-                }
             }
             2 if is_subagent => {
                 // Double-click subagent: open subagent view (same as Enter)

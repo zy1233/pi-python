@@ -52,16 +52,6 @@ impl AgentView {
                     }
                     return InputOutcome::Changed;
                 }
-                if self.hit_bg_status.contains(mouse.column, mouse.row) {
-                    self.tasks.overlay.toggle();
-                    self.tasks.on_state_change();
-                    if self.tasks.overlay.focused {
-                        self.set_active_pane(AgentPane::Tasks, false);
-                    } else if self.active_pane == AgentPane::Tasks {
-                        self.set_active_pane(AgentPane::Scrollback, false);
-                    }
-                    return InputOutcome::Changed;
-                }
                 if self.hit_goal_status.contains(mouse.column, mouse.row) {
                     if !self.workflow_runs.is_empty() {
                         self.show_workflows = !self.show_workflows;
@@ -112,19 +102,6 @@ impl AgentView {
                     }
                     return InputOutcome::Changed;
                 }
-                if self.hit_bg_close.contains(mouse.column, mouse.row) {
-                    self.tasks.overlay.escape();
-                    self.tasks.on_state_change();
-                    if self.active_pane == AgentPane::Tasks {
-                        self.set_active_pane(AgentPane::Scrollback, false);
-                    }
-                    return InputOutcome::Changed;
-                }
-                if self.hit_bg_button.contains(mouse.column, mouse.row)
-                    && !self.pos_occluded(mouse.column, mouse.row)
-                {
-                    return InputOutcome::Action(Action::DemoteToBackground);
-                }
                 if self.hit_cancel_button.contains(mouse.column, mouse.row)
                     && !self.pos_occluded(mouse.column, mouse.row)
                 {
@@ -166,23 +143,6 @@ impl AgentView {
                     return InputOutcome::Action(Action::OpenUrl(
                         crate::views::privacy_banner::PRIVACY_BANNER_POLICY_URL.to_string(),
                     ));
-                }
-                if self.hit_watching_cue.contains(mouse.column, mouse.row)
-                    && !self.pos_occluded(mouse.column, mouse.row)
-                {
-                    let was_visible = self.tasks.overlay.visible;
-                    self.tasks.overlay.toggle();
-                    self.tasks.on_state_change();
-                    if self.tasks.overlay.focused {
-                        self.set_active_pane(AgentPane::Tasks, false);
-                    } else if self.active_pane == AgentPane::Tasks {
-                        self.set_active_pane(AgentPane::Scrollback, false);
-                    }
-                    if !was_visible && !self.watching_cue_toast_shown {
-                        self.watching_cue_toast_shown = true;
-                        self.show_toast("Tip: Ctrl+G toggles the tasks pane");
-                    }
-                    return InputOutcome::Changed;
                 }
                 if self.hit_announcement_hide.contains(mouse.column, mouse.row)
                     && !self.pos_occluded(mouse.column, mouse.row)
@@ -511,161 +471,6 @@ impl AgentView {
                         }
                         InputOutcome::Changed
                     }
-                    Some(AgentPane::Tasks) => {
-                        use crate::views::tasks_pane::TaskEntryId;
-                        self.set_active_pane(AgentPane::Tasks, false);
-                        for (entry_id, rect) in &self.tasks.kill_button_rects {
-                            if rect.contains((mouse.column, mouse.row).into()) {
-                                match entry_id {
-                                    TaskEntryId::BgTask(tid) => {
-                                        return InputOutcome::Action(Action::KillBgTask(
-                                            tid.clone(),
-                                        ));
-                                    }
-                                    TaskEntryId::Agent(sid) => {
-                                        return InputOutcome::Action(Action::KillSubagent(
-                                            sid.clone(),
-                                        ));
-                                    }
-                                    TaskEntryId::Scheduled(tid) => {
-                                        return InputOutcome::Action(Action::CancelScheduledTask(
-                                            tid.clone(),
-                                        ));
-                                    }
-                                    TaskEntryId::Workflow(name) => {
-                                        return InputOutcome::Action(
-                                            Action::SendSlashCommandPreservingDraft(format!(
-                                                "/workflow stop {name}"
-                                            )),
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                        for (entry_id, rect) in &self.tasks.view_button_rects {
-                            if rect.contains((mouse.column, mouse.row).into()) {
-                                match entry_id {
-                                    TaskEntryId::BgTask(tid) => {
-                                        let already_open = self
-                                            .block_viewer
-                                            .as_ref()
-                                            .and_then(|v| v.bg_task_id.as_deref())
-                                            == Some(tid);
-                                        if already_open {
-                                            self.block_viewer = None;
-                                            return InputOutcome::Changed;
-                                        }
-                                        if let Some(task) = self.session.bg_tasks.get(tid) {
-                                            let entry_id =
-                                                task.scrollback_entry_id.unwrap_or_else(|| {
-                                                    crate::scrollback::entry::EntryId::new(0)
-                                                });
-                                            let is_running = task.status
-                                                == crate::app::agent::BgTaskStatus::Running;
-                                            self.block_viewer = Some(
-                                                crate::views::block_viewer::BlockViewerPane::for_bg_task(
-                                                    entry_id,
-                                                    tid,
-                                                    &task.stdout,
-                                                    is_running,
-                                                ),
-                                            );
-                                            self.set_active_pane(AgentPane::Scrollback, true);
-                                            return InputOutcome::Changed;
-                                        }
-                                    }
-                                    TaskEntryId::Agent(sid) => {
-                                        if let Some(child_sid) = self
-                                            .subagent_sessions
-                                            .iter()
-                                            .find(|(_, info)| {
-                                                info.subagent_id.as_ref() == sid.as_str()
-                                            })
-                                            .map(|(k, _)| k.clone())
-                                            && self.subagent_views.contains_key(&child_sid)
-                                        {
-                                            self.open_subagent_fullscreen(child_sid);
-                                            return InputOutcome::Changed;
-                                        }
-                                    }
-                                    TaskEntryId::Scheduled(tid) => {
-                                        if let Some(sid) = self
-                                            .session
-                                            .scheduled_tasks
-                                            .get(tid)
-                                            .and_then(|info| info.last_subagent_id.clone())
-                                            && let Some(child_sid) = self
-                                                .subagent_sessions
-                                                .iter()
-                                                .find(|(_, info)| {
-                                                    info.subagent_id.as_ref() == sid.as_str()
-                                                })
-                                                .map(|(k, _)| k.clone())
-                                            && self.subagent_views.contains_key(&child_sid)
-                                        {
-                                            self.open_subagent_fullscreen(child_sid);
-                                            return InputOutcome::Changed;
-                                        }
-                                    }
-                                    TaskEntryId::Workflow(_) => {}
-                                }
-                            }
-                        }
-                        self.tasks.handle_mouse(
-                            mouse.kind,
-                            mouse.column,
-                            mouse.row,
-                            self.pane_areas.tasks,
-                        );
-                        if let Some(group) = self.tasks.selected_header_group() {
-                            self.tasks.toggle_group(group);
-                            return InputOutcome::Changed;
-                        }
-                        let now = Instant::now();
-                        if let Some(last) = self.last_bg_click
-                            && now.duration_since(last).as_millis() < MULTI_CLICK_TIMEOUT_MS
-                        {
-                            if let Some(task_id) =
-                                self.tasks.selected_task_id().map(|s| s.to_string())
-                                && let Some(task) = self.session.bg_tasks.get(&task_id)
-                            {
-                                let entry_id = task
-                                    .scrollback_entry_id
-                                    .unwrap_or_else(|| crate::scrollback::entry::EntryId::new(0));
-                                let is_running =
-                                    task.status == crate::app::agent::BgTaskStatus::Running;
-                                self.block_viewer =
-                                    Some(crate::views::block_viewer::BlockViewerPane::for_bg_task(
-                                        entry_id,
-                                        &task_id,
-                                        &task.stdout,
-                                        is_running,
-                                    ));
-                                self.set_active_pane(AgentPane::Scrollback, true);
-                                self.last_bg_click = None;
-                                return InputOutcome::Changed;
-                            }
-                            if let Some(child_sid) = self.tasks.selected_child_session_id()
-                                && self.subagent_views.contains_key(child_sid)
-                            {
-                                self.open_subagent_fullscreen(child_sid.to_string());
-                                self.last_bg_click = None;
-                                return InputOutcome::Changed;
-                            }
-                            if let Some(crate::views::tasks_pane::TaskEntry::Workflow {
-                                name,
-                                ..
-                            }) = self.tasks.selected_entry()
-                            {
-                                let name = name.clone();
-                                self.open_workflow_detail(&name);
-                                self.last_bg_click = None;
-                                return InputOutcome::Changed;
-                            }
-                        }
-                        self.last_bg_click = Some(now);
-                        InputOutcome::Changed
-                    }
                     Some(AgentPane::Catalog) => {
                         self.set_active_pane(AgentPane::Catalog, false);
                         self.catalog.handle_mouse(
@@ -983,7 +788,6 @@ impl AgentView {
                         AgentPane::Todo
                         | AgentPane::Queue
                         | AgentPane::Prompt
-                        | AgentPane::Tasks
                         | AgentPane::Catalog => None,
                     })
                 };
@@ -1083,34 +887,10 @@ impl AgentView {
                 changed |= self
                     .hit_voice_stop_button
                     .update_hover(mouse.column, mouse.row);
-                changed |= self.hit_bg_status.update_hover(mouse.column, mouse.row);
                 changed |= self.hit_goal_status.update_hover(mouse.column, mouse.row);
-                changed |= self.hit_bg_close.update_hover(mouse.column, mouse.row);
                 changed |= self.hit_catalog_close.update_hover(mouse.column, mouse.row);
                 changed |= self.hit_cwd.update_hover(mouse.column, mouse.row);
                 changed |= self.hit_upgrade_cta.update_hover(mouse.column, mouse.row);
-                {
-                    let new_kill = self
-                        .tasks
-                        .kill_button_rects
-                        .iter()
-                        .find(|(_, rect)| rect.contains((mouse.column, mouse.row).into()))
-                        .map(|(tid, _)| tid.clone());
-                    if new_kill != self.tasks.hovered_kill {
-                        self.tasks.hovered_kill = new_kill;
-                        changed = true;
-                    }
-                    let new_view = self
-                        .tasks
-                        .view_button_rects
-                        .iter()
-                        .find(|(_, rect)| rect.contains((mouse.column, mouse.row).into()))
-                        .map(|(tid, _)| tid.clone());
-                    if new_view != self.tasks.hovered_view {
-                        self.tasks.hovered_view = new_view;
-                        changed = true;
-                    }
-                }
                 changed |= self.hit_sb_copy.update_hover(mouse.column, mouse.row);
                 changed |= self.hit_sb_view.update_hover(mouse.column, mouse.row);
                 if let Some(hd_area) = self.history_dropdown_area {

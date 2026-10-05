@@ -418,53 +418,23 @@ impl AgentView {
         let (selected_supports_copy, selected_meta_label, selected_supports_fullscreen) =
             if self.active_pane == ActivePane::Catalog {
                 (false, None, self.catalog.selected_entry().is_some())
-            } else if self.active_pane == ActivePane::Tasks {
-                let has_selected = self.tasks.selected_task_id().is_some_and(|tid| {
-                    self.session
-                        .bg_tasks
-                        .get(tid)
-                        .is_some_and(|t| !t.stdout.is_empty())
-                });
-                let has_any_selected = self.tasks.selected_task_id().is_some();
-                (has_selected, None, has_any_selected)
             } else if self.active_pane == ActivePane::Scrollback {
-                let is_bg_task = selected_entry.is_some_and(|e| {
-                    matches!(e.block, crate::scrollback::block::RenderBlock::BgTask(_))
+                let is_viewable_subagent = selected_entry.is_some_and(|e| {
+                    if let crate::scrollback::block::RenderBlock::Subagent(ref sb) = e.block {
+                        self.subagent_views.contains_key(&sb.child_session_id)
+                    } else {
+                        false
+                    }
                 });
-                if is_bg_task {
-                    let has_stdout = selected_entry
-                        .and_then(|e| {
-                            if let crate::scrollback::block::RenderBlock::BgTask(b) = &e.block {
-                                Some(&b.task_id)
-                            } else {
-                                None
-                            }
-                        })
-                        .is_some_and(|tid| {
-                            self.session
-                                .bg_tasks
-                                .get(tid)
-                                .is_some_and(|t| !t.stdout.is_empty())
-                        });
-                    (has_stdout, None, true)
-                } else {
-                    let is_viewable_subagent = selected_entry.is_some_and(|e| {
-                        if let crate::scrollback::block::RenderBlock::Subagent(ref sb) = e.block {
-                            self.subagent_views.contains_key(&sb.child_session_id)
-                        } else {
-                            false
-                        }
-                    });
-                    (
-                        !selected_is_group_header
-                            && selected_entry.is_some_and(|e| e.block.supports_copy()),
-                        selected_entry
-                            .and_then(|e| e.block.copy_meta_label())
-                            .filter(|_| !selected_is_group_header),
-                        selected_entry.is_some_and(|e| e.block.supports_fullscreen())
-                            || is_viewable_subagent,
-                    )
-                }
+                (
+                    !selected_is_group_header
+                        && selected_entry.is_some_and(|e| e.block.supports_copy()),
+                    selected_entry
+                        .and_then(|e| e.block.copy_meta_label())
+                        .filter(|_| !selected_is_group_header),
+                    selected_entry.is_some_and(|e| e.block.supports_fullscreen())
+                        || is_viewable_subagent,
+                )
             } else {
                 (
                     !selected_is_group_header
@@ -475,38 +445,6 @@ impl AgentView {
                     selected_entry.is_some_and(|e| e.block.supports_fullscreen()),
                 )
             };
-        let can_demote = !self.is_subagent_view
-            && self
-                .session
-                .tracker
-                .running_execute_tool_call_id()
-                .is_some();
-        let selected_can_kill = if self.active_pane == ActivePane::Catalog {
-            false
-        } else if self.active_pane == ActivePane::Tasks {
-            self.tasks
-                .selected_task_id()
-                .and_then(|tid| self.session.bg_tasks.get(tid))
-                .is_some_and(|t| {
-                    t.status == crate::app::agent::BgTaskStatus::Running && !t.pending_kill
-                })
-        } else if self.active_pane == ActivePane::Scrollback {
-            !selected_is_group_header
-                && selected_entry
-                    .and_then(|e| {
-                        if let crate::scrollback::block::RenderBlock::BgTask(b) = &e.block {
-                            Some(&b.task_id)
-                        } else {
-                            None
-                        }
-                    })
-                    .and_then(|tid| self.session.bg_tasks.get(tid))
-                    .is_some_and(|t| {
-                        t.status == crate::app::agent::BgTaskStatus::Running && !t.pending_kill
-                    })
-        } else {
-            false
-        };
         let thinking_label = self.scrollback.thinking_fold_label();
         let selected_is_user_prompt = selected_entry.is_some_and(|e| e.block.is_user_prompt());
         let selected_is_agent_message = selected_entry.is_some_and(|e| e.block.is_agent_message());
@@ -521,16 +459,10 @@ impl AgentView {
             fold_label,
             self.scrollback.selected_group_header_fold_label(),
             thinking_label,
-            if self.active_pane == ActivePane::Tasks {
-                self.tasks.show_done()
-            } else {
-                self.todo.show_done()
-            },
+            self.todo.show_done(),
             selected_supports_copy,
             selected_meta_label,
             selected_supports_fullscreen,
-            can_demote,
-            selected_can_kill,
             self.multiline_mode,
             self.vim_mode,
             self.is_subagent_view,
@@ -629,7 +561,7 @@ impl AgentView {
         };
         let icon = if is_running {
             let spinner_frames = crate::glyphs::dot_spinner_frames();
-            let tick = self.tasks.tick_count();
+            let tick = self.scrollback.animation_tick();
             let frame_idx = (tick / 4) as usize % spinner_frames.len();
             spinner_frames[frame_idx]
         } else if info.and_then(|s| s.status.as_deref()) == Some("completed") {
@@ -1256,14 +1188,6 @@ impl AgentView {
         {
             use crate::app::agent::PENDING_KILL_TIMEOUT_SECS;
             let now = Instant::now();
-            for task in self.session.bg_tasks.values_mut() {
-                if let Some(requested) = task.kill_requested_at
-                    && now.duration_since(requested).as_secs() >= PENDING_KILL_TIMEOUT_SECS
-                {
-                    task.pending_kill = false;
-                    task.kill_requested_at = None;
-                }
-            }
             for info in self.subagent_sessions.values_mut() {
                 if let Some(requested) = info.kill_requested_at
                     && now.duration_since(requested).as_secs() >= PENDING_KILL_TIMEOUT_SECS
@@ -1272,24 +1196,6 @@ impl AgentView {
                     info.kill_requested_at = None;
                 }
             }
-        }
-        let queued_cron_ids: HashSet<&str> = self
-            .session
-            .pending_prompts
-            .iter()
-            .filter(|p| p.kind == crate::app::agent::QueueEntryKind::Cron)
-            .filter_map(|p| p.task_id.as_deref())
-            .collect();
-        self.tasks.sync(
-            &self.session.bg_tasks,
-            &self.subagent_sessions,
-            &self.session.scheduled_tasks,
-            self.cron_task_id.as_deref(),
-            &queued_cron_ids,
-            &self.workflow_runs,
-        );
-        if self.active_pane == ActivePane::Tasks && !self.tasks.is_visible() {
-            self.active_pane = ActivePane::Scrollback;
         }
         self.catalog.sync_from_bundle(bundle_state);
         if self.active_pane == ActivePane::Catalog && !self.catalog.is_visible() {
@@ -1300,11 +1206,6 @@ impl AgentView {
             self.active_pane = ActivePane::Scrollback;
         }
         let viewer_open = self.active_subagent.is_some();
-        let tasks_height = if viewer_open {
-            0
-        } else {
-            self.tasks.desired_height(area.height)
-        };
         let catalog_height = if viewer_open {
             0
         } else {
@@ -1366,7 +1267,6 @@ impl AgentView {
             scrollbar_cfg: *scrollbar_cfg,
             timeline_width,
             prompt_height,
-            tasks_height,
             catalog_height,
             todo_height,
             queue_height,
@@ -1498,19 +1398,6 @@ impl AgentView {
             let link_style = Style::default().fg(theme.link_fg).bg(theme.bg_base);
             status.push("link_url", Line::from(Span::styled(display, link_style)));
         }
-        let task_counts = self.tasks.status_counts(
-            &self.session.bg_tasks,
-            &self.subagent_sessions,
-            &self.session.scheduled_tasks,
-            &self.workflow_runs,
-        );
-        if let Some(line) = crate::views::agent_status::task_status_line(
-            task_counts,
-            &theme,
-            self.hit_bg_status.hovered,
-        ) {
-            status.push("bg_tasks", line);
-        }
         if self.should_show_plan_chip(&appearance) {
             let mut plan_style = Style::default().fg(theme.accent_plan).bg(theme.bg_base);
             if self.hit_plan_button.hovered {
@@ -1519,7 +1406,7 @@ impl AgentView {
             status.push("plan", Line::from(Span::styled("plan", plan_style)));
         }
         if let Some(ref goal) = self.goal_state {
-            let tick = self.tasks.tick_count() as usize;
+            let tick = self.scrollback.animation_tick() as usize;
             let active_subagent_tokens: u64 = self
                 .subagent_sessions
                 .values()
@@ -2012,29 +1899,6 @@ impl AgentView {
                     });
                 }
             }
-        }
-        if tasks_height > 0 {
-            let bg_focused = self.active_pane == ActivePane::Tasks && !overlay_focused;
-            self.tasks.render(
-                layout.tasks,
-                buf,
-                bg_focused,
-                layout_cfg,
-                &self.session.bg_tasks,
-                &self.subagent_sessions,
-                &self.session.scheduled_tasks,
-            );
-            let close_rect = agent::render_todo_chrome(
-                buf,
-                layout.tasks,
-                layout_cfg,
-                bg_focused,
-                false,
-                self.hit_bg_close.hovered,
-                &theme,
-            )
-            .and_then(|sel| sel.close_button_rect());
-            self.hit_bg_close.set(close_rect);
         }
         if catalog_height > 0 {
             let cat_focused = self.active_pane == ActivePane::Catalog && !overlay_focused;
@@ -4296,7 +4160,7 @@ impl AgentView {
         {
             let todos = self.todo.todos();
             let overlay_rect = crate::views::goal_detail::goal_detail_area(area, goal, todos);
-            let tick = self.tasks.tick_count() as usize;
+            let tick = self.scrollback.animation_tick() as usize;
             let active_subagent_tokens: u64 = self
                 .subagent_sessions
                 .values()
@@ -4320,7 +4184,7 @@ impl AgentView {
             let runs = self.workflow_runs_newest_first();
             let mut view = self.workflows_view.clone();
             view.normalize(&runs);
-            let tick = self.tasks.tick_count() as usize;
+            let tick = self.scrollback.animation_tick() as usize;
             let live: crate::views::workflows::WorkflowAgentLiveMap = self
                 .subagent_sessions
                 .iter()

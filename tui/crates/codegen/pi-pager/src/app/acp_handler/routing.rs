@@ -30,45 +30,6 @@ impl SessionMatch {
     }
 }
 
-/// Resolve the agent that owns a notification's `session_id` and whether the
-/// active view is affected.
-///
-/// Convenience wrapper around `find_session_match` + `is_matched_agent_active`
-/// + `agents.get_mut()`, used by the bg-task notification handlers.
-pub(super) fn resolve_notif_agent<'a>(
-    app: &'a mut AppView,
-    session_id: &acp::SessionId,
-) -> Option<(SessionMatch, bool, &'a mut AgentView)> {
-    let matched = find_session_match(app, session_id)?;
-    let parent_id = matched.agent_id();
-    let is_active = is_matched_agent_active(app, parent_id);
-    let agent = app.agents.get_mut(&parent_id)?;
-    Some((matched, is_active, agent))
-}
-
-/// Given a matched session and the owning agent, borrow the correct
-/// `(session, scrollback)` pair — the child view's when the notification
-/// targets a subagent, the root agent's otherwise.
-pub(super) fn resolve_target_view<'a>(
-    agent: &'a mut AgentView,
-    matched: SessionMatch,
-    child_sid: &str,
-) -> Option<(
-    &'a mut AgentSession,
-    &'a mut crate::scrollback::state::ScrollbackState,
-)> {
-    if matches!(matched, SessionMatch::Child(_)) {
-        // Precedence-exempt from the hydrate funnel: a `TaskBackgrounded` /
-        // `TaskCompleted` block for a resumed child always follows the funneled
-        // tool_call that spawned the task, so the child is never still
-        // prompt-only + NeedsReplay here.
-        let child_view = agent.subagent_views.get_mut(child_sid)?;
-        Some((&mut child_view.session, &mut child_view.scrollback))
-    } else {
-        Some((&mut agent.session, &mut agent.scrollback))
-    }
-}
-
 /// Locate the agent (or subagent view) a notification's `session_id` belongs to.
 ///
 /// Search order:

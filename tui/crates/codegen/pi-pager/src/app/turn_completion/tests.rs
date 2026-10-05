@@ -652,33 +652,6 @@ fn driver_rearm_same_pid_preserves_received_at() {
 
 // ── End markers: always the plain event text (work lives in the status row) ──
 
-fn insert_bg_task(agent: &mut AgentView, task_id: &str, is_monitor: bool) {
-    agent.session.bg_tasks.insert(
-        task_id.into(),
-        crate::app::agent::BgTaskState {
-            task_id: task_id.into(),
-            tool_call_id: format!("call-{task_id}"),
-            command: "sleep 5".into(),
-            description: None,
-            cwd: "/tmp".into(),
-            output_file: "/tmp/out".into(),
-            status: crate::app::agent::BgTaskStatus::Running,
-            start_time: std::time::SystemTime::now(),
-            end_time: None,
-            exit_code: None,
-            signal: None,
-            stdout: String::new(),
-            stdout_line_count: 0,
-            truncated: false,
-            pending_kill: false,
-            kill_requested_at: None,
-            scrollback_entry_id: None,
-            is_monitor,
-            restored_from_replay: false,
-        },
-    );
-}
-
 /// The newest session-event marker block.
 fn last_marker_block(agent: &AgentView) -> &SessionEventBlock {
     (0..agent.scrollback.len())
@@ -688,29 +661,6 @@ fn last_marker_block(agent: &AgentView) -> &SessionEventBlock {
             _ => None,
         })
         .expect("a session-event marker must exist")
-}
-
-#[test]
-fn real_end_marker_stays_plain_with_running_work() {
-    let mut agent = running_driver("p1");
-    insert_bg_task(&mut agent, "bg-1", false);
-
-    push_turn_terminal_marker(
-        &mut agent,
-        Some(SessionEvent::TurnCompleted {
-            elapsed: Some(std::time::Duration::from_secs(2)),
-        }),
-        Some("p1"),
-    );
-
-    let block = last_marker_block(&agent);
-    assert_eq!(block.prompt_id.as_deref(), Some("p1"));
-    assert_eq!(block.event.message(), "Worked for 2.0s");
-    assert_eq!(
-        agent.watchers().commands,
-        1,
-        "the running command feeds the status-row watchers cue instead"
-    );
 }
 
 #[test]

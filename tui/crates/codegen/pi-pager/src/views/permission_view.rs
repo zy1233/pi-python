@@ -1904,7 +1904,7 @@ fn build_permission_option_line<'a>(
         if scope_is_mcp {
             spans.push(Span::styled(truncated, label_style));
         } else {
-            for s in crate::views::tasks_pane::highlight_bash_command(&truncated) {
+            for s in crate::views::bash_highlight::highlight_bash_command(&truncated) {
                 spans.push(Span::styled(s.content.into_owned(), s.style.bg(row_bg)));
             }
         }

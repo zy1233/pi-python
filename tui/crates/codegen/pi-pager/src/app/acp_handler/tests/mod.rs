@@ -41,9 +41,6 @@ pub(super) fn make_session(session_id: Option<&str>) -> AgentSession {
         model_switch_pending: false,
         user_model_preference: None,
         deferred_model_switch: None,
-        bg_tasks: std::collections::BTreeMap::new(),
-        bg_tool_call_to_task: std::collections::HashMap::new(),
-        scheduled_tasks: std::collections::HashMap::new(),
         in_flight_prompt: None,
         compact_held_prompt: None,
         current_prompt_id: None,
@@ -148,36 +145,6 @@ pub(super) fn make_app_with_agent(session_id: &str) -> AppView {
     );
     app
 }
-/// A Running background task registered on the agent's root session.
-pub(super) fn insert_running_task(agent: &mut AgentView, task_id: &str, command: &str) {
-    agent
-        .session
-        .bg_tasks
-        .insert(
-            task_id.into(),
-            crate::app::agent::BgTaskState {
-                task_id: task_id.into(),
-                tool_call_id: format!("call-{task_id}"),
-                command: command.into(),
-                description: None,
-                cwd: "/tmp".into(),
-                output_file: "/tmp/out".into(),
-                status: BgTaskStatus::Running,
-                start_time: std::time::SystemTime::now(),
-                end_time: None,
-                exit_code: None,
-                signal: None,
-                stdout: String::new(),
-                stdout_line_count: 0,
-                truncated: false,
-                pending_kill: false,
-                kill_requested_at: None,
-                scrollback_entry_id: None,
-                is_monitor: false,
-                restored_from_replay: false,
-            },
-        );
-}
 pub(super) fn park_on_subagents(agent: &mut AgentView, child_ids: &[&str]) {
     use crate::app::agent_view::test_fixtures::simulate_wait_all;
     agent.session.state = AgentState::TurnRunning;
@@ -239,46 +206,6 @@ pub(super) fn prompt_response(app: &mut AppView, prompt_id: &str) {
         }),
         app,
     );
-}
-/// Set up an app with two agents; the active view points to agent 1, but
-/// agent 0 owns the scheduled task. Handlers that gate on `active_view`
-/// will mutate the wrong agent (or silently no-op).
-pub(super) fn make_app_two_agents() -> AppView {
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut app = AppView::new(tx.clone(), ModelState::default(), Vec::new());
-    let id0 = AgentId(0);
-    let agent0 = make_agent(Some("sess-owner"));
-    app.agents.insert(id0, agent0);
-    let id1 = AgentId(1);
-    let agent1 = make_agent(Some("sess-active"));
-    app.agents.insert(id1, agent1);
-    crate::app::dispatch::switch_to_agent(
-        &mut app,
-        id1,
-        crate::app::dispatch::SwitchCause::New,
-    );
-    assert_eq!(app.active_view, ActiveView::Agent(AgentId(1)));
-    app
-}
-pub(super) fn make_created_ext_notif(
-    session_id: &str,
-    task_id: &str,
-    prompt: &str,
-    human_schedule: &str,
-    next_fire_at: Option<&str>,
-) -> acp::ExtNotification {
-    let notif = SessionNotification {
-        session_id: acp::SessionId::new(session_id),
-        update: PiSessionUpdate::ScheduledTaskCreated {
-            task_id: task_id.into(),
-            prompt: prompt.into(),
-            human_schedule: human_schedule.into(),
-            next_fire_at: next_fire_at.map(str::to_string),
-        },
-        meta: None,
-    };
-    let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("pi/scheduled_task_created", std::sync::Arc::from(raw))
 }
 pub(super) fn make_token_notification_message(
     session_id: &str,
@@ -781,36 +708,6 @@ pub(super) fn make_commands_update_message(
         response_tx: tx,
     })
 }
-/// Build a `ToolCallUpdate` notification carrying a Bash `raw_output`
-/// chunk for `tool_call_id`. Used to drive the bg-task stdout route.
-pub(super) fn make_bash_stdout_message(
-    session_id: &str,
-    tool_call_id: &str,
-    stdout: &str,
-) -> AcpClientMessage {
-    let (tx, _rx) = tokio::sync::oneshot::channel();
-    let request = acp::SessionNotification::new(
-        acp::SessionId::new(session_id),
-        acp::SessionUpdate::ToolCallUpdate(
-            acp::ToolCallUpdate::new(
-                acp::ToolCallId::new(tool_call_id),
-                acp::ToolCallUpdateFields::new()
-                    .raw_output(
-                        Some(
-                            serde_json::json!({
-                    "type": "Bash",
-                    "output_for_prompt": stdout,
-                }),
-                        ),
-                    ),
-            ),
-        ),
-    );
-    AcpClientMessage::SessionNotification(pi_acp_lib::AcpArgs {
-        request,
-        response_tx: tx,
-    })
-}
 /// Build an `ExtNotification` envelope for `legacy ext RPC`.
 pub(super) fn make_ext_session_notification(
     session_id: &str,
@@ -1263,71 +1160,6 @@ pub(super) fn make_task_backgrounded_notif(
     let raw = serde_json::value::to_raw_value(&notif).unwrap();
     acp::ExtNotification::new("pi/task_backgrounded", std::sync::Arc::from(raw))
 }
-/// Register a pending Execute tool call in the tracker and send an InProgress
-/// update to create the scrollback entry. Returns the agent for further use.
-pub(super) fn setup_pending_execute_tool(app: &mut AppView, tc_id: &str) {
-    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-    let meta = crate::acp::meta::NotificationMeta::default();
-    let tc = agent_client_protocol::SessionUpdate::ToolCall(
-        agent_client_protocol::ToolCall::new(
-                agent_client_protocol::ToolCallId::new(std::sync::Arc::from(tc_id)),
-                "Execute `sleep 9999`".to_string(),
-            )
-            .kind(agent_client_protocol::ToolKind::Execute)
-            .status(agent_client_protocol::ToolCallStatus::Pending)
-            .content(vec![])
-            .locations(vec![]),
-    );
-    agent.session.tracker.handle_update(tc, &meta, &mut agent.scrollback);
-    let update = agent_client_protocol::SessionUpdate::ToolCallUpdate(
-        agent_client_protocol::ToolCallUpdate::new(
-            agent_client_protocol::ToolCallId::new(std::sync::Arc::from(tc_id)),
-            agent_client_protocol::ToolCallUpdateFields::new()
-                .status(Some(agent_client_protocol::ToolCallStatus::InProgress)),
-        ),
-    );
-    agent.session.tracker.handle_update(update, &meta, &mut agent.scrollback);
-}
-/// Send a late InProgress update with is_background=true to trigger late bg detection.
-pub(super) fn send_late_bg_detection(app: &mut AppView, tc_id: &str) {
-    use serde_json::json;
-    use pi_tools::types::output::{BashOutput, ToolOutput};
-    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-    let meta = crate::acp::meta::NotificationMeta::default();
-    let bash = BashOutput {
-        output: b"more output".to_vec(),
-        output_for_prompt: String::new(),
-        exit_code: 0,
-        command: "sleep 9999".to_string(),
-        truncated: false,
-        signal: None,
-        timed_out: false,
-        description: Some("long running".to_string()),
-        current_dir: "/tmp".to_string(),
-        output_file: String::new(),
-        total_bytes: 11,
-        output_delta: None,
-        was_bare_echo: false,
-    };
-    let update = agent_client_protocol::SessionUpdate::ToolCallUpdate(
-        agent_client_protocol::ToolCallUpdate::new(
-            agent_client_protocol::ToolCallId::new(std::sync::Arc::from(tc_id)),
-            agent_client_protocol::ToolCallUpdateFields::new()
-                .status(Some(agent_client_protocol::ToolCallStatus::InProgress))
-                .raw_output(serde_json::to_value(ToolOutput::Bash(bash)).ok())
-                .raw_input(
-                    Some(
-                        json!({
-                        "command": "sleep 9999",
-                        "is_background": true,
-                        "description": "long running"
-                    }),
-                    ),
-                ),
-        ),
-    );
-    agent.session.tracker.handle_update(update, &meta, &mut agent.scrollback);
-}
 pub(super) fn make_app_with_parent_and_child(
     parent_sid: &str,
     child_sid: &str,
@@ -1501,7 +1333,6 @@ mod permissions;
 mod session_events;
 mod follow_ups;
 mod settings;
-mod scheduled_tasks;
 mod queue_and_adoption;
 mod plan_mode;
 mod reconnect;
@@ -1511,7 +1342,6 @@ mod session_routing;
 mod subagents;
 mod goals;
 mod interactions;
-mod background_tasks;
 mod models;
 mod mcp;
 mod git_head;

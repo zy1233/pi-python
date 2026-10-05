@@ -1246,31 +1246,6 @@ mod tests {
         end_turn, enqueue_local, test_app_with_agent,
     };
 
-    /// A running background bash task for the work-count fixtures.
-    fn running_bg_task(task_id: &str) -> crate::app::agent::BgTaskState {
-        crate::app::agent::BgTaskState {
-            task_id: task_id.into(),
-            tool_call_id: format!("call-{task_id}"),
-            command: "sleep 5".into(),
-            description: None,
-            cwd: "/tmp".into(),
-            output_file: "/tmp/out".into(),
-            status: crate::app::agent::BgTaskStatus::Running,
-            start_time: std::time::SystemTime::now(),
-            end_time: None,
-            exit_code: None,
-            signal: None,
-            stdout: String::new(),
-            stdout_line_count: 0,
-            truncated: false,
-            pending_kill: false,
-            kill_requested_at: None,
-            scrollback_entry_id: None,
-            is_monitor: false,
-            restored_from_replay: false,
-        }
-    }
-
     #[test]
     fn format_cron_prompt_includes_framing() {
         let out = super::format_cron_prompt("do stuff", "task-1", "every 5m");
@@ -2431,67 +2406,6 @@ mod tests {
         let agent = app.agents.get_mut(&id).unwrap();
         assert!(agent.renders_parked(), "live wait = parked look");
         assert_eq!(count_turn_markers(agent), 0, "a park writes no marker");
-    }
-
-    #[test]
-    fn sibling_batch_park_writes_no_markers() {
-        use crate::acp::meta::NotificationMeta;
-        use std::sync::Arc;
-
-        let mut app = test_app_with_agent();
-        let id = AgentId(0);
-        dispatch(Action::SendPrompt("first".into()), &mut app);
-        let agent = app.agents.get_mut(&id).unwrap();
-
-        // Blocking get_task_output registers first; anchor still running.
-        simulate_task_output_wait_call(agent, "wait-1", "bg-anchor", 120_000);
-        agent
-            .session
-            .bg_tasks
-            .insert("bg-anchor".into(), running_bg_task("bg-anchor"));
-        assert_eq!(count_turn_markers(agent), 0);
-
-        for i in 2..=5 {
-            let tc_id = format!("wait-batch-tc{i}");
-            agent.session.handle_update(
-                acp::SessionUpdate::ToolCall(
-                    acp::ToolCall::new(
-                        acp::ToolCallId::new(Arc::from(tc_id.as_str())),
-                        "run_terminal_command",
-                    )
-                    .kind(acp::ToolKind::Execute)
-                    .status(acp::ToolCallStatus::Pending),
-                ),
-                &NotificationMeta::default(),
-                &mut agent.scrollback,
-            );
-        }
-        assert_eq!(
-            count_turn_markers(agent),
-            0,
-            "a sibling-batch park must write zero markers"
-        );
-    }
-
-    #[test]
-    fn chips_and_completions_mid_park_add_no_markers() {
-        use crate::scrollback::block::RenderBlock;
-
-        let mut app = test_app_with_agent();
-        let id = AgentId(0);
-        dispatch(Action::SendPrompt("first".into()), &mut app);
-        let agent = app.agents.get_mut(&id).unwrap();
-
-        simulate_task_output_wait_call(agent, "wait-1", "bg-1", 30_000);
-        assert_eq!(count_turn_markers(agent), 0);
-
-        agent.scrollback.push_block(RenderBlock::bg_task_completed(
-            "sleep 5",
-            "bg-2",
-            std::time::Duration::from_secs(5),
-        ));
-        assert_eq!(count_turn_markers(agent), 0, "chips add no markers");
-        assert!(agent.renders_parked(), "chips keep the parked look");
     }
 
     #[test]

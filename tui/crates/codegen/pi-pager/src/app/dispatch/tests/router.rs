@@ -1764,7 +1764,7 @@ fn find_agent_by_session_id_returns_none_when_session_id_is_none() {
 }
 #[test]
 fn find_agent_by_session_id_finds_inactive_agent() {
-    let mut app = two_agent_app_with_bg_task();
+    let mut app = two_agent_app();
     let found = find_agent_by_session_id(&mut app.agents, "sess-B");
     assert!(found.is_some());
     assert_eq!(

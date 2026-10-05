@@ -33,7 +33,6 @@ pub enum ActivePane {
     Todo,
     Queue,
     Prompt,
-    Tasks,
     Catalog,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -49,16 +48,12 @@ pub struct PaneAreas {
     pub todo: Rect,
     pub queue: Rect,
     pub prompt: Rect,
-    pub tasks: Rect,
     pub catalog: Rect,
 }
 impl PaneAreas {
     /// Determine which pane a screen position falls in, if any.
     pub fn hit_test(&self, col: u16, row: u16) -> Option<ActivePane> {
         let pos = (col, row).into();
-        if self.tasks.area() > 0 && self.tasks.contains(pos) {
-            return Some(ActivePane::Tasks);
-        }
         if self.catalog.area() > 0 && self.catalog.contains(pos) {
             return Some(ActivePane::Catalog);
         }
@@ -116,7 +111,6 @@ pub struct AgentViewLayoutParams {
     /// scrollbar's gutter geometry, so a disabled scrollbar forces it to 0.
     pub timeline_width: u16,
     pub prompt_height: u16,
-    pub tasks_height: u16,
     pub catalog_height: u16,
     pub todo_height: u16,
     pub queue_height: u16,
@@ -144,7 +138,6 @@ pub struct AgentViewLayoutParams {
 /// widgets use these rects to render into.
 pub struct AgentViewLayout {
     pub status_bar: Rect,
-    pub tasks: Rect,
     pub catalog: Rect,
     pub scrollback: Rect,
     pub todo: Rect,
@@ -188,7 +181,6 @@ impl AgentViewLayout {
             scrollbar_cfg,
             timeline_width,
             prompt_height,
-            tasks_height,
             catalog_height,
             todo_height,
             queue_height,
@@ -231,10 +223,6 @@ impl AgentViewLayout {
             Constraint::Length(1), // StatusBar
         ];
         let pane_gap = if top_vpad == 0 { 0u16 } else { 1 };
-        if tasks_height > 0 {
-            constraints.push(Constraint::Length(pane_gap));
-            constraints.push(Constraint::Length(tasks_height));
-        }
         if catalog_height > 0 {
             constraints.push(Constraint::Length(pane_gap));
             constraints.push(Constraint::Length(catalog_height));
@@ -298,14 +286,6 @@ impl AgentViewLayout {
         let mut i = 0;
         let status_bar = chunks[i];
         i += 1;
-        let tasks = if tasks_height > 0 {
-            i += 1;
-            let r = chunks[i];
-            i += 1;
-            r
-        } else {
-            Rect::default()
-        };
         let catalog = if catalog_height > 0 {
             i += 1;
             let r = chunks[i];
@@ -419,7 +399,6 @@ impl AgentViewLayout {
         };
         Self {
             status_bar,
-            tasks,
             catalog,
             scrollback,
             todo,
@@ -474,7 +453,6 @@ impl AgentViewLayout {
             todo: self.todo,
             queue: self.queue,
             prompt: self.prompt,
-            tasks: self.tasks,
             catalog: self.catalog,
         }
     }
@@ -878,8 +856,6 @@ pub fn build_hints(
     selected_supports_copy: bool,
     selected_meta_label: Option<&'static str>,
     selected_supports_fullscreen: bool,
-    can_demote: bool,
-    selected_can_kill: bool,
     multiline_mode: bool,
     vim_mode: bool,
     is_subagent_view: bool,
@@ -901,15 +877,12 @@ pub fn build_hints(
             ));
             hints
         }
-        ActivePane::Queue => {
-            let mut hints = vec![
-                HintItem::new(crate::key!('x'), "delete row"),
-                HintItem::new(crate::key!('e'), "edit"),
-                HintItem::paired(crate::key!('J'), crate::key!('K'), "reorder"),
-                HintItem::new(crate::key!('y'), "copy"),
-            ];
-            hints
-        }
+        ActivePane::Queue => vec![
+            HintItem::new(crate::key!('x'), "delete row"),
+            HintItem::new(crate::key!('e'), "edit"),
+            HintItem::paired(crate::key!('J'), crate::key!('K'), "reorder"),
+            HintItem::new(crate::key!('y'), "copy"),
+        ],
         ActivePane::Prompt if is_editing_queued => {
             let mut hints = Vec::new();
             if prompt.can_send() {
@@ -980,23 +953,6 @@ pub fn build_hints(
                 }
                 hints.push(def.hint());
             }
-            hints
-        }
-        ActivePane::Tasks => {
-            let mut hints = Vec::new();
-            if selected_supports_fullscreen {
-                hints.push(HintItem::new(crate::key!(Enter), "view"));
-            }
-            if selected_supports_copy {
-                hints.push(HintItem::new(crate::key!('y'), "copy output"));
-            }
-            if selected_can_kill {
-                hints.push(HintItem::new(crate::key!('x'), "kill"));
-            }
-            hints.push(HintItem::new(
-                crate::key!('h'),
-                if show_done { "hide done" } else { "show done" },
-            ));
             hints
         }
         ActivePane::Catalog => vec![],
@@ -1142,9 +1098,6 @@ pub fn build_hints(
             {
                 hints.push(HintItem::new(key, label));
             }
-            if selected_can_kill {
-                hints.push(HintItem::new(crate::key!('x'), "kill"));
-            }
             if is_subagent_view {
                 hints.push(HintItem::paired(crate::key!('q'), crate::key!(Esc), "back"));
             }
@@ -1158,7 +1111,6 @@ pub fn build_hints(
         }
         hints.push(hint);
     }
-    let has_composer_payload = !prompt.text().trim().is_empty() || is_editing_queued;
     hints
 }
 #[cfg(test)]
@@ -1209,8 +1161,6 @@ mod tests {
             None,
             selected_supports_fullscreen,
             false,
-            false,
-            false,
             vim_mode,
             false,
             false,
@@ -1220,8 +1170,7 @@ mod tests {
             selected_is_agent_message,
             false,
             false,
-            None,
-        )
+            None)
     }
     fn first_two_labels(hints: &[HintItem]) -> Vec<&str> {
         hints.iter().take(2).map(|h| h.label.as_ref()).collect()
@@ -1350,8 +1299,6 @@ mod tests {
             None,
             true,
             false,
-            false,
-            false,
             true,
             false,
             false,
@@ -1361,8 +1308,7 @@ mod tests {
             false,
             false,
             false,
-            None,
-        );
+            None);
         let labels: Vec<&str> = hints.iter().map(|h| h.label.as_ref()).collect();
         assert!(
             !labels.contains(&"open"),
@@ -1516,8 +1462,6 @@ mod tests {
             None,
             false,
             false,
-            false,
-            false,
             vim_mode,
             false,
             false,
@@ -1527,8 +1471,7 @@ mod tests {
             false,
             false,
             false,
-            Some(&search),
-        )
+            Some(&search))
     }
     #[test]
     fn scrollback_search_hint_not_in_bottom_bar() {
@@ -1621,8 +1564,6 @@ mod tests {
             None,
             false,
             false,
-            false,
-            false,
             true,
             false,
             false,
@@ -1632,8 +1573,7 @@ mod tests {
             false,
             false,
             false,
-            None,
-        );
+            None);
         assert!(
             !hints.iter().any(|h| h.label == "home"),
             "ExitSession (home) must not appear in prompt-focused bar"
@@ -1666,8 +1606,6 @@ mod tests {
             false,
             None,
             false,
-            false,
-            false,
             multiline_mode,
             true,
             false,
@@ -1678,8 +1616,7 @@ mod tests {
             false,
             false,
             shift_enter_unavailable,
-            None,
-        )
+            None)
     }
     #[test]
     fn prompt_idle_submit_hint_is_send() {
@@ -1727,8 +1664,6 @@ mod tests {
                 false,
                 None,
                 false,
-                false,
-                false,
                 multiline,
                 true,
                 false,
@@ -1739,8 +1674,7 @@ mod tests {
                 false,
                 false,
                 false,
-                None,
-            );
+                None);
             let labels: Vec<&str> = hints.iter().map(|h| h.label.as_ref()).collect();
             assert!(
                 labels.contains(&"send now"),
@@ -1776,8 +1710,6 @@ mod tests {
                 None,
                 false,
                 false,
-                false,
-                false,
                 true,
                 false,
                 true,
@@ -1787,8 +1719,7 @@ mod tests {
                 false,
                 false,
                 false,
-                None,
-            );
+                None);
             let cancel = hints
                 .iter()
                 .find(|h| h.label == "cancel")
@@ -1824,8 +1755,6 @@ mod tests {
             false,
             false,
             false,
-            false,
-            false,
             true,
             false,
             false,
@@ -1833,8 +1762,7 @@ mod tests {
             false,
             false,
             false,
-            Some(&search),
-        );
+            Some(&search));
         let esc_cancels: Vec<&HintItem> = hints
             .iter()
             .filter(|h| h.label == "cancel" && h.keys == vec![crate::key!(Esc)])
@@ -1876,8 +1804,6 @@ mod tests {
             false,
             false,
             false,
-            false,
-            false,
             true,
             false,
             false,
@@ -1885,8 +1811,7 @@ mod tests {
             false,
             false,
             false,
-            None,
-        );
+            None);
         let esc_rows: Vec<&HintItem> = hints
             .iter()
             .filter(|h| h.keys.contains(&crate::key!(Esc)))

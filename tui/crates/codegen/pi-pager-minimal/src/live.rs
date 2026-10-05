@@ -1010,40 +1010,6 @@ mod tests {
         assert!(read(&buf).contains("Retrying"), "retry: {:?}", read(&buf));
     }
     #[test]
-    fn minimal_status_shows_idle_watching_cue() {
-        use pi_pager::app::agent::AgentState;
-        let theme = Theme::current();
-        let area = Rect::new(0, 0, 60, 1);
-        let read = |buf: &Buffer| -> String {
-            (0..area.width)
-                .filter_map(|x| buf.cell((x, 0)).map(|c| c.symbol().to_string()))
-                .collect()
-        };
-        let mut a = agent();
-        a.session.state = AgentState::Idle;
-        a.session.scheduled_tasks.insert(
-            "loop-1".to_string(),
-            pi_pager::app::agent::ScheduledTaskInfo {
-                task_id: "loop-1".to_string(),
-                prompt: "do the thing".to_string(),
-                human_schedule: "every 5m".to_string(),
-                created_at: std::time::Instant::now(),
-                next_fire_at: None,
-                tag: "loop".to_string(),
-                last_subagent_id: None,
-            },
-        );
-        assert_eq!(minimal_api::watchers(&a).loops, 1);
-        let mut buf = Buffer::empty(area);
-        render_minimal_status(&mut buf, area, &a, &None, None, &theme);
-        let text = read(&buf);
-        assert!(
-            text.contains("1 loop still running"),
-            "watching cue: {text:?}"
-        );
-        assert!(!text.contains("/help"), "not the idle hint: {text:?}");
-    }
-    #[test]
     fn prompt_style_bash_mode_shows_bang_prefix() {
         use pi_pager::app::agent_view::PromptInputMode;
         use pi_pager::appearance::AppearanceConfig;

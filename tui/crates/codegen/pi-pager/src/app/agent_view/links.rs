@@ -923,87 +923,6 @@ mod link_click_tests {
             "click where stop used to be must not cancel the turn under a dropdown"
         );
     }
-    /// Clicking the still-running watcher cue toggles the tasks pane like
-    /// Ctrl+G; only the first click that reveals the pane shows the one-time
-    /// shortcut toast.
-    #[test]
-    fn watching_cue_click_opens_tasks_pane_with_one_time_shortcut_toast() {
-        let reg = ActionRegistry::defaults();
-        let mut agent = make_agent();
-        agent.last_terminal_size = (80, 30);
-        super::test_fixtures::add_running_bg_task(&mut agent);
-        draw_banner_frame(&mut agent, &reg, &[], 0);
-        let rect = agent.hit_watching_cue.rect.expect("cue rect must be armed");
-        let click = Event::Mouse(mouse_down(rect.x + 1, rect.y));
-        let _ = agent.handle_input(&click, &reg);
-        assert!(agent.tasks.overlay.focused);
-        assert!(agent.toast.is_none(), "focus-only click must not toast");
-        agent.tasks.overlay.hide();
-        agent.tasks.on_state_change();
-        draw_banner_frame(&mut agent, &reg, &[], 0);
-        let _ = agent.handle_input(&click, &reg);
-        assert!(agent.tasks.overlay.visible && agent.tasks.overlay.focused);
-        assert_eq!(agent.active_pane, AgentPane::Tasks);
-        let toast = agent.toast.clone().map(|(msg, _)| msg);
-        assert_eq!(toast.as_deref(), Some("Tip: Ctrl+G toggles the tasks pane"));
-        agent.toast = None;
-        draw_banner_frame(&mut agent, &reg, &[], 0);
-        let _ = agent.handle_input(&click, &reg);
-        assert!(!agent.tasks.overlay.visible);
-        draw_banner_frame(&mut agent, &reg, &[], 0);
-        let _ = agent.handle_input(&click, &reg);
-        assert!(agent.tasks.overlay.visible);
-        assert!(agent.toast.is_none(), "toast fires only once per session");
-    }
-    /// Bg twin: the `[↓]` demote button rides the same turn-status row, so its
-    /// rect must drop under an open dropdown too — a dropdown click must never
-    /// background the running execute tool.
-    #[test]
-    fn open_prompt_dropdown_suppresses_bg_button_click_target() {
-        use crate::acp::meta::NotificationMeta;
-        use agent_client_protocol as acp;
-        let reg = ActionRegistry::defaults();
-        let mut agent = make_agent();
-        agent.last_terminal_size = (80, 30);
-        agent.session.state = AgentState::TurnRunning;
-        agent.session.handle_update(
-            acp::SessionUpdate::ToolCall(
-                acp::ToolCall::new(acp::ToolCallId::new(Arc::from("exec-1")), "sleep 5")
-                    .kind(acp::ToolKind::Execute)
-                    .status(acp::ToolCallStatus::InProgress)
-                    .content(vec![])
-                    .locations(vec![]),
-            ),
-            &NotificationMeta::default(),
-            &mut agent.scrollback,
-        );
-        draw_banner_frame(&mut agent, &reg, &[], 0);
-        let rect = agent
-            .hit_bg_button
-            .rect
-            .expect("running execute must arm the bg rect");
-        let outcome = agent.handle_input(&Event::Mouse(mouse_down(rect.x, rect.y)), &reg);
-        assert!(
-            matches!(outcome, InputOutcome::Action(Action::DemoteToBackground)),
-            "sanity: visible bg button must dispatch DemoteToBackground"
-        );
-        let _ = agent.prompt.handle_paste("/");
-        agent.prompt.refresh_slash(&agent.session.models);
-        assert!(
-            agent.prompt.any_dropdown_open(),
-            "setup: slash dropdown must be open"
-        );
-        draw_banner_frame(&mut agent, &reg, &[], 0);
-        assert!(
-            agent.hit_bg_button.rect.is_none(),
-            "open dropdown must suppress the bg rect"
-        );
-        let outcome = agent.handle_input(&Event::Mouse(mouse_down(rect.x, rect.y)), &reg);
-        assert!(
-            !matches!(outcome, InputOutcome::Action(Action::DemoteToBackground)),
-            "click where the bg button used to be must not demote under a dropdown"
-        );
-    }
     #[test]
     fn subagent_view_suppresses_background_button() {
         let reg = ActionRegistry::defaults();
@@ -1076,37 +995,20 @@ mod link_click_tests {
         );
     }
     /// Second suppression layer for the turn-status row: a frame occluder
-    /// (the goal-detail class — NOT a dropdown, so the rects stay armed)
-    /// covering the [stop] + bg buttons must swallow both clicks at dispatch
-    /// time — a click on overlay text must never cancel or demote the turn.
+    /// (the goal-detail class — NOT a dropdown, so the rect stays armed)
+    /// covering the [stop] button must swallow the click at dispatch time —
+    /// a click on overlay text must never cancel the turn.
     #[test]
-    fn frame_occluder_over_stop_and_bg_buttons_swallows_clicks() {
-        use crate::acp::meta::NotificationMeta;
-        use agent_client_protocol as acp;
+    fn frame_occluder_over_stop_button_swallows_click() {
         let reg = ActionRegistry::defaults();
         let mut agent = make_agent();
         agent.last_terminal_size = (80, 30);
         agent.session.state = AgentState::TurnRunning;
-        agent.session.handle_update(
-            acp::SessionUpdate::ToolCall(
-                acp::ToolCall::new(acp::ToolCallId::new(Arc::from("exec-1")), "sleep 5")
-                    .kind(acp::ToolKind::Execute)
-                    .status(acp::ToolCallStatus::InProgress)
-                    .content(vec![])
-                    .locations(vec![]),
-            ),
-            &NotificationMeta::default(),
-            &mut agent.scrollback,
-        );
         draw_banner_frame(&mut agent, &reg, &[], 0);
         let stop = agent
             .hit_cancel_button
             .rect
             .expect("running turn must arm the stop rect");
-        let bg = agent
-            .hit_bg_button
-            .rect
-            .expect("running execute must arm the bg rect");
         assert!(
             agent.frame_occluder_rects.is_empty(),
             "setup: overlay-free frame must accumulate no occluders"
@@ -1117,21 +1019,11 @@ mod link_click_tests {
             !matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
             "occluded [stop] click must not cancel the turn"
         );
-        let outcome = agent.handle_input(&Event::Mouse(mouse_down(bg.x, bg.y)), &reg);
         assert!(
-            !matches!(outcome, InputOutcome::Action(Action::DemoteToBackground)),
-            "occluded bg click must not demote the turn"
-        );
-        assert!(
-            agent.hit_cancel_button.rect.is_some() && agent.hit_bg_button.rect.is_some(),
-            "occluder guard is click-time: the rects stay armed"
+            agent.hit_cancel_button.rect.is_some(),
+            "occluder guard is click-time: the rect stays armed"
         );
         draw_banner_frame(&mut agent, &reg, &[], 0);
-        let outcome = agent.handle_input(&Event::Mouse(mouse_down(bg.x, bg.y)), &reg);
-        assert!(
-            matches!(outcome, InputOutcome::Action(Action::DemoteToBackground)),
-            "overlay-free bg click must dispatch again"
-        );
         let outcome = agent.handle_input(&Event::Mouse(mouse_down(stop.x, stop.y)), &reg);
         assert!(
             matches!(outcome, InputOutcome::Action(Action::CancelTurn)),

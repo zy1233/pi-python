@@ -320,13 +320,6 @@ pub enum Action {
     CancelTurn,
     /// User confirmed a cancel-turn choice from the panel.
     CancelTurnChoice(crate::views::modal::CancelTurnChoice),
-    /// Kill a background task by task_id.
-    KillBgTask(String),
-    /// Kill (cancel) a subagent by subagent_id.
-    KillSubagent(String),
-    CancelScheduledTask(String),
-    /// Demote the currently running execute tool to a background task.
-    DemoteToBackground,
  /// Request current bundle cache status via `legacy ext RPC`.
     RequestBundleStatus,
     /// View a catalog entry's raw content in the block viewer.
@@ -1202,23 +1195,10 @@ pub enum Effect {
         agent_id: AgentId,
         session_id: acp::SessionId,
     },
-    /// Kill a background task.
-    KillBgTask {
-        session_id: acp::SessionId,
-        task_id: String,
-        source: pi_shell::extensions::task::TaskKillSource,
-    },
  /// Cancel a subagent via `legacy ext RPC`.
     KillSubagent {
         session_id: acp::SessionId,
         subagent_id: String,
-    },
-    DeleteScheduledTask {
-        session_id: acp::SessionId,
-    },
-    /// Demote a foreground execute tool to background.
-    DemoteToBackground {
-        session_id: acp::SessionId,
     },
     /// Switch active model.
     SwitchModel {
@@ -1897,14 +1877,6 @@ pub enum TaskResult {
     CompactComplete {
         agent_id: AgentId,
         result: Result<(), String>,
-    },
-    /// Background task kill result. `outcome` is `None` when the agent
-    /// returned an error envelope or an unparseable payload (treated as
-    /// "clear pending state, keep the row").
-    BgTaskKilled {
-        session_id: String,
-        task_id: String,
-        outcome: Option<pi_tools::types::KillOutcome>,
     },
     /// Model switch completed (effort, if any, was applied in the same request).
     SwitchModelComplete {

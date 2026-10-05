@@ -176,7 +176,7 @@ impl ExecuteToolCallBlock {
         let command_spans: Vec<Span<'static>> = if muted_command || command == "\u{2026}" {
             vec![Span::styled(command, theme.muted())]
         } else {
-            crate::views::tasks_pane::highlight_bash_command(&command)
+            crate::views::bash_highlight::highlight_bash_command(&command)
         };
         // `$` uses gray_dim — dimmer than muted, no bold
         let mut spans = vec![Span::styled("$ ", theme.dim())];
@@ -321,7 +321,7 @@ impl ExecuteToolCallBlock {
             title
         };
         if highlight_as_command && !muted_command && title != "\u{2026}" {
-            spans.extend(crate::views::tasks_pane::highlight_bash_command(title));
+            spans.extend(crate::views::bash_highlight::highlight_bash_command(title));
         } else if muted_command {
             spans.push(Span::styled(title.to_string(), theme.muted()));
         } else {

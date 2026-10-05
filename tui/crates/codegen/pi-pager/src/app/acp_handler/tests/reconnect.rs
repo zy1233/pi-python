@@ -307,52 +307,6 @@
         );
     }
 
-    /// The bg-task stdout arm advances the reconnect cursor like the other
-    /// applied arms — a lagging cursor re-delivers the chunk, and after a
-    /// full-replay swap the highwater (deliberately unseeded by replay)
-    /// cannot absorb it.
-    #[test]
-    fn applied_bg_stdout_update_advances_reconnect_cursor() {
-        let mut app = make_app_with_agent("sess-bg");
-        let id = AgentId(0);
-        app.agents
-            .get_mut(&id)
-            .unwrap()
-            .session
-            .bg_tool_call_to_task
-            .insert("call-bg".into(), "task-1".into());
-
-        let (tx, _rx) = tokio::sync::oneshot::channel();
-        let request = acp::SessionNotification::new(
-            acp::SessionId::new("sess-bg"),
-            acp::SessionUpdate::ToolCallUpdate(acp::ToolCallUpdate::new(
-                acp::ToolCallId::new("call-bg"),
-                acp::ToolCallUpdateFields::new().raw_output(Some(serde_json::json!({
-                    "type": "Bash",
-                    "output_for_prompt": "hi",
-                }))),
-            )),
-        )
-        .meta(
-            serde_json::json!({ "eventId": "sess-bg-6" })
-                .as_object()
-                .cloned(),
-        );
-        let _ = handle(
-            AcpClientMessage::SessionNotification(pi_acp_lib::AcpArgs {
-                request,
-                response_tx: tx,
-            }),
-            &mut app,
-        );
-
-        assert_eq!(
-            app.agents[&id].last_seen_event_id.as_deref(),
-            Some("sess-bg-6"),
-            "the bg-stdout arm must advance the cursor"
-        );
-    }
-
     /// Symptom-2 guard: a replay update with no `session/load` in flight
     /// (leader broadcast fallthrough, or a replay landing after its reload
     /// already timed out) must be dropped, never appended.

@@ -26,7 +26,6 @@ use super::turn_status::SPINNER_DIVISOR;
 use crate::app::agent::{GoalDisplayPhase, GoalDisplayState, GoalDisplayStatus};
 use crate::app::agent_view::McpInitProgress;
 use crate::theme::Theme;
-use crate::views::tasks_pane::TaskStatusCounts;
 
 /// A named status bar item.
 struct StatusEntry {
@@ -133,49 +132,6 @@ impl<'a> AgentStatusBar<'a> {
 
         areas
     }
-}
-
-pub(crate) fn task_status_line(
-    counts: TaskStatusCounts,
-    theme: &Theme,
-    is_hovered: bool,
-) -> Option<Line<'static>> {
-    if counts == TaskStatusCounts::default() {
-        return None;
-    }
-
-    let hover = if is_hovered {
-        ratatui::style::Modifier::BOLD
-    } else {
-        ratatui::style::Modifier::empty()
-    };
-    let running_style = Style::default()
-        .fg(theme.accent_running)
-        .bg(theme.bg_base)
-        .add_modifier(hover);
-    let paused_style = Style::default()
-        .fg(theme.warning)
-        .bg(theme.bg_base)
-        .add_modifier(hover);
-    let mut spans = Vec::with_capacity(2);
-
-    if counts.running > 0 {
-        // Static, and the same diamond the task rows use. The header sits in view the whole session,
-        // so a spinner here reads as noise rather than progress.
-        spans.push(Span::styled(
-            format!("{} {}", crate::glyphs::diamond_filled(), counts.running),
-            running_style,
-        ));
-    }
-    if counts.paused_workflows > 0 {
-        let prefix = if counts.running > 0 { "  " } else { "" };
-        spans.push(Span::styled(
-            format!("{prefix}P {}", counts.paused_workflows),
-            paused_style,
-        ));
-    }
-
-    Some(Line::from(spans))
 }
 
 // ---------------------------------------------------------------------------
@@ -369,9 +325,6 @@ pub fn mcp_status_line(
     ]))
 }
 
-#[cfg(test)]
-#[path = "agent_status_task_tests.rs"]
-mod task_tests;
 
 #[cfg(test)]
 mod tests {

@@ -14,20 +14,6 @@ use crate::app::actions::Action;
 use crate::slash::mode_support::ModeSupport;
 use agent_client_protocol as acp;
 
-/// Provisional scheduled task info for immediate display in the tasks pane.
-///
-/// Created by `/loop` when the user submits the command so the task appears
-/// instantly, rather than waiting for the LLM round-trip through
-/// `scheduler_create`.
-#[derive(Debug, Clone)]
-pub struct ScheduledTaskPreview {
-    pub prompt: String,
-    pub human_schedule: String,
-    pub next_fire_at: Option<String>,
-    /// Tag shown in the tasks pane (e.g. "loop", "check"). Defaults to "loop".
-    pub tag: String,
-}
-
 /// Result of running a slash command.
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
@@ -47,12 +33,8 @@ pub enum CommandResult {
         prompt_blocks: Vec<agent_client_protocol::ContentBlock>,
         /// Whether to display as a skill invocation (teal accent) in scrollback.
         /// `true` for real skills (e.g. /commit), `false` for built-in commands
-        /// like /loop that inject structured prompts but aren't skills.
+        /// that inject structured prompts but aren't skills.
         display_as_skill: bool,
-        /// If set, immediately show a provisional scheduled task in the tasks
-        /// pane (replaced when the real `ScheduledTaskCreated` notification
-        /// arrives from the shell).
-        scheduled_task_preview: Option<ScheduledTaskPreview>,
     },
     /// Command text should be sent as a regular prompt. The shell resolves it.
     ///
