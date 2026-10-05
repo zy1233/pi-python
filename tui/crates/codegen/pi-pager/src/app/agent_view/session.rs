@@ -156,10 +156,6 @@ impl AgentView {
             chat_kind: false,
             conversation_entry: false,
             app_chat_mode: false,
-            #[cfg(feature = "local-workspace")]
-            workspace_mode: crate::views::welcome::WelcomeWorkspaceMode::Sandbox,
-            #[cfg(feature = "local-workspace")]
-            workspace_mode_cli_locked: false,
             credit_balance: None,
             auto_topup: None,
             turn_start_ms: None,

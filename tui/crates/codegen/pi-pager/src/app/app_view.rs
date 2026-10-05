@@ -774,12 +774,6 @@ pub struct AppView {
     pub welcome_privacy_banner_opt_out_rect: Option<ratatui::layout::Rect>,
     pub welcome_privacy_banner_terms_rect: Option<ratatui::layout::Rect>,
     pub welcome_privacy_banner_policy_rect: Option<ratatui::layout::Rect>,
-    /// Hit-test rects for the welcome workspace-mode picker.
-    #[cfg(feature = "local-workspace")]
-    pub welcome_workspace_mode_rects: crate::views::welcome::WorkspaceModeHitRects,
-    /// Sticky hover flag for the workspace-mode picker (redraw on enter/leave).
-    #[cfg(feature = "local-workspace")]
-    pub welcome_on_workspace_mode: bool,
     /// Transient welcome toast: (message, wall-clock expiry).
     pub welcome_toast: Option<(String, std::time::Instant)>,
     /// Sticky hover flag for the privacy banner buttons (redraw on enter/leave).
@@ -850,22 +844,6 @@ pub struct AppView {
     /// profiles on create/load while set. `/chat` does **not** set this
     /// (uses [`Self::deferred_startup`] one-shot state instead).
     pub chat_mode: bool,
-    /// Welcome picker mode; ignored when `local_workspace_startup_locked`.
-    #[cfg(feature = "local-workspace")]
-    pub welcome_workspace_mode: crate::views::welcome::WelcomeWorkspaceMode,
-    /// CLI/env already stamped local workspace; welcome must not override.
-    #[cfg(feature = "local-workspace")]
-    pub local_workspace_startup_locked: bool,
-    /// One-shot next-session stamp: `Some(None)` sandbox, `Some(cfg)` local.
-    #[cfg(feature = "local-workspace")]
-    pub welcome_session_local_workspace:
-        Option<Option<crate::app::session_startup::LocalWorkspaceConfig>>,
-    /// First-run Local ACK still pending in the TUI.
-    #[cfg(feature = "local-workspace")]
-    pub welcome_local_workspace_ack_pending: bool,
-    /// Next welcome history load is local-disk/build (does not set `chat_mode`).
-    #[cfg(feature = "local-workspace")]
-    pub welcome_history_load_as_build: bool,
     /// Whether mouse capture is currently enabled. Disabled during the
     /// Authenticating state so the terminal handles native text selection.
     pub mouse_captured: bool,
@@ -1320,10 +1298,6 @@ impl AppView {
             welcome_privacy_banner_opt_out_rect: None,
             welcome_privacy_banner_terms_rect: None,
             welcome_privacy_banner_policy_rect: None,
-            #[cfg(feature = "local-workspace")]
-            welcome_workspace_mode_rects: Default::default(),
-            #[cfg(feature = "local-workspace")]
-            welcome_on_workspace_mode: false,
             welcome_toast: None,
             welcome_on_privacy_banner: false,
             welcome_on_upgrade_cta: false,
@@ -1351,16 +1325,6 @@ impl AppView {
             subagents: false,
             ask_user: false,
             chat_mode: false,
-            #[cfg(feature = "local-workspace")]
-            welcome_workspace_mode: crate::views::welcome::WelcomeWorkspaceMode::Sandbox,
-            #[cfg(feature = "local-workspace")]
-            local_workspace_startup_locked: false,
-            #[cfg(feature = "local-workspace")]
-            welcome_session_local_workspace: None,
-            #[cfg(feature = "local-workspace")]
-            welcome_local_workspace_ack_pending: false,
-            #[cfg(feature = "local-workspace")]
-            welcome_history_load_as_build: false,
             mouse_captured: true,
             new_worktree_dialog: None,
             contextual_hints: Default::default(),
@@ -1964,8 +1928,6 @@ impl AppView {
             self.session_picker_entries.as_deref(),
             self.session_picker_loading,
         );
-        #[cfg(feature = "local-workspace")]
-        let session_picker_open = self.session_picker_entries.is_some() || sp_loading;
         let outcome = match self.active_view {
             ActiveView::Welcome => handle_welcome_input(
                 ev,
@@ -2009,22 +1971,6 @@ impl AppView {
                     session_picker_grouped: self.session_picker_grouped,
                     sp_pending_delete: &mut self.session_picker_pending_delete,
                     chat_mode: self.chat_mode,
-                    #[cfg(feature = "local-workspace")]
-                    workspace_mode: &mut self.welcome_workspace_mode,
-                    #[cfg(feature = "local-workspace")]
-                    workspace_mode_rects: &self.welcome_workspace_mode_rects,
-                    #[cfg(feature = "local-workspace")]
-                    on_workspace_mode: &mut self.welcome_on_workspace_mode,
-                    #[cfg(feature = "local-workspace")]
-                    workspace_mode_startup_locked: self.local_workspace_startup_locked,
-                    #[cfg(feature = "local-workspace")]
-                    workspace_mode_ack_pending: &mut self.welcome_local_workspace_ack_pending,
-                    #[cfg(feature = "local-workspace")]
-                    history_load_as_build: &mut self.welcome_history_load_as_build,
-                    #[cfg(feature = "local-workspace")]
-                    deferred_startup: &mut self.deferred_startup,
-                    #[cfg(feature = "local-workspace")]
-                    session_picker_open,
                 },
             ),
             ActiveView::Agent(id) => {
@@ -2275,22 +2221,6 @@ struct WelcomeInputCtx<'a> {
     /// Process-wide `--chat`: the session picker is conversations-only
     /// (no delete action).
     chat_mode: bool,
-    #[cfg(feature = "local-workspace")]
-    workspace_mode: &'a mut crate::views::welcome::WelcomeWorkspaceMode,
-    #[cfg(feature = "local-workspace")]
-    workspace_mode_rects: &'a crate::views::welcome::WorkspaceModeHitRects,
-    #[cfg(feature = "local-workspace")]
-    on_workspace_mode: &'a mut bool,
-    #[cfg(feature = "local-workspace")]
-    workspace_mode_startup_locked: bool,
-    #[cfg(feature = "local-workspace")]
-    workspace_mode_ack_pending: &'a mut bool,
-    #[cfg(feature = "local-workspace")]
-    history_load_as_build: &'a mut bool,
-    #[cfg(feature = "local-workspace")]
-    deferred_startup: &'a mut crate::app::session_startup::DeferredStartupActions,
-    #[cfg(feature = "local-workspace")]
-    session_picker_open: bool,
 }
 /// Welcome view input -- auth-state-aware routing.
 fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutcome {
@@ -2409,83 +2339,6 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
             return InputOutcome::Changed;
         }
         return InputOutcome::Unchanged;
-    }
-    #[cfg(feature = "local-workspace")]
-    if *ctx.workspace_mode_ack_pending
-        && matches!(ctx.auth_state, AuthState::Done)
-        && ctx.has_access
-        && !ctx.is_zdr_blocked
-    {
-        if let Event::Key(key) = ev {
-            if key.kind == KeyEventKind::Release {
-                return InputOutcome::Unchanged;
-            }
-            if key!('y').matches(key) || key!('Y').matches(key) || key!(Enter).matches(key) {
-                return InputOutcome::Action(Action::ConfirmWelcomeLocalWorkspaceAck);
-            }
-            if key!('n').matches(key) || key!('N').matches(key) || key!(Esc).matches(key) {
-                *ctx.workspace_mode_ack_pending = false;
-                *ctx.workspace_mode = crate::views::welcome::WelcomeWorkspaceMode::Sandbox;
-                let was_worktree = ctx.deferred_startup.worktree;
-                ctx.deferred_startup.worktree = false;
-                ctx.deferred_startup.worktree_label = None;
-                ctx.deferred_startup.worktree_ref = None;
-                if was_worktree {
-                    ctx.deferred_startup.session = None;
-                    ctx.deferred_startup.preferred_session_id = None;
-                }
-                *ctx.history_load_as_build = false;
-                ctx.deferred_startup.history_load_as_build = false;
-                crate::views::welcome::workspace_mode::log_welcome_ack("cancelled");
-                return InputOutcome::Changed;
-            }
-            return InputOutcome::Unchanged;
-        }
-        if matches!(ev, Event::Resize(_, _)) {
-            return InputOutcome::Changed;
-        }
-        return InputOutcome::Unchanged;
-    }
-    #[cfg(feature = "local-workspace")]
-    if crate::views::welcome::workspace_mode::picker_interactive(
-        ctx.chat_mode,
-        ctx.has_access,
-        matches!(ctx.auth_state, AuthState::Done),
-        ctx.is_zdr_blocked,
-        ctx.session_picker_open,
-        ctx.workspace_mode_startup_locked,
-    ) {
-        if let Event::Key(key) = ev
-            && key.kind != KeyEventKind::Release
-            && key!('e', CONTROL).matches(key)
-        {
-            *ctx.workspace_mode = ctx.workspace_mode.cycle_next();
-            crate::views::welcome::workspace_mode::log_welcome_mode_selected(
-                *ctx.workspace_mode,
-                "ctrl_e",
-                ctx.workspace_mode_startup_locked,
-            );
-            return InputOutcome::Changed;
-        }
-        if let Event::Mouse(mouse) = ev
-            && matches!(
-                mouse.kind,
-                crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left)
-            )
-            && let Some(mode) = crate::views::welcome::hit_test_workspace_mode(
-                ctx.workspace_mode_rects,
-                mouse.column,
-                mouse.row,
-            )
-        {
-            *ctx.workspace_mode = mode;
-            crate::views::welcome::workspace_mode::log_welcome_mode_selected(
-                mode,
-                "click",
-                ctx.workspace_mode_startup_locked,
-            );
-            return InputOutcome::Changed;
-        }
     }
     if (ctx.sp_entries.is_some() || ctx.sp_loading) && matches!(ctx.auth_state, AuthState::Done) {
         use crate::views::picker::{PickerConfig, PickerOutcome, handle_picker_input};
@@ -2923,20 +2776,6 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                 if over_upgrade != *ctx.on_upgrade_cta {
                     *ctx.on_upgrade_cta = over_upgrade;
                     return InputOutcome::Changed;
-                }
-                #[cfg(feature = "local-workspace")]
-                {
-                    let over_ws = ctx
-                        .workspace_mode_rects
-                        .row
-                        .is_some_and(|r| r.contains(pos));
-                    if over_ws != *ctx.on_workspace_mode {
-                        *ctx.on_workspace_mode = over_ws;
-                        return InputOutcome::Changed;
-                    }
-                    if over_ws {
-                        return InputOutcome::Changed;
-                    }
                 }
                 let over_banner = ctx
                     .privacy_banner_opt_in_rect
@@ -3378,12 +3217,6 @@ impl AppView {
                             welcome_announcement_expanded: self.welcome_announcement.expanded,
                             upgrade_cta: hero_cta.map(|(_owner, label, _)| label),
                             privacy_banner,
-                            #[cfg(feature = "local-workspace")]
-                            workspace_mode: self.welcome_workspace_mode,
-                            #[cfg(feature = "local-workspace")]
-                            workspace_mode_startup_locked: self.local_workspace_startup_locked,
-                            #[cfg(feature = "local-workspace")]
-                            workspace_mode_ack_pending: self.welcome_local_workspace_ack_pending,
                         };
                         let result = crate::views::welcome::render_welcome(
                             view_area,
@@ -3404,10 +3237,6 @@ impl AppView {
                             result.privacy_banner_opt_out_rect;
                         self.welcome_privacy_banner_terms_rect = result.privacy_banner_terms_rect;
                         self.welcome_privacy_banner_policy_rect = result.privacy_banner_policy_rect;
-                        #[cfg(feature = "local-workspace")]
-                        {
-                            self.welcome_workspace_mode_rects = result.workspace_mode_rects;
-                        }
                         if let Some((ref msg, _)) = self.welcome_toast {
                             crate::views::welcome::paint_welcome_toast(
                                 f.buffer_mut(),

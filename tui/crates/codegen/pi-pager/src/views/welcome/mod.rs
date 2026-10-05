@@ -24,19 +24,12 @@ mod menu;
 mod prompt;
 mod toast;
 mod top_bar;
-#[cfg(feature = "local-workspace")]
-pub(crate) mod workspace_mode;
 
 pub(crate) use logo::shimmer_frame;
 use logo::{logo_line_count, render_logo};
 use menu::render_menu;
 pub(crate) use toast::paint_welcome_toast;
 use top_bar::render_top_bar;
-#[cfg(feature = "local-workspace")]
-pub use workspace_mode::{
-    WelcomeWorkspaceMode, WorkspaceModeHitRects, hit_test_workspace_mode,
-    render_workspace_mode_picker,
-};
 
 /// True for VS Code and xterm.js embeds (VS Code-family IDEs and Zed) where
 /// quit is `Ctrl+D` (canonical: [`TerminalName::is_vscode_family`]).
@@ -138,9 +131,6 @@ pub struct WelcomeRenderResult {
     pub privacy_banner_opt_out_rect: Option<Rect>,
     pub privacy_banner_terms_rect: Option<Rect>,
     pub privacy_banner_policy_rect: Option<Rect>,
-    /// Hit-test rects for the chat workspace-mode segmented control.
-    #[cfg(feature = "local-workspace")]
-    pub workspace_mode_rects: WorkspaceModeHitRects,
 }
 
 use hero_box::HERO_BOX_MIN_WIDTH;
@@ -639,15 +629,6 @@ pub struct WelcomeRenderParams<'a> {
     pub upgrade_cta: Option<&'a str>,
     /// Non-blocking welcome privacy banner above the prompt.
     pub privacy_banner: bool,
-    /// Chat-mode workspace picker selection (`local-workspace` feature).
-    #[cfg(feature = "local-workspace")]
-    pub workspace_mode: WelcomeWorkspaceMode,
-    /// CLI/env already stamped local workspace — picker is display-only.
-    #[cfg(feature = "local-workspace")]
-    pub workspace_mode_startup_locked: bool,
-    /// In-TUI ACK confirm pending for Local.
-    #[cfg(feature = "local-workspace")]
-    pub workspace_mode_ack_pending: bool,
 }
 
 /// Render the welcome screen.
@@ -1644,19 +1625,6 @@ fn render_welcome_done(
         &owned_menu
     };
 
-    #[cfg(feature = "local-workspace")]
-    // Keep the segmented control (and ACK y/N) visible when history is open
-    // if first-run Local ACK is pending — otherwise the confirm is unpainted
-    // while the ACK handler still swallows keys.
-    let show_workspace_picker =
-        p.chat_mode && p.has_access && (!show_picker || p.workspace_mode_ack_pending);
-    #[cfg(feature = "local-workspace")]
-    let workspace_picker_rows = if show_workspace_picker {
-        workspace_mode::WORKSPACE_MODE_MENU_ROWS
-    } else {
-        0
-    };
-    #[cfg(not(feature = "local-workspace"))]
     let workspace_picker_rows = 0u16;
 
     let menu_height = if show_picker {
@@ -1700,8 +1668,6 @@ fn render_welcome_done(
     let mut announcement_rect: Option<Rect> = None;
     let mut upgrade_cta_rect: Option<Rect> = None;
 
-    #[cfg(feature = "local-workspace")]
-    let mut workspace_mode_rects = WorkspaceModeHitRects::default();
     let (menu_rects, picker_close_button) = if show_picker {
         // Use the full area since logo/menu are hidden and shortcuts
         // are now rendered inside the picker content area.
@@ -1741,20 +1707,10 @@ fn render_welcome_done(
             p.announcement,
             p.welcome_announcement_expanded,
             p.upgrade_cta,
-            #[cfg(feature = "local-workspace")]
-            show_workspace_picker.then_some((
-                p.workspace_mode,
-                p.workspace_mode_startup_locked,
-                p.workspace_mode_ack_pending,
-            )),
         );
         announcement_truncated = rects.announcement_truncated;
         announcement_rect = rects.announcement_rect;
         upgrade_cta_rect = rects.upgrade_cta_rect;
-        #[cfg(feature = "local-workspace")]
-        {
-            workspace_mode_rects = rects.workspace_mode_rects;
-        }
         (rects.menu_rects, None)
     } else {
         // Narrow layout: stacked logo above, menu below. Inset the menu the
@@ -1762,28 +1718,6 @@ fn render_welcome_done(
         // instead of touching the window edge on narrow terminals.
         render_logo(layout.logo, buf, theme, content_area.height);
         let menu_area = inset_horizontal(layout.menu, prompt::prompt_inset(p.compact));
-        #[cfg(feature = "local-workspace")]
-        let menu_area = if show_workspace_picker {
-            let picker_rect = workspace_mode::picker_area(menu_area);
-            workspace_mode_rects = render_workspace_mode_picker(
-                picker_rect,
-                buf,
-                theme,
-                p.workspace_mode,
-                p.mouse_pos,
-                p.workspace_mode_startup_locked,
-                p.workspace_mode_ack_pending,
-            );
-            Rect {
-                y: menu_area.y + workspace_mode::WORKSPACE_MODE_MENU_ROWS,
-                height: menu_area
-                    .height
-                    .saturating_sub(workspace_mode::WORKSPACE_MODE_MENU_ROWS),
-                ..menu_area
-            }
-        } else {
-            menu_area
-        };
         (
             render_menu(
                 menu_area,
@@ -2055,8 +1989,6 @@ fn render_welcome_done(
         privacy_banner_opt_out_rect,
         privacy_banner_terms_rect,
         privacy_banner_policy_rect,
-        #[cfg(feature = "local-workspace")]
-        workspace_mode_rects,
     }
 }
 
@@ -2569,12 +2501,6 @@ mod tests {
             welcome_announcement_expanded: false,
             upgrade_cta: None,
             privacy_banner: false,
-            #[cfg(feature = "local-workspace")]
-            workspace_mode: WelcomeWorkspaceMode::Sandbox,
-            #[cfg(feature = "local-workspace")]
-            workspace_mode_startup_locked: false,
-            #[cfg(feature = "local-workspace")]
-            workspace_mode_ack_pending: false,
         }
     }
     fn render_done_text(params: &WelcomeRenderParams<'_>) -> String {

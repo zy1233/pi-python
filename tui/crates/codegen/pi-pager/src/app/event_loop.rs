@@ -1007,18 +1007,6 @@ pub(crate) async fn run(
     app.subagents = !args.no_subagents;
     app.ask_user = !args.no_ask_user;
     app.chat_mode = args.chat();
-    #[cfg(feature = "local-workspace")]
-    {
-        let stamp = crate::app::session_startup::active_local_workspace()
-            .ok()
-            .flatten();
-        app.local_workspace_startup_locked = stamp.is_some();
-        if app.local_workspace_startup_locked {
-            app.welcome_workspace_mode =
-                crate::views::welcome::workspace_mode::mode_from_active_stamp(stamp.as_ref());
-            crate::views::welcome::workspace_mode::log_cli_lock_applied(app.welcome_workspace_mode);
-        }
-    }
     app.restore_code = args.restore_code.then_some(true);
     if let Some(ref agent) = args.agent {
         match super::cli::resolve_agent_arg(agent) {
@@ -3605,65 +3593,6 @@ fn merge_paste_fragments(events: Vec<TimedInputEvent>) -> Vec<TimedInputEvent> {
     result
 }
 
-/// True when this batch should consume the welcome local-workspace one-shot.
-#[cfg(feature = "local-workspace")]
-pub(crate) fn welcome_oneshot_applies_to_effects(effs: &[super::actions::Effect]) -> bool {
-    use super::actions::Effect;
-    effs.iter().any(|e| {
-        matches!(
-            e,
-            Effect::CreateSession { .. } | Effect::CreateWorktreeSession { .. }
-        )
-    })
-}
-
-/// Conversation `LoadSession` must never inherit process-wide local stamp.
-#[cfg(feature = "local-workspace")]
-fn conversation_load_in_effects(effs: &[super::actions::Effect]) -> bool {
-    use super::actions::Effect;
-    effs.iter().any(|e| {
-        matches!(
-            e,
-            Effect::LoadSession {
-                chat_kind: true,
-                ..
-            }
-        )
-    })
-}
-
-/// Apply history bypass (`chat_mode = false`) for load/restore/worktree-create.
-#[cfg(feature = "local-workspace")]
-pub(crate) fn welcome_history_build_bypass_applies(
-    effs: &[super::actions::Effect],
-    flag: bool,
-) -> bool {
-    use super::actions::Effect;
-    flag && effs.iter().any(|e| {
-        matches!(
-            e,
-            Effect::LoadSession { .. }
-                | Effect::RestoreAndLoadSession { .. }
-                | Effect::CreateWorktreeSession { .. }
-        )
-    })
-}
-
-/// Whether this batch should clear the welcome history bypass flag.
-#[cfg(feature = "local-workspace")]
-pub(crate) fn welcome_history_build_bypass_consume(
-    effs: &[super::actions::Effect],
-    flag: bool,
-) -> bool {
-    use super::actions::Effect;
-    flag && effs.iter().any(|e| {
-        matches!(
-            e,
-            Effect::LoadSession { .. } | Effect::CreateWorktreeSession { .. }
-        )
-    })
-}
-
 /// Shared [`SessionFlags`] builder for the interactive loop.
 ///
 /// Permission seeds come from the global mirrors (`default_yolo`,
@@ -3671,11 +3600,7 @@ pub(crate) fn welcome_history_build_bypass_consume(
 /// update those synchronously, and `ActionThenForward` batches mode dispatch
 /// before this runs, so create meta sees the post-mode values without
 /// effect-shape sniffing.
-pub(crate) fn session_flags_for_effects(
-    app: &mut AppView,
-    #[cfg_attr(not(feature = "local-workspace"), allow(unused_variables))]
-    effs: &[super::actions::Effect],
-) -> effects::SessionFlags {
+pub(crate) fn session_flags_for_effects(app: &mut AppView) -> effects::SessionFlags {
     effects::SessionFlags {
         plan_mode: app.plan_mode,
         subagents: app.subagents,
@@ -3686,37 +3611,7 @@ pub(crate) fn session_flags_for_effects(
             app.default_yolo,
             matches!(app.current_ui.permission_mode.as_deref(), Some("auto")),
         ),
-        chat_mode: {
-            #[cfg(feature = "local-workspace")]
-            {
-                if welcome_history_build_bypass_applies(effs, app.welcome_history_load_as_build) {
-                    if welcome_history_build_bypass_consume(effs, app.welcome_history_load_as_build)
-                    {
-                        app.welcome_history_load_as_build = false;
-                    }
-                    false
-                } else {
-                    app.chat_mode
-                }
-            }
-            #[cfg(not(feature = "local-workspace"))]
-            {
-                app.chat_mode
-            }
-        },
-        #[cfg(feature = "local-workspace")]
-        local_workspace: {
-            if conversation_load_in_effects(effs) {
-                None // conversation resume is sandbox/gateway-owned
-            } else if welcome_oneshot_applies_to_effects(effs) {
-                match app.welcome_session_local_workspace.take() {
-                    Some(one_shot) => one_shot,
-                    None => crate::app::session_startup::active_local_workspace().unwrap_or(None),
-                }
-            } else {
-                crate::app::session_startup::active_local_workspace().unwrap_or(None)
-            }
-        },
+        chat_mode: app.chat_mode,
         screen_mode_label: Some(app.screen_mode.meta_label()),
         is_api_key_auth: app.is_api_key_auth,
     }
@@ -3746,7 +3641,7 @@ fn process_effects(
     tasks: &mut JoinSet<TaskResult>,
     app: &mut AppView,
 ) -> bool {
-    let flags = session_flags_for_effects(app, &effs);
+    let flags = session_flags_for_effects(app);
     for eff in effs {
         let (quit, meta) = effects::execute(eff, tasks, &app.acp_tx, &app.cwd, &flags);
         // Install auth abort handle if the current auth state still matches.
@@ -3913,80 +3808,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "local-workspace")]
-    #[test]
-    fn welcome_oneshot_applies_to_create_worktree_session() {
-        use crate::app::actions::Effect;
-        use crate::app::agent::AgentId;
-        let worktree = Effect::CreateWorktreeSession {
-            agent_id: AgentId(0),
-            load_session_id: None,
-            label: None,
-            git_ref: None,
-            model_id: None,
-            permission_mode_override: None,
-            preferred_session_id: None,
-            chat_kind: false,
-        };
-        assert!(welcome_oneshot_applies_to_effects(std::slice::from_ref(
-            &worktree
-        )));
-        assert!(!welcome_oneshot_applies_to_effects(&[]));
-        assert!(!welcome_oneshot_applies_to_effects(&[Effect::Quit]));
-    }
-
-    #[cfg(feature = "local-workspace")]
-    #[test]
-    fn conversation_load_is_not_welcome_oneshot_or_local_stamp() {
-        use crate::app::actions::Effect;
-        use crate::app::agent::AgentId;
-        let load = Effect::LoadSession {
-            agent_id: AgentId(0),
-            session_id: "c1".into(),
-            session_cwd: None,
-            chat_kind: true,
-        };
-        assert!(!welcome_oneshot_applies_to_effects(std::slice::from_ref(
-            &load
-        )));
-        assert!(conversation_load_in_effects(std::slice::from_ref(&load)));
-        let build_load = Effect::LoadSession {
-            agent_id: AgentId(0),
-            session_id: "b1".into(),
-            session_cwd: None,
-            chat_kind: false,
-        };
-        assert!(!conversation_load_in_effects(std::slice::from_ref(
-            &build_load
-        )));
-    }
-
-    #[cfg(feature = "local-workspace")]
-    #[test]
-    fn session_flags_consume_history_bypass_and_strip_conversation_stamp() {
-        use crate::app::actions::Effect;
-        use crate::app::agent::AgentId;
-        let mut app = crate::app::app_view::tests::test_app();
-        app.chat_mode = true;
-        app.welcome_history_load_as_build = true;
-        let load = Effect::LoadSession {
-            agent_id: AgentId(0),
-            session_id: "c1".into(),
-            session_cwd: None,
-            chat_kind: true,
-        };
-        let flags = session_flags_for_effects(&mut app, std::slice::from_ref(&load));
-        assert!(!flags.chat_mode, "history bypass must clear chat_mode");
-        assert!(
-            !app.welcome_history_load_as_build,
-            "LoadSession consumes the bypass"
-        );
-        assert!(
-            flags.local_workspace.is_none(),
-            "conversation load must strip local stamp"
-        );
-    }
-
     #[tokio::test]
     async fn pending_create_uses_auto_selected_before_effect_execution() {
         let mut app = crate::app::app_view::tests::test_app();
@@ -4065,11 +3886,12 @@ mod tests {
                     ..
                 } if *canonical == expected_canonical
             )));
-            let create = effects
-                .into_iter()
-                .find(|effect| matches!(effect, Effect::CreateSession { .. }))
-                .expect("create effect");
-            let flags = session_flags_for_effects(&mut app, std::slice::from_ref(&create));
+            assert!(
+                effects
+                    .iter()
+                    .any(|effect| matches!(effect, Effect::CreateSession { .. }))
+            );
+            let flags = session_flags_for_effects(&mut app);
             let meta = flags.to_meta().expect("permission metadata");
 
             assert_eq!(

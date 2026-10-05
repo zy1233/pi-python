@@ -16,8 +16,6 @@ pub(crate) use helpers::{
     EffectMeta, SessionFlags, is_disk_full_error,
     persist_permission_mode_and_notify, persist_setting, sanitize_user_error,
 };
-#[cfg(feature = "local-workspace")]
-pub(crate) use helpers::reject_non_fs_only_advertised_tools;
 use helpers::*;
 use std::path::Path;
 use agent_client_protocol as acp;
@@ -157,7 +155,7 @@ pub(crate) fn execute(
             let mut meta = session_flags.to_meta();
             apply_permission_mode_override(&mut meta, permission_mode_override);
             let is_chat_path = chat_kind || session_flags.chat_mode;
-            finalize_chat_session_meta(&mut meta, is_chat_path, session_flags);
+            finalize_chat_session_meta(&mut meta, is_chat_path);
             if let Some(ref mid) = model_id {
                 meta.get_or_insert_with(acp::Meta::new)
                     .insert("modelId".into(), serde_json::json!(mid.0));
@@ -260,7 +258,7 @@ pub(crate) fn execute(
             let tx = acp_tx.clone();
             let mut meta = session_flags.to_meta();
             let is_chat_path = chat_kind || session_flags.chat_mode;
-            finalize_chat_session_meta(&mut meta, is_chat_path, session_flags);
+            finalize_chat_session_meta(&mut meta, is_chat_path);
             let cwd = session_cwd.unwrap_or_else(|| cwd.to_path_buf());
             let mcp_started = std::time::Instant::now();
             let mcp_servers = pi_shell::util::config::load_mcp_servers(

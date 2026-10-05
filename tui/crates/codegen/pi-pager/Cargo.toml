@@ -230,9 +230,7 @@ default-bazel = [
     "jemalloc",
     "sandbox-enforce",
     "test-support",
-    "local-workspace",
     ]
-local-workspace = ["pi-shell/local-workspace"]
 # No-op on this crate: the actual `#[global_allocator]` (and the
 # `tikv-jemallocator` dep) live on the composition-root binary
 # `pi-pager-bin`, which owns `main.rs`. Kept as an empty feature so the

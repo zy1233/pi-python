@@ -739,12 +739,6 @@ pub struct AgentView {
     /// Unlike `chat_kind`, stays `false` for a `/chat` one-shot session in
     /// a Build process, whose picker still lists local sessions.
     pub app_chat_mode: bool,
-    /// Durable workspace mode for the in-session status indicator (`--chat`).
-    #[cfg(feature = "local-workspace")]
-    pub workspace_mode: crate::views::welcome::WelcomeWorkspaceMode,
-    /// True when CLI/env locked local workspace at startup for this session.
-    #[cfg(feature = "local-workspace")]
-    pub workspace_mode_cli_locked: bool,
     /// Mocked credit balance for the status bar indicator.
     pub credit_balance: Option<crate::views::credit_bar::CreditBalance>,
     /// Auto top-up rule paired with `credit_balance` for the prompt warning.

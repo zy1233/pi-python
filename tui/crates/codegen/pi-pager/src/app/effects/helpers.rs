@@ -338,9 +338,6 @@ pub(crate) struct SessionFlags {
     /// Mutual exclusivity with Build plan profiles: profiles are omitted and a
     /// warn is logged when plan flags are also set (K12).
     pub chat_mode: bool,
-    /// Local-workspace stamp for ACP `_meta` (scrub still strips envId / Direct hub).
-    #[cfg(feature = "local-workspace")]
-    pub local_workspace: Option<crate::app::session_startup::LocalWorkspaceConfig>,
     /// Effective screen mode label (`ScreenMode::meta_label`), stamped into
     /// every `PromptRequest._meta.screenMode` for minimal-vs-regular usage
     /// telemetry. `None` (key omitted) only under `Default` in tests; real
@@ -391,12 +388,6 @@ impl SessionFlags {
         {} else if let Some(profile) = self.agent_profile() {
             meta.insert("agentProfile".into(), serde_json::json!(profile));
         }
-        if self.chat_mode {
-            #[cfg(feature = "local-workspace")]
-            if let Some(ref lw) = self.local_workspace {
-                stamp_local_workspace_meta(&mut meta, lw);
-            }
-        }
         if !self.ask_user {
             meta.insert("askUserQuestion".into(), serde_json::json!(false));
         }
@@ -425,17 +416,6 @@ pub(super) const CHAT_FORBIDDEN_WORKSPACE_BIND_KEYS: &[&str] = &[
     "envId",
     "cloud_server_id",
 ];
-/// FS-only tool ids for local existing workspace (chat attach/own).
-#[cfg(feature = "local-workspace")]
-pub(super) const LOCAL_WORKSPACE_FS_ONLY_TOOL_IDS: &[&str] = &[
-    "workspace.fs_list",
-    "workspace.fs_exists",
-    "workspace.fs_read_file",
-    "workspace.fs_write_file",
-    "workspace.fs_delete_file",
-    "workspace.put_files",
-    "workspace.get_files",
-];
 /// Strip Build `agentProfile` in chat mode. Do not stamp grok `legacy ext RPC`.
 pub(super) fn apply_chat_kind_meta(meta: &mut Option<acp::Meta>) {
     let obj = meta.get_or_insert_with(acp::Meta::new);
@@ -443,62 +423,15 @@ pub(super) fn apply_chat_kind_meta(meta: &mut Option<acp::Meta>) {
     obj.insert("pi/session".into(), serde_json::json!({ "kind": "chat" }));
     obj.retain(|k, _| !crate::acp::vendor::is_vendor_meta_key(k));
 }
-/// Stamp chat+local intent. Attach also stamps `legacy ext RPC`.
-/// Own leaves `server_id` unset — shell supervisor mints before handshake.
-///
-/// Never stamps `envId` or `legacy ext RPC`.
-#[cfg(feature = "local-workspace")]
-pub(super) fn stamp_local_workspace_meta(
-    meta: &mut serde_json::Map<String, serde_json::Value>,
-    cfg: &crate::app::session_startup::LocalWorkspaceConfig,
-) {
-    use crate::app::session_startup::LocalWorkspaceMode;
-    let mut local = serde_json::Map::new();
-    let mode = match cfg.mode {
-        LocalWorkspaceMode::Attach => "attach",
-        LocalWorkspaceMode::Own => "own",
-    };
-    local.insert("mode".into(), serde_json::json!(mode));
-    if let Some(ref sid) = cfg.server_id {
-        local.insert("server_id".into(), serde_json::json!(sid));
-    }
-    if let Some(ref cwd) = cfg.cwd {
-        local
-            .insert("cwd".into(), serde_json::json!(cwd.to_string_lossy().into_owned()));
-    }
-    // Phase 4: do not stamp legacy vendor ext workspace bind keys onto standard ACP.
-    let _ = (local, meta, cfg);
-    tracing::debug!(
-        target: crate::views::welcome::workspace_mode::WORKSPACE_MODE_LOG,
-        event = "acp_meta_stamped_skipped",
-        mode,
-        "skipping local_workspace on session meta (standard ACP only)"
-    );
-}
-/// Apply [`stamp_local_workspace_meta`] onto optional ACP meta.
-#[cfg(feature = "local-workspace")]
-pub(super) fn apply_local_workspace_meta(
-    meta: &mut Option<acp::Meta>,
-    cfg: &crate::app::session_startup::LocalWorkspaceConfig,
-) {
-    let obj = meta.get_or_insert_with(acp::Meta::new);
-    stamp_local_workspace_meta(obj, cfg);
-}
 /// Shared chat create/load/worktree meta finalize: kind + local stamp + scrub.
 pub(super) fn finalize_chat_session_meta(
     meta: &mut Option<acp::Meta>,
     is_chat_path: bool,
-    #[cfg_attr(not(feature = "local-workspace"), allow(unused_variables))]
-    session_flags: &SessionFlags,
 ) {
     if !is_chat_path {
         return;
     }
     apply_chat_kind_meta(meta);
-    #[cfg(feature = "local-workspace")]
-    if let Some(ref lw) = session_flags.local_workspace {
-        apply_local_workspace_meta(meta, lw);
-    }
     scrub_chat_workspace_bind_meta(meta);
 }
 /// Remove client workspace-bind keys from chat create/load meta (defense in depth).
@@ -514,66 +447,6 @@ pub(super) fn scrub_chat_workspace_bind_meta(meta: &mut Option<acp::Meta>) {
         obj.remove(*key);
     }
     obj.retain(|k, _| !crate::acp::vendor::is_vendor_meta_key(k));
-}
-/// Params for shell ACP `legacy ext RPC`.
-///
-/// v1 surface is **shell ACP-only** (no pager slash/command wiring). Pager
-/// dogfood / headless clients call the extension directly with this payload.
-/// No remove path until session end.
-#[cfg(feature = "local-workspace")]
-#[allow(dead_code)]
-pub(crate) fn mid_session_add_local_workspace_params(
-    session_id: &str,
-    cfg: &crate::app::session_startup::LocalWorkspaceConfig,
-) -> serde_json::Value {
-    let mut meta = serde_json::Map::new();
-    stamp_local_workspace_meta(&mut meta, cfg);
-    let mut opt = Some(meta);
-    scrub_chat_workspace_bind_meta(&mut opt);
-    serde_json::json!({
-        "sessionId": session_id,
-        "meta": opt.unwrap_or_default(),
-    })
-}
-/// Fail closed on operator attestation outside the FS-only allowlist.
-/// `None` / empty attested set → uncheckable → refuse. Live server is not probed.
-#[cfg(feature = "local-workspace")]
-pub(crate) fn reject_non_fs_only_advertised_tools(
-    advertised_tool_ids: Option<&[&str]>,
-) -> Result<(), String> {
-    let Some(ids) = advertised_tool_ids else {
-        return Err(
-            "operator attestation GROK_CHAT_LOCAL_WORKSPACE_ADVERTISED_TOOLS is unset \
-             (uncheckable); refuse attach. Live workspace_server was not inspected. Set \
-             the env to a comma-separated FS-only catalog."
-                .into(),
-        );
-    };
-    if ids.is_empty() {
-        return Err(
-            "operator attestation GROK_CHAT_LOCAL_WORKSPACE_ADVERTISED_TOOLS is empty \
-             (uncheckable); refuse attach. Live workspace_server was not inspected."
-                .into(),
-        );
-    }
-    let forbidden: Vec<&str> = ids
-        .iter()
-        .copied()
-        .filter(|id| !LOCAL_WORKSPACE_FS_ONLY_TOOL_IDS.contains(id))
-        .collect();
-    if forbidden.is_empty() {
-        Ok(())
-    } else {
-        Err(
-                format!(
-            "operator attestation lists tools outside the FS-only allowlist: {}. \
-             Live workspace_server was not inspected. Fix \
-             GROK_CHAT_LOCAL_WORKSPACE_ADVERTISED_TOOLS or restart workspace_server \
-             with --require-explicit-toolset and an FS-only catalog.",
-            forbidden.join(", ")
-        ),
-            )
-    }
 }
 /// Metadata returned from effect execution so the event loop can patch
 /// state that requires a spawned task handle (e.g., auth AbortHandle).

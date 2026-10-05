@@ -83,11 +83,9 @@ default = [
 default-bazel = [
     "jemalloc",
     "sandbox-enforce",
-    "local-workspace",
     ]
 jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-sys", "dep:tikv-jemalloc-ctl"]
 sandbox-enforce = ["pi-pager/sandbox-enforce"]
-local-workspace = ["pi-pager/local-workspace"]
 release-dist = [
     "pi-pager/release-dist",
     ]

@@ -16,14 +16,11 @@ loom = ["dep:loom"]
 # it via `required-features`.
 test-support = []
 test-util = []
-# Local Computer Hub workspace_server (own/attach + crash-restart). Requires
-local-workspace = []
 # CI default set (preferred over cargo `default` for hermetic CI builds):
 # `config-docs` is on this set (not cargo `default`) so hermetic lib tests
 # parse the committed config-reference page.
 config-docs = []
 default-bazel = [
-    "local-workspace",
     "test-support",
     "config-docs",
 ]

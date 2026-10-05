@@ -101,9 +101,6 @@ pub enum Action {
     /// load effect; under `--chat`, local Build disk rows are refused in
     /// dispatch (never coerced).
     LoadSession(String, Option<std::path::PathBuf>, bool),
-    /// Welcome Local workspace ACK confirmed (y); write ack + start session.
-    #[cfg(feature = "local-workspace")]
-    ConfirmWelcomeLocalWorkspaceAck,
     /// Create a new session with a client-chosen session ID (`--session-id`).
     NewSessionWithId(String),
     /// Send the current prompt text to the agent.
