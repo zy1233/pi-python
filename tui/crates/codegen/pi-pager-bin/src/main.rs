@@ -25,6 +25,7 @@ mod jemalloc_malloc_conf {
     #[unsafe(export_name = "_rjem_malloc_conf")]
     static MALLOC_CONF: MallocConfPtr = MallocConfPtr(CONF.as_ptr());
 }
+mod print_mode;
 use anyhow::Result;
 use std::num::NonZeroUsize;
 use pi_pager::app::{Command, PagerArgs};
@@ -401,6 +402,15 @@ fn dispatch_python_print(args: &PagerArgs) -> Option<i32> {
 }
 
 fn run_python_print(args: &PagerArgs) -> i32 {
+    // The OS sandbox is applied after this dispatch (`async_main`), so print mode can never run
+    // under one. Refuse rather than start the agent without a sandbox that was asked for.
+    if let Some(requested) = pi_shell::config::requested_sandbox_profile(args.sandbox.as_deref()) {
+        eprintln!("{}", print_mode::sandbox_refusal(&requested));
+        return print_mode::REFUSED_EXIT_CODE;
+    }
+    for flag in print_mode::ignored_flags(args) {
+        eprintln!("warning: {flag} has no effect with -p and was ignored");
+    }
     let (program, mut agent_args) = pi_pager::acp::spawn::pi_agent_command();
     if let Some(prompt) = &args.single {
         agent_args.push("-p".into());

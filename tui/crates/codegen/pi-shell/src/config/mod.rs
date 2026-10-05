@@ -1182,6 +1182,47 @@ fn apply_requirements_inner(
     }
     enforced
 }
+/// A sandbox profile a launch asks for, as reported by [`requested_sandbox_profile`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestedSandbox {
+    /// The requested profile name. Never `off`.
+    pub profile: String,
+    /// The layer that asked for it: `requirement`, `cli`, `env` or `config`.
+    pub source: String,
+    /// False when a deployment requirement fixes the profile, so `--sandbox off` cannot lift it.
+    pub overridable: bool,
+}
+/// The sandbox profile this launch asks for, or `None` when it asks for none (`off`).
+///
+/// Resolves exactly like [`apply_sandbox`] (deployment requirement > `--sandbox` >
+/// `GROK_SANDBOX` > `[sandbox].profile`) but applies nothing. Print mode (`zypi -p`) hands the
+/// whole run to the agent process before `apply_sandbox` runs, so its caller uses this to refuse
+/// to start instead of running the agent unsandboxed.
+pub fn requested_sandbox_profile(cli_profile: Option<&str>) -> Option<RequestedSandbox> {
+    let config = crate::agent::config::SandboxSettingsConfig::from_effective_config();
+    let req = load_merged_requirements();
+    let profile_req = req
+        .as_ref()
+        .and_then(|v| v.get("sandbox")?.get("profile")?.as_str());
+    requested_sandbox(&config, cli_profile, profile_req)
+}
+fn requested_sandbox(
+    config: &crate::agent::config::SandboxSettingsConfig,
+    cli_profile: Option<&str>,
+    requirement: Option<&str>,
+) -> Option<RequestedSandbox> {
+    let resolved = config.resolve_profile(cli_profile, requirement);
+    // `ProfileName` parsing never fails: a name that is not built in is a custom profile, which
+    // `apply_sandbox` refuses to run without. Only `off` (or its alias `none`) means "no sandbox".
+    match resolved.value.parse::<pi_sandbox::ProfileName>() {
+        Ok(pi_sandbox::ProfileName::Off) => None,
+        _ => Some(RequestedSandbox {
+            overridable: resolved.source != crate::agent::config::ConfigSource::Requirement,
+            source: resolved.source.to_string(),
+            profile: resolved.value,
+        }),
+    }
+}
 /// Resolve sandbox profile and apply OS-level enforcement. Called once at startup.
 ///
 /// `cli_profile` is the resumed/forced base profile (a resumed session's saved

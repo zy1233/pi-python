@@ -2742,3 +2742,68 @@ fn kill_switched_cold_cwd_stays_allowed_through_plugins_config_read() {
             "gate must still allow the kill-switched folder after the config read"
         );
 }
+/// `GROK_SANDBOX` is process-global; serialize the tests that read it.
+static SANDBOX_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Run `f` with `GROK_SANDBOX` set to `value` (Some) or removed (None).
+fn with_grok_sandbox<T>(value: Option<&str>, f: impl FnOnce() -> T) -> T {
+    let _guard = SANDBOX_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    with_env_var_opt("GROK_SANDBOX", value, f)
+}
+fn sandbox_settings(profile: Option<&str>) -> crate::agent::config::SandboxSettingsConfig {
+    crate::agent::config::SandboxSettingsConfig {
+        profile: profile.map(str::to_owned),
+        auto_allow_bash: None,
+    }
+}
+fn requested(profile: &str, source: &str, overridable: bool) -> Option<RequestedSandbox> {
+    Some(RequestedSandbox {
+        profile: profile.to_owned(),
+        source: source.to_owned(),
+        overridable,
+    })
+}
+#[test]
+fn no_sandbox_is_requested_unless_a_layer_asks_for_one() {
+    with_grok_sandbox(None, || {
+        assert_eq!(requested_sandbox(&sandbox_settings(None), None, None), None);
+        assert_eq!(requested_sandbox(&sandbox_settings(Some("")), None, None), None);
+        assert_eq!(requested_sandbox(&sandbox_settings(Some("off")), None, None), None);
+        assert_eq!(requested_sandbox(&sandbox_settings(Some("none")), None, None), None);
+    });
+}
+#[test]
+fn a_requested_sandbox_names_the_layer_that_asked_for_it() {
+    with_grok_sandbox(None, || {
+        let ask = |config: Option<&str>, cli: Option<&str>| {
+            requested_sandbox(&sandbox_settings(config), cli, None)
+        };
+        assert_eq!(ask(None, Some("workspace")), requested("workspace", "cli", true));
+        assert_eq!(ask(Some("strict"), None), requested("strict", "config", true));
+        assert_eq!(ask(Some("strict"), Some("devbox")), requested("devbox", "cli", true));
+        // A name that is not built in is a custom profile; `apply_sandbox` refuses to run
+        // without it, so it is a request too.
+        assert_eq!(ask(Some("mine"), None), requested("mine", "config", true));
+    });
+    with_grok_sandbox(Some("read-only"), || {
+        assert_eq!(
+            requested_sandbox(&sandbox_settings(Some("strict")), None, None),
+            requested("read-only", "env", true),
+            "the environment wins over the config file"
+        );
+    });
+}
+#[test]
+fn an_explicit_off_lifts_a_configured_sandbox_but_not_a_required_one() {
+    with_grok_sandbox(Some("strict"), || {
+        assert_eq!(
+            requested_sandbox(&sandbox_settings(Some("strict")), Some("off"), None),
+            None,
+            "--sandbox off wins over GROK_SANDBOX and [sandbox].profile"
+        );
+        assert_eq!(
+            requested_sandbox(&sandbox_settings(None), Some("off"), Some("workspace")),
+            requested("workspace", "requirement", false),
+            "a deployment requirement wins over everything and cannot be lifted"
+        );
+    });
+}
