@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -29,7 +31,7 @@ tb = _load()
 
 
 def _manifest() -> dict:
-    return tomllib.loads(MANIFEST.read_text())
+    return tomllib.loads(MANIFEST.read_text(encoding="utf-8"))
 
 
 # ---- parsing --------------------------------------------------------------------------------
@@ -127,9 +129,11 @@ def test_collect_errors_skips_the_abort_summary():
 def test_scan_words_matches_whole_words_and_skips_target_dirs(tmp_path):
     (tmp_path / "src").mkdir()
     (tmp_path / "target").mkdir()
-    (tmp_path / "src" / "a.rs").write_text("struct MvpAgent;\nlet MvpAgentFactory = 1;\n")
-    (tmp_path / "src" / "b.bin").write_text("MvpAgent")  # not a text suffix
-    (tmp_path / "target" / "c.rs").write_text("MvpAgent")
+    (tmp_path / "src" / "a.rs").write_text(
+        "struct MvpAgent;\nlet MvpAgentFactory = 1;\n", encoding="utf-8"
+    )
+    (tmp_path / "src" / "b.bin").write_text("MvpAgent", encoding="utf-8")  # not a text suffix
+    (tmp_path / "target" / "c.rs").write_text("MvpAgent", encoding="utf-8")
     hits = tb.scan_words(tmp_path, ["MvpAgent"])
     assert len(hits) == 1
     assert hits[0].endswith("a.rs:1: struct MvpAgent;")
@@ -196,14 +200,15 @@ def test_evaluate_suite_enforces_floor_and_notes_reference_drift():
 
 
 def test_manifest_toolchain_matches_the_pin_in_tui():
-    pinned = tomllib.loads((REPO_ROOT / "tui" / "rust-toolchain.toml").read_text())
+    pinned = tomllib.loads((REPO_ROOT / "tui" / "rust-toolchain.toml").read_text(encoding="utf-8"))
     assert _manifest()["toolchain"]["channel"] == pinned["toolchain"]["channel"]
 
 
 def _workspace_package_names() -> set[str]:
     names = set()
     for cargo_toml in (REPO_ROOT / "tui" / "crates").rglob("Cargo.toml"):
-        match = re.search(r'^name = "([^"]+)"', cargo_toml.read_text(), re.MULTILINE)
+        text = cargo_toml.read_text(encoding="utf-8")
+        match = re.search(r'^name = "([^"]+)"', text, re.MULTILINE)
         if match:
             names.add(match.group(1))
     return names
@@ -237,20 +242,20 @@ def test_select_suites_narrows_by_package_and_rejects_unknown_names():
 
 
 def test_tests_run_without_fail_fast_so_one_failing_target_cannot_hide_the_rest():
-    assert '"--no-fail-fast"' in SCRIPT.read_text()
+    assert '"--no-fail-fast"' in SCRIPT.read_text(encoding="utf-8")
 
 
 def test_workflow_runs_the_documented_commands():
-    text = WORKFLOW.read_text()
+    text = WORKFLOW.read_text(encoding="utf-8")
     for command in ("check", "test", "release"):  # `gates` runs inside `check`
         assert f"scripts/tui_baseline.py {command}" in text, command
     assert "scripts/tui_baseline.toml" in text  # path filter, so manifest edits trigger the job
 
 
-def test_render_markdown_smoke():
-    report = {
+def _sample_report(detail: str = "a | b") -> dict:
+    return {
         "tools": {"cargo": "cargo 1.94.0"},
-        "checks": [{"name": "x", "status": "fail", "detail": "a | b"}],
+        "checks": [{"name": "x", "status": "fail", "detail": detail}],
         "warnings": {"total": 3, "by_lint": {"dead_code": 3}, "by_crate": {}},
         "graph": {"x86_64-unknown-linux-gnu": 995},
         "tracked": {"pi-tools": ["pi-agent"], "gone": None},
@@ -268,7 +273,40 @@ def test_render_markdown_smoke():
         ],
         "totals": {"passed": 1, "failed": 0, "ignored": 0},
     }
-    markdown = tb.render_markdown("test", report)
+
+
+def test_render_markdown_smoke():
+    markdown = tb.render_markdown("test", _sample_report())
     assert "a \\| b" in markdown
     assert "report only" in markdown
     assert "(not in graph)" in markdown
+
+
+def test_publish_survives_a_legacy_default_encoding(tmp_path):
+    """Windows (and `LC_ALL=C` on POSIX) default to a legacy codec; the reports are not ASCII."""
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps(_sample_report("a \u2014 b \u2705")), encoding="utf-8")
+    program = (
+        "import importlib.util, json, sys\n"
+        "from pathlib import Path\n"
+        "spec = importlib.util.spec_from_file_location('tui_baseline', sys.argv[1])\n"
+        "tb = importlib.util.module_from_spec(spec)\n"
+        "sys.modules[spec.name] = tb\n"
+        "spec.loader.exec_module(tb)\n"
+        "tb.use_utf8_streams()\n"
+        "report = json.loads(Path(sys.argv[2]).read_text(encoding='utf-8'))\n"
+        "tb.publish('test', report, Path(sys.argv[3]))\n"
+    )
+    env = {**os.environ, "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0", "LC_ALL": "C"}
+    for name in ("PYTHONIOENCODING", "GITHUB_STEP_SUMMARY"):
+        env.pop(name, None)
+    out_dir = tmp_path / "out"
+    proc = subprocess.run(
+        [sys.executable, "-c", program, str(SCRIPT), str(report_path), str(out_dir)],
+        env=env,
+        capture_output=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+    assert "\u2014" in (out_dir / "test.md").read_text(encoding="utf-8")
+    assert "\u2705" in proc.stdout.decode("utf-8")

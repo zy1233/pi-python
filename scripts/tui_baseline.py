@@ -275,7 +275,13 @@ def log_group(title: str):
 
 def cargo(args: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["cargo", *args], cwd=cwd, capture_output=True, text=True, check=False, errors="replace"
+        ["cargo", *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+        encoding="utf-8",
+        errors="replace",
     )
 
 
@@ -296,6 +302,7 @@ def stream(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT if merge_stderr else None,
         text=True,
+        encoding="utf-8",
         errors="replace",
         bufsize=1,
         start_new_session=True,
@@ -344,7 +351,15 @@ def echo_diagnostic(line: str) -> None:
 def tool_versions(cwd: Path) -> dict[str, str]:
     versions = {}
     for name, cmd in (("rustc", ["rustc", "-vV"]), ("cargo", ["cargo", "-V"])):
-        proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False)
+        proc = subprocess.run(
+            cmd,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=False,
+            encoding="utf-8",
+            errors="replace",
+        )
         versions[name] = proc.stdout.strip().replace("\n", "; ")
     return versions
 
@@ -361,7 +376,9 @@ def run_gates(manifest: dict[str, Any], tui_dir: Path) -> tuple[list[Check], dic
     package = manifest["graph"]["package"]
     gates = manifest["gates"]
 
-    pinned = tomllib.loads((tui_dir / "rust-toolchain.toml").read_text())["toolchain"]["channel"]
+    pinned = tomllib.loads((tui_dir / "rust-toolchain.toml").read_text(encoding="utf-8"))[
+        "toolchain"
+    ]["channel"]
     expected = manifest["toolchain"]["channel"]
     checks.append(
         Check(
@@ -371,7 +388,7 @@ def run_gates(manifest: dict[str, Any], tui_dir: Path) -> tuple[list[Check], dic
         )
     )
 
-    lock = (tui_dir / "Cargo.lock").read_text()
+    lock = (tui_dir / "Cargo.lock").read_text(encoding="utf-8")
     for crate in gates["deny_crates"]:
         in_lock = re.search(rf'^name = "{re.escape(crate)}"$', lock, re.MULTILINE) is not None
         proc = cargo(["tree", "--locked", "-p", package, "-i", crate, "--prefix", "none"], tui_dir)
@@ -658,16 +675,25 @@ def render_markdown(command: str, report: dict[str, Any]) -> str:
 
 def publish(command: str, report: dict[str, Any], out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / f"{command}.json").write_text(json.dumps(report, indent=2) + "\n")
+    (out_dir / f"{command}.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     markdown = render_markdown(command, report)
-    (out_dir / f"{command}.md").write_text(markdown + "\n")
+    (out_dir / f"{command}.md").write_text(markdown + "\n", encoding="utf-8")
     if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(summary, "a", encoding="utf-8") as handle:
             handle.write(markdown + "\n")
     log("\n" + markdown)
 
 
+def use_utf8_streams() -> None:
+    """The reports contain non-ASCII (— ✅ ❌); a legacy console encoding must not crash the run."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    use_utf8_streams()
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("command", choices=["gates", "check", "test", "release"])
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
@@ -682,7 +708,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    manifest = tomllib.loads(args.manifest.read_text())
+    manifest = tomllib.loads(args.manifest.read_text(encoding="utf-8"))
     tui_dir = args.tui_dir.resolve()
 
     if args.command == "gates":
