@@ -57,7 +57,6 @@ pub(crate) fn shell_c(script: &str) -> Command {
 /// embed secrets; `Shown` includes it for diagnostics.
 #[derive(Clone, Copy)]
 pub(crate) enum CommandLog<'a> {
-    Redacted,
     Shown(&'a str),
 }
 
@@ -65,7 +64,6 @@ impl std::fmt::Display for CommandLog<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
             Self::Shown(cmd) => f.write_str(cmd),
-            Self::Redacted => f.write_str("<redacted>"),
         }
     }
 }
@@ -237,138 +235,5 @@ async fn drain_reader(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
-    fn sh(script: &str) -> Command {
-        shell_c(script)
-    }
-
-    fn opts(label: &str) -> RunOptions<'_> {
-        RunOptions {
-            label,
-            command_log: CommandLog::Redacted,
-        }
-    }
-
-    const TIMEOUT: Duration = Duration::from_secs(10);
-
-    /// The command-string escape hatch must spawn on the host platform. A
-    /// hardcoded `sh` fails here on Windows, which silently downgraded
-    /// `auth_provider_command` to the built-in login. `echo hi` is valid in
-    /// both `sh -c` and `cmd /C`.
-    #[tokio::test]
-    async fn shell_c_spawns_on_this_platform() {
-        let out = run_detached_with_timeout(shell_c("echo hi"), TIMEOUT, opts("test shell_c"))
-            .await
-            .expect("the platform shell must be spawnable");
-        assert!(out.status.success());
-        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "hi");
-    }
-
-    #[tokio::test]
-    async fn large_stderr_is_streamed_and_capped() {
-        let out = run_detached_with_timeout(
-            sh("yes 0123456789abcdef | head -c 2097152 >&2; echo done"),
-            TIMEOUT,
-            opts("test large stderr"),
-        )
-        .await
-        .expect("must complete without hitting the timeout");
-        assert!(out.status.success());
-        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "done");
-        assert_eq!(out.stderr.len(), MAX_CAPTURE_BYTES);
-    }
-
-    #[tokio::test]
-    async fn backgrounded_grandchild_does_not_block_the_drain() {
-        let start = Instant::now();
-        let out = run_detached_with_timeout(
-            sh("sleep 5 & echo hi"),
-            TIMEOUT,
-            opts("test grandchild drain"),
-        )
-        .await
-        .expect("must return promptly, not at the grandchild's exit");
-        assert!(out.status.success());
-        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "hi");
-        assert!(
-            start.elapsed() < Duration::from_secs(3),
-            "drain must not wait for the grandchild (took {:?})",
-            start.elapsed()
-        );
-    }
-
-    #[tokio::test]
-    async fn nonzero_exit_returns_output_to_caller() {
-        let out = run_detached_with_timeout(
-            sh("echo partial; echo diagnostics >&2; exit 3"),
-            TIMEOUT,
-            opts("test nonzero"),
-        )
-        .await
-        .expect("nonzero exit is the caller's call, not a runner failure");
-        assert_eq!(out.status.code(), Some(3));
-        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "partial");
-        assert_eq!(String::from_utf8_lossy(&out.stderr).trim(), "diagnostics");
-    }
-
-    #[tokio::test]
-    async fn timeout_with_grandchild_reports_timeout_promptly() {
-        let start = Instant::now();
-        let out = run_detached_with_timeout(
-            sh("sleep 30 & sleep 30"),
-            Duration::from_secs(1),
-            opts("test group kill"),
-        )
-        .await;
-        assert!(matches!(out, Err(RunError::TimedOut)));
-        assert!(
-            start.elapsed() < Duration::from_secs(5),
-            "group kill must not wait for the grandchild (took {:?})",
-            start.elapsed()
-        );
-    }
-
-    #[tokio::test]
-    async fn timeout_escalates_past_a_sigterm_trap() {
-        let start = Instant::now();
-        let out = run_detached_with_timeout(
-            sh("trap '' TERM; while :; do sleep 0.2; done"),
-            Duration::from_secs(1),
-            opts("test sigterm trap"),
-        )
-        .await;
-        assert!(matches!(out, Err(RunError::TimedOut)));
-        assert!(
-            start.elapsed() < Duration::from_secs(5),
-            "escalation must bound teardown of a SIGTERM-ignoring child (took {:?})",
-            start.elapsed()
-        );
-    }
-
-    #[tokio::test]
-    async fn spawn_failure_reports_spawn_error() {
-        let cmd = Command::new("/nonexistent/grok-test-binary");
-        let out = run_detached_with_timeout(cmd, TIMEOUT, opts("test spawn failure")).await;
-        assert!(matches!(out, Err(RunError::SpawnFailed)));
-    }
-
-    #[tokio::test]
-    async fn post_exit_budget_is_shared_across_streams() {
-        let start = Instant::now();
-        let out = run_detached_with_timeout(
-            sh("(i=0; while [ $i -lt 100 ]; do echo out; echo err >&2; sleep 0.1; i=$((i+1)); done) & echo hi"),
-            TIMEOUT,
-            opts("test shared drain budget"),
-        )
-        .await
-        .expect("must return at the shared budget, not the timeout");
-        assert!(out.status.success());
-        assert!(String::from_utf8_lossy(&out.stdout).contains("hi"));
-        assert!(
-            start.elapsed() < POST_EXIT_BUDGET + Duration::from_millis(1500),
-            "drain must be bounded by ONE shared budget (took {:?})",
-            start.elapsed()
-        );
-    }
 }

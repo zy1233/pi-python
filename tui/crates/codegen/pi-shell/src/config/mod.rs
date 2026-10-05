@@ -1,5 +1,4 @@
-pub mod reloader;
-pub mod watcher;
+pub(crate) mod reloader;
 use crate::bundle;
 use serde::Deserialize;
 pub use pi_config_types::{
@@ -828,22 +827,12 @@ pub use crate::util::config::load_effective_config;
 /// Where a requirement or permission rule was loaded from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RequirementSource {
-    Unknown,
     Requirements { path: std::path::PathBuf },
-    ManagedSettings { path: std::path::PathBuf },
-    Config { path: std::path::PathBuf },
-    Settings { path: std::path::PathBuf },
 }
 impl std::fmt::Display for RequirementSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Unknown => f.write_str("<unknown>"),
             Self::Requirements { path } => write!(f, "{} (requirements)", path.display()),
-            Self::ManagedSettings { path } => {
-                write!(f, "{} (managed-settings)", path.display())
-            }
-            Self::Config { path } => write!(f, "{} (config)", path.display()),
-            Self::Settings { path } => write!(f, "{} (settings)", path.display()),
         }
     }
 }

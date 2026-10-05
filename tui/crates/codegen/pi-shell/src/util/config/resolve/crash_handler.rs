@@ -69,16 +69,7 @@ pub fn load_crash_handler_enabled_sync() -> bool {
 
 #[cfg(test)]
 mod crash_handler_gate_tests {
-    use super::*;
     
 
-    // `GROK_CRASH_HANDLER` is process-global; serialize and force it unset at
-    // the top of each test so a developer's shell value can't make these flaky.
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    fn guard() -> std::sync::MutexGuard<'static, ()> {
-        let g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-        unsafe { std::env::remove_var(ENV_CRASH_HANDLER) };
-        g
-    }
 
 }

@@ -3,10 +3,7 @@
 //! and the doom-loop categorizer) stay here since they need shell-local
 //! types.
 
-pub(crate) use pi_session_events::types::{
-    GoalClassifierVerdictTelemetry,
-    GoalPauseReasonTelemetry,
-};
+pub(crate) use pi_session_events::types::GoalClassifierVerdictTelemetry;
 
 // ── Laziness detector (Layer 3) discriminator vocabulary ─────────────
 //
@@ -448,8 +445,7 @@ impl GoalRoleModelFailOpenReason {
 }
 
 /// Bridge `GoalClassifierVerdict` (shell) → `GoalClassifierVerdictTelemetry`.
-/// Mirrors the `GoalPauseReason` → `GoalPauseReasonTelemetry` pattern;
-/// exhaustive match catches drift if either side adds a variant.
+/// The exhaustive match catches drift if either side adds a variant.
 impl From<crate::session::goal_tracker::GoalClassifierVerdict> for GoalClassifierVerdictTelemetry {
     fn from(verdict: crate::session::goal_tracker::GoalClassifierVerdict) -> Self {
         use crate::session::goal_tracker::GoalClassifierVerdict;
@@ -460,51 +456,9 @@ impl From<crate::session::goal_tracker::GoalClassifierVerdict> for GoalClassifie
     }
 }
 
-/// Bridge `GoalPauseReason` (shell) → `GoalPauseReasonTelemetry`
-/// (`pi-file-utils`). The two enums are intentional mirrors and live in
-/// different crates due to the orphan rule. The exhaustive `match` here
-/// ensures the compiler catches drift if either side adds a variant.
-impl From<crate::session::goal_tracker::GoalPauseReason> for GoalPauseReasonTelemetry {
-    fn from(reason: crate::session::goal_tracker::GoalPauseReason) -> Self {
-        use crate::session::goal_tracker::GoalPauseReason;
-        match reason {
-            GoalPauseReason::User => Self::User,
-            GoalPauseReason::BackOff => Self::BackOff,
-            GoalPauseReason::NoProgress => Self::NoProgress,
-            GoalPauseReason::Verification => Self::Verification,
-            GoalPauseReason::Infra => Self::Infra,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::goal_tracker::GoalPauseReason;
-
-    #[test]
-    fn goal_pause_reason_telemetry_mirrors_all_variants() {
-        assert!(matches!(
-            GoalPauseReasonTelemetry::from(GoalPauseReason::User),
-            GoalPauseReasonTelemetry::User
-        ));
-        assert!(matches!(
-            GoalPauseReasonTelemetry::from(GoalPauseReason::BackOff),
-            GoalPauseReasonTelemetry::BackOff
-        ));
-        assert!(matches!(
-            GoalPauseReasonTelemetry::from(GoalPauseReason::NoProgress),
-            GoalPauseReasonTelemetry::NoProgress
-        ));
-        assert!(matches!(
-            GoalPauseReasonTelemetry::from(GoalPauseReason::Verification),
-            GoalPauseReasonTelemetry::Verification
-        ));
-        assert!(matches!(
-            GoalPauseReasonTelemetry::from(GoalPauseReason::Infra),
-            GoalPauseReasonTelemetry::Infra
-        ));
-    }
 
     /// Hand-curated expected pairings — kept here (not in `all()`) so
     /// the test can detect a desync between `as_const_str` and the

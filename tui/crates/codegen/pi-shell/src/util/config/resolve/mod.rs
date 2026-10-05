@@ -6,7 +6,6 @@ mod crash_handler;
 mod display_refresh;
 mod features;
 mod mcp;
-mod system_prompt;
 mod tool_approvals;
 mod toolset;
 mod ui;

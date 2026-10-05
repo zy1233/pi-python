@@ -61,18 +61,4 @@ pub struct PlanModeSnapshot {
 mod tests {
     
     
-    use pi_tools::types::template_renderer::TemplateRenderer;
-    
-    fn render(
-        renderer: &TemplateRenderer,
-        template: &str,
-        plan_path: &str,
-        plan_has_content: bool,
-    ) -> String {
-        let extra = serde_json::json!({
-            "plan_path": plan_path,
-            "plan_has_content": plan_has_content,
-        });
-        renderer.render_with_extra(template, &extra).unwrap()
-    }
 }

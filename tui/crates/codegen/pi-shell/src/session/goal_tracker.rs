@@ -92,27 +92,6 @@ impl GoalStatus {
     }
 }
 
-/// Input to [`GoalTracker::pause`] / [`GoalTracker::pause_with_message`]
-/// and the auto-pause helpers. Maps 1:1 to one of the paused variants on
-/// [`GoalStatus`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum GoalPauseReason {
-    User,
-    BackOff,
-    /// Verification stage saw no change in the flagged-gap fingerprint
-    /// across consecutive attempts and auto-paused before the run cap.
-    /// Maps to [`GoalStatus::NoProgressPaused`] — same resumable paused
-    /// family as the cap, surfaced distinctly in the UI / telemetry.
-    NoProgress,
-    /// [`GoalStatus::Blocked`]; pairs with a human-readable message on
-    /// [`GoalOrchestration::pause_message`].
-    Verification,
-    /// Turn finished with `PromptTurnResult::Err`. Maps to
-    /// [`GoalStatus::InfraPaused`]; pairs with a human-readable message on
-    /// [`GoalOrchestration::pause_message`].
-    Infra,
-}
-
 /// Aggregate verdict produced by the goal-verification stage.
 /// `Achieved` indicates the adversarial skeptic panel judged the goal
 /// complete; `NotAchieved` means another worker round is warranted.

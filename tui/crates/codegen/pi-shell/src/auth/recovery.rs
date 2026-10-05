@@ -62,10 +62,6 @@ const FRESH_MINT_GUARD_SECS: i64 = 120;
 /// Required at every call site so suppressing the KPI is explicit, not default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RecoverySource {
-    /// A chat/inference turn — surfaces the `ReAuthRequired` banner.
-    Turn,
-    /// The relay / leader connection handshake.
-    Relay,
     /// Uploads, telemetry, tool calls. Never emits the KPI.
     Background,
 }
@@ -73,8 +69,6 @@ pub(crate) enum RecoverySource {
 impl RecoverySource {
     fn trigger(self) -> Option<ManualAuthSurface> {
         match self {
-            RecoverySource::Turn => Some(ManualAuthSurface::Turn),
-            RecoverySource::Relay => Some(ManualAuthSurface::Relay),
             RecoverySource::Background => None,
         }
     }
@@ -190,10 +184,6 @@ impl ManualAuthTracker {
         self.last_token.lock().clone()
     }
 
-    #[cfg(test)]
-    pub(crate) fn last_emit_for_test(&self) -> Option<ManualAuth> {
-        self.last_emit.lock().clone()
-    }
 }
 
 /// Which recovery step to attempt next.

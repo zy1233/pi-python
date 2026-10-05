@@ -326,38 +326,6 @@ mod tests {
         let result = build_candidate_list("/repo/wt-1", "/repo/main", &records, &[]);
         assert_eq!(result, vec!["/repo/wt-1", "/repo/main"]);
     }
-    /// Test helper: Initialize a git repo at the given path
-    fn init_git_repo(path: &std::path::Path) {
-        crate::test_support::ensure_hermetic_git_on_path();
-        std::process::Command::new("git")
-            .current_dir(path)
-            .args(["init"])
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .current_dir(path)
-            .args(["config", "user.email", "test@test.com"])
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .current_dir(path)
-            .args(["config", "user.name", "Test"])
-            .output()
-            .unwrap();
-    }
-    /// Test helper: Stage and commit all files
-    fn git_commit_all(path: &std::path::Path, message: &str) {
-        std::process::Command::new("git")
-            .current_dir(path)
-            .args(["add", "."])
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .current_dir(path)
-            .args(["commit", "-m", message])
-            .output()
-            .unwrap();
-    }
     #[test]
     fn test_background_copy_guard_registers_and_unregisters() {
         let context = BackgroundCopyContext::new();

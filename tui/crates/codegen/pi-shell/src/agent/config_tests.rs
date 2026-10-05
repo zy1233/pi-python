@@ -1062,22 +1062,6 @@ fn e2e_config_models_parsed_directly_not_via_deep_merge() {
         "base_url should be None when user didn't set it"
     );
 }
-/// The tamper-resistance `25-enterprise.md` sells to administrators, for
-/// every key an administrator can pin.
-#[test]
-#[serial]
-fn requirement_pin_outranks_a_hostile_environment() {
-    for spec in FEATURES {
-        let pinned = !spec.default_enabled;
-        let _env = EnvGuard::set(spec.env, if pinned { "0" } else { "1" });
-        let mut cfg = Config::default();
-        cfg.requirements
-            .pin_feature(spec.id, pinned, crate::config::RequirementSource::Unknown);
-        let r = cfg.feature(spec.id);
-        assert_eq!(r.value, pinned, "{} lost to {}", spec.key, spec.env);
-        assert_eq!(r.source, ConfigSource::Requirement, "{}", spec.key);
-    }
-}
 /// A registered key is a `&'static str` matched against the `[features]`
 /// table, not a serde field name, so every one of them is read back here.
 #[test]

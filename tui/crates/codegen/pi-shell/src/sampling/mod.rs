@@ -4,7 +4,7 @@
 //! The Rust sampling client (`pi-sampler`) is gone: model requests are made by the ACP agent
 //! (today the Python `pi_agent_cli`), never by this process.
 
-pub mod conversation;
+pub(crate) mod conversation;
 pub mod error;
 pub mod types;
 

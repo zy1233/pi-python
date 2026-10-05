@@ -180,13 +180,6 @@ impl ApplyOutcome {
         matches!(self, Self::Applied { wrote: true })
     }
 
-    pub(super) fn skipped(&self) -> bool {
-        matches!(self, Self::Skipped)
-    }
-
-    pub(super) fn signature_rejected(&self) -> bool {
-        matches!(self, Self::SignatureRejected)
-    }
 }
 
 /// Pick the envelope whose (hint-only) key_id is trusted, else the first.

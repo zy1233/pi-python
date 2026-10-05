@@ -10,30 +10,11 @@ pub enum SessionKind {
     Chat,
 }
 
-impl SessionKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            SessionKind::Build => "build",
-            SessionKind::Chat => "chat",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum FacetValue {
     One(serde_json::Value),
     Many(Vec<serde_json::Value>),
-}
-
-impl FacetValue {
-    pub fn values(&self) -> Vec<&serde_json::Value> {
-        match self {
-            FacetValue::One(v) => vec![v],
-            FacetValue::Many(vs) => vs.iter().collect(),
-        }
-    }
-
 }
 
 pub type FacetMap = BTreeMap<String, FacetValue>;

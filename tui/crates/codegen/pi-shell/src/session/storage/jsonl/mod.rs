@@ -13,11 +13,6 @@ use std::path::{Path, PathBuf};
 use pi_chat_state::StrictAppendAck;
 use pi_workspace::session::file_state::RewindPoint;
 mod copy;
-#[derive(Clone)]
-enum SessionDirMode {
-    FromRoot(PathBuf),
-    Explicit(PathBuf),
-}
 #[derive(Clone, Copy)]
 pub(crate) enum AppendDurability {
     Buffered,
@@ -26,7 +21,7 @@ pub(crate) enum AppendDurability {
 /// JSONL storage under `{root}/sessions/{url_encoded_cwd}/{session_id}/`.
 #[derive(Clone)]
 pub struct JsonlStorageAdapter {
-    dir_mode: SessionDirMode,
+    root_dir: PathBuf,
     #[cfg(test)]
     update_append_probe: Option<std::sync::Arc<AppendProbe>>,
 }
@@ -40,34 +35,27 @@ impl Default for JsonlStorageAdapter {
 impl JsonlStorageAdapter {
     pub fn new() -> Self {
         Self {
-            dir_mode: SessionDirMode::FromRoot(crate::util::grok_home::grok_home()),
+            root_dir: crate::util::grok_home::grok_home(),
             #[cfg(test)]
             update_append_probe: None,
         }
     }
     pub fn with_root(root_dir: PathBuf) -> Self {
         Self {
-            dir_mode: SessionDirMode::FromRoot(root_dir),
+            root_dir,
             #[cfg(test)]
             update_append_probe: None,
         }
     }
     fn session_dir(&self, info: &Info) -> PathBuf {
-        match &self.dir_mode {
-            SessionDirMode::FromRoot(root) => {
-                crate::util::grok_home::sessions_cwd_dir_in(root, &info.cwd)
-                    .join(info.id.to_string())
-            }
-            SessionDirMode::Explicit(dir) => dir.clone(),
-        }
+        crate::util::grok_home::sessions_cwd_dir_in(&self.root_dir, &info.cwd)
+            .join(info.id.to_string())
     }
-    /// Create `info`'s session dir owner-only. `FromRoot` also ensures the
-    /// `<encoded-cwd>` shield + root; `Explicit` parents are caller-owned.
+    /// Create `info`'s session dir owner-only, ensuring the `<encoded-cwd>`
+    /// shield + root first.
     fn create_session_dir_owner_only(&self, info: &Info) -> io::Result<PathBuf> {
         let dir = self.session_dir(info);
-        if let SessionDirMode::FromRoot(root) = &self.dir_mode {
-            let _ = crate::util::grok_home::ensure_sessions_cwd_dir_in(root, &info.cwd);
-        }
+        let _ = crate::util::grok_home::ensure_sessions_cwd_dir_in(&self.root_dir, &info.cwd);
         crate::util::grok_home::create_dir_all_owner_only(&dir)?;
         Ok(dir)
     }
@@ -134,11 +122,7 @@ impl JsonlStorageAdapter {
     /// Shared by both `list_sessions` (full scan) and `list_sessions_recent`
     /// (mtime-based tail).
     fn scan_session_dirs(&self, cwd: Option<&str>) -> io::Result<Vec<PathBuf>> {
-        let root_dir = match &self.dir_mode {
-            SessionDirMode::FromRoot(root) => root,
-            SessionDirMode::Explicit(_) => return Ok(Vec::new()),
-        };
-        crate::session::storage::relocation::RelocationView::load(root_dir)
+        crate::session::storage::relocation::RelocationView::load(&self.root_dir)
             .and_then(|view| view.session_dirs(cwd))
             .map_err(io::Error::other)
     }

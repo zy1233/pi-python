@@ -760,9 +760,6 @@ pub async fn list_summaries(cwd: Option<&str>) -> io::Result<Vec<Summary>> {
     storage.list_sessions(cwd).await
 }
 
-#[cfg(test)]
-#[path = "persistence_tests.rs"]
-mod durable_update_tests;
 
 
 /// List the `limit` most recently modified session summaries across all

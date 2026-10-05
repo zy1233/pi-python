@@ -74,76 +74,25 @@ pub(crate) fn reset_test_emit_count() {
 
 /// Categories of 401-attribution emit sites. Each variant maps to a
 /// fixed prefix in the rendered `consumer` field; the per-site `op`
-/// string is appended after a `.` separator (omitted for variants that
-/// have no per-operation discriminator, e.g.
-/// [`ConsumerKind::IdleResumeModelRefresh`]).
+/// string is appended after a `.` separator.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ConsumerKind {
-    /// Sampler-side OpenAI-compat / Anthropic Messages emit. The op
-    /// string is the [`SamplingConsumer::as_endpoint`] return value.
-    OaiCompatClient,
     /// Storage upload / batch / check sites in `upload/storage_client.rs`.
     StorageClient,
-    /// Feedback collection sites in `agent/feedback_client.rs`.
-    FeedbackClient,
-    /// Session registry register/update sites in
-    /// `agent/session_registry_client.rs`.
-    SessionRegistryClient,
-    /// Idle-resume model-metadata refresh in
-    /// `session/acp_session.rs::maybe_refresh_model_metadata_on_resume`.
-    /// No per-op discriminator -- the consumer string is just
-    /// `"IdleResumeModelRefresh"`.
-    IdleResumeModelRefresh,
-    /// `pi_tools::ToolConsumer::ImageGen` -- Imagine API
-    /// (`POST /images/generations`). No per-op discriminator;
-    /// consumer string is just `"ImageGen"`.
-    ImageGen,
-    /// `pi_tools::ToolConsumer::VideoGenStart` and
-    /// `VideoGenPoll` -- Video Generation API. The op string is
-    /// `"start"` (`POST /videos/generations`) or `"poll"`
-    /// (`GET /videos/{request_id}`).
-    VideoGen,
-    /// `pi_tools::ToolConsumer::WebSearch` -- web search via
-    /// `POST /responses` with a `WebSearch` tool. No per-op
-    /// discriminator; consumer string is just `"WebSearch"`.
-    WebSearch,
 }
 
 impl ConsumerKind {
     /// Fixed prefix for the rendered `consumer` field.
     fn prefix(self) -> &'static str {
         match self {
-            Self::OaiCompatClient => "OaiCompatClient",
             Self::StorageClient => "StorageClient",
-            Self::FeedbackClient => "FeedbackClient",
-            Self::SessionRegistryClient => "SessionRegistryClient",
-            Self::IdleResumeModelRefresh => "IdleResumeModelRefresh",
-            Self::ImageGen => "ImageGen",
-            Self::VideoGen => "VideoGen",
-            Self::WebSearch => "WebSearch",
         }
-    }
-
-    /// `true` for variants that take a per-operation discriminator
-    /// appended as `<prefix>.<op>`. `false` for variants whose
-    /// `consumer` string is just the prefix
-    /// (`IdleResumeModelRefresh`, `ImageGen`, `WebSearch` -- each is
-    /// a single endpoint with no sub-operation).
-    fn takes_op(self) -> bool {
-        !matches!(
-            self,
-            Self::IdleResumeModelRefresh | Self::ImageGen | Self::WebSearch
-        )
     }
 }
 
 /// Format a `(kind, op)` pair into the design-doc `consumer` string.
 fn format_consumer(kind: ConsumerKind, op: &str) -> String {
-    if kind.takes_op() {
-        format!("{}.{}", kind.prefix(), op)
-    } else {
-        kind.prefix().to_string()
-    }
+    format!("{}.{}", kind.prefix(), op)
 }
 
 /// Emit a single `auth 401 attribution` event for a per-consumer 401.
@@ -562,58 +511,11 @@ mod tests {
         );
     }
 
-    /// `format_consumer` matrix:
-    ///   - generic ops append "." + op (`OaiCompatClient.foo`)
-    ///   - IdleResumeModelRefresh and tool variants drop the op
-    ///     (their consumer string has no sub-op axis).
-    #[test]
-    fn format_consumer_matrix() {
-        let cases: &[(ConsumerKind, &str, &str)] = &[
-            (
-                ConsumerKind::OaiCompatClient,
-                "chat_completions_stream",
-                "OaiCompatClient.chat_completions_stream",
-            ),
-            (
-                ConsumerKind::StorageClient,
-                "upload_file",
-                "StorageClient.upload_file",
-            ),
-            (
-                ConsumerKind::IdleResumeModelRefresh,
-                "",
-                "IdleResumeModelRefresh",
-            ),
-            (
-                ConsumerKind::IdleResumeModelRefresh,
-                "ignored",
-                "IdleResumeModelRefresh",
-            ),
-            (ConsumerKind::ImageGen, "", "ImageGen"),
-            (ConsumerKind::ImageGen, "ignored", "ImageGen"),
-            (ConsumerKind::VideoGen, "start", "VideoGen.start"),
-            (ConsumerKind::VideoGen, "poll", "VideoGen.poll"),
-            (ConsumerKind::WebSearch, "", "WebSearch"),
-            (ConsumerKind::WebSearch, "ignored", "WebSearch"),
-        ];
-        for (kind, op, expected) in cases {
-            assert_eq!(
-                format_consumer(*kind, op),
-                *expected,
-                "kind={kind:?} op={op:?}"
-            );
-        }
-    }
-
     /// `format_consumer` formats `OaiCompatClient.<endpoint>`
     /// correctly and omits the `.` separator for
     /// `IdleResumeModelRefresh`.
     #[test]
     fn format_consumer_with_op_appends_dot() {
-        assert_eq!(
-            format_consumer(ConsumerKind::OaiCompatClient, "chat_completions_stream"),
-            "OaiCompatClient.chat_completions_stream"
-        );
         assert_eq!(
             format_consumer(ConsumerKind::StorageClient, "upload_file"),
             "StorageClient.upload_file"

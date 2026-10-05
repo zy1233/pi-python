@@ -52,27 +52,6 @@ impl GrokAuthCredentials {
             auth_manager: None,
         }
     }
-    /// Live credentials backed by an `AuthManager`. `resolve_async()`
-    /// drives memory -> disk -> OIDC refresh; `resolve()` reads the
-    /// in-memory cache for sync contexts.
-    pub(crate) fn with_auth_manager(mut self, am: Arc<crate::auth::AuthManager>) -> Self {
-        self.auth_manager = Some(am);
-        self
-    }
-    /// Return a reference to the internal `AuthManager`, if any.
-    pub(crate) fn auth_manager(&self) -> Option<&Arc<crate::auth::AuthManager>> {
-        self.auth_manager.as_ref()
-    }
-    /// Error hint for 401 responses, based on which credential was sent.
-    pub(crate) fn auth_error_hint(&self) -> &'static str {
-        if self.deployment_key.is_some() {
-            "Your GROK_DEPLOYMENT_KEY is invalid or expired. Please contact a team admin."
-        } else if self.user_token.is_some() {
-            "Your auth token is invalid or expired. Run `grok login` to re-authenticate."
-        } else {
-            "Not authenticated."
-        }
-    }
     pub(crate) fn apply(&self, builder: RequestBuilder, base_url: &str) -> RequestBuilder {
         let builder = if let Some(ref key) = self.deployment_key {
             builder.header("Authorization", format!("Bearer {}", key))

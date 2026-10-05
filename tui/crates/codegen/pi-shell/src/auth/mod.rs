@@ -4,12 +4,12 @@ mod config;
 pub mod credential_provider;
 #[path = "devbox_login_stub.rs"]
 pub(crate) mod devbox_login;
-pub mod error;
+pub(crate) mod error;
 mod external_auth;
 mod flow;
 pub(crate) mod manager;
 mod model;
-pub mod oidc;
+pub(crate) mod oidc;
 pub(crate) mod recovery;
 pub(crate) mod refresh;
 mod storage;

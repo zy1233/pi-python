@@ -12,8 +12,8 @@
 //!    [`AuthManager::set_system_sleep_imminent`] briefly **holds the OS sleep
 //!    acknowledgment** (macOS delays `IOAllowPowerChange`; Linux holds its
 //!    `delay` inhibitor — both via the blocking power-listener callback) until
-//!    the refresh drains or [`SLEEP_ACK_MAX_WAIT`] elapses, so the in-flight
-//!    exchange finishes *before* the machine suspends.
+//!    the refresh drains, so the in-flight exchange finishes *before* the
+//!    machine suspends.
 //!
 //! Split out of `manager.rs` so the manager stays scannable: this is a
 //! self-contained unit (the [`SleepGate`] type, the [`InFlightGuard`], and a
@@ -49,21 +49,6 @@ pub(super) const SLEEP_GATE_MAX: StdDuration = StdDuration::from_secs(120);
 ///
 /// [`BACKOFF_INTERVAL`]: super::BACKOFF_INTERVAL
 pub(super) const DARK_WAKE_DEFER_MAX: StdDuration = StdDuration::from_secs(120);
-
-/// Upper bound on how long a `WillSleep` transition will hold the OS sleep
-/// acknowledgment waiting for in-flight IdP refreshes to drain (see
-/// [`AuthManager::set_system_sleep_imminent`]). Sized per platform to the OS
-/// pre-sleep budget: **macOS** allows ~30 s before `IOAllowPowerChange` is
-/// forced, so we use most of it — a straddled exchange can need ~15 s of
-/// awake time to complete (in-call retries included), and losing its response
-/// past the assumed ~60 s rotation grace revokes the token family (every
-/// session then demands `/login`). **Linux** logind's `InhibitDelayMaxSec`
-/// defaults to 5 s, so we stay under it. The hold releases the moment the
-/// in-flight count drains; a healthy round-trip is ~1 s.
-#[cfg(target_os = "macos")]
-pub(super) const SLEEP_ACK_MAX_WAIT: StdDuration = StdDuration::from_secs(20);
-#[cfg(not(target_os = "macos"))]
-pub(super) const SLEEP_ACK_MAX_WAIT: StdDuration = StdDuration::from_secs(3);
 
 /// A gate `refresh_chain` consults to avoid *starting* an IdP refresh just
 /// before sleep. Only *defers* a not-yet-started refresh; an in-flight one is

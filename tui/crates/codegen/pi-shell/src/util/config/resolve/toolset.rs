@@ -1,20 +1,5 @@
 use toml::Value as TomlValue;
 
-#[cfg(test)]
-mod login_shell_capture_tests {
-        use toml::Value as TomlValue;
-
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    fn cfg(enabled: bool) -> TomlValue {
-        toml::from_str(&format!(
-            "[toolset.bash]\nlogin_shell_capture = {enabled}\n"
-        ))
-        .unwrap()
-    }
-
-}
-
 const ENV_SCHEDULER_BACKGROUND_LOOPS: &str = "GROK_SCHEDULER_BACKGROUND_LOOPS";
 
 fn scheduler_background_loops_from_toml(v: Option<&TomlValue>) -> Option<bool> {
@@ -170,10 +155,6 @@ mod ask_user_question_timeout_tests {
     
     
     
-
-    // Both env vars are process-global (a dev exports the secs var for TUI
-    // repro); serialize and force them unset so these tests can't go flaky.
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 }
 

@@ -13,49 +13,10 @@ use std::sync::LazyLock;
 use std::time::{Duration as StdDuration, Instant};
 #[derive(Debug, Clone, thiserror::Error)]
 pub(super) enum OidcError {
-    #[error("OIDC not configured")]
-    NotConfigured,
-    #[error("failed to bind OIDC loopback server: {0}")]
-    BindLoopback(String),
-    #[error("failed to save OIDC auth: {0}")]
-    SaveAuth(String),
     #[error("OIDC discovery failed: HTTP {status} from {url}")]
     DiscoveryHttp { status: u16, url: String },
-    /// Keep the "10 minutes" text in sync with `AUTH_CALLBACK_TIMEOUT` in `login.rs`.
-    #[error("Login timed out after 10 minutes. Please try again.")]
-    CallbackTimeout,
-    #[error("OIDC callback channel closed unexpectedly")]
-    CallbackChannelClosed,
-    #[error("OIDC authentication failed: {0}")]
-    CallbackAuthFailed(String),
-    #[error("failed to parse pasted input: {0}")]
-    InvalidPastedInput(String),
-    #[error("OIDC token exchange failed: HTTP {status} — {body}")]
-    TokenExchangeHttp { status: u16, body: String },
     #[error("OIDC token refresh failed: HTTP {status} — {body}")]
     TokenRefreshHttp { status: u16, body: String },
-    #[error("OIDC authentication failed: state mismatch")]
-    StateMismatch,
-    #[error("OIDC id_token uses unsupported algorithm: {0}")]
-    UnsupportedAlg(String),
-    #[error("OIDC id_token alg {alg} is not in discovery supported list")]
-    AlgNotInDiscoverySupportedList { alg: String },
-    #[error("OIDC id_token missing kid header")]
-    IdTokenMissingKid,
-    #[error("OIDC discovery missing jwks_uri")]
-    DiscoveryMissingJwksUri,
-    #[error("OIDC JWK not found for kid={kid}")]
-    JwkNotFound { kid: String },
-    #[error("OIDC id_token issuer mismatch")]
-    IssuerMismatch,
-    #[error("OIDC id_token audience mismatch")]
-    AudienceMismatch,
-    #[error("OIDC id_token nonce mismatch")]
-    NonceMismatch,
-    #[error("OIDC token response missing id_token")]
-    MissingIdToken,
-    #[error("OIDC id_token validation failed: {0}")]
-    IdTokenValidationFailed(String),
     #[error(
         "This deployment requires logging into {expected}; your login returned {}",
         actual.as_deref().unwrap_or("no team principal")
@@ -289,8 +250,6 @@ pub(super) struct TokenResponse {
     pub(super) access_token: String,
     #[serde(default)]
     pub(super) refresh_token: Option<String>,
-    #[serde(default)]
-    pub(super) id_token: Option<String>,
     #[serde(default)]
     pub(super) expires_in: Option<u64>,
 }
@@ -641,26 +600,5 @@ mod tests {
             "temporarily_unavailable must be retried (1 fail + 1 success = 2 hits)"
         );
         server.abort();
-    }
-    #[test]
-    fn callback_timeout_error_is_user_friendly() {
-        let err: anyhow::Error = OidcError::CallbackTimeout.into();
-        let msg = err.to_string();
-        assert!(
-            msg.contains("Login timed out after 10 minutes"),
-            "expected friendly timeout message, got: {msg}"
-        );
-        assert!(
-            msg.contains("Please try again"),
-            "expected 'Please try again' call to action, got: {msg}"
-        );
-        assert!(
-            !msg.contains("OIDC"),
-            "should not leak internal 'OIDC' terminology to users, got: {msg}"
-        );
-        assert!(
-            !msg.contains("300s"),
-            "should not mention raw seconds, got: {msg}"
-        );
     }
 }

@@ -43,7 +43,6 @@ impl AuthProviderConfig {
 pub struct AuthProviderRef {
     pub(crate) name: String,
     pub(crate) config: AuthProviderConfig,
-    slot: ProviderSlot,
     /// `true` once the trusted table is attached. A ref revived from bytes is
     /// `false` and never mints or reads until [`AuthProviderRef::attach_trusted_config`]
     /// joins the shared slot for its name.
@@ -85,7 +84,6 @@ impl AuthProviderRef {
         Self {
             name,
             config: AuthProviderConfig::default(),
-            slot: ProviderSlot::default(),
             resolved: false,
             fail_closed: false,
         }
@@ -95,7 +93,6 @@ impl AuthProviderRef {
         Self {
             name,
             config: AuthProviderConfig::default(),
-            slot: ProviderSlot::default(),
             resolved: true,
             fail_closed: true,
         }
@@ -122,24 +119,6 @@ impl std::fmt::Debug for AuthProviderRef {
             .finish_non_exhaustive()
     }
 }
-
-struct MintedProviderToken {
-    token: String,
-    /// Handed back to the command on the next run; never sent on the wire.
-    refresh_token: Option<String>,
-    /// Drives the 401 fresh-mint guard.
-    minted_at: std::time::Instant,
-    expires_at: Option<chrono::DateTime<chrono::Utc>>,
-    /// The table version that minted the token; a different version reads as
-    /// stale (see [`token_identity`]), so edits re-mint.
-    minted_with: AuthProviderConfig,
-}
-
-/// The async lock is held across the command run, single-flighting mints
-/// per provider name (shared across sessions). This dedupes concurrent
-/// successes; a persistently failing helper is retried per waiter, each bounded
-/// by the timeout clamp.
-type ProviderSlot = std::sync::Arc<tokio::sync::Mutex<Option<MintedProviderToken>>>;
 
 /// Pre-refresh margin: re-mint when the token expires within this window.
 pub(crate) const PROVIDER_TOKEN_EXPIRY_SKEW_SECS: u64 = 60;

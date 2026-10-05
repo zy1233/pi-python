@@ -2153,7 +2153,6 @@ fn apply_user_info_enrichment_preserves_token_fields() {
         user_blocked_reason: None,
         team_blocked_reasons: None,
         coding_data_retention_opt_out: None,
-        subscription_tier: None,
     };
 
     apply_user_info_enrichment(&mut disk, user_info);
@@ -3498,70 +3497,6 @@ async fn manual_auth_capture_attributes_and_recorder_debounces() {
         ManualAuthSurface::Turn,
     );
     assert!(healing.last_token_for_test().is_none());
-}
-
-/// End-to-end: `next()` emits only for a user-facing, in-scope terminal failure.
-/// A credential with no refresh authority terminates with
-/// `ServerRejectedNoRecovery` without a refresher.
-#[tokio::test]
-async fn manual_auth_emits_only_for_user_facing_source() {
-    use crate::auth::recovery::RecoverySource;
-
-    fn mgr_with(dir: &std::path::Path, key: &str, mode: AuthMode) -> Arc<AuthManager> {
-        let mgr = Arc::new(AuthManager::new(dir, GrokComConfig::default()));
-        let mut auth = make_auth(Some(Utc::now() + Duration::hours(1)), Utc::now());
-        auth.user_id = "u1".into();
-        auth.key = key.into();
-        auth.auth_mode = mode;
-        auth.refresh_token = None; // Oidc-sans-refresh-token => LegacySession (in scope)
-        mgr.hot_swap(auth);
-        // CI runs in K8s pods where is_devbox_environment() is true; without this
-        // DevboxRecovery would adopt the seeded valid token and recovery would
-        // return Ok instead of the terminal ServerRejectedNoRecovery.
-        mgr.set_devbox_env_for_test(false);
-        mgr
-    }
-
-    // User-facing + in-scope (legacy session) records.
-    let d1 = tempfile::tempdir().unwrap();
-    let turn = mgr_with(d1.path(), "sess-turn", AuthMode::Oidc);
-    let err = turn
-        .unauthorized_recovery(turn.current_or_expired(), RecoverySource::Turn)
-        .next()
-        .await
-        .unwrap_err();
-    assert!(matches!(err, AuthError::ServerRejectedNoRecovery));
-    // Assert the emitted payload, not just that something fired.
-    use pi_telemetry::events::{
-        AuthTokenKind, ManualAuth, ManualAuthReason, ManualAuthSurface,
-    };
-    assert_eq!(
-        turn.manual_auth_last_emit(),
-        Some(ManualAuth {
-            reason: ManualAuthReason::NoRefreshAuthority,
-            trigger: ManualAuthSurface::Turn,
-            token_kind: AuthTokenKind::LegacySession,
-            principal: Some("u1".to_string()),
-        }),
-    );
-
-    // Background source does not record.
-    let d2 = tempfile::tempdir().unwrap();
-    let bg = mgr_with(d2.path(), "sess-bg", AuthMode::Oidc);
-    let _ = bg
-        .unauthorized_recovery(bg.current_or_expired(), RecoverySource::Background)
-        .next()
-        .await;
-    assert!(bg.manual_auth_last_token().is_none());
-
-    // API-key 401 is out of KPI scope even on a user-facing source.
-    let d3 = tempfile::tempdir().unwrap();
-    let api = mgr_with(d3.path(), "api-key", AuthMode::ApiKey);
-    let _ = api
-        .unauthorized_recovery(api.current_or_expired(), RecoverySource::Turn)
-        .next()
-        .await;
-    assert!(api.manual_auth_last_token().is_none());
 }
 
 // ── requires_manual_reauth: transient-vs-terminal authority ─────────

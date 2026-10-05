@@ -1,7 +1,7 @@
-pub mod acp_types;
-pub mod announcement_state;
-pub mod handle;
-pub mod pending_interaction;
+pub(crate) mod acp_types;
+pub(crate) mod announcement_state;
+pub(crate) mod handle;
+pub(crate) mod pending_interaction;
 pub use self::acp_types::*;
 pub use self::handle::*;
 pub use self::persistence::{
@@ -154,28 +154,21 @@ mod tests {
     }
 }
 /// Share session request/response types
-pub mod share {
+pub(crate) mod share {
 }
 pub(crate) mod events;
-pub mod feedback;
-pub mod goal_tracker;
-pub mod helpers;
+pub(crate) mod feedback;
+pub(crate) mod goal_tracker;
+pub(crate) mod helpers;
 pub(crate) mod image_normalize;
 pub use pi_shared::session::info;
-pub(crate) mod mcp_dispatcher;
-#[cfg(test)]
-mod mcp_dispatcher_e2e_tests;
-pub(crate) mod mcp_restart;
-pub mod memory;
 pub mod persistence;
-pub mod plan_mode;
-#[path = "restore_stub.rs"]
-pub mod restore;
-pub mod result;
-pub mod signals;
+pub(crate) mod plan_mode;
+pub(crate) mod result;
+pub(crate) mod signals;
 pub mod storage;
 pub(crate) mod telemetry;
-pub mod unified_list;
+pub(crate) mod unified_list;
 pub(crate) mod wire_tags;
 pub(crate) mod workflow;
-pub mod worktree;
+pub(crate) mod worktree;

@@ -2,10 +2,7 @@
 use crate::auth::{GrokAuth, GrokComConfig};
 use indexmap::IndexMap;
 use prod_mc_cli_chat_proxy_types::SubagentBundle;
-use serde::{Deserialize, Serialize};
-use std::time::Duration;
-const GROK_CODE_BACKEND_URL: &str = "https://code.grok.com";
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+use serde::{Deserialize, };
 const GROK_CODE_WEB_URL: &str = "https://grok.com";
 /// Build a share URL from a permission ID
 pub fn share_url(permission_id: &str) -> String {
@@ -206,17 +203,6 @@ async fn fetch_bundle_inner(
     .await?;
     Ok(FetchedBundle::Legacy(bundle))
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionUpdate {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cwd: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<serde_json::Value>,
-}
 #[derive(Debug, thiserror::Error)]
 pub enum BackendError {
     #[error("Network error: {0}")]
@@ -234,38 +220,6 @@ pub enum BackendError {
     },
     #[error("Auth error: {0}")]
     Auth(String),
-}
-pub struct BackendClient {
-    reqwest_client: reqwest::Client,
-    client: reqwest_middleware::ClientWithMiddleware,
-    base_url: String,
-    pub(crate) auth_manager: Option<std::sync::Arc<crate::auth::AuthManager>>,
-}
-impl Default for BackendClient {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-impl BackendClient {
-    fn build_default_client() -> reqwest::Client {
-        pi_extra_ca::build_reqwest_client(|builder| {
-                builder.connect_timeout(Duration::from_secs(10)).timeout(DEFAULT_TIMEOUT)
-            })
-            .unwrap_or_else(|e| {
-                tracing::warn!(error = %e, "failed to build backend HTTP client; falling back to shared client");
-                crate::http::shared_client()
-            })
-    }
-    pub fn new() -> Self {
-        let reqwest_client = Self::build_default_client();
-        Self {
-            client: reqwest_middleware::ClientBuilder::new(reqwest_client.clone()).build(),
-            reqwest_client,
-            base_url: std::env::var("GROK_CODE_BACKEND_URL")
-                .unwrap_or_else(|_| GROK_CODE_BACKEND_URL.to_string()),
-            auth_manager: None,
-        }
-    }
 }
 /// Outcome of a blocking settings fetch. Distinguishes the three cases the
 /// external-OTEL gate cares about (see [`crate::agent::mvp_agent`]).

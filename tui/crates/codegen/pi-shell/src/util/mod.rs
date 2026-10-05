@@ -1,6 +1,6 @@
 pub mod config;
 pub(crate) mod dual_clock;
-pub mod grok_auth_credentials;
+pub(crate) mod grok_auth_credentials;
 pub(crate) mod subprocess;
 
 // The foundation utilities live in `pi-shell-base` (upstream of this

@@ -1,12 +1,4 @@
 use super::*;
-use crate::session::info::Info;
-
-fn info() -> Info {
-    Info {
-        id: acp::SessionId::new("durable-jsonl"),
-        cwd: "/test".into(),
-    }
-}
 
 #[test]
 fn directory_barrier_failure_is_retried_even_after_file_exists() {

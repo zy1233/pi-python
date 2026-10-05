@@ -193,30 +193,13 @@ pub struct AuthManager {
     /// Idempotency guard for `configure_refresher` so double-calls
     /// don't reset internal state (e.g. `OidcRefresher::upload_in_flight`).
     refresher_configured: std::sync::atomic::AtomicBool,
-    /// Idempotency guard for `start_proactive_refresh` so we don't
-    /// spawn competing refresh loops on the same Arc.
-    proactive_started: std::sync::atomic::AtomicBool,
     /// Serializes concurrent refresh attempts (async, held across .await).
     refresh_lock: tokio::sync::Mutex<()>,
     permanent_failure: RwLock<Option<ScopedRefreshFailure>>,
-    /// Loop-body iteration count -- catches busy-loops where the
-    /// back-off gate fails to fire.
-    #[cfg(test)]
-    proactive_iter_count: std::sync::atomic::AtomicU32,
-    /// `tokio::spawn` count -- catches idempotency-guard regressions
-    /// (orthogonal to `proactive_iter_count`).
-    #[cfg(test)]
-    proactive_starts: std::sync::atomic::AtomicU32,
     /// Notified after every successful token refresh (key changed).
     /// Used by `ModelsManager` to trigger model catalog recovery
     /// after sleep/wake without relying on the file watcher.
     refresh_notify: Arc<tokio::sync::Notify>,
-    /// Notified on every OS wake (`DidWake`), including dark wakes. Re-arms
-    /// the proactive-refresh loop, whose monotonic sleep pauses during
-    /// suspend — a pre-sleep schedule would otherwise fire hours of
-    /// awake-time late, leaving post-wake requests to discover the expired
-    /// token via 401s. See `start_proactive_refresh`.
-    wake_notify: tokio::sync::Notify,
     /// Last state `read_disk_auth` observed for this manager's scope.
     /// Drives transition-level unified logging: hot retry loops read the
     /// disk every few seconds, so per-read logging would flood and no
@@ -242,15 +225,9 @@ pub struct AuthManager {
     refresh_drain_cv: parking_lot::Condvar,
     /// Idempotency guard for `start_system_power_listener`.
     power_listener_started: std::sync::atomic::AtomicBool,
-    /// Keeps the OS power listener alive for this manager's lifetime; dropping
-    /// it stops the listener. `None` until started (or if unavailable).
-    power_listener: parking_lot::Mutex<Option<pi_system_power::SystemPowerListener>>,
     /// Per-process `manual_auth` KPI debounce, shared by all recoveries on this
     /// manager so repeated 401s on the most-recent dead credential emit once.
     manual_auth: crate::auth::recovery::ManualAuthTracker,
-    /// First-party env key may advertise after initialize probe (default true).
-    /// Lives here (not on the agent) so the probe verdict is auth-owned.
-    first_party_env_api_key_ok: std::sync::atomic::AtomicBool,
     /// When the current unbroken run of dark-wake refresh deferrals began, on
     /// two clocks (see [`DualClock`]); `None` outside such a run. Bounds the
     /// deferral to [`sleep_gate::DARK_WAKE_DEFER_MAX`] so a machine stuck
@@ -454,15 +431,9 @@ impl AuthManager {
             proxy_base_url,
             refresher: RwLock::new(None),
             refresher_configured: std::sync::atomic::AtomicBool::new(false),
-            proactive_started: std::sync::atomic::AtomicBool::new(false),
             refresh_lock: tokio::sync::Mutex::new(()),
             permanent_failure: RwLock::new(None),
-            #[cfg(test)]
-            proactive_iter_count: std::sync::atomic::AtomicU32::new(0),
-            #[cfg(test)]
-            proactive_starts: std::sync::atomic::AtomicU32::new(0),
             refresh_notify: Arc::new(tokio::sync::Notify::new()),
-            wake_notify: tokio::sync::Notify::new(),
             disk_state: RwLock::new(disk_state),
             static_key_cache: parking_lot::Mutex::new(None),
             process_static_api_key: parking_lot::RwLock::new(None),
@@ -471,9 +442,7 @@ impl AuthManager {
             refresh_drain_lock: parking_lot::Mutex::new(()),
             refresh_drain_cv: parking_lot::Condvar::new(),
             power_listener_started: std::sync::atomic::AtomicBool::new(false),
-            power_listener: parking_lot::Mutex::new(None),
             manual_auth: Default::default(),
-            first_party_env_api_key_ok: std::sync::atomic::AtomicBool::new(true),
             dark_wake_defer_since: parking_lot::RwLock::new(None),
             #[cfg(test)]
             dark_wake_override: parking_lot::Mutex::new(None),
@@ -1987,16 +1956,6 @@ impl AuthManager {
         trigger: ManualAuthSurface,
     ) {
         self.manual_auth.record(snapshot, err, trigger);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn manual_auth_last_token(&self) -> Option<String> {
-        self.manual_auth.last_token_for_test()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn manual_auth_last_emit(&self) -> Option<pi_telemetry::events::ManualAuth> {
-        self.manual_auth.last_emit_for_test()
     }
 
     // ── Proactive refresh ─────────────────────────────────────────────

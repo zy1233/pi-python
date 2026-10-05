@@ -822,16 +822,6 @@ mod resolve_auto_compact {
     
     
     
-    use std::sync::Mutex;
-    /// Serialize tests that mutate `GROK_AUTO_COMPACT_THRESHOLD_PERCENT`.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-    /// RAII guard that swaps the env var for the duration of a test and
-    /// restores the previous value on drop. Acquires `ENV_LOCK` so two
-    /// env-var tests never run concurrently.
-    struct EnvVarGuard {
-        _lock: std::sync::MutexGuard<'static, ()>,
-        prev: Option<String>,
-    }
 }
 #[test]
 fn settings_helpers_target_correct_ui_fields() {

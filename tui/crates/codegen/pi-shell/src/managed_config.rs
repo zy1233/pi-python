@@ -189,10 +189,6 @@ fn try_lock_managed_config(home: &std::path::Path) -> Option<std::fs::File> {
 enum SyncBudget {
     /// Background loop and explicit `grok setup`; runs retries to completion.
     Standard,
-    /// Post-login sync; capped because login latency is user-visible.
-    Login,
-    /// Session-start refresh; capped so startup never stalls.
-    SessionStart,
 }
 
 impl SyncBudget {
@@ -200,7 +196,6 @@ impl SyncBudget {
     fn max_attempts(self) -> u32 {
         match self {
             Self::Standard => 5,
-            Self::Login | Self::SessionStart => 2,
         }
     }
 
@@ -472,29 +467,13 @@ pub async fn sync() -> Result<bool, ManagedConfigError> {
 
 struct SyncOutcome {
     wrote: bool,
-    /// Server returned a config row for the consulted principal (independent of apply).
-    served: bool,
-    /// Apply persisted nothing and recorded no marker — see [`ApplyOutcome::Skipped`].
-    skipped: bool,
-    /// Credential consulted (team vs deployment wording for callers).
-    source: Option<ManagedConfigSource>,
-    /// Verification active and envelope rejected — nothing persisted.
-    signature_rejected: bool,
 }
 
 impl SyncOutcome {
     /// Reports only what callers render; marker identity fields live in [`apply_fetched`].
-    fn from_fetch(
-        body: &ManagedConfigResponse,
-        source: ManagedConfigSource,
-        outcome: &ApplyOutcome,
-    ) -> Self {
+    fn from_fetch(outcome: &ApplyOutcome) -> Self {
         Self {
             wrote: outcome.wrote(),
-            served: body.config_exists(),
-            skipped: outcome.skipped(),
-            source: Some(source),
-            signature_rejected: outcome.signature_rejected(),
         }
     }
 }
@@ -589,21 +568,15 @@ async fn sync_with_budget(
                 body.deployment_id.as_deref(),
                 Some(&fingerprint),
             )?;
-            Ok(SyncOutcome::from_fetch(&body, source, &outcome))
+            Ok(SyncOutcome::from_fetch(&outcome))
         }
         FetchedConfig::Team { auth, body } => {
             let source = ManagedConfigSource::TeamOauth;
             // Team identity is bound via principal (team id), not a key fingerprint.
             let outcome = apply_fetched(&body, source, auth.team_id.as_deref(), None)?;
-            Ok(SyncOutcome::from_fetch(&body, source, &outcome))
+            Ok(SyncOutcome::from_fetch(&outcome))
         }
-        FetchedConfig::NoPrincipal => Ok(SyncOutcome {
-            wrote: false,
-            served: false,
-            skipped: false,
-            source: None,
-            signature_rejected: false,
-        }),
+        FetchedConfig::NoPrincipal => Ok(SyncOutcome { wrote: false }),
     }
 }
 

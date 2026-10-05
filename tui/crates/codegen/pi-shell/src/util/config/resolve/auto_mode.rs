@@ -103,18 +103,6 @@ pub fn auto_permission_mode_enabled_from_disk() -> bool {
 
 #[cfg(test)]
 mod auto_permission_mode_gate_tests {
-    use super::*;
     
-
-    // `GROK_AUTO_PERMISSION_MODE` is process-global; serialize every test that
-    // reads it (all of them, via `BoolFlag::env`) and force it unset at the top
-    // of each so a developer's shell value can't make these flaky.
-    fn guard() -> std::sync::MutexGuard<'static, ()> {
-        let g = super::AUTO_PERMISSION_MODE_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        unsafe { std::env::remove_var(ENV_AUTO_PERMISSION_MODE) };
-        g
-    }
 
 }

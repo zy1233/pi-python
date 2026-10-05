@@ -237,10 +237,6 @@ pub(crate) struct UserInfo {
     pub(super) team_blocked_reasons: Option<Vec<String>>,
     #[serde(default)]
     pub(super) coding_data_retention_opt_out: Option<bool>,
-    /// Live subscription tier from the backend (only present when
-    /// `?include=subscription` is passed to `/user`).
-    #[serde(default)]
-    pub(crate) subscription_tier: Option<String>,
 }
 
 /// Look up auth from the store by scope key.
@@ -349,43 +345,6 @@ mod tests {
         let mut map = AuthStore::new();
         map.insert("scope".into(), make_auth(AuthMode::ApiKey));
         assert!(lookup_auth(&map, "scope").is_some());
-    }
-
-    /// subscriptionTier present → deserializes to Some.
-    #[test]
-    fn user_info_subscription_tier_present() {
-        let json = r#"{
-            "userId": "u1",
-            "subscriptionTier": "SuperGrokPro"
-        }"#;
-        let info: UserInfo = serde_json::from_str(json).unwrap();
-        assert_eq!(info.subscription_tier.as_deref(), Some("SuperGrokPro"));
-    }
-
-    /// subscriptionTier absent → deserializes to None (backwards compat).
-    #[test]
-    fn user_info_subscription_tier_absent() {
-        let json = r#"{"userId": "u1"}"#;
-        let info: UserInfo = serde_json::from_str(json).unwrap();
-        assert!(info.subscription_tier.is_none());
-    }
-
-    /// subscriptionTier null → deserializes to None.
-    #[test]
-    fn user_info_subscription_tier_null() {
-        let json = r#"{"userId": "u1", "subscriptionTier": null}"#;
-        let info: UserInfo = serde_json::from_str(json).unwrap();
-        assert!(info.subscription_tier.is_none());
-    }
-
-    /// subscriptionTier empty string → deserializes to Some("").
-    /// The paywall poller treats this as "no subscription" (line 230:
-    /// `Some(tier) if !tier.is_empty()`) and keeps polling.
-    #[test]
-    fn user_info_subscription_tier_empty_string() {
-        let json = r#"{"userId": "u1", "subscriptionTier": ""}"#;
-        let info: UserInfo = serde_json::from_str(json).unwrap();
-        assert_eq!(info.subscription_tier.as_deref(), Some(""));
     }
 
     /// Pre-default auth.json (no coding_data_retention_opt_out key) must

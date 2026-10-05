@@ -13,7 +13,7 @@ use agent_client_protocol as acp;
 use pi_sampling_types::ReasoningEffort;
 use pi_workspace::session::file_state::RewindPoint;
 
-pub mod jsonl;
+pub(crate) mod jsonl;
 #[allow(dead_code)] // Transaction APIs remain deferred until later protocol wiring.
 pub(crate) mod relocation;
 mod replay;

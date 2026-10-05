@@ -27,8 +27,6 @@ pub(crate) struct ImageCompressionInfo {
     pub original_height: u32,
     pub compressed_width: u32,
     pub compressed_height: u32,
-    pub exceeded_size: bool,
-    pub exceeded_dimensions: bool,
 }
 /// Why persisted-history image bytes would be rejected by the API, or
 /// `None` when sendable. Cheap (format sniff + structural walk + header

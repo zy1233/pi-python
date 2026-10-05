@@ -32,7 +32,6 @@ impl ModelsCache {
 
 pub(crate) struct CacheResult {
     pub(crate) models: IndexMap<String, ModelEntry>,
-    pub(crate) etag: Option<String>,
 }
 
 pub(crate) struct ModelsCacheManager {
@@ -78,7 +77,6 @@ impl ModelsCacheManager {
         tracing::debug!(count = cache.models.len(), "loaded models from disk cache");
         Some(CacheResult {
             models: cache.models,
-            etag: cache.etag,
         })
     }
 

@@ -3,9 +3,8 @@ pub mod chat_modes;
 pub mod config;
 pub(crate) mod config_model_override_parse;
 pub mod folder_trust;
-pub mod model_providers;
+pub(crate) mod model_providers;
 pub mod models;
-pub mod session_registry_client;
 
 #[cfg(test)]
 mod storage_client_tests;
