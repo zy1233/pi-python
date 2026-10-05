@@ -71,34 +71,12 @@ pub(super) fn log_prompt_result(
         }
     }
 }
-/// Delay between post-install MCP-list re-probes (`Effect::RetryPluginCtaMcps`).
-pub(super) const CTA_MCP_RETRY_DELAY_MS: u64 = 1000;
-/// How long the CTA shows its "installed" confirmation before auto-dismissing.
-pub(super) const CTA_INSTALLED_DISMISS_MS: u64 = 4000;
 /// Upper bound on the off-thread clipboard-attachment probe. A wedged osascript
 /// read must not pin `paste_probe_in_flight` and silently stash every later send.
 pub(super) const CLIPBOARD_PROBE_TIMEOUT_SECS: u64 = 10;
 /// Picker search debounce ([`Effect::DebounceSessionSearch`]):
 /// long enough to coalesce a typing burst, short enough to feel live.
 pub(super) const SESSION_SEARCH_DEBOUNCE_MS: u64 = 250;
-/// Run the post-CTA-install `legacy ext RPC` read (uncached, which also nudges
-/// the shell to retry auth-required servers) and map it into a
-/// `TaskResult::PluginCtaMcpsLoaded`. Shared by the immediate fetch and the
-/// delayed re-probe.
-pub(super) async fn fetch_plugin_cta_mcps(
-    agent_id: AgentId,
-    _session_id: acp::SessionId,
-    plugin_name: String,
-    _tx: AcpAgentTx,
-) -> TaskResult {
-    TaskResult::PluginCtaMcpsLoaded {
-        agent_id,
-        plugin_name,
-        result: Ok(crate::views::mcps_modal::convert_list_response(
-            crate::views::mcps_modal::McpsListResponse { servers: Vec::new() },
-        )),
-    }
-}
 /// Convert an ACP error to a user-friendly string for display.
 /// Rate-limit errors: free-usage paywall, else server detail (with API-key
 /// rewrite when the body pushes personal SuperGrok), else auth-aware fallback

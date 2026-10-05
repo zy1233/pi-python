@@ -763,11 +763,6 @@ pub struct RemoteSettings {
     /// `None` falls back to env/default (off).
     #[serde(default)]
     pub official_marketplace_auto_register: Option<bool>,
-    /// remote settings gate for the inline plugin-install CTA (keyword-matched
-    /// marketplace upsell above the prompt). `Some(true)` enables, `Some(false)`
-    /// is a kill-switch, `None` falls back to env/default (off).
-    #[serde(default)]
-    pub plugin_cta: Option<bool>,
     /// Remote announcements list from proxy. Malformed items are skipped entirely.
     /// `None` or `[]` = no announcements to display.
     #[serde(default, deserialize_with = "deserialize_tolerant_announcements")]

@@ -679,80 +679,6 @@ pub(crate) struct ReplayRebuiltState {
     pub(crate) tracker: crate::acp::tracker::AcpUpdateTracker,
     pub(crate) todo: TodoPane,
 }
-/// Lifecycle of the inline plugin CTA. `Hidden`/`Matched` cover the idle and
-/// prompt-matched states; `Installing`/`Installed`/`Error` cover an in-TUI
-/// install triggered from the CTA. `AwaitingReload`/`AwaitingMcps` cover the
-/// post-install branch (reload plugins, then read MCP servers); a needs-auth
-/// result hands the user into the Extensions modal and settles back to `Hidden`.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum CtaPhase {
-    #[default]
-    Hidden,
-    Matched {
-        plugin_relative_path: String,
-        name: String,
-    },
-    Installing {
-        plugin_relative_path: String,
-        name: String,
-    },
-    AwaitingReload {
-        name: String,
-    },
-    AwaitingMcps {
-        name: String,
-    },
-    Installed {
-        name: String,
-    },
-    Error {
-        plugin_relative_path: String,
-        name: String,
-        message: String,
-    },
-}
-impl CtaPhase {
-    /// True while the CTA shows an animated spinner (install or post-install
-    /// setup in progress). The frame loop keeps ticking in these phases so the
-    /// braille spinner advances.
-    pub fn is_spinner(&self) -> bool {
-        matches!(
-            self,
-            Self::Installing { .. } | Self::AwaitingReload { .. } | Self::AwaitingMcps { .. }
-        )
-    }
-}
-#[derive(Default)]
-pub struct PluginCtaState {
-    /// Not-installed candidate plugins for CTA matching, from the CTA source
-    /// (pi Official, or the configured `plugin_cta_marketplace` override).
-    pub candidates: Vec<pi_hooks_plugins_types::MarketplacePluginEntry>,
-    /// URL/path of the CTA source the candidates came from — the install
-    /// target (the shell resolves marketplace sources by URL/path identity).
-    /// `None` = no CTA source (official by default, the
-    /// `plugin_cta_marketplace` source when configured) in the last catalog
-    /// scan, which keeps the CTA hidden and blocks installs.
-    pub source_url_or_path: Option<String>,
-    /// Current CTA phase (recomputed when the prompt debounce expires).
-    pub phase: CtaPhase,
-    /// Generation counter for prompt-change debouncing (mirrors suggestions).
-    pub debounce_generation: u64,
-    /// `[Install]`/`[Retry]` affordance rect, rebuilt each frame the CTA is visible.
-    pub hit_connect: HitArea,
-    /// `[x]` dismiss affordance rect, rebuilt each frame the CTA is visible.
-    pub hit_dismiss: HitArea,
-    /// Whether the plugin being installed ships MCP servers (`has_mcp` of the
-    /// matched candidate, captured at Connect time). Gates the post-install
-    /// MCP-init settle poll: skills-only plugins settle immediately.
-    pub expects_mcp: bool,
-    /// Post-install MCP-list re-probe counter, reset on each `AwaitingMcps`
-    /// entry and bounded by the poll budget.
-    pub mcp_attempt: u32,
-    /// Dismissed plugin ids, cached from `config.toml` on catalog load so the
-    /// matched-debounce recompute never reads the config from disk on the UI
-    /// thread. Updated in-memory when the user dismisses via `[x]`.
-    pub dismissed: std::collections::HashSet<String>,
-}
 /// Follow-up suggestion chips for the latest assistant response
 /// (`legacy ext RPC`). Streaming-only: never persisted, does not survive a
 /// session reload. Keyed by the assistant `response_id` (the newest-wins key).
@@ -1128,8 +1054,7 @@ pub struct AgentView {
     pub hit_announcement_hide: HitArea,
     /// `[label]` CTA button on the promo banner row (click opens its link).
     pub hit_announcement_cta: HitArea,
-    /// Privacy upsell banner state: slot ownership + click targets
-    /// (packaged like [`Self::plugin_cta`]).
+    /// Privacy upsell banner state: slot ownership + click targets.
     pub privacy_banner: PrivacyBannerState,
     /// `[label]` upgrade CTA appended after the cwd path in the status bar
     /// (click opens its link; nulled under dropdowns / occluders like the
@@ -1519,9 +1444,6 @@ pub struct AgentView {
     pub(crate) cancel_latency: Option<CancelLatency>,
     /// Cleared at turn start; set on the first live non-echo update. Defaults true.
     pub(crate) front_message_committed: bool,
-    /// Cached official-marketplace candidates for the plugin CTA, populated on
-    /// session start independently of the Extensions modal.
-    pub plugin_cta: PluginCtaState,
     /// Follow-up suggestion chips for the latest assistant response
  /// (`legacy ext RPC`). `None` when no chips are shown. Set by
     /// [`AgentView::apply_follow_ups`]; cleared at each turn start.

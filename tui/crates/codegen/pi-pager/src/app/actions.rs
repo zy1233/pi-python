@@ -1214,54 +1214,6 @@ pub enum Effect {
     PollAuthUrl { request_seq: u64 },
     /// Submit a manually-pasted auth code (ext request).
     SubmitAuthCode { request_seq: u64, code: String },
-    /// Background check and auto-update for marketplace plugins on session start.
-    CheckMarketplaceUpdates {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-    },
-    /// Fetch the official-marketplace catalog into agent-level CTA state,
-    /// independent of the Extensions modal.
-    FetchPluginCtaCatalog {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-    },
- /// Install a plugin from the inline CTA via `legacy ext RPC`,
-    /// reported back via `TaskResult::CtaPluginInstallDone`.
-    InstallPluginFromCta {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        plugin_relative_path: String,
-    },
- /// Reload plugins after a CTA install via `legacy ext RPC`
-    /// (`PluginsAction::Reload`), reported back via
-    /// `TaskResult::CtaPluginReloadDone`. Modal-independent.
-    ReloadPluginsForCta {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        plugin_name: String,
-    },
- /// Read the MCP server list after a CTA install via `legacy ext RPC`,
-    /// reported back via `TaskResult::PluginCtaMcpsLoaded`. Modal-independent.
-    FetchPluginCtaMcps {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        plugin_name: String,
-    },
-    /// Re-probe the MCP server list after a short delay while waiting for a
-    /// just-installed plugin's servers to finish initializing. Sleeps, then runs
- /// the same `legacy ext RPC` fetch as `FetchPluginCtaMcps`, reported back via
-    /// `TaskResult::PluginCtaMcpsLoaded`.
-    RetryPluginCtaMcps {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        plugin_name: String,
-    },
-    /// Auto-dismiss the CTA's brief "installed" confirmation after a delay,
-    /// reported back via `TaskResult::CtaInstalledDismissTimeout`.
-    DismissCtaInstalled {
-        agent_id: AgentId,
-        plugin_name: String,
-    },
  /// Fetch and display session info via legacy ext RPC
     /// Auth lines are derived in the effect from SessionFlags + env (not Effect fields).
     ShowSessionInfo {
@@ -1440,8 +1392,6 @@ pub enum Effect {
     /// to the expiry so the fetch is built from the arming agent, not
     /// whatever view is active when the timer fires.
     DebounceSuggestions { agent_id: AgentId, generation: u64 },
-    /// Spawn a debounce sleep task for plugin-CTA keyword matching.
-    DebouncePluginCta { agent_id: AgentId, generation: u64 },
  /// Send an ACP `legacy ext RPC` request to the shell. `agent_id` is echoed
     /// on the result so the response routes to the agent that fetched, not
     /// whatever view is active when it lands.
@@ -1749,39 +1699,6 @@ pub enum TaskResult {
     AuthCodeSubmitted {
         request_seq: u64,
     },
-    /// Official-marketplace CTA catalog loaded into agent-level state.
-    PluginCtaCatalogLoaded {
-        agent_id: AgentId,
-        result: Result<pi_hooks_plugins_types::MarketplaceListResponse, String>,
-    },
-    /// Background marketplace auto-update completed.
-    MarketplaceUpdatesAvailable {
-        agent_id: AgentId,
-        updates: Vec<(String, String, String)>,
-    },
-    /// Inline-CTA plugin install completed.
-    CtaPluginInstallDone {
-        agent_id: AgentId,
-        plugin_name: String,
-        result: Result<pi_hooks_plugins_types::ActionOutcome, String>,
-    },
-    /// Post-CTA-install plugins reload completed (modal-independent).
-    CtaPluginReloadDone {
-        agent_id: AgentId,
-        plugin_name: String,
-        result: Result<pi_hooks_plugins_types::ActionOutcome, String>,
-    },
-    /// Post-CTA-install MCP server list loaded (modal-independent).
-    PluginCtaMcpsLoaded {
-        agent_id: AgentId,
-        plugin_name: String,
-        result: Result<Vec<crate::views::mcps_modal::McpServerInfo>, String>,
-    },
-    /// The CTA "installed" confirmation auto-dismiss timer fired.
-    CtaInstalledDismissTimeout {
-        agent_id: AgentId,
-        plugin_name: String,
-    },
     /// Session info fetched successfully.
     SessionInfoComplete {
         agent_id: AgentId,
@@ -1967,13 +1884,8 @@ pub enum TaskResult {
         settings: Option<pi_shell::util::config::RemoteSettings>,
     },
     /// Debounce timer for shell suggestions expired. Routed by the arming
-    /// `agent_id`, like the sibling `PluginCtaDebounceExpired`.
+    /// `agent_id`.
     SuggestionDebounceExpired {
-        agent_id: AgentId,
-        generation: u64,
-    },
-    /// Debounce timer for plugin-CTA keyword matching expired.
-    PluginCtaDebounceExpired {
         agent_id: AgentId,
         generation: u64,
     },

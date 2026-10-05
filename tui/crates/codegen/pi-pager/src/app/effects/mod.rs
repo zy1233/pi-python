@@ -33,8 +33,6 @@ use actions::PermissionModeKind;
 use crate::views::usage_modal::SessionInfoField;
 #[cfg(test)]
 use actions::PermissionModePersist;
-#[cfg(test)]
-use agent::AgentId;
 use crate::unified_log as ulog;
 use pi_shell::sampling::error::http_status_from_error;
 use pi_shell::session::SessionInfoResponse;
@@ -1284,89 +1282,6 @@ pub(crate) fn execute(
                 }
             });
         }
-        Effect::FetchPluginCtaCatalog { agent_id, .. } => {
-            tasks.spawn(async move {
-                TaskResult::PluginCtaCatalogLoaded {
-                    agent_id,
-                    result: Ok(pi_hooks_plugins_types::MarketplaceListResponse {
-                        sources: Vec::new(),
-                    }),
-                }
-            });
-        }
-        Effect::CheckMarketplaceUpdates { agent_id, .. } => {
-            tasks.spawn(async move {
-                TaskResult::MarketplaceUpdatesAvailable {
-                    agent_id,
-                    updates: Vec::new(),
-                }
-            });
-        }
-        Effect::InstallPluginFromCta {
-            agent_id,
-            plugin_relative_path,
-            ..
-        } => {
-            let plugin_name = plugin_relative_path
-                .rsplit('/')
-                .next()
-                .unwrap_or(plugin_relative_path.as_str())
-                .to_string();
-            tasks.spawn(async move {
-                TaskResult::CtaPluginInstallDone {
-                    agent_id,
-                    plugin_name,
-                    result: Ok(pi_hooks_plugins_types::ActionOutcome {
-                        status: pi_hooks_plugins_types::OutcomeStatus::Success,
-                        message: String::new(),
-                        requires_reload: false,
-                        requires_restart: false,
-                    }),
-                }
-            });
-        }
-        Effect::ReloadPluginsForCta { agent_id, plugin_name, .. } => {
-            tasks.spawn(async move {
-                TaskResult::CtaPluginReloadDone {
-                    agent_id,
-                    plugin_name,
-                    result: Ok(pi_hooks_plugins_types::ActionOutcome {
-                        status: pi_hooks_plugins_types::OutcomeStatus::Success,
-                        message: String::new(),
-                        requires_reload: false,
-                        requires_restart: false,
-                    }),
-                }
-            });
-        }
-        Effect::FetchPluginCtaMcps { agent_id, session_id, plugin_name } => {
-            let tx = acp_tx.clone();
-            tasks.spawn(fetch_plugin_cta_mcps(agent_id, session_id, plugin_name, tx));
-        }
-        Effect::RetryPluginCtaMcps { agent_id, session_id, plugin_name } => {
-            let tx = acp_tx.clone();
-            tasks
-                .spawn(async move {
-                    tokio::time::sleep(
-                            std::time::Duration::from_millis(CTA_MCP_RETRY_DELAY_MS),
-                        )
-                        .await;
-                    fetch_plugin_cta_mcps(agent_id, session_id, plugin_name, tx).await
-                });
-        }
-        Effect::DismissCtaInstalled { agent_id, plugin_name } => {
-            tasks
-                .spawn(async move {
-                    tokio::time::sleep(
-                            std::time::Duration::from_millis(CTA_INSTALLED_DISMISS_MS),
-                        )
-                        .await;
-                    TaskResult::CtaInstalledDismissTimeout {
-                        agent_id,
-                        plugin_name,
-                    }
-                });
-        }
         Effect::FetchSessionAgentName { agent_id, session_id } => {
             let tx = acp_tx.clone();
             tasks
@@ -1775,16 +1690,6 @@ pub(crate) fn execute(
                 .spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                     TaskResult::SuggestionDebounceExpired {
-                        agent_id,
-                        generation,
-                    }
-                });
-        }
-        Effect::DebouncePluginCta { agent_id, generation } => {
-            tasks
-                .spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                    TaskResult::PluginCtaDebounceExpired {
                         agent_id,
                         generation,
                     }

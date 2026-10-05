@@ -8,7 +8,7 @@
 //! Hit-tests here assume the cached rects come from the last rendered frame.
 use super::actions::Action;
 use super::agent_view::{
-    AgentPane, AgentView, CONTEXT_CLICK_DEBOUNCE_MS, CtaPhase, MULTI_CLICK_TIMEOUT_MS, PromptMode,
+    AgentPane, AgentView, CONTEXT_CLICK_DEBOUNCE_MS, MULTI_CLICK_TIMEOUT_MS, PromptMode,
     TextClickState, is_link_modifier_held, is_text_selection_on_double_click,
 };
 use super::app_view::InputOutcome;
@@ -135,40 +135,6 @@ impl AgentView {
                     return InputOutcome::Action(Action::AnnouncementsOpenCta(
                         pi_telemetry::events::AnnouncementCtaSurface::Banner,
                     ));
-                }
-                if self
-                    .plugin_cta
-                    .hit_dismiss
-                    .contains(mouse.column, mouse.row)
-                    && let CtaPhase::Matched { name, .. } | CtaPhase::Error { name, .. } =
-                        &self.plugin_cta.phase
-                {
-                    let plugin_id = name.clone();
-                    if let Err(e) = pi_shell::config::add_dismissed_plugin_cta(&plugin_id) {
-                        tracing::warn!(error = %e, "couldn't persist plugin CTA dismissal");
-                    }
-                    self.plugin_cta.dismissed.insert(plugin_id.clone());
-                    pi_telemetry::session_ctx::log_event(
-                        pi_telemetry::events::PluginCtaDismissed {
-                            plugin_name: plugin_id,
-                        },
-                    );
-                    self.plugin_cta.phase = CtaPhase::Hidden;
-                    self.plugin_cta.hit_connect.clear();
-                    self.plugin_cta.hit_dismiss.clear();
-                    return InputOutcome::Changed;
-                }
-                if self
-                    .plugin_cta
-                    .hit_connect
-                    .contains(mouse.column, mouse.row)
-                    && matches!(
-                        self.plugin_cta.phase,
-                        CtaPhase::Matched { .. } | CtaPhase::Error { .. }
-                    )
-                {
-                    self.connect_matched_plugin();
-                    return InputOutcome::Changed;
                 }
                 if let Some(idx) = self.follow_up_chip_at(mouse.column, mouse.row)
                     && let Some(text) = self
@@ -816,14 +782,6 @@ impl AgentView {
                 changed |= self
                     .privacy_banner
                     .hit_policy
-                    .update_hover(mouse.column, mouse.row);
-                changed |= self
-                    .plugin_cta
-                    .hit_connect
-                    .update_hover(mouse.column, mouse.row);
-                changed |= self
-                    .plugin_cta
-                    .hit_dismiss
                     .update_hover(mouse.column, mouse.row);
                 changed |= self
                     .hit_voice_stop_button

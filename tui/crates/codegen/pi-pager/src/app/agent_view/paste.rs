@@ -61,9 +61,6 @@ impl AgentView {
                 if let Some(eff) = self.notify_suggestion_text_changed() {
                     self.pending_effects.push(eff);
                 }
-                if let Some(eff) = self.notify_plugin_cta_text_changed() {
-                    self.pending_effects.push(eff);
-                }
                 (InputOutcome::Changed, ClipboardTextInsertion::Inserted)
             }
             PromptEvent::Ignored => (InputOutcome::Changed, ClipboardTextInsertion::Failed),
@@ -433,9 +430,6 @@ impl AgentView {
             self.prompt.refresh_slash(&self.session.models);
         }
         if inserted_non_image && let Some(eff) = self.notify_suggestion_text_changed() {
-            self.pending_effects.push(eff);
-        }
-        if inserted_non_image && let Some(eff) = self.notify_plugin_cta_text_changed() {
             self.pending_effects.push(eff);
         }
         let completion = if inserted_image || inserted_non_image {

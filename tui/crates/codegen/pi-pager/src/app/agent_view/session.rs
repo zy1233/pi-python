@@ -3,7 +3,7 @@
 #[cfg(test)]
 use super::test_agent_view;
 use super::{
-    ActivePane, AgentView, InlineMediaHitAreas, InputMode, PaneAreas, PluginCtaState,
+    ActivePane, AgentView, InlineMediaHitAreas, InputMode, PaneAreas,
     PromptInputMode, PromptMode, REWOUND_PROMPT_ID_CAP, ReplayRebuiltState,
     SELF_ORIGINATED_PROMPT_CAP, SessionReload,
 };
@@ -336,7 +336,6 @@ impl AgentView {
             pending_cancel_resend: None,
             cancel_latency: None,
             front_message_committed: true,
-            plugin_cta: PluginCtaState::default(),
             follow_ups: None,
             follow_up_shown_prompt_id: None,
             follow_up_chips: Vec::new(),

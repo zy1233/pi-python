@@ -5,7 +5,7 @@ use super::paste::paste_key_tests;
 #[cfg(test)]
 use super::test_fixtures;
 use super::{
-    AgentPane, AgentView, BlockingCard, CtaPhase, InputMode, KeyOwner,
+    AgentPane, AgentView, BlockingCard, InputMode, KeyOwner,
     MULTI_CLICK_TIMEOUT_MS, PromptInputMode, active_contexts_for_pane, format_key_for_log,
     is_link_modifier_for_key, is_mouse_reporting_toggle_chord, resolve_action,
 };
@@ -885,17 +885,6 @@ impl AgentView {
             && (self.queue.is_visible() || !self.visible_queue_is_empty())
         {
             self.toggle_queue_pane();
-            return InputOutcome::Changed;
-        }
-        if let Event::Key(key) = ev
-            && key.kind != KeyEventKind::Release
-            && key!('/', CONTROL).matches(key)
-            && matches!(
-                self.plugin_cta.phase,
-                CtaPhase::Matched { .. } | CtaPhase::Error { .. }
-            )
-        {
-            self.connect_matched_plugin();
             return InputOutcome::Changed;
         }
         if let Event::Key(key) = ev

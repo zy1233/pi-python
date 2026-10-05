@@ -8203,7 +8203,6 @@ dependencies = [
  "pi-mermaid",
  "pi-pager-diff",
  "pi-pager-render",
- "pi-plugin-marketplace",
  "pi-prompt-queue",
  "pi-ratatui-inline",
  "pi-ratatui-textarea",

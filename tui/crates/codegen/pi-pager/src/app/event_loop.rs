@@ -1002,9 +1002,8 @@ pub(crate) async fn run(
     if launch_auto {
         app.current_ui.permission_mode = Some("auto".into());
     }
-    // One effective-config read for launch-mode ownership, the display
-    // resolve below, and the plugin-CTA marketplace key (the launch resolvers
-    // above keep their own internal read).
+    // One effective-config read for launch-mode ownership and the display
+    // resolve below (the launch resolvers above keep their own internal read).
     let launch_effective_config = pi_shell::config::load_effective_config().ok();
     let launch_effective_ui = launch_effective_config
         .as_ref()
@@ -1112,12 +1111,6 @@ pub(crate) async fn run(
                 .privacy
                 .privacy_banner_acked
         });
-    app.plugin_cta_enabled = pi_config::env_bool("GROK_PLUGIN_CTA")
-        .or_else(|| remote_settings.as_ref().and_then(|s| s.plugin_cta))
-        .unwrap_or(false);
-    app.plugin_cta_marketplace = launch_effective_config
-        .as_ref()
-        .and_then(plugin_cta_marketplace_from);
     // Voice is applied after auth_meta so API-key detection is accurate.
     app.session_picker_grouped = std::env::var("GROK_SESSION_PICKER_GROUPED")
         .ok()
@@ -2945,9 +2938,6 @@ fn apply_session_recap_available(app: &mut AppView, available: bool) {
     app.welcome_prompt.set_recap_visible(available);
 }
 
-/// `[marketplace].plugin_cta_marketplace` from an effective config: the
-/// marketplace source name the plugin CTA draws candidates from instead of
-/// pi Official. Empty/whitespace-only values count as unset.
 /// Detect external-auth installs once at pager startup.
 fn detect_external_auth_provider(auth_methods: &[agent_client_protocol::AuthMethod]) -> bool {
     let method_is_external = |method: &agent_client_protocol::AuthMethod| {
@@ -2976,15 +2966,6 @@ fn detect_external_auth_provider(auth_methods: &[agent_client_protocol::AuthMeth
             .is_some_and(|s| !s.trim().is_empty())
     };
     auth_methods.iter().any(method_is_external) || env_set() || config_set()
-}
-
-fn plugin_cta_marketplace_from(config: &toml::Value) -> Option<String> {
-    let name = config
-        .get("marketplace")?
-        .get("plugin_cta_marketplace")?
-        .as_str()?
-        .trim();
-    (!name.is_empty()).then(|| name.to_string())
 }
 
 fn should_pregenerate_away_recap(app: &AppView) -> bool {
@@ -5567,62 +5548,5 @@ mod tests {
             app.active_view = view;
             assert!(finish_run(&mut app).exit_info.is_none());
         }
-    }
-
-    #[test]
-    fn plugin_cta_marketplace_from_managed_layer() {
-        let layers = pi_config::ConfigLayers {
-            managed: toml::from_str(
-                "[marketplace]\nplugin_cta_marketplace = \"SpaceX Marketplace\"\n",
-            )
-            .unwrap(),
-            ..Default::default()
-        };
-        assert_eq!(
-            plugin_cta_marketplace_from(&layers.effective_config_base()),
-            Some("SpaceX Marketplace".to_string())
-        );
-    }
-
-    #[test]
-    fn plugin_cta_marketplace_from_user_wins_over_managed() {
-        let layers = pi_config::ConfigLayers {
-            managed: toml::from_str(
-                "[marketplace]\nplugin_cta_marketplace = \"Managed Marketplace\"\n",
-            )
-            .unwrap(),
-            user: toml::from_str("[marketplace]\nplugin_cta_marketplace = \"User Marketplace\"\n")
-                .unwrap(),
-            ..Default::default()
-        };
-        assert_eq!(
-            plugin_cta_marketplace_from(&layers.effective_config_base()),
-            Some("User Marketplace".to_string())
-        );
-    }
-
-    #[test]
-    fn plugin_cta_marketplace_from_unset_or_empty_is_none() {
-        let unset = pi_config::ConfigLayers::default();
-        assert_eq!(
-            plugin_cta_marketplace_from(&unset.effective_config_base()),
-            None
-        );
-        let empty = pi_config::ConfigLayers {
-            managed: toml::from_str("[marketplace]\nplugin_cta_marketplace = \"\"\n").unwrap(),
-            ..Default::default()
-        };
-        assert_eq!(
-            plugin_cta_marketplace_from(&empty.effective_config_base()),
-            None
-        );
-        let blank = pi_config::ConfigLayers {
-            user: toml::from_str("[marketplace]\nplugin_cta_marketplace = \"   \"\n").unwrap(),
-            ..Default::default()
-        };
-        assert_eq!(
-            plugin_cta_marketplace_from(&blank.effective_config_base()),
-            None
-        );
     }
 }

@@ -277,8 +277,6 @@ pub(crate) fn test_app() -> AppView {
         minimal_state: crate::minimal_api::MinimalState::default(),
         show_resolved_model: true,
         sharing_enabled: false,
-        plugin_cta_enabled: false,
-        plugin_cta_marketplace: None,
         usage_visible: true,
         has_external_auth_provider: false,
         tier_restricted_commands: Vec::new(),

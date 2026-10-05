@@ -116,7 +116,6 @@ pi-fast-worktree = { path = "../pi-fast-worktree", features = ["metadata"] }
 chrono = { workspace = true }
 pi-tools = { workspace = true }
 pi-agent = { workspace = true }
-pi-plugin-marketplace = { path = "../pi-plugin-marketplace" }
 pi-hooks-plugins-types = { path = "../pi-hooks-plugins-types" }
 walkdir = { workspace = true }
 pi-sandbox = { path = "../pi-sandbox", default-features = false }

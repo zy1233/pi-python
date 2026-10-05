@@ -7,11 +7,6 @@ use super::billing::{
     handle_check_subscription_complete, handle_credit_limit_recheck_complete,
     handle_gate_refreshed, handle_gate_verify_timeout,
 };
-use super::cta::{
-    handle_cta_plugin_install_done, handle_cta_plugin_reload_done,
-    handle_plugin_cta_catalog_loaded, handle_plugin_cta_debounce_expired,
-    handle_plugin_cta_mcps_loaded,
-};
 use super::ctx::{find_agent_by_session_id, get_active_agent_mut};
 use super::notes::{ handle_memory_note_saved};
 use super::prompt::{
@@ -44,10 +39,6 @@ use super::status::{
     handle_coding_data_sharing_updated,
     handle_context_info_complete, handle_session_usage_result, scrub_error_for_toast,
     usage_modal_state_mut,
-};
-use super::transcript::{
-    handle_marketplace_updates_available,
-    
 };
 use crate::app::actions::{
     ClipboardPasteCompletion, ClipboardPasteContext, ClipboardPasteFailure, ClipboardPasteTarget,
@@ -548,40 +539,6 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
         } => handle_auth_url_ready(app, request_seq, auth_url, external, mode),
         TaskResult::AuthCodeSubmitted { .. } => vec![],
         TaskResult::AuthCancelComplete => vec![],
-        TaskResult::CtaPluginInstallDone {
-            agent_id,
-            plugin_name,
-            result,
-        } => handle_cta_plugin_install_done(app, agent_id, plugin_name, result),
-        TaskResult::CtaPluginReloadDone {
-            agent_id,
-            plugin_name,
-            result,
-        } => handle_cta_plugin_reload_done(app, agent_id, plugin_name, result),
-        TaskResult::PluginCtaMcpsLoaded {
-            agent_id,
-            plugin_name,
-            result,
-        } => handle_plugin_cta_mcps_loaded(app, agent_id, plugin_name, result),
-        TaskResult::CtaInstalledDismissTimeout {
-            agent_id,
-            plugin_name,
-        } => {
-            use crate::app::agent_view::CtaPhase;
-            if let Some(agent) = app.agents.get_mut(&agent_id)
-                && let CtaPhase::Installed { name } = &agent.plugin_cta.phase
-                && *name == plugin_name
-            {
-                agent.plugin_cta.phase = CtaPhase::Hidden;
-            }
-            vec![]
-        }
-        TaskResult::MarketplaceUpdatesAvailable { agent_id, updates } => {
-            handle_marketplace_updates_available(app, agent_id, updates)
-        }
-        TaskResult::PluginCtaCatalogLoaded { agent_id, result } => {
-            handle_plugin_cta_catalog_loaded(app, agent_id, result)
-        }
         TaskResult::SessionAgentNameResolved {
             agent_id,
             agent_name,
@@ -901,10 +858,6 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             agent_id,
             generation,
         } => handle_suggestion_debounce_expired(app, agent_id, generation),
-        TaskResult::PluginCtaDebounceExpired {
-            agent_id,
-            generation,
-        } => handle_plugin_cta_debounce_expired(app, agent_id, generation),
         TaskResult::PromptSuggestionLoaded {
             agent_id,
             suggestion,

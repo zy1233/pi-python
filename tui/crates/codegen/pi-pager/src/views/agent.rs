@@ -68,7 +68,7 @@ impl PaneAreas {
     }
 }
 /// Terminals at or below this height suppress the optional rows above the
-/// prompt (plugin CTA, follow-ups, banner/tip) so the prompt and scrollback
+/// prompt (follow-ups, banner/tip) so the prompt and scrollback
 /// are never starved.
 pub const SHORT_TERMINAL_ROWS: u16 = 16;
 /// The scrollback's floor, pushed as the layout's only `Min`. The solver ranks
@@ -113,8 +113,6 @@ pub struct AgentViewLayoutParams {
     pub banner_height: u16,
     /// Forced to 0 on short terminals (`area.height <= SHORT_TERMINAL_ROWS`)
     /// so the prompt and scrollback are never starved.
-    pub cta_height: u16,
-    /// Force-suppressed on short terminals on the same rule as `cta_height`.
     pub follow_ups_height: u16,
     /// 0 or 1: the gap row between turn status (or scrollback) and the prompt.
     pub prompt_gap: u16,
@@ -140,9 +138,7 @@ pub struct AgentViewLayout {
     pub turn_status: Rect,
     /// Banner rect above the prompt (mode-switch banner, ephemeral tips).
     pub banner: Rect,
-    /// Inline plugin-CTA row (below banner, above the prompt gap).
-    pub plugin_cta: Rect,
-    /// Follow-up suggestion chips row (below the plugin CTA, above the prompt).
+    /// Follow-up suggestion chips row (below the banner, above the prompt).
     pub follow_ups: Rect,
     /// Single-row record indicator ("◉ Recording") directly above the prompt,
     /// shown only while voice capture is active.
@@ -179,7 +175,6 @@ impl AgentViewLayout {
             btw_height,
             turn_status_height,
             banner_height,
-            cta_height,
             follow_ups_height,
             prompt_gap,
             voice_recording_height,
@@ -192,11 +187,6 @@ impl AgentViewLayout {
             0
         } else {
             outer_vpad
-        };
-        let cta_height = if area.height <= SHORT_TERMINAL_ROWS {
-            0
-        } else {
-            cta_height
         };
         let follow_ups_height = if area.height <= SHORT_TERMINAL_ROWS {
             0
@@ -237,10 +227,6 @@ impl AgentViewLayout {
         if banner_height > 0 {
             constraints.push(Constraint::Length(1));
             constraints.push(Constraint::Length(banner_height));
-        }
-        if cta_height > 0 {
-            constraints.push(Constraint::Length(1));
-            constraints.push(Constraint::Length(cta_height));
         }
         if follow_ups_height > 0 {
             constraints.push(Constraint::Length(1));
@@ -317,14 +303,6 @@ impl AgentViewLayout {
         } else {
             Rect::default()
         };
-        let plugin_cta = if cta_height > 0 {
-            i += 1;
-            let r = chunks[i];
-            i += 1;
-            r
-        } else {
-            Rect::default()
-        };
         let follow_ups = if follow_ups_height > 0 {
             i += 1;
             let r = chunks[i];
@@ -385,7 +363,6 @@ impl AgentViewLayout {
             btw,
             turn_status,
             banner,
-            plugin_cta,
             follow_ups,
             voice_recording,
             prompt,
@@ -461,7 +438,7 @@ pub fn fill_background(
 /// Chips render left-to-right and rendering STOPS at the first chip that does
 /// not fit the row width — the result is a rendered prefix of `suggestions`
 /// (index-aligned), not a filtered subset. A transient, mouse-clickable
-/// affordance above the prompt — the same row slot family as the plugin CTA.
+/// affordance above the prompt.
 /// Suggestion text is server-controlled and already sanitized at ingestion;
 /// here it is additionally length-clamped per chip and written through
 /// `set_span_safe`, so a label can neither overflow the row nor inject
@@ -1830,18 +1807,13 @@ mod tests {
     fn layout_with_rows(
         area: Rect,
         banner_height: u16,
-        cta_height: u16,
         follow_ups_height: u16,
     ) -> AgentViewLayout {
         AgentViewLayout::compute(AgentViewLayoutParams {
             banner_height,
-            cta_height,
             follow_ups_height,
             ..base_params(area)
         })
-    }
-    fn layout_with_cta(area: Rect, cta_height: u16) -> AgentViewLayout {
-        layout_with_rows(area, 0, cta_height, 0)
     }
     fn layout_with_status_line(
         area: Rect,
@@ -2038,33 +2010,12 @@ mod tests {
             "no carve-out without the scrollbar gutter"
         );
     }
-    #[test]
-    fn plugin_cta_row_present_above_prompt() {
-        let area = Rect::new(0, 0, 80, 40);
-        let layout = layout_with_cta(area, 1);
-        assert_eq!(layout.plugin_cta.height, 1);
-        assert!(layout.plugin_cta.y < layout.prompt.y);
-        assert!(layout.plugin_cta.y >= layout.scrollback.y + layout.scrollback.height);
-    }
-    #[test]
-    fn plugin_cta_row_absent_when_height_zero() {
-        let area = Rect::new(0, 0, 80, 40);
-        let layout = layout_with_cta(area, 0);
-        assert_eq!(layout.plugin_cta, Rect::default());
-    }
-    #[test]
-    fn plugin_cta_row_suppressed_on_short_terminal() {
-        let area = Rect::new(0, 0, 80, 16);
-        let layout = layout_with_cta(area, 1);
-        assert_eq!(layout.plugin_cta, Rect::default());
-        assert!(layout.scrollback.height >= 5);
-    }
     /// Banner row (mode banner / ephemeral tip slot): height 1 reserves a
     /// one-row rect directly above the prompt (gap row in between).
     #[test]
     fn banner_row_present_above_prompt() {
         let area = Rect::new(0, 0, 80, 40);
-        let layout = layout_with_rows(area, 1, 0, 0);
+        let layout = layout_with_rows(area, 1, 0);
         assert_eq!(layout.banner.height, 1);
         assert_eq!(layout.prompt.y, layout.banner.y + 1);
         assert!(layout.banner.y >= layout.scrollback.y + layout.scrollback.height);
@@ -2072,7 +2023,7 @@ mod tests {
     #[test]
     fn banner_row_absent_when_height_zero() {
         let area = Rect::new(0, 0, 80, 40);
-        let layout = layout_with_rows(area, 0, 0, 0);
+        let layout = layout_with_rows(area, 0, 0);
         assert_eq!(layout.banner, Rect::default());
     }
     fn row_text(buf: &Buffer, area: Rect) -> String {
@@ -2155,29 +2106,21 @@ mod tests {
     #[test]
     fn follow_ups_row_present_above_prompt() {
         let area = Rect::new(0, 0, 80, 40);
-        let layout = layout_with_rows(area, 0, 0, 1);
+        let layout = layout_with_rows(area, 0, 1);
         assert_eq!(layout.follow_ups.height, 1);
         assert!(layout.follow_ups.y < layout.prompt.y);
         assert!(layout.follow_ups.y >= layout.scrollback.y + layout.scrollback.height);
     }
     #[test]
-    fn follow_ups_row_below_plugin_cta() {
-        let area = Rect::new(0, 0, 80, 40);
-        let layout = layout_with_rows(area, 0, 1, 1);
-        assert!(layout.plugin_cta.height == 1 && layout.follow_ups.height == 1);
-        assert!(layout.plugin_cta.y < layout.follow_ups.y);
-        assert!(layout.follow_ups.y < layout.prompt.y);
-    }
-    #[test]
     fn follow_ups_row_absent_when_height_zero() {
         let area = Rect::new(0, 0, 80, 40);
-        let layout = layout_with_rows(area, 0, 0, 0);
+        let layout = layout_with_rows(area, 0, 0);
         assert_eq!(layout.follow_ups, Rect::default());
     }
     #[test]
     fn follow_ups_row_suppressed_on_short_terminal() {
         let area = Rect::new(0, 0, 80, 16);
-        let layout = layout_with_rows(area, 0, 0, 1);
+        let layout = layout_with_rows(area, 0, 1);
         assert_eq!(layout.follow_ups, Rect::default());
         assert!(layout.scrollback.height >= 5);
     }

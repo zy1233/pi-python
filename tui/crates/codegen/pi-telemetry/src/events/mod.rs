@@ -998,34 +998,6 @@ pub struct PluginUsed {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Plugin CTA (inline marketplace "Connect" upsell)
-// ─────────────────────────────────────────────────────────────────────────────
-
-#[derive(Serialize)]
-pub struct PluginCtaImpression {
-    pub plugin_name: String,
-}
-
-#[derive(Serialize)]
-pub struct PluginCtaConnectClicked {
-    pub plugin_name: String,
-    pub is_retry: bool,
-}
-
-#[derive(Serialize)]
-pub struct PluginCtaDismissed {
-    pub plugin_name: String,
-}
-
-#[derive(Serialize)]
-pub struct PluginCtaInstalled {
-    pub plugin_name: String,
-    pub success: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error_category: Option<String>,
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Extensions modal
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -2353,10 +2325,6 @@ telemetry_event!(
     "plugin_used",
     external = crate::external::schema::map_plugin_used
 );
-telemetry_event!(PluginCtaImpression, "plugin_cta_impression");
-telemetry_event!(PluginCtaConnectClicked, "plugin_cta_connect_clicked");
-telemetry_event!(PluginCtaDismissed, "plugin_cta_dismissed");
-telemetry_event!(PluginCtaInstalled, "plugin_cta_installed");
 telemetry_event!(ExtensionsModalOpened, "extensions_modal_opened");
 telemetry_event!(ExtensionsModalAction, "extensions_modal_action");
 telemetry_event!(HookAdded, "hook_added");
@@ -2918,14 +2886,6 @@ mod tests {
     }
 
     #[test]
-    fn plugin_cta_event_names() {
-        assert_eq!(PluginCtaImpression::NAME, "plugin_cta_impression");
-        assert_eq!(PluginCtaConnectClicked::NAME, "plugin_cta_connect_clicked");
-        assert_eq!(PluginCtaDismissed::NAME, "plugin_cta_dismissed");
-        assert_eq!(PluginCtaInstalled::NAME, "plugin_cta_installed");
-    }
-
-    #[test]
     fn announcement_cta_event_names() {
         assert_eq!(AnnouncementCtaShown::NAME, "announcement_cta_shown");
         assert_eq!(AnnouncementCtaClicked::NAME, "announcement_cta_clicked");
@@ -3256,51 +3216,6 @@ mod tests {
     }
 
     #[test]
-    fn plugin_cta_impression_serializes_plugin_name() {
-        let v = serde_json::to_value(PluginCtaImpression {
-            plugin_name: "figma".into(),
-        })
-        .unwrap();
-        assert_eq!(v, serde_json::json!({ "plugin_name": "figma" }));
-    }
-
-    #[test]
-    fn plugin_cta_connect_clicked_serializes_is_retry() {
-        let fresh = serde_json::to_value(PluginCtaConnectClicked {
-            plugin_name: "figma".into(),
-            is_retry: false,
-        })
-        .unwrap();
-        assert_eq!(
-            fresh,
-            serde_json::json!({ "plugin_name": "figma", "is_retry": false })
-        );
-        let retry = serde_json::to_value(PluginCtaConnectClicked {
-            plugin_name: "figma".into(),
-            is_retry: true,
-        })
-        .unwrap();
-        assert_eq!(
-            retry,
-            serde_json::json!({ "plugin_name": "figma", "is_retry": true })
-        );
-    }
-
-    #[test]
-    fn plugin_cta_installed_omits_error_category_when_none() {
-        let v = serde_json::to_value(PluginCtaInstalled {
-            plugin_name: "figma".into(),
-            success: true,
-            error_category: None,
-        })
-        .unwrap();
-        assert_eq!(
-            v,
-            serde_json::json!({ "plugin_name": "figma", "success": true })
-        );
-    }
-
-    #[test]
     fn login_funnel_event_names() {
         assert_eq!(LoginPickerShown::NAME, "login_picker_shown");
         assert_eq!(LoginMethodChosen::NAME, "login_method_chosen");
@@ -3475,23 +3390,5 @@ mod tests {
                 "{private:?} must bucket to other"
             );
         }
-    }
-
-    #[test]
-    fn plugin_cta_installed_includes_error_category_when_some() {
-        let v = serde_json::to_value(PluginCtaInstalled {
-            plugin_name: "figma".into(),
-            success: false,
-            error_category: Some("not_found".into()),
-        })
-        .unwrap();
-        assert_eq!(
-            v,
-            serde_json::json!({
-                "plugin_name": "figma",
-                "success": false,
-                "error_category": "not_found",
-            })
-        );
     }
 }

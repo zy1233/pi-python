@@ -993,12 +993,6 @@ pub(in crate::app::dispatch) fn handle_session_loaded(
             agent_id,
             session_id: hydrate_sid.clone(),
         });
-        if app.plugin_cta_enabled {
-            effects.push(Effect::FetchPluginCtaCatalog {
-                agent_id,
-                session_id: hydrate_sid.clone(),
-            });
-        }
         effects.push(Effect::FetchBilling {
             agent_id,
             silent: true,

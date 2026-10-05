@@ -2,7 +2,6 @@
 
 use super::ctx::with_active_agent;
 use crate::app::actions::Effect;
-use crate::app::agent::AgentId;
 use crate::app::app_view::{ActiveView, AppView};
 use crate::scrollback::block::{BlockContent, RenderBlock};
 use crate::scrollback::blocks::ToolCallBlock;
@@ -270,34 +269,3 @@ pub(super) fn dispatch_dump_input_log(app: &mut AppView) -> Vec<Effect> {
     }
     vec![]
 }
-
-// TaskResult handlers.
-
-pub(super) fn handle_marketplace_updates_available(
-    app: &mut AppView,
-    agent_id: AgentId,
-    // (name, installed_ver, latest_ver)
-    updates: Vec<(String, String, String)>,
-) -> Vec<Effect> {
-    if !updates.is_empty()
-        && let Some(agent) = app.agents.get_mut(&agent_id)
-    {
-        let names: Vec<String> = updates
-            .iter()
-            .map(|(name, old, new)| format!("{name} (v{old} \u{2192} v{new})"))
-            .collect();
-        let summary = if names.len() <= 2 {
-            names.join(", ")
-        } else {
-            format!("{} and {} more", names[..2].join(", "), names.len() - 2)
-        };
-        agent
-            .scrollback
-            .push_block(crate::scrollback::block::RenderBlock::system(format!(
-                "{} Plugins auto-updated: {summary}.",
-                crate::glyphs::diamond_filled()
-            )));
-    }
-    vec![]
-}
-

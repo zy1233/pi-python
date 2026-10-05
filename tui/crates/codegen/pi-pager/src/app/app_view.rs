@@ -668,13 +668,6 @@ pub struct AppView {
     /// Whether the `/share` slash command is available. Currently forced off
     /// while session share links are temporarily disabled in clients.
     pub sharing_enabled: bool,
-    /// Whether the plugin marketplace CTA is enabled. Env `GROK_PLUGIN_CTA`
-    /// overrides `RemoteSettings.plugin_cta` (remote settings); defaults to `false`.
-    pub plugin_cta_enabled: bool,
-    /// Marketplace source name the plugin CTA draws candidates from, when
-    /// `[marketplace].plugin_cta_marketplace` is set in the effective config.
-    /// `None` keeps the default pi Official source.
-    pub plugin_cta_marketplace: Option<String>,
     /// Consumer billing surface (credit fetches / warnings). False for team
     /// and API-key auth. `/usage` itself stays available for session token/cost
     /// unless [`Self::has_external_auth_provider`].
@@ -1555,8 +1548,6 @@ impl AppView {
             pending_screen_mode_switch: None,
             show_resolved_model: true,
             sharing_enabled: false,
-            plugin_cta_enabled: false,
-            plugin_cta_marketplace: None,
             usage_visible: true,
             has_external_auth_provider: false,
             tier_restricted_commands: Vec::new(),
@@ -4708,7 +4699,6 @@ impl AppView {
                         .mcp_init_progress
                         .as_ref()
                         .is_some_and(McpInitProgress::is_visible)
-                    || agent.plugin_cta.phase.is_spinner()
                     || matches!(
                         agent.btw_state,
                         Some(crate::views::btw_overlay::BtwOverlayState::Loading { .. })

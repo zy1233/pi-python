@@ -697,9 +697,6 @@ impl AgentView {
                     if let Some(eff) = self.notify_suggestion_text_changed() {
                         self.pending_effects.push(eff);
                     }
-                    if let Some(eff) = self.notify_plugin_cta_text_changed() {
-                        self.pending_effects.push(eff);
-                    }
                     if let Some(action) = self.take_prompt_tip_signal() {
                         return InputOutcome::Action(action);
                     }

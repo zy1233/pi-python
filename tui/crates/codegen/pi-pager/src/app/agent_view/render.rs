@@ -1,7 +1,7 @@
 //! Frame rendering for [`AgentView`]: the `draw` entry point plus shortcut
 //! hints.
 use super::{
-    ActivePane, AgentPane, AgentView, AgentViewLayout, BlockingCard, CtaPhase, EscStep,
+    ActivePane, AgentPane, AgentView, AgentViewLayout, BlockingCard, EscStep,
     InlineMediaHitAreas, KeyOwner, MODE_BANNER_FADE_TICKS, PromptMode, collect_citation_links,
     dropdown_content_inset, dropdown_items_width, record_dot_pulse, render_dropdown_chrome,
     supports_osc22,
@@ -847,12 +847,6 @@ impl AgentView {
         let _tool_usage_height = 0u16;
         let btw_height =
             crate::views::btw_overlay::btw_panel_height(self.btw_state.as_ref(), inner_width);
-        let cta_height = match &self.plugin_cta.phase {
-            _ if privacy_banner => 0,
-            CtaPhase::Hidden => 0,
-            CtaPhase::Matched { .. } if self.prompt.text().trim().is_empty() => 0,
-            _ => 1,
-        };
         let follow_ups_height = u16::from(self.follow_ups.is_some());
         let timeline_width = crate::views::timeline::rail_width(
             appearance.show_timeline,
@@ -870,7 +864,6 @@ impl AgentView {
             btw_height,
             turn_status_height,
             banner_height,
-            cta_height,
             follow_ups_height,
             prompt_gap,
             voice_recording_height,
@@ -1773,7 +1766,6 @@ impl AgentView {
                 crate::tips::render::render_ephemeral_tip(layout.banner, buf, line);
             }
         }
-        self.draw_plugin_cta(buf, layout.plugin_cta, &theme);
         if voice_listening && layout.voice_recording.height > 0 && layout.voice_recording.width > 0
         {
             let rec_area = layout.voice_recording;

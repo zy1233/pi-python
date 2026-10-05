@@ -2136,65 +2136,6 @@ fn render_io_summary_shows_bundled_for_bundled_personas() {
     assert!(summary.contains("[bundled]"));
 }
 #[test]
-fn add_dismissed_plugin_cta_creates_table() {
-    let tmp = tempfile::tempdir().unwrap();
-    let config_path = tmp.path().join("config.toml");
-    add_dismissed_plugin_cta_to_file("figma", &config_path).unwrap();
-    let content = std::fs::read_to_string(&config_path).unwrap();
-    assert!(content.contains("[plugin_cta]"));
-    assert!(content.contains("figma"));
-    assert!(dismissed_plugin_ctas_in_file(&config_path).contains("figma"));
-}
-#[test]
-fn add_dismissed_plugin_cta_is_idempotent() {
-    let tmp = tempfile::tempdir().unwrap();
-    let config_path = tmp.path().join("config.toml");
-    add_dismissed_plugin_cta_to_file("notion", &config_path).unwrap();
-    add_dismissed_plugin_cta_to_file("notion", &config_path).unwrap();
-    let config: toml::Value = toml::from_str(
-            &std::fs::read_to_string(&config_path).unwrap(),
-        )
-        .unwrap();
-    let dismissed = config
-        .get("plugin_cta")
-        .and_then(|v| v.get("dismissed"))
-        .and_then(|v| v.as_array())
-        .unwrap();
-    let count = dismissed.iter().filter(|v| v.as_str() == Some("notion")).count();
-    assert_eq!(count, 1);
-}
-#[test]
-fn dismissed_plugin_ctas_reflects_added_entries() {
-    let tmp = tempfile::tempdir().unwrap();
-    let config_path = tmp.path().join("config.toml");
-    assert!(!dismissed_plugin_ctas_in_file(&config_path).contains("figma"));
-    add_dismissed_plugin_cta_to_file("figma", &config_path).unwrap();
-    let dismissed = dismissed_plugin_ctas_in_file(&config_path);
-    assert!(dismissed.contains("figma"));
-    assert!(!dismissed.contains("notion"));
-}
-#[test]
-fn add_dismissed_plugin_cta_preserves_other_config() {
-    let tmp = tempfile::tempdir().unwrap();
-    let config_path = tmp.path().join("config.toml");
-    std::fs::write(&config_path, "[plugins]\ndisabled = [\"keep-me\"]\n").unwrap();
-    add_dismissed_plugin_cta_to_file("figma", &config_path).unwrap();
-    let config: toml::Value = toml::from_str(
-            &std::fs::read_to_string(&config_path).unwrap(),
-        )
-        .unwrap();
-    assert_eq!(
-            config
-                .get("plugins")
-                .and_then(|v| v.get("disabled"))
-                .and_then(|v| v.as_array())
-                .and_then(|a| a.first())
-                .and_then(|v| v.as_str()),
-            Some("keep-me"),
-        );
-    assert!(dismissed_plugin_ctas_in_file(&config_path).contains("figma"));
-}
-#[test]
 fn config_layers_user_overrides_managed() {
     let layers = ConfigLayers {
         system_managed: toml::Value::Table(Default::default()),

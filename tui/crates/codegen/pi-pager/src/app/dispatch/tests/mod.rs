@@ -1,7 +1,6 @@
 //! Tests for the dispatch module tree: shared fixtures and per-domain test modules.
 mod auth;
 mod billing;
-mod cta_e2e;
 mod jump;
 mod modes;
 mod notes;
@@ -20,10 +19,6 @@ mod voice;
 use super::billing::{
     CreditLimitUpsellMode, credit_limit_upsell_mode, is_max_tier, open_credit_limit_upsell,
     open_free_usage_upsell,
-};
-use super::cta::{
-    CTA_MCP_ABSENT_MAX_ATTEMPTS, CTA_MCP_POLL_MAX_ATTEMPTS, cta_impression_plugin_name,
-    cta_install_error_category, cta_install_relative_path, plugin_cta_phase_for,
 };
 use super::ctx::{find_agent_by_session_id, get_active_agent, get_active_agent_mut};
 use super::modes::{
@@ -251,8 +246,6 @@ fn test_app() -> AppView {
         minimal_state: crate::minimal_api::MinimalState::default(),
         show_resolved_model: true,
         sharing_enabled: false,
-        plugin_cta_enabled: false,
-        plugin_cta_marketplace: None,
         usage_visible: true,
         has_external_auth_provider: false,
         tier_restricted_commands: Vec::new(),
@@ -340,67 +333,6 @@ pub(super) fn enqueue_local(app: &mut AppView, id: AgentId, text: &str) {
         .unwrap()
         .session
         .enqueue_prompt(text.to_string());
-}
-fn cta_entry(name: &str, status: &str) -> pi_hooks_plugins_types::MarketplacePluginEntry {
-    pi_hooks_plugins_types::MarketplacePluginEntry {
-        name: name.into(),
-        version: None,
-        description: None,
-        category: None,
-        author: None,
-        tags: Vec::new(),
-        keywords: Vec::new(),
-        domains: Vec::new(),
-        homepage: None,
-        relative_path: format!("plugins/{name}"),
-        skill_count: 0,
-        has_hooks: false,
-        has_agents: false,
-        has_mcp: false,
-        install_status: status.into(),
-        installed_version: None,
-        components: None,
-        remote_url: None,
-        remote_ref: None,
-        remote_sha: None,
-        remote_subdir: None,
-    }
-}
-fn cta_outcome(
-    status: pi_hooks_plugins_types::OutcomeStatus,
-    message: &str,
-) -> pi_hooks_plugins_types::ActionOutcome {
-    pi_hooks_plugins_types::ActionOutcome {
-        status,
-        message: message.into(),
-        requires_reload: false,
-        requires_restart: false,
-    }
-}
-fn cta_mcp_server(
-    name: &str,
-    plugin: Option<&str>,
-    status: crate::views::mcps_modal::McpServerDisplayStatus,
-) -> crate::views::mcps_modal::McpServerInfo {
-    use crate::views::mcps_modal::{McpServerDisplayStatus, McpWireSource};
-    crate::views::mcps_modal::McpServerInfo {
-        name: name.into(),
-        display_name: None,
-        status,
-        tool_count: 0,
-        auth_required: matches!(status, McpServerDisplayStatus::NeedsAuth),
-        setup_required: false,
-        setup: None,
-        setup_values: std::collections::HashMap::new(),
-        tools: vec![],
-        enabled: true,
-        source: plugin
-            .map(|p| format!("plugin: {p}"))
-            .unwrap_or_else(|| "local".into()),
-        wire_source: McpWireSource::Local,
-        plugin_name: plugin.map(str::to_string),
-        is_managed_gateway: false,
-    }
 }
 fn arm_reconcile(
     app: &mut AppView,

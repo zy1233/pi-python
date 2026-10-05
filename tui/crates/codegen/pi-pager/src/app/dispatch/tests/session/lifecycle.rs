@@ -125,7 +125,6 @@ fn send_prompt_without_session_queues_but_no_effect() {
 #[test]
 fn session_created_sets_session_id() {
     let mut app = test_app_with_agent();
-    app.plugin_cta_enabled = true;
     let id = AgentId(0);
     app.agents.get_mut(&id).unwrap().session.session_id = None;
     let effects = dispatch(
@@ -137,7 +136,7 @@ fn session_created_sets_session_id() {
         }),
         &mut app,
     );
-    assert_eq!(effects.len(), 7);
+    assert_eq!(effects.len(), 5);
     assert!(matches!(
         &effects[0],
         Effect::FetchPromptHistory { session_id, .. } if session_id == "new-session-123"
@@ -149,14 +148,9 @@ fn session_created_sets_session_id() {
     ));
     assert!(matches!(
         &effects[3],
-        Effect::CheckMarketplaceUpdates { .. }
-    ));
-    assert!(matches!(&effects[4], Effect::FetchPluginCtaCatalog { .. }));
-    assert!(matches!(
-        &effects[5],
         Effect::FetchBilling { silent: true, .. }
     ));
-    assert!(matches!(&effects[6], Effect::RegisterActiveSession { .. }));
+    assert!(matches!(&effects[4], Effect::RegisterActiveSession { .. }));
     assert_eq!(
         app.agents[&id]
             .session
@@ -164,32 +158,6 @@ fn session_created_sets_session_id() {
             .as_ref()
             .map(|s| s.0.as_ref()),
         Some("new-session-123")
-    );
-}
-#[test]
-fn session_created_omits_cta_catalog_when_disabled() {
-    let mut app = test_app_with_agent();
-    assert!(!app.plugin_cta_enabled);
-    let id = AgentId(0);
-    app.agents.get_mut(&id).unwrap().session.session_id = None;
-    let effects = dispatch(
-        Action::TaskComplete(TaskResult::SessionCreated {
-            agent_id: id,
-            session_id: "new-session-123".into(),
-            models: None,
-            scheduler_background_loops: None,
-        }),
-        &mut app,
-    );
-    assert!(
-        !effects
-            .iter()
-            .any(|e| matches!(e, Effect::FetchPluginCtaCatalog { .. }))
-    );
-    assert!(
-        effects
-            .iter()
-            .any(|e| matches!(e, Effect::CheckMarketplaceUpdates { .. }))
     );
 }
 /// All System-block texts in an agent's scrollback, in order.

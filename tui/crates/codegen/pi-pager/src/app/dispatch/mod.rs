@@ -14,7 +14,6 @@
 
 mod auth;
 mod billing;
-mod cta;
 mod ctx;
 pub(crate) mod external_editor;
 mod import_claude;
