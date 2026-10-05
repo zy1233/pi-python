@@ -8,7 +8,6 @@ resolver = "2"
 members = [
     "crates/build/pi-proto-build",
     "crates/codegen/pi-acp-lib",
-    "crates/codegen/pi-agent-lifecycle",
     "crates/codegen/pi-chat-state",
     "crates/codegen/pi-codebase-graph",
     "crates/codegen/pi-compaction-transcript",
@@ -28,7 +27,6 @@ members = [
     "crates/codegen/pi-diag-server",
     "crates/codegen/pi-env",
     "crates/codegen/pi-extra-ca",
-    "crates/codegen/pi-foreign-sessions",
     "crates/codegen/pi-home",
     "crates/codegen/pi-hooks",
     "crates/codegen/pi-http",
@@ -44,16 +42,13 @@ members = [
     "crates/codegen/pi-pager-minimal",
     "crates/codegen/pi-pager-render",
     "crates/codegen/pi-paths",
-    "crates/codegen/pi-plugin-marketplace",
     "crates/codegen/pi-sampling-types",
     "crates/codegen/pi-sandbox",
     "crates/codegen/pi-secrets",
     "crates/codegen/pi-session-events",
-    "crates/codegen/pi-session-search",
     "crates/codegen/pi-shared",
     "crates/codegen/pi-shell",
     "crates/codegen/pi-shell-base",
-    "crates/codegen/pi-shell-session-support",
     "crates/codegen/pi-shell-terminal",
     "crates/codegen/pi-status-line",
     "crates/codegen/pi-subagent-resolution",
@@ -302,7 +297,6 @@ windows = { version = "0.61", features = ["Win32_Security", "Win32_Security_Auth
 wiremock = "0.6"
 wl-clipboard-rs = "0.9"
 pi-acp-lib = { path = "crates/codegen/pi-acp-lib" }
-pi-agent-lifecycle = { path = "crates/codegen/pi-agent-lifecycle" }
 pi-circuit-breaker = { path = "crates/common/pi-circuit-breaker" }
 pi-compaction-transcript = { path = "crates/codegen/pi-compaction-transcript" }
 pi-computer-hub-core = { path = "crates/common/pi-computer-hub-core" }
@@ -319,7 +313,6 @@ pi-config-types = { path = "crates/codegen/pi-config-types" }
 pi-diag-server = { path = "crates/codegen/pi-diag-server" }
 pi-env = { path = "crates/codegen/pi-env" }
 pi-extra-ca = { path = "crates/codegen/pi-extra-ca" }
-pi-foreign-sessions = { path = "crates/codegen/pi-foreign-sessions" }
 pi-home = { path = "crates/codegen/pi-home" }
 pi-http = { path = "crates/codegen/pi-http" }
 pi-markdown = { path = "crates/codegen/pi-markdown" }
@@ -330,11 +323,9 @@ pi-mermaid = { path = "crates/codegen/pi-mermaid" }
 pi-models = { path = "crates/codegen/pi-models" }
 pi-secrets = { path = "crates/codegen/pi-secrets" }
 pi-session-events = { path = "crates/codegen/pi-session-events" }
-pi-session-search = { path = "crates/codegen/pi-session-search" }
 pi-shared = { path = "crates/codegen/pi-shared" }
 pi-shell = { path = "crates/codegen/pi-shell" }
 pi-shell-base = { path = "crates/codegen/pi-shell-base" }
-pi-shell-session-support = { path = "crates/codegen/pi-shell-session-support" }
 pi-shell-terminal = { path = "crates/codegen/pi-shell-terminal" }
 pi-status-line = { path = "crates/codegen/pi-status-line" }
 pi-telemetry = { path = "crates/codegen/pi-telemetry" }

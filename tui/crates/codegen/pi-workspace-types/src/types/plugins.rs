@@ -3,7 +3,7 @@
 //! `WorkspaceEvent::HooksChanged`.
 //!
 //! TODO(workspace): align with the canonical types in
-//! `pi-hooks-plugins-types` and `pi-plugin-marketplace`.
+//! `pi-hooks-plugins-types`.
 
 use serde::{Deserialize, Serialize};
 
