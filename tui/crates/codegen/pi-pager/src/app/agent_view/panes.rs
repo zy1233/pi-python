@@ -301,8 +301,7 @@ impl AgentView {
                     state.hovered = None;
                     return;
                 }
-                ActiveModal::DocViewer { scroll, .. }
-                | ActiveModal::RememberNoteReview { scroll, .. } => {
+                ActiveModal::DocViewer { scroll, .. } => {
                     crate::views::modal::apply_doc_scroll_delta(scroll, lines);
                     return;
                 }

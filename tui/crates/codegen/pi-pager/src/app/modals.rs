@@ -8,8 +8,6 @@
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::text::Line;
-use ratatui::widgets::Widget;
 
 use super::actions::Action;
 use super::agent_view::{AgentView, active_contexts_for_pane, apply_settings_outcome};
@@ -185,69 +183,6 @@ impl AgentView {
                     return self.handle_palette_or_arg_input_with_registry(&ev, registry);
                 }
                 _ => return InputOutcome::Changed,
-            }
-        }
-
-        // RememberNoteReview: modal preview for # remember notes.
-        if let ActiveModal::RememberNoteReview {
-            ref mut scroll,
-            ref mut showing_enhanced,
-            ref enhanced_content,
-            ref mut cached_lines,
-            ref mut window,
-            ..
-        } = *modal
-        {
-            let chrome_cfg = mw::ModalWindowConfig {
-                title: "",
-                tabs: None,
-                shortcuts: &[],
-                sizing: mw::ModalSizing::default(),
-                fold_info: None,
-            };
-            match mw::handle_modal_key(window, key, &chrome_cfg) {
-                mw::ModalWindowOutcome::CloseRequested => {
-                    self.active_modal = None;
-                    return InputOutcome::Changed;
-                }
-                mw::ModalWindowOutcome::Handled => return InputOutcome::Changed,
-                mw::ModalWindowOutcome::Unhandled => {}
-                _ => {}
-            }
-
-            match key.code {
-                KeyCode::Enter => {
-                    return InputOutcome::Action(Action::SaveRememberNoteFromModal);
-                }
-                KeyCode::Char('y') if key.modifiers.is_empty() => {
-                    return InputOutcome::Action(Action::SaveRememberNoteFromModal);
-                }
-                KeyCode::Tab => {
-                    if enhanced_content.is_some() {
-                        *showing_enhanced = !*showing_enhanced;
-                        *cached_lines = None;
-                        *scroll = 0;
-                        return InputOutcome::Changed;
-                    }
-                    return InputOutcome::Unchanged;
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    *scroll = scroll.saturating_add(1);
-                    return InputOutcome::Changed;
-                }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    *scroll = scroll.saturating_sub(1);
-                    return InputOutcome::Changed;
-                }
-                KeyCode::PageDown => {
-                    *scroll = scroll.saturating_add(10);
-                    return InputOutcome::Changed;
-                }
-                KeyCode::PageUp => {
-                    *scroll = scroll.saturating_sub(10);
-                    return InputOutcome::Changed;
-                }
-                _ => return InputOutcome::Unchanged,
             }
         }
 
@@ -427,39 +362,6 @@ impl AgentView {
             }
         }
 
-        // UsageInfo: chrome (Esc/close) first, then tabs / scroll / copy.
-        if let ActiveModal::UsageInfo { state } = modal {
-            let chrome_cfg = mw::ModalWindowConfig {
-                title: "",
-                tabs: None,
-                shortcuts: &[],
-                sizing: mw::ModalSizing::default(),
-                fold_info: None,
-            };
-            match mw::handle_modal_key(&mut state.window, key, &chrome_cfg) {
-                ModalWindowOutcome::CloseRequested => {
-                    self.active_modal = None;
-                    return InputOutcome::Changed;
-                }
-                ModalWindowOutcome::Unhandled => {
-                    use crate::views::usage_modal::{self, UsageModalOutcome};
-                    return match usage_modal::handle_usage_modal_key(state, key) {
-                        UsageModalOutcome::CopySessionId => {
-                            self.copy_usage_modal_session_id();
-                            InputOutcome::Changed
-                        }
-                        UsageModalOutcome::CopyText(text) => {
-                            self.copy_usage_modal_text(&text);
-                            InputOutcome::Changed
-                        }
-                        UsageModalOutcome::Changed => InputOutcome::Changed,
-                        UsageModalOutcome::Unchanged => InputOutcome::Unchanged,
-                    };
-                }
-                _ => return InputOutcome::Changed,
-            }
-        }
-
         // ResetSettingsConfirm: y/n routing. Handled before generic
         // char-match so Esc/F2/Ctrl+, route to Cancel (not modal close).
         if let Some(ActiveModal::ResetSettingsConfirm { modal, .. }) = self.active_modal.as_ref() {
@@ -510,9 +412,7 @@ impl AgentView {
             | ActiveModal::ShortcutsHelp { .. }
             | ActiveModal::MemoryBrowser { .. }
             | ActiveModal::Settings { .. }
-            | ActiveModal::UsageInfo { .. }
-            | ActiveModal::ResetSettingsConfirm { .. }
-            | ActiveModal::RememberNoteReview { .. } => unreachable!(),
+            | ActiveModal::ResetSettingsConfirm { .. } => unreachable!(),
         }
     }
 
@@ -1355,7 +1255,6 @@ impl AgentView {
                     | ActiveModal::DocPicker { .. }
                     | ActiveModal::DocViewer { .. }
                     | ActiveModal::ShortcutsHelp { .. }
-                    | ActiveModal::RememberNoteReview { .. }
             )
         ) {
             // Extract window for handle_modal_mouse.
@@ -1366,7 +1265,6 @@ impl AgentView {
                 Some(ActiveModal::DocPicker { window, .. }) => window,
                 Some(ActiveModal::DocViewer { window, .. }) => window,
                 Some(ActiveModal::ShortcutsHelp { window, .. }) => window,
-                Some(ActiveModal::RememberNoteReview { window, .. }) => window,
                 _ => unreachable!(),
             };
             let outcome = mw::handle_modal_mouse(window, mouse.kind, mouse.column, mouse.row);
@@ -1430,11 +1328,8 @@ impl AgentView {
                     return InputOutcome::Changed;
                 }
                 ModalWindowOutcome::Unhandled => {
-                    // DocViewer / RememberNoteReview: wheel scrolls the markdown body.
-                    if let Some(
-                        ActiveModal::DocViewer { scroll, .. }
-                        | ActiveModal::RememberNoteReview { scroll, .. },
-                    ) = self.active_modal.as_mut()
+                    // DocViewer: wheel scrolls the markdown body.
+                    if let Some(ActiveModal::DocViewer { scroll, .. }) = self.active_modal.as_mut()
                     {
                         if modal::apply_doc_mouse_scroll(mouse.kind, scroll) {
                             return InputOutcome::Changed;
@@ -1544,87 +1439,6 @@ impl AgentView {
             }
         }
 
-        // UsageInfo: chrome first (tabs / close / footer stay clickable), then drag / wheel.
-        if let Some(ActiveModal::UsageInfo { state }) = &mut self.active_modal {
-            use crate::views::usage_modal::{
-                self, COPY_ALL_SESSION_INFO_SHORTCUT, COPY_SESSION_ID_SHORTCUT, UsageModalOutcome,
-            };
-            let outcome =
-                mw::handle_modal_mouse(&mut state.window, mouse.kind, mouse.column, mouse.row);
-            match outcome {
-                ModalWindowOutcome::CloseRequested => {
-                    self.active_modal = None;
-                    return InputOutcome::Changed;
-                }
-                ModalWindowOutcome::TabChanged(idx) => {
-                    state.set_tab(usage_modal::UsageInfoTab::from_index(idx));
-                    return InputOutcome::Changed;
-                }
-                ModalWindowOutcome::ShortcutActivated(id) => {
-                    // Footer click: drop gesture + hover.
-                    state.clear_text_drag();
-                    if id == COPY_SESSION_ID_SHORTCUT {
-                        self.copy_usage_modal_session_id();
-                    } else if id == COPY_ALL_SESSION_INFO_SHORTCUT {
-                        let text = match self.active_modal.as_ref() {
-                            Some(ActiveModal::UsageInfo { state }) => state.session_info_copy_all(),
-                            _ => None,
-                        };
-                        if let Some(text) = text {
-                            self.copy_usage_modal_text(&text);
-                        }
-                    }
-                    return InputOutcome::Changed;
-                }
-                ModalWindowOutcome::Handled => {
-                    match mouse.kind {
-                        // Same rule as content: bare Moved with an active drag is a
-                        // lost Up. Pending press is left alone for click-to-copy.
-                        MouseEventKind::Moved => {
-                            if state.has_active_drag() {
-                                return match state.finish_lost_drag() {
-                                    UsageModalOutcome::CopyText(text) => {
-                                        self.copy_usage_modal_text(&text);
-                                        InputOutcome::Changed
-                                    }
-                                    _ => {
-                                        state.hovered_copy_line = None;
-                                        InputOutcome::Changed
-                                    }
-                                };
-                            }
-                            state.hovered_copy_line = None;
-                        }
-                        // Same-tab click and other chrome Downs: drop gesture + hover.
-                        _ => {
-                            state.clear_text_drag();
-                        }
-                    }
-                    return InputOutcome::Changed;
-                }
-                ModalWindowOutcome::Unhandled => {
-                    return match usage_modal::handle_usage_modal_mouse(
-                        state,
-                        mouse.kind,
-                        mouse.column,
-                        mouse.row,
-                    ) {
-                        UsageModalOutcome::CopySessionId => {
-                            self.copy_usage_modal_session_id();
-                            InputOutcome::Changed
-                        }
-                        UsageModalOutcome::CopyText(text) => {
-                            self.copy_usage_modal_text(&text);
-                            InputOutcome::Changed
-                        }
-                        UsageModalOutcome::Changed => InputOutcome::Changed,
-                        UsageModalOutcome::Unchanged => InputOutcome::Unchanged,
-                    };
-                }
-                _ => return InputOutcome::Changed,
-            }
-        }
-
         // ResetSettingsConfirm: route mouse events through the
         // modal-window chrome.
         if let Some(ActiveModal::ResetSettingsConfirm { settings_state, .. }) =
@@ -1688,25 +1502,6 @@ impl AgentView {
             }
             _ => InputOutcome::Changed,
         }
-    }
-
-    /// Copy the usage modal's session ID and toast the delivery outcome.
-    fn copy_usage_modal_session_id(&mut self) {
-        let Some(ActiveModal::UsageInfo { state }) = self.active_modal.as_ref() else {
-            return;
-        };
-        let Some(id) = state.ctx.session_id.clone() else {
-            return;
-        };
-        let delivery = crate::clipboard::copy_text_or_file(&id);
-        self.show_toast(delivery.toast_message().as_ref());
-    }
-
-    /// Copy Session-info text (`y` / footer "copy all") and toast the
-    /// delivery outcome. Mirrors [`Self::copy_usage_modal_session_id`].
-    fn copy_usage_modal_text(&mut self, text: &str) {
-        let delivery = crate::clipboard::copy_text_or_file(text);
-        self.show_toast(delivery.toast_message().as_ref());
     }
 
     /// Draw the active modal overlay: the per-`ActiveModal`-variant render
@@ -2250,106 +2045,6 @@ impl AgentView {
                     compact,
                     &theme,
                 );
-            } else if let modal::ActiveModal::RememberNoteReview {
-                ref raw_content,
-                ref enhanced_content,
-                showing_enhanced,
-                ref mut scroll,
-                ref mut window,
-                ref mut cached_lines,
-                ..
-            } = *active_modal
-            {
-                use crate::views::modal_window::{self as mw, Shortcut};
-
-                let has_enhanced = enhanced_content.is_some();
-                let tab_label = if showing_enhanced {
-                    "Tab raw"
-                } else if has_enhanced {
-                    "Tab enhanced"
-                } else {
-                    "enhancing\u{2026}"
-                };
-
-                let shortcuts: Vec<Shortcut> = vec![
-                    Shortcut {
-                        label: "\u{2191}/\u{2193} scroll",
-                        clickable: false,
-                        id: 0,
-                    },
-                    Shortcut {
-                        label: "Enter save",
-                        clickable: false,
-                        id: 0,
-                    },
-                    Shortcut {
-                        label: tab_label,
-                        clickable: false,
-                        id: 0,
-                    },
-                    Shortcut {
-                        label: "Esc cancel",
-                        clickable: false,
-                        id: 0,
-                    },
-                ];
-
-                let compact = self.scrollback.appearance().prompt.compact;
-                let modal_config = mw::ModalWindowConfig {
-                    title: "Memory Note",
-                    tabs: None,
-                    shortcuts: &shortcuts,
-                    sizing: mw::ModalSizing {
-                        width_pct: 0.65,
-                        max_width: 100,
-                        min_width: 40,
-                        v_margin: 4,
-                        h_pad: 2,
-                        v_pad: 1,
-                        footer_lines: 2,
-                    }
-                    .with_compact(compact),
-                    fold_info: None,
-                };
-
-                if let Some(mw::ModalContentArea {
-                    content: content_area,
-                    ..
-                }) = mw::render_modal_window(buf, area, window, &modal_config, &theme)
-                {
-                    let display_content = if showing_enhanced {
-                        enhanced_content.as_deref().unwrap_or(raw_content)
-                    } else {
-                        raw_content
-                    };
-
-                    let w = content_area.width;
-                    let needs_reparse = cached_lines
-                        .as_ref()
-                        .is_none_or(|(cached_w, _)| *cached_w != w);
-                    if needs_reparse {
-                        let mc = crate::scrollback::blocks::markdown_content::MarkdownContent::new(
-                            display_content.to_string(),
-                        );
-                        let output = mc.output(w as usize);
-                        let lines: Vec<ratatui::text::Line<'static>> =
-                            output.lines.into_iter().map(|b| b.content).collect();
-                        *cached_lines = Some((w, lines));
-                    }
-                    let all_lines = &cached_lines.as_ref().unwrap().1;
-                    let max_scroll = all_lines.len().saturating_sub(content_area.height as usize);
-                    *scroll = (*scroll as usize).min(max_scroll) as u16;
-                    let start = *scroll as usize;
-                    let visible: Vec<Line> = all_lines
-                        .iter()
-                        .skip(start)
-                        .take(content_area.height as usize)
-                        .cloned()
-                        .collect();
-                    let para = ratatui::widgets::Paragraph::new(visible)
-                        .wrap(ratatui::widgets::Wrap { trim: false });
-                    para.render(content_area, buf);
-                }
             } else if let modal::ActiveModal::ShortcutsHelp {
                 entries,
                 state,
@@ -2400,15 +2095,6 @@ impl AgentView {
                         !searching,
                     );
                 }
-            } else if let modal::ActiveModal::UsageInfo { state } = active_modal {
-                crate::views::usage_modal::render_usage_modal(
-                    buf,
-                    area,
-                    state,
-                    self.credit_balance.as_ref(),
-                    compact,
-                    &theme,
-                );
             } else if let modal::ActiveModal::MemoryBrowser { state: mem_state } = active_modal {
                 crate::views::memory_modal::render_memory_modal(buf, area, mem_state, compact);
             } else if let modal::ActiveModal::Settings {

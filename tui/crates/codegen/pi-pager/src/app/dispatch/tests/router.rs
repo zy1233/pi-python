@@ -29,11 +29,7 @@ fn auth_copy_dispatch_preserves_all_delivery_states() {
 #[test]
 fn external_prompt_editor_arms_typed_request_and_preserves_composer_modes() {
     use crate::app::agent_view::PromptInputMode;
-    for mode in [
-        PromptInputMode::Normal,
-        PromptInputMode::Bash,
-        PromptInputMode::Remember,
-    ] {
+    for mode in [PromptInputMode::Normal, PromptInputMode::Bash] {
         let mut app = test_app_with_agent();
         let id = AgentId(0);
         app.screen_mode = crate::app::ScreenMode::Minimal;
@@ -246,7 +242,6 @@ fn deferred_paste_completion_after_refused_editor_does_not_implicitly_send_witho
                 target: crate::app::actions::ClipboardPasteTarget::AgentPrompt {
                     agent_id: id,
                     images_dir: None,
-                    from_feedback_pane: false,
                 },
                 source: crate::app::actions::ClipboardPasteSource::ClipboardKey {
                     text: crate::app::actions::ClipboardTextRead::Success(Some(
@@ -326,47 +321,6 @@ fn seed_foreign_resume_hint(
             native_id: "native-id".into(),
             age: std::time::Duration::from_secs(60),
         }),
-    );
-}
-/// Sending feedback is a submit: it retires the active ephemeral tip.
-#[test]
-fn send_feedback_clears_active_ephemeral_tip() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    let agent = app.agents.get_mut(&id).unwrap();
-    let _ = agent.ephemeral_tip.show(
-        crate::tips::EphemeralTip::new("t", ratatui::text::Line::from("hint")),
-        &mut std::collections::HashMap::new(),
-    );
-    assert!(agent.ephemeral_tip.is_active());
-    let _ = dispatch(
-        Action::SendFeedback {
-            text: "it broke".into(),
-            images: Default::default(),
-            trace: Some(crate::app::actions::FeedbackTraceChoice::NoUpload),
-        },
-        &mut app,
-    );
-    assert!(
-        !app.agents.get(&id).unwrap().ephemeral_tip.is_active(),
-        "feedback submit must clear the tip"
-    );
-}
-/// Sending a remember note is a submit: it retires the active ephemeral tip.
-#[test]
-fn send_remember_note_clears_active_ephemeral_tip() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    let agent = app.agents.get_mut(&id).unwrap();
-    let _ = agent.ephemeral_tip.show(
-        crate::tips::EphemeralTip::new("t", ratatui::text::Line::from("hint")),
-        &mut std::collections::HashMap::new(),
-    );
-    assert!(agent.ephemeral_tip.is_active());
-    let _ = dispatch(Action::SendRememberNote("remember this".into()), &mut app);
-    assert!(
-        !app.agents.get(&id).unwrap().ephemeral_tip.is_active(),
-        "remember-note submit must clear the tip"
     );
 }
 #[test]
@@ -519,67 +473,6 @@ fn promo_announcement(id: &str) -> pi_announcements::RemoteAnnouncement {
         ..Default::default()
     }
 }
-/// Id of the item the banner slot currently selects (None = banner closed).
-fn shown_banner_id(app: &AppView) -> Option<String> {
-    crate::views::announcements::first_session_announcement(
-        &app.active_announcements,
-        &app.hidden_announcement_ids,
-    )
-    .and_then(|a| a.id.clone())
-}
-/// `AnnouncementsOpenCta(surface)` re-resolves through the slot gate and opens
-/// the promo url (observed via the `GROK_TEST_OPEN_URL_FILE` seam, from every
-/// surface); a critical owning the slot — or no usable cta — makes it a silent
-/// no-op (no open, so a stale prior-frame click can't leak the promo url).
-#[serial_test::serial(GROK_TEST_OPEN_URL_FILE)]
-#[test]
-fn announcements_open_cta_opens_promo_and_noops_under_critical() {
-    use pi_telemetry::events::AnnouncementCtaSurface;
-    let url_file = std::env::temp_dir().join(format!("grok-cta-open-{}.txt", std::process::id()));
-    let _ = std::fs::remove_file(&url_file);
-    unsafe { std::env::set_var("GROK_TEST_OPEN_URL_FILE", &url_file) };
-    let opened = || std::fs::read_to_string(&url_file).unwrap_or_default();
-    let mut app = test_app_with_agent();
-    app.active_announcements = vec![promo_announcement("promo-open")];
-    for surface in [
-        AnnouncementCtaSurface::Banner,
-        AnnouncementCtaSurface::Welcome,
-        AnnouncementCtaSurface::Header,
-        AnnouncementCtaSurface::Keyboard,
-    ] {
-        let _ = std::fs::write(&url_file, "");
-        let effects = dispatch(Action::AnnouncementsOpenCta(surface), &mut app);
-        assert!(effects.is_empty(), "open is a side effect, not an Effect");
-        assert!(
-            opened().lines().any(|l| l == "https://example.com/promo-open"),
-            "surface {surface:?} must open the promo url; got {:?}",
-            opened()
-        );
-    }
-    let _ = std::fs::write(&url_file, "");
-    app.active_announcements = vec![
-        critical_announcement("crit-a"),
-        promo_announcement("promo-open"),
-    ];
-    let _ = dispatch(
-        Action::AnnouncementsOpenCta(AnnouncementCtaSurface::Keyboard),
-        &mut app,
-    );
-    assert!(
-        opened().trim().is_empty(),
-        "a critical slot owner must make the open a no-op; got {:?}",
-        opened()
-    );
-    let _ = std::fs::write(&url_file, "");
-    app.active_announcements = vec![];
-    let _ = dispatch(
-        Action::AnnouncementsOpenCta(AnnouncementCtaSurface::Banner),
-        &mut app,
-    );
-    assert!(opened().trim().is_empty(), "no cta → no open");
-    unsafe { std::env::remove_var("GROK_TEST_OPEN_URL_FILE") };
-    let _ = std::fs::remove_file(&url_file);
-}
 /// `AnnouncementCtaShown` latches once per (announcement, surface): first
 /// frame with an armed CTA rect emits, later frames don't, and a NEW
 /// announcement id re-emits on the same surfaces.
@@ -703,102 +596,6 @@ fn cta_impressions_cover_welcome_surface() {
     let logged = &app.announcement_cta_impressions_logged;
     assert!(!logged.contains(&("q".to_string(), AnnouncementCtaSurface::Welcome)));
     assert_eq!(logged.len(), 1);
-}
-/// Hide records only the currently-SHOWN critical's id: with `[A, B]`,
-/// hiding A reveals B, hiding B closes the banner, and a later push with a
-/// new id (C) re-arms it without any user action.
-#[test]
-fn announcements_hide_is_per_id_so_new_critical_reappears() {
-    let mut app = test_app();
-    app.active_announcements = vec![
-        critical_announcement("outage-a"),
-        critical_announcement("outage-b"),
-    ];
-    assert_eq!(shown_banner_id(&app).as_deref(), Some("outage-a"));
-    let effects = dispatch(Action::AnnouncementsHide, &mut app);
-    assert_eq!(effects.len(), 1);
-    assert!(app.hidden_announcement_ids.contains("outage-a"));
-    assert_eq!(
-        shown_banner_id(&app).as_deref(),
-        Some("outage-b"),
-        "hiding the shown critical must reveal the next one"
-    );
-    let effects = dispatch(Action::AnnouncementsHide, &mut app);
-    assert_eq!(effects.len(), 1);
-    assert_eq!(shown_banner_id(&app), None, "all hidden closes the banner");
-    let effects = dispatch(Action::AnnouncementsHide, &mut app);
-    assert!(effects.is_empty(), "expected no effects, got {effects:?}");
-    app.active_announcements
-        .push(critical_announcement("outage-c"));
-    assert_eq!(
-        shown_banner_id(&app).as_deref(),
-        Some("outage-c"),
-        "new critical id must re-arm the banner"
-    );
-}
-/// Hide targets the banner-slot item: the critical while one owns the slot,
-/// then the promo the slot reveals — each per-ID with a persist effect.
-#[test]
-fn announcements_hide_targets_slot_owner_critical_then_promo() {
-    let mut app = test_app();
-    app.active_announcements = vec![
-        promo_announcement("promo-a"),
-        critical_announcement("outage-a"),
-    ];
-    assert_eq!(
-        shown_banner_id(&app).as_deref(),
-        Some("outage-a"),
-        "critical wins the slot regardless of list order"
-    );
-    let effects = dispatch(Action::AnnouncementsHide, &mut app);
-    assert_eq!(effects.len(), 1);
-    assert!(app.hidden_announcement_ids.contains("outage-a"));
-    assert!(
-        !app.hidden_announcement_ids.contains("promo-a"),
-        "hide must only record the shown item"
-    );
-    assert_eq!(
-        shown_banner_id(&app).as_deref(),
-        Some("promo-a"),
-        "hiding the critical hands the slot to the promo"
-    );
-    let effects = dispatch(Action::AnnouncementsHide, &mut app);
-    assert_eq!(effects.len(), 1);
-    assert!(app.hidden_announcement_ids.contains("promo-a"));
-    assert_eq!(shown_banner_id(&app), None, "all hidden closes the banner");
-    let effects = dispatch(Action::AnnouncementsHide, &mut app);
-    assert!(effects.is_empty(), "expected no effects, got {effects:?}");
-}
-/// `dismissible: false` pins the slot owner: hide is a silent no-op (no key
-/// write, no persist effect, owner stays shown) — and a dismissible item
-/// owning the slot later still hides normally.
-#[test]
-fn announcements_hide_noops_for_non_dismissible_owner() {
-    let mut app = test_app();
-    let mut pinned = critical_announcement("pinned-crit");
-    pinned.dismissible = Some(false);
-    app.active_announcements = vec![pinned, promo_announcement("promo-a")];
-    assert_eq!(shown_banner_id(&app).as_deref(), Some("pinned-crit"));
-    let effects = dispatch(Action::AnnouncementsHide, &mut app);
-    assert!(
-        effects.is_empty(),
-        "non-dismissible hide must not persist, got {effects:?}"
-    );
-    assert!(
-        app.hidden_announcement_ids.is_empty(),
-        "non-dismissible hide must not write a hide key"
-    );
-    assert_eq!(
-        shown_banner_id(&app).as_deref(),
-        Some("pinned-crit"),
-        "pinned owner stays shown"
-    );
-    app.active_announcements.remove(0);
-    assert_eq!(shown_banner_id(&app).as_deref(), Some("promo-a"));
-    let effects = dispatch(Action::AnnouncementsHide, &mut app);
-    assert_eq!(effects.len(), 1);
-    assert!(app.hidden_announcement_ids.contains("promo-a"));
-    assert_eq!(shown_banner_id(&app), None);
 }
 #[test]
 fn switch_model_dispatch_produces_effect_and_sets_pending() {
@@ -1436,13 +1233,6 @@ fn deferred_switch_updates_display_and_persists() {
         "unchanged pre-session pick must not re-persist, got {effects:?}"
     );
 }
-#[test]
-fn request_bundle_status_emits_effect() {
-    let mut app = test_app();
-    let effects = dispatch(Action::RequestBundleStatus, &mut app);
-    assert_eq!(effects.len(), 1);
-    assert!(matches!(&effects[0], Effect::FetchBundleStatus));
-}
 /// Process-wide `--chat` + non-conversation resume of a non-disk id still
 /// loads (gateway conversation) with agent chat_kind from sticky mode.
 #[test]
@@ -1705,27 +1495,6 @@ fn entry_title_uses_display_name_when_set() {
     }
     let title = entry_title(&app.agents[&AgentId(0)]);
     assert_eq!(title, "custom title");
-}
-#[test]
-fn find_agent_by_session_id_returns_none_for_unknown() {
-    let mut app = test_app_with_agent();
-    assert!(find_agent_by_session_id(&mut app.agents, "nonexistent").is_none());
-}
-#[test]
-fn find_agent_by_session_id_returns_none_when_session_id_is_none() {
-    let mut app = test_app_with_agent();
-    app.agents.get_mut(&AgentId(0)).unwrap().session.session_id = None;
-    assert!(find_agent_by_session_id(&mut app.agents, "test-session").is_none());
-}
-#[test]
-fn find_agent_by_session_id_finds_inactive_agent() {
-    let mut app = two_agent_app();
-    let found = find_agent_by_session_id(&mut app.agents, "sess-B");
-    assert!(found.is_some());
-    assert_eq!(
-        found.unwrap().session.session_id,
-        Some(acp::SessionId::new("sess-B"))
-    );
 }
 /// Cross-setting smoke test.
 /// Verifies that the dispatcher routes each Action to the

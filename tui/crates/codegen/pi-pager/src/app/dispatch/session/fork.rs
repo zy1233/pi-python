@@ -92,7 +92,6 @@ pub(in crate::app::dispatch) fn dispatch_fork_resolved(
         agent
             .prompt
             .set_contextual_hints(app.contextual_hints.undo, app.contextual_hints.plan_mode);
-        agent.set_session_recap_available(app.session_recap_available);
         agent.set_voice_mode_available(app.voice_mode_enabled);
         agent.apply_app_scoped_gates(
             app.sharing_enabled,
@@ -174,7 +173,6 @@ fn build_fork_placeholder(
             yolo_mode: app.default_yolo,
             auto_mode: inherit_auto_mode(app),
             prompt_history: Vec::new(),
-            prompt_history_loading: false,
             loading_replay: false,
             restore_degree: None,
             rate_limited: false,

@@ -21,8 +21,6 @@ pub struct AgentId(pub usize);
 pub enum QueueEntryKind {
     /// Regular user prompt — sent via `PromptRequest`.
     Prompt,
-    /// Slash command (e.g., `/compact`) — dispatched as `ExtRequest` or local action.
-    Command,
     /// Direct bash command — bypasses agent loop, executed by shell directly.
     BashCommand,
     /// Scheduled (cron) prompt -- injected by the scheduler via ACP notification.
@@ -33,7 +31,6 @@ impl QueueEntryKind {
     pub fn as_label(&self) -> &'static str {
         match self {
             Self::Prompt => "prompt",
-            Self::Command => "command",
             Self::BashCommand => "bash_command",
             Self::Cron => "cron",
         }
@@ -269,8 +266,6 @@ pub struct AgentSession {
     /// Fetched on session create/load; prompts sent in this session are
     /// additionally front-inserted locally on send.
     pub prompt_history: Vec<String>,
- /// True until the session's startup/load `legacy ext RPC` fetch completes.
-    pub prompt_history_loading: bool,
     /// Session is currently replaying historical updates from `session/load`.
     /// Used to suppress live-style redraw/render work until the load completes.
     pub loading_replay: bool,
@@ -535,10 +530,6 @@ impl AgentSession {
         });
         id
     }
-    /// Push a slash command onto the back of the queue. Returns the assigned ID.
-    pub fn enqueue_command(&mut self, text: String) -> u64 {
-        self.enqueue_entry(text, QueueEntryKind::Command)
-    }
     /// Push a direct bash command onto the back of the queue. Returns the assigned ID.
     pub fn enqueue_bash_command(&mut self, text: String) -> u64 {
         self.enqueue_entry(text, QueueEntryKind::BashCommand)
@@ -695,7 +686,6 @@ mod tests {
             yolo_mode: false,
             auto_mode: false,
             prompt_history: Vec::new(),
-            prompt_history_loading: false,
             loading_replay: false,
             restore_degree: None,
             rate_limited: false,
@@ -820,7 +810,6 @@ mod tests {
         let mut s = test_session();
         s.enqueue_prompt("prompt1".into());
         s.enqueue_bash_command("echo hi".into());
-        s.enqueue_command("/compact".into());
         s.enqueue_bash_command("pwd".into());
         let e1 = s.dequeue_prompt().unwrap();
         assert_eq!(e1.kind, QueueEntryKind::Prompt);
@@ -829,11 +818,8 @@ mod tests {
         assert_eq!(e2.kind, QueueEntryKind::BashCommand);
         assert_eq!(e2.text, "echo hi");
         let e3 = s.dequeue_prompt().unwrap();
-        assert_eq!(e3.kind, QueueEntryKind::Command);
-        assert_eq!(e3.text, "/compact");
-        let e4 = s.dequeue_prompt().unwrap();
-        assert_eq!(e4.kind, QueueEntryKind::BashCommand);
-        assert_eq!(e4.text, "pwd");
+        assert_eq!(e3.kind, QueueEntryKind::BashCommand);
+        assert_eq!(e3.text, "pwd");
         assert!(s.dequeue_prompt().is_none());
     }
     #[test]
@@ -1033,19 +1019,6 @@ mod tests {
         let remaining = s.dequeue_prompt().unwrap();
         assert_eq!(remaining.kind, QueueEntryKind::BashCommand);
         assert_eq!(remaining.text, "ls");
-    }
-    #[test]
-    fn dequeue_combined_prompt_stops_at_command() {
-        let mut s = test_session();
-        s.enqueue_prompt("first".into());
-        s.enqueue_prompt("second".into());
-        s.enqueue_command("/compact".into());
-        let merged = s.dequeue_combined_prompt(None).unwrap();
-        assert_eq!(merged.text, "first\n\nsecond");
-        assert_eq!(s.queue_len(), 1, "the slash command must stay queued");
-        let remaining = s.dequeue_prompt().unwrap();
-        assert_eq!(remaining.kind, QueueEntryKind::Command);
-        assert_eq!(remaining.text, "/compact");
     }
     #[test]
     fn dequeue_combined_prompt_stops_at_cron() {

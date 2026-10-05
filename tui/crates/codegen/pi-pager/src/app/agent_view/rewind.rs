@@ -204,7 +204,6 @@ mod sync_rewind_anchor_to_picker_tests {
                 yolo_mode: false,
                 auto_mode: false,
                 prompt_history: Vec::new(),
-                prompt_history_loading: false,
                 loading_replay: false,
                 restore_degree: None,
                 rate_limited: false,

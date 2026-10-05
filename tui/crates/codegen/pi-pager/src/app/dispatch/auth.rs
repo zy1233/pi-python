@@ -2,9 +2,8 @@
 
 use super::ctx::{restore_auth_return_view, show_welcome};
 use super::queue::maybe_drain_queue;
-use super::router::dispatch;
 use super::session::lifecycle::{clear_startup_actions, drain_startup_actions};
-use crate::app::actions::{Action, Effect};
+use crate::app::actions::{ Effect};
 use crate::app::agent_view::AgentView;
 use crate::app::app_view::{ActiveView, AppView, AuthMode, AuthState};
 use crate::scrollback::block::RenderBlock;
@@ -384,7 +383,7 @@ pub(super) fn handle_auth_complete(
                     retry_effects.extend(drain.effects);
                 }
             }
-            let mut effects = dispatch(Action::RequestBundleStatus, app);
+            let mut effects = Vec::new();
             if app.usage_visible {
                 effects.push(Effect::FetchAppBilling);
             }
@@ -393,7 +392,7 @@ pub(super) fn handle_auth_complete(
         }
 
         // status only; shell auto-syncs post-auth
-        let mut effects = dispatch(Action::RequestBundleStatus, app);
+        let mut effects = Vec::new();
 
         // Start auto-checking subscription if gated.
         // Check immediately (don't wait 5s) then schedule the timer.

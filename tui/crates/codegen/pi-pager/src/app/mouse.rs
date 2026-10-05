@@ -8,7 +8,7 @@
 //! Hit-tests here assume the cached rects come from the last rendered frame.
 use super::actions::Action;
 use super::agent_view::{
-    AgentPane, AgentView, CONTEXT_CLICK_DEBOUNCE_MS, MULTI_CLICK_TIMEOUT_MS, PromptMode,
+    AgentPane, AgentView, MULTI_CLICK_TIMEOUT_MS, PromptMode,
     TextClickState, is_link_modifier_held, is_text_selection_on_double_click,
 };
 use super::app_view::InputOutcome;
@@ -52,17 +52,6 @@ impl AgentView {
                     }
                     return InputOutcome::Changed;
                 }
-                if self.hit_context.contains(mouse.column, mouse.row) {
-                    let now = Instant::now();
-                    let too_soon = self.last_context_click_at.is_some_and(|t| {
-                        now.duration_since(t).as_millis() < CONTEXT_CLICK_DEBOUNCE_MS
-                    });
-                    if too_soon {
-                        return InputOutcome::Unchanged;
-                    }
-                    self.last_context_click_at = Some(now);
-                    return InputOutcome::Action(Action::ShowContextInfo);
-                }
                 if self.hit_plan_button.contains(mouse.column, mouse.row) {
                     if self.plan_approval_view.is_some() {
                         self.reopen_plan_approval();
@@ -90,50 +79,12 @@ impl AgentView {
                 }
                 if self
                     .privacy_banner
-                    .hit_opt_in
-                    .contains(mouse.column, mouse.row)
-                    && !self.pos_occluded(mouse.column, mouse.row)
-                {
-                    return InputOutcome::Action(Action::PrivacyBannerOptIn);
-                }
-                if self
-                    .privacy_banner
-                    .hit_opt_out
-                    .contains(mouse.column, mouse.row)
-                    && !self.pos_occluded(mouse.column, mouse.row)
-                {
-                    return InputOutcome::Action(Action::PrivacyBannerOptOut);
-                }
-                if self
-                    .privacy_banner
                     .hit_terms
                     .contains(mouse.column, mouse.row)
                     && !self.pos_occluded(mouse.column, mouse.row)
                 {
                     return InputOutcome::Action(Action::OpenUrl(
                         crate::views::privacy_banner::PRIVACY_BANNER_TERMS_URL.to_string(),
-                    ));
-                }
-                if self
-                    .privacy_banner
-                    .hit_policy
-                    .contains(mouse.column, mouse.row)
-                    && !self.pos_occluded(mouse.column, mouse.row)
-                {
-                    return InputOutcome::Action(Action::OpenUrl(
-                        crate::views::privacy_banner::PRIVACY_BANNER_POLICY_URL.to_string(),
-                    ));
-                }
-                if self.hit_announcement_hide.contains(mouse.column, mouse.row)
-                    && !self.pos_occluded(mouse.column, mouse.row)
-                {
-                    return InputOutcome::Action(Action::AnnouncementsHide);
-                }
-                if self.hit_announcement_cta.contains(mouse.column, mouse.row)
-                    && !self.pos_occluded(mouse.column, mouse.row)
-                {
-                    return InputOutcome::Action(Action::AnnouncementsOpenCta(
-                        pi_telemetry::events::AnnouncementCtaSurface::Banner,
                     ));
                 }
                 if let Some(idx) = self.follow_up_chip_at(mouse.column, mouse.row)
@@ -147,13 +98,6 @@ impl AgentView {
                 }
                 if self.hit_voice_stop_button.contains(mouse.column, mouse.row) {
                     return InputOutcome::Action(Action::VoiceToggle);
-                }
-                if self.hit_upgrade_cta.contains(mouse.column, mouse.row)
-                    && !self.pos_occluded(mouse.column, mouse.row)
-                {
-                    return InputOutcome::Action(Action::AnnouncementsOpenCta(
-                        pi_telemetry::events::AnnouncementCtaSurface::Header,
-                    ));
                 }
                 if self.hit_cwd.contains(mouse.column, mouse.row) {
                     let path = self.session.cwd.display().to_string();
@@ -372,9 +316,6 @@ impl AgentView {
                         if !was_collapsed {
                             if matches!(self.prompt.handle_mouse(mouse), PromptEvent::Edited) {
                                 self.prompt.refresh_slash(&self.session.models);
-                                if let Some(eff) = self.notify_suggestion_text_changed() {
-                                    self.pending_effects.push(eff);
-                                }
                             }
                             if self.prompt_click_is_double() {
                                 if self.prompt.file_ref_near_cursor()
@@ -650,12 +591,7 @@ impl AgentView {
                     );
                 }
                 if self.active_pane == AgentPane::Prompt {
-                    let event = self.prompt.handle_mouse(mouse);
-                    if matches!(event, PromptEvent::Edited)
-                        && let Some(eff) = self.notify_suggestion_text_changed()
-                    {
-                        self.pending_effects.push(eff);
-                    }
+                    self.prompt.handle_mouse(mouse);
                     InputOutcome::Changed
                 } else {
                     InputOutcome::Unchanged

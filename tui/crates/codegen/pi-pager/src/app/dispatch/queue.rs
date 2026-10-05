@@ -5,7 +5,7 @@
 use super::ctx::NO_SESSION_NOTICE;
 use crate::acp::meta::user_prompt_meta;
 use crate::app::actions::Effect;
-use crate::app::agent::{AgentCommand, AgentId};
+use crate::app::agent::{ AgentId};
 use crate::app::agent_view::{AgentView, PromptMode};
 use crate::app::app_view::{ActiveView, AppView};
 use crate::scrollback::block::RenderBlock;
@@ -337,20 +337,6 @@ pub(super) fn maybe_drain_queue(agent: &mut AgentView) -> QueueDrain {
             };
             QueueDrain {
                 effects,
-            }
-        }
-        QueueEntryKind::Command => {
-            // Currently only `/compact` — future slash commands will branch here.
-            agent.session.start_command(AgentCommand::Compact);
-            // Compact owns the pane; a leftover wake marker must not shadow stop.
-            agent.running_wake_turn = None;
-            agent.turn_started_at = Some(Instant::now());
-
-            QueueDrain {
-                effects: vec![Effect::Compact {
-                    agent_id,
-                    session_id,
-                }],
             }
         }
         QueueEntryKind::BashCommand => {

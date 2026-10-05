@@ -6,7 +6,6 @@
 use super::ScreenMode;
 use crate::acp::model_state::ModelState;
 use crate::actions::{ActionId, ActionRegistry, When};
-use crate::app::consent::ConsentState;
 use crate::appearance::AppearanceConfig;
 use crate::input::KeyboardNormalizer;
 use crate::input::key::KeyShortcut;
@@ -19,7 +18,7 @@ use crate::scrollback::render::ScratchBuffer;
 use crate::views::prompt_widget::PromptWidget;
 use crate::views::welcome::WelcomePromptFocus;
 use agent_client_protocol as acp;
-use crossterm::event::{Event, KeyCode, KeyEventKind, MouseButton, MouseEventKind};
+use crossterm::event::{Event, KeyCode, KeyEventKind};
 use indexmap::IndexMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -215,7 +214,6 @@ use super::PagerTerminal;
 use super::actions::Action;
 use super::agent::AgentId;
 use super::agent_view::{AgentView, AppRenderParams};
-use super::bundle::BundleState;
 /// Which view is currently displayed.
 ///
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -557,15 +555,6 @@ pub struct ScreenModeRelaunch {
     /// Active session to reopen via `--resume`.
     pub session_id: String,
 }
-/// A consented `/feedback` trace upload deferred until the coding-data
-/// sharing opt-in write claimed at `seq` resolves.
-#[derive(Debug, Clone)]
-pub struct PendingFeedbackTraceUpload {
-    /// The `coding_data_write_seq` generation this upload waits on.
-    pub seq: u64,
-    pub agent_id: AgentId,
-    pub session_id: acp::SessionId,
-}
 /// Root view component — owns all application state.
 pub struct AppView {
     /// Taken by whichever path reaches a usable session (or interactive idle) first.
@@ -601,8 +590,6 @@ pub struct AppView {
     pub cwd_has_git_ancestor: bool,
     /// ACP channel for sending requests (shared resource, cloned into agents).
     pub acp_tx: AcpAgentTx,
-    /// Local cache of bundle sync/status state from the shell.
-    pub(crate) bundle_state: BundleState,
     /// Reusable scratch buffer for rendering.
     pub scratch: ScratchBuffer,
     /// Cursor state for blink-preserving cursor management.
@@ -703,20 +690,6 @@ pub struct AppView {
     /// back into the input box. Gated by `GROK_CANCEL_REWIND` env /
     /// `[features] cancel_rewind` config / remote settings flag.
     pub cancel_rewind_enabled: bool,
-    /// Whether session recap (`/recap` + automatic away recap) is rolled out,
-    /// resolved by the shell and advertised on ACP initialize (`sessionRecap`).
- /// When false, the pager must not request recaps (zero `legacy ext RPC` traffic).
-    pub session_recap_available: bool,
-    /// Shell-advertised eligibility for the `/feedback` trace-upload offer,
-    /// exactly as received (initialize meta / auth-meta refreshes). Read it
-    /// through [`Self::feedback_trace_offer`], which subtracts the latch.
-    pub shell_feedback_trace_offer: bool,
-    /// A persisted card answer was made this session; keeps auth-meta
-    /// refreshes from re-offering before the async config write lands.
-    pub feedback_trace_choice_latched: bool,
-    /// Trace upload parked until the same card answer's sharing opt-in write
-    /// confirms (the storage proxy rejects uploads while opted out).
-    pub feedback_trace_upload_pending: Option<PendingFeedbackTraceUpload>,
     /// Stateful prompt widget rendered on the welcome screen (persists input across frames).
     pub welcome_prompt: PromptWidget,
     /// The single slash-command MRU/recency store. Owned here and injected
@@ -794,13 +767,6 @@ pub struct AppView {
     pub welcome_refresh_rect: Option<ratatui::layout::Rect>,
     /// Hit-test rect for the gate URL link on the paywall CTA.
     pub welcome_gate_url_rect: Option<ratatui::layout::Rect>,
-    /// Rewritten by every welcome frame, so a resize leaves no stale click target.
-    pub welcome_consent_link_rects: Vec<(usize, ratatui::layout::Rect)>,
-    /// Consent link the mouse is over, so every run of a wrapped link brightens together.
-    pub welcome_consent_hover_link: Option<usize>,
-    /// The disk write is a spawned task, so a settings refresh that lands first would otherwise
-    /// re-arm a notice the user has already accepted.
-    pub consent_answered: Option<(String, i32)>,
     /// Hit-test rect for the welcome hero upgrade CTA `[label]` button
     /// (click → `AnnouncementsOpenCta(Welcome)`).
     pub welcome_upgrade_cta_rect: Option<ratatui::layout::Rect>,
@@ -998,10 +964,6 @@ pub struct AppView {
     /// when `Pending`, the welcome screen shows the trust question and session
     /// creation is deferred (gated after auth) until it is answered.
     pub trust_state: TrustState,
-    /// Resolves before folder trust: the account-level answer gates the workspace-level one.
-    pub consent_state: crate::app::consent::ConsentState,
-    /// Scopes the consent answer, the only identity the pager has for it.
-    pub account_email: Option<String>,
     /// Login button label from `AuthMethod.name` (e.g., "grok.com", "Acme Corp").
     pub login_label: Option<String>,
     /// The auth method ID to use for login.
@@ -1039,13 +1001,6 @@ pub struct AppView {
     pub privacy_banner_reshow_days: Option<u64>,
     /// Local `[privacy].privacy_banner_acked` (RFC 3339 UTC).
     pub privacy_banner_acked: Option<String>,
-    /// In-flight opt-in write whose ack waits on ACP success.
-    pub privacy_banner_opt_in_inflight: bool,
-    /// Newest `SetCodingDataSharing` write. Bumped per dispatch and echoed
-    /// on the `TaskResult`, so an older write's late reply — whose
-    /// `rollback_to_opted_in` was captured before the newer one — cannot
-    /// clobber the current value.
-    pub coding_data_write_seq: u64,
     /// Persisted `[cli].show_tips` mirror. `None` = no override (default `true`).
     pub show_tips: Option<bool>,
     /// Persisted `[cli].auto_update` mirror. `None` = no override (default `true`).
@@ -1190,23 +1145,6 @@ impl AppView {
                 .as_deref()
                 .is_some_and(|r| r.eq_ignore_ascii_case("admin"))
     }
-    /// Whether `/feedback` may offer the trace-consent card: the shell
-    /// advertised the offer and no card answer latched it off this session.
-    /// Derived so no code path can fabricate an offer the shell never made.
-    pub fn feedback_trace_offer(&self) -> bool {
-        self.shell_feedback_trace_offer && !self.feedback_trace_choice_latched
-    }
-    /// Why `coding_data_sharing` is locked for this user (`None` = editable).
-    /// Mirrors the dispatch guards in `set_coding_data_sharing`.
-    pub fn coding_data_sharing_lock(&self) -> Option<crate::settings::CodingDataSharingLock> {
-        if self.is_zdr {
-            Some(crate::settings::CodingDataSharingLock::Zdr)
-        } else if self.is_team_non_admin() {
-            Some(crate::settings::CodingDataSharingLock::TeamManaged)
-        } else {
-            None
-        }
-    }
     /// Welcome privacy banner visibility gates.
     pub fn privacy_banner_should_show(&self) -> bool {
         if self.screen_mode.is_minimal() {
@@ -1242,7 +1180,6 @@ impl AppView {
     pub fn session_startup_allowed(&self) -> bool {
         matches!(self.auth_state, AuthState::Done)
             && matches!(self.trust_state, TrustState::Done)
-            && matches!(self.consent_state, ConsentState::Done)
     }
     /// Whether startup type-ahead captured while the app was loading may be
     /// replayed into the input channel: every startup screen that consumes raw
@@ -1256,7 +1193,6 @@ impl AppView {
             && self.has_access()
             && !self.is_zdr_blocked()
             && matches!(self.trust_state, TrustState::Done)
-            && matches!(self.consent_state, ConsentState::Done)
     }
     /// Extract `GateInfo` from `RemoteSettings`.
     pub fn gate_from_settings(
@@ -1276,13 +1212,11 @@ impl AppView {
     pub fn apply_auth_meta(&mut self, meta: &pi_shell::auth::AuthMeta) {
         self.pending_gate_verification = None;
         let was_gated = self.gate.is_some();
-        self.account_email = meta.email.clone();
         self.team_id = meta.team_id.clone();
         self.team_name = meta.team_name.clone();
         self.is_zdr = meta.is_zdr;
         self.team_role = meta.team_role.clone();
         self.coding_data_retention_opt_out = meta.coding_data_retention_opt_out;
-        self.shell_feedback_trace_offer = meta.feedback_trace_offer;
         self.gate = meta.gate.clone();
         if was_gated && self.gate.is_none() {
             self.paywall_check_started = None;
@@ -1369,7 +1303,6 @@ impl AppView {
                 .ok()
                 .is_some_and(|c| c.ancestors().any(|p| p.join(".git").exists())),
             acp_tx,
-            bundle_state: BundleState::default(),
             scratch: ScratchBuffer::new(),
             cursor: CursorState::new(),
             pending_action: None,
@@ -1412,9 +1345,6 @@ impl AppView {
             welcome_auth_fallback_rect: None,
             welcome_refresh_rect: None,
             welcome_gate_url_rect: None,
-            welcome_consent_link_rects: Vec::new(),
-            welcome_consent_hover_link: None,
-            consent_answered: None,
             welcome_upgrade_cta_rect: None,
             welcome_privacy_banner_opt_in_rect: None,
             welcome_privacy_banner_opt_out_rect: None,
@@ -1491,8 +1421,6 @@ impl AppView {
             auth_methods: Vec::new(),
             auth_state: AuthState::Done,
             trust_state: TrustState::Done,
-            consent_state: crate::app::consent::ConsentState::Done,
-            account_email: None,
             login_label: None,
             login_method_id: None,
             auth_start_mode: AuthMode::Pending,
@@ -1511,8 +1439,6 @@ impl AppView {
             privacy_notice_rollout: false,
             privacy_banner_reshow_days: None,
             privacy_banner_acked: None,
-            privacy_banner_opt_in_inflight: false,
-            coding_data_write_seq: 0,
             show_tips: None,
             auto_update: None,
             ask_user_question_timeout_enabled: None,
@@ -1548,10 +1474,6 @@ impl AppView {
             session_picker_grouped: false,
             scheduler_background_loops_seed: true,
             cancel_rewind_enabled: true,
-            session_recap_available: false,
-            shell_feedback_trace_offer: false,
-            feedback_trace_choice_latched: false,
-            feedback_trace_upload_pending: None,
             tutorial: None,
             keyboard_normalizer: KeyboardNormalizer::from_terminal_context(),
             voice_mode_enabled: false,
@@ -1590,7 +1512,6 @@ impl AppView {
         self.voice_mode_enabled && pi_voice::AUDIO_SUPPORTED
     }
     /// Sync voice availability into slash surfaces, cheatsheet, and settings.
-    /// Mirrors `apply_session_recap_available` for `/recap`.
     pub fn apply_voice_mode_enabled(&mut self, enabled: bool) {
         self.voice_mode_enabled = enabled;
         crate::app::VOICE_MODE_ENABLED.store(enabled, std::sync::atomic::Ordering::Release);
@@ -2075,14 +1996,6 @@ impl AppView {
         }
         if let Event::Mouse(mouse) = ev {
             self.last_mouse_pos = Some((mouse.column, mouse.row));
-            let is_mouse_action = matches!(
-                mouse.kind,
-                MouseEventKind::Down(MouseButton::Left)
-                    | MouseEventKind::Drag(MouseButton::Left)
-                    | MouseEventKind::Up(MouseButton::Left)
-                    | MouseEventKind::Moved
-            );
-            if is_mouse_action {}
         }
         if let Some(tutorial) = self.tutorial.as_mut()
             && matches!(ev, Event::Key(_) | Event::Mouse(_) | Event::Paste(_))
@@ -2097,11 +2010,6 @@ impl AppView {
         }
         let zdr_blocked = self.is_zdr_blocked();
         let has_access = self.has_access();
-        let welcome_pinned_upgrade_cta = crate::views::announcements::promo_cta(
-            &self.active_announcements,
-            &self.hidden_announcement_ids,
-        )
-        .is_some_and(|(owner, _, _)| !crate::views::announcements::is_dismissible(owner));
         let has_foreign_resume = self.foreign_resume_hint().is_some();
         let sp_loading = crate::views::session_picker::loading_spinner_active(
             self.session_picker_entries.as_deref(),
@@ -2117,9 +2025,6 @@ impl AppView {
                 &mut WelcomeInputCtx {
                     auth_state: &self.auth_state,
                     trust_state: &self.trust_state,
-                    consent_state: &self.consent_state,
-                    consent_link_rects: &self.welcome_consent_link_rects,
-                    consent_hover_link: &mut self.welcome_consent_hover_link,
                     arrived_at,
                     cwd: &self.cwd,
                     mid_session_login: self.auth_return_view.is_some(),
@@ -2142,7 +2047,6 @@ impl AppView {
                     privacy_banner_policy_rect: self.welcome_privacy_banner_policy_rect.as_ref(),
                     on_privacy_banner: &mut self.welcome_on_privacy_banner,
                     on_upgrade_cta: &mut self.welcome_on_upgrade_cta,
-                    upgrade_cta_keyboard: welcome_pinned_upgrade_cta,
                     announcement_truncated: self.welcome_announcement.truncated,
                     announcement_rect: self.welcome_announcement.rect.as_ref(),
                     on_announcement_cta: &mut self.welcome_announcement.on_cta,
@@ -2374,9 +2278,6 @@ struct WelcomeInputCtx<'a> {
     /// Folder-trust state. When `Pending` (and auth is `Done`), the trust
     /// question intercepts keys and swallows the rest so no session starts.
     trust_state: &'a TrustState,
-    consent_state: &'a ConsentState,
-    consent_link_rects: &'a [(usize, ratatui::layout::Rect)],
-    consent_hover_link: &'a mut Option<usize>,
     /// When this event reached the process, so a key typed before the notice painted is no answer.
     arrived_at: Instant,
     /// Live working directory (tracks `Effect::SetWorkingDir`), used to pin
@@ -2411,9 +2312,6 @@ struct WelcomeInputCtx<'a> {
     /// Sticky hover flag for the upgrade CTA (redraw on enter/leave so the
     /// button brightens/dims).
     on_upgrade_cta: &'a mut bool,
-    /// A pinned (non-dismissible) promo CTA is live, so `Ctrl+O` opens it
-    /// (the welcome screen has no YOLO toggle to preserve).
-    upgrade_cta_keyboard: bool,
     /// Whether the announcement overflowed — the "expandable" signal for click-to-toggle.
     announcement_truncated: bool,
     /// Hit-test rect for the full announcement block (click anywhere to toggle).
@@ -2539,23 +2437,6 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
             NewWorktreeDialogOutcome::Changed => return InputOutcome::Changed,
             NewWorktreeDialogOutcome::Unchanged => return InputOutcome::Unchanged,
         }
-    }
-    if matches!(ctx.auth_state, AuthState::Done)
-        && ctx.has_access
-        && !ctx.is_zdr_blocked
-        && matches!(ctx.consent_state, ConsentState::Pending { .. })
-    {
-        return crate::app::consent::handle_answer(
-            ev,
-            &mut crate::app::consent::ConsentInputCtx {
-                state: ctx.consent_state,
-                arrived_at: ctx.arrived_at,
-                menu_rects: ctx.menu_rects,
-                link_rects: ctx.consent_link_rects,
-                menu_index: ctx.menu_index,
-                hover_link: ctx.consent_hover_link,
-            },
-        );
     }
     if matches!(ctx.auth_state, AuthState::Done)
         && ctx.has_access
@@ -2948,11 +2829,6 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
             return InputOutcome::Action(Action::NewSession);
         }
         if matches!(ctx.auth_state, AuthState::Done) {
-            if ctx.upgrade_cta_keyboard && key!('o', CONTROL).matches(key) {
-                return InputOutcome::Action(Action::AnnouncementsOpenCta(
-                    pi_telemetry::events::AnnouncementCtaSurface::Keyboard,
-                ));
-            }
             if key!('w', CONTROL).matches(key) && ctx.cwd_has_git_ancestor {
                 return InputOutcome::Action(Action::OpenNewWorktreeDialog);
             }
@@ -3143,30 +3019,6 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                     && rect.contains(ratatui::layout::Position::new(mouse.column, mouse.row))
                 {
                     return InputOutcome::Action(Action::OpenSupergrokUrl);
-                }
-                if let Some(rect) = ctx.upgrade_cta_rect
-                    && rect.contains(ratatui::layout::Position::new(mouse.column, mouse.row))
-                {
-                    return InputOutcome::Action(Action::AnnouncementsOpenCta(
-                        pi_telemetry::events::AnnouncementCtaSurface::Welcome,
-                    ));
-                }
-                if let Some(rect) = ctx.privacy_banner_opt_in_rect
-                    && rect.contains(ratatui::layout::Position::new(mouse.column, mouse.row))
-                {
-                    return InputOutcome::Action(Action::PrivacyBannerOptIn);
-                }
-                if let Some(rect) = ctx.privacy_banner_opt_out_rect
-                    && rect.contains(ratatui::layout::Position::new(mouse.column, mouse.row))
-                {
-                    return InputOutcome::Action(Action::PrivacyBannerOptOut);
-                }
-                if let Some(rect) = ctx.privacy_banner_terms_rect
-                    && rect.contains(ratatui::layout::Position::new(mouse.column, mouse.row))
-                {
-                    return InputOutcome::Action(Action::OpenUrl(
-                        crate::views::privacy_banner::PRIVACY_BANNER_TERMS_URL.to_string(),
-                    ));
                 }
                 if let Some(rect) = ctx.privacy_banner_policy_rect
                     && rect.contains(ratatui::layout::Position::new(mouse.column, mouse.row))
@@ -3643,8 +3495,6 @@ impl AppView {
                             cwd: &self.cwd,
                             auth_state: &self.auth_state,
                             trust_state: &self.trust_state,
-                            consent_state: &self.consent_state,
-                            consent_hover_link: self.welcome_consent_hover_link,
                             login_label: self.login_label.as_deref(),
                             auth_code_input: self.auth_code_input.text(),
                             auth_code_cursor_byte: self.auth_code_input.cursor_byte(),
@@ -3715,11 +3565,6 @@ impl AppView {
                         self.welcome_auth_fallback_rect = result.auth_fallback_rect;
                         self.welcome_refresh_rect = result.refresh_rect;
                         self.welcome_gate_url_rect = result.gate_url_rect;
-                        self.welcome_consent_link_rects = result.consent_link_rects;
-                        if self.welcome_consent_link_rects.is_empty() {
-                            self.welcome_consent_hover_link = None;
-                        }
-                        record_consent_paint(&mut self.consent_state, result.consent_legibility);
                         self.welcome_upgrade_cta_rect = result.upgrade_cta_rect;
                         self.welcome_privacy_banner_opt_in_rect = result.privacy_banner_opt_in_rect;
                         self.welcome_privacy_banner_opt_out_rect =
@@ -3879,7 +3724,6 @@ impl AppView {
                                         None
                                     },
                                 },
-                                &self.bundle_state,
                                 link_spans,
                                 AppRenderParams {
                                     voice_available,
@@ -4010,28 +3854,6 @@ impl AppView {
                 tracing::debug!(evicted, "scrollback.evicted_offscreen_render_caches");
             }
         }
-    }
-}
-/// The renderer is the only thing that knows whether the body fitted, and accept is gated on that.
-fn record_consent_paint(
-    state: &mut ConsentState,
-    reported: Option<crate::app::consent::ConsentLegibility>,
-) {
-    let ConsentState::Pending {
-        legibility,
-        painted_at,
-        ..
-    } = state
-    else {
-        return;
-    };
-    let Some(painted) = reported else {
-        *legibility = crate::app::consent::ConsentLegibility::Illegible;
-        return;
-    };
-    *legibility = painted;
-    if painted_at.is_none() {
-        *painted_at = Some(Instant::now());
     }
 }
 impl AppView {

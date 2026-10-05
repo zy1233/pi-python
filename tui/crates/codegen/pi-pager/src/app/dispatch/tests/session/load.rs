@@ -32,11 +32,6 @@ fn session_loaded_with_restore_shows_summary_in_scrollback() {
     assert!(
         effects
             .iter()
-            .any(|e| matches!(e, Effect::FetchPromptHistory { .. }))
-    );
-    assert!(
-        effects
-            .iter()
             .any(|e| matches!(e, Effect::RegisterActiveSession { .. }))
     );
     let has_restore_msg = app.agents[&id]
@@ -520,11 +515,6 @@ fn session_loaded_without_restore_no_summary() {
     assert!(
         effects
             .iter()
-            .any(|e| matches!(e, Effect::FetchPromptHistory { .. }))
-    );
-    assert!(
-        effects
-            .iter()
             .any(|e| matches!(e, Effect::RegisterActiveSession { .. }))
     );
     let has_restore_msg = app.agents[&id]
@@ -825,54 +815,6 @@ fn session_loaded_clears_stale_running_entries() {
         !app.agents[&id].scrollback.needs_animation(),
         "no entries should be animating after SessionLoaded",
     );
-}
-/// A failed `legacy ext RPC` fetch arrives as `PromptHistoryLoaded` with an empty list.
-#[test]
-fn a_restored_transcript_stays_recallable_after_a_failed_fetch() {
-    let mut app = test_app();
-    dispatch(
-        Action::LoadSession("sess-history".into(), None, false),
-        &mut app,
-    );
-    let id = AgentId(0);
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent
-            .scrollback
-            .push_block(RenderBlock::user_prompt("first prompt"));
-        agent
-            .scrollback
-            .push_block(RenderBlock::user_prompt("second prompt"));
-    }
-    dispatch(
-        Action::TaskComplete(TaskResult::SessionLoaded {
-            agent_id: id,
-            session_id: acp::SessionId::new("sess-history"),
-            models: None,
-            code_restored: false,
-            restore_summary: None,
-            restore_degree: None,
-            running_prompt_id: None,
-            scheduler_background_loops: None,
-        }),
-        &mut app,
-    );
-    assert_eq!(
-        app.agents[&id].session.prompt_history,
-        ["second prompt", "first prompt"]
-    );
-    dispatch(
-        Action::TaskComplete(TaskResult::PromptHistoryLoaded {
-            agent_id: id,
-            prompts: vec![],
-        }),
-        &mut app,
-    );
-    assert_eq!(
-        app.agents[&id].session.prompt_history,
-        ["second prompt", "first prompt"]
-    );
-    assert!(!app.agents[&id].session.prompt_history_loading);
 }
 #[test]
 fn resume_focuses_existing_agent_for_open_session() {

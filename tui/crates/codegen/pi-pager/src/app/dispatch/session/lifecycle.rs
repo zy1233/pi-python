@@ -9,7 +9,6 @@ use crate::app::agent::{AgentCommand, AgentId, AgentSession, AgentState, Deferre
 use crate::app::agent_view::{ActivePane, AgentView};
 use crate::app::app_view::{ActiveView, AppView, TrustState};
 use crate::app::cancel_latency::TurnEnd;
-use crate::app::consent::ConsentState;
 use crate::app::dispatch::ctx::{
     SwitchCause, get_active_agent, reseed_tip_for_new_session, show_welcome, switch_to_agent,
 };
@@ -381,7 +380,6 @@ pub(in crate::app::dispatch) fn dispatch_new_session_inner_with_id(
             yolo_mode: app.default_yolo,
             auto_mode: inherit_auto_mode(app),
             prompt_history: Vec::new(),
-            prompt_history_loading: false,
             loading_replay: false,
             restore_degree: None,
             rate_limited: false,
@@ -410,7 +408,6 @@ pub(in crate::app::dispatch) fn dispatch_new_session_inner_with_id(
         agent
             .prompt
             .set_contextual_hints(app.contextual_hints.undo, app.contextual_hints.plan_mode);
-        agent.set_session_recap_available(app.session_recap_available);
         agent.set_voice_mode_available(app.voice_mode_enabled);
         agent.apply_app_scoped_gates(
             app.sharing_enabled,
@@ -458,7 +455,6 @@ pub(in crate::app::dispatch) fn dispatch_new_session_inner_with_id(
             agent.workspace_mode_cli_locked = locked;
         }
         agent.apply_credit_balance(app.credit_balance.clone(), app.auto_topup.clone());
-        agent.session.prompt_history_loading = true;
     }
     let preferred_session_id = app.deferred_startup.preferred_session_id.take();
     effects.push(Effect::CreateSession {
@@ -534,42 +530,6 @@ pub(in crate::app::dispatch) fn dispatch_trust_folder(app: &mut AppView) -> Vec<
 /// `AuthComplete` uses, so whichever gate resolves last drains exactly once.
 pub(in crate::app::dispatch) fn finish_trust(app: &mut AppView) -> Vec<Effect> {
     app.trust_state = TrustState::Done;
-    app.welcome_prompt_focused = !app.is_access_blocked();
-    if app.session_startup_allowed() {
-        drain_startup_actions(app)
-    } else {
-        vec![]
-    }
-}
-/// Resolves `consent_state` before the marker write, so a failed write cannot trap the user.
-pub(in crate::app::dispatch) fn dispatch_accept_consent(app: &mut AppView) -> Vec<Effect> {
-    let ConsentState::Pending {
-        notice, legibility, ..
-    } = &app.consent_state
-    else {
-        return vec![];
-    };
-    if !legibility.can_accept() {
-        return vec![];
-    }
-    let notice_id = notice.id.clone();
-    let version = notice.version;
-    app.consent_answered = Some((notice_id.clone(), version));
-    let mut effects = Vec::new();
-    if let Some(account) = app.account_email.clone() {
-        effects.push(Effect::PersistConsentAnswer {
-            account: Some(account),
-            notice_id: notice_id.clone(),
-            version,
-            acked: false,
-        });
-    }
-    effects.push(Effect::RecordConsentUpstream { notice_id, version });
-    effects.extend(finish_consent(app));
-    effects
-}
-fn finish_consent(app: &mut AppView) -> Vec<Effect> {
-    app.consent_state = ConsentState::Done;
     app.welcome_prompt_focused = !app.is_access_blocked();
     if app.session_startup_allowed() {
         drain_startup_actions(app)
@@ -826,7 +786,6 @@ pub(in crate::app::dispatch) fn dispatch_new_worktree_session(
             yolo_mode: app.default_yolo,
             auto_mode: inherit_auto_mode(app),
             prompt_history: Vec::new(),
-            prompt_history_loading: false,
             loading_replay: false,
             restore_degree: None,
             rate_limited: false,
@@ -867,7 +826,6 @@ pub(in crate::app::dispatch) fn dispatch_new_worktree_session(
         agent
             .prompt
             .set_contextual_hints(app.contextual_hints.undo, app.contextual_hints.plan_mode);
-        agent.set_session_recap_available(app.session_recap_available);
         agent.set_voice_mode_available(app.voice_mode_enabled);
         agent.apply_app_scoped_gates(
             app.sharing_enabled,
@@ -993,26 +951,11 @@ pub(in crate::app::dispatch) fn handle_session_created(
         }
         let deferred = apply_deferred_model_switch(agent, app.cli_effort_token.as_deref());
         let deferred_mode = agent.deferred_session_mode.take();
-        let cwd = agent.session.cwd.clone();
         if deferred.is_some() {
             agent.session.model_switch_pending = true;
         }
         let mut drain = maybe_drain_queue(agent);
         let mut effects = std::mem::take(&mut drain.effects);
-        agent.session.prompt_history_loading = true;
-        effects.push(Effect::FetchPromptHistory {
-            agent_id,
-            cwd: cwd.clone(),
-            session_id: session_id_clone.to_string(),
-        });
-        effects.push(Effect::FetchSessionAgentName {
-            agent_id,
-            session_id: session_id_clone.clone(),
-        });
-        effects.push(Effect::RefreshAvailableCommands {
-            agent_id,
-            session_id: session_id_clone.clone(),
-        });
         effects.push(Effect::FetchBilling {
             agent_id,
             silent: true,
@@ -1092,7 +1035,6 @@ pub(in crate::app::dispatch) fn handle_session_failed(
         }
     } else if let Some(agent) = app.agents.get_mut(&agent_id) {
         agent.pending_extensions_fetch = false;
-        agent.session.prompt_history_loading = false;
         agent.session.finish_command();
         let elapsed = agent.turn_elapsed();
         agent.mark_turn_finished(TurnEnd::Aborted);
@@ -1142,7 +1084,6 @@ pub(in crate::app::dispatch) fn handle_worktree_session_failed(
         }
     } else if let Some(agent) = app.agents.get_mut(&agent_id) {
         agent.pending_extensions_fetch = false;
-        agent.session.prompt_history_loading = false;
         agent.session.finish_command();
         let elapsed = agent.turn_elapsed();
         agent.mark_turn_finished(TurnEnd::Aborted);

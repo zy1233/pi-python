@@ -718,7 +718,7 @@ impl AgentView {
                         .map(|qv| qv.focus == crate::views::question_view::QuestionFocus::InputMode)
                         .unwrap_or(false);
                     if in_input {
-                        self.route_question_paste(text)
+                        self.route_popup_paste(text)
                     } else {
                         InputOutcome::Changed
                     }
@@ -985,13 +985,7 @@ impl AgentView {
                 InputOutcome::Unchanged
             }
             ActionId::ToggleYolo => {
-                if self.pinned_upgrade_cta_live {
-                    InputOutcome::Action(Action::AnnouncementsOpenCta(
-                        pi_telemetry::events::AnnouncementCtaSurface::Keyboard,
-                    ))
-                } else {
-                    InputOutcome::Action(Action::SetYoloMode(!self.session.is_yolo()))
-                }
+                InputOutcome::Action(Action::SetYoloMode(!self.session.is_yolo()))
             }
             ActionId::EditPromptExternal => {
                 if self.external_prompt_editor_access()

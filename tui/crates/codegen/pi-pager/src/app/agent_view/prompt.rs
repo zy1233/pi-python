@@ -12,9 +12,6 @@ use crate::views::prompt_widget::PromptEvent;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 impl AgentView {
-    pub fn prompt_history_loading(&self) -> bool {
-        self.session.prompt_history_loading && self.prompt.text().is_empty()
-    }
 
     /// Unsent drafts first (the stash, then drafts it replaced), then `session.prompt_history` in order.
     ///
@@ -348,23 +345,11 @@ impl AgentView {
                 && self.prompt_input_mode == PromptInputMode::Bash
                 && !self.prompt.text().is_empty()
             {
-                // Priority 5: terminal-like Tab in bash mode — always on.
-                // Windows keeps the legacy focus-cycling Tab instead: the
-                // completion stack's tokenizer/quoting is POSIX-only (see
-                // the shell crate's `shell_token`), so the keystroke must
-                // not be eaten by a surface that emits misparsed lines.
-                // Usable candidates complete now (insta-accept / fill /
-                // dropdown, per `tab_decision`); `Nothing` (none fetched, or
-                // outdated by an edit or cursor move) fires a deterministic
-                // fetch whose landing runs the same semantics. An empty
-                // draft falls through to focus-cycling: no token to complete.
-                use crate::views::suggestion_controller::TabAction;
                 match self
                     .prompt
                     .suggestions
                     .tab_decision(self.prompt.text(), self.prompt.cursor())
                 {
-                    TabAction::Nothing => self.request_shell_tab_completion(true),
                     action => self.execute_tab_action(action),
                 }
                 return InputOutcome::Changed;
@@ -485,7 +470,6 @@ impl AgentView {
             && !self.prompt.history_search.is_active()
             && remember_mode_enabled()
         {
-            self.prompt_input_mode = PromptInputMode::Remember;
             return InputOutcome::Changed;
         }
 
@@ -570,16 +554,7 @@ impl AgentView {
                         return InputOutcome::Changed;
                     }
                     if let Some(text) = self.prompt.try_send() {
-                        // Remember + slash_accepted_send: treat as normal SendPrompt
-                        // (the slash path accepted a no-arg command that fell through).
-                        let action_mode = if self.prompt_input_mode == PromptInputMode::Remember
-                            && slash_accepted_send
-                        {
-                            PromptInputMode::Normal
-                        } else {
-                            self.prompt_input_mode
-                        };
-                        let action = action_mode.send_action(text);
+                        let action = self.prompt_input_mode.send_action(text);
                         self.prompt_input_mode = PromptInputMode::Normal;
                         return InputOutcome::Action(action);
                     }
@@ -694,9 +669,6 @@ impl AgentView {
                         self.open_line_viewer(&req.path, req.initial_range);
                     }
                     self.prompt.refresh_slash(&self.session.models);
-                    if let Some(eff) = self.notify_suggestion_text_changed() {
-                        self.pending_effects.push(eff);
-                    }
                     if let Some(action) = self.take_prompt_tip_signal() {
                         return InputOutcome::Action(action);
                     }
@@ -940,10 +912,8 @@ impl AgentView {
     /// Commit a recalled history entry into the composer. Shared by the keyboard accept and the
     /// mouse click, which drifted apart once and left the mouse path holding a duplicate draft.
     pub(in crate::app) fn accept_history_entry(&mut self, text: &str) {
-        // Restore bash mode from a `! ` history entry unless Remember is active.
-        if self.prompt_input_mode != PromptInputMode::Remember
-            && let Some(cmd) = text.strip_prefix("! ")
-        {
+        // Restore bash mode from a `! ` history entry.
+        if let Some(cmd) = text.strip_prefix("! ") {
             self.prompt_input_mode = PromptInputMode::Bash;
             self.prompt.set_text(cmd);
         } else if self.prompt_input_mode == PromptInputMode::Bash {
@@ -1833,47 +1803,6 @@ mod prompt_suggestion_key_tests {
         let _ = agent.handle_prompt_key_for_test(&key(KeyCode::Char('x')));
         assert_eq!(agent.prompt.prompt_suggestion_ghost(), None);
         assert!(agent.prompt.prompt_suggestion.has_suggestion());
-    }
-
-    /// A suggestion that loads behind a divergent draft logs no `shown`
-    /// impression at load; once the draft is cleared the ghost becomes
-    /// visible and the next key event latches `shown` *before* its Tab
-    /// intercept can log `accepted` — the funnel can't record an accept
-    /// without an impression.
-    #[test]
-    fn shown_latches_at_first_visibility_after_divergent_draft_clears() {
-        crate::appearance::cache::set_prompt_suggestions(true);
-        let mut agent = super::test_fixtures::make_agent();
-        // Divergent draft typed while the suggestion fetch was in flight.
-        agent.prompt.textarea.insert_str("x");
-        // The load path: install + gate refresh + latch-if-visible.
-        let generation = agent.prompt.prompt_suggestion.begin_fetch();
-        assert!(
-            agent
-                .prompt
-                .prompt_suggestion
-                .on_loaded(Some("run the tests".to_owned()), generation)
-        );
-        agent.refresh_prompt_suggestion_gate();
-        agent.log_prompt_suggestion_shown_if_visible();
-        assert!(!agent.prompt.prompt_suggestion_visible());
-        assert!(
-            !agent.prompt.prompt_suggestion.shown_logged(),
-            "a ghost hidden by a divergent draft is not an impression"
-        );
-
-        // Backspace empties the draft. The intercept ran before the edit
-        // (ghost still hidden then), so this event doesn't latch either.
-        let _ = agent.handle_prompt_key_for_test(&key(KeyCode::Backspace));
-        assert_eq!(agent.prompt.text(), "");
-        assert!(agent.prompt.prompt_suggestion_visible());
-        assert!(!agent.prompt.prompt_suggestion.shown_logged());
-
-        // The next key event sees the visible ghost and latches `shown`
-        // first; the same event's Tab intercept then accepts.
-        let _ = agent.handle_prompt_key_for_test(&key(KeyCode::Tab));
-        assert!(agent.prompt.prompt_suggestion.shown_logged());
-        assert_eq!(agent.prompt.text(), "run the tests");
     }
 
     /// Esc-dismiss on a late-visible ghost also latches `shown` first (same

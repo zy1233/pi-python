@@ -16,7 +16,7 @@ pub(crate) mod probes;
 mod view;
 
 pub use fix::{
-    AutomaticRemediation, DCS_PASSTHROUGH_ID, FixActivation, FixOutcome, FixPlan,
+    AutomaticRemediation, DCS_PASSTHROUGH_ID, FixActivation, FixPlan,
     FixRequest, 
     ShellKind, TMUX_CLIPBOARD_ID, TMUX_EXTENDED_KEYS_ID, TMUX_TRUECOLOR_ID, apply_fix,
     configured_report, managed_alias_configured, plan_fix, resolve_fix_id,

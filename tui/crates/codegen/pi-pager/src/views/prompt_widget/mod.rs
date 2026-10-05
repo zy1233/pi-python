@@ -1179,12 +1179,6 @@ impl PromptWidget {
         self.slash_controller.set_command_tags(command_tags);
     }
 
-    pub(crate) fn set_recap_visible(&mut self, visible: bool) {
-        self.slash_controller
-            .registry_mut()
-            .set_recap_visible(visible);
-    }
-
     pub(crate) fn set_voice_visible(&mut self, visible: bool) {
         self.slash_controller
             .registry_mut()

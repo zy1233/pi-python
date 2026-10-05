@@ -15,11 +15,9 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::app_view::{AuthMode, AuthState, SessionPickerEntry, TrustState};
-use crate::app::consent::ConsentState;
 use crate::startup::StartupWarning;
 use crate::theme::Theme;
 use crate::views::prompt_widget::{PromptFlag, PromptInfo, PromptWidget};
-mod consent;
 mod hero_box;
 pub(crate) mod logo;
 mod menu;
@@ -130,10 +128,6 @@ pub struct WelcomeRenderResult {
     pub refresh_rect: Option<Rect>,
     /// Hit-test rect for the gate URL link (click to open in browser).
     pub gate_url_rect: Option<Rect>,
-    /// Hit-test rects for the inline links, tagged with their index, one per row a link wraps to.
-    pub consent_link_rects: Vec<(usize, Rect)>,
-    /// `None` when this frame did not paint the notice.
-    pub consent_legibility: Option<crate::app::consent::ConsentLegibility>,
     /// Whether the announcement overflowed (the "expandable" signal).
     pub announcement_truncated: bool,
     /// Hit-test rect for the full announcement block (click anywhere to toggle).
@@ -599,8 +593,6 @@ pub struct WelcomeRenderParams<'a> {
     /// Folder-trust state. When `Pending` (auth done, access granted), the
     /// welcome screen renders the trust question instead of the normal prompt.
     pub trust_state: &'a TrustState,
-    pub consent_state: &'a crate::app::consent::ConsentState,
-    pub consent_hover_link: Option<usize>,
     pub login_label: Option<&'a str>,
     pub auth_code_input: &'a str,
     pub auth_code_cursor_byte: usize,
@@ -782,20 +774,7 @@ pub fn render_welcome(
         // sessions. The `if let` destructure makes the `Pending`-only render
         // structurally exhaustive (no `unreachable!`).
         AuthState::Done if params.has_access => {
-            // Consent is account-level, so it resolves before the workspace-level trust question.
-            if let ConsentState::Pending { notice, .. } = params.consent_state {
-                consent::render_consent(
-                    content_area,
-                    buf,
-                    &theme,
-                    notice,
-                    params.selected,
-                    params.consent_hover_link,
-                    params.pending_hint,
-                    h_margin,
-                    params.compact,
-                )
-            } else if let TrustState::Pending { workspace } = params.trust_state {
+            if let TrustState::Pending { workspace } = params.trust_state {
                 render_welcome_trust(
                     content_area,
                     buf,
@@ -2140,8 +2119,6 @@ fn render_welcome_done(
         auth_fallback_rect: None,
         refresh_rect: refresh_hit_rect,
         gate_url_rect: gate_url_hit_rect,
-        consent_link_rects: Vec::new(),
-        consent_legibility: None,
         announcement_truncated,
         announcement_rect,
         upgrade_cta_rect,
@@ -2741,8 +2718,6 @@ mod tests {
             prompt_focus: WelcomePromptFocus::Unfocused,
             auth_state,
             trust_state,
-            consent_state: &ConsentState::Done,
-            consent_hover_link: None,
             login_label: None,
             auth_code_input: "",
             auth_code_cursor_byte: 0,
@@ -2790,7 +2765,6 @@ mod tests {
             workspace_mode_ack_pending: false,
         }
     }
-
     fn render_done_text(params: &WelcomeRenderParams<'_>) -> String {
         let area = Rect::new(0, 0, 100, 40);
         let mut buf = Buffer::empty(area);

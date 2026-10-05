@@ -7,64 +7,6 @@ use super::super::task_result::{
 use super::*;
 use pi_shell::session::unified_list::ListScope;
 
-fn doctor_target(app: &AppView, id: AgentId) -> crate::app::actions::DoctorFixTarget {
-    let agent = &app.agents[&id];
-    crate::app::actions::DoctorFixTarget {
-        agent_id: id,
-        session_id: agent.session.session_id.clone(),
-        session_binding_epoch: agent.session_binding_epoch,
-        cwd: agent.session.cwd.clone(),
-    }
-}
-
-#[test]
-fn doctor_apply_completion_prefers_initiator_then_active_and_welcome_fallback() {
-    let mut app = three_agent_app();
-    let initiator = AgentId(0);
-    let active = AgentId(1);
-    app.active_view = ActiveView::Agent(active);
-    let target = doctor_target(&app, initiator);
-
-    dispatch_task_result(
-        TaskResult::DoctorFixApplied {
-            target: target.clone(),
-            result: Err("stale plan".to_owned()),
-        },
-        &mut app,
-    );
-    assert_eq!(
-        last_system_text(&app, initiator),
-        "Could not apply the fix: stale plan"
-    );
-
-    app.agents.shift_remove(&initiator);
-    dispatch_task_result(
-        TaskResult::DoctorFixApplied {
-            target: target.clone(),
-            result: Err("apply failed".to_owned()),
-        },
-        &mut app,
-    );
-    assert_eq!(
-        last_system_text(&app, active),
-        "Could not apply the fix: apply failed"
-    );
-
-    app.agents.clear();
-    app.active_view = ActiveView::Welcome;
-    dispatch_task_result(
-        TaskResult::DoctorFixApplied {
-            target,
-            result: Err("validator failed".to_owned()),
-        },
-        &mut app,
-    );
-    assert_eq!(
-        app.startup_warnings.last().unwrap().message,
-        "Could not apply the fix: validator failed"
-    );
-}
-
 #[test]
 fn stale_auth_copy_timeout_does_not_clear_newer_feedback() {
     let mut app = test_app();
@@ -265,7 +207,6 @@ fn x11_primary_hint_requires_canonical_full_miss_outcome() {
     let target = ClipboardPasteTarget::AgentPrompt {
         agent_id: AgentId(0),
         images_dir: None,
-        from_feedback_pane: false,
     };
 
     for completion in [
@@ -332,7 +273,6 @@ fn x11_primary_hint_routes_to_originating_agent() {
     let target = crate::app::actions::ClipboardPasteTarget::AgentPrompt {
         agent_id: origin,
         images_dir: None,
-        from_feedback_pane: false,
     };
 
     maybe_show_x11_primary_paste_hint(
@@ -368,7 +308,6 @@ fn clipboard_failure_routes_to_originating_agent_without_duplicate() {
     let target = crate::app::actions::ClipboardPasteTarget::AgentPrompt {
         agent_id: origin,
         images_dir: None,
-        from_feedback_pane: false,
     };
 
     show_clipboard_failure(
@@ -920,72 +859,6 @@ fn no_deferred_switch_means_no_extra_effect() {
             .any(|e| matches!(e, Effect::SwitchModel { .. }))
     );
     assert!(!app.agents[&id].session.model_switch_pending);
-}
-
-#[test]
-fn bundle_status_failed_logs_but_keeps_state() {
-    let mut app = test_app();
-    app.bundle_state.has_cache = true;
-    app.bundle_state.version = "keep-me".into();
-
-    dispatch(
-        Action::TaskComplete(TaskResult::BundleStatusFailed {
-            error: "status fetch failed".into(),
-        }),
-        &mut app,
-    );
-
-    assert!(app.bundle_state.has_cache);
-    assert_eq!(app.bundle_state.version, "keep-me");
-}
-
-#[test]
-fn available_commands_refreshed_updates_generation() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    let gen_before = app.agents[&id].session.available_commands_generation;
-
-    let commands = vec![
-        acp::AvailableCommand::new("commit", "Create a commit").meta(
-            serde_json::json!({"scope": "local", "path": "/skill/SKILL.md"})
-                .as_object()
-                .cloned(),
-        ),
-    ];
-    let effects = dispatch(
-        Action::TaskComplete(TaskResult::AvailableCommandsRefreshed {
-            agent_id: id,
-            commands,
-        }),
-        &mut app,
-    );
-    assert!(effects.is_empty());
-    assert_eq!(
-        app.agents[&id].session.available_commands_generation,
-        gen_before + 1
-    );
-    assert_eq!(app.agents[&id].session.available_commands.len(), 1);
-    assert_eq!(app.agents[&id].session.available_commands[0].name, "commit");
-}
-
-#[test]
-fn available_commands_refreshed_empty_is_noop() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    let gen_before = app.agents[&id].session.available_commands_generation;
-
-    let effects = dispatch(
-        Action::TaskComplete(TaskResult::AvailableCommandsRefreshed {
-            agent_id: id,
-            commands: vec![],
-        }),
-        &mut app,
-    );
-    assert!(effects.is_empty());
-    assert_eq!(
-        app.agents[&id].session.available_commands_generation,
-        gen_before,
-    );
 }
 
 // -- Session deletion from the /resume picker -----------------------

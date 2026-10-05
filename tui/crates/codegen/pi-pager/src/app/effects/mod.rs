@@ -30,12 +30,10 @@ use actions::{
     SwitchModelError, TaskResult,
 };
 use actions::PermissionModeKind;
-use crate::views::usage_modal::SessionInfoField;
 #[cfg(test)]
 use actions::PermissionModePersist;
 use crate::unified_log as ulog;
 use pi_shell::sampling::error::http_status_from_error;
-use pi_shell::session::SessionInfoResponse;
 fn apply_permission_mode_override(
     meta: &mut Option<acp::Meta>,
     permission_mode_override: Option<PermissionModeKind>,
@@ -930,22 +928,6 @@ pub(crate) fn execute(
                     TaskResult::CancelComplete
                 });
         }
-        Effect::Compact { agent_id, .. } => {
-            tasks.spawn(async move {
-                TaskResult::CompactComplete {
-                    agent_id,
-                    result: Ok(()),
-                }
-            });
-        }
-        Effect::FetchPromptHistory { agent_id, .. } => {
-            tasks.spawn(async move {
-                TaskResult::PromptHistoryLoaded {
-                    agent_id,
-                    prompts: Vec::new(),
-                }
-            });
-        }
         Effect::SwitchModel {
             agent_id,
             session_id,
@@ -1109,76 +1091,6 @@ pub(crate) fn execute(
                     TaskResult::PromptImagePreviewPrepared
                 });
         }
-        Effect::ApplyDoctorFix { target, plan } => {
-            tasks
-                .spawn(async move {
-                    let result = tokio::task::spawn_blocking(move || crate::diagnostics::apply_fix(
-                            *plan,
-                        ))
-                        .await
-                        .map_err(|error| format!("Could not apply the fix: {error}"))
-                        .and_then(|result| result.map_err(|error| error.to_string()));
-                    TaskResult::DoctorFixApplied {
-                        target,
-                        result,
-                    }
-                });
-        }
-        Effect::PersistAnnouncementsHidden { hidden_ids } => {
-            tasks
-                .spawn(async move {
-                    pi_announcements::write_hidden_announcement_ids(&hidden_ids)
-                        .await;
-                    TaskResult::AnnouncementsHiddenPersisted {
-                        result: Ok(()),
-                    }
-                });
-        }
-        Effect::PersistPrivacyBannerAcked { acked_at } => {
-            tasks
-                .spawn(async move {
-                    if let Err(e) = pi_shell::util::config::set_privacy_banner_acked(
-                            acked_at,
-                        )
-                        .await
-                    {
-                        tracing::warn!(error = %e, "failed to persist privacy_banner_acked");
-                    }
-                    TaskResult::CancelComplete
-                });
-        }
-        Effect::PersistConsentAnswer { account, notice_id, version, acked } => {
-            tasks
-                .spawn(async move {
-                    match pi_shell::util::config::set_consent_answer(
-                            account,
-                            notice_id,
-                            version,
-                            acked,
-                        )
-                        .await
-                    {
-                        Ok(()) => TaskResult::CancelComplete,
-                        Err(e) if !acked => {
-                            TaskResult::ConsentPersistFailed {
-                                error: e.to_string(),
-                            }
-                        }
-                        Err(e) => {
-                            tracing::warn!(error = %e, "consent ack not persisted");
-                            TaskResult::CancelComplete
-                        }
-                    }
-                });
-        }
-        Effect::RecordConsentUpstream { notice_id, version } => {
-            tasks.spawn(async move {
-                TaskResult::ConsentRecorded {
-                    notice_id,
-                    version,
-                }
-            });
-        }
         Effect::PersistMemoryFullscreen { fullscreen } => {
             persist_hint(
                 tasks,
@@ -1282,69 +1194,6 @@ pub(crate) fn execute(
                 }
             });
         }
-        Effect::FetchSessionAgentName { agent_id, session_id } => {
-            let tx = acp_tx.clone();
-            tasks
-                .spawn(async move {
-                    match fetch_session_info(&session_id, &tx).await {
-                        Ok(info) => {
-                            TaskResult::SessionAgentNameResolved {
-                                agent_id,
-                                agent_name: info.data.agent_name,
-                            }
-                        }
-                        Err(e) => {
-                            tracing::debug!("session agent name fetch failed: {e}");
-                            TaskResult::SessionAgentNameResolved {
-                                agent_id,
-                                agent_name: None,
-                            }
-                        }
-                    }
-                });
-        }
-        Effect::ShowSessionInfo { agent_id, session_id, show_resolved_model, nonce } => {
-            let is_api_key_auth = session_flags.is_api_key_auth;
-            let api_key_env_set = pi_shell::agent::auth_method::has_pi_api_key_env();
-            let tx = acp_tx.clone();
-            tasks
-                .spawn(async move {
-                    match fetch_session_info(&session_id, &tx).await {
-                        Ok(info) => {
-                            let title = lookup_session_title(&session_id, &info.cwd)
-                                .await;
-                            let text = format_session_info(
-                                &info,
-                                title.as_deref(),
-                                show_resolved_model,
-                                is_api_key_auth,
-                                api_key_env_set,
-                            );
-                            let fields = session_info_fields(
-                                &info,
-                                title.as_deref(),
-                                show_resolved_model,
-                            );
-                            TaskResult::SessionInfoComplete {
-                                agent_id,
-                                session_id,
-                                info: Box::new(info),
-                                text,
-                                fields,
-                                nonce,
-                            }
-                        }
-                        Err(error) => {
-                            TaskResult::SessionInfoFailed {
-                                agent_id,
-                                session_id,
-                                error,
-                                nonce,
-                            }
-                        }
-                    }
-                });
-        }
         Effect::RenameSession { agent_id, session_id, title, cwd, kind } => {
             let tx = acp_tx.clone();
             tasks
@@ -1409,142 +1258,6 @@ pub(crate) fn execute(
                         session_id,
                         error: sanitize_user_error(&error.to_string()),
                     },
-                }
-            });
-        }
-        Effect::SetCodingDataSharing {
-            agent_id,
-            opted_in,
-            seq,
-            ..
-        } => {
-            tasks.spawn(async move {
-                TaskResult::CodingDataSharingUpdated {
-                    agent_id,
-                    opted_in,
-                    seq,
-                }
-            });
-        }
-        Effect::ShowContextInfo { agent_id, session_id, nonce } => {
-            let tx = acp_tx.clone();
-            tasks
-                .spawn(async move {
-                    match fetch_session_info(&session_id, &tx).await {
-                        Ok(info) => {
-                            TaskResult::ContextInfoComplete {
-                                agent_id,
-                                session_id,
-                                info: Box::new(info),
-                                nonce,
-                            }
-                        }
-                        Err(error) => {
-                            TaskResult::ContextInfoFailed {
-                                agent_id,
-                                session_id,
-                                error,
-                                nonce,
-                            }
-                        }
-                    }
-                });
-        }
-        Effect::FetchSessionUsage { agent_id, session_id, nonce } => {
-            let tx = acp_tx.clone();
-            tasks
-                .spawn(async move {
-                    match fetch_session_usage(&session_id, &tx).await {
-                        Ok(usage) => {
-                            TaskResult::SessionUsageComplete {
-                                agent_id,
-                                session_id,
-                                usage: Box::new(usage),
-                                nonce,
-                            }
-                        }
-                        Err(error) => {
-                            TaskResult::SessionUsageFailed {
-                                agent_id,
-                                session_id,
-                                error,
-                                nonce,
-                            }
-                        }
-                    }
-                });
-        }
-        Effect::SendFeedback { agent_id, .. } => {
-            tasks.spawn(async move {
-                TaskResult::FeedbackComplete { agent_id }
-            });
-        }
-        Effect::UploadFeedbackTrace { agent_id, .. } => {
-            tasks.spawn(async move {
-                TaskResult::FeedbackTraceUploaded {
-                    agent_id,
-                    error: None,
-                }
-            });
-        }
-        Effect::RewriteMemoryNote {
-            agent_id,
-            raw_text,
-            nonce,
-            ..
-        } => {
-            tasks.spawn(async move {
-                TaskResult::MemoryNoteRewritten {
-                    agent_id,
-                    result: Ok(raw_text),
-                    nonce,
-                }
-            });
-        }
-        Effect::SaveMemoryNote { agent_id, text, cwd } => {
-            tasks
-                .spawn(async move {
-                    let result = tokio::task::spawn_blocking(move || {
-                            let storage = pi_shell::session::memory::MemoryStorage::new(
-                                &cwd,
-                                None,
-                            );
-                            storage
-                                .append_to_memory(
-                                    pi_shell::session::memory::MemoryScope::Global,
-                                    &text,
-                                )
-                        })
-                        .await
-                        .map_err(|e| format!("task join error: {e}"))
-                        .and_then(|r| r.map_err(|e| format!("{e}")));
-                    TaskResult::MemoryNoteSaved {
-                        agent_id,
-                        result,
-                    }
-                });
-        }
-        Effect::SendRecap { session_id, auto } => {
-            tasks.spawn(async move {
-                TaskResult::RecapRequested {
-                    session_id,
-                    auto,
-                    error: None,
-                }
-            });
-        }
-        Effect::FetchBundleStatus => {
-            tasks.spawn(async move {
-                TaskResult::BundleStatusFailed {
-                    error: "Bundle status is not supported in standard ACP".to_string(),
-                }
-            });
-        }
-        Effect::RefreshAvailableCommands { agent_id, .. } => {
-            tasks.spawn(async move {
-                TaskResult::AvailableCommandsRefreshed {
-                    agent_id,
-                    commands: vec![],
                 }
             });
         }
@@ -1685,49 +1398,8 @@ pub(crate) fn execute(
                 }
             });
         }
-        Effect::DebounceSuggestions { agent_id, generation } => {
-            tasks
-                .spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                    TaskResult::SuggestionDebounceExpired {
-                        agent_id,
-                        generation,
-                    }
-                });
-        }
-        Effect::FetchShellSuggestions { .. } => {
-            tasks.spawn(async move { TaskResult::CancelComplete });
-        }
-        Effect::FetchPromptSuggestion {
-            agent_id,
-            generation,
-            ..
-        } => {
-            tasks.spawn(async move {
-                TaskResult::PromptSuggestionLoaded {
-                    agent_id,
-                    suggestion: None,
-                    generation,
-                }
-            });
-        }
     }
     (false, meta)
-}
-/// Fetch session info (not supported in standard ACP).
-async fn fetch_session_info(
-    _session_id: &acp::SessionId,
-    _tx: &AcpAgentTx,
-) -> Result<SessionInfoResponse, String> {
-    Err("Session info is not supported in standard ACP".to_string())
-}
-
-/// Fetch session usage (not supported in standard ACP).
-async fn fetch_session_usage(
-    _session_id: &acp::SessionId,
-    _tx: &AcpAgentTx,
-) -> Result<pi_shell::extensions::notification::PromptUsage, String> {
-    Err("Session usage is not supported in standard ACP".to_string())
 }
 
 /// Shared rename RPC for rename and `/rename --auto` (not supported in standard ACP).
@@ -1741,141 +1413,6 @@ async fn session_rename_rpc(
         "rename session"
     };
     Err(format!("{verb} is not supported in standard ACP"))
-}
-/// Session title from local persistence: loads only this session's summary
-/// (`cwd` from the `legacy ext RPC` response), never the all-sessions list.
-async fn lookup_session_title(session_id: &acp::SessionId, cwd: &str) -> Option<String> {
-    lookup_session_title_in(
-            pi_shell::util::grok_home::grok_home(),
-            session_id,
-            cwd,
-        )
-        .await
-}
-/// [`lookup_session_title`] against an explicit root, for tests.
-async fn lookup_session_title_in(
-    root: std::path::PathBuf,
-    session_id: &acp::SessionId,
-    cwd: &str,
-) -> Option<String> {
-    use pi_shell::session::storage::{JsonlStorageAdapter, StorageAdapter};
-    let info = pi_shell::session::info::Info {
-        id: session_id.clone(),
-        cwd: cwd.to_string(),
-    };
-    JsonlStorageAdapter::with_root(root)
-        .load_summary(&info)
-        .await
-        .ok()
-        .and_then(|s| s.display_title_opt())
-}
-/// Format session info into a human-readable string.
-///
-/// Mirrors the TUI's `render_session_info` for pager display.
-/// Structured `/session-info` rows — the single source of truth for both the
-/// formatted string ([`format_session_info`]) and the modal, so neither has to
-/// re-parse the other. Auth is not a field here; it is prose the string appends
-/// on its own. `compact` marks the dense model/runtime group the modal renders
-/// as `Label: value` on one line.
-fn session_info_fields(
-    info: &SessionInfoResponse,
-    title: Option<&str>,
-    show_resolved_model: bool,
-) -> Vec<SessionInfoField> {
-    let mut fields = Vec::new();
-    let mut push = |label: &'static str, value: String, compact: bool| {
-        fields
-            .push(SessionInfoField {
-                label,
-                value,
-                compact,
-            });
-    };
-    if let Some(t) = title {
-        push("Title", t.to_string(), false);
-    }
-    push(
-        "Shell version",
-        pi_version::display_version(pi_update::channel_label()),
-        false,
-    );
-    push("Session ID", info.session_id.to_string(), false);
-    if let Some(id) = info.data.conversation_id.as_deref().filter(|id| !id.is_empty()) {
-        push("Conversation ID", id.to_string(), false);
-    }
-    push("Working directory", info.cwd.to_string(), false);
-    let model = info.data.model.as_deref().unwrap_or("unknown");
-    let model_display = pi_shell::session::model_display_name(
-        info.data.model_display_name.as_deref(),
-        model,
-        info.data.resolved_model_id.as_deref(),
-        show_resolved_model,
-    );
-    push("Model", model_display.to_string(), true);
-    if pi_shell::session::should_show_model_fingerprint(
-        info.data.show_model_fingerprint,
-        model,
-    ) && let Some(fp) = info.data.model_fingerprint.as_deref()
-    {
-        push("Model Hash", fp.to_string(), true);
-    }
-    if let Some(b) = info.data.api_backend.as_deref() {
-        push("API Backend", b.to_string(), true);
-    }
-    if let Some(profile) = pi_sandbox::profile_name() {
-        push("Sandbox", profile.to_string(), true);
-    }
-    push("Turn", info.data.turn_index.to_string(), true);
-    let ctx = &info.data.context;
-    push(
-        "Context",
-        format!("{} / {} tokens ({}%)", ctx.used, ctx.total, ctx.usage_pct),
-        true,
-    );
-    fields
-}
-/// The `/session-info` block as a plain string for minimal-mode scrollback.
-/// Built from [`session_info_fields`] (one `  Label: value` line each) with the
-/// auth prose spliced in after the shell version, so it stays a single source
-/// of truth with the modal.
-fn format_session_info(
-    info: &SessionInfoResponse,
-    title: Option<&str>,
-    show_resolved_model: bool,
-    is_api_key_auth: bool,
-    api_key_env_set: bool,
-) -> String {
-    let auth_lines = format_auth_lines(is_api_key_auth, api_key_env_set);
-    let mut out = String::new();
-    for field in session_info_fields(info, title, show_resolved_model) {
-        out.push_str("  ");
-        out.push_str(field.label);
-        out.push_str(": ");
-        out.push_str(&field.value);
-        out.push('\n');
-        if field.label == "Shell version" {
-            out.push_str(&auth_lines);
-        }
-    }
-    out.truncate(out.trim_end_matches('\n').len());
-    out
-}
-/// Auth section for `/session-info` — active login method.
-///
-/// This reflects the process login / ACP auth method, not per-model sampling
-/// credentials (a model `api_key`/`env_key` can still own the turn).
-fn format_auth_lines(is_api_key_auth: bool, api_key_env_set: bool) -> String {
-    if is_api_key_auth {
-        let method = if api_key_env_set {
-            "  Auth method: API key (PI_API_KEY)\n"
-        } else {
-            "  Auth method: API key\n"
-        };
-        return format!(
-            "{method}  Run `grok login` to use your SuperGrok subscription instead.\n"
-        );
-    }
-    String::from("  Auth method: OAuth\n")
 }
 /// Build the single text content block for a plain `Effect::SendPrompt`.
 ///

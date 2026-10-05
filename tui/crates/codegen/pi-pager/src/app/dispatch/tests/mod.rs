@@ -20,7 +20,7 @@ use super::billing::{
     CreditLimitUpsellMode, credit_limit_upsell_mode, is_max_tier, open_credit_limit_upsell,
     open_free_usage_upsell,
 };
-use super::ctx::{find_agent_by_session_id, get_active_agent, get_active_agent_mut};
+use super::ctx::{ get_active_agent, get_active_agent_mut};
 use super::modes::{
     YOLO_ON_UNDER_PLAN_TOAST, active_agent_plan_nudge_state, dispatch_cycle_mode_and_sync,
     permission_mode_toast,
@@ -132,11 +132,6 @@ fn test_app() -> AppView {
         ))],
         auth_state: AuthState::Done,
         trust_state: TrustState::Done,
-        consent_state: crate::app::consent::ConsentState::Done,
-        account_email: None,
-        welcome_consent_link_rects: Vec::new(),
-        welcome_consent_hover_link: None,
-        consent_answered: None,
         login_label: None,
         login_method_id: None,
         auth_start_mode: AuthMode::Pending,
@@ -155,8 +150,6 @@ fn test_app() -> AppView {
         privacy_notice_rollout: false,
         privacy_banner_reshow_days: None,
         privacy_banner_acked: None,
-        privacy_banner_opt_in_inflight: false,
-        coding_data_write_seq: 0,
         show_tips: None,
         auto_update: None,
         ask_user_question_timeout_enabled: None,
@@ -171,7 +164,6 @@ fn test_app() -> AppView {
         subscription_watch_interval_secs: None,
         pending_gate_verification: None,
         gate_verify_gen: 0,
-        bundle_state: crate::app::bundle::BundleState::default(),
         scroll_debug_hud: crate::views::scroll_debug_hud::ScrollDebugHud::new(),
         fps_hud: crate::views::fps_hud::FpsHud::new(),
         welcome_prompt: crate::views::prompt_widget::PromptWidget::new(),
@@ -253,10 +245,6 @@ fn test_app() -> AppView {
         session_picker_grouped: false,
         scheduler_background_loops_seed: true,
         cancel_rewind_enabled: true,
-        session_recap_available: false,
-        shell_feedback_trace_offer: false,
-        feedback_trace_choice_latched: false,
-        feedback_trace_upload_pending: None,
         tutorial: None,
         keyboard_normalizer: crate::input::KeyboardNormalizer::from_terminal_context(),
         voice_mode_enabled: false,
@@ -289,7 +277,6 @@ fn make_test_agent_session(app: &AppView, id: AgentId, sid: &str) -> AgentSessio
         yolo_mode: false,
         auto_mode: false,
         prompt_history: Vec::new(),
-        prompt_history_loading: false,
         loading_replay: false,
         restore_degree: None,
         rate_limited: false,
@@ -422,7 +409,6 @@ fn insert_placeholder_agent(app: &mut AppView, id: AgentId) {
             yolo_mode: false,
             auto_mode: false,
             prompt_history: Vec::new(),
-            prompt_history_loading: false,
             loading_replay: false,
             restore_degree: None,
             rate_limited: false,
@@ -445,14 +431,6 @@ fn insert_placeholder_agent(app: &mut AppView, id: AgentId) {
     agent.active_pane = ActivePane::Scrollback;
     app.agents.insert(id, agent);
 }
-/// Build an app with three agents (ids 0, 1, 2) and `active_view` set
-/// to agent 0.
-pub(super) fn three_agent_app() -> AppView {
-    let mut app = test_app_with_agent();
-    insert_placeholder_agent(&mut app, AgentId(1));
-    insert_placeholder_agent(&mut app, AgentId(2));
-    app
-}
 /// Build a single-agent app for the `/fork` dispatcher tests.
 ///
 /// Sets `current_branch` to `Some("main")` so the agent appears to be
@@ -461,53 +439,6 @@ pub(super) fn three_agent_app() -> AppView {
 fn fork_test_app() -> AppView {
     let mut app = test_app_with_agent();
     app.agents.get_mut(&AgentId(0)).unwrap().current_branch = Some("main".into());
-    app
-}
-/// Set up a two-agent app: agent 0 is active with "sess-A",
-/// agent 1 is inactive with "sess-B".
-fn two_agent_app() -> AppView {
-    let mut app = test_app_with_agent();
-    app.agents[&AgentId(0)].session.session_id = Some(acp::SessionId::new("sess-A"));
-    let id1 = AgentId(1);
-    let agent1 = AgentView::new(
-        AgentSession {
-            id: id1,
-            acp_tx: app.acp_tx.clone(),
-            session_id: Some(acp::SessionId::new("sess-B")),
-            models: ModelState::default(),
-            state: AgentState::Idle,
-            tracker: AcpUpdateTracker::new(),
-            cwd: PathBuf::from("/tmp"),
-            is_worktree: false,
-            forked_from: None,
-            pending_prompts: std::collections::VecDeque::new(),
-            next_queue_id: 0,
-            yolo_mode: false,
-            auto_mode: false,
-            prompt_history: Vec::new(),
-            prompt_history_loading: false,
-            loading_replay: false,
-            restore_degree: None,
-            rate_limited: false,
-            model_incompatible: false,
-            credit_limit_blocked: false,
-            free_usage_blocked: false,
-            available_commands: Vec::new(),
-            available_commands_generation: 0,
-            available_tools: None,
-            model_switch_pending: false,
-            user_model_preference: None,
-            deferred_model_switch: None,
-            in_flight_prompt: None,
-            compact_held_prompt: None,
-            current_prompt_id: None,
-            created_via_new: false,
-        },
-        ScrollbackState::new(),
-    );
-    app.agents.insert(id1, agent1);
-    app.next_agent_id = 2;
-    assert!(matches!(app.active_view, ActiveView::Agent(AgentId(0))));
     app
 }
 /// Test helper: open Settings then OpenResetConfirm for `key`.

@@ -9,11 +9,11 @@ use unicode_width::UnicodeWidthStr;
 use super::state::{
     CONTENT_MIN_WIDTH, MAX_THOUGHTS_WIDTH_WIDENED_MARGIN, MODAL_TITLE, RowEntry,
     STANDARD_MAX_WIDTH, SettingsModalState, SettingsMode, SettingsModeKind,
-    TITLE_LEADING_DECORATION_W, effective_enum_choices, group_children, mode_is_consent_chooser,
+    TITLE_LEADING_DECORATION_W, effective_enum_choices, group_children,
 };
 use crate::render::line_utils::truncate_str;
 use crate::settings::{
-    CodingDataSharingLock, OwnedEnumChoice, SettingKey, SettingKind, SettingMeta, SettingValue,
+    OwnedEnumChoice, SettingKey, SettingKind, SettingMeta, SettingValue,
     StringValidator, dynamic_enum_choices,
 };
 use crate::theme::Theme;
@@ -127,7 +127,7 @@ pub fn render_settings_modal(
     let has_tip_footer = !matches!(
         state.state.mode_kind(),
         SettingsModeKind::EditingString | SettingsModeKind::EditingInt
-    ) && !mode_is_consent_chooser(&state.state.mode);
+    );
     let footer_lines = if has_tip_footer {
         modal_window::footer_lines_with_tip_gap(full_area, &sizing, shortcuts)
     } else {
@@ -172,8 +172,6 @@ pub fn render_settings_modal(
 
     let (inner_area, docs_footer_area) = match state.state.mode_kind() {
         SettingsModeKind::EditingString | SettingsModeKind::EditingInt => (content_area, None),
-        // A consent chooser shows the disclosure and the choices only.
-        _ if mode_is_consent_chooser(&state.state.mode) => (content_area, None),
         _ => modal_window::split_content_for_tip_footer(content_area),
     };
 
@@ -648,9 +646,8 @@ pub(super) fn render_rows(
                             width: area.width,
                             height: desc_height.min(8),
                         };
-                        render_expanded_description(buf, desc_rect, meta, None, theme);
-                        let consumed =
-                            wrapped_description_height(meta, None, area.width, desc_rect.height);
+                        render_expanded_description(buf, desc_rect, meta, theme);
+                        let consumed = wrapped_description_height(meta, area.width, desc_rect.height);
                         y_cursor = y_cursor.saturating_add(consumed);
                     }
                     continue;
@@ -672,10 +669,8 @@ pub(super) fn render_rows(
                     }
                 };
 
-                let lock = state.row_lock(key);
-
                 // Decide 1 vs 2 line layout; fall back to 1 if viewport is tight.
-                let value_display = value_display(meta, value, lock);
+                let value_display = value_display(meta, value);
                 let show_restart_pill_for_layout = meta.restart_required && is_expanded;
                 let layout_decision = row_layout(
                     area.width,
@@ -711,7 +706,6 @@ pub(super) fn render_rows(
                     theme,
                     is_expanded,
                     is_hovered,
-                    lock,
                 );
                 state.value_hit_rects[row_idx] = value_rect;
                 y_cursor = y_cursor.saturating_add(row_height);
@@ -724,12 +718,10 @@ pub(super) fn render_rows(
                         width: area.width,
                         height: desc_height.min(8), // cap at 8 lines per row to keep scroll sane
                     };
-                    let lock_reason = lock.map(CodingDataSharingLock::reason);
-                    render_expanded_description(buf, desc_rect, meta, lock_reason, theme);
+                    render_expanded_description(buf, desc_rect, meta, theme);
                     // Re-measure how many lines the wrapped description
                     // actually consumed, so y_cursor advances precisely.
-                    let consumed =
-                        wrapped_description_height(meta, lock_reason, area.width, desc_rect.height);
+                    let consumed = wrapped_description_height(meta, area.width, desc_rect.height);
                     y_cursor = y_cursor.saturating_add(consumed);
                 }
             }
@@ -816,7 +808,7 @@ fn compute_filtered_row_heights(state: &SettingsModalState, area_width: u16) -> 
                 if matches!(meta.kind, SettingKind::Group { .. }) {
                     let mut h: u16 = 1;
                     if state.expanded_keys.contains(key) {
-                        h = h.saturating_add(wrapped_description_height(meta, None, area_width, 8));
+                        h = h.saturating_add(wrapped_description_height(meta, area_width, 8));
                     }
                     heights.push(h);
                     continue;
@@ -826,8 +818,7 @@ fn compute_filtered_row_heights(state: &SettingsModalState, area_width: u16) -> 
                     continue;
                 };
                 let is_expanded = state.expanded_keys.contains(key);
-                let lock = state.row_lock(key);
-                let value_display = value_display(meta, &value, lock);
+                let value_display = value_display(meta, &value);
                 let show_restart_pill = meta.restart_required && is_expanded;
                 let layout = row_layout(area_width, meta.label, &value_display, show_restart_pill);
                 let mut h: u16 = match layout {
@@ -837,12 +828,7 @@ fn compute_filtered_row_heights(state: &SettingsModalState, area_width: u16) -> 
                 if is_expanded {
                     // Cap matches the forward render loop at line
                     // 2040 (`desc_rect.height = ... .min(8)`).
-                    h = h.saturating_add(wrapped_description_height(
-                        meta,
-                        lock.map(CodingDataSharingLock::reason),
-                        area_width,
-                        8,
-                    ));
+                    h = h.saturating_add(wrapped_description_height(meta, area_width, 8));
                 }
                 heights.push(h);
             }
@@ -852,19 +838,13 @@ fn compute_filtered_row_heights(state: &SettingsModalState, area_width: u16) -> 
 }
 
 /// Wrapped description height for scroll math (mirrors render path).
-fn wrapped_description_height(
-    meta: &SettingMeta,
-    lock_reason: Option<&'static str>,
-    area_width: u16,
-    cap: u16,
-) -> u16 {
+fn wrapped_description_height(meta: &SettingMeta, area_width: u16, cap: u16) -> u16 {
     let indent = 4u16.min(area_width);
     let wrap_w = area_width.saturating_sub(indent);
     if wrap_w == 0 {
         return 0;
     }
-    let text = lock_reason.unwrap_or(meta.description);
-    let line = Line::from(Span::raw(text));
+    let line = Line::from(Span::raw(meta.description));
     let wrapped = crate::render::wrapping::word_wrap_line(&line, wrap_w as usize);
     (wrapped.len() as u16).min(cap)
 }
@@ -2226,21 +2206,10 @@ const ROW_CHEVRON_W: u16 = 2;
 /// Chevron column width — reserved for all rows for alignment.
 pub(super) const ROW_CHEVRON_COL_W: u16 = ROW_CHEVRON_W;
 const ROW_RESTART_PILL_W: u16 = 10; // " · restart" — used for layout budgeting only.
-/// Appended to the value column of a locked row (see `SettingsModalState::row_lock`).
-pub(super) const ROW_ADMIN_MANAGED_SUFFIX: &str = " \u{00B7} Admin Managed";
-/// Value column for ZDR-locked rows — replaces the opt-in/out value entirely.
-pub(super) const ROW_ZDR_VALUE: &str = "ZDR";
 
 /// Value-column text, shared by layout, scroll math, and paint.
-pub(super) fn value_display(
-    meta: &SettingMeta,
-    value: &SettingValue,
-    lock: Option<CodingDataSharingLock>,
-) -> String {
-    if lock == Some(CodingDataSharingLock::Zdr) {
-        return ROW_ZDR_VALUE.to_string();
-    }
-    let mut display = match value {
+pub(super) fn value_display(meta: &SettingMeta, value: &SettingValue) -> String {
+    match value {
         SettingValue::Bool(b) => if *b { "on" } else { "off" }.to_string(),
         SettingValue::String(s) => {
             if s.is_empty() && matches!(meta.kind, SettingKind::DynamicEnum { .. }) {
@@ -2251,11 +2220,7 @@ pub(super) fn value_display(
         }
         SettingValue::Enum(e) => display_for_enum_canonical(&meta.kind, e).to_string(),
         SettingValue::Int(i) => i.to_string(),
-    };
-    if lock == Some(CodingDataSharingLock::TeamManaged) {
-        display.push_str(ROW_ADMIN_MANAGED_SUFFIX);
     }
-    display
 }
 
 /// Per-row layout decision.
@@ -2336,7 +2301,6 @@ pub(super) fn render_setting_row(
     theme: &Theme,
     is_expanded: bool,
     is_hovered: bool,
-    lock: Option<CodingDataSharingLock>,
 ) -> Rect {
     let bg = settings_list_row_bg(theme, is_selected, is_hovered);
     // Paint the row bg across the full area (1 or 2 lines).
@@ -2355,24 +2319,22 @@ pub(super) fn render_setting_row(
         .add_modifier(Modifier::ITALIC);
     let desc_style = Style::default().fg(theme.gray).bg(bg);
 
-    let value_text = value_display(meta, value, lock);
+    let value_text = value_display(meta, value);
     let value_text = value_text.as_str();
 
-    let value_style = if lock.is_some() || matches!(value, SettingValue::Bool(false)) {
+    let value_style = if matches!(value, SettingValue::Bool(false)) {
         Style::default().fg(theme.gray).bg(bg)
     } else {
         value_style
     };
 
     // Chevron for Enum/String/DynamicEnum (opens picker/editor).
-    // Locked rows can't be entered, so they drop the affordance.
-    let show_chevron = lock.is_none()
-        && matches!(
-            (&meta.kind, value),
-            (SettingKind::Enum { .. }, _)
-                | (SettingKind::String { .. }, _)
-                | (SettingKind::DynamicEnum { .. }, _)
-        );
+    let show_chevron = matches!(
+        (&meta.kind, value),
+        (SettingKind::Enum { .. }, _)
+            | (SettingKind::String { .. }, _)
+            | (SettingKind::DynamicEnum { .. }, _)
+    );
     let chevron_str = format!(" {}", crate::glyphs::chevron()); // › → > on legacy ConHost
     let chevron_w = if show_chevron {
         chevron_str.width() as u16
@@ -2602,7 +2564,6 @@ fn render_expanded_description(
     buf: &mut Buffer,
     area: Rect,
     meta: &SettingMeta,
-    lock_reason: Option<&'static str>,
     theme: &Theme,
 ) {
     if area.height == 0 || area.width == 0 {
@@ -2612,7 +2573,7 @@ fn render_expanded_description(
         .fg(theme.gray)
         .bg(theme.bg_base)
         .add_modifier(Modifier::ITALIC);
-    let desc_text = lock_reason.unwrap_or(meta.description);
+    let desc_text = meta.description;
     // Indent 4 cols to nest under the label.
     let indent = 4u16.min(area.width);
     let wrap_w = area.width.saturating_sub(indent);
@@ -2732,12 +2693,6 @@ fn render_setting_group_row(
 pub(super) fn build_shortcuts(state: &SettingsModalState) -> Vec<Shortcut<'static>> {
     match &state.state.mode {
         SettingsMode::Browse => {
-            // A locked row (ZDR / team-managed) accepts neither the edit keys
-            // nor `d`, so it advertises neither. `→ expand` stays — that is
-            // how the user reads the lock reason.
-            let locked = state
-                .focused_setting()
-                .is_some_and(|(key, _)| state.row_lock(key).is_some());
             let enter_label = match state.focused_setting() {
                 Some((_, meta)) if matches!(meta.kind, SettingKind::Bool { .. }) => "Enter toggle",
                 _ => "Enter edit",
@@ -2754,18 +2709,16 @@ pub(super) fn build_shortcuts(state: &SettingsModalState) -> Vec<Shortcut<'stati
                     id: 0,
                 },
             ];
-            if !locked {
-                shortcuts.push(Shortcut {
-                    label: "Space toggle",
-                    clickable: false,
-                    id: 0,
-                });
-                shortcuts.push(Shortcut {
-                    label: enter_label,
-                    clickable: false,
-                    id: 0,
-                });
-            }
+            shortcuts.push(Shortcut {
+                label: "Space toggle",
+                clickable: false,
+                id: 0,
+            });
+            shortcuts.push(Shortcut {
+                label: enter_label,
+                clickable: false,
+                id: 0,
+            });
             shortcuts.extend([
                 Shortcut {
                     label: "\u{2192} expand",
@@ -2778,13 +2731,11 @@ pub(super) fn build_shortcuts(state: &SettingsModalState) -> Vec<Shortcut<'stati
                     id: 0,
                 },
             ]);
-            if !locked {
-                shortcuts.push(Shortcut {
-                    label: "d reset",
-                    clickable: false,
-                    id: 0,
-                });
-            }
+            shortcuts.push(Shortcut {
+                label: "d reset",
+                clickable: false,
+                id: 0,
+            });
             shortcuts.push(Shortcut {
                 label: "F2/Esc close",
                 clickable: false,
@@ -2824,7 +2775,6 @@ pub(super) fn build_shortcuts(state: &SettingsModalState) -> Vec<Shortcut<'stati
         ],
         SettingsMode::PickingEnum {
             supports_preview: sp,
-            key,
             ..
         } => {
             // Labels depend on whether the Enum supports live preview.
@@ -2834,8 +2784,7 @@ pub(super) fn build_shortcuts(state: &SettingsModalState) -> Vec<Shortcut<'stati
                 "\u{2191}/\u{2193} nav"
             };
             let esc_label = if *sp { "Esc revert" } else { "Esc cancel" };
-            let consent = crate::settings::is_consent_chooser(key);
-            let mut shortcuts = vec![
+            vec![
                 Shortcut {
                     label: nav_label,
                     clickable: false,
@@ -2854,17 +2803,12 @@ pub(super) fn build_shortcuts(state: &SettingsModalState) -> Vec<Shortcut<'stati
                     clickable: false,
                     id: 0,
                 },
-            ];
-            // Consent choosers hide reset; the key is disabled there too, so
-            // this stays a description of what actually works on the pane.
-            if !consent {
-                shortcuts.push(Shortcut {
+                Shortcut {
                     label: "d reset",
                     clickable: false,
                     id: 0,
-                });
-            }
-            shortcuts
+                },
+            ]
         }
 
         SettingsMode::EditingInt { min, max, .. } => {

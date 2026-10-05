@@ -101,15 +101,6 @@ pub struct AcpConnection {
     pub auth_meta: Option<serde_json::Value>,
     /// Whether cancel-rewind is enabled (resolved by shell from config layers).
     pub cancel_rewind_enabled: bool,
-    /// Whether the session-recap feature is rolled out for this connection,
-    /// resolved by the shell (remote settings / config / env; default OFF) and
-    /// advertised in `InitializeResponse.meta.sessionRecap`. The client gates
-    /// its automatic away-recap poll and the manual `/recap` on this so a
- /// disabled feature produces zero `legacy ext RPC` traffic. Defaults to `false`
-    /// when absent (e.g. an older shell that predates the feature).
-    pub session_recap_available: bool,
-    /// Shell-side feedback trace-offer eligibility (see `feedbackTraceOffer`).
-    pub feedback_trace_offer: bool,
     /// `AuthManager` for pager-side authenticated channels (voice STT/TTS).
     ///
     /// Built off the local `auth.json`; resolves a fresh bearer per request via
@@ -225,8 +216,6 @@ pub async fn connect(cancel: &CancellationToken, flags: ConnectFlags) -> Result<
         default_auth_method_id,
         available_commands,
         cancel_rewind_enabled,
-        session_recap_available,
-        feedback_trace_offer,
     ) = initialize(&tx, &flags).await?;
 
     // Determine whether interactive login is needed.
@@ -261,8 +250,6 @@ pub async fn connect(cancel: &CancellationToken, flags: ConnectFlags) -> Result<
         auth_start_mode,
         auth_meta,
         cancel_rewind_enabled,
-        session_recap_available,
-        feedback_trace_offer,
         auth_manager,
     })
 }
@@ -346,8 +333,6 @@ async fn initialize(
     Option<acp::AuthMethodId>,
     Vec<acp::AvailableCommand>,
     bool,
-    bool,
-    bool,
 )> {
     let req = acp::InitializeRequest::new(acp::ProtocolVersion::V1)
         .client_capabilities(
@@ -389,8 +374,6 @@ async fn initialize(
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
-    let session_recap_available = parse_session_recap_available(resp.meta.as_ref());
-    let feedback_trace_offer = parse_feedback_trace_offer(resp.meta.as_ref());
     let default_auth_method_id = parse_default_auth_method_id(resp.meta.as_ref());
 
     Ok((
@@ -400,8 +383,6 @@ async fn initialize(
         default_auth_method_id,
         available_commands,
         cancel_rewind_enabled,
-        session_recap_available,
-        feedback_trace_offer,
     ))
 }
 
@@ -413,22 +394,6 @@ pub fn parse_available_commands(meta: Option<&acp::Meta>) -> Vec<acp::AvailableC
     meta.and_then(|m| m.get("availableCommands"))
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default()
-}
-
-/// Parse `sessionRecap` from `InitializeResponse.meta` (shell rollout gate).
-///
-/// Default `false` when missing or non-bool so older agents and dark-launch
-/// defaults produce zero automatic recap traffic.
-pub fn parse_session_recap_available(meta: Option<&acp::Meta>) -> bool {
-    meta.and_then(|m| m.get("sessionRecap"))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
-}
-
-pub fn parse_feedback_trace_offer(meta: Option<&acp::Meta>) -> bool {
-    meta.and_then(|m| m.get("feedbackTraceOffer"))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
 }
 
 /// Determine whether interactive login is needed based on the advertised auth methods.
@@ -726,31 +691,6 @@ mod tests {
         });
         let cmds = parse_available_commands(meta.as_object());
         assert!(cmds.is_empty());
-    }
-
-    #[test]
-    fn parse_session_recap_available_true() {
-        let meta = serde_json::json!({ "sessionRecap": true });
-        assert!(parse_session_recap_available(meta.as_object()));
-    }
-
-    #[test]
-    fn parse_session_recap_available_false_explicit() {
-        let meta = serde_json::json!({ "sessionRecap": false });
-        assert!(!parse_session_recap_available(meta.as_object()));
-    }
-
-    #[test]
-    fn parse_session_recap_available_defaults_off_when_missing() {
-        let meta = serde_json::json!({ "grokShell": true, "cancelRewind": true });
-        assert!(!parse_session_recap_available(meta.as_object()));
-        assert!(!parse_session_recap_available(None));
-    }
-
-    #[test]
-    fn parse_session_recap_available_non_bool_defaults_off() {
-        let meta = serde_json::json!({ "sessionRecap": "yes" });
-        assert!(!parse_session_recap_available(meta.as_object()));
     }
 
     // ── startup_auth_metadata ──────────────────────────────────────

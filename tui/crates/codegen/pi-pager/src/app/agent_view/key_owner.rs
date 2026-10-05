@@ -68,10 +68,6 @@ pub(crate) enum EscStep {
     /// Leave the card's text input for its rows (question free-text answer,
     /// permission followup message).
     LeaveTextInput,
-    /// Close the bare `/feedback` pane, which has no rows to leave the input for.
-    DismissFeedbackPane,
-    /// Skip the `/feedback` trace question (the report still sends).
-    SkipFeedbackTrace,
     /// Throw away an in-progress always-allow pattern edit.
     DiscardPatternEdit,
     /// Unmark this question's answer.
@@ -85,8 +81,6 @@ impl EscStep {
         match self {
             Self::DismissFileSearch => "dismiss",
             Self::LeaveTextInput => "back",
-            Self::DismissFeedbackPane => "dismiss",
-            Self::SkipFeedbackTrace => "skip",
             Self::DiscardPatternEdit => "cancel",
             Self::ClearSelection => "unselect",
             Self::ParkFocus => "scrollback",
@@ -183,19 +177,9 @@ impl AgentView {
                 if qv.focus == QuestionFocus::InputMode {
                     if self.prompt.file_search_visible() {
                         EscStep::DismissFileSearch
-                    } else if qv.is_feedback() {
-                        EscStep::DismissFeedbackPane
                     } else {
                         EscStep::LeaveTextInput
                     }
-                } else if qv.is_feedback_trace() {
-                    // Defaults to a selection, so the generic ladder would
-                    // read Esc as unselect.
-                    EscStep::SkipFeedbackTrace
-                } else if qv.is_feedback_report() {
-                    // Safety net: the report stage stays in InputMode by
-                    // design, so this arm only fires if that ever changes.
-                    EscStep::DismissFeedbackPane
                 } else if qv.active_tab_has_selection() {
                     EscStep::ClearSelection
                 } else {
@@ -218,9 +202,6 @@ impl AgentView {
                 } else {
                     self.commit_question_freeform();
                 }
-            }
-            EscStep::DismissFeedbackPane | EscStep::SkipFeedbackTrace => {
-                return self.submit_question_answers(true);
             }
             EscStep::DiscardPatternEdit => {
                 self.permission_pattern_edit = None;

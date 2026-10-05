@@ -308,7 +308,6 @@ impl AgentView {
             timeline_rail: None,
             timeline_hover: None,
             timeline_hover_preview: None,
-            session_agent_name: None,
             sharing_enabled: false,
             scheduler_background_loops: None,
             billing_surface_visible: false,
@@ -649,7 +648,6 @@ impl AgentView {
         } else {
             self.late_replay_until = None;
         }
-        self.session.prompt_history_loading = false;
         self.session.tracker.clear_user_echo_skip();
         self.session.finish_turn(&mut self.scrollback);
         self.scrollback.finish_all_running();
@@ -873,10 +871,6 @@ impl AgentView {
         } else {
             pi_shell::session::unified_list::SessionKind::Build
         }
-    }
-    /// Show or hide the `/recap` slash command in this agent's registry.
-    pub fn set_session_recap_available(&mut self, available: bool) {
-        self.prompt.set_recap_visible(available);
     }
     /// Show or hide the `/voice` slash command in this agent's registry,
     /// gated on the runtime voice gate (GA default on; kill switch may hide).

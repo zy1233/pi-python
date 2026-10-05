@@ -132,37 +132,6 @@ impl QueuedPromptEntry {
 
                 Line::from(spans)
             }
-            QueueEntryKind::Command => {
-                // Slash commands: `/command` in magenta, args (if any) in bright gray.
-                let trimmed = first_line.trim();
-
-                // For commands, we need to be smarter about truncation.
-                // Truncate the whole thing first, then split.
-                let truncated = if let Some(max_w) = content_max_width {
-                    truncate_str(trimmed, max_w)
-                } else {
-                    trimmed.to_string()
-                };
-
-                let mut spans = if let Some(space_idx) = truncated.find(' ') {
-                    let (cmd, args) = truncated.split_at(space_idx);
-                    vec![
-                        Span::styled(cmd.to_string(), Style::default().fg(theme.accent_assistant)),
-                        Span::styled(args.to_string(), Style::default().fg(theme.gray_bright)),
-                    ]
-                } else {
-                    vec![Span::styled(
-                        truncated,
-                        Style::default().fg(theme.accent_assistant),
-                    )]
-                };
-
-                if extra_lines > 0 {
-                    spans.push(Span::styled(suffix, Style::default().fg(theme.gray)));
-                }
-
-                Line::from(spans)
-            }
             QueueEntryKind::BashCommand => {
                 // Bash commands: `! ` prefix in yellow (theme.command), command text in yellow.
                 let display_text = if let Some(max_w) = content_max_width {
@@ -1190,14 +1159,6 @@ mod tests {
         );
         let text: String = styled.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("(+9 lines)"));
-    }
-
-    #[test]
-    fn test_command_with_suffix() {
-        let styled = QueuedPromptEntry::build_styled("/help me", 3, QueueEntryKind::Command, None);
-        let text: String = styled.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(text.contains("/help"));
-        assert!(text.contains("(+2 lines)"));
     }
 
     // -- Bash command queue pane tests --

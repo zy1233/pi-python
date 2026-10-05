@@ -243,29 +243,6 @@ fn seed_trust_state(
     };
 }
 
-/// Must run before the first render, or the startup-intent block opens a session behind the gate
-/// and the first frame shows the normal welcome.
-pub(crate) fn seed_consent_state_from_gate(
-    app: &mut AppView,
-    gate: Option<&pi_shell::util::config::ConsentGate>,
-) {
-    use crate::app::consent::{ConsentInputs, consent_verdict};
-    let stored = pi_shell::config::load_from_disk()
-        .ok()
-        .map(|root| pi_shell::util::config::load_config_from_toml(&root).consent)
-        .unwrap_or_default();
-    app.consent_state = consent_verdict(&ConsentInputs {
-        gate,
-        answered_this_run: app
-            .consent_answered
-            .as_ref()
-            .map(|(id, version)| (id.as_str(), *version)),
-        answers: &stored.answers,
-        account: app.account_email.as_deref(),
-        minimal: app.screen_mode.is_minimal(),
-    });
-}
-
 /// Pause terminal input and wait up to `timeout` for the reader to acknowledge.
 /// Returns with the pause still asserted; the handoff owner resumes the reader.
 pub(super) fn park_input_reader(
@@ -1131,8 +1108,6 @@ pub(crate) async fn run(
         })
         .unwrap_or(true);
     app.cancel_rewind_enabled = connection.cancel_rewind_enabled;
-    apply_session_recap_available(&mut app, connection.session_recap_available);
-    app.shell_feedback_trace_offer = connection.feedback_trace_offer;
 
     // Preserve auth methods so logout→re-login works without restarting.
     app.auth_methods = connection.auth_methods.clone();
@@ -1679,7 +1654,7 @@ pub(crate) async fn run(
     // directly in the select is NOT safe -- dropping its `next()` future
     // mid-poll (a losing arm) strands its background waker (crossterm #936), so
     // input on an idle screen was not serviced until an unrelated arm happened
-    // to re-poll (every ~20s via recap_poll). The always-on tracing_rx tick
+    // to re-poll (every ~20s via a periodic timer). The always-on tracing_rx tick
     // used to mask this by re-polling ~30Hz; this removes that dependency.
     let (input_tx, mut input_rx) = tokio::sync::mpsc::unbounded_channel::<TimedInputEvent>();
     // Folder-trust verdict, seeded BEFORE the first render, before any session
@@ -1688,16 +1663,6 @@ pub(crate) async fn run(
     // Feature-off (kill-switch / opt-out / local build) resolves `Trusted`, so
     // this stays `TrustState::Done`.
     seed_trust_state(&mut app, remote_settings.as_ref());
-    if !standard_acp {
-        seed_consent_state_from_gate(
-            &mut app,
-            remote_settings
-                .as_ref()
-                .and_then(|s| s.consent_gate.as_ref()),
-        );
-    } else {
-        app.consent_state = crate::app::consent::ConsentState::Done;
-    }
 
     // Type-ahead captured while the app was still loading (see `init_terminal`),
     // replayed only when the composer is already the active input consumer; a
@@ -1849,14 +1814,6 @@ pub(crate) async fn run(
         None
     };
 
-    // Pre-generate the automatic "return-from-away" recap while the terminal is
-    // unfocused, so it's already in the scrollback (instant) when the user
-    // returns. The arm is a cheap no-op while focused / not-yet-eligible; the
-    // heavy lifting (the model call) only fires once per away period via
-    // `should_pregenerate_away_recap`.
-    const RECAP_POLL_INTERVAL: Duration = Duration::from_secs(20);
-    let mut recap_poll_at: Option<Instant> = Some(Instant::now() + RECAP_POLL_INTERVAL);
-
     // Folder trust is seeded earlier (before the reader thread) so the startup
     // type-ahead gate can consult it; see `seed_trust_state` above.
 
@@ -1872,10 +1829,6 @@ pub(crate) async fn run(
 
     // status only; shell auto-syncs post-auth
     if matches!(app.auth_state, AuthState::Done) {
-        let effs = dispatch::dispatch(Action::RequestBundleStatus, &mut app);
-        if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
-            return Ok(finish_run(&mut app));
-        }
         // Fetch billing early so the welcome screen can show a credit warning.
         if app.usage_visible {
             let effs = vec![super::actions::Effect::FetchAppBilling];
@@ -2341,13 +2294,6 @@ pub(crate) async fn run(
         };
 
 
-        let recap_poll = async {
-            match recap_poll_at {
-                Some(at) => sleep_until(at).await,
-                None => std::future::pending().await,
-            }
-        };
-
         let load_barrier_tick = async {
             match session_load_barrier.next_wakeup() {
                 Some(deadline) => {
@@ -2730,19 +2676,6 @@ pub(crate) async fn run(
                 }
             }
 
-            // Pre-generate the away recap so it's already on screen when the
-            // user returns. Cheap no-op while focused / not-yet-eligible.
-            _ = recap_poll => {
-                if should_pregenerate_away_recap(&app) {
-                    let effs = dispatch::dispatch(Action::SendRecap { auto: true }, &mut app);
-                    if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
-                        break;
-                    }
-                }
-                // Always re-arm: a cheap no-op fire while focused / not-yet-eligible.
-                recap_poll_at = Some(Instant::now() + RECAP_POLL_INTERVAL);
-            }
-
             _ = load_barrier_tick => {}
 
             // Hot-reload: config file changed (dev mode) or initial load.
@@ -2919,25 +2852,6 @@ fn load_initial_config_session_bools() -> InitialConfigSessionBools {
     }
 }
 
-/// Whether to pre-generate the automatic "return-from-away" recap right now.
-///
-/// True only when the terminal has been unfocused past the recap threshold
-/// (once per away period, gated by [`FocusTracker::recap_due`]), the shell has
-/// rolled out session recap (`session_recap_available`), the user has not opted
-/// out via `ui.notifications.session_recap`, and the active agent has *finished
-/// its turn* with nothing pending that could wake it — i.e. idle, no modal, no
-/// pending question, an established session, and no running background task (a
-/// bg task completing can auto-wake the agent). Generating it now means the
-/// recap is already in the scrollback when the user returns.
-/// Sync shell `sessionRecap` into execution gate + every existing slash surface.
-fn apply_session_recap_available(app: &mut AppView, available: bool) {
-    app.session_recap_available = available;
-    for agent in app.agents.values_mut() {
-        agent.set_session_recap_available(available);
-    }
-    app.welcome_prompt.set_recap_visible(available);
-}
-
 /// Detect external-auth installs once at pager startup.
 fn detect_external_auth_provider(auth_methods: &[agent_client_protocol::AuthMethod]) -> bool {
     let method_is_external = |method: &agent_client_protocol::AuthMethod| {
@@ -2966,24 +2880,6 @@ fn detect_external_auth_provider(auth_methods: &[agent_client_protocol::AuthMeth
             .is_some_and(|s| !s.trim().is_empty())
     };
     auth_methods.iter().any(method_is_external) || env_set() || config_set()
-}
-
-fn should_pregenerate_away_recap(app: &AppView) -> bool {
-    if !(app.session_recap_available
-        && app.notification_service.focus_tracker.recap_due()
-        && app.notification_service.config().session_recap)
-    {
-        return false;
-    }
-    let ActiveView::Agent(id) = app.active_view else {
-        return false;
-    };
-    app.agents.get(&id).is_some_and(|agent| {
-        agent.session.state.is_idle()
-            && agent.active_modal.is_none()
-            && agent.question_view.is_none()
-            && agent.session.session_id.is_some()
-    })
 }
 
 /// Bookkeeping shared by the JoinSet arm and the deferred SessionLoaded drain.
@@ -3230,12 +3126,6 @@ async fn drain_and_process(
                     force_repaint = true;
                     needs_draw = true;
                 }
-                // Capture recap eligibility BEFORE on_focus_gained() clears the
-                // away timer. Auto recap requires the shell rollout flag plus
-                // the notifications opt-in; manual `/recap` only needs the flag.
-                let recap_due = app.session_recap_available
-                    && app.notification_service.focus_tracker.recap_due()
-                    && app.notification_service.config().session_recap;
                 app.notification_service.focus_tracker.on_focus_gained();
                 // Pre-warm AppKit's lazy dlopen off the UI thread (once) so the
                 // first changeCount poll after returning is just the cheap
@@ -3266,28 +3156,6 @@ async fn drain_and_process(
                             had_non_resize_change = true;
                         }
 
-                        // Automatic "where was I" recap: the user just returned
-                        // after being away long enough. Only when the session is
-                        // idle and not blocked by a modal or pending question.
-                        // Compute eligibility into a bool first so the immutable
-                        // agent borrow is dropped before dispatch (&mut app).
-                        let eligible = app.agents.get(&id).is_some_and(|agent| {
-                            agent.session.state.is_idle()
-                                && agent.active_modal.is_none()
-                                && agent.question_view.is_none()
-                                && agent.session.session_id.is_some()
-                        });
-                        if recap_due && eligible {
-                            let effs = dispatch::dispatch(
-                                crate::app::actions::Action::SendRecap { auto: true },
-                                app,
-                            );
-                            if process_effects(effs, tasks, app, progress_tx) {
-                                return true;
-                            }
-                            needs_draw = true;
-                            had_non_resize_change = true;
-                        }
                     }
                     ActiveView::Welcome => {
                         if matches!(app.auth_state, AuthState::Done) && !app.welcome_prompt_focused

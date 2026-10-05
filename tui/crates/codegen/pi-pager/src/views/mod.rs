@@ -44,5 +44,4 @@ pub(crate) mod timeline;
 pub mod todo_pane;
 pub mod turn_status;
 pub(crate) mod tutorial;
-pub(crate) mod usage_modal;
 pub(crate) mod welcome;

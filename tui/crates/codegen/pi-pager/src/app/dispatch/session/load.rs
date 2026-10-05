@@ -179,7 +179,6 @@ fn dispatch_load_session_ungated(
             yolo_mode: app.default_yolo,
             auto_mode: inherit_auto_mode(app),
             prompt_history: Vec::new(),
-            prompt_history_loading: true,
             loading_replay: true,
             restore_degree: None,
             rate_limited: false,
@@ -213,7 +212,6 @@ fn dispatch_load_session_ungated(
     agent_mut
         .prompt
         .set_contextual_hints(app.contextual_hints.undo, app.contextual_hints.plan_mode);
-    agent_mut.set_session_recap_available(app.session_recap_available);
     agent_mut.set_voice_mode_available(app.voice_mode_enabled);
     agent_mut.scrollback.begin_batch();
     if matches!(app.restore_code, Some(true)) {
@@ -983,16 +981,6 @@ pub(in crate::app::dispatch) fn handle_session_loaded(
             last_turn_summary_gen: agent.last_turn_summary_gen,
         });
         agent.seed_prompt_history_from_scrollback();
-        agent.session.prompt_history_loading = true;
-        effects.push(Effect::FetchPromptHistory {
-            agent_id,
-            cwd,
-            session_id: hydrate_sid.to_string(),
-        });
-        effects.push(Effect::FetchSessionAgentName {
-            agent_id,
-            session_id: hydrate_sid.clone(),
-        });
         effects.push(Effect::FetchBilling {
             agent_id,
             silent: true,
@@ -1031,7 +1019,6 @@ pub(in crate::app::dispatch) fn handle_session_load_failed(
             return vec![];
         }
         agent.pending_extensions_fetch = false;
-        agent.session.prompt_history_loading = false;
         agent.session.finish_command();
         agent.mark_turn_finished(TurnEnd::Aborted);
         agent.scrollback.end_batch();
@@ -1205,7 +1192,6 @@ pub(in crate::app::dispatch) fn handle_session_restore_failed(
         }
         agent.pending_extensions_fetch = false;
         agent.session.loading_replay = false;
-        agent.session.prompt_history_loading = false;
         agent
             .scrollback
             .push_block(RenderBlock::session_event(SessionEvent::TurnFailed {

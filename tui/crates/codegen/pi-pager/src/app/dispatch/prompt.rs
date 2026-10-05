@@ -11,7 +11,7 @@ use super::queue::{drain_prompt_state_to_last_queued, maybe_drain_queue, push_an
 use super::router::dispatch;
 use super::voice::{merge_prompt_with_voice_interim, voice_stop_on_submit};
 use crate::app::actions::{Action, Effect};
-use crate::app::agent::{AgentCommand, AgentId, AgentState};
+use crate::app::agent::{ AgentId, };
 use crate::app::agent_view::AgentView;
 use crate::app::app_view::{ActiveView, AppView};
 use crate::app::cancel_latency::TurnEnd;
@@ -284,8 +284,6 @@ pub(super) fn dispatch_send_prompt_inner(
         return vec![];
     };
     // Capture app-level fields before the mut-borrow on `agent`.
-    let coding_data_sharing_opt_out_from_app = app.coding_data_retention_opt_out;
-    let coding_data_sharing_lock_from_app = app.coding_data_sharing_lock();
     let show_tips_from_app = app.show_tips;
     let auto_update_from_app = app.auto_update;
     let respect_manual_folds_from_app = app.appearance.scrollback.scroll.respect_manual_folds;
@@ -382,8 +380,6 @@ pub(super) fn dispatch_send_prompt_inner(
                         .iter()
                         .map(|(id, info)| (info.name.clone(), id.clone()))
                         .collect(),
-                    coding_data_sharing_opt_out: coding_data_sharing_opt_out_from_app,
-                    coding_data_sharing_lock: coding_data_sharing_lock_from_app,
                     // Prefer optimistic pending over confirmed active.
                     plan_mode_active: agent.plan_mode_pending.unwrap_or(agent.plan_mode_active),
                     show_tips: show_tips_from_app,
@@ -484,21 +480,8 @@ pub(super) fn dispatch_send_prompt_inner(
                 }
                 return dispatch(Action::EditPromptExternal, app);
             }
-            CommandResult::Action(Action::SendRememberNote(note)) => {
+            CommandResult::Action(action) => {
                 if consume_input {
-                    agent.prompt.set_text("");
-                }
-                // The typed `/remember <text>` is the row already recorded above.
-                return super::notes::dispatch_send_remember_note_from_command(app, note);
-            }
-            CommandResult::Action(mut action) => {
-                if consume_input {
-                    // Inline `/feedback` composed alongside pasted images:
-                    // the chips belong to the report, so drain them into the
-                    // action before the composer wipe destroys them.
-                    if let Action::SendFeedback { images, .. } = &mut action {
-                        *images = agent.prompt.drain_images().into();
-                    }
                     agent.prompt.set_text("");
                 }
                 return dispatch(action, app);
@@ -937,7 +920,6 @@ pub(super) fn handle_prompt_response(
         // After a bash-mode turn, scroll to bottom so the user sees
         // the command output, but keep focus on the prompt for
         // consistency with normal prompt behavior.
-        let was_bash_turn = agent.bash_turn;
         if agent.bash_turn {
             agent.bash_turn = false;
             agent.scrollback.goto_bottom();
@@ -1059,31 +1041,6 @@ pub(super) fn handle_prompt_response(
         let drain = maybe_drain_queue(agent);
         let mut effects = drain.effects;
 
-        // Predicted-next-prompt (tab autocomplete): fetch a fresh suggestion
-        // (the stale one was wiped above) — but only after a clean, non-bash
-        // agent turn that leaves the session idle with an empty prompt and no
-        // queued work (a draft in progress or a draining queue means the user
-        // is already mid-thought). Placed after
-        // `maybe_drain_queue` so `is_idle` reflects a locally-drained next
-        // turn.
-        if crate::views::prompt_suggestion::resolve_enabled()
-            && result.is_ok()
-            && !was_cancelling
-            && !was_bash_turn
-            && agent.prompt.text().is_empty()
-            && agent.session.pending_prompts.is_empty()
-            && agent.session.state.is_idle()
-            && let Some(session_id) = agent.session.session_id.as_ref().map(|s| s.0.to_string())
-        {
-            let generation = agent.prompt.prompt_suggestion.begin_fetch();
-            let model = crate::views::prompt_suggestion::resolve_model(&agent.session.models);
-            effects.push(Effect::FetchPromptSuggestion {
-                agent_id,
-                generation,
-                session_id: Some(session_id),
-            });
-        }
-
         effects.push(Effect::FetchBilling {
             agent_id,
             silent: true,
@@ -1094,96 +1051,3 @@ pub(super) fn handle_prompt_response(
     vec![]
 }
 
-pub(super) fn handle_compact_complete(
-    app: &mut AppView,
-    agent_id: AgentId,
-    result: Result<(), String>,
-) -> Vec<Effect> {
-    if let Some(agent) = app.agents.get_mut(&agent_id) {
-        // Defensive: only process if we're still in a compact command state.
-        let was_cancelling = matches!(
-            agent.session.state,
-            AgentState::CommandCancelling {
-                command: AgentCommand::Compact,
-            }
-        );
-        if !matches!(
-            agent.session.state,
-            AgentState::CommandRunning {
-                command: AgentCommand::Compact,
-                ..
-            } | AgentState::CommandCancelling {
-                command: AgentCommand::Compact,
-            }
-        ) {
-            tracing::debug!("Ignoring CompactComplete (not in compact command state)");
-            return vec![];
-        }
-
-        let elapsed = agent.turn_elapsed();
-        agent.session.finish_command();
-
-        match &result {
-            Ok(()) => {
-                agent.scrollback.push_block(RenderBlock::session_event(
-                    SessionEvent::CompactCompleted {
-                        elapsed: elapsed.unwrap_or_default(),
-                    },
-                ));
-            }
-            Err(err) if was_cancelling || err.contains("compact cancelled") => {
-                agent.scrollback.push_block(RenderBlock::session_event(
-                    SessionEvent::CompactionCancelled,
-                ));
-            }
-            Err(err) => {
-                tracing::error!(agent = ?agent_id, error = %err, "Compaction failed");
-                agent.scrollback.push_block(RenderBlock::session_event(
-                    SessionEvent::CompactionFailed {
-                        error: String::new(),
-                    },
-                ));
-            }
-        }
-
-        agent.mark_turn_finished(TurnEnd::Completed);
-        agent.activity_started_at = None;
-        agent.last_activity = None;
-
-        let drain = maybe_drain_queue(agent);
-        return drain.effects;
-    }
-    vec![]
-}
-
-pub(super) fn handle_suggestion_debounce_expired(
-    app: &mut AppView,
-    agent_id: AgentId,
-    generation: u64,
-) -> Vec<Effect> {
-    // Route by the arming agent (the timer carries it), not the active
-    // view: a view switch inside the debounce window must neither fire a
-    // spurious fetch on another agent nor drop this one's.
-    let Some(agent) = app.agents.get(&agent_id) else {
-        return vec![];
-    };
-    // Bash-mode feature: a debounce that outlives the mode fetches nothing.
-    if agent.prompt_input_mode != crate::app::agent_view::PromptInputMode::Bash {
-        return vec![];
-    }
-    if !agent.prompt.suggestions.on_debounce_expired(generation) {
-        return vec![];
-    }
-    let text = agent.prompt.text().to_owned();
-    let cursor = agent.prompt.cursor();
-    let cwd = agent.session.cwd.to_string_lossy().into_owned();
-    let include_ai = agent.prompt.suggestions.ai_enabled;
-    let ai_model = agent.prompt.suggestions.ai_model.clone();
-    let session_id = agent.session.session_id.as_ref().map(|s| s.0.to_string());
-    vec![Effect::FetchShellSuggestions {
-        agent_id,
-        text,
-        cwd,
-        session_id,
-    }]
-}

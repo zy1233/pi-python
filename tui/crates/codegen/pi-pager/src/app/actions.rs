@@ -248,14 +248,6 @@ pub enum Action {
     },
     /// Cancel the currently running turn.
     CancelTurn,
- /// Request current bundle cache status via `legacy ext RPC`.
-    RequestBundleStatus,
-    /// Hide the announcements banner.
-    AnnouncementsHide,
-    /// Open the promo CTA link (url resolved from current state at dispatch
-    /// time, mirroring how `AnnouncementsHide` resolves its target). The
-    /// payload records which surface activated it, for telemetry.
-    AnnouncementsOpenCta(pi_telemetry::events::AnnouncementCtaSurface),
     /// Cycle session mode (Shift+Tab): Normal → Plan → Auto → Always-Approve →
     /// Normal (Auto skipped when the feature gate is off).
     /// Plan mode sends a signal to the shell; always-approve is local.
@@ -412,10 +404,6 @@ pub enum Action {
     /// Open the settings modal (F2, `/settings`, command palette).
     /// If already open, closes it instead of stacking.
     OpenSettings,
-    /// Privacy banner `[Opt in]` (ack only after ACP success).
-    PrivacyBannerOptIn,
-    /// Privacy banner `[Opt out]` (ack now, then record the decline).
-    PrivacyBannerOptOut,
     /// Open the command palette (`/help`). The keybinding path (Ctrl+P) opens it
     /// directly in `handle_agent_action`; this lets a slash command reach the
     /// same modal through dispatch.
@@ -463,19 +451,12 @@ pub enum Action {
     /// workspace, mark trust resolved, and replay any deferred session startup.
     /// (Declining quits via [`Action::Quit`]; there is no decline action.)
     TrustFolder,
-    /// Replays any session startup deferred behind the notice.
-    /// (Declining quits via [`Action::Quit`]; there is no decline action.)
-    AcceptConsent,
-    /// Opens the notice's nth link. The url is re-read from validated state, never carried here.
-    OpenConsentLink(usize),
     /// A spawned task completed.
     TaskComplete(TaskResult),
     /// Rename the current session's title/summary.
     RenameSession {
         title: String,
     },
-    /// Show detailed context usage (progress bar, token breakdown, stats).
-    ShowContextInfo,
     /// Commit a read-only list of the queued prompts as a system block
     /// (`/queue`). The surface minimal mode uses in place of the `QueuePane`.
     ShowQueue,
@@ -483,24 +464,6 @@ pub enum Action {
     /// to config.toml). `/plan <desc>` uses `EnterPlanMode` instead
     /// because it also starts a turn.
     SetPlanMode(PlanModeKind),
-    /// Submit feedback (minimal inline `/feedback <text>`, or card
-    /// submit). `trace` is `None` when no trace-consent card was shown.
-    SendFeedback {
-        text: String,
-        images: crate::views::prompt_widget::FeedbackImages,
-        trace: Option<FeedbackTraceChoice>,
-    },
-    /// Send a remember note from # mode. Routes through LLM rewrite when a
-    /// session is active; falls back to direct save otherwise.
-    SendRememberNote(String),
-    /// Save the currently displayed remember note from the review modal.
-    SaveRememberNoteFromModal,
-    /// Request a session recap ("where was I" summary). `auto` is `true` for
-    /// the automatic return-from-away recap, `false` for an explicit `/recap`.
-    /// Bypasses the prompt queue (works while the agent is busy).
-    SendRecap {
-        auto: bool,
-    },
     /// Pick a session from content (deep search) results.
     PickContentSession {
         session_id: String,
@@ -523,9 +486,6 @@ pub enum Action {
     TriggerDeepSearch,
     /// Force an immediate deep content search, skipping the debounce.
     ForceDeepSearch,
-    SetCodingDataSharing {
-        opted_in: bool,
-    },
     /// Submit-path action emitted by the local fork worktree question
     /// modal. Routes directly to `dispatch_fork_resolved`.
     ForkAnswered {
@@ -554,11 +514,6 @@ pub enum Action {
         model_id: acp::ModelId,
         effort: Option<ReasoningEffort>,
     },
-    DoctorFixConfirmed {
-        target: DoctorFixTarget,
-        plan: Box<crate::diagnostics::FixPlan>,
-    },
-    DoctorFixCancelled(DoctorFixTarget),
     /// Persist the memory modal fullscreen preference to config.toml.
     PersistMemoryFullscreen(bool),
     /// Edit the current minimal-mode composer draft in an external editor.
@@ -681,16 +636,6 @@ mod permission_mode_kind_tests {
         }
     }
 }
-/// What the user chose on the `/feedback` trace-consent question.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FeedbackTraceChoice {
-    /// Upload with this report and persist `[telemetry] trace_upload = true`.
-    AlwaysUpload,
-    /// Send the report alone (also the Esc/skip outcome).
-    NoUpload,
-    /// Send the report alone and persist `[features] feedback_trace_card = false`.
-    NeverAsk,
-}
 /// Canonical on/off state for `plan_mode`. Binary today (single bit
 /// on `agent.plan_mode_active`); typed enum so a future third state
 /// can be added without churning dispatcher arms.
@@ -753,11 +698,6 @@ pub enum ClipboardPasteTarget {
     AgentPrompt {
         agent_id: AgentId,
         images_dir: Option<std::path::PathBuf>,
-        /// Enqueued while the `/feedback` report pane owned the composer. The
-        /// completion drops the attachment when that pane is gone, so a
-        /// screenshot pasted into the pane cannot land in the composer draft
-        /// an Esc restored.
-        from_feedback_pane: bool,
     },
 }
 impl ClipboardPasteTarget {
@@ -927,13 +867,6 @@ pub enum ProbedAttachment {
     /// The attachment probe task failed or timed out.
     ProbeFailed,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DoctorFixTarget {
-    pub agent_id: AgentId,
-    pub session_id: Option<acp::SessionId>,
-    pub session_binding_epoch: u32,
-    pub cwd: std::path::PathBuf,
-}
 /// Aftermath of a successful session delete.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AfterSessionDelete {
@@ -1099,11 +1032,6 @@ pub enum Effect {
         /// Set only when the pager restored the prompt into the composer.
         rewind_prompt_id: Option<String>,
     },
-    /// Run a manual `/compact` command.
-    Compact {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-    },
     /// Switch active model.
     SwitchModel {
         agent_id: AgentId,
@@ -1119,21 +1047,6 @@ pub enum Effect {
         /// `Some` → `session/set_config_option`; `None` → legacy `session/set_model`.
         config_option_id: Option<String>,
     },
-    /// Persist the hidden announcement ids to disk.
-    PersistAnnouncementsHidden {
-        hidden_ids: std::collections::BTreeSet<String>,
-    },
-    /// Persist `[privacy].privacy_banner_acked` (RFC 3339 dismiss time).
-    PersistPrivacyBannerAcked { acked_at: String },
-    /// Persist the consent answer to `[consent]` in config.toml.
-    PersistConsentAnswer {
-        account: Option<String>,
-        notice_id: String,
-        version: i32,
-        acked: bool,
-    },
-    /// Files the acceptance server side; the local marker is what stops the re-prompt if it fails.
-    RecordConsentUpstream { notice_id: String, version: i32 },
     /// Persist memory modal fullscreen preference to `[hints]` in config.toml.
     PersistMemoryFullscreen { fullscreen: bool },
     /// Persist a per-command worktree mode preference to `[hints]` in
@@ -1178,20 +1091,6 @@ pub enum Effect {
         session_id: acp::SessionId,
         mode_id: acp::SessionModeId,
     },
-    /// Fetch prompt history for the current session from the ACP agent.
-    /// `session_id` scopes the per-CWD history file to this session (the agent's
-    /// `filter_session_id` param), so up-arrow recall and the `/history`
-    /// panel show only the current session's prompts.
-    FetchPromptHistory {
-        agent_id: AgentId,
-        cwd: std::path::PathBuf,
-        session_id: String,
-    },
- /// Resolve the running agent name for a session (`legacy ext RPC`).
-    FetchSessionAgentName {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-    },
     /// Send AuthenticateRequest to the agent.
     Authenticate {
         request_seq: u64,
@@ -1203,66 +1102,6 @@ pub enum Effect {
     PollAuthUrl { request_seq: u64 },
     /// Submit a manually-pasted auth code (ext request).
     SubmitAuthCode { request_seq: u64, code: String },
- /// Fetch and display session info via legacy ext RPC
-    /// Auth lines are derived in the effect from SessionFlags + env (not Effect fields).
-    ShowSessionInfo {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        show_resolved_model: bool,
-        /// Usage-modal fetch generation; echoed back on the task result.
-        nonce: u64,
-    },
- /// Fetch and display detailed context usage via legacy ext RPC
-    ShowContextInfo {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        /// Usage-modal fetch generation; echoed back on the task result.
-        nonce: u64,
-    },
- /// Fetch current bundle cache status via `legacy ext RPC`.
-    FetchBundleStatus,
-    /// Send feedback about the current session (fire-and-forget POST).
-    SendFeedback {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-    },
-    /// One-shot session archive for a feedback report (after the text POST).
-    UploadFeedbackTrace {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-    },
-    /// Save a remember note to global MEMORY.md (async file write).
-    SaveMemoryNote {
-        agent_id: AgentId,
-        text: String,
-        cwd: std::path::PathBuf,
-    },
- /// Send raw note to legacy ext RPC for LLM-powered reformatting.
-    /// On success, the rewritten text populates the prompt for inline review.
-    /// On failure, falls back to showing the raw text for review.
-    RewriteMemoryNote {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        raw_text: String,
-        /// Monotonic nonce to correlate this request with the modal that
-        /// opened it, so stale results don't populate a different review.
-        nonce: u64,
-    },
-    /// Re-fetch available commands (including skills) from the shell.
-    ///
-    /// Sent after `SessionCreated` / `WorktreeSessionCreated` to work around
-    /// a race where the shell's `AvailableCommandsUpdate` notification arrives
-    /// before the pager has set `session_id`, causing it to be silently dropped.
-    RefreshAvailableCommands {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-    },
- /// Request a session recap via the legacy ext RPC ext method. Fire-and-forget:
-    /// the recap arrives later as a `SessionRecap` notification.
-    SendRecap {
-        session_id: acp::SessionId,
-        auto: bool,
-    },
  /// Log out via `legacy ext RPC` (shell clears auth.json + in-memory state).
     Logout,
  /// Cancel an in-flight interactive auth on the shell (`legacy ext RPC`).
@@ -1301,16 +1140,6 @@ pub enum Effect {
     UnregisterActiveSession { session_id: acp::SessionId },
     /// Quit the application.
     Quit,
-    /// Toggle coding data sharing via ACP.
-    SetCodingDataSharing {
-        agent_id: AgentId,
-        opted_in: bool,
-        /// Write generation, echoed back on the `TaskResult`. Writes to this
-        /// endpoint are concurrent, so a result that isn't the newest must
-        /// not touch state: its `rollback_to_opted_in` was captured against
-        /// a world that has since moved on.
-        seq: u64,
-    },
     /// Rename the current session.
     RenameSession {
         agent_id: AgentId,
@@ -1368,36 +1197,8 @@ pub enum Effect {
     /// Fetch billing data at the app level (no agent required).
     /// Used on startup to populate the welcome-screen credit warning.
     FetchAppBilling,
- /// Fetch per-session token/cost via `legacy ext RPC` (auth-agnostic).
-    FetchSessionUsage {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        /// Usage-modal fetch generation; echoed back on the task result.
-        nonce: u64,
-    },
     /// Re-fetch remote settings to check subscription gate.
     RefreshGate,
-    /// Spawn a debounce sleep task for shell suggestions. `agent_id` rides
-    /// to the expiry so the fetch is built from the arming agent, not
-    /// whatever view is active when the timer fires.
-    DebounceSuggestions { agent_id: AgentId, generation: u64 },
- /// Send an ACP `legacy ext RPC` request to the shell. `agent_id` is echoed
-    /// on the result so the response routes to the agent that fetched, not
-    /// whatever view is active when it lands.
-    FetchShellSuggestions {
-        agent_id: AgentId,
-        text: String,
-        cwd: String,
-        session_id: Option<String>,
-    },
- /// Send an ACP `legacy ext RPC` request to the shell — predict the
-    /// user's likely next prompt after a completed turn (tab autocomplete
-    /// ghost text).
-    FetchPromptSuggestion {
-        agent_id: AgentId,
-        generation: u64,
-        session_id: Option<String>,
-    },
     /// Probe the clipboard for an attachment off the event-loop thread
     /// (osascript image/file-url read + image decode + session persist), then
     /// attach the chip via [`TaskResult::ClipboardAttachmentProbed`]. Keeps the
@@ -1412,10 +1213,6 @@ pub enum Effect {
     /// Prepare terminal preview bytes off the event-loop thread.
     PreparePromptImagePreview {
         preparation: crate::prompt_images::PromptImagePreviewPreparation,
-    },
-    ApplyDoctorFix {
-        target: DoctorFixTarget,
-        plan: Box<crate::diagnostics::FixPlan>,
     },
 }
 /// Wire params for `legacy ext RPC`. Shared with the effect executor
@@ -1622,22 +1419,7 @@ pub enum TaskResult {
     /// Cancel notification was sent (fire-and-forget).
     /// The real turn end comes via PromptResponse.
     CancelComplete,
-    /// The marker can stop advertising itself as unsent.
-    ConsentRecorded {
-        notice_id: String,
-        version: i32,
-    },
-    /// The answer stands for this run, but nothing on disk holds it,
-    /// so the notice returns at the next launch.
-    ConsentPersistFailed {
-        error: String,
-    },
     PreferredModelPersisted {
-        result: Result<(), String>,
-    },
-    /// Manual `/compact` command completed.
-    CompactComplete {
-        agent_id: AgentId,
         result: Result<(), String>,
     },
     /// Model switch completed (effort, if any, was applied in the same request).
@@ -1649,20 +1431,6 @@ pub enum TaskResult {
         /// Forwarded from `Effect::SwitchModel.prev_model_id` for
         /// rollback on `IncompatibleAgent`.
         prev_model_id: Option<acp::ModelId>,
-    },
-    /// Announcements hidden state persisted.
-    AnnouncementsHiddenPersisted {
-        result: Result<(), String>,
-    },
-    /// Cross-session prompt history loaded from ACP.
-    PromptHistoryLoaded {
-        agent_id: AgentId,
-        prompts: Vec<String>,
-    },
-    /// Running agent name cached from `session/info` (for agents modal, etc.).
-    SessionAgentNameResolved {
-        agent_id: AgentId,
-        agent_name: Option<String>,
     },
     /// Authentication completed successfully.
     AuthComplete {
@@ -1688,30 +1456,6 @@ pub enum TaskResult {
     AuthCodeSubmitted {
         request_seq: u64,
     },
-    /// Session info fetched successfully.
-    SessionInfoComplete {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        info: Box<pi_shell::session::SessionInfoResponse>,
-        /// Plain-text block for minimal-mode scrollback.
-        text: String,
-        /// Structured rows for the modal (built upstream from typed data).
-        fields: Vec<crate::views::usage_modal::SessionInfoField>,
-        nonce: u64,
-    },
-    /// Session info fetch failed.
-    SessionInfoFailed {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        error: String,
-        nonce: u64,
-    },
-    /// Coding data sharing preference updated.
-    CodingDataSharingUpdated {
-        agent_id: AgentId,
-        opted_in: bool,
-        seq: u64,
-    },
     /// Session rename completed successfully.
     RenameSessionComplete {
         agent_id: AgentId,
@@ -1733,78 +1477,6 @@ pub enum TaskResult {
         source: String,
         session_id: String,
         error: String,
-    },
-    /// Context info fetched successfully. Drop if `session_id` no longer matches.
-    ContextInfoComplete {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        info: Box<pi_shell::session::SessionInfoResponse>,
-        nonce: u64,
-    },
-    /// Context info fetch failed. Drop if `session_id` no longer matches.
-    ContextInfoFailed {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        error: String,
-        nonce: u64,
-    },
-    /// `/usage` session ledger fetched. Drop if `session_id` no longer matches.
-    SessionUsageComplete {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        usage: Box<pi_shell::extensions::notification::PromptUsage>,
-        nonce: u64,
-    },
-    /// `/usage` session ledger fetch failed. Drop if `session_id` no longer matches.
-    SessionUsageFailed {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        error: String,
-        nonce: u64,
-    },
-    /// Feedback submitted successfully (fire-and-forget).
-    FeedbackComplete {
-        agent_id: AgentId,
-    },
-    /// One-shot feedback trace archive finished (or was skipped).
-    FeedbackTraceUploaded {
-        agent_id: AgentId,
-        error: Option<String>,
-    },
-    /// Memory note saved to global MEMORY.md.
-    MemoryNoteSaved {
-        agent_id: AgentId,
-        result: Result<(), String>,
-    },
-    /// LLM-rewritten memory note ready for inline review.
-    /// `Ok(text)` = rewritten markdown; `Err(error)` = rewrite failed.
-    MemoryNoteRewritten {
-        agent_id: AgentId,
-        result: Result<String, String>,
-        /// Nonce from the originating RewriteMemoryNote effect; must match
-        /// the modal's `rewrite_nonce` before populating enhanced_content.
-        nonce: u64,
-    },
-    /// Bundle status fetch failed.
-    BundleStatusFailed {
-        error: String,
-    },
- /// `legacy ext RPC` request acknowledged (fire-and-forget). The recap itself
-    /// arrives separately as a `SessionRecap` notification; this only carries
-    /// a transport error, if any, for logging.
-    RecapRequested {
-        /// Session the recap was requested for — lets the handler find the
-        /// agent whose manual loading spinner must be cleared on failure.
-        session_id: acp::SessionId,
-        /// Whether this was an automatic recap. Only a manual `/recap` shows a
-        /// loading spinner, so only a manual failure needs to clear one.
-        auto: bool,
-        error: Option<String>,
-    },
-    /// Available commands refreshed from the shell.
-    AvailableCommandsRefreshed {
-        agent_id: AgentId,
-        commands: Vec<acp::AvailableCommand>,
     },
     /// Shell acknowledged logout (auth cleared).
     LogoutComplete,
@@ -1872,19 +1544,6 @@ pub enum TaskResult {
     GateRefreshed {
         settings: Option<pi_shell::util::config::RemoteSettings>,
     },
-    /// Debounce timer for shell suggestions expired. Routed by the arming
-    /// `agent_id`.
-    SuggestionDebounceExpired {
-        agent_id: AgentId,
-        generation: u64,
-    },
- /// Predicted next prompt loaded from ACP `legacy ext RPC`.
-    /// `suggestion` is `None` when the shell had nothing to suggest.
-    PromptSuggestionLoaded {
-        agent_id: AgentId,
-        suggestion: Option<String>,
-        generation: u64,
-    },
     /// Setting persisted successfully. No reconciliation needed today.
     SettingPersisted {
         key: crate::settings::SettingKey,
@@ -1914,10 +1573,6 @@ pub enum TaskResult {
     },
     /// Shared prompt-image preview state was resolved off-thread.
     PromptImagePreviewPrepared,
-    DoctorFixApplied {
-        target: DoctorFixTarget,
-        result: Result<crate::diagnostics::FixOutcome, String>,
-    },
 }
 #[cfg(test)]
 mod tests {

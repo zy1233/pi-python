@@ -244,24 +244,3 @@ pub(crate) fn switch_to_agent(app: &mut AppView, target: AgentId, cause: SwitchC
     surface_yolo_launch_block_notice(app, target);
 }
 
-pub(super) fn find_agent_id_by_session_id(
-    agents: &indexmap::IndexMap<AgentId, AgentView>,
-    session_id: &str,
-) -> Option<AgentId> {
-    agents.iter().find_map(|(id, a)| {
-        a.session
-            .session_id
-            .as_ref()
-            .is_some_and(|sid| &*sid.0 == session_id)
-            .then_some(*id)
-    })
-}
-
-/// Root session match (for async kill-result routing off the active view).
-pub(super) fn find_agent_by_session_id<'a>(
-    agents: &'a mut indexmap::IndexMap<AgentId, AgentView>,
-    session_id: &str,
-) -> Option<&'a mut AgentView> {
-    let id = find_agent_id_by_session_id(agents, session_id)?;
-    agents.get_mut(&id)
-}

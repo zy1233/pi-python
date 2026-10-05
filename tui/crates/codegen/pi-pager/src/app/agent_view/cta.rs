@@ -49,41 +49,6 @@ impl AgentView {
         });
     }
 
-    /// Notify the suggestion controller that the prompt text changed.
-    /// Returns an Effect to dispatch if the controller wants a debounce.
-    ///
-    /// Shell suggestions are a bash-mode (`!`) feature: outside it the
-    /// pipeline never fires (no shell-history ghosts over natural-language
-    /// chat text) and any leftover ghost/dropdown is torn down.
-    pub(crate) fn notify_suggestion_text_changed(&mut self) -> Option<super::actions::Effect> {
-        use crate::views::suggestion_controller::SuggestionAction;
-
-        if self.prompt_input_mode != super::PromptInputMode::Bash {
-            self.prompt.suggestions.clear_ghost();
-            return None;
-        }
-
-        let snap = self.prompt.slash_state.snapshot();
-        let slash_active = snap.active;
-        let has_inline_ghost = snap.inline_ghost.is_some();
-        // Copy text before passing to text_changed to satisfy the borrow checker.
-        let text = self.prompt.text().to_owned();
-        let action = self
-            .prompt
-            .suggestions
-            .text_changed(&text, slash_active, has_inline_ghost)?;
-
-        match action {
-            SuggestionAction::Matched => None,
-            SuggestionAction::Debounce { generation } => {
-                Some(super::actions::Effect::DebounceSuggestions {
-                    agent_id: self.session.id,
-                    generation,
-                })
-            }
-        }
-    }
-
  /// Apply an `legacy ext RPC` notification, keyed by `response_id`
     /// (newest-response-wins).
     ///

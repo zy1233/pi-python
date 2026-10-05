@@ -240,9 +240,7 @@ impl AgentView {
         } else if let Some(slot) = qv.per_question_freeform.get_mut(idx) {
             slot.clear();
         }
-        if !qv.is_feedback_report() {
-            qv.focus = QuestionFocus::Navigation;
-        }
+        qv.focus = QuestionFocus::Navigation;
         self.last_prompt_click_ms = None;
     }
     /// Handle key input when the question view is active.
@@ -271,41 +269,16 @@ impl AgentView {
                     return self.dismiss_question_view();
                 }
                 if key!('c', CONTROL).matches(key) {
-                    if qv.is_feedback_report() {
-                        return self.clear_feedback_then_dismiss();
-                    }
                     qv.focus = QuestionFocus::Navigation;
                     self.last_prompt_click_ms = None;
                     return InputOutcome::Changed;
-                }
-                if qv.is_feedback_report() && crate::input::key::is_paste_key(key) {
-                    let clipboard_text = crate::app::actions::ClipboardTextRead::from_result(
-                        crate::clipboard::system_clipboard_read_text(),
-                    );
-                    return self.handle_paste_key_deferred(clipboard_text);
                 }
                 match self.prompt.route_enter(key) {
                     EnterOutcome::NewlineInserted => {
                         return InputOutcome::Changed;
                     }
                     EnterOutcome::Submit => {
-                        if self.paste_probe_in_flight > 0
-                            && self.question_view.as_ref().is_some_and(
-                                crate::views::question_view::QuestionViewState::is_feedback_report,
-                            )
-                        {
-                            self.deferred_send =
-                                Some(crate::app::agent_view::AgentDeferredSend::SubmitFeedback);
-                            return InputOutcome::Changed;
-                        }
                         self.commit_question_freeform();
-                        if self
-                            .question_view
-                            .as_ref()
-                            .is_some_and(|qv| qv.is_feedback_report())
-                        {
-                            return self.submit_question_answers(false);
-                        }
                         let on_last = self
                             .question_view
                             .as_ref()
@@ -524,15 +497,6 @@ impl AgentView {
                 InputOutcome::Changed
             }
         }
-    }
-    /// The feedback pane has no navigation to return to, so it follows the composer: clear the report, then dismiss once it is empty.
-    fn clear_feedback_then_dismiss(&mut self) -> InputOutcome {
-        if self.prompt.text().trim().is_empty() {
-            return self.submit_question_answers(true);
-        }
-        self.prompt.set_text("");
-        self.commit_question_freeform();
-        InputOutcome::Changed
     }
     /// Handle mouse events when the question view is active.
     ///
@@ -987,16 +951,6 @@ impl AgentView {
     /// view opened, so typed "additional context" doesn't leak into the
     /// main prompt. Also clears any stashed (tab-hidden) question view.
     fn dismiss_question_view(&mut self) -> InputOutcome {
-        let follows_skip_submit = self.question_view.as_ref().is_some_and(|qv| {
-            matches!(
-                qv.local_kind,
-                Some(crate::views::question_view::LocalQuestionKind::DoctorFix { .. })
-                    | Some(crate::views::question_view::LocalQuestionKind::FeedbackTrace { .. })
-            )
-        });
-        if follows_skip_submit {
-            return self.submit_question_answers(true);
-        }
         if let Some(qv) = self.question_view.take() {
             self.record_question_pause(&qv);
             self.restore_card_prompt(qv.stashed_prompt);
@@ -1090,96 +1044,15 @@ impl AgentView {
             self.prompt.restore(stashed);
         }
     }
-    /// Close out the `/feedback` report pane: Enter advances to the trace
-    /// question (when offered) or sends, Esc drops the report.
-    fn submit_feedback_pane(
-        &mut self,
-        mut qv: crate::views::question_view::QuestionViewState,
-        skipped: bool,
-    ) -> InputOutcome {
-        let report = qv.feedback_report();
-        if !skipped && report.is_empty() && self.prompt.images.is_empty() {
-            crate::unified_log::info(
-                "feedback.submit",
-                None,
-                Some(serde_json::json!({"branch": "empty"})),
-            );
-            let freeform = qv.activate_freeform_input();
-            self.prompt.set_text_preserving(&freeform);
-            self.question_view = Some(qv);
-            return InputOutcome::Changed;
-        }
-        if !skipped && qv.feedback_offer_trace {
-            let images = self.prompt.drain_images();
-            crate::unified_log::info(
-                "feedback.submit",
-                None,
-                Some(serde_json::json!({
-                    "branch": "trace_question",
-                    "chars": report.chars().count(),
-                    "images": images.len(),
-                })),
-            );
-            pi_telemetry::session_ctx::log_event(
-                pi_telemetry::events::FeedbackTraceCardShown {
-                    reenables_sharing: qv.feedback_offer_reenables_sharing,
-                },
-            );
-            qv.begin_feedback_trace_stage(report, images);
-            self.prompt.set_text_preserving("");
-            self.question_view = Some(qv);
-            return InputOutcome::Changed;
-        }
-        let images = if skipped {
-            Vec::new()
-        } else {
-            self.prompt.drain_images()
-        };
-        crate::unified_log::info(
-            "feedback.submit",
-            None,
-            Some(serde_json::json!({
-                "branch": "send",
-                "skipped": skipped,
-                "chars": report.chars().count(),
-                "images": images.len(),
-            })),
-        );
-        self.record_question_pause(&qv);
-        self.restore_card_prompt(qv.stashed_prompt);
-        self.cleanup_question_state();
-        if skipped {
-            return InputOutcome::Changed;
-        }
-        InputOutcome::Action(Action::SendFeedback {
-            text: report,
-            images: images.into(),
-            trace: None,
-        })
-    }
     pub(super) fn submit_question_answers(&mut self, skipped: bool) -> InputOutcome {
         use pi_tools::implementations::grok_build::ask_user_question::AskUserQuestionExtResponse;
         self.swap_question_freeform();
         let Some(mut qv) = self.question_view.take() else {
             return InputOutcome::Changed;
         };
-        if qv.is_feedback_report() {
-            return self.submit_feedback_pane(qv, skipped);
-        }
         self.record_question_pause(&qv);
         if let Some(kind) = qv.local_kind.take() {
-            use crate::views::question_view::LocalQuestionKind;
             let outcome = match (skipped, kind) {
-                (true, LocalQuestionKind::DoctorFix { target, .. }) => {
-                    InputOutcome::Action(Action::DoctorFixCancelled(target))
-                }
-                (true, LocalQuestionKind::FeedbackTrace { report, images }) => {
-                    InputOutcome::Action(Action::SendFeedback {
-                        text: report,
-                        images,
-                        trace: Some(crate::app::actions::FeedbackTraceChoice::NoUpload),
-                    })
-                }
                 (skipped, kind) => translate_local_submit(&qv, kind, skipped),
             };
             self.prompt.restore(qv.stashed_prompt);
@@ -1234,9 +1107,6 @@ impl AgentView {
     /// Clean up question-related visual state after the question view is
     /// dismissed (submit, cancel, or replacement).
     pub(crate) fn cleanup_question_state(&mut self) {
-        if self.deferred_send == Some(crate::app::agent_view::AgentDeferredSend::SubmitFeedback) {
-            self.deferred_send = None;
-        }
         self.hovered_question_item = None;
         self.question_scrollbar_dragging = false;
         self.hit_question_scrollbar.clear();
@@ -1848,7 +1718,6 @@ mod question_no_freeform_tests {
     pub(super) fn draw_frame(agent: &mut AgentView) {
         let area = Rect::new(0, 0, 80, 30);
         let reg = ActionRegistry::defaults();
-        let bundle = crate::app::bundle::BundleState::default();
         let mut buf = Buffer::empty(area);
         let mut scratch = crate::scrollback::render::ScratchBuffer::new();
         agent.last_terminal_size = (80, 30);
@@ -1860,7 +1729,6 @@ mod question_no_freeform_tests {
             None,
             false,
             crate::app::agent_view::BannerSlotParams::none(),
-            &bundle,
             &mut Vec::new(),
             crate::app::agent_view::AppRenderParams::default(),
         );

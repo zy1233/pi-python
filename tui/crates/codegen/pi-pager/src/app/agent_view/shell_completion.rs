@@ -29,9 +29,6 @@ impl AgentView {
         };
         if self.prompt.apply_completion_splice(splice) {
             self.prompt_input_mode = PromptInputMode::Bash;
-            // Re-fetch for the accepted text so accepting a directory
-            // (trailing `/`) lets the NEXT Tab complete inside it.
-            self.kick_shell_suggest_refetch();
         }
         true
     }
@@ -52,9 +49,6 @@ impl AgentView {
             }
             TabAction::Fill(range, fill) => {
                 if self.prompt.apply_completion_fill(range, &fill) {
-                    // A fill is typing: refresh the candidate set for the longer
-                    // token (the next Tab opens the dropdown on the refreshed set).
-                    self.kick_shell_suggest_refetch();
                 } else {
                     // Declined (range clips an atomic element): show the
                     // candidates instead of respinning fill+refetch every Tab.
@@ -68,49 +62,12 @@ impl AgentView {
         }
     }
 
-    /// Fire a deterministic (`includeAi: false`) completion fetch for the
-    /// current draft, bypassing the env-gated as-you-type debounce — the
-    /// always-on Tab path. `run_tab_on_load` makes the landing response run
-    /// the terminal Tab semantics once (a Tab that found no usable items
-    /// still completes when its candidates arrive).
-    pub(super) fn request_shell_tab_completion(&mut self, run_tab_on_load: bool) {
-        // Repeat Tab while the armed fetch is still in flight: keep the
-        // marker (its landing runs the Tab semantics) — no second RPC.
-        if run_tab_on_load && self.prompt.suggestions.tab_fetch_pending() {
-            return;
-        }
-        let generation = self
-            .prompt
-            .suggestions
-            .begin_tab_completion(run_tab_on_load);
-        self.pending_effects
-            .push(super::actions::Effect::FetchShellSuggestions {
-                agent_id: self.session.id,
-                text: self.prompt.text().to_owned(),
-                cwd: self.session.cwd.to_string_lossy().into_owned(),
-                session_id: self.session.session_id.as_ref().map(|s| s.0.to_string()),
-            });
-    }
-
-    /// Refresh the candidate set after an accept or a prefix fill changed
-    /// the draft: through the debounced as-you-type pipeline when enabled,
-    /// else a direct deterministic fetch. Either way the refreshed items
-    /// land silently and the NEXT Tab consumes them.
-    fn kick_shell_suggest_refetch(&mut self) {
-        if self.prompt.suggestions.enabled {
-            if let Some(eff) = self.notify_suggestion_text_changed() {
-                self.pending_effects.push(eff);
-            }
-        } else {
-            self.request_shell_tab_completion(false);
-        }
-    }
 }
 
 #[cfg(test)]
 mod shell_suggestion_key_tests {
     use super::*;
-    use crate::app::actions::{Action, Effect};
+    use crate::app::actions::Action;
     use crate::app::app_view::InputOutcome;
     use crate::views::suggestion_controller::{CompletionItemParsed, SuggestionSource};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -314,45 +271,6 @@ mod shell_suggestion_key_tests {
 
     // -- always-on Tab fetch (no GROK_SUGGESTIONS) --------------------------
 
-    /// Repeat Tab while the armed fetch is still in flight is a no-op: one
-    /// RPC, one landing that runs the Tab semantics once.
-    #[test]
-    fn repeat_tab_fires_single_fetch_while_pending() {
-        let mut agent = bash_agent_always_on("cat no");
-        let _ = agent.handle_prompt_key_for_test(&key(KeyCode::Tab));
-        let _ = agent.handle_prompt_key_for_test(&key(KeyCode::Tab));
-
-        let fetches = agent
-            .pending_effects
-            .iter()
-            .filter(|e| matches!(e, Effect::FetchShellSuggestions { .. }))
-            .count();
-        assert_eq!(fetches, 1, "the second Tab must not fire a second RPC");
-        assert!(
-            agent.prompt.suggestions.tab_fetch_pending(),
-            "the pending-Tab marker survives the repeat press"
-        );
-    }
-
-    /// Items outdated by an edit (stale generation) refetch instead of
-    /// completing over the old candidate set.
-    #[test]
-    fn tab_with_stale_items_refetches() {
-        let mut agent = bash_agent_always_on("cat no");
-        agent.prompt.suggestions.dropdown.items = vec![file_item("cat notes.md", "notes.md", 4..6)];
-        agent.prompt.suggestions.dropdown.generation = 7;
-
-        let _ = agent.handle_prompt_key_for_test(&key(KeyCode::Tab));
-        assert_eq!(agent.prompt.text(), "cat no", "no accept from stale items");
-        assert!(
-            agent
-                .pending_effects
-                .iter()
-                .any(|e| matches!(e, Effect::FetchShellSuggestions { .. })),
-            "stale items must refetch"
-        );
-    }
-
     /// An empty bash draft has no token to complete: Tab keeps its
     /// focus-cycling fallthrough.
     #[test]
@@ -364,23 +282,6 @@ mod shell_suggestion_key_tests {
             InputOutcome::Action(Action::FocusScrollback)
         ));
         assert!(agent.pending_effects.is_empty());
-    }
-
-    /// The normal (chat) prompt keeps its Tab behavior: no fetch, no
-    /// completion — the surface is bash-mode-only.
-    #[test]
-    fn tab_in_normal_mode_does_not_fetch() {
-        let mut agent = super::test_fixtures::make_agent();
-        agent.prompt.textarea.insert_str("cat no");
-
-        let _ = agent.handle_prompt_key_for_test(&key(KeyCode::Tab));
-        assert!(
-            !agent
-                .pending_effects
-                .iter()
-                .any(|e| matches!(e, Effect::FetchShellSuggestions { .. })),
-            "normal-mode Tab must not fetch completions"
-        );
     }
 
     // -- terminal-like Tab (single-candidate accept / common-prefix fill) --
@@ -477,56 +378,6 @@ mod shell_suggestion_key_tests {
         assert_eq!(agent.prompt.text(), "git st");
     }
 
-    /// Multiple candidates sharing a prefix longer than the typed token:
-    /// the first Tab fills the common prefix in place (no dropdown) and
-    /// re-fetches; when the refreshed items land, the second Tab opens the
-    /// dropdown.
-    #[test]
-    fn tab_fills_common_prefix_then_opens_dropdown_on_refresh() {
-        let mut agent = bash_agent("cat al");
-        agent.prompt.suggestions.dropdown.items = vec![
-            file_item("cat alpha_one.txt", "alpha_one.txt", 4..6),
-            file_item("cat alpha_two.txt", "alpha_two.txt", 4..6),
-        ];
-
-        let outcome = agent.handle_prompt_key_for_test(&key(KeyCode::Tab));
-        assert!(matches!(outcome, InputOutcome::Changed));
-        assert_eq!(agent.prompt.text(), "cat alpha_");
-        assert_eq!(agent.prompt.cursor(), "cat alpha_".len());
-        assert!(
-            !agent.prompt.completion_dropdown_open(),
-            "first Tab fills; the dropdown waits for the second"
-        );
-        assert!(
-            agent
-                .pending_effects
-                .iter()
-                .any(|e| matches!(e, Effect::DebounceSuggestions { .. })),
-            "the fill re-fetches candidates for the longer prefix"
-        );
-
-        // The refreshed response lands for the filled text…
-        let generation = agent.prompt.suggestions.generation();
-        agent.prompt.suggestions.on_suggestions_loaded(
-            crate::views::suggestion_controller::SuggestResponseParsed {
-                ghost: None,
-                completions: vec![
-                    file_item("cat alpha_one.txt", "alpha_one.txt", 4..10),
-                    file_item("cat alpha_two.txt", "alpha_two.txt", 4..10),
-                ],
-                generation,
-            },
-            "cat alpha_",
-            "cat alpha_".len(),
-        );
-
-        // …and the second Tab opens the dropdown (LCP no longer extends).
-        let outcome = agent.handle_prompt_key_for_test(&key(KeyCode::Tab));
-        assert!(matches!(outcome, InputOutcome::Changed));
-        assert!(agent.prompt.completion_dropdown_open());
-        assert_eq!(agent.prompt.text(), "cat alpha_");
-    }
-
     /// Bash-mode agent whose draft is a paste CHIP (atomic element), with
     /// the dropdown anchor pinned to it — the state a landing would leave
     /// when the shell's token range points into the chip's raw text.
@@ -542,19 +393,6 @@ mod shell_suggestion_key_tests {
         agent.prompt.suggestions.dropdown.request_cursor = agent.prompt.cursor();
         agent.prompt.suggestions.dropdown.items = items;
         (agent, text)
-    }
-
-    fn suggest_fetch_count(agent: &AgentView) -> usize {
-        agent
-            .pending_effects
-            .iter()
-            .filter(|e| {
-                matches!(
-                    e,
-                    Effect::FetchShellSuggestions { .. } | Effect::DebounceSuggestions { .. }
-                )
-            })
-            .count()
     }
 
     /// BugBot: a Fill whose range clips a paste chip used to no-op the
@@ -581,13 +419,11 @@ mod shell_suggestion_key_tests {
             gen_before,
             "a declined fill must not invalidate anything"
         );
-        assert_eq!(suggest_fetch_count(&agent), 0, "no refetch kick");
 
         // Second Tab goes through the open dropdown (accept path), never
         // the fetch arm — no spin.
         let _ = agent.handle_prompt_key_for_test(&key(KeyCode::Tab));
         assert_eq!(agent.prompt.text(), text);
-        assert_eq!(suggest_fetch_count(&agent), 0);
     }
 
     /// Same hole on the insta-accept arm: committing would consume the
@@ -606,7 +442,6 @@ mod shell_suggestion_key_tests {
             1,
             "the candidate must not be consumed"
         );
-        assert_eq!(suggest_fetch_count(&agent), 0, "no refetch kick");
     }
 
     /// BugBot sibling hole: the OPEN-dropdown accept (Tab/Enter/mouse all
@@ -637,13 +472,11 @@ mod shell_suggestion_key_tests {
             "nothing consumed"
         );
         assert_eq!(agent.prompt.suggestions.generation(), gen_before);
-        assert_eq!(suggest_fetch_count(&agent), 0, "no refetch kick");
 
         // Tab rides the same helper.
         let _ = agent.handle_prompt_key_for_test(&key(KeyCode::Tab));
         assert_eq!(agent.prompt.suggestions.dropdown.items.len(), 2);
         assert_eq!(agent.prompt.text(), text);
-        assert_eq!(suggest_fetch_count(&agent), 0);
     }
 
     /// The probe peeks the SELECTED item: with a chip-clipping row next to
@@ -680,119 +513,6 @@ mod shell_suggestion_key_tests {
         assert!(!agent.prompt.completion_dropdown_open());
     }
 
-    /// Accepting a directory completion (trailing `/`) must re-fetch so the
-    /// NEXT Tab completes inside it — drill-down chaining.
-    #[test]
-    fn dir_accept_kicks_refetch_for_drill_down() {
-        let mut agent = bash_agent("cat no");
-        agent.prompt.suggestions.dropdown.open = true;
-        agent.prompt.suggestions.dropdown.items =
-            vec![file_item("cat Notes\\ Archive/", "Notes\\ Archive/", 4..6)];
-
-        let outcome = agent.handle_prompt_key_for_test(&key(KeyCode::Tab));
-        assert!(matches!(outcome, InputOutcome::Changed));
-        assert_eq!(agent.prompt.text(), "cat Notes\\ Archive/");
-        assert!(
-            agent
-                .pending_effects
-                .iter()
-                .any(|e| matches!(e, Effect::DebounceSuggestions { .. })),
-            "dir accept must kick a fresh fetch for the drill-down"
-        );
-    }
-
     // -- Bash-mode gating of the as-you-type pipeline ------------------------
 
-    /// Typing in the normal (chat) prompt never fires the suggest pipeline;
-    /// the same keystroke in bash mode debounces a request.
-    #[test]
-    fn pipeline_fires_only_in_bash_mode() {
-        let mut agent = super::test_fixtures::make_agent();
-        agent.prompt.suggestions.enabled = true;
-
-        let _ = agent.handle_prompt_key_for_test(&key(KeyCode::Char('g')));
-        assert!(
-            !agent
-                .pending_effects
-                .iter()
-                .any(|e| matches!(e, Effect::DebounceSuggestions { .. })),
-            "normal-mode typing must not reach the suggest pipeline"
-        );
-
-        let mut agent = super::test_fixtures::make_agent();
-        agent.prompt.suggestions.enabled = true;
-        agent.prompt_input_mode = PromptInputMode::Bash;
-
-        let _ = agent.handle_prompt_key_for_test(&key(KeyCode::Char('g')));
-        assert!(
-            agent
-                .pending_effects
-                .iter()
-                .any(|e| matches!(e, Effect::DebounceSuggestions { .. })),
-            "bash-mode typing debounces a suggest request"
-        );
-    }
-
-    /// With the pipeline OFF, typing invalidates Tab-fetched state instead:
-    /// the landing response for the pre-edit text is stale.
-    #[test]
-    fn typing_invalidates_tab_state_always_on() {
-        let mut agent = bash_agent_always_on("cat no");
-        agent.prompt.suggestions.dropdown.items = vec![file_item("cat notes.md", "notes.md", 4..6)];
-        let gen_before = agent.prompt.suggestions.generation();
-
-        let _ = agent.handle_prompt_key_for_test(&key(KeyCode::Char('x')));
-        assert!(
-            agent.prompt.suggestions.generation() > gen_before,
-            "the edit must invalidate Tab-fetched state"
-        );
-        assert!(agent.prompt.suggestions.dropdown.items.is_empty());
-        assert!(
-            !agent
-                .pending_effects
-                .iter()
-                .any(|e| matches!(e, Effect::DebounceSuggestions { .. })),
-            "no as-you-type fetch without the env flag"
-        );
-    }
-
-    /// THE stale-anchor regression: a mouse click repositions the cursor
-    /// with no text change, so it must invalidate cached completion items
-    /// exactly like a typed edit — the next Tab fetches for the token under
-    /// the clicked cursor instead of completing the old one.
-    #[test]
-    fn prompt_click_invalidates_cached_items_before_tab() {
-        use crate::app::agent_view::AgentPane;
-        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
-        let mut agent = bash_agent_always_on("cat no");
-        agent.prompt.suggestions.dropdown.items = vec![file_item("cat notes.md", "notes.md", 4..6)];
-        agent.pane_areas.prompt = ratatui::layout::Rect::new(0, 40, 80, 5);
-        // Already focused: an unfocused-collapse click only refocuses and
-        // never reaches the textarea (the exact bug needs a focused click).
-        agent.active_pane = AgentPane::Prompt;
-        let gen_before = agent.prompt.suggestions.generation();
-
-        let click = MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            column: 2,
-            row: 41,
-            modifiers: KeyModifiers::NONE,
-        };
-        let _ = agent.handle_mouse(&click);
-        assert!(
-            agent.prompt.suggestions.generation() > gen_before,
-            "a prompt click must invalidate cached completion state"
-        );
-        assert!(agent.prompt.suggestions.dropdown.items.is_empty());
-
-        let _ = agent.handle_prompt_key_for_test(&key(KeyCode::Tab));
-        assert_eq!(agent.prompt.text(), "cat no", "old token must not complete");
-        assert!(
-            agent
-                .pending_effects
-                .iter()
-                .any(|e| matches!(e, Effect::FetchShellSuggestions { .. })),
-            "Tab must refetch for the clicked position"
-        );
-    }
 }

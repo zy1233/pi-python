@@ -550,7 +550,7 @@ fn open_settings_enter_picker_esc_stays_open_in_browse() {
         let Some(ActiveModal::Settings { state }) = &mut agent.active_modal else {
             panic!("settings modal must be open")
         };
-        assert!(state.focus_key("coding_data_sharing"));
+        assert!(state.focus_key("screen_mode"));
         assert!(state.try_enter_picking_enum());
         assert!(!state.close_on_picker_exit);
     }
@@ -1247,9 +1247,6 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
         "max_thoughts_width" => {
             let _ = dispatch(Action::SetMaxThoughtsWidth(200), app);
         }
-        "coding_data_sharing" => {
-            let _ = dispatch(Action::SetCodingDataSharing { opted_in: true }, app);
-        }
         "plan_mode" => {
             let _ = dispatch(
                 Action::SetPlanMode(crate::app::actions::PlanModeKind::On),
@@ -1430,7 +1427,6 @@ fn set_simple_mode_propagates_to_every_agent() {
             yolo_mode: false,
             auto_mode: false,
             prompt_history: Vec::new(),
-            prompt_history_loading: false,
             loading_replay: false,
             restore_degree: None,
             rate_limited: false,

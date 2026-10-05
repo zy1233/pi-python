@@ -45,8 +45,6 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
     }
     let ui_snapshot = app.current_ui.clone();
     // Capture app-level fields before the mut-borrow loop.
-    let coding_data_sharing_opt_out_from_app = app.coding_data_retention_opt_out;
-    let coding_data_sharing_lock_from_app = app.coding_data_sharing_lock();
     let show_tips_from_app = app.show_tips;
     let auto_update_from_app = app.auto_update;
     let respect_manual_folds_from_app = app.appearance.scrollback.scroll.respect_manual_folds;
@@ -80,8 +78,6 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
                     .iter()
                     .map(|(id, info)| (info.name.clone(), id.clone()))
                     .collect(),
-                coding_data_sharing_opt_out: coding_data_sharing_opt_out_from_app,
-                coding_data_sharing_lock: coding_data_sharing_lock_from_app,
                 // Prefer optimistic pending over confirmed active.
                 plan_mode_active: agent.plan_mode_pending.unwrap_or(agent.plan_mode_active),
                 show_tips: show_tips_from_app,
@@ -133,7 +129,7 @@ pub(in crate::app::dispatch) fn dispatch_open_command_palette(app: &mut AppView)
 /// Open the settings modal. Reads the live `UiConfig` snapshot
 /// (sans-IO). Single-instance: `debug_assert!` catches routing bugs.
 ///
-/// `focus_key` selects a settings row after open (e.g. `coding_data_sharing`).
+/// `focus_key` selects a settings row after open (e.g. `permission_mode`).
 /// When not on an agent view, switches to an existing agent or creates a
 /// placeholder session so the modal can mount.
 pub(in crate::app::dispatch) fn dispatch_open_settings(
@@ -169,8 +165,6 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
     let registry = app.settings_registry.clone();
     let ui_snapshot = app.current_ui.clone();
     // Capture app-level fields before the mut-borrow on the agent.
-    let coding_data_sharing_opt_out_from_app = app.coding_data_retention_opt_out;
-    let coding_data_sharing_lock_from_app = app.coding_data_sharing_lock();
     let show_tips_from_app = app.show_tips;
     let auto_update_from_app = app.auto_update;
     let respect_manual_folds_from_app = app.appearance.scrollback.scroll.respect_manual_folds;
@@ -213,8 +207,6 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
             .iter()
             .map(|(id, info)| (info.name.clone(), id.clone()))
             .collect(),
-        coding_data_sharing_opt_out: coding_data_sharing_opt_out_from_app,
-        coding_data_sharing_lock: coding_data_sharing_lock_from_app,
         // Prefer optimistic pending over confirmed active.
         plan_mode_active: agent.plan_mode_pending.unwrap_or(agent.plan_mode_active),
         show_tips: show_tips_from_app,
@@ -613,8 +605,6 @@ pub(crate) fn build_pager_snapshot(app: &AppView) -> crate::settings::PagerLocal
         auto_mode: agent_auto_mode(app),
         current_model_name: agent_current_model_name(app),
         available_models: agent_available_models(app),
-        coding_data_sharing_opt_out: app.coding_data_retention_opt_out,
-        coding_data_sharing_lock: app.coding_data_sharing_lock(),
         plan_mode_active: agent_plan_mode(app),
         show_tips: app.show_tips,
         auto_update: app.auto_update,
@@ -759,14 +749,6 @@ pub(in crate::app::dispatch) fn action_for_reset(
         }
         // max_thoughts_width: direct round-trip.
         ("max_thoughts_width", SettingValue::Int(i)) => Some(Action::SetMaxThoughtsWidth(*i)),
-        // coding_data_sharing: "opt-in" / "opt-out" → bool.
-        // Both arms needed (registry default is "opt-out").
-        ("coding_data_sharing", SettingValue::Enum("opt-in")) => {
-            Some(Action::SetCodingDataSharing { opted_in: true })
-        }
-        ("coding_data_sharing", SettingValue::Enum("opt-out")) => {
-            Some(Action::SetCodingDataSharing { opted_in: false })
-        }
         // plan_mode: "on" / "off" → PlanModeKind.
         // "on" arm is a skew guard (default is "off").
         ("plan_mode", SettingValue::Enum("off")) => {
@@ -990,11 +972,6 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
                 set_scroll_mode_inner(app, mode);
             }
         }
-        // No pager-side mirror to roll back; the failure toast is the whole story.
-        ("trace_upload", SettingValue::Bool(_)) => {}
-        // The in-session suppression latch deliberately stays set even when
-        // the disk write fails.
-        ("feedback_trace_card", SettingValue::Bool(_)) => {}
         // invert_scroll / scroll_lines: direct inner calls (clamp in inner).
         ("invert_scroll", SettingValue::Bool(b)) => set_invert_scroll_inner(app, *b),
         // Effective default is false → restore None (mirror stays disk-synced).

@@ -261,11 +261,6 @@ pub enum ActiveModal {
     Settings {
         state: Box<crate::views::settings_modal::SettingsModalState>,
     },
-    /// Tabbed usage / session-info modal (`/usage`, `/session-info`,
-    /// `/context`, context-bar click). Boxed — holds fetched snapshots.
-    UsageInfo {
-        state: Box<crate::views::usage_modal::UsageInfoModalState>,
-    },
     /// Reset-settings confirmation, stacked above Settings.
     ///
     /// The underlying `SettingsModalState` is moved in/out so cancel
@@ -277,22 +272,6 @@ pub enum ActiveModal {
         key: crate::settings::SettingKey,
         /// Preserved settings state, restored by both choice branches.
         settings_state: Box<crate::views::settings_modal::SettingsModalState>,
-    },
-    /// Modal preview for a `#` remember note. Shows the raw text immediately;
-    /// the LLM-enhanced version arrives asynchronously and can be toggled with Tab.
-    RememberNoteReview {
-        raw_content: String,
-        enhanced_content: Option<String>,
-        showing_enhanced: bool,
-        scroll: u16,
-        window: ModalWindowState,
-        cached_lines: Option<(u16, Vec<ratatui::text::Line<'static>>)>,
-        cwd: std::path::PathBuf,
-        agent_id: crate::app::agent::AgentId,
-        /// Monotonic nonce to correlate async rewrite results with the modal
-        /// that requested them, preventing stale results from populating a
-        /// different note's review modal.
-        rewrite_nonce: u64,
     },
 }
 /// Snapshot of the command palette state, saved when opening an arg picker
@@ -504,9 +483,7 @@ impl ActiveModal {
             | ActiveModal::DocViewer { .. }
             | ActiveModal::ShortcutsHelp { .. }
             | ActiveModal::MemoryBrowser { .. }
-            | ActiveModal::Settings { .. }
-            | ActiveModal::UsageInfo { .. }
-            | ActiveModal::RememberNoteReview { .. } => vec![],
+            | ActiveModal::Settings { .. } => vec![],
         }
     }
     pub fn message(&self, drain_blocked: bool) -> &str {
@@ -536,8 +513,6 @@ impl ActiveModal {
             ActiveModal::MemoryBrowser { .. } => "Memory",
             ActiveModal::Settings { .. } => crate::views::settings_modal::MODAL_TITLE,
             ActiveModal::ResetSettingsConfirm { .. } => "Reset setting?",
-            ActiveModal::RememberNoteReview { .. } => "Memory Note",
-            ActiveModal::UsageInfo { .. } => "Usage",
         }
     }
 }

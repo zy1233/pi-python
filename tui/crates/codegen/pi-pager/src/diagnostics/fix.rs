@@ -153,13 +153,6 @@ impl FixPlan {
         self.id
     }
 
-    pub fn change(&self) -> &PlannedChange {
-        &self.change
-    }
-
-    pub fn caveats(&self) -> &[&'static str] {
-        &self.caveats
-    }
 }
 
 #[derive(Clone, Debug)]

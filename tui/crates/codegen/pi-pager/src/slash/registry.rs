@@ -176,7 +176,6 @@ impl CommandRegistry {
         let sources = vec![CommandSource::Builtin; n];
         // Fail-closed until the matching `set_*_visible` call reveals them.
         let mut hidden = HashSet::new();
-        hidden.insert("recap".to_string());
         // Voice is fail-closed in the registry until `set_voice_visible` after
         // the runtime gate resolves (GA default on; remote kill switch may hide).
         hidden.insert("voice".to_string());
@@ -229,7 +228,7 @@ impl CommandRegistry {
     /// typed invocation, ignoring the menu-only gate (`menu_hidden`).
     ///
     /// Still returns `None` for hard-hidden commands (feature gates like
-    /// `/voice` / `/recap`, or `/auto` when the auto permission-mode
+    /// `/voice`, or `/auto` when the auto permission-mode
     /// feature is unavailable — those must stay fail-closed), restricted
     /// commands, and commands whose `required_tools()` are not all in the
     /// advertised toolset.
@@ -387,12 +386,6 @@ impl CommandRegistry {
             self.menu_hidden.insert("share".to_string());
         }
         self.rebuild_triggers();
-    }
-
-    /// Show or hide the `/recap` command (shell `sessionRecap` gate).
-    /// Hidden by default in [`Self::new`]; revealed from initialize meta.
-    pub fn set_recap_visible(&mut self, visible: bool) {
-        self.set_command_visible("recap", visible);
     }
 
     /// Show or hide the `/voice` command (runtime voice gate).
@@ -843,9 +836,9 @@ mod tests {
     /// unresolvable for dispatch, exactly like `get()`.
     #[test]
     fn get_for_dispatch_respects_hard_gates() {
-        // Hard-hidden by name (e.g. /recap default).
-        let recap: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
-            name: "recap",
+        // Hard-hidden by name (e.g. /voice default).
+        let voice: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
+            name: "voice",
             aliases: &[],
         });
         // Tier-restricted.
@@ -858,11 +851,11 @@ mod tests {
             name: "loop",
             required: &["scheduler_create"],
         });
-        let mut reg = CommandRegistry::new(vec![recap, usage, gated]);
+        let mut reg = CommandRegistry::new(vec![voice, usage, gated]);
         reg.set_restricted_commands(&["usage".to_string()]);
 
         assert!(
-            reg.get_for_dispatch("recap").is_none(),
+            reg.get_for_dispatch("voice").is_none(),
             "hard-hidden stays hard"
         );
         assert!(

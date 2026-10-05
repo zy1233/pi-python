@@ -13,11 +13,6 @@ use super::modes::{
     dispatch_cycle_mode, 
     set_permission_mode, set_plan_mode, set_yolo_mode,
 };
-use super::notes::{
-    
-    dispatch_save_remember_note_from_modal, dispatch_send_feedback,
-    dispatch_send_recap, dispatch_send_remember_note,
-};
 use super::permissions::{
     dispatch_permission_cancel, dispatch_permission_followup, dispatch_permission_select,
 };
@@ -39,7 +34,7 @@ use super::session::fork::{
     dispatch_startup_fork_session,
 };
 use super::session::lifecycle::{
-    clear_startup_actions, dispatch_accept_consent, dispatch_agent_type_mismatch_answered,
+    clear_startup_actions, dispatch_agent_type_mismatch_answered,
     dispatch_delete_current_session_answered, dispatch_exit_session, dispatch_new_session,
     dispatch_new_session_inner, dispatch_new_session_with_id, dispatch_new_worktree_session,
     dispatch_trust_folder, open_new_session_question,
@@ -75,9 +70,8 @@ use super::settings::ui::{
 };
 use super::status::{
     dispatch_copy_session_id, 
-    dispatch_privacy_banner_opt_in, dispatch_privacy_banner_opt_out, 
-    dispatch_show_context_info, dispatch_show_queue, 
-    set_coding_data_sharing,
+    
+    dispatch_show_queue, 
 };
 use super::task_result::{dispatch_task_result, unregister_all_active_sessions};
 use super::transcript::{
@@ -90,7 +84,6 @@ use super::voice::{dispatch_enable_voice_mode, dispatch_voice_stop, dispatch_voi
 use crate::app::actions::{Action, Effect};
 use crate::app::agent_view::ActivePane;
 use crate::app::app_view::{ActiveView, AppView, AuthState};
-use crate::app::consent::ConsentState;
 use crate::scrollback::types::DisplayMode;
 use crate::views::session_picker::CONTENT_EXPAND_OFFSET;
 use pi_telemetry::session_ctx::log_event;
@@ -575,58 +568,11 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
                 config_option_id: agent.session.models.config_option_id.clone(),
             }]
         }
-        Action::AnnouncementsHide => {
-            let shown_key = crate::views::announcements::first_session_announcement(
-                &app.active_announcements,
-                &app.hidden_announcement_ids,
-            )
-            .filter(|a| crate::views::announcements::is_dismissible(a))
-            .map(pi_announcements::announcement_hide_key);
-            if let Some(key) = shown_key
-                && app.hidden_announcement_ids.insert(key)
-            {
-                vec![Effect::PersistAnnouncementsHidden {
-                    hidden_ids: app.hidden_announcement_ids.clone(),
-                }]
-            } else {
-                vec![]
-            }
-        }
-        Action::AnnouncementsOpenCta(surface) => {
-            if let Some((promo, url)) = crate::views::announcements::promo_cta_target(
-                &app.active_announcements,
-                &app.hidden_announcement_ids,
-            ) {
-                let url = url.to_owned();
-                let promo_id = promo.id.clone();
-                log_event(pi_telemetry::events::AnnouncementCtaClicked {
-                    id: promo_id,
-                    source: surface,
-                });
-                open_url_or_show(app, &url);
-            }
-            vec![]
-        }
         Action::CancelTurn => dispatch_cancel_turn(app),
-        Action::RequestBundleStatus => vec![Effect::FetchBundleStatus],
         Action::CycleMode => dispatch_cycle_mode(app),
         Action::RenameSession { title } => dispatch_rename_session(app, title),
-        Action::ShowContextInfo => dispatch_show_context_info(app),
         Action::ShowQueue => dispatch_show_queue(app),
         Action::SetPlanMode(kind) => set_plan_mode(app, kind),
-        Action::SendFeedback {
-            text,
-            images,
-            trace,
-        } => dispatch_send_feedback(app, text, images, trace),
-        Action::SendRememberNote(text) => dispatch_send_remember_note(app, text),
-        Action::SaveRememberNoteFromModal => dispatch_save_remember_note_from_modal(app),
-        Action::SendRecap { auto } => dispatch_send_recap(app, auto),
-        Action::SetCodingDataSharing { opted_in } => set_coding_data_sharing(
-            app,
-            opted_in,
-            pi_telemetry::events::CodingDataConsentSource::Settings,
-        ),
         Action::SetVimMode(v) => set_vim_mode(app, v),
         Action::SetRememberToolApprovals(v) => set_remember_tool_approvals(app, v),
         Action::SetAskUserQuestionTimeoutEnabled(v) => {
@@ -682,8 +628,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::PreviewAutoDarkTheme(v) => preview_auto_dark_theme(app, v),
         Action::PreviewAutoLightTheme(v) => preview_auto_light_theme(app, v),
         Action::OpenSettings => dispatch_open_settings(app, None),
-        Action::PrivacyBannerOptIn => dispatch_privacy_banner_opt_in(app),
-        Action::PrivacyBannerOptOut => dispatch_privacy_banner_opt_out(app),
         Action::OpenCommandPalette => dispatch_open_command_palette(app),
         Action::OpenResetConfirm { key } => dispatch_open_reset_confirm(app, key),
         Action::ConfirmResetSetting { choice } => dispatch_confirm_reset_setting(app, choice),
@@ -752,17 +696,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             vec![]
         }
         Action::TrustFolder => dispatch_trust_folder(app),
-        Action::AcceptConsent => dispatch_accept_consent(app),
-        Action::OpenConsentLink(index) => {
-            let url = match &app.consent_state {
-                ConsentState::Pending { notice, .. } => notice.links.get(index).cloned(),
-                ConsentState::Done => None,
-            };
-            if let Some(url) = url {
-                open_url_or_show(app, &url);
-            }
-            vec![]
-        }
         Action::TriggerDeepSearch => dispatch_trigger_deep_search(app, false),
         Action::ForceDeepSearch => dispatch_trigger_deep_search(app, true),
         Action::PickContentSession { session_id, cwd } => {
@@ -830,34 +763,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
                 "new_session_worktree_mode",
             );
             effects
-        }
-        Action::DoctorFixConfirmed { target, plan } => {
-            let Some(target) = super::task_result::current_doctor_target(app, &target) else {
-                super::task_result::deliver_doctor_message(
-                    app,
-                    target.agent_id,
-                    "This fix was cancelled because the session changed. Run `/doctor fix` again."
-                        .to_owned(),
-                );
-                return vec![];
-            };
-            if let Some(agent) = app.agents.get_mut(&target.agent_id) {
-                agent
-                    .scrollback
-                    .push_block(crate::scrollback::block::RenderBlock::system(format!(
-                        "Applying {}…",
-                        plan.id()
-                    )));
-            }
-            vec![Effect::ApplyDoctorFix { target, plan }]
-        }
-        Action::DoctorFixCancelled(target) => {
-            super::task_result::deliver_doctor_message(
-                app,
-                target.agent_id,
-                "Fix cancelled.".to_owned(),
-            );
-            vec![]
         }
         Action::AgentTypeMismatchAnswered {
             start_new,

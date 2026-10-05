@@ -22,7 +22,7 @@ use crate::views::agent::AgentViewLayoutParams;
 use crate::views::btw_overlay::BTW_OVERLAY_ENTRY_IDX;
 use crate::views::plan_approval_view::PlanApprovalFocus;
 use crate::views::prompt_widget::{PromptBg, PromptFlag, PromptInfo, PromptStyle};
-use crate::views::question_view::{QUESTION_VIEW_HPAD, feedback_input};
+use crate::views::question_view::{QUESTION_VIEW_HPAD, };
 use crate::views::shortcuts_bar::{HintItem, PendingHint, ShortcutsBar};
 use crate::views::{agent, turn_status};
 use ratatui::buffer::Buffer;
@@ -139,20 +139,6 @@ impl AgentView {
             }
         }
     }
-    /// Rows to give the bare `/feedback` report box: report-sized where the terminal allows it, never past `cap`.
-    /// Its rules plus one text row is the floor, so a squeezed box still shows what the user is typing.
-    fn feedback_editor_h(&self, inner_width: u16, cap: u16, theme: &Theme) -> u16 {
-        let floor = feedback_input::MIN_HEIGHT;
-        let rows = feedback_input::HEIGHT.clamp(floor, cap.max(floor));
-        self.prompt
-            .desired_height(
-                feedback_input::width(inner_width),
-                &feedback_input::style(theme),
-                true,
-                cap.max(rows),
-            )
-            .max(rows)
-    }
     /// The one-line freeform answer row, growing with what the user types.
     fn freeform_editor_h(&self, inner_width: u16, cap: u16, style: &PromptStyle) -> u16 {
         let question_text_w = crate::views::question_view::inline_text_width(inner_width);
@@ -180,11 +166,7 @@ impl AgentView {
                     esc,
                 ]
             }
-            QuestionFocus::InputMode if qv.is_feedback_report() => {
-                vec![HintItem::new(key!(Enter), "send"), esc]
-            }
             QuestionFocus::InputMode => vec![HintItem::new(key!(Enter), "submit"), esc],
-            QuestionFocus::Navigation if qv.is_feedback_trace() => vec![esc],
             QuestionFocus::Navigation => {
                 vec![
                     HintItem::new(key!(Tab), "next answer"),
@@ -403,31 +385,6 @@ impl AgentView {
     pub fn should_show_tip(&mut self) -> bool {
         false
     }
-    /// Left side of the question card footer, which offers different keys for the report box than for the answer rows.
-    fn question_footer_hints(
-        qv: &crate::views::question_view::QuestionViewState,
-        feedback_pane: bool,
-        hint_style: Style,
-        hint_key: Style,
-    ) -> Vec<Span<'static>> {
-        if feedback_pane {
-            Self::feedback_footer_hints(hint_style, hint_key)
-        } else {
-            Self::answer_footer_hints(qv, hint_style, hint_key)
-        }
-    }
-    /// The report box offers only a newline: nothing to navigate or copy, and the shortcuts bar below already carries Esc.
-    fn feedback_footer_hints(hint_style: Style, hint_key: Style) -> Vec<Span<'static>> {
-        let newline_key = if crate::terminal::terminal_context().shift_enter_unavailable() {
-            "Alt+Enter"
-        } else {
-            "Shift+Enter"
-        };
-        vec![
-            Span::styled(newline_key, hint_key),
-            Span::styled(" newline", hint_style),
-        ]
-    }
     /// Walking and copying the answer rows, counter first when the card holds more than one question.
     fn answer_footer_hints(
         qv: &crate::views::question_view::QuestionViewState,
@@ -465,7 +422,6 @@ impl AgentView {
         pending_hint: Option<PendingHint>,
         overlay_focused: bool,
         banner: super::BannerSlotParams<'_>,
-        bundle_state: &crate::app::bundle::BundleState,
         link_spans_out: &mut Vec<pi_ratatui_inline::LinkSpan>,
         app_params: AppRenderParams<'_>,
     ) -> (
@@ -590,12 +546,7 @@ impl AgentView {
                 None
             },
             placeholder_when_focused: false,
-            placeholder_override: if let Some(ph) = self
-                .prompt_input_mode
-                .placeholder_override(self.multiline_mode)
-            {
-                Some(ph)
-            } else if casual_commenting
+            placeholder_override: if casual_commenting
                 || self
                     .plan_approval_view
                     .as_ref()
@@ -730,15 +681,9 @@ impl AgentView {
             title: None,
             image_preview: true,
         };
-        let feedback_pane = self
-            .question_view
-            .as_ref()
-            .is_some_and(|qv| qv.is_feedback_report());
         let inline_prompt_max = ((area.height as u32) / 3).clamp(3, 15) as u16;
         let question_prompt_body_h = if question_view_h == 0 || !is_question_input_mode {
             0
-        } else if feedback_pane {
-            self.feedback_editor_h(inner_width, inline_prompt_max, &theme)
         } else {
             self.freeform_editor_h(inner_width, inline_prompt_max, &question_input_style)
         };
@@ -2028,46 +1973,7 @@ impl AgentView {
                 self.question_scroll_region =
                     Some((render_result.options_start_y, render_result.options_end_y));
             }
-            let mut painted_prompt_h = inline_prompt_h;
-            if is_input_mode && feedback_pane {
-                let box_y = question_area.y + question_area.height;
-                let below_card = (layout.prompt.y + layout.prompt.height).saturating_sub(box_y);
-                let box_h = inline_prompt_h
-                    .min(below_card.saturating_sub(question_footer_h))
-                    .max(below_card.min(1));
-                let input_area = Rect {
-                    x: layout.prompt.x + 3,
-                    y: box_y,
-                    width: feedback_input::width(layout.prompt.width),
-                    height: box_h,
-                };
-                buf.set_style(
-                    Rect {
-                        x: layout.prompt.x + 1,
-                        y: box_y,
-                        width: layout.prompt.width.saturating_sub(1),
-                        height: box_h,
-                    },
-                    Style::default().bg(theme.bg_light),
-                );
-                let outlined = box_h >= feedback_input::MIN_HEIGHT;
-                let style = if outlined {
-                    feedback_input::style(&theme)
-                } else {
-                    feedback_input::flat_style(&theme)
-                };
-                let result = self.prompt.draw(
-                    buf,
-                    input_area,
-                    Some(layout.scrollback),
-                    &style,
-                    outlined.then_some(&PromptInfo::default()),
-                    None,
-                );
-                prompt_cursor_pos = result.cursor_pos;
-                self.inline_prompt_area = Some(input_area);
-                painted_prompt_h = box_h;
-            } else if is_input_mode && inline_prompt_h > 0 {
+            if is_input_mode && inline_prompt_h > 0 {
                 let row_y = question_area.y + question_area.height;
                 let content_x = layout.prompt.x + 3;
                 let content_w = layout.prompt.width.saturating_sub(3);
@@ -2193,7 +2099,7 @@ impl AgentView {
                 self.inline_prompt_area = None;
             }
             if let Some(ref qv) = self.question_view {
-                let footer_y = question_area.y + question_area.height + painted_prompt_h + 1;
+                let footer_y = question_area.y + question_area.height + inline_prompt_h + 1;
                 let footer_x = layout.prompt.x;
                 let footer_w = layout.prompt.width;
                 self.question_nav_buttons.clear();
@@ -2201,7 +2107,7 @@ impl AgentView {
                     use ratatui::style::Modifier;
                     let footer_bg = theme.bg_light;
                     let gap_above = footer_y.saturating_sub(1);
-                    if gap_above >= question_area.y + question_area.height + painted_prompt_h {
+                    if gap_above >= question_area.y + question_area.height + inline_prompt_h {
                         buf.set_style(
                             Rect {
                                 x: footer_x,
@@ -2240,15 +2146,12 @@ impl AgentView {
                         .fg(question_accent)
                         .bg(footer_bg)
                         .add_modifier(Modifier::BOLD);
-                    let left_spans =
-                        Self::question_footer_hints(qv, feedback_pane, hint_style, hint_key);
+                    let left_spans = Self::answer_footer_hints(qv, hint_style, hint_key);
                     let left_line = Line::from(left_spans);
                     let avail_w = footer_w.saturating_sub(3);
                     buf.set_line_safe(content_x, footer_y, &left_line, avail_w);
                     let is_last = qv.active_tab >= qv.questions.len().saturating_sub(1);
-                    let enter_label = if feedback_pane || qv.is_feedback_trace() {
-                        "send"
-                    } else if qv.is_on_freeform_row() {
+                    let enter_label = if qv.is_on_freeform_row() {
                         "edit"
                     } else if is_last {
                         "submit"
@@ -2581,11 +2484,7 @@ impl AgentView {
                 if result_count == 0 {
                     let msg_y = top_border_y + 1;
                     if msg_y < bottom_border_y {
-                        let message = if self.prompt_history_loading() {
-                            "  Loading..."
-                        } else {
-                            "  no matching history"
-                        };
+                        let message = "  no matching history";
                         buf.set_string_safe(
                             items_x,
                             msg_y,
@@ -3793,7 +3692,6 @@ mod voice_recording_overlay_tests {
     use super::super::test_fixtures::make_plan_approval_view_state;
     use super::AgentView;
     use crate::actions::ActionRegistry;
-    use crate::app::bundle::BundleState;
     use crate::scrollback::render::ScratchBuffer;
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
@@ -3819,7 +3717,6 @@ mod voice_recording_overlay_tests {
             None,
             false,
             crate::app::agent_view::BannerSlotParams::none(),
-            &BundleState::default(),
             &mut Vec::new(),
             super::AppRenderParams {
                 voice_available: listening,
@@ -3865,7 +3762,6 @@ mod voice_recording_overlay_tests {
 mod overlay_post_flush_tests {
     use super::super::test_fixtures::make_agent;
     use crate::actions::ActionRegistry;
-    use crate::app::bundle::BundleState;
     use crate::scrollback::render::ScratchBuffer;
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
@@ -3882,7 +3778,6 @@ mod overlay_post_flush_tests {
                 None,
                 false,
                 crate::app::agent_view::BannerSlotParams::none(),
-                &BundleState::default(),
                 &mut Vec::new(),
                 super::AppRenderParams::default(),
             )
@@ -3999,7 +3894,6 @@ mod status_line_draw_tests {
     use super::super::test_fixtures::make_agent;
     use super::AgentView;
     use crate::actions::ActionRegistry;
-    use crate::app::bundle::BundleState;
     use crate::scrollback::render::ScratchBuffer;
     use crate::views::status_line::{SanitizedText, StatusLineDisplay, StatusLineFrame};
     use ratatui::buffer::Buffer;
@@ -4020,7 +3914,6 @@ mod status_line_draw_tests {
             None,
             false,
             crate::app::agent_view::BannerSlotParams::none(),
-            &BundleState::default(),
             &mut Vec::new(),
             super::AppRenderParams {
                 status_line: StatusLineFrame::On {

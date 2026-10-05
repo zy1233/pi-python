@@ -45,7 +45,6 @@ fn last_credit_limit_block(
 /// Dispatch a `BillingFetched` task result with sensible defaults.
 fn open_usage_modal_nonce(app: &AppView) -> u64 {
     match app.agents[&AgentId(0)].active_modal.as_ref() {
-        Some(crate::views::modal::ActiveModal::UsageInfo { state }) => state.fetch_nonce,
         _ => 0,
     }
 }
@@ -494,41 +493,6 @@ fn upsell_max_tier_not_idempotent_pushes_multiple_cards() {
 
 // ── ShowUsage / session usage ───────────────────────────────────────
 
-fn is_nonsilent_billing(effects: &[Effect]) -> bool {
-    matches!(
-        effects,
-        [Effect::FetchBilling { agent_id, silent, .. }] if *agent_id == AgentId(0) && !*silent
-    )
-}
-
-fn complete_session_usage(
-    app: &mut AppView,
-    session_id: &str,
-    usage: pi_shell::extensions::notification::PromptUsage,
-) -> Vec<Effect> {
-    dispatch(
-        Action::TaskComplete(TaskResult::SessionUsageComplete {
-            agent_id: AgentId(0),
-            session_id: session_id.to_string().into(),
-            usage: Box::new(usage),
-            nonce: Default::default(),
-        }),
-        app,
-    )
-}
-
-fn fail_session_usage(app: &mut AppView, session_id: &str, error: &str) -> Vec<Effect> {
-    dispatch(
-        Action::TaskComplete(TaskResult::SessionUsageFailed {
-            agent_id: AgentId(0),
-            session_id: session_id.to_string().into(),
-            error: error.into(),
-            nonce: Default::default(),
-        }),
-        app,
-    )
-}
-
 #[test]
 fn team_auth_disables_agent_billing_surface() {
     let mut app = test_app_with_agent();
@@ -543,83 +507,6 @@ fn team_auth_disables_agent_billing_surface() {
     });
     assert!(!app.usage_visible);
     assert!(!app.agents.get(&AgentId(0)).unwrap().billing_surface_visible);
-}
-
-#[test]
-fn session_usage_complete_pushes_block_and_chains_billing() {
-    let mut app = test_app_with_agent();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    let before = agent_scrollback_len(&app);
-    let usage = pi_shell::extensions::notification::PromptUsage {
-        totals: pi_shell::extensions::notification::PromptUsageModel {
-            input_tokens: 1_000,
-            output_tokens: 100,
-            total_tokens: 1_100,
-            model_calls: 3,
-            cost_usd_ticks: Some(5_000_000_000),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let effects = complete_session_usage(&mut app, "test-session", usage);
-    assert_eq!(agent_scrollback_len(&app), before + 1);
-    let text = last_system_text(&app, AgentId(0));
-    assert!(
-        text.contains("Session usage") && text.contains("$0.5000"),
-        "{text}"
-    );
-    assert!(is_nonsilent_billing(&effects));
-}
-
-#[test]
-fn session_usage_complete_no_billing_when_surface_hidden() {
-    let mut app = test_app_with_agent();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    app.usage_visible = false;
-    let before = agent_scrollback_len(&app);
-    let effects = complete_session_usage(&mut app, "test-session", Default::default());
-    assert!(effects.is_empty());
-    // Only the credit follow-up is gated; the session block itself must land.
-    assert_eq!(agent_scrollback_len(&app), before + 1);
-}
-
-#[test]
-fn session_usage_complete_drops_stale_session() {
-    let mut app = test_app_with_agent();
-    let before = agent_scrollback_len(&app);
-    let effects = complete_session_usage(
-        &mut app,
-        "old-session",
-        pi_shell::extensions::notification::PromptUsage {
-            totals: pi_shell::extensions::notification::PromptUsageModel {
-                model_calls: 99,
-                cost_usd_ticks: Some(1_000_000_000_000),
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-    );
-    assert!(effects.is_empty());
-    assert_eq!(agent_scrollback_len(&app), before);
-}
-
-#[test]
-fn session_usage_failed_pushes_error_and_chains_billing() {
-    let mut app = test_app_with_agent();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    let before = agent_scrollback_len(&app);
-    let effects = fail_session_usage(&mut app, "test-session", "boom");
-    assert_eq!(agent_scrollback_len(&app), before + 1);
-    assert!(last_system_text(&app, AgentId(0)).contains("Couldn't load session usage: boom"));
-    assert!(is_nonsilent_billing(&effects));
-}
-
-#[test]
-fn session_usage_failed_drops_stale_session() {
-    let mut app = test_app_with_agent();
-    let before = agent_scrollback_len(&app);
-    assert!(fail_session_usage(&mut app, "old-session", "boom").is_empty());
-    assert_eq!(agent_scrollback_len(&app), before);
 }
 
 // ── BillingFetched dispatch tests ───────────────────────────────────

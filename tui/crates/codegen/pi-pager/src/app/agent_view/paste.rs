@@ -58,9 +58,6 @@ impl AgentView {
         match self.prompt.handle_paste(paste_text) {
             PromptEvent::Edited => {
                 self.prompt.refresh_slash(&self.session.models);
-                if let Some(eff) = self.notify_suggestion_text_changed() {
-                    self.pending_effects.push(eff);
-                }
                 (InputOutcome::Changed, ClipboardTextInsertion::Inserted)
             }
             PromptEvent::Ignored => (InputOutcome::Changed, ClipboardTextInsertion::Failed),
@@ -77,17 +74,12 @@ impl AgentView {
             &self.session.cwd,
         );
         self.paste_probe_in_flight += 1;
-        let from_feedback_pane = self
-            .question_view
-            .as_ref()
-            .is_some_and(crate::views::question_view::QuestionViewState::is_feedback_report);
         self.pending_effects
             .push(crate::app::actions::Effect::ProbeClipboardAttachment {
                 ctx: crate::app::actions::ClipboardPasteContext {
                     target: crate::app::actions::ClipboardPasteTarget::AgentPrompt {
                         agent_id: self.session.id,
                         images_dir,
-                        from_feedback_pane,
                     },
                     source,
                 },
@@ -138,22 +130,6 @@ impl AgentView {
             ClipboardPasteCompletion, ClipboardPasteFailure, ProbedAttachment,
         };
         self.paste_probe_in_flight = self.paste_probe_in_flight.saturating_sub(1);
-        if matches!(
-            &ctx.target,
-            crate::app::actions::ClipboardPasteTarget::AgentPrompt {
-                from_feedback_pane: true,
-                ..
-            }
-        ) && !self
-            .question_view
-            .as_ref()
-            .is_some_and(crate::views::question_view::QuestionViewState::is_feedback_report)
-        {
-            if let ProbedAttachment::Image(pasted) = &image {
-                crate::prompt_images::cleanup_temp_file(pasted);
-            }
-            return ClipboardPasteCompletion::Dropped;
-        }
         let insert_deferred_text = matches!(
             &image,
             ProbedAttachment::NoRaster
@@ -237,19 +213,6 @@ impl AgentView {
                 let text = self.prompt.text().to_string();
                 (!text.trim().is_empty()).then_some(Action::SendPrompt(text))
             }
-            AgentDeferredSend::SubmitFeedback => {
-                if !self
-                    .question_view
-                    .as_ref()
-                    .is_some_and(crate::views::question_view::QuestionViewState::is_feedback_report)
-                {
-                    return None;
-                }
-                match self.submit_question_answers(false) {
-                    crate::app::app_view::InputOutcome::Action(action) => Some(action),
-                    _ => None,
-                }
-            }
             AgentDeferredSend::Stash => {
                 self.handle_stash_prompt_key();
                 None
@@ -285,31 +248,6 @@ impl AgentView {
         }
         let _ = self.prompt.handle_paste(text);
         InputOutcome::Changed
-    }
-    /// The feedback report pane mirrors the composer's bracketed-paste
-    /// attachment probe (terminals that deliver Cmd+V as `Event::Paste`
-    /// never hit the key path); every other question view stays text-only,
-    /// including the trace-consent stage (same invariant as the key path:
-    /// a paste there would land in the hidden prompt and never reach the
-    /// committed report).
-    pub(super) fn route_question_paste(&mut self, text: &str) -> InputOutcome {
-        if !self
-            .question_view
-            .as_ref()
-            .is_some_and(crate::views::question_view::QuestionViewState::is_feedback_report)
-        {
-            return self.route_popup_paste(text);
-        }
-        if let Some((outcome, _)) = self.try_handle_dropped_paths_paste(text) {
-            return outcome;
-        }
-        self.probe_attachment_around_bracketed_insert(text, |view| {
-            let insertion = match view.prompt.handle_paste(text) {
-                PromptEvent::Edited => crate::app::actions::ClipboardTextInsertion::Inserted,
-                PromptEvent::Ignored => crate::app::actions::ClipboardTextInsertion::Failed,
-            };
-            (InputOutcome::Changed, insertion)
-        })
     }
     /// The bracketed-paste attachment-probe protocol, shared by the composer
     /// arm and the feedback pane: snapshot the clipboard gate BEFORE the text
@@ -429,9 +367,6 @@ impl AgentView {
         if inserted_image || inserted_non_image {
             self.prompt.refresh_slash(&self.session.models);
         }
-        if inserted_non_image && let Some(eff) = self.notify_suggestion_text_changed() {
-            self.pending_effects.push(eff);
-        }
         let completion = if inserted_image || inserted_non_image {
             crate::app::actions::ClipboardPasteCompletion::Handled
         } else {
@@ -511,7 +446,6 @@ pub(super) mod paste_key_tests {
                 yolo_mode: false,
                 auto_mode: false,
                 prompt_history: Vec::new(),
-                prompt_history_loading: false,
                 loading_replay: false,
                 restore_degree: None,
                 rate_limited: false,
@@ -1966,7 +1900,6 @@ pub(super) mod paste_key_tests {
         let area = ratatui::layout::Rect::new(0, 0, 80, 30);
         let mut buf = ratatui::buffer::Buffer::empty(area);
         let mut scratch = crate::scrollback::render::ScratchBuffer::new();
-        let bundle = crate::app::bundle::BundleState::default();
         agent.draw(
             area,
             &mut buf,
@@ -1975,7 +1908,6 @@ pub(super) mod paste_key_tests {
             None,
             false,
             crate::app::agent_view::BannerSlotParams::none(),
-            &bundle,
             &mut Vec::new(),
             crate::app::agent_view::AppRenderParams::default(),
         );
@@ -2060,7 +1992,6 @@ pub(super) mod paste_key_tests {
             target: crate::app::actions::ClipboardPasteTarget::AgentPrompt {
                 agent_id: agent.session.id,
                 images_dir: None,
-                from_feedback_pane: false,
             },
             source: crate::app::actions::ClipboardPasteSource::ClipboardKey {
                 text: crate::app::actions::ClipboardTextRead::Success(
@@ -2069,43 +2000,6 @@ pub(super) mod paste_key_tests {
                 tip_showing: false,
             },
         }
-    }
-    /// A probe the feedback pane started must not attach into whatever
-    /// replaced the pane: Esc restores the pre-slash composer draft, and the
-    /// completion has to drop the screenshot (and its staged file) instead.
-    #[test]
-    fn feedback_pane_probe_completing_after_dismissal_is_dropped() {
-        let mut agent = make_agent();
-        let ctx = crate::app::actions::ClipboardPasteContext {
-            target: crate::app::actions::ClipboardPasteTarget::AgentPrompt {
-                agent_id: agent.session.id,
-                images_dir: None,
-                from_feedback_pane: true,
-            },
-            source: crate::app::actions::ClipboardPasteSource::ClipboardKey {
-                text: crate::app::actions::ClipboardTextRead::Success(None),
-                tip_showing: false,
-            },
-        };
-        let dir = tempfile::tempdir().unwrap();
-        let staged = dir.path().join("staged.png");
-        std::fs::write(&staged, b"staged").unwrap();
-        let mut pasted = crate::prompt_images::from_clipboard_data(&test_image_data());
-        pasted.staged_temp_path = Some(staged.clone());
-        let completion = agent.complete_clipboard_attachment_paste(
-            ctx,
-            crate::app::actions::ProbedAttachment::Image(pasted),
-            None,
-        );
-        assert_eq!(
-            completion,
-            crate::app::actions::ClipboardPasteCompletion::Dropped
-        );
-        assert!(
-            agent.prompt.images.is_empty(),
-            "the screenshot must not become a composer chip"
-        );
-        assert!(!staged.exists(), "the staged temp file must be deleted");
     }
     /// Drive a real Cmd+V that finds a raster (defers), then complete the probe
     /// with a decoded image — the full shipped image-paste path through the

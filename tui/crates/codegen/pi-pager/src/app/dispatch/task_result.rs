@@ -7,13 +7,10 @@ use super::billing::{
     handle_check_subscription_complete, handle_credit_limit_recheck_complete,
     handle_gate_refreshed, handle_gate_verify_timeout,
 };
-use super::ctx::{find_agent_by_session_id, get_active_agent_mut};
-use super::notes::{ handle_memory_note_saved};
+use super::ctx::{ get_active_agent_mut};
 use super::prompt::{
-    defer_to_open_reload_window, handle_compact_complete, handle_prompt_response,
-    handle_suggestion_debounce_expired,
+    defer_to_open_reload_window, handle_prompt_response,
 };
-use super::queue::push_and_page_flip;
 use super::rewind::{
     handle_rewind_execute_failed, handle_rewind_points_loaded,
 };
@@ -36,16 +33,13 @@ use super::session::load::{
 use super::session::modal::remove_agent_and_cleanup;
 use super::settings::ui::apply_setting_rollback;
 use super::status::{
-    handle_coding_data_sharing_updated,
-    handle_context_info_complete, handle_session_usage_result, scrub_error_for_toast,
-    usage_modal_state_mut,
+    scrub_error_for_toast,
 };
 use crate::app::actions::{
     ClipboardPasteCompletion, ClipboardPasteContext, ClipboardPasteFailure, ClipboardPasteTarget,
-    DoctorFixTarget, Effect, ProbedAttachment, 
+    Effect, ProbedAttachment, 
     TaskResult,
 };
-use crate::app::agent::AgentId;
 use crate::app::agent_view::AgentDeferredSend;
 use crate::app::app_view::{ActiveView, AppView, AuthState};
 use crate::scrollback::block::RenderBlock;
@@ -151,57 +145,6 @@ fn drain_clipboard_target(target: &ClipboardPasteTarget, app: &mut AppView) -> V
             effects
         }
     }
-}
-pub(crate) fn current_doctor_target(
-    app: &AppView,
-    target: &DoctorFixTarget,
-) -> Option<DoctorFixTarget> {
-    let agent = app.agents.get(&target.agent_id)?;
-    if agent.session.cwd != target.cwd {
-        return None;
-    }
-    match (&target.session_id, &agent.session.session_id) {
-        (Some(expected), Some(current))
-            if expected == current
-                && target.session_binding_epoch == agent.session_binding_epoch =>
-        {
-            Some(target.clone())
-        }
-        (None, Some(current))
-            if agent.session_binding_epoch == target.session_binding_epoch.wrapping_add(1) =>
-        {
-            Some(DoctorFixTarget {
-                session_id: Some(current.clone()),
-                session_binding_epoch: agent.session_binding_epoch,
-                ..target.clone()
-            })
-        }
-        (None, None) if target.session_binding_epoch == agent.session_binding_epoch => {
-            Some(target.clone())
-        }
-        _ => None,
-    }
-}
-pub(crate) fn deliver_doctor_message(app: &mut AppView, preferred: AgentId, message: String) {
-    let destination = app
-        .agents
-        .contains_key(&preferred)
-        .then_some(preferred)
-        .or_else(|| match app.active_view {
-            ActiveView::Agent(id) if app.agents.contains_key(&id) => Some(id),
-            _ => app.agents.keys().next().copied(),
-        });
-    if let Some(destination) = destination
-        && let Some(agent) = app.agents.get_mut(&destination)
-    {
-        agent.scrollback.push_block(RenderBlock::system(message));
-        return;
-    }
-    app.startup_warnings.push(crate::startup::StartupWarning {
-        severity: crate::startup::WarningSeverity::Info,
-        message,
-        action: None,
-    });
 }
 /// Handle a completed async task result.
 pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec<Effect> {
@@ -391,27 +334,6 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             tracing::trace!("Cancel notification sent successfully");
             vec![]
         }
-        TaskResult::ConsentPersistFailed { error } => {
-            tracing::warn!(%error, "consent answer not persisted; the notice re-arms next launch");
-            app.show_toast(
-                "\u{2717} Could not save your answer, so this notice returns next launch",
-            );
-            vec![]
-        }
-        TaskResult::ConsentRecorded { notice_id, version } => match app.account_email.clone() {
-            Some(account) => {
-                vec![Effect::PersistConsentAnswer {
-                    account: Some(account),
-                    notice_id,
-                    version,
-                    acked: true,
-                }]
-            }
-            None => vec![],
-        },
-        TaskResult::CompactComplete { agent_id, result } => {
-            handle_compact_complete(app, agent_id, result)
-        }
         TaskResult::SwitchModelComplete {
             agent_id,
             model_id,
@@ -457,65 +379,6 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             effects
         }
         TaskResult::PromptImagePreviewPrepared => vec![],
-        TaskResult::DoctorFixApplied { target, result } => {
-            let message = match result {
-                Ok(outcome) => crate::diagnostics::format_fix_success(&outcome),
-                Err(error) if error.starts_with("Could not apply the fix:") => error,
-                Err(error) => format!("Could not apply the fix: {error}"),
-            };
-            deliver_doctor_message(app, target.agent_id, message);
-            vec![]
-        }
-        TaskResult::AnnouncementsHiddenPersisted { result } => {
-            if let Err(e) = result {
-                tracing::warn!("Failed to persist announcements hidden state: {}", e);
-            }
-            vec![]
-        }
-        TaskResult::PromptHistoryLoaded { agent_id, prompts } => {
-            use pi_tools::implementations::skills::skill::extract_skill_display_text;
-            if let Some(agent) = app.agents.get_mut(&agent_id) {
-                agent.session.prompt_history_loading = false;
-                let fetched: Vec<String> = prompts
-                    .into_iter()
-                    .map(|p| extract_skill_display_text(&p).unwrap_or(p))
-                    .collect();
-                let local: std::collections::HashSet<String> = agent
-                    .session
-                    .prompt_history
-                    .iter()
-                    .flat_map(|p| {
-                        let t = p.trim();
-                        [t.to_owned(), t.strip_prefix("! ").unwrap_or(t).to_owned()]
-                    })
-                    .collect();
-                let local_entries = agent.session.prompt_history.len();
-                let fetched_entries = fetched.len();
-                agent
-                    .session
-                    .prompt_history
-                    .extend(fetched.into_iter().filter(|p| !local.contains(p.trim())));
-                agent
-                    .session
-                    .prompt_history
-                    .truncate(crate::app::agent::PROMPT_HISTORY_CAP);
-                tracing::info!(
-                    history.local_entries = local_entries,
-                    history.fetched_entries = fetched_entries,
-                    history.merged_entries = agent.session.prompt_history.len(),
-                    "history.fetch_merged"
-                );
-                if agent.prompt.history_search.is_active() {
-                    let history = agent.combined_prompt_history();
-                    agent.prompt.history_search.refresh_items(&history);
-                    if !agent.prompt.history_search.is_browse() {
-                        let query = agent.prompt.text().to_owned();
-                        agent.prompt.history_search.update_query(&query);
-                    }
-                }
-            }
-            vec![]
-        }
         TaskResult::AuthComplete { request_seq, meta } => {
             handle_auth_complete(app, request_seq, meta)
         }
@@ -539,78 +402,6 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
         } => handle_auth_url_ready(app, request_seq, auth_url, external, mode),
         TaskResult::AuthCodeSubmitted { .. } => vec![],
         TaskResult::AuthCancelComplete => vec![],
-        TaskResult::SessionAgentNameResolved {
-            agent_id,
-            agent_name,
-        } => {
-            if let Some(agent) = app.agents.get_mut(&agent_id) {
-                agent.session_agent_name = agent_name.clone();
-            }
-            vec![]
-        }
-        TaskResult::SessionInfoComplete {
-            agent_id,
-            session_id,
-            info,
-            text,
-            fields,
-            nonce,
-        } => {
-            let minimal = app.screen_mode.is_minimal();
-            if let Some(agent) = app.agents.get_mut(&agent_id) {
-                if agent.session.session_id.as_ref() != Some(&session_id) {
-                    return vec![];
-                }
-                if let Some(state) = usage_modal_state_mut(agent)
-                    && state.fetch_nonce != nonce
-                {
-                    return vec![];
-                }
-                agent.session_agent_name = info.data.agent_name.clone();
-                agent.apply_full_context_info(info.data.context);
-                if let Some(state) = usage_modal_state_mut(agent) {
-                    state.session_fields = Some(fields);
-                    state.session_error = None;
-                } else if minimal {
-                    push_and_page_flip(
-                        &mut agent.scrollback,
-                        crate::scrollback::block::RenderBlock::system(text),
-                    );
-                }
-            }
-            vec![]
-        }
-        TaskResult::SessionInfoFailed {
-            agent_id,
-            session_id,
-            error,
-            nonce,
-        } => {
-            let minimal = app.screen_mode.is_minimal();
-            if let Some(agent) = app.agents.get_mut(&agent_id) {
-                if agent.session.session_id.as_ref() != Some(&session_id) {
-                    return vec![];
-                }
-                if let Some(state) = usage_modal_state_mut(agent) {
-                    if state.fetch_nonce == nonce {
-                        state.session_error = Some(error);
-                    }
-                } else if minimal {
-                    push_and_page_flip(
-                        &mut agent.scrollback,
-                        crate::scrollback::block::RenderBlock::system(format!(
-                            "Couldn't load session info: {error}"
-                        )),
-                    );
-                }
-            }
-            vec![]
-        }
-        TaskResult::CodingDataSharingUpdated {
-            agent_id,
-            opted_in,
-            seq,
-        } => handle_coding_data_sharing_updated(app, agent_id, opted_in, seq),
         TaskResult::RenameSessionComplete { agent_id, title } => {
             if let Some(agent) = app.agents.get_mut(&agent_id) {
                 let safe = crate::views::session_title::sanitize_display_text(&title);
@@ -676,131 +467,6 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             app.show_toast(&format!("Couldn't delete session: {error}"));
             vec![]
         }
-        TaskResult::ContextInfoComplete {
-            agent_id,
-            session_id,
-            info,
-            nonce,
-        } => handle_context_info_complete(app, agent_id, &session_id, info, nonce),
-        TaskResult::ContextInfoFailed {
-            agent_id,
-            session_id,
-            error,
-            nonce,
-        } => {
-            let minimal = app.screen_mode.is_minimal();
-            let Some(agent) = app.agents.get_mut(&agent_id) else {
-                return vec![];
-            };
-            if agent.session.session_id.as_ref() != Some(&session_id) {
-                return vec![];
-            }
-            if let Some(state) = usage_modal_state_mut(agent) {
-                if state.fetch_nonce == nonce {
-                    state.context_error = Some(error);
-                }
-            } else if minimal {
-                push_and_page_flip(
-                    &mut agent.scrollback,
-                    crate::scrollback::block::RenderBlock::system(format!(
-                        "Couldn't load context info: {error}"
-                    )),
-                );
-            }
-            vec![]
-        }
-        TaskResult::SessionUsageComplete {
-            agent_id,
-            session_id,
-            usage,
-            nonce,
-        } => handle_session_usage_result(
-            app,
-            agent_id,
-            &session_id,
-            crate::app::status_blocks::session_usage_block_text(&usage),
-            nonce,
-        ),
-        TaskResult::SessionUsageFailed {
-            agent_id,
-            session_id,
-            error,
-            nonce,
-        } => handle_session_usage_result(
-            app,
-            agent_id,
-            &session_id,
-            format!("Couldn't load session usage: {error}"),
-            nonce,
-        ),
-        TaskResult::FeedbackComplete { .. } => vec![],
-        TaskResult::FeedbackTraceUploaded { agent_id, error } => {
-            if let Some(error) = error
-                && let Some(agent) = app.agents.get_mut(&agent_id)
-            {
-                agent
-                    .scrollback
-                    .push_block(crate::scrollback::block::RenderBlock::system(format!(
-                        "Couldn't upload a session trace; your feedback was still sent. {error}"
-                    )));
-            }
-            vec![]
-        }
-        TaskResult::MemoryNoteSaved { agent_id, result } => {
-            handle_memory_note_saved(app, agent_id, result)
-        }
-        TaskResult::MemoryNoteRewritten {
-            agent_id,
-            result,
-            nonce,
-        } => {
-            if let Some(agent) = app.agents.get_mut(&agent_id)
-                && let Ok(markdown) = result
-                && let Some(crate::views::modal::ActiveModal::RememberNoteReview {
-                    ref mut enhanced_content,
-                    ref mut cached_lines,
-                    rewrite_nonce,
-                    ..
-                }) = agent.active_modal
-                && rewrite_nonce == nonce
-            {
-                *enhanced_content = Some(markdown);
-                *cached_lines = None;
-            }
-            vec![]
-        }
-        TaskResult::BundleStatusFailed { error } => {
-            tracing::warn!(error = %error, "bundle status fetch failed");
-            vec![]
-        }
-        TaskResult::RecapRequested {
-            session_id,
-            auto,
-            error,
-        } => {
-            if let Some(error) = error {
-                tracing::debug!(%error, "recap request failed");
-                if !auto
-                    && let Some(agent) = find_agent_by_session_id(&mut app.agents, &session_id.0)
-                    && let Some(pending_id) = agent.pending_recap_entry.take()
-                {
-                    agent.scrollback.remove_entry(pending_id);
-                    agent.show_toast(super::recap_unavailable_toast(
-                        super::scrollback_has_user_messages(&agent.scrollback),
-                    ));
-                }
-            }
-            vec![]
-        }
-        TaskResult::AvailableCommandsRefreshed { agent_id, commands } => {
-            if !commands.is_empty()
-                && let Some(agent) = app.agents.get_mut(&agent_id)
-            {
-                agent.session.available_commands = commands;
-                agent.session.available_commands_generation += 1;
-            }
-            vec![]
-        }
         TaskResult::StatusLineCommandFinished { id, outcome } => {
             app.on_status_line_command_finished(id, outcome);
             vec![]
@@ -853,25 +519,6 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
         }
         TaskResult::RewindExecuteFailed { agent_id, error } => {
             handle_rewind_execute_failed(app, agent_id, error)
-        }
-        TaskResult::SuggestionDebounceExpired {
-            agent_id,
-            generation,
-        } => handle_suggestion_debounce_expired(app, agent_id, generation),
-        TaskResult::PromptSuggestionLoaded {
-            agent_id,
-            suggestion,
-            generation,
-        } => {
-            if let Some(agent) = app.agents.get_mut(&agent_id) {
-                agent
-                    .prompt
-                    .prompt_suggestion
-                    .on_loaded(suggestion, generation);
-                agent.refresh_prompt_suggestion_gate();
-                agent.log_prompt_suggestion_shown_if_visible();
-            }
-            vec![]
         }
         TaskResult::SettingPersisted { key, value } => {
             tracing::trace!(target: "settings", ?key, ?value, "setting persisted");

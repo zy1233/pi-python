@@ -22,7 +22,6 @@ pub fn make_agent_view(session_id: Option<&str>, cwd: &str) -> crate::app::agent
         yolo_mode: false,
         auto_mode: false,
         prompt_history: Vec::new(),
-        prompt_history_loading: false,
         loading_replay: false,
         restore_degree: None,
         rate_limited: false,

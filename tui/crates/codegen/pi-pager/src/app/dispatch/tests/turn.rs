@@ -934,34 +934,6 @@ fn entry_title_strips_skill_xml_from_first_prompt() {
     assert_eq!(title, "/deploy");
 }
 
-#[test]
-fn prompt_history_loaded_sanitizes_skill_xml() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-
-    let prompts = vec![
-        "<command-name>review</command-name>\n\
-             <command-message>/review</command-message>\n\
-             <command-args>198653</command-args>"
-            .into(),
-        "plain prompt".into(),
-        "<command-name>deploy</command-name>".into(),
-    ];
-
-    dispatch(
-        Action::TaskComplete(TaskResult::PromptHistoryLoaded {
-            agent_id: id,
-            prompts,
-        }),
-        &mut app,
-    );
-
-    let history = &app.agents[&id].session.prompt_history;
-    assert_eq!(history[0], "/review 198653");
-    assert_eq!(history[1], "plain prompt");
-    assert_eq!(history[2], "/deploy");
-}
-
 
 
 

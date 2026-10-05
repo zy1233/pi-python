@@ -13,10 +13,8 @@ pub mod actions;
 pub mod agent;
 pub mod agent_view;
 pub mod app_view;
-pub(crate) mod bundle;
 pub(crate) mod cancel_latency;
 pub mod cli;
-pub(crate) mod consent;
 pub use crate::link_opener;
 /// Off-thread full-file syntax highlight upgrade for edit diffs.
 pub(crate) mod edit_highlight_worker;

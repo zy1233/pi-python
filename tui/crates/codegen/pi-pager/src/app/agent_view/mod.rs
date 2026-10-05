@@ -178,7 +178,6 @@ mod selection;
 mod session;
 mod shell_completion;
 mod viewer;
-use super::actions;
 use super::dispatch;
 pub(super) fn active_contexts_for_pane(pane: ActivePane) -> Vec<crate::actions::When> {
     use crate::actions::When;
@@ -315,54 +314,36 @@ pub enum PromptInputMode {
     Normal,
     /// Bash mode (`!` prefix): Enter sends `Action::SendBashCommand`.
     Bash,
-    /// Remember mode (`#` prefix): Enter sends `Action::SendRememberNote`.
-    Remember,
 }
 impl PromptInputMode {
     pub fn accent_color(self, theme: &Theme) -> Option<ratatui::style::Color> {
         match self {
             PromptInputMode::Normal => None,
             PromptInputMode::Bash => Some(theme.command),
-            PromptInputMode::Remember => Some(theme.accent_remember),
         }
     }
     pub fn prefix_override(self, theme: &Theme) -> Option<(&'static str, ratatui::style::Color)> {
         match self {
             PromptInputMode::Normal => None,
             PromptInputMode::Bash => Some(("! ", theme.command)),
-            PromptInputMode::Remember => Some(("# ", theme.accent_remember)),
-        }
-    }
-    pub fn placeholder_override(self, multiline: bool) -> Option<&'static str> {
-        match self {
-            PromptInputMode::Normal | PromptInputMode::Bash => None,
-            PromptInputMode::Remember => {
-                if multiline {
-                    Some("Save a memory note... (Enter for newline, Shift+Enter to save)")
-                } else {
-                    Some("Save a memory note... (Shift+Enter for multiline)")
-                }
-            }
         }
     }
     pub fn prompt_info_override(self) -> Option<&'static str> {
         match self {
             PromptInputMode::Normal => None,
             PromptInputMode::Bash => Some("Run shell command"),
-            PromptInputMode::Remember => Some("Save memory note"),
         }
     }
     pub fn send_action(self, text: String) -> Action {
         match self {
             PromptInputMode::Normal => Action::SendPrompt(text),
             PromptInputMode::Bash => Action::SendBashCommand(text),
-            PromptInputMode::Remember => Action::SendRememberNote(text),
         }
     }
     pub fn is_exit_key(self, key: &KeyEvent) -> bool {
         match self {
             PromptInputMode::Normal => false,
-            PromptInputMode::Bash | PromptInputMode::Remember => {
+            PromptInputMode::Bash => {
                 let ctrl_w = key!('w', CONTROL).matches(key);
                 let ctrl_u = key!('u', CONTROL).matches(key);
                 let ctrl_c = key!('c', CONTROL).matches(key);
@@ -394,11 +375,6 @@ pub(super) const MULTI_CLICK_TIMEOUT_MS: u128 = 300;
 /// Minimum interval (ms) between clipboard toasts for rapid word/line
 /// selections. Drag completions always show the toast regardless.
 const CLIPBOARD_TOAST_DEBOUNCE_MS: u128 = 500;
-/// Minimum interval (ms) between consecutive context-bar clicks. Each click
-/// fires an async ACP `session/info` request, so without this debounce a
-/// double/triple-click would spawn redundant backend round-trips and reopen
-/// the modal multiple times.
-pub(super) const CONTEXT_CLICK_DEBOUNCE_MS: u128 = 300;
 /// Default highlight TTL when `keep_text_selection` is `flash`.
 const DEFAULT_SELECTION_HIGHLIGHT_DURATION_MS: u64 = 150;
 /// Duration of the transient mode-switch banner (shown above prompt on Shift+Tab).
@@ -643,8 +619,6 @@ pub(crate) struct FollowUps {
 pub(crate) enum AgentDeferredSend {
     /// Enter: a normal prompt send.
     SendPrompt,
-    /// Enter on the `/feedback` pane — a feedback submit.
-    SubmitFeedback,
     /// Ctrl+S / Alt+S: set the draft aside once its image lands.
     Stash,
 }
@@ -1261,8 +1235,6 @@ pub struct AgentView {
     /// lands on a tick; borrowed during render so streaming redraws don't
     /// rescan/allocate the prompt every frame.
     pub(crate) timeline_hover_preview: Option<(usize, String)>,
- /// Running agent definition for this session (`legacy ext RPC` `agentName`).
-    pub session_agent_name: Option<String>,
     /// Whether the `/share` slash command is available (mirrors
     /// `AppView::sharing_enabled`). Used to gate palette entries.
     pub sharing_enabled: bool,
@@ -1487,13 +1459,6 @@ fn translate_local_submit(
         return InputOutcome::Changed;
     }
     let Some(QuestionSelection::Single(Some(idx))) = qv.selections.first() else {
-        if let LocalQuestionKind::FeedbackTrace { report, images } = kind {
-            return InputOutcome::Action(Action::SendFeedback {
-                text: report,
-                images,
-                trace: Some(crate::app::actions::FeedbackTraceChoice::NoUpload),
-            });
-        }
         return InputOutcome::Changed;
     };
     match kind {
@@ -1557,47 +1522,9 @@ fn translate_local_submit(
                 effort,
             })
         }
-        LocalQuestionKind::DoctorFix { target, plan } => {
-            if *idx == 0 {
-                InputOutcome::Action(Action::DoctorFixConfirmed { target, plan })
-            } else {
-                InputOutcome::Action(Action::DoctorFixCancelled(target))
-            }
-        }
         LocalQuestionKind::DeleteCurrentSession => {
             InputOutcome::Action(Action::DeleteCurrentSessionAnswered {
                 confirmed: *idx == 0,
-            })
-        }
-        LocalQuestionKind::Feedback => {
-            unreachable!(
-                "feedback report submits through submit_feedback_pane, which returns first"
-            )
-        }
-        LocalQuestionKind::FeedbackTrace { report, images } => {
-            use crate::app::actions::FeedbackTraceChoice;
-            use crate::views::question_view::{
-                FEEDBACK_TRACE_OPTION_NEVER_ASK, FEEDBACK_TRACE_OPTION_OPT_IN,
-                FEEDBACK_TRACE_OPTION_OPT_OUT,
-            };
-            let id = qv
-                .questions
-                .first()
-                .and_then(|q| q.options.get(*idx))
-                .and_then(|o| o.id.as_deref());
-            let trace = match id {
-                Some(FEEDBACK_TRACE_OPTION_OPT_IN) => FeedbackTraceChoice::AlwaysUpload,
-                Some(FEEDBACK_TRACE_OPTION_NEVER_ASK) => FeedbackTraceChoice::NeverAsk,
-                Some(FEEDBACK_TRACE_OPTION_OPT_OUT) => FeedbackTraceChoice::NoUpload,
-                other => {
-                    debug_assert!(false, "trace-consent option without a known id: {other:?}");
-                    FeedbackTraceChoice::NoUpload
-                }
-            };
-            InputOutcome::Action(Action::SendFeedback {
-                text: report,
-                images,
-                trace: Some(trace),
             })
         }
     }
@@ -2084,7 +2011,6 @@ pub(crate) mod test_fixtures {
             yolo_mode: false,
             auto_mode: false,
             prompt_history: Vec::new(),
-            prompt_history_loading: false,
             loading_replay: false,
             restore_degree: None,
             rate_limited: false,
@@ -2128,7 +2054,6 @@ pub(crate) mod test_fixtures {
                 yolo_mode: false,
                 auto_mode: false,
                 prompt_history: Vec::new(),
-                prompt_history_loading: false,
                 loading_replay: false,
                 restore_degree: None,
                 rate_limited: false,
@@ -2669,7 +2594,6 @@ pub(crate) fn test_agent_view(session_id: Option<&str>, cwd: std::path::PathBuf)
             yolo_mode: false,
             auto_mode: false,
             prompt_history: Vec::new(),
-            prompt_history_loading: false,
             loading_replay: false,
             restore_degree: None,
             rate_limited: false,
@@ -2786,16 +2710,23 @@ mod prompt_input_mode_tests {
         assert_eq!(PromptInputMode::default(), PromptInputMode::Normal);
     }
     #[test]
+    fn is_exit_key_normal_never_exits() {
+        let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        let back = KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE);
+        let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        assert!(!PromptInputMode::Normal.is_exit_key(&esc));
+        assert!(!PromptInputMode::Normal.is_exit_key(&back));
+        assert!(!PromptInputMode::Normal.is_exit_key(&ctrl_c));
+        assert!(!PromptInputMode::Normal.is_exit_key(&enter));
+    }
+    #[test]
     fn accent_color_returns_expected_for_each_variant() {
         let theme = Theme::current();
         assert_eq!(PromptInputMode::Normal.accent_color(&theme), None);
         assert_eq!(
             PromptInputMode::Bash.accent_color(&theme),
             Some(theme.command)
-        );
-        assert_eq!(
-            PromptInputMode::Remember.accent_color(&theme),
-            Some(theme.accent_remember)
         );
     }
     #[test]
@@ -2806,25 +2737,6 @@ mod prompt_input_mode_tests {
             PromptInputMode::Bash.prefix_override(&theme),
             Some(("! ", theme.command))
         );
-        assert_eq!(
-            PromptInputMode::Remember.prefix_override(&theme),
-            Some(("# ", theme.accent_remember))
-        );
-    }
-    #[test]
-    fn placeholder_override_returns_expected_for_each_variant() {
-        assert_eq!(PromptInputMode::Normal.placeholder_override(false), None);
-        assert_eq!(PromptInputMode::Normal.placeholder_override(true), None);
-        assert_eq!(PromptInputMode::Bash.placeholder_override(false), None);
-        assert_eq!(PromptInputMode::Bash.placeholder_override(true), None);
-        assert_eq!(
-            PromptInputMode::Remember.placeholder_override(false),
-            Some("Save a memory note... (Shift+Enter for multiline)")
-        );
-        assert_eq!(
-            PromptInputMode::Remember.placeholder_override(true),
-            Some("Save a memory note... (Enter for newline, Shift+Enter to save)")
-        );
     }
     #[test]
     fn prompt_info_override_returns_expected_for_each_variant() {
@@ -2832,10 +2744,6 @@ mod prompt_input_mode_tests {
         assert_eq!(
             PromptInputMode::Bash.prompt_info_override(),
             Some("Run shell command")
-        );
-        assert_eq!(
-            PromptInputMode::Remember.prompt_info_override(),
-            Some("Save memory note")
         );
     }
     #[test]
@@ -2850,33 +2758,16 @@ mod prompt_input_mode_tests {
             PromptInputMode::Bash.send_action(t2.clone()),
             Action::SendBashCommand(t) if t == t2
         ));
-        let t4 = "remember this".to_string();
-        assert!(matches!(
-            PromptInputMode::Remember.send_action(t4.clone()),
-            Action::SendRememberNote(t) if t == t4
-        ));
     }
     #[test]
-    fn is_exit_key_normal_never_exits() {
-        let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
-        let back = KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE);
-        let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
-        let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
-        assert!(!PromptInputMode::Normal.is_exit_key(&esc));
-        assert!(!PromptInputMode::Normal.is_exit_key(&back));
-        assert!(!PromptInputMode::Normal.is_exit_key(&ctrl_c));
-        assert!(!PromptInputMode::Normal.is_exit_key(&enter));
-    }
-    #[test]
-    fn is_exit_key_bash_and_remember_share_full_exit_set() {
-        for mode in [PromptInputMode::Bash, PromptInputMode::Remember] {
-            assert!(mode.is_exit_key(&KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)));
-            assert!(mode.is_exit_key(&KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
-            assert!(mode.is_exit_key(&KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL)));
-            assert!(mode.is_exit_key(&KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)));
-            assert!(mode.is_exit_key(&KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)));
-            assert!(!mode.is_exit_key(&KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
-            assert!(!mode.is_exit_key(&KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)));
-        }
+    fn is_exit_key_bash_exits_on_the_full_exit_set() {
+        let mode = PromptInputMode::Bash;
+        assert!(mode.is_exit_key(&KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)));
+        assert!(mode.is_exit_key(&KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+        assert!(mode.is_exit_key(&KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL)));
+        assert!(mode.is_exit_key(&KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)));
+        assert!(mode.is_exit_key(&KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)));
+        assert!(!mode.is_exit_key(&KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
+        assert!(!mode.is_exit_key(&KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)));
     }
 }
