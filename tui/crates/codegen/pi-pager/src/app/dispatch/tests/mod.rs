@@ -27,9 +27,6 @@ use super::permissions::drain_permission_queue;
 use super::prompt::{ dispatch_send_prompt, dispatch_send_prompt_inner};
 use super::session::lifecycle::{ drain_startup_actions, finish_trust};
 use super::session::load::{ reanchor_grouped_selection};
-use super::session::modal::{
-    dispatch_rename_session, 
-};
 use super::settings::setters::set_default_model_inner;
 use super::settings::ui::{action_for_reset, apply_setting_rollback};
 use super::status::scrub_error_for_toast;

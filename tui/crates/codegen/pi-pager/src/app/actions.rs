@@ -10,7 +10,6 @@ use super::agent::AgentId;
 use crate::app::status_line::StatusLineRun;
 use agent_client_protocol as acp;
 use pi_shell::sampling::types::ReasoningEffort;
-use pi_shell::session::unified_list::SessionKind;
 /// Typed error for model switch failures. Replaces the raw `String` in
 /// `TaskResult::SwitchModelComplete` so dispatch can match on the variant
 /// instead of parsing strings.
@@ -439,10 +438,6 @@ pub enum Action {
     TrustFolder,
     /// A spawned task completed.
     TaskComplete(TaskResult),
-    /// Rename the current session's title/summary.
-    RenameSession {
-        title: String,
-    },
     /// Commit a read-only list of the queued prompts as a system block
     /// (`/queue`). The surface minimal mode uses in place of the `QueuePane`.
     ShowQueue,
@@ -1037,14 +1032,6 @@ pub enum Effect {
     UnregisterActiveSession { session_id: acp::SessionId },
     /// Quit the application.
     Quit,
-    /// Rename the current session.
-    RenameSession {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        title: String,
-        cwd: std::path::PathBuf,
-        kind: SessionKind,
-    },
     /// Delete a session in the ACP backend repository.
     DeleteSession {
         source: String,
@@ -1080,36 +1067,6 @@ pub enum Effect {
     PreparePromptImagePreview {
         preparation: crate::prompt_images::PromptImagePreviewPreparation,
     },
-}
-/// Wire params for `legacy ext RPC`. Shared with the effect executor
-/// so dispatch tests can pin the exact camelCase payload.
-#[derive(Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct RenameSessionRequest {
-    pub session_id: String,
-    pub title: String,
-    pub cwd: String,
-    pub kind: SessionKind,
-    /// Empty-title + `true` is the unpin convention. Omitted when false so
-    /// ordinary rename payloads stay byte-identical for old shells.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub reset_to_auto: bool,
-}
-impl RenameSessionRequest {
-    pub(crate) fn for_rename(
-        session_id: String,
-        title: String,
-        cwd: String,
-        kind: SessionKind,
-    ) -> Self {
-        Self {
-            session_id,
-            title,
-            cwd,
-            kind,
-            reset_to_auto: false,
-        }
-    }
 }
 /// Result from a completed async [`Effect`].
 ///
@@ -1248,16 +1205,6 @@ pub enum TaskResult {
     /// Auth code was submitted (fire-and-forget).
     AuthCodeSubmitted {
         request_seq: u64,
-    },
-    /// Session rename completed successfully.
-    RenameSessionComplete {
-        agent_id: AgentId,
-        title: String,
-    },
-    /// Session rename failed.
-    RenameSessionFailed {
-        agent_id: AgentId,
-        error: String,
     },
     /// Session delete completed successfully.
     DeleteSessionComplete {

@@ -312,7 +312,6 @@ impl AgentView {
             pending_recap_entry: None,
             display_name: None,
             generated_session_title: None,
-            title_unpin_committed: false,
             last_turn_summary: None,
             last_turn_summary_gen: 0,
             pending_effects: Vec::new(),
@@ -742,14 +741,6 @@ impl AgentView {
             announcements,
         ));
         self.set_restricted_commands(restricted_commands);
-    }
- /// ACP `kind` for `legacy ext RPC`: the lane this session opened on.
-    pub(crate) fn rename_kind(&self) -> pi_shell::session::unified_list::SessionKind {
-        if self.conversation_entry {
-            pi_shell::session::unified_list::SessionKind::Chat
-        } else {
-            pi_shell::session::unified_list::SessionKind::Build
-        }
     }
     /// Show or hide the `/voice` slash command in this agent's registry,
     /// gated on the runtime voice gate (GA default on; kill switch may hide).

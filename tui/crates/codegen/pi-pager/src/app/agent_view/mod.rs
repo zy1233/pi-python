@@ -1201,24 +1201,15 @@ pub struct AgentView {
     /// summary and stops the animation. `None` when no manual recap is
     /// pending (auto recaps never show a loading block).
     pub(crate) pending_recap_entry: Option<EntryId>,
-    /// The manually-chosen session title (`/rename` or the dashboard
-    /// rename flow), as distinct from the auto-generated
-    /// `generated_session_title` below. Set optimistically at dispatch,
-    /// persisted by the shell as `Summary.title_is_manual`, and restored
-    /// from disk on resume (`TaskResult::SessionMetaFromDisk`). Drives the
-    /// prompt-border inline title and wins precedence for the dashboard
-    /// modal label and the OSC terminal title. The on-disk write is
-    /// best-effort (failure surfaces a system block through the existing
-    /// `RenameSessionFailed` arm).
+    /// The manually-chosen session title, as distinct from the
+    /// auto-generated `generated_session_title` below. Persisted by the shell
+    /// as `Summary.title_is_manual` and restored from disk on resume
+    /// (`TaskResult::SessionMetaFromDisk`). Drives the prompt-border inline
+    /// title and wins precedence for the OSC terminal title.
     pub display_name: Option<String>,
     /// Short title from shell `SessionSummaryGenerated` or `summary.json` on load/resume.
     /// Precedence in the dashboard title is below `display_name`, above first-prompt text.
     pub generated_session_title: Option<String>,
-    /// Shell already fanned out `titleIsManual: false` for this unpin. A
-    /// dropped RPC then surfaces `ResetSessionTitleFailed`; restoring the
-    /// pin would stick a manual title that later absent-meta auto titles
-    /// refuse to clear.
-    pub title_unpin_committed: bool,
     /// Ultra-short summary of the most recent successful turn (shell
     /// `LastTurnSummary`), preferred over the last-message preview for the
     /// idle dashboard row's secondary line. Shown until replaced by the next

@@ -307,27 +307,6 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
         } => handle_auth_url_ready(app, request_seq, auth_url, external, mode),
         TaskResult::AuthCodeSubmitted { .. } => vec![],
         TaskResult::AuthCancelComplete => vec![],
-        TaskResult::RenameSessionComplete { agent_id, title } => {
-            if let Some(agent) = app.agents.get_mut(&agent_id) {
-                let safe = crate::views::session_title::sanitize_display_text(&title);
-                agent
-                    .scrollback
-                    .push_block(crate::scrollback::block::RenderBlock::system(format!(
-                        "Session renamed to \"{safe}\""
-                    )));
-            }
-            vec![]
-        }
-        TaskResult::RenameSessionFailed { agent_id, error } => {
-            if let Some(agent) = app.agents.get_mut(&agent_id) {
-                agent
-                    .scrollback
-                    .push_block(crate::scrollback::block::RenderBlock::system(format!(
-                        "Couldn't rename session: {error}"
-                    )));
-            }
-            vec![]
-        }
         TaskResult::DeleteSessionComplete {
             source,
             session_id,

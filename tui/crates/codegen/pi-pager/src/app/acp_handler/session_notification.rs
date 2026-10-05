@@ -269,12 +269,10 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
                     {
                         agent.display_name = Some(clean.clone());
                         agent.generated_session_title = Some(clean);
-                        agent.title_unpin_committed = false;
                     }
                 }
                 other => {
                     let pin = if other == Some(false) {
-                        agent.title_unpin_committed = true;
                         agent.display_name.take()
                     } else {
                         None

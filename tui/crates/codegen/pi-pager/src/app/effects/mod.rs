@@ -851,36 +851,6 @@ pub(crate) fn execute(
                 }
             });
         }
-        Effect::RenameSession { agent_id, session_id, title, cwd, kind } => {
-            let tx = acp_tx.clone();
-            tasks
-                .spawn(async move {
-                    match session_rename_rpc(
-                            &tx,
-                            actions::RenameSessionRequest::for_rename(
-                                session_id.0.to_string(),
-                                title.clone(),
-                                cwd.to_string_lossy().to_string(),
-                                kind,
-                            ),
-                        )
-                        .await
-                    {
-                        Ok(()) => {
-                            TaskResult::RenameSessionComplete {
-                                agent_id,
-                                title,
-                            }
-                        }
-                        Err(error) => {
-                            TaskResult::RenameSessionFailed {
-                                agent_id,
-                                error,
-                            }
-                        }
-                    }
-                });
-        }
         Effect::DeleteSession {
             source,
             session_id,
@@ -981,18 +951,6 @@ pub(crate) fn execute(
     (false, meta)
 }
 
-/// Shared rename RPC for rename and `/rename --auto` (not supported in standard ACP).
-async fn session_rename_rpc(
-    _tx: &AcpAgentTx,
-    request: actions::RenameSessionRequest,
-) -> Result<(), String> {
-    let verb = if request.reset_to_auto {
-        "reset session title"
-    } else {
-        "rename session"
-    };
-    Err(format!("{verb} is not supported in standard ACP"))
-}
 /// Build the single text content block for a plain `Effect::SendPrompt`.
 ///
 /// Non-empty `skill_token_ranges` are stamped into the block `_meta` as

@@ -1,11 +1,9 @@
-//! Session rename / close helpers.
+//! Session close helpers.
 //!
-//! The `/sessions` picker modal was removed; the remaining entry points
-//! (session close, rename-by-title) go through these dispatchers.
-use crate::app::actions::Effect;
+//! The `/sessions` picker modal was removed; the remaining entry point
+//! (session close) goes through these helpers.
 use crate::app::agent::AgentId;
-use crate::app::app_view::{ActiveView, AppView};
-use crate::scrollback::block::RenderBlock;
+use crate::app::app_view::AppView;
 /// Remove an agent and clean up all references to it:
 /// `forked_from` pointers on surviving agents.
 pub(in crate::app::dispatch) fn remove_agent_and_cleanup(app: &mut AppView, agent_id: AgentId) {
@@ -19,37 +17,4 @@ pub(in crate::app::dispatch) fn remove_agent_and_cleanup(app: &mut AppView, agen
         drop(removed);
         crate::memory_release::release_retained_memory("agent-close");
     }
-}
-/// Rename the current session via legacy ext RPC
-///
-/// Produces Effect::RenameSession which spawns an async ACP ext request.
-/// On completion, TaskResult::RenameSessionComplete shows the result.
-pub(in crate::app::dispatch) fn dispatch_rename_session(
-    app: &mut AppView,
-    title: String,
-) -> Vec<Effect> {
-    let ActiveView::Agent(id) = app.active_view else {
-        return vec![];
-    };
-    let Some(agent) = app.agents.get_mut(&id) else {
-        return vec![];
-    };
-    let Some(session_id) = agent.session.session_id.clone() else {
-        return vec![];
-    };
-    let title = pi_shell::session::persistence::sanitize_rename_title(&title).into_owned();
-    if title.is_empty() {
-        agent.scrollback.push_block(RenderBlock::system(
-            "Couldn't rename session: title must not be blank".to_string(),
-        ));
-        return vec![];
-    }
-    agent.display_name = Some(title.clone());
-    vec![Effect::RenameSession {
-        agent_id: id,
-        session_id,
-        title,
-        cwd: agent.session.cwd.clone(),
-        kind: agent.rename_kind(),
-    }]
 }

@@ -35,7 +35,6 @@ use super::session::load::{
     dispatch_session_picker_closed, dispatch_show_session_picker, session_picker_entry_matches,
     toggle_session_card,
 };
-use super::session::modal::{dispatch_rename_session, };
 use super::settings::setters::{
     clear_default_model, clear_fork_secondary_model, preview_auto_dark_theme,
     preview_auto_light_theme, preview_theme, set_ask_user_question_timeout_enabled,
@@ -437,7 +436,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
         }
         Action::CancelTurn => dispatch_cancel_turn(app),
         Action::CycleMode => dispatch_cycle_mode(app),
-        Action::RenameSession { title } => dispatch_rename_session(app, title),
         Action::ShowQueue => dispatch_show_queue(app),
         Action::SetPlanMode(kind) => set_plan_mode(app, kind),
         Action::SetVimMode(v) => set_vim_mode(app, v),

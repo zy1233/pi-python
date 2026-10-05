@@ -732,52 +732,6 @@ fn no_deferred_switch_means_no_extra_effect() {
 
 // -- Session deletion from the /resume picker -----------------------
 
-#[test]
-fn rename_session_failed_keeps_local_display_name_and_pushes_system_block() {
-    // Pins the documented design decision: a failed on-disk rename
-    // does NOT roll back the local `display_name` cache (the cache
-    // is the source of truth for the modal's rendering and the
-    // disk write is best-effort). The user sees the failure via
-    // the system-block message instead.
-    let mut app = test_app_with_agent();
-    // Seed the cache as the rename path would have done.
-    if let Some(a) = app.agents.get_mut(&AgentId(0)) {
-        a.display_name = Some("optimistic title".into());
-    }
-    let scrollback_len_before = app.agents[&AgentId(0)].scrollback.len();
-
-    let _effects = dispatch_task_result(
-        TaskResult::RenameSessionFailed {
-            agent_id: AgentId(0),
-            error: "boom".into(),
-        },
-        &mut app,
-    );
-
-    // No rollback.
-    assert_eq!(
-        app.agents[&AgentId(0)].display_name.as_deref(),
-        Some("optimistic title"),
-        "display_name must NOT roll back on RenameSessionFailed"
-    );
-    // System block appended with the error.
-    let scrollback = &app.agents[&AgentId(0)].scrollback;
-    assert_eq!(
-        scrollback.len(),
-        scrollback_len_before + 1,
-        "system block must be appended"
-    );
-    let last = scrollback.entry(scrollback.len() - 1).expect("last entry");
-    let text = match &last.block {
-        crate::scrollback::block::RenderBlock::System(b) => b.text.clone(),
-        other => panic!("expected System block, got {other:?}"),
-    };
-    assert!(
-        text.contains("Couldn't rename session: boom"),
-        "system block must surface the error; got: {text:?}"
-    );
-}
-
 // ── GateRefreshed subscription flow ─────────────────────────────
 
 /// Regression: when the 30s gate poll detects the subscription gate has
