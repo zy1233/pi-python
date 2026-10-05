@@ -107,7 +107,6 @@ pi-telemetry = { workspace = true }
 pi-fast-worktree = { path = "../pi-fast-worktree", features = ["metadata"] }
 chrono = { workspace = true }
 pi-tools = { workspace = true }
-pi-agent = { workspace = true }
 walkdir = { workspace = true }
 pi-sandbox = { path = "../pi-sandbox", default-features = false }
 
