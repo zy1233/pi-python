@@ -8,10 +8,6 @@ use super::ctx::{
     get_active_agent_mut, navigate_clearing_selection, open_url_or_show, sync_sleep_inhibitor,
     with_active_agent, with_scrollback,
 };
-use super::import_claude::{
-    dispatch_dismiss_claude_import, dispatch_import_claude, dispatch_import_claude_cancel,
-    dispatch_import_claude_confirm,
-};
 use super::jump::{dispatch_jump_dismiss, dispatch_jump_picker_select, };
 use super::modes::{
     dispatch_cycle_mode, 
@@ -224,10 +220,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             app.new_worktree_dialog = Some(crate::app::app_view::NewWorktreeDialogState::new());
             vec![]
         }
-        Action::ImportClaudeSettings => dispatch_import_claude(app),
-        Action::ImportClaudeConfirm => dispatch_import_claude_confirm(app),
-        Action::ImportClaudeCancel => dispatch_import_claude_cancel(app),
-        Action::DismissClaudeImport => dispatch_dismiss_claude_import(app),
         Action::LoadSession(session_id, session_cwd, chat_kind) => {
             dispatch_load_session(app, session_id, session_cwd, chat_kind)
         }

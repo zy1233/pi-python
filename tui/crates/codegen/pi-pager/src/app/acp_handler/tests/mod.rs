@@ -689,18 +689,6 @@ pub(super) fn make_current_mode_update(mode_id: &str) -> acp::SessionUpdate {
         acp::CurrentModeUpdate::new(acp::SessionModeId::new(mode_id)),
     )
 }
-/// Helper: `mcp_initialized` notification for a specific sessionId.
-pub(super) fn make_mcp_initialized_notif_for(session_id: &str) -> acp::ExtNotification {
-    let raw = serde_json::value::to_raw_value(
-            &serde_json::json!({
-            "sessionId": session_id,
-            "mcpToolCount": 0,
-            "elapsedMs": 0,
-        }),
-        )
-        .unwrap();
-    acp::ExtNotification::new("pi/mcp_initialized", std::sync::Arc::from(raw))
-}
 mod permissions;
 mod session_events;
 mod follow_ups;
@@ -712,5 +700,4 @@ mod turn_completion;
 mod session_routing;
 mod interactions;
 mod models;
-mod mcp;
 mod git_head;

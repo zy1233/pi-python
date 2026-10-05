@@ -16,7 +16,6 @@ mod auth;
 mod billing;
 mod ctx;
 pub(crate) mod external_editor;
-mod import_claude;
 mod jump;
 mod modes;
 pub(crate) mod notes;

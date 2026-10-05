@@ -213,7 +213,6 @@ pub(crate) fn test_app() -> AppView {
         welcome_tip_typing_dismissed: false,
         welcome_menu_index: None,
         welcome_menu_rects: Vec::new(),
-        welcome_import_banner_rect: None,
         last_mouse_pos: None,
         last_scroll_pos: None,
         last_cache_evict_at: None,
@@ -265,8 +264,6 @@ pub(crate) fn test_app() -> AppView {
         foreign_resume_launch: None,
         quit_for_update: false,
         relaunch: None,
-        has_claude_import: false,
-        import_claude_modal: None,
         welcome_doc_viewer: None,
         screen_mode: ScreenMode::Inline,
         pending_screen_mode_switch: None,
@@ -1860,43 +1857,20 @@ fn welcome_ctrl_d_requires_confirmation() {
 #[test]
 fn menu_action_indices_without_import() {
     assert!(matches!(
-        dispatch_menu_action(0, false),
+        dispatch_menu_action(0),
         InputOutcome::Action(Action::OpenNewWorktreeDialog)
     ));
     assert!(matches!(
-        dispatch_menu_action(1, false),
+        dispatch_menu_action(1),
         InputOutcome::Action(Action::FetchSessionList)
     ));
     assert!(matches!(
-        dispatch_menu_action(2, false),
+        dispatch_menu_action(2),
         InputOutcome::Action(Action::Quit)
     ));
     // Past the last row there is nothing to do.
     assert!(matches!(
-        dispatch_menu_action(3, false),
-        InputOutcome::Unchanged
-    ));
-}
-#[test]
-fn menu_action_indices_with_import() {
-    assert!(matches!(
-        dispatch_menu_action(0, true),
-        InputOutcome::Action(Action::ImportClaudeSettings)
-    ));
-    assert!(matches!(
-        dispatch_menu_action(1, true),
-        InputOutcome::Action(Action::OpenNewWorktreeDialog)
-    ));
-    assert!(matches!(
-        dispatch_menu_action(2, true),
-        InputOutcome::Action(Action::FetchSessionList)
-    ));
-    assert!(matches!(
-        dispatch_menu_action(3, true),
-        InputOutcome::Action(Action::Quit)
-    ));
-    assert!(matches!(
-        dispatch_menu_action(4, true),
+        dispatch_menu_action(3),
         InputOutcome::Unchanged
     ));
 }
@@ -2435,15 +2409,6 @@ fn esc_owned_before_agent_covers_app_level_owners() {
     };
     assert!(app.esc_owned_before_agent(), "pending cold-start owns Esc");
     app.voice_state = VoiceState::Idle;
-    assert!(!app.esc_owned_before_agent());
-    app.import_claude_modal = Some(
-        crate::views::import_claude_modal::ImportClaudeModalState::new(
-            pi_shell::claude_import::ImportPlan::default(),
-            std::path::PathBuf::from("/tmp"),
-        ),
-    );
-    assert!(app.esc_owned_before_agent(), "import-claude modal owns Esc");
-    app.import_claude_modal = None;
     assert!(!app.esc_owned_before_agent());
 }
 #[test]

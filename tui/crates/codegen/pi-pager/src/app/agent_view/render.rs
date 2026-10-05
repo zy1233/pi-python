@@ -288,7 +288,6 @@ impl AgentView {
         registry: &ActionRegistry,
         esc_owned_before_agent: bool,
     ) -> ShortcutsBarContent {
-        use crate::views::shortcuts_bar::HintItem;
         match self.key_owner() {
             KeyOwner::LineViewer => self.line_viewer_bar(),
             KeyOwner::BlockViewer => ShortcutsBarContent::Surface(
@@ -313,13 +312,6 @@ impl AgentView {
                     .map(|qv| self.question_shortcut_hints(qv))
                     .unwrap_or_default(),
             ),
-            KeyOwner::Card(BlockingCard::McpElicitation) => ShortcutsBarContent::Surface(vec![
-                HintItem::new(key!(Enter), "accept / toggle"),
-                HintItem::new(key!('d'), "decline"),
-                HintItem::new(key!('c', CONTROL), "cancel"),
-                HintItem::new(key!(Tab), "next field"),
-                self.card_esc_hint(),
-            ]),
             KeyOwner::Pane => {
                 ShortcutsBarContent::Pane(self.normal_pane_hints(registry, esc_owned_before_agent))
             }
@@ -696,21 +688,7 @@ impl AgentView {
         } else {
             0
         };
-        let elicitation_view_h = if slot_card == Some(BlockingCard::McpElicitation) {
-            if let Some(ref ev) = self.elicitation_view {
-                crate::views::elicitation_view::elicitation_view_height(
-                    ev,
-                    area.height,
-                    overlay_content_w,
-                )
-            } else {
-                0
-            }
-        } else {
-            0
-        };
-        let rewind_view_h =
-            if permission_view_h == 0 && question_view_h == 0 && elicitation_view_h == 0 {
+        let rewind_view_h = if permission_view_h == 0 && question_view_h == 0 {
                 if let Some(ref rw) = self.rewind_state {
                     crate::views::rewind::rewind_overlay_height(&rw.phase, area.height)
                 } else {
@@ -807,8 +785,6 @@ impl AgentView {
             question_view_h.saturating_sub(freeform_offset)
                 + question_prompt_body_h
                 + question_footer_h
-        } else if elicitation_view_h > 0 {
-            elicitation_view_h
         } else if rewind_view_h > 0 {
             rewind_view_h
         } else if jump_view_h > 0 {
@@ -829,7 +805,6 @@ impl AgentView {
         let turn_status_height = if turn_status::should_show(
             wake_display_state.unwrap_or(&self.session.state),
             drain_blocked,
-            self.mcp_init_progress.as_ref(),
         ) {
             1
         } else {
@@ -994,11 +969,6 @@ impl AgentView {
                 plan_style = plan_style.add_modifier(ratatui::style::Modifier::BOLD);
             }
             status.push("plan", Line::from(Span::styled("plan", plan_style)));
-        }
-        if let Some(mcp_line) = self.mcp_init_progress.as_ref().and_then(|p| {
-            crate::views::agent_status::mcp_status_line(p, self.scrollback.animation_tick(), &theme)
-        }) {
-            status.push("mcp", mcp_line);
         }
         #[cfg(feature = "local-workspace")]
         if self.chat_kind || self.app_chat_mode {
@@ -1638,11 +1608,7 @@ impl AgentView {
             } else {
                 let is_pending_user_input = matches!(
                     self.blocking_card(),
-                    Some(
-                        BlockingCard::Permission
-                            | BlockingCard::Question
-                            | BlockingCard::McpElicitation
-                    )
+                    Some(BlockingCard::Permission | BlockingCard::Question)
                 );
                 let turn_output = turn_status::render_turn_status(
                     buf,
@@ -1658,7 +1624,6 @@ impl AgentView {
                             cancel_hovered: self.hit_cancel_button.hovered,
                         }),
                         total_tokens: self.context_state.as_ref().map(|c| c.used),
-                        mcp_init_progress: self.mcp_init_progress.as_ref(),
                         is_bash_turn: self.bash_turn,
                         is_pending_user_input,
                         flat_background: false,
@@ -2354,24 +2319,6 @@ impl AgentView {
                 self.hit_question_scrollbar.set(sb_rect);
             } else {
                 self.hit_question_scrollbar.clear();
-            }
-        } else if elicitation_view_h > 0 {
-            self.elicit_hits.clear();
-            if let Some(ev) = self.elicitation_view.as_mut() {
-                let elicit_area = Rect {
-                    x: layout.prompt.x,
-                    y: layout.prompt.y,
-                    width: layout.prompt.width,
-                    height: layout.prompt.height,
-                };
-                crate::views::elicitation_view::render_elicitation_view(
-                    buf,
-                    elicit_area,
-                    ev,
-                    &theme,
-                    prompt_focused,
-                    Some(&mut self.elicit_hits),
-                );
             }
         } else if rewind_view_h > 0 {
             if let Some(ref rw) = self.rewind_state {

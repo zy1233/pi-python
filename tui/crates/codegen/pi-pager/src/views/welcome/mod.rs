@@ -98,9 +98,7 @@ const H_MARGIN: u16 = 2;
 /// Horizontal margin in compact mode.
 const H_MARGIN_COMPACT: u16 = 1;
 
-/// Minimum width for the menu + info sections so they don't resize when the import row toggles.
-/// Derivation: "[ " (2) + import-claude label (22) + gap (4) + "ctrl+i  [x]" (11) + " ]" (2) = 41.
-/// Bumped to 51 for comfortable breathing room.
+/// Minimum width for the menu + info sections so they don't resize with their content.
 const MENU_MIN_WIDTH: u16 = 51;
 
 /// Whether the welcome prompt is currently focused (accepting text input).
@@ -122,8 +120,6 @@ pub struct WelcomeRenderResult {
     pub menu_rects: Vec<Rect>,
     /// Hit-test rect for the prompt input area (for click to start session).
     pub prompt_rect: Option<Rect>,
-    /// Hit-test rect for the import-claude banner (for click to open import modal).
-    pub import_banner_rect: Option<Rect>,
     /// Hit areas from the session picker (for mouse hit-testing).
     pub session_picker_hit_areas: Option<crate::views::picker::PickerHitAreas>,
     /// Hit-test rect for the auth copy line (click-to-copy during Authenticating).
@@ -617,7 +613,6 @@ pub struct WelcomeRenderParams<'a> {
     pub selected: Option<usize>,
     pub team_name: Option<&'a str>,
     pub has_access: bool,
-    pub has_claude_import: bool,
     pub mouse_pos: Option<(u16, u16)>,
     pub is_zdr_blocked: bool,
     pub session_picker: Option<&'a [SessionPickerEntry]>,
@@ -1671,28 +1666,17 @@ fn render_welcome_done(
         gate_menu = [(key_g, cta), (key_l, "Logout"), (key_q, "Quit")];
         &gate_menu
     } else {
-        let (key_w, key_resume, key_q, key_i_with_x) = (
+        let (key_w, key_resume, key_q) = (
             "ctrl+w",
             "f3",
             if in_vscode_family { "ctrl+d" } else { "ctrl+q" },
-            "ctrl+i  [x]",
         );
-        // Insert the import row at the top when there are pending `.claude/`
-        // settings to import — it's the most actionable item right now.
-        let mut items: Vec<(&str, &str)> = Vec::with_capacity(4);
-        if p.has_claude_import {
-            // The trailing "[x]" is a clickable dismiss affordance — the
-            // welcome screen mouse handler treats clicks on the rightmost
-            // 3 cells of this row as dismiss instead of open. Keyboard:
-            // ctrl-shift-i. The key string is right-aligned by render_menu,
-            // so [x] sits at the very end of the row.
-            items.push((key_i_with_x, "Import Claude settings"));
-        }
-        items.push((key_w, "New worktree"));
-        items.push((key_resume, "Resume session"));
-        items.push((key_q, "Quit"));
-        owned_menu = items;
-        owned_menu.as_slice()
+        owned_menu = [
+            (key_w, "New worktree"),
+            (key_resume, "Resume session"),
+            (key_q, "Quit"),
+        ];
+        &owned_menu
     };
 
     #[cfg(feature = "local-workspace")]
@@ -1753,7 +1737,7 @@ fn render_welcome_done(
     });
 
     // Render startup warning in the error area (same slot as auth errors).
-    let import_banner_rect = render_startup_warnings(layout.error, buf, theme, p.startup_warnings);
+    render_startup_warnings(layout.error, buf, theme, p.startup_warnings);
 
     // Hit-rects / truncation flag, set by whichever layout draws each block.
     let mut announcement_truncated = false;
@@ -2152,7 +2136,6 @@ fn render_welcome_done(
             Some(layout.prompt)
         },
         session_picker_hit_areas: picker_close_button,
-        import_banner_rect,
         auth_url_rect: None,
         auth_fallback_rect: None,
         refresh_rect: refresh_hit_rect,
@@ -2522,18 +2505,10 @@ fn render_startup_warnings(
     buf: &mut Buffer,
     theme: &Theme,
     warnings: &[StartupWarning],
-) -> Option<Rect> {
-    let w = crate::startup::banner_warning(warnings)?;
-
-    // Skip the import-claude startup warning entirely — the import row in the
-    // menu now carries the call-to-action with the same visual weight as
-    // every other welcome menu item. Showing the warning text in addition to
-    // the menu row would be redundant noise.
-    if w.message.starts_with("Import Claude settings")
-        || w.message.starts_with("Claude settings detected")
-    {
-        return None;
-    }
+) {
+    let Some(w) = crate::startup::banner_warning(warnings) else {
+        return;
+    };
     let color = match w.severity {
         crate::startup::WarningSeverity::Warning => theme.warning,
         crate::startup::WarningSeverity::Info => theme.gray_dim,
@@ -2550,7 +2525,6 @@ fn render_startup_warnings(
     }
 
     Paragraph::new(lines).render(area, buf);
-    None
 }
 
 fn auth_token_grapheme_visible(index: usize, total: usize) -> bool {
@@ -2781,7 +2755,6 @@ mod tests {
             selected: None,
             team_name: None,
             has_access: true,
-            has_claude_import: false,
             mouse_pos: None,
             is_zdr_blocked: false,
             session_picker,

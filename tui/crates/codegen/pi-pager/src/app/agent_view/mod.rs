@@ -138,7 +138,6 @@ use crate::scrollback::text_selection::{
 use crate::theme::Theme;
 pub use crate::views::agent::{ActivePane, AgentViewLayout, InputMode, PaneAreas};
 use crate::views::block_viewer::BlockViewerPane;
-use crate::views::elicitation_view::ElicitationViewState;
 use crate::views::file_search::line_viewer::LineViewerState;
 use crate::views::modal::{ActiveModal, ModalButtonHit};
 use crate::views::permission_view::PermissionViewState;
@@ -155,7 +154,6 @@ use ratatui::widgets::Widget;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Instant;
 mod cta;
-mod elicitation;
 mod input;
 pub(crate) use input::ExternalPromptEditorAccess;
 mod interactions;
@@ -196,59 +194,6 @@ pub(super) fn active_contexts_for_pane(pane: ActivePane) -> Vec<crate::actions::
 ///
 /// This will grow as we add more panes (tasks, review files, etc.).
 pub type AgentPane = ActivePane;
-/// Per-agent view-model.
-///
-/// Owns both business state (session, entries) and UI state (scroll,
-/// selection, pane focus). See module docs for future split plans.
-/// MCP server initialization progress, received from the shell.
-#[derive(Debug, Clone)]
-pub struct McpInitProgress {
-    pub total: u32,
-    pub connected: u32,
-    pub started_at: Instant,
-}
-impl McpInitProgress {
-    /// Max age for a `total == 0` seed before it auto-expires.
-    pub const SEED_EXPIRE: std::time::Duration = std::time::Duration::from_secs(30);
-    /// Whether the progress indicator should be visible in the UI.
-    ///
-    /// - `total > 0` (real servers): always visible until
- /// `legacy ext RPC` clears the progress.
-    /// - `total == 0` (seed / 0-server): visible for at most
-    ///   [`SEED_EXPIRE`] seconds, then auto-expires as
-    ///   defense-in-depth against the shell failing to send
-    ///   `mcp_initialized`.
-    pub fn is_visible(&self) -> bool {
-        self.total > 0 || self.started_at.elapsed() < Self::SEED_EXPIRE
-    }
-}
-#[cfg(test)]
-mod mcp_init_progress_tests {
-    use super::McpInitProgress;
-    #[test]
-    fn is_visible_requires_servers_or_fresh_seed() {
-        let real = McpInitProgress {
-            total: 3,
-            connected: 1,
-            started_at: std::time::Instant::now(),
-        };
-        assert!(real.is_visible(), "real progress must be visible");
-        let fresh = McpInitProgress {
-            total: 0,
-            connected: 0,
-            started_at: std::time::Instant::now(),
-        };
-        assert!(fresh.is_visible(), "fresh seed must be visible");
-        let expired = McpInitProgress {
-            total: 0,
-            connected: 0,
-            started_at: std::time::Instant::now()
-                - McpInitProgress::SEED_EXPIRE
-                - std::time::Duration::from_secs(1),
-        };
-        assert!(!expired.is_visible(), "expired seed must not be visible");
-    }
-}
 /// Current voice record-dot pulse: `(filled, brightness)`.
 ///
 /// A smooth sine "breathing" on a fixed ~0.7s wall-clock period (not the
@@ -703,6 +648,10 @@ pub(crate) enum AgentDeferredSend {
     /// Ctrl+S / Alt+S: set the draft aside once its image lands.
     Stash,
 }
+/// Per-agent view-model.
+///
+/// Owns both business state (session, entries) and UI state (scroll,
+/// selection, pane focus). See module docs for future split plans.
 pub struct AgentView {
     pub session: AgentSession,
     pub(crate) session_binding_epoch: u32,
@@ -1207,15 +1156,6 @@ pub struct AgentView {
     /// Active question view (from `AskUserQuestion` tool). When `Some`, the
     /// prompt area shows a structured question UI and input is modal.
     pub(crate) question_view: Option<QuestionViewState>,
-    pub(crate) elicitation_view: Option<ElicitationViewState>,
-    pub(crate) pending_elicitation: Option<(
-        pi_tools::mcp_elicitation::McpElicitExtRequest,
-        tokio::sync::oneshot::Sender<pi_acp_lib::AcpResult<agent_client_protocol::ExtResponse>>,
-    )>,
-    pub(crate) elicit_hits: Vec<(
-        crate::views::elicitation_view::ElicitHit,
-        ratatui::layout::Rect,
-    )>,
     /// Scrollbar hit area for the question view (set during render).
     pub(crate) hit_question_scrollbar: HitArea,
     /// Hovered question item index (visual highlight only).
@@ -1251,10 +1191,6 @@ pub struct AgentView {
     /// mirroring `AgentSession.deferred_model_switch`.
     pub(crate) deferred_session_mode: Option<pi_tools::types::SessionMode>,
     pub(crate) pending_extensions_fetch: bool,
-    /// MCP server init progress. Set when the shell starts connecting
- /// MCP servers, cleared when `legacy ext RPC` arrives.
-    /// Shown in the turn status line while the agent is idle.
-    pub(crate) mcp_init_progress: Option<McpInitProgress>,
     /// Last synced ACP command generation. When this differs from
     /// `session.available_commands_generation`, `sync_acp_commands()`
     /// is called on the prompt. Starts at 0 so bootstrap (generation 1)

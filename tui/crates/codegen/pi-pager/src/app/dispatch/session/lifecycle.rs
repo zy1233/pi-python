@@ -6,7 +6,7 @@ use crate::acp::model_state::{EffortTokenError, ModelState};
 use crate::acp::tracker::AcpUpdateTracker;
 use crate::app::actions::{Action, Effect, SwitchModelError};
 use crate::app::agent::{AgentCommand, AgentId, AgentSession, AgentState, DeferredModelSwitch};
-use crate::app::agent_view::{ActivePane, AgentView, McpInitProgress};
+use crate::app::agent_view::{ActivePane, AgentView};
 use crate::app::app_view::{ActiveView, AppView, TrustState};
 use crate::app::cancel_latency::TurnEnd;
 use crate::app::consent::ConsentState;
@@ -458,11 +458,6 @@ pub(in crate::app::dispatch) fn dispatch_new_session_inner_with_id(
             agent.workspace_mode_cli_locked = locked;
         }
         agent.apply_credit_balance(app.credit_balance.clone(), app.auto_topup.clone());
-        agent.mcp_init_progress = Some(McpInitProgress {
-            total: 0,
-            connected: 0,
-            started_at: Instant::now(),
-        });
         agent.session.prompt_history_loading = true;
     }
     let preferred_session_id = app.deferred_startup.preferred_session_id.take();
@@ -1098,7 +1093,6 @@ pub(in crate::app::dispatch) fn handle_session_failed(
     } else if let Some(agent) = app.agents.get_mut(&agent_id) {
         agent.pending_extensions_fetch = false;
         agent.session.prompt_history_loading = false;
-        agent.mcp_init_progress = None;
         agent.session.finish_command();
         let elapsed = agent.turn_elapsed();
         agent.mark_turn_finished(TurnEnd::Aborted);
@@ -1149,7 +1143,6 @@ pub(in crate::app::dispatch) fn handle_worktree_session_failed(
     } else if let Some(agent) = app.agents.get_mut(&agent_id) {
         agent.pending_extensions_fetch = false;
         agent.session.prompt_history_loading = false;
-        agent.mcp_init_progress = None;
         agent.session.finish_command();
         let elapsed = agent.turn_elapsed();
         agent.mark_turn_finished(TurnEnd::Aborted);

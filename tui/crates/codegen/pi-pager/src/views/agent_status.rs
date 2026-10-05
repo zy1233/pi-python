@@ -22,8 +22,6 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use super::context_bar::SEPARATOR;
-use super::turn_status::SPINNER_DIVISOR;
-use crate::app::agent_view::McpInitProgress;
 use crate::theme::Theme;
 
 /// A named status bar item.
@@ -137,97 +135,12 @@ impl<'a> AgentStatusBar<'a> {
 // Goal status line
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// MCP connecting indicator
-// ---------------------------------------------------------------------------
-
-/// Build the compact MCP-connecting indicator for the agent status bar.
-///
-/// Format: `⠋ MCP (1/4)` — a braille spinner (driven by `tick`, same cadence as
-/// the turn-status spinner) followed by the connected/total server count.
-/// Rendered in `theme.gray_dim` so it reads as dim, matching the directory path
-/// shown on the same row.
-///
-/// Returns `None` while `progress.total == 0` (a startup seed). That state
-/// renders `⠋ Starting session…` above the prompt (see
-/// [`crate::views::turn_status`]) rather than as a chip here — the top-bar chip
-/// only shows real server counts once the shell reports `total > 0`.
-pub fn mcp_status_line(
-    progress: &McpInitProgress,
-    tick: u64,
-    theme: &Theme,
-) -> Option<Line<'static>> {
-    if progress.total == 0 {
-        return None;
-    }
-    let frames = crate::glyphs::braille_spinner_frames();
-    let frame_idx = (tick / SPINNER_DIVISOR) as usize % frames.len();
-    let style = Style::default().fg(theme.gray_dim).bg(theme.bg_base);
-    Some(Line::from(vec![
-        Span::styled(format!("{} ", frames[frame_idx]), style),
-        Span::styled(
-            format!("MCP ({}/{})", progress.connected, progress.total),
-            style,
-        ),
-    ]))
-}
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     // The old deliverable-index parity test is removed because deliverables
     // are no longer part of the simplified goal model.
-
-    #[test]
-    fn mcp_status_line_renders_compact_count() {
-        // total > 0 renders the compact `MCP (connected/total)` chip.
-        let progress = McpInitProgress {
-            total: 4,
-            connected: 1,
-            started_at: std::time::Instant::now(),
-        };
-        let t = Theme::current();
-        let line = mcp_status_line(&progress, 0, &t).expect("total > 0 must render a line");
-        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(
-            text.contains("MCP (1/4)"),
-            "expected 'MCP (1/4)', got: {text:?}"
-        );
-    }
-
-    #[test]
-    fn mcp_status_line_uses_dim_directory_color() {
-        // The chip must render in `theme.gray_dim` to match the directory path.
-        let t = Theme::groknight();
-        let progress = McpInitProgress {
-            total: 2,
-            connected: 0,
-            started_at: std::time::Instant::now(),
-        };
-        let line = mcp_status_line(&progress, 0, &t).expect("total > 0 must render a line");
-        for span in &line.spans {
-            assert_eq!(
-                span.style.fg,
-                Some(t.gray_dim),
-                "MCP chip spans must use theme.gray_dim"
-            );
-        }
-    }
-
-    #[test]
-    fn mcp_status_line_hidden_for_zero_total() {
-        // total == 0 (startup seed) renders nothing in the top bar — that state
-        // shows "Starting session…" above the prompt instead.
-        let progress = McpInitProgress {
-            total: 0,
-            connected: 0,
-            started_at: std::time::Instant::now(),
-        };
-        let t = Theme::current();
-        assert!(mcp_status_line(&progress, 0, &t).is_none());
-    }
 
     /// Separators appear only *between* items — never before the first item or
     /// after the last (no leading/trailing divider).

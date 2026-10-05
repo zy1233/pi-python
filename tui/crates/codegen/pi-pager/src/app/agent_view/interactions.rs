@@ -1025,28 +1025,6 @@ impl AgentView {
             let _ = self.dismiss_question_view();
             return true;
         }
-        if let Some(ev) = self.elicitation_view.as_ref()
-            && ev.tool_call_id == tool_call_id
-        {
-            if ev.is_url_waiting() {
-                return false;
-            }
-            if let Some(mut ev) = self.elicitation_view.take() {
-                let _ = ev.take_response_tx();
-                self.restore_elicitation_prompt(ev.stashed_prompt);
-            }
-            return true;
-        }
-        if self
-            .pending_elicitation
-            .as_ref()
-            .is_some_and(|(req, _)| req.tool_call_id == tool_call_id)
-        {
-            if let Some((_, tx)) = self.pending_elicitation.take() {
-                drop(tx);
-            }
-            return true;
-        }
         if self
             .plan_approval_view
             .as_ref()

@@ -214,7 +214,7 @@ impl WorktreeMode {
 use super::PagerTerminal;
 use super::actions::Action;
 use super::agent::AgentId;
-use super::agent_view::{AgentView, AppRenderParams, McpInitProgress};
+use super::agent_view::{AgentView, AppRenderParams};
 use super::bundle::BundleState;
 /// Which view is currently displayed.
 ///
@@ -766,8 +766,6 @@ pub struct AppView {
     pub welcome_menu_index: Option<usize>,
     /// Hit-test rects for welcome menu items (populated during render).
     pub welcome_menu_rects: Vec<ratatui::layout::Rect>,
-    /// Hit-test rect for the import-claude banner on the welcome screen.
-    pub welcome_import_banner_rect: Option<ratatui::layout::Rect>,
     /// Last known mouse position (column, row), updated on every Mouse event.
     /// Used by the welcome screen to render fine-grained hover effects (e.g.
     /// brighter red on the import row's `[x]` when the mouse is exactly on
@@ -1106,10 +1104,6 @@ pub struct AppView {
     /// other screen mode. Driven by `/minimal` and `/fullscreen`. Captures the
     /// session id at action time so a later teardown cannot drop `--resume`.
     pub relaunch: Option<ScreenModeRelaunch>,
-    /// Whether importable `.claude/` settings were detected at startup.
-    pub has_claude_import: bool,
-    /// When set, the welcome screen renders an interactive import modal instead of normal content.
-    pub import_claude_modal: Option<crate::views::import_claude_modal::ImportClaudeModalState>,
     /// Doc viewer overlay for the welcome screen (`/docs <guide>`).
     pub welcome_doc_viewer: Option<crate::views::modal::ActiveModal>,
     /// Whether the pager uses fullscreen (alt-screen) or inline mode.
@@ -1408,7 +1402,6 @@ impl AppView {
             minimal_state: crate::minimal_api::MinimalState::default(),
             welcome_menu_index: None,
             welcome_menu_rects: Vec::new(),
-            welcome_import_banner_rect: None,
             last_mouse_pos: None,
             last_scroll_pos: None,
             last_cache_evict_at: None,
@@ -1541,8 +1534,6 @@ impl AppView {
             foreign_resume_launch: None,
             quit_for_update: false,
             relaunch: None,
-            has_claude_import: false,
-            import_claude_modal: None,
             welcome_doc_viewer: None,
             screen_mode: ScreenMode::Inline,
             pending_screen_mode_switch: None,
@@ -1841,9 +1832,7 @@ impl AppView {
     /// this list in lockstep with those intercepts when adding a top-level
     /// Esc owner.
     pub(crate) fn esc_owned_before_agent(&self) -> bool {
-        self.import_claude_modal.is_some()
-            || self.voice_listening()
-            || self.voice_state.pending_cold_start()
+        self.voice_listening() || self.voice_state.pending_cold_start()
     }
     /// Commit interim on real send keys only (not multiline bare Enter).
     fn maybe_commit_voice_interim_before_submit_key(&mut self, key: &crossterm::event::KeyEvent) {
@@ -2140,13 +2129,8 @@ impl AppView {
                     new_worktree_dialog: &mut self.new_worktree_dialog,
                     menu_index: &mut self.welcome_menu_index,
                     menu_rects: &self.welcome_menu_rects,
-                    menu_count: if zdr_blocked {
-                        2
-                    } else {
-                        3 + if self.has_claude_import { 1 } else { 0 }
-                    },
+                    menu_count: if zdr_blocked { 2 } else { 3 },
                     prompt_rect: self.welcome_prompt_rect.as_ref(),
-                    import_banner_rect: self.welcome_import_banner_rect.as_ref(),
                     auth_url_rect: self.welcome_auth_url_rect.as_ref(),
                     auth_fallback_rect: self.welcome_auth_fallback_rect.as_ref(),
                     refresh_rect: self.welcome_refresh_rect.as_ref(),
@@ -2172,8 +2156,6 @@ impl AppView {
                     sp_content_results: &self.session_picker_content_results,
                     sp_content_loading: self.session_picker_content_loading,
                     sp_entries_query: &self.session_picker_entries_query,
-                    has_claude_import: self.has_claude_import,
-                    import_claude_modal: &mut self.import_claude_modal,
                     welcome_doc_viewer: &mut self.welcome_doc_viewer,
                     has_pending_update: self.pending_update_version.is_some(),
                     has_foreign_resume,
@@ -2201,33 +2183,6 @@ impl AppView {
                 },
             ),
             ActiveView::Agent(id) => {
-                if let Some(modal) = self.import_claude_modal.as_mut() {
-                    use crate::views::import_claude_modal::ImportClaudeModalOutcome;
-                    let outcome_to_input = |o: ImportClaudeModalOutcome| match o {
-                        ImportClaudeModalOutcome::Confirmed => {
-                            InputOutcome::Action(Action::ImportClaudeConfirm)
-                        }
-                        ImportClaudeModalOutcome::Cancelled => {
-                            InputOutcome::Action(Action::ImportClaudeCancel)
-                        }
-                        ImportClaudeModalOutcome::Changed => InputOutcome::Changed,
-                        ImportClaudeModalOutcome::Unchanged => InputOutcome::Unchanged,
-                    };
-                    if let Event::Key(key) = ev {
-                        if key.kind == KeyEventKind::Release {
-                            return InputOutcome::Unchanged;
-                        }
-                        return outcome_to_input(modal.handle_key(key));
-                    }
-                    if let Event::Mouse(mouse) = ev {
-                        return outcome_to_input(modal.handle_mouse(
-                            mouse.kind,
-                            mouse.column,
-                            mouse.row,
-                        ));
-                    }
-                    return InputOutcome::Unchanged;
-                }
                 if let Some(outcome) = self.voice_esc_outcome(key_event) {
                     return outcome;
                 }
@@ -2439,7 +2394,6 @@ struct WelcomeInputCtx<'a> {
     menu_rects: &'a [ratatui::layout::Rect],
     menu_count: usize,
     prompt_rect: Option<&'a ratatui::layout::Rect>,
-    import_banner_rect: Option<&'a ratatui::layout::Rect>,
     auth_url_rect: Option<&'a ratatui::layout::Rect>,
     auth_fallback_rect: Option<&'a ratatui::layout::Rect>,
     refresh_rect: Option<&'a ratatui::layout::Rect>,
@@ -2482,8 +2436,6 @@ struct WelcomeInputCtx<'a> {
     /// The query `sp_entries` were server-fetched with (see
     /// [`crate::views::session_picker::effective_filter_query`]).
     sp_entries_query: &'a Option<String>,
-    has_claude_import: bool,
-    import_claude_modal: &'a mut Option<crate::views::import_claude_modal::ImportClaudeModalState>,
     welcome_doc_viewer: &'a mut Option<crate::views::modal::ActiveModal>,
     has_pending_update: bool,
     /// A recent foreign session is available to resume when no update is pending.
@@ -2514,27 +2466,6 @@ struct WelcomeInputCtx<'a> {
 }
 /// Welcome view input -- auth-state-aware routing.
 fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutcome {
-    if let Some(modal) = ctx.import_claude_modal.as_mut() {
-        use crate::views::import_claude_modal::ImportClaudeModalOutcome;
-        let outcome_to_input = |o: ImportClaudeModalOutcome| match o {
-            ImportClaudeModalOutcome::Confirmed => {
-                InputOutcome::Action(Action::ImportClaudeConfirm)
-            }
-            ImportClaudeModalOutcome::Cancelled => InputOutcome::Action(Action::ImportClaudeCancel),
-            ImportClaudeModalOutcome::Changed => InputOutcome::Changed,
-            ImportClaudeModalOutcome::Unchanged => InputOutcome::Unchanged,
-        };
-        if let Event::Key(key) = ev {
-            if key.kind == crossterm::event::KeyEventKind::Release {
-                return InputOutcome::Unchanged;
-            }
-            return outcome_to_input(modal.handle_key(key));
-        }
-        if let Event::Mouse(mouse) = ev {
-            return outcome_to_input(modal.handle_mouse(mouse.kind, mouse.column, mouse.row));
-        }
-        return InputOutcome::Unchanged;
-    }
     if let Some(modal) = ctx.welcome_doc_viewer {
         if let Event::Key(key) = ev {
             if key.kind == crossterm::event::KeyEventKind::Release {
@@ -3034,12 +2965,6 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
             if ctx.has_foreign_resume && key!('u', CONTROL).matches(key) {
                 return InputOutcome::Action(Action::ResumeForeignSession);
             }
-            if ctx.has_claude_import && key!('i', CONTROL).matches(key) {
-                return InputOutcome::Action(Action::ImportClaudeSettings);
-            }
-            if ctx.has_claude_import && key!('I', CONTROL | SHIFT).matches(key) {
-                return InputOutcome::Action(Action::DismissClaudeImport);
-            }
         }
         if matches!(ctx.auth_state, AuthState::Done) && crate::input::key::is_shift_tab(key) {
             return InputOutcome::ActionThenForward(Action::NewSession);
@@ -3076,7 +3001,7 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
             if key!(Enter).matches(key)
                 && let Some(idx) = *ctx.menu_index
             {
-                return dispatch_menu_action(idx, ctx.has_claude_import);
+                return dispatch_menu_action(idx);
             }
             if crate::input::key::is_text_input_key(key) {
                 *ctx.prompt_focused = true;
@@ -3206,14 +3131,7 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                         if !ctx.has_access {
                             return dispatch_access_gate_menu_action(i);
                         }
-                        if ctx.has_claude_import
-                            && i == 0
-                            && mouse.column >= rect.x + rect.width.saturating_sub(4)
-                            && mouse.column < rect.x + rect.width.saturating_sub(1)
-                        {
-                            return InputOutcome::Action(Action::DismissClaudeImport);
-                        }
-                        return dispatch_menu_action(i, ctx.has_claude_import);
+                        return dispatch_menu_action(i);
                     }
                 }
                 if let Some(rect) = ctx.refresh_rect
@@ -3276,15 +3194,6 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                 {
                     return InputOutcome::Action(Action::ShowRawAuthUrl);
                 }
-                if let Some(rect) = ctx.import_banner_rect
-                    && matches!(ctx.auth_state, AuthState::Done)
-                    && mouse.column >= rect.x
-                    && mouse.column < rect.x + rect.width
-                    && mouse.row >= rect.y
-                    && mouse.row < rect.y + rect.height
-                {
-                    return InputOutcome::Action(Action::ImportClaudeSettings);
-                }
                 if let Some(rect) = ctx.prompt_rect
                     && matches!(ctx.auth_state, AuthState::Done)
                     && mouse.column >= rect.x
@@ -3310,9 +3219,6 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                 }
                 if new_index != *ctx.menu_index {
                     *ctx.menu_index = new_index;
-                    return InputOutcome::Changed;
-                }
-                if ctx.has_claude_import && new_index == Some(0) {
                     return InputOutcome::Changed;
                 }
                 let pos = ratatui::layout::Position::new(mouse.column, mouse.row);
@@ -3448,25 +3354,14 @@ fn dispatch_access_gate_menu_action(index: usize) -> InputOutcome {
 }
 /// Dispatch an action for a welcome menu item by index.
 ///
-/// Menu order: `[Import]`, New worktree, Resume session, Quit.
-fn dispatch_menu_action(index: usize, has_claude_import: bool) -> InputOutcome {
-    let base = if has_claude_import { 1 } else { 0 };
-    let worktree_idx = base;
-    let resume_idx = base + 1;
-    let quit_idx = base + 2;
-    if has_claude_import && index == 0 {
-        return InputOutcome::Action(Action::ImportClaudeSettings);
+/// Menu order: New worktree, Resume session, Quit.
+fn dispatch_menu_action(index: usize) -> InputOutcome {
+    match index {
+        0 => InputOutcome::Action(Action::OpenNewWorktreeDialog),
+        1 => InputOutcome::Action(Action::FetchSessionList),
+        2 => InputOutcome::Action(Action::Quit),
+        _ => InputOutcome::Unchanged,
     }
-    if index == worktree_idx {
-        return InputOutcome::Action(Action::OpenNewWorktreeDialog);
-    }
-    if index == resume_idx {
-        return InputOutcome::Action(Action::FetchSessionList);
-    }
-    if index == quit_idx {
-        return InputOutcome::Action(Action::Quit);
-    }
-    InputOutcome::Unchanged
 }
 impl AppView {
     /// Merge notification escape sequences with render-produced post-flush
@@ -3762,7 +3657,6 @@ impl AppView {
                             selected: self.welcome_menu_index,
                             team_name: self.team_name.as_deref(),
                             has_access,
-                            has_claude_import: self.has_claude_import,
                             mouse_pos: self.last_mouse_pos,
                             is_zdr_blocked: zdr_blocked_for_draw,
                             session_picker: self.session_picker_entries.as_deref(),
@@ -3817,7 +3711,6 @@ impl AppView {
                         );
                         self.welcome_menu_rects = result.menu_rects;
                         self.welcome_prompt_rect = result.prompt_rect;
-                        self.welcome_import_banner_rect = result.import_banner_rect;
                         self.welcome_auth_url_rect = result.auth_url_rect;
                         self.welcome_auth_fallback_rect = result.auth_fallback_rect;
                         self.welcome_refresh_rect = result.refresh_rect;
@@ -3848,16 +3741,6 @@ impl AppView {
                         self.welcome_announcement.truncated = result.announcement_truncated;
                         self.welcome_announcement.rect = result.announcement_rect;
                         self.session_picker_state.hit_areas = result.session_picker_hit_areas;
-                        if let Some(modal) = self.import_claude_modal.as_mut() {
-                            let theme = crate::theme::Theme::current();
-                            crate::views::import_claude_modal::render_import_claude_modal(
-                                f.buffer_mut(),
-                                view_area,
-                                modal,
-                                &theme,
-                                compact,
-                            );
-                        }
                         if let Some(dialog) = self.new_worktree_dialog.as_ref() {
                             crate::views::new_worktree_dialog::render_new_worktree_dialog(
                                 view_area,
@@ -4006,16 +3889,6 @@ impl AppView {
                                     status_line: status_line_frame.clone(),
                                 },
                             );
-                            if let Some(modal) = self.import_claude_modal.as_mut() {
-                                let theme = crate::theme::Theme::current();
-                                crate::views::import_claude_modal::render_import_claude_modal(
-                                    f.buffer_mut(),
-                                    view_area,
-                                    modal,
-                                    &theme,
-                                    compact,
-                                );
-                            }
                             if let Some(tutorial) = self.tutorial.as_mut() {
                                 crate::views::tutorial::render_tutorial(
                                     f.buffer_mut(),
@@ -4032,10 +3905,7 @@ impl AppView {
                             }
                             let (cursor_pos, post_flush) = result;
                             let has_cloud = false;
-                            if has_cloud
-                                || self.import_claude_modal.is_some()
-                                || self.tutorial.is_some()
-                            {
+                            if has_cloud || self.tutorial.is_some() {
                                 link_spans.clear();
                             }
                             let cursor = if has_cloud || self.tutorial.is_some() {
@@ -4169,7 +4039,6 @@ impl AppView {
     fn is_scroll_blocking_modal_open(&self) -> bool {
         let cloud_modal_open = false;
         matches!(self.active_view, ActiveView::Agent(id) if self.agents.get(&id).is_some_and(|a| a.active_modal.is_some()))
-            || self.import_claude_modal.is_some()
             || self.new_worktree_dialog.is_some()
             || self.welcome_doc_viewer.is_some()
             || self.tutorial.is_some()
@@ -4406,11 +4275,6 @@ impl AppView {
             let spinner_frame_tick =
                 agent.scrollback.animation_tick() % crate::views::turn_status::SPINNER_DIVISOR == 0;
             needs_redraw |= !agent.session.state.is_idle() && spinner_frame_tick;
-            needs_redraw |= agent
-                .mcp_init_progress
-                .as_ref()
-                .is_some_and(McpInitProgress::is_visible)
-                && spinner_frame_tick;
             needs_redraw |= matches!(
                 agent.btw_state,
                 Some(crate::views::btw_overlay::BtwOverlayState::Loading { .. })
@@ -4695,10 +4559,6 @@ impl AppView {
                     || !agent.session.state.is_idle()
                     || agent.wake_turn_active()
                     || agent.session.loading_replay
-                    || agent
-                        .mcp_init_progress
-                        .as_ref()
-                        .is_some_and(McpInitProgress::is_visible)
                     || matches!(
                         agent.btw_state,
                         Some(crate::views::btw_overlay::BtwOverlayState::Loading { .. })

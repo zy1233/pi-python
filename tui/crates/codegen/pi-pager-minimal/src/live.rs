@@ -562,11 +562,7 @@ fn render_minimal_status(
         return;
     }
     let drain_blocked = minimal_api::drain_blocked(agent);
-    if !turn_status::should_show(
-        &agent.session.state,
-        drain_blocked,
-        minimal_api::mcp_init_progress(agent),
-    ) {
+    if !turn_status::should_show(&agent.session.state, drain_blocked) {
         render_idle_hint(buf, area, theme);
         return;
     }
@@ -584,7 +580,6 @@ fn render_minimal_status(
             drain_blocked,
             buttons: None,
             total_tokens: agent.context_state.as_ref().map(|c| c.used),
-            mcp_init_progress: minimal_api::mcp_init_progress(agent),
             is_bash_turn: agent.bash_turn,
             is_pending_user_input,
             flat_background: true,

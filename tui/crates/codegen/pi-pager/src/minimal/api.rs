@@ -32,7 +32,7 @@ use crate::acp::tracker::TurnActivity;
 // Only the test-only setters below reference `AgentSession`.
 #[cfg(any(test, feature = "test-support"))]
 use crate::app::agent::AgentSession;
-use crate::app::agent_view::{AgentView, McpInitProgress};
+use crate::app::agent_view::AgentView;
 use crate::app::app_view::{ActiveView, AppView, SessionPickerEntry};
 use crate::appearance::LayoutConfig;
 use crate::scrollback::entry::{EntryId, ScrollbackEntry};
@@ -325,10 +325,6 @@ pub fn plan_mode_pending(v: &AgentView) -> Option<bool> {
     v.plan_mode_pending
 }
 
-/// `AgentView::mcp_init_progress`.
-pub fn mcp_init_progress(v: &AgentView) -> Option<&McpInitProgress> {
-    v.mcp_init_progress.as_ref()
-}
 
 /// `AgentView::plan_approval_view`.
 pub fn plan_approval_view(v: &AgentView) -> Option<&PlanApprovalViewState> {

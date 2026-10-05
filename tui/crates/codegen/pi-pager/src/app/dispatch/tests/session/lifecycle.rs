@@ -352,11 +352,6 @@ fn session_failed_keeps_agent_clears_loading_and_toasts() {
     {
         let a = app.agents.get_mut(&id).unwrap();
         a.session.session_id = Some(acp::SessionId::new("existing"));
-        a.mcp_init_progress = Some(crate::app::agent_view::McpInitProgress {
-            total: 0,
-            connected: 0,
-            started_at: std::time::Instant::now(),
-        });
     }
     let effects = dispatch(
         Action::TaskComplete(TaskResult::SessionFailed {
@@ -367,7 +362,6 @@ fn session_failed_keeps_agent_clears_loading_and_toasts() {
     );
     assert!(effects.is_empty());
     let agent = &app.agents[&id];
-    assert!(agent.mcp_init_progress.is_none());
     assert_eq!(
         agent.toast.as_ref().map(|(m, _)| m.as_str()),
         Some("Session creation failed: No space left on device"),
@@ -381,11 +375,6 @@ fn session_failed_orphan_returns_to_welcome_with_warning() {
         let a = app.agents.get_mut(&id).unwrap();
         a.session.session_id = None;
         a.session.forked_from = None;
-        a.mcp_init_progress = Some(crate::app::agent_view::McpInitProgress {
-            total: 0,
-            connected: 0,
-            started_at: std::time::Instant::now(),
-        });
     }
     let effects = dispatch(
         Action::TaskComplete(TaskResult::SessionFailed {
@@ -544,23 +533,6 @@ fn agent_type_mismatch_start_new_creates_session_with_model_id() {
     } else {
         panic!("expected active view to be an Agent");
     }
-}
-#[test]
-fn new_session_seeds_mcp_init_progress() {
-    let mut app = test_app();
-    dispatch(Action::NewSession, &mut app);
-    let id = AgentId(0);
-    let progress = app.agents[&id].mcp_init_progress.as_ref();
-    assert!(
-        progress.is_some(),
-        "new session must seed mcp_init_progress",
-    );
-    let p = progress.unwrap();
-    assert_eq!(
-        p.total, 0,
-        "seeded total must be 0 (unknown until shell reports)"
-    );
-    assert_eq!(p.connected, 0, "seeded connected must be 0");
 }
 #[test]
 fn new_session_without_model_switch_has_no_model_id() {

@@ -726,19 +726,6 @@ impl AgentView {
                 _ => InputOutcome::Changed,
             };
         }
-        if self.focused_card() == Some(BlockingCard::McpElicitation) {
-            return match ev {
-                Event::Key(key) if key.kind != KeyEventKind::Release => {
-                    if key!('q', CONTROL).matches(key) {
-                        return InputOutcome::Unchanged;
-                    }
-                    self.handle_elicitation_key(key)
-                }
-                Event::Paste(text) => self.handle_elicitation_paste(text),
-                Event::Mouse(mouse) => self.handle_elicitation_mouse(mouse),
-                _ => InputOutcome::Changed,
-            };
-        }
         if self.rewind_state.is_some() {
             return match ev {
                 Event::Key(key) if key.kind != crossterm::event::KeyEventKind::Release => {

@@ -22,7 +22,6 @@ use pi_workspace::permission::mcp_pretty_name_if_qualified;
 
 use crate::acp::tracker::TurnActivity;
 use crate::app::agent::{AgentCommand, AgentState};
-use crate::app::agent_view::McpInitProgress;
 use crate::render::line_utils::truncate_str;
 use crate::theme::Theme;
 
@@ -89,7 +88,6 @@ pub struct TurnStatusArgs<'a> {
     pub buttons: Option<MouseButtons>,
     /// Context-window tokens used, shown as `⇣Nk`.
     pub total_tokens: Option<u64>,
-    pub mcp_init_progress: Option<&'a McpInitProgress>,
     pub is_bash_turn: bool,
     pub is_pending_user_input: bool,
     /// Transparent right-side background so the row blends with the
@@ -115,7 +113,6 @@ pub fn render_turn_status(
         drain_blocked,
         buttons,
         total_tokens,
-        mcp_init_progress,
         is_bash_turn,
         is_pending_user_input,
         flat_background,
@@ -129,20 +126,6 @@ pub fn render_turn_status(
     }
 
     let theme = Theme::current();
-
-    // MCP startup seed (total == 0) while idle — show "Starting session…"
-    // above the prompt until the shell reports real server counts. Real MCP
-    // progress (total > 0) renders as the compact top-bar chip instead, not
-    // here. Auto-expires via `is_visible()` if the shell never reports.
-    if state.is_idle()
-        && !drain_blocked
-        && let Some(progress) = mcp_init_progress
-        && progress.total == 0
-        && progress.is_visible()
-    {
-        render_starting_session(buf, area, progress, tick, &theme);
-        return TurnStatusOutput::default();
-    }
 
     // Special case: drain is blocked (user editing front prompt, agent idle).
     // No cancel button in this state.
@@ -507,57 +490,12 @@ fn compute_activity(
     }
 }
 
-/// Whether the idle "Starting session…" indicator wants the turn-status row.
-///
-/// True only for a fresh `total == 0` startup seed (gated by
-/// [`McpInitProgress::is_visible`] so an orphaned seed expires). Real MCP
-/// progress (`total > 0`) renders as the top-bar chip instead, so it does not
-/// drive this row.
-fn starting_session_visible(progress: Option<&McpInitProgress>) -> bool {
-    progress.is_some_and(|p| p.total == 0 && p.is_visible())
-}
-
-/// Render the idle "Starting session…" indicator above the prompt.
-///
-/// Format: `⠋ Starting session… 0:01` — braille spinner + label + elapsed
-/// timer. Rendered in `theme.gray_dim` (the dimmest gray) so it reads as
-/// quiet/ambient, matching the top-bar MCP chip and the directory path — this
-/// is non-blocking startup, not foreground activity. Shown only while the MCP
-/// init progress is a startup seed (`total == 0`), before the shell reports
-/// real server counts; real progress (`total > 0`) renders as the top-bar chip.
-fn render_starting_session(
-    buf: &mut Buffer,
-    area: Rect,
-    progress: &McpInitProgress,
-    tick: u64,
-    theme: &Theme,
-) {
-    let frames = crate::glyphs::braille_spinner_frames();
-    let frame_idx = (tick / SPINNER_DIVISOR) as usize % frames.len();
-    let timer_str = format!(" {}", format_turn_timer(progress.started_at.elapsed()));
-    let style = Style::default().fg(theme.gray_dim);
-    let spans = vec![
-        Span::styled(format!("{} ", frames[frame_idx]), style),
-        Span::styled("Starting session…", style),
-        Span::styled(timer_str, style),
-    ];
-    buf.set_line(area.x, area.y, &Line::from(spans), area.width);
-}
-
 /// Whether the turn status line should be visible.
 ///
-/// Returns true when a turn is active (Running or Cancelling), when the drain
-/// is blocked (agent idle, waiting on user edit), while the MCP startup seed
-/// is showing "Starting session…" (a fresh `total == 0` seed).
-///
-/// Real MCP progress (`total > 0`) renders as a compact chip in the top status
-/// bar instead, so it does not affect this row.
-pub fn should_show(
-    state: &AgentState,
-    drain_blocked: bool,
-    mcp_init_progress: Option<&McpInitProgress>,
-) -> bool {
-    !state.is_idle() || drain_blocked || starting_session_visible(mcp_init_progress)
+/// Returns true when a turn is active (Running or Cancelling) or when the
+/// drain is blocked (agent idle, waiting on user edit).
+pub fn should_show(state: &AgentState, drain_blocked: bool) -> bool {
+    !state.is_idle() || drain_blocked
 }
 
 /// Format a duration for the turn/phase timer.
@@ -692,9 +630,9 @@ mod tests {
 
     #[test]
     fn should_show_when_running() {
-        assert!(should_show(&AgentState::TurnRunning, false, None));
-        assert!(should_show(&AgentState::TurnCancelling, false, None));
-        assert!(!should_show(&AgentState::Idle, false, None));
+        assert!(should_show(&AgentState::TurnRunning, false));
+        assert!(should_show(&AgentState::TurnCancelling, false));
+        assert!(!should_show(&AgentState::Idle, false));
     }
 
     /// Cancelling keeps `[stop]` clickable (the retry affordance for a lost
@@ -714,7 +652,6 @@ mod tests {
                 drain_blocked: false,
                 buttons: Some(MouseButtons::default()),
                 total_tokens: None,
-                mcp_init_progress: None,
                 is_bash_turn: false,
                 is_pending_user_input: false,
                 flat_background: false,
@@ -733,35 +670,7 @@ mod tests {
 
     #[test]
     fn should_show_when_drain_blocked() {
-        assert!(should_show(&AgentState::Idle, true, None));
-    }
-
-    #[test]
-    fn should_show_when_starting_session() {
-        // A fresh total == 0 seed shows "Starting session…" above the prompt.
-        let seed = McpInitProgress {
-            total: 0,
-            connected: 0,
-            started_at: Instant::now(),
-        };
-        assert!(should_show(&AgentState::Idle, false, Some(&seed)));
-
-        // Real progress (total > 0) is the top-bar chip — it must NOT drive
-        // this row.
-        let connecting = McpInitProgress {
-            total: 3,
-            connected: 1,
-            started_at: Instant::now(),
-        };
-        assert!(!should_show(&AgentState::Idle, false, Some(&connecting)));
-
-        // An expired seed must not drive the row either.
-        let expired = McpInitProgress {
-            total: 0,
-            connected: 0,
-            started_at: Instant::now() - McpInitProgress::SEED_EXPIRE - Duration::from_secs(1),
-        };
-        assert!(!should_show(&AgentState::Idle, false, Some(&expired)));
+        assert!(should_show(&AgentState::Idle, true));
     }
 
     /// Collect every rendered glyph in `area` into a single string.
@@ -787,7 +696,6 @@ mod tests {
             drain_blocked: false,
             buttons: Some(MouseButtons::default()),
             total_tokens: None,
-            mcp_init_progress: None,
             is_bash_turn: false,
             is_pending_user_input: false,
             flat_background: false,
@@ -808,61 +716,12 @@ mod tests {
         buffer_text(&buf, buf.area)
     }
 
-    /// Invoke `render_turn_status` for an idle agent with the given MCP seed.
-    fn render_idle_with_mcp(progress: &McpInitProgress) -> String {
-        let mut args = idle_args();
-        args.mcp_init_progress = Some(progress);
-        render_row_text(args, 60)
-    }
-
     #[test]
     fn idle_renders_nothing() {
         let text = render_row_text(idle_args(), 60);
         assert!(
             text.trim().is_empty(),
             "idle with nothing pending must render nothing, got: {text:?}"
-        );
-    }
-
-    #[test]
-    fn idle_zero_server_seed_renders_starting_session() {
-        // total == 0 seed → "Starting session…" above the prompt.
-        let text = render_idle_with_mcp(&McpInitProgress {
-            total: 0,
-            connected: 0,
-            started_at: Instant::now(),
-        });
-        assert!(
-            text.contains("Starting session"),
-            "idle 0-server seed must render 'Starting session…', got: {text:?}"
-        );
-    }
-
-    #[test]
-    fn idle_active_mcp_progress_renders_nothing_in_turn_status() {
-        // total > 0 is the top-bar chip — the turn-status row stays empty.
-        let text = render_idle_with_mcp(&McpInitProgress {
-            total: 3,
-            connected: 1,
-            started_at: Instant::now(),
-        });
-        assert!(
-            text.trim().is_empty(),
-            "active MCP progress must NOT render in the turn-status row, got: {text:?}"
-        );
-    }
-
-    #[test]
-    fn expired_seed_renders_nothing() {
-        // An expired total == 0 seed renders nothing — defense-in-depth.
-        let text = render_idle_with_mcp(&McpInitProgress {
-            total: 0,
-            connected: 0,
-            started_at: Instant::now() - McpInitProgress::SEED_EXPIRE - Duration::from_secs(1),
-        });
-        assert!(
-            text.trim().is_empty(),
-            "expired seed must render nothing, got: {text:?}"
         );
     }
 
