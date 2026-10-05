@@ -3227,15 +3227,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
 
 [[package]]
-name = "file-id"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1fc6a637b6dc58414714eddd9170ff187ecb0933d4c7024d1abbd23a3cc26e9"
-dependencies = [
- "windows-sys 0.60.2",
-]
-
-[[package]]
 name = "filedescriptor"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6310,19 +6301,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "notify-debouncer-full"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2d88b1a7538054351c8258338df7c931a590513fb3745e8c15eb9ff4199b8d1"
-dependencies = [
- "file-id",
- "log",
- "notify",
- "notify-types",
- "walkdir",
-]
-
-[[package]]
 name = "notify-types"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7721,27 +7699,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pi-fsnotify"
-version = "0.1.0"
-dependencies = [
- "criterion",
- "dunce",
- "git2",
- "globset",
- "ignore",
- "notify",
- "notify-debouncer-full",
- "pi-tracing-macros",
- "serde",
- "serial_test",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
 name = "pi-fuzzy-file-search"
 version = "0.1.0"
 dependencies = [
@@ -7911,40 +7868,6 @@ dependencies = [
  "url",
  "webbrowser",
  "which",
-]
-
-[[package]]
-name = "pi-memory"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "arc-swap",
- "async-trait",
- "blake3",
- "chrono",
- "dunce",
- "filetime",
- "flate2",
- "git2",
- "nix 0.30.1",
- "notify",
- "pi-auth",
- "pi-config-types",
- "pi-http",
- "pi-sqlite-journal",
- "pi-token-estimation",
- "pi-tools",
- "pi-version",
- "reqwest 0.12.24",
- "reqwest-middleware 0.4.2",
- "rusqlite",
- "serde_json",
- "sqlite-vec",
- "tar",
- "tempfile",
- "tokio",
- "tracing",
- "windows 0.61.3",
 ]
 
 [[package]]
@@ -11318,15 +11241,6 @@ checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
 dependencies = [
  "base64ct",
  "der",
-]
-
-[[package]]
-name = "sqlite-vec"
-version = "0.1.7-alpha.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2388d9b97b32baa48a059df2f15a9bb49217fa1f9fb076e98c89e8fc02c8f2c4"
-dependencies = [
- "cc",
 ]
 
 [[package]]

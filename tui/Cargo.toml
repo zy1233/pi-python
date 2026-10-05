@@ -14,7 +14,6 @@ members = [
     "crates/codegen/pi-crash-handler",
     "crates/codegen/pi-fast-worktree",
     "crates/codegen/pi-file-utils",
-    "crates/codegen/pi-fsnotify",
     "crates/codegen/pi-fuzzy-file-search",
     "crates/codegen/pi-gix-status",
     "crates/codegen/pi-active-sessions",
@@ -33,7 +32,6 @@ members = [
     "crates/codegen/pi-markdown",
     "crates/codegen/pi-markdown-core",
     "crates/codegen/pi-mcp",
-    "crates/codegen/pi-memory",
     "crates/codegen/pi-mermaid",
     "crates/codegen/pi-models",
     "crates/codegen/pi-pager",
@@ -98,7 +96,6 @@ license = "Apache-2.0"
 
 [workspace.dependencies]
 agent-client-protocol = { version = "0.10.4", features = ["unstable"] }
-alacritty_terminal = "0.26.0"
 ansi-to-tui = "7.0.0"
 ansi-width = "0.1"
 anstyle = "1.0"
@@ -131,7 +128,6 @@ crc32fast = "1.4"
 criterion = "0.6"
 crossbeam = "0.8"
 crossterm = "0.28"
-cryptify = "3.2"
 ctor = "0.4"
 dashmap = "6"
 derive_more = { version = "2", features = ["add", "add_assign", "debug", "deref", "deref_mut", "display", "from", "from_str", "into", "into_iterator", "as_ref", "try_into"] }
@@ -140,10 +136,7 @@ dirs = "5.0"
 documented = "0.9"
 dunce = "1"
 educe = "0.6.0"
-encoding_rs = "0.8.35"
 enum_delegate = "0.2"
-env_logger = "0.11"
-eventsource-stream = "0.2"
 fastrace = { version = "0.7" }
 fastrace-opentelemetry = { version = "0.18" }
 fastrace-reqwest = { version = "0.2" }
@@ -157,15 +150,12 @@ futures = "0.3"
 futures-util = "0.3"
 fuzzy-matcher = "0.3.7"
 gcloud-storage = { version = "1.3.0", default-features = false, features = ["auth", "jwt-aws-lc-rs", "external-account"] }
-gethostname = "1"
 gix = { version = "0.83", default-features = false, features = ["sha1"] }
-glob = "0.3"
 globset = "0.4"
 htmd = "0.5.4"
 html-escape = "0.2"
 http = "1"
 http-body-util = "0.1"
-humantime-serde = "1"
 ignore = "0.4"
 image = { version = "0.25.10", default-features = false }
 indexmap = { version = "2", features = ["serde"] }
@@ -173,21 +163,16 @@ indicatif = "0.18"
 infer = "0.19.0"
 insta = "1"
 itertools = "0.14"
-jsonschema = "0.30.0"
-kamadak-exif = "0.5"
 libc = "0.2"
 linkify = "0.10"
 lipsum = "0.9"
 log = { version = "0.4", features = ["kv", "kv_unstable"] }
 loom = "0.7"
-md5 = "0.8"
 mermaid-to-svg = { path = "third_party/mermaid-to-svg" }
 minijinja = "2.9"
 mockito = "1"
-moka = "0.12"
 nix = { version = "0.30", features = ["poll", "process", "signal", "sched", "term", "mount", "fs", "ioctl", "mman", "reboot", "user"] }
 notify = "8"
-notify-debouncer-mini = "0.6"
 nucleo = { git = "https://github.com/helix-editor/nucleo.git", rev = "5b74652" }
 num_cpus = "1"
 oauth2 = "5"
@@ -223,7 +208,6 @@ reqwest-middleware = { version = "0.4.1", features = ["json", "multipart"] }
 resvg = { version = "0.47", default-features = false, features = ["text"] }
 rhai = { version = "1.25", features = ["serde"] }
 ring = "0.17"
-rsa = "0.9"
 runfiles = "0.1"
 rustc-hash = "2"
 rustls = { version = "0.23", features = ["aws-lc-rs"] }
@@ -236,12 +220,10 @@ serde_json = "1"
 serde_path_to_error = "0.1"
 serde_yaml = "0.9"
 serial_test = "3"
-sha1 = "0.10"
 sha2 = { version = "0.10", features = ["force-soft"] }
 shlex = "1"
 signal-hook = "0.3"
 similar = "2.7"
-siphasher = "1"
 smallvec = "1"
 strip-ansi-escapes = "0.2.1"
 strum = { version = "0.27", features = ["derive"] }
@@ -249,7 +231,6 @@ supports-color = "3.0"
 syntect = "5.3"
 tar = "0.4"
 tempfile = "3"
-terminput = "0.3"
 termwiz = { version = "0.23", default-features = false }
 textwrap = "0.16"
 thiserror = "2"
@@ -259,7 +240,6 @@ tikv-jemallocator = { version = "0.6", features = ["profiling", "unprefixed_mall
 time = "0.3"
 tiny-skia = "0.12"
 tokio = { version = "1", features = ["full"] }
-tokio-retry = "0.3"
 tokio-stream = { version = "0.1", features = ["net"] }
 tokio-tungstenite = "0.27"
 tokio-util = { version = "0.7", features = ["rt"] }
@@ -278,7 +258,6 @@ tui-scrollbar = "0.2"
 two-face = { version = "0.4", default-features = false, features = ["syntect-fancy"] }
 unicode-bidi = "0.3"
 unicode-bidi-mirroring = "0.4"
-unicode-normalization = "0.1"
 unicode-segmentation = "1.12.0"
 unicode-width = "0.2"
 url = "2"
@@ -317,7 +296,6 @@ pi-http = { path = "crates/codegen/pi-http" }
 pi-markdown = { path = "crates/codegen/pi-markdown" }
 pi-markdown-core = { path = "crates/codegen/pi-markdown-core" }
 pi-mcp = { path = "crates/codegen/pi-mcp" }
-pi-memory = { path = "crates/codegen/pi-memory" }
 pi-mermaid = { path = "crates/codegen/pi-mermaid" }
 pi-models = { path = "crates/codegen/pi-models" }
 pi-secrets = { path = "crates/codegen/pi-secrets" }
@@ -350,7 +328,6 @@ pi-tool-types = { path = "crates/common/pi-tool-types" }
 pi-tracing = { path = "crates/common/pi-tracing" }
 pi-tty-utils = { path = "crates/codegen/pi-tty-utils" }
 zbus = { version = "5" }
-zip = "3"
 zstd = "0.13"
 
 [profile.release]
