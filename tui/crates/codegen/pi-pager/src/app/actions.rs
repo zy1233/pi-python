@@ -71,7 +71,7 @@ pub enum Action {
     ExitSession,
     /// Exit session without double-press confirmation (e.g., from command palette).
     ExitSessionConfirmed,
-    /// `/delete`: confirm, then delete history; return to welcome, or dashboard when attached.
+    /// `/delete`: confirm, then delete history; return to welcome.
     DeleteCurrentSession,
     DeleteCurrentSessionAnswered {
         confirmed: bool,
@@ -838,189 +838,6 @@ pub enum Action {
     DoctorFixCancelled(DoctorFixTarget),
     /// Persist the memory modal fullscreen preference to config.toml.
     PersistMemoryFullscreen(bool),
-    /// Open the Agent Dashboard view (`/dashboard`, `Ctrl+\`, `grok dashboard`).
-    OpenDashboard,
-    /// Close the dashboard, returning to the previous `ActiveView`.
-    ExitDashboard,
-    /// Attach to a dashboard row — switches to the parent agent and
-    /// (for subagent rows) sets the parent's `active_subagent`.
-    DashboardAttach(crate::views::dashboard::DashboardRowId),
-    /// Submit the dispatch-input contents: either a filter, a new
-    /// top-level agent, or a no-op when too short.
-    /// `attach` mirrors Ctrl+S (dispatch + attach / "send + open").
-    DashboardDispatch {
-        text: String,
-        attach: bool,
-    },
-    /// Submit a slash command from the dashboard's dispatch input.
-    /// The text starts with `/`. The dispatcher resolves it through
-    /// the slash registry (builtin / ACP / unknown) without a
-    /// per-agent session context — commands like `/dashboard`,
-    /// `/exit`, `/theme`, `/settings`, `/help` work without a
-    /// session; commands that need one return a friendly toast.
-    DashboardDispatchSlash {
-        text: String,
-    },
-    /// Pin/unpin the currently selected row.
-    DashboardTogglePin,
-    /// Enter inline-rename mode on the selected row.
-    DashboardBeginRename,
-    /// Commit a rename draft. Empty draft cancels.
-    DashboardCommitRename,
-    /// Cancel an in-progress rename without committing.
-    DashboardCancelRename,
-    /// Ctrl+X on the selected row. Top-level: cancels a running turn on a
-    /// busy row, else double-press permanently deletes an idle row.
-    /// Subagent: kills the subagent.
-    DashboardStop,
-    /// Confirm permanent delete of the armed dashboard row.
-    DashboardDelete,
-    /// Cycle the dispatch input's mode for the next spawned agent
-    /// (Normal → Plan → Auto → Always-Approve → Normal; Auto skipped when
-    /// gated off). Bound to Shift+Tab.
-    DashboardCycleMode,
-    /// Cycle the PEEKED agent's live mode (same gated rotation as the agent
-    /// prompt) — the peek-panel counterpart to [`Self::DashboardCycleMode`].
-    /// Unlike that staged dispatch mode, this changes the existing agent
-    /// directly (same effect as Shift+Tab inside the agent's chat view).
-    /// Emitted when Shift+Tab fires while the peek panel is open.
-    DashboardPeekCycleMode,
-    /// Toggle grouping (State ↔ Directory).
-    DashboardToggleGrouping,
-    /// Set the live filter (typically driven by the dispatch input).
-    DashboardSetFilter(crate::views::dashboard::FilterValue),
-    /// Move selection cursor one row down.
-    DashboardSelectNext,
-    /// Move selection cursor one row up.
-    DashboardSelectPrev,
-    /// Reorder the selected row one slot up (Shift+↑).
-    DashboardReorderUp,
-    /// Reorder the selected row one slot down (Shift+↓).
-    DashboardReorderDown,
-    /// Exit the dashboard's session-overlay (the bordered
-    /// `[Prev] [Next] [✗]` chrome wrapped around an attached
-    /// agent view). Returns to the dashboard with the cursor on
-    /// the previously attached row. Bound to Esc / Ctrl+\\ /
-    /// `[✗]` click inside the overlay.
-    DashboardOverlayExit,
-    /// Cycle the dashboard's session-overlay to the previous
-    /// top-level agent in the row list (`[Prev]` click or
-    /// Ctrl+\[).
-    DashboardOverlayPrev,
-    /// Cycle the dashboard's session-overlay to the next
-    /// top-level agent in the row list (`[Next]` click or
-    /// Ctrl+\]).
-    DashboardOverlayNext,
-    /// Confirmed stop from inside the dashboard's session-overlay:
-    /// close the attached session and return to the dashboard. State
-    /// machine documented at `dispatch_dashboard_overlay_stop`.
-    DashboardOverlayStop,
-    /// Toggle auto-approve (YOLO mode) on the selected row's
-    /// owning agent. Mirrors `Action::ToggleYolo` but targets
-    /// the dashboard's selected row instead of the active-view
-    /// agent.
-    DashboardToggleAutoApprove,
-    /// Toggle worktree-dispatch mode: when on, the next agent dispatched
-    /// from the dashboard spawns in a fresh git worktree (and the `[+ New
-    /// Agent]` button reads `[+ New Worktree]`). Bound to Ctrl+W. Gated on
-    /// the cwd being a git repo — worktrees require one, so the toggle is a
-    /// no-op (with an explanatory toast) outside a repo.
-    DashboardToggleWorktree,
-    /// Open the dashboard's shortcuts cheatsheet modal — the
-    /// same searchable picker as the agent view's
-    /// `ShortcutsHelp`, scoped to dashboard-context bindings.
-    /// Bound to Ctrl+. (default) and `?` (alt). Dispatch wires
-    /// it to the modal-state field on `DashboardState`; the
-    /// renderer paints it on top of the row list.
-    DashboardOpenShortcutsHelp,
-    /// Close the dashboard's shortcuts cheatsheet modal. Routed
-    /// from the modal-chrome `CloseRequested` outcome and from
-    /// Esc when the modal is open.
-    DashboardCloseShortcutsHelp,
-    /// Focus the header's `[+ New Agent]` button. Mirrors a
-    /// row-selection action — the button becomes the cursor
-    /// target, the previous row selection (if any) clears, and
-    /// the dispatch input's placeholder flips back to the
-    /// new-session form. Wired to Esc deselect tier, Up-arrow
-    /// from the first row, and the button's mouse-click handler.
-    DashboardFocusNewAgentButton,
-    /// Create a new session AND open its detail view. Routed
-    /// from `[+ New Agent]` click and from Enter-on-empty-prompt
-    /// while the button is focused. Distinct from
-    /// `DashboardDispatch` (which queues a prompt + stays on the
-    /// dashboard) because the no-prompt path has no text to
-    /// enqueue and the user expects to land inside the new
-    /// agent's view immediately.
-    DashboardCreateNewAgentWithDetail,
-    /// Open the dashboard's location picker — a floating modal that
-    /// lists recent project directories (plus the current cwd) and
-    /// accepts a typed path, letting the user change where newly
-    /// dispatched sessions run. Bound to Ctrl+L (default), a click on
-    /// the header location label, and `/cd` with no argument.
-    DashboardOpenLocationPicker,
-    /// Close the dashboard's location picker modal without changing
-    /// the working directory. Routed from Esc, the modal-chrome
-    /// `CloseRequested` outcome, and a click outside the modal.
-    DashboardCloseLocationPicker,
-    /// Change the working directory for newly dispatched dashboard
-    /// sessions. `input` is the raw path text — a picker row's path, a
-    /// path typed into the picker's query field, or the `/cd <path>`
-    /// argument. The dispatcher resolves `~` / relative paths against
-    /// `app.cwd`, validates the target is a directory, and on success
-    /// updates `app.cwd` + the process cwd (via `Effect::SetWorkingDir`).
-    DashboardChangeLocation {
-        input: String,
-    },
-    /// Confirm the dashboard worktree-label dialog: create the next
-    /// dashboard agent in a fresh git worktree (rooted at `app.cwd`) using
-    /// `label` (`None` → auto-generated). Any prompt stashed when the dialog
-    /// opened (a prompt-send) is replayed into the new agent. Routed from
-    /// the dialog's Enter submit.
-    DashboardConfirmWorktree {
-        label: Option<String>,
-    },
-    /// Answer a permission request via the dashboard peek panel.
-    ///
-    /// Carries `request_id` captured at peek-toggle time so that a
-    /// stale answer (the front-of-queue changed between snapshot and
-    /// number-key press) can be detected and dropped instead of
-    /// popping the wrong permission.
-    DashboardPermissionSelect {
-        row: crate::views::dashboard::DashboardRowId,
-        request_id: usize,
-        option_id: acp::PermissionOptionId,
-    },
-    /// Reject the peeked agent's pending permission with a typed
-    /// feedback message (the peek panel's "No, type to add feedback"
-    /// path). Resolves the front request with the `RejectOnce` option
-    /// and the text attached as `followup_message` meta — mirroring the
-    /// agent view's `PermissionFollowup`. `request_id` guards against a
-    /// stale answer if the queue rotated.
-    DashboardPermissionFollowup {
-        row: crate::views::dashboard::DashboardRowId,
-        request_id: usize,
-        text: String,
-    },
-    /// Answer the peeked agent's pending `AskUserQuestion` (the Ask tool)
-    /// from the dashboard peek panel. `option_idx` selects an option;
-    /// `None` with non-empty `freeform` submits the "Other" free-text
-    /// answer. Only valid for a single-question, single-select ext ask.
-    DashboardQuestionAnswer {
-        row: crate::views::dashboard::DashboardRowId,
-        option_idx: Option<usize>,
-        freeform: String,
-    },
-    /// Send / queue a reply to the peeked agent from the dashboard
-    /// peek panel's `❯ reply` input. The reply targets `row`'s owning
-    /// top-level agent: when it is idle the prompt is sent immediately
-    /// (a turn starts), when it is mid-turn the prompt is queued and
-    /// drains after the current turn finishes. `attach` (Ctrl+S)
-    /// additionally walks into the agent's detail view.
-    DashboardPeekReply {
-        row: crate::views::dashboard::DashboardRowId,
-        text: String,
-        attach: bool,
-    },
     /// Open the memory browser modal.
     OpenMemoryModal,
     /// Open the hidden `/gboom` easter egg (DOOM-style raycaster modal).
@@ -1223,9 +1040,6 @@ pub enum CancelTrigger {
     CtrlC,
     /// The on-screen cancel button was clicked.
     Mouse,
-    /// The dashboard's stop key (Ctrl+X), from the overlay or a busy row,
-    /// downgraded to a turn cancel.
-    DashboardStop,
 }
 impl CancelTrigger {
     /// Snake_case wire string sent as `_meta.cancelTrigger`.
@@ -1234,7 +1048,6 @@ impl CancelTrigger {
             Self::Esc => "esc",
             Self::CtrlC => "ctrl_c",
             Self::Mouse => "mouse",
-            Self::DashboardStop => "dashboard_stop",
         }
     }
 }
@@ -1253,22 +1066,12 @@ pub enum ClipboardPasteTarget {
         /// an Esc restored.
         from_feedback_pane: bool,
     },
-    /// Dashboard new-session dispatch input.
-    DashboardDispatch,
-    /// Dashboard peek reply input. `row` is the peeked row at enqueue time; the
-    /// completion drops the paste if the panel closed or moved to another row,
-    /// so the attachment can't land in a different agent's reply.
-    DashboardPeek {
-        row: crate::views::dashboard::DashboardRowId,
-    },
 }
 impl ClipboardPasteTarget {
     /// Telemetry surface label for the empty-clipboard paste-key event.
     pub fn surface_str(&self) -> &'static str {
         match self {
             Self::AgentPrompt { .. } => "agent",
-            Self::DashboardDispatch => "dashboard",
-            Self::DashboardPeek { .. } => "peek",
         }
     }
 }
@@ -1311,8 +1114,6 @@ pub enum ClipboardPasteSource {
         text: ClipboardTextRead,
         tip_showing: bool,
     },
-    /// Dashboard bracketed text waits for the attachment probe's image-wins decision.
-    BracketedDeferred { text: String },
     /// Agent bracketed text was inserted synchronously before probing attachments.
     BracketedInserted {
         text: String,
@@ -1323,7 +1124,7 @@ impl ClipboardPasteSource {
     pub fn text(&self) -> Option<&str> {
         match self {
             Self::ClipboardKey { text, .. } => text.as_deref(),
-            Self::BracketedDeferred { text } | Self::BracketedInserted { text, .. } => Some(text),
+            Self::BracketedInserted { text, .. } => Some(text),
         }
     }
     pub fn is_clipboard_key(&self) -> bool {
@@ -1353,7 +1154,6 @@ impl ClipboardPasteSource {
     pub fn text_to_insert_on_miss(&self) -> Option<&str> {
         match self {
             Self::ClipboardKey { text, .. } => text.as_deref(),
-            Self::BracketedDeferred { text } => Some(text),
             Self::BracketedInserted { .. } => None,
         }
     }
@@ -1448,8 +1248,6 @@ pub enum AfterSessionDelete {
     Stay,
     /// `/delete` from a standalone agent — return to welcome.
     Welcome,
-    /// `/delete` from a dashboard-attached agent, or dashboard row delete.
-    Dashboard,
 }
 /// Async side effect produced by [`super::dispatch::dispatch`]. The event
 /// loop spawns these into a `JoinSet`; completions come back through
@@ -1467,8 +1265,8 @@ pub enum Effect {
         /// the correct model and agent type from the start — avoids a
         /// follow-up `SetSessionModel` roundtrip.
         model_id: Option<acp::ModelId>,
-        /// Per-create permission mode. Dashboard dispatches set this so their
-        /// staged mode overrides process-global defaults without persisting.
+        /// Per-create permission mode that overrides process-global defaults
+        /// without persisting.
         permission_mode_override: Option<PermissionModeKind>,
         /// Client-chosen session ID (`--session-id` / `meta.sessionId`).
         preferred_session_id: Option<String>,
@@ -1477,8 +1275,6 @@ pub enum Effect {
         /// process-wide mode.
         chat_kind: bool,
     },
-    /// Change the process working directory (dashboard location picker, `/cd`).
-    SetWorkingDir { path: std::path::PathBuf },
     /// Create a git worktree and then create or load an ACP session in it.
     /// When `load_session_id` is `Some`, loads that session in the new worktree
     /// instead of creating a fresh one (`--resume` + `--worktree` combination).
@@ -1488,10 +1284,10 @@ pub enum Effect {
         label: Option<String>,
         /// Optional branch/tag/commit to base the worktree on (CLI `--ref`).
         git_ref: Option<String>,
-        /// Staged dashboard `/model` selection, injected as `_meta.modelId`
-        /// into the worktree's `NewSessionRequest` so it spawns with the
-        /// right model — mirrors [`Effect::CreateSession::model_id`]. `None`
-        /// for the welcome / CLI / fork paths.
+        /// Model selection injected as `_meta.modelId` into the worktree's
+        /// `NewSessionRequest` so it spawns with the right model — mirrors
+        /// [`Effect::CreateSession::model_id`]. `None` for the welcome / CLI /
+        /// fork paths.
         model_id: Option<acp::ModelId>,
         /// Per-create permission mode for a fresh worktree session. Ignored
         /// when resuming an existing session.
@@ -1561,10 +1357,6 @@ pub enum Effect {
     /// expiry acts only if `seq` is still current (Build: FTS5 deep search
     /// against the deep-search seq; chat: server refetch against the list seq).
     DebounceSessionSearch { query: String, seq: u64 },
-    /// Fetch the local on-disk session list (dormant/idle sessions) for the
-    /// dashboard via ACP `session/list`. Issued while the dashboard is open
-    /// so it shows idle sessions instead of being empty.
-    FetchDashboardSessions,
     /// Load card detail for a specific session (lazy, reads chat history from disk).
     LoadCardDetail {
         source: String,
@@ -1672,12 +1464,6 @@ pub enum Effect {
     RecordConsentUpstream { notice_id: String, version: i32 },
     /// Persist memory modal fullscreen preference to `[hints]` in config.toml.
     PersistMemoryFullscreen { fullscreen: bool },
-    /// Persist the dashboard's `[dashboard]` configuration to `~/.grok/config.toml`.
-    /// Edge case 15: multi-pager safe via `config_toml_edit::read_config_document_for_edit`,
-    /// which loads → modifies → writes the whole document. Concurrent
-    /// pagers may produce last-writer-wins behaviour but never corrupt
-    /// the file.
-    PersistDashboard(crate::views::dashboard::PersistedDashboard),
     /// Persist a per-command worktree mode preference to `[hints]` in
     /// config.toml. `config_key` is the TOML key under `[hints]`
     /// (`"new_session_worktree_mode"` or `"fork_worktree_mode"`).
@@ -2149,8 +1935,7 @@ pub enum Effect {
         new_session_id: Option<String>,
     },
     /// Read session display fields from local `summary.json` after load/resume:
-    /// title (and `/rename` manual-ness) plus last-turn summary for the
-    /// dashboard secondary line.
+    /// title (and `/rename` manual-ness) plus last-turn summary.
     HydrateSessionMetaFromDisk {
         agent_id: AgentId,
         session_id: acp::SessionId,
@@ -2421,7 +2206,7 @@ pub enum TaskResult {
         /// `/rename` (`summary.title_is_manual`, restores the prompt-border
         /// title) — manual-ness cannot exist without a title.
         title: Option<(String, bool)>,
-        /// Persisted per-turn dashboard summary, so a resumed session's row
+        /// Persisted per-turn summary, so a resumed session's row
         /// shows it without waiting for the next turn.
         last_turn_summary: Option<String>,
         /// Generation captured when the hydrate effect was enqueued.
@@ -2474,13 +2259,6 @@ pub enum TaskResult {
     SessionSearchDebounceExpired {
         query: String,
         seq: u64,
-    },
-    /// Local on-disk session list loaded for the dashboard. Entries are
-    /// pre-converted to `RosterEntry` (activity `Dormant`) so they reuse the
-    /// roster-row rendering path. A fetch failure yields an empty list
-    /// (silent — the next poll retries).
-    DashboardSessionsLoaded {
-        sessions: Vec<crate::app::roster::RosterEntry>,
     },
     /// Card detail loaded for a session in the picker.
     CardDetailLoaded {

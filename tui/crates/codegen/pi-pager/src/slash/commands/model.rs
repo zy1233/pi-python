@@ -26,16 +26,6 @@ impl SlashCommand for ModelCommand {
         "Switch the active model"
     }
 
-    fn session_scoped(&self) -> bool {
-        true
-    }
-
-    fn offered_when_session_less(&self) -> bool {
-        // The dashboard offers `/model` to pick the model for the next
-        // spawned agent (intercepted in `dispatch_dashboard_dispatch_slash`).
-        true
-    }
-
     fn usage(&self) -> &str {
         "/model <name> [effort]"
     }

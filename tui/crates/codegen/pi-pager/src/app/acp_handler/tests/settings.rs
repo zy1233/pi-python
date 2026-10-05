@@ -11,7 +11,7 @@
         app.voice_ui_active = true;
         app.voice_state = crate::app::app_view::VoiceState::ColdStart {
             hold: false,
-            target: crate::app::app_view::VoiceTarget::DashboardDispatch,
+            target: crate::app::app_view::VoiceTarget::Agent(crate::app::agent::AgentId(0)),
         };
 
         let affected = handle_ext_notification(&voice_settings_update(false), &mut app);

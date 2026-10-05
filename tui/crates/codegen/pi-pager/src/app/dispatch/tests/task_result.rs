@@ -583,30 +583,6 @@ fn x11_primary_hint_routes_to_originating_agent() {
     );
 }
 
-#[test]
-fn x11_primary_hint_routes_to_originating_dashboard() {
-    let mut app = test_app_with_agent();
-    open_dashboard(&mut app);
-    app.active_view = ActiveView::Agent(AgentId(0));
-
-    maybe_show_x11_primary_paste_hint(
-        true,
-        crate::app::actions::ClipboardPasteCompletion::FullMiss,
-        &crate::app::actions::ClipboardPasteTarget::DashboardDispatch,
-        &mut app,
-    );
-
-    assert_eq!(
-        app.dashboard
-            .as_ref()
-            .and_then(|dashboard| dashboard.error_toast.as_deref()),
-        Some(X11_PRIMARY_PASTE_HINT),
-    );
-    assert!(
-        app.agents[&AgentId(0)].toast.is_none(),
-        "an unrelated active agent must not receive dashboard guidance"
-    );
-}
 
 #[test]
 fn clipboard_failure_routes_to_originating_agent_without_duplicate() {
@@ -652,26 +628,6 @@ fn clipboard_failure_routes_to_originating_agent_without_duplicate() {
     );
 }
 
-#[test]
-fn clipboard_failure_routes_to_originating_dashboard() {
-    let mut app = test_app_with_agent();
-    open_dashboard(&mut app);
-    app.active_view = ActiveView::Agent(AgentId(0));
-
-    show_clipboard_failure(
-        &crate::app::actions::ClipboardPasteTarget::DashboardDispatch,
-        crate::app::actions::ClipboardPasteFailure::AttachmentRead,
-        &mut app,
-    );
-
-    assert_eq!(
-        app.dashboard
-            .as_ref()
-            .and_then(|dashboard| dashboard.error_toast.as_deref()),
-        Some("Couldn't read clipboard contents")
-    );
-    assert!(app.agents[&AgentId(0)].toast.is_none());
-}
 
 #[test]
 fn marketplace_list_loaded_sanitizes_components_at_ingestion() {

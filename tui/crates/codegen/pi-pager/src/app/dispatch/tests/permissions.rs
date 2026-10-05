@@ -527,15 +527,6 @@ fn rollback_permission_mode_default_canonical_preserves_default() {
     );
 }
 
-/// Non-empty permission_queue → NeedsInput.
-#[test]
-fn classify_top_level_permission_queue_non_empty_is_needs_input() {
-    use crate::views::dashboard::{RowState, classify_top_level};
-    let mut app = test_app_with_agent();
-    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-    let _rx = push_synthetic_permission(agent, 1, vec![("allow", "Allow")]);
-    assert_eq!(classify_top_level(agent), RowState::NeedsInput);
-}
 
 #[test]
 fn permission_select_reject_does_not_steer_sticky_cursor() {

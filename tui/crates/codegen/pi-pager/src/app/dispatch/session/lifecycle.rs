@@ -15,7 +15,7 @@ use crate::app::dispatch::ctx::{
 };
 use crate::app::dispatch::modes::inherit_auto_mode;
 use crate::app::dispatch::prompt::{consume_chat_kind, dispatch_initial_prompt};
-use crate::app::dispatch::queue::{maybe_drain_queue, note_peek_page_flip};
+use crate::app::dispatch::queue::maybe_drain_queue;
 use crate::app::dispatch::router::dispatch;
 use crate::app::dispatch::status::notify_session_ready;
 use crate::app::dispatch::task_result::unregister_session_effect;
@@ -287,8 +287,8 @@ pub(in crate::app::dispatch) fn open_agent_type_mismatch_question(
     agent.prompt.set_text("");
     vec![]
 }
-/// Core new-session logic: create a placeholder agent, push the
-/// `/dashboard` tip, and return the `CreateSession` effect.
+/// Core new-session logic: create a placeholder agent and return the
+/// `CreateSession` effect.
 ///
 /// Apply welcome workspace selection before creating a session from Welcome.
 ///
@@ -346,9 +346,8 @@ pub(in crate::app::dispatch) fn dispatch_new_session_inner(
     let (_id, effects) = dispatch_new_session_inner_with_id(app, model_id);
     effects
 }
-/// Sibling that returns the new `AgentId` alongside
-/// the effects. Used by `dispatch_dashboard_dispatch` so it doesn't
-/// rely on the (correct-but-brittle) `app.agents.last()` lookup.
+/// Sibling that returns the new `AgentId` alongside the effects, so callers
+/// don't rely on the (correct-but-brittle) `app.agents.last()` lookup.
 pub(in crate::app::dispatch) fn dispatch_new_session_inner_with_id(
     app: &mut AppView,
     model_id: Option<acp::ModelId>,
@@ -495,23 +494,6 @@ pub(in crate::app::dispatch) fn dispatch_exit_session(app: &mut AppView) -> Vec<
     app.exit_session_pending = None;
     effects
 }
-/// Aftermath for `/delete` on the active agent: dashboard overlay returns
-/// there; standalone agent sessions go home.
-fn after_delete_current_session(
-    app: &AppView,
-    id: AgentId,
-) -> crate::app::actions::AfterSessionDelete {
-    use crate::app::actions::AfterSessionDelete;
-    if app
-        .dashboard
-        .as_ref()
-        .is_some_and(|d| d.attached_agent == Some(id))
-    {
-        AfterSessionDelete::Dashboard
-    } else {
-        AfterSessionDelete::Welcome
-    }
-}
 /// Confirm deleting the parent session (not a subagent view).
 pub(in crate::app::dispatch) fn open_delete_current_session_question(
     app: &mut AppView,
@@ -523,13 +505,7 @@ pub(in crate::app::dispatch) fn open_delete_current_session_question(
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };
-    let delete_description = if after_delete_current_session(app, id)
-        == crate::app::actions::AfterSessionDelete::Dashboard
-    {
-        "Remove history and return to the dashboard"
-    } else {
-        "Remove history and return home"
-    };
+    let delete_description = "Remove history and return home";
     let Some(agent) = app.agents.get_mut(&id) else {
         return vec![];
     };
@@ -598,7 +574,7 @@ pub(in crate::app::dispatch) fn dispatch_delete_current_session_answered(
         app.show_toast("No active session to delete");
         return vec![];
     };
-    let after = after_delete_current_session(app, id);
+    let after = crate::app::actions::AfterSessionDelete::Welcome;
     let mut effects = vec![Effect::CancelTurn {
         session_id: session_id.clone(),
         cancel_subagents: true,
@@ -691,7 +667,7 @@ pub(in crate::app::dispatch) fn clear_startup_actions(app: &mut AppView) {
     let _ = app.deferred_startup.take();
 }
 /// Replay the session-startup actions deferred until auth + trust both resolved
-/// (`--resume` / `--worktree` / initial-prompt / `grok dashboard`). Extracted
+/// (`--resume` / `--worktree` / initial-prompt). Extracted
 /// from the `AuthComplete` handler so the folder-trust answer can run the SAME
 /// machinery; whichever gate resolves last drains it (each call site guards on
 /// the other gate being `Done`, so it runs exactly once).
@@ -709,7 +685,6 @@ pub(in crate::app::dispatch) fn drain_startup_actions(app: &mut AppView) -> Vec<
         worktree_ref,
         new_session,
         prompt,
-        open_dashboard,
         pending_chat,
         #[cfg(feature = "local-workspace")]
         history_load_as_build,
@@ -824,9 +799,6 @@ pub(in crate::app::dispatch) fn drain_startup_actions(app: &mut AppView) -> Vec<
     }
     if let Some(prompt) = prompt {
         effects.extend(dispatch_initial_prompt(app, prompt));
-    }
-    if open_dashboard {
-        effects.extend(dispatch(Action::OpenDashboard, app));
     }
     effects
 }
@@ -1084,16 +1056,11 @@ pub(in crate::app::dispatch) fn handle_session_created(
     scheduler_background_loops: Option<bool>,
 ) -> Vec<Effect> {
     let agent_count = app.agents.len();
-    let switch_hint =
-        crate::views::dashboard::session_switch_hint_command(app.screen_mode.is_minimal());
     if let Some(agent) = app.agents.get_mut(&agent_id) {
         let session_id_clone = session_id.clone();
-        if agent.session.created_via_new
-            && agent_count > 1
-            && let Some(cmd) = switch_hint
-        {
+        if agent.session.created_via_new && agent_count > 1 {
             agent.scrollback.push_block(RenderBlock::system(format!(
-                "Session {}, use {cmd} to switch between sessions",
+                "Session {}, use /resume to switch between sessions",
                 session_id_clone.0,
             )));
         } else if agent_count > 1 {
@@ -1175,7 +1142,6 @@ pub(in crate::app::dispatch) fn handle_session_created(
             cwd: agent.session.cwd.display().to_string(),
         });
         notify_session_ready(&app.notification_service, agent);
-        note_peek_page_flip(app, agent_id, drain.page_flip_entry);
         return effects;
     }
     vec![]
@@ -1277,7 +1243,6 @@ pub(in crate::app::dispatch) fn handle_worktree_session_created(
             cwd: agent.session.cwd.display().to_string(),
         });
         notify_session_ready(&app.notification_service, agent);
-        note_peek_page_flip(app, agent_id, drain.page_flip_entry);
         return effects;
     }
     vec![]
@@ -1290,25 +1255,6 @@ fn push_session_create_failure_warning(app: &mut AppView, msg: &str) {
             message: msg.to_string(),
             action: None,
         });
-    }
-}
-/// After an orphan create fails, New/Fork may already have moved overlay
-/// attach onto the removed placeholder. Re-point to the survivor so
-/// Left/Esc still exit to the dashboard; clear when recovery is Welcome.
-fn restore_dashboard_attach_after_orphan_remove(
-    app: &mut AppView,
-    removed: AgentId,
-    survivor: Option<AgentId>,
-) {
-    let Some(d) = app.dashboard.as_mut() else {
-        return;
-    };
-    if d.attached_agent != Some(removed) {
-        return;
-    }
-    match survivor {
-        Some(target) => d.repoint_attach_if_on(removed, target),
-        None => d.close_popup(),
     }
 }
 /// Failed plain `CreateSession`: drop orphan placeholders, clear the
@@ -1333,7 +1279,6 @@ pub(in crate::app::dispatch) fn handle_session_failed(
             if failed_was_active {
                 switch_to_agent(app, target, SwitchCause::Picker);
             }
-            restore_dashboard_attach_after_orphan_remove(app, agent_id, Some(target));
             if matches!(app.active_view, ActiveView::Welcome) {
                 push_session_create_failure_warning(app, &msg);
             } else {
@@ -1347,7 +1292,6 @@ pub(in crate::app::dispatch) fn handle_session_failed(
             app.session_picker_state.selected = 0;
             app.session_picker_content_results = None;
             app.session_picker_content_loading = false;
-            restore_dashboard_attach_after_orphan_remove(app, agent_id, None);
             push_session_create_failure_warning(app, &msg);
         }
     } else if let Some(agent) = app.agents.get_mut(&agent_id) {
@@ -1384,7 +1328,6 @@ pub(in crate::app::dispatch) fn handle_worktree_session_failed(
         remove_agent_and_cleanup(app, agent_id);
         if let Some(target) = fallback {
             switch_to_agent(app, target, SwitchCause::Picker);
-            restore_dashboard_attach_after_orphan_remove(app, agent_id, Some(target));
         } else {
             show_welcome(app);
             app.welcome_prompt_focused = true;
@@ -1393,7 +1336,6 @@ pub(in crate::app::dispatch) fn handle_worktree_session_failed(
             app.session_picker_state.selected = 0;
             app.session_picker_content_results = None;
             app.session_picker_content_loading = false;
-            restore_dashboard_attach_after_orphan_remove(app, agent_id, None);
         }
         let msg = format!("Cannot create worktree: {error}");
         if !app.startup_warnings.iter().any(|w| w.message == msg) {
@@ -1481,7 +1423,6 @@ pub(in crate::app::dispatch) fn handle_switch_model_complete(
         };
         let drain = maybe_drain_queue(agent);
         effects.extend(drain.effects);
-        note_peek_page_flip(app, agent_id, drain.page_flip_entry);
         effects
     } else {
         vec![]

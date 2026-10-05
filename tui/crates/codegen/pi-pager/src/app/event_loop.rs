@@ -976,9 +976,9 @@ pub(crate) async fn run(
     // registry at this I/O boundary; the later config-aware rebuild preserves
     // this mode while adding the optional mouse-reporting action.
     app.registry = crate::actions::ActionRegistry::defaults_for(term_state.screen_mode);
-    // Agent/dashboard prompts pick the mode up at their creation sites
-    // (`apply_app_scoped_gates` / `ensure_dashboard_state`); the welcome prompt
-    // already exists, so inject here.
+    // Agent prompts pick the mode up at their creation site
+    // (`apply_app_scoped_gates`); the welcome prompt already exists, so
+    // inject here.
     app.welcome_prompt.set_screen_mode(term_state.screen_mode);
     if app.screen_mode.is_minimal() && term_state.relaunched_into_minimal {
         app.minimal_state.welcome_pending = true;
@@ -1124,13 +1124,6 @@ pub(crate) async fn run(
     app.plugin_cta_marketplace = launch_effective_config
         .as_ref()
         .and_then(plugin_cta_marketplace_from);
-    app.workspace_dashboard_enabled = pi_config::env_bool("GROK_WORKSPACE_DASHBOARD")
-        .or_else(|| {
-            remote_settings
-                .as_ref()
-                .and_then(|s| s.workspace_dashboard_enabled)
-        })
-        .unwrap_or(false);
     // Voice is applied after auth_meta so API-key detection is accurate.
     app.session_picker_grouped = std::env::var("GROK_SESSION_PICKER_GROUPED")
         .ok()
@@ -1378,9 +1371,9 @@ pub(crate) async fn run(
 
     // Pre-arrival seed only. The authoritative per-session value rides the
     // `session/new` / `session/load` response, but `/loop` can be reached from
-    // the session-less dashboard and from a session whose response has not
-    // landed yet; both need an answer now, and this is the same resolver the
-    // shell runs at spawn, so the seed agrees with the flag as it stands today.
+    // a session whose response has not landed yet; that needs an answer now,
+    // and this is the same resolver the shell runs at spawn, so the seed
+    // agrees with the flag as it stands today.
     app.scheduler_background_loops_seed =
         pi_shell::util::config::resolve_scheduler_background_loops(
             remote_settings
@@ -1869,12 +1862,6 @@ pub(crate) async fn run(
         None
     };
 
-    // Dashboard session-list poll. Only fires while the dashboard is open.
-    // Armed to fire immediately at loop start so an already-open dashboard
-    // refreshes without waiting a full interval.
-    const DASHBOARD_POLL_INTERVAL: Duration = Duration::from_secs(1);
-    let mut dashboard_poll_at: Option<Instant> = Some(Instant::now());
-
     // Pre-generate the automatic "return-from-away" recap while the terminal is
     // unfocused, so it's already in the scrollback (instant) when the user
     // returns. The arm is a cheap no-op while focused / not-yet-eligible; the
@@ -2052,31 +2039,9 @@ pub(crate) async fn run(
         }
     }
 
-    // `grok dashboard` startup: open the dashboard view immediately. The
-    // CLI subcommand wrote a `GROK_OPEN_DASHBOARD_AT_STARTUP=1` env var
-    // so we don't have to thread a flag through every arg struct.
-    if std::env::var("GROK_OPEN_DASHBOARD_AT_STARTUP").as_deref() == Ok("1") {
-        // SAFETY: we are pre-multithreaded init for this app loop.
-        unsafe { std::env::remove_var("GROK_OPEN_DASHBOARD_AT_STARTUP") };
-        if app.session_startup_allowed() {
-            let effs = dispatch::dispatch(Action::OpenDashboard, &mut app);
-            if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
-                return Ok(finish_run(&mut app));
-            }
-            presenter.request_presentation(&mut app, terminal, false);
-        } else {
-            // Not signed in yet — the env var is already consumed, so
-            // without a stash the request would be silently dropped and
-            // the post-login flow would land on the welcome screen.
-            // Defer to the `AuthComplete` handler (mirrors
-            // the deferred session/prompt owner).
-            app.deferred_startup.open_dashboard = true;
-        }
-    }
-
     // Minimal (scrollback-native) mode has no welcome screen: the live region
     // only renders for an Agent view. If nothing above already started a
-    // session (no resume / initial prompt / worktree / dashboard), open an
+    // session (no resume / initial prompt / worktree), open an
     // empty one so the user lands directly at the prompt. Unauthenticated /
     // ZDR-blocked startup stays on Welcome, where `crate::minimal::live` shows
     // a sign-in hint instead of a blank region.
@@ -2240,15 +2205,12 @@ pub(crate) async fn run(
                 tracing::info!("voice pipeline started (/voice or Ctrl+Space)");
                 // The spawn is async, so begin capture now the pipeline is live
                 // — but only if the user is still on a surface that can receive
-                // dictation (an agent prompt or the dashboard dispatch input).
+                // dictation (an agent prompt).
                 // This runs at loop-top before any new input, so the surface
                 // normally can't have changed since the keypress; the else-arm
                 // is defensive cleanup so voice mode can't stay armed without
                 // capture ever starting.
-                if matches!(
-                    app.active_view,
-                    ActiveView::Agent(_) | ActiveView::AgentDashboard
-                ) {
+                if matches!(app.active_view, ActiveView::Agent(_)) {
                     app.voice_begin_recording(target, hold);
                 } else {
                     app.voice_state = VoiceState::Idle;
@@ -2292,16 +2254,6 @@ pub(crate) async fn run(
             // No game is the active input target now (switched to a non-game
             // view); clear every game's holds for the same reason.
             app.gboom_release_all_games();
-        }
-
-        // Re-arm the dashboard poll when the dashboard is open but the poll
-        // has gone dormant — i.e. the dashboard was just opened. The poll arm
-        // leaves `dashboard_poll_at = None` only when it fired with the
-        // dashboard closed, so this fires an immediate refresh exactly on the
-        // closed→open transition rather than every iteration. The poll
-        // refreshes the local on-disk idle-session list.
-        if dashboard_poll_at.is_none() && matches!(app.active_view, ActiveView::AgentDashboard) {
-            dashboard_poll_at = Some(Instant::now());
         }
 
         // (Re-)arm the subscription watch on the dormant→wanted transition
@@ -2401,12 +2353,6 @@ pub(crate) async fn run(
             }
         };
 
-        let dashboard_poll = async {
-            match dashboard_poll_at {
-                Some(at) => sleep_until(at).await,
-                None => std::future::pending().await,
-            }
-        };
 
         let recap_poll = async {
             match recap_poll_at {
@@ -2797,22 +2743,6 @@ pub(crate) async fn run(
                 }
             }
 
-            _ = dashboard_poll => {
-                dashboard_poll_at = None;
-                // Only poll while the dashboard is open. When it is not active
-                // we deliberately do NOT re-arm, so the loop isn't woken once
-                // per second forever. The poll refreshes the local on-disk
-                // idle-session list so the dashboard shows idle sessions.
-                let dashboard_open = matches!(app.active_view, ActiveView::AgentDashboard);
-                if dashboard_open {
-                    let eff = Effect::FetchDashboardSessions;
-                    if process_effects(vec![eff], &mut tasks, &mut app, &progress_tx) {
-                        break;
-                    }
-                    dashboard_poll_at = Some(Instant::now() + DASHBOARD_POLL_INTERVAL);
-                }
-            }
-
             // Pre-generate the away recap so it's already on screen when the
             // user returns. Cheap no-op while focused / not-yet-eligible.
             _ = recap_poll => {
@@ -3013,16 +2943,12 @@ fn load_initial_config_session_bools() -> InitialConfigSessionBools {
 /// bg task completing can auto-wake the agent). Generating it now means the
 /// recap is already in the scrollback when the user returns.
 /// Sync shell `sessionRecap` into execution gate + every existing slash surface.
-/// Dashboard created later is seeded in `dispatch_open_dashboard`.
 fn apply_session_recap_available(app: &mut AppView, available: bool) {
     app.session_recap_available = available;
     for agent in app.agents.values_mut() {
         agent.set_session_recap_available(available);
     }
     app.welcome_prompt.set_recap_visible(available);
-    if let Some(dashboard) = app.dashboard.as_mut() {
-        dashboard.set_recap_visible(available);
-    }
 }
 
 /// `[marketplace].plugin_cta_marketplace` from an effective config: the
@@ -3398,10 +3324,6 @@ async fn drain_and_process(
                             had_non_resize_change = true;
                         }
                     }
-                    // The dashboard manages its own input/overview focus
-                    // (`list_focused`); refocusing the terminal must not
-                    // override the user's choice (e.g. vim overview focus).
-                    ActiveView::AgentDashboard => {}
                 }
                 return false;
             }
@@ -5746,7 +5668,7 @@ mod tests {
 
     #[test]
     fn finish_run_non_agent_views_have_no_exit_info() {
-        for view in [ActiveView::Welcome, ActiveView::AgentDashboard] {
+        for view in [ActiveView::Welcome] {
             let mut app = seeded_quit_app(crate::app::ScreenMode::Fullscreen);
             app.active_view = view;
             assert!(finish_run(&mut app).exit_info.is_none());

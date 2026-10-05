@@ -82,7 +82,6 @@ const CATEGORY_ORDER: &[(Category, &str)] = &[
     (Category::ConversationAction, "Conversation Actions"),
     (Category::Panels, "Panels"),
     (Category::Session, "Session"),
-    (Category::Dashboard, "Dashboard"),
 ];
 
 pub fn default_collapsed() -> std::collections::HashSet<usize> {
@@ -90,7 +89,7 @@ pub fn default_collapsed() -> std::collections::HashSet<usize> {
 }
 
 // Man-page body for the paste pseudo-row (Enter detail). Keep claims that
-// hold on every host (agent + dashboard); non-image file paths are agent-only.
+// hold on every host; non-image file paths are agent-only.
 #[cfg(target_os = "windows")]
 const PASTE_LONG_HELP: &str = "\
 Pastes clipboard images into the prompt as chips, and plain text as typed.\n\
@@ -150,29 +149,10 @@ pub fn build_entries(
 ) -> Vec<ShortcutsHelpEntry> {
     let mut entries: Vec<ShortcutsHelpEntry> = Vec::new();
 
-    // Keys the dashboard session-overlay claims while it is up. The
-    // overlay intercept consults `When::DashboardOverlay` before
-    // forwarding a key to the agent, so a lit row from another context
-    // advertising one of these keys would be lying (e.g. the
-    // cheatsheet's Ctrl+X alt is shadowed by the overlay stop).
-    let overlay_claimed: std::collections::HashSet<KeyShortcut> =
-        if active_contexts.contains(&When::DashboardOverlay) {
-            registry
-                .all()
-                .iter()
-                .filter(|d| d.context == When::DashboardOverlay)
-                .map(|d| d.default_key)
-                .collect()
-        } else {
-            std::collections::HashSet::new()
-        };
-
     for (cat_idx, &(cat, label)) in CATEGORY_ORDER.iter().enumerate() {
         // Dedup per category on the default key, preferring the def
-        // whose `When` context is active: `DashboardStop` (list) and
-        // `DashboardOverlayStop` (overlay) share Ctrl+X and category,
-        // and whichever matches the current surface must win
-        // regardless of registration order.
+        // whose `When` context is active, so whichever def matches the
+        // current surface wins regardless of registration order.
         let mut seen_in_cat: std::collections::HashMap<KeyShortcut, usize> =
             std::collections::HashMap::new();
         let defs: Vec<&ActionDef> = registry
@@ -240,24 +220,6 @@ pub fn build_entries(
                 }
             }
             let dimmed = !active_contexts.contains(&def.context);
-            // Strip overlay-claimed keys from lit rows of other
-            // contexts (the overlay intercept shadows them). Dimmed
-            // rows already say "not applicable here", so they keep
-            // their keys for discoverability.
-            if !dimmed
-                && def.context != When::DashboardOverlay
-                && item.keys.iter().any(|k| overlay_claimed.contains(k))
-            {
-                item.keys.retain(|k| !overlay_claimed.contains(k));
-                if item.keys.is_empty() {
-                    // Every key is shadowed — the binding is
-                    // genuinely unreachable inside the overlay.
-                    continue;
-                }
-                // The custom display no longer matches the surviving
-                // keys; render them verbatim.
-                item.custom_display = None;
-            }
             // Identical row for both arms; `item` moves in, `dimmed`/`def.id` are Copy.
             let hint = ShortcutsHelpEntry::Hint {
                 item,
@@ -313,10 +275,9 @@ pub fn build_entries(
             });
         }
         // Clipboard + textarea chords not in ActionRegistry. Super/Cmd omitted
-        // (often swallowed). Lit on agent prompt and dashboard reply hosts.
+        // (often swallowed). Lit on the agent prompt.
         if cat == Category::Input {
-            let dimmed = !active_contexts.contains(&When::PromptFocused)
-                && !active_contexts.contains(&When::DashboardFocused);
+            let dimmed = !active_contexts.contains(&When::PromptFocused);
             let push_pseudo = |entries: &mut Vec<ShortcutsHelpEntry>,
                                item: HintItem,
                                long_help: Option<&'static str>| {
@@ -345,9 +306,8 @@ pub fn build_entries(
             redo.keys.push(crate::key!('r', CONTROL));
             push_pseudo(&mut entries, redo, Some(REDO_LONG_HELP));
 
-            // Prompt history (Up / /history). Not part of the shared paste/undo/redo
-            // `dimmed`: that also lights on DashboardFocused, but Up-history is
-            // prompt-only, so give it its own PromptFocused-scoped dim.
+            // Prompt history (Up / /history). Up-history is prompt-only, so it
+            // gets its own PromptFocused-scoped dim.
             let mut history = HintItem::new(crate::key!(Up), "history");
             history.description = Some("Prompt history".into());
             let history_dimmed = !active_contexts.contains(&When::PromptFocused);
@@ -1074,8 +1034,7 @@ pub fn handle_mouse(
 // ---------------------------------------------------------------------------
 
 /// Footer hints painted along the bottom border of the cheatsheet
-/// modal. Identical visual vocabulary for the agent view and the
-/// dashboard so muscle memory ports across surfaces.
+/// modal.
 pub fn modal_footer(filter_active: bool) -> Vec<crate::views::modal_window::Shortcut<'static>> {
     use crate::views::modal_window::Shortcut;
     let mut shortcuts = vec![
@@ -1153,8 +1112,8 @@ enum CheatsheetRowKind {
     Other,
 }
 
-/// Owned per-frame buffers backing the cheatsheet picker rows, shared by both
-/// modal hosts (agent inline render + dashboard [`render_modal`]). The
+/// Owned per-frame buffers backing the cheatsheet picker rows, shared by the
+/// modal hosts (agent inline render + [`render_modal`]). The
 /// [`crate::views::picker::PickerEntry`] list from [`Self::picker_entries`]
 /// borrows these buffers, so this value must outlive the render call.
 pub struct CheatsheetRows {
@@ -1311,10 +1270,9 @@ impl CheatsheetRows {
 
 /// Render the cheatsheet modal in full (chrome + picker content).
 ///
-/// Pulled out of `AgentView::draw` so the dashboard can paint the
-/// exact same modal without re-plumbing `ModalWindowConfig` /
-/// picker-inner glue. The agent view continues to drive its own
-/// modal via `views::modal::ActiveModal::ShortcutsHelp`; this
+/// Pulled out of `AgentView::draw` so the modal can be painted without
+/// re-plumbing `ModalWindowConfig` / picker-inner glue. The agent view
+/// drives its modal via `views::modal::ActiveModal::ShortcutsHelp`; this
 /// function consumes the same fields by reference.
 ///
 /// The signature mirrors the destructured `ActiveModal::ShortcutsHelp`
@@ -1435,15 +1393,13 @@ pub enum ModalKeyOutcome {
 }
 
 /// Route a key through the cheatsheet's modal-window chrome + the
-/// picker `handle_input`. Mirrors the agent view's per-modal
-/// handler so the dashboard can reuse the exact same key
-/// semantics. Caller owns `filter_active` / `collapsed_sections`
-/// so the result mutations stay local to the wrapping struct.
+/// picker `handle_input`. Caller owns `filter_active` /
+/// `collapsed_sections` so the result mutations stay local to the
+/// wrapping struct.
 ///
 /// Args follow the same one-to-one shape as the field set behind
-/// `ActiveModal::ShortcutsHelp` so dashboards and agents can call
-/// it via plain destructuring instead of building / unpacking a
-/// wrapper struct.
+/// `ActiveModal::ShortcutsHelp` so callers can use plain destructuring
+/// instead of building / unpacking a wrapper struct.
 #[allow(clippy::too_many_arguments)]
 pub fn handle_modal_key(
     key: &crossterm::event::KeyEvent,

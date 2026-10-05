@@ -470,16 +470,7 @@ fn config_agents_slash_name(tab: Option<crate::views::agents_modal::AgentsTab>) 
 /// Toast when a session-hosted modal is opened off the agent view.
 fn toast_session_only_slash(app: &mut AppView, name: &str) {
     let msg = format!("/{name} only works in a session. Open an agent first.");
-    match app.active_view {
-        ActiveView::AgentDashboard => {
-            if let Some(d) = app.dashboard.as_mut() {
-                d.set_error_toast(&msg);
-            }
-        }
-        ActiveView::Welcome | ActiveView::Agent(_) => {
-            app.show_toast(&msg);
-        }
-    }
+    app.show_toast(&msg);
 }
 
 /// Open the hooks/plugins modal on the active agent view and fetch list data.

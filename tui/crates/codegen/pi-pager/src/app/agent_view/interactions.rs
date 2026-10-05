@@ -2,10 +2,7 @@
 //! and the cancel-turn confirm flow (keys, mouse, and submit paths).
 #[cfg(test)]
 use super::test_fixtures;
-use super::{
-    AgentView, MULTI_CLICK_TIMEOUT_MS, PeekAnswerOutcome, question_visible_h,
-    translate_local_submit,
-};
+use super::{AgentView, MULTI_CLICK_TIMEOUT_MS, question_visible_h, translate_local_submit};
 #[cfg(test)]
 use crate::actions::ActionRegistry;
 use crate::app::actions::Action;
@@ -1351,68 +1348,6 @@ impl AgentView {
         self.last_question_click = None;
         self.last_prompt_click_ms = None;
     }
-    /// Answer the ACTIVE question of this agent's pending
-    /// `AskUserQuestion` from the dashboard peek panel.
-    ///
-    /// Mirrors the agent view's own Enter handling but sources the
-    /// freeform text from the peek (a `freeform` argument) instead of
-    /// this view's prompt: `option_idx` selects an option; `None` with
-    /// non-empty `freeform` records the "Other" free-text answer. When
-    /// more questions remain it advances to the next one
-    /// ([`PeekAnswerOutcome::Advanced`]); on the last question it builds +
-    /// sends the accepted ext-response, restores the stashed prompt, and
-    /// clears question state ([`PeekAnswerOutcome::Submitted`]). Only
-    /// valid for an ext ask (`None` `local_kind`); an empty "Other" or a
-    /// non-ext question is a [`PeekAnswerOutcome::NoOp`].
-    pub(crate) fn dashboard_answer_question(
-        &mut self,
-        option_idx: Option<usize>,
-        freeform: String,
-    ) -> PeekAnswerOutcome {
-        use crate::views::question_view::QuestionSelection;
-        let Some(mut qv) = self.question_view.take() else {
-            return PeekAnswerOutcome::NoOp;
-        };
-        if qv.local_kind.is_some() {
-            self.question_view = Some(qv);
-            return PeekAnswerOutcome::NoOp;
-        }
-        let active = qv.active_tab;
-        match option_idx {
-            Some(idx) => {
-                qv.select_option(active, idx);
-                if let Some(slot) = qv.per_question_freeform_selected.get_mut(active) {
-                    *slot = false;
-                }
-            }
-            None => {
-                if freeform.trim().is_empty() {
-                    self.question_view = Some(qv);
-                    return PeekAnswerOutcome::NoOp;
-                }
-                if let Some(slot) = qv.per_question_freeform.get_mut(active) {
-                    *slot = freeform;
-                }
-                if let Some(slot) = qv.per_question_freeform_selected.get_mut(active) {
-                    *slot = true;
-                }
-                if let Some(QuestionSelection::Single(sel)) = qv.selections.get_mut(active) {
-                    *sel = None;
-                }
-            }
-        }
-        if active + 1 < qv.questions.len() {
-            qv.next_question();
-            self.question_view = Some(qv);
-            return PeekAnswerOutcome::Advanced;
-        }
-        self.record_question_pause(&qv);
-        let response = qv.build_accepted_response();
-        qv.send_ext_response(response);
-        self.prompt.restore(qv.stashed_prompt);
-        self.cleanup_question_state();
-        PeekAnswerOutcome::Submitted
-    }
 }
 #[cfg(test)]
 mod cancel_turn_mouse_tests {
@@ -2188,8 +2123,6 @@ mod question_no_freeform_tests {
             false,
             crate::app::agent_view::BannerSlotParams::none(),
             &bundle,
-            false,
-            false,
             &mut Vec::new(),
             crate::app::agent_view::AppRenderParams::default(),
         );

@@ -793,7 +793,6 @@ pub(super) fn dispatch_show_doc(app: &mut AppView, title: String, content: Strin
                 standalone: true,
             });
         }
-        _ => {}
     }
     vec![]
 }

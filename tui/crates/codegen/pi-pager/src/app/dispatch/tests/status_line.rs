@@ -134,7 +134,7 @@ fn owed_refresh_is_deferred_never_dropped_and_consumed_by_the_first_run() {
 
     let mut now = Instant::now();
     let mut app = refresh_timer_app();
-    app.active_view = ActiveView::AgentDashboard;
+    app.active_view = ActiveView::Welcome;
     now += Duration::from_secs(300);
     app.note_status_line_refresh_due_at(now);
     assert!(!queued_a_run(&app), "no agent, nothing to describe");

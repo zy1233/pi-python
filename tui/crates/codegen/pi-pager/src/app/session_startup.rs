@@ -42,7 +42,6 @@ pub struct DeferredStartupActions {
     pub worktree_ref: Option<String>,
     pub new_session: bool,
     pub prompt: Option<String>,
-    pub open_dashboard: bool,
     pub pending_chat: bool,
     /// Welcome history local-disk bypass persisted across the startup gate.
     #[cfg(feature = "local-workspace")]

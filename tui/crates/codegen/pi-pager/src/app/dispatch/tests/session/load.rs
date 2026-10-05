@@ -1246,43 +1246,6 @@ fn resume_unknown_session_still_creates_new_agent() {
         } if *agent_id == new_id && session_id == "sess-never-open"
     )));
 }
-/// Stale `attached_agent` (not equal to visible agent) must not re-arm overlay.
-#[test]
-fn resume_open_session_does_not_rearm_stale_overlay() {
-    let mut app = test_app();
-    dispatch(Action::NewSession, &mut app);
-    let agent_0 = AgentId(0);
-    dispatch(
-        Action::TaskComplete(TaskResult::SessionCreated {
-            agent_id: agent_0,
-            session_id: "sess-a".into(),
-            models: None,
-            scheduler_background_loops: None,
-        }),
-        &mut app,
-    );
-    dispatch(Action::NewSession, &mut app);
-    let agent_1 = AgentId(1);
-    dispatch(
-        Action::TaskComplete(TaskResult::SessionCreated {
-            agent_id: agent_1,
-            session_id: "sess-b".into(),
-            models: None,
-            scheduler_background_loops: None,
-        }),
-        &mut app,
-    );
-    ensure_dashboard_state(&mut app);
-    app.active_view = ActiveView::Agent(agent_1);
-    app.dashboard.as_mut().unwrap().attached_agent = Some(agent_0);
-    let effects = dispatch(Action::LoadSession("sess-b".into(), None, false), &mut app);
-    assert!(effects.is_empty());
-    assert!(matches!(app.active_view, ActiveView::Agent(id) if id == agent_1));
-    assert_eq!(
-        app.dashboard.as_ref().unwrap().attached_agent,
-        Some(agent_0)
-    );
-}
 /// Conversation resume must not focus a Build agent that shares the same id.
 #[test]
 fn resume_conversation_does_not_focus_build_id_collision() {
@@ -1395,52 +1358,6 @@ fn resume_under_chat_mode_focuses_despite_entry_false() {
     assert!(effects.is_empty());
     assert_eq!(app.agents.len(), count_before);
     assert!(matches!(app.active_view, ActiveView::Agent(id) if id == agent_0));
-}
-/// Resuming the agent that `attached_agent` already points at must focus_row.
-#[test]
-fn resume_stale_attached_target_focuses_dashboard_row() {
-    use crate::views::dashboard::DashboardRowId;
-    let mut app = test_app();
-    dispatch(Action::NewSession, &mut app);
-    let agent_0 = AgentId(0);
-    dispatch(
-        Action::TaskComplete(TaskResult::SessionCreated {
-            agent_id: agent_0,
-            session_id: "sess-a".into(),
-            models: None,
-            scheduler_background_loops: None,
-        }),
-        &mut app,
-    );
-    dispatch(Action::NewSession, &mut app);
-    let agent_1 = AgentId(1);
-    dispatch(
-        Action::TaskComplete(TaskResult::SessionCreated {
-            agent_id: agent_1,
-            session_id: "sess-b".into(),
-            models: None,
-            scheduler_background_loops: None,
-        }),
-        &mut app,
-    );
-    ensure_dashboard_state(&mut app);
-    app.active_view = ActiveView::Agent(agent_1);
-    app.dashboard.as_mut().unwrap().attached_agent = Some(agent_0);
-    app.dashboard
-        .as_mut()
-        .unwrap()
-        .focus_row(DashboardRowId::TopLevel(agent_1));
-    let effects = dispatch(Action::LoadSession("sess-a".into(), None, false), &mut app);
-    assert!(effects.is_empty());
-    assert!(matches!(app.active_view, ActiveView::Agent(id) if id == agent_0));
-    assert_eq!(
-        app.dashboard.as_ref().unwrap().attached_agent,
-        Some(agent_0)
-    );
-    assert_eq!(
-        app.dashboard.as_ref().unwrap().selected,
-        Some(DashboardRowId::TopLevel(agent_0))
-    );
 }
 /// After SessionLoadFailed, retrying resume must reissue LoadSession.
 #[test]

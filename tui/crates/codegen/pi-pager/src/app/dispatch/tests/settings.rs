@@ -125,39 +125,6 @@ fn toggle_vim_mode_propagates_to_open_subagent_views() {
         "an open subagent view must also pick up the vim toggle",
     );
 }
-/// `/vim-mode` must toggle vim from the DASHBOARD too (not just an
-/// agent view) — previously it early-returned unless an agent was
-/// active, so it was a silent no-op and the overview's j/k never
-/// turned on. Turning vim ON also focuses the overview so j/k
-/// navigate immediately; turning it OFF returns focus to the input.
-#[serial_test::serial(GROK_AGENT_DASHBOARD)]
-#[test]
-fn toggle_vim_mode_works_on_dashboard_and_focuses_overview() {
-    crate::appearance::cache::set_vim_mode(false);
-    let mut app = test_app_with_agent();
-    open_dashboard(&mut app);
-    assert!(matches!(app.active_view, ActiveView::AgentDashboard));
-    app.dashboard.as_mut().unwrap().list_focused = false;
-    let _ = dispatch(Action::ToggleVimMode, &mut app);
-    assert!(
-        crate::appearance::cache::load_vim_mode(),
-        "/vim-mode must toggle vim ON from the dashboard",
-    );
-    assert!(
-        app.dashboard.as_ref().unwrap().list_focused,
-        "turning vim on focuses the overview so j/k navigate immediately",
-    );
-    let _ = dispatch(Action::ToggleVimMode, &mut app);
-    assert!(
-        !crate::appearance::cache::load_vim_mode(),
-        "second /vim-mode must toggle vim OFF",
-    );
-    assert!(
-        !app.dashboard.as_ref().unwrap().list_focused,
-        "turning vim off returns focus to the input",
-    );
-    crate::appearance::cache::set_vim_mode(false);
-}
 #[test]
 fn plugin_cta_catalog_reload_empty_candidates_resets_matched_phase() {
     use crate::app::agent_view::CtaPhase;
@@ -1996,36 +1963,6 @@ fn set_multiline_mode_no_op_when_no_active_agent() {
         matches!(app.active_view, ActiveView::Welcome),
         "active_view must not flip on no-agent dispatch",
     );
-}
-/// Dashboard surface owns its own compose flag: `SetMultilineMode` /
-/// `/multiline` flip `dashboard.multiline_mode` and leave agent flags alone.
-#[test]
-fn set_multiline_mode_on_dashboard_toggles_dashboard_not_agents() {
-    let mut app = test_app_with_agent();
-    insert_placeholder_agent(&mut app, AgentId(1));
-    app.dashboard = Some(crate::views::dashboard::DashboardState::new());
-    app.active_view = ActiveView::AgentDashboard;
-    assert!(!app.dashboard.as_ref().unwrap().multiline_mode);
-    assert!(!app.agents[&AgentId(0)].multiline_mode);
-    assert!(!app.agents[&AgentId(1)].multiline_mode);
-    let effects = dispatch(Action::SetMultilineMode(true), &mut app);
-    assert!(effects.is_empty());
-    assert!(
-        app.dashboard.as_ref().unwrap().multiline_mode,
-        "dashboard flag must flip on"
-    );
-    assert!(
-        !app.agents[&AgentId(0)].multiline_mode && !app.agents[&AgentId(1)].multiline_mode,
-        "agent flags must stay put"
-    );
-    let _ = dispatch(Action::SetMultilineMode(false), &mut app);
-    assert!(!app.dashboard.as_ref().unwrap().multiline_mode);
-    let _ = dispatch_dashboard_dispatch_slash(&mut app, "/multiline".into());
-    assert!(
-        app.dashboard.as_ref().unwrap().multiline_mode,
-        "/multiline must toggle dashboard on"
-    );
-    assert!(!app.agents[&AgentId(0)].multiline_mode);
 }
 /// Multi-agent fan-out. `set_multiline_mode`
 /// mutates only the ACTIVE agent's `multiline_mode`, never

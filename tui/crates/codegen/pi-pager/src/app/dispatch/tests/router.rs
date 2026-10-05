@@ -462,7 +462,6 @@ fn resume_foreign_session_stashes_prompt_behind_trust_and_auth() {
         app.deferred_startup.preferred_session_id = Some("stale-id".into());
         app.deferred_startup.new_session = true;
         app.deferred_startup.prompt = Some("stale prompt".into());
-        app.deferred_startup.open_dashboard = true;
         app.deferred_startup.pending_chat = true;
         assert!(
             app.foreign_resume_hint().is_some(),
@@ -478,7 +477,6 @@ fn resume_foreign_session_stashes_prompt_behind_trust_and_auth() {
         assert!(app.deferred_startup.worktree_ref.is_none());
         assert!(app.deferred_startup.preferred_session_id.is_none());
         assert!(!app.deferred_startup.new_session);
-        assert!(!app.deferred_startup.open_dashboard);
         assert!(!app.deferred_startup.pending_chat);
     }
 }
@@ -593,7 +591,6 @@ fn announcements_open_cta_opens_promo_and_noops_under_critical() {
         AnnouncementCtaSurface::Banner,
         AnnouncementCtaSurface::Welcome,
         AnnouncementCtaSurface::Header,
-        AnnouncementCtaSurface::Dashboard,
         AnnouncementCtaSurface::Keyboard,
     ] {
         let _ = std::fs::write(&url_file, "");
@@ -733,14 +730,13 @@ fn cta_impressions_suppressed_while_rect_occluded() {
     app.log_announcement_cta_impressions();
     assert_eq!(app.announcement_cta_impressions_logged.len(), 2);
 }
-/// The welcome hero and dashboard surfaces latch from their own armed rects
-/// (only the active view's rects are consulted).
+/// The welcome hero surface latches from its own armed rect (only the active
+/// view's rects are consulted).
 #[test]
-fn cta_impressions_cover_welcome_and_dashboard_surfaces() {
+fn cta_impressions_cover_welcome_surface() {
     use crate::app::app_view::ActiveView;
-    use crate::views::dashboard::state::DashboardState;
     use pi_telemetry::events::AnnouncementCtaSurface;
-    let mut app = test_app();
+    let mut app = test_app_with_agent();
     app.active_announcements = vec![promo_announcement("p")];
     let rect = Some(ratatui::layout::Rect::new(0, 0, 4, 1));
     app.active_view = ActiveView::Welcome;
@@ -748,18 +744,12 @@ fn cta_impressions_cover_welcome_and_dashboard_surfaces() {
     app.log_announcement_cta_impressions();
     let logged = &app.announcement_cta_impressions_logged;
     assert!(logged.contains(&("p".to_string(), AnnouncementCtaSurface::Welcome)));
-    app.active_view = ActiveView::AgentDashboard;
-    let mut dash = DashboardState::new();
-    dash.upgrade_cta_hit.set(rect);
-    app.dashboard = Some(dash);
-    app.log_announcement_cta_impressions();
-    let logged = &app.announcement_cta_impressions_logged;
-    assert!(logged.contains(&("p".to_string(), AnnouncementCtaSurface::Dashboard)));
+    app.active_view = ActiveView::Agent(AgentId(0));
     app.active_announcements = vec![promo_announcement("q")];
     app.log_announcement_cta_impressions();
     let logged = &app.announcement_cta_impressions_logged;
     assert!(!logged.contains(&("q".to_string(), AnnouncementCtaSurface::Welcome)));
-    assert_eq!(logged.len(), 3);
+    assert_eq!(logged.len(), 1);
 }
 #[ignore = "pi-python: grok-specific feature not supported"]
 #[test]
@@ -2285,204 +2275,6 @@ fn show_tasks_no_active_agent_is_noop() {
     let effects = dispatch(Action::ShowTasks, &mut app);
     assert!(effects.is_empty(), "ShowTasks without an agent is a no-op");
 }
-/// classify_top_level decision matrix.
-#[test]
-fn classify_top_level_branches() {
-    use crate::views::dashboard::{RowState, classify_top_level};
-    let mut app = test_app_with_agent();
-    let agent = app.agents.get(&AgentId(0)).unwrap();
-    assert_eq!(classify_top_level(agent), RowState::Idle);
-    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-    agent.session.state = AgentState::TurnRunning;
-    assert_eq!(classify_top_level(agent), RowState::Working);
-    agent.session.state = AgentState::Idle;
-    agent.session.loading_replay = true;
-    assert_eq!(classify_top_level(agent), RowState::Working);
-    agent.session.loading_replay = false;
-}
-/// For Idle rows, `last_change_at` is the
-/// frozen `last_active_at` anchor. Building the row twice in
-/// rapid succession against a fixed `last_active_at` yields
-/// nearly-identical `elapsed()` values (within tolerance).
-#[test]
-fn build_rows_idle_anchor_is_frozen_last_active_at() {
-    use crate::views::dashboard::build_rows;
-    let mut app = test_app_with_agent();
-    mark_agent_nonempty(&mut app, AgentId(0));
-    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-    let anchor = std::time::Instant::now() - std::time::Duration::from_secs(300);
-    agent.last_active_at = Some(anchor);
-    agent.turn_started_at = None;
-    agent.session.state = crate::app::agent::AgentState::Idle;
-    let rows1 = build_rows(
-        &app.agents,
-        &std::collections::BTreeSet::new(),
-        &[],
-        None,
-        crate::views::dashboard::Grouping::State,
-        &crate::views::dashboard::Filter::None,
-        None,
-    );
-    let row1 = &rows1[0];
-    assert_eq!(row1.state, crate::views::dashboard::RowState::Idle);
-    let elapsed1 = row1.last_change_at.elapsed().unwrap_or_default();
-    assert!(
-        elapsed1 >= std::time::Duration::from_secs(299),
-        "expected >= 299s, got {elapsed1:?}",
-    );
-    let rows2 = build_rows(
-        &app.agents,
-        &std::collections::BTreeSet::new(),
-        &[],
-        None,
-        crate::views::dashboard::Grouping::State,
-        &crate::views::dashboard::Filter::None,
-        None,
-    );
-    let elapsed2 = rows2[0].last_change_at.elapsed().unwrap_or_default();
-    assert!(
-        elapsed2 >= std::time::Duration::from_secs(299),
-        "idle anchor must stay frozen across rebuilds, got {elapsed2:?}",
-    );
-}
-/// Working rows anchor at `turn_started_at` so
-/// the age column shows the LIVE elapsed time within the current
-/// turn rather than the time since the previous turn ended.
-#[test]
-fn build_rows_working_anchor_is_turn_started_at() {
-    use crate::views::dashboard::build_rows;
-    let mut app = test_app_with_agent();
-    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-    let turn_start = std::time::Instant::now() - std::time::Duration::from_secs(5);
-    let stale = std::time::Instant::now() - std::time::Duration::from_secs(600);
-    agent.turn_started_at = Some(turn_start);
-    agent.last_active_at = Some(stale);
-    agent.session.state = crate::app::agent::AgentState::TurnRunning;
-    let rows = build_rows(
-        &app.agents,
-        &std::collections::BTreeSet::new(),
-        &[],
-        None,
-        crate::views::dashboard::Grouping::State,
-        &crate::views::dashboard::Filter::None,
-        None,
-    );
-    let row = &rows[0];
-    assert_eq!(row.state, crate::views::dashboard::RowState::Working);
-    let elapsed = row.last_change_at.elapsed().unwrap_or_default();
-    assert!(
-        elapsed >= std::time::Duration::from_secs(4)
-            && elapsed < std::time::Duration::from_secs(30),
-        "expected ~5s (turn_started_at anchor), got {elapsed:?}",
-    );
-}
-/// Defensive test for the fallback
-/// path when both `turn_started_at` and `last_active_at` are
-/// `None`. The row's `last_change_at` projects the *frozen*
-/// process-wide `fallback_epoch`, so two consecutive builds yield
-/// stable `last_change_at` values (within sampling jitter) rather
-/// than re-anchoring at `now` and showing "0s" every frame.
-#[test]
-fn build_rows_fallback_anchor_is_frozen_when_last_active_at_is_none() {
-    use crate::views::dashboard::build_rows;
-    let mut app = test_app_with_agent();
-    mark_agent_nonempty(&mut app, AgentId(0));
-    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-    agent.last_active_at = None;
-    agent.turn_started_at = None;
-    agent.session.state = crate::app::agent::AgentState::Idle;
-    let rows1 = build_rows(
-        &app.agents,
-        &std::collections::BTreeSet::new(),
-        &[],
-        None,
-        crate::views::dashboard::Grouping::State,
-        &crate::views::dashboard::Filter::None,
-        None,
-    );
-    let rows2 = build_rows(
-        &app.agents,
-        &std::collections::BTreeSet::new(),
-        &[],
-        None,
-        crate::views::dashboard::Grouping::State,
-        &crate::views::dashboard::Filter::None,
-        None,
-    );
-    let (t1, t2) = (rows1[0].last_change_at, rows2[0].last_change_at);
-    let drift = t1.duration_since(t2).unwrap_or_else(|e| e.duration());
-    assert!(
-        drift < std::time::Duration::from_secs(1),
-        "fallback anchor must be frozen across rebuilds, drifted {drift:?}",
-    );
-}
-/// While the turn is IDLE the peek header label reflects the TYPE of the
-/// most recent agent block (Response / Edit / Thought / …) via the
-/// scrollback scan. The most recent block wins; a fresh user prompt is a
-/// turn boundary with no agent response after it → "Idle". (The RUNNING
-/// case follows live turn activity — see the `extract_response_type_*`
-/// tests.)
-#[serial_test::serial(GROK_AGENT_DASHBOARD)]
-#[test]
-fn peek_label_reflects_last_response_type() {
-    use crate::scrollback::block::RenderBlock;
-    use crate::views::dashboard::peek::extract_last_response_type;
-    let mut app = test_app_with_agent();
-    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-    agent
-        .scrollback
-        .push_block(RenderBlock::agent_message("hi"));
-    assert_eq!(extract_last_response_type(agent), "Response");
-    agent
-        .scrollback
-        .push_block(RenderBlock::tool_call("edit", "src/x.rs", true));
-    assert_eq!(extract_last_response_type(agent), "Edit");
-    agent.scrollback.push_block(RenderBlock::thinking("hmm"));
-    assert_eq!(extract_last_response_type(agent), "Thought");
-    agent
-        .scrollback
-        .push_block(RenderBlock::user_prompt("do it"));
-    assert_eq!(extract_last_response_type(agent), "Idle");
-}
-/// agent.question_view.is_some() → NeedsInput.
-#[test]
-fn classify_top_level_question_view_some_is_needs_input() {
-    use crate::views::dashboard::{RowState, classify_top_level};
-    use crate::views::question_view::QuestionViewState;
-    let mut app = test_app_with_agent();
-    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-    agent.question_view = Some(QuestionViewState::new(
-        "tc-1".to_string(),
-        Vec::new(),
-        crate::views::prompt_widget::StashedPrompt::default(),
-    ));
-    assert_eq!(classify_top_level(agent), RowState::NeedsInput);
-}
-/// ANSI escapes in `display_name` are stripped at row
-/// build time.
-#[test]
-fn top_level_label_strips_control_characters() {
-    use crate::views::dashboard::build_rows;
-    let mut app = test_app_with_agent();
-    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-    agent.display_name = Some("a\x1b[31mevil\x1b[0m".to_string());
-    let rows = build_rows(
-        &app.agents,
-        &std::collections::BTreeSet::new(),
-        &[],
-        None,
-        crate::views::dashboard::Grouping::State,
-        &crate::views::dashboard::Filter::None,
-        None,
-    );
-    let top = rows.iter().find(|r| r.indent == 0).expect("top row");
-    assert!(
-        !top.label.contains('\x1b'),
-        "label must not retain \\x1b: {:?}",
-        top.label
-    );
-    assert!(top.label.contains("evil"));
-}
 /// Build a synthetic MouseEvent for tests.
 fn mouse_event(
     kind: crossterm::event::MouseEventKind,
@@ -2495,140 +2287,6 @@ fn mouse_event(
         row,
         modifiers: crossterm::event::KeyModifiers::NONE,
     }
-}
-/// Left-click on a row selects it (single click).
-/// Single left-click on a row attaches the
-/// conversation immediately (was: selects only, required
-/// double-click to attach). The user explicitly reported the
-/// previous click-to-select behaviour as unresponsive.
-#[serial_test::serial(GROK_AGENT_DASHBOARD)]
-#[test]
-fn mouse_left_click_attaches_immediately() {
-    use crossterm::event::{Event, MouseButton, MouseEventKind};
-    let mut app = test_app_with_agent();
-    open_dashboard(&mut app);
-    let d = app.dashboard.as_mut().unwrap();
-    let id = crate::views::dashboard::DashboardRowId::TopLevel(AgentId(0));
-    d.row_rects
-        .push((id.clone(), ratatui::layout::Rect::new(0, 5, 80, 1)));
-    d.selected = None;
-    let outcome = d.handle_input(
-        &Event::Mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), 10, 5)),
-        &crate::actions::ActionRegistry::defaults(),
-    );
-    match outcome {
-        crate::app::app_view::InputOutcome::Action(
-            crate::app::actions::Action::DashboardAttach(actual),
-        ) => {
-            assert_eq!(actual, id, "single click must attach the clicked row");
-        }
-        other => panic!("expected DashboardAttach on single click, got {other:?}"),
-    }
-    assert_eq!(d.selected, Some(id));
-}
-/// Every left-click attaches, including
-/// rapid repeated clicks. The previous design used a 500ms window
-/// to distinguish single (select) from double (attach) click;
-/// the new design makes every click attach so the user's mental
-/// model "click = open" always holds.
-#[serial_test::serial(GROK_AGENT_DASHBOARD)]
-#[test]
-fn mouse_repeated_click_keeps_attaching() {
-    use crossterm::event::{Event, MouseButton, MouseEventKind};
-    let mut app = test_app_with_agent();
-    open_dashboard(&mut app);
-    let d = app.dashboard.as_mut().unwrap();
-    let id = crate::views::dashboard::DashboardRowId::TopLevel(AgentId(0));
-    d.row_rects
-        .push((id.clone(), ratatui::layout::Rect::new(0, 5, 80, 1)));
-    let reg = crate::actions::ActionRegistry::defaults();
-    let outcome1 = d.handle_input(
-        &Event::Mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), 10, 5)),
-        &reg,
-    );
-    match outcome1 {
-        crate::app::app_view::InputOutcome::Action(
-            crate::app::actions::Action::DashboardAttach(actual),
-        ) => assert_eq!(actual, id),
-        other => panic!("expected DashboardAttach on first click, got {other:?}"),
-    }
-    let outcome2 = d.handle_input(
-        &Event::Mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), 10, 5)),
-        &reg,
-    );
-    match outcome2 {
-        crate::app::app_view::InputOutcome::Action(
-            crate::app::actions::Action::DashboardAttach(actual),
-        ) => assert_eq!(actual, id),
-        other => panic!("expected DashboardAttach on second click, got {other:?}"),
-    }
-}
-/// Clicks after the previous 500ms-double-click
-/// window also attach (the previous test asserted single-click
-/// behaviour for >500ms-apart clicks; now every click attaches).
-#[serial_test::serial(GROK_AGENT_DASHBOARD)]
-#[test]
-fn mouse_click_after_long_pause_still_attaches() {
-    use crossterm::event::{Event, MouseButton, MouseEventKind};
-    use std::time::{Duration, Instant};
-    let mut app = test_app_with_agent();
-    open_dashboard(&mut app);
-    let d = app.dashboard.as_mut().unwrap();
-    let id = crate::views::dashboard::DashboardRowId::TopLevel(AgentId(0));
-    d.row_rects
-        .push((id.clone(), ratatui::layout::Rect::new(0, 5, 80, 1)));
-    let reg = crate::actions::ActionRegistry::defaults();
-    let _ = d.handle_input(
-        &Event::Mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), 10, 5)),
-        &reg,
-    );
-    if let Some((_, t)) = d.last_click.as_mut() {
-        *t = Instant::now() - Duration::from_millis(600);
-    }
-    let outcome = d.handle_input(
-        &Event::Mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), 10, 5)),
-        &reg,
-    );
-    match outcome {
-        crate::app::app_view::InputOutcome::Action(
-            crate::app::actions::Action::DashboardAttach(actual),
-        ) => assert_eq!(actual, id),
-        other => panic!("expected DashboardAttach, got {other:?}"),
-    }
-}
-/// Click on the peek close-button rect closes the peek.
-#[serial_test::serial(GROK_AGENT_DASHBOARD)]
-#[test]
-fn mouse_click_on_peek_close_rect_clears_peek() {
-    use crossterm::event::{Event, MouseButton, MouseEventKind};
-    let mut app = test_app_with_agent();
-    open_dashboard(&mut app);
-    let d = app.dashboard.as_mut().unwrap();
-    d.peek = Some(crate::views::dashboard::peek::PeekPanelState::new(
-        crate::views::dashboard::DashboardRowId::TopLevel(AgentId(0)),
-        crate::views::dashboard::peek::PeekFields {
-            label: "label".into(),
-            time_ago: String::new(),
-            response_type: "Idle".into(),
-            last_user_message: None,
-            question: None,
-            options: Vec::new(),
-            request_id: None,
-            reject_option: None,
-        },
-    ));
-    d.peek_close_rect = Some(ratatui::layout::Rect::new(70, 8, 3, 1));
-    let reg = crate::actions::ActionRegistry::defaults();
-    let outcome = d.handle_input(
-        &Event::Mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), 71, 8)),
-        &reg,
-    );
-    assert!(matches!(
-        outcome,
-        crate::app::app_view::InputOutcome::Changed
-    ));
-    assert!(d.peek.is_none());
-    assert!(d.peek_close_rect.is_none());
 }
 /// Same refusal at the content-hit worktree entry point.
 #[test]

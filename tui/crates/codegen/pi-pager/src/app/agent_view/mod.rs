@@ -1411,23 +1411,12 @@ pub struct AgentView {
     /// so rapid Shift+Tab presses advance correctly without waiting for ACP.
     pub(crate) plan_mode_pending: Option<bool>,
     /// Session mode to apply once this agent's ACP session exists. Set when
-    /// the agent is spawned from the dashboard with `/plan` active (the
-    /// session does not exist yet, so the mode can't be sent immediately).
+    /// the mode is chosen before the session exists (so it can't be sent
+    /// immediately).
     /// Consumed in the `SessionCreated` / `WorktreeSessionCreated` handlers,
     /// mirroring `AgentSession.deferred_model_switch`.
     pub(crate) deferred_session_mode: Option<pi_tools::types::SessionMode>,
     pub(crate) pending_extensions_fetch: bool,
-    /// Whether this view was last rendered inside the dashboard's session
-    /// overlay. Updated every frame by `draw`; read when building the
-    /// shortcuts cheatsheet so the overlay-scoped shortcuts
-    /// (`When::DashboardOverlay`) are lit in the overlay and dimmed elsewhere.
-    pub(crate) in_dashboard_overlay: bool,
-    /// Whether that overlay's cycle order holds more than one agent, i.e.
-    /// whether the header shows its `[‹]`/`[›]` chips. Updated every frame by
-    /// `draw` beside [`Self::in_dashboard_overlay`], and read from the same
-    /// place: the shortcuts bar builds the pane's hints once for both the bar
-    /// and the cheatsheet, neither of which can see `draw`'s arguments.
-    pub(crate) overlay_can_cycle: bool,
     /// MCP server init progress. Set when the shell starts connecting
  /// MCP servers, cleared when `legacy ext RPC` arrives.
     /// Shown in the turn status line while the agent is idle.
@@ -1763,15 +1752,6 @@ const MAX_PENDING_FOLLOW_UPS: usize = 16;
 /// entry (unlike the follow-up buffer's oldest-first eviction): a coherent
 /// prefix (user echo + tool-call start) renders sanely, a headless tail would not.
 pub(crate) const MAX_PENDING_ADOPTION_UPDATES: usize = 128;
-/// Outcome of [`AgentView::dashboard_answer_question`] — tells the
-/// dashboard dispatcher whether the whole ask form was submitted (close
-/// the peek), the form advanced to the next question (keep the peek open
-/// but reset its per-question draft), or nothing happened.
-pub(crate) enum PeekAnswerOutcome {
-    Submitted,
-    Advanced,
-    NoOp,
-}
 /// Test-only re-export of [`translate_local_submit`] so dispatch tests
 /// can verify the local-question -> Action mapping without spinning up
 /// a full agent view.
@@ -2233,26 +2213,7 @@ fn resolve_action(action_id: Option<ActionId>) -> Option<InputOutcome> {
         | ActionId::SendToBackground
         | ActionId::BashMode
         | ActionId::Rewind
-        | ActionId::KillBgTask
-        | ActionId::OpenDashboard
-        | ActionId::DashboardSelectNext
-        | ActionId::DashboardSelectPrev
-        | ActionId::DashboardTogglePin
-        | ActionId::DashboardBeginRename
-        | ActionId::DashboardStop
-        | ActionId::DashboardCycleMode
-        | ActionId::DashboardToggleGrouping
-        | ActionId::DashboardReorderUp
-        | ActionId::DashboardReorderDown
-        | ActionId::DashboardShortcutsHelp
-        | ActionId::DashboardExit
-        | ActionId::DashboardOverlayExit
-        | ActionId::DashboardOverlayPrev
-        | ActionId::DashboardOverlayNext
-        | ActionId::DashboardOverlayStop
-        | ActionId::DashboardToggleAutoApprove
-        | ActionId::DashboardOpenLocationPicker
-        | ActionId::DashboardToggleWorktree => return None,
+        | ActionId::KillBgTask => return None,
     };
     Some(InputOutcome::Action(action))
 }

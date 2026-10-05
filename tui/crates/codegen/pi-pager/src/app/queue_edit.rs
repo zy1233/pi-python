@@ -1102,7 +1102,7 @@ mod tests {
         let mut app = crate::app::app_view::tests::test_app();
         let id = agent.session.id;
         app.agents.insert(id, agent);
-        let effects = crate::app::dispatch::maybe_drain_queue_and_note_peek(&mut app, id);
+        let effects = crate::app::dispatch::drain_queue_for_agent(&mut app, id);
         let agent = app.agents.get(&id).unwrap();
         match &agent.scrollback.get(0).unwrap().block {
             RenderBlock::UserPrompt(b) => {
@@ -1554,7 +1554,7 @@ mod tests {
         let mut app = crate::app::app_view::tests::test_app();
         let id = agent.session.id;
         app.agents.insert(id, agent);
-        let effects = crate::app::dispatch::maybe_drain_queue_and_note_peek(&mut app, id);
+        let effects = crate::app::dispatch::drain_queue_for_agent(&mut app, id);
         assert!(matches!(
             effects.as_slice(),
             [Effect::SendPromptBlocks { .. }]

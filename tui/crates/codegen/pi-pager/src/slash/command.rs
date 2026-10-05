@@ -311,56 +311,11 @@ pub trait SlashCommand: Send + Sync {
         true
     }
 
-    /// Whether this command operates on a single agent session — its
-    /// conversation, context, model, turns, plan, etc. — rather than the
-    /// pager as a whole.
-    ///
-    /// Session-scoped commands (`/compact`, `/fork`, `/rewind`, …) need a
-    /// "current session" to act on, so they are suppressed on session-less
-    /// surfaces. Today that means the agent dashboard's dispatch input,
-    /// which offers only pager-global commands (`/theme`, `/settings`,
-    /// `/mcps`, …). Surfaces that always have a session (the agent view)
-    /// ignore this flag and continue to show every command.
-    ///
-    /// Defaults to `false` (pager-global).
-    fn session_scoped(&self) -> bool {
-        false
-    }
-
-    /// Whether a `session_scoped()` command should still be offered on
-    /// session-less surfaces (the agent dashboard's dispatch input).
-    ///
-    /// A handful of session-scoped commands have a meaningful session-less
-    /// interpretation: `/model` and `/plan` configure the *next* agent the
-    /// dashboard spawns; `/multiline` toggles compose mode on the dashboard
-    /// inputs. Those override this to `true` so they appear in the dashboard
-    /// dropdown even though `session_scoped()` is `true`. Has no effect for
-    /// non-session-scoped commands (they're always offered).
-    ///
-    /// Defaults to `false`.
-    fn offered_when_session_less(&self) -> bool {
-        false
-    }
-
-    /// Whether this command should ONLY be offered on the session-less
-    /// dashboard surface — the inverse of [`Self::session_scoped`]. The
-    /// dashboard's dispatch input is the one surface where
-    /// `hide_session_scoped` is set, so a `dashboard_only` command shows
-    /// there and is suppressed on every session surface (the agent view) and
-    /// the welcome screen.
-    ///
-    /// `/cd` changes where the dashboard dispatches new agents, so it is
-    /// meaningless in an agent session and hidden there. Defaults to `false`.
-    fn dashboard_only(&self) -> bool {
-        false
-    }
-
     /// Which render modes this command functions in.
     ///
     /// Minimal mode (`grok --minimal`) deletes the interactive fullscreen
-    /// scrollback pane, the in-app mouse selection path, and the agent
-    /// dashboard, handing scroll / search / selection back to the terminal
-    /// (K7); a few commands exist only there, because the full TUI solves the
+    /// scrollback pane and the in-app mouse selection path, handing scroll /
+    /// search / selection back to the terminal (K7); a few commands exist only there, because the full TUI solves the
     /// same problem with a pane or a chord. Declaring the mode here is the
     /// single source for both behaviors: the command is hidden from every
     /// completion surface in the modes it does not support (`command_offered`),

@@ -1,4 +1,4 @@
-//! Recent project directories drawn from session history, plus path display shared by the dashboard.
+//! Recent project directories drawn from session history, plus path display helpers.
 
 use std::path::{Path, PathBuf};
 

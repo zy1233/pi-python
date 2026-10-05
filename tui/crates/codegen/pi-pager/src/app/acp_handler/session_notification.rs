@@ -526,13 +526,6 @@ pub(super) fn handle_session_notification_with_origin(
             child_view.set_sharing_enabled(agent.sharing_enabled);
             child_view.set_billing_surface_visible(agent.billing_surface_visible);
             child_view.set_usage_command_visible(agent.usage_command_visible);
-            let dashboard_visible = agent
-                .prompt
-                .slash_controller
-                .registry()
-                .get("dashboard")
-                .is_some();
-            child_view.set_dashboard_visible(dashboard_visible);
             child_view.set_has_session_announcements(
                 agent.prompt.slash_controller.has_session_announcements(),
             );

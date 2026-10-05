@@ -799,13 +799,7 @@ impl AgentView {
                             }
                             PaletteCommand::KeyboardShortcuts => {
                                 use crate::views::shortcuts_help;
-                                let mut contexts = active_contexts_for_pane(self.active_pane);
-                                // Same overlay-context push as the Ctrl+.
-                                // path (`handle_agent_action`,
-                                // `ActionId::ShortcutsHelp`).
-                                if self.in_dashboard_overlay {
-                                    contexts.push(crate::actions::When::DashboardOverlay);
-                                }
+                                let contexts = active_contexts_for_pane(self.active_pane);
                                 let entries = shortcuts_help::build_entries(
                                     &contexts,
                                     registry,
@@ -2967,7 +2961,6 @@ mod command_palette_vim_input_tests {
         assert!(action_ids.contains(&crate::actions::ActionId::EditPromptExternal));
         assert!(!action_ids.contains(&crate::actions::ActionId::ToggleTasks));
         assert!(action_ids.contains(&crate::actions::ActionId::ToggleMouseCapture));
-        assert!(!action_ids.contains(&crate::actions::ActionId::OpenDashboard));
     }
 
     #[ignore = "pi-python: grok-specific feature not supported"]

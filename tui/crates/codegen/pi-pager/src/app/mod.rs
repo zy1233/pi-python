@@ -31,7 +31,6 @@ mod dispatch;
 mod display_refresh_startup;
 mod effects;
 pub(crate) mod error_display;
-pub mod roster;
 pub mod session_startup;
 pub(crate) mod session_title_resolve;
 pub mod status_blocks;

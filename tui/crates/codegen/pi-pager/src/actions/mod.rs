@@ -121,27 +121,6 @@ pub enum ActionId {
 
     // Settings
     OpenSettings,
-
-    // Agent Dashboard
-    OpenDashboard,
-    DashboardSelectNext,
-    DashboardSelectPrev,
-    DashboardTogglePin,
-    DashboardBeginRename,
-    DashboardStop,
-    DashboardCycleMode,
-    DashboardToggleGrouping,
-    DashboardReorderUp,
-    DashboardReorderDown,
-    DashboardShortcutsHelp,
-    DashboardExit,
-    DashboardOverlayExit,
-    DashboardOverlayPrev,
-    DashboardOverlayNext,
-    DashboardOverlayStop,
-    DashboardToggleAutoApprove,
-    DashboardOpenLocationPicker,
-    DashboardToggleWorktree,
 }
 /// When an action is available / visible.
 ///
@@ -159,13 +138,6 @@ pub enum When {
     AgentScreen,
     /// Only on the welcome screen.
     WelcomeScreen,
-    /// Only when the Agent Dashboard view is focused.
-    DashboardFocused,
-    /// Only inside the dashboard's session overlay (a dashboard-spawned agent
-    /// rendered fullscreen). Distinguishes the detail-view shortcuts (back to
-    /// dashboard, prev/next session) from the dashboard LIST shortcuts so the
-    /// cheatsheet can dim whichever set isn't applicable to the current view.
-    DashboardOverlay,
 }
 
 impl When {
@@ -177,8 +149,6 @@ impl When {
             When::ScrollbackFocused => "scrollback_focused",
             When::AgentScreen => "agent_screen",
             When::WelcomeScreen => "welcome_screen",
-            When::DashboardFocused => "dashboard_focused",
-            When::DashboardOverlay => "dashboard_overlay",
         }
     }
 }
@@ -192,8 +162,6 @@ pub enum Category {
     ConversationAction,
     Panels,
     Session,
-    /// Agent Dashboard shortcuts.
-    Dashboard,
 }
 
 /// A registered action definition.
@@ -402,11 +370,10 @@ impl ActionRegistry {
     /// bare-letter (or `Shift+letter`) bindings when `vim_mode == false`,
     /// for contexts where those letters double as text-input keys.
     ///
-    /// Applies to [`When::ScrollbackFocused`] and [`When::DashboardFocused`]:
-    /// the scrollback `j`/`k` scroll and the dashboard `j`/`k` row-nav
-    /// only resolve when vim-mode is on. With vim-mode off the letters
+    /// Applies to [`When::ScrollbackFocused`]: the scrollback `j`/`k` scroll
+    /// only resolves when vim-mode is on. With vim-mode off the letters
     /// fall through so the caller can type them into its prompt — the
-    /// dashboard dispatch input and the agent prompt both rely on this.
+    /// agent prompt relies on this.
     ///
     /// Arrow / Tab / Esc / Space / PgUp / PgDn / `?` and all `Ctrl+letter`
     /// shortcuts always resolve — they come in as either the action's
@@ -420,9 +387,9 @@ impl ActionRegistry {
         vim_mode: bool,
     ) -> Option<ActionId> {
         // Contexts where a bare letter is also a typeable input key, so
-        // the vim-off suppression applies. Both surfaces own a text
+        // the vim-off suppression applies: the surface owns a text
         // prompt that `j`/`k` must reach when vim-mode is off.
-        let letter_gated = matches!(context, When::ScrollbackFocused | When::DashboardFocused);
+        let letter_gated = matches!(context, When::ScrollbackFocused);
         for def in &self.actions {
             if def.context != context {
                 continue;
@@ -433,8 +400,8 @@ impl ActionRegistry {
                 return Some(def.id);
             }
             // Alt keys: when vim_mode is off, also suppress any alt key
-            // that is itself a bare letter (e.g. the `j`/`k` alts on the
-            // dashboard's SelectNext / SelectPrev). Non-letter alts
+            // that is itself a bare letter (e.g. the `j`/`k` alts on
+            // SelectNext / SelectPrev). Non-letter alts
             // (arrows, Tab, Space) always match.
             for alt in &def.alt_keys {
                 if !vim_mode && letter_gated && alt.is_letter_or_shift_letter() {
@@ -563,7 +530,6 @@ mod tests {
             shortcut_used_action_label(ActionId::OpenExtensions),
             Some("open_extensions")
         );
-        assert_eq!(shortcut_used_action_label(ActionId::OpenDashboard), None);
         assert_eq!(shortcut_used_action_label(ActionId::SendPrompt), None);
         assert_eq!(When::PromptFocused.telemetry_name(), "prompt_focused");
         assert_eq!(When::AgentScreen.telemetry_name(), "agent_screen");
@@ -707,17 +673,16 @@ mod tests {
     }
 
     #[test]
-    fn minimal_registry_omits_unsupported_surfaces_and_dashboard_entry() {
+    fn minimal_registry_omits_unsupported_surfaces() {
         let minimal = ActionRegistry::defaults_for(crate::app::ScreenMode::Minimal);
-        assert!(minimal.find(ActionId::OpenDashboard).is_none());
         assert!(minimal.find(ActionId::FocusScrollback).is_none());
         assert!(minimal.find(ActionId::ToggleMouseCapture).is_none());
-        assert!(minimal.all().iter().all(|def| {
-            !matches!(
-                def.context,
-                When::ScrollbackFocused | When::DashboardFocused | When::DashboardOverlay
-            )
-        }));
+        assert!(
+            minimal
+                .all()
+                .iter()
+                .all(|def| !matches!(def.context, When::ScrollbackFocused))
+        );
         let minimal_with_config =
             ActionRegistry::defaults_with_config_for(crate::app::ScreenMode::Minimal, true);
         assert!(
@@ -744,42 +709,22 @@ mod tests {
             Some(When::Always)
         );
 
-        let ctrl_backslash = KeyEvent::new(KeyCode::Char('\\'), KeyModifiers::CONTROL);
-        assert_eq!(minimal.lookup(&ctrl_backslash, When::Always), None);
-
         for mode in [
             crate::app::ScreenMode::Fullscreen,
             crate::app::ScreenMode::Inline,
         ] {
             let registry = ActionRegistry::defaults_for(mode);
-            assert!(registry.find(ActionId::OpenDashboard).is_some());
             assert_eq!(
                 registry
                     .find(ActionId::FocusScrollback)
                     .map(|def| def.context),
                 Some(When::PromptFocused)
             );
-            assert_eq!(
-                registry.lookup(&ctrl_backslash, When::Always),
-                Some(ActionId::OpenDashboard)
-            );
             assert!(
                 registry
                     .all()
                     .iter()
                     .any(|def| def.context == When::ScrollbackFocused)
-            );
-            assert!(
-                registry
-                    .all()
-                    .iter()
-                    .any(|def| def.context == When::DashboardFocused)
-            );
-            assert!(
-                registry
-                    .all()
-                    .iter()
-                    .any(|def| def.context == When::DashboardOverlay)
             );
         }
     }
@@ -810,13 +755,12 @@ mod tests {
         ] {
             assert!(registry.find(ActionId::EditPromptExternal).is_some());
             assert!(registry.find(ActionId::ToggleTasks).is_none());
-            assert!(registry.find(ActionId::OpenDashboard).is_none());
-            assert!(registry.all().iter().all(|def| {
-                !matches!(
-                    def.context,
-                    When::ScrollbackFocused | When::DashboardFocused | When::DashboardOverlay
-                )
-            }));
+            assert!(
+                registry
+                    .all()
+                    .iter()
+                    .all(|def| !matches!(def.context, When::ScrollbackFocused))
+            );
         }
     }
 
@@ -946,8 +890,8 @@ mod tests {
         );
         assert_eq!(registry.lookup(&ctrl_shift_m, When::Always), None);
         // Voice capture is bound to BOTH Ctrl+Space and F8, and is global
-        // (`When::Always`) so it resolves on the agent screen and the dashboard
-        // alike (distinct from F4/Alt+M model picker / Ctrl+M multiline). It is not
+        // (`When::Always`) so it resolves on the agent screen
+        // (distinct from F4/Alt+M model picker / Ctrl+M multiline). It is not
         // agent-scoped, so an exact AgentScreen lookup misses.
         assert_eq!(
             registry.lookup(&ctrl_space, When::Always),
@@ -965,87 +909,6 @@ mod tests {
     fn exit_session_is_command_only() {
         let registry = ActionRegistry::defaults();
         assert!(registry.find(ActionId::ExitSession).is_none());
-    }
-
-    fn binds_ctrl_4(def: &ActionDef) -> bool {
-        let ctrl_4 = key!('4', CONTROL);
-        def.default_key == ctrl_4 || def.alt_keys.contains(&ctrl_4)
-    }
-
-    // Host-default registry: at most one of these two owns Ctrl+4.
-    #[test]
-    fn open_dashboard_and_toggle_queue_do_not_both_bind_ctrl_4() {
-        let registry = ActionRegistry::defaults();
-        let dashboard = registry.find(ActionId::OpenDashboard).unwrap();
-        let queue = registry.find(ActionId::ToggleQueue).unwrap();
-        assert!(!(binds_ctrl_4(dashboard) && binds_ctrl_4(queue)));
-        assert_eq!(dashboard.default_key, key!('\\', CONTROL));
-        // Exactly one of the two binds Ctrl+4 under host defaults (legacy alt XOR queue primary).
-        assert!(
-            binds_ctrl_4(dashboard) ^ binds_ctrl_4(queue),
-            "exactly one of OpenDashboard/ToggleQueue must bind Ctrl+4 on this host"
-        );
-    }
-
-    // Crossterm maps C0 FS (physical Ctrl+\) to Char('4')+CONTROL without KKP.
-    #[test]
-    fn open_dashboard_accepts_legacy_ctrl_4_encoding() {
-        let mut actions = default_actions(crate::app::ScreenMode::Fullscreen, false);
-        for def in actions.iter_mut() {
-            if def.id == ActionId::OpenDashboard {
-                def.alt_keys = vec![key!('4', CONTROL)];
-            }
-            if def.id == ActionId::ToggleQueue {
-                def.default_key = key!(';', CONTROL);
-                def.alt_keys = vec![key!('\'', CONTROL)];
-            }
-        }
-        let registry = ActionRegistry::new(actions);
-        let ctrl_backslash = KeyEvent::new(KeyCode::Char('\\'), KeyModifiers::CONTROL);
-        let ctrl_4 = KeyEvent::new(KeyCode::Char('4'), KeyModifiers::CONTROL);
-        let ctrl_semicolon = KeyEvent::new(KeyCode::Char(';'), KeyModifiers::CONTROL);
-
-        assert_eq!(
-            registry.lookup(&ctrl_backslash, When::Always),
-            Some(ActionId::OpenDashboard)
-        );
-        assert_eq!(
-            registry.lookup(&ctrl_4, When::Always),
-            Some(ActionId::OpenDashboard)
-        );
-        assert_eq!(registry.lookup(&ctrl_4, When::AgentScreen), None);
-        assert_eq!(
-            registry.lookup(&ctrl_semicolon, When::AgentScreen),
-            Some(ActionId::ToggleQueue)
-        );
-    }
-
-    // Mac-VS pin: ToggleQueue primary Ctrl+4; OpenDashboard keeps Ctrl+\ only.
-    #[test]
-    fn mac_vscode_ctrl_4_stays_toggle_queue_not_open_dashboard() {
-        let mut actions = default_actions(crate::app::ScreenMode::Fullscreen, false);
-        for def in actions.iter_mut() {
-            if def.id == ActionId::ToggleQueue {
-                def.default_key = key!('4', CONTROL);
-                def.alt_keys = vec![key!(';', CONTROL), key!('\'', CONTROL)];
-            }
-            if def.id == ActionId::OpenDashboard {
-                def.alt_keys = vec![];
-            }
-        }
-        let registry = ActionRegistry::new(actions);
-        let ctrl_4 = KeyEvent::new(KeyCode::Char('4'), KeyModifiers::CONTROL);
-        let ctrl_backslash = KeyEvent::new(KeyCode::Char('\\'), KeyModifiers::CONTROL);
-
-        assert_eq!(
-            registry.lookup(&ctrl_4, When::AgentScreen),
-            Some(ActionId::ToggleQueue)
-        );
-        assert_eq!(registry.lookup(&ctrl_4, When::Always), None);
-        assert_eq!(
-            registry.lookup(&ctrl_backslash, When::Always),
-            Some(ActionId::OpenDashboard)
-        );
     }
 
     #[test]

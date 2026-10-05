@@ -1084,31 +1084,12 @@ pub(crate) fn apply_turn_start_shim(
     page_flip_entry
 }
 
-pub(crate) fn note_peek_page_flip(
-    app: &mut AppView,
-    agent_id: AgentId,
-    page_flip_entry: Option<EntryId>,
-) {
-    let Some(entry_id) = page_flip_entry else {
-        return;
+/// Drain the next queued prompt for `agent_id`, returning its effects.
+pub(crate) fn drain_queue_for_agent(app: &mut AppView, agent_id: AgentId) -> Vec<Effect> {
+    let Some(agent) = app.agents.get_mut(&agent_id) else {
+        return vec![];
     };
-    let Some(mut dash) = app.dashboard.take() else {
-        return;
-    };
-    dash.note_page_flip_for_lease(agent_id, entry_id, &app.agents);
-    app.dashboard = Some(dash);
-}
-
-/// Drain the next queued prompt and, when that page-flips under a lease, note it.
-pub(crate) fn maybe_drain_queue_and_note_peek(app: &mut AppView, agent_id: AgentId) -> Vec<Effect> {
-    let drain = {
-        let Some(agent) = app.agents.get_mut(&agent_id) else {
-            return vec![];
-        };
-        maybe_drain_queue(agent)
-    };
-    note_peek_page_flip(app, agent_id, drain.page_flip_entry);
-    drain.effects
+    maybe_drain_queue(agent).effects
 }
 
 /// Try to drain the next queued prompt (triggered after editing completes).
@@ -1116,7 +1097,7 @@ pub(super) fn dispatch_drain_queue(app: &mut AppView) -> Vec<Effect> {
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };
-    maybe_drain_queue_and_note_peek(app, id)
+    drain_queue_for_agent(app, id)
 }
 
 /// `Action::QueueInterjectShared` arm: map the (possibly edited) queue
@@ -1173,9 +1154,9 @@ pub(super) fn dispatch_run_edited_queued_command(
     server: Option<crate::app::actions::SharedQueueTarget>,
     text: String,
 ) -> Vec<Effect> {
-    // The send half is bound to the active view (the dashboard popup forwards keys to an attached
-    // agent without switching it), so resolve the removal target the same way. The edit exit has
-    // already taken the composer text, so a silent bail would drop the command without a trace.
+    // The send half is bound to the active view, so resolve the removal target the same way. The
+    // edit exit has already taken the composer text, so a silent bail would drop the command
+    // without a trace.
     let ActiveView::Agent(agent_id) = app.active_view else {
         app.show_toast("Open the session to run this command");
         return vec![];
@@ -1256,7 +1237,7 @@ pub(super) fn dispatch_run_edited_queued_command(
     }
     // The edit lock is released either way, so a command that starts no turn (or a refusal that
     // keeps the row) must not strand the queue, exactly as the plain save's `DrainQueue` did.
-    effects.extend(maybe_drain_queue_and_note_peek(app, agent_id));
+    effects.extend(drain_queue_for_agent(app, agent_id));
     effects
 }
 
@@ -1523,26 +1504,20 @@ mod tests {
         );
     }
 
-    /// The dashboard popup forwards keys to an attached agent without making it the active view.
-    /// The send half would no-op there, so nothing runs, the row keeps its text, and the toast
-    /// lands on the surface the user is actually looking at.
+    /// With no agent view active the send half would no-op, so nothing runs and the row keeps
+    /// its text.
     #[test]
     fn run_edited_queued_command_off_active_view_keeps_row() {
         let mut app = test_app_with_agent();
         let id = AgentId(0);
         enqueue_local(&mut app, id, "what is the default");
         let local_id = app.agents[&id].session.pending_prompts[0].id;
-        app.active_view = ActiveView::AgentDashboard;
-        app.dashboard = Some(crate::views::dashboard::DashboardState::default());
+        app.active_view = ActiveView::Welcome;
 
         let effects = run_edited_queued_command(&mut app, local_id, None, "/btw why");
 
         assert!(effects.is_empty());
         assert_eq!(app.agents[&id].session.queue_len(), 1);
-        assert_eq!(
-            app.dashboard.as_ref().unwrap().error_toast.as_deref(),
-            Some("Open the session to run this command")
-        );
     }
 
     /// A command the current screen mode refuses is a pre-execution refusal: the user gets the hint

@@ -313,7 +313,7 @@ Actions available from any screen.
 | Key | Alt Key | Action | Confirmation |
 |-----|---------|--------|-------------|
 | `Ctrl+N` | | Create a new session (optionally in a git worktree) | Yes (double-press within 1000ms) |
-| `Ctrl+\` | | Open or toggle the [Agent Dashboard](23-dashboard.md) | No |
+| `Ctrl+\` | | Open or toggle the Agent Dashboard | No |
 | `Ctrl+Q` | `Ctrl+D` | Quit the application | Yes (double-press within 1000ms) |
 
 **VS Code family terminal** (VS Code, Cursor, Windsurf, Zed integrated terminals): `Ctrl+Q` is captured by the host, so Grok makes **`Ctrl+D` the sole quit key** (`Ctrl+Q` is not bound). Half-page-down is rebound to bare **`Shift+D`**. Mid-turn interject uses **`Ctrl+L`** (no alternates) because `Ctrl+Enter` / `Ctrl+I` do not reliably reach the PTY; extensions are opened via `/plugins` instead of `Ctrl+L`.
@@ -343,7 +343,7 @@ Bindings that only fire on the welcome screen (before any agent session is open)
 
 ## Agent Dashboard
 
-Bindings while the [Agent Dashboard](23-dashboard.md) is focused (`Ctrl+\` or `/dashboard`).
+Bindings while the Agent Dashboard is focused (`Ctrl+\` or `/dashboard`).
 
 | Key | Action |
 |-----|--------|
@@ -361,7 +361,7 @@ Bindings while the [Agent Dashboard](23-dashboard.md) is focused (`Ctrl+\` or `/
 | `Ctrl+\` | Exit the dashboard (or return from an attached agent) |
 | `Ctrl+.` (alt: `?`) | Shortcuts cheatsheet |
 
-Details (peek vs dispatch, search prefixes, persistence): [Agent Dashboard](23-dashboard.md).
+Details (peek vs dispatch, search prefixes, persistence): Agent Dashboard.
 
 ---
 

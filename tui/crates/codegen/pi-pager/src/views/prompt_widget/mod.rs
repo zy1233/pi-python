@@ -1193,15 +1193,6 @@ impl PromptWidget {
         self.refresh_slash(models);
     }
 
-    /// Suppress session-scoped slash commands (`/compact`, `/fork`,
-    /// `/rewind`, …) from this prompt's completion.
-    ///
-    /// Used by the agent dashboard's dispatch input, which is
-    /// session-less and should only offer pager-global commands.
-    pub fn hide_session_scoped_commands(&mut self) {
-        self.slash_controller.set_hide_session_scoped(true);
-    }
-
     /// Record the process's effective screen mode so slash visibility gates
     /// (`/minimal`, `/fullscreen`) see it. Injected wherever prompts are
     /// created — the mode is fixed for the process lifetime.
@@ -1210,7 +1201,7 @@ impl PromptWidget {
     }
 
     /// Adopt the shared slash MRU store so this prompt's completion shares
-    /// command recency with other agent prompts and the dashboard dispatch.
+    /// command recency with other agent prompts.
     /// Injected by `AppView`, which owns the single process store.
     pub(crate) fn adopt_slash_mru(
         &mut self,

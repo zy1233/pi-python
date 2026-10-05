@@ -1890,7 +1890,7 @@ fn feedback_trace_card_dropped_with_view_cleans_staged_temp_files() {
 #[test]
 fn send_feedback_without_agent_view_cleans_staged_temp_files() {
     let mut app = test_app_with_agent();
-    app.active_view = crate::app::app_view::ActiveView::AgentDashboard;
+    app.active_view = crate::app::app_view::ActiveView::Welcome;
 
     let dir = tempfile::tempdir().unwrap();
     let staged = dir.path().join("staged.png");

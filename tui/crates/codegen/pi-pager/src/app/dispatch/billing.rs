@@ -1,6 +1,6 @@
 //! Subscription tier checks, credit-limit upsells, and auto-topup handling.
 
-use super::queue::{maybe_drain_queue, note_peek_page_flip};
+use super::queue::maybe_drain_queue;
 use crate::app::actions::Effect;
 use crate::app::agent::AgentId;
 use crate::app::agent_view::AgentView;
@@ -543,7 +543,6 @@ pub(super) fn handle_credit_limit_recheck_complete(
         silent: true,
         nonce: Default::default(),
     });
-    note_peek_page_flip(app, agent_id, drain.page_flip_entry);
     drain.effects
 }
 

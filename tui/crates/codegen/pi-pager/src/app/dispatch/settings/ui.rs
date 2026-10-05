@@ -487,11 +487,8 @@ pub(in crate::app::dispatch) fn dispatch_toggle_compact_mode(app: &mut AppView) 
 /// the `dispatch_toggle_multiline` / `dispatch_toggle_compact_mode` /
 /// `dispatch_toggle_timestamps` pattern.
 pub(in crate::app::dispatch) fn dispatch_toggle_vim_mode(app: &mut AppView) -> Vec<Effect> {
-    // Toggle the EFFECTIVE value (the pager cache) so `/vim-mode` works
-    // from ANY view — including the session-less dashboard. Previously
-    // this early-returned unless an agent was active, so running
-    // `/vim-mode` on the dashboard was a silent no-op and the overview's
-    // j/k navigation (which is gated on vim-mode) never turned on.
+    // Toggle the EFFECTIVE value (the pager cache) so the toggle works
+    // from ANY view, not only while an agent is active.
     let prev = crate::appearance::cache::load_vim_mode();
     let enabled = !prev;
     // Propagate to every agent AND every nested subagent view (so
@@ -512,20 +509,6 @@ pub(in crate::app::dispatch) fn dispatch_toggle_vim_mode(app: &mut AppView) -> V
                 agent
                     .scrollback
                     .push_block(RenderBlock::system(msg.to_string()));
-            }
-        }
-        ActiveView::AgentDashboard => {
-            // On the dashboard, j/k navigate the overview only when it
-            // holds focus. Turning vim ON focuses the overview so the
-            // user can navigate immediately (mirroring the agent view's
-            // "normal mode"); turning it OFF returns focus to the input.
-            // No agents → nothing to navigate, so stay on the input. The
-            // focus shift (overview highlighted, input dimmed, footer
-            // flips to nav hints) is the feedback — a toast would route
-            // to the dashboard's red error slot.
-            let has_agents = !app.agents.is_empty();
-            if let Some(d) = app.dashboard.as_mut() {
-                d.list_focused = enabled && has_agents;
             }
         }
         _ => {

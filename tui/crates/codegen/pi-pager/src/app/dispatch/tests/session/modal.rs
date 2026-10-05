@@ -1,5 +1,5 @@
 //! Tests for session-related modals (extensions, /new worktree question)
-//! and session close helpers shared with the dashboard.
+//! and session close helpers.
 
 use super::*;
 
@@ -187,7 +187,7 @@ fn dispatch_new_session_skips_modal_in_non_git_repo() {
     );
 }
 
-// ── Session close (shared with dashboard) ─────────────────────────────
+// ── Session close ─────────────────────────────
 
 #[test]
 fn close_inactive_agent_drops_it() {

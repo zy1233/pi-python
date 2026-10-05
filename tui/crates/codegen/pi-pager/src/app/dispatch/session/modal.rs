@@ -1,7 +1,7 @@
-//! Session rename / close helpers (shared with the dashboard).
+//! Session rename / close helpers.
 //!
-//! The `/sessions` picker modal was removed; rename-via-slash and
-//! dashboard close still use these dispatchers.
+//! The `/sessions` picker modal was removed; the remaining entry points
+//! (session close, rename-by-title) go through these dispatchers.
 use crate::app::actions::Effect;
 use crate::app::agent::AgentId;
 use crate::app::app_view::{ActiveView, AppView};

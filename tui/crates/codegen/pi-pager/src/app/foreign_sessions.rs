@@ -654,7 +654,7 @@ mod tests {
             app.begin_foreign_resume_detection().is_none(),
             "one launch must schedule at most one detection"
         );
-        app.active_view = crate::app::app_view::ActiveView::AgentDashboard;
+        app.active_view = crate::app::app_view::ActiveView::Agent(crate::app::agent::AgentId(0));
         app.reconcile_foreign_resume_launch();
         app.active_view = crate::app::app_view::ActiveView::Welcome;
         assert!(!app.accept_foreign_resume_canonical_cwd(

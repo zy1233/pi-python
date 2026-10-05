@@ -1,6 +1,5 @@
 //! Active-agent lookup and view-context helpers shared across dispatch modules.
 
-use super::dashboard_telemetry::log_dashboard_opened;
 use crate::app::agent::AgentId;
 use crate::app::agent_view::AgentView;
 use crate::app::app_view::{ActiveView, AppView, WelcomeAnnouncementState};
@@ -174,10 +173,6 @@ pub(super) fn restore_auth_return_view(app: &mut AppView, return_view: ActiveVie
         ActiveView::Agent(id) if app.agents.contains_key(&id) => {
             app.active_view = ActiveView::Agent(id)
         }
-        ActiveView::AgentDashboard => {
-            app.active_view = ActiveView::AgentDashboard;
-            log_dashboard_opened(app);
-        }
         _ => show_welcome(app),
     }
 }
@@ -193,18 +188,13 @@ pub(crate) enum SwitchCause {
     /// Triggered by `/resume` (resuming a prior session) and the
     /// welcome-screen session picker.
     Load,
-    /// Triggered by the agent picker (dashboard attach / switch).
+    /// Triggered by the agent picker.
     Picker,
-    // `SwitchCause::Dashboard` was added
-    // for the dashboard attach path but the earlier popup overlay
-    // never reaches `switch_to_agent`, so the variant was dead. YAGNI —
-    // any future caller can re-add it. The dashboard's attach path
-    // sets `DashboardState::attached_agent` directly.
 }
 
 /// Surface a launch-blocked `--yolo` once on the first agent view (the TUI owns
-/// the terminal, so stderr is gone); idempotent via `.take()`. Dashboard flows
-/// that bypass [`switch_to_agent`] call it directly.
+/// the terminal, so stderr is gone); idempotent via `.take()`. Flows that
+/// bypass [`switch_to_agent`] call it directly.
 pub(super) fn surface_yolo_launch_block_notice(app: &mut AppView, target: AgentId) {
     if let Some(warning) = app.yolo_launch_block_notice.take()
         && let Some(agent) = app.agents.get_mut(&target)
@@ -263,14 +253,8 @@ pub(super) fn sync_active_permission_mode_mirror(app: &mut AppView) {
 /// Switch the active agent — the primary funnel for assigning `ActiveView::Agent`
 /// (new, resume, picker, fork); also fires [`surface_yolo_launch_block_notice`].
 ///
-/// For [`SwitchCause::New`] and [`SwitchCause::Fork`], also follows dashboard
-/// overlay attach when it named the prior top-level agent (Left / Esc / Ctrl+\
-/// back-out only works while attach matches the active agent). Load and Picker
-/// keep their own attach rules. Uses the top-level `ActiveView` id, never a
-/// subagent placeholder from [`get_active_agent`].
-///
-/// No-op if `target` is unknown or already active. Dashboard-first flows that
-/// assign `Agent` directly must call the notice themselves.
+/// No-op if `target` is unknown or already active. Flows that assign `Agent`
+/// directly must call the notice themselves.
 pub(crate) fn switch_to_agent(app: &mut AppView, target: AgentId, cause: SwitchCause) {
     // Structural backstop for the auth + folder-trust session gate. This is the
     // single funnel every FRESH-agent creator routes through (New/Load/Fork —
@@ -281,8 +265,7 @@ pub(crate) fn switch_to_agent(app: &mut AppView, target: AgentId, cause: SwitchC
     // deferring chokepoints (`dispatch_new_session`/`_worktree_session`/
     // `_load_session_inner`) stash+return BEFORE reaching here, so this never
     // fires on the reachable gated paths.
-    // `cause` is also used for New/Fork overlay follow (and remains live for
-    // the debug_assert even when that assert compiles out in release).
+    // `cause` is only consulted by this assert (compiled out in release).
     debug_assert!(
         matches!(cause, SwitchCause::Picker) || app.session_startup_allowed(),
         "session creation via {cause:?} requires the startup gate open (auth + folder trust)"
@@ -293,11 +276,6 @@ pub(crate) fn switch_to_agent(app: &mut AppView, target: AgentId, cause: SwitchC
     if matches!(app.active_view, ActiveView::Agent(current) if current == target) {
         return;
     }
-    // Capture before mutating active_view (subagent views are not top-level ids).
-    let previous_top_level = match app.active_view {
-        ActiveView::Agent(id) => Some(id),
-        _ => None,
-    };
     app.active_view = ActiveView::Agent(target);
     // Re-anchor the global permission-mode mirror to the now-active agent so the
     // cycle's `sync_active_auto_flag` (which derives from the global) can't copy a
@@ -308,13 +286,6 @@ pub(crate) fn switch_to_agent(app: &mut AppView, target: AgentId, cause: SwitchC
     // registry.
     app.sync_permission_mode_slash_gate();
     surface_yolo_launch_block_notice(app, target);
-
-    if matches!(cause, SwitchCause::New | SwitchCause::Fork)
-        && let Some(previous) = previous_top_level
-        && let Some(d) = app.dashboard.as_mut()
-    {
-        d.repoint_attach_if_on(previous, target);
-    }
 }
 
 pub(super) fn find_agent_id_by_session_id(

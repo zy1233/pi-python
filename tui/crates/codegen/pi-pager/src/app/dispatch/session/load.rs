@@ -18,7 +18,7 @@ use crate::app::dispatch::ctx::{
 };
 use crate::app::dispatch::modes::inherit_auto_mode;
 use crate::app::dispatch::prompt::{defer_to_open_reload_window, supersede_open_reload_window};
-use crate::app::dispatch::queue::{maybe_drain_queue, note_peek_page_flip};
+use crate::app::dispatch::queue::maybe_drain_queue;
 use crate::app::dispatch::router::dispatch;
 use crate::app::dispatch::status::notify_session_ready;
 use crate::app::dispatch::transcript::extensions_modal_tab_fetches;
@@ -77,16 +77,11 @@ pub(in crate::app::dispatch) fn clear_stale_session_id(
 ///   vs Build still differs when sticky `--chat` is off.
 /// - Eager `session_id` + leftover load placeholder after `SessionLoadFailed`
 ///   is not "open" — reissue load instead of focusing.
-/// - Overlay: retarget when on the dashboard list, already in overlay (attached
-///   matches visible), or attached already points at the agent we will show
-///   (so switch activates overlay with the correct `focus_row`).
 pub(in crate::app::dispatch) fn focus_if_session_already_open(
     app: &mut AppView,
     session_id: &str,
     chat_kind: bool,
 ) -> Option<AgentId> {
-    use crate::app::app_view::ActiveView;
-    use crate::views::dashboard::DashboardRowId;
     let expected_kind = chat_kind || app.chat_mode;
     let existing_id = app.agents.iter().find_map(|(id, a)| {
         let sid_ok = a
@@ -104,17 +99,6 @@ pub(in crate::app::dispatch) fn focus_if_session_already_open(
     })?;
     if let Some(agent) = app.agents.get_mut(&existing_id) {
         agent.close_subagent_fullscreen();
-    }
-    let retarget_overlay = match app.active_view {
-        ActiveView::AgentDashboard => true,
-        ActiveView::Agent(visible) => app.dashboard.as_ref().is_some_and(|d| {
-            d.attached_agent == Some(visible) || d.attached_agent == Some(existing_id)
-        }),
-        _ => false,
-    };
-    if retarget_overlay && let Some(d) = app.dashboard.as_mut() {
-        d.focus_row(DashboardRowId::TopLevel(existing_id));
-        d.attached_agent = Some(existing_id);
     }
     switch_to_agent(app, existing_id, SwitchCause::Load);
     Some(existing_id)
@@ -1120,7 +1104,7 @@ pub(in crate::app::dispatch) fn handle_session_loaded(
                 sid,
                 &info.parent_sid,
                 info.worktree,
-                crate::views::dashboard::session_switch_hint_command(app.screen_mode.is_minimal()),
+                Some("/resume"),
             );
             agent.scrollback.push_block(RenderBlock::system(banner));
         }
@@ -1142,7 +1126,6 @@ pub(in crate::app::dispatch) fn handle_session_loaded(
             agent.session.enqueue_prompt_front(directive);
         }
         let drain = maybe_drain_queue(agent);
-        let page_flip_entry = drain.page_flip_entry;
         effects.extend(drain.effects);
         let cwd = agent.session.cwd.clone();
         effects.push(Effect::HydrateSessionMetaFromDisk {
@@ -1199,7 +1182,6 @@ pub(in crate::app::dispatch) fn handle_session_loaded(
         });
         notify_session_ready(&app.notification_service, agent);
         crate::memory_release::release_retained_memory("session-load-replay");
-        note_peek_page_flip(app, agent_id, page_flip_entry);
         return effects;
     }
     vec![]

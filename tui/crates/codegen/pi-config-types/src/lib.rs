@@ -1083,8 +1083,6 @@ pub struct RemoteSettings {
     /// `Some(true)` enables it; `None`/`Some(false)` (the default) keep it off.
     #[serde(default)]
     pub workspace_command_enabled: Option<bool>,
-    #[serde(default)]
-    pub workspace_dashboard_enabled: Option<bool>,
     /// Soft default for `keep_text_selection` (`"flash"` / `"hold"` / `"word_select"`), from
     /// `grok_build_settings.keep_text_selection_default`. Applied only when the user has set no
     /// local text-selection preference; an explicit local `keep_text_selection` always wins. An
@@ -1944,17 +1942,6 @@ mod tests {
         let json = r#"{}"#;
         let s: RemoteSettings = serde_json::from_str(json).unwrap();
         assert_eq!(s.workspace_command_enabled, None);
-    }
-    #[test]
-    fn remote_settings_workspace_dashboard_enabled_parses_all_states() {
-        let on: RemoteSettings =
-            serde_json::from_str(r#"{"workspace_dashboard_enabled": true}"#).unwrap();
-        assert_eq!(on.workspace_dashboard_enabled, Some(true));
-        let off: RemoteSettings =
-            serde_json::from_str(r#"{"workspace_dashboard_enabled": false}"#).unwrap();
-        assert_eq!(off.workspace_dashboard_enabled, Some(false));
-        let absent: RemoteSettings = serde_json::from_str("{}").unwrap();
-        assert_eq!(absent.workspace_dashboard_enabled, None);
     }
     #[test]
     fn remote_settings_keep_text_selection_default_round_trips() {

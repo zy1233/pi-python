@@ -1714,7 +1714,7 @@ pub struct SuperGrokUpsellClicked {
 
 /// Which surface a promo announcement's upgrade CTA was activated from.
 /// Modeled on [`SuperGrokUpsell`]; lets the funnel attribute the click to the
-/// welcome hero vs the in-session header vs the banner vs the dashboard, and
+/// welcome hero vs the in-session header vs the banner, and
 /// distinguish keyboard (`Ctrl+O`) activations from pointer/OSC 8 ones.
 /// Ord/Eq exist for the pager's per-(announcement, surface) impression latch.
 #[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -1723,7 +1723,6 @@ pub enum AnnouncementCtaSurface {
     Banner,
     Welcome,
     Header,
-    Dashboard,
     Keyboard,
 }
 
@@ -1970,12 +1969,6 @@ pub struct NotificationEmitted {
     pub was_focused: bool,
 }
 
-#[derive(Serialize)]
-pub struct DashboardOpened {
-    pub agents: usize,
-    pub subagents: usize,
-}
-
 /// User pressed an allowlisted registry shortcut.
 ///
 /// **Product contract (authoritative):** intent-only telemetry for the
@@ -1999,21 +1992,6 @@ pub struct ShortcutUsed {
     pub action: String,
     /// Surface label (`prompt_focused`, `agent_screen`, `queue`, …).
     pub context: String,
-}
-
-#[derive(Serialize)]
-pub struct DashboardClosed {
-    pub agents: usize,
-}
-
-#[derive(Serialize)]
-pub struct DashboardAgentAttached {
-    pub kind: &'static str,
-}
-
-#[derive(Serialize)]
-pub struct DashboardAgentLaunched {
-    pub source: &'static str,
 }
 
 // ---------------------------------------------------------------------------
@@ -2492,10 +2470,6 @@ telemetry_event!(ClipboardImagePaste, "clipboard_image_paste");
 telemetry_event!(PasteKeyEmptyHostClipboard, "paste_key_empty_host_clipboard");
 telemetry_event!(ClipboardCopy, "clipboard_copy");
 telemetry_event!(NotificationEmitted, "notification_emitted");
-telemetry_event!(DashboardOpened, "dashboard_opened");
-telemetry_event!(DashboardClosed, "dashboard_closed");
-telemetry_event!(DashboardAgentAttached, "dashboard_agent_attached");
-telemetry_event!(DashboardAgentLaunched, "dashboard_agent_launched");
 telemetry_event!(ShortcutUsed, "shortcut_used");
 telemetry_event!(
     RateLimitHit,

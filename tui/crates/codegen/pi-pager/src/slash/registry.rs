@@ -185,7 +185,6 @@ impl CommandRegistry {
         let sources = vec![CommandSource::Builtin; n];
         // Fail-closed until the matching `set_*_visible` call reveals them.
         let mut hidden = HashSet::new();
-        hidden.insert("dashboard".to_string());
         hidden.insert("recap".to_string());
         // Voice is fail-closed in the registry until `set_voice_visible` after
         // the runtime gate resolves (GA default on; remote kill switch may hide).
@@ -239,7 +238,7 @@ impl CommandRegistry {
     /// typed invocation, ignoring the menu-only gate (`menu_hidden`).
     ///
     /// Still returns `None` for hard-hidden commands (feature gates like
-    /// `/voice` / `/dashboard`, or `/auto` when the auto permission-mode
+    /// `/voice` / `/recap`, or `/auto` when the auto permission-mode
     /// feature is unavailable — those must stay fail-closed), restricted
     /// commands, and commands whose `required_tools()` are not all in the
     /// advertised toolset.
@@ -435,15 +434,6 @@ impl CommandRegistry {
             self.menu_hidden.insert("share".to_string());
         }
         self.rebuild_triggers();
-    }
-
-    /// Show or hide the `/dashboard` command (feature-flag gating).
-    ///
-    /// The command is hidden by default (see [`Self::new`]) and revealed here
-    /// when the dashboard feature flag (`dashboard_enabled()`) is on. When
-    /// hidden it won't appear in the dropdown or be executable.
-    pub fn set_dashboard_visible(&mut self, visible: bool) {
-        self.set_command_visible("dashboard", visible);
     }
 
     /// Show or hide the `/recap` command (shell `sessionRecap` gate).
@@ -989,44 +979,6 @@ mod tests {
         assert!(registry.get("flush").is_none());
     }
 
-    #[test]
-    fn dashboard_command_hidden_by_default_and_toggleable() {
-        let dashboard: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
-            name: "dashboard",
-            aliases: &[],
-        });
-        let other: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
-            name: "exit",
-            aliases: &[],
-        });
-        let mut registry = CommandRegistry::new(vec![dashboard, other]);
-
-        // Fail-closed: hidden by default (until the feature flag reveals it).
-        assert!(registry.get("dashboard").is_none());
-        assert!(
-            !registry
-                .triggers()
-                .iter()
-                .any(|t| t.canonical == "dashboard")
-        );
-        // Unrelated commands are unaffected.
-        assert!(registry.get("exit").is_some());
-
-        // Enabling the feature reveals it.
-        registry.set_dashboard_visible(true);
-        assert!(registry.get("dashboard").is_some());
-        assert!(
-            registry
-                .triggers()
-                .iter()
-                .any(|t| t.canonical == "dashboard")
-        );
-
-        // Hiding again removes it.
-        registry.set_dashboard_visible(false);
-        assert!(registry.get("dashboard").is_none());
-    }
-
     // ── Builtin/skill name collisions ───────────────────────────────
     //
     fn login_builtin() -> Arc<dyn SlashCommand> {
@@ -1359,9 +1311,9 @@ mod tests {
     /// unresolvable for dispatch, exactly like `get()`.
     #[test]
     fn get_for_dispatch_respects_hard_gates() {
-        // Hard-hidden by name (e.g. /dashboard default).
-        let dashboard: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
-            name: "dashboard",
+        // Hard-hidden by name (e.g. /recap default).
+        let recap: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
+            name: "recap",
             aliases: &[],
         });
         // Tier-restricted.
@@ -1374,12 +1326,11 @@ mod tests {
             name: "loop",
             required: &["scheduler_create"],
         });
-        let mut reg = CommandRegistry::new(vec![dashboard, usage, gated]);
-        reg.set_dashboard_visible(false);
+        let mut reg = CommandRegistry::new(vec![recap, usage, gated]);
         reg.set_restricted_commands(&["usage".to_string()]);
 
         assert!(
-            reg.get_for_dispatch("dashboard").is_none(),
+            reg.get_for_dispatch("recap").is_none(),
             "hard-hidden stays hard"
         );
         assert!(

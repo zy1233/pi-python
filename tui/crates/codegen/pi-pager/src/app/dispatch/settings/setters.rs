@@ -7,29 +7,9 @@ use agent_client_protocol as acp;
 
 /// Set multiline input mode — swap Enter and Shift+Enter behavior.
 ///
-/// PAGER-OWNED: ephemeral, no `Effect::PersistSetting`. On the agent
-/// view this is per-session (`AgentView::multiline_mode`); on the
-/// dashboard it lives on `DashboardState::multiline_mode`. Idempotent.
+/// PAGER-OWNED: ephemeral, no `Effect::PersistSetting`. Per-session
+/// (`AgentView::multiline_mode`). Idempotent.
 pub(in crate::app::dispatch) fn set_multiline_mode(app: &mut AppView, new: bool) -> Vec<Effect> {
-    if matches!(app.active_view, ActiveView::AgentDashboard) {
-        let Some(d) = app.dashboard.as_mut() else {
-            return vec![];
-        };
-        if d.multiline_mode == new {
-            return vec![];
-        }
-        d.multiline_mode = new;
-        tracing::info!(
-            target: "settings",
-            key = "multiline_mode",
-            value = new,
-            surface = "dashboard",
-            "setting changed",
-        );
-        app.show_toast(&save_success_toast("Multiline", new));
-        return vec![];
-    }
-
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };

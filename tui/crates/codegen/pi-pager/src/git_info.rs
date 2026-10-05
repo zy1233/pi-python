@@ -9,8 +9,8 @@ use crate::host::HostOs;
 use crate::terminal::{TerminalName, terminal_context};
 
 /// Per-cwd git cache — the single source of truth for every git display
-/// in the pager: the welcome top bar / dashboard header (process cwd),
-/// each agent's status bar, and the dashboard row subtitles. Keyed per
+/// in the pager: the welcome top bar (process cwd) and each agent's
+/// status bar. Keyed per
 /// directory so one directory's branch never leaks onto another's. Maps
 /// each cwd to its last-computed [`CwdGitInfo`] (`None` for a non-repo)
 /// plus the time of the last refresh attempt (for throttling).
@@ -70,7 +70,7 @@ pub fn update_from_notification(
 }
 
 /// Eagerly warm [`CWD_GIT_CACHE`] for `cwd` off-thread — e.g. at pager
-/// startup and after a dashboard location change — so the header / top bar
+/// startup — so the header / top bar
 /// show the branch + worktree on the next frame instead of waiting for the
 /// first lazy refresh.
 ///
@@ -134,8 +134,8 @@ fn is_cwd_worktree(main_repo: Option<&str>, worktree_label: Option<&str>) -> boo
     main_repo.is_some() || worktree_label.is_some_and(|s| !s.is_empty())
 }
 
-/// Per-cwd git info for render paths that display many directories (the
-/// dashboard agent list, each agent's status bar). Returns the cached
+/// Per-cwd git info for render paths that display many directories (each
+/// agent's status bar). Returns the cached
 /// value for `cwd` (possibly `None` on the very first call) and kicks off
 /// a throttled off-thread refresh when the entry is missing or older than
 /// [`CWD_GIT_REFRESH_TTL`]. Never blocks and never spawns `git`

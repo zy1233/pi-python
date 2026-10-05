@@ -2,7 +2,6 @@
 mod auth;
 mod billing;
 mod cta_e2e;
-mod dashboard;
 mod jump;
 mod modes;
 mod notes;
@@ -28,18 +27,6 @@ use super::cta::{
     cta_install_error_category, cta_install_relative_path, plugin_cta_phase_for,
 };
 use super::ctx::{find_agent_by_session_id, get_active_agent, get_active_agent_mut};
-use super::dashboard::{
-    apply_pending_dispatch_config, dispatch_dashboard_attach, dispatch_dashboard_begin_rename,
-    dispatch_dashboard_commit_rename, dispatch_dashboard_confirm_worktree,
-    dispatch_dashboard_create_new_agent_with_detail, dispatch_dashboard_delete,
-    dispatch_dashboard_dispatch, dispatch_dashboard_dispatch_slash,
-    dispatch_dashboard_overlay_cycle, dispatch_dashboard_overlay_exit,
-    dispatch_dashboard_overlay_stop, dispatch_dashboard_peek_reply,
-    dispatch_dashboard_permission_followup, dispatch_dashboard_permission_select,
-    dispatch_dashboard_question_answer, dispatch_dashboard_stop,
-    dispatch_dashboard_toggle_auto_approve, dispatch_exit_dashboard, dispatch_open_dashboard,
-    ensure_dashboard_state, resolve_location_input,
-};
 use super::modes::{
     YOLO_ON_UNDER_PLAN_TOAST, active_agent_plan_nudge_state, dispatch_cycle_mode_and_sync,
     downgrade_displayed_auto_if_gated, permission_mode_toast,
@@ -269,15 +256,12 @@ fn test_app() -> AppView {
         sharing_enabled: false,
         plugin_cta_enabled: false,
         plugin_cta_marketplace: None,
-        workspace_dashboard_enabled: false,
         usage_visible: true,
         has_external_auth_provider: false,
         tier_restricted_commands: Vec::new(),
         credit_balance: None,
         auto_topup: None,
         billing_poll_wanted: false,
-        dashboard_local_sessions: Vec::new(),
-        dashboard_sessions_loading: false,
         shared_prompt_queues: std::collections::HashMap::new(),
         optimistic_prompt_echoes: std::collections::HashMap::new(),
         pending_running_adoptions: std::collections::HashMap::new(),
@@ -289,9 +273,6 @@ fn test_app() -> AppView {
         feedback_trace_choice_latched: false,
         feedback_trace_upload_pending: None,
         tutorial: None,
-        dashboard: None,
-        dashboard_return: None,
-        dashboard_persisted: None,
         keyboard_normalizer: crate::input::KeyboardNormalizer::from_terminal_context(),
         has_claude_import: false,
         voice_mode_enabled: false,
@@ -356,16 +337,6 @@ pub(super) fn test_app_with_agent() -> AppView {
     app.next_agent_id = 1;
     switch_to_agent(&mut app, id, SwitchCause::New);
     app
-}
-/// Give a test agent a generated title so the dashboard renders it.
-///
-/// The dashboard hides empty (no-real-turn) sessions
-/// (`views::dashboard::row::is_empty_top_level`); nav/render tests that
-/// rely on their placeholder agents being visible call this to opt in.
-fn mark_agent_nonempty(app: &mut AppView, id: AgentId) {
-    if let Some(a) = app.agents.get_mut(&id) {
-        a.generated_session_title = Some(format!("Session {}", id.0));
-    }
 }
 /// Push a plain prompt directly onto the LOCAL drip-feed queue
 /// (`pending_prompts`), bypassing the server-authoritative
@@ -928,43 +899,6 @@ fn agent_scrollback_len(app: &AppView) -> usize {
     app.agents.get(&AgentId(0)).unwrap().scrollback.len()
 }
 use crate::scrollback::blocks::UserPromptBlock;
-/// Helper: open the dashboard against an existing `app`.
-fn open_dashboard(app: &mut AppView) {
-    let _ = dispatch_open_dashboard(app);
-}
-/// Display-order list of selectable row ids — the same order
-/// `dashboard_neighbor_row` and the renderer walk. Test-only mirror
-/// of the row build in `dispatch_dashboard_select`.
-fn dashboard_row_order(app: &AppView) -> Vec<crate::views::dashboard::DashboardRowId> {
-    let d = app.dashboard.as_ref().unwrap();
-    let home = crate::views::dashboard::render::cached_home();
-    let roster: &[crate::app::roster::RosterEntry] = &app.dashboard_local_sessions;
-    let rows = crate::views::dashboard::build_rows_with_roster(
-        &app.agents,
-        &d.pinned,
-        &d.reorder,
-        None,
-        d.grouping,
-        &d.filter,
-        home,
-        roster,
-    );
-    crate::views::dashboard::render::focusables(
-        &rows,
-        d.grouping,
-        &d.filter,
-        &d.collapsed_sections,
-        d.idle_show_all,
-        d.search_mode,
-    )
-    .into_iter()
-    .filter_map(|f| match f {
-        crate::views::dashboard::Focusable::Row(id) => Some(id),
-        crate::views::dashboard::Focusable::Section(_)
-        | crate::views::dashboard::Focusable::IdleOverflow => None,
-    })
-    .collect()
-}
 /// Build a synthetic `PermissionViewState` with the given id and
 /// options. Pushes it to the agent's permission_queue.
 ///

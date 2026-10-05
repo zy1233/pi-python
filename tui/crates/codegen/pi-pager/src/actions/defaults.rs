@@ -10,7 +10,7 @@ use super::{ActionDef, ActionId, Category, When};
 /// True when `Ctrl+.` is not a reliable shortcuts-cheatsheet primary.
 ///
 /// Callers pick a deliverable alternate primary (`Ctrl+X` on the agent
-/// screen, `?` on the dashboard). Both keys stay registered either way;
+/// screen). Both keys stay registered either way;
 /// this only chooses which the UI advertises.
 ///
 /// Driven by [`crate::terminal::TerminalContext::ctrl_dot_unreliable`]
@@ -72,7 +72,7 @@ pub(super) fn default_actions(
     let in_vscode_family = ctx.brand.is_vscode_family();
     let in_vscode = in_vscode_family;
     let in_apple_terminal = ctx.brand == TerminalName::AppleTerminal;
-    // Shared by ToggleQueue (Ctrl+4 primary) and OpenDashboard (omit Ctrl+4 alt).
+    // ToggleQueue takes Ctrl+4 as its primary on local macOS VS Code-family hosts.
     let local_mac_vscode = in_vscode_family && !ctx.is_ssh && cfg!(target_os = "macos");
     let ctrl_dot_unreliable = ctrl_dot_unreliable();
     let send_to_background_help = if screen_mode.is_minimal() {
@@ -590,7 +590,7 @@ pub(super) fn default_actions(
             hint_key_display: None,
             requires_confirmation: false,
             long_help: Some(
-                "Opens the session browser to resume or switch between past conversations.\nSelect one to reattach to its full history. `/resume` does the same.\nSeparate from the Agent Dashboard (Ctrl+\\), which manages many live agents at once.",
+                "Opens the session browser to resume or switch between past conversations.\nSelect one to reattach to its full history. `/resume` does the same.",
             ),
         },
         ActionDef {
@@ -689,8 +689,8 @@ pub(super) fn default_actions(
             default_key: key!(' ', CONTROL),
             alt_keys: vec![key!(F(8))],
             category: Category::Input,
-            // `Always` so the toggle key works on the agent screen AND the
-            // session-less dashboard (resolved via the global fallthrough).
+            // `Always` so the toggle key works on the agent screen
+            // (resolved via the global fallthrough).
             context: When::Always,
             hint_priority: Some(11),
             hint_key_display: Some("Ctrl+Space / F8"),
@@ -894,379 +894,13 @@ pub(super) fn default_actions(
         });
     }
 
-    // Agent Dashboard ----------------------------------------------------
-    //
-    // The `Ctrl+\` entry point AND every in-dashboard shortcut are registered
-    // here. They all share the dedicated `Category::Dashboard` section so the
-    // cheatsheet groups them under a single "Dashboard" header instead of
-    // scattering them through Panels / Session / Navigation.
-    //
-    // `Ctrl+\` (OpenDashboard) is registered against `Always` (global) so it
-    // works from any view — welcome, agent, or dashboard itself (which Esc
-    // closes). Configurable through the standard config.toml mechanism.
-    actions.extend([
-        ActionDef {
-            id: ActionId::OpenDashboard,
-            label: "dashboard",
-            description: "Open the Agent Dashboard",
-            default_key: key!('\\', CONTROL),
-            // Classic C0 FS (0x1c): without KKP, Ctrl+\ arrives as Char('4')+CONTROL
-            // (e.g. Apple Terminal). Omit when ToggleQueue already owns Ctrl+4.
-            alt_keys: if local_mac_vscode {
-                vec![]
-            } else {
-                vec![key!('4', CONTROL)]
-            },
-            category: Category::Dashboard,
-            context: When::Always,
-            hint_priority: None,
-            hint_key_display: Some("Ctrl+\\"),
-            requires_confirmation: false,
-            long_help: Some(
-                "Opens the Agent Dashboard: a list of all your running and recent agents to monitor and switch between.\nWorks from anywhere, including the welcome screen and inside a session.\nFrom there you can dispatch, attach, stop, group, and reorder agents.",
-            ),
-        },
-        // Register all in-dashboard shortcuts through
-        // the registry under `When::DashboardFocused`. The dispatch
-        // path in `dashboard::state::handle_key` looks these up via
-        // `registry.lookup(key, When::DashboardFocused)` so users can
-        // rebind any of them through `~/.grok/config.toml`.
-        ActionDef {
-            id: ActionId::DashboardSelectNext,
-            label: "next",
-            description: "Select next row",
-            default_key: key!(Down),
-            alt_keys: vec![key!('j')],
-            category: Category::Dashboard,
-            context: When::DashboardFocused,
-            hint_priority: None,
-            hint_key_display: Some("\u{2191}\u{2193}"),
-            requires_confirmation: false,
-            long_help: None,
-        },
-        ActionDef {
-            id: ActionId::DashboardSelectPrev,
-            label: "prev",
-            description: "Select previous row",
-            default_key: key!(Up),
-            alt_keys: vec![key!('k')],
-            category: Category::Dashboard,
-            context: When::DashboardFocused,
-            hint_priority: None,
-            hint_key_display: None,
-            requires_confirmation: false,
-            long_help: None,
-        },
-        ActionDef {
-            id: ActionId::DashboardTogglePin,
-            label: "pin",
-            description: "Pin / unpin agent",
-            default_key: key!('t', CONTROL),
-            alt_keys: vec![],
-            category: Category::Dashboard,
-            context: When::DashboardFocused,
-            hint_priority: None,
-            hint_key_display: None,
-            requires_confirmation: false,
-            long_help: Some(
-                "Pins or unpins the selected agent so it stays at the top of the list regardless of sorting or grouping.\nKeep the agents you care about in view as others come and go.\nPins persist across dashboard sessions.",
-            ),
-        },
-        ActionDef {
-            id: ActionId::DashboardBeginRename,
-            label: "rename",
-            description: "Rename agent",
-            default_key: key!('r', CONTROL),
-            alt_keys: vec![],
-            category: Category::Dashboard,
-            context: When::DashboardFocused,
-            hint_priority: None,
-            hint_key_display: None,
-            requires_confirmation: false,
-            long_help: None,
-        },
-        ActionDef {
-            id: ActionId::DashboardStop,
-            label: "delete",
-            description: "Stop / Delete agent",
-            default_key: key!('x', CONTROL),
-            alt_keys: vec![],
-            category: Category::Dashboard,
-            context: When::DashboardFocused,
-            hint_priority: None,
-            hint_key_display: None,
-            requires_confirmation: false,
-            long_help: Some(
-                "On a busy top-level row, Ctrl+X cancels the running turn. Once the row is idle, press Ctrl+X again within 2s to permanently delete the session.\nOn a subagent row, Ctrl+X kills the subagent.",
-            ),
-        },
-        ActionDef {
-            id: ActionId::DashboardCycleMode,
-            label: "mode",
-            description: "Cycle dispatch mode",
-            // All Shift+Tab encodings — see `input::key::shift_tab_keys()`.
-            // Registry `matches` is exact-modifier, so the SHIFT-bearing
-            // forms must be alts.
-            default_key: crate::input::key::shift_tab_keys()[0],
-            alt_keys: crate::input::key::shift_tab_keys()[1..].to_vec(),
-            category: Category::Dashboard,
-            context: When::DashboardFocused,
-            hint_priority: None,
-            hint_key_display: Some("Shift+Tab"),
-            requires_confirmation: false,
-            long_help: Some(
-                "Cycles the dispatch mode for agents you launch from the dashboard: Normal, Plan, then Always-Approve.\nPlan has new agents plan before changing files; Always-Approve runs their tools without prompting.\nMirrors the in-session Shift+Tab cycle, applied to new dispatches.",
-            ),
-        },
-        ActionDef {
-            id: ActionId::DashboardToggleGrouping,
-            label: "group",
-            description: "Toggle row grouping",
-            // `Ctrl+G` ("group"). `Ctrl+S` was reassigned to the peek /
-            // dispatch "send + open" chord so `Shift+Enter` could be
-            // freed for newline insertion. (`Ctrl+G` also has a
-            // mode-specific `When::AgentScreen` action, a context that never
-            // overlaps the dashboard.)
-            default_key: key!('g', CONTROL),
-            alt_keys: vec![],
-            category: Category::Dashboard,
-            context: When::DashboardFocused,
-            hint_priority: None,
-            hint_key_display: None,
-            requires_confirmation: false,
-            long_help: Some(
-                "Switches the dashboard between a flat list and rows grouped by state, such as working versus idle.\nGrouping surfaces the agents that need attention; the flat list keeps a stable order.\nYour choice persists across sessions.",
-            ),
-        },
-        ActionDef {
-            id: ActionId::DashboardReorderUp,
-            label: "reorder up",
-            description: "Reorder agent up",
-            default_key: key!(Up, SHIFT),
-            alt_keys: vec![],
-            category: Category::Dashboard,
-            context: When::DashboardFocused,
-            hint_priority: None,
-            hint_key_display: Some("Shift+\u{2191}"),
-            requires_confirmation: false,
-            long_help: None,
-        },
-        ActionDef {
-            id: ActionId::DashboardReorderDown,
-            label: "reorder down",
-            description: "Reorder agent down",
-            default_key: key!(Down, SHIFT),
-            alt_keys: vec![],
-            category: Category::Dashboard,
-            context: When::DashboardFocused,
-            hint_priority: None,
-            hint_key_display: None,
-            requires_confirmation: false,
-            long_help: None,
-        },
-        ActionDef {
-            id: ActionId::DashboardShortcutsHelp,
-            label: "shortcuts",
-            description: "Show shortcuts overlay",
-            // Ctrl+. / `?` dual-bound; primary follows ctrl_dot_unreliable.
-            // Ctrl+X is DashboardStop — never an alt here.
-            default_key: if ctrl_dot_unreliable {
-                key!('?')
-            } else {
-                key!('.', CONTROL)
-            },
-            alt_keys: vec![if ctrl_dot_unreliable {
-                key!('.', CONTROL)
-            } else {
-                key!('?')
-            }],
-            category: Category::Dashboard,
-            context: When::DashboardFocused,
-            hint_priority: None,
-            hint_key_display: None,
-            requires_confirmation: false,
-            long_help: None,
-        },
-        // `DashboardExit` is registered as a discoverable
-        // action with its DEFAULT key set to Esc, but the in-dashboard
-        // Esc behaviour is a multi-tier cascade (peek → input/filter
-        // → exit) that no single action can express. The Esc cascade
-        // in `state::handle_key` runs BEFORE this registry lookup so
-        // Esc always cascades. A user who REBINDS Esc to something
-        // else gains a discoverable exit shortcut for the rebound key,
-        // and the original Esc cascade still works because the
-        // cascade is keyed on `KeyCode::Esc` directly. The contract
-        // is therefore: "Esc always cascades; any other key bound to
-        // `DashboardExit` exits directly." The hint key shows the
-        // effective binding via `Esc` as a fallback.
-        ActionDef {
-            id: ActionId::DashboardExit,
-            label: "exit",
-            description: "Close dashboard",
-            default_key: key!(Esc),
-            alt_keys: vec![],
-            category: Category::Dashboard,
-            context: When::DashboardFocused,
-            hint_priority: None,
-            hint_key_display: Some("Esc"),
-            requires_confirmation: false,
-            long_help: Some(
-                "Closes the dashboard and returns to where you were.\nEsc is a cascade: it first dismisses an open peek or clears an active filter, and only exits once nothing else is pending.\nRebind this action to a different key to exit directly.",
-            ),
-        },
-        // Mirror of `ToggleYolo` (Ctrl+O) but scoped to the
-        // dashboard — flips the selected row's agent's
-        // always-approve / YOLO mode. Reachable from the dashboard
-        // view (and from inside the session overlay).
-        ActionDef {
-            id: ActionId::DashboardToggleAutoApprove,
-            label: "always-approve",
-            description: "Toggle always-approve",
-            default_key: key!('o', CONTROL),
-            alt_keys: vec![],
-            category: Category::Dashboard,
-            context: When::DashboardFocused,
-            hint_priority: None,
-            hint_key_display: Some("Ctrl+O"),
-            requires_confirmation: false,
-            long_help: Some(
-                "Toggles auto-approve (YOLO) for the selected agent right from the dashboard, without attaching to it.\nWhile on, that agent runs every tool call with no per-action confirmation.\nThe per-session equivalent is Ctrl+O inside a session.",
-            ),
-        },
-        // Open the location picker — a floating modal to change the
-        // working directory new dashboard sessions spawn in. Ctrl+L
-        // ("location") is free under `DashboardFocused` (it only binds
-        // OpenExtensions under `AgentScreen`, a different context).
-        ActionDef {
-            id: ActionId::DashboardOpenLocationPicker,
-            label: "location",
-            description: "Change working directory for new agents",
-            default_key: key!('l', CONTROL),
-            alt_keys: vec![],
-            category: Category::Dashboard,
-            context: When::DashboardFocused,
-            hint_priority: None,
-            hint_key_display: Some("Ctrl+l"),
-            requires_confirmation: false,
-            long_help: Some(
-                "Opens a picker to set the working directory that newly dispatched dashboard agents run in.\nLaunch agents against a different repo or folder without leaving the dashboard.\nAffects new dispatches only, not agents already running.",
-            ),
-        },
-        // Toggle worktree-dispatch mode. Ctrl+W ("worktree") arms the next
-        // dashboard-dispatched session to spawn in a fresh git worktree; the
-        // dispatcher gates it on the cwd being a git repo. Free under
-        // `DashboardFocused` (Ctrl+W only binds the overlay-exit fallback
-        // under `DashboardOverlay`, a different context).
-        ActionDef {
-            id: ActionId::DashboardToggleWorktree,
-            label: "worktree",
-            description: "Toggle worktree mode for new agents",
-            default_key: key!('w', CONTROL),
-            alt_keys: vec![],
-            category: Category::Dashboard,
-            context: When::DashboardFocused,
-            hint_priority: None,
-            hint_key_display: Some("Ctrl+w"),
-            requires_confirmation: false,
-            long_help: Some(
-                "Arms the next dashboard-dispatched agent to spawn in a fresh git worktree, isolating its work on a separate checkout.\nOnly applies when the working directory is a git repo.\nAffects newly dispatched agents, not ones already running.",
-            ),
-        },
-        // Session overlay (dashboard → agent attach)
-        // bindings. They use `When::DashboardOverlay`: the agent-side
-        // overlay intercept (`app_view`) looks them up in that context, and
-        // the cheatsheet uses it to dim them on the dashboard LIST (where
-        // they don't apply) while keeping them lit inside the overlay.
-        ActionDef {
-            id: ActionId::DashboardOverlayExit,
-            label: "close overlay",
-            description: "Back to dashboard",
-            // The primary back-out shortcuts are reached through
-            // different routes:
-            //   - Ctrl+\\ → OpenDashboard (registered separately above);
-            //     the overlay-input intercept treats it as overlay-exit.
-            //   - `q` when scrollback is focused — handled by the
-            //     overlay intercept directly.
-            //   - Esc when the agent is in a "neutral" state
-            //     (no modals/viewers/overlays, no text selection,
-            //     no link highlight, no question/goal/rewind/
-            //     permission overlays). Per-pane Esc consumers
-            //     still take precedence — see `overlay_esc_*`
-            //     tests in `app_view`.
-            //   - `[✗]` click — routed via this action by the
-            //     mouse handler.
-            // The `default_key` mirrors the real primary route, Ctrl+\
-            // (OpenDashboard, treated as overlay-exit), so the cheatsheet hint
-            // is accurate. (Ctrl+W is NOT used here — it's the dashboard's
-            // worktree toggle.)
-            default_key: key!('\\', CONTROL),
-            alt_keys: vec![],
-            category: Category::Dashboard,
-            context: When::DashboardOverlay,
-            hint_priority: None,
-            hint_key_display: Some("Ctrl+\\"),
-            requires_confirmation: false,
-            long_help: Some(
-                "Leaves the attached session overlay and returns to the dashboard list, without stopping the agent.\nAlso reachable via q on the scrollback, a neutral Esc, or the close button.\nTo stop the agent instead of just detaching, use Ctrl+X.",
-            ),
-        },
-        ActionDef {
-            id: ActionId::DashboardOverlayPrev,
-            label: "prev session",
-            description: "Previous session",
-            default_key: key!('[', CONTROL),
-            alt_keys: vec![],
-            category: Category::Dashboard,
-            context: When::DashboardOverlay,
-            hint_priority: None,
-            hint_key_display: Some("Ctrl+["),
-            requires_confirmation: false,
-            long_help: None,
-        },
-        ActionDef {
-            id: ActionId::DashboardOverlayNext,
-            label: "next session",
-            description: "Next session",
-            default_key: key!(']', CONTROL),
-            alt_keys: vec![],
-            category: Category::Dashboard,
-            context: When::DashboardOverlay,
-            hint_priority: None,
-            hint_key_display: Some("Ctrl+]"),
-            requires_confirmation: false,
-            long_help: None,
-        },
-        // Dashboard-parity stop inside the session overlay — state
-        // machine documented at `dispatch_dashboard_overlay_stop`.
-        // Intentionally shadows the agent view's `ShortcutsHelp` alt
-        // binding (Ctrl+X) inside the overlay; Ctrl+. still opens the
-        // cheatsheet there.
-        ActionDef {
-            id: ActionId::DashboardOverlayStop,
-            label: "stop",
-            description: "Stop agent, close session (back to dashboard)",
-            default_key: key!('x', CONTROL),
-            alt_keys: vec![],
-            category: Category::Dashboard,
-            context: When::DashboardOverlay,
-            hint_priority: None,
-            hint_key_display: Some("Ctrl+x"),
-            requires_confirmation: true,
-            long_help: Some(
-                "Inside a session overlay, stops the attached agent and closes it, returning you to the dashboard list.\nRequires confirmation: press Ctrl+X twice.\nCtrl+. still opens the cheatsheet here; only Ctrl+X is taken over by stop.",
-            ),
-        },
-    ]);
-
-    // Minimal has no interactive scrollback or dashboard surface. Keep its
+    // Minimal has no interactive scrollback surface. Keep its
     // logical prompt, agent-screen, and legitimate global actions, but do not
     // register bindings whose target UI cannot exist in this process mode.
     if screen_mode.is_minimal() {
         actions.retain(|def| {
-            !matches!(
-                def.context,
-                When::ScrollbackFocused | When::DashboardFocused | When::DashboardOverlay
-            ) && !matches!(def.id, ActionId::OpenDashboard | ActionId::FocusScrollback)
+            !matches!(def.context, When::ScrollbackFocused)
+                && !matches!(def.id, ActionId::FocusScrollback)
         });
     }
 

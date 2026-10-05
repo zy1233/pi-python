@@ -317,8 +317,6 @@ impl AgentView {
             plan_mode_pending: None,
             deferred_session_mode: None,
             pending_extensions_fetch: false,
-            in_dashboard_overlay: false,
-            overlay_can_cycle: false,
             mcp_init_progress: None,
             acp_synced_generation: 0,
             hovered_permission_item: None,
@@ -745,15 +743,6 @@ impl AgentView {
     pub(crate) fn mark_wake_cancel_sent(&mut self) {
         if let Some(wake) = self.running_wake_turn.as_mut() {
             wake.cancel_sent = true;
-        }
-    }
-    /// Overlay stop: stamp the dashboard trigger if something stoppable is running.
-    pub(crate) fn arm_dashboard_stop(&mut self) -> bool {
-        if self.stoppable_activity_running() {
-            self.cancel_trigger_hint = Some(crate::app::actions::CancelTrigger::DashboardStop);
-            true
-        } else {
-            false
         }
     }
     /// Status-row chrome for a wake turn, or `None` when a local turn owns it.
@@ -1274,16 +1263,6 @@ impl AgentView {
     pub fn set_restricted_commands(&mut self, names: &[String]) {
         self.prompt.set_restricted_commands(names);
     }
-    /// Show or hide the `/dashboard` slash command in this agent's registry.
-    /// Driven by the dashboard feature flag
-    /// (`crate::views::dashboard::dashboard_enabled()`) at agent-creation
-    /// time.
-    pub fn set_dashboard_visible(&mut self, visible: bool) {
-        self.prompt
-            .slash_controller
-            .registry_mut()
-            .set_dashboard_visible(visible);
-    }
     /// Offer `/announcements` when session announcements (critical or promo) exist.
     pub fn set_has_session_announcements(&mut self, has: bool) {
         self.prompt
@@ -1306,7 +1285,6 @@ impl AgentView {
         self.set_usage_command_visible(usage_command_visible);
         self.app_chat_mode = chat_mode;
         self.prompt.set_screen_mode(screen_mode);
-        self.set_dashboard_visible(crate::views::dashboard::dashboard_enabled());
         self.set_has_session_announcements(crate::views::announcements::has_session_announcements(
             announcements,
         ));

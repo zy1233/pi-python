@@ -15,8 +15,8 @@
 //!   chord toggles instead (press starts, press again stops). Handled in
 //!   `app::event_loop`.
 //!
-//! Finals append to the recording target's prompt — the agent prompt or the
-//! dashboard's dispatch (new-agent) input, captured at start via
+//! Finals append to the recording target's prompt — the agent prompt,
+//! captured at start via
 //! [`crate::app::app_view::VoiceTarget`] — while capture stays open across
 //! speech pauses. The user always submits with Enter; nothing is auto-sent.
 //! Submit promotes any remaining interim into the bound prompt, then hard-resets.

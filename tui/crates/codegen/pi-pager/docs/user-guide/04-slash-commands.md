@@ -20,7 +20,7 @@ Open the session picker to reload a previous session from disk.
 
 ### `/dashboard`
 
-Open the [Agent Dashboard](23-dashboard.md): live roster of top-level sessions in this pager (peek, reply, dispatch, pin, rename, stop, attach). Aliases: `/agents-dashboard`, `/sessions`.
+Open the Agent Dashboard: live roster of top-level sessions in this pager (peek, reply, dispatch, pin, rename, stop, attach). Aliases: `/agents-dashboard`, `/sessions`.
 
 Not `/config-agents` (alias `/agents`), which manages agent *definitions* and personas. Hidden in minimal mode; disable with `GROK_AGENT_DASHBOARD=0` or `[dashboard].enabled = false`.
 
@@ -387,7 +387,7 @@ Open the Claude import modal to bring over `~/.claude` settings: permissions, en
 
 Open the agents modal to view and manage agent definitions, set the default, and switch the active one. Alias: `/agents`.
 
-Not the live multi-session [Agent Dashboard](23-dashboard.md) (`/dashboard` / `Ctrl+\`).
+Not the live multi-session Agent Dashboard (`/dashboard` / `Ctrl+\`).
 
 ### `/personas`
 

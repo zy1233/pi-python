@@ -1,7 +1,7 @@
 //! Plan, yolo, auto, and permission mode transitions and toasts.
 
 use super::ctx::{NO_SESSION_NOTICE, with_active_agent};
-use super::queue::{maybe_drain_queue, note_peek_page_flip};
+use super::queue::maybe_drain_queue;
 use super::settings::ui::{refresh_open_settings_modals, save_success_toast};
 use crate::app::actions::Effect;
 use crate::app::app_view::{ActiveView, AppView};
@@ -79,7 +79,6 @@ pub(super) fn dispatch_enter_plan_mode(
             .session
             .enqueue_prompt_with_skill_tokens(desc, skill_token_ranges);
         let drain = maybe_drain_queue(agent);
-        note_peek_page_flip(app, id, drain.page_flip_entry);
         let mut effects = Vec::with_capacity(1);
         for eff in drain.effects {
             match eff {
@@ -234,11 +233,6 @@ pub(crate) fn downgrade_displayed_auto_if_gated(app: &mut AppView) {
     }
     for agent in app.agents.values_mut() {
         agent.session.auto_mode = false;
-    }
-    if let Some(dashboard) = app.dashboard.as_mut()
-        && dashboard.pending_mode == crate::views::dashboard::DashboardDispatchMode::Auto
-    {
-        dashboard.pending_mode = crate::views::dashboard::DashboardDispatchMode::Normal;
     }
     if app.current_ui.permission_mode.as_deref() == Some("auto") {
         app.current_ui.permission_mode = Some("ask".into());
@@ -526,10 +520,7 @@ pub(super) fn dispatch_toggle_yolo(app: &mut AppView) -> Vec<Effect> {
 }
 
 /// Shift+Tab mode cycle from the agent chat view: the shared cycle body plus
-/// plan-nudge acceptance telemetry (the nudge advertises this chord). The
-/// dashboard peek calls [`dispatch_cycle_mode_and_sync`] instead, so a peeked
-/// agent — whose prompt the user is not looking at — never attributes an accept
-/// and never collapses Auto/Always-Approve for the nudge jump.
+/// plan-nudge acceptance telemetry (the nudge advertises this chord).
 pub(super) fn dispatch_cycle_mode(app: &mut AppView) -> Vec<Effect> {
     // Capture the pre-cycle nudge visibility + plan state so only a transition
     // into Plan taken while the nudge is on screen attributes as an acceptance;
@@ -599,12 +590,10 @@ fn collapse_to_ask_for_nudge_jump(app: &mut AppView) -> Option<Vec<Effect>> {
     }])
 }
 
-/// The Shift+Tab cycle body shared by the agent view and the dashboard peek:
-/// apply the mode, then keep the per-session `auto_mode` display flag in sync
-/// with the freshly written canonical mode — covering every arm (including the
-/// pre-session and policy-pin early returns) without per-arm edits. Deliberately
-/// telemetry-free: the dashboard peek reuses it so it can't attribute a
-/// plan-nudge acceptance for an agent the user isn't viewing.
+/// The Shift+Tab cycle body: apply the mode, then keep the per-session
+/// `auto_mode` display flag in sync with the freshly written canonical mode —
+/// covering every arm (including the pre-session and policy-pin early returns)
+/// without per-arm edits. Deliberately telemetry-free.
 pub(super) fn dispatch_cycle_mode_and_sync(app: &mut AppView) -> Vec<Effect> {
     app.permission_mode_from_soft_default = false;
     let effects = dispatch_cycle_mode_inner(app);
@@ -656,7 +645,7 @@ fn dispatch_cycle_mode_inner(app: &mut AppView) -> Vec<Effect> {
         // No session yet (Shift+Tab forwarded from the welcome screen or a
         // fresh tab): cycle the mode locally and stash the ACP push in
         // `deferred_session_mode` — consumed by the `SessionCreated`
-        // handlers, same mechanism as the dashboard's staged plan mode.
+        // handlers.
         // Cycle: Normal → Plan → Auto → Always-Approve → Normal (Auto skipped
         // when always-approve is the only remaining arm under a yolo pin).
         // Each arm yields the canonical permission mode to persist (`None`

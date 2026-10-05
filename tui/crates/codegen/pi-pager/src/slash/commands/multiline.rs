@@ -27,16 +27,6 @@ impl SlashCommand for MultilineCommand {
         "Toggle multiline input mode (swap Enter and Shift+Enter)"
     }
 
-    fn session_scoped(&self) -> bool {
-        true
-    }
-
-    fn offered_when_session_less(&self) -> bool {
-        // Dashboard dispatch/peek own their own multiline flag
-        // (`DashboardState::multiline_mode`); same swap as the agent prompt.
-        true
-    }
-
     fn usage(&self) -> &str {
         "/multiline"
     }

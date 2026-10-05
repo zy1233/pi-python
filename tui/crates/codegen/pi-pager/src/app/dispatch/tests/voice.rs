@@ -289,7 +289,7 @@ fn voice_error_hint_lands_in_bound_agent_scrollback() {
     let before = app.agents.get(&id).unwrap().scrollback.len();
 
     // Hint follows the bound target (like finals), not the active view.
-    app.active_view = ActiveView::AgentDashboard;
+    app.active_view = ActiveView::Welcome;
     app.voice_state = VoiceState::Recording {
         hold: false,
         target: VoiceTarget::Agent(id),
@@ -335,35 +335,6 @@ fn voice_error_hint_lands_in_bound_agent_scrollback() {
     assert_eq!(app.agents.get(&id).unwrap().scrollback.len(), before);
 }
 
-#[test]
-fn voice_error_hint_dropped_for_dashboard_dispatch() {
-    // The dispatch box has no scrollback; only the dashboard toast survives.
-    let mut app = test_app_with_agent();
-    app.active_view = ActiveView::AgentDashboard;
-    ensure_dashboard_state(&mut app);
-    app.voice_state = VoiceState::Recording {
-        hold: false,
-        target: VoiceTarget::DashboardDispatch,
-        interim: None,
-    };
-    let before = app.agents.get(&AgentId(0)).unwrap().scrollback.len();
-    crate::voice::handle_voice_event(
-        &mut app,
-        pi_voice::VoiceEvent::Error {
-            message: "no speech detected".into(),
-            hint: Some("allow terminal mic access in system settings".into()),
-        },
-    );
-    assert_eq!(
-        app.agents.get(&AgentId(0)).unwrap().scrollback.len(),
-        before
-    );
-    assert!(
-        app.dashboard
-            .as_ref()
-            .is_some_and(|d| d.error_toast.is_some())
-    );
-}
 
 #[test]
 fn voice_interim_ignored_after_stop() {

@@ -530,7 +530,7 @@ pub(super) fn handle_scheduled_task_inject_prompt(
         );
         agent_id
     };
-    let effects = super::super::dispatch::maybe_drain_queue_and_note_peek(app, agent_id);
+    let effects = super::super::dispatch::drain_queue_for_agent(app, agent_id);
     app.pending_effects.extend(effects);
 
     true

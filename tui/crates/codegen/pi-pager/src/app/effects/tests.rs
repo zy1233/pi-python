@@ -2709,48 +2709,6 @@ fn worktree_resume_failure_sanitizes_detail_before_hint() {
     let id_msg = worktree_resume_failure_message(None, &sanitize_user_error(raw));
     assert_eq!(id_msg, "couldn't resume worktree session: No space left on device");
 }
-/// A resume-picker entry converts to a **dormant** dashboard roster row
-/// (the non-leader idle source) preserving title, cwd, model, worktree
-/// flag, origin, and last-change time.
-#[test]
-fn session_picker_entry_maps_to_dormant_roster_row() {
-    use crate::app::app_view::SessionPickerEntry;
-    use crate::app::roster::RosterActivity;
-    let updated = chrono::Utc::now();
-    let entry = SessionPickerEntry {
-        id: "sess-1".to_string(),
-        summary: "Wire up dashboard".to_string(),
-        updated_at: updated,
-        created_at: updated,
-        cwd: "/repo/app".to_string(),
-        hostname: Some("box".to_string()),
-        source: "local".to_string(),
-        model_id: Some("grok-4".to_string()),
-        num_messages: 3,
-        last_active_at: Some(updated),
-        branch: None,
-        repo_name: "repo-app".to_string(),
-        worktree_label: Some("wt".to_string()),
-        last_turn_summary: Some("Fixed the parser".to_string()),
-        last_recap: None,
-        card_detail: None,
-    };
-    let roster = session_picker_entry_to_roster(&entry);
-    assert_eq!(roster.session_id, "sess-1");
-    assert_eq!(roster.title.as_deref(), Some("Wire up dashboard"));
-    assert_eq!(roster.cwd, "/repo/app");
-    assert!(roster.is_worktree, "worktree_label present → is_worktree");
-    assert_eq!(roster.model_id.as_deref(), Some("grok-4"));
-    assert_eq!(roster.activity, RosterActivity::Dormant);
-    assert_eq!(
-            roster.last_turn_summary.as_deref(),
-            Some("Fixed the parser")
-        );
-    assert!(!roster.resident);
-    assert_eq!(roster.last_change_unix_ms, updated.timestamp_millis());
-    assert_eq!(roster.origin.kind, "local");
-    assert_eq!(roster.origin.host.as_deref(), Some("box"));
-}
 #[test]
 fn rewind_execute_params_sends_conversation_only_with_force() {
     let params = rewind_execute_params("sess-1", 3);

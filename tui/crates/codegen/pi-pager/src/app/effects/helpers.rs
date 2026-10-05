@@ -756,9 +756,7 @@ pub(super) fn parse_session_list_scope(_payload: &serde_json::Value) -> ListScop
 /// Parse the `legacy ext RPC` response payload (the unwrapped
 /// `{ "sessions": [...] }` object) into [`SessionPickerEntry`] rows.
 ///
-/// Shared by the resume picker ([`Effect::FetchSessionList`]) and the
-/// dashboard's local idle-session list
-/// ([`Effect::FetchDashboardSessions`]) so both produce identical labels.
+/// Used by the resume picker ([`Effect::FetchSessionList`]).
 /// Sessions older than 30 days, and sessions with no usable user prompt
 /// (empty `summary` after fallbacks), are dropped.
 pub(super) fn parse_session_picker_entries(
@@ -951,34 +949,6 @@ pub(super) fn session_picker_entries_from_acp(
     parse_session_picker_entries(&serde_json::json!({ "sessions": sessions }))
 }
 
-/// Convert a resume-picker session into a dormant dashboard roster row.
-///
-/// Used by the dashboard's session list: local on-disk sessions have no
-/// live activity signal, so they map to [`RosterActivity::Dormant`] and render
-/// in the dashboard's **Inactive** group. The label, cwd, model, and worktree
-/// badge all come straight from the picker entry.
-pub(super) fn session_picker_entry_to_roster(
-    e: &crate::app::app_view::SessionPickerEntry,
-) -> crate::app::roster::RosterEntry {
-    use crate::app::roster::{RosterActivity, RosterEntry, RosterOrigin};
-    let last_change = e.last_active_at.unwrap_or(e.updated_at);
-    RosterEntry {
-        session_id: e.id.clone(),
-        title: Some(e.summary.clone()).filter(|s| !s.trim().is_empty()),
-        cwd: e.cwd.clone(),
-        is_worktree: e.worktree_label.is_some(),
-        model_id: e.model_id.clone(),
-        yolo: false,
-        activity: RosterActivity::Dormant,
-        last_turn_summary: e.last_turn_summary.clone(),
-        resident: false,
-        last_change_unix_ms: last_change.timestamp_millis(),
-        origin: RosterOrigin {
-            kind: e.source.clone(),
-            host: e.hostname.clone(),
-        },
-    }
-}
 pub(super) async fn send_logout(_tx: &AcpAgentTx) {}
 
 /// Best-effort auth cancel: stops the shell's device/loopback wait so a

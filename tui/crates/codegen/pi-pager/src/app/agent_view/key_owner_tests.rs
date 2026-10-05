@@ -420,31 +420,6 @@ fn the_esc_hint_names_the_rung_the_key_takes() {
     assert!(hint_labels(&agent).contains(&"unselect".to_string()));
 }
 
-#[test]
-fn the_overlay_owns_the_park_rung_and_the_bar_says_so() {
-    let mut agent = make_agent();
-    open_question(&mut agent);
-    agent.in_dashboard_overlay = true;
-
-    assert_eq!(agent.card_esc(), Some(EscStep::BackOutOverlay));
-    assert!(
-        agent.overlay_esc_backs_out(),
-        "the overlay cascade and the ladder must agree"
-    );
-    assert!(
-        hint_labels(&agent).contains(&"dashboard".to_string()),
-        "the bar names where Esc actually goes, got {:?}",
-        hint_labels(&agent)
-    );
-
-    let _ =
-        agent.handle_question_key_for_test(&KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
-    assert_eq!(agent.card_esc(), Some(EscStep::ClearSelection));
-    assert!(
-        !agent.overlay_esc_backs_out(),
-        "a selection to clear keeps Esc in the card"
-    );
-}
 
 #[test]
 fn a_parked_card_does_not_hand_esc_to_the_turn_cancel() {
@@ -703,86 +678,8 @@ fn esc_on_the_cancel_turn_panel_does_not_cancel_the_turn() {
     assert!(agent.session.state.is_turn_running());
 }
 
-/// Inside the dashboard overlay the ladder's last rung is the dashboard, and
-/// anything parked behind a bare scrollback is on it — a card that parks
-/// rather than backing out (a later question, or a permission prompt, which
-/// has no back-out rung at all), and a plan approval, alone or on top of a
-/// parked card. None of them hold the keyboard there, so none can consume
-/// `Esc`, and the swallow that protects the turn would otherwise leave the
-/// key inert until the user tabbed back in.
-#[test]
-fn anything_parked_in_the_overlay_keeps_an_esc_route_to_the_dashboard() {
-    for (label, setup) in [
-        ("permission", open_permission as fn(&mut AgentView)),
-        ("question", open_question as fn(&mut AgentView)),
-        ("elicitation", open_elicitation as fn(&mut AgentView)),
-        ("plan approval", open_plan as fn(&mut AgentView)),
-        (
-            "plan approval over a parked question",
-            open_plan_over_question as fn(&mut AgentView),
-        ),
-    ] {
-        let mut agent = make_agent();
-        agent.in_dashboard_overlay = true;
-        setup(&mut agent);
-        agent.set_active_pane(AgentPane::Scrollback, true);
 
-        assert!(
-            agent.overlay_esc_backs_out(),
-            "{label}: parked behind the scrollback, the next Esc leaves the overlay"
-        );
 
-        agent.scrollback_search = Some(crate::scrollback::search::ScrollbackSearchState::open());
-        assert!(
-            !agent.overlay_esc_backs_out(),
-            "{label}: but a layered scrollback sub-state still consumes Esc first"
-        );
-    }
-}
-
-/// The new rung is for surfaces the keyboard has left behind — it must not
-/// turn a plain scrollback `Esc` into a detach, which still belongs to the
-/// turn-cancel / rewind policy.
-#[test]
-fn a_bare_overlay_scrollback_esc_still_belongs_to_the_esc_policy() {
-    let mut agent = make_agent();
-    agent.in_dashboard_overlay = true;
-    agent.set_active_pane(AgentPane::Scrollback, true);
-
-    assert!(agent.is_bare_scrollback());
-    assert!(
-        !agent.overlay_esc_backs_out(),
-        "with nothing pending there is nothing parked, so Esc keeps its policy meaning"
-    );
-}
-
-#[test]
-fn esc_on_a_later_question_parks_before_it_leaves_the_overlay() {
-    let mut agent = make_agent();
-    open_two_questions(&mut agent);
-    agent.in_dashboard_overlay = true;
-    agent
-        .question_view
-        .as_mut()
-        .expect("card open")
-        .next_question();
-
-    assert_eq!(
-        agent.card_esc(),
-        Some(EscStep::ParkFocus),
-        "Esc must not throw the user out of the session from question 2 — \
-         Left still walks back there, so the card keeps the first press"
-    );
-    assert!(!agent.overlay_esc_backs_out());
-    assert!(hint_labels(&agent).contains(&"scrollback".to_string()));
-
-    let _ = agent.handle_question_key_for_test(&KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-    assert_eq!(agent.active_pane, AgentPane::Scrollback);
-    assert!(
-        agent.overlay_esc_backs_out(),
-        "and the next press leaves for the dashboard"
-    );
-}
 
 /// The scrollback's focus hint names where `Tab` goes, so it has to be asked
 /// through the same ranking as the keys themselves: with a plan approval

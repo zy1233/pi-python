@@ -10,8 +10,7 @@ use super::interject;
 use super::permissions::drain_permission_queue;
 use super::queue::{
     apply_turn_start_shim, drain_prompt_state_to_last_queued, immediate_server_send_eligible,
-    maybe_drain_queue, note_peek_page_flip, push_and_page_flip, push_server_queue_echo,
-    retire_optimistic_echo,
+    maybe_drain_queue, push_and_page_flip, push_server_queue_echo, retire_optimistic_echo,
 };
 use super::router::dispatch;
 use super::voice::{merge_prompt_with_voice_interim, voice_stop_on_submit};
@@ -951,7 +950,6 @@ pub(super) fn dispatch_send_prompt_inner(
         maybe_drain_queue(agent)
     };
     effects.extend(drain.effects);
-    note_peek_page_flip(app, id, drain.page_flip_entry);
     // A prompt queued while the turn is already busy (wait / live watcher /
     // running tool) would otherwise sit locally until the next ACP batch.
     // An open /btw overlay does not produce that batch, so a send after
@@ -1037,7 +1035,6 @@ pub(super) fn dispatch_send_bash_command(app: &mut AppView, command: String) -> 
     agent.note_draft_consumed();
 
     let drain = maybe_drain_queue(agent);
-    note_peek_page_flip(app, id, drain.page_flip_entry);
     drain.effects
 }
 
@@ -1553,23 +1550,19 @@ pub(super) fn handle_prompt_response(
         // turn-start shim. This sets `TurnRunning`, so the
         // `maybe_drain_queue` below no-ops rather than draining a local
         // prompt — the leader owns the drain order.
-        let adopted_page_flip = if let Some(p) = pending_adoption
+        if let Some(p) = pending_adoption
             && agent.session.current_prompt_id.is_none()
         {
             if response_pid.as_deref() != Some(p.prompt_id.as_str())
                 && agent.should_adopt_running_prompt(&p.prompt_id)
             {
-                apply_turn_start_shim(agent, p.prompt_id, p.text, &p.kind, p.combined_texts)
+                let _ = apply_turn_start_shim(agent, p.prompt_id, p.text, &p.kind, p.combined_texts);
             } else {
                 agent.discard_pending_adoption_updates(&p.prompt_id);
-                None
             }
-        } else {
-            None
-        };
+        }
 
         let drain = maybe_drain_queue(agent);
-        let page_flip_entry = adopted_page_flip.or(drain.page_flip_entry);
         let mut effects = drain.effects;
 
         // Predicted-next-prompt (tab autocomplete): fetch a fresh suggestion
@@ -1604,7 +1597,6 @@ pub(super) fn handle_prompt_response(
             silent: true,
             nonce: Default::default(),
         });
-        note_peek_page_flip(app, agent_id, page_flip_entry);
         return effects;
     }
     vec![]
@@ -1667,7 +1659,6 @@ pub(super) fn handle_compact_complete(
         agent.last_activity = None;
 
         let drain = maybe_drain_queue(agent);
-        note_peek_page_flip(app, agent_id, drain.page_flip_entry);
         return drain.effects;
     }
     vec![]

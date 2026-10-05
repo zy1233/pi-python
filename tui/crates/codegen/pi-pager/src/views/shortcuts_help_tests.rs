@@ -61,32 +61,6 @@ fn hint_with_action(
     }
 }
 
-/// `DashboardCycleMode` carries Shift+Tab three times (the terminal
-/// encoding variants `BackTab` / `BackTab`+SHIFT / `Tab`+SHIFT).
-/// The cheatsheet must collapse identically-rendered keys instead
-/// of showing "Shift+Tab / Shift+Tab / Shift+Tab".
-#[test]
-fn build_entries_dedupes_identically_rendered_alt_keys() {
-    let registry = crate::actions::ActionRegistry::defaults();
-    let entries = build_entries(&[When::DashboardFocused], &registry, false);
-    let item = entries
-        .iter()
-        .find_map(|e| match e {
-            ShortcutsHelpEntry::Hint { item, .. }
-                if item.description.as_deref() == Some("Cycle dispatch mode") =>
-            {
-                Some(item)
-            }
-            _ => None,
-        })
-        .expect("DashboardCycleMode must be listed");
-    assert_eq!(
-        hint_key_pretty(item),
-        "Shift+Tab",
-        "encoding-variant alt keys must collapse to one display",
-    );
-}
-
 #[test]
 fn build_entries_lists_prompt_stash_with_ctrl_s_and_alt_s() {
     let registry = crate::actions::ActionRegistry::defaults();
@@ -525,18 +499,6 @@ fn history_row_lit_only_by_prompt_focus() {
         unreachable!();
     };
     assert!(*dimmed, "history row must be dimmed without prompt focus");
-
-    // Dashboard focus alone must not light it (unlike paste/undo/redo).
-    let entries = build_entries(&[When::DashboardFocused], &registry, false);
-    let ShortcutsHelpEntry::Hint { dimmed, .. } =
-        history_row(&entries).expect("history row present")
-    else {
-        unreachable!();
-    };
-    assert!(
-        *dimmed,
-        "dashboard focus alone must not light the history row"
-    );
 }
 
 #[test]
@@ -623,45 +585,6 @@ fn pseudo_dimmed(entries: &[ShortcutsHelpEntry], label: &str) -> Option<bool> {
     })
 }
 
-#[test]
-fn build_entries_dims_editor_pseudo_rows_outside_prompt_and_dashboard() {
-    let registry = ActionRegistry::defaults();
-    // paste / undo / redo share the same host lit/dim policy.
-    for label in ["paste", "undo", "redo"] {
-        assert_eq!(
-            pseudo_dimmed(
-                &build_entries(
-                    &[When::ScrollbackFocused, When::AgentScreen, When::Always],
-                    &registry,
-                    true,
-                ),
-                label,
-            ),
-            Some(true),
-            "{label} dimmed off prompt/dashboard"
-        );
-        assert_eq!(
-            pseudo_dimmed(
-                &build_entries(
-                    &[When::PromptFocused, When::AgentScreen, When::Always],
-                    &registry,
-                    true,
-                ),
-                label,
-            ),
-            Some(false),
-            "{label} lit when prompt focused"
-        );
-        assert_eq!(
-            pseudo_dimmed(
-                &build_entries(&[When::DashboardFocused, When::Always], &registry, true),
-                label,
-            ),
-            Some(false),
-            "{label} lit on dashboard host"
-        );
-    }
-}
 
 #[test]
 fn build_entries_dims_out_of_context_actions() {
@@ -729,157 +652,7 @@ fn build_entries_dims_both_pane_contexts_from_side_pane() {
     );
 }
 
-/// The dashboard LIST and the session OVERLAY dim each other's shortcuts:
-/// on the list the overlay-scoped shortcuts (`When::DashboardOverlay`,
-/// e.g. "prev session") are dimmed while the list shortcuts
-/// (`When::DashboardFocused`, e.g. "pin") are lit; inside the overlay it's
-/// the inverse. (Dashboard actions are registered under `cfg(test)`.)
-#[test]
-fn build_entries_dims_dashboard_list_vs_overlay() {
-    let registry = ActionRegistry::defaults();
-    let dimmed_of = |entries: &[ShortcutsHelpEntry], label: &str| -> Option<bool> {
-        entries.iter().find_map(|e| match e {
-            ShortcutsHelpEntry::Hint { item, dimmed, .. } if item.label == label => Some(*dimmed),
-            _ => None,
-        })
-    };
 
-    // Dashboard LIST: list shortcuts lit, overlay shortcuts dimmed.
-    let list = build_entries(&[When::DashboardFocused, When::Always], &registry, true);
-    assert_eq!(
-        dimmed_of(&list, "pin"),
-        Some(false),
-        "list `pin` must be lit on the dashboard list",
-    );
-    assert_eq!(
-        dimmed_of(&list, "prev session"),
-        Some(true),
-        "overlay `prev session` must be dimmed on the dashboard list",
-    );
-
-    // Session OVERLAY (details): overlay shortcuts lit, list shortcuts dimmed.
-    let overlay = build_entries(
-        &[When::AgentScreen, When::Always, When::DashboardOverlay],
-        &registry,
-        true,
-    );
-    assert_eq!(
-        dimmed_of(&overlay, "prev session"),
-        Some(false),
-        "overlay `prev session` must be lit inside the overlay",
-    );
-    assert_eq!(
-        dimmed_of(&overlay, "pin"),
-        Some(true),
-        "list `pin` must be dimmed inside the overlay",
-    );
-}
-
-/// `DashboardStop` (list) and `DashboardOverlayStop` (overlay) share
-/// Ctrl+X and the Dashboard category. The per-category dedup must keep
-/// whichever matches the active surface — lit — instead of always
-/// keeping the first-registered (list) def. And inside the overlay the
-/// `ShortcutsHelp` row must drop its shadowed Ctrl+X alt (the overlay
-/// stop owns the key there) while keeping its other binding.
-#[test]
-fn build_entries_overlay_stop_wins_dedup_and_shadows_cheatsheet_ctrl_x() {
-    let registry = ActionRegistry::defaults();
-    let ctrl_x = crate::key!('x', CONTROL);
-    // Match the two Ctrl+X rows by ActionId: the list and overlay
-    // stops carry different labels ("delete" vs "stop").
-    let is_stop = |action_id: &Option<ActionId>| {
-        matches!(
-            action_id,
-            Some(ActionId::DashboardStop | ActionId::DashboardOverlayStop)
-        )
-    };
-    let stop_rows = |entries: &[ShortcutsHelpEntry]| -> Vec<(String, bool)> {
-        entries
-            .iter()
-            .filter_map(|e| match e {
-                ShortcutsHelpEntry::Hint {
-                    item,
-                    dimmed,
-                    action_id,
-                    ..
-                } if is_stop(action_id) => Some((
-                    item.description.as_deref().unwrap_or_default().to_string(),
-                    *dimmed,
-                )),
-                _ => None,
-            })
-            .collect()
-    };
-    let stop_id = |entries: &[ShortcutsHelpEntry]| -> Option<ActionId> {
-        entries
-            .iter()
-            .find_map(|e| match e {
-                ShortcutsHelpEntry::Hint { action_id, .. } if is_stop(action_id) => {
-                    Some(*action_id)
-                }
-                _ => None,
-            })
-            .flatten()
-    };
-    let help_keys = |entries: &[ShortcutsHelpEntry]| -> Vec<KeyShortcut> {
-        entries
-            .iter()
-            .find_map(|e| match e {
-                ShortcutsHelpEntry::Hint { item, .. } if item.label == "shortcuts" => {
-                    Some(item.keys.clone())
-                }
-                _ => None,
-            })
-            .expect("the ShortcutsHelp row must be present")
-    };
-
-    // Dashboard LIST: the list stop survives, lit; the cheatsheet
-    // row keeps Ctrl+X (no overlay up).
-    let list = build_entries(&[When::DashboardFocused, When::Always], &registry, true);
-    assert_eq!(
-        stop_rows(&list),
-        vec![("Stop / Delete agent".to_string(), false)],
-    );
-    assert_eq!(
-        stop_id(&list),
-        Some(ActionId::DashboardStop),
-        "the lit list `stop` is inserted first and never replaced — keeps DashboardStop",
-    );
-    assert!(
-        help_keys(&list).contains(&ctrl_x),
-        "without an overlay the cheatsheet row keeps its Ctrl+X binding",
-    );
-
-    // Session OVERLAY: the overlay stop survives, lit; the
-    // cheatsheet row drops the shadowed Ctrl+X but keeps Ctrl+.
-    let overlay = build_entries(
-        &[When::AgentScreen, When::Always, When::DashboardOverlay],
-        &registry,
-        true,
-    );
-    assert_eq!(
-        stop_rows(&overlay),
-        vec![(
-            "Stop agent, close session (back to dashboard)".to_string(),
-            false
-        )],
-        "the overlay must show exactly the overlay `stop`, lit",
-    );
-    assert_eq!(
-        stop_id(&overlay),
-        Some(ActionId::DashboardOverlayStop),
-        "the lit overlay `stop` replaces the dimmed list row — carries DashboardOverlayStop",
-    );
-    let keys = help_keys(&overlay);
-    assert!(
-        !keys.contains(&ctrl_x),
-        "inside the overlay the cheatsheet row must drop the shadowed Ctrl+X",
-    );
-    assert!(
-        !keys.is_empty(),
-        "the cheatsheet row must keep its non-shadowed binding (Ctrl+.)",
-    );
-}
 
 #[test]
 fn initial_state_selects_first_hint_not_header() {

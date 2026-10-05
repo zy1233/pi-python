@@ -79,11 +79,6 @@ pub(crate) fn execute(
             ulog::info("pager quit", None, None);
             return (true, meta);
         }
-        Effect::SetWorkingDir { path } => {
-            if let Err(e) = std::env::set_current_dir(&path) {
-                tracing::warn!(error = %e, "change location: failed to set_current_dir");
-            }
-        }
         Effect::RunStatusLineCommand(run) => {
             tasks
                 .spawn(async move {
@@ -511,30 +506,6 @@ pub(crate) fn execute(
                     TaskResult::SessionSearchDebounceExpired {
                         query,
                         seq,
-                    }
-                });
-        }
-        Effect::FetchDashboardSessions => {
-            let tx = acp_tx.clone();
-            let cwd = cwd.to_path_buf();
-            tasks
-                .spawn(async move {
-                    let request = acp::ListSessionsRequest::default().cwd(cwd);
-                    match acp_send(request, &tx).await {
-                        Ok(resp) => {
-                            let sessions = session_picker_entries_from_acp(&resp)
-                                .iter()
-                                .map(session_picker_entry_to_roster)
-                                .collect();
-                            TaskResult::DashboardSessionsLoaded {
-                                sessions,
-                            }
-                        }
-                        Err(_) => {
-                            TaskResult::DashboardSessionsLoaded {
-                                sessions: vec![],
-                            }
-                        }
                     }
                 });
         }
@@ -1217,10 +1188,6 @@ pub(crate) fn execute(
                                         images_dir: None,
                                         ..
                                     } => ProbedAttachment::Image(pasted),
-                                    ClipboardPasteTarget::DashboardDispatch
-                                    | ClipboardPasteTarget::DashboardPeek { .. } => {
-                                        ProbedAttachment::Image(pasted)
-                                    }
                                 }
                             }
                             None => ProbedAttachment::NoRaster,
@@ -1387,23 +1354,6 @@ pub(crate) fn execute(
                 fullscreen,
                 "memory fullscreen",
             );
-        }
-        Effect::PersistDashboard(persisted) => {
-            tasks
-                .spawn(async move {
-                    let result = tokio::task::spawn_blocking(move || {
-                            if let Err(e) = crate::views::dashboard::state::write_persisted(
-                                &persisted,
-                            ) {
-                                tracing::warn!(error = %e, "failed to persist dashboard config");
-                            }
-                        })
-                        .await;
-                    if let Err(e) = result {
-                        tracing::warn!(error = %e, "failed to persist dashboard: join error");
-                    }
-                    TaskResult::CancelComplete
-                });
         }
         Effect::PersistWorktreeMode { mode, config_key } => {
             debug_assert!(

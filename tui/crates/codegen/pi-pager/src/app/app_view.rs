@@ -218,43 +218,18 @@ use super::agent_view::{AgentView, AppRenderParams, McpInitProgress};
 use super::bundle::BundleState;
 /// Which view is currently displayed.
 ///
-/// Note: `AgentDashboard` does not carry state directly because
-/// `DashboardState` is not `Copy`. The dashboard view-state lives on
-/// `AppView::dashboard` and is only "active" when `active_view == AgentDashboard`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveView {
     Welcome,
     Agent(AgentId),
-    /// The top-level Agent Dashboard. State lives in `AppView::dashboard`.
-    AgentDashboard,
 }
 impl ActiveView {
     /// The agent on screen, or `None` for a view that shows no single agent.
     pub fn agent_id(self) -> Option<AgentId> {
         match self {
             ActiveView::Agent(id) => Some(id),
-            ActiveView::Welcome | ActiveView::AgentDashboard => None,
+            ActiveView::Welcome => None,
         }
-    }
-}
-/// Target restored when leaving the dashboard (Ctrl+\ / Esc).
-/// Consumed by `dispatch_exit_dashboard`; dead agents fall back to
-/// insertion-order first / Welcome.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DashboardReturn {
-    /// Plain agent view (no session-overlay chrome).
-    Agent(AgentId),
-    /// Session overlay: re-set `attached_agent` on the way back.
-    Overlay(AgentId),
-}
-impl DashboardReturn {
-    pub fn agent_id(self) -> AgentId {
-        match self {
-            Self::Agent(id) | Self::Overlay(id) => id,
-        }
-    }
-    pub fn is_overlay(self) -> bool {
-        matches!(self, Self::Overlay(_))
     }
 }
 /// Tick cadence demanded by the current view state — see
@@ -278,19 +253,11 @@ pub const SLOW_TICK_INTERVAL: Duration = Duration::from_millis(83);
 const WELCOME_TOAST_DURATION: Duration = Duration::from_secs(2);
 /// Which prompt box in-flight voice dictation appends its finalized text to.
 /// Captured when recording **starts** so a trailing STT final still lands where
-/// the user was dictating, even if they navigate away — or toggle a dashboard
-/// row's peek panel — mid-utterance.
+/// the user was dictating, even if they navigate away mid-utterance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VoiceTarget {
     /// A live agent session's prompt box.
     Agent(AgentId),
-    /// The dashboard's new-agent dispatch input (no row peek was open at start).
-    DashboardDispatch,
-    /// The dashboard's peek reply input, bound to the agent whose peek was open
-    /// at start. The id pins the row: selecting a different row mid-utterance
-    /// stops capture (the reply widget is shared and clears on row change), so a
-    /// final can't land on the wrong agent's reply.
-    DashboardPeekReply(AgentId),
 }
 /// The voice-dictation lifecycle. Exactly one state holds at a time, so the
 /// "is the mic live / is a start queued / does a Ctrl+Space hold own it / which
@@ -358,8 +325,7 @@ impl VoiceState {
         matches!(self, Self::ColdStart { hold, .. } | Self::Recording { hold, .. } if *hold)
     }
 }
-/// Entry from the session list wire: welcome/resume pickers and the
-/// dashboard's roster rows (`session_picker_entry_to_roster`).
+/// Entry from the session list wire: welcome/resume pickers.
 #[derive(Debug, Clone)]
 pub struct SessionPickerEntry {
     pub id: String,
@@ -380,8 +346,7 @@ pub struct SessionPickerEntry {
     /// Human-readable worktree label (if the session was created in a named worktree).
     pub worktree_label: Option<String>,
     /// Per-turn secondary line (`lastTurnSummary` on the session/list wire).
-    /// Shown as the "Last turn" line on the expanded resume card and used for
-    /// dashboard roster rows.
+    /// Shown as the "Last turn" line on the expanded resume card.
     pub last_turn_summary: Option<String>,
     /// Latest session recap (`lastRecap` on the session/list wire), shown on the
     /// expanded resume card whenever available. Distinct from `last_turn_summary`.
@@ -515,10 +480,8 @@ impl PendingAction {
     pub fn new(action: Action, shortcut: KeyShortcut, label: &'static str) -> Self {
         Self::with_ttl(action, shortcut, Some(label), Self::TTL)
     }
-    /// Like [`Self::new`] but with an explicit confirm window. Used by
-    /// the dashboard-overlay stop (Ctrl+X), which mirrors the
-    /// dashboard's [`crate::views::dashboard::state::CONFIRM_WINDOW`]
-    /// rather than the default double-press TTL.
+    /// Like [`Self::new`] but with an explicit confirm window instead of the
+    /// default double-press TTL.
     pub fn with_ttl(
         action: Action,
         shortcut: KeyShortcut,
@@ -717,7 +680,6 @@ pub struct AppView {
     /// `[marketplace].plugin_cta_marketplace` is set in the effective config.
     /// `None` keeps the default pi Official source.
     pub plugin_cta_marketplace: Option<String>,
-    pub workspace_dashboard_enabled: bool,
     /// Consumer billing surface (credit fetches / warnings). False for team
     /// and API-key auth. `/usage` itself stays available for session token/cost
     /// unless [`Self::has_external_auth_provider`].
@@ -728,8 +690,8 @@ pub struct AppView {
     /// Slash commands denied for the current subscription tier
     /// ([`TIER_RESTRICTED_COMMANDS`] when the user is on the free / X Basic
     /// tier, empty otherwise). Recomputed by [`Self::apply_tier_restrictions`]
-    /// and fanned out to every slash registry (welcome prompt, agents,
-    /// dashboard); deny wins over all other visibility gates.
+    /// and fanned out to every slash registry (welcome prompt, agents);
+    /// deny wins over all other visibility gates.
     pub tier_restricted_commands: Vec<String>,
     /// App-level credit balance used to show the usage warning on the
     /// welcome screen before any agent session exists.
@@ -738,14 +700,6 @@ pub struct AppView {
     pub auto_topup: Option<crate::views::credit_bar::AutoTopupInfo>,
     /// Periodic billing poll requested (credits >= 99%).
     pub billing_poll_wanted: bool,
-    /// Local on-disk session list (dormant/idle sessions) surfaced on the
-    /// dashboard: the same list the resume picker uses, rendered as idle
-    /// rows. Entries are stored as [`crate::app::roster::RosterEntry`]
-    /// (activity `Dormant`) so they reuse the roster-row rendering / attach
-    /// path.
-    pub dashboard_local_sessions: Vec<crate::app::roster::RosterEntry>,
-    /// Whether the dashboard is currently loading the local session list.
-    pub dashboard_sessions_loading: bool,
     /// Server-authoritative shared prompt queues, keyed by `sessionId`
  /// Reconciled from `legacy ext RPC` broadcasts so
     /// every client renders the same ordered queue (including prompts queued
@@ -775,7 +729,7 @@ pub struct AppView {
     /// Startup-only seed for `AgentView::scheduler_background_loops`, resolved
     /// once from the config layers plus the remote tier known at connect.
     /// Read only until a session's own value arrives on its `session/new` /
-    /// `session/load` response, and by the session-less dashboard. Never
+    /// `session/load` response. Never
     /// refreshed afterwards — the authoritative value is per session, pinned by
     /// the shell when that session's actor spawned.
     pub scheduler_background_loops_seed: bool,
@@ -800,12 +754,12 @@ pub struct AppView {
     /// Stateful prompt widget rendered on the welcome screen (persists input across frames).
     pub welcome_prompt: PromptWidget,
     /// The single slash-command MRU/recency store. Owned here and injected
-    /// into every agent prompt and the dashboard dispatch via
+    /// into every agent prompt via
     /// [`PromptWidget::adopt_slash_mru`] so command recency is shared across
     /// surfaces (single-threaded UI; no process-global singleton).
     pub(crate) slash_mru: std::rc::Rc<std::cell::RefCell<crate::slash::mru::SlashMru>>,
     /// The single resolved per-command tag map (canonical name → free-form tag).
-    /// Owned here and injected into every agent prompt and the dashboard dispatch
+    /// Owned here and injected into every agent prompt
     /// via [`PromptWidget::adopt_command_tags`] so slash-dropdown tags are shared
     /// across surfaces. Populated from remote settings + local config; updated
     /// in place so adopters see refreshes without re-adopting.
@@ -1202,18 +1156,6 @@ pub struct AppView {
     /// works over both the welcome screen and an agent session. Opened by
     /// `/tutorial` (also in the command palette).
     pub tutorial: Option<crate::views::tutorial::TutorialState>,
-    /// Agent Dashboard state. `Some(_)` only when the dashboard view
-    /// is active (`active_view == AgentDashboard`) or recently closed.
-    /// Held outside the `ActiveView` discriminant because `DashboardState`
-    /// is not `Copy` (owns its prompt widget, peek panel, etc.).
-    pub dashboard: Option<crate::views::dashboard::DashboardState>,
-    /// Where to return when leaving the dashboard. See [`DashboardReturn`].
-    pub dashboard_return: Option<DashboardReturn>,
-    /// Persisted dashboard configuration (pinned rows, reorderings,
-    /// grouping). Loaded once on startup from
-    /// `~/.grok/config.toml`. `None` when the file/section is absent
-    /// or contained malformed data — falls back to in-memory defaults.
-    pub dashboard_persisted: Option<crate::views::dashboard::PersistedDashboard>,
     /// Per-platform key event normalizer.
     ///
     /// NOTE: new event consumers that bypass `AppView::handle_input`
@@ -1414,7 +1356,7 @@ impl AppView {
         }
     }
     /// Mirror billing + `/usage` gates onto every slash surface (agents,
-    /// welcome, dashboard dispatch / peek-reply).
+    /// welcome).
     pub(crate) fn sync_billing_surface_to_agents(&mut self) {
         let billing = self.usage_visible;
         let usage_cmd = !self.has_external_auth_provider;
@@ -1428,20 +1370,6 @@ impl AppView {
         self.welcome_prompt
             .slash_controller
             .set_usage_command_visible(usage_cmd);
-        if let Some(dash) = self.dashboard.as_mut() {
-            dash.dispatch
-                .slash_controller
-                .set_billing_surface_visible(billing);
-            dash.dispatch
-                .slash_controller
-                .set_usage_command_visible(usage_cmd);
-            dash.peek_reply
-                .slash_controller
-                .set_billing_surface_visible(billing);
-            dash.peek_reply
-                .slash_controller
-                .set_usage_command_visible(usage_cmd);
-        }
     }
     /// Force voice on for API-key sessions when only a remote rule left it off.
     /// Requirement / env / config pins still win.
@@ -1656,15 +1584,12 @@ impl AppView {
             sharing_enabled: false,
             plugin_cta_enabled: false,
             plugin_cta_marketplace: None,
-            workspace_dashboard_enabled: false,
             usage_visible: true,
             has_external_auth_provider: false,
             tier_restricted_commands: Vec::new(),
             credit_balance: None,
             auto_topup: None,
             billing_poll_wanted: false,
-            dashboard_local_sessions: Vec::new(),
-            dashboard_sessions_loading: false,
             shared_prompt_queues: std::collections::HashMap::new(),
             optimistic_prompt_echoes: std::collections::HashMap::new(),
             pending_running_adoptions: std::collections::HashMap::new(),
@@ -1676,9 +1601,6 @@ impl AppView {
             feedback_trace_choice_latched: false,
             feedback_trace_upload_pending: None,
             tutorial: None,
-            dashboard: None,
-            dashboard_return: None,
-            dashboard_persisted: None,
             keyboard_normalizer: KeyboardNormalizer::from_terminal_context(),
             voice_mode_enabled: false,
             voice_ui_active: false,
@@ -1691,7 +1613,7 @@ impl AppView {
     /// Seed `deferred_model_switch` from CLI `-m`. The CLI effort token is
     /// resolved later against the authoritative session catalog in
     /// [`take_deferred_model_switch`](crate::app::dispatch::session::lifecycle::take_deferred_model_switch);
-    /// resolving it here would use the pre-session dashboard catalog and a
+    /// resolving it here would use the pre-session catalog and a
     /// remapped menu id could resolve differently.
     pub fn deferred_model_switch_from_cli(&self) -> Option<crate::app::agent::DeferredModelSwitch> {
         Some(crate::app::agent::DeferredModelSwitch {
@@ -1736,9 +1658,6 @@ impl AppView {
             }
         }
         self.welcome_prompt.set_voice_visible(enabled);
-        if let Some(dashboard) = self.dashboard.as_mut() {
-            dashboard.set_voice_visible(enabled);
-        }
     }
     /// Sync the auto permission-mode feature gate into every slash surface.
     /// `/auto` is hard-hidden when `self.auto_mode_gate` is off; otherwise both
@@ -1751,13 +1670,10 @@ impl AppView {
             agent.prompt.set_auto_mode_available(available);
         }
         self.welcome_prompt.set_auto_mode_available(available);
-        if let Some(dashboard) = self.dashboard.as_mut() {
-            dashboard.set_auto_mode_available(available);
-        }
     }
     /// Recompute the tier-restricted slash commands from the current auth
     /// state and sync the deny list into every slash surface (welcome
-    /// prompt, all agents, dashboard) so restricted commands hide/show in
+    /// prompt, all agents) so restricted commands hide/show in
     /// lockstep. Mirrors [`Self::apply_voice_mode_enabled`].
     ///
     /// Called from [`Self::apply_auth_meta`] (startup / login) and from the
@@ -1780,9 +1696,6 @@ impl AppView {
             agent.set_restricted_commands(&names);
         }
         self.welcome_prompt.set_restricted_commands(&names);
-        if let Some(dashboard) = self.dashboard.as_mut() {
-            dashboard.set_restricted_commands(&names);
-        }
         self.tier_restricted_commands = names;
     }
     /// Whether voice mode is withheld for the current subscription tier
@@ -1916,52 +1829,26 @@ impl AppView {
     }
     /// Whether the active view still owns the bound dictation `target` — i.e. the
     /// box dictation started in is the one currently on screen and selected. The
-    /// target is bound at capture start; on the dashboard that means dispatch
-    /// requires no peek open, a peek reply requires the *same* top-level row still
-    /// peeked (the shared reply widget clears on row change), and any open
-    /// attached-agent popup (which occludes the dashboard inputs) disqualifies it.
-    /// `false` when no dictation is bound.
+    /// target is bound at capture start. `false` when no dictation is bound.
     fn voice_target_on_active_surface(&self) -> bool {
         let Some(target) = self.voice_recording_target() else {
             return false;
         };
-        if matches!(self.active_view, ActiveView::AgentDashboard)
-            && self
-                .dashboard
-                .as_ref()
-                .is_some_and(|d| d.attached_agent.is_some())
-        {
-            return false;
-        }
-        let peeked_top_level = self
-            .dashboard
-            .as_ref()
-            .and_then(|d| match d.peek.as_ref()?.row {
-                crate::views::dashboard::DashboardRowId::TopLevel(id) => Some(id),
-                _ => None,
-            });
         match (self.active_view, target) {
             (ActiveView::Agent(active), VoiceTarget::Agent(rec)) => active == rec,
-            (ActiveView::AgentDashboard, VoiceTarget::DashboardDispatch) => {
-                self.dashboard.as_ref().is_none_or(|d| d.peek.is_none())
-            }
-            (ActiveView::AgentDashboard, VoiceTarget::DashboardPeekReply(rec)) => {
-                peeked_top_level == Some(rec)
-            }
             _ => false,
         }
     }
     /// Auto-release the mic if the user navigates away from the box that started
-    /// recording (another agent / dashboard popup / a changed peek row). Keeps
-    /// stop controls and the recording session aligned. Event-loop each tick;
-    /// no-op unless recording.
+    /// recording (e.g. another agent). Keeps stop controls and the recording
+    /// session aligned. Event-loop each tick; no-op unless recording.
     pub fn enforce_voice_session_bound(&mut self) {
         if !self.voice_state.listening() || self.voice_target_on_active_surface() {
             return;
         }
         self.voice_reset();
     }
-    /// Esc handling shared by the agent and dashboard surfaces: while voice is
+    /// Esc handling shared by the agent surfaces: while voice is
     /// active, Esc aborts it (and consumes the key) rather than falling into the
     /// surface's own Esc behaviour. Gated on voice state only (not the remote
     /// flag) so Esc can always abort. `None` means Esc isn't ours — the caller
@@ -1992,20 +1879,10 @@ impl AppView {
     /// tracing pane (step 1a consumes all non-global keys), the cloud modal
     /// (step 1d), the import-Claude modal (agent-arm intercept),
     /// [`Self::voice_esc_outcome`] — listening OR pending cold-start, the
-    /// handler's actual condition, not the render-only recording flag — and
-    /// the dashboard's attached-agent popup (dashboard-arm intercept). Keep
+    /// handler's actual condition, not the render-only recording flag. Keep
     /// this list in lockstep with those intercepts when adding a top-level
     /// Esc owner.
     pub(crate) fn esc_owned_before_agent(&self) -> bool {
-        if matches!(self.active_view, ActiveView::AgentDashboard)
-            && self
-                .dashboard
-                .as_ref()
-                .and_then(|d| d.attached_agent)
-                .is_some_and(|id| self.agents.contains_key(&id))
-        {
-            return true;
-        }
         self.import_claude_modal.is_some()
             || self.voice_listening()
             || self.voice_state.pending_cold_start()
@@ -2018,7 +1895,6 @@ impl AppView {
         }
         let multiline = match self.active_view {
             ActiveView::Agent(id) => self.agents.get(&id).is_some_and(|a| a.multiline_mode),
-            ActiveView::AgentDashboard => self.dashboard.as_ref().is_some_and(|d| d.multiline_mode),
             _ => false,
         };
         let is_send = if multiline {
@@ -2054,10 +1930,8 @@ impl AppView {
     }
     /// Show a toast on the currently active view.
     ///
-    /// From the dashboard, toasts route into the dispatch input's inline
-    /// error slot. From an agent view the existing per-agent toast machinery
-    /// fires. On welcome, an overlay above the prompt for
-    /// [`WELCOME_TOAST_DURATION`].
+    /// From an agent view the existing per-agent toast machinery fires. On
+    /// welcome, an overlay above the prompt for [`WELCOME_TOAST_DURATION`].
     pub fn show_toast(&mut self, msg: &str) {
         match self.active_view {
             ActiveView::Agent(id) => {
@@ -2069,11 +1943,6 @@ impl AppView {
                     } else {
                         agent.show_toast(msg);
                     }
-                }
-            }
-            ActiveView::AgentDashboard => {
-                if let Some(d) = self.dashboard.as_mut() {
-                    d.error_toast = Some(crate::glyphs::sanitize_toast_message(msg).into_owned());
                 }
             }
             ActiveView::Welcome => {
@@ -2243,7 +2112,7 @@ impl AppView {
     }
     /// Viewport height (rows) of the surface a scroll would move — the
     /// active agent's (or its fullscreen subagent's) scrollback pane, as
-    /// measured at the last draw. 0 = unknown (welcome/dashboard views),
+    /// measured at the last draw. 0 = unknown (welcome view),
     /// which keeps the trackpad per-flush cap at its floor.
     fn scroll_viewport_height(&self) -> u16 {
         match self.active_view {
@@ -2323,69 +2192,6 @@ impl AppView {
                     self.welcome_doc_viewer.as_mut()
                 {
                     crate::views::modal::apply_doc_scroll_delta(scroll, lines);
-                }
-            }
-            ActiveView::AgentDashboard => {
-                let popup_target = self.dashboard.as_ref().and_then(|d| {
-                    d.attached_agent
-                        .zip(d.popup_outer_rect)
-                        .filter(|(_, outer)| {
-                            column >= outer.x
-                                && column < outer.x + outer.width
-                                && row >= outer.y
-                                && row < outer.y + outer.height
-                        })
-                });
-                if let Some((agent_id, _outer)) = popup_target {
-                    if let Some(agent) = self.agents.get_mut(&agent_id) {
-                        if let Some(child_sid) = agent.active_subagent.clone()
-                            && let Some(child) = agent.subagent_views.get_mut(&child_sid)
-                        {
-                            child.handle_scroll(lines, column, row);
-                            return;
-                        }
-                        agent.handle_scroll(lines, column, row);
-                    }
-                    return;
-                }
-                let in_file_search_dropdown = self
-                    .dashboard
-                    .as_ref()
-                    .and_then(|d| d.file_search_dropdown_items_area)
-                    .is_some_and(|dd| {
-                        column >= dd.x
-                            && column < dd.x + dd.width
-                            && row >= dd.y
-                            && row < dd.y + dd.height
-                    });
-                if in_file_search_dropdown {
-                    if let Some(ref mut dashboard) = self.dashboard {
-                        dashboard
-                            .dropdown_file_search_mut()
-                            .move_selection(lines.signum() as isize);
-                    }
-                    return;
-                }
-                let in_slash_dropdown = self
-                    .dashboard
-                    .as_ref()
-                    .and_then(|d| d.slash_dropdown_items_area)
-                    .is_some_and(|dd| {
-                        column >= dd.x
-                            && column < dd.x + dd.width
-                            && row >= dd.y
-                            && row < dd.y + dd.height
-                    });
-                if in_slash_dropdown {
-                    if let Some(ref mut dashboard) = self.dashboard {
-                        dashboard
-                            .dispatch
-                            .slash_scroll_selection(lines.signum() as isize);
-                    }
-                    return;
-                }
-                if let Some(ref mut dashboard) = self.dashboard {
-                    dashboard.handle_scroll(lines);
                 }
             }
         }
@@ -2585,142 +2391,6 @@ impl AppView {
                 },
             ),
             ActiveView::Agent(id) => {
-                let overlay_active = self
-                    .dashboard
-                    .as_ref()
-                    .is_some_and(|d| d.attached_agent == Some(id));
-                if !overlay_active
-                    && let Event::Key(key) = ev
-                    && key.kind != KeyEventKind::Release
-                {
-                    match self
-                        .registry
-                        .lookup(key, crate::actions::When::DashboardOverlay)
-                    {
-                        Some(crate::actions::ActionId::DashboardOverlayPrev) => {
-                            return InputOutcome::Action(Action::DashboardOverlayPrev);
-                        }
-                        Some(crate::actions::ActionId::DashboardOverlayNext) => {
-                            return InputOutcome::Action(Action::DashboardOverlayNext);
-                        }
-                        _ => {}
-                    }
-                }
-                if overlay_active {
-                    if let Event::Key(key) = ev
-                        && key.kind != KeyEventKind::Release
-                    {
-                        let lookup = self
-                            .registry
-                            .lookup(key, crate::actions::When::DashboardOverlay)
-                            .or_else(|| self.registry.lookup(key, crate::actions::When::Always));
-                        match lookup {
-                            Some(crate::actions::ActionId::OpenDashboard)
-                            | Some(crate::actions::ActionId::DashboardOverlayExit) => {
-                                return InputOutcome::Action(Action::DashboardOverlayExit);
-                            }
-                            Some(crate::actions::ActionId::DashboardOverlayPrev) => {
-                                return InputOutcome::Action(Action::DashboardOverlayPrev);
-                            }
-                            Some(crate::actions::ActionId::DashboardOverlayNext) => {
-                                return InputOutcome::Action(Action::DashboardOverlayNext);
-                            }
-                            Some(crate::actions::ActionId::DashboardOverlayStop) => {
-                                if let Some(agent) = self.agents.get_mut(&id)
-                                    && agent.arm_dashboard_stop()
-                                {
-                                    return InputOutcome::Action(Action::CancelTurn);
-                                }
-                                self.pending_action = Some(PendingAction::with_ttl(
-                                    Action::DashboardOverlayStop,
-                                    KeyShortcut::from(*key),
-                                    Some("close this session"),
-                                    crate::views::dashboard::state::CONFIRM_WINDOW,
-                                ));
-                                return InputOutcome::Changed;
-                            }
-                            _ => {}
-                        }
-                        if key.code == KeyCode::Left
-                            && key.modifiers.is_empty()
-                            && self
-                                .agents
-                                .get(&id)
-                                .is_some_and(|a| a.is_empty_focused_prompt())
-                        {
-                            return InputOutcome::Action(Action::DashboardOverlayExit);
-                        }
-                        if key.code == KeyCode::Esc
-                            && key.modifiers.is_empty()
-                            && self
-                                .agents
-                                .get(&id)
-                                .is_some_and(|a| a.overlay_esc_backs_out_from_prompt())
-                        {
-                            return InputOutcome::Action(Action::DashboardOverlayExit);
-                        }
-                        if key.modifiers.is_empty()
-                            && self.agents.get(&id).is_some_and(|a| match key.code {
-                                KeyCode::Esc => a.overlay_esc_backs_out(),
-                                KeyCode::Left => a.overlay_left_backs_out(),
-                                _ => false,
-                            })
-                        {
-                            return InputOutcome::Action(Action::DashboardOverlayExit);
-                        }
-                        let neutral = self.agents.get(&id).is_some_and(|a| {
-                            a.is_bare_scrollback() && a.no_input_overlay_pending()
-                        });
-                        if key.code == KeyCode::Char('q') && key.modifiers.is_empty() && neutral {
-                            return InputOutcome::Action(Action::DashboardOverlayExit);
-                        }
-                        if key.code == KeyCode::Esc
-                            && key.modifiers.is_empty()
-                            && neutral
-                            && self.agents.get(&id).is_some_and(|a| {
-                                a.no_esc_consumer_pending()
-                                    && !a.session.state.is_turn_running()
-                                    && !a.session.state.is_cancelling()
-                                    && !a.wake_turn_active()
-                            })
-                        {
-                            return InputOutcome::Action(Action::DashboardOverlayExit);
-                        }
-                    }
-                    if let Event::Mouse(mouse) = ev {
-                        use crossterm::event::{MouseButton, MouseEventKind};
-                        match mouse.kind {
-                            MouseEventKind::Moved => {
-                                let mut changed = false;
-                                if let Some(d) = self.dashboard.as_mut() {
-                                    changed |=
-                                        d.overlay_close_hit.update_hover(mouse.column, mouse.row);
-                                    changed |=
-                                        d.overlay_prev_hit.update_hover(mouse.column, mouse.row);
-                                    changed |=
-                                        d.overlay_next_hit.update_hover(mouse.column, mouse.row);
-                                }
-                                if changed {
-                                    return InputOutcome::Changed;
-                                }
-                            }
-                            MouseEventKind::Down(MouseButton::Left) => {
-                                if let Some(d) = self.dashboard.as_ref() {
-                                    if d.overlay_close_hit.contains(mouse.column, mouse.row) {
-                                        return InputOutcome::Action(Action::DashboardOverlayExit);
-                                    }
-                                    if d.overlay_prev_hit.contains(mouse.column, mouse.row) {
-                                        return InputOutcome::Action(Action::DashboardOverlayPrev);
-                                    }
-                                    if d.overlay_next_hit.contains(mouse.column, mouse.row) {
-                                        return InputOutcome::Action(Action::DashboardOverlayNext);
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
                 if let Some(modal) = self.import_claude_modal.as_mut() {
                     use crate::views::import_claude_modal::ImportClaudeModalOutcome;
                     let outcome_to_input = |o: ImportClaudeModalOutcome| match o {
@@ -2763,7 +2433,7 @@ impl AppView {
                 {
                     return outcome;
                 }
-                let prompt_paging = !overlay_active && !self.screen_mode.is_minimal();
+                let prompt_paging = !self.screen_mode.is_minimal();
                 let outcome = match self.agents.get_mut(&id) {
                     Some(agent) => {
                         let transcript_before = agent.active_subagent.clone();
@@ -2796,142 +2466,6 @@ impl AppView {
                     InputOutcome::Unchanged
                 } else {
                     outcome
-                }
-            }
-            ActiveView::AgentDashboard => {
-                if let Some(outcome) = self.voice_esc_outcome(key_event) {
-                    return outcome;
-                }
-                if let Event::Key(key) = ev
-                    && key.kind != KeyEventKind::Release
-                {
-                    self.maybe_commit_voice_interim_before_submit_key(key);
-                }
-                let attached_raw = self.dashboard.as_ref().and_then(|d| d.attached_agent);
-                let attached = attached_raw.filter(|id| self.agents.contains_key(id));
-                if attached_raw.is_some()
-                    && attached.is_none()
-                    && let Some(d) = self.dashboard.as_mut()
-                {
-                    d.close_popup();
-                }
-                if let Some(agent_id) = attached {
-                    if let Event::Key(key) = ev
-                        && key.kind != KeyEventKind::Release
-                    {
-                        let close_via_esc = key.code == KeyCode::Esc;
-                        let close_via_action = self
-                            .registry
-                            .lookup(key, crate::actions::When::Always)
-                            .is_some_and(|id| {
-                                matches!(
-                                    id,
-                                    crate::actions::ActionId::OpenDashboard
-                                        | crate::actions::ActionId::DashboardExit
-                                )
-                            });
-                        if close_via_action || close_via_esc {
-                            if let Some(d) = self.dashboard.as_mut() {
-                                d.close_popup();
-                            }
-                            if let Some(agent) = self.agents.get_mut(&agent_id) {
-                                agent.close_subagent_fullscreen();
-                            }
-                            return InputOutcome::Changed;
-                        }
-                    }
-                    if let Event::Mouse(mouse) = ev
-                        && matches!(
-                            mouse.kind,
-                            crossterm::event::MouseEventKind::Down(
-                                crossterm::event::MouseButton::Left
-                            )
-                        )
-                    {
-                        let (close_rect, outer_rect, row_target) = {
-                            let dash = self.dashboard.as_ref();
-                            let close_rect = dash.and_then(|d| d.popup_close_rect);
-                            let outer_rect = dash.and_then(|d| d.popup_outer_rect);
-                            let row_target = dash.and_then(|d| {
-                                d.row_rects
-                                    .iter()
-                                    .find(|(_, r)| {
-                                        mouse.column >= r.x
-                                            && mouse.column < r.x + r.width
-                                            && mouse.row >= r.y
-                                            && mouse.row < r.y + r.height
-                                    })
-                                    .map(|(id, _)| id.clone())
-                            });
-                            (close_rect, outer_rect, row_target)
-                        };
-                        let in_close = close_rect.is_some_and(|r| {
-                            mouse.column >= r.x
-                                && mouse.column < r.x + r.width
-                                && mouse.row >= r.y
-                                && mouse.row < r.y + r.height
-                        });
-                        let in_outer = outer_rect.is_some_and(|r| {
-                            mouse.column >= r.x
-                                && mouse.column < r.x + r.width
-                                && mouse.row >= r.y
-                                && mouse.row < r.y + r.height
-                        });
-                        if in_close {
-                            if let Some(d) = self.dashboard.as_mut() {
-                                d.close_popup();
-                            }
-                            if let Some(agent) = self.agents.get_mut(&agent_id) {
-                                agent.close_subagent_fullscreen();
-                            }
-                            return InputOutcome::Changed;
-                        }
-                        if !in_outer && let Some(target) = row_target {
-                            return InputOutcome::Action(Action::DashboardAttach(target));
-                        }
-                        if !in_outer {
-                            return InputOutcome::Unchanged;
-                        }
-                    }
-                    match self.agents.get_mut(&agent_id) {
-                        Some(agent) => {
-                            let transcript_before = agent.active_subagent.clone();
-                            let workflows_before = agent.show_workflows;
-                            let outcome = agent.handle_input(ev, &self.registry);
-                            let transcript_opened =
-                                transcript_before.is_none() && agent.active_subagent.is_some();
-                            let workflows_opened = !workflows_before && agent.show_workflows;
-                            if let Event::Key(key) = ev {
-                                agent.record_input(key, &outcome);
-                            }
-                            self.pending_effects.append(&mut agent.pending_effects);
-                            if transcript_opened || workflows_opened {
-                                self.scroll_state.cancel_stream();
-                                self.last_scroll_pos = None;
-                            }
-                            if matches!(outcome, InputOutcome::Action(Action::ExitSession)) {
-                                if let Some(d) = self.dashboard.as_mut() {
-                                    d.close_popup();
-                                }
-                                if let Some(agent) = self.agents.get_mut(&agent_id) {
-                                    agent.close_subagent_fullscreen();
-                                }
-                                return InputOutcome::Changed;
-                            }
-                            outcome
-                        }
-                        None => InputOutcome::Unchanged,
-                    }
-                } else if let Some(ref mut dashboard) = self.dashboard {
-                    let outcome = dashboard.handle_input_with_paste_provenance(
-                        ev,
-                        &self.registry,
-                        paste_provenance,
-                    );
-                    self.pending_effects.append(&mut dashboard.pending_effects);
-                    outcome
-                } else {
-                    InputOutcome::Unchanged
                 }
             }
         };
@@ -3013,10 +2547,7 @@ impl AppView {
         }
         if let Some(key) = key_event
             && (key!('c', CONTROL).matches(key) || key!('d', CONTROL).matches(key))
-            && matches!(
-                self.active_view,
-                ActiveView::Agent(_) | ActiveView::AgentDashboard
-            )
+            && matches!(self.active_view, ActiveView::Agent(_))
         {
             self.pending_action = Some(PendingAction::new(
                 Action::Quit,
@@ -3044,7 +2575,6 @@ impl AppView {
                 label: None,
                 git_ref: None,
             },
-            ActionId::OpenDashboard => Action::OpenDashboard,
             ActionId::VoiceToggle => {
                 if !self.current_ui.voice_keybind_enabled.unwrap_or(true) {
                     return InputOutcome::Unchanged;
@@ -4197,52 +3727,6 @@ impl AppView {
             (None, second) => second,
         }
     }
-    /// Build the Kitty delete escapes that remove image placements left
-    /// behind by agent views that are not drawn this frame.
-    ///
-    /// Kitty graphics survive cell redraws until explicitly deleted, and
-    /// every regular clear lives inside `AgentView::draw` / the prompt
-    /// widget's per-frame self-heal. Once the dashboard takes over the
-    /// frame those paths stop running, so an image overlay (or inline
-    /// scrollback media) the user left open in the agent view would float
-    /// above the dashboard forever. Called from the
-    /// `ActiveView::AgentDashboard` draw branch every frame:
-    ///
-    /// - Placement id 1 is cleared only when no popup agent is drawn; a popup
-    ///   owns and reuses that slot across consecutive dashboard frames.
-    /// - Inline scrollback media ids (2+) are drained per agent via
-    ///   `AgentView::take_inline_media_clear_escapes`, which resets the
-    ///   agent's placement tracking — a one-shot sweep per transition,
-    ///   not a per-frame cost. The popup-attached agent is skipped: it
-    ///   just drew and manages its own placements. The clears-before-popup
-    ///   ordering also means a drained id that collides with one the popup
-    ///   re-places this frame ends up displayed, not deleted.
-    fn dashboard_stale_image_clears(
-        agents: &mut IndexMap<AgentId, AgentView>,
-        drawn_agent: Option<AgentId>,
-    ) -> Option<crate::terminal::overlay::PostFlush> {
-        if crate::terminal::image::detect_graphics_protocol()
-            == crate::terminal::image::GraphicsProtocol::None
-        {
-            return None;
-        }
-        let mut clears = crate::terminal::overlay::PostFlush::default();
-        let mut has_escapes = false;
-        for (id, agent) in agents.iter_mut() {
-            if Some(*id) == drawn_agent {
-                continue;
-            }
-            if let Some(esc) = agent.take_inline_media_clear_escapes() {
-                clears.append_plain(&esc);
-                has_escapes = true;
-            }
-        }
-        if drawn_agent.is_none() {
-            clears.append(crate::terminal::overlay::clear_kitty().into());
-            has_escapes = true;
-        }
-        has_escapes.then_some(clears)
-    }
     /// Minimal mode: queue the most-recently committed folded block (collapsed
     /// reasoning / truncated tool output) to be re-printed fully expanded below
     /// the conversation on the next draw (design decision K10). Returns whether
@@ -4722,68 +4206,7 @@ impl AppView {
                     }
                     ActiveView::Agent(id) => {
                         let overlay_focused = false;
-                        let overlay_active = self
-                            .dashboard
-                            .as_ref()
-                            .is_some_and(|d| d.attached_agent == Some(id));
-                        let position: Option<(usize, usize)> =
-                            if overlay_active && let Some(d) = self.dashboard.as_ref() {
-                                let order = crate::views::dashboard::overlay_cycle_order(d, agents);
-                                order
-                                    .iter()
-                                    .position(|i| *i == id)
-                                    .map(|idx| (idx + 1, order.len()))
-                            } else {
-                                None
-                            };
-                        let overlay_can_cycle = position.is_some_and(|(_, n)| n > 1);
-                        let (agent_area, header) = if overlay_active {
-                            let theme = crate::theme::Theme::current();
-                            let title = agents
-                                .get(&id)
-                                .map(crate::views::session_title::entry_title)
-                                .unwrap_or_else(|| "(session)".to_string());
-                            let (hover_prev, hover_next, hover_close) = self
-                                .dashboard
-                                .as_ref()
-                                .map(|d| {
-                                    (
-                                        d.overlay_prev_hit.hovered,
-                                        d.overlay_next_hit.hovered,
-                                        d.overlay_close_hit.hovered,
-                                    )
-                                })
-                                .unwrap_or((false, false, false));
-                            let header = crate::views::dashboard::render_dashboard_session_header(
-                                f.buffer_mut(),
-                                view_area,
-                                &theme,
-                                &title,
-                                position,
-                                hover_prev,
-                                hover_next,
-                                hover_close,
-                                header_pad_left,
-                                header_pad_right,
-                                header_pad_top,
-                            );
-                            match header {
-                                Some(chrome) => (chrome.content, Some(chrome)),
-                                None => (view_area, None),
-                            }
-                        } else {
-                            (view_area, None)
-                        };
-                        if let Some(d) = self.dashboard.as_mut() {
-                            d.overlay_close_hit.set(header.and_then(|c| c.close_rect));
-                            d.overlay_prev_hit.set(header.and_then(|c| c.prev_rect));
-                            d.overlay_next_hit.set(header.and_then(|c| c.next_rect));
-                        }
-                        if let Some(d) = self.dashboard.as_mut()
-                            && d.peek_viewport.is_some()
-                        {
-                            d.restore_peek_viewport(agents);
-                        }
+                        let agent_area = view_area;
                         if let Some(agent) = agents.get_mut(&id) {
                             let announcement_banner_h =
                                 crate::views::announcements::session_banner_height(
@@ -4825,8 +4248,6 @@ impl AppView {
                                     },
                                 },
                                 &self.bundle_state,
-                                overlay_active,
-                                overlay_can_cycle,
                                 link_spans,
                                 AppRenderParams {
                                     voice_available,
@@ -4876,119 +4297,6 @@ impl AppView {
                             return (cursor, Self::merge_escapes(notif_escapes, post_flush));
                         }
                     }
-                    ActiveView::AgentDashboard => {
-                        if let Some(dashboard) = self.dashboard.as_mut() {
-                            dashboard.voice_listening = voice_listening;
-                            dashboard.voice_interim = voice_interim.clone();
-                            if let Some(id) = dashboard.attached_agent
-                                && !agents.contains_key(&id)
-                            {
-                                dashboard.close_popup();
-                                if dashboard.error_toast.is_none() {
-                                    dashboard.error_toast = Some(format!(
-                                        "{} Session closed",
-                                        crate::glyphs::check_mark()
-                                    ));
-                                }
-                            }
-                            let dashboard_roster: &[crate::app::roster::RosterEntry] =
-                                &self.dashboard_local_sessions;
-                            let dash_upgrade_cta = crate::views::announcements::promo_cta(
-                                &self.active_announcements,
-                                &self.hidden_announcement_ids,
-                            )
-                            .map(
-                                |(owner, label, _)| crate::views::dashboard::HeaderUpgradeCta {
-                                    label,
-                                    pinned: !crate::views::announcements::is_dismissible(owner),
-                                    caption: crate::views::announcements::usable_cta_caption(owner),
-                                },
-                            );
-                            let dash_cursor = crate::views::dashboard::render_dashboard(
-                                f.buffer_mut(),
-                                view_area,
-                                dashboard,
-                                agents,
-                                registry,
-                                pending_hint,
-                                dashboard_roster,
-                                self.dashboard_sessions_loading,
-                                dash_upgrade_cta,
-                            );
-                            let (popup_cursor, popup_post_flush, drawn_popup_agent) =
-                                if let Some(agent_id) = dashboard.attached_agent {
-                                    let theme = crate::theme::Theme::current();
-                                    let popup_area = crate::views::dashboard::popup_rect(view_area);
-                                    let title = agents
-                                        .get(&agent_id)
-                                        .map(crate::views::session_title::entry_title)
-                                        .unwrap_or_else(|| "(session)".to_string());
-                                    let bundle_state = &self.bundle_state;
-                                    let (cursor, post_flush, drawn) =
-                                        crate::views::dashboard::render_popup_overlay(
-                                            f.buffer_mut(),
-                                            popup_area,
-                                            &theme,
-                                            &title,
-                                            dashboard,
-                                            |inner, buf| {
-                                                if let Some(agent) = agents.get_mut(&agent_id) {
-                                                    agent.draw(
-                                                    inner,
-                                                    buf,
-                                                    registry,
-                                                    scratch,
-                                                    None,
-                                                    false,
-                                                    crate::app::agent_view::BannerSlotParams::none(
-                                                    ),
-                                                    bundle_state,
-                                                    false,
-                                                    false,
-                                                    link_spans,
-                                                    AppRenderParams {
-                                                        esc_owned_before_agent,
-                                                        ..Default::default()
-                                                    },
-                                                )
-                                                } else {
-                                                    (None, None)
-                                                }
-                                            },
-                                        );
-                                    (cursor, post_flush, drawn.then_some(agent_id))
-                                } else {
-                                    (None, None, None)
-                                };
-                            let stale_clears =
-                                Self::dashboard_stale_image_clears(agents, drawn_popup_agent);
-                            let popup_post_flush =
-                                Self::merge_post_flush(stale_clears, popup_post_flush);
-                            let tutorial_open = self.tutorial.is_some();
-                            if let Some(tutorial) = self.tutorial.as_mut() {
-                                crate::views::tutorial::render_tutorial(
-                                    f.buffer_mut(),
-                                    view_area,
-                                    tutorial,
-                                    compact,
-                                );
-                            }
-                            if let Some(fps) = &fps_overlay {
-                                fps.render(full_area, f.buffer_mut());
-                            }
-                            if let Some(panel) = &scroll_debug_panel {
-                                panel.render(full_area, f.buffer_mut());
-                            }
-                            let cursor = if tutorial_open {
-                                None
-                            } else if dashboard.attached_agent.is_some() {
-                                popup_cursor
-                            } else {
-                                dash_cursor
-                            };
-                            return (cursor, Self::merge_escapes(notif_escapes, popup_post_flush));
-                        }
-                    }
                 }
             }
             if let Some(fps) = &fps_overlay {
@@ -5014,8 +4322,8 @@ impl AppView {
     /// promo emits nothing.
     pub(crate) fn log_announcement_cta_impressions(&mut self) {
         use pi_telemetry::events::AnnouncementCtaSurface;
-        let (banner, welcome, header, dashboard) = match self.active_view {
-            ActiveView::Welcome => (false, self.welcome_upgrade_cta_rect.is_some(), false, false),
+        let (banner, welcome, header) = match self.active_view {
+            ActiveView::Welcome => (false, self.welcome_upgrade_cta_rect.is_some(), false),
             ActiveView::Agent(agent_id) => match self.agents.get(&agent_id) {
                 Some(a) => {
                     let cta_rect = a.hit_announcement_cta.rect;
@@ -5024,21 +4332,12 @@ impl AppView {
                         cta_rect.is_some_and(|r| !a.rect_occluded(r)),
                         false,
                         header_rect.is_some_and(|r| !a.rect_occluded(r)),
-                        false,
                     )
                 }
                 None => return,
             },
-            ActiveView::AgentDashboard => (
-                false,
-                false,
-                false,
-                self.dashboard
-                    .as_ref()
-                    .is_some_and(|d| d.upgrade_cta_hit.rect.is_some()),
-            ),
         };
-        if !(banner || welcome || header || dashboard) {
+        if !(banner || welcome || header) {
             return;
         }
         let Some((owner, _label, _url)) = crate::views::announcements::promo_cta(
@@ -5053,7 +4352,6 @@ impl AppView {
             (AnnouncementCtaSurface::Banner, banner),
             (AnnouncementCtaSurface::Welcome, welcome),
             (AnnouncementCtaSurface::Header, header),
-            (AnnouncementCtaSurface::Dashboard, dashboard),
         ];
         for (surface, _) in surfaces.into_iter().filter(|(_, painted)| *painted) {
             if self
@@ -5134,8 +4432,6 @@ impl AppView {
             || self.new_worktree_dialog.is_some()
             || self.welcome_doc_viewer.is_some()
             || self.tutorial.is_some()
-            || matches!(self.active_view, ActiveView::AgentDashboard
-                if self.dashboard.as_ref().is_some_and(|d| d.shortcuts_modal.is_some()))
             || cloud_modal_open
     }
     /// Store the resolved per-tip gates and propagate the prompt-relevant tips
@@ -5347,14 +4643,6 @@ impl AppView {
                 }
             }
         }
-        if matches!(self.active_view, ActiveView::AgentDashboard)
-            && let Some(d) = self.dashboard.as_mut()
-        {
-            d.spinner_tick = d.spinner_tick.wrapping_add(1);
-            needs_redraw = true;
-            d.dispatch.poll_file_search();
-            d.peek_reply.poll_file_search();
-        }
         if let Some(pending) = &self.pending_action
             && pending.expired()
         {
@@ -5503,9 +4791,6 @@ impl AppView {
         if let Some(commands) = bootstrap_commands_update {
             self.welcome_prompt
                 .sync_acp_commands(&commands, None, &self.models);
-            if let Some(d) = self.dashboard.as_mut() {
-                d.dispatch.sync_acp_commands(&commands, None, &self.models);
-            }
             self.bootstrap_acp_commands = commands;
         }
         self.update_notifications();
@@ -5795,27 +5080,6 @@ impl AppView {
                     return TickDemand::Slow;
                 }
                 TickDemand::None
-            }
-            ActiveView::AgentDashboard => {
-                let agents_need = self.agents.values().any(|agent| {
-                    !agent.session.state.is_idle()
-                        || !agent.permission_queue.is_empty()
-                        || agent.session.loading_replay
-                        || agent
-                            .subagent_sessions
-                            .values()
-                            .any(|info| !info.finished && info.workflow_run_id.is_none())
-                        || agent.workflow_runs.iter().any(|run| run.is_active())
-                });
-                let dash_search = self.dashboard.as_ref().is_some_and(|d| {
-                    d.dispatch.file_search.context().is_some()
-                        || d.peek_reply.file_search.context().is_some()
-                });
-                if agents_need || dash_search {
-                    TickDemand::Fast
-                } else {
-                    TickDemand::None
-                }
             }
             ActiveView::Welcome => TickDemand::Slow,
         }

@@ -2194,8 +2194,6 @@ pub(super) mod paste_key_tests {
             false,
             crate::app::agent_view::BannerSlotParams::none(),
             &bundle,
-            false,
-            false,
             &mut Vec::new(),
             crate::app::agent_view::AppRenderParams::default(),
         );

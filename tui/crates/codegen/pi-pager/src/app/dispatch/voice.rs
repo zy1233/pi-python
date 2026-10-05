@@ -20,29 +20,11 @@ pub(super) fn merge_prompt_with_voice_interim(existing: String, interim: Option<
     }
 }
 
-/// The prompt box dictation should target for the current surface: a top-level
-/// row's peek reply when one is open, the new-agent dispatch input otherwise, or
-/// the active agent's prompt. `None` off those surfaces. A non-top-level peek
-/// (subagent / roster, which can't accept a reply) maps to the dispatch box,
-/// which `enforce_voice_session_bound` then stops since a peek is open.
+/// The prompt box dictation should target for the current surface: the active
+/// agent's prompt. `None` off that surface.
 fn voice_target_for_view(app: &AppView) -> Option<VoiceTarget> {
-    use crate::views::dashboard::DashboardRowId;
     match app.active_view {
         ActiveView::Agent(id) => Some(VoiceTarget::Agent(id)),
-        ActiveView::AgentDashboard => {
-            let dashboard = app.dashboard.as_ref();
-            // The attached-agent popup hides the dispatch/peek inputs; don't bind
-            // dictation to a box the user can't see (no overlay, finals lost).
-            if dashboard.is_some_and(|d| d.attached_agent.is_some()) {
-                return None;
-            }
-            Some(
-                match dashboard.and_then(|d| d.peek.as_ref()).map(|p| &p.row) {
-                    Some(DashboardRowId::TopLevel(id)) => VoiceTarget::DashboardPeekReply(*id),
-                    _ => VoiceTarget::DashboardDispatch,
-                },
-            )
-        }
         _ => None,
     }
 }
@@ -51,24 +33,15 @@ fn voice_target_for_view(app: &AppView) -> Option<VoiceTarget> {
 /// to start voice via the Ctrl+Space / F8 keybinding, which bypasses the slash
 /// registry (`/voice` is instead hidden + upsold via the deny list). Mirrors the
 /// slash-command upsell surfaces: a Q&A modal on an agent screen
-/// ([`super::billing::open_restricted_command_upsell`]), the feedback toast on
-/// the dashboard (which has no modal surface), and a silent no-op elsewhere
-/// (e.g. the welcome screen, which has no agent to host the modal). Never starts
-/// voice; always returns no effects.
+/// ([`super::billing::open_restricted_command_upsell`]) and a silent no-op
+/// elsewhere (e.g. the welcome screen, which has no agent to host the modal).
+/// Never starts voice; always returns no effects.
 fn open_voice_tier_upsell(app: &mut AppView) -> Vec<Effect> {
     let login_method = app.login_method_id.as_ref().map(|id| id.0.to_string());
     match app.active_view {
         ActiveView::Agent(id) => {
             if let Some(agent) = app.agents.get_mut(&id) {
                 super::billing::open_restricted_command_upsell(agent, login_method);
-            }
-        }
-        ActiveView::AgentDashboard => {
-            if let Some(d) = app.dashboard.as_mut() {
-                d.set_error_toast(&format!(
-                    "/voice requires SuperGrok: upgrade at {}",
-                    super::billing::UPSELL_URL_UPGRADE
-                ));
             }
         }
         _ => {}
@@ -87,12 +60,10 @@ fn open_voice_tier_upsell(app: &mut AppView) -> Vec<Effect> {
 /// (free / X Basic), it shows the SuperGrok upsell instead of starting a session
 /// (see [`open_voice_tier_upsell`]) — this is the enforcement point for the
 /// keybinding, which bypasses the slash registry. Otherwise dictation routes
-/// into a prompt box: the active agent's prompt, or the dashboard's dispatch
-/// (new-agent) input. On the session-less welcome screen (first launch) a session
-/// is created first — via the gated [`dispatch_new_session`], so auth and
-/// folder-trust are respected — so voice works from a cold start in one press.
-/// Any other surface with no visible box (off-screen, or the dashboard behind a
-/// popup) is a silent no-op.
+/// into the active agent's prompt box. On the session-less welcome screen (first
+/// launch) a session is created first — via the gated [`dispatch_new_session`],
+/// so auth and folder-trust are respected — so voice works from a cold start in
+/// one press. Any other surface with no visible box is a silent no-op.
 /// `from_hold` marks a Ctrl+Space hold-press start (`VoiceState::*::hold`) so the
 /// matching Ctrl+Space release (see [`dispatch_voice_stop`]) ends *this* session
 /// and only this one; `/voice` and the toggle pass `false` so a Ctrl+Space
@@ -121,8 +92,8 @@ pub(super) fn dispatch_enable_voice_mode(app: &mut AppView, from_hold: bool) -> 
 
     // Bind the dictation target at press time (the cold-start path defers capture
     // to the event loop, where the surface could have changed). `None` is a
-    // box-less surface — occluded dashboard, or a welcome the gate kept closed —
-    // so stay a silent no-op.
+    // box-less surface — e.g. a welcome the gate kept closed — so stay a silent
+    // no-op.
     let Some(target) = voice_target_for_view(app) else {
         return effects;
     };

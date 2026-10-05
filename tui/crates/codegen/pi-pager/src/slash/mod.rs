@@ -351,11 +351,6 @@ pub struct SlashController {
     registry: CommandRegistry,
     matcher: FuzzyMatcher,
     cwd: std::path::PathBuf,
-    /// When `true`, commands whose [`SlashCommand::session_scoped`] is
-    /// `true` are suppressed from completion. Set on session-less
-    /// surfaces — the agent dashboard's dispatch input — so the dropdown
-    /// only offers pager-global commands. Defaults to `false`.
-    hide_session_scoped: bool,
     /// Offer `/announcements` when session announcements (critical or promo) exist.
     has_session_announcements: bool,
     /// Consumer billing surface — gates `/usage` subcommands. Default `true`.
@@ -375,13 +370,13 @@ pub struct SlashController {
     /// agent view; `None` when the session has no title yet.
     current_title: Option<String>,
     /// MRU/recency store. Owned by `AppView` in production and injected via
-    /// [`Self::set_mru`] so agent prompts and the dashboard share one store;
+    /// [`Self::set_mru`] so agent prompts share one store;
     /// defaults to an isolated in-memory store (no disk I/O) for tests and any
     /// surface that has not been wired up.
     mru: std::rc::Rc<std::cell::RefCell<mru::SlashMru>>,
     /// Resolved per-command tag map (canonical name → free-form tag). Owned by
     /// `AppView` and injected via [`Self::set_command_tags`] so agent prompts
-    /// and the dashboard share one map; defaults to empty for tests and any
+    /// share one map; defaults to empty for tests and any
     /// surface that has not been wired up.
     command_tags: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<String, String>>>,
 }
@@ -406,7 +401,6 @@ impl SlashController {
             registry,
             matcher: FuzzyMatcher::new(),
             cwd,
-            hide_session_scoped: false,
             has_session_announcements: false,
             billing_surface_visible: true,
             usage_command_visible: true,
@@ -422,14 +416,13 @@ impl SlashController {
     }
 
     /// Replace the MRU store with a shared one. Used by `AppView` to inject the
-    /// process-wide store into agent prompts and the dashboard dispatch input.
+    /// process-wide store into agent prompts.
     pub fn set_mru(&mut self, mru: std::rc::Rc<std::cell::RefCell<mru::SlashMru>>) {
         self.mru = mru;
     }
 
     /// Replace the per-command tag map with a shared one. Used by `AppView` to
-    /// inject the resolved (remote + local) tag map into agent prompts and the
-    /// dashboard dispatch input.
+    /// inject the resolved (remote + local) tag map into agent prompts.
     pub fn set_command_tags(
         &mut self,
         command_tags: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<String, String>>>,
@@ -574,28 +567,11 @@ impl SlashController {
         self.registry.set_auto_mode_available(available);
     }
 
-    /// Suppress (or restore) session-scoped commands in completion.
-    ///
-    /// Called once on session-less surfaces (the agent dashboard's
-    /// dispatch input) so commands that act on a single session never
-    /// surface in the dropdown or inline ghost. See
-    /// [`SlashCommand::session_scoped`].
-    pub fn set_hide_session_scoped(&mut self, hide: bool) {
-        self.hide_session_scoped = hide;
-    }
-
-    /// Whether session-scoped commands are suppressed on this surface
-    /// (see [`Self::set_hide_session_scoped`]).
-    pub fn hide_session_scoped(&self) -> bool {
-        self.hide_session_scoped
-    }
-
     /// Whether `command` should be offered for completion or execution
-    /// given this controller's session-scope policy and the command's
-    /// own visibility gates. See [`command_offered`].
+    /// given the command's own visibility gates. See [`command_offered`].
     pub fn is_command_offered(&self, command: &dyn SlashCommand, models: &ModelState) -> bool {
         let ctx = self.app_ctx(models);
-        command_offered(command, &ctx, self.hide_session_scoped)
+        command_offered(command, &ctx)
     }
 
     /// Recompute the snapshot from prompt text + cursor position.
@@ -679,7 +655,7 @@ impl SlashController {
             && let Some(command) = self.registry.get_for_dispatch(invocation.token)
         {
             let ctx = self.app_ctx(models);
-            if command_offered(command.as_ref(), &ctx, self.hide_session_scoped) {
+            if command_offered(command.as_ref(), &ctx) {
                 snapshot.command_recognized = true;
                 snapshot.is_skill = command.is_skill();
                 if args_text_empty {
@@ -721,7 +697,7 @@ impl SlashController {
             let ctx = self.app_ctx(models);
             self.registry
                 .get(&token.name)
-                .is_some_and(|cmd| command_offered(cmd.as_ref(), &ctx, self.hide_session_scoped))
+                .is_some_and(|cmd| command_offered(cmd.as_ref(), &ctx))
         };
 
         let mut snapshot = match phase {
@@ -814,7 +790,7 @@ impl SlashController {
             return snapshot;
         };
         let ctx = self.app_ctx(models);
-        if !command_offered(command.as_ref(), &ctx, self.hide_session_scoped)
+        if !command_offered(command.as_ref(), &ctx)
             || !command.takes_args_now(&ctx)
         {
             return snapshot;
@@ -954,13 +930,12 @@ impl SlashController {
             return Vec::new();
         }
         let ctx = self.app_ctx(models);
-        let hide_session = self.hide_session_scoped;
         tokens
             .into_iter()
             .filter(|token| {
                 self.registry
                     .get(&token.name)
-                    .is_some_and(|cmd| command_offered(cmd.as_ref(), &ctx, hide_session))
+                    .is_some_and(|cmd| command_offered(cmd.as_ref(), &ctx))
             })
             .map(|token| token.range)
             .collect()
@@ -983,13 +958,12 @@ impl SlashController {
     /// Filters out any command whose `visible(&AppCtx)` returns `false`.
     fn command_suggestions(&mut self, query: &str, models: &ModelState) -> Vec<SuggestionRow> {
         let ctx = self.app_ctx(models);
-        let hide_session = self.hide_session_scoped;
         let visible_indices: HashSet<usize> = (0..self.registry.triggers().len())
             .filter(|i| {
                 let trigger = &self.registry.triggers()[*i];
                 self.registry
                     .commands_by_index(trigger.command_index)
-                    .is_some_and(|cmd| command_offered(cmd.as_ref(), &ctx, hide_session))
+                    .is_some_and(|cmd| command_offered(cmd.as_ref(), &ctx))
             })
             .collect();
         let triggers = self.registry.triggers();
@@ -1213,7 +1187,7 @@ impl SlashController {
         // Hidden commands never produce arg suggestions either.
         let offered = {
             let visible_ctx = self.app_ctx(models);
-            command_offered(command.as_ref(), &visible_ctx, self.hide_session_scoped)
+            command_offered(command.as_ref(), &visible_ctx)
         };
         if !offered {
             return Vec::new();
@@ -1274,21 +1248,7 @@ impl SlashController {
 /// the current surface.
 ///
 /// Combines the command's own [`SlashCommand::visible`] gate with the
-/// controller's session-scope policy: when `hide_session_scoped` is set
-/// (session-less surfaces such as the agent dashboard's dispatch input),
-/// commands that act on a single session — `/compact`, `/fork`,
-/// `/rewind`, … — are suppressed because there is no "current session"
-/// for them to operate on.
-///
-/// Commands that opt in via [`SlashCommand::offered_when_session_less`]
-/// (`/model`, `/plan`, `/multiline`) are exempt from this suppression —
-/// they configure the next spawn or the dashboard input surface itself.
-///
-/// Conversely, [`SlashCommand::dashboard_only`] commands (`/cd`) are
-/// offered ONLY when `hide_session_scoped` is set (the dashboard surface)
-/// and suppressed on every session surface.
-///
-/// Commands are also filtered by the render mode they declare support for
+/// render mode it declares support for. Commands are filtered by the render mode they declare support for
 /// ([`SlashCommand::mode_support`]): a fullscreen-only command
 /// (`/find`, `/theme`, …) is not offered under `--minimal`, and a
 /// minimal-only command (`/expand`) is not offered in the full TUI. Note
@@ -1297,26 +1257,11 @@ impl SlashController {
 /// central dispatch gate's [`ModeSupport::refusal`] instead of leaking to the
 /// model as a raw prompt.
 ///
-/// Callers that execute slash commands on a session-less surface (e.g.
-/// `dispatch_dashboard_dispatch_slash`) must consult this before
+/// Callers that execute slash commands must consult this before
 /// `command.run` so typed tokens that were filtered from the dropdown
 /// fall through as ordinary prompt text rather than running invisibly.
-pub(crate) fn command_offered(
-    command: &dyn SlashCommand,
-    ctx: &AppCtx,
-    hide_session_scoped: bool,
-) -> bool {
-    command.mode_support().supports(ctx.screen_mode)
-        && command.visible(ctx)
-        && !(hide_session_scoped
-            && command.session_scoped()
-            && !command.offered_when_session_less())
-        // Dashboard-only commands (`/cd`) are the inverse of session-scoped:
-        // they only make sense on the session-less dashboard surface (where
-        // `hide_session_scoped` is set), so suppress them everywhere else —
-        // offered only when the command isn't dashboard-only or we're on the
-        // dashboard.
-        && (!command.dashboard_only() || hide_session_scoped)
+pub(crate) fn command_offered(command: &dyn SlashCommand, ctx: &AppCtx) -> bool {
+    command.mode_support().supports(ctx.screen_mode) && command.visible(ctx)
 }
 
 // ---------------------------------------------------------------------------

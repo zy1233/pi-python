@@ -1,7 +1,7 @@
 //! Login, logout, account switching, and auth-code submission dispatchers.
 
 use super::ctx::{restore_auth_return_view, show_welcome};
-use super::queue::{maybe_drain_queue, note_peek_page_flip};
+use super::queue::maybe_drain_queue;
 use super::router::dispatch;
 use super::session::lifecycle::{clear_startup_actions, drain_startup_actions};
 use crate::app::actions::{Action, Effect};
@@ -226,7 +226,7 @@ pub(super) fn strip_trailing_auth_error_blocks(agent: &mut AgentView) {
 /// Start an interactive login flow. Triggered by pressing 'l' on the
 /// welcome screen or by the `/login` slash command.
 ///
-/// When invoked mid-session (the active view is an agent/dashboard rather
+/// When invoked mid-session (the active view is an agent rather
 /// than the welcome screen), the auth UI — including the external auth
 /// provider's sign-in URL and status — is only rendered by the welcome
 /// view. We therefore stash the caller's view in `auth_return_view` and
@@ -297,8 +297,8 @@ pub(super) fn dispatch_cancel_login(app: &mut AppView) -> Vec<Effect> {
     app.auth_code_input.reset();
     restore_auth_return_view(app, return_view);
     // The user bailed out of re-auth — drop stashed prompts and strip the
-    // stale re-auth prompt from scrollback (on all agents: the login may
-    // have been started from the dashboard). Clearing the stash alone is
+    // stale re-auth prompt from scrollback (on all agents: auth is global).
+    // Clearing the stash alone is
     // not enough: a leftover `ReAuthRequired` block would let a later
     // `PromptResponse` re-detect it via `scrollback_has_recent_reauth_prompt`
     // and re-stash the prompt, so a subsequent unrelated login could
@@ -367,10 +367,9 @@ pub(super) fn handle_auth_complete(
             // a clean session. Mirrors the credit-limit upsell's
             // stale-block strip.
             // Auth is global, so handle every agent (the login may
-            // have been started from the dashboard, not the agent
+            // have been started from a different agent than the one
             // that 401'd).
             let mut retry_effects = Vec::new();
-            let mut page_flips = Vec::new();
             for agent in app.agents.values_mut() {
                 strip_trailing_auth_error_blocks(agent);
                 // Auto-resubmit the prompt that failed on the expired
@@ -384,11 +383,7 @@ pub(super) fn handle_auth_complete(
                     agent.session.enqueue_in_flight_prompt_front(prompt);
                     let drain = maybe_drain_queue(agent);
                     retry_effects.extend(drain.effects);
-                    page_flips.push((agent.session.id, drain.page_flip_entry));
                 }
-            }
-            for (id, page_flip_entry) in page_flips {
-                note_peek_page_flip(app, id, page_flip_entry);
             }
             let mut effects = dispatch(Action::RequestBundleStatus, app);
             if app.usage_visible {

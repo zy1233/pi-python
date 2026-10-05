@@ -701,8 +701,6 @@ mod link_click_tests {
                 tip: None,
             },
             &bundle,
-            false,
-            false,
             &mut Vec::new(),
             crate::app::agent_view::AppRenderParams::default(),
         );
@@ -2528,8 +2526,6 @@ mod link_click_tests {
             false,
             crate::app::agent_view::BannerSlotParams::none(),
             &bundle,
-            false,
-            false,
             &mut Vec::new(),
             crate::app::agent_view::AppRenderParams::default(),
         );
@@ -2630,8 +2626,6 @@ mod link_click_tests {
                 ..crate::app::agent_view::BannerSlotParams::none()
             },
             &bundle,
-            false,
-            false,
             &mut Vec::new(),
             crate::app::agent_view::AppRenderParams::default(),
         );
@@ -2709,8 +2703,6 @@ mod link_click_tests {
                 tip: Some(long_tip.as_str()),
             },
             &bundle,
-            false,
-            false,
             &mut Vec::new(),
             crate::app::agent_view::AppRenderParams::default(),
         );

@@ -551,25 +551,6 @@ impl AgentView {
         {
             hints.push(def.hint());
         }
-        if self.in_dashboard_overlay {
-            hints.insert(
-                0,
-                HintItem::new(
-                    registry
-                        .find(ActionId::DashboardOverlayStop)
-                        .map(|def| def.default_key)
-                        .unwrap_or(key!('x', CONTROL)),
-                    "stop",
-                ),
-            );
-            if self.overlay_can_cycle {
-                hints.insert(
-                    0,
-                    HintItem::paired(key!('[', CONTROL), key!(']', CONTROL), "prev/next agent"),
-                );
-            }
-            hints.insert(0, HintItem::new(key!('\\', CONTROL), "dashboard"));
-        }
         hints
     }
     /// Render the agent view into the given area.
@@ -817,8 +798,6 @@ impl AgentView {
                 false,
                 super::BannerSlotParams::none(),
                 bundle_state,
-                false,
-                false,
                 &mut Vec::new(),
                 AppRenderParams::default(),
             );
@@ -881,17 +860,6 @@ impl AgentView {
     /// When a tracing overlay is visible, this is smaller than `f.area()`.
     #[allow(clippy::too_many_arguments)]
     /// Render the agent into `area`.
-    ///
-    /// `in_dashboard_overlay` is `true` when this view is being
-    /// rendered inside the dashboard's session-overlay; it appends
-    /// `Ctrl+\\:dashboard` (and, when `overlay_can_cycle`, the
-    /// `Ctrl+[/]:prev/next agent` chip) to the bottom shortcuts bar so the
-    /// user can discover keyboard back-out and agent navigation from
-    /// inside the agent view itself (not just from the overlay header).
-    ///
-    /// `overlay_can_cycle` mirrors the header `[‹]`/`[›]` gate: true when
-    /// the visible overlay cycle order has more than one agent. Callers
-    /// derive it from the same `position` used for the header chips.
     #[allow(clippy::too_many_arguments)]
     pub fn draw(
         &mut self,
@@ -903,8 +871,6 @@ impl AgentView {
         overlay_focused: bool,
         banner: super::BannerSlotParams<'_>,
         bundle_state: &crate::app::bundle::BundleState,
-        in_dashboard_overlay: bool,
-        overlay_can_cycle: bool,
         link_spans_out: &mut Vec<pi_ratatui_inline::LinkSpan>,
         app_params: AppRenderParams<'_>,
     ) -> (
@@ -919,8 +885,6 @@ impl AgentView {
             status_line,
         } = app_params;
         self.scrollback.begin_frame();
-        self.in_dashboard_overlay = in_dashboard_overlay;
-        self.overlay_can_cycle = overlay_can_cycle;
         let super::BannerSlotParams {
             height: banner_height,
             announcements: banner_announcements,
@@ -3455,14 +3419,7 @@ impl AgentView {
             }
             ShortcutsBarContent::Pane(hints) => {
                 let help_hint = registry.find(ActionId::ShortcutsHelp).map(|def| {
-                    let mut hint = def.hint();
-                    if in_dashboard_overlay
-                        && def.default_key == key!('x', CONTROL)
-                        && let Some(alt) = def.alt_keys.first()
-                    {
-                        hint.keys = vec![*alt];
-                    }
-                    hint
+                    def.hint()
                 });
                 ShortcutsBar::new(&hints)
                     .compact(5, help_hint)
@@ -4669,8 +4626,6 @@ mod voice_recording_overlay_tests {
             false,
             crate::app::agent_view::BannerSlotParams::none(),
             &BundleState::default(),
-            false,
-            false,
             &mut Vec::new(),
             super::AppRenderParams {
                 voice_available: listening,
@@ -4713,64 +4668,6 @@ mod voice_recording_overlay_tests {
     }
 }
 #[cfg(test)]
-mod overlay_cycle_hint_tests {
-    use super::super::test_fixtures::make_agent;
-    use crate::actions::ActionRegistry;
-    use crate::app::bundle::BundleState;
-    use crate::scrollback::render::ScratchBuffer;
-    use ratatui::buffer::Buffer;
-    use ratatui::layout::Rect;
-    fn draw_overlay_footer(can_cycle: bool) -> String {
-        let mut agent = make_agent();
-        let reg = ActionRegistry::defaults();
-        let area = Rect::new(0, 0, 100, 30);
-        let mut buf = Buffer::empty(area);
-        let mut scratch = ScratchBuffer::new();
-        agent.draw(
-            area,
-            &mut buf,
-            &reg,
-            &mut scratch,
-            None,
-            false,
-            crate::app::agent_view::BannerSlotParams::none(),
-            &BundleState::default(),
-            true,
-            can_cycle,
-            &mut Vec::new(),
-            super::AppRenderParams::default(),
-        );
-        (0..area.height)
-            .map(|y| {
-                (0..area.width)
-                    .filter_map(|x| buf.cell((x, y)).map(|c| c.symbol().to_string()))
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-    #[test]
-    fn prev_next_hint_shown_when_overlay_can_cycle() {
-        let text = draw_overlay_footer(true);
-        assert!(
-            text.contains("prev/next agent"),
-            "footer must advertise cycle keys when can_cycle:\n{text}"
-        );
-    }
-    #[test]
-    fn prev_next_hint_hidden_when_overlay_cannot_cycle() {
-        let text = draw_overlay_footer(false);
-        assert!(
-            !text.contains("prev/next agent"),
-            "footer must not advertise cycle keys for a single agent:\n{text}"
-        );
-        assert!(
-            text.contains("dashboard"),
-            "back-to-dashboard hint still shown:\n{text}"
-        );
-    }
-}
-#[cfg(test)]
 mod overlay_post_flush_tests {
     use super::super::test_fixtures::make_agent;
     use crate::actions::ActionRegistry;
@@ -4792,8 +4689,6 @@ mod overlay_post_flush_tests {
                 false,
                 crate::app::agent_view::BannerSlotParams::none(),
                 &BundleState::default(),
-                false,
-                false,
                 &mut Vec::new(),
                 super::AppRenderParams::default(),
             )
@@ -4970,8 +4865,6 @@ mod feedback_input_tests {
             false,
             crate::app::agent_view::BannerSlotParams::none(),
             &BundleState::default(),
-            false,
-            false,
             &mut Vec::new(),
             super::AppRenderParams::default(),
         );
@@ -5134,8 +5027,6 @@ mod status_line_draw_tests {
             false,
             crate::app::agent_view::BannerSlotParams::none(),
             &BundleState::default(),
-            false,
-            false,
             &mut Vec::new(),
             super::AppRenderParams {
                 status_line: StatusLineFrame::On {
