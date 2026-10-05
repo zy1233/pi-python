@@ -39,7 +39,6 @@ impl DualClock {
     pub(crate) fn elapsed(&self) -> (Duration, Duration) {
         self.elapsed_between(Self::now())
     }
-
 }
 
 #[cfg(test)]

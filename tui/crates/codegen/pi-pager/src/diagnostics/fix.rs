@@ -67,7 +67,6 @@ impl SafeAbsoluteDirectory {
 }
 
 impl FixRequest {
-
     pub fn from_environment(id: DiagnosticId) -> Result<Self, FixError> {
         let home =
             SafeAbsoluteDirectory::parse(actual_home().ok_or(FixError::HomeUnavailable)?, "HOME")?;
@@ -191,7 +190,6 @@ pub struct FixOutcome {
 }
 
 impl FixOutcome {
-
     fn new(
         id: DiagnosticId,
         status: FixStatus,

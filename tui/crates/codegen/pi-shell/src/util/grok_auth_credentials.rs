@@ -75,9 +75,4 @@ impl pi_auth::HttpAuth for GrokAuthCredentials {
     }
 }
 #[cfg(test)]
-mod tests {
-    
-    
-    
-    
-}
+mod tests {}

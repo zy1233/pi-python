@@ -117,11 +117,7 @@ pub(crate) fn build_screen_mode_relaunch_args(
         // `--minimal`/`--fullscreen` conflict or fight the requested mode.
         if matches!(
             s.as_ref(),
-            "--minimal"
-                | "--fullscreen"
-                | "--continue"
-                | "-c"
-                | "--restore-code"
+            "--minimal" | "--fullscreen" | "--continue" | "-c" | "--restore-code"
         ) {
             continue;
         }
@@ -213,7 +209,10 @@ pub(crate) fn screen_mode_relaunch_resume_hint(session_id: &str, want_minimal: b
     } else {
         "--fullscreen"
     };
-    format!("{GROK_SCREEN_MODE_ENV}={mode} {} {flag} --resume {session_id}", crate::brand::CLI_NAME)
+    format!(
+        "{GROK_SCREEN_MODE_ENV}={mode} {} {flag} --resume {session_id}",
+        crate::brand::CLI_NAME
+    )
 }
 
 /// Replace the current process with a relaunch into the requested screen mode.
@@ -418,24 +417,11 @@ mod tests {
     fn value_taking_flag_tokens_derived_from_clap() {
         let tokens = value_taking_flag_tokens();
         // Value-taking flags (long, short, alias forms) are classified.
-        for flag in [
-            "--model",
-            "-m",
-            "--cwd",
-            "--resume",
-            "-r",
-            "--load",
-        ] {
+        for flag in ["--model", "-m", "--cwd", "--resume", "-r", "--load"] {
             assert!(tokens.contains(flag), "expected value-taking flag {flag}");
         }
         // Boolean switches are not — a bare word after one is the prompt.
-        for flag in [
-            "--minimal",
-            "--fullscreen",
-            "--no-plan",
-            "--continue",
-            "-c",
-        ] {
+        for flag in ["--minimal", "--fullscreen", "--no-plan", "--continue", "-c"] {
             assert!(!tokens.contains(flag), "boolean flag misclassified: {flag}");
         }
     }
@@ -716,11 +702,8 @@ mod tests {
     #[test]
     fn resume_without_value_then_flag_is_not_eaten() {
         // `grok --resume --no-plan` (resume most-recent; next token is a flag).
-        let out = build_screen_mode_relaunch_args(
-            args(&["grok", "--resume", "--no-plan"]),
-            "sid",
-            false,
-        );
+        let out =
+            build_screen_mode_relaunch_args(args(&["grok", "--resume", "--no-plan"]), "sid", false);
         assert_eq!(
             as_strs(&out),
             vec!["--no-plan", "--resume", "sid", "--fullscreen"]

@@ -200,7 +200,6 @@ impl<'a> ShortcutsBar<'a> {
         self.pending_confirmation = pending;
         self
     }
-
 }
 
 impl Widget for ShortcutsBar<'_> {

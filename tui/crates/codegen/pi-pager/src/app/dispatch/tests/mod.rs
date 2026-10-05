@@ -18,15 +18,15 @@ use super::billing::{
     CreditLimitUpsellMode, credit_limit_upsell_mode, is_max_tier, open_credit_limit_upsell,
     open_free_usage_upsell,
 };
+use super::ctx::{get_active_agent, get_active_agent_mut};
 use super::modes::{
     YOLO_ON_UNDER_PLAN_TOAST, active_agent_plan_nudge_state, dispatch_cycle_mode_and_sync,
     permission_mode_toast,
 };
-use super::ctx::{get_active_agent, get_active_agent_mut};
 use super::permissions::drain_permission_queue;
-use super::prompt::{ dispatch_send_prompt, dispatch_send_prompt_inner};
-use super::session::lifecycle::{ drain_startup_actions, finish_trust};
-use super::session::load::{ reanchor_grouped_selection};
+use super::prompt::{dispatch_send_prompt, dispatch_send_prompt_inner};
+use super::session::lifecycle::{drain_startup_actions, finish_trust};
+use super::session::load::reanchor_grouped_selection;
 use super::settings::setters::set_default_model_inner;
 use super::settings::ui::{action_for_reset, apply_setting_rollback};
 use super::status::scrub_error_for_toast;
@@ -500,8 +500,7 @@ fn enqueue_permission_with_enable_always_approve(
     });
     response_rx
 }
-const POLICY_WARNING: &str =
-    pi_workspace::permission::resolution::YOLO_PIN_REASON_REQUIREMENTS;
+const POLICY_WARNING: &str = pi_workspace::permission::resolution::YOLO_PIN_REASON_REQUIREMENTS;
 fn agent_toast(app: &AppView) -> Option<String> {
     app.agents[&AgentId(0)]
         .toast

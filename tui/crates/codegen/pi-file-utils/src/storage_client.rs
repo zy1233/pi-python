@@ -14,6 +14,8 @@ use std::fs::File as StdFile;
 // Positional read traits live in different modules per platform; the
 // methods we use (read_at on Unix, seek_read on Windows) have the same
 // signature, so the call site cfg-branches on the method name only.
+use pi_auth::AuthCredentialProvider;
+use pi_circuit_breaker::{BreakerConfig, BreakerOpen, CircuitBreaker, Outcome, RetryPolicy};
 #[cfg(unix)]
 use std::os::unix::fs::FileExt;
 #[cfg(windows)]
@@ -26,8 +28,6 @@ use tokio::sync::Semaphore;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::bytes::Bytes;
 use tokio_util::io::ReaderStream;
-use pi_circuit_breaker::{BreakerConfig, BreakerOpen, CircuitBreaker, Outcome, RetryPolicy};
-use pi_auth::AuthCredentialProvider;
 
 use crate::circuit_breaker_observer::TracingObserver;
 
@@ -425,8 +425,7 @@ mod static_grok_auth_tests {
 /// `crate::http::shared_upload_client()`) to `with_provider`.
 fn default_upload_client() -> Client {
     #[expect(clippy::expect_used)]
-    pi_extra_ca::build_reqwest_client(|builder| builder)
-        .expect("default reqwest client builds")
+    pi_extra_ca::build_reqwest_client(|builder| builder).expect("default reqwest client builds")
 }
 
 /// Client for uploading files to GCS via cli-chat-proxy.

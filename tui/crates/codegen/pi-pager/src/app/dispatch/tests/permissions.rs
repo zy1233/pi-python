@@ -526,7 +526,6 @@ fn rollback_permission_mode_default_canonical_preserves_default() {
     );
 }
 
-
 #[test]
 fn permission_select_reject_does_not_steer_sticky_cursor() {
     use crate::appearance::permission_cursor::{
@@ -567,8 +566,8 @@ fn push_bash_allow_always(
     focus: crate::views::permission_view::PermissionFocus,
 ) -> tokio::sync::oneshot::Receiver<Result<acp::RequestPermissionResponse, acp::Error>> {
     use crate::views::permission_view::PermissionViewState;
-    use std::sync::Arc;
     use pi_workspace::permission::bash_command_splitting::BashCommandHighlights;
+    use std::sync::Arc;
 
     let (tx, rx) = tokio::sync::oneshot::channel();
     let request = acp::RequestPermissionRequest::new(

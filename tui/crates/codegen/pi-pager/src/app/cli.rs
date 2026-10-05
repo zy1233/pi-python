@@ -668,10 +668,7 @@ impl PagerArgs {
         }
         match self.resume_target() {
             ResumeTarget::SessionId(id) => {
-                pi_shell::session::persistence::resumed_session_sandbox_profile(
-                    Some(&id),
-                    cwd,
-                )
+                pi_shell::session::persistence::resumed_session_sandbox_profile(Some(&id), cwd)
             }
             ResumeTarget::MostRecentForCwd => {
                 pi_shell::session::persistence::resumed_session_sandbox_profile(None, cwd)
@@ -925,9 +922,8 @@ mod tests {
             root.debug_file.as_deref(),
             Some(std::path::Path::new("/tmp/fire.txt"))
         );
-        let sub =
-            PagerArgs::try_parse_from(["zypi", "doctor", "--debug-file", "/tmp/f.txt"])
-                .expect("--debug-file parses after a subcommand (global)");
+        let sub = PagerArgs::try_parse_from(["zypi", "doctor", "--debug-file", "/tmp/f.txt"])
+            .expect("--debug-file parses after a subcommand (global)");
         assert_eq!(
             sub.debug_file.as_deref(),
             Some(std::path::Path::new("/tmp/f.txt"))
@@ -961,7 +957,10 @@ mod tests {
     #[test]
     fn subcommand_takes_precedence_over_positional_prompt() {
         let args = PagerArgs::try_parse_from(["zypi", "version"]).expect("subcommand parses");
-        assert!(matches!(args.command, Some(Command::Version { json: false })));
+        assert!(matches!(
+            args.command,
+            Some(Command::Version { json: false })
+        ));
         assert!(args.prompt.is_none());
     }
     #[test]

@@ -155,5 +155,4 @@ impl ModelsCacheManager {
             let _ = std::fs::remove_file(&tmp);
         }
     }
-
 }

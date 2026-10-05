@@ -20,16 +20,18 @@ mod jemalloc_malloc_conf {
 }
 mod print_mode;
 use anyhow::Result;
-use std::num::NonZeroUsize;
 use pi_pager::app::{Command, PagerArgs};
 use pi_pager::client_identity::PAGER_CLIENT_VERSION;
 use pi_telemetry::process_info::{
     Entrypoint, Interactivity, ProcessIdentity, ReleaseChannel, set_identity, set_release_channel,
 };
+use std::num::NonZeroUsize;
 fn process_identity(command: Option<&Command>, is_interactive: bool) -> Option<ProcessIdentity> {
     use pi_telemetry::process_info::LeaderMode::Standalone;
     let (entrypoint, interactivity) = match command {
-        Some(Command::Doctor(_) | Command::Wrap(_) | Command::Export(_) | Command::DiskUsage(_))
+        Some(
+            Command::Doctor(_) | Command::Wrap(_) | Command::Export(_) | Command::DiskUsage(_),
+        )
         | Some(Command::Version { .. })
         | Some(Command::Completions { .. }) => (Entrypoint::Cli, Interactivity::Unattended),
         None if is_interactive => return None,
@@ -41,14 +43,14 @@ fn process_identity(command: Option<&Command>, is_interactive: bool) -> Option<P
         interactivity,
     })
 }
-use std::env;
 use pi_update::enforce_version_policy_or_exit;
+use std::env;
 /// Entrypoint tag for `grok -p`; keys the quiet stderr default in `init_tracing_simple`.
 const HEADLESS_ENTRYPOINT: &str = "headless";
 /// Initialize simple tracing for non-TUI agent modes.
 fn init_tracing_simple(app_entrypoint: &'static str) {
-    use tracing_subscriber::{EnvFilter, Layer as _, fmt, layer::SubscriberExt as _};
     use pi_telemetry::debug_log::RMCP_SSE_NOISE_TARGET;
+    use tracing_subscriber::{EnvFilter, Layer as _, fmt, layer::SubscriberExt as _};
     let default_filter = if app_entrypoint == HEADLESS_ENTRYPOINT {
         "off"
     } else {
@@ -350,10 +352,7 @@ fn version_text(channel_label: &str) -> String {
     format!(
         "{} {}\n",
         pi_pager::brand::CLI_NAME,
-        pi_version::display_version_with_commit(
-            pi_version::full_version(),
-            channel_label,
-        )
+        pi_version::display_version_with_commit(pi_version::full_version(), channel_label,)
     )
 }
 fn write_version(writer: &mut impl std::io::Write, channel_label: &str) -> std::io::Result<()> {
@@ -363,10 +362,7 @@ fn dispatch_version_if_requested(args: &PagerArgs) -> bool {
     if !args.version {
         return false;
     }
-    if let Err(error) = write_version(
-        &mut std::io::stdout().lock(),
-        pi_update::channel_label(),
-    ) {
+    if let Err(error) = write_version(&mut std::io::stdout().lock(), pi_update::channel_label()) {
         eprintln!("Error: {error}");
         std::process::exit(1);
     }
@@ -438,7 +434,10 @@ fn run_python_print(args: &PagerArgs) -> i32 {
     if args.no_context_files {
         agent_args.push("--no-context-files".into());
     }
-    match std::process::Command::new(&program).args(&agent_args).status() {
+    match std::process::Command::new(&program)
+        .args(&agent_args)
+        .status()
+    {
         Ok(status) => status.code().unwrap_or(1),
         Err(err) => {
             eprintln!(
@@ -502,7 +501,10 @@ fn main() {
     if pi_shell::util::config::load_crash_handler_enabled_sync() {
         let crash_dir = pi_shell::util::grok_home::grok_home().join("crash");
         if let Some(report) = pi_crash_handler::check_previous_crash(&crash_dir) {
-            eprintln!("{} crashed during your last session.", pi_pager::brand::CLI_NAME);
+            eprintln!(
+                "{} crashed during your last session.",
+                pi_pager::brand::CLI_NAME
+            );
             eprintln!("  Signal:  {}", report.signal_name);
             eprintln!("  Version: {}", report.app_version);
             eprintln!("  Report:  {}", report.report_path.display());
@@ -530,7 +532,10 @@ fn main() {
     builder.worker_threads(workers.get()).enable_all();
     let runtime =
         pi_tty_utils::runtime::build_with_blocking_pool(&mut builder).unwrap_or_else(|e| {
-            eprintln!("{}: failed to start tokio runtime: {e}", pi_pager::brand::CLI_NAME);
+            eprintln!(
+                "{}: failed to start tokio runtime: {e}",
+                pi_pager::brand::CLI_NAME
+            );
             shutdown_and_flush_telemetry(1);
         });
     let result = run_and_shutdown(runtime, async_main(args), RUNTIME_SHUTDOWN_GRACE);
@@ -593,11 +598,7 @@ async fn async_main(args: PagerArgs) -> Result<()> {
             std::process::exit(1);
         }
     };
-    pi_shell::config::apply_sandbox(
-        None,
-        sandbox_profile_arg.as_deref(),
-        args.cwd.as_deref(),
-    );
+    pi_shell::config::apply_sandbox(None, sandbox_profile_arg.as_deref(), args.cwd.as_deref());
     let is_interactive = args.command.is_none()
         && args.single.is_none()
         && args.prompt_json.is_none()
@@ -620,10 +621,7 @@ async fn async_main(args: PagerArgs) -> Result<()> {
                     });
                     println!("{}", serde_json::to_string(&payload)?);
                 } else {
-                    write_version(
-                        &mut std::io::stdout().lock(),
-                        pi_update::channel_label(),
-                    )?;
+                    write_version(&mut std::io::stdout().lock(), pi_update::channel_label())?;
                 }
                 return Ok(());
             }
@@ -909,9 +907,7 @@ mod tests {
     #[serial_test::serial(jemalloc_heap_profile)]
     fn install_heap_profile_hooks_wires_shell_apis() {
         install_heap_profile_hooks();
-        assert_stats_sane(
-            pi_shell::heap_profile::stats().expect("shell stats after install"),
-        );
+        assert_stats_sane(pi_shell::heap_profile::stats().expect("shell stats after install"));
         if !require_opt_prof() {
             assert!(!pi_shell::heap_profile::prof_available());
             return;

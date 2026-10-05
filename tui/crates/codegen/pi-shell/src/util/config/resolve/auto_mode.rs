@@ -102,7 +102,4 @@ pub fn auto_permission_mode_enabled_from_disk() -> bool {
 }
 
 #[cfg(test)]
-mod auto_permission_mode_gate_tests {
-    
-
-}
+mod auto_permission_mode_gate_tests {}

@@ -56,4 +56,3 @@ fn dispatch_new_session_skips_modal_in_non_git_repo() {
 }
 
 // ── Session close ─────────────────────────────
-

@@ -61,7 +61,6 @@ impl AgentView {
             TabAction::Nothing => {}
         }
     }
-
 }
 
 #[cfg(test)]
@@ -514,5 +513,4 @@ mod shell_suggestion_key_tests {
     }
 
     // -- Bash-mode gating of the as-you-type pipeline ------------------------
-
 }

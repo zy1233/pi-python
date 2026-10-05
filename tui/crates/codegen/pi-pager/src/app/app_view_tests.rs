@@ -1087,7 +1087,10 @@ fn gboom_backgrounded_game_drops_held_movement() {
 fn resize_event_closes_tip_show_gate_until_redraw() {
     let mut app = test_app_with_agent();
     let id = super::super::agent::AgentId(0);
-    app.agents.get_mut(&id).unwrap().note_terminal_size((80, 30));
+    app.agents
+        .get_mut(&id)
+        .unwrap()
+        .note_terminal_size((80, 30));
     let _ = app.handle_input(&Event::Resize(120, 50));
     let agent = app.agents.get_mut(&id).unwrap();
     assert_eq!(
@@ -1477,10 +1480,7 @@ fn menu_action_indices_without_import() {
         InputOutcome::Action(Action::Quit)
     ));
     // Past the last row there is nothing to do.
-    assert!(matches!(
-        dispatch_menu_action(3),
-        InputOutcome::Unchanged
-    ));
+    assert!(matches!(dispatch_menu_action(3), InputOutcome::Unchanged));
 }
 #[test]
 fn welcome_pending_ctrl_c_quits_instantly() {
@@ -2450,16 +2450,14 @@ fn idle_scrollback_pane_esc_with_draft_and_messages_swallows() {
 #[test]
 fn idle_scrollback_pane_esc_with_pending_input_overlay_arms_nothing() {
     type OverlayInstaller = (&'static str, fn(&mut AgentView));
-    let installers: [OverlayInstaller; 1] = [
-        ("question_view", |a| {
-            let stashed = a.prompt.stash();
-            a.question_view = Some(crate::views::question_view::QuestionViewState::new(
-                "call-q".into(),
-                vec![],
-                stashed,
-            ));
-        }),
-    ];
+    let installers: [OverlayInstaller; 1] = [("question_view", |a| {
+        let stashed = a.prompt.stash();
+        a.question_view = Some(crate::views::question_view::QuestionViewState::new(
+            "call-q".into(),
+            vec![],
+            stashed,
+        ));
+    })];
     for (name, install) in installers {
         let mut app = test_app_with_agent();
         let id = super::super::agent::AgentId(0);

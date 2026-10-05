@@ -1571,7 +1571,14 @@ mod tests {
             crate::scrollback::text_selection::ResolvedSelectionBoundaries::default();
         for (entry_idx, text, hit_col, prefix, suffix, expected) in [
             (0, "foo rest", 0, "   ", "", "foo"),
-            (1, "rest https://example.com", 5, "", "   ", "https://example.com"),
+            (
+                1,
+                "rest https://example.com",
+                5,
+                "",
+                "   ",
+                "https://example.com",
+            ),
         ] {
             let line = ResolvedSelectableLine {
                 entry_idx,

@@ -7,10 +7,12 @@ use super::replay::{
     ReplayLookupFallback, ReplayPathHint, ReplayToolCollapser, ReplayedUpdate,
     line_is_available_commands_update, line_is_dropped_on_replay,
     line_is_in_progress_tool_call_update, prepare_replay_lines, replay_would_emit,
-    resolve_replay_updates_path, stream_replay_updates_at, stream_replay_updates_at_hinted};
+    resolve_replay_updates_path, stream_replay_updates_at, stream_replay_updates_at_hinted,
+};
 use super::{
     PromptExtractEvent, ReplayEmission, SUMMARY_FILE, SessionUpdate, SessionUpdateEnvelope,
-    UPDATES_FILE, filter_rewind_lines, parse_prompt_extract_event};
+    UPDATES_FILE, filter_rewind_lines, parse_prompt_extract_event,
+};
 use crate::session::wire_tags::AVAILABLE_COMMANDS_UPDATE;
 
 fn acp_envelope(session_update_json: &str) -> String {
@@ -425,8 +427,7 @@ fn persist_pi_update(update: crate::extensions::notification::SessionUpdate) -> 
         update,
         meta: None,
     };
-    let envelope =
-        SessionUpdateEnvelope::from_update(&SessionUpdate::Pi(Box::new(notif))).unwrap();
+    let envelope = SessionUpdateEnvelope::from_update(&SessionUpdate::Pi(Box::new(notif))).unwrap();
     serde_json::to_string(&envelope).unwrap()
 }
 

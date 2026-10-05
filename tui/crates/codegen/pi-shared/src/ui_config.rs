@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use pi_config_types::DisplayRefreshSettings;
+use serde::{Deserialize, Serialize};
 
 use pi_status_line::StatusLineConfig;
 

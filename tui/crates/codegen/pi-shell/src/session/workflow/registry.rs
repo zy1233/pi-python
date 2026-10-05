@@ -12,7 +12,4 @@ fn atomic_rename_noreplace_windows(source: &Path, target: &Path) -> io::Result<(
 }
 
 #[cfg(test)]
-mod tests {
-    
-
-}
+mod tests {}

@@ -1,8 +1,8 @@
 //! Interpretation of terminal probe snapshots.
 
 use crate::diagnostics::probes::{
-    CommonProbeSnapshot, DiagnosticRuntimeEvidence, DoctorProbeSnapshot, 
-    RuntimeEvidence, StandaloneDiagnosticSnapshot, TmuxProbeResult,
+    CommonProbeSnapshot, DiagnosticRuntimeEvidence, DoctorProbeSnapshot, RuntimeEvidence,
+    StandaloneDiagnosticSnapshot, TmuxProbeResult,
 };
 use crate::diagnostics::{
     ClipboardFacts, ColorFacts, DataControlFact, DiagnosticFacts, DiagnosticFinding, DiagnosticId,

@@ -45,7 +45,11 @@ impl PickerSurface<'_> {
     }
 
     /// Apply a loaded list; returns a toast when the list is empty.
-    fn loaded(&mut self, sessions: Vec<SessionPickerEntry>, empty_notice: String) -> Option<String> {
+    fn loaded(
+        &mut self,
+        sessions: Vec<SessionPickerEntry>,
+        empty_notice: String,
+    ) -> Option<String> {
         let anchor = self.capture_selection();
         *self.loading = false;
         *self.entries = (!sessions.is_empty()).then_some(sessions);

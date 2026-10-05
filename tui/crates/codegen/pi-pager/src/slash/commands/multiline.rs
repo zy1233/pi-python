@@ -38,10 +38,7 @@ mod tests {
     use crate::acp::model_state::ModelState;
     use crate::settings::PagerLocalSnapshot;
 
-    fn make_ctx<'a>(
-        models: &'a ModelState,
-        multiline_mode: bool,
-    ) -> CommandExecCtx<'a> {
+    fn make_ctx<'a>(models: &'a ModelState, multiline_mode: bool) -> CommandExecCtx<'a> {
         CommandExecCtx {
             models,
             screen_mode: crate::app::ScreenMode::Inline,

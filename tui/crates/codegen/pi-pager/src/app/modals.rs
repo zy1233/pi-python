@@ -1636,8 +1636,7 @@ impl AgentView {
                     // with it on row indices.
                     let filter_query = state.query();
                     let entries_data = entries.as_deref().unwrap_or(&[]);
-                    let filtered_indices =
-                        filter_session_entries(entries.as_deref(), filter_query);
+                    let filtered_indices = filter_session_entries(entries.as_deref(), filter_query);
                     let built = crate::views::session_picker::build_session_entry_data(
                         entries_data,
                         &filtered_indices,

@@ -13,8 +13,8 @@ use super::state::{
 };
 use crate::render::line_utils::truncate_str;
 use crate::settings::{
-    OwnedEnumChoice, SettingKey, SettingKind, SettingMeta, SettingValue,
-    StringValidator, dynamic_enum_choices,
+    OwnedEnumChoice, SettingKey, SettingKind, SettingMeta, SettingValue, StringValidator,
+    dynamic_enum_choices,
 };
 use crate::theme::Theme;
 use crate::views::modal_window::{
@@ -647,7 +647,8 @@ pub(super) fn render_rows(
                             height: desc_height.min(8),
                         };
                         render_expanded_description(buf, desc_rect, meta, theme);
-                        let consumed = wrapped_description_height(meta, area.width, desc_rect.height);
+                        let consumed =
+                            wrapped_description_height(meta, area.width, desc_rect.height);
                         y_cursor = y_cursor.saturating_add(consumed);
                     }
                     continue;
@@ -2560,12 +2561,7 @@ pub(super) fn render_setting_row(
 }
 
 /// Render the wrapped description for an expanded row.
-fn render_expanded_description(
-    buf: &mut Buffer,
-    area: Rect,
-    meta: &SettingMeta,
-    theme: &Theme,
-) {
+fn render_expanded_description(buf: &mut Buffer, area: Rect, meta: &SettingMeta, theme: &Theme) {
     if area.height == 0 || area.width == 0 {
         return;
     }

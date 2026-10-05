@@ -118,7 +118,6 @@ pub fn http_status_from_error(err: &acp::Error) -> Option<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     #[test]
     fn rate_limited_fallback_oauth_vs_api_key() {
@@ -232,5 +231,4 @@ mod tests {
             RATE_LIMITED_USER_MESSAGE_API_KEY
         );
     }
-
 }

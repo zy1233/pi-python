@@ -60,9 +60,6 @@ fn viewer_finalize_idles_and_pushes_completed_marker() {
     ));
 }
 
-
-
-
 #[test]
 fn viewer_finalize_duplicate_terminal_is_noop() {
     let mut agent = running_viewer("p1");

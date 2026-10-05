@@ -181,7 +181,7 @@ pub enum MaterializedStartup {
         /// no-match hint only for this outcome (never inferred from shape).
         deferred_local_miss: bool,
         /// Pre-TUI conversation-only remote restore: follow-up `LoadSession`
- /// must send `legacy ext RPC` so agent `[cli] restore_code`
+        /// must send `legacy ext RPC` so agent `[cli] restore_code`
         /// cannot checkout in-place on the new local child.
         suppress_code_restore: bool,
     },

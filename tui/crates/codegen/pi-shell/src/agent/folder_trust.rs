@@ -42,11 +42,11 @@ use pi_workspace::trust::{TrustStore, workspace_key};
 // `revoke_folder_trust` wrapper, inviting a stale-untrust security bug.
 pub use pi_workspace::folder_trust::grant_folder_trust;
 use pi_workspace::folder_trust::{
-    DecideInputs, TrustOutcome, decide, decide_inputs, feature_enabled, folder_trust_inert, persist_trust,
-    prompt_for_trust,
+    DecideInputs, TrustOutcome, decide, decide_inputs, feature_enabled, folder_trust_inert,
+    persist_trust, prompt_for_trust,
 };
 
-use crate::util::config::{ RemoteSettings};
+use crate::util::config::RemoteSettings;
 
 // NOTE: this folder-trust store (`~/.grok/trusted_folders.toml`) is SEPARATE
 // from the pre-existing per-plugin trust store
@@ -796,5 +796,4 @@ mod tests {
         unsafe { std::env::remove_var(pi_version::TEST_VERSION_ENV) };
         unsafe { std::env::remove_var("GROK_FOLDER_TRUST") };
     }
-
 }

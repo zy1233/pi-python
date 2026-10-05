@@ -1,7 +1,7 @@
 use chrono::{DateTime, Duration, Utc};
+use pi_auth::bearer_suffix;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use pi_auth::bearer_suffix;
 
 pub(crate) const TOKEN_TTL: Duration = Duration::days(30);
 const DEFAULT_EARLY_INVALIDATION_SECS: u64 = 300; // 5 minutes

@@ -16,4 +16,4 @@ pub(crate) mod small_screen;
 pub(crate) mod ssh_wrap;
 pub(crate) mod word_select;
 
-pub use ephemeral::{ EphemeralTip, EphemeralTipState, tip_row_renderable};
+pub use ephemeral::{EphemeralTip, EphemeralTipState, tip_row_renderable};

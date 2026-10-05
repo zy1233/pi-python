@@ -7,13 +7,10 @@ use crate::diagnostics::probes::{
 };
 use crate::diagnostics::{
     ClipboardFacts, ColorFacts, DataControlFact, DiagnosticFacts, DiagnosticFinding, DiagnosticId,
-    DiagnosticReport, FindingDisposition, NewlineFact, ProbeNote,
-    ProbeStatus, RuntimeFact,
+    DiagnosticReport, FindingDisposition, NewlineFact, ProbeNote, ProbeStatus, RuntimeFact,
 };
 use crate::host::{DisplayServer, HostOs};
-use crate::terminal::{
-    ByobuBackend, ModifierFate, MultiplexerKind, TerminalContext, TerminalName,
-};
+use crate::terminal::{ByobuBackend, ModifierFate, MultiplexerKind, TerminalContext, TerminalName};
 use crate::theme::{ThemeKind, color_support::ColorLevel};
 
 static TMUX_ROUTE: ClipboardRoute = ClipboardRoute {

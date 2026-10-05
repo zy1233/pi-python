@@ -2009,7 +2009,6 @@ fn count_cancelled_markers(app: &AppView, id: AgentId) -> usize {
         .count()
 }
 
-
 /// A cancelled `PromptResponse` for the running turn.
 fn cancelled_prompt_response(id: AgentId) -> Action {
     Action::TaskComplete(TaskResult::PromptResponse {

@@ -93,7 +93,6 @@ pub struct PromptUsage {
 }
 
 impl PromptUsage {
-
     /// Drop cost ticks when partial or incomplete so all wire surfaces fail closed.
     /// Incomplete bills clear ticks even when `cost_is_partial` is false.
     pub(crate) fn scrub_untrustworthy_costs(&mut self) {
@@ -108,7 +107,6 @@ impl PromptUsage {
             }
         }
     }
-
 }
 
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]

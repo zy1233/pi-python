@@ -145,28 +145,13 @@ pub(crate) const WEB_SEARCH_DOMAIN_CONFIG_PATHS: &[&str] = &[
 ];
 
 #[cfg(test)]
-mod web_search_domains_tests {
-    
-
-}
+mod web_search_domains_tests {}
 
 #[cfg(test)]
-mod ask_user_question_timeout_tests {
-    
-    
-    
-
-}
+mod ask_user_question_timeout_tests {}
 
 #[cfg(test)]
-mod tests {
-    
-
-}
+mod tests {}
 
 #[cfg(test)]
-mod shell_env_policy_tests {
-    
-    
-
-}
+mod shell_env_policy_tests {}

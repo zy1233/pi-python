@@ -1,10 +1,9 @@
 //! Frame rendering for [`AgentView`]: the `draw` entry point plus shortcut
 //! hints.
 use super::{
-    ActivePane, AgentPane, AgentView, AgentViewLayout, BlockingCard, EscStep,
-    InlineMediaHitAreas, KeyOwner, MODE_BANNER_FADE_TICKS, PromptMode, collect_citation_links,
-    dropdown_content_inset, dropdown_items_width, record_dot_pulse, render_dropdown_chrome,
-    supports_osc22,
+    ActivePane, AgentPane, AgentView, AgentViewLayout, BlockingCard, EscStep, InlineMediaHitAreas,
+    KeyOwner, MODE_BANNER_FADE_TICKS, PromptMode, collect_citation_links, dropdown_content_inset,
+    dropdown_items_width, record_dot_pulse, render_dropdown_chrome, supports_osc22,
 };
 use crate::actions::{ActionId, ActionRegistry};
 use crate::key;
@@ -22,7 +21,7 @@ use crate::views::agent::AgentViewLayoutParams;
 use crate::views::btw_overlay::BTW_OVERLAY_ENTRY_IDX;
 use crate::views::plan_approval_view::PlanApprovalFocus;
 use crate::views::prompt_widget::{PromptBg, PromptFlag, PromptInfo, PromptStyle};
-use crate::views::question_view::{QUESTION_VIEW_HPAD, };
+use crate::views::question_view::QUESTION_VIEW_HPAD;
 use crate::views::shortcuts_bar::{HintItem, PendingHint, ShortcutsBar};
 use crate::views::{agent, turn_status};
 use ratatui::buffer::Buffer;
@@ -785,8 +784,8 @@ impl AgentView {
                 .height
                 .saturating_sub(search_reserved_rows);
         }
-        let overlay_blocks_rail_hover = self.blocking_card().is_some()
-            || self.block_viewer.is_some();
+        let overlay_blocks_rail_hover =
+            self.blocking_card().is_some() || self.block_viewer.is_some();
         if layout.timeline_width > 0 {
             self.sync_pending_user_input_marks();
             self.scrollback.set_cwd(Some(self.session.cwd.clone()));
@@ -897,12 +896,9 @@ impl AgentView {
             .as_ref()
             .and_then(|c| (c.total > 0).then_some(c.total))
             .or(model_window);
-        if let Some(ctx_line) = context_bar::context_bar_line(
-            ctx_used,
-            ctx_total,
-            self.hit_context.hovered,
-            &theme,
-        ) {
+        if let Some(ctx_line) =
+            context_bar::context_bar_line(ctx_used, ctx_total, self.hit_context.hovered, &theme)
+        {
             status.push("context", ctx_line);
         }
         let areas = status.render(buf, layout.status_bar);
@@ -2565,9 +2561,7 @@ impl AgentView {
                     .render(layout.shortcuts, buf);
             }
             ShortcutsBarContent::Pane(hints) => {
-                let help_hint = registry.find(ActionId::ShortcutsHelp).map(|def| {
-                    def.hint()
-                });
+                let help_hint = registry.find(ActionId::ShortcutsHelp).map(|def| def.hint());
                 ShortcutsBar::new(&hints)
                     .compact(5, help_hint)
                     .with_pending(pending_hint)

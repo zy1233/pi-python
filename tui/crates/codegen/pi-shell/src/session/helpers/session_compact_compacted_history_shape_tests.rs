@@ -18,9 +18,7 @@ fn test_auto_continue_prompt_has_no_user_query_tags() {
 /// `acp_session.rs`: build → sanitize → validate → (fallback if needed).
 #[test]
 fn sanitize_then_validate_produces_valid_history() {
-    use pi_chat_state::compaction_utils::{
-        sanitize_compacted_history, validate_compacted_history,
-    };
+    use pi_chat_state::compaction_utils::{sanitize_compacted_history, validate_compacted_history};
     let raw = vec![
         ConversationItem::system("sys"),
         ConversationItem::user("<user_query>\ntask\n</user_query>"),

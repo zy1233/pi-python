@@ -1,11 +1,11 @@
 use agent_client_protocol as acp;
 use anyhow::Result;
 use indexmap::IndexMap;
+use pi_agent::prompt::skills::SkillsConfig;
+use pi_tools::types::compat::{CompatConfig, CompatConfigToml};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use toml::Value as TomlValue;
-use pi_agent::prompt::skills::SkillsConfig;
-use pi_tools::types::compat::{CompatConfig, CompatConfigToml};
 
 // MCP server config value types extracted to `pi-config-types` (config
 // dependency inversion); re-exported so `crate::util::config::*` paths keep working.
@@ -195,7 +195,6 @@ impl McpPreferencesLoad {
             Self::Missing | Self::Corrupt => McpPreferencesFile::default(),
         }
     }
-
 }
 
 pub(crate) fn load_mcp_preferences() -> McpPreferencesLoad {

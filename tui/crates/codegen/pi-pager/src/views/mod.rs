@@ -2,6 +2,7 @@
 pub(crate) mod agent;
 pub(crate) mod agent_status;
 pub(crate) mod announcements;
+pub(crate) mod bash_highlight;
 pub(crate) mod block_viewer;
 pub mod btw_overlay;
 pub mod completion_dropdown;
@@ -36,7 +37,6 @@ pub mod slash_dropdown;
 pub(crate) mod status_bar;
 pub mod status_line;
 pub mod suggestion_controller;
-pub(crate) mod bash_highlight;
 pub(crate) mod timeline;
 pub mod todo_pane;
 pub mod turn_status;

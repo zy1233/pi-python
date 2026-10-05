@@ -77,7 +77,6 @@ impl From<AuthProviderRef> for AuthProviderRefData {
 }
 
 impl AuthProviderRef {
-
     /// The in-memory form of a ref revived from bytes;
     /// [`AuthProviderRef::attach_trusted_config`] resolves it.
     pub(crate) fn unresolved(name: String) -> Self {
@@ -97,7 +96,6 @@ impl AuthProviderRef {
             fail_closed: true,
         }
     }
-
 }
 
 /// Ignores the slot; a deserialized ref compares unequal until resolution
@@ -126,6 +124,5 @@ pub(crate) const PROVIDER_TOKEN_EXPIRY_SKEW_SECS: u64 = 60;
 /// outside the range is honored up to the bound and draws a parse warning,
 /// since a turn waits on the mint.
 pub(crate) const PROVIDER_TIMEOUT_CEILING_SECS: u64 = 600;
- // 1 MiB
- // 64 KiB
-
+// 1 MiB
+// 64 KiB

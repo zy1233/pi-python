@@ -65,7 +65,6 @@ pub(super) struct SleepGate {
 }
 
 impl SleepGate {
-
     /// A stale gate (a missed/late wake event) is lazily lowered here so it can
     /// never permanently block refresh; this read can therefore have a side
     /// effect. The gate expires once *either* clock passes [`SLEEP_GATE_MAX`]
@@ -135,7 +134,6 @@ impl Drop for InFlightGuard<'_> {
 }
 
 impl AuthManager {
-
     /// Mark an IdP refresh as starting. Paired with [`Self::end_refresh_in_flight`]
     /// via [`InFlightGuard`]; see [`Self::hold_sleep_ack_until_refresh_drains`].
     fn begin_refresh_in_flight(&self) {
@@ -253,5 +251,4 @@ impl AuthManager {
     pub(crate) fn set_dark_wake_for_test(&self, dark: bool) {
         *self.dark_wake_override.lock() = Some(dark);
     }
-
 }

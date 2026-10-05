@@ -8,8 +8,8 @@
 //! Hit-tests here assume the cached rects come from the last rendered frame.
 use super::actions::Action;
 use super::agent_view::{
-    AgentPane, AgentView, MULTI_CLICK_TIMEOUT_MS, PromptMode,
-    TextClickState, is_link_modifier_held, is_text_selection_on_double_click,
+    AgentPane, AgentView, MULTI_CLICK_TIMEOUT_MS, PromptMode, TextClickState,
+    is_link_modifier_held, is_text_selection_on_double_click,
 };
 use super::app_view::InputOutcome;
 use crate::scrollback::block::BlockContent;
@@ -494,29 +494,25 @@ impl AgentView {
                             .scrollback
                             .entry_index_at_screen_row(click_row, self.pane_areas.scrollback);
                         if let Some(idx) = hit_idx {
-                            let credit_click = self
-                                .scrollback
-                                .entry(idx)
-                                .and_then(|entry| {
-                                    if let crate::scrollback::block::RenderBlock::CreditLimit(
-                                        ref blk,
-                                    ) = entry.block
-                                    {
-                                        use crate::scrollback::blocks::CreditLimitCardAction;
-                                        let choice = match blk.action {
-                                            CreditLimitCardAction::PurchaseCredits => {
-                                                pi_telemetry::events::CreditLimitChoice::PurchaseCredits
-                                            }
-                                            CreditLimitCardAction::EnablePayg
-                                            | CreditLimitCardAction::IncreasePaygLimit => {
-                                                pi_telemetry::events::CreditLimitChoice::PayAsYouGo
-                                            }
-                                        };
-                                        Some((blk.url.clone(), choice))
-                                    } else {
-                                        None
-                                    }
-                                });
+                            let credit_click = self.scrollback.entry(idx).and_then(|entry| {
+                                if let crate::scrollback::block::RenderBlock::CreditLimit(ref blk) =
+                                    entry.block
+                                {
+                                    use crate::scrollback::blocks::CreditLimitCardAction;
+                                    let choice = match blk.action {
+                                        CreditLimitCardAction::PurchaseCredits => {
+                                            pi_telemetry::events::CreditLimitChoice::PurchaseCredits
+                                        }
+                                        CreditLimitCardAction::EnablePayg
+                                        | CreditLimitCardAction::IncreasePaygLimit => {
+                                            pi_telemetry::events::CreditLimitChoice::PayAsYouGo
+                                        }
+                                    };
+                                    Some((blk.url.clone(), choice))
+                                } else {
+                                    None
+                                }
+                            });
                             if let Some((url, choice)) = credit_click
                                 && let Some((area, _, _)) = self
                                     .scrollback
@@ -633,9 +629,7 @@ impl AgentView {
                                     .get(idx)
                                     .is_some_and(|e| e.block.is_selectable())
                             }),
-                        AgentPane::Todo
-                        | AgentPane::Queue
-                        | AgentPane::Prompt => None,
+                        AgentPane::Todo | AgentPane::Queue | AgentPane::Prompt => None,
                     })
                 };
                 let new_prompt_hover = hit == Some(AgentPane::Prompt)
@@ -939,7 +933,8 @@ mod tests {
         );
         assert_eq!(agent.prompt.text(), "draft");
         assert!(!agent.queue.overlay.visible);
-    }    /// Mouse `[cancel]` of the FRONT local row being edited while idle:
+    }
+    /// Mouse `[cancel]` of the FRONT local row being edited while idle:
     /// discarding the edit releases the drain block, so the click must kick
     /// `DrainQueue` like the modal Delete arm (the row behind must not sit
     /// stuck until an unrelated trigger).
@@ -1084,7 +1079,8 @@ mod tests {
             agent.stashed_prompt.as_ref().map(|s| s.text.as_str()),
             Some("draft")
         );
-    }    /// A synthetic left-click on a rendered follow-up chip yields the LITERAL
+    }
+    /// A synthetic left-click on a rendered follow-up chip yields the LITERAL
     /// `SubmitFollowUp` action (never a slash-command path).
     #[test]
     fn follow_up_chip_click_yields_literal_submit_action() {

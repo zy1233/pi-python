@@ -23,4 +23,3 @@ pub(crate) fn is_devbox_environment() -> bool {
 pub(super) async fn mint_devbox_auth_raw() -> anyhow::Result<GrokAuth> {
     anyhow::bail!(UNAVAILABLE)
 }
-

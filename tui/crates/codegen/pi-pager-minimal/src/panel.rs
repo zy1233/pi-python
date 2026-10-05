@@ -142,8 +142,7 @@ fn resume_body_rows(agent: &AgentView, width: u16) -> u16 {
     };
     let entries_data = entries.as_deref().unwrap_or(&[]);
     let content_width = width.saturating_sub(2);
-    let filtered =
-        minimal_api::filter_session_entries(entries.as_deref(), state.query());
+    let filtered = minimal_api::filter_session_entries(entries.as_deref(), state.query());
     let built =
         minimal_api::build_session_entry_data(entries_data, &filtered, state, content_width);
     let fields_vecs: Vec<Vec<PickerField>> = built
@@ -181,8 +180,7 @@ fn render_resume(
 
     let entries_data = entries.as_deref().unwrap_or(&[]);
     let content_width = area.width.saturating_sub(2);
-    let filtered =
-        minimal_api::filter_session_entries(entries.as_deref(), state.query());
+    let filtered = minimal_api::filter_session_entries(entries.as_deref(), state.query());
     let built =
         minimal_api::build_session_entry_data(entries_data, &filtered, state, content_width);
     let fields_vecs: Vec<Vec<PickerField>> = built

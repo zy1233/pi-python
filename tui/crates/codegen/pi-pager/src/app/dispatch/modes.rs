@@ -1,6 +1,6 @@
 //! Plan, yolo, auto, and permission mode transitions and toasts.
 
-use super::ctx::{NO_SESSION_NOTICE, };
+use super::ctx::NO_SESSION_NOTICE;
 use super::settings::ui::{refresh_open_settings_modals, save_success_toast};
 use crate::app::actions::Effect;
 use crate::app::app_view::{ActiveView, AppView};
@@ -711,9 +711,7 @@ fn dispatch_cycle_mode_inner(app: &mut AppView) -> Vec<Effect> {
             vec![
                 Effect::SetSessionMode {
                     session_id: session_id.clone(),
-                    mode_id: acp::SessionModeId::new(
-                        pi_tools::types::SessionMode::Default.as_id(),
-                    ),
+                    mode_id: acp::SessionModeId::new(pi_tools::types::SessionMode::Default.as_id()),
                 },
                 Effect::PersistPermissionMode {
                     canonical: "auto",
@@ -781,9 +779,7 @@ fn dispatch_cycle_mode_inner(app: &mut AppView) -> Vec<Effect> {
             vec![
                 Effect::SetSessionMode {
                     session_id: session_id.clone(),
-                    mode_id: acp::SessionModeId::new(
-                        pi_tools::types::SessionMode::Default.as_id(),
-                    ),
+                    mode_id: acp::SessionModeId::new(pi_tools::types::SessionMode::Default.as_id()),
                 },
                 Effect::PersistPermissionMode {
                     canonical: "auto",
@@ -813,9 +809,7 @@ fn dispatch_cycle_mode_inner(app: &mut AppView) -> Vec<Effect> {
             if in_plan {
                 effects.push(Effect::SetSessionMode {
                     session_id: session_id.clone(),
-                    mode_id: acp::SessionModeId::new(
-                        pi_tools::types::SessionMode::Default.as_id(),
-                    ),
+                    mode_id: acp::SessionModeId::new(pi_tools::types::SessionMode::Default.as_id()),
                 });
             }
             if in_yolo || in_auto {

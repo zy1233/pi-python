@@ -22,11 +22,6 @@ use crate::file_system::ContentSearchRequest;
 use crate::handle::WorkspaceHandle;
 use crate::worktree::{ApplyWorktreeRequest, CreateWorktreeRequest, RemoveWorktreeRequest};
 use async_trait::async_trait;
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use pi_computer_hub_sdk::ToolHarness;
 use pi_tools::types::output::ToolRunResult;
 use pi_workspace_client::{WorkspaceClient, is_transport_fatal};
@@ -75,6 +70,11 @@ pub use pi_workspace_types::rpc::worktree::{
     WorktreeGcReq, WorktreeListReq, WorktreeSalvageReq, WorktreeShowReq,
 };
 pub use pi_workspace_types::rpc::{RpcActivityClass, WorkspaceRpc};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 /// Implements [`WorkspaceRpc`] for request types whose responses
 /// reference crate-internal types and so cannot live in the types crate.
 /// The activity class is a required argument for the same reason the trait
@@ -187,9 +187,7 @@ fn file_content_status_to_wire(
         S::Full => FileContentStatusWire::Full,
     }
 }
-fn file_content_view_to_wire(
-    view: pi_hunk_tracker::types::FileContentView,
-) -> FileContentViewWire {
+fn file_content_view_to_wire(view: pi_hunk_tracker::types::FileContentView) -> FileContentViewWire {
     FileContentViewWire {
         status: file_content_status_to_wire(view.status),
         byte_len: view.byte_len,
@@ -2012,9 +2010,8 @@ mod tests {
             unreachable!("for_test builds a local handle");
         };
         let sid = "sess-teardown";
-        let toolset = std::sync::Arc::new(
-            pi_tools::registry::types::FinalizedToolset::empty_for_test(),
-        );
+        let toolset =
+            std::sync::Arc::new(pi_tools::registry::types::FinalizedToolset::empty_for_test());
         let weak = std::sync::Arc::downgrade(&toolset);
         ops.bind_local_session(
             sid,
@@ -2134,9 +2131,9 @@ mod tests {
     /// A `SessionSummary` (with a turn carrying a hunk) mirrors identically.
     #[test]
     fn session_summary_to_wire_serializes_identically() {
-        use std::sync::Arc;
         use pi_hunk_tracker::SessionSummary;
         use pi_hunk_tracker::types::{Hunk, HunkSource, TurnSummary};
+        use std::sync::Arc;
         let hunk = Hunk::file_created(
             std::path::PathBuf::from("/repo/a.rs"),
             "x\n".to_string(),

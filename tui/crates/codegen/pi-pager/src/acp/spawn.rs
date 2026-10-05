@@ -8,16 +8,14 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::Result;
-use tokio_util::sync::CancellationToken;
 use pi_telemetry::startup::{self, StartupPhase};
+use tokio_util::sync::CancellationToken;
 
 use pi_acp_lib::{
     AcpAgentChannel, AcpClientChannel, AcpGatewayReceiver, AcpGatewaySender, acp_channels,
 };
 use pi_shell::{
-    agent::config::Config as AgentConfig,
-    auth::AuthManager,
-    util::grok_home::grok_home,
+    agent::config::Config as AgentConfig, auth::AuthManager, util::grok_home::grok_home,
 };
 
 /// Upper bound for the agent process to be killed and reaped after cancel.
@@ -363,10 +361,9 @@ mod pi_agent_command_tests {
 
     #[test]
     fn parse_agent_command_supports_quoted_windows_paths() {
-        let (prog, args) = parse_agent_command(
-            r#""C:\Program Files\Python312\python.exe" -m pi_agent_cli"#,
-        )
-        .expect("quoted command should parse");
+        let (prog, args) =
+            parse_agent_command(r#""C:\Program Files\Python312\python.exe" -m pi_agent_cli"#)
+                .expect("quoted command should parse");
         assert_eq!(
             prog,
             std::ffi::OsString::from(r"C:\Program Files\Python312\python.exe")
@@ -515,7 +512,6 @@ async fn spawn_python_stdio_bridge(
             })
         })?)
 }
-
 
 #[cfg(test)]
 mod tests {

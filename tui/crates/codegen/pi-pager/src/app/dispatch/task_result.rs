@@ -1,38 +1,27 @@
 //! Async task-result application: routes task results into state.
-use super::auth::{
-    ensure_login_method, handle_auth_complete, handle_auth_url_ready, 
-};
+use super::auth::{ensure_login_method, handle_auth_complete, handle_auth_url_ready};
 use super::billing::{
     PAYWALL_AUTO_CHECK_TIMEOUT, apply_auto_topup, handle_billing_fetched,
     handle_check_subscription_complete, handle_credit_limit_recheck_complete,
     handle_gate_refreshed, handle_gate_verify_timeout,
 };
-use super::ctx::{ get_active_agent_mut};
-use super::prompt::{
-    handle_prompt_response,
-};
-use super::router::{dispatch, };
-use super::session::session_list::{
-    handle_session_list_failed, handle_session_list_loaded,
-};
+use super::ctx::get_active_agent_mut;
+use super::prompt::handle_prompt_response;
+use super::router::dispatch;
 use super::session::lifecycle::{
     dispatch_exit_session, handle_session_created, handle_session_failed,
     handle_switch_model_complete, handle_worktree_session_failed,
 };
 use super::session::load::{
-    handle_session_load_failed,
-    handle_session_loaded, 
-    remove_session_from_pickers,
+    handle_session_load_failed, handle_session_loaded, remove_session_from_pickers,
 };
 use super::session::modal::remove_agent_and_cleanup;
+use super::session::session_list::{handle_session_list_failed, handle_session_list_loaded};
 use super::settings::ui::apply_setting_rollback;
-use super::status::{
-    scrub_error_for_toast,
-};
+use super::status::scrub_error_for_toast;
 use crate::app::actions::{
     ClipboardPasteCompletion, ClipboardPasteContext, ClipboardPasteFailure, ClipboardPasteTarget,
-    Effect, ProbedAttachment, 
-    TaskResult,
+    Effect, ProbedAttachment, TaskResult,
 };
 use crate::app::agent_view::AgentDeferredSend;
 use crate::app::app_view::{ActiveView, AppView, AuthState};
@@ -170,14 +159,7 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             silent,
             subscription_tier,
             autotopup,
-        } => handle_billing_fetched(
-            app,
-            agent_id,
-            balance,
-            silent,
-            subscription_tier,
-            autotopup,
-        ),
+        } => handle_billing_fetched(app, agent_id, balance, silent, subscription_tier, autotopup),
         TaskResult::AppBillingFetched { balance, autotopup } => {
             app.credit_balance = balance;
             apply_auto_topup(&mut app.auto_topup, &autotopup);
@@ -212,9 +194,7 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
         TaskResult::SessionListLoaded { sessions, seq } => {
             handle_session_list_loaded(app, sessions, seq)
         }
-        TaskResult::SessionListFailed { error, seq } => {
-            handle_session_list_failed(app, error, seq)
-        }
+        TaskResult::SessionListFailed { error, seq } => handle_session_list_failed(app, error, seq),
         TaskResult::PromptResponse {
             agent_id,
             result,

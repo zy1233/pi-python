@@ -164,7 +164,6 @@ fn x11_primary_hint_routes_to_originating_agent() {
     );
 }
 
-
 #[test]
 fn clipboard_failure_routes_to_originating_agent_without_duplicate() {
     let mut app = test_app_with_agent();
@@ -207,7 +206,6 @@ fn clipboard_failure_routes_to_originating_agent_without_duplicate() {
         Some("Couldn't save pasted image")
     );
 }
-
 
 #[test]
 fn cancel_complete_does_nothing() {
@@ -494,9 +492,7 @@ fn switch_model_incompatible_agent_shows_question_modal() {
             agent_id: id,
             model_id,
             effort: None,
-            result: Err(SwitchModelError::IncompatibleAgent {
-                error: err,
-            }),
+            result: Err(SwitchModelError::IncompatibleAgent { error: err }),
             prev_model_id: None,
         }),
         &mut app,
@@ -556,9 +552,7 @@ fn incompatible_agent_rollback_restores_previous_model() {
             agent_id: id,
             model_id: new_model,
             effort: None,
-            result: Err(SwitchModelError::IncompatibleAgent {
-                error: err,
-            }),
+            result: Err(SwitchModelError::IncompatibleAgent { error: err }),
             prev_model_id: Some(prev_model.clone()),
         }),
         &mut app,
@@ -601,9 +595,7 @@ fn incompatible_agent_closes_active_modal() {
             agent_id: id,
             model_id,
             effort: None,
-            result: Err(SwitchModelError::IncompatibleAgent {
-                error: err,
-            }),
+            result: Err(SwitchModelError::IncompatibleAgent { error: err }),
             prev_model_id: None,
         }),
         &mut app,

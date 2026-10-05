@@ -137,8 +137,8 @@ pub(crate) fn presandbox_resume_target(
     if pi_shell::session::resolve_local_session_any_cwd(arg).is_some() {
         return Ok(PinnedResumeTarget::Id(arg.to_string()));
     }
-    let summaries = pi_shell::session::persistence::local_summaries_for_cwd_sync(cwd)
-        .map_err(|e| {
+    let summaries =
+        pi_shell::session::persistence::local_summaries_for_cwd_sync(cwd).map_err(|e| {
             anyhow::anyhow!("failed to list local sessions while resolving --resume {arg:?}: {e}")
         })?;
     Ok(select_by_title(arg, &summaries)?

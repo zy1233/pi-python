@@ -379,7 +379,7 @@ async fn refresh_tokens_once(
 }
 #[cfg(test)]
 mod tests {
-    
+
     use super::*;
     /// Enforcement matrix: None passes; Single/AnyOf require a match (and reject
     /// a no-principal token); empty AnyOf fails closed.

@@ -1,10 +1,8 @@
 //! Session loading, session pickers, and deep-search dispatchers.
+use super::lifecycle::dispatch_new_worktree_session;
 use super::session_list::dispatch_fetch_session_list;
-use super::lifecycle::{
-    dispatch_new_worktree_session,
-};
 use crate::acp::tracker::AcpUpdateTracker;
-use crate::app::actions::{ Effect};
+use crate::app::actions::Effect;
 use crate::app::agent::{AgentCommand, AgentId, AgentSession, AgentState};
 use crate::app::agent_view::AgentView;
 use crate::app::app_view::AppView;
@@ -13,7 +11,7 @@ use crate::app::dispatch::ctx::{
     SwitchCause, get_active_agent, get_active_agent_mut, switch_to_agent, with_active_agent,
 };
 use crate::app::dispatch::modes::inherit_auto_mode;
-use crate::app::dispatch::prompt::{defer_to_open_reload_window, };
+use crate::app::dispatch::prompt::defer_to_open_reload_window;
 use crate::app::dispatch::queue::maybe_drain_queue;
 use crate::app::dispatch::status::notify_session_ready;
 use crate::scrollback::block::RenderBlock;
@@ -229,8 +227,7 @@ pub(in crate::app::dispatch) fn dispatch_pick_session(
     if pi_shell::session::resolve_local_session(&session_id, &local_cwd).is_some() {
         return dispatch_load_session(app, session_id, None);
     }
-    if let Some(original_cwd) = pi_shell::session::resolve_local_session_any_cwd(&session_id)
-    {
+    if let Some(original_cwd) = pi_shell::session::resolve_local_session_any_cwd(&session_id) {
         return dispatch_load_session(
             app,
             session_id,

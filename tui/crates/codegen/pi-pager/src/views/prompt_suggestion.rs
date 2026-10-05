@@ -141,6 +141,4 @@ pub fn suggestion_size(text: &str) -> (usize, usize) {
 }
 
 #[cfg(test)]
-mod tests {
-
-}
+mod tests {}

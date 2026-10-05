@@ -1,7 +1,5 @@
 //! Model fetching, resolution, and management.
 
-
-
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use indexmap::IndexMap;
 

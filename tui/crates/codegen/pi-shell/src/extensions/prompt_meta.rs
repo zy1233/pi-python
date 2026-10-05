@@ -20,7 +20,6 @@ impl PromptBlockMeta {
             bash_command: Some(command.into()),
         }
     }
-
 }
 
 #[cfg(test)]

@@ -8,8 +8,8 @@ use crate::app::agent_view::AgentView;
 use crate::app::app_view::{ActiveView, AppView};
 use crate::app::cancel_latency::{CancelOrigin, TurnEnd};
 use crate::scrollback::blocks::SessionEvent;
-use std::time::Instant;
 use pi_telemetry::events::CancellationScope;
+use std::time::Instant;
 
 pub(super) fn dispatch_cancel_turn(app: &mut AppView) -> Vec<Effect> {
     let ActiveView::Agent(id) = app.active_view else {
@@ -38,9 +38,7 @@ pub(super) fn dispatch_cancel_turn(app: &mut AppView) -> Vec<Effect> {
                 })),
             );
             return vec![emit_cancel_turn(
-                agent,
-                session_id,
-                /* rewind_prompt_id */ None,
+                agent, session_id, /* rewind_prompt_id */ None,
             )];
         }
         // Compact owns the pane (`CommandRunning`) even if a leftover wake
@@ -56,9 +54,7 @@ pub(super) fn dispatch_cancel_turn(app: &mut AppView) -> Vec<Effect> {
                 };
                 agent.mark_wake_cancel_sent();
                 return vec![emit_cancel_turn(
-                    agent,
-                    session_id,
-                    /* rewind_prompt_id */ None,
+                    agent, session_id, /* rewind_prompt_id */ None,
                 )];
             }
             if !agent.session.state.is_turn_running() {
@@ -93,9 +89,7 @@ fn cancel_agent_turn(
             return vec![];
         };
         return vec![emit_cancel_turn(
-            agent,
-            session_id,
-            /* rewind_prompt_id */ None,
+            agent, session_id, /* rewind_prompt_id */ None,
         )];
     }
     if agent.running_wake_turn.is_some() {
@@ -104,9 +98,7 @@ fn cancel_agent_turn(
         };
         agent.mark_wake_cancel_sent();
         return vec![emit_cancel_turn(
-            agent,
-            session_id,
-            /* rewind_prompt_id */ None,
+            agent, session_id, /* rewind_prompt_id */ None,
         )];
     }
     if !agent.session.state.is_turn_running() {
@@ -436,4 +428,3 @@ pub(crate) fn reconcile_overdue_turn_ends(app: &mut AppView) -> Option<Vec<Effec
 }
 
 // TaskResult handlers.
-

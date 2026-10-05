@@ -16,12 +16,12 @@ use pi_workspace::permission::bash_command_splitting::BashCommandHighlights;
 
 use crate::acp::meta::NotificationMeta;
 use crate::acp::tracker::TurnActivity;
-use crate::app::agent::{AgentId, AgentSession, AgentState, };
+use crate::app::agent::{AgentId, AgentSession, AgentState};
 use crate::notifications::{NotificationEvent, NotificationEventKind};
 use crate::scrollback::block::RenderBlock;
 use crate::scrollback::blocks::SessionEvent;
 use crate::views::permission_view::{
-    McpScope, McpScopeState, PermissionFocus, PermissionViewState, 
+    McpScope, McpScopeState, PermissionFocus, PermissionViewState,
 };
 
 use super::agent_view::{AgentPane, AgentView};
@@ -48,11 +48,13 @@ pub(crate) use prompt_origin::{
     should_adopt_running_prompt,
 };
 
-
 #[cfg(test)]
 pub(crate) use session_notification::apply_session_event_for_test;
 pub(crate) use session_notification::drop_unexpected_replay;
-use session_notification::{advance_reconnect_cursor, confirm_context_used, detect_plan_mode_change, handle_session_notification};
+use session_notification::{
+    advance_reconnect_cursor, confirm_context_used, detect_plan_mode_change,
+    handle_session_notification,
+};
 
 #[cfg(test)]
 #[allow(unused_imports)]
@@ -452,7 +454,10 @@ pub(super) fn note_first_turn_activity(agent: &mut AgentView) {
 fn handle_ext_notification(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
     let method = notif.method.as_ref();
     if crate::acp::vendor::is_vendor_ext_method(method) {
-        tracing::debug!(method, "ignoring vendor ext notification (standard ACP only)");
+        tracing::debug!(
+            method,
+            "ignoring vendor ext notification (standard ACP only)"
+        );
         return false;
     }
     if crate::acp::is_session_update_ext_method(method) {
@@ -478,7 +483,10 @@ fn handle_ext_method(ext: pi_acp_lib::AcpArgs<acp::ExtRequest>) -> bool {
             }
             Err(_) => {
                 ext.response_tx
-                    .send(Err(acp::Error::new(-32601, format!("Method not found: {method}"))))
+                    .send(Err(acp::Error::new(
+                        -32601,
+                        format!("Method not found: {method}"),
+                    )))
                     .ok();
             }
         }

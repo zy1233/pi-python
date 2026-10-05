@@ -169,7 +169,7 @@ pub(crate) fn parse_model_providers(
 
 #[cfg(test)]
 mod tests {
-    use crate::agent::config::{Config};
+    use crate::agent::config::Config;
 
     #[test]
     fn model_provider_parse_warnings_are_lenient_and_specific() {
@@ -412,5 +412,4 @@ mod tests {
             cfg.config_warnings
         );
     }
-
 }

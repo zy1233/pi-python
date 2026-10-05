@@ -1,6 +1,5 @@
 pub(crate) mod reloader;
 use crate::bundle;
-use serde::Deserialize;
 pub use pi_config_types::{
     DEFAULT_RECENCY_DECAY, MemoryConfig, MemoryDreamConfig, MemoryDreamSettings,
     MemoryEmbeddingConfig, MemoryEmbeddingSettings, MemoryFlushConfig, MemoryFlushSettings,
@@ -10,6 +9,7 @@ pub use pi_config_types::{
     MemoryWatcherConfig, MemoryWatcherSettings, MmrConfig, MmrSettings, PruningConfig,
     PruningSettings, TemporalDecayConfig, TemporalDecaySettings,
 };
+use serde::Deserialize;
 /// Configuration for subagent (task tool) support.
 ///
 /// Parsed from the `[subagents]` section of `~/.grok/config.toml` or
@@ -230,7 +230,8 @@ impl SubagentsConfig {
     pub(crate) const ENV_MAX_CONCURRENT: &'static str = "GROK_MAX_CONCURRENT_SUBAGENTS";
     pub(crate) const ENV_SAMPLING_LIMIT: &'static str = "GROK_SUBAGENT_SAMPLING_LIMIT";
     pub(crate) const ENV_LIMIT_BEHAVIOR: &'static str = "GROK_SUBAGENT_LIMIT_BEHAVIOR";
-    pub(crate) const ENV_WORKFLOW_MAX_CONCURRENT: &'static str = "GROK_WORKFLOW_MAX_CONCURRENT_AGENTS";
+    pub(crate) const ENV_WORKFLOW_MAX_CONCURRENT: &'static str =
+        "GROK_WORKFLOW_MAX_CONCURRENT_AGENTS";
     pub(crate) fn resolve_max_concurrent(
         env: Option<&str>,
         config: Option<i64>,
@@ -601,8 +602,10 @@ pub struct ToolsConfig {
     pub media_gen: MediaGenToolsConfig,
 }
 impl ToolsConfig {
-    pub(crate) const ENV_MAX_PARALLEL_IMAGE_GEN_CALLS: &'static str = "GROK_MAX_PARALLEL_IMAGE_GEN_CALLS";
-    pub(crate) const ENV_MAX_PARALLEL_VIDEO_GEN_CALLS: &'static str = "GROK_MAX_PARALLEL_VIDEO_GEN_CALLS";
+    pub(crate) const ENV_MAX_PARALLEL_IMAGE_GEN_CALLS: &'static str =
+        "GROK_MAX_PARALLEL_IMAGE_GEN_CALLS";
+    pub(crate) const ENV_MAX_PARALLEL_VIDEO_GEN_CALLS: &'static str =
+        "GROK_MAX_PARALLEL_VIDEO_GEN_CALLS";
     /// Resolve the final tools config, in priority order:
     /// 1. Env vars `GROK_RESPECT_GITIGNORE` and
     ///    `GROK_DISABLE_ZDR_INCOMPATIBLE_TOOLS` (`0`/`false` off,
@@ -808,6 +811,10 @@ impl StorageMode {
         Self::Local
     }
 }
+/// The `[skills]` table from an effective config, shared by the reload
+/// dispatch and `grok inspect`.
+/// Effective config: layers + campaign overlay (remote cache + `GROK_CAMPAIGNS_OVERRIDE`).
+pub use crate::util::config::load_effective_config;
 pub(crate) use pi_config::ConfigLayers;
 pub use pi_config::{
     GROK_CONFIG_ENV, GROK_CONFIG_PATH_ENV, MDM_REQUIREMENTS_SOURCE, OverlaySource,
@@ -820,10 +827,6 @@ pub use pi_config::{
     normalize_identity, requirements_layers, resolved_env_overlay, system_config_dir,
     user_grok_home,
 };
-/// The `[skills]` table from an effective config, shared by the reload
-/// dispatch and `grok inspect`.
-/// Effective config: layers + campaign overlay (remote cache + `GROK_CAMPAIGNS_OVERRIDE`).
-pub use crate::util::config::load_effective_config;
 /// Where a requirement or permission rule was loaded from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RequirementSource {
@@ -1238,11 +1241,10 @@ pub fn apply_sandbox(
         .and_then(|v| v.get("sandbox")?.get("auto_allow_bash")?.as_bool());
     let resolved = config.resolve_profile(cli_profile, profile_req);
     pi_sandbox::set_auto_allow_bash(config.resolve_auto_allow_bash(auto_allow_req).value);
-    let sandbox_profile: pi_sandbox::ProfileName =
-        resolved.value.parse().unwrap_or_else(|e| {
-            eprintln!("warning: {e}, defaulting to no sandbox");
-            pi_sandbox::ProfileName::Off
-        });
+    let sandbox_profile: pi_sandbox::ProfileName = resolved.value.parse().unwrap_or_else(|e| {
+        eprintln!("warning: {e}, defaulting to no sandbox");
+        pi_sandbox::ProfileName::Off
+    });
     pi_sandbox::set_configured_profile(&resolved.value);
     let workspace = cwd
         .and_then(|p| dunce::canonicalize(p).ok())
@@ -1306,8 +1308,7 @@ pub fn apply_sandbox(
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         let requires_protection = {
             let is_custom = matches!(sandbox_profile, pi_sandbox::ProfileName::Custom(_));
-            let needs_hooks =
-                pi_sandbox::requires_hook_write_deny(&sandbox_profile, &workspace);
+            let needs_hooks = pi_sandbox::requires_hook_write_deny(&sandbox_profile, &workspace);
             is_custom || needs_hooks
         };
         let mut sandbox = pi_sandbox::SandboxManager::new(sandbox_profile, &workspace);
@@ -1319,9 +1320,8 @@ pub fn apply_sandbox(
             #[cfg(target_os = "macos")]
             let unappliable = requires_protection && !sandbox.is_applied();
             #[cfg(target_os = "linux")]
-            let unappliable = requires_protection
-                && !sandbox.is_applied()
-                && !pi_sandbox::is_inside_bwrap();
+            let unappliable =
+                requires_protection && !sandbox.is_applied() && !pi_sandbox::is_inside_bwrap();
             if unappliable {
                 eprintln!(
                     "error: could not apply the '{}' sandbox profile; see the \

@@ -211,4 +211,3 @@ fn minimal_update_notice_no_active_agent_is_noop() {
 // ── Tutorial dispatch tests ──────────────────────────────────────────
 
 // ── Usage modal (full TUI) dispatch tests ────────────────────────────
-

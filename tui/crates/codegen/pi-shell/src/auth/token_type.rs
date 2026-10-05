@@ -49,6 +49,4 @@ impl TokenType {
 #[cfg(test)]
 mod tests {
     //! Per-variant matrix for `is_refreshable`.
-    
-
 }

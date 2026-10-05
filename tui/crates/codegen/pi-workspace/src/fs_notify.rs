@@ -27,9 +27,7 @@ fn parse_diff_name_status_line(
                 repo_root.join(new_path),
             ))
         }
-        _ => Some(pi_codebase_graph::FileEvent::modified(
-            repo_root.join(path),
-        )),
+        _ => Some(pi_codebase_graph::FileEvent::modified(repo_root.join(path))),
     }
 }
 
@@ -100,11 +98,9 @@ pub(crate) async fn refresh_codebase_graph_after_head_change(
     }
 
     if let Some(count) = files_updated {
-        let _ = events_tx.send(
-            pi_workspace_types::WorkspaceEvent::CodebaseIndexUpdated {
-                files_indexed: count,
-            },
-        );
+        let _ = events_tx.send(pi_workspace_types::WorkspaceEvent::CodebaseIndexUpdated {
+            files_indexed: count,
+        });
     }
 }
 

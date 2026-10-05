@@ -1,4 +1,3 @@
-
 /// Permission bits (`mode & 0o777`) of `path`, for owner-only assertions.
 #[cfg(unix)]
 pub(crate) fn unix_mode(path: &std::path::Path) -> u32 {
@@ -14,4 +13,3 @@ pub(crate) fn unix_mode(path: &std::path::Path) -> u32 {
 fn redirect_unified_log_for_tests() {
     pi_telemetry::unified_log::redirect_to_temp_for_tests();
 }
-

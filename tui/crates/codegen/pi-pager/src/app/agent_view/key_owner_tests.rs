@@ -6,8 +6,8 @@ use crate::views::prompt_widget::StashedPrompt;
 use crate::views::question_view::QuestionViewState;
 use agent_client_protocol as acp;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use std::sync::Arc;
 use pi_tools::implementations::grok_build::ask_user_question::{Question, QuestionOption};
+use std::sync::Arc;
 
 const SHIFT_TAB: [(KeyCode, KeyModifiers); 3] = [
     (KeyCode::BackTab, KeyModifiers::NONE),
@@ -299,7 +299,6 @@ fn the_esc_hint_names_the_rung_the_key_takes() {
     assert_eq!(agent.card_esc(), Some(EscStep::ClearSelection));
     assert!(hint_labels(&agent).contains(&"unselect".to_string()));
 }
-
 
 #[test]
 fn a_parked_card_does_not_hand_esc_to_the_turn_cancel() {

@@ -5,7 +5,7 @@
 use super::ctx::NO_SESSION_NOTICE;
 use crate::acp::meta::user_prompt_meta;
 use crate::app::actions::Effect;
-use crate::app::agent::{ AgentId};
+use crate::app::agent::AgentId;
 use crate::app::agent_view::{AgentView, PromptMode};
 use crate::app::app_view::{ActiveView, AppView};
 use crate::scrollback::block::RenderBlock;
@@ -335,9 +335,7 @@ pub(super) fn maybe_drain_queue(agent: &mut AgentView) -> QueueDrain {
                     skill_token_ranges: queued.skill_token_ranges,
                 }]
             };
-            QueueDrain {
-                effects,
-            }
+            QueueDrain { effects }
         }
         QueueEntryKind::BashCommand => {
             // Start turn but do NOT push a user prompt block.
@@ -401,7 +399,6 @@ pub(super) fn maybe_drain_queue(agent: &mut AgentView) -> QueueDrain {
         }
     }
 }
-
 
 /// Paint one user bubble per combined segment of a drained, combined prompt.
 ///

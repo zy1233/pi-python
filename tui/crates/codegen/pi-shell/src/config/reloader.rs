@@ -1,10 +1,5 @@
-
-
 #[cfg(test)]
 mod tests {
-    
-    
-    
 
     #[test]
     fn memory_config_diff_detects_enabled_change() {

@@ -6,8 +6,5 @@
 //! hit-test, and height functions. Row *content* stays with the caller
 //! (a closure); this owns chrome, cursor styling, and the scroll window.
 
-
 #[cfg(test)]
-mod tests {
-
-}
+mod tests {}

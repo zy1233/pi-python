@@ -10,13 +10,7 @@ pub(crate) mod subprocess;
 pub use pi_shell_base::util::*;
 
 #[cfg(test)]
-mod expand_home_tests {
-    
-
-}
+mod expand_home_tests {}
 
 #[cfg(test)]
-mod is_user_instruction_path_tests {
-        
-
-}
+mod is_user_instruction_path_tests {}

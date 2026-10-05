@@ -28,7 +28,4 @@ pub enum PendingKind {
 }
 
 #[cfg(test)]
-mod tests {
-    
-
-}
+mod tests {}

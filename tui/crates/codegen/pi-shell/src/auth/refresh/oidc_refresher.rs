@@ -7,7 +7,6 @@ use crate::auth::oidc::OidcRefreshResult;
 
 use super::{AuthSnapshot, DiagnosticUploader, RefreshOutcome, TokenRefresher};
 
-
 /// Escalate to `PermanentFailure` after this many consecutive transient
 /// failures (then `PERMANENT_FAILURE_TTL` allows recovery). OIDC tolerates more
 /// blips than `ExternalBinaryRefresher` (1) since network refreshes flake more
@@ -342,4 +341,3 @@ fn spawn_diagnostic_upload(
 #[cfg(test)]
 #[path = "oidc_refresher_tests.rs"]
 mod tests;
-

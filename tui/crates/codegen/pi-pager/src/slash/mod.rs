@@ -25,13 +25,10 @@ use std::{
 use crate::acp::model_state::ModelState;
 
 use matcher::FuzzyMatcher;
-use registry::{CommandRegistry, CommandSource, CommandTrigger};
 use pi_tools::implementations::skills::types::SkillScope;
+use registry::{CommandRegistry, CommandSource, CommandTrigger};
 
-pub use command::{
-    AppCtx, ArgItem, CommandProvenance, SlashCommand,
-    
-};
+pub use command::{AppCtx, ArgItem, CommandProvenance, SlashCommand};
 pub use mode_support::{ModeSupport, Remedy};
 
 /// Maximum number of visible rows in the dropdown (scroll beyond this).
@@ -743,9 +740,7 @@ impl SlashController {
             return snapshot;
         };
         let ctx = self.app_ctx(models);
-        if !command_offered(command.as_ref(), &ctx)
-            || !command.takes_args_now(&ctx)
-        {
+        if !command_offered(command.as_ref(), &ctx) || !command.takes_args_now(&ctx) {
             return snapshot;
         }
 

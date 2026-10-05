@@ -113,11 +113,13 @@ pub(crate) fn pending_delete_from_selection(
 ) -> Option<PendingDelete> {
     match entry_map.get(selected).and_then(|e| e.as_ref())? {
         PickerItem::Fuzzy { original_index } => {
-            entries.and_then(|e| e.get(*original_index)).map(|e| PendingDelete {
-                source: e.source.clone(),
-                session_id: e.id.clone(),
-                cwd: e.cwd.clone(),
-            })
+            entries
+                .and_then(|e| e.get(*original_index))
+                .map(|e| PendingDelete {
+                    source: e.source.clone(),
+                    session_id: e.id.clone(),
+                    cwd: e.cwd.clone(),
+                })
         }
     }
 }
@@ -199,12 +201,7 @@ pub(crate) fn capture_picker_selection(
     grouped: bool,
     current_repo: Option<&str>,
 ) -> PickerSelectionAnchor {
-    let map = build_entry_map(
-        entries,
-        query,
-        grouped,
-        current_repo,
-    );
+    let map = build_entry_map(entries, query, grouped, current_repo);
     let key = map
         .get(state.selected)
         .and_then(|item| item.as_ref())
@@ -234,12 +231,7 @@ pub(crate) fn restore_picker_selection(
     grouped: bool,
     current_repo: Option<&str>,
 ) {
-    let map = build_entry_map(
-        entries,
-        query,
-        grouped,
-        current_repo,
-    );
+    let map = build_entry_map(entries, query, grouped, current_repo);
     let selected = anchor
         .key
         .as_ref()
@@ -703,12 +695,7 @@ mod tests {
             make_entry("s2", "repo-a"),
         ];
 
-        let map = build_entry_map(
-            Some(&entries),
-            "",
-            true,
-            None,
-        );
+        let map = build_entry_map(Some(&entries), "", true, None);
 
         // Expected layout (sorted by repo_name):
         //   0: None          (header "repo-a")
@@ -797,7 +784,10 @@ mod tests {
 
         state.set_query("");
         expand_all_mapped_session_items(&mut state, &map);
-        assert!(state.expanded.is_empty(), "an empty query collapses everything");
+        assert!(
+            state.expanded.is_empty(),
+            "an empty query collapses everything"
+        );
     }
 
     /// Empty entries list produces empty map.
@@ -856,12 +846,7 @@ mod tests {
         ];
 
         // Pin repo-c: its group leads, then repo-a, repo-b alphabetically.
-        let map = build_entry_map(
-            Some(&entries),
-            "",
-            true,
-            Some("repo-c"),
-        );
+        let map = build_entry_map(Some(&entries), "", true, Some("repo-c"));
         // [repo-c hdr, s2, repo-a hdr, s0, repo-b hdr, s1]
         assert_eq!(map.len(), 6);
         assert!(map[0].is_none(), "repo-c header pinned first");
@@ -881,12 +866,7 @@ mod tests {
         ));
 
         // A current_repo with no matching group is a no-op (pure alphabetical).
-        let map = build_entry_map(
-            Some(&entries),
-            "",
-            true,
-            Some("repo-zzz"),
-        );
+        let map = build_entry_map(Some(&entries), "", true, Some("repo-zzz"));
         assert!(map[0].is_none(), "repo-a header");
         assert!(matches!(
             map[1],

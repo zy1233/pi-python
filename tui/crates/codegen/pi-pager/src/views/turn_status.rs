@@ -13,12 +13,12 @@
 
 use std::time::{Duration, Instant};
 
+use pi_workspace::permission::mcp_pretty_name_if_qualified;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
-use pi_workspace::permission::mcp_pretty_name_if_qualified;
 
 use crate::acp::tracker::TurnActivity;
 use crate::app::agent::{AgentCommand, AgentState};
@@ -163,8 +163,7 @@ pub fn render_turn_status(
         );
 
     // ── Compute activity style and label ──
-    let (activity_style, label, is_tool) =
-        compute_activity(&theme, state, activity, is_bash_turn);
+    let (activity_style, label, is_tool) = compute_activity(&theme, state, activity, is_bash_turn);
 
     // Early return for idle (shouldn't happen if should_show is respected, but be safe).
     if matches!(state, AgentState::Idle) {
@@ -332,7 +331,9 @@ pub fn render_turn_status(
                 let first_line = detail.lines().next().unwrap_or(detail);
                 let display = truncate_str(first_line, max_cmd);
                 left_spans.push(Span::styled(prefix, Style::default().fg(theme.gray)));
-                left_spans.extend(crate::views::bash_highlight::highlight_bash_command(&display));
+                left_spans.extend(crate::views::bash_highlight::highlight_bash_command(
+                    &display,
+                ));
             }
         }
     } else {
@@ -607,7 +608,7 @@ mod tests {
                 &AgentState::TurnRunning,
                 &Some(TurnActivity::Waiting(reason.clone())),
                 false,
-                );
+            );
             assert_eq!(label, expected, "reason {reason:?}");
             assert!(!is_tool, "waiting is not a tool activity");
         }

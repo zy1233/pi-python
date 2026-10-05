@@ -666,5 +666,4 @@ mod tests {
             .expect("buckets");
         assert_eq!(l.text, "Ran 2 commands");
     }
-
 }

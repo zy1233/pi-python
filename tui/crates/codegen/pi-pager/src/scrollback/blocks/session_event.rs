@@ -1042,8 +1042,6 @@ mod tests {
         assert_eq!(block.accent(&ctx()), None);
     }
 
-
-
     #[test]
     fn only_turn_terminal_events_are_turn_terminal() {
         let settled = SessionEventBlock::new(SessionEvent::TurnCompleted {

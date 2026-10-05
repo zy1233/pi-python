@@ -27,12 +27,12 @@ pub use permissions::*;
 pub use persist::*;
 // `remote` extracted to the `pi-config-types` crate (dependency inversion);
 // re-exported so `crate::util::config::{RemoteSettings, GoalRoleModel}` keep working.
-pub use resolve::*;
-pub use settings_writes::*;
-pub use tips::*;
-pub(crate) use worktree::*;
 pub use pi_config_types::{
     CampaignOverride, ConsentGate, ContextualHintsRemote, DisplayRefreshSettings,
     DoomLoopRecoverySettings, GoalRoleModel, RemoteSettings, WorktreeAutoGcSettings,
     WorktreeKindMaxAge, deserialize_tolerant,
 };
+pub use resolve::*;
+pub use settings_writes::*;
+pub use tips::*;
+pub(crate) use worktree::*;

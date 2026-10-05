@@ -1051,10 +1051,7 @@ fn gated_worktree_without_load_id_preserves_stashed_resume() {
     app.trust_state = TrustState::Pending {
         workspace: PathBuf::from("/x"),
     };
-    let effects = dispatch(
-        Action::LoadSession("resume-me".into(), None),
-        &mut app,
-    );
+    let effects = dispatch(Action::LoadSession("resume-me".into(), None), &mut app);
     assert!(effects.is_empty(), "a gated resume produces no effects");
     assert_eq!(
         app.deferred_startup.session.as_ref().and_then(|d| match d {
@@ -1326,9 +1323,7 @@ fn dispatch_new_session_has_empty_scrollback() {
 #[test]
 fn translate_local_submit_always_returns_persist_always_for_new_session() {
     use crate::views::question_view::{LocalQuestionKind, QuestionViewState};
-    use pi_tools::implementations::grok_build::ask_user_question::{
-        Question, QuestionOption,
-    };
+    use pi_tools::implementations::grok_build::ask_user_question::{Question, QuestionOption};
     let q = Question {
         question: "?".into(),
         options: (0..4)
@@ -1368,9 +1363,7 @@ fn translate_local_submit_always_returns_persist_always_for_new_session() {
 #[test]
 fn translate_local_submit_never_returns_persist_never_for_new_session() {
     use crate::views::question_view::{LocalQuestionKind, QuestionViewState};
-    use pi_tools::implementations::grok_build::ask_user_question::{
-        Question, QuestionOption,
-    };
+    use pi_tools::implementations::grok_build::ask_user_question::{Question, QuestionOption};
     let q = Question {
         question: "?".into(),
         options: (0..4)

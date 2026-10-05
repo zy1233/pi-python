@@ -9,11 +9,8 @@
 //! - `SessionSignalsActor` runs as a background task processing signal events
 //! - Snapshots are requested via oneshot channels for async response
 
-
 use serde::{Deserialize, Serialize};
 use tdigests::TDigest;
-
-
 
 /// Session signals that inform feedback request heuristics.
 ///
@@ -238,4 +235,3 @@ pub struct SessionSignals {
     #[serde(default)]
     pub peak_rss_bytes: u64,
 }
-

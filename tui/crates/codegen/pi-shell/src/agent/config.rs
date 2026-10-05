@@ -5,10 +5,6 @@ use crate::auth::{GrokComConfig, OidcAuthConfig};
 use crate::{config::StorageMode, sampling::ApiBackend, tools::config::ShellToolsetConfig};
 use agent_client_protocol as acp;
 use indexmap::IndexMap;
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::num::NonZeroU64;
-use std::path::PathBuf;
 use pi_agent::prompt::skills::SkillsConfig;
 use pi_sampling_types::{
     CompactionAtTokens, CompactionsRemaining, ReasoningEffort, ReasoningEffortOption,
@@ -16,6 +12,10 @@ use pi_sampling_types::{
 use pi_tools::types::compat::{
     COMPAT_CELLS, CompatConfig, CompatConfigToml, CompatRemoteKey, CompatSurface, CompatVendor,
 };
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::num::NonZeroU64;
+use std::path::PathBuf;
 /// The mode in which the agent is running.
 /// Determines behavior like relay sync enablement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -750,9 +750,7 @@ impl PluginsConfig {
         }
     }
     /// Build a `DiscoveryConfig` from this plugins config.
-    pub(crate) fn to_discovery_config(
-        &self,
-    ) -> pi_agent::plugins::discovery::DiscoveryConfig {
+    pub(crate) fn to_discovery_config(&self) -> pi_agent::plugins::discovery::DiscoveryConfig {
         pi_agent::plugins::discovery::DiscoveryConfig {
             cli_plugin_dirs: self.cli_plugin_dirs.clone(),
             config_paths: self.paths.iter().map(std::path::PathBuf::from).collect(),
@@ -1567,8 +1565,7 @@ impl Default for Config {
             subagents_limit_behavior: Default::default(),
             workflow_max_concurrent_agents:
                 crate::session::workflow::host_service::DEFAULT_WORKFLOW_MAX_CONCURRENT_AGENTS,
-            media_gen_batch_limits: pi_tools::media_gen_limits::MediaGenBatchLimits::default(
-            ),
+            media_gen_batch_limits: pi_tools::media_gen_limits::MediaGenBatchLimits::default(),
             subagent_model_overrides: std::collections::HashMap::new(),
             subagent_toggle: std::collections::HashMap::new(),
             subagent_roles: std::collections::HashMap::new(),
@@ -2436,10 +2433,8 @@ pub(crate) fn resolve_external_otel_config_with(
         }
         getenv(name)
     };
-    let mut resolved = pi_telemetry::external::ExternalOtelConfig::resolve_with(
-        getenv_pinned,
-        file_cfg.as_ref(),
-    )?;
+    let mut resolved =
+        pi_telemetry::external::ExternalOtelConfig::resolve_with(getenv_pinned, file_cfg.as_ref())?;
     resolved.client = client;
     resolved.internal_pipeline_consumed_otel_vars = internal_pipeline_consumed_otel_vars;
     Some(resolved)

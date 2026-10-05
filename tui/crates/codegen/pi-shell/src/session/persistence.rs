@@ -3,8 +3,6 @@ use std::borrow::Cow;
 use std::io;
 use std::path::{Path, PathBuf};
 
-
-
 use crate::session::storage::relocation::{RelocationError, RelocationView};
 use crate::session::storage::{JsonlStorageAdapter, StorageAdapter};
 use crate::util::grok_home::grok_home;
@@ -645,10 +643,9 @@ pub(crate) fn grok_home_string() -> Option<String> {
 
 impl Summary {
     pub(crate) fn new(info: &Info, model_id: acp::ModelId) -> std::io::Result<Self> {
-        let git_metadata =
-            pi_workspace::session::git::resolve_persisted_session_git_metadata_sync(
-                std::path::Path::new(&info.cwd),
-            );
+        let git_metadata = pi_workspace::session::git::resolve_persisted_session_git_metadata_sync(
+            std::path::Path::new(&info.cwd),
+        );
         Ok(Self {
             info: info.clone(),
             cwd_generation: 0,
@@ -730,9 +727,7 @@ impl Summary {
             .filter(|t| !t.is_empty())
             .map(str::to_owned)
     }
-
 }
-
 
 #[cfg(test)]
 #[path = "persistence_head_fields_tests.rs"]
@@ -741,7 +736,6 @@ mod head_fields_tests;
 #[cfg(test)]
 #[path = "persistence_generated_title_tests.rs"]
 mod generated_title_tests;
-
 
 /// List session summaries, optionally filtered by cwd (absolute path string).
 /// Returns summaries sorted by `last_active_at` (else `updated_at`) descending.
@@ -759,8 +753,6 @@ pub async fn list_summaries(cwd: Option<&str>) -> io::Result<Vec<Summary>> {
     let storage: Box<dyn StorageAdapter> = Box::new(JsonlStorageAdapter::with_root(root_dir));
     storage.list_sessions(cwd).await
 }
-
-
 
 /// List the `limit` most recently modified session summaries across all
 /// workspaces. Uses stat-based mtime sorting to avoid reading every
@@ -781,7 +773,6 @@ pub async fn list_recent_summaries(limit: usize) -> io::Result<Vec<Summary>> {
 #[cfg(test)]
 #[path = "persistence_agent_name_persistence_tests.rs"]
 mod agent_name_persistence_tests;
-
 
 #[cfg(test)]
 #[path = "persistence_session_exists_tests.rs"]
@@ -810,4 +801,3 @@ mod resolve_local_session_tests;
 #[cfg(test)]
 #[path = "persistence_repo_wide_resolution_tests.rs"]
 mod repo_wide_resolution_tests;
-

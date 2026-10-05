@@ -12,15 +12,15 @@
 use std::collections::HashSet;
 use std::time::Instant;
 
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
 use pi_acp_lib::AcpResult;
 use pi_markdown::StreamingMarkdownRenderer;
 pub use pi_tools::implementations::grok_build::ask_user_question::{
     AskUserQuestionMode, Question, QuestionOption,
 };
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
 
 use unicode_width::UnicodeWidthStr;
 
@@ -195,7 +195,7 @@ pub struct QuestionViewState {
     /// `Some(1)` = Skip interview.
     pub bottom_panel_index: Option<usize>,
     /// `Some` when this question was opened locally (e.g. by `/fork`)
- /// instead of by an ACP `legacy ext RPC` request. `None` for
+    /// instead of by an ACP `legacy ext RPC` request. `None` for
     /// ACP questions (preserves today's behaviour).
     ///
     /// Mutually exclusive with `response_tx`: a local question never has
@@ -245,7 +245,7 @@ impl QuestionViewState {
 
     /// Create a new question view state with an ACP response sender.
     ///
- /// Called by the `ExtMethod` handler when a blocking `legacy ext RPC`
+    /// Called by the `ExtMethod` handler when a blocking `legacy ext RPC`
     /// request arrives from the shell coordinator.
     pub fn with_response_tx(
         tool_call_id: String,
@@ -890,13 +890,12 @@ impl QuestionViewState {
     /// - Notes included when freeform text is non-empty and selected.
     pub fn build_accepted_response(
         &self,
-    ) -> pi_tools::implementations::grok_build::ask_user_question::AskUserQuestionExtResponse
-    {
+    ) -> pi_tools::implementations::grok_build::ask_user_question::AskUserQuestionExtResponse {
         use indexmap::IndexMap;
-        use std::collections::HashMap;
         use pi_tools::implementations::grok_build::ask_user_question::{
             AskUserQuestionExtResponse, QuestionAnnotation,
         };
+        use std::collections::HashMap;
 
         let mut answers = IndexMap::new();
         let mut annotations: HashMap<String, QuestionAnnotation> = HashMap::new();

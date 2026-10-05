@@ -34,10 +34,7 @@ fn remove_managed_config_files(home: &std::path::Path) {
     // its rename fails and self-heals).
     let atomic_write_tmp_prefixes = [
         format!("{}.", pi_config::MANAGED_CONFIG_CACHE_FILE),
-        format!(
-            "{}.",
-            pi_config::signed_policy::SIGNATURE_SIDECAR_FILE
-        ),
+        format!("{}.", pi_config::signed_policy::SIGNATURE_SIDECAR_FILE),
         format!(
             "{}.",
             pi_config::signed_policy::MANAGED_IDENTITY_SIDECAR_FILE
@@ -198,7 +195,6 @@ impl SyncBudget {
             Self::Standard => 5,
         }
     }
-
 }
 
 /// Exponential backoff for retry `attempt` (caller guarantees `attempt >= 1`).

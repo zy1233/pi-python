@@ -2088,12 +2088,12 @@ pub(crate) fn render_session_picker(
         HintItem::new(crate::key!(Enter), "select"),
     ];
     default_shortcuts.push(HintItem {
-            keys: vec![],
-            label: "worktree".into(),
-            custom_display: Some(worktree_shortcut),
-            description: None,
-            pinned: false,
-        });
+        keys: vec![],
+        label: "worktree".into(),
+        custom_display: Some(worktree_shortcut),
+        description: None,
+        pinned: false,
+    });
     default_shortcuts.push(HintItem {
         keys: vec![],
         label: "navigate".into(),
@@ -2326,8 +2326,14 @@ mod tests {
                 "badge must not label the product: {rendered:?}"
             );
         }
-        assert!(full.contains(crate::brand::PRODUCT_TITLE), "full badge: {full:?}");
-        assert!(inline.contains(crate::brand::PRODUCT_TITLE), "inline badge: {inline:?}");
+        assert!(
+            full.contains(crate::brand::PRODUCT_TITLE),
+            "full badge: {full:?}"
+        );
+        assert!(
+            inline.contains(crate::brand::PRODUCT_TITLE),
+            "inline badge: {inline:?}"
+        );
         assert!(footer.contains("acme"), "footer keeps the team: {footer:?}");
         assert!(
             !footer.ends_with('\u{2502}'),
@@ -3182,7 +3188,10 @@ mod tests {
         // No code param, empty code, and unexpected characters all yield None.
         assert_eq!(extract_user_code("https://example.com/oauth2/device"), None);
         assert_eq!(extract_user_code("https://example.com/d?user_code="), None);
-        assert_eq!(extract_user_code("https://example.com/d?user_code=AB%20CD"), None);
+        assert_eq!(
+            extract_user_code("https://example.com/d?user_code=AB%20CD"),
+            None
+        );
     }
 
     #[test]

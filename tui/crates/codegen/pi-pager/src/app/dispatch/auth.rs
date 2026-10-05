@@ -3,7 +3,7 @@
 use super::ctx::{restore_auth_return_view, show_welcome};
 use super::queue::maybe_drain_queue;
 use super::session::lifecycle::{clear_startup_actions, drain_startup_actions};
-use crate::app::actions::{ Effect};
+use crate::app::actions::Effect;
 use crate::app::agent_view::AgentView;
 use crate::app::app_view::{ActiveView, AppView, AuthMode, AuthState};
 use crate::scrollback::block::RenderBlock;
@@ -456,4 +456,3 @@ pub(super) fn handle_auth_url_ready(
     }
     vec![]
 }
-

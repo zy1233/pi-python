@@ -23,8 +23,7 @@ fn response_anchor_in_range(
                     anchor = Some(idx);
                 }
             }
-            RenderBlock::ToolCall(_)
-            | RenderBlock::Thinking(_) => break,
+            RenderBlock::ToolCall(_) | RenderBlock::Thinking(_) => break,
             _ => {}
         }
     }

@@ -5,45 +5,41 @@ use super::auth::{
 };
 use super::billing::dispatch_open_supergrok_url;
 use super::ctx::{
-    navigate_clearing_selection, open_url_or_show, sync_sleep_inhibitor,
-    with_active_agent, with_scrollback,
+    navigate_clearing_selection, open_url_or_show, sync_sleep_inhibitor, with_active_agent,
+    with_scrollback,
 };
-use super::modes::{
-    dispatch_cycle_mode, 
-    set_permission_mode, set_plan_mode, set_yolo_mode,
-};
+use super::modes::{dispatch_cycle_mode, set_permission_mode, set_plan_mode, set_yolo_mode};
 use super::permissions::{
     dispatch_permission_cancel, dispatch_permission_followup, dispatch_permission_select,
 };
 use super::prompt::{
-    dispatch_accept_word_select_tip, dispatch_clear_prompt, 
-    dispatch_send_bash_command, dispatch_send_prompt, dispatch_send_prompt_inner,
-    dispatch_show_plan_nudge, dispatch_show_undo_tip, dispatch_show_word_select_tip,
+    dispatch_accept_word_select_tip, dispatch_clear_prompt, dispatch_send_bash_command,
+    dispatch_send_prompt, dispatch_send_prompt_inner, dispatch_show_plan_nudge,
+    dispatch_show_undo_tip, dispatch_show_word_select_tip,
 };
 use super::queue;
 use super::queue::dispatch_drain_queue;
-use super::session::session_list::dispatch_fetch_session_list;
-use super::session::worktree_mode::apply_persist_worktree_mode;
 use super::session::lifecycle::{
-    dispatch_agent_type_mismatch_answered,
-    dispatch_delete_current_session_answered, dispatch_exit_session, dispatch_new_session,
-    dispatch_new_session_inner, dispatch_new_session_with_id, dispatch_new_worktree_session,
-    dispatch_trust_folder, open_new_session_question,
+    dispatch_agent_type_mismatch_answered, dispatch_delete_current_session_answered,
+    dispatch_exit_session, dispatch_new_session, dispatch_new_session_inner,
+    dispatch_new_session_with_id, dispatch_new_worktree_session, dispatch_trust_folder,
+    open_new_session_question,
 };
 use super::session::load::{
     dispatch_load_session, dispatch_pick_session, dispatch_pick_session_in_worktree,
     dispatch_session_picker_closed, dispatch_show_session_picker, session_picker_entry_matches,
     toggle_session_card,
 };
+use super::session::session_list::dispatch_fetch_session_list;
+use super::session::worktree_mode::apply_persist_worktree_mode;
 use super::settings::setters::{
     clear_default_model, clear_fork_secondary_model, preview_auto_dark_theme,
     preview_auto_light_theme, preview_theme, set_ask_user_question_timeout_enabled,
     set_auto_dark_theme, set_auto_light_theme, set_auto_update, set_collapsed_edit_blocks,
-    set_combine_queued_prompts, set_compact_mode, 
-    set_contextual_hint_image_input, set_contextual_hint_plan_mode,
-    set_contextual_hint_small_screen, set_contextual_hint_ssh_wrap, set_contextual_hint_undo,
-    set_contextual_hint_word_select, set_default_model, set_default_selected_permission,
-    set_display_refresh_auto_cadence, set_fork_secondary_model,
+    set_combine_queued_prompts, set_compact_mode, set_contextual_hint_image_input,
+    set_contextual_hint_plan_mode, set_contextual_hint_small_screen, set_contextual_hint_ssh_wrap,
+    set_contextual_hint_undo, set_contextual_hint_word_select, set_default_model,
+    set_default_selected_permission, set_display_refresh_auto_cadence, set_fork_secondary_model,
     set_group_tool_verbs, set_hunk_tracker_mode, set_invert_scroll, set_keep_text_selection,
     set_max_thoughts_width, set_multiline_mode, set_page_flip_on_send, set_prompt_suggestions,
     set_remember_tool_approvals, set_render_mermaid, set_respect_manual_folds, set_screen_mode,
@@ -52,20 +48,14 @@ use super::settings::setters::{
     set_voice_keybind_enabled, set_voice_stt_language,
 };
 use super::settings::ui::{
-    dispatch_confirm_reset_setting, dispatch_open_command_palette, 
-    dispatch_open_reset_confirm, dispatch_open_settings, 
-    dispatch_toggle_mouse_capture, 
+    dispatch_confirm_reset_setting, dispatch_open_command_palette, dispatch_open_reset_confirm,
+    dispatch_open_settings, dispatch_toggle_mouse_capture,
 };
-use super::status::{
-    dispatch_copy_session_id, 
-    
-    dispatch_show_queue, 
-};
+use super::status::{dispatch_copy_session_id, dispatch_show_queue};
 use super::task_result::{dispatch_task_result, unregister_all_active_sessions};
 use super::transcript::{
-    dispatch_copy_block_content, dispatch_copy_block_meta,
-    dispatch_dump_input_log, dispatch_open_block_viewer,
-    dispatch_open_transcript_pager,
+    dispatch_copy_block_content, dispatch_copy_block_meta, dispatch_dump_input_log,
+    dispatch_open_block_viewer, dispatch_open_transcript_pager,
 };
 use super::turn::dispatch_cancel_turn;
 use super::voice::{dispatch_enable_voice_mode, dispatch_voice_stop, dispatch_voice_toggle};
@@ -308,8 +298,7 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             if group_toggled {
                 return vec![];
             }
-            let mut credit_card: Option<(String, pi_telemetry::events::CreditLimitChoice)> =
-                None;
+            let mut credit_card: Option<(String, pi_telemetry::events::CreditLimitChoice)> = None;
             with_scrollback(app, |s| {
                 if let Some(idx) = s.selected()
                     && let Some(entry) = s.entry(idx)

@@ -194,13 +194,6 @@ pub(crate) struct RunResult {
     pub relaunch: Option<super::app_view::ScreenModeRelaunch>,
 }
 
-
-
-
-
-
-
-
 /// Compute the folder-trust verdict for the session cwd and seed
 /// [`AppView::trust_state`]. Pager-side mirror of the agent's resolve: read the
 /// local store, scan for repo-local code-exec config, and run the pure
@@ -210,15 +203,12 @@ pub(crate) struct RunResult {
 /// becomes `TrustState::Pending` (show the question); everything else becomes
 /// `TrustState::Done`. The feature-off fast path (kill-switch / opt-out /
 /// local build) short-circuits before any I/O.
-fn seed_trust_state(
-    app: &mut AppView,
-    remote: Option<&pi_shell::util::config::RemoteSettings>,
-) {
-    use std::io::IsTerminal;
+fn seed_trust_state(app: &mut AppView, remote: Option<&pi_shell::util::config::RemoteSettings>) {
     use pi_workspace::folder_trust::{
         TrustOutcome, decide, decide_inputs_with_interactive, feature_enabled,
     };
     use pi_workspace::trust::workspace_key;
+    use std::io::IsTerminal;
 
     let feature = feature_enabled(remote);
     if !feature {
@@ -1067,13 +1057,11 @@ pub(crate) async fn run(
                 .and_then(|s| s.privacy_banner_reshow_days)
         });
     // Local dismiss timestamp for the coding-data privacy banner.
-    app.privacy_banner_acked = pi_shell::config::load_from_disk()
-        .ok()
-        .and_then(|root| {
-            pi_shell::util::config::load_config_from_toml(&root)
-                .privacy
-                .privacy_banner_acked
-        });
+    app.privacy_banner_acked = pi_shell::config::load_from_disk().ok().and_then(|root| {
+        pi_shell::util::config::load_config_from_toml(&root)
+            .privacy
+            .privacy_banner_acked
+    });
     // Voice is applied after auth_meta so API-key detection is accurate.
     app.session_picker_grouped = std::env::var("GROK_SESSION_PICKER_GROUPED")
         .ok()
@@ -1102,8 +1090,7 @@ pub(crate) async fn run(
     // Seed auth state from ACP connection metadata.
     // --force-login overrides: show the login screen even when credentials exist.
     let force_login = !standard_acp && args.force_login;
-    let needs_interactive_login =
-        !standard_acp && (connection.needs_login || force_login);
+    let needs_interactive_login = !standard_acp && (connection.needs_login || force_login);
     if needs_interactive_login {
         app.welcome_prompt_focused = false;
 
@@ -1186,9 +1173,10 @@ pub(crate) async fn run(
         }
     } else {
         // No cached session — check if the API key is the active credential.
-        app.is_api_key_auth = app.auth_methods.iter().any(|m| {
-            m.id().0.as_ref() == pi_shell::agent::auth_method::PI_API_KEY_METHOD_ID
-        });
+        app.is_api_key_auth = app
+            .auth_methods
+            .iter()
+            .any(|m| m.id().0.as_ref() == pi_shell::agent::auth_method::PI_API_KEY_METHOD_ID);
         // No AuthMeta on this path — API keys / external auth have no
         // consumer billing surface. External auth also hides `/usage`.
         if app.is_api_key_auth || app.has_external_auth_provider {
@@ -1254,8 +1242,7 @@ pub(crate) async fn run(
             // Voice inherits the same resolved endpoints base as chat
             // (config > GROK_PI_API_BASE_URL env > default).
             let endpoints_base =
-                pi_shell::agent::config::EndpointsConfig::from_config_value(raw)
-                    .pi_api_base_url;
+                pi_shell::agent::config::EndpointsConfig::from_config_value(raw).pi_api_base_url;
             app.voice_config =
                 pi_voice::VoiceConfig::from_config_table(table, Some(&endpoints_base));
         }
@@ -1816,8 +1803,7 @@ pub(crate) async fn run(
         }
     }
 
-    if !post_render_effects.is_empty()
-        && process_effects(post_render_effects, &mut tasks, &mut app)
+    if !post_render_effects.is_empty() && process_effects(post_render_effects, &mut tasks, &mut app)
     {
         return Ok(finish_run(&mut app));
     }
@@ -1858,10 +1844,7 @@ pub(crate) async fn run(
             if *suppress_code_restore {
                 app.suppress_code_restore_once = Some(session_id.clone());
             }
-            Some(Action::LoadSession(
-                session_id.clone(),
-                session_cwd.clone(),
-            ))
+            Some(Action::LoadSession(session_id.clone(), session_cwd.clone()))
         }
         MaterializedStartup::NewWithId { session_id } if args.worktree.is_some() => {
             // Stash preferred id; `dispatch_new_worktree_session` consumes it and
@@ -1972,7 +1955,6 @@ pub(crate) async fn run(
     // loop-top work (suspends, deadline re-derivation) never waits on an
     // unbounded drain during a token firehose.
     const ACP_DRAIN_BATCH_MAX: usize = 32;
-
 
     // Persistent CSI fragment filter — carries parsing state across
     // drain_and_process calls so a mouse report split across batches is still
@@ -2238,7 +2220,6 @@ pub(crate) async fn run(
                 None => std::future::pending().await,
             }
         };
-
 
         let load_barrier_tick = async {
             match session_load_barrier.next_wakeup() {
@@ -2875,9 +2856,7 @@ fn sync_appearance_watcher(watcher: &mut Option<SystemAppearanceWatcher>) {
 }
 
 fn emit_event_loop_stall(window: super::event_loop_stall::StallWindow) {
-    pi_telemetry::session_ctx::log_event(super::event_loop_stall::event_loop_stall_event(
-        window,
-    ));
+    pi_telemetry::session_ctx::log_event(super::event_loop_stall::event_loop_stall_event(window));
 }
 
 fn flush_pending_stall(stall_rollup: &mut super::event_loop_stall::StallRollup) {
@@ -3087,7 +3066,6 @@ async fn drain_and_process(
                             needs_draw = true;
                             had_non_resize_change = true;
                         }
-
                     }
                     ActiveView::Welcome => {
                         if matches!(app.auth_state, AuthState::Done) && !app.welcome_prompt_focused
@@ -3823,10 +3801,7 @@ mod tests {
         )));
         let mut tasks = JoinSet::new();
 
-        assert!(!process_effects(
-            create_effects,
-            &mut tasks,
-            &mut app));
+        assert!(!process_effects(create_effects, &mut tasks, &mut app));
 
         let request = match acp_rx.recv().await.expect("session/new request") {
             pi_acp_lib::AcpAgentMessage::NewSession(args) => args.request,

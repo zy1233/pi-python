@@ -1,7 +1,7 @@
 //! Turn lifecycle orchestration for trace uploads.
 #[cfg(test)]
 mod tests {
-    
+
     #[test]
     fn subagent_trace_uses_turn_zero() {
         let session_id = "child-abc";

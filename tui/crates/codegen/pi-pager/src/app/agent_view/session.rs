@@ -3,9 +3,8 @@
 #[cfg(test)]
 use super::test_agent_view;
 use super::{
-    ActivePane, AgentView, InlineMediaHitAreas, InputMode, PaneAreas,
-    PromptInputMode, PromptMode, REWOUND_PROMPT_ID_CAP, 
-    SELF_ORIGINATED_PROMPT_CAP, 
+    ActivePane, AgentView, InlineMediaHitAreas, InputMode, PaneAreas, PromptInputMode, PromptMode,
+    REWOUND_PROMPT_ID_CAP, SELF_ORIGINATED_PROMPT_CAP,
 };
 use crate::app::agent::AgentSession;
 use crate::app::app_view::InputOutcome;
@@ -15,10 +14,10 @@ use crate::scrollback::text_selection::ResolvedSelectionModel;
 use crate::views::prompt_widget::PromptWidget;
 use crate::views::queue_pane::QueuePane;
 use crate::views::todo_pane::TodoPane;
+use pi_telemetry::events::{CancellationCompleted, CancellationScope};
 use ratatui::layout::Rect;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Instant;
-use pi_telemetry::events::{CancellationCompleted, CancellationScope};
 impl AgentView {
     /// Live mutation of the turn-summary display field. Always bumps
     /// [`Self::last_turn_summary_gen`] so a concurrent disk hydrate that
@@ -444,7 +443,7 @@ impl AgentView {
         self.session.start_turn(&mut self.scrollback);
     }
     /// Adopt the in-flight turn another client is driving, conveyed by the
- /// `session/load` response meta (`legacy ext RPC`): enter
+    /// `session/load` response meta (`legacy ext RPC`): enter
     /// TurnRunning and match subsequent live deltas. No user-prompt block is
     /// pushed — the turn's prompt and prior chunks arrived via the replay.
     pub(crate) fn adopt_running_prompt(&mut self, prompt_id: String) {
@@ -997,5 +996,4 @@ mod status_window_tests {
     }
 }
 #[cfg(test)]
-mod reconnect_workflow_maps_tests {
-}
+mod reconnect_workflow_maps_tests {}

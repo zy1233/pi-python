@@ -50,7 +50,7 @@ pub enum Action {
     },
     /// Open grok.com in the browser for SuperGrok subscription upsell.
     OpenSupergrokUrl,
- /// Re-check subscription status via the shell's `legacy ext RPC`.
+    /// Re-check subscription status via the shell's `legacy ext RPC`.
     CheckSubscription,
     /// Open an arbitrary URL in the system browser (with scheme validation).
     OpenUrl(String),
@@ -973,14 +973,14 @@ pub enum Effect {
     PollAuthUrl { request_seq: u64 },
     /// Submit a manually-pasted auth code (ext request).
     SubmitAuthCode { request_seq: u64, code: String },
- /// Log out via `legacy ext RPC` (shell clears auth.json + in-memory state).
+    /// Log out via `legacy ext RPC` (shell clears auth.json + in-memory state).
     Logout,
- /// Cancel an in-flight interactive auth on the shell (`legacy ext RPC`).
+    /// Cancel an in-flight interactive auth on the shell (`legacy ext RPC`).
     /// Used when the user abandons mid-session `/login` so the device-code
     /// poll stops instead of running until the code expires. `request_seq`
     /// scopes the cancel so a delayed RPC cannot tear down a successor login.
     CancelAuth { request_seq: u64 },
- /// Re-check subscription status via `legacy ext RPC`.
+    /// Re-check subscription status via `legacy ext RPC`.
     /// `verify` scopes the result to a deferred-gate verification (see
     /// [`crate::app::subscription`]); `None` for generic checks.
     CheckSubscription { verify: Option<u64> },
@@ -1018,14 +1018,11 @@ pub enum Effect {
         cwd: String,
         after: AfterSessionDelete,
     },
- /// Fetch billing/credit usage from the agent's `legacy ext RPC` extension.
+    /// Fetch billing/credit usage from the agent's `legacy ext RPC` extension.
     /// When `silent` is true the result updates `credit_balance` without
     /// pushing a system message into scrollback (used for automatic refreshes
     /// on session init and after each turn).
-    FetchBilling {
-        agent_id: AgentId,
-        silent: bool,
-    },
+    FetchBilling { agent_id: AgentId, silent: bool },
     /// Fetch billing data at the app level (no agent required).
     /// Used on startup to populate the welcome-screen credit warning.
     FetchAppBilling,
@@ -1076,7 +1073,7 @@ pub enum TaskResult {
         models: Option<acp::SessionModelState>,
         /// Whether this session's scheduled fires run detached, as the shell
         /// resolved it at spawn (response
- /// `_meta key`). `None` from a shell that
+        /// `_meta key`). `None` from a shell that
         /// predates the key. See
         /// [`crate::app::effects::parse_session_scheduler_background_loops`].
         scheduler_background_loops: Option<bool>,
@@ -1100,7 +1097,7 @@ pub enum TaskResult {
         restore_summary: Option<String>,
         restore_degree: Option<pi_workspace::session::git::RestoreDegree>,
         /// The session's in-flight running prompt id (from the load response
- /// `_meta key`), present only when the session was
+        /// `_meta key`), present only when the session was
         /// loaded MID-turn (another client is driving). The loader adopts it to
         /// pass the live `session/update` gate without re-rendering the user
         /// block (replay already rendered it).
@@ -1178,7 +1175,7 @@ pub enum TaskResult {
         /// Deprecated: superseded by `mode` (authoritative). Kept only as a
         /// back-compat fallback for older agents that don't send `mode`.
         external: bool,
- /// Presentation mode from `legacy ext RPC`; `None` on older agents.
+        /// Presentation mode from `legacy ext RPC`; `None` on older agents.
         mode: Option<String>,
     },
     /// Auth code was submitted (fire-and-forget).
@@ -1199,9 +1196,9 @@ pub enum TaskResult {
     },
     /// Shell acknowledged logout (auth cleared).
     LogoutComplete,
- /// Best-effort `legacy ext RPC` finished (no UI update; state already left Authenticating).
+    /// Best-effort `legacy ext RPC` finished (no UI update; state already left Authenticating).
     AuthCancelComplete,
- /// Shell responded to `legacy ext RPC`. `verify` echoes
+    /// Shell responded to `legacy ext RPC`. `verify` echoes
     /// the generation from `Effect::CheckSubscription` for deferred-gate
     /// verifications.
     CheckSubscriptionComplete {

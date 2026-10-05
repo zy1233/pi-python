@@ -654,5 +654,4 @@ mod tests {
             Some(("Pay-as-you-go limit left: $3.50".to_string(), true))
         );
     }
-
 }

@@ -1279,5 +1279,4 @@ mod tests {
             "Phase 2 should recompute at narrow width"
         );
     }
-
 }

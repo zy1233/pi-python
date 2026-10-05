@@ -14,8 +14,8 @@ use super::*;
 
 // ── ModelFetchAuth::resolve priority tests ──────────────────────
 
-use serial_test::serial;
 use pi_test_support::EnvGuard;
+use serial_test::serial;
 
 #[test]
 #[serial]
@@ -114,4 +114,3 @@ fn resolve_deployment_key_outranks_ambient_api_key() {
 // ── duplicate model slug re-keying (A/B experiment "auto" alias) ──
 
 // ── persisted model id → catalog key (session resume) ─────────────
-

@@ -49,4 +49,3 @@ pub fn todo_item_from_plan_entry(entry: acp::PlanEntry) -> TodoItem {
         meta: entry.meta.map(serde_json::Value::Object),
     }
 }
-

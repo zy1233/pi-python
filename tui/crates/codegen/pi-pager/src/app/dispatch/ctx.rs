@@ -230,4 +230,3 @@ pub(crate) fn switch_to_agent(app: &mut AppView, target: AgentId, cause: SwitchC
     app.sync_permission_mode_slash_gate();
     surface_yolo_launch_block_notice(app, target);
 }
-

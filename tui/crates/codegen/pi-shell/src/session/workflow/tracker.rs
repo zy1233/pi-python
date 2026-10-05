@@ -1,6 +1,5 @@
-
-use serde::{Deserialize, Serialize};
 use pi_workflow::PhaseMeta;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -82,7 +81,4 @@ pub struct WorkflowRunState {
 }
 
 #[cfg(test)]
-mod tests {
-    
-
-}
+mod tests {}

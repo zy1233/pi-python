@@ -38,9 +38,7 @@ pub fn resolve_mcp_push_server_status(
 }
 
 #[cfg(test)]
-mod mcp_startup_timeout_tests {
-    
-}
+mod mcp_startup_timeout_tests {}
 
 // ── MCP max output bytes (inline tool-result cap) ───────────────────────────
 //
@@ -49,7 +47,4 @@ mod mcp_startup_timeout_tests {
 // result via `set_mcp_max_output_bytes` so free-function truncation sees it.
 
 #[cfg(test)]
-mod max_mcp_output_bytes_tests {
-    
-
-}
+mod max_mcp_output_bytes_tests {}

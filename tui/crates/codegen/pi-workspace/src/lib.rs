@@ -56,13 +56,13 @@ pub use path_virtualization::{
     VISIBLE_ROOT,
 };
 pub use permission::*;
+pub use pi_hunk_tracker::HunkTrackerHandle;
+pub use pi_workspace_client::WorkspaceClient;
+pub use pi_workspace_types::WorkspaceEvent;
 pub use session::{WorkspaceSession, WorkspaceShared};
 pub use session::{file_state, git, jj};
 pub use upload::environment::{WorkspaceEnvironment, WorkspaceIdentity};
 pub use workspace_ops::{WorkspaceOp, WorkspaceOps};
-pub use pi_workspace_client::WorkspaceClient;
-pub use pi_workspace_types::WorkspaceEvent;
-pub use pi_hunk_tracker::HunkTrackerHandle;
 /// Zero-init every workspace metric family so idle panels render a `0` baseline
 /// instead of "No data". Idempotent; call once at workspace-server startup.
 pub fn init_metrics() {

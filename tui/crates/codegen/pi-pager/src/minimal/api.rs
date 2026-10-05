@@ -324,7 +324,6 @@ pub fn plan_mode_pending(v: &AgentView) -> Option<bool> {
     v.plan_mode_pending
 }
 
-
 /// `AgentView::plan_approval_view`.
 pub fn plan_approval_view(v: &AgentView) -> Option<&PlanApprovalViewState> {
     v.plan_approval_view.as_ref()
@@ -582,10 +581,7 @@ pub fn repo_name_from_cwd(cwd: &str) -> String {
 }
 
 /// [`crate::views::session_picker::filter_session_entries`].
-pub fn filter_session_entries(
-    entries: Option<&[SessionPickerEntry]>,
-    query: &str,
-) -> Vec<usize> {
+pub fn filter_session_entries(entries: Option<&[SessionPickerEntry]>, query: &str) -> Vec<usize> {
     crate::views::session_picker::filter_session_entries(entries, query)
 }
 

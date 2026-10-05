@@ -8,11 +8,8 @@
 //! No deadline is imposed by default ([`WorkspaceClient::with_deadline`]
 //! opts in), preserving `WorkspaceOps::rpc_raw` semantics where callers
 //! own their timeouts.
-use serde_json::Value;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
 use pi_computer_hub_sdk::harness::ToolHarness;
+use pi_tool_runtime::{ToolCallContext, ToolStreamItem, TypedToolOutput};
 use pi_workspace_types::rpc::agents_md::{AgentConfigFile, DiscoverAgentsMdReq};
 use pi_workspace_types::rpc::code_nav::{
     CodeFindDefinitionsReq, CodeFindReferencesReq, CodeGotoDefinitionReq, CodeGotoReferencesReq,
@@ -55,7 +52,10 @@ use pi_workspace_types::rpc::worktree::{
     WorktreeGcReq, WorktreeListReq, WorktreeShowReq,
 };
 use pi_workspace_types::rpc::{RpcEnvelope, RpcError, WORKSPACE_RPC_TOOL_ID, WorkspaceRpc};
-use pi_tool_runtime::{ToolCallContext, ToolStreamItem, TypedToolOutput};
+use serde_json::Value;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 #[derive(Debug, thiserror::Error)]
 pub enum WorkspaceClientError {
     /// A previous call observed a fatal transport error and no
@@ -596,14 +596,14 @@ impl WorkspaceClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use schemars::JsonSchema;
-    use serde::Deserialize;
     use pi_computer_hub_sdk::harness::LocalRegistry;
-    use pi_workspace_types::rpc::RpcActivityClass;
-    use pi_workspace_types::rpc::skills::SkillScope;
     use pi_tool_protocol::{SessionId, ToolId};
     use pi_tool_runtime::{Tool, ToolError};
     use pi_tool_types::ToolDescription;
+    use pi_workspace_types::rpc::RpcActivityClass;
+    use pi_workspace_types::rpc::skills::SkillScope;
+    use schemars::JsonSchema;
+    use serde::Deserialize;
     #[derive(Debug, Deserialize, JsonSchema)]
     struct RpcArgs {
         method: String,

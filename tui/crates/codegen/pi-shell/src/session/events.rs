@@ -104,7 +104,6 @@ pub(crate) enum LazinessCategory {
 }
 
 impl LazinessCategory {
-
     /// Every variant of this enum. Used by the producer-consistency
     /// tests to enumerate the closed set rather than a hand-coded
     /// array that would silently drift if a new variant were added.
@@ -407,7 +406,6 @@ pub(crate) enum GoalRoleModelFailOpenReason {
 }
 
 impl GoalRoleModelFailOpenReason {
-
     /// Every variant of this enum, enumerated alongside a compiler-
     /// enforced exhaustive `match` so adding a variant is a compile error
     /// until it is listed here (and given an `as_const_str` arm). Mirrors
@@ -588,5 +586,4 @@ mod tests {
             "GoalRoleModelFailOpenReason::all() and EXPECTED_FAIL_OPEN_CONSTS drifted",
         );
     }
-
 }

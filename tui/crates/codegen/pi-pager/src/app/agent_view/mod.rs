@@ -1153,7 +1153,7 @@ pub struct AgentView {
     /// it to describe the runtime a fire will get. `None` until that response
     /// lands (or against a shell that predates the key), where readers fall
     /// back to `AppView::scheduler_background_loops_seed`. Deliberately NOT
- /// refreshed by `legacy ext RPC`: the fire side is pinned for the
+    /// refreshed by `legacy ext RPC`: the fire side is pinned for the
     /// session's lifetime, so a live mirror would drift out of agreement.
     pub scheduler_background_loops: Option<bool>,
     /// Mirrors `AppView::usage_visible` (credit warning + `/usage manage`).
@@ -1210,7 +1210,7 @@ pub struct AgentView {
     /// complete. Kind-only: the payload is re-derived from the widget on
     /// reissue so the freshly attached image chip travels with it.
     pub(crate) deferred_send: Option<AgentDeferredSend>,
- /// Armed when an `legacy ext RPC` broadcast arrives for the
+    /// Armed when an `legacy ext RPC` broadcast arrives for the
     /// turn THIS client drives while it is still awaiting that turn's
     /// `session/prompt` RPC response. The RPC normally lands milliseconds
     /// later and disarms this; if it never does (lost in leader response
@@ -1229,7 +1229,7 @@ pub struct AgentView {
     /// Cleared at turn start; set on the first live non-echo update. Defaults true.
     pub(crate) front_message_committed: bool,
     /// Follow-up suggestion chips for the latest assistant response
- /// (`legacy ext RPC`). `None` when no chips are shown. Set by
+    /// (`legacy ext RPC`). `None` when no chips are shown. Set by
     /// [`AgentView::apply_follow_ups`]; cleared at each turn start.
     pub(crate) follow_ups: Option<FollowUps>,
     /// `promptId` (turn identity) of the currently-shown `follow_ups`, when the
@@ -1263,7 +1263,7 @@ pub struct AgentView {
     /// The ordering key for newest-wins: a fresh id takes the next value (the
     /// new high-water), so every previously-seen id is strictly lower.
     pub(crate) follow_up_next_gen: u64,
- /// Stamped `legacy ext RPC` that arrived for a turn that is NOT yet the
+    /// Stamped `legacy ext RPC` that arrived for a turn that is NOT yet the
     /// currently-adopted one, keyed by `promptId`. Ext notifications and
     /// `session/update` travel on separate channels, so a turn's follow_ups can
     /// land BEFORE the `session/update` that adopts it. Rather than drop such a
@@ -1357,12 +1357,10 @@ fn translate_local_submit(
                 .get(*idx)
                 .copied()
                 .unwrap_or(pi_telemetry::events::CreditLimitChoice::PayAsYouGo);
-            pi_telemetry::session_ctx::log_event(
-                pi_telemetry::events::CreditLimitUpsellClicked {
-                    surface: pi_telemetry::events::CreditLimitUpsellSurface::QuestionModal,
-                    choice,
-                },
-            );
+            pi_telemetry::session_ctx::log_event(pi_telemetry::events::CreditLimitUpsellClicked {
+                surface: pi_telemetry::events::CreditLimitUpsellSurface::QuestionModal,
+                choice,
+            });
             InputOutcome::Action(Action::OpenUrl(url.to_string()))
         }
         LocalQuestionKind::FreeUsageUpsell { source } => {
@@ -1372,12 +1370,10 @@ fn translate_local_submit(
                 .and_then(|q| q.options.get(*idx))
                 .and_then(|o| o.id.as_deref())
                 .unwrap_or(super::dispatch::UPSELL_URL_UPGRADE);
-            pi_telemetry::session_ctx::log_event(
-                pi_telemetry::events::SuperGrokUpsellClicked {
-                    source,
-                    auth_method: None,
-                },
-            );
+            pi_telemetry::session_ctx::log_event(pi_telemetry::events::SuperGrokUpsellClicked {
+                source,
+                auth_method: None,
+            });
             InputOutcome::Action(Action::OpenUrl(url.to_string()))
         }
         LocalQuestionKind::AgentTypeMismatch { model_id, effort } => {
@@ -2119,7 +2115,7 @@ pub(crate) mod test_fixtures {
         );
         assert_eq!(agent.follow_ups.as_ref().unwrap().suggestions, vec!["a"]);
     }
- /// FIX 4 (b): after adopting a NEW turn, a buffer-replayed `legacy ext RPC`
+    /// FIX 4 (b): after adopting a NEW turn, a buffer-replayed `legacy ext RPC`
     /// for a PRIOR turn's response_id must NOT revive stale chips — its
     /// `promptId` is not the active turn and it is already in the seen ring.
     #[test]
@@ -2140,7 +2136,7 @@ pub(crate) mod test_fixtures {
         assert!(agent.apply_follow_ups_with_prompt("resp-2".into(), Some("p2"), vec!["b".into()]));
         assert_eq!(agent.follow_ups.as_ref().unwrap().response_id, "resp-2");
     }
- /// FINDING B (stamped path): a LATE FIRST-TIME (never-seen) `legacy ext RPC`
+    /// FINDING B (stamped path): a LATE FIRST-TIME (never-seen) `legacy ext RPC`
     /// for a PRIOR turn — arriving while a newer turn is active — must NOT
     /// render. Before the fix it slipped through the "strictly newer" branch
     /// (never recorded in `follow_up_seen`, so the seen-reject didn't catch it).
@@ -2196,7 +2192,7 @@ pub(crate) mod test_fixtures {
     /// distinguished from the new turn's first follow_ups, so it follows the
     /// legacy newest-wins (renders). This path is not reachable for current
     /// shells (which always stamp `promptId`) or for buffer-replays (suppressed
- /// upstream by the `_meta key` gate); it is pinned here so the
+    /// upstream by the `_meta key` gate); it is pinned here so the
     /// stamped-path fix above is understood to be the deterministic guard.
     #[test]
     fn apply_follow_ups_none_prompt_first_time_follows_legacy_newest_wins() {
@@ -2208,7 +2204,7 @@ pub(crate) mod test_fixtures {
         );
         assert_eq!(agent.follow_ups.as_ref().unwrap().response_id, "resp-x");
     }
- /// FIX (buffer-before-adoption): a stamped `legacy ext RPC` for a turn that
+    /// FIX (buffer-before-adoption): a stamped `legacy ext RPC` for a turn that
     /// is NOT yet current (its `session/update` adoption raced behind the ext
     /// channel) must be BUFFERED, not dropped — and then RENDER when that turn
     /// becomes current and is flushed.

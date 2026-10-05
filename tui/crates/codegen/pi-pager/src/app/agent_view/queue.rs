@@ -57,10 +57,7 @@ impl AgentView {
 
     /// Shared tail of every turn-end marker push
     /// (`push_turn_terminal_marker`).
-    pub(crate) fn push_end_marker_block(
-        &mut self,
-        event: crate::scrollback::blocks::SessionEvent,
-    ) {
+    pub(crate) fn push_end_marker_block(&mut self, event: crate::scrollback::blocks::SessionEvent) {
         let block = crate::scrollback::blocks::SessionEventBlock::new(event);
         self.scrollback
             .push_block(crate::scrollback::block::RenderBlock::SessionEvent(block));

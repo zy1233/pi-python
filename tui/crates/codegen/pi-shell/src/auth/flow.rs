@@ -1,14 +1,5 @@
-
-
 #[cfg(test)]
 mod tests {
-    
-
-    
-    
-    
-    
-    
 
     // ── run_auth_flow: expired path with disk token ─────────────────
 
@@ -51,5 +42,4 @@ mod tests {
             < crate::auth::manager::REFRESH_LOCK_TIMEOUT.as_millis(),
         "the startup refresh bound must fire before the lock convoy budget"
     );
-
 }

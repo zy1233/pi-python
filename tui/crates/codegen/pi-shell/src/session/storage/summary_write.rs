@@ -303,13 +303,4 @@ fn write_summary_atomic(summary_path: &Path, summary: &Summary) -> io::Result<()
 }
 
 #[cfg(test)]
-mod tests {
-    
-    
-    
-    
-    
-    
-    
-
-}
+mod tests {}

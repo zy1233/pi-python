@@ -17,6 +17,4 @@ pub(super) fn to_meta<E: std::fmt::Display>(
     }
 }
 #[cfg(test)]
-mod tests {
-    
-}
+mod tests {}

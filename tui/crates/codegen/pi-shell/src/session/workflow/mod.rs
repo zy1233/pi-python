@@ -4,6 +4,4 @@ pub(crate) mod store;
 pub(crate) mod tracker;
 
 #[cfg(test)]
-mod builtin_tests {
-
-}
+mod builtin_tests {}

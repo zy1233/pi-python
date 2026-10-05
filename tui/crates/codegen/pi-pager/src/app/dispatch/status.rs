@@ -99,4 +99,3 @@ pub(super) fn dispatch_copy_session_id(app: &mut AppView, index: usize) -> Vec<E
     }
     vec![]
 }
-

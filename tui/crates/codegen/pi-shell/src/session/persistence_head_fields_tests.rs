@@ -44,4 +44,3 @@ fn summary_relocation_metadata_is_backward_compatible() {
         assert!(serialized.get(field).is_none());
     }
 }
-

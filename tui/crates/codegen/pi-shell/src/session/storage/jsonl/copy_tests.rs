@@ -1,7 +1,5 @@
 use crate::session::info::Info;
-use crate::session::storage::{
-    JsonlStorageAdapter, StorageAdapter,
-};
+use crate::session::storage::{JsonlStorageAdapter, StorageAdapter};
 use agent_client_protocol as acp;
 use tempfile::TempDir;
 

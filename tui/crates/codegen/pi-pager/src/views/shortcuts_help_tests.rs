@@ -559,7 +559,6 @@ fn pseudo_hint<'a>(
     })
 }
 
-
 #[test]
 fn build_entries_dims_out_of_context_actions() {
     let registry = ActionRegistry::defaults();
@@ -625,8 +624,6 @@ fn build_entries_dims_both_pane_contexts_from_side_pane() {
         "nav should be dimmed from todo pane (ScrollbackFocused)"
     );
 }
-
-
 
 #[test]
 fn initial_state_selects_first_hint_not_header() {

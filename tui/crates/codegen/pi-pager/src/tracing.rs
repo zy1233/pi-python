@@ -25,9 +25,6 @@
 //! insulates `ListPane` from this change — only this module would need updating.
 //! The `TracingEntry::new()` constructor is the seam: swap its internals from
 //! "parse ANSI string" to "format structured fields" and nothing else changes.
-use std::io;
-use tokio::sync::mpsc;
-use tracing_subscriber::fmt::MakeWriter;
 /// Target for the full ACP update payload dump (plain JSON, no ANSI).
 ///
 /// Off by default in release builds: serializing every update at streaming
@@ -43,6 +40,9 @@ pub use pi_telemetry::debug_log::ACP_UPDATE_PAYLOAD_TARGET;
 /// Defined in `pi-telemetry` so the firehose directives and the pager
 /// filter share one constant (re-exported here for callsites).
 pub use pi_telemetry::debug_log::ACP_UPDATE_TARGET;
+use std::io;
+use tokio::sync::mpsc;
+use tracing_subscriber::fmt::MakeWriter;
 /// Capacity of the log channel between tracing-subscriber and the UI.
 ///
 /// Bounded so a starved consumer (the event loop drains it only on ticks,
@@ -146,10 +146,10 @@ pub struct TracingHandle {
 /// }
 /// ```
 pub fn init_tracing() -> TracingHandle {
+    use pi_telemetry::debug_log::RMCP_SSE_NOISE_TARGET;
     use tracing_subscriber::{
         EnvFilter, Layer as _, filter::LevelFilter, fmt, layer::SubscriberExt as _,
     };
-    use pi_telemetry::debug_log::RMCP_SSE_NOISE_TARGET;
     let (make_writer, rx) = TracingChannelMakeWriter::new();
     let payload_level = "off";
     let directives = format!(
@@ -181,15 +181,13 @@ pub fn init_tracing() -> TracingHandle {
         .with(hooks_log_layer)
         .with(otel_layer);
     pi_telemetry::debug_log::install_firehose(registry, "tui");
-    pi_telemetry::external::init(
-        pi_shell::agent::config::resolve_external_otel_config(
-            pi_telemetry::external::config::ExternalClientInfo {
-                service_version: pi_version::full_version().to_owned(),
-                client_version: pi_version::VERSION.to_owned(),
-                app_entrypoint: "tui".to_owned(),
-            },
-        ),
-    );
+    pi_telemetry::external::init(pi_shell::agent::config::resolve_external_otel_config(
+        pi_telemetry::external::config::ExternalClientInfo {
+            service_version: pi_version::full_version().to_owned(),
+            client_version: pi_version::VERSION.to_owned(),
+            app_entrypoint: "tui".to_owned(),
+        },
+    ));
     TracingHandle { rx }
 }
 #[cfg(test)]

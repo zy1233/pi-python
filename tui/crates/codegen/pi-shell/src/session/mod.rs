@@ -107,7 +107,7 @@ impl PromptOrigin {
 }
 #[cfg(test)]
 mod tests {
-    use super::{PromptOrigin};
+    use super::PromptOrigin;
     #[test]
     fn from_prompt_id_user() {
         assert_eq!(
@@ -154,8 +154,7 @@ mod tests {
     }
 }
 /// Share session request/response types
-pub(crate) mod share {
-}
+pub(crate) mod share {}
 pub(crate) mod events;
 pub(crate) mod feedback;
 pub(crate) mod goal_tracker;

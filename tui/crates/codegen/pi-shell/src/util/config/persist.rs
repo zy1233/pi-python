@@ -1,9 +1,9 @@
 use super::load::load_config_from_toml;
 use super::mcp::{Config, user_config_path};
 use anyhow::Result;
+use pi_agent::prompt::skills::SkillsConfig;
 use toml::Value as TomlValue;
 use toml::map::Map as TomlMap;
-use pi_agent::prompt::skills::SkillsConfig;
 /// Process-wide write lock for `~/.grok/config.toml`.
 ///
 /// Serializes the read-modify-write in `save_config` so two rapid

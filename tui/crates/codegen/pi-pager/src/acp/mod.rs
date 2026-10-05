@@ -23,14 +23,12 @@ use pi_telemetry::process_info::{
     Entrypoint, Interactivity, LeaderMode, ProcessIdentity, set_identity,
 };
 use pi_telemetry::startup;
-pub use pi_telemetry::startup::{
-    AgentKind, Owner, StartupOutcome, StartupPhase, StartupTimer,
-};
+pub use pi_telemetry::startup::{AgentKind, Owner, StartupOutcome, StartupPhase, StartupTimer};
 
 use anyhow::Result;
 use tokio_util::sync::CancellationToken;
 
-use crate::client_identity::{ PAGER_CLIENT_TYPE, PAGER_CLIENT_VERSION};
+use crate::client_identity::{PAGER_CLIENT_TYPE, PAGER_CLIENT_VERSION};
 use agent_client_protocol as acp;
 use pi_acp_lib::{AcpAgentTx, AcpClientRx, acp_send};
 use pi_shell::agent::auth_method::AuthMethodKind;
@@ -127,7 +125,7 @@ pub struct ConnectFlags {
     /// Storage mode override.
     pub storage_mode: Option<String>,
     /// Whether this client will draw a status row, advertised as
- /// `legacy ext RPC` so the agent can skip an unpainted payload.
+    /// `legacy ext RPC` so the agent can skip an unpainted payload.
     pub status_line: bool,
     /// Client identifier for ACP Initialize metadata.
     pub client_identifier: Option<String>,
@@ -641,9 +639,15 @@ mod tests {
     #[test]
     fn is_session_update_ext_method_covers_both_carriers() {
         use crate::acp::vendor::VENDOR_EXT_PREFIX;
-        assert!(is_session_update_ext_method(&format!("{VENDOR_EXT_PREFIX}session_notification")));
-        assert!(is_session_update_ext_method(&format!("{VENDOR_EXT_PREFIX}session/update")));
-        assert!(!is_session_update_ext_method(&format!("{VENDOR_EXT_PREFIX}task_completed")));
+        assert!(is_session_update_ext_method(&format!(
+            "{VENDOR_EXT_PREFIX}session_notification"
+        )));
+        assert!(is_session_update_ext_method(&format!(
+            "{VENDOR_EXT_PREFIX}session/update"
+        )));
+        assert!(!is_session_update_ext_method(&format!(
+            "{VENDOR_EXT_PREFIX}task_completed"
+        )));
         assert!(!is_session_update_ext_method("session/update"));
     }
 
@@ -834,7 +838,15 @@ mod tests {
             ..Default::default()
         });
         use crate::acp::vendor::VENDOR_EXT_PREFIX;
-        assert!(with_hunk.get(&format!("{VENDOR_EXT_PREFIX}hunkTracker")).is_none());
-        assert!(with_hunk.get(&format!("{VENDOR_EXT_PREFIX}statusLine")).is_none());
+        assert!(
+            with_hunk
+                .get(&format!("{VENDOR_EXT_PREFIX}hunkTracker"))
+                .is_none()
+        );
+        assert!(
+            with_hunk
+                .get(&format!("{VENDOR_EXT_PREFIX}statusLine"))
+                .is_none()
+        );
     }
 }

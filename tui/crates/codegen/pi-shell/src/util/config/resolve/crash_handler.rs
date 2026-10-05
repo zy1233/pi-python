@@ -68,8 +68,4 @@ pub fn load_crash_handler_enabled_sync() -> bool {
 }
 
 #[cfg(test)]
-mod crash_handler_gate_tests {
-    
-
-
-}
+mod crash_handler_gate_tests {}

@@ -183,7 +183,6 @@ impl ManualAuthTracker {
     pub(crate) fn last_token_for_test(&self) -> Option<String> {
         self.last_token.lock().clone()
     }
-
 }
 
 /// Which recovery step to attempt next.

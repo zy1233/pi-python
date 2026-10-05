@@ -14,11 +14,9 @@ mod layout;
 mod render;
 mod state;
 
-pub use layout::{ WrapMode};
+pub use layout::WrapMode;
 pub use render::ListPane;
-pub use state::{
-    InputBarMode, ListPaneConfig, ListPaneState, 
-};
+pub use state::{InputBarMode, ListPaneConfig, ListPaneState};
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;

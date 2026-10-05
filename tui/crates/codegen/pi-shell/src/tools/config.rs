@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
- // 10 hours
+// 10 hours
 
 /// User configurable settings for the built-in bash tool (`[toolset.bash]`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -181,5 +181,4 @@ mod tests {
     //    (also the binary default); overridable via config.toml --
 
     // -- foreground_block_budget_ms: only emitted when set (server defaults to 15s) --
-
 }

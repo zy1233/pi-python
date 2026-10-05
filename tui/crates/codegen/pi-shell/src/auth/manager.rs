@@ -4,10 +4,10 @@
 
 use chrono::{Duration, Utc};
 use parking_lot::RwLock;
+use pi_auth::bearer_suffix;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
-use pi_auth::bearer_suffix;
 
 #[path = "manager/enrichment.rs"]
 mod enrichment;
@@ -1229,22 +1229,14 @@ impl AuthManager {
         match new_state {
             // Recovery (or first observation in GROK_AUTH mode).
             DiskAuthState::Ok => {
-                pi_telemetry::unified_log::info(
-                    "auth disk state: entry present",
-                    None,
-                    Some(ctx),
-                );
+                pi_telemetry::unified_log::info("auth disk state: entry present", None, Some(ctx));
             }
             // Credential loss on disk — the line that answers "when did
             // auth.json disappear and what did this process see".
             DiskAuthState::FileMissing
             | DiskAuthState::EntryMissing
             | DiskAuthState::Unreadable => {
-                pi_telemetry::unified_log::warn(
-                    "auth disk state: entry lost",
-                    None,
-                    Some(ctx),
-                );
+                pi_telemetry::unified_log::warn("auth disk state: entry lost", None, Some(ctx));
             }
         }
     }
@@ -1959,7 +1951,6 @@ impl AuthManager {
     }
 
     // ── Proactive refresh ─────────────────────────────────────────────
-
 }
 
 /// Tools + pager voice bearer. Static: env → process model key → disk.
@@ -2067,7 +2058,6 @@ impl AuthManager {
             }
         }
     }
-
 }
 
 fn non_empty_key(key: Option<String>) -> Option<String> {

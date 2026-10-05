@@ -397,5 +397,4 @@ mod tests {
             assert!(context_bar_line(Some(1_000), Some(0), hovered, &theme).is_none());
         }
     }
-
 }

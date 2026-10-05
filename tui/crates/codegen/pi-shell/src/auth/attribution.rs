@@ -156,11 +156,7 @@ pub(crate) fn record_auth_401(
     // on OIDC refresh failure (auth/refresh.rs::spawn_diagnostic_upload),
     // so by itself it does not give visibility into the steady-state
     // 401 population. Sink 2 below provides that.
-    pi_telemetry::unified_log::warn(
-        "auth 401 attribution",
-        session_id,
-        Some(payload.clone()),
-    );
+    pi_telemetry::unified_log::warn("auth 401 attribution", session_id, Some(payload.clone()));
 
     // Sink 2 -- discrete OTel span exported via OTLP
     // (util/otel_layer.rs). Auth 401 attribution schema fields below
@@ -278,7 +274,6 @@ fn compute_attribution_payload(
 
 #[cfg(test)]
 mod tests {
-    
 
     use chrono::{Duration, Utc};
 
@@ -710,5 +705,4 @@ mod tests {
         record_auth_401(&am, None, "Test.counter", Some("k"));
         assert_eq!(test_emit_count(), 2);
     }
-
 }

@@ -3,7 +3,10 @@
 
 #[cfg(test)]
 use super::test_fixtures;
-use super::{AgentPane, AgentView, PromptInputMode, PromptMode, is_bang_key, is_hash_key, remember_mode_enabled, resolve_action};
+use super::{
+    AgentPane, AgentView, PromptInputMode, PromptMode, is_bang_key, is_hash_key,
+    remember_mode_enabled, resolve_action,
+};
 use crate::actions::{ActionId, ActionRegistry, When};
 use crate::app::actions::Action;
 use crate::app::app_view::InputOutcome;
@@ -12,7 +15,6 @@ use crate::views::prompt_widget::PromptEvent;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 impl AgentView {
-
     /// Unsent drafts first (the stash, then drafts it replaced), then `session.prompt_history` in order.
     ///
     /// `session.prompt_history` in order, and nothing else. A stashed draft is not history: `Ctrl+S`
@@ -37,7 +39,7 @@ impl AgentView {
 
     /// Append the replayed transcript's `UserPrompt` blocks to `session.prompt_history`, newest first.
     ///
- /// The browse reads that list alone, and the `legacy ext RPC` fetch delivers an empty list when it
+    /// The browse reads that list alone, and the `legacy ext RPC` fetch delivers an empty list when it
     /// fails, so this is what makes a restored session's prompts recallable. Appended, not prepended: a prompt
     /// sent during the load is newer than anything the transcript holds. `PromptHistoryLoaded` skips fetched
     /// prompts whose trimmed text is already here.
@@ -390,13 +392,11 @@ impl AgentView {
                     // (the ghost only shows when the text is a prefix of it).
                     let (chars, words) =
                         crate::views::prompt_suggestion::suggestion_size(self.prompt.text());
-                    pi_telemetry::session_ctx::log_event(
-                        pi_telemetry::events::PromptSuggestion {
-                            action: pi_telemetry::events::PromptSuggestionAction::Accepted,
-                            chars,
-                            words,
-                        },
-                    );
+                    pi_telemetry::session_ctx::log_event(pi_telemetry::events::PromptSuggestion {
+                        action: pi_telemetry::events::PromptSuggestionAction::Accepted,
+                        chars,
+                        words,
+                    });
                     self.prompt.refresh_slash(&self.session.models);
                     return InputOutcome::Changed;
                 }
@@ -409,13 +409,11 @@ impl AgentView {
                     self.prompt.prompt_suggestion_ghost().unwrap_or_default(),
                 );
                 self.prompt.prompt_suggestion.dismiss();
-                pi_telemetry::session_ctx::log_event(
-                    pi_telemetry::events::PromptSuggestion {
-                        action: pi_telemetry::events::PromptSuggestionAction::Dismissed,
-                        chars,
-                        words,
-                    },
-                );
+                pi_telemetry::session_ctx::log_event(pi_telemetry::events::PromptSuggestion {
+                    action: pi_telemetry::events::PromptSuggestionAction::Dismissed,
+                    chars,
+                    words,
+                });
                 return InputOutcome::Changed;
             }
         }
@@ -651,12 +649,10 @@ impl AgentView {
             match self.prompt.handle_key(key) {
                 PromptEvent::Edited => {
                     if undo_tip_accepted {
-                        pi_telemetry::session_ctx::log_event(
-                            pi_telemetry::events::ContextualTip {
-                                tip: pi_telemetry::events::ContextualTipKind::Undo,
-                                action: pi_telemetry::events::ContextualTipAction::Accepted,
-                            },
-                        );
+                        pi_telemetry::session_ctx::log_event(pi_telemetry::events::ContextualTip {
+                            tip: pi_telemetry::events::ContextualTipKind::Undo,
+                            action: pi_telemetry::events::ContextualTipAction::Accepted,
+                        });
                         // Retire the hint on the restore that consumed it (its
                         // "Input cleared" copy is now stale), mirroring the
                         // clipboard tip's clear-on-paste so one restore counts
@@ -1509,7 +1505,7 @@ mod prompt_suggestion_key_tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     /// Idle agent with the gate open and a loaded suggestion — the state
- /// right after a turn ends with `legacy ext RPC` resolved. Pins the
+    /// right after a turn ends with `legacy ext RPC` resolved. Pins the
     /// settings cache so `resolve_enabled()` never reads the dev machine's
     /// config.toml (thread-local, so per-test).
     fn suggestion_agent(text: &str) -> AgentView {

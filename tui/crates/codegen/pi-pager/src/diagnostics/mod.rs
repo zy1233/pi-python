@@ -16,15 +16,13 @@ pub(crate) mod probes;
 mod view;
 
 pub use fix::{
-    AutomaticRemediation, DCS_PASSTHROUGH_ID, FixActivation, FixPlan,
-    FixRequest, 
-    ShellKind, TMUX_CLIPBOARD_ID, TMUX_EXTENDED_KEYS_ID, TMUX_TRUECOLOR_ID, apply_fix,
-    configured_report, managed_alias_configured, plan_fix, resolve_fix_id,
-    verify_persistent_fix,
+    AutomaticRemediation, DCS_PASSTHROUGH_ID, FixActivation, FixPlan, FixRequest, ShellKind,
+    TMUX_CLIPBOARD_ID, TMUX_EXTENDED_KEYS_ID, TMUX_TRUECOLOR_ID, apply_fix, configured_report,
+    managed_alias_configured, plan_fix, resolve_fix_id, verify_persistent_fix,
 };
 pub(crate) use fix::{
-    automatic_remediation_for, format_applicable_automatic_fixes,
-    format_fix_preview, format_fix_success, human_fix_command, 
+    automatic_remediation_for, format_applicable_automatic_fixes, format_fix_preview,
+    format_fix_success, human_fix_command,
 };
 pub(crate) use model::probe_requires_live_tui;
 pub(crate) use model::{
@@ -39,7 +37,7 @@ pub use model::{
     ProbeStatus, RuntimeFact, TmuxColorPassthrough, TmuxFacts, TmuxOptionFact, TmuxSupportFact,
     VoiceFacts,
 };
-pub use view::{ view};
+pub use view::view;
 
 /// Passive input-device probe for `grok doctor` / `/doctor`.
 ///

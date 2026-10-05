@@ -134,7 +134,6 @@ impl ReplayToolCollapser {
             .into_values()
             .map(acp::SessionUpdate::ToolCall)
     }
-
 }
 
 /// Load replay-ready typed ACP updates for a session, or `None` when the
@@ -468,4 +467,3 @@ pub fn prepare_replay_lines<'a>(contents: &'a str, cursor: Option<&str>) -> Prep
 
     PreparedReplay { lines }
 }
-

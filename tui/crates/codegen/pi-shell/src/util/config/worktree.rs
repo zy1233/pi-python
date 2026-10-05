@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use pi_fast_worktree::CreationMode;
+use serde::{Deserialize, Serialize};
 
 /// Worktree creation type configuration.
 ///
@@ -44,9 +44,7 @@ impl From<WorktreeType> for CreationMode {
 
 #[cfg(test)]
 mod tests {
-        use super::*;
-    
-    
+    use super::*;
 
     #[test]
     fn test_worktree_type_fromstr() {
@@ -61,5 +59,4 @@ mod tests {
     }
 
     // === restore_code config tests ===
-
 }

@@ -221,12 +221,7 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
                         false
                     }
                 } else {
-                    finish_wake_turn(
-                        agent,
-                        &prompt_id,
-                        &stop_reason,
-                        agent_result.as_deref(),
-                    );
+                    finish_wake_turn(agent, &prompt_id, &stop_reason, agent_result.as_deref());
                     true
                 }
             } else if is_server_initiated_prompt(&prompt_id)
@@ -263,9 +258,7 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
             match title_is_manual {
                 Some(true) => {
                     if let Some(clean) =
-                        pi_shell::session::persistence::sanitize_and_cap_title(
-                            &session_summary,
-                        )
+                        pi_shell::session::persistence::sanitize_and_cap_title(&session_summary)
                     {
                         agent.display_name = Some(clean.clone());
                         agent.generated_session_title = Some(clean);
@@ -389,11 +382,11 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
             let new_model_id = acp::ModelId::new(model_id.clone());
             if !agent.session.models.available.contains_key(&new_model_id) {
                 tracing::warn!(
-                        session_id = session_notif.session_id.0.as_ref(),
-                        model_id = %model_id,
-                        "ignoring ModelChanged broadcast — model not in local catalog"
-                    );
-                    return false;
+                    session_id = session_notif.session_id.0.as_ref(),
+                    model_id = %model_id,
+                    "ignoring ModelChanged broadcast — model not in local catalog"
+                );
+                return false;
             }
             let effort = reasoning_effort
                 .as_deref()
@@ -616,21 +609,19 @@ pub(super) fn apply_retry_state(
             session.set_retry_activity(None);
             session.rate_limited = *rate_limited;
             if *rate_limited {
-                pi_telemetry::session_ctx::log_event(
-                    pi_telemetry::events::RateLimitHit {
-                        model_id: session
-                            .models
-                            .current
-                            .as_ref()
-                            .map(|m| m.0.to_string())
-                            .unwrap_or_default(),
-                        attempts: *attempts,
-                    },
-                );
+                pi_telemetry::session_ctx::log_event(pi_telemetry::events::RateLimitHit {
+                    model_id: session
+                        .models
+                        .current
+                        .as_ref()
+                        .map(|m| m.0.to_string())
+                        .unwrap_or_default(),
+                    attempts: *attempts,
+                });
             }
             is_credit_limit = super::super::dispatch::is_credit_limit_error(None, reason);
-            let is_free_usage = *rate_limited
-                && pi_shell::sampling::error::is_free_usage_exhausted_error(reason);
+            let is_free_usage =
+                *rate_limited && pi_shell::sampling::error::is_free_usage_exhausted_error(reason);
             if is_credit_limit {
                 session.credit_limit_blocked = true;
             } else if is_free_usage {

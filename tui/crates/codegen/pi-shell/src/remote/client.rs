@@ -2,7 +2,7 @@
 use crate::auth::{GrokAuth, GrokComConfig};
 use indexmap::IndexMap;
 use prod_mc_cli_chat_proxy_types::SubagentBundle;
-use serde::{Deserialize, };
+use serde::Deserialize;
 const GROK_CODE_WEB_URL: &str = "https://grok.com";
 /// Build a share URL from a permission ID
 pub fn share_url(permission_id: &str) -> String {
@@ -149,14 +149,13 @@ async fn fetch_bundle_inner(
     let archive_url = format!("{}/bundle/archive", cli_chat_proxy_base_url);
     let raw_client = crate::http::shared_client();
     let client: reqwest_middleware::ClientWithMiddleware = if let Some(am) = auth_manager {
-        let provider: std::sync::Arc<dyn pi_auth::AuthCredentialProvider> =
-            std::sync::Arc::new(
-                crate::auth::credential_provider::ShellAuthCredentialProvider::new(
-                    am.clone(),
-                    deployment_key.map(str::to_owned),
-                    alpha_test_key.map(str::to_owned),
-                ),
-            );
+        let provider: std::sync::Arc<dyn pi_auth::AuthCredentialProvider> = std::sync::Arc::new(
+            crate::auth::credential_provider::ShellAuthCredentialProvider::new(
+                am.clone(),
+                deployment_key.map(str::to_owned),
+                alpha_test_key.map(str::to_owned),
+            ),
+        );
         crate::http::with_auth_retry(raw_client, provider)
     } else {
         reqwest_middleware::ClientBuilder::new(raw_client).build()

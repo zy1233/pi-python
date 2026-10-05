@@ -16,11 +16,10 @@ mod storage;
 mod token_output;
 pub(crate) mod token_type;
 pub(crate) use auth_provider::{AuthProviderConfig, AuthProviderRef};
-pub(crate) use auth_provider::{
-    PROVIDER_TIMEOUT_CEILING_SECS, PROVIDER_TOKEN_EXPIRY_SKEW_SECS};
+pub(crate) use auth_provider::{PROVIDER_TIMEOUT_CEILING_SECS, PROVIDER_TOKEN_EXPIRY_SKEW_SECS};
 pub use config::{
-    ForceLoginTeam, GrokComConfig, OAuth2ProviderConfig, OidcAuthConfig, PreferredAuthMethod,
-    PI_OAUTH2_ISSUER, is_pi_oauth2_issuer, pi_oauth2_issuer,
+    ForceLoginTeam, GrokComConfig, OAuth2ProviderConfig, OidcAuthConfig, PI_OAUTH2_ISSUER,
+    PreferredAuthMethod, is_pi_oauth2_issuer, pi_oauth2_issuer,
 };
 pub(crate) use config::{
     force_login_team_from_env, force_login_team_from_requirements, resolve_force_login_team,

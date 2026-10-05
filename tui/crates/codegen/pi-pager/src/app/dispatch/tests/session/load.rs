@@ -3,10 +3,7 @@ use super::*;
 #[test]
 fn session_loaded_with_restore_shows_summary_in_scrollback() {
     let mut app = test_app();
-    dispatch(
-        Action::LoadSession("sess-restore".into(), None),
-        &mut app,
-    );
+    dispatch(Action::LoadSession("sess-restore".into(), None), &mut app);
     let id = AgentId(0);
     let effects = dispatch(
         Action::TaskComplete(TaskResult::SessionLoaded {
@@ -48,10 +45,7 @@ fn session_loaded_with_restore_shows_summary_in_scrollback() {
 #[test]
 fn session_loaded_without_adoption_finishes_replayed_running_entries() {
     let mut app = test_app();
-    dispatch(
-        Action::LoadSession("sess-stuck".into(), None),
-        &mut app,
-    );
+    dispatch(Action::LoadSession("sess-stuck".into(), None), &mut app);
     let id = AgentId(0);
     {
         let agent = app.agents.get_mut(&id).unwrap();
@@ -128,10 +122,7 @@ fn load_session_anchors_agent_cwd_to_resolved_session_cwd() {
 fn load_session_falls_back_to_process_cwd_when_no_session_cwd() {
     let mut app = test_app();
     let process_cwd = app.cwd.clone();
-    dispatch(
-        Action::LoadSession("sess-samecwd".into(), None),
-        &mut app,
-    );
+    dispatch(Action::LoadSession("sess-samecwd".into(), None), &mut app);
     assert_eq!(
         app.agents[&AgentId(0)].session.cwd,
         process_cwd,
@@ -149,10 +140,7 @@ fn session_loaded_purges_replay_transient() {
     use crate::memory_release::test_support;
     test_support::install_counting_hook();
     let mut app = test_app();
-    dispatch(
-        Action::LoadSession("sess-purge".into(), None),
-        &mut app,
-    );
+    dispatch(Action::LoadSession("sess-purge".into(), None), &mut app);
     let id = AgentId(0);
     let before = test_support::calls();
     dispatch(
@@ -179,10 +167,7 @@ fn session_loaded_purges_replay_transient() {
 #[test]
 fn session_loaded_with_restore_failure_shows_warning_banner() {
     let mut app = test_app();
-    dispatch(
-        Action::LoadSession("sess-fail".into(), None),
-        &mut app,
-    );
+    dispatch(Action::LoadSession("sess-fail".into(), None), &mut app);
     let id = AgentId(0);
     dispatch(
         Action::TaskComplete(TaskResult::SessionLoaded {
@@ -223,10 +208,7 @@ fn session_loaded_with_restore_failure_shows_warning_banner() {
 #[test]
 fn session_loaded_without_restore_no_summary() {
     let mut app = test_app();
-    dispatch(
-        Action::LoadSession("sess-plain".into(), None),
-        &mut app,
-    );
+    dispatch(Action::LoadSession("sess-plain".into(), None), &mut app);
     let id = AgentId(0);
     let effects = dispatch(
         Action::TaskComplete(TaskResult::SessionLoaded {
@@ -303,10 +285,7 @@ fn load_session_seeds_available_commands_from_bootstrap() {
         "session-info".to_string(),
         "Show session info".to_string(),
     )];
-    dispatch(
-        Action::LoadSession("sess-123".into(), None),
-        &mut app,
-    );
+    dispatch(Action::LoadSession("sess-123".into(), None), &mut app);
     let id = AgentId(0);
     assert_eq!(app.agents[&id].session.available_commands.len(), 1);
     assert_eq!(
@@ -414,10 +393,7 @@ fn session_loaded_clears_stale_running_entries() {
     use crate::acp::meta::NotificationMeta;
     use std::sync::Arc;
     let mut app = test_app();
-    dispatch(
-        Action::LoadSession("sess-stale".into(), None),
-        &mut app,
-    );
+    dispatch(Action::LoadSession("sess-stale".into(), None), &mut app);
     let id = AgentId(0);
     let agent = app.agents.get_mut(&id).unwrap();
     let meta = NotificationMeta::default();
@@ -492,10 +468,7 @@ fn resume_focuses_existing_agent_for_open_session() {
         &mut app,
     );
     let count_before = app.agents.len();
-    let effects = dispatch(
-        Action::LoadSession("wt-sess-1".into(), None),
-        &mut app,
-    );
+    let effects = dispatch(Action::LoadSession("wt-sess-1".into(), None), &mut app);
     assert!(matches!(app.active_view, ActiveView::Agent(id) if id == agent_0));
     assert_eq!(app.agents.len(), count_before);
     assert!(effects.is_empty());

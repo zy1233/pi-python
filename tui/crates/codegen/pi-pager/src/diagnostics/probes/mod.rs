@@ -111,9 +111,8 @@ pub fn collect_startup_tui<'a>(
     tmux: &dyn TmuxOptionQuery,
 ) -> ProbeSnapshot<'a> {
     let is_wayland = crate::host::DisplayServer::current() == crate::host::DisplayServer::Wayland;
-    let native_tool = startup_native_tool(is_wayland, || {
-        pi_shell::util::clipboard::native_tool_name()
-    });
+    let native_tool =
+        startup_native_tool(is_wayland, || pi_shell::util::clipboard::native_tool_name());
     collect_common(
         terminal,
         runtime,
@@ -295,8 +294,7 @@ fn collect_common<'a>(
     is_wayland: bool,
     native_tool: Option<&str>,
 ) -> ProbeSnapshot<'a> {
-    let data_control =
-        is_wayland && pi_shell::util::clipboard::wayland_data_control_supported();
+    let data_control = is_wayland && pi_shell::util::clipboard::wayland_data_control_supported();
     ProbeSnapshot {
         terminal,
         tmux: collect_tmux(terminal, control_mode, color_probe, tmux),

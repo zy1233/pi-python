@@ -398,7 +398,6 @@ pub(super) fn should_drop_late_auto_recap(
 
 /// Recap must not paint in the gap before the next turn starts.
 fn cli_is_idle_for_recap(agent: &crate::app::agent_view::AgentView) -> bool {
-
     if !agent.session.state.is_idle() {
         return false;
     }
@@ -526,4 +525,3 @@ pub(super) fn apply_recap_block(agent: &mut AgentView, auto: bool, recap_block: 
         }
     }
 }
-

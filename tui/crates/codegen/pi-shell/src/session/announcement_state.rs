@@ -73,5 +73,4 @@ mod tests {
         assert!(loaded.mcp_server_fingerprints.is_empty());
         assert!(loaded.announced_skill_names.is_empty());
     }
-
 }

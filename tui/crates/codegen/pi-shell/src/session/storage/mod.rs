@@ -480,7 +480,6 @@ impl UpdatesIterator {
             line_buffer: String::new(),
         }))
     }
-
 }
 
 impl Iterator for UpdatesIterator {
@@ -1524,7 +1523,9 @@ impl Iterator for PromptExtractIterator {
 /// The resulting `Vec` is the resume `prompt_texts` / rewind-picker index
 /// space: `prompt_index == prompts.len()` after load, matching live turn
 /// stamping (not raw user-message count).
-pub(crate) fn collect_prompts_from_events(iter: impl Iterator<Item = PromptExtractEvent>) -> Vec<String> {
+pub(crate) fn collect_prompts_from_events(
+    iter: impl Iterator<Item = PromptExtractEvent>,
+) -> Vec<String> {
     let mut prompts: Vec<String> = Vec::new();
     let mut current = String::new();
     let mut in_user = false;
@@ -1728,7 +1729,9 @@ pub(crate) fn collect_assistant_text(
 /// Note: This collector does not honor rewind markers (unlike PromptExtractIterator).
 /// Rewound-away branches may still contribute to FTS index. This is a known limitation;
 /// fix by using a rewind-aware replay model (future work).
-pub(crate) fn collect_tool_metadata(iter: impl Iterator<Item = io::Result<SessionUpdate>>) -> Vec<String> {
+pub(crate) fn collect_tool_metadata(
+    iter: impl Iterator<Item = io::Result<SessionUpdate>>,
+) -> Vec<String> {
     let mut meta: Vec<String> = Vec::new();
     let mut tool_call_count = 0usize;
     let mut chars_emitted = 0usize;

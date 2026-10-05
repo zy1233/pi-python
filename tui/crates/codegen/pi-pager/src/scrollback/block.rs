@@ -14,11 +14,10 @@ use pi_pager_diff::DiffHunk;
 
 use super::blocks::mermaid_content::DiagramAffordance;
 use super::blocks::{
-    AgentMessageBlock, BtwBlock, ContextInfoBlock, CreditLimitBlock,
-    EditToolCallBlock, ExecuteToolCallBlock, LineRange, ListDirToolCallBlock, OtherToolCallBlock,
-    ReadToolCallBlock, SearchFileMatch, SearchToolCallBlock, SessionEvent, SessionEventBlock,
-    SystemMessageBlock, ThinkingBlock, ToolCallBlock,
-    UserPromptBlock, 
+    AgentMessageBlock, BtwBlock, ContextInfoBlock, CreditLimitBlock, EditToolCallBlock,
+    ExecuteToolCallBlock, LineRange, ListDirToolCallBlock, OtherToolCallBlock, ReadToolCallBlock,
+    SearchFileMatch, SearchToolCallBlock, SessionEvent, SessionEventBlock, SystemMessageBlock,
+    ThinkingBlock, ToolCallBlock, UserPromptBlock,
 };
 use super::types::{
     AccentStyle, BlockBackground, BlockContext, BlockOutput, DisplayMode, RenderedBlockOutput,
@@ -1097,10 +1096,7 @@ impl RenderBlock {
     /// (pre-wrap line index, display-cell column range). The caller is
     /// responsible for mapping through word-wrapping and entry layout to
     /// reach screen coordinates.
-    pub fn with_hyperlinks<R>(
-        &self,
-        f: impl FnOnce(&[pi_markdown::HyperlinkTarget]) -> R,
-    ) -> R {
+    pub fn with_hyperlinks<R>(&self, f: impl FnOnce(&[pi_markdown::HyperlinkTarget]) -> R) -> R {
         match self {
             RenderBlock::AgentMessage(b) => b.content().with_hyperlinks(f),
             RenderBlock::Thinking(b) => b.content().with_hyperlinks(f),
@@ -1369,8 +1365,8 @@ mod tests {
 mod searchable_text_tests {
     use super::*;
     use crate::scrollback::blocks::SearchLineMatch;
-    use crate::scrollback::blocks::tool::memory_search::{MemoryResult, MemorySearchToolCallBlock};
     use crate::scrollback::blocks::tool::WebSearchToolCallBlock;
+    use crate::scrollback::blocks::tool::memory_search::{MemoryResult, MemorySearchToolCallBlock};
     use pi_shell::session::ContextInfo;
 
     #[test]

@@ -1,6 +1,5 @@
 //! Feedback, remember-note, btw, and recap dispatchers.
 
-
 /// Toast when a manual `/recap` produces no summary. Empty sessions get a clear
 /// empty-state message; anything else (model failure, empty summary, etc.) keeps
 /// the generic failure toast.
@@ -25,4 +24,3 @@ pub(crate) fn scrollback_has_user_messages(
 }
 
 // TaskResult handlers.
-

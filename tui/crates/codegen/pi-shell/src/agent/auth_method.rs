@@ -63,8 +63,7 @@ pub(crate) const OIDC_METHOD_ID: &str = "oidc";
 #[cfg(test)]
 mod tests {
     use super::*;
-    
-    
+
     use serial_test::serial;
 
     use pi_test_support::EnvGuard;
@@ -102,5 +101,4 @@ mod tests {
     // ordering would send legacy-token users to the login screen.
 
     // ── preferred_method pin (fail-closed) ──────────────────────────────
-
 }

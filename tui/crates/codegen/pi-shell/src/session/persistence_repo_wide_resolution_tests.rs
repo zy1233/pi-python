@@ -14,4 +14,3 @@ fn resolution_kind_serde_round_trip() {
         assert_eq!(*kind, deser);
     }
 }
-

@@ -1090,4 +1090,3 @@ fn credit_limit_upsell_submit_shows_url_when_browser_unavailable() {
     // SAFETY: serialized via `serial_test`.
     unsafe { std::env::remove_var("GROK_TEST_OPEN_URL_FILE") };
 }
-

@@ -7,6 +7,5 @@
 pub(crate) mod config;
 pub mod todo;
 
-
 // Re-export key types from pi-tools for convenience
 pub use self::todo::{TodoId, TodoItem, TodoPriority, TodoStatus};

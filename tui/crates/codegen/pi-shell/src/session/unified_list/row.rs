@@ -53,8 +53,4 @@ impl TryFrom<SessionInfo> for acp::SessionInfo {
 }
 
 #[cfg(test)]
-mod tests {
-    
-    
-
-}
+mod tests {}

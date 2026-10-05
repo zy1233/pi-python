@@ -1018,8 +1018,7 @@ mod doc_viewer_scroll_tests {
 mod palette_tests {
     use super::*;
     fn slash(mode: crate::app::ScreenMode) -> crate::slash::SlashController {
-        let mut controller =
-            crate::slash::SlashController::with_builtins();
+        let mut controller = crate::slash::SlashController::with_builtins();
         controller.set_screen_mode(mode);
         controller
     }

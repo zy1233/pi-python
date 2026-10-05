@@ -197,8 +197,6 @@ mod tests {
         assert!(!should_show_model_fingerprint(false, "some-other"));
     }
 
-    
-
     // ── RewindMode serialization ──────────────────────────────────────
 
     // ── RewindRequest backwards compatibility ─────────────────────────
@@ -225,5 +223,4 @@ mod tests {
         assert_eq!(c.usage_pct, 0);
         assert_eq!(c.free_tokens, 0);
     }
-
 }

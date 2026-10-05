@@ -58,7 +58,4 @@ pub struct PlanModeSnapshot {
     pub awaiting_plan_approval: bool,
 }
 #[cfg(test)]
-mod tests {
-    
-    
-}
+mod tests {}

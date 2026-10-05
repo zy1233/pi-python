@@ -4,7 +4,6 @@
 //! non-jemalloc builds) every seam API is inert. The monitor polls
 //! `stats.resident` and uploads dumps via `gcs::upload_file`.
 
-
 /// Recommended jemalloc `lg_prof_sample` (2^19 bytes ≈ 512 KiB).
 ///
 /// Keep process `MALLOC_CONF` / `_RJEM_MALLOC_CONF` and dump meta in sync with

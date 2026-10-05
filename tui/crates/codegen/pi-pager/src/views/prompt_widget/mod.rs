@@ -20,12 +20,12 @@
 use std::path::Path;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use pi_ratatui_textarea::{ElementId, ElementKind, TextArea, TextAreaState, TextElement};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::StatefulWidgetRef;
-use pi_ratatui_textarea::{ElementId, ElementKind, TextArea, TextAreaState, TextElement};
 
 use crate::clipboard::{SystemClipboard, system_clipboard_get};
 use crate::input::key::key;
@@ -515,7 +515,6 @@ impl StashedPrompt {
             std::mem::take(&mut self.chip_elements),
         )
     }
-
 }
 
 /// Reusable text prompt component.

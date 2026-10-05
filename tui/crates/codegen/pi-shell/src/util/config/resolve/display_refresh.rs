@@ -1,9 +1,9 @@
 //! Display-refresh probe + auto-cadence policy resolve and pure cadence derivation.
 
 use crate::util::config::RemoteSettings;
+use pi_config_types::DisplayRefreshSettings;
 use serde::Deserialize;
 use toml::Value as TomlValue;
-use pi_config_types::DisplayRefreshSettings;
 
 pub(crate) const ENV_DISPLAY_REFRESH_PROBE_ENABLED: &str = "GROK_DISPLAY_REFRESH_PROBE_ENABLED";
 pub(crate) const ENV_DISPLAY_REFRESH_AUTO_CADENCE: &str = "GROK_DISPLAY_REFRESH_AUTO_CADENCE";

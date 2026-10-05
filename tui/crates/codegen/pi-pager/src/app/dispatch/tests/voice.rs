@@ -294,7 +294,6 @@ fn voice_error_hint_lands_in_bound_agent_scrollback() {
     assert_eq!(app.agents.get(&id).unwrap().scrollback.len(), before);
 }
 
-
 #[test]
 fn voice_interim_ignored_after_stop() {
     // Late interim events that arrive after recording stopped must not

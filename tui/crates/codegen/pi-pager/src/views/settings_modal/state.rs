@@ -7,9 +7,9 @@ use ratatui::layout::Rect;
 use crate::app::actions::Action;
 use crate::input::line_editor::LineEditor;
 use crate::settings::{
-    EnumChoice, OwnedEnumChoice, PagerLocalSnapshot, SettingCategory,
-    SettingKey, SettingKind, SettingMeta, SettingValue, SettingsRegistry, StringValidator,
-    current_value_for, dynamic_enum_choices,
+    EnumChoice, OwnedEnumChoice, PagerLocalSnapshot, SettingCategory, SettingKey, SettingKind,
+    SettingMeta, SettingValue, SettingsRegistry, StringValidator, current_value_for,
+    dynamic_enum_choices,
 };
 use crate::views::modal_window::ModalWindowState;
 

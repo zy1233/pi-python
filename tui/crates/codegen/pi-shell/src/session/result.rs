@@ -49,14 +49,10 @@ impl<T: Serialize> ExtMethodResult<T> {
             error: Some(serde_json::Value::String(error.to_string())),
         }
     }
-
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Empty {}
 
 #[cfg(test)]
-mod tests {
-    
-
-}
+mod tests {}

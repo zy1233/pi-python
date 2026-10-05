@@ -1702,11 +1702,9 @@ mod question_no_freeform_tests {
     use crossterm::event::{
         KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
     };
+    use pi_tools::implementations::grok_build::ask_user_question::{Question, QuestionOption};
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
-    use pi_tools::implementations::grok_build::ask_user_question::{
-        Question, QuestionOption,
-    };
     /// Fixed options, single-select — shaped like the free-usage upsell.
     fn upsell_question() -> Question {
         let opt = |label: &str, desc: &str| QuestionOption {
@@ -2024,9 +2022,7 @@ mod question_answer_focus_tests {
     use crate::views::prompt_widget::StashedPrompt;
     use crate::views::question_view::{QuestionFocus, QuestionSelection, QuestionViewState};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use pi_tools::implementations::grok_build::ask_user_question::{
-        Question, QuestionOption,
-    };
+    use pi_tools::implementations::grok_build::ask_user_question::{Question, QuestionOption};
     fn question(prompt: &str, labels: &[&str]) -> Question {
         Question {
             question: prompt.into(),

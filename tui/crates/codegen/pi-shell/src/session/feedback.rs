@@ -49,7 +49,6 @@ pub(crate) struct TriggerSignalSnapshot {
 }
 
 impl TriggerCondition {
-
     /// Get a human-readable trigger reason.
     pub(crate) fn trigger_reason(&self) -> String {
         let snapshot = &self.signal_snapshot;
@@ -102,7 +101,4 @@ pub(crate) struct FeedbackRequest {
 }
 
 #[cfg(test)]
-mod tests {
-    
-
-}
+mod tests {}

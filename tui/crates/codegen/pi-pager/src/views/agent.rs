@@ -986,7 +986,8 @@ mod tests {
             selected_is_agent_message,
             false,
             false,
-            None)
+            None,
+        )
     }
     fn first_two_labels(hints: &[HintItem]) -> Vec<&str> {
         hints.iter().take(2).map(|h| h.label.as_ref()).collect()
@@ -1015,7 +1016,8 @@ mod tests {
             false,
             false,
             false,
-            None);
+            None,
+        );
         let labels: Vec<&str> = hints.iter().map(|h| h.label.as_ref()).collect();
         assert!(
             !labels.contains(&"open"),
@@ -1176,7 +1178,8 @@ mod tests {
             false,
             false,
             false,
-            Some(&search))
+            Some(&search),
+        )
     }
     #[test]
     fn scrollback_search_hint_not_in_bottom_bar() {
@@ -1276,7 +1279,8 @@ mod tests {
             false,
             false,
             false,
-            None);
+            None,
+        );
         assert!(
             !hints.iter().any(|h| h.label == "home"),
             "ExitSession (home) must not appear in prompt-focused bar"
@@ -1317,7 +1321,8 @@ mod tests {
             false,
             false,
             shift_enter_unavailable,
-            None)
+            None,
+        )
     }
     #[test]
     fn prompt_idle_submit_hint_is_send() {
@@ -1379,7 +1384,8 @@ mod tests {
                 false,
                 false,
                 false,
-                None);
+                None,
+            );
             let cancel = hints
                 .iter()
                 .find(|h| h.label == "cancel")
@@ -1420,7 +1426,8 @@ mod tests {
             false,
             false,
             false,
-            Some(&search));
+            Some(&search),
+        );
         let esc_cancels: Vec<&HintItem> = hints
             .iter()
             .filter(|h| h.label == "cancel" && h.keys == vec![crate::key!(Esc)])
@@ -1467,7 +1474,8 @@ mod tests {
             false,
             false,
             false,
-            None);
+            None,
+        );
         let esc_rows: Vec<&HintItem> = hints
             .iter()
             .filter(|h| h.keys.contains(&crate::key!(Esc)))
@@ -1568,11 +1576,7 @@ mod tests {
             ..Default::default()
         }
     }
-    fn layout_with_rows(
-        area: Rect,
-        banner_height: u16,
-        follow_ups_height: u16,
-    ) -> AgentViewLayout {
+    fn layout_with_rows(area: Rect, banner_height: u16, follow_ups_height: u16) -> AgentViewLayout {
         AgentViewLayout::compute(AgentViewLayoutParams {
             banner_height,
             follow_ups_height,

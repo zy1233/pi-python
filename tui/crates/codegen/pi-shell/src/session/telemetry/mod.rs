@@ -3,7 +3,4 @@
 mod permission;
 
 #[cfg(test)]
-mod is_same_skill_file_tests {
-        
-
-}
+mod is_same_skill_file_tests {}

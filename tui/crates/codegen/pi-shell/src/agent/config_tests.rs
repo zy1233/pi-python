@@ -1,6 +1,6 @@
 use super::*;
-use serial_test::serial;
 use pi_test_support::EnvGuard;
+use serial_test::serial;
 /// `AutoModeConfig` parses identically from a local `[auto_mode]` TOML table
 /// and an equivalent remote settings JSON object (serde is format-agnostic). The
 /// lean shape is all scalars/enums, so no custom tolerant deser is needed.

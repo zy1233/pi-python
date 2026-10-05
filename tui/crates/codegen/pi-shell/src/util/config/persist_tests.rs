@@ -1,5 +1,5 @@
 use super::super::load::load_config_from_toml;
-use super::super::mcp::{McpConfig};
+use super::super::mcp::McpConfig;
 use super::*;
 use toml::Value as TomlValue;
 use toml::map::Map as TomlMap;
@@ -818,11 +818,7 @@ fn merge_section_session_load_envrc_does_not_drag_auto_compact() {
          when only load_envrc is being committed"
     );
 }
-mod resolve_auto_compact {
-    
-    
-    
-}
+mod resolve_auto_compact {}
 #[test]
 fn settings_helpers_target_correct_ui_fields() {
     fn apply<F: FnOnce(&mut Config)>(f: F) -> Config {

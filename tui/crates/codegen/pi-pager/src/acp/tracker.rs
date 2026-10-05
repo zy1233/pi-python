@@ -21,13 +21,13 @@ use crate::scrollback::state::ScrollbackState;
 use crate::scrollback::state::verb_group::verb_group_kind_changed;
 use agent_client_protocol as acp;
 use chrono::{DateTime, Local, TimeZone};
+use pi_tools::types::output::{BashOutput, ToolOutput};
+use pi_tools::types::output::{ReadFileOutput, SearchToolOutput, WebFetchOutput};
+use pi_tools::util::strip_redundant_session_cd;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing::debug;
-use pi_tools::types::output::{BashOutput, ToolOutput};
-use pi_tools::types::output::{ReadFileOutput, SearchToolOutput, WebFetchOutput};
-use pi_tools::util::strip_redundant_session_cd;
 /// Convert a UTC millisecond timestamp to local time.
 fn utc_ms_to_local(ms: i64) -> DateTime<Local> {
     chrono::Utc
@@ -194,26 +194,23 @@ impl WritingToolCall {
             Some(name) => {
                 use pi_tools::types::tool::ToolKind;
                 let copy =
-                    pi_tools::tool_taxonomy::writing_tool_kind(name).and_then(|kind| {
-                        match kind {
-                            ToolKind::Write => Some("Writing file"),
-                            ToolKind::Edit => Some("Writing edit"),
-                            ToolKind::Execute => Some("Writing command"),
-                            ToolKind::Plan => Some("Updating todo list"),
-                            ToolKind::Workflow => Some("Writing workflow"),
-                            ToolKind::ImageGen => Some("Writing image prompt"),
-                            ToolKind::ImageToVideo | ToolKind::ReferenceToVideo => {
-                                Some("Writing video prompt")
-                            }
-                            ToolKind::AskUser => Some("Preparing question"),
-                            _ => None,
+                    pi_tools::tool_taxonomy::writing_tool_kind(name).and_then(|kind| match kind {
+                        ToolKind::Write => Some("Writing file"),
+                        ToolKind::Edit => Some("Writing edit"),
+                        ToolKind::Execute => Some("Writing command"),
+                        ToolKind::Plan => Some("Updating todo list"),
+                        ToolKind::Workflow => Some("Writing workflow"),
+                        ToolKind::ImageGen => Some("Writing image prompt"),
+                        ToolKind::ImageToVideo | ToolKind::ReferenceToVideo => {
+                            Some("Writing video prompt")
                         }
+                        ToolKind::AskUser => Some("Preparing question"),
+                        _ => None,
                     });
                 match copy {
                     Some(copy) => format!("{copy}{ordinal}…"),
                     None => {
-                        let name =
-                            pi_workspace::permission::mcp_pretty_name_if_qualified(name);
+                        let name = pi_workspace::permission::mcp_pretty_name_if_qualified(name);
                         format!("Preparing {}{ordinal}…", clamp_activity_subject(&name))
                     }
                 }
@@ -374,7 +371,7 @@ pub struct AcpUpdateTracker {
     /// Tool call IDs marked as background (`is_background=true`).
     ///
     /// First-detection (no scrollback entry yet): defers entry creation until
- /// `legacy ext RPC` creates a `BgTask` block.
+    /// `legacy ext RPC` creates a `BgTask` block.
     /// Late-detection (Execute block already exists): suppresses further output
     /// streaming; the existing block is demoted by `handle_task_backgrounded`.
     ///
@@ -1662,8 +1659,7 @@ fn user_message_hidden_from_scrollback(
         return true;
     }
     if let Some(pid) = meta.prompt_id.as_deref()
-        && pi_shell::session::PromptOrigin::from_prompt_id(pid)
-            .hide_user_echo_from_scrollback()
+        && pi_shell::session::PromptOrigin::from_prompt_id(pid).hide_user_echo_from_scrollback()
     {
         return true;
     }

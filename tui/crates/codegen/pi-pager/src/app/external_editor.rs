@@ -7,9 +7,9 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use crate::app::agent::AgentId;
-use crate::app::app_view::AppView;
 #[cfg(test)]
 use crate::app::app_view::ActiveView;
+use crate::app::app_view::AppView;
 use crate::scrollback::block::RenderBlock;
 
 const PROMPT_EDITOR_MAX_BYTES: u64 = 4 * 1024 * 1024;

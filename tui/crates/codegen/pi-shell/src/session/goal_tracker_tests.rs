@@ -498,4 +498,3 @@ fn classifier_verdict_serializes_as_snake_case() {
     assert_eq!(a, GoalClassifierVerdict::Achieved);
     assert_eq!(n, GoalClassifierVerdict::NotAchieved);
 }
-

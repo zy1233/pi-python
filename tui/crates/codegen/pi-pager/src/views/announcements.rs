@@ -166,10 +166,7 @@ pub fn is_dismissible(a: &pi_announcements::RemoteAnnouncement) -> bool {
 /// dismissible items: an explicit `dismissible: false` stays selectable even
 /// with its hide key stored, so flipping the flag server-side resurrects a
 /// previously-hidden banner (the remote config stays source of truth).
-fn is_hidden(
-    a: &pi_announcements::RemoteAnnouncement,
-    hidden_ids: &BTreeSet<String>,
-) -> bool {
+fn is_hidden(a: &pi_announcements::RemoteAnnouncement, hidden_ids: &BTreeSet<String>) -> bool {
     is_dismissible(a) && hidden_ids.contains(&pi_announcements::announcement_hide_key(a))
 }
 
@@ -307,11 +304,7 @@ pub fn first_session_announcement_at<'a>(
 pub(crate) fn promo_cta<'a>(
     announcements: &'a [pi_announcements::RemoteAnnouncement],
     hidden_ids: &BTreeSet<String>,
-) -> Option<(
-    &'a pi_announcements::RemoteAnnouncement,
-    &'a str,
-    &'a str,
-)> {
+) -> Option<(&'a pi_announcements::RemoteAnnouncement, &'a str, &'a str)> {
     let owner = first_session_announcement(announcements, hidden_ids).filter(|a| is_promo(a))?;
     let (label, url) = usable_cta(owner)?;
     Some((owner, label, url))
@@ -331,9 +324,7 @@ pub fn promo_cta_target<'a>(
 /// promo) exists, deliberately IGNORING the hidden set (unlike the banner
 /// selection above) so `/announcements show` stays reachable while
 /// everything is hidden.
-pub fn has_session_announcements(
-    announcements: &[pi_announcements::RemoteAnnouncement],
-) -> bool {
+pub fn has_session_announcements(announcements: &[pi_announcements::RemoteAnnouncement]) -> bool {
     let now = chrono::Utc::now();
     visible_announcements(announcements)
         .into_iter()
@@ -1208,7 +1199,11 @@ mod tests {
     /// partial CTA never produces an openable target (or a painted button).
     #[test]
     fn promo_cta_target_requires_usable_pair() {
-        let full = vec![promo("p", "msg", Some(("Go", " https://example.com/promo ")))];
+        let full = vec![promo(
+            "p",
+            "msg",
+            Some(("Go", " https://example.com/promo ")),
+        )];
         let (a, url) = promo_cta_target(&full, &no_hidden()).expect("usable target");
         assert_eq!(a.id.as_deref(), Some("p"));
         assert_eq!(url, "https://example.com/promo");
@@ -1281,7 +1276,11 @@ mod tests {
     /// promo from a dismissible one.
     #[test]
     fn promo_cta_returns_label_and_pinned_flag() {
-        let mut pinned = promo("p", "msg", Some(("Upgrade Account", "https://example.com/promo")));
+        let mut pinned = promo(
+            "p",
+            "msg",
+            Some(("Upgrade Account", "https://example.com/promo")),
+        );
         pinned.dismissible = Some(false);
         let pinned = [pinned];
         let (owner, label, url) = promo_cta(&pinned, &no_hidden()).expect("usable cta");

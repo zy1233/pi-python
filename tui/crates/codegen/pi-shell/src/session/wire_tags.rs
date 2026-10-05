@@ -63,7 +63,4 @@ pub(crate) static REWIND_MARKER: LazyLock<String> = LazyLock::new(|| {
 });
 
 #[cfg(test)]
-mod tests {
-    
-
-}
+mod tests {}

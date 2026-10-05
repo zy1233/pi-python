@@ -256,10 +256,7 @@ impl AgentView {
         {
             let text = self.prompt.text().to_string();
             self.exit_editing_mode();
-            return InputOutcome::Action(Action::RunEditedQueuedCommand {
-                local_id: id,
-                text,
-            });
+            return InputOutcome::Action(Action::RunEditedQueuedCommand { local_id: id, text });
         }
 
         let edited = self.prompt.stash();

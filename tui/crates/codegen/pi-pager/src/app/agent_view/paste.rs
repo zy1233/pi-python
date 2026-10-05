@@ -149,12 +149,10 @@ impl AgentView {
                         );
                     }
                     if ctx.source.tip_showing() {
-                        pi_telemetry::session_ctx::log_event(
-                            pi_telemetry::events::ContextualTip {
-                                tip: pi_telemetry::events::ContextualTipKind::ImageInput,
-                                action: pi_telemetry::events::ContextualTipAction::Accepted,
-                            },
-                        );
+                        pi_telemetry::session_ctx::log_event(pi_telemetry::events::ContextualTip {
+                            tip: pi_telemetry::events::ContextualTipKind::ImageInput,
+                            action: pi_telemetry::events::ContextualTipAction::Accepted,
+                        });
                     }
                     self.prompt.refresh_slash(&self.session.models);
                     ClipboardPasteCompletion::Handled

@@ -11,7 +11,7 @@ use super::queue::{drain_prompt_state_to_last_queued, maybe_drain_queue, push_an
 use super::router::dispatch;
 use super::voice::{merge_prompt_with_voice_interim, voice_stop_on_submit};
 use crate::app::actions::{Action, Effect};
-use crate::app::agent::{ AgentId, };
+use crate::app::agent::AgentId;
 use crate::app::agent_view::AgentView;
 use crate::app::app_view::{ActiveView, AppView};
 use crate::app::cancel_latency::TurnEnd;
@@ -998,4 +998,3 @@ pub(super) fn handle_prompt_response(
     }
     vec![]
 }
-

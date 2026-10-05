@@ -69,4 +69,3 @@ fn title_is_manual_defaults_false_and_skips_when_unset() {
     let json = serde_json::to_string(&summary).unwrap();
     assert!(!json.contains("title_is_manual"));
 }
-

@@ -29,12 +29,6 @@ mod dispatch;
 mod display_refresh_startup;
 mod effects;
 pub(crate) mod error_display;
-pub(crate) mod session_startup;
-pub(crate) mod session_title_resolve;
-pub(crate) mod status_blocks;
-pub(crate) mod status_line;
-mod status_line_policy;
-pub(crate) mod subscription;
 mod event_loop;
 mod event_loop_stall;
 mod exit_timeout;
@@ -45,8 +39,14 @@ mod mouse;
 mod queue_edit;
 pub(crate) mod screen_mode_relaunch;
 mod session_load_barrier;
+pub(crate) mod session_startup;
+pub(crate) mod session_title_resolve;
 pub(crate) mod signal_handler;
 mod startup_failure;
+pub(crate) mod status_blocks;
+pub(crate) mod status_line;
+mod status_line_policy;
+pub(crate) mod subscription;
 mod turn_completion;
 mod xt_filter;
 pub(crate) use crate::terminal::{kitty_flags_pushed, kitty_releases_reported};
@@ -609,10 +609,7 @@ pub async fn run(
             .reasoning_effort
             .as_deref()
             .and_then(pi_shell::sampling::types::parse_canonical_effort_token),
-        permission_rules: cli::parse_permission_rules_lenient(
-            &args.allow_rules,
-            &args.deny_rules,
-        ),
+        permission_rules: cli::parse_permission_rules_lenient(&args.allow_rules, &args.deny_rules),
         default_yolo_mode: launch_yolo.yolo,
         default_auto_mode: launch_auto && !launch_yolo.yolo,
         status_line: false,
@@ -706,25 +703,20 @@ pub async fn run(
         );
     }
     let connect_target = crate::acp::AgentKind::Embedded;
-    pi_telemetry::external::init(
-        pi_shell::agent::config::resolve_external_otel_config(
-            pi_telemetry::external::config::ExternalClientInfo {
-                service_version: pi_version::full_version().to_owned(),
-                client_version: pi_version::VERSION.to_owned(),
-                app_entrypoint: "tui".to_owned(),
-            },
-        ),
-    );
+    pi_telemetry::external::init(pi_shell::agent::config::resolve_external_otel_config(
+        pi_telemetry::external::config::ExternalClientInfo {
+            service_version: pi_version::full_version().to_owned(),
+            client_version: pi_version::VERSION.to_owned(),
+            app_entrypoint: "tui".to_owned(),
+        },
+    ));
     let pending_startup = pi_telemetry::startup::PendingStartup::new();
     let timer = pi_telemetry::startup::begin(crate::acp::Owner::Client);
-    let connect_result = bounded_connect(
-        &cancel,
-        connect_ui_timeout,
-        connect_target,
-        &timer,
-        async { crate::acp::connect(&cancel, connect_flags).await },
-    )
-    .await;
+    let connect_result =
+        bounded_connect(&cancel, connect_ui_timeout, connect_target, &timer, async {
+            crate::acp::connect(&cancel, connect_flags).await
+        })
+        .await;
     let mut connection = match connect_result {
         Ok(conn) => {
             tracing::info!(
@@ -873,7 +865,12 @@ fn print_exit_resume_hint(info: &ExitInfo, max_width: usize, w: &mut impl Write)
             info.session_id
         );
     } else {
-        let _ = writeln!(w, "  {} --resume {}", crate::brand::CLI_NAME, info.session_id);
+        let _ = writeln!(
+            w,
+            "  {} --resume {}",
+            crate::brand::CLI_NAME,
+            info.session_id
+        );
     }
 }
 /// Screen-mode relaunch failure fallback (same quit tail as plain resume).
@@ -1163,9 +1160,7 @@ fn init_terminal(
             })?;
         }
         if mode.is_fullscreen() {
-            pi_shell::util::with_locked_stderr(|stderr| {
-                execute!(stderr, EnterAlternateScreen)
-            })?;
+            pi_shell::util::with_locked_stderr(|stderr| execute!(stderr, EnterAlternateScreen))?;
         }
         #[cfg(windows)]
         if want_minimal {
@@ -1750,8 +1745,7 @@ mod tests {
     #[test]
     fn cli_fork_session_flag_is_removed() {
         assert!(
-            try_parse_pager(&["grok-pager", "-s", "a", "--resume", "b", "--fork-session"])
-                .is_err()
+            try_parse_pager(&["grok-pager", "-s", "a", "--resume", "b", "--fork-session"]).is_err()
         );
     }
     #[test]
@@ -1779,7 +1773,10 @@ mod tests {
         use clap::CommandFactory;
         let help = PagerArgs::command().render_long_help().to_string();
         let first_5: Vec<&str> = help.lines().take(5).collect();
-        let expected_usage = format!("Usage: {} [OPTIONS] [PROMPT] [COMMAND]", crate::brand::CLI_NAME);
+        let expected_usage = format!(
+            "Usage: {} [OPTIONS] [PROMPT] [COMMAND]",
+            crate::brand::CLI_NAME
+        );
         assert_eq!(
             first_5,
             vec![

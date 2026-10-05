@@ -116,10 +116,7 @@ fn uuid_shaped_arg_never_matches_titles() {
 fn title_miss_hint_escapes_arg_and_suggests_search() {
     let hint = title_miss_hint("evil\ntitle");
     assert!(hint.contains("evil\\ntitle"), "arg must be escaped: {hint}");
-    assert!(
-        hint.contains("zypi --resume"),
-        "missing hint: {hint}"
-    );
+    assert!(hint.contains("zypi --resume"), "missing hint: {hint}");
 }
 
 /// Regression (production wiring): pinning rewrites the `-r` title to the

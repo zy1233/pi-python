@@ -85,8 +85,6 @@ fn stale_prompt_rpc_error_does_not_kill_running_turn() {
     );
 }
 
-
-
 #[test]
 fn cancel_turn_cancels_immediately() {
     let mut app = test_app_with_agent();
@@ -96,12 +94,7 @@ fn cancel_turn_cancels_immediately() {
     let effects = dispatch(Action::CancelTurn, &mut app);
 
     assert_eq!(effects.len(), 1);
-    assert!(matches!(
-        &effects[0],
-        Effect::CancelTurn {
-            ..
-        }
-    ));
+    assert!(matches!(&effects[0], Effect::CancelTurn { .. }));
     assert!(app.agents[&id].session.state.is_cancelling());
 }
 
@@ -564,12 +557,7 @@ fn cancel_turn_when_already_cancelling_resends_cancel() {
     let effects = dispatch(Action::CancelTurn, &mut app);
 
     assert!(
-        matches!(
-            effects.as_slice(),
-            [Effect::CancelTurn {
-                ..
-            }]
-        ),
+        matches!(effects.as_slice(), [Effect::CancelTurn { .. }]),
         "cancel while cancelling must re-send the cancel, got {effects:?}"
     );
     assert!(app.agents[&id].session.state.is_cancelling());
@@ -892,17 +880,11 @@ fn entry_title_strips_skill_xml_from_first_prompt() {
     assert_eq!(title, "/deploy");
 }
 
-
-
-
-
-
-
 #[test]
 fn settled_cancel_emits_latency_from_arm_anchor_once() {
     use crate::app::cancel_latency::{CancelLatency, CancelOrigin, TurnEnd};
-    use std::time::{Duration, Instant};
     use pi_telemetry::events::CancellationScope;
+    use std::time::{Duration, Instant};
 
     let mut app = test_app_with_agent();
     let id = AgentId(0);

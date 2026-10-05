@@ -1,8 +1,8 @@
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
 use pi_sampling_types::ReasoningEffort;
+use serde::{Deserialize, Serialize};
 
 use super::tracker::WorkflowRunState;
 
@@ -95,8 +95,4 @@ pub(crate) fn read_bounded_nofollow(path: &Path, limit: u64) -> io::Result<Vec<u
 }
 
 #[cfg(test)]
-mod tests {
-    
-    
-
-}
+mod tests {}

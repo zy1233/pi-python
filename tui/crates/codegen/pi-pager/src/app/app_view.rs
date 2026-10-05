@@ -20,10 +20,10 @@ use crate::views::welcome::WelcomePromptFocus;
 use agent_client_protocol as acp;
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 use indexmap::IndexMap;
+use pi_acp_lib::AcpAgentTx;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use pi_acp_lib::AcpAgentTx;
 /// State for the "New Worktree" popup dialog on the welcome screen.
 #[derive(Debug, Default)]
 pub struct NewWorktreeDialogState {
@@ -195,8 +195,7 @@ impl WorktreeMode {
     }
     /// Same as [`Self::resolve_from_hints`], for merged effective config (`toml::Value`).
     pub fn resolve_from_hints_value(hints: Option<&toml::Value>) -> (Self, Self) {
-        let (new_session, fork) =
-            pi_shell::util::config::WorktreeHintMode::resolve_pair(hints);
+        let (new_session, fork) = pi_shell::util::config::WorktreeHintMode::resolve_pair(hints);
         (new_session.into(), fork.into())
     }
     fn resolve_from_hint_strings(get_str: impl Fn(&str) -> Option<Self>) -> (Self, Self) {
@@ -1058,10 +1057,7 @@ fn privacy_banner_reshow_elapsed(acked_at: &str, reshow_days: Option<u64>) -> bo
 impl AppView {
     /// Finishes startup if this view still holds the obligation; does nothing after.
     pub(crate) fn finish_startup(&mut self, outcome: pi_telemetry::startup::StartupOutcome) {
-        pi_telemetry::startup::PendingStartup::finish_held(
-            &mut self.pending_startup,
-            outcome,
-        );
+        pi_telemetry::startup::PendingStartup::finish_held(&mut self.pending_startup, outcome);
     }
     /// Releases the obligation without recording; does nothing after finish.
     pub(crate) fn abandon_startup(&mut self) {
@@ -1121,8 +1117,7 @@ impl AppView {
     /// startup sites; trust is gated AFTER auth so a pending trust question
     /// defers session creation until answered.
     pub fn session_startup_allowed(&self) -> bool {
-        matches!(self.auth_state, AuthState::Done)
-            && matches!(self.trust_state, TrustState::Done)
+        matches!(self.auth_state, AuthState::Done) && matches!(self.trust_state, TrustState::Done)
     }
     /// Whether startup type-ahead captured while the app was loading may be
     /// replayed into the input channel: every startup screen that consumes raw
@@ -1163,12 +1158,10 @@ impl AppView {
         self.gate = meta.gate.clone();
         if was_gated && self.gate.is_none() {
             self.paywall_check_started = None;
-            pi_telemetry::session_ctx::log_event(
-                pi_telemetry::events::SubscriptionActivated {
-                    auth_method: self.login_method_id.as_ref().map(|id| id.0.to_string()),
-                    upsell_shown_this_session: self.access_gate_shown_logged,
-                },
-            );
+            pi_telemetry::session_ctx::log_event(pi_telemetry::events::SubscriptionActivated {
+                auth_method: self.login_method_id.as_ref().map(|id| id.0.to_string()),
+                upsell_shown_this_session: self.access_gate_shown_logged,
+            });
         }
         self.subscription_tier = meta.subscription_tier.clone();
         let was_api_key = self.is_api_key_auth;
@@ -1465,7 +1458,7 @@ impl AppView {
     /// lockstep. Mirrors [`Self::apply_voice_mode_enabled`].
     ///
     /// Called from [`Self::apply_auth_meta`] (startup / login) and from the
- /// `legacy ext RPC` handler when the subscription tier changes, so
+    /// `legacy ext RPC` handler when the subscription tier changes, so
     /// a mid-session upgrade lifts the restrictions without a restart.
     pub fn apply_tier_restrictions(&mut self) {
         let restricted = self.team_name.is_none()
@@ -1870,13 +1863,13 @@ impl AppView {
         {
             let stale_idle_arm_while_busy = matches!(pending.action, Action::ClearPrompt)
                 && matches!(
-                self.active_view,
-                ActiveView::Agent(id) if self.agents.get(&id).is_some_and(|a| {
-                    a.session.state.is_turn_running()
-                        || a.session.state.is_cancelling()
-                        || a.wake_turn_active()
-                })
-            );
+                    self.active_view,
+                    ActiveView::Agent(id) if self.agents.get(&id).is_some_and(|a| {
+                        a.session.state.is_turn_running()
+                            || a.session.state.is_cancelling()
+                            || a.wake_turn_active()
+                    })
+                );
             if !stale_idle_arm_while_busy && !pending.expired() && pending.shortcut.matches(key) {
                 let action = self.pending_action.take().unwrap().action;
                 return InputOutcome::Action(action);
@@ -2149,8 +2142,8 @@ impl AppView {
 }
 pub(crate) use crate::views::session_picker::filter_session_entries;
 use crate::views::session_picker::{
-    PickerItem, SessionPickerWorktreeSelection, build_entry_map,
-    session_picker_worktree_selection, sync_session_picker_query_expansion,
+    PickerItem, SessionPickerWorktreeSelection, build_entry_map, session_picker_worktree_selection,
+    sync_session_picker_query_expansion,
 };
 /// Context for welcome-view input handling.
 struct WelcomeInputCtx<'a> {
@@ -3266,8 +3259,7 @@ impl AppView {
                             self.access_gate_shown_logged = true;
                             pi_telemetry::session_ctx::log_event(
                                 pi_telemetry::events::SuperGrokUpsellShown {
-                                    source:
-                                        pi_telemetry::events::SuperGrokUpsell::WelcomeScreen,
+                                    source: pi_telemetry::events::SuperGrokUpsell::WelcomeScreen,
                                     auth_method: self
                                         .login_method_id
                                         .as_ref()
@@ -3468,12 +3460,10 @@ impl AppView {
                 .announcement_cta_impressions_logged
                 .insert((key.clone(), surface))
             {
-                pi_telemetry::session_ctx::log_event(
-                    pi_telemetry::events::AnnouncementCtaShown {
-                        id: id.clone(),
-                        source: surface,
-                    },
-                );
+                pi_telemetry::session_ctx::log_event(pi_telemetry::events::AnnouncementCtaShown {
+                    id: id.clone(),
+                    source: surface,
+                });
             }
         }
     }

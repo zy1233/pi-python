@@ -12,8 +12,8 @@ use super::state::*;
 use crate::app::actions::Action;
 use crate::input::line_editor::LineEditor;
 use crate::settings::{
-    EnumChoice, PagerLocalSnapshot, SettingCategory, SettingKey,
-    SettingKind, SettingMeta, SettingOwner, SettingValue, SettingsRegistry, StringValidator,
+    EnumChoice, PagerLocalSnapshot, SettingCategory, SettingKey, SettingKind, SettingMeta,
+    SettingOwner, SettingValue, SettingsRegistry, StringValidator,
 };
 use crate::theme::Theme;
 use pi_shell::agent::config::UiConfig;
@@ -5036,11 +5036,7 @@ fn two_line_row_with_expansion_renders_three_segments() {
     // The row label is on line 1. A narrow row may truncate a long label, so
     // match the head of the live copy rather than the whole string.
     let label_line = buf_row_text(&buf, rect.y, area.x, area.width);
-    let label = s
-        .registry
-        .find("screen_mode")
-        .expect("registered")
-        .label;
+    let label = s.registry.find("screen_mode").expect("registered").label;
     let head: String = label
         .split_whitespace()
         .take(2)

@@ -11,8 +11,7 @@
 //!   plumbs it together with `process::exit`.
 
 pub(crate) use pi_telemetry::instrumentation::{
-    InstrumentationMode, InstrumentationTimer,
-    TARGET, current_mode,
+    InstrumentationMode, InstrumentationTimer, TARGET, current_mode,
 };
 
 /// Time a block under the instrumentation target.

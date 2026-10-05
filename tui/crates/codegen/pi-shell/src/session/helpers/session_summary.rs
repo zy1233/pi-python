@@ -41,7 +41,7 @@ pub(crate) fn save_title_refresh_watermark(session_dir: &std::path::Path, idx: u
 
 #[cfg(test)]
 mod tests {
-    
+
     /// The freeze watermark round-trips (durable across a shortened conversation,
     /// e.g. compaction), reads `None` when absent, and clamps a stale-large value.
     #[test]
@@ -65,5 +65,4 @@ mod tests {
             "stale-large watermark reads as frozen"
         );
     }
-
 }

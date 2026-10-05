@@ -66,7 +66,7 @@ pub fn load_config_from_toml(root: &TomlValue) -> Config {
 }
 #[cfg(test)]
 mod tests {
-    
+
     use toml::Value as TomlValue;
     #[test]
     fn test_models_default_parsing() {
