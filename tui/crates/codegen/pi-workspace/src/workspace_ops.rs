@@ -101,14 +101,6 @@ pub trait WorkspaceOp: WorkspaceRpc + DeserializeOwned + Send + Sync {
         session_id: Option<&str>,
     ) -> WorkspaceResult<Self::Response>;
 }
-/// Prepare a worktree fork from an existing worktree (validation + path resolution).
-/// Returns a serialized result with `spawn_task` flag and the response.
-fn hub_transfer_client() -> WorkspaceResult<reqwest::Client> {
-    pi_extra_ca::build_reqwest_client(|builder| {
-        builder.timeout(std::time::Duration::from_secs(600))
-    })
-    .map_err(|e| WorkspaceError::HubError(format!("failed to create HTTP client: {e}")))
-}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrepareWorktreeFromWorktreeReq {
     pub inner: crate::worktree::CreateWorktreeFromWorktreeRequest,

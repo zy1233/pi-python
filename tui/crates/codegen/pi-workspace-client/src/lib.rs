@@ -1,10 +1,3 @@
-#![allow(
-    unused_imports,
-    unused_variables,
-    unused_mut,
-    unreachable_code,
-    dead_code
-)]
 //! Typed client for hub-proxied `workspace.*` RPC methods — the single
 //! transport for the `workspace_rpc` channel, shared by `WorkspaceOps`
 //! proxy mode and by consumers that cannot depend on

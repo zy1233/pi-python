@@ -1,10 +1,3 @@
-#![allow(
-    unused_imports,
-    unused_variables,
-    unused_mut,
-    unreachable_code,
-    dead_code
-)]
 //! Shared test utilities for grok-build crates: mock inference server, SSE
 //! generators, ACP stdio client, headless runner, env/process sandbox.
 //!

@@ -1,10 +1,3 @@
-#![allow(
-    unused_imports,
-    unused_variables,
-    unused_mut,
-    unreachable_code,
-    dead_code
-)]
 //! Core workspace library: FS, VCS, permissions, tool config, and subsystem wiring.
 pub mod activity;
 pub mod capability;
