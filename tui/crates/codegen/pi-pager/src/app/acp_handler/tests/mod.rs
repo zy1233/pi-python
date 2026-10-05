@@ -113,48 +113,6 @@ pub(super) fn make_subagent_info(child_sid: &str) -> SubagentInfo {
         transcript: Default::default(),
     }
 }
-#[test]
-fn workflow_catalog_projection_and_open_modal_refresh_are_coalesced() {
-    let workflow = acp::AvailableCommand::new("review", "review")
-        .meta(serde_json::json!({"workflowSource": "project"}).as_object().cloned());
-    assert_eq!(
-            workflow_commands(&[workflow]),
-            vec![("review", "review", Some("project"), None)]
-        );
-    let mut app = make_app_with_agent("session-workflows");
-    let id = AgentId(0);
-    app.agents.get_mut(&id).unwrap().extensions_modal = Some(
-        crate::views::extensions_modal::ExtensionsModalState::new(
-            crate::views::extensions_modal::ExtensionsTab::Skills,
-        ),
-    );
-    queue_open_workflows_modal_refresh(&mut app, id);
-    queue_open_workflows_modal_refresh(&mut app, id);
-    assert_eq!(app.pending_effects.len(), 1);
-    assert!(matches!(
-            app.pending_effects.first(),
-            Some(Effect::FetchWorkflowsList { agent_id, session_id })
-                if *agent_id == id && session_id.0.as_ref() == "session-workflows"
-        ));
-}
-#[test]
-fn workflow_catalog_projection_detects_same_name_metadata_changes() {
-    let command = |description: &str, path: &str| {
-        acp::AvailableCommand::new("review", description)
-            .meta(
-                serde_json::json!({
-                    "workflowSource": "project",
-                    "workflowPath": path,
-                })
-                    .as_object()
-                    .cloned(),
-            )
-    };
-    assert_ne!(
-            workflow_commands(&[command("Workflow: old", "/old/review.rhai")]),
-            workflow_commands(&[command("Workflow: new", "/new/review.rhai")]),
-        );
-}
 pub(super) fn compressed_entry(
     index: usize,
 ) -> pi_shell::extensions::notification::ImageCompressedEntry {
@@ -301,31 +259,6 @@ pub(super) fn make_app_two_agents() -> AppView {
     );
     assert_eq!(app.active_view, ActiveView::Agent(AgentId(1)));
     app
-}
-pub(super) fn critical_announcement(
-    id: &str,
-) -> pi_announcements::RemoteAnnouncement {
-    pi_announcements::RemoteAnnouncement {
-        id: Some(id.into()),
-        title: Some(format!("{id} title")),
-        message: Some(format!("{id} message")),
-        severity: Some("critical".into()),
-        ..Default::default()
-    }
-}
-pub(super) fn announcements_update_notif(
-    r#gen: u64,
-    announcements: &[pi_announcements::RemoteAnnouncement],
-) -> acp::ExtNotification {
-    acp::ExtNotification::new(
-        "pi/announcements/update",
-        std::sync::Arc::from(
-            serde_json::value::to_raw_value(
-                    &serde_json::json!({ "gen": r#gen, "announcements": announcements }),
-                )
-                .unwrap(),
-        ),
-    )
 }
 pub(super) fn make_created_ext_notif(
     session_id: &str,
@@ -1568,7 +1501,6 @@ mod permissions;
 mod session_events;
 mod follow_ups;
 mod settings;
-mod announcements;
 mod scheduled_tasks;
 mod queue_and_adoption;
 mod plan_mode;
@@ -1576,7 +1508,6 @@ mod reconnect;
 mod turn_completion;
 mod interjection;
 mod session_routing;
-mod plugins;
 mod subagents;
 mod goals;
 mod interactions;

@@ -976,102 +976,6 @@ fn cta_reload_done_ignored_for_stale_phase_or_plugin() {
 }
 
 #[test]
-fn cta_mcps_loaded_handoff_requires_section_name_parity() {
-    use crate::app::agent_view::CtaPhase;
-    use crate::views::mcps_modal::McpServerDisplayStatus;
-    // Happy path: server "plugin: figma" matches the catalog name "figma" ->
-    // handoff fires (modal opens).
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    app.agents.get_mut(&id).unwrap().plugin_cta.phase = CtaPhase::AwaitingMcps {
-        name: "figma".into(),
-    };
-    dispatch(
-        Action::TaskComplete(TaskResult::PluginCtaMcpsLoaded {
-            agent_id: id,
-            plugin_name: "figma".into(),
-            result: Ok(vec![cta_mcp_server(
-                "figma-srv",
-                Some("figma"),
-                McpServerDisplayStatus::NeedsAuth,
-            )]),
-        }),
-        &mut app,
-    );
-    assert_eq!(app.agents[&id].plugin_cta.phase, CtaPhase::Hidden);
-    assert!(app.agents[&id].extensions_modal.is_some());
-
-    // Mismatch: needs-auth server is labelled "plugin: figma-connector" while
-    // the catalog name is "figma" -> graceful degrade to Installed, no modal.
-    let mut app = test_app_with_agent();
-    app.agents.get_mut(&id).unwrap().plugin_cta.phase = CtaPhase::AwaitingMcps {
-        name: "figma".into(),
-    };
-    dispatch(
-        Action::TaskComplete(TaskResult::PluginCtaMcpsLoaded {
-            agent_id: id,
-            plugin_name: "figma".into(),
-            result: Ok(vec![cta_mcp_server(
-                "figma-srv",
-                Some("figma-connector"),
-                McpServerDisplayStatus::NeedsAuth,
-            )]),
-        }),
-        &mut app,
-    );
-    assert_eq!(
-        app.agents[&id].plugin_cta.phase,
-        CtaPhase::Installed {
-            name: "figma".into()
-        }
-    );
-    assert!(app.agents[&id].extensions_modal.is_none());
-}
-
-#[test]
-fn cta_mcps_loaded_initializing_keeps_waiting_and_retries() {
-    use crate::app::agent_view::CtaPhase;
-    use crate::views::mcps_modal::McpServerDisplayStatus;
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    {
-        let cta = &mut app.agents.get_mut(&id).unwrap().plugin_cta;
-        cta.phase = CtaPhase::AwaitingMcps {
-            name: "figma".into(),
-        };
-        cta.expects_mcp = true;
-    }
-    // Plugin server present but still initializing -> not yet terminal.
-    let servers = vec![cta_mcp_server(
-        "figma-srv",
-        Some("figma"),
-        McpServerDisplayStatus::Initializing,
-    )];
-    let effects = dispatch(
-        Action::TaskComplete(TaskResult::PluginCtaMcpsLoaded {
-            agent_id: id,
-            plugin_name: "figma".into(),
-            result: Ok(servers),
-        }),
-        &mut app,
-    );
-    // Phase stays AwaitingMcps; a delayed re-probe is queued and the attempt
-    // counter advances.
-    assert_eq!(
-        app.agents[&id].plugin_cta.phase,
-        CtaPhase::AwaitingMcps {
-            name: "figma".into()
-        }
-    );
-    assert_eq!(app.agents[&id].plugin_cta.mcp_attempt, 1);
-    assert!(matches!(
-        effects.as_slice(),
-        [Effect::RetryPluginCtaMcps { plugin_name, .. }] if plugin_name == "figma"
-    ));
-    assert!(app.agents[&id].extensions_modal.is_none());
-}
-
-#[test]
 fn cta_mcps_loaded_unavailable_keeps_waiting() {
     use crate::app::agent_view::CtaPhase;
     use crate::views::mcps_modal::McpServerDisplayStatus;
@@ -1389,98 +1293,15 @@ fn cta_installed_dismiss_timeout_ignored_when_phase_moved_on() {
     );
 }
 
-#[test]
-fn cta_mcps_loaded_err_sets_error() {
-    use crate::app::agent_view::CtaPhase;
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    app.agents.get_mut(&id).unwrap().plugin_cta.phase = CtaPhase::AwaitingMcps {
-        name: "figma".into(),
-    };
-    let effects = dispatch(
-        Action::TaskComplete(TaskResult::PluginCtaMcpsLoaded {
-            agent_id: id,
-            plugin_name: "figma".into(),
-            result: Err("mcps boom".into()),
-        }),
-        &mut app,
-    );
-    assert!(effects.is_empty());
-    match &app.agents[&id].plugin_cta.phase {
-        CtaPhase::Error {
-            plugin_relative_path,
-            name,
-            message,
-        } => {
-            assert_eq!(plugin_relative_path.as_str(), "plugins/figma");
-            assert_eq!(name.as_str(), "figma");
-            assert_eq!(message.as_str(), "mcps boom");
-        }
-        other => panic!("expected Error, got {other:?}"),
-    }
-    assert!(app.agents[&id].extensions_modal.is_none());
-}
-
-#[test]
-fn cta_mcps_loaded_ignored_for_stale_phase_or_plugin() {
-    use crate::app::agent_view::CtaPhase;
-    use crate::views::mcps_modal::McpServerDisplayStatus;
-    // Wrong plugin name.
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    app.agents.get_mut(&id).unwrap().plugin_cta.phase = CtaPhase::AwaitingMcps {
-        name: "figma".into(),
-    };
-    let effects = dispatch(
-        Action::TaskComplete(TaskResult::PluginCtaMcpsLoaded {
-            agent_id: id,
-            plugin_name: "slack".into(),
-            result: Ok(vec![cta_mcp_server(
-                "x",
-                Some("slack"),
-                McpServerDisplayStatus::NeedsAuth,
-            )]),
-        }),
-        &mut app,
-    );
-    assert!(effects.is_empty());
-    assert_eq!(
-        app.agents[&id].plugin_cta.phase,
-        CtaPhase::AwaitingMcps {
-            name: "figma".into()
-        }
-    );
-    assert!(app.agents[&id].extensions_modal.is_none());
-    // Non-matching phase (Installing, not AwaitingMcps).
-    app.agents.get_mut(&id).unwrap().plugin_cta.phase = CtaPhase::Installing {
-        plugin_relative_path: "plugins/figma".into(),
-        name: "figma".into(),
-    };
-    let effects = dispatch(
-        Action::TaskComplete(TaskResult::PluginCtaMcpsLoaded {
-            agent_id: id,
-            plugin_name: "figma".into(),
-            result: Ok(vec![]),
-        }),
-        &mut app,
-    );
-    assert!(effects.is_empty());
-    assert!(matches!(
-        app.agents[&id].plugin_cta.phase,
-        CtaPhase::Installing { .. }
-    ));
-}
-
 #[allow(clippy::module_inception)]
 mod cta_e2e {
-    use super::{cta_entry, cta_mcp_server, cta_outcome, cta_outcome_reload, test_app_with_agent};
+    use super::{cta_entry, cta_outcome, cta_outcome_reload, test_app_with_agent};
     use crate::app::actions::{Action, Effect, TaskResult};
     use crate::app::agent::AgentId;
     use crate::app::agent_view::CtaPhase;
     use crate::app::app_view::{AppView, InputOutcome};
-    use crate::app::dispatch::cta::{CTA_MCP_POLL_MAX_ATTEMPTS, plugin_cta_phase_for};
+    use crate::app::dispatch::cta::plugin_cta_phase_for;
     use crate::app::dispatch::dispatch;
-    use crate::views::mcps_modal::{ McpServerDisplayStatus, };
     use pi_hooks_plugins_types::OutcomeStatus;
 
     const PROMPT: &str = "please open figma now";
@@ -1558,27 +1379,6 @@ mod cta_e2e {
         std::mem::take(&mut app.pending_effects)
     }
 
-    fn app_awaiting_mcps() -> AppView {
-        let mut app = app_matched();
-        let id = AgentId(0);
-        connect(&mut app);
-        dispatch(
-            Action::TaskComplete(TaskResult::CtaPluginInstallDone {
-                agent_id: id,
-                plugin_name: "figma".into(),
-                result: Ok(cta_outcome(OutcomeStatus::Success, "installed")),
-            }),
-            &mut app,
-        );
-        assert_eq!(
-            app.agents[&id].plugin_cta.phase,
-            CtaPhase::AwaitingMcps {
-                name: "figma".into()
-            }
-        );
-        app
-    }
-
     #[test]
     fn no_reload_path_enters_awaiting_mcps_directly() {
         let mut app = app_matched();
@@ -1602,88 +1402,6 @@ mod cta_e2e {
             effects.as_slice(),
             [Effect::FetchPluginCtaMcps { plugin_name, .. }] if plugin_name == "figma"
         ));
-    }
-
-    #[test]
-    fn no_auth_path_settles_installed_without_modal() {
-        let mut app = app_awaiting_mcps();
-        let id = AgentId(0);
-        // All of the plugin's servers are Ready (terminal, no auth) -> settle.
-        let effects = dispatch(
-            Action::TaskComplete(TaskResult::PluginCtaMcpsLoaded {
-                agent_id: id,
-                plugin_name: "figma".into(),
-                result: Ok(vec![cta_mcp_server(
-                    "figma-srv",
-                    Some("figma"),
-                    McpServerDisplayStatus::Ready,
-                )]),
-            }),
-            &mut app,
-        );
-        assert_eq!(
-            app.agents[&id].plugin_cta.phase,
-            CtaPhase::Installed {
-                name: "figma".into()
-            }
-        );
-        assert!(app.agents[&id].extensions_modal.is_none());
-        assert!(
-            !effects
-                .iter()
-                .any(|e| matches!(e, Effect::FetchMcpsList { .. }))
-        );
-        assert!(
-            !effects
-                .iter()
-                .any(|e| matches!(e, Effect::RetryPluginCtaMcps { .. }))
-        );
-        // Settling schedules the ✓ auto-dismiss and refreshes the candidate set.
-        assert!(
-            effects
-                .iter()
-                .any(|e| matches!(e, Effect::DismissCtaInstalled { .. }))
-        );
-        assert!(
-            effects
-                .iter()
-                .any(|e| matches!(e, Effect::FetchPluginCtaCatalog { .. }))
-        );
-    }
-
-    #[test]
-    fn skills_only_install_settles_installed_without_fetch() {
-        let mut app = app_matched();
-        let id = AgentId(0);
-        // Skills-only plugin: clear has_mcp so connect captures expects_mcp=false.
-        app.agents.get_mut(&id).unwrap().plugin_cta.candidates[0].has_mcp = false;
-        connect(&mut app);
-        let effects = dispatch(
-            Action::TaskComplete(TaskResult::CtaPluginInstallDone {
-                agent_id: id,
-                plugin_name: "figma".into(),
-                result: Ok(cta_outcome(OutcomeStatus::Success, "installed")),
-            }),
-            &mut app,
-        );
-        // No MCP fetch, no "Setting up…" flash: straight to Installed.
-        assert_eq!(
-            app.agents[&id].plugin_cta.phase,
-            CtaPhase::Installed {
-                name: "figma".into()
-            }
-        );
-        assert!(
-            !effects
-                .iter()
-                .any(|e| matches!(e, Effect::FetchPluginCtaMcps { .. }))
-        );
-        assert!(
-            effects
-                .iter()
-                .any(|e| matches!(e, Effect::DismissCtaInstalled { .. }))
-        );
-        assert!(app.agents[&id].extensions_modal.is_none());
     }
 
     #[test]
@@ -1743,29 +1461,6 @@ mod cta_e2e {
             }
             other => panic!("expected Error, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn mcps_error_settles_error() {
-        let mut app = app_awaiting_mcps();
-        let id = AgentId(0);
-        let effects = dispatch(
-            Action::TaskComplete(TaskResult::PluginCtaMcpsLoaded {
-                agent_id: id,
-                plugin_name: "figma".into(),
-                result: Err("mcps boom".into()),
-            }),
-            &mut app,
-        );
-        assert!(effects.is_empty());
-        match &app.agents[&id].plugin_cta.phase {
-            CtaPhase::Error { name, message, .. } => {
-                assert_eq!(name, "figma");
-                assert_eq!(message, "mcps boom");
-            }
-            other => panic!("expected Error, got {other:?}"),
-        }
-        assert!(app.agents[&id].extensions_modal.is_none());
     }
 
     #[test]
@@ -1829,57 +1524,4 @@ mod cta_e2e {
         }
     }
 
-    #[test]
-    fn plugin_name_parity_match_hands_off() {
-        let mut app = app_awaiting_mcps();
-        let id = AgentId(0);
-        dispatch(
-            Action::TaskComplete(TaskResult::PluginCtaMcpsLoaded {
-                agent_id: id,
-                plugin_name: "figma".into(),
-                result: Ok(vec![cta_mcp_server(
-                    "figma-srv",
-                    Some("figma"),
-                    McpServerDisplayStatus::NeedsAuth,
-                )]),
-            }),
-            &mut app,
-        );
-        assert_eq!(app.agents[&id].plugin_cta.phase, CtaPhase::Hidden);
-        assert!(app.agents[&id].extensions_modal.is_some());
-    }
-
-    #[test]
-    fn plugin_name_parity_mismatch_degrades_to_installed() {
-        let mut app = app_awaiting_mcps();
-        let id = AgentId(0);
-        // A NeedsAuth server whose section plugin-name does not match the CTA
-        // name is not a handoff trigger. Under the poll it keeps waiting, so
-        // drive it to the attempt budget to force the terminal no-auth verdict.
-        app.agents.get_mut(&id).unwrap().plugin_cta.mcp_attempt = CTA_MCP_POLL_MAX_ATTEMPTS;
-        let effects = dispatch(
-            Action::TaskComplete(TaskResult::PluginCtaMcpsLoaded {
-                agent_id: id,
-                plugin_name: "figma".into(),
-                result: Ok(vec![cta_mcp_server(
-                    "figma-srv",
-                    Some("figma-connector"),
-                    McpServerDisplayStatus::NeedsAuth,
-                )]),
-            }),
-            &mut app,
-        );
-        assert_eq!(
-            app.agents[&id].plugin_cta.phase,
-            CtaPhase::Installed {
-                name: "figma".into()
-            }
-        );
-        assert!(app.agents[&id].extensions_modal.is_none());
-        assert!(
-            !effects
-                .iter()
-                .any(|e| matches!(e, Effect::RetryPluginCtaMcps { .. }))
-        );
-    }
 }

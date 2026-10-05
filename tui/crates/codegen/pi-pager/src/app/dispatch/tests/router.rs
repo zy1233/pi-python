@@ -301,25 +301,6 @@ fn editor_failure_targets_original_agent_and_vanished_agent_is_safe() {
     crate::app::external_editor::report_prompt_failure(&mut app, id, "ignored");
     assert!(app.agents.is_empty());
 }
-#[test]
-fn config_editor_action_still_uses_typed_request() {
-    let mut app = test_app_with_agent();
-    let path = std::path::PathBuf::from("/tmp/agent-config.md");
-    let _ = dispatch(
-        Action::SuspendForEditor {
-            path: path.clone(),
-            refresh_agents_modal: Some(crate::views::agents_modal::AgentsTab::Agents),
-        },
-        &mut app,
-    );
-    assert!(matches!(
-        app.pending_editor,
-        Some(crate::app::external_editor::PendingEditorRequest::ConfigFile {
-            path: ref queued,
-            refresh_agents_modal: Some(crate::views::agents_modal::AgentsTab::Agents),
-        }) if queued == &path
-    ));
-}
 fn seed_foreign_resume_hint(
     app: &mut AppView,
     tool: pi_foreign_sessions::ForeignSessionTool,

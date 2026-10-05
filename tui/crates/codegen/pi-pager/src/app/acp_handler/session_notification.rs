@@ -224,7 +224,6 @@ pub(super) fn handle_session_notification_with_origin(
         );
         return false;
     }
-    let mut plugins_changed_needs_skills_refetch = false;
     let mut status_snapshot_applied = false;
     let mut terminal_outcome: Option<super::super::turn_completion::TerminalApply> = None;
     let mut deferred_subagent_finish: Option<SessionNotification> = None;
@@ -901,39 +900,6 @@ pub(super) fn handle_session_notification_with_origin(
             }
             true
         }
-        PiSessionUpdate::HooksChanged {
-            hooks,
-            project_trusted,
-            load_errors,
-        } => {
-            if let Some(ref mut modal) = agent.extensions_modal {
-                use crate::views::extensions_modal::TabDataState;
-                modal.hooks_data =
-                    TabDataState::Loaded(pi_hooks_plugins_types::HooksListResponse {
-                        hooks,
-                        project_trusted,
-                        load_errors,
-                    });
-                true
-            } else {
-                false
-            }
-        }
-        PiSessionUpdate::PluginsChanged { plugins } => {
-            if let Some(ref mut modal) = agent.extensions_modal {
-                use crate::views::extensions_modal::TabDataState;
-                modal.seed_plugin_groups_once(&plugins);
-                modal.plugins_data =
-                    TabDataState::Loaded(pi_hooks_plugins_types::PluginsListResponse { plugins });
-                if !matches!(modal.skills_data, TabDataState::Loading) {
-                    modal.skills_data = TabDataState::Loading;
-                    plugins_changed_needs_skills_refetch = true;
-                }
-                true
-            } else {
-                false
-            }
-        }
         PiSessionUpdate::SessionSummaryGenerated { session_summary } => {
             let title_is_manual = session_notif.meta.as_ref().and_then(|v| {
                 v.get(pi_shell::extensions::notification::TITLE_IS_MANUAL_META_KEY)
@@ -1242,23 +1208,6 @@ pub(super) fn handle_session_notification_with_origin(
     if status_snapshot_applied && is_active {
         app.refresh_status_line_now();
         changed |= app.status_line.take_changed();
-    }
-    if plugins_changed_needs_skills_refetch {
-        if let Some(agent) = app.agents.get(&parent_id)
-            && let Some(session_id) = agent.session.session_id.clone()
-        {
-            app.pending_effects.push(Effect::FetchSkillsList {
-                agent_id: parent_id,
-                session_id,
-            });
-        } else if let Some(agent) = app.agents.get_mut(&parent_id)
-            && let Some(ref mut modal) = agent.extensions_modal
-        {
-            modal.skills_data =
-                crate::views::extensions_modal::TabDataState::Error("No active session".into());
-        } else {
-            tracing::warn!("PluginsChanged: agent or modal disappeared before skills re-fetch");
-        }
     }
     if let Some(agent) = app.agents.get_mut(&parent_id) {
         if let Some(seq) = meta.event_seq

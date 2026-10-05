@@ -1,7 +1,6 @@
 //! Screen rendering — each screen type has its own rendering module.
 pub(crate) mod agent;
 pub(crate) mod agent_status;
-pub(crate) mod agents_modal;
 pub(crate) mod announcements;
 pub(crate) mod block_viewer;
 pub mod btw_overlay;
@@ -10,7 +9,6 @@ pub mod context_bar;
 pub(crate) mod credit_bar;
 pub(crate) mod debug_style;
 pub(crate) mod elicitation_view;
-pub mod extensions_modal;
 pub mod file_search;
 pub(crate) mod fps_hud;
 pub(crate) mod goal_detail;
@@ -26,7 +24,6 @@ pub(crate) mod new_worktree_dialog;
 pub(crate) mod overlay;
 pub(crate) mod overlay_list;
 pub mod permission_view;
-pub(crate) mod persona_detail;
 pub mod picker;
 pub mod plan_approval_view;
 pub(crate) mod privacy_banner;

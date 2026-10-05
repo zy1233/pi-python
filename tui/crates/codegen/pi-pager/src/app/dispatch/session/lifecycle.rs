@@ -19,7 +19,6 @@ use crate::app::dispatch::queue::maybe_drain_queue;
 use crate::app::dispatch::router::dispatch;
 use crate::app::dispatch::status::notify_session_ready;
 use crate::app::dispatch::task_result::unregister_session_effect;
-use crate::app::dispatch::transcript::extensions_modal_tab_fetches;
 use crate::scrollback::block::RenderBlock;
 use crate::scrollback::blocks::SessionEvent;
 use crate::scrollback::state::ScrollbackState;
@@ -1072,15 +1071,6 @@ pub(in crate::app::dispatch) fn handle_session_created(
                 session_id: session_id_clone.clone(),
                 mode_id: acp::SessionModeId::new(mode.as_id()),
             });
-        }
-        if std::mem::take(&mut agent.pending_extensions_fetch)
-            && let Some(modal) = agent.extensions_modal.as_mut()
-        {
-            effects.extend(extensions_modal_tab_fetches(
-                modal,
-                agent_id,
-                session_id_clone.clone(),
-            ));
         }
         effects.push(Effect::RegisterActiveSession {
             session_id: session_id_clone,

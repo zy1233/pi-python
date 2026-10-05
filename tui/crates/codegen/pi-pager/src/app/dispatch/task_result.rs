@@ -1,7 +1,6 @@
 //! Async task-result application: routes task results into state.
 use super::auth::{
-    ensure_login_method, handle_auth_complete, handle_auth_url_ready, handle_mcp_auth_trigger_done,
-    handle_mcp_setup_submit_done,
+    ensure_login_method, handle_auth_complete, handle_auth_url_ready, 
 };
 use super::billing::{
     PAYWALL_AUTO_CHECK_TIMEOUT, apply_auto_topup, handle_billing_fetched,
@@ -23,7 +22,7 @@ use super::queue::push_and_page_flip;
 use super::rewind::{
     handle_rewind_execute_failed, handle_rewind_points_loaded,
 };
-use super::router::{dispatch, dispatch_action_result};
+use super::router::{dispatch, };
 use super::session::foreign::{
     handle_foreign_sessions_scanned, handle_session_list_failed, handle_session_list_loaded,
 };
@@ -47,8 +46,8 @@ use super::status::{
     usage_modal_state_mut,
 };
 use super::transcript::{
-    handle_hooks_list_loaded, handle_marketplace_list_loaded, handle_marketplace_updates_available,
-    handle_mcp_toggle_done, handle_plugins_list_loaded, handle_skills_toggle_done,
+    handle_marketplace_updates_available,
+    
 };
 use super::turn::handle_bg_task_killed;
 use crate::app::actions::{
@@ -618,41 +617,6 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
         } => handle_auth_url_ready(app, request_seq, auth_url, external, mode),
         TaskResult::AuthCodeSubmitted { .. } => vec![],
         TaskResult::AuthCancelComplete => vec![],
-        TaskResult::McpsListLoaded { agent_id, result } => {
-            use crate::views::extensions_modal::TabDataState;
-            if let Some(agent) = app.agents.get_mut(&agent_id)
-                && let Some(ref mut modal) = agent.extensions_modal
-            {
-                modal.pending_action = None;
-                modal.pending_entry_index = None;
-                modal.mcps_data = match result {
-                    Ok(response) => TabDataState::Loaded(response),
-                    Err(e) => TabDataState::Error(e),
-                };
-            }
-            vec![]
-        }
-        TaskResult::McpAuthTriggerDone {
-            agent_id,
-            server_name,
-            result,
-        } => handle_mcp_auth_trigger_done(app, agent_id, server_name, result),
-        TaskResult::McpSetupSubmitDone {
-            agent_id,
-            server_name,
-            result,
-        } => handle_mcp_setup_submit_done(app, agent_id, server_name, result),
-        TaskResult::HooksListLoaded { agent_id, result } => {
-            handle_hooks_list_loaded(app, agent_id, result)
-        }
-        TaskResult::PluginsListLoaded { agent_id, result } => {
-            handle_plugins_list_loaded(app, agent_id, result)
-        }
-        TaskResult::HooksActionResult { agent_id, result }
-        | TaskResult::PluginsActionResult { agent_id, result }
-        | TaskResult::MarketplaceActionResult { agent_id, result } => {
-            dispatch_action_result(app, agent_id, result)
-        }
         TaskResult::CtaPluginInstallDone {
             agent_id,
             plugin_name,
@@ -681,54 +645,11 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             }
             vec![]
         }
-        TaskResult::McpToggleDone { agent_id, result } => {
-            handle_mcp_toggle_done(app, agent_id, result)
-        }
         TaskResult::MarketplaceUpdatesAvailable { agent_id, updates } => {
             handle_marketplace_updates_available(app, agent_id, updates)
         }
-        TaskResult::MarketplaceListLoaded { agent_id, result } => {
-            handle_marketplace_list_loaded(app, agent_id, result)
-        }
         TaskResult::PluginCtaCatalogLoaded { agent_id, result } => {
             handle_plugin_cta_catalog_loaded(app, agent_id, result)
-        }
-        TaskResult::SkillsListLoaded { agent_id, result } => {
-            use crate::views::extensions_modal::TabDataState;
-            if let Some(agent) = app.agents.get_mut(&agent_id)
-                && let Some(ref mut modal) = agent.extensions_modal
-            {
-                modal.skills_data = match result {
-                    Ok(skills) => {
-                        modal.seed_skills_groups_once(&skills);
-                        TabDataState::Loaded(skills)
-                    }
-                    Err(e) => TabDataState::Error(e),
-                };
-                modal.pending_action = None;
-                modal.pending_entry_index = None;
-            }
-            vec![]
-        }
-        TaskResult::WorkflowsListLoaded {
-            agent_id,
-            session_id,
-            result,
-        } => {
-            use crate::views::extensions_modal::TabDataState;
-            if let Some(agent) = app.agents.get_mut(&agent_id)
-                && agent.session.session_id.as_ref() == Some(&session_id)
-                && let Some(ref mut modal) = agent.extensions_modal
-            {
-                modal.workflows_data = match result {
-                    Ok(workflows) => TabDataState::Loaded(workflows),
-                    Err(e) => TabDataState::Error(e),
-                };
-            }
-            vec![]
-        }
-        TaskResult::SkillsToggleDone { agent_id, result } => {
-            handle_skills_toggle_done(app, agent_id, result)
         }
         TaskResult::SessionAgentNameResolved {
             agent_id,
@@ -736,9 +657,6 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
         } => {
             if let Some(agent) = app.agents.get_mut(&agent_id) {
                 agent.session_agent_name = agent_name.clone();
-                if let Some(modal) = agent.agents_modal.as_mut() {
-                    modal.active_agent = agent_name;
-                }
             }
             vec![]
         }
@@ -761,9 +679,6 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
                     return vec![];
                 }
                 agent.session_agent_name = info.data.agent_name.clone();
-                if let Some(modal) = agent.agents_modal.as_mut() {
-                    modal.active_agent = info.data.agent_name.clone();
-                }
                 agent.apply_full_context_info(info.data.context);
                 if let Some(state) = usage_modal_state_mut(agent) {
                     state.session_fields = Some(fields);

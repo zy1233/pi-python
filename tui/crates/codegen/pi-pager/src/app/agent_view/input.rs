@@ -34,9 +34,6 @@ impl AgentView {
         let owned_elsewhere = !matches!(self.prompt_mode, super::PromptMode::Normal)
             || self.active_subagent.is_some()
             || self.active_modal.is_some()
-            || self.extensions_modal.is_some()
-            || self.agents_modal.is_some()
-            || self.persona_detail.is_some()
             || self.scrollback_search.is_some()
             || self.line_viewer.is_some()
             || self.image_viewer.is_some()
@@ -75,9 +72,6 @@ impl AgentView {
             && self.image_viewer.is_none()
             && self.video_viewer.is_none()
             && self.gboom.is_none()
-            && self.extensions_modal.is_none()
-            && self.agents_modal.is_none()
-            && self.persona_detail.is_none()
             && self.btw_state.is_none()
             && self.scrollback_search.is_none()
     }
@@ -104,13 +98,10 @@ impl AgentView {
     /// `/gboom` (turn/close), video (seek/close), image (close), `/agents`,
     /// persona detail, and the block viewer.
     pub(super) fn modal_owns_input(&self) -> bool {
-        self.extensions_modal.is_some()
-            || self.active_modal.is_some()
+        self.active_modal.is_some()
             || self.gboom.is_some()
             || self.video_viewer.is_some()
             || self.image_viewer.is_some()
-            || self.agents_modal.is_some()
-            || self.persona_detail.is_some()
             || self.block_viewer.is_some()
     }
     pub(crate) fn workflow_runs_newest_first(
@@ -178,8 +169,6 @@ impl AgentView {
             && matches!(self.prompt_mode, crate::app::queue_edit::PromptMode::Normal)
             && self.inline_edit.is_none()
             && !self.is_subagent_view
-            && self.agents_modal.is_none()
-            && self.persona_detail.is_none()
             && self.no_esc_consumer_pending()
             && self.no_input_overlay_pending()
     }
@@ -613,45 +602,6 @@ impl AgentView {
                         self.handle_line_viewer_mouse(mouse)
                     }
                 }
-                _ => InputOutcome::Changed,
-            };
-        }
-        if self.extensions_modal.is_some() {
-            return match ev {
-                Event::Key(key) if key.kind != KeyEventKind::Release => {
-                    if registry.lookup(key, When::Always).is_some() {
-                        return InputOutcome::Unchanged;
-                    }
-                    self.handle_extensions_modal_key(key)
-                }
-                Event::Mouse(mouse) => self.handle_extensions_modal_mouse(mouse),
-                Event::Paste(text) => self.handle_extensions_modal_paste(text),
-                _ => InputOutcome::Changed,
-            };
-        }
-        if self.persona_detail.is_some() {
-            return match ev {
-                Event::Key(key) if key.kind != KeyEventKind::Release => {
-                    if registry.lookup(key, When::Always).is_some() {
-                        return InputOutcome::Unchanged;
-                    }
-                    self.handle_persona_detail_key(key)
-                }
-                Event::Mouse(mouse) => self.handle_persona_detail_mouse(mouse),
-                Event::Paste(text) => self.handle_persona_detail_paste(text),
-                _ => InputOutcome::Changed,
-            };
-        }
-        if self.agents_modal.is_some() {
-            return match ev {
-                Event::Key(key) if key.kind != KeyEventKind::Release => {
-                    if registry.lookup(key, When::Always).is_some() {
-                        return InputOutcome::Unchanged;
-                    }
-                    self.handle_agents_modal_key(key)
-                }
-                Event::Mouse(mouse) => self.handle_agents_modal_mouse(mouse),
-                Event::Paste(text) => self.handle_agents_modal_paste(text),
                 _ => InputOutcome::Changed,
             };
         }
@@ -1849,29 +1799,6 @@ mod esc_would_cancel_turn_tests {
         assert!(
             !agent.esc_would_cancel_turn(false),
             "Esc in a fullscreen subagent view closes the child, not cancel"
-        );
-    }
-    #[test]
-    fn agents_and_persona_modals_steal_esc() {
-        let mut agent = running_agent(false);
-        agent.agents_modal = Some(crate::views::agents_modal::AgentsModalState::new(
-            std::path::Path::new("/nonexistent"),
-            &std::collections::HashMap::new(),
-            &crate::app::bundle::BundleState::default(),
-            None,
-            None,
-            None,
-        ));
-        assert!(
-            !agent.esc_would_cancel_turn(false),
-            "an open agents modal owns Esc (close), not cancel"
-        );
-        let mut agent = running_agent(false);
-        agent.persona_detail =
-            Some(crate::views::persona_detail::PersonaDetailState::from_name_only("researcher"));
-        assert!(
-            !agent.esc_would_cancel_turn(false),
-            "an open persona detail owns Esc (back/close), not cancel"
         );
     }
     #[test]

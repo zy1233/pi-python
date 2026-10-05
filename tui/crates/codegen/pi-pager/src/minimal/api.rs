@@ -20,11 +20,9 @@
 //!   added only where minimal actually mutates.
 //! - `pub use` cannot re-export a `pub(crate)` item at wider visibility (E0365),
 //!   so free helpers are re-exposed as thin `pub fn` wrappers, not re-exports.
-//! - Purely-internal DTOs (`DropdownChrome`, `McpServersPickerRows`) are never
-//!   named across the crate boundary — the wrappers return their extracted data
-//!   (a `Rect`, a tuple of `Vec`s) so those types stay `pub(crate)`.
-
-use std::collections::HashSet;
+//! - Purely-internal DTOs (`DropdownChrome`) are never named across the crate
+//!   boundary — the wrappers return their extracted data (a `Rect`) so those
+//!   types stay `pub(crate)`.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -40,8 +38,6 @@ use crate::appearance::LayoutConfig;
 use crate::scrollback::entry::{EntryId, ScrollbackEntry};
 use crate::scrollback::state::ScrollbackState;
 use crate::theme::Theme;
-use crate::views::extensions_modal::{ExtensionsModalState, StatusFilter};
-use crate::views::mcps_modal::{McpServerDisplayStatus, McpServerInfo};
 use crate::views::modal::CancelTurnViewState;
 use crate::views::picker::{PickerEntry, PickerField, PickerState};
 use crate::views::plan_approval_view::PlanApprovalViewState;
@@ -300,18 +296,6 @@ pub fn set_last_activity(v: &mut AgentView, val: Option<TurnActivity>) {
     v.last_activity = val;
 }
 
-/// `AgentView::extensions_modal`.
-pub fn extensions_modal(v: &AgentView) -> Option<&ExtensionsModalState> {
-    v.extensions_modal.as_ref()
-}
-
-/// `AgentView::extensions_modal` (mutable — minimal reuses the full-TUI modal
-/// renderer, which takes `&mut ExtensionsModalState`, and updates render-stored
-/// picker row state).
-pub fn extensions_modal_mut(v: &mut AgentView) -> Option<&mut ExtensionsModalState> {
-    v.extensions_modal.as_mut()
-}
-
 /// `AgentView::question_view`.
 pub fn question_view(v: &AgentView) -> Option<&QuestionViewState> {
     v.question_view.as_ref()
@@ -366,9 +350,6 @@ pub fn minimal_btw_surface_available(v: &AgentView) -> bool {
         && v.gboom.is_none()
         && !(v.show_goal_detail && v.goal_state.is_some())
         && v.line_viewer.is_none()
-        && v.extensions_modal.is_none()
-        && v.persona_detail.is_none()
-        && v.agents_modal.is_none()
         && v.block_viewer.is_none()
         && v.active_modal.is_none()
         && v.no_input_overlay_pending()
@@ -618,51 +599,6 @@ pub fn dropdown_chrome_items(
     .map(|chrome| chrome.items)
 }
 
-// ── MCP picker rows ──────────────────────────────────────────────────────────
-
-/// Build the MCP-servers picker rows, returning `(labels, group_keys,
-/// data_indices)`. Wraps [`crate::views::extensions_modal::build_mcp_servers_picker_rows`];
-/// the `McpServersPickerRows` DTO stays crate-internal.
-pub fn build_mcp_picker_rows(
-    servers: &[McpServerInfo],
-    query: &str,
-    filter: StatusFilter,
-    collapsed_sections: &HashSet<String>,
-    tools_expanded: &HashSet<usize>,
-) -> (Vec<String>, Vec<Option<String>>, Vec<Option<usize>>) {
-    let rows = crate::views::extensions_modal::build_mcp_servers_picker_rows(
-        servers,
-        query,
-        filter,
-        collapsed_sections,
-        tools_expanded,
-    );
-    (rows.labels, rows.group_keys, rows.data_indices)
-}
-
-/// [`crate::views::extensions_modal::mcp_section_children_hidden`].
-pub fn mcp_section_children_hidden(
-    collapsed_sections: &HashSet<String>,
-    section_key: &str,
-    searching: bool,
-) -> bool {
-    crate::views::extensions_modal::mcp_section_children_hidden(
-        collapsed_sections,
-        section_key,
-        searching,
-    )
-}
-
-/// [`McpServerDisplayStatus::theme_color`].
-pub fn mcp_status_theme_color(status: &McpServerDisplayStatus, theme: &Theme) -> Color {
-    status.theme_color(theme)
-}
-
-/// [`McpServerDisplayStatus::label`].
-pub fn mcp_status_label(status: &McpServerDisplayStatus) -> &'static str {
-    status.label()
-}
-
 // ── Session picker builders ──────────────────────────────────────────────────
 
 /// Render a search bar from a [`PickerState`] using its grapheme-safe viewport.
@@ -796,12 +732,6 @@ pub fn record_committed_for_expand(sb: &mut ScrollbackState, id: EntryId) {
 #[cfg(any(test, feature = "test-support"))]
 pub fn test_agent_view(session_id: Option<&str>, cwd: std::path::PathBuf) -> AgentView {
     crate::app::agent_view::test_agent_view(session_id, cwd)
-}
-
-/// Test-only setter for `AgentView::extensions_modal`.
-#[cfg(any(test, feature = "test-support"))]
-pub fn set_extensions_modal(v: &mut AgentView, val: Option<ExtensionsModalState>) {
-    v.extensions_modal = val;
 }
 
 /// Test-only setter for `AgentView::question_view`.

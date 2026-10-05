@@ -60,8 +60,6 @@ pub enum Action {
     OpenUrl(String),
     /// Open a semantic scrollback link.
     OpenLink(crate::render::osc8::LinkTarget),
-    /// Open grok.com managed connectors, appending session teamId when set.
-    OpenManagedConnectors,
     /// Cycle to the next visible link (or highlight the first if none selected).
     OpenNextLink,
     /// Cycle to the previous visible link.
@@ -311,54 +309,6 @@ pub enum Action {
     CopyBlockMeta,
     /// Open the selected block in the fullscreen viewer.
     OpenBlockViewer,
-    /// Open the extensions modal dialog on a specific tab.
-    OpenExtensionsModal {
-        tab: crate::views::extensions_modal::ExtensionsTab,
-        trigger: pi_telemetry::events::ExtensionsModalTrigger,
-    },
-    /// Trigger OAuth for an MCP server from the modal.
-    McpAuthTrigger {
-        server_name: String,
-    },
-    McpSetupSubmit {
-        server_name: String,
-        values: std::collections::HashMap<String, String>,
-    },
-    /// Reload skills list from the modal.
-    ReloadSkills,
-    /// Refresh MCP server list from the modal.
-    RefreshMcpList,
-    /// Execute a hooks management action from the modal.
-    ExecuteHooksAction(pi_hooks_plugins_types::HooksAction),
-    /// Execute a plugins management action from the modal.
-    ExecutePluginsAction(pi_hooks_plugins_types::PluginsAction),
-    /// Execute a marketplace management action from the modal.
-    ExecuteMarketplaceAction(pi_hooks_plugins_types::MarketplaceAction),
- /// Add or update an MCP server via legacy ext RPC
-    UpsertMcpServer {
-        name: String,
-        config: Box<pi_shell::util::config::McpServerConfig>,
-    },
- /// Delete an MCP server via legacy ext RPC
-    DeleteMcpServer {
-        server_name: String,
-    },
-    /// Live-toggle an MCP server (enable/disable without session restart).
-    ToggleMcpServer {
-        server_name: String,
-        enabled: bool,
-    },
- /// Toggle a skill enable/disable via legacy ext RPC
-    ToggleSkill {
-        skill_name: String,
-        enabled: bool,
-    },
-    /// Toggle a single MCP tool within a server (enable/disable).
-    ToggleMcpTool {
-        server_name: String,
-        tool_name: String,
-        enabled: bool,
-    },
     /// Cycle to next model.
     NextModel,
     /// Switch active model.
@@ -699,12 +649,6 @@ pub enum Action {
     DoctorFixCancelled(DoctorFixTarget),
     /// Persist the memory modal fullscreen preference to config.toml.
     PersistMemoryFullscreen(bool),
-    /// Suspend the TUI and open a configuration file in `$EDITOR`.
-    SuspendForEditor {
-        path: std::path::PathBuf,
-        /// Reload `/config-agents` list after the editor exits (when set).
-        refresh_agents_modal: Option<crate::views::agents_modal::AgentsTab>,
-    },
     /// Edit the current minimal-mode composer draft in an external editor.
     EditPromptExternal,
     /// Toggle the expanded goal detail overlay.
@@ -1428,49 +1372,6 @@ pub enum Effect {
     PollAuthUrl { request_seq: u64 },
     /// Submit a manually-pasted auth code (ext request).
     SubmitAuthCode { request_seq: u64, code: String },
- /// Fetch MCP server list from the shell (legacy ext RPC).
-    FetchMcpsList {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        cache: bool,
-    },
- /// Trigger MCP OAuth for a server (legacy ext RPC).
-    McpAuthTrigger {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        server_name: String,
-    },
-    McpSetupSubmit {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        server_name: String,
-        values: std::collections::HashMap<String, String>,
-    },
- /// Fetch hooks list from the shell (legacy ext RPC).
-    FetchHooksList {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-    },
- /// Fetch plugins list from the shell (legacy ext RPC).
-    FetchPluginsList {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-    },
-    /// Execute a hooks management action via ACP.
-    HooksAction {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-    },
-    /// Execute a plugins management action via ACP.
-    PluginsAction {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-    },
-    /// Fetch marketplace plugin list from the shell.
-    FetchMarketplaceList {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-    },
     /// Background check and auto-update for marketplace plugins on session start.
     CheckMarketplaceUpdates {
         agent_id: AgentId,
@@ -1479,26 +1380,6 @@ pub enum Effect {
     /// Fetch the official-marketplace catalog into agent-level CTA state,
     /// independent of the Extensions modal.
     FetchPluginCtaCatalog {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-    },
- /// Fetch skills list from the shell (legacy ext RPC).
-    FetchSkillsList {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-    },
-    FetchWorkflowsList {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-    },
- /// Toggle a skill via legacy ext RPC (enable/disable without restart).
-    ToggleSkill {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        enabled: bool,
-    },
-    /// Execute a marketplace action (install/uninstall/refresh) via ACP.
-    MarketplaceAction {
         agent_id: AgentId,
         session_id: acp::SessionId,
     },
@@ -1538,29 +1419,6 @@ pub enum Effect {
     DismissCtaInstalled {
         agent_id: AgentId,
         plugin_name: String,
-    },
- /// Upsert an MCP server via legacy ext RPC
-    UpsertMcpServer {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        name: String,
-    },
- /// Delete an MCP server via legacy ext RPC
-    DeleteMcpServer {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-    },
- /// Live-toggle an MCP server via legacy ext RPC (no restart needed).
-    ToggleMcpServer {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        enabled: bool,
-    },
- /// Toggle a single MCP tool via legacy ext RPC
-    ToggleMcpTool {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        enabled: bool,
     },
  /// Fetch and display session info via legacy ext RPC
     /// Auth lines are derived in the effect from SessionFlags + env (not Effect fields).
@@ -1830,9 +1688,6 @@ pub enum SubagentKillOutcome {
     /// "cancelled".
     NothingLive { status: Option<String> },
 }
-#[derive(Debug)]
-pub enum McpAuthTriggerOutcome {
-}
 /// Result from a completed async [`Effect`].
 ///
 /// Wrapped in `Action::TaskComplete` and dispatched synchronously.
@@ -2099,76 +1954,15 @@ pub enum TaskResult {
     AuthCodeSubmitted {
         request_seq: u64,
     },
-    /// MCP server list fetched from shell.
-    McpsListLoaded {
-        agent_id: AgentId,
-        result: Result<Vec<crate::views::mcps_modal::McpServerInfo>, String>,
-    },
-    /// MCP auth trigger completed.
-    McpAuthTriggerDone {
-        agent_id: AgentId,
-        server_name: String,
-        result: Result<McpAuthTriggerOutcome, String>,
-    },
-    McpSetupSubmitDone {
-        agent_id: AgentId,
-        server_name: String,
-        result: Result<(), String>,
-    },
-    /// Hooks list fetched from shell.
-    HooksListLoaded {
-        agent_id: AgentId,
-        result: Result<pi_hooks_plugins_types::HooksListResponse, String>,
-    },
-    /// Plugins list fetched from shell.
-    PluginsListLoaded {
-        agent_id: AgentId,
-        result: Result<pi_hooks_plugins_types::PluginsListResponse, String>,
-    },
-    /// Hooks action completed.
-    HooksActionResult {
-        agent_id: AgentId,
-        result: Result<pi_hooks_plugins_types::ActionOutcome, String>,
-    },
-    /// Plugins action completed.
-    PluginsActionResult {
-        agent_id: AgentId,
-        result: Result<pi_hooks_plugins_types::ActionOutcome, String>,
-    },
-    /// Marketplace list loaded.
-    MarketplaceListLoaded {
-        agent_id: AgentId,
-        result: Result<pi_hooks_plugins_types::MarketplaceListResponse, String>,
-    },
     /// Official-marketplace CTA catalog loaded into agent-level state.
     PluginCtaCatalogLoaded {
         agent_id: AgentId,
         result: Result<pi_hooks_plugins_types::MarketplaceListResponse, String>,
     },
-    /// Skills list loaded.
-    SkillsListLoaded {
-        agent_id: AgentId,
-        result: Result<Vec<pi_tools::implementations::skills::types::SkillInfo>, String>,
-    },
-    WorkflowsListLoaded {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        result: Result<Vec<crate::views::extensions_modal::WorkflowInfo>, String>,
-    },
-    /// Skill toggle completed (enable/disable).
-    SkillsToggleDone {
-        agent_id: AgentId,
-        result: Result<Vec<pi_tools::implementations::skills::types::SkillInfo>, String>,
-    },
     /// Background marketplace auto-update completed.
     MarketplaceUpdatesAvailable {
         agent_id: AgentId,
         updates: Vec<(String, String, String)>,
-    },
-    /// Marketplace action completed.
-    MarketplaceActionResult {
-        agent_id: AgentId,
-        result: Result<pi_hooks_plugins_types::ActionOutcome, String>,
     },
     /// Inline-CTA plugin install completed.
     CtaPluginInstallDone {
@@ -2192,11 +1986,6 @@ pub enum TaskResult {
     CtaInstalledDismissTimeout {
         agent_id: AgentId,
         plugin_name: String,
-    },
-    /// Live MCP toggle completed.
-    McpToggleDone {
-        agent_id: AgentId,
-        result: Result<(), String>,
     },
     /// Session info fetched successfully.
     SessionInfoComplete {

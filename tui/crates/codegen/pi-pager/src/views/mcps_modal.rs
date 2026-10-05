@@ -232,16 +232,6 @@ pub enum McpServerDisplayStatus {
 }
 
 impl McpServerDisplayStatus {
-    /// Theme-aware status color for badge rendering.
-    pub(crate) fn theme_color(&self, theme: &crate::theme::Theme) -> ratatui::style::Color {
-        match self {
-            Self::Ready => theme.accent_success,
-            Self::NeedsAuth => theme.warning,
-            Self::SetupRequired => theme.warning,
-            Self::Unavailable => theme.accent_error,
-            Self::Initializing => theme.running,
-        }
-    }
 
     /// Short human label for the status.
     pub(crate) fn label(&self) -> &'static str {

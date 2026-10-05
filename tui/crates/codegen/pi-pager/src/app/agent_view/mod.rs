@@ -139,7 +139,6 @@ use crate::theme::Theme;
 pub use crate::views::agent::{ActivePane, AgentViewLayout, InputMode, PaneAreas};
 use crate::views::block_viewer::BlockViewerPane;
 use crate::views::elicitation_view::ElicitationViewState;
-use crate::views::extensions_modal::ExtensionsModalState;
 use crate::views::file_search::line_viewer::LineViewerState;
 use crate::views::modal::{self, ActiveModal, ModalButtonHit};
 use crate::views::permission_view::{PermissionViewState, SubagentInfo};
@@ -167,7 +166,6 @@ mod key_owner;
 pub(crate) use key_owner::{BlockingCard, EscStep, KeyOwner};
 mod links;
 mod media;
-mod modals;
 mod notices;
 mod panes;
 mod paste;
@@ -1299,13 +1297,6 @@ pub struct AgentView {
     pub(crate) terminal_size_stale: bool,
     /// Hit areas for inline media buttons (cleared and rebuilt each frame).
     pub(crate) inline_media_hits: InlineMediaHitAreas,
-    /// Active hooks/plugins modal popup. When `Some`, blocks all input and
-    /// renders as a centered overlay. Opened by `/hooks`, `/plugins`, or `/mcps`.
-    pub(crate) extensions_modal: Option<ExtensionsModalState>,
-    /// Active agents modal popup. When `Some`, blocks all input and
-    /// renders as a centered overlay. Opened by `/config-agents` or `/agents`.
-    pub(crate) agents_modal: Option<crate::views::agents_modal::AgentsModalState>,
-    pub(crate) persona_detail: Option<crate::views::persona_detail::PersonaDetailState>,
     /// Active /btw side question overlay. When `Some`, renders as a dismissible
     /// overlay and captures keyboard input (Esc/Enter/Space to dismiss).
     pub btw_state: Option<crate::views::btw_overlay::BtwOverlayState>,

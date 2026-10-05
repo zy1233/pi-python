@@ -400,58 +400,12 @@ fn session_created_drains_queued_prompts() {
     assert_eq!(app.agents[&id].session.queue_len(), 0);
 }
 #[test]
-fn session_created_with_flag_emits_five_fetches_and_clears_flag() {
-    use crate::views::extensions_modal::{ExtensionsModalState, ExtensionsTab};
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    {
-        let a = app.agents.get_mut(&id).unwrap();
-        a.session.session_id = None;
-        a.pending_extensions_fetch = true;
-        a.extensions_modal = Some(ExtensionsModalState::new(ExtensionsTab::Hooks));
-    }
-    let effects = dispatch(
-        Action::TaskComplete(TaskResult::SessionCreated {
-            agent_id: id,
-            session_id: acp::SessionId::new("s"),
-            models: None,
-            scheduler_background_loops: None,
-        }),
-        &mut app,
-    );
-    assert_eq!(count_extension_fetches(&effects), 5);
-    assert!(
-        effects
-            .iter()
-            .any(|e| matches!(e, Effect::FetchMcpsList { cache: true, .. }))
-    );
-    assert!(!app.agents[&id].pending_extensions_fetch);
-}
-#[test]
-fn session_created_without_flag_emits_no_extension_fetches() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    app.agents.get_mut(&id).unwrap().session.session_id = None;
-    assert!(!app.agents[&id].pending_extensions_fetch);
-    let effects = dispatch(
-        Action::TaskComplete(TaskResult::SessionCreated {
-            agent_id: id,
-            session_id: acp::SessionId::new("s"),
-            models: None,
-            scheduler_background_loops: None,
-        }),
-        &mut app,
-    );
-    assert_eq!(count_extension_fetches(&effects), 0);
-}
-#[test]
 fn session_failed_keeps_agent_clears_loading_and_toasts() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     {
         let a = app.agents.get_mut(&id).unwrap();
         a.session.session_id = Some(acp::SessionId::new("existing"));
-        a.pending_extensions_fetch = true;
         a.mcp_init_progress = Some(crate::app::agent_view::McpInitProgress {
             total: 0,
             connected: 0,
@@ -467,7 +421,6 @@ fn session_failed_keeps_agent_clears_loading_and_toasts() {
     );
     assert!(effects.is_empty());
     let agent = &app.agents[&id];
-    assert!(!agent.pending_extensions_fetch);
     assert!(agent.mcp_init_progress.is_none());
     assert_eq!(
         agent.toast.as_ref().map(|(m, _)| m.as_str()),

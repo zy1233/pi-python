@@ -1340,36 +1340,6 @@ async fn fetch_session_list_ignores_kind_facet_filter() {
     let _ = tasks.join_next().await;
     assert_eq!(*captured.lock().unwrap(), 1);
 }
-#[tokio::test]
-async fn fetch_workflows_list_returns_empty_in_standard_acp_mode() {
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    let session_id = acp::SessionId::new(Arc::from("test-session"));
-    let mut tasks = JoinSet::new();
-    let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
-    execute(
-        Effect::FetchWorkflowsList {
-            agent_id: AgentId(3),
-            session_id: session_id.clone(),
-        },
-        &mut tasks,
-        &tx,
-        Path::new("."),
-        &SessionFlags::default(),
-        &progress_tx,
-    );
-    match tasks.join_next().await.expect("task").expect("no panic") {
-        TaskResult::WorkflowsListLoaded {
-            agent_id,
-            session_id: result_session_id,
-            result,
-        } => {
-            assert_eq!(agent_id, AgentId(3));
-            assert_eq!(result_session_id, session_id);
-            assert!(result.expect("workflows load").is_empty());
-        }
-        other => panic!("expected WorkflowsListLoaded, got {other:?}"),
-    }
-}
 /// The debounce arm must echo `query` and `seq` exactly. Awaits the real
 /// 250 ms debounce (tokio's paused clock needs `test-util`, not enabled
 /// in this crate).

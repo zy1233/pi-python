@@ -21,7 +21,6 @@ use crate::app::dispatch::prompt::{defer_to_open_reload_window, supersede_open_r
 use crate::app::dispatch::queue::maybe_drain_queue;
 use crate::app::dispatch::router::dispatch;
 use crate::app::dispatch::status::notify_session_ready;
-use crate::app::dispatch::transcript::extensions_modal_tab_fetches;
 use crate::scrollback::block::RenderBlock;
 use crate::scrollback::blocks::SessionEvent;
 use crate::scrollback::state::ScrollbackState;
@@ -1024,15 +1023,6 @@ pub(in crate::app::dispatch) fn handle_session_loaded(
                 prev_model_id: switch.prev_model_id,
                 config_option_id: agent.session.models.config_option_id.clone(),
             });
-        }
-        if std::mem::take(&mut agent.pending_extensions_fetch)
-            && let Some(modal) = agent.extensions_modal.as_mut()
-        {
-            effects.extend(extensions_modal_tab_fetches(
-                modal,
-                agent_id,
-                hydrate_sid.clone(),
-            ));
         }
         effects.push(Effect::RegisterActiveSession {
             session_id: hydrate_sid,

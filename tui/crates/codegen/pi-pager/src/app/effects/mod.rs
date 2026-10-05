@@ -1349,92 +1349,6 @@ pub(crate) fn execute(
                 }
             });
         }
-        Effect::FetchMcpsList { agent_id, .. } => {
-            tasks.spawn(async move {
-                TaskResult::McpsListLoaded {
-                    agent_id,
-                    result: Ok(crate::views::mcps_modal::convert_list_response(
-                        crate::views::mcps_modal::McpsListResponse { servers: Vec::new() },
-                    )),
-                }
-            });
-        }
-        Effect::McpAuthTrigger { agent_id, server_name, .. } => {
-            tasks.spawn(async move {
-                TaskResult::McpAuthTriggerDone {
-                    agent_id,
-                    server_name,
-                    result: Err("MCP auth trigger not supported in standard ACP".into()),
-                }
-            });
-        }
-        Effect::McpSetupSubmit { agent_id, server_name, .. } => {
-            tasks.spawn(async move {
-                TaskResult::McpSetupSubmitDone {
-                    agent_id,
-                    server_name,
-                    result: Ok(()),
-                }
-            });
-        }
-        Effect::FetchHooksList { agent_id, .. } => {
-            tasks.spawn(async move {
-                TaskResult::HooksListLoaded {
-                    agent_id,
-                    result: Ok(pi_hooks_plugins_types::HooksListResponse {
-                        hooks: Vec::new(),
-                        project_trusted: true,
-                        load_errors: Vec::new(),
-                    }),
-                }
-            });
-        }
-        Effect::FetchPluginsList { agent_id, .. } => {
-            tasks.spawn(async move {
-                TaskResult::PluginsListLoaded {
-                    agent_id,
-                    result: Ok(pi_hooks_plugins_types::PluginsListResponse {
-                        plugins: Vec::new(),
-                    }),
-                }
-            });
-        }
-        Effect::HooksAction { agent_id, .. } => {
-            tasks.spawn(async move {
-                TaskResult::HooksActionResult {
-                    agent_id,
-                    result: Ok(pi_hooks_plugins_types::ActionOutcome {
-                        status: pi_hooks_plugins_types::OutcomeStatus::Success,
-                        message: String::new(),
-                        requires_reload: false,
-                        requires_restart: false,
-                    }),
-                }
-            });
-        }
-        Effect::PluginsAction { agent_id, .. } => {
-            tasks.spawn(async move {
-                TaskResult::PluginsActionResult {
-                    agent_id,
-                    result: Ok(pi_hooks_plugins_types::ActionOutcome {
-                        status: pi_hooks_plugins_types::OutcomeStatus::Success,
-                        message: String::new(),
-                        requires_reload: false,
-                        requires_restart: false,
-                    }),
-                }
-            });
-        }
-        Effect::FetchMarketplaceList { agent_id, .. } => {
-            tasks.spawn(async move {
-                TaskResult::MarketplaceListLoaded {
-                    agent_id,
-                    result: Ok(pi_hooks_plugins_types::MarketplaceListResponse {
-                        sources: Vec::new(),
-                    }),
-                }
-            });
-        }
         Effect::FetchPluginCtaCatalog { agent_id, .. } => {
             tasks.spawn(async move {
                 TaskResult::PluginCtaCatalogLoaded {
@@ -1445,49 +1359,11 @@ pub(crate) fn execute(
                 }
             });
         }
-        Effect::FetchSkillsList { agent_id, .. } => {
-            tasks.spawn(async move {
-                TaskResult::SkillsListLoaded {
-                    agent_id,
-                    result: Ok(Vec::new()),
-                }
-            });
-        }
-        Effect::FetchWorkflowsList { agent_id, session_id } => {
-            tasks.spawn(async move {
-                TaskResult::WorkflowsListLoaded {
-                    agent_id,
-                    session_id,
-                    result: Ok(Vec::new()),
-                }
-            });
-        }
-        Effect::ToggleSkill { agent_id, .. } => {
-            tasks.spawn(async move {
-                TaskResult::SkillsToggleDone {
-                    agent_id,
-                    result: Ok(Vec::new()),
-                }
-            });
-        }
         Effect::CheckMarketplaceUpdates { agent_id, .. } => {
             tasks.spawn(async move {
                 TaskResult::MarketplaceUpdatesAvailable {
                     agent_id,
                     updates: Vec::new(),
-                }
-            });
-        }
-        Effect::MarketplaceAction { agent_id, .. } => {
-            tasks.spawn(async move {
-                TaskResult::MarketplaceActionResult {
-                    agent_id,
-                    result: Ok(pi_hooks_plugins_types::ActionOutcome {
-                        status: pi_hooks_plugins_types::OutcomeStatus::Success,
-                        message: String::new(),
-                        requires_reload: false,
-                        requires_restart: false,
-                    }),
                 }
             });
         }
@@ -1555,38 +1431,6 @@ pub(crate) fn execute(
                         plugin_name,
                     }
                 });
-        }
-        Effect::UpsertMcpServer { agent_id, .. } => {
-            tasks.spawn(async move {
-                TaskResult::McpToggleDone {
-                    agent_id,
-                    result: Ok(()),
-                }
-            });
-        }
-        Effect::DeleteMcpServer { agent_id, .. } => {
-            tasks.spawn(async move {
-                TaskResult::McpToggleDone {
-                    agent_id,
-                    result: Ok(()),
-                }
-            });
-        }
-        Effect::ToggleMcpServer { agent_id, .. } => {
-            tasks.spawn(async move {
-                TaskResult::McpToggleDone {
-                    agent_id,
-                    result: Ok(()),
-                }
-            });
-        }
-        Effect::ToggleMcpTool { agent_id, .. } => {
-            tasks.spawn(async move {
-                TaskResult::McpToggleDone {
-                    agent_id,
-                    result: Ok(()),
-                }
-            });
         }
         Effect::FetchSessionAgentName { agent_id, session_id } => {
             let tx = acp_tx.clone();

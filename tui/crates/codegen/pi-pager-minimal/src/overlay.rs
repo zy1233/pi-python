@@ -273,15 +273,14 @@ fn compute_target(app: &mut AppView, term_h: u16, width: u16) -> u16 {
         return super::panel::panel_height(agent, kind, width, ceiling);
     }
 
-    // A centered app-modal (command palette / settings / pickers) or the
-    // extensions modal (hooks / plugins / marketplace / skills) reuses the
+    // A centered app-modal (command palette / settings / pickers) reuses the
     // full-TUI popup renderer, which fills whatever area it's given. Grow to a
     // moderate, bottom-anchored height — NOT the full ceiling. Growing to the
     // ceiling and shrinking on close left a *screen-tall* blank band above the
     // prompt (committed rows scrolled into native scrollback can't be pulled
     // back). A capped panel keeps that band small while still giving the
     // list/editor room (its inner content scrolls).
-    if app_modal_active(agent) || minimal_api::extensions_modal(agent).is_some() {
+    if app_modal_active(agent) {
         return app_modal_target(base, ceiling);
     }
 

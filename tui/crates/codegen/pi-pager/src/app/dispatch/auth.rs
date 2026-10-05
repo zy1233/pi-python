@@ -5,7 +5,6 @@ use super::queue::maybe_drain_queue;
 use super::router::dispatch;
 use super::session::lifecycle::{clear_startup_actions, drain_startup_actions};
 use crate::app::actions::{Action, Effect};
-use crate::app::agent::AgentId;
 use crate::app::agent_view::AgentView;
 use crate::app::app_view::{ActiveView, AppView, AuthMode, AuthState};
 use crate::scrollback::block::RenderBlock;
@@ -459,85 +458,3 @@ pub(super) fn handle_auth_url_ready(
     vec![]
 }
 
-pub(super) fn handle_mcp_auth_trigger_done(
-    app: &mut AppView,
-    agent_id: AgentId,
-    server_name: String,
-    result: Result<crate::app::actions::McpAuthTriggerOutcome, String>,
-) -> Vec<Effect> {
-    let Some(agent) = app.agents.get_mut(&agent_id) else {
-        return vec![];
-    };
-    if let Some(ref mut modal) = agent.extensions_modal {
-        modal.pending_action = None;
-        modal.pending_entry_index = None;
-        match result {
-            Err(e) => {
-                let msg = if e.starts_with("To authenticate") {
-                    format!("{server_name}: {e}")
-                } else if e.contains(&server_name) {
-                    format!("Auth failed: {e}")
-                } else {
-                    format!("{server_name} auth failed: {e}")
-                };
-                modal.modal_message =
-                    Some(crate::views::extensions_modal::ModalMessage::Error(msg));
-                if let Some(session_id) = agent.session.session_id.clone() {
-                    return vec![Effect::FetchMcpsList {
-                        agent_id,
-                        session_id,
-                        cache: false,
-                    }];
-                }
-                return vec![];
-            }
-        }
-    }
-    // No toast on success: the row transition from the FetchMcpsList
-    // refresh below is the confirmation.
-    let Some(session_id) = agent.session.session_id.clone() else {
-        return vec![];
-    };
-    vec![Effect::FetchMcpsList {
-        agent_id,
-        session_id,
-        cache: false,
-    }]
-}
-
-pub(super) fn handle_mcp_setup_submit_done(
-    app: &mut AppView,
-    agent_id: AgentId,
-    server_name: String,
-    result: Result<(), String>,
-) -> Vec<Effect> {
-    let Some(agent) = app.agents.get_mut(&agent_id) else {
-        return vec![];
-    };
-    if let Some(ref mut modal) = agent.extensions_modal {
-        if let Err(e) = result {
-            modal.pending_action = None;
-            modal.pending_entry_index = None;
-            modal.modal_message = Some(crate::views::extensions_modal::ModalMessage::Error(
-                format!("{server_name} setup failed: {e}"),
-            ));
-            return vec![];
-        }
-        modal.pending_action = Some(format!("Authenticating {server_name}..."));
-        modal.pending_entry_index = None;
-    }
-    let Some(session_id) = agent.session.session_id.clone() else {
-        if let Some(ref mut modal) = agent.extensions_modal {
-            modal.pending_action = None;
-            modal.modal_message = Some(crate::views::extensions_modal::ModalMessage::Error(
-                format!("{server_name}: no active session for authentication"),
-            ));
-        }
-        return vec![];
-    };
-    vec![Effect::McpAuthTrigger {
-        agent_id,
-        session_id,
-        server_name,
-    }]
-}

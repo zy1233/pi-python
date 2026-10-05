@@ -234,8 +234,6 @@ fn dismiss_agent_surfaces(agent: &mut AgentView) {
     agent.video_viewer = None;
     agent.line_viewer = None;
     agent.block_viewer = None;
-    agent.persona_detail = None;
-    agent.agents_modal = None;
     agent.show_goal_detail = false;
     for child in agent.subagent_views.values_mut() {
         dismiss_agent_surfaces(child);

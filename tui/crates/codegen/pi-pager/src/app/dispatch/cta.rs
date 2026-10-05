@@ -1,6 +1,5 @@
 //! Plugin install call-to-action phase tracking helpers and constants.
 
-use super::transcript::extensions_modal_tab_fetches;
 use crate::app::actions::Effect;
 use crate::app::agent::AgentId;
 use crate::app::app_view::AppView;
@@ -318,9 +317,6 @@ pub(super) fn handle_plugin_cta_mcps_loaded(
     result: Result<Vec<crate::views::mcps_modal::McpServerInfo>, String>,
 ) -> Vec<Effect> {
     use crate::app::agent_view::CtaPhase;
-    use crate::views::extensions_modal::{
-        ExtensionsModalState, ExtensionsTab, TabDataState, seed_mcps_section_collapse_for_cta,
-    };
     use crate::views::mcps_modal::{McpSectionId, McpServerDisplayStatus, section_for};
     let Some(agent) = app.agents.get_mut(&agent_id) else {
         return vec![];
@@ -371,31 +367,8 @@ pub(super) fn handle_plugin_cta_mcps_loaded(
                 && agent.plugin_cta.mcp_attempt >= CTA_MCP_ABSENT_MAX_ATTEMPTS;
             let mut effects = Vec::new();
             if needs_auth {
-                // Hand off into the Extensions modal on the MCP Servers tab
-                // with only the new plugin's section expanded. Seed the MCP
-                // data from the read we already have (no flash) and emit the
-                // same tab fetch-set as a manual open so no other tab is left
-                // stuck Loading; the modal then owns the auth UX.
-                let mut modal = ExtensionsModalState::new(ExtensionsTab::McpServers);
-                modal.session_team_id = app.team_id.clone();
-                seed_mcps_section_collapse_for_cta(
-                    &mut modal.mcps_collapsed_sections,
-                    &mut modal.mcps_section_collapse_initialized,
-                    &servers,
-                    &name,
-                );
-                modal.mcps_data = TabDataState::Loaded(servers);
-                agent.agents_modal = None;
-                agent.extensions_modal = Some(modal);
-                log_event(pi_telemetry::events::ExtensionsModalOpened {
-                    trigger: pi_telemetry::events::ExtensionsModalTrigger::AuthHandoff,
-                    tab: ExtensionsTab::McpServers.telemetry_tab(),
-                });
                 agent.plugin_cta.phase = CtaPhase::Hidden;
                 if let Some(session_id) = session_id.clone() {
-                    if let Some(modal) = agent.extensions_modal.as_mut() {
-                        effects.extend(extensions_modal_tab_fetches(modal, agent_id, session_id));
-                    }
                 } else {
                     agent.pending_extensions_fetch = true;
                 }

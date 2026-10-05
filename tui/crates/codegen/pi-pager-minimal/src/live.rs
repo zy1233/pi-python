@@ -161,20 +161,6 @@ pub fn draw_live(app: &mut AppView, terminal: &mut PagerTerminal) {
             super::overlay::render_app_modal(frame.buffer_mut(), area, agent, compact);
             return (None, None);
         }
-        if minimal_api::extensions_modal(agent).is_some() {
-            let tick = (now_millis() / 100) as u64;
-            if let Some(state) = minimal_api::extensions_modal_mut(agent) {
-                pi_pager::views::extensions_modal::render_extensions_modal(
-                    frame.buffer_mut(),
-                    area,
-                    state,
-                    None,
-                    compact,
-                    tick,
-                );
-            }
-            return (None, None);
-        }
         if let Some(modal) = super::overlay::active_modal(agent) {
             let status_h = 1u16.min(area.height);
             let sl_h = status_line_frame

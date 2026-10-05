@@ -19,22 +19,6 @@ fn test_app_git() -> AppView {
     app
 }
 
-fn count_extension_fetches(effects: &[Effect]) -> usize {
-    effects
-        .iter()
-        .filter(|e| {
-            matches!(
-                e,
-                Effect::FetchHooksList { .. }
-                    | Effect::FetchPluginsList { .. }
-                    | Effect::FetchMarketplaceList { .. }
-                    | Effect::FetchMcpsList { .. }
-                    | Effect::FetchSkillsList { .. }
-            )
-        })
-        .count()
-}
-
 /// Build a single-agent app for the `/new` dispatcher tests.
 ///
 /// Sets `current_branch` to `Some("main")` so the agent appears to be

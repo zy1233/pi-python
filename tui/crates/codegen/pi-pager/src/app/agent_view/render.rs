@@ -921,8 +921,6 @@ impl AgentView {
                 || self.video_viewer.is_some()
                 || self.gboom.is_some()
                 || self.block_viewer.is_some()
-                || self.extensions_modal.is_some()
-                || self.agents_modal.is_some()
                 || self.btw_state.is_some()
                 || self.line_viewer.is_some()
                 || self.active_modal.is_some())
@@ -4045,80 +4043,6 @@ impl AgentView {
             ShortcutsBar::new(&hints).render(layout.shortcuts, buf);
             self.pane_areas = layout.pane_areas();
             return (prompt_cursor_pos, prompt_post_flush);
-        }
-        if let Some(ref mut modal_state) = self.agents_modal {
-            let overlay_area = Rect {
-                x: area.x,
-                y: area.y,
-                width: area.width,
-                height: layout.shortcuts.y.saturating_sub(area.y).saturating_sub(1),
-            };
-            let compact = self.scrollback.appearance().prompt.compact;
-            let theme = Theme::current();
-            crate::views::agents_modal::render_agents_modal(
-                buf,
-                overlay_area,
-                modal_state,
-                compact,
-                &theme,
-            );
-            if let Some(ref mut detail) = self.persona_detail {
-                crate::views::persona_detail::render_persona_detail(
-                    buf,
-                    overlay_area,
-                    detail,
-                    &theme,
-                    compact,
-                );
-            }
-            self.pane_areas = layout.pane_areas();
-            return (None, crate::terminal::overlay::clear().map(Into::into));
-        }
-        if let Some(ref mut modal_state) = self.extensions_modal {
-            use crate::views::extensions_modal::render_extensions_modal;
-            use crate::views::shortcuts_bar::HintItem;
-            let is_fullscreen = matches!(
-                modal_state.picker_state.mode,
-                crate::views::picker::PickerMode::FullScreen
-            );
-            let overlay_area = if is_fullscreen {
-                area
-            } else {
-                Rect {
-                    x: area.x,
-                    y: area.y,
-                    width: area.width,
-                    height: layout.shortcuts.y.saturating_sub(area.y).saturating_sub(1),
-                }
-            };
-            let compact = self.scrollback.appearance().prompt.compact;
-            let tick = self.scrollback.animation_tick();
-            render_extensions_modal(
-                buf,
-                overlay_area,
-                modal_state,
-                Some(layout.shortcuts),
-                compact,
-                tick,
-            );
-            if modal_state.input.is_some() {
-                let hints = vec![
-                    HintItem::new(key!(Enter), "submit"),
-                    HintItem::new(key!(Esc), "cancel"),
-                ];
-                ShortcutsBar::new(&hints).render(layout.shortcuts, buf);
-            } else if modal_state.pending_action.is_some() {
-                let hints = vec![HintItem::new(key!(Esc), "dismiss")];
-                ShortcutsBar::new(&hints).render(layout.shortcuts, buf);
-            } else if modal_state.picker_state.search_active {
-                let hints = vec![
-                    HintItem::new(key!(Esc), "clear search"),
-                    HintItem::new(key!(Enter), "keep filter"),
-                ];
-                ShortcutsBar::new(&hints).render(layout.shortcuts, buf);
-            }
-            self.pane_areas = layout.pane_areas();
-            return (None, crate::terminal::overlay::clear().map(Into::into));
         }
         let dropdown_active = self.slash_dropdown_items_area.is_some()
             || self.dropdown_items_area.is_some()
