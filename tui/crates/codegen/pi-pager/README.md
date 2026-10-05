@@ -59,8 +59,3 @@ src/
 ## Docs
 
 - [Terminal Support & Troubleshooting](docs/user-guide/21-terminal-support.md) — tmux/SSH truecolor, clipboard, mouse, diagnostics, `/doctor`
-- [Hooks & Plugins Guide](docs/hooks-and-plugins.md) — managing hooks, plugins, and marketplace sources
-- [Custom Hooks Guide](docs/custom-hooks.md) — creating, configuring, and writing your own hooks
-- [Hook Examples](../pi-hooks/examples/README.md) — sample hooks for common workflows
-- [Hooks Crate (`pi-hooks`)](../pi-hooks/) — hook runtime, event types, and execution engine
-- [Plugin Marketplace Crate (`pi-plugin-marketplace`)](../pi-plugin-marketplace/) — marketplace source loading, scanning, and install

@@ -208,7 +208,6 @@ fn lost_cancel_is_resent_while_still_cancelling() {
             prompt_id: "p1".into(),
             stop_reason: Some("cancelled".into()),
             agent_result: None,
-            cancellation_category: None,
             received_at: std::time::Instant::now(),
         });
     }
@@ -261,7 +260,6 @@ fn confirmed_stop_retry_does_not_rearm_auto_resend() {
             prompt_id: "p1".into(),
             stop_reason: Some("cancelled".into()),
             agent_result: None,
-            cancellation_category: None,
             received_at: std::time::Instant::now(),
         });
     }
@@ -621,45 +619,6 @@ fn reconcile_finishes_cancelling_turn_after_grace() {
     );
 }
 
-/// A lost-RPC reconcile for a hook-denied cancel consumes the parked
-/// `cancellationCategory` and renders the blocked-by-a-hook marker, not
-/// "cancelled by user".
-#[test]
-fn reconcile_renders_hook_denied_marker_from_parked_category() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.session.state = AgentState::TurnRunning;
-        agent.session.current_prompt_id = Some("pid-stuck".into());
-    }
-    arm_reconcile_with_meta(
-        &mut app,
-        id,
-        "pid-stuck",
-        "cancelled",
-        Some(crate::app::turn_completion::HOOK_DENIED_CATEGORY),
-        TURN_END_RECONCILE_GRACE + std::time::Duration::from_secs(1),
-    );
-
-    let fired = reconcile_overdue_turn_ends(&mut app);
-
-    assert!(fired.is_some(), "the overdue reconcile must fire");
-    let agent = &app.agents[&id];
-    assert!(agent.session.state.is_idle());
-    let has_blocked_marker = (0..agent.scrollback.len()).any(|i| {
-        matches!(
-            agent.scrollback.entry(i).map(|e| &e.block),
-            Some(RenderBlock::SessionEvent(ev))
-                if matches!(ev.event, SessionEvent::TurnBlockedByHook { .. })
-        )
-    });
-    assert!(
-        has_blocked_marker,
-        "the reconcile must surface the blocked-by-a-hook marker"
-    );
-}
-
 #[test]
 fn reconcile_waits_for_grace_window() {
     // A freshly-armed marker means the RPC response may still be in
@@ -741,7 +700,6 @@ fn reconcile_error_formats_marker_and_defers_to_banner() {
                 prompt_id: "pid-stuck".into(),
                 stop_reason: Some("error".into()),
                 agent_result: Some("boom".into()),
-                cancellation_category: None,
                 received_at: std::time::Instant::now()
                     - (TURN_END_RECONCILE_GRACE + std::time::Duration::from_secs(1)),
             });

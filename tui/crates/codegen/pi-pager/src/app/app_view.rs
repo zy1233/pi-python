@@ -1773,11 +1773,6 @@ impl AppView {
         crate::render::bidi::set_enabled(config.scrollback.display.rtl_bidi);
         for agent in self.agents.values_mut() {
             agent.scrollback.set_appearance(config.clone());
-            agent
-                .prompt
-                .slash_controller
-                .registry_mut()
-                .set_plugins_visible(!config.disable_plugins);
             agent.prompt.sync_tab_width_from_appearance();
         }
         self.welcome_prompt.sync_tab_width_from_appearance();

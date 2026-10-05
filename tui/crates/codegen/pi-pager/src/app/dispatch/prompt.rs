@@ -707,15 +707,6 @@ pub(super) fn handle_prompt_response(
                 &result,
                 Ok(pr) if pr.stop_reason == acp::StopReason::Cancelled
             );
-        // A hook-denied end rides the cancelled stop reason but is a policy
-        // block, not a user cancel — `cancelled_turn_event` picks the marker.
-        let wire_cancellation_category = result.as_ref().ok().and_then(|pr| {
-            pr.meta
-                .as_ref()?
-                .get(crate::app::turn_completion::CANCELLATION_CATEGORY_KEY)?
-                .as_str()
-                .map(str::to_string)
-        });
         let rate_limited = agent.session.rate_limited;
         // Fallback mirroring the credit-limit race guard below: if the retry
         // notification lost the race with (or never reached) this
@@ -826,21 +817,13 @@ pub(super) fn handle_prompt_response(
             "turn ended; client returning to idle",
         );
 
-        // Read before `finish_turn()` clears it; keys the pending stop-hook stash.
-        let ending_prompt_id = agent
-            .session
-            .current_prompt_id
-            .clone()
-            .or_else(|| response_pid.clone());
-
         agent.session.finish_turn(&mut agent.scrollback);
 
         // Insert session event message (skip TurnCompleted for bash-mode — no agent turn).
         let event = match (&result, was_cancelling) {
-            (Ok(_), true) => Some(crate::app::turn_completion::cancelled_turn_event(
-                wire_cancellation_category.as_deref(),
-                elapsed.unwrap_or_default(),
-            )),
+            (Ok(_), true) => Some(SessionEvent::TurnCancelled {
+                elapsed: elapsed.unwrap_or_default(),
+            }),
             (Ok(_), false) if agent.bash_turn => None,
             (Ok(_), false) => Some(SessionEvent::TurnCompleted {
                 // Legacy copy on purpose: unknown elapsed keeps the "in 0.0s"
@@ -855,11 +838,7 @@ pub(super) fn handle_prompt_response(
                 elapsed,
             }),
         };
-        crate::app::turn_completion::push_turn_terminal_marker(
-            agent,
-            event,
-            ending_prompt_id.as_deref(),
-        );
+        crate::app::turn_completion::push_turn_terminal_marker(agent, event);
 
         let notification = match (&result, was_cancelling) {
             (Ok(_), false) if !agent.bash_turn => {

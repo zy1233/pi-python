@@ -1370,7 +1370,7 @@ mod searchable_text_tests {
     use super::*;
     use crate::scrollback::blocks::SearchLineMatch;
     use crate::scrollback::blocks::tool::memory_search::{MemoryResult, MemorySearchToolCallBlock};
-    use crate::scrollback::blocks::tool::{LifecycleEventBlock, WebSearchToolCallBlock};
+    use crate::scrollback::blocks::tool::WebSearchToolCallBlock;
     use pi_shell::session::ContextInfo;
 
     #[test]
@@ -1497,17 +1497,6 @@ mod searchable_text_tests {
         assert!(text.contains("global"), "got: {text:?}");
         assert!(text.contains("MEMORY.md"), "got: {text:?}");
         assert!(text.contains("use graphite for PRs"), "got: {text:?}");
-    }
-
-    #[test]
-    fn lifecycle_indexes_event_name() {
-        let block = RenderBlock::ToolCall(ToolCallBlock::Lifecycle(LifecycleEventBlock::new(
-            "user_prompt_submit",
-        )));
-        assert_eq!(
-            block.searchable_text().as_deref(),
-            Some("user_prompt_submit")
-        );
     }
 
     #[test]

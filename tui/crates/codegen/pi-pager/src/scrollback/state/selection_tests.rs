@@ -939,27 +939,6 @@ fn verb_group_leading_thought_anchors_run_and_expands() {
 }
 
 #[test]
-fn group_range_keeps_hooked_members_in_rendered_fold() {
-    let mut state = verb_state();
-    let ids = push_reads(&mut state, 2);
-    state.prepare_layout(80, 40);
-    assert!(verb_header_at(&state, 0));
-    assert_eq!(state.group_range_of(0, true), 0..2);
-
-    state.attach_hooks(
-        ids[1],
-        crate::scrollback::blocks::tool::HookPhase::Post,
-        Vec::new(),
-    );
-    assert_eq!(state.group_range_of(0, true), 0..2);
-
-    state.prepare_layout(80, 40);
-    assert!(verb_header_at(&state, 0));
-    assert_eq!(state.group_range_of(1, true), 0..2);
-    assert_eq!(cached_height_at(&state, 1), 0, "hooked member stays folded");
-}
-
-#[test]
 fn verb_group_interior_thought_claims_into_fold() {
     let mut state = verb_state();
     crate::appearance::cache::set_show_thinking_blocks(true);
@@ -1146,33 +1125,6 @@ fn verb_group_refolds_when_clear_all_resolves_pending_input() {
     state.prepare_layout(80, 40);
     assert!(verb_header_at(&state, 0));
     assert_eq!(cached_height_at(&state, 1), 0, "cleared row refolds");
-}
-
-#[test]
-fn verb_group_stays_folded_on_attach_hooks() {
-    use crate::scrollback::blocks::tool::{HookPhase, HookRunEntry, HookRunStatus};
-
-    let mut state = verb_state();
-    let ids = push_reads(&mut state, 3);
-    state.prepare_layout(80, 40);
-    assert_eq!(cached_height_at(&state, 2), 0);
-
-    state.attach_hooks(
-        ids[2],
-        HookPhase::Post,
-        vec![HookRunEntry {
-            name: "fmt".to_owned(),
-            status: HookRunStatus::Success {
-                elapsed: std::time::Duration::from_millis(1),
-            },
-            output: None,
-        }],
-    );
-    assert!(state.gaps_may_be_dirty, "hook attachment reapplies folds");
-    state.prepare_layout(80, 40);
-    assert!(verb_header_at(&state, 0));
-    assert_eq!(header_count_at(&mut state, 0), 3);
-    assert_eq!(cached_height_at(&state, 2), 0, "hooked row remains folded");
 }
 
 #[test]

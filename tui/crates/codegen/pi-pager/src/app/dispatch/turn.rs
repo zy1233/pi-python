@@ -401,10 +401,7 @@ pub(crate) fn reconcile_overdue_turn_ends(app: &mut AppView) -> Option<Vec<Effec
 
         agent.session.finish_turn(&mut agent.scrollback);
         let event = if was_cancelling {
-            Some(crate::app::turn_completion::cancelled_turn_event(
-                pending.cancellation_category.as_deref(),
-                elapsed,
-            ))
+            Some(SessionEvent::TurnCancelled { elapsed })
         } else {
             match pending.stop_reason.as_deref() {
                 // Rate limits drive a dedicated driver UX via the retry
@@ -420,11 +417,7 @@ pub(crate) fn reconcile_overdue_turn_ends(app: &mut AppView) -> Option<Vec<Effec
                 }),
             }
         };
-        crate::app::turn_completion::push_turn_terminal_marker(
-            agent,
-            event,
-            Some(pending.prompt_id.as_str()),
-        );
+        crate::app::turn_completion::push_turn_terminal_marker(agent, event);
 
         agent.mark_turn_finished(TurnEnd::Completed);
         agent.activity_started_at = None;

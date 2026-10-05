@@ -63,7 +63,6 @@ members = [
     "crates/codegen/pi-workspace-client",
     "crates/codegen/pi-workspace-daemon",
     "crates/codegen/pi-workspace-types",
-    "crates/codegen/pi-hooks-plugins-types",
     "crates/codegen/pi-hunk-tracker",
     "crates/codegen/pi-mixpanel",
     "crates/codegen/pi-prompt-queue",
@@ -335,7 +334,6 @@ pi-tools-api = { path = "crates/codegen/pi-tools-api" }
 pi-version = { path = "crates/codegen/pi-version" }
 pi-workspace = { path = "crates/codegen/pi-workspace" }
 pi-workspace-types = { path = "crates/codegen/pi-workspace-types" }
-pi-hooks-plugins-types = { path = "crates/codegen/pi-hooks-plugins-types" }
 pi-interjection-core = { path = "crates/common/pi-interjection-core" }
 pi-mixpanel = { path = "crates/codegen/pi-mixpanel" }
 pi-prompt-queue = { path = "crates/codegen/pi-prompt-queue" }

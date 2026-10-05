@@ -1,6 +1,5 @@
 pub mod acp_types;
 pub mod announcement_state;
-pub mod commands;
 pub mod handle;
 pub mod pending_interaction;
 pub use self::acp_types::*;

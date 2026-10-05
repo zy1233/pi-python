@@ -802,7 +802,7 @@ impl AcpUpdateTracker {
     /// trustworthy one-liner summary, and free of per-entry attachments a
     /// merge would misplace.
     fn coalescable_edit(entry: &ScrollbackEntry) -> Option<&EditToolCallBlock> {
-        if entry.is_running || entry.is_pending_user_input || entry.hook_data.is_some() {
+        if entry.is_running || entry.is_pending_user_input {
             return None;
         }
         let RenderBlock::ToolCall(ToolCallBlock::Edit(edit)) = &entry.block else {

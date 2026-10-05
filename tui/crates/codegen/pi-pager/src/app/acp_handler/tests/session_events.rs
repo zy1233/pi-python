@@ -895,16 +895,10 @@
         );
     }
 
-    /// Hook / image-intake diagnostics must not consume the Ctrl+C rewind stash.
+    /// Image-intake diagnostics must not consume the Ctrl+C rewind stash.
     #[test]
-    fn hook_and_image_intake_notifications_keep_in_flight_prompt() {
+    fn image_intake_notifications_keep_in_flight_prompt() {
         let updates = [
-            PiSessionUpdate::HookExecution {
-                event_name: "user_prompt_submit".into(),
-                tool_name: None,
-                prompt_id: Some("p1".into()),
-                runs: vec![],
-            },
             PiSessionUpdate::ImageCompressed {
                 images: vec![],
                 message: "resized".into(),

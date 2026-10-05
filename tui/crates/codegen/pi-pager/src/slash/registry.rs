@@ -15,10 +15,8 @@ use super::acp_command::AcpSlashCommand;
 use super::command::{CommandProvenance, SlashCommand, WorkflowChoice};
 use super::mode_support::ModeSupport;
 
-/// Shell ACP names the pager never offers (unified `/hooks` / `/plugins` UI,
-/// plus `/help`). Must stay covered by [`pi_shell::session::PAGER_COMMAND_KEYS`]
-/// so a skill of the same name is advertised already qualified instead of
-/// being dropped here when the matching shell gate is off.
+/// Agent-advertised command names the pager never offers: `/help` is a
+/// builtin, and the hooks/plugins management commands have no UI here.
 pub(crate) const BLOCKED_ACP_NAMES: &[&str] = &[
     "help",
     "hooks-add",
@@ -350,22 +348,6 @@ impl CommandRegistry {
     /// the underlying `SlashCommand` for visibility filtering.
     pub fn commands_by_index(&self, index: usize) -> Option<&Arc<dyn SlashCommand>> {
         self.commands.get(index)
-    }
-
-    /// Show or hide the /hooks and /plugins commands.
-    /// When hidden, they won't appear in the dropdown or be executable.
-    pub fn set_plugins_visible(&mut self, visible: bool) {
-        let names = ["hooks", "plugins"];
-        if visible {
-            for name in &names {
-                self.hidden.remove(*name);
-            }
-        } else {
-            for name in &names {
-                self.hidden.insert((*name).to_string());
-            }
-        }
-        self.rebuild_triggers();
     }
 
     fn apply_available_tools(&mut self, tools: HashSet<String>) {

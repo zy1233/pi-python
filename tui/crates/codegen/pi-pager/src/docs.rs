@@ -1,8 +1,8 @@
 //! In-app how-to documentation data (embedded markdown).
 //!
-//! Single source of truth: two static arrays (`USER_GUIDE`, `REFERENCE_DOCS`)
-//! hold every doc. All lookups are zero-allocation; `DocEntry` exists only for
-//! backward compatibility with the TUI doc picker.
+//! Single source of truth: the static `USER_GUIDE` array holds every doc. All
+//! lookups are zero-allocation; `DocEntry` exists only for backward
+//! compatibility with the TUI doc picker.
 
 /// A compile-time document entry. All fields are `&'static str`.
 #[derive(Debug)]
@@ -87,16 +87,6 @@ pub static USER_GUIDE: &[Doc] = &[
         "Creating and using reusable prompt packages"
     ),
     guide!(
-        "09-plugins.md",
-        "Plugins and Marketplace",
-        "Installing, managing, and creating plugin packages"
-    ),
-    guide!(
-        "10-hooks.md",
-        "Hooks",
-        "Project lifecycle scripts for pre/post tool-use events"
-    ),
-    guide!(
         "11-custom-models.md",
         "Custom Models",
         "BYOK, Ollama, OpenAI-compatible endpoints"
@@ -173,41 +163,18 @@ pub static USER_GUIDE: &[Doc] = &[
     ),
 ];
 
-/// Non-user-guide reference docs. Separate from USER_GUIDE because they
-/// live under `docs/` (not `docs/user-guide/`), are not extracted to disk,
-/// and do not follow the NN-*.md managed naming pattern. Bundled via
-/// `include_str!` so they are available at runtime without a docs path.
-static REFERENCE_DOCS: &[Doc] = &[
-    Doc {
-        filename: "hooks-and-plugins.md",
-        title: "Hooks & Plugins Guide",
-        description: "Using hooks, plugins, and marketplace",
-        content: include_str!("../docs/hooks-and-plugins.md"),
-    },
-    Doc {
-        filename: "custom-hooks.md",
-        title: "Creating Custom Hooks",
-        description: "Writing your own hooks and matchers",
-        content: include_str!("../docs/custom-hooks.md"),
-    },
-];
-
 // ── Public API ───────────────────────────────────────────────────────────────
 
 /// Find a doc by title (case-insensitive). Returns the static entry.
 pub fn find_doc(title: &str) -> Option<&'static Doc> {
     USER_GUIDE
         .iter()
-        .chain(REFERENCE_DOCS.iter())
         .find(|d| d.title.eq_ignore_ascii_case(title))
 }
 
 /// All doc titles, zero allocation.
 pub fn all_titles() -> impl Iterator<Item = &'static str> {
-    USER_GUIDE
-        .iter()
-        .chain(REFERENCE_DOCS.iter())
-        .map(|d| d.title)
+    USER_GUIDE.iter().map(|d| d.title)
 }
 
 /// Returns the content of a how-to document by exact title match (case-insensitive).
@@ -222,11 +189,7 @@ pub fn list_howto_titles() -> Vec<String> {
 
 /// Returns all docs as owned `DocEntry` values for the TUI doc picker.
 pub fn default_howto_entries() -> Vec<DocEntry> {
-    USER_GUIDE
-        .iter()
-        .chain(REFERENCE_DOCS.iter())
-        .map(DocEntry::from)
-        .collect()
+    USER_GUIDE.iter().map(DocEntry::from).collect()
 }
 
 /// Extract user-guide docs to `<grok_home>/docs/user-guide/`.
@@ -307,7 +270,7 @@ mod tests {
     #[test]
     fn default_howto_entries_includes_all_user_guide_docs() {
         let entries = default_howto_entries();
-        assert_eq!(entries.len(), USER_GUIDE.len() + REFERENCE_DOCS.len());
+        assert_eq!(entries.len(), USER_GUIDE.len());
         for (i, doc) in USER_GUIDE.iter().enumerate() {
             assert_eq!(entries[i].title, doc.title, "Entry {} title mismatch", i);
         }
@@ -321,22 +284,21 @@ mod tests {
     }
 
     #[test]
-    fn all_titles_covers_both_tables() {
+    fn all_titles_covers_the_user_guide() {
         let titles: Vec<_> = all_titles().collect();
-        assert_eq!(titles.len(), USER_GUIDE.len() + REFERENCE_DOCS.len());
+        assert_eq!(titles.len(), USER_GUIDE.len());
     }
 
     #[test]
     fn get_howto_doc_delegates_to_find_doc() {
         assert!(get_howto_doc("Getting Started").is_some());
-        assert!(get_howto_doc("Hooks & Plugins Guide").is_some());
         assert!(get_howto_doc("no such doc").is_none());
     }
 
     #[test]
     fn list_howto_titles_returns_all() {
         let titles = list_howto_titles();
-        assert_eq!(titles.len(), USER_GUIDE.len() + REFERENCE_DOCS.len());
+        assert_eq!(titles.len(), USER_GUIDE.len());
     }
 
     #[test]

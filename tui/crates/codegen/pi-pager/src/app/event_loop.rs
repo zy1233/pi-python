@@ -1648,7 +1648,7 @@ pub(crate) async fn run(
     // used to mask this by re-polling ~30Hz; this removes that dependency.
     let (input_tx, mut input_rx) = tokio::sync::mpsc::unbounded_channel::<TimedInputEvent>();
     // Folder-trust verdict, seeded BEFORE the first render, before any session
-    // is created (no repo-local MCP/LSP/hooks/plugins have loaded yet), and —
+    // is created, and —
     // for the type-ahead gate just below — before the reader thread starts.
     // Feature-off (kill-switch / opt-out / local build) resolves `Trusted`, so
     // this stays `TrustState::Done`.

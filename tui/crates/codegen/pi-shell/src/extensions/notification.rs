@@ -225,34 +225,6 @@ pub fn ticks_to_usd(ticks: i64) -> f64 {
     ticks as f64 / USD_TICKS_PER_USD
 }
 
-/// Status of a single hook run (wire format).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase", tag = "status")]
-pub enum HookRunStatusDto {
-    Success {
-        elapsed_ms: u64,
-    },
-    Skipped,
-    Failed {
-        error: String,
-        elapsed_ms: u64,
-        /// Stop-gate block (the hook's decision, not a failure). Rides `failed`
-        /// so old pagers keep rendering it. TODO: promote to a dedicated status.
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        blocked: bool,
-    },
-}
-
-/// A single hook run entry (wire format).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct HookRunEntryDto {
-    pub name: String,
-    pub status: HookRunStatusDto,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output: Option<String>,
-}
-
 /// Why auto-compaction stopped before completing.
 #[derive(
     Debug,
@@ -366,42 +338,6 @@ pub enum SessionUpdate {
         attempts: u32,
         /// The final error message
         error: String,
-    },
-    /// A hook annotation message for the TUI scrollback.
-    /// Rendered inline with the preceding tool call block.
-    HookAnnotation {
-        /// The hook message to display (e.g., "🪝 Running post_tool_use hooks for `Edit`...")
-        message: String,
-    },
-    /// Structured hook execution data attached to tool call blocks.
-    HookExecution {
-        /// The hook event name ("pre_tool_use" or "post_tool_use").
-        event_name: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        tool_name: Option<String>,
-        /// Keeps a delayed turn-end batch off the wrong turn's marker.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        prompt_id: Option<String>,
-        runs: Vec<HookRunEntryDto>,
-    },
-    /// Hooks registry changed (after reload or trust/untrust).
-    /// Sent so the pager modal can auto-refresh if open.
-    HooksChanged {
-        hooks: Vec<pi_hooks_plugins_types::HookInfo>,
-        project_trusted: bool,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        load_errors: Vec<String>,
-    },
-    /// Plugins registry changed (after reload).
-    /// Sent so the pager modal can auto-refresh if open.
-    PluginsChanged {
-        plugins: Vec<pi_hooks_plugins_types::PluginInfo>,
-    },
-    /// Marketplace plugin updates were auto-installed on session start.
-    /// Sent so desktop/pager can show a notification to the user.
-    PluginUpdatesInstalled {
-        /// List of (plugin_name, old_version, new_version).
-        updates: Vec<(String, String, String)>,
     },
     /// Status snapshot for client status lines. Send-only: never persisted,
     /// since the next emit supersedes it.

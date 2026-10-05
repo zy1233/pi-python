@@ -1002,7 +1002,6 @@ fn needs_animation_gates_pending_turn_end_reconcile() {
             prompt_id: "pid-stuck".into(),
             stop_reason: Some("end_turn".into()),
             agent_result: None,
-            cancellation_category: None,
             received_at: std::time::Instant::now()
                 - (TURN_END_RECONCILE_GRACE + std::time::Duration::from_secs(1)),
         });

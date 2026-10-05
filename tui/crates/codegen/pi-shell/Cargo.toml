@@ -107,7 +107,6 @@ pi-bundle = { workspace = true }
 pi-config = { workspace = true }
 pi-config-types = { workspace = true }
 pi-memory = { workspace = true }
-pi-hooks-plugins-types = { path = "../pi-hooks-plugins-types" }
 pi-file-utils = { path = "../pi-file-utils" }
 pi-session-events = { workspace = true }
 pi-auth = { workspace = true, features = ["middleware"] }

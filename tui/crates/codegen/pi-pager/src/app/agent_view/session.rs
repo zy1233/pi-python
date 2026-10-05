@@ -162,7 +162,6 @@ impl AgentView {
             workspace_mode_cli_locked: false,
             credit_balance: None,
             auto_topup: None,
-            pending_stop_hooks: None,
             turn_start_ms: None,
             turn_start_ms_prompt: None,
             turn_started_at: None,
@@ -426,7 +425,6 @@ impl AgentView {
         self.finished_wake_prompts.clear();
         self.pending_cancel_resend = None;
         self.cancel_latency = None;
-        self.pending_stop_hooks = None;
         self.front_message_committed = true;
     }
     /// Record that an `isReplay` update applied while a reload window is open.

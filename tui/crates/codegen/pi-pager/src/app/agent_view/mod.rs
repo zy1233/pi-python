@@ -482,10 +482,6 @@ pub(crate) struct PendingTurnEnd {
     pub stop_reason: Option<String>,
     /// `agentResult` detail from the broadcast (error text, when present).
     pub agent_result: Option<String>,
-    /// `_meta.cancellationCategory` from the broadcast (`"HookDenied"` picks
-    /// the "blocked by a hook" marker over "cancelled by user"). `None` on
-    /// older shells or plain user cancels.
-    pub cancellation_category: Option<String>,
     /// When the broadcast arrived; the reconcile fires after
     /// [`super::dispatch::TURN_END_RECONCILE_GRACE`].
     pub received_at: std::time::Instant,
@@ -522,16 +518,6 @@ pub(crate) struct PendingCancelResend {
     pub confirmed: bool,
     /// Replayed so a resend still arms the shell's task-wake barrier.
     pub trigger: crate::app::actions::CancelTrigger,
-}
-/// Turn-end hook runs held for the live turn's marker. See [`AgentView::pending_stop_hooks`].
-#[derive(Debug, Clone, Default)]
-pub(crate) struct PendingStopHooks {
-    /// The turn the stash belongs to; a stash that can't be matched to the
-    /// ending turn flushes standalone instead of attaching to its marker.
-    pub prompt_id: Option<String>,
-    /// `(event_name, runs)` per hook batch, in arrival order
-    /// (`stop_failure` before `stop` on error turns).
-    pub groups: Vec<(String, Vec<crate::scrollback::blocks::tool::HookRunEntry>)>,
 }
 /// In-flight reconnect session reload.
 ///
@@ -763,9 +749,6 @@ pub struct AgentView {
     pub credit_balance: Option<crate::views::credit_bar::CreditBalance>,
     /// Auto top-up rule paired with `credit_balance` for the prompt warning.
     pub auto_topup: Option<crate::views::credit_bar::AutoTopupInfo>,
-    /// Turn-end hook runs waiting for the turn's marker, which they race. Consumed or flushed
-    /// by `push_turn_terminal_marker`; dropped on every replay-window entry.
-    pub(crate) pending_stop_hooks: Option<PendingStopHooks>,
     /// UTC ms when the current turn started (`turnStartMs` from notification meta).
     /// Used for turn elapsed display.
     pub turn_start_ms: Option<i64>,

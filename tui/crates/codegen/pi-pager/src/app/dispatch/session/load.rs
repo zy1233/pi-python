@@ -254,11 +254,6 @@ fn dispatch_load_session_ungated(
         agent_mut.workspace_mode_cli_locked = cli_locked;
     }
     agent_mut.apply_credit_balance(app.credit_balance.clone(), app.auto_topup.clone());
-    agent_mut
-        .prompt
-        .slash_controller
-        .registry_mut()
-        .set_plugins_visible(!app.appearance.disable_plugins);
     switch_to_agent(app, agent_id, SwitchCause::Load);
     vec![Effect::LoadSession {
         agent_id,

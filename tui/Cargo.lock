@@ -7933,14 +7933,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pi-hooks-plugins-types"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "pi-http"
 version = "0.1.0"
 dependencies = [
@@ -8162,7 +8154,6 @@ dependencies = [
  "pi-config",
  "pi-crash-handler",
  "pi-fast-worktree",
- "pi-hooks-plugins-types",
  "pi-markdown",
  "pi-mermaid",
  "pi-pager-diff",
@@ -8532,7 +8523,6 @@ dependencies = [
  "pi-extra-ca",
  "pi-fast-worktree",
  "pi-file-utils",
- "pi-hooks-plugins-types",
  "pi-http",
  "pi-mcp",
  "pi-memory",

@@ -34,9 +34,6 @@ pub struct AppearanceConfig {
     pub show_timestamps: bool,
     /// Timeline sidebar (per-turn tick rail). Toggled via `/timeline`.
     pub show_timeline: bool,
-    /// Whether hooks & plugins UI is disabled (hides /hooks, /plugins commands
-    /// and scrollback annotations). `false` by default (plugins enabled).
-    pub disable_plugins: bool,
     /// Always show the "plan" chip in the status bar when plan content is
     /// available, even after the user exits plan mode.
     /// `false` by default (chip hidden once plan mode ends).
@@ -732,9 +729,6 @@ pub struct RawAppearanceConfig {
     pub prompt: RawPromptViewConfig,
     /// Scrollback pane settings (layout, scrollbar, scroll, blocks).
     pub scrollback: RawScrollbackConfig,
-    /// Disable hooks & plugins UI (/hooks and /plugins commands, scrollback annotations).
-    /// Defaults to false (plugins enabled).
-    pub disable_plugins: bool,
     /// Always show the "plan" chip in the status bar when plan content is
     /// available, even after the user exits plan mode.
     /// Defaults to false (chip hidden once plan mode ends).
@@ -1389,7 +1383,6 @@ impl From<RawAppearanceConfig> for AppearanceConfig {
             show_timestamps: true, // runtime-only, loaded from config.toml via persist
             // Single source: UiConfig::SHOW_TIMELINE_DEFAULT (loaded from config.toml via persist).
             show_timeline: UiConfig::SHOW_TIMELINE_DEFAULT,
-            disable_plugins: raw.disable_plugins,
             show_plan_chip: raw.show_plan_chip,
             alt_screen: raw.terminal.alt_screen.into(),
             minimal: raw.terminal.minimal,

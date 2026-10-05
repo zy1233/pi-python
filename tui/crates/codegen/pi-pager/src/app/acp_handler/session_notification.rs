@@ -1,46 +1,5 @@
 use super::*;
 use pi_shell::sampling::error::format_rate_limited_user_message;
-/// Stash a live stop-family batch under `stash_pid` for the turn marker
-/// to fold. `merge_same_name` merges a same-name repeat instead of standalone.
-pub(super) fn stash_live_stop_batch(
-    agent: &mut AgentView,
-    stash_pid: Option<String>,
-    event_name: String,
-    hook_entries: Vec<crate::scrollback::blocks::tool::HookRunEntry>,
-    merge_same_name: bool,
-) {
-    if let Some(stale) = agent
-        .pending_stop_hooks
-        .take_if(|p| p.prompt_id != stash_pid)
-    {
-        for (name, runs) in stale.groups {
-            agent.scrollback.push_lifecycle_hooks(name, runs);
-        }
-    }
-    let pending = agent.pending_stop_hooks.get_or_insert_with(|| {
-        super::super::agent_view::PendingStopHooks {
-            prompt_id: stash_pid,
-            groups: Vec::new(),
-        }
-    });
-    match pending
-        .groups
-        .iter()
-        .position(|(name, _)| *name == event_name)
-    {
-        Some(idx) if merge_same_name => {
-            pending.groups[idx].1.extend(hook_entries);
-        }
-        Some(_) => {
-            agent
-                .scrollback
-                .push_lifecycle_hooks(event_name, hook_entries);
-        }
-        None => {
-            pending.groups.push((event_name, hook_entries));
-        }
-    }
-}
 pub(super) fn refresh_context_used(view: &mut AgentView, used: u64) {
     let total = view.session.models.get_context_window().unwrap_or(0);
     view.apply_context_used(used, total);
@@ -107,11 +66,6 @@ pub(super) fn advance_reconnect_cursor(agent: &mut AgentView, meta: &mut Notific
     if let Some(id) = meta.event_id.take() {
         agent.advance_last_seen_event_id(id, meta.event_seq);
     }
-}
-/// A string field off a turn-terminal notification envelope's `_meta`
-/// (the cancel-qualifier keys; absent on older shells).
-fn terminal_meta_str<'a>(meta: Option<&'a serde_json::Value>, key: &str) -> Option<&'a str> {
-    meta.and_then(|v| v.get(key)).and_then(|v| v.as_str())
 }
 /// Handle `legacy ext RPC` and replay-path `legacy ext RPC`.
 ///
@@ -260,8 +214,6 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
                                     error,
                                     elapsed: None,
                                 },
-                                Vec::new(),
-                                Some(prompt_id.clone()),
                             );
                             true
                         }
@@ -274,10 +226,6 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
                         &prompt_id,
                         &stop_reason,
                         agent_result.as_deref(),
-                        terminal_meta_str(
-                            session_notif.meta.as_ref(),
-                            super::super::turn_completion::CANCELLATION_CATEGORY_KEY,
-                        ),
                     );
                     true
                 }
@@ -302,126 +250,10 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
                             prompt_id: Some(&prompt_id),
                             stop_reason: Some(&stop_reason),
                             agent_result: agent_result.as_deref(),
-                            cancellation_category: terminal_meta_str(
-                                session_notif.meta.as_ref(),
-                                super::super::turn_completion::CANCELLATION_CATEGORY_KEY,
-                            ),
                         },
                     ));
                 false
             }
-        }
-        PiSessionUpdate::HookAnnotation { message } => {
-            if app.appearance.disable_plugins {
-                return false;
-            }
-            tracing::debug!("Hook annotation: {message}");
-            agent
-                .scrollback
-                .push_block(RenderBlock::session_event(SessionEvent::HookAnnotation {
-                    message,
-                }));
-            true
-        }
-        PiSessionUpdate::HookExecution {
-            event_name,
-            tool_name: _tool_name,
-            prompt_id: batch_prompt_id,
-            runs,
-        } => {
-            use crate::scrollback::blocks::tool::{HookPhase, HookRunEntry, HookRunStatus};
-            let hook_entries: Vec<HookRunEntry> = runs
-                .into_iter()
-                .map(|r| {
-                    let status = match r.status {
-                        pi_shell::extensions::notification::HookRunStatusDto::Success {
-                            elapsed_ms,
-                        } => HookRunStatus::Success {
-                            elapsed: std::time::Duration::from_millis(elapsed_ms),
-                        },
-                        pi_shell::extensions::notification::HookRunStatusDto::Skipped => {
-                            HookRunStatus::Skipped
-                        }
-                        pi_shell::extensions::notification::HookRunStatusDto::Failed {
-                            error,
-                            elapsed_ms,
-                            blocked: true,
-                        } => HookRunStatus::Blocked {
-                            detail: error,
-                            elapsed: std::time::Duration::from_millis(elapsed_ms),
-                        },
-                        pi_shell::extensions::notification::HookRunStatusDto::Failed {
-                            error,
-                            elapsed_ms,
-                            blocked: false,
-                        } => HookRunStatus::Failed {
-                            error,
-                            elapsed: std::time::Duration::from_millis(elapsed_ms),
-                        },
-                    };
-                    HookRunEntry {
-                        name: r.name,
-                        status,
-                        output: r.output,
-                    }
-                })
-                .collect();
-            let is_tool_hook = event_name == "pre_tool_use" || event_name == "post_tool_use";
-            let is_stop_hook =
-                pi_hooks_plugins_types::HookEvent::from_wire(&event_name).is_turn_end();
-            if is_tool_hook {
-                let phase = if event_name == "pre_tool_use" {
-                    HookPhase::Pre
-                } else {
-                    HookPhase::Post
-                };
-                if let Some(entry_id) = agent.scrollback.last_tool_call_entry_id() {
-                    agent.scrollback.attach_hooks(entry_id, phase, hook_entries);
-                }
-            } else if is_stop_hook && !meta.is_replay && !agent.session.loading_replay {
-                let local_turn_active =
-                    agent.session.state.is_turn_running() || agent.session.state.is_cancelling();
-                let batch_is_wake = batch_prompt_id.as_deref().is_some_and(is_wake_prompt);
-                let foreign_batch = batch_prompt_id.is_some()
-                    && agent.session.current_prompt_id.is_some()
-                    && batch_prompt_id != agent.session.current_prompt_id
-                    && !batch_is_wake;
-                if foreign_batch {
-                    agent
-                        .scrollback
-                        .push_lifecycle_hooks(event_name, hook_entries);
-                } else if !batch_is_wake && local_turn_active {
-                    let stash_pid = batch_prompt_id
-                        .clone()
-                        .or_else(|| agent.session.current_prompt_id.clone());
-                    stash_live_stop_batch(
-                        agent,
-                        stash_pid,
-                        event_name,
-                        hook_entries,
-                        batch_prompt_id.is_some(),
-                    );
-                } else if let Some(entry_id) = agent
-                    .scrollback
-                    .latest_turn_marker_accepting(&event_name, batch_prompt_id.as_deref())
-                {
-                    agent.scrollback.attach_stop_hooks_to_marker(
-                        entry_id,
-                        event_name,
-                        hook_entries,
-                        batch_prompt_id.as_deref(),
-                    );
-                } else {
-                    agent
-                        .scrollback
-                        .push_lifecycle_hooks(event_name, hook_entries);
-                }
-            } else {
-                agent
-                    .scrollback
-                    .push_lifecycle_hooks(event_name, hook_entries);
-            }
-            true
         }
         PiSessionUpdate::SessionSummaryGenerated { session_summary } => {
             let title_is_manual = session_notif.meta.as_ref().and_then(|v| {

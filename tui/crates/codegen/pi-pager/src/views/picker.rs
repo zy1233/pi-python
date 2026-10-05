@@ -77,7 +77,7 @@ pub struct PickerRow<'a> {
     /// (e.g., an at-a-glance summary). Hidden when expanded, where
     /// `description_lines` and `fields` take over.
     pub summary_lines: &'a [&'a str],
-    /// Whether this row should be dimmed (e.g., disabled plugins/hooks).
+    /// Whether this row should be dimmed (e.g., a currently unavailable shortcut).
     pub dimmed: bool,
     /// Indentation level (0 = top-level, 1 = nested under a group header, etc.).
     /// Each level adds 2 spaces of left padding.
