@@ -94,13 +94,7 @@ pub enum Action {
     /// Load (resume) an existing session by ID (strict — never create).
     /// The optional `PathBuf` overrides the CWD for sessions stored under a
     /// different directory (e.g., a worktree).
-    ///
-    /// `chat_kind` is the **conversation-entry** bit only (`source ==
-    /// "conversation"` / restore preserve) — **not** sticky `--chat`.
-    /// Process-wide chat mode still stamps kind=chat via SessionFlags in the
-    /// load effect; under `--chat`, local Build disk rows are refused in
-    /// dispatch (never coerced).
-    LoadSession(String, Option<std::path::PathBuf>, bool),
+    LoadSession(String, Option<std::path::PathBuf>),
     /// Create a new session with a client-chosen session ID (`--session-id`).
     NewSessionWithId(String),
     /// Send the current prompt text to the agent.
@@ -834,10 +828,6 @@ pub enum Effect {
         permission_mode_override: Option<PermissionModeKind>,
         /// Client-chosen session ID (`--session-id` / `meta.sessionId`).
         preferred_session_id: Option<String>,
-        /// Gateway light-frontend for **this** session only (`/chat` one-shot
-        /// or CLI `--chat` via `SessionFlags.chat_mode`). Does not sticky-set
-        /// process-wide mode.
-        chat_kind: bool,
     },
     /// Create a git worktree and then create or load an ACP session in it.
     /// When `load_session_id` is `Some`, loads that session in the new worktree
@@ -860,9 +850,6 @@ pub enum Effect {
         /// the worktree/session id and `meta.sessionId` on fresh create.
         /// Ignored when `load_session_id` is set (resume path owns the id).
         preferred_session_id: Option<String>,
-        /// One-shot `/chat` or sticky `--chat` — stamp `_meta` kind=chat on
-        /// fresh create (resume uses `LoadSession.chat_kind` instead).
-        chat_kind: bool,
     },
     /// Load (resume) an existing ACP session by ID.
     ///
@@ -871,15 +858,10 @@ pub enum Effect {
     /// CWD (e.g., a worktree) than the one the user is currently in.
     ///
     /// Strict load — does not create if missing.
-    ///
-    /// `chat_kind` is the conversation-entry bit; effects also stamp kind=chat
-    /// when [`SessionFlags::chat_mode`] (`--chat`) is set.
     LoadSession {
         agent_id: AgentId,
         session_id: String,
         session_cwd: Option<std::path::PathBuf>,
-        /// Conversation-entry bit (`source == "conversation"`), not sticky `--chat`.
-        chat_kind: bool,
     },
     /// Fetch session list for the welcome screen session picker.
     FetchSessionList {

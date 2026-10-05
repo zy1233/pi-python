@@ -796,9 +796,6 @@ impl AgentView {
                 let entry_count = entry_map.len();
                 let non_sel: Vec<bool> = entry_map.iter().map(|e| e.is_none()).collect();
 
-                // Chat-mode picker lists conversations only: local-disk
-                // delete is dead weight there.
-                let chat_mode = self.app_chat_mode;
                 let config = PickerConfig {
                     title: Some("Resume session"),
                     show_search_hint: true,
@@ -811,11 +808,7 @@ impl AgentView {
                     shortcuts_area: None,
                     tabs: None,
                     active_tab: 0,
-                    action_keys: if chat_mode {
-                        &[]
-                    } else {
-                        &[('d', "delete")]
-                    },
+                    action_keys: &[('d', "delete")],
                     disable_search: false,
                     compact_bottom_bar: false,
                     search_only_on_slash: false,
@@ -881,7 +874,7 @@ impl AgentView {
                                 .map(str::to_owned);
                         if let Some(sid) = load_id {
                             self.active_modal = None;
-                            InputOutcome::Action(Action::LoadSession(sid, None, false))
+                            InputOutcome::Action(Action::LoadSession(sid, None))
                         } else {
                             InputOutcome::Unchanged
                         }
@@ -1547,9 +1540,7 @@ impl AgentView {
                 use crate::views::picker::PickerField;
                 // While a delete confirmation is armed, the footer swaps to a
                 // "y confirm / n cancel" prompt. Otherwise show the normal
-                // hints plus the `d delete` action. Chat mode drops the
-                // delete hint (local-disk-row action).
-                let chat_mode = self.app_chat_mode;
+                // hints plus the `d delete` action.
                 let mut session_shortcuts: Vec<Shortcut> = if pending_delete.is_some() {
                     vec![
                         Shortcut {
@@ -1581,13 +1572,11 @@ impl AgentView {
                             id: 0,
                         },
                     ];
-                    if !chat_mode {
-                        shortcuts.push(Shortcut {
-                            label: "d delete",
-                            clickable: false,
-                            id: 0,
-                        });
-                    }
+                    shortcuts.push(Shortcut {
+                        label: "d delete",
+                        clickable: false,
+                        id: 0,
+                    });
                     shortcuts
                 };
                 // Surface `i search` in the footer when vim nav mode is active.
@@ -2122,7 +2111,7 @@ mod session_picker_delete_tests {
         assert!(
             matches!(
                 out,
-                InputOutcome::Action(Action::LoadSession(ref id, None, false)) if id == sid
+                InputOutcome::Action(Action::LoadSession(ref id, None)) if id == sid
             ),
             "UUID query should direct-load, got {out:?}"
         );

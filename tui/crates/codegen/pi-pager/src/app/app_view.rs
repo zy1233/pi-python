@@ -793,9 +793,9 @@ pub struct AppView {
     /// Monotonically increasing sequence number for session list fetches
     /// (`Effect::FetchSessionList`): only the seq-current response is
     /// applied, so a stale completion can't clobber newer results. Bumped
-    /// only under chat mode (server-search supersede); in Build mode it
-    /// stays 0 so plain list responses keep their pre-existing
-    /// last-write-wins behavior.
+    /// when the welcome-screen picker is dismissed (a late response for the
+    /// closed picker is dropped); otherwise it stays 0 so plain list
+    /// responses keep last-write-wins behavior.
     pub session_picker_list_seq: u64,
     pub session_picker_pending_delete: Option<crate::views::session_picker::PendingDelete>,
     /// Tick counter for welcome screen spinner animation.
@@ -839,11 +839,6 @@ pub struct AppView {
     /// Enable the ask-user-question tool for new sessions (`--ask-user`).
     /// Automatically enabled by `plan_mode`.
     pub ask_user: bool,
-    /// Process-wide gateway light-frontend from CLI `--chat` only.
- /// Stamps `_meta key.kind = "chat"` and omits Build agent
-    /// profiles on create/load while set. `/chat` does **not** set this
-    /// (uses [`Self::deferred_startup`] one-shot state instead).
-    pub chat_mode: bool,
     /// Whether mouse capture is currently enabled. Disabled during the
     /// Authenticating state so the terminal handles native text selection.
     pub mouse_captured: bool,
@@ -1324,7 +1319,6 @@ impl AppView {
             plan_mode: false,
             subagents: false,
             ask_user: false,
-            chat_mode: false,
             mouse_captured: true,
             new_worktree_dialog: None,
             contextual_hints: Default::default(),
@@ -1970,7 +1964,6 @@ impl AppView {
                     cwd_has_git_ancestor: self.cwd_has_git_ancestor,
                     session_picker_grouped: self.session_picker_grouped,
                     sp_pending_delete: &mut self.session_picker_pending_delete,
-                    chat_mode: self.chat_mode,
                 },
             ),
             ActiveView::Agent(id) => {
@@ -2218,9 +2211,6 @@ struct WelcomeInputCtx<'a> {
     cwd_has_git_ancestor: bool,
     session_picker_grouped: bool,
     sp_pending_delete: &'a mut Option<crate::views::session_picker::PendingDelete>,
-    /// Process-wide `--chat`: the session picker is conversations-only
-    /// (no delete action).
-    chat_mode: bool,
 }
 /// Welcome view input -- auth-state-aware routing.
 fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutcome {
@@ -2364,11 +2354,7 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
             shortcuts_area: None,
             tabs: None,
             active_tab: 0,
-            action_keys: if ctx.chat_mode {
-                &[]
-            } else {
-                &[('d', "delete")]
-            },
+            action_keys: &[('d', "delete")],
             disable_search: false,
             compact_bottom_bar: false,
             search_only_on_slash: false,
@@ -2427,7 +2413,7 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                 if let Some(sid) =
                     crate::views::session_picker::session_id_for_direct_load(ctx.sp_state.query())
                 {
-                    return InputOutcome::Action(Action::LoadSession(sid.to_string(), None, false));
+                    return InputOutcome::Action(Action::LoadSession(sid.to_string(), None));
                 }
                 return InputOutcome::Unchanged;
             }
@@ -3209,7 +3195,6 @@ impl AppView {
                             session_picker_pending_delete: self
                                 .session_picker_pending_delete
                                 .is_some(),
-                            chat_mode: self.chat_mode,
                             credit_balance: self.credit_balance.as_ref(),
                             auto_topup: self.auto_topup.as_ref(),
                             usage_visible: self.usage_visible,

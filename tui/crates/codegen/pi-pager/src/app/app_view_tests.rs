@@ -131,7 +131,6 @@ pub(crate) fn test_app() -> AppView {
         plan_mode: false,
         subagents: false,
         ask_user: false,
-        chat_mode: false,
         mouse_captured: true,
         new_worktree_dialog: None,
         contextual_hints: Default::default(),

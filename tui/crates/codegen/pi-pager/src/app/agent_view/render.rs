@@ -897,12 +897,11 @@ impl AgentView {
             .as_ref()
             .and_then(|c| (c.total > 0).then_some(c.total))
             .or(model_window);
-        if let Some(ctx_line) = context_bar::context_bar_line_for_session(
+        if let Some(ctx_line) = context_bar::context_bar_line(
             ctx_used,
             ctx_total,
             self.hit_context.hovered,
             &theme,
-            self.chat_kind,
         ) {
             status.push("context", ctx_line);
         }
@@ -1733,11 +1732,10 @@ impl AgentView {
         let mode_flags: &[PromptFlag] = &mode_flags_vec;
         let multiline = self.multiline_mode;
         let warning = self.credit_balance.as_ref().and_then(|bal| {
-            crate::views::credit_bar::usage_warning_for_session(
+            crate::views::credit_bar::usage_warning(
                 bal,
                 self.auto_topup.as_ref(),
                 self.billing_surface_visible,
-                self.chat_kind,
             )
         });
         let usage_warning_text: Option<String> = warning.as_ref().map(|(t, _)| t.clone());

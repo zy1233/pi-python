@@ -722,23 +722,6 @@ pub struct AgentView {
     /// Held across a frame that clamps the row away, so a script keeps the size
     /// it last painted at.
     pub last_status_line_size: Option<crate::views::status_line::RowSize>,
-    /// Gateway light-frontend session (`kind: "chat"` / `--chat` / conversation
-    /// resume). Suppresses Build credits / local sampler context telemetry so the
-    /// status bar and prompt never imply remote usage from wrong metrics.
-    /// OR'd with sticky `--chat` for UI/focus matching — not the ACP rename
-    /// `kind` bit; see [`Self::conversation_entry`].
-    pub chat_kind: bool,
-    /// Whether this session opened on the chat lane (ACP `kind=chat`).
-    /// True for conversation-entry loads, `/chat` create, and sticky
-    /// `--chat` gateway resumes. False for history-bypass local-disk
-    /// Build rows (those keep [`Self::chat_kind`] for UI only).
-    pub conversation_entry: bool,
-    /// Process-wide `--chat` (mirrors `AppView::chat_mode`; set via
-    /// [`Self::apply_app_scoped_gates`]). UI policy only: hides picker
-    /// source filter / delete / deep search on a conversations-only list.
-    /// Unlike `chat_kind`, stays `false` for a `/chat` one-shot session in
-    /// a Build process, whose picker still lists local sessions.
-    pub app_chat_mode: bool,
     /// Mocked credit balance for the status bar indicator.
     pub credit_balance: Option<crate::views::credit_bar::CreditBalance>,
     /// Auto top-up rule paired with `credit_balance` for the prompt warning.

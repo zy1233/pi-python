@@ -372,11 +372,10 @@ pub(super) fn handle_billing_fetched(
     // Render the `/usage` summary from the now-current cached rule.
     let summary_topup = app.auto_topup.clone();
     if let Some(agent) = app.agents.get_mut(&agent_id) {
-        // Gateway/chat-kind: do not attach Build coding credits.
         let mut topup = agent.auto_topup.clone();
         apply_auto_topup(&mut topup, &autotopup);
         agent.apply_credit_balance(balance.clone(), topup);
-        if !silent && !agent.chat_kind {
+        if !silent {
             let msg = match &balance {
                 Some(bal) => {
                     crate::views::credit_bar::format_usage_summary(bal, summary_topup.as_ref())

@@ -132,8 +132,8 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             app.new_worktree_dialog = Some(crate::app::app_view::NewWorktreeDialogState::new());
             vec![]
         }
-        Action::LoadSession(session_id, session_cwd, chat_kind) => {
-            dispatch_load_session(app, session_id, session_cwd, chat_kind)
+        Action::LoadSession(session_id, session_cwd) => {
+            dispatch_load_session(app, session_id, session_cwd)
         }
         Action::NewSessionWithId(session_id) => dispatch_new_session_with_id(app, session_id),
         Action::FetchSessionList => dispatch_fetch_session_list(app),
@@ -516,10 +516,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             session_id,
             cwd,
         } => {
-            if source == "conversation" {
-                app.show_toast("Deleting chat conversations isn't supported yet");
-                return vec![];
-            }
             if !matches!(source.as_str(), "local" | "remote" | "both")
                 || !session_picker_entry_matches(app, &source, &session_id)
             {

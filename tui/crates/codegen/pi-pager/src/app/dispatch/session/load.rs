@@ -28,18 +28,16 @@ pub(in crate::app::dispatch) fn dispatch_load_session(
     app: &mut AppView,
     session_id: String,
     session_cwd: Option<std::path::PathBuf>,
-    chat_kind: bool,
 ) -> Vec<Effect> {
     if !app.session_startup_allowed() {
         app.deferred_startup.session =
             Some(crate::app::session_startup::DeferredSessionStartup::Load {
                 session_id,
                 session_cwd,
-                chat_kind,
             });
         return vec![];
     }
-    dispatch_load_session_ungated(app, session_id, session_cwd, chat_kind)
+    dispatch_load_session_ungated(app, session_id, session_cwd)
 }
 /// Clear `session_id` from any existing agent that already owns the given
 /// session, then return a freshly constructed [`acp::SessionId`].
@@ -59,26 +57,21 @@ pub(in crate::app::dispatch) fn clear_stale_session_id(
     }
     sid
 }
-/// If a local agent already owns this id **and** matches kind, focus it.
+/// If a local agent already owns this id, focus it.
 ///
-/// - Kind: compare against the stamped form `chat_kind || app.chat_mode` (agents
-///   store that; the LoadSession arg is conversation-entry only). Conversation
-///   vs Build still differs when sticky `--chat` is off.
 /// - Eager `session_id` + leftover load placeholder after `SessionLoadFailed`
 ///   is not "open" — reissue load instead of focusing.
 pub(in crate::app::dispatch) fn focus_if_session_already_open(
     app: &mut AppView,
     session_id: &str,
-    chat_kind: bool,
 ) -> Option<AgentId> {
-    let expected_kind = chat_kind || app.chat_mode;
     let existing_id = app.agents.iter().find_map(|(id, a)| {
         let sid_ok = a
             .session
             .session_id
             .as_ref()
             .is_some_and(|sid| &*sid.0 == session_id);
-        if !sid_ok || a.chat_kind != expected_kind {
+        if !sid_ok {
             return None;
         }
         if a.loading_placeholder_id.is_some() && !a.session.loading_replay {
@@ -89,39 +82,13 @@ pub(in crate::app::dispatch) fn focus_if_session_already_open(
     switch_to_agent(app, existing_id, SwitchCause::Load);
     Some(existing_id)
 }
-/// Matches effects `is_chat_path` after history-bypass clearing of
-/// `SessionFlags.chat_mode`: conversation-entry bit OR (sticky `--chat`
-/// and not local-disk history bypass). Gateway resumes (no bypass) are
-/// Chat; history-bypass local-disk rows stay Build.
-///
-/// Used by load and fork so `rename_kind()` matches the lane `LoadSession`
-/// is stamped onto.
-pub(in crate::app::dispatch) fn session_opens_as_chat(app: &AppView, chat_kind: bool) -> bool {
-    if chat_kind {
-        return true;
-    }
-    app.chat_mode
-}
 fn dispatch_load_session_ungated(
     app: &mut AppView,
     session_id: String,
     session_cwd: Option<std::path::PathBuf>,
-    chat_kind: bool,
 ) -> Vec<Effect> {
-    let bypass_chat_refusal = false;
-    if !bypass_chat_refusal
-        && crate::app::session_startup::chat_mode_refuses_local_build_load(
-            app.chat_mode,
-            chat_kind,
-            &session_id,
-            &app.cwd,
-        )
-    {
-        app.show_toast(crate::app::session_startup::CHAT_MODE_LOCAL_BUILD_REFUSAL);
-        return vec![];
-    }
     invalidate_picker_fetch_on_dismiss(app);
-    if focus_if_session_already_open(app, &session_id, chat_kind).is_some() {
+    if focus_if_session_already_open(app, &session_id).is_some() {
         return vec![];
     }
     let acp_session_id = clear_stale_session_id(app, &session_id);
@@ -174,7 +141,6 @@ fn dispatch_load_session_ungated(
         scrollback,
     );
     app.agents.insert(agent_id, agent);
-    let conversation_entry = session_opens_as_chat(app, chat_kind);
     let agent_mut = app.agents.get_mut(&agent_id).unwrap();
     agent_mut.attached_as_viewer = true;
     agent_mut.begin_replay_window();
@@ -197,21 +163,16 @@ fn dispatch_load_session_ungated(
         app.sharing_enabled,
         app.usage_visible,
         !app.has_external_auth_provider,
-        app.chat_mode,
         app.screen_mode,
         &app.active_announcements,
         &app.tier_restricted_commands,
     );
-    agent_mut.chat_kind = chat_kind || app.chat_mode;
-    agent_mut.conversation_entry = conversation_entry;
     agent_mut.apply_credit_balance(app.credit_balance.clone(), app.auto_topup.clone());
     switch_to_agent(app, agent_id, SwitchCause::Load);
     vec![Effect::LoadSession {
         agent_id,
         session_id,
         session_cwd,
-        // Conversation-entry bit; effects OR SessionFlags.chat_mode for meta.
-        chat_kind,
     }]
 }
 /// Load the session selected in the session picker.
@@ -226,7 +187,7 @@ pub(in crate::app::dispatch) fn dispatch_pick_session(
             let data = entries
                 .as_ref()
                 .and_then(|s| s.get(index))
-                .map(|e| (e.id.clone(), e.source.clone(), e.cwd.clone()));
+                .map(|e| (e.id.clone(), e.cwd.clone()));
             agent.active_modal = None;
             picker_dismissed = true;
             data
@@ -239,7 +200,7 @@ pub(in crate::app::dispatch) fn dispatch_pick_session(
     if picker_dismissed {
         invalidate_picker_fetch_on_dismiss(app);
     }
-    let (session_id, source, cwd) = match entry_data {
+    let (session_id, cwd) = match entry_data {
         Some(d) => d,
         None => {
             let sessions = match app.session_picker_entries.take() {
@@ -253,7 +214,7 @@ pub(in crate::app::dispatch) fn dispatch_pick_session(
                 Some(e) => e,
                 None => return vec![],
             };
-            let d = (entry.id.clone(), entry.source.clone(), entry.cwd.clone());
+            let d = (entry.id.clone(), entry.cwd.clone());
             app.session_picker_loading = false;
             app.session_picker_state.set_query("");
             app.session_picker_state.search_active = false;
@@ -261,16 +222,12 @@ pub(in crate::app::dispatch) fn dispatch_pick_session(
             d
         }
     };
-    let chat_kind = source == "conversation";
-    if chat_kind {
-        return dispatch_load_session(app, session_id, None, true);
-    }
-    if focus_if_session_already_open(app, &session_id, false).is_some() {
+    if focus_if_session_already_open(app, &session_id).is_some() {
         return vec![];
     }
     let local_cwd = app.cwd.to_string_lossy().to_string();
     if pi_shell::session::resolve_local_session(&session_id, &local_cwd).is_some() {
-        return dispatch_load_session(app, session_id, None, false);
+        return dispatch_load_session(app, session_id, None);
     }
     if let Some(original_cwd) = pi_shell::session::resolve_local_session_any_cwd(&session_id)
     {
@@ -278,7 +235,6 @@ pub(in crate::app::dispatch) fn dispatch_pick_session(
             app,
             session_id,
             Some(std::path::PathBuf::from(original_cwd)),
-            false,
         );
     }
     // In pi-python architecture, sessions are managed by the ACP agent backend (JsonlSessionRepo)
@@ -289,7 +245,7 @@ pub(in crate::app::dispatch) fn dispatch_pick_session(
     } else {
         Some(std::path::PathBuf::from(cwd))
     };
-    dispatch_load_session(app, session_id, session_cwd, false)
+    dispatch_load_session(app, session_id, session_cwd)
 }
 /// Pick a session from the picker and resume it in a new git worktree.
 pub(in crate::app::dispatch) fn dispatch_pick_session_in_worktree(
@@ -303,7 +259,7 @@ pub(in crate::app::dispatch) fn dispatch_pick_session_in_worktree(
             let data = entries
                 .as_ref()
                 .and_then(|s| s.get(index))
-                .map(|e| (e.id.clone(), e.source.clone()));
+                .map(|e| e.id.clone());
             agent.active_modal = None;
             picker_dismissed = true;
             data
@@ -316,7 +272,7 @@ pub(in crate::app::dispatch) fn dispatch_pick_session_in_worktree(
     if picker_dismissed {
         invalidate_picker_fetch_on_dismiss(app);
     }
-    let (session_id, source) = match entry_data {
+    let session_id = match entry_data {
         Some(d) => d,
         None => {
             let sessions = match app.session_picker_entries.take() {
@@ -330,7 +286,7 @@ pub(in crate::app::dispatch) fn dispatch_pick_session_in_worktree(
                 Some(e) => e,
                 None => return vec![],
             };
-            let d = (entry.id.clone(), entry.source.clone());
+            let d = entry.id.clone();
             app.session_picker_loading = false;
             app.session_picker_state.set_query("");
             app.session_picker_state.search_active = false;
@@ -338,10 +294,6 @@ pub(in crate::app::dispatch) fn dispatch_pick_session_in_worktree(
             d
         }
     };
-    if source == "conversation" {
-        app.show_toast("Chat conversations can't be resumed in a worktree");
-        return vec![];
-    }
     dispatch_new_worktree_session(app, Some(session_id), None, None, None, None, None)
 }
 fn keep_picker_entry(
@@ -645,7 +597,7 @@ pub(in crate::app::dispatch) fn dispatch_session_picker_closed(app: &mut AppView
 /// resurrects the picker.
 fn invalidate_picker_fetch_on_dismiss(app: &mut AppView) {
     let welcome_dismissal = matches!(app.active_view, crate::app::app_view::ActiveView::Welcome);
-    if app.chat_mode || welcome_dismissal {
+    if welcome_dismissal {
         app.session_picker_list_seq += 1;
     }
     if welcome_dismissal {

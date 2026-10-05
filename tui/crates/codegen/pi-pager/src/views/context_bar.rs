@@ -178,31 +178,12 @@ const BAR_PCT_GAP: u16 = 1;
 /// line, which always rounds up to 6 (zero-width bar + gap + percentage).
 ///
 /// Returns `None` if token data is unavailable.
-///
-/// Gateway light-frontend (`kind: "chat"`) sessions must not display Build /
-/// local sampler context usage — call with `gateway_chat = true` to suppress
-/// the bar entirely (remote owns context; no mapped totals yet). remote settings
-/// opt-in for chat entry can reuse the same gate later.
 pub fn context_bar_line(
     used_tokens: Option<u64>,
     total_tokens: Option<u64>,
     hovered: bool,
     theme: &Theme,
 ) -> Option<Line<'static>> {
-    context_bar_line_for_session(used_tokens, total_tokens, hovered, theme, false)
-}
-
-/// Like [`context_bar_line`], but omits the bar for gateway/chat-kind sessions.
-pub fn context_bar_line_for_session(
-    used_tokens: Option<u64>,
-    total_tokens: Option<u64>,
-    hovered: bool,
-    theme: &Theme,
-    gateway_chat: bool,
-) -> Option<Line<'static>> {
-    if gateway_chat {
-        return None;
-    }
     let used = used_tokens?;
     let total = total_tokens.filter(|&t| t > 0)?;
     let pct = pi_token_estimation::usage_percentage(used, total);
@@ -417,16 +398,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn gateway_chat_suppresses_context_bar_even_with_tokens() {
-        let theme = Theme::default();
-        assert!(
-            context_bar_line_for_session(Some(1_000), Some(1_000_000), false, &theme, true)
-                .is_none()
-        );
-        assert!(
-            context_bar_line_for_session(Some(1_000), Some(1_000_000), false, &theme, false)
-                .is_some()
-        );
-    }
 }

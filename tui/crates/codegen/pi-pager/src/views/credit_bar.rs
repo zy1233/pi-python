@@ -152,26 +152,12 @@ const PAY_AS_YOU_GO_CRITICAL_CENTS: i64 = 500;
 /// never warn). Behaviour splits by billing model — prepaid credits,
 /// pay-as-you-go on-demand, or the included-allowance percentage — with exact
 /// thresholds and copy pinned by the unit tests.
-///
-/// Gateway light-frontend (`kind: "chat"`) sessions must not surface Build
-/// coding-credit warnings — use [`usage_warning_for_session`] with
-/// `gateway_chat = true` so the prompt shows no fake local sampler telemetry.
 pub fn usage_warning(
     balance: &CreditBalance,
     autotopup: Option<&AutoTopupInfo>,
     usage_visible: bool,
 ) -> Option<(String, bool)> {
-    usage_warning_for_session(balance, autotopup, usage_visible, false)
-}
-
-/// Like [`usage_warning`], but suppresses output for gateway/chat-kind sessions.
-pub fn usage_warning_for_session(
-    balance: &CreditBalance,
-    autotopup: Option<&AutoTopupInfo>,
-    usage_visible: bool,
-    gateway_chat: bool,
-) -> Option<(String, bool)> {
-    if gateway_chat || !usage_visible {
+    if !usage_visible {
         return None;
     }
 

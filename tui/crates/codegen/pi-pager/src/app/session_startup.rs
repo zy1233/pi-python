@@ -15,8 +15,6 @@ pub enum DeferredSessionStartup {
     Load {
         session_id: String,
         session_cwd: Option<PathBuf>,
-        /// Conversation-entry bit (`source == "conversation"`), not sticky `--chat`.
-        chat_kind: bool,
     },
     /// Client-chosen id (`--session-id`), also mirrored into `preferred_session_id`.
     NewWithId { session_id: String },
@@ -31,7 +29,6 @@ pub struct DeferredStartupActions {
     pub worktree_ref: Option<String>,
     pub new_session: bool,
     pub prompt: Option<String>,
-    pub pending_chat: bool,
 }
 impl DeferredStartupActions {
     pub fn is_empty(&self) -> bool {
@@ -167,62 +164,6 @@ impl PagerArgs {
         })
     }
 }
-/// User-facing refusal when process-wide `--chat` would open a local Build disk row.
-pub const CHAT_MODE_LOCAL_BUILD_REFUSAL: &str = "cannot open a local Build session while --chat is active; \
-resume a conversation or start a new chat (/chat)";
-/// User-facing error for `--restore-code` + `--chat` (code restore is a
-/// Build/worktree concept; chat sessions carry no codebase).
-pub const CHAT_MODE_RESTORE_CODE_CONFLICT: &str = "--restore-code is not supported with --chat";
-/// Flag validation: Build-lifecycle flags that cannot combine with `--chat`.
-/// Always `None` when `chat_mode` is false, so call sites need no `cfg`.
-pub fn chat_mode_flag_conflict(chat_mode: bool, restore_code: bool) -> Option<&'static str> {
-    if !chat_mode {
-        return None;
-    }
-    if restore_code {
-        return Some(CHAT_MODE_RESTORE_CODE_CONFLICT);
-    }
-    None
-}
-/// Conservative shape check for a chat-mode `--resume <id>` passthrough.
-///
-/// The id skips disk/GCS resolution and flows to the gateway, but it is also
-/// path-joined by the local cwd-collision check — so reject path separators,
-/// dots, and anything outside the conversation-id alphabet before it leaves
-/// materialization. Existence is still validated by the gateway at load.
-pub fn valid_conversation_id_shape(id: &str) -> bool {
-    !id.is_empty()
-        && id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
-}
-/// True when `session_id` resolves under the **cwd-scoped** local Build sessions
-/// tree. Deliberately does **not** use `resolve_local_session_any_cwd`: a gateway
-/// conversation id that collides with a Build session under another cwd must not
-/// false-refuse CLI resume / non-entry loads under `--chat`.
-pub fn local_build_session_on_disk(session_id: &str, cwd: &Path) -> bool {
-    let cwd_str = cwd.to_string_lossy();
-    pi_shell::session::resolve_local_session(session_id, &cwd_str).is_some()
-}
-/// Process-wide `--chat` must not load (or coerce) local Build disk rows.
-///
-/// `conversation_entry` is true only for picker/list rows with
-/// `source == "conversation"` (or restore that preserved that bit) — **not**
-/// merely because sticky `--chat` / `chat_mode` is set.
-///
-/// Short-circuits before any disk walk when `--chat` is off or the row is a
-/// conversation entry.
-pub fn chat_mode_refuses_local_build_load(
-    chat_mode: bool,
-    conversation_entry: bool,
-    session_id: &str,
-    cwd: &Path,
-) -> bool {
-    if !chat_mode || conversation_entry {
-        return false;
-    }
-    local_build_session_on_disk(session_id, cwd)
-}
 /// Outcome of async materialization (local resolve / remote restore / preflight).
 #[derive(Debug, Clone)]
 pub enum MaterializedStartup {
@@ -266,10 +207,6 @@ pub struct MaterializeCtx {
     pub has_worktree: bool,
     /// When true, attempt remote restore if the session is not on disk.
     pub allow_remote_restore: bool,
-    /// Process-wide flag: resume targets are grok.com conversations, not
-    /// the local disk store. Always `false` without the optional feature;
-    /// setting it anyway errors rather than silently falling back to disk.
-    pub chat_mode: bool,
     /// See [`TitleResolution`]; carried from the pre-sandbox pin outcome.
     pub title_resolution: TitleResolution,
     /// CLI `--restore-code`. Remote codebase restore is never applied in-place;
@@ -288,7 +225,6 @@ impl MaterializeCtx {
         Self {
             has_worktree: args.worktree.is_some(),
             allow_remote_restore: Self::default_allow_remote_restore(),
-            chat_mode: args.chat(),
             title_resolution: if args.resume_target_pinned {
                 TitleResolution::PinnedPreSandbox
             } else {
@@ -403,9 +339,6 @@ pub async fn materialize_startup_for_cwd(
             session_id: None,
             most_recent_for_cwd: true,
         } => {
-            if ctx.chat_mode {
-                anyhow::bail!("chat-mode resume requires a build with the `chat` cargo feature");
-            }
             let started = std::time::Instant::now();
             let (id, title) = most_recent_session_id(cwd).await?;
             tracing::info!(
@@ -425,18 +358,6 @@ pub async fn materialize_startup_for_cwd(
             session_id: Some(session_id),
             ..
         } => {
-            if ctx.chat_mode {
-                if !valid_conversation_id_shape(&session_id) {
-                    anyhow::bail!("invalid conversation id {session_id:?}");
-                }
-                return Ok(MaterializedStartup::Resume {
-                    session_id,
-                    original_cwd: None,
-                    title: None,
-                    deferred_local_miss: false,
-                    suppress_code_restore: false,
-                });
-            }
             let r = resolve_existing_session(ctx, &session_id, cwd).await?;
             Ok(MaterializedStartup::Resume {
                 session_id: r.id,
@@ -793,7 +714,6 @@ mod tests {
                 session_id: "client-id".into(),
             }),
             prompt: Some("prompt".into()),
-            pending_chat: true,
             ..Default::default()
         };
         assert!(!actions.is_empty());
@@ -801,7 +721,6 @@ mod tests {
         assert!(actions.is_empty());
         assert!(snapshot.session.is_some());
         assert_eq!(snapshot.prompt.as_deref(), Some("prompt"));
-        assert!(snapshot.pending_chat);
     }
     #[test]
     fn intent_default_is_new_auto() {
@@ -888,35 +807,11 @@ mod tests {
         let load = DeferredSessionStartup::Load {
             session_id: "s".into(),
             session_cwd: None,
-            chat_kind: false,
         };
         let nid = DeferredSessionStartup::NewWithId {
             session_id: "s".into(),
         };
         assert_ne!(load, nid);
-    }
-    fn chat_ctx() -> MaterializeCtx {
-        MaterializeCtx {
-            has_worktree: false,
-            allow_remote_restore: true,
-            chat_mode: true,
-            title_resolution: TitleResolution::Allowed,
-            restore_code: false,
-            restore_progress_on_stdout: false,
-        }
-    }
-    #[test]
-    fn chat_mode_flag_conflict_matrix() {
-        assert_eq!(
-            chat_mode_flag_conflict(true, true),
-            Some(CHAT_MODE_RESTORE_CODE_CONFLICT)
-        );
-        assert_eq!(chat_mode_flag_conflict(true, false), None);
-        assert_eq!(chat_mode_flag_conflict(false, true), None);
-    }
-    #[test]
-    fn materialize_ctx_chat_mode_from_args() {
-        assert!(!MaterializeCtx::from_pager_args(&parse(&["grok"])).chat_mode);
     }
     /// hardcoded `false` here once disabled it everywhere.
     #[test]
@@ -955,7 +850,6 @@ mod tests {
         MaterializeCtx {
             has_worktree,
             allow_remote_restore: true,
-            chat_mode: false,
             title_resolution: TitleResolution::Allowed,
             restore_code,
             restore_progress_on_stdout: false,
@@ -1097,75 +991,6 @@ mod tests {
             other => panic!("expected Resume, got {other:?}"),
         }
     }
-    /// Explicit-id resume under `--chat` passes the id through untouched:
-    /// no disk resolution, no GCS restore (the cwd does not even exist).
-    #[tokio::test]
-    async fn materialize_chat_resume_id_is_conversation_direct() {
-        let out = materialize_startup_for_cwd(
-            chat_ctx(),
-            SessionStartupIntent::Resume {
-                session_id: Some("conv-e2f1".into()),
-                most_recent_for_cwd: false,
-            },
-            "/nonexistent/cwd/for/chat-resume-test",
-        )
-        .await
-        .unwrap();
-        match out {
-            MaterializedStartup::Resume {
-                session_id,
-                original_cwd,
-                title,
-                ..
-            } => {
-                assert_eq!(session_id, "conv-e2f1");
-                assert!(original_cwd.is_none());
-                assert!(title.is_none());
-            }
-            other => panic!("expected Resume, got {other:?}"),
-        }
-    }
-    /// Chat-mode passthrough rejects ids that could escape the sessions tree
-    /// via the collision check's path join (or are junk for the gateway).
-    #[tokio::test]
-    async fn materialize_chat_resume_id_rejects_unsafe_shapes() {
-        for bad in ["../../../etc/passwd", "a/b", "conv id", "conv\u{7}", ""] {
-            let err = materialize_startup_for_cwd(
-                chat_ctx(),
-                SessionStartupIntent::Resume {
-                    session_id: Some(bad.into()),
-                    most_recent_for_cwd: false,
-                },
-                "/tmp",
-            )
-            .await
-            .unwrap_err();
-            assert!(
-                err.to_string().contains("invalid conversation id"),
-                "expected shape rejection for {bad:?}, got: {err}"
-            );
-        }
-        assert!(valid_conversation_id_shape(
-            "aaaaaaaa-1111-2222-3333-444444444444"
-        ));
-        assert!(valid_conversation_id_shape("conv_abc123"));
-    }
-    /// A no-feature build asked for chat most-recent must fail loudly, not
-    /// silently resolve a local Build session.
-    #[tokio::test]
-    async fn materialize_chat_most_recent_without_feature_bails() {
-        let err = materialize_startup_for_cwd(
-            chat_ctx(),
-            SessionStartupIntent::Resume {
-                session_id: None,
-                most_recent_for_cwd: true,
-            },
-            "/nonexistent/cwd/for/no-feature-chat-test",
-        )
-        .await
-        .unwrap_err();
-        assert!(err.to_string().contains("chat"), "unexpected error: {err}");
-    }
     /// Without `--chat` an unknown id still goes through disk/GCS resolution
     /// (pinned via `allow_remote_restore: false` → strict "does not exist").
     #[ignore = "pi-python: grok-specific feature not supported"]
@@ -1174,7 +999,6 @@ mod tests {
         let ctx = MaterializeCtx {
             has_worktree: false,
             allow_remote_restore: false,
-            chat_mode: false,
             title_resolution: TitleResolution::Allowed,
             restore_code: false,
             restore_progress_on_stdout: false,
@@ -1194,51 +1018,6 @@ mod tests {
             "unexpected error: {err}"
         );
     }
-    /// The chat passthrough does not bypass the cwd-collision refusal that
-    /// `app/mod.rs` runs on the materialized id.
-    #[serial_test::serial(GROK_HOME)]
-    #[tokio::test]
-    async fn chat_resume_passthrough_keeps_cwd_collision_refusal() {
-        let home = tempfile::tempdir().expect("home tempdir");
-        unsafe { std::env::set_var("GROK_HOME", home.path()) };
-        let cwd = tempfile::tempdir().expect("cwd tempdir");
-        let cwd_str = cwd.path().to_string_lossy().to_string();
-        let id = "aaaaaaaa-1111-2222-3333-444444444444";
-        let encoded = pi_shell::util::grok_home::encode_cwd_dirname(&cwd_str);
-        let sessions_cwd_dir = pi_shell::util::grok_home::grok_home()
-            .join("sessions")
-            .join(&encoded);
-        struct RmDirOnDrop(std::path::PathBuf);
-        impl Drop for RmDirOnDrop {
-            fn drop(&mut self) {
-                let _ = std::fs::remove_dir_all(&self.0);
-            }
-        }
-        let _cleanup = RmDirOnDrop(sessions_cwd_dir.clone());
-        let session_dir = sessions_cwd_dir.join(id);
-        std::fs::create_dir_all(&session_dir).unwrap();
-        std::fs::write(session_dir.join("summary.json"), "{}").unwrap();
-        let out = materialize_startup_for_cwd(
-            chat_ctx(),
-            SessionStartupIntent::Resume {
-                session_id: Some(id.into()),
-                most_recent_for_cwd: false,
-            },
-            &cwd_str,
-        )
-        .await
-        .unwrap();
-        match &out {
-            MaterializedStartup::Resume { session_id, .. } => {
-                assert_eq!(session_id, id);
-                assert!(
-                    chat_mode_refuses_local_build_load(true, false, session_id, cwd.path()),
-                    "cwd-local Build collision must still be refused after passthrough"
-                );
-            }
-            other => panic!("expected Resume, got {other:?}"),
-        }
-    }
     mod resume_by_title {
         use super::*;
         use crate::test_util::GrokHomeFixture;
@@ -1246,7 +1025,6 @@ mod tests {
             MaterializeCtx {
                 has_worktree: false,
                 allow_remote_restore: false,
-                chat_mode: false,
                 title_resolution: TitleResolution::Allowed,
                 restore_code: false,
                 restore_progress_on_stdout: false,

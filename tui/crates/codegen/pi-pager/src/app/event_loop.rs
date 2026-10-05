@@ -1006,7 +1006,6 @@ pub(crate) async fn run(
     app.plan_mode = !args.no_plan;
     app.subagents = !args.no_subagents;
     app.ask_user = !args.no_ask_user;
-    app.chat_mode = args.chat();
     app.restore_code = args.restore_code.then_some(true);
     if let Some(ref agent) = args.agent {
         match super::cli::resolve_agent_arg(agent) {
@@ -1856,17 +1855,12 @@ pub(crate) async fn run(
             suppress_code_restore,
             ..
         } => {
-            // CLI resume has no roster entry: `chat_kind` on LoadSession is the
-            // conversation-entry bit only (false here). Process-wide `--chat`
-            // still stamps kind=chat via SessionFlags.chat_mode in the load
-            // effect; local Build disk rows are refused in dispatch / startup.
             if *suppress_code_restore {
                 app.suppress_code_restore_once = Some(session_id.clone());
             }
             Some(Action::LoadSession(
                 session_id.clone(),
                 session_cwd.clone(),
-                false,
             ))
         }
         MaterializedStartup::NewWithId { session_id } if args.worktree.is_some() => {
@@ -3611,7 +3605,6 @@ pub(crate) fn session_flags_for_effects(app: &mut AppView) -> effects::SessionFl
             app.default_yolo,
             matches!(app.current_ui.permission_mode.as_deref(), Some("auto")),
         ),
-        chat_mode: app.chat_mode,
         screen_mode_label: Some(app.screen_mode.meta_label()),
         is_api_key_auth: app.is_api_key_auth,
     }

@@ -140,8 +140,7 @@ pub(crate) fn parse_session_load_running_prompt_id(
 /// pager stores it per session and must not re-resolve the setting: a
 /// mid-session flip would then make `/loop`'s wording describe a runtime the
 /// already-spawned session will never use. `None` when the shell predates the
-/// key (or for gateway chat sessions, which have no local fires), leaving the
-/// reader on the startup seed.
+/// key, leaving the reader on the startup seed.
 pub(crate) fn parse_session_scheduler_background_loops(
     resp_meta: Option<&acp::Meta>,
 ) -> Option<bool> {
@@ -319,10 +318,6 @@ pub(crate) fn sanitize_user_error(raw: &str) -> String {
 /// | true  | true      | false    | `grok-build-plan`              | `false`            |
 /// | true  | false     | true     | `grok-build-plan-no-subagents` | omitted (shell gate) |
 /// | true  | true      | true     | `grok-build-plan`              | omitted (shell gate) |
-///
-/// When [`Self::chat_mode`] is set (gateway light-frontend / `--chat`), Build
-/// `agentProfile` injection is omitted (K12) and `_meta key.kind`
-/// is stamped `"chat"` so the shell takes `require_gateway` / thin profile.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SessionFlags {
     pub plan_mode: bool,
@@ -334,10 +329,6 @@ pub(crate) struct SessionFlags {
     /// Auto (classifier) permission mode (`_meta.autoMode`). Mutually exclusive
     /// with `yolo_mode` on the agent; both may be set only if yolo wins at spawn.
     pub auto_mode: bool,
-    /// Gateway light-frontend (`kind: "chat"`) — `--chat` / `/chat`.
-    /// Mutual exclusivity with Build plan profiles: profiles are omitted and a
-    /// warn is logged when plan flags are also set (K12).
-    pub chat_mode: bool,
     /// Effective screen mode label (`ScreenMode::meta_label`), stamped into
     /// every `PromptRequest._meta.screenMode` for minimal-vs-regular usage
     /// telemetry. `None` (key omitted) only under `Default` in tests; real
@@ -351,12 +342,8 @@ impl SessionFlags {
     /// Resolve the agent profile name from the flags.
     ///
     /// Returns `None` for the default `grok-build` profile (no `_meta`
-    /// needed; it already includes TaskTool). Chat mode never injects a
-    /// Build profile (remote owns agent behavior).
+    /// needed; it already includes TaskTool).
     pub(super) fn agent_profile(&self) -> Option<&'static str> {
-        if self.chat_mode {
-            return None;
-        }
         match (self.plan_mode, self.subagents, self.ask_user) {
             (true, true, _) => Some("grok-build-plan"),
             (true, false, _) => Some("grok-build-plan-no-subagents"),
@@ -371,18 +358,10 @@ impl SessionFlags {
     /// emit-site comment below). `--no-ask-user` always forces
     /// `askUserQuestion: false` into the meta, even when paired with
     /// `GROK_AGENT` — the env var chooses the *agent*, but the tool-strip is
- /// independent. Chat mode additionally stamps `legacy ext RPC`.
+    /// independent.
     pub(crate) fn to_meta(&self) -> Option<acp::Meta> {
         let mut meta = serde_json::Map::new();
-        if self.chat_mode {
-            if self.plan_mode || self.agent_override.is_some()
-                || std::env::var("GROK_AGENT").ok().is_some_and(|s| !s.trim().is_empty())
-            {
-                tracing::warn!(
-                    "chat mode active: omitting Build agentProfile (plan/agent override ignored)"
-                );
-            }
-        } else if let Some(ref profile) = self.agent_override {
+        if let Some(ref profile) = self.agent_override {
             meta.insert("agentProfile".into(), profile.clone());
         } else if std::env::var("GROK_AGENT").ok().is_some_and(|s| !s.trim().is_empty())
         {} else if let Some(profile) = self.agent_profile() {
@@ -400,53 +379,8 @@ impl SessionFlags {
             )),
         );
         meta.retain(|k, _| !crate::acp::vendor::is_vendor_meta_key(k));
-        let mut result = if meta.is_empty() { None } else { Some(meta) };
-        if self.chat_mode {
-            apply_chat_kind_meta(&mut result);
-        }
-        result
+        if meta.is_empty() { None } else { Some(meta) }
     }
-}
-/// Workspace-bind `_meta` keys **always** forbidden on chat create/load.
-///
-/// `legacy ext RPC` is intentionally omitted: scrub keeps it
-/// iff `legacy ext RPC`.
-#[allow(dead_code)]
-pub(super) const CHAT_FORBIDDEN_WORKSPACE_BIND_KEYS: &[&str] = &[
-    "envId",
-    "cloud_server_id",
-];
-/// Strip Build `agentProfile` in chat mode. Do not stamp grok `legacy ext RPC`.
-pub(super) fn apply_chat_kind_meta(meta: &mut Option<acp::Meta>) {
-    let obj = meta.get_or_insert_with(acp::Meta::new);
-    obj.remove("agentProfile");
-    obj.insert("pi/session".into(), serde_json::json!({ "kind": "chat" }));
-    obj.retain(|k, _| !crate::acp::vendor::is_vendor_meta_key(k));
-}
-/// Shared chat create/load/worktree meta finalize: kind + local stamp + scrub.
-pub(super) fn finalize_chat_session_meta(
-    meta: &mut Option<acp::Meta>,
-    is_chat_path: bool,
-) {
-    if !is_chat_path {
-        return;
-    }
-    apply_chat_kind_meta(meta);
-    scrub_chat_workspace_bind_meta(meta);
-}
-/// Remove client workspace-bind keys from chat create/load meta (defense in depth).
-///
-/// Narrow scrub exception: keep `legacy ext RPC` when local
-/// intent is **attach**. Own stamps intent only (shell mints `server_id`).
-/// Never keep `envId` or Direct hub `legacy ext RPC`.
-pub(super) fn scrub_chat_workspace_bind_meta(meta: &mut Option<acp::Meta>) {
-    let Some(obj) = meta.as_mut() else {
-        return;
-    };
-    for key in CHAT_FORBIDDEN_WORKSPACE_BIND_KEYS {
-        obj.remove(*key);
-    }
-    obj.retain(|k, _| !crate::acp::vendor::is_vendor_meta_key(k));
 }
 /// Metadata returned from effect execution so the event loop can patch
 /// state that requires a spawned task handle (e.g., auth AbortHandle).
@@ -539,7 +473,6 @@ pub(super) fn parse_session_picker_entries(
                 .or_else(|| v.get("first_prompt"))
                 .and_then(|s| s.as_str())
                 .map(String::from);
-            let is_conversation = false;
             let parsed_updated: Option<chrono::DateTime<chrono::Utc>> = v
                 .get("updatedAt")
                 .or_else(|| v.get("updated_at"))
@@ -551,18 +484,8 @@ pub(super) fn parse_session_picker_entries(
                 .and_then(|s| s.as_str())
                 .and_then(|s| s.parse().ok());
             let updated_at: chrono::DateTime<chrono::Utc> = match parsed_updated {
-                Some(ts) => {
-                    if !is_conversation && ts < cutoff {
-                        return None;
-                    }
-                    ts
-                }
-                None => {
-                    if !is_conversation {
-                        return None;
-                    }
-                    parsed_created.unwrap_or(chrono::DateTime::<chrono::Utc>::UNIX_EPOCH)
-                }
+                Some(ts) if ts >= cutoff => ts,
+                _ => return None,
             };
             use pi_tools::implementations::skills::skill::extract_skill_display_text;
             let display = if let Some(ref fp) = first_prompt {
@@ -595,11 +518,11 @@ pub(super) fn parse_session_picker_entries(
                 .unwrap_or_default()
                 .to_string();
             let hostname = v.get("hostname").and_then(|s| s.as_str()).map(String::from);
-            let source = if is_conversation {
-                "conversation".to_string()
-            } else {
-                v.get("source").and_then(|s| s.as_str()).unwrap_or("local").to_string()
-            };
+            let source = v
+                .get("source")
+                .and_then(|s| s.as_str())
+                .unwrap_or("local")
+                .to_string();
             let model_id = v
                 .get("modelId")
                 .or_else(|| v.get("model_id"))
@@ -653,11 +576,7 @@ pub(super) fn parse_session_picker_entries(
         })
         .filter_map(|mut e| {
             if e.summary.is_empty() {
-                if e.source == "conversation" {
-                    e.summary = "Untitled".to_string();
-                } else {
-                    return None;
-                }
+                return None;
             }
             if e.source == "remote"
                 && pi_shell::session::resolve_local_session_any_cwd(&e.id)

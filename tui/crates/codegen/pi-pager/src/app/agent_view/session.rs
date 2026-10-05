@@ -153,9 +153,6 @@ impl AgentView {
             context_state: None,
             status_context: None,
             last_status_line_size: None,
-            chat_kind: false,
-            conversation_entry: false,
-            app_chat_mode: false,
             credit_balance: None,
             auto_topup: None,
             turn_start_ms: None,
@@ -579,26 +576,12 @@ impl AgentView {
         Some(TurnActivity::Waiting(WaitingReason::Model))
     }
     /// Update context state with a full snapshot from live callers.
-    ///
-    /// No-op for gateway/chat-kind sessions — local GetSessionInfo / sampler
-    /// breakdowns must not populate the context bar (remote owns context).
     pub fn apply_full_context_info(&mut self, next: pi_shell::session::ContextInfo) {
-        if self.chat_kind {
-            self.context_state = None;
-            return;
-        }
         self.context_state = Some(next);
     }
     /// Update context state from a streaming notification carrying only
     /// `used` and `total` fields.
-    ///
-    /// No-op for gateway/chat-kind sessions (same policy as
-    /// [`Self::apply_full_context_info`]).
     pub fn apply_context_used(&mut self, used: u64, total: u64) {
-        if self.chat_kind {
-            self.context_state = None;
-            return;
-        }
         let total = if total > 0 {
             total
         } else {
@@ -620,18 +603,12 @@ impl AgentView {
             }
         }
     }
-    /// Apply Build coding-credit balance only for non-chat agents.
-    /// Gateway/chat-kind sessions keep credits unset so bars/warnings stay off.
+    /// Apply the coding-credit balance and the auto top-up rule.
     pub fn apply_credit_balance(
         &mut self,
         balance: Option<crate::views::credit_bar::CreditBalance>,
         auto_topup: Option<crate::views::credit_bar::AutoTopupInfo>,
     ) {
-        if self.chat_kind {
-            self.credit_balance = None;
-            self.auto_topup = None;
-            return;
-        }
         self.credit_balance = balance;
         self.auto_topup = auto_topup;
     }
@@ -723,7 +700,6 @@ impl AgentView {
         sharing_enabled: bool,
         billing_surface_visible: bool,
         usage_command_visible: bool,
-        chat_mode: bool,
         screen_mode: crate::app::ScreenMode,
         announcements: &[pi_announcements::RemoteAnnouncement],
         restricted_commands: &[String],
@@ -731,7 +707,6 @@ impl AgentView {
         self.set_sharing_enabled(sharing_enabled);
         self.set_billing_surface_visible(billing_surface_visible);
         self.set_usage_command_visible(usage_command_visible);
-        self.app_chat_mode = chat_mode;
         self.prompt.set_screen_mode(screen_mode);
         self.set_has_session_announcements(crate::views::announcements::has_session_announcements(
             announcements,

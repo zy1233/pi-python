@@ -1654,22 +1654,17 @@ pub(in crate::app::dispatch) fn set_default_model(
     // The shell's `resolve_default_model` matches by slug / map key,
     // so persisting the human-readable name (e.g. "Grok Build")
     // would silently fail to resolve on the next startup.
-    //
-    // Chat (`--chat` / GROK_CHAT_MODE) catalogs use opaque `/rest/modes`
-    // slugs that must not become the global Build `default_model`.
     let mut effects: Vec<Effect> = Vec::new();
-    if !pi_shell::agent::chat_modes::process_chat_mode_enabled() {
-        let new_id_str = new_id.0.to_string();
-        let prev_id_str = prev_id
-            .as_ref()
-            .map(|id| id.0.to_string())
-            .unwrap_or_default();
-        effects.push(Effect::PersistSetting {
-            key: "default_model",
-            value: crate::settings::SettingValue::String(new_id_str),
-            rollback_value: crate::settings::SettingValue::String(prev_id_str),
-        });
-    }
+    let new_id_str = new_id.0.to_string();
+    let prev_id_str = prev_id
+        .as_ref()
+        .map(|id| id.0.to_string())
+        .unwrap_or_default();
+    effects.push(Effect::PersistSetting {
+        key: "default_model",
+        value: crate::settings::SettingValue::String(new_id_str),
+        rollback_value: crate::settings::SettingValue::String(prev_id_str),
+    });
 
     // Best-effort session-level switch. The `Effect::SwitchModel`
     // pipeline handles its own deferred-switch semantics for the

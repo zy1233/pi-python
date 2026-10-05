@@ -91,7 +91,6 @@ fn test_app() -> AppView {
         screen_mode_switch_hint: None,
         require_plan_approval: false,
         plan_mode: false,
-        chat_mode: false,
         subagents: false,
         ask_user: false,
         mouse_captured: true,
@@ -308,16 +307,6 @@ pub(super) fn end_turn() -> Action {
         prompt_id: None,
     })
 }
-/// Plant a Build session under the process `grok_home()` (OnceLock-cached;
-/// do not rely on setting `GROK_HOME` mid-process). Caller must remove `sess_dir`.
-fn plant_local_build_session(cwd: &std::path::Path, session_id: &str) -> std::path::PathBuf {
-    let home = pi_shell::util::grok_home::grok_home();
-    let encoded = pi_shell::util::grok_home::encode_cwd_dirname(&cwd.to_string_lossy());
-    let sess_dir = home.join("sessions").join(encoded).join(session_id);
-    std::fs::create_dir_all(&sess_dir).expect("plant session dir");
-    std::fs::write(sess_dir.join("summary.json"), b"{}").expect("plant summary");
-    sess_dir
-}
 /// Extract the in-flight auth request sequence, panicking if the auth
 /// state is not `Authenticating`.
 fn authenticating_seq(app: &AppView) -> u64 {
@@ -420,11 +409,6 @@ fn make_picker_entry(id: &str, cwd: &str) -> crate::app::app_view::SessionPicker
         last_recap: None,
         card_detail: None,
     }
-}
-fn make_conversation_entry(id: &str) -> crate::app::app_view::SessionPickerEntry {
-    let mut e = make_picker_entry(id, "");
-    e.source = "conversation".into();
-    e
 }
 /// Open the modal `/resume` picker on the active agent with `entries` loaded.
 fn open_session_picker_with(

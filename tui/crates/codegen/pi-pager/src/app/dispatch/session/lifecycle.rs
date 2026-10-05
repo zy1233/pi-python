@@ -13,7 +13,7 @@ use crate::app::dispatch::ctx::{
     SwitchCause, get_active_agent, reseed_tip_for_new_session, show_welcome, switch_to_agent,
 };
 use crate::app::dispatch::modes::inherit_auto_mode;
-use crate::app::dispatch::prompt::{consume_chat_kind, dispatch_initial_prompt};
+use crate::app::dispatch::prompt::dispatch_initial_prompt;
 use crate::app::dispatch::queue::maybe_drain_queue;
 use crate::app::dispatch::status::notify_session_ready;
 use crate::app::dispatch::task_result::unregister_session_effect;
@@ -355,7 +355,6 @@ pub(in crate::app::dispatch) fn dispatch_new_session_inner_with_id(
             app.sharing_enabled,
             app.usage_visible,
             !app.has_external_auth_provider,
-            app.chat_mode,
             app.screen_mode,
             &app.active_announcements,
             &app.tier_restricted_commands,
@@ -367,10 +366,7 @@ pub(in crate::app::dispatch) fn dispatch_new_session_inner_with_id(
     if app.screen_mode.is_minimal() {
         app.minimal_state.welcome_pending = true;
     }
-    let chat_kind = consume_chat_kind(app);
     if let Some(agent) = app.agents.get_mut(&agent_id) {
-        agent.chat_kind = chat_kind;
-        agent.conversation_entry = chat_kind;
         agent.apply_credit_balance(app.credit_balance.clone(), app.auto_topup.clone());
     }
     let preferred_session_id = app.deferred_startup.preferred_session_id.take();
@@ -380,7 +376,6 @@ pub(in crate::app::dispatch) fn dispatch_new_session_inner_with_id(
         model_id,
         permission_mode_override: None,
         preferred_session_id,
-        chat_kind,
     });
     (agent_id, effects)
 }
@@ -479,19 +474,14 @@ pub(in crate::app::dispatch) fn drain_startup_actions(app: &mut AppView) -> Vec<
         worktree_ref,
         new_session,
         prompt,
-        pending_chat,
     } = app.deferred_startup.take();
     let mut effects = Vec::new();
     match deferred {
         Some(DeferredSessionStartup::Load {
             session_id,
             session_cwd,
-            chat_kind,
         }) => {
             if worktree {
-                if chat_kind || pending_chat {
-                    app.deferred_startup.pending_chat = true;
-                }
                 effects.extend(dispatch_new_worktree_session(
                     app,
                     Some(session_id),
@@ -506,14 +496,10 @@ pub(in crate::app::dispatch) fn drain_startup_actions(app: &mut AppView) -> Vec<
                     app,
                     session_id,
                     session_cwd,
-                    chat_kind,
                 ));
             }
         }
         Some(DeferredSessionStartup::NewWithId { session_id }) => {
-            if pending_chat {
-                app.deferred_startup.pending_chat = true;
-            }
             if worktree {
                 effects.extend(dispatch_new_worktree_session(
                     app,
@@ -529,9 +515,6 @@ pub(in crate::app::dispatch) fn drain_startup_actions(app: &mut AppView) -> Vec<
             }
         }
         None => {
-            if pending_chat {
-                app.deferred_startup.pending_chat = true;
-            }
             if let Some(sid) = preferred_id {
                 if worktree {
                     effects.extend(dispatch_new_worktree_session(
@@ -558,8 +541,6 @@ pub(in crate::app::dispatch) fn drain_startup_actions(app: &mut AppView) -> Vec<
                 ));
             } else if new_session {
                 effects.extend(dispatch_new_session(app));
-            } else {
-                app.deferred_startup.pending_chat = false;
             }
         }
     }
@@ -590,7 +571,6 @@ pub(in crate::app::dispatch) fn dispatch_new_worktree_session(
                 Some(crate::app::session_startup::DeferredSessionStartup::Load {
                     session_id: sid,
                     session_cwd: None,
-                    chat_kind: app.deferred_startup.pending_chat,
                 });
         }
         app.deferred_startup.worktree = true;
@@ -668,11 +648,6 @@ pub(in crate::app::dispatch) fn dispatch_new_worktree_session(
     agent.session.start_command(cmd);
     agent.turn_started_at = Some(Instant::now());
     app.agents.insert(agent_id, agent);
-    let chat_kind = if load_session_id.is_none() {
-        consume_chat_kind(app)
-    } else {
-        app.deferred_startup.pending_chat
-    };
     {
         let agent = app.agents.get_mut(&agent_id).unwrap();
         agent.prompt.set_compact(app.appearance.prompt.compact);
@@ -686,13 +661,10 @@ pub(in crate::app::dispatch) fn dispatch_new_worktree_session(
             app.sharing_enabled,
             app.usage_visible,
             !app.has_external_auth_provider,
-            app.chat_mode,
             app.screen_mode,
             &app.active_announcements,
             &app.tier_restricted_commands,
         );
-        agent.chat_kind = chat_kind;
-        agent.conversation_entry = chat_kind;
         agent.apply_credit_balance(app.credit_balance.clone(), app.auto_topup.clone());
     }
     if let Some(prompt) = prompt
@@ -709,7 +681,6 @@ pub(in crate::app::dispatch) fn dispatch_new_worktree_session(
         model_id,
         permission_mode_override: None,
         preferred_session_id,
-        chat_kind,
     }];
     effects
 }

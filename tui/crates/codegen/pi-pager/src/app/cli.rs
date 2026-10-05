@@ -624,9 +624,6 @@ impl PagerArgs {
     /// Same as [`Self::pin_local_resume_target`] with an explicit cwd, so
     /// tests never mutate the process cwd.
     pub fn pin_local_resume_target_for_cwd(&mut self, cwd: Option<&str>) -> anyhow::Result<()> {
-        if self.chat() {
-            return Ok(());
-        }
         let Some(target) = self.session_to_resume().map(str::to_owned) else {
             return Ok(());
         };

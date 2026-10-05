@@ -554,11 +554,6 @@ async fn async_main(args: PagerArgs) -> Result<()> {
     if let Some(ref detail) = args.compaction_detail {
         unsafe { std::env::set_var("GROK_COMPACTION_DETAIL", detail) };
     }
-    if args.chat() {
-        unsafe {
-            std::env::set_var(pi_shell::agent::chat_modes::GROK_CHAT_MODE_ENV, "1");
-        }
-    }
     if let Some(ref path) = args.debug_file {
         unsafe {
             std::env::set_var("PI_DEBUG_LOG", path);

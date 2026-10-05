@@ -609,8 +609,6 @@ pub struct WelcomeRenderParams<'a> {
     pub subscription_tier: Option<&'a str>,
     pub session_picker_grouped: bool,
     pub session_picker_pending_delete: bool,
-    /// Process-wide `--chat`: the picker lists backend conversations only.
-    pub chat_mode: bool,
     /// Live working directory (tracks `Effect::SetWorkingDir`), used to pin
     /// the current repo's session group to the top of the picker.
     pub cwd: &'a std::path::Path,
@@ -1690,7 +1688,6 @@ fn render_welcome_done(
                 tick: p.welcome_tick,
                 grouped: p.session_picker_grouped,
                 pending_delete: p.session_picker_pending_delete,
-                chat_mode: p.chat_mode,
                 cwd: p.cwd,
             },
         );
@@ -2006,8 +2003,6 @@ pub(crate) struct SessionPickerRenderCtx<'a> {
     /// When true, entries are grouped by `repo_name` with non-selectable headers.
     pub(crate) grouped: bool,
     pub(crate) pending_delete: bool,
-    /// Process-wide `--chat` (see `WelcomeRenderParams::chat_mode`).
-    pub(crate) chat_mode: bool,
 }
 
 /// Render the session picker list on the welcome screen.
@@ -2085,23 +2080,20 @@ pub(crate) fn render_session_picker(
         (entries, Vec::new())
     };
 
-    // Build shortcuts for fullscreen mode. Chat mode drops the worktree
-    // hint (local-Build-row action).
+    // Build shortcuts for fullscreen mode.
     let worktree_shortcut: &'static str = "ctrl+w";
     use crate::views::shortcuts_bar::HintItem;
     let mut default_shortcuts: Vec<HintItem> = vec![
         HintItem::new(crate::key!(Esc), "back"),
         HintItem::new(crate::key!(Enter), "select"),
     ];
-    if !ctx.chat_mode {
-        default_shortcuts.push(HintItem {
+    default_shortcuts.push(HintItem {
             keys: vec![],
             label: "worktree".into(),
             custom_display: Some(worktree_shortcut),
             description: None,
             pinned: false,
         });
-    }
     default_shortcuts.push(HintItem {
         keys: vec![],
         label: "navigate".into(),
@@ -2125,7 +2117,7 @@ pub(crate) fn render_session_picker(
             description: None,
             pinned: false,
         });
-    } else if !ctx.chat_mode {
+    } else {
         default_shortcuts.push(HintItem {
             keys: vec![],
             label: "delete".into(),
@@ -2147,7 +2139,7 @@ pub(crate) fn render_session_picker(
         shortcuts_area: ctx.shortcuts_area,
         tabs: None,
         active_tab: 0,
-        action_keys: if ctx.chat_mode || ctx.pending_delete {
+        action_keys: if ctx.pending_delete {
             &[]
         } else {
             &[('d', "delete")]
@@ -2493,7 +2485,6 @@ mod tests {
             subscription_tier: None,
             session_picker_grouped: false,
             session_picker_pending_delete: false,
-            chat_mode: false,
             cwd: std::path::Path::new("/repo"),
             credit_balance: None,
             auto_topup: None,

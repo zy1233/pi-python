@@ -4,7 +4,7 @@ use super::*;
 fn session_loaded_with_restore_shows_summary_in_scrollback() {
     let mut app = test_app();
     dispatch(
-        Action::LoadSession("sess-restore".into(), None, false),
+        Action::LoadSession("sess-restore".into(), None),
         &mut app,
     );
     let id = AgentId(0);
@@ -49,7 +49,7 @@ fn session_loaded_with_restore_shows_summary_in_scrollback() {
 fn session_loaded_without_adoption_finishes_replayed_running_entries() {
     let mut app = test_app();
     dispatch(
-        Action::LoadSession("sess-stuck".into(), None, false),
+        Action::LoadSession("sess-stuck".into(), None),
         &mut app,
     );
     let id = AgentId(0);
@@ -87,7 +87,7 @@ fn load_session_marks_standalone_worktree_cwd() {
     let main = crate::test_util::TempGitRepo::init("main-only");
     let clone = main.standalone_clone("wt-branch");
     dispatch(
-        Action::LoadSession("sess-wt".into(), Some(clone.path.clone()), false),
+        Action::LoadSession("sess-wt".into(), Some(clone.path.clone())),
         &mut app,
     );
     assert!(
@@ -101,7 +101,7 @@ fn load_session_plain_repo_is_not_worktree() {
     let mut app = test_app();
     let repo = crate::test_util::TempGitRepo::init("main");
     dispatch(
-        Action::LoadSession("sess-plain-git".into(), Some(repo.path.clone()), false),
+        Action::LoadSession("sess-plain-git".into(), Some(repo.path.clone())),
         &mut app,
     );
     assert!(!app.agents[&AgentId(0)].session.is_worktree);
@@ -114,7 +114,7 @@ fn load_session_anchors_agent_cwd_to_resolved_session_cwd() {
     let origin_cwd = PathBuf::from("/some/other/origin-cwd");
     assert_ne!(origin_cwd, process_cwd, "test precondition");
     dispatch(
-        Action::LoadSession("sess-xcwd".into(), Some(origin_cwd.clone()), false),
+        Action::LoadSession("sess-xcwd".into(), Some(origin_cwd.clone())),
         &mut app,
     );
     assert_eq!(
@@ -129,7 +129,7 @@ fn load_session_falls_back_to_process_cwd_when_no_session_cwd() {
     let mut app = test_app();
     let process_cwd = app.cwd.clone();
     dispatch(
-        Action::LoadSession("sess-samecwd".into(), None, false),
+        Action::LoadSession("sess-samecwd".into(), None),
         &mut app,
     );
     assert_eq!(
@@ -150,7 +150,7 @@ fn session_loaded_purges_replay_transient() {
     test_support::install_counting_hook();
     let mut app = test_app();
     dispatch(
-        Action::LoadSession("sess-purge".into(), None, false),
+        Action::LoadSession("sess-purge".into(), None),
         &mut app,
     );
     let id = AgentId(0);
@@ -180,7 +180,7 @@ fn session_loaded_purges_replay_transient() {
 fn session_loaded_with_restore_failure_shows_warning_banner() {
     let mut app = test_app();
     dispatch(
-        Action::LoadSession("sess-fail".into(), None, false),
+        Action::LoadSession("sess-fail".into(), None),
         &mut app,
     );
     let id = AgentId(0);
@@ -224,7 +224,7 @@ fn session_loaded_with_restore_failure_shows_warning_banner() {
 fn session_loaded_without_restore_no_summary() {
     let mut app = test_app();
     dispatch(
-        Action::LoadSession("sess-plain".into(), None, false),
+        Action::LoadSession("sess-plain".into(), None),
         &mut app,
     );
     let id = AgentId(0);
@@ -259,7 +259,7 @@ fn session_loaded_without_restore_no_summary() {
 #[test]
 fn session_loaded_without_restore_resets_restore_degree() {
     let mut app = test_app();
-    dispatch(Action::LoadSession("sess-r2".into(), None, false), &mut app);
+    dispatch(Action::LoadSession("sess-r2".into(), None), &mut app);
     let id = AgentId(0);
     dispatch(
         Action::TaskComplete(TaskResult::SessionLoaded {
@@ -304,7 +304,7 @@ fn load_session_seeds_available_commands_from_bootstrap() {
         "Show session info".to_string(),
     )];
     dispatch(
-        Action::LoadSession("sess-123".into(), None, false),
+        Action::LoadSession("sess-123".into(), None),
         &mut app,
     );
     let id = AgentId(0);
@@ -320,7 +320,7 @@ fn load_session_seeds_available_commands_from_bootstrap() {
 fn resume_known_session_id_loads_not_creates() {
     let mut app = test_app();
     let effects = dispatch(
-        Action::LoadSession("resume-known-id".into(), None, false),
+        Action::LoadSession("resume-known-id".into(), None),
         &mut app,
     );
     assert!(
@@ -415,7 +415,7 @@ fn session_loaded_clears_stale_running_entries() {
     use std::sync::Arc;
     let mut app = test_app();
     dispatch(
-        Action::LoadSession("sess-stale".into(), None, false),
+        Action::LoadSession("sess-stale".into(), None),
         &mut app,
     );
     let id = AgentId(0);
@@ -493,7 +493,7 @@ fn resume_focuses_existing_agent_for_open_session() {
     );
     let count_before = app.agents.len();
     let effects = dispatch(
-        Action::LoadSession("wt-sess-1".into(), None, false),
+        Action::LoadSession("wt-sess-1".into(), None),
         &mut app,
     );
     assert!(matches!(app.active_view, ActiveView::Agent(id) if id == agent_0));
@@ -522,7 +522,7 @@ fn resume_unknown_session_still_creates_new_agent() {
         &mut app,
     );
     let effects = dispatch(
-        Action::LoadSession("sess-never-open".into(), None, false),
+        Action::LoadSession("sess-never-open".into(), None),
         &mut app,
     );
     let new_id = AgentId(1);
@@ -537,83 +537,12 @@ fn resume_unknown_session_still_creates_new_agent() {
         } if *agent_id == new_id && session_id == "sess-never-open"
     )));
 }
-/// Conversation resume must not focus a Build agent that shares the same id.
-#[test]
-fn resume_conversation_does_not_focus_build_id_collision() {
-    let mut app = test_app();
-    dispatch(Action::NewSession, &mut app);
-    let agent_0 = AgentId(0);
-    dispatch(
-        Action::TaskComplete(TaskResult::SessionCreated {
-            agent_id: agent_0,
-            session_id: "shared-id".into(),
-            models: None,
-            scheduler_background_loops: None,
-        }),
-        &mut app,
-    );
-    assert!(!app.agents[&agent_0].chat_kind);
-    let count_before = app.agents.len();
-    let effects = dispatch(
-        Action::LoadSession("shared-id".into(), None, true),
-        &mut app,
-    );
-    assert_eq!(app.agents.len(), count_before + 1);
-    assert!(effects.iter().any(|e| matches!(
-        e,
-        Effect::LoadSession {
-            session_id,
-            chat_kind: true,
-            ..
-        } if session_id == "shared-id"
-    )));
-    assert!(!app.agents[&agent_0].chat_kind);
-}
-/// Under sticky `--chat`, agents stamp `chat_kind=true` even for build loads;
-/// resume with conversation-entry false must still focus the open agent.
-#[test]
-fn resume_under_chat_mode_focuses_despite_entry_false() {
-    let mut app = test_app();
-    app.chat_mode = true;
-    dispatch(Action::NewSession, &mut app);
-    let agent_0 = AgentId(0);
-    dispatch(
-        Action::TaskComplete(TaskResult::SessionCreated {
-            agent_id: agent_0,
-            session_id: "chat-mode-sess".into(),
-            models: None,
-            scheduler_background_loops: None,
-        }),
-        &mut app,
-    );
-    app.agents.get_mut(&agent_0).unwrap().chat_kind = true;
-    dispatch(Action::NewSession, &mut app);
-    let agent_1 = AgentId(1);
-    dispatch(
-        Action::TaskComplete(TaskResult::SessionCreated {
-            agent_id: agent_1,
-            session_id: "other".into(),
-            models: None,
-            scheduler_background_loops: None,
-        }),
-        &mut app,
-    );
-    app.agents.get_mut(&agent_1).unwrap().chat_kind = true;
-    let count_before = app.agents.len();
-    let effects = dispatch(
-        Action::LoadSession("chat-mode-sess".into(), None, false),
-        &mut app,
-    );
-    assert!(effects.is_empty());
-    assert_eq!(app.agents.len(), count_before);
-    assert!(matches!(app.active_view, ActiveView::Agent(id) if id == agent_0));
-}
 /// After SessionLoadFailed, retrying resume must reissue LoadSession.
 #[test]
 fn resume_after_load_failed_reissues_load() {
     let mut app = test_app();
     let effects = dispatch(
-        Action::LoadSession("fail-then-retry".into(), None, false),
+        Action::LoadSession("fail-then-retry".into(), None),
         &mut app,
     );
     let agent_0 = AgentId(0);
@@ -634,7 +563,7 @@ fn resume_after_load_failed_reissues_load() {
     assert!(app.agents[&agent_0].loading_placeholder_id.is_some());
     let count_before = app.agents.len();
     let effects = dispatch(
-        Action::LoadSession("fail-then-retry".into(), None, false),
+        Action::LoadSession("fail-then-retry".into(), None),
         &mut app,
     );
     assert!(
@@ -670,25 +599,6 @@ fn non_minimal_new_session_does_not_queue_welcome_card() {
         "the welcome card is minimal-only"
     );
 }
-/// Welcome-screen variant of the conversation-row pick.
-#[test]
-fn pick_conversation_row_from_welcome_dispatches_direct_chat_load() {
-    let mut app = test_app();
-    app.session_picker_entries = Some(vec![make_conversation_entry("conv-pick-2")]);
-    let effects = dispatch(Action::PickSession(0), &mut app);
-    assert!(
-        matches!(
-            &effects[..],
-            [Effect::LoadSession {
-                session_id,
-                session_cwd: None,
-                chat_kind: true,
-                ..
-            }] if session_id == "conv-pick-2"
-        ),
-        "expected a direct chat LoadSession, got {effects:?}"
-    );
-}
 /// Pins Esc-during-load: with the previous entries still visible and a
 /// refetch in flight, Esc must really dismiss the picker — drop the loading
 /// flag (a lingering flag holds `show_picker` in a spinner limbo that ignores
@@ -698,7 +608,6 @@ fn pick_conversation_row_from_welcome_dispatches_direct_chat_load() {
 fn build_welcome_esc_during_load_dismisses_without_resurrection() {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     let mut app = test_app();
-    assert!(!app.chat_mode);
     let _ = dispatch(Action::FetchSessionList, &mut app);
     let seq = app.session_picker_list_seq;
     assert!(app.session_picker_loading);
@@ -795,7 +704,6 @@ fn welcome_picker_enter_picks_only_entries_matching_the_query() {
 #[test]
 fn build_mode_rapid_plain_fetches_keep_last_write_wins() {
     let mut app = test_app();
-    assert!(!app.chat_mode);
     let first = dispatch(Action::FetchSessionList, &mut app);
     let second = dispatch(Action::FetchSessionList, &mut app);
     for effects in [&first, &second] {

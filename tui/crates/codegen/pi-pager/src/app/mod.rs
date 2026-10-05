@@ -535,9 +535,6 @@ pub async fn run(
             }
         }
     }
-    if let Some(err) = session_startup::chat_mode_flag_conflict(args.chat(), args.restore_code) {
-        anyhow::bail!("{err}");
-    }
     let intent = args
         .session_startup_intent()
         .map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -545,17 +542,6 @@ pub async fn run(
     materialize_ctx.restore_progress_on_stdout =
         std::io::IsTerminal::is_terminal(&std::io::stdout());
     let materialized = session_startup::materialize_startup(materialize_ctx, intent).await?;
-    if args.chat()
-        && let session_startup::MaterializedStartup::Resume { session_id, .. } = &materialized
-    {
-        let cwd = std::env::current_dir().unwrap_or_default();
-        if session_startup::chat_mode_refuses_local_build_load(true, false, session_id, &cwd) {
-            anyhow::bail!(
-                "{} (session id: {session_id})",
-                session_startup::CHAT_MODE_LOCAL_BUILD_REFUSAL
-            );
-        }
-    }
     let mut session_title = match &materialized {
         session_startup::MaterializedStartup::Resume { title, .. } => title.clone(),
         _ => None,
@@ -567,7 +553,6 @@ pub async fn run(
         _ => None,
     };
     if session_title.is_none()
-        && !args.chat()
         && let Some(id) = title_lookup_id
     {
         let summaries = pi_shell::session::persistence::list_summaries(None).await?;
@@ -1683,7 +1668,6 @@ mod tests {
         assert!(!args.continue_last_session);
         assert!(args.worktree.is_none());
         assert_eq!(args.session_to_resume(), None);
-        assert!(!args.chat());
     }
     /// Neither `--chat` nor the local-workspace flags exist: a binary given one of
     /// them fails clap parsing instead of silently ignoring it.

@@ -142,7 +142,6 @@ pub(crate) fn execute(
             model_id,
             permission_mode_override,
             preferred_session_id,
-            chat_kind,
         } => {
             let tx = acp_tx.clone();
             let compat = pi_tools::types::compat::CompatConfig::default();
@@ -154,8 +153,6 @@ pub(crate) fn execute(
             #[allow(unused_mut)]
             let mut meta = session_flags.to_meta();
             apply_permission_mode_override(&mut meta, permission_mode_override);
-            let is_chat_path = chat_kind || session_flags.chat_mode;
-            finalize_chat_session_meta(&mut meta, is_chat_path);
             if let Some(ref mid) = model_id {
                 meta.get_or_insert_with(acp::Meta::new)
                     .insert("modelId".into(), serde_json::json!(mid.0));
@@ -163,9 +160,6 @@ pub(crate) fn execute(
             if let Some(ref sid) = preferred_session_id {
                 meta.get_or_insert_with(acp::Meta::new)
                     .insert("sessionId".into(), serde_json::json!(sid));
-            }
-            if is_chat_path {
-                scrub_chat_workspace_bind_meta(&mut meta);
             }
             let preferred_for_preflight = preferred_session_id.clone();
             tasks
@@ -254,11 +248,9 @@ pub(crate) fn execute(
                 }
             });
         }
-        Effect::LoadSession { agent_id, session_id, session_cwd, chat_kind } => {
+        Effect::LoadSession { agent_id, session_id, session_cwd } => {
             let tx = acp_tx.clone();
-            let mut meta = session_flags.to_meta();
-            let is_chat_path = chat_kind || session_flags.chat_mode;
-            finalize_chat_session_meta(&mut meta, is_chat_path);
+            let meta = session_flags.to_meta();
             let cwd = session_cwd.unwrap_or_else(|| cwd.to_path_buf());
             let mcp_started = std::time::Instant::now();
             let mcp_servers = pi_shell::util::config::load_mcp_servers(

@@ -503,40 +503,6 @@ fn switch_model_dispatch_produces_effect_and_sets_pending() {
     assert!(app.agents[&id].session.state.is_idle());
 }
 #[test]
-fn switch_model_allowed_when_agent_chat_kind() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    app.agents.get_mut(&id).unwrap().chat_kind = true;
-    let model_id = acp::ModelId::new(std::sync::Arc::from("auto"));
-    let effects = dispatch(
-        Action::SwitchModel {
-            model_id: model_id.clone(),
-            effort: None,
-        },
-        &mut app,
-    );
-    assert_eq!(effects.len(), 1);
-    assert!(matches!(&effects[0], Effect::SwitchModel { model_id: mid, .. } if mid == &model_id));
-    assert!(app.agents[&id].session.model_switch_pending);
-}
-#[test]
-fn switch_model_allowed_when_app_chat_mode() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    app.chat_mode = true;
-    let model_id = acp::ModelId::new(std::sync::Arc::from("auto"));
-    let effects = dispatch(
-        Action::SwitchModel {
-            model_id: model_id.clone(),
-            effort: None,
-        },
-        &mut app,
-    );
-    assert_eq!(effects.len(), 1);
-    assert!(matches!(&effects[0], Effect::SwitchModel { model_id: mid, .. } if mid == &model_id));
-    assert!(app.agents[&id].session.model_switch_pending);
-}
-#[test]
 fn agent_type_mismatch_cancel_is_noop() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
@@ -980,7 +946,7 @@ fn all_constructor_paths_initialize_slash_fields() {
         assert_eq!(s.available_commands_generation, 1);
         assert!(!s.model_switch_pending);
     }
-    dispatch(Action::LoadSession("sess-1".into(), None, false), &mut app);
+    dispatch(Action::LoadSession("sess-1".into(), None), &mut app);
     {
         let s = &app.agents[&AgentId(1)].session;
         assert_eq!(s.available_commands_generation, 1);
@@ -1118,85 +1084,6 @@ fn deferred_switch_updates_display_and_persists() {
     assert!(
         effects.is_empty(),
         "unchanged pre-session pick must not re-persist, got {effects:?}"
-    );
-}
-/// Process-wide `--chat` + non-conversation resume of a non-disk id still
-/// loads (gateway conversation) with agent chat_kind from sticky mode.
-#[test]
-fn chat_mode_resume_without_local_disk_loads_as_chat() {
-    let mut app = test_app();
-    app.chat_mode = true;
-    let effects = dispatch(
-        Action::LoadSession("remote-conv-only".into(), None, false),
-        &mut app,
-    );
-    assert!(matches!(
-        &effects[..],
-        [Effect::LoadSession {
-            session_id,
-            chat_kind: false,
-            ..
-        }] if session_id == "remote-conv-only"
-    ));
-    let agent = app.agents.values().next().expect("agent");
-    assert!(
-        agent.chat_kind,
-        "sticky --chat must set agent chat_kind even without entry bit"
-    );
-    assert!(
-        agent.conversation_entry,
-        "sticky --chat gateway resume (no local disk) opens as chat"
-    );
-    assert!(
-        agent.app_chat_mode,
-        "app.chat_mode must propagate to AgentView::app_chat_mode"
-    );
-}
-/// Process-wide `--chat` refuses local Build disk rows (no LoadSession).
-#[test]
-fn chat_mode_refuses_local_build_disk_load() {
-    let cwd = PathBuf::from(format!(
-        "/tmp/chat-mode-build-refuse-{}",
-        std::process::id()
-    ));
-    let session_id = format!("build-disk-{}", std::process::id());
-    let sess_dir = plant_local_build_session(&cwd, &session_id);
-    let mut app = test_app();
-    app.cwd = cwd;
-    app.chat_mode = true;
-    let effects = dispatch(Action::LoadSession(session_id, None, false), &mut app);
-    let _ = std::fs::remove_dir_all(&sess_dir);
-    assert!(
-        effects.is_empty(),
-        "local Build under --chat must refuse, got {effects:?}"
-    );
-    assert!(
-        app.agents.is_empty(),
-        "refuse must not allocate an agent slot"
-    );
-}
-/// Conversation entry under `--chat` still loads even if a local path exists.
-#[test]
-fn chat_mode_allows_conversation_entry_even_if_local_path() {
-    let cwd = PathBuf::from(format!("/tmp/chat-mode-conv-ok-{}", std::process::id()));
-    let session_id = format!("conv-also-local-{}", std::process::id());
-    let sess_dir = plant_local_build_session(&cwd, &session_id);
-    let mut app = test_app();
-    app.cwd = cwd;
-    app.chat_mode = true;
-    let effects = dispatch(Action::LoadSession(session_id, None, true), &mut app);
-    let _ = std::fs::remove_dir_all(&sess_dir);
-    assert!(matches!(
-        &effects[..],
-        [Effect::LoadSession {
-            chat_kind: true,
-            ..
-        }]
-    ));
-    let agent = app.agents.values().next().expect("agent");
-    assert!(
-        agent.conversation_entry,
-        "conversation-entry bit must stamp conversation_entry even if a local path exists"
     );
 }
 #[test]
