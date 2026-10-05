@@ -30,7 +30,6 @@ default-bazel = [
 
 [dependencies]
 dunce = { workspace = true }
-tonic-prost = { workspace = true, optional = true }
 agent-client-protocol = { workspace = true }
 anyhow = { workspace = true }
 pi-announcements = { workspace = true }
@@ -41,12 +40,6 @@ blake3 = { workspace = true }
 chrono = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 loom = { workspace = true, optional = true }
-# rmcp 2.1 + reqwest 0.13 are quarantined inside `pi-mcp`. The remaining
-# MCP code in this crate (extensions/mcp.rs, mcp_doctor.rs) reaches rmcp model
-# types via `pi_mcp::rmcp::model::*`. reqwest 0.13 is a private impl
-# detail of pi-mcp::servers; shell never sees it. Every HTTP call site
-# in this crate uses workspace reqwest 0.12.
-pi-mcp = { workspace = true }
 reqwest = { workspace = true, features = ["stream", "blocking"] }
 reqwest-middleware = { workspace = true }
 serde = { workspace = true }
@@ -72,19 +65,14 @@ urlencoding = { workspace = true }
 git2 = { version = "0.20", default-features = false, features = [
     "vendored-libgit2",
 ] }
-notify = { workspace = true }
-notify-debouncer-mini = { workspace = true }
 arc-swap = { workspace = true }
 image = { workspace = true, features = ["png", "jpeg", "gif", "webp"] }
 dhat = { workspace = true, optional = true }
 base64 = { workspace = true }
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
-sha2 = { workspace = true }
 strum = { workspace = true }
 pi-fast-worktree = { path = "../pi-fast-worktree", features = ["metadata"] }
 
-tonic = { workspace = true, optional = true }
-prost = { workspace = true, optional = true }
 pi-shell-base = { workspace = true }
 pi-shell-terminal = { workspace = true }
 pi-shared = { workspace = true }
@@ -106,7 +94,6 @@ pi-agent = { path = "../pi-agent" }
 pi-bundle = { workspace = true }
 pi-config = { workspace = true }
 pi-config-types = { workspace = true }
-pi-memory = { workspace = true }
 pi-file-utils = { path = "../pi-file-utils" }
 pi-session-events = { workspace = true }
 pi-auth = { workspace = true, features = ["middleware"] }
@@ -124,7 +111,6 @@ libc = { workspace = true }
 nix = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
-siphasher = { workspace = true }
 windows = { workspace = true }
 
 [dev-dependencies]
@@ -138,7 +124,6 @@ tempfile = { workspace = true }
 # `extensions::bundle` tests build archives with `bundle::test_helpers`, which
 # is `#[cfg(test)]`-only inside pi-bundle without this feature.
 pi-bundle = { workspace = true, features = ["test-support"] }
-pi-memory = { workspace = true, features = ["test-support"] }
 pi-workspace = { workspace = true, features = ["test-support"] }
 pi-config = { workspace = true, features = [] }
 semver = { workspace = true }

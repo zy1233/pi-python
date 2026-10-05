@@ -69,8 +69,6 @@ chrono = { workspace = true }
 tree-sitter = "0.25.10"
 tree-sitter-bash = "0.25"
 url = { workspace = true }
-pi-env = { workspace = true }
-humantime-serde = { workspace = true }
 prometheus = { workspace = true }
 glob = "0.3"
 pi-sandbox = { path = "../pi-sandbox", default-features = false }
@@ -93,12 +91,7 @@ pi-tool-types = { workspace = true }
 tokio-util = { workspace = true, features = ["rt"] }
 urlencoding = "2"
 pi-fast-worktree = { path = "../pi-fast-worktree", features = ["metadata"] }
-# tonic: Status/Code mapping for deploy errors in workspace_ops.
-tonic = { workspace = true }
-sha1 = { workspace = true, optional = true }
-zip = { workspace = true, optional = true }
 
-pi-fsnotify = { path = "../pi-fsnotify" }
 clap = { workspace = true }
 tracing-subscriber = { workspace = true }
 # "enable" required for the SDK's spans to record at all.
@@ -141,8 +134,6 @@ tempfile = { workspace = true }
 axum = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 pi-test-utils = { path = "../../common/pi-test-utils" }
-# Decode tar.gz archives produced by workspace upload helpers in tests.
-flate2 = { workspace = true }
 tar = { workspace = true }
 
 [package.metadata.cargo-shear]

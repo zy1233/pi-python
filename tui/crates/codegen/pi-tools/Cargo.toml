@@ -11,7 +11,6 @@ arc-swap = { workspace = true }
 dirs = { workspace = true }
 derive_more = { workspace = true, features = ["from", "try_into"] }
 dunce = { workspace = true }
-encoding_rs = { workspace = true, optional = true }
 fs2 = { workspace = true }
 educe = { workspace = true, features = ["Debug"] }
 async-openai = { workspace = true }
@@ -20,7 +19,6 @@ pi-auth = { workspace = true }
 pi-config = { path = "../pi-config" }
 pi-extra-ca = { workspace = true }
 pi-tools-api = { path = "../pi-tools-api" }
-pi-workspace-types = { path = "../pi-workspace-types" }
 pi-version = { workspace = true }
 pi-interjection-core = { workspace = true }
 pi-token-estimation = { workspace = true }
@@ -33,7 +31,6 @@ ignore = { workspace = true }
 infer = { workspace = true }
 globset = { workspace = true }
 image = { workspace = true, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff", "ico"] }
-kamadak-exif = { workspace = true, optional = true }
 pdf_oxide = { workspace = true }
 # PPTX text extraction (implementations/read_file/pptx.rs). Deliberately NOT
 # `workspace = true`: the workspace `zip` pin has default features on, which
@@ -74,13 +71,10 @@ tokio = { workspace = true, features = [
     "sync",
 ] }
 tokio-util = { workspace = true, features = ["compat"] }
-tonic = { workspace = true }
 tracing = { workspace = true }
-unicode-normalization = { workspace = true, optional = true }
 url = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
 wildmatch = { workspace = true }
-pi-env = { workspace = true }
 serde_yaml = { workspace = true }
 shellexpand = "3.1"
 tempfile = { workspace = true }

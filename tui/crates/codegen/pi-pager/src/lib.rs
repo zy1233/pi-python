@@ -26,8 +26,6 @@ pub mod minimal_api;
 #[path = "minimal/hook.rs"]
 pub mod minimal_hook;
 pub(crate) mod notifications;
-#[allow(unused_imports, unused_macros)]
-pub(crate) mod obf;
 pub(crate) mod pty_wrap;
 pub(crate) mod recent_dirs;
 pub mod scrollback;
