@@ -57,5 +57,6 @@ The Rust TUI (`zypi`) spawns the Python agent via (priority order):
 | `headless.py` | `-p` one-shot mode, prompt override application |
 | `events.py` | Internal events → ACP `session_update` projection |
 | `permissions.py` | Tool permission gating (ask / auto / always-approve) |
+| `session_list.py` | `session/list` display data: first-user-message title and file-mtime `updated_at` (bounded read; one page, no cursor) |
 | `create_harness.py` | Harness-level system prompt, coding tool wiring |
 | `benchmarks/` | Pelican benchmark suite, evaluator, Docker runner |

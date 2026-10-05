@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -290,6 +291,22 @@ async def test_list_load_close_session(tmp_path):
     await agent.close_session(session_id=created.session_id)
     with pytest.raises(RequestError):
         await agent.prompt(session_id=created.session_id, prompt=[text_block("x")])
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_titles_follow_the_first_prompt(tmp_path):
+    agent = _agent(tmp_path)
+    agent.on_connect(FakeClient())
+    cwd = str(tmp_path.resolve())
+    empty = await agent.new_session(cwd=cwd)
+    talked = await agent.new_session(cwd=cwd)
+    await agent.prompt(session_id=talked.session_id, prompt=[text_block("explain\n  the   build")])
+
+    listed = {s.session_id: s for s in (await agent.list_sessions()).sessions}
+    assert listed[empty.session_id].title == "(no messages)"
+    assert listed[talked.session_id].title == "explain the build"
+    updated = datetime.fromisoformat(listed[talked.session_id].updated_at.replace("Z", "+00:00"))
+    assert updated.tzinfo is not None
 
 
 @pytest.mark.asyncio

@@ -65,6 +65,7 @@ from pi_agent_cli.permissions import (
     outcome_allows,
     permission_tool_call,
 )
+from pi_agent_cli.session_list import read_session_previews
 from pi_agent_core.coding_tools.path_utils import normalize_host_path
 from pi_agent_core.messages import ImageContent
 from pi_agent_core.types import StreamFn
@@ -187,15 +188,19 @@ class PiAcpAgent(Agent):
     async def list_sessions(
         self, cwd: str | None = None, cursor: str | None = None, **kwargs: Any
     ) -> ListSessionsResponse:
+        # One page: the pager does not follow ``nextCursor``, so ``cursor`` is not used.
         listed = await self._repo.list({"cwd": cwd} if cwd is not None else None)
+        previews = await asyncio.to_thread(
+            read_session_previews, [(item.path, item.createdAt) for item in listed]
+        )
         sessions = [
             SessionInfo(
                 session_id=item.id,
                 cwd=item.cwd,
-                title=_session_title(item.id, item.createdAt),
-                updated_at=item.createdAt,
+                title=preview.title,
+                updated_at=preview.updated_at,
             )
-            for item in listed
+            for item, preview in zip(listed, previews, strict=True)
         ]
         return ListSessionsResponse(sessions=sessions)
 
@@ -479,11 +484,6 @@ class PiAcpAgent(Agent):
         if outcome_allows(response.outcome):
             return None
         return {"block": True, "reason": "User denied permission"}
-
-
-def _session_title(session_id: str, created_at: str) -> str:
-    short = session_id[:8] if len(session_id) > 8 else session_id
-    return f"{created_at} ({short})"
 
 
 def _prompt_to_text_images(
