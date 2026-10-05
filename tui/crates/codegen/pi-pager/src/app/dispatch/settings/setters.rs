@@ -271,14 +271,12 @@ pub(in crate::app::dispatch) fn set_voice_stt_language(
 }
 
 /// State-only mutation for `vim_mode`. Propagates to every in-process
-/// agent so background subagents and side panes pick up the change
-/// without restart. The cache mirror lets new agents created later
-/// read the same value via `cache::load_vim_mode()` in `AgentView::new`.
+/// agent so background agents pick up the change without restart. The
+/// cache mirror lets new agents created later read the same value via
+/// `cache::load_vim_mode()` in `AgentView::new`.
 pub(super) fn set_vim_mode_inner(app: &mut AppView, new: bool) {
     for agent in app.agents.values_mut() {
-        // Recursive so open subagent views also pick up the change —
-        // otherwise their scrollback j/k stay in the vim-OFF fallback.
-        agent.set_vim_mode_recursive(new);
+        agent.vim_mode = new;
     }
     crate::appearance::cache::set_vim_mode(new);
 }
@@ -392,10 +390,6 @@ pub(super) fn set_show_thinking_blocks_inner(app: &mut AppView, new: bool) {
     for agent in app.agents.values_mut() {
         agent.scrollback.clear_group_expansion();
         agent.scrollback.invalidate_heights();
-        for child in agent.subagent_views.values_mut() {
-            child.scrollback.clear_group_expansion();
-            child.scrollback.invalidate_heights();
-        }
     }
 }
 
@@ -436,10 +430,6 @@ pub(super) fn set_group_tool_verbs_inner(app: &mut AppView, new: bool) {
     for agent in app.agents.values_mut() {
         agent.scrollback.clear_group_expansion();
         agent.scrollback.invalidate_heights();
-        for child in agent.subagent_views.values_mut() {
-            child.scrollback.clear_group_expansion();
-            child.scrollback.invalidate_heights();
-        }
     }
 }
 
@@ -479,9 +469,6 @@ pub(super) fn set_collapsed_edit_blocks_inner(app: &mut AppView, new: bool) {
     // (the flip policy lives on ScrollbackState).
     for agent in app.agents.values_mut() {
         agent.scrollback.apply_collapsed_edit_blocks_flip(prev, new);
-        for child in agent.subagent_views.values_mut() {
-            child.scrollback.apply_collapsed_edit_blocks_flip(prev, new);
-        }
     }
 }
 

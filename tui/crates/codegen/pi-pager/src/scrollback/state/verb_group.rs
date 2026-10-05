@@ -19,7 +19,6 @@ use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 
 use crate::scrollback::block::RenderBlock;
-use crate::scrollback::blocks::SubagentBlockKind;
 use crate::scrollback::blocks::tool::hook::{
     HookRunCounts, render_group_hook_counts_inline_suffix,
 };
@@ -72,14 +71,6 @@ pub(crate) fn run_step(entry: &ScrollbackEntry, show_thinking: bool) -> RunStep 
             // the run — same treatment as opened thinking — so toggling a
             // member of an expanded group never dissolves the group.
             RunStep::Transparent
-        }
-    } else if matches!(entry.block, RenderBlock::Subagent(_)) {
-        if entry.display_mode == DisplayMode::Collapsed && !entry.is_pending_user_input {
-            RunStep::Member(VerbGroupKind::Subagent)
-        } else {
-            // Subagent rows are always collapsed single-row entries; prompt
-            // chrome keeps them standalone and breaks the run.
-            RunStep::Break
         }
     } else if entry.block.is_thinking() {
         if show_thinking && !entry.is_running && is_claimable_thinking {
@@ -293,7 +284,6 @@ pub fn truncation_header_label(
         }
         match &entry.block {
             RenderBlock::ToolCall(block) => acc.push(block.label_kind()?, entry, false),
-            RenderBlock::Subagent(_) => acc.push(VerbGroupKind::Subagent, entry, false),
             // A participant the vocabulary can't name would leave the label
             // dishonest about what's hidden; decline so the numerically
             // exact plain count renders instead.
@@ -351,14 +341,6 @@ impl<'e> BucketAccumulator<'e> {
                         .extend(b.citations.iter().map(String::as_str));
                 }
                 if block_failed(block) {
-                    self.failed_count += 1;
-                }
-            }
-            RenderBlock::Subagent(sb) => {
-                bucket.sources.insert(sb.child_session_id.as_str());
-                // Cancelled is deliberate, not an error — only Failed feeds
-                // the red suffix.
-                if matches!(sb.kind, SubagentBlockKind::Failed { .. }) {
                     self.failed_count += 1;
                 }
             }
@@ -441,7 +423,6 @@ fn block_failed(block: &ToolCallBlock) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scrollback::blocks::SubagentBlock;
     use crate::scrollback::blocks::tool::{
         HookRunEntry, HookRunStatus, ListDirToolCallBlock, ReadToolCallBlock, SearchToolCallBlock,
         ToolCallHookData, WebSearchToolCallBlock,
@@ -469,24 +450,6 @@ mod tests {
             ..ToolCallHookData::default()
         });
         entry
-    }
-
-    fn subagent(block: SubagentBlock) -> ScrollbackEntry {
-        ScrollbackEntry::new(RenderBlock::Subagent(block))
-    }
-
-    fn sub_started(child_sid: &str) -> ScrollbackEntry {
-        subagent(SubagentBlock::started(
-            "task", child_sid, "explore", None, None, None, /*is_background=*/ true,
-        ))
-    }
-
-    fn sub_completed(child_sid: &str) -> ScrollbackEntry {
-        subagent(SubagentBlock::completed(
-            "task",
-            child_sid,
-            std::time::Duration::from_secs(3),
-        ))
     }
 
     fn label(entries: &[ScrollbackEntry]) -> VerbGroupHeaderLabel {
@@ -792,55 +755,4 @@ mod tests {
         assert_eq!(l.text, "Ran 2 commands");
     }
 
-    #[test]
-    fn subagent_rows_bucket_with_tools_and_count_distinct_subagents() {
-        // A background subagent leaves BOTH its started row and a terminal
-        // row in the run; the child-session-id source override collapses
-        // them to one displayed subagent.
-        let entries = vec![
-            read("a.rs"),
-            sub_started("child-A"),
-            read("b.rs"),
-            sub_completed("child-A"),
-        ];
-        let l = label(&entries);
-        assert_eq!(l.text, "Read 2 files, Ran 1 subagent");
-        assert!(!l.failed);
-    }
-
-    #[test]
-    fn subagent_completion_burst_counts_each_subagent() {
-        let entries = vec![sub_completed("child-A"), sub_completed("child-B")];
-        let l = label(&entries);
-        assert_eq!(l.text, "Ran 2 subagents");
-    }
-
-    #[test]
-    fn subagent_failed_feeds_suffix_cancelled_does_not() {
-        let entries = vec![
-            subagent(SubagentBlock::failed(
-                "task",
-                "child-A",
-                std::time::Duration::from_secs(3),
-                Some("boom".into()),
-            )),
-            subagent(SubagentBlock::cancelled(
-                "task",
-                "child-B",
-                std::time::Duration::from_secs(3),
-            )),
-        ];
-        let l = label(&entries);
-        assert_eq!(l.text, "Ran 2 subagents · 1 failed");
-        assert!(l.failed);
-    }
-
-    #[test]
-    fn running_subagent_flips_group_tense() {
-        let mut entries = vec![read("a.rs"), sub_started("child-A")];
-        entries[1].is_running = true;
-        let l = label(&entries);
-        assert_eq!(l.text, "Reading 1 file, Running 1 subagent");
-        assert!(l.running);
-    }
 }

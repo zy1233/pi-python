@@ -7,7 +7,6 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::render::SafeBuf;
 use crate::theme::Theme;
-use crate::views::goal_detail::truncate_to_width;
 
 /// Prefer one row above the prompt, right-aligned to it. With no prompt
 /// (login / gate), paint the last row of `area` — stacked welcome layouts
@@ -47,9 +46,64 @@ pub(crate) fn paint_welcome_toast(
     buf.set_string_safe(x, y, &toast, style);
 }
 
+/// Truncate `text` to at most `budget` terminal columns, appending an
+/// ellipsis if truncated. Uses display width (not char count) so CJK
+/// and emoji characters measure correctly.
+fn truncate_to_width(text: &str, budget: usize) -> String {
+    use unicode_width::UnicodeWidthChar;
+
+    if UnicodeWidthStr::width(text) <= budget {
+        return text.to_owned();
+    }
+    let target = budget.saturating_sub(1); // room for ellipsis
+    let mut out = String::new();
+    let mut w = 0usize;
+    for ch in text.chars() {
+        let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if w + cw > target {
+            break;
+        }
+        out.push(ch);
+        w += cw;
+    }
+    out.push('\u{2026}');
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn truncate_to_width_ascii() {
+        assert_eq!(truncate_to_width("short", 100), "short");
+        assert_eq!(truncate_to_width("hello world", 5), "hell\u{2026}");
+    }
+
+    #[test]
+    fn truncate_to_width_cjk() {
+        // Each CJK char = 2 cols. "你好世界" = 8 cols. Budget 5 → 2 chars (4 cols) + ellipsis.
+        let result = truncate_to_width("你好世界", 5);
+        assert!(
+            UnicodeWidthStr::width(result.as_str()) <= 5,
+            "truncated CJK {result:?} wider than 5"
+        );
+        assert!(result.ends_with('\u{2026}'));
+    }
+
+    #[test]
+    fn truncate_to_width_boundaries() {
+        // Exactly at budget → unchanged (no ellipsis).
+        assert_eq!(truncate_to_width("abcd", 4), "abcd");
+        // One column over → truncated with the ellipsis.
+        assert_eq!(truncate_to_width("abcde", 4), "abc\u{2026}");
+        // Zero-width combining marks don't consume the budget.
+        let combining = "a\u{0301}b\u{0301}"; // 2 display columns
+        assert_eq!(UnicodeWidthStr::width(combining), 2);
+        assert_eq!(truncate_to_width(combining, 5), combining);
+        // Degenerate budget 0 → just the ellipsis (no codepoint dropped silently).
+        assert_eq!(truncate_to_width("x", 0), "\u{2026}");
+    }
 
     fn toast_row(buf: &Buffer, area: Rect, y: u16) -> String {
         (area.x..area.right())

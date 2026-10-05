@@ -5,9 +5,6 @@
 //! and pi session extension notifications (`legacy ext RPC` and
 //! replay-path `legacy ext RPC`).
 
-#[cfg(test)]
-use std::sync::Arc;
-
 use agent_client_protocol as acp;
 use pi_acp_lib::AcpClientMessage;
 
@@ -19,12 +16,12 @@ use pi_workspace::permission::bash_command_splitting::BashCommandHighlights;
 
 use crate::acp::meta::NotificationMeta;
 use crate::acp::tracker::TurnActivity;
-use crate::app::agent::{AgentId, AgentSession, AgentState, GoalDisplayPhase, GoalDisplayState, GoalDisplayStatus};
+use crate::app::agent::{AgentId, AgentSession, AgentState, };
 use crate::notifications::{NotificationEvent, NotificationEventKind};
 use crate::scrollback::block::RenderBlock;
 use crate::scrollback::blocks::SessionEvent;
 use crate::views::permission_view::{
-    McpScope, McpScopeState, PermissionFocus, PermissionViewState, SubagentInfo,
+    McpScope, McpScopeState, PermissionFocus, PermissionViewState, 
 };
 
 use super::agent_view::{AgentPane, AgentView};
@@ -35,9 +32,6 @@ mod prompt_origin;
 mod queue;
 mod routing;
 mod session_notification;
-mod subagent_activity;
-mod subagent_lifecycle;
-mod workflow_ingest;
 
 #[cfg(test)]
 use permissions::{MCP_ARGS_MAX_LINE_CHARS, MCP_ARGS_MAX_LINES, mcp_args_lines};
@@ -47,7 +41,7 @@ use permissions::{
 };
 
 // Hub + child modules (via `use super::*`) need sibling symbols in this scope.
-use routing::{SessionMatch, find_session_match, is_matched_agent_active};
+use routing::{find_session_match, is_matched_agent_active};
 
 use prompt_origin::{finish_wake_turn, viewer_turn_anchor};
 pub(crate) use prompt_origin::{
@@ -55,21 +49,11 @@ pub(crate) use prompt_origin::{
     should_adopt_running_prompt,
 };
 
-pub(crate) use subagent_activity::finalize_killed_subagent;
-use subagent_activity::{subagent_activity_label, sync_subagent_activity};
-use subagent_lifecycle::{LifecycleDelivery, LifecycleOrigin, classify_subagent_lifecycle, gate_subagent_lifecycle, redispatched_subagent_finish};
 
-use workflow_ingest::ingest_workflow_update;
-
-pub(crate) use session_notification::apply_child_view_session_event;
 #[cfg(test)]
 pub(crate) use session_notification::apply_session_event_for_test;
 pub(crate) use session_notification::drop_unexpected_replay;
-use session_notification::{
-    advance_reconnect_cursor, confirm_context_used, detect_plan_mode_change,
-    handle_session_notification, handle_session_notification_with_origin,
-};
-
+use session_notification::{advance_reconnect_cursor, confirm_context_used, detect_plan_mode_change, handle_session_notification};
 pub(crate) use queue::PendingRunningAdoption;
 
 #[cfg(test)]
@@ -84,12 +68,6 @@ use routing::*;
 #[cfg(test)]
 #[allow(unused_imports)]
 use session_notification::*;
-#[cfg(test)]
-#[allow(unused_imports)]
-use subagent_activity::*;
-#[cfg(test)]
-#[allow(unused_imports)]
-use workflow_ingest::*;
 
 /// Handle an ACP notification (session update, permission request, etc.).
 ///
@@ -104,7 +82,7 @@ pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
             let mut meta = NotificationMeta::from_json(notif.request.meta.as_ref());
 
             let affected = match find_session_match(app, &notif.request.session_id) {
-                Some(SessionMatch::Root(id)) => {
+                Some(id) => {
                     let is_active = is_matched_agent_active(app, id);
                     // Read before the agent borrow below.
                     let stashed_adoption_pid = app
@@ -379,7 +357,6 @@ pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
                         if let Some(commands) = agent.session.tracker.take_pending_acp_commands() {
                             agent.session.available_commands = commands;
                             agent.session.available_commands_generation += 1;
-                            refresh_workflow_run_capabilities(agent);
                         }
                         // Tools list arrives in the same update's `meta` payload.
                         // Stash it on the session so the per-frame sync in
@@ -456,41 +433,6 @@ pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
                     // agent is the visible one.
                     mutated && is_active
                 }
-                Some(SessionMatch::Child(parent_id)) => {
-                    let is_active = is_matched_agent_active(app, parent_id);
-                    let parent = app
-                        .agents
-                        .get_mut(&parent_id)
-                        .expect("find_session_match returned an existing AgentId");
-                    // Re-derive the &str key to avoid making SessionMatch::Child
-                    // carry an owned String (see find_session_match docs).
-                    let child_key: &str = notif.request.session_id.0.as_ref();
-
-                    let activity_label = {
-                        let child_view = parent
-                            .child_view_for_live_update_mut(child_key)
-                            .expect("find_session_match returned an existing subagent_views key");
-                        if let Some(tokens) = meta.total_tokens {
-                            confirm_context_used(child_view, tokens);
-                        }
-                        if let Some(ts) = meta.turn_start_ms {
-                            child_view.turn_start_ms = Some(ts);
-                        }
-                        child_view.session.handle_update(
-                            notif.request.update,
-                            &meta,
-                            &mut child_view.scrollback,
-                        );
-                        for entry_id in child_view.session.tracker.take_pending_edit_hl() {
-                            child_view.submit_edit_highlight(entry_id);
-                        }
-                        subagent_activity_label(child_view)
-                    };
-
-                    sync_subagent_activity(parent, child_key, activity_label);
-
-                    is_active
-                }
                 None => {
                     tracing::debug!(
                         session_id = notif.request.session_id.0.as_ref(),
@@ -547,41 +489,6 @@ pub(super) fn note_first_turn_activity(agent: &mut AgentView) {
                 "activity": activity_label,
             })),
         );
-    }
-}
-
-pub(super) fn is_builtin_workflow_handle(
-    commands: &[acp::AvailableCommand],
-    display_name: &str,
-) -> bool {
-    let is_builtin = |command: &acp::AvailableCommand| {
-        command.meta.as_ref().is_some_and(|meta| {
-            meta.get("workflowSource")
-                .and_then(serde_json::Value::as_str)
-                == Some("builtin")
-        })
-    };
-    if let Some(exact) = commands.iter().find(|command| command.name == display_name) {
-        return is_builtin(exact);
-    }
-    commands.iter().any(|command| {
-        is_builtin(command)
-            && display_name
-                .strip_prefix(command.name.as_str())
-                .and_then(|suffix| suffix.strip_prefix('-'))
-                .is_some_and(|ordinal| ordinal.parse::<u32>().is_ok_and(|n| n >= 2))
-    })
-}
-
-pub(crate) fn refresh_workflow_run_capabilities(agent: &mut AgentView) {
-    let management_available = agent
-        .session
-        .available_commands
-        .iter()
-        .any(|command| command.name == "workflow");
-    for run in &mut agent.workflow_runs {
-        run.management_available = management_available;
-        run.builtin = is_builtin_workflow_handle(&agent.session.available_commands, &run.name);
     }
 }
 

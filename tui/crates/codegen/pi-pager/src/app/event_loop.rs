@@ -570,13 +570,7 @@ fn report_suspend_wait(app: &mut AppView, message: &str) {
                 && let Some(agent) = app.agents.get_mut(&id)
             {
                 let block = crate::scrollback::block::RenderBlock::system(message);
-                if let Some(child_sid) = agent.active_subagent.clone()
-                    && let Some(child) = agent.subagent_views.get_mut(&child_sid)
-                {
-                    child.scrollback.push_block(block);
-                } else {
-                    agent.scrollback.push_block(block);
-                }
+                agent.scrollback.push_block(block);
             }
         }
     }

@@ -60,7 +60,6 @@ use crate::scrollback::state::ScrollbackState;
 use agent_client_protocol as acp;
 use indexmap::IndexMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Instant;
 fn test_app() -> AppView {
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
@@ -346,47 +345,6 @@ pub(super) fn enqueue_local(app: &mut AppView, id: AgentId, text: &str) {
         .unwrap()
         .session
         .enqueue_prompt(text.to_string());
-}
-fn make_test_subagent(child_sid: &str, sa_id: &str) -> crate::app::subagent::SubagentInfo {
-    crate::app::subagent::SubagentInfo {
-        subagent_id: Arc::from(sa_id),
-        child_session_id: Arc::from(child_sid),
-        description: Arc::from("test subagent"),
-        subagent_type: Arc::from("general-purpose"),
-        persona: None,
-        role: None,
-        model: None,
-        context_source: None,
-        resumed_from: None,
-        capability_mode: None,
-        workflow_run_id: None,
-        context_normalized: false,
-        parent_prompt_id: None,
-        started_at: std::time::Instant::now(),
-        last_progress_at: std::time::Instant::now(),
-        finished: false,
-        status: None,
-        error: None,
-        duration_ms: None,
-        tool_calls: None,
-        turns: None,
-        turn_count: None,
-        tool_call_count: None,
-        tokens_used: None,
-        context_window_tokens: None,
-        context_usage_pct: None,
-        tools_used: Vec::new(),
-        error_count: None,
-        activity_label: None,
-        is_background: false,
-        pending_kill: false,
-        kill_requested_at: None,
-        scrollback_entry_id: None,
-        prompt: None,
-        child_cwd: None,
-        worktree_path: None,
-        transcript: Default::default(),
-    }
 }
 fn cta_entry(name: &str, status: &str) -> pi_hooks_plugins_types::MarketplacePluginEntry {
     pi_hooks_plugins_types::MarketplacePluginEntry {
@@ -774,7 +732,6 @@ fn enqueue_permission_with_enable_always_approve(
         description: vec![],
         args_expanded: false,
         desc_scroll: 0,
-        subagent_label: None,
         options_area_height: 0,
         options_scroll_offset: 0,
     });

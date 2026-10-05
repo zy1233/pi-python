@@ -799,29 +799,16 @@ pub(super) fn push_send_now_user_block(
 }
 
 /// Whether a Send Now row should paint an optimistic block. Returns `false`
-/// unless the client expects a Send Now cancel, or the row belongs to an active
-/// goal on a committed, running turn. Arms the cancel expectation only on the
-/// expects-cancel path; an active goal paints WITHOUT arming so its interjection
-/// notification can claim the block. Bash rows and idle sessions do neither.
+/// unless the client expects a Send Now cancel, in which case the cancel
+/// expectation is armed. Bash rows and idle sessions do neither.
 fn paint_send_now_and_maybe_arm(agent: &mut AgentView, id: &str) -> bool {
-    let expects_cancel = agent.expects_send_now_cancel();
-    let goal_active = agent
-        .goal_state
-        .as_ref()
-        .is_some_and(|goal| matches!(goal.status, crate::app::agent::GoalDisplayStatus::Active));
-    if !(expects_cancel
-        || (goal_active && agent.session.state.is_turn_running() && agent.front_message_committed))
-    {
+    if !agent.expects_send_now_cancel() {
         return false;
     }
-    if expects_cancel {
-        agent.arm_send_now_expectation(id.to_string());
-    }
+    agent.arm_send_now_expectation(id.to_string());
     true
 }
 
-/// Active goals paint without arming cancellation so their authoritative
-/// interjection notification can claim the block.
 pub(super) fn arm_send_now_and_paint_dispatched(
     agent: &mut AgentView,
     prompt_id: &str,
@@ -1237,10 +1224,7 @@ mod tests {
     use super::*;
     use crate::app::actions::{Action, SharedQueueTarget};
     use crate::app::agent::AgentState;
-    use crate::app::agent_view::test_fixtures::{
-        complete_task_output_wait_call, count_turn_markers, running_subagent_info,
-        simulate_subagent_wait, simulate_task_output_wait, simulate_task_output_wait_call,
-    };
+    use crate::app::agent_view::test_fixtures::{complete_task_output_wait_call, count_turn_markers, simulate_task_output_wait, simulate_task_output_wait_call};
     use crate::app::dispatch::router::dispatch;
     use crate::app::dispatch::tests::{
         end_turn, enqueue_local, test_app_with_agent,
@@ -2481,40 +2465,6 @@ mod tests {
         );
 
         assert_eq!(agent.session.pending_prompts.len(), 1);
-    }
-
-    /// A foreground-subagent wait is sendable but never parks (parent blocked, not completed).
-    #[test]
-    fn subagent_wait_holds_queue_but_never_parks() {
-        let mut app = test_app_with_agent();
-        let id = AgentId(0);
-        dispatch(Action::SendPrompt("first".into()), &mut app);
-        enqueue_local(&mut app, id, "queued row");
-        simulate_subagent_wait(app.agents.get_mut(&id).unwrap());
-
-        let agent = app.agents.get_mut(&id).unwrap();
-        assert_eq!(
-            agent.held_queue_count(),
-            1,
-            "held row feeds the inline status hint"
-        );
-        assert_eq!(count_turn_markers(agent), 0);
-        assert!(!agent.renders_parked());
-
-        // Even with an empty queue + live subagent, a subagent wait never parks.
-        agent
-            .subagent_sessions
-            .insert("child-1".into(), running_subagent_info("child-1"));
-        agent.session.pending_prompts.clear();
-        assert_eq!(
-            count_turn_markers(agent),
-            0,
-            "subagent wait must never park"
-        );
-        assert!(
-            !agent.renders_parked(),
-            "subagent wait keeps running chrome"
-        );
     }
 
     /// T1 regression: a live chunk must un-park even when the wait's terminal

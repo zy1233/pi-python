@@ -234,28 +234,6 @@ fn session_created_banner_advertises_resume_in_minimal_mode() {
     );
 }
 #[test]
-fn global_cancel_subagents_pref_skips_panel_without_session_override() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.session.state = AgentState::TurnRunning;
-        agent
-            .subagent_sessions
-            .insert("child-1".into(), make_test_subagent("child-1", "sa-1"));
-    }
-    app.current_ui.cancel_subagents_on_turn_cancel = Some("always_continue".into());
-    let effects = dispatch(Action::CancelTurn, &mut app);
-    assert!(app.agents[&id].cancel_turn_view.is_none());
-    assert!(matches!(
-        effects.as_slice(),
-        [Effect::CancelTurn {
-            cancel_subagents: false,
-            ..
-        }]
-    ));
-}
-#[test]
 fn new_worktree_session_creates_agent_and_returns_effect() {
     let mut app = test_app_git();
     let effects = dispatch(

@@ -96,9 +96,6 @@ pub(in crate::app::dispatch) fn focus_if_session_already_open(
         }
         Some(*id)
     })?;
-    if let Some(agent) = app.agents.get_mut(&existing_id) {
-        agent.close_subagent_fullscreen();
-    }
     switch_to_agent(app, existing_id, SwitchCause::Load);
     Some(existing_id)
 }
@@ -971,9 +968,6 @@ pub(in crate::app::dispatch) fn handle_session_loaded(
             agent.adopt_running_prompt(running_pid);
         } else {
             agent.scrollback.finish_all_running();
-            for child in agent.subagent_views.values_mut() {
-                child.scrollback.finish_all_running();
-            }
         }
         let mut effects = Vec::new();
         if let Some(directive) = agent.pending_first_prompt.take() {

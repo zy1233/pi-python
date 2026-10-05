@@ -118,21 +118,6 @@ fn owed_refresh_is_deferred_never_dropped_and_consumed_by_the_first_run() {
     assert!(!app.status_line.refresh_due(), "consumed by that run");
 
     let mut now = Instant::now();
-    let mut app = settled_refresh_timer_app(now);
-    app.agents.get_mut(&AgentId(0)).unwrap().active_subagent = Some("child".into());
-    now += Duration::from_secs(300);
-    app.note_status_line_refresh_due_at(now);
-    assert!(!queued_a_run(&app), "no run for a frame the subagent owns");
-    assert!(
-        app.status_line.refresh_due(),
-        "the refresh waits for the row"
-    );
-    app.agents.get_mut(&AgentId(0)).unwrap().active_subagent = None;
-    app.update_status_line_at(now);
-    assert!(queued_a_run(&app), "the first run after the row returns");
-    assert!(!app.status_line.refresh_due(), "consumed, not re-demanded");
-
-    let mut now = Instant::now();
     let mut app = refresh_timer_app();
     app.active_view = ActiveView::Welcome;
     now += Duration::from_secs(300);

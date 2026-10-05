@@ -36,7 +36,6 @@ pub(crate) mod session_title_resolve;
 pub(crate) mod status_blocks;
 pub(crate) mod status_line;
 mod status_line_policy;
-pub(crate) mod subagent;
 pub(crate) mod subscription;
 mod event_loop;
 mod event_loop_stall;

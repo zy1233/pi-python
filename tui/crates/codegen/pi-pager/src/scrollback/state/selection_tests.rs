@@ -796,14 +796,6 @@ fn push_reads(state: &mut ScrollbackState, n: usize) -> Vec<EntryId> {
         .collect()
 }
 
-fn push_subagent(state: &mut ScrollbackState, child_sid: &str) -> EntryId {
-    state.push_block(RenderBlock::Subagent(
-        crate::scrollback::blocks::SubagentBlock::started(
-            "task", child_sid, "explore", None, None, None, /*is_background=*/ false,
-        ),
-    ))
-}
-
 fn verb_header_at(state: &ScrollbackState, idx: usize) -> bool {
     state
         .layout_cache
@@ -1653,62 +1645,6 @@ fn verb_group_search_reveal_unhides_member() {
         cached_height_at(&state, 2) > 0,
         "members stay expanded across a head reveal"
     );
-}
-
-#[test]
-fn verb_group_subagent_head_expand_and_collapse_round_trip() {
-    let mut state = verb_state();
-    let sub_id = push_subagent(&mut state, "child-A");
-    push_reads(&mut state, 2);
-    state.prepare_layout(80, 40);
-    assert!(verb_header_at(&state, 0));
-    assert_eq!(header_count_at(&mut state, 0), 3);
-    assert_eq!(cached_height_at(&state, 0), 1);
-    assert_eq!(cached_height_at(&state, 1), 0);
-
-    // Expand from the header: the subagent hosts the shared slot (header
-    // line stacked above its own row); every member reveals below.
-    state.set_selected(Some(0));
-    assert!(state.toggle_group_expansion());
-    state.prepare_layout(80, 40);
-    assert!(state.expanded_groups.contains(&sub_id));
-    assert_eq!(cached_height_at(&state, 0), 2);
-    assert!(cached_height_at(&state, 1) > 0);
-    assert!(cached_height_at(&state, 2) > 0);
-
-    // Collapse from a member refolds behind the subagent-anchored header.
-    state.set_selected(Some(1));
-    assert!(state.collapse_group_if_expanded());
-    state.prepare_layout(80, 40);
-    assert!(!state.expanded_groups.contains(&sub_id));
-    assert_eq!(cached_height_at(&state, 1), 0);
-}
-
-#[test]
-fn verb_group_subagent_mid_run_member_folds_and_round_trips() {
-    let mut state = verb_state();
-    let ids = push_reads(&mut state, 1);
-    push_subagent(&mut state, "child-A");
-    push_reads(&mut state, 1);
-    state.prepare_layout(80, 40);
-    assert!(verb_header_at(&state, 0));
-    assert_eq!(header_count_at(&mut state, 0), 3);
-    assert_eq!(
-        cached_height_at(&state, 1),
-        0,
-        "subagent row folds into the run"
-    );
-
-    // Expand reveals the subagent row; collapse from it refolds the run.
-    state.set_selected(Some(0));
-    assert!(state.toggle_group_expansion());
-    state.prepare_layout(80, 40);
-    assert!(cached_height_at(&state, 1) > 0);
-    state.set_selected(Some(1));
-    assert!(state.collapse_group_if_expanded());
-    state.prepare_layout(80, 40);
-    assert!(!state.expanded_groups.contains(&ids[0]));
-    assert_eq!(cached_height_at(&state, 1), 0);
 }
 
 /// Ctrl+E's expand-all re-derives dense runs itself; a verb-claimed lone

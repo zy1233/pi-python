@@ -141,12 +141,11 @@ use crate::views::block_viewer::BlockViewerPane;
 use crate::views::elicitation_view::ElicitationViewState;
 use crate::views::file_search::line_viewer::LineViewerState;
 use crate::views::modal::{self, ActiveModal, ModalButtonHit};
-use crate::views::permission_view::{PermissionViewState, SubagentInfo};
+use crate::views::permission_view::{PermissionViewState, };
 use crate::views::plan_approval_view::{PlanApprovalViewState, PlanComment};
 use crate::views::prompt_widget::{PromptWidget, StashedPrompt};
 use crate::views::question_view::QuestionViewState;
 use crate::views::queue_pane::QueuePane;
-use crate::views::subagent_catalog_pane::SubagentCatalogPane;
 use crate::views::todo_pane::TodoPane;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -181,7 +180,6 @@ mod selection;
 mod session;
 mod shell_completion;
 mod viewer;
-mod workflows_overlay;
 use super::actions;
 use super::dispatch;
 pub(super) fn active_contexts_for_pane(pane: ActivePane) -> Vec<crate::actions::When> {
@@ -638,11 +636,6 @@ pub(crate) struct PendingForkBanner {
     /// Whether the fork created a new worktree.
     pub worktree: bool,
 }
-/// A finish held until its spawn arrives. Output is stripped at insert.
-#[derive(Debug, Clone)]
-pub(crate) struct DeferredSubagentFinish {
-    pub inserted_at: std::time::Instant,
-}
 /// In-flight reconnect session reload.
 ///
 /// Opened by [`AgentView::begin_session_reload`]: the pre-outage scrollback
@@ -692,11 +685,6 @@ pub(crate) struct ReplayRebuiltState {
     pub(crate) scrollback: ScrollbackState,
     pub(crate) tracker: crate::acp::tracker::AcpUpdateTracker,
     pub(crate) todo: TodoPane,
-    pub(crate) workflow_blocks:
-        std::collections::HashMap<String, crate::scrollback::entry::EntryId>,
-    pub(crate) workflow_runs: Vec<crate::views::workflows::WorkflowRunSnapshot>,
-    pub(crate) workflow_run_revisions: std::collections::HashMap<String, u64>,
-    pub(crate) cleared_workflow_runs: std::collections::HashSet<String>,
 }
 /// Lifecycle of the inline plugin CTA. `Hidden`/`Matched` cover the idle and
 /// prompt-matched states; `Installing`/`Installed`/`Error` cover an in-TUI
@@ -804,7 +792,6 @@ pub struct AgentView {
     /// Sticky: once the user types in the prompt, hide the tip for the session.
     pub tip_typing_dismissed: bool,
     pub todo: TodoPane,
-    pub catalog: SubagentCatalogPane,
     pub queue: QueuePane,
     /// Per-agent mirror of the server-authoritative shared prompt queue
     /// (`AppView::shared_prompt_queues[sid]`), kept in sync by
@@ -872,10 +859,6 @@ pub struct AgentView {
     /// [`Self::advance_last_seen_event_id`] so forward-only compares do not
     /// re-parse the id string at every writer.
     pub last_seen_event_seq: Option<u64>,
-    /// Terminal lifecycle updates that arrived before their spawn. Bounded,
-    /// output-stripped, and cleared on session rebind; the spawn path drains
-    /// an entry before a later reconnect cursor can strand the finish.
-    pub(crate) deferred_subagent_finishes: HashMap<String, DeferredSubagentFinish>,
     /// Open reconnect reload window, if any. See [`SessionReload`].
     pub(crate) session_reload: Option<SessionReload>,
     /// Unexpected-replay drops since the last reload window opened. Gates the
@@ -986,28 +969,9 @@ pub struct AgentView {
     pub credit_balance: Option<crate::views::credit_bar::CreditBalance>,
     /// Auto top-up rule paired with `credit_balance` for the prompt warning.
     pub auto_topup: Option<crate::views::credit_bar::AutoTopupInfo>,
-    /// Current goal orchestration state. Set by `GoalUpdated` session
-    /// notifications, cleared when a new session starts.
-    pub goal_state: Option<super::agent::GoalDisplayState>,
-    pub workflow_blocks: std::collections::HashMap<String, crate::scrollback::entry::EntryId>,
-    pub workflow_runs: Vec<crate::views::workflows::WorkflowRunSnapshot>,
-    pub workflow_run_revisions: std::collections::HashMap<String, u64>,
-    pub cleared_workflow_runs: std::collections::HashSet<String>,
-    pub show_workflows: bool,
-    pub workflows_view: crate::views::workflows::WorkflowsViewState,
     /// Turn-end hook runs waiting for the turn's marker, which they race. Consumed or flushed
     /// by `push_turn_terminal_marker`; dropped on every replay-window entry.
     pub(crate) pending_stop_hooks: Option<PendingStopHooks>,
-    /// Goal id of the most recently cleared goal, captured from the dropped
-    /// state (the `cleared` event itself carries an empty id). Drops a late
-    /// in-flight `GoalUpdated` that would otherwise resurrect the cleared
-    /// chip/modal. Single slot: goal ids are unique, so only the latest clear
-    /// can race a stale update.
-    pub last_cleared_goal_id: Option<String>,
-    /// Whether the expanded goal detail overlay is visible.
-    /// Toggled by `Action::ToggleGoalDetail`. Only shown when
-    /// `goal_state` is `Some`.
-    pub show_goal_detail: bool,
     /// UTC ms when the current turn started (`turnStartMs` from notification meta).
     /// Used for turn elapsed display.
     pub turn_start_ms: Option<i64>,
@@ -1172,11 +1136,7 @@ pub struct AgentView {
     pub hit_credits: HitArea,
     pub hit_todo_close: HitArea,
     pub hit_bg_close: HitArea,
-    pub hit_subagent_close: HitArea,
-    pub hit_catalog_close: HitArea,
     pub hit_bg_status: HitArea,
-    pub hit_goal_status: HitArea,
-    pub hit_goal_close: HitArea,
     pub hit_bg_button: HitArea,
     #[allow(dead_code)]
     pub(crate) last_bg_click: Option<Instant>,
@@ -1482,23 +1442,6 @@ pub struct AgentView {
     pub(crate) timeline_hover_preview: Option<(usize, String)>,
  /// Running agent definition for this session (`legacy ext RPC` `agentName`).
     pub session_agent_name: Option<String>,
-    /// Map of child session IDs to subagent metadata. Populated on
-    /// `SubagentSpawned` notifications, used for permission routing
-    /// (which agent owns a session) and provenance display.
-    pub subagent_sessions: HashMap<String, SubagentInfo>,
-    /// Child subagent views. Keyed by child_session_id.
-    /// Created eagerly on SubagentSpawned so updates are tracked from the start.
-    pub subagent_views: HashMap<String, Box<AgentView>>,
-    /// Currently open subagent view (child_session_id). When Some, the
-    /// scrollback area is replaced by the subagent's framed view.
-    pub active_subagent: Option<String>,
-    /// When true, this AgentView is rendering as a subagent (read-only):
-    /// - Prompt is hidden
-    /// - Cancel turn / demote to bg shortcuts are disabled
-    /// - Shortcuts bar shows subagent-specific hints
-    pub is_subagent_view: bool,
-    /// Hit area for the [✗] close button in the subagent frame title bar.
-    pub hit_subagent_frame_close: HitArea,
     /// Whether the `/share` slash command is available (mirrors
     /// `AppView::sharing_enabled`). Used to gate palette entries.
     pub sharing_enabled: bool,
@@ -2329,7 +2272,6 @@ pub(crate) mod test_fixtures {
             description: vec![],
             args_expanded: false,
             desc_scroll: 0,
-            subagent_label: None,
             options_area_height: 0,
             options_scroll_offset: 0,
         }
@@ -2438,114 +2380,6 @@ pub(crate) mod test_fixtures {
     /// Blocking-wait shorthand for [`simulate_task_output_wait_ms`].
     pub fn simulate_task_output_wait(agent: &mut AgentView, task_id: &str) {
         simulate_task_output_wait_ms(agent, task_id, 30_000);
-    }
-    /// Drive the agent's tracker into a wait-all
-    /// (`WaitingReason::TasksComplete`) blocking wait via the real update
-    /// path; the tracker classifies on the title alone.
-    pub fn simulate_wait_all(agent: &mut AgentView) {
-        use crate::acp::meta::NotificationMeta;
-        use crate::acp::tracker::{TurnActivity, WaitingReason};
-        use std::sync::Arc;
-        agent.front_message_committed = true;
-        let meta = NotificationMeta::default();
-        agent.session.handle_update(
-            acp::SessionUpdate::ToolCall(
-                acp::ToolCall::new(
-                    acp::ToolCallId::new(Arc::from("waitall-1")),
-                    "wait_commands_or_subagents",
-                )
-                .kind(acp::ToolKind::Other)
-                .status(acp::ToolCallStatus::Pending)
-                .content(vec![])
-                .locations(vec![]),
-            ),
-            &meta,
-            &mut agent.scrollback,
-        );
-        let activity = agent.resolve_turn_activity();
-        assert!(
-            matches!(
-                activity,
-                Some(TurnActivity::Waiting(WaitingReason::TasksComplete))
-            ),
-            "expected TasksComplete wait, got {activity:?}"
-        );
-    }
-    /// Drive the agent's tracker into a foreground-subagent wait via the real
-    /// update path: a pending `task` tool call (no `run_in_background`)
-    /// registers a blocking [`WaitingReason::Subagent`]
-    /// (`crate::acp::tracker`). The shell aborts that await the moment the
-    /// user sends (send-now), so it must read as a sendable/parked wait.
-    pub fn simulate_subagent_wait(agent: &mut AgentView) {
-        use crate::acp::meta::NotificationMeta;
-        use crate::acp::tracker::{TurnActivity, WaitingReason};
-        use std::sync::Arc;
-        agent.front_message_committed = true;
-        let meta = NotificationMeta::default();
-        agent.session.handle_update(
-            acp::SessionUpdate::ToolCall(
-                acp::ToolCall::new(acp::ToolCallId::new(Arc::from("task-tc-1")), "task")
-                    .kind(acp::ToolKind::Other)
-                    .status(acp::ToolCallStatus::Pending)
-                    .content(vec![])
-                    .locations(vec![]),
-            ),
-            &meta,
-            &mut agent.scrollback,
-        );
-        let activity = agent.resolve_turn_activity();
-        assert!(
-            matches!(
-                activity,
-                Some(TurnActivity::Waiting(WaitingReason::Subagent { .. }))
-            ),
-            "expected Subagent wait, got {activity:?}"
-        );
-    }
-    /// A minimal running (foreground) subagent registry row, so tests can
-    /// count it in `watchers()` snapshots.
-    pub fn running_subagent_info(child_sid: &str) -> crate::app::subagent::SubagentInfo {
-        use std::sync::Arc;
-        use std::time::Instant;
-        crate::app::subagent::SubagentInfo {
-            subagent_id: Arc::from(format!("sa-{child_sid}")),
-            child_session_id: Arc::from(child_sid),
-            description: Arc::from("test"),
-            subagent_type: Arc::from("general-purpose"),
-            persona: None,
-            role: None,
-            model: None,
-            context_source: None,
-            resumed_from: None,
-            capability_mode: None,
-            workflow_run_id: None,
-            context_normalized: false,
-            parent_prompt_id: None,
-            started_at: Instant::now(),
-            last_progress_at: Instant::now(),
-            finished: false,
-            status: None,
-            error: None,
-            duration_ms: None,
-            tool_calls: None,
-            turns: None,
-            turn_count: None,
-            tool_call_count: None,
-            tokens_used: None,
-            context_window_tokens: None,
-            context_usage_pct: None,
-            tools_used: Vec::new(),
-            error_count: None,
-            activity_label: None,
-            is_background: false,
-            pending_kill: false,
-            kill_requested_at: None,
-            scrollback_entry_id: None,
-            prompt: None,
-            child_cwd: None,
-            worktree_path: None,
-            transcript: Default::default(),
-        }
     }
     /// Count of "Worked for X" (`TurnCompleted`) marker blocks in the
     /// agent's scrollback.

@@ -147,9 +147,6 @@ impl AgentView {
             // Privacy upsell banner owns the slot until acted on — a
             // session-long occluder like the session announcement banner.
             || self.privacy_banner.active
-            // Subagent fullscreen takeover: draw early-returns into
-            // draw_subagent_fullscreen and never paints the parent banner.
-            || self.active_subagent.is_some()
             // Fullscreen viewers render after the banner paints: image/video/
             // block dim the whole region down to the shortcuts row (banner
             // included). line_viewer's overlay stops at turn_status.y when a
@@ -162,13 +159,6 @@ impl AgentView {
             || self.block_viewer.is_some()
             // /gboom dims the same down-to-shortcuts region as the video viewer.
             || self.gboom.is_some()
-            // Goal-detail is a vertically-centered overlay painted after the
-            // tip; its box only reaches the banner row for tall/content-rich
-            // goals, but kept unconditional as a safe over-refusal (like the
-            // modals and line_viewer) since a tip during goal reading is
-            // unwanted regardless.
-            || (self.show_goal_detail && self.goal_state.is_some())
-            || self.show_workflows
             // Prompt dropdowns (@/slash/completion/history) render in the
             // row directly above the prompt — the banner row — clearing it.
             || self.prompt.any_dropdown_open()
@@ -215,9 +205,6 @@ impl AgentView {
     /// Propagate sticky status to this view and every nested subagent view.
     pub fn set_sticky_toast_recursive(&mut self, msg: Option<&str>) {
         self.set_sticky_toast(msg);
-        for child in self.subagent_views.values_mut() {
-            child.set_sticky_toast_recursive(msg);
-        }
     }
 
     /// Show a toast with an explicit tick duration.

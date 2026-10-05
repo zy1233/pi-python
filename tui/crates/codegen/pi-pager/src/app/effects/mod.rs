@@ -26,7 +26,7 @@ use tokio::task::JoinSet;
 use pi_acp_lib::{AcpAgentTx, acp_send};
 use pi_telemetry::startup::{self, StartupPhase};
 use actions::{
-    ClipboardPasteTarget, Effect, ProbedAttachment, SubagentKillOutcome,
+    ClipboardPasteTarget, Effect, ProbedAttachment, 
     SwitchModelError, TaskResult,
 };
 use actions::PermissionModeKind;
@@ -984,15 +984,6 @@ pub(crate) fn execute(
                 }
             });
         }
-        Effect::KillSubagent { session_id, subagent_id } => {
-            tasks.spawn(async move {
-                TaskResult::KillSubagentComplete {
-                    session_id,
-                    subagent_id,
-                    outcome: SubagentKillOutcome::NothingLive { status: None },
-                }
-            });
-        }
         Effect::SwitchModel {
             agent_id,
             session_id,
@@ -1675,13 +1666,6 @@ pub(crate) fn execute(
                     error: "Interjection is not supported in standard ACP".into(),
                     text,
                     blocks,
-                }
-            });
-        }
-        Effect::FetchCatalogEntry { .. } => {
-            tasks.spawn(async move {
-                TaskResult::CatalogEntryFailed {
-                    error: "Bundle catalog is not supported in standard ACP".to_string(),
                 }
             });
         }

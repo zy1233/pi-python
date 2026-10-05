@@ -104,7 +104,6 @@ impl AgentView {
                 match target {
                     AgentPane::Queue => self.queue.overlay.focused = false,
                     AgentPane::Todo => self.todo.overlay.focused = false,
-                    AgentPane::Catalog => self.catalog.overlay.focused = false,
                     _ => {}
                 }
                 self.show_toast("Editing a queued prompt: press Enter to save, Esc to discard");

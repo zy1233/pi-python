@@ -1,11 +1,10 @@
-//! Turn cancellation, task and subagent kills, and overdue turn reconciliation.
+//! Turn cancellation and overdue turn reconciliation.
 
-use super::ctx::active_subagent_view_mut;
 use super::permissions::drain_permission_queue;
 use super::queue::{apply_turn_start_shim, maybe_drain_queue};
 use crate::app::actions::Effect;
 use crate::app::agent::AgentId;
-use crate::app::agent_view::{ActivePane, AgentView};
+use crate::app::agent_view::{ AgentView};
 use crate::app::app_view::{ActiveView, AppView};
 use crate::app::cancel_latency::{CancelOrigin, TurnEnd};
 use crate::scrollback::blocks::SessionEvent;
@@ -57,49 +56,6 @@ pub(super) fn dispatch_cancel_turn(app: &mut AppView) -> Vec<Effect> {
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };
-    // Overlay [stop] is the child's turn. Parent may be Idle (background Task) and the ask panel
-    // would render under the overlay, unreachable.
-    if let Some(agent) = active_subagent_view_mut(app) {
-        // No wire target: leave local state alone (do not flip to Cancelling).
-        let Some(session_id) = agent.session.session_id.clone() else {
-            return vec![];
-        };
-        let retrying = agent.any_cancel_pending();
-        crate::unified_log::info(
-            if retrying {
-                "cancel.retry"
-            } else {
-                "cancel.overlay"
-            },
-            Some(&session_id.0),
-            Some(serde_json::json!({
-                "current_prompt_id": agent.session.current_prompt_id,
-            })),
-        );
-        if retrying {
-            agent.clear_send_now_expectation();
-            return vec![emit_cancel_turn(
-                agent, session_id, /* cancel_subagents */ true,
-                /* rewind_prompt_id */ None,
-            )];
-        }
-        return cancel_agent_turn(
-            agent,
-            /* cancel_rewind_enabled */ false,
-            /* cancel_subagents */ true,
-            CancelOrigin::UserGesture,
-        );
-    }
-    // Focused running subagent with no child view (no overlay to cancel through): kill is
-    // the same lever as the row's kill button.
-    let focused_subagent_kill = app.agents.get(&id).and_then(|agent| {
-        let child_sid = agent.active_subagent.as_ref()?;
-        let info = agent.subagent_sessions.get(child_sid.as_str())?;
-        info.is_running().then(|| info.subagent_id.to_string())
-    });
-    if let Some(subagent_id) = focused_subagent_kill {
-        return dispatch_kill_subagent(app, subagent_id);
-    }
     let ui_pref = effective_cancel_subagents_preference(None, &app.current_ui);
 
     // Scoped agent borrow: extract decisions, then release before `do_cancel_turn`.
@@ -177,34 +133,8 @@ pub(super) fn dispatch_cancel_turn(app: &mut AppView) -> Vec<Effect> {
             )];
         } else if !agent.session.state.is_turn_running() {
             return vec![];
-        } else if let Some(stop) = resolved_pref {
-            Some(stop)
         } else {
-            // Check all running subagents, not just those from the current turn.
-            // This is broader than the old TUI (which filtered by parent_prompt_id),
-            // but intentional: subagents kept alive from a previous cancel should
-            // still prompt the user on the next cancel.
-            let running_count = agent
-                .subagent_sessions
-                .values()
-                .filter(|s| s.is_running() && s.workflow_run_id.is_none())
-                .count();
-            if running_count > 0 && agent.cancel_turn_view.is_none() {
-                agent.cancel_turn_view = Some(crate::views::modal::CancelTurnViewState {
-                    active_idx: 0,
-                    running_count,
-                });
-                // Default focus to the picker so keyboard up/down navigates options
-                // immediately. Without this, if the user triggered cancel while the
-                // scrollback pane was focused (e.g. browsing history), the modal
-                // would open but keystrokes would still go to scrollback — the
-                // picker was only reachable via mouse hover/click.
-                if agent.active_pane == ActivePane::Scrollback {
-                    agent.active_pane = ActivePane::Prompt;
-                }
-                return vec![];
-            }
-            None
+            resolved_pref
         }
     };
 
@@ -509,11 +439,6 @@ pub(crate) fn reconcile_overdue_cancels(app: &mut AppView) -> Option<Vec<Effect>
         if let Some(effect) = overdue_cancel_for_agent(agent) {
             effects.push(effect);
         }
-        for child in agent.subagent_views.values_mut() {
-            if let Some(effect) = overdue_cancel_for_agent(child) {
-                effects.push(effect);
-            }
-        }
     }
     (!effects.is_empty()).then_some(effects)
 }
@@ -707,31 +632,6 @@ pub(crate) fn reconcile_overdue_turn_ends(app: &mut AppView) -> Option<Vec<Effec
         effects.extend(drain.effects);
     }
     fired.then_some(effects)
-}
-
-pub(super) fn dispatch_kill_subagent(app: &mut AppView, subagent_id: String) -> Vec<Effect> {
-    let ActiveView::Agent(id) = app.active_view else {
-        return vec![];
-    };
-    let Some(agent) = app.agents.get_mut(&id) else {
-        return vec![];
-    };
-    let Some(session_id) = agent.session.session_id.clone() else {
-        return vec![];
-    };
-
-    // Mark as pending_kill for UI feedback
-    for info in agent.subagent_sessions.values_mut() {
-        if info.subagent_id.as_ref() == subagent_id {
-            info.pending_kill = true;
-            info.kill_requested_at = Some(Instant::now());
-        }
-    }
-
-    vec![Effect::KillSubagent {
-        session_id,
-        subagent_id,
-    }]
 }
 
 // TaskResult handlers.

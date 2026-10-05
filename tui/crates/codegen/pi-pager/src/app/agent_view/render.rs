@@ -1,5 +1,5 @@
 //! Frame rendering for [`AgentView`]: the `draw` entry point plus shortcut
-//! hints and the subagent fullscreen view.
+//! hints.
 use super::{
     ActivePane, AgentPane, AgentView, AgentViewLayout, BlockingCard, CtaPhase, EscStep,
     InlineMediaHitAreas, KeyOwner, MODE_BANNER_FADE_TICKS, PromptMode, collect_citation_links,
@@ -99,45 +99,6 @@ impl AgentView {
             }
             _ => self.timeline_hover_preview = None,
         }
-    }
-    /// Open the fullscreen subagent view for `child_sid`, replaying child
-    /// `updates.jsonl` when scrollback only has the injected task prompt.
-    pub(crate) fn open_subagent_fullscreen(&mut self, child_sid: String) {
-        if let Some(child) = self.subagent_views.get_mut(&child_sid) {
-            child.mark_as_subagent_view();
-        } else {
-            return;
-        }
-        if self.active_subagent.as_deref() != Some(child_sid.as_str()) {
-            self.close_subagent_fullscreen();
-        }
-        let replay_outcome = crate::app::subagent::ensure_subagent_child_replayed(self, &child_sid);
-        tracing::debug!(child_sid = %child_sid, ?replay_outcome, "opened subagent fullscreen");
-        self.active_subagent = Some(child_sid);
-    }
-    /// Close the fullscreen subagent takeover (if any), evicting the closed
-    /// child when finished (see [`crate::app::subagent::evict_finished_child_view`]
-    /// for rationale and guards). All close sites route through here.
-    pub(crate) fn close_subagent_fullscreen(&mut self) {
-        if let Some(child_sid) = self.active_subagent.take() {
-            let _ = crate::app::subagent::evict_finished_child_view(self, &child_sid);
-        }
-    }
-    /// Fetch a child view for applying a live update, hydrating a resumed
-    /// child's inherited transcript first so the incoming block never closes
-    /// the replay window (see
-    /// [`crate::app::subagent::replay_resumed_child_before_live_block`]). The
-    /// funnel for every apply that can be a resumed child's *first* live block:
-    /// the ACP and pi child ingresses and the finish-path finalize. Reads and
-    /// precedence-exempt writers (background task blocks, tool-call argument
-    /// deltas, each transitively preceded by a funneled block) use the field
-    /// directly.
-    pub(crate) fn child_view_for_live_update_mut(
-        &mut self,
-        child_sid: &str,
-    ) -> Option<&mut AgentView> {
-        crate::app::subagent::replay_resumed_child_before_live_block(self, child_sid);
-        self.subagent_views.get_mut(child_sid).map(|v| &mut **v)
     }
     /// Shortcut hints for the plan-approval prompt/comment focus states.
     ///
@@ -297,11 +258,6 @@ impl AgentView {
     /// they are guaranteed identical and every shortcut makes sense in the
     /// active context.
     ///
-    /// Known transient: when a subagent is fullscreen (`active_subagent.is_some()`),
-    /// draw returns early and the child renders its own bar; Current on the parent
-    /// still reflects parent context (documented limitation, pre-existing before
-    /// this change).
-    ///
     /// `esc_owned_before_agent`: app-level Esc ownership snapshot
     /// (`AppView::esc_owned_before_agent`); the draw path passes its param
     /// of the same name.
@@ -415,36 +371,13 @@ impl AgentView {
             .scrollback
             .selected()
             .is_some_and(|idx| self.scrollback.entry_content_hidden_by_group(idx));
-        let (selected_supports_copy, selected_meta_label, selected_supports_fullscreen) =
-            if self.active_pane == ActivePane::Catalog {
-                (false, None, self.catalog.selected_entry().is_some())
-            } else if self.active_pane == ActivePane::Scrollback {
-                let is_viewable_subagent = selected_entry.is_some_and(|e| {
-                    if let crate::scrollback::block::RenderBlock::Subagent(ref sb) = e.block {
-                        self.subagent_views.contains_key(&sb.child_session_id)
-                    } else {
-                        false
-                    }
-                });
-                (
-                    !selected_is_group_header
-                        && selected_entry.is_some_and(|e| e.block.supports_copy()),
-                    selected_entry
-                        .and_then(|e| e.block.copy_meta_label())
-                        .filter(|_| !selected_is_group_header),
-                    selected_entry.is_some_and(|e| e.block.supports_fullscreen())
-                        || is_viewable_subagent,
-                )
-            } else {
-                (
-                    !selected_is_group_header
-                        && selected_entry.is_some_and(|e| e.block.supports_copy()),
-                    selected_entry
-                        .and_then(|e| e.block.copy_meta_label())
-                        .filter(|_| !selected_is_group_header),
-                    selected_entry.is_some_and(|e| e.block.supports_fullscreen()),
-                )
-            };
+        let (selected_supports_copy, selected_meta_label, selected_supports_fullscreen) = (
+            !selected_is_group_header && selected_entry.is_some_and(|e| e.block.supports_copy()),
+            selected_entry
+                .and_then(|e| e.block.copy_meta_label())
+                .filter(|_| !selected_is_group_header),
+            selected_entry.is_some_and(|e| e.block.supports_fullscreen()),
+        );
         let thinking_label = self.scrollback.thinking_fold_label();
         let selected_is_user_prompt = selected_entry.is_some_and(|e| e.block.is_user_prompt());
         let selected_is_agent_message = selected_entry.is_some_and(|e| e.block.is_agent_message());
@@ -465,7 +398,6 @@ impl AgentView {
             selected_supports_fullscreen,
             self.multiline_mode,
             self.vim_mode,
-            self.is_subagent_view,
             (self.session.state.is_turn_running() || self.wake_turn_active())
                 && !self.renders_parked(),
             self.esc_would_cancel_turn(esc_owned_before_agent),
@@ -484,258 +416,6 @@ impl AgentView {
             hints.push(def.hint());
         }
         hints
-    }
-    /// Render the agent view into the given area.
-    ///
-    /// Thin orchestrator: computes layout, then calls shared widgets and
-    /// agent-specific overlay helpers in sequence. Each component takes
-    /// only the state it needs — no arg threading.
-    ///
-    /// Returns cursor position if the prompt is focused (for terminal cursor).
-    /// Render a fullscreen subagent view — replaces the ENTIRE parent view.
-    ///
-    /// Draws:
-    /// 1. Background fill
-    /// 2. Title bar: icon + type + description + meta + badge + progress + [elapsed] + [✗]
-    /// 3. Border frame (single-line box)
-    /// 4. Child `AgentView::draw()` inside the frame
-    #[allow(clippy::too_many_arguments)]
-    fn draw_subagent_fullscreen(
-        &mut self,
-        child_sid: &str,
-        area: Rect,
-        buf: &mut Buffer,
-        registry: &ActionRegistry,
-        scratch: &mut ScratchBuffer,
-        theme: &Theme,
-        bundle_state: &crate::app::bundle::BundleState,
-    ) -> (
-        Option<(u16, u16)>,
-        Option<crate::terminal::overlay::PostFlush>,
-    ) {
-        use crate::app::subagent::{format_context_badge, format_subagent_label};
-        use ratatui::style::Modifier;
-        use unicode_width::UnicodeWidthStr;
-        let appearance = self.scrollback.appearance().clone();
-        let layout_cfg = &appearance.scrollback.layout;
-        let compact = appearance.prompt.compact;
-        agent::fill_background(buf, area, layout_cfg, compact, theme);
-        let padded = Rect {
-            x: area.x + layout_cfg.eff_hpad_left(compact),
-            y: area.y + layout_cfg.eff_outer_vpad(compact),
-            width: area.width.saturating_sub(
-                layout_cfg.eff_hpad_left(compact) + layout_cfg.eff_hpad_right(compact),
-            ),
-            height: area
-                .height
-                .saturating_sub(layout_cfg.eff_outer_vpad(compact) * 2),
-        };
-        if padded.width < 10 || padded.height < 5 {
-            return (None, crate::terminal::overlay::clear().map(Into::into));
-        }
-        let border_color = theme.selection_border;
-        let frame = match crate::views::picker::render_bordered_frame(
-            buf,
-            padded,
-            border_color,
-            theme.bg_base,
-        ) {
-            Some(f) => f,
-            None => {
-                return (None, crate::terminal::overlay::clear().map(Into::into));
-            }
-        };
-        let title_y = frame.title_row.y;
-        let _title_row = frame.title_row;
-        let inner = frame.content;
-        let _border_style = Style::default().fg(border_color);
-        let info = self.subagent_sessions.get(child_sid);
-        let raw_description = info.map(|s| s.description.as_ref()).unwrap_or("subagent");
-        let is_running = info.is_some_and(|s| s.is_running());
-        let elapsed = info
-            .map(|s| crate::util::format_duration(s.display_elapsed()))
-            .unwrap_or_default();
-        let (type_label, description): (String, String) = match info {
-            Some(s) => format_subagent_label(s),
-            None => (String::new(), raw_description.to_string()),
-        };
-        let icon = if is_running {
-            let spinner_frames = crate::glyphs::dot_spinner_frames();
-            let tick = self.scrollback.animation_tick();
-            let frame_idx = (tick / 4) as usize % spinner_frames.len();
-            spinner_frames[frame_idx]
-        } else if info.and_then(|s| s.status.as_deref()) == Some("completed") {
-            crate::glyphs::check_mark()
-        } else {
-            crate::glyphs::ballot_x()
-        };
-        let icon_color = if is_running {
-            theme.accent_running
-        } else if info.and_then(|s| s.status.as_deref()) == Some("completed") {
-            theme.accent_success
-        } else {
-            theme.accent_error
-        };
-        let label_color = if info.is_some_and(|s| s.pending_kill) {
-            theme.accent_error
-        } else if is_running {
-            theme.accent_running
-        } else if info.and_then(|s| s.status.as_deref()) == Some("completed") {
-            theme.accent_success
-        } else {
-            theme.accent_error
-        };
-        let meta = info
-            .and_then(|s| s.model.as_deref())
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .unwrap_or("")
-            .to_string();
-        let badge = info.map(format_context_badge).unwrap_or("");
-        let activity_label: Option<String> = if is_running {
-            self.subagent_views.get(child_sid).and_then(|cv| {
-                cv.resolve_turn_activity()
-                    .map(|a| crate::app::subagent::format_activity_label(&a))
-                    .or_else(|| cv.session.state.is_busy().then(|| "Waiting".to_string()))
-            })
-        } else {
-            None
-        };
-        let title_x = padded.x + 1;
-        buf.set_span_safe(
-            title_x,
-            title_y,
-            &Span::styled(format!(" {icon}"), Style::default().fg(icon_color)),
-            3,
-        );
-        let close_text = "[\u{2717}]";
-        let close_width: u16 = close_text.width() as u16;
-        let elapsed_text = elapsed.clone();
-        let right_margin: u16 = 1;
-        let badge_width = if badge.is_empty() {
-            0
-        } else {
-            badge.width() as u16 + 1
-        };
-        let activity_width: u16 = activity_label
-            .as_deref()
-            .map(|s| s.width() as u16 + 3)
-            .unwrap_or(0);
-        let right_width = activity_width
-            + elapsed_text.width() as u16
-            + 1
-            + close_width
-            + right_margin
-            + badge_width;
-        let desc_start_x = title_x + 3;
-        let avail = padded.width.saturating_sub(5 + right_width) as usize;
-        let type_text = if type_label.is_empty() {
-            String::new()
-        } else if description.is_empty() {
-            type_label.clone()
-        } else {
-            format!("{type_label} ")
-        };
-        let meta_text = if meta.is_empty() {
-            String::new()
-        } else {
-            format!(" {meta}")
-        };
-        let overhead = type_text.width() + meta_text.width();
-        let desc_max = avail.saturating_sub(overhead);
-        let desc_display = crate::render::line_utils::truncate_str(&description, desc_max);
-        if !type_text.is_empty() {
-            buf.set_span_safe(
-                desc_start_x,
-                title_y,
-                &Span::styled(&type_text, Style::default().fg(label_color)),
-                type_text.width() as u16,
-            );
-        }
-        let desc_x = desc_start_x + type_text.width() as u16;
-        buf.set_span_safe(
-            desc_x,
-            title_y,
-            &Span::styled(
-                &desc_display,
-                Style::default()
-                    .fg(theme.text_primary)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            desc_display.width() as u16,
-        );
-        let after_desc_x = desc_x + desc_display.width() as u16;
-        if !meta_text.is_empty() {
-            buf.set_span_safe(
-                after_desc_x,
-                title_y,
-                &Span::styled(&meta_text, Style::default().fg(theme.gray)),
-                meta_text.width() as u16,
-            );
-        }
-        let mut rx = padded.x + padded.width.saturating_sub(right_margin + close_width + 1);
-        let close_style = if self.hit_subagent_frame_close.hovered {
-            Style::default()
-                .fg(theme.text_primary)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(theme.gray)
-        };
-        buf.set_span_safe(
-            rx,
-            title_y,
-            &Span::styled(close_text, close_style),
-            close_width,
-        );
-        self.hit_subagent_frame_close.rect = Some(Rect::new(rx, title_y, close_width, 1));
-        rx = rx.saturating_sub(elapsed_text.width() as u16 + 1);
-        buf.set_span_safe(
-            rx,
-            title_y,
-            &Span::styled(&elapsed_text, Style::default().fg(theme.gray)),
-            elapsed_text.width() as u16,
-        );
-        if let Some(activity) = activity_label.as_deref() {
-            let segment = format!("{activity} \u{00b7} ");
-            let w = segment.width() as u16;
-            rx = rx.saturating_sub(w);
-            buf.set_span_safe(
-                rx,
-                title_y,
-                &Span::styled(segment, Style::default().fg(theme.gray)),
-                w,
-            );
-        }
-        if !badge.is_empty() {
-            rx = rx.saturating_sub(badge.width() as u16 + 1);
-            buf.set_span_safe(
-                rx,
-                title_y,
-                &Span::styled(badge, Style::default().fg(theme.gray_dim)),
-                badge.width() as u16,
-            );
-        }
-        let mut child_post_flush = None;
-        if inner.width > 5
-            && inner.height > 3
-            && let Some(child_view) = self.subagent_views.get_mut(child_sid)
-        {
-            child_view.mark_as_subagent_view();
-            let (_, post_flush) = child_view.draw(
-                inner,
-                buf,
-                registry,
-                scratch,
-                None,
-                false,
-                super::BannerSlotParams::none(),
-                bundle_state,
-                &mut Vec::new(),
-                AppRenderParams::default(),
-            );
-            child_post_flush = post_flush;
-        }
-        (None, child_post_flush)
     }
     pub fn should_show_tip(&mut self) -> bool {
         false
@@ -866,31 +546,6 @@ impl AgentView {
             });
             self.inline_media_ids.clear();
             self.inline_media_iterm_emitted.clear();
-        }
-        if let Some(ref child_sid) = self.active_subagent.clone() {
-            if let Some(esc) = self.take_own_inline_media_clear_escapes() {
-                pi_shell::util::with_locked_stderr(|stderr| {
-                    let _ = std::io::Write::write_all(stderr, esc.as_bytes());
-                });
-            }
-            self.hit_announcement_hide.clear();
-            self.hit_announcement_cta.clear();
-            self.hit_upgrade_cta.clear();
-            self.privacy_banner.clear_hits();
-            return self.draw_subagent_fullscreen(
-                &child_sid.clone(),
-                area,
-                buf,
-                registry,
-                scratch,
-                &theme,
-                bundle_state,
-            );
-        }
-        if let Some(esc) = self.take_subagent_inline_media_clear_escapes() {
-            pi_shell::util::with_locked_stderr(|stderr| {
-                let _ = std::io::Write::write_all(stderr, esc.as_bytes());
-            });
         }
         let appearance = self.scrollback.appearance().clone();
         let layout_cfg = &appearance.scrollback.layout;
@@ -1180,42 +835,7 @@ impl AgentView {
         };
         let prompt_height =
             prompt_height.max(prompt_style.vpad_top + 1 + prompt_style.info_block(true));
-        let prompt_height = if self.is_subagent_view {
-            0
-        } else {
-            prompt_height
-        };
-        {
-            use crate::app::agent::PENDING_KILL_TIMEOUT_SECS;
-            let now = Instant::now();
-            for info in self.subagent_sessions.values_mut() {
-                if let Some(requested) = info.kill_requested_at
-                    && now.duration_since(requested).as_secs() >= PENDING_KILL_TIMEOUT_SECS
-                {
-                    info.pending_kill = false;
-                    info.kill_requested_at = None;
-                }
-            }
-        }
-        self.catalog.sync_from_bundle(bundle_state);
-        if self.active_pane == ActivePane::Catalog && !self.catalog.is_visible() {
-            self.active_pane = ActivePane::Scrollback;
-        }
-        self.catalog.sync_from_bundle(bundle_state);
-        if self.active_pane == ActivePane::Catalog && !self.catalog.is_visible() {
-            self.active_pane = ActivePane::Scrollback;
-        }
-        let viewer_open = self.active_subagent.is_some();
-        let catalog_height = if viewer_open {
-            0
-        } else {
-            self.catalog.desired_height(area.height)
-        };
-        let todo_height = if viewer_open {
-            0
-        } else {
-            self.todo.desired_height(area.height)
-        };
+        let todo_height = self.todo.desired_height(area.height);
         self.sync_queue_pane();
         if self.active_pane == ActivePane::Queue && !self.queue.is_visible() {
             self.active_pane = ActivePane::Scrollback;
@@ -1257,7 +877,6 @@ impl AgentView {
         let follow_ups_height = u16::from(self.follow_ups.is_some());
         let timeline_width = crate::views::timeline::rail_width(
             appearance.show_timeline,
-            self.is_subagent_view,
             area.width,
             self.scrollback.turn_count(),
         );
@@ -1267,7 +886,6 @@ impl AgentView {
             scrollbar_cfg: *scrollbar_cfg,
             timeline_width,
             prompt_height,
-            catalog_height,
             todo_height,
             queue_height,
             btw_height,
@@ -1405,26 +1023,6 @@ impl AgentView {
             }
             status.push("plan", Line::from(Span::styled("plan", plan_style)));
         }
-        if let Some(ref goal) = self.goal_state {
-            let tick = self.scrollback.animation_tick() as usize;
-            let active_subagent_tokens: u64 = self
-                .subagent_sessions
-                .values()
-                .filter(|s| !s.finished && s.workflow_run_id.is_none())
-                .filter_map(|s| s.tokens_used)
-                .sum();
-            status.push(
-                "goal",
-                crate::views::agent_status::goal_status_line(
-                    goal,
-                    &theme,
-                    self.hit_goal_status.hovered,
-                    tick,
-                    self.context_state.as_ref().map(|c| c.used),
-                    active_subagent_tokens,
-                ),
-            );
-        }
         if let Some(mcp_line) = self.mcp_init_progress.as_ref().and_then(|p| {
             crate::views::agent_status::mcp_status_line(p, self.scrollback.animation_tick(), &theme)
         }) {
@@ -1462,7 +1060,6 @@ impl AgentView {
         }
         let areas = status.render(buf, layout.status_bar);
         self.hit_bg_status.rect = areas.get("bg_tasks").copied();
-        self.hit_goal_status.rect = areas.get("goal").copied();
         self.hit_context.rect = areas.get("context").copied();
         self.hit_credits.rect = areas.get("credits").copied();
         self.hit_plan_button.rect = areas.get("plan").copied();
@@ -1900,24 +1497,6 @@ impl AgentView {
                 }
             }
         }
-        if catalog_height > 0 {
-            let cat_focused = self.active_pane == ActivePane::Catalog && !overlay_focused;
-            self.catalog
-                .render(layout.catalog, buf, cat_focused, layout_cfg);
-            let close_rect = agent::render_todo_chrome(
-                buf,
-                layout.catalog,
-                layout_cfg,
-                cat_focused,
-                false,
-                self.hit_catalog_close.hovered,
-                &theme,
-            )
-            .and_then(|sel| sel.close_button_rect());
-            self.hit_catalog_close.set(close_rect);
-        } else {
-            self.hit_catalog_close.clear();
-        }
         if todo_height > 0 {
             let todo_focused = self.active_pane == ActivePane::Todo && !overlay_focused;
             self.todo.render(layout.todo, buf, todo_focused, layout_cfg);
@@ -2089,8 +1668,7 @@ impl AgentView {
                 self.hit_bg_button.rect = None;
                 self.hit_watching_cue.rect = None;
             } else {
-                let has_running_execute = !self.is_subagent_view
-                    && wake_display_state.is_none()
+                let has_running_execute = wake_display_state.is_none()
                     && self
                         .session
                         .tracker
@@ -2104,10 +1682,6 @@ impl AgentView {
                             | BlockingCard::McpElicitation
                     )
                 );
-                let goal_verifying = self
-                    .goal_state
-                    .as_ref()
-                    .is_some_and(|g| g.verifying_completion);
                 let held_queue = self.held_queue_count();
                 let held_queue_top_sendable = self.held_queue_top_sendable();
                 let turn_output = turn_status::render_turn_status(
@@ -2130,7 +1704,6 @@ impl AgentView {
                         mcp_init_progress: self.mcp_init_progress.as_ref(),
                         is_bash_turn: self.bash_turn,
                         is_pending_user_input,
-                        goal_verifying,
                         watchers,
                         parked,
                         flat_background: false,
@@ -4155,59 +3728,6 @@ impl AgentView {
             let clear = crate::terminal::overlay::clear_kitty();
             prompt_post_flush = Some(clear.into());
         }
-        if self.show_goal_detail
-            && let Some(ref goal) = self.goal_state
-        {
-            let todos = self.todo.todos();
-            let overlay_rect = crate::views::goal_detail::goal_detail_area(area, goal, todos);
-            let tick = self.scrollback.animation_tick() as usize;
-            let active_subagent_tokens: u64 = self
-                .subagent_sessions
-                .values()
-                .filter(|s| !s.finished && s.workflow_run_id.is_none())
-                .filter_map(|s| s.tokens_used)
-                .sum();
-            let close_rect = crate::views::goal_detail::render_goal_detail(
-                buf,
-                overlay_rect,
-                goal,
-                todos,
-                tick,
-                self.context_state.as_ref().map(|c| c.used),
-                active_subagent_tokens,
-                self.hit_goal_close.hovered,
-            );
-            self.hit_goal_close.rect = close_rect;
-            self.frame_occluder_rects.push(overlay_rect);
-        }
-        if self.show_workflows {
-            let runs = self.workflow_runs_newest_first();
-            let mut view = self.workflows_view.clone();
-            view.normalize(&runs);
-            let tick = self.scrollback.animation_tick() as usize;
-            let live: crate::views::workflows::WorkflowAgentLiveMap = self
-                .subagent_sessions
-                .iter()
-                .filter(|(_, info)| info.workflow_run_id.is_some())
-                .map(|(id, info)| {
-                    (
-                        id.clone(),
-                        crate::views::workflows::WorkflowAgentLiveStatus {
-                            activity: info.activity_label.clone(),
-                            context_tokens: info.tokens_used,
-                            context_window_tokens: info.context_window_tokens,
-                            elapsed_ms: Some(info.display_elapsed().as_millis() as u64),
-                        },
-                    )
-                })
-                .collect();
-            let popup =
-                crate::views::workflows::render_workflows(buf, area, &runs, &mut view, tick, &live);
-            self.workflows_view = view;
-            if let Some(popup) = popup {
-                self.frame_occluder_rects.push(popup);
-            }
-        }
         self.pane_areas = layout.pane_areas();
         {
             let route = crate::hyperlink_route::hyperlink_route();
@@ -4489,26 +4009,6 @@ mod overlay_post_flush_tests {
     }
     fn png() -> [u8; 8] {
         [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n']
-    }
-    #[test]
-    fn fullscreen_subagent_propagates_child_clear_to_emitter() {
-        let _guard = crate::terminal::image::set_protocol_for_test(
-            crate::terminal::image::GraphicsProtocol::Kitty,
-        );
-        crate::terminal::overlay::reset_owner();
-        seed_static_owner(41);
-        let mut parent = make_agent();
-        parent
-            .subagent_views
-            .insert("child".into(), Box::new(make_agent()));
-        parent.active_subagent = Some("child".into());
-        let post_flush = draw(&mut parent).expect("child clear propagates");
-        assert!(post_flush.as_str().contains("a=d"));
-        let before_emit = crate::terminal::overlay::static_image(&png(), 20, 10, 0, 0, 41).unwrap();
-        assert!(!before_emit.as_str().contains("a=t"));
-        post_flush.write_to(&mut Vec::new()).unwrap();
-        let after_emit = crate::terminal::overlay::static_image(&png(), 20, 10, 0, 0, 41).unwrap();
-        assert!(after_emit.as_str().contains("a=t"));
     }
     #[test]
     fn active_modal_returns_clear_without_committing_discarded_state() {

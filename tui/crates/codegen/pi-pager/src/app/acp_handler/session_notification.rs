@@ -119,20 +119,13 @@ fn terminal_meta_str<'a>(meta: Option<&'a serde_json::Value>, key: &str) -> Opti
 /// agent's state. The redraw decision is gated on whether the matched agent
 /// is the currently visible one.
 pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
-    handle_session_notification_with_origin(notif, app, LifecycleOrigin::Stream)
-}
-pub(super) fn handle_session_notification_with_origin(
-    notif: &acp::ExtNotification,
-    app: &mut AppView,
-    origin: LifecycleOrigin,
-) -> bool {
     let Ok(session_notif) = serde_json::from_str::<SessionNotification>(notif.params.get()) else {
         tracing::warn!("Failed to parse {}", notif.method.as_ref());
         return false;
     };
     let is_api_key_auth = app.is_api_key_auth;
-    let matched = match find_session_match(app, &session_notif.session_id) {
-        Some(m) => m,
+    let agent_id = match find_session_match(app, &session_notif.session_id) {
+        Some(id) => id,
         None => {
             tracing::debug!(
                 session_id = session_notif.session_id.0.as_ref(),
@@ -142,22 +135,11 @@ pub(super) fn handle_session_notification_with_origin(
             return false;
         }
     };
-    let parent_id = matched.agent_id();
-    let is_active = is_matched_agent_active(app, parent_id);
+    let is_active = is_matched_agent_active(app, agent_id);
     let agent = app
         .agents
-        .get_mut(&parent_id)
+        .get_mut(&agent_id)
         .expect("find_session_match returned an existing AgentId");
-    if matches!(matched, SessionMatch::Child(_)) {
-        let child_sid: &str = session_notif.session_id.0.as_ref();
-        let changed = handle_child_session_notification(
-            session_notif.update,
-            child_sid,
-            agent,
-            is_api_key_auth,
-        );
-        return changed && is_active;
-    }
     let meta = NotificationMeta::from_json(session_notif.meta.as_ref().and_then(|v| v.as_object()));
     if drop_unexpected_replay(
         agent,
@@ -167,34 +149,7 @@ pub(super) fn handle_session_notification_with_origin(
     ) {
         return false;
     }
-    let is_workflow_update = matches!(
-        &session_notif.update,
-        PiSessionUpdate::WorkflowUpdated { .. }
-    );
-    let is_subagent_lifecycle =
-        if let Some(lifecycle) = classify_subagent_lifecycle(&session_notif.update, origin) {
-            match gate_subagent_lifecycle(
-                &agent.subagent_sessions,
-                &agent.scrollback,
-                &mut agent.deferred_subagent_finishes,
-                &lifecycle,
-                meta.is_replay,
-                session_notif.session_id.0.as_ref(),
-                meta.event_id.as_deref(),
-                &session_notif,
-                std::time::Instant::now(),
-            ) {
-                LifecycleDelivery::Apply => true,
-                LifecycleDelivery::DropDuplicate | LifecycleDelivery::AwaitSpawn => {
-                    return false;
-                }
-            }
-        } else {
-            false
-        };
-    if !is_workflow_update
-        && !is_subagent_lifecycle
-        && !meta.is_replay
+    if !meta.is_replay
         && meta.event_seq.is_some_and(|seq| {
             agent
                 .last_applied_pi_event_seq
@@ -211,7 +166,6 @@ pub(super) fn handle_session_notification_with_origin(
     }
     let mut status_snapshot_applied = false;
     let mut terminal_outcome: Option<super::super::turn_completion::TerminalApply> = None;
-    let mut deferred_subagent_finish: Option<SessionNotification> = None;
     let root_session_id: &str = session_notif.session_id.0.as_ref();
     let changed = match session_notif.update {
         ref update @ (PiSessionUpdate::AutoCompactStarted { .. }
@@ -657,113 +611,6 @@ pub(super) fn handle_session_notification_with_origin(
             });
             true
         }
-        update @ PiSessionUpdate::WorkflowUpdated { .. } => ingest_workflow_update(agent, update),
-        PiSessionUpdate::GoalUpdated {
-            goal_id,
-            objective,
-            status,
-            phase,
-            token_budget,
-            tokens_used,
-            elapsed_ms,
-            total_deliverables,
-            completed_deliverables,
-            current_deliverable_id,
-            current_deliverable_title,
-            current_subagent_role,
-            total_worker_rounds,
-            total_verify_rounds,
-            token_baseline,
-            finished_subagent_tokens,
-            live_subagent_tokens,
-            live_tokens_by_model,
-            live_context_pct,
-            live_turn_count,
-            live_tool_call_count,
-            last_event,
-            last_event_detail,
-            last_event_timestamp,
-            pause_message,
-            classifier_runs_attempted,
-            classifier_max_runs,
-            last_classifier_verdict,
-            last_classifier_details_path,
-            verifying_completion,
-            planning,
-            ..
-        } => {
-            let new_status = GoalDisplayStatus::parse(&status);
-            let just_completed = new_status == GoalDisplayStatus::Complete
-                && agent
-                    .goal_state
-                    .as_ref()
-                    .is_none_or(|g| g.status != GoalDisplayStatus::Complete);
-            if status == "cleared" {
-                if let Some(g) = agent.goal_state.take() {
-                    agent.last_cleared_goal_id = Some(g.goal_id);
-                }
-                agent.show_goal_detail = false;
-                true
-            } else if agent.last_cleared_goal_id.as_deref() == Some(goal_id.as_str()) {
-                false
-            } else {
-                let elapsed_floor_ms = agent
-                    .goal_state
-                    .as_ref()
-                    .filter(|g| g.goal_id == goal_id)
-                    .map(|g| g.live_elapsed_ms())
-                    .unwrap_or(0)
-                    .max(elapsed_ms);
-                if just_completed {
-                    agent.scrollback.push_block(RenderBlock::session_event(
-                        SessionEvent::GoalCompleted {
-                            elapsed: std::time::Duration::from_millis(elapsed_floor_ms),
-                        },
-                    ));
-                }
-                let last_classifier_details_exists = last_classifier_details_path
-                    .as_deref()
-                    .is_some_and(|p| std::path::Path::new(p).exists());
-                agent.goal_state = Some(GoalDisplayState {
-                    goal_id,
-                    objective,
-                    status: new_status,
-                    phase: GoalDisplayPhase::parse(&phase),
-                    token_budget,
-                    tokens_used,
-                    elapsed_ms,
-                    total_deliverables,
-                    completed_deliverables,
-                    current_deliverable_id,
-                    current_deliverable_title,
-                    current_subagent_role,
-                    total_worker_rounds,
-                    total_verify_rounds,
-                    live_subagent_tokens,
-                    live_tokens_by_model,
-                    live_context_pct,
-                    live_turn_count,
-                    live_tool_call_count,
-                    last_event,
-                    last_event_detail,
-                    last_event_timestamp,
-                    token_baseline,
-                    finished_subagent_tokens,
-                    deliverables: Vec::new(),
-                    pause_message,
-                    classifier_runs_attempted,
-                    classifier_max_runs,
-                    last_classifier_verdict,
-                    last_classifier_details_path,
-                    last_classifier_details_exists,
-                    verifying_completion: verifying_completion.unwrap_or(false),
-                    planning: planning.unwrap_or(false),
-                    received_at: std::time::Instant::now(),
-                    elapsed_floor_ms,
-                });
-                true
-            }
-        }
         PiSessionUpdate::InteractionResolved { tool_call_id } => {
             agent.dismiss_resolved_interaction(&tool_call_id)
         }
@@ -786,10 +633,9 @@ pub(super) fn handle_session_notification_with_origin(
         app.refresh_status_line_now();
         changed |= app.status_line.take_changed();
     }
-    if let Some(agent) = app.agents.get_mut(&parent_id) {
+    if let Some(agent) = app.agents.get_mut(&agent_id) {
         if let Some(seq) = meta.event_seq
             && !meta.is_replay
-            && !is_workflow_update
         {
             agent.last_applied_pi_event_seq = Some(
                 agent
@@ -801,113 +647,13 @@ pub(super) fn handle_session_notification_with_origin(
             agent.advance_last_seen_event_id(id, meta.event_seq);
         }
     }
-    if let Some(payload) = deferred_subagent_finish {
-        if let Some(deferred) = redispatched_subagent_finish(payload) {
-            let _ = handle_session_notification(&deferred, app);
-        } else {
-            tracing::warn!(
-                session_id = session_notif.session_id.0.as_ref(),
-                "Failed to serialize deferred subagent finish"
-            );
-        }
-    }
     if let Some(outcome) = terminal_outcome {
         return super::super::turn_completion::apply_terminal_outcome(
-            outcome, app, parent_id, is_active,
+            outcome, app, agent_id, is_active,
         );
     }
     changed && is_active
 }
-/// Handle an pi session notification that targets a child (subagent) session.
-///
-/// Events like compaction, retry, and memory flush are emitted by the child's
-/// `acp_session` with the *child's* `session_id`. This routes them to the
-/// correct child view and updates `SubagentInfo` where appropriate.
-pub(super) fn handle_child_session_notification(
-    update: PiSessionUpdate,
-    child_sid: &str,
-    agent: &mut AgentView,
-    is_api_key_auth: bool,
-) -> bool {
-    match update {
-        PiSessionUpdate::AutoCompactStarted { .. }
-        | PiSessionUpdate::AutoCompactCompleted { .. }
-        | PiSessionUpdate::AutoCompactFailed { .. }
-        | PiSessionUpdate::AutoCompactCancelled { .. }
-        | PiSessionUpdate::RetryState(_)
-        | PiSessionUpdate::MemoryFlushCompleted { .. }
-        | PiSessionUpdate::MemoryDreamCompleted { .. }
-        | PiSessionUpdate::MemorySessionSaved { .. } => {
-            let mut changed = false;
-            if let Some(child_view) = agent.child_view_for_live_update_mut(child_sid) {
-                changed = apply_child_view_session_event(child_view, &update, is_api_key_auth);
-            }
-            if let PiSessionUpdate::AutoCompactCompleted { tokens_after, .. } = update
-                && let Some(info) = agent.subagent_sessions.get_mut(child_sid)
-            {
-                info.tokens_used = Some(tokens_after);
-                if let Some(cw) = info.context_window_tokens.filter(|&cw| cw > 0) {
-                    info.context_usage_pct =
-                        Some(pi_token_estimation::usage_percentage_u8(tokens_after, cw));
-                }
-            }
-            changed
-        }
-        PiSessionUpdate::ToolCallDeltaChunk {
-            ref name,
-            tool_index,
-            ..
-        } => {
-            let Some(child_view) = agent.subagent_views.get_mut(child_sid) else {
-                return false;
-            };
-            if child_view.session.loading_replay {
-                return false;
-            }
-            let row_live = agent
-                .subagent_sessions
-                .get(child_sid)
-                .is_some_and(|info| !info.finished);
-            if !row_live {
-                return false;
-            }
-            if !child_view
-                .session
-                .tracker
-                .note_tool_call_arguments_delta(name.as_deref(), tool_index)
-            {
-                return false;
-            }
-            let activity_label = subagent_activity_label(child_view);
-            sync_subagent_activity(agent, child_sid, activity_label);
-            true
-        }
-        _ => false,
-    }
-}
-/// Apply one pi session event to a child view: the scrollback/session
-/// rendering shared by the live child routing above and the from-disk child
-/// replay (`crate::app::subagent::replay_inherited_updates`), so a rebuilt
-/// transcript keeps the same compaction/retry markers the live one had.
-pub(crate) fn apply_child_view_session_event(
-    child_view: &mut AgentView,
-    update: &PiSessionUpdate,
-    is_api_key_auth: bool,
-) -> bool {
-    let changed = apply_session_event(
-        update,
-        &mut child_view.session,
-        &mut child_view.scrollback,
-        is_api_key_auth,
-    );
-    if let PiSessionUpdate::AutoCompactCompleted { tokens_after, .. } = update {
-        refresh_context_used(child_view, *tokens_after);
-    }
-    changed
-}
-/// Apply a compaction or retry event to a session's activity state and scrollback.
-///
-/// Shared between the root agent and child (subagent) notification paths.
 /// Test-only shim so dispatch-level tests can replay real notification
 /// sequences (e.g. `RetryState::Retrying` → `Exhausted`) through the
 /// production handler — the Retrying arm clears the `in_flight_prompt`
@@ -920,6 +666,7 @@ pub(crate) fn apply_session_event_for_test(
 ) -> bool {
     apply_session_event(update, session, scrollback, false)
 }
+/// Apply a compaction or retry event to a session's activity state and scrollback.
 pub(super) fn apply_session_event(
     update: &PiSessionUpdate,
     session: &mut AgentSession,

@@ -1727,9 +1727,6 @@ impl AppView {
                 .prompt
                 .slash_controller
                 .set_has_session_announcements(has);
-            for child in agent.subagent_views.values_mut() {
-                child.set_has_session_announcements(has);
-            }
         }
     }
     /// Mic is live (the [`VoiceState::Recording`] state).
@@ -1927,13 +1924,7 @@ impl AppView {
         match self.active_view {
             ActiveView::Agent(id) => {
                 if let Some(agent) = self.agents.get_mut(&id) {
-                    if let Some(child_sid) = agent.active_subagent.clone()
-                        && let Some(child) = agent.subagent_views.get_mut(&child_sid)
-                    {
-                        child.show_toast(msg);
-                    } else {
-                        agent.show_toast(msg);
-                    }
+                    agent.show_toast(msg);
                 }
             }
             ActiveView::Welcome => {
@@ -2066,10 +2057,6 @@ impl AppView {
         crate::render::bidi::set_enabled(config.scrollback.display.rtl_bidi);
         for agent in self.agents.values_mut() {
             agent.scrollback.set_appearance(config.clone());
-            for child in agent.subagent_views.values_mut() {
-                child.scrollback.set_appearance(config.clone());
-                child.prompt.sync_tab_width_from_appearance();
-            }
             agent
                 .prompt
                 .slash_controller
@@ -2102,19 +2089,15 @@ impl AppView {
         }
     }
     /// Viewport height (rows) of the surface a scroll would move — the
-    /// active agent's (or its fullscreen subagent's) scrollback pane, as
-    /// measured at the last draw. 0 = unknown (welcome view),
-    /// which keeps the trackpad per-flush cap at its floor.
+    /// active agent's scrollback pane, as measured at the last draw.
+    /// 0 = unknown (welcome view), which keeps the trackpad per-flush cap at
+    /// its floor.
     fn scroll_viewport_height(&self) -> u16 {
         match self.active_view {
-            ActiveView::Agent(id) => self.agents.get(&id).map_or(0, |agent| {
-                let scrollback = agent
-                    .active_subagent
-                    .as_ref()
-                    .and_then(|sid| agent.subagent_views.get(sid))
-                    .map_or(&agent.scrollback, |child| &child.scrollback);
-                scrollback.scroll_info().1
-            }),
+            ActiveView::Agent(id) => self
+                .agents
+                .get(&id)
+                .map_or(0, |agent| agent.scrollback.scroll_info().1),
             _ => 0,
         }
     }
@@ -2135,11 +2118,7 @@ impl AppView {
             .debug_snapshot(&config, std::time::Instant::now());
         let view = match self.active_view {
             ActiveView::Agent(id) => self.agents.get(&id).map(|agent| {
-                let scrollback = agent
-                    .active_subagent
-                    .as_ref()
-                    .and_then(|sid| agent.subagent_views.get(sid))
-                    .map_or(&agent.scrollback, |child| &child.scrollback);
+                let scrollback = &agent.scrollback;
                 let (scroll_offset, viewport, total_height) = scrollback.scroll_info();
                 let max_offset = total_height.saturating_sub(viewport as usize);
                 crate::views::scroll_debug_hud::ViewportDebug {
@@ -2169,12 +2148,6 @@ impl AppView {
         match self.active_view {
             ActiveView::Agent(id) => {
                 if let Some(agent) = self.agents.get_mut(&id) {
-                    if let Some(child_sid) = agent.active_subagent.clone()
-                        && let Some(child) = agent.subagent_views.get_mut(&child_sid)
-                    {
-                        child.handle_scroll(lines, column, row);
-                        return;
-                    }
                     agent.handle_scroll(lines, column, row);
                 }
             }
@@ -2219,9 +2192,6 @@ impl AppView {
         if let Event::Resize(_, rows) = ev {
             for agent in self.agents.values_mut() {
                 agent.note_terminal_resize();
-                for child in agent.subagent_views.values_mut() {
-                    child.note_terminal_resize();
-                }
             }
             self.last_known_terminal_rows = *rows;
             self.apply_effective_compact();
@@ -2427,8 +2397,6 @@ impl AppView {
                 let prompt_paging = !self.screen_mode.is_minimal();
                 let outcome = match self.agents.get_mut(&id) {
                     Some(agent) => {
-                        let transcript_before = agent.active_subagent.clone();
-                        let workflows_before = agent.show_workflows;
                         let outcome = if self.screen_mode.is_minimal() {
                             agent.handle_minimal_input(ev, &self.registry)
                         } else if prompt_paging {
@@ -2436,17 +2404,10 @@ impl AppView {
                         } else {
                             agent.handle_input(ev, &self.registry)
                         };
-                        let transcript_opened =
-                            transcript_before.is_none() && agent.active_subagent.is_some();
-                        let workflows_opened = !workflows_before && agent.show_workflows;
                         if let Event::Key(key) = ev {
                             agent.record_input(key, &outcome);
                         }
                         self.pending_effects.append(&mut agent.pending_effects);
-                        if transcript_opened || workflows_opened {
-                            self.scroll_state.cancel_stream();
-                            self.last_scroll_pos = None;
-                        }
                         outcome
                     }
                     None => InputOutcome::Unchanged,
@@ -4309,7 +4270,7 @@ impl AppView {
     /// Interval between off-screen render-cache eviction sweeps.
     const CACHE_EVICT_INTERVAL: Duration = Duration::from_secs(5);
     /// Throttled sweep of off-screen render caches for the active view's
-    /// scrollback (parent agent, or the open fullscreen subagent child).
+    /// scrollback.
     /// A sweep is an O(entries) walk of pointer-sized cache slots — trivial
     /// next to a frame render — but there's no reason to run it per frame.
     fn maybe_evict_offscreen_caches(&mut self) {
@@ -4325,15 +4286,7 @@ impl AppView {
         }
         self.last_cache_evict_at = Some(now);
         if let Some(agent) = self.agents.get_mut(&id) {
-            let evicted = if let Some(child_sid) = agent.active_subagent.clone() {
-                agent
-                    .subagent_views
-                    .get(&child_sid)
-                    .map(|child| child.scrollback.evict_offscreen_render_caches())
-                    .unwrap_or(0)
-            } else {
-                agent.scrollback.evict_offscreen_render_caches()
-            };
+            let evicted = agent.scrollback.evict_offscreen_render_caches();
             if evicted > 0 {
                 tracing::debug!(evicted, "scrollback.evicted_offscreen_render_caches");
             }
@@ -4595,28 +4548,12 @@ impl AppView {
             None;
         for agent in self.agents.values_mut() {
             needs_redraw |= agent.edit_hl_tick();
-            for child in agent.subagent_views.values_mut() {
-                needs_redraw |= child.edit_hl_tick();
-            }
         }
         if let ActiveView::Agent(id) = self.active_view
             && let Some(agent) = self.agents.get_mut(&id)
         {
             needs_redraw |= agent.scrollback.tick();
             needs_redraw |= agent.todo.list_state.tick();
-            for child_view in agent.subagent_views.values_mut() {
-                needs_redraw |= child_view.scrollback.tick();
-                needs_redraw |= child_view.tick_toast();
-                needs_redraw |= child_view.tick_ephemeral_tip();
-                needs_redraw |= child_view.tick_mode_banner();
-                needs_redraw |= child_view.tick_selection_highlight();
-                needs_redraw |= child_view.tick_drag_autoscroll();
-                needs_redraw |= child_view.poll_link_modifier();
-                needs_redraw |= child_view.poll_scrollback_search();
-                needs_redraw |= child_view.mermaid_tick();
-                needs_redraw |= Self::tick_agent_image_load(child_view);
-                needs_redraw |= Self::tick_agent_block_viewer(child_view);
-            }
             let spinner_frame_tick =
                 agent.scrollback.animation_tick() % crate::views::turn_status::SPINNER_DIVISOR == 0;
             needs_redraw |= !agent.session.state.is_idle() && spinner_frame_tick;
@@ -4645,25 +4582,6 @@ impl AppView {
                 )
             ) && spinner_frame_tick;
             needs_redraw |= agent.drain_blocked();
-            agent.prompt.slash_controller.set_workflows_available(
-                agent
-                    .session
-                    .available_commands
-                    .iter()
-                    .any(|c| c.name == "workflow")
-                    || !agent.workflow_runs.is_empty(),
-            );
-            agent.prompt.slash_controller.set_workflow_runs(
-                agent
-                    .workflow_runs
-                    .iter()
-                    .map(|run| crate::slash::command::WorkflowRunChoice {
-                        name: run.name.clone(),
-                        status: run.status.clone(),
-                        builtin: run.builtin,
-                    })
-                    .collect(),
-            );
             if agent.acp_synced_generation != agent.session.available_commands_generation {
                 agent.prompt.sync_acp_commands(
                     &agent.session.available_commands,
@@ -4898,12 +4816,11 @@ impl AppView {
         {
             return TickDemand::Fast;
         }
-        if self.agents.values().any(|a| {
-            a.pending_cancel_resend.is_some()
-                || a.subagent_views
-                    .values()
-                    .any(|c| c.pending_cancel_resend.is_some())
-        }) {
+        if self
+            .agents
+            .values()
+            .any(|a| a.pending_cancel_resend.is_some())
+        {
             return TickDemand::Fast;
         }
         if self.deferred_notification.is_some() {
@@ -4915,13 +4832,7 @@ impl AppView {
         if self.session_picker_content_loading {
             return TickDemand::Fast;
         }
-        if self.agents.values().any(|agent| {
-            agent.edit_hl_needs_tick()
-                || agent
-                    .subagent_views
-                    .values()
-                    .any(|c| c.edit_hl_needs_tick())
-        }) {
+        if self.agents.values().any(|agent| agent.edit_hl_needs_tick()) {
             return TickDemand::Fast;
         }
         match self.active_view {
@@ -4977,32 +4888,11 @@ impl AppView {
                             *loading,
                             lanes,
                         )
-                    )
-                    || agent.subagent_views.iter().any(|(sid, child)| {
-                        child.toast.is_some()
-                            || child.ephemeral_tip_needs_tick()
-                            || child.mode_switch_banner.is_some()
-                            || child.has_drag_autoscroll()
-                            || child.selection_created_at.is_some()
-                            || (agent.active_subagent.as_deref() == Some(sid.as_str())
-                                && child.scrollback.needs_animation())
-                            || child.any_cancel_pending()
-                            || child.scrollback_search.is_some()
-                            || child.block_viewer.is_some()
-                            || child.image_viewer.as_ref().is_some_and(|v| v.loading)
-                            || child.image_load_rx.is_some()
-                            || child.mermaid_needs_tick()
-                    });
+                    );
                 if fast {
                     return TickDemand::Fast;
                 }
-                if cfg!(target_os = "macos")
-                    && (agent.needs_link_modifier_poll()
-                        || agent
-                            .subagent_views
-                            .values()
-                            .any(|child| child.needs_link_modifier_poll()))
-                {
+                if cfg!(target_os = "macos") && agent.needs_link_modifier_poll() {
                     return TickDemand::Slow;
                 }
                 TickDemand::None

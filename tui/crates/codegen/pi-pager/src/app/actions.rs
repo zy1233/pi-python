@@ -322,11 +322,6 @@ pub enum Action {
     CancelTurnChoice(crate::views::modal::CancelTurnChoice),
  /// Request current bundle cache status via `legacy ext RPC`.
     RequestBundleStatus,
-    /// View a catalog entry's raw content in the block viewer.
-    ViewCatalogEntry {
-        kind: String,
-        name: String,
-    },
     /// Hide the announcements banner.
     AnnouncementsHide,
     /// Open the promo CTA link (url resolved from current state at dispatch
@@ -644,9 +639,6 @@ pub enum Action {
     PersistMemoryFullscreen(bool),
     /// Edit the current minimal-mode composer draft in an external editor.
     EditPromptExternal,
-    /// Toggle the expanded goal detail overlay.
-    ToggleGoalDetail,
-    ToggleWorkflows,
     RewindShowPicker,
     RewindPickerSelect(usize),
     RewindConfirm(usize),
@@ -1195,11 +1187,6 @@ pub enum Effect {
         agent_id: AgentId,
         session_id: acp::SessionId,
     },
- /// Cancel a subagent via `legacy ext RPC`.
-    KillSubagent {
-        session_id: acp::SessionId,
-        subagent_id: String,
-    },
     /// Switch active model.
     SwitchModel {
         agent_id: AgentId,
@@ -1418,8 +1405,6 @@ pub enum Effect {
     },
  /// Fetch current bundle cache status via `legacy ext RPC`.
     FetchBundleStatus,
- /// Fetch a bundled entry's raw content via `legacy ext RPC`.
-    FetchCatalogEntry { kind: String, name: String },
     /// Send feedback about the current session (fire-and-forget POST).
     SendFeedback {
         agent_id: AgentId,
@@ -1658,16 +1643,6 @@ impl RenameSessionRequest {
         }
     }
 }
-/// Outcome of an `legacy ext RPC` request, telling dispatch whether the
-/// pager must finalize the subagent row itself.
-#[derive(Debug)]
-pub enum SubagentKillOutcome {
-    /// Nothing live to stop (orphan / already finished) — no finish coming, so
-    /// the pager finalizes the row. `status` = the real terminal status for an
-    /// already-finished orphan, else `None` (unknown id / older shell) →
-    /// "cancelled".
-    NothingLive { status: Option<String> },
-}
 /// Result from a completed async [`Effect`].
 ///
 /// Wrapped in `Action::TaskComplete` and dispatched synchronously.
@@ -1864,12 +1839,6 @@ pub enum TaskResult {
     ConsentPersistFailed {
         error: String,
     },
- /// Response to `legacy ext RPC`; see [`SubagentKillOutcome`].
-    KillSubagentComplete {
-        session_id: acp::SessionId,
-        subagent_id: String,
-        outcome: SubagentKillOutcome,
-    },
     PreferredModelPersisted {
         result: Result<(), String>,
     },
@@ -2058,10 +2027,6 @@ pub enum TaskResult {
     },
     /// Bundle status fetch failed.
     BundleStatusFailed {
-        error: String,
-    },
-    /// Catalog entry fetch failed.
-    CatalogEntryFailed {
         error: String,
     },
  /// `legacy ext RPC` request acknowledged (fire-and-forget). The recap itself

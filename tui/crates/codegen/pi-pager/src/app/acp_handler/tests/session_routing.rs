@@ -45,47 +45,6 @@
     }
 
     #[test]
-    fn acp_chunk_for_subagent_routes_through_parent() {
-        // Subagent (child) chunk must land in the parent's
-        // `subagent_views[child_sid]` even when a different agent is
-        // currently active.
-        let mut app = make_app_with_agent("sess-A");
-        insert_agent(&mut app, AgentId(1), Some("sess-B"));
-        switch_active_to(&mut app, AgentId(1));
-
-        let child_sid = "sess-A-child";
-        {
-            let parent = app.agents.get_mut(&AgentId(0)).unwrap();
-            parent
-                .subagent_sessions
-                .insert(child_sid.into(), make_subagent_info(child_sid));
-            parent
-                .subagent_views
-                .insert(child_sid.into(), Box::new(make_agent(Some(child_sid))));
-        }
-
-        let affected = handle(
-            make_agent_chunk_message(child_sid, "hello from subagent"),
-            &mut app,
-        );
-
-        let parent = app.agents.get(&AgentId(0)).unwrap();
-        let child_view = parent
-            .subagent_views
-            .get(child_sid)
-            .expect("child view must still exist");
-        assert_eq!(
-            agent_message_text(child_view),
-            "hello from subagent",
-            "subagent chunk must land in subagent_views[child_sid]"
-        );
-        assert!(
-            !affected,
-            "subagent chunk for non-active parent must not request a redraw"
-        );
-    }
-
-    #[test]
     fn acp_chunk_with_unknown_session_id_is_dropped_and_no_redraw() {
         // No agent owns the session_id and the active agent already has a
         // session_id assigned (so the race-window fallback does not fire).

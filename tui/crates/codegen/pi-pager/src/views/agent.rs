@@ -33,7 +33,6 @@ pub enum ActivePane {
     Todo,
     Queue,
     Prompt,
-    Catalog,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum InputMode {
@@ -48,15 +47,11 @@ pub struct PaneAreas {
     pub todo: Rect,
     pub queue: Rect,
     pub prompt: Rect,
-    pub catalog: Rect,
 }
 impl PaneAreas {
     /// Determine which pane a screen position falls in, if any.
     pub fn hit_test(&self, col: u16, row: u16) -> Option<ActivePane> {
         let pos = (col, row).into();
-        if self.catalog.area() > 0 && self.catalog.contains(pos) {
-            return Some(ActivePane::Catalog);
-        }
         if self.todo.area() > 0 && self.todo.contains(pos) {
             return Some(ActivePane::Todo);
         }
@@ -111,7 +106,6 @@ pub struct AgentViewLayoutParams {
     /// scrollbar's gutter geometry, so a disabled scrollbar forces it to 0.
     pub timeline_width: u16,
     pub prompt_height: u16,
-    pub catalog_height: u16,
     pub todo_height: u16,
     pub queue_height: u16,
     pub btw_height: u16,
@@ -138,7 +132,6 @@ pub struct AgentViewLayoutParams {
 /// widgets use these rects to render into.
 pub struct AgentViewLayout {
     pub status_bar: Rect,
-    pub catalog: Rect,
     pub scrollback: Rect,
     pub todo: Rect,
     pub queue: Rect,
@@ -181,7 +174,6 @@ impl AgentViewLayout {
             scrollbar_cfg,
             timeline_width,
             prompt_height,
-            catalog_height,
             todo_height,
             queue_height,
             btw_height,
@@ -223,10 +215,6 @@ impl AgentViewLayout {
             Constraint::Length(1), // StatusBar
         ];
         let pane_gap = if top_vpad == 0 { 0u16 } else { 1 };
-        if catalog_height > 0 {
-            constraints.push(Constraint::Length(pane_gap));
-            constraints.push(Constraint::Length(catalog_height));
-        }
         if todo_height > 0 {
             constraints.push(Constraint::Length(pane_gap));
             constraints.push(Constraint::Length(todo_height));
@@ -286,14 +274,6 @@ impl AgentViewLayout {
         let mut i = 0;
         let status_bar = chunks[i];
         i += 1;
-        let catalog = if catalog_height > 0 {
-            i += 1;
-            let r = chunks[i];
-            i += 1;
-            r
-        } else {
-            Rect::default()
-        };
         let todo = if todo_height > 0 {
             i += 1;
             let r = chunks[i];
@@ -399,7 +379,6 @@ impl AgentViewLayout {
         };
         Self {
             status_bar,
-            catalog,
             scrollback,
             todo,
             queue,
@@ -453,7 +432,6 @@ impl AgentViewLayout {
             todo: self.todo,
             queue: self.queue,
             prompt: self.prompt,
-            catalog: self.catalog,
         }
     }
 }
@@ -858,7 +836,6 @@ pub fn build_hints(
     selected_supports_fullscreen: bool,
     multiline_mode: bool,
     vim_mode: bool,
-    is_subagent_view: bool,
     is_turn_running: bool,
     esc_would_cancel_turn: bool,
     has_queued_follow_up: bool,
@@ -955,7 +932,6 @@ pub fn build_hints(
             }
             hints
         }
-        ActivePane::Catalog => vec![],
         ActivePane::Scrollback if scrollback_search.is_some() => {
             let mut hints = Vec::new();
             if vim_mode {
@@ -1098,9 +1074,6 @@ pub fn build_hints(
             {
                 hints.push(HintItem::new(key, label));
             }
-            if is_subagent_view {
-                hints.push(HintItem::paired(crate::key!('q'), crate::key!(Esc), "back"));
-            }
             hints
         }
     };
@@ -1162,7 +1135,6 @@ mod tests {
             selected_supports_fullscreen,
             false,
             vim_mode,
-            false,
             false,
             false,
             false,
@@ -1300,7 +1272,6 @@ mod tests {
             true,
             false,
             true,
-            false,
             false,
             false,
             false,
@@ -1470,7 +1441,6 @@ mod tests {
             false,
             false,
             false,
-            false,
             Some(&search))
     }
     #[test]
@@ -1572,7 +1542,6 @@ mod tests {
             false,
             false,
             false,
-            false,
             None);
         assert!(
             !hints.iter().any(|h| h.label == "home"),
@@ -1608,7 +1577,6 @@ mod tests {
             false,
             multiline_mode,
             true,
-            false,
             is_turn_running,
             false,
             false,
@@ -1666,7 +1634,6 @@ mod tests {
                 false,
                 multiline,
                 true,
-                false,
                 true,
                 false,
                 true,
@@ -1711,7 +1678,6 @@ mod tests {
                 false,
                 false,
                 true,
-                false,
                 true,
                 esc_would_cancel_turn,
                 false,
@@ -1751,7 +1717,6 @@ mod tests {
             false,
             false,
             None,
-            false,
             false,
             false,
             false,
@@ -1800,7 +1765,6 @@ mod tests {
             false,
             false,
             None,
-            false,
             false,
             false,
             false,

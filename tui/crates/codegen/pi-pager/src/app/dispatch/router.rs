@@ -657,9 +657,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::CancelTurn => dispatch_cancel_turn(app),
         Action::CancelTurnChoice(choice) => dispatch_cancel_turn_choice(app, choice),
         Action::RequestBundleStatus => vec![Effect::FetchBundleStatus],
-        Action::ViewCatalogEntry { kind, name } => {
-            vec![Effect::FetchCatalogEntry { kind, name }]
-        }
         Action::CycleMode => dispatch_cycle_mode(app),
         Action::RenameSession { title } => dispatch_rename_session(app, title),
         Action::ShowContextInfo => dispatch_show_context_info(app),
@@ -920,29 +917,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
         }
         Action::EditPromptExternal => super::external_editor::dispatch_edit_prompt_external(app),
         Action::TaskComplete(result) => dispatch_task_result(result, app),
-        Action::ToggleGoalDetail => {
-            with_active_agent(app, |agent| {
-                if agent.goal_state.is_some() {
-                    agent.show_goal_detail = !agent.show_goal_detail;
-                }
-            });
-            vec![]
-        }
-        Action::ToggleWorkflows => {
-            let opening = matches!(app.active_view, ActiveView::Agent(id) if app.agents.get(&id).is_some_and(|agent| !agent.show_workflows));
-            if opening {
-                app.scroll_state.cancel_stream();
-                app.last_scroll_pos = None;
-            }
-            with_active_agent(app, |agent| {
-                agent.show_workflows = !agent.show_workflows;
-                if agent.show_workflows {
-                    agent.workflows_view.reset();
-                    agent.show_goal_detail = false;
-                }
-            });
-            vec![]
-        }
         Action::RewindShowPicker => dispatch_rewind_show_picker(app),
         Action::RewindPickerSelect(prompt_index) => {
             dispatch_rewind_picker_select(app, prompt_index)
@@ -961,8 +935,8 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
     sync_sleep_inhibitor(app);
     effects
 }
-/// Drains the agent and its focused subagent: the paste drain reports on the parent while `with_active_agent` would pick the child,
-/// and a stranded flag restores on a later dispatch.
+/// Restores the stashed draft once the agent reports its draft was consumed
+/// (a stranded flag restores on a later dispatch).
 fn restore_stash_where_the_draft_was_consumed(app: &mut AppView) {
     let ActiveView::Agent(id) = app.active_view else {
         return;
@@ -970,12 +944,6 @@ fn restore_stash_where_the_draft_was_consumed(app: &mut AppView) {
     let Some(agent) = app.agents.get_mut(&id) else {
         return;
     };
-    if let Some(child_sid) = agent.active_subagent.clone()
-        && let Some(child) = agent.subagent_views.get_mut(&child_sid)
-        && child.take_draft_consumed()
-    {
-        child.auto_restore_stash_after_send();
-    }
     if agent.take_draft_consumed() {
         agent.auto_restore_stash_after_send();
     }

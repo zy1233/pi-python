@@ -22,56 +22,6 @@
         );
     }
 
-    #[test]
-    fn mcp_lifecycle_notif_for_subagent_session_is_dropped() {
-        // A subagent runs its own MCP init, emitting init_progress /
-        // mcp_initialized under the *child* session id. Those must NOT write to
-        // or clear the parent agent's mcp_init_progress — it's a per-root-agent
-        // indicator with no subagent slot, so a subagent's init must not
-        // clobber the parent's spinner.
-        let mut app = make_app_with_agent("sess-A");
-        app.agents.get_mut(&AgentId(0)).unwrap().mcp_init_progress =
-            Some(crate::app::agent_view::McpInitProgress {
-                total: 2,
-                connected: 1,
-                started_at: Instant::now(),
-            });
-        // Register a subagent child view keyed by the child session id.
-        app.agents
-            .get_mut(&AgentId(0))
-            .unwrap()
-            .subagent_views
-            .insert(
-                "child-sess".to_string(),
-                Box::new(make_agent(Some("child-sess"))),
-            );
-
-        // init_progress for the child session must leave the parent untouched.
-        let changed = handle_ext_notification(
-            &make_mcp_init_progress_notif_for(5, 0, "child-sess"),
-            &mut app,
-        );
-        assert!(
-            !changed,
-            "subagent init_progress must not redraw the parent"
-        );
-        let p = app.agents[&AgentId(0)].mcp_init_progress.as_ref().unwrap();
-        assert_eq!(
-            (p.total, p.connected),
-            (2, 1),
-            "parent spinner must be untouched by a subagent's init",
-        );
-
-        // mcp_initialized for the child session must not clear the parent.
-        let changed =
-            handle_ext_notification(&make_mcp_initialized_notif_for("child-sess"), &mut app);
-        assert!(!changed);
-        assert!(
-            app.agents[&AgentId(0)].mcp_init_progress.is_some(),
-            "subagent mcp_initialized must not clear the parent's spinner",
-        );
-    }
-
     /// Pin that the pager deserializes against the *shell's*
     /// `McpServerStatus` enum, so a future new variant doesn't need a
     /// pager change to be recognized. Round-trip through

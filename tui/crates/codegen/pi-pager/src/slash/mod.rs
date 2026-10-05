@@ -356,9 +356,6 @@ pub struct SlashController {
     billing_surface_visible: bool,
     /// Whether `/usage` is offered. Default `true`; cleared for external auth.
     usage_command_visible: bool,
-    workflows_available: bool,
-    /// Session run handles for `/workflow` manage-verb autocomplete.
-    workflow_runs: Vec<crate::slash::command::WorkflowRunChoice>,
     /// Effective render mode of this process (immutable after startup — it only
     /// changes via a full `/minimal`-`/fullscreen` re-exec). Injected via
     /// [`Self::set_screen_mode`] wherever prompts are created; gates the
@@ -401,8 +398,6 @@ impl SlashController {
             has_session_announcements: false,
             billing_surface_visible: true,
             usage_command_visible: true,
-            workflows_available: false,
-            workflow_runs: Vec::new(),
             screen_mode: crate::app::ScreenMode::Fullscreen,
             current_title: None,
             mru,
@@ -442,14 +437,6 @@ impl SlashController {
 
     pub fn set_usage_command_visible(&mut self, visible: bool) {
         self.usage_command_visible = visible;
-    }
-
-    pub fn set_workflows_available(&mut self, available: bool) {
-        self.workflows_available = available;
-    }
-
-    pub fn set_workflow_runs(&mut self, runs: Vec<crate::slash::command::WorkflowRunChoice>) {
-        self.workflow_runs = runs;
     }
 
     /// Record the process's effective screen mode (see the field doc).

@@ -1,30 +1,6 @@
 //! Tests for session loading, restore, pickers, and deep search.
 use super::*;
 use pi_shell::session::unified_list::ListScope;
-/// Opening the cancel-turn picker while scrollback is focused must
-/// hand keyboard focus to the picker — otherwise up/down keys go
-/// to scrollback and the modal is only navigable via mouse.
-#[test]
-fn cancel_turn_picker_grabs_focus_from_scrollback() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.session.state = AgentState::TurnRunning;
-        agent
-            .subagent_sessions
-            .insert("child-1".into(), make_test_subagent("child-1", "sa-1"));
-        agent.active_pane = ActivePane::Scrollback;
-    }
-    let effects = dispatch(Action::CancelTurn, &mut app);
-    assert!(effects.is_empty());
-    assert!(app.agents[&id].cancel_turn_view.is_some());
-    assert_eq!(
-        app.agents[&id].active_pane,
-        ActivePane::Prompt,
-        "picker should steal focus from scrollback so keyboard navigation works"
-    );
-}
 #[test]
 fn session_loaded_with_restore_shows_summary_in_scrollback() {
     let mut app = test_app();
@@ -912,13 +888,6 @@ fn resume_focuses_existing_agent_for_open_session() {
         }),
         &mut app,
     );
-    {
-        let agent = app.agents.get_mut(&agent_0).unwrap();
-        agent
-            .subagent_sessions
-            .insert("child-1".into(), make_test_subagent("child-1", "sa-1"));
-        agent.active_subagent = Some("child-1".into());
-    }
     dispatch(Action::NewSession, &mut app);
     let agent_1 = AgentId(1);
     dispatch(
@@ -938,7 +907,6 @@ fn resume_focuses_existing_agent_for_open_session() {
     assert!(matches!(app.active_view, ActiveView::Agent(id) if id == agent_0));
     assert_eq!(app.agents.len(), count_before);
     assert!(effects.is_empty());
-    assert!(app.agents[&agent_0].active_subagent.is_none());
     assert_eq!(
         app.agents[&agent_0].session.session_id,
         Some(acp::SessionId::new("wt-sess-1"))

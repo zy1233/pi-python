@@ -17,8 +17,8 @@ use super::blocks::{
     AgentMessageBlock, BtwBlock, ContextInfoBlock, CreditLimitBlock,
     EditToolCallBlock, ExecuteToolCallBlock, LineRange, ListDirToolCallBlock, OtherToolCallBlock,
     ReadToolCallBlock, SearchFileMatch, SearchToolCallBlock, SessionEvent, SessionEventBlock,
-    SubagentBlock, SubagentBlockKind, SystemMessageBlock, ThinkingBlock, ToolCallBlock,
-    UserPromptBlock, WorkflowBlock,
+    SystemMessageBlock, ThinkingBlock, ToolCallBlock,
+    UserPromptBlock, 
 };
 use super::types::{
     AccentStyle, BlockBackground, BlockContext, BlockOutput, DisplayMode, RenderedBlockOutput,
@@ -383,9 +383,6 @@ pub enum RenderBlock {
     System(SystemMessageBlock),
     /// Session-level event (typed: turn completed, cancelled, failed, etc.).
     SessionEvent(SessionEventBlock),
-    /// Subagent lifecycle (started / completed / failed).
-    Subagent(SubagentBlock),
-    Workflow(WorkflowBlock),
     /// /btw side-question response (golden accent).
     Btw(BtwBlock),
     /// `/context` snapshot with categorical bar + breakdown.
@@ -405,8 +402,6 @@ macro_rules! delegate_block {
             RenderBlock::Thinking(b) => b.$method($($arg),*),
             RenderBlock::System(b) => b.$method($($arg),*),
             RenderBlock::SessionEvent(b) => b.$method($($arg),*),
-            RenderBlock::Subagent(b) => b.$method($($arg),*),
-            RenderBlock::Workflow(b) => b.$method($($arg),*),
             RenderBlock::Btw(b) => b.$method($($arg),*),
             RenderBlock::ContextInfo(b) => b.$method($($arg),*),
             RenderBlock::CreditLimit(b) => b.$method($($arg),*),
@@ -863,14 +858,6 @@ impl RenderBlock {
         matches!(self, RenderBlock::Thinking(_))
     }
 
-    /// Check if this block is a Subagent block.
-    ///
-    /// Used by the entry cache for the same reason as `is_tool_call`:
-    /// the bold "Subagent" label undims on selection.
-    pub fn is_subagent(&self) -> bool {
-        matches!(self, RenderBlock::Subagent(_))
-    }
-
     /// Check if this block is an AgentMessage.
     pub fn is_agent_message(&self) -> bool {
         matches!(self, RenderBlock::AgentMessage(_))
@@ -942,7 +929,6 @@ impl RenderBlock {
         match self {
             RenderBlock::UserPrompt(_) => Some(theme.text_primary),
             RenderBlock::AgentMessage(_) => None, // No accent for agent messages
-            RenderBlock::Workflow(_) => None,
             RenderBlock::ToolCall(block) => {
                 // Execute: Green for success, red for failure
                 // Read/Edit/ListDir/Search: No accent
@@ -965,13 +951,6 @@ impl RenderBlock {
                 }
             }
             RenderBlock::Thinking(_) => Some(theme.accent_thinking),
-            RenderBlock::Subagent(block) => {
-                if block.is_running() {
-                    Some(theme.accent_running)
-                } else {
-                    None
-                }
-            }
             RenderBlock::System(_)
             | RenderBlock::SessionEvent(_)
             | RenderBlock::ContextInfo(_)
@@ -1091,27 +1070,6 @@ impl RenderBlock {
             RenderBlock::Thinking(b) => join_searchable([Some(b.copy_text(false))]),
             RenderBlock::System(b) => join_searchable([Some(b.text.clone())]),
             RenderBlock::SessionEvent(b) => join_searchable([Some(b.event.message())]),
-            RenderBlock::Workflow(b) => {
-                join_searchable([Some(b.name.clone()), Some(b.objective.clone())])
-            }
-            RenderBlock::Subagent(b) => {
-                // Only the failed variant carries an error string worth indexing.
-                let error = match &b.kind {
-                    SubagentBlockKind::Failed { error, .. } => error.clone(),
-                    SubagentBlockKind::Started
-                    | SubagentBlockKind::Completed { .. }
-                    | SubagentBlockKind::Cancelled { .. } => None,
-                };
-                join_searchable([
-                    Some(b.description.clone()),
-                    Some(b.subagent_type.clone()),
-                    b.persona.clone(),
-                    b.role.clone(),
-                    b.model.clone(),
-                    b.activity_label.clone(),
-                    error,
-                ])
-            }
             RenderBlock::Btw(b) => join_searchable([
                 Some(b.question.clone()),
                 Some(b.content().rendered_plain_text()),
@@ -1419,7 +1377,6 @@ mod searchable_text_tests {
     use crate::scrollback::blocks::SearchLineMatch;
     use crate::scrollback::blocks::tool::memory_search::{MemoryResult, MemorySearchToolCallBlock};
     use crate::scrollback::blocks::tool::{LifecycleEventBlock, WebSearchToolCallBlock};
-    use std::time::Duration;
     use pi_shell::session::ContextInfo;
 
     #[test]
@@ -1453,32 +1410,6 @@ mod searchable_text_tests {
         });
         let text = block.searchable_text().expect("session event text");
         assert!(text.contains("connection reset"), "got: {text:?}");
-    }
-
-    #[test]
-    fn subagent_failed_indexes_metadata_and_error() {
-        let mut block = RenderBlock::Subagent(SubagentBlock::failed(
-            "investigate flaky test",
-            "child-1",
-            Duration::from_secs(3),
-            Some("panicked at assert".into()),
-        ));
-        // Populate the metadata fields a failed background block leaves empty.
-        if let RenderBlock::Subagent(b) = &mut block {
-            b.subagent_type = "explore".into();
-            b.persona = Some("scout".into());
-            b.role = Some("researcher".into());
-            b.model = Some("grok-test".into());
-            b.activity_label = Some("Running: cargo build".into());
-        }
-        let text = block.searchable_text().expect("subagent text");
-        assert!(text.contains("investigate flaky test"), "got: {text:?}");
-        assert!(text.contains("explore"), "got: {text:?}");
-        assert!(text.contains("scout"), "got: {text:?}");
-        assert!(text.contains("researcher"), "got: {text:?}");
-        assert!(text.contains("grok-test"), "got: {text:?}");
-        assert!(text.contains("Running: cargo build"), "got: {text:?}");
-        assert!(text.contains("panicked at assert"), "got: {text:?}");
     }
 
     #[test]

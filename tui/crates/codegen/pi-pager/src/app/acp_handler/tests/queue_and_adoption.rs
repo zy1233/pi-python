@@ -581,12 +581,6 @@
         agent.last_seen_event_id = Some("sess-a-7".into());
         agent.last_applied_event_seq = Some(7);
         agent.last_applied_pi_event_seq = Some(8);
-        agent.deferred_subagent_finishes.insert(
-            "child-stale".into(),
-            crate::app::agent_view::DeferredSubagentFinish {
-                inserted_at: std::time::Instant::now(),
-            },
-        );
 
         let epoch = agent.session_binding_epoch;
         agent.bind_session_id(acp::SessionId::new("sess-a"));
@@ -594,7 +588,6 @@
         assert_eq!(agent.last_seen_event_id.as_deref(), Some("sess-a-7"));
         assert_eq!(agent.last_applied_event_seq, Some(7));
         assert_eq!(agent.last_applied_pi_event_seq, Some(8));
-        assert_eq!(agent.deferred_subagent_finishes.len(), 1);
 
         agent.bind_session_id(acp::SessionId::new("sess-b"));
         assert_eq!(agent.session_binding_epoch, epoch.wrapping_add(1));
@@ -608,10 +601,6 @@
         );
         assert!(agent.last_applied_event_seq.is_none());
         assert!(agent.last_applied_pi_event_seq.is_none());
-        assert!(
-            agent.deferred_subagent_finishes.is_empty(),
-            "deferred finishes are meaningless against another session"
-        );
     }
 
     #[test]

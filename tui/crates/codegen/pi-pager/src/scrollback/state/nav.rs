@@ -24,8 +24,7 @@ fn response_anchor_in_range(
                 }
             }
             RenderBlock::ToolCall(_)
-            | RenderBlock::Thinking(_)
-            | RenderBlock::Subagent(_) => break,
+            | RenderBlock::Thinking(_) => break,
             _ => {}
         }
     }

@@ -52,18 +52,6 @@ impl AgentView {
                     }
                     return InputOutcome::Changed;
                 }
-                if self.hit_goal_status.contains(mouse.column, mouse.row) {
-                    if !self.workflow_runs.is_empty() {
-                        self.show_workflows = !self.show_workflows;
-                        if self.show_workflows {
-                            self.workflows_view.reset();
-                            self.show_goal_detail = false;
-                        }
-                    } else if self.goal_state.is_some() {
-                        self.show_goal_detail = !self.show_goal_detail;
-                    }
-                    return InputOutcome::Changed;
-                }
                 if self.hit_context.contains(mouse.column, mouse.row) {
                     let now = Instant::now();
                     let too_soon = self.last_context_click_at.is_some_and(|t| {
@@ -91,14 +79,6 @@ impl AgentView {
                         self.reopen_plan_approval();
                     } else {
                         self.show_plan_preview();
-                    }
-                    return InputOutcome::Changed;
-                }
-                if self.hit_catalog_close.contains(mouse.column, mouse.row) {
-                    self.catalog.overlay.escape();
-                    self.catalog.on_state_change();
-                    if self.active_pane == AgentPane::Catalog {
-                        self.set_active_pane(AgentPane::Scrollback, false);
                     }
                     return InputOutcome::Changed;
                 }
@@ -471,16 +451,6 @@ impl AgentView {
                         }
                         InputOutcome::Changed
                     }
-                    Some(AgentPane::Catalog) => {
-                        self.set_active_pane(AgentPane::Catalog, false);
-                        self.catalog.handle_mouse(
-                            mouse.kind,
-                            mouse.column,
-                            mouse.row,
-                            self.pane_areas.catalog,
-                        );
-                        InputOutcome::Changed
-                    }
                     Some(AgentPane::Scrollback) => {
                         self.set_active_pane(AgentPane::Scrollback, false);
                         if self.block_viewer.is_some() {
@@ -787,8 +757,7 @@ impl AgentView {
                             }),
                         AgentPane::Todo
                         | AgentPane::Queue
-                        | AgentPane::Prompt
-                        | AgentPane::Catalog => None,
+                        | AgentPane::Prompt => None,
                     })
                 };
                 let new_prompt_hover = hit == Some(AgentPane::Prompt)
@@ -887,8 +856,6 @@ impl AgentView {
                 changed |= self
                     .hit_voice_stop_button
                     .update_hover(mouse.column, mouse.row);
-                changed |= self.hit_goal_status.update_hover(mouse.column, mouse.row);
-                changed |= self.hit_catalog_close.update_hover(mouse.column, mouse.row);
                 changed |= self.hit_cwd.update_hover(mouse.column, mouse.row);
                 changed |= self.hit_upgrade_cta.update_hover(mouse.column, mouse.row);
                 changed |= self.hit_sb_copy.update_hover(mouse.column, mouse.row);

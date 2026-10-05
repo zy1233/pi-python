@@ -1,5 +1,5 @@
 //! Secondary pane input: scrollback keys and search, todo/tool-usage panes,
-//! background tasks, subagent catalog, and the pane-aware scroll router.
+//! and the pane-aware scroll router.
 use super::{ActivePane, AgentPane, AgentView, overlay_action_to_outcome, resolve_action};
 use crate::actions::{ActionId, ActionRegistry, When};
 use crate::app::actions::Action;
@@ -52,18 +52,6 @@ impl AgentView {
             && self.enter_inline_edit(idx)
         {
             return InputOutcome::Changed;
-        }
-        if key!(Enter).matches(key)
-            && !self.scrollback.is_selected_group_header()
-            && let Some(idx) = self.scrollback.selected()
-            && let Some(entry) = self.scrollback.entry(idx)
-            && let crate::scrollback::block::RenderBlock::Subagent(ref sb) = entry.block
-        {
-            let child_sid = sb.child_session_id.clone();
-            if self.subagent_views.contains_key(&child_sid) {
-                self.open_subagent_fullscreen(child_sid);
-                return InputOutcome::Changed;
-            }
         }
         if key.code == KeyCode::Esc
             && key.modifiers.is_empty()
@@ -287,45 +275,6 @@ impl AgentView {
             InputOutcome::Unchanged
         }
     }
-    /// Subagent-pane-focused key handling.
-    pub(super) fn handle_catalog_key(
-        &mut self,
-        key: &KeyEvent,
-        _registry: &ActionRegistry,
-    ) -> InputOutcome {
-        use crate::views::overlay::{handle_overlay_key, handle_overlay_nav_key};
-        let has_input = self.catalog.list_state.input_mode().is_some();
-        let action = handle_overlay_key(&mut self.catalog.overlay, key).or_else(|| {
-            if !has_input {
-                handle_overlay_nav_key(&mut self.catalog.overlay, key)
-            } else {
-                None
-            }
-        });
-        if let Some(action) = action {
-            self.catalog.on_state_change();
-            if !self.catalog.overlay.visible || !self.catalog.overlay.focused {
-                self.set_active_pane(AgentPane::Scrollback, false);
-            }
-            return overlay_action_to_outcome(action);
-        }
-        if key.code == crossterm::event::KeyCode::Enter
-            && key.modifiers == crossterm::event::KeyModifiers::NONE
-        {
-            if let Some((kind, name)) = self.catalog.selected_entry() {
-                return InputOutcome::Action(Action::ViewCatalogEntry {
-                    kind: kind.to_owned(),
-                    name: name.to_owned(),
-                });
-            }
-            return InputOutcome::Unchanged;
-        }
-        if self.catalog.handle_key(key) {
-            InputOutcome::Changed
-        } else {
-            InputOutcome::Unchanged
-        }
-    }
     /// Handle a normalized scroll event at a screen position.
     ///
     /// Hit-tests against pane areas to decide what to scroll:
@@ -334,16 +283,6 @@ impl AgentView {
     ///
     /// Positive `lines` = scroll down, negative = scroll up.
     pub fn handle_scroll(&mut self, lines: i32, col: u16, row: u16) {
-        if self.show_workflows {
-            let runs = self.workflow_runs_newest_first();
-            let mut view = self.workflows_view.clone();
-            view.handle_scroll(lines, col, row, &runs);
-            self.workflows_view = view;
-            return;
-        }
-        if self.show_goal_detail {
-            return;
-        }
         if let Some(ref mut modal) = self.active_modal {
             use crate::views::modal::ActiveModal;
             match modal {
@@ -494,9 +433,6 @@ impl AgentView {
             ActivePane::Queue => {
                 self.queue.handle_scroll(lines, col, row);
             }
-            ActivePane::Catalog => {
-                self.catalog.handle_scroll(lines, col, row);
-            }
             ActivePane::Prompt => {
                 if self.question_view.is_some() {
                     return;
@@ -586,38 +522,6 @@ mod scroll_granularity_tests {
         assert_eq!(
             agent.prompt.suggestions.dropdown.selected, 0,
             "-3-line wheel notch must move the completion selection by exactly -1"
-        );
-    }
-    #[test]
-    fn wheel_over_fullscreen_overlays_never_scrolls_panes_beneath() {
-        let mut agent = make_agent();
-        agent.pane_areas.scrollback = Rect::new(0, 0, 80, 10);
-        for i in 0..30 {
-            agent
-                .scrollback
-                .push_block(crate::scrollback::block::RenderBlock::agent_message(
-                    format!("line {i}"),
-                ));
-        }
-        agent.scrollback.prepare_layout(80, 10);
-        agent.scrollback.scroll_up(5);
-        let before = agent.scrollback.scroll_info().0;
-        assert!(before > 0, "setup: scrollback holds a real offset");
-        agent.show_workflows = true;
-        agent.handle_scroll(3, 5, 4);
-        agent.handle_scroll(-3, 5, 4);
-        assert_eq!(
-            agent.scrollback.scroll_info().0,
-            before,
-            "wheel must not leak through the /workflow runs modal"
-        );
-        agent.show_workflows = false;
-        agent.show_goal_detail = true;
-        agent.handle_scroll(-3, 5, 4);
-        assert_eq!(
-            agent.scrollback.scroll_info().0,
-            before,
-            "wheel must not leak through the goal detail overlay"
         );
     }
 }

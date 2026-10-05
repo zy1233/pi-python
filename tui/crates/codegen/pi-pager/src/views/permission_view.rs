@@ -264,12 +264,6 @@ pub struct PermissionViewState {
     /// Scroll offset for description area.
     pub desc_scroll: u16,
 
-    // -- Subagent provenance --
-    /// If this permission was requested by a subagent, its descriptive label.
-    /// Derived from matching `request.session_id` against known subagent
-    /// sessions. Displayed as a provenance line above the title.
-    pub subagent_label: Option<String>,
-
     // -- Prompt stash (queue-level, not per-request) --
     // NOTE: prompt stash is NOT on PermissionViewState.
     // It lives on AgentView as `permission_stashed_prompt`.
@@ -470,9 +464,6 @@ fn shortcut_label(index: usize) -> &'static str {
 
 // ── Subagent tracking ──────────────────────────────────────────────────
 
-// SubagentInfo lives in app::subagent — re-export for backward compat.
-pub use crate::app::subagent::SubagentInfo;
-
 // ── Height calculation ─────────────────────────────────────────────────
 
 /// Chrome height for the permission view as actually rendered.
@@ -506,9 +497,6 @@ fn permission_chrome_height(state: &PermissionViewState, content_w: usize) -> u1
         .saturating_add(bash_indicator as usize)
         .min(u16::MAX as usize) as u16;
     let mut h: u16 = 1; // vpad top
-    if state.subagent_label.is_some() {
-        h += 1; // provenance line
-    }
     h += 1; // title line
     h = h.saturating_add(bash_line_count);
     // Planned MCP arguments: same `mcp_args_visible_rows` budget as the
@@ -727,20 +715,6 @@ pub fn render_permission_view(
     // bottom of a short terminal they must not write past it (ratatui's
     // set_line panics on an out-of-bounds row).
     let area_bottom = area.y + area.height;
-
-    // Subagent provenance line (if present).
-    if let Some(ref label) = state.subagent_label {
-        if y < area_bottom {
-            let prov_style = Style::default().fg(theme.gray);
-            buf.set_line(
-                content_x,
-                y,
-                &Line::from(Span::styled(label.clone(), prov_style)),
-                content_width,
-            );
-        }
-        y += 1;
-    }
 
     // Title (bold, accent color) — e.g. bash tool description or "Allow Edit?"
     if y < area_bottom {
@@ -2149,7 +2123,6 @@ mod tests {
             description: vec![],
             args_expanded: false,
             desc_scroll: 0,
-            subagent_label: Some("subagent: worker".to_string()),
             options_area_height: 0,
             options_scroll_offset: 0,
         }
@@ -2193,7 +2166,6 @@ mod tests {
                         }
                         let mut state = long_args_state();
                         state.args_expanded = expanded;
-                        state.subagent_label = Some("subagent: worker".into());
                         let area = Rect::new(0, area_y, buf_w, area_h);
                         let mut buf = Buffer::empty(Rect::new(0, 0, buf_w.max(1), 10));
                         let _ = render_permission_view(
@@ -2305,7 +2277,6 @@ mod tests {
             description: vec![],
             args_expanded: false,
             desc_scroll: 0,
-            subagent_label: None,
             options_area_height: 0,
             options_scroll_offset: 0,
         }

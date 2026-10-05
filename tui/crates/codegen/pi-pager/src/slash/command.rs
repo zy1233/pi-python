@@ -70,14 +70,6 @@ pub struct WorkflowChoice {
     pub description: String,
 }
 
-/// A session workflow run the `/workflow` manage verbs can target.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkflowRunChoice {
-    pub name: String,
-    pub status: String,
-    pub builtin: bool,
-}
-
 impl WorkflowChoice {
     /// `None` when the command is not a workflow definition.
     pub fn from_acp(cmd: &acp::AvailableCommand) -> Option<Self> {

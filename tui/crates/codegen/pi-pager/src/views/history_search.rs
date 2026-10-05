@@ -384,13 +384,6 @@ impl HistorySearchState {
         }
     }
 
-    /// Whether the matcher daemon has been spawned. Regression accessor for
-    /// the subagent storm test: child views must never build one.
-    #[cfg(test)]
-    pub(crate) fn daemon_built(&self) -> bool {
-        self.daemon.is_some()
-    }
-
     pub fn is_active(&self) -> bool {
         self.active
     }

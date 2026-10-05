@@ -26,14 +26,6 @@ impl AppView {
         draws_a_row(&self.current_ui.status_line)
     }
 
-    /// A fullscreen subagent draws the whole frame. Separate from
-    /// [`Self::draws_a_row`]: the row comes back when the subagent closes, so
-    /// nothing here may clear it or disarm the resize it is owed.
-    fn a_subagent_owns_the_frame(&self) -> bool {
-        self.active_agent()
-            .is_some_and(|agent| agent.active_subagent.is_some())
-    }
-
     pub(crate) fn status_line_tick_demand(&self) -> TickDemand {
         self.status_line_tick_demand_at(Instant::now())
     }
@@ -43,7 +35,7 @@ impl AppView {
         status_line_tick_demand(TickInputs {
             // `reserves_a_row`, not `resolve`: a row whose config could not be read
             // still takes space, and the tick paints the problem into it.
-            row_is_drawn: self.draws_a_row() && !self.a_subagent_owns_the_frame(),
+            row_is_drawn: self.draws_a_row(),
             settled: self.status_line.is_settled(),
             source_changed: self.status_line.source() != source,
             // A rename reaches the row from here, not from the site that renamed, so
@@ -75,12 +67,6 @@ impl AppView {
         if source.is_none() {
             self.status_line.set_source(source);
             self.status_line.invalidate();
-            return;
-        }
-
-        // Below the watchdog, which the run is still owed, and above the recompute,
-        // which would run a script for a row nobody can see.
-        if self.a_subagent_owns_the_frame() {
             return;
         }
 

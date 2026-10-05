@@ -10,19 +10,16 @@ pub(crate) mod markdown_content;
 pub mod mermaid_content;
 mod quote_bar;
 mod session_event;
-mod subagent;
 mod system;
 mod thinking;
 pub mod tool;
 mod user;
-mod workflow;
 
 pub use agent::AgentMessageBlock;
 pub use btw::BtwBlock;
 pub use context_info::ContextInfoBlock;
 pub use credit_limit::{CreditLimitBlock, CreditLimitCardAction};
 pub use session_event::{SessionEvent, SessionEventBlock};
-pub use subagent::{SubagentBlock, SubagentBlockKind};
 pub use system::SystemMessageBlock;
 pub use thinking::ThinkingBlock;
 pub use tool::{
@@ -33,7 +30,6 @@ pub use tool::{
     render_diff_hunks_highlighted,
 };
 pub use user::UserPromptBlock;
-pub use workflow::{WorkflowBlock, WorkflowBlockPhase, WorkflowBlockStatus};
 
 // Backwards compatibility alias
 pub type EditBlock = EditToolCallBlock;

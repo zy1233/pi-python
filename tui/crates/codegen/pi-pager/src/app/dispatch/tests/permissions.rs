@@ -98,7 +98,6 @@ fn set_yolo_mode_on_drains_permission_queue_with_allow_once() {
         description: vec![],
         args_expanded: false,
         desc_scroll: 0,
-        subagent_label: None,
         options_area_height: 0,
         options_scroll_offset: 0,
     });
@@ -614,7 +613,6 @@ fn push_bash_allow_always(
         description: vec![],
         args_expanded: false,
         desc_scroll: 0,
-        subagent_label: None,
         options_area_height: 0,
         options_scroll_offset: 0,
     });

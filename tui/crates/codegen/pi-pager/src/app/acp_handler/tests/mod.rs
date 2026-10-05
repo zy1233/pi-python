@@ -6,7 +6,6 @@ use crate::app::agent::{AgentId, AgentSession, AgentState, InFlightPrompt};
 use crate::app::agent_view::AgentView;
 use crate::scrollback::entry::EntryId;
 use crate::scrollback::state::ScrollbackState;
-use crate::views::permission_view::SubagentInfo;
 use std::path::PathBuf;
 use std::time::Instant;
 use pi_shell::extensions::notification::RetryState;
@@ -69,47 +68,6 @@ pub(super) fn recap_block(text: &str) -> RenderBlock {
         auto: false,
     })
 }
-pub(super) fn make_subagent_info(child_sid: &str) -> SubagentInfo {
-    SubagentInfo {
-        subagent_id: Arc::from(format!("sa-{child_sid}")),
-        child_session_id: Arc::from(child_sid),
-        description: Arc::from("test"),
-        subagent_type: Arc::from("general-purpose"),
-        persona: None,
-        role: None,
-        model: None,
-        context_source: None,
-        resumed_from: None,
-        capability_mode: None,
-        workflow_run_id: None,
-        context_normalized: false,
-        parent_prompt_id: None,
-        started_at: Instant::now(),
-        last_progress_at: Instant::now(),
-        finished: false,
-        status: None,
-        error: None,
-        duration_ms: None,
-        tool_calls: None,
-        turns: None,
-        turn_count: None,
-        tool_call_count: None,
-        tokens_used: None,
-        context_window_tokens: Some(131072),
-        context_usage_pct: Some(85),
-        tools_used: Vec::new(),
-        error_count: None,
-        activity_label: None,
-        is_background: false,
-        pending_kill: false,
-        kill_requested_at: None,
-        scrollback_entry_id: None,
-        prompt: None,
-        child_cwd: None,
-        worktree_path: None,
-        transcript: Default::default(),
-    }
-}
 pub(super) fn compressed_entry(
     index: usize,
 ) -> pi_shell::extensions::notification::ImageCompressedEntry {
@@ -145,16 +103,6 @@ pub(super) fn make_app_with_agent(session_id: &str) -> AppView {
     );
     app
 }
-pub(super) fn park_on_subagents(agent: &mut AgentView, child_ids: &[&str]) {
-    use crate::app::agent_view::test_fixtures::simulate_wait_all;
-    agent.session.state = AgentState::TurnRunning;
-    agent.session.current_prompt_id = Some("p1".into());
-    for &child_id in child_ids {
-        agent.subagent_sessions.insert(child_id.into(), make_subagent_info(child_id));
-    }
-    simulate_wait_all(agent);
-    assert!(agent.renders_parked());
-}
 pub(super) fn follow_ups_ext(
     response_id: &str,
     labels: &[&str],
@@ -169,21 +117,6 @@ pub(super) fn follow_ups_ext(
         });
     acp::ExtNotification::new(
         "pi/follow_ups",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
-    )
-}
-pub(super) fn subagent_ext_replay(
-    session_id: &str,
-    update: serde_json::Value,
-    event_id: &str,
-) -> acp::ExtNotification {
-    let params = serde_json::json!({
-            "sessionId": session_id,
-            "update": update,
-            "_meta": { "isReplay": true, "eventId": event_id },
-        });
-    acp::ExtNotification::new(
-        "pi/session/update",
         std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
     )
 }
@@ -738,361 +671,6 @@ pub(super) fn make_ext_session_notification_with_method(
         response_tx: tx,
     })
 }
-use crate::scrollback::blocks::SubagentBlockKind;
-pub(super) fn test_subagent_spawned(
-    parent_sid: &str,
-    child_sid: &str,
-) -> PiSessionUpdate {
-    test_subagent_spawned_for_workflow(parent_sid, child_sid, None)
-}
-pub(super) fn test_subagent_spawned_for_workflow(
-    parent_sid: &str,
-    child_sid: &str,
-    workflow_run_id: Option<String>,
-) -> PiSessionUpdate {
-    PiSessionUpdate::SubagentSpawned {
-        subagent_id: child_sid.into(),
-        parent_session_id: parent_sid.into(),
-        parent_prompt_id: None,
-        child_session_id: child_sid.into(),
-        subagent_type: "explore".into(),
-        description: "scan src/".into(),
-        effective_context_source: None,
-        context_normalized: false,
-        capability_mode: None,
-        workflow_run_id,
-        persona: None,
-        role: None,
-        model: None,
-        resumed_from: None,
-    }
-}
-pub(super) fn test_subagent_finished(child_sid: &str) -> PiSessionUpdate {
-    PiSessionUpdate::SubagentFinished {
-        subagent_id: child_sid.into(),
-        child_session_id: child_sid.into(),
-        status: "completed".into(),
-        error: None,
-        tool_calls: 2,
-        turns: 1,
-        duration_ms: 500,
-        tokens_used: 0,
-        output: None,
-        will_wake: false,
-    }
-}
-pub(super) fn test_subagent_progress(
-    parent_sid: &str,
-    child_sid: &str,
-) -> PiSessionUpdate {
-    PiSessionUpdate::SubagentProgress {
-        subagent_id: child_sid.into(),
-        parent_session_id: parent_sid.into(),
-        child_session_id: child_sid.into(),
-        duration_ms: 100,
-        turn_count: 1,
-        tool_call_count: 0,
-        tokens_used: 0,
-        context_window_tokens: 0,
-        context_usage_pct: 0,
-        tools_used: vec![],
-        error_count: 0,
-    }
-}
-/// Snapshot of subagent state after SubagentSpawned for method-parity tests.
-pub(super) struct SubagentSpawnSnapshot {
-    description: String,
-    subagent_type: String,
-    has_child_view: bool,
-    scrollback_len: usize,
-    child_session_id: String,
-    block_kind: SubagentBlockKind,
-    scrollback_entry_id: Option<EntryId>,
-}
-pub(super) fn snapshot_after_subagent_spawn(
-    app: &AppView,
-    child_sid: &str,
-) -> SubagentSpawnSnapshot {
-    let agent = app.agents.get(&AgentId(0)).unwrap();
-    let info = agent.subagent_sessions.get(child_sid).unwrap();
-    let entry_id = info.scrollback_entry_id.expect("scrollback_entry_id after spawn");
-    let entry = agent.scrollback.get_by_id(entry_id).unwrap();
-    let RenderBlock::Subagent(sb) = &entry.block else {
-        panic!("expected Subagent block after spawn");
-    };
-    SubagentSpawnSnapshot {
-        description: info.description.to_string(),
-        subagent_type: info.subagent_type.to_string(),
-        has_child_view: agent.subagent_views.contains_key(child_sid),
-        scrollback_len: agent.scrollback.len(),
-        child_session_id: sb.child_session_id.clone(),
-        block_kind: sb.kind.clone(),
-        scrollback_entry_id: info.scrollback_entry_id,
-    }
-}
-/// Snapshot after SubagentFinished for method-parity tests.
-pub(super) struct SubagentFinishSnapshot {
-    finished: bool,
-    status: Option<String>,
-    tool_calls: Option<u32>,
-    turns: Option<u32>,
-    duration_ms: Option<u64>,
-    block_kind: SubagentBlockKind,
-}
-pub(super) fn snapshot_after_subagent_finish(
-    app: &AppView,
-    child_sid: &str,
-) -> SubagentFinishSnapshot {
-    let agent = app.agents.get(&AgentId(0)).unwrap();
-    let info = agent.subagent_sessions.get(child_sid).unwrap();
-    let entry_id = info.scrollback_entry_id.expect("scrollback_entry_id after finish");
-    let entry = agent.scrollback.get_by_id(entry_id).unwrap();
-    let RenderBlock::Subagent(sb) = &entry.block else {
-        panic!("expected Subagent block after finish");
-    };
-    SubagentFinishSnapshot {
-        finished: info.finished,
-        status: info.status.as_ref().map(|s| s.to_string()),
-        tool_calls: info.tool_calls,
-        turns: info.turns,
-        duration_ms: info.duration_ms,
-        block_kind: sb.kind.clone(),
-    }
-}
-pub(super) fn run_subagent_lifecycle_via_method(
-    method: &str,
-    child_sid: &str,
-) -> (SubagentSpawnSnapshot, SubagentFinishSnapshot) {
-    let mut app = make_app_with_agent("sess-parent");
-    let _ = handle(
-        make_ext_session_notification_with_method(
-            "sess-parent",
-            method,
-            test_subagent_spawned("sess-parent", child_sid),
-        ),
-        &mut app,
-    );
-    let spawn = snapshot_after_subagent_spawn(&app, child_sid);
-    let _ = handle(
-        make_ext_session_notification_with_method(
-            "sess-parent",
-            method,
-            test_subagent_finished(child_sid),
-        ),
-        &mut app,
-    );
-    let finish = snapshot_after_subagent_finish(&app, child_sid);
-    (spawn, finish)
-}
-/// Shared temp `GROK_HOME` for disk-replay tests. `grok_home()` uses a
-/// process-wide `OnceLock`, so parallel tests must not each set `GROK_HOME`
-/// to a different tempdir.
-pub(super) fn replay_disk_test_home() -> &'static std::path::Path {
-    use std::sync::OnceLock;
-    static HOME: OnceLock<tempfile::TempDir> = OnceLock::new();
-    HOME.get_or_init(|| {
-            let tmp = tempfile::tempdir().expect("tempdir creation");
-            unsafe {
-                std::env::set_var("GROK_HOME", tmp.path());
-            }
-            tmp
-        })
-        .path()
-}
-/// Runs `f` with a thread-local grok home override so disk replay tests do not
-/// depend on process-wide `grok_home()` cache order when the full suite runs.
-pub(super) fn with_replay_disk_home<R>(f: impl FnOnce(&std::path::Path) -> R) -> R {
-    let home = replay_disk_test_home();
-    crate::app::subagent::set_replay_grok_home_for_tests(Some(home.to_path_buf()));
-    let out = f(home);
-    crate::app::subagent::set_replay_grok_home_for_tests(None);
-    out
-}
-pub(super) fn write_child_updates_jsonl(
-    grok_home: &std::path::Path,
-    child_sid: &str,
-    content: &str,
-) {
-    write_child_updates_jsonl_under_cwd(grok_home, "/tmp", child_sid, content);
-}
-pub(super) fn write_child_updates_jsonl_under_cwd(
-    grok_home: &std::path::Path,
-    cwd: &str,
-    child_sid: &str,
-    content: &str,
-) {
-    let sessions_dir = grok_home
-        .join("sessions")
-        .join(pi_config::encode_cwd_dirname(cwd))
-        .join(child_sid);
-    std::fs::create_dir_all(&sessions_dir).unwrap();
-    std::fs::write(sessions_dir.join("summary.json"), "{}").unwrap();
-    std::fs::write(sessions_dir.join("updates.jsonl"), content).unwrap();
-}
-pub(super) fn child_scrollback_tool_call_count(
-    agent: &AgentView,
-    child_sid: &str,
-) -> usize {
-    let child = agent.subagent_views.get(child_sid).expect("child subagent view");
-    (0..child.scrollback.len())
-        .filter(|i| {
-            child
-                .scrollback
-                .entry(*i)
-                .is_some_and(|e| matches!(e.block, RenderBlock::ToolCall(_)))
-        })
-        .count()
-}
-/// `SessionEvent` blocks (the `TurnCompleted` footer) in a child scrollback.
-pub(super) fn child_scrollback_session_event_count(
-    agent: &AgentView,
-    child_sid: &str,
-) -> usize {
-    let child = agent.subagent_views.get(child_sid).expect("child subagent view");
-    (0..child.scrollback.len())
-        .filter(|i| {
-            child
-                .scrollback
-                .entry(*i)
-                .is_some_and(|e| matches!(e.block, RenderBlock::SessionEvent(_)))
-        })
-        .count()
-}
-pub(super) fn child_tool_line(child_sid: &str) -> String {
-    format!(
-            r#"{{"method":"session/update","params":{{"sessionId":"{child_sid}","update":{{"sessionUpdate":"tool_call","toolCallId":"tc1","title":"Read foo","kind":"read","locations":[{{"path":"/tmp/foo"}}]}}}}}}"#
-        )
-}
-pub(super) fn child_user_message_line(child_sid: &str, text: &str) -> String {
-    let escaped = serde_json::to_string(text).unwrap();
-    format!(
-            r#"{{"method":"session/update","params":{{"sessionId":"{child_sid}","update":{{"sessionUpdate":"user_message_chunk","content":{{"type":"text","text":{escaped}}}}}}}}}"#
-        )
-}
-pub(super) fn write_subagent_meta_json(
-    grok_home: &std::path::Path,
-    parent_sid: &str,
-    subagent_id: &str,
-    prompt: &str,
-) {
-    let sessions_dir = grok_home
-        .join("sessions")
-        .join(urlencoding::encode("/tmp").as_ref())
-        .join(parent_sid)
-        .join("subagents")
-        .join(subagent_id);
-    std::fs::create_dir_all(&sessions_dir).unwrap();
-    let json = format!(r#"{{"prompt":{}}}"#, serde_json::to_string(prompt).unwrap());
-    std::fs::write(sessions_dir.join("meta.json"), json).unwrap();
-}
-/// The persisted echo of a task prompt wraps differently from the
-/// injected copy, so compare with internal whitespace collapsed.
-fn subagent_prompt_text_eq(a: &str, b: &str) -> bool {
-    a.split_whitespace().eq(b.split_whitespace())
-}
-pub(super) fn child_scrollback_matching_prompt_count(
-    agent: &AgentView,
-    child_sid: &str,
-    prompt: &str,
-) -> usize {
-    let child = agent.subagent_views.get(child_sid).expect("child subagent view");
-    if prompt.trim().is_empty() {
-        return 0;
-    }
-    (0..child.scrollback.len())
-        .filter(|i| {
-            child
-                .scrollback
-                .entry(*i)
-                .is_some_and(|e| {
-                    let t = match &e.block {
-                        RenderBlock::UserPrompt(b) => Some(b.text.as_str()),
-                        _ => None,
-                    };
-                    t.is_some_and(|s| subagent_prompt_text_eq(s, prompt))
-                })
-        })
-        .count()
-}
-pub(super) fn child_tracker_expects_user_echo(
-    agent: &AgentView,
-    child_sid: &str,
-) -> bool {
-    agent
-        .subagent_views
-        .get(child_sid)
-        .expect("child subagent view")
-        .session
-        .tracker
-        .expects_user_echo()
-}
-pub(super) fn spawn_subagent_with_optional_updates(
-    app: &mut AppView,
-    child_sid: &str,
-    updates: Option<&str>,
-) {
-    if let Some(content) = updates {
-        write_child_updates_jsonl(replay_disk_test_home(), child_sid, content);
-    }
-    let _ = handle(
-        make_ext_session_notification_with_method(
-            "sess-parent",
-            "pi/session/update",
-            test_subagent_spawned("sess-parent", child_sid),
-        ),
-        app,
-    );
-}
-/// A minimal `GoalUpdated` `update` object (the required wire fields) for
-/// `sess-A`; callers add optional fields before dispatching.
-pub(super) fn goal_update_value(
-    goal_id: &str,
-    status: &str,
-    elapsed_ms: u64,
-) -> serde_json::Value {
-    serde_json::json!({
-            "sessionUpdate": "goal_updated",
-            "goal_id": goal_id,
-            "objective": "obj",
-            "status": status,
-            "phase": "executing",
-            "tokens_used": 0,
-            "elapsed_ms": elapsed_ms,
-            "total_deliverables": 0,
-            "completed_deliverables": 0,
-            "total_worker_rounds": 0,
-            "total_verify_rounds": 0,
-            "token_baseline": 0,
-            "finished_subagent_tokens": 0,
-        })
-}
-/// Wrap an `update` object in the session envelope and run it through the
-/// real handler; returns whether the notification requested a redraw.
-pub(super) fn dispatch_goal_update(
-    app: &mut AppView,
-    update: serde_json::Value,
-) -> bool {
-    let raw_payload = serde_json::json!({ "sessionId": "sess-A", "update": update });
-    let raw = serde_json::value::to_raw_value(&raw_payload).unwrap();
-    let (tx, _rx) = tokio::sync::oneshot::channel();
-    handle(
-        AcpClientMessage::ExtNotification(pi_acp_lib::AcpArgs {
-            request: acp::ExtNotification::new("pi/session_notification", raw.into()),
-            response_tx: tx,
-        }),
-        app,
-    )
-}
-/// Build + dispatch a `GoalUpdated` for `sess-A` with the given id /
-/// status / elapsed; returns whether the notification requested a redraw.
-pub(super) fn send_goal_update(
-    app: &mut AppView,
-    goal_id: &str,
-    status: &str,
-    elapsed_ms: u64,
-) -> bool {
-    dispatch_goal_update(app, goal_update_value(goal_id, status, elapsed_ms))
-}
 /// Build a minimal `RequestPermission` message that carries `session_id`
 /// and one `AllowOnce` option.
 pub(super) fn make_permission_message(
@@ -1159,17 +737,6 @@ pub(super) fn make_task_backgrounded_notif(
     };
     let raw = serde_json::value::to_raw_value(&notif).unwrap();
     acp::ExtNotification::new("pi/task_backgrounded", std::sync::Arc::from(raw))
-}
-pub(super) fn make_app_with_parent_and_child(
-    parent_sid: &str,
-    child_sid: &str,
-) -> AppView {
-    let mut app = make_app_with_agent(parent_sid);
-    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-    agent.subagent_sessions.insert(child_sid.into(), make_subagent_info(child_sid));
-    let child_view = make_agent(Some(child_sid));
-    agent.subagent_views.insert(child_sid.into(), Box::new(child_view));
-    app
 }
 pub(super) fn make_task_completed_notif(
     session_id: &str,
@@ -1301,22 +868,6 @@ pub(super) fn make_current_mode_update(mode_id: &str) -> acp::SessionUpdate {
         acp::CurrentModeUpdate::new(acp::SessionModeId::new(mode_id)),
     )
 }
-/// Helper: `init_progress` notification carrying an explicit sessionId.
-pub(super) fn make_mcp_init_progress_notif_for(
-    total: u32,
-    connected: u32,
-    session_id: &str,
-) -> acp::ExtNotification {
-    let raw = serde_json::value::to_raw_value(
-            &serde_json::json!({
-            "total": total,
-            "connected": connected,
-            "sessionId": session_id,
-        }),
-        )
-        .unwrap();
-    acp::ExtNotification::new("pi/mcp/init_progress", std::sync::Arc::from(raw))
-}
 /// Helper: `mcp_initialized` notification for a specific sessionId.
 pub(super) fn make_mcp_initialized_notif_for(session_id: &str) -> acp::ExtNotification {
     let raw = serde_json::value::to_raw_value(
@@ -1339,8 +890,6 @@ mod reconnect;
 mod turn_completion;
 mod interjection;
 mod session_routing;
-mod subagents;
-mod goals;
 mod interactions;
 mod models;
 mod mcp;

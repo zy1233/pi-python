@@ -449,43 +449,6 @@ fn clipboard_probe_refused_show_burns_nothing() {
         "refused show must leave cooldown and dedup uncommitted"
     );
 }
-/// Build an idle subagent child `AgentView` for child gate↔tick symmetry tests.
-fn idle_child_view(app: &AppView, id_n: usize, sid: &str) -> Box<AgentView> {
-    let session = AgentSession {
-        id: super::super::agent::AgentId(id_n),
-        acp_tx: app.acp_tx.clone(),
-        session_id: Some(sid.to_string().into()),
-        models: ModelState::default(),
-        state: AgentState::Idle,
-        tracker: AcpUpdateTracker::new(),
-        cwd: std::path::PathBuf::from("/tmp"),
-        is_worktree: false,
-        forked_from: None,
-        pending_prompts: std::collections::VecDeque::new(),
-        next_queue_id: 0,
-        yolo_mode: false,
-        auto_mode: false,
-        prompt_history: Vec::new(),
-        prompt_history_loading: false,
-        loading_replay: false,
-        restore_degree: None,
-        rate_limited: false,
-        model_incompatible: false,
-        credit_limit_blocked: false,
-        free_usage_blocked: false,
-        available_commands: Vec::new(),
-        available_commands_generation: 0,
-        available_tools: None,
-        model_switch_pending: false,
-        user_model_preference: None,
-        deferred_model_switch: None,
-        in_flight_prompt: None,
-        compact_held_prompt: None,
-        current_prompt_id: None,
-        created_via_new: false,
-    };
-    Box::new(AgentView::new(session, ScrollbackState::new()))
-}
 fn key_event(code: KeyCode, mods: KeyModifiers) -> Event {
     Event::Key(KeyEvent::new(code, mods))
 }
@@ -1179,71 +1142,6 @@ fn needs_animation_gates_pending_cancel_resend() {
     assert!(!app.needs_animation());
 }
 #[test]
-fn needs_animation_gates_subagent_image_viewer_loading() {
-    let mut app = test_app_with_agent();
-    let id = super::super::agent::AgentId(0);
-    let child_sid = "child-img-gate";
-    let child = idle_child_view(&app, 1, child_sid);
-    app.agents
-        .get_mut(&id)
-        .unwrap()
-        .subagent_views
-        .insert(child_sid.to_string(), child);
-    assert!(
-        !app.needs_animation(),
-        "an idle agent with an idle subagent child must not request ticks"
-    );
-    let viewer = crate::prompt_images::ImageViewerState::open_from_path_deferred(
-        std::path::Path::new("/nonexistent/child_img_gate.png"),
-    );
-    assert!(viewer.loading, "deferred open must be in loading state");
-    app.agents
-        .get_mut(&id)
-        .unwrap()
-        .subagent_views
-        .get_mut(child_sid)
-        .unwrap()
-        .image_viewer = Some(viewer);
-    assert!(
-        app.needs_animation(),
-        "a loading image viewer on a subagent CHILD must request ticks (child arm)"
-    );
-    let mut terminal = false;
-    for _ in 0..200 {
-        app.tick();
-        let child = &app.agents[&id].subagent_views[child_sid];
-        if child.image_viewer.is_none()
-            || child.toast.is_some()
-            || child.image_load_rx.is_some()
-            || child.image_viewer.as_ref().is_some_and(|v| !v.loading)
-        {
-            terminal = true;
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(2));
-    }
-    assert!(
-        terminal,
-        "tick() must progress the CHILD image load (shared tick_agent_image_load)"
-    );
-    {
-        let child = app
-            .agents
-            .get_mut(&id)
-            .unwrap()
-            .subagent_views
-            .get_mut(child_sid)
-            .unwrap();
-        child.image_viewer = None;
-        child.image_load_rx = None;
-        child.toast = None;
-    }
-    assert!(
-        !app.needs_animation(),
-        "a cleared child image viewer must stop requesting ticks"
-    );
-}
-#[test]
 fn gboom_backgrounded_game_drops_held_movement() {
     use crate::gboom::GboomState;
     let mut app = test_app_with_agent();
@@ -1269,26 +1167,18 @@ fn gboom_backgrounded_game_drops_held_movement() {
         "a backgrounded game must drop its holds"
     );
 }
-/// `Event::Resize` must close the tip show gate of every agent view —
-/// parent AND fullscreen-capable subagent children — until the next draw
-/// re-measures: a trigger firing between the event and the (debounced)
-/// resize draw would otherwise act on the pre-resize measurement and burn
-/// a seen count on a tip the new layout can never paint. The event must
-/// NOT write the full terminal size into `last_terminal_size` — views can
-/// paint into chrome-shrunk rects, so the event height proves nothing
+/// `Event::Resize` must close the tip show gate of every agent view until
+/// the next draw re-measures: a trigger firing between the event and the
+/// (debounced) resize draw would otherwise act on the pre-resize measurement
+/// and burn a seen count on a tip the new layout can never paint. The event
+/// must NOT write the full terminal size into `last_terminal_size` — views
+/// can paint into chrome-shrunk rects, so the event height proves nothing
 /// about the banner row.
 #[test]
 fn resize_event_closes_tip_show_gate_until_redraw() {
     let mut app = test_app_with_agent();
     let id = super::super::agent::AgentId(0);
-    let child_sid = "child-session";
-    {
-        let mut child = idle_child_view(&app, 1, child_sid);
-        child.note_terminal_size((80, 28));
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.note_terminal_size((80, 30));
-        agent.subagent_views.insert(child_sid.to_string(), child);
-    }
+    app.agents.get_mut(&id).unwrap().note_terminal_size((80, 30));
     let _ = app.handle_input(&Event::Resize(120, 50));
     let agent = app.agents.get_mut(&id).unwrap();
     assert_eq!(
@@ -1303,15 +1193,9 @@ fn resize_event_closes_tip_show_gate_until_redraw() {
     };
     assert!(!agent.show_ephemeral_tip(tip(), &mut counts));
     assert!(counts.is_empty(), "stale-size show must not burn a count");
-    let child = agent.subagent_views.get_mut(child_sid).unwrap();
-    assert!(!child.show_ephemeral_tip(tip(), &mut counts));
-    assert!(counts.is_empty(), "child stale-size show must not burn");
-    child.note_terminal_size((118, 46));
-    assert!(child.show_ephemeral_tip(tip(), &mut counts));
-    let agent = app.agents.get_mut(&id).unwrap();
     agent.note_terminal_size((120, 50));
     assert!(agent.show_ephemeral_tip(tip(), &mut counts));
-    assert_eq!(counts.get("t_seen"), Some(&2));
+    assert_eq!(counts.get("t_seen"), Some(&1));
 }
 #[test]
 fn apply_auth_meta_enables_billing_surface_for_personal_users() {
@@ -2115,69 +1999,6 @@ fn prompt_paging_scope_matches_agent_surface() {
             "{label} prompt paging scope mismatch: {outcome:?}",
         );
     }
-}
-#[test]
-fn prompt_page_actions_target_visible_fullscreen_child_scrollback() {
-    fn make_pageable(agent: &mut AgentView) {
-        for i in 0..16 {
-            agent
-                .scrollback
-                .push_block(crate::scrollback::block::RenderBlock::agent_message(
-                    format!("message {i}\ncontinued"),
-                ));
-        }
-        agent.scrollback.prepare_layout(40, 6);
-        agent.scrollback.goto_bottom();
-        assert!(
-            agent.scrollback.scroll_info().0 > 0,
-            "precondition: scrollback must have a page above"
-        );
-    }
-    let mut app = test_app_with_agent();
-    app.screen_mode = ScreenMode::Fullscreen;
-    let ActiveView::Agent(id) = app.active_view else {
-        panic!("test app must start on an agent");
-    };
-    let child_sid = "page-target-child";
-    let mut child = idle_child_view(&app, 1, child_sid);
-    child.set_active_pane(crate::app::agent_view::AgentPane::Prompt, true);
-    make_pageable(&mut child);
-    {
-        let parent = app.agents.get_mut(&id).unwrap();
-        make_pageable(parent);
-        parent.subagent_views.insert(child_sid.to_owned(), child);
-        parent.active_subagent = Some(child_sid.to_owned());
-    }
-    let offsets = |app: &AppView| {
-        let parent = &app.agents[&id];
-        (
-            parent.scrollback.scroll_info().0,
-            parent.subagent_views[child_sid].scrollback.scroll_info().0,
-        )
-    };
-    let before = offsets(&app);
-    let outcome = app.handle_input(&key_event(KeyCode::PageUp, KeyModifiers::NONE));
-    let InputOutcome::Action(action @ Action::PageUp) = outcome else {
-        panic!("child prompt PageUp must emit PageUp, got {outcome:?}");
-    };
-    let _ = super::super::dispatch::dispatch(action, &mut app);
-    let after_up = offsets(&app);
-    assert_eq!(after_up.0, before.0, "parent scrollback must not move");
-    assert!(
-        after_up.1 < before.1,
-        "PageUp must move the visible child scrollback"
-    );
-    let outcome = app.handle_input(&key_event(KeyCode::PageDown, KeyModifiers::NONE));
-    let InputOutcome::Action(action @ Action::PageDown) = outcome else {
-        panic!("child prompt PageDown must emit PageDown, got {outcome:?}");
-    };
-    let _ = super::super::dispatch::dispatch(action, &mut app);
-    let after_down = offsets(&app);
-    assert_eq!(after_down.0, before.0, "parent scrollback must stay put");
-    assert!(
-        after_down.1 > after_up.1,
-        "PageDown must move the visible child scrollback"
-    );
 }
 #[test]
 fn ctrl_d_from_scrollback_is_half_page_down_not_quit() {
@@ -4069,61 +3890,6 @@ fn scroll_event(kind: MouseEventKind, column: u16, row: u16) -> Event {
         row,
         modifiers: KeyModifiers::NONE,
     })
-}
-#[test]
-fn opening_workflow_transcript_cancels_pending_scroll_stream() {
-    use crate::input::mouse::{ScrollConfig, ScrollDirection};
-    let mut app = test_app_with_agent();
-    let ActiveView::Agent(id) = app.active_view else {
-        panic!("test app must start on an agent");
-    };
-    let child_sid = "workflow-child";
-    let child = idle_child_view(&app, 1, child_sid);
-    let agent = app.agents.get_mut(&id).unwrap();
-    agent.subagent_views.insert(child_sid.to_owned(), child);
-    agent
-        .workflow_runs
-        .push(crate::views::workflows::WorkflowRunSnapshot {
-            run_id: "wf_run".to_owned(),
-            name: "deep-research".to_owned(),
-            objective: "obj".to_owned(),
-            status: "active".to_owned(),
-            management_available: true,
-            builtin: false,
-            phases: vec![("Research".to_owned(), "active".to_owned())],
-            current_phase: Some("Research".to_owned()),
-            agents: vec![crate::views::workflows::WorkflowAgentRowView {
-                agent_id: child_sid.to_owned(),
-                label: "researcher".to_owned(),
-                phase: Some("Research".to_owned()),
-                model: None,
-                state: "running".to_owned(),
-                tokens_used: 0,
-                duration_ms: 0,
-            }],
-            agent_budget: None,
-            agents_used: 0,
-            agents_reserved: 0,
-            agents_remaining: None,
-            agent_usage_incomplete: false,
-            active_agents: 1,
-            elapsed_ms: 0,
-            received_at: std::time::Instant::now(),
-            pause_message: None,
-            result_summary: None,
-        });
-    agent.show_workflows = true;
-    agent.workflows_view.detail_run_id = Some("wf_run".to_owned());
-    let _ = app
-        .scroll_state
-        .on_scroll_event(ScrollDirection::Up, ScrollConfig::default());
-    app.last_scroll_pos = Some((30, 12));
-    assert!(app.scroll_state.has_active_stream());
-    let out = app.handle_input(&key_event(KeyCode::Enter, KeyModifiers::NONE));
-    assert!(matches!(out, InputOutcome::Changed));
-    assert_eq!(app.agents[&id].active_subagent.as_deref(), Some(child_sid));
-    assert!(!app.scroll_state.has_active_stream());
-    assert_eq!(app.last_scroll_pos, None);
 }
 #[test]
 fn scroll_event_stashes_origin_for_residual_flush() {

@@ -21,9 +21,9 @@ pub(super) fn handle_permission_request(
     perm: pi_acp_lib::AcpArgs<acp::RequestPermissionRequest>,
     app: &mut AppView,
 ) -> bool {
-    // 1. Look up the owning agent by session_id (root or subagent view).
-    let matched = match find_session_match(app, &perm.request.session_id) {
-        Some(m) => m,
+    // 1. Look up the owning agent by session_id.
+    let owning_agent_id = match find_session_match(app, &perm.request.session_id) {
+        Some(id) => id,
         None => {
             tracing::warn!(
                 session_id = %perm.request.session_id.0,
@@ -33,7 +33,6 @@ pub(super) fn handle_permission_request(
             return false;
         }
     };
-    let owning_agent_id = matched.agent_id();
     let is_active = is_matched_agent_active(app, owning_agent_id);
     let Some(agent) = app.agents.get_mut(&owning_agent_id) else {
         cancel_permission(perm);
@@ -150,10 +149,6 @@ fn enqueue_permission(
             selected: McpScope::Tool,
         });
 
-    // 2. Build subagent provenance label.
-    //    If session_id differs from the root session, look up subagent info.
-    let subagent_label = resolve_subagent_label(agent, &perm.request.session_id);
-
     // 3. Build title and description from the tool call.
     let (title, description, bash_command_raw) = build_permission_display(
         &perm.request,
@@ -212,7 +207,6 @@ fn enqueue_permission(
         description,
         args_expanded: false,
         desc_scroll: 0,
-        subagent_label,
         options_area_height: 0,
         options_scroll_offset: 0,
     });
@@ -224,38 +218,6 @@ fn enqueue_permission(
     agent.last_active_at = Some(std::time::Instant::now());
 
     true // needs redraw
-}
-
-/// Build a subagent provenance label for display.
-///
-/// Two tiers of provenance quality:
-///
-/// 1. **Tracked provenance** (`SubagentSpawned` was received): renders as
-///    `Subagent "Find endpoints" (explore):` with description and type
-///    from the tracked `SubagentInfo`. This is the trusted path.
-///
-/// 2. **Opaque non-root session**: the session_id does not match root and
-///    is not in the tracked subagent map. Renders as
-///    `Child session (untracked):` to signal reduced confidence.
-///
-/// Returns `None` for root session (no provenance needed).
-fn resolve_subagent_label(agent: &AgentView, session_id: &acp::SessionId) -> Option<String> {
-    let sid = session_id.0.as_ref();
-    // Check if this is the root session (no provenance needed).
-    if let Some(ref root_sid) = agent.session.session_id
-        && root_sid.0.as_ref() == sid
-    {
-        return None;
-    }
-    // Tier 1: tracked subagent with full metadata.
-    if let Some(info) = agent.subagent_sessions.get(sid) {
-        return Some(format!(
-            "Subagent \"{}\" ({}):",
-            info.description, info.subagent_type
-        ));
-    }
-    // Tier 2: non-root session with no tracked info.
-    Some("Child session (untracked):".to_string())
 }
 
 /// Build title, description lines, and optional raw command for a permission request.
@@ -469,9 +431,6 @@ fn cli_is_idle_for_recap(agent: &crate::app::agent_view::AgentView) -> bool {
         return false;
     }
     if agent.session.in_flight_prompt.is_some() || agent.has_held_user_queue() {
-        return false;
-    }
-    if agent.subagent_sessions.values().any(|s| !s.finished) {
         return false;
     }
     if scrollback_waiting_on_user_turn(&agent.scrollback) {

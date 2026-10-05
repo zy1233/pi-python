@@ -14,7 +14,6 @@ use crate::scrollback::state::ScrollbackState;
 use crate::scrollback::text_selection::ResolvedSelectionModel;
 use crate::views::prompt_widget::PromptWidget;
 use crate::views::queue_pane::QueuePane;
-use crate::views::subagent_catalog_pane::SubagentCatalogPane;
 use crate::views::todo_pane::TodoPane;
 use ratatui::layout::Rect;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -41,7 +40,6 @@ impl AgentView {
             self.last_seen_event_seq = None;
             self.last_applied_event_seq = None;
             self.last_applied_pi_event_seq = None;
-            self.deferred_subagent_finishes.clear();
             self.clear_minimal_btw_lifecycle();
         }
         self.session.session_id = Some(session_id);
@@ -74,7 +72,6 @@ impl AgentView {
     pub(crate) fn unbind_session_id(&mut self) {
         if self.session.session_id.take().is_some() {
             self.session_binding_epoch = self.session_binding_epoch.wrapping_add(1);
-            self.deferred_subagent_finishes.clear();
             self.clear_minimal_btw_lifecycle();
         }
     }
@@ -122,7 +119,6 @@ impl AgentView {
             prompt,
             tip_typing_dismissed: false,
             todo: TodoPane::new(),
-            catalog: SubagentCatalogPane::new(),
             queue: QueuePane::new(),
             shared_queue: Vec::new(),
             attached_as_viewer: false,
@@ -132,7 +128,6 @@ impl AgentView {
             last_applied_pi_event_seq: None,
             last_seen_event_id: None,
             last_seen_event_seq: None,
-            deferred_subagent_finishes: HashMap::new(),
             session_reload: None,
             unexpected_replay_drops: 0,
             late_replay_until: None,
@@ -168,16 +163,7 @@ impl AgentView {
             workspace_mode_cli_locked: false,
             credit_balance: None,
             auto_topup: None,
-            goal_state: None,
-            workflow_blocks: std::collections::HashMap::new(),
-            workflow_runs: Vec::new(),
-            workflow_run_revisions: std::collections::HashMap::new(),
-            cleared_workflow_runs: std::collections::HashSet::new(),
-            show_workflows: false,
-            workflows_view: crate::views::workflows::WorkflowsViewState::default(),
             pending_stop_hooks: None,
-            last_cleared_goal_id: None,
-            show_goal_detail: false,
             turn_start_ms: None,
             turn_start_ms_prompt: None,
             turn_started_at: None,
@@ -232,11 +218,7 @@ impl AgentView {
             hit_credits: Default::default(),
             hit_todo_close: Default::default(),
             hit_bg_close: Default::default(),
-            hit_subagent_close: Default::default(),
-            hit_catalog_close: Default::default(),
             hit_bg_status: Default::default(),
-            hit_goal_status: Default::default(),
-            hit_goal_close: Default::default(),
             hit_bg_button: Default::default(),
             last_bg_click: None,
             hit_queue_close: Default::default(),
@@ -341,11 +323,6 @@ impl AgentView {
             timeline_hover: None,
             timeline_hover_preview: None,
             session_agent_name: None,
-            subagent_sessions: HashMap::new(),
-            subagent_views: HashMap::new(),
-            active_subagent: None,
-            is_subagent_view: false,
-            hit_subagent_frame_close: Default::default(),
             sharing_enabled: false,
             scheduler_background_loops: None,
             billing_surface_visible: false,
@@ -393,10 +370,6 @@ impl AgentView {
         view.set_input_mode(mode);
         view
     }
-    /// Establish read-only child identity before a view is stored or opened.
-    pub(crate) fn mark_as_subagent_view(&mut self) {
-        self.is_subagent_view = true;
-    }
     /// Called at every turn-termination site; clears the wall anchor so a turn
     /// that reuses a prompt id cannot wall-max against a prior attempt.
     pub(crate) fn mark_turn_finished(&mut self, end: TurnEnd) {
@@ -419,7 +392,7 @@ impl AgentView {
             CancellationScope::Turn => self.session.cancel_turn(&mut self.scrollback),
             CancellationScope::Compaction => self.session.cancel_compact_command(),
         }
-        if origin == CancelOrigin::UserGesture && !self.is_subagent_view {
+        if origin == CancelOrigin::UserGesture {
             self.cancel_latency
                 .get_or_insert_with(|| CancelLatency::new(now, scope));
         }
@@ -489,28 +462,6 @@ impl AgentView {
         self.optimistic_queue_ids.clear();
         self.send_now_awaiting_confirm = None;
         self.send_now_painted_blocks.clear();
-        self.workflow_blocks.clear();
-        self.workflow_run_revisions.clear();
-        self.cleared_workflow_runs.clear();
-        self.workflow_runs.clear();
-    }
-    /// Swap every replay-rebuilt field for a fresh value and return the old
-    /// state. Reset together so stale revision gates cannot suppress the
-    /// replayed updates.
-    pub(crate) fn take_replay_rebuilt_state(&mut self) -> ReplayRebuiltState {
-        let fresh = self.scrollback.fresh_continuation();
-        ReplayRebuiltState {
-            scrollback: std::mem::replace(&mut self.scrollback, fresh),
-            tracker: std::mem::replace(
-                &mut self.session.tracker,
-                crate::acp::tracker::AcpUpdateTracker::new(),
-            ),
-            todo: std::mem::take(&mut self.todo),
-            workflow_blocks: std::mem::take(&mut self.workflow_blocks),
-            workflow_runs: std::mem::take(&mut self.workflow_runs),
-            workflow_run_revisions: std::mem::take(&mut self.workflow_run_revisions),
-            cleared_workflow_runs: std::mem::take(&mut self.cleared_workflow_runs),
-        }
     }
     /// Put a taken [`ReplayRebuiltState`] back: the counterpart of
     /// [`Self::take_replay_rebuilt_state`] for callers whose rebuild failed
@@ -524,10 +475,6 @@ impl AgentView {
         self.scrollback = taken.scrollback;
         self.session.tracker = taken.tracker;
         self.todo = taken.todo;
-        self.workflow_blocks = taken.workflow_blocks;
-        self.workflow_runs = taken.workflow_runs;
-        self.workflow_run_revisions = taken.workflow_run_revisions;
-        self.cleared_workflow_runs = taken.cleared_workflow_runs;
     }
     /// Record that an `isReplay` update applied while a reload window is open.
     /// No-op otherwise.
@@ -716,34 +663,6 @@ impl AgentView {
                 }
             }
             self.scrollback.append_entries_from(tail);
-            self.workflow_blocks.extend(stash.workflow_blocks);
-            {
-                let mut live_by_id: HashMap<String, _> = std::mem::take(&mut self.workflow_runs)
-                    .into_iter()
-                    .map(|run| (run.run_id.clone(), run))
-                    .collect();
-                let mut merged = Vec::with_capacity(stash.workflow_runs.len() + live_by_id.len());
-                for run in stash.workflow_runs {
-                    if let Some(live) = live_by_id.remove(&run.run_id) {
-                        merged.push(live);
-                    } else {
-                        merged.push(run);
-                    }
-                }
-                let mut live_only: Vec<_> = live_by_id.into_values().collect();
-                live_only.sort_by_key(|run| run.received_at);
-                merged.extend(live_only);
-                self.cleared_workflow_runs
-                    .extend(stash.cleared_workflow_runs);
-                merged.retain(|run| !self.cleared_workflow_runs.contains(&run.run_id));
-                self.workflow_runs = merged;
-            }
-            for (run_id, rev) in stash.workflow_run_revisions {
-                self.workflow_run_revisions
-                    .entry(run_id)
-                    .and_modify(|live| *live = (*live).max(rev))
-                    .or_insert(rev);
-            }
             if !reload.saw_todo_update {
                 self.todo = stash.todo;
             }
@@ -800,27 +719,12 @@ impl AgentView {
     /// gap during a running inference turn resolved into an explicit
     /// [`WaitingReason`] so the spinner names *what* we're waiting on.
     ///
-    /// The tracker already returns `Waiting(TaskOutput/TasksComplete/Sleep)`,
-    /// and `Waiting(Subagent)` for a foreground `task` call from the moment it's
-    /// issued. This fills in the remaining gap: if no tracker activity but a
-    /// foreground subagent is registered as running, it's still `Subagent`
-    /// (covers any window where the task tool call has cleared but the child is
-    /// live); otherwise the model itself (`Model`). Bash turns keep `None` so
-    /// the status line renders its own "Running…".
-    ///
-    /// For `Waiting(TaskOutput { task_ids, .. })`, also resolves a display
-    /// `subject` from live bg-task / subagent state (description preferred,
-    /// else command) so the spinner can read `{description}…`.
+    /// The tracker already returns `Waiting(TaskOutput/TasksComplete/Sleep)`
+    /// for the explicit wait tools. This fills in the remaining gap: with no
+    /// tracker activity during a running turn it is the model itself
+    /// (`Model`). Bash turns keep `None` so the status line renders its own
+    /// "Running…".
     pub(crate) fn resolve_turn_activity(&self) -> Option<crate::acp::tracker::TurnActivity> {
-        self.resolve_turn_activity_unenriched()
-            .map(|activity| self.enrich_waiting_activity(activity))
-    }
-    /// Wait detection without display enrichment — for predicates that need
-    /// the wait's identity and must not churn with view-resolved display
-    /// state; [`Self::resolve_turn_activity`] adds the display subject on top.
-    pub(crate) fn resolve_turn_activity_unenriched(
-        &self,
-    ) -> Option<crate::acp::tracker::TurnActivity> {
         use crate::acp::tracker::{TurnActivity, WaitingReason};
         use crate::app::agent::AgentState;
         if let Some(activity) = self.session.turn_activity() {
@@ -832,167 +736,7 @@ impl AgentView {
         if self.bash_turn {
             return None;
         }
-        let reason = if self.has_running_foreground_subagent() {
-            WaitingReason::subagent()
-        } else {
-            WaitingReason::Model
-        };
-        Some(TurnActivity::Waiting(reason))
-    }
-    /// Fill in a `TaskOutput` / `Subagent` wait's display subject.
-    fn enrich_waiting_activity(
-        &self,
-        activity: crate::acp::tracker::TurnActivity,
-    ) -> crate::acp::tracker::TurnActivity {
-        use crate::acp::tracker::{TurnActivity, WaitingReason};
-        match activity {
-            TurnActivity::Waiting(WaitingReason::TaskOutput {
-                task_ids, waits, ..
-            }) => {
-                let subject = self.subject_for_wait_tasks(&task_ids);
-                TurnActivity::Waiting(WaitingReason::TaskOutput {
-                    task_ids,
-                    subject,
-                    waits,
-                })
-            }
-            TurnActivity::Waiting(WaitingReason::Subagent { .. }) => {
-                TurnActivity::Waiting(WaitingReason::Subagent {
-                    display: self.subagent_wait_subject(),
-                })
-            }
-            other => other,
-        }
-    }
-    /// Best user-facing name for the tasks being waited on.
-    ///
-    /// Uses the first resolvable subject. Multi-id waits always reflect the
-    /// full `task_ids` length (`"first + N more"` with `N = task_ids.len()-1`)
-    /// so partial resolution still reads as multi-task. Unknown ids → `None`
-    /// (spinner falls back to the generic label).
-    fn subject_for_wait_tasks(&self, task_ids: &[String]) -> Option<String> {
-        use crate::acp::tracker::{MAX_ACTIVITY_SUBJECT_CHARS, clamp_activity_subject};
-        if task_ids.is_empty() {
-            return None;
-        }
-        let first = task_ids
-            .iter()
-            .find_map(|id| self.lookup_task_subject(id))?;
-        if task_ids.len() == 1 {
-            let first = clamp_activity_subject(&first);
-            return (!first.is_empty()).then_some(first);
-        }
-        let n = task_ids.len() - 1;
-        let suffix = format!(" + {n} more");
-        let budget = MAX_ACTIVITY_SUBJECT_CHARS
-            .saturating_sub(suffix.chars().count())
-            .max(8);
-        let base: String = first
-            .lines()
-            .map(str::trim)
-            .find(|l| !l.is_empty())
-            .unwrap_or(first.trim())
-            .chars()
-            .take(budget)
-            .collect();
-        if base.is_empty() {
-            None
-        } else {
-            Some(format!("{base}{suffix}"))
-        }
-    }
-    /// Resolve one task id to a display subject (description preferred, else
-    /// a *short* command / subagent description).
-    ///
-    /// Long bare commands are intentionally not used as subjects — the spinner
-    /// falls back to the generic `"Waiting on task output…"` instead of
-    /// stuffing a wall of shell into the status line. Descriptions are kept
-    /// but clamped by the caller via [`clamp_activity_subject`].
-    fn lookup_task_subject(&self, task_id: &str) -> Option<String> {
-        fn first_nonempty_line(s: &str) -> &str {
-            s.lines()
-                .map(str::trim)
-                .find(|line| !line.is_empty())
-                .unwrap_or(s)
-        }
-        if let Some(info) = self.subagent_sessions.get(task_id) {
-            let desc = info.description.trim();
-            if !desc.is_empty() {
-                return Some(first_nonempty_line(desc).to_string());
-            }
-        }
-        self.subagent_sessions
-            .values()
-            .find(|info| info.subagent_id.as_ref() == task_id)
-            .and_then(|info| {
-                let desc = info.description.trim();
-                if desc.is_empty() {
-                    None
-                } else {
-                    Some(first_nonempty_line(desc).to_string())
-                }
-            })
-    }
-    /// Whether a foreground subagent (`task`/`spawn_subagent`, not
-    /// `run_in_background`) is currently running. The parent turn is blocked on
-    /// it, so the spinner should read as a subagent wait.
-    fn has_running_foreground_subagent(&self) -> bool {
-        self.running_foreground_subagents().next().is_some()
-    }
-    /// The one predicate shared by the wait gate and its subject.
-    fn running_foreground_subagents(
-        &self,
-    ) -> impl Iterator<Item = &crate::app::subagent::SubagentInfo> {
-        self.subagent_sessions
-            .values()
-            .filter(|s| s.is_running() && !s.is_background && s.workflow_run_id.is_none())
-    }
-    /// Display subject for a foreground-subagent wait; `None` when no running
-    /// child has a description.
-    fn subagent_wait_subject(&self) -> Option<String> {
-        use crate::acp::tracker::{MAX_ACTIVITY_SUBJECT_CHARS, clamp_activity_subject};
-        let mut running: Vec<_> = self.running_foreground_subagents().collect();
-        running.sort_by_key(|info| info.started_at);
-        let description = running.iter().find_map(|info| {
-            let (_, desc) = crate::app::subagent::parse_tag_prefix(info.description.trim());
-            let desc = clamp_activity_subject(desc);
-            (!desc.is_empty()).then_some(desc)
-        })?;
-        if running.len() > 1 {
-            let n = running.len();
-            return Some(budgeted_subject(
-                &format!("{n} subagents: "),
-                &description,
-                &format!(" +{}", n - 1),
-            ));
-        }
-        let activity = running
-            .first()
-            .and_then(|info| info.activity_label.as_deref())
-            .map(|label| label.trim_end_matches('…').trim())
-            .filter(|label| !label.is_empty());
-        match activity {
-            Some(activity) => {
-                const PREFIX: &str = "Subagent (";
-                const SUFFIX_HEAD: &str = "): ";
-                const SUBAGENT_AFFIX_CHARS: usize = PREFIX.len() + SUFFIX_HEAD.len();
-                const ACTIVITY_FLOOR: usize = 8;
-                let desc_claim = description
-                    .chars()
-                    .count()
-                    .min(MAX_ACTIVITY_SUBJECT_CHARS - SUBAGENT_AFFIX_CHARS - ACTIVITY_FLOOR);
-                let activity: String = activity
-                    .chars()
-                    .take(MAX_ACTIVITY_SUBJECT_CHARS - SUBAGENT_AFFIX_CHARS - desc_claim)
-                    .collect();
-                Some(budgeted_subject(
-                    PREFIX,
-                    &description,
-                    &format!("{SUFFIX_HEAD}{activity}"),
-                ))
-            }
-            None => Some(budgeted_subject("Subagent: ", &description, "")),
-        }
+        Some(TurnActivity::Waiting(WaitingReason::Model))
     }
     /// Update context state with a full snapshot from live callers.
     ///
@@ -1068,7 +812,6 @@ impl AgentView {
             ActivePane::Todo => ActivePaneSnapshot::Todo,
             ActivePane::Queue => ActivePaneSnapshot::Queue,
             ActivePane::Prompt => ActivePaneSnapshot::Prompt,
-            ActivePane::Catalog => ActivePaneSnapshot::Catalog,
         };
         let outcome_snap = match outcome {
             InputOutcome::Changed | InputOutcome::ArmPending { .. } => OutcomeSnapshot::Changed,
@@ -1211,29 +954,6 @@ fn honest_turn_elapsed(params: TurnElapsedParams<'_>) -> std::time::Duration {
 /// postdates `now_ms` (skew) so a wall span can never go negative.
 fn wall_since_ms(start_ms: i64, now_ms: i64) -> std::time::Duration {
     std::time::Duration::from_millis(u64::try_from(now_ms.saturating_sub(start_ms)).unwrap_or(0))
-}
-const SUBJECT_DESC_FLOOR: usize = 8;
-/// `{prefix}{description}{suffix}` with the description cut to the leftover
-/// budget; a cut description ends with `…` inside that budget. Callers size
-/// `prefix` + `suffix` so the composed subject stays within
-/// `MAX_ACTIVITY_SUBJECT_CHARS` (debug-asserted on the result).
-fn budgeted_subject(prefix: &str, description: &str, suffix: &str) -> String {
-    use crate::acp::tracker::MAX_ACTIVITY_SUBJECT_CHARS;
-    let budget = MAX_ACTIVITY_SUBJECT_CHARS
-        .saturating_sub(prefix.chars().count() + suffix.chars().count())
-        .max(SUBJECT_DESC_FLOOR);
-    let description: String = if description.chars().count() <= budget {
-        description.to_string()
-    } else {
-        let head: String = description.chars().take(budget - 1).collect();
-        format!("{head}…")
-    };
-    let subject = format!("{prefix}{description}{suffix}");
-    debug_assert!(
-        subject.chars().count() <= MAX_ACTIVITY_SUBJECT_CHARS,
-        "over-budget subject {subject:?}"
-    );
-    subject
 }
 #[cfg(test)]
 mod honest_turn_elapsed_tests {
@@ -1420,298 +1140,6 @@ mod resolve_turn_activity_tests {
             view.resolve_turn_activity(),
             Some(TurnActivity::AutoCompacting)
         );
-    }
-    fn running_child(description: &str) -> crate::app::subagent::SubagentInfo {
-        let mut info = crate::app::agent_view::test_fixtures::running_subagent_info("child");
-        info.description = std::sync::Arc::from(description);
-        info
-    }
-    #[test]
-    fn subagent_wait_names_single_child() {
-        let mut view = running_view();
-        view.subagent_sessions
-            .insert("child-1".into(), running_child("scan src/"));
-        let activity = view.resolve_turn_activity().expect("waiting activity");
-        assert_eq!(activity.as_label(), "waiting_subagent");
-        let TurnActivity::Waiting(reason) = activity else {
-            panic!("expected waiting activity");
-        };
-        assert_eq!(reason.label(), "Subagent: scan src/…");
-    }
-    #[test]
-    fn subagent_wait_strips_description_tag_prefix() {
-        let mut view = running_view();
-        view.subagent_sessions
-            .insert("child-1".into(), running_child("[reviewer] check lints"));
-        let Some(TurnActivity::Waiting(reason)) = view.resolve_turn_activity() else {
-            panic!("expected waiting activity");
-        };
-        assert_eq!(reason.label(), "Subagent: check lints…");
-        let mut earlier = running_child("[explore] scan src/");
-        earlier.started_at = std::time::Instant::now() - std::time::Duration::from_secs(5);
-        view.subagent_sessions.insert("child-0".into(), earlier);
-        let Some(TurnActivity::Waiting(reason)) = view.resolve_turn_activity() else {
-            panic!("expected waiting activity");
-        };
-        assert_eq!(reason.label(), "2 subagents: scan src/ +1…");
-    }
-    #[test]
-    fn subagent_wait_composes_child_activity() {
-        let mut view = running_view();
-        let mut info = running_child("fix flaky test");
-        info.activity_label = Some("Writing subagent prompt…".into());
-        view.subagent_sessions.insert("child-1".into(), info);
-        let Some(TurnActivity::Waiting(reason)) = view.resolve_turn_activity() else {
-            panic!("expected waiting activity");
-        };
-        assert_eq!(reason.label(), "Subagent (fix flaky test): Writing subag…");
-    }
-    #[test]
-    fn subagent_wait_long_description_keeps_activity_visible() {
-        let mut view = running_view();
-        let mut info = running_child("abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH");
-        info.activity_label = Some("Running: cargo test".into());
-        view.subagent_sessions.insert("child-1".into(), info);
-        let Some(TurnActivity::Waiting(reason)) = view.resolve_turn_activity() else {
-            panic!("expected waiting activity");
-        };
-        assert_eq!(reason.label(), "Subagent (abcdefghijklmnopqr…): Running:…");
-    }
-    /// QA case: long description + long activity. The description gets first
-    /// claim on the budget (inner ellipsis when cut) and the activity keeps
-    /// at least its first 8 chars.
-    #[test]
-    fn subagent_wait_long_desc_and_activity_gives_description_priority() {
-        let mut view = running_view();
-        let mut info = running_child("summarize scratchpad findings into notes");
-        info.activity_label = Some("Waiting for response…".into());
-        view.subagent_sessions.insert("child-1".into(), info);
-        let Some(TurnActivity::Waiting(reason)) = view.resolve_turn_activity() else {
-            panic!("expected waiting activity");
-        };
-        let label = reason.label();
-        assert_eq!(label, "Subagent (summarize scratchp…): Waiting…");
-        assert!(label.chars().count() <= 41, "label too long: {label:?}");
-    }
-    #[test]
-    fn subagent_wait_multi_child_truncated_description_gets_inner_ellipsis() {
-        let mut view = running_view();
-        let mut earlier = running_child("audit every dashboard panel for drift");
-        earlier.started_at = std::time::Instant::now() - std::time::Duration::from_secs(5);
-        view.subagent_sessions.insert("child-1".into(), earlier);
-        view.subagent_sessions
-            .insert("child-2".into(), running_child("fix tests"));
-        let Some(TurnActivity::Waiting(reason)) = view.resolve_turn_activity() else {
-            panic!("expected waiting activity");
-        };
-        assert_eq!(reason.label(), "2 subagents: audit every dashboard p… +1…");
-    }
-    #[test]
-    fn subagent_wait_counts_parallel_children() {
-        let mut view = running_view();
-        let mut earlier = running_child("scan src/");
-        earlier.started_at = std::time::Instant::now() - std::time::Duration::from_secs(5);
-        view.subagent_sessions.insert("child-1".into(), earlier);
-        view.subagent_sessions
-            .insert("child-2".into(), running_child("fix tests"));
-        let Some(TurnActivity::Waiting(reason)) = view.resolve_turn_activity() else {
-            panic!("expected waiting activity");
-        };
-        assert_eq!(reason.label(), "2 subagents: scan src/ +1…");
-    }
-    #[test]
-    fn unenriched_wait_matches_variant_without_subject() {
-        use crate::acp::tracker::WaitingReason;
-        let mut view = running_view();
-        view.subagent_sessions
-            .insert("child-1".into(), running_child("scan src/"));
-        assert_eq!(
-            view.resolve_turn_activity_unenriched(),
-            Some(TurnActivity::Waiting(WaitingReason::subagent()))
-        );
-        assert!(view.is_waiting_on_subagent());
-        let Some(TurnActivity::Waiting(WaitingReason::Subagent { display })) =
-            view.resolve_turn_activity()
-        else {
-            panic!("expected subagent wait");
-        };
-        assert_eq!(display.as_deref(), Some("Subagent: scan src/"));
-    }
-    #[test]
-    fn subagent_wait_labels_bounded_for_adversarial_inputs() {
-        use crate::acp::tracker::{MAX_ACTIVITY_SUBJECT_CHARS, WaitingReason};
-        let long_desc = "x".repeat(500);
-        let descriptions = [
-            "",
-            "d",
-            long_desc.as_str(),
-            "line one\nline two\nline three",
-            "[tag]",
-        ];
-        let activities = [
-            None,
-            Some("Run".to_string()),
-            Some("a".repeat(40)),
-            Some("b".repeat(50)),
-        ];
-        let mut cases = 0;
-        for n in [1usize, 3] {
-            for desc in descriptions {
-                for activity in &activities {
-                    cases += 1;
-                    let mut view = running_view();
-                    for i in 0..n {
-                        let mut info = running_child(desc);
-                        info.started_at = std::time::Instant::now()
-                            - std::time::Duration::from_secs((n - i) as u64);
-                        if i == 0 {
-                            info.activity_label = activity.clone();
-                        }
-                        view.subagent_sessions.insert(format!("child-{i}"), info);
-                    }
-                    let Some(TurnActivity::Waiting(reason)) = view.resolve_turn_activity() else {
-                        panic!("expected waiting activity");
-                    };
-                    if let WaitingReason::Subagent {
-                        display: Some(display),
-                    } = &reason
-                    {
-                        assert!(
-                            display.chars().count() <= MAX_ACTIVITY_SUBJECT_CHARS,
-                            "unbounded display {display:?} (desc {} chars, activity {activity:?}, n {n})",
-                            desc.len(),
-                        );
-                    }
-                    let label = reason.label();
-                    assert!(
-                        label.chars().count() <= MAX_ACTIVITY_SUBJECT_CHARS + 1,
-                        "label too long: {label:?}"
-                    );
-                    if n == 1
-                        && let Some(activity) = activity
-                        && matches!(&reason, WaitingReason::Subagent { display: Some(_) })
-                    {
-                        let head: String = activity.chars().take(8).collect();
-                        assert!(
-                            label.contains(&head),
-                            "activity head {head:?} missing from {label:?}"
-                        );
-                    }
-                }
-            }
-        }
-        assert_eq!(cases, 40);
-    }
-    #[test]
-    fn subagent_wait_falls_back_without_description() {
-        let mut view = running_view();
-        view.subagent_sessions
-            .insert("child-1".into(), running_child("  "));
-        let Some(TurnActivity::Waiting(reason)) = view.resolve_turn_activity() else {
-            panic!("expected waiting activity");
-        };
-        assert_eq!(reason.label(), "Waiting on subagent…");
-    }
-    #[test]
-    fn tracker_subagent_wait_is_enriched() {
-        use crate::acp::meta::NotificationMeta;
-        use agent_client_protocol as acp;
-        use std::sync::Arc;
-        let mut view = running_view();
-        view.session.handle_update(
-            acp::SessionUpdate::ToolCall(
-                acp::ToolCall::new(acp::ToolCallId::new(Arc::from("task-tc-1")), "task")
-                    .kind(acp::ToolKind::Other)
-                    .status(acp::ToolCallStatus::Pending)
-                    .content(vec![])
-                    .locations(vec![]),
-            ),
-            &NotificationMeta::default(),
-            &mut view.scrollback,
-        );
-        view.subagent_sessions
-            .insert("child-1".into(), running_child("scan src/"));
-        let Some(TurnActivity::Waiting(reason)) = view.resolve_turn_activity() else {
-            panic!("expected waiting activity");
-        };
-        assert_eq!(reason.label(), "Subagent: scan src/…");
-    }
-    /// get_task_output often passes subagent_id, not the child_session_id map key.
-    #[test]
-    fn task_output_wait_resolves_subagent_by_subagent_id() {
-        use crate::acp::meta::NotificationMeta;
-        use crate::app::subagent::SubagentInfo;
-        use agent_client_protocol as acp;
-        use std::sync::Arc;
-        use std::time::Instant;
-        let mut view = running_view();
-        let now = Instant::now();
-        view.subagent_sessions.insert(
-            "child-session-xyz".into(),
-            SubagentInfo {
-                subagent_id: Arc::from("sub-id-42"),
-                child_session_id: Arc::from("child-session-xyz"),
-                description: Arc::from("explore the auth module"),
-                subagent_type: Arc::from("explore"),
-                persona: None,
-                role: None,
-                model: None,
-                context_source: None,
-                resumed_from: None,
-                capability_mode: None,
-                workflow_run_id: None,
-                context_normalized: false,
-                parent_prompt_id: None,
-                started_at: now,
-                last_progress_at: now,
-                finished: false,
-                status: None,
-                error: None,
-                duration_ms: None,
-                tool_calls: None,
-                turns: None,
-                turn_count: None,
-                tool_call_count: None,
-                tokens_used: None,
-                context_window_tokens: None,
-                context_usage_pct: None,
-                tools_used: vec![],
-                error_count: None,
-                activity_label: None,
-                is_background: true,
-                pending_kill: false,
-                kill_requested_at: None,
-                scrollback_entry_id: None,
-                prompt: None,
-                child_cwd: None,
-                worktree_path: None,
-                transcript: Default::default(),
-            },
-        );
-        let meta = NotificationMeta::default();
-        view.session.handle_update(
-            acp::SessionUpdate::ToolCall(
-                acp::ToolCall::new(
-                    acp::ToolCallId::new(Arc::from("wait-sub")),
-                    "get_command_or_subagent_output",
-                )
-                .kind(acp::ToolKind::Other)
-                .status(acp::ToolCallStatus::Pending)
-                .content(vec![])
-                .raw_input(Some(serde_json::json!({
-                    "task_ids": ["sub-id-42"],
-                    "timeout_ms": 10_000,
-                })))
-                .locations(vec![]),
-            ),
-            &meta,
-            &mut view.scrollback,
-        );
-        let activity = view.resolve_turn_activity().expect("activity");
-        let TurnActivity::Waiting(reason) = activity else {
-            panic!("expected waiting: {activity:?}");
-        };
-        assert_eq!(reason.label(), "explore the auth module…");
     }
 }
 #[cfg(test)]

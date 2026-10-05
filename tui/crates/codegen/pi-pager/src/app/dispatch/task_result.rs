@@ -51,7 +51,7 @@ use super::transcript::{
 };
 use crate::app::actions::{
     ClipboardPasteCompletion, ClipboardPasteContext, ClipboardPasteFailure, ClipboardPasteTarget,
-    DoctorFixTarget, Effect, ProbedAttachment, SubagentKillOutcome,
+    DoctorFixTarget, Effect, ProbedAttachment, 
     TaskResult,
 };
 use crate::app::agent::AgentId;
@@ -465,22 +465,6 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             }
             None => vec![],
         },
-        TaskResult::KillSubagentComplete {
-            session_id,
-            subagent_id,
-            outcome,
-        } => {
-            if let SubagentKillOutcome::NothingLive { status } = outcome {
-                let status = status.as_deref().unwrap_or("cancelled");
-                crate::app::acp_handler::finalize_killed_subagent(
-                    app,
-                    &session_id,
-                    &subagent_id,
-                    status,
-                );
-            }
-            vec![]
-        }
         TaskResult::CompactComplete { agent_id, result } => {
             handle_compact_complete(app, agent_id, result)
         }
@@ -879,17 +863,6 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             tracing::warn!(error = %error, "bundle status fetch failed");
             vec![]
         }
-        TaskResult::CatalogEntryFailed { error } => {
-            tracing::warn!(error = %error, "catalog entry fetch failed");
-            if let ActiveView::Agent(id) = app.active_view
-                && let Some(agent) = app.agents.get_mut(&id)
-            {
-                agent
-                    .scrollback
-                    .push_block(RenderBlock::system(format!("Couldn't load entry: {error}")));
-            }
-            vec![]
-        }
         TaskResult::RecapRequested {
             session_id,
             auto,
@@ -944,7 +917,6 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             {
                 agent.session.available_commands = commands;
                 agent.session.available_commands_generation += 1;
-                super::super::acp_handler::refresh_workflow_run_capabilities(agent);
             }
             vec![]
         }

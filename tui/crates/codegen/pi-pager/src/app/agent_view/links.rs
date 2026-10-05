@@ -923,24 +923,6 @@ mod link_click_tests {
             "click where stop used to be must not cancel the turn under a dropdown"
         );
     }
-    #[test]
-    fn subagent_view_suppresses_background_button() {
-        let reg = ActionRegistry::defaults();
-        let mut parent = make_agent();
-        let mut child = make_agent();
-        super::test_fixtures::add_running_execute(&mut child);
-        parent
-            .subagent_views
-            .insert("child-sid".into(), Box::new(child));
-        assert!(!parent.subagent_views["child-sid"].is_subagent_view);
-        parent.open_subagent_fullscreen("child-sid".into());
-        let child = parent.subagent_views.get_mut("child-sid").unwrap();
-        draw_banner_frame(child, &reg, &[], 0);
-        assert!(
-            child.hit_bg_button.rect.is_none(),
-            "read-only child view must not advertise a background button"
-        );
-    }
     /// Header twin: the top-header upgrade CTA rect must drop under an open
     /// dropdown too — the only suppression consumer previously without a
     /// dropdown pin (its occluder-class twin lives below).
@@ -1029,38 +1011,6 @@ mod link_click_tests {
             matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
             "overlay-free [stop] click must dispatch again"
         );
-    }
-    /// Subagent fullscreen takeover: the parent's banner/header chrome is not
-    /// painted, so the takeover draw must drop the armed [hide]/[label]/header
-    /// CTA rects — a stale rect would fake post-draw impressions and clicks.
-    #[test]
-    fn subagent_fullscreen_clears_announcement_and_header_cta_rects() {
-        let reg = ActionRegistry::defaults();
-        let mut agent = make_agent();
-        agent.last_terminal_size = (120, 30);
-        let promo = [pi_announcements::RemoteAnnouncement {
-            id: Some("promo-1".into()),
-            severity: Some("promo".into()),
-            message: Some("ZZPROMO".into()),
-            cta: Some(pi_announcements::AnnouncementCta {
-                label: Some("Go".into()),
-                url: Some("https://example.com/promo".into()),
-                caption: None,
-            }),
-            ..Default::default()
-        }];
-        let _ = draw_frame_sized(&mut agent, &reg, &promo, 1, 120);
-        assert!(
-            agent.hit_announcement_cta.rect.is_some(),
-            "banner CTA armed"
-        );
-        assert!(agent.hit_announcement_hide.rect.is_some(), "[hide] armed");
-        assert!(agent.hit_upgrade_cta.rect.is_some(), "header CTA armed");
-        agent.active_subagent = Some("child-sid".into());
-        let _ = draw_frame_sized(&mut agent, &reg, &promo, 1, 120);
-        assert!(agent.hit_announcement_cta.rect.is_none());
-        assert!(agent.hit_announcement_hide.rect.is_none());
-        assert!(agent.hit_upgrade_cta.rect.is_none());
     }
     /// In-session header upgrade CTA: a promo owning the slot arms
     /// `hit_upgrade_cta` (clickable → `AnnouncementsOpenCta(Header)`), and the
@@ -1927,57 +1877,6 @@ mod link_click_tests {
         }
     }
     #[test]
-    fn enter_on_subagent_group_header_falls_through_to_group_toggle() {
-        let mut agent = make_agent();
-        let mut appearance = crate::appearance::AppearanceConfig::default();
-        appearance.scrollback.display.group_max_visible = 3;
-        agent.scrollback.set_appearance(appearance);
-        agent
-            .scrollback
-            .push_block(crate::scrollback::block::RenderBlock::Subagent(
-                crate::scrollback::blocks::SubagentBlock::started(
-                    "child task",
-                    "child-sid",
-                    "general-purpose",
-                    None,
-                    None,
-                    None,
-                    false,
-                ),
-            ));
-        for i in 0..5 {
-            agent
-                .scrollback
-                .push_block(crate::scrollback::block::RenderBlock::tool_call(
-                    format!("Tool{i}"),
-                    "info",
-                    true,
-                ));
-        }
-        for i in 0..6 {
-            if let Some(e) = agent.scrollback.entry_mut(i) {
-                e.display_mode = crate::scrollback::types::DisplayMode::Collapsed;
-            }
-        }
-        agent
-            .subagent_views
-            .insert("child-sid".into(), Box::new(make_agent()));
-        agent.scrollback.prepare_layout(80, 40);
-        agent.scrollback.set_selected(Some(0));
-        assert!(agent.scrollback.is_selected_group_header());
-        let registry = ActionRegistry::defaults();
-        let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
-        let outcome = agent.handle_scrollback_key(&enter, &registry);
-        assert!(
-            agent.active_subagent.is_none(),
-            "Enter on a group header must not open the hidden entry's subagent fullscreen"
-        );
-        assert!(
-            matches!(outcome, InputOutcome::Action(Action::OpenBlockViewer)),
-            "Enter must fall through to OpenBlockViewer (group toggle), got {outcome:?}"
-        );
-    }
-    #[test]
     fn single_click_on_plan_tool_group_header_does_not_open_plan_preview() {
         use crate::scrollback::blocks::tool::{OtherToolCallBlock, ToolCallBlock};
         let mut agent = make_agent();
@@ -2759,113 +2658,6 @@ mod link_click_tests {
         assert!(
             !agent.is_bare_scrollback(),
             "an open scrollback search is a layered sub-state"
-        );
-    }
-    #[test]
-    fn subagent_esc_cancels_open_search_before_closing_view() {
-        let reg = ActionRegistry::defaults();
-        let mut parent = make_agent();
-        let (mut child, _) = make_search_agent();
-        press(&mut child, &reg, KeyCode::Char('/'));
-        type_query(&mut child, &reg, "foo");
-        assert!(child.scrollback_search.is_some());
-        let child_sid = "child-sid".to_string();
-        parent
-            .subagent_views
-            .insert(child_sid.clone(), Box::new(child));
-        parent.active_subagent = Some(child_sid.clone());
-        let esc = Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-        parent.handle_input(&esc, &reg);
-        assert!(
-            parent.active_subagent.is_some(),
-            "view stays open while the child's search is cancelled"
-        );
-        assert!(
-            parent.subagent_views[&child_sid]
-                .scrollback_search
-                .is_none(),
-            "the forwarded Esc cancels the child's search"
-        );
-        parent.handle_input(&esc, &reg);
-        assert!(
-            parent.active_subagent.is_none(),
-            "Esc closes the subagent view once no search is open"
-        );
-    }
-    #[test]
-    fn subagent_q_while_searching_types_into_query_not_close() {
-        let reg = ActionRegistry::defaults();
-        let mut parent = make_agent();
-        let (mut child, _) = make_search_agent();
-        press(&mut child, &reg, KeyCode::Char('/'));
-        type_query(&mut child, &reg, "fo");
-        assert!(child.scrollback_search.as_ref().unwrap().is_composing());
-        let child_sid = "child-sid".to_string();
-        parent
-            .subagent_views
-            .insert(child_sid.clone(), Box::new(child));
-        parent.active_subagent = Some(child_sid.clone());
-        let q = Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
-        parent.handle_input(&q, &reg);
-        assert!(
-            parent.active_subagent.is_some(),
-            "view stays open while a search is composing"
-        );
-        assert_eq!(
-            parent.subagent_views[&child_sid]
-                .scrollback_search
-                .as_ref()
-                .unwrap()
-                .query(),
-            "foq",
-            "q is typed into the query, not treated as a close key"
-        );
-    }
-    #[test]
-    fn subagent_scrollback_search_delivers_results_via_child_poll() {
-        let reg = ActionRegistry::defaults();
-        let mut parent = make_agent();
-        let (mut child, _) = make_search_agent();
-        press(&mut child, &reg, KeyCode::Char('/'));
-        assert!(child.scrollback_search.is_some());
-        let child_sid = "child-sid".to_string();
-        parent
-            .subagent_views
-            .insert(child_sid.clone(), Box::new(child));
-        parent.active_subagent = Some(child_sid.clone());
-        for c in "foo".chars() {
-            parent.handle_input(
-                &Event::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)),
-                &reg,
-            );
-            let mut delivered = false;
-            for _ in 0..1000 {
-                if parent
-                    .subagent_views
-                    .get_mut(&child_sid)
-                    .unwrap()
-                    .poll_scrollback_search()
-                {
-                    delivered = true;
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(1));
-            }
-            assert!(delivered, "child search daemon did not publish a result");
-        }
-        let search = parent.subagent_views[&child_sid]
-            .scrollback_search
-            .as_ref()
-            .unwrap();
-        assert_eq!(
-            search.match_count(),
-            2,
-            "child search finds both 'foo' entries"
-        );
-        assert_eq!(
-            search.current_index(),
-            Some(0),
-            "child search parks the cursor on the first match"
         );
     }
     #[test]

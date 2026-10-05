@@ -670,7 +670,6 @@ fn cta_impressions_respect_slot_gate_and_paint() {
     assert!(app.announcement_cta_impressions_logged.is_empty());
     {
         let agent = app.agents.get_mut(&id).unwrap();
-        agent.active_subagent = Some("child-sid".into());
         agent.hit_announcement_cta.clear();
         agent.hit_upgrade_cta.clear();
     }
@@ -1629,23 +1628,6 @@ fn chat_mode_allows_conversation_entry_even_if_local_path() {
         agent.rename_kind(),
         pi_shell::session::unified_list::SessionKind::Chat
     );
-}
-#[test]
-fn view_catalog_entry_emits_fetch_effect() {
-    let mut app = test_app_with_agent();
-    let effects = dispatch(
-        Action::ViewCatalogEntry {
-            kind: "persona".into(),
-            name: "researcher".into(),
-        },
-        &mut app,
-    );
-    assert_eq!(effects.len(), 1);
-    assert!(matches!(
-        &effects[0],
-        Effect::FetchCatalogEntry { kind, name }
-        if kind == "persona" && name == "researcher"
-    ));
 }
 #[test]
 fn translate_local_submit_skipped_returns_changed_with_no_action() {

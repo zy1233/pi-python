@@ -1274,54 +1274,6 @@
         );
     }
 
-    #[test]
-    fn child_session_completions_never_spam_root_status() {
-        // A background subagent's own task traffic routes to the CHILD view;
-        // it never counts toward the root's watchers, so its completions must
-        // not push root status lines.
-        let mut app = make_app_with_parent_and_child("sess-child-quiet", "child-1");
-        let _ = handle_ext_notification(
-            &make_task_backgrounded_notif("child-1", "tc-c1", "task-c1", "sleep 97"),
-            &mut app,
-        );
-        let _ = handle_ext_notification(
-            &make_task_backgrounded_notif("child-1", "tc-c2", "task-c2", "sleep 98"),
-            &mut app,
-        );
-        assert!(app.agents[&AgentId(0)].session.state.is_idle());
-
-        let _ = handle_ext_notification(
-            &make_task_completed_notif("child-1", "task-c1", "sleep 97", Some(0)),
-            &mut app,
-        );
-        let _ = handle_ext_notification(
-            &make_task_completed_notif("child-1", "task-c2", "sleep 98", Some(0)),
-            &mut app,
-        );
-
-        let agent = app.agents.get(&AgentId(0)).unwrap();
-        assert!(
-            work_status_lines(&agent.scrollback).is_empty(),
-            "child-session completions must not spawn root status lines"
-        );
-        let child = agent.subagent_views.get("child-1").unwrap();
-        assert!(
-            work_status_lines(&child.scrollback).is_empty(),
-            "and none in the child view either (chips only)"
-        );
-
-        // Nested analogue: a SubagentFinished carrying a CHILD session id
-        // routes to the child handler, which has no status site at all.
-        let _ = handle(
-            make_ext_session_notification("child-1", test_subagent_finished("grandchild-1")),
-            &mut app,
-        );
-        assert!(
-            work_status_lines(&app.agents[&AgentId(0)].scrollback).is_empty(),
-            "nested subagent traffic must not spawn root status lines"
-        );
-    }
-
     /// The core reattach-finalization: a `TurnCompleted` seen during a load's
     /// replay window records its prompt id (the running turn isn't adopted yet),
     /// and the post-replay `SessionLoaded` adoption then SKIPS that same id — so

@@ -32,7 +32,6 @@ impl AgentView {
     /// (like the other global chords); overlays and dropdowns still own input.
     pub(crate) fn external_prompt_editor_access(&self) -> ExternalPromptEditorAccess {
         let owned_elsewhere = !matches!(self.prompt_mode, super::PromptMode::Normal)
-            || self.active_subagent.is_some()
             || self.active_modal.is_some()
             || self.scrollback_search.is_some()
             || self.line_viewer.is_some()
@@ -40,7 +39,6 @@ impl AgentView {
             || self.video_viewer.is_some()
             || self.block_viewer.is_some()
             || self.gboom.is_some()
-            || self.show_goal_detail
             || self.btw_focused
             || self.blocking_card().is_some()
             || self.plan_approval_view.is_some()
@@ -60,10 +58,9 @@ impl AgentView {
         }
     }
     /// True when the scrollback pane is focused with nothing layered on top —
-    /// no viewer, modal, btw, or open search. This is the precise state in
-    /// which a bare `q`/`Esc` should close the enclosing surface (the subagent
-    /// fullscreen view). The close-key guards share this one predicate so a
-    /// future sub-state addition can't make the mirrored checks drift apart.
+    /// no viewer, modal, btw, or open search. Shared by the Esc-policy
+    /// predicates so a future sub-state addition can't make the mirrored
+    /// checks drift apart.
     pub(crate) fn is_bare_scrollback(&self) -> bool {
         self.active_pane == AgentPane::Scrollback
             && self.block_viewer.is_none()
@@ -104,20 +101,13 @@ impl AgentView {
             || self.image_viewer.is_some()
             || self.block_viewer.is_some()
     }
-    pub(crate) fn workflow_runs_newest_first(
-        &self,
-    ) -> Vec<&crate::views::workflows::WorkflowRunSnapshot> {
-        self.workflow_runs.iter().rev().collect()
-    }
     /// No per-pane `Esc` consumer is pending (text selection, link highlight,
-    /// goal detail, rewind overlay, open `/btw` panel, or open `/jump` picker),
+    /// rewind overlay, open `/btw` panel, or open `/jump` picker),
     /// so `Esc` is free for the turn-cancel policy rather than clearing or
     /// dismissing one of them first. A future Esc consumer is added once here.
     pub(crate) fn no_esc_consumer_pending(&self) -> bool {
         self.persistent_text_selection.is_none()
             && self.highlighted_link_idx.is_none()
-            && !self.show_goal_detail
-            && !self.show_workflows
             && self.rewind_state.is_none()
             && self.btw_state.is_none()
             && self.jump_state.is_none()
@@ -139,8 +129,8 @@ impl AgentView {
     /// the same predicates input routing uses, so the hint cannot claim Esc
     /// while a higher-priority consumer (dropdown, search, viewer/modal,
     /// agents/persona modal, needs-input overlay, queued-prompt or inline
-    /// edit, subagent-view close, selection/link/goal/rewind/btw/jump,
-    /// latent composer mode) would steal the press. Conservative on purpose:
+    /// edit, selection/link/rewind/btw/jump, latent composer mode) would
+    /// steal the press. Conservative on purpose:
     /// when false, the registry `Ctrl+C` is shown, which always cancels.
     /// `esc_owned_before_agent` is the app-level ownership snapshot
     /// (`AppView::esc_owned_before_agent`: voice dictation listening or
@@ -168,7 +158,6 @@ impl AgentView {
         pane_clear
             && matches!(self.prompt_mode, crate::app::queue_edit::PromptMode::Normal)
             && self.inline_edit.is_none()
-            && !self.is_subagent_view
             && self.no_esc_consumer_pending()
             && self.no_input_overlay_pending()
     }
@@ -304,48 +293,6 @@ impl AgentView {
                 _ => self.clear_stuck_scrollback_drag(),
             }
         }
-        if let Some(ref child_sid) = self.active_subagent.clone() {
-            if let Event::Key(key) = ev
-                && key.kind != KeyEventKind::Release
-                && key!('q', CONTROL).matches(key)
-            {
-                return InputOutcome::Unchanged;
-            }
-            if let Event::Mouse(mouse) = ev
-                && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
-                && self
-                    .hit_subagent_frame_close
-                    .contains(mouse.column, mouse.row)
-            {
-                self.close_subagent_fullscreen();
-                return InputOutcome::Changed;
-            }
-            if let Event::Mouse(mouse) = ev
-                && matches!(mouse.kind, MouseEventKind::Moved)
-                && self
-                    .hit_subagent_frame_close
-                    .update_hover(mouse.column, mouse.row)
-            {
-                return InputOutcome::Changed;
-            }
-            let child_in_scrollback = self
-                .subagent_views
-                .get(child_sid)
-                .is_some_and(|c| c.is_bare_scrollback());
-            if child_in_scrollback
-                && let Event::Key(key) = ev
-                && key.kind != KeyEventKind::Release
-                && (key!('q').matches(key) || key.code == KeyCode::Esc)
-            {
-                self.close_subagent_fullscreen();
-                return InputOutcome::Changed;
-            }
-            if let Some(child_view) = self.subagent_views.get_mut(child_sid) {
-                child_view.mark_as_subagent_view();
-                return child_view.handle_input_inner(ev, registry, prompt_paging);
-            }
-            return InputOutcome::Unchanged;
-        }
         if self.dismiss_jump_picker_if_suppressed()
             && let Event::Key(key) = ev
             && key.kind != KeyEventKind::Release
@@ -429,40 +376,6 @@ impl AgentView {
                 Event::Mouse(mouse) => self.handle_gboom_mouse(mouse),
                 _ => InputOutcome::Changed,
             };
-        }
-        if let Some(outcome) = self.handle_workflows_overlay_input(ev) {
-            return outcome;
-        }
-        if self.show_goal_detail && self.goal_state.is_some() {
-            if let Event::Key(key) = ev
-                && key.kind != KeyEventKind::Release
-            {
-                match key.code {
-                    KeyCode::Esc | KeyCode::Char('g') | KeyCode::Char('q') => {
-                        self.show_goal_detail = false;
-                        return InputOutcome::Changed;
-                    }
-                    _ => {
-                        return InputOutcome::Changed;
-                    }
-                }
-            }
-            if let Event::Mouse(mouse) = ev
-                && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
-                && self.hit_goal_close.contains(mouse.column, mouse.row)
-            {
-                self.show_goal_detail = false;
-                return InputOutcome::Changed;
-            }
-            if let Event::Mouse(mouse) = ev
-                && matches!(mouse.kind, MouseEventKind::Moved)
-                && self.hit_goal_close.update_hover(mouse.column, mouse.row)
-            {
-                return InputOutcome::Changed;
-            }
-            if matches!(ev, Event::Mouse(_) | Event::Paste(_)) {
-                return InputOutcome::Changed;
-            }
         }
         if self.btw_state.is_some()
             && let Event::Key(key) = ev
@@ -903,7 +816,6 @@ impl AgentView {
                 AgentPane::Scrollback => self.handle_scrollback_key(key, registry),
                 AgentPane::Todo => self.handle_todo_key(key, registry),
                 AgentPane::Queue => self.handle_queue_key(key, registry),
-                AgentPane::Catalog => self.handle_catalog_key(key, registry),
             },
             Event::Paste(text) => {
                 if self.active_pane == AgentPane::Scrollback
@@ -930,7 +842,6 @@ impl AgentView {
                 } else {
                     let consumed = match self.active_pane {
                         AgentPane::Todo => self.todo.handle_paste(text),
-                        AgentPane::Catalog => self.catalog.handle_paste(text),
                         AgentPane::Queue => self.queue.handle_paste(text),
                         AgentPane::Prompt | AgentPane::Scrollback => false,
                     };
@@ -1015,19 +926,6 @@ impl AgentView {
                 window: crate::views::modal_window::ModalWindowState::new(),
             });
             return InputOutcome::Changed;
-        }
-        if let Event::Key(key) = ev
-            && key.kind != KeyEventKind::Release
-            && key.code == KeyCode::Char('g')
-            && key.modifiers.is_empty()
-            && (self.goal_state.is_some() || !self.workflow_runs.is_empty())
-        {
-            let has_active_workflow = self.workflow_runs.iter().any(|run| !run.is_terminal());
-            return InputOutcome::Action(if self.goal_state.is_some() && !has_active_workflow {
-                Action::ToggleGoalDetail
-            } else {
-                Action::ToggleWorkflows
-            });
         }
         if let Event::Key(key) = ev
             && key.kind != KeyEventKind::Release
@@ -1211,9 +1109,6 @@ impl AgentView {
             if target != AgentPane::Todo {
                 self.todo.overlay.focused = false;
             }
-            if target != AgentPane::Catalog {
-                self.catalog.overlay.focused = false;
-            }
             if target != AgentPane::Queue {
                 self.queue.overlay.focused = false;
             }
@@ -1225,9 +1120,6 @@ impl AgentView {
         }
         if target != AgentPane::Todo {
             self.todo.overlay.focused = false;
-        }
-        if target != AgentPane::Catalog {
-            self.catalog.overlay.focused = false;
         }
         if target != AgentPane::Queue {
             self.queue.overlay.focused = false;
@@ -1242,22 +1134,6 @@ impl AgentView {
             && self.active_pane == AgentPane::Prompt
         {
             let _switched = self.set_active_pane(AgentPane::Scrollback, false);
-        }
-    }
-    /// Propagate a vim-mode change to this view AND every nested
-    /// subagent view.
-    ///
-    /// `ToggleVimMode` / `SetVimMode` only walk the top-level
-    /// `app.agents`, so without this an already-open subagent view keeps
-    /// its stale `vim_mode`. The bug that surfaces: the user opens a
-    /// subagent, runs `/vim-mode`, presses Tab to focus the subagent's
-    /// scrollback, and `j`/`k` forward to the prompt (the vim-OFF
-    /// fallback) instead of navigating — because the subagent view never
-    /// saw the toggle.
-    pub(crate) fn set_vim_mode_recursive(&mut self, enabled: bool) {
-        self.vim_mode = enabled;
-        for child in self.subagent_views.values_mut() {
-            child.set_vim_mode_recursive(enabled);
         }
     }
     #[cfg(test)]
@@ -1781,16 +1657,6 @@ mod esc_would_cancel_turn_tests {
         assert!(
             !agent.esc_would_cancel_turn(false),
             "an open inline prompt edit owns Esc (dismiss), not cancel"
-        );
-    }
-    #[test]
-    fn subagent_fullscreen_view_owns_esc() {
-        let mut agent = running_agent(false);
-        agent.is_subagent_view = true;
-        agent.active_pane = AgentPane::Scrollback;
-        assert!(
-            !agent.esc_would_cancel_turn(false),
-            "Esc in a fullscreen subagent view closes the child, not cancel"
         );
     }
     #[test]
