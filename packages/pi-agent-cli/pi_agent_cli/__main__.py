@@ -29,7 +29,9 @@ _PROMPT_CLI_FLAG_NAMES = (
 
 
 async def _amain() -> None:
-    await run_agent(PiAcpAgent())
+    # `session/close` and `session/resume` are unstable in the SDK and answered with
+    # "Method not found" unless this flag is set, although `initialize` advertises both.
+    await run_agent(PiAcpAgent(), use_unstable_protocol=True)
 
 
 def _build_parser() -> argparse.ArgumentParser:

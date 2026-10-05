@@ -32,6 +32,12 @@ The Rust TUI (`zypi`) spawns the Python agent via (priority order):
 2. `[agent].command` in `agent.toml`
 3. `PI_PYTHON` env var (appends `-m pi_agent_cli`)
 
+## ACP contract tests
+
+`tests/test_acp_stdio_contract.py` drives an agent *process* over stdio the way the TUI does: `initialize`, `session/new`, streamed `prompt`, the `model` config option, `session/list` (first-prompt title), `session/load` replay and `session/resume` across a restart, `session/close`, unknown methods answered with an error, exit code 0 on stdin EOF. It uses the mock LLM (`PI_USE_MOCK=1`) and a throw-away `PI_HOME`. Set `PI_ACP_CONTRACT_COMMAND` to run the same suite against another stdio ACP agent (it must honour `PI_HOME` and answer prompts with `Hello from mock`, without network), e.g. a future `pi-rust`.
+
+`__main__` starts `run_agent(..., use_unstable_protocol=True)`: `initialize` advertises `session/close` and `session/resume`, which the SDK serves only with that flag.
+
 ## System prompt pipeline
 
 `build_system_prompt` (`system_prompt.py`) assembles:
