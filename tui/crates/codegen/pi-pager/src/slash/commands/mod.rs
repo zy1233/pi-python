@@ -9,16 +9,16 @@
 //! `/theme`, `/settings`, `/multiline`, `/home`). Everything else the agent
 //! offers arrives over ACP (`available_commands_update`) and is registered
 //! by [`CommandRegistry::set_acp_commands`](super::registry::CommandRegistry).
-pub mod effort_levels;
-pub mod exit;
-pub mod help;
-pub mod home;
-pub mod model;
-pub mod multiline;
-pub mod new;
-pub mod resume;
-pub mod settings_cmd;
-pub mod theme;
+pub(crate) mod effort_levels;
+pub(crate) mod exit;
+pub(crate) mod help;
+pub(crate) mod home;
+pub(crate) mod model;
+pub(crate) mod multiline;
+pub(crate) mod new;
+pub(crate) mod resume;
+pub(crate) mod settings_cmd;
+pub(crate) mod theme;
 use super::command::SlashCommand;
 use std::sync::Arc;
 /// All pager-local builtin commands, in menu order: this vec breaks ties after MRU recency and tags, so moving an entry moves it in the menu.

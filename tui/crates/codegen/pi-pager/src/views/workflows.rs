@@ -159,7 +159,7 @@ pub struct WorkflowsViewState {
     pub roster_anchor: Option<(String, String)>,
 }
 
-pub mod shortcut_ids {
+pub(crate) mod shortcut_ids {
     pub const OPEN: usize = 1;
     pub const RUNS: usize = 2;
     pub const PAUSE: usize = 3;

@@ -23,8 +23,8 @@
 //! `AppView::settings_registry: Arc<SettingsRegistry>` (mirroring the
 //! existing `ActionRegistry` pattern). No `LazyLock`, no global state.
 
-pub mod defs;
-pub mod registry;
+pub(crate) mod defs;
+pub(crate) mod registry;
 
 pub use registry::{
     CodingDataSharingLock, DynamicEnumSource, EnumChoice, OwnedEnumChoice, PagerLocalSnapshot,

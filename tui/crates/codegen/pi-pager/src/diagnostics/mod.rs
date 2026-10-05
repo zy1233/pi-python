@@ -13,7 +13,7 @@ use crate::theme::color_support::ColorLevel;
 mod doctor_format;
 mod fix;
 mod model;
-pub mod probes;
+pub(crate) mod probes;
 mod view;
 
 pub use doctor_format::format_doctor;

@@ -8,13 +8,13 @@
 //! - [`is_command_complete()`] -- two-bit completeness model.
 //! - [`CommandRegistry`] -- maps names/aliases to command implementations.
 
-pub mod acp_command;
-pub mod command;
-pub mod commands;
-pub mod matcher;
-pub mod mode_support;
-pub mod mru;
-pub mod registry;
+pub(crate) mod acp_command;
+pub(crate) mod command;
+pub(crate) mod commands;
+pub(crate) mod matcher;
+pub(crate) mod mode_support;
+pub(crate) mod mru;
+pub(crate) mod registry;
 
 use std::{
     cell::RefCell,

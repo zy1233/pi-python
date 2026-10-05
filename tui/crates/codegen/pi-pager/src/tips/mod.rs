@@ -7,14 +7,14 @@
 //! seen-count map (`AppView::tip_seen_counts`) so they stop appearing once seen
 //! often enough within a run; that map is in-memory only and resets each run.
 
-pub mod clear_detector;
-pub mod clipboard_focus;
-pub mod ephemeral;
-pub mod plan_nudge;
-pub mod render;
-pub mod send_now;
-pub mod small_screen;
-pub mod ssh_wrap;
-pub mod word_select;
+pub(crate) mod clear_detector;
+pub(crate) mod clipboard_focus;
+pub(crate) mod ephemeral;
+pub(crate) mod plan_nudge;
+pub(crate) mod render;
+pub(crate) mod send_now;
+pub(crate) mod small_screen;
+pub(crate) mod ssh_wrap;
+pub(crate) mod word_select;
 
 pub use ephemeral::{DEFAULT_TIP_TICKS, EphemeralTip, EphemeralTipState, tip_row_renderable};

@@ -1,11 +1,11 @@
-pub mod config;
-pub mod focus;
-pub mod hooks;
-pub mod progress;
-pub mod protocol;
-pub mod sleep;
-pub mod title;
-pub mod tmux;
+pub(crate) mod config;
+pub(crate) mod focus;
+pub(crate) mod hooks;
+pub(crate) mod progress;
+pub(crate) mod protocol;
+pub(crate) mod sleep;
+pub(crate) mod title;
+pub(crate) mod tmux;
 
 use std::time::{Duration, Instant};
 

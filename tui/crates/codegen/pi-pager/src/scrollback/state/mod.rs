@@ -3,14 +3,14 @@
 //! This combines entries, scroll position, selection, and turn-based navigation
 //! into a single clean state object.
 
-pub mod groups;
+pub(crate) mod groups;
 mod layout;
 mod nav;
 mod pin_reserve;
 mod selection;
 mod timeline;
 mod types;
-pub mod verb_group;
+pub(crate) mod verb_group;
 
 pub(crate) use layout::ScrollAnchor;
 pub use layout::compute_paint_window;

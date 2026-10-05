@@ -8,7 +8,7 @@
 //! so the decrypted temporary lives in the caller's scope.
 
 /// Authentication mechanism identifiers.
-pub mod auth {
+pub(crate) mod auth {
     /// The internal `cached_token` auth method ID used for reconnection.
     macro_rules! CACHED_TOKEN {
         () => {

@@ -7,7 +7,7 @@ mod bg_task;
 mod btw;
 mod context_info;
 mod credit_limit;
-pub mod markdown_content;
+pub(crate) mod markdown_content;
 pub mod mermaid_content;
 mod quote_bar;
 mod session_event;

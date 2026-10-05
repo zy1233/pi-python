@@ -71,7 +71,7 @@ impl ReplayMetaStamp {
 /// producers (`dispatch/queue.rs` drain, `effects.rs` prompt send) and the
 /// replay consumer (`acp/tracker.rs` `handle_user_message`) so the wire keys
 /// cannot drift. Tests keep raw literals — they pin the wire values.
-pub mod user_prompt_meta {
+pub(crate) mod user_prompt_meta {
     /// Clean display text shown in scrollback instead of the wire text.
     pub const DISPLAY_TEXT: &str = "displayText";
     /// Render the display text as a skill invocation (teal leading token).
@@ -88,7 +88,7 @@ pub mod user_prompt_meta {
 
 /// `UserMessageChunk` / `ContentChunk._meta` keys stamped by the shell and
 /// read by the pager (live and on replay).
-pub mod user_message_chunk_meta {
+pub(crate) mod user_message_chunk_meta {
     /// Prompt index for rewind / attribution.
     pub const PROMPT_INDEX: &str = "promptIndex";
     /// When true, the chunk must not become a scrollback user prompt

@@ -3,11 +3,11 @@
 //! Handles spawning the agent process, initializing the protocol,
 //! authenticating, and providing the channel for communication.
 
-pub mod meta;
-pub mod model_state;
+pub(crate) mod meta;
+pub(crate) mod model_state;
 pub mod spawn;
 pub mod tracker;
-pub mod vendor;
+pub(crate) mod vendor;
 
 /// Ext methods that carry a session-scoped update and may stamp `isReplay`.
 /// Unreachable in standard-ACP mode (vendor ext notifications are filtered at
