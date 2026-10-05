@@ -5,7 +5,7 @@
 //!
 //! - **List** — the tutorial topics from [`crate::tutorial_docs`] with ✓
 //!   marks for explored topics. Enter opens a topic; Esc closes.
-//! - **Topic** — a scrollable markdown page (same chrome as the release-notes
+//! - **Topic** — a scrollable markdown page (same chrome as the `/docs`
 //!   viewer); `→`/`←` flow through the topics in order, Esc returns to the
 //!   list.
 //!

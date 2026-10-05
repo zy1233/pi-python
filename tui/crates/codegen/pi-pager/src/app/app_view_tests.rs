@@ -118,8 +118,6 @@ pub(crate) fn test_app() -> AppView {
         hidden_announcement_ids: Default::default(),
         announcements_last_gen: 0,
         announcement: None,
-        changelog_markdown: None,
-        changelog_bullets: Vec::new(),
         tips: Vec::new(),
         tip: None,
         cli_model_override: None,
@@ -215,7 +213,6 @@ pub(crate) fn test_app() -> AppView {
         welcome_tip_typing_dismissed: false,
         welcome_menu_index: None,
         welcome_menu_rects: Vec::new(),
-        welcome_show_changelog_action: false,
         welcome_import_banner_rect: None,
         last_mouse_pos: None,
         last_scroll_pos: None,
@@ -223,7 +220,6 @@ pub(crate) fn test_app() -> AppView {
         welcome_prompt_rect: None,
         welcome_auth_url_rect: None,
         welcome_on_auth_url: false,
-        welcome_on_changelog_cta: false,
         welcome_announcement: WelcomeAnnouncementState::default(),
         welcome_auth_fallback_rect: None,
         welcome_refresh_rect: None,
@@ -240,7 +236,6 @@ pub(crate) fn test_app() -> AppView {
         welcome_toast: None,
         welcome_on_privacy_banner: false,
         welcome_on_upgrade_cta: false,
-        welcome_changelog_cta_rect: None,
         auth_show_raw_url: false,
         native_select_hold: false,
         session_picker_entries: None,
@@ -2511,65 +2506,46 @@ fn welcome_ctrl_d_requires_confirmation() {
     );
 }
 #[test]
-fn menu_action_indices_without_changelog() {
+fn menu_action_indices_without_import() {
     assert!(matches!(
-        dispatch_menu_action(0, false, false, None),
+        dispatch_menu_action(0, false),
         InputOutcome::Action(Action::OpenNewWorktreeDialog)
     ));
     assert!(matches!(
-        dispatch_menu_action(1, false, false, None),
+        dispatch_menu_action(1, false),
         InputOutcome::Action(Action::FetchSessionList)
     ));
     assert!(matches!(
-        dispatch_menu_action(2, false, false, None),
+        dispatch_menu_action(2, false),
         InputOutcome::Action(Action::Quit)
     ));
-}
-#[test]
-fn menu_action_changelog_sits_above_quit() {
-    let md = Some("# notes");
+    // Past the last row there is nothing to do.
     assert!(matches!(
-        dispatch_menu_action(1, false, true, md),
-        InputOutcome::Action(Action::FetchSessionList)
-    ));
-    assert!(matches!(
-        dispatch_menu_action(2, false, true, md),
-        InputOutcome::Action(Action::ShowReleaseNotes { .. })
-    ));
-    assert!(matches!(
-        dispatch_menu_action(3, false, true, md),
-        InputOutcome::Action(Action::Quit)
-    ));
-}
-#[test]
-fn menu_action_changelog_before_fetch_is_noop() {
-    assert!(matches!(
-        dispatch_menu_action(2, false, true, None),
+        dispatch_menu_action(3, false),
         InputOutcome::Unchanged
     ));
 }
 #[test]
-fn menu_action_indices_with_import_and_changelog() {
-    let md = Some("# notes");
+fn menu_action_indices_with_import() {
     assert!(matches!(
-        dispatch_menu_action(0, true, true, md),
+        dispatch_menu_action(0, true),
         InputOutcome::Action(Action::ImportClaudeSettings)
     ));
     assert!(matches!(
-        dispatch_menu_action(1, true, true, md),
+        dispatch_menu_action(1, true),
         InputOutcome::Action(Action::OpenNewWorktreeDialog)
     ));
     assert!(matches!(
-        dispatch_menu_action(2, true, true, md),
+        dispatch_menu_action(2, true),
         InputOutcome::Action(Action::FetchSessionList)
     ));
     assert!(matches!(
-        dispatch_menu_action(3, true, true, md),
-        InputOutcome::Action(Action::ShowReleaseNotes { .. })
+        dispatch_menu_action(3, true),
+        InputOutcome::Action(Action::Quit)
     ));
     assert!(matches!(
-        dispatch_menu_action(4, true, true, md),
-        InputOutcome::Action(Action::Quit)
+        dispatch_menu_action(4, true),
+        InputOutcome::Unchanged
     ));
 }
 #[test]
@@ -4886,7 +4862,7 @@ fn welcome_doc_viewer_is_scroll_blocking_and_wheel_scrolls_content() {
     let mut app = test_app();
     app.active_view = ActiveView::Welcome;
     app.welcome_doc_viewer = Some(crate::views::modal::ActiveModal::DocViewer {
-        title: "Release Notes".into(),
+        title: "Guide".into(),
         content: "line\n".repeat(80),
         scroll: 0,
         window: crate::views::modal_window::ModalWindowState::new(),
@@ -4896,7 +4872,7 @@ fn welcome_doc_viewer_is_scroll_blocking_and_wheel_scrolls_content() {
     });
     assert!(
         app.is_scroll_blocking_modal_open(),
-        "welcome release-notes overlay must block background scroll",
+        "welcome doc-viewer overlay must block background scroll",
     );
     let outcome = app.handle_input(&scroll_event(MouseEventKind::ScrollDown, 40, 12));
     assert!(
@@ -4905,7 +4881,7 @@ fn welcome_doc_viewer_is_scroll_blocking_and_wheel_scrolls_content() {
     );
     assert!(
         app.last_scroll_pos.is_none(),
-        "wheel must not reach the background scroll path while release notes are open",
+        "wheel must not reach the background scroll path while the doc viewer is open",
     );
     let scroll = match app.welcome_doc_viewer.as_ref() {
         Some(crate::views::modal::ActiveModal::DocViewer { scroll, .. }) => *scroll,

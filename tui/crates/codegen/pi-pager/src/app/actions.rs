@@ -697,8 +697,8 @@ pub enum Action {
     ShareSession,
     /// Show session info (auth, ID, cwd, model, context usage) instantly.
     ShowSessionInfo,
-    /// Show release notes in a modal.
-    ShowReleaseNotes {
+    /// Show a markdown document (`/docs`) in a modal.
+    ShowDoc {
         title: String,
         content: String,
     },
@@ -1643,10 +1643,6 @@ pub enum Effect {
         /// `Some` → `session/set_config_option`; `None` → legacy `session/set_model`.
         config_option_id: Option<String>,
     },
-    /// Fetch changelog from CDN (both markdown + structured JSON).
-    /// Runs off the render path via `spawn_blocking`. Result is cached
-    /// on `AppView` so `/release-notes` and the welcome screen share it.
-    FetchChangelog,
     /// Persist the hidden announcement ids to disk.
     PersistAnnouncementsHidden {
         hidden_ids: std::collections::BTreeSet<String>,
@@ -2577,11 +2573,6 @@ pub enum TaskResult {
         /// Forwarded from `Effect::SwitchModel.prev_model_id` for
         /// rollback on `IncompatibleAgent`.
         prev_model_id: Option<acp::ModelId>,
-    },
-    /// Changelog fetched from CDN (both formats).
-    ChangelogFetched {
-        markdown: Option<String>,
-        entries: Vec<pi_shell::util::changelog::ChangelogEntry>,
     },
     /// Announcements hidden state persisted.
     AnnouncementsHiddenPersisted {

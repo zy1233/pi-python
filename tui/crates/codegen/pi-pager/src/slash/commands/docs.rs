@@ -76,7 +76,7 @@ impl SlashCommand for DocsCommand {
             return CommandResult::Action(Action::OpenUrl(BUILD_DOCS_URL.into()));
         }
         match find_doc(trimmed) {
-            Some(doc) => CommandResult::Action(Action::ShowReleaseNotes {
+            Some(doc) => CommandResult::Action(Action::ShowDoc {
                 title: doc.title.into(),
                 content: doc.content.into(),
             }),
@@ -178,11 +178,11 @@ mod tests {
         let models = ModelState::default();
         let mut ctx = make_ctx(&models);
         match DocsCommand.run(&mut ctx, "Getting Started") {
-            CommandResult::Action(Action::ShowReleaseNotes { title, content }) => {
+            CommandResult::Action(Action::ShowDoc { title, content }) => {
                 assert_eq!(title, "Getting Started");
                 assert!(!content.is_empty());
             }
-            other => panic!("expected ShowReleaseNotes, got {other:?}"),
+            other => panic!("expected ShowDoc, got {other:?}"),
         }
     }
 

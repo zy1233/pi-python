@@ -258,7 +258,7 @@ pub enum ActiveModal {
         /// to the doc list on Esc so the DocPicker can still restore the palette.
         previous_palette: Option<PaletteSnapshot>,
         /// When true, Esc closes the modal directly instead of returning
-        /// to the DocPicker list (used for /release-notes).
+        /// to the DocPicker list (used when a doc is opened directly, e.g. `/docs <name>`).
         standalone: bool,
     },
     /// All-shortcuts cheatsheet for the current view/state.

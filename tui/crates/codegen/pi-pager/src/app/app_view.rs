@@ -701,12 +701,6 @@ pub struct AppView {
     pub announcements_last_gen: u64,
     /// Selected welcome announcement for this pager launch.
     pub announcement: Option<pi_announcements::RemoteAnnouncement>,
-    /// Cached changelog markdown (for `/release-notes`). Populated by
-    /// `FetchChangelog` at startup; `None` until the fetch completes.
-    pub changelog_markdown: Option<String>,
-    /// Cached changelog bullets (for welcome screen). Populated by
-    /// `FetchChangelog` at startup; empty until the fetch completes.
-    pub changelog_bullets: Vec<String>,
     /// Resolved tip list from config layers.
     pub tips: Vec<String>,
     /// Selected tip for the current launch/session.
@@ -852,10 +846,6 @@ pub struct AppView {
     pub welcome_menu_index: Option<usize>,
     /// Hit-test rects for welcome menu items (populated during render).
     pub welcome_menu_rects: Vec<ratatui::layout::Rect>,
-    /// Whether the welcome menu currently includes a "Changelog" row (above
-    /// Quit). Set during render; the input handler uses it to size the menu and
-    /// map the extra row to the release-notes action.
-    pub welcome_show_changelog_action: bool,
     /// Hit-test rect for the import-claude banner on the welcome screen.
     pub welcome_import_banner_rect: Option<ratatui::layout::Rect>,
     /// Last known mouse position (column, row), updated on every Mouse event.
@@ -877,8 +867,6 @@ pub struct AppView {
     pub welcome_auth_url_rect: Option<ratatui::layout::Rect>,
     /// Whether the mouse pointer was last over the auth URL (for OSC 22 cursor shape).
     pub welcome_on_auth_url: bool,
-    /// Mouse last over the changelog block (drives hover color + redraws).
-    pub welcome_on_changelog_cta: bool,
     /// Per-visit announcement UI state on the welcome screen (expansion, hover,
     /// overflow flag, hit-rect).
     pub welcome_announcement: WelcomeAnnouncementState,
@@ -914,8 +902,6 @@ pub struct AppView {
     pub welcome_on_privacy_banner: bool,
     /// Sticky hover flag for the welcome upgrade CTA (redraw on enter/leave).
     pub welcome_on_upgrade_cta: bool,
-    /// Hit-test rect for the clickable changelog info block (opens release notes).
-    pub welcome_changelog_cta_rect: Option<ratatui::layout::Rect>,
     /// Show the raw auth URL with mouse capture disabled for manual copy.
     pub auth_show_raw_url: bool,
     /// We turned capture off for native select and owe a restore on leave.
@@ -1204,7 +1190,7 @@ pub struct AppView {
     pub has_claude_import: bool,
     /// When set, the welcome screen renders an interactive import modal instead of normal content.
     pub import_claude_modal: Option<crate::views::import_claude_modal::ImportClaudeModalState>,
-    /// Doc viewer overlay for the welcome screen (release notes via Ctrl+L).
+    /// Doc viewer overlay for the welcome screen (`/docs <guide>`).
     pub welcome_doc_viewer: Option<crate::views::modal::ActiveModal>,
     /// Whether the pager uses fullscreen (alt-screen) or inline mode.
     /// Set from the resolved terminal state at startup; updated by the
@@ -1517,8 +1503,6 @@ impl AppView {
             hidden_announcement_ids: Default::default(),
             announcements_last_gen: 0,
             announcement: None,
-            changelog_markdown: None,
-            changelog_bullets: Vec::new(),
             tips: Vec::new(),
             tip: None,
             welcome_prompt,
@@ -1533,7 +1517,6 @@ impl AppView {
             minimal_state: crate::minimal_api::MinimalState::default(),
             welcome_menu_index: None,
             welcome_menu_rects: Vec::new(),
-            welcome_show_changelog_action: false,
             welcome_import_banner_rect: None,
             last_mouse_pos: None,
             last_scroll_pos: None,
@@ -1541,7 +1524,6 @@ impl AppView {
             welcome_prompt_rect: None,
             welcome_auth_url_rect: None,
             welcome_on_auth_url: false,
-            welcome_on_changelog_cta: false,
             welcome_announcement: WelcomeAnnouncementState::default(),
             welcome_auth_fallback_rect: None,
             welcome_refresh_rect: None,
@@ -1561,7 +1543,6 @@ impl AppView {
             welcome_toast: None,
             welcome_on_privacy_banner: false,
             welcome_on_upgrade_cta: false,
-            welcome_changelog_cta_rect: None,
             auth_show_raw_url: false,
             native_select_hold: false,
             session_picker_entries: None,
@@ -2550,11 +2531,6 @@ impl AppView {
                         2
                     } else {
                         3 + if self.has_claude_import { 1 } else { 0 }
-                            + if self.welcome_show_changelog_action {
-                                1
-                            } else {
-                                0
-                            }
                     },
                     prompt_rect: self.welcome_prompt_rect.as_ref(),
                     import_banner_rect: self.welcome_import_banner_rect.as_ref(),
@@ -2570,8 +2546,6 @@ impl AppView {
                     on_privacy_banner: &mut self.welcome_on_privacy_banner,
                     on_upgrade_cta: &mut self.welcome_on_upgrade_cta,
                     upgrade_cta_keyboard: welcome_pinned_upgrade_cta,
-                    changelog_cta_rect: self.welcome_changelog_cta_rect.as_ref(),
-                    on_changelog_cta: &mut self.welcome_on_changelog_cta,
                     announcement_truncated: self.welcome_announcement.truncated,
                     announcement_rect: self.welcome_announcement.rect.as_ref(),
                     on_announcement_cta: &mut self.welcome_announcement.on_cta,
@@ -2588,8 +2562,6 @@ impl AppView {
                     has_claude_import: self.has_claude_import,
                     import_claude_modal: &mut self.import_claude_modal,
                     welcome_doc_viewer: &mut self.welcome_doc_viewer,
-                    changelog_markdown: &self.changelog_markdown,
-                    show_changelog_action: self.welcome_show_changelog_action,
                     has_pending_update: self.pending_update_version.is_some(),
                     has_foreign_resume,
                     cwd_has_git_ancestor: self.cwd_has_git_ancestor,
@@ -3194,10 +3166,6 @@ struct WelcomeInputCtx<'a> {
     /// A pinned (non-dismissible) promo CTA is live, so `Ctrl+O` opens it
     /// (the welcome screen has no YOLO toggle to preserve).
     upgrade_cta_keyboard: bool,
-    /// Hit-test rect for the clickable changelog info block (opens release notes).
-    changelog_cta_rect: Option<&'a ratatui::layout::Rect>,
-    /// Sticky hover flag for the changelog block (redraw on enter/leave).
-    on_changelog_cta: &'a mut bool,
     /// Whether the announcement overflowed — the "expandable" signal for click-to-toggle.
     announcement_truncated: bool,
     /// Hit-test rect for the full announcement block (click anywhere to toggle).
@@ -3223,10 +3191,6 @@ struct WelcomeInputCtx<'a> {
     has_claude_import: bool,
     import_claude_modal: &'a mut Option<crate::views::import_claude_modal::ImportClaudeModalState>,
     welcome_doc_viewer: &'a mut Option<crate::views::modal::ActiveModal>,
-    changelog_markdown: &'a Option<String>,
-    /// Whether the welcome menu currently includes a "Changelog" row (above
-    /// Quit), so index→action mapping accounts for it.
-    show_changelog_action: bool,
     has_pending_update: bool,
     /// A recent foreign session is available to resume when no update is pending.
     has_foreign_resume: bool,
@@ -3818,12 +3782,7 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
             if key!(Enter).matches(key)
                 && let Some(idx) = *ctx.menu_index
             {
-                return dispatch_menu_action(
-                    idx,
-                    ctx.has_claude_import,
-                    ctx.show_changelog_action,
-                    ctx.changelog_markdown.as_deref(),
-                );
+                return dispatch_menu_action(idx, ctx.has_claude_import);
             }
             if crate::input::key::is_text_input_key(key) {
                 *ctx.prompt_focused = true;
@@ -3960,12 +3919,7 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                         {
                             return InputOutcome::Action(Action::DismissClaudeImport);
                         }
-                        return dispatch_menu_action(
-                            i,
-                            ctx.has_claude_import,
-                            ctx.show_changelog_action,
-                            ctx.changelog_markdown.as_deref(),
-                        );
+                        return dispatch_menu_action(i, ctx.has_claude_import);
                     }
                 }
                 if let Some(rect) = ctx.refresh_rect
@@ -4008,15 +3962,6 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                     return InputOutcome::Action(Action::OpenUrl(
                         crate::views::privacy_banner::PRIVACY_BANNER_POLICY_URL.to_string(),
                     ));
-                }
-                if let Some(rect) = ctx.changelog_cta_rect
-                    && rect.contains(ratatui::layout::Position::new(mouse.column, mouse.row))
-                    && let Some(md) = ctx.changelog_markdown.as_deref()
-                {
-                    return InputOutcome::Action(Action::ShowReleaseNotes {
-                        title: "Release Notes".to_string(),
-                        content: md.trim().to_string(),
-                    });
                 }
                 if let Some(rect) = ctx.announcement_rect
                     && (ctx.announcement_truncated || *ctx.announcement_expanded)
@@ -4077,11 +4022,6 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                     return InputOutcome::Changed;
                 }
                 let pos = ratatui::layout::Position::new(mouse.column, mouse.row);
-                let over_cta = ctx.changelog_cta_rect.is_some_and(|r| r.contains(pos));
-                if over_cta != *ctx.on_changelog_cta {
-                    *ctx.on_changelog_cta = over_cta;
-                    return InputOutcome::Changed;
-                }
                 let over_upgrade = ctx.upgrade_cta_rect.is_some_and(|r| r.contains(pos));
                 if over_upgrade != *ctx.on_upgrade_cta {
                     *ctx.on_upgrade_cta = over_upgrade;
@@ -4214,23 +4154,12 @@ fn dispatch_access_gate_menu_action(index: usize) -> InputOutcome {
 }
 /// Dispatch an action for a welcome menu item by index.
 ///
-/// Menu order: `[Import]`, New worktree, Resume session, `[Changelog]`, Quit.
-/// `show_changelog_action` is true when the Changelog row is rendered; release
-/// notes open only once `changelog_md` is available.
-fn dispatch_menu_action(
-    index: usize,
-    has_claude_import: bool,
-    show_changelog_action: bool,
-    changelog_md: Option<&str>,
-) -> InputOutcome {
+/// Menu order: `[Import]`, New worktree, Resume session, Quit.
+fn dispatch_menu_action(index: usize, has_claude_import: bool) -> InputOutcome {
     let base = if has_claude_import { 1 } else { 0 };
     let worktree_idx = base;
     let resume_idx = base + 1;
-    let (changelog_idx, quit_idx) = if show_changelog_action {
-        (Some(base + 2), base + 3)
-    } else {
-        (None, base + 2)
-    };
+    let quit_idx = base + 2;
     if has_claude_import && index == 0 {
         return InputOutcome::Action(Action::ImportClaudeSettings);
     }
@@ -4239,15 +4168,6 @@ fn dispatch_menu_action(
     }
     if index == resume_idx {
         return InputOutcome::Action(Action::FetchSessionList);
-    }
-    if Some(index) == changelog_idx {
-        if let Some(md) = changelog_md {
-            return InputOutcome::Action(Action::ShowReleaseNotes {
-                title: "Release Notes".to_string(),
-                content: md.trim().to_string(),
-            });
-        }
-        return InputOutcome::Unchanged;
     }
     if index == quit_idx {
         return InputOutcome::Action(Action::Quit);
@@ -4648,8 +4568,6 @@ impl AppView {
                             auto_topup: self.auto_topup.as_ref(),
                             usage_visible: self.usage_visible,
                             is_api_key_auth: self.is_api_key_auth,
-                            changelog_bullets: &self.changelog_bullets,
-                            changelog_has_full_notes: self.changelog_markdown.is_some(),
                             welcome_announcement_expanded: self.welcome_announcement.expanded,
                             upgrade_cta: hero_cta.map(|(_owner, label, _)| label),
                             privacy_banner,
@@ -4668,7 +4586,6 @@ impl AppView {
                             &mut self.session_picker_state,
                         );
                         self.welcome_menu_rects = result.menu_rects;
-                        self.welcome_show_changelog_action = result.changelog_action_present;
                         self.welcome_prompt_rect = result.prompt_rect;
                         self.welcome_import_banner_rect = result.import_banner_rect;
                         self.welcome_auth_url_rect = result.auth_url_rect;
@@ -4690,7 +4607,6 @@ impl AppView {
                         {
                             self.welcome_workspace_mode_rects = result.workspace_mode_rects;
                         }
-                        self.welcome_changelog_cta_rect = result.changelog_cta_rect;
                         if let Some((ref msg, _)) = self.welcome_toast {
                             crate::views::welcome::paint_welcome_toast(
                                 f.buffer_mut(),

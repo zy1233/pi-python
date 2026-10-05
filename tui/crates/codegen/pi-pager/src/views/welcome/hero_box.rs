@@ -33,7 +33,7 @@ const HERO_SUBTITLE: &str = "Thanks for trying zypi — give feedback with /feed
 use super::{PROMPT_HEIGHT, VERSION_GAP};
 
 /// Rows the "thanks" subtitle occupies. Hidden when the in-box info slot
-/// (changelog / announcement) is shown, to keep the box compact.
+/// (the announcement) is shown, to keep the box compact.
 fn subtitle_rows(info_height: u16) -> u16 {
     if info_height > 0 { 0 } else { 1 }
 }
@@ -93,15 +93,14 @@ fn left_col_width() -> u16 {
 
 /// Compute the hero box layout: bordered box with logo left, version + menu right.
 ///
-/// Sizes the in-box info slot here (the announcement clamped to fit, else the
-/// fixed `changelog_height`) so the renderer just draws into `hero_info`.
+/// Sizes the in-box info slot here (the announcement, clamped to fit) so the
+/// renderer just draws into `hero_info`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn compute_hero_box(
     content_area: Rect,
     error_height: u16,
     menu_height: u16,
     tip_height: u16,
-    changelog_height: u16,
     announcement: Option<&pi_announcements::RemoteAnnouncement>,
     expanded: bool,
     has_upgrade_cta: bool,
@@ -126,7 +125,7 @@ pub(super) fn compute_hero_box(
             menu_height,
             tip_height,
         ),
-        None => changelog_height,
+        None => 0,
     };
 
     let logo_rows = super::logo::full_logo_line_count();
@@ -237,7 +236,7 @@ pub(super) fn compute_hero_box(
         zero
     };
 
-    // Info block (announcement or changelog) below version + optional subtitle.
+    // Info block (the announcement) below version + optional subtitle.
     let info_y = inner.y + 1 + subtitle_rows(info_height) + info_gap;
     let hero_info = if info_height > 0 {
         Rect {
@@ -265,7 +264,7 @@ pub(super) fn compute_hero_box(
         logo: zero,
         error,
         menu: zero,
-        changelog: zero,
+        info: zero,
         tip,
         prompt,
         version: version_slot,
@@ -282,8 +281,6 @@ pub(super) fn compute_hero_box(
 pub(super) struct HeroBoxRects {
     /// Hit-test rect per menu item row (for click/hover).
     pub(super) menu_rects: Vec<Rect>,
-    /// Clickable changelog info block, if drawn.
-    pub(super) changelog_cta_rect: Option<Rect>,
     /// Whether the announcement overflowed (the "expandable" signal).
     pub(super) announcement_truncated: bool,
     /// Full announcement block area (clickable anywhere to toggle), if shown.
@@ -305,8 +302,6 @@ pub(super) fn render_hero_box(
     mouse_pos: Option<(u16, u16)>,
     announcement: Option<&pi_announcements::RemoteAnnouncement>,
     announcement_expanded: bool,
-    changelog_bullets: &[String],
-    changelog_has_full_notes: bool,
     upgrade_cta: Option<&str>,
     #[cfg(feature = "local-workspace")] workspace_mode: Option<(
         super::WelcomeWorkspaceMode,
@@ -346,36 +341,25 @@ pub(super) fn render_hero_box(
         );
     }
 
-    // In-box info slot: the announcement takes priority over the changelog,
-    // and only one is ever shown — always in this same position.
-    let mut changelog_cta_rect = None;
+    // In-box info slot: the announcement, always in this same position.
     let mut announcement_truncated = false;
     let mut announcement_rect = None;
     let mut upgrade_cta_rect = None;
-    if layout.hero_info.height > 0 {
-        if let Some(ann) = announcement {
-            let (text_area, truncated, cta_rect) = render_announcement_with_upgrade_cta(
-                buf,
-                theme,
-                layout.hero_info,
-                ann,
-                announcement_expanded,
-                mouse_pos,
-                upgrade_cta,
-            );
-            announcement_rect = Some(text_area);
-            announcement_truncated = truncated;
-            upgrade_cta_rect = cta_rect;
-        } else if !changelog_bullets.is_empty() {
-            changelog_cta_rect = render_hero_changelog(
-                buf,
-                theme,
-                layout.hero_info,
-                changelog_bullets,
-                changelog_has_full_notes,
-                mouse_pos,
-            );
-        }
+    if layout.hero_info.height > 0
+        && let Some(ann) = announcement
+    {
+        let (text_area, truncated, cta_rect) = render_announcement_with_upgrade_cta(
+            buf,
+            theme,
+            layout.hero_info,
+            ann,
+            announcement_expanded,
+            mouse_pos,
+            upgrade_cta,
+        );
+        announcement_rect = Some(text_area);
+        announcement_truncated = truncated;
+        upgrade_cta_rect = cta_rect;
     }
 
     #[cfg(feature = "local-workspace")]
@@ -420,7 +404,6 @@ pub(super) fn render_hero_box(
     );
     HeroBoxRects {
         menu_rects,
-        changelog_cta_rect,
         announcement_truncated,
         announcement_rect,
         upgrade_cta_rect,
@@ -536,55 +519,6 @@ pub(super) fn render_announcement_block(
         );
     }
     false
-}
-
-/// Render the changelog block (header + bullets) in the info slot. When
-/// `clickable` (full notes exist), the whole block opens the notes on click and
-/// brightens while hovered; returns that clickable rect.
-fn render_hero_changelog(
-    buf: &mut Buffer,
-    theme: &Theme,
-    area: Rect,
-    bullets: &[String],
-    clickable: bool,
-    mouse_pos: Option<(u16, u16)>,
-) -> Option<Rect> {
-    if area.width == 0 || area.height == 0 {
-        return None;
-    }
-
-    let hovered =
-        clickable && mouse_pos.is_some_and(|(mx, my)| area.contains(Position::new(mx, my)));
-
-    let header_style = super::hover_style(
-        theme,
-        hovered,
-        Style::default()
-            .fg(theme.gray_bright)
-            .add_modifier(Modifier::DIM),
-    );
-    let title = "Changelog";
-    buf.set_span(
-        area.x,
-        area.y,
-        &Span::styled(title, header_style),
-        area.width,
-    );
-
-    // Bullets start 2 rows down (header + blank), matching the height budget.
-    let bullet_style = super::hover_style(theme, hovered, Style::default().fg(theme.gray_bright));
-    let max_text_width = area.width.saturating_sub(4) as usize; // " • " prefix + pad
-    for (i, bullet) in bullets.iter().enumerate() {
-        let row = area.y + 2 + i as u16;
-        if row >= area.y + area.height {
-            break;
-        }
-        let truncated = crate::render::line_utils::truncate_str(bullet, max_text_width);
-        let text = format!(" \u{2022} {truncated}");
-        buf.set_span(area.x, row, &Span::styled(text, bullet_style), area.width);
-    }
-
-    clickable.then_some(area)
 }
 
 /// Word-wrap `text` into lines no wider than `width` columns. A single word

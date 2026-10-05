@@ -1910,12 +1910,6 @@ pub(crate) async fn run(
                 return Ok(finish_run(&mut app));
             }
         }
-        // Fetch changelog off the render path so the welcome screen
-        // can display bullets and /release-notes uses the cached result.
-        let effs = vec![super::actions::Effect::FetchChangelog];
-        if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
-            return Ok(finish_run(&mut app));
-        }
         if !app.has_access() {
             gate_poll_at = Some(Instant::now() + GATE_POLL_INTERVAL);
         }

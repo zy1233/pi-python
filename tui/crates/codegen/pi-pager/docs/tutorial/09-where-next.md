@@ -19,7 +19,7 @@ You know enough to be productive. When you want more:
   where it's going.
 - Automate anything: `grok -p "summarize new TODOs" --output-format json`
   runs headless — great for scripts and CI.
-- Stay current with `grok update`; see what changed with `/release-notes`.
+- Stay current with `grok update`.
 - Something feel off? `/feedback` goes straight to the team.
 
 ## Reopen this tutorial

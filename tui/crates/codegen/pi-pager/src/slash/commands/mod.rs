@@ -48,7 +48,6 @@ pub mod plugin;
 pub mod privacy;
 pub mod queue;
 pub mod recap;
-pub mod release_notes;
 pub mod remember;
 pub mod rename;
 pub mod resume;
@@ -143,7 +142,6 @@ pub fn builtin_commands() -> Vec<Arc<dyn SlashCommand>> {
         Arc::new(imagine_video::ImagineVideoCommand),
         // Docs, account and one-off maintenance.
         Arc::new(docs::DocsCommand),
-        Arc::new(release_notes::ReleaseNotesCommand),
         Arc::new(announcements::AnnouncementsCommand),
         Arc::new(feedback::FeedbackCommand),
         Arc::new(privacy::PrivacyCommand),

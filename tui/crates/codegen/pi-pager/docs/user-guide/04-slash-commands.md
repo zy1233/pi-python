@@ -351,10 +351,6 @@ Open the MCP servers management modal.
 
 Check the current session for terminal, clipboard, color, input, notification, and sandbox issues. Doctor shows what it found and how to resolve each issue. Run `/doctor fix` to list available automatic fixes; other findings include manual steps. `/terminal-setup`, `/terminal-check`, and `/terminal-info` remain aliases.
 
-### `/release-notes`
-
-View release notes for the current version. Alias: `/changelog`.
-
 ### `/docs`
 
 Browse the built-in How-to Guides, open the online Build docs, or jump straight to a guide by title. Aliases: `/howto`, `/guides`.
