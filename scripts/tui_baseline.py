@@ -234,7 +234,7 @@ def evaluate_suite(
         notes.append(f"passed {totals.passed} < floor {minimum}")
     reference = suite.get("reference_passed")
     if reference and abs(totals.passed - reference) > reference * REFERENCE_TOLERANCE:
-        notes.append(f"passed {totals.passed} deviates >5% from the macOS reference {reference}")
+        notes.append(f"passed {totals.passed} deviates >5% from the reference {reference}")
 
     return SuiteResult(
         package=suite["package"],

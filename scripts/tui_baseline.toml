@@ -33,16 +33,17 @@ package = "pi-pager-bin"
 
 # Ceiling for the number of unique packages in `cargo tree -p pi-pager-bin --target <triple>`.
 [graph.max_nodes]
-# Measured on the Linux runner (TUI CI run 37263077643): 995. A new dependency has to lower the
-# count elsewhere or raise this number on purpose.
-x86_64-unknown-linux-gnu = 995
+# Measured on the Linux runner (TUI CI run 37379203134, commit 0e71894): 980, down from 995 after
+# the unused-dependency sweep and the removal of pi-memory / pi-fsnotify. A new dependency has to
+# lower the count elsewhere or raise this number on purpose.
+x86_64-unknown-linux-gnu = 980
 
 [check]
 # Consumer build: everything that ships (`zypi`, the minimal pager, the updater).
 packages = ["pi-pager-bin", "pi-pager-minimal", "pi-update"]
-# Warning ceiling across those packages. Linux and macOS both show 20 (all `dead_code` in
-# pi-shell; the crate-root `#![allow]` is still in place, see plan A.4).
-max_warnings = 20
+# Warning ceiling across those packages. Linux and macOS both show 0: the crate-root
+# `#![allow(dead_code, ...)]` attributes are gone (plan A.4) and the code they hid was deleted.
+max_warnings = 0
 # `cargo check --workspace --tests --keep-going` type-checks every crate's tests, which is where
 # Linux-only cfg code that macOS never compiled would break.
 workspace_tests = true
@@ -64,17 +65,17 @@ unset_env = ["NO_COLOR", "PI_HOME", "GROK_HOME", "PI_AGENT_COMMAND", "PI_PYTHON"
 TERM = "xterm-256color"
 COLORTERM = "truecolor"
 
-# `reference_passed` is the macOS result at the current tip (docs/baselines/tui.md); the summary
-# flags a run that deviates by more than 5 %. The Linux run (TUI CI run 37263077643, before the
-# print-mode guard and the changelog removal) passed every suite: 10,851 passed, 0 failed.
-# `min_passed` (floor) stays unset until the planned deletions (plan A.3 / A.4) have landed,
-# because deleting dead code legitimately deletes its tests; set the floors from the Linux run
-# after that.
+# `reference_passed` is the Linux CI result of the last recorded run (TUI CI run 37379203134,
+# commit 0e71894; docs/baselines/tui.md); the summary flags a run that deviates by more than 5 %.
+# `min_passed` (floor) is that run minus a few percent: deleting dead code legitimately deletes
+# its tests, but a drop below the floor has to be a deliberate edit of this file. Both numbers
+# are measured on Linux; macOS runs a handful of platform-specific tests more or fewer.
 
 [[test.suite]]
 package = "pi-shell"
 targets = ["--lib", "--test", "sandbox_requirements_pin", "--test", "test_config_update_isolation"]
-reference_passed = 1143 # 1138 lib + 2 + 3
+reference_passed = 1056
+min_passed = 1000
 
 [[test.suite]]
 package = "pi-pager"
@@ -94,7 +95,8 @@ known_failures = [
     "render_footer_multiline_empty_create_uses_shift_or_alt_enter",
     "render_footer_multiline_mode_send_uses_shift_or_alt_enter",
 ]
-reference_passed = 8862 # 8581 lib + 277 + 2 + 2
+reference_passed = 5593
+min_passed = 5300
 
 [[test.suite]]
 package = "pi-pager-bin"
@@ -102,6 +104,7 @@ targets = ["--bin", "zypi"]
 # tests/update_never_blocked_by_config.rs is not selected: it looks for CARGO_BIN_EXE_pi-pager,
 # but the binary is named zypi (fork-rename leftover, unrelated to the runtime removal).
 reference_passed = 20
+min_passed = 20
 
 [[test.suite]]
 package = "pi-acp-lib"
@@ -110,26 +113,31 @@ targets = ["--lib"]
 # never fires and the queued request is never answered (docs/PLAN/... section 10.4).
 skip = ["vendor_x_ai_ext_is_dropped_without_sending"]
 reference_passed = 21
+min_passed = 21
 
 [[test.suite]]
 package = "pi-http"
 targets = ["--lib"]
 reference_passed = 13
+min_passed = 13
 
 [[test.suite]]
 package = "pi-telemetry"
 targets = ["--lib"]
-reference_passed = 244
+reference_passed = 239
+min_passed = 230
 
 [[test.suite]]
 package = "pi-file-utils"
 targets = ["--lib"]
-reference_passed = 217 # Linux: 216 (one test fewer)
+reference_passed = 216
+min_passed = 210
 
 [[test.suite]]
 package = "pi-sampling-types"
 targets = ["--lib"]
 reference_passed = 320
+min_passed = 310
 
 [release]
 profile = "release-dist"
