@@ -1884,10 +1884,6 @@ impl AppView {
     }
     /// Commit interim on real send keys only (not multiline bare Enter).
     fn maybe_commit_voice_interim_before_submit_key(&mut self, key: &crossterm::event::KeyEvent) {
-        if self.registry.matches_id(ActionId::InterjectPrompt, key) {
-            let _ = crate::voice::commit_interim_into_prompt(self);
-            return;
-        }
         let multiline = match self.active_view {
             ActiveView::Agent(id) => self.agents.get(&id).is_some_and(|a| a.multiline_mode),
             _ => false,
@@ -2480,11 +2476,6 @@ impl AppView {
             self.pending_action = Some(PendingAction::with_ttl(action, shortcut, label, ttl));
             return InputOutcome::Changed;
         }
-        if let InputOutcome::Action(Action::ExitSession) = &outcome
-            && matches!(self.active_view, ActiveView::Agent(_))
-        {
-            return self.apply_exit_session_confirmation(key_event);
-        }
         if matches!(
             outcome,
             InputOutcome::Action(Action::NewSession | Action::NewWorktreeSession { .. })
@@ -2562,11 +2553,6 @@ impl AppView {
         let action = match action_id {
             ActionId::Quit => Action::Quit,
             ActionId::NewSession => Action::NewSession,
-            ActionId::NewSessionInWorktree => Action::NewWorktreeSession {
-                load_session_id: None,
-                label: None,
-                git_ref: None,
-            },
             ActionId::VoiceToggle => {
                 if !self.current_ui.voice_keybind_enabled.unwrap_or(true) {
                     return InputOutcome::Unchanged;
@@ -2609,27 +2595,6 @@ impl AppView {
             InputOutcome::Changed
         } else {
             InputOutcome::Action(Action::Quit)
-        }
-    }
-    /// Apply exit-session confirmation (double-press). Works like quit confirmation
-    /// but transitions to the welcome screen instead of quitting.
-    fn apply_exit_session_confirmation(
-        &mut self,
-        key_event: Option<&crossterm::event::KeyEvent>,
-    ) -> InputOutcome {
-        let Some(key) = key_event else {
-            return InputOutcome::Action(Action::ExitSession);
-        };
-        let Some(def) = self.registry.find(ActionId::ExitSession) else {
-            return InputOutcome::Action(Action::ExitSession);
-        };
-        if def.requires_confirmation {
-            let shortcut = KeyShortcut::from(*key);
-            self.pending_action =
-                Some(PendingAction::new(Action::ExitSession, shortcut, def.label));
-            InputOutcome::Changed
-        } else {
-            InputOutcome::Action(Action::ExitSession)
         }
     }
 }
@@ -3755,20 +3720,10 @@ impl AppView {
     ///   the scrollback-pane fold.
     /// - `Ctrl+O` opens the whole conversation fully expanded in `$PAGER` (the
     ///   "expand everything" view, the honest equivalent of a full
-    ///   transcript mode for a static native scrollback). The full-TUI Ctrl+O is
-    ///   interject, which keeps its Ctrl+Enter / Ctrl+I alt bindings —
-    ///   **except on Apple Terminal**, where Ctrl+O *is* the interject chord
-    ///   (kitty keyboard protocol unavailable → Ctrl+Enter doesn't arrive and
-    ///   Ctrl+I aliases to Tab, see `default_actions`'s terminal-aware
-    ///   `InterjectPrompt` binding). There the remap yields to interject only
-    ///   while an interject would actually consume the press (turn running with
-    ///   a non-empty composer, turn running with a queued follow-up on an empty
-    ///   composer, or editing a queued row) — otherwise minimal on Apple
-    ///   Terminal would have no working interject key at all. At idle / with an
-    ///   empty composer and no queue the interject path is a silent no-op, so
-    ///   the remap keeps the key and the transcript opens (it looked simply
-    ///   dead before); see `minimal_api::minimal_ctrl_o_opens_transcript`, which
-    ///   the info-row hint shares so it always advertises what a press would do.
+    ///   transcript mode for a static native scrollback), except while a pinned
+    ///   upgrade CTA is live; see `minimal_api::minimal_ctrl_o_opens_transcript`,
+    ///   which the info-row hint shares so it always advertises what a press
+    ///   would do.
     /// - The `ToggleQueue` chord (Ctrl+; by default; registry-resolved because
     ///   it is remappable and terminal-dependent) commits the read-only
     ///   `/queue` snapshot instead of toggling the full-TUI queue pane: the

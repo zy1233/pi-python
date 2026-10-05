@@ -491,25 +491,6 @@ mod tests {
         assert_eq!(agent.prompt.text(), "fix the retry loop");
     }
 
-    /// A deferred interject empties the composer off the normal send path, so it must report that itself or the stash never returns.
-    #[test]
-    fn a_deferred_interject_reports_the_draft_it_consumed() {
-        let mut agent = test_fixtures::make_agent();
-        agent.prompt.set_text("stashed thought");
-        agent.stash_prompt_draft(StashCause::Chord);
-        agent.session.start_turn(&mut agent.scrollback);
-        agent.prompt.set_text("one more thing");
-
-        let action = agent.resume_deferred_send(super::super::AgentDeferredSend::Interject);
-
-        assert!(action.is_some(), "the interject reissues after the probe");
-        assert_eq!(agent.prompt.text(), "", "the interject took the draft");
-        assert!(
-            agent.take_draft_consumed(),
-            "the router restores only what a handler reports"
-        );
-    }
-
     /// Ctrl+S belongs to the stash on every path: even declined, it must not reach the session picker, which lives on F3.
     #[test]
     fn ctrl_s_never_opens_the_session_picker() {

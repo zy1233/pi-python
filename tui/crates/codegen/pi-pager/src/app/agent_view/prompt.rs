@@ -3,10 +3,7 @@
 
 #[cfg(test)]
 use super::test_fixtures;
-use super::{
-    AgentDeferredSend, AgentPane, AgentView, PromptInputMode, PromptMode, is_bang_key, is_hash_key,
-    remember_mode_enabled, resolve_action,
-};
+use super::{AgentPane, AgentView, PromptInputMode, PromptMode, is_bang_key, is_hash_key, remember_mode_enabled, resolve_action};
 use crate::actions::{ActionId, ActionRegistry, When};
 use crate::app::actions::Action;
 use crate::app::app_view::InputOutcome;
@@ -82,16 +79,15 @@ impl AgentView {
     /// **Exception**: when the file search dropdown is visible, the widget gets
     /// first shot at Tab/Enter/Esc/arrows (for navigation and acceptance).
     /// Test-only wrapper around the private `handle_prompt_key` using a
-    /// **non–VS Code** pinned registry so host `TERM_PROGRAM` cannot change
-    /// InterjectPrompt / OpenExtensions chords under test.
+    /// **non–VS Code** pinned registry so the host `TERM_PROGRAM` cannot change
+    /// the chords under test.
     #[cfg(test)]
     pub(crate) fn handle_prompt_key_for_test(&mut self, key: &KeyEvent) -> InputOutcome {
         let registry = ActionRegistry::non_vscode_for_test();
         self.handle_prompt_key(key, &registry, false)
     }
 
-    /// Like [`Self::handle_prompt_key_for_test`] with an explicit registry
-    /// (e.g. [`ActionRegistry::vscode_family_for_test`]).
+    /// Like [`Self::handle_prompt_key_for_test`] with an explicit registry.
     #[cfg(test)]
     pub(crate) fn handle_prompt_key_with_registry_for_test(
         &mut self,
@@ -101,11 +97,11 @@ impl AgentView {
         self.handle_prompt_key(key, registry, false)
     }
 
-    // `pub(super)`: also called by `AppView::minimal_key_intercept` to route
-    // Apple Terminal's Ctrl+O interject chord straight to the prompt path —
-    // minimal's prompt is conceptually always focused, but `active_pane` can be
-    // Scrollback, whose `When::AgentScreen` promotion would misroute the chord
-    // to `ToggleYolo`.
+    // `pub(in crate::app)`: also called by `AppView::minimal_key_intercept` to
+    // route Ctrl+O straight to the prompt path while a pinned upgrade CTA is
+    // live — minimal's prompt is conceptually always focused, but `active_pane`
+    // can be Scrollback, whose `When::AgentScreen` promotion would misroute the
+    // chord to `ToggleYolo`.
     pub(in crate::app) fn handle_prompt_key(
         &mut self,
         key: &KeyEvent,
@@ -615,51 +611,6 @@ impl AgentView {
                     }
                     // try_send() returned None (empty, backslash continuation)
                     // → backslash continuation mutates widget, need redraw
-                    return InputOutcome::Changed;
-                }
-                ActionId::InterjectPrompt => {
-                    crate::actions::log_shortcut_used(
-                        key,
-                        ActionId::InterjectPrompt,
-                        When::PromptFocused.telemetry_name(),
-                    );
-                    // Editing-queued intercept lives in `queue_edit.rs`.
-                    if let Some(outcome) = self.interject_editing_queued_intercept() {
-                        return outcome;
-                    }
-                    // Mid-turn send-now (cancel-and-send):
-                    // 1) Non-empty composer → cancel the running turn and send
-                    //    that text as the next prompt.
-                    // 2) Empty composer + a visible follow-up in the queue →
-                    //    same as bare Enter: send the top row now.
-                    // 3) Idle / nothing to send: promote to ToggleYolo when that chord
-                    //    matches (Apple Terminal Ctrl+O opens YOLO / free-tier CTA).
-                    let text = self.prompt.text().trim().to_string();
-                    let turn_running = self.session.state.is_turn_running();
-                    if !text.is_empty() {
-                        if turn_running {
-                            // Paste-then-immediate-send: an image probe is still
-                            // off-thread. Stash (draft untouched) and re-issue on
-                            // completion so the not-yet-attached chip isn't dropped.
-                            if self.paste_probe_in_flight > 0 {
-                                self.deferred_send = Some(AgentDeferredSend::Interject);
-                                return InputOutcome::Changed;
-                            }
-                            // Drain images BEFORE set_text("") wipes the chip elements.
-                            let images = self.prompt.drain_images();
-                            self.prompt.set_text("");
-                            self.note_draft_consumed();
-                            return InputOutcome::Action(Action::SendPromptNow { text, images });
-                        }
-                    } else if turn_running
-                        && let Some(outcome) = self.try_send_now_queued_from_prompt()
-                    {
-                        return outcome;
-                    }
-                    if registry.matches_id(ActionId::ToggleYolo, key) {
-                        return self
-                            .handle_agent_action_with_registry(ActionId::ToggleYolo, registry);
-                    }
                     return InputOutcome::Changed;
                 }
                 ActionId::ToggleMultiline => {
@@ -1968,87 +1919,6 @@ mod prompt_suggestion_key_tests {
             "the key event latches the impression before dismissing"
         );
         assert!(!agent.prompt.prompt_suggestion.has_suggestion());
-    }
-}
-
-#[cfg(test)]
-mod apple_terminal_ctrl_o_upgrade_cta_tests {
-    use super::*;
-    use crate::app::agent::AgentState;
-    use crate::app::app_view::InputOutcome;
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use pi_telemetry::events::AnnouncementCtaSurface;
-
-    fn ctrl_o() -> KeyEvent {
-        KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL)
-    }
-
-    #[test]
-    fn apple_terminal_idle_ctrl_o_opens_pinned_upgrade_cta() {
-        let mut agent = super::test_fixtures::make_agent();
-        agent.pinned_upgrade_cta_live = true;
-        let registry = ActionRegistry::apple_terminal_for_test();
-
-        let outcome = agent.handle_prompt_key_with_registry_for_test(&ctrl_o(), &registry);
-        assert!(
-            matches!(
-                outcome,
-                InputOutcome::Action(Action::AnnouncementsOpenCta(
-                    AnnouncementCtaSurface::Keyboard
-                ))
-            ),
-            "idle Apple-Terminal Ctrl+O must open pinned CTA, got {outcome:?}"
-        );
-    }
-
-    #[test]
-    fn apple_terminal_idle_ctrl_o_without_promo_toggles_yolo() {
-        let mut agent = super::test_fixtures::make_agent();
-        agent.pinned_upgrade_cta_live = false;
-        let was_yolo = agent.session.is_yolo();
-        let registry = ActionRegistry::apple_terminal_for_test();
-
-        let outcome = agent.handle_prompt_key_with_registry_for_test(&ctrl_o(), &registry);
-        assert!(
-            matches!(
-                outcome,
-                InputOutcome::Action(Action::SetYoloMode(m)) if m != was_yolo
-            ),
-            "idle Apple-Terminal Ctrl+O without promo must toggle YOLO, got {outcome:?}"
-        );
-    }
-
-    #[test]
-    fn apple_terminal_running_ctrl_o_still_interjects() {
-        let mut agent = super::test_fixtures::make_agent();
-        agent.session.state = AgentState::TurnRunning;
-        agent.prompt.set_text("steer mid-turn");
-        agent.pinned_upgrade_cta_live = true;
-        let registry = ActionRegistry::apple_terminal_for_test();
-
-        let outcome = agent.handle_prompt_key_with_registry_for_test(&ctrl_o(), &registry);
-        assert!(
-            matches!(
-                outcome,
-                InputOutcome::Action(Action::SendPromptNow { ref text, .. })
-                    if text == "steer mid-turn"
-            ),
-            "running + payload: interject must win over CTA, got {outcome:?}"
-        );
-    }
-
-    #[test]
-    fn non_apple_ctrl_enter_idle_stays_noop() {
-        let mut agent = super::test_fixtures::make_agent();
-        agent.pinned_upgrade_cta_live = true;
-        let registry = ActionRegistry::non_vscode_for_test();
-        let ctrl_enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL);
-
-        let outcome = agent.handle_prompt_key_with_registry_for_test(&ctrl_enter, &registry);
-        assert!(
-            matches!(outcome, InputOutcome::Changed),
-            "idle Ctrl+Enter must stay a silent interject no-op, got {outcome:?}"
-        );
     }
 }
 

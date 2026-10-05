@@ -908,9 +908,6 @@ pub fn build_hints(
                 HintItem::paired(crate::key!('J'), crate::key!('K'), "reorder"),
                 HintItem::new(crate::key!('y'), "copy"),
             ];
-            if is_turn_running && let Some(def) = registry.find(ActionId::InterjectPrompt) {
-                hints.push(def.hint());
-            }
             hints
         }
         ActivePane::Prompt if is_editing_queued => {
@@ -1162,18 +1159,6 @@ pub fn build_hints(
         hints.push(hint);
     }
     let has_composer_payload = !prompt.text().trim().is_empty() || is_editing_queued;
-    if matches!(active_pane, ActivePane::Prompt)
-        && ActionRegistry::interjection_possible(is_turn_running, has_composer_payload)
-        && let Some(def) = registry.find(ActionId::InterjectPrompt)
-    {
-        hints.push(def.hint());
-    }
-    if can_demote
-        && !is_subagent_view
-        && let Some(key) = registry.key_for(ActionId::SendToBackground)
-    {
-        hints.push(HintItem::new(key, "send to bg"));
-    }
     hints
 }
 #[cfg(test)]
@@ -1347,42 +1332,6 @@ mod tests {
         let mut buf = render_hook_frame(&state, viewport);
         hover_hook_badge(&mut buf, &state, viewport, 0);
         assert!(!frame_text(&buf).contains("hover-hook"));
-    }
-    #[test]
-    fn demotion_hint_uses_registered_ctrl_b_binding() {
-        let registry = ActionRegistry::defaults();
-        let hints = build_hints(
-            ActivePane::Scrollback,
-            prompt_focus_hint(),
-            &PromptWidget::default(),
-            &registry,
-            false,
-            None,
-            None,
-            "expand thinking",
-            false,
-            false,
-            None,
-            false,
-            true,
-            false,
-            false,
-            true,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            None,
-        );
-        let hint = hints
-            .iter()
-            .find(|hint| hint.label == "send to bg")
-            .expect("running Execute should advertise demotion");
-        assert_eq!(hint.keys, vec![crate::key!('b', CONTROL)]);
     }
     #[test]
     fn group_header_shows_enter_toggle_hint_instead_of_open_and_fold() {
@@ -1742,7 +1691,7 @@ mod tests {
         );
     }
     #[test]
-    fn prompt_running_submit_hint_is_queue_and_send_now() {
+    fn prompt_running_submit_hint_is_queue() {
         let hints = prompt_hints_with_text_and_turn(false, false, true);
         let labels: Vec<&str> = hints.iter().map(|h| h.label.as_ref()).collect();
         assert!(
@@ -1754,8 +1703,8 @@ mod tests {
             "mid-turn must not mislabel Enter as send; got {labels:?}"
         );
         assert!(
-            labels.contains(&"send now"),
-            "mid-turn with composer text must advertise the send-now (interject) chord; got {labels:?}"
+            !labels.contains(&"send now"),
+            "the interject chord is gone, so no send-now hint; got {labels:?}"
         );
     }
     /// Empty composer + mid-turn queue: bare Enter is send-now in both normal

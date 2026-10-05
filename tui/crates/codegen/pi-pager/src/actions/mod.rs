@@ -36,7 +36,6 @@ pub(crate) fn default_actions(
 pub enum ActionId {
     // Prompt
     SendPrompt,
-    InterjectPrompt,
     /// Stash the composer draft; on an empty composer, pop the newest stash.
     StashPrompt,
     /// Enable voice mode and start recording (`/voice`). Not a toggle — it
@@ -92,20 +91,13 @@ pub enum ActionId {
 
     // Panes
     ToggleTodos,
-    ToggleTasks,
     ToggleQueue,
     OpenSessions,
-    OpenExtensions,
-    SendToBackground,
 
     // Prompt
     EditPromptExternal,
     CycleMode,
     BashMode,
-
-    // Scrollback (contextual)
-    Rewind,
-    KillBgTask,
 
     // Debug
     DumpInputLog,
@@ -113,8 +105,6 @@ pub enum ActionId {
     // App
     Quit,
     NewSession,
-    NewSessionInWorktree,
-    ExitSession,
     CommandPalette,
     ModelPicker,
     ShortcutsHelp,
@@ -270,22 +260,12 @@ impl ActionRegistry {
     }
 
     /// Whether `event` matches `id`'s default or any alt, ignoring `When`.
-    /// Used for cross-pane chords that share an action's key set (e.g. queue
-    /// force-interject uses the same keys as `InterjectPrompt`).
+    /// Used for cross-pane chords that share an action's key set.
     pub fn matches_id(&self, id: ActionId, event: &KeyEvent) -> bool {
         let Some(def) = self.find(id) else {
             return false;
         };
         def.default_key.matches(event) || def.alt_keys.iter().any(|k| k.matches(event))
-    }
-
-    /// True when the send-now (interject) chord should act or be advertised:
-    /// turn running and there is something to send. `has_payload` is true for
-    /// non-empty composer text, editing a queued row, or a visible queued
-    /// follow-up (empty-composer force-send from the prompt). Idle or no
-    /// payload remains a no-op (not send-like-Enter).
-    pub fn interjection_possible(turn_running: bool, has_payload: bool) -> bool {
-        turn_running && has_payload
     }
 
     /// Registry pinned to non–VS Code family bindings (host-independent tests).
@@ -306,61 +286,6 @@ impl ActionRegistry {
             }
             if def.id == ActionId::HalfPageDown {
                 def.default_key = key!('d', CONTROL);
-            }
-            if def.id == ActionId::InterjectPrompt {
-                def.default_key = key!(Enter, CONTROL);
-                def.alt_keys = vec![key!('i', CONTROL)];
-            }
-            if def.id == ActionId::OpenExtensions {
-                def.default_key = key!('l', CONTROL);
-                def.alt_keys = vec![];
-            }
-        }
-        Self::new(actions)
-    }
-
-    /// Registry pinned to Apple Terminal's interject binding (Ctrl+O is the
-    /// interject chord; kitty keyboard protocol unavailable → Ctrl+Enter does
-    /// not arrive). Host-independent stand-in for `default_actions` run under
-    /// an Apple Terminal context.
-    #[cfg(test)]
-    pub fn apple_terminal_for_test() -> Self {
-        Self::apple_terminal_for_mode_for_test(crate::app::ScreenMode::Fullscreen)
-    }
-
-    /// Mode-correct registry pinned to Apple Terminal's interject binding.
-    #[cfg(test)]
-    pub(crate) fn apple_terminal_for_mode_for_test(screen_mode: crate::app::ScreenMode) -> Self {
-        use crate::key;
-        let mut actions = defaults::default_actions(screen_mode, false);
-        for def in actions.iter_mut() {
-            if def.id == ActionId::InterjectPrompt {
-                def.default_key = key!('o', CONTROL);
-                def.alt_keys = vec![key!(Enter, CONTROL), key!('i', CONTROL)];
-            }
-        }
-        Self::new(actions)
-    }
-
-    /// Registry pinned to VS Code family interject / extensions bindings.
-    #[cfg(test)]
-    pub fn vscode_family_for_test() -> Self {
-        Self::vscode_family_for_mode_for_test(crate::app::ScreenMode::Fullscreen)
-    }
-
-    /// Mode-correct registry pinned to VS Code family bindings.
-    #[cfg(test)]
-    pub(crate) fn vscode_family_for_mode_for_test(screen_mode: crate::app::ScreenMode) -> Self {
-        use crate::key;
-        let mut actions = defaults::default_actions(screen_mode, false);
-        for def in actions.iter_mut() {
-            if def.id == ActionId::InterjectPrompt {
-                def.default_key = key!('l', CONTROL);
-                def.alt_keys = vec![];
-            }
-            if def.id == ActionId::OpenExtensions {
-                def.default_key = key!(Null);
-                def.alt_keys = vec![];
             }
         }
         Self::new(actions)
@@ -492,8 +417,6 @@ pub fn log_shortcut_used(key: &KeyEvent, action_id: ActionId, context: &str) {
 /// Stable product-event labels for the allowlisted actions. `None` = do not emit.
 fn shortcut_used_action_label(id: ActionId) -> Option<&'static str> {
     match id {
-        ActionId::InterjectPrompt => Some("interject_prompt"),
-        ActionId::OpenExtensions => Some("open_extensions"),
         _ => None,
     }
 }
@@ -508,31 +431,12 @@ mod tests {
         ActionRegistry::non_vscode_for_test()
     }
 
-    fn vscode_family_interject_registry() -> ActionRegistry {
-        ActionRegistry::vscode_family_for_test()
-    }
-
     #[test]
     fn shortcut_display() {
         assert_eq!(key!('q').display(), "q");
         assert_eq!(key!(Enter).display(), "Enter");
         assert_eq!(key!('c', CONTROL).display(), "Ctrl+c");
         assert_eq!(key!('l', CONTROL).display(), "Ctrl+l");
-    }
-
-    #[test]
-    fn shortcut_used_allowlist_is_ctrl_l_actions_only() {
-        assert_eq!(
-            shortcut_used_action_label(ActionId::InterjectPrompt),
-            Some("interject_prompt")
-        );
-        assert_eq!(
-            shortcut_used_action_label(ActionId::OpenExtensions),
-            Some("open_extensions")
-        );
-        assert_eq!(shortcut_used_action_label(ActionId::SendPrompt), None);
-        assert_eq!(When::PromptFocused.telemetry_name(), "prompt_focused");
-        assert_eq!(When::AgentScreen.telemetry_name(), "agent_screen");
     }
 
     #[test]
@@ -566,45 +470,6 @@ mod tests {
     }
 
     #[test]
-    fn vscode_family_interject_lookup_uses_ctrl_l_without_alts() {
-        let registry = vscode_family_interject_registry();
-        let ctrl_l = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL);
-        assert_eq!(
-            registry.lookup(&ctrl_l, When::PromptFocused),
-            Some(ActionId::InterjectPrompt)
-        );
-        assert!(registry.matches_id(ActionId::InterjectPrompt, &ctrl_l));
-        // No alt chords on VS family.
-        let ctrl_enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL);
-        assert_ne!(
-            registry.lookup(&ctrl_enter, When::PromptFocused),
-            Some(ActionId::InterjectPrompt)
-        );
-        assert!(!registry.matches_id(ActionId::InterjectPrompt, &ctrl_enter));
-        let ctrl_i = KeyEvent::new(KeyCode::Char('i'), KeyModifiers::CONTROL);
-        assert_ne!(
-            registry.lookup(&ctrl_i, When::PromptFocused),
-            Some(ActionId::InterjectPrompt)
-        );
-        // OpenExtensions must not claim Ctrl+L on VS family (plugins via /plugins).
-        assert_ne!(
-            registry.lookup(&ctrl_l, When::AgentScreen),
-            Some(ActionId::OpenExtensions)
-        );
-        let def = registry
-            .find(ActionId::InterjectPrompt)
-            .expect("InterjectPrompt");
-        assert!(def.alt_keys.is_empty());
-    }
-
-    #[test]
-    fn interjection_possible_gate() {
-        assert!(!ActionRegistry::interjection_possible(false, true));
-        assert!(!ActionRegistry::interjection_possible(true, false));
-        assert!(ActionRegistry::interjection_possible(true, true));
-    }
-
-    #[test]
     fn exact_context_matching() {
         let registry = non_vscode_registry();
 
@@ -622,146 +487,6 @@ mod tests {
             Some(ActionId::HalfPageDown)
         );
         assert_eq!(registry.lookup(&ctrl_d, When::Always), Some(ActionId::Quit));
-    }
-
-    #[test]
-    fn screen_mode_registries_own_ctrl_g_and_share_ctrl_b() {
-        let ctrl_b = KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL);
-        let ctrl_g = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL);
-
-        for mode in [
-            crate::app::ScreenMode::Fullscreen,
-            crate::app::ScreenMode::Inline,
-            crate::app::ScreenMode::Minimal,
-        ] {
-            let registry = ActionRegistry::defaults_for(mode);
-            assert_eq!(
-                registry.lookup(&ctrl_b, When::AgentScreen),
-                Some(ActionId::SendToBackground)
-            );
-            assert!(registry.matches_id(ActionId::SendToBackground, &ctrl_b));
-            assert!(!registry.matches_id(ActionId::SendToBackground, &ctrl_g));
-
-            let ctrl_g_actions: Vec<_> = registry
-                .all()
-                .iter()
-                .filter(|def| {
-                    def.context == When::AgentScreen
-                        && (def.default_key.matches(&ctrl_g)
-                            || def.alt_keys.iter().any(|key| key.matches(&ctrl_g)))
-                })
-                .map(|def| def.id)
-                .collect();
-            let expected = if mode.is_minimal() {
-                ActionId::EditPromptExternal
-            } else {
-                ActionId::ToggleTasks
-            };
-            assert_eq!(ctrl_g_actions, vec![expected]);
-            assert_eq!(registry.lookup(&ctrl_g, When::AgentScreen), Some(expected));
-            assert!(registry.matches_id(expected, &ctrl_g));
-
-            assert_eq!(
-                registry.find(ActionId::ToggleTasks).is_some(),
-                !mode.is_minimal()
-            );
-            assert_eq!(
-                registry.find(ActionId::EditPromptExternal).is_some(),
-                mode.is_minimal()
-            );
-        }
-    }
-
-    #[test]
-    fn minimal_registry_omits_unsupported_surfaces() {
-        let minimal = ActionRegistry::defaults_for(crate::app::ScreenMode::Minimal);
-        assert!(minimal.find(ActionId::FocusScrollback).is_none());
-        assert!(minimal.find(ActionId::ToggleMouseCapture).is_none());
-        assert!(
-            minimal
-                .all()
-                .iter()
-                .all(|def| !matches!(def.context, When::ScrollbackFocused))
-        );
-        let minimal_with_config =
-            ActionRegistry::defaults_with_config_for(crate::app::ScreenMode::Minimal, true);
-        assert!(
-            minimal_with_config
-                .find(ActionId::ToggleMouseCapture)
-                .is_none()
-        );
-        assert_eq!(
-            minimal.find(ActionId::SendPrompt).map(|def| def.context),
-            Some(When::PromptFocused)
-        );
-        assert_eq!(
-            minimal
-                .find(ActionId::SendToBackground)
-                .map(|def| def.context),
-            Some(When::AgentScreen)
-        );
-        assert_eq!(
-            minimal.find(ActionId::Quit).map(|def| def.context),
-            Some(When::Always)
-        );
-        assert_eq!(
-            minimal.find(ActionId::NewSession).map(|def| def.context),
-            Some(When::Always)
-        );
-
-        for mode in [
-            crate::app::ScreenMode::Fullscreen,
-            crate::app::ScreenMode::Inline,
-        ] {
-            let registry = ActionRegistry::defaults_for(mode);
-            assert_eq!(
-                registry
-                    .find(ActionId::FocusScrollback)
-                    .map(|def| def.context),
-                Some(When::PromptFocused)
-            );
-            assert!(
-                registry
-                    .all()
-                    .iter()
-                    .any(|def| def.context == When::ScrollbackFocused)
-            );
-        }
-    }
-
-    #[test]
-    fn send_to_background_help_is_mode_accurate() {
-        let fullscreen = ActionRegistry::defaults_for(crate::app::ScreenMode::Fullscreen)
-            .find(ActionId::SendToBackground)
-            .and_then(|def| def.long_help)
-            .expect("fullscreen background help");
-        assert!(fullscreen.contains("tasks pane (Ctrl+G)"));
-        assert!(!fullscreen.contains("/tasks"));
-
-        let minimal = ActionRegistry::defaults_for(crate::app::ScreenMode::Minimal)
-            .find(ActionId::SendToBackground)
-            .and_then(|def| def.long_help)
-            .expect("minimal background help");
-        assert!(minimal.contains("/tasks"));
-        assert!(!minimal.contains("tasks pane (Ctrl+G)"));
-    }
-
-    #[test]
-    fn terminal_family_test_registries_preserve_screen_mode() {
-        for registry in [
-            ActionRegistry::non_vscode_for_mode_for_test(crate::app::ScreenMode::Minimal),
-            ActionRegistry::apple_terminal_for_mode_for_test(crate::app::ScreenMode::Minimal),
-            ActionRegistry::vscode_family_for_mode_for_test(crate::app::ScreenMode::Minimal),
-        ] {
-            assert!(registry.find(ActionId::EditPromptExternal).is_some());
-            assert!(registry.find(ActionId::ToggleTasks).is_none());
-            assert!(
-                registry
-                    .all()
-                    .iter()
-                    .all(|def| !matches!(def.context, When::ScrollbackFocused))
-            );
-        }
     }
 
     #[test]
@@ -906,12 +631,6 @@ mod tests {
     }
 
     #[test]
-    fn exit_session_is_command_only() {
-        let registry = ActionRegistry::defaults();
-        assert!(registry.find(ActionId::ExitSession).is_none());
-    }
-
-    #[test]
     fn shortcuts_help_registered_with_ctrl_dot_and_ctrl_x() {
         let registry = ActionRegistry::defaults();
         let def = registry
@@ -932,6 +651,107 @@ mod tests {
         assert_eq!(
             registry.lookup(&ctrl_x, When::AgentScreen),
             Some(ActionId::ShortcutsHelp)
+        );
+    }
+
+    #[test]
+    fn ctrl_g_is_external_editor_in_minimal_only() {
+        let ctrl_g = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL);
+
+        for mode in [
+            crate::app::ScreenMode::Fullscreen,
+            crate::app::ScreenMode::Inline,
+            crate::app::ScreenMode::Minimal,
+        ] {
+            let registry = ActionRegistry::defaults_for(mode);
+            let ctrl_g_actions: Vec<_> = registry
+                .all()
+                .iter()
+                .filter(|def| {
+                    def.context == When::AgentScreen
+                        && (def.default_key.matches(&ctrl_g)
+                            || def.alt_keys.iter().any(|key| key.matches(&ctrl_g)))
+                })
+                .map(|def| def.id)
+                .collect();
+            if mode.is_minimal() {
+                assert_eq!(ctrl_g_actions, vec![ActionId::EditPromptExternal]);
+                assert_eq!(
+                    registry.lookup(&ctrl_g, When::AgentScreen),
+                    Some(ActionId::EditPromptExternal)
+                );
+                assert!(registry.matches_id(ActionId::EditPromptExternal, &ctrl_g));
+            } else {
+                assert!(ctrl_g_actions.is_empty());
+            }
+            assert_eq!(
+                registry.find(ActionId::EditPromptExternal).is_some(),
+                mode.is_minimal()
+            );
+        }
+    }
+
+    #[test]
+    fn minimal_registry_omits_unsupported_surfaces() {
+        let minimal = ActionRegistry::defaults_for(crate::app::ScreenMode::Minimal);
+        assert!(minimal.find(ActionId::FocusScrollback).is_none());
+        assert!(minimal.find(ActionId::ToggleMouseCapture).is_none());
+        assert!(
+            minimal
+                .all()
+                .iter()
+                .all(|def| !matches!(def.context, When::ScrollbackFocused))
+        );
+        let minimal_with_config =
+            ActionRegistry::defaults_with_config_for(crate::app::ScreenMode::Minimal, true);
+        assert!(
+            minimal_with_config
+                .find(ActionId::ToggleMouseCapture)
+                .is_none()
+        );
+        assert_eq!(
+            minimal.find(ActionId::SendPrompt).map(|def| def.context),
+            Some(When::PromptFocused)
+        );
+        assert_eq!(
+            minimal.find(ActionId::Quit).map(|def| def.context),
+            Some(When::Always)
+        );
+        assert_eq!(
+            minimal.find(ActionId::NewSession).map(|def| def.context),
+            Some(When::Always)
+        );
+
+        for mode in [
+            crate::app::ScreenMode::Fullscreen,
+            crate::app::ScreenMode::Inline,
+        ] {
+            let registry = ActionRegistry::defaults_for(mode);
+            assert_eq!(
+                registry
+                    .find(ActionId::FocusScrollback)
+                    .map(|def| def.context),
+                Some(When::PromptFocused)
+            );
+            assert!(
+                registry
+                    .all()
+                    .iter()
+                    .any(|def| def.context == When::ScrollbackFocused)
+            );
+        }
+    }
+
+    #[test]
+    fn test_registry_preserves_screen_mode() {
+        let registry =
+            ActionRegistry::non_vscode_for_mode_for_test(crate::app::ScreenMode::Minimal);
+        assert!(registry.find(ActionId::EditPromptExternal).is_some());
+        assert!(
+            registry
+                .all()
+                .iter()
+                .all(|def| !matches!(def.context, When::ScrollbackFocused))
         );
     }
 }

@@ -797,8 +797,6 @@ pub(crate) struct FollowUps {
 pub(crate) enum AgentDeferredSend {
     /// Enter: a normal prompt send.
     SendPrompt,
-    /// Ctrl+Enter: a mid-turn interjection.
-    Interject,
     /// Enter on the `/feedback` pane — a feedback submit.
     SubmitFeedback,
     /// Ctrl+S / Alt+S: set the draft aside once its image lands.
@@ -2182,15 +2180,12 @@ fn resolve_action(action_id: Option<ActionId>) -> Option<InputOutcome> {
         ActionId::CycleMode => Action::CycleMode,
         ActionId::CancelTurn
         | ActionId::Quit
-        | ActionId::ExitSession
         | ActionId::NewSession
-        | ActionId::NewSessionInWorktree
         | ActionId::CommandPalette
         | ActionId::ModelPicker => return None,
         ActionId::DumpInputLog => return None,
         ActionId::ToggleYolo => return None,
         ActionId::ToggleMultiline => return None,
-        ActionId::InterjectPrompt => return None,
         ActionId::StashPrompt => return None,
         ActionId::EnableVoiceMode => Action::EnableVoiceMode,
         ActionId::VoiceToggle => {
@@ -2202,15 +2197,10 @@ fn resolve_action(action_id: Option<ActionId>) -> Option<InputOutcome> {
         ActionId::ShortcutsHelp => return None,
         ActionId::OpenSettings => return None,
         ActionId::ToggleTodos
-        | ActionId::ToggleTasks
         | ActionId::EditPromptExternal
         | ActionId::ToggleQueue
         | ActionId::OpenSessions
-        | ActionId::OpenExtensions
-        | ActionId::SendToBackground
-        | ActionId::BashMode
-        | ActionId::Rewind
-        | ActionId::KillBgTask => return None,
+        | ActionId::BashMode => return None,
     };
     Some(InputOutcome::Action(action))
 }
@@ -2588,9 +2578,6 @@ pub(crate) mod test_fixtures {
             })
             .count()
     }
-    pub fn raw_ctrl_b_event() -> crossterm::event::Event {
-        crossterm::event::Event::Key(KeyEvent::new(KeyCode::Char('\u{0002}'), KeyModifiers::NONE))
-    }
     pub fn add_running_bg_task(agent: &mut AgentView) {
         agent.session.bg_tasks.insert(
             "task-1".into(),
@@ -2749,17 +2736,9 @@ pub(crate) mod test_fixtures {
     pub fn force_interject_key() -> KeyEvent {
         KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)
     }
-    /// Interject chord for VS Code family tests (`Ctrl+L`).
-    pub fn vscode_interject_key() -> KeyEvent {
-        KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL)
-    }
     /// Host-independent registry for queue/prompt interject tests (Ctrl+Enter).
     pub fn non_vscode_registry() -> ActionRegistry {
         ActionRegistry::non_vscode_for_test()
-    }
-    /// Host-independent VS family registry (Ctrl+L interject, OpenExtensions Null).
-    pub fn vscode_family_registry() -> ActionRegistry {
-        ActionRegistry::vscode_family_for_test()
     }
     #[test]
     fn apply_follow_ups_renders_chips_for_a_response() {

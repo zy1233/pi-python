@@ -3,6 +3,7 @@
 #[cfg(test)]
 use super::{ActivePane, AgentViewLayout, PromptInputMode, render_dropdown_chrome};
 use super::{AgentDeferredSend, AgentView};
+#[cfg(test)]
 use crate::actions::ActionRegistry;
 use crate::app::actions::Action;
 use crate::app::app_view::InputOutcome;
@@ -260,19 +261,6 @@ impl AgentView {
             AgentDeferredSend::SendPrompt => {
                 let text = self.prompt.text().to_string();
                 (!text.trim().is_empty()).then_some(Action::SendPrompt(text))
-            }
-            AgentDeferredSend::Interject => {
-                let text = self.prompt.text().trim().to_string();
-                if !ActionRegistry::interjection_possible(
-                    self.session.state.is_turn_running(),
-                    !text.is_empty(),
-                ) {
-                    return None;
-                }
-                let images = self.prompt.drain_images();
-                self.prompt.set_text("");
-                self.note_draft_consumed();
-                Some(Action::SendPromptNow { text, images })
             }
             AgentDeferredSend::SubmitFeedback => {
                 if !self

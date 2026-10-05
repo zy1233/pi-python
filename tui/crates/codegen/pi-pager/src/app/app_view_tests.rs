@@ -2,7 +2,7 @@ use super::*;
 use crate::acp::model_state::ModelState;
 use crate::acp::tracker::AcpUpdateTracker;
 use crate::app::agent::{AgentSession, AgentState};
-use crate::app::agent_view::{AgentView, PromptMode};
+use crate::app::agent_view::AgentView;
 use crate::app::bundle::BundleState;
 use crate::scrollback::state::ScrollbackState;
 use crossterm::event::{
@@ -1453,7 +1453,7 @@ fn welcome_ctrl_u_update_keeps_priority_over_foreign_resume() {
     ));
 }
 #[test]
-fn minimal_ctrl_g_edits_prompt_while_full_tui_keeps_tasks() {
+fn minimal_ctrl_g_edits_prompt_while_full_tui_leaves_it_unbound() {
     let event = key_event(KeyCode::Char('g'), KeyModifiers::CONTROL);
     let mut minimal = test_app_with_agent();
     minimal.screen_mode = ScreenMode::Minimal;
@@ -1480,8 +1480,6 @@ fn minimal_ctrl_g_edits_prompt_while_full_tui_keeps_tasks() {
         out,
         InputOutcome::Action(Action::EditPromptExternal)
     ));
-    assert!(!minimal.agents[&id].tasks.overlay.visible);
-    assert!(!minimal.agents[&id].tasks.overlay.focused);
     minimal.pending_editor = Some(
         crate::app::external_editor::PendingEditorRequest::PromptDraft {
             agent_id: id,
@@ -1505,14 +1503,13 @@ fn minimal_ctrl_g_edits_prompt_while_full_tui_keeps_tasks() {
         .open = true;
     assert!(matches!(owned.handle_input(&event), InputOutcome::Changed));
     assert!(owned.pending_editor.is_none());
-    assert!(!owned.agents[&id].tasks.overlay.visible);
-    assert!(!owned.agents[&id].tasks.overlay.focused);
     let mut full = test_app_with_agent();
     full.screen_mode = ScreenMode::Fullscreen;
     let out = full.handle_input(&event);
-    assert!(matches!(out, InputOutcome::Changed));
-    assert!(full.agents[&id].tasks.overlay.visible);
-    assert!(full.agents[&id].tasks.overlay.focused);
+    assert!(
+        !matches!(out, InputOutcome::Action(Action::EditPromptExternal)),
+        "Ctrl+G is only the external-editor chord in minimal mode, got {out:?}"
+    );
     assert!(full.pending_editor.is_none());
 }
 #[test]
@@ -1543,70 +1540,7 @@ fn non_minimal_ctrl_t_leaves_todo_panel_flag_untouched() {
         "the minimal todo-panel flag must never flip outside minimal mode"
     );
 }
-/// The minimal info-row transcript hint and the Ctrl+O key remap are gated
-/// on the same predicate. Ctrl+O opens the transcript pager unless it is
-/// the interject chord (Apple Terminal) AND an interject would actually
-/// consume the press (turn running + non-empty composer, turn running +
-/// queued follow-up with empty composer, or editing a queued row) — at
-/// idle / empty composer with no queue the interject path is a silent
-/// no-op, so the remap keeps the key (it looked simply dead before).
-#[test]
-fn minimal_ctrl_o_transcript_predicate_tracks_interject_binding() {
-    let mut app = test_app_with_agent();
-    app.registry = ActionRegistry::non_vscode_for_mode_for_test(ScreenMode::Minimal);
-    assert!(
-        crate::minimal_api::minimal_ctrl_o_opens_transcript(&app),
-        "Ctrl+O opens the transcript when interject doesn't own the chord"
-    );
-    app.registry = ActionRegistry::apple_terminal_for_mode_for_test(ScreenMode::Minimal);
-    assert!(
-        crate::minimal_api::minimal_ctrl_o_opens_transcript(&app),
-        "idle + empty composer: Ctrl+O must open the transcript, not no-op"
-    );
-    let id = super::super::agent::AgentId(0);
-    app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
-    assert!(
-        crate::minimal_api::minimal_ctrl_o_opens_transcript(&app),
-        "running turn + empty composer + empty queue: still no interjection"
-    );
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.prompt.set_text("");
-        agent.session.enqueue_prompt("queued follow-up".into());
-    }
-    assert!(
-        !crate::minimal_api::minimal_ctrl_o_opens_transcript(&app),
-        "running + empty composer + queue: Ctrl+O must yield to send-now"
-    );
-    app.agents
-        .get_mut(&id)
-        .unwrap()
-        .session
-        .pending_prompts
-        .clear();
-    app.agents.get_mut(&id).unwrap().prompt.set_text("steer it");
-    assert!(
-        !crate::minimal_api::minimal_ctrl_o_opens_transcript(&app),
-        "running turn + payload: Ctrl+O must yield to interject"
-    );
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.session.state = AgentState::Idle;
-        agent.prompt_mode = PromptMode::EditingQueued {
-            id: 1,
-            original: String::new(),
-            server_id: None,
-            kind: crate::app::agent::QueueEntryKind::Prompt,
-        };
-    }
-    assert!(
-        !crate::minimal_api::minimal_ctrl_o_opens_transcript(&app),
-        "editing a queued row: Ctrl+O must stay the interject/save key"
-    );
-}
-/// In minimal mode Ctrl+O routes to `Action::OpenTranscriptPager` (unless
-/// interject owns the chord AND would consume the press — see the
-/// predicate test above).
+/// In minimal mode Ctrl+O routes to `Action::OpenTranscriptPager`.
 #[test]
 fn minimal_ctrl_o_opens_transcript_pager() {
     let mut app = test_app_with_agent();
@@ -1617,94 +1551,6 @@ fn minimal_ctrl_o_opens_transcript_pager() {
         matches!(out, InputOutcome::Action(Action::OpenTranscriptPager)),
         "expected OpenTranscriptPager, got {out:?}"
     );
-}
-/// Apple Terminal (interject = Ctrl+O), minimal mode: at idle the interject
-/// path would silently no-op, so Ctrl+O must open the transcript — this was
-/// the "Ctrl+O appears dead on Mac" report. With a running turn and text in
-/// the composer the same key must send-now (cancel-and-send). With a running
-/// turn, empty composer, and a queued follow-up it must force-send that row
-/// (send-now).
-#[test]
-fn minimal_ctrl_o_on_apple_terminal_transcript_at_idle_interject_with_payload() {
-    let mut app = test_app_with_agent();
-    app.screen_mode = ScreenMode::Minimal;
-    app.registry = ActionRegistry::apple_terminal_for_mode_for_test(ScreenMode::Minimal);
-    let out = app.handle_input(&key_event(KeyCode::Char('o'), KeyModifiers::CONTROL));
-    assert!(
-        matches!(out, InputOutcome::Action(Action::OpenTranscriptPager)),
-        "idle Apple-Terminal Ctrl+O must open the transcript, got {out:?}"
-    );
-    let id = super::super::agent::AgentId(0);
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.session.state = AgentState::TurnRunning;
-        agent.prompt.set_text("steer it");
-    }
-    let out = app.handle_input(&key_event(KeyCode::Char('o'), KeyModifiers::CONTROL));
-    assert!(
-        matches!(out, InputOutcome::Action(Action::SendPromptNow { ref text, .. }) if text == "steer it"),
-        "running Apple-Terminal Ctrl+O with payload must send-now, got {out:?}"
-    );
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.prompt.set_text("");
-        agent.session.enqueue_prompt("queued follow-up".into());
-    }
-    let out = app.handle_input(&key_event(KeyCode::Char('o'), KeyModifiers::CONTROL));
-    assert!(
-        matches!(
-            out,
-            InputOutcome::Action(Action::SendPromptNow { ref text, .. })
-                if text == "queued follow-up"
-        ),
-        "running + empty + queue: Apple-Terminal Ctrl+O must send-now, got {out:?}"
-    );
-    assert!(
-        app.agents[&id].session.pending_prompts.is_empty(),
-        "queued row must be consumed by prompt-path send-now"
-    );
-}
-fn assert_background_routing_for_mode(
-    mode: ScreenMode,
-    pane: crate::app::agent_view::AgentPane,
-    event: Event,
-) {
-    let mut app = test_app_with_agent();
-    app.screen_mode = mode;
-    app.registry = ActionRegistry::defaults_for(mode);
-    let ActiveView::Agent(id) = app.active_view else {
-        panic!("test app must start on an agent");
-    };
-    app.agents.get_mut(&id).unwrap().set_active_pane(pane, true);
-    let out = app.handle_input(&event);
-    assert!(matches!(out, InputOutcome::Changed));
-    assert_eq!(app.agents[&id].active_pane, pane);
-    assert!(!app.agents[&id].tasks.overlay.visible);
-    assert!(!app.agents[&id].tasks.overlay.focused);
-    crate::app::agent_view::test_fixtures::add_running_execute(app.agents.get_mut(&id).unwrap());
-    let out = app.handle_input(&event);
-    assert!(matches!(
-        out,
-        InputOutcome::Action(Action::DemoteToBackground)
-    ));
-    assert_eq!(app.agents[&id].active_pane, pane);
-    assert!(!app.agents[&id].tasks.overlay.visible);
-    assert!(!app.agents[&id].tasks.overlay.focused);
-}
-#[test]
-fn raw_ctrl_b_routes_like_canonical_in_full_and_minimal_modes() {
-    for mode in [ScreenMode::Fullscreen, ScreenMode::Minimal] {
-        for pane in [
-            crate::app::agent_view::AgentPane::Prompt,
-            crate::app::agent_view::AgentPane::Scrollback,
-        ] {
-            assert_background_routing_for_mode(
-                mode,
-                pane,
-                crate::app::agent_view::test_fixtures::raw_ctrl_b_event(),
-            );
-        }
-    }
 }
 /// Minimal maps the full-TUI queue chord to `/queue` because the pane is absent.
 #[test]

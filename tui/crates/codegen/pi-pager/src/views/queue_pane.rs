@@ -653,9 +653,6 @@ impl QueuePane {
         registry: &crate::actions::ActionRegistry,
     ) -> Option<QueueEvent> {
         let id = self.selected_id()?;
-        if registry.matches_id(crate::actions::ActionId::InterjectPrompt, key) {
-            return Some(QueueEvent::ForceInterject { id });
-        }
         match key.code {
             KeyCode::Char('x') | KeyCode::Delete | KeyCode::Backspace => {
                 Some(QueueEvent::DeleteSelected { id })

@@ -939,12 +939,6 @@ impl AgentView {
         }
         if let Event::Key(key) = ev
             && key.kind != KeyEventKind::Release
-            && registry.matches_id(ActionId::SendToBackground, key)
-        {
-            return self.handle_agent_action_with_registry(ActionId::SendToBackground, registry);
-        }
-        if let Event::Key(key) = ev
-            && key.kind != KeyEventKind::Release
             && key!('y', CONTROL).matches(key)
             && self.ephemeral_tip.current_key()
                 == Some(crate::tips::word_select::WORD_SELECT_TIP_KEY)
@@ -1020,19 +1014,6 @@ impl AgentView {
         }
         if let Event::Key(key) = ev
             && key.kind != KeyEventKind::Release
-            && registry.matches_id(ActionId::ToggleTasks, key)
-        {
-            self.tasks.overlay.toggle();
-            self.tasks.on_state_change();
-            if self.tasks.overlay.focused {
-                self.set_active_pane(AgentPane::Tasks, false);
-            } else if self.active_pane == AgentPane::Tasks {
-                self.set_active_pane(AgentPane::Scrollback, false);
-            }
-            return InputOutcome::Changed;
-        }
-        if let Event::Key(key) = ev
-            && key.kind != KeyEventKind::Release
             && registry.matches_id(ActionId::OpenSessions, key)
         {
             self.active_modal = Some(ActiveModal::SessionPicker {
@@ -1058,20 +1039,6 @@ impl AgentView {
         {
             self.toggle_queue_pane();
             return InputOutcome::Changed;
-        }
-        if let Event::Key(key) = ev
-            && key.kind != KeyEventKind::Release
-            && registry.lookup(key, When::AgentScreen) == Some(ActionId::OpenExtensions)
-        {
-            crate::actions::log_shortcut_used(
-                key,
-                ActionId::OpenExtensions,
-                When::AgentScreen.telemetry_name(),
-            );
-            return InputOutcome::Action(Action::OpenExtensionsModal {
-                tab: crate::views::extensions_modal::ExtensionsTab::Plugins,
-                trigger: pi_telemetry::events::ExtensionsModalTrigger::KeyboardShortcut,
-            });
         }
         if let Event::Key(key) = ev
             && key.kind != KeyEventKind::Release
@@ -1214,19 +1181,6 @@ impl AgentView {
                     ))
                 } else {
                     InputOutcome::Action(Action::SetYoloMode(!self.session.is_yolo()))
-                }
-            }
-            ActionId::SendToBackground => {
-                if !self.is_subagent_view
-                    && self
-                        .session
-                        .tracker
-                        .running_execute_tool_call_id()
-                        .is_some()
-                {
-                    InputOutcome::Action(Action::DemoteToBackground)
-                } else {
-                    InputOutcome::Changed
                 }
             }
             ActionId::EditPromptExternal => {
@@ -1372,74 +1326,11 @@ impl AgentView {
 #[cfg(test)]
 mod background_and_tasks_shortcut_tests {
     use super::super::AgentPane;
-    use super::super::test_fixtures::{add_running_bg_task, add_running_execute, make_agent};
+    use super::super::test_fixtures::make_agent;
     use crate::actions::ActionRegistry;
-    use crate::app::actions::Action;
     use crate::app::app_view::InputOutcome;
     use crate::views::history_search::HistoryEntry;
-    use crate::views::list_pane::InputBarMode;
-    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-    fn ctrl(c: char) -> Event {
-        Event::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL))
-    }
-    fn assert_demotes(outcome: InputOutcome) {
-        assert!(matches!(
-            outcome,
-            InputOutcome::Action(Action::DemoteToBackground)
-        ));
-    }
-    #[test]
-    fn ctrl_b_is_consumed_when_ineligible_and_demotes_when_eligible() {
-        let registry = ActionRegistry::defaults();
-        for pane in [AgentPane::Prompt, AgentPane::Scrollback] {
-            let mut agent = make_agent();
-            agent.set_active_pane(pane, true);
-            agent.prompt.set_text("draft");
-            let cursor = agent.prompt.text().len();
-            agent.prompt.set_cursor(cursor);
-            assert!(matches!(
-                agent.handle_input(&ctrl('b'), &registry),
-                InputOutcome::Changed
-            ));
-            assert_eq!(agent.active_pane, pane);
-            assert_eq!(agent.prompt.text(), "draft");
-            assert_eq!(agent.prompt.cursor(), cursor);
-            assert!(!agent.tasks.overlay.focused);
-            add_running_execute(&mut agent);
-            assert_demotes(agent.handle_input(&ctrl('b'), &registry));
-            assert_eq!(agent.active_pane, pane);
-            assert_eq!(agent.prompt.text(), "draft");
-            assert_eq!(agent.prompt.cursor(), cursor);
-        }
-    }
-    #[test]
-    fn ctrl_b_preempts_history_browse_and_search_without_mutating_them() {
-        let registry = ActionRegistry::defaults();
-        for browse in [true, false] {
-            let mut agent = make_agent();
-            agent.set_active_pane(AgentPane::Prompt, true);
-            let history = [HistoryEntry {
-                text: "earlier prompt".into(),
-            }];
-            if browse {
-                assert!(agent.prompt.history_search.activate_browse(&history, ""));
-                agent.prompt.set_text("earlier prompt");
-            } else {
-                assert!(agent.prompt.history_search.activate(&history, "query"));
-                agent.prompt.set_text("query");
-            }
-            let text = agent.prompt.text().to_string();
-            let cursor = agent.prompt.cursor();
-            let selected = agent.prompt.history_search.selected;
-            add_running_execute(&mut agent);
-            assert_demotes(agent.handle_input(&ctrl('b'), &registry));
-            assert!(agent.prompt.history_search.is_active());
-            assert_eq!(agent.prompt.history_search.is_browse(), browse);
-            assert_eq!(agent.prompt.history_search.selected, selected);
-            assert_eq!(agent.prompt.text(), text);
-            assert_eq!(agent.prompt.cursor(), cursor);
-        }
-    }
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     #[test]
     fn shortcuts_key_tears_down_history_and_opens_cheatsheet() {
         use crate::views::modal::ActiveModal;
@@ -1473,121 +1364,6 @@ mod background_and_tasks_shortcut_tests {
                 );
             }
         }
-    }
-    #[test]
-    fn ctrl_b_preempts_tasks_search_and_filter_without_mutating_them() {
-        let registry = ActionRegistry::defaults();
-        for (open_key, expected_mode) in [('/', InputBarMode::Search), ('f', InputBarMode::Filter)]
-        {
-            let mut agent = make_agent();
-            add_running_bg_task(&mut agent);
-            agent.tasks.overlay.visible = true;
-            agent.tasks.overlay.focused = true;
-            agent.set_active_pane(AgentPane::Tasks, true);
-            assert!(
-                agent
-                    .tasks
-                    .handle_key(&KeyEvent::new(KeyCode::Char(open_key), KeyModifiers::NONE,))
-            );
-            for c in "needle".chars() {
-                assert!(
-                    agent
-                        .tasks
-                        .handle_key(&KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE,))
-                );
-            }
-            add_running_execute(&mut agent);
-            assert_demotes(agent.handle_input(&ctrl('b'), &registry));
-            assert_eq!(agent.active_pane, AgentPane::Tasks);
-            assert!(agent.tasks.overlay.visible);
-            assert!(agent.tasks.overlay.focused);
-            assert_eq!(agent.tasks.list_state.input_mode(), Some(expected_mode));
-            assert_eq!(agent.tasks.list_state.input_text(), "needle");
-        }
-    }
-    #[test]
-    fn fullscreen_child_ctrl_b_never_demotes_child_or_parent() {
-        let registry = ActionRegistry::defaults();
-        let child_sid = "child-sid".to_string();
-        let mut parent = make_agent();
-        add_running_execute(&mut parent);
-        assert!(
-            parent
-                .session
-                .tracker
-                .running_execute_tool_call_id()
-                .is_some()
-        );
-        let mut child = make_agent();
-        add_running_execute(&mut child);
-        assert!(
-            child
-                .session
-                .tracker
-                .running_execute_tool_call_id()
-                .is_some()
-        );
-        child.set_active_pane(AgentPane::Scrollback, true);
-        parent
-            .subagent_views
-            .insert(child_sid.clone(), Box::new(child));
-        assert!(!parent.subagent_views[&child_sid].is_subagent_view);
-        parent.open_subagent_fullscreen(child_sid.clone());
-        assert!(parent.subagent_views[&child_sid].is_subagent_view);
-        let outcome = parent.handle_input(&ctrl('b'), &registry);
-        assert!(matches!(outcome, InputOutcome::Changed));
-        assert!(!matches!(
-            outcome,
-            InputOutcome::Action(Action::DemoteToBackground)
-        ));
-        assert_eq!(parent.active_subagent.as_deref(), Some(child_sid.as_str()));
-        assert!(
-            parent
-                .session
-                .tracker
-                .running_execute_tool_call_id()
-                .is_some()
-        );
-        assert!(
-            parent.subagent_views[&child_sid]
-                .session
-                .tracker
-                .running_execute_tool_call_id()
-                .is_some()
-        );
-        let child = &parent.subagent_views[&child_sid];
-        assert!(child.is_subagent_view);
-        assert!(
-            !child
-                .current_shortcut_hints(&registry, false)
-                .iter()
-                .any(|hint| hint.label == "send to bg")
-        );
-        assert!(child.hit_bg_button.rect.is_none());
-    }
-    #[test]
-    fn ctrl_g_toggles_tasks_and_never_demotes() {
-        let registry = ActionRegistry::defaults();
-        let mut agent = make_agent();
-        agent.prompt.set_text("draft");
-        let draft_len = agent.prompt.text().len();
-        agent.prompt.set_cursor(draft_len);
-        agent.set_active_pane(AgentPane::Prompt, true);
-        add_running_execute(&mut agent);
-        let first = agent.handle_input(&ctrl('g'), &registry);
-        assert!(matches!(first, InputOutcome::Changed));
-        assert_eq!(agent.active_pane, AgentPane::Tasks);
-        assert!(agent.tasks.overlay.visible);
-        assert!(agent.tasks.overlay.focused);
-        assert_eq!(agent.prompt.text(), "draft");
-        assert_eq!(agent.prompt.cursor(), draft_len);
-        let second = agent.handle_input(&ctrl('g'), &registry);
-        assert!(matches!(
-            second,
-            InputOutcome::Action(Action::FocusScrollback)
-        ));
-        assert!(!agent.tasks.overlay.visible);
-        assert!(!agent.tasks.overlay.focused);
     }
 }
 #[cfg(test)]

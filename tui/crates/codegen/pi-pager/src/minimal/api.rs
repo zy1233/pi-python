@@ -268,65 +268,18 @@ pub fn status_line_inner_width(width: u16, padding: u16) -> Option<u16> {
 
 /// Whether minimal's Ctrl+O remap opens the full-transcript pager *right now*.
 ///
-/// Minimal remaps Ctrl+O to `Action::OpenTranscriptPager` except when:
-///
-/// - Ctrl+O is bound to interject (Apple Terminal: the kitty keyboard protocol is
-///   unavailable, so Ctrl+Enter doesn't arrive and Ctrl+I aliases to Tab, leaving
-///   Ctrl+O as the only interject chord) AND an interject would actually consume
-///   the press:
-///   - editing a queued row (the interject key saves / interjects the edit), or
-///   - a turn is running with a non-empty composer, or
-///   - a turn is running with an empty composer **and** a visible queued
-///     follow-up (prompt-path force-send of the top queue row; same as full TUI)
-/// - a free-tier pinned upgrade CTA is live (`pinned_upgrade_cta_live`), so
-///   Ctrl+O reaches ToggleYolo (open CTA) instead of the transcript
-///
-/// Otherwise the remap keeps the key for the transcript. When the remap yields,
-/// `minimal_key_intercept` routes to the prompt path (interject, or ToggleYolo
-/// on Apple Terminal when interject has nothing to send). The info-row hint
+/// Minimal remaps Ctrl+O to `Action::OpenTranscriptPager` except when a
+/// free-tier pinned upgrade CTA is live (`pinned_upgrade_cta_live`), so Ctrl+O
+/// reaches ToggleYolo (open CTA) instead of the transcript. The info-row hint
 /// re-evaluates this every frame so the advertised key ("ctrl+o transcript" vs
 /// `/transcript`) always matches what the press would do.
 pub fn minimal_ctrl_o_opens_transcript(app: &AppView) -> bool {
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    let ctrl_o = KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL);
     let ActiveView::Agent(id) = &app.active_view else {
         return true;
     };
     let Some(agent) = app.agents.get(id) else {
         return true;
     };
-    if !app
-        .registry
-        .matches_id(crate::actions::ActionId::InterjectPrompt, &ctrl_o)
-    {
-        // Not the interject chord: transcript unless a pinned upgrade CTA owns it.
-        return !agent.pinned_upgrade_cta_live;
-    }
-    // Editing a queued row: the interject key saves (idle) or interjects
-    // (running) the edited text — never steal it mid-edit.
-    if matches!(
-        agent.prompt_mode,
-        crate::app::agent_view::PromptMode::EditingQueued { .. }
-    ) {
-        return false;
-    }
-    // Matches prompt-path send-now: non-empty composer text *or* a visible
-    // queued follow-up (empty-composer force-send of the top row). Exclude the
-    // in-flight shared-queue entry when it is the running turn (same rule as
-    // `AgentView::visible_queue_is_empty`).
-    let running = agent.session.current_prompt_id.as_deref();
-    let has_queued_follow_up = !agent.session.pending_prompts.is_empty()
-        || agent
-            .shared_queue
-            .iter()
-            .any(|e| Some(e.id.as_str()) != running);
-    let has_payload = !agent.prompt.text().trim().is_empty() || has_queued_follow_up;
-    if crate::actions::ActionRegistry::interjection_possible(
-        agent.session.state.is_turn_running(),
-        has_payload,
-    ) {
-        return false;
-    }
     !agent.pinned_upgrade_cta_live
 }
 

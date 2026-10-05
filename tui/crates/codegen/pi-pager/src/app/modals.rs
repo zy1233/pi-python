@@ -2949,7 +2949,6 @@ mod command_palette_vim_input_tests {
             })
             .collect();
         assert!(action_ids.contains(&crate::actions::ActionId::EditPromptExternal));
-        assert!(!action_ids.contains(&crate::actions::ActionId::ToggleTasks));
         assert!(action_ids.contains(&crate::actions::ActionId::ToggleMouseCapture));
     }
 

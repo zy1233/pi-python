@@ -316,14 +316,6 @@ impl AgentView {
     ) -> InputOutcome {
         use crate::views::overlay::{handle_overlay_key, handle_overlay_nav_key};
         use crate::views::tasks_pane::TaskEntry;
-        if registry.matches_id(ActionId::ToggleTasks, key) {
-            self.tasks.overlay.toggle();
-            self.tasks.on_state_change();
-            if !self.tasks.overlay.focused {
-                return InputOutcome::Action(Action::FocusScrollback);
-            }
-            return InputOutcome::Changed;
-        }
         if self.tasks.list_state.input_mode().is_none()
             && let Some(group) = self.tasks.selected_header_group()
         {

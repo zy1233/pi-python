@@ -315,7 +315,7 @@ fn build_entries_deduplicates_within_category() {
 }
 
 #[test]
-fn build_entries_show_mode_correct_ctrl_g_and_shared_ctrl_b() {
+fn build_entries_show_mode_correct_ctrl_g() {
     for mode in [
         crate::app::ScreenMode::Fullscreen,
         crate::app::ScreenMode::Inline,
@@ -335,8 +335,6 @@ fn build_entries_show_mode_correct_ctrl_g_and_shared_ctrl_b() {
                 _ => None,
             })
         };
-        let background = row(ActionId::SendToBackground).expect("background row");
-        assert_eq!(background.keys, vec![crate::key!('b', CONTROL)]);
 
         let agent_ctrl_g_rows: Vec<_> = entries
             .iter()
@@ -357,25 +355,13 @@ fn build_entries_show_mode_correct_ctrl_g_and_shared_ctrl_b() {
             .collect();
         if mode.is_minimal() {
             assert!(row(ActionId::FocusScrollback).is_none());
+            assert_eq!(agent_ctrl_g_rows, vec![ActionId::EditPromptExternal]);
+            assert!(row(ActionId::EditPromptExternal).is_some());
         } else {
             assert!(row(ActionId::FocusScrollback).is_some());
+            assert!(agent_ctrl_g_rows.is_empty());
+            assert!(row(ActionId::EditPromptExternal).is_none());
         }
-
-        let expected = if mode.is_minimal() {
-            ActionId::EditPromptExternal
-        } else {
-            ActionId::ToggleTasks
-        };
-        assert_eq!(agent_ctrl_g_rows, vec![expected]);
-        assert!(row(expected).is_some());
-        assert!(
-            row(if mode.is_minimal() {
-                ActionId::ToggleTasks
-            } else {
-                ActionId::EditPromptExternal
-            })
-            .is_none()
-        );
     }
 }
 
@@ -1508,14 +1494,6 @@ fn assert_cheatsheet_row_has_key(entries: &[ShortcutsHelpEntry], label: &str, ex
         keys.iter().any(|k| k == expected_key),
         "{label} cheatsheet row missing {expected_key}; got {keys:?}"
     );
-}
-
-#[test]
-fn build_entries_surfaces_interject_ctrl_i_fallback() {
-    let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, true);
-    // Action label is compact "send now" wording (interject under the hood).
-    assert_cheatsheet_row_has_key(&entries, "send now", "Ctrl+i");
 }
 
 #[test]

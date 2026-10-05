@@ -3,7 +3,7 @@
 //! All key bindings are defined here — not scattered across event handlers.
 
 use crate::key;
-use crate::terminal::{TerminalName, terminal_context};
+use crate::terminal::terminal_context;
 
 use super::{ActionDef, ActionId, Category, When};
 
@@ -21,41 +21,24 @@ pub fn ctrl_dot_unreliable() -> bool {
     terminal_context().ctrl_dot_unreliable() || cfg!(target_os = "windows") || crate::host::is_wsl()
 }
 
-/// Choose the one agent-screen action that owns Ctrl+G for this mode.
-fn mode_ctrl_g_action(screen_mode: crate::app::ScreenMode) -> ActionDef {
-    if screen_mode.is_minimal() {
-        ActionDef {
-            id: ActionId::EditPromptExternal,
-            label: "edit prompt",
-            description: "Edit prompt in external editor",
-            default_key: key!('g', CONTROL),
-            alt_keys: vec![],
-            category: Category::Input,
-            context: When::AgentScreen,
-            hint_priority: None,
-            hint_key_display: None,
-            requires_confirmation: false,
-            long_help: Some(
-                "Opens the current prompt draft in $VISUAL or $EDITOR, falling back to vi when neither is set.\nSaving and closing the editor returns the updated text to the composer; it does not send the prompt.\nAvailable in minimal mode for ordinary attachment-free drafts.",
-            ),
-        }
-    } else {
-        ActionDef {
-            id: ActionId::ToggleTasks,
-            label: "tasks",
-            description: "Toggle tasks pane",
-            default_key: key!('g', CONTROL),
-            alt_keys: vec![],
-            category: Category::Panels,
-            context: When::AgentScreen,
-            hint_priority: None,
-            hint_key_display: None,
-            requires_confirmation: false,
-            long_help: Some(
-                "Shows or hides the tasks pane, which lists background tasks and their status.\nUse it to monitor or return to work you sent to the background with Ctrl+B.\nA side pane; toggle off to reclaim width.",
-            ),
-        }
-    }
+/// The agent-screen action that owns Ctrl+G, if any: the external-editor
+/// shortcut in minimal mode only (fullscreen leaves Ctrl+G unbound).
+fn mode_ctrl_g_action(screen_mode: crate::app::ScreenMode) -> Option<ActionDef> {
+    screen_mode.is_minimal().then(|| ActionDef {
+        id: ActionId::EditPromptExternal,
+        label: "edit prompt",
+        description: "Edit prompt in external editor",
+        default_key: key!('g', CONTROL),
+        alt_keys: vec![],
+        category: Category::Input,
+        context: When::AgentScreen,
+        hint_priority: None,
+        hint_key_display: None,
+        requires_confirmation: false,
+        long_help: Some(
+            "Opens the current prompt draft in $VISUAL or $EDITOR, falling back to vi when neither is set.\nSaving and closing the editor returns the updated text to the composer; it does not send the prompt.\nAvailable in minimal mode for ordinary attachment-free drafts.",
+        ),
+    })
 }
 
 /// Build the default action definitions for a screen mode.
@@ -68,18 +51,12 @@ pub(super) fn default_actions(
 ) -> Vec<ActionDef> {
     let ctx = terminal_context();
     // xterm.js embeds: no KKP; host often steals Ctrl+I. Share one family flag for
-    // quit / half-page / interject so VS Code-family embeds match VS Code.
+    // quit / half-page so VS Code-family embeds match VS Code.
     let in_vscode_family = ctx.brand.is_vscode_family();
     let in_vscode = in_vscode_family;
-    let in_apple_terminal = ctx.brand == TerminalName::AppleTerminal;
     // ToggleQueue takes Ctrl+4 as its primary on local macOS VS Code-family hosts.
     let local_mac_vscode = in_vscode_family && !ctx.is_ssh && cfg!(target_os = "macos");
     let ctrl_dot_unreliable = ctrl_dot_unreliable();
-    let send_to_background_help = if screen_mode.is_minimal() {
-        "Detaches the running foreground Execute so it keeps working in the background while you read, queue prompts, or start something else.\nTrack background work with /tasks.\nOnly meaningful while a foreground Execute is actually running."
-    } else {
-        "Detaches the running foreground Execute so it keeps working in the background while you read, queue prompts, or start something else.\nTrack and resume it from the tasks pane (Ctrl+G).\nOnly meaningful while a foreground Execute is actually running."
-    };
 
     let mut actions = vec![
         // ── Navigation (scrollback) ─────────────────────────────────
@@ -430,36 +407,6 @@ pub(super) fn default_actions(
             long_help: None,
         },
         // ── Scrollback (contextual — block-type-dependent) ────────────
-        ActionDef {
-            id: ActionId::Rewind,
-            label: "rewind",
-            description: "Rewind to selected turn",
-            default_key: key!(Null),
-            alt_keys: vec![],
-            category: Category::ConversationAction,
-            context: When::ScrollbackFocused,
-            hint_priority: None,
-            hint_key_display: None,
-            requires_confirmation: false,
-            long_help: Some(
-                "Rewinds the conversation to an earlier turn, discarding later turns. File changes made after that turn are left as-is.\nPick a turn from the list; a running turn is offered for cancel first. When Confirm before rewind is on (default), each pick asks Yes / Yes, and don't ask again / No. Picking \"Yes, and don't ask again\" turns the setting off in /settings.\nDestructive: later turns are dropped.\nAlso reachable idle with an empty prompt via Esc Esc (within 800ms), same as `/rewind`.",
-            ),
-        },
-        ActionDef {
-            id: ActionId::KillBgTask,
-            label: "kill",
-            description: "Kill background task",
-            default_key: key!('x'),
-            alt_keys: vec![],
-            category: Category::ConversationAction,
-            context: When::ScrollbackFocused,
-            hint_priority: None,
-            hint_key_display: None,
-            requires_confirmation: false,
-            long_help: Some(
-                "Terminates the background task owned by the selected task block (e.g. a long shell command sent to the background).\nReach for it to stop a runaway or no-longer-needed process.\nApplies only to a live task; finished ones are unaffected.",
-            ),
-        },
         // ── Essentials ────────────────────────────────────────────────
         ActionDef {
             id: ActionId::SendPrompt,
@@ -534,7 +481,6 @@ pub(super) fn default_actions(
             ),
         },
         // ── Panes (agent-level — toggle side panes) ─────────────────
-        mode_ctrl_g_action(screen_mode),
         ActionDef {
             id: ActionId::ToggleTodos,
             label: "todos",
@@ -593,73 +539,7 @@ pub(super) fn default_actions(
                 "Opens the session browser to resume or switch between past conversations.\nSelect one to reattach to its full history. `/resume` does the same.",
             ),
         },
-        ActionDef {
-            id: ActionId::OpenExtensions,
-            label: "extensions",
-            description: "Open extensions",
-            // VS Code family: Ctrl+L is interject; plugins via /plugins (no chord here).
-            default_key: if in_vscode_family {
-                key!(Null)
-            } else {
-                key!('l', CONTROL)
-            },
-            alt_keys: vec![],
-            category: Category::Panels,
-            context: When::AgentScreen,
-            hint_priority: None,
-            hint_key_display: None,
-            requires_confirmation: false,
-            long_help: Some(
-                "Opens the extensions manager for MCP servers and plugins: see what's connected and the tools they add.\nUse it to confirm an integration loaded or browse available tools.\nDistinct from settings, which holds general app options.",
-            ),
-        },
-        ActionDef {
-            id: ActionId::SendToBackground,
-            label: "send to bg",
-            description: "Send running task to background",
-            default_key: key!('b', CONTROL),
-            alt_keys: vec![],
-            category: Category::Panels,
-            context: When::AgentScreen,
-            hint_priority: None,
-            hint_key_display: None,
-            requires_confirmation: false,
-            long_help: Some(send_to_background_help),
-        },
         // ── Prompt ───────────────────────────────────────────────────
-        ActionDef {
-            id: ActionId::InterjectPrompt,
-            // "send now" label: Enter queues a follow-up while a turn runs;
-            // this chord is cancel-and-send — stop the current turn and run
-            // the message as the next one ("send now").
-            label: "send now",
-            description: "Send now while running (cancels the current turn)",
-            default_key: if in_apple_terminal {
-                key!('o', CONTROL)
-            } else if in_vscode_family {
-                // Ctrl+L is a stable C0 form feed on xterm.js; see user-guide § interject.
-                key!('l', CONTROL)
-            } else {
-                key!(Enter, CONTROL)
-            },
-            // Windows: Ctrl+Enter may drop Ctrl → Ctrl+I alt. VS Code family: no alts
-            // (Ctrl+L sole chord; OpenExtensions unbound so it does not steal).
-            alt_keys: if in_apple_terminal {
-                vec![key!(Enter, CONTROL), key!('i', CONTROL)]
-            } else if in_vscode_family {
-                vec![]
-            } else {
-                vec![key!('i', CONTROL)]
-            },
-            category: Category::Input,
-            context: When::PromptFocused,
-            hint_priority: None,
-            hint_key_display: None,
-            requires_confirmation: false,
-            long_help: Some(
-                "Sends a message to the agent mid-turn without cancelling it (interject), so you can steer or add context while it keeps working.\nPlain Enter while a turn is running queues a follow-up for later; this chord merges composer text into the current turn instead.\nWith an empty composer, bare Enter (or this chord) force-sends the top queued follow-up from the prompt: no need to focus the queue pane. On the queue pane, this chord force-sends the selected row.\nReach for it to correct course without losing the turn's progress.",
-            ),
-        },
         ActionDef {
             id: ActionId::EnableVoiceMode,
             label: "voice mode",
@@ -868,6 +748,9 @@ pub(super) fn default_actions(
             long_help: None,
         },
     ];
+
+    // Ctrl+G: external editor (minimal mode only).
+    actions.extend(mode_ctrl_g_action(screen_mode));
 
     // Toggle terminal mouse reporting (mouse capture). Opt-in via
     // `[ui] mouse_reporting_toggle = true` in config.toml. Disabling capture
