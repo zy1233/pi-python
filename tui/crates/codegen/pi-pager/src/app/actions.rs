@@ -318,8 +318,6 @@ pub enum Action {
     },
     /// Cancel the currently running turn.
     CancelTurn,
-    /// User confirmed a cancel-turn choice from the panel.
-    CancelTurnChoice(crate::views::modal::CancelTurnChoice),
  /// Request current bundle cache status via `legacy ext RPC`.
     RequestBundleStatus,
     /// Hide the announcements banner.
@@ -1172,7 +1170,6 @@ pub enum Effect {
     /// Cancel the current turn.
     CancelTurn {
         session_id: acp::SessionId,
-        cancel_subagents: bool,
         /// What user gesture triggered the cancel (ESC / Ctrl+C / mouse), sent
         /// on `session/cancel` as `_meta.cancelTrigger` so the agent's
         /// `mid_turn_abort` telemetry can distinguish them. `None` for

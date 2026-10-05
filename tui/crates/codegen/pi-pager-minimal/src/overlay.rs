@@ -440,8 +440,7 @@ pub fn render(
 // already route to the shared permission / question / rewind handlers (minimal
 // did not change input routing), so this is a render + sizing concern only.
 //
-// The permission, question, rewind-picker, and cancel-turn confirm modals are
-// all hosted here. Plan approval is hosted separately via [`plan`] (its full-TUI
+// The permission, question and rewind-picker modals are all hosted here. Plan approval is hosted separately via [`plan`] (its full-TUI
 // surface is a fullscreen line-viewer + live prompt, so it gets its own minimal
 // treatment rather than a `render_*` reuse).
 
@@ -451,25 +450,16 @@ pub enum Modal {
     Permission,
     Question,
     Rewind,
-    /// The "subagents are still running — stop them?" confirm shown when
-    /// cancelling a turn with running subagents (`AgentView::cancel_turn_view`).
-    Cancel,
     /// Plan approval (`AgentView::plan_approval_view`) — rendered compactly by
     /// [`super::plan`] in place of the full TUI's fullscreen line viewer.
     Plan,
 }
 
 /// The active prompt-replacing modal, in the full-TUI render precedence
-/// (cancel-confirm > plan > permission > question > rewind), or `None`.
+/// (plan > permission > question > rewind), or `None`.
 pub fn active_modal(agent: &AgentView) -> Option<Modal> {
-    // The cancel-turn confirm is checked first to match the input router, which
-    // intercepts keys for `cancel_turn_view` ahead of the question view
-    // (`AgentView::handle_input`).
-    if minimal_api::cancel_turn_view(agent).is_some() {
-        return Some(Modal::Cancel);
-    }
     // Plan approval routes through the line viewer (kept open in minimal) and is
-    // mutually exclusive with permission/question in practice; check it next.
+    // mutually exclusive with permission/question in practice; check it first.
     if minimal_api::plan_approval_view(agent).is_some() {
         return Some(Modal::Plan);
     }
@@ -526,13 +516,6 @@ pub fn modal_height(modal: Modal, agent: &mut AgentView, screen_h: u16, content_
         Modal::Rewind => minimal_api::rewind_state(agent)
             .map(|rw| pi_pager::views::rewind::rewind_overlay_height(&rw.phase, screen_h))
             .unwrap_or(0),
-        Modal::Cancel => {
-            if minimal_api::cancel_turn_view(agent).is_some() {
-                pi_pager::views::modal::cancel_turn_panel_height(screen_h)
-            } else {
-                0
-            }
-        }
         Modal::Plan => super::plan::height(agent),
     }
 }
@@ -556,29 +539,6 @@ pub fn render_modal(
         Modal::Rewind => {
             if let Some(rw) = minimal_api::rewind_state(agent) {
                 pi_pager::views::rewind::render_rewind_overlay(buf, area, &rw.phase, true);
-            }
-            None
-        }
-        Modal::Cancel => {
-            // The prompt is always focused in minimal, so the confirm is too.
-            // `cancel_turn_view` (shared) and `cancel_turn_buttons_mut` (exclusive)
-            // can't both be borrowed from the agent at once through the facade, so
-            // render the hit-test rects into a local Vec and store them back after.
-            let mut buttons: Vec<Rect> = Vec::new();
-            let drawn = if let Some(ctv) = minimal_api::cancel_turn_view(agent) {
-                pi_pager::views::modal::render_cancel_turn_panel(
-                    buf,
-                    area,
-                    ctv,
-                    true,
-                    &mut buttons,
-                );
-                true
-            } else {
-                false
-            };
-            if drawn {
-                *minimal_api::cancel_turn_buttons_mut(agent) = buttons;
             }
             None
         }

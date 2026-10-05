@@ -90,7 +90,7 @@ use super::transcript::{
     dispatch_dump_input_log, dispatch_open_block_viewer,
     dispatch_open_transcript_pager,
 };
-use super::turn::{dispatch_cancel_turn, dispatch_cancel_turn_choice, };
+use super::turn::dispatch_cancel_turn;
 use super::voice::{dispatch_enable_voice_mode, dispatch_voice_stop, dispatch_voice_toggle};
 use crate::app::actions::{Action, Effect};
 use crate::app::agent_view::ActivePane;
@@ -655,7 +655,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             vec![]
         }
         Action::CancelTurn => dispatch_cancel_turn(app),
-        Action::CancelTurnChoice(choice) => dispatch_cancel_turn_choice(app, choice),
         Action::RequestBundleStatus => vec![Effect::FetchBundleStatus],
         Action::CycleMode => dispatch_cycle_mode(app),
         Action::RenameSession { title } => dispatch_rename_session(app, title),

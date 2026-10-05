@@ -1,5 +1,5 @@
-//! Blocking interaction surfaces: permission prompts, the question view,
-//! and the cancel-turn confirm flow (keys, mouse, and submit paths).
+//! Blocking interaction surfaces: permission prompts and the question view
+//! (keys, mouse, and submit paths).
 #[cfg(test)]
 use super::test_fixtures;
 use super::{AgentView, MULTI_CLICK_TIMEOUT_MS, question_visible_h, translate_local_submit};
@@ -9,7 +9,6 @@ use crate::app::actions::Action;
 use crate::app::app_view::InputOutcome;
 use crate::input::key::RowWalk;
 use crate::key;
-use crate::views::modal::CancelTurnChoice;
 use crate::views::prompt_widget::{EnterOutcome, PromptEvent};
 use crate::views::question_view::QUESTION_VIEW_HPAD;
 #[cfg(test)]
@@ -214,83 +213,6 @@ impl AgentView {
                 }
                 InputOutcome::Changed
             }
-        }
-    }
-    pub(super) fn handle_cancel_turn_key(&mut self, key: &KeyEvent) -> InputOutcome {
-        if key.code == KeyCode::Esc {
-            return self.handle_card_esc();
-        }
-        let Some(ctv) = self.cancel_turn_view.as_mut() else {
-            return InputOutcome::Unchanged;
-        };
-        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            self.cancel_trigger_hint = Some(crate::app::actions::CancelTrigger::CtrlC);
-            return InputOutcome::Action(Action::CancelTurn);
-        }
-        if let Some(walk) = RowWalk::from_key(key) {
-            ctv.active_idx = walk.step(ctv.active_idx, CancelTurnChoice::ALL.len());
-            return InputOutcome::Changed;
-        }
-        match key.code {
-            KeyCode::Char('j') | KeyCode::Down => {
-                ctv.active_idx = (ctv.active_idx + 1).min(CancelTurnChoice::ALL.len() - 1);
-                InputOutcome::Changed
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                ctv.active_idx = ctv.active_idx.saturating_sub(1);
-                InputOutcome::Changed
-            }
-            KeyCode::Enter => {
-                let choice = CancelTurnChoice::ALL[ctv.active_idx];
-                InputOutcome::Action(Action::CancelTurnChoice(choice))
-            }
-            KeyCode::Char(c @ '1'..='4') => {
-                let idx = (c as usize) - ('1' as usize);
-                let choice = CancelTurnChoice::ALL[idx];
-                InputOutcome::Action(Action::CancelTurnChoice(choice))
-            }
-            _ => InputOutcome::Unchanged,
-        }
-    }
-    /// Mouse handler for the cancel-turn panel. `Moved` moves the
-    /// cursor onto the pointed row; `Down(Left)` dispatches the row's
-    /// `CancelTurnChoice`. All other events are consumed.
-    pub(super) fn handle_cancel_turn_mouse(&mut self, mouse: &MouseEvent) -> InputOutcome {
-        if self.cancel_turn_view.is_none() {
-            return InputOutcome::Unchanged;
-        }
-        let hit_idx = self
-            .cancel_turn_buttons
-            .iter()
-            .enumerate()
-            .find(|(_, rect)| rect.contains((mouse.column, mouse.row).into()))
-            .map(|(idx, _)| idx);
-        match mouse.kind {
-            MouseEventKind::Moved => {
-                let Some(idx) = hit_idx else {
-                    return InputOutcome::Unchanged;
-                };
-                if let Some(ctv) = self.cancel_turn_view.as_mut()
-                    && ctv.active_idx != idx
-                {
-                    ctv.active_idx = idx;
-                    return InputOutcome::Changed;
-                }
-                InputOutcome::Unchanged
-            }
-            MouseEventKind::Down(MouseButton::Left) => {
-                if let Some(idx) = hit_idx
-                    && idx < CancelTurnChoice::ALL.len()
-                {
-                    if let Some(ctv) = self.cancel_turn_view.as_mut() {
-                        ctv.active_idx = idx;
-                    }
-                    let choice = CancelTurnChoice::ALL[idx];
-                    return InputOutcome::Action(Action::CancelTurnChoice(choice));
-                }
-                InputOutcome::Unchanged
-            }
-            _ => InputOutcome::Unchanged,
         }
     }
     /// Save the free-text answer the composer is holding and return the card
@@ -1343,161 +1265,6 @@ impl AgentView {
         self.inline_prompt_area = None;
         self.last_question_click = None;
         self.last_prompt_click_ms = None;
-    }
-}
-#[cfg(test)]
-mod cancel_turn_mouse_tests {
-    use super::*;
-    use crate::acp::model_state::ModelState;
-    use crate::app::agent::{AgentId, AgentSession, AgentState};
-    use crate::app::app_view::InputOutcome;
-    use crate::scrollback::state::ScrollbackState;
-    use crate::views::modal::{CancelTurnChoice, CancelTurnViewState};
-    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
-    use ratatui::layout::Rect;
-    fn make_agent() -> AgentView {
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        AgentView::new(
-            AgentSession {
-                id: AgentId(0),
-                acp_tx: tx,
-                session_id: None,
-                models: ModelState::default(),
-                state: AgentState::Idle,
-                tracker: crate::acp::tracker::AcpUpdateTracker::new(),
-                cwd: std::path::PathBuf::from("/tmp"),
-                is_worktree: false,
-                forked_from: None,
-                pending_prompts: std::collections::VecDeque::new(),
-                next_queue_id: 0,
-                yolo_mode: false,
-                auto_mode: false,
-                prompt_history: Vec::new(),
-                prompt_history_loading: false,
-                loading_replay: false,
-                restore_degree: None,
-                rate_limited: false,
-                model_incompatible: false,
-                credit_limit_blocked: false,
-                free_usage_blocked: false,
-                available_commands: Vec::new(),
-                available_commands_generation: 0,
-                available_tools: None,
-                model_switch_pending: false,
-                user_model_preference: None,
-                deferred_model_switch: None,
-                in_flight_prompt: None,
-                compact_held_prompt: None,
-                current_prompt_id: None,
-                created_via_new: false,
-            },
-            ScrollbackState::new(),
-        )
-    }
-    /// Panel with one synthetic Rect per choice, stacked at y=10.
-    fn setup_panel(agent: &mut AgentView) {
-        agent.cancel_turn_view = Some(CancelTurnViewState {
-            active_idx: 0,
-            running_count: 2,
-        });
-        agent.cancel_turn_buttons.clear();
-        for (i, _) in CancelTurnChoice::ALL.iter().enumerate() {
-            agent.cancel_turn_buttons.push(Rect {
-                x: 5,
-                y: 10 + i as u16,
-                width: 40,
-                height: 1,
-            });
-        }
-    }
-    fn down(col: u16, row: u16) -> MouseEvent {
-        MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            column: col,
-            row,
-            modifiers: crossterm::event::KeyModifiers::empty(),
-        }
-    }
-    fn moved(col: u16, row: u16) -> MouseEvent {
-        MouseEvent {
-            kind: MouseEventKind::Moved,
-            column: col,
-            row,
-            modifiers: crossterm::event::KeyModifiers::empty(),
-        }
-    }
-    #[test]
-    fn click_first_row_dispatches_stop_running() {
-        let mut agent = make_agent();
-        setup_panel(&mut agent);
-        let outcome = agent.handle_cancel_turn_mouse(&down(10, 10));
-        match outcome {
-            InputOutcome::Action(Action::CancelTurnChoice(c)) => {
-                assert_eq!(c, CancelTurnChoice::StopRunning);
-            }
-            other => panic!("expected CancelTurnChoice(StopRunning), got {other:?}"),
-        }
-        assert_eq!(agent.cancel_turn_view.as_ref().unwrap().active_idx, 0);
-    }
-    #[test]
-    fn click_third_row_dispatches_always_stop() {
-        let mut agent = make_agent();
-        setup_panel(&mut agent);
-        let outcome = agent.handle_cancel_turn_mouse(&down(10, 12));
-        match outcome {
-            InputOutcome::Action(Action::CancelTurnChoice(c)) => {
-                assert_eq!(c, CancelTurnChoice::AlwaysStop);
-            }
-            other => panic!("expected CancelTurnChoice(AlwaysStop), got {other:?}"),
-        }
-        assert_eq!(agent.cancel_turn_view.as_ref().unwrap().active_idx, 2);
-    }
-    #[test]
-    fn click_outside_rows_consumes_event_without_action() {
-        let mut agent = make_agent();
-        setup_panel(&mut agent);
-        let outcome = agent.handle_cancel_turn_mouse(&down(10, 50));
-        assert!(matches!(outcome, InputOutcome::Unchanged));
-        assert_eq!(agent.cancel_turn_view.as_ref().unwrap().active_idx, 0);
-    }
-    #[test]
-    fn hover_moves_cursor_to_pointed_row() {
-        let mut agent = make_agent();
-        setup_panel(&mut agent);
-        assert_eq!(agent.cancel_turn_view.as_ref().unwrap().active_idx, 0);
-        let outcome = agent.handle_cancel_turn_mouse(&moved(10, 11));
-        assert!(matches!(outcome, InputOutcome::Changed));
-        assert_eq!(agent.cancel_turn_view.as_ref().unwrap().active_idx, 1);
-        let outcome = agent.handle_cancel_turn_mouse(&moved(10, 13));
-        assert!(matches!(outcome, InputOutcome::Changed));
-        assert_eq!(agent.cancel_turn_view.as_ref().unwrap().active_idx, 3);
-        let outcome = agent.handle_cancel_turn_mouse(&moved(15, 13));
-        assert!(matches!(outcome, InputOutcome::Unchanged));
-        assert_eq!(agent.cancel_turn_view.as_ref().unwrap().active_idx, 3);
-        let outcome = agent.handle_cancel_turn_mouse(&moved(10, 50));
-        assert!(matches!(outcome, InputOutcome::Unchanged));
-        assert_eq!(agent.cancel_turn_view.as_ref().unwrap().active_idx, 3);
-    }
-    #[test]
-    fn mouse_event_ignored_when_panel_closed() {
-        let mut agent = make_agent();
-        let outcome = agent.handle_cancel_turn_mouse(&down(10, 10));
-        assert!(matches!(outcome, InputOutcome::Unchanged));
-    }
-    #[test]
-    fn esc_dismisses_the_panel_without_cancelling_the_turn() {
-        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-        let mut agent = make_agent();
-        agent.session.state = AgentState::TurnRunning;
-        setup_panel(&mut agent);
-        let outcome =
-            agent.handle_cancel_turn_key(&KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-        assert!(
-            matches!(outcome, InputOutcome::Changed),
-            "panel Esc must keep the turn running, got {outcome:?}"
-        );
-        assert!(agent.cancel_turn_view.is_none());
-        assert!(agent.session.state.is_turn_running());
     }
 }
 #[cfg(test)]

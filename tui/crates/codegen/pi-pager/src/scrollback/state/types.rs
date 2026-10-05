@@ -115,8 +115,8 @@ pub struct EntryLayoutInfo {
     /// normal block content. For N-more truncation headers it is the number
     /// of hidden entries (drives the plain "╶╶ N more" fallback text; frames
     /// with fold spans render the aggregated bucket label instead). For
-    /// verb-group headers it is the run's MEMBER count — tool calls and
-    /// subagent rows; folded thoughts never count — and the value is never
+    /// verb-group headers it is the run's MEMBER count — tool calls; folded
+    /// thoughts never count — and the value is never
     /// rendered — header gates go through [`Self::is_group_header`].
     pub group_header_count: u16,
     /// When true, this entry renders as an expanded-group collapse header.

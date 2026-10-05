@@ -47,8 +47,8 @@ pub struct GroupSpan {
 /// when they fold and what the header says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GroupKind {
-    /// Eagerly folded run of verb-groupable members (tool calls and subagent
-    /// rows) — the aggregated "Read 2 skills" header. `members` counts
+    /// Eagerly folded run of verb-groupable members (tool calls) — the
+    /// aggregated "Read 2 skills" header. `members` counts
     /// label-bearing members only; claimed thoughts fold in but never count.
     VerbRun { members: usize },
     /// Budget truncation of an over-long dense run — the "N more" header.

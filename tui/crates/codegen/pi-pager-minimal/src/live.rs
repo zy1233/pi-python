@@ -561,14 +561,12 @@ fn render_minimal_status(
         );
         return;
     }
-    let watchers = minimal_api::watchers(agent);
     let drain_blocked = minimal_api::drain_blocked(agent);
     let parked = minimal_api::renders_parked(agent);
     if !turn_status::should_show(
         &agent.session.state,
         drain_blocked,
         minimal_api::mcp_init_progress(agent),
-        watchers,
         parked,
     ) {
         render_idle_hint(buf, area, theme);
@@ -587,12 +585,10 @@ fn render_minimal_status(
             tick: agent.scrollback.animation_tick(),
             drain_blocked,
             buttons: None,
-            has_running_execute: false,
             total_tokens: agent.context_state.as_ref().map(|c| c.used),
             mcp_init_progress: minimal_api::mcp_init_progress(agent),
             is_bash_turn: agent.bash_turn,
             is_pending_user_input,
-            watchers,
             parked,
             flat_background: true,
             held_queue: minimal_api::held_queue_count(agent),

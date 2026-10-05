@@ -776,7 +776,6 @@
         // FIFO can deliver a wake's terminal after a fresh local prompt starts; a
         // foreign "Worked for" under that prompt would misattribute.
         let mut app = make_app_with_agent("sess-wake");
-        seed_two_bg_tasks(&mut app, "sess-wake");
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
             agent.session.start_turn(&mut agent.scrollback);
@@ -1234,44 +1233,6 @@
         let agent = app.agents.get(&AgentId(0)).unwrap();
         assert_eq!(count_lifecycle_blocks(&agent.scrollback), 1);
         assert!(agent.pending_stop_hooks.is_none());
-    }
-
-    #[test]
-    fn mid_turn_completion_pushes_chip_only() {
-        let mut app = make_app_with_agent("sess-midturn");
-        seed_two_bg_tasks(&mut app, "sess-midturn");
-        {
-            let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-            agent.session.start_turn(&mut agent.scrollback);
-            agent.session.current_prompt_id = Some("p1".into());
-        }
-
-        let _ = handle_ext_notification(
-            &make_task_completed_notif("sess-midturn", "task-1", "sleep 98", Some(0)),
-            &mut app,
-        );
-        assert!(
-            work_status_lines(&app.agents[&AgentId(0)].scrollback).is_empty(),
-            "a completion inside an active turn pushes its chip only"
-        );
-    }
-
-    #[test]
-    fn will_wake_flag_is_ignored_wire_compat_pin() {
-        // `will_wake` is a wire-compat field the TUI no longer reads.
-        let mut app = make_app_with_agent("sess-wake-skip");
-        seed_two_bg_tasks(&mut app, "sess-wake-skip");
-
-        let _ = handle_ext_notification(
-            &task_completed_notif("sess-wake-skip", "task-1", "sleep 98", Some(0), None, true),
-            &mut app,
-        );
-
-        let agent = app.agents.get(&AgentId(0)).unwrap();
-        assert!(
-            work_status_lines(&agent.scrollback).is_empty(),
-            "a wake-bound completion pushes its chip only"
-        );
     }
 
     /// The core reattach-finalization: a `TurnCompleted` seen during a load's

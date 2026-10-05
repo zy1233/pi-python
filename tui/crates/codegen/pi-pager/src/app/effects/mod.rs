@@ -890,7 +890,6 @@ pub(crate) fn execute(
         }
         Effect::CancelTurn {
             session_id,
-            cancel_subagents,
             trigger,
             rewind_prompt_id,
         } => {
@@ -903,7 +902,6 @@ pub(crate) fn execute(
                         Some(&session_id.0),
                         Some(
                             serde_json::json!({
-                        "cancel_subagents": cancel_subagents,
                         "trigger": trigger_str,
                         "rewind_if_no_output": rewind_prompt_id.is_some(),
                         "rewind_prompt_id": rewind_prompt_id.as_deref(),
@@ -911,7 +909,7 @@ pub(crate) fn execute(
                         ),
                     );
                     let send_start = std::time::Instant::now();
-                    let mut meta = serde_json::json!({ "cancelSubagents": cancel_subagents });
+                    let mut meta = serde_json::json!({});
                     if let Some(t) = trigger_str {
                         meta[crate::app::turn_completion::CANCEL_TRIGGER_KEY] = t.into();
                     }

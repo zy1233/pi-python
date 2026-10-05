@@ -788,18 +788,6 @@ impl AgentView {
                 _ => InputOutcome::Unchanged,
             };
         }
-        if self.focused_card() == Some(BlockingCard::CancelTurn) {
-            return match ev {
-                Event::Key(key) if key.kind != KeyEventKind::Release => {
-                    if key!('q', CONTROL).matches(key) {
-                        return InputOutcome::Unchanged;
-                    }
-                    self.handle_cancel_turn_key(key)
-                }
-                Event::Mouse(mouse) => self.handle_cancel_turn_mouse(mouse),
-                _ => InputOutcome::Unchanged,
-            };
-        }
         if let Event::Key(key) = ev
             && key.kind != KeyEventKind::Release
             && key!('y', CONTROL).matches(key)
@@ -1503,7 +1491,7 @@ mod focus_gained_restore_tests {
     };
     use super::{AgentPane, AgentView};
     use crate::app::agent::AgentState;
-    use crate::views::modal::{ActiveModal, CancelTurnViewState};
+    use crate::views::modal::ActiveModal;
     fn scrollback_agent() -> AgentView {
         let mut agent = make_agent();
         agent.active_pane = AgentPane::Scrollback;
@@ -1590,17 +1578,6 @@ mod focus_gained_restore_tests {
         agent.vim_mode = true;
         agent.session.state = AgentState::TurnRunning;
         agent.question_view = Some(make_question_view_state_in_input_mode());
-        assert!(agent.should_restore_prompt_on_focus_gained());
-    }
-    #[test]
-    fn should_restore_prompt_on_focus_gained_cancel_turn_vim() {
-        let mut agent = scrollback_agent();
-        agent.vim_mode = true;
-        agent.session.state = AgentState::TurnRunning;
-        agent.cancel_turn_view = Some(CancelTurnViewState {
-            active_idx: 0,
-            running_count: 1,
-        });
         assert!(agent.should_restore_prompt_on_focus_gained());
     }
 }

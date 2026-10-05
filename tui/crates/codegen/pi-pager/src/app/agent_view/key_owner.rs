@@ -12,7 +12,6 @@ use crate::views::shortcuts_bar::HintItem;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BlockingCard {
     Permission,
-    CancelTurn,
     Question,
     McpElicitation,
 }
@@ -24,7 +23,6 @@ impl BlockingCard {
     pub(crate) fn focus_hint(self) -> HintItem {
         let label = match self {
             Self::Permission => "permission",
-            Self::CancelTurn => "cancel turn",
             Self::Question => "question",
             Self::McpElicitation => "elicitation",
         };
@@ -41,9 +39,9 @@ impl BlockingCard {
 /// Which surface the keyboard reaches, in the order [`AgentView::handle_input`]
 /// asks for it.
 ///
-/// The fullscreen takeovers ahead of these — the subagent view, the media
-/// viewers, `/gboom`, and the modal stack — answer for themselves and draw
-/// their own chrome, so they are not ranked here.
+/// The fullscreen takeovers ahead of these — the media viewers, `/gboom`,
+/// and the modal stack — answer for themselves and draw their own chrome, so
+/// they are not ranked here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum KeyOwner {
     /// An open line viewer: the plan preview, or a file preview from the
@@ -82,8 +80,6 @@ pub(crate) enum EscStep {
     ClearSelection,
     /// Hand the keyboard to the scrollback with the card still drawn.
     ParkFocus,
-    /// Dismiss the cancel-turn panel and leave the turn (and subagents) running.
-    KeepRunning,
     DismissElicitWaiting,
 }
 
@@ -97,7 +93,6 @@ impl EscStep {
             Self::DiscardPatternEdit => "cancel",
             Self::ClearSelection => "unselect",
             Self::ParkFocus => "scrollback",
-            Self::KeepRunning => "keep running",
             Self::DismissElicitWaiting => "dismiss",
         }
     }
@@ -109,8 +104,6 @@ impl AgentView {
     pub(crate) fn blocking_card(&self) -> Option<BlockingCard> {
         if !self.permission_queue.is_empty() {
             Some(BlockingCard::Permission)
-        } else if self.cancel_turn_view.is_some() {
-            Some(BlockingCard::CancelTurn)
         } else if self.question_view.is_some() {
             Some(BlockingCard::Question)
         } else if self.elicitation_view.is_some() {
@@ -191,9 +184,6 @@ impl AgentView {
                 PermissionFocus::PatternEdit => EscStep::DiscardPatternEdit,
                 PermissionFocus::Options => EscStep::ParkFocus,
             },
-            // Never a dead end: Esc closes the panel and keeps the turn
-            // running. Enter / 1–4 still pick a cancel-and-subagent choice.
-            BlockingCard::CancelTurn => EscStep::KeepRunning,
             BlockingCard::Question => {
                 let qv = self.question_view.as_ref()?;
                 if qv.focus == QuestionFocus::InputMode {
@@ -264,13 +254,6 @@ impl AgentView {
                 }
             }
             EscStep::ParkFocus => self.park_focused_card(),
-            EscStep::KeepRunning => {
-                // The bar promises "keep running". Mapping this to
-                // ContinueToRun would still cancel the parent turn (only
-                // the subagents would survive). Close the panel instead.
-                self.cancel_turn_view = None;
-                self.cancel_turn_buttons.clear();
-            }
             EscStep::DismissElicitWaiting => return self.resolve_elicitation_cancel(),
         }
         InputOutcome::Changed

@@ -1210,18 +1210,6 @@ pub(crate) async fn persist_setting(
                 .await
                 .map_err(|e| e.to_string())
         }
-        "cancel_subagents_on_turn_cancel" => {
-            let SettingValue::Enum(s) = value else {
-                return Err(
-                    kind_mismatch("cancel_subagents_on_turn_cancel", "Enum", &value),
-                );
-            };
-            pi_shell::util::config::set_cancel_subagents_on_turn_cancel(
-                    s.to_string(),
-                )
-                .await
-                .map_err(|e| e.to_string())
-        }
         "vim_mode" => {
             let SettingValue::Bool(b) = value else {
                 return Err(kind_mismatch("vim_mode", "Bool", &value));

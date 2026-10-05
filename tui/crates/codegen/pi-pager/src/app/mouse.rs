@@ -821,8 +821,6 @@ impl AgentView {
                     .hit_response_top_indicator
                     .update_hover(mouse.column, mouse.row);
                 changed |= self.hit_cancel_button.update_hover(mouse.column, mouse.row);
-                changed |= self.hit_bg_button.update_hover(mouse.column, mouse.row);
-                changed |= self.hit_watching_cue.update_hover(mouse.column, mouse.row);
                 changed |= self
                     .hit_announcement_hide
                     .update_hover(mouse.column, mouse.row);

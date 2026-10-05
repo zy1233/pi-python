@@ -1209,9 +1209,6 @@ pub(super) fn handle_prompt_response(
             agent.line_viewer = None;
         }
 
-        agent.cancel_turn_view = None;
-        agent.cancel_turn_buttons.clear();
-
         // After a bash-mode turn, scroll to bottom so the user sees
         // the command output, but keep focus on the prompt for
         // consistency with normal prompt behavior.

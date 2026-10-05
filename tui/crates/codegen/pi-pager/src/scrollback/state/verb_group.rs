@@ -1,7 +1,6 @@
-//! Verb-group aggregation: the "Read 10 files, Ran 2 subagents" header
-//! label for a folded run of consecutive non-destructive tool calls and
-//! subagent lifecycle rows, plus any finished collapsed thoughts the run
-//! claims. Also home of the run classification ([`run_step`]) shared by the
+//! Verb-group aggregation: the "Read 10 files, Searched 2 patterns" header
+//! label for a folded run of consecutive non-destructive tool calls, plus any
+//! finished collapsed thoughts the run claims. Also home of the run classification ([`run_step`]) shared by the
 //! layout fold, range resolution, and the label walk.
 //!
 //! The layout pass in `state/layout.rs` detects the runs and marks the header
@@ -29,7 +28,7 @@ use crate::theme::Theme;
 
 /// One step of a verb-group run walk.
 pub(crate) enum RunStep {
-    /// A collapsed verb-groupable tool or subagent entry: joins the run and
+    /// A collapsed verb-groupable tool entry: joins the run and
     /// counts toward the fold threshold ([`RunScan::folds`]).
     Member(VerbGroupKind),
     /// A finished, collapsed, shown thinking entry: claims into the run
@@ -47,8 +46,8 @@ pub(crate) enum RunStep {
 /// Classify one entry for run walking — the single source of truth shared by
 /// the layout fold scan, `verb_group_range_of`, and the label walk.
 ///
-/// Members are collapsed verb-groupable tool calls and subagent lifecycle
-/// rows; pending-user-input rows stay standalone so their prompt remains
+/// Members are collapsed verb-groupable tool calls; pending-user-input rows
+/// stay standalone so their prompt remains
 /// visible. Hook-decorated members still join: the group header summarizes
 /// their runs while expanded members keep compact per-member suffixes. A
 /// manually-opened member is [`RunStep::Transparent`] and keeps its own rows
@@ -97,7 +96,7 @@ pub(crate) fn verb_group_kind_changed(old: &RenderBlock, new: &RenderBlock) -> b
 
 /// Shape of one forward run walk, as reported by [`scan_run_forward`].
 pub(crate) struct RunScan {
-    /// Member entries counted (tool calls and subagent rows), including a
+    /// Member entries counted (tool calls), including a
     /// member start entry. Thought members claim but never count — the fold
     /// threshold is members-only.
     pub(crate) members: usize,
@@ -206,9 +205,7 @@ struct Bucket<'e> {
     calls: usize,
     /// Distinct-count override: when non-empty its size replaces `calls` as
     /// the displayed count. Holds WebSearch citation URLs (distinct result
-    /// websites) and subagent child session ids (started + terminal rows of
-    /// one subagent count once; a burst of terminal rows counts each
-    /// distinct subagent).
+    /// websites).
     sources: std::collections::HashSet<&'e str>,
 }
 
@@ -328,9 +325,8 @@ impl<'e> BucketAccumulator<'e> {
         };
         let bucket = &mut self.buckets[pos];
         bucket.calls += 1;
-        // Bucketed entries are tool-call or subagent rows by construction
-        // (both walks); the block feeds the distinct-count override and
-        // failure detection.
+        // Bucketed entries are tool-call rows by construction (both walks);
+        // the block feeds the distinct-count override and failure detection.
         match &entry.block {
             RenderBlock::ToolCall(block) => {
                 if let ToolCallBlock::WebSearch(b) = block

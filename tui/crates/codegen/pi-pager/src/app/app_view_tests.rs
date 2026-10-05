@@ -1110,7 +1110,6 @@ fn needs_animation_gates_pending_cancel_resend() {
             sent_at: std::time::Instant::now(),
             attempts: 1,
             confirmed: false,
-            cancel_subagents: true,
             trigger: crate::app::actions::CancelTrigger::Mouse,
         });
     }
@@ -2950,13 +2949,7 @@ fn idle_scrollback_pane_esc_with_draft_and_messages_swallows() {
 #[test]
 fn idle_scrollback_pane_esc_with_pending_input_overlay_does_not_arm_rewind() {
     type OverlayInstaller = (&'static str, fn(&mut AgentView));
-    let installers: [OverlayInstaller; 2] = [
-        ("cancel_turn_view", |a| {
-            a.cancel_turn_view = Some(crate::views::modal::CancelTurnViewState {
-                active_idx: 0,
-                running_count: 1,
-            });
-        }),
+    let installers: [OverlayInstaller; 1] = [
         ("question_view", |a| {
             let stashed = a.prompt.stash();
             a.question_view = Some(crate::views::question_view::QuestionViewState::new(

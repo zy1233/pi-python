@@ -15,7 +15,7 @@ use crate::views::modal_window::ModalWindowState;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::Span;
 use unicode_width::UnicodeWidthStr;
 /// A blocking confirmation dialog with typed results.
 ///
@@ -125,33 +125,6 @@ impl ModalConfirmation<ResetSettingsResult> {
             ],
         }
     }
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CancelTurnChoice {
-    StopRunning,
-    ContinueToRun,
-    AlwaysStop,
-    AlwaysContinue,
-}
-impl CancelTurnChoice {
-    pub const ALL: [CancelTurnChoice; 4] = [
-        CancelTurnChoice::StopRunning,
-        CancelTurnChoice::ContinueToRun,
-        CancelTurnChoice::AlwaysStop,
-        CancelTurnChoice::AlwaysContinue,
-    ];
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::StopRunning => "Stop running",
-            Self::ContinueToRun => "Continue to run",
-            Self::AlwaysStop => "Always stop",
-            Self::AlwaysContinue => "Always continue",
-        }
-    }
-}
-pub struct CancelTurnViewState {
-    pub active_idx: usize,
-    pub running_count: usize,
 }
 /// Returns a ready-to-open DocPicker modal for the how-to guides list.
 ///
@@ -737,109 +710,6 @@ pub fn render_modal_overlay(
         x += btn_w + 1;
     }
     ModalRenderResult { buttons }
-}
-/// vpad(1) + title(1) + count(1) + gap(1) + 4 options + vpad(1) = 9
-const CANCEL_TURN_PANEL_HEIGHT: u16 = 9;
-pub fn cancel_turn_panel_height(screen_h: u16) -> u16 {
-    let cap = (screen_h as u32 * 33 / 100)
-        .max(8)
-        .min(screen_h as u32 * 80 / 100) as u16;
-    CANCEL_TURN_PANEL_HEIGHT.min(cap)
-}
-pub fn render_cancel_turn_panel(
-    buf: &mut Buffer,
-    area: Rect,
-    state: &CancelTurnViewState,
-    focused: bool,
-    button_rects: &mut Vec<Rect>,
-) {
-    button_rects.clear();
-    let theme = Theme::current();
-    buf.set_style(area, Style::default().bg(theme.bg_light));
-    let accent_style = Style::default().fg(theme.warning);
-    for row in area.y..area.y + area.height {
-        if let Some(cell) = buf.cell_mut((area.x, row)) {
-            cell.set_symbol(crate::glyphs::accent_bar());
-            cell.set_style(accent_style);
-        }
-    }
-    let content_x = area.x + 3;
-    let content_w = area.width.saturating_sub(5) as usize;
-    let mut y = area.y + 1;
-    let title_style = Style::default()
-        .fg(theme.accent_user)
-        .add_modifier(Modifier::BOLD);
-    buf.set_line(
-        content_x,
-        y,
-        &Line::from(Span::styled(
-            "Subagents are still running. Stop them?",
-            title_style,
-        )),
-        content_w as u16,
-    );
-    y += 1;
-    let count_text = if state.running_count == 1 {
-        "1 subagent running".to_string()
-    } else {
-        format!("{} subagents running", state.running_count)
-    };
-    buf.set_line(
-        content_x,
-        y,
-        &Line::from(Span::styled(count_text, Style::default().fg(theme.gray))),
-        content_w as u16,
-    );
-    y += 2;
-    for (i, choice) in CancelTurnChoice::ALL.iter().enumerate() {
-        if y >= area.y + area.height {
-            break;
-        }
-        let is_cursor = i == state.active_idx;
-        let row_bg = if is_cursor && focused {
-            theme.bg_visual
-        } else {
-            theme.bg_light
-        };
-        let row_rect = Rect {
-            x: content_x.saturating_sub(1),
-            y,
-            width: content_w as u16 + 2,
-            height: 1,
-        };
-        buf.set_style(row_rect, Style::default().bg(row_bg));
-        button_rects.push(row_rect);
-        let marker = if is_cursor {
-            crate::glyphs::filled_dot()
-        } else {
-            "\u{25CB}"
-        };
-        let num = (i + 1).to_string();
-        let num_style = Style::default().fg(theme.accent_user).bg(row_bg);
-        let marker_style = if is_cursor {
-            Style::default().fg(theme.accent_user).bg(row_bg)
-        } else {
-            Style::default().fg(theme.gray).bg(row_bg)
-        };
-        let label_style = Style::default()
-            .fg(theme.text_primary)
-            .bg(row_bg)
-            .add_modifier(if is_cursor {
-                Modifier::BOLD
-            } else {
-                Modifier::empty()
-            });
-        let line = Line::from(vec![
-            Span::styled(format!("{num} "), num_style),
-            Span::styled(format!("({marker}) "), marker_style),
-            Span::styled(choice.label(), label_style),
-        ]);
-        buf.set_line(content_x, y, &line, content_w as u16);
-        y += 1;
-    }
-    if !focused {
-        crate::render::color::blend_area(buf, area, Some((theme.bg_light, 0.66)), None);
-    }
 }
 /// Apply scroll-key dispatch for a DocViewer modal. Returns `true` if the key
 /// was handled (caller should return `InputOutcome::Changed`).

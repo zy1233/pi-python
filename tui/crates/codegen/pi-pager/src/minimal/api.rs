@@ -38,7 +38,6 @@ use crate::appearance::LayoutConfig;
 use crate::scrollback::entry::{EntryId, ScrollbackEntry};
 use crate::scrollback::state::ScrollbackState;
 use crate::theme::Theme;
-use crate::views::modal::CancelTurnViewState;
 use crate::views::picker::{PickerEntry, PickerField, PickerState};
 use crate::views::plan_approval_view::PlanApprovalViewState;
 use crate::views::prompt_widget::PromptWidget;
@@ -483,17 +482,6 @@ pub fn btw_focused(v: &AgentView) -> bool {
     v.btw_focused
 }
 
-/// `AgentView::cancel_turn_view`.
-pub fn cancel_turn_view(v: &AgentView) -> Option<&CancelTurnViewState> {
-    v.cancel_turn_view.as_ref()
-}
-
-/// `AgentView::cancel_turn_buttons` (mutable — the renderer fills the hit-test
-/// rects).
-pub fn cancel_turn_buttons_mut(v: &mut AgentView) -> &mut Vec<Rect> {
-    &mut v.cancel_turn_buttons
-}
-
 /// `AgentView::rewind_state`.
 pub fn rewind_state(v: &AgentView) -> Option<&RewindState> {
     v.rewind_state.as_ref()
@@ -509,13 +497,6 @@ pub fn resolve_turn_activity(v: &AgentView) -> Option<TurnActivity> {
 /// [`AgentView::renders_parked`].
 pub fn renders_parked(v: &AgentView) -> bool {
     v.renders_parked()
-}
-
-/// [`AgentView::watchers`] — idle-surviving background work (running
-/// commands / monitors / loops / subagents) for the shared turn-status
-/// widget's "… still running" cue.
-pub fn watchers(v: &AgentView) -> crate::views::turn_status::Watchers {
-    v.watchers()
 }
 
 /// [`AgentView::held_queue_count`].

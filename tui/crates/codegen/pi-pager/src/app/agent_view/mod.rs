@@ -140,8 +140,8 @@ pub use crate::views::agent::{ActivePane, AgentViewLayout, InputMode, PaneAreas}
 use crate::views::block_viewer::BlockViewerPane;
 use crate::views::elicitation_view::ElicitationViewState;
 use crate::views::file_search::line_viewer::LineViewerState;
-use crate::views::modal::{self, ActiveModal, ModalButtonHit};
-use crate::views::permission_view::{PermissionViewState, };
+use crate::views::modal::{ActiveModal, ModalButtonHit};
+use crate::views::permission_view::PermissionViewState;
 use crate::views::plan_approval_view::{PlanApprovalViewState, PlanComment};
 use crate::views::prompt_widget::{PromptWidget, StashedPrompt};
 use crate::views::question_view::QuestionViewState;
@@ -608,11 +608,8 @@ pub(crate) struct PendingCancelResend {
     pub attempts: u8,
     /// The turn-end broadcast arrived, proving the cancel landed: the
     /// auto-resend stops, but the record stays so a manual retry can reuse
-    /// the recorded subagent choice.
+    /// the recorded cancel.
     pub confirmed: bool,
-    /// The first cancel's subagent decision; retries replay it instead of
-    /// escalating past a one-shot "Continue to run".
-    pub cancel_subagents: bool,
     /// Replayed so a resend still arms the shell's task-wake barrier.
     pub trigger: crate::app::actions::CancelTrigger,
 }
@@ -1135,11 +1132,6 @@ pub struct AgentView {
     pub hit_context: HitArea,
     pub hit_credits: HitArea,
     pub hit_todo_close: HitArea,
-    pub hit_bg_close: HitArea,
-    pub hit_bg_status: HitArea,
-    pub hit_bg_button: HitArea,
-    #[allow(dead_code)]
-    pub(crate) last_bg_click: Option<Instant>,
     pub hit_queue_close: HitArea,
     pub hit_plan_button: HitArea,
     pub hit_plan_approval_status: HitArea,
@@ -1151,9 +1143,6 @@ pub struct AgentView {
     pub hit_cwd: HitArea,
     /// Cancel button in turn status line (`[stop]`).
     pub hit_cancel_button: HitArea,
-    /// Still-running watcher cue on the turn-status row (click opens the
-    /// tasks pane, same as `Ctrl+G`).
-    pub hit_watching_cue: HitArea,
     /// `[hide]` button on the announcement banner (click == `/announcements hide`).
     pub hit_announcement_hide: HitArea,
     /// `[label]` CTA button on the promo banner row (click opens its link).
@@ -1404,16 +1393,6 @@ pub struct AgentView {
     /// on save/cancel. Mirrors `plan_approval_view.stashed_prompt` so
     /// the casual plan modal can share the same prompt-input UX.
     pub(crate) casual_stashed_prompt: Option<StashedPrompt>,
-    /// Non-blocking cancel-turn panel (QA-style, shown when cancelling with running subagents).
-    pub(crate) cancel_turn_view: Option<modal::CancelTurnViewState>,
-    /// Clickable rects for cancel-turn option rows, populated by
-    /// `render_cancel_turn_panel`.
-    pub(crate) cancel_turn_buttons: Vec<Rect>,
-    /// Per-agent mirror of cancel-subagents preference (`Some(true)` = always
-    /// stop, `Some(false)` = always continue). Always choices set this on every
-    /// agent and persist to `[ui].cancel_subagents_on_turn_cancel`; when unset,
-    /// cancel falls back to that UI/config field, then the prompt panel.
-    pub(crate) cancel_subagents_preference: Option<bool>,
     /// What gesture triggered the pending turn-cancel (Ctrl+C / mouse; Esc
     /// via the mid-turn cancel in minimal / non-vim mode and the cancel-retry
     /// path while TurnCancelling).

@@ -526,30 +526,6 @@ pub(super) fn last_marker_stop_hook_groups(
             _ => None,
         })
 }
-/// Work-only status lines ("N … still running") pushed as system rows.
-/// Never pushed in production; tests assert emptiness.
-pub(super) fn work_status_lines(sb: &ScrollbackState) -> Vec<String> {
-    (0..sb.len())
-        .filter_map(|i| match sb.get(i).map(|e| &e.block) {
-            Some(RenderBlock::System(b)) if b.text.contains("still running") => {
-                Some(b.text.clone())
-            }
-            _ => None,
-        })
-        .collect()
-}
-/// Register two running background commands on the (idle) agent through
-/// the wire.
-pub(super) fn seed_two_bg_tasks(app: &mut AppView, session_id: &str) {
-    let _ = handle_ext_notification(
-        &make_task_backgrounded_notif(session_id, "tc-1", "task-1", "sleep 98"),
-        app,
-    );
-    let _ = handle_ext_notification(
-        &make_task_backgrounded_notif(session_id, "tc-2", "task-2", "sleep 99"),
-        app,
-    );
-}
 /// Build an `legacy ext RPC` ext-notification (no id).
 pub(super) fn interjection_ext(session_id: &str, text: &str) -> acp::ExtNotification {
     interjection_ext_with_id(session_id, text, None)
@@ -715,86 +691,6 @@ pub(super) fn interaction_resolved_ext(
     };
     let raw = serde_json::value::to_raw_value(&notif).unwrap();
     acp::ExtNotification::new("pi/session_notification", std::sync::Arc::from(raw))
-}
-pub(super) fn make_task_backgrounded_notif(
-    session_id: &str,
-    tool_call_id: &str,
-    task_id: &str,
-    command: &str,
-) -> acp::ExtNotification {
-    let notif = SessionNotification {
-        session_id: acp::SessionId::new(session_id),
-        update: PiSessionUpdate::TaskBackgrounded {
-            tool_call_id: tool_call_id.into(),
-            task_id: task_id.into(),
-            command: command.into(),
-            cwd: "/tmp".into(),
-            output_file: "/tmp/output.log".into(),
-            monitor_description: None,
-            description: None,
-        },
-        meta: None,
-    };
-    let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("pi/task_backgrounded", std::sync::Arc::from(raw))
-}
-pub(super) fn make_task_completed_notif(
-    session_id: &str,
-    task_id: &str,
-    command: &str,
-    exit_code: Option<i32>,
-) -> acp::ExtNotification {
-    make_task_completed_notif_with_signal(session_id, task_id, command, exit_code, None)
-}
-pub(super) fn make_task_completed_notif_with_signal(
-    session_id: &str,
-    task_id: &str,
-    command: &str,
-    exit_code: Option<i32>,
-    signal: Option<&str>,
-) -> acp::ExtNotification {
-    task_completed_notif(session_id, task_id, command, exit_code, signal, false)
-}
-pub(super) fn task_completed_notif(
-    session_id: &str,
-    task_id: &str,
-    command: &str,
-    exit_code: Option<i32>,
-    signal: Option<&str>,
-    will_wake: bool,
-) -> acp::ExtNotification {
-    use pi_tools::types::TaskSnapshot;
-    let notif = SessionNotification {
-        session_id: acp::SessionId::new(session_id),
-        update: PiSessionUpdate::TaskCompleted {
-            task_snapshot: TaskSnapshot {
-                task_id: task_id.into(),
-                command: command.into(),
-                display_command: None,
-                cwd: "/tmp".into(),
-                start_time: std::time::SystemTime::now(),
-                end_time: Some(std::time::SystemTime::now()),
-                output: String::new(),
-                output_file: "/tmp/out.log".into(),
-                truncated: false,
-                exit_code,
-                signal: signal.map(|s| s.to_string()),
-                completed: true,
-                kind: Default::default(),
-                block_waited: false,
-                explicitly_killed: false,
-                kill_result_delivered: false,
-                owner_session_id: None,
-                description: None,
-                is_backgrounded: false,
-                output_total_bytes: 0,
-            },
-            will_wake,
-        },
-        meta: None,
-    };
-    let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("pi/task_completed", std::sync::Arc::from(raw))
 }
 pub(super) fn make_model_info(id: &str) -> acp::ModelInfo {
     acp::ModelInfo::new(acp::ModelId::new(std::sync::Arc::from(id)), id.to_string())

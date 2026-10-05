@@ -72,115 +72,27 @@ pub struct TurnStatusOutput {
     /// Hit area for the cancel button, if rendered.
     /// `None` when the button is not shown (idle, parked, drain-blocked).
     pub cancel_button: Option<Rect>,
-    /// Hit area for the background-demote button, if rendered.
-    pub bg_button: Option<Rect>,
-    /// Hit area for the still-running watcher cue (click opens the tasks
-    /// pane). `None` on keyboard-only hosts.
-    pub watching_cue: Option<Rect>,
 }
 
-/// Hover state for the turn-status row's mouse affordances (`[stop]`, `[↓]`,
-/// the still-running watcher cue). `Some(_)` renders them; `None` marks a
-/// keyboard-only host (minimal mode — no mouse capture) and suppresses all.
+/// Hover state for the turn-status row's mouse affordances (`[stop]`).
+/// `Some(_)` renders them; `None` marks a keyboard-only host (minimal mode —
+/// no mouse capture) and suppresses all.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MouseButtons {
     /// Whether the mouse is over the `[stop]` cancel button.
     pub cancel_hovered: bool,
-    /// Whether the mouse is over the `[↓]` send-to-background button.
-    pub bg_hovered: bool,
-    /// Whether the mouse is over the still-running watcher cue.
-    pub watching_hovered: bool,
-}
-
-/// Counts of idle-surviving "watcher" work — background jobs that can wake
-/// the agent for a new turn while it sits idle (commands and monitors on
-/// completion/events, `/loop` tasks on a timer, background subagents on
-/// finish). They share one persistent still-running cue above the prompt.
-/// Broader than the tasks-pane `Watchers` group (monitors + loops only).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Watchers {
-    /// Running background commands (non-monitor `background: true` tasks).
-    pub commands: usize,
-    /// Running `monitor` background tasks.
-    pub monitors: usize,
-    /// Active scheduled `/loop` tasks.
-    pub loops: usize,
-    /// Running background subagents. While the agent is idle, any running
-    /// subagent is a background one — a foreground subagent would keep the
-    /// parent in `TurnRunning`.
-    pub subagents: usize,
-    pub workflows: usize,
-}
-
-impl Watchers {
-    /// Total watcher count across all kinds.
-    pub fn total(self) -> usize {
-        self.commands + self.monitors + self.loops + self.subagents + self.workflows
-    }
-
-    /// Awaitable in-flight work — the kinds a blocking `wait_tasks` /
-    /// `get_task_output` wait can resolve on (commands, monitors, subagents;
-    /// scheduled `/loop` tasks and workflows are not task waits).
-    pub fn awaitable_work(self) -> usize {
-        self.commands + self.monitors + self.subagents
-    }
-}
-
-/// Format a counts-first `"… still running"` cue from `(count, noun)` pairs,
-/// listing only the non-zero kinds (plain-`s` plurals) — e.g.
-/// `"1 command · 2 monitors still running"`. `None` when every count is
-/// zero. Single owner of the format mechanics so the agent view's idle cue
-/// and the dashboard's background-work label cannot drift.
-pub(crate) fn format_still_running<'a>(
-    kinds: impl IntoIterator<Item = (usize, &'a str)>,
-) -> Option<String> {
-    use std::fmt::Write as _;
-    let mut label = String::with_capacity(48);
-    for (count, noun) in kinds {
-        if count == 0 {
-            continue;
-        }
-        if !label.is_empty() {
-            label.push_str(" \u{00b7} ");
-        }
-        let plural = if count == 1 { "" } else { "s" };
-        let _ = write!(label, "{count} {noun}{plural}");
-    }
-    if label.is_empty() {
-        return None;
-    }
-    label.push_str(" still running");
-    Some(label)
-}
-
-/// The idle watcher cue's label — e.g.
-/// `"1 command · 2 monitors · 1 loop · 1 subagent still running"`. Leads
-/// with the counts (not an ambient "watching") so a glance under a
-/// "Worked for X" marker still reads as unfinished work. `None` when no
-/// watchers are live.
-fn still_running_label(watchers: Watchers) -> Option<String> {
-    format_still_running([
-        (watchers.commands, "command"),
-        (watchers.monitors, "monitor"),
-        (watchers.loops, "loop"),
-        (watchers.subagents, "subagent"),
-        (watchers.workflows, "workflow"),
-    ])
 }
 
 /// Whether the turn is blocked in a wait the shell aborts as soon as the
 /// user sends a message (`get_task_output` with `timeout_ms`, `wait_tasks`,
-/// `Await*`, and a foreground subagent await — mirrors the shell's blocking
-/// waits, whose send-now routing cancels the blocked turn and runs the new
-/// message next). Typing is actionable during these, which is what the
-/// parked-wait rendering (`AgentView::is_parked_on_sendable_wait` /
-/// `renders_parked`) builds on.
+/// `Await*` — mirrors the shell's blocking waits, whose send-now routing
+/// cancels the blocked turn and runs the new message next). Typing is
+/// actionable during these, which is what the parked-wait rendering
+/// (`AgentView::is_parked_on_sendable_wait` / `renders_parked`) builds on.
 ///
-/// `Subagent` is included: the shell treats a blocked foreground subagent
-/// await like the other blocking waits, so Enter sends promptly and pre-wait
-/// rows read as held. `Model` waits stay excluded — the model is actively
-/// producing the turn, so a message typed there queues behind real work. Pure
-/// predicate over the resolved activity; no turn-lifecycle side effects.
+/// `Model` waits stay excluded — the model is actively producing the turn, so
+/// a message typed there queues behind real work. Pure predicate over the
+/// resolved activity; no turn-lifecycle side effects.
 pub fn is_sendable_wait(activity: &Option<TurnActivity>) -> bool {
     matches!(
         activity,
@@ -188,7 +100,6 @@ pub fn is_sendable_wait(activity: &Option<TurnActivity>) -> bool {
             WaitingReason::TaskOutput { waits: true, .. }
                 | WaitingReason::TasksComplete
                 | WaitingReason::Sleep
-                | WaitingReason::Subagent { .. }
         ))
     )
 }
@@ -204,13 +115,11 @@ pub struct TurnStatusArgs<'a> {
     pub drain_blocked: bool,
     /// Mouse affordances + hover state; `None` for keyboard-only hosts.
     pub buttons: Option<MouseButtons>,
-    pub has_running_execute: bool,
     /// Context-window tokens used, shown as `⇣Nk`.
     pub total_tokens: Option<u64>,
     pub mcp_init_progress: Option<&'a McpInitProgress>,
     pub is_bash_turn: bool,
     pub is_pending_user_input: bool,
-    pub watchers: Watchers,
     /// Parked on a sendable wait (`AgentView::renders_parked`).
     pub parked: bool,
     /// Transparent right-side background so the row blends with the
@@ -237,22 +146,19 @@ pub fn render_turn_status(
         tick,
         drain_blocked,
         buttons,
-        has_running_execute,
         total_tokens,
         mcp_init_progress,
         is_bash_turn,
         is_pending_user_input,
-        watchers,
         parked,
         flat_background,
         held_queue,
         held_queue_top_sendable,
     } = args;
     // Resolve the mouse affordances: a keyboard-only host (`None`) suppresses
-    // both buttons and reports no hover.
+    // the button and reports no hover.
     let show_buttons = buttons.is_some();
     let cancel_hovered = buttons.is_some_and(|b| b.cancel_hovered);
-    let bg_hovered = buttons.is_some_and(|b| b.bg_hovered);
     if area.height == 0 || area.width < 10 {
         return TurnStatusOutput::default();
     }
@@ -292,54 +198,35 @@ pub fn render_turn_status(
         return TurnStatusOutput::default();
     }
 
-    // Idle or parked: persistent cue (not scrollback — it must never scroll
-    // away). Lower priority than the starting-session and drain-blocked cues
-    // above. Parked never falls through to the running-turn chrome
+    // Parked: persistent cue (not scrollback — it must never scroll away).
+    // Lower priority than the starting-session and drain-blocked cues above.
+    // Parked never falls through to the running-turn chrome
     // (spinner/timers/[stop]) — the wait aborts the moment the user types,
-    // so that chrome would lie.
+    // so that chrome would lie. An idle row with nothing parked is blank.
     if state.is_idle() || parked {
-        // Parked with held queued rows: the queued hint IS the input-semantics
-        // story (Enter acts on the queue immediately), so it replaces the
-        // generic interrupt copy.
-        let parked_suffix = if held_queue > 0 && held_queue_top_sendable {
-            format!(" \u{00b7} {held_queue} queued, Enter to send now")
-        } else if held_queue > 0 {
-            format!(" \u{00b7} {held_queue} queued")
-        } else {
-            " \u{00b7} send a message to interrupt".to_string()
-        };
-        let cue = match (still_running_label(watchers), parked) {
-            (Some(label), true) => Some(format!("{label}{parked_suffix}")),
-            (Some(label), false) => Some(label),
-            (None, true) => Some(format!("waiting{parked_suffix}")),
-            (None, false) => None,
-        };
-        if let Some(cue) = cue {
+        if parked {
+            // Parked with held queued rows: the queued hint IS the
+            // input-semantics story (Enter acts on the queue immediately), so
+            // it replaces the generic interrupt copy.
+            let parked_suffix = if held_queue > 0 && held_queue_top_sendable {
+                format!(" \u{00b7} {held_queue} queued, Enter to send now")
+            } else if held_queue > 0 {
+                format!(" \u{00b7} {held_queue} queued")
+            } else {
+                " \u{00b7} send a message to interrupt".to_string()
+            };
+            let cue = format!("waiting{parked_suffix}");
             // Pulsing concentric circle (○ ◎ ◉ ◎) on a calm ambient cadence:
             // the agent is idle, so this breath runs slower than the active
             // turn spinner (see MONITOR_PULSE_DIVISOR).
             let frames = crate::glyphs::monitor_icon_frames();
             let frame_idx = (tick / MONITOR_PULSE_DIVISOR) as usize % frames.len();
             let icon = format!("{} ", frames[frame_idx]);
-            let label_fg = if buttons.is_some_and(|b| b.watching_hovered) {
-                theme.text_primary
-            } else {
-                theme.gray
-            };
-            let cue_width = (icon.width() + cue.width()).min(area.width as usize) as u16;
             let spans = vec![
                 Span::styled(icon, Style::default().fg(theme.accent_system)),
-                Span::styled(cue, Style::default().fg(label_fg)),
+                Span::styled(cue, Style::default().fg(theme.gray)),
             ];
             buf.set_line(area.x, area.y, &Line::from(spans), area.width);
-            // The cue opens the tasks pane on click — only advertise the hit
-            // area when there are tasks to show (a watcherless parked cue has
-            // nothing behind it).
-            return TurnStatusOutput {
-                watching_cue: (show_buttons && watchers.total() > 0)
-                    .then(|| Rect::new(area.x, area.y, cue_width, 1)),
-                ..TurnStatusOutput::default()
-            };
         }
         return TurnStatusOutput::default();
     }
@@ -380,37 +267,13 @@ pub fn render_turn_status(
     };
     let turn_timer_width = turn_timer_str.width();
 
-    // Bg button: [↓] normally, [send to bg] when hovered. Running execute
-    // tools only, and never while cancelling (demote no-ops there).
-    let show_bg = show_cancel
-        && has_running_execute
-        && matches!(
-            state,
-            AgentState::TurnRunning | AgentState::CommandRunning { .. }
-        );
-    let bg_str = if show_bg {
-        if bg_hovered {
-            " [send to bg]"
-        } else {
-            " [\u{2193}]"
-        }
-    } else {
-        ""
-    };
-    let bg_width = bg_str.width();
-
-    // Cancel button: always `[stop]`. Leading space only when the bg button
-    // is not shown (otherwise they're adjacent). Every arm is a `&'static str`
-    // so the per-frame status line never allocates. Hover state is conveyed by
+    // Cancel button: always `[stop]`. Every arm is a `&'static str` so the
+    // per-frame status line never allocates. Hover state is conveyed by
     // color (red on hover, see `cancel_style`), not by swapping the label.
-    let cancel_str: &str = match (show_cancel, show_bg) {
-        (false, _) => "",
-        (true, true) => "[stop]",
-        (true, false) => " [stop]",
-    };
+    let cancel_str: &str = if show_cancel { " [stop]" } else { "" };
     let cancel_width = cancel_str.width();
 
-    let right_width = turn_timer_width + bg_width + cancel_width;
+    let right_width = turn_timer_width + cancel_width;
 
     // ── Build components ──
     // While a tool is blocked on a permission prompt or `ask_user_question`,
@@ -447,7 +310,7 @@ pub fn render_turn_status(
 
     // Timer style (gray for both phase and turn timers).
     //
-    // Right-side elements (turn timer, bg button, cancel button) must set
+    // Right-side elements (turn timer, cancel button) must set
     // fg, bg, AND remove_modifier explicitly. fill_background() paints
     // bg_base on every cell before widgets render, but set_line() for the
     // left content may overwrite fg/modifiers on cells in the right zone.
@@ -593,7 +456,7 @@ pub fn render_turn_status(
     let left_line = Line::from(left_spans);
     buf.set_line(area.x, area.y, &left_line, area.width);
 
-    // ── Render right side: turn_timer + bg + cancel ──
+    // ── Render right side: turn_timer + cancel ──
     let right_start_x = area.x + area.width.saturating_sub(right_width as u16);
 
     // Helper: build a fully-specified right-side style (fg + bg + clear mods).
@@ -612,22 +475,6 @@ pub fn render_turn_status(
         x += turn_timer_width as u16;
     }
 
-    // Bg button — accent_running on hover
-    let bg_button_rect = if show_bg && !bg_str.is_empty() {
-        let bg_x = x;
-        let bg_style = if bg_hovered {
-            right_style(theme.accent_running)
-        } else {
-            right_style(theme.gray)
-        };
-        let span = Span::styled(bg_str, bg_style);
-        buf.set_span(x, area.y, &span, bg_width as u16);
-        x += bg_width as u16;
-        Some(Rect::new(bg_x, area.y, bg_str.width() as u16, 1))
-    } else {
-        None
-    };
-
     // Cancel button — accent_error (red) on hover, gray at rest
     let cancel_button_rect = if show_cancel && !cancel_str.is_empty() {
         let cancel_x = x;
@@ -645,8 +492,6 @@ pub fn render_turn_status(
 
     TurnStatusOutput {
         cancel_button: cancel_button_rect,
-        bg_button: bg_button_rect,
-        watching_cue: None,
     }
 }
 
@@ -722,7 +567,7 @@ fn compute_activity(
         ),
         (AgentState::TurnRunning, None) => (
             // Fallback: a running inference turn with no resolved activity. The
-            // view resolves this gap into Waiting(Model/Subagent) before render,
+            // view resolves this gap into Waiting(Model) before render,
             // so this is now a rarely-hit safety net.
             Style::default().fg(theme.text_secondary),
             "Waiting…".to_string(),
@@ -793,13 +638,9 @@ fn render_starting_session(
 ///
 /// Returns true when a turn is active (Running or Cancelling), when the drain
 /// is blocked (agent idle, waiting on user edit), while the MCP startup seed
-/// is showing "Starting session…" (a fresh `total == 0` seed), or when the
-/// agent is idle but background watchers are still running
-/// (`watchers.total() > 0`) — running commands and monitors wake the agent on
-/// completion/events, scheduled `/loop` tasks fire prompts, and background
-/// subagents inject a completion turn, any of which can start a new turn.
+/// is showing "Starting session…" (a fresh `total == 0` seed).
 ///
-/// A parked turn always shows the row, watchers or not.
+/// A parked turn always shows the row.
 ///
 /// Real MCP progress (`total > 0`) renders as a compact chip in the top status
 /// bar instead, so it does not affect this row.
@@ -807,7 +648,6 @@ pub fn should_show(
     state: &AgentState,
     drain_blocked: bool,
     mcp_init_progress: Option<&McpInitProgress>,
-    watchers: Watchers,
     parked: bool,
 ) -> bool {
     if parked {
@@ -816,7 +656,6 @@ pub fn should_show(
     !state.is_idle()
         || drain_blocked
         || starting_session_visible(mcp_init_progress)
-        || watchers.total() > 0
 }
 
 /// Format a duration for the turn/phase timer.
@@ -864,10 +703,10 @@ mod tests {
     use super::*;
 
     /// Sendable waits = exactly the wait reasons the shell aborts on a queued
-    /// user prompt (blocking task-output / wait_tasks / Await, and a blocked
-    /// foreground subagent await — all take the send-now path). Model waits —
-    /// where typing only queues behind the actively-streaming turn — and
-    /// non-wait activities keep the busy spinner.
+    /// user prompt (blocking task-output / wait_tasks / Await — all take the
+    /// send-now path). Model waits — where typing only queues behind the
+    /// actively-streaming turn — and non-wait activities keep the busy
+    /// spinner.
     #[test]
     fn sendable_wait_matches_shell_interruptible_waits() {
         let task_wait = |waits| {
@@ -891,11 +730,6 @@ mod tests {
         assert!(!is_sendable_wait(&Some(TurnActivity::Waiting(
             WaitingReason::Model
         ))));
-        assert!(
-            is_sendable_wait(&Some(TurnActivity::Waiting(WaitingReason::subagent()))),
-            "the shell aborts a blocked foreground subagent await on send-now, \
-             so Enter during it must read as sendable"
-        );
         assert!(!is_sendable_wait(&Some(TurnActivity::Thinking)));
         assert!(!is_sendable_wait(&None));
     }
@@ -947,13 +781,6 @@ mod tests {
         let theme = Theme::current();
         let cases = [
             (WaitingReason::Model, "Waiting for response…"),
-            (WaitingReason::subagent(), "Waiting on subagent…"),
-            (
-                WaitingReason::Subagent {
-                    display: Some("fix flaky test: Running: cargo test".into()),
-                },
-                "fix flaky test: Running: cargo test…",
-            ),
             (WaitingReason::task_output(), "Waiting on task output…"),
             (
                 WaitingReason::TaskOutput {
@@ -999,21 +826,18 @@ mod tests {
             &AgentState::TurnRunning,
             false,
             None,
-            Watchers::default(),
             false
         ));
         assert!(should_show(
             &AgentState::TurnCancelling,
             false,
             None,
-            Watchers::default(),
             false
         ));
         assert!(!should_show(
             &AgentState::Idle,
             false,
             None,
-            Watchers::default(),
             false
         ));
     }
@@ -1034,12 +858,10 @@ mod tests {
                 tick: 0,
                 drain_blocked: false,
                 buttons: Some(MouseButtons::default()),
-                has_running_execute: false,
                 total_tokens: None,
                 mcp_init_progress: None,
                 is_bash_turn: false,
                 is_pending_user_input: false,
-                watchers: Watchers::default(),
                 parked: false,
                 flat_background: false,
                 held_queue: 0,
@@ -1063,65 +885,13 @@ mod tests {
             &AgentState::Idle,
             true,
             None,
-            Watchers::default(),
-            false
-        ));
-    }
-
-    #[test]
-    fn should_show_when_watchers_running() {
-        // Idle but a watcher (command, monitor, loop, or subagent) is still
-        // running → row stays visible so the persistent "… still running" cue
-        // can show.
-        for watchers in [
-            Watchers {
-                commands: 1,
-                ..Watchers::default()
-            },
-            Watchers {
-                monitors: 1,
-                ..Watchers::default()
-            },
-            Watchers {
-                loops: 1,
-                ..Watchers::default()
-            },
-            Watchers {
-                subagents: 1,
-                ..Watchers::default()
-            },
-        ] {
-            assert!(should_show(&AgentState::Idle, false, None, watchers, false));
-        }
-        // Idle with no watchers and nothing else pending → hidden.
-        assert!(!should_show(
-            &AgentState::Idle,
-            false,
-            None,
-            Watchers::default(),
             false
         ));
     }
 
     #[test]
     fn should_show_parked_always() {
-        assert!(should_show(
-            &AgentState::TurnRunning,
-            false,
-            None,
-            Watchers {
-                commands: 1,
-                ..Watchers::default()
-            },
-            true
-        ));
-        assert!(should_show(
-            &AgentState::TurnRunning,
-            false,
-            None,
-            Watchers::default(),
-            true
-        ));
+        assert!(should_show(&AgentState::TurnRunning, false, None, true));
     }
 
     #[test]
@@ -1136,7 +906,6 @@ mod tests {
             &AgentState::Idle,
             false,
             Some(&seed),
-            Watchers::default(),
             false
         ));
 
@@ -1151,7 +920,6 @@ mod tests {
             &AgentState::Idle,
             false,
             Some(&connecting),
-            Watchers::default(),
             false
         ));
 
@@ -1165,7 +933,6 @@ mod tests {
             &AgentState::Idle,
             false,
             Some(&expired),
-            Watchers::default(),
             false
         ));
     }
@@ -1182,8 +949,8 @@ mod tests {
             .join("\n")
     }
 
-    /// Baseline render args: idle agent on a mouse host with the given watchers.
-    fn idle_args<'a>(watchers: Watchers) -> TurnStatusArgs<'a> {
+    /// Baseline render args: idle agent on a mouse host.
+    fn idle_args<'a>() -> TurnStatusArgs<'a> {
         TurnStatusArgs {
             state: &AgentState::Idle,
             activity: &None,
@@ -1192,12 +959,10 @@ mod tests {
             tick: 0,
             drain_blocked: false,
             buttons: Some(MouseButtons::default()),
-            has_running_execute: false,
             total_tokens: None,
             mcp_init_progress: None,
             is_bash_turn: false,
             is_pending_user_input: false,
-            watchers,
             parked: false,
             flat_background: false,
             held_queue: 0,
@@ -1221,261 +986,31 @@ mod tests {
 
     /// Invoke `render_turn_status` for an idle agent with the given MCP seed.
     fn render_idle_with_mcp(progress: &McpInitProgress) -> String {
-        let mut args = idle_args(Watchers::default());
+        let mut args = idle_args();
         args.mcp_init_progress = Some(progress);
         render_row_text(args, 60)
     }
 
-    /// Invoke `render_turn_status` for an idle agent with the given watcher
-    /// counts at animation tick `tick`.
-    fn render_idle_with_watchers_at_tick(watchers: Watchers, tick: u64) -> String {
-        render_idle_with_watchers_in_width(watchers, tick, 72)
-    }
-
-    /// [`render_idle_with_watchers_at_tick`] with an explicit row width.
-    fn render_idle_with_watchers_in_width(watchers: Watchers, tick: u64, width: u16) -> String {
-        let mut args = idle_args(watchers);
-        args.tick = tick;
-        render_row_text(args, width)
-    }
-
     /// Invoke `render_turn_status` for a PARKED running turn (the stopped
-    /// look) with the given watcher counts.
-    fn render_parked_with_watchers(watchers: Watchers) -> String {
+    /// look) at animation tick `tick`.
+    fn render_parked_at_tick(tick: u64) -> String {
         let activity = Some(TurnActivity::Waiting(WaitingReason::TasksComplete));
-        let mut args = idle_args(watchers);
+        let mut args = idle_args();
         args.state = &AgentState::TurnRunning;
         args.activity = &activity;
         args.turn_elapsed = Some(Duration::from_secs(5));
         args.parked = true;
+        args.tick = tick;
         render_row_text(args, 72)
     }
 
-    /// Invoke `render_turn_status` for an idle agent with the given watcher
-    /// counts at the first animation tick.
-    fn render_idle_with_watchers(watchers: Watchers) -> String {
-        render_idle_with_watchers_at_tick(watchers, 0)
-    }
-
-    /// Invoke `render_turn_status` for an idle agent with `n` running
-    /// monitors at animation tick `tick`.
-    fn render_idle_with_monitors_at_tick(n: usize, tick: u64) -> String {
-        render_idle_with_watchers_at_tick(
-            Watchers {
-                monitors: n,
-                ..Watchers::default()
-            },
-            tick,
-        )
-    }
-
-    /// Invoke `render_turn_status` for an idle agent with `n` running
-    /// monitors at the first animation tick.
-    fn render_idle_with_monitors(n: usize) -> String {
-        render_idle_with_monitors_at_tick(n, 0)
-    }
-
     #[test]
-    fn idle_with_monitors_renders_still_running_cue() {
-        let text = render_idle_with_monitors(2);
-        assert!(
-            text.contains("2 monitors still running"),
-            "idle with monitors must render the still-running cue, got: {text:?}"
-        );
-    }
-
-    #[test]
-    fn idle_with_one_monitor_uses_singular() {
-        let text = render_idle_with_monitors(1);
-        assert!(
-            text.contains("1 monitor still running") && !text.contains("monitors"),
-            "single monitor must use the singular noun, got: {text:?}"
-        );
-    }
-
-    #[test]
-    fn idle_with_no_monitors_renders_nothing() {
-        let text = render_idle_with_monitors(0);
-        assert!(
-            text.trim().is_empty(),
-            "idle with no monitors must render nothing, got: {text:?}"
-        );
-    }
-
-    /// Mouse hosts get a hit rect hugging exactly the rendered cue text, and
-    /// hover brightens the label; keyboard-only hosts get neither.
-    #[test]
-    fn watching_cue_is_clickable_on_mouse_hosts_only() {
-        let theme = Theme::current();
-        let watchers = Watchers {
-            monitors: 1,
-            ..Watchers::default()
-        };
-        // First label cell (after the 2-col icon).
-        let label_fg = |buf: &Buffer| buf.cell((2, 0)).map(|c| c.fg);
-
-        let (output, buf) = render_row(idle_args(watchers), 60);
-        let rect = output.watching_cue.expect("mouse host must get a hit rect");
-        let rendered_width = buffer_text(&buf, buf.area).trim_end().width() as u16;
-        assert_eq!(rect, Rect::new(0, 0, rendered_width, 1));
-        assert_eq!(label_fg(&buf), Some(theme.gray));
-
-        let mut args = idle_args(watchers);
-        args.buttons = Some(MouseButtons {
-            watching_hovered: true,
-            ..MouseButtons::default()
-        });
-        let (_, buf) = render_row(args, 60);
-        assert_eq!(label_fg(&buf), Some(theme.text_primary));
-
-        let mut args = idle_args(watchers);
-        args.buttons = None;
-        let (output, _) = render_row(args, 60);
-        assert!(output.watching_cue.is_none());
-    }
-
-    #[test]
-    fn idle_with_loops_renders_still_running_cue() {
-        let text = render_idle_with_watchers(Watchers {
-            loops: 2,
-            ..Watchers::default()
-        });
-        assert!(
-            text.contains("2 loops still running"),
-            "idle with loops must render the still-running cue, got: {text:?}"
-        );
-    }
-
-    #[test]
-    fn idle_with_one_loop_uses_singular() {
-        let text = render_idle_with_watchers(Watchers {
-            loops: 1,
-            ..Watchers::default()
-        });
-        assert!(
-            text.contains("1 loop still running") && !text.contains("loops"),
-            "single loop must use the singular noun, got: {text:?}"
-        );
-    }
-
-    #[test]
-    fn idle_with_subagents_renders_still_running_cue() {
-        let text = render_idle_with_watchers(Watchers {
-            subagents: 2,
-            ..Watchers::default()
-        });
-        assert!(
-            text.contains("2 subagents still running"),
-            "idle with subagents must render the still-running cue, got: {text:?}"
-        );
-    }
-
-    #[test]
-    fn idle_with_one_subagent_uses_singular() {
-        let text = render_idle_with_watchers(Watchers {
-            subagents: 1,
-            ..Watchers::default()
-        });
-        assert!(
-            text.contains("1 subagent still running") && !text.contains("subagents"),
-            "single subagent must use the singular noun, got: {text:?}"
-        );
-    }
-
-    #[test]
-    fn idle_with_one_workflow_counts_run_once() {
-        let text = render_idle_with_watchers(Watchers {
-            workflows: 1,
-            ..Watchers::default()
-        });
-        assert!(text.contains("1 workflow still running"), "got: {text:?}");
-    }
-
-    #[test]
-    fn idle_with_monitors_and_loops_lists_both() {
-        // Both watcher kinds present → one cue lists monitors then loops,
-        // each with its own count, joined by the middle-dot separator.
-        let text = render_idle_with_watchers(Watchers {
-            monitors: 1,
-            loops: 2,
-            ..Watchers::default()
-        });
-        assert!(
-            text.contains("1 monitor \u{00b7} 2 loops still running"),
-            "both kinds must be listed in one cue, got: {text:?}"
-        );
-    }
-
-    #[test]
-    fn idle_with_all_watcher_kinds_lists_all() {
-        // Commands, monitors, loops, and subagents present → one cue lists
-        // all four in order, middle-dot separated.
-        let text = render_idle_with_watchers(Watchers {
-            commands: 1,
-            monitors: 2,
-            loops: 1,
-            subagents: 3,
-            workflows: 0,
-        });
-        assert!(
-            text.contains(
-                "1 command \u{00b7} 2 monitors \u{00b7} 1 loop \u{00b7} 3 subagents still running"
-            ),
-            "all kinds must be listed in one cue, got: {text:?}"
-        );
-    }
-
-    #[test]
-    fn narrow_area_clips_cue_tail_keeping_counts() {
-        // 40 cols with three kinds: the row tail-clips with no ellipsis, so
-        // the leading counts survive and the trailing suffix is what gets
-        // cut. Pins the narrow-pane tradeoff of leading with the counts; a
-        // smarter compact fallback would be a behavior change.
-        let watchers = Watchers {
-            commands: 1,
-            monitors: 2,
-            loops: 1,
-            ..Watchers::default()
-        };
-        let text = render_idle_with_watchers_in_width(watchers, 0, 40);
-        assert!(
-            text.contains("1 command \u{00b7} 2 monitors \u{00b7} 1 loop"),
-            "the counts must survive the clip, got: {text:?}"
-        );
-    }
-
-    #[test]
-    fn idle_with_commands_renders_still_running_cue() {
-        // Plain background commands (non-monitor bg tasks) count as watchers:
-        // they wake the agent with a task-completed turn, so the cue must show.
-        let text = render_idle_with_watchers(Watchers {
-            commands: 2,
-            ..Watchers::default()
-        });
-        assert!(
-            text.contains("2 commands still running"),
-            "idle with bg commands must render the still-running cue, got: {text:?}"
-        );
-        let text = render_idle_with_watchers(Watchers {
-            commands: 1,
-            ..Watchers::default()
-        });
-        assert!(
-            text.contains("1 command still running") && !text.contains("commands"),
-            "single command must use the singular noun, got: {text:?}"
-        );
-    }
-
-    #[test]
-    fn parked_with_watchers_renders_cue_not_running_chrome() {
+    fn parked_renders_waiting_cue_not_running_chrome() {
         // The wait aborts as soon as the user types, so busy chrome would lie.
-        let text = render_parked_with_watchers(Watchers {
-            commands: 2,
-            ..Watchers::default()
-        });
+        let text = render_parked_at_tick(0);
         assert!(
-            text.contains("2 commands still running \u{00b7} send a message to interrupt"),
-            "parked with bg work must render the interruptible still-running cue, got: {text:?}"
+            text.contains("waiting \u{00b7} send a message to interrupt"),
+            "parked must render the waiting interrupt cue, got: {text:?}"
         );
         assert!(
             !text.contains("Waiting") && !text.contains("[stop]"),
@@ -1484,26 +1019,10 @@ mod tests {
     }
 
     #[test]
-    fn parked_without_watchers_renders_waiting_cue() {
-        let text = render_parked_with_watchers(Watchers::default());
-        assert!(
-            text.contains("waiting \u{00b7} send a message to interrupt"),
-            "watcherless parked must render the waiting interrupt cue, got: {text:?}"
-        );
-        assert!(
-            !text.contains("[stop]"),
-            "watcherless parked must not render the running-turn chrome, got: {text:?}"
-        );
-    }
-
-    #[test]
     fn parked_with_held_queue_renders_queued_hint() {
         // The queued hint replaces the interrupt copy (Enter = send-now).
         let activity = Some(TurnActivity::Waiting(WaitingReason::TasksComplete));
-        let mut args = idle_args(Watchers {
-            commands: 1,
-            ..Watchers::default()
-        });
+        let mut args = idle_args();
         args.state = &AgentState::TurnRunning;
         args.activity = &activity;
         args.parked = true;
@@ -1521,18 +1040,18 @@ mod tests {
     }
 
     #[test]
-    fn idle_with_no_watchers_renders_nothing() {
-        let text = render_idle_with_watchers(Watchers::default());
+    fn idle_renders_nothing() {
+        let text = render_row_text(idle_args(), 60);
         assert!(
             text.trim().is_empty(),
-            "idle with no watchers must render nothing, got: {text:?}"
+            "idle with nothing pending must render nothing, got: {text:?}"
         );
     }
 
     #[test]
     fn queued_hint_renders_after_phase_timer() {
-        let activity = Some(TurnActivity::Waiting(WaitingReason::subagent()));
-        let mut args = idle_args(Watchers::default());
+        let activity = Some(TurnActivity::Waiting(WaitingReason::TasksComplete));
+        let mut args = idle_args();
         args.state = &AgentState::TurnRunning;
         args.activity = &activity;
         args.activity_started_at = Some(Instant::now() - Duration::from_secs(359));
@@ -1540,77 +1059,23 @@ mod tests {
         args.held_queue_top_sendable = true;
         let text = render_row_text(args, 80);
         assert!(
-            text.contains("Waiting on subagent… 5m59s · 1 queued, Enter to send now"),
+            text.contains("Waiting on tasks… 5m59s · 1 queued, Enter to send now"),
             "phase timer must sit between the wait label and the queued hint, got: {text:?}"
         );
     }
 
     #[test]
-    fn still_running_label_lists_only_nonzero_kinds() {
-        assert_eq!(
-            still_running_label(Watchers {
-                commands: 2,
-                ..Watchers::default()
-            }),
-            Some("2 commands still running".into())
-        );
-        assert_eq!(
-            still_running_label(Watchers {
-                monitors: 2,
-                ..Watchers::default()
-            }),
-            Some("2 monitors still running".into())
-        );
-        assert_eq!(
-            still_running_label(Watchers {
-                loops: 1,
-                ..Watchers::default()
-            }),
-            Some("1 loop still running".into())
-        );
-        assert_eq!(
-            still_running_label(Watchers {
-                subagents: 1,
-                ..Watchers::default()
-            }),
-            Some("1 subagent still running".into())
-        );
-        assert_eq!(
-            still_running_label(Watchers {
-                monitors: 1,
-                loops: 2,
-                ..Watchers::default()
-            }),
-            Some("1 monitor \u{00b7} 2 loops still running".into())
-        );
-        assert_eq!(
-            still_running_label(Watchers {
-                commands: 1,
-                monitors: 1,
-                loops: 1,
-                subagents: 2,
-                workflows: 0,
-            }),
-            Some(
-                "1 command \u{00b7} 1 monitor \u{00b7} 1 loop \u{00b7} 2 subagents still running"
-                    .into()
-            )
-        );
-        assert_eq!(still_running_label(Watchers::default()), None);
-    }
-
-    #[test]
-    fn idle_monitor_icon_animates_across_ticks() {
+    fn parked_icon_animates_across_ticks() {
         // The leading glyph cycles through monitor_icon_frames() as `tick`
         // advances, so two ticks a full frame apart (0 vs MONITOR_PULSE_DIVISOR)
         // must render different icons — proving the cue is animated, not static.
-        let frame0 = render_idle_with_monitors_at_tick(1, 0);
-        let frame1 = render_idle_with_monitors_at_tick(1, MONITOR_PULSE_DIVISOR);
+        let frame0 = render_parked_at_tick(0);
+        let frame1 = render_parked_at_tick(MONITOR_PULSE_DIVISOR);
         let icon0 = frame0.chars().next();
         let icon1 = frame1.chars().next();
         assert_ne!(
             icon0, icon1,
-            "monitor icon must animate between frames, got {frame0:?} vs {frame1:?}"
+            "parked icon must animate between frames, got {frame0:?} vs {frame1:?}"
         );
     }
 

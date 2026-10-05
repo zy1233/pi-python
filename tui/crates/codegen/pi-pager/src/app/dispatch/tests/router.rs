@@ -84,15 +84,15 @@ fn external_prompt_editor_arms_in_fullscreen_and_refuses_owned_input() {
         "the composer stays the editing surface with scrollback focused"
     );
     app.pending_editor = None;
-    app.agents.get_mut(&id).unwrap().cancel_turn_view =
-        Some(crate::views::modal::CancelTurnViewState {
-            active_idx: 0,
-            running_count: 1,
-        });
+    app.agents
+        .get_mut(&id)
+        .unwrap()
+        .permission_queue
+        .push_back(crate::app::agent_view::test_fixtures::make_followup_permission_state());
     let _ = dispatch(Action::EditPromptExternal, &mut app);
     assert!(app.pending_editor.is_none(), "modal owner must refuse");
     assert_eq!(app.agents[&id].prompt.text(), "draft");
-    app.agents.get_mut(&id).unwrap().cancel_turn_view = None;
+    app.agents.get_mut(&id).unwrap().permission_queue.clear();
     app.agents.get_mut(&id).unwrap().prompt_mode = PromptMode::EditingQueued {
         id: 1,
         original: "queued".to_owned(),

@@ -185,7 +185,6 @@ pub(super) fn dispatch_rewind_cancel_offer(app: &mut AppView) -> Vec<Effect> {
     });
     let mut effects = vec![Effect::CancelTurn {
         session_id: session_id.clone(),
-        cancel_subagents: true,
         trigger: None,
         // The rewind picker owns history via `handle_rewind`; this pre-cancel
         // must not also pop the in-flight prompt.

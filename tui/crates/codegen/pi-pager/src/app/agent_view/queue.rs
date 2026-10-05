@@ -219,13 +219,6 @@ impl AgentView {
         self.is_parked_on_sendable_wait()
     }
 
-    /// Live counts for the turn-status watching cue; see
-    /// [`crate::views::turn_status::Watchers`].
-    pub(crate) fn watchers(&self) -> crate::views::turn_status::Watchers {
-        let mut watchers = crate::views::turn_status::Watchers::default();
-        watchers
-    }
-
     /// Shared tail of every turn-end marker push
     /// (`push_turn_terminal_marker`).
     pub(crate) fn push_end_marker_block(

@@ -78,9 +78,8 @@ impl fmt::Display for LineRange {
 
 /// Semantic class of a verb-groupable (non-destructive) run member, naming
 /// what a folded run of consecutive rows touched: "Read 3 files", "Searched
-/// 4 patterns". Most kinds classify tool blocks via
-/// [`ToolCallBlock::verb_group_kind`]; `Subagent` classifies subagent
-/// lifecycle render blocks, which are not tool calls.
+/// 4 patterns". Kinds classify tool blocks via
+/// [`ToolCallBlock::verb_group_kind`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VerbGroupKind {
     /// Plain file reads.
@@ -99,8 +98,6 @@ pub enum VerbGroupKind {
     MemorySearch,
     /// MCP tool discovery (`search_tool`).
     IntegrationSearch,
-    /// Subagent lifecycle rows (`RenderBlock::Subagent`).
-    Subagent,
     /// Shell commands. Label-only: commands never fold eagerly
     /// ([`ToolCallBlock::verb_group_kind`] excludes them), but a truncation
     /// header describing hidden rows buckets them ("Ran 6 commands").
@@ -124,9 +121,7 @@ impl VerbGroupKind {
             | VerbGroupKind::IntegrationSearch => ("Searched", "Searching"),
             VerbGroupKind::Dir => ("Listed", "Listing"),
             VerbGroupKind::WebFetch => ("Fetched", "Fetching"),
-            VerbGroupKind::Subagent | VerbGroupKind::Command | VerbGroupKind::OtherTool => {
-                ("Ran", "Running")
-            }
+            VerbGroupKind::Command | VerbGroupKind::OtherTool => ("Ran", "Running"),
             VerbGroupKind::EditFile => ("Edited", "Editing"),
             VerbGroupKind::McpCall => ("Called", "Calling"),
         };
@@ -143,7 +138,6 @@ impl VerbGroupKind {
             VerbGroupKind::WebFetch | VerbGroupKind::WebSearch => ("website", "websites"),
             VerbGroupKind::MemorySearch => ("memory", "memories"),
             VerbGroupKind::IntegrationSearch | VerbGroupKind::McpCall => ("MCP tool", "MCP tools"),
-            VerbGroupKind::Subagent => ("subagent", "subagents"),
             VerbGroupKind::Command => ("command", "commands"),
             VerbGroupKind::OtherTool => ("tool", "tools"),
         };
@@ -631,8 +625,6 @@ mod tests {
         assert_eq!(VerbGroupKind::WebSearch.verb(false), "Searched");
         assert_eq!(VerbGroupKind::MemorySearch.verb(false), "Searched");
         assert_eq!(VerbGroupKind::IntegrationSearch.verb(true), "Searching");
-        assert_eq!(VerbGroupKind::Subagent.verb(false), "Ran");
-        assert_eq!(VerbGroupKind::Subagent.verb(true), "Running");
         assert_eq!(VerbGroupKind::Command.verb(false), "Ran");
         assert_eq!(VerbGroupKind::Command.verb(true), "Running");
         assert_eq!(VerbGroupKind::EditFile.verb(false), "Edited");
@@ -656,8 +648,6 @@ mod tests {
         assert_eq!(VerbGroupKind::MemorySearch.noun(2), "memories");
         assert_eq!(VerbGroupKind::IntegrationSearch.noun(1), "MCP tool");
         assert_eq!(VerbGroupKind::IntegrationSearch.noun(2), "MCP tools");
-        assert_eq!(VerbGroupKind::Subagent.noun(1), "subagent");
-        assert_eq!(VerbGroupKind::Subagent.noun(2), "subagents");
         assert_eq!(VerbGroupKind::Command.noun(1), "command");
         assert_eq!(VerbGroupKind::Command.noun(2), "commands");
         assert_eq!(VerbGroupKind::EditFile.noun(2), "files");

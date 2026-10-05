@@ -2083,16 +2083,6 @@ mod link_click_tests {
         assert!(agent.scrollback_search.is_none());
     }
     #[test]
-    fn router_slash_blocked_while_cancel_turn_pending() {
-        let (mut agent, reg) = make_search_agent();
-        agent.cancel_turn_view = Some(crate::views::modal::CancelTurnViewState {
-            active_idx: 0,
-            running_count: 1,
-        });
-        route_slash(&mut agent, &reg);
-        assert!(agent.scrollback_search.is_none());
-    }
-    #[test]
     fn router_slash_blocked_while_question_pending() {
         let (mut agent, reg) = make_search_agent();
         agent.question_view =

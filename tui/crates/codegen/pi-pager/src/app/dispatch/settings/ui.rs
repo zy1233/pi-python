@@ -21,7 +21,6 @@ use crate::app::app_view::{ActiveView, AppView};
 use crate::app::dispatch::ctx::with_active_agent;
 use crate::app::dispatch::modes::{set_yolo_mode_inner, sync_active_auto_flag};
 use crate::app::dispatch::router::dispatch;
-use crate::app::dispatch::turn::apply_cancel_subagents_preference_global;
 use agent_client_protocol as acp;
 
 /// Format a "✓ Label: value" success toast.
@@ -887,18 +886,6 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
                     s,
                 ),
             )
-        }
-        ("cancel_subagents_on_turn_cancel", SettingValue::Enum("ask")) => {
-            app.current_ui.cancel_subagents_on_turn_cancel = None;
-            for agent in app.agents.values_mut() {
-                agent.cancel_subagents_preference = None;
-            }
-        }
-        ("cancel_subagents_on_turn_cancel", SettingValue::Enum("always_stop")) => {
-            apply_cancel_subagents_preference_global(app, true);
-        }
-        ("cancel_subagents_on_turn_cancel", SettingValue::Enum("always_continue")) => {
-            apply_cancel_subagents_preference_global(app, false);
         }
         // Rollback for corrupted auto-* = "auto" — clear to None.
         ("auto_dark_theme", SettingValue::Enum("auto")) => {

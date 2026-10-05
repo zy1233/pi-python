@@ -20,7 +20,6 @@ use crate::scrollback::text_selection::{
 use crate::theme::Theme;
 use crate::views::agent::AgentViewLayoutParams;
 use crate::views::btw_overlay::BTW_OVERLAY_ENTRY_IDX;
-use crate::views::modal;
 use crate::views::plan_approval_view::PlanApprovalFocus;
 use crate::views::prompt_widget::{PromptBg, PromptFlag, PromptInfo, PromptStyle};
 use crate::views::question_view::{QUESTION_VIEW_HPAD, feedback_input};
@@ -309,12 +308,6 @@ impl AgentView {
                 .map_or(ShortcutsBarContent::Hidden, |pav| {
                     self.plan_approval_bar(pav)
                 }),
-            KeyOwner::Card(BlockingCard::CancelTurn) => ShortcutsBarContent::Surface(vec![
-                HintItem::paired(key!('1'), key!('4'), "select"),
-                HintItem::new(key!(Tab), "next choice"),
-                HintItem::new(key!(Enter), "confirm"),
-                self.card_esc_hint(),
-            ]),
             KeyOwner::Card(BlockingCard::Question) => ShortcutsBarContent::Surface(
                 self.focused_question()
                     .map(|qv| self.question_shortcut_hints(qv))
@@ -728,12 +721,6 @@ impl AgentView {
             } else {
                 0
             };
-        let cancel_turn_view_h =
-            if slot_card == Some(BlockingCard::CancelTurn) && rewind_view_h == 0 {
-                modal::cancel_turn_panel_height(area.height)
-            } else {
-                0
-            };
         let jump_view_h = if !self.jump_slot_taken() {
             if let Some(ref js) = self.jump_state {
                 crate::views::jump::jump_overlay_height(js, area.height)
@@ -828,8 +815,6 @@ impl AgentView {
             rewind_view_h
         } else if jump_view_h > 0 {
             jump_view_h
-        } else if cancel_turn_view_h > 0 {
-            cancel_turn_view_h
         } else {
             base_prompt_height
         };
@@ -842,14 +827,12 @@ impl AgentView {
         }
         let queue_height = self.queue.desired_height();
         let drain_blocked = self.drain_blocked();
-        let watchers = self.watchers();
         let parked = self.renders_parked();
         let wake_display_state = self.wake_display_state();
         let turn_status_height = if turn_status::should_show(
             wake_display_state.unwrap_or(&self.session.state),
             drain_blocked,
             self.mcp_init_progress.as_ref(),
-            watchers,
             parked,
         ) {
             1
@@ -1059,7 +1042,6 @@ impl AgentView {
             status.push("context", ctx_line);
         }
         let areas = status.render(buf, layout.status_bar);
-        self.hit_bg_status.rect = areas.get("bg_tasks").copied();
         self.hit_context.rect = areas.get("context").copied();
         self.hit_credits.rect = areas.get("credits").copied();
         self.hit_plan_button.rect = areas.get("plan").copied();
@@ -1665,15 +1647,7 @@ impl AgentView {
                     1,
                 ));
                 self.hit_cancel_button.rect = None;
-                self.hit_bg_button.rect = None;
-                self.hit_watching_cue.rect = None;
             } else {
-                let has_running_execute = wake_display_state.is_none()
-                    && self
-                        .session
-                        .tracker
-                        .running_execute_tool_call_id()
-                        .is_some();
                 let is_pending_user_input = matches!(
                     self.blocking_card(),
                     Some(
@@ -1696,15 +1670,11 @@ impl AgentView {
                         drain_blocked,
                         buttons: Some(turn_status::MouseButtons {
                             cancel_hovered: self.hit_cancel_button.hovered,
-                            bg_hovered: self.hit_bg_button.hovered,
-                            watching_hovered: self.hit_watching_cue.hovered,
                         }),
-                        has_running_execute,
                         total_tokens: self.context_state.as_ref().map(|c| c.used),
                         mcp_init_progress: self.mcp_init_progress.as_ref(),
                         is_bash_turn: self.bash_turn,
                         is_pending_user_input,
-                        watchers,
                         parked,
                         flat_background: false,
                         held_queue,
@@ -1713,15 +1683,9 @@ impl AgentView {
                 );
                 self.hit_cancel_button
                     .set_unless_dropdown(turn_output.cancel_button, dropdown_open);
-                self.hit_bg_button
-                    .set_unless_dropdown(turn_output.bg_button, dropdown_open);
-                self.hit_watching_cue
-                    .set_unless_dropdown(turn_output.watching_cue, dropdown_open);
             }
         } else {
             self.hit_cancel_button.clear();
-            self.hit_bg_button.clear();
-            self.hit_watching_cue.clear();
             self.hit_plan_approval_status.clear();
         }
         let privacy_banner_owns_slot =
@@ -2439,13 +2403,6 @@ impl AgentView {
         } else if jump_view_h > 0 {
             if let Some(ref js) = self.jump_state {
                 crate::views::jump::render_jump_overlay(buf, layout.prompt, js, prompt_focused);
-            }
-        } else if cancel_turn_view_h > 0 {
-            let buttons = &mut self.cancel_turn_buttons;
-            if let Some(ctv) = self.cancel_turn_view.as_ref() {
-                modal::render_cancel_turn_panel(buf, layout.prompt, ctv, prompt_focused, buttons);
-            } else {
-                buttons.clear();
             }
         } else {
             let collapsed = !prompt_focused && appearance.prompt.collapse_unfocused;

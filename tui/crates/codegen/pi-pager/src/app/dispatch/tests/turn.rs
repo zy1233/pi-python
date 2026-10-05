@@ -178,7 +178,7 @@ fn cta_reload_done_skills_only_settles_installed_without_fetch() {
 }
 
 #[test]
-fn cancel_turn_without_subagents_cancels_immediately() {
+fn cancel_turn_cancels_immediately() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
@@ -189,7 +189,6 @@ fn cancel_turn_without_subagents_cancels_immediately() {
     assert!(matches!(
         &effects[0],
         Effect::CancelTurn {
-            cancel_subagents: true,
             ..
         }
     ));
@@ -324,69 +323,6 @@ fn lost_cancel_is_resent_while_still_cancelling() {
     app.agents.get_mut(&id).unwrap().session.state = AgentState::Idle;
     assert!(reconcile_overdue_cancels(&mut app).is_none());
     assert!(app.agents[&id].pending_cancel_resend.is_none());
-}
-
-#[test]
-fn cancel_retry_reuses_recorded_subagent_choice() {
-    use crate::app::actions::CancelTrigger;
-    use crate::app::dispatch::reconcile_overdue_cancels;
-    use crate::views::modal::CancelTurnChoice;
-
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.session.state = AgentState::TurnRunning;
-        agent.cancel_trigger_hint = Some(CancelTrigger::CtrlC);
-    }
-
-    let effects = dispatch(
-        Action::CancelTurnChoice(CancelTurnChoice::ContinueToRun),
-        &mut app,
-    );
-    assert!(matches!(
-        effects.as_slice(),
-        [Effect::CancelTurn {
-            cancel_subagents: false,
-            ..
-        }]
-    ));
-
-    let effects = dispatch(Action::CancelTurn, &mut app);
-    assert!(
-        matches!(
-            effects.as_slice(),
-            [Effect::CancelTurn {
-                cancel_subagents: false,
-                ..
-            }]
-        ),
-        "the retry must not escalate past the one-shot choice, got {effects:?}"
-    );
-
-    // The turn-end broadcast stands the auto-resend down; a retry after it
-    // must still reuse the recorded choice instead of escalating.
-    app.agents.get_mut(&id).unwrap().pending_turn_end_reconcile =
-        Some(crate::app::agent_view::PendingTurnEnd {
-            prompt_id: "p1".into(),
-            stop_reason: Some("cancelled".into()),
-            agent_result: None,
-            cancel_trigger: None,
-            cancellation_category: None,
-            received_at: std::time::Instant::now(),
-        });
-    assert!(reconcile_overdue_cancels(&mut app).is_none());
-    let effects = dispatch(Action::CancelTurn, &mut app);
-    assert!(
-        matches!(
-            effects.as_slice(),
-            [Effect::CancelTurn {
-                cancel_subagents: false,
-                ..
-            }]
-        ),
-        "a confirmed cancel must not discard the recorded choice, got {effects:?}"
-    );
 }
 
 #[test]
@@ -595,7 +531,6 @@ fn stale_cancel_resend_clears_once_pane_is_idle() {
             sent_at: std::time::Instant::now(),
             attempts: 3,
             confirmed: true,
-            cancel_subagents: false,
             trigger: CancelTrigger::Esc,
         });
     }
@@ -622,14 +557,12 @@ fn do_cancel_turn_cancels_running_wake_turn() {
 
     let effects = super::super::turn::do_cancel_turn(
         &mut app,
-        true,
         crate::app::cancel_latency::CancelOrigin::UserGesture,
     );
     assert!(
         matches!(
             effects.as_slice(),
             [Effect::CancelTurn {
-                cancel_subagents: true,
                 rewind_prompt_id: None,
                 trigger: None,
                 ..
@@ -774,71 +707,6 @@ fn cancel_turn_leaves_shared_queue_for_agent_to_drain() {
 }
 
 #[test]
-fn cancel_turn_choice_stop_running_sends_cancel_true() {
-    use crate::views::modal::CancelTurnChoice;
-
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
-
-    let effects = dispatch(
-        Action::CancelTurnChoice(CancelTurnChoice::StopRunning),
-        &mut app,
-    );
-
-    assert_eq!(effects.len(), 1);
-    assert!(matches!(
-        &effects[0],
-        Effect::CancelTurn {
-            cancel_subagents: true,
-            ..
-        }
-    ));
-    assert!(app.agents[&id].session.state.is_cancelling());
-}
-
-#[test]
-fn cancel_turn_choice_continue_to_run_sends_cancel_false() {
-    use crate::views::modal::CancelTurnChoice;
-
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
-
-    let effects = dispatch(
-        Action::CancelTurnChoice(CancelTurnChoice::ContinueToRun),
-        &mut app,
-    );
-
-    assert_eq!(effects.len(), 1);
-    assert!(matches!(
-        &effects[0],
-        Effect::CancelTurn {
-            cancel_subagents: false,
-            ..
-        }
-    ));
-    assert!(app.agents[&id].session.state.is_cancelling());
-}
-
-#[test]
-fn cancel_turn_choice_after_turn_finished_is_noop() {
-    use crate::views::modal::CancelTurnChoice;
-
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    assert!(app.agents[&id].session.state.is_idle());
-
-    let effects = dispatch(
-        Action::CancelTurnChoice(CancelTurnChoice::StopRunning),
-        &mut app,
-    );
-
-    assert!(effects.is_empty());
-    assert!(app.agents[&id].session.state.is_idle());
-}
-
-#[test]
 fn cancel_turn_when_idle_does_nothing() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
@@ -867,36 +735,12 @@ fn cancel_turn_when_already_cancelling_resends_cancel() {
         matches!(
             effects.as_slice(),
             [Effect::CancelTurn {
-                cancel_subagents: true,
                 ..
             }]
         ),
         "cancel while cancelling must re-send the cancel, got {effects:?}"
     );
     assert!(app.agents[&id].session.state.is_cancelling());
-}
-
-#[test]
-fn cancel_turn_retry_honors_subagent_preference() {
-    // The retry skips the subagent panel (the choice was already made on
-    // the first cancel) but must reuse the remembered preference.
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.session.state = AgentState::TurnCancelling;
-        agent.cancel_subagents_preference = Some(false);
-    }
-
-    let effects = dispatch(Action::CancelTurn, &mut app);
-
-    assert!(matches!(
-        effects.as_slice(),
-        [Effect::CancelTurn {
-            cancel_subagents: false,
-            ..
-        }]
-    ));
 }
 
 /// The latched-cancel deadlock: cancel sent → state
@@ -1225,88 +1069,6 @@ fn reconcile_error_formats_marker_and_defers_to_banner() {
 }
 
 #[test]
-fn always_stop_choice_sets_preference() {
-    use crate::views::modal::CancelTurnChoice;
-
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
-
-    let effects = dispatch(
-        Action::CancelTurnChoice(CancelTurnChoice::AlwaysStop),
-        &mut app,
-    );
-
-    assert_eq!(app.agents[&id].cancel_subagents_preference, Some(true));
-    assert_eq!(
-        app.current_ui.cancel_subagents_on_turn_cancel.as_deref(),
-        Some("always_stop")
-    );
-    assert!(effects.iter().any(|e| matches!(
-        e,
-        Effect::PersistSetting {
-            key: "cancel_subagents_on_turn_cancel",
-            value: crate::settings::SettingValue::Enum("always_stop"),
-            ..
-        }
-    )));
-}
-
-#[test]
-fn always_continue_choice_sets_preference() {
-    use crate::views::modal::CancelTurnChoice;
-
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
-
-    let effects = dispatch(
-        Action::CancelTurnChoice(CancelTurnChoice::AlwaysContinue),
-        &mut app,
-    );
-
-    assert_eq!(app.agents[&id].cancel_subagents_preference, Some(false));
-    assert_eq!(
-        app.current_ui.cancel_subagents_on_turn_cancel.as_deref(),
-        Some("always_continue")
-    );
-    assert!(effects.iter().any(|e| matches!(
-        e,
-        Effect::PersistSetting {
-            key: "cancel_subagents_on_turn_cancel",
-            value: crate::settings::SettingValue::Enum("always_continue"),
-            ..
-        }
-    )));
-}
-
-#[test]
-fn prompt_response_clears_cancel_turn_panel() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
-    app.agents.get_mut(&id).unwrap().turn_started_at = Some(std::time::Instant::now());
-    app.agents.get_mut(&id).unwrap().cancel_turn_view =
-        Some(crate::views::modal::CancelTurnViewState {
-            active_idx: 0,
-            running_count: 2,
-        });
-
-    dispatch(
-        Action::TaskComplete(TaskResult::PromptResponse {
-            agent_id: id,
-            result: Ok(acp::PromptResponse::new(acp::StopReason::EndTurn)),
-            http_status: None,
-            prompt_id: None,
-        }),
-        &mut app,
-    );
-
-    assert!(app.agents[&id].cancel_turn_view.is_none());
-    assert!(app.agents[&id].session.state.is_idle());
-}
-
-#[test]
 fn cancel_after_first_activity_does_not_restore() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
@@ -1506,7 +1268,6 @@ fn fork_failure_force_idle_drops_a_live_cancel_anchor() {
     app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
     let _ = super::super::turn::do_cancel_turn(
         &mut app,
-        true,
         crate::app::cancel_latency::CancelOrigin::UserGesture,
     );
     assert!(
@@ -1532,7 +1293,7 @@ fn settled_cancel_emits_latency_from_arm_anchor_once() {
     let id = AgentId(0);
     app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
 
-    let _ = super::super::turn::do_cancel_turn(&mut app, true, CancelOrigin::UserGesture);
+    let _ = super::super::turn::do_cancel_turn(&mut app, CancelOrigin::UserGesture);
     assert_eq!(
         app.agents[&id].cancel_latency.map(|c| c.scope),
         Some(CancellationScope::Turn),

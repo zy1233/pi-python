@@ -1,7 +1,6 @@
 use super::{AgentPane, AgentView, BlockingCard, EscStep, KeyOwner};
 use crate::actions::ActionRegistry;
 use crate::app::agent_view::test_fixtures::{make_agent, make_followup_permission_state};
-use crate::views::modal::{CancelTurnChoice, CancelTurnViewState};
 use crate::views::permission_view::PermissionFocus;
 use crate::views::prompt_widget::StashedPrompt;
 use crate::views::question_view::QuestionViewState;
@@ -34,13 +33,6 @@ fn open_permission(agent: &mut AgentView) {
         option("reject-always", acp::PermissionOptionKind::RejectAlways),
     ];
     agent.permission_queue.push_back(perm);
-}
-
-fn open_cancel_turn(agent: &mut AgentView) {
-    agent.cancel_turn_view = Some(CancelTurnViewState {
-        active_idx: 0,
-        running_count: 1,
-    });
 }
 
 fn question(prompt: &str) -> Question {
@@ -238,75 +230,6 @@ fn permission_tab_is_inert_with_a_single_option() {
 }
 
 #[test]
-fn cancel_turn_tab_walks_the_choices_and_wraps() {
-    let mut agent = make_agent();
-    open_cancel_turn(&mut agent);
-    let last = CancelTurnChoice::ALL.len() - 1;
-
-    for expected in 1..=last {
-        let _ = agent.handle_cancel_turn_key(&KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
-        assert_eq!(
-            agent
-                .cancel_turn_view
-                .as_ref()
-                .expect("panel open")
-                .active_idx,
-            expected
-        );
-    }
-    let _ = agent.handle_cancel_turn_key(&KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
-    assert_eq!(
-        agent
-            .cancel_turn_view
-            .as_ref()
-            .expect("panel open")
-            .active_idx,
-        0,
-        "past the last choice, back to the first"
-    );
-
-    for (code, modifiers) in SHIFT_TAB {
-        let _ = agent.handle_cancel_turn_key(&KeyEvent::new(code, modifiers));
-        assert_eq!(
-            agent
-                .cancel_turn_view
-                .as_ref()
-                .expect("panel open")
-                .active_idx,
-            last,
-            "Shift+Tab wraps back to the last choice ({code:?}/{modifiers:?})"
-        );
-        let _ = agent.handle_cancel_turn_key(&KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
-    }
-    assert_eq!(
-        agent.active_pane,
-        AgentPane::Prompt,
-        "the panel keeps the keyboard"
-    );
-}
-
-#[test]
-fn cancel_turn_panel_parks_and_returns_like_the_others() {
-    let mut agent = make_agent();
-    open_cancel_turn(&mut agent);
-    assert!(hint_labels(&agent).contains(&"next choice".to_string()));
-
-    agent.active_pane = AgentPane::Scrollback;
-    let parked = hint_labels(&agent);
-    assert!(
-        !parked.contains(&"next choice".to_string()),
-        "parked, the panel's keys leave the bar, got {parked:?}"
-    );
-    assert!(
-        parked.contains(&"cancel turn".to_string()),
-        "the bar must name the way back into the panel, got {parked:?}"
-    );
-
-    tab_from_scrollback(&mut agent);
-    assert_eq!(agent.active_pane, AgentPane::Prompt);
-}
-
-#[test]
 fn a_parked_card_contributes_one_route_back() {
     let mut agent = make_agent();
     open_question(&mut agent);
@@ -346,26 +269,25 @@ fn a_parked_card_contributes_one_route_back() {
 fn the_bar_follows_the_router_when_two_cards_are_open() {
     let mut agent = make_agent();
     open_question(&mut agent);
-    open_cancel_turn(&mut agent);
-    assert_eq!(agent.focused_card(), Some(BlockingCard::CancelTurn));
+    assert_eq!(agent.focused_card(), Some(BlockingCard::Question));
 
     let labels = hint_labels(&agent);
     assert!(
-        labels.contains(&"next choice".to_string()) && !labels.contains(&"next answer".to_string()),
-        "the cancel-turn panel takes the keys, so it takes the bar too, got {labels:?}"
+        labels.contains(&"next answer".to_string()),
+        "the question card takes the keys, so it takes the bar too, got {labels:?}"
     );
 
     open_permission(&mut agent);
     assert_eq!(agent.focused_card(), Some(BlockingCard::Permission));
     let labels = hint_labels(&agent);
     assert!(
-        labels.contains(&"next option".to_string()) && !labels.contains(&"next choice".to_string()),
-        "and the permission card outranks both, got {labels:?}"
+        labels.contains(&"next option".to_string()) && !labels.contains(&"next answer".to_string()),
+        "and the permission card outranks it, got {labels:?}"
     );
 }
 
 #[test]
-fn elicitation_shares_the_question_layer_under_cancel_turn() {
+fn elicitation_shares_the_question_layer() {
     let mut agent = make_agent();
     open_elicitation(&mut agent);
     assert_eq!(agent.blocking_card(), Some(BlockingCard::McpElicitation));
@@ -383,27 +305,6 @@ fn elicitation_shares_the_question_layer_under_cancel_turn() {
         labels.contains(&"next answer".to_string()),
         "the bar must name the question the user can see, got {labels:?}"
     );
-
-    open_cancel_turn(&mut agent);
-    assert_eq!(
-        agent.blocking_card(),
-        Some(BlockingCard::CancelTurn),
-        "cancel-turn outranks both question-style cards"
-    );
-    assert_eq!(agent.focused_card(), Some(BlockingCard::CancelTurn));
-    let labels = hint_labels(&agent);
-    assert!(
-        labels.contains(&"next choice".to_string()) && !labels.contains(&"next answer".to_string()),
-        "the cancel-turn panel takes the keys, so it takes the bar too, got {labels:?}"
-    );
-
-    agent.question_view = None;
-    assert_eq!(
-        agent.blocking_card(),
-        Some(BlockingCard::CancelTurn),
-        "cancel-turn still occupies the slot over a leftover elicitation"
-    );
-    assert_eq!(agent.focused_card(), Some(BlockingCard::CancelTurn));
 }
 
 #[test]
@@ -480,7 +381,7 @@ fn plan_approval_takes_the_bar_wherever_it_takes_the_keys() {
 }
 
 /// The open plan preview is the state a plan approval spends most of its life
-/// in. The line viewer ranks above Question/CancelTurn (not Permission) and
+/// in. The line viewer ranks above Question (not Permission) and
 /// paints its own hints over the bar's row; what the bar must not do is speak
 /// for the card behind the viewer.
 #[test]
@@ -624,62 +525,6 @@ fn the_permission_esc_ladder_steps_out_one_rung_at_a_time() {
         "no rung of the ladder answers the request"
     );
 }
-
-#[test]
-fn the_cancel_turn_panel_resolves_instead_of_parking() {
-    let mut agent = make_agent();
-    agent.session.state = crate::app::agent::AgentState::TurnRunning;
-    open_cancel_turn(&mut agent);
-
-    assert_eq!(agent.card_esc(), Some(EscStep::KeepRunning));
-    assert!(hint_labels(&agent).contains(&"keep running".to_string()));
-
-    let outcome = agent.handle_cancel_turn_key(&KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-    assert!(
-        matches!(outcome, crate::app::app_view::InputOutcome::Changed),
-        "Esc must dismiss the panel without cancelling the turn, got {outcome:?}"
-    );
-    assert!(
-        agent.cancel_turn_view.is_none(),
-        "keep-running closes the panel"
-    );
-    assert!(
-        agent.session.state.is_turn_running(),
-        "dismissing is not a cancel"
-    );
-    assert_eq!(
-        agent.active_pane,
-        AgentPane::Prompt,
-        "resolving is the way out, so the panel never parks"
-    );
-}
-
-#[test]
-fn esc_on_the_cancel_turn_panel_does_not_cancel_the_turn() {
-    let mut agent = make_agent();
-    agent.session.state = crate::app::agent::AgentState::TurnRunning;
-    open_cancel_turn(&mut agent);
-
-    let outcome = agent.handle_input(
-        &crossterm::event::Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
-        &ActionRegistry::defaults(),
-    );
-    assert!(
-        !matches!(
-            outcome,
-            crate::app::app_view::InputOutcome::Action(
-                crate::app::actions::Action::CancelTurn
-                    | crate::app::actions::Action::CancelTurnChoice(_)
-            )
-        ),
-        "the bar's 'keep running' must not cancel the turn, got {outcome:?}"
-    );
-    assert!(agent.cancel_turn_view.is_none());
-    assert!(agent.session.state.is_turn_running());
-}
-
-
-
 
 /// The scrollback's focus hint names where `Tab` goes, so it has to be asked
 /// through the same ranking as the keys themselves: with a plan approval

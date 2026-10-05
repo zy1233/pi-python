@@ -4,91 +4,28 @@ use super::permissions::drain_permission_queue;
 use super::queue::{apply_turn_start_shim, maybe_drain_queue};
 use crate::app::actions::Effect;
 use crate::app::agent::AgentId;
-use crate::app::agent_view::{ AgentView};
+use crate::app::agent_view::AgentView;
 use crate::app::app_view::{ActiveView, AppView};
 use crate::app::cancel_latency::{CancelOrigin, TurnEnd};
 use crate::scrollback::blocks::SessionEvent;
 use std::time::Instant;
 use pi_telemetry::events::CancellationScope;
 
-/// Map `[ui].cancel_subagents_on_turn_cancel` / in-memory agent preference to
-/// `cancel_subagents` for the cancel wire payload. `None` means prompt.
-fn effective_cancel_subagents_preference(
-    agent_pref: Option<bool>,
-    ui: &pi_shell::agent::config::UiConfig,
-) -> Option<bool> {
-    agent_pref.or(match ui.cancel_subagents_on_turn_cancel.as_deref() {
-        Some("always_stop") => Some(true),
-        Some("always_continue") => Some(false),
-        _ => None,
-    })
-}
-
-fn cancel_subagents_pref_canonical(stop: bool) -> &'static str {
-    if stop {
-        "always_stop"
-    } else {
-        "always_continue"
-    }
-}
-
-fn cancel_subagents_pref_canonical_from_ui(
-    ui: &pi_shell::agent::config::UiConfig,
-) -> &'static str {
-    match ui.cancel_subagents_on_turn_cancel.as_deref() {
-        Some("always_stop") => "always_stop",
-        Some("always_continue") => "always_continue",
-        _ => "ask",
-    }
-}
-
-/// Apply a global always-stop / always-continue preference to every agent and
-/// `app.current_ui` (in-memory only; caller emits `Effect::PersistSetting`).
-pub(super) fn apply_cancel_subagents_preference_global(app: &mut AppView, stop: bool) {
-    let canonical = cancel_subagents_pref_canonical(stop);
-    app.current_ui.cancel_subagents_on_turn_cancel = Some(canonical.to_string());
-    for agent in app.agents.values_mut() {
-        agent.cancel_subagents_preference = Some(stop);
-    }
-}
-
 pub(super) fn dispatch_cancel_turn(app: &mut AppView) -> Vec<Effect> {
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };
-    let ui_pref = effective_cancel_subagents_preference(None, &app.current_ui);
 
     // Scoped agent borrow: extract decisions, then release before `do_cancel_turn`.
-    let preferred_cancel_subagents = {
+    {
         let Some(agent) = app.agents.get_mut(&id) else {
             return vec![];
         };
-        let resolved_pref = agent.cancel_subagents_preference.or(ui_pref);
         // Retry path: a cancel was already sent (`TurnCancelling`) but the turn
         // never resolved — the `session/cancel` notification or the turn-end
         // response may have been lost in transit. Re-send instead of silently
         // no-opping (cancel is idempotent on the agent), so Ctrl+C / palette
         // CancelTurn is never a dead key on a stuck "Cancelling…" spinner.
-        //
-        // Retry and wake cancels skip the subagent panel and share one rule
-        // for the choice: reuse the first cancel's recorded decision (a retry
-        // after a one-shot "Continue to run" must not escalate to killing the
-        // subagents the user chose to keep), else the preference, else stop
-        // them.
-        let resolve_cancel_subagents = |agent: &crate::app::agent_view::AgentView| {
-            let target = agent
-                .running_wake_turn
-                .as_ref()
-                .map(|wake| wake.prompt_id.clone())
-                .or_else(|| agent.session.current_prompt_id.clone());
-            agent
-                .pending_cancel_resend
-                .as_ref()
-                .filter(|p| p.prompt_id == target)
-                .map(|p| p.cancel_subagents)
-                .or(resolved_pref)
-                .unwrap_or(true)
-        };
         if agent.session.state.is_cancelling() {
             let Some(session_id) = agent.session.session_id.clone() else {
                 return vec![];
@@ -102,104 +39,41 @@ pub(super) fn dispatch_cancel_turn(app: &mut AppView) -> Vec<Effect> {
             );
             // Explicit user cancel supersedes any pending send-now expectation (its marker renders).
             agent.clear_send_now_expectation();
-            let cancel_subagents = resolve_cancel_subagents(agent);
             return vec![emit_cancel_turn(
                 agent,
                 session_id,
-                cancel_subagents,
                 /* rewind_prompt_id */ None,
             )];
         }
         // Compact owns the pane (`CommandRunning`) even if a leftover wake
         // marker is still set — `/compact` can drain while that marker is live.
         // Must beat the wake early-return or Esc never calls cancel_compact.
-        if agent.session.state.is_compact_running() {
-            resolved_pref.or(Some(true))
-        } else if agent.running_wake_turn.is_some() {
-            // Marker, not idle-only: a local send during a wake start_turn's
-            // the pane while the shell front is still the wake. Cancel that
-            // wake; the queued user prompt must survive.
-            let Some(session_id) = agent.session.session_id.clone() else {
+        if !agent.session.state.is_compact_running() {
+            if agent.running_wake_turn.is_some() {
+                // Marker, not idle-only: a local send during a wake start_turn's
+                // the pane while the shell front is still the wake. Cancel that
+                // wake; the queued user prompt must survive.
+                let Some(session_id) = agent.session.session_id.clone() else {
+                    return vec![];
+                };
+                agent.clear_send_now_expectation();
+                agent.mark_wake_cancel_sent();
+                return vec![emit_cancel_turn(
+                    agent,
+                    session_id,
+                    /* rewind_prompt_id */ None,
+                )];
+            }
+            if !agent.session.state.is_turn_running() {
                 return vec![];
-            };
-            agent.clear_send_now_expectation();
-            let cancel_subagents = resolve_cancel_subagents(agent);
-            agent.mark_wake_cancel_sent();
-            return vec![emit_cancel_turn(
-                agent,
-                session_id,
-                cancel_subagents,
-                /* rewind_prompt_id */ None,
-            )];
-        } else if !agent.session.state.is_turn_running() {
-            return vec![];
-        } else {
-            resolved_pref
-        }
-    };
-
-    do_cancel_turn(
-        app,
-        preferred_cancel_subagents.unwrap_or(true),
-        CancelOrigin::UserGesture,
-    )
-}
-
-pub(super) fn dispatch_cancel_turn_choice(
-    app: &mut AppView,
-    choice: crate::views::modal::CancelTurnChoice,
-) -> Vec<Effect> {
-    use crate::views::modal::CancelTurnChoice;
-    let cancel_subagents = matches!(
-        choice,
-        CancelTurnChoice::StopRunning | CancelTurnChoice::AlwaysStop
-    );
-
-    if let ActiveView::Agent(id) = app.active_view
-        && let Some(agent) = app.agents.get_mut(&id)
-    {
-        agent.cancel_turn_view = None;
-        agent.cancel_turn_buttons.clear();
-    }
-
-    let mut effects = Vec::new();
-    match choice {
-        CancelTurnChoice::AlwaysStop | CancelTurnChoice::AlwaysContinue => {
-            let stop = matches!(choice, CancelTurnChoice::AlwaysStop);
-            let prev_canonical = cancel_subagents_pref_canonical_from_ui(&app.current_ui);
-            let new_canonical = cancel_subagents_pref_canonical(stop);
-            apply_cancel_subagents_preference_global(app, stop);
-            if prev_canonical != new_canonical {
-                tracing::info!(
-                    target: "settings",
-                    key = "cancel_subagents_on_turn_cancel",
-                    value = new_canonical,
-                    "setting changed",
-                );
-                effects.push(Effect::PersistSetting {
-                    key: "cancel_subagents_on_turn_cancel",
-                    value: crate::settings::SettingValue::Enum(new_canonical),
-                    rollback_value: crate::settings::SettingValue::Enum(prev_canonical),
-                });
             }
         }
-        // One-shot choices: apply only to this cancel; global/session pref unchanged.
-        CancelTurnChoice::StopRunning | CancelTurnChoice::ContinueToRun => {}
     }
 
-    effects.extend(do_cancel_turn(
-        app,
-        cancel_subagents,
-        CancelOrigin::UserGesture,
-    ));
-    effects
+    do_cancel_turn(app, CancelOrigin::UserGesture)
 }
 
-pub(super) fn do_cancel_turn(
-    app: &mut AppView,
-    cancel_subagents: bool,
-    origin: CancelOrigin,
-) -> Vec<Effect> {
+pub(super) fn do_cancel_turn(app: &mut AppView, origin: CancelOrigin) -> Vec<Effect> {
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };
@@ -207,19 +81,16 @@ pub(super) fn do_cancel_turn(
     let Some(agent) = app.agents.get_mut(&id) else {
         return vec![];
     };
-    cancel_agent_turn(agent, cancel_rewind_enabled, cancel_subagents, origin)
+    cancel_agent_turn(agent, cancel_rewind_enabled, origin)
 }
 
 fn cancel_agent_turn(
     agent: &mut AgentView,
     cancel_rewind_enabled: bool,
-    cancel_subagents: bool,
     origin: CancelOrigin,
 ) -> Vec<Effect> {
     if agent.session.state.is_compact_running() {
         agent.cancel_and_arm(CancellationScope::Compaction, origin);
-        agent.cancel_turn_view = None;
-        agent.cancel_turn_buttons.clear();
         drain_permission_queue(agent);
         let Some(session_id) = agent.session.session_id.clone() else {
             return vec![];
@@ -228,7 +99,6 @@ fn cancel_agent_turn(
         return vec![emit_cancel_turn(
             agent,
             session_id,
-            cancel_subagents,
             /* rewind_prompt_id */ None,
         )];
     }
@@ -241,7 +111,6 @@ fn cancel_agent_turn(
         return vec![emit_cancel_turn(
             agent,
             session_id,
-            cancel_subagents,
             /* rewind_prompt_id */ None,
         )];
     }
@@ -317,8 +186,6 @@ fn cancel_agent_turn(
     } else {
         agent.cancel_and_arm(CancellationScope::Turn, origin);
     }
-    agent.cancel_turn_view = None;
-    agent.cancel_turn_buttons.clear();
     drain_permission_queue(agent);
     if let Some(mut pav) = agent.plan_approval_view.take() {
         pav.send_stale_cancel();
@@ -346,7 +213,6 @@ fn cancel_agent_turn(
     vec![emit_cancel_turn(
         agent,
         session_id,
-        cancel_subagents,
         if rewinding { rewind_prompt_id } else { None },
     )]
 }
@@ -356,7 +222,6 @@ fn cancel_agent_turn(
 pub(super) fn emit_cancel_turn(
     agent: &mut crate::app::agent_view::AgentView,
     session_id: agent_client_protocol::SessionId,
-    cancel_subagents: bool,
     rewind_prompt_id: Option<String>,
 ) -> Effect {
     let rewind_if_no_output = rewind_prompt_id.is_some();
@@ -412,13 +277,11 @@ pub(super) fn emit_cancel_turn(
             sent_at: Instant::now(),
             attempts,
             confirmed,
-            cancel_subagents,
             trigger,
         });
     }
     Effect::CancelTurn {
         session_id,
-        cancel_subagents,
         trigger,
         rewind_prompt_id,
     }
@@ -481,7 +344,6 @@ fn overdue_cancel_for_agent(agent: &mut AgentView) -> Option<Effect> {
     );
     Some(Effect::CancelTurn {
         session_id,
-        cancel_subagents: pending.cancel_subagents,
         trigger: Some(pending.trigger),
         rewind_prompt_id: None,
     })
@@ -609,8 +471,6 @@ pub(crate) fn reconcile_overdue_turn_ends(app: &mut AppView) -> Option<Vec<Effec
         agent.activity_started_at = None;
         agent.last_activity = None;
         drain_permission_queue(agent);
-        agent.cancel_turn_view = None;
-        agent.cancel_turn_buttons.clear();
         if agent.bash_turn {
             agent.bash_turn = false;
             agent.scrollback.goto_bottom();
