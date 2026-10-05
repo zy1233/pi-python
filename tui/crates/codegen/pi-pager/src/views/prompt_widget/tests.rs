@@ -1515,42 +1515,6 @@
         );
     }
 
-    #[test]
-    fn sync_acp_commands_passes_tools_to_registry() {
-        // End-to-end: tracker advertises a toolset, sync forwards it,
-        // and tool-gated commands like /loop disappear when their
-        // tool isn't registered.
-        let mut pw = PromptWidget::new();
-        let models = crate::acp::model_state::ModelState::default();
-        let mut empty_tools = std::collections::HashSet::new();
-        empty_tools.insert("read_file".to_string());
-
-        // Sync with a toolset that omits scheduler_create.
-        pw.sync_acp_commands(&[], Some(&empty_tools), &models);
-        // Now type /loop -- it should be filtered out of the dropdown.
-        pw.textarea.insert_str("/loop");
-        pw.refresh_slash(&models);
-        let snap = pw.slash_snapshot();
-        assert!(
-            !snap.matches.iter().any(|r| r.display == "/loop"),
-            "/loop should be hidden when scheduler_create is missing, got: {:?}",
-            snap.matches
-                .iter()
-                .map(|r| r.display.as_str())
-                .collect::<Vec<_>>()
-        );
-
-        // Add the tool back and resync -- /loop returns.
-        empty_tools.insert("scheduler_create".to_string());
-        pw.sync_acp_commands(&[], Some(&empty_tools), &models);
-        pw.refresh_slash(&models);
-        let snap = pw.slash_snapshot();
-        assert!(
-            snap.matches.iter().any(|r| r.display == "/loop"),
-            "/loop should be visible once scheduler_create is advertised",
-        );
-    }
-
     // ── Slash completion acceptance tests ──────────────────────────
 
     #[test]
@@ -1744,24 +1708,24 @@
     }
 
     #[test]
-    fn compact_completable_with_no_args() {
+    fn optional_arg_command_completable_with_no_args() {
         let mut pw = PromptWidget::new();
         let models = crate::acp::model_state::ModelState::default();
 
-        // Type "/comp" → matches "/compact".
-        pw.textarea.insert_str("/comp");
+        // Type "/the" → matches "/theme".
+        pw.textarea.insert_str("/the");
         pw.refresh_slash(&models);
 
-        // Accept → text becomes "/compact " (trailing space since takes_args).
+        // Accept → text becomes "/theme " (trailing space since takes_args).
         pw.accept_slash_completion(&models);
         let text = pw.textarea.text().to_string();
-        assert_eq!(text, "/compact ");
+        assert_eq!(text, "/theme ");
 
         // Even without filling args, try_send should succeed (args are optional).
         let sent = pw.try_send();
         assert!(
             sent.is_some(),
-            "/compact with no args should be sendable (optional args)"
+            "/theme with no args should be sendable (optional args)"
         );
     }
 

@@ -620,7 +620,7 @@ pub(super) fn three_agent_app() -> AppView {
     insert_placeholder_agent(&mut app, AgentId(2));
     app
 }
-use crate::slash::commands::fork::ForkArgs;
+use crate::app::actions::ForkArgs;
 fn fork_args(worktree_override: Option<bool>, directive: Option<&str>) -> ForkArgs {
     ForkArgs {
         worktree_override,

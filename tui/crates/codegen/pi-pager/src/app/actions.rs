@@ -31,6 +31,19 @@ pub enum SwitchModelError {
     /// Any other failure (network, auth, server error, etc.).
     Other(String),
 }
+/// Arguments of an in-session fork request ([`Action::Fork`]).
+///
+/// The `/fork` slash command that parsed these is gone; the type stays only
+/// until the in-session fork flow itself is removed.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct ForkArgs {
+    /// `None` opens the worktree question; `Some(true)` / `Some(false)`
+    /// force a worktree / no worktree.
+    pub worktree_override: Option<bool>,
+    /// Optional first prompt for the new session.
+    pub directive: Option<String>,
+}
+
 /// Synchronous, side-effect-free user intent.
 ///
 /// Produced by [`super::input`] from key/mouse events.
@@ -786,11 +799,10 @@ pub enum Action {
     SetCodingDataSharing {
         opted_in: bool,
     },
-    /// `/fork` slash command: parsed args produced by
-    /// [`crate::slash::commands::fork::parse_fork_args`]. The dispatcher
-    /// resolves the worktree question (via flag or the local
-    /// QuestionView modal) before constructing the placeholder.
-    Fork(crate::slash::commands::fork::ForkArgs),
+    /// In-session fork request. The dispatcher resolves the worktree
+    /// question (via flag or the local QuestionView modal) before
+    /// constructing the placeholder.
+    Fork(ForkArgs),
     /// Submit-path action emitted by the local fork worktree question
     /// modal. Routes directly to `dispatch_fork_resolved`.
     ForkAnswered {

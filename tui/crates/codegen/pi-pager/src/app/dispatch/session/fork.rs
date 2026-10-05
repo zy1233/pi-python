@@ -43,7 +43,7 @@ use std::time::Instant;
 ///   `TaskResult` and is deferred to v2.
 pub(in crate::app::dispatch) fn dispatch_fork(
     app: &mut AppView,
-    args: crate::slash::commands::fork::ForkArgs,
+    args: crate::app::actions::ForkArgs,
 ) -> Vec<Effect> {
     let ActiveView::Agent(parent_id) = app.active_view else {
         app.show_toast("/fork only works inside a session");

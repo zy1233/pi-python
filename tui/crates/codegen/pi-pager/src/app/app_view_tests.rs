@@ -1558,7 +1558,6 @@ fn apply_auth_meta_api_key_enables_voice_and_skips_tier_gate() {
     assert!(app.is_api_key_auth);
     assert!(!app.usage_visible);
     assert!(app.tier_restricted_commands.is_empty());
-    assert_tier_restricted_commands_present(&app);
     assert!(!app.is_voice_tier_restricted());
     assert!(app.voice_mode_enabled);
     let mut app = test_app();
@@ -1616,15 +1615,6 @@ fn assert_tier_restricted_commands_absent(app: &AppView) {
     }
     assert!(reg.get("cost").is_none(), "/cost alias must be denied");
 }
-fn assert_tier_restricted_commands_present(app: &AppView) {
-    let reg = app.welcome_prompt.slash_controller.registry();
-    for name in TIER_RESTRICTED_COMMANDS {
-        assert!(
-            reg.get(name).is_some(),
-            "/{name} must be available when not tier-restricted (tools advertised)"
-        );
-    }
-}
 #[test]
 fn apply_auth_meta_restricts_usage_for_free_tier() {
     let mut app = test_app();
@@ -1662,7 +1652,6 @@ fn apply_auth_meta_lifts_restrictions_for_paid_tiers_and_teams() {
     };
     app.apply_auth_meta(&meta);
     assert!(app.tier_restricted_commands.is_empty());
-    assert_tier_restricted_commands_present(&app);
     let mut app = test_app();
     advertise_media_tools(&mut app);
     app.apply_auth_meta(&pi_shell::auth::AuthMeta::default());
@@ -1670,7 +1659,6 @@ fn apply_auth_meta_lifts_restrictions_for_paid_tiers_and_teams() {
     app.subscription_tier = Some("SuperGrok".into());
     app.apply_tier_restrictions();
     assert!(app.tier_restricted_commands.is_empty());
-    assert_tier_restricted_commands_present(&app);
     let mut app = test_app();
     let meta = pi_shell::auth::AuthMeta {
         team_id: Some("team-uuid".into()),

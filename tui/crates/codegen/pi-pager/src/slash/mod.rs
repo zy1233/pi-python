@@ -557,15 +557,6 @@ impl SlashController {
         Self::new(CommandRegistry::new(commands::builtin_commands()), cwd)
     }
 
-    /// Limit the dropdown to standard-ACP session commands and local TUI chrome.
-    pub fn enable_pi_standard_slash_menu(&mut self) {
-        self.registry.enable_pi_standard_slash_menu();
-    }
-
-    pub(crate) fn pi_standard_slash_menu(&self) -> bool {
-        self.registry.pi_standard_slash_enabled()
-    }
-
     /// Mutable access to the registry (for ACP sync).
     pub fn registry_mut(&mut self) -> &mut CommandRegistry {
         &mut self.registry
@@ -1757,9 +1748,9 @@ mod tests {
     #[test]
     fn optional_arg_command_is_complete_without_args() {
         let reg = test_registry();
-        // /compact has takes_args=true, args_required=false.
-        assert!(is_command_complete("/compact", &reg));
-        assert!(is_command_complete("/compact some context", &reg));
+        // /theme has takes_args=true, args_required=false.
+        assert!(is_command_complete("/theme", &reg));
+        assert!(is_command_complete("/theme dark", &reg));
     }
 
     #[test]
@@ -1796,19 +1787,19 @@ mod tests {
     #[test]
     fn is_complete_builtin_invocation_accepts_complete_builtin() {
         let reg = test_registry();
-        assert!(is_complete_builtin_invocation("/btw why is it slow", &reg));
-        assert!(is_complete_builtin_invocation("  /compact  ", &reg));
+        assert!(is_complete_builtin_invocation("/model grok-4", &reg));
+        assert!(is_complete_builtin_invocation("  /new  ", &reg));
     }
 
     #[test]
     fn is_complete_builtin_invocation_rejects_incomplete_or_unowned_text() {
         let reg = test_registry();
         // Args required but missing: dispatch would not execute it either.
-        assert!(!is_complete_builtin_invocation("/btw", &reg));
+        assert!(!is_complete_builtin_invocation("/model", &reg));
         // Unknown command: reserved for the agent's own pass-through.
         assert!(!is_complete_builtin_invocation("/nope x", &reg));
         // Not an invocation at position 0.
-        assert!(!is_complete_builtin_invocation("great /compact go", &reg));
+        assert!(!is_complete_builtin_invocation("great /new go", &reg));
         assert!(!is_complete_builtin_invocation("plain prompt", &reg));
         assert!(!is_complete_builtin_invocation("/", &reg));
     }
@@ -1816,9 +1807,9 @@ mod tests {
     #[test]
     fn is_complete_builtin_invocation_rejects_restricted_builtin() {
         let mut reg = test_registry();
-        reg.set_restricted_commands(&["usage".to_string()]);
+        reg.set_restricted_commands(&["model".to_string()]);
         assert!(
-            !is_complete_builtin_invocation("/usage", &reg),
+            !is_complete_builtin_invocation("/model grok-4", &reg),
             "a tier-gated command must stay saved as text, not run from a queue row"
         );
     }
@@ -1835,67 +1826,6 @@ mod tests {
         let snapshot = state.snapshot();
         assert!(snapshot.open);
         assert!(!snapshot.matches.is_empty());
-    }
-
-    #[test]
-    fn gboom_never_appears_in_suggestions() {
-        // The /gboom easter egg is executable but must stay out of the
-        // dropdown: not in the full list, not via prefix, not via exact name.
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
-        let state = SlashState::default();
-        let models = ModelState::default();
-
-        for query in ["/", "/g", "/gbo", "/gboom"] {
-            ctrl.refresh(&state, query, query.len(), &models);
-            let snapshot = state.snapshot();
-            assert!(
-                snapshot
-                    .matches
-                    .iter()
-                    .all(|row| !row.display.contains("gboom")),
-                "/gboom leaked into suggestions for query {query:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn gboom_still_resolves_for_execution() {
-        // Dispatch resolves via `registry.get()`, which ignores `visible()`.
-        let reg = test_registry();
-        let cmd = reg.get("gboom").expect("/gboom resolvable for dispatch");
-        assert_eq!(cmd.name(), "gboom");
-    }
-
-    /// `/debug` lists via `visible()` = cfg!(debug_assertions); tests
-    /// compile with debug_assertions, so it must surface here. Release
-    /// builds flip the same constant to false (the /gboom hidden
-    /// mechanism), which is untestable from a debug test build — hence
-    /// the cfg gate rather than a release-side assertion.
-    #[test]
-    #[cfg(debug_assertions)]
-    fn debug_appears_in_suggestions_on_debug_binaries() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
-        let state = SlashState::default();
-        let models = ModelState::default();
-
-        for query in ["/", "/deb", "/debug"] {
-            ctrl.refresh(&state, query, query.len(), &models);
-            let snapshot = state.snapshot();
-            assert!(
-                snapshot
-                    .matches
-                    .iter()
-                    .any(|row| row.display.contains("debug")),
-                "/debug missing from suggestions for query {query:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn debug_resolves_for_execution() {
-        let reg = test_registry();
-        let cmd = reg.get("debug").expect("/debug resolvable for dispatch");
-        assert_eq!(cmd.name(), "debug");
     }
 
     #[test]
@@ -1919,8 +1849,8 @@ mod tests {
         let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
         let meta = serde_json::json!({
             "scope": "plugin",
-            "path": "/plugins/acme/skills/login/SKILL.md",
-            "bareName": "login",
+            "path": "/plugins/acme/skills/theme/SKILL.md",
+            "bareName": "theme",
             "pluginName": "acme",
         })
         .as_object()
@@ -1928,26 +1858,26 @@ mod tests {
         .unwrap();
         ctrl.registry_mut()
             .set_acp_commands(&[agent_client_protocol::AvailableCommand::new(
-                "acme:login".to_string(),
-                "Acme account login".to_string(),
+                "acme:theme".to_string(),
+                "Acme brand theme".to_string(),
             )
             .meta(meta)]);
 
         let state = SlashState::default();
         let models = ModelState::default();
-        ctrl.refresh(&state, "/login", 6, &models);
+        ctrl.refresh(&state, "/theme", 6, &models);
         let snapshot = state.snapshot();
-        let login = snapshot
+        let theme = snapshot
             .matches
             .iter()
-            .find(|row| row.display == "/login")
-            .expect("builtin /login");
-        assert_eq!(login.provenance, Some(CommandProvenance::Builtin));
-        assert!(!login.description.contains("built-in"));
+            .find(|row| row.display == "/theme")
+            .expect("builtin /theme");
+        assert_eq!(theme.provenance, Some(CommandProvenance::Builtin));
+        assert!(!theme.description.contains("built-in"));
         let skill = snapshot
             .matches
             .iter()
-            .find(|row| row.display == "/acme:login")
+            .find(|row| row.display == "/acme:theme")
             .expect("qualified skill");
         assert_eq!(
             skill.provenance,
@@ -1955,19 +1885,19 @@ mod tests {
                 source: "acme".to_string()
             })
         );
-        assert_eq!(skill.description, "Acme account login");
-        assert!(ctrl.registry().get("login").is_some_and(|c| !c.is_skill()));
+        assert_eq!(skill.description, "Acme brand theme");
+        assert!(ctrl.registry().get("theme").is_some_and(|c| !c.is_skill()));
         assert!(
             ctrl.registry()
-                .get("acme:login")
+                .get("acme:theme")
                 .is_some_and(|c| c.is_skill())
         );
 
-        ctrl.refresh(&state, "/acme:login", 11, &models);
+        ctrl.refresh(&state, "/acme:theme", 11, &models);
         let snapshot = state.snapshot();
         assert_eq!(
             snapshot.selection().map(|row| row.display.as_str()),
-            Some("/acme:login"),
+            Some("/acme:theme"),
             "exact qualified query should select the skill"
         );
     }
@@ -2077,33 +2007,6 @@ mod tests {
         let first = snapshot.matches.first().expect("match");
         assert_eq!(first.display, "/m");
         assert!(first.insert_text.starts_with("/m"));
-    }
-
-    /// `/sessions` survives the sessions-modal removal as an alias of
-    /// `/dashboard`: typing it must complete with the alias spelling and the
-    /// dashboard command's description.
-    #[test]
-    fn controller_suggests_sessions_alias_for_dashboard() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
-        // `/dashboard` is feature-flag gated (hidden by default); the alias
-        // is only offered once the flag reveals the canonical command.
-        ctrl.registry_mut().set_dashboard_visible(true);
-        let state = SlashState::default();
-        let models = ModelState::default();
-
-        ctrl.refresh(&state, "/sessions", 9, &models);
-        let snapshot = state.snapshot();
-        assert!(snapshot.open);
-        let row = snapshot
-            .matches
-            .iter()
-            .find(|r| r.display == "/sessions")
-            .expect("/sessions must be offered in completion");
-        assert_eq!(
-            row.description,
-            crate::slash::commands::dashboard::DashboardCommand.description(),
-            "alias must carry the dashboard command's description"
-        );
     }
 
     #[test]
@@ -2236,208 +2139,6 @@ mod tests {
         assert!(
             snapshot.command_recognized,
             "known command should be recognized"
-        );
-    }
-
-    // -- session-scoped surface filtering (agent dashboard) --
-
-    /// On a session-less surface (the agent dashboard's dispatch input),
-    /// commands that act on a single session are suppressed from completion
-    /// while pager-global commands remain. See `SlashCommand::session_scoped`.
-    #[test]
-    fn hide_session_scoped_filters_session_commands_from_dropdown() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
-        ctrl.set_hide_session_scoped(true);
-        // `/dashboard` is feature-flag gated (hidden by default in the
-        // registry); the session-less surface under test is the dashboard's
-        // own dispatch input, so the flag is necessarily on there.
-        ctrl.registry_mut().set_dashboard_visible(true);
-        let state = SlashState::default();
-        let models = ModelState::default();
-
-        ctrl.refresh(&state, "/", 1, &models);
-        let snapshot = state.snapshot();
-        assert!(snapshot.open);
-        let names: Vec<&str> = snapshot
-            .matches
-            .iter()
-            .map(|r| r.display.as_str())
-            .collect();
-
-        // Pager-global commands stay, plus session-scoped opt-ins
-        // (`offered_when_session_less`): `/model`/`/plan` stage the next
-        // spawn; `/multiline` toggles compose on the dashboard inputs.
-        for keep in [
-            "/quit",
-            "/new",
-            "/theme",
-            "/settings",
-            "/dashboard",
-            "/resume",
-            "/model",
-            "/plan",
-            "/multiline",
-        ] {
-            assert!(
-                names.contains(&keep),
-                "{keep} should remain on the dashboard, got {names:?}"
-            );
-        }
-        // Session-scoped commands without a session-less opt-in are gone.
-        for hide in [
-            "/compact",
-            "/fork",
-            "/rewind",
-            "/share",
-            "/context",
-            "/copy",
-            "/export",
-            "/rename",
-            "/btw",
-            "/session-info",
-            "/find",
-            "/doctor",
-        ] {
-            assert!(
-                !names.contains(&hide),
-                "{hide} should be hidden on the dashboard, got {names:?}"
-            );
-        }
-    }
-
-    /// The default surface (agent view) keeps showing session-scoped commands.
-    #[test]
-    fn default_surface_keeps_session_scoped_commands() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
-        let state = SlashState::default();
-        let models = ModelState::default();
-
-        ctrl.refresh(&state, "/", 1, &models);
-        let names: Vec<String> = state
-            .snapshot()
-            .matches
-            .iter()
-            .map(|r| r.display.clone())
-            .collect();
-        assert!(names.iter().any(|d| d == "/compact"));
-        assert!(names.iter().any(|d| d == "/fork"));
-        assert!(names.iter().any(|d| d == "/doctor"));
-    }
-
-    /// `/cd` is dashboard-only: it appears in the dropdown on the
-    /// session-less dashboard surface but is hidden on the default (agent
-    /// view) surface — the inverse of session-scoped commands.
-    #[test]
-    fn dashboard_only_command_hidden_off_dashboard() {
-        let models = ModelState::default();
-
-        // Default surface (agent view): `/cd` is hidden.
-        let mut agent = SlashController::with_builtins(std::path::PathBuf::from("."));
-        let state = SlashState::default();
-        agent.refresh(&state, "/cd", 3, &models);
-        let agent_names: Vec<String> = state
-            .snapshot()
-            .matches
-            .iter()
-            .map(|r| r.display.clone())
-            .collect();
-        assert!(
-            !agent_names.iter().any(|d| d == "/cd"),
-            "/cd must be hidden off the dashboard, got {agent_names:?}"
-        );
-
-        // Dashboard surface (session-less): `/cd` is offered.
-        let mut dash = SlashController::with_builtins(std::path::PathBuf::from("."));
-        dash.set_hide_session_scoped(true);
-        let state = SlashState::default();
-        dash.refresh(&state, "/cd", 3, &models);
-        let dash_names: Vec<String> = state
-            .snapshot()
-            .matches
-            .iter()
-            .map(|r| r.display.clone())
-            .collect();
-        assert!(
-            dash_names.iter().any(|d| d == "/cd"),
-            "/cd must be offered on the dashboard, got {dash_names:?}"
-        );
-    }
-
-    /// Fuzzy queries also exclude session-scoped commands while keeping
-    /// global ones that match the same prefix (`/compact` is hidden,
-    /// `/compact-mode` stays).
-    #[test]
-    fn hide_session_scoped_filters_fuzzy_query() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
-        ctrl.set_hide_session_scoped(true);
-        let state = SlashState::default();
-        let models = ModelState::default();
-
-        ctrl.refresh(&state, "/co", 3, &models);
-        let names: Vec<String> = state
-            .snapshot()
-            .matches
-            .iter()
-            .map(|r| r.display.clone())
-            .collect();
-        assert!(!names.iter().any(|d| d == "/compact"));
-        assert!(!names.iter().any(|d| d == "/context"));
-        assert!(!names.iter().any(|d| d == "/copy"));
-        // The pager-global /compact-mode also fuzzy-matches "co" and stays.
-        assert!(
-            names.iter().any(|d| d == "/compact-mode"),
-            "global commands matching the query must remain, got {names:?}"
-        );
-    }
-
-    /// A fully-typed session command is neither recognized (no teal /
-    /// placeholder) nor offered arg suggestions on the dashboard surface.
-    #[test]
-    fn hidden_session_command_not_recognized_and_no_args() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
-        ctrl.set_hide_session_scoped(true);
-        let state = SlashState::default();
-        let models = ModelState::default();
-
-        ctrl.refresh(&state, "/compact", 8, &models);
-        assert!(
-            !state.snapshot().command_recognized,
-            "/compact must not be recognized on the session-less dashboard"
-        );
-
-        let text = "/compact ";
-        ctrl.refresh(&state, text, text.len(), &models);
-        assert!(
-            state.snapshot().matches.is_empty(),
-            "a hidden command must not produce arg suggestions"
-        );
-    }
-
-    /// `/model`, `/plan`, and `/multiline` opt in via `offered_when_session_less`,
-    /// so they stay recognized on the dashboard even though they're session-scoped.
-    #[test]
-    fn session_less_opt_in_commands_recognized_on_dashboard() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
-        ctrl.set_hide_session_scoped(true);
-        let state = SlashState::default();
-        let models = ModelState::default();
-
-        ctrl.refresh(&state, "/plan", 5, &models);
-        assert!(
-            state.snapshot().command_recognized,
-            "/plan must be recognized on the dashboard"
-        );
-
-        ctrl.refresh(&state, "/model", 6, &models);
-        assert!(
-            state.snapshot().command_recognized,
-            "/model must be recognized on the dashboard"
-        );
-
-        ctrl.refresh(&state, "/multiline", 10, &models);
-        assert!(
-            state.snapshot().command_recognized,
-            "/multiline must be recognized on the dashboard"
         );
     }
 
@@ -2642,78 +2343,21 @@ mod tests {
     fn restricted_commands_stay_visible_in_dropdown() {
         let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
         ctrl.registry_mut()
-            .set_restricted_commands(&["usage".to_string()]);
+            .set_restricted_commands(&["theme".to_string()]);
         assert!(
-            ctrl.registry().get("usage").is_none(),
+            ctrl.registry().get("theme").is_none(),
             "execution stays blocked"
         );
 
         let state = SlashState::default();
         let models = ModelState::default();
-        ctrl.refresh(&state, "/usa", 4, &models);
+        ctrl.refresh(&state, "/the", 4, &models);
         let snapshot = state.snapshot();
         let top = snapshot.selection().expect("dropdown open").display.clone();
         assert_eq!(
-            top, "/usage",
+            top, "/theme",
             "restricted command stays discoverable in the dropdown"
         );
-    }
-
-    /// Gate open → both `/always-approve` and `/auto` offered + dispatchable.
-    /// Gate closed → `/auto` hard-hidden; `/always-approve` still offered.
-    #[test]
-    fn set_auto_mode_available_gates_only_auto() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
-        let visible = |ctrl: &SlashController, name: &str| ctrl.registry().get(name).is_some();
-        let dispatchable =
-            |ctrl: &SlashController, name: &str| ctrl.registry().get_for_dispatch(name).is_some();
-
-        ctrl.set_auto_mode_available(true);
-        assert!(visible(&ctrl, "always-approve"));
-        assert!(visible(&ctrl, "auto"));
-        assert!(dispatchable(&ctrl, "always-approve"));
-        assert!(dispatchable(&ctrl, "auto"));
-
-        ctrl.set_auto_mode_available(false);
-        assert!(visible(&ctrl, "always-approve"));
-        assert!(!visible(&ctrl, "auto"));
-        assert!(dispatchable(&ctrl, "always-approve"));
-        assert!(!dispatchable(&ctrl, "auto"));
-    }
-
-    /// With the gate open, both permission-mode toggles appear in completion
-    /// for full-list, prefix, and exact-name queries.
-    #[test]
-    fn permission_mode_toggles_appear_in_completion_when_available() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
-        let state = SlashState::default();
-        let models = ModelState::default();
-        ctrl.set_auto_mode_available(true);
-
-        for (query, display) in [
-            ("/", "/always-approve"),
-            ("/alw", "/always-approve"),
-            ("/always-approve", "/always-approve"),
-            ("/", "/auto"),
-            ("/au", "/auto"),
-            ("/auto", "/auto"),
-        ] {
-            ctrl.refresh(&state, query, query.len(), &models);
-            let snapshot = state.snapshot();
-            assert!(
-                snapshot.matches.iter().any(|row| row.display == display),
-                "{display} missing from completion for query {query:?}"
-            );
-        }
-    }
-
-    /// No-arg toggles are complete so Enter submits immediately.
-    #[test]
-    fn permission_mode_toggles_are_complete_for_enter() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
-        ctrl.set_auto_mode_available(true);
-        assert!(is_command_complete("/always-approve", ctrl.registry()));
-        assert!(is_command_complete("/auto", ctrl.registry()));
     }
 
     #[test]
@@ -2721,9 +2365,9 @@ mod tests {
         let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
         let state = SlashState::default();
         let models = ModelState::default();
-        ctrl.refresh(&state, "/p", 2, &models);
+        ctrl.refresh(&state, "/h", 2, &models);
         let before = state.snapshot();
-        assert!(before.matches.len() >= 2, "need multiple /p hits");
+        assert!(before.matches.len() >= 2, "need multiple /h hits");
         let first_name = before
             .selection()
             .expect("selection")
@@ -3256,37 +2900,6 @@ mod tests {
     }
 
     #[test]
-    fn recognized_token_ranges_parity_in_mid_text_state_with_session_scope_hidden() {
-        // Dashboard-style surface (session-scoped commands suppressed), cursor
-        // in a mid-text token's args: the mid-text refresh path must apply the
-        // same membership rule as the helper — /compact (session-scoped) is
-        // excluded on this surface, /theme (pager-global) is highlighted.
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
-        ctrl.set_hide_session_scoped(true);
-        let state = SlashState::default();
-        let models = ModelState::default();
-
-        let text = "do /compact then /theme now";
-        ctrl.refresh(&state, text, text.len(), &models);
-        let composer = state.snapshot().recognized_tokens;
-
-        let helper = ctrl.recognized_token_ranges(text, &models);
-        assert_eq!(helper, composer);
-        assert_eq!(helper, vec![17..23]);
-
-        // Cursor inside the suppressed /compact token: the under-cursor teal
-        // source (command_recognized) must agree with the ranges — no teal
-        // flicker while the cursor sits in a not-offered command.
-        ctrl.refresh(&state, text, 11, &models);
-        let snap = state.snapshot();
-        assert!(
-            !snap.command_recognized,
-            "/compact must not be recognized mid-text on the session-less surface"
-        );
-        assert_eq!(snap.recognized_tokens, helper);
-    }
-
-    #[test]
     fn recognized_token_ranges_excludes_unknown_and_paths() {
         let ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
         let models = ModelState::default();
@@ -3313,22 +2926,22 @@ mod tests {
         let state = SlashState::default();
         let models = ModelState::default();
 
-        let text = "asdasd /implement    agine\n  /im";
+        let text = "asdasd /model    agine\n  /mo";
         let cursor = text.len();
         ctrl.refresh(&state, text, cursor, &models);
         let snapshot = state.snapshot();
         assert!(
             snapshot.active,
-            "cursor on /im should activate slash completion"
+            "cursor on /mo should activate slash completion"
         );
         assert_eq!(
             snapshot.command_range,
-            Some(29..32),
-            "command_range must be the /im token on line 2, not the leading span"
+            Some(25..28),
+            "command_range must be the /mo token on line 2, not the leading span"
         );
         assert!(
             snapshot.open || snapshot.inline_ghost.is_some(),
-            "partial /im should show dropdown or inline ghost"
+            "partial /mo should show dropdown or inline ghost"
         );
     }
 
@@ -3373,19 +2986,19 @@ mod tests {
         let state = SlashState::default();
         let models = ModelState::default();
 
-        let text = "hi /imagine\n\n  /execute-plan";
-        let cursor = text.find("/imagine").unwrap() + "/imagine".len();
+        let text = "hi /resume\n\n  /theme";
+        let cursor = text.find("/resume").unwrap() + "/resume".len();
         ctrl.refresh(&state, text, cursor, &models);
         let snapshot = state.snapshot();
         assert!(
             snapshot.cursor_in_command,
-            "cursor at end of /imagine must stay in command mode for Tab"
+            "cursor at end of /resume must stay in command mode for Tab"
         );
         assert_eq!(snapshot.args_range, None);
         assert_eq!(
             snapshot.command_range,
-            Some(3..11),
-            "Tab must target /imagine, not the later /execute-plan token"
+            Some(3..10),
+            "Tab must target /resume, not the later /theme token"
         );
     }
 
@@ -3471,91 +3084,9 @@ mod tests {
         assert_eq!(snap.matches[0].indices, vec![0, 1]);
     }
 
-    #[test]
-    fn doctor_completion_prefers_canonical_but_honors_exact_aliases() {
-        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
-        let state = SlashState::default();
-        let models = ModelState::default();
-
-        let text = "/doctor";
-        ctrl.refresh(&state, text, text.len(), &models);
-        let snapshot = state.snapshot();
-        let displays: Vec<&str> = snapshot
-            .matches
-            .iter()
-            .map(|row| row.display.as_str())
-            .collect();
-        assert!(displays.contains(&"/doctor"), "matches: {displays:?}");
-        assert!(!displays.contains(&"/terminal-setup"));
-
-        for text in ["/doctor ", "/terminal-setup "] {
-            ctrl.refresh(&state, text, text.len(), &models);
-            let snapshot = state.snapshot();
-            assert!(!snapshot.open, "bare args opened for {text:?}");
-            assert!(snapshot.matches.is_empty(), "matches for {text:?}");
-        }
-        for (text, inserted, indices) in [
-            ("/doctor f", "fix", vec![0]),
-            ("/doctor fix s", "fix ssh-wrap", vec![0]),
-            ("/doctor fix ssh", "fix ssh-wrap", vec![0, 1, 2]),
-            ("/doctor fix terminal.s", "fix ssh-wrap", vec![0]),
-            (
-                "/doctor fix tmux-c",
-                "fix tmux-clipboard",
-                vec![0, 1, 2, 3, 4, 5],
-            ),
-            ("/doctor fix dcs", "fix dcs-passthrough", vec![0, 1, 2]),
-            (
-                "/doctor fix tmux-e",
-                "fix tmux-extended-keys",
-                vec![0, 1, 2, 3, 4, 5],
-            ),
-            ("/terminal-setup f", "fix", vec![0]),
-            ("/terminal-setup fix s", "fix ssh-wrap", vec![0]),
-        ] {
-            ctrl.refresh(&state, text, text.len(), &models);
-            let snapshot = state.snapshot();
-            assert!(snapshot.open, "no matches for {text:?}");
-            assert_eq!(snapshot.matches[0].insert_text, inserted);
-            assert_eq!(snapshot.matches[0].indices, indices, "{text:?}");
-        }
-
-        for text in [
-            "/doctor fix ssh-wrap",
-            "/doctor fix terminal.ssh-wrap",
-            "/doctor fix tmux-clipboard",
-            "/doctor fix terminal.tmux-clipboard",
-            "/doctor fix dcs-passthrough",
-            "/doctor fix terminal.dcs-passthrough",
-            "/doctor fix tmux-extended-keys",
-            "/doctor fix terminal.tmux-extended-keys",
-            "/terminal-setup fix ssh-wrap",
-            "/terminal-setup fix terminal.ssh-wrap",
-        ] {
-            ctrl.refresh(&state, text, text.len(), &models);
-            let snapshot = state.snapshot();
-            assert!(!snapshot.open, "exact form left picker open for {text:?}");
-            assert!(snapshot.matches.is_empty(), "matches for {text:?}");
-        }
-
-        let text = "/terminal-setup";
-        ctrl.refresh(&state, text, text.len(), &models);
-        let snapshot = state.snapshot();
-        let displays: Vec<&str> = snapshot
-            .matches
-            .iter()
-            .map(|row| row.display.as_str())
-            .collect();
-        assert!(
-            displays.contains(&"/terminal-setup"),
-            "matches: {displays:?}"
-        );
-    }
-
     /// A command's `mode_support()` declaration is the whole story for
     /// completion: a fullscreen-only command must not be offered under
-    /// `--minimal`, a minimal-only one must not be offered in the full TUI,
-    /// and `Inline` (`--no-alt-screen`) counts as the full TUI.
+    /// `--minimal`, and `Inline` (`--no-alt-screen`) counts as the full TUI.
     #[test]
     fn completion_offers_only_commands_that_support_the_mode() {
         let models = ModelState::default();
@@ -3576,11 +3107,11 @@ mod tests {
             crate::app::ScreenMode::Inline,
         ] {
             assert!(offered(full_tui, "/theme"), "{full_tui:?}");
-            assert!(!offered(full_tui, "/expand"), "{full_tui:?}");
         }
 
         assert!(!offered(crate::app::ScreenMode::Minimal, "/theme"));
-        assert!(offered(crate::app::ScreenMode::Minimal, "/expand"));
+        // A command without a mode declaration works everywhere.
+        assert!(offered(crate::app::ScreenMode::Minimal, "/model"));
     }
 
     #[test]

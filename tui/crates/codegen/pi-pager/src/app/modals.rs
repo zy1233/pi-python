@@ -793,38 +793,9 @@ impl AgentView {
                                 self.active_modal = None;
                                 InputOutcome::Action(Action::NewSession)
                             }
-                            PaletteCommand::NewSessionInWorktree => {
-                                self.active_modal = None;
-                                InputOutcome::Action(Action::NewWorktreeSession {
-                                    load_session_id: None,
-                                    label: None,
-                                    git_ref: None,
-                                })
-                            }
-                            PaletteCommand::Home => {
-                                self.active_modal = None;
-                                InputOutcome::Action(Action::ExitSessionConfirmed)
-                            }
                             PaletteCommand::Quit => {
                                 self.active_modal = None;
                                 InputOutcome::Action(Action::QuitConfirmed)
-                            }
-                            PaletteCommand::HowTo => {
-                                // Save palette state for Esc restore (same pattern as /resume).
-                                let prev = {
-                                    let ActiveModal::CommandPalette { entries, state, .. } =
-                                        self.active_modal.as_ref().unwrap()
-                                    else {
-                                        unreachable!()
-                                    };
-                                    Some(crate::views::modal::PaletteSnapshot {
-                                        entries: entries.clone(),
-                                        state: state.clone(),
-                                    })
-                                };
-                                self.active_modal =
-                                    Some(crate::views::modal::howto_list_modal(prev));
-                                InputOutcome::Changed
                             }
                             PaletteCommand::KeyboardShortcuts => {
                                 use crate::views::shortcuts_help;
@@ -853,28 +824,9 @@ impl AgentView {
                                 });
                                 InputOutcome::Changed
                             }
-                            PaletteCommand::Memory => {
-                                self.active_modal = None;
-                                InputOutcome::Action(Action::OpenMemoryModal)
-                            }
-                            PaletteCommand::OpenExtensionsTab(tab) => {
-                                self.active_modal = None;
-                                InputOutcome::Action(Action::OpenExtensionsModal {
-                                    tab,
-                                    trigger: pi_telemetry::events::ExtensionsModalTrigger::CommandPalette,
-                                })
-                            }
                             PaletteCommand::OpenSettings => {
                                 self.active_modal = None;
                                 InputOutcome::Action(Action::OpenSettings)
-                            }
-                            PaletteCommand::OpenAgentsModal => {
-                                self.active_modal = None;
-                                InputOutcome::Action(Action::OpenConfigAgentsModal(None))
-                            }
-                            PaletteCommand::EditPromptExternal => {
-                                self.active_modal = None;
-                                InputOutcome::Action(Action::EditPromptExternal)
                             }
                             PaletteCommand::SlashCommand(text) => {
                                 let trimmed = text

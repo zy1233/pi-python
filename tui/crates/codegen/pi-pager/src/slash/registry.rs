@@ -29,7 +29,10 @@ pub(crate) const BLOCKED_ACP_NAMES: &[&str] = &[
     "reload-plugins",
 ];
 
-/// Slash names kept in the pi-python TUI (standard ACP + local chrome).
+/// The builtin slash set of the pi-python TUI: standard-ACP session commands
+/// plus local chrome. `commands::builtin_commands()` is exactly this list (a
+/// test pins it); everything else comes from the agent over ACP.
+#[cfg(test)]
 pub(crate) const PI_STANDARD_SLASH_NAMES: &[&str] = &[
     "new",
     "resume",
@@ -169,9 +172,6 @@ pub struct CommandRegistry {
     /// Extracted from `_meta.workflowSource` on the incoming list (including
     /// names skipped as reserved/claimed) so `/workflow` can suggest them.
     saved_workflows: Vec<WorkflowChoice>,
-    /// When true, only standard-ACP / local-TUI slash commands are offered
-    /// (`/new` `/resume` `/quit` plus `/help` `/theme` `/settings` `/multiline` `/model`).
-    pi_standard_slash: bool,
 }
 
 impl CommandRegistry {
@@ -207,7 +207,6 @@ impl CommandRegistry {
             restricted: HashSet::new(),
             available_tools: None,
             saved_workflows: Vec::new(),
-            pi_standard_slash: false,
         };
         reg.rebuild_triggers();
         reg
@@ -375,18 +374,6 @@ impl CommandRegistry {
     /// Number of unique commands (not triggers).
     pub fn command_count(&self) -> usize {
         self.commands.len()
-    }
-
-    /// Offer only `/new` `/resume` `/quit` and local TUI chrome. Commands
- /// that needed grok `legacy ext RPC` RPCs stay compiled but are not listed or
-    /// dispatchable.
-    pub fn enable_pi_standard_slash_menu(&mut self) {
-        self.pi_standard_slash = true;
-        self.rebuild_triggers();
-    }
-
-    pub(crate) fn pi_standard_slash_enabled(&self) -> bool {
-        self.pi_standard_slash
     }
 
     /// Show or hide the /hooks and /plugins commands.
@@ -609,13 +596,6 @@ impl CommandRegistry {
 
             // Skip hidden commands — they don't get triggers or key_to_index entries.
             if self.hidden.contains(canonical) {
-                continue;
-            }
-
-            if self.pi_standard_slash
-                && !PI_STANDARD_SLASH_NAMES.contains(&canonical)
-                && source != CommandSource::Acp
-            {
                 continue;
             }
 
@@ -1436,72 +1416,5 @@ mod tests {
         // Out-of-range returns None (boundary + far-out).
         assert!(registry.commands_by_index(2).is_none());
         assert!(registry.commands_by_index(usize::MAX).is_none());
-    }
-
-    #[test]
-    fn pi_standard_slash_hides_vendor_commands() {
-        let mut registry =
-            CommandRegistry::new(crate::slash::commands::builtin_commands());
-        assert!(registry.get("model").is_some());
-        assert!(registry.get("compact").is_some());
-        registry.enable_pi_standard_slash_menu();
-        assert!(registry.get("new").is_some());
-        assert!(registry.get("resume").is_some());
-        assert!(registry.get("quit").is_some());
-        assert!(registry.get("help").is_some());
-        assert!(registry.get("theme").is_some());
-        assert!(registry.get("settings").is_some());
-        assert!(registry.get("multiline").is_some());
-        assert!(registry.get("model").is_some());
-        assert!(registry.get("home").is_some());
-        assert!(registry.get("welcome").is_some(), "/welcome is an alias of /home");
-        assert!(registry.get("clear").is_some(), "/clear is an alias of /new");
-        assert!(registry.get("exit").is_some(), "/exit is an alias of /quit");
-        assert!(registry.get("compact").is_none());
-        assert!(registry.get("rewind").is_none());
-        assert!(registry.get("fork").is_none());
-    }
-
-    #[test]
-    fn pi_standard_slash_allows_acp_commands_through() {
-        // Use a builtin whose name IS in PI_STANDARD_SLASH_NAMES.
-        let builtin: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
-            name: "model",
-            aliases: &[],
-        });
-        let mut registry = CommandRegistry::new(vec![builtin]);
-        registry.enable_pi_standard_slash_menu();
-
-        // Whitelisted builtin stays visible.
-        assert!(registry.get("model").is_some(), "/model is in the whitelist");
-
-        // A non-whitelisted builtin would be hidden — add one to verify.
-        // (DummyCommand "compact" is NOT in PI_STANDARD_SLASH_NAMES.)
-        // We can't easily add another builtin after construction, so we
-        // just verify ACP commands pass through.
-
-        // ACP commands from the Python agent should pass through the filter.
-        registry.set_acp_commands(&[
-            agent_client_protocol::AvailableCommand::new(
-                "workflows".to_string(),
-                "List workflows".to_string(),
-            ),
-            agent_client_protocol::AvailableCommand::new(
-                "deep-research".to_string(),
-                "Deep research workflow".to_string(),
-            ),
-        ]);
-        assert!(
-            registry.get("workflows").is_some(),
-            "ACP command must not be filtered by pi_standard_slash"
-        );
-        assert!(
-            registry.get("deep-research").is_some(),
-            "ACP command must not be filtered by pi_standard_slash"
-        );
-        assert!(
-            registry.triggers().iter().any(|t| t.canonical == "workflows"),
-            "ACP commands should have completion triggers"
-        );
     }
 }

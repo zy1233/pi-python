@@ -1236,8 +1236,7 @@ pub(crate) async fn run(
         vec![]
     };
 
-    app.has_external_auth_provider =
-        crate::slash::commands::usage::detect_external_auth_provider(&app.auth_methods);
+    app.has_external_auth_provider = detect_external_auth_provider(&app.auth_methods);
 
     if let Some(meta) = connection.auth_meta.as_ref() {
         match serde_json::from_value::<pi_shell::auth::AuthMeta>(meta.clone()) {
@@ -3029,6 +3028,36 @@ fn apply_session_recap_available(app: &mut AppView, available: bool) {
 /// `[marketplace].plugin_cta_marketplace` from an effective config: the
 /// marketplace source name the plugin CTA draws candidates from instead of
 /// pi Official. Empty/whitespace-only values count as unset.
+/// Detect external-auth installs once at pager startup.
+fn detect_external_auth_provider(auth_methods: &[agent_client_protocol::AuthMethod]) -> bool {
+    let method_is_external = |method: &agent_client_protocol::AuthMethod| {
+        method
+            .meta()
+            .as_ref()
+            .and_then(|v| v.get("external_provider"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+    };
+    let env_set = || {
+        std::env::var("GROK_AUTH_PROVIDER_COMMAND")
+            .ok()
+            .is_some_and(|s| !s.trim().is_empty())
+    };
+    let config_set = || {
+        let Ok(raw) = pi_shell::config::load_effective_config() else {
+            return false;
+        };
+        let Ok(cfg) = pi_shell::agent::config::Config::new_from_toml_cfg(&raw) else {
+            return false;
+        };
+        cfg.grok_com_config
+            .auth_provider_command
+            .as_deref()
+            .is_some_and(|s| !s.trim().is_empty())
+    };
+    auth_methods.iter().any(method_is_external) || env_set() || config_set()
+}
+
 fn plugin_cta_marketplace_from(config: &toml::Value) -> Option<String> {
     let name = config
         .get("marketplace")?

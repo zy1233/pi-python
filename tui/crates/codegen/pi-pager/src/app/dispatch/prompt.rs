@@ -64,16 +64,31 @@ pub(super) fn collect_live_doctor_report_for_terminal(
     terminal: &crate::terminal::TerminalContext,
 ) -> Option<crate::diagnostics::DiagnosticReport> {
     let agent = app.agents.get(&agent_id)?;
-    let mut report = crate::slash::commands::doctor::DoctorCommand::report_for_terminal(
+    let runtime = crate::diagnostics::TuiRuntimeRequest {
+        workspace: &agent.session.cwd,
+        notification_method: app.notification_service.config().method,
+        notification_protocol: app.notification_service.protocol(),
+        notification_condition: app.notification_service.config().condition,
+    };
+    let query = crate::diagnostics::probes::LiveTmuxProbe;
+    let snapshot = crate::diagnostics::probes::collect_doctor_tui(
         terminal,
-        app.screen_mode,
-        crate::diagnostics::TuiRuntimeRequest {
-            workspace: &agent.session.cwd,
-            notification_method: app.notification_service.config().method,
-            notification_protocol: app.notification_service.protocol(),
-            notification_condition: app.notification_service.config().condition,
+        crate::diagnostics::probes::TuiProbeEvidence {
+            fullscreen_active: app.screen_mode.is_fullscreen(),
+            kitty_flags_pushed: crate::app::kitty_flags_pushed(),
+            xtversion: crate::terminal::xtversion::detected(),
         },
+        &query,
     );
+    let runtime_findings = crate::diagnostics::collect_tui_runtime_findings(
+        &snapshot.common,
+        runtime.notification_method,
+        runtime.notification_protocol,
+        runtime.notification_condition,
+        runtime.workspace,
+    );
+    let mut report = crate::diagnostics::view(snapshot.into());
+    crate::diagnostics::merge_tui_runtime_findings(&mut report, runtime_findings);
     if crate::app::voice_mode_enabled() {
         crate::diagnostics::apply_voice_probe(&mut report, true);
     }

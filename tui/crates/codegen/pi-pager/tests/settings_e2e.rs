@@ -5379,25 +5379,6 @@ fn default_selected_permission_mouse_click_on_indicator_opens_picker_in_one_clic
     }
 }
 
-/// `/privacy` takes no arguments: it opens the settings page and nothing
-/// else. The alias parser it used to carry (`opt-in`, `share`, `out`, …) is
-/// gone — a one-word prompt alias could flip a privacy preference with none
-/// of the disclosure copy in front of the user, and the ambiguous forms
-/// (`on`/`off`) risked landing on the opposite of the intent.
-#[test]
-fn pr9_privacy_slash_command_takes_no_arguments() {
-    use pi_pager::slash::commands::builtin_commands;
-    use pi_pager::slash::registry::CommandRegistry;
-
-    let reg = CommandRegistry::new(builtin_commands());
-    let cmd = reg.get("privacy").expect("/privacy must be registered");
-    assert!(
-        !cmd.takes_args(),
-        "/privacy must not advertise an argument slot"
-    );
-    assert_eq!(cmd.usage(), "/privacy");
-}
-
 // ---------------------------------------------------------------------------
 // `plan_mode` (Agent-category Enum, PAGER-owned + ACP-mediated,
 // supports_preview: false)

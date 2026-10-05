@@ -105,58 +105,12 @@ fn mode_specific_builtin_refusals_are_pinned() {
 
     assert_eq!(
         actual,
-        vec![
-            (
-                "dashboard",
-                "/dashboard isn't available in minimal mode (minimal is single-session). \
-                 Run /fullscreen to switch this session."
-                    .to_string()
-            ),
-            (
-                "expand",
-                "/expand isn't available in fullscreen mode: press Tab to focus the \
-                 scrollback, then → on the block."
-                    .to_string()
-            ),
-            (
-                "find",
-                "/find isn't available in minimal mode (minimal has no scrollback pane: \
-                 use your terminal's own search). Run /fullscreen to switch this session."
-                    .to_string()
-            ),
-            (
-                "fullscreen",
-                "You're already in fullscreen mode.".to_string()
-            ),
-            (
-                "jump",
-                "/jump isn't available in minimal mode \
-                 (minimal scrolls with your terminal's native scrollback). \
-                 Run /fullscreen to switch this session."
-                    .to_string()
-            ),
-            ("minimal", "You're already in minimal mode.".to_string()),
-            (
-                "theme",
-                "/theme isn't available in minimal mode \
-                 (minimal renders with your terminal's own palette). \
-                 Run /fullscreen to switch this session."
-                    .to_string()
-            ),
-            (
-                "timeline",
-                "/timeline isn't available in minimal mode \
-                 (the timeline rail needs the interactive scrollback pane). \
-                 Run /fullscreen to switch this session."
-                    .to_string()
-            ),
-            (
-                "tutorial",
-                "/tutorial isn't available in minimal mode \
-                 (the tutorial overlay needs fullscreen). \
-                 Run /fullscreen to switch this session."
-                    .to_string()
-            ),
-        ]
+        vec![(
+            "theme",
+            "/theme isn't available in minimal mode \
+             (minimal renders with your terminal's own palette). \
+             Run /fullscreen to switch this session."
+                .to_string()
+        )]
     );
 }
