@@ -33,42 +33,48 @@ package = "pi-pager-bin"
 
 # Ceiling for the number of unique packages in `cargo tree -p pi-pager-bin --target <triple>`.
 [graph.max_nodes]
-# PROVISIONAL: 995 when resolved from a macOS host; the slack covers host-only build deps.
-x86_64-unknown-linux-gnu = 1000
+# Measured on the Linux runner (TUI CI run 37263077643): 995. A new dependency has to lower the
+# count elsewhere or raise this number on purpose.
+x86_64-unknown-linux-gnu = 995
 
 [check]
 # Consumer build: everything that ships (`zypi`, the minimal pager, the updater).
 packages = ["pi-pager-bin", "pi-pager-minimal", "pi-update"]
-# Warning ceiling across those packages. Report-only until the first Linux run:
-# macOS shows 20 (all `dead_code` in pi-shell; the crate-root `#![allow]` is still in place).
-# max_warnings = 20
+# Warning ceiling across those packages. Linux and macOS both show 20 (all `dead_code` in
+# pi-shell; the crate-root `#![allow]` is still in place, see plan A.4).
+max_warnings = 20
 # `cargo check --workspace --tests --keep-going` type-checks every crate's tests, which is where
 # Linux-only cfg code that macOS never compiled would break.
 workspace_tests = true
 # pi-fast-worktree: lib tests do not compile at HEAD (`nfs::confined::tests::plant_journal`).
 workspace_tests_exclude = ["pi-fast-worktree"]
-# Flip to true once the first Linux run is green.
-enforce_workspace_tests = false
+# The first Linux run was green (0 errors).
+enforce_workspace_tests = true
 
 [test]
-# Flip to true once the first Linux run is triaged into `known_failures` / `skip` below.
-enforce = false
+# The first Linux run passed every suite with 0 failures, so unexpected failures now block.
+enforce = true
 timeout_minutes = 60
 # Several pager tests assert colour / cursor output and need a capable terminal environment.
-unset_env = ["NO_COLOR"]
+# The home / agent / sandbox variables are unset so a developer's shell cannot change results
+# (`PI_HOME` outranks the `GROK_HOME` that the config-isolation tests set for themselves).
+unset_env = ["NO_COLOR", "PI_HOME", "GROK_HOME", "PI_AGENT_COMMAND", "PI_PYTHON", "GROK_SANDBOX"]
 
 [test.env]
 TERM = "xterm-256color"
 COLORTERM = "truecolor"
 
-# `reference_passed` is the macOS result after the runtime removal and the leader-residue cleanup
-# (docs/baselines/tui.md); the summary flags a Linux count that deviates by more than 5 %.
-# `min_passed` (floor) is unset until Linux numbers exist.
+# `reference_passed` is the macOS result at the current tip (docs/baselines/tui.md); the summary
+# flags a run that deviates by more than 5 %. The Linux run (TUI CI run 37263077643, before the
+# print-mode guard and the changelog removal) passed every suite: 10,851 passed, 0 failed.
+# `min_passed` (floor) stays unset until the planned deletions (plan A.3 / A.4) have landed,
+# because deleting dead code legitimately deletes its tests; set the floors from the Linux run
+# after that.
 
 [[test.suite]]
 package = "pi-shell"
 targets = ["--lib", "--test", "sandbox_requirements_pin", "--test", "test_config_update_isolation"]
-reference_passed = 1140 # 1135 lib + 2 + 3
+reference_passed = 1143 # 1138 lib + 2 + 3
 
 [[test.suite]]
 package = "pi-pager"
@@ -83,19 +89,19 @@ targets = [
 ]
 # doctor_cmd:: probes the audio input device (hangs on a macOS CoreAudio query without mic access).
 skip = ["doctor_cmd::"]
-# macOS renders Alt as "Opt", so these footer assertions only fail there.
+# macOS renders Alt as "Opt", so these footer assertions only fail there (Linux passes them).
 known_failures = [
     "render_footer_multiline_empty_create_uses_shift_or_alt_enter",
     "render_footer_multiline_mode_send_uses_shift_or_alt_enter",
 ]
-reference_passed = 8870 # 8589 lib + 277 + 2 + 2
+reference_passed = 8862 # 8581 lib + 277 + 2 + 2
 
 [[test.suite]]
 package = "pi-pager-bin"
 targets = ["--bin", "zypi"]
 # tests/update_never_blocked_by_config.rs is not selected: it looks for CARGO_BIN_EXE_pi-pager,
 # but the binary is named zypi (fork-rename leftover, unrelated to the runtime removal).
-reference_passed = 14
+reference_passed = 20
 
 [[test.suite]]
 package = "pi-acp-lib"
@@ -118,7 +124,7 @@ reference_passed = 244
 [[test.suite]]
 package = "pi-file-utils"
 targets = ["--lib"]
-reference_passed = 217
+reference_passed = 217 # Linux: 216 (one test fewer)
 
 [[test.suite]]
 package = "pi-sampling-types"
