@@ -430,7 +430,7 @@ fn cli_is_idle_for_recap(agent: &crate::app::agent_view::AgentView) -> bool {
     if !agent.session.state.is_idle() {
         return false;
     }
-    if agent.session.in_flight_prompt.is_some() || agent.has_held_user_queue() {
+    if agent.session.in_flight_prompt.is_some() || !agent.session.pending_prompts.is_empty() {
         return false;
     }
     if scrollback_waiting_on_user_turn(&agent.scrollback) {

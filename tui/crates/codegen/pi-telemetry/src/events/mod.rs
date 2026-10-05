@@ -60,7 +60,6 @@ pub enum ContextualTipKind {
     Undo,
     PlanMode,
     ImageInput,
-    SendNow,
     SmallScreen,
     /// Double-click fold/nav path → tip to enable Word select in settings.
     WordSelect,

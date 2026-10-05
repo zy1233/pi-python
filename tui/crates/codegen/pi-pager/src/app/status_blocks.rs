@@ -7,27 +7,16 @@
 use crate::app::agent_view::AgentView;
 use crate::util::{format_duration, group_thousands};
 
-/// `/queue` body — a read-only list of the queued prompts.
-///
-/// Server-authoritative shared-queue rows (the in-flight prompt excluded) come
-/// first in broadcast order, then the local drip-feed queue — matching
-/// [`crate::views::queue_pane::QueuePane::sync_from_merged`]'s ordering.
+/// `/queue` body — a read-only list of the queued prompts (the local
+/// drip-feed queue, in drain order).
 pub(crate) fn queue_block_text(agent: &AgentView) -> String {
-    let running_id = agent.session.current_prompt_id.as_deref();
-
-    let mut rows: Vec<String> = Vec::new();
-    let mut pos = 1usize;
-    for wire in &agent.shared_queue {
-        if running_id == Some(wire.id.as_str()) {
-            continue;
-        }
-        rows.push(format_queue_row(pos, &wire.text));
-        pos += 1;
-    }
-    for prompt in &agent.session.pending_prompts {
-        rows.push(format_queue_row(pos, &prompt.text));
-        pos += 1;
-    }
+    let rows: Vec<String> = agent
+        .session
+        .pending_prompts
+        .iter()
+        .enumerate()
+        .map(|(i, prompt)| format_queue_row(i + 1, &prompt.text))
+        .collect();
 
     if rows.is_empty() {
         "Queue is empty.".to_string()

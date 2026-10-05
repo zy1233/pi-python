@@ -460,7 +460,7 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_l_matches_interject_chord() {
+    fn ctrl_l_chord_matches_only_ctrl_l() {
         let chord = key!('l', CONTROL);
         let event = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL);
         assert!(chord.matches(&event));

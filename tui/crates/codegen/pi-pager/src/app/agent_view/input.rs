@@ -803,7 +803,7 @@ impl AgentView {
                 AgentPane::Prompt => self.handle_prompt_key(key, registry, prompt_paging),
                 AgentPane::Scrollback => self.handle_scrollback_key(key, registry),
                 AgentPane::Todo => self.handle_todo_key(key, registry),
-                AgentPane::Queue => self.handle_queue_key(key, registry),
+                AgentPane::Queue => self.handle_queue_key(key),
             },
             Event::Paste(text) => {
                 if self.active_pane == AgentPane::Scrollback
@@ -1614,7 +1614,6 @@ mod esc_would_cancel_turn_tests {
         agent.prompt_mode = crate::app::queue_edit::PromptMode::EditingQueued {
             id: 1,
             original: "queued row".into(),
-            server_id: None,
             kind: crate::app::agent::QueueEntryKind::Prompt,
         };
         assert!(

@@ -29,7 +29,6 @@ use super::app_view::{ActiveView, AppView};
 
 mod permissions;
 mod prompt_origin;
-mod queue;
 mod routing;
 mod session_notification;
 
@@ -54,14 +53,10 @@ pub(crate) use prompt_origin::{
 pub(crate) use session_notification::apply_session_event_for_test;
 pub(crate) use session_notification::drop_unexpected_replay;
 use session_notification::{advance_reconnect_cursor, confirm_context_used, detect_plan_mode_change, handle_session_notification};
-pub(crate) use queue::PendingRunningAdoption;
 
 #[cfg(test)]
 #[allow(unused_imports)]
 use prompt_origin::*;
-#[cfg(test)]
-#[allow(unused_imports)]
-use queue::*;
 #[cfg(test)]
 #[allow(unused_imports)]
 use routing::*;
@@ -84,11 +79,6 @@ pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
             let affected = match find_session_match(app, &notif.request.session_id) {
                 Some(id) => {
                     let is_active = is_matched_agent_active(app, id);
-                    // Read before the agent borrow below.
-                    let stashed_adoption_pid = app
-                        .pending_running_adoptions
-                        .get(&id)
-                        .map(|p| p.prompt_id.clone());
                     let agent = app
                         .agents
                         .get_mut(&id)
@@ -213,38 +203,6 @@ pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
                     } else if !meta.is_replay
                         && let Some(notif_pid) = meta.prompt_id.as_ref()
                         && agent.session.current_prompt_id.as_ref() != Some(notif_pid)
-                        && !agent.attached_as_viewer
-                        && stashed_adoption_pid.as_deref() == Some(notif_pid.as_str())
-                    {
-                        // FIFO handoff: the server already promoted this
-                        // prompt but its adoption waits on the previous turn's
-                        // PromptResponse — buffer for the shim's flush. Not
-                        // applied, so the reconnect cursor does not advance.
-                        if agent.pending_adoption_updates.len()
-                            < super::agent_view::MAX_PENDING_ADOPTION_UPDATES
-                        {
-                            tracing::debug!(
-                                target: "qtrace",
-                                pid = std::process::id(),
-                                event = "adoption_update_buffered",
-                                prompt_id = %notif_pid,
-                                "buffering session/update for the stashed pending adoption",
-                            );
-                            agent.pending_adoption_updates.push((
-                                notif_pid.clone(),
-                                notif.request.update,
-                                meta.clone(),
-                            ));
-                        } else {
-                            tracing::debug!(
-                                prompt_id = %notif_pid,
-                                "pending-adoption buffer full; dropping update (kept prefix)",
-                            );
-                        }
-                        false
-                    } else if !meta.is_replay
-                        && let Some(notif_pid) = meta.prompt_id.as_ref()
-                        && agent.session.current_prompt_id.as_ref() != Some(notif_pid)
                         && !((agent.session.current_prompt_id.is_none()
                             || agent
                                 .session
@@ -290,11 +248,6 @@ pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
                         // PromptResponses get discarded. Their content still
                         // renders — the drop gate above passes synthetic deltas
                         // through when `current_prompt_id` is None/synthetic.
-                        //
-                        // (Cron `scheduler-fired-…` turns ARE client-driven and
-                        // have a `prompt_complete` exit; a viewer enters their
-                        // running chrome via the `queue/changed` shim adoption
-                        // in `handle_queue_changed`, not here.)
                         if let Some(notif_pid) = meta.prompt_id.as_ref()
                             && agent.session.current_prompt_id.as_ref() != Some(notif_pid)
                             && agent.attached_as_viewer
@@ -373,7 +326,7 @@ pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
                         // turn of its own and never calls start_turn(), so it
                         // would stay `Idle` — hiding the "⠿ Responding…" status
                         // line, the elapsed/token counter, and the Ctrl+c:cancel
-                        // / Ctrl+Enter:interject footer hints (all gated on
+                        // footer hint (all gated on
                         // `AgentState::TurnRunning`). Enter TurnRunning whenever a
                         // turn is in flight (a prompt id is adopted) and we are
                         // not already running.

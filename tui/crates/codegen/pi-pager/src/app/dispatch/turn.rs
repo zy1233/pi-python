@@ -1,7 +1,7 @@
 //! Turn cancellation and overdue turn reconciliation.
 
 use super::permissions::drain_permission_queue;
-use super::queue::{apply_turn_start_shim, maybe_drain_queue};
+use super::queue::maybe_drain_queue;
 use crate::app::actions::Effect;
 use crate::app::agent::AgentId;
 use crate::app::agent_view::AgentView;
@@ -37,8 +37,6 @@ pub(super) fn dispatch_cancel_turn(app: &mut AppView) -> Vec<Effect> {
                     "current_prompt_id": agent.session.current_prompt_id,
                 })),
             );
-            // Explicit user cancel supersedes any pending send-now expectation (its marker renders).
-            agent.clear_send_now_expectation();
             return vec![emit_cancel_turn(
                 agent,
                 session_id,
@@ -56,7 +54,6 @@ pub(super) fn dispatch_cancel_turn(app: &mut AppView) -> Vec<Effect> {
                 let Some(session_id) = agent.session.session_id.clone() else {
                     return vec![];
                 };
-                agent.clear_send_now_expectation();
                 agent.mark_wake_cancel_sent();
                 return vec![emit_cancel_turn(
                     agent,
@@ -95,7 +92,6 @@ fn cancel_agent_turn(
         let Some(session_id) = agent.session.session_id.clone() else {
             return vec![];
         };
-        agent.clear_send_now_expectation();
         return vec![emit_cancel_turn(
             agent,
             session_id,
@@ -106,7 +102,6 @@ fn cancel_agent_turn(
         let Some(session_id) = agent.session.session_id.clone() else {
             return vec![];
         };
-        agent.clear_send_now_expectation();
         agent.mark_wake_cancel_sent();
         return vec![emit_cancel_turn(
             agent,
@@ -131,11 +126,6 @@ fn cancel_agent_turn(
     // Clearing `current_prompt_id` (via `finish_turn`) is what makes orphan
     // chunks/PR for the cancelled turn get dropped by the `promptId` gate
     // in acp_handler / PromptResponse handler.
-    // When a prompt is queued on the server-authoritative shared queue, cancel
-    // restores the FRONT queued prompt to the input instead (handled after the
-    // cleanup below). So skip the in-flight rewind in that case — the user wants
-    // the queued prompt back, not the in-flight one.
-    //
     // Minimal mode prints each committed block once into the terminal's native
     // scrollback, and that print can't be "un-printed". A user-prompt block
     // commits immediately (it is never `is_running`), so a just-promoted queued
@@ -158,8 +148,7 @@ fn cancel_agent_turn(
     let composer_has_draft = !agent.prompt.text().is_empty() || !agent.prompt.images.is_empty();
     // Captured before `finish_turn` clears it; no id → standard cancel.
     let rewind_prompt_id = agent.session.current_prompt_id.clone();
-    let rewinding = agent.shared_queue.is_empty()
-        && cancel_rewind_enabled
+    let rewinding = cancel_rewind_enabled
         && agent.session.in_flight_prompt.is_some()
         && agent.session.pending_prompts.is_empty()
         && !in_flight_committed
@@ -198,16 +187,6 @@ fn cancel_agent_turn(
         return vec![];
     };
 
-    // Explicit user cancel supersedes any pending send-now expectation (its marker renders).
-    agent.clear_send_now_expectation();
-
-    // Server-authoritative queue: the agent owns the drain. On an interactive
-    // cancel we only tear down the running turn and let the agent promote the
-    // FRONT queued prompt as the next turn — its `legacy/queue/changed`
-    // rebroadcast (carrying `running_prompt_id`) is the source of truth, and the
-    // pager adopts it via `handle_queue_changed` / `apply_turn_start_shim`. We
-    // do NOT pull any queued prompt back into the input or predict the new queue
-    // order client-side; the user's first queued prompt is what runs next.
     // `rewinding` mirrors the local rewind on the wire so the shell trims
     // its stored copy too.
     vec![emit_cancel_turn(
@@ -367,8 +346,7 @@ pub(crate) const TURN_END_RECONCILE_GRACE: std::time::Duration = std::time::Dura
 /// broadcast is armed in `handle_prompt_complete` and disarmed by a matching
 /// `TaskResult::PromptResponse`; whatever is still armed past
 /// [`TURN_END_RECONCILE_GRACE`] is reconciled here with the essential subset
-/// of the PromptResponse teardown (state, marker, adoption hand-off, queue
-/// drain).
+/// of the PromptResponse teardown (state, marker, queue drain).
 ///
 /// Returns `None` when nothing fired; `Some(effects)` (possibly empty) when
 /// at least one agent was reconciled, so the caller forces a redraw.
@@ -390,9 +368,6 @@ pub(crate) fn reconcile_overdue_turn_ends(app: &mut AppView) -> Option<Vec<Effec
     let mut fired = false;
     let mut effects = Vec::new();
     for id in overdue {
-        // Take the stashed adoption before borrowing the agent (disjoint
-        // `app` fields; same pattern as the PromptResponse arm).
-        let pending_adoption = app.pending_running_adoptions.remove(&id);
         let Some(agent) = app.agents.get_mut(&id) else {
             continue;
         };
@@ -405,25 +380,13 @@ pub(crate) fn reconcile_overdue_turn_ends(app: &mut AppView) -> Option<Vec<Effec
         let busy = agent.session.state.is_turn_running() || agent.session.state.is_cancelling();
         if !still_ours || !busy {
             // The turn already resolved through the normal path (or a new
-            // turn was adopted); the marker is stale. Restore the adoption
-            // for the path that owns it.
-            if let Some(p) = pending_adoption {
-                app.pending_running_adoptions.insert(id, p);
-            }
+            // turn was adopted); the marker is stale.
             continue;
         }
 
         fired = true;
         let was_cancelling = agent.session.state.is_cancelling()
             || pending.stop_reason.as_deref() == Some("cancelled");
-        // Send-now cancel: suppress the marker (wire `cancelTrigger` wins, else
-        // the armed expectation). Consumed every reconcile (no stale flag).
-        let expected_send_now = agent.expect_send_now_cancel.take();
-        let send_now_cancel = was_cancelling
-            && match pending.cancel_trigger.as_deref() {
-                Some(trigger) => trigger == "send_now",
-                None => expected_send_now.is_some(),
-            };
         let elapsed = agent.turn_elapsed().unwrap_or_default();
         crate::unified_log::warn(
             "turn.end_reconciled_from_broadcast",
@@ -432,20 +395,16 @@ pub(crate) fn reconcile_overdue_turn_ends(app: &mut AppView) -> Option<Vec<Effec
                 "prompt_id": pending.prompt_id,
                 "stop_reason": pending.stop_reason,
                 "was_cancelling": was_cancelling,
-                "send_now_cancel": send_now_cancel,
                 "grace_ms": TURN_END_RECONCILE_GRACE.as_millis() as u64,
             })),
         );
 
         agent.session.finish_turn(&mut agent.scrollback);
         let event = if was_cancelling {
-            // Send-now cancel renders no marker (the new prompt is the next turn).
-            (!send_now_cancel).then(|| {
-                crate::app::turn_completion::cancelled_turn_event(
-                    pending.cancellation_category.as_deref(),
-                    elapsed,
-                )
-            })
+            Some(crate::app::turn_completion::cancelled_turn_event(
+                pending.cancellation_category.as_deref(),
+                elapsed,
+            ))
         } else {
             match pending.stop_reason.as_deref() {
                 // Rate limits drive a dedicated driver UX via the retry
@@ -477,17 +436,6 @@ pub(crate) fn reconcile_overdue_turn_ends(app: &mut AppView) -> Option<Vec<Effec
         }
         agent.cron_task_id = None;
 
-        // FIFO handoff (mirrors the PromptResponse arm): adopt the next
-        // server-authoritative running prompt now that the slot is free.
-        if let Some(p) = pending_adoption
-            && agent.session.current_prompt_id.is_none()
-        {
-            if p.prompt_id != pending.prompt_id && agent.should_adopt_running_prompt(&p.prompt_id) {
-                let _ = apply_turn_start_shim(agent, p.prompt_id, p.text, &p.kind, p.combined_texts);
-            } else {
-                agent.discard_pending_adoption_updates(&p.prompt_id);
-            }
-        }
         let drain = maybe_drain_queue(agent);
         effects.extend(drain.effects);
     }

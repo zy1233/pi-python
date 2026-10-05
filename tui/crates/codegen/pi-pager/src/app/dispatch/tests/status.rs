@@ -2,65 +2,6 @@
 
 use super::*;
 
-/// Regression (Steer turn-end race): when this client is briefly Idle
-/// (`is_turn_running() == false`, `current_prompt_id` cleared) but the server
-/// still has queued prompts — visible as a non-empty `shared_queue` mirror —
-/// a newly-sent prompt must route to the SERVER (immediate-send), NOT be
-/// locally drained as a phantom running turn. The failure mode: a
-/// `send_route_plain immediate=false is_turn_running=false shared_queue_len=5`
-/// path taking `local_drain`, leaving the prompt shown running on the sender
-/// while it was actually queued behind the existing entries on the agent and
-/// every other client.
-#[test]
-fn send_while_idle_with_nonempty_shared_queue_routes_to_server() {
-    let _steer = SteerFollowUp::enter();
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    // Two prompts already queued on the server (as a broadcast would leave
-    // things): populate the authoritative map AND mirror it into the agent.
-    app.push_optimistic_prompt_echo("test-session", "q1", "a", "prompt");
-    app.push_optimistic_prompt_echo("test-session", "q2", "b", "prompt");
-    {
-        let snapshot = app.shared_prompt_queue("test-session").cloned().unwrap();
-        let agent = app.agents.get_mut(&id).unwrap();
-        // Turn-end window: locally Idle with no current prompt, but the
-        // server's queue (mirrored from the last broadcast) still has work.
-        agent.session.state = AgentState::Idle;
-        agent.session.current_prompt_id = None;
-        agent.shared_queue = snapshot;
-        assert!(agent.session.pending_prompts.is_empty());
-    }
-
-    let effects = dispatch(Action::SendPrompt("c".into()), &mut app);
-
-    // Routed to the server (immediate-send), keyed by a fresh prompt_id.
-    let pid = effects
-        .iter()
-        .find_map(|e| match e {
-            Effect::SendPrompt {
-                text, prompt_id, ..
-            } if text == "c" => Some(prompt_id.clone()),
-            _ => None,
-        })
-        .unwrap_or_else(|| panic!("expected immediate SendPrompt for 'c', got {effects:?}"));
-    // Did NOT start a local turn or adopt "c" as the running prompt.
-    assert!(
-        !app.agents[&id].session.state.is_turn_running(),
-        "must not promote 'c' to a local running turn"
-    );
-    assert!(
-        app.agents[&id].session.current_prompt_id.is_none(),
-        "must not set current_prompt_id locally for a server-queued prompt"
-    );
-    // Echoed into the shared queue BEHIND the existing entries (position 3).
-    let q = app
-        .shared_prompt_queue("test-session")
-        .expect("optimistic echo present");
-    assert_eq!(q.len(), 3, "c queued behind q1, q2");
-    assert_eq!(q.last().map(|e| e.id.as_str()), Some(pid.as_str()));
-    assert_eq!(q.last().map(|e| e.text.as_str()), Some("c"));
-}
-
 // ── coding_data_sharing dispatch tests ───
 //
 // The dispatcher uses **optimistic + rollback**, matching the

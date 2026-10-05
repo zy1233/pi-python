@@ -5,7 +5,6 @@
 //! - Spinner (left, slowed to ~7.5fps)
 //! - Activity label (colored per activity type, truncates if needed)
 //! - Phase timer `Xs` (gray, never truncates)
-//! - Queued-send hint `· N queued, Enter to send now` (gray, sendable waits only)
 //! - Fill space
 //! - Turn timer `Xm Ys` and optional token count `⇣Nk` (right-aligned, gray)
 //! - Cancel button `[stop]` (right-aligned, red on hover)
@@ -21,7 +20,7 @@ use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 use pi_workspace::permission::mcp_pretty_name_if_qualified;
 
-use crate::acp::tracker::{TurnActivity, WaitingReason};
+use crate::acp::tracker::TurnActivity;
 use crate::app::agent::{AgentCommand, AgentState};
 use crate::app::agent_view::McpInitProgress;
 use crate::render::line_utils::truncate_str;
@@ -30,12 +29,6 @@ use crate::theme::Theme;
 /// Show each spinner frame for this many animation ticks.
 /// At ~30fps, 4 ticks = ~133ms per frame = ~7.5 spinner fps.
 pub(crate) const SPINNER_DIVISOR: u64 = 4;
-
-/// Show each monitor-pulse frame for this many animation ticks — twice the
-/// [`SPINNER_DIVISOR`] dwell (~3.75 fps). The idle still-running cue should
-/// breathe calmly rather than read like the active turn spinner, so its
-/// `○ ◎ ◉ ◎` cycle runs at roughly half the speed (~1.07s per loop).
-pub(crate) const MONITOR_PULSE_DIVISOR: u64 = 8;
 
 /// Pulse speed for every "waiting on you" diamond — the drain-blocked
 /// status, the pending-user-input status, and the plan-approval status
@@ -70,7 +63,7 @@ pub(crate) fn pending_diamond_color(theme: &Theme, accent: Color, tick: u64) -> 
 #[derive(Debug, Default)]
 pub struct TurnStatusOutput {
     /// Hit area for the cancel button, if rendered.
-    /// `None` when the button is not shown (idle, parked, drain-blocked).
+    /// `None` when the button is not shown (idle, drain-blocked).
     pub cancel_button: Option<Rect>,
 }
 
@@ -81,27 +74,6 @@ pub struct TurnStatusOutput {
 pub struct MouseButtons {
     /// Whether the mouse is over the `[stop]` cancel button.
     pub cancel_hovered: bool,
-}
-
-/// Whether the turn is blocked in a wait the shell aborts as soon as the
-/// user sends a message (`get_task_output` with `timeout_ms`, `wait_tasks`,
-/// `Await*` — mirrors the shell's blocking waits, whose send-now routing
-/// cancels the blocked turn and runs the new message next). Typing is
-/// actionable during these, which is what the parked-wait rendering
-/// (`AgentView::is_parked_on_sendable_wait` / `renders_parked`) builds on.
-///
-/// `Model` waits stay excluded — the model is actively producing the turn, so
-/// a message typed there queues behind real work. Pure predicate over the
-/// resolved activity; no turn-lifecycle side effects.
-pub fn is_sendable_wait(activity: &Option<TurnActivity>) -> bool {
-    matches!(
-        activity,
-        Some(TurnActivity::Waiting(
-            WaitingReason::TaskOutput { waits: true, .. }
-                | WaitingReason::TasksComplete
-                | WaitingReason::Sleep
-        ))
-    )
 }
 
 /// Inputs to [`render_turn_status`] — one frame's worth of turn state.
@@ -120,13 +92,9 @@ pub struct TurnStatusArgs<'a> {
     pub mcp_init_progress: Option<&'a McpInitProgress>,
     pub is_bash_turn: bool,
     pub is_pending_user_input: bool,
-    /// Parked on a sendable wait (`AgentView::renders_parked`).
-    pub parked: bool,
     /// Transparent right-side background so the row blends with the
     /// terminal's own background (minimal mode).
     pub flat_background: bool,
-    pub held_queue: usize,
-    pub held_queue_top_sendable: bool,
 }
 
 /// Render the turn status line into the given area.
@@ -150,10 +118,7 @@ pub fn render_turn_status(
         mcp_init_progress,
         is_bash_turn,
         is_pending_user_input,
-        parked,
         flat_background,
-        held_queue,
-        held_queue_top_sendable,
     } = args;
     // Resolve the mouse affordances: a keyboard-only host (`None`) suppresses
     // the button and reports no hover.
@@ -198,36 +163,8 @@ pub fn render_turn_status(
         return TurnStatusOutput::default();
     }
 
-    // Parked: persistent cue (not scrollback — it must never scroll away).
-    // Lower priority than the starting-session and drain-blocked cues above.
-    // Parked never falls through to the running-turn chrome
-    // (spinner/timers/[stop]) — the wait aborts the moment the user types,
-    // so that chrome would lie. An idle row with nothing parked is blank.
-    if state.is_idle() || parked {
-        if parked {
-            // Parked with held queued rows: the queued hint IS the
-            // input-semantics story (Enter acts on the queue immediately), so
-            // it replaces the generic interrupt copy.
-            let parked_suffix = if held_queue > 0 && held_queue_top_sendable {
-                format!(" \u{00b7} {held_queue} queued, Enter to send now")
-            } else if held_queue > 0 {
-                format!(" \u{00b7} {held_queue} queued")
-            } else {
-                " \u{00b7} send a message to interrupt".to_string()
-            };
-            let cue = format!("waiting{parked_suffix}");
-            // Pulsing concentric circle (○ ◎ ◉ ◎) on a calm ambient cadence:
-            // the agent is idle, so this breath runs slower than the active
-            // turn spinner (see MONITOR_PULSE_DIVISOR).
-            let frames = crate::glyphs::monitor_icon_frames();
-            let frame_idx = (tick / MONITOR_PULSE_DIVISOR) as usize % frames.len();
-            let icon = format!("{} ", frames[frame_idx]);
-            let spans = vec![
-                Span::styled(icon, Style::default().fg(theme.accent_system)),
-                Span::styled(cue, Style::default().fg(theme.gray)),
-            ];
-            buf.set_line(area.x, area.y, &Line::from(spans), area.width);
-        }
+    // Nothing to show while idle.
+    if state.is_idle() {
         return TurnStatusOutput::default();
     }
 
@@ -330,7 +267,7 @@ pub fn render_turn_status(
         .remove_modifier(Modifier::all());
 
     // Available width for activity label (only the label truncates)
-    // Layout: spinner + label + phase_timer + queued_hint + gap(1) + turn_timer + cancel
+    // Layout: spinner + label + phase_timer + gap(1) + turn_timer + cancel
     let min_gap = 1;
     let available_for_label = (area.width as usize)
         .saturating_sub(spinner_width)
@@ -338,7 +275,7 @@ pub fn render_turn_status(
         .saturating_sub(min_gap)
         .saturating_sub(right_width);
 
-    // ── Render left side: spinner + label (truncated) + phase_timer + queued_hint ──
+    // ── Render left side: spinner + label (truncated) + phase_timer ──
     let mut left_spans: Vec<Span<'static>> = Vec::with_capacity(5);
 
     // Spinner color: usually inherits the activity color (green for tools,
@@ -356,7 +293,6 @@ pub fn render_turn_status(
     left_spans.push(Span::styled(spinner_str, spinner_style));
 
     // Activity label (potentially truncated)
-    let mut queued_hint: Option<Span<'static>> = None;
     if is_tool {
         if let Some(TurnActivity::ToolRunning { title, description }) = activity {
             if is_asking {
@@ -417,39 +353,13 @@ pub fn render_turn_status(
             }
         }
     } else {
-        // Sendable wait holding queued messages: the persistent inline hint
-        // saying why the queue is paused and how to send anyway. On the status
-        // row (not an ephemeral tip) so it stays visible for the whole wait,
-        // and dropped before the label truncates on a narrow terminal.
-        // "Enter to send now" is advertised only when Enter would actually
-        // send the top row (bash / client-expanded local rows refuse with a
-        // toast — see `AgentView::held_queue_top_sendable`).
-        let suffix = if held_queue > 0 && is_sendable_wait(activity) {
-            if held_queue_top_sendable {
-                format!(" · {held_queue} queued, Enter to send now")
-            } else {
-                format!(" · {held_queue} queued")
-            }
-        } else {
-            String::new()
-        };
-        if !suffix.is_empty() && label.width() + suffix.width() <= available_for_label {
-            left_spans.push(Span::styled(label.clone(), activity_style));
-            queued_hint = Some(Span::styled(suffix, Style::default().fg(theme.gray)));
-        } else {
-            let display = truncate_str(&label, available_for_label);
-            left_spans.push(Span::styled(display, activity_style));
-        }
+        let display = truncate_str(&label, available_for_label);
+        left_spans.push(Span::styled(display, activity_style));
     }
 
     // Phase timer (gray, never truncates)
     if !phase_timer_str.is_empty() {
         left_spans.push(Span::styled(phase_timer_str, timer_style));
-    }
-
-    // After the phase timer, so the elapsed time reads as the wait's, not the hint's.
-    if let Some(hint) = queued_hint {
-        left_spans.push(hint);
     }
 
     // Render left side
@@ -640,22 +550,14 @@ fn render_starting_session(
 /// is blocked (agent idle, waiting on user edit), while the MCP startup seed
 /// is showing "Starting session…" (a fresh `total == 0` seed).
 ///
-/// A parked turn always shows the row.
-///
 /// Real MCP progress (`total > 0`) renders as a compact chip in the top status
 /// bar instead, so it does not affect this row.
 pub fn should_show(
     state: &AgentState,
     drain_blocked: bool,
     mcp_init_progress: Option<&McpInitProgress>,
-    parked: bool,
 ) -> bool {
-    if parked {
-        return true;
-    }
-    !state.is_idle()
-        || drain_blocked
-        || starting_session_visible(mcp_init_progress)
+    !state.is_idle() || drain_blocked || starting_session_visible(mcp_init_progress)
 }
 
 /// Format a duration for the turn/phase timer.
@@ -701,38 +603,6 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-
-    /// Sendable waits = exactly the wait reasons the shell aborts on a queued
-    /// user prompt (blocking task-output / wait_tasks / Await — all take the
-    /// send-now path). Model waits — where typing only queues behind the
-    /// actively-streaming turn — and non-wait activities keep the busy
-    /// spinner.
-    #[test]
-    fn sendable_wait_matches_shell_interruptible_waits() {
-        let task_wait = |waits| {
-            Some(TurnActivity::Waiting(WaitingReason::TaskOutput {
-                task_ids: vec!["t-1".into()],
-                subject: Some("sleep 300".into()),
-                waits,
-            }))
-        };
-        assert!(is_sendable_wait(&task_wait(true)));
-        assert!(
-            !is_sendable_wait(&task_wait(false)),
-            "instant polls are not blocking waits"
-        );
-        assert!(is_sendable_wait(&Some(TurnActivity::Waiting(
-            WaitingReason::TasksComplete
-        ))));
-        assert!(is_sendable_wait(&Some(TurnActivity::Waiting(
-            WaitingReason::Sleep
-        ))));
-        assert!(!is_sendable_wait(&Some(TurnActivity::Waiting(
-            WaitingReason::Model
-        ))));
-        assert!(!is_sendable_wait(&Some(TurnActivity::Thinking)));
-        assert!(!is_sendable_wait(&None));
-    }
 
     #[test]
     fn format_subsecond() {
@@ -822,24 +692,9 @@ mod tests {
 
     #[test]
     fn should_show_when_running() {
-        assert!(should_show(
-            &AgentState::TurnRunning,
-            false,
-            None,
-            false
-        ));
-        assert!(should_show(
-            &AgentState::TurnCancelling,
-            false,
-            None,
-            false
-        ));
-        assert!(!should_show(
-            &AgentState::Idle,
-            false,
-            None,
-            false
-        ));
+        assert!(should_show(&AgentState::TurnRunning, false, None));
+        assert!(should_show(&AgentState::TurnCancelling, false, None));
+        assert!(!should_show(&AgentState::Idle, false, None));
     }
 
     /// Cancelling keeps `[stop]` clickable (the retry affordance for a lost
@@ -862,10 +717,7 @@ mod tests {
                 mcp_init_progress: None,
                 is_bash_turn: false,
                 is_pending_user_input: false,
-                parked: false,
                 flat_background: false,
-                held_queue: 0,
-                held_queue_top_sendable: false,
             },
         );
         assert!(
@@ -881,17 +733,7 @@ mod tests {
 
     #[test]
     fn should_show_when_drain_blocked() {
-        assert!(should_show(
-            &AgentState::Idle,
-            true,
-            None,
-            false
-        ));
-    }
-
-    #[test]
-    fn should_show_parked_always() {
-        assert!(should_show(&AgentState::TurnRunning, false, None, true));
+        assert!(should_show(&AgentState::Idle, true, None));
     }
 
     #[test]
@@ -902,12 +744,7 @@ mod tests {
             connected: 0,
             started_at: Instant::now(),
         };
-        assert!(should_show(
-            &AgentState::Idle,
-            false,
-            Some(&seed),
-            false
-        ));
+        assert!(should_show(&AgentState::Idle, false, Some(&seed)));
 
         // Real progress (total > 0) is the top-bar chip — it must NOT drive
         // this row.
@@ -916,12 +753,7 @@ mod tests {
             connected: 1,
             started_at: Instant::now(),
         };
-        assert!(!should_show(
-            &AgentState::Idle,
-            false,
-            Some(&connecting),
-            false
-        ));
+        assert!(!should_show(&AgentState::Idle, false, Some(&connecting)));
 
         // An expired seed must not drive the row either.
         let expired = McpInitProgress {
@@ -929,12 +761,7 @@ mod tests {
             connected: 0,
             started_at: Instant::now() - McpInitProgress::SEED_EXPIRE - Duration::from_secs(1),
         };
-        assert!(!should_show(
-            &AgentState::Idle,
-            false,
-            Some(&expired),
-            false
-        ));
+        assert!(!should_show(&AgentState::Idle, false, Some(&expired)));
     }
 
     /// Collect every rendered glyph in `area` into a single string.
@@ -963,10 +790,7 @@ mod tests {
             mcp_init_progress: None,
             is_bash_turn: false,
             is_pending_user_input: false,
-            parked: false,
             flat_background: false,
-            held_queue: 0,
-            held_queue_top_sendable: false,
         }
     }
 
@@ -991,91 +815,12 @@ mod tests {
         render_row_text(args, 60)
     }
 
-    /// Invoke `render_turn_status` for a PARKED running turn (the stopped
-    /// look) at animation tick `tick`.
-    fn render_parked_at_tick(tick: u64) -> String {
-        let activity = Some(TurnActivity::Waiting(WaitingReason::TasksComplete));
-        let mut args = idle_args();
-        args.state = &AgentState::TurnRunning;
-        args.activity = &activity;
-        args.turn_elapsed = Some(Duration::from_secs(5));
-        args.parked = true;
-        args.tick = tick;
-        render_row_text(args, 72)
-    }
-
-    #[test]
-    fn parked_renders_waiting_cue_not_running_chrome() {
-        // The wait aborts as soon as the user types, so busy chrome would lie.
-        let text = render_parked_at_tick(0);
-        assert!(
-            text.contains("waiting \u{00b7} send a message to interrupt"),
-            "parked must render the waiting interrupt cue, got: {text:?}"
-        );
-        assert!(
-            !text.contains("Waiting") && !text.contains("[stop]"),
-            "parked must not render the running-turn chrome, got: {text:?}"
-        );
-    }
-
-    #[test]
-    fn parked_with_held_queue_renders_queued_hint() {
-        // The queued hint replaces the interrupt copy (Enter = send-now).
-        let activity = Some(TurnActivity::Waiting(WaitingReason::TasksComplete));
-        let mut args = idle_args();
-        args.state = &AgentState::TurnRunning;
-        args.activity = &activity;
-        args.parked = true;
-        args.held_queue = 1;
-        args.held_queue_top_sendable = true;
-        let text = render_row_text(args, 80);
-        assert!(
-            text.contains("1 queued, Enter to send now"),
-            "parked with a held row must advertise the queued hint, got: {text:?}"
-        );
-        assert!(
-            !text.contains("send a message to interrupt"),
-            "queued hint replaces the interrupt copy, got: {text:?}"
-        );
-    }
-
     #[test]
     fn idle_renders_nothing() {
         let text = render_row_text(idle_args(), 60);
         assert!(
             text.trim().is_empty(),
             "idle with nothing pending must render nothing, got: {text:?}"
-        );
-    }
-
-    #[test]
-    fn queued_hint_renders_after_phase_timer() {
-        let activity = Some(TurnActivity::Waiting(WaitingReason::TasksComplete));
-        let mut args = idle_args();
-        args.state = &AgentState::TurnRunning;
-        args.activity = &activity;
-        args.activity_started_at = Some(Instant::now() - Duration::from_secs(359));
-        args.held_queue = 1;
-        args.held_queue_top_sendable = true;
-        let text = render_row_text(args, 80);
-        assert!(
-            text.contains("Waiting on tasks… 5m59s · 1 queued, Enter to send now"),
-            "phase timer must sit between the wait label and the queued hint, got: {text:?}"
-        );
-    }
-
-    #[test]
-    fn parked_icon_animates_across_ticks() {
-        // The leading glyph cycles through monitor_icon_frames() as `tick`
-        // advances, so two ticks a full frame apart (0 vs MONITOR_PULSE_DIVISOR)
-        // must render different icons — proving the cue is animated, not static.
-        let frame0 = render_parked_at_tick(0);
-        let frame1 = render_parked_at_tick(MONITOR_PULSE_DIVISOR);
-        let icon0 = frame0.chars().next();
-        let icon1 = frame1.chars().next();
-        assert_ne!(
-            icon0, icon1,
-            "parked icon must animate between frames, got {frame0:?} vs {frame1:?}"
         );
     }
 

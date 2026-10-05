@@ -46,16 +46,12 @@ fn external_prompt_editor_arms_typed_request_and_preserves_composer_modes() {
         let effects = dispatch(Action::EditPromptExternal, &mut app);
         assert!(effects.is_empty());
         let request = app.pending_editor.take().expect("editor request");
-        match request {
-            crate::app::external_editor::PendingEditorRequest::PromptDraft {
-                agent_id,
-                original_text,
-            } => {
-                assert_eq!(agent_id, id);
-                assert_eq!(original_text, "draft with\nnewlines");
-            }
-            other => panic!("expected prompt draft request, got {other:?}"),
-        }
+        let crate::app::external_editor::PendingEditorRequest::PromptDraft {
+            agent_id,
+            original_text,
+        } = request;
+        assert_eq!(agent_id, id);
+        assert_eq!(original_text, "draft with\nnewlines");
         assert_eq!(app.agents[&id].prompt_input_mode, mode);
         assert_eq!(app.agents[&id].prompt.text(), "draft with\nnewlines");
     }
@@ -96,7 +92,6 @@ fn external_prompt_editor_arms_in_fullscreen_and_refuses_owned_input() {
     app.agents.get_mut(&id).unwrap().prompt_mode = PromptMode::EditingQueued {
         id: 1,
         original: "queued".to_owned(),
-        server_id: None,
         kind: crate::app::agent::QueueEntryKind::Prompt,
     };
     let _ = dispatch(Action::EditPromptExternal, &mut app);
@@ -483,28 +478,6 @@ fn follow_up_chip_does_not_execute_exit_alias() {
     assert!(
         matches!(&effects[..], [Effect::SendPrompt { text, .. }] if text == "quit"),
         "bare 'quit' chip must be a literal prompt, got {effects:?}"
-    );
-}
-#[test]
-fn chip_submit_while_running_clears_follow_up_chips() {
-    let _steer = SteerFollowUp::enter();
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.apply_follow_ups("resp-1".into(), vec!["Summarize".into()]);
-        assert!(agent.follow_ups.is_some(), "precondition: chips shown");
-        agent.session.state = AgentState::TurnRunning;
-    }
-    let effects = dispatch(Action::SubmitFollowUp("Summarize".into()), &mut app);
-    assert!(
-        matches!(&effects[..], [Effect::SendPrompt { text, .. }] if text == "Summarize"),
-        "chip must immediate-send while running, got {effects:?}"
-    );
-    assert_eq!(app.agents[&id].session.queue_len(), 0);
-    assert!(
-        app.agents[&id].follow_ups.is_none(),
-        "immediate-send chip path must clear chips"
     );
 }
 #[test]

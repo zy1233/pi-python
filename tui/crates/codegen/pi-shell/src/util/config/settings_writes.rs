@@ -1,50 +1,10 @@
 use super::persist::update_config;
 use anyhow::Result;
-use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
-use std::time::UNIX_EPOCH;
 
 // ---------------------------------------------------------------------------
 // Settings helpers — typed disk-write wrappers for each setting.
 // All route through `update_config` → `merge_section` → `save_config`.
 // ---------------------------------------------------------------------------
-
-// Process-wide cache for `[ui].follow_up_behavior == "steer"`.
-//
-// The shell agent is a separate process from the pager, so an in-process
-// atomic updated in the pager never reaches the turn loop. Key the cache on
-// config.toml mtime instead. A live settings write invalidates on the next
-// safe-point drain (cheap stat; full parse only when the file changed).
-//
-// 0 = unknown, 1 = queue, 2 = steer.
-const FOLLOW_UP_CACHE_UNKNOWN: u8 = 0;
-const FOLLOW_UP_CACHE_QUEUE: u8 = 1;
-const FOLLOW_UP_CACHE_STEER: u8 = 2;
-static FOLLOW_UP_STEER_CACHE: AtomicU8 = AtomicU8::new(FOLLOW_UP_CACHE_UNKNOWN);
-static FOLLOW_UP_STEER_MTIME_NS: AtomicU64 = AtomicU64::new(0);
-
-/// Nanoseconds since epoch for the user `config.toml` mtime, or 0 if missing.
-fn follow_up_config_mtime_ns() -> u64 {
-    let path = crate::util::grok_home::grok_home().join("config.toml");
-    std::fs::metadata(path)
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0)
-}
-
-/// Update the hot-path Steer cache (same-process tests / after a local write).
-pub fn set_follow_up_steer_cache(steer: bool) {
-    FOLLOW_UP_STEER_CACHE.store(
-        if steer {
-            FOLLOW_UP_CACHE_STEER
-        } else {
-            FOLLOW_UP_CACHE_QUEUE
-        },
-        Ordering::Relaxed,
-    );
-    FOLLOW_UP_STEER_MTIME_NS.store(follow_up_config_mtime_ns(), Ordering::Relaxed);
-}
 
 /// Persist `[ui].compact_mode` via `update_config`.
 pub async fn set_compact_mode(value: bool) -> Result<()> {
@@ -76,13 +36,6 @@ pub async fn set_combine_queued_prompts(value: bool) -> Result<()> {
     update_config(|cfg| cfg.ui.combine_queued_prompts = Some(value)).await
 }
 
-/// Persist `[ui].follow_up_behavior` (`"queue"` | `"steer"`).
-pub async fn set_follow_up_behavior(value: String) -> Result<()> {
-    // Keep the hot-path cache in sync before the disk write returns.
-    set_follow_up_steer_cache(value == "steer");
-    update_config(|cfg| cfg.ui.follow_up_behavior = Some(value)).await
-}
-
 /// Persist `[ui].simple_mode` via `update_config`. Same `Option<bool>`
 /// shape as `show_timestamps`.
 pub async fn set_simple_mode(value: bool) -> Result<()> {
@@ -103,11 +56,6 @@ pub async fn set_contextual_hint_plan_mode(value: bool) -> Result<()> {
 /// Persist `[ui.contextual_hints].image_input` via `update_config`.
 pub async fn set_contextual_hint_image_input(value: bool) -> Result<()> {
     update_config(|cfg| cfg.ui.contextual_hints.image_input = Some(value)).await
-}
-
-/// Persist `[ui.contextual_hints].send_now` via `update_config`.
-pub async fn set_contextual_hint_send_now(value: bool) -> Result<()> {
-    update_config(|cfg| cfg.ui.contextual_hints.send_now = Some(value)).await
 }
 
 /// Persist `[ui.contextual_hints].small_screen` via `update_config`.

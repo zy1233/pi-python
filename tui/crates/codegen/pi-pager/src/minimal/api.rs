@@ -494,21 +494,6 @@ pub fn resolve_turn_activity(v: &AgentView) -> Option<TurnActivity> {
     v.resolve_turn_activity()
 }
 
-/// [`AgentView::renders_parked`].
-pub fn renders_parked(v: &AgentView) -> bool {
-    v.renders_parked()
-}
-
-/// [`AgentView::held_queue_count`].
-pub fn held_queue_count(v: &AgentView) -> usize {
-    v.held_queue_count()
-}
-
-/// [`AgentView::held_queue_top_sendable`].
-pub fn held_queue_top_sendable(v: &AgentView) -> bool {
-    v.held_queue_top_sendable()
-}
-
 /// [`AgentView::sync_pending_user_input_marks`].
 pub fn sync_pending_user_input_marks(v: &mut AgentView) {
     v.sync_pending_user_input_marks();

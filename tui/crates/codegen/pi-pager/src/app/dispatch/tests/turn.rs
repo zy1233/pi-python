@@ -2,18 +2,16 @@
 
 use super::*;
 
-/// Regression (Steer): a queued prompt's parked `session/prompt` RPC
-/// can resolve as an *error* — e.g. its `respond_to` is dropped on the
-/// agent when the prompt is removed from the shared queue, surfacing as
-/// `Internal error: "session failed to respond"`. An `acp::Error` carries
-/// no `promptId`, so before the Err-arm gate this error was misattributed
-/// to the running turn and rendered as a spurious "Turn failed", detonating
-/// an unrelated in-flight turn. The handler now gates the Err arm on the
-/// `prompt_id` the pager minted for that RPC: an error whose id is NOT the
-/// running turn is discarded; the running turn is left untouched.
+/// Regression: a `session/prompt` RPC that does not belong to the running turn
+/// can resolve as an *error* (e.g. `Internal error: "session failed to
+/// respond"`). An `acp::Error` carries no `promptId`, so before the Err-arm
+/// gate this error was misattributed to the running turn and rendered as a
+/// spurious "Turn failed", detonating an unrelated in-flight turn. The handler
+/// gates the Err arm on the `prompt_id` the pager minted for that RPC: an
+/// error whose id is NOT the running turn is discarded; the running turn is
+/// left untouched.
 #[test]
-fn queued_prompt_rpc_error_does_not_kill_running_turn() {
-    let _steer = SteerFollowUp::enter();
+fn stale_prompt_rpc_error_does_not_kill_running_turn() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
 
@@ -29,18 +27,13 @@ fn queued_prompt_rpc_error_does_not_kill_running_turn() {
         Some(running_pid.as_str())
     );
 
-    // Second prompt typed while running → immediate server-authoritative
-    // send (queued at the agent). Capture its prompt_id.
-    let effects = dispatch(Action::SendPrompt("queued".into()), &mut app);
-    let queued_pid = match &effects[0] {
-        Effect::SendPrompt { prompt_id, .. } => prompt_id.clone(),
-        other => panic!("expected immediate SendPrompt, got {other:?}"),
-    };
+    // An RPC of some other (already superseded) prompt.
+    let queued_pid = "stale-prompt-id".to_string();
     assert_ne!(running_pid, queued_pid);
 
     let scrollback_before = app.agents[&id].scrollback.len();
 
-    // The queued prompt is removed; its parked RPC resolves Err.
+    // The stale prompt's RPC resolves Err.
     let effects = dispatch(
         Action::TaskComplete(TaskResult::PromptResponse {
             agent_id: id,
@@ -54,11 +47,11 @@ fn queued_prompt_rpc_error_does_not_kill_running_turn() {
     // Discarded: no effects, running turn untouched, no "Turn failed" block.
     assert!(
         effects.is_empty(),
-        "a queued prompt's RPC error must be discarded, got {effects:?}"
+        "a stale prompt's RPC error must be discarded, got {effects:?}"
     );
     assert!(
         app.agents[&id].session.state.is_turn_running(),
-        "the running turn must survive a queued prompt's RPC error"
+        "the running turn must survive a stale prompt's RPC error"
     );
     assert_eq!(
         app.agents[&id].session.current_prompt_id.as_deref(),
@@ -298,7 +291,6 @@ fn lost_cancel_is_resent_while_still_cancelling() {
             prompt_id: "p1".into(),
             stop_reason: Some("cancelled".into()),
             agent_result: None,
-            cancel_trigger: None,
             cancellation_category: None,
             received_at: std::time::Instant::now(),
         });
@@ -352,7 +344,6 @@ fn confirmed_stop_retry_does_not_rearm_auto_resend() {
             prompt_id: "p1".into(),
             stop_reason: Some("cancelled".into()),
             agent_result: None,
-            cancel_trigger: None,
             cancellation_category: None,
             received_at: std::time::Instant::now(),
         });
@@ -481,7 +472,7 @@ fn cancel_after_local_send_during_wake_does_not_arm_resend() {
             prompt_id: "task-completed-bg1".into(),
             cancel_sent: false,
         });
-        agent.start_turn_boundary(Some("user-1"));
+        agent.start_turn_boundary();
         agent.session.current_prompt_id = Some("user-1".into());
         agent.cancel_trigger_hint = Some(CancelTrigger::Esc);
     }
@@ -633,80 +624,6 @@ fn stop_click_cancels_running_wake_turn() {
 }
 
 #[test]
-fn cancel_turn_leaves_shared_queue_for_agent_to_drain() {
-    use crate::app::prompt_queue::QueueEntryWire;
-    // Prompts typed while a turn runs live on the server-authoritative
-    // shared queue (broadcast to all attached clients). The agent owns the
-    // drain: on cancel the FRONT queued prompt runs next (promoted
-    // server-side), so the pager must NOT pull it back into the input or
-    // mutate the queue locally — the `pi/queue/changed` rebroadcast is the
-    // source of truth.
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.session.state = AgentState::TurnRunning;
-        agent.shared_queue = vec![
-            QueueEntryWire {
-                id: "q1".into(),
-                version: 3,
-                owner: None,
-                last_editor: None,
-                kind: "prompt".into(),
-                text: "first queued".into(),
-                position: 0,
-                combined_texts: None,
-            },
-            QueueEntryWire {
-                id: "q2".into(),
-                version: 4,
-                owner: None,
-                last_editor: None,
-                kind: "prompt".into(),
-                text: "second queued".into(),
-                position: 1,
-                combined_texts: None,
-            },
-        ];
-        assert!(agent.prompt.text().is_empty());
-    }
-
-    let effects = dispatch(Action::CancelTurn, &mut app);
-
-    // The input box is left untouched — the front queued prompt is NOT
-    // pulled back into it (it runs next on the agent instead).
-    assert!(
-        app.agents[&id].prompt.text().is_empty(),
-        "cancel must not restore a queued prompt into the input"
-    );
-    // The local mirror is left intact; the agent's rebroadcast drives the
-    // queue, so the pager must not predict the post-cancel order.
-    let q = &app.agents[&id].shared_queue;
-    assert_eq!(
-        q.len(),
-        2,
-        "cancel must not mutate the shared queue locally"
-    );
-    assert_eq!(q[0].id, "q1");
-    assert_eq!(q[1].id, "q2");
-    // A plain CancelTurn is emitted (no queued-prompt id threaded, no
-    // separate QueueRemove) — the agent tears down the running turn and
-    // promotes q1 as the next turn.
-    assert!(
-        effects
-            .iter()
-            .any(|e| matches!(e, Effect::CancelTurn { .. })),
-        "must emit CancelTurn, got {effects:?}"
-    );
-    assert!(
-        !effects
-            .iter()
-            .any(|e| matches!(e, Effect::QueueRemove { .. })),
-        "must NOT emit a separate QueueRemove on cancel"
-    );
-}
-
-#[test]
 fn cancel_turn_when_idle_does_nothing() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
@@ -787,47 +704,6 @@ fn reconcile_finishes_cancelling_turn_after_grace() {
     );
 }
 
-/// A lost-RPC reconcile for a send-now cancel (`_meta.cancelTrigger: "send_now"`) pushes no marker.
-#[test]
-fn reconcile_suppresses_send_now_cancel_marker() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.session.state = AgentState::TurnRunning;
-        agent.session.current_prompt_id = Some("pid-stuck".into());
-    }
-    arm_reconcile_with_trigger(
-        &mut app,
-        id,
-        "pid-stuck",
-        "cancelled",
-        Some("send_now"),
-        TURN_END_RECONCILE_GRACE + std::time::Duration::from_secs(1),
-    );
-
-    let fired = reconcile_overdue_turn_ends(&mut app);
-
-    assert!(fired.is_some(), "the overdue reconcile must still fire");
-    let agent = &app.agents[&id];
-    assert!(agent.session.state.is_idle(), "the turn still finishes");
-    let has_marker = (0..agent.scrollback.len()).any(|i| {
-        matches!(
-            agent.scrollback.entry(i).map(|e| &e.block),
-            Some(RenderBlock::SessionEvent(ev))
-                if matches!(
-                    ev.event,
-                    SessionEvent::TurnCancelled { .. } | SessionEvent::TurnCompleted { .. }
-                )
-        )
-    });
-    assert!(
-        !has_marker,
-        "a send-now cancel reconcile must not push a cancelled (or substitute \
-         completed) marker"
-    );
-}
-
 /// A lost-RPC reconcile for a hook-denied cancel consumes the parked
 /// `cancellationCategory` and renders the blocked-by-a-hook marker, not
 /// "cancelled by user".
@@ -845,7 +721,6 @@ fn reconcile_renders_hook_denied_marker_from_parked_category() {
         id,
         "pid-stuck",
         "cancelled",
-        None,
         Some(crate::app::turn_completion::HOOK_DENIED_CATEGORY),
         TURN_END_RECONCILE_GRACE + std::time::Duration::from_secs(1),
     );
@@ -865,43 +740,6 @@ fn reconcile_renders_hook_denied_marker_from_parked_category() {
     assert!(
         has_blocked_marker,
         "the reconcile must surface the blocked-by-a-hook marker"
-    );
-}
-
-/// Older-shell fallback on the reconcile rail: no wire trigger, armed expectation.
-#[test]
-fn reconcile_suppresses_expected_send_now_cancel_without_wire_trigger() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.session.state = AgentState::TurnRunning;
-        agent.session.current_prompt_id = Some("pid-stuck".into());
-        agent.expect_send_now_cancel = Some("p-next".into());
-    }
-    arm_reconcile(
-        &mut app,
-        id,
-        "pid-stuck",
-        "cancelled",
-        TURN_END_RECONCILE_GRACE + std::time::Duration::from_secs(1),
-    );
-
-    let fired = reconcile_overdue_turn_ends(&mut app);
-
-    assert!(fired.is_some());
-    let agent = &app.agents[&id];
-    let has_cancelled = (0..agent.scrollback.len()).any(|i| {
-        matches!(
-            agent.scrollback.entry(i).map(|e| &e.block),
-            Some(RenderBlock::SessionEvent(ev))
-                if matches!(ev.event, SessionEvent::TurnCancelled { .. })
-        )
-    });
-    assert!(!has_cancelled, "expected send-now cancel renders no marker");
-    assert!(
-        agent.expect_send_now_cancel.is_none(),
-        "the expectation is consumed by the reconcile"
     );
 }
 
@@ -961,53 +799,6 @@ fn reconcile_drops_stale_marker_when_turn_already_resolved() {
     assert_eq!(agent.scrollback.len(), scrollback_before);
 }
 
-#[test]
-fn reconcile_applies_stashed_running_adoption() {
-    // The failing sequence: queued prompt promoted server-side while the
-    // cancelled turn's response was lost. The reconcile must hand the pane
-    // to the promoted prompt (turn-start shim), not strand it Idle.
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.session.state = AgentState::TurnCancelling;
-        agent.session.current_prompt_id = Some("pid-stuck".into());
-    }
-    // The leader's running_prompt_id broadcast arrived mid-teardown and
-    // was stashed (same as the PromptResponse path).
-    app.pending_running_adoptions.insert(
-        id,
-        crate::app::acp_handler::PendingRunningAdoption {
-            prompt_id: "pid-next".into(),
-            text: Some("queued prompt".into()),
-            combined_texts: None,
-            kind: "prompt".into(),
-        },
-    );
-    arm_reconcile(
-        &mut app,
-        id,
-        "pid-stuck",
-        "cancelled",
-        TURN_END_RECONCILE_GRACE + std::time::Duration::from_secs(1),
-    );
-
-    let fired = reconcile_overdue_turn_ends(&mut app);
-
-    assert!(fired.is_some());
-    let agent = &app.agents[&id];
-    assert_eq!(
-        agent.session.current_prompt_id.as_deref(),
-        Some("pid-next"),
-        "the stashed adoption must be applied after the reconcile"
-    );
-    assert!(
-        matches!(agent.session.state, AgentState::TurnRunning),
-        "the promoted prompt is the new running turn"
-    );
-    assert!(!app.pending_running_adoptions.contains_key(&id));
-}
-
 /// The reconcile rail's `stop_reason == "error"` arm: formats the raw
 /// agent_result and skips the marker when a dedicated banner already
 /// explains the failure.
@@ -1033,7 +824,6 @@ fn reconcile_error_formats_marker_and_defers_to_banner() {
                 prompt_id: "pid-stuck".into(),
                 stop_reason: Some("error".into()),
                 agent_result: Some("boom".into()),
-                cancel_trigger: None,
                 cancellation_category: None,
                 received_at: std::time::Instant::now()
                     - (TURN_END_RECONCILE_GRACE + std::time::Duration::from_secs(1)),

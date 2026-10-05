@@ -6,9 +6,7 @@
     /// content must render, but the turn must NOT be claimed — no role flip, no
     /// `current_prompt_id`, no `TurnRunning` — otherwise it strands the
     /// turn-status and poisons the slot so later real turns' PromptResponses get
-    /// discarded. (Pairs with the `handle_queue_changed` skip above: together
-    /// they keep synthetic auto-wake turns out of the running slot on BOTH the
-    /// queue-broadcast and the streaming-delta paths.)
+    /// discarded.
     #[test]
     fn synthetic_auto_wake_delta_renders_without_claiming_turn() {
         let mut app = make_app_with_agent("sess-1");
@@ -497,36 +495,6 @@
         );
     }
 
-    /// A stash matching the finishing response's pid is discarded, not re-adopted.
-    #[test]
-    fn own_pid_stash_is_not_readopted_by_its_response() {
-        let mut app = make_app_with_agent("sess-1");
-        let id = AgentId(0);
-        {
-            let agent = app.agents.get_mut(&id).unwrap();
-            agent.session.current_prompt_id = Some("p1".to_string());
-            agent.session.state = AgentState::TurnRunning;
-        }
-        app.pending_running_adoptions.insert(
-            id,
-            crate::app::acp_handler::PendingRunningAdoption {
-                prompt_id: "p1".to_string(),
-                text: Some("first".to_string()),
-                combined_texts: None,
-                kind: "prompt".to_string(),
-            },
-        );
-
-        prompt_response(&mut app, "p1");
-        let agent = app.agents.get(&id).unwrap();
-        assert!(
-            agent.session.state.is_idle(),
-            "must not re-enter TurnRunning"
-        );
-        assert!(agent.session.current_prompt_id.is_none());
-        assert!(!app.pending_running_adoptions.contains_key(&id));
-    }
-
     /// `adopt_running_prompt` must not leave `start_turn`'s user-echo skip
     /// armed: the adopted turn pushed no local user block, so the armed skip
     /// would survive and silently eat the NEXT turn's `UserMessageChunk`
@@ -620,7 +588,7 @@
         // A viewer (attached_as_viewer) watching the driver's turn starts Idle.
         // Adopting the first live delta must flip it to TurnRunning and stamp
         // `turn_started_at` so the turn-in-progress chrome (status line, elapsed
-        // timer, cancel/interject footer hints — all gated on TurnRunning)
+        // timer, cancel footer hint — all gated on TurnRunning)
         // renders. A second chunk must NOT reset `turn_started_at`.
         let mut app = make_app_with_agent("sess-view");
         {

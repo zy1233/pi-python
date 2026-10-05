@@ -1,8 +1,7 @@
 //! `/multiline` -- toggle multiline input mode.
 //!
 //! In multiline mode, Enter inserts a newline and Shift+Enter sends the
-//! prompt (the inverse of normal mode). Empty-composer mid-turn Enter still
-//! force-sends the top queued follow-up (send now), same as normal mode.
+//! prompt (the inverse of normal mode).
 //! Toggled via `Ctrl+M`, this slash command, or the settings modal.
 //!
 //! Dispatches `Action::SetMultilineMode(!current)`. Per-session only

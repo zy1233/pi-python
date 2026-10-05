@@ -562,20 +562,10 @@ impl AgentView {
                     //  - slash_accepted_send: slash dropdown Enter accepted a no-arg
                     //    command and fell through — must send, not insert newline.
                     //  - bash mode: Enter should always send.
-                    //  - empty composer + mid-turn queue: force-send the top row
-                    //    (send-now discoverability). Inserting a blank line on an
-                    //    empty prompt is never useful here; same path as normal mode.
                     if self.multiline_mode
                         && self.prompt_input_mode != PromptInputMode::Bash
                         && !slash_accepted_send
                     {
-                        if matches!(self.prompt_mode, PromptMode::Normal)
-                            && self.prompt.text().trim().is_empty()
-                            && self.session.state.is_turn_running()
-                            && let Some(outcome) = self.try_send_now_queued_from_prompt()
-                        {
-                            return outcome;
-                        }
                         self.prompt.insert_replacing_selection("\n");
                         return InputOutcome::Changed;
                     }
@@ -592,22 +582,6 @@ impl AgentView {
                         let action = action_mode.send_action(text);
                         self.prompt_input_mode = PromptInputMode::Normal;
                         return InputOutcome::Action(action);
-                    }
-                    // Empty (or backslash continuation). Mid-turn + a queued
-                    // follow-up: bare Enter force-sends the top queue row so
-                    // users discover send-now without learning a chord.
-                    // Skip while editing a queued row (edit-mode Enter is
-                    // handled earlier for non-empty; empty must stay a no-op).
-                    // Guard on an actually-empty composer: try_send() also
-                    // returns None after a backslash continuation, which leaves
-                    // the (non-empty) draft in place — that Enter must only
-                    // insert the newline, not fire a queued follow-up.
-                    if matches!(self.prompt_mode, PromptMode::Normal)
-                        && self.prompt.text().trim().is_empty()
-                        && self.session.state.is_turn_running()
-                        && let Some(outcome) = self.try_send_now_queued_from_prompt()
-                    {
-                        return outcome;
                     }
                     // try_send() returned None (empty, backslash continuation)
                     // → backslash continuation mutates widget, need redraw
@@ -1932,7 +1906,7 @@ mod queue_recall_tests {
         agent.handle_prompt_key_for_test(&KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))
     }
 
-    /// Focus lands on the bottom row, not the top one send-now takes.
+    /// Focus lands on the bottom (newest) row.
     #[test]
     fn up_focuses_the_queue_on_its_bottom_row() {
         let mut agent = make_running_agent();
@@ -1984,7 +1958,6 @@ mod queue_recall_tests {
         agent.active_pane = AgentPane::Prompt;
         agent.queue.overlay.focused = false;
         agent.session.pending_prompts.clear();
-        agent.shared_queue.clear();
         agent.sync_queue_pane();
         agent.session.prompt_history = vec!["an older prompt".into()];
 

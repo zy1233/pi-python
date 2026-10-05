@@ -276,10 +276,6 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
                         agent_result.as_deref(),
                         terminal_meta_str(
                             session_notif.meta.as_ref(),
-                            super::super::turn_completion::CANCEL_TRIGGER_KEY,
-                        ),
-                        terminal_meta_str(
-                            session_notif.meta.as_ref(),
                             super::super::turn_completion::CANCELLATION_CATEGORY_KEY,
                         ),
                     );
@@ -306,10 +302,6 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
                             prompt_id: Some(&prompt_id),
                             stop_reason: Some(&stop_reason),
                             agent_result: agent_result.as_deref(),
-                            cancel_trigger: terminal_meta_str(
-                                session_notif.meta.as_ref(),
-                                super::super::turn_completion::CANCEL_TRIGGER_KEY,
-                            ),
                             cancellation_category: terminal_meta_str(
                                 session_notif.meta.as_ref(),
                                 super::super::turn_completion::CANCELLATION_CATEGORY_KEY,
@@ -648,9 +640,7 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
         }
     }
     if let Some(outcome) = terminal_outcome {
-        return super::super::turn_completion::apply_terminal_outcome(
-            outcome, app, agent_id, is_active,
-        );
+        return super::super::turn_completion::apply_terminal_outcome(outcome, is_active);
     }
     changed && is_active
 }

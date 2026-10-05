@@ -120,26 +120,6 @@ pub(super) fn follow_ups_ext(
         std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
     )
 }
-/// Dispatch an `Ok(EndTurn)` PromptResponse for `prompt_id`.
-pub(super) fn prompt_response(app: &mut AppView, prompt_id: &str) {
-    use crate::app::actions::{Action, TaskResult};
-    crate::app::dispatch::dispatch(
-        Action::TaskComplete(TaskResult::PromptResponse {
-            agent_id: AgentId(0),
-            result: Ok(
-                acp::PromptResponse::new(acp::StopReason::EndTurn)
-                    .meta(
-                        serde_json::json!({ "promptId": prompt_id })
-                            .as_object()
-                            .cloned(),
-                    ),
-            ),
-            http_status: None,
-            prompt_id: Some(prompt_id.to_string()),
-        }),
-        app,
-    );
-}
 pub(super) fn make_token_notification_message(
     session_id: &str,
     total_tokens: u64,
@@ -396,33 +376,6 @@ pub(super) fn pi_turn_completed_notif(
         std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
     )
 }
-/// Live `TurnCompleted` stamped with `_meta.cancelTrigger` (send-now / ctrl_c).
-pub(super) fn pi_turn_completed_notif_with_cancel_trigger(
-    session_id: &str,
-    prompt_id: &str,
-    stop_reason: &str,
-    cancel_trigger: &str,
-) -> acp::ExtNotification {
-    let payload = SessionNotification {
-        session_id: acp::SessionId::new(session_id),
-        update: PiSessionUpdate::TurnCompleted {
-            prompt_id: prompt_id.into(),
-            stop_reason: stop_reason.into(),
-            agent_result: None,
-            usage: None,
-        },
-        meta: Some(
-            serde_json::json!({
-                "isReplay": false,
-                "cancelTrigger": cancel_trigger,
-            }),
-        ),
-    };
-    acp::ExtNotification::new(
-        "pi/session/update",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
-    )
-}
 /// A live durable `TurnCompleted`, optionally stamped with the shell
 /// completion clock (`agentTimestampMs`) the wake marker's elapsed reads.
 pub(super) fn pi_wake_turn_completed_notif(
@@ -523,34 +476,6 @@ pub(super) fn last_marker_stop_hook_groups(
             Some(RenderBlock::SessionEvent(b)) if b.event.is_turn_terminal() => {
                 Some(b.stop_hooks.len())
             }
-            _ => None,
-        })
-}
-/// Build an `legacy ext RPC` ext-notification (no id).
-pub(super) fn interjection_ext(session_id: &str, text: &str) -> acp::ExtNotification {
-    interjection_ext_with_id(session_id, text, None)
-}
-/// Build an `legacy ext RPC` ext-notification with an optional
-/// `interjectionId` (the originator-dedup key).
-pub(super) fn interjection_ext_with_id(
-    session_id: &str,
-    text: &str,
-    interjection_id: Option<&str>,
-) -> acp::ExtNotification {
-    let mut payload = serde_json::json!({ "sessionId": session_id, "text": text });
-    if let Some(id) = interjection_id {
-        payload["interjectionId"] = serde_json::json!(id);
-    }
-    let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("pi/session/interjection", std::sync::Arc::from(raw))
-}
-/// Text of the most recent user prompt block in scrollback, if any.
-/// Interjections render as standard user prompt blocks.
-pub(super) fn last_interjection_text(sb: &ScrollbackState) -> Option<String> {
-    (0..sb.len())
-        .rev()
-        .find_map(|i| match sb.get(i).map(|e| &e.block) {
-            Some(RenderBlock::UserPrompt(b)) => Some(b.text.clone()),
             _ => None,
         })
 }
@@ -784,7 +709,6 @@ mod queue_and_adoption;
 mod plan_mode;
 mod reconnect;
 mod turn_completion;
-mod interjection;
 mod session_routing;
 mod interactions;
 mod models;

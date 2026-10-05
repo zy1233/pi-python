@@ -682,67 +682,6 @@ fn primary_path_returns_correct_idx_for_each_prompt() {
     );
 }
 
-/// Interjections render as standard user prompts but the shell never
-/// numbers them — the positional fallback must skip them or every mapping
-/// after an interjection is off by one.
-#[test]
-fn fallback_path_skips_interjections() {
-    let mut sb = ScrollbackState::new();
-    let alpha = sb.push_block(user_block("alpha", None));
-    sb.push_block(RenderBlock::agent_message("a"));
-    sb.push_block(RenderBlock::interjection_prompt("mid-turn steer"));
-    sb.push_block(RenderBlock::agent_message("a2"));
-    let bravo = sb.push_block(user_block("bravo", None));
-
-    let alpha_idx = sb.index_of_id(alpha).unwrap();
-    let bravo_idx = sb.index_of_id(bravo).unwrap();
-
-    assert_eq!(
-        find_user_prompt_entry_for_shell_index(&sb, 0),
-        Some(alpha_idx)
-    );
-    assert_eq!(
-        find_user_prompt_entry_for_shell_index(&sb, 1),
-        Some(bravo_idx),
-        "index 1 must map to the next real prompt, not the interjection"
-    );
-}
-
-/// Selecting an interjection (or an entry after it within the same turn)
-/// anchors rewind on the enclosing turn's prompt, not the next turn's.
-#[test]
-fn shell_prompt_index_at_resolves_interjection_to_enclosing_turn() {
-    use super::super::rewind::shell_prompt_index_at;
-
-    let mut sb = ScrollbackState::new();
-    sb.push_block(user_block("alpha", Some(0)));
-    sb.push_block(RenderBlock::agent_message("a"));
-    let ij = sb.push_block(RenderBlock::interjection_prompt("mid-turn steer"));
-    sb.push_block(RenderBlock::agent_message("a2"));
-    sb.push_block(user_block("bravo", Some(1)));
-
-    let ij_idx = sb.index_of_id(ij).unwrap();
-    assert_eq!(shell_prompt_index_at(&sb, ij_idx), Some(0));
-    // A block after the interjection but before the next prompt still
-    // belongs to turn 0.
-    assert_eq!(shell_prompt_index_at(&sb, ij_idx + 1), Some(0));
-}
-
-/// Legacy meta-less scrollbacks: the positional count inside
-/// `shell_prompt_index_at` must also exclude interjections.
-#[test]
-fn shell_prompt_index_at_counting_fallback_skips_interjections() {
-    use super::super::rewind::shell_prompt_index_at;
-
-    let mut sb = ScrollbackState::new();
-    sb.push_block(user_block("alpha", None));
-    sb.push_block(RenderBlock::interjection_prompt("steer"));
-    let bravo = sb.push_block(user_block("bravo", None));
-
-    let bravo_idx = sb.index_of_id(bravo).unwrap();
-    assert_eq!(shell_prompt_index_at(&sb, bravo_idx), Some(1));
-}
-
 #[test]
 fn fallback_path_returns_correct_idx_when_prompt_index_is_none() {
     let mut sb = ScrollbackState::new();

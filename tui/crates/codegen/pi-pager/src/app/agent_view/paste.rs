@@ -69,23 +69,6 @@ impl AgentView {
             PromptEvent::Ignored => (InputOutcome::Changed, ClipboardTextInsertion::Failed),
         }
     }
-    fn reject_shared_queue_image_edit(
-        &mut self,
-        pasted: &crate::prompt_images::PastedImage,
-    ) -> bool {
-        if !matches!(
-            self.prompt_mode,
-            crate::app::queue_edit::PromptMode::EditingQueued {
-                server_id: Some(_),
-                ..
-            }
-        ) {
-            return false;
-        }
-        crate::prompt_images::cleanup_temp_file(pasted);
-        self.show_toast("Images can't be attached when editing a shared queued prompt");
-        true
-    }
     /// Enqueue attachment probing off-thread so paste-then-send remains ordered.
     pub(super) fn enqueue_clipboard_attachment_probe(
         &mut self,
@@ -182,11 +165,6 @@ impl AgentView {
         );
         let attachment = match image {
             ProbedAttachment::Image(pasted) => {
-                if self.reject_shared_queue_image_edit(&pasted) {
-                    return ClipboardPasteCompletion::Failed(
-                        ClipboardPasteFailure::AlreadyReported,
-                    );
-                }
                 let preparation = pasted.preview_preparation();
                 if let Err(msg) = self.prompt.insert_image(pasted) {
                     self.show_toast_ticks(&msg, 150);
@@ -255,7 +233,7 @@ impl AgentView {
         self.deferred_send.take()
     }
     /// Resume a drained deferred action, re-deriving the payload from the now-updated prompt so the freshly attached image chip (and its
-    /// aligned range) travels with it. Call only when actually reissuing: the interject variant consumes the draft.
+    /// aligned range) travels with it. Call only when actually reissuing.
     pub(crate) fn resume_deferred_send(&mut self, kind: AgentDeferredSend) -> Option<Action> {
         match kind {
             AgentDeferredSend::SendPrompt => {
@@ -488,9 +466,6 @@ impl AgentView {
         &mut self,
         mut pasted: crate::prompt_images::PastedImage,
     ) -> bool {
-        if self.reject_shared_queue_image_edit(&pasted) {
-            return false;
-        }
         let preparation = pasted.preview_preparation();
         if let Some(images_dir) = crate::prompt_images::session_images_dir(
             self.session.session_id.as_ref(),

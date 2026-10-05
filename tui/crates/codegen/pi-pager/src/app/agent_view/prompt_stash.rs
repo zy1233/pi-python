@@ -418,7 +418,6 @@ mod tests {
         agent.prompt_mode = PromptMode::EditingQueued {
             id: 1,
             original: "queued text".to_owned(),
-            server_id: None,
             kind: crate::app::agent::QueueEntryKind::Prompt,
         };
         agent.prompt.set_text("queued text being edited");

@@ -87,11 +87,6 @@ pub struct UserPromptBlock {
     pub is_bash: bool,
     /// Whether this prompt was injected by the scheduler (cron/loop).
     pub is_cron: bool,
-    /// Mid-turn interjection. Renders identically to a typed prompt but is
-    /// excluded from shell prompt-index bookkeeping — the shell numbers only
-    /// turn-starting prompts, so counting interjections would skew the
-    /// positional prompt↔entry mapping used by rewind.
-    pub is_interjection: bool,
     pub prompt_index: Option<usize>,
     /// Sanitized byte ranges into `text` rendered in the skill accent color
     /// (recognized `/command` tokens). Empty = plain prompt styling. This is
@@ -106,7 +101,6 @@ impl UserPromptBlock {
             text: text.into(),
             is_bash: false,
             is_cron: false,
-            is_interjection: false,
             prompt_index: None,
             skill_token_ranges: Vec::new(),
         }
@@ -123,7 +117,6 @@ impl UserPromptBlock {
             text: text.into(),
             is_bash: true,
             is_cron: false,
-            is_interjection: false,
             prompt_index: None,
             skill_token_ranges: Vec::new(),
         }
@@ -147,7 +140,6 @@ impl UserPromptBlock {
             text,
             is_bash: false,
             is_cron: false,
-            is_interjection: false,
             prompt_index: None,
             skill_token_ranges,
         }
@@ -163,7 +155,6 @@ impl UserPromptBlock {
             text,
             is_bash: false,
             is_cron: false,
-            is_interjection: false,
             prompt_index: None,
             skill_token_ranges,
         }
@@ -175,20 +166,6 @@ impl UserPromptBlock {
             text: text.into(),
             is_bash: false,
             is_cron: true,
-            is_interjection: false,
-            prompt_index: None,
-            skill_token_ranges: Vec::new(),
-        }
-    }
-
-    /// Create a mid-turn interjection prompt block (standard prompt
-    /// rendering; never receives a shell prompt index).
-    pub fn interjection(text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            is_bash: false,
-            is_cron: false,
-            is_interjection: true,
             prompt_index: None,
             skill_token_ranges: Vec::new(),
         }

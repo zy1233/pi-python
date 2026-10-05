@@ -1227,17 +1227,7 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
             let away = !crate::appearance::cache::load_combine_queued_prompts();
             let _ = dispatch(Action::SetCombineQueuedPrompts(away), app);
         }
-        "follow_up_behavior" => {
-            let away = match crate::appearance::cache::load_follow_up_behavior() {
-                crate::appearance::FollowUpBehavior::Queue => {
-                    crate::appearance::FollowUpBehavior::Steer
-                }
-                crate::appearance::FollowUpBehavior::Steer => {
-                    crate::appearance::FollowUpBehavior::Queue
-                }
-            };
-            let _ = dispatch(Action::SetFollowUpBehavior(away), app);
-        }
+
         "simple_mode" => {
             let _ = dispatch(Action::SetSimpleMode(false), app);
         }
@@ -1250,9 +1240,7 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
         "contextual_hints.image_input" => {
             let _ = dispatch(Action::SetContextualHintImageInput(false), app);
         }
-        "contextual_hints.send_now" => {
-            let _ = dispatch(Action::SetContextualHintSendNow(false), app);
-        }
+
         "contextual_hints.small_screen" => {
             let _ = dispatch(Action::SetContextualHintSmallScreen(false), app);
         }

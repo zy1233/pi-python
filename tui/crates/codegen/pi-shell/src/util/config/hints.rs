@@ -88,7 +88,6 @@ pub struct ResolvedContextualHints {
     pub undo: bool,
     pub plan_mode: bool,
     pub image_input: bool,
-    pub send_now: bool,
     pub small_screen: bool,
     pub word_select: bool,
     pub ssh_wrap: bool,
@@ -100,7 +99,6 @@ impl Default for ResolvedContextualHints {
             undo: true,
             plan_mode: true,
             image_input: true,
-            send_now: true,
             small_screen: true,
             word_select: true,
             ssh_wrap: true,
@@ -130,7 +128,6 @@ pub fn resolve_contextual_hints(
         undo: resolve_tip(ui.undo, remote.and_then(|r| r.undo)),
         plan_mode: resolve_tip(ui.plan_mode, remote.and_then(|r| r.plan_mode)),
         image_input: resolve_tip(ui.image_input, remote.and_then(|r| r.image_input)),
-        send_now: resolve_tip(ui.send_now, remote.and_then(|r| r.send_now)),
         small_screen: resolve_tip(ui.small_screen, remote.and_then(|r| r.small_screen)),
         word_select: resolve_tip(ui.word_select, remote.and_then(|r| r.word_select)),
         ssh_wrap: resolve_tip(ui.ssh_wrap, remote.and_then(|r| r.ssh_wrap)),
@@ -219,14 +216,12 @@ mod tests {
         undo: Option<bool>,
         plan_mode: Option<bool>,
         image_input: Option<bool>,
-        send_now: Option<bool>,
         word_select: Option<bool>,
     ) -> ContextualHintsRemote {
         ContextualHintsRemote {
             undo,
             plan_mode,
             image_input,
-            send_now,
             small_screen: None,
             word_select,
             ssh_wrap: None,
@@ -240,7 +235,6 @@ mod tests {
         assert!(resolved.undo, "undo defaults ON");
         assert!(resolved.plan_mode, "plan_mode defaults ON");
         assert!(resolved.image_input, "image_input defaults ON");
-        assert!(resolved.send_now, "send_now defaults ON");
         assert!(resolved.small_screen, "small_screen defaults ON");
         assert!(resolved.word_select, "word_select defaults ON");
         assert!(resolved.ssh_wrap, "ssh_wrap defaults ON");
@@ -258,7 +252,6 @@ mod tests {
         assert!(!resolved.undo);
         assert!(resolved.plan_mode);
         assert!(resolved.image_input);
-        assert!(resolved.send_now);
         assert!(resolved.small_screen);
         assert!(resolved.word_select);
         assert!(resolved.ssh_wrap);
@@ -272,13 +265,12 @@ mod tests {
         // resolver line (reading one remote field into another's gate).
         let r = ContextualHintsRemote {
             ssh_wrap: Some(false),
-            ..remote(None, Some(false), None, None, None)
+            ..remote(None, Some(false), None, None)
         };
         let resolved = resolve_contextual_hints(&ContextualHints::default(), Some(&r));
         assert!(resolved.undo, "absent remote tip → default ON");
         assert!(!resolved.plan_mode, "remote `false` soft-disables");
         assert!(resolved.image_input);
-        assert!(resolved.send_now);
         assert!(resolved.word_select);
         assert!(!resolved.ssh_wrap, "remote `false` soft-disables ssh_wrap");
     }
@@ -291,7 +283,7 @@ mod tests {
             image_input: Some(true),
             ..ContextualHints::default()
         };
-        let r = remote(None, None, Some(false), None, None);
+        let r = remote(None, None, Some(false), None);
         let resolved = resolve_contextual_hints(&ui, Some(&r));
         assert!(
             resolved.image_input,
@@ -308,24 +300,16 @@ mod tests {
             undo: Some(false),
             plan_mode: Some(false),
             image_input: Some(false),
-            send_now: Some(false),
             small_screen: Some(false),
             word_select: Some(false),
             ssh_wrap: Some(false),
         };
-        let r = remote(
-            Some(false),
-            Some(false),
-            Some(false),
-            Some(false),
-            Some(false),
-        );
+        let r = remote(Some(false), Some(false), Some(false), Some(false));
         let resolved = resolve_contextual_hints(&ui, Some(&r));
         assert!(
             resolved.undo
                 && resolved.plan_mode
                 && resolved.image_input
-                && resolved.send_now
                 && resolved.small_screen
                 && resolved.word_select
                 && resolved.ssh_wrap
@@ -342,18 +326,16 @@ mod tests {
             undo: Some(true),
             plan_mode: Some(true),
             image_input: Some(true),
-            send_now: Some(true),
             small_screen: Some(true),
             word_select: Some(true),
             ssh_wrap: Some(true),
         };
-        let r = remote(Some(true), Some(true), Some(true), Some(true), Some(true));
+        let r = remote(Some(true), Some(true), Some(true), Some(true));
         let resolved = resolve_contextual_hints(&ui, Some(&r));
         assert!(
             !resolved.undo
                 && !resolved.plan_mode
                 && !resolved.image_input
-                && !resolved.send_now
                 && !resolved.small_screen
                 && !resolved.word_select
                 && !resolved.ssh_wrap

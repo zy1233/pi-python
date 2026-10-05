@@ -572,10 +572,6 @@ pub(crate) struct PendingTurnEnd {
     /// the "blocked by a hook" marker over "cancelled by user"). `None` on
     /// older shells or plain user cancels.
     pub cancellation_category: Option<String>,
-    /// `_meta.cancelTrigger` from the broadcast (`"send_now"` marks a
-    /// cancel-and-send whose "Turn cancelled" marker is suppressed). `None`
-    /// on older shells / non-cancel ends.
-    pub cancel_trigger: Option<String>,
     /// When the broadcast arrived; the reconcile fires after
     /// [`super::dispatch::TURN_END_RECONCILE_GRACE`].
     pub received_at: std::time::Instant,
@@ -790,13 +786,6 @@ pub struct AgentView {
     pub tip_typing_dismissed: bool,
     pub todo: TodoPane,
     pub queue: QueuePane,
-    /// Per-agent mirror of the server-authoritative shared prompt queue
-    /// (`AppView::shared_prompt_queues[sid]`), kept in sync by
-    /// `handle_queue_changed` and the immediate-send path. The queue
-    /// pane renders the union of this and the local `pending_prompts`; the
-    /// edit handlers read it to route remove/reorder by origin. Empty unless a
-    /// plain prompt was queued server-side while a turn was running.
-    pub shared_queue: Vec<crate::app::prompt_queue::QueueEntryWire>,
     /// True when this session was opened via `session/load` (session picker
     /// resume, `/resume`, or a dashboard roster attach) rather than
     /// created locally — i.e. this client is *viewing* a session it did not
@@ -990,14 +979,6 @@ pub struct AgentView {
     /// does not. Netted against the wall-anchored turn span so a suspend
     /// during an open question isn't reported as worked time.
     pub turn_paused_wall: std::time::Duration,
-    /// IDs of interjections this client sent and already rendered locally
- /// (optimistic echo). The shell broadcasts `legacy ext RPC` to
-    /// every attached pane; when our own broadcast echoes back carrying an id
-    /// in this set, `handle_interjection` drops it (we already showed it) and
-    /// removes the id. Other panes (which lack the id) render it. This is the
-    /// queue's optimistic-echo + reconcile-by-id pattern, applied so the
-    /// originator gets instant feedback AND viewers stay in sync.
-    pub self_interjection_ids: std::collections::HashSet<String>,
     /// Local wall-clock time when the most recent turn finished
     /// (success, failure, or cancellation). Used by the dashboard
     /// modal to display "Nm ago" idle markers. Initialised to the
@@ -1257,7 +1238,7 @@ pub struct AgentView {
     pub(crate) toast: Option<(String, u8)>,
     /// Single-slot ephemeral tip shown in the banner rect above the prompt.
     /// Unlike `toast`, survives typing; cleared by TTL, any prompt-box
-    /// submit (prompt/interject/bash/feedback/remember), or explicit clear.
+    /// submit (prompt/bash/feedback/remember), or explicit clear.
     /// Show via `show_ephemeral_tip` (renderability-gated), never `.show()`.
     pub(crate) ephemeral_tip: crate::tips::EphemeralTipState,
     /// Prompt text snapshot taken when the word-select tip was shown. Any
@@ -1516,7 +1497,7 @@ pub struct AgentView {
     /// paste-then-immediate-send never builds content blocks before the image
     /// attaches.
     pub(crate) paste_probe_in_flight: usize,
-    /// A prompt send / interject deferred until the in-flight paste probe(s)
+    /// A prompt send deferred until the in-flight paste probe(s)
     /// complete. Kind-only: the payload is re-derived from the widget on
     /// reissue so the freshly attached image chip travels with it.
     pub(crate) deferred_send: Option<AgentDeferredSend>,
@@ -1536,47 +1517,8 @@ pub struct AgentView {
     /// [`super::dispatch::CANCEL_RESEND_GRACE`] while still cancelling.
     pub(crate) pending_cancel_resend: Option<PendingCancelResend>,
     pub(crate) cancel_latency: Option<CancelLatency>,
-    /// Send-now cancel expectation: the client-minted id of an explicit
-    /// cancel-and-send this client dispatched into a running turn (send-now
-    /// chord / `SendPromptNow`, or queue-row "Send now"). The running turn's
-    /// imminent cancel is the silent half of cancel-and-send, so the turn-end
-    /// rails suppress the "Turn cancelled by user …" marker.
-    ///
-    /// Compat fallback only: a wire `_meta.cancelTrigger` on the turn end is
-    /// trusted over this flag (`"send_now"` suppresses, anything else
-    /// renders). Consumed at every driver turn end. Kept across the matching
-    /// send-now prompt's turn start (so the outgoing turn's cancel
-    /// PromptResponse can still suppress the marker when it races behind the
-    /// adopt), but cleared on a non-matching turn start / interactive cancel /
-    /// replay-window entry, so a stale expectation can never eat a later real
-    /// Ctrl+C marker.
-    pub(crate) expect_send_now_cancel: Option<String>,
     /// Cleared at turn start; set on the first live non-echo update. Defaults true.
     pub(crate) front_message_committed: bool,
-    /// Send-now promote: skip `scroll_to_entry_top` on next matching adoption.
-    /// Survives cancel-rail `take()` of [`Self::expect_send_now_cancel`].
-    pub(crate) follow_without_jump_prompt_id: Option<String>,
-    /// Ids of THIS client's server-queue rows that are still optimistic
-    /// echoes — the `session/prompt` RPC is in flight and no
- /// `legacy ext RPC` broadcast has confirmed the row yet. Inserted by
-    /// the echo push, drained when a broadcast lists the id (queued or
-    /// running) or the RPC resolves without the row landing.
-    pub(crate) optimistic_queue_ids: std::collections::HashSet<String>,
-    /// A queue-row send-now the user fired while the row was still an
- /// optimistic echo. Firing `legacy ext RPC` then would race the
-    /// row's own in-flight `session/prompt` and silently no-op shell-side
-    /// (a rapid double-Enter on a queued bash command could "disappear" — the
-    /// interject overtook the row, the no-op dropped the send-now, and the
-    /// armed cancel expectation hid the still-queued row).
- /// Parked here and fired from the confirming `legacy ext RPC`
-    /// broadcast with the row's authoritative version.
-    pub(crate) send_now_awaiting_confirm: Option<String>,
-    /// User blocks painted at send-now dispatch, keyed by prompt id; the
-    /// turn-start adoption consumes an entry to reuse its block. The flag
-    /// marks an edit-interject override (fresher than the mirror text the
-    /// adoption captures). Cleared on session reload.
-    pub(crate) send_now_painted_blocks:
-        std::collections::HashMap<String, (crate::scrollback::EntryId, bool)>,
     /// Cached official-marketplace candidates for the plugin CTA, populated on
     /// session start independently of the Extensions modal.
     pub plugin_cta: PluginCtaState,
@@ -1629,14 +1571,6 @@ pub struct AgentView {
     /// Insertion order of `follow_up_pending` keys, so an overflow evicts ONLY
     /// the OLDEST buffered entry (never the whole map).
     pub(crate) follow_up_pending_order: VecDeque<String>,
-    /// Live `session/update`s buffered for the stashed pending running
-    /// adoption: in the FIFO handoff window an instant turn emits its whole
-    /// stream before the previous turn's PromptResponse applies the adoption.
-    pub(crate) pending_adoption_updates: Vec<(
-        String,
-        agent_client_protocol::SessionUpdate,
-        crate::acp::meta::NotificationMeta,
-    )>,
 }
 /// Cap on [`AgentView::self_originated_prompt_ids`]. Only recent ids matter (a
 /// stale post-rewind chunk arrives right after its turn ends), so a small
@@ -1649,10 +1583,6 @@ const REWOUND_PROMPT_ID_CAP: usize = 64;
 /// is tiny), so a small bounded map is plenty; an overflow evicts the oldest
 /// buffered entry (FIFO) rather than the whole map.
 const MAX_PENDING_FOLLOW_UPS: usize = 16;
-/// Cap on [`AgentView::pending_adoption_updates`]. Overflow drops the NEWEST
-/// entry (unlike the follow-up buffer's oldest-first eviction): a coherent
-/// prefix (user echo + tool-call start) renders sanely, a headless tail would not.
-pub(crate) const MAX_PENDING_ADOPTION_UPDATES: usize = 128;
 /// Test-only re-export of [`translate_local_submit`] so dispatch tests
 /// can verify the local-question -> Action mapping without spinning up
 /// a full agent view.
@@ -2184,42 +2114,14 @@ fn collect_citation_links(
     links
 }
 /// Shared fixtures for the queue-routing tests here, the queued-prompt
-/// editing tests in `queue_edit.rs`, and the parked-wait tests in
-/// `dispatch/queue.rs` / `acp_handler.rs`.
+/// editing tests in `queue_edit.rs`, and the drain tests in `dispatch/queue.rs`.
 #[cfg(test)]
 pub(crate) mod test_fixtures {
     use super::{AgentPane, AgentView};
     use crate::acp::model_state::ModelState;
-    use crate::actions::ActionRegistry;
     use crate::app::agent::{AgentId, AgentSession, AgentState};
-    use crate::app::prompt_queue::QueueEntryWire;
     use crate::scrollback::state::ScrollbackState;
     use agent_client_protocol as acp;
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
-    /// Scopes `[ui].follow_up_behavior` to `Steer` for one test: a prompt or
-    /// bash command typed while a turn runs is then sent to the agent at once
-    /// (server-authoritative queue echo) instead of joining the local
-    /// drip-feed queue, which is the default. Restores the previous behavior
-    /// on drop, because the cache is thread-local and a `--test-threads=1` run
-    /// reuses one thread across tests.
-    pub(crate) struct SteerFollowUp {
-        previous: crate::appearance::FollowUpBehavior,
-    }
-    impl SteerFollowUp {
-        pub(crate) fn enter() -> Self {
-            let previous = crate::appearance::cache::load_follow_up_behavior();
-            crate::appearance::cache::set_follow_up_behavior(
-                crate::appearance::FollowUpBehavior::Steer,
-            );
-            Self { previous }
-        }
-    }
-    impl Drop for SteerFollowUp {
-        fn drop(&mut self) {
-            crate::appearance::cache::set_follow_up_behavior(self.previous);
-        }
-    }
 
     pub(crate) fn make_followup_permission_state()
     -> crate::views::permission_view::PermissionViewState {
@@ -2275,90 +2177,6 @@ pub(crate) mod test_fixtures {
             },
             tx,
         )
-    }
-    /// Drive the agent's tracker into a task-output wait via the real update
-    /// path. `timeout_ms > 0` advertises a blocking (sendable/parked) wait;
-    /// `0` is an instant poll that must NOT advertise one.
-    pub fn simulate_task_output_wait_ms(agent: &mut AgentView, task_id: &str, timeout_ms: u64) {
-        simulate_task_output_wait_call(agent, "wait-1", task_id, timeout_ms);
-    }
-    /// [`simulate_task_output_wait_ms`] with an explicit tool-call id.
-    pub fn simulate_task_output_wait_call(
-        agent: &mut AgentView,
-        tool_call_id: &str,
-        task_id: &str,
-        timeout_ms: u64,
-    ) {
-        use crate::acp::meta::NotificationMeta;
-        use crate::acp::tracker::{TurnActivity, WaitingReason};
-        use std::sync::Arc;
-        agent.front_message_committed = true;
-        let meta = NotificationMeta::default();
-        agent.session.handle_update(
-            acp::SessionUpdate::ToolCall(
-                acp::ToolCall::new(
-                    acp::ToolCallId::new(Arc::from(tool_call_id)),
-                    "get_command_or_subagent_output",
-                )
-                .kind(acp::ToolKind::Other)
-                .status(acp::ToolCallStatus::Pending)
-                .content(vec![])
-                .locations(vec![]),
-            ),
-            &meta,
-            &mut agent.scrollback,
-        );
-        agent.session.handle_update(
-            acp::SessionUpdate::ToolCallUpdate(acp::ToolCallUpdate::new(
-                acp::ToolCallId::new(Arc::from(tool_call_id)),
-                acp::ToolCallUpdateFields::new().raw_input(Some(serde_json::json!({
-                    "task_ids": [task_id],
-                    "timeout_ms": timeout_ms,
-                }))),
-            )),
-            &meta,
-            &mut agent.scrollback,
-        );
-        let activity = agent.resolve_turn_activity();
-        if timeout_ms > 0 {
-            assert!(
-                matches!(
-                    activity,
-                    Some(TurnActivity::Waiting(WaitingReason::TaskOutput {
-                        waits: true,
-                        ..
-                    }))
-                ),
-                "expected TaskOutput wait, got {activity:?}"
-            );
-        } else {
-            assert!(
-                !matches!(
-                    activity,
-                    Some(TurnActivity::Waiting(WaitingReason::TaskOutput { .. }))
-                ),
-                "poll must not advertise a task-output wait, got {activity:?}"
-            );
-        }
-    }
-    /// Complete a wait tool call registered by
-    /// [`simulate_task_output_wait_call`], releasing its blocking-wait entry.
-    pub fn complete_task_output_wait_call(agent: &mut AgentView, tool_call_id: &str) {
-        use crate::acp::meta::NotificationMeta;
-        use std::sync::Arc;
-        let meta = NotificationMeta::default();
-        agent.session.handle_update(
-            acp::SessionUpdate::ToolCallUpdate(acp::ToolCallUpdate::new(
-                acp::ToolCallId::new(Arc::from(tool_call_id)),
-                acp::ToolCallUpdateFields::new().status(Some(acp::ToolCallStatus::Completed)),
-            )),
-            &meta,
-            &mut agent.scrollback,
-        );
-    }
-    /// Blocking-wait shorthand for [`simulate_task_output_wait_ms`].
-    pub fn simulate_task_output_wait(agent: &mut AgentView, task_id: &str) {
-        simulate_task_output_wait_ms(agent, task_id, 30_000);
     }
     /// Count of "Worked for X" (`TurnCompleted`) marker blocks in the
     /// agent's scrollback.
@@ -2428,23 +2246,7 @@ pub(crate) mod test_fixtures {
         };
         session.enqueue_prompt("local one".to_string());
         let mut agent = AgentView::new(session, ScrollbackState::new());
-        agent.shared_queue = vec![QueueEntryWire {
-            id: "p1".into(),
-            version: 2,
-            owner: None,
-            last_editor: None,
-            kind: "prompt".into(),
-            text: "server one".into(),
-            position: 0,
-            combined_texts: None,
-        }];
-        agent.queue.sync_from_merged(
-            &agent.session.pending_prompts,
-            &agent.shared_queue,
-            agent.session.current_prompt_id.as_deref(),
-            agent.expect_send_now_cancel.as_deref(),
-            &agent.send_now_painted_blocks,
-        );
+        agent.queue.sync_from_local(&agent.session.pending_prompts);
         agent.queue.overlay.visible = true;
         agent.queue.overlay.focused = true;
         agent
@@ -2488,14 +2290,6 @@ pub(crate) mod test_fixtures {
             },
             ScrollbackState::new(),
         )
-    }
-    /// Interject chord for non–VS Code family tests (`Ctrl+Enter`).
-    pub fn force_interject_key() -> KeyEvent {
-        KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)
-    }
-    /// Host-independent registry for queue/prompt interject tests (Ctrl+Enter).
-    pub fn non_vscode_registry() -> ActionRegistry {
-        ActionRegistry::non_vscode_for_test()
     }
     #[test]
     fn apply_follow_ups_renders_chips_for_a_response() {
@@ -2975,20 +2769,13 @@ pub(crate) mod test_fixtures {
         );
         assert_eq!(agent.follow_up_chip_at(area.width - 1, 0), None);
     }
-    /// `make_running_agent` reduced to a single focused local row: empty server
-    /// mirror, no in-flight prompt. The shared setup for the pane-hide paths.
+    /// `make_running_agent` with the queue pane focused and no in-flight
+    /// prompt. The shared setup for the pane-hide paths.
     pub fn running_agent_local_only() -> AgentView {
         let mut agent = make_running_agent();
         agent.active_pane = AgentPane::Queue;
-        agent.shared_queue.clear();
         agent.session.current_prompt_id = None;
-        agent.queue.sync_from_merged(
-            &agent.session.pending_prompts,
-            &agent.shared_queue,
-            None,
-            None,
-            &agent.send_now_painted_blocks,
-        );
+        agent.queue.sync_from_local(&agent.session.pending_prompts);
         agent.queue.overlay.visible = true;
         agent.queue.overlay.focused = true;
         agent

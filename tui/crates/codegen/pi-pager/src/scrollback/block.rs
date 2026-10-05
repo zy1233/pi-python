@@ -606,12 +606,6 @@ impl RenderBlock {
         RenderBlock::UserPrompt(UserPromptBlock::cron(text))
     }
 
-    /// Create a mid-turn interjection prompt block (standard user prompt
-    /// rendering, excluded from shell prompt-index bookkeeping).
-    pub fn interjection_prompt(text: impl Into<String>) -> Self {
-        RenderBlock::UserPrompt(UserPromptBlock::interjection(text))
-    }
-
     /// Create an agent message block.
     pub fn agent_message(text: impl Into<String>) -> Self {
         RenderBlock::AgentMessage(AgentMessageBlock::new(text))

@@ -35,7 +35,6 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "page_flip_on_send",
     "confirm_before_rewind",
     "combine_queued_prompts",
-    "follow_up_behavior",
     "simple_mode",
     "vim_mode",
     "remember_tool_approvals",
@@ -75,7 +74,6 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "contextual_hints.undo",
     "contextual_hints.plan_mode",
     "contextual_hints.image_input",
-    "contextual_hints.send_now",
     "contextual_hints.small_screen",
     "contextual_hints.word_select",
     "contextual_hints.ssh_wrap",
@@ -425,48 +423,6 @@ fn space_on_combine_queued_prompts_dispatches_typed_setter() {
 }
 
 #[test]
-fn enter_on_follow_up_behavior_row_enters_picking_enum() {
-    let mut s = make_state();
-    navigate_to(&mut s, "follow_up_behavior");
-    let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    assert!(
-        matches!(outcome, SettingsKeyOutcome::Changed),
-        "Enter on follow_up_behavior row must transition to PickingEnum, got {outcome:?}"
-    );
-    match &s.mode() {
-        SettingsModalMode::PickingEnum {
-            key,
-            original_value,
-            ..
-        } => {
-            assert_eq!(*key, "follow_up_behavior");
-            assert_eq!(
-                original_value,
-                &SettingValue::Enum("queue"),
-                "default follow_up_behavior is queue"
-            );
-        }
-        other => panic!("expected PickingEnum mode, got {other:?}"),
-    }
-}
-
-#[test]
-fn follow_up_behavior_picker_enter_dispatches_set_commit() {
-    let mut s = make_state();
-    navigate_to(&mut s, "follow_up_behavior");
-    let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    // Default is queue (index 0); Down → steer.
-    let _ = handle_settings_key(&mut s, &press(KeyCode::Down));
-    let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    match outcome {
-        SettingsKeyOutcome::Action(Action::SetFollowUpBehavior(mode)) => {
-            assert_eq!(mode, pi_pager::appearance::FollowUpBehavior::Steer);
-        }
-        other => panic!("expected SetFollowUpBehavior(Steer), got {other:?}"),
-    }
-}
-
-#[test]
 fn space_on_simple_mode_dispatches_typed_setter() {
     let mut s = make_state();
     navigate_to(&mut s, "simple_mode");
@@ -728,28 +684,6 @@ fn mouse_click_on_combine_queued_prompts_indicator_toggles_in_one_click() {
     );
     let default_on = UiConfig::default().combine_queued_prompts.unwrap_or(false);
     assert_set_bool_action(outcome, "combine_queued_prompts", !default_on);
-}
-
-#[test]
-fn mouse_click_on_follow_up_behavior_indicator_opens_picker() {
-    let mut s = make_state();
-    synth_rects(&mut s);
-    let row_y = row_idx_for(&s, "follow_up_behavior") as u16;
-    let outcome = handle_settings_mouse(
-        &mut s,
-        MouseEventKind::Down(crossterm::event::MouseButton::Left),
-        72,
-        row_y,
-    );
-    assert!(
-        matches!(outcome, SettingsKeyOutcome::Changed),
-        "click on follow_up_behavior indicator should open picker, got {outcome:?}"
-    );
-    assert!(
-        matches!(s.mode(), SettingsModalMode::PickingEnum { key, .. } if key == "follow_up_behavior"),
-        "expected PickingEnum(follow_up_behavior), got {:?}",
-        s.mode()
-    );
 }
 
 #[test]
@@ -1911,7 +1845,6 @@ fn registry_kind_membership_through_pr_14() {
             "contextual_hints.undo",
             "contextual_hints.plan_mode",
             "contextual_hints.image_input",
-            "contextual_hints.send_now",
             "contextual_hints.small_screen",
             "contextual_hints.word_select",
             "contextual_hints.ssh_wrap",
@@ -1931,7 +1864,6 @@ fn registry_kind_membership_through_pr_14() {
             "auto_light_theme",
             "coding_data_sharing",
             "default_selected_permission",
-            "follow_up_behavior",
             "hunk_tracker_mode",
             "keep_text_selection",
             "permission_mode",
@@ -2001,7 +1933,6 @@ fn enum_settings_membership_through_pr_14() {
             "auto_light_theme",
             "coding_data_sharing",
             "default_selected_permission",
-            "follow_up_behavior",
             "hunk_tracker_mode",
             "keep_text_selection",
             "permission_mode",
@@ -2035,9 +1966,6 @@ fn defaults_round_trip_through_registry() {
     pi_pager::appearance::cache::set_group_tool_verbs(true);
     pi_pager::appearance::cache::set_page_flip_on_send(true);
     pi_pager::appearance::cache::set_combine_queued_prompts(false);
-    pi_pager::appearance::cache::set_follow_up_behavior(
-        pi_pager::appearance::FollowUpBehavior::Queue,
-    );
     pi_pager::appearance::cache::set_scroll_mode(
         pi_pager::appearance::ScrollMode::Auto,
     );
@@ -2055,7 +1983,6 @@ fn defaults_round_trip_through_registry() {
             "page_flip_on_send" => SettingValue::Bool(true),
             "confirm_before_rewind" => SettingValue::Bool(true),
             "combine_queued_prompts" => SettingValue::Bool(false),
-            "follow_up_behavior" => SettingValue::Enum("queue"),
             "simple_mode" => SettingValue::Bool(true),
             "vim_mode" => SettingValue::Bool(false),
             "remember_tool_approvals" => SettingValue::Bool(true),
@@ -2093,7 +2020,6 @@ fn defaults_round_trip_through_registry() {
             "contextual_hints.undo" => SettingValue::Bool(true),
             "contextual_hints.plan_mode" => SettingValue::Bool(true),
             "contextual_hints.image_input" => SettingValue::Bool(true),
-            "contextual_hints.send_now" => SettingValue::Bool(true),
             "contextual_hints.small_screen" => SettingValue::Bool(true),
             "contextual_hints.word_select" => SettingValue::Bool(true),
             "contextual_hints.ssh_wrap" => SettingValue::Bool(true),

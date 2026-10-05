@@ -4,38 +4,6 @@ use super::*;
 
 // ── agent-bound kinds (bash) ─────────
 
-/// With Steer, a bash command typed while a turn is RUNNING takes the
-/// server-authoritative immediate path (Effect + optimistic echo, no local
-/// queue entry).
-#[test]
-fn bash_while_running_is_server_authoritative() {
-    let _steer = SteerFollowUp::enter();
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
-
-    let effects = dispatch(Action::SendBashCommand("ls -la".into()), &mut app);
-    let pid = match &effects[0] {
-        Effect::SendBashCommand {
-            command, prompt_id, ..
-        } => {
-            assert_eq!(command, "ls -la");
-            prompt_id.clone()
-        }
-        other => panic!("expected immediate SendBashCommand, got {other:?}"),
-    };
-    // Not in the local queue.
-    assert_eq!(app.agents[&id].session.queue_len(), 0);
-    // Optimistic echo present with kind="bash".
-    let q = app
-        .shared_prompt_queue("test-session")
-        .expect("echo present");
-    assert_eq!(q.len(), 1);
-    assert_eq!(q[0].id, pid);
-    assert_eq!(q[0].kind, "bash");
-    assert_eq!(q[0].text, "ls -la");
-}
-
 #[test]
 fn auth_complete_triggers_bundle_status_fetch() {
     let mut app = test_app();

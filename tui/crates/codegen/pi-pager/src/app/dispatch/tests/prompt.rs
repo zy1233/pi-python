@@ -1,4 +1,4 @@
-//! Tests for prompt and bash submission, queueing, and interject shims.
+//! Tests for prompt and bash submission and queueing.
 
 use super::*;
 
@@ -695,127 +695,23 @@ fn chip_submit_while_enqueued_clears_follow_up_chips() {
 }
 
 #[test]
-fn send_prompt_while_running_sends_to_server_when_follow_up_steer() {
-    struct ResetFollowUp(crate::appearance::FollowUpBehavior);
-    impl Drop for ResetFollowUp {
-        fn drop(&mut self) {
-            crate::appearance::cache::set_follow_up_behavior(self.0);
-        }
-    }
-    let _reset = ResetFollowUp(crate::appearance::cache::load_follow_up_behavior());
-    crate::appearance::cache::set_follow_up_behavior(crate::appearance::FollowUpBehavior::Steer);
-
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    // Simulate a running turn.
-    app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
-
-    let effects = dispatch(Action::SendPrompt("queued".into()), &mut app);
-
-    // With Steer, a plain prompt typed while a turn is running is sent to
-    // the agent IMMEDIATELY (server-authoritative) rather than held in the
-    // local drip-feed queue. It does NOT start a concurrent turn and does
-    // not interject yet — the agent promotes it at the next safe point.
-    assert_eq!(effects.len(), 1);
-    let pid = match &effects[0] {
-        Effect::SendPrompt {
-            text, prompt_id, ..
-        } => {
-            assert_eq!(text, "queued");
-            prompt_id.clone()
-        }
-        other => panic!("expected immediate SendPrompt, got {other:?}"),
-    };
-    // Not in the local queue; turn state unchanged (no new turn started).
-    assert_eq!(app.agents[&id].session.queue_len(), 0);
-    assert!(app.agents[&id].session.state.is_turn_running());
-    // Optimistic echo present in the shared queue, keyed by prompt_id.
-    let q = app
-        .shared_prompt_queue("test-session")
-        .expect("optimistic echo present");
-    assert_eq!(q.len(), 1);
-    assert_eq!(q[0].id, pid);
-    assert_eq!(q[0].text, "queued");
-}
-
-#[test]
-fn send_prompt_while_running_with_follow_up_queue_stays_local() {
-    struct ResetFollowUp(crate::appearance::FollowUpBehavior);
-    impl Drop for ResetFollowUp {
-        fn drop(&mut self) {
-            crate::appearance::cache::set_follow_up_behavior(self.0);
-        }
-    }
-    let _reset = ResetFollowUp(crate::appearance::cache::load_follow_up_behavior());
-    crate::appearance::cache::set_follow_up_behavior(crate::appearance::FollowUpBehavior::Queue);
-
+fn send_prompt_while_running_stays_local() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
 
     let effects = dispatch(Action::SendPrompt("later".into()), &mut app);
     assert!(
-        effects
-            .iter()
-            .all(|e| !matches!(e, Effect::SendInterject { .. })),
-        "Queue must not interject mid-turn, got {effects:?}"
+        effects.is_empty(),
+        "a prompt typed mid-turn must only queue, got {effects:?}"
     );
-    // Queue: local drip-feed path (not server-immediate).
+    // Local drip-feed path: the prompt waits for the running turn to end.
     assert_eq!(app.agents[&id].session.queue_len(), 1);
 }
 
-/// With Steer, an older local drip-feed row still blocks server-immediate
-/// send: newer Enter must not interject or jump the server queue ahead of
-/// the older local prompt.
+/// A prompt with attachments typed mid-turn joins the local queue like any other.
 #[test]
-fn send_while_running_with_pending_local_and_steer_preserves_fifo() {
-    struct ResetFollowUp(crate::appearance::FollowUpBehavior);
-    impl Drop for ResetFollowUp {
-        fn drop(&mut self) {
-            crate::appearance::cache::set_follow_up_behavior(self.0);
-        }
-    }
-    let _reset = ResetFollowUp(crate::appearance::cache::load_follow_up_behavior());
-    crate::appearance::cache::set_follow_up_behavior(crate::appearance::FollowUpBehavior::Steer);
-
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.session.state = AgentState::TurnRunning;
-        agent.session.enqueue_prompt("two".into());
-        assert_eq!(agent.session.pending_prompts.len(), 1);
-    }
-
-    let effects = dispatch(Action::SendPrompt("three".into()), &mut app);
-    assert!(
-        effects
-            .iter()
-            .all(|e| !matches!(e, Effect::SendInterject { .. } | Effect::SendPrompt { .. })),
-        "Steer must not bypass empty-local-queue gate, got {effects:?}"
-    );
-    let order: Vec<&str> = app.agents[&id]
-        .session
-        .pending_prompts
-        .iter()
-        .map(|p| p.text.as_str())
-        .collect();
-    assert_eq!(order, vec!["two", "three"]);
-}
-
-/// Images never ride server-immediate; with Steer they still join the local
-/// queue (no interject-on-Enter with attachments).
-#[test]
-fn send_prompt_with_images_while_running_and_steer_stays_local() {
-    struct ResetFollowUp(crate::appearance::FollowUpBehavior);
-    impl Drop for ResetFollowUp {
-        fn drop(&mut self) {
-            crate::appearance::cache::set_follow_up_behavior(self.0);
-        }
-    }
-    let _reset = ResetFollowUp(crate::appearance::cache::load_follow_up_behavior());
-    crate::appearance::cache::set_follow_up_behavior(crate::appearance::FollowUpBehavior::Steer);
-
+fn send_prompt_with_images_while_running_stays_local() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     {
@@ -840,23 +736,16 @@ fn send_prompt_with_images_while_running_and_steer_stays_local() {
 
     let effects = dispatch(Action::SendPrompt("with image".into()), &mut app);
     assert!(
-        effects
-            .iter()
-            .all(|e| !matches!(e, Effect::SendInterject { .. } | Effect::SendPrompt { .. })),
-        "images + Steer must not interject or server-send, got {effects:?}"
+        effects.is_empty(),
+        "an image prompt typed mid-turn must only queue, got {effects:?}"
     );
     assert_eq!(app.agents[&id].session.queue_len(), 1);
 }
 
-/// Regression (queue reorder race): a plain prompt typed while a turn is
-/// running must NOT jump onto the server queue when an older prompt is still
-/// waiting in the local drip-feed queue — e.g. prompts queued during
-/// "Starting session…" before the turn began, where the first drains to
-/// start the turn and the rest are stranded locally. If the new prompt
-/// immediate-sent onto the server queue it would render/run AHEAD of the
-/// older local prompt (the merge is server-rows-first), so `[2, 3]` showed
-/// up as `[3, 2]`. The new prompt must instead join the local queue behind
-/// the older one, preserving FIFO.
+/// A prompt typed while a turn is running joins the local drip-feed queue
+/// BEHIND an older prompt already waiting there — e.g. prompts queued during
+/// "Starting session…" before the turn began, where the first drains to start
+/// the turn and the rest are stranded locally — so FIFO order is preserved.
 #[test]
 fn send_while_running_with_pending_local_prompt_preserves_fifo() {
     let mut app = test_app_with_agent();
@@ -893,23 +782,10 @@ fn send_while_running_with_pending_local_prompt_preserves_fifo() {
         vec!["two", "three"],
         "new prompt must queue behind the older local prompt"
     );
-    // No optimistic shared-queue echo was created (nothing went server-side).
-    assert!(
-        app.shared_prompt_queue("test-session")
-            .is_none_or(|q| q.is_empty()),
-        "no server-queue echo while routing locally"
-    );
 }
 
 #[test]
 fn turn_end_drains_next_queued_prompt() {
-    // With Steer, a plain prompt typed while running is sent
-    // server-authoritatively and drained by the agent, not by the local
-    // queue. The agent's `running_prompt_id` broadcast (modeled here by a
-    // stashed adoption that arrived before the previous turn's
-    // PromptResponse) is adopted by the PromptResponse handler after
-    // `finish_turn`, rendering its user block.
-    let _steer = SteerFollowUp::enter();
     let mut app = test_app_with_agent();
     let id = AgentId(0);
 
@@ -918,34 +794,12 @@ fn turn_end_drains_next_queued_prompt() {
     assert_eq!(effects.len(), 1);
     assert!(app.agents[&id].session.state.is_turn_running());
 
-    // Submit second prompt while running → immediate server-authoritative
-    // send (no local queue entry).
+    // Submit second prompt while running → joins the local queue.
     let effects = dispatch(Action::SendPrompt("second".into()), &mut app);
-    let pid_second = match &effects[0] {
-        Effect::SendPrompt {
-            text, prompt_id, ..
-        } => {
-            assert_eq!(text, "second");
-            prompt_id.clone()
-        }
-        other => panic!("expected immediate SendPrompt, got {other:?}"),
-    };
-    assert_eq!(app.agents[&id].session.queue_len(), 0);
+    assert!(effects.is_empty(), "got {effects:?}");
+    assert_eq!(app.agents[&id].session.queue_len(), 1);
 
-    // Model the agent's running=second broadcast arriving before first's
-    // PromptResponse: stash the adoption (FIFO handoff race).
-    app.pending_running_adoptions.insert(
-        id,
-        crate::app::acp_handler::PendingRunningAdoption {
-            prompt_id: pid_second.clone(),
-            text: Some("second".to_string()),
-            combined_texts: None,
-            kind: "prompt".to_string(),
-        },
-    );
-
-    // Turn ends → PromptResponse → finish_turn clears current_prompt_id,
-    // then the stashed adoption is applied (turn-start shim).
+    // Turn ends → the queue drains "second" (+ the billing refresh).
     let effects = dispatch(
         Action::TaskComplete(TaskResult::PromptResponse {
             agent_id: id,
@@ -955,67 +809,16 @@ fn turn_end_drains_next_queued_prompt() {
         }),
         &mut app,
     );
-
-    // No re-send (the prompt was already sent at enqueue time): only the
-    // billing refresh effect.
-    assert_eq!(effects.len(), 1);
+    assert_eq!(effects.len(), 2);
+    assert!(matches!(&effects[0], Effect::SendPrompt { text, .. } if text == "second"));
     assert!(matches!(
-        &effects[0],
+        &effects[1],
         Effect::FetchBilling { silent: true, .. }
     ));
     assert!(app.agents[&id].session.state.is_turn_running());
-    // current_prompt_id was handed off to the second prompt for correlation.
-    assert_eq!(
-        app.agents[&id].session.current_prompt_id.as_deref(),
-        Some(pid_second.as_str())
-    );
-    assert!(app.pending_running_adoptions.is_empty());
+    assert_eq!(app.agents[&id].session.queue_len(), 0);
     // Scrollback: user "first" + "Worked for" + user "second".
     assert_eq!(app.agents[&id].scrollback.len(), 3);
-}
-
-/// PromptResponse FIFO handoff must forward `combined_texts` (one bubble each).
-#[test]
-fn prompt_response_fifo_handoff_paints_multi_bubble_combined() {
-    use crate::scrollback::block::RenderBlock;
-
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    dispatch(Action::SendPrompt("first".into()), &mut app);
-    assert!(app.agents[&id].session.state.is_turn_running());
-
-    app.pending_running_adoptions.insert(
-        id,
-        crate::app::acp_handler::PendingRunningAdoption {
-            prompt_id: "p-combo".into(),
-            text: Some("alpha\n\nbeta".into()),
-            combined_texts: Some(vec!["alpha".into(), "beta".into()]),
-            kind: "prompt".into(),
-        },
-    );
-    dispatch(
-        Action::TaskComplete(TaskResult::PromptResponse {
-            agent_id: id,
-            result: Ok(acp::PromptResponse::new(acp::StopReason::EndTurn)),
-            http_status: None,
-            prompt_id: None,
-        }),
-        &mut app,
-    );
-
-    let agent = app.agents.get(&id).unwrap();
-    assert_eq!(agent.session.current_prompt_id.as_deref(), Some("p-combo"));
-    assert!(app.pending_running_adoptions.is_empty());
-    let user_texts: Vec<_> = (0..agent.scrollback.len())
-        .filter_map(|i| agent.scrollback.entry(i))
-        .filter_map(|e| match &e.block {
-            RenderBlock::UserPrompt(ub) => Some(ub.text.as_str()),
-            _ => None,
-        })
-        .collect();
-    assert!(user_texts.contains(&"alpha"));
-    assert!(user_texts.contains(&"beta"));
-    assert!(user_texts.iter().all(|t| !t.contains("\n\n")));
 }
 
 #[test]
@@ -1205,49 +1008,6 @@ fn turn_end_with_draft_does_not_fetch_prompt_suggestion() {
             .iter()
             .any(|e| matches!(e, Effect::FetchPromptSuggestion { .. })),
         "a draft suppresses the suggestion fetch: {effects:?}"
-    );
-}
-
-/// A non-empty server-authoritative shared queue means more queued turns are
-/// coming — no suggestion fetch (mirrors the local `pending_prompts` guard).
-#[test]
-fn turn_end_with_shared_queue_does_not_fetch_prompt_suggestion() {
-    crate::appearance::cache::set_prompt_suggestions(true);
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.session.state = AgentState::TurnRunning;
-        agent.turn_started_at = Some(std::time::Instant::now());
-        agent
-            .shared_queue
-            .push(crate::app::prompt_queue::QueueEntryWire {
-                id: "q1".into(),
-                version: 1,
-                owner: None,
-                last_editor: None,
-                kind: "prompt".into(),
-                text: "queued server-side".into(),
-                position: 0,
-                combined_texts: None,
-            });
-    }
-
-    let effects = dispatch(
-        Action::TaskComplete(TaskResult::PromptResponse {
-            agent_id: id,
-            result: Ok(acp::PromptResponse::new(acp::StopReason::EndTurn)),
-            http_status: None,
-            prompt_id: None,
-        }),
-        &mut app,
-    );
-
-    assert!(
-        !effects
-            .iter()
-            .any(|e| matches!(e, Effect::FetchPromptSuggestion { .. })),
-        "a non-empty server shared queue suppresses the suggestion fetch: {effects:?}"
     );
 }
 
@@ -1658,7 +1418,6 @@ fn prompt_response_routes_idle_title_through_frame_pipeline() {
 
 #[test]
 fn turn_complete_notification_suppressed_when_queue_non_empty() {
-    let _steer = SteerFollowUp::enter();
     let mut app = test_app_with_agent();
     let id = AgentId(0);
 
@@ -1667,27 +1426,13 @@ fn turn_complete_notification_suppressed_when_queue_non_empty() {
     assert_eq!(effects.len(), 1);
     assert!(app.agents[&id].session.state.is_turn_running());
 
-    // Send a second prompt while the first is running → immediate
-    // server-authoritative send.
+    // A second prompt typed while the first runs waits in the local queue.
     let effects = dispatch(Action::SendPrompt("second".into()), &mut app);
-    let pid_second = match &effects[0] {
-        Effect::SendPrompt { prompt_id, .. } => prompt_id.clone(),
-        other => panic!("expected immediate SendPrompt, got {other:?}"),
-    };
-    // Model the agent's running=second broadcast arriving before first's
-    // PromptResponse (stashed adoption ⇒ next turn is about to start).
-    app.pending_running_adoptions.insert(
-        id,
-        crate::app::acp_handler::PendingRunningAdoption {
-            prompt_id: pid_second,
-            text: Some("second".to_string()),
-            combined_texts: None,
-            kind: "prompt".to_string(),
-        },
-    );
+    assert!(effects.is_empty(), "got {effects:?}");
+    assert_eq!(app.agents[&id].session.queue_len(), 1);
 
-    // First turn completes — a server prompt is about to start (pending
-    // adoption), so the TurnComplete notification must be suppressed.
+    // First turn completes — the queued prompt drains straight into the next
+    // turn, so the TurnComplete notification must be suppressed.
     let effects = dispatch(
         Action::TaskComplete(TaskResult::PromptResponse {
             agent_id: id,
@@ -1697,12 +1442,7 @@ fn turn_complete_notification_suppressed_when_queue_non_empty() {
         }),
         &mut app,
     );
-    // No re-send; only billing refresh. The second prompt is adopted.
-    assert_eq!(effects.len(), 1);
-    assert!(matches!(
-        &effects[0],
-        Effect::FetchBilling { silent: true, .. }
-    ));
+    assert!(matches!(&effects[0], Effect::SendPrompt { text, .. } if text == "second"));
     assert!(app.agents[&id].session.state.is_turn_running());
     assert!(
         app.deferred_notification.is_none(),
@@ -1726,230 +1466,6 @@ fn turn_complete_notification_suppressed_when_queue_non_empty() {
     assert!(
         app.deferred_notification.is_some(),
         "notification must fire when prompt queue is empty",
-    );
-}
-
-/// Regression: cancelling while prompts are queued must hand the queue to
-/// the agent untouched. The FRONT queued prompt runs next (promoted
-/// server-side), the rest stay queued in order, and the authoritative
-/// `legacy ext RPC` rebroadcast — not client-side prediction — updates
-/// the mirror. Nothing resurrects or reorders.
-#[test]
-fn cancel_hands_queue_to_agent_without_reordering() {
-    use crate::app::prompt_queue::{QueueChanged, QueueEntryWire};
-
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    let sid = "test-session".to_string();
-
-    // Running turn (`p-run`) plus three prompts typed while running. They
-    // exist as optimistic echoes (no confirming broadcast yet) and are
-    // mirrored into `agent.shared_queue`, exactly as the immediate-send path
-    // leaves things.
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.session.state = AgentState::TurnRunning;
-        agent.session.current_prompt_id = Some("p-run".into());
-    }
-    app.push_optimistic_prompt_echo(&sid, "q1", "one", "prompt");
-    app.push_optimistic_prompt_echo(&sid, "q2", "two", "prompt");
-    app.push_optimistic_prompt_echo(&sid, "q3", "three", "prompt");
-    {
-        let snapshot = app.shared_prompt_queue(&sid).cloned().unwrap();
-        app.agents.get_mut(&id).unwrap().shared_queue = snapshot;
-    }
-
-    // Cancel: the input stays empty and no queued prompt is dropped
-    // client-side — the agent promotes the front (q1) and rebroadcasts.
-    let effects = dispatch(Action::CancelTurn, &mut app);
-    assert!(
-        app.agents[&id].prompt.text().is_empty(),
-        "cancel must not restore a queued prompt into the input"
-    );
-    assert!(
-        effects
-            .iter()
-            .any(|e| matches!(e, Effect::CancelTurn { .. })),
-        "must emit CancelTurn, got {effects:?}"
-    );
-    // q1's optimistic echo is left in place — it runs next, and the
-    // broadcast (not a client-side retire) reconciles it.
-    assert!(
-        app.optimistic_prompt_echoes
-            .get(&sid)
-            .is_some_and(|v| v.iter().any(|e| e.id == "q1")),
-        "front prompt's optimistic echo must survive the cancel (it runs next)"
-    );
-
-    // The agent tears down p-run, promotes q1 (the front) as the running
-    // turn, and rebroadcasts the authoritative remaining queue: [q2, q3]
-    // with q1 running (dropped from the pending list).
-    app.apply_queue_changed(QueueChanged {
-        session_id: sid.clone(),
-        entries: vec![
-            QueueEntryWire {
-                id: "q2".into(),
-                version: 0,
-                owner: None,
-                last_editor: None,
-                kind: "prompt".into(),
-                text: "two".into(),
-                position: 0,
-                combined_texts: None,
-            },
-            QueueEntryWire {
-                id: "q3".into(),
-                version: 0,
-                owner: None,
-                last_editor: None,
-                kind: "prompt".into(),
-                text: "three".into(),
-                position: 1,
-                combined_texts: None,
-            },
-        ],
-        running_prompt_id: Some("q1".into()),
-
-        running_text: None,
-        running_kind: None,
-        running_combined_texts: None,
-    });
-
-    // Post-broadcast the queue is exactly [q2, q3] in order — q1 is now the
-    // running turn, nothing resurrects or reorders.
-    let texts: Vec<String> = app
-        .shared_prompt_queue(&sid)
-        .cloned()
-        .unwrap_or_default()
-        .iter()
-        .map(|e| e.text.clone())
-        .collect();
-    assert_eq!(
-        texts,
-        vec!["two".to_string(), "three".to_string()],
-        "front runs next; remaining queue stays in order"
-    );
-}
-
-/// Regression for the "queued message renders 2×" dup: a shell/proxy that
-/// re-keys the prompt (the broadcast row and later `running_prompt_id` carry a
-/// DIFFERENT id than the pager's optimistic echo) must still reconcile the
-/// echo by kind+text. Without the fallback the echo is pinned forever — the
-/// message shows as a stale queue row alongside the server's copy, and then
-/// alongside the running turn's user block.
-#[test]
-fn rekeyed_broadcast_reconciles_optimistic_echo_by_text() {
-    use crate::app::prompt_queue::{QueueChanged, QueueEntryWire};
-
-    let mut app = test_app_with_agent();
-    let sid = "test-session".to_string();
-
-    app.push_optimistic_prompt_echo(&sid, "pager-id", "run the tests", "prompt");
-
-    // The shell accepted the message under its own id.
-    app.apply_queue_changed(QueueChanged {
-        session_id: sid.clone(),
-        entries: vec![QueueEntryWire {
-            id: "shell-id".into(),
-            version: 0,
-            owner: None,
-            last_editor: None,
-            kind: "prompt".into(),
-            text: "run the tests".into(),
-            position: 0,
-            combined_texts: None,
-        }],
-        running_prompt_id: None,
-
-        running_text: None,
-        running_kind: None,
-        running_combined_texts: None,
-    });
-
-    let rows = app.shared_prompt_queue(&sid).cloned().unwrap_or_default();
-    assert_eq!(
-        rows.iter().filter(|e| e.text == "run the tests").count(),
-        1,
-        "the re-keyed authoritative row must supersede the echo (no 2x row)"
-    );
-    assert!(
-        !app.optimistic_prompt_echoes.contains_key(&sid),
-        "the echo must be retired by the text-level reconcile"
-    );
-
-    // Same for the promote broadcast: echo pending, then the re-keyed row
-    // starts running (dropped from entries, carried as running_prompt_id).
-    app.push_optimistic_prompt_echo(&sid, "pager-id-2", "second message", "prompt");
-    app.apply_queue_changed(QueueChanged {
-        session_id: sid.clone(),
-        entries: vec![QueueEntryWire {
-            id: "shell-id-2".into(),
-            version: 0,
-            owner: None,
-            last_editor: None,
-            kind: "prompt".into(),
-            text: "second message".into(),
-            position: 0,
-            combined_texts: None,
-        }],
-        running_prompt_id: None,
-
-        running_text: None,
-        running_kind: None,
-        running_combined_texts: None,
-    });
-    app.apply_queue_changed(QueueChanged {
-        session_id: sid.clone(),
-        entries: vec![],
-        running_prompt_id: Some("shell-id-2".into()),
-
-        running_text: None,
-        running_kind: None,
-        running_combined_texts: None,
-    });
-    assert!(
-        app.shared_prompt_queue(&sid).is_none(),
-        "no stale echo row may survive the promote (the turn renders the block)"
-    );
-
-    // Running-row fallback: the echo lands AFTER the broadcast that listed
-    // the re-keyed row (reconnect-replay shape) — the promote must retire it
-    // via the prior snapshot's kind+text, not leave it pinned forever.
-    app.apply_queue_changed(QueueChanged {
-        session_id: sid.clone(),
-        entries: vec![QueueEntryWire {
-            id: "shell-id-3".into(),
-            version: 0,
-            owner: None,
-            last_editor: None,
-            kind: "prompt".into(),
-            text: "third message".into(),
-            position: 0,
-            combined_texts: None,
-        }],
-        running_prompt_id: None,
-
-        running_text: None,
-        running_kind: None,
-        running_combined_texts: None,
-    });
-    app.push_optimistic_prompt_echo(&sid, "pager-id-3", "third message", "prompt");
-    app.apply_queue_changed(QueueChanged {
-        session_id: sid.clone(),
-        entries: vec![],
-        running_prompt_id: Some("shell-id-3".into()),
-
-        running_text: None,
-        running_kind: None,
-        running_combined_texts: None,
-    });
-    assert!(
-        app.shared_prompt_queue(&sid).is_none(),
-        "the promote's running row (kind+text) must retire the late echo"
-    );
-    assert!(
-        !app.optimistic_prompt_echoes.contains_key(&sid),
-        "no echo may be pinned after its message started running"
     );
 }
 
@@ -2169,7 +1685,6 @@ fn cancel_drain_is_blocked_when_editing_front_prompt() {
     app.agents.get_mut(&id).unwrap().prompt_mode = PromptMode::EditingQueued {
         id: queued_id,
         original: "queued-1".into(),
-        server_id: None,
         kind: crate::app::agent::QueueEntryKind::Prompt,
     };
 
@@ -2195,8 +1710,7 @@ fn cancel_drain_is_blocked_when_editing_front_prompt() {
     assert_eq!(app.agents[&id].session.pending_prompts[1].text, "queued-2");
 }
 
-/// An IDLE bash submit is UNCHANGED — local enqueue + drain
-/// (no optimistic shared-queue echo).
+/// An IDLE bash submit is a local enqueue + immediate drain.
 #[test]
 fn bash_while_idle_stays_on_local_path() {
     let mut app = test_app_with_agent();
@@ -2208,11 +1722,31 @@ fn bash_while_idle_stays_on_local_path() {
         effects.as_slice(),
         [Effect::SendBashCommand { .. }]
     ));
-    // No optimistic shared-queue echo on the local path.
-    assert!(app.shared_prompt_queue("test-session").is_none());
     // Drain started the turn and set the bash-focus flag locally.
     assert!(app.agents[&id].session.state.is_turn_running());
     assert!(app.agents[&id].bash_turn);
+}
+
+/// A bash command typed while a turn is RUNNING queues locally behind it: no
+/// immediate effect, the composer clears, and the entry waits for the drain.
+#[test]
+fn bash_while_running_is_queued_locally() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
+
+    let effects = dispatch(Action::SendBashCommand("ls -la".into()), &mut app);
+
+    assert!(
+        effects.is_empty(),
+        "nothing may send mid-turn, got {effects:?}"
+    );
+    let agent = &app.agents[&id];
+    assert_eq!(agent.session.queue_len(), 1, "the command must be queued");
+    assert!(
+        agent.prompt.text().is_empty(),
+        "the composer must be cleared"
+    );
 }
 
 /// A bash command submitted before the session binds is queued, clears the composer, and still lands
@@ -2760,7 +2294,7 @@ fn show_queue_no_active_agent_is_noop() {
     assert!(effects.is_empty(), "ShowQueue without an agent is a no-op");
 }
 
-// ── Send-now cancel marker suppression (PromptResponse rail) ────────
+// ── Cancel marker (PromptResponse rail) ────────
 
 /// Count of "Turn cancelled by user …" marker blocks in the agent's scrollback.
 fn count_cancelled_markers(app: &AppView, id: AgentId) -> usize {
@@ -2776,60 +2310,15 @@ fn count_cancelled_markers(app: &AppView, id: AgentId) -> usize {
         .count()
 }
 
-/// Count of "Worked for …" marker blocks (parked or terminal).
-fn count_completed_markers(app: &AppView, id: AgentId) -> usize {
-    let agent = &app.agents[&id];
-    (0..agent.scrollback.len())
-        .filter(|i| {
-            matches!(
-                agent.scrollback.entry(*i).map(|e| &e.block),
-                Some(RenderBlock::SessionEvent(ev))
-                    if matches!(ev.event, SessionEvent::TurnCompleted { .. })
-            )
-        })
-        .count()
-}
 
-/// A cancelled `PromptResponse` for the running turn, optionally stamped `_meta.cancelTrigger`.
-fn cancelled_prompt_response(id: AgentId, cancel_trigger: Option<&str>) -> Action {
-    let mut meta = serde_json::Map::new();
-    if let Some(t) = cancel_trigger {
-        meta.insert("cancelTrigger".into(), serde_json::Value::String(t.into()));
-    }
-    let pr = if meta.is_empty() {
-        acp::PromptResponse::new(acp::StopReason::Cancelled)
-    } else {
-        acp::PromptResponse::new(acp::StopReason::Cancelled).meta(Some(meta))
-    };
+/// A cancelled `PromptResponse` for the running turn.
+fn cancelled_prompt_response(id: AgentId) -> Action {
     Action::TaskComplete(TaskResult::PromptResponse {
         agent_id: id,
-        result: Ok(pr),
+        result: Ok(acp::PromptResponse::new(acp::StopReason::Cancelled)),
         http_status: None,
         prompt_id: None,
     })
-}
-
-/// A `_meta.cancelTrigger: "send_now"` turn end renders no cancel/completed marker.
-#[test]
-fn send_now_cancel_via_wire_meta_pushes_no_cancelled_marker() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    dispatch(Action::SendPrompt("first".into()), &mut app);
-    assert!(app.agents[&id].session.state.is_turn_running());
-
-    let _ = dispatch(cancelled_prompt_response(id, Some("send_now")), &mut app);
-
-    assert!(app.agents[&id].session.state.is_idle());
-    assert_eq!(
-        count_cancelled_markers(&app, id),
-        0,
-        "a send-now cancel must not render the cancelled marker"
-    );
-    assert_eq!(
-        count_completed_markers(&app, id),
-        0,
-        "no substitute 'Worked for' for the cancelled turn either"
-    );
 }
 
 /// Control: a plain cancel (no meta, no expectation) still renders its marker.
@@ -2843,420 +2332,13 @@ fn plain_cancel_still_pushes_cancelled_marker() {
     let _ = dispatch(Action::CancelTurn, &mut app);
     assert!(app.agents[&id].session.state.is_cancelling());
 
-    let _ = dispatch(cancelled_prompt_response(id, None), &mut app);
+    let _ = dispatch(cancelled_prompt_response(id), &mut app);
 
     assert!(app.agents[&id].session.state.is_idle());
     assert_eq!(
         count_cancelled_markers(&app, id),
         1,
         "a real user cancel keeps its marker"
-    );
-}
-
-/// A non-"send_now" wire trigger wins over the client-side expectation (marker renders).
-#[test]
-fn non_send_now_wire_trigger_wins_over_client_expectation() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    dispatch(Action::SendPrompt("first".into()), &mut app);
-    app.agents.get_mut(&id).unwrap().expect_send_now_cancel = Some("p-send-now".into());
-
-    let _ = dispatch(cancelled_prompt_response(id, Some("ctrl_c")), &mut app);
-
-    assert_eq!(
-        count_cancelled_markers(&app, id),
-        1,
-        "an explicit non-send-now wire trigger must render the marker"
-    );
-    assert!(
-        app.agents[&id].expect_send_now_cancel.is_none(),
-        "the expectation is consumed at every driver turn end"
-    );
-}
-
-/// Older-shell fallback: `SendPromptNow` arms the expectation; a meta-less cancel is suppressed.
-#[test]
-fn send_prompt_now_dispatch_arms_expectation_and_suppresses_marker() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    dispatch(Action::SendPrompt("first".into()), &mut app);
-    app.agents.get_mut(&id).unwrap().front_message_committed = true;
-
-    let effects = dispatch(
-        Action::SendPromptNow {
-            text: "run this instead".into(),
-            images: vec![],
-        },
-        &mut app,
-    );
-    assert!(matches!(effects.as_slice(), [Effect::SendPromptNow { .. }]));
-    assert!(
-        app.agents[&id].expect_send_now_cancel.is_some(),
-        "send-now dispatch must arm the cancel expectation"
-    );
-
-    let _ = dispatch(cancelled_prompt_response(id, None), &mut app);
-
-    assert_eq!(
-        count_cancelled_markers(&app, id),
-        0,
-        "the expected send-now cancel must not render the cancelled marker"
-    );
-    assert!(
-        app.agents[&id].expect_send_now_cancel.is_none(),
-        "the expectation is consumed by the turn end"
-    );
-}
-
-/// Older-shell control: a plain `SendPrompt` during a held wait stays unarmed,
-/// so a meta-less cancel still renders its marker.
-#[test]
-fn plain_send_during_blocking_wait_does_not_arm_and_meta_less_cancel_is_visible() {
-    use crate::app::agent_view::test_fixtures::simulate_task_output_wait;
-
-    let _steer = SteerFollowUp::enter();
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    dispatch(Action::SendPrompt("first".into()), &mut app);
-    assert!(
-        app.agents[&id].expect_send_now_cancel.is_none(),
-        "an idle-drain send must NOT arm the expectation"
-    );
-    simulate_task_output_wait(app.agents.get_mut(&id).unwrap(), "bg-1");
-
-    let effects = dispatch(Action::SendPrompt("wake up and do this".into()), &mut app);
-    let prompt_id = match effects.as_slice() {
-        [Effect::SendPrompt { prompt_id, .. }] => prompt_id.clone(),
-        other => panic!("mid-turn plain prompt takes the immediate server send, got {other:?}"),
-    };
-    let agent = &app.agents[&id];
-    assert!(
-        agent.expect_send_now_cancel.is_none(),
-        "a plain send into a held wait must not arm send-now"
-    );
-    assert!(
-        agent.follow_without_jump_prompt_id.is_none(),
-        "a plain send must not pin follow-without-jump"
-    );
-    assert!(
-        !agent.send_now_painted_blocks.contains_key(&prompt_id),
-        "a plain send must not paint a speculative send-now block"
-    );
-
-    let _ = dispatch(cancelled_prompt_response(id, None), &mut app);
-    assert_eq!(
-        count_cancelled_markers(&app, id),
-        1,
-        "older-shell meta-less cancel after an unarmed plain send stays visible"
-    );
-}
-
-/// Modern shell: wire `cancelTrigger=send_now` suppresses the marker without a pager arm.
-#[test]
-fn plain_send_during_blocking_wait_trusts_wire_send_now_trigger() {
-    use crate::app::agent_view::test_fixtures::simulate_task_output_wait;
-
-    let _steer = SteerFollowUp::enter();
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    dispatch(Action::SendPrompt("first".into()), &mut app);
-    simulate_task_output_wait(app.agents.get_mut(&id).unwrap(), "bg-1");
-
-    let effects = dispatch(Action::SendPrompt("wake up and do this".into()), &mut app);
-    let prompt_id = match effects.as_slice() {
-        [Effect::SendPrompt { prompt_id, .. }] => prompt_id.clone(),
-        other => panic!("mid-turn plain prompt takes the immediate server send, got {other:?}"),
-    };
-    let agent = &app.agents[&id];
-    assert!(agent.expect_send_now_cancel.is_none());
-    assert!(agent.follow_without_jump_prompt_id.is_none());
-    assert!(!agent.send_now_painted_blocks.contains_key(&prompt_id));
-
-    let _ = dispatch(cancelled_prompt_response(id, Some("send_now")), &mut app);
-    assert_eq!(count_cancelled_markers(&app, id), 0);
-    assert_eq!(
-        count_completed_markers(&app, id),
-        0,
-        "no substitute completed marker for a wire send-now cancel"
-    );
-}
-
-/// A plain mid-turn prompt (no held wait) must not arm the expectation.
-#[test]
-fn plain_send_while_streaming_does_not_arm_expectation() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    dispatch(Action::SendPrompt("first".into()), &mut app);
-
-    let _ = dispatch(Action::SendPrompt("follow-up".into()), &mut app);
-    assert!(
-        app.agents[&id].expect_send_now_cancel.is_none(),
-        "a queued follow-up outside a held wait must not arm the expectation"
-    );
-
-    let _ = dispatch(Action::CancelTurn, &mut app);
-    let _ = dispatch(cancelled_prompt_response(id, None), &mut app);
-    assert_eq!(
-        count_cancelled_markers(&app, id),
-        1,
-        "the later real cancel keeps its marker"
-    );
-}
-
-/// Queue-pane "Send now" of a server row arms the expectation (older-shell fallback).
-#[test]
-fn queue_interject_shared_arms_expectation_while_running() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    dispatch(Action::SendPrompt("first".into()), &mut app);
-    app.agents.get_mut(&id).unwrap().front_message_committed = true;
-
-    let effects = dispatch(
-        Action::QueueInterjectShared {
-            id: "srv-row-1".into(),
-            expected_version: 1,
-            new_text: None,
-        },
-        &mut app,
-    );
-    assert!(matches!(
-        effects.as_slice(),
-        [Effect::QueueInterject { .. }]
-    ));
-    assert_eq!(
-        app.agents[&id].expect_send_now_cancel.as_deref(),
-        Some("srv-row-1"),
-        "server-row send-now must arm the cancel expectation"
-    );
-    assert!(app.agents[&id].is_self_originated_prompt("srv-row-1"));
-}
-
-/// A failed send-now RPC requeues its payload (front) instead of silently
-/// dropping the message, and retires the optimistic queue echo.
-#[test]
-fn failed_send_now_requeues_payload_and_retires_echo() {
-    use agent_client_protocol as acp;
-
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    dispatch(Action::SendPrompt("first".into()), &mut app);
-
-    let effects = dispatch(
-        Action::SendPromptNow {
-            text: "gets lost on the wire".into(),
-            images: vec![],
-        },
-        &mut app,
-    );
-    let prompt_id = match effects.as_slice() {
-        [Effect::SendPromptNow { prompt_id, .. }] => prompt_id.clone(),
-        other => panic!("expected SendPromptNow effect, got {other:?}"),
-    };
-    assert!(
-        app.agents[&id]
-            .shared_queue
-            .iter()
-            .any(|e| e.id == prompt_id),
-        "the optimistic echo must be visible before the failure"
-    );
-
-    let _ = dispatch(
-        Action::TaskComplete(TaskResult::SendPromptNowFailed {
-            agent_id: id,
-            session_id: acp::SessionId::new("test-session"),
-            prompt_id: prompt_id.clone(),
-            error: "transport closed".into(),
-            blocks: vec![acp::ContentBlock::Text(acp::TextContent::new(
-                "gets lost on the wire".to_string(),
-            ))],
-        }),
-        &mut app,
-    );
-
-    let agent = &app.agents[&id];
-    assert_eq!(
-        agent
-            .session
-            .pending_prompts
-            .front()
-            .map(|p| p.text.as_str()),
-        Some("gets lost on the wire"),
-        "the failed payload must be requeued at the front"
-    );
-    assert!(
-        !agent.shared_queue.iter().any(|e| e.id == prompt_id),
-        "the optimistic echo must be retired"
-    );
-    assert!(agent.toast.is_some(), "the failure must explain itself");
-}
-
-/// With Steer, an image-bearing prompt submitted during a parked sendable
-/// wait routes through send-now (images ride as content blocks) instead of
-/// silently holding in the local queue behind the wait.
-#[test]
-fn image_prompt_during_sendable_wait_routes_to_send_now() {
-    use crate::app::agent_view::test_fixtures::simulate_task_output_wait;
-
-    let _steer = SteerFollowUp::enter();
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    dispatch(Action::SendPrompt("first".into()), &mut app);
-    simulate_task_output_wait(app.agents.get_mut(&id).unwrap(), "bg-1");
-
-    let img = crate::prompt_images::from_clipboard_data(&crate::clipboard::ImageData {
-        data: vec![1, 2, 3],
-        mime_type: "image/png".into(),
-    });
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        // A real chip insert: `drain_images` reconciles against live textarea
-        // elements, so a bare `images.push` would be dropped as stale.
-        agent.prompt.insert_image(img).unwrap();
-    }
-
-    let effects = dispatch(Action::SendPrompt("look at [Image #1]".into()), &mut app);
-    match effects.as_slice() {
-        [Effect::SendPromptNow { blocks, .. }] => {
-            assert!(
-                blocks
-                    .iter()
-                    .any(|b| matches!(b, acp::ContentBlock::Image(_))),
-                "the pasted image must ride the send-now blocks"
-            );
-        }
-        other => {
-            panic!("expected SendPromptNow for an image prompt in a sendable wait, got {other:?}")
-        }
-    }
-    let agent = &app.agents[&id];
-    assert!(
-        agent.session.pending_prompts.is_empty(),
-        "the message must not ALSO be held in the local queue"
-    );
-    assert!(
-        agent.prompt.images.is_empty(),
-        "the composer images must be consumed by the send"
-    );
-}
-
-/// The local drip-feed drain must hold while a non-running server row exists —
-/// the shell owns the next turn (its `running_prompt_id` broadcast starts it).
-/// Draining locally would promote a bogus local turn that swallows the real
-/// turn's deltas.
-#[test]
-fn local_drain_holds_while_server_row_queued() {
-    use crate::app::dispatch::queue::maybe_drain_queue;
-    use crate::app::dispatch::tests::enqueue_local;
-
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    enqueue_local(&mut app, id, "local follow-up");
-    app.agents.get_mut(&id).unwrap().shared_queue =
-        vec![crate::app::prompt_queue::QueueEntryWire {
-            id: "srv-1".into(),
-            version: 0,
-            owner: None,
-            last_editor: None,
-            kind: "prompt".into(),
-            text: "server-owned next".into(),
-            position: 0,
-            combined_texts: None,
-        }];
-
-    let agent = app.agents.get_mut(&id).unwrap();
-    assert!(agent.session.state.is_idle());
-    let effects = maybe_drain_queue(agent).effects;
-    assert!(
-        effects.is_empty(),
-        "local drain must hold while the server owns the next turn, got {effects:?}"
-    );
-    assert_eq!(
-        agent.session.pending_prompts.len(),
-        1,
-        "the local row must stay queued"
-    );
-
-    // The running server row does NOT hold the drain (it is the in-flight
-    // turn, not a queued one) — once it's marked running and the turn ends,
-    // the local row drains normally.
-    agent.session.current_prompt_id = Some("srv-1".into());
-    let effects = maybe_drain_queue(agent).effects;
-    assert!(
-        matches!(effects.as_slice(), [Effect::SendPrompt { .. }]),
-        "a running-only shared queue must not hold the local drain, got {effects:?}"
-    );
-}
-
-/// A real turn start clears a stale expectation (so a later Ctrl+C keeps its marker).
-#[test]
-fn stale_expectation_cleared_on_next_turn_start() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    app.agents.get_mut(&id).unwrap().expect_send_now_cancel = Some("p-stale".into());
-
-    dispatch(Action::SendPrompt("fresh turn".into()), &mut app);
-    assert!(
-        app.agents[&id].expect_send_now_cancel.is_none(),
-        "turn start must clear a stale expectation"
-    );
-
-    // Real Ctrl+C on the fresh turn keeps its marker (stash dropped → standard path).
-    app.agents.get_mut(&id).unwrap().session.in_flight_prompt = None;
-    let _ = dispatch(Action::CancelTurn, &mut app);
-    let _ = dispatch(cancelled_prompt_response(id, None), &mut app);
-    assert_eq!(count_cancelled_markers(&app, id), 1);
-}
-
-/// An explicit user cancel supersedes a pending send-now expectation (marker renders).
-#[test]
-fn interactive_cancel_supersedes_send_now_expectation() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    dispatch(Action::SendPrompt("first".into()), &mut app);
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.expect_send_now_cancel = Some("p-send-now".into());
-        agent.session.in_flight_prompt = None;
-    }
-
-    let _ = dispatch(Action::CancelTurn, &mut app);
-    assert!(
-        app.agents[&id].expect_send_now_cancel.is_none(),
-        "an interactive cancel must clear the send-now expectation"
-    );
-
-    let _ = dispatch(cancelled_prompt_response(id, None), &mut app);
-    assert_eq!(
-        count_cancelled_markers(&app, id),
-        1,
-        "the interactive cancel keeps its marker"
-    );
-}
-
-/// A modern send-now cancel out of a park leaves no markers: the park is
-/// markerless and wire `cancelTrigger=send_now` suppresses the cancel marker.
-#[test]
-fn send_now_cancel_after_park_leaves_no_markers() {
-    use crate::app::agent_view::test_fixtures::{count_turn_markers, simulate_task_output_wait};
-
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    dispatch(Action::SendPrompt("first".into()), &mut app);
-    simulate_task_output_wait(app.agents.get_mut(&id).unwrap(), "bg-1");
-    assert_eq!(
-        count_turn_markers(&app.agents[&id]),
-        0,
-        "a park writes no marker"
-    );
-
-    let _ = dispatch(Action::SendPrompt("next thing".into()), &mut app);
-    let _ = dispatch(cancelled_prompt_response(id, Some("send_now")), &mut app);
-
-    assert_eq!(count_cancelled_markers(&app, id), 0);
-    assert_eq!(
-        count_completed_markers(&app, id),
-        0,
-        "no completed marker renders for the cancelled parked turn"
     );
 }
 
@@ -3605,31 +2687,6 @@ mod prompt_stash_dispatch_tests {
             );
             assert!(agent.prompt_stash.is_none(), "{label} left the slot full");
         }
-    }
-
-    /// `SendPromptNow` also force-sends a queued row, which never touched the composer.
-    /// Only the caller that consumed the draft reports it, so the queued-row case must leave the stash alone.
-    #[test]
-    fn a_queued_row_send_now_leaves_the_stash_alone() {
-        let mut app = test_app_with_agent();
-        let id = AgentId(0);
-        {
-            let agent = app.agents.get_mut(&id).unwrap();
-            agent.prompt.set_text("stashed thought");
-            agent.stash_prompt_draft(StashCause::Chord);
-        }
-
-        dispatch(
-            Action::SendPromptNow {
-                text: "a queued row".into(),
-                images: vec![],
-            },
-            &mut app,
-        );
-
-        let agent = app.agents.get(&id).unwrap();
-        assert_eq!(agent.prompt.text(), "", "the composer was never the source");
-        assert!(agent.prompt_stash.is_some(), "the stash must stay put");
     }
 
     /// A `#` note with no text is refused, so it never consumed a draft and must not hand the

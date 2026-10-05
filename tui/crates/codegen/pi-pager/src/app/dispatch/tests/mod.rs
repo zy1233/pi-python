@@ -7,7 +7,6 @@ mod modes;
 mod notes;
 mod permissions;
 mod prompt;
-mod queue_release;
 mod rewind;
 mod router;
 mod session;
@@ -48,7 +47,6 @@ use crate::acp::model_state::ModelState;
 use crate::acp::tracker::AcpUpdateTracker;
 use crate::app::actions::{Action, Effect, SwitchModelError, TaskResult};
 use crate::app::agent::{AgentId, AgentSession, AgentState};
-use crate::app::agent_view::test_fixtures::SteerFollowUp;
 use crate::app::agent_view::{ActivePane, AgentView, PromptMode};
 use crate::app::app_view::{
     ActiveView, AppView, AuthMode, AuthState, TrustState, VoiceState, VoiceTarget,
@@ -261,9 +259,6 @@ fn test_app() -> AppView {
         credit_balance: None,
         auto_topup: None,
         billing_poll_wanted: false,
-        shared_prompt_queues: std::collections::HashMap::new(),
-        optimistic_prompt_echoes: std::collections::HashMap::new(),
-        pending_running_adoptions: std::collections::HashMap::new(),
         session_picker_grouped: false,
         scheduler_background_loops_seed: true,
         cancel_rewind_enabled: true,
@@ -414,28 +409,14 @@ fn arm_reconcile(
     stop_reason: &str,
     age: std::time::Duration,
 ) {
-    arm_reconcile_with_trigger(app, id, prompt_id, stop_reason, None, age);
+    arm_reconcile_with_meta(app, id, prompt_id, stop_reason, None, age);
 }
-/// [`arm_reconcile`] with an explicit `_meta.cancelTrigger`.
-fn arm_reconcile_with_trigger(
-    app: &mut AppView,
-    id: AgentId,
-    prompt_id: &str,
-    stop_reason: &str,
-    cancel_trigger: Option<&str>,
-    age: std::time::Duration,
-) {
-    arm_reconcile_with_meta(app, id, prompt_id, stop_reason, cancel_trigger, None, age);
-}
-/// [`arm_reconcile`] with explicit `_meta.cancelTrigger` /
-/// `_meta.cancellationCategory`.
-#[allow(clippy::too_many_arguments)]
+/// [`arm_reconcile`] with an explicit `_meta.cancellationCategory`.
 fn arm_reconcile_with_meta(
     app: &mut AppView,
     id: AgentId,
     prompt_id: &str,
     stop_reason: &str,
-    cancel_trigger: Option<&str>,
     cancellation_category: Option<&str>,
     age: std::time::Duration,
 ) {
@@ -444,7 +425,7 @@ fn arm_reconcile_with_meta(
             prompt_id: prompt_id.into(),
             stop_reason: Some(stop_reason.into()),
             agent_result: None,
-            cancel_trigger: cancel_trigger.map(str::to_string),
+
             cancellation_category: cancellation_category.map(str::to_string),
             received_at: std::time::Instant::now() - age,
         });

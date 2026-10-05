@@ -6,8 +6,8 @@ use super::setters::{
     set_combine_queued_prompts_inner, set_compact_mode_inner,
     set_confirm_before_rewind_inner, set_contextual_hint_inner, set_default_model_inner,
     set_default_selected_permission_inner, set_display_refresh_auto_cadence_inner,
-    set_follow_up_behavior_inner, set_fork_secondary_model_inner, set_group_tool_verbs_inner,
-    set_hunk_tracker_mode_inner, set_invert_scroll_inner, set_keep_text_selection_inner,
+    set_fork_secondary_model_inner, set_group_tool_verbs_inner, set_hunk_tracker_mode_inner,
+    set_invert_scroll_inner, set_keep_text_selection_inner,
     set_max_thoughts_width_inner, set_page_flip_on_send_inner,
     set_prompt_suggestions_inner, set_remember_tool_approvals_inner, set_render_mermaid_inner,
     set_respect_manual_folds_inner, set_screen_mode_inner, set_scroll_lines_inner,
@@ -648,9 +648,6 @@ pub(in crate::app::dispatch) fn action_for_reset(
         ("combine_queued_prompts", SettingValue::Bool(b)) => {
             Some(Action::SetCombineQueuedPrompts(*b))
         }
-        ("follow_up_behavior", SettingValue::Enum(s)) => {
-            crate::appearance::FollowUpBehavior::from_canonical(s).map(Action::SetFollowUpBehavior)
-        }
         ("simple_mode", SettingValue::Bool(b)) => Some(Action::SetSimpleMode(*b)),
         ("contextual_hints.undo", SettingValue::Bool(b)) => Some(Action::SetContextualHintUndo(*b)),
         ("contextual_hints.plan_mode", SettingValue::Bool(b)) => {
@@ -658,9 +655,6 @@ pub(in crate::app::dispatch) fn action_for_reset(
         }
         ("contextual_hints.image_input", SettingValue::Bool(b)) => {
             Some(Action::SetContextualHintImageInput(*b))
-        }
-        ("contextual_hints.send_now", SettingValue::Bool(b)) => {
-            Some(Action::SetContextualHintSendNow(*b))
         }
         ("contextual_hints.small_screen", SettingValue::Bool(b)) => {
             Some(Action::SetContextualHintSmallScreen(*b))
@@ -850,11 +844,6 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
         ("combine_queued_prompts", SettingValue::Bool(b)) => {
             set_combine_queued_prompts_inner(app, *b)
         }
-        ("follow_up_behavior", SettingValue::Enum(s)) => {
-            if let Some(mode) = crate::appearance::FollowUpBehavior::from_canonical(s) {
-                set_follow_up_behavior_inner(app, mode);
-            }
-        }
         ("simple_mode", SettingValue::Bool(b)) => set_simple_mode_inner(app, *b),
         ("contextual_hints.undo", SettingValue::Bool(b)) => {
             set_contextual_hint_inner(app, |h, v| h.undo = v, *b)
@@ -864,9 +853,6 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
         }
         ("contextual_hints.image_input", SettingValue::Bool(b)) => {
             set_contextual_hint_inner(app, |h, v| h.image_input = v, *b)
-        }
-        ("contextual_hints.send_now", SettingValue::Bool(b)) => {
-            set_contextual_hint_inner(app, |h, v| h.send_now = v, *b)
         }
         ("contextual_hints.small_screen", SettingValue::Bool(b)) => {
             set_contextual_hint_inner(app, |h, v| h.small_screen = v, *b)

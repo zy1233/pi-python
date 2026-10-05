@@ -375,23 +375,6 @@ impl AgentView {
                     }
                     Some(AgentPane::Queue) => {
                         if let Some(id) = self.queue.delete_click(mouse.column, mouse.row) {
-                            let (is_server, row) = self.resolve_queue_row(id);
-                            if is_server {
-                                if let (Some(_sid), Some(row)) =
-                                    (self.session.session_id.as_ref(), row)
-                                    && let Some(server_id) = row.server_id
-                                {
-                                    self.shared_queue.retain(|e| e.id != server_id);
-                                    if self.visible_queue_is_empty() {
-                                        self.hide_queue_pane();
-                                    }
-                                    return InputOutcome::Action(Action::QueueRemoveShared {
-                                        id: server_id,
-                                        expected_version: row.version,
-                                    });
-                                }
-                                return InputOutcome::Changed;
-                            }
                             let was_drain_blocked = self.drain_blocked();
                             self.remove_local_queue_row(id);
                             if was_drain_blocked {
@@ -399,18 +382,11 @@ impl AgentView {
                             }
                             return InputOutcome::Changed;
                         }
-                        if let Some(id) = self.queue.send_now_click(mouse.column, mouse.row)
-                            && self.session.state.is_turn_running()
-                            && let InputOutcome::Action(action) = self.force_interject_queue_row(id)
-                        {
-                            return InputOutcome::Action(action);
-                        }
                         if let Some(id) = self.queue.edit_click(mouse.column, mouse.row)
                             && (!matches!(self.prompt_mode, PromptMode::EditingQueued { .. })
                                 || self.set_active_pane(AgentPane::Queue, false))
                         {
-                            let (is_server, row) = self.resolve_queue_row(id);
-                            self.enter_queue_edit(id, is_server, row);
+                            self.enter_queue_edit(id);
                             return InputOutcome::Changed;
                         }
                         self.set_active_pane(AgentPane::Queue, false);
@@ -801,12 +777,10 @@ impl AgentView {
                     Some(AgentPane::Queue)
                 ) {
                     changed |= self.queue.update_delete_hover(mouse.column, mouse.row);
-                    changed |= self.queue.update_send_now_hover(mouse.column, mouse.row);
                     changed |= self.queue.update_edit_hover(mouse.column, mouse.row);
                     changed |= self.queue.update_row_hover(mouse.column, mouse.row);
                 } else {
                     changed |= self.queue.clear_delete_hover();
-                    changed |= self.queue.clear_send_now_hover();
                     changed |= self.queue.clear_edit_hover();
                     changed |= self.queue.clear_row_hover();
                 }
@@ -985,9 +959,7 @@ mod tests {
     use super::*;
     use crate::app::agent::AgentState;
     use crate::app::agent_view::PromptMode;
-    use crate::app::agent_view::test_fixtures::{
-        make_running_agent, running_agent_local_only, test_pasted_image,
-    };
+    use crate::app::agent_view::test_fixtures::{make_running_agent, running_agent_local_only};
     use crossterm::event::KeyModifiers;
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
@@ -1002,10 +974,7 @@ mod tests {
         let area = Rect::new(0, 0, 80, 6);
         let mut buf = Buffer::empty(area);
         let layout_cfg = crate::appearance::LayoutConfig::default();
-        let running = agent.session.state.is_turn_running();
-        agent
-            .queue
-            .render(area, &mut buf, true, &layout_cfg, None, running);
+        agent.queue.render(area, &mut buf, true, &layout_cfg, None);
         agent.pane_areas.queue = area;
         let mut found = None;
         'find: for row in area.y..area.y + area.height {
@@ -1024,10 +993,7 @@ mod tests {
             modifiers: KeyModifiers::empty(),
         })
     }
-    /// Left-click the row's `[Interject]` (send-now) button.
-    fn click_send_now(agent: &mut AgentView, selected_id: u64) -> InputOutcome {
-        click_queue_button(agent, selected_id, |a, c, r| a.queue.send_now_click(c, r))
-    }
+
     /// Left-click the row's `[cancel]` (delete) button.
     fn click_delete(agent: &mut AgentView, selected_id: u64) -> InputOutcome {
         click_queue_button(agent, selected_id, |a, c, r| a.queue.delete_click(c, r))
@@ -1036,55 +1002,24 @@ mod tests {
     fn click_edit(agent: &mut AgentView, selected_id: u64) -> InputOutcome {
         click_queue_button(agent, selected_id, |a, c, r| a.queue.edit_click(c, r))
     }
-    /// Mouse "Send now" (interject) on the last local row keeps the pane open
-    /// when a server row remains — the third sibling site of the same fix.
+    /// Mouse `[cancel]` on the last queued row hides the pane and hands focus back to scrollback.
     #[test]
-    fn mouse_send_now_last_local_row_keeps_pane_open_when_server_remains() {
-        let mut agent = make_running_agent();
-        agent.active_pane = AgentPane::Queue;
-        agent.session.pending_prompts[0]
-            .images
-            .push(test_pasted_image());
-        let ids = agent.queue.entry_ids();
-        let outcome = click_send_now(&mut agent, ids[1]);
-        match outcome {
-            InputOutcome::Action(Action::SendPromptNow { text, images }) => {
-                assert_eq!(text, "local one");
-                assert_eq!(images.len(), 1, "row image must ride the send-now");
-            }
-            other => panic!("expected SendPromptNow action, got {other:?}"),
-        }
-        assert!(agent.session.pending_prompts.is_empty());
-        assert_eq!(agent.shared_queue.len(), 1);
-        assert!(agent.queue.overlay.visible);
-        assert!(agent.queue.overlay.focused);
-        assert_eq!(agent.active_pane, AgentPane::Queue);
-    }
-    /// Hide via the mouse "Send now" path (site 3): with no server rows left,
-    /// interjecting the last local row empties the merged view → hide.
-    #[test]
-    fn mouse_send_now_last_local_row_hides_pane_when_shared_queue_empty() {
+    fn mouse_delete_last_row_hides_pane() {
         let mut agent = running_agent_local_only();
         let ids = agent.queue.entry_ids();
         assert_eq!(ids.len(), 1);
-        let outcome = click_send_now(&mut agent, ids[0]);
-        match outcome {
-            InputOutcome::Action(Action::SendPromptNow { text, .. }) => {
-                assert_eq!(text, "local one")
-            }
-            other => panic!("expected SendPromptNow action, got {other:?}"),
-        }
+        let outcome = click_delete(&mut agent, ids[0]);
+        assert!(matches!(outcome, InputOutcome::Changed), "got {outcome:?}");
         assert!(agent.session.pending_prompts.is_empty());
         assert!(!agent.queue.overlay.visible);
         assert!(!agent.queue.overlay.focused);
         assert_eq!(agent.active_pane, AgentPane::Scrollback);
     }
-    /// Send-now `[Interject]` on the lone local row while it is being
-    /// DIRTY-edited: the removal must discard the edit via the canonical
-    /// helper — the old inline removal stranded `EditingQueued` and armed
-    /// the invisible modal.
+    /// Mouse `[cancel]` on a row while it is being DIRTY-edited discards the
+    /// edit via the canonical helper — an inline removal would strand
+    /// `EditingQueued` and arm the invisible modal.
     #[test]
-    fn mouse_send_now_edited_lone_local_row_discards_edit_without_orphaned_modal() {
+    fn mouse_delete_edited_lone_row_discards_edit_without_orphaned_modal() {
         let mut agent = running_agent_local_only();
         let ids = agent.queue.entry_ids();
         agent.stashed_prompt = Some(crate::views::prompt_widget::StashedPrompt {
@@ -1098,17 +1033,11 @@ mod tests {
         agent.prompt_mode = PromptMode::EditingQueued {
             id: ids[0],
             original: "local one".into(),
-            server_id: None,
             kind: crate::app::agent::QueueEntryKind::Prompt,
         };
         agent.prompt.set_text("local one EDITED");
-        let outcome = click_send_now(&mut agent, ids[0]);
-        match outcome {
-            InputOutcome::Action(Action::SendPromptNow { text, .. }) => {
-                assert_eq!(text, "local one")
-            }
-            other => panic!("expected SendPromptNow action, got {other:?}"),
-        }
+        let outcome = click_delete(&mut agent, ids[0]);
+        assert!(matches!(outcome, InputOutcome::Changed), "got {outcome:?}");
         assert!(agent.session.pending_prompts.is_empty());
         assert!(matches!(agent.prompt_mode, PromptMode::Normal));
         assert!(
@@ -1117,8 +1046,7 @@ mod tests {
         );
         assert_eq!(agent.prompt.text(), "draft");
         assert!(!agent.queue.overlay.visible);
-    }
-    /// Mouse `[cancel]` of the FRONT local row being edited while idle:
+    }    /// Mouse `[cancel]` of the FRONT local row being edited while idle:
     /// discarding the edit releases the drain block, so the click must kick
     /// `DrainQueue` like the modal Delete arm (the row behind must not sit
     /// stuck until an unrelated trigger).
@@ -1127,13 +1055,7 @@ mod tests {
         let mut agent = running_agent_local_only();
         agent.session.state = AgentState::Idle;
         agent.session.enqueue_prompt("local two".to_string());
-        agent.queue.sync_from_merged(
-            &agent.session.pending_prompts,
-            &agent.shared_queue,
-            None,
-            None,
-            &agent.send_now_painted_blocks,
-        );
+        agent.queue.sync_from_local(&agent.session.pending_prompts);
         let ids = agent.queue.entry_ids();
         agent.stashed_prompt = Some(crate::views::prompt_widget::StashedPrompt {
             text: "draft".into(),
@@ -1146,7 +1068,6 @@ mod tests {
         agent.prompt_mode = PromptMode::EditingQueued {
             id: ids[0],
             original: "local one".into(),
-            server_id: None,
             kind: crate::app::agent::QueueEntryKind::Prompt,
         };
         agent.prompt.set_text("local one EDITED");
@@ -1175,24 +1096,22 @@ mod tests {
             "edit click redraws without dispatching an action, got {outcome:?}"
         );
         match &agent.prompt_mode {
-            PromptMode::EditingQueued {
-                id,
-                original,
-                server_id,
-                ..
-            } => {
+            PromptMode::EditingQueued { id, original, .. } => {
                 assert_eq!(*id, ids[0]);
                 assert_eq!(original, "local one");
-                assert!(
-                    server_id.is_none(),
-                    "local row must not take the server edit path"
-                );
             }
             other => panic!("expected EditingQueued, got {other:?}"),
         }
         assert_eq!(agent.prompt.text(), "local one");
         assert_eq!(agent.active_pane, AgentPane::Prompt);
         assert_eq!(agent.session.pending_prompts.len(), 1);
+    }
+    /// A running agent with two queued rows ("local one", "local two").
+    fn running_agent_two_rows() -> AgentView {
+        let mut agent = make_running_agent();
+        agent.session.enqueue_prompt("local two".to_string());
+        agent.queue.sync_from_local(&agent.session.pending_prompts);
+        agent
     }
     /// Clicking another row's `[edit]` while a DIRTY queued edit is active
     /// must not re-enter `enter_queue_edit` — that would bypass the
@@ -1201,7 +1120,7 @@ mod tests {
     /// through to the pane switch, which the lock blocks.
     #[test]
     fn mouse_edit_click_during_dirty_edit_preserves_first_edit_and_stash() {
-        let mut agent = make_running_agent();
+        let mut agent = running_agent_two_rows();
         let ids = agent.queue.entry_ids();
         agent.stashed_prompt = Some(crate::views::prompt_widget::StashedPrompt {
             text: "draft".into(),
@@ -1212,18 +1131,17 @@ mod tests {
             image_undo_stash: Vec::new(),
         });
         agent.prompt_mode = PromptMode::EditingQueued {
-            id: ids[1],
+            id: ids[0],
             original: "local one".into(),
-            server_id: None,
             kind: crate::app::agent::QueueEntryKind::Prompt,
         };
         agent.prompt.set_text("local one EDITED");
         agent.active_pane = AgentPane::Prompt;
-        let outcome = click_edit(&mut agent, ids[0]);
+        let outcome = click_edit(&mut agent, ids[1]);
         assert!(matches!(outcome, InputOutcome::Changed), "got {outcome:?}");
         match &agent.prompt_mode {
             PromptMode::EditingQueued { id, original, .. } => {
-                assert_eq!(*id, ids[1], "the first edit's target row must survive");
+                assert_eq!(*id, ids[0], "the first edit's target row must survive");
                 assert_eq!(original, "local one");
             }
             other => panic!("expected the first edit to stay active, got {other:?}"),
@@ -1234,49 +1152,14 @@ mod tests {
             Some("draft"),
             "the pre-edit draft must survive for Esc-restore"
         );
-        assert!(
-            agent.pending_effects.is_empty(),
-            "no hold effect may be emitted for the clicked row"
-        );
-    }
-    /// Same guard for a dirty SERVER-row edit: clicking another row's
-    /// `[edit]` must not replace the edit (which would strand the first
-    /// row's combine hold) nor emit a second `QueueHoldEdit`.
-    #[test]
-    fn mouse_edit_click_during_dirty_server_edit_keeps_hold_target() {
-        let mut agent = make_running_agent();
-        let ids = agent.queue.entry_ids();
-        agent.prompt_mode = PromptMode::EditingQueued {
-            id: ids[0],
-            original: "server one".into(),
-            server_id: Some("p1".into()),
-            kind: crate::app::agent::QueueEntryKind::Prompt,
-        };
-        agent.prompt.set_text("server one EDITED");
-        agent.active_pane = AgentPane::Prompt;
-        let outcome = click_edit(&mut agent, ids[1]);
-        assert!(matches!(outcome, InputOutcome::Changed), "got {outcome:?}");
-        match &agent.prompt_mode {
-            PromptMode::EditingQueued { id, server_id, .. } => {
-                assert_eq!(*id, ids[0], "the held server row must stay the edit target");
-                assert_eq!(server_id.as_deref(), Some("p1"));
-            }
-            other => panic!("expected the server edit to stay active, got {other:?}"),
-        }
-        assert_eq!(agent.prompt.text(), "server one EDITED");
-        assert!(
-            agent.pending_effects.is_empty(),
-            "no second QueueHoldEdit may be emitted while one row is held"
-        );
     }
     /// Clicking another row's `[edit]` while a CLEAN (unchanged) edit is
     /// active must open the clicked row's edit on the SAME click: the
-    /// canonical pane switch exits the clean edit — releasing its server
-    /// combine hold — and the arm then enters the clicked row instead of
-    /// letting the click die on the pane switch.
+    /// canonical pane switch exits the clean edit and the arm then enters
+    /// the clicked row instead of letting the click die on the pane switch.
     #[test]
     fn mouse_edit_click_during_clean_edit_switches_to_clicked_row() {
-        let mut agent = make_running_agent();
+        let mut agent = running_agent_two_rows();
         let ids = agent.queue.entry_ids();
         agent.stashed_prompt = Some(crate::views::prompt_widget::StashedPrompt {
             text: "draft".into(),
@@ -1288,65 +1171,27 @@ mod tests {
         });
         agent.prompt_mode = PromptMode::EditingQueued {
             id: ids[0],
-            original: "server one".into(),
-            server_id: Some("p1".into()),
+            original: "local one".into(),
             kind: crate::app::agent::QueueEntryKind::Prompt,
         };
-        agent.prompt.set_text("server one");
+        agent.prompt.set_text("local one");
         agent.active_pane = AgentPane::Prompt;
         let outcome = click_edit(&mut agent, ids[1]);
         assert!(matches!(outcome, InputOutcome::Changed), "got {outcome:?}");
         match &agent.prompt_mode {
-            PromptMode::EditingQueued {
-                id,
-                original,
-                server_id,
-                ..
-            } => {
+            PromptMode::EditingQueued { id, original, .. } => {
                 assert_eq!(*id, ids[1], "one click must open the clicked row's edit");
-                assert_eq!(original, "local one");
-                assert!(server_id.is_none());
+                assert_eq!(original, "local two");
             }
             other => panic!("expected EditingQueued for the clicked row, got {other:?}"),
         }
-        assert_eq!(agent.prompt.text(), "local one");
+        assert_eq!(agent.prompt.text(), "local two");
         assert_eq!(agent.active_pane, AgentPane::Prompt);
-        assert!(
-            agent.pending_effects.iter().any(|e| matches!(
-                e,
-                crate::app::actions::Effect::QueueReleaseEdit { id, .. } if id == "p1"
-            )),
-            "clean exit must release the held server row, effects = {:?}",
-            agent.pending_effects
-        );
         assert_eq!(
             agent.stashed_prompt.as_ref().map(|s| s.text.as_str()),
             Some("draft")
         );
-    }
-    /// Mouse edit on an optimistic server row toasts and does not emit HoldEdit.
-    #[test]
-    fn mouse_edit_click_on_optimistic_server_row_toasts() {
-        let mut agent = make_running_agent();
-        agent.optimistic_queue_ids.insert("p1".into());
-        let ids = agent.queue.entry_ids();
-        let outcome = click_edit(&mut agent, ids[0]);
-        assert!(matches!(outcome, InputOutcome::Changed), "got {outcome:?}");
-        assert!(
-            matches!(agent.prompt_mode, PromptMode::Normal),
-            "an unconfirmed echo must not be editable"
-        );
-        assert_eq!(agent.prompt.text(), "");
-        assert_eq!(
-            agent.toast.as_ref().map(|(message, _)| message.as_str()),
-            Some(crate::app::queue_edit::STILL_QUEUEING_TOAST),
-        );
-        assert!(
-            agent.pending_effects.is_empty(),
-            "no QueueHoldEdit may be emitted for a row the shell doesn't have"
-        );
-    }
-    /// A synthetic left-click on a rendered follow-up chip yields the LITERAL
+    }    /// A synthetic left-click on a rendered follow-up chip yields the LITERAL
     /// `SubmitFollowUp` action (never a slash-command path).
     #[test]
     fn follow_up_chip_click_yields_literal_submit_action() {

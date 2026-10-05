@@ -391,10 +391,8 @@ impl AgentView {
             selected_supports_fullscreen,
             self.multiline_mode,
             self.vim_mode,
-            (self.session.state.is_turn_running() || self.wake_turn_active())
-                && !self.renders_parked(),
+            self.session.state.is_turn_running() || self.wake_turn_active(),
             self.esc_would_cancel_turn(esc_owned_before_agent),
-            !self.visible_queue_is_empty(),
             selected_is_user_prompt,
             selected_is_agent_message,
             selected_is_credit_limit,
@@ -827,13 +825,11 @@ impl AgentView {
         }
         let queue_height = self.queue.desired_height();
         let drain_blocked = self.drain_blocked();
-        let parked = self.renders_parked();
         let wake_display_state = self.wake_display_state();
         let turn_status_height = if turn_status::should_show(
             wake_display_state.unwrap_or(&self.session.state),
             drain_blocked,
             self.mcp_init_progress.as_ref(),
-            parked,
         ) {
             1
         } else {
@@ -1504,7 +1500,6 @@ impl AgentView {
                 queue_focused,
                 layout_cfg,
                 Some(layout.scrollback),
-                self.session.state.is_turn_running(),
             );
             let close_rect = agent::render_todo_chrome_with_close_label(
                 buf,
@@ -1656,8 +1651,6 @@ impl AgentView {
                             | BlockingCard::McpElicitation
                     )
                 );
-                let held_queue = self.held_queue_count();
-                let held_queue_top_sendable = self.held_queue_top_sendable();
                 let turn_output = turn_status::render_turn_status(
                     buf,
                     turn_area,
@@ -1675,10 +1668,7 @@ impl AgentView {
                         mcp_init_progress: self.mcp_init_progress.as_ref(),
                         is_bash_turn: self.bash_turn,
                         is_pending_user_input,
-                        parked,
                         flat_background: false,
-                        held_queue,
-                        held_queue_top_sendable,
                     },
                 );
                 self.hit_cancel_button

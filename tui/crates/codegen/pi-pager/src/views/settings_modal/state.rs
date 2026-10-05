@@ -886,7 +886,6 @@ pub(super) fn action_for_bool(key: SettingKey, new: bool) -> Option<Action> {
         "contextual_hints.undo" => Some(Action::SetContextualHintUndo(new)),
         "contextual_hints.plan_mode" => Some(Action::SetContextualHintPlanMode(new)),
         "contextual_hints.image_input" => Some(Action::SetContextualHintImageInput(new)),
-        "contextual_hints.send_now" => Some(Action::SetContextualHintSendNow(new)),
         "contextual_hints.small_screen" => Some(Action::SetContextualHintSmallScreen(new)),
         "contextual_hints.word_select" => Some(Action::SetContextualHintWordSelect(new)),
         "contextual_hints.ssh_wrap" => Some(Action::SetContextualHintSshWrap(new)),
@@ -983,8 +982,6 @@ pub(super) fn action_for_enum_commit(key: SettingKey, choice: &'static str) -> O
         "scroll_mode" => {
             crate::appearance::ScrollMode::from_canonical(choice).map(Action::SetScrollMode)
         }
-        "follow_up_behavior" => crate::appearance::FollowUpBehavior::from_canonical(choice)
-            .map(Action::SetFollowUpBehavior),
         "default_selected_permission" => {
             Some(Action::SetDefaultSelectedPermission(choice.to_string()))
         }

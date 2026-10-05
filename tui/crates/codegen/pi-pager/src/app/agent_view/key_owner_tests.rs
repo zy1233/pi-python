@@ -457,7 +457,6 @@ fn esc_parks_even_under_a_latent_queued_edit() {
         agent.prompt_mode = crate::app::queue_edit::PromptMode::EditingQueued {
             id: 1,
             original: "the queued prompt".into(),
-            server_id: None,
             kind: crate::app::agent::QueueEntryKind::Prompt,
         };
         open(&mut agent);

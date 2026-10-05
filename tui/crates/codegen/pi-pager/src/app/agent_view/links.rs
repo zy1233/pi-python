@@ -2264,7 +2264,6 @@ mod link_click_tests {
         agent.prompt_mode = PromptMode::EditingQueued {
             id: 0,
             original: "queued text".into(),
-            server_id: None,
             kind: crate::app::agent::QueueEntryKind::Prompt,
         };
         assert!(
@@ -2366,12 +2365,12 @@ mod link_click_tests {
             "tip is only hidden by precedence, not cleared"
         );
     }
-    /// Regression (#send-now bold leak): an ephemeral tip that reserved the
-    /// banner row must render with its own styling even when a session tip is
-    /// (wrongly or historically) handed to `draw` at the same time. The
-    /// session tip's bold `Tip: ` prefix used to underpaint the row and —
-    /// because `Cell::set_style` merges modifiers — leak BOLD into the first
-    /// five cells of the ephemeral tip ("**Queue**d · Enter to send now").
+    /// Regression (bold leak): an ephemeral tip that reserved the banner row
+    /// must render with its own styling even when a session tip is (wrongly or
+    /// historically) handed to `draw` at the same time. The session tip's bold
+    /// `Tip: ` prefix used to underpaint the row and — because
+    /// `Cell::set_style` merges modifiers — leak BOLD into the first five
+    /// cells of the ephemeral tip ("**Sampl**e · Enter to go").
     #[test]
     fn ephemeral_tip_not_bolded_by_session_tip_underpaint() {
         use ratatui::style::Modifier;
@@ -2380,8 +2379,18 @@ mod link_click_tests {
         let tall = Rect::new(0, 0, 80, 30);
         let mut agent = make_agent();
         agent.last_terminal_size = (80, 30);
-        let _ =
-            agent.show_ephemeral_tip(crate::tips::send_now::send_now_tip(), &mut HashMap::new());
+        let tip = crate::tips::EphemeralTip::new(
+            "bold-leak",
+            ratatui::text::Line::from(vec![
+                ratatui::text::Span::raw("Sample · "),
+                ratatui::text::Span::styled(
+                    "Enter",
+                    ratatui::style::Style::default().add_modifier(Modifier::BOLD),
+                ),
+                ratatui::text::Span::raw(" to go"),
+            ]),
+        );
+        let _ = agent.show_ephemeral_tip(tip, &mut HashMap::new());
         assert!(agent.ephemeral_tip.is_active());
         let mut buf = Buffer::empty(tall);
         let mut scratch = ScratchBuffer::new();
@@ -2411,14 +2420,14 @@ mod link_click_tests {
             crate::app::agent_view::AppRenderParams::default(),
         );
         let tip_y = (0..tall.height)
-            .find(|&y| buffer_row(&buf, tall.width, y).contains("Queued"))
+            .find(|&y| buffer_row(&buf, tall.width, y).contains("Sample"))
             .expect("ephemeral tip must paint into the banner row");
         let row = buffer_row(&buf, tall.width, tip_y);
         assert!(
             !(0..tall.height).any(|y| buffer_row(&buf, tall.width, y).contains("ZZSESSIONTIPZZ")),
             "session tip must not remain visible in the agent view"
         );
-        let start = row[..row.find("Queued").expect("tip text")].chars().count() as u16;
+        let start = row[..row.find("Sample").expect("tip text")].chars().count() as u16;
         let bold_cols: Vec<u16> = (0..tall.width)
             .filter(|&x| {
                 buf.cell((x, tip_y))

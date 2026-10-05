@@ -695,28 +695,6 @@ pub struct AppView {
     pub auto_topup: Option<crate::views::credit_bar::AutoTopupInfo>,
     /// Periodic billing poll requested (credits >= 99%).
     pub billing_poll_wanted: bool,
-    /// Server-authoritative shared prompt queues, keyed by `sessionId`
- /// Reconciled from `legacy ext RPC` broadcasts so
-    /// every client renders the same ordered queue (including prompts queued
-    /// by other clients). Empty until a prompt is queued server-side
-    /// (follow-up Steer).
-    pub shared_prompt_queues:
-        std::collections::HashMap<String, Vec<crate::app::prompt_queue::QueueEntryWire>>,
-    /// Optimistic echo rows for prompts the pager sent server-authoritatively
-    /// (plain prompt typed while a turn is running) but for which the
- /// confirming `legacy ext RPC` broadcast has not yet arrived. Keyed by
-    /// `sessionId`. Pinned into `shared_prompt_queues` on reconcile so the row
-    /// doesn't flicker, and dropped once the authoritative broadcast reflects
-    /// the id (or it starts running). Never persisted.
-    pub optimistic_prompt_echoes:
-        std::collections::HashMap<String, Vec<crate::app::prompt_queue::QueueEntryWire>>,
-    /// Server-authoritative running prompts that drained into the running slot
-    /// while the previous turn was still finishing locally (handoff race).
-    /// Keyed by `AgentId`. Consumed by the `PromptResponse` handler after
-    /// `finish_turn` clears `current_prompt_id`, which then adopts the prompt
-    /// and runs the turn-start shim. Never persisted.
-    pub(crate) pending_running_adoptions:
-        std::collections::HashMap<AgentId, crate::app::acp_handler::PendingRunningAdoption>,
     /// Whether the session picker groups entries by repo name with
     /// non-selectable headers. Gated by `GROK_SESSION_PICKER_GROUPED` env var
     /// or remote settings `session_picker_grouped`; defaults to `false`.
@@ -964,7 +942,7 @@ pub struct AppView {
     /// Active "New Worktree" dialog on the welcome screen.
     pub new_worktree_dialog: Option<NewWorktreeDialogState>,
     /// Resolved per-tip gates for the contextual ephemeral hints (undo tip,
-    /// plan nudge, clipboard-image tip, send-now tip). Default all ON; resolved
+    /// plan nudge, clipboard-image tip). Default all ON; resolved
     /// at startup and on settings toggles from `GROK_CONTEXTUAL_HINTS` (master)
     /// > `[ui.contextual_hints]` user config > remote tier > default.
     pub contextual_hints: pi_shell::util::config::ResolvedContextualHints,
@@ -1585,9 +1563,6 @@ impl AppView {
             credit_balance: None,
             auto_topup: None,
             billing_poll_wanted: false,
-            shared_prompt_queues: std::collections::HashMap::new(),
-            optimistic_prompt_echoes: std::collections::HashMap::new(),
-            pending_running_adoptions: std::collections::HashMap::new(),
             session_picker_grouped: false,
             scheduler_background_loops_seed: true,
             cancel_rewind_enabled: true,
@@ -1934,123 +1909,6 @@ impl AppView {
                 ));
             }
         }
-    }
-    /// Reconcile the shared prompt queue for a session from a
- /// `legacy ext RPC` broadcast. The broadcast is
-    /// authoritative: it fully replaces the previously-known queue for that
-    /// session. An empty list clears the entry.
-    ///
-    /// Returns `(old_id, new_id)` for echoes retired via the kind+text
-    /// fallback (re-keyed: the old id never appears in any broadcast). The
-    /// caller routes these through `AgentView::note_queue_echo_rekeyed` so
-    /// per-agent state moves with the message instead of leaking.
-    pub fn apply_queue_changed(
-        &mut self,
-        changed: crate::app::prompt_queue::QueueChanged,
-    ) -> Vec<(String, String)> {
-        let crate::app::prompt_queue::QueueChanged {
-            session_id,
-            mut entries,
-            running_prompt_id,
-            running_text: _,
-            running_kind: _,
-            running_combined_texts: _,
-        } = changed;
-        let mut rekeyed_echo_ids: Vec<(String, String)> = Vec::new();
-        let running_row: Option<(String, String)> = running_prompt_id.as_ref().and_then(|pid| {
-            self.shared_prompt_queues
-                .get(&session_id)
-                .and_then(|q| q.iter().find(|e| &e.id == pid))
-                .map(|e| (e.kind.clone(), e.text.clone()))
-        });
-        if let Some(opt) = self.optimistic_prompt_echoes.get_mut(&session_id) {
-            opt.retain(|e| {
-                let id_matches_running = running_prompt_id.as_deref() == Some(e.id.as_str());
-                let id_matches_entry = entries.iter().any(|x| x.id == e.id);
-                let content_match_id = running_row
-                    .as_ref()
-                    .filter(|(kind, text)| *kind == e.kind && *text == e.text)
-                    .and_then(|_| running_prompt_id.clone())
-                    .or_else(|| {
-                        entries
-                            .iter()
-                            .find(|x| x.kind == e.kind && x.text == e.text)
-                            .map(|x| x.id.clone())
-                    });
-                let retired = id_matches_running || id_matches_entry || content_match_id.is_some();
-                if retired
-                    && !id_matches_running
-                    && !id_matches_entry
-                    && let Some(new_id) = content_match_id
-                {
-                    rekeyed_echo_ids.push((e.id.clone(), new_id));
-                }
-                !retired
-            });
-            for e in opt.iter() {
-                if !entries.iter().any(|x| x.id == e.id) {
-                    let mut pinned = e.clone();
-                    pinned.position = entries.len();
-                    entries.push(pinned);
-                }
-            }
-            if opt.is_empty() {
-                self.optimistic_prompt_echoes.remove(&session_id);
-            }
-        }
-        if entries.is_empty() {
-            self.shared_prompt_queues.remove(&session_id);
-        } else {
-            self.shared_prompt_queues.insert(session_id, entries);
-        }
-        rekeyed_echo_ids
-    }
-    /// Push an optimistic echo row for a server-authoritative prompt the pager
-    /// just sent (a plain prompt or agent-bound kind typed while a turn is
-    /// running). The row is keyed by `prompt_id` so the authoritative
- /// `legacy ext RPC` broadcast replaces it (matched by `id`) rather than
-    /// duplicating it. `kind` (`"prompt"`/`"bash"`/…) drives the row's display
-    /// and, on adoption, the turn-start shim's block + focus flag.
-    pub fn push_optimistic_prompt_echo(
-        &mut self,
-        session_id: &str,
-        prompt_id: &str,
-        text: &str,
-        kind: &str,
-    ) {
-        let entry = crate::app::prompt_queue::QueueEntryWire {
-            id: prompt_id.to_string(),
-            version: 0,
-            owner: None,
-            last_editor: None,
-            kind: kind.to_string(),
-            text: text.to_string(),
-            combined_texts: None,
-            position: 0,
-        };
-        let opt = self
-            .optimistic_prompt_echoes
-            .entry(session_id.to_string())
-            .or_default();
-        if !opt.iter().any(|e| e.id == entry.id) {
-            opt.push(entry.clone());
-        }
-        let shared = self
-            .shared_prompt_queues
-            .entry(session_id.to_string())
-            .or_default();
-        if !shared.iter().any(|e| e.id == entry.id) {
-            let mut e = entry;
-            e.position = shared.len();
-            shared.push(e);
-        }
-    }
-    /// The shared (server-authoritative) prompt queue for a session, if any.
-    pub fn shared_prompt_queue(
-        &self,
-        session_id: &str,
-    ) -> Option<&Vec<crate::app::prompt_queue::QueueEntryWire>> {
-        self.shared_prompt_queues.get(session_id)
     }
     /// Apply a (possibly hot-reloaded) appearance config to all agents.
     pub fn set_appearance(&mut self, config: AppearanceConfig) {
@@ -4918,15 +4776,10 @@ impl AppView {
                     .as_deref()
                     .or(agent.generated_session_title.as_deref());
                 let model = agent.session.models.current_model_name();
-                let parked = agent.renders_parked();
-                let activity = if parked {
-                    None
-                } else {
-                    agent.resolve_turn_activity()
-                };
+                let activity = agent.resolve_turn_activity();
                 let has_perms = !agent.permission_queue.is_empty();
-                let elapsed = if parked { None } else { agent.turn_elapsed() };
-                let is_busy = agent.session.state.is_busy() && !parked;
+                let elapsed = agent.turn_elapsed();
+                let is_busy = agent.session.state.is_busy();
                 (name, model, activity, has_perms, elapsed, is_busy)
             } else {
                 (None, None, None, false, None, false)

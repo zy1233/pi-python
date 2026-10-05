@@ -101,9 +101,9 @@ impl QueuedPrompt {
     ///
     /// `true` for plain rows (no `wire_blocks`) and for raw skill slash rows
     /// (`/find-session args` — a single Text block equal to `text`, expanded
-    /// shell-side at delivery), so interjecting `text` loses nothing. `false`
+    /// shell-side at delivery), so sending `text` as-is loses nothing. `false`
     /// when the payload was expanded client-side (`/imagine`, `/loop`):
-    /// interjecting those by `text` would drop the expansion, and by payload
+    /// sending those by `text` would drop the expansion, and by payload
     /// would render the raw instruction.
     pub fn wire_matches_display(&self) -> bool {
         match self.wire_blocks.as_deref() {
@@ -847,7 +847,7 @@ mod tests {
         assert_eq!(s.pending_prompts[1].id, id_p);
         assert_eq!(s.pending_prompts[1].kind, QueueEntryKind::Prompt);
     }
-    /// `wire_matches_display` splits interjectable rows (no payload, or a raw
+    /// `wire_matches_display` splits plain rows (no payload, or a raw
     /// skill slash payload equal to the display text) from client-expanded
     /// payloads (`/imagine`, `/loop`) that must run as their own turn.
     #[test]

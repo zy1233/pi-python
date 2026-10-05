@@ -10,9 +10,7 @@
 
 use crate::scrollback::blocks::SessionEvent;
 
-use super::agent::AgentId;
 use super::agent_view::AgentView;
-use super::app_view::AppView;
 use super::cancel_latency::TurnEnd;
 
 /// `_meta.cancellationCategory` of a hook-denied turn end: renders the
@@ -108,11 +106,6 @@ pub(super) struct TerminalSignal<'a> {
     pub stop_reason: Option<&'a str>,
     /// `agentResult` detail (error text, when present).
     pub agent_result: Option<&'a str>,
-    /// `_meta.cancelTrigger`: `"send_now"` is the silent half of a
-    /// cancel-and-send, so the `TurnCancelled` marker is suppressed. Absent
-    /// meta means a normal cancel, unless this client just dispatched the
-    /// send-now (`AgentView::expect_send_now_cancel`, older-shell fallback).
-    pub cancel_trigger: Option<&'a str>,
     /// `_meta.cancellationCategory`: `"HookDenied"` picks the
     /// blocked-by-a-hook marker. Absent on older shells and plain user
     /// cancels.
@@ -129,7 +122,7 @@ pub(super) enum TerminalApply {
     /// change so the reconcile sweep's animation tick stays scheduled.
     ReconcileArmed,
     /// Viewer: the turn was finished and (for non-rate-limit reasons) a terminal
-    /// marker pushed. The caller drops any stale running-prompt adoption.
+    /// marker pushed.
     ViewerFinalized,
 }
 
@@ -153,7 +146,6 @@ fn arm_driver_turn_end_reconcile(
         prompt_id,
         stop_reason,
         agent_result,
-        cancel_trigger,
         cancellation_category,
     } = signal;
     if agent.session.loading_replay {
@@ -193,7 +185,6 @@ fn arm_driver_turn_end_reconcile(
             prompt_id: arm_pid.clone(),
             stop_reason: stop_reason.map(str::to_string),
             agent_result: agent_result.map(str::to_string),
-            cancel_trigger: cancel_trigger.map(str::to_string),
             cancellation_category: cancellation_category.map(str::to_string),
             received_at,
         });
@@ -225,7 +216,6 @@ fn arm_driver_turn_end_reconcile(
         prompt_id: arm_pid,
         stop_reason: stop_reason.map(str::to_string),
         agent_result: agent_result.map(str::to_string),
-        cancel_trigger: cancel_trigger.map(str::to_string),
         cancellation_category: cancellation_category.map(str::to_string),
         received_at: std::time::Instant::now(),
     });
@@ -300,7 +290,6 @@ pub(super) fn finalize_turn_from_terminal(
         prompt_id,
         stop_reason,
         agent_result,
-        cancel_trigger,
         cancellation_category,
     } = signal;
     if !agent.attached_as_viewer {
@@ -330,22 +319,11 @@ pub(super) fn finalize_turn_from_terminal(
 
     agent.session.finish_turn(&mut agent.scrollback);
 
-    // Wire meta wins; else the client-side expectation (older-shell fallback).
-    // Taken at every viewer finalize so it can't go stale.
-    let expected_send_now = agent.expect_send_now_cancel.take();
-    let send_now_cancel = match cancel_trigger {
-        Some(trigger) => trigger == "send_now",
-        None => expected_send_now.is_some(),
-    };
-
     // A viewer never receives the driver's `PromptResponse` RPC — the source of
     // the driver's "Worked for X" marker. Surface the equivalent here.
     // The signal only carries a coarse `stop_reason` (no doom-loop category, no
     // driver-local rate-limit / re-auth context), so map it to the closest event:
     let event = match stop_reason {
-        // Send-now cancel: no marker (the sender's new prompt renders as the
-        // next turn; neither cancelled nor a substitute completed).
-        Some("cancelled") if send_now_cancel => None,
         Some("cancelled") => Some(cancelled_turn_event(cancellation_category, elapsed)),
         // Rate limits drive a dedicated UX on the driver and are not actionable
         // from a viewer — don't surface a stray "Turn failed" line.
@@ -376,24 +354,12 @@ pub(super) fn finalize_turn_from_terminal(
 ///   (`is_active == false`) that armed the reconcile must still report the change
 ///   or `reconcile_overdue_turn_ends` never fires and the turn strands on
 ///   "Waiting…" — the exact bug this rail fixes.
-/// - `ViewerFinalized` -> `true` only when `is_active` (drop pending adoption).
-pub(super) fn apply_terminal_outcome(
-    outcome: TerminalApply,
-    app: &mut AppView,
-    agent_id: AgentId,
-    is_active: bool,
-) -> bool {
+/// - `ViewerFinalized` -> `true` only when `is_active`.
+pub(super) fn apply_terminal_outcome(outcome: TerminalApply, is_active: bool) -> bool {
     match outcome {
         TerminalApply::Ignored => false,
         TerminalApply::ReconcileArmed => true,
-        TerminalApply::ViewerFinalized => {
-            if let Some(p) = app.pending_running_adoptions.remove(&agent_id)
-                && let Some(agent) = app.agents.get_mut(&agent_id)
-            {
-                agent.discard_pending_adoption_updates(&p.prompt_id);
-            }
-            is_active
-        }
+        TerminalApply::ViewerFinalized => is_active,
     }
 }
 

@@ -145,24 +145,6 @@ pub enum Action {
     /// identically to `SendPrompt` otherwise — same registry resolution,
     /// same effect outputs — but skips the `prompt.set_text("")` calls.
     SendSlashCommandPreservingDraft(String),
-    /// Send a mid-turn interjection without canceling the running turn.
-    /// Reserved for text that answers the running turn (plan-review comments,
-    /// permission follow-ups); user send-now takes [`Self::SendPromptNow`].
-    Interject {
-        text: String,
-        /// Pasted images riding along with the interjection. Empty for
-        /// producers that carry plain text (plan-review comments, etc.).
-        images: Vec<crate::prompt_images::PastedImage>,
-    },
-    /// Cancel-and-send: cancel the running turn (background tasks and queued
-    /// rows survive shell-side) and run this text as the next prompt turn.
-    /// The send-now chord, empty-composer Enter on a queued local row, and
-    /// the deferred-paste re-issue produce this.
-    SendPromptNow {
-        text: String,
-        /// Pasted images riding along with the prompt.
-        images: Vec<crate::prompt_images::PastedImage>,
-    },
     /// Enable session voice mode and start recording (the Ctrl+Space
     /// hold-to-talk key-press, on terminals that report key releases).
     /// Start-only — never stops; use [`Self::VoiceStop`] / [`Self::VoiceToggle`]
@@ -196,54 +178,13 @@ pub enum Action {
     AcceptWordSelectTip,
     /// Try to drain the next queued prompt (after editing completes, etc.).
     DrainQueue,
-    /// Remove a server-authoritative (shared) queued prompt by its stable
- /// `prompt_id`. Routed to the agent as `legacy ext RPC`;
- /// the resulting `legacy ext RPC` rebroadcast is the source of truth.
-    QueueRemoveShared {
-        id: String,
-        expected_version: u64,
-    },
-    /// Reorder the server-authoritative (shared) queued prompts to match
- /// `ordered_ids`. Routed as `legacy ext RPC`.
-    QueueReorderShared {
-        ordered_ids: Vec<String>,
-    },
-    /// Replace the text of a server-authoritative (shared) queued prompt.
- /// Routed to the agent as `legacy ext RPC`; the rebroadcast of
- /// `legacy ext RPC` is the source of truth. Last write wins via the
-    /// session actor's serialized mailbox; no client-side conflict resolution.
-    QueueEditShared {
-        id: String,
-        new_text: String,
-    },
-    /// Interject a server-authoritative (shared) queued prompt into the running
-    /// turn: the agent atomically removes it from the queue and
- /// merges its text into the in-flight turn. Routed as `legacy ext RPC`;
- /// the `legacy ext RPC` + `legacy ext RPC` rebroadcasts are
-    /// the source of truth (no optimistic client-side block). Mirrors the local
-    /// "Send now" / `Ctrl+Enter` path, which uses [`Interject`](Self::Interject)
-    /// directly because the local queue is client-owned.
-    QueueInterjectShared {
-        id: String,
-        expected_version: u64,
-        /// Locally-edited replacement text (the edit-interject key while in
-        /// `PromptMode::EditingQueued`): without it the agent would interject
-        /// the original server-side text, not the edit. Atomicity semantics
-        /// live on [`Effect::QueueInterject`].
-        new_text: Option<String>,
-    },
     /// A queued-row edit whose saved text is a complete pager builtin invocation: drop the row,
     /// then run the command through the normal slash dispatch. The view only classifies; dispatch
     /// stays the sole execution owner, and it removes the row only after its own guards pass, so a
     /// failed run leaves the row queued.
     RunEditedQueuedCommand {
-        /// `PromptMode::EditingQueued.id`: the local `pending_prompts` id, or the synthesized
-        /// selection id for a server row (unused there).
+        /// `PromptMode::EditingQueued.id`: the local `pending_prompts` id.
         local_id: u64,
-        /// `Some` for a server-authoritative row. `None` covers both a local row and a server row
-        /// that vanished from the mirror before Enter: with nothing to remove, no versioned
- /// `legacy ext RPC` request is sent.
-        server: Option<SharedQueueTarget>,
         text: String,
     },
     /// Focus the prompt pane.
@@ -425,9 +366,6 @@ pub enum Action {
     /// drain site) and persists to `[ui].combine_queued_prompts` via
     /// `Effect::PersistSetting`.
     SetCombineQueuedPrompts(bool),
-    /// Mid-turn follow-up routing (`queue` | `steer`).
-    /// SHARED-owned: `[ui].follow_up_behavior`.
-    SetFollowUpBehavior(crate::appearance::FollowUpBehavior),
     /// Set simple mode (ASCII / minimal glyphs). Persists via `Effect::PersistSetting`.
     SetSimpleMode(bool),
     /// Set the per-tip contextual-hint user config (`[ui.contextual_hints]`).
@@ -436,7 +374,6 @@ pub enum Action {
     SetContextualHintUndo(bool),
     SetContextualHintPlanMode(bool),
     SetContextualHintImageInput(bool),
-    SetContextualHintSendNow(bool),
     SetContextualHintSmallScreen(bool),
     SetContextualHintWordSelect(bool),
     SetContextualHintSshWrap(bool),
@@ -652,12 +589,6 @@ pub enum Action {
     JumpPickerSelect(EntryId),
     /// Close the picker and restore the stashed viewport.
     JumpDismiss,
-}
-/// A server-authoritative queue row plus the version its removal is checked against.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SharedQueueTarget {
-    pub id: String,
-    pub expected_version: u64,
 }
 /// Persist-and-notify semantics for [`Effect::PersistPermissionMode`].
 ///
@@ -1253,59 +1184,6 @@ pub enum Effect {
         /// See [`Effect::SendPrompt::prompt_id`].
         prompt_id: String,
     },
-    /// Cancel-and-send: `session/prompt` stamped with `_meta.sendNow`, so the
-    /// shell cancels the running turn and runs this prompt next (background
-    /// tasks and the rest of the queue survive). Carries structured blocks so
-    /// pasted images ride along.
-    SendPromptNow {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        blocks: Vec<acp::ContentBlock>,
-        /// See [`Effect::SendPrompt::prompt_id`].
-        prompt_id: String,
-    },
-    /// Remove a server-owned queued prompt: fire-and-forget
- /// `legacy ext RPC`. The agent re-broadcasts the authoritative queue.
-    QueueRemove {
-        session_id: acp::SessionId,
-        id: String,
-    },
- /// Reorder server-owned queued prompts: fire-and-forget `legacy ext RPC`.
-    QueueReorder {
-        session_id: acp::SessionId,
-    },
-    /// Replace the text of a server-owned queued prompt in place: fire-and-forget
- /// `legacy ext RPC`. The session actor's serialized mailbox makes this
-    /// last-writer-wins for concurrent edits; the rebroadcast of
- /// `legacy ext RPC` is the truth signal.
-    QueueEdit {
-        session_id: acp::SessionId,
-        id: String,
-    },
-    /// Hold a server-owned row out of combine-on-promote while the composer
- /// edits it: fire-and-forget `legacy ext RPC`.
-    QueueHoldEdit {
-        session_id: acp::SessionId,
-        id: String,
-    },
- /// Release a previous [`Self::QueueHoldEdit`]: `legacy ext RPC`.
-    QueueReleaseEdit {
-        session_id: acp::SessionId,
-        id: String,
-    },
-    /// Interject a server-owned queued prompt into the running turn:
- /// fire-and-forget `legacy ext RPC`. The session actor atomically
-    /// removes it from the queue and merges its text into the in-flight turn,
-    /// then broadcasts both the interjection and the authoritative queue.
-    /// `new_text` (when `Some`, serialized as `newText`) replaces the stored
-    /// queue text in the interjection — same single version check, so a stale
-    /// version no-ops the edit too. If the turn already ended, the agent
-    /// saves a version-matching `new_text` to the row as an LWW edit instead
-    /// (the edit survives and drains; it is never silently lost).
-    QueueInterject {
-        session_id: acp::SessionId,
-        id: String,
-    },
     /// Set the session mode via ACP `session/set_mode`.
     SetSessionMode {
         session_id: acp::SessionId,
@@ -1443,15 +1321,6 @@ pub enum Effect {
     SendRecap {
         session_id: acp::SessionId,
         auto: bool,
-    },
- /// Send a mid-turn interjection via legacy ext RPC ext method.
-    SendInterject {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        text: String,
-        /// Structured text + image content blocks. `None` for text-only
-        /// interjections — the wire shape stays byte-identical to legacy.
-        blocks: Option<Vec<acp::ContentBlock>>,
     },
  /// Log out via `legacy ext RPC` (shell clears auth.json + in-memory state).
     Logout,
@@ -1811,18 +1680,6 @@ pub enum TaskResult {
         /// constructions that don't need gating.
         prompt_id: Option<String>,
     },
-    /// A send-now `session/prompt` RPC failed at the transport/RPC layer —
-    /// the prompt never reached the shell's queue. Carries the payload so
-    /// dispatch can requeue it locally (the producer already consumed the
-    /// composer/queue row, so dropping it would silently lose the message —
-    /// the same contract the removed `InterjectFailed` requeue had).
-    SendPromptNowFailed {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-        prompt_id: String,
-        error: String,
-        blocks: Vec<acp::ContentBlock>,
-    },
     /// Cancel notification was sent (fire-and-forget).
     /// The real turn end comes via PromptResponse.
     CancelComplete,
@@ -2037,16 +1894,6 @@ pub enum TaskResult {
         /// loading spinner, so only a manual failure needs to clear one.
         auto: bool,
         error: Option<String>,
-    },
-    /// Interjection send failed. Carries the payload so the dispatcher can
-    /// requeue it (mirrors the batch path's `failed_local` requeue) — the
-    /// queue row was already removed optimistically, so dropping the text
-    /// here would silently lose the user's message.
-    InterjectFailed {
-        agent_id: AgentId,
-        error: String,
-        text: String,
-        blocks: Option<Vec<agent_client_protocol::ContentBlock>>,
     },
     /// Available commands refreshed from the shell.
     AvailableCommandsRefreshed {

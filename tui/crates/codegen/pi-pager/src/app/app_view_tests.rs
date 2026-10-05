@@ -285,9 +285,6 @@ pub(crate) fn test_app() -> AppView {
         credit_balance: None,
         auto_topup: None,
         billing_poll_wanted: false,
-        shared_prompt_queues: std::collections::HashMap::new(),
-        optimistic_prompt_echoes: std::collections::HashMap::new(),
-        pending_running_adoptions: std::collections::HashMap::new(),
         session_picker_grouped: false,
         scheduler_background_loops_seed: true,
         cancel_rewind_enabled: true,
@@ -1075,7 +1072,6 @@ fn needs_animation_gates_pending_turn_end_reconcile() {
             prompt_id: "pid-stuck".into(),
             stop_reason: Some("end_turn".into()),
             agent_result: None,
-            cancel_trigger: None,
             cancellation_category: None,
             received_at: std::time::Instant::now()
                 - (TURN_END_RECONCILE_GRACE + std::time::Duration::from_secs(1)),

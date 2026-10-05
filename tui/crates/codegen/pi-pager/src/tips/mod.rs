@@ -12,7 +12,6 @@ pub(crate) mod clipboard_focus;
 pub(crate) mod ephemeral;
 pub(crate) mod plan_nudge;
 pub(crate) mod render;
-pub(crate) mod send_now;
 pub(crate) mod small_screen;
 pub(crate) mod ssh_wrap;
 pub(crate) mod word_select;

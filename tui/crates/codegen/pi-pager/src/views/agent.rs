@@ -838,7 +838,6 @@ pub fn build_hints(
     vim_mode: bool,
     is_turn_running: bool,
     esc_would_cancel_turn: bool,
-    has_queued_follow_up: bool,
     selected_is_user_prompt: bool,
     selected_is_agent_message: bool,
     selected_is_credit_limit: bool,
@@ -901,8 +900,6 @@ pub fn build_hints(
                     hints.push(HintItem::new(newline_key, submit_label));
                 } else if prompt.can_send() {
                     hints.push(HintItem::new(key, submit_label));
-                } else if is_turn_running && has_queued_follow_up {
-                    hints.push(HintItem::new(key, "send now"));
                 }
             }
             if shift_enter_unavailable && !multiline_mode && prompt.can_send() {
@@ -1137,7 +1134,6 @@ mod tests {
             vim_mode,
             false,
             false,
-            false,
             selected_is_user_prompt,
             selected_is_agent_message,
             false,
@@ -1272,7 +1268,6 @@ mod tests {
             true,
             false,
             true,
-            false,
             false,
             false,
             false,
@@ -1440,7 +1435,6 @@ mod tests {
             false,
             false,
             false,
-            false,
             Some(&search))
     }
     #[test]
@@ -1541,7 +1535,6 @@ mod tests {
             false,
             false,
             false,
-            false,
             None);
         assert!(
             !hints.iter().any(|h| h.label == "home"),
@@ -1582,7 +1575,6 @@ mod tests {
             false,
             false,
             false,
-            false,
             shift_enter_unavailable,
             None)
     }
@@ -1611,44 +1603,6 @@ mod tests {
             !labels.contains(&"send now"),
             "the interject chord is gone, so no send-now hint; got {labels:?}"
         );
-    }
-    /// Empty composer + mid-turn queue: bare Enter is send-now in both normal
-    /// and multiline modes (multiline only inserts newline when there is text).
-    #[test]
-    fn prompt_empty_mid_turn_queue_advertises_send_now_including_multiline() {
-        for multiline in [false, true] {
-            let prompt = PromptWidget::default();
-            let registry = ActionRegistry::defaults();
-            let hints = build_hints(
-                ActivePane::Prompt,
-                prompt_focus_hint(),
-                &prompt,
-                &registry,
-                false,
-                None,
-                None,
-                "expand thinking",
-                false,
-                false,
-                None,
-                false,
-                multiline,
-                true,
-                true,
-                false,
-                true,
-                false,
-                false,
-                false,
-                false,
-                None);
-            let labels: Vec<&str> = hints.iter().map(|h| h.label.as_ref()).collect();
-            assert!(
-                labels.contains(&"send now"),
-                "empty composer mid-turn with queue must advertise Enter:send now \
-                 (multiline={multiline}); got {labels:?}"
-            );
-        }
     }
     /// Running-turn cancel hint key tracks `esc_would_cancel_turn` — the
     /// input-routing predicate computed by the caller: Esc when a bare press
@@ -1680,7 +1634,6 @@ mod tests {
                 true,
                 true,
                 esc_would_cancel_turn,
-                false,
                 false,
                 false,
                 false,
@@ -1721,7 +1674,6 @@ mod tests {
             false,
             false,
             true,
-            false,
             false,
             false,
             false,
@@ -1769,7 +1721,6 @@ mod tests {
             false,
             false,
             true,
-            false,
             false,
             false,
             false,

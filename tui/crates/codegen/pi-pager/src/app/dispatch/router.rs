@@ -5,14 +5,13 @@ use super::auth::{
 };
 use super::billing::dispatch_open_supergrok_url;
 use super::ctx::{
-    active_agent_session_id, get_active_agent_mut, navigate_clearing_selection, open_url_or_show,
-    sync_sleep_inhibitor, with_active_agent, with_scrollback,
+    get_active_agent_mut, navigate_clearing_selection, open_url_or_show, sync_sleep_inhibitor,
+    with_active_agent, with_scrollback,
 };
 use super::import_claude::{
     dispatch_dismiss_claude_import, dispatch_import_claude, dispatch_import_claude_cancel,
     dispatch_import_claude_confirm,
 };
-use super::interject::dispatch_interject;
 use super::jump::{dispatch_jump_dismiss, dispatch_jump_picker_select, };
 use super::modes::{
     dispatch_cycle_mode, 
@@ -62,10 +61,10 @@ use super::settings::setters::{
     preview_auto_light_theme, preview_theme, set_ask_user_question_timeout_enabled,
     set_auto_dark_theme, set_auto_light_theme, set_auto_update, set_collapsed_edit_blocks,
     set_combine_queued_prompts, set_compact_mode, set_confirm_before_rewind,
-    set_contextual_hint_image_input, set_contextual_hint_plan_mode, set_contextual_hint_send_now,
+    set_contextual_hint_image_input, set_contextual_hint_plan_mode,
     set_contextual_hint_small_screen, set_contextual_hint_ssh_wrap, set_contextual_hint_undo,
     set_contextual_hint_word_select, set_default_model, set_default_selected_permission,
-    set_display_refresh_auto_cadence, set_follow_up_behavior, set_fork_secondary_model,
+    set_display_refresh_auto_cadence, set_fork_secondary_model,
     set_group_tool_verbs, set_hunk_tracker_mode, set_invert_scroll, set_keep_text_selection,
     set_max_thoughts_width, set_multiline_mode, set_page_flip_on_send, set_prompt_suggestions,
     set_remember_tool_approvals, set_render_mermaid, set_respect_manual_folds, set_screen_mode,
@@ -349,10 +348,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::SendSlashCommandPreservingDraft(text) => {
             dispatch_send_prompt_inner(app, text, false, false, false)
         }
-        Action::Interject { text, images } => dispatch_interject(app, text, images),
-        Action::SendPromptNow { text, images } => {
-            super::interject::dispatch_send_prompt_now(app, text, images)
-        }
         Action::EnableVoiceMode => dispatch_enable_voice_mode(app, true),
         Action::VoiceToggle => dispatch_voice_toggle(app),
         Action::VoiceStop => dispatch_voice_stop(app),
@@ -362,43 +357,9 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::ShowWordSelectTip => dispatch_show_word_select_tip(app),
         Action::AcceptWordSelectTip => dispatch_accept_word_select_tip(app),
         Action::DrainQueue => dispatch_drain_queue(app),
-        Action::QueueRemoveShared {
-            id,
-            expected_version,
-        } => match active_agent_session_id(app) {
-            Some(session_id) => {
-                vec![Effect::QueueRemove {
-                    session_id,
-                    id,
-                }]
-            }
-            None => vec![],
-        },
-        Action::QueueReorderShared { ordered_ids } => match active_agent_session_id(app) {
-            Some(session_id) => {
-                vec![Effect::QueueReorder {
-                    session_id,
-                }]
-            }
-            None => vec![],
-        },
-        Action::QueueEditShared { id, new_text } => match active_agent_session_id(app) {
-            Some(session_id) => vec![Effect::QueueEdit {
-                session_id,
-                id,
-            }],
-            None => vec![],
-        },
-        Action::QueueInterjectShared {
-            id,
-            expected_version,
-            new_text,
-        } => queue::dispatch_queue_interject_shared(app, id, expected_version, new_text),
-        Action::RunEditedQueuedCommand {
-            local_id,
-            server,
-            text,
-        } => queue::dispatch_run_edited_queued_command(app, local_id, server, text),
+        Action::RunEditedQueuedCommand { local_id, text } => {
+            queue::dispatch_run_edited_queued_command(app, local_id, text)
+        }
         Action::FocusPrompt => {
             with_active_agent(app, |agent| {
                 agent.set_active_pane(ActivePane::Prompt, false);
@@ -705,12 +666,12 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::SetPageFlipOnSend(v) => set_page_flip_on_send(app, v),
         Action::SetConfirmBeforeRewind(v) => set_confirm_before_rewind(app, v),
         Action::SetCombineQueuedPrompts(v) => set_combine_queued_prompts(app, v),
-        Action::SetFollowUpBehavior(v) => set_follow_up_behavior(app, v),
+
         Action::SetSimpleMode(v) => set_simple_mode(app, v),
         Action::SetContextualHintUndo(v) => set_contextual_hint_undo(app, v),
         Action::SetContextualHintPlanMode(v) => set_contextual_hint_plan_mode(app, v),
         Action::SetContextualHintImageInput(v) => set_contextual_hint_image_input(app, v),
-        Action::SetContextualHintSendNow(v) => set_contextual_hint_send_now(app, v),
+
         Action::SetContextualHintSmallScreen(v) => set_contextual_hint_small_screen(app, v),
         Action::SetContextualHintWordSelect(v) => set_contextual_hint_word_select(app, v),
         Action::SetContextualHintSshWrap(v) => set_contextual_hint_ssh_wrap(app, v),

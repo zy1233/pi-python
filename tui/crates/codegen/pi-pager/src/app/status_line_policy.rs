@@ -255,10 +255,7 @@ impl AppView {
     /// stamp rides the payload for clients with no clock of their own; reading it
     /// back here would trade the pause correction away.
     fn local_turn_elapsed(&self) -> Option<std::time::Duration> {
-        let agent = self.active_agent()?;
-        (!agent.renders_parked())
-            .then(|| agent.turn_elapsed())
-            .flatten()
+        self.active_agent()?.turn_elapsed()
     }
 
     /// What one frame paints. Gated on ownership rather than on every

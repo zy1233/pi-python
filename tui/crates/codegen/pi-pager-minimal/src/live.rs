@@ -152,7 +152,7 @@ pub fn draw_live(app: &mut AppView, terminal: &mut PagerTerminal) {
         agent.active_pane = pi_pager::app::agent_view::AgentPane::Prompt;
         let status_activity = minimal_advance_phase_timer(agent);
         let show_todos = crate::todo::todo_panel_visible(agent, force_todos);
-        let queued = agent.session.pending_prompts.len() + agent.shared_queue.len();
+        let queued = agent.session.pending_prompts.len();
         if let Some(kind) = super::panel::active(agent) {
             let cursor = super::panel::render(frame.buffer_mut(), area, agent, kind, &theme);
             return (cursor, None);
@@ -562,12 +562,10 @@ fn render_minimal_status(
         return;
     }
     let drain_blocked = minimal_api::drain_blocked(agent);
-    let parked = minimal_api::renders_parked(agent);
     if !turn_status::should_show(
         &agent.session.state,
         drain_blocked,
         minimal_api::mcp_init_progress(agent),
-        parked,
     ) {
         render_idle_hint(buf, area, theme);
         return;
@@ -589,10 +587,7 @@ fn render_minimal_status(
             mcp_init_progress: minimal_api::mcp_init_progress(agent),
             is_bash_turn: agent.bash_turn,
             is_pending_user_input,
-            parked,
             flat_background: true,
-            held_queue: minimal_api::held_queue_count(agent),
-            held_queue_top_sendable: minimal_api::held_queue_top_sendable(agent),
         },
     );
 }

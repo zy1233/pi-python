@@ -521,9 +521,6 @@ pub fn current_value_for(
         "combine_queued_prompts" => Some(SettingValue::Bool(
             crate::appearance::cache::load_combine_queued_prompts(),
         )),
-        "follow_up_behavior" => Some(SettingValue::Enum(
-            crate::appearance::cache::load_follow_up_behavior().as_canonical(),
-        )),
         "confirm_before_rewind" => Some(SettingValue::Bool(ui.confirm_before_rewind_enabled())),
         "simple_mode" => Some(SettingValue::Bool(ui.simple_mode.unwrap_or(true))),
         // Per-tip contextual hints — `None` (inherit) reads as the default ON.
@@ -535,9 +532,6 @@ pub fn current_value_for(
         )),
         "contextual_hints.image_input" => Some(SettingValue::Bool(
             ui.contextual_hints.image_input.unwrap_or(true),
-        )),
-        "contextual_hints.send_now" => Some(SettingValue::Bool(
-            ui.contextual_hints.send_now.unwrap_or(true),
         )),
         "contextual_hints.small_screen" => Some(SettingValue::Bool(
             ui.contextual_hints.small_screen.unwrap_or(true),
@@ -797,13 +791,6 @@ mod tests {
                         "contextual_hints.image_input default drifts from UiConfig::default()"
                     );
                 }
-                ("contextual_hints.send_now", SettingKind::Bool { default }) => {
-                    assert_eq!(
-                        *default,
-                        ui.contextual_hints.send_now.unwrap_or(true),
-                        "contextual_hints.send_now default drifts from UiConfig::default()"
-                    );
-                }
                 ("contextual_hints.small_screen", SettingKind::Bool { default }) => {
                     assert_eq!(
                         *default,
@@ -860,13 +847,6 @@ mod tests {
                         *default,
                         ui.combine_queued_prompts.unwrap_or(false),
                         "combine_queued_prompts default drifts from UiConfig::default()"
-                    );
-                }
-                ("follow_up_behavior", SettingKind::Enum { default, .. }) => {
-                    assert_eq!(
-                        *default,
-                        ui.follow_up_behavior(),
-                        "follow_up_behavior default drifts from UiConfig::default()"
                     );
                 }
                 ("simple_mode", SettingKind::Bool { default }) => {
@@ -1668,7 +1648,6 @@ mod tests {
                 "contextual_hints.undo",
                 "contextual_hints.plan_mode",
                 "contextual_hints.image_input",
-                "contextual_hints.send_now",
                 "contextual_hints.small_screen",
                 "contextual_hints.word_select",
                 "contextual_hints.ssh_wrap",

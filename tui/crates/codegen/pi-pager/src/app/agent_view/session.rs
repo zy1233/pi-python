@@ -120,7 +120,6 @@ impl AgentView {
             tip_typing_dismissed: false,
             todo: TodoPane::new(),
             queue: QueuePane::new(),
-            shared_queue: Vec::new(),
             attached_as_viewer: false,
             self_originated_prompt_ids: VecDeque::new(),
             rewound_prompt_ids: VecDeque::new(),
@@ -170,7 +169,6 @@ impl AgentView {
             first_activity_logged_for: None,
             turn_paused_duration: std::time::Duration::ZERO,
             turn_paused_wall: std::time::Duration::ZERO,
-            self_interjection_ids: std::collections::HashSet::new(),
             last_active_at: Some(Instant::now()),
             current_branch: None,
             is_worktree: false,
@@ -337,12 +335,7 @@ impl AgentView {
             pending_turn_end_reconcile: None,
             pending_cancel_resend: None,
             cancel_latency: None,
-            expect_send_now_cancel: None,
             front_message_committed: true,
-            optimistic_queue_ids: std::collections::HashSet::new(),
-            send_now_awaiting_confirm: None,
-            send_now_painted_blocks: std::collections::HashMap::new(),
-            follow_without_jump_prompt_id: None,
             plugin_cta: PluginCtaState::default(),
             follow_ups: None,
             follow_up_shown_prompt_id: None,
@@ -352,7 +345,6 @@ impl AgentView {
             follow_up_next_gen: 0,
             follow_up_pending: HashMap::new(),
             follow_up_pending_order: VecDeque::new(),
-            pending_adoption_updates: Vec::new(),
         };
         let mode = if crate::appearance::cache::load_simple_mode() {
             InputMode::Simple
@@ -449,11 +441,7 @@ impl AgentView {
         self.pending_cancel_resend = None;
         self.cancel_latency = None;
         self.pending_stop_hooks = None;
-        self.clear_send_now_expectation();
         self.front_message_committed = true;
-        self.optimistic_queue_ids.clear();
-        self.send_now_awaiting_confirm = None;
-        self.send_now_painted_blocks.clear();
     }
     /// Put a taken [`ReplayRebuiltState`] back: the counterpart of
     /// [`Self::take_replay_rebuilt_state`] for callers whose rebuild failed
@@ -486,14 +474,7 @@ impl AgentView {
     /// bookkeeping every real turn start must apply, so no caller can miss
     /// it. Deliberately NOT used by server-initiated synthetic turns
     /// (auto-wake / actor runs): they never call `start_turn`.
-    pub(crate) fn start_turn_boundary(&mut self, starting_prompt_id: Option<&str>) {
-        if self
-            .expect_send_now_cancel
-            .as_deref()
-            .is_some_and(|id| Some(id) != starting_prompt_id)
-        {
-            self.expect_send_now_cancel = None;
-        }
+    pub(crate) fn start_turn_boundary(&mut self) {
         self.front_message_committed = false;
         self.pending_cancel_resend = None;
         self.cancel_latency = None;
@@ -504,7 +485,7 @@ impl AgentView {
     /// TurnRunning and match subsequent live deltas. No user-prompt block is
     /// pushed — the turn's prompt and prior chunks arrived via the replay.
     pub(crate) fn adopt_running_prompt(&mut self, prompt_id: String) {
-        self.start_turn_boundary(Some(&prompt_id));
+        self.start_turn_boundary();
         self.session.tracker.clear_user_echo_skip();
         self.front_message_committed = true;
         self.session.current_prompt_id = Some(prompt_id.clone());
@@ -1147,18 +1128,17 @@ mod status_window_tests {
             confirmed: false,
             trigger: crate::app::actions::CancelTrigger::Esc,
         });
-        agent.start_turn_boundary(None);
+        agent.start_turn_boundary();
         assert!(agent.session.state.is_turn_running());
         assert!(agent.pending_cancel_resend.is_none());
     }
     #[test]
     fn adopt_running_prompt_marks_front_committed() {
         let mut agent = test_agent_view(Some("s1"), std::path::PathBuf::from("/tmp"));
-        agent.start_turn_boundary(Some("p-local"));
+        agent.start_turn_boundary();
         assert!(!agent.front_message_committed);
         agent.adopt_running_prompt("p-run".into());
         assert!(agent.front_message_committed);
-        assert!(agent.expects_send_now_cancel());
     }
     #[test]
     fn session_rebind_and_replay_invalidate_minimal_btw() {

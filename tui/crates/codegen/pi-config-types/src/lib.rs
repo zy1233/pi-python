@@ -1127,9 +1127,6 @@ pub struct ContextualHintsRemote {
     /// Clipboard-image input tip.
     #[serde(default)]
     pub image_input: Option<bool>,
-    /// Send-now tip after queuing a mid-turn follow-up (InterjectPrompt chord).
-    #[serde(default)]
-    pub send_now: Option<bool>,
     /// Small-screen tip (`/compact-mode` hint on smallish terminals).
     #[serde(default)]
     pub small_screen: Option<bool>,

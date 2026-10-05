@@ -190,35 +190,9 @@ impl AgentView {
         let Some(mut pav) = self.plan_approval_view.take() else {
             return InputOutcome::Changed;
         };
-        let freeform = {
-            let t = self.prompt.text_without_image_chips();
-            let trimmed = t.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_owned())
-            }
-        };
         Self::merge_live_images_into_stash(&mut self.prompt, &mut pav.stashed_prompt);
-        let review_comments = {
-            let formatted = pav.format_feedback(freeform.as_deref());
-            if formatted.trim().is_empty() {
-                None
-            } else {
-                Some(format!(
-                    "The user approved the plan with the following review comments:\n\n{}",
-                    formatted
-                ))
-            }
-        };
         pav.send_approved();
         self.close_plan_review(pav, "build");
-        if let Some(text) = review_comments {
-            return InputOutcome::Action(Action::Interject {
-                text,
-                images: vec![],
-            });
-        }
         InputOutcome::Changed
     }
     /// Fold freeform-only images into the session draft. Prefill clones share
@@ -1062,10 +1036,7 @@ mod plan_approval_enter_tests {
             agent.plan_approval_view.is_none(),
             "empty freeform + comments: `a` must approve with comments"
         );
-        assert!(matches!(
-            outcome,
-            InputOutcome::Action(Action::Interject { .. })
-        ));
+        assert!(matches!(outcome, InputOutcome::Changed));
     }
     #[test]
     fn a_with_nonempty_freeform_types_letter() {
@@ -1125,7 +1096,7 @@ mod plan_approval_enter_tests {
         assert_eq!(agent.prompt.text(), "session draft from mid-thinking");
     }
     #[test]
-    fn approve_includes_freeform_notes() {
+    fn approve_restores_session_draft() {
         let mut agent = agent_with_revise_prompt();
         if let Some(ref mut pav) = agent.plan_approval_view {
             pav.stashed_prompt = crate::views::prompt_widget::StashedPrompt {
@@ -1139,15 +1110,11 @@ mod plan_approval_enter_tests {
         }
         agent.prompt.set_text("please also fix auth");
         let outcome = agent.approve_plan();
-        assert!(matches!(
-            outcome,
-            InputOutcome::Action(Action::Interject { ref text, .. })
-                if text.contains("please also fix auth")
-        ));
+        assert!(matches!(outcome, InputOutcome::Changed));
         assert_eq!(
             agent.prompt.text(),
             "session draft",
-            "approve restores session draft after including freeform"
+            "approve restores the session draft"
         );
     }
     #[test]
@@ -1260,7 +1227,7 @@ mod plan_approval_enter_tests {
         );
     }
     #[test]
-    fn approve_strips_image_chips_from_interjection_text() {
+    fn approve_merges_freeform_images_into_session_draft() {
         let mut agent = agent_with_revise_prompt();
         agent.prompt.set_text("also check auth ");
         let img = crate::prompt_images::PastedImage {
@@ -1284,23 +1251,7 @@ mod plan_approval_enter_tests {
             "precondition: chip in freeform text"
         );
         let outcome = agent.approve_plan();
-        match outcome {
-            InputOutcome::Action(Action::Interject { text, images }) => {
-                assert!(
-                    !text.contains("[Image #"),
-                    "approve interjection must not leak image chip tokens, got {text:?}"
-                );
-                assert!(
-                    text.contains("also check auth"),
-                    "non-chip freeform text must still ship, got {text:?}"
-                );
-                assert!(
-                    images.is_empty(),
-                    "approve interjection stays text-only; images merge into session draft"
-                );
-            }
-            other => panic!("expected Interject with freeform, got {other:?}"),
-        }
+        assert!(matches!(outcome, InputOutcome::Changed));
         assert!(
             agent.prompt.text().contains("[Image #1]"),
             "merged freeform image must restore with a chip in session draft text, got {:?}",
@@ -1430,8 +1381,7 @@ mod plan_approval_optimistic_mode_tests {
         let parsed: serde_json::Value = serde_json::from_str(raw.0.get()).unwrap();
         assert_eq!(parsed["outcome"], "approved");
     }
-    /// Approve with review comments takes the early `Action::Interject`
-    /// return — the optimistic clear must happen before that branch.
+    /// Approve with review comments still clears plan mode optimistically.
     #[test]
     fn approve_plan_with_comments_still_clears_plan_mode() {
         let (mut agent, _rx) = agent_in_plan_mode_with_approval();
@@ -1444,10 +1394,7 @@ mod plan_approval_optimistic_mode_tests {
                 });
         }
         let outcome = agent.approve_plan();
-        assert!(matches!(
-            outcome,
-            InputOutcome::Action(Action::Interject { .. })
-        ));
+        assert!(matches!(outcome, InputOutcome::Changed));
         assert_eq!(agent.plan_mode_pending, Some(false));
         assert!(!effective_plan_mode(&agent));
     }

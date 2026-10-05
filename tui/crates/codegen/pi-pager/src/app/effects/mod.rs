@@ -58,7 +58,6 @@ pub(crate) fn execute(
     progress_tx: &tokio::sync::mpsc::UnboundedSender<RestoreProgressMsg>,
 ) -> (bool, EffectMeta) {
     let mut meta = EffectMeta::default();
-    let effect_is_send_now = matches!(effect, Effect::SendPromptNow { .. });
     match effect {
         Effect::RegisterActiveSession { session_id, cwd } => {
             crate::app::signal_handler::set_current_session_id(Some(session_id.clone()));
@@ -762,9 +761,7 @@ pub(crate) fn execute(
                     }
                 });
         }
-        Effect::SendPromptBlocks { agent_id, session_id, blocks, prompt_id }
-        | Effect::SendPromptNow { agent_id, session_id, blocks, prompt_id } => {
-            let send_now = effect_is_send_now;
+        Effect::SendPromptBlocks { agent_id, session_id, blocks, prompt_id } => {
             let tx = acp_tx.clone();
             let screen_mode = session_flags.screen_mode_label;
             let is_api_key_auth = session_flags.is_api_key_auth;
@@ -775,18 +772,14 @@ pub(crate) fn execute(
                         Some(&session_id.0),
                         Some(
                             serde_json::json!({
-                        "kind": if send_now { "send_now" } else { "blocks" },
+                        "kind": "blocks",
                         "block_count": blocks.len(),
                         "prompt_id": prompt_id,
                     }),
                         ),
                     );
                     let send_start = std::time::Instant::now();
-                    let mut meta = prompt_request_meta(&prompt_id, screen_mode);
-                    if send_now && let Some(map) = meta.as_object_mut() {
-                        map.insert("sendNow".into(), serde_json::Value::Bool(true));
-                    }
-                    let requeue_blocks = send_now.then(|| blocks.clone());
+                    let meta = prompt_request_meta(&prompt_id, screen_mode);
                     let req = acp::PromptRequest::new(session_id.clone(), blocks)
                         .meta(meta.as_object().cloned());
                     let result = acp_send(req, &tx).await;
@@ -796,7 +789,7 @@ pub(crate) fn execute(
                         Some(&session_id.0),
                         Some(
                             serde_json::json!({
-                        "kind": if send_now { "send_now" } else { "blocks" },
+                        "kind": "blocks",
                         "elapsed_ms": send_elapsed_ms,
                         "ok": result.is_ok(),
                         "prompt_id": prompt_id,
@@ -804,15 +797,6 @@ pub(crate) fn execute(
                         ),
                     );
                     log_prompt_result(&session_id, &result);
-                    if let (Some(blocks), Err(e)) = (requeue_blocks, &result) {
-                        return TaskResult::SendPromptNowFailed {
-                            agent_id,
-                            session_id,
-                            prompt_id,
-                            error: format_acp_error(e, is_api_key_auth),
-                            blocks,
-                        };
-                    }
                     let http_status = result
                         .as_ref()
                         .err()
@@ -936,24 +920,6 @@ pub(crate) fn execute(
                     }
                     TaskResult::CancelComplete
                 });
-        }
-        Effect::QueueRemove { .. } => {
-            tasks.spawn(async move { TaskResult::CancelComplete });
-        }
-        Effect::QueueReorder { .. } => {
-            tasks.spawn(async move { TaskResult::CancelComplete });
-        }
-        Effect::QueueEdit { .. } => {
-            tasks.spawn(async move { TaskResult::CancelComplete });
-        }
-        Effect::QueueHoldEdit { .. } => {
-            tasks.spawn(async move { TaskResult::CancelComplete });
-        }
-        Effect::QueueReleaseEdit { .. } => {
-            tasks.spawn(async move { TaskResult::CancelComplete });
-        }
-        Effect::QueueInterject { .. } => {
-            tasks.spawn(async move { TaskResult::CancelComplete });
         }
         Effect::SetSessionMode { session_id, mode_id } => {
             let tx = acp_tx.clone();
@@ -1649,21 +1615,6 @@ pub(crate) fn execute(
                     session_id,
                     auto,
                     error: None,
-                }
-            });
-        }
-        Effect::SendInterject {
-            agent_id,
-            text,
-            blocks,
-            ..
-        } => {
-            tasks.spawn(async move {
-                TaskResult::InterjectFailed {
-                    agent_id,
-                    error: "Interjection is not supported in standard ACP".into(),
-                    text,
-                    blocks,
                 }
             });
         }

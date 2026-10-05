@@ -386,53 +386,6 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             app.refresh_status_line_for(agent_id);
             effects
         }
-        TaskResult::SendPromptNowFailed {
-            agent_id,
-            session_id,
-            prompt_id,
-            error,
-            blocks,
-        } => {
-            let sid = session_id.0.to_string();
-            super::queue::retire_optimistic_echo(
-                &mut app.optimistic_prompt_echoes,
-                &mut app.shared_prompt_queues,
-                &sid,
-                &prompt_id,
-            );
-            if let Some(agent) = app.agents.get_mut(&agent_id) {
-                agent.shared_queue.retain(|e| e.id != prompt_id);
-                agent.note_queue_echo_retired(&prompt_id);
-                if agent.expect_send_now_cancel.as_deref() == Some(prompt_id.as_str())
-                    || agent.follow_without_jump_prompt_id.as_deref() == Some(prompt_id.as_str())
-                {
-                    agent.clear_send_now_expectation();
-                }
-                agent.retire_send_now_painted_block(&prompt_id);
-                let text = blocks
-                    .iter()
-                    .find_map(|b| match b {
-                        acp::ContentBlock::Text(t) => Some(t.text.clone()),
-                        _ => None,
-                    })
-                    .unwrap_or_default();
-                let id = agent.session.next_queue_id;
-                agent.session.next_queue_id += 1;
-                agent
-                    .session
-                    .pending_prompts
-                    .push_front(crate::app::agent::QueuedPrompt {
-                        wire_blocks: Some(blocks),
-                        ..crate::app::agent::QueuedPrompt::plain(
-                            id,
-                            &text,
-                            crate::app::agent::QueueEntryKind::Prompt,
-                        )
-                    });
-                agent.show_toast(&format!("Send now failed. Requeued: {error}"));
-            }
-            vec![]
-        }
         TaskResult::PreferredModelPersisted { result } => {
             if let Err(err) = result
                 && let Some(agent) = get_active_agent_mut(app)
@@ -879,35 +832,6 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
                         super::scrollback_has_user_messages(&agent.scrollback),
                     ));
                 }
-            }
-            vec![]
-        }
-        TaskResult::InterjectFailed {
-            agent_id,
-            error,
-            text,
-            blocks,
-        } => {
-            if let Some(agent) = app.agents.get_mut(&agent_id) {
-                let id = agent.session.next_queue_id;
-                agent.session.next_queue_id += 1;
-                agent
-                    .session
-                    .pending_prompts
-                    .push_front(crate::app::agent::QueuedPrompt {
-                        id,
-                        text,
-                        kind: crate::app::agent::QueueEntryKind::Prompt,
-                        wire_blocks: blocks,
-                        images: Vec::new(),
-                        display_as_skill: false,
-                        task_id: None,
-                        human_schedule: None,
-                        chip_elements: Vec::new(),
-                        skill_token_ranges: Vec::new(),
-                        combined_texts: Vec::new(),
-                    });
-                agent.show_toast(&format!("Interjection failed. Requeued: {error}"));
             }
             vec![]
         }

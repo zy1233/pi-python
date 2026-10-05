@@ -1470,9 +1470,6 @@ impl AcpUpdateTracker {
                     if let Some(entry) = scrollback.get_mut(idx)
                         && let RenderBlock::UserPrompt(ref mut block) = entry.block
                     {
-                        if block.is_interjection {
-                            continue;
-                        }
                         if let Some(pi) = prompt_index
                             && block.prompt_index.is_none()
                         {

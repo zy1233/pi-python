@@ -18,7 +18,6 @@ use std::cell::Cell;
 
 use pi_shared::ui_config::UiConfig;
 
-use super::follow_up_behavior::FollowUpBehavior;
 use super::render_mermaid::RenderMermaid;
 use super::scroll_mode::ScrollMode;
 use super::text_selection::TextSelection;
@@ -34,7 +33,6 @@ const TIMELINE_DEFAULT: bool = UiConfig::SHOW_TIMELINE_DEFAULT;
 const PAGE_FLIP_ON_SEND_DEFAULT: bool = UiConfig::PAGE_FLIP_ON_SEND_DEFAULT;
 /// Combine-queued-prompts rollout flag defaults OFF (opt-in).
 const COMBINE_QUEUED_PROMPTS_DEFAULT: bool = false;
-const FOLLOW_UP_BEHAVIOR_DEFAULT: FollowUpBehavior = FollowUpBehavior::Queue;
 const SIMPLE_MODE_DEFAULT: bool = true;
 /// Vim-mode scrollback default — matches the previous on-disk default.
 const VIM_MODE_DEFAULT: bool = false;
@@ -195,38 +193,6 @@ pub fn load_combine_queued_prompts() -> bool {
 pub fn set_combine_queued_prompts(enabled: bool) {
     COMBINE_QUEUED_PROMPTS_CURRENT.with(|c| c.set(enabled));
     COMBINE_QUEUED_PROMPTS_LOADED.with(|l| l.set(true));
-}
-
-thread_local! {
-    static FOLLOW_UP_BEHAVIOR_CURRENT: Cell<FollowUpBehavior> =
-        const { Cell::new(FOLLOW_UP_BEHAVIOR_DEFAULT) };
-    static FOLLOW_UP_BEHAVIOR_LOADED: Cell<bool> = const { Cell::new(false) };
-}
-
-/// Read cached `follow_up_behavior`, seeding from disk on first call.
-pub fn load_follow_up_behavior() -> FollowUpBehavior {
-    FOLLOW_UP_BEHAVIOR_LOADED.with(|loaded| {
-        if !loaded.get() {
-            let value = load_str_from_effective_config("follow_up_behavior")
-                .as_deref()
-                .and_then(FollowUpBehavior::from_canonical)
-                .unwrap_or(FOLLOW_UP_BEHAVIOR_DEFAULT);
-            FOLLOW_UP_BEHAVIOR_CURRENT.with(|c| c.set(value));
-            loaded.set(true);
-        }
-    });
-    FOLLOW_UP_BEHAVIOR_CURRENT.with(|c| c.get())
-}
-
-/// True when follow-ups should promote as mid-turn interjections (Steer).
-pub fn load_follow_up_steer() -> bool {
-    load_follow_up_behavior().is_steer()
-}
-
-/// Replace cached `follow_up_behavior`.
-pub fn set_follow_up_behavior(value: FollowUpBehavior) {
-    FOLLOW_UP_BEHAVIOR_CURRENT.with(|c| c.set(value));
-    FOLLOW_UP_BEHAVIOR_LOADED.with(|l| l.set(true));
 }
 
 // -- Simple mode --------------------------------------------------------------
@@ -666,12 +632,6 @@ pub fn prime(ui: &UiConfig) {
         ui.combine_queued_prompts
             .unwrap_or(COMBINE_QUEUED_PROMPTS_DEFAULT),
     );
-    set_follow_up_behavior(
-        ui.follow_up_behavior
-            .as_deref()
-            .and_then(FollowUpBehavior::from_canonical)
-            .unwrap_or(FOLLOW_UP_BEHAVIOR_DEFAULT),
-    );
     set_simple_mode(ui.simple_mode.unwrap_or(SIMPLE_MODE_DEFAULT));
     set_keep_text_selection(text_selection_from_ui(ui));
     // Layered-config keys (not the `UiConfig` arg) — seed so the first frame
@@ -794,10 +754,6 @@ mod tests {
             COMBINE_QUEUED_PROMPTS_DEFAULT,
             ui.combine_queued_prompts
                 .unwrap_or(COMBINE_QUEUED_PROMPTS_DEFAULT)
-        );
-        assert_eq!(
-            FOLLOW_UP_BEHAVIOR_DEFAULT.as_canonical(),
-            ui.follow_up_behavior()
         );
         assert_eq!(SIMPLE_MODE_DEFAULT, ui.simple_mode.unwrap_or(true));
         assert_eq!(VIM_MODE_DEFAULT, ui.vim_mode.unwrap_or(false));

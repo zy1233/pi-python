@@ -832,8 +832,6 @@ fn contextual_tip_maps_every_tip_and_action() {
         (K::PlanMode, A::Accepted, "plan_mode", "accepted"),
         (K::ImageInput, A::Shown, "image_input", "shown"),
         (K::ImageInput, A::Accepted, "image_input", "accepted"),
-        (K::SendNow, A::Shown, "send_now", "shown"),
-        (K::SendNow, A::Accepted, "send_now", "accepted"),
         (K::SmallScreen, A::Shown, "small_screen", "shown"),
         (K::SmallScreen, A::Accepted, "small_screen", "accepted"),
         (K::WordSelect, A::Shown, "word_select", "shown"),
