@@ -204,7 +204,7 @@ fn human_wayland_error_includes_detail_once() {
     report.facts.clipboard.display_server = DisplayServer::Wayland;
     report.facts.clipboard.data_control = DataControlFact::Error;
     report.facts.clipboard.delivery = ClipboardDelivery::Failed;
-    report.facts.clipboard.fix = Some("/minimal".to_owned());
+    report.facts.clipboard.fix = Some("zypi --minimal".to_owned());
     report.findings.push(DiagnosticFinding {
         id: crate::diagnostics::CLIPBOARD_DELIVERY_UNAVAILABLE_ID,
         disposition: FindingDisposition::Issue,
@@ -212,9 +212,8 @@ fn human_wayland_error_includes_detail_once() {
         remediation: None,
         automatic_remediation: None,
         note: Some(
-            "Each in-app copy is also written to the backup path shown by the operation. Use \
-             `/copy <file>` for an explicit file or `/minimal` for terminal-native selection, \
-             then check the native clipboard tool reported above."
+            "When you copy, zypi saves the text to the backup file shown in the copy message. \
+             Start zypi with `--minimal`, then check the native clipboard tool reported above."
                 .to_owned(),
         ),
     });
@@ -226,7 +225,7 @@ fn human_wayland_error_includes_detail_once() {
     assert_eq!(
         human::format(&report),
         concat!(
-            "Grok Doctor\n",
+            "zypi Doctor\n",
             "\n",
             "Environment\n",
             "  · terminal                     Ghostty\n",
@@ -246,7 +245,7 @@ fn human_wayland_error_includes_detail_once() {
             "\n",
             "Findings\n",
             "  ! clipboard.delivery-unavailable No configured clipboard route can reach the intended clipboard\n",
-            "      Each in-app copy is also written to the backup path shown by the operation. Use `/copy <file>` for an explicit file or `/minimal` for terminal-native selection, then check the native clipboard tool reported above.\n",
+            "      When you copy, zypi saves the text to the backup file shown in the copy message. Start zypi with `--minimal`, then check the native clipboard tool reported above.\n",
             "\n",
             "1 issue, 0 recommendations\n",
         )
@@ -335,7 +334,7 @@ fn human_healthy_fixture_is_exact() {
     assert_eq!(
         human::format(&healthy_report()),
         concat!(
-            "Grok Doctor\n",
+            "zypi Doctor\n",
             "\n",
             "Environment\n",
             "  · terminal                     Ghostty\n",
@@ -384,7 +383,7 @@ fn human_incomplete_fixture_is_exact_without_duplicate_probe_rows() {
     assert_eq!(
         human::format(&report),
         concat!(
-            "Grok Doctor\n",
+            "zypi Doctor\n",
             "\n",
             "Environment\n",
             "  · terminal                     Ghostty\n",
@@ -402,7 +401,7 @@ fn human_incomplete_fixture_is_exact_without_duplicate_probe_rows() {
             "  · status                       confirmed\n",
             "\n",
             "Needs a running session\n",
-            "  Some checks only run in Grok. Start Grok and run /doctor.\n",
+            "  Some checks only run inside a live zypi session, so they are not part of this report.\n",
             "\n",
             "0 issues, 0 recommendations\n",
         )
@@ -659,14 +658,14 @@ fn clipboard_issue_count_preserves_legacy_reports_without_double_counting_named_
 fn new_named_findings_extend_json_without_schema_changes() {
     let mut report = healthy_report();
     report.facts.clipboard.delivery = ClipboardDelivery::Unverified;
-    report.facts.clipboard.fix = Some("grok wrap <ssh command> or /minimal".to_owned());
+    report.facts.clipboard.fix = Some("zypi wrap <ssh command> or zypi --minimal".to_owned());
     report.findings.push(DiagnosticFinding {
         id: crate::diagnostics::CLIPBOARD_DELIVERY_UNVERIFIED_ID,
         disposition: FindingDisposition::Issue,
         message: "Clipboard delivery could not be verified across this remote boundary".to_owned(),
         remediation: None,
         automatic_remediation: None,
-        note: Some("Run /doctor guidance".to_owned()),
+        note: Some("Run zypi doctor guidance".to_owned()),
     });
 
     let mut output = Vec::new();
@@ -676,7 +675,7 @@ fn new_named_findings_extend_json_without_schema_changes() {
     assert_eq!(json["facts"]["clipboard"]["delivery"], "unverified");
     assert_eq!(
         json["facts"]["clipboard"]["fix"],
-        "grok wrap <ssh command> or /minimal"
+        "zypi wrap <ssh command> or zypi --minimal"
     );
     assert_eq!(json["findings"][0]["id"], "clipboard.delivery-unverified");
     assert_eq!(json["counts"]["issues"], 1);

@@ -91,3 +91,28 @@ fn client_features_decide_color_passthrough() {
             .collect::<Vec<_>>()
     );
 }
+
+/// The one-line fixes appear in the report and in `--json`. They may only name
+/// things this binary has: `zypi wrap` and the `--minimal` flag. There is no
+/// `/minimal`, `/doctor` or `/copy` slash command, and no `grok` binary.
+#[test]
+fn clipboard_recovery_fixes_name_only_real_commands() {
+    use ClipboardRecovery::*;
+    for recovery in [
+        Confirmed,
+        UnverifiedSsh,
+        UnverifiedContainer,
+        UnverifiedOther,
+        UnavailableSsh,
+        UnavailableContainer,
+        UnavailableLocal,
+    ] {
+        let Some(fix) = recovery.legacy_fix() else {
+            continue;
+        };
+        assert!(fix.starts_with(crate::brand::CLI_NAME), "{fix:?}");
+        for stale in ["grok", "/minimal", "/doctor", "/copy"] {
+            assert!(!fix.contains(stale), "{stale:?} in {fix:?}");
+        }
+    }
+}

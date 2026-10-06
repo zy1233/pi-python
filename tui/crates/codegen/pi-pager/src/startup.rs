@@ -3,7 +3,9 @@
 //! Any subsystem (terminal diagnostics, auth, config migration, etc.) can
 //! produce [`StartupWarning`]s.
 
-pub(crate) const DOCTOR_ACTION: &str = "Run /doctor for details and fixes.";
+/// What startup notices tell the user to run. `zypi doctor` is a CLI subcommand:
+/// the TUI has no `/doctor` slash command.
+pub(crate) const DOCTOR_ACTION: &str = "Run zypi doctor for details and fixes.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ActionableStartupWarning {
@@ -45,15 +47,15 @@ impl ActionableStartupWarning {
 /// A non-fatal startup warning from any subsystem.
 ///
 /// This is a **display contract only** -- the subsystem formats the message
-/// and optional action hint. Actionable diagnostic notices link to `/doctor`,
-/// which owns detailed evidence and remediation.
+/// and optional action hint. Actionable diagnostic notices point at
+/// `zypi doctor`, which owns detailed evidence and remediation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StartupWarning {
     /// Severity controls rendering color (yellow for warnings, dim for info).
     pub severity: WarningSeverity,
     /// Short, user-facing message (fits in ~60 columns).
     pub message: String,
-    /// Optional action hint (e.g. "Run /doctor for details and fixes.").
+    /// Optional action hint (e.g. "Run zypi doctor for details and fixes.").
     pub action: Option<String>,
 }
 
@@ -96,6 +98,20 @@ mod tests {
             message: message.to_owned(),
             action: None,
         }
+    }
+
+    /// `zypi doctor` is a CLI subcommand; the TUI has no `/doctor` command to
+    /// send the user to.
+    #[test]
+    fn doctor_action_names_the_cli_subcommand() {
+        assert_eq!(
+            DOCTOR_ACTION,
+            format!(
+                "Run {} doctor for details and fixes.",
+                crate::brand::CLI_NAME
+            )
+        );
+        assert!(!DOCTOR_ACTION.contains('/'));
     }
 
     #[test]

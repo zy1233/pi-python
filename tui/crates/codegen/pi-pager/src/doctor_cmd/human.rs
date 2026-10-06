@@ -5,11 +5,14 @@ use crate::diagnostics::{
 };
 use crate::host::{DisplayServer, HostOs};
 
-const LIVE_TUI_PROBE_CTA: &str = "Some checks only run in Grok. Start Grok and run /doctor.";
+/// Shown when a probe needs the live TUI (it can't run from `zypi doctor`).
+/// There is no in-session `/doctor`, so this only says why the check is absent.
+const LIVE_TUI_PROBE_CTA: &str =
+    "Some checks only run inside a live zypi session, so they are not part of this report.";
 
 pub(super) fn format(report: &DiagnosticReport) -> String {
     let facts = &report.facts;
-    let mut out = String::from("Grok Doctor\n\nEnvironment\n");
+    let mut out = format!("{} Doctor\n\nEnvironment\n", crate::brand::PRODUCT_TITLE);
 
     fact(&mut out, "terminal", &facts.terminal.to_string());
     match &facts.xtversion {
