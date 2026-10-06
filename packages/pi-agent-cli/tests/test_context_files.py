@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+import pytest
 
 from pi_agent_cli.context_files import (
     discover_context_files,
@@ -38,6 +41,28 @@ def test_agents_override_preferred_in_same_directory(tmp_path):
     paths = [Path(item.path).name for item in files]
     assert "AGENTS.override.md" in paths
     assert "AGENTS.md" in paths
+
+
+def test_one_file_under_two_names_is_loaded_once(tmp_path):
+    """Both ``AGENTS.md`` and ``AGENTS.MD`` are looked for; as one file they make one entry.
+
+    A case-insensitive file system (macOS) makes them one file by itself; elsewhere a hard link
+    does.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+    (repo / "AGENTS.md").write_text("Rules", encoding="utf-8")
+    try:
+        os.link(repo / "AGENTS.md", repo / "AGENTS.MD")
+    except FileExistsError:
+        pass  # a case-insensitive file system: the two names already are one file
+    except OSError:
+        pytest.skip("this file system has no hard links")
+
+    files = discover_context_files(cwd=repo, home=tmp_path / "empty")
+
+    assert [item.content for item in files] == ["Rules"]
 
 
 def test_system_and_append_files(tmp_path, monkeypatch):

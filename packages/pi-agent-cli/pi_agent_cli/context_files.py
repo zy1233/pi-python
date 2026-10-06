@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from pi_agent_cli.config import pi_home
@@ -43,6 +44,21 @@ def _read_if_exists(path: Path) -> ContextFile | None:
     return ContextFile(path=str(path.resolve()), content=path.read_text(encoding="utf-8"))
 
 
+def _identity(path: str) -> tuple[int, int] | str:
+    """What makes two names one file: device and inode, or the path when there are none.
+
+    The path string is not enough. ``AGENTS.md`` and ``AGENTS.MD`` are both candidates, and on a
+    case-insensitive file system (the macOS and Windows default) they name the same file, yet
+    ``Path.resolve`` keeps the spelling it was given on macOS. The file would reach the prompt
+    twice.
+    """
+    try:
+        info = os.stat(path)
+    except OSError:
+        return path
+    return (info.st_dev, info.st_ino) if info.st_ino else path
+
+
 def _find_in_directory(directory: Path, filenames: tuple[str, ...]) -> list[ContextFile]:
     found: list[ContextFile] = []
     for name in filenames:
@@ -63,13 +79,14 @@ def discover_context_files(*, cwd: str | Path, home: Path | None = None) -> list
     if global_agents is not None:
         files.append(global_agents)
 
-    seen_paths: set[str] = {item.path for item in files}
+    seen: set[tuple[int, int] | str] = {_identity(item.path) for item in files}
     current = resolved_cwd
     while True:
         for item in _find_in_directory(current, AGENT_CONTEXT_FILENAMES):
-            if item.path not in seen_paths:
+            key = _identity(item.path)
+            if key not in seen:
                 files.append(item)
-                seen_paths.add(item.path)
+                seen.add(key)
         if current == repo_root:
             break
         if current.parent == current:
