@@ -523,9 +523,9 @@ r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶�
 
 **有意没动的。**
 
-- 用户设置的接口：428 个 `GROK_*` 环境变量名（`GROK_HOME`、`GROK_SANDBOX`、`GROK_THEME`、`GROK_MESSAGE` 等，`--help` 里还看得到）、项目级路径 `.grok/sandbox.toml`、`zypi du --json` 的 `grok_home` 字段（机器可读，改了要升 schema 版本）。改名是破坏性变更，要用户另行决定。
-- 内部标识：`grok_*` crate 名、`ThemeKind::GrokNight`、`Theme::groknight()`、`groknight.rs`、`grok-night.tmTheme`、HTTP 头 `x-grok-*`、上游 URL 与包名。
-- 死世界里的字符串：计费 / SuperGrok、tutorial、隐私横幅、feedback 问题、`pi-update`（`grok update`、版本策略）、`pi-shell` 的认证错误（`grok login`）、给模型看的工具描述、ACP 的 auth method「Grok」。它们归 A.3 的尾巴 / 阶段 D；现在改只会和之后的删除互相冲突。
+- 用户设置的接口：`GROK_*` 环境变量名（`GROK_HOME` 一个名字就被引用 241 次，`GROK_SANDBOX` 还出现在 `--help` 里）、项目级路径 `.grok/sandbox.toml`、`zypi du --json` 的 `grok_home` 字段（机器可读，改了要升 schema 版本）。改名是破坏性变更，要用户另行决定。
+- 内部标识：`ThemeKind::GrokNight` / `GrokDay`、`Theme::groknight()` / `grokday()`、`theme/groknight.rs` / `grokday.rs`、`assets/grok-night.tmTheme` / `grok-day.tmTheme`、`grok_*` 函数与字段名（`default_grok_home`、`display_user_grok_path`）、HTTP 头 `x-grok-*`、`xai_grok_pager__*.snap` 快照文件名。
+- 死世界里的字符串：计费 / SuperGrok（`app/dispatch/billing.rs`）、tutorial（`views/tutorial.rs`）、隐私横幅（`views/privacy_banner.rs`）、`pi-update`（`grok update`、`version_policy.rs`）、`pi-auth` / `pi-shell` / `pi-workspace` 里的 `grok login` 提示、`pi-tools` 里给模型看的参数说明（例如 workflow 工具的 `~/.grok/workflows/`）、ACP 的 auth method「Grok」。它们归 A.3 的尾巴 / 阶段 D；现在改只会和之后的删除互相冲突。
 - `tui/crates/codegen/pi-pager/docs/user-guide/`：整套是上游文档（C.2），主题表里还写着 `GrokNight`。旧名字仍是有效别名，文档不会误导，只是旧。
 
 **验证。**
@@ -534,9 +534,10 @@ r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶�
 - **单测**（macOS 本机，`--test-threads=2`，只跑相关过滤）：pi-pager-render 的 theme / util / clipboard 265 通过；pi-pager-minimal 79；pi-pager `--lib` 的 theme / settings / doctor / diagnostics / disk_usage / notifications / startup / tips / wrap / status_line 1,068；`settings_e2e` 251；`grok_home_paths` 2；`doctor_early_dispatch`（真二进制，`--ignored`）13，其中包括往 rc 里写 alias 的那一条。
 - **新增的回归测试**：旧主题 id 与别名仍可解析、主题的落盘 id 与显示名不含 grok（`pre_rename_theme_names_still_resolve`、`house_themes_are_named_after_the_product`、`current_value_for_theme_reads_pre_rename_ids`）；路径标签指向真实目录（`home_labels_name_the_real_home_directory`）；fix 命令与 alias 用 `brand::CLI_NAME`（`fix_commands_and_alias_name_this_binary`）；`DOCTOR_ACTION` 不带斜杠；复制提示、设置页文案、剪贴板修复提示不含 grok 和不存在的斜杠命令；`zypi du` 不再提示 `worktree gc|rm`、`db rebuild`。
 - **PTY**（debug `zypi` + mock agent）：全屏模式扫了欢迎页、命令面板、`/help`、`/theme`、`/settings`（逐行走完整个列表，共 16 屏）、`/model`、一个回合、`/resume`、Ctrl+C 提示；`--minimal` 扫了欢迎页、`/help`、一个回合——含 `grok` 或不存在的斜杠命令的行：0。`config.toml` 里写旧值 `theme = "grokday"`，`/theme` 把 `zypiday` 标成 active；默认家目录时设置页脚写 `~/.pi-python/config.toml`，`PI_HOME` 指到别处时写 `$PI_HOME/config.toml`。
-- **CLI**：`zypi doctor`、`du`、`--help`、`version`、`wrap` 的输出里只剩 `--help` 的 `[env: GROK_SANDBOX=]`（环境变量名，有意不动）。
+- **CLI**：顶层与每个子命令（`completions`、`doctor`、`doctor fix`、`du`、`export`、`help`、`version`、`wrap`）的 `--help`，加上 `zypi doctor`、`du`、`version` 的输出：只剩顶层 `--help` 里的 `[env: GROK_SANDBOX=]`（环境变量名，有意不动）。
 - **已知的本机波动**：有一次过滤运行里 `session_startup::tests::remote_miss_restore_code_with_worktree_defers` 失败。它在 macOS 上读真实的 `~/.pi-python/sessions/<临时仓库路径>`（`/var` 与 `/private/var` 的差别），目录不存在就报错，跟本次改动无关；之后的运行里通过。
-- **Linux CI**：见 PR。
+- **Linux CI**（`33374a3`，PR [#8](https://github.com/zy1233/pi-python/pull/8)）：`TUI CI` run [37408839608](https://github.com/zy1233/pi-python/actions/runs/37408839608)（check 6 m 27 s，test 19 m 11 s）✓ 门禁全过；依赖图 980、消费者构建 0 告警、`cargo check --workspace --tests` 0 个错误；8 个 suite 共 7,444 通过 / 0 失败 / 20 忽略（`pi-pager` 5,559，比 `b617575` 的 5,554 多 5；上面那条 macOS 本机波动的测试在 Linux 上通过）；`CI`（Ruff + Python 3.11–3.13）run 37408839645 ✓。
+- **CI 没覆盖到的**：`TUI CI` 的 8 个 suite 里没有 `pi-pager-render` 和 `pi-pager-minimal`（`scripts/tui_baseline.toml`），所以本次在这两个 crate 里新增和改动的测试——主题别名、路径标签、剪贴板提示、`--minimal` 欢迎页——只在 macOS 上跑过，Linux 上只做了编译检查（`cargo check --workspace --tests`）。把这两个 crate 加进基线是个小改动，但要先在 Linux 上量出各自的 `reference_passed`，而且会改 CI 门禁（`enforce = true`），所以没有顺手做，留给用户决定。
 
 ## 附录 A：能力矩阵（阶段 0.8 的初稿）
 
