@@ -65,8 +65,8 @@ unset_env = ["NO_COLOR", "PI_HOME", "GROK_HOME", "PI_AGENT_COMMAND", "PI_PYTHON"
 TERM = "xterm-256color"
 COLORTERM = "truecolor"
 
-# `reference_passed` is the Linux CI result of the last recorded run (TUI CI run 37379203134,
-# commit 0e71894; docs/baselines/tui.md); the summary flags a run that deviates by more than 5 %.
+# `reference_passed` is the Linux CI result of the last recorded run (TUI CI run 37389455793,
+# commit ac1d3ff; docs/baselines/tui.md); the summary flags a run that deviates by more than 5 %.
 # `min_passed` (floor) is that run minus a few percent: deleting dead code legitimately deletes
 # its tests, but a drop below the floor has to be a deliberate edit of this file. Both numbers
 # are measured on Linux; macOS runs a handful of platform-specific tests more or fewer.
@@ -90,7 +90,7 @@ targets = [
 ]
 # doctor_cmd:: probes the audio input device (hangs on a macOS CoreAudio query without mic access).
 skip = ["doctor_cmd::"]
-reference_passed = 5593
+reference_passed = 5552
 min_passed = 5300
 
 [[test.suite]]

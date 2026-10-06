@@ -2,7 +2,7 @@
 
 对应 [`PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`](../PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md) 阶段 0 的 0.1（Rust CI job）、0.2（基线报告）、0.4（deny-list）。权威环境是 CI 的 Linux runner（ADR6：`ubuntu-24.04` + `tui/rust-toolchain.toml` 钉的 1.94.0）。
 
-> **状态（r5）**：门禁与 CI job 已在 Linux 上跑通并阻塞。最近一次完整的 Linux 结果是 `TUI CI` run [37379203134](https://github.com/zy1233/pi-python/actions/runs/37379203134)（PR #7 的 `0e71894`，入口审计与阶段 A 之后）：门禁全过，依赖图 **980** 个包，消费者构建 **0** 条告警，`--workspace --tests` 0 个错误，8 个 suite 共 **7,478 通过 / 0 失败 / 20 忽略**。据此清单已收紧：依赖图上限 995 → 980，`max_warnings` 20 → 0，各 suite 设了 `min_passed` 下限（`27df705`）。**还缺**：`5fcec14` 之后的 Linux 运行结果、release 体积 / 冷编译耗时 / `--version` 延迟（`release-baseline` 要手动触发，见 §5）。权威数字以 Linux 一栏为准；macOS 一栏是本机实测，用于对照。
+> **状态（r5）**：门禁与 CI job 已在 Linux 上跑通并阻塞，release 基线也有了数。最近一次完整的 Linux 结果是 PR #7 的 `ac1d3ff`（入口审计、阶段 A 与欢迎页残留清理之后）：`TUI CI` run [37389447358](https://github.com/zy1233/pi-python/actions/runs/37389447358)（PR）与手动触发的 run [37389455793](https://github.com/zy1233/pi-python/actions/runs/37389455793)（带 `release_baseline`）全绿——门禁全过，依赖图 **980** 个包，消费者构建 **0** 条告警，`--workspace --tests` 0 个错误，8 个 suite 共 **7,437 通过 / 0 失败 / 20 忽略**；`release-dist` 的 `zypi` **422,034,120 B**（比拆除前小 10.3 %），冷缓存构建 **1,155 s**（拆除前 1,647 s，快 29.9 %），`--version` 中位数 **23.1 ms**。清单已按 Linux 数收紧（依赖图上限 995 → 980，`max_warnings` 20 → 0，各 suite 的 `min_passed` 下限）。权威数字以 Linux 一栏为准；macOS 一栏是本机实测，用于对照。
 
 ## 1. 文件与命令
 
@@ -42,23 +42,23 @@ python scripts/tui_baseline.py release           # release-dist 构建 + 体积 
 
 ### 3.1 构建与依赖图
 
-「拆除前」= 发布版 v0.4.0（`tui/` 与提交 `07a3574` 完全相同）。「r3」= 提交 `9add266`（拆除 Rust runtime）。「r5」= 入口审计与阶段 A 之后：macOS 一栏测于 `fe1fc65`（PR #7 的当前提示），Linux 一栏测于 `0e71894`（TUI CI run 37379203134；其后的 `5fcec14`、`fe1fc65` 只删了恒假的 `chat_mode` 世界并做了 rustfmt，待下一次 Linux 运行确认）。
+「拆除前」= 发布版 v0.4.0（`tui/` 与提交 `07a3574` 完全相同）。「r3」= 提交 `9add266`（拆除 Rust runtime）。「r5」= 入口审计与阶段 A 之后：行数、包数与 macOS 一栏测于 `ac1d3ff`（依赖图只取决于 `Cargo.lock`，`fe1fc65` 之后它没变），Linux 一栏来自 `ac1d3ff` 的两次 CI 运行（PR run 37389447358；手动 run 37389455793，带 release 基线）。
 
 | 指标 | 拆除前 | r3（macOS） | r5（macOS） | r5（Linux CI） |
 |---|---|---|---|---|
-| `tui/crates` 下 `.rs` 行数 | 1,620,612 | 1,254,693 | 1,019,816 | — |
-| `Cargo.lock` 包数 | 1,311 | 1,285 | 1,257 | — |
+| `tui/crates` 下 `.rs` 行数 | 1,620,612 | 1,254,693 | 1,019,041 | 同左（同一份源码） |
+| `Cargo.lock` 包数 | 1,311 | 1,285 | 1,257 | 同左 |
 | 依赖图唯一包数 `x86_64-unknown-linux-gnu` | 1,026 | 995 | 980 | 980 |
 | `aarch64-unknown-linux-gnu` | 1,025 | 994 | 979 | — |
 | `aarch64-apple-darwin` | 990 | 957 | 943 | — |
 | `x86_64-apple-darwin` | 991 | 958 | 944 | — |
 | `x86_64-pc-windows-msvc` | 972 | 939 | 926 | — |
 | 消费者构建告警 | 未测 | 20（全是 `pi-shell` 的 `dead_code`） | 0 | 0 |
-| `cargo check` 消费者构建耗时 | 未测 | 94 s（本机，缓存状态不受控，只作参考） | — | 262 s（runner，冷缓存） |
-| `cargo check --workspace --tests` 耗时 | 未测 | 162 s（同上），0 个错误 | — | 218 s，0 个错误 |
-| `release-dist` 的 `zypi`（Linux x86_64） | 470,461,776 B（448.7 MiB） | 待回填 | — | 待回填 |
-| `release-dist` 冷缓存构建耗时 | 27 m 27 s（`ubuntu-24.04`，v0.4.0 的发布 job） | — | — | 待回填 |
-| `zypi --version` 延迟（5 次中位数） | 未测 | — | — | 待回填 |
+| `cargo check` 消费者构建耗时 | 未测 | 94 s（本机，缓存状态不受控，只作参考） | — | 204 s（runner；缓存状态不受控，第一次冷缓存运行是 272 s） |
+| `cargo check --workspace --tests` 耗时 | 未测 | 162 s（同上），0 个错误 | — | 164 s，0 个错误（第一次冷缓存运行是 229 s） |
+| `release-dist` 的 `zypi`（Linux x86_64） | 470,461,776 B（448.7 MiB） | — | — | **422,034,120 B（402.5 MiB，−10.3 %）** |
+| `release-dist` 冷缓存构建耗时 | 27 m 27 s（`ubuntu-24.04`，v0.4.0 的发布 job） | — | — | **19 m 15 s（1,155 s，−29.9 %）** |
+| `zypi --version` 延迟（5 次中位数） | 未测 | — | — | 23.1 ms |
 
 macOS 环境：Apple Silicon，Homebrew `cargo` / `rustc` 1.96.1（**不是**钉的 1.94.0）。依赖图节点数只取决于 `Cargo.lock` 与目标三元组，与工具链版本无关；告警数与耗时会随工具链漂移，所以只当参考。
 
@@ -66,21 +66,21 @@ macOS 环境：Apple Silicon，Homebrew `cargo` / `rustc` 1.96.1（**不是**钉
 
 ### 3.2 测试
 
-**Linux（权威）**：`TUI CI` run 37379203134（`0e71894`），`test` job 26 m 38 s。`macOS` 一栏的数是 `5fcec14` 上的本机轻量运行（`--test-threads=2`，只跑了 `pi-pager`）；命令：`env -u NO_COLOR TERM=xterm-256color COLORTERM=truecolor`（沙箱默认的 `NO_COLOR=1`、`TERM=dumb` 会让约 10 个颜色 / 光标断言失败）；`PI_HOME` 等变量由清单的 `unset_env` 清掉（`PI_HOME` 的优先级高于配置隔离测试自己设的 `GROK_HOME`，不清掉会让 `test_config_update_isolation` 失败）。
+**Linux（权威）**：手动 run 37389455793（`ac1d3ff`），`test` job 约 27 m；同一提交的 PR run 37389447358 结果相同。`macOS` 一栏的数是 `ac1d3ff` 上的本机轻量运行（`--test-threads=2`，只跑了 `pi-pager`）；命令：`env -u NO_COLOR TERM=xterm-256color COLORTERM=truecolor`（沙箱默认的 `NO_COLOR=1`、`TERM=dumb` 会让约 10 个颜色 / 光标断言失败）；`PI_HOME` 等变量由清单的 `unset_env` 清掉（`PI_HOME` 的优先级高于配置隔离测试自己设的 `GROK_HOME`，不清掉会让 `test_config_update_isolation` 失败）。
 
 | suite（`cargo test -p …`） | 目标 | 通过（Linux） | 失败 | 忽略 | 耗时（含增量编译） | `min_passed` | 说明 |
 |---|---|---|---|---|---|---|---|
-| `pi-shell` | `--lib` + 2 个集成 | 1,056 | 0 | 1 | 375 s | 1,000 | |
-| `pi-pager` | `--lib` + 3 个集成 | 5,593 | 0 | 13 | 500 s | 5,300 | macOS：lib 5,327 + `settings_e2e` 251 + 2 + 2，0 失败（Alt/Opt 渲染的 2 个已知失败随 dashboard 一起删了，清单里的 `known_failures` 也去掉了） |
-| `pi-pager-bin` | `--bin zypi` | 20 | 0 | 0 | 236 s | 20 | 含 6 个 `-p` 守卫用例 |
-| `pi-acp-lib` | `--lib` | 21 | 0 | 0 | 18 s | 21 | 跳过 1 个会永久挂起的用例 |
-| `pi-http` | `--lib` | 13 | 0 | 0 | 187 s | 13 | |
-| `pi-telemetry` | `--lib` | 239 | 0 | 0 | 71 s | 230 | macOS 多 5 个平台相关用例 |
-| `pi-file-utils` | `--lib` | 216 | 0 | 6 | 66 s | 210 | macOS 多 1 个 |
-| `pi-sampling-types` | `--lib` | 320 | 0 | 0 | 106 s | 310 | |
-| **合计** | | **7,478** | **0** | **20** | | | |
+| `pi-shell` | `--lib` + 2 个集成 | 1,056 | 0 | 1 | 383 s | 1,000 | |
+| `pi-pager` | `--lib` + 3 个集成 | 5,552 | 0 | 13 | 509 s | 5,300 | macOS：lib 5,307 + `settings_e2e` 251 + 2 + 2，0 失败（Alt/Opt 渲染的 2 个已知失败随 dashboard 一起删了，清单里的 `known_failures` 也去掉了） |
+| `pi-pager-bin` | `--bin zypi` | 20 | 0 | 0 | 238 s | 20 | 含 6 个 `-p` 守卫用例 |
+| `pi-acp-lib` | `--lib` | 21 | 0 | 0 | 19 s | 21 | 跳过 1 个会永久挂起的用例 |
+| `pi-http` | `--lib` | 13 | 0 | 0 | 189 s | 13 | |
+| `pi-telemetry` | `--lib` | 239 | 0 | 0 | 72 s | 230 | macOS 多 5 个平台相关用例 |
+| `pi-file-utils` | `--lib` | 216 | 0 | 6 | 68 s | 210 | macOS 多 1 个 |
+| `pi-sampling-types` | `--lib` | 320 | 0 | 0 | 107 s | 310 | |
+| **合计** | | **7,437** | **0** | **20** | | | |
 
-对比第一次 Linux 运行（10,851 通过 / 75 忽略）：少了 3,373 个通过，是随被删功能一起删的用例（`pi-pager` −3,281，`pi-shell` −93，`pi-telemetry` −5；另有 `-p` 沙箱守卫新增的 9 个用例——`pi-shell` +3、`pi-pager-bin` +6——已含在净数里）；`min_passed` 取实测值下方 3–6 %，让今后无意的丢失会失败，有意的删除要改清单。
+对比第一次 Linux 运行（10,851 通过 / 75 忽略）：少了 3,414 个通过，是随被删功能一起删的用例（`0e71894` 时是 7,478，即 −3,373：`pi-pager` −3,281，`pi-shell` −93，`pi-telemetry` −5；另有 `-p` 沙箱守卫新增的 9 个用例——`pi-shell` +3、`pi-pager-bin` +6——已含在净数里；其后 `5fcec14` 删 `chat_mode` 世界又少 21 个，`ac1d3ff` 删 worktree 对话框又少 20 个，都在 `pi-pager`）；`min_passed` 取实测值下方 3–6 %，让今后无意的丢失会失败，有意的删除要改清单。
 
 **清单里的已知失败 / 跳过，及原因**
 
@@ -98,7 +98,7 @@ macOS 环境：Apple Silicon，Homebrew `cargo` / `rustc` 1.96.1（**不是**钉
 
 下列 crate **允许存在**，但必须有理由与缩减方案；`check` 会把它们在 `pi-pager-bin` 依赖图里的直接依赖者列进报告，便于看出是否有新的依赖方悄悄加入。
 
-| crate | 直接依赖者（r5 实测，Linux CI `0e71894`） | 现状理由 | 缩减方案 |
+| crate | 直接依赖者（r5 实测，Linux CI `ac1d3ff`；与 `0e71894` 相比只有 `pi-agent` 一行变了） | 现状理由 | 缩减方案 |
 |---|---|---|---|
 | `async-openai` | `pi-sampling-types`、`pi-tools` | 仅作为这两个 crate 的类型来源；TUI 进程里没有发起请求的代码 | 阶段 D.1：把工具展示类型抽到叶子 crate，或对 `async-openai` 做 feature-gate |
 | `pi-sampling-types` | `pi-agent`、`pi-chat-state`、`pi-compaction-transcript`、`pi-shell`、`pi-subagent-resolution` | pager 经 `pi_shell::sampling` 使用对话项、reasoning-effort 元数据与错误文案（18 个符号） | 阶段 B.2：把这 18 个符号迁到不依赖 provider 栈的叶子 crate，再做 D.1 |
@@ -110,14 +110,14 @@ macOS 环境：Apple Silicon，Homebrew `cargo` / `rustc` 1.96.1（**不是**钉
 
 ## 5. 第一次 Linux 运行之后要做的事
 
-**进度（r5）**：第 1–4 步已完成（见上方状态与 §3），`min_passed` 已按 `0e71894` 的 Linux 数设置；只剩第 5 步（release 基线）。第 3 步没有需要分诊的失败：Linux 上 8 个 suite 全部通过。第 2 步的系统库预查也得到验证——只装 `protoc` 就能在 `ubuntu-24.04` 上编译并链接全部测试二进制。
+**进度（r5）**：第 1–6 步都已完成（见上方状态与 §3）：`min_passed` 按 `0e71894` 的 Linux 数设置，release 基线由手动 run 37389455793 补齐。第 3 步没有需要分诊的失败：Linux 上 8 个 suite 全部通过。第 2 步的系统库预查也得到验证——只装 `protoc` 就能在 `ubuntu-24.04` 上编译并链接全部测试二进制。
 
 1. 触发 `TUI CI`（push / PR 命中 `tui/**` 即自动运行；或手动 `workflow_dispatch`）。看 job summary 或下载 artifact `tui-baseline-check` / `tui-baseline-test`。
 2. `check`：看工具链是否按钉安装（`rustc --version --verbose` 应为 1.94.0）、依赖图节点数、`--workspace --tests` 的错误列表（macOS 上从未编译过的 `cfg(target_os = "linux")` 代码会在这里暴露）。系统库已预查：`cargo tree -p pi-pager-bin --target x86_64-unknown-linux-gnu` 里的 `-sys` crate 要么内置源码（`libsqlite3-sys` 开了 `bundled`，另有 `zstd-sys`、`aws-lc-sys`、`libgit2-sys`、`tikv-jemalloc-sys`、`libmimalloc-sys`），要么在没有系统库时回退到源码构建（`libz-sys`），图里没有 `alsa-sys`、`openssl-sys`、`libudev-sys`、`dbus-sys`；所以 workflow 和 `release.yml`（v0.4.0 就是这样在 `ubuntu-24.04` 上构建成功的）一样只装 `protoc`。这只覆盖 `pi-pager-bin` 的图，没有逐个核对其他 suite 的 dev-dependencies；若 `test` job 在链接阶段报缺系统库，在 `Install protoc` 之后加一步 `apt-get install`。
 3. `test`：把每个意外失败分诊为「修」或「加入 `known_failures` / `skip` 并写明原因」；用 Linux 的通过数设置各 suite 的 `reference_passed` 与 `min_passed`。
 4. 翻开开关：`[test] enforce = true`、`[check] enforce_workspace_tests = true`；按实测设置 `max_warnings`，并把 `[graph.max_nodes]` 的 `PROVISIONAL` 值换成 Linux 实测值。
-5. 手动运行一次 `release_baseline`，把 `zypi` 体积、构建耗时与 `--version` 延迟填进 §3.1。**要放在最后一次 push 之后**：workflow 的 `concurrency` 是 `cancel-in-progress`，期间任何新的 push 都会把这个 30 分钟的任务取消掉。
-6. 把本页 Linux 一栏补全，并在计划文档把 0.1 / 0.2 勾选为完成。0.1 已满足（Linux 上跑通且阻塞）；0.2 还缺第 5 步的三项数字。`min_passed` 已在入口审计的删除落地后按 Linux 数设置（`27df705`）。
+5. 手动运行一次 `release_baseline`（`gh workflow run tui-ci.yml --ref <分支> -f release_baseline=true`），把 `zypi` 体积、构建耗时与 `--version` 延迟填进 §3.1。实测：手动 run 的 `concurrency` 组是 `TUI CI-refs/heads/<分支>`，与 PR 运行的 `refs/pull/<n>/merge` 不是同一组，所以之后往 PR 上 push **不会**取消它；只有再手动触发同一分支才会取代上一次。整个 workflow 约 27 分钟（release 构建 19 分钟）。
+6. 把本页 Linux 一栏补全，并在计划文档把 0.1 / 0.2 勾选为完成。两项都已满足（0.2 的三项 release 数字见 §3.1）。`min_passed` 已在入口审计的删除落地后按 Linux 数设置（`27df705`）；`ac1d3ff` 之后 `pi-pager` 的实测是 5,552，仍高于 5,300 的下限，`reference_passed` 随之更新到 5,552。
 
 ## 6. 尚未覆盖
 
