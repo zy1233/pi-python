@@ -1,4 +1,4 @@
-//! pi-pager — Grok Build TUI.
+//! pi-pager — the zypi TUI.
 //!
 //! A clean-room implementation built on the v3 pager rendering engine.
 pub mod acp;
