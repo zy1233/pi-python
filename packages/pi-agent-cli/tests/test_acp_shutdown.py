@@ -73,10 +73,18 @@ async def _assert_tool_reaped(pid: int) -> None:
 
 
 @asynccontextmanager
-async def agent_running_a_tool(home: Path) -> AsyncIterator[tuple[asyncio.subprocess.Process, int]]:
-    """An agent process in the middle of a ``bash`` call; yields it and the tool's pid."""
+async def agent_running_a_tool(
+    home: Path, *, stuck_thread: bool = False
+) -> AsyncIterator[tuple[asyncio.subprocess.Process, int]]:
+    """An agent process in the middle of a ``bash`` call; yields it and the tool's pid.
+
+    With ``stuck_thread`` the turn blocks in an uncancellable thread instead, and the pid is the
+    agent's own.
+    """
     pidfile = home / "tool.pid"
     env = {"PI_HOME": str(home), "PI_TEST_TOOL_PIDFILE": str(pidfile)}
+    if stuck_thread:
+        env["PI_TEST_STUCK_THREAD"] = "1"
     async with spawn_agent_process(
         _SilentClient(),
         sys.executable,
@@ -122,3 +130,14 @@ async def test_stop_signals_stop_the_agent_and_reap_the_running_tool(tmp_path, s
         await asyncio.wait_for(process.wait(), EXIT_TIMEOUT)
         assert process.returncode == 0
         await _assert_tool_reaped(tool_pid)
+
+
+async def test_a_repeated_signal_stops_an_agent_whose_shutdown_hangs(tmp_path):
+    """The first SIGTERM starts a graceful stop; if that hangs, the second one must still kill."""
+    async with agent_running_a_tool(tmp_path, stuck_thread=True) as (process, _agent_pid):
+        process.send_signal(signal.SIGTERM)
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(asyncio.shield(process.wait()), 1.5)  # still shutting down
+        process.send_signal(signal.SIGTERM)
+        await asyncio.wait_for(process.wait(), EXIT_TIMEOUT)
+        assert process.returncode == -signal.SIGTERM

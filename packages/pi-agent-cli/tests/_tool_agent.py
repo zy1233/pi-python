@@ -2,13 +2,16 @@
 
 The command records the shell pid in ``PI_TEST_TOOL_PIDFILE`` and then ``exec``s ``sleep``, so the
 pid in that file is the pid of the tool process itself. ``permission = "auto"`` keeps the tool
-call from waiting for the client. Run it as ``python _tool_agent.py`` with ``PI_HOME`` set.
+call from waiting for the client. With ``PI_TEST_STUCK_THREAD`` set the turn instead blocks in a
+thread that cannot be cancelled (the file then holds the agent's pid), to test a shutdown that
+hangs. Run it as ``python _tool_agent.py`` with ``PI_HOME`` set.
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
+import time
 from pathlib import Path
 
 from pi_agent_cli.__main__ import serve
@@ -25,6 +28,11 @@ PIDFILE = os.environ["PI_TEST_TOOL_PIDFILE"]
 async def _long_bash_once_stream(model, context, options=None):
     if any(getattr(m, "role", None) == "toolResult" for m in context.messages):
         return await mock_text_stream(model, context, options)
+    if os.environ.get("PI_TEST_STUCK_THREAD"):
+        # A blocking call that cannot be cancelled: `asyncio.run` waits for it at shutdown, so
+        # the agent hangs there. The pidfile holds the agent's own pid in this mode.
+        Path(PIDFILE).write_text(str(os.getpid()))
+        await asyncio.to_thread(time.sleep, 120)
     stream = AssistantMessageEventStream()
     tc: ToolCallContent = {
         "type": "toolCall",

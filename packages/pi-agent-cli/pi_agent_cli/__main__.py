@@ -46,9 +46,18 @@ async def serve(agent: PiAcpAgent) -> None:
     main_task = asyncio.current_task()
     if main_task is not None:
         loop = asyncio.get_running_loop()
+
+        def request_stop() -> None:
+            # A repeated signal gets the default action, so an agent that hangs while it
+            # shuts down (a thread that cannot be cancelled) can still be stopped.
+            for stop_signal in _STOP_SIGNALS:
+                with contextlib.suppress(NotImplementedError, RuntimeError):
+                    loop.remove_signal_handler(stop_signal)
+            main_task.cancel()
+
         for stop_signal in _STOP_SIGNALS:
             with contextlib.suppress(NotImplementedError, RuntimeError):
-                loop.add_signal_handler(stop_signal, main_task.cancel)
+                loop.add_signal_handler(stop_signal, request_stop)
     # `session/close` and `session/resume` are unstable in the SDK and answered with
     # "Method not found" unless this flag is set, although `initialize` advertises both.
     with contextlib.suppress(asyncio.CancelledError):

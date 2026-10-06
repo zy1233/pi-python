@@ -175,7 +175,7 @@ zypi（Rust）                                     pi_agent_cli（Python，通�
 Python（`pi_agent_cli`）：
 
 - [ ] 1.P1（r5 部分：`title` = 会话第一条 user message，`updated_at` = 会话文件 mtime，`50ccfb1`；**`cursor` 分页没做**——pager 不跟 `nextCursor`，只要 Python 分页，列表就会被截断，所以要先让 pager 跟游标）`list_sessions`：真实 title、`updated_at`（最后活动）、`cursor` 分页（ACP `session/list` 字段，[RFD](https://github.com/agentclientprotocol/agent-client-protocol/blob/main/docs/rfds/session-list.mdx)）。
-- [x] 1.P2 优雅退出（r5，`f14e321`）：处理 stdin EOF / SIGTERM，回收工具进程组。实测（macOS，脚本化的 bash 调用）：stdin EOF 本来就是优雅的——`run_agent` 返回，`asyncio.run` 取消在途 turn，bash 工具杀进程组，退出码 0、工具不残留；SIGTERM 则立刻终止进程（−15），工具残留。现在 `__main__.serve()` 把 SIGTERM 与 SIGHUP（`421d497`：终端消失、或 zypi 作为会话首进程被杀时，内核把 SIGHUP 发给前台进程组，agent 在其中，默认动作让它立刻死掉）接到同一条路径（POSIX；Windows 没有 `add_signal_handler` 与 SIGHUP，只靠 EOF）。SIGKILL 无法处理，工具仍会残留，所以 Rust 一侧不能一上来就 SIGKILL（1.R3）。契约：`tests/test_acp_shutdown.py`（EOF、SIGTERM、SIGHUP 都要退出码 0 且回收工具；去掉 SIGTERM 处理器后该用例以 −15 失败）。
+- [x] 1.P2 优雅退出（r5，`f14e321`）：处理 stdin EOF / SIGTERM，回收工具进程组。实测（macOS，脚本化的 bash 调用）：stdin EOF 本来就是优雅的——`run_agent` 返回，`asyncio.run` 取消在途 turn，bash 工具杀进程组，退出码 0、工具不残留；SIGTERM 则立刻终止进程（−15），工具残留。现在 `__main__.serve()` 把 SIGTERM 与 SIGHUP（`421d497`：终端消失、或 zypi 作为会话首进程被杀时，内核把 SIGHUP 发给前台进程组，agent 在其中，默认动作让它立刻死掉）接到同一条路径（POSIX；Windows 没有 `add_signal_handler` 与 SIGHUP，只靠 EOF）。处理器只生效一次（第一个信号后就摘掉），所以停到一半卡住的 agent（比如 `asyncio.run` 在等一个取消不了的线程）仍可被第二个 SIGTERM 杀掉。SIGKILL 无法处理，工具仍会残留，所以 Rust 一侧不能一上来就 SIGKILL（1.R3）。契约：`tests/test_acp_shutdown.py`（EOF、SIGTERM、SIGHUP 都要退出码 0 且回收工具；重复的信号要能杀掉卡住的 agent；去掉 SIGTERM 处理器后第一个用例以 −15 失败，去掉自摘除后最后一个用例超时）。
 - [ ] 1.P3 `set_session_mode`（或 `configOptions` 的 `mode`）取代仅靠 `ext_notification` 的权限模式切换，映射由矩阵定。
 - [ ] 1.P4 `mcp_servers`：显式忽略并在文档声明（Phase 4 非目标），或实现。
 - [ ] 1.P5（r5 部分：`initialize` 公布了 `session/close` 与 `session/resume`，但 `run_agent` 没开 `use_unstable_protocol`，SDK 对这两个方法回「Method not found」，`5163592` 已改；其余公布项与 pager 需求的对照没做）`initialize` 的 capabilities / `_meta`：只公布 pager 实际需要且已登记（P2）的键。
@@ -459,6 +459,7 @@ r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶�
 | 本机，`5163592` | `pytest -m "not real_llm"`；`ruff check .` / `ruff format --check .` | ✓ 617 通过（r4 的 598 之外新增 `session_list` 11 个、stdio 契约 8 个）；通过 |
 | 本机，`f14e321` | `pytest -m "not real_llm"`；`ruff check .` / `ruff format --check .`；`test_acp_shutdown.py` 连跑 3 次；去掉 SIGTERM 处理器再跑（变异检查） | ✓ 619 通过；通过；3 次都稳定；SIGTERM 用例以 −15 失败，EOF 用例仍通过 |
 | 本机，`421d497` | `pytest packages/pi-agent-cli -m "not real_llm"`；`ruff check .` / `ruff format --check .` | ✓ 116 通过（SIGHUP 用例 +1，全仓 620）；通过 |
+| 本机，信号处理器自摘除 | `test_acp_shutdown.py` 4 个用例；去掉自摘除再跑（变异检查） | ✓ 通过；「重复的信号」用例超时失败 |
 | macOS 本机，`e8557e5` | `cargo test -p pi-pager --lib acp::spawn`（含 2 个新测试）；`cargo build -p pi-pager-bin`（`CARGO_INCREMENTAL=0`、2 个 job） | ✓ 10 通过 / 0 失败；构建 0 告警（之后只有 rustfmt 的折行，未重编） |
 | 本机 PTY，`e8557e5` / `421d497` | `/tmp/rr/tui_orphan.py <模式>`：`PI_AGENT_COMMAND` 指向 `tests/_tool_agent.py`，发一句话让 agent 跑 `exec sleep 300`，工具运行时按模式退出 zypi，查 `sleep` 是否还在；另跑一遍 mock 的 `/exit` | 见下表；mock 的 `/exit`：退出码 0，无残留进程，终端上没有 Traceback / BrokenPipe |
 
