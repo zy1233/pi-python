@@ -1,6 +1,6 @@
 # Rust Agent Runtime 剥离计划
 
-> 状态：r6。r2 的计划稿之上，**已拆除 Rust runtime 并恢复 `/model`（r3）；r4 补了阶段 0 的 Linux CI 与基线工具、清掉 leader 的 UI 状态残留、完成 1.R3 的命名；r5 在 Linux CI 上跑通并启用了基线，执行入口审计（0.6）并完成阶段 A（A.3、A.4）——又删了约 23 万行 Rust、8 个 crate，消费者构建 0 告警**。分支已 push，PR [#7](https://github.com/zy1233/pi-python/pull/7) 已转 ready for review；**r6 清理了品牌残留（把还写着 Grok、或指向不存在的命令 / 目录的提示改成真的东西，见 §10.8），在叠加分支 `codex/branding-cleanup` 上**；执行记录见 §10。§1–§9 保留 r2 原文作为决策依据，与 §10 冲突处以 §10 和 ADR3（r3）为准。负责人：待指派。
+> 状态：r7。r2 的计划稿之上，**已拆除 Rust runtime 并恢复 `/model`（r3）；r4 补了阶段 0 的 Linux CI 与基线工具、清掉 leader 的 UI 状态残留、完成 1.R3 的命名；r5 在 Linux CI 上跑通并启用了基线，执行入口审计（0.6）并完成阶段 A（A.3、A.4）——又删了约 23 万行 Rust、8 个 crate，消费者构建 0 告警**。分支已 push，PR [#7](https://github.com/zy1233/pi-python/pull/7) 已转 ready for review；**r6 清理了品牌残留（把还写着 Grok、或指向不存在的命令 / 目录的提示改成真的东西，见 §10.8），在叠加分支 `codex/branding-cleanup` 上；r7 合并了 `main` 上另一台机器推的 7 个提交，6 个文件的冲突已解（见 §10.9）**；执行记录见 §10。§1–§9 保留 r2 原文作为决策依据，与 §10 冲突处以 §10 和 ADR3（r3）为准。负责人：待指派。
 > 基线：分支 `codex/rust-agent-runtime-removal-plan`；r2 / r3 的比较基线是 HEAD `07a3574`，r4 / r5 的提交见 §10。
 > 验证方式：r2 为静态分析（源码阅读、`Cargo.toml` 解析、模块级引用统计，复现方法见附录 B）；r3 起拆除结果由 `cargo check`（macOS 本机，消费者构建 `pi-pager-bin` / `pi-pager-minimal` / `pi-update` 及 `pi-shell` / `pi-pager` 的 `--tests` 类型检查）、`cargo test`（触及的 crate）、Python 侧 pytest，以及伪终端里 `zypi` ↔ `pi_agent_cli` ↔ OpenRouter 的真实会话（含 `/model` 切换）验证。标「需实测」的其余结论仍是静态推断；Linux / Windows 的 `cfg` 代码本机无法编译，见 §10.4。
 > 与既有文档的关系：承接 [Phase 4 设计](../specs/2026-08-25-phase4-coding-agent-cli-design.md) §3「第一轮允许 pager 继续链接 `xai-grok-shell`……变瘦不是迁入前提」和 [`AUDIT-PHASE4-PHASE5.md`](../AUDIT/AUDIT-PHASE4-PHASE5.md) 的「TUI 瘦身长期里程碑」，是 Phase 4 的第二轮。与既有决定的张力见 §3。
@@ -247,7 +247,7 @@ Rust（pager）：
 - 新增 TUI 功能（MCP、queue、subagent UI 等）——另立计划并过 P2 准入。（`/model` 不在此列：r3 已按 ADR3 经 Session Config Options 恢复。）
 - 多会话共享进程（leader 的替代方案）。
 
-## 10. 执行记录（r3、r4、r5、r6）
+## 10. 执行记录（r3、r4、r5、r6、r7）
 
 r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
@@ -539,6 +539,28 @@ r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶�
 - **Linux CI**（`33374a3`，PR [#8](https://github.com/zy1233/pi-python/pull/8)）：`TUI CI` run [37408839608](https://github.com/zy1233/pi-python/actions/runs/37408839608)（check 6 m 27 s，test 19 m 11 s）✓ 门禁全过；依赖图 980、消费者构建 0 告警、`cargo check --workspace --tests` 0 个错误；8 个 suite 共 7,444 通过 / 0 失败 / 20 忽略（`pi-pager` 5,559，比 `b617575` 的 5,554 多 5；上面那条 macOS 本机波动的测试在 Linux 上通过）；`CI`（Ruff + Python 3.11–3.13）run 37408839645 ✓。
 - **CI 没覆盖到的**：`TUI CI` 的 8 个 suite 里没有 `pi-pager-render` 和 `pi-pager-minimal`（`scripts/tui_baseline.toml`），所以本次在这两个 crate 里新增和改动的测试——主题别名、路径标签、剪贴板提示、`--minimal` 欢迎页——只在 macOS 上跑过，Linux 上只做了编译检查（`cargo check --workspace --tests`）。把这两个 crate 加进基线是个小改动，但要先在 Linux 上量出各自的 `reference_passed`，而且会改 CI 门禁（`enforce = true`），所以没有顺手做，留给用户决定。
 
+### 10.9 r7 追加：合并 `main`（另一台机器推的 7 个提交）
+
+**背景。** 用户另一台机器上的功能提交推到了 `main`：`09fc38d..7e7d4d4`，7 个提交、122 个文件（+21,174 / −809），是 Phase 6 / 7 审计的实现——项目信任（`extension_trust`、`trust_prompt`、`trust_store`）、按 provider 限定的 API key、`Model.reasoning`、workflow 沙箱、工具注解与权限、后台 turn 之后排队的 prompt、0.5.0 发版。**没有一个文件在 `tui/` 下**，Rust 一侧不受影响。两个 PR 相对 `main` 是 61 个提交。
+
+**冲突。** 先用 `git merge-tree` 查，再动手：两边都改过的有 10 个文件，其中 6 个文本冲突、共 17 处——`pi_agent_cli/agent.py`（6）、`config.py`（4）、`factory.py`（3）、`packages/pi-agent-cli/AGENTS.md`（2）、`__main__.py`（1）、`pyproject.toml`（1）。其余 4 个自动合并。冲突全在 Python 一侧，#7 和 #8 的冲突一样（#8 没有新增）。选 merge 而不是 rebase：61 个提交会把同样的冲突逐个重放，而且最终要 squash。
+
+**怎么合。** 两边的功能都留，真正需要决定的只有接缝处的三件事：
+
+- **API key 的归属。** main 规定 `api_key_env` 只给自己的 provider 用（请求别的 provider 时返回 `None`）。我们的 `/model` 里每个模型有自己的 `api_key_env` 和 `provider`，所以改成 `api_key_getter(env_name, provider)`：`make_get_api_key(config)` 是 `[model]` 默认项的特例，`factory.api_key_for_choice(choice)` 给 `[[models]]` 里的某一项用。
+- **`Model.reasoning`。** main 在构造 `Model` 时按 `CliConfig.model_reasoning` 设它；我们的 `model_for_choice` 不带，切换模型会把它丢掉。现在 `model_for_choice(choice, reasoning=…)`，值对所有 choice 相同（它是会话级的设置，不是模型的属性）。
+- **会话启动。** main 把 `_schedule_deferred_advertise` 扩成了 `_schedule_deferred_setup`（问信任、广播命令、报告被跳过或加载失败的扩展），合并后沿用 main 的。`_bind_session` 先决定信任，再恢复持久化的模型选择，两个都交给 `create_session_harness(trust=…, model_choice=…)`；会话响应仍带 `configOptions` 和每会话的 `pi/*` 提示。
+
+新增测试 `test_a_chosen_model_keeps_the_reasoning_setting_and_gets_only_its_own_key` 守住这个接缝；`packages/pi-agent-cli/AGENTS.md` 的「Model selection」一节记了同样的规则。
+
+**验证（macOS 本机）。** `ruff check` 与 `ruff format --check` 通过（204 个文件）。pytest 全量 1,999 通过、6 失败、33 跳过、31 取消选择（需要真实 API 的测试，main 新加的 `addopts` 默认排除）。**这 6 个失败在纯 `origin/main`（`7e7d4d4`，临时 worktree）上原样复现，与合并无关**，都是 macOS 专属：
+
+- `test_context_files_are_loaded_whatever_the_trust`：`context_files.py` 的候选名同时有 `AGENTS.md` 和 `AGENTS.MD`（`CLAUDE.md` / `CLAUDE.MD` 同理）。大小写不敏感的文件系统上两个名字命中同一个文件，而 `Path.resolve()` 在 macOS 上保留写法，按路径字符串去重失效，项目的 `AGENTS.md` 会被读两遍、进提示词两次。不是测试的问题，是 Phase 5 起就有的真 bug（`f96ccb1`），main 新加的测试第一次在 macOS 上暴露它。
+- `test_a_path_that_is_not_valid_text_can_still_be_saved`：macOS 不允许非 UTF-8 的文件名（`Errno 92`），测试自己建不出那个目录。
+- `test_sandbox_isolation.py` 的 4 个：macOS 上沙箱只报告 `process`、`rlimit-core`、`rlimit-cpu`、`rlimit-nofile`、`rlimit-fsize` 几层，没有 `rlimit-as`；「不靠审计钩子，内核也拦得住子进程和大内存」这一组在 macOS 上不成立；子进程还多了 macOS 自己补的 `__CF_USER_TEXT_ENCODING`。
+
+**PTY 冒烟**（debug `zypi` + 合并后的 agent，`PI_USE_MOCK`）：启动、一个回合、`/model` 选择器列出两个模型、切到第二个并发一轮、切回、`/exit` 退出码 0 且没有残留的 agent 进程。Linux CI 的结果见 PR。
+
 ## 附录 A：能力矩阵（阶段 0.8 的初稿）
 
 | 能力 | pager 侧 | Python 现状 | 默认决策 |
@@ -802,3 +824,4 @@ LoC 用 `python3` 递归统计 `*.rs` 行数（沙箱内 `xargs wc -l` 可能失
 - r4：把 r3 的工作区改动提交到本地分支（**未 push**），并补三件事：① 阶段 0 的 0.1 / 0.2 / 0.4——Linux CI workflow、基线执行器与清单、基线报告 `docs/baselines/tui.md`（0.4 勾选；0.1 / 0.2 因为 workflow 没在 Linux 上跑过而不勾选）；② 清掉 leader 的 UI 状态残留（A.2 的尾巴），生产行为不变，测试夹具改用生产默认值；③ 1.R3 的命名与提示语（行为不变，`stderr` 去向、优雅退出、残留进程实测仍未做）。同时把 §10.4 的 leader 残留改写为四类「不是 UI 残留」的剩余（273 行 / 80 个文件），新增 §10.6，并更正测试基线（清理 leader 时随被删代码删掉 18 个测试，10,857 → 10,839）。验证仍是 macOS 一台机器：门禁、`--workspace --tests`、8 个 suite、PTY 烟测；没有 Linux / Windows 结果。
 - r5：推送分支、开 draft PR [#7](https://github.com/zy1233/pi-python/pull/7)，并完成阶段 A 与阶段 0 的 0.1 / 0.6。① 第一次 Linux `TUI CI` 全绿后把基线转为阻塞，依赖图上限 995 → 980、告警上限 20 → 0、各 suite 设 `min_passed`；② 入口审计（0.6）按附录 A 的默认执行，A.3 删除 dashboard、白名单外的斜杠命令、agents / extensions / persona 模态、tasks / 后台 / 定时任务、subagents / workflows / goals、共享 prompt 队列、MCP / hooks / plugins / marketplace 入口、rewind / fork / jump、recap / feedback / consent、changelog、`--chat` 世界、session rename 的死链路；③ A.4 去掉各 crate 根的 `#![allow]`（消费者构建 0 告警）、`pi-shell` 的 `pub mod` 降级、删未用依赖与 8 个无人依赖的 crate、删 `cfg(feature = "local-workspace")` 代码；④ `-p` 无沙箱时拒绝运行（ADR7 的最小版本）。净效果：`tui/crates` 的 `.rs` 从 1,252,374 行降到 1,019,041 行，`Cargo.lock` 1,285 → 1,257 个包，Linux 依赖图 995 → 980。新增 §10.7 与附录 A 的 r5 结果。⑤ 收尾：PTY 烟测发现并删掉欢迎页与选择器里的死 worktree 入口（`ac1d3ff`）；手动 `release_baseline` 回填了 release 数（`zypi` 422,034,120 B，−10.3 %；冷缓存构建 1,155 s，−29.9 %；0.2 勾选）；阶段 1 开了头——`session/list` 的标题与 `updated_at`（1.P1 一半）、stdio 契约套件并修了 `session/close` / `resume` 的路由（0.3 / 1.P7 的 Python 一侧、1.P5 的一个 bug）、优雅退出（1.P2 完成，1.R3 ② 完成：退出 zypi 时 bash 工具进程不再残留——双击 Ctrl+Q、`kill -9 zypi`、SIGTERM、关终端都量过，前因后果见 §10.7）。验证：Linux CI（`0e71894`、`cca48b0`、`ac1d3ff`）、macOS 本机、PTY。阶段 1 的其余部分和 0.5 / 0.7–0.9 未做，见 §10.7 的遗留。
 - r6：清理品牌残留（用户选了「清理 Grok 品牌残留」，没给新名字，沿用 zypi），分支 `codex/branding-cleanup`，叠在 PR #7 之上；PR #7 同时转为 ready for review。改动：主题改名为 `zypi Night` / `zypi Day`（落盘 id `zypinight` / `zypiday`，旧 id 与别名仍可解析）、桌面通知标题、`zypi doctor` 的标题与全部提示、启动 / SSH 提示、设置页描述、复制提示、`--minimal` 欢迎页与信任提示、`zypi wrap` 报错前缀。顺带修了三处「提示指向不存在的东西」：`zypi doctor fix ssh-wrap` 写进 shell rc 的是 `alias ssh='grok wrap ssh'`（`grok` 不存在）；配置目录在消息里叫 `~/.grok` / `$GROK_HOME`（实际是 `~/.pi-python` / `$PI_HOME`）；`/doctor`、`/minimal`、`/copy`、`grok worktree gc|rm|db rebuild` 都不存在。有意没动的见 §10.8。验证见 §10.8。
+- r7：合并 `main` 上另一台机器推的 7 个提交（Phase 6 / 7 审计的实现，没有一个文件在 `tui/` 下）。6 个文件、17 处冲突，都在 `packages/pi-agent-cli` 与 `pyproject.toml`；接缝处的三个决定：`api_key_getter(env_name, provider)`（key 只给自己的 provider，`/model` 里的每个模型都适用）、`model_for_choice(choice, reasoning=…)`（切换模型不丢 `Model.reasoning`）、`_bind_session` 先决定信任再恢复模型选择。纯 `origin/main` 上就失败的 6 个 macOS 专属测试没有动，其中一个是真 bug（macOS 上项目的 `AGENTS.md` 会被读两遍）。见 §10.9。
