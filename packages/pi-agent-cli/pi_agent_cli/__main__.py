@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
+import signal
 import sys
 from pathlib import Path
 
@@ -28,10 +30,25 @@ _PROMPT_CLI_FLAG_NAMES = (
 )
 
 
-async def _amain() -> None:
+async def serve(agent: PiAcpAgent) -> None:
+    """Serve ``agent`` over stdio until stdin closes or the process gets SIGTERM."""
+    # SIGTERM stops the agent the way EOF on stdin does: the main task is cancelled, so
+    # `asyncio.run` cancels the in-flight turns and each running tool's process group is
+    # reaped. Without a handler SIGTERM ends the process at once and its tools outlive it.
+    # (SIGKILL cannot be handled; there the tools are orphaned.)
+    main_task = asyncio.current_task()
+    if main_task is not None:
+        # Windows has no `add_signal_handler`; there the agent ends on EOF only.
+        with contextlib.suppress(NotImplementedError, RuntimeError):
+            asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, main_task.cancel)
     # `session/close` and `session/resume` are unstable in the SDK and answered with
     # "Method not found" unless this flag is set, although `initialize` advertises both.
-    await run_agent(PiAcpAgent(), use_unstable_protocol=True)
+    with contextlib.suppress(asyncio.CancelledError):
+        await run_agent(agent, use_unstable_protocol=True)
+
+
+async def _amain() -> None:
+    await serve(PiAcpAgent())
 
 
 def _build_parser() -> argparse.ArgumentParser:

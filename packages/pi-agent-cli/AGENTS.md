@@ -36,7 +36,11 @@ The Rust TUI (`zypi`) spawns the Python agent via (priority order):
 
 `tests/test_acp_stdio_contract.py` drives an agent *process* over stdio the way the TUI does: `initialize`, `session/new`, streamed `prompt`, the `model` config option, `session/list` (first-prompt title), `session/load` replay and `session/resume` across a restart, `session/close`, unknown methods answered with an error, exit code 0 on stdin EOF. It uses the mock LLM (`PI_USE_MOCK=1`) and a throw-away `PI_HOME`. Set `PI_ACP_CONTRACT_COMMAND` to run the same suite against another stdio ACP agent (it must honour `PI_HOME` and answer prompts with `Hello from mock`, without network), e.g. a future `pi-rust`.
 
-`__main__` starts `run_agent(..., use_unstable_protocol=True)`: `initialize` advertises `session/close` and `session/resume`, which the SDK serves only with that flag.
+`__main__.serve()` starts `run_agent(..., use_unstable_protocol=True)`: `initialize` advertises `session/close` and `session/resume`, which the SDK serves only with that flag.
+
+## Stopping the agent
+
+The agent must reap the tools it is running when its client goes away: the TUI closes the agent's stdin and kills it only after a grace period (`acp/spawn.rs`, `AGENT_EOF_GRACE`). `serve()` ends on EOF on stdin (`run_agent` returns, `asyncio.run` cancels the turns in flight, each `bash` tool kills its process group) and on SIGTERM (the main task is cancelled, same path); both exit 0. SIGKILL cannot be handled and orphans the tools. `tests/test_acp_shutdown.py` runs `tests/_tool_agent.py` (the real `serve()` with a scripted `bash` call) and checks both cases; POSIX only.
 
 ## System prompt pipeline
 
