@@ -175,7 +175,7 @@ zypi（Rust）                                     pi_agent_cli（Python，通�
 Python（`pi_agent_cli`）：
 
 - [ ] 1.P1（r5 部分：`title` = 会话第一条 user message，`updated_at` = 会话文件 mtime，`50ccfb1`；**`cursor` 分页没做**——pager 不跟 `nextCursor`，只要 Python 分页，列表就会被截断，所以要先让 pager 跟游标）`list_sessions`：真实 title、`updated_at`（最后活动）、`cursor` 分页（ACP `session/list` 字段，[RFD](https://github.com/agentclientprotocol/agent-client-protocol/blob/main/docs/rfds/session-list.mdx)）。
-- [ ] 1.P2 优雅退出：处理 stdin EOF / SIGTERM → 关闭所有 harness，回收工具进程组。
+- [x] 1.P2 优雅退出（r5，`f14e321`）：处理 stdin EOF / SIGTERM，回收工具进程组。实测（macOS，脚本化的 bash 调用）：stdin EOF 本来就是优雅的——`run_agent` 返回，`asyncio.run` 取消在途 turn，bash 工具杀进程组，退出码 0、工具不残留；SIGTERM 则立刻终止进程（−15），工具残留。现在 `__main__.serve()` 把 SIGTERM 接到同一条路径（POSIX；Windows 没有 `add_signal_handler`，只靠 EOF）。SIGKILL 无法处理，工具仍会残留，所以 Rust 一侧不能一上来就 SIGKILL（1.R3）。契约：`tests/test_acp_shutdown.py`（EOF 与 SIGTERM 都要退出码 0 且回收工具；去掉处理器后 SIGTERM 用例以 −15 失败）。
 - [ ] 1.P3 `set_session_mode`（或 `configOptions` 的 `mode`）取代仅靠 `ext_notification` 的权限模式切换，映射由矩阵定。
 - [ ] 1.P4 `mcp_servers`：显式忽略并在文档声明（Phase 4 非目标），或实现。
 - [ ] 1.P5（r5 部分：`initialize` 公布了 `session/close` 与 `session/resume`，但 `run_agent` 没开 `use_unstable_protocol`，SDK 对这两个方法回「Method not found」，`5163592` 已改；其余公布项与 pager 需求的对照没做）`initialize` 的 capabilities / `_meta`：只公布 pager 实际需要且已登记（P2）的键。
@@ -186,7 +186,7 @@ Rust（pager）：
 
 - [ ] 1.R1 ADR1 落地：移除对 session 文件的读取；`export` 的去向。
 - [ ] 1.R2 按能力隐藏 Python 不路由的方法的入口（`session/set_model`、`session/set_mode` 等）；method-not-found 不 panic、不重复报错；`/model` 按 ADR3 恢复（r3 已做，不在隐藏之列）。
-- [ ] 1.R3 子进程生命周期（P6）。**r4 已做（命名与提示语，行为不变）**：`SpawnedAgent` → `AgentProcess`（`thread_handle` → `bridge_thread`，`AcpConnection.agent_thread` → `bridge_thread`）、`AgentShutdownGuard` → `AgentProcessGuard`、`spawn_grok_shell` → `spawn_agent_process`（顺手去掉没人用的 `_memory_config` 参数）、`SESSION_FLUSH_GRACE` / `AGENT_JOIN_SLACK` → `AGENT_EXIT_GRACE` / `BRIDGE_JOIN_SLACK`（仍是 10 s + 2 s，`exit_timeout` 的 20 s 预算不变）、`join_agent_thread` → `join_bridge_thread`；慢退出提示从「Finishing session…」改为「Stopping agent…」，超时告警不再声称 SessionEnd teardown 可能不完整，只说 agent 进程可能还在；守卫的文档改为只有 `app::run` 持有。**未做**：① 确定 `stderr` 去向（现为继承，agent 打印的任何东西都会写在 TUI 所在的终端上）；② 优雅退出（1.P2；现在是取消即 `start_kill()`，没有 flush 窗口，所以那 10 s 宽限实际只兜底卡死的回收）；③ 崩溃 / 中途 Ctrl-C / `kill -9 zypi` 之后是否残留 Python 与 bash / MCP 子进程的实测——SIGKILL 不给 Python 回收自己子进程的机会，它们会不会残留没验证过。
+- [ ] 1.R3 子进程生命周期（P6）。**r4 已做（命名与提示语，行为不变）**：`SpawnedAgent` → `AgentProcess`（`thread_handle` → `bridge_thread`，`AcpConnection.agent_thread` → `bridge_thread`）、`AgentShutdownGuard` → `AgentProcessGuard`、`spawn_grok_shell` → `spawn_agent_process`（顺手去掉没人用的 `_memory_config` 参数）、`SESSION_FLUSH_GRACE` / `AGENT_JOIN_SLACK` → `AGENT_EXIT_GRACE` / `BRIDGE_JOIN_SLACK`（仍是 10 s + 2 s，`exit_timeout` 的 20 s 预算不变）、`join_agent_thread` → `join_bridge_thread`；慢退出提示从「Finishing session…」改为「Stopping agent…」，超时告警不再声称 SessionEnd teardown 可能不完整，只说 agent 进程可能还在；守卫的文档改为只有 `app::run` 持有。**r5 已做（`e8557e5`）**：② 优雅退出——取消时先关 agent 的 stdin，等它自己退出（`AGENT_EOF_GRACE` = 3 s，编译期断言小于 `AGENT_EXIT_GRACE`），超时才 `start_kill()`；退出期间继续读（并丢弃）agent 的 stdout，免得它写到已关闭的管道；③ 的一部分——用脚本化 agent 在 bash 工具运行时双击 Ctrl+Q：旧版退出后 `sleep` 残留（1 次），新版回收（2 次），退出都是 0.3 s（本机 PTY）。**未做**：① 确定 `stderr` 去向（现为继承，agent 打印的任何东西都会写在 TUI 所在的终端上）；③ 的其余——`kill -9 zypi` / pager 崩溃之后会怎样（agent 靠 stdin 的 EOF 自己退出，没有实测）、MCP 子进程、运行工具时单按 Ctrl-C。
 - [ ] 1.R4 `-p` 派发顺序与沙箱（ADR7）。
 - [ ] 1.R5 解码精简：`initialize._meta` 只读 Python 实际公布的键；`pi/*` 解码按 ADR4 清理。
 
@@ -231,7 +231,7 @@ Rust（pager）：
 | R2 | 没有 Rust 回归安全网，验收全部依赖它 | 阶段 0 的 CI、基线、ACP 契约测试先于任何删除 |
 | R3 | 残留 UI 入口调用已删 runtime，或发送 Python 不路由的方法 | 入口审计 + 能力驱动 UI（P3）+ method-not-found 契约测试；去掉全局 allow 后由编译器验证 |
 | R4 | 误把有入口的代码当死代码 | 入口审计 + A.4 去 allow + e2e；每类删除单独 PR |
-| R5 | 子进程生命周期：孤儿 bash 进程、Windows 行为未知 | 阶段 1 的优雅退出协议 + 实测；Windows 先记录现状 |
+| R5 | 子进程生命周期：孤儿 bash 进程、Windows 行为未知 | 阶段 1 的优雅退出协议 + 实测；Windows 先记录现状。r5：macOS 上已实测并修掉退出 zypi 后残留的 bash 进程（§10.7）；`kill -9 zypi` 与 Windows 仍未测 |
 | R6 | ACP 两端版本偏差 | 配对表 + 升级同步 + 契约测试；不依赖 Rust 端 unstable 方法 |
 | R7 | 删除 `agent::config` 字段破坏用户 `config.toml` | ADR5 |
 | R8 | 沙箱随 `agent::config` 被误删 | ADR7 + B.4 明确保留 + 测试（含 `-p`） |
@@ -334,7 +334,7 @@ r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶�
 **残留**：
 
 - **leader（r4 更新）**：pager 的 leader UI 状态与流程已清掉（做法与范围见 §10.6）。`.rs` 里的 `leader` 字样从 684 行 / 121 个文件降到 **273 行 / 80 个文件**（HEAD 是 2,999 行）。剩下的不是 UI 残留，分四类：① 多客户端共享会话协议的词汇（pager 61 行：viewer 模式、`shared_prompt_queues`、`session_load_barrier`、`acp_handler/queue.rs` 的 `running_prompt_id` 采纳；注释里的「leader」指托管共享会话的 agent）——ADR4 / A.3 决定去留，不在 r4 范围；② 与本事无关的通用含义：进程组 / 会话 leader（`pi-tty-utils`、`pi-workspace` 的 `restore_fetch`、`pi-hooks`、`pi-workspace-daemon`、`pi-mermaid`）、单飞里的 leader（`pi-mcp` 的 OAuth）；③ `pi-update` 的自更新收敛与 `LeaderConverge` 遥测；④ 遥测的进程身份（`Entrypoint::Leader`、`LeaderMode`、`is_leader_mode`，`pi-pager-bin` 与 `acp/mod.rs` 恒报 `Standalone`）——这是遥测 schema，改它是产品决定。另有零星的「in leader mode」注释留在 `pi-shell`（config watcher、campaigns、`extensions::notification`）、`pi-shell-base`（`cpu_profile`）与 `pi-tools`（monitor），随各自模块的取舍处理。
-- **子进程生命周期（1.R3）：命名与提示语 r4 已改（见 §10.6），行为没动**。实测只覆盖正常退出（`/exit` 后 Python agent 随 stdin 关闭退出，无残留）；`stderr` 去向、优雅退出（1.P2）、崩溃 / 中途 Ctrl-C 之后是否残留 Python 或 bash 子进程都还没做 / 没测，见 §7 的 1.R3。
+- **子进程生命周期（1.R3）：命名与提示语 r4 已改（见 §10.6），行为没动（r5 起 pager 先关 stdin 再杀，见 §10.7）**。r4 的实测只覆盖正常退出（`/exit` 后 Python agent 随 stdin 关闭退出，无残留）；`stderr` 去向、优雅退出（1.P2）、崩溃 / 中途 Ctrl-C 之后是否残留 Python 或 bash 子进程都还没做 / 没测，见 §7 的 1.R3。
 - **「Starting session…」要转 30 s**：每个会话创建都会种下一个 `McpInitProgress` seed（`app/dispatch/session/lifecycle.rs:466`），只会被 agent 的 `*/mcp/init_progress` 通知清掉（`acp_handler/mcp.rs`），Python 不发，只能等 `SEED_EXPIRE`（30 s）到期。纯展示问题，不阻塞输入与 prompt；种下与清除的代码和 HEAD 一致（本次没改），属于 P3（能力驱动 UI）的待办。
 - **配置兼容**：已移除的配置段（例如 `[toolset.web_search]`）现在会被报为「未识别」，由 `removed_web_search_section_is_reported_unused` 守住；ADR5 的「首次启动告警一次」没做。
 - **依赖图**：`async-openai` 仍在 `cargo tree -p pi-pager-bin` 里（经 `pi-tools` / `pi-sampling-types` / `pi-agent`），阶段 D 没做；`pi-shell/build.rs` 的 ripgrep 打包是死代码（真正的使用者在 `pi-tools/build.rs`），没动。
@@ -416,6 +416,9 @@ r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶�
 | `ac1d3ff` | 删欢迎页「New worktree」菜单项、ctrl+w、New Worktree 对话框、会话选择器的 ctrl+w「在 worktree 里恢复」，以及英雄区宣传已删除 `/feedback` 的副标题；顺手删 `cloud_modal_open`（恒 false）与随之无人调用的 `LineEditor::insert_paste_with_byte_limit` | 13 / +15 −790 |
 | `50ccfb1` | Python：`session/list` 的 `title` 取会话第一条 user message、`updated_at` 取文件 mtime（1.P1 的一半） | 5 |
 | `5163592` | Python：stdio ACP 契约套件；`run_agent` 开 `use_unstable_protocol`，让已公布的 `session/close`、`session/resume` 真正可用 | 3 / +208 |
+| `d775a54` | 文档：release 基线与 `ac1d3ff` 的 Linux 数字、PTY 烟测的发现、阶段 1 的开头 | 3 |
+| `f14e321` | Python：SIGTERM 与 EOF 走同一条停止路径（1.P2）；`tests/test_acp_shutdown.py` + `tests/_tool_agent.py` | 4 / +200 −3 |
+| `e8557e5` | Rust：退出时先关 agent 的 stdin、等 `AGENT_EOF_GRACE`、超时才 SIGKILL；退出期间排空 stdout（1.P2 / 1.R3） | 1 / +119 −29 |
 
 **入口审计的结果（0.6，按附录 A 的默认）。**
 
@@ -452,14 +455,18 @@ r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶�
 | macOS 本机，`ac1d3ff` | `errs.py`（pi-pager、pi-pager-bin，全 target）；`cargo test -p pi-pager --lib`（`--test-threads=2`）与 `--test settings_e2e` / `grok_home_paths` / `selection_model_public_api` | ✓ 0 错误 0 告警；5,307 通过 / 0 失败 / 13 忽略；251；2；2 |
 | 本机 PTY，`ac1d3ff`（`PI_USE_MOCK=1`） | 欢迎页 → `/help`、`/settings`、`/theme`、`/resume`、`/model` 开合 → `/exit`；一轮对话 → `/exit` → 同一 `PI_HOME` 重启 → `/resume` 选回上一个会话 → 历史回放 → `/exit` | ✓ 全部走通，退出码 0，无 panic，`/exit` 之后没有残留 `pi_agent_cli` 进程；欢迎页只剩「Resume session / Quit」，ctrl+w 不再弹对话框 |
 | 本机，`5163592` | `pytest -m "not real_llm"`；`ruff check .` / `ruff format --check .` | ✓ 617 通过（r4 的 598 之外新增 `session_list` 11 个、stdio 契约 8 个）；通过 |
+| 本机，`f14e321` | `pytest -m "not real_llm"`；`ruff check .` / `ruff format --check .`；`test_acp_shutdown.py` 连跑 3 次；去掉 SIGTERM 处理器再跑（变异检查） | ✓ 619 通过；通过；3 次都稳定；SIGTERM 用例以 −15 失败，EOF 用例仍通过 |
+| macOS 本机，`e8557e5` | `cargo test -p pi-pager --lib acp::spawn`（含 2 个新测试）；`cargo build -p pi-pager-bin`（`CARGO_INCREMENTAL=0`、2 个 job） | ✓ 10 通过 / 0 失败；构建 0 告警（之后只有 rustfmt 的折行，未重编） |
+| 本机 PTY，`e8557e5` | `/tmp/rr/tui_orphan.py`：`PI_AGENT_COMMAND` 指向 `tests/_tool_agent.py`，发一句话让 agent 跑 `exec sleep 300`，工具运行时双击 Ctrl+Q，查 `sleep` 是否还在；另跑一遍 mock 的 `/exit` | ✓ 新版 2 次：zypi 退出码 0、0.3 s，agent 与 `sleep` 都不在；旧版（`ac1d3ff`）：退出码 0、0.3 s，`sleep` 残留。mock 的 `/exit`：退出码 0，无残留进程，终端上没有 Traceback / BrokenPipe |
 
-**这一轮没有验证的**：Windows；`5163592` 之后的 Linux 运行（推送后的 CI 结果见 PR）；`zypi` 异常退出（崩溃、`kill -9`、运行工具时 Ctrl-C）后 Python 与 bash 子进程是否残留（见下面第 5 条）；用真实模型跑 PTY——OpenRouter 的免费 slug `qwen/qwen3.8-27b:free` 现在回 404（付费 slug 要花钱，由用户定），所以 `ac1d3ff` 的 PTY 烟测用的是 agent 自带的 mock LLM。
+**这一轮没有验证的**：Windows；`5163592` 之后的 Linux 运行（推送后的 CI 结果见 PR）；`zypi` 异常退出（崩溃、`kill -9`）后 agent 与它的工具是否残留，以及运行工具时单按 Ctrl-C 的情形；`e8557e5` 的 Linux 运行；用真实模型跑 PTY——OpenRouter 的免费 slug `qwen/qwen3.8-27b:free` 现在回 404（付费 slug 要花钱，由用户定），所以 `ac1d3ff` 的 PTY 烟测用的是 agent 自带的 mock LLM。
 
 **PTY 烟测的发现（已处理 / 待处理）。**
 
 - 已处理（`ac1d3ff`）：欢迎页的「New worktree」菜单项与 ctrl+w 弹出的对话框是死入口——回车后只会显示「Cannot create worktree: Git worktree sessions are not supported in standard ACP mode」；英雄区副标题还在宣传已删除的 `/feedback`。
 - 已处理（`50ccfb1`）：`/resume` 选择器里每个会话的标题都是「ISO 时间戳 (短 id)」，`updated_at` 是创建时间。
 - 已处理（`5163592`）：契约测试发现 `initialize` 公布的 `session/close`、`session/resume` 在线上回「Method not found」。pager 没有调用点，所以此前没人发现。
+- 已处理（`f14e321`、`e8557e5`）：运行 bash 工具时退出 zypi 会留下工具进程——Rust 一退出就 SIGKILL agent，agent 来不及回收工具的进程组（PTY：双击 Ctrl+Q 之后 `sleep 300` 还在）。同时量到：stdin EOF 本来就能让 Python agent 干净退出（退出码 0、工具回收），SIGTERM 不行（−15、工具残留）。修法：Python 的 SIGTERM 接到 EOF 那条路径；Rust 先关 stdin，等 3 s，超时才 SIGKILL。
 - 待处理：冷启动后 `/resume` 选择器的第一项是当前这个刚创建的空会话（标题现在是「(no messages)」），真正想恢复的要按一下 ↓；pager 不跟 `nextCursor`（见 1.P1）。
 
 **遗留与建议的顺序。**
@@ -468,7 +475,7 @@ r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶�
 2. ~~`release_baseline`~~：已做（0.2 勾选）。
 3. **A.3 的尾巴**（可选，同样的折叠器办法）：3d-6 CLI 旗标瘦身——欢迎页与选择器里的 worktree 入口已在 `ac1d3ff` 删掉，但 `-w/--worktree`、`--worktree-ref`、`--restore-code`、`/new` 的 worktree 模式（`new_session_worktree_mode`、`Action::NewWorktreeSession`、`Action::ChooseNewSessionMode`）和 `allow_remote_restore` / `suppress_code_restore` 的「远端恢复」世界仍在，标准 ACP 下 `Effect::CreateWorktreeSession` 恒返回 `WorktreeSessionFailed`，这些路径恒假；它们归 1.P6 的旗标契约一起定。欢迎页隐私横幅（`views/privacy_banner.rs`，「Help improve Grok」数据共享广告）按代码读只有设了环境变量 `GROK_PRIVACY_NOTICE_ROLLOUT` 或远端设置才会出现（没有实测），同属「靠数据恒假」的世界，约 1k 行、15 个文件。3f plan 审批 / btw / cta；3d-4 认证 / 计费界面归阶段 D.3。
 4. **A.4 的尾巴**（可选）：`pi-shell-base` 等其余 crate 的 `pub` 瘦身（没做过）；`pi-shell-base/src/env.rs` 里死掉的 gateway-bridge 常量；约 25 处局部 `#[allow(dead_code | unused*)]`（有的是平台门控，要看 Linux）；`pi-shell/src/session/storage` 的 `relocation`（`#[allow(dead_code)]`，归 D.2）。
-5. **阶段 1 才开了个头**：做了 1.P1 的一半（标题与 `updated_at`）、1.P5 的一个 bug（`session/close` / `resume` 的路由）、0.3 / 1.P7 的 Python 一侧（stdio 契约套件）。余下的需要拍板：① 优雅退出（1.P2 + 1.R3 ②③）：`AgentProcess` 现在取消即 `start_kill()`（SIGKILL），Python 来不及回收 `start_new_session=True` 的 bash 进程组，可能留下孤儿进程；做法是 Rust 先关 stdin 并给一个有界宽限，Python 在 EOF / SIGTERM 时 abort 所有 harness，宽限秒数与「退出等待多久」要定，也需要一个能触发 bash 工具调用的 mock 才能测；② pager 跟 `nextCursor`（才能在 Python 端分页）；③ 1.R1 ADR1（`--continue` / `--resume` 的磁盘读取）；④ 1.P6 旗标契约。阶段 0 的 0.3 的 Rust 一侧、0.5、0.7–0.9 仍未做。
+5. **阶段 1 才开了个头**：做了 1.P1 的一半（标题与 `updated_at`）、1.P5 的一个 bug（`session/close` / `resume` 的路由）、0.3 / 1.P7 的 Python 一侧（stdio 契约套件）。余下的需要拍板：① 优雅退出（1.P2、1.R3 ②）**已做**（`f14e321`、`e8557e5`），宽限取了 3 s（`AGENT_EOF_GRACE`，一个常量，要换数字由用户定）；还剩 `kill -9 zypi` / 崩溃之后的残留（agent 靠 stdin 的 EOF 自己退出，没测）与 `stderr` 去向（1.R3 ①）；② pager 跟 `nextCursor`（才能在 Python 端分页）；③ 1.R1 ADR1（`--continue` / `--resume` 的磁盘读取）；④ 1.P6 旗标契约。阶段 0 的 0.3 的 Rust 一侧、0.5、0.7–0.9 仍未做。
 6. **文档与声明**：C.2 内嵌 user-guide；C.3 `tui/NOTICE` 与 `THIRD-PARTY-NOTICES`（依赖已少了 28 个包，需要重新生成；对外发布二进制前由用户定措辞）。还有**品牌残留**：用户看得见的有 `/theme` 里的「Grok Night / Grok Day」、桌面通知标题「Grok」（审批请求、会话就绪、回合结束）、`zypi doctor` 的「Grok Doctor」、`zypi disk-usage` 提示里的 `grok worktree gc`；代码里还有 `grok-pager` 之类的客户端标识。是否改名、改成什么，由用户定。
 
 ## 附录 A：能力矩阵（阶段 0.8 的初稿）
@@ -732,4 +739,4 @@ LoC 用 `python3` 递归统计 `*.rs` 行数（沙箱内 `xargs wc -l` 可能失
 - r2：吸收源码核查与架构评估。主要变化：终态拆成行为层 / 依赖图层；新增原则 P1–P7、与既有架构的关系（§3）、决策记录（§6）、改动规模（§5）；阶段重排为「基线 → 死代码先行 → 协议与 Python → 拆 runtime → 收口 →（可选）依赖图瘦身」；`pi/` 扩展改准入制、会话数据改纯 ACP、leader 直接放弃；更正 `-p` / headless、证据失真（`*_cmd` 是死代码）、文档目标等事实；退出条件改为可机检。
 - r3：在工作区执行 Rust runtime 拆除并恢复 `/model`（当时未提交，现已本地提交，见 §10）。主要变化：新增 §10 执行记录；ADR3 推翻 r2 的「`/model` 从白名单移除」，改为经 ACP Session Config Options 恢复（Python 公布 `configOptions` 并路由 `session/set_config_option`，pager 读 `configOptions`、无该配置项时退回旧 `session/set_model`）；P1 增补「任何 runtime（含将来的 pi-rust）都必须作为独立 ACP agent 位于 ACP 之后」；§7 勾选 A.1、A.2（主体）、B.1、B.5、B.6，A.3、A.4、B.3 未做，B.2、B.4 换了做法或只做了一部分；§4.4 关于「出站 `x.ai/*` 被 `channel.rs` 丢弃」的判断被实测推翻（§10.4）。验证以消费者构建、单测、PTY 真机 `/model` 切换与 OpenRouter 真实会话为准，没有 Linux / Windows 结果，阶段 0（CI、基线、契约 / e2e）仍未做。
 - r4：把 r3 的工作区改动提交到本地分支（**未 push**），并补三件事：① 阶段 0 的 0.1 / 0.2 / 0.4——Linux CI workflow、基线执行器与清单、基线报告 `docs/baselines/tui.md`（0.4 勾选；0.1 / 0.2 因为 workflow 没在 Linux 上跑过而不勾选）；② 清掉 leader 的 UI 状态残留（A.2 的尾巴），生产行为不变，测试夹具改用生产默认值；③ 1.R3 的命名与提示语（行为不变，`stderr` 去向、优雅退出、残留进程实测仍未做）。同时把 §10.4 的 leader 残留改写为四类「不是 UI 残留」的剩余（273 行 / 80 个文件），新增 §10.6，并更正测试基线（清理 leader 时随被删代码删掉 18 个测试，10,857 → 10,839）。验证仍是 macOS 一台机器：门禁、`--workspace --tests`、8 个 suite、PTY 烟测；没有 Linux / Windows 结果。
-- r5：推送分支、开 draft PR [#7](https://github.com/zy1233/pi-python/pull/7)，并完成阶段 A 与阶段 0 的 0.1 / 0.6。① 第一次 Linux `TUI CI` 全绿后把基线转为阻塞，依赖图上限 995 → 980、告警上限 20 → 0、各 suite 设 `min_passed`；② 入口审计（0.6）按附录 A 的默认执行，A.3 删除 dashboard、白名单外的斜杠命令、agents / extensions / persona 模态、tasks / 后台 / 定时任务、subagents / workflows / goals、共享 prompt 队列、MCP / hooks / plugins / marketplace 入口、rewind / fork / jump、recap / feedback / consent、changelog、`--chat` 世界、session rename 的死链路；③ A.4 去掉各 crate 根的 `#![allow]`（消费者构建 0 告警）、`pi-shell` 的 `pub mod` 降级、删未用依赖与 8 个无人依赖的 crate、删 `cfg(feature = "local-workspace")` 代码；④ `-p` 无沙箱时拒绝运行（ADR7 的最小版本）。净效果：`tui/crates` 的 `.rs` 从 1,252,374 行降到 1,019,041 行，`Cargo.lock` 1,285 → 1,257 个包，Linux 依赖图 995 → 980。新增 §10.7 与附录 A 的 r5 结果。⑤ 收尾：PTY 烟测发现并删掉欢迎页与选择器里的死 worktree 入口（`ac1d3ff`）；手动 `release_baseline` 回填了 release 数（`zypi` 422,034,120 B，−10.3 %；冷缓存构建 1,155 s，−29.9 %；0.2 勾选）；阶段 1 开了头——`session/list` 的标题与 `updated_at`（1.P1 一半）、stdio 契约套件并修了 `session/close` / `resume` 的路由（0.3 / 1.P7 的 Python 一侧、1.P5 的一个 bug）。验证：Linux CI（`0e71894`、`cca48b0`、`ac1d3ff`）、macOS 本机、PTY。阶段 1 的其余部分和 0.5 / 0.7–0.9 未做，见 §10.7 的遗留。
+- r5：推送分支、开 draft PR [#7](https://github.com/zy1233/pi-python/pull/7)，并完成阶段 A 与阶段 0 的 0.1 / 0.6。① 第一次 Linux `TUI CI` 全绿后把基线转为阻塞，依赖图上限 995 → 980、告警上限 20 → 0、各 suite 设 `min_passed`；② 入口审计（0.6）按附录 A 的默认执行，A.3 删除 dashboard、白名单外的斜杠命令、agents / extensions / persona 模态、tasks / 后台 / 定时任务、subagents / workflows / goals、共享 prompt 队列、MCP / hooks / plugins / marketplace 入口、rewind / fork / jump、recap / feedback / consent、changelog、`--chat` 世界、session rename 的死链路；③ A.4 去掉各 crate 根的 `#![allow]`（消费者构建 0 告警）、`pi-shell` 的 `pub mod` 降级、删未用依赖与 8 个无人依赖的 crate、删 `cfg(feature = "local-workspace")` 代码；④ `-p` 无沙箱时拒绝运行（ADR7 的最小版本）。净效果：`tui/crates` 的 `.rs` 从 1,252,374 行降到 1,019,041 行，`Cargo.lock` 1,285 → 1,257 个包，Linux 依赖图 995 → 980。新增 §10.7 与附录 A 的 r5 结果。⑤ 收尾：PTY 烟测发现并删掉欢迎页与选择器里的死 worktree 入口（`ac1d3ff`）；手动 `release_baseline` 回填了 release 数（`zypi` 422,034,120 B，−10.3 %；冷缓存构建 1,155 s，−29.9 %；0.2 勾选）；阶段 1 开了头——`session/list` 的标题与 `updated_at`（1.P1 一半）、stdio 契约套件并修了 `session/close` / `resume` 的路由（0.3 / 1.P7 的 Python 一侧、1.P5 的一个 bug）、优雅退出（1.P2 完成，1.R3 ② 完成：退出 zypi 时 bash 工具进程不再残留，量到的前因后果见 §10.7）。验证：Linux CI（`0e71894`、`cca48b0`、`ac1d3ff`）、macOS 本机、PTY。阶段 1 的其余部分和 0.5 / 0.7–0.9 未做，见 §10.7 的遗留。
