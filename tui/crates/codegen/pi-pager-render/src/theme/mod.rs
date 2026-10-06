@@ -71,12 +71,16 @@ impl ThemeKind {
         }
     }
 
-    /// Human-readable display name.
+    /// Canonical persisted name (what `/theme` lists and `[ui] theme` stores).
+    ///
+    /// The two house themes are named after the product (`zypinight`,
+    /// `zypiday`). Their original names (`groknight`, `grokday`) stay valid
+    /// *input* in [`ThemeKind::from_name`], so existing configs keep loading.
     pub fn display_name(self) -> &'static str {
         match self {
-            Self::GrokNight => "groknight",
+            Self::GrokNight => "zypinight",
             Self::TokyoNight => "tokyonight",
-            Self::GrokDay => "grokday",
+            Self::GrokDay => "zypiday",
             Self::RosePineMoon => "rosepine-moon",
             Self::OscuraMidnight => "oscura-midnight",
             Self::Auto => "auto",
@@ -106,9 +110,15 @@ impl ThemeKind {
         let lower = name.to_lowercase();
         match lower.as_str() {
             "auto" | "system" => Some(Self::Auto),
-            "groknight" | "grok-night" | "dark" => Some(Self::GrokNight),
+            // `groknight` / `grokday` are the pre-rename names: accepted so a
+            // config written by an earlier build still resolves.
+            "zypinight" | "zypi-night" | "groknight" | "grok-night" | "dark" => {
+                Some(Self::GrokNight)
+            }
             "tokyonight" | "tokyo-night" | "tokyo" => Some(Self::TokyoNight),
-            "grokday" | "grok-day" | "light" | "day" => Some(Self::GrokDay),
+            "zypiday" | "zypi-day" | "grokday" | "grok-day" | "light" | "day" => {
+                Some(Self::GrokDay)
+            }
             "rosepine" | "rose-pine" | "rosepine-moon" | "rose-pine-moon" => {
                 Some(Self::RosePineMoon)
             }
@@ -140,12 +150,12 @@ pub fn canonical_name(value: &str) -> Option<&'static str> {
 }
 
 /// Human-friendly display name for a canonical theme value (e.g.
-/// `"groknight"` → `"Grok Night"`). Falls back to `value` verbatim.
+/// `"zypinight"` → `"zypi Night"`). Falls back to `value` verbatim.
 pub fn display_name_for_canonical(value: &str) -> &str {
     match value {
         "auto" => "Auto",
-        "groknight" => "Grok Night",
-        "grokday" => "Grok Day",
+        "zypinight" => "zypi Night",
+        "zypiday" => "zypi Day",
         "tokyonight" => "Tokyo Night",
         "rosepine-moon" => "Rose Pine Moon",
         other => other,
@@ -1189,11 +1199,11 @@ mod tests {
     #[test]
     fn from_name_concrete_variants_still_work() {
         assert_eq!(
-            ThemeKind::from_name("groknight"),
+            ThemeKind::from_name("zypinight"),
             Some(ThemeKind::GrokNight)
         );
         assert_eq!(ThemeKind::from_name("dark"), Some(ThemeKind::GrokNight));
-        assert_eq!(ThemeKind::from_name("grokday"), Some(ThemeKind::GrokDay));
+        assert_eq!(ThemeKind::from_name("zypiday"), Some(ThemeKind::GrokDay));
         assert_eq!(ThemeKind::from_name("light"), Some(ThemeKind::GrokDay));
         assert_eq!(
             ThemeKind::from_name("tokyonight"),
@@ -1220,12 +1230,16 @@ mod tests {
         let cases = [
             ("auto", ThemeKind::Auto),
             ("system", ThemeKind::Auto),
+            ("zypinight", ThemeKind::GrokNight),
+            ("zypi-night", ThemeKind::GrokNight),
             ("groknight", ThemeKind::GrokNight),
             ("grok-night", ThemeKind::GrokNight),
             ("dark", ThemeKind::GrokNight),
             ("tokyonight", ThemeKind::TokyoNight),
             ("tokyo-night", ThemeKind::TokyoNight),
             ("tokyo", ThemeKind::TokyoNight),
+            ("zypiday", ThemeKind::GrokDay),
+            ("zypi-day", ThemeKind::GrokDay),
             ("grokday", ThemeKind::GrokDay),
             ("grok-day", ThemeKind::GrokDay),
             ("light", ThemeKind::GrokDay),
@@ -1250,5 +1264,43 @@ mod tests {
         }
         assert_eq!("nonexistent".parse::<ThemeKind>(), Err(()));
         assert_eq!("".parse::<ThemeKind>(), Err(()));
+    }
+
+    /// The two house themes carry the product name, in what `/theme` lists
+    /// and in what the settings chooser shows.
+    #[test]
+    fn house_themes_are_named_after_the_product() {
+        assert_eq!(ThemeKind::GrokNight.display_name(), "zypinight");
+        assert_eq!(ThemeKind::GrokDay.display_name(), "zypiday");
+        assert_eq!(display_name_for_canonical("zypinight"), "zypi Night");
+        assert_eq!(display_name_for_canonical("zypiday"), "zypi Day");
+        for kind in ThemeKind::ALL {
+            let canonical = kind.display_name();
+            let label = display_name_for_canonical(canonical);
+            assert!(
+                !canonical.to_lowercase().contains("grok")
+                    && !label.to_lowercase().contains("grok"),
+                "{kind:?}: `{canonical}` / `{label}` still carry the old product name",
+            );
+        }
+    }
+
+    /// A config written before the rename (`theme = "groknight"`) still
+    /// loads, and normalises to the new canonical name.
+    #[test]
+    fn pre_rename_theme_names_still_resolve() {
+        for (old, new) in [
+            ("groknight", "zypinight"),
+            ("grok-night", "zypinight"),
+            ("GrokNight", "zypinight"),
+            ("grokday", "zypiday"),
+            ("grok-day", "zypiday"),
+        ] {
+            assert_eq!(canonical_name(old), Some(new), "`{old}` must normalise");
+        }
+        // Every canonical name round-trips through its own parser.
+        for kind in ThemeKind::ALL {
+            assert_eq!(ThemeKind::from_name(kind.display_name()), Some(*kind));
+        }
     }
 }

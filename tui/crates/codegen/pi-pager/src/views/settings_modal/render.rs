@@ -433,11 +433,14 @@ pub(super) fn render_row_list_with_search_bar(
     }
 }
 
+/// One-line tip under the settings list. It only claims what holds in this
+/// product: the file the modal persists to, which can be edited by hand. The
+/// path follows the resolved home (`~/.pi-python`, or `$PI_HOME` when set).
 pub(super) fn render_docs_footer(buf: &mut Buffer, area: Rect, theme: &Theme) {
-    const LONG: &str =
-        "Tip · Ask Grok: \"change theme to grokday\" or \"what does compact mode do?\"";
-    const SHORT: &str = "Tip · Ask Grok to change a setting";
-    let text = modal_window::fit_tip_line(&[LONG, SHORT], area.width as usize);
+    let config = crate::util::display_user_grok_path("config.toml");
+    let long = format!("Tip · Most settings are saved to {config}");
+    let short = format!("Tip · See {config}");
+    let text = modal_window::fit_tip_line(&[long.as_str(), short.as_str()], area.width as usize);
     modal_window::render_centered_tip_footer(buf, area, theme, text.as_ref());
 }
 

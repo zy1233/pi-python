@@ -46,13 +46,13 @@ const THEME_CHOICES: &[EnumChoice] = &[
         description: "Follow system dark/light appearance.",
     },
     EnumChoice {
-        canonical: "groknight",
-        display: "Grok Night",
+        canonical: "zypinight",
+        display: "zypi Night",
         description: "Neutral dark with magenta accent.",
     },
     EnumChoice {
-        canonical: "grokday",
-        display: "Grok Day",
+        canonical: "zypiday",
+        display: "zypi Day",
         description: "Light theme for bright environments.",
     },
     EnumChoice {
@@ -453,13 +453,13 @@ const VOICE_STT_LANGUAGE_CHOICES: &[EnumChoice] = &[
 /// the user can pair any theme with any system-appearance bucket.
 const CONCRETE_THEME_CHOICES: &[EnumChoice] = &[
     EnumChoice {
-        canonical: "groknight",
-        display: "Grok Night",
+        canonical: "zypinight",
+        display: "zypi Night",
         description: "Neutral dark with magenta accent.",
     },
     EnumChoice {
-        canonical: "grokday",
-        display: "Grok Day",
+        canonical: "zypiday",
+        display: "zypi Day",
         description: "Light theme for bright environments.",
     },
     EnumChoice {
@@ -523,7 +523,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
             label: "Default screen mode",
             description: "How plain zypi opens next time: Fullscreen (default when unset) or \
                           Minimal. Writes [ui] screen_mode in config.toml. Restart required. \
-                          Switch this session only with /minimal or /fullscreen.",
+                          Switch this session only by starting zypi with --minimal or --fullscreen.",
             keywords: &[
                 "screen",
                 "mode",
@@ -677,8 +677,8 @@ pub fn default_settings() -> Vec<SettingMeta> {
                 "light",
             ],
             kind: SettingKind::Enum {
-                // `Option<String>` — `None` resolved to "groknight".
-                default: "groknight",
+                // `Option<String>` — `None` resolved to "zypinight".
+                default: "zypinight",
                 choices: THEME_CHOICES,
                 supports_preview: true,
             },
@@ -693,8 +693,8 @@ pub fn default_settings() -> Vec<SettingMeta> {
             description: "Theme to use when the system is in dark mode (only with theme=auto).",
             keywords: &["auto", "dark", "theme", "system", "appearance", "night"],
             kind: SettingKind::Enum {
-                // `Option<String>` — `None` falls back to "groknight".
-                default: "groknight",
+                // `Option<String>` — `None` falls back to "zypinight".
+                default: "zypinight",
                 choices: CONCRETE_THEME_CHOICES,
                 supports_preview: true,
             },
@@ -709,8 +709,8 @@ pub fn default_settings() -> Vec<SettingMeta> {
             description: "Theme to use when the system is in light mode (only with theme=auto).",
             keywords: &["auto", "light", "theme", "system", "appearance", "day"],
             kind: SettingKind::Enum {
-                // `Option<String>` — `None` falls back to "grokday".
-                default: "grokday",
+                // `Option<String>` — `None` falls back to "zypiday".
+                default: "zypiday",
                 choices: CONCRETE_THEME_CHOICES,
                 supports_preview: true,
             },
@@ -1367,7 +1367,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
             category: SettingCategory::Editor,
             owner: SettingOwner::Shell,
             label: "Voice language",
-            description: "Speech-to-text language for voice dictation (Grok STT). \
+            description: "Speech-to-text language for voice dictation. \
                           English by default; System uses your locale when supported. \
                           Sets formatting language for numbers and currencies.",
             keywords: &["voice", "language", "locale", "dictation", "stt", "speech"],
@@ -1465,7 +1465,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
             category: SettingCategory::Advanced,
             owner: SettingOwner::Shell,
             label: "SSH wrap",
-            description: "Show a `/doctor` tip when an SSH session is not using `zypi wrap`.",
+            description: "Show a `zypi doctor` tip when an SSH session is not using `zypi wrap`.",
             keywords: &[
                 "ssh",
                 "wrap",

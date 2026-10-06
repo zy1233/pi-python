@@ -551,7 +551,7 @@ fn deep_link_preview_esc_closes_modal_and_forwards_revert_action() {
     );
     match outcome {
         InputOutcome::Action(Action::PreviewTheme(name)) => {
-            assert_eq!(name, "groknight");
+            assert_eq!(name, "zypinight");
         }
         other => panic!("expected Action(PreviewTheme), got {other:?}"),
     }
@@ -2631,12 +2631,12 @@ fn dispatch_cycle_mode_refreshes_open_modal_snapshot() {
         "current_value_for must read the refreshed snapshot",
     );
 }
-/// `dispatch(Action::SetTheme("grokday"), &mut app)` emits
+/// `dispatch(Action::SetTheme("zypiday"), &mut app)` emits
 /// exactly one `Effect::PersistSetting`, mutates
 /// `app.current_ui.theme`, fires a toast, and toggles AUTO_MODE
 /// off (kind is concrete).
 ///
-/// Note: we persist `grokday` (a non-truecolor theme) here
+/// Note: we persist `zypiday` (a non-truecolor theme) here
 /// because `Effect::PersistSetting`'s payload is `&'static str`
 /// from the registry's canonical table — the persisted CANONICAL
 /// is what we're asserting, NOT the live theme cache (which
@@ -2651,7 +2651,7 @@ fn set_theme_emits_persist_setting_with_correct_payload() {
         let mut app = test_app_with_agent();
         assert_eq!(app.current_ui.theme, None);
         crate::theme::cache::set(crate::theme::ThemeKind::GrokNight);
-        let effects = dispatch(Action::SetTheme("grokday".into()), &mut app);
+        let effects = dispatch(Action::SetTheme("zypiday".into()), &mut app);
         assert_eq!(effects.len(), 1);
         match &effects[0] {
             Effect::PersistSetting {
@@ -2660,12 +2660,12 @@ fn set_theme_emits_persist_setting_with_correct_payload() {
                 rollback_value,
             } => {
                 assert_eq!(*key, "theme");
-                assert_eq!(*value, SettingValue::Enum("grokday"));
-                assert_eq!(*rollback_value, SettingValue::Enum("groknight"));
+                assert_eq!(*value, SettingValue::Enum("zypiday"));
+                assert_eq!(*rollback_value, SettingValue::Enum("zypinight"));
             }
             other => panic!("expected PersistSetting, got {other:?}"),
         }
-        assert_eq!(app.current_ui.theme.as_deref(), Some("grokday"));
+        assert_eq!(app.current_ui.theme.as_deref(), Some("zypiday"));
         assert!(
             !crate::theme::cache::is_auto_mode(),
             "concrete theme commit must disable AUTO_MODE",
@@ -2673,7 +2673,7 @@ fn set_theme_emits_persist_setting_with_correct_payload() {
     });
 }
 /// Same payload contract as `set_theme_emits_persist_setting_with_correct_payload`
-/// for the auto-dark sibling. Uses `grokday` to avoid the
+/// for the auto-dark sibling. Uses `zypiday` to avoid the
 /// `clamp_to_terminal` ambiguity in non-truecolor test envs;
 /// `apply_kind` doesn't fire here anyway (parent theme is not
 /// auto by default) but using a non-truecolor canonical keeps
@@ -2683,7 +2683,7 @@ fn set_auto_dark_theme_emits_persist_setting_with_correct_payload() {
     use crate::settings::SettingValue;
     with_theme_test_env(|| {
         let mut app = test_app_with_agent();
-        let effects = dispatch(Action::SetAutoDarkTheme("grokday".into()), &mut app);
+        let effects = dispatch(Action::SetAutoDarkTheme("zypiday".into()), &mut app);
         assert_eq!(effects.len(), 1);
         match &effects[0] {
             Effect::PersistSetting {
@@ -2692,12 +2692,12 @@ fn set_auto_dark_theme_emits_persist_setting_with_correct_payload() {
                 rollback_value,
             } => {
                 assert_eq!(*key, "auto_dark_theme");
-                assert_eq!(*value, SettingValue::Enum("grokday"));
-                assert_eq!(*rollback_value, SettingValue::Enum("groknight"));
+                assert_eq!(*value, SettingValue::Enum("zypiday"));
+                assert_eq!(*rollback_value, SettingValue::Enum("zypinight"));
             }
             other => panic!("expected PersistSetting, got {other:?}"),
         }
-        assert_eq!(app.current_ui.auto_dark_theme.as_deref(), Some("grokday"));
+        assert_eq!(app.current_ui.auto_dark_theme.as_deref(), Some("zypiday"));
     });
 }
 #[test]
@@ -2705,7 +2705,7 @@ fn set_auto_light_theme_emits_persist_setting_with_correct_payload() {
     use crate::settings::SettingValue;
     with_theme_test_env(|| {
         let mut app = test_app_with_agent();
-        let effects = dispatch(Action::SetAutoLightTheme("groknight".into()), &mut app);
+        let effects = dispatch(Action::SetAutoLightTheme("zypinight".into()), &mut app);
         assert_eq!(effects.len(), 1);
         match &effects[0] {
             Effect::PersistSetting {
@@ -2714,14 +2714,14 @@ fn set_auto_light_theme_emits_persist_setting_with_correct_payload() {
                 rollback_value,
             } => {
                 assert_eq!(*key, "auto_light_theme");
-                assert_eq!(*value, SettingValue::Enum("groknight"));
-                assert_eq!(*rollback_value, SettingValue::Enum("grokday"));
+                assert_eq!(*value, SettingValue::Enum("zypinight"));
+                assert_eq!(*rollback_value, SettingValue::Enum("zypiday"));
             }
             other => panic!("expected PersistSetting, got {other:?}"),
         }
         assert_eq!(
             app.current_ui.auto_light_theme.as_deref(),
-            Some("groknight"),
+            Some("zypinight"),
         );
     });
 }
@@ -2774,11 +2774,11 @@ fn preview_auto_light_theme_emits_no_persist_and_no_current_ui_mutation() {
 /// Auto-theme commit applies the live theme **only** when
 /// `theme="auto"` AND the system is in the matching mode.
 ///
-/// Scenario: `theme="groknight"` (concrete) + system=Dark. User
-/// commits `auto_dark_theme="grokday"`. The setting is dormant
+/// Scenario: `theme="zypinight"` (concrete) + system=Dark. User
+/// commits `auto_dark_theme="zypiday"`. The setting is dormant
 /// (parent theme is concrete, not auto), so the live display
 /// must stay on GrokNight even though we're committing a
-/// different theme. Uses `grokday` to avoid `clamp_to_terminal`
+/// different theme. Uses `zypiday` to avoid `clamp_to_terminal`
 /// ambiguity in non-truecolor envs.
 #[test]
 fn set_auto_dark_theme_does_not_apply_when_theme_is_not_auto() {
@@ -2787,18 +2787,18 @@ fn set_auto_dark_theme_does_not_apply_when_theme_is_not_auto() {
             crate::theme::system_appearance::SystemAppearance::Dark,
         ));
         let mut app = test_app_with_agent();
-        let _ = dispatch(Action::SetTheme("groknight".into()), &mut app);
+        let _ = dispatch(Action::SetTheme("zypinight".into()), &mut app);
         assert_eq!(
             crate::theme::cache::current_kind(),
             crate::theme::ThemeKind::GrokNight,
         );
-        let _ = dispatch(Action::SetAutoDarkTheme("grokday".into()), &mut app);
+        let _ = dispatch(Action::SetAutoDarkTheme("zypiday".into()), &mut app);
         assert_eq!(
             crate::theme::cache::current_kind(),
             crate::theme::ThemeKind::GrokNight,
             "auto_dark_theme commit must NOT change live display when theme is not auto",
         );
-        assert_eq!(app.current_ui.auto_dark_theme.as_deref(), Some("grokday"));
+        assert_eq!(app.current_ui.auto_dark_theme.as_deref(), Some("zypiday"));
     });
 }
 /// Auto-theme commit DOES apply the live theme when both
@@ -2824,7 +2824,7 @@ fn set_auto_dark_theme_applies_when_theme_is_auto_and_system_is_dark() {
             crate::theme::cache::current_kind(),
             crate::theme::ThemeKind::GrokNight,
         );
-        let _ = dispatch(Action::SetAutoDarkTheme("grokday".into()), &mut app);
+        let _ = dispatch(Action::SetAutoDarkTheme("zypiday".into()), &mut app);
         assert_eq!(
             crate::theme::cache::current_kind(),
             crate::theme::ThemeKind::GrokDay,
@@ -2834,7 +2834,7 @@ fn set_auto_dark_theme_applies_when_theme_is_auto_and_system_is_dark() {
 }
 /// Auto-theme commit does NOT apply when system is in the
 /// non-matching mode (auto_dark_theme + system=Light).
-/// Uses `groknight` for the auto_dark_theme
+/// Uses `zypinight` for the auto_dark_theme
 /// value to avoid `clamp_to_terminal` ambiguity (we want a
 /// concrete kind that's clearly different from GrokDay, the
 /// active resolved theme).
@@ -2850,18 +2850,18 @@ fn set_auto_dark_theme_does_not_apply_when_system_is_light() {
             crate::theme::cache::current_kind(),
             crate::theme::ThemeKind::GrokDay,
         );
-        let _ = dispatch(Action::SetAutoDarkTheme("groknight".into()), &mut app);
+        let _ = dispatch(Action::SetAutoDarkTheme("zypinight".into()), &mut app);
         assert_eq!(
             crate::theme::cache::current_kind(),
             crate::theme::ThemeKind::GrokDay,
             "auto_dark_theme commit must NOT change live display when system=Light",
         );
-        assert_eq!(app.current_ui.auto_dark_theme.as_deref(), Some("groknight"),);
+        assert_eq!(app.current_ui.auto_dark_theme.as_deref(), Some("zypinight"),);
     });
 }
 /// Symmetric to the dark test: `set_auto_light_theme` applies only
 /// when theme=auto + system=Light. Uses a non-truecolor theme
-/// (`groknight`) for the same clamp reason as the dark variant.
+/// (`zypinight`) for the same clamp reason as the dark variant.
 #[test]
 fn set_auto_light_theme_applies_when_theme_is_auto_and_system_is_light() {
     with_theme_test_env(|| {
@@ -2874,7 +2874,7 @@ fn set_auto_light_theme_applies_when_theme_is_auto_and_system_is_light() {
             crate::theme::cache::current_kind(),
             crate::theme::ThemeKind::GrokDay,
         );
-        let _ = dispatch(Action::SetAutoLightTheme("groknight".into()), &mut app);
+        let _ = dispatch(Action::SetAutoLightTheme("zypinight".into()), &mut app);
         assert_eq!(
             crate::theme::cache::current_kind(),
             crate::theme::ThemeKind::GrokNight,
@@ -2951,15 +2951,15 @@ fn set_auto_light_theme_rejects_auto_value() {
 fn set_theme_toast_format_uses_display_name() {
     with_theme_test_env(|| {
         let mut app = test_app_with_agent();
-        let _ = dispatch(Action::SetTheme("grokday".into()), &mut app);
+        let _ = dispatch(Action::SetTheme("zypiday".into()), &mut app);
         let toast = read_toast(&app);
         assert!(
             toast.contains("Theme"),
             "toast must contain label, got: {toast:?}",
         );
         assert!(
-            toast.contains("Grok Day"),
-            "toast must use display name `Grok Day`, not canonical `grokday`, got: {toast:?}",
+            toast.contains("zypi Day"),
+            "toast must use display name `zypi Day`, not canonical `zypiday`, got: {toast:?}",
         );
         assert!(toast.contains('\u{2713}'), "toast must contain the ✓ glyph");
     });
@@ -2968,10 +2968,10 @@ fn set_theme_toast_format_uses_display_name() {
 fn set_auto_dark_theme_toast_format_uses_display_name() {
     with_theme_test_env(|| {
         let mut app = test_app_with_agent();
-        let _ = dispatch(Action::SetAutoDarkTheme("grokday".into()), &mut app);
+        let _ = dispatch(Action::SetAutoDarkTheme("zypiday".into()), &mut app);
         let toast = read_toast(&app);
         assert!(toast.contains("Auto dark theme"));
-        assert!(toast.contains("Grok Day"));
+        assert!(toast.contains("zypi Day"));
         assert!(toast.contains('\u{2713}'));
     });
 }
@@ -2979,17 +2979,17 @@ fn set_auto_dark_theme_toast_format_uses_display_name() {
 fn set_auto_light_theme_toast_format_uses_display_name() {
     with_theme_test_env(|| {
         let mut app = test_app_with_agent();
-        let _ = dispatch(Action::SetAutoLightTheme("groknight".into()), &mut app);
+        let _ = dispatch(Action::SetAutoLightTheme("zypinight".into()), &mut app);
         let toast = read_toast(&app);
         assert!(toast.contains("Auto light theme"));
-        assert!(toast.contains("Grok Night"));
+        assert!(toast.contains("zypi Night"));
     });
 }
 /// `apply_setting_rollback` for theme keys: a failed persist
 /// reverts `app.current_ui.theme` AND the live cache (mirror of
 /// `rollback_known_key_reverts_cache_and_no_effect`).
 ///
-/// Uses non-truecolor themes (`grokday` ↔ `groknight`) to avoid
+/// Uses non-truecolor themes (`zypiday` ↔ `zypinight`) to avoid
 /// the `clamp_to_terminal` interaction in test environments that
 /// don't report truecolor support.
 #[test]
@@ -2997,8 +2997,8 @@ fn rollback_theme_reverts_current_ui_and_cache() {
     use crate::settings::SettingValue;
     with_theme_test_env(|| {
         let mut app = test_app_with_agent();
-        let _ = dispatch(Action::SetTheme("grokday".into()), &mut app);
-        assert_eq!(app.current_ui.theme.as_deref(), Some("grokday"));
+        let _ = dispatch(Action::SetTheme("zypiday".into()), &mut app);
+        assert_eq!(app.current_ui.theme.as_deref(), Some("zypiday"));
         assert_eq!(
             crate::theme::cache::current_kind(),
             crate::theme::ThemeKind::GrokDay,
@@ -3006,14 +3006,14 @@ fn rollback_theme_reverts_current_ui_and_cache() {
         let _ = dispatch(
             Action::TaskComplete(TaskResult::SettingPersistFailed {
                 key: "theme",
-                rollback_value: SettingValue::Enum("groknight"),
+                rollback_value: SettingValue::Enum("zypinight"),
                 error: "disk full".into(),
             }),
             &mut app,
         );
         assert_eq!(
             app.current_ui.theme.as_deref(),
-            Some("groknight"),
+            Some("zypinight"),
             "rollback must update app.current_ui.theme",
         );
         assert_eq!(
@@ -3028,17 +3028,17 @@ fn rollback_auto_dark_theme_reverts_current_ui() {
     use crate::settings::SettingValue;
     with_theme_test_env(|| {
         let mut app = test_app_with_agent();
-        let _ = dispatch(Action::SetAutoDarkTheme("grokday".into()), &mut app);
-        assert_eq!(app.current_ui.auto_dark_theme.as_deref(), Some("grokday"));
+        let _ = dispatch(Action::SetAutoDarkTheme("zypiday".into()), &mut app);
+        assert_eq!(app.current_ui.auto_dark_theme.as_deref(), Some("zypiday"));
         let _ = dispatch(
             Action::TaskComplete(TaskResult::SettingPersistFailed {
                 key: "auto_dark_theme",
-                rollback_value: SettingValue::Enum("groknight"),
+                rollback_value: SettingValue::Enum("zypinight"),
                 error: "disk full".into(),
             }),
             &mut app,
         );
-        assert_eq!(app.current_ui.auto_dark_theme.as_deref(), Some("groknight"),);
+        assert_eq!(app.current_ui.auto_dark_theme.as_deref(), Some("zypinight"),);
     });
 }
 #[test]
@@ -3046,20 +3046,20 @@ fn rollback_auto_light_theme_reverts_current_ui() {
     use crate::settings::SettingValue;
     with_theme_test_env(|| {
         let mut app = test_app_with_agent();
-        let _ = dispatch(Action::SetAutoLightTheme("groknight".into()), &mut app);
+        let _ = dispatch(Action::SetAutoLightTheme("zypinight".into()), &mut app);
         assert_eq!(
             app.current_ui.auto_light_theme.as_deref(),
-            Some("groknight"),
+            Some("zypinight"),
         );
         let _ = dispatch(
             Action::TaskComplete(TaskResult::SettingPersistFailed {
                 key: "auto_light_theme",
-                rollback_value: SettingValue::Enum("grokday"),
+                rollback_value: SettingValue::Enum("zypiday"),
                 error: "disk full".into(),
             }),
             &mut app,
         );
-        assert_eq!(app.current_ui.auto_light_theme.as_deref(), Some("grokday"));
+        assert_eq!(app.current_ui.auto_light_theme.as_deref(), Some("zypiday"));
     });
 }
 /// Edge case — if the rollback value is
@@ -3074,8 +3074,8 @@ fn rollback_auto_dark_theme_with_auto_value_clears_to_none() {
     use crate::settings::SettingValue;
     with_theme_test_env(|| {
         let mut app = test_app_with_agent();
-        let _ = dispatch(Action::SetAutoDarkTheme("grokday".into()), &mut app);
-        assert_eq!(app.current_ui.auto_dark_theme.as_deref(), Some("grokday"));
+        let _ = dispatch(Action::SetAutoDarkTheme("zypiday".into()), &mut app);
+        assert_eq!(app.current_ui.auto_dark_theme.as_deref(), Some("zypiday"));
         let _ = dispatch(
             Action::TaskComplete(TaskResult::SettingPersistFailed {
                 key: "auto_dark_theme",
@@ -3096,10 +3096,10 @@ fn rollback_auto_light_theme_with_auto_value_clears_to_none() {
     use crate::settings::SettingValue;
     with_theme_test_env(|| {
         let mut app = test_app_with_agent();
-        let _ = dispatch(Action::SetAutoLightTheme("groknight".into()), &mut app);
+        let _ = dispatch(Action::SetAutoLightTheme("zypinight".into()), &mut app);
         assert_eq!(
             app.current_ui.auto_light_theme.as_deref(),
-            Some("groknight"),
+            Some("zypinight"),
         );
         let _ = dispatch(
             Action::TaskComplete(TaskResult::SettingPersistFailed {

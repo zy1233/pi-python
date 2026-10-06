@@ -1946,9 +1946,9 @@ fn defaults_round_trip_through_registry() {
             "remember_tool_approvals" => SettingValue::Bool(true),
             "toolset.ask_user_question.timeout_enabled" => SettingValue::Bool(true),
             "keep_text_selection" => SettingValue::Enum("flash"),
-            "theme" => SettingValue::Enum("groknight"),
-            "auto_dark_theme" => SettingValue::Enum("groknight"),
-            "auto_light_theme" => SettingValue::Enum("grokday"),
+            "theme" => SettingValue::Enum("zypinight"),
+            "auto_dark_theme" => SettingValue::Enum("zypinight"),
+            "auto_light_theme" => SettingValue::Enum("zypiday"),
             "render_mermaid" => SettingValue::Enum("auto"),
             "multiline_mode" => SettingValue::Bool(false),
             "permission_mode" => SettingValue::Enum("ask"),
@@ -3556,11 +3556,11 @@ fn reset_overlay_dims_all_rows_except_target() {
 }
 
 /// User-feedback follow-up: the settings modal renders a 1-line
-/// "Ask Grok" tip footer at the bottom of the content area in
-/// Browse, FilterFocused, and PickingEnum modes (always-on tip).
-/// The footer is suppressed in `EditingValue` because the editor
-/// needs every line for input + validation. This pins the
-/// discoverability contract.
+/// tip footer (where the config file lives) at the bottom of the
+/// content area in Browse, FilterFocused, and PickingEnum modes
+/// (always-on tip). The footer is suppressed in `EditingValue`
+/// because the editor needs every line for input + validation. This
+/// pins the discoverability contract.
 #[test]
 fn docs_footer_renders_for_browse_and_picker() {
     use ratatui::buffer::Buffer;
@@ -3590,13 +3590,18 @@ fn docs_footer_renders_for_browse_and_picker() {
             all_text.push('\n');
         }
         assert!(
-            all_text.contains("Ask Grok"),
-            "[{fixture_label}] docs footer (`Ask Grok`) must appear in the rendered modal:\n\
-             {all_text}"
+            all_text.contains("Tip · Most settings are saved to"),
+            "[{fixture_label}] docs footer (`Tip · Most settings are saved to`) must appear in \
+             the rendered modal:\n{all_text}"
         );
         assert!(
-            all_text.contains("change theme to grokday"),
-            "[{fixture_label}] docs footer must include the example phrasing"
+            all_text.contains("config.toml"),
+            "[{fixture_label}] docs footer must name the config file"
+        );
+        assert!(
+            !all_text.to_lowercase().contains("grok"),
+            "[{fixture_label}] the settings modal must not carry the old product name:\n\
+             {all_text}"
         );
     }
 }
