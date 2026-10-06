@@ -30,17 +30,25 @@ _PROMPT_CLI_FLAG_NAMES = (
 )
 
 
+# SIGHUP is what a closing terminal sends to its foreground process group, which includes the
+# agent when the TUI is started from a shell. Windows has neither signal handlers nor SIGHUP.
+_STOP_SIGNALS = tuple(
+    getattr(signal, name) for name in ("SIGTERM", "SIGHUP") if hasattr(signal, name)
+)
+
+
 async def serve(agent: PiAcpAgent) -> None:
-    """Serve ``agent`` over stdio until stdin closes or the process gets SIGTERM."""
-    # SIGTERM stops the agent the way EOF on stdin does: the main task is cancelled, so
+    """Serve ``agent`` over stdio until stdin closes or the process is told to stop."""
+    # A stop signal ends the agent the way EOF on stdin does: the main task is cancelled, so
     # `asyncio.run` cancels the in-flight turns and each running tool's process group is
-    # reaped. Without a handler SIGTERM ends the process at once and its tools outlive it.
+    # reaped. Without a handler the signal ends the process at once and its tools outlive it.
     # (SIGKILL cannot be handled; there the tools are orphaned.)
     main_task = asyncio.current_task()
     if main_task is not None:
-        # Windows has no `add_signal_handler`; there the agent ends on EOF only.
-        with contextlib.suppress(NotImplementedError, RuntimeError):
-            asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, main_task.cancel)
+        loop = asyncio.get_running_loop()
+        for stop_signal in _STOP_SIGNALS:
+            with contextlib.suppress(NotImplementedError, RuntimeError):
+                loop.add_signal_handler(stop_signal, main_task.cancel)
     # `session/close` and `session/resume` are unstable in the SDK and answered with
     # "Method not found" unless this flag is set, although `initialize` advertises both.
     with contextlib.suppress(asyncio.CancelledError):

@@ -1,9 +1,10 @@
 """Stopping the stdio agent must reap the tools it is running.
 
-A client that closes the agent's stdin, or sends it SIGTERM, in the middle of a ``bash`` call must
-not leave that process behind. The Rust TUI relies on this: it closes stdin first and kills the
-agent only if it does not exit by itself. SIGKILL cannot be handled, so a tool outlives an agent
-that was killed that way; that case is deliberately not tested.
+A client that closes the agent's stdin, or sends it SIGTERM (or SIGHUP, which a closing terminal
+sends), in the middle of a ``bash`` call must not leave that process behind. The Rust TUI relies
+on this: it closes stdin first and kills the agent only if it does not exit by itself. SIGKILL
+cannot be handled, so a tool outlives an agent that was killed that way; that case is
+deliberately not tested.
 
 The agent under test is ``_tool_agent.py`` (the real stdio loop with a scripted LLM turn).
 """
@@ -114,9 +115,10 @@ async def test_closing_stdin_stops_the_agent_and_reaps_the_running_tool(tmp_path
         await _assert_tool_reaped(tool_pid)
 
 
-async def test_sigterm_stops_the_agent_and_reaps_the_running_tool(tmp_path):
+@pytest.mark.parametrize("stop_signal", ["SIGTERM", "SIGHUP"])
+async def test_stop_signals_stop_the_agent_and_reap_the_running_tool(tmp_path, stop_signal):
     async with agent_running_a_tool(tmp_path) as (process, tool_pid):
-        process.send_signal(signal.SIGTERM)
+        process.send_signal(getattr(signal, stop_signal))
         await asyncio.wait_for(process.wait(), EXIT_TIMEOUT)
         assert process.returncode == 0
         await _assert_tool_reaped(tool_pid)
