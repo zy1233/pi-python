@@ -22,22 +22,25 @@ pub fn pager_toml_path() -> PathBuf {
     grok_home().join("pager.toml")
 }
 
-/// `~/.grok` or `$GROK_HOME`, decided by the resolved home rather than by
-/// whether `GROK_HOME` is set in the environment.
+/// `~/.pi-python` or `$PI_HOME`, decided by the resolved home rather than by
+/// whether `PI_HOME` is set in the environment.
 pub fn display_grok_home_prefix() -> String {
     display_grok_home_prefix_for(&grok_home())
 }
 
+/// The label the zypi home goes by in messages. It must name the directory
+/// that is really used (`<home>/.pi-python`, see `pi_home`), because users
+/// are told to open files under it.
 pub fn display_grok_home_prefix_for(home: &Path) -> String {
     let default = pi_config::default_grok_home();
     if home == default || home == dunce::canonicalize(&default).unwrap_or(default) {
-        "~/.grok".to_string()
+        "~/.pi-python".to_string()
     } else {
-        "$GROK_HOME".to_string()
+        "$PI_HOME".to_string()
     }
 }
 
-/// User-facing path under [`grok_home()`], e.g. ``~/.grok/config.toml``.
+/// User-facing path under [`grok_home()`], e.g. ``~/.pi-python/config.toml``.
 pub fn display_user_grok_path(relative: impl AsRef<Path>) -> String {
     display_user_grok_path_for(&grok_home(), relative)
 }
@@ -426,30 +429,49 @@ mod tests {
 
     #[test]
     fn display_grok_home_prefix_default_install() {
-        if std::env::var("GROK_HOME").is_ok() {
+        if std::env::var("PI_HOME").is_ok() || std::env::var("GROK_HOME").is_ok() {
             return;
         }
-        assert_eq!(display_grok_home_prefix(), "~/.grok");
+        assert_eq!(display_grok_home_prefix(), "~/.pi-python");
     }
 
     #[test]
     fn display_user_grok_path_joins_relative() {
         let path = display_user_grok_path("config.toml");
         assert!(path.ends_with("/config.toml") || path.ends_with("\\config.toml"));
-        assert!(path.contains(".grok") || path.contains("$GROK_HOME"));
+        assert!(path.contains(".pi-python") || path.contains("$PI_HOME"));
     }
 
     #[test]
     fn display_user_grok_path_for_custom_home_uses_override_label() {
-        let custom = std::env::temp_dir().join("grok-home-display-regression");
+        let custom = std::env::temp_dir().join("pi-home-display-regression");
         assert_eq!(
             display_user_grok_path_for(&custom, "config.toml"),
-            "$GROK_HOME/config.toml"
+            "$PI_HOME/config.toml"
         );
         assert_eq!(
             display_user_grok_path_for(&custom, "sandbox.toml"),
-            "$GROK_HOME/sandbox.toml"
+            "$PI_HOME/sandbox.toml"
         );
+    }
+
+    /// The label is shown to users as "open this file", so it has to be the
+    /// directory the home really is, not the one the fork was derived from.
+    #[test]
+    fn home_labels_name_the_real_home_directory() {
+        let default = pi_config::default_grok_home();
+        assert!(default.ends_with(".pi-python"));
+        assert_eq!(display_grok_home_prefix_for(&default), "~/.pi-python");
+        assert_eq!(
+            display_user_grok_path_for(&default, "config.toml"),
+            "~/.pi-python/config.toml"
+        );
+        for label in [
+            display_grok_home_prefix_for(&default),
+            display_grok_home_prefix_for(&std::env::temp_dir().join("elsewhere")),
+        ] {
+            assert!(!label.to_lowercase().contains("grok"), "{label}");
+        }
     }
 
     #[test]

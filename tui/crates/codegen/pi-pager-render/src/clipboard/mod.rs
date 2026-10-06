@@ -35,7 +35,7 @@ fn is_container_no_display() -> bool {
 
 /// Cached result of the "an upstream OSC 52 sink is capturing our output" check.
 ///
-/// `grok wrap` runs a command inside a local PTY, scans its output for OSC 52
+/// `zypi wrap` runs a command inside a local PTY, scans its output for OSC 52
 /// clipboard sequences, and writes their payload to the *real* (local) system
 /// clipboard (see `pi-pager`'s `pty_wrap` module). It advertises this to
 /// the wrapped program via an environment variable so the
@@ -164,7 +164,7 @@ fn resolve_clipboard_route_with(ctx: &TerminalContext, opts: ClipboardRouteOpts)
     // Linux: always emit OSC 52 as a safety net. This matches other
     // terminal agent CLIs which emit OSC 52 on every copy.
     // macOS/Windows: only in tmux/SSH/container contexts, or when an
-    // upstream `grok wrap` sink is capturing our output and will forward
+    // upstream `zypi wrap` sink is capturing our output and will forward
     // the sequence to the real clipboard.
     // `GROK_CLIPBOARD_NO_OSC52` wins over every automatic path.
     let osc52 = !opts.no_osc52
@@ -375,12 +375,12 @@ impl ClipboardFeedback {
             Self::CopiedOscContainer => "Copied via OSC 52 from the container.",
             Self::CopiedOscRemote => "Copied via OSC 52.",
             Self::UnverifiedOscRemote | Self::UnverifiedOscContainer => {
-                "Copy sent. If paste fails, use grok wrap or /minimal."
+                "Copy sent. If paste fails, use zypi wrap or --minimal."
             }
             Self::VsCodeSshNonAscii => {
-                "Copied. VS Code over SSH may garble non-ASCII; use /minimal if needed."
+                "Copied. VS Code over SSH may garble non-ASCII; use --minimal if needed."
             }
-            Self::FailedRemote | Self::Failed => "Copy failed. Try /doctor or /minimal.",
+            Self::FailedRemote | Self::Failed => "Copy failed. Try zypi doctor or --minimal.",
         }
     }
 
@@ -644,7 +644,7 @@ fn resolve_delivery(
 /// (Claude Code parity: every copy lands in a file too).
 ///
 /// The file is the recovery path for terminals that cannot reach the local
-/// clipboard over SSH (notably Apple Terminal without `grok wrap`); a failed
+/// clipboard over SSH (notably Apple Terminal without `zypi wrap`); a failed
 /// file write never fails a copy whose clipboard leg succeeded.
 pub fn copy_text_or_file(text: &str) -> CopyDelivery {
     let clipboard = copy_text(text);
@@ -1896,7 +1896,7 @@ mod tests {
         );
         assert!(
             on.osc52,
-            "grok wrap sink must emit OSC 52 so the local PTY can intercept it"
+            "zypi wrap sink must emit OSC 52 so the local PTY can intercept it"
         );
         let killed = resolve_clipboard_route_with(
             &plain_terminal_ctx(),
@@ -2146,35 +2146,35 @@ mod tests {
             (
                 ClipboardFeedback::UnverifiedOscRemote,
                 ClipboardDelivery::Unverified,
-                "Copy sent. If paste fails, use grok wrap or /minimal.",
+                "Copy sent. If paste fails, use zypi wrap or --minimal.",
                 "unverified_osc_remote",
                 120,
             ),
             (
                 ClipboardFeedback::UnverifiedOscContainer,
                 ClipboardDelivery::Unverified,
-                "Copy sent. If paste fails, use grok wrap or /minimal.",
+                "Copy sent. If paste fails, use zypi wrap or --minimal.",
                 "unverified_osc_container",
                 120,
             ),
             (
                 ClipboardFeedback::VsCodeSshNonAscii,
                 ClipboardDelivery::Confirmed,
-                "Copied. VS Code over SSH may garble non-ASCII; use /minimal if needed.",
+                "Copied. VS Code over SSH may garble non-ASCII; use --minimal if needed.",
                 "vs_code_ssh_non_ascii",
                 120,
             ),
             (
                 ClipboardFeedback::FailedRemote,
                 ClipboardDelivery::Failed,
-                "Copy failed. Try /doctor or /minimal.",
+                "Copy failed. Try zypi doctor or --minimal.",
                 "failed_remote",
                 120,
             ),
             (
                 ClipboardFeedback::Failed,
                 ClipboardDelivery::Failed,
-                "Copy failed. Try /doctor or /minimal.",
+                "Copy failed. Try zypi doctor or --minimal.",
                 "failed",
                 120,
             ),
@@ -2193,6 +2193,32 @@ mod tests {
                 message.starts_with(result.message_lead),
                 "message_lead must prefix message for {feedback:?}"
             );
+        }
+    }
+
+    /// Toast guidance may only point at things zypi has: `zypi wrap`,
+    /// `zypi doctor`, the `--minimal` flag. There is no `/minimal`, `/doctor`
+    /// or `/copy` slash command and no `grok` binary.
+    #[test]
+    fn toast_guidance_names_only_real_commands() {
+        for feedback in [
+            ClipboardFeedback::Copied,
+            ClipboardFeedback::CopiedTmux,
+            ClipboardFeedback::CopiedOscContainer,
+            ClipboardFeedback::CopiedOscRemote,
+            ClipboardFeedback::UnverifiedOscRemote,
+            ClipboardFeedback::UnverifiedOscContainer,
+            ClipboardFeedback::VsCodeSshNonAscii,
+            ClipboardFeedback::FailedRemote,
+            ClipboardFeedback::Failed,
+        ] {
+            let message = feedback.message();
+            for stale in ["grok", "Grok", "/minimal", "/doctor", "/copy"] {
+                assert!(
+                    !message.contains(stale),
+                    "{feedback:?} mentions {stale:?}: {message:?}"
+                );
+            }
         }
     }
 
