@@ -462,8 +462,9 @@ r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶�
 | 本机，信号处理器自摘除 | `test_acp_shutdown.py` 4 个用例；去掉自摘除再跑（变异检查） | ✓ 通过；「重复的信号」用例超时失败 |
 | macOS 本机，`e8557e5` | `cargo test -p pi-pager --lib acp::spawn`（含 2 个新测试）；`cargo build -p pi-pager-bin`（`CARGO_INCREMENTAL=0`、2 个 job） | ✓ 10 通过 / 0 失败；构建 0 告警（之后只有 rustfmt 的折行，未重编） |
 | 本机 PTY，`e8557e5` / `421d497` | `/tmp/rr/tui_orphan.py <模式>`：`PI_AGENT_COMMAND` 指向 `tests/_tool_agent.py`，发一句话让 agent 跑 `exec sleep 300`，工具运行时按模式退出 zypi，查 `sleep` 是否还在；另跑一遍 mock 的 `/exit` | 见下表；mock 的 `/exit`：退出码 0，无残留进程，终端上没有 Traceback / BrokenPipe |
+| Linux CI，`b617575` | `TUI CI` PR run [37394965723](https://github.com/zy1233/pi-python/actions/runs/37394965723)（check + test 26 m 39 s）；`CI`（Python 3.11–3.13）run 37394965713 | ✓ 依赖图 980、0 告警、`--workspace --tests` 0 个错误；8 个 suite 共 7,439 通过 / 0 失败 / 20 忽略（`pi-pager` 5,554，比 `ac1d3ff` 多 `spawn.rs` 的 2 个单元测试）；Python 全绿（含 stdio 契约套件与关停测试） |
 
-**这一轮没有验证的**：Windows；`5163592` 之后的 Linux 运行（推送后的 CI 结果见 PR）；zypi 不是会话首进程时被 `kill -9`（agent 只看到 EOF）的端到端情形、MCP 子进程、Linux / Windows 上的退出行为；`e8557e5` 与 `421d497` 的 Linux 运行；用真实模型跑 PTY——OpenRouter 的免费 slug `qwen/qwen3.8-27b:free` 现在回 404（付费 slug 要花钱，由用户定），所以 `ac1d3ff` 的 PTY 烟测用的是 agent 自带的 mock LLM。
+**这一轮没有验证的**：Windows；zypi 不是会话首进程时被 `kill -9`（agent 只看到 EOF）的端到端情形；MCP 子进程；退出行为的 PTY 实测只在 macOS 上做过（Linux CI 跑了 Python 的关停测试与 Rust 的单元测试，没有 PTY 烟测）；用真实模型跑 PTY——OpenRouter 的免费 slug `qwen/qwen3.8-27b:free` 现在回 404（付费 slug 要花钱，由用户定），所以 `ac1d3ff` 的 PTY 烟测用的是 agent 自带的 mock LLM。
 
 **退出时工具进程是否残留（agent 在跑 `exec sleep 300`，本机 PTY，zypi 是会话首进程）。**
 
