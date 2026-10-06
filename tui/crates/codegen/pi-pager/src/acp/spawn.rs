@@ -18,13 +18,22 @@ use pi_shell::{
     agent::config::Config as AgentConfig, auth::AuthManager, util::grok_home::grok_home,
 };
 
-/// Upper bound for the agent process to be killed and reaped after cancel.
-///
-/// Today the bridge SIGKILLs the child at once (a graceful stdin-EOF exit is
-/// plan item 1.P2), so this only bounds a wedged reap. It is also the budget a
-/// graceful exit would get before the kill. Kept at the historical value so the
-/// pager's overall exit budget (`app::exit_timeout`) is unchanged.
+/// Upper bound for the agent process to be stopped and reaped after cancel:
+/// [`AGENT_EOF_GRACE`] for a voluntary exit, then the kill and its reap.
+/// Kept at the historical value so the pager's overall exit budget
+/// (`app::exit_timeout`) is unchanged.
 const AGENT_EXIT_GRACE: Duration = Duration::from_secs(10);
+
+/// How long the agent gets to exit by itself once its stdin is closed.
+///
+/// EOF is the stop request: the Python agent aborts the turns in flight, which
+/// reaps the process groups of its running tools, and exits 0 (measured; the
+/// stdio contract tests pin it). SIGKILL gives it no such chance, so the tools
+/// of a killed agent outlive it as orphans — the kill is the last resort after
+/// this grace, not the first move. Well below [`AGENT_EXIT_GRACE`].
+const AGENT_EOF_GRACE: Duration = Duration::from_secs(3);
+
+const _: () = assert!(AGENT_EOF_GRACE.as_millis() < AGENT_EXIT_GRACE.as_millis());
 
 /// Extra slack when joining the bridge thread after the agent process has been
 /// reaped, so the thread can unwind.
@@ -167,6 +176,28 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
         s.clone()
     } else {
         "non-string panic payload".to_string()
+    }
+}
+
+/// How the agent process ended after the stop request.
+#[derive(Debug, PartialEq, Eq)]
+enum StopOutcome {
+    /// It exited by itself within the grace period.
+    Exited,
+    /// It ignored the stop request and was killed.
+    Killed,
+}
+
+/// Wait up to `grace` for `child` to exit by itself — its stdin is already
+/// closed, which is the stop request — then kill it if it has not, and reap it.
+async fn stop_child(child: &mut tokio::process::Child, grace: Duration) -> StopOutcome {
+    match tokio::time::timeout(grace, child.wait()).await {
+        Ok(_) => StopOutcome::Exited,
+        Err(_) => {
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+            StopOutcome::Killed
+        }
     }
 }
 
@@ -380,10 +411,11 @@ mod pi_agent_command_tests {
 
 /// Spawn the agent child and the thread that bridges its stdio to `channel`.
 ///
-/// The returned thread owns the child: on `cancel` it kills the child (SIGKILL —
-/// there is no graceful exit yet, plan 1.P2), reaps it, and returns. The child
-/// inherits this process's stderr, so anything it prints lands on the terminal
-/// (plan 1.R3 leaves its destination open).
+/// The returned thread owns the child: on `cancel` it closes the child's stdin
+/// (EOF is the stop request), gives it [`AGENT_EOF_GRACE`] to exit by itself,
+/// kills it if it does not, reaps it, and returns. The child inherits this
+/// process's stderr, so anything it prints lands on the terminal (plan 1.R3
+/// leaves its destination open).
 async fn spawn_python_stdio_bridge(
     channel: AcpAgentChannel,
     cancel: CancellationToken,
@@ -438,22 +470,21 @@ async fn spawn_python_stdio_bridge(
                 let cancel_r = cancel.clone();
                 let reader_task = tokio::task::spawn_local(async move {
                     let mut lines = BufReader::new(child_stdout).lines();
-                    loop {
-                        tokio::select! {
-                            biased;
-                            _ = cancel_r.cancelled() => break,
-                            line = lines.next_line() => {
-                                match line {
-                                    Ok(Some(json_line)) => {
-                                        if incoming_write.write_all(json_line.as_bytes()).await.is_err()
-                                            || incoming_write.write_all(b"\n").await.is_err()
-                                        {
-                                            break;
-                                        }
-                                    }
-                                    Ok(None) | Err(_) => break,
-                                }
-                            }
+                    // After cancel the lines are read and dropped until the agent
+                    // closes its stdout: a stopping agent must not find the pipe
+                    // closed (EPIPE noise on the restored terminal). The bridge
+                    // aborts this task once the child is reaped.
+                    while let Ok(Some(json_line)) = lines.next_line().await {
+                        if cancel_r.is_cancelled() {
+                            continue;
+                        }
+                        if incoming_write
+                            .write_all(json_line.as_bytes())
+                            .await
+                            .is_err()
+                            || incoming_write.write_all(b"\n").await.is_err()
+                        {
+                            break;
                         }
                     }
                 });
@@ -504,10 +535,18 @@ async fn spawn_python_stdio_bridge(
                 tokio::task::yield_now().await;
 
                 cancel.cancelled().await;
-                let _ = child.start_kill();
-                reader_task.abort();
+                // Stop request: end the writer task, which drops the child's stdin
+                // (EOF). The Python agent treats EOF as "the client is gone".
                 writer_task.abort();
-                let _ = child.wait().await;
+                let _ = writer_task.await;
+                if stop_child(&mut child, AGENT_EOF_GRACE).await == StopOutcome::Killed {
+                    tracing::warn!(
+                        grace_ms = AGENT_EOF_GRACE.as_millis() as u64,
+                        "agent did not exit after its stdin closed; killed it"
+                    );
+                }
+                reader_task.abort();
+                let _ = reader_task.await;
                 Ok(())
             })
         })?)
@@ -552,6 +591,57 @@ mod tests {
         assert!(
             started.elapsed() < Duration::from_secs(5),
             "join must return at its budget, not wait out the bridge"
+        );
+    }
+
+    #[cfg(unix)]
+    fn spawn_sh(script: &str) -> tokio::process::Child {
+        tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg(script)
+            .stdin(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn sh")
+    }
+
+    /// An agent that exits when its stdin closes — what the Python agent does —
+    /// is reaped without a kill.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn child_that_exits_on_eof_is_not_killed() {
+        let mut child = spawn_sh("cat > /dev/null");
+        drop(child.stdin.take());
+        let started = std::time::Instant::now();
+        assert_eq!(
+            stop_child(&mut child, Duration::from_secs(30)).await,
+            StopOutcome::Exited
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "a voluntary exit must not wait out the grace"
+        );
+    }
+
+    /// An agent that ignores the stop request is killed once the grace is over,
+    /// instead of holding the exit open.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn child_that_ignores_eof_is_killed_after_the_grace() {
+        let mut child = spawn_sh("exec sleep 60");
+        drop(child.stdin.take());
+        let started = std::time::Instant::now();
+        assert_eq!(
+            stop_child(&mut child, Duration::from_millis(100)).await,
+            StopOutcome::Killed
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the kill must follow the grace, not the child's own lifetime"
+        );
+        assert!(
+            child.try_wait().expect("try_wait").is_some(),
+            "the killed child must have been reaped"
         );
     }
 
