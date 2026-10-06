@@ -1,6 +1,5 @@
 #![cfg_attr(rustfmt, rustfmt::skip)]
 use super::*;
-use pi_shell::extensions::billing::{BillingConfig, Cent, UsagePeriod};
 /// The invalid-params server detail survives `attach_prompt_usage`
 /// wrapping `error.data` as `{message, promptUsage}`.
 #[test]
@@ -109,19 +108,6 @@ fn prompt_request_meta_stamps_screen_mode() {
 fn prompt_request_meta_omits_screen_mode_when_unset() {
     let meta = prompt_request_meta("p-2", None);
     assert_eq!(meta, serde_json::json!({ "promptId": "p-2" }));
-}
-/// Text-only interjections must omit the `content` key entirely — the
-/// legacy `legacy ext RPC` wire shape stays byte-identical.
-#[test]
-fn interject_params_omit_content_when_no_blocks() {
-    let sid = acp::SessionId::new("s1");
-    let params = build_interject_params(&sid, "steer", "i1", None);
-    let obj = params.as_object().unwrap();
-    assert!(!obj.contains_key("content"), "content key must be absent");
-    assert_eq!(obj["sessionId"], "s1");
-    assert_eq!(obj["text"], "steer");
-    assert_eq!(obj["interjectionId"], "i1");
-    assert_eq!(obj.len(), 3, "no extra keys on the legacy shape");
 }
 #[test]
 fn picker_drops_conversation_without_updated_at_in_standard_acp_mode() {
@@ -236,494 +222,6 @@ fn picker_still_drops_build_row_with_empty_summary() {
     assert!(entries.is_empty(), "empty-summary Build rows stay dropped");
 }
 #[test]
-fn session_list_partial_is_not_parsed_in_standard_acp_mode() {
-    let payload = |reason: &str| {
-        serde_json::json!({
-                "sessions": [],
-                "_meta": { "pi/partial": { "conversations": true, "reason": reason } }
-            })
-    };
-    for reason in ["no_oauth", "timeout", "error", "something_new"] {
-        assert_eq!(
-            parse_session_list_partial(&payload(reason)),
-            None,
-            "legacy partial meta is ignored ({reason})"
-        );
-    }
-}
-#[test]
-fn session_list_partial_absent_for_healthy_or_meta_less_responses() {
-    let healthy = serde_json::json!({
-            "sessions": [],
-            "_meta": { "pi/partial": { "conversations": false } }
-        });
-    assert_eq!(parse_session_list_partial(&healthy), None);
-    let legacy = serde_json::json!({ "sessions": [] });
-    assert_eq!(parse_session_list_partial(&legacy), None);
-}
-/// The agent serializes `ExtMethodResult<KillTaskResponse>`: the outcome
-/// lives at `result.outcome`. Probing the top level (the pre-fix code)
-/// was why the tasks-pane ✗ never removed stale (`not_found`) rows after
-/// a session resume.
-#[test]
-fn parse_kill_outcome_reads_result_envelope() {
-    use pi_tools::types::KillOutcome;
-    let resp = r#"{"result":{"taskId":"t-1","outcome":"not_found"}}"#;
-    assert_eq!(parse_kill_outcome(resp), Some(KillOutcome::NotFound));
-    let resp = r#"{"result":{"taskId":"t-1","outcome":"killed"}}"#;
-    assert_eq!(parse_kill_outcome(resp), Some(KillOutcome::Killed));
-    let resp = r#"{"result":{"taskId":"t-1","outcome":"already_exited"}}"#;
-    assert_eq!(parse_kill_outcome(resp), Some(KillOutcome::AlreadyExited));
-}
-/// Round-trip through the agent's own serializer: what
-/// `extensions::task::respond()` produces must parse back to the same
-/// typed outcome (guards against the two sides drifting apart).
-#[test]
-fn parse_kill_outcome_round_trips_agent_serialization() {
-    use pi_shell::extensions::task::KillTaskResponse;
-    use pi_shell::session::result::ExtMethodResult;
-    use pi_tools::types::KillOutcome;
-    let wire = serde_json::to_string(
-            &ExtMethodResult::success(KillTaskResponse {
-                task_id: "t-1".into(),
-                outcome: KillOutcome::NotFound,
-            }),
-        )
-        .unwrap();
-    assert_eq!(parse_kill_outcome(&wire), Some(KillOutcome::NotFound));
-}
-/// Error envelopes and malformed payloads yield `None` (clear pending
-/// state, keep the row).
-#[test]
-fn parse_kill_outcome_none_for_error_or_malformed() {
-    assert_eq!(
-            parse_kill_outcome(r#"{"result":null,"error":"session not found"}"#),
-            None
-        );
-    assert_eq!(parse_kill_outcome("not json"), None);
-    assert_eq!(parse_kill_outcome("{}"), None);
-    assert_eq!(
-            parse_kill_outcome(r#"{"result":{"taskId":"t-1","outcome":"exploded"}}"#),
-            None
-        );
-}
-/// Typed `outcome`: `Cancelled` → `StoppedLive`; `AlreadyFinished` /
-/// `NotFound` → `NothingLive` (carrying the real status when known).
-#[test]
-fn parse_subagent_kill_outcome_reads_typed_outcome() {
-    assert!(matches!(
-            parse_subagent_kill_outcome(
-                r#"{"result":{"subagentId":"sa-1","cancelled":true,"outcome":{"kind":"cancelled"}}}"#
-            ),
-            SubagentKillOutcome::StoppedLive
-        ));
-    assert!(matches!(
-            parse_subagent_kill_outcome(
-                r#"{"result":{"subagentId":"sa-1","cancelled":false,"outcome":{"kind":"already_finished","status":"completed"}}}"#
-            ),
-            SubagentKillOutcome::NothingLive { status: Some(s) } if s == "completed"
-        ));
-    assert!(matches!(
-            parse_subagent_kill_outcome(
-                r#"{"result":{"subagentId":"sa-1","cancelled":false,"outcome":{"kind":"not_found"}}}"#
-            ),
-            SubagentKillOutcome::NothingLive { status: None }
-        ));
-}
-/// An older shell sends no `outcome`; the parser falls back to the legacy
-/// `cancelled` bool (true → `StoppedLive`, false → `NothingLive`).
-#[test]
-fn parse_subagent_kill_outcome_falls_back_to_legacy_bool() {
-    assert!(matches!(
-            parse_subagent_kill_outcome(r#"{"result":{"subagentId":"sa-1","cancelled":true}}"#),
-            SubagentKillOutcome::StoppedLive
-        ));
-    assert!(matches!(
-            parse_subagent_kill_outcome(r#"{"result":{"subagentId":"sa-1","cancelled":false}}"#),
-            SubagentKillOutcome::NothingLive { status: None }
-        ));
-}
-/// An unknown future `kind` deserializes to `Unknown` (via `#[serde(other)]`)
-/// and falls back to the always-present `cancelled` bool — not `RpcFailed`,
-/// which would leave the row stuck.
-#[test]
-fn parse_subagent_kill_outcome_unknown_kind_falls_back_to_legacy_bool() {
-    assert!(matches!(
-            parse_subagent_kill_outcome(
-                r#"{"result":{"subagentId":"sa-1","cancelled":true,"outcome":{"kind":"some_future_kind"}}}"#
-            ),
-            SubagentKillOutcome::StoppedLive
-        ));
-    assert!(matches!(
-            parse_subagent_kill_outcome(
-                r#"{"result":{"subagentId":"sa-1","cancelled":false,"outcome":{"kind":"some_future_kind"}}}"#
-            ),
-            SubagentKillOutcome::NothingLive { status: None }
-        ));
-}
-/// Round-trip through the agent's own serializer guards the two sides
-/// against drifting apart.
-#[test]
-fn parse_subagent_kill_outcome_round_trips_agent_serialization() {
-    use pi_shell::extensions::task::{
-        CancelSubagentResponse, SubagentCancelOutcomeDto,
-    };
-    let wire = serde_json::to_string(
-            &ExtMethodResult::success(CancelSubagentResponse {
-                subagent_id: "sa-1".into(),
-                cancelled: false,
-                outcome: Some(SubagentCancelOutcomeDto::AlreadyFinished {
-                    status: "failed".into(),
-                }),
-            }),
-        )
-        .unwrap();
-    assert!(matches!(
-            parse_subagent_kill_outcome(&wire),
-            SubagentKillOutcome::NothingLive { status: Some(s) } if s == "failed"
-        ));
-}
-/// A top-level payload (no `result` envelope), error envelopes, and
-/// malformed payloads are a failed RPC (`RpcFailed`) — the caller must NOT
-/// finalize a possibly-live row.
-#[test]
-fn parse_subagent_kill_outcome_rpc_failed_for_error_or_malformed() {
-    assert!(matches!(
-            parse_subagent_kill_outcome(r#"{"cancelled":true}"#),
-            SubagentKillOutcome::RpcFailed
-        ));
-    assert!(matches!(
-            parse_subagent_kill_outcome(r#"{"result":null,"error":"session not found"}"#),
-            SubagentKillOutcome::RpcFailed
-        ));
-    assert!(matches!(
-            parse_subagent_kill_outcome("not json"),
-            SubagentKillOutcome::RpcFailed
-        ));
-    assert!(matches!(
-            parse_subagent_kill_outcome("{}"),
-            SubagentKillOutcome::RpcFailed
-        ));
-}
-/// Image-bearing interjections carry the blocks as a `content` array.
-#[test]
-fn interject_params_carry_content_when_blocks_present() {
-    let sid = acp::SessionId::new("s1");
-    let blocks = vec![acp::ContentBlock::Text(acp::TextContent::new(
-            "look at [Image #1]",
-        ))];
-    let params = build_interject_params(
-        &sid,
-        "look at [Image #1]",
-        "i1",
-        Some(blocks.as_slice()),
-    );
-    let content = params["content"].as_array().expect("content array");
-    assert_eq!(content.len(), 1);
-    assert_eq!(content[0]["text"], "look at [Image #1]");
-}
-/// A billing config with every field unset, for use as a base in
-/// `credit_balance_from_config` tests via struct-update syntax.
-fn empty_billing_config() -> BillingConfig {
-    BillingConfig {
-        credit_usage_percent: None,
-        current_period: None,
-        monthly_limit: None,
-        used: None,
-        on_demand_cap: None,
-        on_demand_used: None,
-        prepaid_balance: None,
-        is_unified_billing_user: None,
-        billing_period_start: None,
-        billing_period_end: None,
-        history: vec![],
-    }
-}
-#[test]
-fn credit_balance_prefers_credit_usage_percent_over_limit_used() {
-    let c = BillingConfig {
-        credit_usage_percent: Some(42.0),
-        monthly_limit: Some(Cent { val: 10_000 }),
-        used: Some(Cent { val: 9_000 }),
-        ..empty_billing_config()
-    };
-    assert_eq!(credit_balance_from_config(c).usage_pct, 42.0);
-}
-#[test]
-fn credit_balance_forwards_is_unified_billing_user() {
-    let c = BillingConfig {
-        is_unified_billing_user: Some(true),
-        ..empty_billing_config()
-    };
-    assert_eq!(
-            credit_balance_from_config(c).is_unified_billing_user,
-            Some(true)
-        );
-    assert_eq!(
-            credit_balance_from_config(empty_billing_config()).is_unified_billing_user,
-            None
-        );
-}
-#[test]
-fn credit_balance_falls_back_to_limit_used_when_percent_absent() {
-    let c = BillingConfig {
-        monthly_limit: Some(Cent { val: 10_000 }),
-        used: Some(Cent { val: 2_500 }),
-        ..empty_billing_config()
-    };
-    assert_eq!(credit_balance_from_config(c).usage_pct, 25.0);
-}
-/// Match production: RFC 3339 → user's local wall-clock (no zone label).
-fn expected_period_end_display(rfc3339: &str) -> String {
-    chrono::DateTime::parse_from_rfc3339(rfc3339)
-        .expect("test fixture is valid RFC 3339")
-        .with_timezone(&chrono::Local)
-        .format("%B %-d, %H:%M")
-        .to_string()
-}
-#[test]
-fn credit_balance_prefers_current_period_end_over_billing_period_end() {
-    let end = "2026-06-08T20:00:00Z";
-    let c = BillingConfig {
-        credit_usage_percent: Some(10.0),
-        current_period: Some(UsagePeriod {
-            period_type: Some("USAGE_PERIOD_TYPE_WEEKLY".into()),
-            start: Some("2026-06-01T00:00:00Z".into()),
-            end: Some(end.into()),
-        }),
-        billing_period_end: Some("2026-07-01T20:00:00Z".into()),
-        ..empty_billing_config()
-    };
-    assert_eq!(
-            credit_balance_from_config(c).period_end_display.as_deref(),
-            Some(expected_period_end_display(end).as_str())
-        );
-}
-#[test]
-fn credit_balance_period_end_uses_local_timezone() {
-    let winter = "2026-01-15T20:00:00Z";
-    let summer = "2026-07-15T20:00:00Z";
-    let winter_cfg = BillingConfig {
-        billing_period_end: Some(winter.into()),
-        ..empty_billing_config()
-    };
-    let summer_cfg = BillingConfig {
-        billing_period_end: Some(summer.into()),
-        ..empty_billing_config()
-    };
-    assert_eq!(
-            credit_balance_from_config(winter_cfg)
-                .period_end_display
-                .as_deref(),
-            Some(expected_period_end_display(winter).as_str())
-        );
-    assert_eq!(
-            credit_balance_from_config(summer_cfg)
-                .period_end_display
-                .as_deref(),
-            Some(expected_period_end_display(summer).as_str())
-        );
-    assert_ne!(
-            expected_period_end_display(winter),
-            expected_period_end_display(summer)
-        );
-}
-#[test]
-fn credit_balance_falls_back_to_billing_period_end() {
-    let end = "2026-07-01T20:00:00Z";
-    let c = BillingConfig {
-        billing_period_end: Some(end.into()),
-        ..empty_billing_config()
-    };
-    assert_eq!(
-            credit_balance_from_config(c).period_end_display.as_deref(),
-            Some(expected_period_end_display(end).as_str())
-        );
-}
-#[test]
-fn credit_balance_period_end_falls_back_when_current_period_has_no_end() {
-    let end = "2026-07-01T20:00:00Z";
-    let c = BillingConfig {
-        current_period: Some(UsagePeriod {
-            period_type: None,
-            start: Some("2026-06-01T00:00:00Z".into()),
-            end: None,
-        }),
-        billing_period_end: Some(end.into()),
-        ..empty_billing_config()
-    };
-    assert_eq!(
-            credit_balance_from_config(c).period_end_display.as_deref(),
-            Some(expected_period_end_display(end).as_str())
-        );
-}
-#[test]
-fn credit_balance_period_end_none_when_unavailable() {
-    assert!(
-            credit_balance_from_config(empty_billing_config())
-                .period_end_display
-                .is_none()
-        );
-}
-#[test]
-fn credit_balance_clamps_new_percent_above_100() {
-    let c = BillingConfig {
-        credit_usage_percent: Some(150.0),
-        ..empty_billing_config()
-    };
-    assert_eq!(credit_balance_from_config(c).usage_pct, 100.0);
-}
-#[test]
-fn credit_balance_clamps_legacy_used_above_limit() {
-    let c = BillingConfig {
-        monthly_limit: Some(Cent { val: 1_000 }),
-        used: Some(Cent { val: 2_500 }),
-        ..empty_billing_config()
-    };
-    assert_eq!(credit_balance_from_config(c).usage_pct, 100.0);
-}
-#[test]
-fn credit_balance_effective_equals_usage_when_no_on_demand() {
-    let c = BillingConfig {
-        credit_usage_percent: Some(40.0),
-        ..empty_billing_config()
-    };
-    let bal = credit_balance_from_config(c);
-    assert!(!bal.pay_as_you_go);
-    assert_eq!(bal.on_demand_cap_cents, None);
-    assert_eq!(bal.effective_usage_pct, 40.0);
-}
-#[test]
-fn credit_balance_effective_uses_on_demand_ratio_when_included_exhausted() {
-    let c = BillingConfig {
-        credit_usage_percent: Some(100.0),
-        on_demand_cap: Some(Cent { val: 5_000 }),
-        on_demand_used: Some(Cent { val: 1_000 }),
-        ..empty_billing_config()
-    };
-    let bal = credit_balance_from_config(c);
-    assert!(bal.pay_as_you_go);
-    assert_eq!(bal.usage_pct, 100.0);
-    assert_eq!(bal.effective_usage_pct, 20.0);
-    assert_eq!(bal.on_demand_cap_cents, Some(5_000));
-    assert_eq!(bal.on_demand_used_cents, Some(1_000));
-}
-#[test]
-fn parse_auto_topup_present_rule_resolves() {
-    let v = serde_json::json!({
-            "rule": {"enabled": true, "topupAmount": {"val": 2000}, "maxAmountPerMonth": {"val": 10000}}
-        });
-    match parse_auto_topup_response(&v) {
-        crate::views::credit_bar::AutoTopupFetch::Resolved(at) => {
-            assert!(at.enabled);
-            assert_eq!(at.topup_amount_cents, Some(2000));
-            assert_eq!(at.max_amount_cents, Some(10000));
-        }
-        other => panic!("expected Resolved, got {other:?}"),
-    }
-}
-#[test]
-fn parse_auto_topup_empty_body_resolves_to_disabled() {
-    for v in [serde_json::json!({}), serde_json::json!({ "rule": null })] {
-        match parse_auto_topup_response(&v) {
-            crate::views::credit_bar::AutoTopupFetch::Resolved(at) => {
-                assert!(!at.enabled);
-            }
-            other => panic!("expected Resolved(disabled), got {other:?}"),
-        }
-    }
-}
-#[test]
-fn parse_auto_topup_rule_without_enabled_is_disabled() {
-    let v = serde_json::json!({ "rule": {"topupAmount": {"val": 500}} });
-    match parse_auto_topup_response(&v) {
-        crate::views::credit_bar::AutoTopupFetch::Resolved(at) => {
-            assert!(!at.enabled);
-            assert_eq!(at.topup_amount_cents, Some(500));
-        }
-        other => panic!("expected Resolved(disabled), got {other:?}"),
-    }
-}
-#[test]
-fn parse_auto_topup_malformed_body_is_unchanged() {
-    for v in [serde_json::json!(null), serde_json::json!(42)] {
-        match parse_auto_topup_response(&v) {
-            crate::views::credit_bar::AutoTopupFetch::Unchanged => {}
-            other => panic!("expected Unchanged, got {other:?}"),
-        }
-    }
-}
-#[test]
-fn credit_balance_effective_tracks_included_for_new_shape_under_100() {
-    let c = BillingConfig {
-        credit_usage_percent: Some(95.0),
-        on_demand_cap: Some(Cent { val: 5_000 }),
-        on_demand_used: Some(Cent { val: 0 }),
-        ..empty_billing_config()
-    };
-    let bal = credit_balance_from_config(c);
-    assert!(bal.pay_as_you_go);
-    assert_eq!(bal.effective_usage_pct, 95.0);
-}
-#[test]
-fn credit_balance_effective_blends_budget_for_legacy_shape_under_100() {
-    let c = BillingConfig {
-        monthly_limit: Some(Cent { val: 10_000 }),
-        used: Some(Cent { val: 5_000 }),
-        on_demand_cap: Some(Cent { val: 10_000 }),
-        on_demand_used: Some(Cent { val: 0 }),
-        ..empty_billing_config()
-    };
-    let bal = credit_balance_from_config(c);
-    assert!(bal.pay_as_you_go);
-    assert_eq!(bal.usage_pct, 50.0);
-    assert_eq!(bal.effective_usage_pct, 25.0);
-}
-#[test]
-fn parse_worktree_restore_payload_full() {
-    use pi_workspace::session::git::RestoreDegree;
-    let value = serde_json::json!({
-            "codeRestored": true,
-            "restoreSummary": "checked out abc12345, staged: true, unstaged: false, untracked: 3",
-            "restoreDegree": "full",
-        });
-    let (restored, summary, degree) = parse_worktree_restore_payload(&value);
-    assert!(restored);
-    assert_eq!(degree, Some(RestoreDegree::Full));
-    assert!(summary.unwrap().contains("staged: true"));
-}
-#[test]
-fn parse_worktree_restore_payload_head_only() {
-    use pi_workspace::session::git::RestoreDegree;
-    let value = serde_json::json!({
-            "codeRestored": true,
-            "restoreSummary": "checked out abc (session registry disabled — staged/unstaged/untracked not restored)",
-            "restoreDegree": "head_only",
-        });
-    let (_, _, degree) = parse_worktree_restore_payload(&value);
-    assert_eq!(degree, Some(RestoreDegree::HeadOnly));
-}
-#[test]
-fn parse_worktree_restore_payload_missing_fields() {
-    let value = serde_json::json!({ "codeRestored": false });
-    let (restored, summary, degree) = parse_worktree_restore_payload(&value);
-    assert!(!restored);
-    assert!(summary.is_none());
-    assert!(degree.is_none());
-}
-/// A typo / unknown variant must parse as `None` rather than
-/// silently round-tripping a bogus value.
-#[test]
-fn parse_worktree_restore_payload_rejects_unknown_degree() {
-    let value = serde_json::json!({
-            "codeRestored": true,
-            "restoreSummary": "x",
-            "restoreDegree": "full_",
-        });
-    let (_, _, degree) = parse_worktree_restore_payload(&value);
-    assert!(degree.is_none(), "typo must produce None");
-}
-#[test]
 fn parse_session_load_restore_meta_full_shape() {
     use pi_workspace::session::git::RestoreDegree;
     let meta = serde_json::json!({
@@ -775,6 +273,7 @@ fn parse_session_response_models_prefers_native_payload() {
     });
     let parsed = parse_session_response_models(
         Some(native.clone()),
+        None,
         meta.as_object(),
     );
     assert_eq!(parsed, Some(native));
@@ -786,7 +285,7 @@ fn parse_session_response_models_falls_back_to_meta() {
         "pi/currentModelDisplayName": "DeepSeek Flash",
         "pi/provider": "deepseek",
     });
-    let parsed = parse_session_response_models(None, meta.as_object())
+    let parsed = parse_session_response_models(None, None, meta.as_object())
         .expect("meta model fallback should build SessionModelState");
     assert_eq!(parsed.current_model_id.0.as_ref(), "deepseek-flash");
     assert_eq!(parsed.available_models.len(), 1);
@@ -803,8 +302,101 @@ fn parse_session_response_models_falls_back_to_meta() {
 #[test]
 fn parse_session_response_models_none_without_native_or_meta_model() {
     let meta = serde_json::json!({ "pi/provider": "deepseek" });
-    let parsed = parse_session_response_models(None, meta.as_object());
+    let parsed = parse_session_response_models(None, None, meta.as_object());
     assert!(parsed.is_none(), "no model id means no fallback state");
+}
+/// The `model` option exactly as the Python `pi_agent_cli` agent serializes it
+/// (`SessionConfigOptionSelect`, category `model`).
+fn python_agent_model_config_option() -> acp::SessionConfigOption {
+    serde_json::from_value(serde_json::json!({
+        "id": "model",
+        "name": "Model",
+        "category": "model",
+        "type": "select",
+        "currentValue": "qwen/qwen3.8-27b:free",
+        "options": [
+            { "value": "qwen/qwen3.8-27b:free", "name": "Qwen 27B (free)" },
+            { "value": "deepseek/deepseek-chat", "name": "DeepSeek Chat", "description": "fast" },
+        ],
+    }))
+    .expect("Python agent model option must deserialize into the Rust schema")
+}
+#[test]
+fn parse_session_response_models_reads_model_config_option() {
+    let options = vec![python_agent_model_config_option()];
+    let parsed = parse_session_response_models(None, Some(options.as_slice()), None)
+        .expect("a `model` select config option must yield a model catalog");
+    assert_eq!(parsed.current_model_id.0.as_ref(), "qwen/qwen3.8-27b:free");
+    assert_eq!(parsed.available_models.len(), 2);
+    assert_eq!(parsed.available_models[0].name, "Qwen 27B (free)");
+    assert_eq!(
+        parsed.available_models[1].description.as_deref(),
+        Some("fast")
+    );
+    // The config option id must travel with the state so `/model` can address
+    // `session/set_config_option`.
+    let state = crate::acp::model_state::ModelState::from(Some(parsed));
+    assert_eq!(state.config_option_id.as_deref(), Some("model"));
+    assert_eq!(state.available.len(), 2);
+}
+#[test]
+fn parse_session_response_models_prefers_native_over_config_option() {
+    let id = acp::ModelId::new(std::sync::Arc::from("native-model"));
+    let native = acp::SessionModelState::new(
+        id.clone(),
+        vec![acp::ModelInfo::new(id, "Native Model")],
+    );
+    let options = vec![python_agent_model_config_option()];
+    let parsed =
+        parse_session_response_models(Some(native.clone()), Some(options.as_slice()), None);
+    assert_eq!(parsed, Some(native));
+}
+#[test]
+fn parse_session_response_models_ignores_non_model_config_options() {
+    let mode = acp::SessionConfigOption::select(
+        "mode",
+        "Mode",
+        "ask",
+        vec![
+            acp::SessionConfigSelectOption::new("ask", "Ask"),
+            acp::SessionConfigSelectOption::new("code", "Code"),
+        ],
+    )
+    .category(acp::SessionConfigOptionCategory::Mode);
+    let options = vec![mode];
+    let parsed = parse_session_response_models(None, Some(options.as_slice()), None);
+    assert!(parsed.is_none(), "only category=model options feed /model");
+}
+#[test]
+fn parse_session_response_models_flattens_grouped_model_options() {
+    let option = acp::SessionConfigOption::select(
+        "model",
+        "Model",
+        "b",
+        acp::SessionConfigSelectOptions::Grouped(vec![
+            acp::SessionConfigSelectGroup::new(
+                "g1",
+                "Group 1",
+                vec![acp::SessionConfigSelectOption::new("a", "A")],
+            ),
+            acp::SessionConfigSelectGroup::new(
+                "g2",
+                "Group 2",
+                vec![acp::SessionConfigSelectOption::new("b", "B")],
+            ),
+        ]),
+    )
+    .category(acp::SessionConfigOptionCategory::Model);
+    let options = vec![option];
+    let parsed = parse_session_response_models(None, Some(options.as_slice()), None)
+        .expect("grouped options flatten into one catalog");
+    assert_eq!(parsed.current_model_id.0.as_ref(), "b");
+    let ids: Vec<&str> = parsed
+        .available_models
+        .iter()
+        .map(|m| m.model_id.0.as_ref())
+        .collect();
+    assert_eq!(ids, ["a", "b"]);
 }
 /// Unknown keys return a descriptive error.
 #[tokio::test]
@@ -863,17 +455,6 @@ async fn persist_setting_type_mismatch_errors_page_flip_on_send() {
     let err = r.expect_err("page_flip_on_send with String payload must return Err");
     assert!(
             err.contains("persist_setting(page_flip_on_send) expected Bool"),
-            "got: {err}",
-        );
-}
-#[tokio::test]
-async fn persist_setting_type_mismatch_errors_confirm_before_rewind() {
-    use crate::settings::SettingValue;
-    let r = persist_setting("confirm_before_rewind", SettingValue::String("nope".into()))
-        .await;
-    let err = r.expect_err("confirm_before_rewind with String payload must return Err");
-    assert!(
-            err.contains("persist_setting(confirm_before_rewind) expected Bool"),
             "got: {err}",
         );
 }
@@ -1317,252 +898,8 @@ fn route_permission_mode_result_err_best_effort_routes_to_dedicated_variant() {
         }
     }
 }
-#[test]
-fn marketplace_outcome_succeeded_only_accepts_success_status() {
-    use pi_hooks_plugins_types::{ActionOutcome, OutcomeStatus};
-    let success = ActionOutcome {
-        status: OutcomeStatus::Success,
-        message: "updated".into(),
-        requires_reload: true,
-        requires_restart: false,
-    };
-    let failed = ActionOutcome {
-        status: OutcomeStatus::InternalError,
-        message: "failed".into(),
-        requires_reload: false,
-        requires_restart: false,
-    };
-    assert!(marketplace_outcome_succeeded(&success));
-    assert!(!marketplace_outcome_succeeded(&failed));
-}
-#[tokio::test]
-async fn check_marketplace_updates_dispatches_update_and_skips_failed_notifications() {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use pi_acp_lib::AcpAgentMessage;
-    use pi_hooks_plugins_types::{ActionOutcome, MarketplaceAction, OutcomeStatus};
-    let action_calls = Arc::new(AtomicUsize::new(0));
-    let saw_update = Arc::new(AtomicBool::new(false));
-    let saw_wrong_action = Arc::new(AtomicBool::new(false));
-    let saw_success_notification = Arc::new(AtomicBool::new(false));
-    let action_calls_for_task = action_calls.clone();
-    let saw_update_for_task = saw_update.clone();
-    let saw_wrong_action_for_task = saw_wrong_action.clone();
-    let saw_success_notification_for_task = saw_success_notification.clone();
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::spawn(async move {
-        while let Some(msg) = rx.recv().await {
-            if let AcpAgentMessage::ExtMethod(args) = msg {
-                match args.request.method.as_ref() {
-                    "pi/marketplace/list" => {
-                        let response = serde_json::json!({
-                                "result": {
-                                    "sources": [{
-                                        "sourceName": "test-source",
-                                        "sourceKind": "git",
-                                        "sourceUrlOrPath": "https://example.com/plugins.git",
-                                        "plugins": [{
-                                            "name": "test-plugin",
-                                            "version": "2.0.0",
-                                            "description": null,
-                                            "category": null,
-                                            "author": null,
-                                            "tags": [],
-                                            "relativePath": "plugins/test-plugin",
-                                            "skillCount": 0,
-                                            "hasHooks": false,
-                                            "hasAgents": false,
-                                            "hasMcp": false,
-                                            "installStatus": "update_available",
-                                            "installedVersion": "1.0.0"
-                                        }],
-                                        "error": null
-                                    }]
-                                }
-                            });
-                        let raw = serde_json::value::RawValue::from_string(
-                                response.to_string(),
-                            )
-                            .expect("serialize marketplace list response");
-                        let _ = args
-                            .response_tx
-                            .send(Ok(acp::ExtResponse::new(Arc::from(raw))));
-                    }
-                    "pi/marketplace/action" => {
-                        action_calls_for_task.fetch_add(1, Ordering::SeqCst);
-                        let req: pi_hooks_plugins_types::MarketplaceActionRequest = serde_json::from_str(
-                                args.request.params.get(),
-                            )
-                            .expect("parse marketplace action request");
-                        match req.action {
-                            MarketplaceAction::Update {
-                                source_url_or_path,
-                                plugin_relative_path,
-                            } if source_url_or_path == "https://example.com/plugins.git"
-                                && plugin_relative_path == "plugins/test-plugin" => {
-                                saw_update_for_task.store(true, Ordering::SeqCst);
-                            }
-                            _ => {
-                                saw_wrong_action_for_task.store(true, Ordering::SeqCst);
-                            }
-                        }
-                        let outcome = ActionOutcome {
-                            status: OutcomeStatus::InternalError,
-                            message: "update failed".into(),
-                            requires_reload: false,
-                            requires_restart: false,
-                        };
-                        let response = serde_json::json!({ "result": outcome });
-                        let raw = serde_json::value::RawValue::from_string(
-                                response.to_string(),
-                            )
-                            .expect("serialize marketplace action response");
-                        let _ = args
-                            .response_tx
-                            .send(Ok(acp::ExtResponse::new(Arc::from(raw))));
-                    }
-                    "pi/plugins/notify-updates" => {
-                        saw_success_notification_for_task.store(true, Ordering::SeqCst);
-                        let raw = serde_json::value::RawValue::from_string("{}".into())
-                            .expect("serialize notify response");
-                        let _ = args
-                            .response_tx
-                            .send(Ok(acp::ExtResponse::new(Arc::from(raw))));
-                    }
-                    _ => {
-                        let raw = serde_json::value::RawValue::from_string("{}".into())
-                            .expect("serialize fallback response");
-                        let _ = args
-                            .response_tx
-                            .send(Ok(acp::ExtResponse::new(Arc::from(raw))));
-                    }
-                }
-            }
-        }
-    });
-    let mut tasks = JoinSet::new();
-    let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
-    execute(
-        Effect::CheckMarketplaceUpdates {
-            agent_id: AgentId(7),
-            session_id: acp::SessionId::new(Arc::from("test-session")),
-        },
-        &mut tasks,
-        &tx,
-        Path::new("."),
-        &SessionFlags::default(),
-        &progress_tx,
-    );
-    let result = tasks
-        .join_next()
-        .await
-        .expect("task should complete")
-        .expect("task should not panic");
-    match result {
-        TaskResult::MarketplaceUpdatesAvailable { agent_id, updates } => {
-            assert_eq!(agent_id, AgentId(7));
-            assert!(updates.is_empty());
-        }
-        other => panic!("expected MarketplaceUpdatesAvailable, got {other:?}"),
-    }
-    assert_eq!(
-        action_calls.load(Ordering::SeqCst),
-        0,
-        "standard ACP mode does not call legacy marketplace ext RPC"
-    );
-    assert!(!saw_update.load(Ordering::SeqCst));
-    assert!(!saw_wrong_action.load(Ordering::SeqCst));
-    assert!(!saw_success_notification.load(Ordering::SeqCst));
-}
-#[tokio::test]
-async fn foreign_scan_task_echoes_sequence_without_enabled_sources() {
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut tasks = JoinSet::new();
-    let app_coordinator = crate::app::ForeignScanCoordinator::default();
-    app_coordinator.begin_request(41);
-    execute(
-        Effect::ScanForeignSessions {
-            cwd: PathBuf::from("/path/that/must/not/be-read"),
-            compat: pi_foreign_sessions::EnabledForeignSessionSources::default(),
-            grok_home: PathBuf::from("/path/that/must/not/be-read"),
-            coordinator: app_coordinator.clone(),
-            seq: 41,
-        },
-        &mut tasks,
-        &tx,
-        Path::new("."),
-        &SessionFlags::default(),
-        &progress_tx,
-    );
-    match tasks.join_next().await.expect("task").expect("no panic") {
-        TaskResult::ForeignSessionsScanned { entries, seq } => {
-            assert!(entries.is_empty());
-            assert_eq!(seq, 41);
-        }
-        other => panic!("expected ForeignSessionsScanned, got {other:?}"),
-    }
-    drop(app_coordinator);
-}
-#[tokio::test]
-async fn foreign_resume_detection_runs_as_task_result() {
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut tasks = JoinSet::new();
-    let (quit, _) = execute(
-        Effect::CanonicalizeForeignResumeCwd {
-            requested_cwd: PathBuf::from("/path/that/does-not-exist"),
-            launch_token: 7,
-        },
-        &mut tasks,
-        &tx,
-        Path::new("."),
-        &SessionFlags::default(),
-        &progress_tx,
-    );
-    assert!(!quit);
-    match tasks.join_next().await.expect("task").expect("no panic") {
-        TaskResult::ForeignResumeCwdCanonicalized {
-            canonical_cwd,
-            launch_token,
-            ..
-        } => {
-            assert!(canonical_cwd.is_none());
-            assert_eq!(launch_token, 7);
-        }
-        other => panic!("expected ForeignResumeCwdCanonicalized, got {other:?}"),
-    }
-    let canonical_cwd = dunce::canonicalize(tempfile::tempdir().unwrap().path())
-        .unwrap();
-    let (quit, _) = execute(
-        Effect::DetectForeignResumeHint {
-            canonical_cwd: canonical_cwd.clone(),
-            compat: pi_foreign_sessions::EnabledForeignSessionSources::default(),
-            grok_home: PathBuf::from("/path/that/must/not-be-read"),
-            launch_token: 8,
-        },
-        &mut tasks,
-        &tx,
-        Path::new("."),
-        &SessionFlags::default(),
-        &progress_tx,
-    );
-    assert!(!quit);
-    match tasks.join_next().await.expect("task").expect("no panic") {
-        TaskResult::ForeignResumeHintDetected {
-            canonical_cwd: result_cwd,
-            launch_token,
-            hint,
-        } => {
-            assert_eq!(result_cwd, canonical_cwd);
-            assert_eq!(launch_token, 8);
-            assert!(hint.is_none());
-        }
-        other => panic!("expected ForeignResumeHintDetected, got {other:?}"),
-    }
-}
 /// `FetchSessionList` uses standard `session/list` (cwd filter on the wire;
-/// picker `query` is applied locally). Failures and `seq`/`query` are echoed.
+/// the picker query is applied locally). The `seq` is echoed back.
 #[tokio::test]
 async fn fetch_session_list_uses_standard_session_list() {
     use pi_acp_lib::AcpAgentMessage;
@@ -1602,51 +939,26 @@ async fn fetch_session_list_uses_standard_session_list() {
             }
         }
     });
-    let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
-    let run = |effect: Effect| {
-        let mut tasks = JoinSet::new();
-        execute(
-            effect,
-            &mut tasks,
-            &tx,
-            Path::new("."),
-            &SessionFlags::default(),
-            &progress_tx,
-        );
-        tasks
-    };
-    let mut tasks = run(Effect::FetchSessionList {
-        query: Some("hit".into()),
-        seq: 7,
-        kind_filter: None,
-    });
+    let mut tasks = JoinSet::new();
+    execute(
+        Effect::FetchSessionList { seq: 8 },
+        &mut tasks,
+        &tx,
+        Path::new("."),
+        &SessionFlags::default(),
+    );
     match tasks.join_next().await.expect("task").expect("no panic") {
-        TaskResult::SessionListLoaded { sessions, scope, seq, query, .. } => {
-            assert_eq!(seq, 7, "seq must be echoed, not reconstructed");
-            assert_eq!(query.as_deref(), Some("hit"), "query must be echoed");
-            assert!(!scope.is_relaxed(), "standard session/list stays cwd-scoped");
-            assert_eq!(sessions.len(), 1);
-            assert_eq!(sessions[0].id, "sess-hit");
-        }
-        other => panic!("expected SessionListLoaded, got {other:?}"),
-    }
-    let mut tasks = run(Effect::FetchSessionList {
-        query: None,
-        seq: 8,
-        kind_filter: None,
-    });
-    match tasks.join_next().await.expect("task").expect("no panic") {
-        TaskResult::SessionListLoaded { sessions, scope, seq, query, .. } => {
-            assert_eq!(seq, 8);
-            assert_eq!(query, None);
-            assert!(!scope.is_relaxed());
-            assert_eq!(sessions.len(), 2);
+        TaskResult::SessionListLoaded { sessions, seq } => {
+            assert_eq!(seq, 8, "seq must be echoed, not reconstructed");
+            let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
+            assert_eq!(ids.len(), 2, "both sessions are returned unfiltered");
+            assert!(ids.contains(&"sess-hit") && ids.contains(&"sess-other"));
         }
         other => panic!("expected SessionListLoaded, got {other:?}"),
     }
 }
 #[tokio::test]
-async fn fetch_session_list_echoes_query_on_error() {
+async fn fetch_session_list_echoes_seq_on_error() {
     use pi_acp_lib::AcpAgentMessage;
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     tokio::spawn(async move {
@@ -1659,28 +971,18 @@ async fn fetch_session_list_echoes_query_on_error() {
             }
         }
     });
-    let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
     let mut tasks = JoinSet::new();
     execute(
-        Effect::FetchSessionList {
-            query: Some("fail-me".into()),
-            seq: 9,
-            kind_filter: None,
-        },
+        Effect::FetchSessionList { seq: 9 },
         &mut tasks,
         &tx,
         Path::new("."),
         &SessionFlags::default(),
-        &progress_tx,
     );
     match tasks.join_next().await.expect("task").expect("no panic") {
-        TaskResult::SessionListFailed { seq, query, .. } => {
-            assert_eq!(seq, 9);
-            assert_eq!(
-                query.as_deref(),
-                Some("fail-me"),
-                "failure must echo the query (gates the indicator clear)"
-            );
+        TaskResult::SessionListFailed { seq, error } => {
+            assert_eq!(seq, 9, "seq must be echoed on failure too");
+            assert!(error.contains("boom"), "error text is surfaced: {error}");
         }
         other => panic!("expected SessionListFailed, got {other:?}"),
     }
@@ -1702,79 +1004,18 @@ async fn fetch_session_list_ignores_kind_facet_filter() {
             }
         }
     });
-    let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
     let mut tasks = JoinSet::new();
     execute(
         Effect::FetchSessionList {
-            query: None,
             seq: 1,
-            kind_filter: Some(vec!["build".into()]),
         },
         &mut tasks,
         &tx,
         Path::new("."),
         &SessionFlags::default(),
-        &progress_tx,
     );
     let _ = tasks.join_next().await;
     assert_eq!(*captured.lock().unwrap(), 1);
-}
-#[tokio::test]
-async fn fetch_workflows_list_returns_empty_in_standard_acp_mode() {
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    let session_id = acp::SessionId::new(Arc::from("test-session"));
-    let mut tasks = JoinSet::new();
-    let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
-    execute(
-        Effect::FetchWorkflowsList {
-            agent_id: AgentId(3),
-            session_id: session_id.clone(),
-        },
-        &mut tasks,
-        &tx,
-        Path::new("."),
-        &SessionFlags::default(),
-        &progress_tx,
-    );
-    match tasks.join_next().await.expect("task").expect("no panic") {
-        TaskResult::WorkflowsListLoaded {
-            agent_id,
-            session_id: result_session_id,
-            result,
-        } => {
-            assert_eq!(agent_id, AgentId(3));
-            assert_eq!(result_session_id, session_id);
-            assert!(result.expect("workflows load").is_empty());
-        }
-        other => panic!("expected WorkflowsListLoaded, got {other:?}"),
-    }
-}
-/// The debounce arm must echo `query` and `seq` exactly. Awaits the real
-/// 250 ms debounce (tokio's paused clock needs `test-util`, not enabled
-/// in this crate).
-#[tokio::test]
-async fn debounce_session_search_echoes_query_and_seq() {
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut tasks = JoinSet::new();
-    execute(
-        Effect::DebounceSessionSearch {
-            query: "abc".into(),
-            seq: 9,
-        },
-        &mut tasks,
-        &tx,
-        Path::new("."),
-        &SessionFlags::default(),
-        &progress_tx,
-    );
-    match tasks.join_next().await.expect("task").expect("no panic") {
-        TaskResult::SessionSearchDebounceExpired { query, seq } => {
-            assert_eq!(query, "abc");
-            assert_eq!(seq, 9);
-        }
-        other => panic!("expected SessionSearchDebounceExpired, got {other:?}"),
-    }
 }
 /// Verify that every profile name produced by `SessionFlags::agent_profile()`
 /// is a valid `BuiltinAgentName` that the shell can resolve.
@@ -2090,260 +1331,6 @@ fn to_meta_always_emits_yolo_mode_explicitly() {
     }
 }
 #[test]
-fn to_meta_chat_mode_stamps_kind_and_omits_agent_profile() {
-    let flags = SessionFlags {
-        chat_mode: true,
-        plan_mode: true,
-        subagents: true,
-        ask_user: true,
-        ..Default::default()
-    };
-    let meta = flags.to_meta().expect("chat_mode must emit meta");
-    assert_eq!(meta["pi/session"]["kind"], "chat");
-    assert!(
-            meta.get("agentProfile").is_none(),
-            "K12: chat mode must omit Build agentProfile"
-        );
-    assert_chat_meta_has_no_workspace_bind_keys(
-        &serde_json::Value::Object(meta.clone()),
-    );
-}
-/// Load meta merge: explicit `chat_kind` alone (no process-wide chat_mode)
-/// stamps kind and strips agentProfile — conversation resume acceptance.
-#[test]
-fn load_meta_chat_kind_alone_stamps_kind_and_strips_profile() {
-    let flags = SessionFlags {
-        chat_mode: false,
-        plan_mode: true,
-        subagents: true,
-        ask_user: true,
-        ..Default::default()
-    };
-    let mut meta = flags.to_meta();
-    let chat_kind = true;
-    if chat_kind || flags.chat_mode {
-        apply_chat_kind_meta(&mut meta);
-        scrub_chat_workspace_bind_meta(&mut meta);
-    }
-    let meta = meta.expect("chat_kind must produce meta");
-    assert_eq!(meta["pi/session"]["kind"], "chat");
-    assert!(
-            meta.get("agentProfile").is_none(),
-            "entry chat_kind must strip Build agentProfile"
-        );
-    assert_chat_meta_has_no_workspace_bind_keys(
-        &serde_json::Value::Object(meta.clone()),
-    );
-}
-/// Chat create/load meta must never include client workspace-bind keys
-/// (`envId`, Direct hub id, gateway attach), even if cloud fields are
-/// present on the effect — backend owns workspace for `kind=chat`.
-fn assert_chat_meta_has_no_workspace_bind_keys(meta: &serde_json::Value) {
-    for key in CHAT_FORBIDDEN_WORKSPACE_BIND_KEYS {
-        assert!(
-                meta.get(*key).is_none(),
-                "chat meta must not include workspace-bind key {key:?}: {meta}"
-            );
-    }
-    assert!(
-            meta.get("x.ai/cloud_existing_workspace").is_none(),
-            "chat meta without attach must not include existing workspace: {meta}"
-        );
-}
-#[test]
-fn chat_create_meta_never_includes_workspace_bind_keys_when_cloud_fields_set() {
-    let flags = SessionFlags {
-        chat_mode: true,
-        ..Default::default()
-    };
-    let mut meta = flags.to_meta();
-    apply_chat_kind_meta(&mut meta);
-    scrub_chat_workspace_bind_meta(&mut meta);
-    let meta = meta.expect("chat create must emit meta");
-    assert_eq!(meta["pi/session"]["kind"], "chat");
-    assert_chat_meta_has_no_workspace_bind_keys(
-        &serde_json::Value::Object(meta.clone()),
-    );
-}
-#[test]
-fn chat_load_meta_never_includes_workspace_bind_keys() {
-    let flags = SessionFlags::default();
-    let mut meta = flags.to_meta();
-    apply_chat_kind_meta(&mut meta);
-    {
-        let obj = meta.get_or_insert_with(acp::Meta::new);
-        obj.insert("envId".into(), serde_json::json!("env-poison"));
-        obj.insert("x.ai/cloud_server_id".into(), serde_json::json!("srv-poison"));
-        obj.insert(
-            "x.ai/cloud_existing_workspace".into(),
-            serde_json::json!({
-                    "server_id": "srv-poison",
-                    "cwd": "/ws",
-                }),
-        );
-    }
-    scrub_chat_workspace_bind_meta(&mut meta);
-    let meta = meta.expect("chat load must emit meta");
-    assert_eq!(meta["pi/session"]["kind"], "chat");
-    assert_chat_meta_has_no_workspace_bind_keys(
-        &serde_json::Value::Object(meta.clone()),
-    );
-}
-/// Attach stamp keeps existing workspace + local intent; envId / Direct hub stay stripped.
-#[cfg(feature = "local-workspace")]
-#[test]
-fn scrub_chat_workspace_matrix_attach_exception() {
-    use crate::app::session_startup::{LocalWorkspaceConfig, LocalWorkspaceMode};
-    let mut meta = Some(acp::Meta::new());
-    {
-        let obj = meta.as_mut().unwrap();
-        obj.insert("envId".into(), serde_json::json!("env-x"));
-        obj.insert("pi/cloud_server_id".into(), serde_json::json!("hub-x"));
-        obj.insert(
-            "pi/cloud_existing_workspace".into(),
-            serde_json::json!({"server_id": "srv-x", "cwd": "/ws"}),
-        );
-    }
-    scrub_chat_workspace_bind_meta(&mut meta);
-    let scrubbed = meta.as_ref().unwrap();
-    assert!(scrubbed.get("envId").is_none());
-    assert!(scrubbed.get("pi/cloud_server_id").is_none());
-    assert!(scrubbed.get("pi/cloud_existing_workspace").is_none());
-    let mut meta = Some(acp::Meta::new());
-    apply_local_workspace_meta(
-        &mut meta,
-        &LocalWorkspaceConfig {
-            mode: LocalWorkspaceMode::Attach,
-            cwd: Some(std::path::PathBuf::from("/tmp/repo")),
-            server_id: Some("srv-dogfood".into()),
-        },
-    );
-    {
-        let obj = meta.as_mut().unwrap();
-        obj.insert("envId".into(), serde_json::json!("env-must-go"));
-        obj.insert("pi/cloud_server_id".into(), serde_json::json!("hub-must-go"));
-    }
-    scrub_chat_workspace_bind_meta(&mut meta);
-    let scrubbed = meta.as_ref().unwrap();
-    assert!(scrubbed.get("envId").is_none(), "envId must stay scrubbed");
-    assert!(
-            scrubbed.get("pi/cloud_server_id").is_none(),
-            "Direct hub must stay scrubbed"
-        );
-    assert_eq!(
-            scrubbed["pi/cloud_existing_workspace"]["server_id"],
-            "srv-dogfood"
-        );
-    assert_eq!(scrubbed["pi/local_workspace"]["mode"], "attach");
-    assert_eq!(scrubbed["pi/local_workspace"]["server_id"], "srv-dogfood");
-    assert_eq!(scrubbed["pi/local_workspace"]["cwd"], "/tmp/repo");
-}
-#[cfg(feature = "local-workspace")]
-#[test]
-fn to_meta_chat_attach_stamps_local_and_existing() {
-    use crate::app::session_startup::{LocalWorkspaceConfig, LocalWorkspaceMode};
-    let flags = SessionFlags {
-        chat_mode: true,
-        local_workspace: Some(LocalWorkspaceConfig {
-            mode: LocalWorkspaceMode::Attach,
-            cwd: Some(std::path::PathBuf::from("/tmp/repo")),
-            server_id: Some("srv-1".into()),
-        }),
-        ..Default::default()
-    };
-    let meta = flags.to_meta().expect("meta");
-    assert_eq!(meta["pi/session"]["kind"], "chat");
-    assert_eq!(meta["pi/local_workspace"]["mode"], "attach");
-    assert_eq!(meta["pi/cloud_existing_workspace"]["server_id"], "srv-1");
-    assert!(meta.get("envId").is_none());
-    assert!(meta.get("pi/cloud_server_id").is_none());
-}
-#[cfg(feature = "local-workspace")]
-#[test]
-fn to_meta_chat_own_stamps_intent_without_existing() {
-    use crate::app::session_startup::{LocalWorkspaceConfig, LocalWorkspaceMode};
-    let flags = SessionFlags {
-        chat_mode: true,
-        local_workspace: Some(LocalWorkspaceConfig {
-            mode: LocalWorkspaceMode::Own,
-            cwd: Some(std::path::PathBuf::from("/tmp/repo-own")),
-            server_id: None,
-        }),
-        ..Default::default()
-    };
-    let meta = flags.to_meta().expect("meta");
-    assert_eq!(meta["pi/local_workspace"]["mode"], "own");
-    assert_eq!(meta["pi/local_workspace"]["cwd"], "/tmp/repo-own");
-    assert!(meta["pi/local_workspace"].get("server_id").is_none());
-    assert!(
-            meta.get("pi/cloud_existing_workspace").is_none(),
-            "own must not stamp existing; shell mints server_id"
-        );
-    assert!(meta.get("envId").is_none());
-}
-#[cfg(feature = "local-workspace")]
-#[test]
-fn mid_session_add_params_scrub_envid() {
-    use crate::app::session_startup::{LocalWorkspaceConfig, LocalWorkspaceMode};
-    let params = mid_session_add_local_workspace_params(
-        "sess-1",
-        &LocalWorkspaceConfig {
-            mode: LocalWorkspaceMode::Attach,
-            cwd: Some(std::path::PathBuf::from("/tmp/repo")),
-            server_id: Some("srv-add".into()),
-        },
-    );
-    assert_eq!(params["sessionId"], "sess-1");
-    assert_eq!(params["meta"]["pi/local_workspace"]["mode"], "attach");
-    assert_eq!(
-            params["meta"]["pi/cloud_existing_workspace"]["server_id"],
-            "srv-add"
-        );
-    assert!(params["meta"].get("envId").is_none());
-}
-#[cfg(feature = "local-workspace")]
-#[test]
-fn reject_non_fs_only_advertised_tools_matrix() {
-    let fs_only = ["workspace.fs_list", "workspace.fs_read_file", "workspace.put_files"];
-    assert!(reject_non_fs_only_advertised_tools(Some(&fs_only[..])).is_ok());
-    assert!(
-            reject_non_fs_only_advertised_tools(None)
-                .unwrap_err()
-                .contains("uncheckable")
-        );
-    assert!(
-            reject_non_fs_only_advertised_tools(Some(&[][..]))
-                .unwrap_err()
-                .contains("empty")
-        );
-    let with_exec = ["workspace.fs_list", "workspace.bash", "terminal.exec"];
-    let err = reject_non_fs_only_advertised_tools(Some(&with_exec[..])).unwrap_err();
-    assert!(err.contains("FS-only"), "{err}");
-    assert!(err.contains("workspace.bash"), "{err}");
-    assert!(err.contains("terminal.exec"), "{err}");
-}
-#[cfg(feature = "local-workspace")]
-#[test]
-fn finalize_chat_session_meta_stamps_attach_on_worktree_path() {
-    use crate::app::session_startup::{LocalWorkspaceConfig, LocalWorkspaceMode};
-    let flags = SessionFlags {
-        chat_mode: false,
-        local_workspace: Some(LocalWorkspaceConfig {
-            mode: LocalWorkspaceMode::Attach,
-            cwd: Some(std::path::PathBuf::from("/tmp/repo")),
-            server_id: Some("srv-wt".into()),
-        }),
-        ..Default::default()
-    };
-    let mut meta = flags.to_meta();
-    finalize_chat_session_meta(&mut meta, true, &flags);
-    let meta = meta.expect("meta");
-    assert_eq!(meta["pi/session"]["kind"], "chat");
-    assert_eq!(meta["pi/local_workspace"]["mode"], "attach");
-    assert_eq!(meta["pi/cloud_existing_workspace"]["server_id"], "srv-wt");
-    assert!(meta.get("envId").is_none());
-}
-#[test]
 fn to_meta_yolo_suppresses_auto_mode() {
     let flags = SessionFlags {
         auto_mode: true,
@@ -2375,164 +1362,6 @@ fn agent_profile_definitions_have_correct_names() {
                 "definition name should match the kebab-case profile name"
             );
     }
-}
-fn make_session_info(
-    model: &str,
-    resolved: Option<&str>,
-    used: u64,
-    total: u64,
-) -> pi_shell::session::SessionInfoResponse {
-    use pi_shell::session::acp_types::{ContextInfo, SessionInfoData};
-    pi_shell::session::SessionInfoResponse {
-        session_id: "test-session-id".into(),
-        cwd: "/tmp/test".into(),
-        data: SessionInfoData {
-            agent_name: None,
-            model: Some(model.into()),
-            model_display_name: None,
-            resolved_model_id: resolved.map(Into::into),
-            model_fingerprint: None,
-            show_model_fingerprint: false,
-            api_backend: None,
-            conversation_id: None,
-            turns: 0,
-            turn_index: 0,
-            context: ContextInfo {
-                used,
-                total,
-                auto_compact_threshold_percent: 85,
-                ..Default::default()
-            },
-        },
-    }
-}
-#[test]
-fn format_session_info_session_auth_ignores_api_key_env() {
-    let info = make_session_info("auto", None, 1000, 10000);
-    let text = format_session_info(&info, None, false, false, true);
-    assert!(text.contains("Auth method: OAuth"), "{text}");
-    assert!(!text.contains("Manage account and credits"), "{text}");
-    assert!(!text.contains("Also present: PI_API_KEY"), "{text}");
-    assert!(!text.contains("console.x.ai"), "{text}");
-    assert!(!text.contains("grok login"), "{text}");
-}
-#[test]
-fn format_session_info_api_key_without_env() {
-    let info = make_session_info("auto", None, 1000, 10000);
-    let text = format_session_info(&info, None, false, true, false);
-    assert!(text.contains("Auth method: API key\n"), "{text}");
-    assert!(!text.contains("PI_API_KEY"), "{text}");
-    assert!(!text.contains("Manage account and credits"), "{text}");
-    assert!(
-            text.contains("Run `grok login` to use your SuperGrok subscription instead."),
-            "{text}"
-        );
-    assert!(!text.contains("grok.com"), "{text}");
-}
-#[test]
-fn format_session_info_api_key_auth_suggests_grok_login() {
-    let info = make_session_info("auto", None, 1000, 10000);
-    let text = format_session_info(&info, None, false, true, true);
-    assert!(text.contains("Auth method: API key (PI_API_KEY)"), "{text}");
-    assert!(!text.contains("Manage account and credits"), "{text}");
-    assert!(
-            text.contains("Run `grok login` to use your SuperGrok subscription instead."),
-            "{text}"
-        );
-    assert!(!text.contains("Also present: PI_API_KEY"), "{text}");
-    assert!(!text.contains("console.x.ai"), "{text}");
-    assert!(!text.contains("grok.com"), "{text}");
-}
-#[test]
-fn format_session_info_session_only_shows_oauth() {
-    let info = make_session_info("auto", None, 1000, 10000);
-    let text = format_session_info(&info, None, false, false, false);
-    assert!(text.contains("Auth method: OAuth"), "{text}");
-    assert!(!text.contains("Manage account and credits"), "{text}");
-    assert!(!text.contains("Also present: PI_API_KEY"), "{text}");
-    assert!(!text.contains("console.x.ai"), "{text}");
-    assert!(!text.contains("grok login"), "{text}");
-}
-#[test]
-fn format_session_info_shows_conversation_id_when_present() {
-    let mut info = make_session_info("auto", None, 1000, 10000);
-    info.data.conversation_id = Some("conv_abc123".into());
-    let text = format_session_info(&info, None, false, false, false);
-    assert!(text.contains("Conversation ID: conv_abc123"));
-    assert!(text.contains("Session ID: test-session-id"));
-}
-#[test]
-fn format_session_info_shows_resolved_when_enabled_and_different() {
-    let info = make_session_info("grok-4.5", Some("grok-4.3"), 1000, 10000);
-    let text = format_session_info(&info, None, true, false, false);
-    assert!(text.contains("Model: grok-4.5 (grok-4.3)"));
-}
-#[test]
-fn format_session_info_hides_resolved_when_disabled() {
-    let info = make_session_info("grok-4.5", Some("grok-4.3"), 1000, 10000);
-    let text = format_session_info(&info, None, false, false, false);
-    assert!(text.contains("Model: grok-4.5"));
-    assert!(!text.contains("grok-4.3"));
-}
-/// The (cwd, id)-derived summary path resolves and `generated_title` wins.
-#[tokio::test]
-async fn lookup_session_title_loads_single_summary_by_cwd() {
-    let root = tempfile::tempdir().unwrap();
-    let cwd = "/workspace";
-    let dir = root
-        .path()
-        .join("sessions")
-        .join(pi_shell::util::grok_home::encode_cwd_dirname(cwd))
-        .join("sess-1");
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(
-            dir.join("summary.json"),
-            serde_json::json!({
-                "info": { "id": "sess-1", "cwd": cwd },
-                "session_summary": "raw summary",
-                "created_at": "2026-01-01T00:00:00Z",
-                "updated_at": "2026-01-01T00:00:00Z",
-                "num_messages": 1,
-                "current_model_id": "m",
-                "generated_title": "Renamed title"
-            })
-                .to_string(),
-        )
-        .unwrap();
-    let id = acp::SessionId::new("sess-1");
-    let title = lookup_session_title_in(root.path().to_path_buf(), &id, cwd).await;
-    assert_eq!(title.as_deref(), Some("Renamed title"));
-}
-#[test]
-fn format_session_info_no_parens_when_resolved_matches_requested() {
-    let info = make_session_info("grok-4.5", Some("grok-4.5"), 1000, 10000);
-    let text = format_session_info(&info, None, true, false, false);
-    assert!(text.contains("Model: grok-4.5"));
-    assert!(!text.contains("(grok-4.5)"));
-}
-#[test]
-fn format_session_info_shows_model_hash_when_catalog_flag_set() {
-    let mut info = make_session_info("v9", None, 1000, 10000);
-    info.data.model_fingerprint = Some("abc123".into());
-    info.data.show_model_fingerprint = true;
-    let text = format_session_info(&info, None, false, false, false);
-    assert!(text.contains("Model Hash: abc123"));
-}
-#[test]
-fn format_session_info_hides_model_hash_for_noncoding_without_flag() {
-    let mut info = make_session_info("v9", None, 1000, 10000);
-    info.data.model_fingerprint = Some("abc123".into());
-    info.data.show_model_fingerprint = false;
-    let text = format_session_info(&info, None, false, false, false);
-    assert!(!text.contains("Model Hash"));
-}
-#[test]
-fn format_session_info_shows_model_hash_for_coding_slug_without_flag() {
-    let mut info = make_session_info("grok-build", None, 1000, 10000);
-    info.data.model_fingerprint = Some("abc123".into());
-    info.data.show_model_fingerprint = false;
-    let text = format_session_info(&info, None, false, false, false);
-    assert!(text.contains("Model Hash: abc123"));
 }
 #[test]
 fn session_picker_summary_strips_skill_xml() {
@@ -2590,76 +1419,4 @@ fn sanitize_user_error_collapses_disk_full() {
             sanitize_user_error("couldn't create worktree: failed to get HEAD commit from source"),
             "couldn't create worktree: failed to get HEAD commit from source"
         );
-}
-/// Production ordering of the deferred worktree resume failure: the
-/// detail is sanitized FIRST, then composed — sanitizing the composed
-/// message would collapse a disk-full chain whole and erase the title
-/// hint for a deferred local-miss target.
-#[test]
-fn worktree_resume_failure_sanitizes_detail_before_hint() {
-    let raw = "failed to copy index: No space left on device (os error 28)";
-    let msg = worktree_resume_failure_message(
-        Some("typo title"),
-        &sanitize_user_error(raw),
-    );
-    assert_eq!(
-            msg,
-            format!(
-                "couldn't resume worktree session: No space left on device; {}",
-                crate::app::session_title_resolve::title_miss_hint("typo title")
-            )
-        );
-    let id_msg = worktree_resume_failure_message(None, &sanitize_user_error(raw));
-    assert_eq!(id_msg, "couldn't resume worktree session: No space left on device");
-}
-/// A resume-picker entry converts to a **dormant** dashboard roster row
-/// (the non-leader idle source) preserving title, cwd, model, worktree
-/// flag, origin, and last-change time.
-#[test]
-fn session_picker_entry_maps_to_dormant_roster_row() {
-    use crate::app::app_view::SessionPickerEntry;
-    use crate::app::roster::RosterActivity;
-    let updated = chrono::Utc::now();
-    let entry = SessionPickerEntry {
-        id: "sess-1".to_string(),
-        summary: "Wire up dashboard".to_string(),
-        updated_at: updated,
-        created_at: updated,
-        cwd: "/repo/app".to_string(),
-        hostname: Some("box".to_string()),
-        source: "local".to_string(),
-        model_id: Some("grok-4".to_string()),
-        num_messages: 3,
-        last_active_at: Some(updated),
-        branch: None,
-        repo_name: "repo-app".to_string(),
-        worktree_label: Some("wt".to_string()),
-        last_turn_summary: Some("Fixed the parser".to_string()),
-        last_recap: None,
-        card_detail: None,
-    };
-    let roster = session_picker_entry_to_roster(&entry);
-    assert_eq!(roster.session_id, "sess-1");
-    assert_eq!(roster.title.as_deref(), Some("Wire up dashboard"));
-    assert_eq!(roster.cwd, "/repo/app");
-    assert!(roster.is_worktree, "worktree_label present → is_worktree");
-    assert_eq!(roster.model_id.as_deref(), Some("grok-4"));
-    assert_eq!(roster.activity, RosterActivity::Dormant);
-    assert_eq!(
-            roster.last_turn_summary.as_deref(),
-            Some("Fixed the parser")
-        );
-    assert!(!roster.resident);
-    assert_eq!(roster.last_change_unix_ms, updated.timestamp_millis());
-    assert_eq!(roster.origin.kind, "local");
-    assert_eq!(roster.origin.host.as_deref(), Some("box"));
-}
-#[test]
-fn rewind_execute_params_sends_conversation_only_with_force() {
-    let params = rewind_execute_params("sess-1", 3);
-    assert_eq!(params["sessionId"], "sess-1");
-    assert_eq!(params["targetPromptIndex"], 3);
-    assert_eq!(params["force"], true);
-    assert_eq!(params["mode"], REWIND_MODE_WIRE);
-    assert_eq!(params["mode"], "conversation_only");
 }

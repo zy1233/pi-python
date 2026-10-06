@@ -39,12 +39,6 @@ impl DualClock {
     pub(crate) fn elapsed(&self) -> (Duration, Duration) {
         self.elapsed_between(Self::now())
     }
-
-    /// `(awake, total, suspended)` durations since this instant.
-    pub(crate) fn elapsed_split(&self) -> (Duration, Duration, Duration) {
-        let (awake, total) = self.elapsed();
-        (awake, total, total.saturating_sub(awake))
-    }
 }
 
 #[cfg(test)]

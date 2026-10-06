@@ -7,17 +7,12 @@ use crate::tools::todo::TodoState;
 use agent_client_protocol as acp;
 use async_trait::async_trait;
 use fs2::FileExt;
+use pi_chat_state::StrictAppendAck;
+use pi_workspace::session::file_state::RewindPoint;
 use std::fs::OpenOptions;
 use std::io::{self, Read, Seek, Write};
 use std::path::{Path, PathBuf};
-use pi_chat_state::StrictAppendAck;
-use pi_workspace::session::file_state::RewindPoint;
 mod copy;
-#[derive(Clone)]
-enum SessionDirMode {
-    FromRoot(PathBuf),
-    Explicit(PathBuf),
-}
 #[derive(Clone, Copy)]
 pub(crate) enum AppendDurability {
     Buffered,
@@ -26,7 +21,7 @@ pub(crate) enum AppendDurability {
 /// JSONL storage under `{root}/sessions/{url_encoded_cwd}/{session_id}/`.
 #[derive(Clone)]
 pub struct JsonlStorageAdapter {
-    dir_mode: SessionDirMode,
+    root_dir: PathBuf,
     #[cfg(test)]
     update_append_probe: Option<std::sync::Arc<AppendProbe>>,
 }
@@ -40,64 +35,27 @@ impl Default for JsonlStorageAdapter {
 impl JsonlStorageAdapter {
     pub fn new() -> Self {
         Self {
-            dir_mode: SessionDirMode::FromRoot(crate::util::grok_home::grok_home()),
+            root_dir: crate::util::grok_home::grok_home(),
             #[cfg(test)]
             update_append_probe: None,
         }
     }
     pub fn with_root(root_dir: PathBuf) -> Self {
         Self {
-            dir_mode: SessionDirMode::FromRoot(root_dir),
+            root_dir,
             #[cfg(test)]
             update_append_probe: None,
         }
-    }
-    /// Create an adapter that writes directly to `session_dir`, bypassing
-    /// the `{root}/sessions/{cwd}/{id}/` path computation. Used for subagent
-    /// child sessions (top-level dirs; only their metadata nests under the
-    /// parent's session dir).
-    pub fn with_explicit_session_dir(session_dir: PathBuf) -> Self {
-        Self {
-            dir_mode: SessionDirMode::Explicit(session_dir),
-            #[cfg(test)]
-            update_append_probe: None,
-        }
-    }
-    #[cfg(test)]
-    pub(crate) fn with_update_append_probe(
-        session_dir: PathBuf,
-        append_probe: impl Fn(AppendDurability) -> io::Result<()> + Send + Sync + 'static,
-    ) -> Self {
-        Self {
-            dir_mode: SessionDirMode::Explicit(session_dir),
-            update_append_probe: Some(std::sync::Arc::new(append_probe)),
-        }
-    }
-    /// Load chat history from a specific directory.
-    /// Used by fork bootstrap to load the copied parent conversation.
-    pub fn load_chat_history_from_dir(
-        &self,
-        dir: &std::path::Path,
-    ) -> std::io::Result<Vec<ConversationItem>> {
-        let chat_file = dir.join(super::CHAT_HISTORY_FILE);
-        self.read_chat_history_sync(chat_file, CHAT_FORMAT_VERSION)
     }
     fn session_dir(&self, info: &Info) -> PathBuf {
-        match &self.dir_mode {
-            SessionDirMode::FromRoot(root) => {
-                crate::util::grok_home::sessions_cwd_dir_in(root, &info.cwd)
-                    .join(info.id.to_string())
-            }
-            SessionDirMode::Explicit(dir) => dir.clone(),
-        }
+        crate::util::grok_home::sessions_cwd_dir_in(&self.root_dir, &info.cwd)
+            .join(info.id.to_string())
     }
-    /// Create `info`'s session dir owner-only. `FromRoot` also ensures the
-    /// `<encoded-cwd>` shield + root; `Explicit` parents are caller-owned.
+    /// Create `info`'s session dir owner-only, ensuring the `<encoded-cwd>`
+    /// shield + root first.
     fn create_session_dir_owner_only(&self, info: &Info) -> io::Result<PathBuf> {
         let dir = self.session_dir(info);
-        if let SessionDirMode::FromRoot(root) = &self.dir_mode {
-            let _ = crate::util::grok_home::ensure_sessions_cwd_dir_in(root, &info.cwd);
-        }
+        let _ = crate::util::grok_home::ensure_sessions_cwd_dir_in(&self.root_dir, &info.cwd);
         crate::util::grok_home::create_dir_all_owner_only(&dir)?;
         Ok(dir)
     }
@@ -164,11 +122,7 @@ impl JsonlStorageAdapter {
     /// Shared by both `list_sessions` (full scan) and `list_sessions_recent`
     /// (mtime-based tail).
     fn scan_session_dirs(&self, cwd: Option<&str>) -> io::Result<Vec<PathBuf>> {
-        let root_dir = match &self.dir_mode {
-            SessionDirMode::FromRoot(root) => root,
-            SessionDirMode::Explicit(_) => return Ok(Vec::new()),
-        };
-        crate::session::storage::relocation::RelocationView::load(root_dir)
+        crate::session::storage::relocation::RelocationView::load(&self.root_dir)
             .and_then(|view| view.session_dirs(cwd))
             .map_err(io::Error::other)
     }
@@ -204,7 +158,7 @@ impl JsonlStorageAdapter {
     /// only reads the top `limit` files. On a machine with ~12K sessions
     /// this reduces cold-boot `workspace_list` from ~3s to ~200ms.
     /// Final order among candidates uses `last_active_at` else `updated_at`.
-    pub async fn list_sessions_recent(&self, limit: usize) -> io::Result<Vec<Summary>> {
+    pub(crate) async fn list_sessions_recent(&self, limit: usize) -> io::Result<Vec<Summary>> {
         let session_dirs = self.scan_session_dirs(None)?;
         let mut candidates: Vec<(PathBuf, std::time::SystemTime)> =
             Vec::with_capacity(session_dirs.len());
@@ -1668,11 +1622,11 @@ impl StorageAdapter for JsonlStorageAdapter {
         info: &Info,
         segment: &crate::extensions::notification::CompactionSegmentFile,
     ) -> io::Result<()> {
-        use tokio::io::AsyncWriteExt;
         use pi_compaction_transcript::{
             COMPACTION_DIR, INDEX_FILE, INDEX_HEADER, extract_keywords, render_index_row,
             render_segment_md, segment_filename,
         };
+        use tokio::io::AsyncWriteExt;
         let base = self.session_dir(info).join(COMPACTION_DIR);
         tokio::fs::create_dir_all(&base).await?;
         let index = next_compaction_segment_index(&base).await;

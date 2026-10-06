@@ -43,20 +43,12 @@ fn last_credit_limit_block(
 }
 
 /// Dispatch a `BillingFetched` task result with sensible defaults.
-fn open_usage_modal_nonce(app: &AppView) -> u64 {
-    match app.agents[&AgentId(0)].active_modal.as_ref() {
-        Some(crate::views::modal::ActiveModal::UsageInfo { state }) => state.fetch_nonce,
-        _ => 0,
-    }
-}
-
 fn dispatch_billing(
     app: &mut AppView,
     balance: Option<crate::views::credit_bar::CreditBalance>,
     silent: bool,
     subscription_tier: Option<String>,
 ) {
-    let nonce = open_usage_modal_nonce(app);
     dispatch(
         Action::TaskComplete(TaskResult::BillingFetched {
             agent_id: AgentId(0),
@@ -64,7 +56,6 @@ fn dispatch_billing(
             silent,
             subscription_tier,
             autotopup: crate::views::credit_bar::AutoTopupFetch::Unchanged,
-            nonce,
         }),
         app,
     );
@@ -494,77 +485,6 @@ fn upsell_max_tier_not_idempotent_pushes_multiple_cards() {
 
 // ── ShowUsage / session usage ───────────────────────────────────────
 
-fn is_session_usage_fetch(effects: &[Effect]) -> bool {
-    matches!(
-        effects,
-        [Effect::FetchSessionUsage { agent_id, .. }] if *agent_id == AgentId(0)
-    )
-}
-
-fn is_nonsilent_billing(effects: &[Effect]) -> bool {
-    matches!(
-        effects,
-        [Effect::FetchBilling { agent_id, silent, .. }] if *agent_id == AgentId(0) && !*silent
-    )
-}
-
-fn complete_session_usage(
-    app: &mut AppView,
-    session_id: &str,
-    usage: pi_shell::extensions::notification::PromptUsage,
-) -> Vec<Effect> {
-    dispatch(
-        Action::TaskComplete(TaskResult::SessionUsageComplete {
-            agent_id: AgentId(0),
-            session_id: session_id.to_string().into(),
-            usage: Box::new(usage),
-            nonce: Default::default(),
-        }),
-        app,
-    )
-}
-
-fn fail_session_usage(app: &mut AppView, session_id: &str, error: &str) -> Vec<Effect> {
-    dispatch(
-        Action::TaskComplete(TaskResult::SessionUsageFailed {
-            agent_id: AgentId(0),
-            session_id: session_id.to_string().into(),
-            error: error.into(),
-            nonce: Default::default(),
-        }),
-        app,
-    )
-}
-
-#[test]
-fn show_usage_schedules_session_fetch_only() {
-    let mut app = test_app_with_agent();
-    // Scrollback flow is minimal-only.
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    assert!(is_session_usage_fetch(&dispatch(
-        Action::ShowUsage,
-        &mut app
-    )));
-
-    app.usage_visible = false;
-    assert!(is_session_usage_fetch(&dispatch(
-        Action::ShowUsage,
-        &mut app
-    )));
-}
-
-#[test]
-fn show_usage_without_session_still_surfaces_credits() {
-    let mut app = test_app_with_agent();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    app.agents.get_mut(&AgentId(0)).unwrap().session.session_id = None;
-    let before = agent_scrollback_len(&app);
-    let effects = dispatch(Action::ShowUsage, &mut app);
-    assert!(last_system_text(&app, AgentId(0)).contains("unavailable"));
-    assert_eq!(agent_scrollback_len(&app), before + 1);
-    assert!(is_nonsilent_billing(&effects));
-}
-
 #[test]
 fn team_auth_disables_agent_billing_surface() {
     let mut app = test_app_with_agent();
@@ -579,123 +499,6 @@ fn team_auth_disables_agent_billing_surface() {
     });
     assert!(!app.usage_visible);
     assert!(!app.agents.get(&AgentId(0)).unwrap().billing_surface_visible);
-}
-
-#[serial_test::serial(GROK_TEST_OPEN_URL_FILE)]
-#[test]
-fn manage_billing_gates_on_consumer_billing_surface() {
-    let out = std::env::temp_dir().join(format!("grok-manage-billing-{}.txt", std::process::id()));
-    let _ = std::fs::remove_file(&out);
-    // SAFETY: serialized via `serial_test` so no other test races the env var.
-    unsafe { std::env::set_var("GROK_TEST_OPEN_URL_FILE", &out) };
-    let mut app = test_app_with_agent();
-    dispatch(Action::ManageBilling, &mut app);
-    let opened = std::fs::read_to_string(&out).unwrap_or_default();
-    assert!(opened.contains("grok.com/?_s=usage"), "got: {opened}");
-    let _ = std::fs::remove_file(&out);
-
-    // Non-consumer: silent no-op (slash command never offers manage).
-    let mut app = test_app_with_agent();
-    app.usage_visible = false;
-    let before = agent_scrollback_len(&app);
-    assert!(dispatch(Action::ManageBilling, &mut app).is_empty());
-    assert_eq!(agent_scrollback_len(&app), before);
-}
-
-#[test]
-fn session_usage_complete_pushes_block_and_chains_billing() {
-    let mut app = test_app_with_agent();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    let before = agent_scrollback_len(&app);
-    let usage = pi_shell::extensions::notification::PromptUsage {
-        totals: pi_shell::extensions::notification::PromptUsageModel {
-            input_tokens: 1_000,
-            output_tokens: 100,
-            total_tokens: 1_100,
-            model_calls: 3,
-            cost_usd_ticks: Some(5_000_000_000),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let effects = complete_session_usage(&mut app, "test-session", usage);
-    assert_eq!(agent_scrollback_len(&app), before + 1);
-    let text = last_system_text(&app, AgentId(0));
-    assert!(
-        text.contains("Session usage") && text.contains("$0.5000"),
-        "{text}"
-    );
-    assert!(is_nonsilent_billing(&effects));
-}
-
-#[test]
-fn session_usage_complete_no_billing_when_surface_hidden() {
-    let mut app = test_app_with_agent();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    app.usage_visible = false;
-    let before = agent_scrollback_len(&app);
-    let effects = complete_session_usage(&mut app, "test-session", Default::default());
-    assert!(effects.is_empty());
-    // Only the credit follow-up is gated; the session block itself must land.
-    assert_eq!(agent_scrollback_len(&app), before + 1);
-}
-
-#[test]
-fn session_usage_complete_redirect_after_session_block() {
-    let mut app = test_app_with_agent();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    app.usage_billing_redirect_url = Some("https://billing.example.com/me".into());
-    // Dispatch defers the redirect until after the session block.
-    let before = agent_scrollback_len(&app);
-    assert!(is_session_usage_fetch(&dispatch(
-        Action::ShowUsage,
-        &mut app
-    )));
-    assert_eq!(agent_scrollback_len(&app), before);
-
-    let effects = complete_session_usage(&mut app, "test-session", Default::default());
-    assert!(effects.is_empty());
-    assert_eq!(agent_scrollback_len(&app), before + 2);
-    assert!(last_system_text(&app, AgentId(0)).contains("https://billing.example.com/me"));
-}
-
-#[test]
-fn session_usage_complete_drops_stale_session() {
-    let mut app = test_app_with_agent();
-    let before = agent_scrollback_len(&app);
-    let effects = complete_session_usage(
-        &mut app,
-        "old-session",
-        pi_shell::extensions::notification::PromptUsage {
-            totals: pi_shell::extensions::notification::PromptUsageModel {
-                model_calls: 99,
-                cost_usd_ticks: Some(1_000_000_000_000),
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-    );
-    assert!(effects.is_empty());
-    assert_eq!(agent_scrollback_len(&app), before);
-}
-
-#[test]
-fn session_usage_failed_pushes_error_and_chains_billing() {
-    let mut app = test_app_with_agent();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    let before = agent_scrollback_len(&app);
-    let effects = fail_session_usage(&mut app, "test-session", "boom");
-    assert_eq!(agent_scrollback_len(&app), before + 1);
-    assert!(last_system_text(&app, AgentId(0)).contains("Couldn't load session usage: boom"));
-    assert!(is_nonsilent_billing(&effects));
-}
-
-#[test]
-fn session_usage_failed_drops_stale_session() {
-    let mut app = test_app_with_agent();
-    let before = agent_scrollback_len(&app);
-    assert!(fail_session_usage(&mut app, "old-session", "boom").is_empty());
-    assert_eq!(agent_scrollback_len(&app), before);
 }
 
 // ── BillingFetched dispatch tests ───────────────────────────────────
@@ -822,181 +625,7 @@ fn billing_fetched_propagates_balance_to_agent() {
     assert_eq!(agent_bal.on_demand_used_cents, Some(1200));
 }
 
-#[test]
-fn billing_fetched_stores_autotopup_on_app_and_agent() {
-    let mut app = test_app_with_agent();
-    let bal = crate::views::credit_bar::CreditBalance {
-        prepaid_balance_cents: Some(1500),
-        ..test_bal(100.0)
-    };
-    let autotopup = crate::views::credit_bar::AutoTopupInfo {
-        enabled: true,
-        topup_amount_cents: Some(2000),
-        max_amount_cents: Some(10000),
-    };
-    dispatch(
-        Action::TaskComplete(TaskResult::BillingFetched {
-            agent_id: AgentId(0),
-            balance: Some(bal),
-            silent: true,
-            subscription_tier: None,
-            autotopup: crate::views::credit_bar::AutoTopupFetch::Resolved(autotopup),
-            nonce: Default::default(),
-        }),
-        &mut app,
-    );
-    assert!(app.auto_topup.as_ref().is_some_and(|at| at.enabled));
-    let agent_at = app.agents.get(&AgentId(0)).unwrap().auto_topup.as_ref();
-    assert_eq!(agent_at.and_then(|at| at.max_amount_cents), Some(10000));
-}
-
-#[test]
-fn billing_fetched_unchanged_autotopup_keeps_cached_rule() {
-    let mut app = test_app_with_agent();
-    let bal = || crate::views::credit_bar::CreditBalance {
-        prepaid_balance_cents: Some(1500),
-        ..test_bal(100.0)
-    };
-    let resolved = crate::views::credit_bar::AutoTopupFetch::Resolved(
-        crate::views::credit_bar::AutoTopupInfo {
-            enabled: true,
-            topup_amount_cents: Some(2000),
-            max_amount_cents: None,
-        },
-    );
-    dispatch(
-        Action::TaskComplete(TaskResult::BillingFetched {
-            agent_id: AgentId(0),
-            balance: Some(bal()),
-            silent: true,
-            subscription_tier: None,
-            autotopup: resolved,
-            nonce: Default::default(),
-        }),
-        &mut app,
-    );
-    // A later refresh whose auto-topup fetch failed must not clear the rule.
-    dispatch(
-        Action::TaskComplete(TaskResult::BillingFetched {
-            agent_id: AgentId(0),
-            balance: Some(bal()),
-            silent: true,
-            subscription_tier: None,
-            autotopup: crate::views::credit_bar::AutoTopupFetch::Unchanged,
-            nonce: Default::default(),
-        }),
-        &mut app,
-    );
-    assert!(app.auto_topup.as_ref().is_some_and(|at| at.enabled));
-    let agent_at = app.agents.get(&AgentId(0)).unwrap().auto_topup.as_ref();
-    assert!(agent_at.is_some_and(|at| at.enabled));
-}
-
-#[test]
-fn billing_fetched_cleared_autotopup_resets_cache() {
-    let mut app = test_app_with_agent();
-    // Seed a known rule while credits exist.
-    dispatch(
-        Action::TaskComplete(TaskResult::BillingFetched {
-            agent_id: AgentId(0),
-            balance: Some(crate::views::credit_bar::CreditBalance {
-                prepaid_balance_cents: Some(1500),
-                ..test_bal(100.0)
-            }),
-            silent: true,
-            subscription_tier: None,
-            autotopup: crate::views::credit_bar::AutoTopupFetch::Resolved(
-                crate::views::credit_bar::AutoTopupInfo {
-                    enabled: true,
-                    topup_amount_cents: Some(2000),
-                    max_amount_cents: None,
-                },
-            ),
-            nonce: Default::default(),
-        }),
-        &mut app,
-    );
-    // Credits gone → `Cleared` resets the cached rule to "unknown" so a later
-    // credits period can't read a stale rule.
-    dispatch(
-        Action::TaskComplete(TaskResult::BillingFetched {
-            agent_id: AgentId(0),
-            balance: Some(test_bal(50.0)),
-            silent: true,
-            subscription_tier: None,
-            autotopup: crate::views::credit_bar::AutoTopupFetch::Cleared,
-            nonce: Default::default(),
-        }),
-        &mut app,
-    );
-    assert!(app.auto_topup.is_none());
-    assert!(app.agents.get(&AgentId(0)).unwrap().auto_topup.is_none());
-}
-
-#[test]
-fn app_billing_fetched_stores_autotopup() {
-    let mut app = test_app_with_agent();
-    let bal = crate::views::credit_bar::CreditBalance {
-        prepaid_balance_cents: Some(500),
-        ..test_bal(0.0)
-    };
-    dispatch(
-        Action::TaskComplete(TaskResult::AppBillingFetched {
-            balance: Some(bal),
-            autotopup: crate::views::credit_bar::AutoTopupFetch::Resolved(
-                crate::views::credit_bar::AutoTopupInfo::disabled(),
-            ),
-        }),
-        &mut app,
-    );
-    assert_eq!(
-        app.credit_balance.and_then(|b| b.prepaid_balance_cents),
-        Some(500)
-    );
-    assert!(app.auto_topup.is_some_and(|at| !at.enabled));
-}
-
 // ── BillingError dispatch tests ─────────────────────────────────────
-
-#[test]
-fn billing_error_silent_does_not_push_scrollback() {
-    let mut app = test_app_with_agent();
-    let before = agent_scrollback_len(&app);
-    dispatch(
-        Action::TaskComplete(TaskResult::BillingError {
-            agent_id: AgentId(0),
-            error: "network timeout".into(),
-            silent: true,
-            nonce: Default::default(),
-        }),
-        &mut app,
-    );
-    assert_eq!(
-        agent_scrollback_len(&app),
-        before,
-        "silent billing error should not push a scrollback message"
-    );
-}
-
-#[test]
-fn billing_error_non_silent_pushes_error_message() {
-    let mut app = test_app_with_agent();
-    let before = agent_scrollback_len(&app);
-    dispatch(
-        Action::TaskComplete(TaskResult::BillingError {
-            agent_id: AgentId(0),
-            error: "service unavailable".into(),
-            silent: false,
-            nonce: Default::default(),
-        }),
-        &mut app,
-    );
-    assert_eq!(
-        agent_scrollback_len(&app),
-        before + 1,
-        "non-silent billing error should push an error message"
-    );
-}
 
 // ── Free-usage paywall tests ────────────────────────────────────────
 
@@ -1155,9 +784,9 @@ fn restricted_command_submit_opens_three_option_upsell() {
     app.agents
         .get_mut(&id)
         .unwrap()
-        .set_restricted_commands(&["imagine".to_string()]);
+        .set_restricted_commands(&["theme".to_string()]);
 
-    let effects = dispatch(Action::SendPrompt("/imagine a sunset".into()), &mut app);
+    let effects = dispatch(Action::SendPrompt("/theme dark".into()), &mut app);
 
     assert!(
         effects.is_empty(),
@@ -1199,9 +828,9 @@ fn restricted_command_alias_also_upsells() {
     app.agents
         .get_mut(&id)
         .unwrap()
-        .set_restricted_commands(&["usage".to_string()]);
+        .set_restricted_commands(&["settings".to_string()]);
 
-    let effects = dispatch(Action::SendPrompt("/cost".into()), &mut app);
+    let effects = dispatch(Action::SendPrompt("/prefs".into()), &mut app);
 
     assert!(effects.is_empty());
     assert!(app.agents[&id].question_view.is_some(), "upsell must open");
@@ -1218,21 +847,21 @@ fn restricted_command_with_open_modal_keeps_composer_text() {
     let id = AgentId(0);
     {
         let agent = app.agents.get_mut(&id).unwrap();
-        agent.set_restricted_commands(&["imagine".to_string()]);
+        agent.set_restricted_commands(&["theme".to_string()]);
         // A question modal is already up (credit-limit upsell).
         open_credit_limit_upsell(agent, CreditLimitUpsellMode::UnifiedCredits, false);
         assert!(agent.question_view.is_some());
         // The user typed the restricted command into the composer.
-        agent.prompt.set_text("/imagine a sunset");
+        agent.prompt.set_text("/theme dark");
     }
 
-    let effects = dispatch(Action::SendPrompt("/imagine a sunset".into()), &mut app);
+    let effects = dispatch(Action::SendPrompt("/theme dark".into()), &mut app);
 
     assert!(effects.is_empty(), "no passthrough / send: {effects:?}");
     let agent = &app.agents[&id];
     assert_eq!(
         agent.prompt.text(),
-        "/imagine a sunset",
+        "/theme dark",
         "composer text must be preserved for a later resubmit"
     );
     assert!(
@@ -1460,75 +1089,4 @@ fn credit_limit_upsell_submit_shows_url_when_browser_unavailable() {
 
     // SAFETY: serialized via `serial_test`.
     unsafe { std::env::remove_var("GROK_TEST_OPEN_URL_FILE") };
-}
-
-#[test]
-fn billing_fetched_clears_usage_modal_loading() {
-    let mut app = test_app_with_agent();
-    dispatch(Action::ShowUsage, &mut app);
-    dispatch_billing(
-        &mut app,
-        Some(test_bal(50.0)),
-        true,
-        Some("SuperGrok".into()),
-    );
-    let agent = &app.agents[&AgentId(0)];
-    let Some(crate::views::modal::ActiveModal::UsageInfo { state }) = agent.active_modal.as_ref()
-    else {
-        panic!("expected the usage modal to be open");
-    };
-    assert!(!state.billing_loading);
-    assert!(state.billing_error.is_none());
-    assert_eq!(state.ctx.subscription_tier.as_deref(), Some("SuperGrok"));
-    // The modal renders from the agent's cached billing mirrors.
-    assert_eq!(agent.credit_balance.as_ref().unwrap().usage_pct, 50.0);
-}
-
-#[test]
-fn background_billing_reply_does_not_settle_modal_loading() {
-    let mut app = test_app_with_agent();
-    dispatch(Action::ShowUsage, &mut app);
-    // A turn-end refresh (nonce 0) lands while the modal's own fetch is in
-    // flight: mirrors update, but the modal's loading/error flags don't.
-    dispatch(
-        Action::TaskComplete(TaskResult::BillingError {
-            agent_id: AgentId(0),
-            error: "background boom".to_string(),
-            silent: true,
-            nonce: Default::default(),
-        }),
-        &mut app,
-    );
-    let Some(crate::views::modal::ActiveModal::UsageInfo { state }) =
-        app.agents[&AgentId(0)].active_modal.as_ref()
-    else {
-        panic!("expected the usage modal to be open");
-    };
-    assert!(state.billing_loading, "still waiting on its own fetch");
-    assert!(state.billing_error.is_none());
-}
-
-#[test]
-fn billing_error_surfaces_in_usage_modal_without_scrollback() {
-    let mut app = test_app_with_agent();
-    dispatch(Action::ShowUsage, &mut app);
-    let before = agent_scrollback_len(&app);
-    let nonce = open_usage_modal_nonce(&app);
-    dispatch(
-        Action::TaskComplete(TaskResult::BillingError {
-            agent_id: AgentId(0),
-            error: "billing boom".to_string(),
-            silent: true,
-            nonce,
-        }),
-        &mut app,
-    );
-    let Some(crate::views::modal::ActiveModal::UsageInfo { state }) =
-        app.agents[&AgentId(0)].active_modal.as_ref()
-    else {
-        panic!("expected the usage modal to be open");
-    };
-    assert!(!state.billing_loading);
-    assert_eq!(state.billing_error.as_deref(), Some("billing boom"));
-    assert_eq!(agent_scrollback_len(&app), before);
 }

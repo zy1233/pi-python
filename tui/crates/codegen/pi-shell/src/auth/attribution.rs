@@ -38,20 +38,14 @@
 //!
 //! # Cross-crate plumbing
 //!
-//! [`pi_sampler`] is intentionally decoupled from this crate. It
-//! invokes the trait [`pi_sampler::Auth401AttributionCallback`] at
-//! its six 401 arms; this module provides [`ShellAttribution`], the
-//! concrete impl that the shell wires into
-//! [`pi_sampler::SamplerConfig::attribution_callback`] at every
-//! sampler-construction site. Non-sampler sites (storage / feedback /
+//! Consumer crates (tools, storage client) are intentionally decoupled from
+//! this crate: they invoke an `Auth401AttributionCallback` trait at their 401
+//! arms, and this module provides [`ShellAttribution`], the concrete impl the
+//! shell wires in. Sites that live in this crate (storage / feedback /
 //! registry / idle-resume) call [`record_consumer_401`]
 //! directly with their `(consumer_kind, op)` pair.
 
-use std::sync::Arc;
-
 use serde_json::Value as JsonValue;
-use pi_sampler::{Auth401AttributionCallback, SamplingConsumer};
-use pi_tools::{Auth401AttributionCallback as ToolAuth401AttributionCallback, ToolConsumer};
 
 use crate::auth::{AuthManager, TOKEN_TTL};
 use pi_auth::bearer_suffix;
@@ -78,184 +72,27 @@ pub(crate) fn reset_test_emit_count() {
     EMIT_COUNT.store(0, std::sync::atomic::Ordering::SeqCst);
 }
 
-/// Concrete implementation of [`Auth401AttributionCallback`] for the
-/// sampler crate's six 401 arms.
-///
-/// One instance is constructed per `SamplerConfig` and cloned cheaply
-/// (the struct holds an `Arc` and an `Option<String>`). The
-/// `session_id` is captured at construction time and used for the
-/// `unified_log::warn` `sid` field; non-session callers may pass
-/// `None`.
-pub(crate) struct ShellAttribution {
-    auth_manager: Arc<AuthManager>,
-    session_id: Option<String>,
-}
-
-// `AuthManager` does not implement `Debug` (it carries a `RwLock` over
-// auth state and would expose secrets if it did). Hand-roll a redacted
-// `Debug` impl so the `Auth401AttributionCallback` trait's
-// `Debug + Send + Sync` bound is satisfied without changing
-// `AuthManager`'s API surface.
-impl std::fmt::Debug for ShellAttribution {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ShellAttribution")
-            .field("auth_manager", &"<redacted>")
-            .field("session_id", &self.session_id)
-            .finish()
-    }
-}
-
-impl ShellAttribution {
-    /// Construct a shareable attribution callback wired to the given
-    /// [`AuthManager`]. Returns `Arc<dyn Trait>` for the sampler
-    /// trait so callers can drop the value directly into
-    /// [`pi_sampler::SamplerConfig::attribution_callback`].
-    ///
-    /// (Returns `Arc<dyn Trait>` rather than `Self` because the
-    /// `pi_sampler::SamplerConfig` field expects exactly that;
-    /// keeping the boundary in one place avoids `as Arc<dyn _>`
-    /// coercions at every call site.)
-    #[allow(clippy::new_ret_no_self)]
-    pub(crate) fn new(
-        auth_manager: Arc<AuthManager>,
-        session_id: Option<String>,
-    ) -> Arc<dyn Auth401AttributionCallback> {
-        Arc::new(Self {
-            auth_manager,
-            session_id,
-        })
-    }
-
-    /// Tool-side counterpart of [`Self::new`]: returns
-    /// `Arc<dyn pi_tools::Auth401AttributionCallback>` for the
-    /// `with_attribution_callback(...)` builder on each tool HTTP
-    /// client (`ImageGenClient`, `VideoGenClient`, `WebSearchClient`).
-    /// The two callbacks share the same underlying impl and emit the
-    /// same `auth_401_attribution` event format -- only the trait
-    /// signature differs (`SamplingConsumer` vs. `ToolConsumer`).
-    pub(crate) fn new_tool_callback(
-        auth_manager: Arc<AuthManager>,
-        session_id: Option<String>,
-    ) -> Arc<dyn ToolAuth401AttributionCallback> {
-        Arc::new(Self {
-            auth_manager,
-            session_id,
-        })
-    }
-}
-
-impl Auth401AttributionCallback for ShellAttribution {
-    fn record_401(&self, consumer: SamplingConsumer, sent_bearer_suffix: Option<&str>) {
-        // Already truncated by the sampler; the re-truncate downstream is a
-        // deliberate no-op so the full bearer never leaves that crate.
-        record_consumer_401(
-            self.auth_manager.as_ref(),
-            self.session_id.as_deref(),
-            ConsumerKind::OaiCompatClient,
-            consumer.as_endpoint(),
-            sent_bearer_suffix,
-        );
-    }
-}
-
-/// Tool-side hook: each tool client (image_gen, video_gen, web_search)
-/// in `pi-tools` emits a 401 attribution event through this
-/// trait when its HTTP request returns UNAUTHORIZED. Same shape as
-/// the sampler-side impl above; routes to the same pair of sinks.
-///
-/// `ToolConsumer::VideoGenStart` and `VideoGenPoll` collapse to the
-/// same [`ConsumerKind::VideoGen`] with different op strings so the
-/// gate query can break down video-gen 401s by phase.
-impl ToolAuth401AttributionCallback for ShellAttribution {
-    fn record_401(&self, consumer: ToolConsumer, sent_bearer_suffix: Option<&str>) {
-        let (kind, op) = match consumer {
-            ToolConsumer::ImageGen => (ConsumerKind::ImageGen, ""),
-            ToolConsumer::VideoGenStart => (ConsumerKind::VideoGen, "start"),
-            ToolConsumer::VideoGenPoll => (ConsumerKind::VideoGen, "poll"),
-            ToolConsumer::WebSearch => (ConsumerKind::WebSearch, ""),
-        };
-        record_consumer_401(
-            self.auth_manager.as_ref(),
-            self.session_id.as_deref(),
-            kind,
-            op,
-            sent_bearer_suffix,
-        );
-    }
-}
-
 /// Categories of 401-attribution emit sites. Each variant maps to a
 /// fixed prefix in the rendered `consumer` field; the per-site `op`
-/// string is appended after a `.` separator (omitted for variants that
-/// have no per-operation discriminator, e.g.
-/// [`ConsumerKind::IdleResumeModelRefresh`]).
+/// string is appended after a `.` separator.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ConsumerKind {
-    /// Sampler-side OpenAI-compat / Anthropic Messages emit. The op
-    /// string is the [`SamplingConsumer::as_endpoint`] return value.
-    OaiCompatClient,
     /// Storage upload / batch / check sites in `upload/storage_client.rs`.
     StorageClient,
-    /// Feedback collection sites in `agent/feedback_client.rs`.
-    FeedbackClient,
-    /// Session registry register/update sites in
-    /// `agent/session_registry_client.rs`.
-    SessionRegistryClient,
-    /// Idle-resume model-metadata refresh in
-    /// `session/acp_session.rs::maybe_refresh_model_metadata_on_resume`.
-    /// No per-op discriminator -- the consumer string is just
-    /// `"IdleResumeModelRefresh"`.
-    IdleResumeModelRefresh,
-    /// `pi_tools::ToolConsumer::ImageGen` -- Imagine API
-    /// (`POST /images/generations`). No per-op discriminator;
-    /// consumer string is just `"ImageGen"`.
-    ImageGen,
-    /// `pi_tools::ToolConsumer::VideoGenStart` and
-    /// `VideoGenPoll` -- Video Generation API. The op string is
-    /// `"start"` (`POST /videos/generations`) or `"poll"`
-    /// (`GET /videos/{request_id}`).
-    VideoGen,
-    /// `pi_tools::ToolConsumer::WebSearch` -- web search via
-    /// `POST /responses` with a `WebSearch` tool. No per-op
-    /// discriminator; consumer string is just `"WebSearch"`.
-    WebSearch,
 }
 
 impl ConsumerKind {
     /// Fixed prefix for the rendered `consumer` field.
     fn prefix(self) -> &'static str {
         match self {
-            Self::OaiCompatClient => "OaiCompatClient",
             Self::StorageClient => "StorageClient",
-            Self::FeedbackClient => "FeedbackClient",
-            Self::SessionRegistryClient => "SessionRegistryClient",
-            Self::IdleResumeModelRefresh => "IdleResumeModelRefresh",
-            Self::ImageGen => "ImageGen",
-            Self::VideoGen => "VideoGen",
-            Self::WebSearch => "WebSearch",
         }
-    }
-
-    /// `true` for variants that take a per-operation discriminator
-    /// appended as `<prefix>.<op>`. `false` for variants whose
-    /// `consumer` string is just the prefix
-    /// (`IdleResumeModelRefresh`, `ImageGen`, `WebSearch` -- each is
-    /// a single endpoint with no sub-operation).
-    fn takes_op(self) -> bool {
-        !matches!(
-            self,
-            Self::IdleResumeModelRefresh | Self::ImageGen | Self::WebSearch
-        )
     }
 }
 
 /// Format a `(kind, op)` pair into the design-doc `consumer` string.
 fn format_consumer(kind: ConsumerKind, op: &str) -> String {
-    if kind.takes_op() {
-        format!("{}.{}", kind.prefix(), op)
-    } else {
-        kind.prefix().to_string()
-    }
+    format!("{}.{}", kind.prefix(), op)
 }
 
 /// Emit a single `auth 401 attribution` event for a per-consumer 401.
@@ -319,11 +156,7 @@ pub(crate) fn record_auth_401(
     // on OIDC refresh failure (auth/refresh.rs::spawn_diagnostic_upload),
     // so by itself it does not give visibility into the steady-state
     // 401 population. Sink 2 below provides that.
-    pi_telemetry::unified_log::warn(
-        "auth 401 attribution",
-        session_id,
-        Some(payload.clone()),
-    );
+    pi_telemetry::unified_log::warn("auth 401 attribution", session_id, Some(payload.clone()));
 
     // Sink 2 -- discrete OTel span exported via OTLP
     // (util/otel_layer.rs). Auth 401 attribution schema fields below
@@ -441,7 +274,6 @@ fn compute_attribution_payload(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use chrono::{Duration, Utc};
 
@@ -674,101 +506,15 @@ mod tests {
         );
     }
 
-    /// `format_consumer` matrix:
-    ///   - generic ops append "." + op (`OaiCompatClient.foo`)
-    ///   - IdleResumeModelRefresh and tool variants drop the op
-    ///     (their consumer string has no sub-op axis).
-    #[test]
-    fn format_consumer_matrix() {
-        let cases: &[(ConsumerKind, &str, &str)] = &[
-            (
-                ConsumerKind::OaiCompatClient,
-                "chat_completions_stream",
-                "OaiCompatClient.chat_completions_stream",
-            ),
-            (
-                ConsumerKind::StorageClient,
-                "upload_file",
-                "StorageClient.upload_file",
-            ),
-            (
-                ConsumerKind::IdleResumeModelRefresh,
-                "",
-                "IdleResumeModelRefresh",
-            ),
-            (
-                ConsumerKind::IdleResumeModelRefresh,
-                "ignored",
-                "IdleResumeModelRefresh",
-            ),
-            (ConsumerKind::ImageGen, "", "ImageGen"),
-            (ConsumerKind::ImageGen, "ignored", "ImageGen"),
-            (ConsumerKind::VideoGen, "start", "VideoGen.start"),
-            (ConsumerKind::VideoGen, "poll", "VideoGen.poll"),
-            (ConsumerKind::WebSearch, "", "WebSearch"),
-            (ConsumerKind::WebSearch, "ignored", "WebSearch"),
-        ];
-        for (kind, op, expected) in cases {
-            assert_eq!(
-                format_consumer(*kind, op),
-                *expected,
-                "kind={kind:?} op={op:?}"
-            );
-        }
-    }
-
     /// `format_consumer` formats `OaiCompatClient.<endpoint>`
     /// correctly and omits the `.` separator for
     /// `IdleResumeModelRefresh`.
     #[test]
     fn format_consumer_with_op_appends_dot() {
         assert_eq!(
-            format_consumer(ConsumerKind::OaiCompatClient, "chat_completions_stream"),
-            "OaiCompatClient.chat_completions_stream"
-        );
-        assert_eq!(
             format_consumer(ConsumerKind::StorageClient, "upload_file"),
             "StorageClient.upload_file"
         );
-    }
-
-    /// `ShellAttribution` implements `pi_tools::Auth401AttributionCallback`
-    /// by routing each `ToolConsumer` variant to the right
-    /// `(ConsumerKind, op)` pair, which formats to the expected
-    /// `consumer` string in the emitted payload.
-    #[test]
-    #[serial_test::serial(attribution_emit_count)]
-    fn shell_attribution_tool_impl_routes_to_correct_consumer_strings() {
-        reset_test_emit_count();
-        let (_dir, am) = empty_auth_manager();
-        am.hot_swap(fresh_auth("bearer-1234567890"));
-        let am_arc = Arc::new(am);
-        let cb: Arc<dyn ToolAuth401AttributionCallback> =
-            ShellAttribution::new_tool_callback(am_arc.clone(), Some("sid-tool".into()));
-
-        let cases = [
-            (ToolConsumer::ImageGen, "ImageGen"),
-            (ToolConsumer::VideoGenStart, "VideoGen.start"),
-            (ToolConsumer::VideoGenPoll, "VideoGen.poll"),
-            (ToolConsumer::WebSearch, "WebSearch"),
-        ];
-
-        for (consumer, expected_consumer_str) in cases {
-            cb.record_401(consumer, Some("bearer-1234567890"));
-            let payload = compute_attribution_payload(
-                am_arc.as_ref(),
-                expected_consumer_str,
-                Some("bearer-1234567890"),
-            );
-            assert_eq!(
-                payload_field(&payload, "consumer"),
-                expected_consumer_str,
-                "ToolConsumer::{consumer:?} should render as {expected_consumer_str:?}",
-            );
-        }
-
-        // Each variant bumped the global counter exactly once.
-        assert_eq!(test_emit_count() as usize, cases.len());
     }
 
     /// Capture `tracing::Span` `on_new_span` callbacks into a
@@ -958,79 +704,5 @@ mod tests {
         assert_eq!(test_emit_count(), 1);
         record_auth_401(&am, None, "Test.counter", Some("k"));
         assert_eq!(test_emit_count(), 2);
-    }
-
-    /// The SubagentSpawnContext-borne callback flows through
-    /// `read_parent_sampling_config` into the inherited
-    /// `SamplerConfig.attribution_callback`. We can't drive the full
-    /// subagent path here (requires SessionActor + chat-state
-    /// scaffolding), but we can assert the structural property: the
-    /// callback the parent constructs is the one any later
-    /// `SamplerConfig` clone carries forward unchanged.
-    #[test]
-    #[serial_test::serial(attribution_emit_count)]
-    fn parent_callback_flows_through_arc_clone() {
-        reset_test_emit_count();
-        let (_dir, am) = empty_auth_manager();
-        let am_arc = Arc::new(am);
-        let parent_cb = ShellAttribution::new(am_arc.clone(), Some("parent-sid".into()));
-
-        // Simulate the inheritance hand-off: the parent callback flows
-        // through SessionHandle -> SubagentSpawnContext ->
-        // SamplerConfig.attribution_callback as plain Arc clones.
-        let inherited_cb = parent_cb.clone();
-
-        // Drive the inherited callback. The `record_401` should bump
-        // the same global counter the parent callback would, proving
-        // they refer to the same underlying impl.
-        inherited_cb.record_401(SamplingConsumer::ChatCompletionsStream, Some("bearer"));
-        assert_eq!(test_emit_count(), 1);
-
-        // Sanity: the parent_cb still works too (it's the same Arc).
-        parent_cb.record_401(SamplingConsumer::Messages, Some("bearer"));
-        assert_eq!(test_emit_count(), 2);
-    }
-
-    /// End-to-end: the trait impl wraps `consumer.as_endpoint()` in
-    /// `"OaiCompatClient.<endpoint>"` and delegates to
-    /// `record_consumer_401` for every variant of `SamplingConsumer`.
-    /// We assert one bump per variant via the test counter, plus the
-    /// rendered `consumer` string for one variant via a payload
-    /// recompute (the trait does not return the payload, so we
-    /// recompute directly from the same inputs).
-    #[test]
-    #[serial_test::serial(attribution_emit_count)]
-    fn shell_attribution_trait_impl_routes_through_helper() {
-        reset_test_emit_count();
-        let (_dir, am) = empty_auth_manager();
-        let am_arc = Arc::new(am);
-        let cb = ShellAttribution::new(am_arc.clone(), Some("sid-shell".into()));
-        let variants = [
-            SamplingConsumer::ChatCompletionsStream,
-            SamplingConsumer::ChatCompletions,
-            SamplingConsumer::ResponsesStream,
-            SamplingConsumer::Responses,
-            SamplingConsumer::MessagesStream,
-            SamplingConsumer::Messages,
-        ];
-        for consumer in variants {
-            cb.record_401(consumer, Some("test-bearer"));
-        }
-        assert_eq!(test_emit_count() as usize, variants.len());
-
-        // Sanity-check the consumer-string formatting via direct
-        // payload computation.
-        let payload = compute_attribution_payload(
-            am_arc.as_ref(),
-            &format_consumer(
-                ConsumerKind::OaiCompatClient,
-                SamplingConsumer::MessagesStream.as_endpoint(),
-            ),
-            Some("test-bearer"),
-        );
-        assert_eq!(
-            payload_field(&payload, "consumer"),
-            "OaiCompatClient.messages_stream"
-        );
     }
 }

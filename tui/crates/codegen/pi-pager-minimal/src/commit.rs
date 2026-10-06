@@ -64,18 +64,6 @@ pub(crate) const MINIMAL_BLOCK_GAP: u16 = 0;
 /// running **tool** may still update its result, so it keeps the strict
 /// `is_running` gate, and the **last** entry always stays live.
 ///
-/// **Background-task lifecycle blocks commit even while "running".** A fresh
-/// background task is pushed as a `BgTask` "started" block with the entry's
-/// `is_running` flag set (`handle_task_backgrounded` → `set_last_running(true)`),
-/// but that flag only drives bullet animation — the block's *content* never
-/// changes (task completion pushes a **separate** `bg_task_completed`/`failed`
-/// block, and live output goes to the task store, not this entry). An async task
-/// can outlive its turn, so gating it on `is_running` would wedge the commit
-/// frontier for the rest of the turn: the "started" block — and everything after
-/// it — would stay stuck in the live tail (scrolled out of view), so the task is
-/// invisible until it finishes. Committing it immediately matches design §6.11
-/// ("status blocks committed") and keeps the frontier moving.
-///
 /// Once the turn is **idle** (`turn_running == false`) everything except a
 /// pending-user-input block is stable and committable: the tracker can also
 /// leave a thinking block's `is_running` flag set after the turn ends (finalize
@@ -108,15 +96,12 @@ pub fn is_committable(state: &ScrollbackState, i: usize, turn_running: bool) -> 
     if !entry.is_running {
         return true;
     }
-    // Running, mid-turn. Two block kinds are safe to commit despite a set
-    // `is_running` flag: a BgTask lifecycle block (finalized event; flag is
-    // animation-only — see above), and an agent message whose later sibling
-    // proves the tracker moved on ([`agent_message_stream_closed`]). A running
-    // **tool** may still update its result, and a still-open agent stream
-    // (last, or only followed by interleaved thinking) must stay live.
-    matches!(entry.block, RenderBlock::BgTask(_))
-        || (matches!(entry.block, RenderBlock::AgentMessage(_))
-            && agent_message_stream_closed(state, i))
+    // Running, mid-turn. Only an agent message whose later sibling proves the
+    // tracker moved on ([`agent_message_stream_closed`]) is safe to commit
+    // despite a set `is_running` flag. A running **tool** may still update its
+    // result, and a still-open agent stream (last, or only followed by
+    // interleaved thinking) must stay live.
+    matches!(entry.block, RenderBlock::AgentMessage(_)) && agent_message_stream_closed(state, i)
 }
 
 /// Whether a later entry proves the tracker will not append to the agent

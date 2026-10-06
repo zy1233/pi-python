@@ -1,8 +1,60 @@
 //! CLI argument parsing for the pager.
-pub use crate::headless::OutputFormat;
-use clap::{ArgAction, Parser, Subcommand, ValueHint};
+use clap::{ArgAction, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
 use std::path::PathBuf;
+
+/// `--output-format` values. The flag is still parsed for CLI compatibility;
+/// `-p` is executed by the Python ACP agent, which owns output rendering.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ValueEnum)]
+pub enum OutputFormat {
+    #[default]
+    Plain,
+    Json,
+    /// NDJSON of the agent native ACP session updates.
+    #[value(name = "streaming-json")]
+    StreamingJson,
+    /// NDJSON in the Anthropic Messages API wire format.
+    #[value(name = "streaming-messages-json")]
+    StreamingMessagesJson,
+}
+
+/// Parse `--allow` / `--deny` permission rules, warning on (and skipping) invalid entries.
+pub fn parse_permission_rules_lenient(
+    allow: &[String],
+    deny: &[String],
+) -> Vec<pi_workspace::permission::types::PermissionRule> {
+    use pi_workspace::permission::rules::parse_permission_rule;
+    use pi_workspace::permission::types::RuleAction;
+
+    let mut rules = Vec::new();
+    // Deny before allow is cosmetic: the policy evaluator is order-independent (deny > ask > allow).
+    for (flag, rule_str, action) in deny
+        .iter()
+        .map(|r| ("--deny", r, RuleAction::Deny))
+        .chain(allow.iter().map(|r| ("--allow", r, RuleAction::Allow)))
+    {
+        match parse_permission_rule(rule_str, action) {
+            Ok(rule) => rules.push(rule),
+            Err(e) => eprintln!("warning: {flag} \"{rule_str}\": {e}, skipping"),
+        }
+    }
+    rules
+}
+
+/// How a `--agent` argument resolves: an existing file path or a bare profile name.
+pub(crate) enum ResolvedAgent {
+    FilePath(PathBuf),
+    Name(String),
+}
+
+pub(crate) fn resolve_agent_arg(agent: &str) -> ResolvedAgent {
+    let path = std::path::Path::new(agent);
+    if path.exists() && path.is_file() {
+        ResolvedAgent::FilePath(dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()))
+    } else {
+        ResolvedAgent::Name(agent.to_string())
+    }
+}
 /// Top-level commands for the pager binary.
 #[derive(Debug, Clone, Subcommand)]
 pub enum Command {
@@ -89,14 +141,6 @@ pub struct PagerArgs {
     /// Working directory.
     #[arg(long)]
     pub cwd: Option<PathBuf>,
-    /// Use a custom leader socket path instead of the default `~/.pi-python/leader.sock`.
-    #[arg(
-        long = "leader-socket",
-        value_name = "PATH",
-        global = true,
-        value_hint = ValueHint::FilePath
-    )]
-    pub leader_socket: Option<PathBuf>,
     /// Enable debug logging.
     #[arg(long = "debug", global = true)]
     pub debug: bool,
@@ -270,15 +314,10 @@ pub struct PagerArgs {
     pub continue_last_session: bool,
     /// Use a specific session UUID for a **new** conversation (must be a valid
     /// UUID and must not already exist under the target session directory).
-    /// With `--resume`/`--continue`, only valid together with `--fork-session`
-    /// (names the forked session). Does not resume existing sessions, use
-    /// `--resume` / `--continue` instead.
+    /// Not valid together with `--resume` / `--continue`. Does not resume
+    /// existing sessions, use `--resume` / `--continue` instead.
     #[arg(short = 's', long = "session-id", value_name = "SESSION_ID")]
     pub session_id: Option<String>,
-    /// When resuming (`--resume` / `--continue`), create a new session ID
-    /// instead of reusing the original (optionally set via `--session-id`).
-    #[arg(long = "fork-session")]
-    pub fork_session: bool,
     /// Start the session in a new git worktree, optionally named.
     /// With `--resume` of a remote session, pass `--restore-code` to apply
     /// the snapshot codebase (conversation is restored either way).
@@ -297,32 +336,6 @@ pub struct PagerArgs {
     /// Disable plan mode.
     #[arg(long = "no-plan")]
     pub no_plan: bool,
-    /// Own a local `workspace_server` (replaces remote sandbox). Requires `--chat`.
-    ///
-    /// Compiled only with `--features local-workspace` (not implied by `chat`).
-    #[cfg(feature = "local-workspace")]
-    #[arg(
-        long = "local-workspace",
-        num_args = 0..= 1,
-        value_name = "CWD",
-        conflicts_with = "local_workspace_attach",
-        requires = "chat"
-    )]
-    pub local_workspace: Option<Option<PathBuf>>,
-    /// Attach an existing local `workspace_server` by `server_id`,
-    /// replacing the chat sandbox (ExistingWorkspace only). Requires `--chat`.
-    #[cfg(feature = "local-workspace")]
-    #[arg(
-        long = "local-workspace-attach",
-        value_name = "SERVER_ID",
-        conflicts_with = "local_workspace",
-        requires = "chat"
-    )]
-    pub local_workspace_attach: Option<String>,
-    /// Cwd override for local-workspace attach/own. Requires `--chat`.
-    #[cfg(feature = "local-workspace")]
-    #[arg(long = "local-workspace-cwd", value_name = "PATH", requires = "chat")]
-    pub local_workspace_cwd: Option<PathBuf>,
     /// Disable subagent spawning.
     #[arg(long = "no-subagents")]
     pub no_subagents: bool,
@@ -457,12 +470,6 @@ pub struct PagerArgs {
     /// Use OAuth when the welcome screen starts authentication.
     #[arg(long = "oauth")]
     pub oauth: bool,
-    /// Connect to a shared leader process.
-    #[arg(long, conflicts_with = "no_leader", hide = true)]
-    pub leader: bool,
-    /// Run standalone even when leader mode is configured.
-    #[arg(long, conflicts_with = "leader", hide = true)]
-    pub no_leader: bool,
     /// Initial prompt for the interactive session, e.g. `zypi "fix the bug"` or `zypi --worktree=feat "create this feature"`.
     #[arg(
         value_name = "PROMPT",
@@ -489,9 +496,9 @@ pub enum SandboxStartup {
 /// Derived from [`PagerArgs::session_startup_intent`]; new-with-id is not a resume.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ResumeTarget {
-    /// Resume (or fork-from) a specific session id.
+    /// Resume a specific session id.
     SessionId(String),
-    /// Resume (or fork-from) the most recent session for the current directory.
+    /// Resume the most recent session for the current directory.
     MostRecentForCwd,
     /// Not resuming an existing session (new auto or new-with-id).
     None,
@@ -520,15 +527,6 @@ impl PagerArgs {
             None
         }
     }
-    pub(crate) fn memory_override_flag(&self) -> Option<&'static str> {
-        if self.experimental_memory {
-            Some("--experimental-memory")
-        } else if self.no_memory {
-            Some("--no-memory")
-        } else {
-            None
-        }
-    }
     /// Parse CLI arguments without applying side effects.
     pub fn parse_cli() -> Self {
         let bin_name = std::env::args()
@@ -549,9 +547,6 @@ impl PagerArgs {
         self.apply_cwd_from(launch_dir.as_deref())
     }
     fn apply_cwd_from(mut self, launch_dir: Option<&std::path::Path>) -> anyhow::Result<Self> {
-        if let Some(socket) = self.leader_socket.take() {
-            self.leader_socket = Some(anchor_to_launch_dir(socket, launch_dir));
-        }
         if let Some(file) = self.debug_file.take() {
             self.debug_file = Some(anchor_to_launch_dir(file, launch_dir));
         }
@@ -566,21 +561,6 @@ impl PagerArgs {
     /// feature, so call sites need no `cfg` of their own.
     pub fn chat(&self) -> bool {
         false
-    }
-    /// `--local-workspace[=cwd]` own-mode flag.
-    #[cfg(feature = "local-workspace")]
-    pub fn local_workspace(&self) -> Option<Option<&std::path::Path>> {
-        self.local_workspace.as_ref().map(|inner| inner.as_deref())
-    }
-    /// `--local-workspace-attach=<server_id>`.
-    #[cfg(feature = "local-workspace")]
-    pub fn local_workspace_attach(&self) -> Option<&str> {
-        self.local_workspace_attach.as_deref()
-    }
-    /// `--local-workspace-cwd=<path>`.
-    #[cfg(feature = "local-workspace")]
-    pub fn local_workspace_cwd(&self) -> Option<&std::path::Path> {
-        self.local_workspace_cwd.as_deref()
     }
     /// Get the session ID to resume, from either --resume or --load (hidden alias).
     ///
@@ -606,16 +586,8 @@ impl PagerArgs {
             Ok(SessionStartupIntent::Resume {
                 session_id: Some(id),
                 ..
-            })
-            | Ok(SessionStartupIntent::ForkFrom {
-                source_session_id: Some(id),
-                ..
             }) => ResumeTarget::SessionId(id),
             Ok(SessionStartupIntent::Resume {
-                most_recent_for_cwd: true,
-                ..
-            })
-            | Ok(SessionStartupIntent::ForkFrom {
                 most_recent_for_cwd: true,
                 ..
             }) => ResumeTarget::MostRecentForCwd,
@@ -652,9 +624,6 @@ impl PagerArgs {
     /// Same as [`Self::pin_local_resume_target`] with an explicit cwd, so
     /// tests never mutate the process cwd.
     pub fn pin_local_resume_target_for_cwd(&mut self, cwd: Option<&str>) -> anyhow::Result<()> {
-        if self.chat() {
-            return Ok(());
-        }
         let Some(target) = self.session_to_resume().map(str::to_owned) else {
             return Ok(());
         };
@@ -699,10 +668,7 @@ impl PagerArgs {
         }
         match self.resume_target() {
             ResumeTarget::SessionId(id) => {
-                pi_shell::session::persistence::resumed_session_sandbox_profile(
-                    Some(&id),
-                    cwd,
-                )
+                pi_shell::session::persistence::resumed_session_sandbox_profile(Some(&id), cwd)
             }
             ResumeTarget::MostRecentForCwd => {
                 pi_shell::session::persistence::resumed_session_sandbox_profile(None, cwd)
@@ -857,12 +823,6 @@ mod tests {
                 .resume_target(),
             ResumeTarget::None
         );
-        assert_eq!(
-            PagerArgs::try_parse_from(["zypi", "-r", "old", "--fork-session"])
-                .unwrap()
-                .resume_target(),
-            ResumeTarget::SessionId("old".to_string())
-        );
     }
     /// The screen-mode flags are mutually exclusive: the pair exists so one
     /// can override the other's sticky config value, so accepting both in one
@@ -931,20 +891,10 @@ mod tests {
     }
     #[test]
     fn launch_directory_anchoring_precedes_cwd_change() {
-        let args = PagerArgs::try_parse_from([
-            "zypi",
-            "--leader-socket",
-            "relative.sock",
-            "--debug-file",
-            "relative.log",
-        ])
-        .unwrap()
-        .apply_cwd_from(Some(std::path::Path::new("/launch")))
-        .unwrap();
-        assert_eq!(
-            args.leader_socket.as_deref(),
-            Some(std::path::Path::new("/launch/relative.sock"))
-        );
+        let args = PagerArgs::try_parse_from(["zypi", "--debug-file", "relative.log"])
+            .unwrap()
+            .apply_cwd_from(Some(std::path::Path::new("/launch")))
+            .unwrap();
         assert_eq!(
             args.debug_file.as_deref(),
             Some(std::path::Path::new("/launch/relative.log"))
@@ -953,9 +903,9 @@ mod tests {
     #[test]
     fn launch_directory_anchoring_normalizes_dot_components() {
         for (input, expected) in [
-            ("./leader.sock", "/launch/leader.sock"),
+            ("./debug.log", "/launch/debug.log"),
             ("logs/../debug.log", "/launch/logs/../debug.log"),
-            ("../leader.sock", "/launch/../leader.sock"),
+            ("../debug.log", "/launch/../debug.log"),
         ] {
             assert_eq!(
                 anchor_to_launch_dir(PathBuf::from(input), Some(std::path::Path::new("/launch"))),
@@ -965,34 +915,6 @@ mod tests {
         }
     }
     #[test]
-    fn leader_socket_flag_parses_at_root() {
-        let args = PagerArgs::try_parse_from(["zypi", "--leader-socket", "/tmp/leader-x.sock"])
-            .expect("--leader-socket parses at the root");
-        assert_eq!(
-            args.leader_socket.as_deref(),
-            Some(std::path::Path::new("/tmp/leader-x.sock"))
-        );
-    }
-    #[test]
-    fn leader_socket_flag_is_global_for_subcommands() {
-        let args = PagerArgs::try_parse_from([
-            "zypi",
-            "doctor",
-            "--leader-socket",
-            "/tmp/leader-y.sock",
-        ])
-        .expect("--leader-socket parses after a subcommand (global)");
-        assert_eq!(
-            args.leader_socket.as_deref(),
-            Some(std::path::Path::new("/tmp/leader-y.sock"))
-        );
-    }
-    #[test]
-    fn leader_socket_flag_defaults_to_none() {
-        let args = PagerArgs::try_parse_from(["zypi"]).expect("bare grok parses");
-        assert!(args.leader_socket.is_none());
-    }
-    #[test]
     fn debug_file_flag_parses_and_is_global() {
         let root = PagerArgs::try_parse_from(["zypi", "--debug-file", "/tmp/fire.txt"])
             .expect("--debug-file parses at the root");
@@ -1000,9 +922,8 @@ mod tests {
             root.debug_file.as_deref(),
             Some(std::path::Path::new("/tmp/fire.txt"))
         );
-        let sub =
-            PagerArgs::try_parse_from(["zypi", "doctor", "--debug-file", "/tmp/f.txt"])
-                .expect("--debug-file parses after a subcommand (global)");
+        let sub = PagerArgs::try_parse_from(["zypi", "doctor", "--debug-file", "/tmp/f.txt"])
+            .expect("--debug-file parses after a subcommand (global)");
         assert_eq!(
             sub.debug_file.as_deref(),
             Some(std::path::Path::new("/tmp/f.txt"))
@@ -1036,7 +957,10 @@ mod tests {
     #[test]
     fn subcommand_takes_precedence_over_positional_prompt() {
         let args = PagerArgs::try_parse_from(["zypi", "version"]).expect("subcommand parses");
-        assert!(matches!(args.command, Some(Command::Version { json: false })));
+        assert!(matches!(
+            args.command,
+            Some(Command::Version { json: false })
+        ));
         assert!(args.prompt.is_none());
     }
     #[test]

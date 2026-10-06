@@ -23,10 +23,7 @@ fn response_anchor_in_range(
                     anchor = Some(idx);
                 }
             }
-            RenderBlock::ToolCall(_)
-            | RenderBlock::Thinking(_)
-            | RenderBlock::Subagent(_)
-            | RenderBlock::BgTask(_) => break,
+            RenderBlock::ToolCall(_) | RenderBlock::Thinking(_) => break,
             _ => {}
         }
     }
@@ -627,10 +624,6 @@ impl ScrollbackState {
     /// Check if follow mode is enabled.
     pub fn is_follow_mode(&self) -> bool {
         self.follow_mode
-    }
-
-    pub(crate) fn is_follow_preserve_scroll(&self) -> bool {
-        self.follow_preserve_scroll
     }
 
     /// Check if there's content below the viewport (not at the bottom).
@@ -1239,63 +1232,6 @@ mod tests {
     use super::super::test_util::*;
     use super::*;
     use pretty_assertions::assert_eq;
-
-    #[test]
-    fn follow_new_turn_scroll_policies() {
-        fn tall_state_with_prompt() -> (ScrollbackState, usize) {
-            let mut state = ScrollbackState::new();
-            for i in 0..30 {
-                state.push_block(agent_block(&format!("filler line {i}")));
-            }
-            state.push_block(user_block("next question"));
-            let prompt_idx = state.len() - 1;
-            state.prepare_layout(80, 8);
-            (state, prompt_idx)
-        }
-
-        let (mut state, prompt_idx) = tall_state_with_prompt();
-        state.goto_bottom();
-        let bottom = state.scroll_offset();
-        state.follow_new_turn(Some(prompt_idx), true);
-        assert!(state.is_follow_mode());
-        assert!(state.is_follow_preserve_scroll());
-        assert_eq!(state.selected(), Some(prompt_idx));
-        assert_ne!(state.scroll_offset(), bottom);
-
-        let (mut state, prompt_idx) = tall_state_with_prompt();
-        state.goto_bottom();
-        let bottom = state.scroll_offset();
-        state.follow_new_turn(Some(prompt_idx), false);
-        assert!(state.is_follow_mode());
-        assert!(!state.is_follow_preserve_scroll());
-        assert_eq!(state.scroll_offset(), bottom);
-        assert_eq!(state.selected(), Some(prompt_idx));
-
-        let (mut state, prompt_idx) = tall_state_with_prompt();
-        state.goto_bottom();
-        state.scroll_up(10);
-        let reading = state.scroll_offset();
-        state.follow_new_turn(Some(prompt_idx), false);
-        assert!(!state.is_follow_mode());
-        assert_eq!(state.scroll_offset(), reading);
-        assert_eq!(state.selected(), Some(prompt_idx));
-
-        // No prompt (bash/synthetic): always arm follow, with or without page_flip.
-        let (mut state, _) = tall_state_with_prompt();
-        state.goto_bottom();
-        state.follow_new_turn(None, true);
-        assert!(state.is_follow_mode());
-        assert!(state.is_follow_preserve_scroll());
-
-        let (mut state, _) = tall_state_with_prompt();
-        state.goto_bottom();
-        state.scroll_up(10);
-        let reading = state.scroll_offset();
-        state.follow_new_turn(None, false);
-        assert!(state.is_follow_mode());
-        assert!(state.is_follow_preserve_scroll());
-        assert_eq!(state.scroll_offset(), reading);
-    }
 
     #[test]
     fn test_response_anchor_trailing_run_skips_interleaved_messages() {

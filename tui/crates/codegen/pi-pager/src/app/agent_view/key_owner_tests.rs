@@ -1,14 +1,13 @@
 use super::{AgentPane, AgentView, BlockingCard, EscStep, KeyOwner};
 use crate::actions::ActionRegistry;
 use crate::app::agent_view::test_fixtures::{make_agent, make_followup_permission_state};
-use crate::views::modal::{CancelTurnChoice, CancelTurnViewState};
 use crate::views::permission_view::PermissionFocus;
 use crate::views::prompt_widget::StashedPrompt;
 use crate::views::question_view::QuestionViewState;
 use agent_client_protocol as acp;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use std::sync::Arc;
 use pi_tools::implementations::grok_build::ask_user_question::{Question, QuestionOption};
+use std::sync::Arc;
 
 const SHIFT_TAB: [(KeyCode, KeyModifiers); 3] = [
     (KeyCode::BackTab, KeyModifiers::NONE),
@@ -34,13 +33,6 @@ fn open_permission(agent: &mut AgentView) {
         option("reject-always", acp::PermissionOptionKind::RejectAlways),
     ];
     agent.permission_queue.push_back(perm);
-}
-
-fn open_cancel_turn(agent: &mut AgentView) {
-    agent.cancel_turn_view = Some(CancelTurnViewState {
-        active_idx: 0,
-        running_count: 1,
-    });
 }
 
 fn question(prompt: &str) -> Question {
@@ -238,75 +230,6 @@ fn permission_tab_is_inert_with_a_single_option() {
 }
 
 #[test]
-fn cancel_turn_tab_walks_the_choices_and_wraps() {
-    let mut agent = make_agent();
-    open_cancel_turn(&mut agent);
-    let last = CancelTurnChoice::ALL.len() - 1;
-
-    for expected in 1..=last {
-        let _ = agent.handle_cancel_turn_key(&KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
-        assert_eq!(
-            agent
-                .cancel_turn_view
-                .as_ref()
-                .expect("panel open")
-                .active_idx,
-            expected
-        );
-    }
-    let _ = agent.handle_cancel_turn_key(&KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
-    assert_eq!(
-        agent
-            .cancel_turn_view
-            .as_ref()
-            .expect("panel open")
-            .active_idx,
-        0,
-        "past the last choice, back to the first"
-    );
-
-    for (code, modifiers) in SHIFT_TAB {
-        let _ = agent.handle_cancel_turn_key(&KeyEvent::new(code, modifiers));
-        assert_eq!(
-            agent
-                .cancel_turn_view
-                .as_ref()
-                .expect("panel open")
-                .active_idx,
-            last,
-            "Shift+Tab wraps back to the last choice ({code:?}/{modifiers:?})"
-        );
-        let _ = agent.handle_cancel_turn_key(&KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
-    }
-    assert_eq!(
-        agent.active_pane,
-        AgentPane::Prompt,
-        "the panel keeps the keyboard"
-    );
-}
-
-#[test]
-fn cancel_turn_panel_parks_and_returns_like_the_others() {
-    let mut agent = make_agent();
-    open_cancel_turn(&mut agent);
-    assert!(hint_labels(&agent).contains(&"next choice".to_string()));
-
-    agent.active_pane = AgentPane::Scrollback;
-    let parked = hint_labels(&agent);
-    assert!(
-        !parked.contains(&"next choice".to_string()),
-        "parked, the panel's keys leave the bar, got {parked:?}"
-    );
-    assert!(
-        parked.contains(&"cancel turn".to_string()),
-        "the bar must name the way back into the panel, got {parked:?}"
-    );
-
-    tab_from_scrollback(&mut agent);
-    assert_eq!(agent.active_pane, AgentPane::Prompt);
-}
-
-#[test]
 fn a_parked_card_contributes_one_route_back() {
     let mut agent = make_agent();
     open_question(&mut agent);
@@ -346,64 +269,21 @@ fn a_parked_card_contributes_one_route_back() {
 fn the_bar_follows_the_router_when_two_cards_are_open() {
     let mut agent = make_agent();
     open_question(&mut agent);
-    open_cancel_turn(&mut agent);
-    assert_eq!(agent.focused_card(), Some(BlockingCard::CancelTurn));
+    assert_eq!(agent.focused_card(), Some(BlockingCard::Question));
 
     let labels = hint_labels(&agent);
     assert!(
-        labels.contains(&"next choice".to_string()) && !labels.contains(&"next answer".to_string()),
-        "the cancel-turn panel takes the keys, so it takes the bar too, got {labels:?}"
+        labels.contains(&"next answer".to_string()),
+        "the question card takes the keys, so it takes the bar too, got {labels:?}"
     );
 
     open_permission(&mut agent);
     assert_eq!(agent.focused_card(), Some(BlockingCard::Permission));
     let labels = hint_labels(&agent);
     assert!(
-        labels.contains(&"next option".to_string()) && !labels.contains(&"next choice".to_string()),
-        "and the permission card outranks both, got {labels:?}"
+        labels.contains(&"next option".to_string()) && !labels.contains(&"next answer".to_string()),
+        "and the permission card outranks it, got {labels:?}"
     );
-}
-
-#[test]
-fn elicitation_shares_the_question_layer_under_cancel_turn() {
-    let mut agent = make_agent();
-    open_elicitation(&mut agent);
-    assert_eq!(agent.blocking_card(), Some(BlockingCard::McpElicitation));
-    assert_eq!(agent.focused_card(), Some(BlockingCard::McpElicitation));
-
-    open_question(&mut agent);
-    assert_eq!(
-        agent.blocking_card(),
-        Some(BlockingCard::Question),
-        "question and elicitation share a layer; the painted question keeps the keys"
-    );
-    assert_eq!(agent.focused_card(), Some(BlockingCard::Question));
-    let labels = hint_labels(&agent);
-    assert!(
-        labels.contains(&"next answer".to_string()),
-        "the bar must name the question the user can see, got {labels:?}"
-    );
-
-    open_cancel_turn(&mut agent);
-    assert_eq!(
-        agent.blocking_card(),
-        Some(BlockingCard::CancelTurn),
-        "cancel-turn outranks both question-style cards"
-    );
-    assert_eq!(agent.focused_card(), Some(BlockingCard::CancelTurn));
-    let labels = hint_labels(&agent);
-    assert!(
-        labels.contains(&"next choice".to_string()) && !labels.contains(&"next answer".to_string()),
-        "the cancel-turn panel takes the keys, so it takes the bar too, got {labels:?}"
-    );
-
-    agent.question_view = None;
-    assert_eq!(
-        agent.blocking_card(),
-        Some(BlockingCard::CancelTurn),
-        "cancel-turn still occupies the slot over a leftover elicitation"
-    );
-    assert_eq!(agent.focused_card(), Some(BlockingCard::CancelTurn));
 }
 
 #[test]
@@ -421,37 +301,10 @@ fn the_esc_hint_names_the_rung_the_key_takes() {
 }
 
 #[test]
-fn the_overlay_owns_the_park_rung_and_the_bar_says_so() {
-    let mut agent = make_agent();
-    open_question(&mut agent);
-    agent.in_dashboard_overlay = true;
-
-    assert_eq!(agent.card_esc(), Some(EscStep::BackOutOverlay));
-    assert!(
-        agent.overlay_esc_backs_out(),
-        "the overlay cascade and the ladder must agree"
-    );
-    assert!(
-        hint_labels(&agent).contains(&"dashboard".to_string()),
-        "the bar names where Esc actually goes, got {:?}",
-        hint_labels(&agent)
-    );
-
-    let _ =
-        agent.handle_question_key_for_test(&KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
-    assert_eq!(agent.card_esc(), Some(EscStep::ClearSelection));
-    assert!(
-        !agent.overlay_esc_backs_out(),
-        "a selection to clear keeps Esc in the card"
-    );
-}
-
-#[test]
 fn a_parked_card_does_not_hand_esc_to_the_turn_cancel() {
     for open in [
         open_permission as fn(&mut AgentView),
         open_question as fn(&mut AgentView),
-        open_elicitation as fn(&mut AgentView),
     ] {
         let mut agent = make_agent();
         open(&mut agent);
@@ -505,7 +358,7 @@ fn plan_approval_takes_the_bar_wherever_it_takes_the_keys() {
 }
 
 /// The open plan preview is the state a plan approval spends most of its life
-/// in. The line viewer ranks above Question/CancelTurn (not Permission) and
+/// in. The line viewer ranks above Question (not Permission) and
 /// paints its own hints over the bar's row; what the bar must not do is speak
 /// for the card behind the viewer.
 #[test]
@@ -575,13 +428,11 @@ fn esc_parks_even_under_a_latent_queued_edit() {
     for open in [
         open_permission as fn(&mut AgentView),
         open_question as fn(&mut AgentView),
-        open_elicitation as fn(&mut AgentView),
     ] {
         let mut agent = make_agent();
         agent.prompt_mode = crate::app::queue_edit::PromptMode::EditingQueued {
             id: 1,
             original: "the queued prompt".into(),
-            server_id: None,
             kind: crate::app::agent::QueueEntryKind::Prompt,
         };
         open(&mut agent);
@@ -647,140 +498,6 @@ fn the_permission_esc_ladder_steps_out_one_rung_at_a_time() {
         agent.permission_queue.len(),
         1,
         "no rung of the ladder answers the request"
-    );
-}
-
-#[test]
-fn the_cancel_turn_panel_resolves_instead_of_parking() {
-    let mut agent = make_agent();
-    agent.session.state = crate::app::agent::AgentState::TurnRunning;
-    open_cancel_turn(&mut agent);
-
-    assert_eq!(agent.card_esc(), Some(EscStep::KeepRunning));
-    assert!(hint_labels(&agent).contains(&"keep running".to_string()));
-
-    let outcome = agent.handle_cancel_turn_key(&KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-    assert!(
-        matches!(outcome, crate::app::app_view::InputOutcome::Changed),
-        "Esc must dismiss the panel without cancelling the turn, got {outcome:?}"
-    );
-    assert!(
-        agent.cancel_turn_view.is_none(),
-        "keep-running closes the panel"
-    );
-    assert!(
-        agent.session.state.is_turn_running(),
-        "dismissing is not a cancel"
-    );
-    assert_eq!(
-        agent.active_pane,
-        AgentPane::Prompt,
-        "resolving is the way out, so the panel never parks"
-    );
-}
-
-#[test]
-fn esc_on_the_cancel_turn_panel_does_not_cancel_the_turn() {
-    let mut agent = make_agent();
-    agent.session.state = crate::app::agent::AgentState::TurnRunning;
-    open_cancel_turn(&mut agent);
-
-    let outcome = agent.handle_input(
-        &crossterm::event::Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
-        &ActionRegistry::defaults(),
-    );
-    assert!(
-        !matches!(
-            outcome,
-            crate::app::app_view::InputOutcome::Action(
-                crate::app::actions::Action::CancelTurn
-                    | crate::app::actions::Action::CancelTurnChoice(_)
-            )
-        ),
-        "the bar's 'keep running' must not cancel the turn, got {outcome:?}"
-    );
-    assert!(agent.cancel_turn_view.is_none());
-    assert!(agent.session.state.is_turn_running());
-}
-
-/// Inside the dashboard overlay the ladder's last rung is the dashboard, and
-/// anything parked behind a bare scrollback is on it — a card that parks
-/// rather than backing out (a later question, or a permission prompt, which
-/// has no back-out rung at all), and a plan approval, alone or on top of a
-/// parked card. None of them hold the keyboard there, so none can consume
-/// `Esc`, and the swallow that protects the turn would otherwise leave the
-/// key inert until the user tabbed back in.
-#[test]
-fn anything_parked_in_the_overlay_keeps_an_esc_route_to_the_dashboard() {
-    for (label, setup) in [
-        ("permission", open_permission as fn(&mut AgentView)),
-        ("question", open_question as fn(&mut AgentView)),
-        ("elicitation", open_elicitation as fn(&mut AgentView)),
-        ("plan approval", open_plan as fn(&mut AgentView)),
-        (
-            "plan approval over a parked question",
-            open_plan_over_question as fn(&mut AgentView),
-        ),
-    ] {
-        let mut agent = make_agent();
-        agent.in_dashboard_overlay = true;
-        setup(&mut agent);
-        agent.set_active_pane(AgentPane::Scrollback, true);
-
-        assert!(
-            agent.overlay_esc_backs_out(),
-            "{label}: parked behind the scrollback, the next Esc leaves the overlay"
-        );
-
-        agent.scrollback_search = Some(crate::scrollback::search::ScrollbackSearchState::open());
-        assert!(
-            !agent.overlay_esc_backs_out(),
-            "{label}: but a layered scrollback sub-state still consumes Esc first"
-        );
-    }
-}
-
-/// The new rung is for surfaces the keyboard has left behind — it must not
-/// turn a plain scrollback `Esc` into a detach, which still belongs to the
-/// turn-cancel / rewind policy.
-#[test]
-fn a_bare_overlay_scrollback_esc_still_belongs_to_the_esc_policy() {
-    let mut agent = make_agent();
-    agent.in_dashboard_overlay = true;
-    agent.set_active_pane(AgentPane::Scrollback, true);
-
-    assert!(agent.is_bare_scrollback());
-    assert!(
-        !agent.overlay_esc_backs_out(),
-        "with nothing pending there is nothing parked, so Esc keeps its policy meaning"
-    );
-}
-
-#[test]
-fn esc_on_a_later_question_parks_before_it_leaves_the_overlay() {
-    let mut agent = make_agent();
-    open_two_questions(&mut agent);
-    agent.in_dashboard_overlay = true;
-    agent
-        .question_view
-        .as_mut()
-        .expect("card open")
-        .next_question();
-
-    assert_eq!(
-        agent.card_esc(),
-        Some(EscStep::ParkFocus),
-        "Esc must not throw the user out of the session from question 2 — \
-         Left still walks back there, so the card keeps the first press"
-    );
-    assert!(!agent.overlay_esc_backs_out());
-    assert!(hint_labels(&agent).contains(&"scrollback".to_string()));
-
-    let _ = agent.handle_question_key_for_test(&KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-    assert_eq!(agent.active_pane, AgentPane::Scrollback);
-    assert!(
-        agent.overlay_esc_backs_out(),
-        "and the next press leaves for the dashboard"
     );
 }
 
@@ -1055,37 +772,11 @@ fn vim_mode_permission_tab_and_esc_match_default() {
     assert_eq!(agent.key_owner(), KeyOwner::Card(BlockingCard::Permission));
 }
 
-fn open_elicitation(agent: &mut AgentView) {
-    use crate::views::elicitation_view::ElicitationViewState;
-    use pi_tools::mcp_elicitation::{McpElicitExtRequest, McpElicitModeFields};
-    agent.elicitation_view = Some(ElicitationViewState::from_request(
-        McpElicitExtRequest {
-            session_id: "s".into(),
-            tool_call_id: "mcp-elicit-1".into(),
-            server_name: "demo".into(),
-            message: "Fill in".into(),
-            mode: McpElicitModeFields::Form {
-                requested_schema: Some(serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "email": { "type": "string", "format": "email" }
-                    },
-                    "required": ["email"]
-                })),
-            },
-        },
-        Some(StashedPrompt::default()),
-        None,
-    ));
-}
-
 #[test]
-fn question_keys_win_over_rewind() {
-    use crate::views::rewind::RewindState;
+fn question_card_consumes_navigation_keys() {
     use crossterm::event::Event;
     let mut agent = make_agent();
     open_question(&mut agent);
-    agent.rewind_state = Some(RewindState::new_cancel_offer(0, None, None));
     let registry = ActionRegistry::defaults();
     let _ = agent.handle_input(
         &Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
@@ -1093,241 +784,4 @@ fn question_keys_win_over_rewind() {
     );
     let qv = agent.question_view.as_ref().expect("question stays open");
     assert_eq!(qv.cursor(), 1, "the question card consumed the key");
-    assert!(
-        agent.rewind_state.is_some(),
-        "the cancel-offer stays parked behind the card"
-    );
-}
-
-#[test]
-fn elicitation_keys_win_over_rewind() {
-    use crate::views::elicitation_view::ElicitationFocus;
-    use crate::views::rewind::RewindState;
-    use crossterm::event::Event;
-    let mut agent = make_agent();
-    open_elicitation(&mut agent);
-    agent.rewind_state = Some(RewindState::new_cancel_offer(0, None, None));
-    let registry = ActionRegistry::defaults();
-    let _ = agent.handle_input(
-        &Event::Key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE)),
-        &registry,
-    );
-    let ev = agent.elicitation_view.as_ref().unwrap();
-    assert_eq!(ev.focus, ElicitationFocus::Editing);
-    assert_eq!(ev.form().unwrap().fields[0].draft(), "y");
-    assert!(agent.rewind_state.is_some());
-}
-
-#[test]
-fn elicitation_esc_leaves_edit_then_parks() {
-    use crate::views::elicitation_view::ElicitationFocus;
-    let mut agent = make_agent();
-    open_elicitation(&mut agent);
-
-    agent.elicitation_view.as_mut().unwrap().focus = ElicitationFocus::Editing;
-    assert_eq!(agent.card_esc(), Some(EscStep::LeaveTextInput));
-    assert!(hint_labels(&agent).contains(&"back".to_string()));
-    let _ = agent.handle_elicitation_key(&KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-    assert_eq!(
-        agent.elicitation_view.as_ref().unwrap().focus,
-        ElicitationFocus::Fields
-    );
-    assert!(
-        agent.elicitation_view.is_some(),
-        "leaving edit must not cancel the request"
-    );
-
-    assert_eq!(agent.card_esc(), Some(EscStep::ParkFocus));
-    assert!(hint_labels(&agent).contains(&"scrollback".to_string()));
-    let _ = agent.handle_elicitation_key(&KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-    assert_eq!(agent.active_pane, AgentPane::Scrollback);
-    assert!(
-        agent.elicitation_view.is_some(),
-        "park must not cancel the request"
-    );
-}
-
-#[test]
-fn elicitation_form_printable_keys_enter_edit() {
-    use crate::views::elicitation_view::ElicitationFocus;
-    let mut agent = make_agent();
-    open_elicitation(&mut agent);
-    assert_eq!(
-        agent.elicitation_view.as_ref().unwrap().focus,
-        ElicitationFocus::Fields
-    );
-    let _ = agent.handle_elicitation_key(&KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
-    let ev = agent.elicitation_view.as_ref().unwrap();
-    assert_eq!(ev.focus, ElicitationFocus::Editing);
-    assert_eq!(ev.form().unwrap().fields[0].draft(), "y");
-    let _ = agent.handle_elicitation_key(&KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
-    let ev = agent.elicitation_view.as_ref().unwrap();
-    assert_eq!(ev.focus, ElicitationFocus::Editing);
-    assert_eq!(ev.form().unwrap().fields[0].draft(), "yd");
-}
-
-#[test]
-fn elicitation_paste_on_fields_enters_edit() {
-    use crate::views::elicitation_view::ElicitationFocus;
-    let mut agent = make_agent();
-    open_elicitation(&mut agent);
-    assert_eq!(
-        agent.elicitation_view.as_ref().unwrap().focus,
-        ElicitationFocus::Fields
-    );
-    let _ = agent.handle_elicitation_paste("user@example.com");
-    let ev = agent.elicitation_view.as_ref().unwrap();
-    assert_eq!(ev.focus, ElicitationFocus::Editing);
-    assert_eq!(ev.form().unwrap().fields[0].draft(), "user@example.com");
-}
-
-#[test]
-fn elicitation_paste_strips_control_chars() {
-    let mut agent = make_agent();
-    open_elicitation(&mut agent);
-    let _ = agent.handle_elicitation_paste("user\x1b]52;c;c3RvbGVu\x07@example.com");
-    let draft = agent
-        .elicitation_view
-        .as_ref()
-        .unwrap()
-        .form()
-        .unwrap()
-        .fields[0]
-        .draft();
-    assert!(
-        !draft.chars().any(char::is_control),
-        "pasted escapes must not reach the draft: {draft:?}"
-    );
-    assert_eq!(draft, "user]52;c;c3RvbGVu@example.com");
-}
-
-#[test]
-fn elicitation_draft_stops_at_named_cap() {
-    use pi_tools::mcp_elicitation::MAX_ELICIT_DRAFT_CHARS;
-    let mut agent = make_agent();
-    open_elicitation(&mut agent);
-    let over = "a".repeat(MAX_ELICIT_DRAFT_CHARS + 32);
-    let _ = agent.handle_elicitation_paste(&over);
-    let draft = agent
-        .elicitation_view
-        .as_ref()
-        .unwrap()
-        .form()
-        .unwrap()
-        .fields[0]
-        .draft();
-    assert_eq!(draft.chars().count(), MAX_ELICIT_DRAFT_CHARS);
-}
-
-fn open_url_elicitation(
-    agent: &mut AgentView,
-    response_tx: Option<crate::views::elicitation_view::ElicitResponseTx>,
-) {
-    use crate::views::elicitation_view::ElicitationViewState;
-    use pi_tools::mcp_elicitation::{McpElicitExtRequest, McpElicitModeFields};
-    agent.elicitation_view = Some(ElicitationViewState::from_request(
-        McpElicitExtRequest {
-            session_id: "s".into(),
-            tool_call_id: "mcp-elicit-url".into(),
-            server_name: "demo".into(),
-            message: "Open".into(),
-            mode: McpElicitModeFields::Url {
-                url: format!("https://example.com/{}", "a/".repeat(200)),
-                elicitation_id: "eid-1".into(),
-            },
-        },
-        Some(StashedPrompt::default()),
-        response_tx,
-    ));
-}
-
-#[test]
-fn url_accept_on_dead_request_dismisses_without_waiting() {
-    let mut agent = make_agent();
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    drop(rx);
-    open_url_elicitation(&mut agent, Some(tx));
-    let _ = agent.handle_elicitation_key(&KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
-    assert!(
-        agent.elicitation_view.is_none(),
-        "an accept the MCP side can no longer hear must dismiss the card, \
-         not park it in waiting"
-    );
-}
-
-#[test]
-fn url_walk_keys_scroll_the_viewport() {
-    let mut agent = make_agent();
-    open_url_elicitation(&mut agent, None);
-    let scroll = |agent: &AgentView| agent.elicitation_view.as_ref().unwrap().scroll;
-    assert_eq!(scroll(&agent), 0);
-    let _ = agent.handle_elicitation_key(&KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
-    assert_eq!(scroll(&agent), 1);
-    let _ = agent.handle_elicitation_key(&KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
-    assert_eq!(scroll(&agent), 5);
-    let _ = agent.handle_elicitation_key(&KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
-    assert_eq!(scroll(&agent), 4);
-    let _ = agent.handle_elicitation_key(&KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE));
-    assert_eq!(scroll(&agent), 0);
-}
-
-fn open_two_field_elicitation(agent: &mut AgentView) {
-    use crate::views::elicitation_view::ElicitationViewState;
-    use pi_tools::mcp_elicitation::{McpElicitExtRequest, McpElicitModeFields};
-    agent.elicitation_view = Some(ElicitationViewState::from_request(
-        McpElicitExtRequest {
-            session_id: "s".into(),
-            tool_call_id: "mcp-elicit-2".into(),
-            server_name: "demo".into(),
-            message: "Fill in".into(),
-            mode: McpElicitModeFields::Form {
-                requested_schema: Some(serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "email": { "type": "string" },
-                        "name": { "type": "string" }
-                    },
-                    "required": ["email", "name"]
-                })),
-            },
-        },
-        Some(StashedPrompt::default()),
-        None,
-    ));
-}
-
-#[test]
-fn elicitation_shift_tab_walks_fields_backwards() {
-    use crate::views::elicitation_view::{ElicitationActionFocus, ElicitationFocus};
-    for (code, modifiers) in SHIFT_TAB {
-        let mut agent = make_agent();
-        open_two_field_elicitation(&mut agent);
-        let ev = agent.elicitation_view.as_ref().unwrap();
-        assert_eq!(ev.focus, ElicitationFocus::Fields);
-        assert_eq!(ev.field_cursor(), 0);
-
-        let _ = agent.handle_elicitation_key(&KeyEvent::new(code, modifiers));
-        let ev = agent.elicitation_view.as_ref().unwrap();
-        assert_eq!(ev.focus, ElicitationFocus::Actions);
-        assert_eq!(
-            ev.action_focus,
-            ElicitationActionFocus::Decline,
-            "Shift+Tab from the first field wraps to Decline ({code:?})"
-        );
-
-        let _ = agent.handle_elicitation_key(&KeyEvent::new(code, modifiers));
-        let ev = agent.elicitation_view.as_ref().unwrap();
-        assert_eq!(ev.focus, ElicitationFocus::Actions);
-        assert_eq!(ev.action_focus, ElicitationActionFocus::Accept);
-
-        let _ = agent.handle_elicitation_key(&KeyEvent::new(code, modifiers));
-        let ev = agent.elicitation_view.as_ref().unwrap();
-        assert_eq!(ev.focus, ElicitationFocus::Fields);
-        assert_eq!(ev.field_cursor(), 1);
-
-        let _ = agent.handle_elicitation_key(&KeyEvent::new(code, modifiers));
-        let ev = agent.elicitation_view.as_ref().unwrap();
-        assert_eq!(ev.focus, ElicitationFocus::Fields);
-        assert_eq!(ev.field_cursor(), 0);
-    }
 }

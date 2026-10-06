@@ -6,8 +6,8 @@
 
 use std::ops::Range;
 
-use ratatui::layout::Rect;
 use pi_ratatui_textarea::{ClipboardProvider, InternalClipboard, TextArea, TextAreaState};
+use ratatui::layout::Rect;
 
 use super::ListItem;
 use super::layout::{ListLayoutCache, WrapMode};
@@ -125,13 +125,6 @@ impl ListMatcher {
 // ---------------------------------------------------------------------------
 // Backward-compatible aliases
 // ---------------------------------------------------------------------------
-
-/// Backward-compatible alias for [`ListMatcher`].
-///
-/// Existing code that constructs `FilterMatcher::substring(...)` or
-/// `FilterMatcher::regex(...)` continues to work via these helper methods.
-/// New code should use [`ListMatcher::new`] directly.
-pub type FilterMatcher = ListMatcher;
 
 impl ListMatcher {
     /// Build a substring filter matcher (backward-compatible).

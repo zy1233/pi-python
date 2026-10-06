@@ -121,32 +121,6 @@ const PERMISSION_MODE_CHOICES: &[EnumChoice] = &[
 ];
 
 // ---------------------------------------------------------------------------
-// Coding-data-sharing catalog.
-//
-// Persisted in auth metadata (`AuthEntry::coding_data_retention_opt_out`),
-// NOT config.toml. Two choices only — the pager has no `Option`/`Unset`
-// representation for this field.
-//
-// `supports_preview: false` — toggling fires an async ACP call that
-// can fail. Commit on Enter only.
-// ---------------------------------------------------------------------------
-
-// The setting's own description carries the full explanation, so the choices
-// are bare labels — an empty description collapses each to a single line.
-const CODING_DATA_SHARING_CHOICES: &[EnumChoice] = &[
-    EnumChoice {
-        canonical: "opt-in",
-        display: "Opt in",
-        description: "",
-    },
-    EnumChoice {
-        canonical: "opt-out",
-        display: "Opt out",
-        description: "",
-    },
-];
-
-// ---------------------------------------------------------------------------
 // Plan-mode catalog.
 //
 // PAGER-owned, per-session, ACP-mediated via `session/set_mode`.
@@ -215,21 +189,6 @@ const PLAN_MODE_CHOICES: &[EnumChoice] = &[
         canonical: "on",
         display: "On",
         description: "Agent summarises a plan and asks for approval before running tools.",
-    },
-];
-
-// Mid-turn follow-up routing. SHARED-owned, persisted to
-// `[ui].follow_up_behavior`. Canonicals match `FollowUpBehavior::as_canonical`.
-const FOLLOW_UP_BEHAVIOR_CHOICES: &[EnumChoice] = &[
-    EnumChoice {
-        canonical: "queue",
-        display: "Queue",
-        description: "Hold follow-ups until the current turn finishes.",
-    },
-    EnumChoice {
-        canonical: "steer",
-        display: "Steer",
-        description: "Inject follow-ups mid-turn at the next tool or model step.",
     },
 ];
 
@@ -529,7 +488,6 @@ const CONTEXTUAL_HINTS_CHILDREN: &[&str] = &[
     "contextual_hints.undo",
     "contextual_hints.plan_mode",
     "contextual_hints.image_input",
-    "contextual_hints.send_now",
     "contextual_hints.small_screen",
     "contextual_hints.word_select",
     "contextual_hints.ssh_wrap",
@@ -644,46 +602,6 @@ pub fn default_settings() -> Vec<SettingMeta> {
             keywords: &["queue", "combine", "batch", "follow-up", "merge", "pending"],
             kind: SettingKind::Bool {
                 default: ui_default.combine_queued_prompts.unwrap_or(false),
-            },
-            restart_required: false,
-            hidden_in_minimal: false,
-        },
-        SettingMeta {
-            key: "follow_up_behavior",
-            category: SettingCategory::Editor,
-            owner: SettingOwner::Shared,
-            label: "Follow-up behavior",
-            description: "What to do with messages you send while a turn is \
-                          running. Queue waits for the turn to finish; Steer \
-                          injects them mid-turn at the next tool batch or \
-                          model step. Default: Queue.",
-            keywords: &[
-                "queue",
-                "steer",
-                "interject",
-                "follow-up",
-                "followup",
-                "send",
-                "immediate",
-            ],
-            kind: SettingKind::Enum {
-                default: ui_default.follow_up_behavior(),
-                choices: FOLLOW_UP_BEHAVIOR_CHOICES,
-                supports_preview: false,
-            },
-            restart_required: false,
-            hidden_in_minimal: false,
-        },
-        SettingMeta {
-            key: "confirm_before_rewind",
-            category: SettingCategory::Editor,
-            owner: SettingOwner::Shared,
-            label: "Confirm before rewind",
-            description: "Ask before rewinding conversation history. Turn off to rewind \
-                          immediately when you pick a turn.",
-            keywords: &["rewind", "confirm", "undo", "history", "ask", "prompt"],
-            kind: SettingKind::Bool {
-                default: ui_default.confirm_before_rewind_enabled(),
             },
             restart_required: false,
             hidden_in_minimal: false,
@@ -1202,40 +1120,6 @@ pub fn default_settings() -> Vec<SettingMeta> {
             restart_required: false,
             hidden_in_minimal: false,
         },
-        // SHELL-owned. Persisted in auth metadata (not config.toml).
-        // Reads from `PagerLocalSnapshot.coding_data_sharing_opt_out`.
-        // Default "opt-out" matches `AuthEntry::coding_data_retention_opt_out = true`
-        // (safer consumer default; server enrichment may still opt the user in).
-        // ZDR / non-admin guards are enforced at dispatch time.
-        // Do not put "telemetry" in keywords — that word is the config-file
-        // analytics toggle (Monitoring / Configuration docs).
-        SettingMeta {
-            key: "coding_data_sharing",
-            category: SettingCategory::Privacy,
-            owner: SettingOwner::Shell,
-            label: "Coding data, retention, and training",
-            description: "Opt-in to provide SpaceXAI the ability to retain and train on \
-                          coding data, e.g., prompts, traces, & metrics, for training and \
-                          debugging purposes. We may still collect simple user metrics, \
-                          e.g. how many times you use the product or a feature.",
-            keywords: &[
-                "privacy",
-                "data",
-                "sharing",
-                "coding",
-                "retention",
-                "training",
-                "opt-in",
-                "opt-out",
-            ],
-            kind: SettingKind::Enum {
-                default: "opt-out",
-                choices: CODING_DATA_SHARING_CHOICES,
-                supports_preview: false,
-            },
-            restart_required: false,
-            hidden_in_minimal: false,
-        },
         // SHELL-owned, persisted to `[ui].default_selected_permission` in
         // config.toml. Read by the pager via `appearance::permission_cursor`.
         // Canonical `always_allow_all_sessions` (the effective default) lands
@@ -1353,9 +1237,6 @@ pub fn default_settings() -> Vec<SettingMeta> {
                 "image",
                 "clipboard",
                 "ephemeral",
-                "send",
-                "interject",
-                "queue",
                 // Child-specific terms: the per-tip children are hidden from the
                 // top-level list, so mirror their search words here to keep a
                 // query like "ctrl+z" or "shift+tab" from dead-ending.
@@ -1366,8 +1247,6 @@ pub fn default_settings() -> Vec<SettingMeta> {
                 "shift+tab",
                 "paste",
                 "input",
-                "enter",
-                "follow-up",
                 "small",
                 "screen",
                 "compact",
@@ -1539,29 +1418,6 @@ pub fn default_settings() -> Vec<SettingMeta> {
             keywords: &["image", "clipboard", "paste", "input", "hint"],
             kind: SettingKind::Bool {
                 default: ui_default.contextual_hints.image_input.unwrap_or(true),
-            },
-            restart_required: false,
-            hidden_in_minimal: false,
-        },
-        SettingMeta {
-            key: "contextual_hints.send_now",
-            category: SettingCategory::Advanced,
-            owner: SettingOwner::Shell,
-            label: "Send now",
-            description: "After you queue a follow-up mid-turn, remind you that Enter \
-                          on an empty prompt sends the top queued item now.",
-            keywords: &[
-                "send",
-                "now",
-                "interject",
-                "queue",
-                "follow-up",
-                "enter",
-                "empty",
-                "hint",
-            ],
-            kind: SettingKind::Bool {
-                default: ui_default.contextual_hints.send_now.unwrap_or(true),
             },
             restart_required: false,
             hidden_in_minimal: false,

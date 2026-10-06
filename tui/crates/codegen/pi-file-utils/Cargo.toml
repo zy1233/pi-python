@@ -9,7 +9,6 @@ authors = ["pi"]
 [dependencies]
 anyhow = { workspace = true }
 base64.workspace = true
-dunce = { workspace = true }
 pi-circuit-breaker = { workspace = true }
 pi-version = { workspace = true }
 aws-sdk-s3 = { version = "1", default-features = false, features = [
@@ -27,7 +26,6 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
 dirs = { workspace = true }
-indexmap = { workspace = true }
 reqwest = { workspace = true }
 pi-extra-ca = { workspace = true }
 reqwest-middleware = { workspace = true }

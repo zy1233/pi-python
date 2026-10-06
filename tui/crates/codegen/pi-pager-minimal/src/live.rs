@@ -8,11 +8,6 @@
 //! message / running tool) so output is visible as it generates; finished blocks
 //! scroll up into native scrollback via [`super::commit`]. When idle the tail is
 //! empty and only status + prompt (+ optional panels) show.
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Widget};
 use pi_pager::app::PagerTerminal;
 use pi_pager::app::app_view::{ActiveView, AppView};
 use pi_pager::minimal_api;
@@ -22,6 +17,11 @@ use pi_pager::scrollback::wrappers::EntryRenderer;
 use pi_pager::theme::Theme;
 use pi_pager::views::prompt_widget::{PromptBg, PromptStyle};
 use pi_pager::views::turn_status;
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::style::{Color, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Clear, Widget};
 /// Left inset (columns) for every auxiliary live-region row: the status row,
 /// the info bar, the exit hint, and the todo panel — and the prompt's
 /// `chrome_pad_left`.
@@ -65,14 +65,13 @@ fn paintable_btw_area(frame_area: Rect, area: Rect) -> Option<Rect> {
 /// Shared with [`super::overlay::sync_viewport`] so viewport sizing measures the
 /// prompt's height exactly as the live region will draw it.
 ///
-/// `input_mode` wires special composer modes (bash `! `, feedback `~ `,
-/// remember `# `) the same way the full TUI does — without this, `!` on an
-/// empty prompt would flip mode invisibly (key consumed, default `❯` remains).
+/// `input_mode` wires the bash composer mode (`! `) the same way the full TUI
+/// does — without this, `!` on an empty prompt would flip mode invisibly (key
+/// consumed, default `❯` remains).
 pub(super) fn prompt_style(
     appearance: &pi_pager::appearance::AppearanceConfig,
     input_mode: pi_pager::app::agent_view::PromptInputMode,
     theme: &Theme,
-    multiline: bool,
 ) -> PromptStyle {
     PromptStyle {
         focused: true,
@@ -87,7 +86,7 @@ pub(super) fn prompt_style(
         border_color_override: None,
         prefix_override: input_mode.prefix_override(theme),
         placeholder_when_focused: false,
-        placeholder_override: input_mode.placeholder_override(multiline),
+        placeholder_override: None,
         show_accent_line: false,
         show_borders: false,
         title: None,
@@ -125,11 +124,11 @@ pub fn draw_live(app: &mut AppView, terminal: &mut PagerTerminal) {
     let theme = Theme::current();
     let commit_app = super::commit::committed_appearance(appearance);
     let compact = appearance.prompt.compact;
-    let (input_mode, multiline) = agent_id
+    let input_mode = agent_id
         .and_then(|id| agents.get(&id))
-        .map(|a| (a.prompt_input_mode, a.multiline_mode))
+        .map(|a| a.prompt_input_mode)
         .unwrap_or_default();
-    let style = prompt_style(appearance, input_mode, &theme, multiline);
+    let style = prompt_style(appearance, input_mode, &theme);
     let row_inset = live_left_inset(appearance);
     let layout_cfg = &appearance.scrollback.layout;
     let term_h = terminal.last_known_area().height;
@@ -152,27 +151,13 @@ pub fn draw_live(app: &mut AppView, terminal: &mut PagerTerminal) {
         agent.active_pane = pi_pager::app::agent_view::AgentPane::Prompt;
         let status_activity = minimal_advance_phase_timer(agent);
         let show_todos = crate::todo::todo_panel_visible(agent, force_todos);
-        let queued = agent.session.pending_prompts.len() + agent.shared_queue.len();
+        let queued = agent.session.pending_prompts.len();
         if let Some(kind) = super::panel::active(agent) {
             let cursor = super::panel::render(frame.buffer_mut(), area, agent, kind, &theme);
             return (cursor, None);
         }
         if super::overlay::app_modal_active(agent) {
             super::overlay::render_app_modal(frame.buffer_mut(), area, agent, compact);
-            return (None, None);
-        }
-        if minimal_api::extensions_modal(agent).is_some() {
-            let tick = (now_millis() / 100) as u64;
-            if let Some(state) = minimal_api::extensions_modal_mut(agent) {
-                pi_pager::views::extensions_modal::render_extensions_modal(
-                    frame.buffer_mut(),
-                    area,
-                    state,
-                    None,
-                    compact,
-                    tick,
-                );
-            }
             return (None, None);
         }
         if let Some(modal) = super::overlay::active_modal(agent) {
@@ -270,10 +255,7 @@ pub fn draw_live(app: &mut AppView, terminal: &mut PagerTerminal) {
             .max(1);
         let rest = avail.saturating_sub(prompt_h);
         let raw_btw = if minimal_api::minimal_btw_surface_available(agent) {
-            pi_pager::views::btw_overlay::btw_panel_height(
-                agent.btw_state.as_ref(),
-                area.width,
-            )
+            pi_pager::views::btw_overlay::btw_panel_height(agent.btw_state.as_ref(), area.width)
         } else {
             0
         };
@@ -575,25 +557,13 @@ fn render_minimal_status(
         );
         return;
     }
-    let watchers = minimal_api::watchers(agent);
     let drain_blocked = minimal_api::drain_blocked(agent);
-    let parked = minimal_api::renders_parked(agent);
-    if !turn_status::should_show(
-        &agent.session.state,
-        drain_blocked,
-        minimal_api::mcp_init_progress(agent),
-        watchers,
-        parked,
-    ) {
+    if !turn_status::should_show(&agent.session.state, drain_blocked) {
         render_idle_hint(buf, area, theme);
         return;
     }
     let is_pending_user_input =
         !agent.permission_queue.is_empty() || minimal_api::question_view(agent).is_some();
-    let goal_verifying = agent
-        .goal_state
-        .as_ref()
-        .is_some_and(|g| g.verifying_completion);
     turn_status::render_turn_status(
         buf,
         area,
@@ -605,17 +575,10 @@ fn render_minimal_status(
             tick: agent.scrollback.animation_tick(),
             drain_blocked,
             buttons: None,
-            has_running_execute: false,
             total_tokens: agent.context_state.as_ref().map(|c| c.used),
-            mcp_init_progress: minimal_api::mcp_init_progress(agent),
             is_bash_turn: agent.bash_turn,
             is_pending_user_input,
-            goal_verifying,
-            watchers,
-            parked,
             flat_background: true,
-            held_queue: minimal_api::held_queue_count(agent),
-            held_queue_top_sendable: minimal_api::held_queue_top_sendable(agent),
         },
     );
 }
@@ -641,9 +604,8 @@ fn render_config_status_line(
         });
     }
     if let Some(display) = frame.display() {
-        let _ = pi_pager::views::status_line::render_status_line(
-            buf, area, display, padding, theme,
-        );
+        let _ =
+            pi_pager::views::status_line::render_status_line(buf, area, display, padding, theme);
     }
 }
 /// Idle status: `minimal · [/fullscreen to go back ·] /help` (+ auto-set note).
@@ -840,10 +802,10 @@ mod tests {
     }
     #[test]
     fn config_status_line_paints_and_records_the_script_size() {
-        use std::sync::Arc;
         use pi_pager::views::status_line::{
             RowSize, SanitizedText, StatusLineDisplay, StatusLineFrame,
         };
+        use std::sync::Arc;
         let theme = Theme::current();
         let area = Rect::new(0, 0, 40, 1);
         let row_text = |buf: &Buffer| -> String {
@@ -1024,50 +986,16 @@ mod tests {
         assert!(read(&buf).contains("Retrying"), "retry: {:?}", read(&buf));
     }
     #[test]
-    fn minimal_status_shows_idle_watching_cue() {
-        use pi_pager::app::agent::AgentState;
-        let theme = Theme::current();
-        let area = Rect::new(0, 0, 60, 1);
-        let read = |buf: &Buffer| -> String {
-            (0..area.width)
-                .filter_map(|x| buf.cell((x, 0)).map(|c| c.symbol().to_string()))
-                .collect()
-        };
-        let mut a = agent();
-        a.session.state = AgentState::Idle;
-        a.session.scheduled_tasks.insert(
-            "loop-1".to_string(),
-            pi_pager::app::agent::ScheduledTaskInfo {
-                task_id: "loop-1".to_string(),
-                prompt: "do the thing".to_string(),
-                human_schedule: "every 5m".to_string(),
-                created_at: std::time::Instant::now(),
-                next_fire_at: None,
-                tag: "loop".to_string(),
-                last_subagent_id: None,
-            },
-        );
-        assert_eq!(minimal_api::watchers(&a).loops, 1);
-        let mut buf = Buffer::empty(area);
-        render_minimal_status(&mut buf, area, &a, &None, None, &theme);
-        let text = read(&buf);
-        assert!(
-            text.contains("1 loop still running"),
-            "watching cue: {text:?}"
-        );
-        assert!(!text.contains("/help"), "not the idle hint: {text:?}");
-    }
-    #[test]
     fn prompt_style_bash_mode_shows_bang_prefix() {
         use pi_pager::app::agent_view::PromptInputMode;
         use pi_pager::appearance::AppearanceConfig;
         let appearance = AppearanceConfig::default();
         let theme = Theme::current();
-        let normal = prompt_style(&appearance, PromptInputMode::Normal, &theme, false);
+        let normal = prompt_style(&appearance, PromptInputMode::Normal, &theme);
         assert!(normal.prefix_override.is_none());
         assert!(normal.accent_color_override.is_none());
         assert!(normal.placeholder_override.is_none());
-        let bash = prompt_style(&appearance, PromptInputMode::Bash, &theme, false);
+        let bash = prompt_style(&appearance, PromptInputMode::Bash, &theme);
         assert_eq!(
             bash.prefix_override,
             Some(("! ", theme.command)),

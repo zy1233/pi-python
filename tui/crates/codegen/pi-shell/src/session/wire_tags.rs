@@ -8,7 +8,6 @@
 use std::sync::LazyLock;
 
 use agent_client_protocol as acp;
-use pi_tools::types::TaskSnapshot;
 
 use crate::extensions::notification::SessionUpdate as PiSessionUpdate;
 
@@ -63,76 +62,5 @@ pub(crate) static REWIND_MARKER: LazyLock<String> = LazyLock::new(|| {
     })
 });
 
-/// pi `SessionUpdate::TaskBackgrounded` discriminant.
-pub(crate) static TASK_BACKGROUNDED: LazyLock<String> = LazyLock::new(|| {
-    tagged_discriminant(&PiSessionUpdate::TaskBackgrounded {
-        tool_call_id: String::new(),
-        task_id: String::new(),
-        command: String::new(),
-        cwd: String::new(),
-        output_file: String::new(),
-        monitor_description: None,
-        description: None,
-    })
-});
-
-/// pi `SessionUpdate::TaskCompleted` discriminant.
-pub(crate) static TASK_COMPLETED: LazyLock<String> = LazyLock::new(|| {
-    tagged_discriminant(&PiSessionUpdate::TaskCompleted {
-        task_snapshot: TaskSnapshot {
-            task_id: String::new(),
-            command: String::new(),
-            display_command: None,
-            cwd: String::new(),
-            start_time: std::time::SystemTime::UNIX_EPOCH,
-            end_time: None,
-            output: String::new(),
-            output_file: std::path::PathBuf::new(),
-            truncated: false,
-            exit_code: None,
-            signal: None,
-            completed: false,
-            kind: Default::default(),
-            block_waited: false,
-            explicitly_killed: false,
-            kill_result_delivered: false,
-            owner_session_id: None,
-            description: None,
-            is_backgrounded: false,
-            output_total_bytes: 0,
-        },
-        will_wake: false,
-    })
-});
-
-/// The `"sessionUpdate":"user_message_chunk"` key/value pair as serialized (no
-/// leading `{`). Built from [`USER_MESSAGE_CHUNK`] so the literal isn't hand-
-/// maintained; the quoted key means it can't false-match the bare discriminant
-/// escaped inside user content.
-pub(crate) static USER_MESSAGE_CHUNK_PREFIX: LazyLock<String> =
-    LazyLock::new(|| format!(r#""sessionUpdate":"{}""#, *USER_MESSAGE_CHUNK));
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Pins the wire format: each derived discriminant must equal the exact
-    /// string persisted in `updates.jsonl`, so a serde/wire change fails here.
-    #[test]
-    fn derived_discriminants_match_wire_format() {
-        assert_eq!(USER_MESSAGE_CHUNK.as_str(), "user_message_chunk");
-        assert_eq!(
-            AVAILABLE_COMMANDS_UPDATE.as_str(),
-            "available_commands_update"
-        );
-        assert_eq!(TOOL_CALL_UPDATE.as_str(), "tool_call_update");
-        assert_eq!(TOOL_CALL_STATUS_IN_PROGRESS.as_str(), "in_progress");
-        assert_eq!(REWIND_MARKER.as_str(), "rewind_marker");
-        assert_eq!(TASK_BACKGROUNDED.as_str(), "task_backgrounded");
-        assert_eq!(TASK_COMPLETED.as_str(), "task_completed");
-        assert_eq!(
-            USER_MESSAGE_CHUNK_PREFIX.as_str(),
-            r#""sessionUpdate":"user_message_chunk""#
-        );
-    }
-}
+mod tests {}

@@ -125,6 +125,49 @@ def test_load_local_env_sets_missing_keys(tmp_path: Path, monkeypatch):
     assert got == str((tmp_path / "proj" / ".pi" / "skills").resolve())
 
 
+def test_load_config_parses_selectable_models(tmp_path: Path):
+    (tmp_path / "agent.toml").write_text(
+        """
+[model]
+provider = "openai"
+id = "base"
+base_url = "https://one.example/v1"
+api_key_env = "KEY_ONE"
+
+[[models]]
+id = "same-provider"
+name = "Same Provider"
+
+[[models]]
+id = "other-provider"
+provider = "deepseek"
+
+[[models]]
+id = "base"
+
+[[models]]
+name = "missing id is ignored"
+""".strip(),
+        encoding="utf-8",
+    )
+    config = load_config(tmp_path)
+    same, other = config.model_choices()[1:]
+    assert [c.id for c in config.model_choices()] == ["base", "same-provider", "other-provider"]
+    # unset fields inherit from [model] only for the same provider
+    assert (same.provider, same.base_url, same.api_key_env, same.name) == (
+        "openai",
+        "https://one.example/v1",
+        "KEY_ONE",
+        "Same Provider",
+    )
+    assert (other.provider, other.base_url, other.api_key_env) == ("deepseek", None, None)
+
+
+def test_load_config_without_models_has_single_choice():
+    config = CliConfig(provider="mock", model_id="mock")
+    assert [c.id for c in config.model_choices()] == ["mock"]
+
+
 def test_load_config_parses_git_section(tmp_path: Path):
     (tmp_path / "agent.toml").write_text(
         """

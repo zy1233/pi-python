@@ -10,12 +10,6 @@ pub enum Remedy {
         /// `"minimal is single-session"`.
         why: &'static str,
     },
-    /// Imperative clause naming what to do in this mode instead. Two ways to
-    /// get this wrong: `Ctrl+G` is the external editor in minimal and the
-    /// tasks pane everywhere else, and a bare letter resolves only under vim
-    /// mode (off by default), so name arrows, `Tab`, or `Ctrl+<letter>`.
-    UseInstead(&'static str),
-    AlreadyInMode,
 }
 
 /// Which render modes a slash command functions in.
@@ -23,7 +17,6 @@ pub enum Remedy {
 pub enum ModeSupport {
     Both,
     FullscreenOnly(Remedy),
-    MinimalOnly(Remedy),
 }
 
 impl ModeSupport {
@@ -31,7 +24,6 @@ impl ModeSupport {
         match self {
             Self::Both => true,
             Self::FullscreenOnly(_) => !mode.is_minimal(),
-            Self::MinimalOnly(_) => mode.is_minimal(),
         }
     }
 
@@ -42,17 +34,12 @@ impl ModeSupport {
         let (remedy, current, switch) = match self {
             Self::Both => return None,
             Self::FullscreenOnly(remedy) => (remedy, "minimal", "/fullscreen"),
-            Self::MinimalOnly(remedy) => (remedy, "fullscreen", "/minimal"),
         };
         Some(match remedy {
             Remedy::SwitchMode { why } => format!(
                 "/{token} isn't available in {current} mode ({why}). \
                  Run {switch} to switch this session."
             ),
-            Remedy::UseInstead(instead) => {
-                format!("/{token} isn't available in {current} mode: {instead}.")
-            }
-            Remedy::AlreadyInMode => format!("You're already in {current} mode."),
         })
     }
 }

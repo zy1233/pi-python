@@ -106,16 +106,6 @@ impl RefreshTokenFailedReason {
         }
     }
 
-    /// Whether the verdict rules out an unattended retry for as long as it
-    /// stands. Orthogonal to [`Self::is_sticky`], which is about whether the
-    /// verdict ever ages out.
-    pub(crate) fn blocks_unattended_retry(self) -> bool {
-        match self {
-            Self::RefreshTokenRejected | Self::ProviderInteractiveRequired => true,
-            Self::ClientRejected | Self::Other => false,
-        }
-    }
-
     /// User-facing copy for a terminal refresh failure; the raw IdP code stays
     /// in logs.
     pub(crate) fn user_message(self) -> Cow<'static, str> {

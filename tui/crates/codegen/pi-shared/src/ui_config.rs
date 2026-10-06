@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use pi_config_types::DisplayRefreshSettings;
+use serde::{Deserialize, Serialize};
 
 use pi_status_line::StatusLineConfig;
 
@@ -49,10 +49,6 @@ pub struct UiConfig {
     /// Written by the pager's settings modal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page_flip_on_send: Option<bool>,
-    /// Ask before rewinding conversation history. `None` = on (default).
-    /// Written by the pager's settings modal / rewind "Yes, and don't ask again".
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub confirm_before_rewind: Option<bool>,
     /// Theme to use when the OS is in dark mode. Written by the pager's theme persist module.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_dark_theme: Option<String>,
@@ -173,11 +169,6 @@ pub struct UiConfig {
     /// Combine consecutive queued follow-ups into one turn. `None` = off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub combine_queued_prompts: Option<bool>,
-    /// Mid-turn follow-up routing: `"queue"` (default) or `"steer"`. `None`
-    /// behaves as queue. Steer promotes server-queued follow-ups as
-    /// interjections at the next tool or model safe point.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub follow_up_behavior: Option<String>,
     /// Display-refresh probe + auto-cadence (`[ui.display_refresh]`). Per-field
     /// `None` inherits remote/default; skipped when untouched.
     #[serde(default, skip_serializing_if = "DisplayRefreshSettings::is_default")]
@@ -206,9 +197,6 @@ pub struct ContextualHints {
     /// Clipboard-image input tip.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_input: Option<bool>,
-    /// Send-now tip after queuing a mid-turn follow-up (InterjectPrompt chord).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub send_now: Option<bool>,
     /// Small-screen tip (`/compact-mode` hint on smallish terminals).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub small_screen: Option<bool>,
@@ -229,7 +217,6 @@ impl ContextualHints {
         self.undo.is_none()
             && self.plan_mode.is_none()
             && self.image_input.is_none()
-            && self.send_now.is_none()
             && self.small_screen.is_none()
             && self.word_select.is_none()
             && self.ssh_wrap.is_none()
@@ -274,7 +261,6 @@ impl Default for UiConfig {
             show_timestamps: None,
             show_timeline: None,
             page_flip_on_send: None,
-            confirm_before_rewind: None,
             auto_dark_theme: None,
             auto_light_theme: None,
             scroll_speed: None,
@@ -301,7 +287,6 @@ impl Default for UiConfig {
             double_click_action: None,
             contextual_hints: ContextualHints::default(),
             combine_queued_prompts: None,
-            follow_up_behavior: None,
             display_refresh: DisplayRefreshSettings::default(),
             status_line: StatusLineConfig::default(),
         }
@@ -333,31 +318,6 @@ impl UiConfig {
     pub fn page_flip_on_send_enabled(&self) -> bool {
         self.page_flip_on_send
             .unwrap_or(Self::PAGE_FLIP_ON_SEND_DEFAULT)
-    }
-
-    /// Default for [`Self::confirm_before_rewind`] when unset.
-    pub const CONFIRM_BEFORE_REWIND_DEFAULT: bool = true;
-
-    pub fn confirm_before_rewind_enabled(&self) -> bool {
-        self.confirm_before_rewind
-            .unwrap_or(Self::CONFIRM_BEFORE_REWIND_DEFAULT)
-    }
-
-    /// Canonical default for `[ui].follow_up_behavior`.
-    pub const FOLLOW_UP_BEHAVIOR_DEFAULT: &'static str = "queue";
-
-    /// Resolved follow-up behavior: `"queue"` or `"steer"`.
-    /// Unknown values fall back to queue.
-    pub fn follow_up_behavior(&self) -> &'static str {
-        match self.follow_up_behavior.as_deref() {
-            Some("steer") => "steer",
-            _ => Self::FOLLOW_UP_BEHAVIOR_DEFAULT,
-        }
-    }
-
-    /// True when mid-turn follow-ups should promote as interjections (Steer).
-    pub fn follow_up_steer_enabled(&self) -> bool {
-        self.follow_up_behavior() == "steer"
     }
 
     /// True when the highlight should not timer-dismiss (`hold` / `word_select`,
@@ -435,16 +395,6 @@ mod tests {
             ..Default::default()
         };
         assert!(!off.page_flip_on_send_enabled());
-    }
-
-    #[test]
-    fn confirm_before_rewind_defaults_on() {
-        assert!(UiConfig::default().confirm_before_rewind_enabled());
-        let off = UiConfig {
-            confirm_before_rewind: Some(false),
-            ..Default::default()
-        };
-        assert!(!off.confirm_before_rewind_enabled());
     }
 
     #[test]

@@ -733,7 +733,6 @@ mod tests {
         ] {
             assert_eq!(env_value(&sandbox, proxy), None, "{proxy} must not leak");
         }
-        assert_eq!(env_value(&sandbox, "GROK_LEADER_SOCKET"), None);
         assert_eq!(env_value(&sandbox, "GROK_DISABLE_WEB_FETCH"), None);
         assert_eq!(env_value(&sandbox, "GROK_WEB_FETCH"), None);
     }

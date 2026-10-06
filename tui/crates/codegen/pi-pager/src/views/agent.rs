@@ -33,8 +33,6 @@ pub enum ActivePane {
     Todo,
     Queue,
     Prompt,
-    Tasks,
-    Catalog,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum InputMode {
@@ -49,19 +47,11 @@ pub struct PaneAreas {
     pub todo: Rect,
     pub queue: Rect,
     pub prompt: Rect,
-    pub tasks: Rect,
-    pub catalog: Rect,
 }
 impl PaneAreas {
     /// Determine which pane a screen position falls in, if any.
     pub fn hit_test(&self, col: u16, row: u16) -> Option<ActivePane> {
         let pos = (col, row).into();
-        if self.tasks.area() > 0 && self.tasks.contains(pos) {
-            return Some(ActivePane::Tasks);
-        }
-        if self.catalog.area() > 0 && self.catalog.contains(pos) {
-            return Some(ActivePane::Catalog);
-        }
         if self.todo.area() > 0 && self.todo.contains(pos) {
             return Some(ActivePane::Todo);
         }
@@ -78,7 +68,7 @@ impl PaneAreas {
     }
 }
 /// Terminals at or below this height suppress the optional rows above the
-/// prompt (plugin CTA, follow-ups, banner/tip) so the prompt and scrollback
+/// prompt (follow-ups, banner/tip) so the prompt and scrollback
 /// are never starved.
 pub const SHORT_TERMINAL_ROWS: u16 = 16;
 /// The scrollback's floor, pushed as the layout's only `Min`. The solver ranks
@@ -116,8 +106,6 @@ pub struct AgentViewLayoutParams {
     /// scrollbar's gutter geometry, so a disabled scrollbar forces it to 0.
     pub timeline_width: u16,
     pub prompt_height: u16,
-    pub tasks_height: u16,
-    pub catalog_height: u16,
     pub todo_height: u16,
     pub queue_height: u16,
     pub btw_height: u16,
@@ -125,8 +113,6 @@ pub struct AgentViewLayoutParams {
     pub banner_height: u16,
     /// Forced to 0 on short terminals (`area.height <= SHORT_TERMINAL_ROWS`)
     /// so the prompt and scrollback are never starved.
-    pub cta_height: u16,
-    /// Force-suppressed on short terminals on the same rule as `cta_height`.
     pub follow_ups_height: u16,
     /// 0 or 1: the gap row between turn status (or scrollback) and the prompt.
     pub prompt_gap: u16,
@@ -144,8 +130,6 @@ pub struct AgentViewLayoutParams {
 /// widgets use these rects to render into.
 pub struct AgentViewLayout {
     pub status_bar: Rect,
-    pub tasks: Rect,
-    pub catalog: Rect,
     pub scrollback: Rect,
     pub todo: Rect,
     pub queue: Rect,
@@ -154,9 +138,7 @@ pub struct AgentViewLayout {
     pub turn_status: Rect,
     /// Banner rect above the prompt (mode-switch banner, ephemeral tips).
     pub banner: Rect,
-    /// Inline plugin-CTA row (below banner, above the prompt gap).
-    pub plugin_cta: Rect,
-    /// Follow-up suggestion chips row (below the plugin CTA, above the prompt).
+    /// Follow-up suggestion chips row (below the banner, above the prompt).
     pub follow_ups: Rect,
     /// Single-row record indicator ("◉ Recording") directly above the prompt,
     /// shown only while voice capture is active.
@@ -188,14 +170,11 @@ impl AgentViewLayout {
             scrollbar_cfg,
             timeline_width,
             prompt_height,
-            tasks_height,
-            catalog_height,
             todo_height,
             queue_height,
             btw_height,
             turn_status_height,
             banner_height,
-            cta_height,
             follow_ups_height,
             prompt_gap,
             voice_recording_height,
@@ -208,11 +187,6 @@ impl AgentViewLayout {
             0
         } else {
             outer_vpad
-        };
-        let cta_height = if area.height <= SHORT_TERMINAL_ROWS {
-            0
-        } else {
-            cta_height
         };
         let follow_ups_height = if area.height <= SHORT_TERMINAL_ROWS {
             0
@@ -231,14 +205,6 @@ impl AgentViewLayout {
             Constraint::Length(1), // StatusBar
         ];
         let pane_gap = if top_vpad == 0 { 0u16 } else { 1 };
-        if tasks_height > 0 {
-            constraints.push(Constraint::Length(pane_gap));
-            constraints.push(Constraint::Length(tasks_height));
-        }
-        if catalog_height > 0 {
-            constraints.push(Constraint::Length(pane_gap));
-            constraints.push(Constraint::Length(catalog_height));
-        }
         if todo_height > 0 {
             constraints.push(Constraint::Length(pane_gap));
             constraints.push(Constraint::Length(todo_height));
@@ -261,10 +227,6 @@ impl AgentViewLayout {
         if banner_height > 0 {
             constraints.push(Constraint::Length(1));
             constraints.push(Constraint::Length(banner_height));
-        }
-        if cta_height > 0 {
-            constraints.push(Constraint::Length(1));
-            constraints.push(Constraint::Length(cta_height));
         }
         if follow_ups_height > 0 {
             constraints.push(Constraint::Length(1));
@@ -298,22 +260,6 @@ impl AgentViewLayout {
         let mut i = 0;
         let status_bar = chunks[i];
         i += 1;
-        let tasks = if tasks_height > 0 {
-            i += 1;
-            let r = chunks[i];
-            i += 1;
-            r
-        } else {
-            Rect::default()
-        };
-        let catalog = if catalog_height > 0 {
-            i += 1;
-            let r = chunks[i];
-            i += 1;
-            r
-        } else {
-            Rect::default()
-        };
         let todo = if todo_height > 0 {
             i += 1;
             let r = chunks[i];
@@ -350,14 +296,6 @@ impl AgentViewLayout {
             Rect::default()
         };
         let banner = if banner_height > 0 {
-            i += 1;
-            let r = chunks[i];
-            i += 1;
-            r
-        } else {
-            Rect::default()
-        };
-        let plugin_cta = if cta_height > 0 {
             i += 1;
             let r = chunks[i];
             i += 1;
@@ -419,15 +357,12 @@ impl AgentViewLayout {
         };
         Self {
             status_bar,
-            tasks,
-            catalog,
             scrollback,
             todo,
             queue,
             btw,
             turn_status,
             banner,
-            plugin_cta,
             follow_ups,
             voice_recording,
             prompt,
@@ -474,8 +409,6 @@ impl AgentViewLayout {
             todo: self.todo,
             queue: self.queue,
             prompt: self.prompt,
-            tasks: self.tasks,
-            catalog: self.catalog,
         }
     }
 }
@@ -505,7 +438,7 @@ pub fn fill_background(
 /// Chips render left-to-right and rendering STOPS at the first chip that does
 /// not fit the row width — the result is a rendered prefix of `suggestions`
 /// (index-aligned), not a filtered subset. A transient, mouse-clickable
-/// affordance above the prompt — the same row slot family as the plugin CTA.
+/// affordance above the prompt.
 /// Suggestion text is server-controlled and already sanitized at ingestion;
 /// here it is additionally length-clamped per chip and written through
 /// `set_span_safe`, so a label can neither overflow the row nor inject
@@ -602,135 +535,6 @@ pub fn render_entry_hover(
                 .with_bottom_clipped(last_bottom_clipped)
                 .render(buf);
         }
-    }
-}
-/// Render a floating popup showing hook details when hovering over
-/// a collapsed tool call entry that has hooks.
-pub fn render_hook_hover_popup(
-    buf: &mut Buffer,
-    scrollback_area: Rect,
-    scrollback: &ScrollbackState,
-    hovered_entry: Option<usize>,
-    mouse_pos: (u16, u16),
-    theme: &Theme,
-) {
-    let Some(hover_idx) = hovered_entry else {
-        return;
-    };
-    let Some(entry) = scrollback.get(hover_idx) else {
-        return;
-    };
-    let layout_info = scrollback
-        .get_cached_entry_layouts()
-        .and_then(|layouts| layouts.get(hover_idx));
-    if layout_info.is_some_and(|info| {
-        info.verb_group_header && !info.is_expanded_verb_header() && info.group_header_count > 1
-    }) {
-        return;
-    }
-    let is_expanded_verb_header =
-        layout_info.is_some_and(crate::scrollback::EntryLayoutInfo::is_expanded_verb_header);
-    if entry.display_mode != crate::scrollback::types::DisplayMode::Collapsed {
-        return;
-    }
-    let Some(ref hd) = entry.hook_data else {
-        return;
-    };
-    if !hd.has_content() {
-        return;
-    }
-    use crate::scrollback::blocks::tool::hook::render_hooks_for_mode;
-    let mode = crate::scrollback::types::DisplayMode::Expanded;
-    let mut lines = Vec::new();
-    let pre = render_hooks_for_mode("pre_tool_use", &hd.pre_hooks, mode);
-    let post = render_hooks_for_mode("post_tool_use", &hd.post_hooks, mode);
-    lines.extend(pre);
-    lines.extend(post);
-    for (event_name, runs) in &hd.lifecycle {
-        lines.extend(render_hooks_for_mode(event_name, runs, mode));
-    }
-    if lines.is_empty() {
-        return;
-    }
-    let Some((entry_area, top_clipped, _)) =
-        scrollback.entry_screen_area(hover_idx, scrollback_area)
-    else {
-        return;
-    };
-    let (mouse_col, mouse_row) = mouse_pos;
-    if mouse_row < entry_area.y || mouse_row >= entry_area.y + entry_area.height {
-        return;
-    }
-    let badge_row = entry_area.y + u16::from(is_expanded_verb_header && !top_clipped);
-    if badge_row >= entry_area.y + entry_area.height {
-        return;
-    }
-    let row_start = scrollback_area.x;
-    let row_end = scrollback_area.x + scrollback_area.width;
-    let row_text: String = (row_start..row_end)
-        .filter_map(|col| {
-            buf.cell(ratatui::layout::Position::new(col, badge_row))
-                .map(|c| c.symbol().to_string())
-        })
-        .collect();
-    let Some(badge_start_in_text) = row_text.find("[hooks:") else {
-        return;
-    };
-    let badge_end_in_text = row_text[badge_start_in_text..]
-        .find(']')
-        .map(|i| badge_start_in_text + i + 1)
-        .unwrap_or(row_text.len());
-    let badge_start_col = row_start + badge_start_in_text as u16;
-    let badge_end_col = row_start + badge_end_in_text as u16;
-    if mouse_row != badge_row || mouse_col < badge_start_col || mouse_col >= badge_end_col {
-        return;
-    }
-    let buf_height = buf.area.height;
-    let buf_width = buf.area.width;
-    let popup_height = (lines.len() as u16 + 2).min(15).min(buf_height);
-    let popup_width = scrollback_area
-        .width
-        .saturating_sub(8)
-        .max(40)
-        .min(buf_width);
-    let popup_y = if entry_area.y + entry_area.height + popup_height
-        <= scrollback_area.y + scrollback_area.height
-    {
-        entry_area.y + entry_area.height
-    } else {
-        entry_area.y.saturating_sub(popup_height)
-    };
-    let popup_x = entry_area.x + 4;
-    let popup_area = Rect::new(
-        popup_x.min(scrollback_area.x + scrollback_area.width.saturating_sub(popup_width)),
-        popup_y,
-        popup_width,
-        popup_height.min(buf_height.saturating_sub(popup_y)),
-    );
-    let bg = theme.bg_base;
-    let clear_style = ratatui::style::Style::default().bg(bg);
-    for y in popup_area.y..popup_area.y + popup_area.height {
-        for x in popup_area.x..popup_area.x + popup_area.width {
-            if let Some(cell) = buf.cell_mut(ratatui::layout::Position::new(x, y)) {
-                cell.reset();
-                cell.set_style(clear_style);
-            }
-        }
-    }
-    let border_style = ratatui::style::Style::default().fg(theme.gray);
-    let block = ratatui::widgets::Block::default()
-        .borders(ratatui::widgets::Borders::ALL)
-        .border_type(ratatui::widgets::BorderType::Rounded)
-        .border_style(border_style)
-        .style(ratatui::style::Style::default().bg(bg));
-    let inner = block.inner(popup_area);
-    ratatui::widgets::Widget::render(block, popup_area, buf);
-    for (i, line) in lines.iter().enumerate() {
-        let y = inner.y + i as u16;
-        if y >= inner.y + inner.height {
-            break;
-        }
-        buf.set_line_safe_bidi(inner.x, y, &line.content, inner.width);
     }
 }
 /// Selection/hover chrome for a side pane (todo / queue / tasks). Focused panes get a dismiss control.
@@ -878,14 +682,10 @@ pub fn build_hints(
     selected_supports_copy: bool,
     selected_meta_label: Option<&'static str>,
     selected_supports_fullscreen: bool,
-    can_demote: bool,
-    selected_can_kill: bool,
     multiline_mode: bool,
     vim_mode: bool,
-    is_subagent_view: bool,
     is_turn_running: bool,
     esc_would_cancel_turn: bool,
-    has_queued_follow_up: bool,
     selected_is_user_prompt: bool,
     selected_is_agent_message: bool,
     selected_is_credit_limit: bool,
@@ -901,18 +701,12 @@ pub fn build_hints(
             ));
             hints
         }
-        ActivePane::Queue => {
-            let mut hints = vec![
-                HintItem::new(crate::key!('x'), "delete row"),
-                HintItem::new(crate::key!('e'), "edit"),
-                HintItem::paired(crate::key!('J'), crate::key!('K'), "reorder"),
-                HintItem::new(crate::key!('y'), "copy"),
-            ];
-            if is_turn_running && let Some(def) = registry.find(ActionId::InterjectPrompt) {
-                hints.push(def.hint());
-            }
-            hints
-        }
+        ActivePane::Queue => vec![
+            HintItem::new(crate::key!('x'), "delete row"),
+            HintItem::new(crate::key!('e'), "edit"),
+            HintItem::paired(crate::key!('J'), crate::key!('K'), "reorder"),
+            HintItem::new(crate::key!('y'), "copy"),
+        ],
         ActivePane::Prompt if is_editing_queued => {
             let mut hints = Vec::new();
             if prompt.can_send() {
@@ -954,8 +748,6 @@ pub fn build_hints(
                     hints.push(HintItem::new(newline_key, submit_label));
                 } else if prompt.can_send() {
                     hints.push(HintItem::new(key, submit_label));
-                } else if is_turn_running && has_queued_follow_up {
-                    hints.push(HintItem::new(key, "send now"));
                 }
             }
             if shift_enter_unavailable && !multiline_mode && prompt.can_send() {
@@ -985,24 +777,6 @@ pub fn build_hints(
             }
             hints
         }
-        ActivePane::Tasks => {
-            let mut hints = Vec::new();
-            if selected_supports_fullscreen {
-                hints.push(HintItem::new(crate::key!(Enter), "view"));
-            }
-            if selected_supports_copy {
-                hints.push(HintItem::new(crate::key!('y'), "copy output"));
-            }
-            if selected_can_kill {
-                hints.push(HintItem::new(crate::key!('x'), "kill"));
-            }
-            hints.push(HintItem::new(
-                crate::key!('h'),
-                if show_done { "hide done" } else { "show done" },
-            ));
-            hints
-        }
-        ActivePane::Catalog => vec![],
         ActivePane::Scrollback if scrollback_search.is_some() => {
             let mut hints = Vec::new();
             if vim_mode {
@@ -1145,12 +919,6 @@ pub fn build_hints(
             {
                 hints.push(HintItem::new(key, label));
             }
-            if selected_can_kill {
-                hints.push(HintItem::new(crate::key!('x'), "kill"));
-            }
-            if is_subagent_view {
-                hints.push(HintItem::paired(crate::key!('q'), crate::key!(Esc), "back"));
-            }
             hints
         }
     };
@@ -1160,19 +928,6 @@ pub fn build_hints(
             hint.keys = vec![crate::key!(Esc)];
         }
         hints.push(hint);
-    }
-    let has_composer_payload = !prompt.text().trim().is_empty() || is_editing_queued;
-    if matches!(active_pane, ActivePane::Prompt)
-        && ActionRegistry::interjection_possible(is_turn_running, has_composer_payload)
-        && let Some(def) = registry.find(ActionId::InterjectPrompt)
-    {
-        hints.push(def.hint());
-    }
-    if can_demote
-        && !is_subagent_view
-        && let Some(key) = registry.key_for(ActionId::SendToBackground)
-    {
-        hints.push(HintItem::new(key, "send to bg"));
     }
     hints
 }
@@ -1224,11 +979,7 @@ mod tests {
             None,
             selected_supports_fullscreen,
             false,
-            false,
-            false,
             vim_mode,
-            false,
-            false,
             false,
             false,
             selected_is_user_prompt,
@@ -1240,149 +991,6 @@ mod tests {
     }
     fn first_two_labels(hints: &[HintItem]) -> Vec<&str> {
         hints.iter().take(2).map(|h| h.label.as_ref()).collect()
-    }
-    fn hooked_read_state(member_count: usize, viewport: Rect) -> ScrollbackState {
-        use crate::scrollback::RenderBlock;
-        use crate::scrollback::blocks::tool::{HookPhase, HookRunEntry, HookRunStatus};
-        crate::appearance::cache::set_group_tool_verbs(true);
-        crate::appearance::cache::set_show_thinking_blocks(false);
-        let mut state = ScrollbackState::new();
-        let first = state.push_block(RenderBlock::read("first.rs", None));
-        for i in 1..member_count {
-            state.push_block(RenderBlock::read(format!("member-{i}.rs"), None));
-        }
-        state.attach_hooks(
-            first,
-            HookPhase::Post,
-            vec![HookRunEntry {
-                name: "hover-hook".to_owned(),
-                status: HookRunStatus::Success {
-                    elapsed: std::time::Duration::from_millis(1),
-                },
-                output: None,
-            }],
-        );
-        state.prepare_layout(viewport.width, viewport.height);
-        state
-    }
-    fn render_hook_frame(state: &ScrollbackState, viewport: Rect) -> Buffer {
-        let layouts = state.get_cached_entry_layouts().expect("layout cache");
-        let entries = state.entries_in_range(0..state.len());
-        let mut buf = Buffer::empty(viewport);
-        crate::scrollback::render::render_scrolled_entries_with_scratch(
-            &mut buf,
-            viewport,
-            &entries,
-            0,
-            None,
-            &Theme::current(),
-            state.appearance(),
-            layouts,
-            0,
-            None,
-            None,
-            None,
-            0,
-            0,
-            &[],
-            Some((state.group_spans(), 0)),
-            state.cwd(),
-        );
-        buf
-    }
-    fn hover_hook_badge(buf: &mut Buffer, state: &ScrollbackState, viewport: Rect, row: u16) {
-        let row_text: String = (viewport.left()..viewport.right())
-            .map(|x| buf[(x, row)].symbol())
-            .collect();
-        let badge_col = viewport.x + row_text.find("[hooks:").expect("rendered hook badge") as u16;
-        render_hook_hover_popup(
-            buf,
-            viewport,
-            state,
-            Some(0),
-            (badge_col, row),
-            &Theme::current(),
-        );
-    }
-    fn frame_text(buf: &Buffer) -> String {
-        (buf.area.top()..buf.area.bottom())
-            .flat_map(|y| (buf.area.left()..buf.area.right()).map(move |x| buf[(x, y)].symbol()))
-            .collect()
-    }
-    #[test]
-    fn hook_hover_popup_allows_singleton_verb_header() {
-        let viewport = Rect::new(0, 0, 100, 12);
-        let state = hooked_read_state(1, viewport);
-        let layout = state.get_cached_entry_layouts().expect("layout cache")[0];
-        assert!(layout.verb_group_header);
-        assert_eq!(layout.group_header_count, 1);
-        assert!(!layout.is_expanded_verb_header());
-        let mut buf = render_hook_frame(&state, viewport);
-        hover_hook_badge(&mut buf, &state, viewport, 0);
-        assert!(frame_text(&buf).contains("hover-hook"));
-    }
-    #[test]
-    fn hook_hover_popup_allows_expanded_verb_member_zero() {
-        let viewport = Rect::new(0, 0, 100, 12);
-        let mut state = hooked_read_state(2, viewport);
-        state.set_selected(Some(0));
-        assert!(state.toggle_group_expansion());
-        state.set_selected(None);
-        state.prepare_layout(viewport.width, viewport.height);
-        assert!(
-            state.get_cached_entry_layouts().expect("layout cache")[0].is_expanded_verb_header()
-        );
-        let mut buf = render_hook_frame(&state, viewport);
-        hover_hook_badge(&mut buf, &state, viewport, 1);
-        assert!(frame_text(&buf).contains("hover-hook"));
-    }
-    #[test]
-    fn hook_hover_popup_skips_collapsed_multi_member_verb_header() {
-        let viewport = Rect::new(0, 0, 100, 12);
-        let state = hooked_read_state(2, viewport);
-        let layout = state.get_cached_entry_layouts().expect("layout cache")[0];
-        assert!(layout.verb_group_header);
-        assert_eq!(layout.group_header_count, 2);
-        assert!(!layout.is_expanded_verb_header());
-        let mut buf = render_hook_frame(&state, viewport);
-        hover_hook_badge(&mut buf, &state, viewport, 0);
-        assert!(!frame_text(&buf).contains("hover-hook"));
-    }
-    #[test]
-    fn demotion_hint_uses_registered_ctrl_b_binding() {
-        let registry = ActionRegistry::defaults();
-        let hints = build_hints(
-            ActivePane::Scrollback,
-            prompt_focus_hint(),
-            &PromptWidget::default(),
-            &registry,
-            false,
-            None,
-            None,
-            "expand thinking",
-            false,
-            false,
-            None,
-            false,
-            true,
-            false,
-            false,
-            true,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            None,
-        );
-        let hint = hints
-            .iter()
-            .find(|hint| hint.label == "send to bg")
-            .expect("running Execute should advertise demotion");
-        assert_eq!(hint.keys, vec![crate::key!('b', CONTROL)]);
     }
     #[test]
     fn group_header_shows_enter_toggle_hint_instead_of_open_and_fold() {
@@ -1401,11 +1009,7 @@ mod tests {
             None,
             true,
             false,
-            false,
-            false,
             true,
-            false,
-            false,
             false,
             false,
             false,
@@ -1567,11 +1171,7 @@ mod tests {
             None,
             false,
             false,
-            false,
-            false,
             vim_mode,
-            false,
-            false,
             false,
             false,
             false,
@@ -1672,11 +1272,7 @@ mod tests {
             None,
             false,
             false,
-            false,
-            false,
             true,
-            false,
-            false,
             false,
             false,
             false,
@@ -1717,13 +1313,9 @@ mod tests {
             false,
             None,
             false,
-            false,
-            false,
             multiline_mode,
             true,
-            false,
             is_turn_running,
-            false,
             false,
             false,
             false,
@@ -1742,7 +1334,7 @@ mod tests {
         );
     }
     #[test]
-    fn prompt_running_submit_hint_is_queue_and_send_now() {
+    fn prompt_running_submit_hint_is_queue() {
         let hints = prompt_hints_with_text_and_turn(false, false, true);
         let labels: Vec<&str> = hints.iter().map(|h| h.label.as_ref()).collect();
         assert!(
@@ -1754,51 +1346,9 @@ mod tests {
             "mid-turn must not mislabel Enter as send; got {labels:?}"
         );
         assert!(
-            labels.contains(&"send now"),
-            "mid-turn with composer text must advertise the send-now (interject) chord; got {labels:?}"
+            !labels.contains(&"send now"),
+            "the interject chord is gone, so no send-now hint; got {labels:?}"
         );
-    }
-    /// Empty composer + mid-turn queue: bare Enter is send-now in both normal
-    /// and multiline modes (multiline only inserts newline when there is text).
-    #[test]
-    fn prompt_empty_mid_turn_queue_advertises_send_now_including_multiline() {
-        for multiline in [false, true] {
-            let prompt = PromptWidget::default();
-            let registry = ActionRegistry::defaults();
-            let hints = build_hints(
-                ActivePane::Prompt,
-                prompt_focus_hint(),
-                &prompt,
-                &registry,
-                false,
-                None,
-                None,
-                "expand thinking",
-                false,
-                false,
-                None,
-                false,
-                false,
-                false,
-                multiline,
-                true,
-                false,
-                true,
-                false,
-                true,
-                false,
-                false,
-                false,
-                false,
-                None,
-            );
-            let labels: Vec<&str> = hints.iter().map(|h| h.label.as_ref()).collect();
-            assert!(
-                labels.contains(&"send now"),
-                "empty composer mid-turn with queue must advertise Enter:send now \
-                 (multiline={multiline}); got {labels:?}"
-            );
-        }
     }
     /// Running-turn cancel hint key tracks `esc_would_cancel_turn` — the
     /// input-routing predicate computed by the caller: Esc when a bare press
@@ -1827,13 +1377,9 @@ mod tests {
                 None,
                 false,
                 false,
-                false,
-                false,
                 true,
-                false,
                 true,
                 esc_would_cancel_turn,
-                false,
                 false,
                 false,
                 false,
@@ -1874,11 +1420,7 @@ mod tests {
             false,
             false,
             false,
-            false,
-            false,
-            false,
             true,
-            false,
             false,
             false,
             false,
@@ -1926,11 +1468,7 @@ mod tests {
             false,
             false,
             false,
-            false,
-            false,
-            false,
             true,
-            false,
             false,
             false,
             false,
@@ -2038,21 +1576,12 @@ mod tests {
             ..Default::default()
         }
     }
-    fn layout_with_rows(
-        area: Rect,
-        banner_height: u16,
-        cta_height: u16,
-        follow_ups_height: u16,
-    ) -> AgentViewLayout {
+    fn layout_with_rows(area: Rect, banner_height: u16, follow_ups_height: u16) -> AgentViewLayout {
         AgentViewLayout::compute(AgentViewLayoutParams {
             banner_height,
-            cta_height,
             follow_ups_height,
             ..base_params(area)
         })
-    }
-    fn layout_with_cta(area: Rect, cta_height: u16) -> AgentViewLayout {
-        layout_with_rows(area, 0, cta_height, 0)
     }
     fn layout_with_status_line(
         area: Rect,
@@ -2249,33 +1778,12 @@ mod tests {
             "no carve-out without the scrollbar gutter"
         );
     }
-    #[test]
-    fn plugin_cta_row_present_above_prompt() {
-        let area = Rect::new(0, 0, 80, 40);
-        let layout = layout_with_cta(area, 1);
-        assert_eq!(layout.plugin_cta.height, 1);
-        assert!(layout.plugin_cta.y < layout.prompt.y);
-        assert!(layout.plugin_cta.y >= layout.scrollback.y + layout.scrollback.height);
-    }
-    #[test]
-    fn plugin_cta_row_absent_when_height_zero() {
-        let area = Rect::new(0, 0, 80, 40);
-        let layout = layout_with_cta(area, 0);
-        assert_eq!(layout.plugin_cta, Rect::default());
-    }
-    #[test]
-    fn plugin_cta_row_suppressed_on_short_terminal() {
-        let area = Rect::new(0, 0, 80, 16);
-        let layout = layout_with_cta(area, 1);
-        assert_eq!(layout.plugin_cta, Rect::default());
-        assert!(layout.scrollback.height >= 5);
-    }
     /// Banner row (mode banner / ephemeral tip slot): height 1 reserves a
     /// one-row rect directly above the prompt (gap row in between).
     #[test]
     fn banner_row_present_above_prompt() {
         let area = Rect::new(0, 0, 80, 40);
-        let layout = layout_with_rows(area, 1, 0, 0);
+        let layout = layout_with_rows(area, 1, 0);
         assert_eq!(layout.banner.height, 1);
         assert_eq!(layout.prompt.y, layout.banner.y + 1);
         assert!(layout.banner.y >= layout.scrollback.y + layout.scrollback.height);
@@ -2283,7 +1791,7 @@ mod tests {
     #[test]
     fn banner_row_absent_when_height_zero() {
         let area = Rect::new(0, 0, 80, 40);
-        let layout = layout_with_rows(area, 0, 0, 0);
+        let layout = layout_with_rows(area, 0, 0);
         assert_eq!(layout.banner, Rect::default());
     }
     fn row_text(buf: &Buffer, area: Rect) -> String {
@@ -2366,29 +1874,21 @@ mod tests {
     #[test]
     fn follow_ups_row_present_above_prompt() {
         let area = Rect::new(0, 0, 80, 40);
-        let layout = layout_with_rows(area, 0, 0, 1);
+        let layout = layout_with_rows(area, 0, 1);
         assert_eq!(layout.follow_ups.height, 1);
         assert!(layout.follow_ups.y < layout.prompt.y);
         assert!(layout.follow_ups.y >= layout.scrollback.y + layout.scrollback.height);
     }
     #[test]
-    fn follow_ups_row_below_plugin_cta() {
-        let area = Rect::new(0, 0, 80, 40);
-        let layout = layout_with_rows(area, 0, 1, 1);
-        assert!(layout.plugin_cta.height == 1 && layout.follow_ups.height == 1);
-        assert!(layout.plugin_cta.y < layout.follow_ups.y);
-        assert!(layout.follow_ups.y < layout.prompt.y);
-    }
-    #[test]
     fn follow_ups_row_absent_when_height_zero() {
         let area = Rect::new(0, 0, 80, 40);
-        let layout = layout_with_rows(area, 0, 0, 0);
+        let layout = layout_with_rows(area, 0, 0);
         assert_eq!(layout.follow_ups, Rect::default());
     }
     #[test]
     fn follow_ups_row_suppressed_on_short_terminal() {
         let area = Rect::new(0, 0, 80, 16);
-        let layout = layout_with_rows(area, 0, 0, 1);
+        let layout = layout_with_rows(area, 0, 1);
         assert_eq!(layout.follow_ups, Rect::default());
         assert!(layout.scrollback.height >= 5);
     }

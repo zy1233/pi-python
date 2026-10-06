@@ -1,207 +1,11 @@
-#![allow(dead_code)] // Functions consumed by handle.rs event forwarder wiring
-//! FsNotify adapter functions bridging [`pi_fsnotify`] events to
-//! workspace subsystems (hunk tracker, codebase graph, workspace
-//! event broadcast).
+//! Bridges workspace file-change events to the codebase graph.
 //!
-//! Codebase graph forwarding: FsNotify file-change
-//! events are converted via [`fs_event_to_codebase_graph_event`] and
-//! sent to the [`IndexManagerHandle`](pi_codebase_graph::IndexManagerHandle).
-//! The [`refresh_codebase_graph_after_head_change`] helper handles
-//! git HEAD changes by diffing `ORIG_HEAD..HEAD`.
+//! [`ws_event_to_codebase_graph_event`] converts a workspace event into a graph
+//! event for the [`IndexManagerHandle`](pi_codebase_graph::IndexManagerHandle);
+//! [`refresh_codebase_graph_after_head_change`] handles git HEAD changes by
+//! diffing `ORIG_HEAD..HEAD`.
 
-use std::path::{Path, PathBuf};
-
-use pi_fsnotify::{FsEvent, FsEventKind};
-use pi_hunk_tracker::HunkTrackerHandle;
-
-/// True if `path` lies under a hidden component below `cwd`.
-///
-/// The `cwd` prefix is stripped first, so a `cwd` like
-/// `/home/u/.config/foo` does not flag paths inside that directory as
-/// hidden. Only components below `cwd` that start with `.` (and are
-/// longer than a bare `.`) are considered hidden.
-pub(crate) fn is_under_hidden_dir(path: &Path, cwd: &Path) -> bool {
-    let rel = path.strip_prefix(cwd).unwrap_or(path);
-    rel.components().any(|c| {
-        c.as_os_str()
-            .to_str()
-            .is_some_and(|s| s.starts_with('.') && s.len() > 1)
-    })
-}
-
-/// Hidden-dir filter against the longest matching materialized root.
-/// Multi-repo events under `/workspace/lib` must not use `/workspace/app` cwd.
-pub(crate) fn is_under_hidden_dir_any(path: &Path, roots: &[PathBuf]) -> bool {
-    let Some(root) = roots
-        .iter()
-        .filter(|root| path.starts_with(root))
-        .max_by_key(|root| root.as_os_str().len())
-    else {
-        return is_under_hidden_dir(path, Path::new(""));
-    };
-    is_under_hidden_dir(path, root)
-}
-
-/// Forward an fs event to the hunk tracker. Hidden-directory paths
-/// (relative to `cwd`) are filtered out so the hunk tracker never
-/// sees `.git/`, `.grok/`, etc.
-pub(crate) fn forward_to_hunk_tracker(
-    paths: &[PathBuf],
-    kind: FsEventKind,
-    handle: &HunkTrackerHandle,
-    cwd: &Path,
-) {
-    forward_to_hunk_tracker_roots(
-        paths,
-        kind,
-        handle,
-        std::slice::from_ref(&cwd.to_path_buf()),
-    );
-}
-
-pub(crate) fn forward_to_hunk_tracker_roots(
-    paths: &[PathBuf],
-    kind: FsEventKind,
-    handle: &HunkTrackerHandle,
-    roots: &[PathBuf],
-) {
-    for path in paths {
-        if is_under_hidden_dir_any(path, roots) {
-            continue;
-        }
-        match kind {
-            FsEventKind::Created | FsEventKind::Modified | FsEventKind::Renamed => {
-                handle.handle_file_change(path.clone());
-            }
-            FsEventKind::Removed => {
-                handle.handle_file_deleted(path.clone());
-            }
-            _ => {}
-        }
-    }
-}
-
-/// Convert to codebase graph `FileEvent` for incremental index updates.
-pub(crate) fn fs_event_to_codebase_graph_event(
-    paths: &[PathBuf],
-    kind: FsEventKind,
-) -> pi_codebase_graph::FileEvent {
-    use pi_codebase_graph::{FileEvent, FileEventKind};
-    let graph_kind = match kind {
-        FsEventKind::Created => FileEventKind::Created,
-        FsEventKind::Modified => FileEventKind::Modified,
-        FsEventKind::Removed => FileEventKind::Removed,
-        FsEventKind::Renamed => FileEventKind::Renamed,
-        // `#[non_exhaustive]` fallback.
-        _ => FileEventKind::Modified,
-    };
-    FileEvent::new(paths.to_vec(), graph_kind)
-}
-
-/// Convert [`pi_fsnotify::FsEventKind`] to the wire-type
-/// [`pi_workspace_types::FsEventKind`].
-///
-/// Identity mapping today; kept explicit so all known variants are
-/// consciously mapped. Unknown future variants fall back to
-/// `Modified` via the `#[non_exhaustive]` wildcard arm.
-pub(crate) fn to_workspace_event_kind(kind: FsEventKind) -> pi_workspace_types::FsEventKind {
-    match kind {
-        FsEventKind::Created => pi_workspace_types::FsEventKind::Created,
-        FsEventKind::Modified => pi_workspace_types::FsEventKind::Modified,
-        FsEventKind::Removed => pi_workspace_types::FsEventKind::Removed,
-        FsEventKind::Renamed => pi_workspace_types::FsEventKind::Renamed,
-        // `#[non_exhaustive]` fallback.
-        _ => pi_workspace_types::FsEventKind::Modified,
-    }
-}
-
-/// Spawn a background task that reads [`FsEvent`]s from a broadcast
-/// receiver, forwards `FilesChanged` to the hunk tracker, and
-/// re-broadcasts each affected path as
-/// [`WorkspaceEvent::FsChanged`](pi_workspace_types::WorkspaceEvent::FsChanged)
-/// on the workspace event bus.
-///
-/// The task exits when:
-/// - the broadcast sender drops (all `FsEventSource`s for this
-///   receiver are gone), or
-/// - `cancel` is cancelled.
-pub(crate) fn spawn_fs_event_forwarder(
-    rx: tokio::sync::broadcast::Receiver<FsEvent>,
-    hunk_tracker: HunkTrackerHandle,
-    events_tx: tokio::sync::broadcast::Sender<pi_workspace_types::WorkspaceEvent>,
-    cwd: PathBuf,
-    cancel: tokio_util::sync::CancellationToken,
-    codebase_index: Option<std::sync::Arc<pi_codebase_graph::IndexManagerHandle>>,
-) {
-    spawn_fs_event_forwarder_roots(
-        rx,
-        hunk_tracker,
-        events_tx,
-        vec![cwd],
-        cancel,
-        codebase_index,
-    );
-}
-
-pub(crate) fn spawn_fs_event_forwarder_roots(
-    mut rx: tokio::sync::broadcast::Receiver<FsEvent>,
-    hunk_tracker: HunkTrackerHandle,
-    events_tx: tokio::sync::broadcast::Sender<pi_workspace_types::WorkspaceEvent>,
-    roots: Vec<PathBuf>,
-    cancel: tokio_util::sync::CancellationToken,
-    codebase_index: Option<std::sync::Arc<pi_codebase_graph::IndexManagerHandle>>,
-) {
-    tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                biased;
-                _ = cancel.cancelled() => break,
-                result = rx.recv() => {
-                    match result {
-                        Ok(FsEvent::FilesChanged { ref paths, kind }) => {
-                            // Forward to hunk tracker (hidden-dir filtered per mount).
-                            forward_to_hunk_tracker_roots(paths, kind, &hunk_tracker, &roots);
-                            // Forward to codebase graph for incremental
-                            // index updates (hidden-dir paths are indexed
-                            // -- the graph's own ignore logic handles them).
-                            if let Some(ref idx) = codebase_index {
-                                let graph_event = fs_event_to_codebase_graph_event(paths, kind);
-                                if let Err(e) = idx.send_event(graph_event) {
-                                    tracing::debug!(
-                                        error = %e,
-                                        "failed to forward fs event to codebase graph"
-                                    );
-                                }
-                            }
-                            // Broadcast per-path WorkspaceEvent::FsChanged.
-                            let ws_kind = to_workspace_event_kind(kind);
-                            for path in paths {
-                                let _ = events_tx.send(
-                                    pi_workspace_types::WorkspaceEvent::FsChanged {
-                                        path: path.clone(),
-                                        kind: ws_kind,
-                                    },
-                                );
-                            }
-                        }
-                        Ok(other) => {
-                            // Git meta / operation events -- not yet bridged
-                            // to WorkspaceEvent::GitHeadChanged etc.
-                            tracing::trace!(?other, "fs event forwarder: unhandled event variant");
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                            tracing::warn!(
-                                lagged = n,
-                                "fs event forwarder lagged; some events were dropped"
-                            );
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                    }
-                }
-            }
-        }
-    });
-}
+use std::path::Path;
 
 const GIT_DIFF_REBUILD_THRESHOLD: usize = 500;
 
@@ -223,9 +27,7 @@ fn parse_diff_name_status_line(
                 repo_root.join(new_path),
             ))
         }
-        _ => Some(pi_codebase_graph::FileEvent::modified(
-            repo_root.join(path),
-        )),
+        _ => Some(pi_codebase_graph::FileEvent::modified(repo_root.join(path))),
     }
 }
 
@@ -296,11 +98,9 @@ pub(crate) async fn refresh_codebase_graph_after_head_change(
     }
 
     if let Some(count) = files_updated {
-        let _ = events_tx.send(
-            pi_workspace_types::WorkspaceEvent::CodebaseIndexUpdated {
-                files_indexed: count,
-            },
-        );
+        let _ = events_tx.send(pi_workspace_types::WorkspaceEvent::CodebaseIndexUpdated {
+            files_indexed: count,
+        });
     }
 }
 
@@ -321,95 +121,9 @@ pub(crate) fn ws_event_to_codebase_graph_event(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::{Path, PathBuf};
-
-    #[test]
-    fn hidden_dir_positive() {
-        assert!(is_under_hidden_dir(
-            &PathBuf::from("/workspace/.grok/worktrees/abc/src/main.rs"),
-            &PathBuf::from("/workspace"),
-        ));
-    }
-
-    #[test]
-    fn hidden_dir_ignores_cwd_components() {
-        assert!(!is_under_hidden_dir(
-            &PathBuf::from("/home/user/.config/project/src/lib.rs"),
-            &PathBuf::from("/home/user/.config/project"),
-        ));
-    }
-
-    #[test]
-    fn hidden_dir_dot_only() {
-        // A bare `.` component is not "hidden".
-        assert!(!is_under_hidden_dir(
-            &PathBuf::from("/workspace/./src/main.rs"),
-            &PathBuf::from("/workspace"),
-        ));
-    }
-
-    #[test]
-    fn hidden_dir_any_uses_longest_mount_prefix() {
-        let roots = vec![
-            PathBuf::from("/workspace/app"),
-            PathBuf::from("/workspace/lib"),
-        ];
-        assert!(is_under_hidden_dir_any(
-            Path::new("/workspace/lib/.git/HEAD"),
-            &roots,
-        ));
-        assert!(!is_under_hidden_dir_any(
-            Path::new("/workspace/lib/src/lib.rs"),
-            &roots,
-        ));
-        assert!(!is_under_hidden_dir_any(
-            Path::new("/workspace/app/src/main.rs"),
-            &roots,
-        ));
-    }
-
-    #[test]
-    fn workspace_event_kind_round_trip() {
-        use pi_workspace_types::FsEventKind as WsKind;
-        assert_eq!(
-            to_workspace_event_kind(FsEventKind::Created),
-            WsKind::Created
-        );
-        assert_eq!(
-            to_workspace_event_kind(FsEventKind::Modified),
-            WsKind::Modified
-        );
-        assert_eq!(
-            to_workspace_event_kind(FsEventKind::Removed),
-            WsKind::Removed
-        );
-        assert_eq!(
-            to_workspace_event_kind(FsEventKind::Renamed),
-            WsKind::Renamed
-        );
-    }
-
-    #[test]
-    fn codebase_graph_event_mapping() {
-        use pi_codebase_graph::FileEventKind;
-        let paths = vec![PathBuf::from("/workspace/src/main.rs")];
-
-        let ev = fs_event_to_codebase_graph_event(&paths, FsEventKind::Created);
-        assert_eq!(ev.kind, FileEventKind::Created);
-
-        let ev = fs_event_to_codebase_graph_event(&paths, FsEventKind::Modified);
-        assert_eq!(ev.kind, FileEventKind::Modified);
-
-        let ev = fs_event_to_codebase_graph_event(&paths, FsEventKind::Removed);
-        assert_eq!(ev.kind, FileEventKind::Removed);
-
-        let ev = fs_event_to_codebase_graph_event(&paths, FsEventKind::Renamed);
-        assert_eq!(ev.kind, FileEventKind::Renamed);
-    }
 
     #[test]
     fn parse_diff_name_status_all_variants() {
-        use std::path::Path;
         use pi_codebase_graph::FileEventKind;
         let root = Path::new("/repo");
 

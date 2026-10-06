@@ -1,8 +1,8 @@
 //! Interpretation of terminal probe snapshots.
 
 use crate::diagnostics::probes::{
-    CommonProbeSnapshot, DiagnosticRuntimeEvidence, DoctorProbeSnapshot, ProbeSnapshot,
-    RuntimeEvidence, StandaloneDiagnosticSnapshot, TmuxProbeResult,
+    CommonProbeSnapshot, DiagnosticRuntimeEvidence, DoctorProbeSnapshot, RuntimeEvidence,
+    StandaloneDiagnosticSnapshot, TmuxProbeResult,
 };
 use crate::diagnostics::{
     ClipboardFacts, ColorFacts, DataControlFact, DiagnosticFacts, DiagnosticFinding, DiagnosticId,
@@ -20,32 +20,6 @@ pub struct DiagnosticSnapshot<'a> {
     pub container_no_display: bool,
     pub color_level: RuntimeEvidence<crate::theme::color_support::ColorLevel>,
     pub runtime: DiagnosticRuntimeEvidence<'a>,
-}
-
-impl<'a> DiagnosticSnapshot<'a> {
-    pub fn from_parts(
-        common: ProbeSnapshot<'a>,
-        clipboard: crate::diagnostics::probes::ClipboardProbeFacts,
-        host_os: crate::host::HostOs,
-        display_server: crate::host::DisplayServer,
-        container_no_display: bool,
-        color_level: crate::theme::color_support::ColorLevel,
-        runtime: DiagnosticRuntimeEvidence<'a>,
-    ) -> Self {
-        Self {
-            common: CommonProbeSnapshot {
-                terminal: common.terminal,
-                tmux: common.tmux,
-                wayland: common.wayland,
-            },
-            clipboard,
-            host_os,
-            display_server,
-            container_no_display,
-            color_level: RuntimeEvidence::Available(color_level),
-            runtime,
-        }
-    }
 }
 
 impl<'a> From<DoctorProbeSnapshot<'a>> for DiagnosticSnapshot<'a> {

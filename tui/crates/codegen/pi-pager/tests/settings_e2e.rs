@@ -33,9 +33,7 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "show_timestamps",
     "show_timeline",
     "page_flip_on_send",
-    "confirm_before_rewind",
     "combine_queued_prompts",
-    "follow_up_behavior",
     "simple_mode",
     "vim_mode",
     "remember_tool_approvals",
@@ -54,7 +52,6 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "scroll_lines",
     "invert_scroll",
     "display_refresh_auto_cadence",
-    "coding_data_sharing",
     "default_selected_permission",
     "plan_mode",
     "show_tips",
@@ -75,7 +72,6 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "contextual_hints.undo",
     "contextual_hints.plan_mode",
     "contextual_hints.image_input",
-    "contextual_hints.send_now",
     "contextual_hints.small_screen",
     "contextual_hints.word_select",
     "contextual_hints.ssh_wrap",
@@ -216,12 +212,6 @@ fn assert_set_bool_action(outcome: SettingsKeyOutcome, key: &str, expected: bool
         }
         ("page_flip_on_send", Action::SetPageFlipOnSend(b)) => {
             assert_eq!(b, expected, "SetPageFlipOnSend value differs from expected")
-        }
-        ("confirm_before_rewind", Action::SetConfirmBeforeRewind(b)) => {
-            assert_eq!(
-                b, expected,
-                "SetConfirmBeforeRewind value differs from expected"
-            )
         }
         ("combine_queued_prompts", Action::SetCombineQueuedPrompts(b)) => {
             assert_eq!(
@@ -407,63 +397,12 @@ fn space_on_page_flip_on_send_dispatches_typed_setter() {
 }
 
 #[test]
-fn space_on_confirm_before_rewind_dispatches_typed_setter() {
-    let mut s = make_state();
-    navigate_to(&mut s, "confirm_before_rewind");
-    let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
-    let default_on = UiConfig::default().confirm_before_rewind_enabled();
-    assert_set_bool_action(outcome, "confirm_before_rewind", !default_on);
-}
-
-#[test]
 fn space_on_combine_queued_prompts_dispatches_typed_setter() {
     let mut s = make_state();
     navigate_to(&mut s, "combine_queued_prompts");
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
     let default_on = UiConfig::default().combine_queued_prompts.unwrap_or(false);
     assert_set_bool_action(outcome, "combine_queued_prompts", !default_on);
-}
-
-#[test]
-fn enter_on_follow_up_behavior_row_enters_picking_enum() {
-    let mut s = make_state();
-    navigate_to(&mut s, "follow_up_behavior");
-    let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    assert!(
-        matches!(outcome, SettingsKeyOutcome::Changed),
-        "Enter on follow_up_behavior row must transition to PickingEnum, got {outcome:?}"
-    );
-    match &s.mode() {
-        SettingsModalMode::PickingEnum {
-            key,
-            original_value,
-            ..
-        } => {
-            assert_eq!(*key, "follow_up_behavior");
-            assert_eq!(
-                original_value,
-                &SettingValue::Enum("queue"),
-                "default follow_up_behavior is queue"
-            );
-        }
-        other => panic!("expected PickingEnum mode, got {other:?}"),
-    }
-}
-
-#[test]
-fn follow_up_behavior_picker_enter_dispatches_set_commit() {
-    let mut s = make_state();
-    navigate_to(&mut s, "follow_up_behavior");
-    let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    // Default is queue (index 0); Down → steer.
-    let _ = handle_settings_key(&mut s, &press(KeyCode::Down));
-    let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    match outcome {
-        SettingsKeyOutcome::Action(Action::SetFollowUpBehavior(mode)) => {
-            assert_eq!(mode, pi_pager::appearance::FollowUpBehavior::Steer);
-        }
-        other => panic!("expected SetFollowUpBehavior(Steer), got {other:?}"),
-    }
 }
 
 #[test]
@@ -728,43 +667,6 @@ fn mouse_click_on_combine_queued_prompts_indicator_toggles_in_one_click() {
     );
     let default_on = UiConfig::default().combine_queued_prompts.unwrap_or(false);
     assert_set_bool_action(outcome, "combine_queued_prompts", !default_on);
-}
-
-#[test]
-fn mouse_click_on_follow_up_behavior_indicator_opens_picker() {
-    let mut s = make_state();
-    synth_rects(&mut s);
-    let row_y = row_idx_for(&s, "follow_up_behavior") as u16;
-    let outcome = handle_settings_mouse(
-        &mut s,
-        MouseEventKind::Down(crossterm::event::MouseButton::Left),
-        72,
-        row_y,
-    );
-    assert!(
-        matches!(outcome, SettingsKeyOutcome::Changed),
-        "click on follow_up_behavior indicator should open picker, got {outcome:?}"
-    );
-    assert!(
-        matches!(s.mode(), SettingsModalMode::PickingEnum { key, .. } if key == "follow_up_behavior"),
-        "expected PickingEnum(follow_up_behavior), got {:?}",
-        s.mode()
-    );
-}
-
-#[test]
-fn mouse_click_on_confirm_before_rewind_indicator_toggles_in_one_click() {
-    let mut s = make_state();
-    synth_rects(&mut s);
-    let row_y = row_idx_for(&s, "confirm_before_rewind") as u16;
-    let outcome = handle_settings_mouse(
-        &mut s,
-        MouseEventKind::Down(crossterm::event::MouseButton::Left),
-        72,
-        row_y,
-    );
-    let default_on = UiConfig::default().confirm_before_rewind_enabled();
-    assert_set_bool_action(outcome, "confirm_before_rewind", !default_on);
 }
 
 /// Value-column click toggles `remember_tool_approvals` in one click.
@@ -1769,9 +1671,7 @@ fn render_with_filter_active_and_small_viewport_clamps_scroll() {
         height: 12,
     };
     let mut buf = Buffer::empty(area);
-    pi_pager::views::settings_modal::render_settings_modal(
-        &mut buf, area, &mut s, false, None,
-    );
+    pi_pager::views::settings_modal::render_settings_modal(&mut buf, area, &mut s, false, None);
     let visible = s.filtered_indices().len();
     assert!(
         s.scroll_offset <= visible.saturating_sub(1).max(0),
@@ -1801,9 +1701,7 @@ fn render_no_matches_placeholder_includes_query() {
         height: 30,
     };
     let mut buf = Buffer::empty(area);
-    pi_pager::views::settings_modal::render_settings_modal(
-        &mut buf, area, &mut s, false, None,
-    );
+    pi_pager::views::settings_modal::render_settings_modal(&mut buf, area, &mut s, false, None);
     // Scan all cells for the substring "No matches" and "xyzzy".
     let mut all_text = String::new();
     for y in 0..area.height {
@@ -1897,7 +1795,6 @@ fn registry_kind_membership_through_pr_14() {
             "show_timeline",
             "show_timestamps",
             "page_flip_on_send",
-            "confirm_before_rewind",
             "combine_queued_prompts",
             "simple_mode",
             "vim_mode",
@@ -1911,7 +1808,6 @@ fn registry_kind_membership_through_pr_14() {
             "contextual_hints.undo",
             "contextual_hints.plan_mode",
             "contextual_hints.image_input",
-            "contextual_hints.send_now",
             "contextual_hints.small_screen",
             "contextual_hints.word_select",
             "contextual_hints.ssh_wrap",
@@ -1929,9 +1825,7 @@ fn registry_kind_membership_through_pr_14() {
         vec![
             "auto_dark_theme",
             "auto_light_theme",
-            "coding_data_sharing",
             "default_selected_permission",
-            "follow_up_behavior",
             "hunk_tracker_mode",
             "keep_text_selection",
             "permission_mode",
@@ -1999,9 +1893,7 @@ fn enum_settings_membership_through_pr_14() {
         vec![
             "auto_dark_theme",
             "auto_light_theme",
-            "coding_data_sharing",
             "default_selected_permission",
-            "follow_up_behavior",
             "hunk_tracker_mode",
             "keep_text_selection",
             "permission_mode",
@@ -2035,12 +1927,7 @@ fn defaults_round_trip_through_registry() {
     pi_pager::appearance::cache::set_group_tool_verbs(true);
     pi_pager::appearance::cache::set_page_flip_on_send(true);
     pi_pager::appearance::cache::set_combine_queued_prompts(false);
-    pi_pager::appearance::cache::set_follow_up_behavior(
-        pi_pager::appearance::FollowUpBehavior::Queue,
-    );
-    pi_pager::appearance::cache::set_scroll_mode(
-        pi_pager::appearance::ScrollMode::Auto,
-    );
+    pi_pager::appearance::cache::set_scroll_mode(pi_pager::appearance::ScrollMode::Auto);
     pi_pager::appearance::cache::set_invert_scroll(false);
     // 3 = the registry default shown while the profile is in charge.
     pi_pager::appearance::cache::set_scroll_lines(3);
@@ -2053,9 +1940,7 @@ fn defaults_round_trip_through_registry() {
             "show_timestamps" => SettingValue::Bool(true),
             "show_timeline" => SettingValue::Bool(false),
             "page_flip_on_send" => SettingValue::Bool(true),
-            "confirm_before_rewind" => SettingValue::Bool(true),
             "combine_queued_prompts" => SettingValue::Bool(false),
-            "follow_up_behavior" => SettingValue::Enum("queue"),
             "simple_mode" => SettingValue::Bool(true),
             "vim_mode" => SettingValue::Bool(false),
             "remember_tool_approvals" => SettingValue::Bool(true),
@@ -2074,7 +1959,6 @@ fn defaults_round_trip_through_registry() {
             "scroll_lines" => SettingValue::Int(3),
             "invert_scroll" => SettingValue::Bool(false),
             "display_refresh_auto_cadence" => SettingValue::Bool(true),
-            "coding_data_sharing" => SettingValue::Enum("opt-out"),
             "default_selected_permission" => SettingValue::Enum("always_allow_all_sessions"),
             "hunk_tracker_mode" => SettingValue::Enum("off"),
             "voice_keybind_enabled" => SettingValue::Bool(true),
@@ -2093,7 +1977,6 @@ fn defaults_round_trip_through_registry() {
             "contextual_hints.undo" => SettingValue::Bool(true),
             "contextual_hints.plan_mode" => SettingValue::Bool(true),
             "contextual_hints.image_input" => SettingValue::Bool(true),
-            "contextual_hints.send_now" => SettingValue::Bool(true),
             "contextual_hints.small_screen" => SettingValue::Bool(true),
             "contextual_hints.word_select" => SettingValue::Bool(true),
             "contextual_hints.ssh_wrap" => SettingValue::Bool(true),
@@ -2155,7 +2038,6 @@ fn settings_value_payload_matches_kind() {
             | SettingsKeyOutcome::Action(Action::SetTimestamps(_))
             | SettingsKeyOutcome::Action(Action::SetTimeline(_))
             | SettingsKeyOutcome::Action(Action::SetPageFlipOnSend(_))
-            | SettingsKeyOutcome::Action(Action::SetConfirmBeforeRewind(_))
             | SettingsKeyOutcome::Action(Action::SetCombineQueuedPrompts(_))
             | SettingsKeyOutcome::Action(Action::SetSimpleMode(_))
             | SettingsKeyOutcome::Action(Action::SetMultilineMode(_))
@@ -3157,65 +3039,6 @@ fn pr6_permission_mode_picker_nav_does_not_dispatch_preview() {
     }
 }
 
-/// Enter on "always-approve" commits `SetPermissionMode(AlwaysApprove)`.
-#[test]
-fn pr6_permission_mode_picker_enter_dispatches_set_permission_mode_commit() {
-    use pi_pager::app::actions::PermissionModeKind;
-    let reg = SettingsRegistry::defaults();
-    let meta = reg.find("permission_mode").unwrap();
-    let choices = match &meta.kind {
-        SettingKind::Enum { choices, .. } => *choices,
-        _ => panic!("permission_mode must be Enum"),
-    };
-    let always_idx = choices
-        .iter()
-        .position(|c| c.canonical == "always-approve")
-        .expect("permission_mode must include the 'always-approve' choice");
-    let default_canonical = match &meta.kind {
-        SettingKind::Enum { default, .. } => *default,
-        _ => unreachable!(),
-    };
-    let initial_idx = choices
-        .iter()
-        .position(|c| c.canonical == default_canonical)
-        .expect("registered default must be present in catalog");
-
-    let mut s = make_state();
-    navigate_to(&mut s, "permission_mode");
-    let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-
-    assert!(
-        matches!(s.mode(), SettingsModalMode::PickingEnum { key, .. } if key == "permission_mode"),
-        "Enter on permission_mode row must open the picker, got {:?}",
-        s.mode(),
-    );
-    // Navigate from the seeded default canonical to "always-approve".
-    let steps = always_idx as isize - initial_idx as isize;
-    let nav_key = if steps > 0 {
-        KeyCode::Down
-    } else {
-        KeyCode::Up
-    };
-    for _ in 0..steps.unsigned_abs() {
-        let _ = handle_settings_key(&mut s, &press(nav_key));
-    }
-    // Enter → commit.
-    let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    match outcome {
-        SettingsKeyOutcome::Action(Action::SetPermissionMode(
-            PermissionModeKind::AlwaysApprove,
-        )) => {}
-        other => panic!(
-            "Enter on 'always-approve' must commit Action::SetPermissionMode(AlwaysApprove), \
-             got {other:?}"
-        ),
-    }
-    assert!(
-        matches!(s.mode(), SettingsModalMode::Browse),
-        "Enter commit must return to Browse"
-    );
-}
-
 /// Esc in non-preview picker returns to Browse without Action.
 #[test]
 fn pr6_permission_mode_picker_esc_does_not_dispatch_action() {
@@ -3439,112 +3262,6 @@ fn pr6_mouse_click_on_permission_mode_indicator_opens_picker_in_one_click() {
 // permission_mode 3-state tests (default/ask/always-approve)
 // ---------------------------------------------------------------------------
 
-/// Picking "Default" dispatches `SetPermissionMode(Default)`.
-#[test]
-fn pr11_picker_commit_for_default_dispatches_set_permission_mode_default() {
-    use pi_pager::app::actions::PermissionModeKind;
-    let reg = SettingsRegistry::defaults();
-    let meta = reg.find("permission_mode").unwrap();
-    let choices = match &meta.kind {
-        SettingKind::Enum { choices, .. } => *choices,
-        _ => panic!("permission_mode must be Enum"),
-    };
-    let default_idx = choices
-        .iter()
-        .position(|c| c.canonical == "default")
-        .expect("permission_mode must include the 'default' choice (PR 11)");
-    let initial_idx = choices
-        .iter()
-        .position(|c| c.canonical == "ask")
-        .expect("'ask' canonical must be present");
-    assert_ne!(
-        default_idx, initial_idx,
-        "test invariant: 'default' must be a distinct choice from 'ask'"
-    );
-
-    let mut s = make_state();
-    navigate_to(&mut s, "permission_mode");
-    let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    assert!(
-        matches!(s.mode(), SettingsModalMode::PickingEnum { key, .. } if key == "permission_mode"),
-        "Enter on permission_mode row must open the picker, got {:?}",
-        s.mode(),
-    );
-    let steps = default_idx as isize - initial_idx as isize;
-    let nav_key = if steps > 0 {
-        KeyCode::Down
-    } else {
-        KeyCode::Up
-    };
-    for _ in 0..steps.unsigned_abs() {
-        let _ = handle_settings_key(&mut s, &press(nav_key));
-    }
-    let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    match outcome {
-        SettingsKeyOutcome::Action(Action::SetPermissionMode(PermissionModeKind::Default)) => {}
-        other => panic!(
-            "Enter on 'default' must commit Action::SetPermissionMode(Default), got {other:?}"
-        ),
-    }
-    assert!(
-        matches!(s.mode(), SettingsModalMode::Browse),
-        "Enter commit must return to Browse"
-    );
-}
-
-/// Picking "Ask" dispatches `SetPermissionMode(Ask)`.
-#[test]
-fn pr11_picker_commit_for_ask_dispatches_set_permission_mode_ask() {
-    use pi_pager::app::actions::PermissionModeKind;
-    // Set snapshot so the picker opens seeded at "always-approve",
-    // then navigate to "ask" to commit a non-default selection.
-    let snapshot = PagerLocalSnapshot {
-        yolo_mode: true,
-        auto_mode_gate: true,
-        ..PagerLocalSnapshot::default()
-    };
-    let mut s = SettingsModalState::new(
-        Arc::new(SettingsRegistry::defaults()),
-        UiConfig::default(),
-        snapshot,
-    );
-    navigate_to(&mut s, "permission_mode");
-    let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    assert!(
-        matches!(s.mode(), SettingsModalMode::PickingEnum { key, .. } if key == "permission_mode"),
-        "Enter on permission_mode row must open the picker, got {:?}",
-        s.mode(),
-    );
-
-    let reg = SettingsRegistry::defaults();
-    let meta = reg.find("permission_mode").unwrap();
-    let choices = match &meta.kind {
-        SettingKind::Enum { choices, .. } => *choices,
-        _ => panic!("permission_mode must be Enum"),
-    };
-    let always_idx = choices
-        .iter()
-        .position(|c| c.canonical == "always-approve")
-        .unwrap();
-    let ask_idx = choices.iter().position(|c| c.canonical == "ask").unwrap();
-    let steps = ask_idx as isize - always_idx as isize;
-    let nav_key = if steps > 0 {
-        KeyCode::Down
-    } else {
-        KeyCode::Up
-    };
-    for _ in 0..steps.unsigned_abs() {
-        let _ = handle_settings_key(&mut s, &press(nav_key));
-    }
-    let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    match outcome {
-        SettingsKeyOutcome::Action(Action::SetPermissionMode(PermissionModeKind::Ask)) => {}
-        other => {
-            panic!("Enter on 'ask' must commit Action::SetPermissionMode(Ask), got {other:?}")
-        }
-    }
-}
-
 /// Returns "default" when `ui.permission_mode == "default"` and yolo=false.
 #[test]
 fn pr11_current_value_for_returns_default_when_ui_says_default() {
@@ -3643,75 +3360,6 @@ fn pr11_current_value_for_falls_through_to_ask() {
     );
 }
 
-/// `PermissionModeKind` canonical strings round-trip.
-#[test]
-fn pr11_permission_mode_kind_canonical_round_trip() {
-    use pi_pager::app::actions::PermissionModeKind;
-    for kind in [
-        PermissionModeKind::Default,
-        PermissionModeKind::Ask,
-        PermissionModeKind::AlwaysApprove,
-    ] {
-        let canonical = kind.as_canonical();
-        let recovered = PermissionModeKind::from_canonical(canonical)
-            .unwrap_or_else(|| panic!("from_canonical('{canonical}') must round-trip"));
-        assert_eq!(
-            recovered, kind,
-            "PermissionModeKind::from_canonical(as_canonical({kind:?})) must round-trip"
-        );
-    }
-    // Garbage input → None
-    assert!(PermissionModeKind::from_canonical("nonexistent").is_none());
-    assert!(PermissionModeKind::from_canonical("").is_none());
-}
-
-/// Catalog canonicals match `PermissionModeKind::as_canonical`.
-#[test]
-fn pr11_permission_mode_kind_canonical_strings_match_choices_catalog() {
-    use pi_pager::app::actions::PermissionModeKind;
-    let catalog_canonicals: std::collections::HashSet<&str> = SettingsRegistry::defaults()
-        .find("permission_mode")
-        .and_then(|m| match &m.kind {
-            SettingKind::Enum { choices, .. } => Some(*choices),
-            _ => None,
-        })
-        .map(|c| c.iter().map(|c| c.canonical).collect())
-        .expect("permission_mode must be registered");
-
-    for kind in [
-        PermissionModeKind::Default,
-        PermissionModeKind::Ask,
-        PermissionModeKind::Auto,
-        PermissionModeKind::AlwaysApprove,
-    ] {
-        assert!(
-            catalog_canonicals.contains(kind.as_canonical()),
-            "catalog must contain `{}` (from PermissionModeKind::{kind:?})",
-            kind.as_canonical(),
-        );
-    }
-    assert_eq!(
-        catalog_canonicals.len(),
-        4,
-        "catalog must be exactly {{ask, auto, always-approve, default}} — adding a fifth \
-         choice requires adding a PermissionModeKind variant AND updating action_for_enum_commit \
-         + apply_setting_rollback + load_permission_mode + this test (PR 11 contract)",
-    );
-}
-
-/// Only `AlwaysApprove` projects to `true`.
-#[test]
-fn pr11_permission_mode_kind_is_always_approve_projection() {
-    use pi_pager::app::actions::PermissionModeKind;
-    assert!(PermissionModeKind::AlwaysApprove.is_always_approve());
-    assert!(!PermissionModeKind::Ask.is_always_approve());
-    assert!(
-        !PermissionModeKind::Default.is_always_approve(),
-        "PR 11: Default must project onto yolo=false — it's an alias for Ask at runtime, \
-         NOT an alias for AlwaysApprove"
-    );
-}
-
 // cycle_mode delegation tests live in `dispatch.rs::tests`.
 
 // The previous
@@ -3743,9 +3391,9 @@ fn pr11_permission_mode_kind_is_always_approve_projection() {
 /// dimmest fg before the overlay's blend was applied).
 #[test]
 fn reset_overlay_dims_all_rows_except_target() {
+    use pi_pager::views::settings_modal::ResetConfirmOverlay;
     use ratatui::buffer::Buffer;
     use ratatui::style::Modifier;
-    use pi_pager::views::settings_modal::ResetConfirmOverlay;
     // Set up a state with at least 3 rows visible AND navigate to a
     // specific target (NOT the initially-selected row) so we can
     // assert dim-vs-full-intensity for both target and non-target
@@ -3931,9 +3579,7 @@ fn docs_footer_renders_for_browse_and_picker() {
             assert!(matches!(s.mode(), SettingsModalMode::PickingEnum { .. }));
         }
         let mut buf = Buffer::empty(area);
-        pi_pager::views::settings_modal::render_settings_modal(
-            &mut buf, area, &mut s, false, None,
-        );
+        pi_pager::views::settings_modal::render_settings_modal(&mut buf, area, &mut s, false, None);
         let mut all_text = String::new();
         for y in 0..area.height {
             for x in 0..area.width {
@@ -4210,8 +3856,8 @@ fn vim_l_h_keys_toggle_expansion() {
 /// where the dialog was invisible.
 #[test]
 fn reset_confirm_overlay_renders_prompt_with_setting_label_and_default() {
-    use ratatui::buffer::Buffer;
     use pi_pager::views::settings_modal::ResetConfirmOverlay;
+    use ratatui::buffer::Buffer;
     let mut s = make_state();
     let area = Rect {
         x: 0,
@@ -4717,401 +4363,6 @@ fn pr8_default_model_and_max_thoughts_width_defaults_roundtrip() {
 }
 
 // ---------------------------------------------------------------------------
-// coding_data_sharing (Privacy Enum, no preview — async ACP)
-// ---------------------------------------------------------------------------
-
-/// `coding_data_sharing` lives under `Privacy`.
-#[test]
-fn pr9_coding_data_sharing_renders_under_privacy_category() {
-    let reg = SettingsRegistry::defaults();
-    let meta = reg
-        .find("coding_data_sharing")
-        .expect("coding_data_sharing must be registered");
-    assert_eq!(
-        meta.category,
-        SettingCategory::Privacy,
-        "coding_data_sharing must live under Privacy"
-    );
-    assert_eq!(
-        meta.owner,
-        SettingOwner::Shell,
-        "coding_data_sharing is SHELL-owned (auth-metadata-backed, persists via ACP)"
-    );
-}
-
-/// `coding_data_sharing` must be `supports_preview: false` (async ACP).
-#[test]
-fn pr9_coding_data_sharing_does_not_support_preview() {
-    let reg = SettingsRegistry::defaults();
-    let meta = reg
-        .find("coding_data_sharing")
-        .expect("coding_data_sharing must be registered");
-    match &meta.kind {
-        SettingKind::Enum {
-            supports_preview, ..
-        } => {
-            assert!(
-                !supports_preview,
-                "coding_data_sharing MUST be supports_preview: false — every preview \
-                 would fire an async ACP round-trip OR commit-on-every-nav, both \
-                 unacceptable",
-            );
-        }
-        other => panic!("expected Enum kind for coding_data_sharing, got {other:?}"),
-    }
-}
-
-/// Reads from pager snapshot; inverts `_opt_out` bool.
-#[test]
-fn pr9_current_value_for_reads_pager_snapshot_inverts_opt_out() {
-    use pi_pager::settings::current_value_for;
-
-    let ui = UiConfig::default();
-
-    let opted_in_snap = PagerLocalSnapshot {
-        coding_data_sharing_opt_out: false,
-        ..PagerLocalSnapshot::default()
-    };
-    let opted_out_snap = PagerLocalSnapshot {
-        coding_data_sharing_opt_out: true,
-        ..PagerLocalSnapshot::default()
-    };
-
-    assert_eq!(
-        current_value_for("coding_data_sharing", &ui, &opted_in_snap),
-        Some(SettingValue::Enum("opt-in")),
-        "opt_out=false → canonical 'opt-in' (user IS sharing data)",
-    );
-    assert_eq!(
-        current_value_for("coding_data_sharing", &ui, &opted_out_snap),
-        Some(SettingValue::Enum("opt-out")),
-        "opt_out=true → canonical 'opt-out' (user opted OUT of sharing)",
-    );
-}
-
-/// Enter opens picker seeded to current state.
-#[test]
-fn pr9_enter_on_coding_data_sharing_row_enters_picking_enum() {
-    let mut s = make_state();
-    navigate_to(&mut s, "coding_data_sharing");
-    let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    assert!(
-        matches!(outcome, SettingsKeyOutcome::Changed),
-        "Enter on coding_data_sharing row must transition to PickingEnum, got {outcome:?}"
-    );
-    match &s.mode() {
-        SettingsModalMode::PickingEnum {
-            key,
-            original_value,
-            ..
-        } => {
-            assert_eq!(*key, "coding_data_sharing");
-            assert_eq!(
-                original_value,
-                &SettingValue::Enum("opt-out"),
-                "default snapshot opt_out=true → original 'opt-out'"
-            );
-        }
-        other => panic!("expected PickingEnum mode, got {other:?}"),
-    }
-}
-
-/// Nav in picker must NOT dispatch preview (async ACP).
-#[test]
-fn pr9_coding_data_sharing_picker_nav_does_not_dispatch_preview() {
-    for nav_key in &[
-        KeyCode::Down,
-        KeyCode::Char('j'),
-        KeyCode::Up,
-        KeyCode::Char('k'),
-    ] {
-        let mut s = make_state();
-        navigate_to(&mut s, "coding_data_sharing");
-        let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-        assert!(matches!(s.mode(), SettingsModalMode::PickingEnum { .. }));
-
-        // Pre-position so the nav key under test has room to move no matter
-        // which choice the registry default opens the picker on (Up needs
-        // idx > 0, Down needs idx < last).
-        if matches!(nav_key, KeyCode::Up | KeyCode::Char('k')) {
-            let _ = handle_settings_key(&mut s, &press(KeyCode::Down));
-        } else {
-            let _ = handle_settings_key(&mut s, &press(KeyCode::Up));
-        }
-
-        let outcome = handle_settings_key(&mut s, &press(*nav_key));
-        assert!(
-            matches!(outcome, SettingsKeyOutcome::Changed),
-            "Nav key {nav_key:?} in coding_data_sharing picker MUST NOT dispatch a preview \
-             Action — that would fire a network round-trip per keystroke. Got {outcome:?}",
-        );
-        assert!(matches!(s.mode(), SettingsModalMode::PickingEnum { .. }));
-    }
-}
-
-/// Enter commits `SetCodingDataSharing { opted_in }` (opt-in→true).
-#[test]
-fn pr9_coding_data_sharing_picker_enter_dispatches_set_commit() {
-    let reg = SettingsRegistry::defaults();
-    let meta = reg.find("coding_data_sharing").unwrap();
-    let (default_canonical, choices) = match &meta.kind {
-        SettingKind::Enum {
-            default, choices, ..
-        } => (*default, *choices),
-        _ => panic!("coding_data_sharing must be Enum"),
-    };
-    // Resolve "the other" canonical from the registry rather than
-    // hardcoding — robust against future catalog additions.
-    let other_canonical = choices
-        .iter()
-        .map(|c| c.canonical)
-        .find(|c| *c != default_canonical)
-        .expect("coding_data_sharing must have ≥2 choices");
-    let expected_opted_in = match other_canonical {
-        "opt-in" => true,
-        "opt-out" => false,
-        _ => panic!("unexpected canonical: {other_canonical:?}"),
-    };
-
-    let mut s = make_state();
-    navigate_to(&mut s, "coding_data_sharing");
-    let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    // Nav to the OTHER choice — direction depends on where the registry
-    // default opened the picker, so derive it instead of hardcoding Down.
-    let default_idx = choices
-        .iter()
-        .position(|c| c.canonical == default_canonical)
-        .expect("default must be a registry choice");
-    let other_idx = choices
-        .iter()
-        .position(|c| c.canonical == other_canonical)
-        .expect("other choice must be in the registry");
-    let nav = if other_idx > default_idx {
-        KeyCode::Down
-    } else {
-        KeyCode::Up
-    };
-    let _ = handle_settings_key(&mut s, &press(nav));
-    // Enter → commit.
-    let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    match outcome {
-        SettingsKeyOutcome::Action(Action::SetCodingDataSharing { opted_in }) => {
-            assert_eq!(
-                opted_in, expected_opted_in,
-                "Enter must commit `{other_canonical}` → SetCodingDataSharing(opted_in={expected_opted_in})"
-            );
-        }
-        other => panic!("expected Action::SetCodingDataSharing commit, got {other:?}"),
-    }
-    assert!(
-        matches!(s.mode(), SettingsModalMode::Browse),
-        "Enter commit must return to Browse"
-    );
-}
-
-/// Esc in non-preview picker returns to Browse without Action.
-#[test]
-fn pr9_coding_data_sharing_picker_esc_does_not_dispatch_action() {
-    let mut s = make_state();
-    navigate_to(&mut s, "coding_data_sharing");
-    let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    let _ = handle_settings_key(&mut s, &press(KeyCode::Down));
-
-    let outcome = handle_settings_key(&mut s, &press(KeyCode::Esc));
-    assert!(
-        matches!(outcome, SettingsKeyOutcome::Changed),
-        "Esc on non-preview Enum picker must NOT emit an Action — \
-         doing so would fire an ACP round-trip on every Esc. Got {outcome:?}"
-    );
-    assert!(
-        matches!(s.mode(), SettingsModalMode::Browse),
-        "Esc must return to Browse"
-    );
-}
-
-/// Picker seeds at "opt-out" when `coding_data_sharing_opt_out: true`.
-#[test]
-fn pr9_picker_seeds_choices_idx_from_pager_snapshot_opt_out_true() {
-    let snapshot = PagerLocalSnapshot {
-        coding_data_sharing_opt_out: true,
-        ..PagerLocalSnapshot::default()
-    };
-    let mut s = SettingsModalState::new(
-        Arc::new(SettingsRegistry::defaults()),
-        UiConfig::default(),
-        snapshot,
-    );
-    navigate_to(&mut s, "coding_data_sharing");
-    let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    let reg = SettingsRegistry::defaults();
-    let opt_out_idx = match &reg.find("coding_data_sharing").unwrap().kind {
-        SettingKind::Enum { choices, .. } => choices
-            .iter()
-            .position(|c| c.canonical == "opt-out")
-            .expect("coding_data_sharing must have 'opt-out' choice"),
-        _ => panic!("coding_data_sharing must be Enum"),
-    };
-    match s.mode() {
-        SettingsModalMode::PickingEnum {
-            choices_idx,
-            ref original_value,
-            ..
-        } => {
-            assert_eq!(
-                choices_idx, opt_out_idx,
-                "picker must seed at the 'opt-out' index when snapshot says opt_out=true"
-            );
-            assert_eq!(
-                original_value,
-                &SettingValue::Enum("opt-out"),
-                "original_value must match the live snapshot"
-            );
-        }
-        ref other => panic!("expected PickingEnum mode, got {other:?}"),
-    }
-}
-
-/// Exactly 2 canonical choices: {opt-in, opt-out}.
-#[test]
-fn pr9_coding_data_sharing_choices_use_canonical_strings() {
-    let reg = SettingsRegistry::defaults();
-    let meta = reg.find("coding_data_sharing").unwrap();
-    let canonicals: Vec<&str> = match &meta.kind {
-        SettingKind::Enum { choices, .. } => choices.iter().map(|c| c.canonical).collect(),
-        _ => panic!("coding_data_sharing must be Enum"),
-    };
-    assert_eq!(
-        canonicals.len(),
-        2,
-        "coding_data_sharing catalog must be exactly {{opt-in, opt-out}} — adding a \
-         choice requires updating the action_for_enum_commit arm in \
-         views/settings_modal.rs AND the action_for_reset arm in dispatch.rs",
-    );
-    assert!(
-        canonicals.contains(&"opt-in"),
-        "coding_data_sharing must include 'opt-in' canonical"
-    );
-    assert!(
-        canonicals.contains(&"opt-out"),
-        "coding_data_sharing must include 'opt-out' canonical"
-    );
-}
-
-/// Search "privacy" finds exactly `coding_data_sharing`.
-#[test]
-fn pr9_search_privacy_matches_coding_data_sharing() {
-    let reg = SettingsRegistry::defaults();
-    let hits = reg.search("privacy");
-    // The category label "Privacy" appears as a header but is not
-    // part of `search()`'s haystack (search ignores categories);
-    // matches come from the meta's keywords + label + description.
-    let hit_keys: Vec<&str> = hits.iter().map(|m| m.key).collect();
-    assert_eq!(
-        hits.len(),
-        1,
-        "search('privacy') must return EXACTLY one result (coding_data_sharing). \
-         Found {} results: {hit_keys:?}. \
-         If this fails because another setting added 'privacy' to its keywords/label/\
-         description, decide: (a) is 'privacy' a real keyword for that setting? If yes, \
-         loosen this assertion to a presence-only check `hit_keys.contains(&\"coding_data_sharing\")`. \
-         (b) If no, remove 'privacy' from the other setting's haystack — search relevance \
-         is more important than tag promiscuity.",
-        hits.len(),
-    );
-    assert_eq!(
-        hits[0].key, "coding_data_sharing",
-        "search('privacy') unique result must be coding_data_sharing"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Mouse path tests for coding_data_sharing
-// ---------------------------------------------------------------------------
-
-/// First click on unselected row only selects.
-#[test]
-fn pr9_mouse_click_on_unselected_coding_data_sharing_row_only_selects() {
-    let mut s = make_state();
-    synth_rects(&mut s);
-    let row_y = row_idx_for(&s, "coding_data_sharing") as u16;
-
-    let outcome = handle_settings_mouse(
-        &mut s,
-        MouseEventKind::Down(crossterm::event::MouseButton::Left),
-        10,
-        row_y,
-    );
-    assert!(
-        matches!(outcome, SettingsKeyOutcome::Changed),
-        "first body-click on unselected coding_data_sharing row should only select, got: {outcome:?}",
-    );
-    assert_eq!(s.selected, row_y as usize);
-    assert!(matches!(s.mode(), SettingsModalMode::Browse));
-}
-
-/// Second click on selected row opens picker.
-#[test]
-fn pr9_mouse_click_on_selected_coding_data_sharing_row_opens_picker() {
-    let mut s = make_state();
-    synth_rects(&mut s);
-    let row_y = row_idx_for(&s, "coding_data_sharing") as u16;
-
-    // First click: select.
-    let _ = handle_settings_mouse(
-        &mut s,
-        MouseEventKind::Down(crossterm::event::MouseButton::Left),
-        10,
-        row_y,
-    );
-    assert_eq!(s.selected, row_y as usize);
-
-    // Second click on the focused row: open the picker.
-    let outcome = handle_settings_mouse(
-        &mut s,
-        MouseEventKind::Down(crossterm::event::MouseButton::Left),
-        10,
-        row_y,
-    );
-    assert!(
-        matches!(outcome, SettingsKeyOutcome::Changed),
-        "second click on focused Enum row must open picker, got: {outcome:?}",
-    );
-    match &s.mode() {
-        SettingsModalMode::PickingEnum { key, .. } => {
-            assert_eq!(*key, "coding_data_sharing");
-        }
-        _ => panic!("second click on focused coding_data_sharing row must enter PickingEnum"),
-    }
-}
-
-/// Value-column click opens picker in one click.
-#[test]
-fn pr9_mouse_click_on_coding_data_sharing_indicator_opens_picker_in_one_click() {
-    let mut s = make_state();
-    synth_rects(&mut s);
-    let row_y = row_idx_for(&s, "coding_data_sharing") as u16;
-
-    let outcome = handle_settings_mouse(
-        &mut s,
-        MouseEventKind::Down(crossterm::event::MouseButton::Left),
-        72,
-        row_y,
-    );
-    assert!(
-        matches!(outcome, SettingsKeyOutcome::Changed),
-        "value click must open picker in one click, got: {outcome:?}",
-    );
-    match &s.mode() {
-        SettingsModalMode::PickingEnum { key, .. } => {
-            assert_eq!(*key, "coding_data_sharing");
-        }
-        _ => {
-            panic!("value click on coding_data_sharing must enter PickingEnum")
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // default_selected_permission (Agent Enum, no preview — SHELL-owned, persists)
 // ---------------------------------------------------------------------------
 
@@ -5379,25 +4630,6 @@ fn default_selected_permission_mouse_click_on_indicator_opens_picker_in_one_clic
     }
 }
 
-/// `/privacy` takes no arguments: it opens the settings page and nothing
-/// else. The alias parser it used to carry (`opt-in`, `share`, `out`, …) is
-/// gone — a one-word prompt alias could flip a privacy preference with none
-/// of the disclosure copy in front of the user, and the ambiguous forms
-/// (`on`/`off`) risked landing on the opposite of the intent.
-#[test]
-fn pr9_privacy_slash_command_takes_no_arguments() {
-    use pi_pager::slash::commands::builtin_commands;
-    use pi_pager::slash::registry::CommandRegistry;
-
-    let reg = CommandRegistry::new(builtin_commands());
-    let cmd = reg.get("privacy").expect("/privacy must be registered");
-    assert!(
-        !cmd.takes_args(),
-        "/privacy must not advertise an argument slot"
-    );
-    assert_eq!(cmd.usage(), "/privacy");
-}
-
 // ---------------------------------------------------------------------------
 // `plan_mode` (Agent-category Enum, PAGER-owned + ACP-mediated,
 // supports_preview: false)
@@ -5488,7 +4720,7 @@ fn pr10_current_value_for_reads_pager_snapshot() {
 }
 
 /// Enter on the `plan_mode` row → PickingEnum mode (mirroring the
-/// theme/permission_mode/coding_data_sharing picker), seeded to the
+/// theme/permission_mode picker), seeded to the
 /// canonical of the current live state.
 #[test]
 fn pr10_enter_on_plan_mode_row_enters_picking_enum() {
@@ -5519,8 +4751,7 @@ fn pr10_enter_on_plan_mode_row_enters_picking_enum() {
 /// **Regression test.** Up/Down/j/k nav in the `plan_mode` picker
 /// MUST NOT dispatch a preview Action — that would fire an ACP
 /// round-trip per keystroke (the ACP path is eager). Mirror of
-/// `pr6_permission_mode_picker_nav_does_not_dispatch_preview` and
-/// `pr9_coding_data_sharing_picker_nav_does_not_dispatch_preview`.
+/// `pr6_permission_mode_picker_nav_does_not_dispatch_preview`.
 #[test]
 fn pr10_plan_mode_picker_nav_does_not_dispatch_preview() {
     for nav_key in &[
@@ -5548,41 +4779,8 @@ fn pr10_plan_mode_picker_nav_does_not_dispatch_preview() {
     }
 }
 
-/// Enter on the focused picker choice commits via
-/// `Action::SetPlanMode(PlanModeKind)` — the typed setter, not a
-/// preview variant. Pins the canonical-to-PlanModeKind mapping
-/// (on→On, off→Off).
-#[test]
-fn pr10_plan_mode_picker_enter_dispatches_set_commit() {
-    use pi_pager::app::actions::PlanModeKind;
-
-    let mut s = make_state();
-    navigate_to(&mut s, "plan_mode");
-    let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    // Default snapshot has plan_mode_active=false → picker seeds at
-    // "off". Down nav moves to "on".
-    let _ = handle_settings_key(&mut s, &press(KeyCode::Down));
-    // Enter → commit.
-    let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    match outcome {
-        SettingsKeyOutcome::Action(Action::SetPlanMode(kind)) => {
-            assert_eq!(
-                kind,
-                PlanModeKind::On,
-                "Enter must commit `on` → SetPlanMode(PlanModeKind::On)"
-            );
-        }
-        other => panic!("expected Action::SetPlanMode commit, got {other:?}"),
-    }
-    assert!(
-        matches!(s.mode(), SettingsModalMode::Browse),
-        "Enter commit must return to Browse"
-    );
-}
-
 /// Esc inside the picker for a non-preview Enum returns to Browse
-/// without dispatching any Action. Mirror of
-/// `pr9_coding_data_sharing_picker_esc_does_not_dispatch_action`.
+/// without dispatching any Action.
 /// Since `plan_mode` has no preview, Esc must NOT re-persist.
 #[test]
 fn pr10_plan_mode_picker_esc_does_not_dispatch_action() {
@@ -5679,7 +4877,7 @@ fn pr10_plan_mode_choices_use_canonical_strings() {
 // ---------------------------------------------------------------------------
 // Mouse path tests for plan_mode (keyboard ↔ mouse parity).
 //
-// Mirrors the permission_mode / coding_data_sharing mouse tests. Every
+// Mirrors the permission_mode mouse tests. Every
 // keyboard interaction has a mouse equivalent.
 // ---------------------------------------------------------------------------
 
@@ -5783,7 +4981,7 @@ fn pr10_mouse_click_on_plan_mode_indicator_opens_picker_in_one_click() {
 // and Esc must never dispatch an Action.
 //
 // These tests honor the `ALL_SETTINGS_EXERCISED` contract — keyboard AND
-// mouse coverage, same rigor as `plan_mode` / `coding_data_sharing`.
+// mouse coverage, same rigor as `plan_mode`.
 // ---------------------------------------------------------------------------
 
 /// `render_mermaid` lives under `Appearance` and is SHELL-owned (persisted to

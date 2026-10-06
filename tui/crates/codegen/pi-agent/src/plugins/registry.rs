@@ -1,7 +1,7 @@
 //! In-memory registry of active plugins.
 //!
 //! The `PluginRegistry` is the single source of truth for which plugins
-//! are loaded in a session.  It is built once during `MvpAgent` initialization
+//! are loaded in a session.  It is built once during agent initialization
 //! and can be rebuilt via `/plugins reload`.  Each session receives a snapshot.
 
 use std::collections::HashMap;
@@ -80,9 +80,7 @@ pub struct LoadedPlugin {
 impl LoadedPlugin {
     /// Data directory for this plugin: `~/.grok/plugin-data/<plugin_id>/`.
     pub fn data_dir(&self) -> PathBuf {
-        pi_config::grok_home()
-            .join("plugin-data")
-            .join(&self.id.0)
+        pi_config::grok_home().join("plugin-data").join(&self.id.0)
     }
 
     /// Plugin root path as a string (for env var substitution).
@@ -466,9 +464,7 @@ impl SharedPluginRegistryHandle {
 /// dedupes on `plugin:<name>`) — so counts equal what actually loads, both
 /// for overlapping dir entries and same-basename dirs at different paths.
 pub fn skill_md_paths(skill_dirs: &[PathBuf]) -> Vec<PathBuf> {
-    use pi_tools::implementations::skills::discovery::{
-        find_skill_md_paths, normalize_skill_name,
-    };
+    use pi_tools::implementations::skills::discovery::{find_skill_md_paths, normalize_skill_name};
 
     let mut paths: Vec<PathBuf> = skill_dirs
         .iter()

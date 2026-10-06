@@ -19,10 +19,6 @@ impl SlashCommand for HomeCommand {
         "Return to the welcome screen"
     }
 
-    fn usage(&self) -> &str {
-        "/home"
-    }
-
     fn run(&self, _ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {
         CommandResult::Action(Action::ExitSession)
     }

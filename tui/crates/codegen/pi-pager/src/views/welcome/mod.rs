@@ -7,7 +7,7 @@
 //! - Bottom margin
 
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Alignment, Constraint, Flex, Layout, Position, Rect};
+use ratatui::layout::{Alignment, Constraint, Flex, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Padding, Paragraph, Widget, Wrap};
@@ -15,31 +15,21 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::app_view::{AuthMode, AuthState, SessionPickerEntry, TrustState};
-use crate::app::consent::ConsentState;
 use crate::startup::StartupWarning;
 use crate::theme::Theme;
 use crate::views::prompt_widget::{PromptFlag, PromptInfo, PromptWidget};
-mod consent;
 mod hero_box;
 pub(crate) mod logo;
 mod menu;
 mod prompt;
 mod toast;
 mod top_bar;
-#[cfg(feature = "local-workspace")]
-pub(crate) mod workspace_mode;
 
 pub(crate) use logo::shimmer_frame;
 use logo::{logo_line_count, render_logo};
 use menu::render_menu;
 pub(crate) use toast::paint_welcome_toast;
-pub(crate) use top_bar::location_line_at;
 use top_bar::render_top_bar;
-#[cfg(feature = "local-workspace")]
-pub use workspace_mode::{
-    WelcomeWorkspaceMode, WorkspaceModeHitRects, hit_test_workspace_mode,
-    render_workspace_mode_picker,
-};
 
 /// True for VS Code and xterm.js embeds (VS Code-family IDEs and Zed) where
 /// quit is `Ctrl+D` (canonical: [`TerminalName::is_vscode_family`]).
@@ -66,7 +56,7 @@ fn quit_hint_spans(theme: &Theme) -> Vec<Span<'static>> {
 }
 
 /// Style for a clickable welcome block: bright primary while `hovered`, else
-/// `base`. Shared by the announcement and changelog renderers.
+/// `base`. Shared by the announcement renderers.
 pub(super) fn hover_style(theme: &Theme, hovered: bool, base: Style) -> Style {
     if hovered {
         Style::default().fg(theme.text_primary)
@@ -99,9 +89,7 @@ const H_MARGIN: u16 = 2;
 /// Horizontal margin in compact mode.
 const H_MARGIN_COMPACT: u16 = 1;
 
-/// Minimum width for menu + changelog sections so they don't resize when the import row toggles.
-/// Derivation: "[ " (2) + import-claude label (22) + gap (4) + "ctrl+i  [x]" (11) + " ]" (2) = 41.
-/// Bumped to 51 for comfortable breathing room.
+/// Minimum width for the menu + info sections so they don't resize with their content.
 const MENU_MIN_WIDTH: u16 = 51;
 
 /// Whether the welcome prompt is currently focused (accepting text input).
@@ -123,8 +111,6 @@ pub struct WelcomeRenderResult {
     pub menu_rects: Vec<Rect>,
     /// Hit-test rect for the prompt input area (for click to start session).
     pub prompt_rect: Option<Rect>,
-    /// Hit-test rect for the import-claude banner (for click to open import modal).
-    pub import_banner_rect: Option<Rect>,
     /// Hit areas from the session picker (for mouse hit-testing).
     pub session_picker_hit_areas: Option<crate::views::picker::PickerHitAreas>,
     /// Hit-test rect for the auth copy line (click-to-copy during Authenticating).
@@ -135,16 +121,6 @@ pub struct WelcomeRenderResult {
     pub refresh_rect: Option<Rect>,
     /// Hit-test rect for the gate URL link (click to open in browser).
     pub gate_url_rect: Option<Rect>,
-    /// Hit-test rects for the inline links, tagged with their index, one per row a link wraps to.
-    pub consent_link_rects: Vec<(usize, Rect)>,
-    /// `None` when this frame did not paint the notice.
-    pub consent_legibility: Option<crate::app::consent::ConsentLegibility>,
-    /// Whether a "Changelog" menu action was rendered (above Quit), so the
-    /// input handler can map the extra menu row to the release-notes action
-    /// once markdown is available.
-    pub changelog_action_present: bool,
-    /// Hit-test rect for the clickable changelog info block (opens release notes).
-    pub changelog_cta_rect: Option<Rect>,
     /// Whether the announcement overflowed (the "expandable" signal).
     pub announcement_truncated: bool,
     /// Hit-test rect for the full announcement block (click anywhere to toggle).
@@ -155,9 +131,6 @@ pub struct WelcomeRenderResult {
     pub privacy_banner_opt_out_rect: Option<Rect>,
     pub privacy_banner_terms_rect: Option<Rect>,
     pub privacy_banner_policy_rect: Option<Rect>,
-    /// Hit-test rects for the chat workspace-mode segmented control.
-    #[cfg(feature = "local-workspace")]
-    pub workspace_mode_rects: WorkspaceModeHitRects,
 }
 
 use hero_box::HERO_BOX_MIN_WIDTH;
@@ -172,10 +145,10 @@ pub(super) struct WelcomeLayout {
     pub(super) logo: Rect,
     pub(super) error: Rect,
     pub(super) menu: Rect,
-    /// Stacked info slot below the menu (narrow layout only) — shows either the
-    /// announcement or the changelog (one at a time; the announcement takes
-    /// priority). Zero in the hero box layout, which uses `hero_info` instead.
-    pub(super) changelog: Rect,
+    /// Stacked info slot below the menu (narrow layout only) — holds the
+    /// announcement. Zero in the hero box layout, which uses `hero_info`
+    /// instead.
+    pub(super) info: Rect,
     pub(super) tip: Rect,
     pub(super) prompt: Rect,
     pub(super) version: Rect,
@@ -184,8 +157,7 @@ pub(super) struct WelcomeLayout {
     pub(super) hero_logo: Rect,
     pub(super) hero_version: Rect,
     pub(super) hero_subtitle: Rect,
-    /// In-box info slot — shows either the announcement or the changelog
-    /// (only one at a time; the announcement takes priority).
+    /// In-box info slot — holds the announcement.
     pub(super) hero_info: Rect,
     pub(super) hero_menu: Rect,
 }
@@ -201,8 +173,6 @@ struct WelcomeLayoutInput<'a> {
     error_height: u16,
     menu_height: u16,
     tip_height: u16,
-    /// Desired changelog height (collapsed to 0 if the terminal is too short).
-    changelog_height: u16,
     /// Vertical compaction (session picker visible): skip the logo + info slot.
     compact: bool,
     /// Horizontal-inset compaction (appearance setting) for the stacked slot.
@@ -232,7 +202,9 @@ impl WelcomeLayout {
         tip_height + tip_gap + prompt_height + VERSION_GAP + 1
     }
 
-    pub(super) fn effective_changelog(
+    /// Height and gap of the stacked info slot: `requested` rows (plus a one-row
+    /// gap) when they fit under the menu, else `(0, 0)`.
+    pub(super) fn effective_info(
         content_height: u16,
         fixed_above: u16,
         content_slot: u16,
@@ -265,8 +237,8 @@ impl WelcomeLayout {
 
     /// Compute the welcome screen layout.
     ///
-    /// Picks hero vs stacked, then measures the info slot (announcement, else
-    /// changelog) at that layout's slot width before placing rects — width is
+    /// Picks hero vs stacked, then measures the info slot (the announcement) at
+    /// that layout's slot width before placing rects — width is
     /// content-size-only, so it's a clean two-phase computation. `allow_hero_box`
     /// gates the wide variant; stacked-only callers pass `false`.
     fn compute_inner(input: WelcomeLayoutInput<'_>, allow_hero_box: bool) -> Self {
@@ -275,7 +247,6 @@ impl WelcomeLayout {
             error_height,
             menu_height,
             tip_height,
-            changelog_height,
             compact,
             prompt_compact,
             announcement,
@@ -285,19 +256,13 @@ impl WelcomeLayout {
         } = input;
         let zero = Rect::default();
         // Pick hero vs stacked first, independent of the announcement's height:
-        // the changelog isn't clamped so it must fit as-is, but an announcement
-        // clamps to fit, so with one present the box only needs to fit empty.
-        let gate_info = if announcement.is_some() {
-            0
-        } else {
-            changelog_height
-        };
+        // an announcement clamps to fit, so the box only needs to fit empty.
         let use_hero_box = allow_hero_box
             && !compact
             && content_area.width >= HERO_BOX_MIN_WIDTH
             && menu_height > 0
             && content_area.height
-                >= hero_box::min_content_height(error_height, menu_height, tip_height, gate_info);
+                >= hero_box::min_content_height(error_height, menu_height, tip_height, 0);
 
         if use_hero_box {
             // The hero box measures + clamps the announcement itself.
@@ -306,15 +271,14 @@ impl WelcomeLayout {
                 error_height,
                 menu_height,
                 tip_height,
-                changelog_height,
                 announcement,
                 expanded,
                 has_upgrade_cta,
             );
         }
 
-        // Stacked info slot: the announcement clamped to the column budget, else
-        // the changelog. Measure at the centered menu width inside the inset.
+        // Stacked info slot: the announcement clamped to the column budget.
+        // Measure at the centered menu width inside the inset.
         let info_height = match announcement {
             Some(ann) => {
                 let avail = content_area
@@ -331,7 +295,7 @@ impl WelcomeLayout {
                     ),
                 )
             }
-            None => changelog_height,
+            None => 0,
         };
 
         // Stacked layout: skip the logo in compact mode (the session picker
@@ -347,10 +311,9 @@ impl WelcomeLayout {
         let prompt_height = prompt_height.unwrap_or(PROMPT_HEIGHT);
         let fixed_below = Self::fixed_below_with_prompt(tip_height, prompt_height);
         let fixed_above = logo_rows + 1 + gap_after_logo + error_height; // +1 for gap after logo
-        // The stacked info slot below the menu holds whichever block is shown
-        // (announcement or changelog), matching the hero box's single-slot rule.
-        let (eff_changelog_height, _) = if !compact {
-            Self::effective_changelog(
+        // The stacked info slot below the menu holds the announcement.
+        let (eff_info_height, _) = if !compact {
+            Self::effective_info(
                 content_area.height,
                 fixed_above,
                 menu_height,
@@ -360,7 +323,7 @@ impl WelcomeLayout {
         } else {
             (0, 0)
         };
-        let eff_changelog_gap = if eff_changelog_height > 0 { 1u16 } else { 0 };
+        let eff_info_gap = if eff_info_height > 0 { 1u16 } else { 0 };
         // Compute top_pad using the *default* menu height (4 items = 7 rows) so
         // the logo position stays constant regardless of picker/focus state.
         let top_pad = if compact {
@@ -370,7 +333,7 @@ impl WelcomeLayout {
             let remaining = content_area.height.saturating_sub(fixed_above);
             remaining
                 .saturating_sub(default_menu_height)
-                .saturating_sub(eff_changelog_gap + eff_changelog_height)
+                .saturating_sub(eff_info_gap + eff_info_height)
                 .saturating_sub(fixed_below)
                 / 3
         };
@@ -384,7 +347,7 @@ impl WelcomeLayout {
             error,
             menu,
             _,
-            changelog,
+            info,
             _,
             tip,
             _,
@@ -398,8 +361,8 @@ impl WelcomeLayout {
             Constraint::Length(gap_after_logo),
             Constraint::Length(error_height),
             Constraint::Length(menu_height),
-            Constraint::Length(eff_changelog_gap),
-            Constraint::Length(eff_changelog_height),
+            Constraint::Length(eff_info_gap),
+            Constraint::Length(eff_info_height),
             Constraint::Min(flex_gap),
             Constraint::Length(tip_height),
             Constraint::Length(tip_gap),
@@ -412,7 +375,7 @@ impl WelcomeLayout {
             logo,
             error,
             menu,
-            changelog,
+            info,
             tip,
             prompt,
             version,
@@ -620,8 +583,6 @@ pub struct WelcomeRenderParams<'a> {
     /// Folder-trust state. When `Pending` (auth done, access granted), the
     /// welcome screen renders the trust question instead of the normal prompt.
     pub trust_state: &'a TrustState,
-    pub consent_state: &'a crate::app::consent::ConsentState,
-    pub consent_hover_link: Option<usize>,
     pub login_label: Option<&'a str>,
     pub auth_code_input: &'a str,
     pub auth_code_cursor_byte: usize,
@@ -634,7 +595,6 @@ pub struct WelcomeRenderParams<'a> {
     pub selected: Option<usize>,
     pub team_name: Option<&'a str>,
     pub has_access: bool,
-    pub has_claude_import: bool,
     pub mouse_pos: Option<(u16, u16)>,
     pub is_zdr_blocked: bool,
     pub session_picker: Option<&'a [SessionPickerEntry]>,
@@ -643,25 +603,12 @@ pub struct WelcomeRenderParams<'a> {
     pub pending_hint: Option<crate::views::shortcuts_bar::PendingHint>,
     pub startup_warnings: &'a [StartupWarning],
     pub pending_update_version: Option<&'a str>,
-    /// Recent foreign session offered on ctrl+u, suppressed by a pending update.
-    pub foreign_resume_hint: Option<&'a pi_foreign_sessions::RecentForeignSession>,
     pub is_api_key_auth: bool,
-    pub session_picker_content_results:
-        Option<&'a [pi_shell::extensions::session_search::SearchSessionHit]>,
-    pub session_picker_content_loading: bool,
-    /// The query the picker entries were server-fetched with (see
-    /// [`crate::views::session_picker::effective_filter_query`]).
-    pub session_picker_entries_query: Option<&'a str>,
     pub welcome_tick: u64,
     pub gate: Option<&'a pi_shell::auth::GateInfo>,
     pub subscription_tier: Option<&'a str>,
     pub session_picker_grouped: bool,
-    /// Source filter for the session picker.
-    pub session_picker_source_filter: crate::views::session_picker::SourceFilter,
     pub session_picker_pending_delete: bool,
-    /// Process-wide `--chat`: the picker lists backend conversations only, so
-    /// the source filter and local deep search are hidden.
-    pub chat_mode: bool,
     /// Live working directory (tracks `Effect::SetWorkingDir`), used to pin
     /// the current repo's session group to the top of the picker.
     pub cwd: &'a std::path::Path,
@@ -671,10 +618,6 @@ pub struct WelcomeRenderParams<'a> {
     pub auto_topup: Option<&'a crate::views::credit_bar::AutoTopupInfo>,
     /// Consumer billing surface (false for team / API-key — no credit warning).
     pub usage_visible: bool,
-    /// Cached changelog bullets for the welcome screen (up to 3).
-    pub changelog_bullets: &'a [String],
-    /// Whether full release notes markdown is available (controls the CTA hint).
-    pub changelog_has_full_notes: bool,
     /// Whether a long managed-config announcement is expanded inline (vs the
     /// default 2-line collapsed view with a trailing `…`).
     pub welcome_announcement_expanded: bool,
@@ -684,15 +627,6 @@ pub struct WelcomeRenderParams<'a> {
     pub upgrade_cta: Option<&'a str>,
     /// Non-blocking welcome privacy banner above the prompt.
     pub privacy_banner: bool,
-    /// Chat-mode workspace picker selection (`local-workspace` feature).
-    #[cfg(feature = "local-workspace")]
-    pub workspace_mode: WelcomeWorkspaceMode,
-    /// CLI/env already stamped local workspace — picker is display-only.
-    #[cfg(feature = "local-workspace")]
-    pub workspace_mode_startup_locked: bool,
-    /// In-TUI ACK confirm pending for Local.
-    #[cfg(feature = "local-workspace")]
-    pub workspace_mode_ack_pending: bool,
 }
 
 /// Render the welcome screen.
@@ -808,20 +742,7 @@ pub fn render_welcome(
         // sessions. The `if let` destructure makes the `Pending`-only render
         // structurally exhaustive (no `unreachable!`).
         AuthState::Done if params.has_access => {
-            // Consent is account-level, so it resolves before the workspace-level trust question.
-            if let ConsentState::Pending { notice, .. } = params.consent_state {
-                consent::render_consent(
-                    content_area,
-                    buf,
-                    &theme,
-                    notice,
-                    params.selected,
-                    params.consent_hover_link,
-                    params.pending_hint,
-                    h_margin,
-                    params.compact,
-                )
-            } else if let TrustState::Pending { workspace } = params.trust_state {
+            if let TrustState::Pending { workspace } = params.trust_state {
                 render_welcome_trust(
                     content_area,
                     buf,
@@ -1548,73 +1469,6 @@ fn inset_horizontal(rect: Rect, inset: u16) -> Rect {
     }
 }
 
-/// Render the changelog section (header + bullets), centered to the menu width.
-/// When `clickable` (full notes exist) the whole block opens the notes on click
-/// and brightens while hovered; returns that clickable rect.
-#[allow(clippy::too_many_arguments)]
-fn render_changelog_section(
-    area: Rect,
-    buf: &mut Buffer,
-    theme: &Theme,
-    bullets: &[String],
-    min_width_hint: u16,
-    content_height: u16,
-    clickable: bool,
-    mouse_pos: Option<(u16, u16)>,
-) -> Option<Rect> {
-    let menu_width = logo::logo_visual_width(content_height)
-        .max(30)
-        .max(min_width_hint);
-    let [_, centered, _] = Layout::horizontal([
-        Constraint::Min(0),
-        Constraint::Length(menu_width),
-        Constraint::Min(0),
-    ])
-    .flex(Flex::Center)
-    .areas(area);
-
-    if centered.width < 20 || centered.height == 0 {
-        return None;
-    }
-
-    let hovered =
-        clickable && mouse_pos.is_some_and(|(mx, my)| centered.contains(Position::new(mx, my)));
-
-    let header_style = hover_style(
-        theme,
-        hovered,
-        Style::default()
-            .fg(theme.gray_bright)
-            .add_modifier(Modifier::DIM),
-    );
-    let title = "Changelog";
-    buf.set_span(
-        centered.x,
-        centered.y,
-        &Span::styled(title, header_style),
-        centered.width,
-    );
-
-    let bullet_style = hover_style(theme, hovered, Style::default().fg(theme.gray_bright));
-    let max_text_width = centered.width.saturating_sub(2) as usize; // "• " prefix = 2 cols
-    for (i, bullet) in bullets.iter().enumerate() {
-        let row = centered.y + 2 + i as u16;
-        if row >= centered.y + centered.height {
-            break;
-        }
-        let truncated = crate::render::line_utils::truncate_str(bullet, max_text_width);
-        let text = format!("\u{2022} {truncated}");
-        buf.set_span(
-            centered.x,
-            row,
-            &Span::styled(text, bullet_style),
-            centered.width,
-        );
-    }
-
-    clickable.then_some(centered)
-}
-
 /// Wrap width of the stacked info slot, centered at the menu width inside the
 /// inset. Both `compute`'s height measurement and `render_announcement_section`
 /// go through here — same width, no drift. `logo_height` selects the min menu
@@ -1627,7 +1481,7 @@ fn stacked_info_width(avail_width: u16, logo_height: u16, min_width_hint: u16) -
 }
 
 /// Largest info-slot height the stacked column can allocate, mirroring
-/// [`WelcomeLayout::effective_changelog`]. Compact never shows the slot.
+/// [`WelcomeLayout::effective_info`]. Compact never shows the slot.
 fn stacked_info_budget(
     content_area: Rect,
     error_height: u16,
@@ -1717,8 +1571,8 @@ fn render_welcome_done(
         if in_vscode_family { "ctrl+d" } else { "ctrl+q" },
     );
 
-    // Heights that don't depend on the menu — computed first so the menu
-    // builder can probe the layout to decide whether to add a Changelog row.
+    // Heights that don't depend on the menu — computed first so the layout
+    // can be sized from them.
     // Startup-warning hint height (multi-line aware). Must pick the same
     // entry `render_startup_warnings` draws — see `startup::banner_warning`.
     let hint_height = crate::startup::banner_warning(p.startup_warnings).map_or(0u16, |w| {
@@ -1727,9 +1581,8 @@ fn render_welcome_done(
         msg_lines + action_line + 1 // +1 for buffer spacing
     });
     let has_update_tip = p.pending_update_version.is_some();
-    let has_resume_tip = !has_update_tip && p.foreign_resume_hint.is_some();
     // Tip slot precedence: pending update > privacy banner (wraps, so its
-    // height depends on width) > resume hint > random tip. The update
+    // height depends on width) > random tip. The update
     // outranks the upsell so a ready update is never invisible; the banner
     // takes the slot back once it's applied.
     let tip_height = if !show_picker {
@@ -1740,8 +1593,6 @@ fn render_welcome_done(
             // and the wrapped row count can't drift.
             let inset = prompt::prompt_inset(p.compact);
             crate::views::privacy_banner::height(content_area.width.saturating_sub(inset * 2))
-        } else if has_resume_tip {
-            1u16
         } else if let Some(tip_text) = p.tip {
             let inset = prompt::prompt_inset(welcome_compact);
             let tip_width = content_area.width.saturating_sub(inset * 2);
@@ -1752,14 +1603,6 @@ fn render_welcome_done(
     } else {
         0
     };
-    let changelog_height = if p.has_access && !show_picker && !p.changelog_bullets.is_empty() {
-        2 + p.changelog_bullets.len() as u16
-    } else {
-        0
-    };
-    // Changelog is reachable via this menu row (ctrl+l). Show from the first
-    // frame so the menu doesn't shift while the CDN fetch completes.
-    let show_changelog_action = p.has_access && !show_picker;
 
     let gate_menu;
     let owned_menu;
@@ -1767,47 +1610,11 @@ fn render_welcome_done(
         gate_menu = [(key_g, cta), (key_l, "Logout"), (key_q, "Quit")];
         &gate_menu
     } else {
-        let (key_w, key_resume, key_q, key_i_with_x) = (
-            "ctrl+w",
-            "f3",
-            if in_vscode_family { "ctrl+d" } else { "ctrl+q" },
-            "ctrl+i  [x]",
-        );
-        // Insert the import row at the top when there are pending `.claude/`
-        // settings to import — it's the most actionable item right now.
-        let mut items: Vec<(&str, &str)> = Vec::with_capacity(5);
-        if p.has_claude_import {
-            // The trailing "[x]" is a clickable dismiss affordance — the
-            // welcome screen mouse handler treats clicks on the rightmost
-            // 3 cells of this row as dismiss instead of open. Keyboard:
-            // ctrl-shift-i. The key string is right-aligned by render_menu,
-            // so [x] sits at the very end of the row.
-            items.push((key_i_with_x, "Import Claude settings"));
-        }
-        items.push((key_w, "New worktree"));
-        items.push((key_resume, "Resume session"));
-        // "Changelog" above Quit; no shortcut — opened by click (row or block).
-        if show_changelog_action {
-            items.push(("", "Changelog"));
-        }
-        items.push((key_q, "Quit"));
-        owned_menu = items;
-        owned_menu.as_slice()
+        let (key_resume, key_q) = ("f3", if in_vscode_family { "ctrl+d" } else { "ctrl+q" });
+        owned_menu = [(key_resume, "Resume session"), (key_q, "Quit")];
+        &owned_menu
     };
 
-    #[cfg(feature = "local-workspace")]
-    // Keep the segmented control (and ACK y/N) visible when history is open
-    // if first-run Local ACK is pending — otherwise the confirm is unpainted
-    // while the ACK handler still swallows keys.
-    let show_workspace_picker =
-        p.chat_mode && p.has_access && (!show_picker || p.workspace_mode_ack_pending);
-    #[cfg(feature = "local-workspace")]
-    let workspace_picker_rows = if show_workspace_picker {
-        workspace_mode::WORKSPACE_MODE_MENU_ROWS
-    } else {
-        0
-    };
-    #[cfg(not(feature = "local-workspace"))]
     let workspace_picker_rows = 0u16;
 
     let menu_height = if show_picker {
@@ -1822,16 +1629,7 @@ fn render_welcome_done(
         if p.session_picker_loading {
             1
         } else {
-            // Reserve a row for the pinned hidden-external hint when shown.
-            let hint_row = u16::from(
-                !p.chat_mode
-                    && crate::views::session_picker::hidden_external_hint(
-                        p.session_picker,
-                        p.session_picker_source_filter,
-                    )
-                    .is_some(),
-            );
-            (picker_count as u16).min(15) + 3 + hint_row // +3 for title + search + gap
+            (picker_count as u16).min(15) + 3 // +3 for title + search + gap
         }
     } else {
         0
@@ -1844,7 +1642,6 @@ fn render_welcome_done(
         error_height: hint_height,
         menu_height: content_height,
         tip_height,
-        changelog_height,
         compact: welcome_compact,
         prompt_compact: p.compact,
         announcement: p.announcement,
@@ -1854,16 +1651,13 @@ fn render_welcome_done(
     });
 
     // Render startup warning in the error area (same slot as auth errors).
-    let import_banner_rect = render_startup_warnings(layout.error, buf, theme, p.startup_warnings);
+    render_startup_warnings(layout.error, buf, theme, p.startup_warnings);
 
     // Hit-rects / truncation flag, set by whichever layout draws each block.
-    let mut changelog_cta_rect: Option<Rect> = None;
     let mut announcement_truncated = false;
     let mut announcement_rect: Option<Rect> = None;
     let mut upgrade_cta_rect: Option<Rect> = None;
 
-    #[cfg(feature = "local-workspace")]
-    let mut workspace_mode_rects = WorkspaceModeHitRects::default();
     let (menu_rects, picker_close_button) = if show_picker {
         // Use the full area since logo/menu are hidden and shortcuts
         // are now rendered inside the picker content area.
@@ -1883,14 +1677,9 @@ fn render_welcome_done(
                 loading: p.session_picker_loading,
                 pending_hint: p.pending_hint,
                 shortcuts_area: None,
-                content_results: p.session_picker_content_results,
-                content_loading: p.session_picker_content_loading,
-                entries_query: p.session_picker_entries_query,
                 tick: p.welcome_tick,
                 grouped: p.session_picker_grouped,
-                source_filter: p.session_picker_source_filter,
                 pending_delete: p.session_picker_pending_delete,
-                chat_mode: p.chat_mode,
                 cwd: p.cwd,
             },
         );
@@ -1906,24 +1695,11 @@ fn render_welcome_done(
             p.mouse_pos,
             p.announcement,
             p.welcome_announcement_expanded,
-            p.changelog_bullets,
-            p.changelog_has_full_notes,
             p.upgrade_cta,
-            #[cfg(feature = "local-workspace")]
-            show_workspace_picker.then_some((
-                p.workspace_mode,
-                p.workspace_mode_startup_locked,
-                p.workspace_mode_ack_pending,
-            )),
         );
-        changelog_cta_rect = rects.changelog_cta_rect;
         announcement_truncated = rects.announcement_truncated;
         announcement_rect = rects.announcement_rect;
         upgrade_cta_rect = rects.upgrade_cta_rect;
-        #[cfg(feature = "local-workspace")]
-        {
-            workspace_mode_rects = rects.workspace_mode_rects;
-        }
         (rects.menu_rects, None)
     } else {
         // Narrow layout: stacked logo above, menu below. Inset the menu the
@@ -1931,28 +1707,6 @@ fn render_welcome_done(
         // instead of touching the window edge on narrow terminals.
         render_logo(layout.logo, buf, theme, content_area.height);
         let menu_area = inset_horizontal(layout.menu, prompt::prompt_inset(p.compact));
-        #[cfg(feature = "local-workspace")]
-        let menu_area = if show_workspace_picker {
-            let picker_rect = workspace_mode::picker_area(menu_area);
-            workspace_mode_rects = render_workspace_mode_picker(
-                picker_rect,
-                buf,
-                theme,
-                p.workspace_mode,
-                p.mouse_pos,
-                p.workspace_mode_startup_locked,
-                p.workspace_mode_ack_pending,
-            );
-            Rect {
-                y: menu_area.y + workspace_mode::WORKSPACE_MODE_MENU_ROWS,
-                height: menu_area
-                    .height
-                    .saturating_sub(workspace_mode::WORKSPACE_MODE_MENU_ROWS),
-                ..menu_area
-            }
-        } else {
-            menu_area
-        };
         (
             render_menu(
                 menu_area,
@@ -1967,11 +1721,11 @@ fn render_welcome_done(
         )
     };
 
-    // Stacked info slot below the menu (narrow layout): show the announcement
-    // or the changelog (announcement takes priority), mirroring the hero box.
-    // Inset to match the input bar so it lines up with the menu above.
-    if layout.changelog.height > 0 {
-        let info_area = inset_horizontal(layout.changelog, prompt::prompt_inset(p.compact));
+    // Stacked info slot below the menu (narrow layout): the announcement,
+    // mirroring the hero box. Inset to match the input bar so it lines up with
+    // the menu above.
+    if layout.info.height > 0 {
+        let info_area = inset_horizontal(layout.info, prompt::prompt_inset(p.compact));
         if let Some(ann) = p.announcement {
             let (block, truncated, cta_rect) = render_announcement_section(
                 info_area,
@@ -1987,17 +1741,6 @@ fn render_welcome_done(
             announcement_rect = block;
             announcement_truncated = truncated;
             upgrade_cta_rect = cta_rect;
-        } else {
-            changelog_cta_rect = render_changelog_section(
-                info_area,
-                buf,
-                theme,
-                p.changelog_bullets,
-                MENU_MIN_WIDTH,
-                content_area.height,
-                p.changelog_has_full_notes,
-                p.mouse_pos,
-            );
         }
     }
 
@@ -2176,47 +1919,6 @@ fn render_welcome_done(
                 .render(tip_inset, buf);
         }
 
-        // Recent foreign session: offer a one-click resume in the tip area
-        // (only when no update is pending — the update shares ctrl+u and wins).
-        if !p.privacy_banner
-            && p.pending_update_version.is_none()
-            && let Some(hint) = p.foreign_resume_hint
-            && layout.tip.height > 0
-        {
-            let [_, tip_centered, _] = Layout::horizontal([
-                Constraint::Min(0),
-                Constraint::Length(content_area.width),
-                Constraint::Min(0),
-            ])
-            .flex(Flex::Center)
-            .areas(layout.tip);
-            let inset = prompt::prompt_inset(p.compact);
-            let tip_inset = Rect {
-                x: tip_centered.x + inset,
-                y: tip_centered.y,
-                width: tip_centered.width.saturating_sub(inset * 2),
-                height: tip_centered.height,
-            };
-            let mins = hint.age.as_secs() / 60;
-            let when = if mins == 0 {
-                "moments ago".to_string()
-            } else {
-                format!("{mins}m ago")
-            };
-            let accent = Style::default().fg(theme.accent_user);
-            let accent_bold = accent.add_modifier(Modifier::BOLD);
-            let tool = crate::app::foreign_tool_display_label(hint.tool);
-            let line = Line::from(vec![
-                Span::styled("Coming from ", accent),
-                Span::styled(tool, accent_bold),
-                Span::styled(format!("? Resume your session from {when} using "), accent),
-                Span::styled("ctrl+u", accent_bold),
-            ]);
-            Paragraph::new(line)
-                .style(Style::default().bg(theme.bg_base))
-                .render(tip_inset, buf);
-        }
-
         let warning = p.credit_balance.and_then(|bal| {
             crate::views::credit_bar::usage_warning(bal, p.auto_topup, p.usage_visible)
         });
@@ -2240,11 +1942,8 @@ fn render_welcome_done(
             p.prompt_focus,
             prompt,
             &usage_info,
-            if p.privacy_banner
-                || p.pending_update_version.is_some()
-                || p.foreign_resume_hint.is_some()
-            {
-                // Banner/update/resume tip already rendered above with custom styling.
+            if p.privacy_banner || p.pending_update_version.is_some() {
+                // Banner/update tip already rendered above with custom styling.
                 None
             } else {
                 p.tip
@@ -2268,15 +1967,10 @@ fn render_welcome_done(
             Some(layout.prompt)
         },
         session_picker_hit_areas: picker_close_button,
-        import_banner_rect,
         auth_url_rect: None,
         auth_fallback_rect: None,
         refresh_rect: refresh_hit_rect,
         gate_url_rect: gate_url_hit_rect,
-        consent_link_rects: Vec::new(),
-        consent_legibility: None,
-        changelog_action_present: show_changelog_action,
-        changelog_cta_rect,
         announcement_truncated,
         announcement_rect,
         upgrade_cta_rect,
@@ -2284,8 +1978,6 @@ fn render_welcome_done(
         privacy_banner_opt_out_rect,
         privacy_banner_terms_rect,
         privacy_banner_policy_rect,
-        #[cfg(feature = "local-workspace")]
-        workspace_mode_rects,
     }
 }
 
@@ -2299,21 +1991,10 @@ pub(crate) struct SessionPickerRenderCtx<'a> {
     pub(crate) loading: bool,
     pub(crate) pending_hint: Option<crate::views::shortcuts_bar::PendingHint>,
     pub(crate) shortcuts_area: Option<Rect>,
-    pub(crate) content_results:
-        Option<&'a [pi_shell::extensions::session_search::SearchSessionHit]>,
-    pub(crate) content_loading: bool,
-    /// The query `sessions` were server-fetched with (see
-    /// [`crate::views::session_picker::effective_filter_query`]).
-    pub(crate) entries_query: Option<&'a str>,
     pub(crate) tick: u64,
     /// When true, entries are grouped by `repo_name` with non-selectable headers.
     pub(crate) grouped: bool,
-    /// Source filter for filtering session entries.
-    pub(crate) source_filter: crate::views::session_picker::SourceFilter,
     pub(crate) pending_delete: bool,
-    /// Process-wide `--chat`: hides the source-filter chip and the
-    /// deep-search/filter footer hints (see `WelcomeRenderParams::chat_mode`).
-    pub(crate) chat_mode: bool,
 }
 
 /// Render the session picker list on the welcome screen.
@@ -2327,23 +2008,18 @@ pub(crate) fn render_session_picker(
     ctx: &mut SessionPickerRenderCtx<'_>,
 ) -> crate::views::picker::PickerHitAreas {
     use crate::views::picker::{self, PickerConfig, PickerEntry, PickerField, PickerRow};
-    use crate::views::session_picker::{
-        SessionEntryData, build_grouped_picker_entries, build_session_entry_data,
-    };
+    use crate::views::session_picker::{build_grouped_picker_entries, build_session_entry_data};
 
     let entries_data = match ctx.sessions {
         Some(s) => s,
         None => &[],
     };
 
-    // Filter entries by query and source (shared helper). The same effective
-    // query must drive filtering AND the content header/rows gates below, or
-    // this render disagrees with `handle_welcome_input`'s `build_entry_map`
-    // (which receives the effective query) on row indices.
-    let filter_query =
-        crate::views::session_picker::effective_filter_query(ctx.state.query(), ctx.entries_query);
+    // Filter entries by query (shared helper). The same query must drive
+    // filtering here and in `handle_welcome_input`'s `build_entry_map`, or
+    // this render disagrees with it on row indices.
     let filtered_indices =
-        crate::app::app_view::filter_session_entries(ctx.sessions, filter_query, ctx.source_filter);
+        crate::app::app_view::filter_session_entries(ctx.sessions, ctx.state.query());
 
     let content_width = area.width; // approximate for truncation
     let built = build_session_entry_data(entries_data, &filtered_indices, ctx.state, content_width);
@@ -2360,7 +2036,7 @@ pub(crate) fn render_session_picker(
         .collect();
 
     // Build picker entries, optionally grouped by repo_name.
-    let (mut picker_entries, non_selectable_indices) = if ctx.grouped {
+    let (picker_entries, non_selectable_indices) = if ctx.grouped {
         let current_repo =
             crate::views::session_picker::repo_name_from_cwd(&ctx.cwd.to_string_lossy());
         build_grouped_picker_entries(
@@ -2396,110 +2072,12 @@ pub(crate) fn render_session_picker(
         (entries, Vec::new())
     };
 
-    // Append content search result rows (shared helper handles dedup).
-    use crate::views::session_picker::{build_content_entry_data, build_content_header_label};
-    // Content rows will start after fuzzy rows + 1 header row.
-    let content_start = picker_entries.len() + 1;
-    let content_entry_data: Vec<SessionEntryData> = if let Some(hits) = ctx.content_results
-        && ctx.source_filter != crate::views::session_picker::SourceFilter::External
-        && !filter_query.is_empty()
-    {
-        build_content_entry_data(
-            hits,
-            entries_data,
-            &filtered_indices,
-            ctx.state,
-            content_start,
-        )
-    } else {
-        Vec::new()
-    };
-
-    // Show header only if there are actual deduped content rows to display.
-    let has_content_rows = !content_entry_data.is_empty();
-    let content_loading = ctx.content_loading
-        && ctx.source_filter != crate::views::session_picker::SourceFilter::External;
-    let spinner_label = build_content_header_label(content_loading, has_content_rows, ctx.tick);
-    // Only show the header when content results exist or when content
-    // search is in progress with a non-empty query.  This must match the
-    // header condition inside `build_entry_map` as called from
-    // `handle_welcome_input` (app_view.rs) so the input handler's
-    // `entry_count` agrees with the rendered entry list — a mismatch causes
-    // arrow-key selection to target the wrong row. Both sides therefore gate
-    // on the same EFFECTIVE query (`filter_query`), not the live one.
-    let show_content_header =
-        has_content_rows || (content_loading && !filter_query.trim().is_empty());
-    if show_content_header {
-        picker_entries.push(PickerEntry::Header {
-            label: &spinner_label,
-        });
-    }
-
-    let content_fields: Vec<Vec<PickerField>> = content_entry_data
-        .iter()
-        .map(|b| {
-            b.field_data
-                .iter()
-                .map(|(l, v)| PickerField { label: l, value: v })
-                .collect()
-        })
-        .collect();
-
-    let content_snippets: Vec<[&str; 1]> = content_entry_data
-        .iter()
-        .map(|b| [b.snippet_preview.as_deref().unwrap_or("")])
-        .collect();
-
-    for (i, (b, fields)) in content_entry_data
-        .iter()
-        .zip(content_fields.iter())
-        .enumerate()
-    {
-        let has_snippet = b.snippet_preview.is_some();
-        picker_entries.push(PickerEntry::Row(PickerRow {
-            label: &b.summary,
-            right_label: &b.right_text,
-            selected: b.is_selected,
-            expanded: b.is_expanded,
-            fields,
-            description_lines: if has_snippet {
-                &content_snippets[i]
-            } else {
-                &[]
-            },
-            summary_lines: &[],
-            dimmed: false,
-            indent: 1,
-            badge: if has_snippet { "match" } else { "" },
-            badge_color: Some(theme.accent_user),
-            collapsible: true,
-            underline_last_desc: false,
-        }));
-    }
-
-    let hidden_hint = if ctx.chat_mode {
-        None
-    } else {
-        crate::views::session_picker::hidden_external_hint(ctx.sessions, ctx.source_filter)
-    };
-
-    // Build shortcuts for fullscreen mode. Chat mode drops the worktree /
-    // deep-search / filter hints (local-Build-row actions).
-    let worktree_shortcut: &'static str = "ctrl+w";
+    // Build shortcuts for fullscreen mode.
     use crate::views::shortcuts_bar::HintItem;
     let mut default_shortcuts: Vec<HintItem> = vec![
         HintItem::new(crate::key!(Esc), "back"),
         HintItem::new(crate::key!(Enter), "select"),
     ];
-    if !ctx.chat_mode {
-        default_shortcuts.push(HintItem {
-            keys: vec![],
-            label: "worktree".into(),
-            custom_display: Some(worktree_shortcut),
-            description: None,
-            pinned: false,
-        });
-    }
     default_shortcuts.push(HintItem {
         keys: vec![],
         label: "navigate".into(),
@@ -2523,14 +2101,7 @@ pub(crate) fn render_session_picker(
             description: None,
             pinned: false,
         });
-    } else if !ctx.chat_mode {
-        default_shortcuts.push(HintItem {
-            keys: vec![],
-            label: "filter".into(),
-            custom_display: Some("f"),
-            description: None,
-            pinned: false,
-        });
+    } else {
         default_shortcuts.push(HintItem {
             keys: vec![],
             label: "delete".into(),
@@ -2552,11 +2123,7 @@ pub(crate) fn render_session_picker(
         shortcuts_area: ctx.shortcuts_area,
         tabs: None,
         active_tab: 0,
-        filter_label: (!ctx.chat_mode).then(|| ctx.source_filter.label()),
-        filter_key_hint: (!ctx.chat_mode).then_some("f"),
-        filter_active: !ctx.chat_mode && ctx.source_filter.is_active(),
-        header_note: hidden_hint.as_deref(),
-        action_keys: if ctx.chat_mode || ctx.pending_delete {
+        action_keys: if ctx.pending_delete {
             &[]
         } else {
             &[('d', "delete")]
@@ -2640,18 +2207,10 @@ fn render_startup_warnings(
     buf: &mut Buffer,
     theme: &Theme,
     warnings: &[StartupWarning],
-) -> Option<Rect> {
-    let w = crate::startup::banner_warning(warnings)?;
-
-    // Skip the import-claude startup warning entirely — the import row in the
-    // menu now carries the call-to-action with the same visual weight as
-    // every other welcome menu item. Showing the warning text in addition to
-    // the menu row would be redundant noise.
-    if w.message.starts_with("Import Claude settings")
-        || w.message.starts_with("Claude settings detected")
-    {
-        return None;
-    }
+) {
+    let Some(w) = crate::startup::banner_warning(warnings) else {
+        return;
+    };
     let color = match w.severity {
         crate::startup::WarningSeverity::Warning => theme.warning,
         crate::startup::WarningSeverity::Info => theme.gray_dim,
@@ -2668,7 +2227,6 @@ fn render_startup_warnings(
     }
 
     Paragraph::new(lines).render(area, buf);
-    None
 }
 
 fn auth_token_grapheme_visible(index: usize, total: usize) -> bool {
@@ -2752,8 +2310,14 @@ mod tests {
                 "badge must not label the product: {rendered:?}"
             );
         }
-        assert!(full.contains(crate::brand::PRODUCT_TITLE), "full badge: {full:?}");
-        assert!(inline.contains(crate::brand::PRODUCT_TITLE), "inline badge: {inline:?}");
+        assert!(
+            full.contains(crate::brand::PRODUCT_TITLE),
+            "full badge: {full:?}"
+        );
+        assert!(
+            inline.contains(crate::brand::PRODUCT_TITLE),
+            "inline badge: {inline:?}"
+        );
         assert!(footer.contains("acme"), "footer keeps the team: {footer:?}");
         assert!(
             !footer.ends_with('\u{2502}'),
@@ -2885,8 +2449,6 @@ mod tests {
             prompt_focus: WelcomePromptFocus::Unfocused,
             auth_state,
             trust_state,
-            consent_state: &ConsentState::Done,
-            consent_hover_link: None,
             login_label: None,
             auth_code_input: "",
             auth_code_cursor_byte: 0,
@@ -2899,7 +2461,6 @@ mod tests {
             selected: None,
             team_name: None,
             has_access: true,
-            has_claude_import: false,
             mouse_pos: None,
             is_zdr_blocked: false,
             session_picker,
@@ -2908,36 +2469,21 @@ mod tests {
             pending_hint: None,
             startup_warnings: &[],
             pending_update_version: None,
-            foreign_resume_hint: None,
             is_api_key_auth: false,
-            session_picker_content_results: None,
-            session_picker_content_loading: false,
-            session_picker_entries_query: None,
             welcome_tick: 0,
             gate: None,
             subscription_tier: None,
             session_picker_grouped: false,
-            session_picker_source_filter: crate::views::session_picker::SourceFilter::default(),
             session_picker_pending_delete: false,
-            chat_mode: false,
             cwd: std::path::Path::new("/repo"),
             credit_balance: None,
             auto_topup: None,
             usage_visible: true,
-            changelog_bullets: &[],
-            changelog_has_full_notes: false,
             welcome_announcement_expanded: false,
             upgrade_cta: None,
             privacy_banner: false,
-            #[cfg(feature = "local-workspace")]
-            workspace_mode: WelcomeWorkspaceMode::Sandbox,
-            #[cfg(feature = "local-workspace")]
-            workspace_mode_startup_locked: false,
-            #[cfg(feature = "local-workspace")]
-            workspace_mode_ack_pending: false,
         }
     }
-
     fn render_done_text(params: &WelcomeRenderParams<'_>) -> String {
         let area = Rect::new(0, 0, 100, 40);
         let mut buf = Buffer::empty(area);
@@ -2948,46 +2494,14 @@ mod tests {
     }
 
     #[test]
-    fn foreign_resume_tip_names_each_tool_and_age() {
-        use pi_foreign_sessions::ForeignSessionTool;
-
+    fn pending_update_shows_available_version() {
         let auth = AuthState::Done;
         let trust = TrustState::Done;
-        for (tool, label) in [
-            (ForeignSessionTool::Claude, "Claude Code"),
-            (ForeignSessionTool::Codex, "Codex"),
-            (ForeignSessionTool::Cursor, "Cursor"),
-        ] {
-            let hint = pi_foreign_sessions::RecentForeignSession {
-                tool,
-                native_id: "native-id".into(),
-                age: std::time::Duration::from_secs(125),
-            };
-            let mut params = render_params(&auth, &trust, None);
-            params.foreign_resume_hint = Some(&hint);
-            let text = render_done_text(&params);
-            assert!(text.contains(&format!("Coming from {label}?")), "{text}");
-            assert!(text.contains("2m ago"), "{text}");
-            assert!(text.contains("ctrl+u"), "{text}");
-        }
-    }
-
-    #[test]
-    fn pending_update_suppresses_foreign_resume_tip() {
-        let auth = AuthState::Done;
-        let trust = TrustState::Done;
-        let hint = pi_foreign_sessions::RecentForeignSession {
-            tool: pi_foreign_sessions::ForeignSessionTool::Cursor,
-            native_id: "native-id".into(),
-            age: std::time::Duration::from_secs(30),
-        };
         let mut params = render_params(&auth, &trust, None);
-        params.foreign_resume_hint = Some(&hint);
         params.pending_update_version = Some("9.9.9");
 
         let text = render_done_text(&params);
         assert!(text.contains("v9.9.9 available"), "{text}");
-        assert!(!text.contains("Coming from Cursor?"), "{text}");
     }
 
     fn png() -> [u8; 8] {
@@ -3062,156 +2576,6 @@ mod tests {
 
         let result = render_welcome(area, &mut buf, &params, &mut prompt, &mut picker);
         assert_promptless_clear(result, 82);
-    }
-
-    /// RENDER half of the header-gate invariant (input half:
-    /// `session_picker::tests::grouped_entry_map_empty_query_with_loading_has_no_header`):
-    /// with stamp==live and a re-search in flight, the "Searching…" header
-    /// must NOT render — a render-only header row shifts arrow-key row
-    /// indices. Control leg: the same search WITHOUT the stamp keeps it.
-    #[test]
-    fn render_header_gate_uses_effective_query() {
-        use ratatui::buffer::Buffer;
-        use ratatui::layout::Rect;
-
-        let theme = crate::theme::Theme::default();
-        let area = Rect::new(0, 0, 80, 20);
-        // Content-only hit: title shares nothing with the query "hit".
-        let entries = vec![make_entry("conv-1", "Quarterly roadmap notes", "repo")];
-
-        let render = |entries_query: Option<&str>| -> String {
-            let mut buf = Buffer::empty(area);
-            let mut state = PickerState::default();
-            state.set_query("hit");
-            render_session_picker(
-                area,
-                &mut buf,
-                &theme,
-                &mut SessionPickerRenderCtx {
-                    state: &mut state,
-                    sessions: Some(&entries),
-                    cwd: std::path::Path::new("/repo"),
-                    loading: false,
-                    pending_hint: None,
-                    shortcuts_area: None,
-                    content_results: None,
-                    content_loading: true,
-                    entries_query,
-                    tick: 0,
-                    grouped: false,
-                    source_filter: crate::views::session_picker::SourceFilter::default(),
-                    pending_delete: false,
-                    chat_mode: true,
-                },
-            );
-            (0..area.height)
-                .map(|y| {
-                    (0..area.width)
-                        .map(|x| {
-                            buf.cell((x, y))
-                                .map_or(' ', |c| c.symbol().chars().next().unwrap_or(' '))
-                        })
-                        .collect::<String>()
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
-
-        let stamped = render(Some("hit"));
-        assert!(
-            !stamped.contains("Searching session content"),
-            "stamp==live must not render the search header:\n{stamped}"
-        );
-        assert!(
-            stamped.contains("Quarterly roadmap notes"),
-            "stamped server hit must render:\n{stamped}"
-        );
-
-        // Control: unstamped in-flight search keeps the header, proving the
-        // negative assertion above exercises the gate.
-        let unstamped = render(None);
-        assert!(
-            unstamped.contains("Searching session content"),
-            "in-flight search without the stamp must render the header:\n{unstamped}"
-        );
-    }
-
-    /// The hidden-external hint stays pinned on the welcome picker's default
-    /// Grok view when scanned foreign rows exist — even when the native list
-    /// overflows the viewport — and never renders under `--chat` (foreign
-    /// scanning is disabled there, so the hint is dead weight).
-    #[test]
-    fn hidden_external_hint_renders_outside_chat_mode() {
-        use ratatui::buffer::Buffer;
-        use ratatui::layout::Rect;
-
-        let theme = crate::theme::Theme::default();
-        let area = Rect::new(0, 0, 80, 20);
-        // More native rows than the viewport fits: a trailing list row would
-        // scroll out of view, a pinned row must not.
-        let mut entries: Vec<SessionPickerEntry> = (0..30)
-            .map(|i| make_entry(&format!("s{i}"), &format!("native session {i}"), "repo"))
-            .collect();
-        let mut foreign = make_entry("f1", "Claude work", "repo");
-        foreign.source = "claude".into();
-        entries.push(foreign);
-
-        let render = |chat_mode: bool| -> String {
-            let mut buf = Buffer::empty(area);
-            let mut state = PickerState::default();
-            render_session_picker(
-                area,
-                &mut buf,
-                &theme,
-                &mut SessionPickerRenderCtx {
-                    state: &mut state,
-                    sessions: Some(&entries),
-                    cwd: std::path::Path::new("/repo"),
-                    loading: false,
-                    pending_hint: None,
-                    shortcuts_area: None,
-                    content_results: None,
-                    content_loading: false,
-                    entries_query: None,
-                    tick: 0,
-                    grouped: false,
-                    source_filter: crate::views::session_picker::SourceFilter::default(),
-                    pending_delete: false,
-                    chat_mode,
-                },
-            );
-            (0..area.height)
-                .map(|y| {
-                    (0..area.width)
-                        .map(|x| {
-                            buf.cell((x, y))
-                                .map_or(' ', |c| c.symbol().chars().next().unwrap_or(' '))
-                        })
-                        .collect::<String>()
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
-
-        let build_mode = render(false);
-        assert!(
-            build_mode.contains("1 external session hidden \u{b7} f to show"),
-            "default Grok filter must pin the hidden-external hint:\n{build_mode}"
-        );
-        assert!(
-            build_mode.find("external session hidden") < build_mode.find("native session 0"),
-            "the hint must be pinned above the first list row:\n{build_mode}"
-        );
-        assert!(
-            !build_mode.contains("Claude work"),
-            "the foreign row itself stays hidden under the default filter:\n{build_mode}"
-        );
-
-        let chat = render(true);
-        assert!(
-            !chat.contains("external session"),
-            "chat mode must not render the hidden-external hint:\n{chat}"
-        );
     }
 
     #[test]
@@ -3353,10 +2717,6 @@ mod tests {
             shortcuts_area: None,
             tabs: None,
             active_tab: 0,
-            filter_label: None,
-            filter_key_hint: None,
-            filter_active: false,
-            header_note: None,
             action_keys: &[],
             disable_search: false,
             compact_bottom_bar: false,
@@ -3391,137 +2751,85 @@ mod tests {
     }
 
     #[test]
-    fn changelog_hidden_on_short_terminal() {
-        let area = Rect::new(0, 0, 80, 15);
-        let layout = WelcomeLayout::compute(WelcomeLayoutInput {
-            content_area: area,
-            menu_height: 4,
-            changelog_height: 5,
-            ..Default::default()
-        });
-        assert_eq!(layout.changelog.height, 0);
-    }
-
-    #[test]
-    fn changelog_shown_on_tall_terminal() {
-        let area = Rect::new(0, 0, 80, 50);
-        let layout = WelcomeLayout::compute(WelcomeLayoutInput {
-            content_area: area,
-            menu_height: 4,
-            changelog_height: 5,
-            ..Default::default()
-        });
-        assert_eq!(layout.changelog.height, 5);
-    }
-
-    #[test]
-    fn stacked_slot_sized_for_announcement_over_changelog() {
-        // Narrow terminal (80 cols < 90 → no hero box). With both present, the
-        // stacked info slot is sized for the announcement (priority), not the
-        // changelog.
-        let area = Rect::new(0, 0, 80, 50);
-        let a = long_ann();
-        let layout = WelcomeLayout::compute(WelcomeLayoutInput {
-            content_area: area,
-            menu_height: 4,
-            changelog_height: 5,
-            announcement: Some(&a),
-            ..Default::default()
-        });
-        assert!(!layout.has_hero_box());
-        assert_eq!(layout.changelog.height, 3);
-    }
-
-    #[test]
-    fn stacked_slot_uses_announcement_when_no_changelog() {
-        // Narrow terminal, announcement but no changelog: the stacked slot is
-        // still allocated for the announcement (it used to be changelog-only).
-        let area = Rect::new(0, 0, 80, 50);
-        let a = long_ann();
-        let layout = WelcomeLayout::compute(WelcomeLayoutInput {
-            content_area: area,
-            menu_height: 4,
-            announcement: Some(&a),
-            ..Default::default()
-        });
-        assert!(!layout.has_hero_box());
-        assert_eq!(layout.changelog.height, 3);
-    }
-
-    #[test]
-    fn changelog_hidden_when_compact() {
+    fn stacked_slot_empty_without_announcement() {
         let area = Rect::new(0, 0, 80, 60);
         let layout = WelcomeLayout::compute(WelcomeLayoutInput {
             content_area: area,
             menu_height: 4,
-            changelog_height: 5,
+            ..Default::default()
+        });
+        assert!(!layout.has_hero_box());
+        assert_eq!(layout.info.height, 0);
+    }
+
+    #[test]
+    fn stacked_slot_sized_for_announcement() {
+        // Narrow terminal (80 cols < 90 → no hero box): the stacked slot is
+        // allocated for the announcement — title + 2 wrapped message lines.
+        let area = Rect::new(0, 0, 80, 50);
+        let a = long_ann();
+        let layout = WelcomeLayout::compute(WelcomeLayoutInput {
+            content_area: area,
+            menu_height: 4,
+            announcement: Some(&a),
+            ..Default::default()
+        });
+        assert!(!layout.has_hero_box());
+        assert_eq!(layout.info.height, 3);
+    }
+
+    #[test]
+    fn stacked_slot_hidden_when_compact() {
+        let area = Rect::new(0, 0, 80, 60);
+        let a = long_ann();
+        let layout = WelcomeLayout::compute(WelcomeLayoutInput {
+            content_area: area,
+            menu_height: 4,
+            announcement: Some(&a),
             compact: true,
             prompt_compact: true,
             ..Default::default()
         });
-        assert_eq!(layout.changelog.height, 0);
+        assert_eq!(layout.info.height, 0);
     }
 
     #[test]
-    fn changelog_hidden_when_zero_requested() {
-        let area = Rect::new(0, 0, 80, 60);
-        let layout = WelcomeLayout::compute(WelcomeLayoutInput {
-            content_area: area,
-            menu_height: 4,
-            ..Default::default()
-        });
-        assert_eq!(layout.changelog.height, 0);
+    fn stacked_slot_clamps_to_the_rows_left_under_the_menu() {
+        // No logo at h < 22, so fixed_above = 1 and fixed_below = 5 (prompt 3 +
+        // version gap 1 + version 1); the menu takes 4. The slot also needs one
+        // gap row above it and one flex row above the tip, so it gets h - 12
+        // rows, capped at the 3 the announcement wants.
+        let a = long_ann();
+        for (height, want) in [(12u16, 0u16), (13, 1), (14, 2), (15, 3), (16, 3)] {
+            let layout = WelcomeLayout::compute(WelcomeLayoutInput {
+                content_area: Rect::new(0, 0, 80, height),
+                menu_height: 4,
+                announcement: Some(&a),
+                ..Default::default()
+            });
+            assert_eq!(layout.info.height, want, "terminal height {height}");
+        }
     }
 
     #[test]
-    fn changelog_boundary_exact_fit() {
-        // No logo at h < 22. fixed_above = 0 + 1 + 0 + 0 = 1.
-        // fixed_below = 0 (tip) + 0 (tip_gap) + 3 (prompt) + 1 (ver_gap) + 1 (ver) = 5.
-        // min_without_changelog = 1 + 4 (menu) + 1 (flex) + 5 = 11.
-        // changelog slot = 1 (gap) + 5 (height) = 6. Threshold = 11 + 6 = 17.
-        let just_fits = Rect::new(0, 0, 80, 17);
-        let layout = WelcomeLayout::compute(WelcomeLayoutInput {
-            content_area: just_fits,
-            menu_height: 4,
-            changelog_height: 5,
-            ..Default::default()
-        });
-        assert_eq!(layout.changelog.height, 5);
-
-        let too_short = Rect::new(0, 0, 80, 16);
-        let layout = WelcomeLayout::compute(WelcomeLayoutInput {
-            content_area: too_short,
-            menu_height: 4,
-            changelog_height: 5,
-            ..Default::default()
-        });
-        assert_eq!(layout.changelog.height, 0);
-    }
-
-    #[test]
-    fn changelog_hidden_when_tip_steals_space() {
-        // Use narrow width to avoid hero box path, keeping stacked layout.
-        // With tip_height=2: fixed_below(2) = 8. min = 1 + 4 + 1 + 8 = 14.
-        // Threshold = 14 + 6 = 20. At h=19 the tip pushes changelog out.
-        let with_tip = Rect::new(0, 0, 60, 19);
-        let layout = WelcomeLayout::compute(WelcomeLayoutInput {
-            content_area: with_tip,
-            menu_height: 4,
-            tip_height: 2,
-            changelog_height: 5,
-            ..Default::default()
-        });
-        assert_eq!(layout.changelog.height, 0);
-
-        // Same size without tip: threshold = 17 <= 19, changelog fits.
-        let without_tip = Rect::new(0, 0, 60, 19);
-        let layout = WelcomeLayout::compute(WelcomeLayoutInput {
-            content_area: without_tip,
-            menu_height: 4,
-            changelog_height: 5,
-            ..Default::default()
-        });
-        assert_eq!(layout.changelog.height, 5);
+    fn stacked_slot_shrinks_when_a_tip_takes_the_space() {
+        // Narrow width keeps the stacked layout. A 2-row tip makes fixed_below 8
+        // instead of 5, so at 16 rows the slot has h - 15 = 1 row left (vs. its
+        // full 3 without the tip).
+        let a = long_ann();
+        let slot_height = |tip_height| {
+            WelcomeLayout::compute(WelcomeLayoutInput {
+                content_area: Rect::new(0, 0, 60, 16),
+                menu_height: 4,
+                tip_height,
+                announcement: Some(&a),
+                ..Default::default()
+            })
+            .info
+            .height
+        };
+        assert_eq!(slot_height(0), 3);
+        assert_eq!(slot_height(2), 1);
     }
 
     #[test]
@@ -3734,25 +3042,6 @@ mod tests {
     }
 
     #[test]
-    fn hero_box_with_changelog() {
-        // With no announcement, the changelog renders inside the box (info
-        // slot), not in a separate area below it.
-        let area = Rect::new(0, 0, 100, 50);
-        let layout = WelcomeLayout::compute(WelcomeLayoutInput {
-            content_area: area,
-            menu_height: 3,
-            changelog_height: 5,
-            ..Default::default()
-        });
-        assert!(layout.has_hero_box());
-        assert_eq!(layout.changelog.height, 0);
-        assert_eq!(layout.hero_info.height, 5);
-        // The subtitle is hidden when the info slot is shown.
-        assert_eq!(layout.hero_subtitle.height, 0);
-        assert!(layout.hero_info.y > layout.hero_version.y);
-    }
-
-    #[test]
     fn hero_box_with_announcement() {
         let area = Rect::new(0, 0, 100, 50);
         let a = long_ann();
@@ -3776,21 +3065,20 @@ mod tests {
     }
 
     #[test]
-    fn hero_box_announcement_takes_priority_over_changelog() {
-        // When both are present, the info slot is sized for the announcement
-        // and the changelog is suppressed (never shown outside the box).
+    fn hero_box_announcement_is_not_shown_outside_the_box() {
+        // In the hero layout the announcement lives in the box's info slot; the
+        // stacked slot below the menu stays empty.
         let area = Rect::new(0, 0, 100, 50);
         let a = long_ann();
         let layout = WelcomeLayout::compute(WelcomeLayoutInput {
             content_area: area,
             menu_height: 3,
-            changelog_height: 5,
             announcement: Some(&a),
             ..Default::default()
         });
         assert!(layout.has_hero_box());
-        assert_eq!(layout.hero_info.height, 3); // announcement height, not changelog (5)
-        assert_eq!(layout.changelog.height, 0);
+        assert_eq!(layout.hero_info.height, 3);
+        assert_eq!(layout.info.height, 0);
     }
 
     #[test]
@@ -3825,7 +3113,7 @@ mod tests {
 
     #[test]
     fn hero_box_keeps_one_bottom_pad_below_actions() {
-        // With a changelog/announcement the subtitle is hidden, but there's
+        // With an announcement the subtitle is hidden, but there's
         // still exactly one padding row between the actions and the bottom
         // border. (menu=4 + info=3 fills the inner, so the menu reaches the pad.)
         let area = Rect::new(0, 0, 100, 50);
@@ -3884,7 +3172,10 @@ mod tests {
         // No code param, empty code, and unexpected characters all yield None.
         assert_eq!(extract_user_code("https://example.com/oauth2/device"), None);
         assert_eq!(extract_user_code("https://example.com/d?user_code="), None);
-        assert_eq!(extract_user_code("https://example.com/d?user_code=AB%20CD"), None);
+        assert_eq!(
+            extract_user_code("https://example.com/d?user_code=AB%20CD"),
+            None
+        );
     }
 
     #[test]
@@ -4198,9 +3489,7 @@ the usual channels. "
     }
 
     #[test]
-    fn no_announcement_uses_changelog_for_info_slot() {
-        // Without an announcement the info slot falls back to the changelog
-        // height (0 here → empty slot).
+    fn no_announcement_leaves_the_info_slot_empty() {
         let area = Rect::new(0, 0, 120, 60);
         let layout = WelcomeLayout::compute(WelcomeLayoutInput {
             content_area: area,
@@ -4238,7 +3527,7 @@ the usual channels. "
             let budget = stacked_info_budget(area, 0, 4, 0, false);
             if budget > 0 {
                 assert!(
-                    layout.changelog.height > 0,
+                    layout.info.height > 0,
                     "height {height}: stacked slot dropped to 0 with budget {budget}"
                 );
             }

@@ -40,40 +40,6 @@ pub struct McpServerFingerprint {
     pub tool_names_hash: u64,
 }
 
-/// Convert from in-memory fingerprint map to persistable map.
-pub(crate) fn to_persisted_fingerprints(
-    in_memory: &HashMap<String, (usize, u64, u64)>,
-) -> HashMap<String, McpServerFingerprint> {
-    in_memory
-        .iter()
-        .map(|(name, &(tc, dh, tnh))| {
-            (
-                name.clone(),
-                McpServerFingerprint {
-                    tool_count: tc,
-                    description_hash: dh,
-                    tool_names_hash: tnh,
-                },
-            )
-        })
-        .collect()
-}
-
-/// Convert from persisted fingerprint map to in-memory map.
-pub(crate) fn from_persisted_fingerprints(
-    persisted: &HashMap<String, McpServerFingerprint>,
-) -> HashMap<String, (usize, u64, u64)> {
-    persisted
-        .iter()
-        .map(|(name, fp)| {
-            (
-                name.clone(),
-                (fp.tool_count, fp.description_hash, fp.tool_names_hash),
-            )
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,14 +72,5 @@ mod tests {
         let loaded: AnnouncementState = serde_json::from_str("{}").unwrap();
         assert!(loaded.mcp_server_fingerprints.is_empty());
         assert!(loaded.announced_skill_names.is_empty());
-    }
-
-    #[test]
-    fn fingerprint_conversion_round_trip() {
-        let in_memory: HashMap<String, (usize, u64, u64)> =
-            HashMap::from([("srv".to_string(), (3, 111, 222))]);
-        let persisted = to_persisted_fingerprints(&in_memory);
-        let back = from_persisted_fingerprints(&persisted);
-        assert_eq!(in_memory, back);
     }
 }

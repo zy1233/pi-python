@@ -88,7 +88,7 @@ pub fn resolve_tips(
     merge_tips(req, usr, mgd, remote_tips)
 }
 
-pub const SLASH_COMMAND_TAGS_CONFIG_PATH: &str = "slash_command_tags";
+pub(crate) const SLASH_COMMAND_TAGS_CONFIG_PATH: &str = "slash_command_tags";
 
 /// Parse `[slash_command_tags]` from a TOML value into a name → tag map.
 /// Only string values are kept; non-string entries are ignored.
@@ -167,20 +167,6 @@ pub fn resolve_slash_command_tags(
     remote: Option<&std::collections::BTreeMap<String, String>>,
 ) -> std::collections::HashMap<String, String> {
     resolve_slash_command_tags_with_env(effective_config, remote, slash_command_tags_from_env())
-}
-
-/// Read `[cli] channel` from config.toml.
-/// Returns `None` when absent (falls through to remote settings).
-pub fn channel_from_toml_opt(root: &TomlValue) -> Option<String> {
-    if let TomlValue::Table(table) = root
-        && let Some(TomlValue::Table(cli)) = table.get("cli")
-    {
-        cli.get("channel")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-    } else {
-        None
-    }
 }
 
 #[cfg(test)]

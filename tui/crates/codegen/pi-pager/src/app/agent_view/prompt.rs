@@ -4,7 +4,7 @@
 #[cfg(test)]
 use super::test_fixtures;
 use super::{
-    AgentDeferredSend, AgentPane, AgentView, PromptInputMode, PromptMode, is_bang_key, is_hash_key,
+    AgentPane, AgentView, PromptInputMode, PromptMode, is_bang_key, is_hash_key,
     remember_mode_enabled, resolve_action,
 };
 use crate::actions::{ActionId, ActionRegistry, When};
@@ -15,10 +15,6 @@ use crate::views::prompt_widget::PromptEvent;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 impl AgentView {
-    pub fn prompt_history_loading(&self) -> bool {
-        self.session.prompt_history_loading && self.prompt.text().is_empty()
-    }
-
     /// Unsent drafts first (the stash, then drafts it replaced), then `session.prompt_history` in order.
     ///
     /// `session.prompt_history` in order, and nothing else. A stashed draft is not history: `Ctrl+S`
@@ -43,7 +39,7 @@ impl AgentView {
 
     /// Append the replayed transcript's `UserPrompt` blocks to `session.prompt_history`, newest first.
     ///
- /// The browse reads that list alone, and the `legacy ext RPC` fetch delivers an empty list when it
+    /// The browse reads that list alone, and the `legacy ext RPC` fetch delivers an empty list when it
     /// fails, so this is what makes a restored session's prompts recallable. Appended, not prepended: a prompt
     /// sent during the load is newer than anything the transcript holds. `PromptHistoryLoaded` skips fetched
     /// prompts whose trimmed text is already here.
@@ -82,16 +78,15 @@ impl AgentView {
     /// **Exception**: when the file search dropdown is visible, the widget gets
     /// first shot at Tab/Enter/Esc/arrows (for navigation and acceptance).
     /// Test-only wrapper around the private `handle_prompt_key` using a
-    /// **non–VS Code** pinned registry so host `TERM_PROGRAM` cannot change
-    /// InterjectPrompt / OpenExtensions chords under test.
+    /// **non–VS Code** pinned registry so the host `TERM_PROGRAM` cannot change
+    /// the chords under test.
     #[cfg(test)]
     pub(crate) fn handle_prompt_key_for_test(&mut self, key: &KeyEvent) -> InputOutcome {
         let registry = ActionRegistry::non_vscode_for_test();
         self.handle_prompt_key(key, &registry, false)
     }
 
-    /// Like [`Self::handle_prompt_key_for_test`] with an explicit registry
-    /// (e.g. [`ActionRegistry::vscode_family_for_test`]).
+    /// Like [`Self::handle_prompt_key_for_test`] with an explicit registry.
     #[cfg(test)]
     pub(crate) fn handle_prompt_key_with_registry_for_test(
         &mut self,
@@ -101,11 +96,11 @@ impl AgentView {
         self.handle_prompt_key(key, registry, false)
     }
 
-    // `pub(super)`: also called by `AppView::minimal_key_intercept` to route
-    // Apple Terminal's Ctrl+O interject chord straight to the prompt path —
-    // minimal's prompt is conceptually always focused, but `active_pane` can be
-    // Scrollback, whose `When::AgentScreen` promotion would misroute the chord
-    // to `ToggleYolo`.
+    // `pub(in crate::app)`: also called by `AppView::minimal_key_intercept` to
+    // route Ctrl+O straight to the prompt path while a pinned upgrade CTA is
+    // live — minimal's prompt is conceptually always focused, but `active_pane`
+    // can be Scrollback, whose `When::AgentScreen` promotion would misroute the
+    // chord to `ToggleYolo`.
     pub(in crate::app) fn handle_prompt_key(
         &mut self,
         key: &KeyEvent,
@@ -352,23 +347,11 @@ impl AgentView {
                 && self.prompt_input_mode == PromptInputMode::Bash
                 && !self.prompt.text().is_empty()
             {
-                // Priority 5: terminal-like Tab in bash mode — always on.
-                // Windows keeps the legacy focus-cycling Tab instead: the
-                // completion stack's tokenizer/quoting is POSIX-only (see
-                // the shell crate's `shell_token`), so the keystroke must
-                // not be eaten by a surface that emits misparsed lines.
-                // Usable candidates complete now (insta-accept / fill /
-                // dropdown, per `tab_decision`); `Nothing` (none fetched, or
-                // outdated by an edit or cursor move) fires a deterministic
-                // fetch whose landing runs the same semantics. An empty
-                // draft falls through to focus-cycling: no token to complete.
-                use crate::views::suggestion_controller::TabAction;
                 match self
                     .prompt
                     .suggestions
                     .tab_decision(self.prompt.text(), self.prompt.cursor())
                 {
-                    TabAction::Nothing => self.request_shell_tab_completion(true),
                     action => self.execute_tab_action(action),
                 }
                 return InputOutcome::Changed;
@@ -409,13 +392,11 @@ impl AgentView {
                     // (the ghost only shows when the text is a prefix of it).
                     let (chars, words) =
                         crate::views::prompt_suggestion::suggestion_size(self.prompt.text());
-                    pi_telemetry::session_ctx::log_event(
-                        pi_telemetry::events::PromptSuggestion {
-                            action: pi_telemetry::events::PromptSuggestionAction::Accepted,
-                            chars,
-                            words,
-                        },
-                    );
+                    pi_telemetry::session_ctx::log_event(pi_telemetry::events::PromptSuggestion {
+                        action: pi_telemetry::events::PromptSuggestionAction::Accepted,
+                        chars,
+                        words,
+                    });
                     self.prompt.refresh_slash(&self.session.models);
                     return InputOutcome::Changed;
                 }
@@ -428,13 +409,11 @@ impl AgentView {
                     self.prompt.prompt_suggestion_ghost().unwrap_or_default(),
                 );
                 self.prompt.prompt_suggestion.dismiss();
-                pi_telemetry::session_ctx::log_event(
-                    pi_telemetry::events::PromptSuggestion {
-                        action: pi_telemetry::events::PromptSuggestionAction::Dismissed,
-                        chars,
-                        words,
-                    },
-                );
+                pi_telemetry::session_ctx::log_event(pi_telemetry::events::PromptSuggestion {
+                    action: pi_telemetry::events::PromptSuggestionAction::Dismissed,
+                    chars,
+                    words,
+                });
                 return InputOutcome::Changed;
             }
         }
@@ -489,12 +468,11 @@ impl AgentView {
             && !self.prompt.history_search.is_active()
             && remember_mode_enabled()
         {
-            self.prompt_input_mode = PromptInputMode::Remember;
             return InputOutcome::Changed;
         }
 
         // 0e. Exit special input mode on empty prompt using per-mode exit keys (Bash/Remember: Backspace/Esc/Ctrl+W/U/C).
-        //     With non-empty text, Esc falls through to Esc policy (cancel / mid-turn swallow / clear / rewind). Mode is preserved for re-focus.
+        //     With non-empty text, Esc falls through to Esc policy (cancel / mid-turn swallow / clear). Mode is preserved for re-focus.
         if self.prompt_input_mode.is_exit_key(key) && self.prompt.text().is_empty() {
             self.prompt_input_mode = PromptInputMode::Normal;
             return InputOutcome::Changed;
@@ -566,100 +544,20 @@ impl AgentView {
                     //  - slash_accepted_send: slash dropdown Enter accepted a no-arg
                     //    command and fell through — must send, not insert newline.
                     //  - bash mode: Enter should always send.
-                    //  - empty composer + mid-turn queue: force-send the top row
-                    //    (send-now discoverability). Inserting a blank line on an
-                    //    empty prompt is never useful here; same path as normal mode.
                     if self.multiline_mode
                         && self.prompt_input_mode != PromptInputMode::Bash
                         && !slash_accepted_send
                     {
-                        if matches!(self.prompt_mode, PromptMode::Normal)
-                            && self.prompt.text().trim().is_empty()
-                            && self.session.state.is_turn_running()
-                            && let Some(outcome) = self.try_send_now_queued_from_prompt()
-                        {
-                            return outcome;
-                        }
                         self.prompt.insert_replacing_selection("\n");
                         return InputOutcome::Changed;
                     }
                     if let Some(text) = self.prompt.try_send() {
-                        // Remember + slash_accepted_send: treat as normal SendPrompt
-                        // (the slash path accepted a no-arg command that fell through).
-                        let action_mode = if self.prompt_input_mode == PromptInputMode::Remember
-                            && slash_accepted_send
-                        {
-                            PromptInputMode::Normal
-                        } else {
-                            self.prompt_input_mode
-                        };
-                        let action = action_mode.send_action(text);
+                        let action = self.prompt_input_mode.send_action(text);
                         self.prompt_input_mode = PromptInputMode::Normal;
                         return InputOutcome::Action(action);
                     }
-                    // Empty (or backslash continuation). Mid-turn + a queued
-                    // follow-up: bare Enter force-sends the top queue row so
-                    // users discover send-now without learning a chord.
-                    // Skip while editing a queued row (edit-mode Enter is
-                    // handled earlier for non-empty; empty must stay a no-op).
-                    // Guard on an actually-empty composer: try_send() also
-                    // returns None after a backslash continuation, which leaves
-                    // the (non-empty) draft in place — that Enter must only
-                    // insert the newline, not fire a queued follow-up.
-                    if matches!(self.prompt_mode, PromptMode::Normal)
-                        && self.prompt.text().trim().is_empty()
-                        && self.session.state.is_turn_running()
-                        && let Some(outcome) = self.try_send_now_queued_from_prompt()
-                    {
-                        return outcome;
-                    }
                     // try_send() returned None (empty, backslash continuation)
                     // → backslash continuation mutates widget, need redraw
-                    return InputOutcome::Changed;
-                }
-                ActionId::InterjectPrompt => {
-                    crate::actions::log_shortcut_used(
-                        key,
-                        ActionId::InterjectPrompt,
-                        When::PromptFocused.telemetry_name(),
-                    );
-                    // Editing-queued intercept lives in `queue_edit.rs`.
-                    if let Some(outcome) = self.interject_editing_queued_intercept() {
-                        return outcome;
-                    }
-                    // Mid-turn send-now (cancel-and-send):
-                    // 1) Non-empty composer → cancel the running turn and send
-                    //    that text as the next prompt.
-                    // 2) Empty composer + a visible follow-up in the queue →
-                    //    same as bare Enter: send the top row now.
-                    // 3) Idle / nothing to send: promote to ToggleYolo when that chord
-                    //    matches (Apple Terminal Ctrl+O opens YOLO / free-tier CTA).
-                    let text = self.prompt.text().trim().to_string();
-                    let turn_running = self.session.state.is_turn_running();
-                    if !text.is_empty() {
-                        if turn_running {
-                            // Paste-then-immediate-send: an image probe is still
-                            // off-thread. Stash (draft untouched) and re-issue on
-                            // completion so the not-yet-attached chip isn't dropped.
-                            if self.paste_probe_in_flight > 0 {
-                                self.deferred_send = Some(AgentDeferredSend::Interject);
-                                return InputOutcome::Changed;
-                            }
-                            // Drain images BEFORE set_text("") wipes the chip elements.
-                            let images = self.prompt.drain_images();
-                            self.prompt.set_text("");
-                            self.note_draft_consumed();
-                            return InputOutcome::Action(Action::SendPromptNow { text, images });
-                        }
-                    } else if turn_running
-                        && let Some(outcome) = self.try_send_now_queued_from_prompt()
-                    {
-                        return outcome;
-                    }
-                    if registry.matches_id(ActionId::ToggleYolo, key) {
-                        return self
-                            .handle_agent_action_with_registry(ActionId::ToggleYolo, registry);
-                    }
                     return InputOutcome::Changed;
                 }
                 ActionId::ToggleMultiline => {
@@ -751,12 +649,10 @@ impl AgentView {
             match self.prompt.handle_key(key) {
                 PromptEvent::Edited => {
                     if undo_tip_accepted {
-                        pi_telemetry::session_ctx::log_event(
-                            pi_telemetry::events::ContextualTip {
-                                tip: pi_telemetry::events::ContextualTipKind::Undo,
-                                action: pi_telemetry::events::ContextualTipAction::Accepted,
-                            },
-                        );
+                        pi_telemetry::session_ctx::log_event(pi_telemetry::events::ContextualTip {
+                            tip: pi_telemetry::events::ContextualTipKind::Undo,
+                            action: pi_telemetry::events::ContextualTipAction::Accepted,
+                        });
                         // Retire the hint on the restore that consumed it (its
                         // "Input cleared" copy is now stale), mirroring the
                         // clipboard tip's clear-on-paste so one restore counts
@@ -769,12 +665,6 @@ impl AgentView {
                         self.open_line_viewer(&req.path, req.initial_range);
                     }
                     self.prompt.refresh_slash(&self.session.models);
-                    if let Some(eff) = self.notify_suggestion_text_changed() {
-                        self.pending_effects.push(eff);
-                    }
-                    if let Some(eff) = self.notify_plugin_cta_text_changed() {
-                        self.pending_effects.push(eff);
-                    }
                     if let Some(action) = self.take_prompt_tip_signal() {
                         return InputOutcome::Action(action);
                     }
@@ -829,17 +719,6 @@ impl AgentView {
         }
     }
 
-    /// How long after an Esc-fired cancel the idle rewind ARM stays
-    /// suppressed (see [`Self::rewind_arm_suppressed`]). Must exceed
-    /// `PendingAction::ESC_DOUBLE_PRESS_TTL` (800ms): the grace exists to
-    /// absorb the double-press gesture itself, so it has to outlast one full
-    /// arm-to-fire window or a mash could still arm-and-fire around it
-    /// (invariant pinned by `esc_cancel_rewind_grace_outlives_double_press_ttl`).
-    /// The pty-only `GROK_ESC_DOUBLE_PRESS_MS` override can exceed this; no
-    /// pty case mashes Esc across a cancel.
-    pub(crate) const ESC_CANCEL_REWIND_GRACE: std::time::Duration =
-        std::time::Duration::from_millis(1000);
-
     /// Esc policy (Prompt/Scrollback after overlay steal).
     ///
     /// Call only after overlay / dropdown / search / selection declined Esc.
@@ -853,7 +732,7 @@ impl AgentView {
         }
 
         // This bare Esc is now owned by the policy: every path below consumes the
-        // event (cancel / mid-turn swallow / arm-clear / arm-rewind / idle
+        // event (cancel / mid-turn swallow / arm-clear / idle
         // swallow). Disarm the Esc→d flight-recorder combo here, uniformly — the
         // `0-esc-d` block set `esc_pressed_at` on this same press, but since the
         // policy is handling the Esc, a following `d` is the user's text, not a
@@ -870,7 +749,7 @@ impl AgentView {
         }
 
         // Mid-turn running, fullscreen vim mode: swallow Esc (do not cancel or
-        // arm clear/rewind — Ctrl+C stays the cancel gesture there).
+        // arm clear — Ctrl+C stays the cancel gesture there).
         // `is_minimal_mode` is the per-agent injected screen mode, not the
         // process global, so tests stay race-free. A streaming wake turn
         // follows the same policy as a running turn (the pane state is Idle
@@ -885,25 +764,20 @@ impl AgentView {
         // Mid-turn (minimal / non-vim): cancel immediately from prompt or
         // scrollback, even with a draft. Also — in every mode — while already
         // cancelling, so a lost cancel notification is re-sent (Ctrl+C
-        // escalates to Quit instead). Push the grace deadline out so an Esc
-        // mash past the cancel cannot silently arm the rewind picker below.
+        // escalates to Quit instead).
         if self.session.state.is_turn_running()
             || self.wake_turn_active()
             || self.any_cancel_pending()
         {
             self.cancel_trigger_hint = Some(crate::app::actions::CancelTrigger::Esc);
-            self.suppress_rewind_arm(std::time::Instant::now());
             return Some(InputOutcome::Action(Action::CancelTurn));
         }
 
-        // The two idle arms split on pane ownership. CLEAR mutates the composer
-        // (drops text/image chips), so it fires only while the PROMPT pane owns
-        // keys — clearing a draft the reader has scrolled past would be a
-        // surprising cross-pane side effect. REWIND requires an EMPTY prompt
-        // (checked below), so there is no draft to clobber or silently stash and
-        // it may arm from EITHER pane. The mid-turn cancel or swallow /
-        // cancel-retry (above) stays cross-pane; any other idle Esc swallows
-        // (below).
+        // CLEAR mutates the composer (drops text/image chips), so it fires only
+        // while the PROMPT pane owns keys — clearing a draft the reader has
+        // scrolled past would be a surprising cross-pane side effect. The
+        // mid-turn cancel or swallow / cancel-retry (above) stays cross-pane;
+        // any other idle Esc swallows (below).
         let has_content = !self.prompt.text().is_empty() || !self.prompt.images.is_empty();
 
         // Idle + non-empty (text and/or image chips) + prompt pane → arm clear (2× Esc).
@@ -916,69 +790,10 @@ impl AgentView {
             });
         }
 
-        // Idle + empty + at least one user turn to rewind to → arm rewind
-        // picker (silent first press), from either pane. `turn_count` counts
-        // UserPrompt-started turns (the scrollback's own notion of "has user
-        // messages"), so a scrollback of only system/info/error blocks swallows
-        // Esc instead of arming a picker the server would answer with "No
-        // undoable prompts". The last three guards restate shields that the
-        // PROMPT pane gets upstream but that the SCROLLBACK pane bypasses (so
-        // they are vacuously true on the prompt pane): step 0e exits a latent
-        // Bash/Remember mode on an empty-composer Esc before the policy runs
-        // (without the mode guard a rewind restore would drop conversation
-        // text into a still-armed `!` composer); the needs-input overlay
-        // intercepts exempt the scrollback pane while the open
-        // picker's own intercept does not, so arming under a pending
-        // permission/plan/cancel-turn/question overlay would let the picker
-        // key-starve it (and a rewind mutate the session out from under it);
-        // and the step 0b history-search intercept is prompt-pane-only, so
-        // arming would stack the rewind picker on the open search overlay.
-        // The grace guard holds only this ARM (never modal/other Esc handling)
-        // right after an Esc-fired cancel — see `rewind_arm_suppressed`.
-        if !has_content
-            && self.scrollback.turn_count() > 0
-            && self.prompt_input_mode == PromptInputMode::Normal
-            && self.no_input_overlay_pending()
-            && !self.prompt.history_search.is_active()
-            && !self.rewind_arm_suppressed(std::time::Instant::now())
-        {
-            return Some(InputOutcome::ArmPending {
-                action: Action::RewindShowPicker,
-                shortcut: crate::input::key::KeyShortcut::from(*key),
-                label: None,
-                ttl: crate::app::app_view::esc_double_press_ttl(),
-            });
-        }
-
-        // Idle with nothing to arm (scrollback pane with a draft, empty prompt
-        // + no turns, a scrollback Esc under a latent composer mode / pending
-        // needs-input overlay / open history search, or the post-cancel grace):
-        // swallow Esc (not FocusScrollback, and not a bubble-up to global quit).
+        // Idle with nothing to arm (scrollback pane with a draft, or an empty
+        // prompt): swallow Esc (not FocusScrollback, and not a bubble-up to
+        // global quit).
         Some(InputOutcome::Changed)
-    }
-
-    /// Arm the post-cancel grace: push the rewind-ARM suppression deadline
-    /// out to `now + ESC_CANCEL_REWIND_GRACE`. After an Esc-fired cancel the
-    /// session goes Cancelling → Idle with (typically) an empty composer, so
-    /// a user mashing Esc would otherwise immediately arm-and-fire the
-    /// silent double-Esc rewind picker. Takes `now` so tests are
-    /// deterministic (no fabricated `Instant`s).
-    pub(crate) fn suppress_rewind_arm(&mut self, now: std::time::Instant) {
-        self.rewind_suppress_deadline = Some(now + Self::ESC_CANCEL_REWIND_GRACE);
-    }
-
-    /// Check-and-retire the post-cancel grace: true while `now` is before
-    /// the deadline set by [`Self::suppress_rewind_arm`]; an expired
-    /// deadline is cleared on this consult so no stale `Instant` lingers.
-    pub(crate) fn rewind_arm_suppressed(&mut self, now: std::time::Instant) -> bool {
-        match self.rewind_suppress_deadline {
-            Some(deadline) if now < deadline => true,
-            Some(_) => {
-                self.rewind_suppress_deadline = None;
-                false
-            }
-            None => false,
-        }
     }
 
     /// Put a history entry into the composer (browse-mode live populate and
@@ -1018,10 +833,8 @@ impl AgentView {
     /// Commit a recalled history entry into the composer. Shared by the keyboard accept and the
     /// mouse click, which drifted apart once and left the mouse path holding a duplicate draft.
     pub(in crate::app) fn accept_history_entry(&mut self, text: &str) {
-        // Restore bash mode from a `! ` history entry unless Remember is active.
-        if self.prompt_input_mode != PromptInputMode::Remember
-            && let Some(cmd) = text.strip_prefix("! ")
-        {
+        // Restore bash mode from a `! ` history entry.
+        if let Some(cmd) = text.strip_prefix("! ") {
             self.prompt_input_mode = PromptInputMode::Bash;
             self.prompt.set_text(cmd);
         } else if self.prompt_input_mode == PromptInputMode::Bash {
@@ -1686,66 +1499,13 @@ mod history_browse_panel_tests {
 }
 
 #[cfg(test)]
-mod rewind_grace_tests {
-    use super::*;
-    use std::time::{Duration, Instant};
-
-    /// Pure deadline semantics with an injected `now`: suppressed strictly
-    /// before the deadline, expired (and retired) at it.
-    #[test]
-    fn suppress_rewind_arm_holds_until_deadline_then_retires() {
-        let mut agent = super::test_fixtures::make_agent();
-        let t0 = Instant::now();
-        assert!(!agent.rewind_arm_suppressed(t0), "no cancel yet — no grace");
-
-        agent.suppress_rewind_arm(t0);
-        assert!(agent.rewind_arm_suppressed(t0));
-        assert!(agent.rewind_arm_suppressed(
-            t0 + AgentView::ESC_CANCEL_REWIND_GRACE - Duration::from_millis(1)
-        ));
-
-        assert!(
-            !agent.rewind_arm_suppressed(t0 + AgentView::ESC_CANCEL_REWIND_GRACE),
-            "the deadline itself is expiry"
-        );
-        assert!(
-            agent.rewind_suppress_deadline.is_none(),
-            "the expired deadline is cleared on the consult"
-        );
-    }
-
-    /// A later Esc-fired cancel (e.g. a cancel-retry mash) pushes the
-    /// deadline out; the grace is measured from the LAST cancel press.
-    #[test]
-    fn suppress_rewind_arm_refreshes_on_later_cancel() {
-        let mut agent = super::test_fixtures::make_agent();
-        let t0 = Instant::now();
-        agent.suppress_rewind_arm(t0);
-        let t1 = t0 + Duration::from_millis(500);
-        agent.suppress_rewind_arm(t1);
-        assert!(agent.rewind_arm_suppressed(t0 + AgentView::ESC_CANCEL_REWIND_GRACE));
-        assert!(!agent.rewind_arm_suppressed(t1 + AgentView::ESC_CANCEL_REWIND_GRACE));
-    }
-
-    /// The grace must outlast one full idle double-press window — see the
-    /// constant's doc for why.
-    #[test]
-    fn esc_cancel_rewind_grace_outlives_double_press_ttl() {
-        assert!(
-            AgentView::ESC_CANCEL_REWIND_GRACE
-                > crate::app::app_view::PendingAction::ESC_DOUBLE_PRESS_TTL
-        );
-    }
-}
-
-#[cfg(test)]
 mod prompt_suggestion_key_tests {
     use super::*;
     use crate::app::app_view::InputOutcome;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     /// Idle agent with the gate open and a loaded suggestion — the state
- /// right after a turn ends with `legacy ext RPC` resolved. Pins the
+    /// right after a turn ends with `legacy ext RPC` resolved. Pins the
     /// settings cache so `resolve_enabled()` never reads the dev machine's
     /// config.toml (thread-local, so per-test).
     fn suggestion_agent(text: &str) -> AgentView {
@@ -1913,47 +1673,6 @@ mod prompt_suggestion_key_tests {
         assert!(agent.prompt.prompt_suggestion.has_suggestion());
     }
 
-    /// A suggestion that loads behind a divergent draft logs no `shown`
-    /// impression at load; once the draft is cleared the ghost becomes
-    /// visible and the next key event latches `shown` *before* its Tab
-    /// intercept can log `accepted` — the funnel can't record an accept
-    /// without an impression.
-    #[test]
-    fn shown_latches_at_first_visibility_after_divergent_draft_clears() {
-        crate::appearance::cache::set_prompt_suggestions(true);
-        let mut agent = super::test_fixtures::make_agent();
-        // Divergent draft typed while the suggestion fetch was in flight.
-        agent.prompt.textarea.insert_str("x");
-        // The load path: install + gate refresh + latch-if-visible.
-        let generation = agent.prompt.prompt_suggestion.begin_fetch();
-        assert!(
-            agent
-                .prompt
-                .prompt_suggestion
-                .on_loaded(Some("run the tests".to_owned()), generation)
-        );
-        agent.refresh_prompt_suggestion_gate();
-        agent.log_prompt_suggestion_shown_if_visible();
-        assert!(!agent.prompt.prompt_suggestion_visible());
-        assert!(
-            !agent.prompt.prompt_suggestion.shown_logged(),
-            "a ghost hidden by a divergent draft is not an impression"
-        );
-
-        // Backspace empties the draft. The intercept ran before the edit
-        // (ghost still hidden then), so this event doesn't latch either.
-        let _ = agent.handle_prompt_key_for_test(&key(KeyCode::Backspace));
-        assert_eq!(agent.prompt.text(), "");
-        assert!(agent.prompt.prompt_suggestion_visible());
-        assert!(!agent.prompt.prompt_suggestion.shown_logged());
-
-        // The next key event sees the visible ghost and latches `shown`
-        // first; the same event's Tab intercept then accepts.
-        let _ = agent.handle_prompt_key_for_test(&key(KeyCode::Tab));
-        assert!(agent.prompt.prompt_suggestion.shown_logged());
-        assert_eq!(agent.prompt.text(), "run the tests");
-    }
-
     /// Esc-dismiss on a late-visible ghost also latches `shown` first (same
     /// key event), so `dismissed` never outruns `shown` either.
     #[test]
@@ -1972,87 +1691,6 @@ mod prompt_suggestion_key_tests {
 }
 
 #[cfg(test)]
-mod apple_terminal_ctrl_o_upgrade_cta_tests {
-    use super::*;
-    use crate::app::agent::AgentState;
-    use crate::app::app_view::InputOutcome;
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use pi_telemetry::events::AnnouncementCtaSurface;
-
-    fn ctrl_o() -> KeyEvent {
-        KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL)
-    }
-
-    #[test]
-    fn apple_terminal_idle_ctrl_o_opens_pinned_upgrade_cta() {
-        let mut agent = super::test_fixtures::make_agent();
-        agent.pinned_upgrade_cta_live = true;
-        let registry = ActionRegistry::apple_terminal_for_test();
-
-        let outcome = agent.handle_prompt_key_with_registry_for_test(&ctrl_o(), &registry);
-        assert!(
-            matches!(
-                outcome,
-                InputOutcome::Action(Action::AnnouncementsOpenCta(
-                    AnnouncementCtaSurface::Keyboard
-                ))
-            ),
-            "idle Apple-Terminal Ctrl+O must open pinned CTA, got {outcome:?}"
-        );
-    }
-
-    #[test]
-    fn apple_terminal_idle_ctrl_o_without_promo_toggles_yolo() {
-        let mut agent = super::test_fixtures::make_agent();
-        agent.pinned_upgrade_cta_live = false;
-        let was_yolo = agent.session.is_yolo();
-        let registry = ActionRegistry::apple_terminal_for_test();
-
-        let outcome = agent.handle_prompt_key_with_registry_for_test(&ctrl_o(), &registry);
-        assert!(
-            matches!(
-                outcome,
-                InputOutcome::Action(Action::SetYoloMode(m)) if m != was_yolo
-            ),
-            "idle Apple-Terminal Ctrl+O without promo must toggle YOLO, got {outcome:?}"
-        );
-    }
-
-    #[test]
-    fn apple_terminal_running_ctrl_o_still_interjects() {
-        let mut agent = super::test_fixtures::make_agent();
-        agent.session.state = AgentState::TurnRunning;
-        agent.prompt.set_text("steer mid-turn");
-        agent.pinned_upgrade_cta_live = true;
-        let registry = ActionRegistry::apple_terminal_for_test();
-
-        let outcome = agent.handle_prompt_key_with_registry_for_test(&ctrl_o(), &registry);
-        assert!(
-            matches!(
-                outcome,
-                InputOutcome::Action(Action::SendPromptNow { ref text, .. })
-                    if text == "steer mid-turn"
-            ),
-            "running + payload: interject must win over CTA, got {outcome:?}"
-        );
-    }
-
-    #[test]
-    fn non_apple_ctrl_enter_idle_stays_noop() {
-        let mut agent = super::test_fixtures::make_agent();
-        agent.pinned_upgrade_cta_live = true;
-        let registry = ActionRegistry::non_vscode_for_test();
-        let ctrl_enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL);
-
-        let outcome = agent.handle_prompt_key_with_registry_for_test(&ctrl_enter, &registry);
-        assert!(
-            matches!(outcome, InputOutcome::Changed),
-            "idle Ctrl+Enter must stay a silent interject no-op, got {outcome:?}"
-        );
-    }
-}
-
-#[cfg(test)]
 mod queue_recall_tests {
     use super::*;
     use crate::app::agent_view::test_fixtures::make_running_agent;
@@ -2062,7 +1700,7 @@ mod queue_recall_tests {
         agent.handle_prompt_key_for_test(&KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))
     }
 
-    /// Focus lands on the bottom row, not the top one send-now takes.
+    /// Focus lands on the bottom (newest) row.
     #[test]
     fn up_focuses_the_queue_on_its_bottom_row() {
         let mut agent = make_running_agent();
@@ -2114,7 +1752,6 @@ mod queue_recall_tests {
         agent.active_pane = AgentPane::Prompt;
         agent.queue.overlay.focused = false;
         agent.session.pending_prompts.clear();
-        agent.shared_queue.clear();
         agent.sync_queue_pane();
         agent.session.prompt_history = vec!["an older prompt".into()];
 

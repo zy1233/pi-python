@@ -10,7 +10,7 @@ pub(crate) fn is_server_initiated_prompt(prompt_id: &str) -> bool {
 ///
 /// Cron turns are synthetic (so [`is_server_initiated_prompt`] is also true for
 /// them), but UNLIKE auto-wake / subagent-completion turns they are
-/// CLIENT-driven via `MvpAgent::prompt()` and therefore DO emit a matching
+/// CLIENT-driven via the agent's `prompt` handler and therefore DO emit a matching
 /// `legacy ext RPC` turn-end signal. A viewer can thus safely
 /// enter `TurnRunning` for them (the exit exists, so it won't strand) — which is
 /// what lets the dashboard show a running `/loop` session as Working.
@@ -44,7 +44,7 @@ pub(crate) fn is_wake_prompt(prompt_id: &str) -> bool {
 /// adoptable iff the turn emits a terminal `legacy ext RPC`, the
 /// only non-interactive way a viewer leaves `TurnRunning`. That holds for
 /// user-driven turns and `/loop` (`scheduler-fired-…`) fires — both run via
-/// `MvpAgent::prompt()` — and is false for actor-run synthetic turns
+/// the agent's `prompt` handler — and is false for actor-run synthetic turns
 /// (task-completed / subagent-completion / notification-drain / goal-*), which
 /// have no such exit, so adopting one strands the viewer in `TurnRunning`.
 ///
@@ -92,22 +92,12 @@ pub(super) fn viewer_turn_anchor(turn_start_ms: Option<i64>) -> std::time::Insta
 /// with one; silence closes with none — except failures, which surface even
 /// when silent (the user's standing instruction stopped executing invisibly).
 /// Silent rate limits defer to the retry notifications, like the real-turn
-/// rails. A hook-denied wake follows the cancelled policy (no failure
-/// carve-out): the `HookAnnotation` warning attributes the deny but is not
-/// turn output, so a silent block closes without a marker.
-///
-/// `cancel_trigger` is the signal's `_meta.cancelTrigger`. `"send_now"` marks
-/// an internal cancel-and-send, so the `TurnCancelled` marker is suppressed
-/// (wire trigger wins; `expect_send_now_cancel` is the older-shell fallback).
-/// `cancellation_category` is the signal's `_meta.cancellationCategory`;
-/// `"HookDenied"` picks the blocked-by-a-hook marker.
+/// rails.
 pub(super) fn finish_wake_turn(
     agent: &mut AgentView,
     prompt_id: &str,
     stop_reason: &str,
     agent_result: Option<&str>,
-    cancel_trigger: Option<&str>,
-    cancellation_category: Option<&str>,
 ) {
     use crate::scrollback::blocks::SessionEvent;
 
@@ -126,11 +116,6 @@ pub(super) fn finish_wake_turn(
         })
     } else {
         None
-    };
-    // Wire trigger carries this case; pid-matched fallback is consistency-only (do not take/clear).
-    let send_now_cancel = match cancel_trigger {
-        Some(trigger) => trigger == "send_now",
-        None => agent.expect_send_now_cancel.as_deref() == Some(prompt_id),
     };
     let already_failed = agent.failed_wake_marker_for.as_deref() == Some(prompt_id);
     let event = match stop_reason {
@@ -163,16 +148,11 @@ pub(super) fn finish_wake_turn(
             }
         }
         "cancelled" if !had_output => None,
-        // Send-now cancel: no marker (the sender's new prompt is the next turn).
-        "cancelled" if send_now_cancel => None,
-        "cancelled" => Some(crate::app::turn_completion::cancelled_turn_event(
-            cancellation_category,
-            elapsed.unwrap_or_default(),
-        )),
+        "cancelled" => Some(SessionEvent::TurnCancelled {
+            elapsed: elapsed.unwrap_or_default(),
+        }),
         _ if !had_output => None,
         _ => Some(SessionEvent::TurnCompleted { elapsed }),
     };
-    if event.is_some() {
-        crate::app::turn_completion::push_turn_terminal_marker(agent, event, Some(prompt_id));
-    }
+    crate::app::turn_completion::push_turn_terminal_marker(agent, event);
 }

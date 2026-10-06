@@ -33,11 +33,6 @@ impl TokenType {
         }
     }
 
-    /// `true` for types that can be silently refreshed (OIDC, external binary).
-    pub(crate) fn is_refreshable(self) -> bool {
-        matches!(self, Self::OidcSession | Self::ExternalBinary)
-    }
-
     /// Stable telemetry mirror for the `manual_auth` KPI.
     pub(crate) fn telemetry_kind(self) -> pi_telemetry::events::AuthTokenKind {
         use pi_telemetry::events::AuthTokenKind as K;
@@ -54,14 +49,4 @@ impl TokenType {
 #[cfg(test)]
 mod tests {
     //! Per-variant matrix for `is_refreshable`.
-    use super::*;
-
-    #[test]
-    fn is_refreshable_matrix() {
-        assert!(TokenType::OidcSession.is_refreshable());
-        assert!(TokenType::ExternalBinary.is_refreshable());
-        assert!(!TokenType::LegacySession.is_refreshable());
-        assert!(!TokenType::ApiKey.is_refreshable());
-        assert!(!TokenType::None.is_refreshable());
-    }
 }

@@ -7,7 +7,9 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use crate::app::agent::AgentId;
-use crate::app::app_view::{ActiveView, AppView};
+#[cfg(test)]
+use crate::app::app_view::ActiveView;
+use crate::app::app_view::AppView;
 use crate::scrollback::block::RenderBlock;
 
 const PROMPT_EDITOR_MAX_BYTES: u64 = 4 * 1024 * 1024;
@@ -33,11 +35,6 @@ const PROMPT_EDITOR_STALE: &str =
 
 #[derive(Clone, Debug)]
 pub(crate) enum PendingEditorRequest {
-    /// Edit an agents/personas configuration file, then refresh its modal tab.
-    ConfigFile {
-        path: PathBuf,
-        refresh_agents_modal: Option<crate::views::agents_modal::AgentsTab>,
-    },
     /// Edit an attachment-free composer draft.
     PromptDraft {
         agent_id: AgentId,
@@ -51,10 +48,6 @@ pub(crate) struct EditorLaunch {
 }
 
 pub(crate) enum PreparedEditorRequest {
-    ConfigFile {
-        launch: EditorLaunch,
-        refresh_agents_modal: Option<crate::views::agents_modal::AgentsTab>,
-    },
     PromptDraft {
         launch: EditorLaunch,
         agent_id: AgentId,
@@ -66,7 +59,7 @@ pub(crate) enum PreparedEditorRequest {
 impl PreparedEditorRequest {
     pub(crate) fn launch(&self) -> &EditorLaunch {
         match self {
-            Self::ConfigFile { launch, .. } | Self::PromptDraft { launch, .. } => launch,
+            Self::PromptDraft { launch, .. } => launch,
         }
     }
 }
@@ -146,7 +139,6 @@ fn editor_argv() -> Result<Vec<String>, String> {
 fn revalidate(app: &mut AppView, request: PendingEditorRequest) -> Option<PendingEditorRequest> {
     let agent_id = match &request {
         PendingEditorRequest::PromptDraft { agent_id, .. } => *agent_id,
-        PendingEditorRequest::ConfigFile { .. } => return Some(request),
     };
     let access = app
         .agents
@@ -193,13 +185,6 @@ pub(crate) fn prepare(
         }
     };
     match request {
-        PendingEditorRequest::ConfigFile {
-            path,
-            refresh_agents_modal,
-        } => Ok(Some(PreparedEditorRequest::ConfigFile {
-            launch: EditorLaunch { argv, path },
-            refresh_agents_modal,
-        })),
         PendingEditorRequest::PromptDraft {
             agent_id,
             original_text,
@@ -239,25 +224,6 @@ pub(crate) fn finish_prepare_error(app: &mut AppView, error: PrepareError) {
         PendingEditorRequest::PromptDraft { agent_id, .. } => {
             report_prompt_failure(app, agent_id, &error.message);
         }
-        PendingEditorRequest::ConfigFile { .. } => report_config_failure(app, &error.message),
-    }
-}
-
-fn report_config_failure(app: &mut AppView, message: &str) {
-    if app.screen_mode.is_minimal()
-        && let ActiveView::Agent(id) = app.active_view
-        && let Some(agent) = app.agents.get_mut(&id)
-    {
-        let block = RenderBlock::system(message.to_owned());
-        if let Some(child_sid) = agent.active_subagent.clone()
-            && let Some(child) = agent.subagent_views.get_mut(&child_sid)
-        {
-            child.scrollback.push_block(block);
-        } else {
-            agent.scrollback.push_block(block);
-        }
-    } else {
-        app.show_toast(message);
     }
 }
 
@@ -267,21 +233,6 @@ pub(crate) fn finish(
     editor_result: Result<std::process::ExitStatus, std::io::Error>,
 ) {
     match prepared {
-        PreparedEditorRequest::ConfigFile {
-            refresh_agents_modal,
-            ..
-        } => {
-            if let Err(error) = editor_result {
-                tracing::warn!(%error, "configuration editor: child failed");
-            }
-            if let Some(tab) = refresh_agents_modal
-                && let ActiveView::Agent(id) = app.active_view
-                && let Some(agent) = app.agents.get_mut(&id)
-                && let Some(ref mut modal) = agent.agents_modal
-            {
-                modal.refresh_after_editor(tab);
-            }
-        }
         PreparedEditorRequest::PromptDraft {
             agent_id,
             original_text,
@@ -453,45 +404,6 @@ mod tests {
                 original_text: "original".to_owned(),
             },
         )
-    }
-
-    #[test]
-    fn config_prepare_error_is_visible_in_fullscreen_and_minimal() {
-        let id = AgentId(0);
-        let mut app = crate::app::app_view::tests::test_app();
-        app.agents.insert(
-            id,
-            crate::test_util::make_agent_view(Some("session"), "/work"),
-        );
-        app.active_view = ActiveView::Agent(id);
-        let message = "could not parse $VISUAL or $EDITOR";
-        let error = || PrepareError {
-            request: PendingEditorRequest::ConfigFile {
-                path: PathBuf::from("/tmp/agent-config.md"),
-                refresh_agents_modal: None,
-            },
-            message: message.to_owned(),
-        };
-
-        app.screen_mode = crate::app::ScreenMode::Fullscreen;
-        finish_prepare_error(&mut app, error());
-        assert_eq!(
-            app.agents[&id]
-                .toast
-                .as_ref()
-                .map(|(text, _)| text.as_str()),
-            Some(message)
-        );
-
-        app.agents.get_mut(&id).unwrap().toast = None;
-        app.screen_mode = crate::app::ScreenMode::Minimal;
-        finish_prepare_error(&mut app, error());
-        assert!(
-            app.agents[&id]
-                .scrollback
-                .iter_entries()
-                .any(|(_, entry)| entry.block.searchable_text().as_deref() == Some(message))
-        );
     }
 
     #[test]

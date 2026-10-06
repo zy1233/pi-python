@@ -75,11 +75,6 @@ tokio-util = { workspace = true, features = ["compat"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
-# Binary hardening: compile-time string obfuscation.
-# (cryptify / rustls / semver / tikv-jemallocator moved to the composition-root
-# binary `pi-pager-bin` with `main.rs`; this lib no longer references them.)
-obfstr = { workspace = true }
-
 # Fuzzy matching (history search daemon)
 nucleo = { workspace = true }
 
@@ -93,7 +88,6 @@ pi-update = { path = "../pi-update" }
 # ACP
 agent-client-protocol = { workspace = true }
 pi-acp-lib = { workspace = true }
-pi-file-utils = { path = "../pi-file-utils" }
 # Crash-recovery registry of open TUI sessions.
 pi-active-sessions = { workspace = true }
 pi-config = { workspace = true }
@@ -108,19 +102,11 @@ pi-shell = { workspace = true }
 # from upstream of the crate that fills it in.
 pi-status-line = { workspace = true }
 pi-workspace = { workspace = true }
-# Foreign coding-agent session discovery.
-pi-foreign-sessions = { workspace = true }
 pi-token-estimation = { workspace = true }
 pi-telemetry = { workspace = true }
 pi-fast-worktree = { path = "../pi-fast-worktree", features = ["metadata"] }
-backon = { workspace = true }
 chrono = { workspace = true }
-flate2 = { workspace = true }
-tar = { workspace = true }
 pi-tools = { workspace = true }
-pi-agent = { workspace = true }
-pi-plugin-marketplace = { path = "../pi-plugin-marketplace" }
-pi-hooks-plugins-types = { path = "../pi-hooks-plugins-types" }
 walkdir = { workspace = true }
 pi-sandbox = { path = "../pi-sandbox", default-features = false }
 
@@ -184,8 +170,6 @@ criterion = { workspace = true }
 tempfile = { workspace = true }
 serial_test = { workspace = true }
 pi-agent = { workspace = true }
-# Provider install for the in-process leader-cluster tests.
-pi-extra-ca = { workspace = true }
 
 [[bench]]
 name = "render"
@@ -245,9 +229,7 @@ default-bazel = [
     "jemalloc",
     "sandbox-enforce",
     "test-support",
-    "local-workspace",
     ]
-local-workspace = ["pi-shell/local-workspace"]
 # No-op on this crate: the actual `#[global_allocator]` (and the
 # `tikv-jemallocator` dep) live on the composition-root binary
 # `pi-pager-bin`, which owns `main.rs`. Kept as an empty feature so the

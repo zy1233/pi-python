@@ -12,16 +12,15 @@
 //!    [`AuthManager::set_system_sleep_imminent`] briefly **holds the OS sleep
 //!    acknowledgment** (macOS delays `IOAllowPowerChange`; Linux holds its
 //!    `delay` inhibitor — both via the blocking power-listener callback) until
-//!    the refresh drains or [`SLEEP_ACK_MAX_WAIT`] elapses, so the in-flight
-//!    exchange finishes *before* the machine suspends.
+//!    the refresh drains, so the in-flight exchange finishes *before* the
+//!    machine suspends.
 //!
 //! Split out of `manager.rs` so the manager stays scannable: this is a
 //! self-contained unit (the [`SleepGate`] type, the [`InFlightGuard`], and a
 //! small `impl AuthManager` block driving them from OS power events).
 
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::time::{Duration as StdDuration, Instant};
+use std::time::Duration as StdDuration;
 
 use parking_lot::RwLock;
 
@@ -51,21 +50,6 @@ pub(super) const SLEEP_GATE_MAX: StdDuration = StdDuration::from_secs(120);
 /// [`BACKOFF_INTERVAL`]: super::BACKOFF_INTERVAL
 pub(super) const DARK_WAKE_DEFER_MAX: StdDuration = StdDuration::from_secs(120);
 
-/// Upper bound on how long a `WillSleep` transition will hold the OS sleep
-/// acknowledgment waiting for in-flight IdP refreshes to drain (see
-/// [`AuthManager::set_system_sleep_imminent`]). Sized per platform to the OS
-/// pre-sleep budget: **macOS** allows ~30 s before `IOAllowPowerChange` is
-/// forced, so we use most of it — a straddled exchange can need ~15 s of
-/// awake time to complete (in-call retries included), and losing its response
-/// past the assumed ~60 s rotation grace revokes the token family (every
-/// session then demands `/login`). **Linux** logind's `InhibitDelayMaxSec`
-/// defaults to 5 s, so we stay under it. The hold releases the moment the
-/// in-flight count drains; a healthy round-trip is ~1 s.
-#[cfg(target_os = "macos")]
-pub(super) const SLEEP_ACK_MAX_WAIT: StdDuration = StdDuration::from_secs(20);
-#[cfg(not(target_os = "macos"))]
-pub(super) const SLEEP_ACK_MAX_WAIT: StdDuration = StdDuration::from_secs(3);
-
 /// A gate `refresh_chain` consults to avoid *starting* an IdP refresh just
 /// before sleep. Only *defers* a not-yet-started refresh; an in-flight one is
 /// left to finish (see [`AuthManager::refresh_chain`]).
@@ -81,31 +65,6 @@ pub(super) struct SleepGate {
 }
 
 impl SleepGate {
-    pub(super) fn raise(&self) {
-        *self.raised_at.write() = Some(DualClock::now());
-        pi_telemetry::unified_log::warn("auth.sleep.gate_set", None, None);
-    }
-
-    pub(super) fn lower(&self, reason: &str) {
-        let prev = self.raised_at.write().take();
-        let (mono_ms, wall_ms) = prev
-            .map(|r| {
-                let (mono, wall) = r.elapsed();
-                (mono.as_millis() as u64, wall.as_millis() as u64)
-            })
-            .unwrap_or((0, 0));
-        pi_telemetry::unified_log::info(
-            "auth.sleep.gate_cleared",
-            None,
-            Some(serde_json::json!({
-                "reason": reason,
-                "was_raised": prev.is_some(),
-                "mono_elapsed_ms": mono_ms,
-                "wall_elapsed_ms": wall_ms,
-            })),
-        );
-    }
-
     /// A stale gate (a missed/late wake event) is lazily lowered here so it can
     /// never permanently block refresh; this read can therefore have a side
     /// effect. The gate expires once *either* clock passes [`SLEEP_GATE_MAX`]
@@ -175,30 +134,6 @@ impl Drop for InFlightGuard<'_> {
 }
 
 impl AuthManager {
-    /// Report a system power transition (`true` = sleep imminent, `false` =
-    /// woke). Safe to call from any thread.
-    pub(crate) fn set_system_sleep_imminent(&self, imminent: bool) {
-        if imminent {
-            // Raise the gate first so a refresh that re-checks it right before
-            // its IdP call (see `refresh_chain`) backs out instead of starting
-            // into the suspend window. Then hold the OS sleep acknowledgment
-            // until any refresh already in flight drains, so it can finish
-            // before the machine suspends rather than straddling it.
-            self.sleep_gate.raise();
-            self.hold_sleep_ack_until_refresh_drains(SLEEP_ACK_MAX_WAIT);
-        } else {
-            self.sleep_gate.lower("wake");
-            // `DidWake` fires for dark wakes too; clearing unconditionally would reset
-            // the defer budget every cycle and it could never exhaust.
-            if !self.is_dark_wake() {
-                self.end_dark_wake_defer_run();
-            }
-            // Re-arm the proactive-refresh loop; its monotonic timer did not
-            // advance during the suspend (see [`AuthManager::notify_wake`]).
-            self.notify_wake();
-        }
-    }
-
     /// Mark an IdP refresh as starting. Paired with [`Self::end_refresh_in_flight`]
     /// via [`InFlightGuard`]; see [`Self::hold_sleep_ack_until_refresh_drains`].
     fn begin_refresh_in_flight(&self) {
@@ -215,60 +150,6 @@ impl AuthManager {
             let _drain = self.refresh_drain_lock.lock();
             self.refresh_drain_cv.notify_all();
         }
-    }
-
-    /// Block the calling thread — the OS power-listener callback, so this
-    /// delays the macOS `IOAllowPowerChange` ack / Linux `delay`-inhibitor
-    /// release — until in-flight IdP refreshes drain or `max` elapses.
-    ///
-    /// A refresh already on the wire when sleep is requested would otherwise
-    /// straddle the suspend and, on a long sleep, lose its rotated successor
-    /// token — revoking the refresh-token family and forcing re-login. We never
-    /// abort the refresh; we briefly delay the suspend so it can finish first.
-    ///
-    /// Bounded by `max` (see [`SLEEP_ACK_MAX_WAIT`]) so a hung refresh can't
-    /// hold the machine awake past the OS pre-sleep budget: on timeout the
-    /// suspend proceeds and the in-flight refresh is left to finish (a resulting
-    /// straddle is surfaced by `auth.refresh.suspend_spanned`).
-    fn hold_sleep_ack_until_refresh_drains(&self, max: StdDuration) {
-        let in_flight = self.refresh_in_flight.load(Ordering::SeqCst);
-        if in_flight == 0 {
-            return;
-        }
-        pi_telemetry::unified_log::warn(
-            "auth.sleep.refresh_in_flight_at_suspend",
-            None,
-            Some(serde_json::json!({ "in_flight": in_flight })),
-        );
-        let started = Instant::now();
-        {
-            let mut drain = self.refresh_drain_lock.lock();
-            // Loop on the atomic (the authoritative predicate) under the lock so
-            // a notify that races the park — or a spurious wake — can neither
-            // lose the signal nor over-wait. `InFlightGuard::drop` notifies when
-            // the count hits zero.
-            while self.refresh_in_flight.load(Ordering::SeqCst) > 0 {
-                let Some(remaining) = max.checked_sub(started.elapsed()) else {
-                    break;
-                };
-                if remaining.is_zero() {
-                    break;
-                }
-                let _ = self.refresh_drain_cv.wait_for(&mut drain, remaining);
-            }
-        }
-        let remaining = self.refresh_in_flight.load(Ordering::SeqCst);
-        pi_telemetry::unified_log::info(
-            "auth.sleep.refresh_drain",
-            None,
-            Some(serde_json::json!({
-                "in_flight_at_start": in_flight,
-                "in_flight_remaining": remaining,
-                "drained": remaining == 0,
-                "waited_ms": started.elapsed().as_millis() as u64,
-                "max_wait_ms": max.as_millis() as u64,
-            })),
-        );
     }
 
     pub(crate) fn is_sleep_gated(&self) -> bool {
@@ -369,63 +250,5 @@ impl AuthManager {
     #[cfg(test)]
     pub(crate) fn set_dark_wake_for_test(&self, dark: bool) {
         *self.dark_wake_override.lock() = Some(dark);
-    }
-
-    /// Test hook: simulate an IdP refresh entering flight (mirrors
-    /// [`InFlightGuard::new`]).
-    #[cfg(test)]
-    pub(crate) fn test_enter_refresh_in_flight(&self) {
-        self.begin_refresh_in_flight();
-    }
-
-    /// Test hook: simulate an in-flight IdP refresh finishing (mirrors
-    /// [`InFlightGuard`]'s drop), waking a sleep-ack waiter.
-    #[cfg(test)]
-    pub(crate) fn test_exit_refresh_in_flight(&self) {
-        self.end_refresh_in_flight();
-    }
-
-    /// Test hook: run the bounded sleep-ack hold directly so tests can pass a
-    /// short bound instead of [`SLEEP_ACK_MAX_WAIT`].
-    #[cfg(test)]
-    pub(crate) fn test_hold_sleep_ack(&self, max: StdDuration) {
-        self.hold_sleep_ack_until_refresh_drains(max);
-    }
-
-    /// Start the OS power listener so sleep/wake drives the gate. Idempotent and
-    /// a no-op where the listener is unavailable. Call only from local /
-    /// interactive entrypoints, never headless/server ones.
-    pub fn start_system_power_listener(self: &Arc<Self>) {
-        // Claim the one-time startup so concurrent/duplicate calls don't
-        // double-register.
-        if self
-            .power_listener_started
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
-            return;
-        }
-        // Weak ref to avoid a manager <-> listener Arc cycle.
-        let weak = Arc::downgrade(self);
-        let listener = pi_system_power::SystemPowerListener::start(move |event| {
-            if let Some(this) = weak.upgrade() {
-                let imminent = matches!(event, pi_system_power::PowerEvent::WillSleep);
-                this.set_system_sleep_imminent(imminent);
-            }
-        });
-        let available = listener.is_some();
-        if available {
-            *self.power_listener.lock() = listener;
-        } else {
-            // Unavailable (unsupported OS / no logind / registration failure):
-            // release the guard so a later call can retry rather than being
-            // permanently no-op'd for this manager.
-            self.power_listener_started.store(false, Ordering::Release);
-        }
-        pi_telemetry::unified_log::info(
-            "auth.sleep.power_listener_init",
-            None,
-            Some(serde_json::json!({ "available": available })),
-        );
     }
 }

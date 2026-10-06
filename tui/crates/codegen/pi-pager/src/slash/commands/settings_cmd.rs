@@ -22,10 +22,6 @@ impl SlashCommand for SettingsCommand {
         "Open the settings modal"
     }
 
-    fn usage(&self) -> &str {
-        "/settings"
-    }
-
     fn run(&self, _ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {
         CommandResult::Action(Action::OpenSettings)
     }
@@ -36,26 +32,10 @@ mod tests {
     use super::*;
     use crate::acp::model_state::ModelState;
 
-    static DEFAULT_BUNDLE_STATE: crate::app::bundle::BundleState =
-        crate::app::bundle::BundleState {
-            has_cache: false,
-            version: String::new(),
-            personas: Vec::new(),
-            roles: Vec::new(),
-            agents: Vec::new(),
-            skills: Vec::new(),
-            persona_details: Vec::new(),
-            role_details: Vec::new(),
-        };
-
     fn make_ctx<'a>(models: &'a ModelState) -> CommandExecCtx<'a> {
         CommandExecCtx {
             models,
-            session_id: None,
-            bundle_state: &DEFAULT_BUNDLE_STATE,
             screen_mode: crate::app::ScreenMode::Inline,
-            billing_surface_visible: true,
-            usage_command_visible: true,
             pager_state: crate::settings::PagerLocalSnapshot {
                 multiline_mode: false,
                 yolo_mode: false,

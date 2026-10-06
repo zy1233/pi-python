@@ -6,18 +6,14 @@ edition.workspace = true
 description = "Foundation modules for the grok shell crate family: environment presets, CPU profiling, and process/filesystem utilities."
 
 [features]
-# Forwarded from shell; empty here (no local-ws code in this crate).
-local-workspace = []
 # Exposes `#[cfg(test)]`-only helpers (`env::EnvVarGuard`,
 # `cpu_profile` test seams) to downstream crates' test targets. Enabled by
 test-support = ["pi-env/test-support"]
 default-bazel = ["test-support"]
 
 [dependencies]
-anyhow = { workspace = true }
 chrono = { workspace = true }
 reqwest = { workspace = true, features = ["blocking"] }
-pi-extra-ca = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -27,7 +23,6 @@ url = { workspace = true }
 pi-config = { workspace = true }
 pi-env = { workspace = true }
 pi-shared = { workspace = true }
-pi-version = { workspace = true }
 pi-tty-utils = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]

@@ -14,11 +14,10 @@ use pi_pager_diff::DiffHunk;
 
 use super::blocks::mermaid_content::DiagramAffordance;
 use super::blocks::{
-    AgentMessageBlock, BgTaskBlock, BtwBlock, ContextInfoBlock, CreditLimitBlock,
-    EditToolCallBlock, ExecuteToolCallBlock, LineRange, ListDirToolCallBlock, OtherToolCallBlock,
-    ReadToolCallBlock, SearchFileMatch, SearchToolCallBlock, SessionEvent, SessionEventBlock,
-    SubagentBlock, SubagentBlockKind, SystemMessageBlock, ThinkingBlock, ToolCallBlock,
-    UserPromptBlock, WorkflowBlock,
+    AgentMessageBlock, BtwBlock, ContextInfoBlock, CreditLimitBlock, EditToolCallBlock,
+    ExecuteToolCallBlock, LineRange, ListDirToolCallBlock, OtherToolCallBlock, ReadToolCallBlock,
+    SearchFileMatch, SearchToolCallBlock, SessionEvent, SessionEventBlock, SystemMessageBlock,
+    ThinkingBlock, ToolCallBlock, UserPromptBlock,
 };
 use super::types::{
     AccentStyle, BlockBackground, BlockContext, BlockOutput, DisplayMode, RenderedBlockOutput,
@@ -383,11 +382,6 @@ pub enum RenderBlock {
     System(SystemMessageBlock),
     /// Session-level event (typed: turn completed, cancelled, failed, etc.).
     SessionEvent(SessionEventBlock),
-    /// Background task (always collapsed, animated bullet while running).
-    BgTask(BgTaskBlock),
-    /// Subagent lifecycle (started / completed / failed).
-    Subagent(SubagentBlock),
-    Workflow(WorkflowBlock),
     /// /btw side-question response (golden accent).
     Btw(BtwBlock),
     /// `/context` snapshot with categorical bar + breakdown.
@@ -407,9 +401,6 @@ macro_rules! delegate_block {
             RenderBlock::Thinking(b) => b.$method($($arg),*),
             RenderBlock::System(b) => b.$method($($arg),*),
             RenderBlock::SessionEvent(b) => b.$method($($arg),*),
-            RenderBlock::BgTask(b) => b.$method($($arg),*),
-            RenderBlock::Subagent(b) => b.$method($($arg),*),
-            RenderBlock::Workflow(b) => b.$method($($arg),*),
             RenderBlock::Btw(b) => b.$method($($arg),*),
             RenderBlock::ContextInfo(b) => b.$method($($arg),*),
             RenderBlock::CreditLimit(b) => b.$method($($arg),*),
@@ -614,12 +605,6 @@ impl RenderBlock {
         RenderBlock::UserPrompt(UserPromptBlock::cron(text))
     }
 
-    /// Create a mid-turn interjection prompt block (standard user prompt
-    /// rendering, excluded from shell prompt-index bookkeeping).
-    pub fn interjection_prompt(text: impl Into<String>) -> Self {
-        RenderBlock::UserPrompt(UserPromptBlock::interjection(text))
-    }
-
     /// Create an agent message block.
     pub fn agent_message(text: impl Into<String>) -> Self {
         RenderBlock::AgentMessage(AgentMessageBlock::new(text))
@@ -797,41 +782,6 @@ impl RenderBlock {
         RenderBlock::CreditLimit(CreditLimitBlock::new(heading, action, url))
     }
 
-    /// Create a "Task started" background task block.
-    pub fn bg_task(command: impl Into<String>, task_id: impl Into<String>) -> Self {
-        RenderBlock::BgTask(BgTaskBlock::started(command, task_id))
-    }
-
-    /// Create a "Task completed" background task block.
-    pub fn bg_task_completed(
-        command: impl Into<String>,
-        task_id: impl Into<String>,
-        elapsed: std::time::Duration,
-    ) -> Self {
-        RenderBlock::BgTask(BgTaskBlock::completed(command, task_id, elapsed))
-    }
-
-    /// Create a "Task failed" background task block.
-    pub fn bg_task_failed(
-        command: impl Into<String>,
-        task_id: impl Into<String>,
-        elapsed: std::time::Duration,
-        exit_code: Option<i32>,
-        signal: Option<String>,
-    ) -> Self {
-        RenderBlock::BgTask(BgTaskBlock::failed(
-            command, task_id, elapsed, exit_code, signal,
-        ))
-    }
-
-    /// Set the description on a `BgTask` block (builder pattern, no-op for other variants).
-    pub fn with_bg_task_description(mut self, description: Option<String>) -> Self {
-        if let RenderBlock::BgTask(ref mut b) = self {
-            b.description = description;
-        }
-        self
-    }
-
     /// Get mutable access to a StubBlock if this is one.
     pub fn as_stub_mut(&mut self) -> Option<&mut StubBlock> {
         match self {
@@ -899,22 +849,6 @@ impl RenderBlock {
     /// the thinking header text undims on selection.
     pub fn is_thinking(&self) -> bool {
         matches!(self, RenderBlock::Thinking(_))
-    }
-
-    /// Check if this block is a BgTask block.
-    ///
-    /// Used by the entry cache for the same reason as `is_tool_call`:
-    /// the bold "Task" label undims on selection.
-    pub fn is_bg_task(&self) -> bool {
-        matches!(self, RenderBlock::BgTask(_))
-    }
-
-    /// Check if this block is a Subagent block.
-    ///
-    /// Used by the entry cache for the same reason as `is_tool_call`:
-    /// the bold "Subagent" label undims on selection.
-    pub fn is_subagent(&self) -> bool {
-        matches!(self, RenderBlock::Subagent(_))
     }
 
     /// Check if this block is an AgentMessage.
@@ -988,7 +922,6 @@ impl RenderBlock {
         match self {
             RenderBlock::UserPrompt(_) => Some(theme.text_primary),
             RenderBlock::AgentMessage(_) => None, // No accent for agent messages
-            RenderBlock::Workflow(_) => None,
             RenderBlock::ToolCall(block) => {
                 // Execute: Green for success, red for failure
                 // Read/Edit/ListDir/Search: No accent
@@ -1011,20 +944,6 @@ impl RenderBlock {
                 }
             }
             RenderBlock::Thinking(_) => Some(theme.accent_thinking),
-            RenderBlock::BgTask(block) => {
-                if block.is_running() {
-                    Some(theme.accent_running)
-                } else {
-                    None
-                }
-            }
-            RenderBlock::Subagent(block) => {
-                if block.is_running() {
-                    Some(theme.accent_running)
-                } else {
-                    None
-                }
-            }
             RenderBlock::System(_)
             | RenderBlock::SessionEvent(_)
             | RenderBlock::ContextInfo(_)
@@ -1044,8 +963,7 @@ impl RenderBlock {
             | RenderBlock::ToolCall(ToolCallBlock::WebFetch(_))
             | RenderBlock::ToolCall(ToolCallBlock::WebSearch(_))
             | RenderBlock::ToolCall(ToolCallBlock::IntegrationSearch(_))
-            | RenderBlock::ToolCall(ToolCallBlock::UseTool(_))
-            | RenderBlock::BgTask(_) => true,
+            | RenderBlock::ToolCall(ToolCallBlock::UseTool(_)) => true,
             RenderBlock::ToolCall(ToolCallBlock::Read(b)) => b.has_content(),
             RenderBlock::ToolCall(ToolCallBlock::Search(b)) => b.error.is_none(),
             RenderBlock::ToolCall(ToolCallBlock::ListDir(b)) => {
@@ -1119,7 +1037,6 @@ impl RenderBlock {
             RenderBlock::ToolCall(ToolCallBlock::WebFetch(b)) => Some(b.url.clone()),
             RenderBlock::ToolCall(ToolCallBlock::WebSearch(b)) => Some(b.query.clone()),
             RenderBlock::ToolCall(ToolCallBlock::Search(b)) => Some(b.pattern.clone()),
-            RenderBlock::BgTask(b) => Some(b.command.clone()),
             _ => None,
         }
     }
@@ -1146,30 +1063,6 @@ impl RenderBlock {
             RenderBlock::Thinking(b) => join_searchable([Some(b.copy_text(false))]),
             RenderBlock::System(b) => join_searchable([Some(b.text.clone())]),
             RenderBlock::SessionEvent(b) => join_searchable([Some(b.event.message())]),
-            RenderBlock::BgTask(b) => {
-                join_searchable([Some(b.command.clone()), b.description.clone()])
-            }
-            RenderBlock::Workflow(b) => {
-                join_searchable([Some(b.name.clone()), Some(b.objective.clone())])
-            }
-            RenderBlock::Subagent(b) => {
-                // Only the failed variant carries an error string worth indexing.
-                let error = match &b.kind {
-                    SubagentBlockKind::Failed { error, .. } => error.clone(),
-                    SubagentBlockKind::Started
-                    | SubagentBlockKind::Completed { .. }
-                    | SubagentBlockKind::Cancelled { .. } => None,
-                };
-                join_searchable([
-                    Some(b.description.clone()),
-                    Some(b.subagent_type.clone()),
-                    b.persona.clone(),
-                    b.role.clone(),
-                    b.model.clone(),
-                    b.activity_label.clone(),
-                    error,
-                ])
-            }
             RenderBlock::Btw(b) => join_searchable([
                 Some(b.question.clone()),
                 Some(b.content().rendered_plain_text()),
@@ -1203,10 +1096,7 @@ impl RenderBlock {
     /// (pre-wrap line index, display-cell column range). The caller is
     /// responsible for mapping through word-wrapping and entry layout to
     /// reach screen coordinates.
-    pub fn with_hyperlinks<R>(
-        &self,
-        f: impl FnOnce(&[pi_markdown::HyperlinkTarget]) -> R,
-    ) -> R {
+    pub fn with_hyperlinks<R>(&self, f: impl FnOnce(&[pi_markdown::HyperlinkTarget]) -> R) -> R {
         match self {
             RenderBlock::AgentMessage(b) => b.content().with_hyperlinks(f),
             RenderBlock::Thinking(b) => b.content().with_hyperlinks(f),
@@ -1475,9 +1365,8 @@ mod tests {
 mod searchable_text_tests {
     use super::*;
     use crate::scrollback::blocks::SearchLineMatch;
+    use crate::scrollback::blocks::tool::WebSearchToolCallBlock;
     use crate::scrollback::blocks::tool::memory_search::{MemoryResult, MemorySearchToolCallBlock};
-    use crate::scrollback::blocks::tool::{LifecycleEventBlock, WebSearchToolCallBlock};
-    use std::time::Duration;
     use pi_shell::session::ContextInfo;
 
     #[test]
@@ -1511,41 +1400,6 @@ mod searchable_text_tests {
         });
         let text = block.searchable_text().expect("session event text");
         assert!(text.contains("connection reset"), "got: {text:?}");
-    }
-
-    #[test]
-    fn bg_task_indexes_command_and_description() {
-        let block = RenderBlock::bg_task("cargo build --release", "task-1")
-            .with_bg_task_description(Some("compile in release mode".into()));
-        let text = block.searchable_text().expect("bg task text");
-        assert!(text.contains("cargo build --release"), "got: {text:?}");
-        assert!(text.contains("compile in release mode"), "got: {text:?}");
-    }
-
-    #[test]
-    fn subagent_failed_indexes_metadata_and_error() {
-        let mut block = RenderBlock::Subagent(SubagentBlock::failed(
-            "investigate flaky test",
-            "child-1",
-            Duration::from_secs(3),
-            Some("panicked at assert".into()),
-        ));
-        // Populate the metadata fields a failed background block leaves empty.
-        if let RenderBlock::Subagent(b) = &mut block {
-            b.subagent_type = "explore".into();
-            b.persona = Some("scout".into());
-            b.role = Some("researcher".into());
-            b.model = Some("grok-test".into());
-            b.activity_label = Some("Running: cargo build".into());
-        }
-        let text = block.searchable_text().expect("subagent text");
-        assert!(text.contains("investigate flaky test"), "got: {text:?}");
-        assert!(text.contains("explore"), "got: {text:?}");
-        assert!(text.contains("scout"), "got: {text:?}");
-        assert!(text.contains("researcher"), "got: {text:?}");
-        assert!(text.contains("grok-test"), "got: {text:?}");
-        assert!(text.contains("Running: cargo build"), "got: {text:?}");
-        assert!(text.contains("panicked at assert"), "got: {text:?}");
     }
 
     #[test]
@@ -1639,17 +1493,6 @@ mod searchable_text_tests {
         assert!(text.contains("global"), "got: {text:?}");
         assert!(text.contains("MEMORY.md"), "got: {text:?}");
         assert!(text.contains("use graphite for PRs"), "got: {text:?}");
-    }
-
-    #[test]
-    fn lifecycle_indexes_event_name() {
-        let block = RenderBlock::ToolCall(ToolCallBlock::Lifecycle(LifecycleEventBlock::new(
-            "user_prompt_submit",
-        )));
-        assert_eq!(
-            block.searchable_text().as_deref(),
-            Some("user_prompt_submit")
-        );
     }
 
     #[test]

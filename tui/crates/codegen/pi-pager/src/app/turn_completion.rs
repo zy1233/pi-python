@@ -10,87 +10,22 @@
 
 use crate::scrollback::blocks::SessionEvent;
 
-use super::agent::AgentId;
 use super::agent_view::AgentView;
-use super::app_view::AppView;
 use super::cancel_latency::TurnEnd;
-
-/// `_meta.cancellationCategory` of a hook-denied turn end: renders the
-/// "blocked by a hook" marker instead of "cancelled by user" on every rail.
-pub(crate) const HOOK_DENIED_CATEGORY: &str =
-    pi_shell::session::commands::HOOK_DENIED_CATEGORY;
 
 /// `_meta` key of a cancelled terminal's trigger (`"send_now"`, `"ctrl_c"`, …).
 pub(crate) const CANCEL_TRIGGER_KEY: &str = "cancelTrigger";
-/// `_meta` key of a terminal's cancellation category (e.g.
-/// [`HOOK_DENIED_CATEGORY`]).
-pub(crate) const CANCELLATION_CATEGORY_KEY: &str = "cancellationCategory";
 
-/// The turn-cancelled terminal marker for a cancel of `category`: the
-/// hook-denied category renders [`SessionEvent::TurnBlockedByHook`], anything
-/// else the user-cancel copy. One chooser for all rails so the wording can't
-/// drift between the driver, viewer, reconcile, and wake paths.
-pub(super) fn cancelled_turn_event(
-    cancellation_category: Option<&str>,
-    elapsed: std::time::Duration,
-) -> SessionEvent {
-    if cancellation_category == Some(HOOK_DENIED_CATEGORY) {
-        SessionEvent::TurnBlockedByHook { elapsed }
-    } else {
-        SessionEvent::TurnCancelled { elapsed }
-    }
-}
-
-/// Push a turn-terminal marker ("Turn completed/cancelled/failed"), folding
-/// any pending stop-family hook runs into it so they render inline
-/// (right-justified) on the marker line instead of as a standalone block.
+/// Push a turn-terminal marker ("Turn completed/cancelled/failed").
 ///
 /// All three marker rails route through here: the driver's `PromptResponse`,
 /// the lost-RPC reconcile, and the viewer finalize. (Wake turns route through
 /// `finish_wake_turn` in acp_handler, which maps their stop reason and calls
-/// here only when a marker is due.) `event == None`
-/// (bash turns, rate-limit / re-auth UX that replaces the marker) flushes the
-/// held hooks as the legacy standalone lifecycle block so failures stay
-/// visible.
-///
-/// A stamped stash folds only on an exact ending-id match. On a mismatch it
-/// flushes standalone (the ending turn is THE turn — an older stash has no
-/// marker coming). An unstamped stash keeps the legacy
-/// stashed-during-this-turn heuristic.
-pub(super) fn push_turn_terminal_marker(
-    agent: &mut AgentView,
-    event: Option<SessionEvent>,
-    ending_prompt_id: Option<&str>,
-) {
-    let pending = agent.pending_stop_hooks.take();
-    let groups = match pending {
-        None => Vec::new(),
-        Some(pending) => {
-            let stale = match (pending.prompt_id.as_deref(), ending_prompt_id) {
-                (Some(stashed), Some(ending)) => stashed != ending,
-                (Some(_), None) => true,
-                (None, _) => false,
-            };
-            if stale {
-                for (name, runs) in pending.groups {
-                    agent.scrollback.push_lifecycle_hooks(name, runs);
-                }
-                Vec::new()
-            } else {
-                pending.groups
-            }
-        }
-    };
-
-    match event {
-        Some(event) => {
-            agent.push_end_marker_block(event, groups, ending_prompt_id.map(str::to_string));
-        }
-        None => {
-            for (name, runs) in groups {
-                agent.scrollback.push_lifecycle_hooks(name, runs);
-            }
-        }
+/// here only when a marker is due.) `event == None` (bash turns, rate-limit /
+/// re-auth UX that replaces the marker) pushes nothing.
+pub(super) fn push_turn_terminal_marker(agent: &mut AgentView, event: Option<SessionEvent>) {
+    if let Some(event) = event {
+        agent.push_end_marker_block(event);
     }
 }
 
@@ -108,15 +43,6 @@ pub(super) struct TerminalSignal<'a> {
     pub stop_reason: Option<&'a str>,
     /// `agentResult` detail (error text, when present).
     pub agent_result: Option<&'a str>,
-    /// `_meta.cancelTrigger`: `"send_now"` is the silent half of a
-    /// cancel-and-send, so the `TurnCancelled` marker is suppressed. Absent
-    /// meta means a normal cancel, unless this client just dispatched the
-    /// send-now (`AgentView::expect_send_now_cancel`, older-shell fallback).
-    pub cancel_trigger: Option<&'a str>,
-    /// `_meta.cancellationCategory`: `"HookDenied"` picks the
-    /// blocked-by-a-hook marker. Absent on older shells and plain user
-    /// cancels.
-    pub cancellation_category: Option<&'a str>,
 }
 
 /// What applying a terminal turn signal did to one agent.
@@ -129,7 +55,7 @@ pub(super) enum TerminalApply {
     /// change so the reconcile sweep's animation tick stays scheduled.
     ReconcileArmed,
     /// Viewer: the turn was finished and (for non-rate-limit reasons) a terminal
-    /// marker pushed. The caller drops any stale running-prompt adoption.
+    /// marker pushed.
     ViewerFinalized,
 }
 
@@ -153,8 +79,6 @@ fn arm_driver_turn_end_reconcile(
         prompt_id,
         stop_reason,
         agent_result,
-        cancel_trigger,
-        cancellation_category,
     } = signal;
     if agent.session.loading_replay {
         return false;
@@ -193,8 +117,6 @@ fn arm_driver_turn_end_reconcile(
             prompt_id: arm_pid.clone(),
             stop_reason: stop_reason.map(str::to_string),
             agent_result: agent_result.map(str::to_string),
-            cancel_trigger: cancel_trigger.map(str::to_string),
-            cancellation_category: cancellation_category.map(str::to_string),
             received_at,
         });
         crate::unified_log::info(
@@ -225,8 +147,6 @@ fn arm_driver_turn_end_reconcile(
         prompt_id: arm_pid,
         stop_reason: stop_reason.map(str::to_string),
         agent_result: agent_result.map(str::to_string),
-        cancel_trigger: cancel_trigger.map(str::to_string),
-        cancellation_category: cancellation_category.map(str::to_string),
         received_at: std::time::Instant::now(),
     });
     true
@@ -297,11 +217,9 @@ pub(super) fn finalize_turn_from_terminal(
     signal: TerminalSignal<'_>,
 ) -> TerminalApply {
     let TerminalSignal {
-        prompt_id,
         stop_reason,
         agent_result,
-        cancel_trigger,
-        cancellation_category,
+        ..
     } = signal;
     if !agent.attached_as_viewer {
         if arm_driver_turn_end_reconcile(agent, session_id, signal) {
@@ -321,32 +239,14 @@ pub(super) fn finalize_turn_from_terminal(
     // anchor was back-dated from the authoritative `turnStartMs` on adoption, so
     // this reads the same wall-clock duration the driver shows.
     let elapsed = agent.turn_elapsed().unwrap_or_default();
-    // Read before `finish_turn()` clears it; keys the pending stop-hook stash.
-    let ending_prompt_id = agent
-        .session
-        .current_prompt_id
-        .clone()
-        .or_else(|| prompt_id.map(str::to_string));
-
     agent.session.finish_turn(&mut agent.scrollback);
-
-    // Wire meta wins; else the client-side expectation (older-shell fallback).
-    // Taken at every viewer finalize so it can't go stale.
-    let expected_send_now = agent.expect_send_now_cancel.take();
-    let send_now_cancel = match cancel_trigger {
-        Some(trigger) => trigger == "send_now",
-        None => expected_send_now.is_some(),
-    };
 
     // A viewer never receives the driver's `PromptResponse` RPC — the source of
     // the driver's "Worked for X" marker. Surface the equivalent here.
     // The signal only carries a coarse `stop_reason` (no doom-loop category, no
     // driver-local rate-limit / re-auth context), so map it to the closest event:
     let event = match stop_reason {
-        // Send-now cancel: no marker (the sender's new prompt renders as the
-        // next turn; neither cancelled nor a substitute completed).
-        Some("cancelled") if send_now_cancel => None,
-        Some("cancelled") => Some(cancelled_turn_event(cancellation_category, elapsed)),
+        Some("cancelled") => Some(SessionEvent::TurnCancelled { elapsed }),
         // Rate limits drive a dedicated UX on the driver and are not actionable
         // from a viewer — don't surface a stray "Turn failed" line.
         Some("rate_limit") => None,
@@ -356,7 +256,7 @@ pub(super) fn finalize_turn_from_terminal(
             elapsed: Some(elapsed),
         }),
     };
-    push_turn_terminal_marker(agent, event, ending_prompt_id.as_deref());
+    push_turn_terminal_marker(agent, event);
 
     agent.mark_turn_finished(TurnEnd::Completed);
 
@@ -376,24 +276,12 @@ pub(super) fn finalize_turn_from_terminal(
 ///   (`is_active == false`) that armed the reconcile must still report the change
 ///   or `reconcile_overdue_turn_ends` never fires and the turn strands on
 ///   "Waiting…" — the exact bug this rail fixes.
-/// - `ViewerFinalized` -> `true` only when `is_active` (drop pending adoption).
-pub(super) fn apply_terminal_outcome(
-    outcome: TerminalApply,
-    app: &mut AppView,
-    agent_id: AgentId,
-    is_active: bool,
-) -> bool {
+/// - `ViewerFinalized` -> `true` only when `is_active`.
+pub(super) fn apply_terminal_outcome(outcome: TerminalApply, is_active: bool) -> bool {
     match outcome {
         TerminalApply::Ignored => false,
         TerminalApply::ReconcileArmed => true,
-        TerminalApply::ViewerFinalized => {
-            if let Some(p) = app.pending_running_adoptions.remove(&agent_id)
-                && let Some(agent) = app.agents.get_mut(&agent_id)
-            {
-                agent.discard_pending_adoption_updates(&p.prompt_id);
-            }
-            is_active
-        }
+        TerminalApply::ViewerFinalized => is_active,
     }
 }
 

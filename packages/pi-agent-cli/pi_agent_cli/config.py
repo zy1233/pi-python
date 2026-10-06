@@ -77,6 +77,23 @@ def is_project_relative_path(raw: str) -> bool:
 
 
 @dataclass(frozen=True)
+class ModelChoice:
+    """One selectable model (the ``/model`` picker; ACP session config option ``model``).
+
+    In ``[[models]]`` entries unset fields inherit from the default ``[model]`` table, but
+    ``base_url`` / ``api_key_env`` / ``supports_images`` are only inherited when ``provider``
+    is unset or equals the default provider (credentials never leak across providers).
+    """
+
+    id: str
+    name: str | None = None
+    provider: str | None = None
+    base_url: str | None = None
+    api_key_env: str | None = None
+    supports_images: bool | None = None
+
+
+@dataclass(frozen=True)
 class CliConfig:
     permission: PermissionMode = "ask"
     provider: str = "mock"
@@ -106,6 +123,7 @@ class CliConfig:
     # ``None``: not set. Then the older ``trust_project_extensions`` decides ("always" if it is
     # on), and otherwise the answer is "ask". See ``extension_trust.effective_default_trust``.
     default_project_trust: DefaultProjectTrust | None = None
+    models: tuple[ModelChoice, ...] = ()
 
     @property
     def model_reasoning(self) -> bool:
@@ -119,6 +137,43 @@ class CliConfig:
         if self.reasoning is not None:
             return self.reasoning
         return self.thinking_level != "off"
+
+    def default_choice(self) -> ModelChoice:
+        """The ``[model]`` table as a fully-resolved choice."""
+        return ModelChoice(
+            id=self.model_id,
+            provider=self.provider,
+            base_url=self.base_url,
+            api_key_env=self.api_key_env,
+            supports_images=self.supports_images,
+        )
+
+    def model_choices(self) -> tuple[ModelChoice, ...]:
+        """Selectable models: the default first, then ``[[models]]`` (resolved, unique by id)."""
+        out = [self.default_choice()]
+        seen = {self.model_id}
+        for item in self.models:
+            if item.id in seen:
+                continue
+            seen.add(item.id)
+            same_provider = item.provider is None or item.provider == self.provider
+            out.append(
+                ModelChoice(
+                    id=item.id,
+                    name=item.name,
+                    provider=item.provider or self.provider,
+                    base_url=item.base_url
+                    if item.base_url is not None or not same_provider
+                    else self.base_url,
+                    api_key_env=item.api_key_env
+                    if item.api_key_env is not None or not same_provider
+                    else self.api_key_env,
+                    supports_images=item.supports_images
+                    if item.supports_images is not None or not same_provider
+                    else self.supports_images,
+                )
+            )
+        return tuple(out)
 
 
 def load_config(home: Path | str | None = None) -> CliConfig:
@@ -135,26 +190,34 @@ def load_config(home: Path | str | None = None) -> CliConfig:
     return CliConfig()
 
 
-def make_get_api_key(
-    config: CliConfig,
-) -> Callable[[str], str | None] | None:
-    """Build the ``get_api_key`` callback; ``None`` when no ``api_key_env`` is configured.
+def api_key_getter(env_name: str | None, provider: str) -> Callable[[str], str | None] | None:
+    """Build the ``get_api_key`` callback for a model of ``provider``.
 
-    ``api_key_env`` is the key of ``config.provider`` only. Any other provider (e.g. a
-    sub-agent routed elsewhere) gets ``None`` so its SDK falls back to its own standard
-    env var (``ANTHROPIC_API_KEY`` ...) instead of receiving a credential meant for a
-    different vendor.
+    ``None`` when no ``env_name`` is configured. ``env_name`` is the key of ``provider`` only.
+    Any other provider (e.g. a sub-agent routed elsewhere) gets ``None`` so its SDK falls back
+    to its own standard env var (``ANTHROPIC_API_KEY`` ...) instead of receiving a credential
+    meant for a different vendor.
     """
-    env_name = config.api_key_env
     if not env_name:
         return None
 
-    def get_api_key(provider: str) -> str | None:
-        if provider.casefold() != config.provider.casefold():
+    def get_api_key(requested: str) -> str | None:
+        if requested.casefold() != provider.casefold():
             return None
         return os.environ.get(env_name) or None
 
     return get_api_key
+
+
+def make_get_api_key(
+    config: CliConfig,
+) -> Callable[[str], str | None] | None:
+    """Build the ``get_api_key`` callback for the ``[model]`` default.
+
+    ``None`` when no ``api_key_env`` is configured. ``api_key_env`` is the key of
+    ``config.provider`` only (see ``api_key_getter``).
+    """
+    return api_key_getter(config.api_key_env, config.provider)
 
 
 def _from_toml(data: dict[str, Any]) -> CliConfig:
@@ -205,6 +268,27 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
     if isinstance(raw_trusted, list):
         trusted_projects = tuple(str(item).strip() for item in raw_trusted if str(item).strip())
 
+    models: list[ModelChoice] = []
+    raw_models = data.get("models")
+    if isinstance(raw_models, list):
+        for item in raw_models:
+            if not isinstance(item, dict):
+                continue
+            model_id = _optional_str(item.get("id") or item.get("model_id"))
+            if model_id is None:
+                continue
+            images = item.get("supports_images")
+            models.append(
+                ModelChoice(
+                    id=model_id,
+                    name=_optional_str(item.get("name")),
+                    provider=_optional_str(item.get("provider")),
+                    base_url=_optional_str(item.get("base_url")),
+                    api_key_env=_optional_str(item.get("api_key_env")),
+                    supports_images=bool(images) if images is not None else None,
+                )
+            )
+
     return CliConfig(
         permission=permission,  # type: ignore[arg-type]
         provider=str(model.get("provider") or data.get("provider") or "mock"),
@@ -228,6 +312,7 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         trust_project_extensions=_as_bool(extensions.get("trust_project_extensions"), False),
         trusted_projects=trusted_projects,
         default_project_trust=_default_project_trust(extensions.get("default_project_trust")),
+        models=tuple(models),
     )
 
 

@@ -67,23 +67,6 @@ impl SafeAbsoluteDirectory {
 }
 
 impl FixRequest {
-    #[cfg(test)]
-    pub(crate) fn new_for_test(
-        id: DiagnosticId,
-        home: &Path,
-        shell: Option<PathBuf>,
-        validator: Option<PathBuf>,
-        byobu_config_dir: Option<PathBuf>,
-    ) -> Result<Self, FixError> {
-        Ok(Self {
-            id,
-            home: SafeAbsoluteDirectory::parse(home.to_path_buf(), "HOME")?,
-            shell,
-            validator,
-            byobu_config_dir,
-        })
-    }
-
     pub fn from_environment(id: DiagnosticId) -> Result<Self, FixError> {
         let home =
             SafeAbsoluteDirectory::parse(actual_home().ok_or(FixError::HomeUnavailable)?, "HOME")?;
@@ -164,20 +147,6 @@ pub struct FixPlan {
     payload: FixPayload,
 }
 
-impl FixPlan {
-    pub fn id(&self) -> DiagnosticId {
-        self.id
-    }
-
-    pub fn change(&self) -> &PlannedChange {
-        &self.change
-    }
-
-    pub fn caveats(&self) -> &[&'static str] {
-        &self.caveats
-    }
-}
-
 #[derive(Clone, Debug)]
 enum FixPayload {
     SshWrap(SshWrapPlan),
@@ -221,24 +190,6 @@ pub struct FixOutcome {
 }
 
 impl FixOutcome {
-    #[cfg(test)]
-    pub(crate) fn new_for_test(
-        id: DiagnosticId,
-        status: FixStatus,
-        path: PathBuf,
-        backup_path: Option<PathBuf>,
-        activation: FixActivation,
-        shell: Option<ShellKind>,
-    ) -> Self {
-        Self::new(
-            id,
-            status,
-            ChangedFile { path, backup_path },
-            activation,
-            shell,
-        )
-    }
-
     fn new(
         id: DiagnosticId,
         status: FixStatus,
@@ -259,10 +210,6 @@ impl FixOutcome {
         self.id
     }
 
-    pub fn status(&self) -> FixStatus {
-        self.status
-    }
-
     pub fn activation(&self) -> FixActivation {
         self.activation
     }
@@ -273,11 +220,6 @@ impl FixOutcome {
 
     pub fn backup_path(&self) -> Option<&Path> {
         self.changed_file.backup_path.as_deref()
-    }
-
-    /// Shell that planned and applied this fix, when the fix is shell-scoped.
-    pub fn shell(&self) -> Option<ShellKind> {
-        self.shell
     }
 
     /// Whether the SSH-wrap managed alias is present for the shell that applied
@@ -534,36 +476,11 @@ pub(crate) fn human_fix_command(id: DiagnosticId) -> Option<String> {
     fix_spec(id).map(|spec| format!("grok doctor fix {}", spec.handle))
 }
 
-pub(crate) fn automatic_fix_choices()
--> impl Iterator<Item = (DiagnosticId, &'static str, &'static str)> {
-    FIX_REGISTRY
-        .iter()
-        .map(|spec| (spec.id, spec.handle, spec.label))
-}
-
 pub(crate) fn automatic_remediation_for(id: DiagnosticId) -> Option<AutomaticRemediation> {
     fix_spec(id).map(|spec| AutomaticRemediation {
         fix_id: id,
         command: spec.command,
     })
-}
-
-pub fn ssh_wrap_automatic_remediation() -> AutomaticRemediation {
-    automatic_remediation_for(SSH_WRAP_ID).expect("registered SSH wrap fix")
-}
-
-pub(crate) fn select_fix_plan(
-    id: DiagnosticId,
-    report: &DiagnosticReport,
-    terminal: &TerminalContext,
-) -> Result<Option<FixPlan>, FixError> {
-    let spec = fix_spec(id).ok_or_else(|| FixError::UnknownId(id.to_string()))?;
-    if matches!(spec.kind, FixKind::SshWrap)
-        && (terminal.is_ssh || terminal.is_official_vscode_remote || report.facts.ssh)
-    {
-        return Ok(None);
-    }
-    plan_fix(FixRequest::from_environment(id)?, report, terminal).map(Some)
 }
 
 pub(crate) fn applicable_automatic_fixes(
@@ -1590,16 +1507,6 @@ pub fn configured_report(mut report: DiagnosticReport, configured: bool) -> Diag
         report.findings.retain(|finding| finding.id != SSH_WRAP_ID);
     }
     report
-}
-
-#[cfg(test)]
-pub(crate) fn test_fix_plan(home: &Path) -> FixPlan {
-    plan_fix(
-        tests::request(home, "/bin/bash"),
-        &tests::report(),
-        &TerminalContext::default(),
-    )
-    .unwrap()
 }
 
 #[cfg(test)]

@@ -79,7 +79,7 @@ pub fn render_tip(area: Rect, buf: &mut Buffer, tip: &str, inset: u16) {
 /// modifiers (`insert(add)` / `remove(sub)`), so a later paint whose style
 /// carries no `sub_modifier` inherits whatever BOLD/ITALIC/… an earlier
 /// same-frame paint left behind (e.g. the welcome tip's bold `Tip: ` prefix
-/// bleeding into the ephemeral tip as "**Queue**d · Enter to send now").
+/// bleeding into the ephemeral tip as "**Sampl**e · Enter to go").
 fn clear_rect(buf: &mut Buffer, area: Rect, color: Color) {
     for row in 0..area.height {
         for col in 0..area.width {
@@ -165,17 +165,17 @@ mod tests {
             Style::default().add_modifier(Modifier::BOLD),
         );
 
-        // The send-now tip shape: dim text with a single bold key chord.
+        // A typical tip shape: dim text with a single bold key chord.
         let dim = Style::default();
         let bold = Style::default().add_modifier(Modifier::BOLD);
         let line = Line::from(vec![
-            Span::styled("Queued · ", dim),
+            Span::styled("Sample · ", dim),
             Span::styled("Enter", bold),
-            Span::styled(" to send now", dim),
+            Span::styled(" to go", dim),
         ]);
         render_ephemeral_tip(area, &mut buf, &line);
 
-        assert_eq!(row_text(&buf, area, 0).trim(), "Queued · Enter to send now");
+        assert_eq!(row_text(&buf, area, 0).trim(), "Sample · Enter to go");
         let bold_cols: Vec<u16> = (0..area.width)
             .filter(|&x| {
                 buf.cell((x, 0))

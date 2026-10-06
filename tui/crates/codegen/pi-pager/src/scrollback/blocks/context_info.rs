@@ -263,13 +263,6 @@ impl ContextInfoBlock {
         }
     }
 
-    /// Build the styled lines for an arbitrary content width. Reused by the
-    /// usage modal's "Context usage" tab so the modal and the minimal-mode
-    /// scrollback block render the same breakdown.
-    pub(crate) fn lines_for_width(&self, theme: &Theme, width: u16) -> Vec<Line<'static>> {
-        self.build_lines(theme, BarLayout::for_width(width))
-    }
-
     /// Build the styled lines using the supplied theme and bar layout.
     ///
     /// Called from `output()` on every redraw so theme switches take effect
@@ -665,7 +658,6 @@ impl BlockContent for ContextInfoBlock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pi_shell::session::TokenUsageCategory;
 
     fn snapshot() -> ContextInfo {
         ContextInfo {
@@ -1054,55 +1046,6 @@ mod tests {
         assert_eq!(tools, 0, "tool definitions excluded from the bar");
         assert_eq!(diamonds, 20, "used band must equal used/total");
         assert_eq!(free, 80);
-    }
-
-    #[test]
-    fn build_lines_renders_usage_categories_with_details() {
-        let mut snap = snapshot();
-        snap.usage_categories = vec![
-            TokenUsageCategory::skills_listing(&"x".repeat(9_600), 21),
-            TokenUsageCategory::mcp_servers(&"y".repeat(1_200), 4),
-        ];
-        let block = ContextInfoBlock::new(snap, "grok-4");
-        let theme = test_theme();
-        let lines = block.build_lines(&theme, BarLayout::WIDE);
-        let all = all_text(&lines);
-        assert!(
-            all.contains("Skills") && all.contains("21 skills"),
-            "skills row missing:\n{all}"
-        );
-        assert!(
-            all.contains("MCP servers") && all.contains("4 servers"),
-            "mcp row missing:\n{all}"
-        );
-        assert!(all.contains("\u{00b7} 12 tools"), "tools count:\n{all}");
-        let (_, tools, _, total) = count_bar_glyphs(&lines, BarLayout::WIDE);
-        assert_eq!(total, 100);
-        assert_eq!(tools, 0, "usage categories must never enter the bar");
-
-        // Token, percent, and count columns line up across all rows;
-        // single-digit counts are right-aligned ("·  4 servers").
-        let is_row = |l: &&str| {
-            (l.starts_with('\u{25C6}') || l.starts_with('\u{25C8}') || l.starts_with('\u{25C7}'))
-                && l.contains(" tokens ")
-        };
-        let cols = |needle: &str| -> Vec<usize> {
-            all.lines()
-                .filter(is_row)
-                .filter_map(|l| l.find(needle))
-                .collect()
-        };
-        for needle in [" tokens ", ")"] {
-            let positions = cols(needle);
-            assert!(
-                positions.windows(2).all(|w| w[0] == w[1]),
-                "{needle:?} column misaligned: {positions:?}\n{all}"
-            );
-        }
-        assert!(
-            all.contains("\u{00b7}  4 servers"),
-            "single-digit count must be right-aligned:\n{all}"
-        );
     }
 
     #[test]

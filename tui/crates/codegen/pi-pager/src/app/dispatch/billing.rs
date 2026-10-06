@@ -1,14 +1,14 @@
 //! Subscription tier checks, credit-limit upsells, and auto-topup handling.
 
-use super::queue::{maybe_drain_queue, note_peek_page_flip};
+use super::queue::maybe_drain_queue;
 use crate::app::actions::Effect;
 use crate::app::agent::AgentId;
 use crate::app::agent_view::AgentView;
 use crate::app::app_view::AppView;
 use crate::scrollback::block::RenderBlock;
-use std::time::Duration;
 use pi_telemetry::events::{SuperGrokUpsell, SuperGrokUpsellClicked};
 use pi_telemetry::session_ctx::log_event;
+use std::time::Duration;
 
 /// How long the pager auto-checks subscription status before stopping.
 /// After this, the user can still manually check via the [Refresh] button.
@@ -172,9 +172,7 @@ pub(super) fn open_credit_limit_upsell(
 
     // ── Default: Q&A question modal with two options ────────────────
     use crate::views::question_view::{LocalQuestionKind, QuestionViewState};
-    use pi_tools::implementations::grok_build::ask_user_question::{
-        Question, QuestionOption,
-    };
+    use pi_tools::implementations::grok_build::ask_user_question::{Question, QuestionOption};
 
     if agent.question_view.is_some() {
         return;
@@ -260,9 +258,7 @@ fn open_supergrok_upsell(
     auth_method: Option<String>,
 ) -> bool {
     use crate::views::question_view::{LocalQuestionKind, QuestionViewState};
-    use pi_tools::implementations::grok_build::ask_user_question::{
-        Question, QuestionOption,
-    };
+    use pi_tools::implementations::grok_build::ask_user_question::{Question, QuestionOption};
 
     // Never displace an already-open question modal. Callers that consume
     // input on open must check this `false` and keep the input instead.
@@ -338,7 +334,6 @@ pub(super) fn apply_auto_topup(
 ) {
     use crate::views::credit_bar::AutoTopupFetch;
     match fetch {
-        AutoTopupFetch::Resolved(rule) => *slot = Some(rule.clone()),
         AutoTopupFetch::Cleared => *slot = None,
         AutoTopupFetch::Unchanged => {}
     }
@@ -353,7 +348,6 @@ pub(super) fn handle_billing_fetched(
     silent: bool,
     subscription_tier: Option<String>,
     autotopup: crate::views::credit_bar::AutoTopupFetch,
-    nonce: u64,
 ) -> Vec<Effect> {
     // Parse/transport failures route to `BillingError`, so a `None`
     // balance here means the response carried no billing config. Clear
@@ -373,23 +367,11 @@ pub(super) fn handle_billing_fetched(
     }
     // Render the `/usage` summary from the now-current cached rule.
     let summary_topup = app.auto_topup.clone();
-    let tier_now = app.subscription_tier.clone();
     if let Some(agent) = app.agents.get_mut(&agent_id) {
-        // Gateway/chat-kind: do not attach Build coding credits.
         let mut topup = agent.auto_topup.clone();
         apply_auto_topup(&mut topup, &autotopup);
         agent.apply_credit_balance(balance.clone(), topup);
-        // The open usage modal renders from the mirrors updated above; only
-        // its own fetch generation may settle the loading/error flags
-        // (background refreshes carry nonce 0).
-        if let Some(state) = super::status::usage_modal_state_mut(agent)
-            && state.fetch_nonce == nonce
-        {
-            state.billing_loading = false;
-            state.billing_error = None;
-            state.ctx.subscription_tier = tier_now;
-        }
-        if !silent && !agent.chat_kind {
+        if !silent {
             let msg = match &balance {
                 Some(bal) => {
                     crate::views::credit_bar::format_usage_summary(bal, summary_topup.as_ref())
@@ -541,9 +523,7 @@ pub(super) fn handle_credit_limit_recheck_complete(
     drain.effects.push(Effect::FetchBilling {
         agent_id,
         silent: true,
-        nonce: Default::default(),
     });
-    note_peek_page_flip(app, agent_id, drain.page_flip_entry);
     drain.effects
 }
 

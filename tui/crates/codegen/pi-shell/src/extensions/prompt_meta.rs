@@ -20,11 +20,6 @@ impl PromptBlockMeta {
             bash_command: Some(command.into()),
         }
     }
-
-    /// Try to parse from a freeform `_meta` map.
-    pub fn from_value(value: &agent_client_protocol::Meta) -> Option<Self> {
-        serde_json::from_value(serde_json::Value::Object(value.clone())).ok()
-    }
 }
 
 #[cfg(test)]
@@ -37,29 +32,6 @@ mod tests {
         let json = serde_json::to_value(&meta).unwrap();
         let parsed: PromptBlockMeta = serde_json::from_value(json).unwrap();
         assert_eq!(parsed.bash_command, Some("ls -la".to_string()));
-    }
-
-    #[test]
-    fn from_value_legacy_compat() {
-        let val = serde_json::json!({"bash_command": "ls"});
-        let meta = PromptBlockMeta::from_value(val.as_object().unwrap()).unwrap();
-        assert_eq!(meta.bash_command, Some("ls".to_string()));
-    }
-
-    #[test]
-    fn from_value_unrelated_meta() {
-        let val = serde_json::json!({"other": 1});
-        let meta = PromptBlockMeta::from_value(val.as_object().unwrap());
-        assert!(meta.is_some());
-        assert_eq!(meta.unwrap().bash_command, None);
-    }
-
-    #[test]
-    fn from_value_empty_object() {
-        let val = serde_json::json!({});
-        let meta = PromptBlockMeta::from_value(val.as_object().unwrap());
-        assert!(meta.is_some());
-        assert_eq!(meta.unwrap().bash_command, None);
     }
 
     #[test]

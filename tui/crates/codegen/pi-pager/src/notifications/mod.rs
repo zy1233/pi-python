@@ -1,11 +1,11 @@
-pub mod config;
-pub mod focus;
-pub mod hooks;
-pub mod progress;
-pub mod protocol;
-pub mod sleep;
-pub mod title;
-pub mod tmux;
+pub(crate) mod config;
+pub(crate) mod focus;
+pub(crate) mod hooks;
+pub(crate) mod progress;
+pub(crate) mod protocol;
+pub(crate) mod sleep;
+pub(crate) mod title;
+pub(crate) mod tmux;
 
 use std::time::{Duration, Instant};
 
@@ -14,8 +14,7 @@ use std::time::{Duration, Instant};
 const PROGRESS_KEEPALIVE: Duration = Duration::from_secs(5);
 
 pub use config::{
-    NotificationCondition, NotificationConfig, NotificationEventKind, NotificationHook,
-    NotificationMethod, TitleConfig, TitleItem,
+    NotificationCondition, NotificationConfig, NotificationEventKind, NotificationMethod,
 };
 pub use title::TitleState;
 
@@ -112,13 +111,11 @@ impl NotificationService {
                 &event.body,
                 self.terminal_ctx,
             );
-            pi_telemetry::session_ctx::log_event(
-                pi_telemetry::events::NotificationEmitted {
-                    protocol: self.protocol.as_str(),
-                    event_kind: event.kind.as_str(),
-                    was_focused: self.focus_tracker.is_focused(),
-                },
-            );
+            pi_telemetry::session_ctx::log_event(pi_telemetry::events::NotificationEmitted {
+                protocol: self.protocol.as_str(),
+                event_kind: event.kind.as_str(),
+                was_focused: self.focus_tracker.is_focused(),
+            });
         }
     }
 

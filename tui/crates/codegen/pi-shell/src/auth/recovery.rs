@@ -49,14 +49,6 @@ pub(crate) fn manual_auth_reason(err: &AuthError) -> Option<ManualAuthReason> {
     })
 }
 
-/// Whether the relay should stop reconnecting on this recovery error. Its own
-/// predicate rather than reusing `manual_auth_reason`: the relay must give up on
-/// any terminal auth failure, including `ApiKeyAuthDisabled` (a kill-switched
-/// API key), which is deliberately out of the `manual_auth` KPI's scope.
-pub(crate) fn relay_should_cancel(err: &AuthError) -> bool {
-    manual_auth_reason(err).is_some() || matches!(err, AuthError::ApiKeyAuthDisabled)
-}
-
 /// Fresh-mint guard window (±) for `ServerRejected` refreshes
 /// ([`UnauthorizedRecovery::fresh_mint_guard`]). 120s outlasts in-flight
 /// requests sent with a previous key plus validation lag (observed stale
@@ -70,10 +62,6 @@ const FRESH_MINT_GUARD_SECS: i64 = 120;
 /// Required at every call site so suppressing the KPI is explicit, not default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RecoverySource {
-    /// A chat/inference turn — surfaces the `ReAuthRequired` banner.
-    Turn,
-    /// The relay / leader connection handshake.
-    Relay,
     /// Uploads, telemetry, tool calls. Never emits the KPI.
     Background,
 }
@@ -81,8 +69,6 @@ pub(crate) enum RecoverySource {
 impl RecoverySource {
     fn trigger(self) -> Option<ManualAuthSurface> {
         match self {
-            RecoverySource::Turn => Some(ManualAuthSurface::Turn),
-            RecoverySource::Relay => Some(ManualAuthSurface::Relay),
             RecoverySource::Background => None,
         }
     }
@@ -196,11 +182,6 @@ impl ManualAuthTracker {
     #[cfg(test)]
     pub(crate) fn last_token_for_test(&self) -> Option<String> {
         self.last_token.lock().clone()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn last_emit_for_test(&self) -> Option<ManualAuth> {
-        self.last_emit.lock().clone()
     }
 }
 
@@ -924,62 +905,6 @@ mod tests {
         assert!(
             matches!(err, AuthError::RecoveryExhausted),
             "Done state must surface RecoveryExhausted, got {err:?}",
-        );
-    }
-
-    /// Exhaustion after a *transient* authority failure preserves the
-    /// transient axis: surfacing `RecoveryExhausted` would count a network
-    /// blip as a forced re-login (`manual_auth`) and make the relay cancel
-    /// instead of reconnect.
-    #[tokio::test]
-    async fn exhaustion_after_transient_failure_stays_transient() {
-        /// Refresher fake: transient failure on every call.
-        struct TransientFailRefresher;
-        #[async_trait::async_trait]
-        impl TokenRefresher for TransientFailRefresher {
-            async fn refresh(
-                &self,
-                _reason: crate::auth::manager::RefreshReason,
-            ) -> RefreshOutcome {
-                RefreshOutcome::transient("network blip")
-            }
-        }
-
-        let (_d, m) = mgr();
-        seed(&m, AuthMode::Oidc, Some("rt"));
-        m.set_refresher(Arc::new(TransientFailRefresher));
-        m.set_devbox_env_for_test(false);
-
-        let mut rec = m.unauthorized_recovery(rejected_cred(), RecoverySource::Turn);
-        // First next(): the authority's transient error propagates as-is.
-        let first = rec.next().await.unwrap_err();
-        assert!(
-            matches!(first, AuthError::Refresh(RefreshTokenError::Transient(_))),
-            "authority transient must propagate, got {first:?}",
-        );
-
-        // Driving past exhaustion must stay transient too.
-        let err = loop {
-            if let Err(e) = rec.next().await {
-                break e;
-            }
-        };
-        assert!(
-            matches!(err, AuthError::Refresh(RefreshTokenError::Transient(_))),
-            "exhaustion after a transient failure must stay transient, got {err:?}",
-        );
-        assert_eq!(
-            manual_auth_reason(&err),
-            None,
-            "a transient exhaustion must not map to a manual_auth reason",
-        );
-        assert!(
-            !relay_should_cancel(&err),
-            "the relay must reconnect (not cancel) on a transient exhaustion",
-        );
-        assert!(
-            m.manual_auth_last_token().is_none(),
-            "no manual_auth event may be recorded for a transient outage",
         );
     }
 

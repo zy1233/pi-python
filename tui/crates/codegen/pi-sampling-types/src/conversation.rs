@@ -1562,9 +1562,8 @@ pub fn inject_streaming_reasoning_fallback(items: &mut Vec<ConversationItem>, te
 ///
 /// Singular `reasoning` path: builds a synthetic `rs::ReasoningItem`
 /// from the legacy `ReasoningContent { text, encrypted, id }`. `id` is
-/// preserved when present; Anthropic Thinking blocks never carried one
-/// ([stream/messages.rs:340](crates/codegen/pi-sampler/src/stream/messages.rs))
-/// so the synthesized id is the empty string in that case.
+/// preserved when present; Anthropic Thinking blocks never carried one, so
+/// the synthesized id is the empty string in that case.
 ///
 /// v0 `ChatRequestMessage` path: top-level `reasoning_content: String`
 /// becomes a single `SummaryText`-only sibling. No id / encrypted.

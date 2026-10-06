@@ -1,0 +1,146 @@
+# Baseline manifest for the TUI (Rust) workspace.
+#
+# Stage 0 of docs/PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md. Read by scripts/tui_baseline.py and
+# .github/workflows/tui-ci.yml; the human-readable report is docs/baselines/tui.md.
+#
+# Ratchet rules: ceilings (graph nodes, warnings) only go down, floors (tests) only go up. A key
+# that is absent means "report only". Values tagged PROVISIONAL were measured on macOS or
+# cross-resolved and are meant to be replaced by the first Linux CI run (see the report doc).
+
+[toolchain]
+# Must equal `channel` in tui/rust-toolchain.toml (scripts/tests/test_tui_baseline.py checks it).
+channel = "1.94.0"
+
+[gates]
+# `cargo tree -p pi-pager-bin -i <crate>` must fail with "did not match any packages", and the
+# crate must not appear in tui/Cargo.lock.
+deny_crates = ["pi-sampler"]
+# Whole-word matches anywhere under tui/crates are runtime remnants and fail the gate.
+deny_words = ["MvpAgent", "acp_session_impl", "SamplerActor"]
+# Present on purpose; the report lists their direct dependents (reasons: docs/baselines/tui.md).
+tracked_crates = [
+    "async-openai",
+    "pi-sampling-types",
+    "pi-tools",
+    "pi-agent",
+    "pi-workspace",
+    "pi-hooks",
+    "pi-mcp",
+]
+
+[graph]
+package = "pi-pager-bin"
+
+# Ceiling for the number of unique packages in `cargo tree -p pi-pager-bin --target <triple>`.
+[graph.max_nodes]
+# Measured on the Linux runner (TUI CI run 37379203134, commit 0e71894): 980, down from 995 after
+# the unused-dependency sweep and the removal of pi-memory / pi-fsnotify. A new dependency has to
+# lower the count elsewhere or raise this number on purpose.
+x86_64-unknown-linux-gnu = 980
+
+[check]
+# Consumer build: everything that ships (`zypi`, the minimal pager, the updater).
+packages = ["pi-pager-bin", "pi-pager-minimal", "pi-update"]
+# Warning ceiling across those packages. Linux and macOS both show 0: the crate-root
+# `#![allow(dead_code, ...)]` attributes are gone (plan A.4) and the code they hid was deleted.
+max_warnings = 0
+# `cargo check --workspace --tests --keep-going` type-checks every crate's tests, which is where
+# Linux-only cfg code that macOS never compiled would break.
+workspace_tests = true
+# pi-fast-worktree: lib tests do not compile at HEAD (`nfs::confined::tests::plant_journal`).
+workspace_tests_exclude = ["pi-fast-worktree"]
+# The first Linux run was green (0 errors).
+enforce_workspace_tests = true
+
+[test]
+# The first Linux run passed every suite with 0 failures, so unexpected failures now block.
+enforce = true
+timeout_minutes = 60
+# Several pager tests assert colour / cursor output and need a capable terminal environment.
+# The home / agent / sandbox variables are unset so a developer's shell cannot change results
+# (`PI_HOME` outranks the `GROK_HOME` that the config-isolation tests set for themselves).
+unset_env = ["NO_COLOR", "PI_HOME", "GROK_HOME", "PI_AGENT_COMMAND", "PI_PYTHON", "GROK_SANDBOX"]
+
+[test.env]
+TERM = "xterm-256color"
+COLORTERM = "truecolor"
+
+# `reference_passed` is the Linux CI result of the last recorded run (TUI CI run 37389455793,
+# commit ac1d3ff; docs/baselines/tui.md); the summary flags a run that deviates by more than 5 %.
+# `min_passed` (floor) is that run minus a few percent: deleting dead code legitimately deletes
+# its tests, but a drop below the floor has to be a deliberate edit of this file. Both numbers
+# are measured on Linux; macOS runs a handful of platform-specific tests more or fewer.
+
+[[test.suite]]
+package = "pi-shell"
+targets = ["--lib", "--test", "sandbox_requirements_pin", "--test", "test_config_update_isolation"]
+reference_passed = 1056
+min_passed = 1000
+
+[[test.suite]]
+package = "pi-pager"
+targets = [
+    "--lib",
+    "--test",
+    "settings_e2e",
+    "--test",
+    "grok_home_paths",
+    "--test",
+    "selection_model_public_api",
+]
+# doctor_cmd:: probes the audio input device (hangs on a macOS CoreAudio query without mic access).
+skip = ["doctor_cmd::"]
+reference_passed = 5552
+min_passed = 5300
+
+[[test.suite]]
+package = "pi-pager-bin"
+targets = ["--bin", "zypi"]
+# tests/update_never_blocked_by_config.rs is not selected: it looks for CARGO_BIN_EXE_pi-pager,
+# but the binary is named zypi (fork-rename leftover, unrelated to the runtime removal).
+reference_passed = 20
+min_passed = 20
+
+[[test.suite]]
+package = "pi-acp-lib"
+targets = ["--lib"]
+# The x.ai drop test hangs forever: acp::ExtRequest serialises `method` away, so the drop logic
+# never fires and the queued request is never answered (docs/PLAN/... section 10.4).
+skip = ["vendor_x_ai_ext_is_dropped_without_sending"]
+reference_passed = 21
+min_passed = 21
+
+[[test.suite]]
+package = "pi-http"
+targets = ["--lib"]
+reference_passed = 13
+min_passed = 13
+
+[[test.suite]]
+package = "pi-telemetry"
+targets = ["--lib"]
+reference_passed = 239
+min_passed = 230
+
+[[test.suite]]
+package = "pi-file-utils"
+targets = ["--lib"]
+reference_passed = 216
+min_passed = 210
+
+[[test.suite]]
+package = "pi-sampling-types"
+targets = ["--lib"]
+reference_passed = 320
+min_passed = 310
+
+[release]
+profile = "release-dist"
+package = "pi-pager-bin"
+binary = "zypi"
+
+# Pre-removal reference: the v0.4.0 release (tui/ identical to commit 07a3574), job "Build TUI
+# binary (Linux x86_64)" on ubuntu-24.04 with a cold cache. The binary must not grow.
+[release.reference]
+size_bytes = 470461776
+build_seconds = 1647 # "Finished `release-dist` profile ... in 27m 27s"

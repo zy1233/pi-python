@@ -70,13 +70,7 @@ impl AgentView {
         width_override: Option<u16>,
         f: impl FnOnce(&dyn Fn(usize) -> Option<String>) -> R,
     ) -> Option<R> {
-        let scrollback = if let Some(ref child_id) = self.active_subagent
-            && let Some(child) = self.subagent_views.get(child_id)
-        {
-            &child.scrollback
-        } else {
-            &self.scrollback
-        };
+        let scrollback = &self.scrollback;
         let visible_start = scrollback.visible_entry_range().start;
         let abs_idx = entry_idx + visible_start;
         // The per-block content width the geometry/hits were captured
@@ -150,16 +144,8 @@ impl AgentView {
             return false;
         };
 
-        // Scroll the active scrollback.
-        let scrollback = if let Some(ref child_id) = self.active_subagent {
-            if let Some(child) = self.subagent_views.get_mut(child_id) {
-                &mut child.scrollback
-            } else {
-                &mut self.scrollback
-            }
-        } else {
-            &mut self.scrollback
-        };
+        // Scroll the scrollback.
+        let scrollback = &mut self.scrollback;
 
         match autoscroll.direction {
             AutoScrollDirection::Up => scrollback.scroll_up(autoscroll.speed),
@@ -662,13 +648,7 @@ impl AgentView {
         {
             return Some((text, drag.kind));
         }
-        let scrollback = if let Some(ref child_id) = self.active_subagent
-            && let Some(child) = self.subagent_views.get(child_id)
-        {
-            &child.scrollback
-        } else {
-            &self.scrollback
-        };
+        let scrollback = &self.scrollback;
         let visible_start = scrollback.visible_entry_range().start;
         let abs_idx = drag.anchor.entry_idx + visible_start;
         // Width must come from the same VisibleBlockGeometry the drag's
@@ -879,20 +859,6 @@ impl AgentView {
                 continue;
             }
 
-            // BgTask: copy stdout from session state when available.
-            if let crate::scrollback::block::RenderBlock::BgTask(ref block) = entry.block {
-                let stdout = self
-                    .session
-                    .bg_tasks
-                    .get(&block.task_id)
-                    .map(|t| &t.stdout)
-                    .filter(|s| !s.is_empty());
-                if let Some(stdout) = stdout {
-                    parts.push(stdout.clone());
-                    continue;
-                }
-            }
-
             // Find the content width from the resolved model's visible block geometry.
             let content_width = self
                 .last_scrollback_selection_model
@@ -961,17 +927,10 @@ impl AgentView {
         };
 
         let entry_block = self.scrollback.entry(idx).map(|e| &e.block);
-        let is_bg_task = entry_block
-            .is_some_and(|b| matches!(b, crate::scrollback::block::RenderBlock::BgTask(_)));
-        let is_subagent = entry_block
-            .is_some_and(|b| matches!(b, crate::scrollback::block::RenderBlock::Subagent(_)));
-        let is_workflow = entry_block
-            .is_some_and(|b| matches!(b, crate::scrollback::block::RenderBlock::Workflow(_)));
 
         // Word-select tip probe (see WORD_SELECT_REPEAT_WINDOW): assistant
         // messages only — headers / prompts / tool rows are fold-nav surfaces
-        // where double-click is the designed gesture, and bg-task / subagent
-        // double-clicks open a viewer that owns input.
+        // where double-click is the designed gesture.
         let word_select_probe = click_count == 2
             && entry_block.is_some_and(|b| b.is_agent_message())
             && !super::is_text_selection_on_double_click();
@@ -1030,64 +989,16 @@ impl AgentView {
         // Credit-limit URL click is handled upstream (before this method)
         // so only the URL line is clickable, not the whole block.
 
-        // Double-click on bg-task / subagent blocks (matched above) opens a
-        // viewer instead of folding.
         match click_count {
             1 if is_plan_tool => {
                 self.show_plan_preview();
             }
-            2 if is_bg_task => {
-                // Double-click bg task: open block viewer (same as Enter).
-                if let Some(entry) = self.scrollback.entry(idx)
-                    && let crate::scrollback::block::RenderBlock::BgTask(ref bt) = entry.block
-                    && let Some(task) = self.session.bg_tasks.get(&bt.task_id)
-                {
-                    let eid = task
-                        .scrollback_entry_id
-                        .unwrap_or_else(|| crate::scrollback::entry::EntryId::new(0));
-                    let is_running = task.status == crate::app::agent::BgTaskStatus::Running;
-                    self.block_viewer =
-                        Some(crate::views::block_viewer::BlockViewerPane::for_bg_task(
-                            eid,
-                            &bt.task_id,
-                            &task.stdout,
-                            is_running,
-                        ));
-                }
-            }
-            2 if is_subagent => {
-                // Double-click subagent: open subagent view (same as Enter)
-                if let Some(entry) = self.scrollback.entry(idx)
-                    && let crate::scrollback::block::RenderBlock::Subagent(ref sb) = entry.block
-                {
-                    let child_sid = sb.child_session_id.clone();
-                    if self.subagent_views.contains_key(&child_sid) {
-                        self.open_subagent_fullscreen(child_sid);
-                    }
-                }
-            }
-            2 if is_workflow => {
-                if let Some(entry) = self.scrollback.entry(idx)
-                    && let crate::scrollback::block::RenderBlock::Workflow(ref wf) = entry.block
-                {
-                    let run_id = wf.run_id.clone();
-                    self.open_workflow_detail_by_run_id(&run_id);
-                }
-            }
             2 if is_prompt => {
-                // Edit in place; bash/cron keep the old fold behavior.
-                //
-                // Gated OFF for now (unsolved scroll jump on enter — see
-                // inline_edit::INLINE_EDIT_ENABLED). When disabled this is a
-                // no-op, so the block below runs and restores the EXACT
-                // pre-feature double-click behavior for a prompt: fold (if
-                // foldable) + scroll the entry to the top.
-                if !(crate::app::inline_edit::INLINE_EDIT_ENABLED && self.enter_inline_edit(idx)) {
-                    if foldable {
-                        self.scrollback.toggle_fold_selected();
-                    }
-                    self.scrollback.scroll_to_entry_top(idx);
+                // Fold (if foldable) + scroll the prompt entry to the top.
+                if foldable {
+                    self.scrollback.toggle_fold_selected();
                 }
+                self.scrollback.scroll_to_entry_top(idx);
             }
             2 => {
                 if foldable {
@@ -1660,7 +1571,14 @@ mod tests {
             crate::scrollback::text_selection::ResolvedSelectionBoundaries::default();
         for (entry_idx, text, hit_col, prefix, suffix, expected) in [
             (0, "foo rest", 0, "   ", "", "foo"),
-            (1, "rest https://example.com", 5, "", "   ", "https://example.com"),
+            (
+                1,
+                "rest https://example.com",
+                5,
+                "",
+                "   ",
+                "https://example.com",
+            ),
         ] {
             let line = ResolvedSelectableLine {
                 entry_idx,
@@ -1839,112 +1757,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn active_child_copy_uses_child_scrollback_cwd() {
-        use crate::scrollback::block::RenderBlock;
-        use crate::scrollback::render::ScratchBuffer;
-        use crate::scrollback::scrollback_pane::ScrollbackPane;
-        use crate::scrollback::types::{DisplayMode, derive_selection_text};
-        use ratatui::buffer::Buffer;
-
-        let parent_cwd = std::path::PathBuf::from("/parent/worktree");
-        let child_cwd = std::path::PathBuf::from("/child/worktree");
-        let mut child = make_agent();
-        child.session.cwd = child_cwd.clone();
-        child.scrollback.set_cwd(Some(child_cwd.clone()));
-        let read = child.scrollback.push_block(RenderBlock::read(
-            child_cwd.join("src/lib.rs").to_string_lossy(),
-            None,
-        ));
-        child
-            .scrollback
-            .get_by_id_mut(read)
-            .expect("Read entry")
-            .set_display_mode(DisplayMode::Expanded);
-
-        let area = Rect::new(0, 0, 40, 8);
-        child.scrollback.prepare_layout(area.width, area.height);
-        let mut buffer = Buffer::empty(area);
-        let mut scratch = ScratchBuffer::new();
-        let rendered = ScrollbackPane::new().render_with_scratch_and_selection_boundaries(
-            area,
-            &mut buffer,
-            &child.scrollback,
-            &mut scratch,
-        );
-        let line = rendered
-            .output
-            .selection_model
-            .ranges
-            .iter()
-            .flat_map(|range| &range.lines)
-            .find(|line| line.text == "src/lib.rs")
-            .expect("child-relative Read header")
-            .clone();
-        let content_width = rendered
-            .output
-            .selection_model
-            .visible_block_content_width(line.entry_idx)
-            .expect("visible child block width");
-
-        let mut parent = make_agent();
-        parent.session.cwd = parent_cwd;
-        parent.update_scrollback_selection_state(
-            rendered.output.selection_model,
-            rendered.selection_boundaries,
-        );
-        let child_id = "child".to_string();
-        parent
-            .subagent_views
-            .insert(child_id.clone(), Box::new(child));
-        parent.active_subagent = Some(child_id.clone());
-
-        let source_text = parent
-            .with_entry_output_text_source(
-                line.entry_idx,
-                line.range_id,
-                Some(content_width),
-                |source| source(line.block_line_idx),
-            )
-            .flatten();
-        assert_eq!(source_text.as_deref(), Some("src/lib.rs"));
-        {
-            let child = parent.subagent_views.get(&child_id).expect("active child");
-            let entry = child.scrollback.get(0).expect("child Read entry");
-            let cached = entry.cached_output_ref();
-            assert_eq!(
-                derive_selection_text(&cached.lines[line.block_line_idx]),
-                "src/lib.rs",
-                "copy helper must not rebuild the child cache against parent cwd"
-            );
-        }
-
-        let path_width = line
-            .selectable_cols
-            .end
-            .saturating_sub(line.selectable_cols.start);
-        let drag = ActiveTextDrag {
-            anchor: RangeHit {
-                entry_idx: line.entry_idx,
-                range_id: line.range_id,
-                block_line_idx: line.block_line_idx,
-                col_within_range: 0,
-            },
-            head: RangeHit {
-                entry_idx: line.entry_idx,
-                range_id: line.range_id,
-                block_line_idx: line.block_line_idx,
-                col_within_range: path_width.saturating_sub(1),
-            },
-            kind: SelectionKind::Linear,
-            anchor_content_width: Some(content_width),
-        };
-        assert_eq!(
-            parent.reconstruct_drag_copy(&drag),
-            Some(("src/lib.rs".to_string(), SelectionKind::Linear))
-        );
-    }
-
     /// Regression: a table drag whose table copy can't run must return and
     /// persist `Linear` (and drop the side-car) to match the linear text
     /// that was copied.
@@ -1999,55 +1811,6 @@ mod tests {
             agent.handle_scrollback_click(t + Duration::from_millis(100), idx, false);
         agent.last_click = last;
         tip2
-    }
-
-    #[test]
-    fn workflow_double_click_opens_matching_run_id_and_closes_goal_detail() {
-        use crate::scrollback::blocks::WorkflowBlock;
-        use crate::views::workflows::WorkflowRunSnapshot;
-
-        let run = |run_id: &str| WorkflowRunSnapshot {
-            run_id: run_id.to_owned(),
-            name: "same-display-name".to_owned(),
-            objective: "objective".to_owned(),
-            status: "active".to_owned(),
-            management_available: true,
-            builtin: false,
-            phases: Vec::new(),
-            current_phase: None,
-            agents: Vec::new(),
-            agent_budget: None,
-            agents_used: 0,
-            agents_reserved: 0,
-            agents_remaining: None,
-            agent_usage_incomplete: false,
-            active_agents: 0,
-            elapsed_ms: 0,
-            received_at: Instant::now(),
-            pause_message: None,
-            result_summary: None,
-        };
-        let mut agent = make_agent();
-        agent.workflow_runs = vec![run("wf_other"), run("wf_target")];
-        agent.show_goal_detail = true;
-        agent
-            .scrollback
-            .push_block(crate::scrollback::block::RenderBlock::Workflow(
-                WorkflowBlock::started("wf_target", "same-display-name", "objective"),
-            ));
-
-        assert!(!double_click_gesture(&mut agent, Instant::now(), 0));
-
-        assert!(agent.show_workflows);
-        assert!(!agent.show_goal_detail);
-        assert_eq!(
-            agent.workflows_view.selected_run_id.as_deref(),
-            Some("wf_target")
-        );
-        assert_eq!(
-            agent.workflows_view.detail_run_id.as_deref(),
-            Some("wf_target")
-        );
     }
 
     /// The word-select tip needs a REPEATED double-click on assistant text:
@@ -2941,25 +2704,6 @@ mod tests {
         let mut agent = agent_with_above_prompt_strip();
         let _ = agent.handle_input(&Event::Mouse(mouse_down(5, 21)), &reg);
         assert!(agent.deferred_text_press.is_none(), "prompt is a pane");
-    }
-
-    /// With the block viewer open the band must not arm: the modal owns the
-    /// screen while the scrollback model beneath keeps rebuilding, so an
-    /// armed latch would convert on (and copy) text hidden under it.
-    #[test]
-    fn strip_press_with_block_viewer_open_arms_nothing() {
-        let mut agent = agent_with_above_prompt_strip();
-        let reg = ActionRegistry::defaults();
-        agent.block_viewer = Some(crate::views::block_viewer::BlockViewerPane::for_plain_text(
-            "t", "content",
-        ));
-
-        let _ = agent.handle_input(&Event::Mouse(mouse_down(10, 17)), &reg);
-        assert!(agent.deferred_text_press.is_none(), "viewer owns the press");
-
-        let _ = agent.handle_input(&Event::Mouse(mouse_drag(14, 6)), &reg);
-        assert!(agent.drag_selection.is_none(), "nothing converts");
-        assert!(agent.persistent_text_selection.is_none());
     }
 
     /// A strip press keeps focus where it was (deliberate), so with the

@@ -1,63 +1,5 @@
 //! Tests for settings setters, toggles, resets, and rollback.
 use super::*;
-/// `Action::ToggleVimMode` flips the active agent's `vim_mode` field,
-/// updates the in-process pager cache so future agents pick it up
-/// via `load_vim_mode`, emits `Effect::PersistSetting` so the new
-/// value is written to `[ui].vim_mode` in config.toml, and a second
-/// toggle restores the original.
-#[test]
-fn toggle_vim_mode_flips_state_and_persistence_cache() {
-    crate::appearance::cache::set_vim_mode(false);
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    if let Some(agent) = app.agents.get_mut(&id) {
-        agent.vim_mode = false;
-    }
-    let effects = dispatch(Action::ToggleVimMode, &mut app);
-    assert_eq!(
-        effects.len(),
-        1,
-        "toggle must emit exactly one Effect::PersistSetting so the \
-             new value lands in config.toml, got {effects:?}",
-    );
-    assert!(
-        matches!(
-            &effects[0],
-            Effect::PersistSetting {
-                key: "vim_mode",
-                value: crate::settings::SettingValue::Bool(true),
-                rollback_value: crate::settings::SettingValue::Bool(false),
-            }
-        ),
-        "unexpected effect: {:?}",
-        effects[0],
-    );
-    assert!(
-        app.agents[&id].vim_mode,
-        "active agent should be in vim mode after toggle"
-    );
-    assert!(
-        crate::appearance::cache::load_vim_mode(),
-        "pager cache must reflect new value so future agents pick it up"
-    );
-    let effects = dispatch(Action::ToggleVimMode, &mut app);
-    assert!(
-        matches!(
-            effects.as_slice(),
-            [Effect::PersistSetting {
-                key: "vim_mode",
-                value: crate::settings::SettingValue::Bool(false),
-                rollback_value: crate::settings::SettingValue::Bool(true),
-            }]
-        ),
-        "second toggle must also persist, got {effects:?}",
-    );
-    assert!(!app.agents[&id].vim_mode, "toggling again flips it back");
-    assert!(
-        !crate::appearance::cache::load_vim_mode(),
-        "cache must follow the second toggle"
-    );
-}
 /// End-to-end: in vim mode, Tab from the prompt focuses scrollback,
 /// and then `j` navigates the scrollback (does NOT bounce back to the
 /// prompt). Drives the real handle_input → dispatch loop.
@@ -98,105 +40,6 @@ fn agent_vim_tab_focuses_scrollback_then_j_navigates() {
     );
     crate::appearance::cache::set_vim_mode(false);
 }
-/// `/vim-mode` (ToggleVimMode) must propagate to OPEN subagent views,
-/// not just top-level agents. Otherwise a user inside a subagent view
-/// toggles vim, presses Tab + j, and the keystroke forwards to the
-/// prompt (vim-OFF fallback) because the subagent view kept its stale
-/// `vim_mode = false`.
-#[test]
-fn toggle_vim_mode_propagates_to_open_subagent_views() {
-    crate::appearance::cache::set_vim_mode(false);
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    let child_session = make_test_agent_session(&app, AgentId(0), "child-session");
-    let mut child = AgentView::new(child_session, ScrollbackState::new());
-    child.vim_mode = false;
-    {
-        let parent = app.agents.get_mut(&id).unwrap();
-        parent.vim_mode = false;
-        parent
-            .subagent_views
-            .insert("child-1".to_string(), Box::new(child));
-    }
-    let _ = dispatch(Action::ToggleVimMode, &mut app);
-    assert!(app.agents[&id].vim_mode, "parent picks up the toggle");
-    assert!(
-        app.agents[&id].subagent_views["child-1"].vim_mode,
-        "an open subagent view must also pick up the vim toggle",
-    );
-}
-/// `/vim-mode` must toggle vim from the DASHBOARD too (not just an
-/// agent view) — previously it early-returned unless an agent was
-/// active, so it was a silent no-op and the overview's j/k never
-/// turned on. Turning vim ON also focuses the overview so j/k
-/// navigate immediately; turning it OFF returns focus to the input.
-#[serial_test::serial(GROK_AGENT_DASHBOARD)]
-#[test]
-fn toggle_vim_mode_works_on_dashboard_and_focuses_overview() {
-    crate::appearance::cache::set_vim_mode(false);
-    let mut app = test_app_with_agent();
-    open_dashboard(&mut app);
-    assert!(matches!(app.active_view, ActiveView::AgentDashboard));
-    app.dashboard.as_mut().unwrap().list_focused = false;
-    let _ = dispatch(Action::ToggleVimMode, &mut app);
-    assert!(
-        crate::appearance::cache::load_vim_mode(),
-        "/vim-mode must toggle vim ON from the dashboard",
-    );
-    assert!(
-        app.dashboard.as_ref().unwrap().list_focused,
-        "turning vim on focuses the overview so j/k navigate immediately",
-    );
-    let _ = dispatch(Action::ToggleVimMode, &mut app);
-    assert!(
-        !crate::appearance::cache::load_vim_mode(),
-        "second /vim-mode must toggle vim OFF",
-    );
-    assert!(
-        !app.dashboard.as_ref().unwrap().list_focused,
-        "turning vim off returns focus to the input",
-    );
-    crate::appearance::cache::set_vim_mode(false);
-}
-#[test]
-fn plugin_cta_catalog_reload_empty_candidates_resets_matched_phase() {
-    use crate::app::agent_view::CtaPhase;
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    {
-        let cta = &mut app.agents.get_mut(&id).unwrap().plugin_cta;
-        cta.source_url_or_path = Some(pi_plugin_marketplace::OFFICIAL_SOURCE_GIT_URL.into());
-        cta.candidates = vec![cta_entry("figma", "not_installed")];
-        cta.phase = CtaPhase::Matched {
-            plugin_relative_path: "plugins/figma".into(),
-            name: "figma".into(),
-        };
-        cta.hit_connect.rect = Some(ratatui::layout::Rect::new(0, 0, 9, 1));
-        cta.hit_dismiss.rect = Some(ratatui::layout::Rect::new(10, 0, 3, 1));
-    }
-    let response = pi_hooks_plugins_types::MarketplaceListResponse {
-        sources: vec![pi_hooks_plugins_types::MarketplaceScanResult {
-            source_name: pi_plugin_marketplace::OFFICIAL_SOURCE_NAME.into(),
-            source_kind: "git".into(),
-            source_url_or_path: pi_plugin_marketplace::OFFICIAL_SOURCE_GIT_URL.into(),
-            plugins: vec![cta_entry("figma", "installed")],
-            error: None,
-        }],
-    };
-    let effects = dispatch(
-        Action::TaskComplete(TaskResult::PluginCtaCatalogLoaded {
-            agent_id: id,
-            result: Ok(response),
-        }),
-        &mut app,
-    );
-    assert!(effects.is_empty());
-    let cta = &app.agents[&id].plugin_cta;
-    assert!(cta.candidates.is_empty());
-    assert_eq!(cta.phase, CtaPhase::Hidden);
-    assert!(cta.hit_connect.rect.is_none());
-    assert!(cta.hit_dismiss.rect.is_none());
-}
 #[test]
 fn cancel_before_first_activity_resets_state_and_discards_orphan_response() {
     let mut app = test_app_with_agent();
@@ -233,32 +76,6 @@ fn cancel_before_first_activity_resets_state_and_discards_orphan_response() {
     );
     assert!(app.agents[&id].session.state.is_idle());
     assert_eq!(app.agents[&id].scrollback.len(), 0);
-}
-#[test]
-fn set_default_model_allowed_when_agent_chat_kind() {
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    let model_id = acp::ModelId::new(std::sync::Arc::from("auto"));
-    app.agents
-        .get_mut(&id)
-        .unwrap()
-        .session
-        .models
-        .available
-        .insert(
-            model_id.clone(),
-            acp::ModelInfo::new(model_id.clone(), "Auto".to_string()),
-        );
-    app.agents.get_mut(&id).unwrap().chat_kind = true;
-    let effects = dispatch(Action::SetDefaultModel(model_id.clone()), &mut app);
-    assert!(
-        effects.iter().any(|e| matches!(
-            e,
-            Effect::SwitchModel { model_id: mid, .. } if mid == &model_id
-        )),
-        "chat_kind must still emit SwitchModel for live chat mode switches"
-    );
-    assert!(app.agents[&id].session.model_switch_pending);
 }
 /// `/model <name>` dispatches `SetDefaultModel` which routes
 /// through both `PersistSetting` and `SwitchModel`.
@@ -594,27 +411,6 @@ fn set_timeline_toggles_displayed_state_when_current_ui_diverges() {
     assert_eq!(app.current_ui.show_timeline, Some(false));
 }
 #[test]
-fn set_confirm_before_rewind_emits_persist_setting_with_correct_payload() {
-    use crate::settings::SettingValue;
-    let mut app = test_app_with_agent();
-    let default_on = app.current_ui.confirm_before_rewind_enabled();
-    let effects = dispatch(Action::SetConfirmBeforeRewind(!default_on), &mut app);
-    assert_eq!(effects.len(), 1);
-    match &effects[0] {
-        Effect::PersistSetting {
-            key,
-            value,
-            rollback_value,
-        } => {
-            assert_eq!(*key, "confirm_before_rewind");
-            assert_eq!(value, &SettingValue::Bool(!default_on));
-            assert_eq!(rollback_value, &SettingValue::Bool(default_on));
-        }
-        other => panic!("expected PersistSetting, got {other:?}"),
-    }
-    assert_eq!(app.current_ui.confirm_before_rewind, Some(!default_on));
-}
-#[test]
 fn set_page_flip_on_send_emits_persist_setting_with_correct_payload() {
     use crate::settings::SettingValue;
     let mut app = test_app_with_agent();
@@ -681,144 +477,6 @@ fn dispatch_open_settings_opens_then_close_on_reentry() {
         );
     }
 }
-/// A focused open on an agent whose settings modal is already open must
-/// reopen focused on the requested row — not toggle the modal closed.
-#[test]
-fn dispatch_open_settings_focus_reopens_when_already_open() {
-    use crate::views::modal::ActiveModal;
-    use crate::views::settings_modal::SettingsModalMode;
-    let mut app = test_app_with_agent();
-    let _ = dispatch(Action::OpenSettings, &mut app);
-    let agent = app.agents.get(&AgentId(0)).unwrap();
-    assert!(matches!(
-        agent.active_modal,
-        Some(ActiveModal::Settings { .. })
-    ));
-    let _ = dispatch(
-        Action::OpenSettingsFocus {
-            key: "coding_data_sharing",
-        },
-        &mut app,
-    );
-    let agent = app.agents.get(&AgentId(0)).unwrap();
-    let Some(ActiveModal::Settings { state }) = &agent.active_modal else {
-        panic!("focused re-entry must keep the settings modal open")
-    };
-    assert_eq!(
-        state.focused_setting().map(|(k, _)| k),
-        Some("coding_data_sharing"),
-        "focused re-entry must land on the requested row"
-    );
-    assert!(
-        matches!(state.mode(), SettingsModalMode::PickingEnum { .. }),
-        "focused re-entry must open the chooser, got {:?}",
-        state.mode()
-    );
-    assert!(
-        state.close_on_picker_exit,
-        "focused re-entry must arm close_on_picker_exit"
-    );
-}
-/// Chooser when editable, browse row when locked. The team-admin arm is the
-/// one a `team_name.is_some()` shortcut would break.
-#[test]
-fn dispatch_open_settings_focus_skips_the_chooser_only_when_locked() {
-    use crate::views::modal::ActiveModal;
-    use crate::views::settings_modal::SettingsModalMode;
-    let open_focused = |app: &mut AppView| -> SettingsModalMode {
-        let _ = dispatch(
-            Action::OpenSettingsFocus {
-                key: "coding_data_sharing",
-            },
-            app,
-        );
-        let agent = app.agents.get(&AgentId(0)).unwrap();
-        let Some(ActiveModal::Settings { state }) = &agent.active_modal else {
-            panic!("settings modal must be open")
-        };
-        assert_eq!(
-            state.focused_setting().map(|(k, _)| k),
-            Some("coding_data_sharing"),
-            "every landing focuses the row"
-        );
-        state.mode()
-    };
-    let mut app = test_app_with_agent();
-    assert!(
-        matches!(
-            open_focused(&mut app),
-            SettingsModalMode::PickingEnum { .. }
-        ),
-        "an editable setting opens its chooser"
-    );
-    let mut app = test_app_with_agent();
-    app.is_zdr = true;
-    assert!(
-        matches!(open_focused(&mut app), SettingsModalMode::Browse),
-        "ZDR must stop at the row that says so"
-    );
-    let mut app = test_app_with_agent();
-    app.team_name = Some("acme".to_string());
-    app.team_role = Some("member".to_string());
-    assert!(
-        matches!(open_focused(&mut app), SettingsModalMode::Browse),
-        "a team-managed lock must stop at the row that says so"
-    );
-    let mut app = test_app_with_agent();
-    app.team_name = Some("acme".to_string());
-    app.team_role = Some("admin".to_string());
-    assert!(
-        matches!(
-            open_focused(&mut app),
-            SettingsModalMode::PickingEnum { .. }
-        ),
-        "a team admin is not locked"
-    );
-}
-/// Focused open that enters the chooser sets `close_on_picker_exit` so Esc
-/// dismisses the modal (GB-4470). Locked landings stay in Browse with the
-/// flag clear — chrome Esc already closes.
-#[test]
-fn dispatch_open_settings_focus_sets_close_on_picker_exit_when_chooser_opens() {
-    use crate::views::modal::ActiveModal;
-    use crate::views::settings_modal::SettingsModalMode;
-    let mut app = test_app_with_agent();
-    let _ = dispatch(
-        Action::OpenSettingsFocus {
-            key: "coding_data_sharing",
-        },
-        &mut app,
-    );
-    let agent = app.agents.get(&AgentId(0)).unwrap();
-    let Some(ActiveModal::Settings { state }) = &agent.active_modal else {
-        panic!("settings modal must be open")
-    };
-    assert!(
-        matches!(state.mode(), SettingsModalMode::PickingEnum { .. }),
-        "editable focus must open the chooser"
-    );
-    assert!(
-        state.close_on_picker_exit,
-        "deep-link chooser open must set close_on_picker_exit"
-    );
-    let mut app = test_app_with_agent();
-    app.is_zdr = true;
-    let _ = dispatch(
-        Action::OpenSettingsFocus {
-            key: "coding_data_sharing",
-        },
-        &mut app,
-    );
-    let agent = app.agents.get(&AgentId(0)).unwrap();
-    let Some(ActiveModal::Settings { state }) = &agent.active_modal else {
-        panic!("settings modal must be open")
-    };
-    assert!(matches!(state.mode(), SettingsModalMode::Browse));
-    assert!(
-        !state.close_on_picker_exit,
-        "locked focus must not set close_on_picker_exit"
-    );
-}
 /// Plain OpenSettings does not arm close-on-picker-Esc.
 #[test]
 fn dispatch_open_settings_does_not_set_close_on_picker_exit() {
@@ -830,78 +488,6 @@ fn dispatch_open_settings_does_not_set_close_on_picker_exit() {
         panic!("settings modal must be open")
     };
     assert!(!state.close_on_picker_exit);
-}
-/// Full path: `/privacy`-style focus open → Esc dismisses the settings modal.
-#[test]
-fn open_settings_focus_esc_closes_settings_modal() {
-    use crate::views::modal::ActiveModal;
-    use crate::views::settings_modal::SettingsModalMode;
-    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    let _ = dispatch(
-        Action::OpenSettingsFocus {
-            key: "coding_data_sharing",
-        },
-        &mut app,
-    );
-    {
-        let agent = app.agents.get(&id).unwrap();
-        let Some(ActiveModal::Settings { state }) = &agent.active_modal else {
-            panic!("settings modal must be open")
-        };
-        assert!(matches!(
-            state.mode(),
-            SettingsModalMode::PickingEnum { .. }
-        ));
-        assert!(state.close_on_picker_exit);
-    }
-    let esc = Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-    let _ = app.handle_input(&esc);
-    assert!(
-        app.agents.get(&id).unwrap().active_modal.is_none(),
-        "deep-link Esc must dismiss the settings modal"
-    );
-}
-/// Full path: `/privacy`-style focus open → Enter commits and dismisses.
-#[test]
-fn open_settings_focus_enter_closes_settings_modal() {
-    use crate::app::app_view::InputOutcome;
-    use crate::views::modal::ActiveModal;
-    use crate::views::settings_modal::SettingsModalMode;
-    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    let _ = dispatch(
-        Action::OpenSettingsFocus {
-            key: "coding_data_sharing",
-        },
-        &mut app,
-    );
-    {
-        let agent = app.agents.get(&id).unwrap();
-        let Some(ActiveModal::Settings { state }) = &agent.active_modal else {
-            panic!("settings modal must be open")
-        };
-        assert!(matches!(
-            state.mode(),
-            SettingsModalMode::PickingEnum { .. }
-        ));
-        assert!(state.close_on_picker_exit);
-    }
-    let enter = Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    let outcome = app.handle_input(&enter);
-    assert!(
-        app.agents.get(&id).unwrap().active_modal.is_none(),
-        "deep-link Enter must dismiss the settings modal"
-    );
-    assert!(
-        matches!(
-            outcome,
-            InputOutcome::Action(Action::SetCodingDataSharing { .. })
-        ),
-        "deep-link Enter must commit SetCodingDataSharing, got {outcome:?}"
-    );
 }
 /// Browse path: OpenSettings → enter picker → Esc keeps modal open in Browse.
 #[test]
@@ -917,7 +503,7 @@ fn open_settings_enter_picker_esc_stays_open_in_browse() {
         let Some(ActiveModal::Settings { state }) = &mut agent.active_modal else {
             panic!("settings modal must be open")
         };
-        assert!(state.focus_key("coding_data_sharing"));
+        assert!(state.focus_key("screen_mode"));
         assert!(state.try_enter_picking_enum());
         assert!(!state.close_on_picker_exit);
     }
@@ -1547,25 +1133,11 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
             let away = !crate::appearance::cache::load_page_flip_on_send();
             let _ = dispatch(Action::SetPageFlipOnSend(away), app);
         }
-        "confirm_before_rewind" => {
-            let away = !app.current_ui.confirm_before_rewind_enabled();
-            let _ = dispatch(Action::SetConfirmBeforeRewind(away), app);
-        }
         "combine_queued_prompts" => {
             let away = !crate::appearance::cache::load_combine_queued_prompts();
             let _ = dispatch(Action::SetCombineQueuedPrompts(away), app);
         }
-        "follow_up_behavior" => {
-            let away = match crate::appearance::cache::load_follow_up_behavior() {
-                crate::appearance::FollowUpBehavior::Queue => {
-                    crate::appearance::FollowUpBehavior::Steer
-                }
-                crate::appearance::FollowUpBehavior::Steer => {
-                    crate::appearance::FollowUpBehavior::Queue
-                }
-            };
-            let _ = dispatch(Action::SetFollowUpBehavior(away), app);
-        }
+
         "simple_mode" => {
             let _ = dispatch(Action::SetSimpleMode(false), app);
         }
@@ -1578,9 +1150,7 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
         "contextual_hints.image_input" => {
             let _ = dispatch(Action::SetContextualHintImageInput(false), app);
         }
-        "contextual_hints.send_now" => {
-            let _ = dispatch(Action::SetContextualHintSendNow(false), app);
-        }
+
         "contextual_hints.small_screen" => {
             let _ = dispatch(Action::SetContextualHintSmallScreen(false), app);
         }
@@ -1625,9 +1195,6 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
         }
         "max_thoughts_width" => {
             let _ = dispatch(Action::SetMaxThoughtsWidth(200), app);
-        }
-        "coding_data_sharing" => {
-            let _ = dispatch(Action::SetCodingDataSharing { opted_in: true }, app);
         }
         "plan_mode" => {
             let _ = dispatch(
@@ -1809,7 +1376,6 @@ fn set_simple_mode_propagates_to_every_agent() {
             yolo_mode: false,
             auto_mode: false,
             prompt_history: Vec::new(),
-            prompt_history_loading: false,
             loading_replay: false,
             restore_degree: None,
             rate_limited: false,
@@ -1822,9 +1388,6 @@ fn set_simple_mode_propagates_to_every_agent() {
             model_switch_pending: false,
             user_model_preference: None,
             deferred_model_switch: None,
-            bg_tasks: std::collections::BTreeMap::new(),
-            bg_tool_call_to_task: std::collections::HashMap::new(),
-            scheduled_tasks: std::collections::HashMap::new(),
             in_flight_prompt: None,
             compact_held_prompt: None,
             current_prompt_id: None,
@@ -1996,36 +1559,6 @@ fn set_multiline_mode_no_op_when_no_active_agent() {
         matches!(app.active_view, ActiveView::Welcome),
         "active_view must not flip on no-agent dispatch",
     );
-}
-/// Dashboard surface owns its own compose flag: `SetMultilineMode` /
-/// `/multiline` flip `dashboard.multiline_mode` and leave agent flags alone.
-#[test]
-fn set_multiline_mode_on_dashboard_toggles_dashboard_not_agents() {
-    let mut app = test_app_with_agent();
-    insert_placeholder_agent(&mut app, AgentId(1));
-    app.dashboard = Some(crate::views::dashboard::DashboardState::new());
-    app.active_view = ActiveView::AgentDashboard;
-    assert!(!app.dashboard.as_ref().unwrap().multiline_mode);
-    assert!(!app.agents[&AgentId(0)].multiline_mode);
-    assert!(!app.agents[&AgentId(1)].multiline_mode);
-    let effects = dispatch(Action::SetMultilineMode(true), &mut app);
-    assert!(effects.is_empty());
-    assert!(
-        app.dashboard.as_ref().unwrap().multiline_mode,
-        "dashboard flag must flip on"
-    );
-    assert!(
-        !app.agents[&AgentId(0)].multiline_mode && !app.agents[&AgentId(1)].multiline_mode,
-        "agent flags must stay put"
-    );
-    let _ = dispatch(Action::SetMultilineMode(false), &mut app);
-    assert!(!app.dashboard.as_ref().unwrap().multiline_mode);
-    let _ = dispatch_dashboard_dispatch_slash(&mut app, "/multiline".into());
-    assert!(
-        app.dashboard.as_ref().unwrap().multiline_mode,
-        "/multiline must toggle dashboard on"
-    );
-    assert!(!app.agents[&AgentId(0)].multiline_mode);
 }
 /// Multi-agent fan-out. `set_multiline_mode`
 /// mutates only the ACTIVE agent's `multiline_mode`, never

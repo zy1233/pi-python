@@ -98,7 +98,6 @@ fn set_yolo_mode_on_drains_permission_queue_with_allow_once() {
         description: vec![],
         args_expanded: false,
         desc_scroll: 0,
-        subagent_label: None,
         options_area_height: 0,
         options_scroll_offset: 0,
     });
@@ -527,16 +526,6 @@ fn rollback_permission_mode_default_canonical_preserves_default() {
     );
 }
 
-/// Non-empty permission_queue → NeedsInput.
-#[test]
-fn classify_top_level_permission_queue_non_empty_is_needs_input() {
-    use crate::views::dashboard::{RowState, classify_top_level};
-    let mut app = test_app_with_agent();
-    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-    let _rx = push_synthetic_permission(agent, 1, vec![("allow", "Allow")]);
-    assert_eq!(classify_top_level(agent), RowState::NeedsInput);
-}
-
 #[test]
 fn permission_select_reject_does_not_steer_sticky_cursor() {
     use crate::appearance::permission_cursor::{
@@ -577,8 +566,8 @@ fn push_bash_allow_always(
     focus: crate::views::permission_view::PermissionFocus,
 ) -> tokio::sync::oneshot::Receiver<Result<acp::RequestPermissionResponse, acp::Error>> {
     use crate::views::permission_view::PermissionViewState;
-    use std::sync::Arc;
     use pi_workspace::permission::bash_command_splitting::BashCommandHighlights;
+    use std::sync::Arc;
 
     let (tx, rx) = tokio::sync::oneshot::channel();
     let request = acp::RequestPermissionRequest::new(
@@ -623,7 +612,6 @@ fn push_bash_allow_always(
         description: vec![],
         args_expanded: false,
         desc_scroll: 0,
-        subagent_label: None,
         options_area_height: 0,
         options_scroll_offset: 0,
     });

@@ -2,8 +2,8 @@
 //! errors, response parsing, envelope picking, fetched-envelope verification, and
 //! the apply outcome the sync orchestration consumes.
 
-use serde::Deserialize;
 use pi_config::signed_policy::now_unix;
+use serde::Deserialize;
 
 /// Which credential a config fetch used — tailors error messages and the
 /// post-fetch confirmation (team vs deployment).
@@ -115,9 +115,7 @@ impl ManagedConfigResponse {
     /// `signatures` entry whose key_id is in the embedded trusted set, else the
     /// first entry (so verification reports the real UnknownKeyId failure). The
     /// outer key_id only PICKS — verification re-selects the key from the signed bytes.
-    pub(super) fn signature_sidecar(
-        &self,
-    ) -> Option<pi_config::signed_policy::SignatureEnvelope> {
+    pub(super) fn signature_sidecar(&self) -> Option<pi_config::signed_policy::SignatureEnvelope> {
         pick_trusted_envelope(
             self.signatures.as_deref(),
             pi_config::signed_policy::embedded_key_id_trusted,
@@ -178,14 +176,6 @@ pub(super) enum ApplyOutcome {
 impl ApplyOutcome {
     pub(super) fn wrote(&self) -> bool {
         matches!(self, Self::Applied { wrote: true })
-    }
-
-    pub(super) fn skipped(&self) -> bool {
-        matches!(self, Self::Skipped)
-    }
-
-    pub(super) fn signature_rejected(&self) -> bool {
-        matches!(self, Self::SignatureRejected)
     }
 }
 

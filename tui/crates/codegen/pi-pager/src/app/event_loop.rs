@@ -13,12 +13,10 @@ use tokio::task::JoinSet;
 use tokio::time::{Instant, sleep_until};
 
 use crate::appearance::ConfigWatcher;
-use crate::client_identity::{PAGER_CLIENT_TYPE, PAGER_CLIENT_VERSION};
 use crate::theme::system_appearance::{self, SystemAppearanceWatcher};
 use crate::theme::{Theme, ThemeKind, cache as theme_cache};
 
-use agent_client_protocol as acp;
-use pi_acp_lib::{AcpClientMessage, acp_send};
+use pi_acp_lib::AcpClientMessage;
 
 use super::actions::{Action, Effect, TaskResult};
 use super::app_view::{
@@ -196,121 +194,6 @@ pub(crate) struct RunResult {
     pub relaunch: Option<super::app_view::ScreenModeRelaunch>,
 }
 
-/// In-flight reconnect re-initialization, tied to the agents whose reload
-/// windows it opened so completion lands on them even if the user switches
-/// views (or closes one) while the re-init runs.
-struct ReconnectReinit {
-    rx: tokio::sync::oneshot::Receiver<ReinitOutcome>,
-    /// Agents being reloaded, active tab first; empty when the reconnect
-    /// happened with no open sessions (init/auth are still re-run).
-    agent_ids: Vec<super::agent::AgentId>,
-    /// Reconnect generation that opened the reload windows.
-    generation: u64,
-}
-
-/// Result of a reconnect re-initialization task.
-struct ReinitOutcome {
-    /// Whether initialize/authenticate succeeded; when false no load was
-    /// attempted and `loads` is empty (every window finalizes as failed).
-    init_ok: bool,
-    loads: Vec<AgentLoadOutcome>,
-}
-
-/// Per-agent `session/load` outcome from the re-init task.
-struct AgentLoadOutcome {
-    agent_id: super::agent::AgentId,
-    success: bool,
- /// `legacy ext RPC` from the reload response: the turn another
-    /// client is driving mid-reconnect, adopted at finalize (mirrors the
-    /// `SessionLoaded` adoption in `dispatch.rs`).
-    running_prompt_id: Option<String>,
- /// `legacy ext RPC` from the reload response. A reconnect
-    /// re-spawns the session actor, which re-pins the fire mode, so the
-    /// pre-reconnect value can be stale — adopt the reloaded one or `/loop`
-    /// describes a runtime the new actor will not use.
-    scheduler_background_loops: Option<bool>,
-}
-
-/// Fields of the reconnect `session/load`, derived from the agent being
-/// reloaded. `None` when the agent has no session yet.
-struct ReconnectLoadPlan {
-    session_id: acp::SessionId,
-    /// The session's own cwd — its on-disk storage key — falling back to the
-    /// pager cwd only when unset. The pager cwd only matches sessions started
-    /// in it; worktree/cross-cwd sessions would fail to reload.
-    cwd: std::path::PathBuf,
-    /// `yoloMode` plus the optional reconnect `cursor`: the agent replays
-    /// only the post-cursor tail (as live updates) when it finds the eventId,
-    /// and full-replays when it doesn't.
-    meta: serde_json::Value,
-}
-
-fn restore_dashboard_peek_before_reload(
-    dashboard: &mut Option<crate::views::dashboard::DashboardState>,
-    agents: &mut indexmap::IndexMap<super::agent::AgentId, super::agent_view::AgentView>,
-) {
-    if let Some(dashboard) = dashboard.as_mut() {
-        dashboard.restore_peek_viewport(agents);
-    }
-}
-
-fn plan_reconnect_load(
-    agent: &super::agent_view::AgentView,
-    fallback_cwd: &std::path::Path,
-) -> Option<ReconnectLoadPlan> {
-    let session_id = agent.session.session_id.clone()?;
-    let cwd = if agent.session.cwd.as_os_str().is_empty() {
-        fallback_cwd.to_path_buf()
-    } else {
-        agent.session.cwd.clone()
-    };
-    let yolo = agent.session.is_yolo();
-    // Set BOTH yoloMode and autoMode explicitly. The leader's capability injection
-    // only fills ABSENT keys, so omitting autoMode here lets a stale launch-time
-    // `ClientCapabilities.auto_mode` re-enable Auto after the user left it (e.g.
-    // Shift+Tab to Ask). Auto is per-agent (symmetric with yolo) — derive it from
-    // this agent's own `auto_mode` so a background tab reconnects with ITS mode,
-    // not the active tab's global `current_ui` mirror.
-    let auto = super::dispatch::effective_auto(yolo, agent.session.is_auto());
-    let mut meta = serde_json::json!({ "yoloMode": yolo, "autoMode": auto });
-    if let Some(ref cursor) = agent.last_seen_event_id {
-        meta["cursor"] = serde_json::Value::String(cursor.clone());
-    }
-    Some(ReconnectLoadPlan {
-        session_id,
-        cwd,
-        meta,
-    })
-}
-
-/// Resolve the two post-reconnect restore outcomes from the per-agent
-/// `session/load` results.
-///
-/// - `all_restored` (AND across every reloaded tab, plus `init_ok`) drives the
-///   user-facing toast: it reports whether the WHOLE reconnect came back.
-/// - `active_restored` is per-agent: the ACTIVE tab's OWN reload succeeded. It
-///   gates that tab's post-reconnect queue drain. Gating the drain on
-///   `all_restored` would let one failed background tab strand prompts queued
-///   on a healthy active tab — the drain (`dispatch_drain_queue`) only ever
-///   touches the active agent, so a background failure has no bearing on it.
-///
-/// `loads` maps each reloaded agent to `(success, running_prompt_id)`; an agent
-/// in `pending_agent_ids` but absent from `loads` is treated as failed
-/// (mirrors the `unwrap_or((false, _))` at the finalize site).
-fn reconnect_restore_outcome(
-    init_ok: bool,
-    pending_agent_ids: &[super::agent::AgentId],
-    loads: &std::collections::HashMap<super::agent::AgentId, (bool, Option<String>, Option<bool>)>,
-    active_agent_id: Option<super::agent::AgentId>,
-) -> (bool, bool) {
-    let load_ok =
-        |id: &super::agent::AgentId| -> bool { loads.get(id).is_some_and(|(ok, ..)| *ok) };
-    let all_restored = init_ok && pending_agent_ids.iter().all(load_ok);
-    let active_restored = init_ok
-        && active_agent_id.is_some_and(|aid| pending_agent_ids.contains(&aid) && load_ok(&aid));
-    (all_restored, active_restored)
-}
-
 /// Compute the folder-trust verdict for the session cwd and seed
 /// [`AppView::trust_state`]. Pager-side mirror of the agent's resolve: read the
 /// local store, scan for repo-local code-exec config, and run the pure
@@ -320,15 +203,12 @@ fn reconnect_restore_outcome(
 /// becomes `TrustState::Pending` (show the question); everything else becomes
 /// `TrustState::Done`. The feature-off fast path (kill-switch / opt-out /
 /// local build) short-circuits before any I/O.
-fn seed_trust_state(
-    app: &mut AppView,
-    remote: Option<&pi_shell::util::config::RemoteSettings>,
-) {
-    use std::io::IsTerminal;
+fn seed_trust_state(app: &mut AppView, remote: Option<&pi_shell::util::config::RemoteSettings>) {
     use pi_workspace::folder_trust::{
         TrustOutcome, decide, decide_inputs_with_interactive, feature_enabled,
     };
     use pi_workspace::trust::workspace_key;
+    use std::io::IsTerminal;
 
     let feature = feature_enabled(remote);
     if !feature {
@@ -351,29 +231,6 @@ fn seed_trust_state(
         TrustOutcome::Prompt => TrustState::Pending { workspace: key },
         TrustOutcome::Trusted | TrustOutcome::Untrusted => TrustState::Done,
     };
-}
-
-/// Must run before the first render, or the startup-intent block opens a session behind the gate
-/// and the first frame shows the normal welcome.
-pub(crate) fn seed_consent_state_from_gate(
-    app: &mut AppView,
-    gate: Option<&pi_shell::util::config::ConsentGate>,
-) {
-    use crate::app::consent::{ConsentInputs, consent_verdict};
-    let stored = pi_shell::config::load_from_disk()
-        .ok()
-        .map(|root| pi_shell::util::config::load_config_from_toml(&root).consent)
-        .unwrap_or_default();
-    app.consent_state = consent_verdict(&ConsentInputs {
-        gate,
-        answered_this_run: app
-            .consent_answered
-            .as_ref()
-            .map(|(id, version)| (id.as_str(), *version)),
-        answers: &stored.answers,
-        account: app.account_email.as_deref(),
-        minimal: app.screen_mode.is_minimal(),
-    });
 }
 
 /// Pause terminal input and wait up to `timeout` for the reader to acknowledge.
@@ -680,13 +537,7 @@ fn report_suspend_wait(app: &mut AppView, message: &str) {
                 && let Some(agent) = app.agents.get_mut(&id)
             {
                 let block = crate::scrollback::block::RenderBlock::system(message);
-                if let Some(child_sid) = agent.active_subagent.clone()
-                    && let Some(child) = agent.subagent_views.get_mut(&child_sid)
-                {
-                    child.scrollback.push_block(block);
-                } else {
-                    agent.scrollback.push_block(block);
-                }
+                agent.scrollback.push_block(block);
             }
         }
     }
@@ -915,7 +766,6 @@ fn run_pending_mode_switch(
     input_rx: &mut tokio::sync::mpsc::UnboundedReceiver<TimedInputEvent>,
     presenter: &mut Presenter,
     tasks: &mut JoinSet<TaskResult>,
-    progress_tx: &tokio::sync::mpsc::UnboundedSender<effects::RestoreProgressMsg>,
     status_line_refresh_interval: &mut Option<Duration>,
     status_line_refresh_at: &mut Option<Instant>,
 ) -> bool {
@@ -1020,7 +870,7 @@ fn run_pending_mode_switch(
                     })
                 })
                 .collect();
-            let _ = process_effects(effs, tasks, app, progress_tx);
+            let _ = process_effects(effs, tasks, app);
             true
         }
     }
@@ -1081,19 +931,14 @@ pub(crate) async fn run(
     // Startup terminal height for the auto-compact derivation; kept fresh by
     // `Event::Resize` from here on. 0 (probe failure) never forces compact.
     app.last_known_terminal_rows = crossterm::terminal::size().map(|(_, r)| r).unwrap_or(0);
-    // Leader mode: a live `leader_status_rx` means the pager is connected via a
-    // leader. The dashboard itself is NOT gated on this flag (it renders local
-    // sessions regardless); `leader_mode` only controls whether we additionally
-    // poll the leader roster (see the roster-poll arm below).
-    app.leader_mode = connection.leader_status_rx.is_some();
     app.screen_mode = term_state.screen_mode;
     // `AppView::new` precedes the terminal's resolved screen mode. Rebuild the
     // registry at this I/O boundary; the later config-aware rebuild preserves
     // this mode while adding the optional mouse-reporting action.
     app.registry = crate::actions::ActionRegistry::defaults_for(term_state.screen_mode);
-    // Agent/dashboard prompts pick the mode up at their creation sites
-    // (`apply_app_scoped_gates` / `ensure_dashboard_state`); the welcome prompt
-    // already exists, so inject here.
+    // Agent prompts pick the mode up at their creation site
+    // (`apply_app_scoped_gates`); the welcome prompt already exists, so
+    // inject here.
     app.welcome_prompt.set_screen_mode(term_state.screen_mode);
     if app.screen_mode.is_minimal() && term_state.relaunched_into_minimal {
         app.minimal_state.welcome_pending = true;
@@ -1123,9 +968,8 @@ pub(crate) async fn run(
     if launch_auto {
         app.current_ui.permission_mode = Some("auto".into());
     }
-    // One effective-config read for launch-mode ownership, the display
-    // resolve below, and the plugin-CTA marketplace key (the launch resolvers
-    // above keep their own internal read).
+    // One effective-config read for launch-mode ownership and the display
+    // resolve below (the launch resolvers above keep their own internal read).
     let launch_effective_config = pi_shell::config::load_effective_config().ok();
     let launch_effective_ui = launch_effective_config
         .as_ref()
@@ -1152,23 +996,10 @@ pub(crate) async fn run(
     app.plan_mode = !args.no_plan;
     app.subagents = !args.no_subagents;
     app.ask_user = !args.no_ask_user;
-    app.chat_mode = args.chat();
-    #[cfg(feature = "local-workspace")]
-    {
-        let stamp = crate::app::session_startup::active_local_workspace()
-            .ok()
-            .flatten();
-        app.local_workspace_startup_locked = stamp.is_some();
-        if app.local_workspace_startup_locked {
-            app.welcome_workspace_mode =
-                crate::views::welcome::workspace_mode::mode_from_active_stamp(stamp.as_ref());
-            crate::views::welcome::workspace_mode::log_cli_lock_applied(app.welcome_workspace_mode);
-        }
-    }
     app.restore_code = args.restore_code.then_some(true);
     if let Some(ref agent) = args.agent {
-        match crate::headless::resolve_agent_arg(agent) {
-            crate::headless::ResolvedAgent::FilePath(path) => {
+        match super::cli::resolve_agent_arg(agent) {
+            super::cli::ResolvedAgent::FilePath(path) => {
                 match pi_shell::agent::config::AgentDefinition::from_file(&path) {
                     Ok(def) => app.agent_override = Some(def.to_json_value()),
                     Err(e) => {
@@ -1176,7 +1007,7 @@ pub(crate) async fn run(
                     }
                 }
             }
-            crate::headless::ResolvedAgent::Name(name) => {
+            super::cli::ResolvedAgent::Name(name) => {
                 app.agent_override = Some(serde_json::Value::String(name));
             }
         }
@@ -1226,26 +1057,11 @@ pub(crate) async fn run(
                 .and_then(|s| s.privacy_banner_reshow_days)
         });
     // Local dismiss timestamp for the coding-data privacy banner.
-    app.privacy_banner_acked = pi_shell::config::load_from_disk()
-        .ok()
-        .and_then(|root| {
-            pi_shell::util::config::load_config_from_toml(&root)
-                .privacy
-                .privacy_banner_acked
-        });
-    app.plugin_cta_enabled = pi_config::env_bool("GROK_PLUGIN_CTA")
-        .or_else(|| remote_settings.as_ref().and_then(|s| s.plugin_cta))
-        .unwrap_or(false);
-    app.plugin_cta_marketplace = launch_effective_config
-        .as_ref()
-        .and_then(plugin_cta_marketplace_from);
-    app.workspace_dashboard_enabled = pi_config::env_bool("GROK_WORKSPACE_DASHBOARD")
-        .or_else(|| {
-            remote_settings
-                .as_ref()
-                .and_then(|s| s.workspace_dashboard_enabled)
-        })
-        .unwrap_or(false);
+    app.privacy_banner_acked = pi_shell::config::load_from_disk().ok().and_then(|root| {
+        pi_shell::util::config::load_config_from_toml(&root)
+            .privacy
+            .privacy_banner_acked
+    });
     // Voice is applied after auth_meta so API-key detection is accurate.
     app.session_picker_grouped = std::env::var("GROK_SESSION_PICKER_GROUPED")
         .ok()
@@ -1266,8 +1082,6 @@ pub(crate) async fn run(
         })
         .unwrap_or(true);
     app.cancel_rewind_enabled = connection.cancel_rewind_enabled;
-    apply_session_recap_available(&mut app, connection.session_recap_available);
-    app.shell_feedback_trace_offer = connection.feedback_trace_offer;
 
     // Preserve auth methods so logout→re-login works without restarting.
     app.auth_methods = connection.auth_methods.clone();
@@ -1276,8 +1090,7 @@ pub(crate) async fn run(
     // Seed auth state from ACP connection metadata.
     // --force-login overrides: show the login screen even when credentials exist.
     let force_login = !standard_acp && args.force_login;
-    let needs_interactive_login =
-        !standard_acp && (connection.needs_login || force_login);
+    let needs_interactive_login = !standard_acp && (connection.needs_login || force_login);
     if needs_interactive_login {
         app.welcome_prompt_focused = false;
 
@@ -1351,8 +1164,7 @@ pub(crate) async fn run(
         vec![]
     };
 
-    app.has_external_auth_provider =
-        crate::slash::commands::usage::detect_external_auth_provider(&app.auth_methods);
+    app.has_external_auth_provider = detect_external_auth_provider(&app.auth_methods);
 
     if let Some(meta) = connection.auth_meta.as_ref() {
         match serde_json::from_value::<pi_shell::auth::AuthMeta>(meta.clone()) {
@@ -1361,9 +1173,10 @@ pub(crate) async fn run(
         }
     } else {
         // No cached session — check if the API key is the active credential.
-        app.is_api_key_auth = app.auth_methods.iter().any(|m| {
-            m.id().0.as_ref() == pi_shell::agent::auth_method::PI_API_KEY_METHOD_ID
-        });
+        app.is_api_key_auth = app
+            .auth_methods
+            .iter()
+            .any(|m| m.id().0.as_ref() == pi_shell::agent::auth_method::PI_API_KEY_METHOD_ID);
         // No AuthMeta on this path — API keys / external auth have no
         // consumer billing surface. External auth also hides `/usage`.
         if app.is_api_key_auth || app.has_external_auth_provider {
@@ -1419,15 +1232,6 @@ pub(crate) async fn run(
             None
         }
     };
-    let compat = pi_shell::agent::config::resolve_compat_sessions_from_raw(
-        effective_config.as_ref().ok_or(()),
-        remote_settings.as_ref(),
-    );
-    app.foreign_session_compat = pi_foreign_sessions::EnabledForeignSessionSources {
-        claude: compat.claude.sessions,
-        codex: compat.codex.sessions,
-        cursor: compat.cursor.sessions,
-    };
 
     // Load notification config from [ui.notifications] in config.toml.
     if let Some(ref raw) = effective_config {
@@ -1438,8 +1242,7 @@ pub(crate) async fn run(
             // Voice inherits the same resolved endpoints base as chat
             // (config > GROK_PI_API_BASE_URL env > default).
             let endpoints_base =
-                pi_shell::agent::config::EndpointsConfig::from_config_value(raw)
-                    .pi_api_base_url;
+                pi_shell::agent::config::EndpointsConfig::from_config_value(raw).pi_api_base_url;
             app.voice_config =
                 pi_voice::VoiceConfig::from_config_table(table, Some(&endpoints_base));
         }
@@ -1494,9 +1297,9 @@ pub(crate) async fn run(
 
     // Pre-arrival seed only. The authoritative per-session value rides the
     // `session/new` / `session/load` response, but `/loop` can be reached from
-    // the session-less dashboard and from a session whose response has not
-    // landed yet; both need an answer now, and this is the same resolver the
-    // shell runs at spawn, so the seed agrees with the flag as it stands today.
+    // a session whose response has not landed yet; that needs an answer now,
+    // and this is the same resolver the shell runs at spawn, so the seed
+    // agrees with the flag as it stands today.
     app.scheduler_background_loops_seed =
         pi_shell::util::config::resolve_scheduler_background_loops(
             remote_settings
@@ -1815,25 +1618,15 @@ pub(crate) async fn run(
     // directly in the select is NOT safe -- dropping its `next()` future
     // mid-poll (a losing arm) strands its background waker (crossterm #936), so
     // input on an idle screen was not serviced until an unrelated arm happened
-    // to re-poll (every ~20s via recap_poll). The always-on tracing_rx tick
+    // to re-poll (every ~20s via a periodic timer). The always-on tracing_rx tick
     // used to mask this by re-polling ~30Hz; this removes that dependency.
     let (input_tx, mut input_rx) = tokio::sync::mpsc::unbounded_channel::<TimedInputEvent>();
     // Folder-trust verdict, seeded BEFORE the first render, before any session
-    // is created (no repo-local MCP/LSP/hooks/plugins have loaded yet), and —
+    // is created, and —
     // for the type-ahead gate just below — before the reader thread starts.
     // Feature-off (kill-switch / opt-out / local build) resolves `Trusted`, so
     // this stays `TrustState::Done`.
     seed_trust_state(&mut app, remote_settings.as_ref());
-    if !standard_acp {
-        seed_consent_state_from_gate(
-            &mut app,
-            remote_settings
-                .as_ref()
-                .and_then(|s| s.consent_gate.as_ref()),
-        );
-    } else {
-        app.consent_state = crate::app::consent::ConsentState::Done;
-    }
 
     // Type-ahead captured while the app was still loading (see `init_terminal`),
     // replayed only when the composer is already the active input consumer; a
@@ -1934,12 +1727,9 @@ pub(crate) async fn run(
     });
     let mut acp_rx = connection.rx;
     let connection_cancel = connection.cancel;
-    let mut leader_status_rx = connection.leader_status_rx;
     let mut tasks: JoinSet<TaskResult> = JoinSet::new();
     let mut session_load_barrier = SessionLoadBarrier::new();
     let mut acp_peek: Option<AcpClientMessage> = None;
-    let (progress_tx, mut progress_rx) =
-        tokio::sync::mpsc::unbounded_channel::<effects::RestoreProgressMsg>();
 
     // Voice STT pipeline is started lazily on first successful `/voice` (see
     // `VoiceState::ColdStart`), not at launch — avoids background work for users
@@ -1986,21 +1776,6 @@ pub(crate) async fn run(
         None
     };
 
-    // Leader-mode roster poll (FleetView dashboard). Only fires while the
-    // dashboard is open AND we're connected via a leader. Armed to fire
-    // immediately at loop start so an already-open dashboard refreshes
-    // without waiting a full interval.
-    const ROSTER_POLL_INTERVAL: Duration = Duration::from_secs(1);
-    let mut roster_poll_at: Option<Instant> = Some(Instant::now());
-
-    // Pre-generate the automatic "return-from-away" recap while the terminal is
-    // unfocused, so it's already in the scrollback (instant) when the user
-    // returns. The arm is a cheap no-op while focused / not-yet-eligible; the
-    // heavy lifting (the model call) only fires once per away period via
-    // `should_pregenerate_away_recap`.
-    const RECAP_POLL_INTERVAL: Duration = Duration::from_secs(20);
-    let mut recap_poll_at: Option<Instant> = Some(Instant::now() + RECAP_POLL_INTERVAL);
-
     // Folder trust is seeded earlier (before the reader thread) so the startup
     // type-ahead gate can consult it; see `seed_trust_state` above.
 
@@ -2016,30 +1791,19 @@ pub(crate) async fn run(
 
     // status only; shell auto-syncs post-auth
     if matches!(app.auth_state, AuthState::Done) {
-        let effs = dispatch::dispatch(Action::RequestBundleStatus, &mut app);
-        if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
-            return Ok(finish_run(&mut app));
-        }
         // Fetch billing early so the welcome screen can show a credit warning.
         if app.usage_visible {
             let effs = vec![super::actions::Effect::FetchAppBilling];
-            if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+            if process_effects(effs, &mut tasks, &mut app) {
                 return Ok(finish_run(&mut app));
             }
-        }
-        // Fetch changelog off the render path so the welcome screen
-        // can display bullets and /release-notes uses the cached result.
-        let effs = vec![super::actions::Effect::FetchChangelog];
-        if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
-            return Ok(finish_run(&mut app));
         }
         if !app.has_access() {
             gate_poll_at = Some(Instant::now() + GATE_POLL_INTERVAL);
         }
     }
 
-    if !post_render_effects.is_empty()
-        && process_effects(post_render_effects, &mut tasks, &mut app, &progress_tx)
+    if !post_render_effects.is_empty() && process_effects(post_render_effects, &mut tasks, &mut app)
     {
         return Ok(finish_run(&mut app));
     }
@@ -2077,18 +1841,10 @@ pub(crate) async fn run(
             suppress_code_restore,
             ..
         } => {
-            // CLI resume has no roster entry: `chat_kind` on LoadSession is the
-            // conversation-entry bit only (false here). Process-wide `--chat`
-            // still stamps kind=chat via SessionFlags.chat_mode in the load
-            // effect; local Build disk rows are refused in dispatch / startup.
             if *suppress_code_restore {
                 app.suppress_code_restore_once = Some(session_id.clone());
             }
-            Some(Action::LoadSession(
-                session_id.clone(),
-                session_cwd.clone(),
-                false,
-            ))
+            Some(Action::LoadSession(session_id.clone(), session_cwd.clone()))
         }
         MaterializedStartup::NewWithId { session_id } if args.worktree.is_some() => {
             // Stash preferred id; `dispatch_new_worktree_session` consumes it and
@@ -2104,22 +1860,6 @@ pub(crate) async fn run(
         MaterializedStartup::NewWithId { session_id } => {
             Some(Action::NewSessionWithId(session_id.clone()))
         }
-        MaterializedStartup::Fork {
-            parent_session_id,
-            parent_cwd,
-            new_session_id,
-            suppress_code_restore,
-            ..
-        } => {
-            if *suppress_code_restore {
-                app.suppress_code_restore_once = Some(parent_session_id.clone());
-            }
-            Some(Action::StartupForkSession {
-                parent_session_id: parent_session_id.clone(),
-                parent_cwd: parent_cwd.clone().or(session_cwd.clone()),
-                new_session_id: new_session_id.clone(),
-            })
-        }
         MaterializedStartup::NewAuto if args.worktree.is_some() => {
             Some(Action::NewWorktreeSession {
                 load_session_id: None,
@@ -2132,7 +1872,7 @@ pub(crate) async fn run(
 
     if let Some(action) = startup_action {
         let effs = dispatch::dispatch(action, &mut app);
-        if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+        if process_effects(effs, &mut tasks, &mut app) {
             return Ok(finish_run(&mut app));
         }
         presenter.request_presentation(&mut app, terminal, false);
@@ -2146,7 +1886,7 @@ pub(crate) async fn run(
             },
             &mut app,
         );
-        if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+        if process_effects(effs, &mut tasks, &mut app) {
             return Ok(finish_run(&mut app));
         }
         presenter.request_presentation(&mut app, terminal, false);
@@ -2166,7 +1906,7 @@ pub(crate) async fn run(
             app.deferred_startup.prompt = Some(initial_prompt.to_string());
         } else if !app.is_zdr_blocked() {
             let effs = dispatch::dispatch_initial_prompt(&mut app, initial_prompt.to_string());
-            if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+            if process_effects(effs, &mut tasks, &mut app) {
                 return Ok(finish_run(&mut app));
             }
             presenter.request_presentation(&mut app, terminal, false);
@@ -2176,31 +1916,9 @@ pub(crate) async fn run(
         }
     }
 
-    // `grok dashboard` startup: open the dashboard view immediately. The
-    // CLI subcommand wrote a `GROK_OPEN_DASHBOARD_AT_STARTUP=1` env var
-    // so we don't have to thread a flag through every arg struct.
-    if std::env::var("GROK_OPEN_DASHBOARD_AT_STARTUP").as_deref() == Ok("1") {
-        // SAFETY: we are pre-multithreaded init for this app loop.
-        unsafe { std::env::remove_var("GROK_OPEN_DASHBOARD_AT_STARTUP") };
-        if app.session_startup_allowed() {
-            let effs = dispatch::dispatch(Action::OpenDashboard, &mut app);
-            if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
-                return Ok(finish_run(&mut app));
-            }
-            presenter.request_presentation(&mut app, terminal, false);
-        } else {
-            // Not signed in yet — the env var is already consumed, so
-            // without a stash the request would be silently dropped and
-            // the post-login flow would land on the welcome screen.
-            // Defer to the `AuthComplete` handler (mirrors
-            // the deferred session/prompt owner).
-            app.deferred_startup.open_dashboard = true;
-        }
-    }
-
     // Minimal (scrollback-native) mode has no welcome screen: the live region
     // only renders for an Agent view. If nothing above already started a
-    // session (no resume / initial prompt / worktree / dashboard), open an
+    // session (no resume / initial prompt / worktree), open an
     // empty one so the user lands directly at the prompt. Unauthenticated /
     // ZDR-blocked startup stays on Welcome, where `crate::minimal::live` shows
     // a sign-in hint instead of a blank region.
@@ -2209,7 +1927,7 @@ pub(crate) async fn run(
             // Already authenticated + trusted: open the empty session now so the
             // user lands directly at the prompt.
             let effs = dispatch::dispatch(Action::NewSession, &mut app);
-            if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+            if process_effects(effs, &mut tasks, &mut app) {
                 return Ok(finish_run(&mut app));
             }
             presenter.request_presentation(&mut app, terminal, false);
@@ -2222,13 +1940,6 @@ pub(crate) async fn run(
             // sign-in screen.
             app.deferred_startup.new_session = true;
         }
-    }
-
-    // Startup intents are now fully classified; only an untouched welcome can nudge.
-    if let Some(effect) = app.begin_foreign_resume_detection()
-        && process_effects(vec![effect], &mut tasks, &mut app, &progress_tx)
-    {
-        return Ok(finish_run(&mut app));
     }
 
     // Schedule the first animation tick so live updates start immediately
@@ -2244,14 +1955,6 @@ pub(crate) async fn run(
     // loop-top work (suspends, deadline re-derivation) never waits on an
     // unbounded drain during a token firehose.
     const ACP_DRAIN_BATCH_MAX: usize = 32;
-
-    let mut reconnect_reinit: Option<ReconnectReinit> = None;
-    let mut reconnect_abort_handle: Option<tokio::task::AbortHandle> = None;
-    // Highest `Connected` generation already handled. Starts at 0 — the
-    // initial pre-reconnect watch value — so startup never triggers a reload;
-    // any greater generation is a reconnect, even when the intermediate
-    // `Reconnecting` state was coalesced away by the watch channel.
-    let mut last_leader_generation: u64 = 0;
 
     // Persistent CSI fragment filter — carries parsing state across
     // drain_and_process calls so a mouse report split across batches is still
@@ -2298,7 +2001,7 @@ pub(crate) async fn run(
         let mut quit_after_deferred_load = false;
         for result in ready_loads {
             let effs = dispatch::dispatch(Action::TaskComplete(result), &mut app);
-            if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+            if process_effects(effs, &mut tasks, &mut app) {
                 quit_after_deferred_load = true;
                 break;
             }
@@ -2343,7 +2046,6 @@ pub(crate) async fn run(
             &mut input_rx,
             &mut presenter,
             &mut tasks,
-            &progress_tx,
             &mut status_line_refresh_interval,
             &mut status_line_refresh_at,
         ) {
@@ -2371,15 +2073,12 @@ pub(crate) async fn run(
                 tracing::info!("voice pipeline started (/voice or Ctrl+Space)");
                 // The spawn is async, so begin capture now the pipeline is live
                 // — but only if the user is still on a surface that can receive
-                // dictation (an agent prompt or the dashboard dispatch input).
+                // dictation (an agent prompt).
                 // This runs at loop-top before any new input, so the surface
                 // normally can't have changed since the keypress; the else-arm
                 // is defensive cleanup so voice mode can't stay armed without
                 // capture ever starting.
-                if matches!(
-                    app.active_view,
-                    ActiveView::Agent(_) | ActiveView::AgentDashboard
-                ) {
+                if matches!(app.active_view, ActiveView::Agent(_)) {
                     app.voice_begin_recording(target, hold);
                 } else {
                     app.voice_state = VoiceState::Idle;
@@ -2423,17 +2122,6 @@ pub(crate) async fn run(
             // No game is the active input target now (switched to a non-game
             // view); clear every game's holds for the same reason.
             app.gboom_release_all_games();
-        }
-
-        // Re-arm the dashboard roster poll when the dashboard is open but the
-        // poll has gone dormant — i.e. the dashboard was just opened. The poll
-        // arm leaves `roster_poll_at = None` only when it fired with the
-        // dashboard closed, so this fires an immediate refresh exactly on the
-        // closed→open transition rather than every iteration. Applies in both
-        // modes: leader mode polls the live roster, non-leader mode polls the
-        // local on-disk idle-session list.
-        if roster_poll_at.is_none() && matches!(app.active_view, ActiveView::AgentDashboard) {
-            roster_poll_at = Some(Instant::now());
         }
 
         // (Re-)arm the subscription watch on the dormant→wanted transition
@@ -2533,20 +2221,6 @@ pub(crate) async fn run(
             }
         };
 
-        let roster_poll = async {
-            match roster_poll_at {
-                Some(at) => sleep_until(at).await,
-                None => std::future::pending().await,
-            }
-        };
-
-        let recap_poll = async {
-            match recap_poll_at {
-                Some(at) => sleep_until(at).await,
-                None => std::future::pending().await,
-            }
-        };
-
         let load_barrier_tick = async {
             match session_load_barrier.next_wakeup() {
                 Some(deadline) => {
@@ -2570,9 +2244,9 @@ pub(crate) async fn run(
         tokio::select! {
             biased;
 
-            // Leader disconnect: the bridge fires cancel when the IPC
-            // channel closes.  Without this arm the loop would hang
-            // because AppView holds the client-side tx, keeping acp_rx open.
+            // Agent disconnect: the stdio bridge fires cancel when the agent
+            // process exits.  Without this arm the loop would hang because
+            // AppView holds the client-side tx, keeping acp_rx open.
             _ = connection_cancel.cancelled() => {
                 break;
             }
@@ -2581,7 +2255,7 @@ pub(crate) async fn run(
             // biased order so a SIGTERM quit isn't starved by an ACP firehose.
             _ = quit_notify.notified() => {
                 let effs = dispatch::dispatch(Action::Quit, &mut app);
-                let _ = process_effects(effs, &mut tasks, &mut app, &progress_tx);
+                let _ = process_effects(effs, &mut tasks, &mut app);
                 break;
             }
 
@@ -2627,7 +2301,7 @@ pub(crate) async fn run(
                 let mut state_changed = acp_handler::handle(msg, &mut app);
                 if !app.pending_effects.is_empty() {
                     let effs = std::mem::take(&mut app.pending_effects);
-                    if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+                    if process_effects(effs, &mut tasks, &mut app) {
                         break;
                     }
                 }
@@ -2645,7 +2319,7 @@ pub(crate) async fn run(
                     state_changed |= acp_handler::handle(msg, &mut app);
                     if !app.pending_effects.is_empty() {
                         let effs = std::mem::take(&mut app.pending_effects);
-                        if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+                        if process_effects(effs, &mut tasks, &mut app) {
                             return Ok(finish_run_with_stall_flush(&mut app, &mut stall_rollup));
                         }
                     }
@@ -2694,7 +2368,7 @@ pub(crate) async fn run(
                             continue;
                         };
                         let effs = dispatch::dispatch(Action::TaskComplete(result), &mut app);
-                        if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+                        if process_effects(effs, &mut tasks, &mut app) {
                             break;
                         }
                         after_task_complete_dispatch(
@@ -2718,18 +2392,6 @@ pub(crate) async fn run(
                         }
                     }
                 }
-            }
-
-            Some(msg) = progress_rx.recv() => {
-                let result = TaskResult::SessionRestoreProgress {
-                    agent_id: msg.agent_id,
-                    message: msg.message,
-                };
-                let effs = dispatch::dispatch(Action::TaskComplete(result), &mut app);
-                if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
-                    break;
-                }
-                presenter.request(false);
             }
 
             // Background update check completed.
@@ -2767,7 +2429,7 @@ pub(crate) async fn run(
                     super::event_loop_stall::input_wait(ev.arrived_at, handled_at, loop_entry);
                 let stall_activity = super::event_loop_stall::StallActivity::read();
                 let result = drain_and_process(
-                    ev, &mut input_rx, &mut app, &mut tasks, &progress_tx,
+                    ev, &mut input_rx, &mut app, &mut tasks,
                     &mut csi_filter, &mut xt_filter,
                 ).await;
                 if let Some(window) =
@@ -2780,7 +2442,7 @@ pub(crate) async fn run(
                 }
                 if !app.pending_effects.is_empty() {
                     let effs = std::mem::take(&mut app.pending_effects);
-                    if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+                    if process_effects(effs, &mut tasks, &mut app) {
                         break;
                     }
                 }
@@ -2854,7 +2516,7 @@ pub(crate) async fn run(
                 // `needs_animation()` keeps ticks alive while either recovery
                 // is armed, so these checks cannot be starved.
                 if let Some(resends) = dispatch::reconcile_overdue_cancels(&mut app)
-                    && process_effects(resends, &mut tasks, &mut app, &progress_tx)
+                    && process_effects(resends, &mut tasks, &mut app)
                 {
                     break;
                 }
@@ -2864,7 +2526,7 @@ pub(crate) async fn run(
                 // (see `dispatch::reconcile_overdue_turn_ends`).
                 let reconciled = dispatch::reconcile_overdue_turn_ends(&mut app);
                 if let Some(effs) = reconciled {
-                    if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+                    if process_effects(effs, &mut tasks, &mut app) {
                         break;
                     }
                     presenter.request(false);
@@ -2882,9 +2544,8 @@ pub(crate) async fn run(
                     let effs = vec![Effect::FetchBilling {
                         agent_id: id,
                         silent: true,
-                        nonce: Default::default(),
                     }];
-                    if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+                    if process_effects(effs, &mut tasks, &mut app) {
                         break;
                     }
                 }
@@ -2896,7 +2557,7 @@ pub(crate) async fn run(
             _ = gate_poll => {
                 gate_poll_at = None;
                 let effs = vec![Effect::RefreshGate];
-                if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+                if process_effects(effs, &mut tasks, &mut app) {
                     break;
                 }
                 if !app.has_access() {
@@ -2924,43 +2585,9 @@ pub(crate) async fn run(
             _ = subscription_watch => {
                 subscription_watch_at = None;
                 let effs = app.fire_subscription_check("watch");
-                if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+                if process_effects(effs, &mut tasks, &mut app) {
                     break;
                 }
-            }
-
-            _ = roster_poll => {
-                roster_poll_at = None;
-                // Only poll while the dashboard is open. When it is not active
-                // we deliberately do NOT re-arm, so the loop isn't woken once
-                // per second forever. In leader mode we poll the live FleetView
-                // roster; outside leader mode we poll the local on-disk
-                // idle-session list so the dashboard still shows idle sessions.
-                let dashboard_open = matches!(app.active_view, ActiveView::AgentDashboard);
-                if dashboard_open {
-                    let eff = if leader_status_rx.is_some() {
-                        Effect::FetchRoster
-                    } else {
-                        Effect::FetchDashboardSessions
-                    };
-                    if process_effects(vec![eff], &mut tasks, &mut app, &progress_tx) {
-                        break;
-                    }
-                    roster_poll_at = Some(Instant::now() + ROSTER_POLL_INTERVAL);
-                }
-            }
-
-            // Pre-generate the away recap so it's already on screen when the
-            // user returns. Cheap no-op while focused / not-yet-eligible.
-            _ = recap_poll => {
-                if should_pregenerate_away_recap(&app) {
-                    let effs = dispatch::dispatch(Action::SendRecap { auto: true }, &mut app);
-                    if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
-                        break;
-                    }
-                }
-                // Always re-arm: a cheap no-op fire while focused / not-yet-eligible.
-                recap_poll_at = Some(Instant::now() + RECAP_POLL_INTERVAL);
             }
 
             _ = load_barrier_tick => {}
@@ -3021,333 +2648,6 @@ pub(crate) async fn run(
                 }
             }
 
-            // Leader connection status changes (reconnect lifecycle).
-            Ok(()) = async {
-                match leader_status_rx.as_mut() {
-                    Some(rx) => rx.changed().await.map_err(|_| ()),
-                    None => std::future::pending::<Result<(), ()>>().await,
-                }
-            } => {
-                use crate::acp::leader_bridge::ConnectionStatus;
-
-                let Some(rx) = leader_status_rx.as_mut() else {
-                    // Guard: the async block above pends when None, but
-                    // defensive code should never .unwrap() in production.
-                    continue;
-                };
-                let status = rx.borrow_and_update().clone();
-                match status {
-                    ConnectionStatus::Reconnecting { attempt } => {
-                        // Unified-log marker: an IPC reconnect mints a new leader-side
-                        // ClientId, which orphans responses to this client's in-flight
-                        // RPCs and drops outbound lines held across the swap — the
-                        // root trigger of the stuck-cancel bug.
-                        // Without this marker the reconnect is invisible in the
-                        // unified log (it only surfaced as ghost `session loaded`
-                        // replays with no matching `session.load.start`).
-                        crate::unified_log::warn(
-                            "leader.ipc.reconnecting",
-                            None,
-                            Some(serde_json::json!({ "attempt": attempt })),
-                        );
-                        app.show_toast(&format!(
-                            "Disconnected. Reconnecting... (attempt {attempt})"
-                        ));
-                        presenter.request(false);
-                    }
-                    ConnectionStatus::Connected { generation }
-                        if generation > last_leader_generation =>
-                    {
-                        crate::unified_log::warn(
-                            "leader.ipc.reconnected",
-                            None,
-                            Some(serde_json::json!({
-                                "generation": generation,
-                                "open_sessions": app
-                                    .agents
-                                    .values()
-                                    .filter_map(|a| {
-                                        a.session.session_id.as_ref().map(|s| s.0.to_string())
-                                    })
-                                    .collect::<Vec<_>>(),
-                            })),
-                        );
-                        last_leader_generation = generation;
-                        app.reconnect_pending = true;
-                        // Connection-scoped: a re-elected shell reseeds its push gen from wall clock,
-                        // so a surviving higher watermark would silently drop its fresh pushes.
-                        app.announcements_last_gen = 0;
-
-                        // Cancel any in-flight re-init from a previous reconnect
-                        // cycle and restore those agents' stashed transcripts —
-                        // their load requests rode the now-dead connection.
-                        if let Some(handle) = reconnect_abort_handle.take() {
-                            handle.abort();
-                        }
-                        if let Some(prev) = reconnect_reinit.take() {
-                            restore_dashboard_peek_before_reload(
-                                &mut app.dashboard,
-                                &mut app.agents,
-                            );
-                            for prev_id in prev.agent_ids {
-                                if let Some(agent) = app.agents.get_mut(&prev_id) {
-                                    agent.finish_session_reload(prev.generation, false);
-                                }
-                            }
-                        }
-
-                        // Open a reload window on EVERY agent with a session
-                        // (active tab first so the visible one restores
-                        // fastest): a freshly (re-)elected leader has no
-                        // sessions in memory, so reloading only the active
-                        // session would leave every other tab on a session id
-                        // the new leader has never seen ("unknown session id"
-                        // on its next prompt). Replay is staged into fresh
-                        // state per agent and each existing transcript stays
-                        // recoverable until its load outcome is known.
-                        let fallback_cwd = app.cwd.clone();
-                        let active_agent_id = match app.active_view {
-                            ActiveView::Agent(id) => Some(id),
-                            _ => None,
-                        };
-                        let mut agent_ids: Vec<super::agent::AgentId> =
-                            app.agents.keys().copied().collect();
-                        agent_ids.sort_by_key(|id| Some(*id) != active_agent_id);
-                        let mut reload_agent_ids = Vec::new();
-                        let mut load_plans = Vec::new();
-                        restore_dashboard_peek_before_reload(
-                            &mut app.dashboard,
-                            &mut app.agents,
-                        );
-                        for id in agent_ids {
-                            let Some(agent) = app.agents.get_mut(&id) else {
-                                continue;
-                            };
-                            let Some(plan) = plan_reconnect_load(agent, &fallback_cwd) else {
-                                continue;
-                            };
-                            // Keep the per-session display flag in lockstep with the
-                            // enforcement value (`autoMode`) we just re-seeded on this
-                            // agent (yolo wins, computed inside `plan_reconnect_load`).
-                            agent.session.auto_mode =
-                                plan.meta["autoMode"].as_bool().unwrap_or(false);
-                            agent.begin_session_reload(generation);
-                            // The reload adoption supersedes a pre-disconnect stash.
-                            app.pending_running_adoptions.remove(&id);
-                            reload_agent_ids.push(id);
-                            load_plans.push((id, plan));
-                        }
-                        let any_reload = !reload_agent_ids.is_empty();
-                        // Per-agent `auto_mode` was just re-seeded from the reload
-                        // meta; keep `/auto` feature-gate slash visibility in sync.
-                        app.sync_permission_mode_slash_gate();
-
-                        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
-                        reconnect_reinit = Some(ReconnectReinit {
-                            rx: done_rx,
-                            agent_ids: reload_agent_ids,
-                            generation,
-                        });
-
-                        let acp_tx = app.acp_tx.clone();
-                        let join_handle = tokio::spawn(async move {
-                            // 30 s for initialize/authenticate plus a budget per
-                            // session/load (each load replays history and may
-                            // respawn MCP servers on the new leader).
-                            let timeout = Duration::from_secs(
-                                (30 + 30 * load_plans.len() as u64).min(300),
-                            );
-
-                            // Inner result: `None` = init/auth failure (no
-                            // load was attempted); `Some(loads)` = per-agent
-                            // load outcomes with the optional mid-turn running
-                            // prompt id from each reload response.
-                            let ok = tokio::time::timeout(timeout, async {
-                                let init_req = acp::InitializeRequest::new(acp::ProtocolVersion::V1).client_capabilities(acp::ClientCapabilities::new().fs(acp::FileSystemCapabilities::new()).terminal(false)).meta(serde_json::json!({
-                                        "clientType": PAGER_CLIENT_TYPE,
-                                        "clientVersion": PAGER_CLIENT_VERSION,
-                                    }).as_object().cloned());
-                                if let Err(e) = acp_send(init_req, &acp_tx).await {
-                                    tracing::error!(error = %e, "reconnect: re-initialize failed");
-                                    return None;
-                                }
-
-                                let auth_req = acp::AuthenticateRequest::new(acp::AuthMethodId::new(crate::obf::auth::CACHED_TOKEN!()));
-                                if let Err(e) = acp_send(auth_req, &acp_tx).await {
-                                    tracing::warn!(error = %e, "reconnect: re-authenticate failed");
-                                }
-
-                                let mut loads = Vec::with_capacity(load_plans.len());
-                                for (agent_id, plan) in load_plans {
-                                    // Reconnect path — no resolved compat in scope; default
-                                    // (all-on) preserves existing behavior.
-                                    let mcp_servers = pi_shell::util::config::load_mcp_servers(
-                                        &plan.cwd,
-                                        &pi_tools::types::compat::CompatConfig::default(),
-                                    );
-                                    let load_req = acp::LoadSessionRequest::new(plan.session_id, plan.cwd).mcp_servers(mcp_servers).meta(plan.meta.as_object().cloned());
-                                    match acp_send(load_req, &acp_tx).await {
-                                        Ok(resp) => {
-                                            loads.push(AgentLoadOutcome {
-                                                agent_id,
-                                                success: true,
-                                                running_prompt_id:
-                                                    effects::parse_session_load_running_prompt_id(
-                                                        resp.meta.as_ref(),
-                                                    ),
-                                                scheduler_background_loops:
-                                                    effects::parse_session_scheduler_background_loops(
-                                                        resp.meta.as_ref(),
-                                                    ),
-                                            });
-                                        }
-                                        Err(e) => {
-                                            tracing::error!(error = %e, "reconnect: reload session failed");
-                                            // Keep restoring the remaining sessions —
-                                            // one broken session must not doom the rest.
-                                            loads.push(AgentLoadOutcome {
-                                                agent_id,
-                                                success: false,
-                                                running_prompt_id: None,
-                                                scheduler_background_loops: None,
-                                            });
-                                        }
-                                    }
-                                }
-                                Some(loads)
-                            })
-                            .await;
-
-                            let outcome = match ok {
-                                Ok(Some(loads)) => ReinitOutcome {
-                                    init_ok: true,
-                                    loads,
-                                },
-                                Ok(None) => ReinitOutcome {
-                                    init_ok: false,
-                                    loads: Vec::new(),
-                                },
-                                Err(_) => {
-                                    tracing::error!("reconnect re-initialization timed out");
-                                    ReinitOutcome {
-                                        init_ok: false,
-                                        loads: Vec::new(),
-                                    }
-                                }
-                            };
-                            let _ = done_tx.send(outcome);
-                        });
-                        reconnect_abort_handle = Some(join_handle.abort_handle());
-
-                        app.show_toast(if any_reload {
-                            "Reconnected. Reloading session..."
-                        } else {
-                            "Reconnected. Re-initializing..."
-                        });
-                        presenter.request(false);
-                    }
-                    ConnectionStatus::Failed { ref error } => {
-                        app.show_toast(&format!("Connection failed: {error}"));
-                        presenter.request(false);
-                    }
-                    _ => {}
-                }
-            }
-
-            // Reconnect re-initialization completed (or failed).
-            result = async {
-                match reconnect_reinit.as_mut() {
-                    Some(pending) => (&mut pending.rx).await,
-                    None => std::future::pending::<Result<ReinitOutcome, _>>().await,
-                }
-            } => {
-                let Some(pending) = reconnect_reinit.take() else {
-                    continue;
-                };
-                reconnect_abort_handle = None;
-                app.reconnect_pending = false;
-
-                let outcome = match result {
-                    Ok(outcome) => outcome,
-                    Err(_) => {
-                        tracing::error!("reconnect re-init task failed (sender dropped)");
-                        ReinitOutcome { init_ok: false, loads: Vec::new() }
-                    }
-                };
-
-                // Finalize the reload windows on the agents the re-init was
-                // started for — NOT whatever view is active now (see
-                // `SessionReload` for the outcome handling). Each window
-                // resolves on ITS load outcome (one broken session must not
-                // discard the other tabs' replayed transcripts), then a
-                // mid-reconnect running turn is adopted, mirroring the
-                // `SessionLoaded` adoption in dispatch.rs.
-                let mut loads: std::collections::HashMap<_, _> = outcome
-                    .loads
-                    .into_iter()
-                    .map(|l| {
-                        (
-                            l.agent_id,
-                            (l.success, l.running_prompt_id, l.scheduler_background_loops),
-                        )
-                    })
-                    .collect();
-                // Resolved BEFORE the finalize loop drains `loads` via `remove`
-                // (see `reconnect_restore_outcome`).
-                let active_agent_id = match app.active_view {
-                    ActiveView::Agent(id) => Some(id),
-                    _ => None,
-                };
-                let (restored, active_restored) = reconnect_restore_outcome(
-                    outcome.init_ok,
-                    &pending.agent_ids,
-                    &loads,
-                    active_agent_id,
-                );
-                restore_dashboard_peek_before_reload(&mut app.dashboard, &mut app.agents);
-                for id in &pending.agent_ids {
-                    let (ok, running_prompt_id, scheduler_background_loops) =
-                        loads.remove(id).unwrap_or((false, None, None));
-                    if let Some(agent) = app.agents.get_mut(id) {
-                        // The reloaded actor re-pinned the fire mode; a failed
-                        // load leaves the previous value rather than guessing.
-                        if let Some(mode) = scheduler_background_loops {
-                            agent.scheduler_background_loops = Some(mode);
-                        }
-                        agent.finalize_reload_and_maybe_adopt(
-                            pending.generation,
-                            ok,
-                            running_prompt_id,
-                        );
-                    }
-                }
-
-                if pending.agent_ids.is_empty() {
-                    // Nothing was reloaded (no open sessions at reconnect).
-                    app.show_toast("Reconnected.");
-                } else if restored {
-                    app.show_toast("Session restored. In-progress tools and terminals were lost.");
-                } else {
-                    app.show_toast("Session restore failed. Kept the existing transcript.");
-                }
-
-                // Re-trigger the queue drain suppressed during the outage: every
-                // normal trigger (PromptResponse, DrainQueue, send-prompt,
-                // session-created) early-returns while `reconnect_pending` is set
-                // and defers here, and the agent was just force-idled above. Gate
-                // on the active tab's own restore (see `reconnect_restore_outcome`):
-                // a failed active restore suppresses the drain, since sending into
-                // an unrestored session would be wrong.
-                if active_restored {
-                    let drain_effects = dispatch::dispatch(Action::DrainQueue, &mut app);
-                    if process_effects(drain_effects, &mut tasks, &mut app, &progress_tx) {
-                        return Ok(finish_run_with_stall_flush(&mut app, &mut stall_rollup));
-                    }
-                }
-
-                presenter.request(false);
-            }
-
             // Voice STT — DELIBERATELY THE LAST (lowest-priority) arm. In a
             // biased select, an arm that is ready on most iterations masks every
             // arm below it. A hot mic (toggle capture stays open across pauses)
@@ -3375,7 +2675,7 @@ pub(crate) async fn run(
                         }
                         if !app.pending_effects.is_empty() {
                             let effs = std::mem::take(&mut app.pending_effects);
-                            if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+                            if process_effects(effs, &mut tasks, &mut app) {
                                 break;
                             }
                         }
@@ -3405,7 +2705,7 @@ pub(crate) async fn run(
         // still drain inline when it needs the effects applied sooner.
         if !app.pending_effects.is_empty() {
             let effs = std::mem::take(&mut app.pending_effects);
-            if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
+            if process_effects(effs, &mut tasks, &mut app) {
                 break;
             }
         }
@@ -3466,58 +2766,34 @@ fn load_initial_config_session_bools() -> InitialConfigSessionBools {
     }
 }
 
-/// Whether to pre-generate the automatic "return-from-away" recap right now.
-///
-/// True only when the terminal has been unfocused past the recap threshold
-/// (once per away period, gated by [`FocusTracker::recap_due`]), the shell has
-/// rolled out session recap (`session_recap_available`), the user has not opted
-/// out via `ui.notifications.session_recap`, and the active agent has *finished
-/// its turn* with nothing pending that could wake it — i.e. idle, no modal, no
-/// pending question, an established session, and no running background task (a
-/// bg task completing can auto-wake the agent). Generating it now means the
-/// recap is already in the scrollback when the user returns.
-/// Sync shell `sessionRecap` into execution gate + every existing slash surface.
-/// Dashboard created later is seeded in `dispatch_open_dashboard`.
-fn apply_session_recap_available(app: &mut AppView, available: bool) {
-    app.session_recap_available = available;
-    for agent in app.agents.values_mut() {
-        agent.set_session_recap_available(available);
-    }
-    app.welcome_prompt.set_recap_visible(available);
-    if let Some(dashboard) = app.dashboard.as_mut() {
-        dashboard.set_recap_visible(available);
-    }
-}
-
-/// `[marketplace].plugin_cta_marketplace` from an effective config: the
-/// marketplace source name the plugin CTA draws candidates from instead of
-/// pi Official. Empty/whitespace-only values count as unset.
-fn plugin_cta_marketplace_from(config: &toml::Value) -> Option<String> {
-    let name = config
-        .get("marketplace")?
-        .get("plugin_cta_marketplace")?
-        .as_str()?
-        .trim();
-    (!name.is_empty()).then(|| name.to_string())
-}
-
-fn should_pregenerate_away_recap(app: &AppView) -> bool {
-    if !(app.session_recap_available
-        && app.notification_service.focus_tracker.recap_due()
-        && app.notification_service.config().session_recap)
-    {
-        return false;
-    }
-    let ActiveView::Agent(id) = app.active_view else {
-        return false;
+/// Detect external-auth installs once at pager startup.
+fn detect_external_auth_provider(auth_methods: &[agent_client_protocol::AuthMethod]) -> bool {
+    let method_is_external = |method: &agent_client_protocol::AuthMethod| {
+        method
+            .meta()
+            .as_ref()
+            .and_then(|v| v.get("external_provider"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
     };
-    app.agents.get(&id).is_some_and(|agent| {
-        agent.session.state.is_idle()
-            && agent.active_modal.is_none()
-            && agent.question_view.is_none()
-            && agent.session.session_id.is_some()
-            && !agent.session.has_running_bg_tasks()
-    })
+    let env_set = || {
+        std::env::var("GROK_AUTH_PROVIDER_COMMAND")
+            .ok()
+            .is_some_and(|s| !s.trim().is_empty())
+    };
+    let config_set = || {
+        let Ok(raw) = pi_shell::config::load_effective_config() else {
+            return false;
+        };
+        let Ok(cfg) = pi_shell::agent::config::Config::new_from_toml_cfg(&raw) else {
+            return false;
+        };
+        cfg.grok_com_config
+            .auth_provider_command
+            .as_deref()
+            .is_some_and(|s| !s.trim().is_empty())
+    };
+    auth_methods.iter().any(method_is_external) || env_set() || config_set()
 }
 
 /// Bookkeeping shared by the JoinSet arm and the deferred SessionLoaded drain.
@@ -3580,9 +2856,7 @@ fn sync_appearance_watcher(watcher: &mut Option<SystemAppearanceWatcher>) {
 }
 
 fn emit_event_loop_stall(window: super::event_loop_stall::StallWindow) {
-    pi_telemetry::session_ctx::log_event(super::event_loop_stall::event_loop_stall_event(
-        window,
-    ));
+    pi_telemetry::session_ctx::log_event(super::event_loop_stall::event_loop_stall_event(window));
 }
 
 fn flush_pending_stall(stall_rollup: &mut super::event_loop_stall::StallRollup) {
@@ -3703,7 +2977,6 @@ async fn drain_and_process(
     input_rx: &mut tokio::sync::mpsc::UnboundedReceiver<TimedInputEvent>,
     app: &mut AppView,
     tasks: &mut JoinSet<TaskResult>,
-    progress_tx: &tokio::sync::mpsc::UnboundedSender<effects::RestoreProgressMsg>,
     csi_filter: &mut super::csi_filter::CsiFragmentFilter,
     xt_filter: &mut super::xt_filter::XtversionFilter,
 ) -> DrainResult {
@@ -3764,12 +3037,6 @@ async fn drain_and_process(
                     force_repaint = true;
                     needs_draw = true;
                 }
-                // Capture recap eligibility BEFORE on_focus_gained() clears the
-                // away timer. Auto recap requires the shell rollout flag plus
-                // the notifications opt-in; manual `/recap` only needs the flag.
-                let recap_due = app.session_recap_available
-                    && app.notification_service.focus_tracker.recap_due()
-                    && app.notification_service.config().session_recap;
                 app.notification_service.focus_tracker.on_focus_gained();
                 // Pre-warm AppKit's lazy dlopen off the UI thread (once) so the
                 // first changeCount poll after returning is just the cheap
@@ -3786,7 +3053,7 @@ async fn drain_and_process(
                 // The user may have just subscribed in the browser and
                 // tabbed back.
                 let effs = app.fire_subscription_check("focus");
-                if process_effects(effs, tasks, app, progress_tx) {
+                if process_effects(effs, tasks, app) {
                     return true;
                 }
                 // Restore Prompt on refocus: needs-input overlay always, else idle non-vim.
@@ -3799,30 +3066,6 @@ async fn drain_and_process(
                             needs_draw = true;
                             had_non_resize_change = true;
                         }
-
-                        // Automatic "where was I" recap: the user just returned
-                        // after being away long enough. Only when the session is
-                        // idle and not blocked by a modal or pending question.
-                        // Compute eligibility into a bool first so the immutable
-                        // agent borrow is dropped before dispatch (&mut app).
-                        let eligible = app.agents.get(&id).is_some_and(|agent| {
-                            agent.session.state.is_idle()
-                                && agent.active_modal.is_none()
-                                && agent.question_view.is_none()
-                                && agent.session.session_id.is_some()
-                                && !agent.session.has_running_bg_tasks()
-                        });
-                        if recap_due && eligible {
-                            let effs = dispatch::dispatch(
-                                crate::app::actions::Action::SendRecap { auto: true },
-                                app,
-                            );
-                            if process_effects(effs, tasks, app, progress_tx) {
-                                return true;
-                            }
-                            needs_draw = true;
-                            had_non_resize_change = true;
-                        }
                     }
                     ActiveView::Welcome => {
                         if matches!(app.auth_state, AuthState::Done) && !app.welcome_prompt_focused
@@ -3832,10 +3075,6 @@ async fn drain_and_process(
                             had_non_resize_change = true;
                         }
                     }
-                    // The dashboard manages its own input/overview focus
-                    // (`list_focused`); refocusing the terminal must not
-                    // override the user's choice (e.g. vim overview focus).
-                    ActiveView::AgentDashboard => {}
                 }
                 return false;
             }
@@ -3884,7 +3123,7 @@ async fn drain_and_process(
             );
             if let Some(action) = action {
                 let effs = dispatch::dispatch(action, app);
-                if process_effects(effs, tasks, app, progress_tx) {
+                if process_effects(effs, tasks, app) {
                     return true;
                 }
                 needs_draw = true;
@@ -3900,7 +3139,7 @@ async fn drain_and_process(
         ) {
             InputOutcome::Action(action) => {
                 let effs = dispatch::dispatch(action, app);
-                if process_effects(effs, tasks, app, progress_tx) {
+                if process_effects(effs, tasks, app) {
                     return true;
                 }
                 needs_draw = true;
@@ -3915,7 +3154,7 @@ async fn drain_and_process(
                     routed.paste_provenance,
                     app,
                 );
-                if process_effects(effs, tasks, app, progress_tx) {
+                if process_effects(effs, tasks, app) {
                     return true;
                 }
                 needs_draw = true;
@@ -3924,11 +3163,11 @@ async fn drain_and_process(
             InputOutcome::ActionPair(first, second) => {
                 // Effect barrier: first must fully resolve before second (e.g. revert preview then open reset).
                 let effs = dispatch::dispatch(first, app);
-                if process_effects(effs, tasks, app, progress_tx) {
+                if process_effects(effs, tasks, app) {
                     return true;
                 }
                 let effs = dispatch::dispatch(second, app);
-                if process_effects(effs, tasks, app, progress_tx) {
+                if process_effects(effs, tasks, app) {
                     return true;
                 }
                 needs_draw = true;
@@ -4326,161 +3565,26 @@ fn merge_paste_fragments(events: Vec<TimedInputEvent>) -> Vec<TimedInputEvent> {
     result
 }
 
-/// True when this batch should consume the welcome local-workspace one-shot.
-#[cfg(feature = "local-workspace")]
-pub(crate) fn welcome_oneshot_applies_to_effects(effs: &[super::actions::Effect]) -> bool {
-    use super::actions::Effect;
-    effs.iter().any(|e| {
-        matches!(
-            e,
-            Effect::CreateSession { .. } | Effect::CreateWorktreeSession { .. }
-        )
-    })
-}
-
-/// Conversation `LoadSession` must never inherit process-wide local stamp.
-#[cfg(feature = "local-workspace")]
-fn conversation_load_in_effects(effs: &[super::actions::Effect]) -> bool {
-    use super::actions::Effect;
-    effs.iter().any(|e| {
-        matches!(
-            e,
-            Effect::LoadSession {
-                chat_kind: true,
-                ..
-            }
-        )
-    })
-}
-
-/// Apply history bypass (`chat_mode = false`) for load/restore/worktree-create.
-#[cfg(feature = "local-workspace")]
-pub(crate) fn welcome_history_build_bypass_applies(
-    effs: &[super::actions::Effect],
-    flag: bool,
-) -> bool {
-    use super::actions::Effect;
-    flag && effs.iter().any(|e| {
-        matches!(
-            e,
-            Effect::LoadSession { .. }
-                | Effect::RestoreAndLoadSession { .. }
-                | Effect::CreateWorktreeSession { .. }
-        )
-    })
-}
-
-/// Whether this batch should clear the welcome history bypass flag.
-#[cfg(feature = "local-workspace")]
-pub(crate) fn welcome_history_build_bypass_consume(
-    effs: &[super::actions::Effect],
-    flag: bool,
-) -> bool {
-    use super::actions::Effect;
-    flag && effs.iter().any(|e| {
-        matches!(
-            e,
-            Effect::LoadSession { .. } | Effect::CreateWorktreeSession { .. }
-        )
-    })
-}
-
-/// Consume id-keyed code-restore suppression on a matching `LoadSession` or
-/// worktree resume. Leaves `app.restore_code` unchanged for other loads.
-pub(crate) fn take_load_restore_code(
-    app: &mut AppView,
-    effs: &[super::actions::Effect],
-) -> Option<bool> {
-    let Some(target) = app.suppress_code_restore_once.clone() else {
-        return app.restore_code;
-    };
-    let hit_load = effs.iter().any(|e| match e {
-        super::actions::Effect::LoadSession { session_id, .. } => session_id == &target,
-        _ => false,
-    });
-    let hit_worktree = effs.iter().any(|e| match e {
-        super::actions::Effect::CreateWorktreeSession {
-            load_session_id: Some(sid),
-            ..
-        } => sid == &target,
-        _ => false,
-    });
-    if hit_load {
-        app.suppress_code_restore_once = None;
-        return Some(false);
-    }
-    if hit_worktree {
-        // Peek only: worktree resume sends restoreCode:false, then
-        // WorktreeForked retargets suppress to the child LoadSession.
-        return Some(false);
-    }
-    app.restore_code
-}
-
-/// If one-shot suppress is armed for `from`, point it at `to`.
-pub(crate) fn retarget_suppress_code_restore(app: &mut AppView, from: &str, to: impl Into<String>) {
-    if app.suppress_code_restore_once.as_deref() == Some(from) {
-        app.suppress_code_restore_once = Some(to.into());
-    }
-}
-
-/// Shared [`SessionFlags`] builder (interactive loop + leader-cluster).
+/// Shared [`SessionFlags`] builder for the interactive loop.
 ///
 /// Permission seeds come from the global mirrors (`default_yolo`,
 /// `current_ui.permission_mode`). Pre-session `CycleMode` / `SetPermissionMode`
 /// update those synchronously, and `ActionThenForward` batches mode dispatch
 /// before this runs, so create meta sees the post-mode values without
 /// effect-shape sniffing.
-pub(crate) fn session_flags_for_effects(
-    app: &mut AppView,
-    #[cfg_attr(not(feature = "local-workspace"), allow(unused_variables))]
-    effs: &[super::actions::Effect],
-) -> effects::SessionFlags {
+pub(crate) fn session_flags_for_effects(app: &mut AppView) -> effects::SessionFlags {
     effects::SessionFlags {
         plan_mode: app.plan_mode,
         subagents: app.subagents,
         ask_user: app.ask_user,
-        restore_code: take_load_restore_code(app, effs),
         agent_override: app.agent_override.clone(),
         yolo_mode: app.default_yolo,
         auto_mode: super::dispatch::effective_auto(
             app.default_yolo,
             matches!(app.current_ui.permission_mode.as_deref(), Some("auto")),
         ),
-        chat_mode: {
-            #[cfg(feature = "local-workspace")]
-            {
-                if welcome_history_build_bypass_applies(effs, app.welcome_history_load_as_build) {
-                    if welcome_history_build_bypass_consume(effs, app.welcome_history_load_as_build)
-                    {
-                        app.welcome_history_load_as_build = false;
-                    }
-                    false
-                } else {
-                    app.chat_mode
-                }
-            }
-            #[cfg(not(feature = "local-workspace"))]
-            {
-                app.chat_mode
-            }
-        },
-        #[cfg(feature = "local-workspace")]
-        local_workspace: {
-            if conversation_load_in_effects(effs) {
-                None // conversation resume is sandbox/gateway-owned
-            } else if welcome_oneshot_applies_to_effects(effs) {
-                match app.welcome_session_local_workspace.take() {
-                    Some(one_shot) => one_shot,
-                    None => crate::app::session_startup::active_local_workspace().unwrap_or(None),
-                }
-            } else {
-                crate::app::session_startup::active_local_workspace().unwrap_or(None)
-            }
-        },
         screen_mode_label: Some(app.screen_mode.meta_label()),
         is_api_key_auth: app.is_api_key_auth,
-        resume_local_miss: app.resume_local_miss.clone(),
     }
 }
 
@@ -4507,11 +3611,10 @@ fn process_effects(
     effs: Vec<super::actions::Effect>,
     tasks: &mut JoinSet<TaskResult>,
     app: &mut AppView,
-    progress_tx: &tokio::sync::mpsc::UnboundedSender<effects::RestoreProgressMsg>,
 ) -> bool {
-    let flags = session_flags_for_effects(app, &effs);
+    let flags = session_flags_for_effects(app);
     for eff in effs {
-        let (quit, meta) = effects::execute(eff, tasks, &app.acp_tx, &app.cwd, &flags, progress_tx);
+        let (quit, meta) = effects::execute(eff, tasks, &app.acp_tx, &app.cwd, &flags);
         // Install auth abort handle if the current auth state still matches.
         if let Some((seq, abort_handle)) = meta.auth_abort_handle
             && let super::app_view::AuthState::Authenticating {
@@ -4676,80 +3779,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "local-workspace")]
-    #[test]
-    fn welcome_oneshot_applies_to_create_worktree_session() {
-        use crate::app::actions::Effect;
-        use crate::app::agent::AgentId;
-        let worktree = Effect::CreateWorktreeSession {
-            agent_id: AgentId(0),
-            load_session_id: None,
-            label: None,
-            git_ref: None,
-            model_id: None,
-            permission_mode_override: None,
-            preferred_session_id: None,
-            chat_kind: false,
-        };
-        assert!(welcome_oneshot_applies_to_effects(std::slice::from_ref(
-            &worktree
-        )));
-        assert!(!welcome_oneshot_applies_to_effects(&[]));
-        assert!(!welcome_oneshot_applies_to_effects(&[Effect::Quit]));
-    }
-
-    #[cfg(feature = "local-workspace")]
-    #[test]
-    fn conversation_load_is_not_welcome_oneshot_or_local_stamp() {
-        use crate::app::actions::Effect;
-        use crate::app::agent::AgentId;
-        let load = Effect::LoadSession {
-            agent_id: AgentId(0),
-            session_id: "c1".into(),
-            session_cwd: None,
-            chat_kind: true,
-        };
-        assert!(!welcome_oneshot_applies_to_effects(std::slice::from_ref(
-            &load
-        )));
-        assert!(conversation_load_in_effects(std::slice::from_ref(&load)));
-        let build_load = Effect::LoadSession {
-            agent_id: AgentId(0),
-            session_id: "b1".into(),
-            session_cwd: None,
-            chat_kind: false,
-        };
-        assert!(!conversation_load_in_effects(std::slice::from_ref(
-            &build_load
-        )));
-    }
-
-    #[cfg(feature = "local-workspace")]
-    #[test]
-    fn session_flags_consume_history_bypass_and_strip_conversation_stamp() {
-        use crate::app::actions::Effect;
-        use crate::app::agent::AgentId;
-        let mut app = crate::app::app_view::tests::test_app();
-        app.chat_mode = true;
-        app.welcome_history_load_as_build = true;
-        let load = Effect::LoadSession {
-            agent_id: AgentId(0),
-            session_id: "c1".into(),
-            session_cwd: None,
-            chat_kind: true,
-        };
-        let flags = session_flags_for_effects(&mut app, std::slice::from_ref(&load));
-        assert!(!flags.chat_mode, "history bypass must clear chat_mode");
-        assert!(
-            !app.welcome_history_load_as_build,
-            "LoadSession consumes the bypass"
-        );
-        assert!(
-            flags.local_workspace.is_none(),
-            "conversation load must strip local stamp"
-        );
-    }
-
     #[tokio::test]
     async fn pending_create_uses_auto_selected_before_effect_execution() {
         let mut app = crate::app::app_view::tests::test_app();
@@ -4770,15 +3799,9 @@ mod tests {
                 ..
             }
         )));
-        let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut tasks = JoinSet::new();
 
-        assert!(!process_effects(
-            create_effects,
-            &mut tasks,
-            &mut app,
-            &progress_tx
-        ));
+        assert!(!process_effects(create_effects, &mut tasks, &mut app));
 
         let request = match acp_rx.recv().await.expect("session/new request") {
             pi_acp_lib::AcpAgentMessage::NewSession(args) => args.request,
@@ -4831,11 +3854,12 @@ mod tests {
                     ..
                 } if *canonical == expected_canonical
             )));
-            let create = effects
-                .into_iter()
-                .find(|effect| matches!(effect, Effect::CreateSession { .. }))
-                .expect("create effect");
-            let flags = session_flags_for_effects(&mut app, std::slice::from_ref(&create));
+            assert!(
+                effects
+                    .iter()
+                    .any(|effect| matches!(effect, Effect::CreateSession { .. }))
+            );
+            let flags = session_flags_for_effects(&mut app);
             let meta = flags.to_meta().expect("permission metadata");
 
             assert_eq!(
@@ -4861,7 +3885,6 @@ mod tests {
         app.acp_tx = acp_tx;
         let (input_tx, mut input_rx) = tokio::sync::mpsc::unbounded_channel();
         drop(input_tx);
-        let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut tasks = JoinSet::new();
         let mut csi_filter = super::super::csi_filter::CsiFragmentFilter::new();
         let mut xt_filter = super::super::xt_filter::XtversionFilter::new();
@@ -4871,7 +3894,6 @@ mod tests {
             &mut input_rx,
             &mut app,
             &mut tasks,
-            &progress_tx,
             &mut csi_filter,
             &mut xt_filter,
         )
@@ -4903,7 +3925,6 @@ mod tests {
         let _ = input_tx.send(press(KeyCode::Char('b')));
         let _ = input_tx.send(press(KeyCode::Char('c')));
         drop(input_tx);
-        let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut tasks = JoinSet::new();
         let mut csi_filter = super::super::csi_filter::CsiFragmentFilter::new();
         let mut xt_filter = super::super::xt_filter::XtversionFilter::new();
@@ -4913,7 +3934,6 @@ mod tests {
             &mut input_rx,
             &mut app,
             &mut tasks,
-            &progress_tx,
             &mut csi_filter,
             &mut xt_filter,
         )
@@ -4926,63 +3946,6 @@ mod tests {
         assert_eq!(
             result.handled, 1,
             "only the first event ran before the suspend break; the two-event tail is unhandled"
-        );
-    }
-
-    #[test]
-    fn take_load_restore_code_is_oneshot_on_matching_session_only() {
-        use crate::app::actions::Effect;
-        use crate::app::agent::AgentId;
-        let mut app = crate::app::app_view::tests::test_app();
-        app.restore_code = None;
-        app.suppress_code_restore_once = Some("child".into());
-        let other_load = Effect::LoadSession {
-            agent_id: AgentId(0),
-            session_id: "other".into(),
-            session_cwd: None,
-            chat_kind: false,
-        };
-        assert_eq!(
-            take_load_restore_code(&mut app, std::slice::from_ref(&other_load)),
-            None
-        );
-        assert_eq!(app.suppress_code_restore_once.as_deref(), Some("child"));
-        let wt = Effect::CreateWorktreeSession {
-            agent_id: AgentId(0),
-            load_session_id: Some("child".into()),
-            label: None,
-            git_ref: None,
-            model_id: None,
-            permission_mode_override: None,
-            preferred_session_id: None,
-            chat_kind: false,
-        };
-        assert_eq!(
-            take_load_restore_code(&mut app, std::slice::from_ref(&wt)),
-            Some(false)
-        );
-        assert_eq!(
-            app.suppress_code_restore_once.as_deref(),
-            Some("child"),
-            "worktree resume peeks suppress without consuming"
-        );
-
-        let load = Effect::LoadSession {
-            agent_id: AgentId(0),
-            session_id: "child".into(),
-            session_cwd: None,
-            chat_kind: false,
-        };
-        assert_eq!(
-            take_load_restore_code(&mut app, std::slice::from_ref(&load)),
-            Some(false)
-        );
-        assert!(app.suppress_code_restore_once.is_none());
-        app.restore_code = Some(true);
-        assert_eq!(
-            take_load_restore_code(&mut app, std::slice::from_ref(&load)),
-            Some(true),
-            "later loads must use app.restore_code, not sticky false"
         );
     }
 
@@ -5098,220 +4061,6 @@ mod tests {
                 "voice_chord_claims_event({kind:?},{enabled},{owned})"
             );
         }
-    }
-
-    // ── plan_reconnect_load ──────────────────────────────────────────────
-
-    #[test]
-    fn plan_reconnect_load_requires_session_id() {
-        let agent = crate::test_util::make_agent_view(None, "/work/project");
-        assert!(plan_reconnect_load(&agent, std::path::Path::new("/pager/cwd")).is_none());
-    }
-
-    /// The session's own cwd keys its on-disk storage — the pager cwd
-    /// is only a fallback for agents without one.
-    #[test]
-    fn plan_reconnect_load_prefers_session_cwd_over_fallback() {
-        let agent = crate::test_util::make_agent_view(Some("sess-1"), "/work/worktree-a");
-        let plan = plan_reconnect_load(&agent, std::path::Path::new("/pager/cwd")).unwrap();
-        assert_eq!(plan.session_id.0.as_ref(), "sess-1");
-        assert_eq!(plan.cwd, std::path::PathBuf::from("/work/worktree-a"));
-
-        let agent = crate::test_util::make_agent_view(Some("sess-1"), "");
-        let plan = plan_reconnect_load(&agent, std::path::Path::new("/pager/cwd")).unwrap();
-        assert_eq!(plan.cwd, std::path::PathBuf::from("/pager/cwd"));
-    }
-
-    /// The reconnect cursor rides `_meta.cursor` when known; yolo mode
-    /// always rides `_meta.yoloMode`. Auto rides `_meta.autoMode` per-agent.
-    #[test]
-    fn plan_reconnect_load_meta_carries_cursor_and_yolo() {
-        let mut agent = crate::test_util::make_agent_view(Some("sess-1"), "/work");
-        let plan = plan_reconnect_load(&agent, std::path::Path::new("/pager/cwd")).unwrap();
-        assert_eq!(plan.meta["yoloMode"], serde_json::json!(false));
-        assert!(
-            plan.meta.get("cursor").is_none(),
-            "no cursor key before any event was applied"
-        );
-        // autoMode is always set explicitly (false when not in auto) so the leader's
-        // capability injection can't re-enable Auto on reconnect.
-        assert_eq!(plan.meta["autoMode"], serde_json::json!(false));
-
-        agent.last_seen_event_id = Some("sess-1-42".into());
-        agent.session.yolo_mode = true;
-        let plan = plan_reconnect_load(&agent, std::path::Path::new("/pager/cwd")).unwrap();
-        assert_eq!(plan.meta["yoloMode"], serde_json::json!(true));
-        assert_eq!(plan.meta["cursor"], serde_json::json!("sess-1-42"));
-    }
-
-    #[test]
-    fn plan_reconnect_load_meta_carries_auto_mode_from_session() {
-        // Auto rides `_meta.autoMode`, derived from THIS agent's own
-        // `auto_mode` (per-agent, symmetric with yolo) — not the global UI mirror.
-        let mut agent = crate::test_util::make_agent_view(Some("sess-1"), "/work");
-        agent.session.auto_mode = true;
-        let plan = plan_reconnect_load(&agent, std::path::Path::new("/pager/cwd")).unwrap();
-        assert_eq!(plan.meta["yoloMode"], serde_json::json!(false));
-        assert_eq!(plan.meta["autoMode"], serde_json::json!(true));
-
-        // Yolo wins: autoMode is explicitly false even if the session is in auto.
-        let mut agent = crate::test_util::make_agent_view(Some("sess-1"), "/work");
-        agent.session.auto_mode = true;
-        agent.session.yolo_mode = true;
-        let plan = plan_reconnect_load(&agent, std::path::Path::new("/pager/cwd")).unwrap();
-        assert_eq!(plan.meta["yoloMode"], serde_json::json!(true));
-        assert_eq!(plan.meta["autoMode"], serde_json::json!(false));
-    }
-
-    /// Multi-agent reconnect must seed each tab's `autoMode` from ITS OWN
-    /// session, not a shared global mirror: an active Auto tab and a background
-    /// Ask tab reconnect with `autoMode:true` and `autoMode:false` respectively.
-    #[test]
-    fn plan_reconnect_load_multi_agent_uses_per_agent_auto() {
-        let mut active = crate::test_util::make_agent_view(Some("sess-active"), "/work");
-        active.session.auto_mode = true;
-        let background = crate::test_util::make_agent_view(Some("sess-bg"), "/work");
-        // background.session.auto_mode stays false (Ask).
-
-        let active_plan = plan_reconnect_load(&active, std::path::Path::new("/pager/cwd")).unwrap();
-        let background_plan =
-            plan_reconnect_load(&background, std::path::Path::new("/pager/cwd")).unwrap();
-
-        assert_eq!(active_plan.meta["autoMode"], serde_json::json!(true));
-        assert_eq!(
-            background_plan.meta["autoMode"],
-            serde_json::json!(false),
-            "background Ask tab must reconnect with autoMode:false regardless of the active tab"
-        );
-    }
-
-    #[test]
-    fn reconnect_restores_dashboard_peek_before_replacing_scrollback() {
-        use crate::scrollback::block::RenderBlock;
-        use crate::views::dashboard::{DashboardRowId, DashboardState};
-        use indexmap::IndexMap;
-
-        let id = super::super::agent::AgentId(0);
-        let mut agent = crate::test_util::make_agent_view(Some("sess-1"), "/work");
-        agent
-            .scrollback
-            .push_block(RenderBlock::user_prompt("before reconnect"));
-        agent.scrollback.prepare_layout(80, 24);
-        agent.scrollback.set_selected(Some(0));
-        agent.scrollback.set_scroll_offset(0);
-        let mut agents = IndexMap::new();
-        agents.insert(id, agent);
-        let mut dashboard = Some(DashboardState::new());
-        dashboard
-            .as_mut()
-            .unwrap()
-            .begin_peek_viewport(DashboardRowId::TopLevel(id), &mut agents);
-        assert!(dashboard.as_ref().unwrap().peek_viewport.is_some());
-        assert!(agents[&id].scrollback.is_follow_mode());
-
-        restore_dashboard_peek_before_reload(&mut dashboard, &mut agents);
-
-        assert!(dashboard.as_ref().unwrap().peek_viewport.is_none());
-        assert_eq!(agents[&id].scrollback.selected(), Some(0));
-        assert!(!agents[&id].scrollback.is_follow_mode());
-    }
-
-    // ── reconnect_restore_outcome ────────────────────────────────────────
-
-    /// The regression guard: one background tab fails, the active tab
-    /// succeeds. The whole-reconnect flag goes false (toast says "failed"),
-    /// but the active tab's OWN drain must still fire — a failed background tab
-    /// must not strand prompts queued on the healthy active tab.
-    #[test]
-    fn reconnect_drain_gates_on_active_agent_not_all_agents() {
-        use super::super::agent::AgentId;
-        let active = AgentId(0);
-        let background = AgentId(1);
-        let mut loads = std::collections::HashMap::new();
-        loads.insert(active, (true, None, None));
-        loads.insert(background, (false, None, None));
-        let pending = vec![active, background];
-
-        let (all_restored, active_restored) =
-            reconnect_restore_outcome(true, &pending, &loads, Some(active));
-        assert!(
-            !all_restored,
-            "a failed background tab keeps the whole-reconnect flag false (toast)"
-        );
-        assert!(
-            active_restored,
-            "the active tab's own success still drains its queue"
-        );
-    }
-
-    /// The active tab's OWN reload failed: its drain stays suppressed even
-    /// though a background tab succeeded.
-    #[test]
-    fn reconnect_drain_blocked_when_active_agent_failed() {
-        use super::super::agent::AgentId;
-        let active = AgentId(0);
-        let background = AgentId(1);
-        let mut loads = std::collections::HashMap::new();
-        loads.insert(active, (false, None, None));
-        loads.insert(background, (true, None, None));
-        let pending = vec![active, background];
-
-        let (all_restored, active_restored) =
-            reconnect_restore_outcome(true, &pending, &loads, Some(active));
-        assert!(!all_restored);
-        assert!(
-            !active_restored,
-            "the active tab's own failure must block its drain"
-        );
-    }
-
-    /// Single-agent behavior is preserved: the lone active tab succeeds → both
-    /// flags true (toast "restored" + drain).
-    #[test]
-    fn reconnect_drain_single_agent_success_preserved() {
-        use super::super::agent::AgentId;
-        let active = AgentId(0);
-        let mut loads = std::collections::HashMap::new();
-        loads.insert(active, (true, None, None));
-        let pending = vec![active];
-
-        let (all_restored, active_restored) =
-            reconnect_restore_outcome(true, &pending, &loads, Some(active));
-        assert!(all_restored);
-        assert!(active_restored);
-    }
-
-    /// A failed init (`init_ok == false`, empty `loads`) suppresses everything.
-    #[test]
-    fn reconnect_drain_blocked_when_init_failed() {
-        use super::super::agent::AgentId;
-        let active = AgentId(0);
-        let loads = std::collections::HashMap::new();
-        let pending = vec![active];
-
-        let (all_restored, active_restored) =
-            reconnect_restore_outcome(false, &pending, &loads, Some(active));
-        assert!(!all_restored);
-        assert!(!active_restored);
-    }
-
-    /// No active agent (dashboard/welcome view): nothing to drain, even when
-    /// every reloaded tab restored.
-    #[test]
-    fn reconnect_drain_blocked_when_no_active_agent() {
-        use super::super::agent::AgentId;
-        let background = AgentId(1);
-        let mut loads = std::collections::HashMap::new();
-        loads.insert(background, (true, None, None));
-        let pending = vec![background];
-
-        let (all_restored, active_restored) =
-            reconnect_restore_outcome(true, &pending, &loads, None);
-        assert!(all_restored);
-        assert!(
-            !active_restored,
-            "no active agent → no active-tab drain to fire"
-        );
     }
 
     fn timed(event: Event, arrived_at: std::time::Instant) -> TimedInputEvent {
@@ -6394,67 +5143,10 @@ mod tests {
 
     #[test]
     fn finish_run_non_agent_views_have_no_exit_info() {
-        for view in [ActiveView::Welcome, ActiveView::AgentDashboard] {
+        for view in [ActiveView::Welcome] {
             let mut app = seeded_quit_app(crate::app::ScreenMode::Fullscreen);
             app.active_view = view;
             assert!(finish_run(&mut app).exit_info.is_none());
         }
-    }
-
-    #[test]
-    fn plugin_cta_marketplace_from_managed_layer() {
-        let layers = pi_config::ConfigLayers {
-            managed: toml::from_str(
-                "[marketplace]\nplugin_cta_marketplace = \"SpaceX Marketplace\"\n",
-            )
-            .unwrap(),
-            ..Default::default()
-        };
-        assert_eq!(
-            plugin_cta_marketplace_from(&layers.effective_config_base()),
-            Some("SpaceX Marketplace".to_string())
-        );
-    }
-
-    #[test]
-    fn plugin_cta_marketplace_from_user_wins_over_managed() {
-        let layers = pi_config::ConfigLayers {
-            managed: toml::from_str(
-                "[marketplace]\nplugin_cta_marketplace = \"Managed Marketplace\"\n",
-            )
-            .unwrap(),
-            user: toml::from_str("[marketplace]\nplugin_cta_marketplace = \"User Marketplace\"\n")
-                .unwrap(),
-            ..Default::default()
-        };
-        assert_eq!(
-            plugin_cta_marketplace_from(&layers.effective_config_base()),
-            Some("User Marketplace".to_string())
-        );
-    }
-
-    #[test]
-    fn plugin_cta_marketplace_from_unset_or_empty_is_none() {
-        let unset = pi_config::ConfigLayers::default();
-        assert_eq!(
-            plugin_cta_marketplace_from(&unset.effective_config_base()),
-            None
-        );
-        let empty = pi_config::ConfigLayers {
-            managed: toml::from_str("[marketplace]\nplugin_cta_marketplace = \"\"\n").unwrap(),
-            ..Default::default()
-        };
-        assert_eq!(
-            plugin_cta_marketplace_from(&empty.effective_config_base()),
-            None
-        );
-        let blank = pi_config::ConfigLayers {
-            user: toml::from_str("[marketplace]\nplugin_cta_marketplace = \"   \"\n").unwrap(),
-            ..Default::default()
-        };
-        assert_eq!(
-            plugin_cta_marketplace_from(&blank.effective_config_base()),
-            None
-        );
     }
 }

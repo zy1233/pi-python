@@ -12,9 +12,7 @@ use crate::views::shortcuts_bar::HintItem;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BlockingCard {
     Permission,
-    CancelTurn,
     Question,
-    McpElicitation,
 }
 
 impl BlockingCard {
@@ -24,9 +22,7 @@ impl BlockingCard {
     pub(crate) fn focus_hint(self) -> HintItem {
         let label = match self {
             Self::Permission => "permission",
-            Self::CancelTurn => "cancel turn",
             Self::Question => "question",
-            Self::McpElicitation => "elicitation",
         };
         HintItem {
             keys: vec![crate::key!(Tab), crate::key!(' ')],
@@ -41,9 +37,9 @@ impl BlockingCard {
 /// Which surface the keyboard reaches, in the order [`AgentView::handle_input`]
 /// asks for it.
 ///
-/// The fullscreen takeovers ahead of these — the subagent view, the media
-/// viewers, `/gboom`, and the modal stack — answer for themselves and draw
-/// their own chrome, so they are not ranked here.
+/// The fullscreen takeovers ahead of these — the media viewers, `/gboom`,
+/// and the modal stack — answer for themselves and draw their own chrome, so
+/// they are not ranked here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum KeyOwner {
     /// An open line viewer: the plan preview, or a file preview from the
@@ -72,22 +68,12 @@ pub(crate) enum EscStep {
     /// Leave the card's text input for its rows (question free-text answer,
     /// permission followup message).
     LeaveTextInput,
-    /// Close the bare `/feedback` pane, which has no rows to leave the input for.
-    DismissFeedbackPane,
-    /// Skip the `/feedback` trace question (the report still sends).
-    SkipFeedbackTrace,
     /// Throw away an in-progress always-allow pattern edit.
     DiscardPatternEdit,
     /// Unmark this question's answer.
     ClearSelection,
-    /// Return to the dashboard, leaving the card pending. Owned by the
-    /// dashboard overlay's own cascade, which runs ahead of the router.
-    BackOutOverlay,
     /// Hand the keyboard to the scrollback with the card still drawn.
     ParkFocus,
-    /// Dismiss the cancel-turn panel and leave the turn (and subagents) running.
-    KeepRunning,
-    DismissElicitWaiting,
 }
 
 impl EscStep {
@@ -95,14 +81,9 @@ impl EscStep {
         match self {
             Self::DismissFileSearch => "dismiss",
             Self::LeaveTextInput => "back",
-            Self::DismissFeedbackPane => "dismiss",
-            Self::SkipFeedbackTrace => "skip",
             Self::DiscardPatternEdit => "cancel",
             Self::ClearSelection => "unselect",
-            Self::BackOutOverlay => "dashboard",
             Self::ParkFocus => "scrollback",
-            Self::KeepRunning => "keep running",
-            Self::DismissElicitWaiting => "dismiss",
         }
     }
 }
@@ -113,12 +94,8 @@ impl AgentView {
     pub(crate) fn blocking_card(&self) -> Option<BlockingCard> {
         if !self.permission_queue.is_empty() {
             Some(BlockingCard::Permission)
-        } else if self.cancel_turn_view.is_some() {
-            Some(BlockingCard::CancelTurn)
         } else if self.question_view.is_some() {
             Some(BlockingCard::Question)
-        } else if self.elicitation_view.is_some() {
-            Some(BlockingCard::McpElicitation)
         } else {
             None
         }
@@ -195,44 +172,16 @@ impl AgentView {
                 PermissionFocus::PatternEdit => EscStep::DiscardPatternEdit,
                 PermissionFocus::Options => EscStep::ParkFocus,
             },
-            // Never a dead end: Esc closes the panel and keeps the turn
-            // running. Enter / 1–4 still pick a cancel-and-subagent choice.
-            BlockingCard::CancelTurn => EscStep::KeepRunning,
             BlockingCard::Question => {
                 let qv = self.question_view.as_ref()?;
                 if qv.focus == QuestionFocus::InputMode {
                     if self.prompt.file_search_visible() {
                         EscStep::DismissFileSearch
-                    } else if qv.is_feedback() {
-                        EscStep::DismissFeedbackPane
                     } else {
                         EscStep::LeaveTextInput
                     }
-                } else if qv.is_feedback_trace() {
-                    // Defaults to a selection, so the generic ladder would
-                    // read Esc as unselect.
-                    EscStep::SkipFeedbackTrace
-                } else if qv.is_feedback_report() {
-                    // Safety net: the report stage stays in InputMode by
-                    // design, so this arm only fires if that ever changes.
-                    EscStep::DismissFeedbackPane
                 } else if qv.active_tab_has_selection() {
                     EscStep::ClearSelection
-                } else if self.in_dashboard_overlay && qv.active_tab == 0 {
-                    // On later questions `Left` still walks back, so `Esc`
-                    // stays in the card.
-                    EscStep::BackOutOverlay
-                } else {
-                    EscStep::ParkFocus
-                }
-            }
-            BlockingCard::McpElicitation => {
-                use crate::views::elicitation_view::ElicitationFocus;
-                let ev = self.elicitation_view.as_ref()?;
-                if ev.focus == ElicitationFocus::Editing {
-                    EscStep::LeaveTextInput
-                } else if ev.is_url_waiting() {
-                    EscStep::DismissElicitWaiting
                 } else {
                     EscStep::ParkFocus
                 }
@@ -250,16 +199,9 @@ impl AgentView {
             EscStep::LeaveTextInput => {
                 if self.focused_card() == Some(BlockingCard::Permission) {
                     self.permission_back_to_options();
-                } else if self.focused_card() == Some(BlockingCard::McpElicitation) {
-                    if let Some(ev) = self.elicitation_view.as_mut() {
-                        ev.focus = crate::views::elicitation_view::ElicitationFocus::Fields;
-                    }
                 } else {
                     self.commit_question_freeform();
                 }
-            }
-            EscStep::DismissFeedbackPane | EscStep::SkipFeedbackTrace => {
-                return self.submit_question_answers(true);
             }
             EscStep::DiscardPatternEdit => {
                 self.permission_pattern_edit = None;
@@ -271,20 +213,7 @@ impl AgentView {
                     qv.clear_selection(active);
                 }
             }
-            // The dashboard overlay's cascade runs ahead of the router and
-            // takes this rung itself; reaching it here means the overlay
-            // declined, and the card keeps the key rather than letting it
-            // fall through to the turn-cancel policy.
-            EscStep::BackOutOverlay => {}
             EscStep::ParkFocus => self.park_focused_card(),
-            EscStep::KeepRunning => {
-                // The bar promises "keep running". Mapping this to
-                // ContinueToRun would still cancel the parent turn (only
-                // the subagents would survive). Close the panel instead.
-                self.cancel_turn_view = None;
-                self.cancel_turn_buttons.clear();
-            }
-            EscStep::DismissElicitWaiting => return self.resolve_elicitation_cancel(),
         }
         InputOutcome::Changed
     }

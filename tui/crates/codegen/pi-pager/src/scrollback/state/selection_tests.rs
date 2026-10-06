@@ -796,14 +796,6 @@ fn push_reads(state: &mut ScrollbackState, n: usize) -> Vec<EntryId> {
         .collect()
 }
 
-fn push_subagent(state: &mut ScrollbackState, child_sid: &str) -> EntryId {
-    state.push_block(RenderBlock::Subagent(
-        crate::scrollback::blocks::SubagentBlock::started(
-            "task", child_sid, "explore", None, None, None, /*is_background=*/ false,
-        ),
-    ))
-}
-
 fn verb_header_at(state: &ScrollbackState, idx: usize) -> bool {
     state
         .layout_cache
@@ -944,27 +936,6 @@ fn verb_group_leading_thought_anchors_run_and_expands() {
         "re-anchored expanded header reserves its synthetic row"
     );
     crate::appearance::cache::set_show_thinking_blocks(false);
-}
-
-#[test]
-fn group_range_keeps_hooked_members_in_rendered_fold() {
-    let mut state = verb_state();
-    let ids = push_reads(&mut state, 2);
-    state.prepare_layout(80, 40);
-    assert!(verb_header_at(&state, 0));
-    assert_eq!(state.group_range_of(0, true), 0..2);
-
-    state.attach_hooks(
-        ids[1],
-        crate::scrollback::blocks::tool::HookPhase::Post,
-        Vec::new(),
-    );
-    assert_eq!(state.group_range_of(0, true), 0..2);
-
-    state.prepare_layout(80, 40);
-    assert!(verb_header_at(&state, 0));
-    assert_eq!(state.group_range_of(1, true), 0..2);
-    assert_eq!(cached_height_at(&state, 1), 0, "hooked member stays folded");
 }
 
 #[test]
@@ -1154,33 +1125,6 @@ fn verb_group_refolds_when_clear_all_resolves_pending_input() {
     state.prepare_layout(80, 40);
     assert!(verb_header_at(&state, 0));
     assert_eq!(cached_height_at(&state, 1), 0, "cleared row refolds");
-}
-
-#[test]
-fn verb_group_stays_folded_on_attach_hooks() {
-    use crate::scrollback::blocks::tool::{HookPhase, HookRunEntry, HookRunStatus};
-
-    let mut state = verb_state();
-    let ids = push_reads(&mut state, 3);
-    state.prepare_layout(80, 40);
-    assert_eq!(cached_height_at(&state, 2), 0);
-
-    state.attach_hooks(
-        ids[2],
-        HookPhase::Post,
-        vec![HookRunEntry {
-            name: "fmt".to_owned(),
-            status: HookRunStatus::Success {
-                elapsed: std::time::Duration::from_millis(1),
-            },
-            output: None,
-        }],
-    );
-    assert!(state.gaps_may_be_dirty, "hook attachment reapplies folds");
-    state.prepare_layout(80, 40);
-    assert!(verb_header_at(&state, 0));
-    assert_eq!(header_count_at(&mut state, 0), 3);
-    assert_eq!(cached_height_at(&state, 2), 0, "hooked row remains folded");
 }
 
 #[test]
@@ -1653,62 +1597,6 @@ fn verb_group_search_reveal_unhides_member() {
         cached_height_at(&state, 2) > 0,
         "members stay expanded across a head reveal"
     );
-}
-
-#[test]
-fn verb_group_subagent_head_expand_and_collapse_round_trip() {
-    let mut state = verb_state();
-    let sub_id = push_subagent(&mut state, "child-A");
-    push_reads(&mut state, 2);
-    state.prepare_layout(80, 40);
-    assert!(verb_header_at(&state, 0));
-    assert_eq!(header_count_at(&mut state, 0), 3);
-    assert_eq!(cached_height_at(&state, 0), 1);
-    assert_eq!(cached_height_at(&state, 1), 0);
-
-    // Expand from the header: the subagent hosts the shared slot (header
-    // line stacked above its own row); every member reveals below.
-    state.set_selected(Some(0));
-    assert!(state.toggle_group_expansion());
-    state.prepare_layout(80, 40);
-    assert!(state.expanded_groups.contains(&sub_id));
-    assert_eq!(cached_height_at(&state, 0), 2);
-    assert!(cached_height_at(&state, 1) > 0);
-    assert!(cached_height_at(&state, 2) > 0);
-
-    // Collapse from a member refolds behind the subagent-anchored header.
-    state.set_selected(Some(1));
-    assert!(state.collapse_group_if_expanded());
-    state.prepare_layout(80, 40);
-    assert!(!state.expanded_groups.contains(&sub_id));
-    assert_eq!(cached_height_at(&state, 1), 0);
-}
-
-#[test]
-fn verb_group_subagent_mid_run_member_folds_and_round_trips() {
-    let mut state = verb_state();
-    let ids = push_reads(&mut state, 1);
-    push_subagent(&mut state, "child-A");
-    push_reads(&mut state, 1);
-    state.prepare_layout(80, 40);
-    assert!(verb_header_at(&state, 0));
-    assert_eq!(header_count_at(&mut state, 0), 3);
-    assert_eq!(
-        cached_height_at(&state, 1),
-        0,
-        "subagent row folds into the run"
-    );
-
-    // Expand reveals the subagent row; collapse from it refolds the run.
-    state.set_selected(Some(0));
-    assert!(state.toggle_group_expansion());
-    state.prepare_layout(80, 40);
-    assert!(cached_height_at(&state, 1) > 0);
-    state.set_selected(Some(1));
-    assert!(state.collapse_group_if_expanded());
-    state.prepare_layout(80, 40);
-    assert!(!state.expanded_groups.contains(&ids[0]));
-    assert_eq!(cached_height_at(&state, 1), 0);
 }
 
 /// Ctrl+E's expand-all re-derives dense runs itself; a verb-claimed lone

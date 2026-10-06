@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import os
+import signal
 import sys
 from pathlib import Path
 
@@ -30,8 +32,42 @@ _PROMPT_CLI_FLAG_NAMES = (
 )
 
 
+# SIGHUP is what a closing terminal sends to its foreground process group, which includes the
+# agent when the TUI is started from a shell. Windows has neither signal handlers nor SIGHUP.
+_STOP_SIGNALS = tuple(
+    getattr(signal, name) for name in ("SIGTERM", "SIGHUP") if hasattr(signal, name)
+)
+
+
+async def serve(agent: PiAcpAgent) -> None:
+    """Serve ``agent`` over stdio until stdin closes or the process is told to stop."""
+    # A stop signal ends the agent the way EOF on stdin does: the main task is cancelled, so
+    # `asyncio.run` cancels the in-flight turns and each running tool's process group is
+    # reaped. Without a handler the signal ends the process at once and its tools outlive it.
+    # (SIGKILL cannot be handled; there the tools are orphaned.)
+    main_task = asyncio.current_task()
+    if main_task is not None:
+        loop = asyncio.get_running_loop()
+
+        def request_stop() -> None:
+            # A repeated signal gets the default action, so an agent that hangs while it
+            # shuts down (a thread that cannot be cancelled) can still be stopped.
+            for stop_signal in _STOP_SIGNALS:
+                with contextlib.suppress(NotImplementedError, RuntimeError):
+                    loop.remove_signal_handler(stop_signal)
+            main_task.cancel()
+
+        for stop_signal in _STOP_SIGNALS:
+            with contextlib.suppress(NotImplementedError, RuntimeError):
+                loop.add_signal_handler(stop_signal, request_stop)
+    # `session/close` and `session/resume` are unstable in the SDK and answered with
+    # "Method not found" unless this flag is set, although `initialize` advertises both.
+    with contextlib.suppress(asyncio.CancelledError):
+        await run_agent(agent, use_unstable_protocol=True)
+
+
 async def _amain() -> None:
-    await run_agent(PiAcpAgent())
+    await serve(PiAcpAgent())
 
 
 def _build_parser() -> argparse.ArgumentParser:

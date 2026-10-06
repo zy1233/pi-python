@@ -5,23 +5,21 @@ use pi_telemetry::startup::{AgentKind, PhaseSnapshot, StartupPhase, format_durat
 
 use crate::app::connect_timeout::CONNECT_UI_TIMEOUT_TRY_COMMAND;
 
-use super::{ConnectAttempt, Context, EarlierAttempt, Reason, StartupFailure};
+use super::{Reason, StartupFailure};
 
 const WRAP_WIDTH: usize = 76;
 
 pub(super) fn render(failure: &StartupFailure) -> String {
     let context = &failure.context;
     let mut rows = vec![
-        ("Mode", attempted_agents(context)),
+        ("Mode", agent_name(context.target).to_owned()),
         ("Version", context.version.clone()),
     ];
     let mut report = match &failure.reason {
         Reason::TimedOut { waited, timings } => {
-            let advice = advice_for(timings, context.attempt);
+            let advice = advice_for(timings);
             rows.push(("Steps", format_steps(timings)));
-            if let Some(command) = advice.next_step.command() {
-                rows.push(("Try", command.to_owned()));
-            }
+            rows.push(("Try", CONNECT_UI_TIMEOUT_TRY_COMMAND.to_owned()));
             let explanation = fill_indented(&advice.explanation(), "  ", "  ");
             format!(
                 "Couldn't start Grok: startup timed out after {}.\n\n{explanation}",
@@ -40,23 +38,14 @@ pub(super) fn render(failure: &StartupFailure) -> String {
 
 struct Advice {
     doing: Option<&'static str>,
-    earlier: Option<EarlierAttempt>,
     next_step: NextStep,
 }
 
-/// A wedged leader is only ever the earlier attempt: the fallback that renders
-/// this message never enters `LeaderConnect` itself.
-fn advice_for(timings: &PhaseSnapshot, attempt: ConnectAttempt) -> Advice {
+fn advice_for(timings: &PhaseSnapshot) -> Advice {
     let step = timings.longest_step().map(step_advice);
-    let earlier = attempt.earlier();
     Advice {
         doing: step.map(|(doing, _)| doing),
-        earlier: earlier.filter(|earlier| earlier.shaped_the_wait()),
-        next_step: if earlier.is_some_and(|earlier| earlier.wedged_leader()) {
-            NextStep::RestartSharedLeader
-        } else {
-            step.map_or(NextStep::Retry, |(_, next_step)| next_step)
-        },
+        next_step: step.map_or(NextStep::Retry, |(_, next_step)| next_step),
     }
 }
 
@@ -66,27 +55,12 @@ impl Advice {
             Some(doing) => format!("The longest step was {doing}."),
             None => "No startup step had begun.".to_owned(),
         };
-        if let Some(earlier) = self.earlier {
-            let target = agent_name(earlier.target);
-            let _ = write!(
-                explanation,
-                " Grok spent the first {} on the {target}.",
-                whole_seconds(earlier.wait)
-            );
-        }
         let _ = write!(explanation, " {}", self.next_step.text());
-        // Only where waiting longer can help: a wedged leader never becomes
-        // ready, so pairing this with "stop the leader" would contradict it.
-        if matches!(
-            self.next_step,
-            NextStep::Retry | NextStep::CheckNetworkThenRetry
-        ) {
-            let _ = write!(
-                explanation,
-                " On a slow machine or network filesystem, a larger startup \
-                 budget can help. Set it with the command below."
-            );
-        }
+        let _ = write!(
+            explanation,
+            " On a slow machine or network filesystem, a larger startup \
+             budget can help. Set it with the command below."
+        );
         explanation
     }
 }
@@ -146,7 +120,6 @@ fn fill_indented(text: &str, initial_indent: &str, subsequent_indent: &str) -> S
 enum NextStep {
     Retry,
     CheckNetworkThenRetry,
-    RestartSharedLeader,
 }
 
 impl NextStep {
@@ -154,25 +127,13 @@ impl NextStep {
         match self {
             Self::Retry => "Start zypi again.",
             Self::CheckNetworkThenRetry => "Check your network connection, then start zypi again.",
-            Self::RestartSharedLeader => {
-                "Stop it with the command below, which also stops any other zypi \
-                 session using it, then start zypi again."
-            }
-        }
-    }
-
-    /// Kept out of the prose so wrapping can never split it.
-    fn command(self) -> Option<&'static str> {
-        match self {
-            Self::Retry | Self::CheckNetworkThenRetry => Some(CONNECT_UI_TIMEOUT_TRY_COMMAND),
-            Self::RestartSharedLeader => Some("zypi leader kill"),
         }
     }
 }
 
 /// Reads as the object of "The longest step was".
 fn step_advice(phase: StartupPhase) -> (&'static str, NextStep) {
-    use NextStep::{CheckNetworkThenRetry as Network, RestartSharedLeader, Retry};
+    use NextStep::{CheckNetworkThenRetry as Network, Retry};
     match phase {
         StartupPhase::ConfigLoad => ("reading your local configuration", Retry),
         StartupPhase::ManagedPolicy => ("checking your organization's managed policy", Network),
@@ -180,8 +141,6 @@ fn step_advice(phase: StartupPhase) -> (&'static str, NextStep) {
         // A disk cache read; the network fetch is the background refresh.
         StartupPhase::ModelCatalog => ("reading the list of available models", Retry),
         StartupPhase::WorkerSpawn => ("starting the local agent", Retry),
-        // A Unix socket and a local spawn, never the network.
-        StartupPhase::LeaderConnect => ("connecting to the shared leader", RestartSharedLeader),
         StartupPhase::AcpInitialize => ("waiting for the agent to respond", Retry),
         StartupPhase::EagerAuth => ("refreshing your sign-in", Network),
         StartupPhase::AppInit => ("preparing the interface", Retry),
@@ -189,20 +148,9 @@ fn step_advice(phase: StartupPhase) -> (&'static str, NextStep) {
     }
 }
 
-fn attempted_agents(context: &Context) -> String {
-    let target = agent_name(context.target);
-    match context.attempt {
-        ConnectAttempt::First => target.to_owned(),
-        ConnectAttempt::AfterFallback(earlier) => {
-            format!("{}, then {target}", agent_name(earlier.target))
-        }
-    }
-}
-
 fn agent_name(agent: AgentKind) -> &'static str {
     match agent {
         AgentKind::Embedded => "local agent",
-        AgentKind::Leader => "shared leader",
     }
 }
 

@@ -1,18 +1,14 @@
-//! Blocking interaction surfaces: permission prompts, the question view,
-//! and the cancel-turn confirm flow (keys, mouse, and submit paths).
+//! Blocking interaction surfaces: permission prompts and the question view
+//! (keys, mouse, and submit paths).
 #[cfg(test)]
 use super::test_fixtures;
-use super::{
-    AgentView, MULTI_CLICK_TIMEOUT_MS, PeekAnswerOutcome, question_visible_h,
-    translate_local_submit,
-};
+use super::{AgentView, MULTI_CLICK_TIMEOUT_MS, question_visible_h, translate_local_submit};
 #[cfg(test)]
 use crate::actions::ActionRegistry;
 use crate::app::actions::Action;
 use crate::app::app_view::InputOutcome;
 use crate::input::key::RowWalk;
 use crate::key;
-use crate::views::modal::CancelTurnChoice;
 use crate::views::prompt_widget::{EnterOutcome, PromptEvent};
 use crate::views::question_view::QUESTION_VIEW_HPAD;
 #[cfg(test)]
@@ -25,6 +21,38 @@ enum QuestionSwitch {
     Prev,
 }
 impl AgentView {
+    /// Refresh the scrollback's "awaiting user input" marks so the renderer
+    /// can swap the running-spinner bullet for a pulsing-circle bullet on
+    /// tool entries that are blocked on a permission prompt or
+    /// `ask_user_question`.
+    ///
+    /// Recomputed every frame because the queue/question state is fully
+    /// owned by `AgentView` and changes asynchronously; doing a fresh
+    /// clear+rebuild keeps the mark and the view of record from drifting
+    /// out of sync (e.g. on Cancelled requests we never observe a
+    /// matching "pop" event).
+    ///
+    /// Cheap: O(entries) for the clear plus O(permission_queue +
+    /// question_view) lookups via the tracker, both tiny in practice.
+    ///
+    /// Called once per frame from `AgentView::draw` in the full TUI; minimal
+    /// mode bypasses that draw path, so its commit pass
+    /// ([`crate::minimal::commit::commit_active`]) calls this itself to keep a
+    /// tool blocked on a permission/question out of the committed frontier.
+    pub(crate) fn sync_pending_user_input_marks(&mut self) {
+        self.scrollback.clear_all_pending_user_input();
+        for perm in &self.permission_queue {
+            let tc_id = perm.request.request.tool_call.tool_call_id.0.as_ref();
+            if let Some(entry_id) = self.session.tracker.pending_tool_entry_id(tc_id) {
+                self.scrollback.set_pending_user_input(entry_id, true);
+            }
+        }
+        if let Some(qv) = self.question_view.as_ref()
+            && let Some(entry_id) = self.session.tracker.pending_tool_entry_id(&qv.tool_call_id)
+        {
+            self.scrollback.set_pending_user_input(entry_id, true);
+        }
+    }
     /// Handle key input for the permission card. Like the question card it has
     /// an option-row mode and text modes (a followup message to the agent, and
     /// a hand-written always-allow pattern); `Esc` is the ladder back down
@@ -219,83 +247,6 @@ impl AgentView {
             }
         }
     }
-    pub(super) fn handle_cancel_turn_key(&mut self, key: &KeyEvent) -> InputOutcome {
-        if key.code == KeyCode::Esc {
-            return self.handle_card_esc();
-        }
-        let Some(ctv) = self.cancel_turn_view.as_mut() else {
-            return InputOutcome::Unchanged;
-        };
-        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            self.cancel_trigger_hint = Some(crate::app::actions::CancelTrigger::CtrlC);
-            return InputOutcome::Action(Action::CancelTurn);
-        }
-        if let Some(walk) = RowWalk::from_key(key) {
-            ctv.active_idx = walk.step(ctv.active_idx, CancelTurnChoice::ALL.len());
-            return InputOutcome::Changed;
-        }
-        match key.code {
-            KeyCode::Char('j') | KeyCode::Down => {
-                ctv.active_idx = (ctv.active_idx + 1).min(CancelTurnChoice::ALL.len() - 1);
-                InputOutcome::Changed
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                ctv.active_idx = ctv.active_idx.saturating_sub(1);
-                InputOutcome::Changed
-            }
-            KeyCode::Enter => {
-                let choice = CancelTurnChoice::ALL[ctv.active_idx];
-                InputOutcome::Action(Action::CancelTurnChoice(choice))
-            }
-            KeyCode::Char(c @ '1'..='4') => {
-                let idx = (c as usize) - ('1' as usize);
-                let choice = CancelTurnChoice::ALL[idx];
-                InputOutcome::Action(Action::CancelTurnChoice(choice))
-            }
-            _ => InputOutcome::Unchanged,
-        }
-    }
-    /// Mouse handler for the cancel-turn panel. `Moved` moves the
-    /// cursor onto the pointed row; `Down(Left)` dispatches the row's
-    /// `CancelTurnChoice`. All other events are consumed.
-    pub(super) fn handle_cancel_turn_mouse(&mut self, mouse: &MouseEvent) -> InputOutcome {
-        if self.cancel_turn_view.is_none() {
-            return InputOutcome::Unchanged;
-        }
-        let hit_idx = self
-            .cancel_turn_buttons
-            .iter()
-            .enumerate()
-            .find(|(_, rect)| rect.contains((mouse.column, mouse.row).into()))
-            .map(|(idx, _)| idx);
-        match mouse.kind {
-            MouseEventKind::Moved => {
-                let Some(idx) = hit_idx else {
-                    return InputOutcome::Unchanged;
-                };
-                if let Some(ctv) = self.cancel_turn_view.as_mut()
-                    && ctv.active_idx != idx
-                {
-                    ctv.active_idx = idx;
-                    return InputOutcome::Changed;
-                }
-                InputOutcome::Unchanged
-            }
-            MouseEventKind::Down(MouseButton::Left) => {
-                if let Some(idx) = hit_idx
-                    && idx < CancelTurnChoice::ALL.len()
-                {
-                    if let Some(ctv) = self.cancel_turn_view.as_mut() {
-                        ctv.active_idx = idx;
-                    }
-                    let choice = CancelTurnChoice::ALL[idx];
-                    return InputOutcome::Action(Action::CancelTurnChoice(choice));
-                }
-                InputOutcome::Unchanged
-            }
-            _ => InputOutcome::Unchanged,
-        }
-    }
     /// Save the free-text answer the composer is holding and return the card
     /// to its answer rows. A non-blank answer becomes this question's
     /// selection — exclusive with an option row, which single-select clears —
@@ -321,9 +272,7 @@ impl AgentView {
         } else if let Some(slot) = qv.per_question_freeform.get_mut(idx) {
             slot.clear();
         }
-        if !qv.is_feedback_report() {
-            qv.focus = QuestionFocus::Navigation;
-        }
+        qv.focus = QuestionFocus::Navigation;
         self.last_prompt_click_ms = None;
     }
     /// Handle key input when the question view is active.
@@ -352,41 +301,16 @@ impl AgentView {
                     return self.dismiss_question_view();
                 }
                 if key!('c', CONTROL).matches(key) {
-                    if qv.is_feedback_report() {
-                        return self.clear_feedback_then_dismiss();
-                    }
                     qv.focus = QuestionFocus::Navigation;
                     self.last_prompt_click_ms = None;
                     return InputOutcome::Changed;
-                }
-                if qv.is_feedback_report() && crate::input::key::is_paste_key(key) {
-                    let clipboard_text = crate::app::actions::ClipboardTextRead::from_result(
-                        crate::clipboard::system_clipboard_read_text(),
-                    );
-                    return self.handle_paste_key_deferred(clipboard_text);
                 }
                 match self.prompt.route_enter(key) {
                     EnterOutcome::NewlineInserted => {
                         return InputOutcome::Changed;
                     }
                     EnterOutcome::Submit => {
-                        if self.paste_probe_in_flight > 0
-                            && self.question_view.as_ref().is_some_and(
-                                crate::views::question_view::QuestionViewState::is_feedback_report,
-                            )
-                        {
-                            self.deferred_send =
-                                Some(crate::app::agent_view::AgentDeferredSend::SubmitFeedback);
-                            return InputOutcome::Changed;
-                        }
                         self.commit_question_freeform();
-                        if self
-                            .question_view
-                            .as_ref()
-                            .is_some_and(|qv| qv.is_feedback_report())
-                        {
-                            return self.submit_question_answers(false);
-                        }
                         let on_last = self
                             .question_view
                             .as_ref()
@@ -605,15 +529,6 @@ impl AgentView {
                 InputOutcome::Changed
             }
         }
-    }
-    /// The feedback pane has no navigation to return to, so it follows the composer: clear the report, then dismiss once it is empty.
-    fn clear_feedback_then_dismiss(&mut self) -> InputOutcome {
-        if self.prompt.text().trim().is_empty() {
-            return self.submit_question_answers(true);
-        }
-        self.prompt.set_text("");
-        self.commit_question_freeform();
-        InputOutcome::Changed
     }
     /// Handle mouse events when the question view is active.
     ///
@@ -1068,16 +983,6 @@ impl AgentView {
     /// view opened, so typed "additional context" doesn't leak into the
     /// main prompt. Also clears any stashed (tab-hidden) question view.
     fn dismiss_question_view(&mut self) -> InputOutcome {
-        let follows_skip_submit = self.question_view.as_ref().is_some_and(|qv| {
-            matches!(
-                qv.local_kind,
-                Some(crate::views::question_view::LocalQuestionKind::DoctorFix { .. })
-                    | Some(crate::views::question_view::LocalQuestionKind::FeedbackTrace { .. })
-            )
-        });
-        if follows_skip_submit {
-            return self.submit_question_answers(true);
-        }
         if let Some(qv) = self.question_view.take() {
             self.record_question_pause(&qv);
             self.restore_card_prompt(qv.stashed_prompt);
@@ -1104,28 +1009,6 @@ impl AgentView {
             .is_some_and(|qv| qv.tool_call_id == tool_call_id)
         {
             let _ = self.dismiss_question_view();
-            return true;
-        }
-        if let Some(ev) = self.elicitation_view.as_ref()
-            && ev.tool_call_id == tool_call_id
-        {
-            if ev.is_url_waiting() {
-                return false;
-            }
-            if let Some(mut ev) = self.elicitation_view.take() {
-                let _ = ev.take_response_tx();
-                self.restore_elicitation_prompt(ev.stashed_prompt);
-            }
-            return true;
-        }
-        if self
-            .pending_elicitation
-            .as_ref()
-            .is_some_and(|(req, _)| req.tool_call_id == tool_call_id)
-        {
-            if let Some((_, tx)) = self.pending_elicitation.take() {
-                drop(tx);
-            }
             return true;
         }
         if self
@@ -1160,21 +1043,9 @@ impl AgentView {
         }
         false
     }
-    /// Test-only access to [`submit_question_answers`] so dispatch tests
-    /// can verify the full submit/cancel pipeline (including
-    /// `prompt.restore` and `cleanup_question_state`) for local
-    /// questions, not just the inner `translate_local_submit` shim.
-    #[cfg(test)]
-    pub(crate) fn submit_question_answers_for_test(&mut self, skipped: bool) -> InputOutcome {
-        self.submit_question_answers(skipped)
-    }
     #[cfg(test)]
     pub(crate) fn handle_question_key_for_test(&mut self, key: &KeyEvent) -> InputOutcome {
         self.handle_question_key(key)
-    }
-    #[cfg(test)]
-    pub(crate) fn handle_question_mouse_for_test(&mut self, mouse: &MouseEvent) -> InputOutcome {
-        self.handle_question_mouse(mouse)
     }
     /// Give back the draft a card displaced when it opened.
     ///
@@ -1197,96 +1068,15 @@ impl AgentView {
             self.prompt.restore(stashed);
         }
     }
-    /// Close out the `/feedback` report pane: Enter advances to the trace
-    /// question (when offered) or sends, Esc drops the report.
-    fn submit_feedback_pane(
-        &mut self,
-        mut qv: crate::views::question_view::QuestionViewState,
-        skipped: bool,
-    ) -> InputOutcome {
-        let report = qv.feedback_report();
-        if !skipped && report.is_empty() && self.prompt.images.is_empty() {
-            crate::unified_log::info(
-                "feedback.submit",
-                None,
-                Some(serde_json::json!({"branch": "empty"})),
-            );
-            let freeform = qv.activate_freeform_input();
-            self.prompt.set_text_preserving(&freeform);
-            self.question_view = Some(qv);
-            return InputOutcome::Changed;
-        }
-        if !skipped && qv.feedback_offer_trace {
-            let images = self.prompt.drain_images();
-            crate::unified_log::info(
-                "feedback.submit",
-                None,
-                Some(serde_json::json!({
-                    "branch": "trace_question",
-                    "chars": report.chars().count(),
-                    "images": images.len(),
-                })),
-            );
-            pi_telemetry::session_ctx::log_event(
-                pi_telemetry::events::FeedbackTraceCardShown {
-                    reenables_sharing: qv.feedback_offer_reenables_sharing,
-                },
-            );
-            qv.begin_feedback_trace_stage(report, images);
-            self.prompt.set_text_preserving("");
-            self.question_view = Some(qv);
-            return InputOutcome::Changed;
-        }
-        let images = if skipped {
-            Vec::new()
-        } else {
-            self.prompt.drain_images()
-        };
-        crate::unified_log::info(
-            "feedback.submit",
-            None,
-            Some(serde_json::json!({
-                "branch": "send",
-                "skipped": skipped,
-                "chars": report.chars().count(),
-                "images": images.len(),
-            })),
-        );
-        self.record_question_pause(&qv);
-        self.restore_card_prompt(qv.stashed_prompt);
-        self.cleanup_question_state();
-        if skipped {
-            return InputOutcome::Changed;
-        }
-        InputOutcome::Action(Action::SendFeedback {
-            text: report,
-            images: images.into(),
-            trace: None,
-        })
-    }
     pub(super) fn submit_question_answers(&mut self, skipped: bool) -> InputOutcome {
         use pi_tools::implementations::grok_build::ask_user_question::AskUserQuestionExtResponse;
         self.swap_question_freeform();
         let Some(mut qv) = self.question_view.take() else {
             return InputOutcome::Changed;
         };
-        if qv.is_feedback_report() {
-            return self.submit_feedback_pane(qv, skipped);
-        }
         self.record_question_pause(&qv);
         if let Some(kind) = qv.local_kind.take() {
-            use crate::views::question_view::LocalQuestionKind;
             let outcome = match (skipped, kind) {
-                (true, LocalQuestionKind::DoctorFix { target, .. }) => {
-                    InputOutcome::Action(Action::DoctorFixCancelled(target))
-                }
-                (true, LocalQuestionKind::FeedbackTrace { report, images }) => {
-                    InputOutcome::Action(Action::SendFeedback {
-                        text: report,
-                        images,
-                        trace: Some(crate::app::actions::FeedbackTraceChoice::NoUpload),
-                    })
-                }
                 (skipped, kind) => translate_local_submit(&qv, kind, skipped),
             };
             self.prompt.restore(qv.stashed_prompt);
@@ -1341,235 +1131,12 @@ impl AgentView {
     /// Clean up question-related visual state after the question view is
     /// dismissed (submit, cancel, or replacement).
     pub(crate) fn cleanup_question_state(&mut self) {
-        if self.deferred_send == Some(crate::app::agent_view::AgentDeferredSend::SubmitFeedback) {
-            self.deferred_send = None;
-        }
         self.hovered_question_item = None;
         self.question_scrollbar_dragging = false;
         self.hit_question_scrollbar.clear();
         self.inline_prompt_area = None;
         self.last_question_click = None;
         self.last_prompt_click_ms = None;
-    }
-    /// Answer the ACTIVE question of this agent's pending
-    /// `AskUserQuestion` from the dashboard peek panel.
-    ///
-    /// Mirrors the agent view's own Enter handling but sources the
-    /// freeform text from the peek (a `freeform` argument) instead of
-    /// this view's prompt: `option_idx` selects an option; `None` with
-    /// non-empty `freeform` records the "Other" free-text answer. When
-    /// more questions remain it advances to the next one
-    /// ([`PeekAnswerOutcome::Advanced`]); on the last question it builds +
-    /// sends the accepted ext-response, restores the stashed prompt, and
-    /// clears question state ([`PeekAnswerOutcome::Submitted`]). Only
-    /// valid for an ext ask (`None` `local_kind`); an empty "Other" or a
-    /// non-ext question is a [`PeekAnswerOutcome::NoOp`].
-    pub(crate) fn dashboard_answer_question(
-        &mut self,
-        option_idx: Option<usize>,
-        freeform: String,
-    ) -> PeekAnswerOutcome {
-        use crate::views::question_view::QuestionSelection;
-        let Some(mut qv) = self.question_view.take() else {
-            return PeekAnswerOutcome::NoOp;
-        };
-        if qv.local_kind.is_some() {
-            self.question_view = Some(qv);
-            return PeekAnswerOutcome::NoOp;
-        }
-        let active = qv.active_tab;
-        match option_idx {
-            Some(idx) => {
-                qv.select_option(active, idx);
-                if let Some(slot) = qv.per_question_freeform_selected.get_mut(active) {
-                    *slot = false;
-                }
-            }
-            None => {
-                if freeform.trim().is_empty() {
-                    self.question_view = Some(qv);
-                    return PeekAnswerOutcome::NoOp;
-                }
-                if let Some(slot) = qv.per_question_freeform.get_mut(active) {
-                    *slot = freeform;
-                }
-                if let Some(slot) = qv.per_question_freeform_selected.get_mut(active) {
-                    *slot = true;
-                }
-                if let Some(QuestionSelection::Single(sel)) = qv.selections.get_mut(active) {
-                    *sel = None;
-                }
-            }
-        }
-        if active + 1 < qv.questions.len() {
-            qv.next_question();
-            self.question_view = Some(qv);
-            return PeekAnswerOutcome::Advanced;
-        }
-        self.record_question_pause(&qv);
-        let response = qv.build_accepted_response();
-        qv.send_ext_response(response);
-        self.prompt.restore(qv.stashed_prompt);
-        self.cleanup_question_state();
-        PeekAnswerOutcome::Submitted
-    }
-}
-#[cfg(test)]
-mod cancel_turn_mouse_tests {
-    use super::*;
-    use crate::acp::model_state::ModelState;
-    use crate::app::agent::{AgentId, AgentSession, AgentState};
-    use crate::app::app_view::InputOutcome;
-    use crate::scrollback::state::ScrollbackState;
-    use crate::views::modal::{CancelTurnChoice, CancelTurnViewState};
-    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
-    use ratatui::layout::Rect;
-    fn make_agent() -> AgentView {
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        AgentView::new(
-            AgentSession {
-                id: AgentId(0),
-                acp_tx: tx,
-                session_id: None,
-                models: ModelState::default(),
-                state: AgentState::Idle,
-                tracker: crate::acp::tracker::AcpUpdateTracker::new(),
-                cwd: std::path::PathBuf::from("/tmp"),
-                is_worktree: false,
-                forked_from: None,
-                pending_prompts: std::collections::VecDeque::new(),
-                next_queue_id: 0,
-                yolo_mode: false,
-                auto_mode: false,
-                prompt_history: Vec::new(),
-                prompt_history_loading: false,
-                loading_replay: false,
-                restore_degree: None,
-                rate_limited: false,
-                model_incompatible: false,
-                credit_limit_blocked: false,
-                free_usage_blocked: false,
-                available_commands: Vec::new(),
-                available_commands_generation: 0,
-                available_tools: None,
-                model_switch_pending: false,
-                user_model_preference: None,
-                deferred_model_switch: None,
-                bg_tasks: std::collections::BTreeMap::new(),
-                bg_tool_call_to_task: std::collections::HashMap::new(),
-                scheduled_tasks: std::collections::HashMap::new(),
-                in_flight_prompt: None,
-                compact_held_prompt: None,
-                current_prompt_id: None,
-                created_via_new: false,
-            },
-            ScrollbackState::new(),
-        )
-    }
-    /// Panel with one synthetic Rect per choice, stacked at y=10.
-    fn setup_panel(agent: &mut AgentView) {
-        agent.cancel_turn_view = Some(CancelTurnViewState {
-            active_idx: 0,
-            running_count: 2,
-        });
-        agent.cancel_turn_buttons.clear();
-        for (i, _) in CancelTurnChoice::ALL.iter().enumerate() {
-            agent.cancel_turn_buttons.push(Rect {
-                x: 5,
-                y: 10 + i as u16,
-                width: 40,
-                height: 1,
-            });
-        }
-    }
-    fn down(col: u16, row: u16) -> MouseEvent {
-        MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            column: col,
-            row,
-            modifiers: crossterm::event::KeyModifiers::empty(),
-        }
-    }
-    fn moved(col: u16, row: u16) -> MouseEvent {
-        MouseEvent {
-            kind: MouseEventKind::Moved,
-            column: col,
-            row,
-            modifiers: crossterm::event::KeyModifiers::empty(),
-        }
-    }
-    #[test]
-    fn click_first_row_dispatches_stop_running() {
-        let mut agent = make_agent();
-        setup_panel(&mut agent);
-        let outcome = agent.handle_cancel_turn_mouse(&down(10, 10));
-        match outcome {
-            InputOutcome::Action(Action::CancelTurnChoice(c)) => {
-                assert_eq!(c, CancelTurnChoice::StopRunning);
-            }
-            other => panic!("expected CancelTurnChoice(StopRunning), got {other:?}"),
-        }
-        assert_eq!(agent.cancel_turn_view.as_ref().unwrap().active_idx, 0);
-    }
-    #[test]
-    fn click_third_row_dispatches_always_stop() {
-        let mut agent = make_agent();
-        setup_panel(&mut agent);
-        let outcome = agent.handle_cancel_turn_mouse(&down(10, 12));
-        match outcome {
-            InputOutcome::Action(Action::CancelTurnChoice(c)) => {
-                assert_eq!(c, CancelTurnChoice::AlwaysStop);
-            }
-            other => panic!("expected CancelTurnChoice(AlwaysStop), got {other:?}"),
-        }
-        assert_eq!(agent.cancel_turn_view.as_ref().unwrap().active_idx, 2);
-    }
-    #[test]
-    fn click_outside_rows_consumes_event_without_action() {
-        let mut agent = make_agent();
-        setup_panel(&mut agent);
-        let outcome = agent.handle_cancel_turn_mouse(&down(10, 50));
-        assert!(matches!(outcome, InputOutcome::Unchanged));
-        assert_eq!(agent.cancel_turn_view.as_ref().unwrap().active_idx, 0);
-    }
-    #[test]
-    fn hover_moves_cursor_to_pointed_row() {
-        let mut agent = make_agent();
-        setup_panel(&mut agent);
-        assert_eq!(agent.cancel_turn_view.as_ref().unwrap().active_idx, 0);
-        let outcome = agent.handle_cancel_turn_mouse(&moved(10, 11));
-        assert!(matches!(outcome, InputOutcome::Changed));
-        assert_eq!(agent.cancel_turn_view.as_ref().unwrap().active_idx, 1);
-        let outcome = agent.handle_cancel_turn_mouse(&moved(10, 13));
-        assert!(matches!(outcome, InputOutcome::Changed));
-        assert_eq!(agent.cancel_turn_view.as_ref().unwrap().active_idx, 3);
-        let outcome = agent.handle_cancel_turn_mouse(&moved(15, 13));
-        assert!(matches!(outcome, InputOutcome::Unchanged));
-        assert_eq!(agent.cancel_turn_view.as_ref().unwrap().active_idx, 3);
-        let outcome = agent.handle_cancel_turn_mouse(&moved(10, 50));
-        assert!(matches!(outcome, InputOutcome::Unchanged));
-        assert_eq!(agent.cancel_turn_view.as_ref().unwrap().active_idx, 3);
-    }
-    #[test]
-    fn mouse_event_ignored_when_panel_closed() {
-        let mut agent = make_agent();
-        let outcome = agent.handle_cancel_turn_mouse(&down(10, 10));
-        assert!(matches!(outcome, InputOutcome::Unchanged));
-    }
-    #[test]
-    fn esc_dismisses_the_panel_without_cancelling_the_turn() {
-        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-        let mut agent = make_agent();
-        agent.session.state = AgentState::TurnRunning;
-        setup_panel(&mut agent);
-        let outcome =
-            agent.handle_cancel_turn_key(&KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-        assert!(
-            matches!(outcome, InputOutcome::Changed),
-            "panel Esc must keep the turn running, got {outcome:?}"
-        );
-        assert!(agent.cancel_turn_view.is_none());
-        assert!(agent.session.state.is_turn_running());
     }
 }
 #[cfg(test)]
@@ -2135,11 +1702,9 @@ mod question_no_freeform_tests {
     use crossterm::event::{
         KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
     };
+    use pi_tools::implementations::grok_build::ask_user_question::{Question, QuestionOption};
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
-    use pi_tools::implementations::grok_build::ask_user_question::{
-        Question, QuestionOption,
-    };
     /// Fixed options, single-select — shaped like the free-usage upsell.
     fn upsell_question() -> Question {
         let opt = |label: &str, desc: &str| QuestionOption {
@@ -2175,7 +1740,6 @@ mod question_no_freeform_tests {
     pub(super) fn draw_frame(agent: &mut AgentView) {
         let area = Rect::new(0, 0, 80, 30);
         let reg = ActionRegistry::defaults();
-        let bundle = crate::app::bundle::BundleState::default();
         let mut buf = Buffer::empty(area);
         let mut scratch = crate::scrollback::render::ScratchBuffer::new();
         agent.last_terminal_size = (80, 30);
@@ -2187,9 +1751,6 @@ mod question_no_freeform_tests {
             None,
             false,
             crate::app::agent_view::BannerSlotParams::none(),
-            &bundle,
-            false,
-            false,
             &mut Vec::new(),
             crate::app::agent_view::AppRenderParams::default(),
         );
@@ -2461,9 +2022,7 @@ mod question_answer_focus_tests {
     use crate::views::prompt_widget::StashedPrompt;
     use crate::views::question_view::{QuestionFocus, QuestionSelection, QuestionViewState};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use pi_tools::implementations::grok_build::ask_user_question::{
-        Question, QuestionOption,
-    };
+    use pi_tools::implementations::grok_build::ask_user_question::{Question, QuestionOption};
     fn question(prompt: &str, labels: &[&str]) -> Question {
         Question {
             question: prompt.into(),

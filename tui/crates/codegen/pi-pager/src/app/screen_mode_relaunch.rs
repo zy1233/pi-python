@@ -76,13 +76,13 @@ fn flag_takes_value(flag: &str) -> bool {
 /// Strips prior session-selection / mode flags, one-shot session-creation
 /// directives, and any bare positional prompt so a cold-start
 /// `grok "do the thing"` does not re-submit on resume. Keeps everything else
-/// (e.g. `--no-leader`, `--model`, endpoint overrides) intact, including the
+/// (e.g. `--model`, endpoint overrides) intact, including the
 /// value token that follows value-taking flags.
 ///
 /// One-shot startup directives must not survive into the rebuilt argv:
-/// `--session-id` combined with the appended `--resume` (without
-/// `--fork-session`) is rejected at startup (`SessionIdRequiresFork`), so the
-/// relaunched process would exit immediately; a kept `--worktree` /
+/// `--session-id` combined with the appended `--resume` is rejected at
+/// startup (`SessionIdWithResume`), so the relaunched process would exit
+/// immediately; a kept `--worktree` /
 /// `--worktree-ref` would create a *second* worktree on relaunch; a kept
 /// `--restore-code` would re-checkout the original session commit. All of
 /// them already did their job in the process being replaced.
@@ -117,12 +117,7 @@ pub(crate) fn build_screen_mode_relaunch_args(
         // `--minimal`/`--fullscreen` conflict or fight the requested mode.
         if matches!(
             s.as_ref(),
-            "--minimal"
-                | "--fullscreen"
-                | "--continue"
-                | "-c"
-                | "--fork-session"
-                | "--restore-code"
+            "--minimal" | "--fullscreen" | "--continue" | "-c" | "--restore-code"
         ) {
             continue;
         }
@@ -142,7 +137,7 @@ pub(crate) fn build_screen_mode_relaunch_args(
         // Session-selection / one-shot session-creation flags with an
         // optional/required following value — drop flag and value; we rebind
         // via a fresh `--resume <id>` below. `--session-id` would make the
-        // appended `--resume` an invalid combo (SessionIdRequiresFork) and
+        // appended `--resume` an invalid combo (SessionIdWithResume) and
         // kill the relaunch at startup; `--worktree`/`--worktree-ref` would
         // create a second worktree.
         if matches!(
@@ -197,13 +192,6 @@ pub(crate) fn build_screen_mode_relaunch_args(
     out
 }
 
-/// `GROK_SCREEN_MODE_SWITCH=exec` forces the legacy re-exec switch.
-pub(crate) const SCREEN_MODE_SWITCH_ENV: &str = "GROK_SCREEN_MODE_SWITCH";
-
-pub(crate) fn exec_switch_forced() -> bool {
-    std::env::var(SCREEN_MODE_SWITCH_ENV).is_ok_and(|v| v.trim().eq_ignore_ascii_case("exec"))
-}
-
 /// Env value written for a screen-mode relaunch (`minimal` / `fullscreen`).
 pub(crate) fn screen_mode_env_value(want_minimal: bool) -> &'static str {
     if want_minimal {
@@ -221,7 +209,10 @@ pub(crate) fn screen_mode_relaunch_resume_hint(session_id: &str, want_minimal: b
     } else {
         "--fullscreen"
     };
-    format!("{GROK_SCREEN_MODE_ENV}={mode} {} {flag} --resume {session_id}", crate::brand::CLI_NAME)
+    format!(
+        "{GROK_SCREEN_MODE_ENV}={mode} {} {flag} --resume {session_id}",
+        crate::brand::CLI_NAME
+    )
 }
 
 /// Replace the current process with a relaunch into the requested screen mode.
@@ -426,36 +417,21 @@ mod tests {
     fn value_taking_flag_tokens_derived_from_clap() {
         let tokens = value_taking_flag_tokens();
         // Value-taking flags (long, short, alias forms) are classified.
-        for flag in [
-            "--model",
-            "-m",
-            "--cwd",
-            "--leader-socket",
-            "--resume",
-            "-r",
-            "--load",
-        ] {
+        for flag in ["--model", "-m", "--cwd", "--resume", "-r", "--load"] {
             assert!(tokens.contains(flag), "expected value-taking flag {flag}");
         }
         // Boolean switches are not — a bare word after one is the prompt.
-        for flag in [
-            "--minimal",
-            "--fullscreen",
-            "--no-leader",
-            "--continue",
-            "-c",
-            "--fork-session",
-        ] {
+        for flag in ["--minimal", "--fullscreen", "--no-plan", "--continue", "-c"] {
             assert!(!tokens.contains(flag), "boolean flag misclassified: {flag}");
         }
     }
 
     #[test]
     fn adds_minimal_and_resume() {
-        let out = build_screen_mode_relaunch_args(args(&["grok", "--no-leader"]), "abc", true);
+        let out = build_screen_mode_relaunch_args(args(&["grok", "--no-plan"]), "abc", true);
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "abc", "--minimal"]
+            vec!["--no-plan", "--resume", "abc", "--minimal"]
         );
     }
 
@@ -463,17 +439,17 @@ mod tests {
     /// resolution still works without the env override.
     #[test]
     fn adds_fullscreen_and_resume() {
-        let out = build_screen_mode_relaunch_args(args(&["grok", "--no-leader"]), "abc", false);
+        let out = build_screen_mode_relaunch_args(args(&["grok", "--no-plan"]), "abc", false);
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "abc", "--fullscreen"]
+            vec!["--no-plan", "--resume", "abc", "--fullscreen"]
         );
     }
 
     /// `--session-id` must not survive the rebuild: combined with the appended
-    /// `--resume` (and no `--fork-session`) startup rejects the combo
-    /// (`SessionIdRequiresFork`), so the relaunched process would exit
-    /// immediately instead of reopening the session.
+    /// `--resume` startup rejects the combo (`SessionIdWithResume`), so the
+    /// relaunched process would exit immediately instead of reopening the
+    /// session.
     #[test]
     fn strips_session_id_flag() {
         let out = build_screen_mode_relaunch_args(
@@ -481,14 +457,14 @@ mod tests {
                 "grok",
                 "--session-id",
                 "11111111-1111-1111-1111-111111111111",
-                "--no-leader",
+                "--no-plan",
             ]),
             "new",
             true,
         );
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "new", "--minimal"]
+            vec!["--no-plan", "--resume", "new", "--minimal"]
         );
 
         let out = build_screen_mode_relaunch_args(
@@ -514,14 +490,14 @@ mod tests {
                 "--restore-code",
                 "--resume",
                 "old",
-                "--no-leader",
+                "--no-plan",
             ]),
             "new",
             false,
         );
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "new", "--fullscreen"]
+            vec!["--no-plan", "--resume", "new", "--fullscreen"]
         );
     }
 
@@ -535,14 +511,14 @@ mod tests {
                 "--worktree=wt",
                 "--worktree-ref=main",
                 "--ref=main",
-                "--no-leader",
+                "--no-plan",
             ]),
             "new",
             false,
         );
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "new", "--fullscreen"]
+            vec!["--no-plan", "--resume", "new", "--fullscreen"]
         );
     }
 
@@ -551,26 +527,26 @@ mod tests {
     #[test]
     fn strips_bare_worktree_without_eating_next_flag() {
         let out = build_screen_mode_relaunch_args(
-            args(&["grok", "--worktree", "--no-leader"]),
+            args(&["grok", "--worktree", "--no-plan"]),
             "new",
             false,
         );
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "new", "--fullscreen"]
+            vec!["--no-plan", "--resume", "new", "--fullscreen"]
         );
     }
 
     #[test]
     fn strips_prior_minimal_and_resume() {
         let out = build_screen_mode_relaunch_args(
-            args(&["grok", "--minimal", "--resume", "old", "--no-leader"]),
+            args(&["grok", "--minimal", "--resume", "old", "--no-plan"]),
             "new",
             false,
         );
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "new", "--fullscreen"]
+            vec!["--no-plan", "--resume", "new", "--fullscreen"]
         );
         assert!(!as_strs(&out).iter().any(|s| s == "--minimal"));
     }
@@ -582,13 +558,13 @@ mod tests {
     #[test]
     fn strips_prior_fullscreen_flag() {
         let out = build_screen_mode_relaunch_args(
-            args(&["grok", "--fullscreen", "--resume", "old", "--no-leader"]),
+            args(&["grok", "--fullscreen", "--resume", "old", "--no-plan"]),
             "new",
             true,
         );
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "new", "--minimal"]
+            vec!["--no-plan", "--resume", "new", "--minimal"]
         );
         assert!(!as_strs(&out).iter().any(|s| s == "--fullscreen"));
     }
@@ -596,57 +572,57 @@ mod tests {
     #[test]
     fn strips_short_resume_and_continue() {
         let out = build_screen_mode_relaunch_args(
-            args(&["grok", "-r", "old", "-c", "--no-leader"]),
+            args(&["grok", "-r", "old", "-c", "--no-plan"]),
             "sid",
             true,
         );
-        // `-c` and `-r old` gone; `--minimal --resume sid` added; `--no-leader` kept.
+        // `-c` and `-r old` gone; `--minimal --resume sid` added; `--no-plan` kept.
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "sid", "--minimal"]
+            vec!["--no-plan", "--resume", "sid", "--minimal"]
         );
     }
 
     #[test]
     fn strips_resume_equals_form() {
         let out = build_screen_mode_relaunch_args(
-            args(&["grok", "--resume=old-id", "--no-leader"]),
+            args(&["grok", "--resume=old-id", "--no-plan"]),
             "sid",
             false,
         );
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "sid", "--fullscreen"]
+            vec!["--no-plan", "--resume", "sid", "--fullscreen"]
         );
     }
 
     #[test]
     fn strips_positional_prompt() {
         let out = build_screen_mode_relaunch_args(
-            args(&["grok", "--no-leader", "fix the bug"]),
+            args(&["grok", "--no-plan", "fix the bug"]),
             "sid",
             true,
         );
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "sid", "--minimal"]
+            vec!["--no-plan", "--resume", "sid", "--minimal"]
         );
         assert!(!as_strs(&out).iter().any(|s| s.contains("fix")));
     }
 
     #[test]
     fn double_dash_and_following_positionals_dropped() {
-        // `grok --no-leader -- "fix the bug"`: everything after `--` is the
+        // `grok --no-plan -- "fix the bug"`: everything after `--` is the
         // prompt. The separator itself must go too, or the appended
         // `--resume <id>` would be parsed as positional prompt words.
         let out = build_screen_mode_relaunch_args(
-            args(&["grok", "--no-leader", "--", "fix the bug"]),
+            args(&["grok", "--no-plan", "--", "fix the bug"]),
             "sid",
             false,
         );
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "sid", "--fullscreen"]
+            vec!["--no-plan", "--resume", "sid", "--fullscreen"]
         );
     }
 
@@ -661,11 +637,9 @@ mod tests {
                 "grok-4",
                 "--cwd",
                 "/tmp/proj",
-                "--leader-socket",
-                "/tmp/leader.sock",
                 "--debug-file",
                 "/tmp/debug.log",
-                "--no-leader",
+                "--no-plan",
                 "fix the bug",
             ]),
             "sid",
@@ -678,11 +652,9 @@ mod tests {
                 "grok-4",
                 "--cwd",
                 "/tmp/proj",
-                "--leader-socket",
-                "/tmp/leader.sock",
                 "--debug-file",
                 "/tmp/debug.log",
-                "--no-leader",
+                "--no-plan",
                 "--resume",
                 "sid",
                 "--minimal",
@@ -694,7 +666,7 @@ mod tests {
     #[test]
     fn keeps_equals_form_and_short_model_flag() {
         let out = build_screen_mode_relaunch_args(
-            args(&["grok", "-m", "grok-4", "--cwd=/tmp/proj", "--no-leader"]),
+            args(&["grok", "-m", "grok-4", "--cwd=/tmp/proj", "--no-plan"]),
             "sid",
             false,
         );
@@ -704,7 +676,7 @@ mod tests {
                 "-m",
                 "grok-4",
                 "--cwd=/tmp/proj",
-                "--no-leader",
+                "--no-plan",
                 "--resume",
                 "sid",
                 "--fullscreen",
@@ -714,30 +686,27 @@ mod tests {
 
     #[test]
     fn boolean_flag_does_not_eat_following_positional() {
-        // `--no-leader` is boolean; the bare word after it is the prompt and
+        // `--no-plan` is boolean; the bare word after it is the prompt and
         // must be dropped, not attached as a spurious value.
         let out = build_screen_mode_relaunch_args(
-            args(&["grok", "--no-leader", "fix the bug"]),
+            args(&["grok", "--no-plan", "fix the bug"]),
             "sid",
             false,
         );
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "sid", "--fullscreen"]
+            vec!["--no-plan", "--resume", "sid", "--fullscreen"]
         );
     }
 
     #[test]
     fn resume_without_value_then_flag_is_not_eaten() {
-        // `grok --resume --no-leader` (resume most-recent; next token is a flag).
-        let out = build_screen_mode_relaunch_args(
-            args(&["grok", "--resume", "--no-leader"]),
-            "sid",
-            false,
-        );
+        // `grok --resume --no-plan` (resume most-recent; next token is a flag).
+        let out =
+            build_screen_mode_relaunch_args(args(&["grok", "--resume", "--no-plan"]), "sid", false);
         assert_eq!(
             as_strs(&out),
-            vec!["--no-leader", "--resume", "sid", "--fullscreen"]
+            vec!["--no-plan", "--resume", "sid", "--fullscreen"]
         );
     }
 

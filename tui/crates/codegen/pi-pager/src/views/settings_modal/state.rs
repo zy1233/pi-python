@@ -7,9 +7,9 @@ use ratatui::layout::Rect;
 use crate::app::actions::Action;
 use crate::input::line_editor::LineEditor;
 use crate::settings::{
-    CodingDataSharingLock, EnumChoice, OwnedEnumChoice, PagerLocalSnapshot, SettingCategory,
-    SettingKey, SettingKind, SettingMeta, SettingValue, SettingsRegistry, StringValidator,
-    current_value_for, dynamic_enum_choices,
+    EnumChoice, OwnedEnumChoice, PagerLocalSnapshot, SettingCategory, SettingKey, SettingKind,
+    SettingMeta, SettingValue, SettingsRegistry, StringValidator, current_value_for,
+    dynamic_enum_choices,
 };
 use crate::views::modal_window::ModalWindowState;
 
@@ -159,14 +159,6 @@ pub(super) enum SettingsMode {
     },
 }
 
-/// Is the open sub-pane a [`crate::settings::is_consent_chooser`] pane?
-pub(super) fn mode_is_consent_chooser(mode: &SettingsMode) -> bool {
-    matches!(
-        mode,
-        SettingsMode::PickingEnum { key, .. } if crate::settings::is_consent_chooser(key)
-    )
-}
-
 /// Settings modal state. Boxed inside `ActiveModal::Settings` to
 /// avoid clippy `large_enum_variant`.
 pub struct SettingsModalState {
@@ -255,16 +247,6 @@ impl SettingsModalState {
             expanded_keys: std::collections::HashSet::new(),
             hover_row: None,
             close_on_picker_exit: false,
-        }
-    }
-
-    /// Why a Browse row cannot be edited (`None` = editable). Consulted by
-    /// both render and input.
-    pub fn row_lock(&self, key: SettingKey) -> Option<CodingDataSharingLock> {
-        if key == "coding_data_sharing" {
-            self.pager_snapshot.coding_data_sharing_lock
-        } else {
-            None
         }
     }
 
@@ -577,9 +559,6 @@ impl SettingsModalState {
             let Some((key, meta)) = self.focused_setting() else {
                 return false;
             };
-            if self.row_lock(key).is_some() {
-                return false;
-            }
             // Handles both static `Enum` and `DynamicEnum` catalogs.
             let (supports_preview, resolved): (bool, Vec<OwnedEnumChoice>) = match &meta.kind {
                 SettingKind::Enum {
@@ -886,7 +865,6 @@ pub(super) fn action_for_bool(key: SettingKey, new: bool) -> Option<Action> {
         "contextual_hints.undo" => Some(Action::SetContextualHintUndo(new)),
         "contextual_hints.plan_mode" => Some(Action::SetContextualHintPlanMode(new)),
         "contextual_hints.image_input" => Some(Action::SetContextualHintImageInput(new)),
-        "contextual_hints.send_now" => Some(Action::SetContextualHintSendNow(new)),
         "contextual_hints.small_screen" => Some(Action::SetContextualHintSmallScreen(new)),
         "contextual_hints.word_select" => Some(Action::SetContextualHintWordSelect(new)),
         "contextual_hints.ssh_wrap" => Some(Action::SetContextualHintSshWrap(new)),
@@ -903,7 +881,6 @@ pub(super) fn action_for_bool(key: SettingKey, new: bool) -> Option<Action> {
         "prompt_suggestions" => Some(Action::SetPromptSuggestions(new)),
         "respect_manual_folds" => Some(Action::SetRespectManualFolds(new)),
         "page_flip_on_send" => Some(Action::SetPageFlipOnSend(new)),
-        "confirm_before_rewind" => Some(Action::SetConfirmBeforeRewind(new)),
         "combine_queued_prompts" => Some(Action::SetCombineQueuedPrompts(new)),
 
         "invert_scroll" => Some(Action::SetInvertScroll(new)),
@@ -924,7 +901,6 @@ pub(super) fn action_for_enum(key: SettingKey, choice: &'static str) -> Option<A
         "auto_light_theme" => Some(Action::PreviewAutoLightTheme(choice.to_string())),
         // No preview for settings with irreversible side effects.
         "permission_mode" => None,
-        "coding_data_sharing" => None,
         "plan_mode" => None,
         "render_mermaid" => None,
         "keep_text_selection" => None,
@@ -960,11 +936,6 @@ pub(super) fn action_for_enum_commit(key: SettingKey, choice: &'static str) -> O
             )),
             _ => None,
         },
-        "coding_data_sharing" => match choice {
-            "opt-in" => Some(Action::SetCodingDataSharing { opted_in: true }),
-            "opt-out" => Some(Action::SetCodingDataSharing { opted_in: false }),
-            _ => None,
-        },
         "plan_mode" => match choice {
             "on" => Some(Action::SetPlanMode(crate::app::actions::PlanModeKind::On)),
             "off" => Some(Action::SetPlanMode(crate::app::actions::PlanModeKind::Off)),
@@ -983,8 +954,6 @@ pub(super) fn action_for_enum_commit(key: SettingKey, choice: &'static str) -> O
         "scroll_mode" => {
             crate::appearance::ScrollMode::from_canonical(choice).map(Action::SetScrollMode)
         }
-        "follow_up_behavior" => crate::appearance::FollowUpBehavior::from_canonical(choice)
-            .map(Action::SetFollowUpBehavior),
         "default_selected_permission" => {
             Some(Action::SetDefaultSelectedPermission(choice.to_string()))
         }

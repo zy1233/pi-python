@@ -290,53 +290,6 @@ fn selection_clears_when_selected_removed() {
 
 // -- Filter + selection tests ---------------------------------------------
 
-#[test]
-fn select_with_filter() {
-    let items = vec![
-        TestItem::new(0).with_text("alpha"),
-        TestItem::new(1).with_text("beta"),
-        TestItem::new(2).with_text("alphabet"),
-        TestItem::new(3).with_text("gamma"),
-    ];
-    let mut state = new_streaming(WrapMode::NoWrap, false);
-
-    // Filter "alph" → items 0 (alpha) and 2 (alphabet)
-    state.set_filter(Some(FilterMatcher::substring("alph")));
-    state.prepare_layout(&items, 80, 10);
-
-    assert_eq!(state.visible_count(), 2);
-
-    // Auto-select picked visible item 0 (physical 0, "alpha").
-    assert_eq!(state.selected_index(), Some(0));
-    assert_eq!(state.selected_id(), Some(0));
-
-    // select_next → visible item 1 (physical item 2, "alphabet")
-    state.select_next(&items);
-    assert_eq!(state.selected_index(), Some(1));
-    assert_eq!(state.selected_id(), Some(2));
-
-    // select_prev → back to visible item 0
-    state.select_prev(&items);
-    assert_eq!(state.selected_index(), Some(0));
-    assert_eq!(state.selected_id(), Some(0));
-
-    // select_last → engages follow (no cursor)
-    state.select_last(&items);
-    assert!(state.follow_mode);
-    assert_eq!(state.selected_index(), None);
-
-    // select_first → exits follow, selects visible item 0
-    state.select_first(&items);
-    assert!(!state.follow_mode);
-    assert_eq!(state.selected_index(), Some(0));
-    assert_eq!(state.selected_id(), Some(0));
-
-    // select_at(1) → visible item 1
-    state.select_at(1, &items);
-    assert_eq!(state.selected_index(), Some(1));
-    assert_eq!(state.selected_id(), Some(2));
-}
-
 // -- Visible range tests --------------------------------------------------
 
 #[test]
@@ -377,34 +330,6 @@ fn visible_range_variable_height() {
 }
 
 // -- Filter tests ---------------------------------------------------------
-
-#[test]
-fn filter_reduces_visible_items() {
-    let items = vec![
-        TestItem::new(0).with_text("alpha"),
-        TestItem::new(1).with_text("beta"),
-        TestItem::new(2).with_text("alphabet"),
-        TestItem::new(3).with_text("gamma"),
-    ];
-    let mut state = ListPaneState::new(WrapMode::NoWrap, false);
-
-    // No filter → all 4 visible
-    state.prepare_layout(&items, 80, 10);
-    assert_eq!(state.visible_count(), 4);
-    assert_eq!(state.total_height(), 4);
-
-    // Filter "alph" → items 0 and 2
-    state.set_filter(Some(FilterMatcher::substring("alph")));
-    state.prepare_layout(&items, 80, 10);
-    assert_eq!(state.visible_count(), 2);
-    assert_eq!(state.total_height(), 2);
-    assert_eq!(state.filter().unwrap().match_count(), 2);
-
-    // Clear filter
-    state.set_filter(None);
-    state.prepare_layout(&items, 80, 10);
-    assert_eq!(state.visible_count(), 4);
-}
 
 // -- Wrap mode tests ------------------------------------------------------
 
@@ -820,22 +745,6 @@ fn prepare_layout_full_rebuild_on_width_change() {
 }
 
 #[test]
-fn prepare_layout_full_rebuild_on_filter_change() {
-    let items = vec![
-        TestItem::new(0).with_text("alpha"),
-        TestItem::new(1).with_text("beta"),
-        TestItem::new(2).with_text("alphabet"),
-    ];
-    let mut state = ListPaneState::new(WrapMode::NoWrap, false);
-    state.prepare_layout(&items, 80, 10);
-    assert_eq!(state.visible_count(), 3);
-
-    state.set_filter(Some(FilterMatcher::substring("alph")));
-    state.prepare_layout(&items, 80, 10);
-    assert_eq!(state.visible_count(), 2);
-}
-
-#[test]
 fn prepare_layout_handles_item_eviction() {
     // Simulate eviction: items shrink between frames (front removed).
     let mut items: Vec<TestItem> = (0..20).map(TestItem::new).collect();
@@ -857,28 +766,6 @@ fn prepare_layout_handles_item_eviction() {
     assert_eq!(state.selected_index(), Some(5)); // shifted
     assert_eq!(state.visible_count(), 15);
     assert_eq!(state.total_height(), 15);
-}
-
-#[test]
-fn prepare_layout_refilters_when_items_shrink_under_active_filter() {
-    // Filter leaves a gap; shrink must drop stale high physical indices.
-    let mut items = vec![
-        TestItem::new(0).with_text("row-0"),
-        TestItem::new(1).with_text("row-1"),
-        TestItem::new(2).with_text("zzz"),
-        TestItem::new(3).with_text("row-3"),
-        TestItem::new(4).with_text("row-4"),
-    ];
-    let mut state = ListPaneState::new(WrapMode::NoWrap, false);
-    state.set_filter(Some(FilterMatcher::substring("row")));
-    state.prepare_layout(&items, 80, 10);
-    assert_eq!(state.visible_count(), 4);
-
-    items.truncate(2);
-    state.prepare_layout(&items, 80, 10);
-    assert_eq!(state.visible_count(), 2);
-    assert_eq!(state.to_physical(0), 0);
-    assert_eq!(state.to_physical(1), 1);
 }
 
 #[test]
@@ -1585,34 +1472,6 @@ fn g_in_follow_already_is_noop() {
     state.select_last(&items);
     assert!(state.follow_mode);
     assert_eq!(state.scroll_offset(), 10);
-}
-
-#[test]
-fn next_match_with_filter_mode() {
-    // In filter mode, only matching items are visible.
-    // n/N should still navigate between them.
-    let items = vec![
-        TestItem::new(0).with_text("alpha"),
-        TestItem::new(1).with_text("beta"),
-        TestItem::new(2).with_text("alphabet"),
-        TestItem::new(3).with_text("gamma"),
-    ];
-    let mut state = ListPaneState::new(WrapMode::NoWrap, false);
-    state.set_filter(Some(FilterMatcher::substring("alph")));
-    state.prepare_layout(&items, 80, 10);
-
-    assert_eq!(state.visible_count(), 2);
-    // Auto-selected vis 0 (physical 0).
-    assert_eq!(state.selected_index(), Some(0));
-
-    // n → next match = physical 2 (vis 1).
-    state.next_match(&items);
-    assert_eq!(state.selected_index(), Some(1)); // vis index 1
-    assert_eq!(state.selected_id(), Some(2)); // physical id 2
-
-    // n → wraps to physical 0 (vis 0).
-    state.next_match(&items);
-    assert_eq!(state.selected_index(), Some(0));
 }
 
 // -- Config gating tests --------------------------------------------------

@@ -15,7 +15,7 @@ use crate::views::modal_window::ModalWindowState;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::Span;
 use unicode_width::UnicodeWidthStr;
 /// A blocking confirmation dialog with typed results.
 ///
@@ -126,33 +126,6 @@ impl ModalConfirmation<ResetSettingsResult> {
         }
     }
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CancelTurnChoice {
-    StopRunning,
-    ContinueToRun,
-    AlwaysStop,
-    AlwaysContinue,
-}
-impl CancelTurnChoice {
-    pub const ALL: [CancelTurnChoice; 4] = [
-        CancelTurnChoice::StopRunning,
-        CancelTurnChoice::ContinueToRun,
-        CancelTurnChoice::AlwaysStop,
-        CancelTurnChoice::AlwaysContinue,
-    ];
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::StopRunning => "Stop running",
-            Self::ContinueToRun => "Continue to run",
-            Self::AlwaysStop => "Always stop",
-            Self::AlwaysContinue => "Always continue",
-        }
-    }
-}
-pub struct CancelTurnViewState {
-    pub active_idx: usize,
-    pub running_count: usize,
-}
 /// Returns a ready-to-open DocPicker modal for the how-to guides list.
 ///
 /// `previous_palette` is the saved command-palette state; when provided,
@@ -211,24 +184,10 @@ pub enum ActiveModal {
         entries: Option<Vec<crate::app::app_view::SessionPickerEntry>>,
         /// Whether the session list is being fetched.
         loading: bool,
-        /// Foreign lane completion and deferred native-lane notice.
-        lanes: crate::views::session_picker::SessionPickerLanes,
         /// Previous command palette state (if opened from palette). Restored on Esc.
         previous_palette: Option<PaletteSnapshot>,
         /// Shared modal window chrome state.
         window: ModalWindowState,
-        /// Content-based (deep search) results from ACP session search.
-        content_results: Option<Vec<pi_shell::extensions::session_search::SearchSessionHit>>,
-        /// Whether a deep search is currently in flight.
-        content_loading: bool,
-        /// Monotonically increasing sequence number for deep search requests.
-        deep_search_seq: u64,
-        /// The search query `entries` were server-fetched with (`None` =
-        /// unfiltered fetch). See
-        /// [`crate::views::session_picker::effective_filter_query`].
-        entries_query: Option<String>,
-        /// Source filter for the modal session picker.
-        source_filter: crate::views::session_picker::SourceFilter,
         /// Session armed for delete via `d` (see
         /// [`crate::views::session_picker::PendingDelete`]).
         pending_delete: Option<crate::views::session_picker::PendingDelete>,
@@ -258,7 +217,7 @@ pub enum ActiveModal {
         /// to the doc list on Esc so the DocPicker can still restore the palette.
         previous_palette: Option<PaletteSnapshot>,
         /// When true, Esc closes the modal directly instead of returning
-        /// to the DocPicker list (used for /release-notes).
+        /// to the DocPicker list (used when a doc is opened directly, e.g. `/docs <name>`).
         standalone: bool,
     },
     /// All-shortcuts cheatsheet for the current view/state.
@@ -280,18 +239,9 @@ pub enum ActiveModal {
         /// Browse list vs in-modal detail page (pattern B).
         mode: crate::views::shortcuts_help::ShortcutsHelpMode,
     },
-    /// Memory browser modal (/memory).
-    MemoryBrowser {
-        state: Box<crate::views::memory_modal::MemoryModalState>,
-    },
     /// Settings modal (F2, /settings, palette). Boxed — large state.
     Settings {
         state: Box<crate::views::settings_modal::SettingsModalState>,
-    },
-    /// Tabbed usage / session-info modal (`/usage`, `/session-info`,
-    /// `/context`, context-bar click). Boxed — holds fetched snapshots.
-    UsageInfo {
-        state: Box<crate::views::usage_modal::UsageInfoModalState>,
     },
     /// Reset-settings confirmation, stacked above Settings.
     ///
@@ -304,22 +254,6 @@ pub enum ActiveModal {
         key: crate::settings::SettingKey,
         /// Preserved settings state, restored by both choice branches.
         settings_state: Box<crate::views::settings_modal::SettingsModalState>,
-    },
-    /// Modal preview for a `#` remember note. Shows the raw text immediately;
-    /// the LLM-enhanced version arrives asynchronously and can be toggled with Tab.
-    RememberNoteReview {
-        raw_content: String,
-        enhanced_content: Option<String>,
-        showing_enhanced: bool,
-        scroll: u16,
-        window: ModalWindowState,
-        cached_lines: Option<(u16, Vec<ratatui::text::Line<'static>>)>,
-        cwd: std::path::PathBuf,
-        agent_id: crate::app::agent::AgentId,
-        /// Monotonic nonce to correlate async rewrite results with the modal
-        /// that requested them, preventing stale results from populating a
-        /// different note's review modal.
-        rewrite_nonce: u64,
     },
 }
 /// Snapshot of the command palette state, saved when opening an arg picker
@@ -343,31 +277,22 @@ pub struct PaletteEntry {
 #[derive(Debug, Clone)]
 pub enum PaletteCommand {
     NewSession,
-    NewSessionInWorktree,
-    Home,
     Quit,
     /// Execute a slash command through the palette's draft-preserving route.
     SlashCommand(String),
-    /// Edit the minimal-mode composer draft without routing through slash text.
-    EditPromptExternal,
     /// Non-selectable section header for visual grouping.
     SectionHeader(String),
-    /// Open the how-to documentation picker.
-    HowTo,
     /// Open the keyboard shortcuts cheatsheet (Ctrl+.).
     KeyboardShortcuts,
-    /// Open the memory browser modal.
-    Memory,
-    /// Open the Extensions modal on a specific tab. Used by palette
-    /// entries that don't have a corresponding slash command (e.g.
-    /// "Marketplace", "Skills") and to keep direct entries consistent.
-    OpenExtensionsTab(crate::views::extensions_modal::ExtensionsTab),
     /// Open the settings modal.
     OpenSettings,
-    /// Open the Agents modal (listing all agent definitions).
-    OpenAgentsModal,
 }
+
 /// Build the default set of palette entries with section grouping.
+///
+/// Every row is a pager-local action or one of the builtin slash commands
+/// (`crate::slash::commands::builtin_commands`); the agent's own commands are
+/// reached through the slash menu, not this palette.
 pub(crate) fn default_palette_entries(
     sharing_enabled: bool,
     slash: &crate::slash::SlashController,
@@ -386,75 +311,9 @@ pub(crate) fn default_palette_entries(
             command: PaletteCommand::NewSession,
         },
         PaletteEntry {
-            label: "New Session in Worktree".into(),
-            shortcut: "Ctrl+P → worktree".into(),
-            command: PaletteCommand::NewSessionInWorktree,
-        },
-        PaletteEntry {
-            label: "Agent Dashboard".into(),
-            shortcut: "/dashboard".into(),
-            command: PaletteCommand::SlashCommand("/dashboard".into()),
-        },
-        PaletteEntry {
-            label: "Back to Home".into(),
-            shortcut: "/home".into(),
-            command: PaletteCommand::Home,
-        },
-        PaletteEntry {
-            label: "Delete This Session".into(),
-            shortcut: "/delete".into(),
-            command: PaletteCommand::SlashCommand("/delete".into()),
-        },
-        PaletteEntry {
             label: "Resume Session".into(),
             shortcut: "/resume".into(),
             command: PaletteCommand::SlashCommand("/resume".into()),
-        },
-        PaletteEntry {
-            label: "Share Session".into(),
-            shortcut: "/share".into(),
-            command: PaletteCommand::SlashCommand("/share".into()),
-        },
-        PaletteEntry {
-            label: "Rename Session".into(),
-            shortcut: "/rename ".into(),
-            command: PaletteCommand::SlashCommand("/rename ".into()),
-        },
-        PaletteEntry {
-            label: "Session Info".into(),
-            shortcut: "/session-info".into(),
-            command: PaletteCommand::SlashCommand("/session-info".into()),
-        },
-        PaletteEntry {
-            label: "Send Feedback".into(),
-            shortcut: "/feedback".into(),
-            command: PaletteCommand::SlashCommand("/feedback ".into()),
-        },
-        // ── Context ──
-        PaletteEntry {
-            label: "Context".into(),
-            shortcut: String::new(),
-            command: PaletteCommand::SectionHeader("Context".into()),
-        },
-        PaletteEntry {
-            label: "Compact History".into(),
-            shortcut: "/compact".into(),
-            command: PaletteCommand::SlashCommand("/compact".into()),
-        },
-        PaletteEntry {
-            label: "Context Usage".into(),
-            shortcut: "/context".into(),
-            command: PaletteCommand::SlashCommand("/context".into()),
-        },
-        PaletteEntry {
-            label: "View Plan".into(),
-            shortcut: "/view-plan".into(),
-            command: PaletteCommand::SlashCommand("/view-plan".into()),
-        },
-        PaletteEntry {
-            label: "Memory".into(),
-            shortcut: "/memory".into(),
-            command: PaletteCommand::Memory,
         },
         // ── Model & Input ──
         PaletteEntry {
@@ -468,72 +327,9 @@ pub(crate) fn default_palette_entries(
             command: PaletteCommand::SlashCommand("/model ".into()),
         },
         PaletteEntry {
-            label: "Always Approve Mode".into(),
-            shortcut: "/always-approve".into(),
-            command: PaletteCommand::SlashCommand("/always-approve".into()),
-        },
-        PaletteEntry {
             label: "Multiline Input".into(),
             shortcut: "/multiline".into(),
             command: PaletteCommand::SlashCommand("/multiline".into()),
-        },
-        PaletteEntry {
-            label: "Edit Prompt in External Editor".into(),
-            shortcut: "Ctrl+G".into(),
-            command: PaletteCommand::EditPromptExternal,
-        },
-        // ── Tools ──
-        PaletteEntry {
-            label: "Tools".into(),
-            shortcut: String::new(),
-            command: PaletteCommand::SectionHeader("Tools".into()),
-        },
-        PaletteEntry {
-            label: "Hooks".into(),
-            shortcut: "/hooks".into(),
-            command: PaletteCommand::OpenExtensionsTab(
-                crate::views::extensions_modal::ExtensionsTab::Hooks,
-            ),
-        },
-        PaletteEntry {
-            label: "Plugins".into(),
-            shortcut: "/plugins".into(),
-            command: PaletteCommand::OpenExtensionsTab(
-                crate::views::extensions_modal::ExtensionsTab::Plugins,
-            ),
-        },
-        PaletteEntry {
-            label: "Marketplace".into(),
-            shortcut: "/marketplace".into(),
-            command: PaletteCommand::OpenExtensionsTab(
-                crate::views::extensions_modal::ExtensionsTab::Marketplace,
-            ),
-        },
-        PaletteEntry {
-            label: "Skills".into(),
-            shortcut: "/skills".into(),
-            command: PaletteCommand::OpenExtensionsTab(
-                crate::views::extensions_modal::ExtensionsTab::Skills,
-            ),
-        },
-        PaletteEntry {
-            label: "Workflows".into(),
-            shortcut: "/workflows".into(),
-            command: PaletteCommand::OpenExtensionsTab(
-                crate::views::extensions_modal::ExtensionsTab::Workflows,
-            ),
-        },
-        PaletteEntry {
-            label: "MCP Servers".into(),
-            shortcut: "/mcps".into(),
-            command: PaletteCommand::OpenExtensionsTab(
-                crate::views::extensions_modal::ExtensionsTab::McpServers,
-            ),
-        },
-        PaletteEntry {
-            label: "Manage Agents".into(),
-            shortcut: "/config-agents".into(),
-            command: PaletteCommand::OpenAgentsModal,
         },
         // ── Other ──
         PaletteEntry {
@@ -561,16 +357,6 @@ pub(crate) fn default_palette_entries(
             command: PaletteCommand::KeyboardShortcuts,
         },
         PaletteEntry {
-            label: "How-to Guides".into(),
-            shortcut: "/docs".into(),
-            command: PaletteCommand::HowTo,
-        },
-        PaletteEntry {
-            label: "Tutorial".into(),
-            shortcut: "/tutorial".into(),
-            command: PaletteCommand::SlashCommand("/tutorial".into()),
-        },
-        PaletteEntry {
             label: "Quit".into(),
             shortcut: "Ctrl+Q".into(),
             command: PaletteCommand::Quit,
@@ -593,42 +379,8 @@ pub(crate) fn default_palette_entries(
         }
         true
     });
-    if slash.pi_standard_slash_menu() {
-        entries.retain(|entry| pi_standard_palette_kept(&entry.command, slash.registry()));
-        entries = drop_empty_palette_sections(entries);
-    }
-    if !screen_mode.is_minimal()
-        && let Some(entry) = entries
-            .iter_mut()
-            .find(|entry| matches!(entry.command, PaletteCommand::EditPromptExternal))
-    {
-        entry.shortcut = "/edit-prompt".into();
-    }
+    entries = drop_empty_palette_sections(entries);
     entries
-}
-
-fn pi_standard_palette_kept(
-    command: &PaletteCommand,
-    registry: &crate::slash::registry::CommandRegistry,
-) -> bool {
-    match command {
-        PaletteCommand::NewSession
-        | PaletteCommand::Quit
-        | PaletteCommand::OpenSettings
-        | PaletteCommand::KeyboardShortcuts
-        | PaletteCommand::SectionHeader(_) => true,
-        PaletteCommand::SlashCommand(text) => {
-            let name = text
-                .trim()
-                .trim_start_matches('/')
-                .split_whitespace()
-                .next()
-                .unwrap_or("");
-            crate::slash::registry::PI_STANDARD_SLASH_NAMES.contains(&name)
-                || !registry.is_builtin(name)
-        }
-        _ => false,
-    }
 }
 
 fn drop_empty_palette_sections(entries: Vec<PaletteEntry>) -> Vec<PaletteEntry> {
@@ -636,9 +388,9 @@ fn drop_empty_palette_sections(entries: Vec<PaletteEntry>) -> Vec<PaletteEntry> 
     let mut i = 0;
     while i < entries.len() {
         if matches!(entries[i].command, PaletteCommand::SectionHeader(_)) {
-            let has_child = entries.get(i + 1).is_some_and(|next| {
-                !matches!(next.command, PaletteCommand::SectionHeader(_))
-            });
+            let has_child = entries
+                .get(i + 1)
+                .is_some_and(|next| !matches!(next.command, PaletteCommand::SectionHeader(_)));
             if has_child {
                 out.push(entries[i].clone());
             }
@@ -712,10 +464,7 @@ impl ActiveModal {
             | ActiveModal::DocPicker { .. }
             | ActiveModal::DocViewer { .. }
             | ActiveModal::ShortcutsHelp { .. }
-            | ActiveModal::MemoryBrowser { .. }
-            | ActiveModal::Settings { .. }
-            | ActiveModal::UsageInfo { .. }
-            | ActiveModal::RememberNoteReview { .. } => vec![],
+            | ActiveModal::Settings { .. } => vec![],
         }
     }
     pub fn message(&self, drain_blocked: bool) -> &str {
@@ -742,11 +491,8 @@ impl ActiveModal {
             ActiveModal::DocPicker { .. } => "How-to Guides",
             ActiveModal::DocViewer { title, .. } => title.as_str(),
             ActiveModal::ShortcutsHelp { .. } => "Keyboard Shortcuts",
-            ActiveModal::MemoryBrowser { .. } => "Memory",
             ActiveModal::Settings { .. } => crate::views::settings_modal::MODAL_TITLE,
             ActiveModal::ResetSettingsConfirm { .. } => "Reset setting?",
-            ActiveModal::RememberNoteReview { .. } => "Memory Note",
-            ActiveModal::UsageInfo { .. } => "Usage",
         }
     }
 }
@@ -919,109 +665,6 @@ pub fn render_modal_overlay(
         x += btn_w + 1;
     }
     ModalRenderResult { buttons }
-}
-/// vpad(1) + title(1) + count(1) + gap(1) + 4 options + vpad(1) = 9
-const CANCEL_TURN_PANEL_HEIGHT: u16 = 9;
-pub fn cancel_turn_panel_height(screen_h: u16) -> u16 {
-    let cap = (screen_h as u32 * 33 / 100)
-        .max(8)
-        .min(screen_h as u32 * 80 / 100) as u16;
-    CANCEL_TURN_PANEL_HEIGHT.min(cap)
-}
-pub fn render_cancel_turn_panel(
-    buf: &mut Buffer,
-    area: Rect,
-    state: &CancelTurnViewState,
-    focused: bool,
-    button_rects: &mut Vec<Rect>,
-) {
-    button_rects.clear();
-    let theme = Theme::current();
-    buf.set_style(area, Style::default().bg(theme.bg_light));
-    let accent_style = Style::default().fg(theme.warning);
-    for row in area.y..area.y + area.height {
-        if let Some(cell) = buf.cell_mut((area.x, row)) {
-            cell.set_symbol(crate::glyphs::accent_bar());
-            cell.set_style(accent_style);
-        }
-    }
-    let content_x = area.x + 3;
-    let content_w = area.width.saturating_sub(5) as usize;
-    let mut y = area.y + 1;
-    let title_style = Style::default()
-        .fg(theme.accent_user)
-        .add_modifier(Modifier::BOLD);
-    buf.set_line(
-        content_x,
-        y,
-        &Line::from(Span::styled(
-            "Subagents are still running. Stop them?",
-            title_style,
-        )),
-        content_w as u16,
-    );
-    y += 1;
-    let count_text = if state.running_count == 1 {
-        "1 subagent running".to_string()
-    } else {
-        format!("{} subagents running", state.running_count)
-    };
-    buf.set_line(
-        content_x,
-        y,
-        &Line::from(Span::styled(count_text, Style::default().fg(theme.gray))),
-        content_w as u16,
-    );
-    y += 2;
-    for (i, choice) in CancelTurnChoice::ALL.iter().enumerate() {
-        if y >= area.y + area.height {
-            break;
-        }
-        let is_cursor = i == state.active_idx;
-        let row_bg = if is_cursor && focused {
-            theme.bg_visual
-        } else {
-            theme.bg_light
-        };
-        let row_rect = Rect {
-            x: content_x.saturating_sub(1),
-            y,
-            width: content_w as u16 + 2,
-            height: 1,
-        };
-        buf.set_style(row_rect, Style::default().bg(row_bg));
-        button_rects.push(row_rect);
-        let marker = if is_cursor {
-            crate::glyphs::filled_dot()
-        } else {
-            "\u{25CB}"
-        };
-        let num = (i + 1).to_string();
-        let num_style = Style::default().fg(theme.accent_user).bg(row_bg);
-        let marker_style = if is_cursor {
-            Style::default().fg(theme.accent_user).bg(row_bg)
-        } else {
-            Style::default().fg(theme.gray).bg(row_bg)
-        };
-        let label_style = Style::default()
-            .fg(theme.text_primary)
-            .bg(row_bg)
-            .add_modifier(if is_cursor {
-                Modifier::BOLD
-            } else {
-                Modifier::empty()
-            });
-        let line = Line::from(vec![
-            Span::styled(format!("{num} "), num_style),
-            Span::styled(format!("({marker}) "), marker_style),
-            Span::styled(choice.label(), label_style),
-        ]);
-        buf.set_line(content_x, y, &line, content_w as u16);
-        y += 1;
-    }
-    if !focused {
-        crate::render::color::blend_area(buf, area, Some((theme.bg_light, 0.66)), None);
-    }
 }
 /// Apply scroll-key dispatch for a DocViewer modal. Returns `true` if the key
 /// was handled (caller should return `InputOutcome::Changed`).
@@ -1372,42 +1015,12 @@ mod doc_viewer_scroll_tests {
     }
 }
 #[cfg(test)]
-mod palette_sharing_tests {
+mod palette_tests {
     use super::*;
-    fn has_share(entries: &[PaletteEntry]) -> bool {
-        entries
-            .iter()
-            .any(|e| matches!(&e.command, PaletteCommand::SlashCommand(s) if s.trim() == "/share"))
-    }
     fn slash(mode: crate::app::ScreenMode) -> crate::slash::SlashController {
-        let mut controller =
-            crate::slash::SlashController::with_builtins(std::path::PathBuf::from("."));
+        let mut controller = crate::slash::SlashController::with_builtins();
         controller.set_screen_mode(mode);
         controller
-    }
-    #[test]
-    fn default_palette_includes_share_when_enabled() {
-        let entries = default_palette_entries(true, &slash(crate::app::ScreenMode::Fullscreen));
-        assert!(
-            has_share(&entries),
-            "/share should be present when sharing_enabled=true"
-        );
-    }
-    #[test]
-    fn default_palette_includes_dashboard() {
-        let entries = default_palette_entries(true, &slash(crate::app::ScreenMode::Fullscreen));
-        let has_dashboard = entries.iter().any(
-            |e| matches!(&e.command, PaletteCommand::SlashCommand(s) if s.trim() == "/dashboard"),
-        );
-        assert!(
-            has_dashboard,
-            "/dashboard entry must be present in the palette so users can switch between agents"
-        );
-        let labelled = entries.iter().any(|e| e.label == "Agent Dashboard");
-        assert!(
-            labelled,
-            "palette entry must use the 'Agent Dashboard' label"
-        );
     }
     fn slash_rows(mode: crate::app::ScreenMode) -> Vec<String> {
         default_palette_entries(true, &slash(mode))
@@ -1421,38 +1034,46 @@ mod palette_sharing_tests {
     #[test]
     fn palette_drops_slash_rows_the_mode_cannot_run() {
         let minimal = slash_rows(crate::app::ScreenMode::Minimal);
-        for gated in ["/theme", "/dashboard", "/tutorial"] {
-            assert!(!minimal.contains(&gated.to_string()), "{gated} in minimal");
-        }
         assert!(
-            minimal.contains(&"/compact".to_string()),
+            !minimal.contains(&"/theme".to_string()),
+            "/theme in minimal"
+        );
+        assert!(
+            minimal.contains(&"/model".to_string()),
             "mode-agnostic rows stay: {minimal:?}"
         );
         let fullscreen = slash_rows(crate::app::ScreenMode::Fullscreen);
-        for offered in ["/theme", "/dashboard", "/tutorial"] {
+        for offered in ["/resume", "/model", "/multiline", "/theme"] {
             assert!(
                 fullscreen.contains(&offered.to_string()),
                 "{offered} missing in fullscreen"
             );
         }
     }
+
     #[test]
-    fn workflows_hub_row_survives_minimal() {
-        for mode in [
-            crate::app::ScreenMode::Minimal,
-            crate::app::ScreenMode::Fullscreen,
-        ] {
-            let entries = default_palette_entries(true, &slash(mode));
-            assert!(
-                entries.iter().any(|e| e.label == "Workflows"),
-                "hub row missing in {mode:?}"
-            );
-            assert!(
-                !entries.iter().any(|e| e.label == "Workflow Runs"),
-                "Workflow Runs must stay off the palette in {mode:?}"
-            );
-        }
+    fn palette_lists_only_local_actions_and_builtin_commands() {
+        let labels: Vec<String> =
+            default_palette_entries(true, &slash(crate::app::ScreenMode::Fullscreen))
+                .into_iter()
+                .filter(|e| !matches!(e.command, PaletteCommand::SectionHeader(_)))
+                .map(|e| e.label)
+                .collect();
+        assert_eq!(
+            labels,
+            [
+                "New Session",
+                "Resume Session",
+                "Switch Model",
+                "Multiline Input",
+                "Switch Theme",
+                "Settings",
+                "Keyboard Shortcuts",
+                "Quit",
+            ]
+        );
     }
+
     #[test]
     fn every_palette_slash_row_resolves_to_a_registered_command() {
         let builtins = crate::slash::commands::builtin_commands();
@@ -1467,89 +1088,6 @@ mod palette_sharing_tests {
                 "palette row {row:?} names no builtin command"
             );
         }
-    }
-    #[test]
-    fn edit_prompt_palette_entry_shows_mode_correct_hint() {
-        let hint = |mode| {
-            default_palette_entries(true, &slash(mode))
-                .into_iter()
-                .find(|entry| matches!(entry.command, PaletteCommand::EditPromptExternal))
-                .expect("palette offers the external editor in every mode")
-                .shortcut
-        };
-        assert_eq!(hint(crate::app::ScreenMode::Minimal), "Ctrl+G");
-        assert_eq!(hint(crate::app::ScreenMode::Fullscreen), "/edit-prompt");
-    }
-    #[test]
-    fn default_palette_omits_share_when_disabled() {
-        let entries = default_palette_entries(false, &slash(crate::app::ScreenMode::Fullscreen));
-        assert!(
-            !has_share(&entries),
-            "/share must not appear in palette when sharing_enabled=false"
-        );
-    }
-    #[test]
-    fn filter_palette_omits_share_when_disabled() {
-        let entries = filter_palette_entries("", false, &slash(crate::app::ScreenMode::Fullscreen));
-        assert!(
-            !has_share(&entries),
-            "/share must not appear in unfiltered palette when sharing_enabled=false"
-        );
-        let entries =
-            filter_palette_entries("share", false, &slash(crate::app::ScreenMode::Fullscreen));
-        assert!(
-            !has_share(&entries),
-            "/share must not appear when filtering for 'share' with sharing_enabled=false"
-        );
-    }
-    #[test]
-    fn filter_palette_includes_share_when_enabled_and_matched() {
-        let entries =
-            filter_palette_entries("share", true, &slash(crate::app::ScreenMode::Fullscreen));
-        assert!(
-            has_share(&entries),
-            "/share should match a 'share' query when sharing_enabled=true"
-        );
-    }
-    #[test]
-    fn palette_tools_section_routes_each_tab_to_itself() {
-        use crate::views::extensions_modal::ExtensionsTab;
-        let entries = default_palette_entries(true, &slash(crate::app::ScreenMode::Fullscreen));
-        for (label, expected) in [
-            ("Hooks", ExtensionsTab::Hooks),
-            ("Plugins", ExtensionsTab::Plugins),
-            ("Marketplace", ExtensionsTab::Marketplace),
-            ("Skills", ExtensionsTab::Skills),
-            ("Workflows", ExtensionsTab::Workflows),
-            ("MCP Servers", ExtensionsTab::McpServers),
-        ] {
-            let entry = entries
-                .iter()
-                .find(|e| e.label == label)
-                .unwrap_or_else(|| panic!("Tools entry {label:?} missing from palette"));
-            assert!(
-                matches!(
-                    &entry.command,
-                    PaletteCommand::OpenExtensionsTab(t) if *t == expected,
-                ),
-                "Tools entry {label:?} dispatches to the wrong tab",
-            );
-        }
-        let positions: Vec<usize> = ExtensionsTab::ALL
-            .iter()
-            .map(|tab| {
-                entries
-                    .iter()
-                    .position(
-                        |e| matches!(&e.command, PaletteCommand::OpenExtensionsTab(t) if t == tab),
-                    )
-                    .unwrap_or_else(|| panic!("no Tools row opens {tab:?}"))
-            })
-            .collect();
-        assert!(
-            positions.windows(2).all(|pair| pair[0] < pair[1]),
-            "Tools hub rows out of tab order: {positions:?}"
-        );
     }
     #[test]
     fn howto_list_modal_opens_on_first_guide() {

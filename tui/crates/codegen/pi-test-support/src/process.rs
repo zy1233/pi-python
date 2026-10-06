@@ -1,6 +1,6 @@
 //! Shared subprocess lifecycle ownership for grok-build test harnesses.
 //!
-//! [`TestProcess`] is the Tokio-child owner used by ACP, leader, and headless
+//! [`TestProcess`] is the Tokio-child owner used by ACP and headless
 //! harnesses. [`TestProcessTree`] is the narrower process-tree guard used when
 //! a dependency (notably `portable-pty`) owns the concrete child handle.
 

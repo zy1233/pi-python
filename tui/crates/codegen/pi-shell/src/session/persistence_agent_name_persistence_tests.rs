@@ -1,24 +1,6 @@
 use super::*;
 
 #[test]
-fn summary_round_trips_agent_name_through_json() {
-    let mut summary = Summary::new(
-        &Info {
-            id: acp::SessionId::new("test"),
-            cwd: "/tmp".into(),
-        },
-        default_model_id(),
-    )
-    .unwrap();
-    summary.agent_name = Some("cursor".into());
-
-    let json = serde_json::to_string(&summary).unwrap();
-    let deserialized: Summary = serde_json::from_str(&json).unwrap();
-
-    assert_eq!(deserialized.agent_name.as_deref(), Some("cursor"));
-}
-
-#[test]
 fn summary_deserializes_without_agent_name_backward_compat() {
     // Simulate an old summary.json that lacks agent_name — must still
     // deserialize successfully (serde default → None).
@@ -36,68 +18,6 @@ fn summary_deserializes_without_agent_name_backward_compat() {
         summary.agent_name.is_none(),
         "old summaries without agent_name should deserialize as None"
     );
-}
-
-#[test]
-fn summary_skips_none_agent_name_in_serialized_json() {
-    let summary = Summary::new(
-        &Info {
-            id: acp::SessionId::new("test"),
-            cwd: "/tmp".into(),
-        },
-        default_model_id(),
-    )
-    .unwrap();
-    let json = serde_json::to_string(&summary).unwrap();
-    assert!(
-        !json.contains("agent_name"),
-        "None agent_name should not appear in serialized JSON"
-    );
-}
-
-#[test]
-fn summary_includes_agent_name_when_set() {
-    let mut summary = Summary::new(
-        &Info {
-            id: acp::SessionId::new("test"),
-            cwd: "/tmp".into(),
-        },
-        default_model_id(),
-    )
-    .unwrap();
-    summary.agent_name = Some("cursor".into());
-    let json = serde_json::to_string(&summary).unwrap();
-    assert!(json.contains("agent_name"));
-    assert!(json.contains("cursor"));
-}
-
-#[test]
-fn summary_round_trips_various_agent_names() {
-    for name in [
-        "cursor",
-        "grok-build",
-        "grok-build-plan",
-        "codex",
-        "browser-use",
-    ] {
-        let mut summary = Summary::new(
-            &Info {
-                id: acp::SessionId::new("test"),
-                cwd: "/tmp".into(),
-            },
-            default_model_id(),
-        )
-        .unwrap();
-        summary.agent_name = Some(name.into());
-
-        let json = serde_json::to_string(&summary).unwrap();
-        let deserialized: Summary = serde_json::from_str(&json).unwrap();
-        assert_eq!(
-            deserialized.agent_name.as_deref(),
-            Some(name),
-            "round-trip failed for agent_name={name}"
-        );
-    }
 }
 
 #[test]

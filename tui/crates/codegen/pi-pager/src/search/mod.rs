@@ -5,7 +5,7 @@
 //! [`next_index_after`] / [`prev_index_before`] helpers wrap-navigate a sorted
 //! slice of match positions for `n`/`N` traversal.
 
-pub mod matcher;
+pub(crate) mod matcher;
 
 pub use matcher::{QueryKind, TextMatcher};
 

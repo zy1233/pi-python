@@ -12,7 +12,7 @@ terminal:
   # without them --minimal silently downgrades to full-height inline.
   respond_to_queries: true
 environment:
-  args: ["--minimal", "--no-leader"]
+  args: ["--minimal"]
   env:
     # Detected as TerminalName::AppleTerminal → InterjectPrompt binds Ctrl+O.
     - { key: TERM_PROGRAM, value: Apple_Terminal }

@@ -3,15 +3,14 @@ use std::path::Path;
 use agent_client_protocol as acp;
 use tokio::task::JoinSet;
 use pi_acp_lib::{AcpAgentTx, acp_send};
-use super::actions::{PermissionModePersist, SubagentKillOutcome, TaskResult};
+use super::actions::{PermissionModePersist, TaskResult};
 use super::agent::AgentId;
+use crate::acp::model_state::MODEL_CONFIG_ID_META_KEY;
 use crate::unified_log as ulog;
 use pi_shell::sampling::error::{
     RATE_LIMITED_ERROR_CODE, error_detail_from_data, format_rate_limited_user_message,
     http_status_from_error,
 };
-use pi_shell::session::ExtMethodResult;
-use pi_shell::session::unified_list::ListScope;
 /// Floor for the session create/load RPCs.
 const SESSION_RPC_FLOOR: std::time::Duration = std::time::Duration::from_secs(180);
 /// Headroom over the agent-side `.envrc` budget for the rest of session setup.
@@ -50,12 +49,6 @@ where
         }
     }
 }
-/// Typed progress message for session restore.
-/// Keeps the progress channel from accepting arbitrary `TaskResult` variants.
-pub(crate) struct RestoreProgressMsg {
-    pub agent_id: AgentId,
-    pub message: String,
-}
 pub(super) fn log_prompt_result(
     session_id: &acp::SessionId,
     result: &Result<acp::PromptResponse, acp::Error>,
@@ -72,34 +65,9 @@ pub(super) fn log_prompt_result(
         }
     }
 }
-/// Delay between post-install MCP-list re-probes (`Effect::RetryPluginCtaMcps`).
-pub(super) const CTA_MCP_RETRY_DELAY_MS: u64 = 1000;
-/// How long the CTA shows its "installed" confirmation before auto-dismissing.
-pub(super) const CTA_INSTALLED_DISMISS_MS: u64 = 4000;
 /// Upper bound on the off-thread clipboard-attachment probe. A wedged osascript
 /// read must not pin `paste_probe_in_flight` and silently stash every later send.
 pub(super) const CLIPBOARD_PROBE_TIMEOUT_SECS: u64 = 10;
-/// Picker search debounce ([`Effect::DebounceSessionSearch`]):
-/// long enough to coalesce a typing burst, short enough to feel live.
-pub(super) const SESSION_SEARCH_DEBOUNCE_MS: u64 = 250;
-/// Run the post-CTA-install `legacy ext RPC` read (uncached, which also nudges
-/// the shell to retry auth-required servers) and map it into a
-/// `TaskResult::PluginCtaMcpsLoaded`. Shared by the immediate fetch and the
-/// delayed re-probe.
-pub(super) async fn fetch_plugin_cta_mcps(
-    agent_id: AgentId,
-    _session_id: acp::SessionId,
-    plugin_name: String,
-    _tx: AcpAgentTx,
-) -> TaskResult {
-    TaskResult::PluginCtaMcpsLoaded {
-        agent_id,
-        plugin_name,
-        result: Ok(crate::views::mcps_modal::convert_list_response(
-            crate::views::mcps_modal::McpsListResponse { servers: Vec::new() },
-        )),
-    }
-}
 /// Convert an ACP error to a user-friendly string for display.
 /// Rate-limit errors: free-usage paywall, else server detail (with API-key
 /// rewrite when the body pushes personal SuperGrok), else auth-aware fallback
@@ -130,35 +98,6 @@ pub(super) fn format_acp_error(err: &acp::Error, is_api_key_auth: bool) -> Strin
             &raw,
         )
         .message()
-}
-/// Format a Duration for user-visible restore progress messages.
-pub(super) fn format_restore_elapsed(d: std::time::Duration) -> String {
-    let secs = d.as_secs();
-    if secs >= 60 {
-        format!("{}m{:02}s", secs / 60, secs % 60)
-    } else {
-        format!("{}.{:01}s", secs, d.subsec_millis() / 100)
-    }
-}
-/// CANONICAL wire parser for the worktree resume response. Any other code
-/// consuming the `codeRestored` / `restoreSummary` / `restoreDegree` shape
-/// MUST go through this function — do not re-implement.
-pub(super) fn parse_worktree_restore_payload(
-    result_obj: &serde_json::Value,
-) -> (bool, Option<String>, Option<pi_workspace::session::git::RestoreDegree>) {
-    let code_restored = result_obj
-        .get("codeRestored")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let restore_summary = result_obj
-        .get("restoreSummary")
-        .and_then(|v| v.as_str())
-        .map(String::from);
-    let restore_degree = result_obj
-        .get("restoreDegree")
-        .cloned()
-        .and_then(|v| serde_json::from_value(v).ok());
-    (code_restored, restore_summary, restore_degree)
 }
 /// CANONICAL wire parser for `LoadSessionResponse._meta.codeRestore`. Any
 /// other code consuming this shape MUST go through this function — do not
@@ -201,8 +140,7 @@ pub(crate) fn parse_session_load_running_prompt_id(
 /// pager stores it per session and must not re-resolve the setting: a
 /// mid-session flip would then make `/loop`'s wording describe a runtime the
 /// already-spawned session will never use. `None` when the shell predates the
-/// key (or for gateway chat sessions, which have no local fires), leaving the
-/// reader on the startup seed.
+/// key, leaving the reader on the startup seed.
 pub(crate) fn parse_session_scheduler_background_loops(
     resp_meta: Option<&acp::Meta>,
 ) -> Option<bool> {
@@ -212,19 +150,25 @@ pub(crate) fn parse_session_scheduler_background_loops(
         })
         .and_then(|v| v.as_bool())
 }
-/// Fallback model-state parser for standard ACP backends that cannot emit the
-/// unstable `SessionModelState` response field yet.
+/// Model-state parser for the `session/new` / `session/load` responses.
 ///
 /// Priority:
-/// 1. Use `models` when present (native unstable payload).
-/// 2. Else read `_meta` keys (pi-python compatibility path) and synthesize a
-///    single-entry model catalog so status surfaces can render a real name.
+/// 1. `models` when present (native unstable payload).
+/// 2. The standard ACP Session Config Option with `category: model` (a `select`):
+///    its values become the `/model` catalog and its id is remembered so the switch can
+///    use `session/set_config_option`.
+/// 3. Else read `_meta` keys (legacy pi-python hints) and synthesize a single-entry
+///    model catalog so status surfaces can render a real name.
 pub(super) fn parse_session_response_models(
     models: Option<acp::SessionModelState>,
+    config_options: Option<&[acp::SessionConfigOption]>,
     resp_meta: Option<&acp::Meta>,
 ) -> Option<acp::SessionModelState> {
     if models.is_some() {
         return models;
+    }
+    if let Some(state) = config_options.and_then(model_state_from_config_options) {
+        return Some(state);
     }
     let meta = resp_meta?;
     let model_id = parse_non_empty_meta_string(
@@ -254,6 +198,54 @@ pub(super) fn parse_session_response_models(
         );
     }
     Some(acp::SessionModelState::new(id, vec![info]))
+}
+
+/// Synthesize a model catalog from the first `select` Session Config Option whose category
+/// is `model`. The option id is stored in the state's `_meta` ([`MODEL_CONFIG_ID_META_KEY`]).
+fn model_state_from_config_options(
+    options: &[acp::SessionConfigOption],
+) -> Option<acp::SessionModelState> {
+    let (option, select) = options.iter().find_map(|option| {
+        match (&option.category, &option.kind) {
+            (
+                Some(acp::SessionConfigOptionCategory::Model),
+                acp::SessionConfigKind::Select(select),
+            ) => Some((option, select)),
+            _ => None,
+        }
+    })?;
+    let flat: Vec<&acp::SessionConfigSelectOption> = match &select.options {
+        acp::SessionConfigSelectOptions::Ungrouped(opts) => opts.iter().collect(),
+        acp::SessionConfigSelectOptions::Grouped(groups) => {
+            groups.iter().flat_map(|group| group.options.iter()).collect()
+        }
+        _ => Vec::new(),
+    };
+    let available: Vec<acp::ModelInfo> = flat
+        .into_iter()
+        .map(|value| {
+            let info = acp::ModelInfo::new(
+                acp::ModelId::new(value.value.0.clone()),
+                value.name.clone(),
+            );
+            match &value.description {
+                Some(description) => info.description(description.clone()),
+                None => info,
+            }
+        })
+        .collect();
+    if available.is_empty() {
+        return None;
+    }
+    let mut meta = acp::Meta::new();
+    meta.insert(
+        MODEL_CONFIG_ID_META_KEY.to_string(),
+        serde_json::Value::String(option.id.0.to_string()),
+    );
+    Some(
+        acp::SessionModelState::new(acp::ModelId::new(select.current_value.0.clone()), available)
+            .meta(meta),
+    )
 }
 
 fn parse_non_empty_meta_string(meta: &acp::Meta, keys: &[&str]) -> Option<String> {
@@ -326,32 +318,17 @@ pub(crate) fn sanitize_user_error(raw: &str) -> String {
 /// | true  | true      | false    | `grok-build-plan`              | `false`            |
 /// | true  | false     | true     | `grok-build-plan-no-subagents` | omitted (shell gate) |
 /// | true  | true      | true     | `grok-build-plan`              | omitted (shell gate) |
-///
-/// When [`Self::chat_mode`] is set (gateway light-frontend / `--chat`), Build
-/// `agentProfile` injection is omitted (K12) and `_meta key.kind`
-/// is stamped `"chat"` so the shell takes `require_gateway` / thin profile.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SessionFlags {
     pub plan_mode: bool,
     pub subagents: bool,
     pub ask_user: bool,
-    /// Restore code state on resume (`--restore-code`).
- /// Injected as `legacy ext RPC` into `LoadSession` meta, or passed
-    /// as `restoreCode` in the `resume_session` ACP payload for worktrees.
-    pub restore_code: Option<bool>,
     pub agent_override: Option<serde_json::Value>,
     /// Always-approve for this session (`_meta.yoloMode`).
     pub yolo_mode: bool,
     /// Auto (classifier) permission mode (`_meta.autoMode`). Mutually exclusive
     /// with `yolo_mode` on the agent; both may be set only if yolo wins at spawn.
     pub auto_mode: bool,
-    /// Gateway light-frontend (`kind: "chat"`) — `--chat` / `/chat`.
-    /// Mutual exclusivity with Build plan profiles: profiles are omitted and a
-    /// warn is logged when plan flags are also set (K12).
-    pub chat_mode: bool,
-    /// Local-workspace stamp for ACP `_meta` (scrub still strips envId / Direct hub).
-    #[cfg(feature = "local-workspace")]
-    pub local_workspace: Option<crate::app::session_startup::LocalWorkspaceConfig>,
     /// Effective screen mode label (`ScreenMode::meta_label`), stamped into
     /// every `PromptRequest._meta.screenMode` for minimal-vs-regular usage
     /// telemetry. `None` (key omitted) only under `Default` in tests; real
@@ -360,21 +337,13 @@ pub(crate) struct SessionFlags {
     /// Active auth is API key (not OAuth/session). Drives rate-limit copy in
     /// `format_acp_error`. Default `false` (OAuth copy) for tests.
     pub is_api_key_auth: bool,
-    /// Startup resume target deferred to the worktree handler after missing
-    /// local id/title resolution. Worktree failure messages append the
-    /// no-match hint only when the failing target equals this value.
-    pub resume_local_miss: Option<String>,
 }
 impl SessionFlags {
     /// Resolve the agent profile name from the flags.
     ///
     /// Returns `None` for the default `grok-build` profile (no `_meta`
-    /// needed; it already includes TaskTool). Chat mode never injects a
-    /// Build profile (remote owns agent behavior).
+    /// needed; it already includes TaskTool).
     pub(super) fn agent_profile(&self) -> Option<&'static str> {
-        if self.chat_mode {
-            return None;
-        }
         match (self.plan_mode, self.subagents, self.ask_user) {
             (true, true, _) => Some("grok-build-plan"),
             (true, false, _) => Some("grok-build-plan-no-subagents"),
@@ -389,28 +358,14 @@ impl SessionFlags {
     /// emit-site comment below). `--no-ask-user` always forces
     /// `askUserQuestion: false` into the meta, even when paired with
     /// `GROK_AGENT` — the env var chooses the *agent*, but the tool-strip is
- /// independent. Chat mode additionally stamps `legacy ext RPC`.
+    /// independent.
     pub(crate) fn to_meta(&self) -> Option<acp::Meta> {
         let mut meta = serde_json::Map::new();
-        if self.chat_mode {
-            if self.plan_mode || self.agent_override.is_some()
-                || std::env::var("GROK_AGENT").ok().is_some_and(|s| !s.trim().is_empty())
-            {
-                tracing::warn!(
-                    "chat mode active: omitting Build agentProfile (plan/agent override ignored)"
-                );
-            }
-        } else if let Some(ref profile) = self.agent_override {
+        if let Some(ref profile) = self.agent_override {
             meta.insert("agentProfile".into(), profile.clone());
         } else if std::env::var("GROK_AGENT").ok().is_some_and(|s| !s.trim().is_empty())
         {} else if let Some(profile) = self.agent_profile() {
             meta.insert("agentProfile".into(), serde_json::json!(profile));
-        }
-        if self.chat_mode {
-            #[cfg(feature = "local-workspace")]
-            if let Some(ref lw) = self.local_workspace {
-                stamp_local_workspace_meta(&mut meta, lw);
-            }
         }
         if !self.ask_user {
             meta.insert("askUserQuestion".into(), serde_json::json!(false));
@@ -424,170 +379,7 @@ impl SessionFlags {
             )),
         );
         meta.retain(|k, _| !crate::acp::vendor::is_vendor_meta_key(k));
-        let mut result = if meta.is_empty() { None } else { Some(meta) };
-        if self.chat_mode {
-            apply_chat_kind_meta(&mut result);
-        }
-        result
-    }
-}
-/// Workspace-bind `_meta` keys **always** forbidden on chat create/load.
-///
-/// `legacy ext RPC` is intentionally omitted: scrub keeps it
-/// iff `legacy ext RPC`.
-#[allow(dead_code)]
-pub(super) const CHAT_FORBIDDEN_WORKSPACE_BIND_KEYS: &[&str] = &[
-    "envId",
-    "cloud_server_id",
-];
-/// FS-only tool ids for local existing workspace (chat attach/own).
-#[cfg(feature = "local-workspace")]
-pub(super) const LOCAL_WORKSPACE_FS_ONLY_TOOL_IDS: &[&str] = &[
-    "workspace.fs_list",
-    "workspace.fs_exists",
-    "workspace.fs_read_file",
-    "workspace.fs_write_file",
-    "workspace.fs_delete_file",
-    "workspace.put_files",
-    "workspace.get_files",
-];
-/// Strip Build `agentProfile` in chat mode. Do not stamp grok `legacy ext RPC`.
-pub(super) fn apply_chat_kind_meta(meta: &mut Option<acp::Meta>) {
-    let obj = meta.get_or_insert_with(acp::Meta::new);
-    obj.remove("agentProfile");
-    obj.insert("pi/session".into(), serde_json::json!({ "kind": "chat" }));
-    obj.retain(|k, _| !crate::acp::vendor::is_vendor_meta_key(k));
-}
-/// Stamp chat+local intent. Attach also stamps `legacy ext RPC`.
-/// Own leaves `server_id` unset — shell supervisor mints before handshake.
-///
-/// Never stamps `envId` or `legacy ext RPC`.
-#[cfg(feature = "local-workspace")]
-pub(super) fn stamp_local_workspace_meta(
-    meta: &mut serde_json::Map<String, serde_json::Value>,
-    cfg: &crate::app::session_startup::LocalWorkspaceConfig,
-) {
-    use crate::app::session_startup::LocalWorkspaceMode;
-    let mut local = serde_json::Map::new();
-    let mode = match cfg.mode {
-        LocalWorkspaceMode::Attach => "attach",
-        LocalWorkspaceMode::Own => "own",
-    };
-    local.insert("mode".into(), serde_json::json!(mode));
-    if let Some(ref sid) = cfg.server_id {
-        local.insert("server_id".into(), serde_json::json!(sid));
-    }
-    if let Some(ref cwd) = cfg.cwd {
-        local
-            .insert("cwd".into(), serde_json::json!(cwd.to_string_lossy().into_owned()));
-    }
-    // Phase 4: do not stamp legacy vendor ext workspace bind keys onto standard ACP.
-    let _ = (local, meta, cfg);
-    tracing::debug!(
-        target: crate::views::welcome::workspace_mode::WORKSPACE_MODE_LOG,
-        event = "acp_meta_stamped_skipped",
-        mode,
-        "skipping local_workspace on session meta (standard ACP only)"
-    );
-}
-/// Apply [`stamp_local_workspace_meta`] onto optional ACP meta.
-#[cfg(feature = "local-workspace")]
-pub(super) fn apply_local_workspace_meta(
-    meta: &mut Option<acp::Meta>,
-    cfg: &crate::app::session_startup::LocalWorkspaceConfig,
-) {
-    let obj = meta.get_or_insert_with(acp::Meta::new);
-    stamp_local_workspace_meta(obj, cfg);
-}
-/// Shared chat create/load/worktree meta finalize: kind + local stamp + scrub.
-pub(super) fn finalize_chat_session_meta(
-    meta: &mut Option<acp::Meta>,
-    is_chat_path: bool,
-    #[cfg_attr(not(feature = "local-workspace"), allow(unused_variables))]
-    session_flags: &SessionFlags,
-) {
-    if !is_chat_path {
-        return;
-    }
-    apply_chat_kind_meta(meta);
-    #[cfg(feature = "local-workspace")]
-    if let Some(ref lw) = session_flags.local_workspace {
-        apply_local_workspace_meta(meta, lw);
-    }
-    scrub_chat_workspace_bind_meta(meta);
-}
-/// Remove client workspace-bind keys from chat create/load meta (defense in depth).
-///
-/// Narrow scrub exception: keep `legacy ext RPC` when local
-/// intent is **attach**. Own stamps intent only (shell mints `server_id`).
-/// Never keep `envId` or Direct hub `legacy ext RPC`.
-pub(super) fn scrub_chat_workspace_bind_meta(meta: &mut Option<acp::Meta>) {
-    let Some(obj) = meta.as_mut() else {
-        return;
-    };
-    for key in CHAT_FORBIDDEN_WORKSPACE_BIND_KEYS {
-        obj.remove(*key);
-    }
-    obj.retain(|k, _| !crate::acp::vendor::is_vendor_meta_key(k));
-}
-/// Params for shell ACP `legacy ext RPC`.
-///
-/// v1 surface is **shell ACP-only** (no pager slash/command wiring). Pager
-/// dogfood / headless clients call the extension directly with this payload.
-/// No remove path until session end.
-#[cfg(feature = "local-workspace")]
-#[allow(dead_code)]
-pub(crate) fn mid_session_add_local_workspace_params(
-    session_id: &str,
-    cfg: &crate::app::session_startup::LocalWorkspaceConfig,
-) -> serde_json::Value {
-    let mut meta = serde_json::Map::new();
-    stamp_local_workspace_meta(&mut meta, cfg);
-    let mut opt = Some(meta);
-    scrub_chat_workspace_bind_meta(&mut opt);
-    serde_json::json!({
-        "sessionId": session_id,
-        "meta": opt.unwrap_or_default(),
-    })
-}
-/// Fail closed on operator attestation outside the FS-only allowlist.
-/// `None` / empty attested set → uncheckable → refuse. Live server is not probed.
-#[cfg(feature = "local-workspace")]
-pub(crate) fn reject_non_fs_only_advertised_tools(
-    advertised_tool_ids: Option<&[&str]>,
-) -> Result<(), String> {
-    let Some(ids) = advertised_tool_ids else {
-        return Err(
-            "operator attestation GROK_CHAT_LOCAL_WORKSPACE_ADVERTISED_TOOLS is unset \
-             (uncheckable); refuse attach. Live workspace_server was not inspected. Set \
-             the env to a comma-separated FS-only catalog."
-                .into(),
-        );
-    };
-    if ids.is_empty() {
-        return Err(
-            "operator attestation GROK_CHAT_LOCAL_WORKSPACE_ADVERTISED_TOOLS is empty \
-             (uncheckable); refuse attach. Live workspace_server was not inspected."
-                .into(),
-        );
-    }
-    let forbidden: Vec<&str> = ids
-        .iter()
-        .copied()
-        .filter(|id| !LOCAL_WORKSPACE_FS_ONLY_TOOL_IDS.contains(id))
-        .collect();
-    if forbidden.is_empty() {
-        Ok(())
-    } else {
-        Err(
-                format!(
-            "operator attestation lists tools outside the FS-only allowlist: {}. \
-             Live workspace_server was not inspected. Fix \
-             GROK_CHAT_LOCAL_WORKSPACE_ADVERTISED_TOOLS or restart workspace_server \
-             with --require-explicit-toolset and an FS-only catalog.",
-            forbidden.join(", ")
-        ),
-            )
+        if meta.is_empty() { None } else { Some(meta) }
     }
 }
 /// Metadata returned from effect execution so the event loop can patch
@@ -646,64 +438,10 @@ pub(super) fn extract_first_user_prompt(
     }
     None
 }
-/// Typed deserialization so schema drift is caught at compile time.
-/// Synthetic user messages (auto-continue, doom-loop) are excluded.
-pub(super) fn count_chat_history_stats(history_path: &Path) -> (usize, usize) {
-    use std::io::BufRead;
-    use pi_shell::sampling::{AssistantItem, ConversationItem, UserItem};
-    let mut turn_count = 0usize;
-    let mut tool_call_count = 0usize;
-    let Ok(file) = std::fs::File::open(history_path) else {
-        return (0, 0);
-    };
-    for line in std::io::BufReader::new(file).lines().map_while(Result::ok) {
-        match serde_json::from_str::<ConversationItem>(&line) {
-            Ok(ConversationItem::User(UserItem { synthetic_reason: None, .. })) => {
-                turn_count += 1;
-            }
-            Ok(ConversationItem::Assistant(AssistantItem { ref tool_calls, .. })) => {
-                tool_call_count += tool_calls.len();
-            }
-            _ => {}
-        }
-    }
-    (turn_count, tool_call_count)
-}
-/// Degraded conversations lane on `legacy ext RPC`, parsed from the
-/// response's `_meta key` envelope.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConversationsPartial {
-    NoOauth,
-    Timeout,
-    Error,
-}
-impl ConversationsPartial {
-    /// Actionable picker notice for a degraded conversations lane.
-    pub(crate) fn picker_notice(self) -> &'static str {
-        match self {
-            Self::NoOauth => "Couldn't load your chats: log in with /login",
-            Self::Timeout | Self::Error => "Couldn't load conversations: retry",
-        }
-    }
-}
-/// Read `_meta key` from a session-list payload. `None` when the
-/// conversations lane completed (or was skipped); unknown reasons degrade to
-/// [`ConversationsPartial::Error`].
-pub(super) fn parse_session_list_partial(
-    _payload: &serde_json::Value,
-) -> Option<ConversationsPartial> {
-    None
-}
-/// Reads `_meta key` from a session-list payload.
-pub(super) fn parse_session_list_scope(_payload: &serde_json::Value) -> ListScope {
-    ListScope::Cwd
-}
 /// Parse the `legacy ext RPC` response payload (the unwrapped
 /// `{ "sessions": [...] }` object) into [`SessionPickerEntry`] rows.
 ///
-/// Shared by the resume picker ([`Effect::FetchSessionList`]) and the
-/// dashboard's non-leader idle-session fallback
-/// ([`Effect::FetchDashboardSessions`]) so both produce identical labels.
+/// Used by the resume picker ([`Effect::FetchSessionList`]).
 /// Sessions older than 30 days, and sessions with no usable user prompt
 /// (empty `summary` after fallbacks), are dropped.
 pub(super) fn parse_session_picker_entries(
@@ -735,7 +473,6 @@ pub(super) fn parse_session_picker_entries(
                 .or_else(|| v.get("first_prompt"))
                 .and_then(|s| s.as_str())
                 .map(String::from);
-            let is_conversation = false;
             let parsed_updated: Option<chrono::DateTime<chrono::Utc>> = v
                 .get("updatedAt")
                 .or_else(|| v.get("updated_at"))
@@ -747,18 +484,8 @@ pub(super) fn parse_session_picker_entries(
                 .and_then(|s| s.as_str())
                 .and_then(|s| s.parse().ok());
             let updated_at: chrono::DateTime<chrono::Utc> = match parsed_updated {
-                Some(ts) => {
-                    if !is_conversation && ts < cutoff {
-                        return None;
-                    }
-                    ts
-                }
-                None => {
-                    if !is_conversation {
-                        return None;
-                    }
-                    parsed_created.unwrap_or(chrono::DateTime::<chrono::Utc>::UNIX_EPOCH)
-                }
+                Some(ts) if ts >= cutoff => ts,
+                _ => return None,
             };
             use pi_tools::implementations::skills::skill::extract_skill_display_text;
             let display = if let Some(ref fp) = first_prompt {
@@ -791,11 +518,11 @@ pub(super) fn parse_session_picker_entries(
                 .unwrap_or_default()
                 .to_string();
             let hostname = v.get("hostname").and_then(|s| s.as_str()).map(String::from);
-            let source = if is_conversation {
-                "conversation".to_string()
-            } else {
-                v.get("source").and_then(|s| s.as_str()).unwrap_or("local").to_string()
-            };
+            let source = v
+                .get("source")
+                .and_then(|s| s.as_str())
+                .unwrap_or("local")
+                .to_string();
             let model_id = v
                 .get("modelId")
                 .or_else(|| v.get("model_id"))
@@ -849,11 +576,7 @@ pub(super) fn parse_session_picker_entries(
         })
         .filter_map(|mut e| {
             if e.summary.is_empty() {
-                if e.source == "conversation" {
-                    e.summary = "Untitled".to_string();
-                } else {
-                    return None;
-                }
+                return None;
             }
             if e.source == "remote"
                 && pi_shell::session::resolve_local_session_any_cwd(&e.id)
@@ -896,34 +619,6 @@ pub(super) fn session_picker_entries_from_acp(
     parse_session_picker_entries(&serde_json::json!({ "sessions": sessions }))
 }
 
-/// Convert a resume-picker session into a dormant dashboard roster row.
-///
-/// Used by the non-leader dashboard fallback: local on-disk sessions have no
-/// live activity signal, so they map to [`RosterActivity::Dormant`] and render
-/// in the dashboard's **Inactive** group. The label, cwd, model, and worktree
-/// badge all come straight from the picker entry.
-pub(super) fn session_picker_entry_to_roster(
-    e: &crate::app::app_view::SessionPickerEntry,
-) -> crate::app::roster::RosterEntry {
-    use crate::app::roster::{RosterActivity, RosterEntry, RosterOrigin};
-    let last_change = e.last_active_at.unwrap_or(e.updated_at);
-    RosterEntry {
-        session_id: e.id.clone(),
-        title: Some(e.summary.clone()).filter(|s| !s.trim().is_empty()),
-        cwd: e.cwd.clone(),
-        is_worktree: e.worktree_label.is_some(),
-        model_id: e.model_id.clone(),
-        yolo: false,
-        activity: RosterActivity::Dormant,
-        last_turn_summary: e.last_turn_summary.clone(),
-        resident: false,
-        last_change_unix_ms: last_change.timestamp_millis(),
-        origin: RosterOrigin {
-            kind: e.source.clone(),
-            host: e.hostname.clone(),
-        },
-    }
-}
 pub(super) async fn send_logout(_tx: &AcpAgentTx) {}
 
 /// Best-effort auth cancel: stops the shell's device/loopback wait so a
@@ -1014,22 +709,6 @@ pub(crate) async fn persist_setting(
                 .await
                 .map_err(|e| e.to_string())
         }
-        "trace_upload" => {
-            let SettingValue::Bool(b) = value else {
-                return Err(kind_mismatch("trace_upload", "Bool", &value));
-            };
-            pi_shell::util::config::set_trace_upload(b)
-                .await
-                .map_err(|e| e.to_string())
-        }
-        "feedback_trace_card" => {
-            let SettingValue::Bool(b) = value else {
-                return Err(kind_mismatch("feedback_trace_card", "Bool", &value));
-            };
-            pi_shell::util::config::set_feedback_trace_card(b)
-                .await
-                .map_err(|e| e.to_string())
-        }
         "show_timestamps" => {
             let SettingValue::Bool(b) = value else {
                 return Err(kind_mismatch("show_timestamps", "Bool", &value));
@@ -1046,27 +725,11 @@ pub(crate) async fn persist_setting(
                 .await
                 .map_err(|e| e.to_string())
         }
-        "confirm_before_rewind" => {
-            let SettingValue::Bool(b) = value else {
-                return Err(kind_mismatch("confirm_before_rewind", "Bool", &value));
-            };
-            pi_shell::util::config::set_confirm_before_rewind(b)
-                .await
-                .map_err(|e| e.to_string())
-        }
         "combine_queued_prompts" => {
             let SettingValue::Bool(b) = value else {
                 return Err(kind_mismatch("combine_queued_prompts", "Bool", &value));
             };
             pi_shell::util::config::set_combine_queued_prompts(b)
-                .await
-                .map_err(|e| e.to_string())
-        }
-        "follow_up_behavior" => {
-            let SettingValue::Enum(s) = value else {
-                return Err(kind_mismatch("follow_up_behavior", "Enum", &value));
-            };
-            pi_shell::util::config::set_follow_up_behavior(s.to_string())
                 .await
                 .map_err(|e| e.to_string())
         }
@@ -1109,14 +772,6 @@ pub(crate) async fn persist_setting(
                 );
             };
             pi_shell::util::config::set_contextual_hint_image_input(b)
-                .await
-                .map_err(|e| e.to_string())
-        }
-        "contextual_hints.send_now" => {
-            let SettingValue::Bool(b) = value else {
-                return Err(kind_mismatch("contextual_hints.send_now", "Bool", &value));
-            };
-            pi_shell::util::config::set_contextual_hint_send_now(b)
                 .await
                 .map_err(|e| e.to_string())
         }
@@ -1227,18 +882,6 @@ pub(crate) async fn persist_setting(
                 return Err(kind_mismatch("default_selected_permission", "Enum", &value));
             };
             pi_shell::util::config::set_default_selected_permission(s.to_string())
-                .await
-                .map_err(|e| e.to_string())
-        }
-        "cancel_subagents_on_turn_cancel" => {
-            let SettingValue::Enum(s) = value else {
-                return Err(
-                    kind_mismatch("cancel_subagents_on_turn_cancel", "Enum", &value),
-                );
-            };
-            pi_shell::util::config::set_cancel_subagents_on_turn_cancel(
-                    s.to_string(),
-                )
                 .await
                 .map_err(|e| e.to_string())
         }
@@ -1458,71 +1101,6 @@ pub(super) fn should_send_yolo_acp_notification(
         (Err(_), PermissionModePersist::WithRollback(_)) => false,
     }
 }
-pub(super) fn marketplace_outcome_succeeded(
-    outcome: &pi_hooks_plugins_types::ActionOutcome,
-) -> bool {
-    outcome.status == pi_hooks_plugins_types::OutcomeStatus::Success
-}
-/// Extract the typed kill outcome from an `legacy ext RPC` ext response.
-///
-/// The agent serializes `ExtMethodResult<KillTaskResponse>`, so the outcome
-/// lives at `result.outcome` (`{"result":{"taskId":..,"outcome":
-/// "not_found"}}`). Deserializes through the same wire DTOs the agent
-/// serializes (`pi_shell::extensions::task::KillTaskResponse` +
-/// `pi_shell::session::result::ExtMethodResult`) so the contract stays
-/// typed end-to-end. Returns `None` — which the dispatcher treats as "clear
-/// pending state, keep the row" — for error envelopes (`result: null`) or
-/// unparseable payloads. Probing the top level with untyped JSON here was
-/// why the tasks-pane ✗ never removed stale (`not_found`) rows after a
-/// session resume.
-pub(super) fn parse_kill_outcome(
-    resp: &str,
-) -> Option<pi_tools::types::KillOutcome> {
-    use pi_shell::extensions::task::KillTaskResponse;
-    use pi_shell::session::result::ExtMethodResult;
-    serde_json::from_str::<ExtMethodResult<KillTaskResponse>>(resp)
-        .ok()
-        .and_then(|envelope| envelope.result)
-        .map(|payload| payload.outcome)
-}
-/// Map an `legacy ext RPC` response (payload under `result`) to a kill
-/// outcome. Prefers the typed `outcome`; falls back to the legacy `cancelled`
-/// bool for an older shell or an unknown future `kind`. An error/unparseable
-/// body is `RpcFailed` (subagent may still be running — leave the row alone).
-pub(super) fn parse_subagent_kill_outcome(resp: &str) -> SubagentKillOutcome {
-    use pi_shell::extensions::task::{
-        CancelSubagentResponse, SubagentCancelOutcomeDto,
-    };
-    let Some(payload) = serde_json::from_str::<
-        ExtMethodResult<CancelSubagentResponse>,
-    >(resp)
-        .ok()
-        .and_then(|envelope| envelope.result) else {
-        return SubagentKillOutcome::RpcFailed;
-    };
-    match payload.outcome {
-        Some(SubagentCancelOutcomeDto::Cancelled) => SubagentKillOutcome::StoppedLive,
-        Some(SubagentCancelOutcomeDto::AlreadyFinished { status }) => {
-            SubagentKillOutcome::NothingLive {
-                status: Some(status),
-            }
-        }
-        Some(SubagentCancelOutcomeDto::NotFound) => {
-            SubagentKillOutcome::NothingLive {
-                status: None,
-            }
-        }
-        Some(SubagentCancelOutcomeDto::Unknown) | None => {
-            if payload.cancelled {
-                SubagentKillOutcome::StoppedLive
-            } else {
-                SubagentKillOutcome::NothingLive {
-                        status: None,
-                    }
-            }
-        }
-    }
-}
 /// Map disk-write outcome + persist variant to the correct `TaskResult`.
 pub(super) fn route_permission_mode_result(
     disk_outcome: Result<(), String>,
@@ -1575,114 +1153,6 @@ pub(super) fn persist_hint(
             }
             TaskResult::CancelComplete
         });
-}
-/// Map a billing config into a [`CreditBalance`].
-///
-/// Prefers the newer credits-config fields (`credit_usage_percent`,
-/// `current_period`) and falls back to the deprecated
-/// `monthly_limit`/`used`/`billing_period_end`. Shared by `Effect::FetchBilling`
-/// and `Effect::FetchAppBilling` so every pager UI path derives identical usage
-/// values from the same config.
-pub(super) fn credit_balance_from_config(
-    c: pi_shell::extensions::billing::BillingConfig,
-) -> crate::views::credit_bar::CreditBalance {
-    let limit = c.monthly_limit.map(|v| v.val).unwrap_or(0);
-    let used = c.used.map(|v| v.val).unwrap_or(0);
-    let has_credit_pct = c.credit_usage_percent.is_some();
-    let usage_pct = match c.credit_usage_percent {
-        Some(pct) => pct.clamp(0.0, 100.0),
-        None if limit > 0 => (used as f64 / limit as f64 * 100.0).min(100.0),
-        None => 0.0,
-    };
-    let period_end_display = c
-        .current_period
-        .as_ref()
-        .and_then(|p| p.end.clone())
-        .or(c.billing_period_end)
-        .and_then(|s| {
-            chrono::DateTime::parse_from_rfc3339(&s)
-                .ok()
-                .map(|dt| {
-                    dt.with_timezone(&chrono::Local).format("%B %-d, %H:%M").to_string()
-                })
-        });
-    let on_demand_val = c.on_demand_cap.map(|v| v.val).unwrap_or(0);
-    let pay_as_you_go = on_demand_val > 0;
-    let on_demand_cap_cents = if on_demand_val > 0 { Some(on_demand_val) } else { None };
-    let on_demand_used_cents = c
-        .on_demand_used
-        .map(|v| v.val)
-        .unwrap_or_else(|| (used - limit).max(0));
-    let effective_usage_pct = if on_demand_val > 0 {
-        if usage_pct >= 100.0 {
-            (on_demand_used_cents as f64 / on_demand_val as f64 * 100.0).min(100.0)
-        } else if has_credit_pct {
-            usage_pct
-        } else {
-            let total_budget = limit + on_demand_val;
-            if total_budget > 0 {
-                (used as f64 / total_budget as f64 * 100.0).min(100.0)
-            } else {
-                0.0
-            }
-        }
-    } else {
-        usage_pct
-    };
-    let period_type = c.current_period.as_ref().and_then(|p| p.period_type.clone());
-    crate::views::credit_bar::CreditBalance {
-        usage_pct,
-        effective_usage_pct,
-        period_end_display,
-        pay_as_you_go,
-        on_demand_cap_cents,
-        on_demand_used_cents: Some(on_demand_used_cents),
-        prepaid_balance_cents: c.prepaid_balance.map(|v| v.val),
-        period_type,
-        is_unified_billing_user: c.is_unified_billing_user,
-    }
-}
-/// Whether the balance carries a non-zero prepaid credit balance (signed cents).
-pub(super) fn has_prepaid_credits(
-    balance: Option<&crate::views::credit_bar::CreditBalance>,
-) -> bool {
-    balance.and_then(|b| b.prepaid_balance_cents).map(i64::abs).is_some_and(|c| c > 0)
-}
-/// Fetch the user's auto top-up rule via the `legacy ext RPC` extension.
-/// A transport failure yields [`AutoTopupFetch::Unchanged`] so the caller keeps
-/// any cached rule rather than treating the blip as "no auto top-up".
-pub(super) async fn fetch_auto_topup_info(
-    _tx: &pi_acp_lib::AcpAgentTx,
-) -> crate::views::credit_bar::AutoTopupFetch {
-    use crate::views::credit_bar::AutoTopupFetch;
-    AutoTopupFetch::Cleared
-}
-/// Map an `legacy ext RPC` payload to an [`AutoTopupFetch`]. A body that
-/// fails to deserialize is a fetch error (→ `Unchanged`, keep the cached rule),
-/// not a definitive "no rule", so a malformed response can't silently flip the
-/// credits warning.
-pub(super) fn parse_auto_topup_response(
-    result: &serde_json::Value,
-) -> crate::views::credit_bar::AutoTopupFetch {
-    use crate::views::credit_bar::{AutoTopupFetch, AutoTopupInfo};
-    use pi_shell::extensions::billing::GetAutoTopupRuleResponse;
-    match serde_json::from_value::<GetAutoTopupRuleResponse>(result.clone()) {
-        Ok(parsed) => {
-            AutoTopupFetch::Resolved(
-                parsed
-                    .rule
-                    .map_or_else(
-                        AutoTopupInfo::disabled,
-                        |rule| AutoTopupInfo {
-                            enabled: rule.enabled,
-                            topup_amount_cents: rule.topup_amount.map(|c| c.val),
-                            max_amount_cents: rule.max_amount_per_month.map(|c| c.val),
-                        },
-                    ),
-            )
-        }
-        Err(_) => AutoTopupFetch::Unchanged,
-    }
 }
 /// A blocking flock on the shared, possibly-network `~/.grok` lock must never
 /// stall the event-loop thread (and would hang exit on `/quit`); the registry

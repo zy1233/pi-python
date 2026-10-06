@@ -1,11 +1,9 @@
 //! Login, logout, account switching, and auth-code submission dispatchers.
 
 use super::ctx::{restore_auth_return_view, show_welcome};
-use super::queue::{maybe_drain_queue, note_peek_page_flip};
-use super::router::dispatch;
+use super::queue::maybe_drain_queue;
 use super::session::lifecycle::{clear_startup_actions, drain_startup_actions};
-use crate::app::actions::{Action, Effect};
-use crate::app::agent::AgentId;
+use crate::app::actions::Effect;
 use crate::app::agent_view::AgentView;
 use crate::app::app_view::{ActiveView, AppView, AuthMode, AuthState};
 use crate::scrollback::block::RenderBlock;
@@ -226,7 +224,7 @@ pub(super) fn strip_trailing_auth_error_blocks(agent: &mut AgentView) {
 /// Start an interactive login flow. Triggered by pressing 'l' on the
 /// welcome screen or by the `/login` slash command.
 ///
-/// When invoked mid-session (the active view is an agent/dashboard rather
+/// When invoked mid-session (the active view is an agent rather
 /// than the welcome screen), the auth UI — including the external auth
 /// provider's sign-in URL and status — is only rendered by the welcome
 /// view. We therefore stash the caller's view in `auth_return_view` and
@@ -297,8 +295,8 @@ pub(super) fn dispatch_cancel_login(app: &mut AppView) -> Vec<Effect> {
     app.auth_code_input.reset();
     restore_auth_return_view(app, return_view);
     // The user bailed out of re-auth — drop stashed prompts and strip the
-    // stale re-auth prompt from scrollback (on all agents: the login may
-    // have been started from the dashboard). Clearing the stash alone is
+    // stale re-auth prompt from scrollback (on all agents: auth is global).
+    // Clearing the stash alone is
     // not enough: a leftover `ReAuthRequired` block would let a later
     // `PromptResponse` re-detect it via `scrollback_has_recent_reauth_prompt`
     // and re-stash the prompt, so a subsequent unrelated login could
@@ -367,10 +365,9 @@ pub(super) fn handle_auth_complete(
             // a clean session. Mirrors the credit-limit upsell's
             // stale-block strip.
             // Auth is global, so handle every agent (the login may
-            // have been started from the dashboard, not the agent
+            // have been started from a different agent than the one
             // that 401'd).
             let mut retry_effects = Vec::new();
-            let mut page_flips = Vec::new();
             for agent in app.agents.values_mut() {
                 strip_trailing_auth_error_blocks(agent);
                 // Auto-resubmit the prompt that failed on the expired
@@ -384,13 +381,9 @@ pub(super) fn handle_auth_complete(
                     agent.session.enqueue_in_flight_prompt_front(prompt);
                     let drain = maybe_drain_queue(agent);
                     retry_effects.extend(drain.effects);
-                    page_flips.push((agent.session.id, drain.page_flip_entry));
                 }
             }
-            for (id, page_flip_entry) in page_flips {
-                note_peek_page_flip(app, id, page_flip_entry);
-            }
-            let mut effects = dispatch(Action::RequestBundleStatus, app);
+            let mut effects = Vec::new();
             if app.usage_visible {
                 effects.push(Effect::FetchAppBilling);
             }
@@ -399,7 +392,7 @@ pub(super) fn handle_auth_complete(
         }
 
         // status only; shell auto-syncs post-auth
-        let mut effects = dispatch(Action::RequestBundleStatus, app);
+        let mut effects = Vec::new();
 
         // Start auto-checking subscription if gated.
         // Check immediately (don't wait 5s) then schedule the timer.
@@ -412,8 +405,6 @@ pub(super) fn handle_auth_complete(
         if app.usage_visible {
             effects.push(Effect::FetchAppBilling);
         }
-        // Fetch changelog (mirrors startup path for interactive login).
-        effects.push(Effect::FetchChangelog);
 
         // ZDR-blocked users stay on the welcome screen — discard any
         // deferred startup (they cannot start a session).
@@ -464,111 +455,4 @@ pub(super) fn handle_auth_url_ready(
         };
     }
     vec![]
-}
-
-pub(super) fn handle_mcp_auth_trigger_done(
-    app: &mut AppView,
-    agent_id: AgentId,
-    server_name: String,
-    result: Result<crate::app::actions::McpAuthTriggerOutcome, String>,
-) -> Vec<Effect> {
-    let Some(agent) = app.agents.get_mut(&agent_id) else {
-        return vec![];
-    };
-    if let Some(ref mut modal) = agent.extensions_modal {
-        modal.pending_action = None;
-        modal.pending_entry_index = None;
-        match result {
-            Ok(crate::app::actions::McpAuthTriggerOutcome::Authenticated) => {}
-            Ok(crate::app::actions::McpAuthTriggerOutcome::SetupRequired(setup)) => {
-                let setup_values = match &modal.mcps_data {
-                    crate::views::extensions_modal::TabDataState::Loaded(servers) => servers
-                        .iter()
-                        .find(|server| server.name == server_name)
-                        .map(|server| server.setup_values.clone())
-                        .unwrap_or_default(),
-                    _ => std::collections::HashMap::new(),
-                };
-                if let Some(form) = crate::views::extensions_modal::McpSetupFormState::from_setup(
-                    server_name.clone(),
-                    setup,
-                    setup_values,
-                ) {
-                    modal.mcp_setup = Some(form);
-                } else {
-                    modal.modal_message =
-                        Some(crate::views::extensions_modal::ModalMessage::Error(
-                            format!("{server_name}: setup schema is not supported in this UI"),
-                        ));
-                }
-                return vec![];
-            }
-            Err(e) => {
-                let msg = if e.starts_with("To authenticate") {
-                    format!("{server_name}: {e}")
-                } else if e.contains(&server_name) {
-                    format!("Auth failed: {e}")
-                } else {
-                    format!("{server_name} auth failed: {e}")
-                };
-                modal.modal_message =
-                    Some(crate::views::extensions_modal::ModalMessage::Error(msg));
-                if let Some(session_id) = agent.session.session_id.clone() {
-                    return vec![Effect::FetchMcpsList {
-                        agent_id,
-                        session_id,
-                        cache: false,
-                    }];
-                }
-                return vec![];
-            }
-        }
-    }
-    // No toast on success: the row transition from the FetchMcpsList
-    // refresh below is the confirmation.
-    let Some(session_id) = agent.session.session_id.clone() else {
-        return vec![];
-    };
-    vec![Effect::FetchMcpsList {
-        agent_id,
-        session_id,
-        cache: false,
-    }]
-}
-
-pub(super) fn handle_mcp_setup_submit_done(
-    app: &mut AppView,
-    agent_id: AgentId,
-    server_name: String,
-    result: Result<(), String>,
-) -> Vec<Effect> {
-    let Some(agent) = app.agents.get_mut(&agent_id) else {
-        return vec![];
-    };
-    if let Some(ref mut modal) = agent.extensions_modal {
-        if let Err(e) = result {
-            modal.pending_action = None;
-            modal.pending_entry_index = None;
-            modal.modal_message = Some(crate::views::extensions_modal::ModalMessage::Error(
-                format!("{server_name} setup failed: {e}"),
-            ));
-            return vec![];
-        }
-        modal.pending_action = Some(format!("Authenticating {server_name}..."));
-        modal.pending_entry_index = None;
-    }
-    let Some(session_id) = agent.session.session_id.clone() else {
-        if let Some(ref mut modal) = agent.extensions_modal {
-            modal.pending_action = None;
-            modal.modal_message = Some(crate::views::extensions_modal::ModalMessage::Error(
-                format!("{server_name}: no active session for authentication"),
-            ));
-        }
-        return vec![];
-    };
-    vec![Effect::McpAuthTrigger {
-        agent_id,
-        session_id,
-        server_name,
-    }]
 }

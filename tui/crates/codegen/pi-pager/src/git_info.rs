@@ -9,8 +9,8 @@ use crate::host::HostOs;
 use crate::terminal::{TerminalName, terminal_context};
 
 /// Per-cwd git cache — the single source of truth for every git display
-/// in the pager: the welcome top bar / dashboard header (process cwd),
-/// each agent's status bar, and the dashboard row subtitles. Keyed per
+/// in the pager: the welcome top bar (process cwd) and each agent's
+/// status bar. Keyed per
 /// directory so one directory's branch never leaks onto another's. Maps
 /// each cwd to its last-computed [`CwdGitInfo`] (`None` for a non-repo)
 /// plus the time of the last refresh attempt (for throttling).
@@ -36,41 +36,8 @@ const CWD_GIT_REFRESH_TTL: Duration = Duration::from_secs(5);
 /// evicted on insert (see [`cwd_cache_insert`]).
 const CWD_GIT_CACHE_CAP: usize = 64;
 
-/// Refresh [`CWD_GIT_CACHE`] for `dir` from a `git_head_changed`
-/// notification, so a branch switch inside an agent's session reflects in
-/// every view immediately instead of waiting out [`CWD_GIT_REFRESH_TTL`].
-///
-/// Called from [`crate::app::acp_handler::handle_git_head_changed`], which
-/// also updates the agent's own `current_branch` / `is_worktree` /
-/// `main_repo` fields directly. The worktree label isn't carried by the
-/// notification (and is immutable for a path), so any previously-resolved
-/// label is preserved. `is_worktree` matches [`compute_cwd_git_info`]:
-/// notification flag, `main_repo`, or a cached non-empty label.
-pub fn update_from_notification(
-    dir: &Path,
-    branch: Option<&str>,
-    main_repo: Option<String>,
-    is_worktree: bool,
-) {
-    if let Ok(mut cache) = CWD_GIT_CACHE.lock() {
-        let worktree_label = cache
-            .get(dir)
-            .and_then(|(info, _)| info.as_ref())
-            .and_then(|i| i.worktree_label.clone());
-        let is_worktree =
-            is_worktree || is_cwd_worktree(main_repo.as_deref(), worktree_label.as_deref());
-        let info = CwdGitInfo {
-            is_worktree,
-            branch: branch.map(str::to_string),
-            main_repo,
-            worktree_label,
-        };
-        cwd_cache_insert(&mut cache, dir.to_path_buf(), (Some(info), Instant::now()));
-    }
-}
-
 /// Eagerly warm [`CWD_GIT_CACHE`] for `cwd` off-thread — e.g. at pager
-/// startup and after a dashboard location change — so the header / top bar
+/// startup — so the header / top bar
 /// show the branch + worktree on the next frame instead of waiting for the
 /// first lazy refresh.
 ///
@@ -104,8 +71,6 @@ pub struct CwdGitInfo {
     pub is_worktree: bool,
     /// Tilde-shortened path to the main repo when in a worktree.
     pub main_repo: Option<String>,
-    /// Human-readable worktree label from the metadata DB, if any.
-    pub worktree_label: Option<String>,
 }
 
 /// Synchronously compute fresh git context (branch + worktree info) for
@@ -126,7 +91,6 @@ pub fn compute_cwd_git_info(cwd: &Path) -> Option<CwdGitInfo> {
         ),
         branch: snap.branch,
         main_repo: snap.main_repo_display,
-        worktree_label: snap.worktree_label,
     })
 }
 
@@ -134,8 +98,8 @@ fn is_cwd_worktree(main_repo: Option<&str>, worktree_label: Option<&str>) -> boo
     main_repo.is_some() || worktree_label.is_some_and(|s| !s.is_empty())
 }
 
-/// Per-cwd git info for render paths that display many directories (the
-/// dashboard agent list, each agent's status bar). Returns the cached
+/// Per-cwd git info for render paths that display many directories (each
+/// agent's status bar). Returns the cached
 /// value for `cwd` (possibly `None` on the very first call) and kicks off
 /// a throttled off-thread refresh when the entry is missing or older than
 /// [`CWD_GIT_REFRESH_TTL`]. Never blocks and never spawns `git`
@@ -276,32 +240,6 @@ fn compute_snapshot(cwd: &Path) -> GitSnapshot {
         main_repo_display: marker_main_repo.or(db_main_repo).or(linked_main_repo),
         worktree_label,
     }
-}
-
-/// Map of worktree root path → human label for every managed worktree
-/// that has a non-empty label. Opens the worktree metadata DB once and
-/// returns an empty map on any error. Keys are canonicalized so callers
-/// can match against `dunce::canonicalize`d candidate paths.
-///
-/// Intended to be built once (e.g. when a directory picker opens) and
-/// reused for many path lookups, avoiding a DB open per candidate.
-pub fn worktree_label_index() -> std::collections::HashMap<PathBuf, String> {
-    let mut map = std::collections::HashMap::new();
-    let Ok(db) = pi_fast_worktree::db::WorktreeDb::open_default() else {
-        return map;
-    };
-    let Ok(records) = db.list(&Default::default()) else {
-        return map;
-    };
-    for rec in records {
-        let Some(label) = rec.label() else {
-            continue;
-        };
-        let label = label.to_owned();
-        let key = dunce::canonicalize(&rec.path).unwrap_or(rec.path);
-        map.insert(key, label);
-    }
-    map
 }
 
 /// Look up the worktree label and source repo from the metadata DB.
@@ -465,7 +403,6 @@ mod tests {
             branch: Some("main".into()),
             is_worktree: false,
             main_repo: None,
-            worktree_label: None,
         };
         // Seed a resolved entry with an old timestamp.
         let old_ts = Instant::now() - Duration::from_secs(60);
@@ -643,74 +580,6 @@ mod tests {
         assert!(!info.is_worktree);
         assert!(info.main_repo.is_none());
         assert_eq!(info.branch.as_deref(), Some("dep-branch"));
-    }
-
-    #[serial_test::serial(GROK_HOME)]
-    #[test]
-    fn compute_cwd_git_info_nested_repo_does_not_inherit_db_record() {
-        let home = tempfile::tempdir().unwrap();
-        // serial(GROK_HOME) orders peers; EnvVarGuard restores on drop so
-        // later `open_default()` callers do not see a deleted temp home.
-        let _grok_home = crate::test_util::EnvVarGuard::set("GROK_HOME", home.path());
-        let _ = pi_fast_worktree::db::WorktreeDb::open(home.path());
-
-        let wt = crate::test_util::TempGitRepo::init("wt-branch");
-        let canon_wt = dunce::canonicalize(&wt.path).unwrap_or_else(|_| wt.path.clone());
-        let db = pi_fast_worktree::db::WorktreeDb::open(home.path()).unwrap();
-        db.register(&pi_fast_worktree::db::WorktreeRecord {
-            id: "db-wt".into(),
-            path: canon_wt,
-            source_repo: PathBuf::from("/src/main-repo"),
-            repo_name: "main-repo".into(),
-            kind: pi_fast_worktree::db::WorktreeKind::Session,
-            creation_mode: "standalone".into(),
-            git_ref: None,
-            head_commit: None,
-            session_id: None,
-            creator_pid: None,
-            created_at: 1,
-            last_accessed_at: None,
-            status: pi_fast_worktree::db::WorktreeStatus::Alive,
-            metadata: Some(serde_json::json!({ "label": "db-label" })),
-        })
-        .unwrap();
-
-        let nested = wt.path.join("vendor").join("dep");
-        crate::test_util::init_git_repo_on_branch(&nested, "dep-branch");
-        let info = compute_cwd_git_info(&nested).expect("nested init is a repo");
-        assert!(!info.is_worktree);
-        assert!(info.main_repo.is_none());
-        assert!(info.worktree_label.is_none());
-        assert_eq!(info.branch.as_deref(), Some("dep-branch"));
-    }
-
-    #[test]
-    fn update_from_notification_ors_cached_label_into_is_worktree() {
-        let dir = PathBuf::from("/nonexistent-pi-notif-label-wt");
-        {
-            let mut cache = CWD_GIT_CACHE.lock().expect("cache lock");
-            cwd_cache_insert(
-                &mut cache,
-                dir.clone(),
-                (
-                    Some(CwdGitInfo {
-                        branch: Some("main".into()),
-                        is_worktree: true,
-                        main_repo: None,
-                        worktree_label: Some("my-label".into()),
-                    }),
-                    Instant::now(),
-                ),
-            );
-        }
-        update_from_notification(&dir, Some("main"), None, /* is_worktree */ false);
-        let cache = CWD_GIT_CACHE.lock().expect("cache lock");
-        let info = cache
-            .get(&dir)
-            .and_then(|(info, _)| info.clone())
-            .expect("cache entry");
-        assert!(info.is_worktree);
-        assert_eq!(info.worktree_label.as_deref(), Some("my-label"));
     }
 
     #[test]

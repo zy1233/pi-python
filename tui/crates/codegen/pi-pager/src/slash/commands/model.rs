@@ -26,20 +26,6 @@ impl SlashCommand for ModelCommand {
         "Switch the active model"
     }
 
-    fn session_scoped(&self) -> bool {
-        true
-    }
-
-    fn offered_when_session_less(&self) -> bool {
-        // The dashboard offers `/model` to pick the model for the next
-        // spawned agent (intercepted in `dispatch_dashboard_dispatch_slash`).
-        true
-    }
-
-    fn usage(&self) -> &str {
-        "/model <name> [effort]"
-    }
-
     fn takes_args(&self) -> bool {
         true
     }
@@ -203,8 +189,8 @@ fn build_effort_items(models: &ModelState, model_id: &acp::ModelId) -> Vec<ArgIt
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use pi_shell::sampling::types::ReasoningEffort;
+    use std::sync::Arc;
 
     fn model_with_reasoning(id: &str, name: &str) -> (acp::ModelId, acp::ModelInfo) {
         let id = acp::ModelId::new(Arc::from(id));
@@ -224,25 +210,10 @@ mod tests {
         (id, info)
     }
 
-    static EMPTY_BUNDLE: crate::app::bundle::BundleState = crate::app::bundle::BundleState {
-        has_cache: false,
-        version: String::new(),
-        personas: Vec::new(),
-        roles: Vec::new(),
-        agents: Vec::new(),
-        skills: Vec::new(),
-        persona_details: Vec::new(),
-        role_details: Vec::new(),
-    };
-
     fn dummy_exec_ctx(models: &ModelState) -> CommandExecCtx<'_> {
         CommandExecCtx {
             models,
-            session_id: None,
-            bundle_state: &EMPTY_BUNDLE,
             screen_mode: crate::app::ScreenMode::Inline,
-            billing_surface_visible: true,
-            usage_command_visible: true,
             pager_state: crate::settings::PagerLocalSnapshot {
                 multiline_mode: false,
                 yolo_mode: false,
@@ -276,15 +247,7 @@ mod tests {
         let cmd = ModelCommand;
         let ctx = AppCtx {
             models: &state,
-            cwd: std::path::Path::new("."),
-            has_session_announcements: false,
-            billing_surface_visible: true,
-            usage_command_visible: true,
-            workflows_available: true,
-            saved_workflows: &[],
-            workflow_runs: &[],
             screen_mode: crate::app::ScreenMode::Fullscreen,
-            current_title: None,
         };
         let items = cmd.suggest_args(&ctx, "").unwrap();
         assert_eq!(items.len(), 2, "model phase: one row per logical model");
@@ -312,15 +275,7 @@ mod tests {
         let cmd = ModelCommand;
         let ctx = AppCtx {
             models: &state,
-            cwd: std::path::Path::new("."),
-            has_session_announcements: false,
-            billing_surface_visible: true,
-            usage_command_visible: true,
-            workflows_available: true,
-            saved_workflows: &[],
-            workflow_runs: &[],
             screen_mode: crate::app::ScreenMode::Fullscreen,
-            current_title: None,
         };
         // Args query has a trailing space -> effort phase. Items come out
         // ordered xhigh -> low (strongest first) per EFFORT_LEVELS.
@@ -347,15 +302,7 @@ mod tests {
         let cmd = ModelCommand;
         let ctx = AppCtx {
             models: &state,
-            cwd: std::path::Path::new("."),
-            has_session_announcements: false,
-            billing_surface_visible: true,
-            usage_command_visible: true,
-            workflows_available: true,
-            saved_workflows: &[],
-            workflow_runs: &[],
             screen_mode: crate::app::ScreenMode::Fullscreen,
-            current_title: None,
         };
         // Still in effort phase; matcher upstream narrows to high / xhigh.
         let items = cmd.suggest_args(&ctx, "Reasoning X h").unwrap();
@@ -371,15 +318,7 @@ mod tests {
         let cmd = ModelCommand;
         let ctx = AppCtx {
             models: &state,
-            cwd: std::path::Path::new("."),
-            has_session_announcements: false,
-            billing_surface_visible: true,
-            usage_command_visible: true,
-            workflows_available: true,
-            saved_workflows: &[],
-            workflow_runs: &[],
             screen_mode: crate::app::ScreenMode::Fullscreen,
-            current_title: None,
         };
         // No trailing space, user is still typing the model name.
         let items = cmd.suggest_args(&ctx, "Reason").unwrap();

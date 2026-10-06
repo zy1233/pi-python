@@ -7,14 +7,11 @@
 //! the workaround once the upstream envelope parses `method` as an
 //! owned/`Cow` string.
 //!
-//! Scope: only process-stdin ingress is normalized. Clients that connect
-//! directly to the leader socket bypass this module — fine today, those are
-//! first-party clients whose encoders never emit `\/`.
-//!
-//! Downstream dependency: the leader bridge's replay sniff
-//! (`pi-pager-bin/src/main.rs`, the `trimmed.contains("\"session/new\"")`
-//! checks) matches escaped Foundation input only because this normalization
-//! runs upstream of it.
+//! Scope: only process-stdin ingress is normalized. Nothing in the workspace
+//! calls [`spawn_stdin_line_reader`](crate::spawn_stdin_line_reader) any more
+//! (the stdio-agent entry that did was removed together with the Rust agent
+//! runtime), so this module is dormant until a stdio ACP server returns; plan
+//! A.3 decides whether to delete it.
 
 /// Foundation (Xcode) escapes `/` as `\/` by default, and the pinned
 /// `agent-client-protocol` 0.6 envelope parses `method` as a borrowed `&str`

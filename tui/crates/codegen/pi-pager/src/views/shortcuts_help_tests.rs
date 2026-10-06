@@ -61,32 +61,6 @@ fn hint_with_action(
     }
 }
 
-/// `DashboardCycleMode` carries Shift+Tab three times (the terminal
-/// encoding variants `BackTab` / `BackTab`+SHIFT / `Tab`+SHIFT).
-/// The cheatsheet must collapse identically-rendered keys instead
-/// of showing "Shift+Tab / Shift+Tab / Shift+Tab".
-#[test]
-fn build_entries_dedupes_identically_rendered_alt_keys() {
-    let registry = crate::actions::ActionRegistry::defaults();
-    let entries = build_entries(&[When::DashboardFocused], &registry, false);
-    let item = entries
-        .iter()
-        .find_map(|e| match e {
-            ShortcutsHelpEntry::Hint { item, .. }
-                if item.description.as_deref() == Some("Cycle dispatch mode") =>
-            {
-                Some(item)
-            }
-            _ => None,
-        })
-        .expect("DashboardCycleMode must be listed");
-    assert_eq!(
-        hint_key_pretty(item),
-        "Shift+Tab",
-        "encoding-variant alt keys must collapse to one display",
-    );
-}
-
 #[test]
 fn build_entries_lists_prompt_stash_with_ctrl_s_and_alt_s() {
     let registry = crate::actions::ActionRegistry::defaults();
@@ -341,7 +315,7 @@ fn build_entries_deduplicates_within_category() {
 }
 
 #[test]
-fn build_entries_show_mode_correct_ctrl_g_and_shared_ctrl_b() {
+fn build_entries_show_mode_correct_ctrl_g() {
     for mode in [
         crate::app::ScreenMode::Fullscreen,
         crate::app::ScreenMode::Inline,
@@ -361,8 +335,6 @@ fn build_entries_show_mode_correct_ctrl_g_and_shared_ctrl_b() {
                 _ => None,
             })
         };
-        let background = row(ActionId::SendToBackground).expect("background row");
-        assert_eq!(background.keys, vec![crate::key!('b', CONTROL)]);
 
         let agent_ctrl_g_rows: Vec<_> = entries
             .iter()
@@ -383,25 +355,13 @@ fn build_entries_show_mode_correct_ctrl_g_and_shared_ctrl_b() {
             .collect();
         if mode.is_minimal() {
             assert!(row(ActionId::FocusScrollback).is_none());
+            assert_eq!(agent_ctrl_g_rows, vec![ActionId::EditPromptExternal]);
+            assert!(row(ActionId::EditPromptExternal).is_some());
         } else {
             assert!(row(ActionId::FocusScrollback).is_some());
+            assert!(agent_ctrl_g_rows.is_empty());
+            assert!(row(ActionId::EditPromptExternal).is_none());
         }
-
-        let expected = if mode.is_minimal() {
-            ActionId::EditPromptExternal
-        } else {
-            ActionId::ToggleTasks
-        };
-        assert_eq!(agent_ctrl_g_rows, vec![expected]);
-        assert!(row(expected).is_some());
-        assert!(
-            row(if mode.is_minimal() {
-                ActionId::ToggleTasks
-            } else {
-                ActionId::EditPromptExternal
-            })
-            .is_none()
-        );
     }
 }
 
@@ -525,18 +485,6 @@ fn history_row_lit_only_by_prompt_focus() {
         unreachable!();
     };
     assert!(*dimmed, "history row must be dimmed without prompt focus");
-
-    // Dashboard focus alone must not light it (unlike paste/undo/redo).
-    let entries = build_entries(&[When::DashboardFocused], &registry, false);
-    let ShortcutsHelpEntry::Hint { dimmed, .. } =
-        history_row(&entries).expect("history row present")
-    else {
-        unreachable!();
-    };
-    assert!(
-        *dimmed,
-        "dashboard focus alone must not light the history row"
-    );
 }
 
 #[test]
@@ -611,58 +559,6 @@ fn pseudo_hint<'a>(
     })
 }
 
-fn pseudo_dimmed(entries: &[ShortcutsHelpEntry], label: &str) -> Option<bool> {
-    entries.iter().find_map(|e| match e {
-        ShortcutsHelpEntry::Hint {
-            item,
-            dimmed,
-            action_id: None,
-            ..
-        } if item.label == label => Some(*dimmed),
-        _ => None,
-    })
-}
-
-#[test]
-fn build_entries_dims_editor_pseudo_rows_outside_prompt_and_dashboard() {
-    let registry = ActionRegistry::defaults();
-    // paste / undo / redo share the same host lit/dim policy.
-    for label in ["paste", "undo", "redo"] {
-        assert_eq!(
-            pseudo_dimmed(
-                &build_entries(
-                    &[When::ScrollbackFocused, When::AgentScreen, When::Always],
-                    &registry,
-                    true,
-                ),
-                label,
-            ),
-            Some(true),
-            "{label} dimmed off prompt/dashboard"
-        );
-        assert_eq!(
-            pseudo_dimmed(
-                &build_entries(
-                    &[When::PromptFocused, When::AgentScreen, When::Always],
-                    &registry,
-                    true,
-                ),
-                label,
-            ),
-            Some(false),
-            "{label} lit when prompt focused"
-        );
-        assert_eq!(
-            pseudo_dimmed(
-                &build_entries(&[When::DashboardFocused, When::Always], &registry, true),
-                label,
-            ),
-            Some(false),
-            "{label} lit on dashboard host"
-        );
-    }
-}
-
 #[test]
 fn build_entries_dims_out_of_context_actions() {
     let registry = ActionRegistry::defaults();
@@ -726,158 +622,6 @@ fn build_entries_dims_both_pane_contexts_from_side_pane() {
     assert!(
         nav_dimmed,
         "nav should be dimmed from todo pane (ScrollbackFocused)"
-    );
-}
-
-/// The dashboard LIST and the session OVERLAY dim each other's shortcuts:
-/// on the list the overlay-scoped shortcuts (`When::DashboardOverlay`,
-/// e.g. "prev session") are dimmed while the list shortcuts
-/// (`When::DashboardFocused`, e.g. "pin") are lit; inside the overlay it's
-/// the inverse. (Dashboard actions are registered under `cfg(test)`.)
-#[test]
-fn build_entries_dims_dashboard_list_vs_overlay() {
-    let registry = ActionRegistry::defaults();
-    let dimmed_of = |entries: &[ShortcutsHelpEntry], label: &str| -> Option<bool> {
-        entries.iter().find_map(|e| match e {
-            ShortcutsHelpEntry::Hint { item, dimmed, .. } if item.label == label => Some(*dimmed),
-            _ => None,
-        })
-    };
-
-    // Dashboard LIST: list shortcuts lit, overlay shortcuts dimmed.
-    let list = build_entries(&[When::DashboardFocused, When::Always], &registry, true);
-    assert_eq!(
-        dimmed_of(&list, "pin"),
-        Some(false),
-        "list `pin` must be lit on the dashboard list",
-    );
-    assert_eq!(
-        dimmed_of(&list, "prev session"),
-        Some(true),
-        "overlay `prev session` must be dimmed on the dashboard list",
-    );
-
-    // Session OVERLAY (details): overlay shortcuts lit, list shortcuts dimmed.
-    let overlay = build_entries(
-        &[When::AgentScreen, When::Always, When::DashboardOverlay],
-        &registry,
-        true,
-    );
-    assert_eq!(
-        dimmed_of(&overlay, "prev session"),
-        Some(false),
-        "overlay `prev session` must be lit inside the overlay",
-    );
-    assert_eq!(
-        dimmed_of(&overlay, "pin"),
-        Some(true),
-        "list `pin` must be dimmed inside the overlay",
-    );
-}
-
-/// `DashboardStop` (list) and `DashboardOverlayStop` (overlay) share
-/// Ctrl+X and the Dashboard category. The per-category dedup must keep
-/// whichever matches the active surface — lit — instead of always
-/// keeping the first-registered (list) def. And inside the overlay the
-/// `ShortcutsHelp` row must drop its shadowed Ctrl+X alt (the overlay
-/// stop owns the key there) while keeping its other binding.
-#[test]
-fn build_entries_overlay_stop_wins_dedup_and_shadows_cheatsheet_ctrl_x() {
-    let registry = ActionRegistry::defaults();
-    let ctrl_x = crate::key!('x', CONTROL);
-    // Match the two Ctrl+X rows by ActionId: the list and overlay
-    // stops carry different labels ("delete" vs "stop").
-    let is_stop = |action_id: &Option<ActionId>| {
-        matches!(
-            action_id,
-            Some(ActionId::DashboardStop | ActionId::DashboardOverlayStop)
-        )
-    };
-    let stop_rows = |entries: &[ShortcutsHelpEntry]| -> Vec<(String, bool)> {
-        entries
-            .iter()
-            .filter_map(|e| match e {
-                ShortcutsHelpEntry::Hint {
-                    item,
-                    dimmed,
-                    action_id,
-                    ..
-                } if is_stop(action_id) => Some((
-                    item.description.as_deref().unwrap_or_default().to_string(),
-                    *dimmed,
-                )),
-                _ => None,
-            })
-            .collect()
-    };
-    let stop_id = |entries: &[ShortcutsHelpEntry]| -> Option<ActionId> {
-        entries
-            .iter()
-            .find_map(|e| match e {
-                ShortcutsHelpEntry::Hint { action_id, .. } if is_stop(action_id) => {
-                    Some(*action_id)
-                }
-                _ => None,
-            })
-            .flatten()
-    };
-    let help_keys = |entries: &[ShortcutsHelpEntry]| -> Vec<KeyShortcut> {
-        entries
-            .iter()
-            .find_map(|e| match e {
-                ShortcutsHelpEntry::Hint { item, .. } if item.label == "shortcuts" => {
-                    Some(item.keys.clone())
-                }
-                _ => None,
-            })
-            .expect("the ShortcutsHelp row must be present")
-    };
-
-    // Dashboard LIST: the list stop survives, lit; the cheatsheet
-    // row keeps Ctrl+X (no overlay up).
-    let list = build_entries(&[When::DashboardFocused, When::Always], &registry, true);
-    assert_eq!(
-        stop_rows(&list),
-        vec![("Stop / Delete agent".to_string(), false)],
-    );
-    assert_eq!(
-        stop_id(&list),
-        Some(ActionId::DashboardStop),
-        "the lit list `stop` is inserted first and never replaced — keeps DashboardStop",
-    );
-    assert!(
-        help_keys(&list).contains(&ctrl_x),
-        "without an overlay the cheatsheet row keeps its Ctrl+X binding",
-    );
-
-    // Session OVERLAY: the overlay stop survives, lit; the
-    // cheatsheet row drops the shadowed Ctrl+X but keeps Ctrl+.
-    let overlay = build_entries(
-        &[When::AgentScreen, When::Always, When::DashboardOverlay],
-        &registry,
-        true,
-    );
-    assert_eq!(
-        stop_rows(&overlay),
-        vec![(
-            "Stop agent, close session (back to dashboard)".to_string(),
-            false
-        )],
-        "the overlay must show exactly the overlay `stop`, lit",
-    );
-    assert_eq!(
-        stop_id(&overlay),
-        Some(ActionId::DashboardOverlayStop),
-        "the lit overlay `stop` replaces the dimmed list row — carries DashboardOverlayStop",
-    );
-    let keys = help_keys(&overlay);
-    assert!(
-        !keys.contains(&ctrl_x),
-        "inside the overlay the cheatsheet row must drop the shadowed Ctrl+X",
-    );
-    assert!(
-        !keys.is_empty(),
-        "the cheatsheet row must keep its non-shadowed binding (Ctrl+.)",
     );
 }
 
@@ -1049,7 +793,6 @@ fn click_from_search_opens_detail_and_clears_query() {
         item_rects: vec![Rect::new(0, 2, 20, 1)],
         entry_indices: vec![hint_pos],
         tab_rects: vec![],
-        filter_rect: None,
     });
     let click = MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
@@ -1103,39 +846,6 @@ fn modal_footer_advertises_i_search_under_vim() {
         footer.iter().any(|s| s.label == "/ search"),
         "`/ search` must remain regardless of vim-mode"
     );
-}
-
-/// Host path: Enter on a registry hint enters Detail (not Close) via the
-/// chrome + picker pipeline both hosts share.
-#[test]
-fn handle_modal_key_enter_on_hint_enters_detail() {
-    use crate::actions::ActionId;
-    let entries = vec![
-        header("Nav", 0, 1),
-        hint_with_action("send", key!(Enter), ActionId::SendPrompt),
-    ];
-    let mut state = build_initial_picker_state(&entries);
-    state.selected = 1;
-    let mut window = crate::views::modal_window::ModalWindowState::default();
-    let mut mode = browse_mode();
-    let outcome = handle_modal_key(
-        &make_key(crossterm::event::KeyCode::Enter),
-        &entries,
-        &mut state,
-        &mut window,
-        false,
-        &no_collapsed(),
-        &no_expanded(),
-        &mut mode,
-        false,
-    );
-    assert_ne!(
-        outcome,
-        ModalKeyOutcome::Close,
-        "Enter on a hint must not close"
-    );
-    assert_eq!(outcome, ModalKeyOutcome::Changed);
-    assert!(mode.is_detail(), "Enter enters the detail page");
 }
 
 /// Over-scrolling a detail body clamps to the last lines instead of paging
@@ -1237,35 +947,6 @@ fn populated_long_help_is_distinct_and_man_style() {
             def.id
         );
     }
-}
-
-/// `detail_from_entry` surfaces the action's `long_help` as the detail body
-/// (not the description), proving the populated copy reaches the screen.
-#[test]
-fn detail_from_entry_uses_long_help_for_body() {
-    let registry = ActionRegistry::defaults();
-    let def = registry
-        .find(ActionId::ShortcutsHelp)
-        .expect("ShortcutsHelp is registered");
-    let expected = def.long_help.expect("ShortcutsHelp has long_help");
-    let entries = build_entries(&all_contexts(), &registry, true);
-    let entry = entries
-        .iter()
-        .find(|e| hint_expand_action_id(e) == Some(ActionId::ShortcutsHelp))
-        .expect("ShortcutsHelp row is present");
-    let ShortcutsHelpMode::Detail { body, .. } =
-        detail_from_entry(entry).expect("registry hint yields a detail")
-    else {
-        panic!("expected Detail mode");
-    };
-    assert_eq!(
-        body, expected,
-        "detail body must surface the action's long_help"
-    );
-    assert_ne!(
-        body, def.description,
-        "detail body must be the long_help, not the description"
-    );
 }
 
 /// Scroll clamp counts WRAPPED rows: a body that wraps well past the viewport
@@ -1545,41 +1226,6 @@ fn detail_mode_ignores_vim_keys() {
     assert!(mode.is_browse(), "Left returns to browse");
 }
 
-/// Host path: chrome must not intercept Esc while in detail (would close the
-/// modal); it returns to browse and keeps the modal open.
-#[test]
-fn handle_modal_key_esc_in_detail_is_back_not_close() {
-    let entries = vec![header("Nav", 0, 1), hint("send", key!(Enter))];
-    let mut state = build_initial_picker_state(&entries);
-    let mut window = crate::views::modal_window::ModalWindowState::default();
-    let collapsed = no_collapsed();
-    let mut mode = ShortcutsHelpMode::Detail {
-        title: "Send".into(),
-        keys_line: "Enter".into(),
-        body: "Send the message".into(),
-        dimmed_note: false,
-        scroll: 0,
-    };
-    let outcome = handle_modal_key(
-        &make_key(crossterm::event::KeyCode::Esc),
-        &entries,
-        &mut state,
-        &mut window,
-        false,
-        &collapsed,
-        &no_expanded(),
-        &mut mode,
-        false,
-    );
-    assert_ne!(
-        outcome,
-        ModalKeyOutcome::Close,
-        "Esc in detail must not close"
-    );
-    assert_eq!(outcome, ModalKeyOutcome::Changed);
-    assert!(mode.is_browse(), "Esc in detail returns to browse");
-}
-
 #[test]
 fn esc_in_browse_closes_via_picker() {
     let entries = vec![header("Nav", 0, 1), hint("send", key!(Enter))];
@@ -1844,14 +1490,6 @@ fn assert_cheatsheet_row_has_key(entries: &[ShortcutsHelpEntry], label: &str, ex
         keys.iter().any(|k| k == expected_key),
         "{label} cheatsheet row missing {expected_key}; got {keys:?}"
     );
-}
-
-#[test]
-fn build_entries_surfaces_interject_ctrl_i_fallback() {
-    let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, true);
-    // Action label is compact "send now" wording (interject under the hood).
-    assert_cheatsheet_row_has_key(&entries, "send now", "Ctrl+i");
 }
 
 #[test]
@@ -2135,134 +1773,6 @@ fn vim_l_expands_and_h_collapses_paste() {
         "vim h must collapse the expanded paste pseudo-row"
     );
     assert!(state.query().is_empty(), "vim h must not enter search text");
-}
-
-/// `handle_modal_key` (chrome + picker pipeline) maps the hint-row expand to
-/// `ModalKeyOutcome::ToggleExpand` so dashboards get identical semantics.
-#[test]
-fn handle_modal_key_maps_toggle_expand() {
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, true);
-    let mut state = build_initial_picker_state(&entries);
-    state.selected = 1;
-    let mut window = crate::views::modal_window::ModalWindowState::default();
-    let key = KeyEvent::new(KeyCode::Right, KeyModifiers::NONE);
-    let mut mode = ShortcutsHelpMode::Browse;
-    let out = handle_modal_key(
-        &key,
-        &entries,
-        &mut state,
-        &mut window,
-        false,
-        &no_collapsed(),
-        &no_expanded(),
-        &mut mode,
-        false,
-    );
-    assert!(
-        matches!(out, ModalKeyOutcome::ToggleExpand(_)),
-        "Right on a hint row must map to ModalKeyOutcome::ToggleExpand, got {out:?}"
-    );
-}
-
-/// `handle_modal_key` forwards `expanded_ids` through the chrome pipeline so
-/// the dashboard host's Left-collapse works. A *populated* expanded set is
-/// required to exercise the wiring — the `→` test above passes regardless of
-/// the set, so it can't catch a dropped `expanded_ids` forward.
-#[test]
-fn handle_modal_key_left_collapses_expanded_hint() {
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, true);
-    let mut state = build_initial_picker_state(&entries);
-    state.selected = 1;
-    let key_id = expand_key(&entries[1]).expect("row 1 is expandable");
-    let expanded = std::collections::HashSet::from([key_id]);
-    let mut window = crate::views::modal_window::ModalWindowState::default();
-    let key = KeyEvent::new(KeyCode::Left, KeyModifiers::NONE);
-    let mut mode = ShortcutsHelpMode::Browse;
-    let out = handle_modal_key(
-        &key,
-        &entries,
-        &mut state,
-        &mut window,
-        false,
-        &no_collapsed(),
-        &expanded,
-        &mut mode,
-        false,
-    );
-    assert_eq!(
-        out,
-        ModalKeyOutcome::ToggleExpand(key_id),
-        "Left on an expanded hint must map to ModalKeyOutcome::ToggleExpand (collapse), got {out:?}"
-    );
-}
-
-/// A row's `long_help` renders as an inline line only while its id is
-/// expanded, and is absent otherwise.
-#[test]
-fn render_modal_shows_long_help_only_when_expanded() {
-    use crate::actions::ActionId;
-    use ratatui::buffer::Buffer;
-    use ratatui::layout::Rect;
-
-    // long_help differs from label/description so the expanded line is detectable.
-    let mut item = HintItem::new(key!('q', CONTROL), "quit");
-    item.description = Some("Quit the app".into());
-    let entries = vec![
-        ShortcutsHelpEntry::SectionHeader {
-            label: "Essentials",
-            category_idx: 0,
-            entry_count: 1,
-        },
-        ShortcutsHelpEntry::Hint {
-            item,
-            dimmed: false,
-            action_id: Some(ActionId::Quit),
-            long_help: Some("Zqxhelpline"),
-        },
-    ];
-    let theme = crate::theme::Theme::current();
-    let area = Rect::new(0, 0, 100, 40);
-    let render = |expanded: &std::collections::HashSet<ExpandKey>| -> String {
-        let mut state = build_initial_picker_state(&entries);
-        let mut window = crate::views::modal_window::ModalWindowState::default();
-        let mut buf = Buffer::empty(area);
-        render_modal(
-            &mut buf,
-            area,
-            &entries,
-            &mut state,
-            &mut window,
-            false,
-            &no_collapsed(),
-            expanded,
-            &ShortcutsHelpMode::Browse,
-            &theme,
-            false,
-        );
-        let mut out = String::new();
-        for y in area.y..area.y + area.height {
-            for x in area.x..area.x + area.width {
-                if let Some(cell) = buf.cell((x, y)) {
-                    out.push_str(cell.symbol());
-                }
-            }
-        }
-        out
-    };
-    let mut expanded = std::collections::HashSet::new();
-    expanded.insert(ExpandKey::Action(ActionId::Quit));
-    assert!(
-        render(&expanded).contains("Zqxhelpline"),
-        "expanded hint must render its long_help line"
-    );
-    assert!(
-        !render(&std::collections::HashSet::new()).contains("Zqxhelpline"),
-        "collapsed hint must not render the long_help line"
-    );
 }
 
 /// The collapsible (inline expand) view collapses newlines to spaces so the

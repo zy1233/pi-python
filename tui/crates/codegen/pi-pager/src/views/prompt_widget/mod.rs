@@ -20,12 +20,12 @@
 use std::path::Path;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use pi_ratatui_textarea::{ElementId, ElementKind, TextArea, TextAreaState, TextElement};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::StatefulWidgetRef;
-use pi_ratatui_textarea::{ElementId, ElementKind, TextArea, TextAreaState, TextElement};
 
 use crate::clipboard::{SystemClipboard, system_clipboard_get};
 use crate::input::key::key;
@@ -515,48 +515,6 @@ impl StashedPrompt {
             std::mem::take(&mut self.chip_elements),
         )
     }
-
-    pub(crate) fn with_transformed_text(mut self, text: String) -> Self {
-        if self.text == text {
-            return self;
-        }
-        let Some(start) = self.text.rfind(&text) else {
-            crate::prompt_images::drain_and_cleanup(&mut self.images);
-            crate::prompt_images::drain_and_cleanup(&mut self.image_undo_stash);
-            self.text = text;
-            self.cursor = self.text.len();
-            self.chip_elements.clear();
-            self.image_counter = 0;
-            return self;
-        };
-        let end = start + text.len();
-        let mut image_numbers = std::collections::HashSet::new();
-        self.chip_elements.retain_mut(|chip| {
-            if chip.range.start < start || chip.range.end > end {
-                return false;
-            }
-            chip.range = chip.range.start - start..chip.range.end - start;
-            if chip.kind == KIND_IMAGE
-                && let Some(number) = parse_image_display_number(&text[chip.range.clone()])
-            {
-                image_numbers.insert(number);
-            }
-            true
-        });
-        self.images.retain(|image| {
-            if image_numbers.contains(&image.display_number) {
-                true
-            } else {
-                crate::prompt_images::cleanup_temp_file(image);
-                false
-            }
-        });
-        crate::prompt_images::drain_and_cleanup(&mut self.image_undo_stash);
-        self.text = text;
-        self.cursor = self.text.len();
-        self.image_counter = images_high_water(&self.images);
-        self
-    }
 }
 
 /// Reusable text prompt component.
@@ -679,7 +637,7 @@ impl PromptWidget {
             file_search: FileSearchState::new(cwd),
             pending_viewer_request: None,
             history_search: HistorySearchState::new(),
-            slash_controller: crate::slash::SlashController::with_builtins(cwd.to_path_buf()),
+            slash_controller: crate::slash::SlashController::with_builtins(),
             slash_state: crate::slash::SlashState::default(),
             slash_hovered: None,
             last_input_delta: crate::input_log::LastInputDelta::default(),
@@ -1193,15 +1151,6 @@ impl PromptWidget {
         self.refresh_slash(models);
     }
 
-    /// Suppress session-scoped slash commands (`/compact`, `/fork`,
-    /// `/rewind`, …) from this prompt's completion.
-    ///
-    /// Used by the agent dashboard's dispatch input, which is
-    /// session-less and should only offer pager-global commands.
-    pub fn hide_session_scoped_commands(&mut self) {
-        self.slash_controller.set_hide_session_scoped(true);
-    }
-
     /// Record the process's effective screen mode so slash visibility gates
     /// (`/minimal`, `/fullscreen`) see it. Injected wherever prompts are
     /// created — the mode is fixed for the process lifetime.
@@ -1210,7 +1159,7 @@ impl PromptWidget {
     }
 
     /// Adopt the shared slash MRU store so this prompt's completion shares
-    /// command recency with other agent prompts and the dashboard dispatch.
+    /// command recency with other agent prompts.
     /// Injected by `AppView`, which owns the single process store.
     pub(crate) fn adopt_slash_mru(
         &mut self,
@@ -1227,12 +1176,6 @@ impl PromptWidget {
         command_tags: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<String, String>>>,
     ) {
         self.slash_controller.set_command_tags(command_tags);
-    }
-
-    pub(crate) fn set_recap_visible(&mut self, visible: bool) {
-        self.slash_controller
-            .registry_mut()
-            .set_recap_visible(visible);
     }
 
     pub(crate) fn set_voice_visible(&mut self, visible: bool) {

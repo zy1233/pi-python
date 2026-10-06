@@ -72,7 +72,7 @@ Alias: `/exit`. To leave the current session but stay in Grok, use `/home` to re
 /delete
 ```
 
-Confirms, then permanently removes the session history. Returns to the welcome screen, or to the dashboard when you opened the session from the dashboard. From `/resume` or the welcome session list, press `d` then `y`. On the [Agent Dashboard](23-dashboard.md), `Ctrl+X` twice (or hover `[✗]`) permanently deletes.
+Confirms, then permanently removes the session history. Returns to the welcome screen, or to the dashboard when you opened the session from the dashboard. From `/resume` or the welcome session list, press `d` then `y`. On the Agent Dashboard, `Ctrl+X` twice (or hover `[✗]`) permanently deletes.
 
 ---
 
@@ -90,7 +90,7 @@ This opens a session picker that lists recent sessions for the current workspace
 
 Typing in the picker filters the list by title and also searches your conversation content as you type; content matches appear under an "Extended search results" heading. Press `Ctrl+/` to search immediately without the brief pause.
 
-For the live top-level sessions in this pager (parent and forks) — switch, rename, peek, dispatch, or close — use the [Agent Dashboard](23-dashboard.md): `/dashboard` (aliases `/sessions`, `/agents-dashboard`) or `Ctrl+\`.
+For the live top-level sessions in this pager (parent and forks) — switch, rename, peek, dispatch, or close — use the Agent Dashboard: `/dashboard` (aliases `/sessions`, `/agents-dashboard`) or `Ctrl+\`.
 
 ### From the Command Line
 

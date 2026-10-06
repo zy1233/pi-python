@@ -12,15 +12,15 @@
 use std::collections::HashSet;
 use std::time::Instant;
 
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
 use pi_acp_lib::AcpResult;
 use pi_markdown::StreamingMarkdownRenderer;
 pub use pi_tools::implementations::grok_build::ask_user_question::{
     AskUserQuestionMode, Question, QuestionOption,
 };
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
 
 use unicode_width::UnicodeWidthStr;
 
@@ -30,7 +30,7 @@ use crate::render::wrapping::word_wrap_lines_with_joiners;
 use crate::syntax::get_syntect;
 use crate::theme::Theme;
 use crate::theme::md_style;
-use crate::views::prompt_widget::{PromptBg, PromptStyle, StashedPrompt};
+use crate::views::prompt_widget::StashedPrompt;
 
 /// Maximum description lines shown in the question chrome before truncation.
 const DEFAULT_MAX_CHROME_DESC_LINES: u16 = 5;
@@ -94,16 +94,6 @@ pub enum QuestionFocus {
 /// Not `Clone`: `FeedbackTrace` owns its attachments' staged temp files.
 #[derive(Debug)]
 pub enum LocalQuestionKind {
-    /// Modal opened by `/fork` to resolve the worktree question.
-    /// On submit, the selected option index plus the carried directive
-    /// are translated into an
-    /// [`crate::app::actions::Action::ForkAnswered`].
-    Fork {
-        /// Optional directive supplied via `/fork <directive>`. Stashed
-        /// here so the modal can carry it across the synchronous return
-        /// path back to `dispatch_fork_resolved` without a global mailbox.
-        directive: Option<String>,
-    },
     /// Modal opened by `/new` to resolve the worktree question.
     /// On submit, the selected option index is translated into an
     /// [`crate::app::actions::Action::NewSessionAnswered`].
@@ -130,20 +120,7 @@ pub enum LocalQuestionKind {
         model_id: agent_client_protocol::ModelId,
         effort: Option<pi_shell::sampling::types::ReasoningEffort>,
     },
-    DoctorFix {
-        target: crate::app::actions::DoctorFixTarget,
-        plan: Box<crate::diagnostics::FixPlan>,
-    },
     DeleteCurrentSession,
-    /// Freeform report modal opened by `/feedback`.
-    Feedback,
-    /// Second stage of the `/feedback` card: trace consent. Carries the
-    /// committed report (text and drained image attachments) so Esc can
-    /// skip the question without dropping it.
-    FeedbackTrace {
-        report: String,
-        images: crate::views::prompt_widget::FeedbackImages,
-    },
 }
 
 /// Bare `/feedback` pane label (first paragraph of the question chrome).
@@ -218,7 +195,7 @@ pub struct QuestionViewState {
     /// `Some(1)` = Skip interview.
     pub bottom_panel_index: Option<usize>,
     /// `Some` when this question was opened locally (e.g. by `/fork`)
- /// instead of by an ACP `legacy ext RPC` request. `None` for
+    /// instead of by an ACP `legacy ext RPC` request. `None` for
     /// ACP questions (preserves today's behaviour).
     ///
     /// Mutually exclusive with `response_tx`: a local question never has
@@ -268,7 +245,7 @@ impl QuestionViewState {
 
     /// Create a new question view state with an ACP response sender.
     ///
- /// Called by the `ExtMethod` handler when a blocking `legacy ext RPC`
+    /// Called by the `ExtMethod` handler when a blocking `legacy ext RPC`
     /// request arrives from the shell coordinator.
     pub fn with_response_tx(
         tool_call_id: String,
@@ -859,96 +836,6 @@ impl QuestionViewState {
         option.preview.as_deref()
     }
 
-    /// Either stage of the `/feedback` card (report or trace consent).
-    pub fn is_feedback(&self) -> bool {
-        matches!(
-            self.local_kind,
-            Some(LocalQuestionKind::Feedback | LocalQuestionKind::FeedbackTrace { .. })
-        )
-    }
-
-    /// The freeform report stage of the `/feedback` card.
-    pub fn is_feedback_report(&self) -> bool {
-        matches!(self.local_kind, Some(LocalQuestionKind::Feedback))
-    }
-
-    /// The trace-consent stage of the `/feedback` card.
-    pub fn is_feedback_trace(&self) -> bool {
-        matches!(
-            self.local_kind,
-            Some(LocalQuestionKind::FeedbackTrace { .. })
-        )
-    }
-
-    pub fn feedback_report(&self) -> String {
-        self.per_question_freeform
-            .first()
-            .map(|s| s.trim().to_string())
-            .unwrap_or_default()
-    }
-
-    /// Swap the report card for the trace-consent question, keeping the
-    /// stashed prompt. Built through the constructor so the per-question
-    /// vector-length invariant lives in exactly one place.
-    pub fn begin_feedback_trace_stage(
-        &mut self,
-        report: String,
-        images: Vec<crate::prompt_images::PastedImage>,
-    ) {
-        // "Opt in" is a persistent grant, so its description names what it
-        // turns on beyond this one upload.
-        let opt_in_description = if self.feedback_offer_reenables_sharing {
-            "Turns on trace upload for future sessions on this machine and switches coding \
-             data sharing back on for this account."
-        } else {
-            "Turns on trace upload for future sessions on this machine (change any time with \
-             [telemetry] trace_upload in config.toml)."
-        };
-        let question = Question {
-            question: FEEDBACK_TRACE_QUESTION_LABEL.to_string(),
-            options: vec![
-                QuestionOption {
-                    label: "Opt in".into(),
-                    description: opt_in_description.into(),
-                    preview: None,
-                    id: Some(FEEDBACK_TRACE_OPTION_OPT_IN.into()),
-                },
-                QuestionOption {
-                    label: "Opt out this time".into(),
-                    description: String::new(),
-                    preview: None,
-                    id: Some(FEEDBACK_TRACE_OPTION_OPT_OUT.into()),
-                },
-                QuestionOption {
-                    label: "Opt out and don't ask again".into(),
-                    description: String::new(),
-                    preview: None,
-                    id: Some(FEEDBACK_TRACE_OPTION_NEVER_ASK.into()),
-                },
-            ],
-            multi_select: Some(false),
-            id: None,
-        };
-        let mut next = QuestionViewState::new(
-            std::mem::take(&mut self.tool_call_id),
-            vec![question],
-            std::mem::take(&mut self.stashed_prompt),
-        );
-        next.selections = vec![QuestionSelection::Single(Some(0))];
-        next.no_freeform = true;
-        next.fullscreen = self.fullscreen;
-        // Card-open time spans both stages (pause accounting).
-        next.opened_at = self.opened_at;
-        next.opened_at_wall_ms = self.opened_at_wall_ms;
-        next.feedback_offer_trace = self.feedback_offer_trace;
-        next.feedback_offer_reenables_sharing = self.feedback_offer_reenables_sharing;
-        next.local_kind = Some(LocalQuestionKind::FeedbackTrace {
-            report,
-            images: images.into(),
-        });
-        *self = next;
-    }
-
     /// Labels of the selected options for a given question.
     pub fn selected_labels(&self, question_idx: usize) -> Vec<String> {
         let Some(sel) = self.selections.get(question_idx) else {
@@ -1003,13 +890,12 @@ impl QuestionViewState {
     /// - Notes included when freeform text is non-empty and selected.
     pub fn build_accepted_response(
         &self,
-    ) -> pi_tools::implementations::grok_build::ask_user_question::AskUserQuestionExtResponse
-    {
+    ) -> pi_tools::implementations::grok_build::ask_user_question::AskUserQuestionExtResponse {
         use indexmap::IndexMap;
-        use std::collections::HashMap;
         use pi_tools::implementations::grok_build::ask_user_question::{
             AskUserQuestionExtResponse, QuestionAnnotation,
         };
+        use std::collections::HashMap;
 
         let mut answers = IndexMap::new();
         let mut annotations: HashMap<String, QuestionAnnotation> = HashMap::new();
@@ -1281,50 +1167,6 @@ pub const QUESTION_VIEW_HPAD: u16 = 5;
 ///   Single: `X (●) ` = 1 + 1 + 3 + 1 = 6
 pub fn option_prefix_w(_question: &Question) -> usize {
     6 // both multi and single use 3-char markers now
-}
-
-/// Report area of the bare `/feedback` card: a multi-line box standing in for the option rows, shared by the full TUI and minimal renderers.
-/// `draw` needs a blank [`crate::views::prompt_widget::PromptInfo`] to put the bottom rule in place.
-pub mod feedback_input {
-    use super::{PromptBg, PromptStyle, QUESTION_VIEW_HPAD, Theme};
-
-    /// Rows at rest: top rule, five text rows, bottom rule. The box grows with the report up to the caller's cap.
-    pub const HEIGHT: u16 = 7;
-
-    /// Rows of that height spent on the outline rather than text.
-    pub const CHROME_H: u16 = 2;
-
-    /// Smallest box that can still carry its outline: the two rules plus one row of text. Below this the renderers drop to [`flat_style`].
-    pub const MIN_HEIGHT: u16 = CHROME_H + 1;
-
-    /// Shown while the box is empty, including while it has focus.
-    pub const PLACEHOLDER: &str = "Please provide as much detail as possible.";
-
-    /// The card's content column, so the box lines up under the label.
-    pub fn width(area_width: u16) -> u16 {
-        area_width.saturating_sub(QUESTION_VIEW_HPAD)
-    }
-
-    pub fn style(theme: &Theme) -> PromptStyle {
-        PromptStyle {
-            // Sits on the card, so it takes the card's surface rather than the composer's, and pads symmetrically inside its own rules.
-            bg: PromptBg::Panel(theme.bg_light),
-            chrome_pad_right: 2,
-            placeholder_when_focused: true,
-            placeholder_override: Some(PLACEHOLDER),
-            ..PromptStyle::default()
-        }
-    }
-
-    /// Unoutlined variant for a panel too short to spare the two rows the rules cost.
-    pub fn flat_style(theme: &Theme) -> PromptStyle {
-        PromptStyle {
-            vpad_top: 0,
-            chrome: false,
-            show_borders: false,
-            ..style(theme)
-        }
-    }
 }
 
 /// Width available for inline prompt text given the full area width.
@@ -2318,61 +2160,6 @@ mod tests {
                 "chrome accounting vs render drift at content_w={content_w}"
             );
         }
-    }
-
-    #[test]
-    fn begin_feedback_trace_stage_swaps_report_for_consent_options() {
-        let mut state = QuestionViewState::new(
-            "fb".into(),
-            vec![Question {
-                question: FEEDBACK_QUESTION_LABEL.into(),
-                options: vec![],
-                multi_select: Some(false),
-                id: None,
-            }],
-            StashedPrompt::default(),
-        )
-        .with_local_kind(LocalQuestionKind::Feedback);
-        state.per_question_freeform[0] = "clipboard is broken over ssh".into();
-
-        state.begin_feedback_trace_stage(state.feedback_report(), vec![]);
-
-        assert!(
-            state.is_feedback(),
-            "trace stage is still the feedback card"
-        );
-        assert!(state.is_feedback_trace());
-        assert!(!state.is_feedback_report());
-        assert_eq!(state.questions.len(), 1);
-        assert_eq!(state.questions[0].question, FEEDBACK_TRACE_QUESTION_LABEL);
-        assert_eq!(state.questions[0].options.len(), 3);
-        assert_eq!(
-            state.questions[0].options[2].label,
-            "Opt out and don't ask again"
-        );
-        assert_eq!(
-            state.questions[0]
-                .options
-                .iter()
-                .map(|o| o.id.as_deref())
-                .collect::<Vec<_>>(),
-            vec![
-                Some(FEEDBACK_TRACE_OPTION_OPT_IN),
-                Some(FEEDBACK_TRACE_OPTION_OPT_OUT),
-                Some(FEEDBACK_TRACE_OPTION_NEVER_ASK),
-            ],
-            "consent maps from ids, so every option must carry one"
-        );
-        assert!(
-            matches!(state.selections[0], QuestionSelection::Single(Some(0))),
-            "turning trace upload on is the default"
-        );
-        assert!(state.no_freeform, "consent card has no free-text row");
-        assert_eq!(state.focus, QuestionFocus::Navigation);
-        let Some(LocalQuestionKind::FeedbackTrace { report, .. }) = &state.local_kind else {
-            panic!("local kind must carry the report");
-        };
-        assert_eq!(report, "clipboard is broken over ssh");
     }
 
     /// Helper: build a question with N options.

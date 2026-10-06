@@ -70,19 +70,10 @@ pub enum TimelineHit {
 }
 
 /// Columns to reserve for the rail this frame — the single eligibility
-/// policy (setting, view kind, terminal width, turn count). Geometry
-/// feasibility (enough rows) stays in [`compute_rail`].
-pub fn rail_width(
-    show_timeline: bool,
-    is_subagent_view: bool,
-    area_width: u16,
-    turn_count: usize,
-) -> u16 {
-    if show_timeline
-        && !is_subagent_view
-        && area_width >= MIN_TERMINAL_WIDTH
-        && turn_count >= MIN_TURNS
-    {
+/// policy (setting, terminal width, turn count). Geometry feasibility
+/// (enough rows) stays in [`compute_rail`].
+pub fn rail_width(show_timeline: bool, area_width: u16, turn_count: usize) -> u16 {
+    if show_timeline && area_width >= MIN_TERMINAL_WIDTH && turn_count >= MIN_TURNS {
         RAIL_WIDTH
     } else {
         0
@@ -540,11 +531,10 @@ mod tests {
     #[test]
     fn rail_width_gates_eligibility() {
         // All conditions met → rail columns reserved.
-        assert_eq!(rail_width(true, false, 80, 5), RAIL_WIDTH);
-        // Setting off / subagent view / narrow terminal / too few turns.
-        assert_eq!(rail_width(false, false, 80, 5), 0);
-        assert_eq!(rail_width(true, true, 80, 5), 0);
-        assert_eq!(rail_width(true, false, MIN_TERMINAL_WIDTH - 1, 5), 0);
-        assert_eq!(rail_width(true, false, 80, 1), 0);
+        assert_eq!(rail_width(true, 80, 5), RAIL_WIDTH);
+        // Setting off / narrow terminal / too few turns.
+        assert_eq!(rail_width(false, 80, 5), 0);
+        assert_eq!(rail_width(true, MIN_TERMINAL_WIDTH - 1, 5), 0);
+        assert_eq!(rail_width(true, 80, 1), 0);
     }
 }

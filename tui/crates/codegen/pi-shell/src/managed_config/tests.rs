@@ -1,20 +1,5 @@
 use super::*;
 
-/// Fail closed only for a managed principal AND compromised policy; every other combination proceeds.
-#[test]
-fn gate_blocks_only_managed_principal_with_compromised_policy() {
-    // The one blocking case.
-    assert!(
-        managed_policy_gate_decision(true, true).is_err(),
-        "managed principal + compromised policy must fail closed"
-    );
-    // Policy intact / opted-out → proceed even for a managed principal.
-    assert!(managed_policy_gate_decision(true, false).is_ok());
-    // No managed principal → nothing to enforce.
-    assert!(managed_policy_gate_decision(false, true).is_ok());
-    assert!(managed_policy_gate_decision(false, false).is_ok());
-}
-
 /// Writes both artifacts and overwrites in place on re-fetch.
 #[test]
 fn apply_writes_and_overwrites_artifacts() {
@@ -412,8 +397,7 @@ fn purge_keeps_marker_when_an_artifact_removal_fails() {
 
     remove_managed_config_files(home);
     assert!(
-        home.join(pi_config::MANAGED_CONFIG_CACHE_FILE)
-            .exists(),
+        home.join(pi_config::MANAGED_CONFIG_CACHE_FILE).exists(),
         "a failed artifact removal must keep the marker (detector stays armed)"
     );
 
@@ -424,9 +408,7 @@ fn purge_keeps_marker_when_an_artifact_removal_fails() {
         assert!(!home.join(name).exists(), "{name} must be purged");
     }
     assert!(
-        !home
-            .join(pi_config::MANAGED_CONFIG_CACHE_FILE)
-            .exists(),
+        !home.join(pi_config::MANAGED_CONFIG_CACHE_FILE).exists(),
         "with every artifact removed, the marker goes last"
     );
 }
@@ -479,20 +461,6 @@ fn claim_persists_only_when_bound_to_served_principal() {
 #[test]
 fn absent_claim_is_skipped() {
     assert!(verified_claim_sidecar(&ManagedConfigResponse::default(), Some("team-007")).is_none());
-}
-
-/// The startup label: a deployment key wins outright, and an unreadable
-/// `auth.json` is `unknown`, never `personal` — the sync still runs and
-/// mislabeling it would hide the deployment-cost split.
-#[test]
-fn auth_mode_classification() {
-    use pi_telemetry::startup::AuthMode;
-    let err = || std::io::Error::other("unreadable");
-    assert_eq!(auth_mode(true, &Ok(true)), AuthMode::Deployment);
-    assert_eq!(auth_mode(true, &Err(err())), AuthMode::Deployment);
-    assert_eq!(auth_mode(false, &Ok(true)), AuthMode::Team);
-    assert_eq!(auth_mode(false, &Ok(false)), AuthMode::Personal);
-    assert_eq!(auth_mode(false, &Err(err())), AuthMode::Unknown);
 }
 
 /// The `GROK_CONFIG` overlay must not arm or disarm the managed-config sync gate:

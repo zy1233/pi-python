@@ -666,12 +666,8 @@ pub struct PlanViewerExtras {
     pub last_click_at: Option<std::time::Instant>,
     pub gutter_drag_start: Option<usize>,
     pub gutter_drag_end: Option<usize>,
-    pub gutter_hovered_line: Option<usize>,
     pub active_commenting_range: Option<std::ops::Range<usize>>,
 }
-
-/// Double-click detection threshold in milliseconds.
-pub const DOUBLE_CLICK_MS: u128 = 400;
 
 /// State for the line viewer popup.
 pub struct LineViewerState {
@@ -687,8 +683,6 @@ pub struct LineViewerState {
     pub list_state: ListPaneState,
     /// The element ID being modified (if editing an existing element).
     pub element_id: Option<ElementId>,
-    /// Whether we're inside an undo group (to close/cancel on exit).
-    pub in_undo_group: bool,
     /// Cached inner popup area from last render (for mouse hit-testing).
     /// Excludes the divider + footer rows in plan modes, so it matches
     /// the area the ListPane was rendered into — used for routing list
@@ -766,7 +760,6 @@ impl LineViewerState {
             source_lines,
             list_state,
             element_id,
-            in_undo_group: false,
             last_popup_area: None,
             last_modal_area: None,
             close_button_area: None,
@@ -828,7 +821,6 @@ impl LineViewerState {
             source_lines,
             list_state,
             element_id,
-            in_undo_group: false,
             last_popup_area: None,
             last_modal_area: None,
             close_button_area: None,

@@ -3,6 +3,7 @@
 #[cfg(test)]
 use super::{ActivePane, AgentViewLayout, PromptInputMode, render_dropdown_chrome};
 use super::{AgentDeferredSend, AgentView};
+#[cfg(test)]
 use crate::actions::ActionRegistry;
 use crate::app::actions::Action;
 use crate::app::app_view::InputOutcome;
@@ -57,33 +58,10 @@ impl AgentView {
         match self.prompt.handle_paste(paste_text) {
             PromptEvent::Edited => {
                 self.prompt.refresh_slash(&self.session.models);
-                if let Some(eff) = self.notify_suggestion_text_changed() {
-                    self.pending_effects.push(eff);
-                }
-                if let Some(eff) = self.notify_plugin_cta_text_changed() {
-                    self.pending_effects.push(eff);
-                }
                 (InputOutcome::Changed, ClipboardTextInsertion::Inserted)
             }
             PromptEvent::Ignored => (InputOutcome::Changed, ClipboardTextInsertion::Failed),
         }
-    }
-    fn reject_shared_queue_image_edit(
-        &mut self,
-        pasted: &crate::prompt_images::PastedImage,
-    ) -> bool {
-        if !matches!(
-            self.prompt_mode,
-            crate::app::queue_edit::PromptMode::EditingQueued {
-                server_id: Some(_),
-                ..
-            }
-        ) {
-            return false;
-        }
-        crate::prompt_images::cleanup_temp_file(pasted);
-        self.show_toast("Images can't be attached when editing a shared queued prompt");
-        true
     }
     /// Enqueue attachment probing off-thread so paste-then-send remains ordered.
     pub(super) fn enqueue_clipboard_attachment_probe(
@@ -96,17 +74,12 @@ impl AgentView {
             &self.session.cwd,
         );
         self.paste_probe_in_flight += 1;
-        let from_feedback_pane = self
-            .question_view
-            .as_ref()
-            .is_some_and(crate::views::question_view::QuestionViewState::is_feedback_report);
         self.pending_effects
             .push(crate::app::actions::Effect::ProbeClipboardAttachment {
                 ctx: crate::app::actions::ClipboardPasteContext {
                     target: crate::app::actions::ClipboardPasteTarget::AgentPrompt {
                         agent_id: self.session.id,
                         images_dir,
-                        from_feedback_pane,
                     },
                     source,
                 },
@@ -157,22 +130,6 @@ impl AgentView {
             ClipboardPasteCompletion, ClipboardPasteFailure, ProbedAttachment,
         };
         self.paste_probe_in_flight = self.paste_probe_in_flight.saturating_sub(1);
-        if matches!(
-            &ctx.target,
-            crate::app::actions::ClipboardPasteTarget::AgentPrompt {
-                from_feedback_pane: true,
-                ..
-            }
-        ) && !self
-            .question_view
-            .as_ref()
-            .is_some_and(crate::views::question_view::QuestionViewState::is_feedback_report)
-        {
-            if let ProbedAttachment::Image(pasted) = &image {
-                crate::prompt_images::cleanup_temp_file(pasted);
-            }
-            return ClipboardPasteCompletion::Dropped;
-        }
         let insert_deferred_text = matches!(
             &image,
             ProbedAttachment::NoRaster
@@ -181,11 +138,6 @@ impl AgentView {
         );
         let attachment = match image {
             ProbedAttachment::Image(pasted) => {
-                if self.reject_shared_queue_image_edit(&pasted) {
-                    return ClipboardPasteCompletion::Failed(
-                        ClipboardPasteFailure::AlreadyReported,
-                    );
-                }
                 let preparation = pasted.preview_preparation();
                 if let Err(msg) = self.prompt.insert_image(pasted) {
                     self.show_toast_ticks(&msg, 150);
@@ -197,12 +149,10 @@ impl AgentView {
                         );
                     }
                     if ctx.source.tip_showing() {
-                        pi_telemetry::session_ctx::log_event(
-                            pi_telemetry::events::ContextualTip {
-                                tip: pi_telemetry::events::ContextualTipKind::ImageInput,
-                                action: pi_telemetry::events::ContextualTipAction::Accepted,
-                            },
-                        );
+                        pi_telemetry::session_ctx::log_event(pi_telemetry::events::ContextualTip {
+                            tip: pi_telemetry::events::ContextualTipKind::ImageInput,
+                            action: pi_telemetry::events::ContextualTipAction::Accepted,
+                        });
                     }
                     self.prompt.refresh_slash(&self.session.models);
                     ClipboardPasteCompletion::Handled
@@ -254,38 +204,12 @@ impl AgentView {
         self.deferred_send.take()
     }
     /// Resume a drained deferred action, re-deriving the payload from the now-updated prompt so the freshly attached image chip (and its
-    /// aligned range) travels with it. Call only when actually reissuing: the interject variant consumes the draft.
+    /// aligned range) travels with it. Call only when actually reissuing.
     pub(crate) fn resume_deferred_send(&mut self, kind: AgentDeferredSend) -> Option<Action> {
         match kind {
             AgentDeferredSend::SendPrompt => {
                 let text = self.prompt.text().to_string();
                 (!text.trim().is_empty()).then_some(Action::SendPrompt(text))
-            }
-            AgentDeferredSend::Interject => {
-                let text = self.prompt.text().trim().to_string();
-                if !ActionRegistry::interjection_possible(
-                    self.session.state.is_turn_running(),
-                    !text.is_empty(),
-                ) {
-                    return None;
-                }
-                let images = self.prompt.drain_images();
-                self.prompt.set_text("");
-                self.note_draft_consumed();
-                Some(Action::SendPromptNow { text, images })
-            }
-            AgentDeferredSend::SubmitFeedback => {
-                if !self
-                    .question_view
-                    .as_ref()
-                    .is_some_and(crate::views::question_view::QuestionViewState::is_feedback_report)
-                {
-                    return None;
-                }
-                match self.submit_question_answers(false) {
-                    crate::app::app_view::InputOutcome::Action(action) => Some(action),
-                    _ => None,
-                }
             }
             AgentDeferredSend::Stash => {
                 self.handle_stash_prompt_key();
@@ -322,31 +246,6 @@ impl AgentView {
         }
         let _ = self.prompt.handle_paste(text);
         InputOutcome::Changed
-    }
-    /// The feedback report pane mirrors the composer's bracketed-paste
-    /// attachment probe (terminals that deliver Cmd+V as `Event::Paste`
-    /// never hit the key path); every other question view stays text-only,
-    /// including the trace-consent stage (same invariant as the key path:
-    /// a paste there would land in the hidden prompt and never reach the
-    /// committed report).
-    pub(super) fn route_question_paste(&mut self, text: &str) -> InputOutcome {
-        if !self
-            .question_view
-            .as_ref()
-            .is_some_and(crate::views::question_view::QuestionViewState::is_feedback_report)
-        {
-            return self.route_popup_paste(text);
-        }
-        if let Some((outcome, _)) = self.try_handle_dropped_paths_paste(text) {
-            return outcome;
-        }
-        self.probe_attachment_around_bracketed_insert(text, |view| {
-            let insertion = match view.prompt.handle_paste(text) {
-                PromptEvent::Edited => crate::app::actions::ClipboardTextInsertion::Inserted,
-                PromptEvent::Ignored => crate::app::actions::ClipboardTextInsertion::Failed,
-            };
-            (InputOutcome::Changed, insertion)
-        })
     }
     /// The bracketed-paste attachment-probe protocol, shared by the composer
     /// arm and the feedback pane: snapshot the clipboard gate BEFORE the text
@@ -466,12 +365,6 @@ impl AgentView {
         if inserted_image || inserted_non_image {
             self.prompt.refresh_slash(&self.session.models);
         }
-        if inserted_non_image && let Some(eff) = self.notify_suggestion_text_changed() {
-            self.pending_effects.push(eff);
-        }
-        if inserted_non_image && let Some(eff) = self.notify_plugin_cta_text_changed() {
-            self.pending_effects.push(eff);
-        }
         let completion = if inserted_image || inserted_non_image {
             crate::app::actions::ClipboardPasteCompletion::Handled
         } else {
@@ -500,9 +393,6 @@ impl AgentView {
         &mut self,
         mut pasted: crate::prompt_images::PastedImage,
     ) -> bool {
-        if self.reject_shared_queue_image_edit(&pasted) {
-            return false;
-        }
         let preparation = pasted.preview_preparation();
         if let Some(images_dir) = crate::prompt_images::session_images_dir(
             self.session.session_id.as_ref(),
@@ -554,7 +444,6 @@ pub(super) mod paste_key_tests {
                 yolo_mode: false,
                 auto_mode: false,
                 prompt_history: Vec::new(),
-                prompt_history_loading: false,
                 loading_replay: false,
                 restore_degree: None,
                 rate_limited: false,
@@ -567,9 +456,6 @@ pub(super) mod paste_key_tests {
                 model_switch_pending: false,
                 user_model_preference: None,
                 deferred_model_switch: None,
-                bg_tasks: std::collections::BTreeMap::new(),
-                bg_tool_call_to_task: std::collections::HashMap::new(),
-                scheduled_tasks: std::collections::HashMap::new(),
                 in_flight_prompt: None,
                 compact_held_prompt: None,
                 current_prompt_id: None,
@@ -1482,90 +1368,6 @@ pub(super) mod paste_key_tests {
             "bracketed paste must clear the clipboard-image tip"
         );
     }
-    /// `show_ephemeral_tip` refuses shows that cannot paint, so no seen count,
-    /// TTL, or telemetry burns invisibly: an unknown/short terminal, or any
-    /// occluding view. One case per occluder predicate term — a per-term typo
-    /// (wrong field, duplicate, omission) fails exactly one assertion — closed
-    /// by a non-vacuous success that shows and counts.
-    #[test]
-    fn ephemeral_tip_show_refused_while_unrenderable() {
-        use std::collections::HashMap;
-        let mut agent = make_agent();
-        let mut counts: HashMap<&'static str, u32> = HashMap::new();
-        let gated = || {
-            crate::tips::EphemeralTip::new("t", ratatui::text::Line::from("hint"))
-                .with_session_seen_cap("t_seen", 1)
-        };
-        let assert_refused =
-            |agent: &mut AgentView, counts: &mut HashMap<&'static str, u32>, why: &str| {
-                assert!(!agent.show_ephemeral_tip(gated(), counts), "{why}");
-                assert!(!agent.ephemeral_tip.is_active(), "{why}: tip must not show");
-                assert!(counts.is_empty(), "{why}: must not burn a count");
-            };
-        assert_refused(&mut agent, &mut counts, "unknown size");
-        agent.last_terminal_size = (80, 16);
-        assert_refused(&mut agent, &mut counts, "short terminal");
-        agent.last_terminal_size = (80, 30);
-        agent.active_subagent = Some("child".into());
-        assert_refused(&mut agent, &mut counts, "subagent takeover");
-        agent.active_subagent = None;
-        agent.line_viewer =
-            crate::views::file_search::line_viewer::LineViewerState::open_markdown_content(
-                "x.md",
-                "body".to_string(),
-                None,
-            );
-        assert!(agent.line_viewer.is_some(), "line viewer fixture must open");
-        assert_refused(&mut agent, &mut counts, "line viewer");
-        agent.line_viewer = None;
-        agent.image_viewer = Some(
-            crate::prompt_images::ImageViewerState::open_from_path_deferred(std::path::Path::new(
-                "x.png",
-            )),
-        );
-        assert_refused(&mut agent, &mut counts, "image viewer");
-        agent.image_viewer = None;
-        agent.video_viewer = Some(crate::prompt_images::VideoViewerState::test_stub());
-        assert_refused(&mut agent, &mut counts, "video viewer");
-        agent.video_viewer = None;
-        agent.block_viewer = Some(crate::views::block_viewer::BlockViewerPane::for_plain_text(
-            "t", "content",
-        ));
-        assert_refused(&mut agent, &mut counts, "block viewer");
-        agent.block_viewer = None;
-        agent.gboom = Some(crate::gboom::GboomState::new());
-        assert_refused(&mut agent, &mut counts, "gboom");
-        agent.gboom = None;
-        agent.extensions_modal = Some(crate::views::extensions_modal::ExtensionsModalState::new(
-            crate::views::extensions_modal::ExtensionsTab::Hooks,
-        ));
-        assert_refused(&mut agent, &mut counts, "extensions modal");
-        agent.extensions_modal = None;
-        agent.agents_modal = Some(crate::views::agents_modal::AgentsModalState::new(
-            std::path::Path::new("/nonexistent"),
-            &HashMap::new(),
-            &crate::app::bundle::BundleState::default(),
-            None,
-            None,
-            None,
-        ));
-        assert_refused(&mut agent, &mut counts, "agents modal");
-        agent.agents_modal = None;
-        agent.show_goal_detail = true;
-        agent.goal_state = Some(crate::app::agent::GoalDisplayState::test_stub());
-        assert_refused(&mut agent, &mut counts, "goal detail overlay");
-        agent.show_goal_detail = false;
-        agent.goal_state = None;
-        agent.prompt.suggestions.dropdown.open = true;
-        assert_refused(&mut agent, &mut counts, "prompt dropdown");
-        agent.prompt.suggestions.dropdown.open = false;
-        assert!(
-            agent.show_ephemeral_tip(gated(), &mut counts),
-            "renderable show must take the slot"
-        );
-        assert!(agent.ephemeral_tip.is_active());
-        assert_eq!(counts.get("t_seen"), Some(&1));
-    }
     /// A resize event must close the show gate until the next draw
     /// re-measures — in EITHER direction. The recorded height describes a
     /// possibly chrome-shrunk paint rect (dashboard overlay header/popup,
@@ -2089,94 +1891,6 @@ pub(super) mod paste_key_tests {
         );
         assert!(!agent.inline_media_load_failed.contains_key(&path));
     }
-    /// Draining an agent with live inline-media placements returns delete
-    /// escapes for every placed id — including ids placed by subagent
-    /// fullscreen views — and resets the tracking state so the next draw
-    /// re-transmits (used when another view takes over the frame and the
-    /// agent's per-frame clears stop running).
-    #[test]
-    fn take_inline_media_clear_escapes_drains_placements() {
-        let mut agent = make_agent();
-        agent
-            .inline_media_ids
-            .insert(std::path::PathBuf::from("/tmp/a.png"), 2);
-        agent
-            .inline_media_ids
-            .insert(std::path::PathBuf::from("/tmp/b.png"), 3);
-        agent.last_placed_ids = [2, 3].into_iter().collect();
-        agent.inline_media_active = true;
-        let mut child = make_agent();
-        child
-            .inline_media_ids
-            .insert(std::path::PathBuf::from("/tmp/c.png"), 4);
-        child.inline_media_active = true;
-        agent
-            .subagent_views
-            .insert("child-sid".into(), Box::new(child));
-        let esc = agent
-            .take_inline_media_clear_escapes()
-            .expect("drains placed media");
-        assert!(
-            esc.contains(&crate::terminal::image::clear_kitty_image(2)),
-            "deletes id 2: {esc:?}"
-        );
-        assert!(
-            esc.contains(&crate::terminal::image::clear_kitty_image(3)),
-            "deletes id 3: {esc:?}"
-        );
-        assert!(
-            esc.contains(&crate::terminal::image::clear_kitty_image(4)),
-            "deletes the subagent view's id 4: {esc:?}"
-        );
-        assert!(!agent.inline_media_active);
-        assert!(agent.inline_media_ids.is_empty());
-        assert!(agent.last_placed_ids.is_empty());
-        assert!(agent.inline_video.is_none());
-        assert!(agent.take_inline_media_clear_escapes().is_none());
-    }
-    /// An agent with no placements has nothing to clear.
-    #[test]
-    fn take_inline_media_clear_escapes_none_when_no_placements() {
-        let mut agent = make_agent();
-        assert!(agent.take_inline_media_clear_escapes().is_none());
-    }
-    /// The own-only drain deletes this view's placements but leaves
-    /// `subagent_views` untouched, so the fullscreen takeover doesn't force
-    /// the active child into a pointless re-transmit.
-    #[test]
-    fn take_own_inline_media_clear_escapes_leaves_children() {
-        let mut agent = make_agent();
-        agent
-            .inline_media_ids
-            .insert(std::path::PathBuf::from("/tmp/a.png"), 2);
-        agent.last_placed_ids = [2].into_iter().collect();
-        agent.inline_media_active = true;
-        let mut child = make_agent();
-        child
-            .inline_media_ids
-            .insert(std::path::PathBuf::from("/tmp/c.png"), 4);
-        child.inline_media_active = true;
-        agent
-            .subagent_views
-            .insert("child-sid".into(), Box::new(child));
-        let esc = agent
-            .take_own_inline_media_clear_escapes()
-            .expect("drains own placed media");
-        assert!(
-            esc.contains(&crate::terminal::image::clear_kitty_image(2)),
-            "deletes own id 2: {esc:?}"
-        );
-        assert!(
-            !esc.contains(&crate::terminal::image::clear_kitty_image(4)),
-            "must not delete the child's id 4: {esc:?}"
-        );
-        assert!(!agent.inline_media_active);
-        assert!(agent.inline_media_ids.is_empty());
-        assert!(agent.last_placed_ids.is_empty());
-        let child = agent.subagent_views.get("child-sid").unwrap();
-        assert!(child.inline_media_active);
-        assert_eq!(child.inline_media_ids.len(), 1);
-    }
     /// Draw one 80x30 frame — shared fixture for the subagent-takeover
     /// inline-media regression tests below.
     fn draw_media_frame(agent: &mut AgentView) {
@@ -2184,7 +1898,6 @@ pub(super) mod paste_key_tests {
         let area = ratatui::layout::Rect::new(0, 0, 80, 30);
         let mut buf = ratatui::buffer::Buffer::empty(area);
         let mut scratch = crate::scrollback::render::ScratchBuffer::new();
-        let bundle = crate::app::bundle::BundleState::default();
         agent.draw(
             area,
             &mut buf,
@@ -2193,9 +1906,6 @@ pub(super) mod paste_key_tests {
             None,
             false,
             crate::app::agent_view::BannerSlotParams::none(),
-            &bundle,
-            false,
-            false,
             &mut Vec::new(),
             crate::app::agent_view::AppRenderParams::default(),
         );
@@ -2240,53 +1950,6 @@ pub(super) mod paste_key_tests {
             "the post-draw drain must purge the dropped frame set"
         );
     }
-    /// Entering the fullscreen subagent view must delete the parent's Kitty
-    /// placements: the takeover early-returns before every normal per-frame
-    /// clear path, and Kitty images survive cell overdraw, so without the
-    /// takeover-time drain the parent's image bleeds through the child view.
-    #[test]
-    fn subagent_fullscreen_draw_clears_parent_inline_media() {
-        let mut agent = make_agent();
-        agent
-            .inline_media_ids
-            .insert(std::path::PathBuf::from("/tmp/a.png"), 2);
-        agent.last_placed_ids = [2].into_iter().collect();
-        agent.inline_media_active = true;
-        agent
-            .subagent_views
-            .insert("child-sid".into(), Box::new(make_agent()));
-        agent.active_subagent = Some("child-sid".into());
-        draw_media_frame(&mut agent);
-        assert!(
-            !agent.inline_media_active,
-            "takeover frame must drain the parent's inline media"
-        );
-        assert!(agent.inline_media_ids.is_empty());
-        assert!(agent.last_placed_ids.is_empty());
-    }
-    /// Symmetric regression: after the fullscreen subagent view closes, the
-    /// child's per-frame clears stop running, so the parent's next normal draw
-    /// must delete whatever the child placed while fullscreen.
-    #[test]
-    fn draw_after_subagent_close_clears_child_inline_media() {
-        let mut agent = make_agent();
-        let mut child = make_agent();
-        child
-            .inline_media_ids
-            .insert(std::path::PathBuf::from("/tmp/c.png"), 4);
-        child.inline_media_active = true;
-        agent
-            .subagent_views
-            .insert("child-sid".into(), Box::new(child));
-        assert!(agent.active_subagent.is_none(), "subagent view is closed");
-        draw_media_frame(&mut agent);
-        let child = agent.subagent_views.get("child-sid").unwrap();
-        assert!(
-            !child.inline_media_active,
-            "normal draw must drain a closed subagent view's inline media"
-        );
-        assert!(child.inline_media_ids.is_empty());
-    }
     fn ctrl_v_key() -> KeyEvent {
         key!('v', CONTROL).to_key_event()
     }
@@ -2327,7 +1990,6 @@ pub(super) mod paste_key_tests {
             target: crate::app::actions::ClipboardPasteTarget::AgentPrompt {
                 agent_id: agent.session.id,
                 images_dir: None,
-                from_feedback_pane: false,
             },
             source: crate::app::actions::ClipboardPasteSource::ClipboardKey {
                 text: crate::app::actions::ClipboardTextRead::Success(
@@ -2336,43 +1998,6 @@ pub(super) mod paste_key_tests {
                 tip_showing: false,
             },
         }
-    }
-    /// A probe the feedback pane started must not attach into whatever
-    /// replaced the pane: Esc restores the pre-slash composer draft, and the
-    /// completion has to drop the screenshot (and its staged file) instead.
-    #[test]
-    fn feedback_pane_probe_completing_after_dismissal_is_dropped() {
-        let mut agent = make_agent();
-        let ctx = crate::app::actions::ClipboardPasteContext {
-            target: crate::app::actions::ClipboardPasteTarget::AgentPrompt {
-                agent_id: agent.session.id,
-                images_dir: None,
-                from_feedback_pane: true,
-            },
-            source: crate::app::actions::ClipboardPasteSource::ClipboardKey {
-                text: crate::app::actions::ClipboardTextRead::Success(None),
-                tip_showing: false,
-            },
-        };
-        let dir = tempfile::tempdir().unwrap();
-        let staged = dir.path().join("staged.png");
-        std::fs::write(&staged, b"staged").unwrap();
-        let mut pasted = crate::prompt_images::from_clipboard_data(&test_image_data());
-        pasted.staged_temp_path = Some(staged.clone());
-        let completion = agent.complete_clipboard_attachment_paste(
-            ctx,
-            crate::app::actions::ProbedAttachment::Image(pasted),
-            None,
-        );
-        assert_eq!(
-            completion,
-            crate::app::actions::ClipboardPasteCompletion::Dropped
-        );
-        assert!(
-            agent.prompt.images.is_empty(),
-            "the screenshot must not become a composer chip"
-        );
-        assert!(!staged.exists(), "the staged temp file must be deleted");
     }
     /// Drive a real Cmd+V that finds a raster (defers), then complete the probe
     /// with a decoded image — the full shipped image-paste path through the

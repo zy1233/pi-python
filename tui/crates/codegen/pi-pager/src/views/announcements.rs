@@ -166,10 +166,7 @@ pub fn is_dismissible(a: &pi_announcements::RemoteAnnouncement) -> bool {
 /// dismissible items: an explicit `dismissible: false` stays selectable even
 /// with its hide key stored, so flipping the flag server-side resurrects a
 /// previously-hidden banner (the remote config stays source of truth).
-fn is_hidden(
-    a: &pi_announcements::RemoteAnnouncement,
-    hidden_ids: &BTreeSet<String>,
-) -> bool {
+fn is_hidden(a: &pi_announcements::RemoteAnnouncement, hidden_ids: &BTreeSet<String>) -> bool {
     is_dismissible(a) && hidden_ids.contains(&pi_announcements::announcement_hide_key(a))
 }
 
@@ -307,11 +304,7 @@ pub fn first_session_announcement_at<'a>(
 pub(crate) fn promo_cta<'a>(
     announcements: &'a [pi_announcements::RemoteAnnouncement],
     hidden_ids: &BTreeSet<String>,
-) -> Option<(
-    &'a pi_announcements::RemoteAnnouncement,
-    &'a str,
-    &'a str,
-)> {
+) -> Option<(&'a pi_announcements::RemoteAnnouncement, &'a str, &'a str)> {
     let owner = first_session_announcement(announcements, hidden_ids).filter(|a| is_promo(a))?;
     let (label, url) = usable_cta(owner)?;
     Some((owner, label, url))
@@ -327,35 +320,11 @@ pub fn promo_cta_target<'a>(
     promo_cta(announcements, hidden_ids).map(|(owner, _label, url)| (owner, url))
 }
 
-/// Hide keys of every live (non-expired) session-surfaced announcement
-/// (critical or promo) — the set `/announcements show` clears, matching the
-/// selection's meaning of visible; prune owns cleanup of keys for
-/// expired-but-still-listed items.
-pub fn session_announcement_hide_keys(
-    announcements: &[pi_announcements::RemoteAnnouncement],
-) -> Vec<String> {
-    session_announcement_hide_keys_at(announcements, chrono::Utc::now())
-}
-
-/// [`session_announcement_hide_keys`] with an injectable clock.
-pub fn session_announcement_hide_keys_at(
-    announcements: &[pi_announcements::RemoteAnnouncement],
-    now: chrono::DateTime<chrono::Utc>,
-) -> Vec<String> {
-    visible_announcements(announcements)
-        .into_iter()
-        .filter(|a| is_live_session_announcement(a, now))
-        .map(pi_announcements::announcement_hide_key)
-        .collect()
-}
-
 /// Slash-gate predicate: any live session-surfaced announcement (critical or
 /// promo) exists, deliberately IGNORING the hidden set (unlike the banner
 /// selection above) so `/announcements show` stays reachable while
 /// everything is hidden.
-pub fn has_session_announcements(
-    announcements: &[pi_announcements::RemoteAnnouncement],
-) -> bool {
+pub fn has_session_announcements(announcements: &[pi_announcements::RemoteAnnouncement]) -> bool {
     let now = chrono::Utc::now();
     visible_announcements(announcements)
         .into_iter()
@@ -815,53 +784,6 @@ mod tests {
         );
     }
 
-    /// Show's clear set matches the selection's meaning of visible: live
-    /// (non-expired) criticals and promos only — expired keys are prune's job.
-    #[test]
-    fn session_hide_keys_cover_live_criticals_and_promos_only() {
-        let mut expired_promo = promo("promo-expired", "gone promo", None);
-        expired_promo.expires_at = Some("2000-01-01T00:00:00Z".into());
-        let list = vec![
-            ann(Some("info"), Some("skip me")),
-            RemoteAnnouncement {
-                id: Some("crit-1".into()),
-                severity: Some("critical".into()),
-                message: Some("one".into()),
-                ..Default::default()
-            },
-            RemoteAnnouncement {
-                id: None,
-                title: Some("T".into()),
-                severity: Some("critical".into()),
-                message: Some("two".into()),
-                ..Default::default()
-            },
-            RemoteAnnouncement {
-                id: Some("crit-expired".into()),
-                severity: Some("critical".into()),
-                message: Some("gone".into()),
-                expires_at: Some("2000-01-01T00:00:00Z".into()),
-                ..Default::default()
-            },
-            ann(Some("critical"), None), // no message → not visible
-            promo("promo-1", "upsell", Some(("Go", "https://example.com"))),
-            expired_promo,
-        ];
-        let now = chrono::DateTime::parse_from_rfc3339("2020-01-01T00:00:00Z")
-            .unwrap()
-            .with_timezone(&chrono::Utc);
-        let keys = session_announcement_hide_keys_at(&list, now);
-        assert_eq!(
-            keys,
-            vec![
-                "crit-1".to_string(),
-                "content:T\u{1f}two".to_string(),
-                "promo-1".to_string(),
-            ],
-            "expired keys must not be cleared by show; live promo keys must be"
-        );
-    }
-
     #[test]
     fn session_banner_height_zero_for_unfiltered_info_only() {
         let info_only = vec![
@@ -1277,7 +1199,11 @@ mod tests {
     /// partial CTA never produces an openable target (or a painted button).
     #[test]
     fn promo_cta_target_requires_usable_pair() {
-        let full = vec![promo("p", "msg", Some(("Go", " https://example.com/promo ")))];
+        let full = vec![promo(
+            "p",
+            "msg",
+            Some(("Go", " https://example.com/promo ")),
+        )];
         let (a, url) = promo_cta_target(&full, &no_hidden()).expect("usable target");
         assert_eq!(a.id.as_deref(), Some("p"));
         assert_eq!(url, "https://example.com/promo");
@@ -1350,7 +1276,11 @@ mod tests {
     /// promo from a dismissible one.
     #[test]
     fn promo_cta_returns_label_and_pinned_flag() {
-        let mut pinned = promo("p", "msg", Some(("Upgrade Account", "https://example.com/promo")));
+        let mut pinned = promo(
+            "p",
+            "msg",
+            Some(("Upgrade Account", "https://example.com/promo")),
+        );
         pinned.dismissible = Some(false);
         let pinned = [pinned];
         let (owner, label, url) = promo_cta(&pinned, &no_hidden()).expect("usable cta");

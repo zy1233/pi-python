@@ -10,25 +10,19 @@ use crate::notifications::{NotificationCondition, NotificationMethod};
 use crate::terminal::{ByobuBackend, MultiplexerKind, TerminalContext, TerminalName};
 use crate::theme::color_support::ColorLevel;
 
-mod doctor_format;
 mod fix;
 mod model;
-pub mod probes;
+pub(crate) mod probes;
 mod view;
 
-pub use doctor_format::format_doctor;
-#[cfg(test)]
-pub(crate) use fix::test_fix_plan;
 pub use fix::{
-    AutomaticRemediation, DCS_PASSTHROUGH_ID, FixActivation, FixError, FixOutcome, FixPlan,
-    FixRequest, FixStatus, PlannedChange, SSH_WRAP_FIX_COMMAND, SSH_WRAP_ID, SSH_WRAP_ONE_OFF,
-    ShellKind, TMUX_CLIPBOARD_ID, TMUX_EXTENDED_KEYS_ID, TMUX_TRUECOLOR_ID, apply_fix,
-    configured_report, managed_alias_configured, plan_fix, resolve_fix_id,
-    ssh_wrap_automatic_remediation, verify_persistent_fix,
+    AutomaticRemediation, DCS_PASSTHROUGH_ID, FixActivation, FixPlan, FixRequest, ShellKind,
+    TMUX_CLIPBOARD_ID, TMUX_EXTENDED_KEYS_ID, TMUX_TRUECOLOR_ID, apply_fix, configured_report,
+    managed_alias_configured, plan_fix, resolve_fix_id, verify_persistent_fix,
 };
 pub(crate) use fix::{
-    automatic_fix_choices, automatic_remediation_for, format_applicable_automatic_fixes,
-    format_fix_preview, format_fix_success, human_fix_command, select_fix_plan,
+    automatic_remediation_for, format_applicable_automatic_fixes, format_fix_preview,
+    format_fix_success, human_fix_command,
 };
 pub(crate) use model::probe_requires_live_tui;
 pub(crate) use model::{
@@ -43,7 +37,7 @@ pub use model::{
     ProbeStatus, RuntimeFact, TmuxColorPassthrough, TmuxFacts, TmuxOptionFact, TmuxSupportFact,
     VoiceFacts,
 };
-pub use view::{DiagnosticSnapshot, view};
+pub use view::view;
 
 /// Passive input-device probe for `grok doctor` / `/doctor`.
 ///
@@ -566,24 +560,6 @@ fn supports_focus_tracking(brand: TerminalName) -> bool {
     brand != TerminalName::AppleTerminal && !brand.is_capability_unclassified()
 }
 
-/// Collect notification-specific startup warnings.
-///
-/// These complement the general terminal warnings from
-/// [`collect_startup_warnings`] and depend on the resolved notification
-/// protocol and condition.
-pub fn collect_notification_warnings(
-    snapshot: &probes::ProbeSnapshot<'_>,
-    protocol: NotificationProtocol,
-    condition: NotificationCondition,
-) -> Vec<TerminalWarning> {
-    collect_notification_warnings_with_method(
-        snapshot,
-        NotificationMethod::Auto,
-        protocol,
-        condition,
-    )
-}
-
 pub(crate) fn collect_notification_warnings_with_method(
     snapshot: &probes::ProbeSnapshot<'_>,
     method: NotificationMethod,
@@ -657,52 +633,6 @@ pub(crate) fn collect_notification_warnings_with_method(
     }
 
     warnings
-}
-
-#[derive(Clone, Copy)]
-pub(crate) struct TuiRuntimeRequest<'a> {
-    pub workspace: &'a Path,
-    pub notification_method: NotificationMethod,
-    pub notification_protocol: NotificationProtocol,
-    pub notification_condition: NotificationCondition,
-}
-
-/// Interpret current TUI-only notification and sandbox evidence as findings.
-pub(crate) fn collect_tui_runtime_findings(
-    snapshot: &probes::ProbeSnapshot<'_>,
-    method: NotificationMethod,
-    protocol: NotificationProtocol,
-    condition: NotificationCondition,
-    workspace: &Path,
-) -> Vec<DiagnosticFinding> {
-    collect_notification_warnings_with_method(snapshot, method, protocol, condition)
-        .into_iter()
-        .filter_map(view::finding_from_warning)
-        .chain(sandbox_profile_conflict_warning(workspace).and_then(view::finding_from_warning))
-        .collect()
-}
-
-pub(crate) fn merge_tui_runtime_findings(
-    report: &mut DiagnosticReport,
-    runtime_findings: impl IntoIterator<Item = DiagnosticFinding>,
-) {
-    for runtime_finding in runtime_findings {
-        if let Some(existing) = report
-            .findings
-            .iter_mut()
-            .find(|finding| finding.id == runtime_finding.id)
-        {
-            if existing.id == DiagnosticId::new("terminal", "dcs-passthrough") {
-                existing.message = runtime_finding.message;
-                existing.note = Some(match existing.note.take() {
-                    Some(note) => format!("{note} OSC terminal notifications are also blocked."),
-                    None => "OSC terminal notifications are also blocked.".to_owned(),
-                });
-            }
-        } else {
-            report.findings.push(runtime_finding);
-        }
-    }
 }
 
 fn tmux_reload_note(config_path: &str) -> String {
@@ -853,101 +783,6 @@ pub(crate) fn diagnose_wayland_data_control_from_common(
         data_control,
         snapshot.wayland.wl_copy_available,
     )
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct ClipboardDiagnosticsInput<'a> {
-    pub route_native: bool,
-    pub route_tmux: bool,
-    pub route_osc52: bool,
-    pub native_tool: &'a str,
-    pub brand: TerminalName,
-    pub host_os: crate::host::HostOs,
-    pub display_server: crate::host::DisplayServer,
-    pub is_ssh: bool,
-    pub container_no_display: bool,
-    pub osc52_sink: bool,
-    pub wayland_data_control: bool,
-    pub wl_copy_available: bool,
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub struct ClipboardDiagnostics {
-    pub text: String,
-    pub has_issue: bool,
-}
-
-/// Format preflight clipboard routes without claiming that a copy already happened.
-pub fn format_clipboard_diagnostics(input: ClipboardDiagnosticsInput<'_>) -> ClipboardDiagnostics {
-    use crate::clipboard::{
-        ClipboardDelivery, ClipboardEnvironment, NativeClipboardPreflight, expected_delivery,
-        native_clipboard_preflight,
-    };
-
-    let environment = ClipboardEnvironment {
-        brand: input.brand,
-        host_os: input.host_os,
-        display_server: input.display_server,
-        remote: input.is_ssh,
-        container: input.container_no_display,
-        osc52_sink: input.osc52_sink,
-        wayland_data_control: input.wayland_data_control,
-        wl_copy_available: input.wl_copy_available,
-    };
-    let capability = environment.osc52_capability();
-    let native_preflight = native_clipboard_preflight(input.route_native, environment);
-    let delivery = expected_delivery(
-        native_preflight,
-        input.route_tmux,
-        input.route_osc52,
-        environment,
-    );
-    let native = match native_preflight {
-        NativeClipboardPreflight::LocalAvailable => format!("local ({})", input.native_tool),
-        NativeClipboardPreflight::RemoteOnly if input.container_no_display => {
-            format!("container ({})", input.native_tool)
-        }
-        NativeClipboardPreflight::RemoteOnly => format!("remote ({})", input.native_tool),
-        NativeClipboardPreflight::Unavailable => "unavailable".to_owned(),
-        NativeClipboardPreflight::Disabled => "off".to_owned(),
-    };
-    let tmux = if input.route_tmux { "on" } else { "off" };
-    let osc52 = if input.route_osc52 {
-        capability.label()
-    } else {
-        "off"
-    };
-    let wrap = if input.osc52_sink { "on" } else { "off" };
-    let status = match delivery {
-        ClipboardDelivery::Confirmed => "confirmed",
-        ClipboardDelivery::Unverified => "unverified",
-        ClipboardDelivery::Failed => "unavailable",
-    };
-    let has_issue = !delivery.is_confirmed();
-
-    let mut out = String::from("Clipboard\n");
-    out.push_str(&format!("  native       {native}\n"));
-    out.push_str(&format!("  tmux         {tmux}\n"));
-    out.push_str(&format!("  osc 52       {osc52}\n"));
-    out.push_str(&format!("  wrap         {wrap}\n"));
-    if input.display_server == crate::host::DisplayServer::Wayland {
-        out.push_str(&format!(
-            "  data-control {}\n",
-            if input.wayland_data_control {
-                "on"
-            } else {
-                "off"
-            }
-        ));
-    }
-    out.push_str(&format!("  status       {status}\n"));
-    if has_issue {
-        out.push_str("  action       Run /doctor for details and fixes\n");
-    }
-    ClipboardDiagnostics {
-        text: out,
-        has_issue,
-    }
 }
 
 /// Explicit `/doctor` warning when truecolor themes are locked out.
@@ -1284,151 +1119,6 @@ mod tests {
     // =====================================================================
     // diagnose_clipboard_from_values: pure clipboard logic
     // =====================================================================
-
-    fn clipboard_input(brand: TerminalName) -> ClipboardDiagnosticsInput<'static> {
-        ClipboardDiagnosticsInput {
-            route_native: true,
-            route_tmux: false,
-            route_osc52: true,
-            native_tool: "arboard",
-            brand,
-            host_os: crate::host::HostOs::Linux,
-            display_server: crate::host::DisplayServer::Unknown,
-            is_ssh: true,
-            container_no_display: false,
-            osc52_sink: false,
-            wayland_data_control: false,
-            wl_copy_available: false,
-        }
-    }
-
-    #[test]
-    fn clipboard_diagnostics_unknown_ssh_is_unverified() {
-        let diagnostics = format_clipboard_diagnostics(clipboard_input(TerminalName::Unknown));
-        for expected in [
-            "Clipboard",
-            "native       remote (arboard)",
-            "tmux         off",
-            "osc 52       unknown",
-            "wrap         off",
-            "status       unverified",
-            "action       Run /doctor for details and fixes",
-        ] {
-            assert!(
-                diagnostics.text.contains(expected),
-                "missing {expected:?}:\n{}",
-                diagnostics.text
-            );
-        }
-        assert!(diagnostics.has_issue);
-    }
-
-    #[test]
-    fn clipboard_diagnostics_known_terminal_status() {
-        let supported = format_clipboard_diagnostics(clipboard_input(TerminalName::Ghostty));
-        assert!(supported.text.contains("osc 52       supported"));
-        assert!(supported.text.contains("status       confirmed"));
-        assert!(!supported.has_issue);
-
-        let unsupported = format_clipboard_diagnostics(clipboard_input(TerminalName::Vte));
-        assert!(unsupported.text.contains("osc 52       unsupported"));
-        assert!(unsupported.text.contains("status       unavailable"));
-        assert!(
-            unsupported
-                .text
-                .contains("action       Run /doctor for details and fixes")
-        );
-        assert!(unsupported.has_issue);
-
-        let unsupported_container = format_clipboard_diagnostics(ClipboardDiagnosticsInput {
-            is_ssh: false,
-            container_no_display: true,
-            ..clipboard_input(TerminalName::Vte)
-        });
-        assert!(
-            unsupported_container
-                .text
-                .contains("osc 52       unsupported")
-        );
-        assert!(
-            unsupported_container
-                .text
-                .contains("status       unavailable")
-        );
-    }
-
-    #[test]
-    fn clipboard_diagnostics_local_wayland_native_matrix() {
-        for (data_control, wl_copy, expected) in [
-            (false, false, crate::clipboard::ClipboardDelivery::Failed),
-            (false, true, crate::clipboard::ClipboardDelivery::Confirmed),
-            (true, false, crate::clipboard::ClipboardDelivery::Confirmed),
-        ] {
-            let diagnostics = format_clipboard_diagnostics(ClipboardDiagnosticsInput {
-                route_osc52: false,
-                native_tool: if wl_copy { "wl-copy" } else { "arboard" },
-                brand: TerminalName::Vte,
-                display_server: crate::host::DisplayServer::Wayland,
-                is_ssh: false,
-                wayland_data_control: data_control,
-                wl_copy_available: wl_copy,
-                ..clipboard_input(TerminalName::Vte)
-            });
-            assert_eq!(diagnostics.has_issue, !expected.is_confirmed());
-            assert!(diagnostics.text.contains(if data_control {
-                "data-control on"
-            } else {
-                "data-control off"
-            }));
-        }
-    }
-
-    #[test]
-    fn clipboard_diagnostics_tmux_wrap_and_container() {
-        let tmux = format_clipboard_diagnostics(ClipboardDiagnosticsInput {
-            route_tmux: true,
-            route_osc52: false,
-            ..clipboard_input(TerminalName::Unknown)
-        });
-        assert!(tmux.text.contains("tmux         on"));
-        assert!(tmux.text.contains("status       confirmed"));
-
-        let wrapped = format_clipboard_diagnostics(ClipboardDiagnosticsInput {
-            osc52_sink: true,
-            ..clipboard_input(TerminalName::Unknown)
-        });
-        assert!(wrapped.text.contains("osc 52       supported"));
-        assert!(wrapped.text.contains("wrap         on"));
-        assert!(wrapped.text.contains("status       confirmed"));
-
-        let container = format_clipboard_diagnostics(ClipboardDiagnosticsInput {
-            is_ssh: false,
-            container_no_display: true,
-            ..clipboard_input(TerminalName::Unknown)
-        });
-        assert!(container.text.contains("native       container (arboard)"));
-        assert!(container.text.contains("status       unverified"));
-        assert!(
-            container
-                .text
-                .contains("action       Run /doctor for details and fixes")
-        );
-
-        let remote_container = format_clipboard_diagnostics(ClipboardDiagnosticsInput {
-            container_no_display: true,
-            ..clipboard_input(TerminalName::Unknown)
-        });
-        assert!(
-            remote_container
-                .text
-                .contains("native       container (arboard)")
-        );
-        assert!(
-            remote_container
-                .text
-                .contains("action       Run /doctor for details and fixes")
-        );
-    }
 
     #[test]
     fn clipboard_all_good_modern_tmux() {
@@ -2505,46 +2195,6 @@ mod tests {
     }
 
     #[test]
-    fn notification_runtime_findings_map_to_visible_useful_doctor_entries() {
-        let ctx = TerminalContext {
-            brand: TerminalName::Unknown,
-            ..Default::default()
-        };
-        let query = FakeTmuxQuery::healthy_modern();
-        let snapshot = test_snapshot(&ctx, &query, false, true, false, None);
-        let workspace = tempfile::tempdir().unwrap();
-        let findings = collect_tui_runtime_findings(
-            &snapshot,
-            NotificationMethod::Auto,
-            NotificationProtocol::Bel,
-            NotificationCondition::Unfocused,
-            workspace.path(),
-        );
-
-        assert_eq!(
-            findings
-                .iter()
-                .map(|finding| finding.id)
-                .collect::<Vec<_>>(),
-            [
-                NOTIFICATION_PROTOCOL_FALLBACK_ID,
-                FOCUS_TRACKING_UNAVAILABLE_ID,
-            ]
-        );
-        assert!(
-            findings[0]
-                .note
-                .as_deref()
-                .is_some_and(|note| note.contains("bell"))
-        );
-        assert!(findings[1].remediation.as_ref().is_some_and(|remediation| {
-            remediation.fix.contains("condition = \"always\"")
-                && remediation.config_path.as_deref()
-                    == Some(crate::util::display_user_grok_path("config.toml").as_str())
-        }));
-    }
-
-    #[test]
     fn every_production_warning_detector_maps_to_stable_useful_doctor_content() {
         let config_path = "~/.tmux.conf";
         let mut terminal = plain_tmux_ctx();
@@ -2718,53 +2368,6 @@ mod tests {
         assert_eq!(w[0].category, WarningCategory::DcsPassthrough);
         assert!(w[0].message.contains("notification"));
         assert_eq!(w[0].fix.as_deref(), Some("set -wg allow-passthrough on"));
-    }
-
-    #[test]
-    fn runtime_findings_deduplicate_general_and_notification_dcs() {
-        let ctx = plain_tmux_ctx();
-        let query = FakeTmuxQuery {
-            allow_passthrough: Some("off".to_owned()),
-            ..FakeTmuxQuery::healthy_modern()
-        };
-        let snapshot = test_snapshot(&ctx, &query, false, true, false, None);
-        let doctor_snapshot = DiagnosticSnapshot::from_parts(
-            test_snapshot(&ctx, &query, false, true, false, None),
-            probes::ClipboardProbeFacts {
-                route: crate::clipboard::resolve_clipboard_route(&ctx),
-                native_tool: "pbcopy",
-                osc52_sink_active: false,
-            },
-            crate::host::HostOs::Macos,
-            crate::host::DisplayServer::Unknown,
-            false,
-            ColorLevel::TrueColor,
-            snapshot.runtime.into(),
-        );
-        let workspace = tempfile::tempdir().unwrap();
-        let runtime_findings = collect_tui_runtime_findings(
-            &snapshot,
-            NotificationMethod::Osc9,
-            NotificationProtocol::Osc9,
-            NotificationCondition::Always,
-            workspace.path(),
-        );
-        let mut report = view::view(doctor_snapshot);
-        merge_tui_runtime_findings(&mut report, runtime_findings);
-
-        let dcs = report
-            .findings
-            .iter()
-            .filter(|finding| finding.id == DiagnosticId::new("terminal", "dcs-passthrough"))
-            .collect::<Vec<_>>();
-        assert_eq!(dcs.len(), 1);
-        assert!(dcs[0].message.contains("notifications are blocked"));
-        assert!(
-            dcs[0]
-                .note
-                .as_deref()
-                .is_some_and(|note| note.contains("notifications are also blocked"))
-        );
     }
 
     #[test]

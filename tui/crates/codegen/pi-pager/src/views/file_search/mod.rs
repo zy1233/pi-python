@@ -11,9 +11,9 @@
 //! - [`line_viewer`] — centered popup file viewer (Phase 3, not yet implemented)
 //! - [`preview`] — file preview alongside dropdown (Phase 4, not yet implemented)
 
-pub mod context;
+pub(crate) mod context;
 pub mod dropdown;
-pub mod line_viewer;
+pub(crate) mod line_viewer;
 mod state;
 
 pub use context::AtContext;

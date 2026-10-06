@@ -24,6 +24,7 @@
 - 不把官方 `grok` 二进制当产品入口（命令名用 `pi`）。
 - 本期不做 grok marketplace / plugins / worktree / subagent / share URL。
 - 无标准 ACP 对照的斜杠命令（`/compact`、`/model`、`/rewind`、`/effort`、`/context`、`/fork`）从 TUI 菜单拿掉；auto-compact 可在 harness 内静默执行。
+  - **修订（Rust runtime 剥离计划 r3）**：`/model` 实际有标准对照——ACP Session Config Options（`configOptions` 中 `category: "model"` 的 select + `session/set_config_option`），已按此恢复；其余命令仍按本条处理。见 [`PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`](../PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md) ADR3。
 
 ### 1.3 已确认决策
 

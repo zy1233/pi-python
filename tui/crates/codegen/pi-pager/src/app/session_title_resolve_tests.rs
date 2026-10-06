@@ -116,26 +116,7 @@ fn uuid_shaped_arg_never_matches_titles() {
 fn title_miss_hint_escapes_arg_and_suggests_search() {
     let hint = title_miss_hint("evil\ntitle");
     assert!(hint.contains("evil\\ntitle"), "arg must be escaped: {hint}");
-    assert!(
-        hint.contains("zypi --resume"),
-        "missing hint: {hint}"
-    );
-}
-
-/// The worktree defer drops the local zero-match context; the failure
-/// message restores it only for a threaded deferred-miss target. A resolved
-/// legacy non-UUID id (no threaded miss) must not get a false no-match hint.
-#[test]
-fn worktree_failure_message_hint_follows_threaded_provenance() {
-    let msg = worktree_resume_failure_message(Some("typo title"), "restore failed");
-    assert!(msg.contains("couldn't resume worktree session: restore failed"));
-    assert!(msg.contains("no session id or title matched"), "{msg}");
-    assert!(msg.contains("zypi --resume"), "{msg}");
-    let resolved_msg = worktree_resume_failure_message(None, "restore failed");
-    assert_eq!(
-        resolved_msg,
-        "couldn't resume worktree session: restore failed"
-    );
+    assert!(hint.contains("zypi --resume"), "missing hint: {hint}");
 }
 
 /// Regression (production wiring): pinning rewrites the `-r` title to the
@@ -265,7 +246,6 @@ fn pinned_local_ctx() -> crate::app::session_startup::MaterializeCtx {
     crate::app::session_startup::MaterializeCtx {
         has_worktree: false,
         allow_remote_restore: false,
-        chat_mode: false,
         title_resolution: crate::app::session_startup::TitleResolution::PinnedPreSandbox,
         restore_code: false,
         restore_progress_on_stdout: false,

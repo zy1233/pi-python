@@ -23,13 +23,13 @@
 //! `AppView::settings_registry: Arc<SettingsRegistry>` (mirroring the
 //! existing `ActionRegistry` pattern). No `LazyLock`, no global state.
 
-pub mod defs;
-pub mod registry;
+pub(crate) mod defs;
+pub(crate) mod registry;
 
 pub use registry::{
-    CodingDataSharingLock, DynamicEnumSource, EnumChoice, OwnedEnumChoice, PagerLocalSnapshot,
-    SettingCategory, SettingKey, SettingKind, SettingMeta, SettingOwner, SettingValue,
-    SettingsRegistry, StringValidator, canonical_hunk_tracker_mode, canonical_screen_mode,
+    DynamicEnumSource, EnumChoice, OwnedEnumChoice, PagerLocalSnapshot, SettingCategory,
+    SettingKey, SettingKind, SettingMeta, SettingOwner, SettingValue, SettingsRegistry,
+    StringValidator, canonical_hunk_tracker_mode, canonical_screen_mode,
     canonical_voice_capture_mode, canonical_voice_stt_language, current_value_for,
-    default_value_for, dynamic_enum_choices, is_consent_chooser,
+    default_value_for, dynamic_enum_choices,
 };

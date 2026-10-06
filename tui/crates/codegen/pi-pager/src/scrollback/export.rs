@@ -96,7 +96,6 @@ fn tool_summary(tc: &ToolCallBlock) -> String {
         ToolCallBlock::IntegrationSearch(_) => "IntegrationSearch (MCP tool discovery)".into(),
         ToolCallBlock::MemorySearch(_) => "MemorySearch".into(),
         ToolCallBlock::Skill(o) | ToolCallBlock::Other(o) => format!("Tool: {}", o.name),
-        ToolCallBlock::Lifecycle(_) => "Lifecycle event".into(),
     }
 }
 

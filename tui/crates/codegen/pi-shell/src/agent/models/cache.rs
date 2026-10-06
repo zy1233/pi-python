@@ -32,7 +32,6 @@ impl ModelsCache {
 
 pub(crate) struct CacheResult {
     pub(crate) models: IndexMap<String, ModelEntry>,
-    pub(crate) etag: Option<String>,
 }
 
 pub(crate) struct ModelsCacheManager {
@@ -78,7 +77,6 @@ impl ModelsCacheManager {
         tracing::debug!(count = cache.models.len(), "loaded models from disk cache");
         Some(CacheResult {
             models: cache.models,
-            etag: cache.etag,
         })
     }
 
@@ -98,39 +96,6 @@ impl ModelsCacheManager {
             models: models.clone(),
         };
         self.atomic_write(&cache);
-    }
-
-    pub(crate) async fn renew_ttl(&self, expected_auth: &CacheAuthMethod, expected_origin: &str) {
-        let data = match tokio::fs::read(&self.path).await {
-            Ok(data) => data,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
-            Err(e) => {
-                tracing::warn!(error = %e, "models cache TTL renewal: read failed");
-                return;
-            }
-        };
-        let Ok(mut cache) = serde_json::from_slice::<ModelsCache>(&data) else {
-            return;
-        };
-        if cache.auth_method.as_ref() != Some(expected_auth) {
-            tracing::debug!("models cache TTL renewal skipped: auth method mismatch");
-            return;
-        }
-        if cache.origin.as_deref() != Some(expected_origin) {
-            tracing::debug!("models cache TTL renewal skipped: origin mismatch");
-            return;
-        }
-        cache.fetched_at = Utc::now();
-        self.atomic_write_async(&cache).await;
-        tracing::debug!("models cache TTL renewed");
-    }
-
-    pub(crate) fn invalidate(&self) {
-        match std::fs::remove_file(&self.path) {
-            Ok(()) => tracing::info!("models disk cache invalidated"),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => tracing::warn!(error = %e, "failed to invalidate models disk cache"),
-        }
     }
 
     /// Per-writer temp path: `~/.grok` is shared across concurrent CLI
@@ -188,24 +153,6 @@ impl ModelsCacheManager {
             }
         } else {
             let _ = std::fs::remove_file(&tmp);
-        }
-    }
-
-    pub(crate) async fn atomic_write_async(&self, cache: &ModelsCache) {
-        if let Some(parent) = self.path.parent() {
-            let _ = tokio::fs::create_dir_all(parent).await;
-        }
-        self.sweep_stale_tmp();
-        let Ok(json) = serde_json::to_vec_pretty(cache) else {
-            return;
-        };
-        let tmp = self.unique_tmp_path();
-        if tokio::fs::write(&tmp, &json).await.is_ok() {
-            if tokio::fs::rename(&tmp, &self.path).await.is_err() {
-                let _ = tokio::fs::remove_file(&tmp).await;
-            }
-        } else {
-            let _ = tokio::fs::remove_file(&tmp).await;
         }
     }
 }

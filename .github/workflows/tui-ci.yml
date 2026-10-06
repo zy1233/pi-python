@@ -1,0 +1,164 @@
+name: TUI CI
+
+# Stage 0 of docs/PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md: a Linux gate and baseline for the Rust
+# TUI workspace (tui/). Authoritative environment (ADR6): ubuntu-24.04 + the toolchain pinned in
+# tui/rust-toolchain.toml. What is enforced vs report-only lives in scripts/tui_baseline.toml; the
+# report is docs/baselines/tui.md. Python code is covered by ci.yml.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tui/**"
+      - "scripts/tui_baseline.py"
+      - "scripts/tui_baseline.toml"
+      - ".github/workflows/tui-ci.yml"
+  pull_request:
+    paths:
+      - "tui/**"
+      - "scripts/tui_baseline.py"
+      - "scripts/tui_baseline.toml"
+      - ".github/workflows/tui-ci.yml"
+  workflow_dispatch:
+    inputs:
+      release_baseline:
+        description: "Also build release-dist and record binary size, build time and startup latency (~30 min)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  # No debuginfo for dev/test builds: smaller target dir and faster links on the runner.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  check:
+    name: Gates + cargo check (Linux x86_64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Rust toolchain (pinned by tui/rust-toolchain.toml)
+        working-directory: tui
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustc --version --verbose
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "28.x"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tui
+          shared-key: tui-linux-x86_64-check
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Gates and cargo check
+        run: python scripts/tui_baseline.py check --out tui-baseline
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tui-baseline-check
+          path: tui-baseline/
+
+  test:
+    name: cargo test (Linux x86_64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Rust toolchain (pinned by tui/rust-toolchain.toml)
+        working-directory: tui
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustc --version --verbose
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "28.x"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tui
+          shared-key: tui-linux-x86_64-test
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # Report-only until `[test] enforce = true` in scripts/tui_baseline.toml (after the first
+      # Linux run has been triaged); the per-suite table lands in the job summary either way.
+      - name: Test suites
+        run: python scripts/tui_baseline.py test --out tui-baseline
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tui-baseline-test
+          path: tui-baseline/
+
+  release-baseline:
+    name: Release build baseline (Linux x86_64)
+    if: github.event_name == 'workflow_dispatch' && inputs.release_baseline
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Rust toolchain (pinned by tui/rust-toolchain.toml)
+        working-directory: tui
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustc --version --verbose
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "28.x"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # A warm cache would make the recorded build time meaningless, so only the registry is cached.
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tui
+          shared-key: tui-linux-x86_64-release
+          cache-targets: "false"
+
+      - name: Build release-dist and measure
+        run: python scripts/tui_baseline.py release --out tui-baseline
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tui-baseline-release
+          path: tui-baseline/

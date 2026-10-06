@@ -20,11 +20,9 @@
 //!   added only where minimal actually mutates.
 //! - `pub use` cannot re-export a `pub(crate)` item at wider visibility (E0365),
 //!   so free helpers are re-exposed as thin `pub fn` wrappers, not re-exports.
-//! - Purely-internal DTOs (`DropdownChrome`, `McpServersPickerRows`) are never
-//!   named across the crate boundary — the wrappers return their extracted data
-//!   (a `Rect`, a tuple of `Vec`s) so those types stay `pub(crate)`.
-
-use std::collections::HashSet;
+//! - Purely-internal DTOs (`DropdownChrome`) are never named across the crate
+//!   boundary — the wrappers return their extracted data (a `Rect`) so those
+//!   types stay `pub(crate)`.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -34,21 +32,17 @@ use crate::acp::tracker::TurnActivity;
 // Only the test-only setters below reference `AgentSession`.
 #[cfg(any(test, feature = "test-support"))]
 use crate::app::agent::AgentSession;
-use crate::app::agent_view::{AgentView, McpInitProgress};
+use crate::app::agent_view::AgentView;
 use crate::app::app_view::{ActiveView, AppView, SessionPickerEntry};
 use crate::appearance::LayoutConfig;
 use crate::scrollback::entry::{EntryId, ScrollbackEntry};
 use crate::scrollback::state::ScrollbackState;
 use crate::theme::Theme;
-use crate::views::extensions_modal::{ExtensionsModalState, StatusFilter};
-use crate::views::mcps_modal::{McpServerDisplayStatus, McpServerInfo};
-use crate::views::modal::CancelTurnViewState;
 use crate::views::picker::{PickerEntry, PickerField, PickerState};
 use crate::views::plan_approval_view::PlanApprovalViewState;
 use crate::views::prompt_widget::PromptWidget;
 use crate::views::question_view::QuestionViewState;
-use crate::views::rewind::RewindState;
-use crate::views::session_picker::{SessionEntryData, SourceFilter};
+use crate::views::session_picker::SessionEntryData;
 use crate::views::suggestion_controller::SuggestionController;
 
 /// The shared renderer's minimum `/btw` panel dimensions.
@@ -268,65 +262,18 @@ pub fn status_line_inner_width(width: u16, padding: u16) -> Option<u16> {
 
 /// Whether minimal's Ctrl+O remap opens the full-transcript pager *right now*.
 ///
-/// Minimal remaps Ctrl+O to `Action::OpenTranscriptPager` except when:
-///
-/// - Ctrl+O is bound to interject (Apple Terminal: the kitty keyboard protocol is
-///   unavailable, so Ctrl+Enter doesn't arrive and Ctrl+I aliases to Tab, leaving
-///   Ctrl+O as the only interject chord) AND an interject would actually consume
-///   the press:
-///   - editing a queued row (the interject key saves / interjects the edit), or
-///   - a turn is running with a non-empty composer, or
-///   - a turn is running with an empty composer **and** a visible queued
-///     follow-up (prompt-path force-send of the top queue row; same as full TUI)
-/// - a free-tier pinned upgrade CTA is live (`pinned_upgrade_cta_live`), so
-///   Ctrl+O reaches ToggleYolo (open CTA) instead of the transcript
-///
-/// Otherwise the remap keeps the key for the transcript. When the remap yields,
-/// `minimal_key_intercept` routes to the prompt path (interject, or ToggleYolo
-/// on Apple Terminal when interject has nothing to send). The info-row hint
+/// Minimal remaps Ctrl+O to `Action::OpenTranscriptPager` except when a
+/// free-tier pinned upgrade CTA is live (`pinned_upgrade_cta_live`), so Ctrl+O
+/// reaches ToggleYolo (open CTA) instead of the transcript. The info-row hint
 /// re-evaluates this every frame so the advertised key ("ctrl+o transcript" vs
 /// `/transcript`) always matches what the press would do.
 pub fn minimal_ctrl_o_opens_transcript(app: &AppView) -> bool {
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    let ctrl_o = KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL);
     let ActiveView::Agent(id) = &app.active_view else {
         return true;
     };
     let Some(agent) = app.agents.get(id) else {
         return true;
     };
-    if !app
-        .registry
-        .matches_id(crate::actions::ActionId::InterjectPrompt, &ctrl_o)
-    {
-        // Not the interject chord: transcript unless a pinned upgrade CTA owns it.
-        return !agent.pinned_upgrade_cta_live;
-    }
-    // Editing a queued row: the interject key saves (idle) or interjects
-    // (running) the edited text — never steal it mid-edit.
-    if matches!(
-        agent.prompt_mode,
-        crate::app::agent_view::PromptMode::EditingQueued { .. }
-    ) {
-        return false;
-    }
-    // Matches prompt-path send-now: non-empty composer text *or* a visible
-    // queued follow-up (empty-composer force-send of the top row). Exclude the
-    // in-flight shared-queue entry when it is the running turn (same rule as
-    // `AgentView::visible_queue_is_empty`).
-    let running = agent.session.current_prompt_id.as_deref();
-    let has_queued_follow_up = !agent.session.pending_prompts.is_empty()
-        || agent
-            .shared_queue
-            .iter()
-            .any(|e| Some(e.id.as_str()) != running);
-    let has_payload = !agent.prompt.text().trim().is_empty() || has_queued_follow_up;
-    if crate::actions::ActionRegistry::interjection_possible(
-        agent.session.state.is_turn_running(),
-        has_payload,
-    ) {
-        return false;
-    }
     !agent.pinned_upgrade_cta_live
 }
 
@@ -345,18 +292,6 @@ pub fn last_activity(v: &AgentView) -> Option<&TurnActivity> {
 /// `AgentView::last_activity` (write).
 pub fn set_last_activity(v: &mut AgentView, val: Option<TurnActivity>) {
     v.last_activity = val;
-}
-
-/// `AgentView::extensions_modal`.
-pub fn extensions_modal(v: &AgentView) -> Option<&ExtensionsModalState> {
-    v.extensions_modal.as_ref()
-}
-
-/// `AgentView::extensions_modal` (mutable — minimal reuses the full-TUI modal
-/// renderer, which takes `&mut ExtensionsModalState`, and updates render-stored
-/// picker row state).
-pub fn extensions_modal_mut(v: &mut AgentView) -> Option<&mut ExtensionsModalState> {
-    v.extensions_modal.as_mut()
 }
 
 /// `AgentView::question_view`.
@@ -389,11 +324,6 @@ pub fn plan_mode_pending(v: &AgentView) -> Option<bool> {
     v.plan_mode_pending
 }
 
-/// `AgentView::mcp_init_progress`.
-pub fn mcp_init_progress(v: &AgentView) -> Option<&McpInitProgress> {
-    v.mcp_init_progress.as_ref()
-}
-
 /// `AgentView::plan_approval_view`.
 pub fn plan_approval_view(v: &AgentView) -> Option<&PlanApprovalViewState> {
     v.plan_approval_view.as_ref()
@@ -407,19 +337,13 @@ pub fn plan_approval_view(v: &AgentView) -> Option<&PlanApprovalViewState> {
 /// owner predicate at the minimal facade gives paint and minimal input one
 /// canonical answer without changing the fullscreen router.
 pub fn minimal_btw_surface_available(v: &AgentView) -> bool {
-    v.active_subagent.is_none()
-        && v.image_viewer.is_none()
+    v.image_viewer.is_none()
         && v.video_viewer.is_none()
         && v.gboom.is_none()
-        && !(v.show_goal_detail && v.goal_state.is_some())
         && v.line_viewer.is_none()
-        && v.extensions_modal.is_none()
-        && v.persona_detail.is_none()
-        && v.agents_modal.is_none()
         && v.block_viewer.is_none()
         && v.active_modal.is_none()
         && v.no_input_overlay_pending()
-        && v.rewind_state.is_none()
 }
 
 /// Start a correlated minimal `/btw` loading panel on this agent.
@@ -551,49 +475,11 @@ pub fn btw_focused(v: &AgentView) -> bool {
     v.btw_focused
 }
 
-/// `AgentView::cancel_turn_view`.
-pub fn cancel_turn_view(v: &AgentView) -> Option<&CancelTurnViewState> {
-    v.cancel_turn_view.as_ref()
-}
-
-/// `AgentView::cancel_turn_buttons` (mutable — the renderer fills the hit-test
-/// rects).
-pub fn cancel_turn_buttons_mut(v: &mut AgentView) -> &mut Vec<Rect> {
-    &mut v.cancel_turn_buttons
-}
-
-/// `AgentView::rewind_state`.
-pub fn rewind_state(v: &AgentView) -> Option<&RewindState> {
-    v.rewind_state.as_ref()
-}
-
 // ── AgentView method wrappers ────────────────────────────────────────────────
 
 /// [`AgentView::resolve_turn_activity`].
 pub fn resolve_turn_activity(v: &AgentView) -> Option<TurnActivity> {
     v.resolve_turn_activity()
-}
-
-/// [`AgentView::renders_parked`].
-pub fn renders_parked(v: &AgentView) -> bool {
-    v.renders_parked()
-}
-
-/// [`AgentView::watchers`] — idle-surviving background work (running
-/// commands / monitors / loops / subagents) for the shared turn-status
-/// widget's "… still running" cue.
-pub fn watchers(v: &AgentView) -> crate::views::turn_status::Watchers {
-    v.watchers()
-}
-
-/// [`AgentView::held_queue_count`].
-pub fn held_queue_count(v: &AgentView) -> usize {
-    v.held_queue_count()
-}
-
-/// [`AgentView::held_queue_top_sendable`].
-pub fn held_queue_top_sendable(v: &AgentView) -> bool {
-    v.held_queue_top_sendable()
 }
 
 /// [`AgentView::sync_pending_user_input_marks`].
@@ -665,51 +551,6 @@ pub fn dropdown_chrome_items(
     .map(|chrome| chrome.items)
 }
 
-// ── MCP picker rows ──────────────────────────────────────────────────────────
-
-/// Build the MCP-servers picker rows, returning `(labels, group_keys,
-/// data_indices)`. Wraps [`crate::views::extensions_modal::build_mcp_servers_picker_rows`];
-/// the `McpServersPickerRows` DTO stays crate-internal.
-pub fn build_mcp_picker_rows(
-    servers: &[McpServerInfo],
-    query: &str,
-    filter: StatusFilter,
-    collapsed_sections: &HashSet<String>,
-    tools_expanded: &HashSet<usize>,
-) -> (Vec<String>, Vec<Option<String>>, Vec<Option<usize>>) {
-    let rows = crate::views::extensions_modal::build_mcp_servers_picker_rows(
-        servers,
-        query,
-        filter,
-        collapsed_sections,
-        tools_expanded,
-    );
-    (rows.labels, rows.group_keys, rows.data_indices)
-}
-
-/// [`crate::views::extensions_modal::mcp_section_children_hidden`].
-pub fn mcp_section_children_hidden(
-    collapsed_sections: &HashSet<String>,
-    section_key: &str,
-    searching: bool,
-) -> bool {
-    crate::views::extensions_modal::mcp_section_children_hidden(
-        collapsed_sections,
-        section_key,
-        searching,
-    )
-}
-
-/// [`McpServerDisplayStatus::theme_color`].
-pub fn mcp_status_theme_color(status: &McpServerDisplayStatus, theme: &Theme) -> Color {
-    status.theme_color(theme)
-}
-
-/// [`McpServerDisplayStatus::label`].
-pub fn mcp_status_label(status: &McpServerDisplayStatus) -> &'static str {
-    status.label()
-}
-
 // ── Session picker builders ──────────────────────────────────────────────────
 
 /// Render a search bar from a [`PickerState`] using its grapheme-safe viewport.
@@ -740,12 +581,8 @@ pub fn repo_name_from_cwd(cwd: &str) -> String {
 }
 
 /// [`crate::views::session_picker::filter_session_entries`].
-pub fn filter_session_entries(
-    entries: Option<&[SessionPickerEntry]>,
-    query: &str,
-    source_filter: SourceFilter,
-) -> Vec<usize> {
-    crate::views::session_picker::filter_session_entries(entries, query, source_filter)
+pub fn filter_session_entries(entries: Option<&[SessionPickerEntry]>, query: &str) -> Vec<usize> {
+    crate::views::session_picker::filter_session_entries(entries, query)
 }
 
 /// [`crate::views::session_picker::build_session_entry_data`].
@@ -761,14 +598,6 @@ pub fn build_session_entry_data(
         state,
         content_width,
     )
-}
-
-/// [`crate::views::session_picker::hidden_external_hint`].
-pub fn hidden_external_hint(
-    entries: Option<&[SessionPickerEntry]>,
-    source_filter: SourceFilter,
-) -> Option<String> {
-    crate::views::session_picker::hidden_external_hint(entries, source_filter)
 }
 
 /// [`crate::views::session_picker::build_grouped_picker_entries`].
@@ -843,12 +672,6 @@ pub fn record_committed_for_expand(sb: &mut ScrollbackState, id: EntryId) {
 #[cfg(any(test, feature = "test-support"))]
 pub fn test_agent_view(session_id: Option<&str>, cwd: std::path::PathBuf) -> AgentView {
     crate::app::agent_view::test_agent_view(session_id, cwd)
-}
-
-/// Test-only setter for `AgentView::extensions_modal`.
-#[cfg(any(test, feature = "test-support"))]
-pub fn set_extensions_modal(v: &mut AgentView, val: Option<ExtensionsModalState>) {
-    v.extensions_modal = val;
 }
 
 /// Test-only setter for `AgentView::question_view`.

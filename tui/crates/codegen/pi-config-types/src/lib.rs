@@ -1,10 +1,3 @@
-#![allow(
-    unused_imports,
-    unused_variables,
-    unused_mut,
-    unreachable_code,
-    dead_code
-)]
 mod flags;
 pub use flags::*;
 mod registry;
@@ -16,9 +9,9 @@ pub use mcp::*;
 mod permission;
 pub use permission::*;
 mod pool;
+use pi_announcements::RemoteAnnouncement;
 pub use pool::*;
 use serde::{Deserialize, Serialize};
-use pi_announcements::RemoteAnnouncement;
 /// A remote `campaigns[]` entry: an `id` gate plus a full-power
 /// flattened config patch (the JSON sibling of a `[[campaigns]]` TOML override).
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -446,10 +439,6 @@ pub struct ConsentGate {
 /// - Callers can distinguish "server said false" from "server didn't say"
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct RemoteSettings {
-    /// When `Some(true)`, the server recommends enabling leader mode.
-    /// Used as a fallback when the user hasn't set `[cli] use_leader` locally.
-    #[serde(default)]
-    pub leader_mode: Option<bool>,
     #[serde(default)]
     pub max_upload_file_bytes: Option<u64>,
     #[serde(default)]
@@ -767,11 +756,6 @@ pub struct RemoteSettings {
     /// `None` falls back to env/default (off).
     #[serde(default)]
     pub official_marketplace_auto_register: Option<bool>,
-    /// remote settings gate for the inline plugin-install CTA (keyword-matched
-    /// marketplace upsell above the prompt). `Some(true)` enables, `Some(false)`
-    /// is a kill-switch, `None` falls back to env/default (off).
-    #[serde(default)]
-    pub plugin_cta: Option<bool>,
     /// Remote announcements list from proxy. Malformed items are skipped entirely.
     /// `None` or `[]` = no announcements to display.
     #[serde(default, deserialize_with = "deserialize_tolerant_announcements")]
@@ -1087,8 +1071,6 @@ pub struct RemoteSettings {
     /// `Some(true)` enables it; `None`/`Some(false)` (the default) keep it off.
     #[serde(default)]
     pub workspace_command_enabled: Option<bool>,
-    #[serde(default)]
-    pub workspace_dashboard_enabled: Option<bool>,
     /// Soft default for `keep_text_selection` (`"flash"` / `"hold"` / `"word_select"`), from
     /// `grok_build_settings.keep_text_selection_default`. Applied only when the user has set no
     /// local text-selection preference; an explicit local `keep_text_selection` always wins. An
@@ -1133,9 +1115,6 @@ pub struct ContextualHintsRemote {
     /// Clipboard-image input tip.
     #[serde(default)]
     pub image_input: Option<bool>,
-    /// Send-now tip after queuing a mid-turn follow-up (InterjectPrompt chord).
-    #[serde(default)]
-    pub send_now: Option<bool>,
     /// Small-screen tip (`/compact-mode` hint on smallish terminals).
     #[serde(default)]
     pub small_screen: Option<bool>,
@@ -1342,10 +1321,14 @@ mod tests {
             serde_json::to_value(&WorktreeKindMaxAge::Never).unwrap(),
             serde_json::Value::String("never".into())
         );
-        let nested_bad = r#"{"leader_mode":true,"worktree_auto_gc":"not-an-object"}"#;
+        let nested_bad = r#"{"max_upload_file_bytes":4096,"worktree_auto_gc":"not-an-object"}"#;
         let s: RemoteSettings = serde_json::from_str(nested_bad).unwrap();
-        assert_eq!(s.leader_mode, Some(true));
+        assert_eq!(s.max_upload_file_bytes, Some(4096));
         assert_eq!(s.worktree_auto_gc, None);
+        // A retired field from an older server is ignored, not an error.
+        let retired = r#"{"leader_mode":true,"max_upload_file_bytes":8}"#;
+        let s: RemoteSettings = serde_json::from_str(retired).unwrap();
+        assert_eq!(s.max_upload_file_bytes, Some(8));
     }
     #[test]
     fn remote_settings_vendor_sessions_round_trip_and_default_absent() {
@@ -1944,17 +1927,6 @@ mod tests {
         let json = r#"{}"#;
         let s: RemoteSettings = serde_json::from_str(json).unwrap();
         assert_eq!(s.workspace_command_enabled, None);
-    }
-    #[test]
-    fn remote_settings_workspace_dashboard_enabled_parses_all_states() {
-        let on: RemoteSettings =
-            serde_json::from_str(r#"{"workspace_dashboard_enabled": true}"#).unwrap();
-        assert_eq!(on.workspace_dashboard_enabled, Some(true));
-        let off: RemoteSettings =
-            serde_json::from_str(r#"{"workspace_dashboard_enabled": false}"#).unwrap();
-        assert_eq!(off.workspace_dashboard_enabled, Some(false));
-        let absent: RemoteSettings = serde_json::from_str("{}").unwrap();
-        assert_eq!(absent.workspace_dashboard_enabled, None);
     }
     #[test]
     fn remote_settings_keep_text_selection_default_round_trips() {

@@ -44,9 +44,6 @@ pub(crate) fn reseed_screen_mode(app: &mut AppView, mode: ScreenMode) {
 
 fn reseed_agent_screen_mode(agent: &mut AgentView, mode: ScreenMode) {
     agent.prompt.set_screen_mode(mode);
-    for child in agent.subagent_views.values_mut() {
-        reseed_agent_screen_mode(child, mode);
-    }
 }
 
 /// Result of [`transition_terminal`].
@@ -234,12 +231,6 @@ fn dismiss_agent_surfaces(agent: &mut AgentView) {
     agent.video_viewer = None;
     agent.line_viewer = None;
     agent.block_viewer = None;
-    agent.persona_detail = None;
-    agent.agents_modal = None;
-    agent.show_goal_detail = false;
-    for child in agent.subagent_views.values_mut() {
-        dismiss_agent_surfaces(child);
-    }
 }
 
 #[cfg(test)]
@@ -255,13 +246,6 @@ mod tests {
 
         let mut app = crate::app::app_view::tests::test_app_with_agent();
         let agent_id = *app.agents.keys().next().expect("agent present");
-        let child =
-            crate::app::agent_view::test_agent_view(Some("sess-1"), std::path::PathBuf::from("."));
-        app.agents
-            .get_mut(&agent_id)
-            .expect("agent present")
-            .subagent_views
-            .insert("sub-1".to_string(), Box::new(child));
 
         for &(mode, minimal) in &[
             (ScreenMode::Minimal, true),
@@ -287,12 +271,6 @@ mod tests {
             );
             let agent = &app.agents[&agent_id];
             assert_eq!(agent.is_minimal_mode(), minimal, "agent gate");
-            let child = agent
-                .subagent_views
-                .values()
-                .next()
-                .expect("subagent present");
-            assert_eq!(child.is_minimal_mode(), minimal, "subagent gate");
         }
 
         // Leave the fullscreen baseline other tests expect.

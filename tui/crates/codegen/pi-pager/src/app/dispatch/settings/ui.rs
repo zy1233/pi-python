@@ -3,17 +3,16 @@
 use super::setters::{
     pr13_effective_default, set_ask_user_question_timeout_enabled_inner, set_auto_dark_theme_inner,
     set_auto_light_theme_inner, set_auto_update_inner, set_collapsed_edit_blocks_inner,
-    set_combine_queued_prompts_inner, set_compact_mode, set_compact_mode_inner,
-    set_confirm_before_rewind_inner, set_contextual_hint_inner, set_default_model_inner,
-    set_default_selected_permission_inner, set_display_refresh_auto_cadence_inner,
-    set_follow_up_behavior_inner, set_fork_secondary_model_inner, set_group_tool_verbs_inner,
-    set_hunk_tracker_mode_inner, set_invert_scroll_inner, set_keep_text_selection_inner,
-    set_max_thoughts_width_inner, set_multiline_mode, set_page_flip_on_send_inner,
+    set_combine_queued_prompts_inner, set_compact_mode_inner, set_contextual_hint_inner,
+    set_default_model_inner, set_default_selected_permission_inner,
+    set_display_refresh_auto_cadence_inner, set_fork_secondary_model_inner,
+    set_group_tool_verbs_inner, set_hunk_tracker_mode_inner, set_invert_scroll_inner,
+    set_keep_text_selection_inner, set_max_thoughts_width_inner, set_page_flip_on_send_inner,
     set_prompt_suggestions_inner, set_remember_tool_approvals_inner, set_render_mermaid_inner,
     set_respect_manual_folds_inner, set_screen_mode_inner, set_scroll_lines_inner,
     set_scroll_mode_inner, set_scroll_speed_inner, set_show_thinking_blocks_inner,
     set_show_tips_inner, set_simple_mode_inner, set_theme_inner, set_timeline_inner,
-    set_timestamps, set_timestamps_inner, set_vim_mode_inner, set_voice_capture_mode_inner,
+    set_timestamps_inner, set_vim_mode_inner, set_voice_capture_mode_inner,
     set_voice_keybind_enabled_inner, set_voice_stt_language_inner,
 };
 use crate::app::actions::{Action, Effect};
@@ -21,8 +20,6 @@ use crate::app::app_view::{ActiveView, AppView};
 use crate::app::dispatch::ctx::with_active_agent;
 use crate::app::dispatch::modes::{set_yolo_mode_inner, sync_active_auto_flag};
 use crate::app::dispatch::router::dispatch;
-use crate::app::dispatch::turn::apply_cancel_subagents_preference_global;
-use crate::scrollback::block::RenderBlock;
 use agent_client_protocol as acp;
 
 /// Format a "✓ Label: value" success toast.
@@ -47,8 +44,6 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
     }
     let ui_snapshot = app.current_ui.clone();
     // Capture app-level fields before the mut-borrow loop.
-    let coding_data_sharing_opt_out_from_app = app.coding_data_retention_opt_out;
-    let coding_data_sharing_lock_from_app = app.coding_data_sharing_lock();
     let show_tips_from_app = app.show_tips;
     let auto_update_from_app = app.auto_update;
     let respect_manual_folds_from_app = app.appearance.scrollback.scroll.respect_manual_folds;
@@ -82,8 +77,6 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
                     .iter()
                     .map(|(id, info)| (info.name.clone(), id.clone()))
                     .collect(),
-                coding_data_sharing_opt_out: coding_data_sharing_opt_out_from_app,
-                coding_data_sharing_lock: coding_data_sharing_lock_from_app,
                 // Prefer optimistic pending over confirmed active.
                 plan_mode_active: agent.plan_mode_pending.unwrap_or(agent.plan_mode_active),
                 show_tips: show_tips_from_app,
@@ -132,27 +125,10 @@ pub(in crate::app::dispatch) fn dispatch_open_command_palette(app: &mut AppView)
     vec![]
 }
 
-/// Open the How-to Guides doc picker (`/docs`). Toggles closed if already open.
-pub(in crate::app::dispatch) fn dispatch_open_howto_guides(app: &mut AppView) -> Vec<Effect> {
-    use crate::views::modal::ActiveModal;
-    let ActiveView::Agent(id) = app.active_view else {
-        return vec![];
-    };
-    let Some(agent) = app.agents.get_mut(&id) else {
-        return vec![];
-    };
-    if matches!(&agent.active_modal, Some(ActiveModal::DocPicker { .. })) {
-        agent.active_modal = None;
-        return vec![];
-    }
-    agent.active_modal = Some(crate::views::modal::howto_list_modal(None));
-    vec![]
-}
-
 /// Open the settings modal. Reads the live `UiConfig` snapshot
 /// (sans-IO). Single-instance: `debug_assert!` catches routing bugs.
 ///
-/// `focus_key` selects a settings row after open (e.g. `coding_data_sharing`).
+/// `focus_key` selects a settings row after open (e.g. `permission_mode`).
 /// When not on an agent view, switches to an existing agent or creates a
 /// placeholder session so the modal can mount.
 pub(in crate::app::dispatch) fn dispatch_open_settings(
@@ -188,8 +164,6 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
     let registry = app.settings_registry.clone();
     let ui_snapshot = app.current_ui.clone();
     // Capture app-level fields before the mut-borrow on the agent.
-    let coding_data_sharing_opt_out_from_app = app.coding_data_retention_opt_out;
-    let coding_data_sharing_lock_from_app = app.coding_data_sharing_lock();
     let show_tips_from_app = app.show_tips;
     let auto_update_from_app = app.auto_update;
     let respect_manual_folds_from_app = app.appearance.scrollback.scroll.respect_manual_folds;
@@ -232,8 +206,6 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
             .iter()
             .map(|(id, info)| (info.name.clone(), id.clone()))
             .collect(),
-        coding_data_sharing_opt_out: coding_data_sharing_opt_out_from_app,
-        coding_data_sharing_lock: coding_data_sharing_lock_from_app,
         // Prefer optimistic pending over confirmed active.
         plan_mode_active: agent.plan_mode_pending.unwrap_or(agent.plan_mode_active),
         show_tips: show_tips_from_app,
@@ -450,105 +422,6 @@ pub(in crate::app::dispatch) fn dispatch_confirm_reset_setting(
     }
 }
 
-/// Toggle multiline input mode (Ctrl+M keybinding path). Delegates
-/// to `set_multiline_mode` (PAGER-OWNED, per-agent ephemeral).
-pub(in crate::app::dispatch) fn dispatch_toggle_multiline(app: &mut AppView) -> Vec<Effect> {
-    let ActiveView::Agent(id) = app.active_view else {
-        return vec![];
-    };
-    let Some(agent) = app.agents.get(&id) else {
-        return vec![];
-    };
-    let new = !agent.multiline_mode;
-    set_multiline_mode(app, new)
-}
-
-/// Toggle compact mode (keybinding path). Delegates to the
-/// registry-driven `set_compact_mode` so the cache, modal snapshot,
-/// and `Effect::PersistSetting` all flow through one path.
-pub(in crate::app::dispatch) fn dispatch_toggle_compact_mode(app: &mut AppView) -> Vec<Effect> {
-    // Toggle the USER value: `appearance.prompt.compact` is the derived render
-    // value, which auto-compact forces on short terminals regardless of it.
-    let new = !app.current_ui.compact_mode;
-    set_compact_mode(app, new)
-}
-
-/// Toggle vim-style scrollback keybindings (`/vim-mode` slash command path).
-///
-/// When OFF (default): bare-letter and Shift+letter scrollback bindings
-/// (j/k/h/l/g/G/y/Y/o/O/r/x/e/E/L/H plus the `i` FocusPrompt alt) are
-/// suppressed; users get a "letter pressed in scrollback jumps to prompt
-/// and types the character" behaviour instead. Arrow/Tab/Esc/Space/PgUp/
-/// PgDn and all Ctrl+letter bindings remain active in both modes.
-///
-/// Delegates to the registry-driven `set_vim_mode` so the cache, modal
-/// snapshot, toast, and `Effect::PersistSetting` (which writes
-/// `[ui].vim_mode` to config.toml) all flow through one path — matching
-/// the `dispatch_toggle_multiline` / `dispatch_toggle_compact_mode` /
-/// `dispatch_toggle_timestamps` pattern.
-pub(in crate::app::dispatch) fn dispatch_toggle_vim_mode(app: &mut AppView) -> Vec<Effect> {
-    // Toggle the EFFECTIVE value (the pager cache) so `/vim-mode` works
-    // from ANY view — including the session-less dashboard. Previously
-    // this early-returned unless an agent was active, so running
-    // `/vim-mode` on the dashboard was a silent no-op and the overview's
-    // j/k navigation (which is gated on vim-mode) never turned on.
-    let prev = crate::appearance::cache::load_vim_mode();
-    let enabled = !prev;
-    // Propagate to every agent AND every nested subagent view (so
-    // background + open subagent views pick up the change without a
-    // restart) and mirror the pager cache. Shares `set_vim_mode_inner`
-    // with the `SetVimMode` settings path.
-    set_vim_mode_inner(app, enabled);
-    refresh_open_settings_modals(app);
-    let msg = if enabled {
-        "Vim mode: on"
-    } else {
-        "Vim mode: off"
-    };
-    tracing::info!(vim_mode = enabled, "Vim mode toggled");
-    match app.active_view {
-        ActiveView::Agent(id) => {
-            if let Some(agent) = app.agents.get_mut(&id) {
-                agent
-                    .scrollback
-                    .push_block(RenderBlock::system(msg.to_string()));
-            }
-        }
-        ActiveView::AgentDashboard => {
-            // On the dashboard, j/k navigate the overview only when it
-            // holds focus. Turning vim ON focuses the overview so the
-            // user can navigate immediately (mirroring the agent view's
-            // "normal mode"); turning it OFF returns focus to the input.
-            // No agents → nothing to navigate, so stay on the input. The
-            // focus shift (overview highlighted, input dimmed, footer
-            // flips to nav hints) is the feedback — a toast would route
-            // to the dashboard's red error slot.
-            let has_agents = !app.agents.is_empty();
-            if let Some(d) = app.dashboard.as_mut() {
-                d.list_focused = enabled && has_agents;
-            }
-        }
-        _ => {
-            app.show_toast(msg);
-        }
-    }
-    // Persist like the shared setter so `/vim-mode` survives a restart
-    // (writes `[ui].vim_mode` to config.toml).
-    vec![Effect::PersistSetting {
-        key: "vim_mode",
-        value: crate::settings::SettingValue::Bool(enabled),
-        rollback_value: crate::settings::SettingValue::Bool(prev),
-    }]
-}
-
-/// Toggle timestamps (Ctrl+? keybinding path). Delegates to the
-/// registry-driven `set_timestamps` so persistence + cache + UI
-/// reconciliation all flow through a single code path.
-pub(in crate::app::dispatch) fn dispatch_toggle_timestamps(app: &mut AppView) -> Vec<Effect> {
-    let show = !app.appearance.show_timestamps;
-    set_timestamps(app, show)
-}
-
 /// Toggle terminal mouse reporting (crossterm mouse capture) at the user's
 /// discretion. Disabling it lets the terminal handle native click-drag text
 /// selection and copy/paste; re-enabling restores in-app mouse handling
@@ -731,8 +604,6 @@ pub(crate) fn build_pager_snapshot(app: &AppView) -> crate::settings::PagerLocal
         auto_mode: agent_auto_mode(app),
         current_model_name: agent_current_model_name(app),
         available_models: agent_available_models(app),
-        coding_data_sharing_opt_out: app.coding_data_retention_opt_out,
-        coding_data_sharing_lock: app.coding_data_sharing_lock(),
         plan_mode_active: agent_plan_mode(app),
         show_tips: app.show_tips,
         auto_update: app.auto_update,
@@ -760,14 +631,8 @@ pub(in crate::app::dispatch) fn action_for_reset(
         ("show_timestamps", SettingValue::Bool(b)) => Some(Action::SetTimestamps(*b)),
         ("show_timeline", SettingValue::Bool(b)) => Some(Action::SetTimeline(*b)),
         ("page_flip_on_send", SettingValue::Bool(b)) => Some(Action::SetPageFlipOnSend(*b)),
-        ("confirm_before_rewind", SettingValue::Bool(b)) => {
-            Some(Action::SetConfirmBeforeRewind(*b))
-        }
         ("combine_queued_prompts", SettingValue::Bool(b)) => {
             Some(Action::SetCombineQueuedPrompts(*b))
-        }
-        ("follow_up_behavior", SettingValue::Enum(s)) => {
-            crate::appearance::FollowUpBehavior::from_canonical(s).map(Action::SetFollowUpBehavior)
         }
         ("simple_mode", SettingValue::Bool(b)) => Some(Action::SetSimpleMode(*b)),
         ("contextual_hints.undo", SettingValue::Bool(b)) => Some(Action::SetContextualHintUndo(*b)),
@@ -776,9 +641,6 @@ pub(in crate::app::dispatch) fn action_for_reset(
         }
         ("contextual_hints.image_input", SettingValue::Bool(b)) => {
             Some(Action::SetContextualHintImageInput(*b))
-        }
-        ("contextual_hints.send_now", SettingValue::Bool(b)) => {
-            Some(Action::SetContextualHintSendNow(*b))
         }
         ("contextual_hints.small_screen", SettingValue::Bool(b)) => {
             Some(Action::SetContextualHintSmallScreen(*b))
@@ -883,14 +745,6 @@ pub(in crate::app::dispatch) fn action_for_reset(
         }
         // max_thoughts_width: direct round-trip.
         ("max_thoughts_width", SettingValue::Int(i)) => Some(Action::SetMaxThoughtsWidth(*i)),
-        // coding_data_sharing: "opt-in" / "opt-out" → bool.
-        // Both arms needed (registry default is "opt-out").
-        ("coding_data_sharing", SettingValue::Enum("opt-in")) => {
-            Some(Action::SetCodingDataSharing { opted_in: true })
-        }
-        ("coding_data_sharing", SettingValue::Enum("opt-out")) => {
-            Some(Action::SetCodingDataSharing { opted_in: false })
-        }
         // plan_mode: "on" / "off" → PlanModeKind.
         // "on" arm is a skew guard (default is "off").
         ("plan_mode", SettingValue::Enum("off")) => {
@@ -962,16 +816,8 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
         ("show_timestamps", SettingValue::Bool(b)) => set_timestamps_inner(app, *b),
         ("show_timeline", SettingValue::Bool(b)) => set_timeline_inner(app, *b),
         ("page_flip_on_send", SettingValue::Bool(b)) => set_page_flip_on_send_inner(app, *b),
-        ("confirm_before_rewind", SettingValue::Bool(b)) => {
-            set_confirm_before_rewind_inner(app, *b)
-        }
         ("combine_queued_prompts", SettingValue::Bool(b)) => {
             set_combine_queued_prompts_inner(app, *b)
-        }
-        ("follow_up_behavior", SettingValue::Enum(s)) => {
-            if let Some(mode) = crate::appearance::FollowUpBehavior::from_canonical(s) {
-                set_follow_up_behavior_inner(app, mode);
-            }
         }
         ("simple_mode", SettingValue::Bool(b)) => set_simple_mode_inner(app, *b),
         ("contextual_hints.undo", SettingValue::Bool(b)) => {
@@ -982,9 +828,6 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
         }
         ("contextual_hints.image_input", SettingValue::Bool(b)) => {
             set_contextual_hint_inner(app, |h, v| h.image_input = v, *b)
-        }
-        ("contextual_hints.send_now", SettingValue::Bool(b)) => {
-            set_contextual_hint_inner(app, |h, v| h.send_now = v, *b)
         }
         ("contextual_hints.small_screen", SettingValue::Bool(b)) => {
             set_contextual_hint_inner(app, |h, v| h.small_screen = v, *b)
@@ -1004,18 +847,6 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
                     s,
                 ),
             )
-        }
-        ("cancel_subagents_on_turn_cancel", SettingValue::Enum("ask")) => {
-            app.current_ui.cancel_subagents_on_turn_cancel = None;
-            for agent in app.agents.values_mut() {
-                agent.cancel_subagents_preference = None;
-            }
-        }
-        ("cancel_subagents_on_turn_cancel", SettingValue::Enum("always_stop")) => {
-            apply_cancel_subagents_preference_global(app, true);
-        }
-        ("cancel_subagents_on_turn_cancel", SettingValue::Enum("always_continue")) => {
-            apply_cancel_subagents_preference_global(app, false);
         }
         // Rollback for corrupted auto-* = "auto" — clear to None.
         ("auto_dark_theme", SettingValue::Enum("auto")) => {
@@ -1096,8 +927,10 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
                         if let ActiveView::Agent(aid) = app.active_view
                             && let Some(sid) = session_id
                         {
+                            let mut config_option_id = None;
                             if let Some(agent) = app.agents.get_mut(&aid) {
                                 agent.session.model_switch_pending = true;
+                                config_option_id = agent.session.models.config_option_id.clone();
                             }
                             companion_effects.push(Effect::SwitchModel {
                                 agent_id: aid,
@@ -1105,6 +938,7 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
                                 model_id: id,
                                 effort: None,
                                 prev_model_id: None,
+                                config_option_id,
                             });
                         }
                     }
@@ -1131,11 +965,6 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
                 set_scroll_mode_inner(app, mode);
             }
         }
-        // No pager-side mirror to roll back; the failure toast is the whole story.
-        ("trace_upload", SettingValue::Bool(_)) => {}
-        // The in-session suppression latch deliberately stays set even when
-        // the disk write fails.
-        ("feedback_trace_card", SettingValue::Bool(_)) => {}
         // invert_scroll / scroll_lines: direct inner calls (clamp in inner).
         ("invert_scroll", SettingValue::Bool(b)) => set_invert_scroll_inner(app, *b),
         // Effective default is false → restore None (mirror stays disk-synced).

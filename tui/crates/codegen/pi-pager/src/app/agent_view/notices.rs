@@ -147,9 +147,6 @@ impl AgentView {
             // Privacy upsell banner owns the slot until acted on — a
             // session-long occluder like the session announcement banner.
             || self.privacy_banner.active
-            // Subagent fullscreen takeover: draw early-returns into
-            // draw_subagent_fullscreen and never paints the parent banner.
-            || self.active_subagent.is_some()
             // Fullscreen viewers render after the banner paints: image/video/
             // block dim the whole region down to the shortcuts row (banner
             // included). line_viewer's overlay stops at turn_status.y when a
@@ -162,19 +159,6 @@ impl AgentView {
             || self.block_viewer.is_some()
             // /gboom dims the same down-to-shortcuts region as the video viewer.
             || self.gboom.is_some()
-            // Extensions/agents modals are centered popups (render_modal_window)
-            // that capture all input and early-return out of draw; distinct
-            // from active_modal. persona_detail only renders atop the agents
-            // modal. A tip could at most peek beside the modal, so refuse.
-            || self.extensions_modal.is_some()
-            || self.agents_modal.is_some()
-            // Goal-detail is a vertically-centered overlay painted after the
-            // tip; its box only reaches the banner row for tall/content-rich
-            // goals, but kept unconditional as a safe over-refusal (like the
-            // modals and line_viewer) since a tip during goal reading is
-            // unwanted regardless.
-            || (self.show_goal_detail && self.goal_state.is_some())
-            || self.show_workflows
             // Prompt dropdowns (@/slash/completion/history) render in the
             // row directly above the prompt — the banner row — clearing it.
             || self.prompt.any_dropdown_open()
@@ -221,9 +205,6 @@ impl AgentView {
     /// Propagate sticky status to this view and every nested subagent view.
     pub fn set_sticky_toast_recursive(&mut self, msg: Option<&str>) {
         self.set_sticky_toast(msg);
-        for child in self.subagent_views.values_mut() {
-            child.set_sticky_toast_recursive(msg);
-        }
     }
 
     /// Show a toast with an explicit tick duration.
@@ -333,14 +314,6 @@ impl AgentView {
         false
     }
 
-    /// Tick the extensions modal's transient result notice. Returns true if it
-    /// just expired (needs a redraw to erase the badge / status line).
-    pub fn tick_extensions_result_notice(&mut self) -> bool {
-        self.extensions_modal
-            .as_mut()
-            .is_some_and(|m| m.tick_result_notice())
-    }
-
     /// Open `url` in the system browser. When the opener cannot run (headless
     /// Linux VM, missing `xdg-open`, etc.), push a scrollback system message
     /// with the full URL so the user can copy it, and best-effort copy to the
@@ -360,26 +333,6 @@ impl AgentView {
                 // Best-effort clipboard so SSH/VM users can paste into a
                 // browser on another machine without selecting TUI text.
                 let _ = crate::clipboard::SystemClipboard::try_set(url);
-                self.show_toast("Browser unavailable - URL shown above");
-            }
-        }
-    }
-
-    /// [`Self::open_url_or_show`] minus the automatic clipboard copy, for
-    /// server-controlled URLs (MCP elicitation): silently seeding the
-    /// clipboard invites pasting attacker-chosen text into a shell on the
-    /// headless fallback path. The full URL stays visible in scrollback (and
-    /// on the card) for a deliberate manual copy instead.
-    pub(crate) fn open_untrusted_url_or_show(&mut self, url: &str) {
-        use crate::app::link_opener::{OpenUrlResult, browser_unavailable_message, try_open_url};
-        use crate::scrollback::block::RenderBlock;
-        use crate::terminal::hyperlinks::SchemeFilter;
-
-        match try_open_url(url, SchemeFilter::Standard) {
-            OpenUrlResult::Opened | OpenUrlResult::RejectedScheme => {}
-            OpenUrlResult::BrowserUnavailable => {
-                self.scrollback
-                    .push_block(RenderBlock::system(browser_unavailable_message(url)));
                 self.show_toast("Browser unavailable - URL shown above");
             }
         }

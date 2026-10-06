@@ -57,14 +57,6 @@ impl AtContext {
     }
 }
 
-/// Detect an @-completion context from prompt text and cursor position.
-///
-/// Returns `None` if the cursor is not inside an @-token, or if the `@` is
-/// preceded by an alphanumeric/underscore character (e.g., `email@`).
-pub fn detect(text: &str, cursor: usize) -> Option<AtContext> {
-    detect_with_drill(text, cursor, None)
-}
-
 /// Like [`detect`], but treats whitespace *inside* `drill_prefix` (the path of
 /// the directory being drilled into) as part of the @-token, so `@my dir/` stays
 /// one token. Self-validating: inert once the path content stops matching it.
@@ -139,143 +131,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn basic_at_token() {
-        let ctx = detect("@foo", 4).unwrap();
-        assert_eq!(ctx.range, 0..4);
-        assert_eq!(ctx.query, "foo");
-        assert!(!ctx.is_dir_mode());
-        assert!(!ctx.is_hidden_mode());
-    }
-
-    #[test]
-    fn at_with_prefix_text() {
-        let ctx = detect("hello @bar/baz", 14).unwrap();
-        assert_eq!(ctx.range, 6..14);
-        assert_eq!(ctx.query, "bar/baz");
-    }
-
-    #[test]
-    fn cursor_mid_token() {
-        let ctx = detect("@foo/bar", 5).unwrap();
-        assert_eq!(ctx.range, 0..8);
-        assert_eq!(ctx.query, "foo/");
-        assert!(ctx.is_dir_mode());
-    }
-
-    #[test]
-    fn cursor_at_sign_only() {
-        let ctx = detect("@", 1).unwrap();
-        assert_eq!(ctx.range, 0..1);
-        assert_eq!(ctx.query, "");
-    }
-
-    #[test]
-    fn rejected_email_like() {
-        // @ preceded by alphanumeric — should not trigger.
-        assert!(detect("user@example", 12).is_none());
-        assert!(detect("test_@foo", 9).is_none());
-    }
-
-    #[test]
-    fn cursor_past_token() {
-        // Cursor is after the space following the token — no match.
-        assert!(detect("@foo bar", 5).is_none());
-        assert!(detect("@foo bar", 8).is_none());
-    }
-
-    #[test]
-    fn hidden_mode() {
-        let ctx = detect("@!foo", 5).unwrap();
-        assert!(ctx.is_hidden_mode());
-        assert_eq!(ctx.matcher_query(), "foo");
-    }
-
-    #[test]
-    fn dir_mode() {
-        let ctx = detect("@src/", 5).unwrap();
-        assert!(ctx.is_dir_mode());
-        assert_eq!(ctx.query, "src/");
-        assert_eq!(ctx.matcher_query(), "src/");
-    }
-
-    #[test]
-    fn hidden_dir_mode() {
-        let ctx = detect("@!.config/", 10).unwrap();
-        assert!(ctx.is_hidden_mode());
-        assert!(ctx.is_dir_mode());
-        assert_eq!(ctx.matcher_query(), ".config/");
-    }
-
-    #[test]
-    fn multiple_at_picks_rightmost() {
-        let ctx = detect("@first @second", 14).unwrap();
-        assert_eq!(ctx.query, "second");
-        assert_eq!(ctx.range, 7..14);
-    }
-
-    #[test]
-    fn at_after_special_chars() {
-        // @ preceded by space, parens, etc. — should trigger.
-        assert!(detect("(@foo", 5).is_some());
-        assert!(detect(" @foo", 5).is_some());
-        assert!(detect(",@foo", 5).is_some());
-    }
-
-    #[test]
-    fn empty_text() {
-        assert!(detect("", 0).is_none());
-    }
-
-    #[test]
-    fn cursor_at_zero() {
-        assert!(detect("@foo", 0).is_none());
-    }
-
-    #[test]
     fn normalize_path() {
         assert_eq!(normalize_display_path("./foo/bar"), "foo/bar");
         assert_eq!(normalize_display_path("foo/bar"), "foo/bar");
         assert_eq!(normalize_display_path("./"), "");
-    }
-
-    #[test]
-    fn token_delimited_by_comma() {
-        let ctx = detect("@foo,@bar", 4).unwrap();
-        assert_eq!(ctx.range, 0..4);
-        assert_eq!(ctx.query, "foo");
-    }
-
-    #[test]
-    fn token_delimited_by_semicolon() {
-        let ctx = detect("@foo;rest", 4).unwrap();
-        assert_eq!(ctx.range, 0..4);
-        assert_eq!(ctx.query, "foo");
-    }
-
-    #[test]
-    fn path_range_skips_at_only() {
-        // Plain @-token: path_range starts after `@`, ends at token end.
-        let ctx = detect("@src/foo", 8).unwrap();
-        assert_eq!(ctx.range, 0..8);
-        assert_eq!(ctx.path_range(), 1..8);
-    }
-
-    #[test]
-    fn path_range_skips_at_and_bang_in_hidden_mode() {
-        // Hidden mode: path_range skips both `@` and `!`.
-        let ctx = detect("@!src/foo", 9).unwrap();
-        assert!(ctx.is_hidden_mode());
-        assert_eq!(ctx.range, 0..9);
-        assert_eq!(ctx.path_range(), 2..9);
-    }
-
-    #[test]
-    fn path_range_with_prefix_text_offset() {
-        // @-token preceded by other text: path_range respects the
-        // absolute offset of the @ in the input.
-        let ctx = detect("hello @bar", 10).unwrap();
-        assert_eq!(ctx.range, 6..10);
-        assert_eq!(ctx.path_range(), 7..10);
     }
 
     // ── Drill-aware detection (whitespace inside a drilled dir name) ─────
@@ -319,13 +178,6 @@ mod tests {
     fn drill_prefix_whitespace_after_prefix_terminates() {
         // Whitespace beyond the drilled prefix still ends the token.
         assert!(detect_with_drill("@my dir extra", 13, Some("my dir")).is_none());
-    }
-
-    #[test]
-    fn no_drill_prefix_space_still_terminates() {
-        // Without a prefix, behavior is identical to plain `detect`.
-        assert!(detect("@my dir", 7).is_none());
-        assert!(detect_with_drill("@my dir", 7, None).is_none());
     }
 
     #[test]

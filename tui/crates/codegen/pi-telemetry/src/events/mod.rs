@@ -60,7 +60,6 @@ pub enum ContextualTipKind {
     Undo,
     PlanMode,
     ImageInput,
-    SendNow,
     SmallScreen,
     /// Double-click fold/nav path → tip to enable Word select in settings.
     WordSelect,
@@ -999,34 +998,6 @@ pub struct PluginUsed {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Plugin CTA (inline marketplace "Connect" upsell)
-// ─────────────────────────────────────────────────────────────────────────────
-
-#[derive(Serialize)]
-pub struct PluginCtaImpression {
-    pub plugin_name: String,
-}
-
-#[derive(Serialize)]
-pub struct PluginCtaConnectClicked {
-    pub plugin_name: String,
-    pub is_retry: bool,
-}
-
-#[derive(Serialize)]
-pub struct PluginCtaDismissed {
-    pub plugin_name: String,
-}
-
-#[derive(Serialize)]
-pub struct PluginCtaInstalled {
-    pub plugin_name: String,
-    pub success: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error_category: Option<String>,
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Extensions modal
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1714,7 +1685,7 @@ pub struct SuperGrokUpsellClicked {
 
 /// Which surface a promo announcement's upgrade CTA was activated from.
 /// Modeled on [`SuperGrokUpsell`]; lets the funnel attribute the click to the
-/// welcome hero vs the in-session header vs the banner vs the dashboard, and
+/// welcome hero vs the in-session header vs the banner, and
 /// distinguish keyboard (`Ctrl+O`) activations from pointer/OSC 8 ones.
 /// Ord/Eq exist for the pager's per-(announcement, surface) impression latch.
 #[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -1723,7 +1694,6 @@ pub enum AnnouncementCtaSurface {
     Banner,
     Welcome,
     Header,
-    Dashboard,
     Keyboard,
 }
 
@@ -1970,13 +1940,6 @@ pub struct NotificationEmitted {
     pub was_focused: bool,
 }
 
-#[derive(Serialize)]
-pub struct DashboardOpened {
-    pub agents: usize,
-    pub subagents: usize,
-    pub leader_mode: bool,
-}
-
 /// User pressed an allowlisted registry shortcut.
 ///
 /// **Product contract (authoritative):** intent-only telemetry for the
@@ -2000,21 +1963,6 @@ pub struct ShortcutUsed {
     pub action: String,
     /// Surface label (`prompt_focused`, `agent_screen`, `queue`, …).
     pub context: String,
-}
-
-#[derive(Serialize)]
-pub struct DashboardClosed {
-    pub agents: usize,
-}
-
-#[derive(Serialize)]
-pub struct DashboardAgentAttached {
-    pub kind: &'static str,
-}
-
-#[derive(Serialize)]
-pub struct DashboardAgentLaunched {
-    pub source: &'static str,
 }
 
 // ---------------------------------------------------------------------------
@@ -2377,10 +2325,6 @@ telemetry_event!(
     "plugin_used",
     external = crate::external::schema::map_plugin_used
 );
-telemetry_event!(PluginCtaImpression, "plugin_cta_impression");
-telemetry_event!(PluginCtaConnectClicked, "plugin_cta_connect_clicked");
-telemetry_event!(PluginCtaDismissed, "plugin_cta_dismissed");
-telemetry_event!(PluginCtaInstalled, "plugin_cta_installed");
 telemetry_event!(ExtensionsModalOpened, "extensions_modal_opened");
 telemetry_event!(ExtensionsModalAction, "extensions_modal_action");
 telemetry_event!(HookAdded, "hook_added");
@@ -2493,10 +2437,6 @@ telemetry_event!(ClipboardImagePaste, "clipboard_image_paste");
 telemetry_event!(PasteKeyEmptyHostClipboard, "paste_key_empty_host_clipboard");
 telemetry_event!(ClipboardCopy, "clipboard_copy");
 telemetry_event!(NotificationEmitted, "notification_emitted");
-telemetry_event!(DashboardOpened, "dashboard_opened");
-telemetry_event!(DashboardClosed, "dashboard_closed");
-telemetry_event!(DashboardAgentAttached, "dashboard_agent_attached");
-telemetry_event!(DashboardAgentLaunched, "dashboard_agent_launched");
 telemetry_event!(ShortcutUsed, "shortcut_used");
 telemetry_event!(
     RateLimitHit,
@@ -2946,14 +2886,6 @@ mod tests {
     }
 
     #[test]
-    fn plugin_cta_event_names() {
-        assert_eq!(PluginCtaImpression::NAME, "plugin_cta_impression");
-        assert_eq!(PluginCtaConnectClicked::NAME, "plugin_cta_connect_clicked");
-        assert_eq!(PluginCtaDismissed::NAME, "plugin_cta_dismissed");
-        assert_eq!(PluginCtaInstalled::NAME, "plugin_cta_installed");
-    }
-
-    #[test]
     fn announcement_cta_event_names() {
         assert_eq!(AnnouncementCtaShown::NAME, "announcement_cta_shown");
         assert_eq!(AnnouncementCtaClicked::NAME, "announcement_cta_clicked");
@@ -3284,51 +3216,6 @@ mod tests {
     }
 
     #[test]
-    fn plugin_cta_impression_serializes_plugin_name() {
-        let v = serde_json::to_value(PluginCtaImpression {
-            plugin_name: "figma".into(),
-        })
-        .unwrap();
-        assert_eq!(v, serde_json::json!({ "plugin_name": "figma" }));
-    }
-
-    #[test]
-    fn plugin_cta_connect_clicked_serializes_is_retry() {
-        let fresh = serde_json::to_value(PluginCtaConnectClicked {
-            plugin_name: "figma".into(),
-            is_retry: false,
-        })
-        .unwrap();
-        assert_eq!(
-            fresh,
-            serde_json::json!({ "plugin_name": "figma", "is_retry": false })
-        );
-        let retry = serde_json::to_value(PluginCtaConnectClicked {
-            plugin_name: "figma".into(),
-            is_retry: true,
-        })
-        .unwrap();
-        assert_eq!(
-            retry,
-            serde_json::json!({ "plugin_name": "figma", "is_retry": true })
-        );
-    }
-
-    #[test]
-    fn plugin_cta_installed_omits_error_category_when_none() {
-        let v = serde_json::to_value(PluginCtaInstalled {
-            plugin_name: "figma".into(),
-            success: true,
-            error_category: None,
-        })
-        .unwrap();
-        assert_eq!(
-            v,
-            serde_json::json!({ "plugin_name": "figma", "success": true })
-        );
-    }
-
-    #[test]
     fn login_funnel_event_names() {
         assert_eq!(LoginPickerShown::NAME, "login_picker_shown");
         assert_eq!(LoginMethodChosen::NAME, "login_method_chosen");
@@ -3503,23 +3390,5 @@ mod tests {
                 "{private:?} must bucket to other"
             );
         }
-    }
-
-    #[test]
-    fn plugin_cta_installed_includes_error_category_when_some() {
-        let v = serde_json::to_value(PluginCtaInstalled {
-            plugin_name: "figma".into(),
-            success: false,
-            error_category: Some("not_found".into()),
-        })
-        .unwrap();
-        assert_eq!(
-            v,
-            serde_json::json!({
-                "plugin_name": "figma",
-                "success": false,
-                "error_category": "not_found",
-            })
-        );
     }
 }

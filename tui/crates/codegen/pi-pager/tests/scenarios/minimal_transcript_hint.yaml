@@ -11,7 +11,7 @@ terminal:
   # without them --minimal silently downgrades to full-height inline.
   respond_to_queries: true
 environment:
-  args: ["--minimal", "--no-leader"]
+  args: ["--minimal"]
 mock:
   response: "MINIMAL_SCENARIO_RESPONSE from the mock server."
 steps:

@@ -77,7 +77,7 @@ pub struct PickerRow<'a> {
     /// (e.g., an at-a-glance summary). Hidden when expanded, where
     /// `description_lines` and `fields` take over.
     pub summary_lines: &'a [&'a str],
-    /// Whether this row should be dimmed (e.g., disabled plugins/hooks).
+    /// Whether this row should be dimmed (e.g., a currently unavailable shortcut).
     pub dimmed: bool,
     /// Indentation level (0 = top-level, 1 = nested under a group header, etc.).
     /// Each level adds 2 spaces of left padding.
@@ -338,33 +338,6 @@ pub(crate) fn render_line_editor_search_bar(
         theme,
         SEARCH_BAR_LABEL,
         editor,
-        active,
-        show_hint,
-        bg,
-    );
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn render_picker_search_bar_with_label(
-    buf: &mut Buffer,
-    x: u16,
-    y: u16,
-    width: u16,
-    theme: &Theme,
-    label: &str,
-    state: &PickerState,
-    active: bool,
-    show_hint: bool,
-    bg: Option<ratatui::style::Color>,
-) {
-    render_line_editor_search_bar_with_label(
-        buf,
-        x,
-        y,
-        width,
-        theme,
-        label,
-        &state.query,
         active,
         show_hint,
         bg,
@@ -748,66 +721,6 @@ pub fn render_popup_frame(
     buf.set_style(popup_area, base_style);
     border.render(popup_area, buf);
     Some(inner)
-}
-
-// ---------------------------------------------------------------------------
-// Search bar filter indicator
-// ---------------------------------------------------------------------------
-
-/// Render a right-aligned filter indicator on a search bar row.
-///
-/// Draws e.g. `Enabled  f` at the right edge. Used by plugin/hooks modal.
-///
-/// `active` controls the label styling: when `false` (default/"All" state),
-/// the label renders in `gray_dim`; when `true` (filter active), in `gray`;
-/// when `hovered`, in `text_primary + BOLD`.
-#[allow(clippy::too_many_arguments)]
-pub fn render_filter_indicator(
-    buf: &mut Buffer,
-    x: u16,
-    y: u16,
-    width: u16,
-    theme: &Theme,
-    label: &str,
-    key_hint: &str,
-    active: bool,
-    hovered: bool,
-) -> Rect {
-    let label_w = label.width() as u16;
-    let hint_w = key_hint.width() as u16;
-    let total_w = label_w + 1 + hint_w + 1; // "Label k "
-    let start_x = x + width.saturating_sub(total_w + 1);
-
-    let label_fg = if hovered {
-        theme.text_primary
-    } else if active {
-        theme.gray
-    } else {
-        theme.gray_dim
-    };
-    let label_mods = if hovered {
-        Modifier::BOLD
-    } else {
-        Modifier::empty()
-    };
-    let label_style = Style::default()
-        .fg(label_fg)
-        .bg(theme.bg_base)
-        .add_modifier(label_mods);
-    let hint_style = Style::default()
-        .fg(label_fg)
-        .bg(theme.bg_base)
-        .add_modifier(Modifier::BOLD);
-
-    buf.set_span(start_x, y, &Span::styled(label, label_style), label_w);
-    buf.set_span(
-        start_x + label_w + 1,
-        y,
-        &Span::styled(key_hint, hint_style),
-        hint_w,
-    );
-
-    Rect::new(start_x, y, total_w, 1)
 }
 
 // ---------------------------------------------------------------------------
@@ -1578,10 +1491,6 @@ pub struct PickerState {
     pub link_band: Option<(usize, std::ops::Range<u16>)>,
     /// Hit areas for tab labels (one per tab, `None` if tab didn't fit).
     pub tab_hit_areas: Option<Vec<Option<Rect>>>,
-    /// Hit area for the filter indicator in the search bar.
-    pub filter_area: Option<Rect>,
-    /// Whether the mouse is hovering over the filter indicator.
-    pub filter_hovered: bool,
     /// Whether the tab bar region has keyboard focus. When true, Left/Right cycle tabs.
     pub tabs_focused: bool,
     /// Suppress the list selection highlight while keyboard focus is on the search bar (via edge navigation); cleared once the selection is meaningful again (typing, navigating back into the list, mouse click/hover). Session-picker rows gate their `selected` flag on `!selection_hidden`.
@@ -1602,8 +1511,6 @@ impl Default for PickerState {
             hit_areas: None,
             link_band: None,
             tab_hit_areas: None,
-            filter_area: None,
-            filter_hovered: false,
             tabs_focused: false,
             selection_hidden: false,
         }
@@ -1641,8 +1548,6 @@ impl PickerState {
         self.hit_areas = None;
         self.link_band = None;
         self.tab_hit_areas = None;
-        self.filter_area = None;
-        self.filter_hovered = false;
         self.tabs_focused = false;
         self.selection_hidden = false;
     }
@@ -1706,8 +1611,6 @@ pub struct PickerHitAreas {
     pub entry_indices: Vec<usize>,
     /// One rect per tab label; `None` if the tab didn't fit.
     pub tab_rects: Vec<Option<Rect>>,
-    /// Hit rect for the filter indicator. `None` if no filter.
-    pub filter_rect: Option<Rect>,
 }
 
 /// Configuration for picker behavior (non-state, provided per-call).
@@ -1741,16 +1644,6 @@ pub struct PickerConfig<'a> {
     pub tabs: Option<&'a [&'a str]>,
     /// Active tab index (only used if tabs is Some).
     pub active_tab: usize,
-    /// Filter indicator in the search bar. None = no filter.
-    pub filter_label: Option<&'a str>,
-    /// Key hint for the filter (e.g., "f").
-    pub filter_key_hint: Option<&'a str>,
-    /// Whether the filter is active (not in its default state).
-    pub filter_active: bool,
-    /// Pinned single-line note rendered between the search/filter chrome and
-    /// the first entry (e.g. the hidden-external sessions hint). Render-only:
-    /// never part of the entry list, hit areas, or scrolling.
-    pub header_note: Option<&'a str>,
     /// Custom action keys that produce `PickerOutcome::Action`.
     /// Each entry is `(key_char, description)` shown in shortcuts.
     pub action_keys: &'a [(char, &'a str)],
@@ -1824,8 +1717,6 @@ pub enum PickerOutcome {
     Unchanged,
     /// User switched to tab at given index.
     TabChanged(usize),
-    /// User clicked/pressed the filter key — caller should cycle the filter.
-    FilterCycled,
     /// Custom action key pressed.
     Action(char),
     /// Click on a non-selectable but clickable row (e.g. section label).
@@ -2003,7 +1894,6 @@ pub fn render_picker_in_modal_inner(
         item_rects: content_hit.item_rects,
         entry_indices: content_hit.entry_indices,
         tab_rects: vec![],
-        filter_rect: None,
     });
 }
 
@@ -2237,7 +2127,6 @@ pub fn render_picker(
         item_rects: vec![],
         entry_indices: vec![],
         tab_rects: vec![],
-        filter_rect: None,
     };
 
     let frame = match render_picker_frame(
@@ -2416,55 +2305,13 @@ pub fn render_picker(
         );
     }
 
-    // ── Filter indicator (optional) ──
-    let filter_rect_out = if let Some(filter_label) = config.filter_label {
-        let key_hint = config.filter_key_hint.unwrap_or("f");
-        let rect = render_filter_indicator(
-            buf,
-            content.x,
-            content.y,
-            search_width,
-            theme,
-            filter_label,
-            key_hint,
-            config.filter_active,
-            state.filter_hovered,
-        );
-        state.filter_area = Some(rect);
-        Some(rect)
-    } else {
-        state.filter_area = None;
-        None
-    };
-
     // Divider below search.
     let sep_y = content.y + 1;
     if sep_y < content.y + content.height {
         render_divider(buf, content.x, sep_y, content.width, theme, bg);
     }
 
-    let mut entries_start_y = sep_y + 1;
-
-    // Pinned header note: reserve the first list row so it stays visible
-    // regardless of list scroll.
-    if let Some(note) = config.header_note
-        && entries_start_y < content.y + content.height
-    {
-        let note_style = Style::default().fg(theme.gray_dim);
-        let note_style = if let Some(c) = bg {
-            note_style.bg(c)
-        } else {
-            note_style
-        };
-        buf.set_stringn(
-            content.x + 1,
-            entries_start_y,
-            note,
-            content.width.saturating_sub(1) as usize,
-            note_style,
-        );
-        entries_start_y += 1;
-    }
+    let entries_start_y = sep_y + 1;
 
     // Delegate entry rendering + scrollbar to render_picker_content.
     let entries_area = Rect {
@@ -2560,7 +2407,6 @@ pub fn render_picker(
         item_rects,
         entry_indices,
         tab_rects: tab_rects_out,
-        filter_rect: filter_rect_out,
     }
 }
 
@@ -2667,12 +2513,6 @@ pub fn handle_picker_input(
                         return PickerOutcome::TabChanged(i);
                     }
                 }
-                // Filter click.
-                if let Some(filter_rect) = hit.filter_rect
-                    && filter_rect.contains(pos)
-                {
-                    return PickerOutcome::FilterCycled;
-                }
                 for (i, rect) in hit.item_rects.iter().enumerate() {
                     if rect.contains(pos)
                         && let Some(&entry_idx) = hit.entry_indices.get(i)
@@ -2694,14 +2534,6 @@ pub fn handle_picker_input(
                 if on_close != state.close_hovered {
                     state.close_hovered = on_close;
                     changed = true;
-                }
-                // Filter hover.
-                if let Some(filter_area) = state.filter_area {
-                    let on_filter = filter_area.contains(pos);
-                    if on_filter != state.filter_hovered {
-                        state.filter_hovered = on_filter;
-                        changed = true;
-                    }
                 }
                 // Row hover.
                 let mut on_item = None;
@@ -3179,15 +3011,6 @@ pub fn handle_picker_input(
             }
         }
 
-        // ── Filter cycling ──
-        // 'f' key (not in search mode) toggles the filter.
-        if config.filter_label.is_some()
-            && !state.search_active
-            && key.code == KeyCode::Char('f')
-            && key.modifiers.is_empty()
-        {
-            return PickerOutcome::FilterCycled;
-        }
         // vim_normal_first opens the picker in nav mode; `/` or `i` is the only
         // way into search (printable chars don't type until then). Mirrors
         // scrollback vim-mode. This intentionally shadows the hint `/` handler
@@ -3279,10 +3102,6 @@ mod tests {
             non_selectable_clickable: &[],
             tabs: None,
             active_tab: 0,
-            filter_label: None,
-            filter_key_hint: None,
-            filter_active: false,
-            header_note: None,
             action_keys: &[],
             disable_search: false,
             compact_bottom_bar: false,

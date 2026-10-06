@@ -3,15 +3,11 @@
 //! Handles spawning the agent process, initializing the protocol,
 //! authenticating, and providing the channel for communication.
 
-pub mod leader_bridge;
-pub mod meta;
-pub mod model_state;
+pub(crate) mod meta;
+pub(crate) mod model_state;
 pub mod spawn;
 pub mod tracker;
-pub mod vendor;
-mod version_mismatch;
-
-pub(crate) use version_mismatch::{is_version_mismatch_banner, version_mismatch_banner};
+pub(crate) mod vendor;
 
 /// Ext methods that carry a session-scoped update and may stamp `isReplay`.
 /// Unreachable in standard-ACP mode (vendor ext notifications are filtered at
@@ -27,14 +23,12 @@ use pi_telemetry::process_info::{
     Entrypoint, Interactivity, LeaderMode, ProcessIdentity, set_identity,
 };
 use pi_telemetry::startup;
-pub use pi_telemetry::startup::{
-    AgentKind, Owner, StartupOutcome, StartupPhase, StartupTimer,
-};
+pub use pi_telemetry::startup::{AgentKind, Owner, StartupOutcome, StartupPhase, StartupTimer};
 
 use anyhow::Result;
 use tokio_util::sync::CancellationToken;
 
-use crate::client_identity::{HEADLESS_CLIENT_TYPE, PAGER_CLIENT_TYPE, PAGER_CLIENT_VERSION};
+use crate::client_identity::{PAGER_CLIENT_TYPE, PAGER_CLIENT_VERSION};
 use agent_client_protocol as acp;
 use pi_acp_lib::{AcpAgentTx, AcpClientRx, acp_send};
 use pi_shell::agent::auth_method::AuthMethodKind;
@@ -82,9 +76,9 @@ pub struct AcpConnection {
     pub auth_methods: Vec<acp::AuthMethod>,
     /// Cancellation token to stop the agent.
     pub cancel: CancellationToken,
-    /// In-process agent worker thread (`connect` only). Join after cancel so
-    /// session actors can flush SessionEnd hooks. `None` in leader mode.
-    pub agent_thread: Option<std::thread::JoinHandle<anyhow::Result<()>>>,
+    /// Thread running the stdio bridge that owns the agent process. Taken by
+    /// [`spawn::AgentProcessGuard`], which cancels and joins it on exit.
+    pub bridge_thread: Option<std::thread::JoinHandle<anyhow::Result<()>>>,
     /// ACP-advertised slash commands parsed from `InitializeResponse.meta.availableCommands`.
     /// Seeded into every new `AgentSession` so autocomplete has shell builtins
     /// and skills immediately, before any `AvailableCommandsUpdate` arrives.
@@ -103,24 +97,12 @@ pub struct AcpConnection {
     /// Auth response metadata from eager authentication (cached token / API key).
     /// Contains `team_name`, etc. `None` when interactive login is required.
     pub auth_meta: Option<serde_json::Value>,
-    /// Leader connection status. `Some` only when connected via leader.
-    pub leader_status_rx: Option<tokio::sync::watch::Receiver<leader_bridge::ConnectionStatus>>,
     /// Whether cancel-rewind is enabled (resolved by shell from config layers).
     pub cancel_rewind_enabled: bool,
-    /// Whether the session-recap feature is rolled out for this connection,
-    /// resolved by the shell (remote settings / config / env; default OFF) and
-    /// advertised in `InitializeResponse.meta.sessionRecap`. The client gates
-    /// its automatic away-recap poll and the manual `/recap` on this so a
- /// disabled feature produces zero `legacy ext RPC` traffic. Defaults to `false`
-    /// when absent (e.g. an older shell that predates the feature).
-    pub session_recap_available: bool,
-    /// Shell-side feedback trace-offer eligibility (see `feedbackTraceOffer`).
-    pub feedback_trace_offer: bool,
     /// `AuthManager` for pager-side authenticated channels (voice STT/TTS).
     ///
-    /// In-process mode shares the agent's instance (single token cache); leader
-    /// mode builds a dedicated one off the same local `auth.json`. Either way it
-    /// resolves a fresh bearer per request via the refresh chain.
+    /// Built off the local `auth.json`; resolves a fresh bearer per request via
+    /// the refresh chain.
     pub auth_manager: std::sync::Arc<pi_shell::auth::AuthManager>,
 }
 
@@ -130,8 +112,6 @@ pub struct ConnectFlags {
     pub subagents: bool,
     /// CLI memory override set by a legacy compatibility flag.
     pub memory_enabled_override: Option<bool>,
-    /// Original compatibility flag spelling for leader-mode warnings.
-    pub memory_override_flag: Option<&'static str>,
     pub disable_web_search: bool,
     /// Session-scoped `--todo-gate` override. Forces
     /// `ReminderPolicy.todo_gate.enabled = true` for this session.
@@ -145,7 +125,7 @@ pub struct ConnectFlags {
     /// Storage mode override.
     pub storage_mode: Option<String>,
     /// Whether this client will draw a status row, advertised as
- /// `legacy ext RPC` so the agent can skip an unpainted payload.
+    /// `legacy ext RPC` so the agent can skip an unpainted payload.
     pub status_line: bool,
     /// Client identifier for ACP Initialize metadata.
     pub client_identifier: Option<String>,
@@ -168,7 +148,6 @@ pub struct ConnectFlags {
     /// Override reasoning effort for all models.
     pub reasoning_effort_override: Option<ReasoningEffort>,
     /// CLI permission rules from --allow / --deny flags.
-    /// Not supported in leader mode (agent config is set at leader startup).
     pub permission_rules: Vec<pi_workspace::permission::types::PermissionRule>,
     /// Seed agent sessions with always-approve (YOLO) permission mode.
     pub default_yolo_mode: bool,
@@ -223,8 +202,7 @@ pub async fn connect(cancel: &CancellationToken, flags: ConnectFlags) -> Result<
         interactivity: Interactivity::Interactive,
     });
 
-    let memory_config = agent_config.memory_config.clone();
-    let spawned = spawn::spawn_grok_shell(agent_config, cancel, memory_config).await?;
+    let spawned = spawn::spawn_agent_process(agent_config, cancel).await?;
     let auth_manager = spawned.auth_manager.clone();
     let (tx, rx) = (spawned.channel.tx, spawned.channel.rx);
 
@@ -236,8 +214,6 @@ pub async fn connect(cancel: &CancellationToken, flags: ConnectFlags) -> Result<
         default_auth_method_id,
         available_commands,
         cancel_rewind_enabled,
-        session_recap_available,
-        feedback_trace_offer,
     ) = initialize(&tx, &flags).await?;
 
     // Determine whether interactive login is needed.
@@ -264,195 +240,16 @@ pub async fn connect(cancel: &CancellationToken, flags: ConnectFlags) -> Result<
         is_grok_shell,
         auth_methods,
         cancel: spawned.cancel,
-        agent_thread: Some(spawned.thread_handle),
+        bridge_thread: Some(spawned.bridge_thread),
         available_commands,
         needs_login,
         login_label,
         login_method_id,
         auth_start_mode,
         auth_meta,
-        leader_status_rx: None,
         cancel_rewind_enabled,
-        session_recap_available,
-        feedback_trace_offer,
         auth_manager,
     })
-}
-
-/// Connect to a leader process and return an `AcpConnection`.
-///
-/// The leader provides the ACP transport via IPC (raw JSON strings over a
-/// Unix socket). This function bridges that transport into the same typed
-/// `(AcpAgentTx, AcpClientRx)` pair that `connect()` produces, then runs
-/// the standard initialize + authenticate sequence.
-pub async fn connect_via_leader(
-    cancel: &CancellationToken,
-    flags: ConnectFlags,
-    raw_config: &toml::Value,
-) -> Result<AcpConnection> {
-    use pi_shell::leader::{
-        ClientCapabilities, ClientMode, LeaderReconnector, ReconnectPolicy, connect_or_spawn,
-    };
-
-    // These flags are baked into the agent at startup.  In leader mode the
-    // agent is already running, so per-client overrides cannot be applied.
-    warn_unsupported_leader_flags(&flags);
-
-    apply_config_writes(&flags);
-
-    startup::enter(StartupPhase::ConfigLoad);
-    // The leader path never runs the managed-policy sync in this process.
-    startup::set_auth_mode(pi_shell::managed_config::classify_auth_mode());
-    let mut agent_config = AgentConfig::new_from_toml_cfg(raw_config)
-        .map_err(|e| anyhow::anyhow!("Failed to create agent config: {e}"))?;
-    // resolve_telemetry_mode reads remote_settings.
-    agent_config.remote_settings = flags.remote_settings.clone();
-
-    let client_type = flags
-        .client_identifier
-        .as_deref()
-        .unwrap_or(HEADLESS_CLIENT_TYPE);
-    let env_urls = pi_shell::leader::LeaderEnvUrls::from(&agent_config.grok_com_config);
-    let capabilities = ClientCapabilities {
-        // Leader agent is pre-running; seed modes via capabilities → session meta.
-        yolo_mode: flags.default_yolo_mode,
-        auto_mode: flags.default_auto_mode && !flags.default_yolo_mode,
-        default_model: agent_config.models.default.clone(),
-        client_version: Some(PAGER_CLIENT_VERSION.to_string()),
-        code_nav_enabled: false,
-        terminal: flags.terminal,
-        fs_read: flags.fs_read,
-        fs_write: flags.fs_write,
-        status_line: flags.status_line,
-    };
-
-    startup::enter(StartupPhase::LeaderConnect);
-    let conn = connect_or_spawn(
-        client_type,
-        ClientMode::Stdio,
-        &env_urls,
-        capabilities.clone(),
-    )
-    .await?;
-
-    let (status_tx, status_rx) = LeaderReconnector::status_channel();
-    let reconnector = LeaderReconnector::new(
-        client_type,
-        ClientMode::Stdio,
-        env_urls,
-        capabilities,
-        status_tx,
-    );
-    let bridge = leader_bridge::bridge_leader_connection(
-        conn,
-        cancel.clone(),
-        Some(reconnector),
-        ReconnectPolicy::unbounded(),
-    )?;
-    let (tx, rx) = (bridge.channel.tx, bridge.channel.rx);
-
-    startup::enter(StartupPhase::AcpInitialize);
-    let (
-        models,
-        is_grok_shell,
-        auth_methods,
-        default_auth_method_id,
-        available_commands,
-        cancel_rewind_enabled,
-        session_recap_available,
-        feedback_trace_offer,
-    ) = initialize(&tx, &flags).await?;
-
-    let (needs_login, login_label, login_method_id, auth_start_mode) =
-        startup_auth_metadata(&auth_methods);
-
-    startup::enter(StartupPhase::EagerAuth);
-    let (needs_login, login_label, login_method_id, auth_start_mode, auth_meta) =
-        bounded_eager_auth(
-            &tx,
-            &auth_methods,
-            default_auth_method_id.as_ref(),
-            needs_login,
-            login_label,
-            login_method_id,
-            auth_start_mode,
-        )
-        .await;
-
-    // Leader mode runs the agent in a separate process, so there's no shared
-    // in-process `AuthManager`. Build a dedicated *non-refreshing* one over the
-    // same `auth.json`: skip `configure_refresher` so only the agent rotates the
-    // token. A second refresher would race rotation and could clear credentials
-    // on failure. This one just reads the valid token, and on expiry adopts the
-    // agent's disk-rotated token under the file lock (`try_adopt_disk_token`).
-    let auth_manager = std::sync::Arc::new(pi_shell::auth::AuthManager::new(
-        &pi_shell::util::grok_home::grok_home(),
-        agent_config.grok_com_config.clone(),
-    ));
-
-    // Leader has no in-process agent; init this process's product telemetry client.
-    set_identity(ProcessIdentity {
-        entrypoint: Entrypoint::Pager,
-        leader: LeaderMode::Attached,
-        interactivity: Interactivity::Interactive,
-    });
-    pi_shell::agent::init::update_telemetry_config(&agent_config, &auth_manager);
-
-    Ok(AcpConnection {
-        tx,
-        rx,
-        models,
-        is_grok_shell,
-        auth_methods,
-        cancel: bridge.cancel,
-        agent_thread: None,
-        available_commands,
-        needs_login,
-        login_label,
-        login_method_id,
-        auth_start_mode,
-        auth_meta,
-        leader_status_rx: Some(status_rx),
-        cancel_rewind_enabled,
-        session_recap_available,
-        feedback_trace_offer,
-        auth_manager,
-    })
-}
-
-/// Warn about flags that only take effect in direct-spawn mode.
-///
-/// In leader mode the agent is already running; these per-agent settings
-/// cannot be changed after the fact.
-fn warn_unsupported_leader_flags(flags: &ConnectFlags) {
-    // eprintln rather than tracing::warn because this runs before pager
-    // TUI tracing is initialised — tracing output would be silently dropped.
-    for flag in unsupported_leader_flags(flags) {
-        eprintln!(
-            "warning: {flag} has no effect in leader mode \
-             (agent config is set at leader startup)"
-        );
-    }
-}
-
-fn unsupported_leader_flags(flags: &ConnectFlags) -> Vec<&'static str> {
-    let mut out = Vec::new();
-    if let Some(flag) = flags.memory_override_flag {
-        out.push(flag);
-    }
-    if flags.disable_web_search {
-        out.push("--disable-web-search");
-    }
-    if flags.storage_mode.is_some() {
-        out.push("--storage-mode");
-    }
-    if flags.subagents {
-        out.push("--subagents");
-    }
-    if !flags.permission_rules.is_empty() {
-        out.push("--allow/--deny permission rules");
-    }
-    out
 }
 
 /// Write config.toml fields based on CLI flags.
@@ -486,7 +283,7 @@ fn apply_config_writes(flags: &ConnectFlags) {
     }
 }
 
-/// Build the per-session `_meta` for `InitializeRequest` (TUI and leader).
+/// Build the per-session `_meta` for `InitializeRequest`.
 fn build_initialize_meta(flags: &ConnectFlags) -> serde_json::Value {
     let client_type = flags
         .client_identifier
@@ -534,8 +331,6 @@ async fn initialize(
     Option<acp::AuthMethodId>,
     Vec<acp::AvailableCommand>,
     bool,
-    bool,
-    bool,
 )> {
     let req = acp::InitializeRequest::new(acp::ProtocolVersion::V1)
         .client_capabilities(
@@ -577,8 +372,6 @@ async fn initialize(
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
-    let session_recap_available = parse_session_recap_available(resp.meta.as_ref());
-    let feedback_trace_offer = parse_feedback_trace_offer(resp.meta.as_ref());
     let default_auth_method_id = parse_default_auth_method_id(resp.meta.as_ref());
 
     Ok((
@@ -588,8 +381,6 @@ async fn initialize(
         default_auth_method_id,
         available_commands,
         cancel_rewind_enabled,
-        session_recap_available,
-        feedback_trace_offer,
     ))
 }
 
@@ -601,22 +392,6 @@ pub fn parse_available_commands(meta: Option<&acp::Meta>) -> Vec<acp::AvailableC
     meta.and_then(|m| m.get("availableCommands"))
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default()
-}
-
-/// Parse `sessionRecap` from `InitializeResponse.meta` (shell rollout gate).
-///
-/// Default `false` when missing or non-bool so older agents and dark-launch
-/// defaults produce zero automatic recap traffic.
-pub fn parse_session_recap_available(meta: Option<&acp::Meta>) -> bool {
-    meta.and_then(|m| m.get("sessionRecap"))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
-}
-
-pub fn parse_feedback_trace_offer(meta: Option<&acp::Meta>) -> bool {
-    meta.and_then(|m| m.get("feedbackTraceOffer"))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
 }
 
 /// Determine whether interactive login is needed based on the advertised auth methods.
@@ -864,9 +639,15 @@ mod tests {
     #[test]
     fn is_session_update_ext_method_covers_both_carriers() {
         use crate::acp::vendor::VENDOR_EXT_PREFIX;
-        assert!(is_session_update_ext_method(&format!("{VENDOR_EXT_PREFIX}session_notification")));
-        assert!(is_session_update_ext_method(&format!("{VENDOR_EXT_PREFIX}session/update")));
-        assert!(!is_session_update_ext_method(&format!("{VENDOR_EXT_PREFIX}task_completed")));
+        assert!(is_session_update_ext_method(&format!(
+            "{VENDOR_EXT_PREFIX}session_notification"
+        )));
+        assert!(is_session_update_ext_method(&format!(
+            "{VENDOR_EXT_PREFIX}session/update"
+        )));
+        assert!(!is_session_update_ext_method(&format!(
+            "{VENDOR_EXT_PREFIX}task_completed"
+        )));
         assert!(!is_session_update_ext_method("session/update"));
     }
 
@@ -914,31 +695,6 @@ mod tests {
         });
         let cmds = parse_available_commands(meta.as_object());
         assert!(cmds.is_empty());
-    }
-
-    #[test]
-    fn parse_session_recap_available_true() {
-        let meta = serde_json::json!({ "sessionRecap": true });
-        assert!(parse_session_recap_available(meta.as_object()));
-    }
-
-    #[test]
-    fn parse_session_recap_available_false_explicit() {
-        let meta = serde_json::json!({ "sessionRecap": false });
-        assert!(!parse_session_recap_available(meta.as_object()));
-    }
-
-    #[test]
-    fn parse_session_recap_available_defaults_off_when_missing() {
-        let meta = serde_json::json!({ "grokShell": true, "cancelRewind": true });
-        assert!(!parse_session_recap_available(meta.as_object()));
-        assert!(!parse_session_recap_available(None));
-    }
-
-    #[test]
-    fn parse_session_recap_available_non_bool_defaults_off() {
-        let meta = serde_json::json!({ "sessionRecap": "yes" });
-        assert!(!parse_session_recap_available(meta.as_object()));
     }
 
     // ── startup_auth_metadata ──────────────────────────────────────
@@ -991,57 +747,6 @@ mod tests {
         assert_eq!(mode, AuthStartMode::Pending);
     }
 
-    /// CROSS-CRATE REGRESSION GUARD:
-    ///
-    /// Enterprise/BYOK configs (e.g. an enterprise `~/.grok/config.toml` with a
-    /// `[model.*]` table containing `env_key = "ANTHROPIC_AUTH_TOKEN"`) MUST
-    /// NOT send the user to the login screen at startup.
-    ///
-    /// This test exercises the SHELL-PAGER JOIN, not just the pager half:
-    /// it calls the shell-side `build_auth_methods()` with the exact inputs
-    /// `MvpAgent::initialize()` would compute for an enterprise user, then feeds
-    /// the result into the pager's `startup_auth_metadata()`. If a future
-    /// change re-orders `build_auth_methods()` to put `pi.api_key` anywhere
-    /// other than first (the shape of a past regression), this test fails
-    /// because `startup_auth_metadata()` returns `needs_login = true`.
-    ///
-    /// Counterpart shell-side tests
-    /// (`agent::auth_method::tests::enterprise_byok_first_method_is_pi_api_key`
-    /// and `enterprise_byok_config_does_not_require_login`) pin the same
-    /// invariant from the shell side; this test pins the cross-crate
-    /// contract that the pager actually consumes the shell's output as
-    /// expected.
-    #[test]
-    fn shell_built_auth_methods_for_byok_user_skip_login_screen() {
-        use pi_shell::agent::auth_method::{AuthMethodsBuildInputs, build_auth_methods};
-
-        let built = build_auth_methods(AuthMethodsBuildInputs {
-            // enterprise-style: model has `env_key` set and the env var resolves,
-            // so the shell-side predicate returns true.
-            has_external_api_key: true,
-            // Realistic enterprise user: no cached session token, default `grok.com`
-            // login (no enterprise OIDC).
-            has_cached_token: false,
-            has_enterprise_oidc: false,
-            enterprise_oidc_issuer: None,
-            login_label: None,
-            has_auth_provider_command: false,
-            preferred_method: None,
-        });
-
-        let (needs, label, method_id, mode) = startup_auth_metadata(&built.methods);
-        assert!(
-            !needs,
-            "shell built auth_methods for a BYOK user, but the pager still \
-             reports needs_login = true. Either the shell stopped putting \
-             pi.api_key first or the pager stopped treating pi.api_key as \
-             a no-login method.",
-        );
-        assert!(label.is_none());
-        assert!(method_id.is_none());
-        assert_eq!(mode, AuthStartMode::Pending);
-    }
-
     /// Inverse direction: when `pi.api_key` is NOT in the list, the pager
     /// MUST show the login screen. We assert this with `pi.api_key` present
     /// LATER in the list (the shape of a past regression) and confirm the
@@ -1081,53 +786,6 @@ mod tests {
         let methods = vec![make_auth_method("grok.com", "grok.com", Some(meta))];
         let (_, _, _, mode) = startup_auth_metadata(&methods);
         assert_eq!(mode, AuthStartMode::Pending);
-    }
-
-    // ── unsupported_leader_flags ──────────────────────────────────
-
-    #[test]
-    fn unsupported_leader_flags_empty_when_none_set() {
-        let flags = ConnectFlags::default();
-        assert!(unsupported_leader_flags(&flags).is_empty());
-    }
-
-    #[test]
-    fn unsupported_leader_flags_detects_all() {
-        let flags = ConnectFlags {
-            memory_enabled_override: Some(true),
-            memory_override_flag: Some("--experimental-memory"),
-            disable_web_search: true,
-            storage_mode: Some("writeback".into()),
-            subagents: true,
-            ..Default::default()
-        };
-        let detected = unsupported_leader_flags(&flags);
-        assert_eq!(detected.len(), 4);
-        assert!(detected.contains(&"--experimental-memory"));
-        assert!(detected.contains(&"--disable-web-search"));
-        assert!(detected.contains(&"--storage-mode"));
-        assert!(detected.contains(&"--subagents"));
-    }
-
-    #[test]
-    fn unsupported_leader_flags_preserves_no_memory_spelling() {
-        let flags = ConnectFlags {
-            memory_enabled_override: Some(false),
-            memory_override_flag: Some("--no-memory"),
-            ..Default::default()
-        };
-        assert_eq!(unsupported_leader_flags(&flags), vec!["--no-memory"]);
-    }
-
-    #[test]
-    fn unsupported_leader_flags_ignores_supported() {
-        let flags = ConnectFlags {
-            terminal: true,
-            fs_read: true,
-            fs_write: true,
-            ..Default::default()
-        };
-        assert!(unsupported_leader_flags(&flags).is_empty());
     }
 
     #[test]
@@ -1180,7 +838,15 @@ mod tests {
             ..Default::default()
         });
         use crate::acp::vendor::VENDOR_EXT_PREFIX;
-        assert!(with_hunk.get(&format!("{VENDOR_EXT_PREFIX}hunkTracker")).is_none());
-        assert!(with_hunk.get(&format!("{VENDOR_EXT_PREFIX}statusLine")).is_none());
+        assert!(
+            with_hunk
+                .get(&format!("{VENDOR_EXT_PREFIX}hunkTracker"))
+                .is_none()
+        );
+        assert!(
+            with_hunk
+                .get(&format!("{VENDOR_EXT_PREFIX}statusLine"))
+                .is_none()
+        );
     }
 }

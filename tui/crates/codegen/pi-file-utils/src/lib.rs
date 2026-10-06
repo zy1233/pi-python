@@ -1,10 +1,3 @@
-#![allow(
-    unused_imports,
-    unused_variables,
-    unused_mut,
-    unreachable_code,
-    dead_code
-)]
 //! Local data collection: upload queueing and S3-compatible blob storage.
 pub(crate) mod circuit_breaker_observer;
 /// Wrap a raw client with [`pi_auth::AuthRetryMiddleware`] for automatic 401 retry.

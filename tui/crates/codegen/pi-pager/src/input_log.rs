@@ -30,9 +30,6 @@ pub enum ActivePaneSnapshot {
     Scrollback,
     Todo,
     Queue,
-    Tasks,
-    Catalog,
-    Other,
 }
 /// Copy-friendly snapshot of the input outcome. No heap allocation.
 #[derive(Clone, Copy, Debug)]

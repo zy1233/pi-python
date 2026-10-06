@@ -11,7 +11,7 @@ terminal:
   # without them --minimal silently downgrades to full-height inline.
   respond_to_queries: true
 environment:
-  args: ["--minimal", "--no-leader"]
+  args: ["--minimal"]
 mock:
   response: "FLUSH_LEFT_RESPONSE — short answer aligned with the welcome card."
 steps:

@@ -478,17 +478,13 @@ fn expect_user_echo_skips_one() {
     assert!(tracker.handle_update(user_message("world"), &meta(), &mut sb));
     assert_eq!(sb.len(), 2, "second message should be added normally");
 }
-/// The echoed promptIndex belongs to the turn-starting prompt: an
-/// interjection that lands between the local push and the echo (laggy
-/// link) must not steal the backfilled index — the shell never numbers
-/// interjections.
+/// The echoed promptIndex is backfilled onto the locally pushed prompt.
 #[test]
-fn echo_prompt_index_backfill_skips_interjections() {
+fn echo_prompt_index_backfills_the_local_prompt() {
     let mut sb = ScrollbackState::new();
     let mut tracker = AcpUpdateTracker::new();
     let prompt_id = sb.push_block(RenderBlock::user_prompt("real prompt"));
     tracker.expect_user_echo();
-    let ij_id = sb.push_block(RenderBlock::interjection_prompt("steer"));
     let echo = acp::SessionUpdate::UserMessageChunk(
         acp::ContentChunk::new(acp::ContentBlock::Text(acp::TextContent::new(
             "real prompt".to_string(),
@@ -502,17 +498,6 @@ fn echo_prompt_index_backfill_skips_interjections() {
     let prompt_idx = sb.index_of_id(prompt_id).unwrap();
     match &sb.get(prompt_idx).unwrap().block {
         RenderBlock::UserPrompt(b) => assert_eq!(b.prompt_index, Some(3)),
-        other => panic!("expected UserPrompt, got {other:?}"),
-    }
-    let ij_idx = sb.index_of_id(ij_id).unwrap();
-    match &sb.get(ij_idx).unwrap().block {
-        RenderBlock::UserPrompt(b) => {
-            assert!(b.is_interjection);
-            assert_eq!(
-                b.prompt_index, None,
-                "interjection must not steal the echoed index"
-            );
-        }
         other => panic!("expected UserPrompt, got {other:?}"),
     }
 }
@@ -1024,8 +1009,8 @@ fn tool_output_bash_serde_roundtrip() {
 /// 4. Second Completed ToolCallUpdate (from acp_session completion handler)
 #[test]
 fn production_execute_sequence() {
-    use serde_json::json;
     use pi_tools::types::output::{BashOutput, ToolOutput};
+    use serde_json::json;
     let mut sb = ScrollbackState::new();
     let mut tracker = AcpUpdateTracker::new();
     let tc_id = "call_abc123";
@@ -3909,7 +3894,7 @@ fn handle_user_message_finishes_pending_tool_entries() {
         "no entries should be animating after user message",
     );
 }
-/// A send-now interrupt must not finalize the freshly armed page-flip pin.
+/// A user message arriving mid-turn must not finalize the freshly armed page-flip pin.
 #[test]
 fn handle_user_message_does_not_finalize_fresh_pin() {
     let mut sb = ScrollbackState::new();
@@ -3935,7 +3920,7 @@ fn handle_user_message_does_not_finalize_fresh_pin() {
     );
     assert!(
         !sb.is_pin_reserve_after_turn(),
-        "a send-now must not finalize the fresh pin (that blocks the overflow chase)"
+        "a mid-turn user message must not finalize the fresh pin (that blocks the overflow chase)"
     );
 }
 /// Regression: finish_turn must call finish_running even for tools that are

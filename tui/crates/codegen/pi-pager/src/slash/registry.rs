@@ -15,10 +15,8 @@ use super::acp_command::AcpSlashCommand;
 use super::command::{CommandProvenance, SlashCommand, WorkflowChoice};
 use super::mode_support::ModeSupport;
 
-/// Shell ACP names the pager never offers (unified `/hooks` / `/plugins` UI,
-/// plus `/help`). Must stay covered by [`pi_shell::session::PAGER_COMMAND_KEYS`]
-/// so a skill of the same name is advertised already qualified instead of
-/// being dropped here when the matching shell gate is off.
+/// Agent-advertised command names the pager never offers: `/help` is a
+/// builtin, and the hooks/plugins management commands have no UI here.
 pub(crate) const BLOCKED_ACP_NAMES: &[&str] = &[
     "help",
     "hooks-add",
@@ -29,7 +27,10 @@ pub(crate) const BLOCKED_ACP_NAMES: &[&str] = &[
     "reload-plugins",
 ];
 
-/// Slash names kept in the pi-python TUI (standard ACP + local chrome).
+/// The builtin slash set of the pi-python TUI: standard-ACP session commands
+/// plus local chrome. `commands::builtin_commands()` is exactly this list (a
+/// test pins it); everything else comes from the agent over ACP.
+#[cfg(test)]
 pub(crate) const PI_STANDARD_SLASH_NAMES: &[&str] = &[
     "new",
     "resume",
@@ -66,12 +67,6 @@ pub struct CommandTrigger {
     pub match_text: String,
     /// Command description.
     pub description: String,
-    /// Usage string.
-    pub usage: String,
-    /// Whether this command takes arguments.
-    pub takes_args: bool,
-    /// Whether arguments are required (only meaningful when `takes_args` is true).
-    pub args_required: bool,
     /// Index into `CommandRegistry::commands`.
     pub command_index: usize,
     /// Source of this command.
@@ -94,9 +89,6 @@ impl CommandTrigger {
             display: format!("/{key}"),
             match_text: key.to_string(),
             description: command.description().to_string(),
-            usage: command.usage().to_string(),
-            takes_args: command.takes_args(),
-            args_required: command.args_required(),
             command_index,
             source,
             provenance: command.provenance(),
@@ -169,9 +161,6 @@ pub struct CommandRegistry {
     /// Extracted from `_meta.workflowSource` on the incoming list (including
     /// names skipped as reserved/claimed) so `/workflow` can suggest them.
     saved_workflows: Vec<WorkflowChoice>,
-    /// When true, only standard-ACP / local-TUI slash commands are offered
-    /// (`/new` `/resume` `/quit` plus `/help` `/theme` `/settings` `/multiline` `/model`).
-    pi_standard_slash: bool,
 }
 
 impl CommandRegistry {
@@ -185,8 +174,6 @@ impl CommandRegistry {
         let sources = vec![CommandSource::Builtin; n];
         // Fail-closed until the matching `set_*_visible` call reveals them.
         let mut hidden = HashSet::new();
-        hidden.insert("dashboard".to_string());
-        hidden.insert("recap".to_string());
         // Voice is fail-closed in the registry until `set_voice_visible` after
         // the runtime gate resolves (GA default on; remote kill switch may hide).
         hidden.insert("voice".to_string());
@@ -207,7 +194,6 @@ impl CommandRegistry {
             restricted: HashSet::new(),
             available_tools: None,
             saved_workflows: Vec::new(),
-            pi_standard_slash: false,
         };
         reg.rebuild_triggers();
         reg
@@ -240,7 +226,7 @@ impl CommandRegistry {
     /// typed invocation, ignoring the menu-only gate (`menu_hidden`).
     ///
     /// Still returns `None` for hard-hidden commands (feature gates like
-    /// `/voice` / `/dashboard`, or `/auto` when the auto permission-mode
+    /// `/voice`, or `/auto` when the auto permission-mode
     /// feature is unavailable — those must stay fail-closed), restricted
     /// commands, and commands whose `required_tools()` are not all in the
     /// advertised toolset.
@@ -328,14 +314,6 @@ impl CommandRegistry {
             })
     }
 
-    /// Current deny list (normalized). Used to mirror the gate onto child
-    /// registries (subagent views), same as the `set_*_visible` gates.
-    pub fn restricted_commands(&self) -> Vec<String> {
-        let mut names: Vec<String> = self.restricted.iter().cloned().collect();
-        names.sort();
-        names
-    }
-
     /// True when `cmd.required_tools()` is empty, or the toolset is
     /// known and every required tool is in the advertised set.
     ///
@@ -372,64 +350,6 @@ impl CommandRegistry {
         self.commands.get(index)
     }
 
-    /// Number of unique commands (not triggers).
-    pub fn command_count(&self) -> usize {
-        self.commands.len()
-    }
-
-    /// Offer only `/new` `/resume` `/quit` and local TUI chrome. Commands
- /// that needed grok `legacy ext RPC` RPCs stay compiled but are not listed or
-    /// dispatchable.
-    pub fn enable_pi_standard_slash_menu(&mut self) {
-        self.pi_standard_slash = true;
-        self.rebuild_triggers();
-    }
-
-    pub(crate) fn pi_standard_slash_enabled(&self) -> bool {
-        self.pi_standard_slash
-    }
-
-    /// Show or hide the /hooks and /plugins commands.
-    /// When hidden, they won't appear in the dropdown or be executable.
-    pub fn set_plugins_visible(&mut self, visible: bool) {
-        let names = ["hooks", "plugins"];
-        if visible {
-            for name in &names {
-                self.hidden.remove(*name);
-            }
-        } else {
-            for name in &names {
-                self.hidden.insert((*name).to_string());
-            }
-        }
-        self.rebuild_triggers();
-    }
-
-    /// Update the set of tool names the agent has registered.
-    ///
-    /// Called by the ACP plumbing whenever the shell advertises a new
-    /// toolset (typically via `AvailableCommandsUpdate.meta.tools`).
-    /// Commands whose `required_tools()` aren't all in `tools` are
-    /// hidden from the dropdown and `get()`. Pass an empty set to
-    /// hide every tool-gated command.
-    ///
-    /// API note: once `Some` has been set this method only replaces
-    /// the set -- it cannot transition the registry back to the
-    /// `None` "tool list unknown, show everything" bootstrap state.
-    /// In practice the drain pipeline never delivers a clear; older
-    /// shells that drop `meta.tools` mid-session will see stale
-    /// gating until the next update with a tools list arrives. If a
-    /// real clear path is needed, change the signature to
-    /// `Option<HashSet<String>>` and rewire `sync_acp_commands`.
-    ///
-    /// Triggers a full `rebuild_triggers()`. Prefer `set_acp_state`
-    /// when also updating ACP commands so both mutations share one
-    /// rebuild.
-    pub fn set_available_tools(&mut self, tools: HashSet<String>) {
-        self.apply_available_tools(tools);
-        self.rebuild_triggers();
-    }
-
     fn apply_available_tools(&mut self, tools: HashSet<String>) {
         self.available_tools = Some(tools);
     }
@@ -448,21 +368,6 @@ impl CommandRegistry {
             self.menu_hidden.insert("share".to_string());
         }
         self.rebuild_triggers();
-    }
-
-    /// Show or hide the `/dashboard` command (feature-flag gating).
-    ///
-    /// The command is hidden by default (see [`Self::new`]) and revealed here
-    /// when the dashboard feature flag (`dashboard_enabled()`) is on. When
-    /// hidden it won't appear in the dropdown or be executable.
-    pub fn set_dashboard_visible(&mut self, visible: bool) {
-        self.set_command_visible("dashboard", visible);
-    }
-
-    /// Show or hide the `/recap` command (shell `sessionRecap` gate).
-    /// Hidden by default in [`Self::new`]; revealed from initialize meta.
-    pub fn set_recap_visible(&mut self, visible: bool) {
-        self.set_command_visible("recap", visible);
     }
 
     /// Show or hide the `/voice` command (runtime voice gate).
@@ -517,25 +422,6 @@ impl CommandRegistry {
             self.apply_available_tools(tools);
         }
         self.rebuild_triggers();
-    }
-
-    /// Replace all ACP-sourced commands with a new set.
-    ///
-    /// Builtin commands are preserved. ACP names that collide with a
-    /// builtin trigger or blocked name are skipped — the shell advertises
-    /// colliding skills already qualified (`acme:login`).
-    ///
-    /// Triggers a full `rebuild_triggers()`. Prefer `set_acp_state`
-    /// when also updating the agent's tool list so both mutations
-    /// share one rebuild.
-    pub fn set_acp_commands(&mut self, commands: &[agent_client_protocol::AvailableCommand]) {
-        self.apply_acp_commands(commands);
-        self.rebuild_triggers();
-    }
-
-    /// Saved / built-in workflow definitions from the last ACP catalog.
-    pub fn saved_workflows(&self) -> &[WorkflowChoice] {
-        &self.saved_workflows
     }
 
     fn apply_acp_commands(&mut self, commands: &[agent_client_protocol::AvailableCommand]) {
@@ -612,13 +498,6 @@ impl CommandRegistry {
                 continue;
             }
 
-            if self.pi_standard_slash
-                && !PI_STANDARD_SLASH_NAMES.contains(&canonical)
-                && source != CommandSource::Acp
-            {
-                continue;
-            }
-
             // Menu-hidden commands keep their key entries (so
             // `get_for_dispatch()` resolves a typed invocation) but emit no
             // triggers — the inverse of the restricted trade-off below.
@@ -678,11 +557,8 @@ mod tests {
         fn description(&self) -> &str {
             "dummy"
         }
-        fn usage(&self) -> &str {
-            self.name
-        }
         fn run(&self, _ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {
-            CommandResult::Handled
+            CommandResult::Message(String::new())
         }
     }
 
@@ -698,23 +574,12 @@ mod tests {
         fn description(&self) -> &str {
             "tool-gated"
         }
-        fn usage(&self) -> &str {
-            self.name
-        }
         fn required_tools(&self) -> &[&str] {
             self.required
         }
         fn run(&self, _ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {
-            CommandResult::Handled
+            CommandResult::Message(String::new())
         }
-    }
-
-    fn tool_set<I, S>(names: I) -> HashSet<String>
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        names.into_iter().map(Into::into).collect()
     }
 
     #[test]
@@ -759,100 +624,6 @@ mod tests {
     }
 
     #[test]
-    fn trigger_count_includes_aliases() {
-        let cmd: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
-            name: "exit",
-            aliases: &["quit", "q"],
-        });
-        let registry = CommandRegistry::new(vec![cmd]);
-        // 1 canonical + 2 aliases = 3 triggers.
-        assert_eq!(registry.triggers().len(), 3);
-        assert_eq!(registry.command_count(), 1);
-    }
-
-    #[test]
-    fn set_acp_commands_replaces_only_acp() {
-        let builtin: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
-            name: "exit",
-            aliases: &["quit"],
-        });
-        let mut registry = CommandRegistry::new(vec![builtin]);
-        assert_eq!(registry.command_count(), 1);
-
-        // Add ACP commands.
-        let acp_cmds = vec![agent_client_protocol::AvailableCommand::new(
-            "flush".to_string(),
-            "Flush memory".to_string(),
-        )];
-        registry.set_acp_commands(&acp_cmds);
-        assert_eq!(registry.command_count(), 2);
-        assert!(registry.get("flush").is_some());
-
-        // Replace ACP commands -- flush should be gone, builtin stays.
-        registry.set_acp_commands(&[]);
-        assert_eq!(registry.command_count(), 1);
-        assert!(registry.get("exit").is_some());
-        assert!(registry.get("flush").is_none());
-    }
-
-    fn acp_workflow(
-        name: &str,
-        description: &str,
-        source: &str,
-    ) -> agent_client_protocol::AvailableCommand {
-        agent_client_protocol::AvailableCommand::new(name.to_string(), description.to_string())
-            .meta(
-                serde_json::json!({ "workflowSource": source })
-                    .as_object()
-                    .cloned()
-                    .expect("object"),
-            )
-    }
-
-    #[test]
-    fn set_acp_commands_extracts_saved_workflows_sorted() {
-        let mut registry = CommandRegistry::new(vec![Arc::new(DummyCommand {
-            name: "exit",
-            aliases: &[],
-        })]);
-        registry.set_acp_commands(&[
-            agent_client_protocol::AvailableCommand::new(
-                "flush".to_string(),
-                "Flush memory".to_string(),
-            ),
-            acp_workflow("zeta-wf", "Workflow: Zeta", "user"),
-            acp_workflow("alpha-wf", "Workflow: Alpha", "project"),
-        ]);
-        let names: Vec<&str> = registry
-            .saved_workflows()
-            .iter()
-            .map(|w| w.name.as_str())
-            .collect();
-        assert_eq!(names, ["alpha-wf", "zeta-wf"]);
-        assert_eq!(registry.saved_workflows()[0].description, "Alpha");
-        assert_eq!(registry.saved_workflows()[1].description, "Zeta");
-
-        registry.set_acp_commands(&[]);
-        assert!(registry.saved_workflows().is_empty());
-    }
-
-    #[test]
-    fn saved_workflows_include_names_skipped_as_reserved() {
-        let mut registry = CommandRegistry::new(vec![Arc::new(DummyCommand {
-            name: "theme",
-            aliases: &[],
-        })]);
-        registry.set_acp_commands(&[acp_workflow("theme", "Workflow: colliding name", "user")]);
-        assert!(
-            registry.get("theme").is_some(),
-            "pager builtin keeps the name"
-        );
-        assert_eq!(registry.saved_workflows().len(), 1);
-        assert_eq!(registry.saved_workflows()[0].name, "theme");
-        assert_eq!(registry.saved_workflows()[0].description, "colliding name");
-    }
-
-    #[test]
     fn set_share_visible_hides_and_restores_share_command() {
         let share: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
             name: "share",
@@ -885,50 +656,6 @@ mod tests {
         assert!(registry.get("share").is_none());
         assert!(registry.get_for_dispatch("share").is_some());
         assert!(!registry.triggers().iter().any(|t| t.canonical == "share"));
-    }
-
-    #[test]
-    fn restricted_commands_hide_and_restore() {
-        let usage: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
-            name: "usage",
-            aliases: &[],
-        });
-        let other: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
-            name: "exit",
-            aliases: &[],
-        });
-        let mut registry = CommandRegistry::new(vec![usage, other]);
-        assert!(registry.get("usage").is_some());
-
-        registry.set_restricted_commands(&["usage".to_string()]);
-        // Execution is blocked …
-        assert!(registry.get("usage").is_none());
-        // … but the command stays listed (dropdown/completion
-        // discoverability — invoking shows the upsell instead).
-        assert!(registry.triggers().iter().any(|t| t.canonical == "usage"));
-        // Other commands unaffected.
-        assert!(registry.get("exit").is_some());
-        assert_eq!(registry.restricted_commands(), vec!["usage"]);
-
-        // Clearing the deny list restores execution.
-        registry.set_restricted_commands(&[]);
-        assert!(registry.get("usage").is_some());
-        assert!(registry.restricted_commands().is_empty());
-    }
-
-    #[test]
-    fn restricted_entries_are_normalized() {
-        let usage: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
-            name: "usage",
-            aliases: &[],
-        });
-        let mut registry = CommandRegistry::new(vec![usage]);
-
-        // Leading slash, whitespace, and case are all tolerated; empty
-        // entries are dropped rather than denying the "" name.
-        registry.set_restricted_commands(&[" /Usage ".to_string(), String::new(), "/".to_string()]);
-        assert!(registry.get("usage").is_none());
-        assert_eq!(registry.restricted_commands(), vec!["usage"]);
     }
 
     /// `is_restricted` scans the command list (not `key_to_index`, which
@@ -985,239 +712,7 @@ mod tests {
         assert!(registry.get("share").is_none());
     }
 
-    #[test]
-    fn restricted_applies_to_acp_commands() {
-        let builtin: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
-            name: "exit",
-            aliases: &[],
-        });
-        let mut registry = CommandRegistry::new(vec![builtin]);
-        registry.set_acp_commands(&[agent_client_protocol::AvailableCommand::new(
-            "flush".to_string(),
-            "Flush memory".to_string(),
-        )]);
-        assert!(registry.get("flush").is_some());
-
-        registry.set_restricted_commands(&["flush".to_string()]);
-        assert!(registry.get("flush").is_none());
-
-        // Deny list survives an ACP catalog resync.
-        registry.set_acp_commands(&[agent_client_protocol::AvailableCommand::new(
-            "flush".to_string(),
-            "Flush memory".to_string(),
-        )]);
-        assert!(registry.get("flush").is_none());
-    }
-
-    #[test]
-    fn dashboard_command_hidden_by_default_and_toggleable() {
-        let dashboard: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
-            name: "dashboard",
-            aliases: &[],
-        });
-        let other: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
-            name: "exit",
-            aliases: &[],
-        });
-        let mut registry = CommandRegistry::new(vec![dashboard, other]);
-
-        // Fail-closed: hidden by default (until the feature flag reveals it).
-        assert!(registry.get("dashboard").is_none());
-        assert!(
-            !registry
-                .triggers()
-                .iter()
-                .any(|t| t.canonical == "dashboard")
-        );
-        // Unrelated commands are unaffected.
-        assert!(registry.get("exit").is_some());
-
-        // Enabling the feature reveals it.
-        registry.set_dashboard_visible(true);
-        assert!(registry.get("dashboard").is_some());
-        assert!(
-            registry
-                .triggers()
-                .iter()
-                .any(|t| t.canonical == "dashboard")
-        );
-
-        // Hiding again removes it.
-        registry.set_dashboard_visible(false);
-        assert!(registry.get("dashboard").is_none());
-    }
-
     // ── Builtin/skill name collisions ───────────────────────────────
-    //
-    fn login_builtin() -> Arc<dyn SlashCommand> {
-        Arc::new(DummyCommand {
-            name: "login",
-            aliases: &[],
-        })
-    }
-
-    fn acp_skill(name: &str, meta: serde_json::Value) -> agent_client_protocol::AvailableCommand {
-        agent_client_protocol::AvailableCommand::new(name.to_string(), format!("{name} skill"))
-            .meta(meta.as_object().cloned().unwrap())
-    }
-
-    #[test]
-    fn advertised_qualified_skill_sits_beside_builtin() {
-        let mut registry = CommandRegistry::new(vec![login_builtin()]);
-        registry.set_acp_commands(&[acp_skill(
-            "acme:login",
-            serde_json::json!({
-                "scope": "plugin",
-                "path": "/x/SKILL.md",
-                "pluginName": "acme",
-            }),
-        )]);
-
-        assert!(registry.is_builtin("login"));
-        assert_eq!(
-            registry.get("login").unwrap().provenance(),
-            CommandProvenance::Builtin
-        );
-        let skill = registry.get("acme:login").expect("qualified skill");
-        assert!(!registry.is_builtin("acme:login"));
-        assert_eq!(
-            skill.provenance(),
-            CommandProvenance::Skill {
-                source: "acme".to_string()
-            }
-        );
-        assert_eq!(registry.command_count(), 2);
-
-        let skill_match_texts: HashSet<&str> = registry
-            .triggers()
-            .iter()
-            .filter(|t| t.canonical == "acme:login")
-            .inspect(|t| assert_eq!(t.display, "/acme:login"))
-            .map(|t| t.match_text.as_str())
-            .collect();
-        assert_eq!(skill_match_texts, HashSet::from(["login", "acme:login"]));
-    }
-
-    #[test]
-    fn colliding_mixed_case_acp_name_is_skipped() {
-        let mut registry = CommandRegistry::new(vec![login_builtin()]);
-        registry.set_acp_commands(&[acp_skill(
-            "Login",
-            serde_json::json!({
-                "scope": "local",
-                "path": "/x/SKILL.md",
-            }),
-        )]);
-        assert_eq!(registry.command_count(), 1);
-        assert!(registry.is_builtin("login"));
-        assert!(registry.get("Login").is_none());
-        assert!(registry.get("local:login").is_none());
-    }
-
-    #[test]
-    fn colliding_bare_acp_name_is_skipped() {
-        let mut registry = CommandRegistry::new(vec![login_builtin()]);
-        registry.set_acp_commands(&[acp_skill(
-            "login",
-            serde_json::json!({
-                "scope": "plugin",
-                "path": "/x/SKILL.md",
-                "pluginName": "acme",
-            }),
-        )]);
-        assert_eq!(registry.command_count(), 1);
-        assert!(registry.is_builtin("login"));
-        assert!(registry.get("acme:login").is_none());
-    }
-
-    #[test]
-    fn first_claimant_wins_duplicate_acp_name() {
-        let mut registry = CommandRegistry::new(vec![login_builtin()]);
-        let first = agent_client_protocol::AvailableCommand::new(
-            "acme:login".to_string(),
-            "first".to_string(),
-        )
-        .meta(
-            serde_json::json!({"scope": "plugin", "path": "/a/SKILL.md", "pluginName": "acme"})
-                .as_object()
-                .cloned()
-                .unwrap(),
-        );
-        let second = agent_client_protocol::AvailableCommand::new(
-            "acme:login".to_string(),
-            "second".to_string(),
-        )
-        .meta(
-            serde_json::json!({"scope": "plugin", "path": "/b/SKILL.md", "pluginName": "other"})
-                .as_object()
-                .cloned()
-                .unwrap(),
-        );
-        registry.set_acp_commands(&[first, second]);
-        assert_eq!(registry.command_count(), 2, "builtin + first acme:login");
-        assert_eq!(registry.get("acme:login").unwrap().description(), "first");
-    }
-
-    #[test]
-    fn colliding_non_skill_or_malformed_command_is_dropped() {
-        let non_skill = agent_client_protocol::AvailableCommand::new(
-            "login".to_string(),
-            "shell login".to_string(),
-        );
-        let malformed = acp_skill("login", serde_json::json!({"scope": "local"}));
-        for cmd in [non_skill, malformed] {
-            let mut registry = CommandRegistry::new(vec![login_builtin()]);
-            registry.set_acp_commands(&[cmd]);
-            assert_eq!(registry.command_count(), 1, "only the builtin remains");
-            assert!(registry.is_builtin("login"));
-        }
-    }
-
-    #[test]
-    fn collision_detection_covers_builtin_aliases() {
-        let builtin: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
-            name: "exit",
-            aliases: &["quit"],
-        });
-        let mut registry = CommandRegistry::new(vec![builtin]);
-        registry.set_acp_commands(&[agent_client_protocol::AvailableCommand::new(
-            "quit".to_string(),
-            "Should be dropped".to_string(),
-        )]);
-        assert_eq!(registry.command_count(), 1);
-    }
-
-    #[test]
-    fn skill_named_after_blocked_name_is_skipped() {
-        let mut registry = CommandRegistry::new(vec![login_builtin()]);
-        registry.set_acp_commands(&[acp_skill(
-            "hooks-add",
-            serde_json::json!({"scope": "local", "path": "/x/SKILL.md"}),
-        )]);
-        assert!(registry.get("hooks-add").is_none());
-        assert!(registry.get("local:hooks-add").is_none());
-
-        registry.set_acp_commands(&[acp_skill(
-            "local:hooks-add",
-            serde_json::json!({"scope": "local", "path": "/x/SKILL.md"}),
-        )]);
-        assert!(registry.get("local:hooks-add").is_some());
-    }
-
-    #[test]
-    fn command_without_required_tools_is_always_visible() {
-        let plain: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
-            name: "exit",
-            aliases: &[],
-        });
-        let mut reg = CommandRegistry::new(vec![plain]);
-        // Default (None) -> visible.
-        assert!(reg.get("exit").is_some());
-        // Empty advertised toolset still doesn't hide a no-requirements command.
-        reg.set_available_tools(HashSet::new());
-        assert!(reg.get("exit").is_some());
-        assert!(reg.triggers().iter().any(|t| t.canonical == "exit"));
-    }
 
     #[test]
     fn tool_gated_command_hidden_when_toolset_unknown() {
@@ -1231,62 +726,6 @@ mod tests {
         // can't actually run scheduler_create.
         assert!(reg.get("loop").is_none());
         assert!(!reg.triggers().iter().any(|t| t.canonical == "loop"));
-    }
-
-    #[test]
-    fn tool_gated_command_hidden_when_required_tool_missing() {
-        let gated: Arc<dyn SlashCommand> = Arc::new(ToolGatedCommand {
-            name: "loop",
-            required: &["scheduler_create"],
-        });
-        let plain: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
-            name: "exit",
-            aliases: &[],
-        });
-        let mut reg = CommandRegistry::new(vec![gated, plain]);
-        // Advertise a toolset missing `scheduler_create`.
-        reg.set_available_tools(tool_set(["read_file"]));
-        assert!(reg.get("loop").is_none());
-        assert!(!reg.triggers().iter().any(|t| t.canonical == "loop"));
-        // Plain command is unaffected.
-        assert!(reg.get("exit").is_some());
-    }
-
-    #[test]
-    fn tool_gated_command_reappears_after_tool_added() {
-        let gated: Arc<dyn SlashCommand> = Arc::new(ToolGatedCommand {
-            name: "loop",
-            required: &["scheduler_create"],
-        });
-        let mut reg = CommandRegistry::new(vec![gated]);
-        reg.set_available_tools(HashSet::new());
-        assert!(reg.get("loop").is_none());
-
-        // Add the tool -- command becomes visible again.
-        reg.set_available_tools(tool_set(["scheduler_create"]));
-        assert!(reg.get("loop").is_some());
-        assert!(reg.triggers().iter().any(|t| t.canonical == "loop"));
-    }
-
-    #[test]
-    fn multi_tool_command_requires_all_tools() {
-        let gated: Arc<dyn SlashCommand> = Arc::new(ToolGatedCommand {
-            name: "multi",
-            required: &["a", "b"],
-        });
-        let mut reg = CommandRegistry::new(vec![gated]);
-
-        // Only one of two tools present -> hidden.
-        reg.set_available_tools(tool_set(["a"]));
-        assert!(reg.get("multi").is_none());
-
-        // Both tools present -> visible.
-        reg.set_available_tools(tool_set(["a", "b"]));
-        assert!(reg.get("multi").is_some());
-
-        // Superset is fine.
-        reg.set_available_tools(tool_set(["a", "b", "c"]));
-        assert!(reg.get("multi").is_some());
     }
 
     /// Builds a registry with `always-approve` (+ a `yolo` alias to cover
@@ -1379,9 +818,9 @@ mod tests {
     /// unresolvable for dispatch, exactly like `get()`.
     #[test]
     fn get_for_dispatch_respects_hard_gates() {
-        // Hard-hidden by name (e.g. /dashboard default).
-        let dashboard: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
-            name: "dashboard",
+        // Hard-hidden by name (e.g. /voice default).
+        let voice: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
+            name: "voice",
             aliases: &[],
         });
         // Tier-restricted.
@@ -1394,12 +833,11 @@ mod tests {
             name: "loop",
             required: &["scheduler_create"],
         });
-        let mut reg = CommandRegistry::new(vec![dashboard, usage, gated]);
-        reg.set_dashboard_visible(false);
+        let mut reg = CommandRegistry::new(vec![voice, usage, gated]);
         reg.set_restricted_commands(&["usage".to_string()]);
 
         assert!(
-            reg.get_for_dispatch("dashboard").is_none(),
+            reg.get_for_dispatch("voice").is_none(),
             "hard-hidden stays hard"
         );
         assert!(
@@ -1436,72 +874,5 @@ mod tests {
         // Out-of-range returns None (boundary + far-out).
         assert!(registry.commands_by_index(2).is_none());
         assert!(registry.commands_by_index(usize::MAX).is_none());
-    }
-
-    #[test]
-    fn pi_standard_slash_hides_vendor_commands() {
-        let mut registry =
-            CommandRegistry::new(crate::slash::commands::builtin_commands());
-        assert!(registry.get("model").is_some());
-        assert!(registry.get("compact").is_some());
-        registry.enable_pi_standard_slash_menu();
-        assert!(registry.get("new").is_some());
-        assert!(registry.get("resume").is_some());
-        assert!(registry.get("quit").is_some());
-        assert!(registry.get("help").is_some());
-        assert!(registry.get("theme").is_some());
-        assert!(registry.get("settings").is_some());
-        assert!(registry.get("multiline").is_some());
-        assert!(registry.get("model").is_some());
-        assert!(registry.get("home").is_some());
-        assert!(registry.get("welcome").is_some(), "/welcome is an alias of /home");
-        assert!(registry.get("clear").is_some(), "/clear is an alias of /new");
-        assert!(registry.get("exit").is_some(), "/exit is an alias of /quit");
-        assert!(registry.get("compact").is_none());
-        assert!(registry.get("rewind").is_none());
-        assert!(registry.get("fork").is_none());
-    }
-
-    #[test]
-    fn pi_standard_slash_allows_acp_commands_through() {
-        // Use a builtin whose name IS in PI_STANDARD_SLASH_NAMES.
-        let builtin: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
-            name: "model",
-            aliases: &[],
-        });
-        let mut registry = CommandRegistry::new(vec![builtin]);
-        registry.enable_pi_standard_slash_menu();
-
-        // Whitelisted builtin stays visible.
-        assert!(registry.get("model").is_some(), "/model is in the whitelist");
-
-        // A non-whitelisted builtin would be hidden — add one to verify.
-        // (DummyCommand "compact" is NOT in PI_STANDARD_SLASH_NAMES.)
-        // We can't easily add another builtin after construction, so we
-        // just verify ACP commands pass through.
-
-        // ACP commands from the Python agent should pass through the filter.
-        registry.set_acp_commands(&[
-            agent_client_protocol::AvailableCommand::new(
-                "workflows".to_string(),
-                "List workflows".to_string(),
-            ),
-            agent_client_protocol::AvailableCommand::new(
-                "deep-research".to_string(),
-                "Deep research workflow".to_string(),
-            ),
-        ]);
-        assert!(
-            registry.get("workflows").is_some(),
-            "ACP command must not be filtered by pi_standard_slash"
-        );
-        assert!(
-            registry.get("deep-research").is_some(),
-            "ACP command must not be filtered by pi_standard_slash"
-        );
-        assert!(
-            registry.triggers().iter().any(|t| t.canonical == "workflows"),
-            "ACP commands should have completion triggers"
-        );
     }
 }

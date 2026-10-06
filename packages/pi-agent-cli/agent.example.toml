@@ -20,6 +20,19 @@ api_key_env = "REAL_LLM_API_KEY" # key for `provider` only; other providers use 
 # Unset: any level but "off" says it can. `false` keeps a model that rejects reasoning parameters out of them.
 # reasoning = true
 
+# Extra models for the TUI `/model` picker (ACP session config option "model").
+# `[model]` above is always offered first; unset fields inherit from it, but
+# base_url / api_key_env / supports_images only when `provider` is unset or the same.
+# [[models]]
+# id = "deepseek-ai/DeepSeek-V4-Pro"
+# name = "DeepSeek V4 Pro"
+#
+# [[models]]
+# provider = "openai"
+# id = "gpt-4.1"
+# base_url = "https://api.openai.com/v1"
+# api_key_env = "OPENAI_API_KEY"
+
 [skills]
 # ".pi/skills" is relative to the project, so it loads only for a trusted project (see [extensions]).
 paths = ["~/.pi-python/skills", ".pi/skills"]

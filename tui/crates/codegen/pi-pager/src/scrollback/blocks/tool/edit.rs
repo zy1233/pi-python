@@ -791,7 +791,6 @@ pub struct EditToolCallBlock {
     pub elapsed_ms: Option<i64>,
     /// Header prefix (e.g. "Edit " or "Creating ").
     pub prefix: &'static str,
-    pub display_name: Option<String>,
     /// One-liner summary can't be trusted: the call touched multiple files
     /// (apply_patch emits one Diff per file, only the first becomes hunks) or
     /// the path fell back to the tool title. Suppresses the diffstat suffix;
@@ -801,21 +800,6 @@ pub struct EditToolCallBlock {
     change_counts: (usize, usize),
     /// Hunk-only first paint; may upgrade to FileScoped via the edit-HL worker.
     pub highlight: EditHighlightPhase,
-}
-
-fn workflow_script_name(path: &str) -> Option<String> {
-    let p = Path::new(path);
-    if p.extension().is_none_or(|e| e != "rhai") {
-        return None;
-    }
-    if !p
-        .ancestors()
-        .skip(1)
-        .any(|a| a.file_name().is_some_and(|n| n == "workflows"))
-    {
-        return None;
-    }
-    Some(p.file_stem()?.to_string_lossy().into_owned())
 }
 
 impl EditToolCallBlock {
@@ -828,7 +812,6 @@ impl EditToolCallBlock {
         let path = path.into();
         let edit_count = hunks.len().max(1);
         let change_counts = Self::compute_changes(&hunks);
-        let display_name = workflow_script_name(&path);
         Self {
             path,
             hunks,
@@ -836,12 +819,7 @@ impl EditToolCallBlock {
             error: None,
             started_at: None,
             elapsed_ms: None,
-            prefix: if display_name.is_some() {
-                "Editing workflow "
-            } else {
-                "Edit "
-            },
-            display_name,
+            prefix: "Edit ",
             summary_untrusted: false,
             change_counts,
             highlight: EditHighlightPhase::HunkOnly,
@@ -849,11 +827,7 @@ impl EditToolCallBlock {
     }
 
     pub fn with_prefix(mut self, prefix: &'static str) -> Self {
-        self.prefix = if self.display_name.is_some() && prefix == "Creating " {
-            "Creating workflow "
-        } else {
-            prefix
-        };
+        self.prefix = prefix;
         self
     }
 
@@ -1018,16 +992,13 @@ impl EditToolCallBlock {
             .map(|span| unicode_width::UnicodeWidthStr::width(span.content.as_ref()))
             .sum();
 
-        let path = match &self.display_name {
-            Some(name) => name.clone(),
-            None => crate::render::tool_paths::path_for_tool_surface(
-                &self.path,
-                surface,
-                cwd,
-                width,
-                prefix.len() + suffix_width,
-            ),
-        };
+        let path = crate::render::tool_paths::path_for_tool_surface(
+            &self.path,
+            surface,
+            cwd,
+            width,
+            prefix.len() + suffix_width,
+        );
 
         let mut spans = vec![
             Span::styled(prefix, bold_style),
@@ -1610,51 +1581,6 @@ mod tests {
         );
         let text: String = header.spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(text, "Edit main.rs (3 edits)");
-    }
-
-    #[test]
-    fn workflow_script_header_hides_rhai_path() {
-        let theme = Theme::current();
-        let block = EditToolCallBlock::new(".grok/workflows/cc-deep-research.rhai", vec![]);
-        let header = block.header_line(
-            &theme,
-            false,
-            false,
-            false,
-            ToolPathSurface::Expanded,
-            None,
-            None,
-        );
-        let text: String = header.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert_eq!(text, "Editing workflow cc-deep-research");
-        assert!(
-            block
-                .path_link_target(Some(Path::new("/repo")))
-                .and_then(|target| crate::render::osc8::resolve_link_target(&target))
-                .and_then(|resolved| resolved.osc8_url)
-                .is_some_and(|u| u.contains("cc-deep-research.rhai")),
-        );
-
-        let block =
-            EditToolCallBlock::new(".grok/workflows/triage.rhai", vec![]).with_prefix("Creating ");
-        let header = block.header_line(
-            &theme,
-            false,
-            false,
-            false,
-            ToolPathSurface::Expanded,
-            None,
-            None,
-        );
-        let text: String = header.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert_eq!(text, "Creating workflow triage");
-
-        let block = EditToolCallBlock::new("scripts/build.rhai", vec![]);
-        assert_eq!(block.prefix, "Edit ");
-        assert!(block.display_name.is_none());
-
-        let block = EditToolCallBlock::new("workflows/wf_0199abc/script.rhai", vec![]);
-        assert_eq!(block.display_name.as_deref(), Some("script"));
     }
 
     #[test]

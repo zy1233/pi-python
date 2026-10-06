@@ -4,7 +4,7 @@
 //! slash command, or shell completion — directly above the prompt, growing the
 //! pinned live viewport to make room and shrinking + re-anchoring it to the
 //! bottom of the screen when the dropdown closes. (Modal overlays — permission,
-//! question, plan, rewind — land in PR 10; the command palette / model picker
+//! question, plan — land in PR 10; the command palette / model picker
 //! in a later PR.)
 //!
 //! ## Viewport sizing (the load-bearing part)
@@ -42,8 +42,8 @@ use pi_pager::appearance::LayoutConfig;
 use pi_pager::minimal_api;
 use pi_pager::render::SafeBuf as _;
 use pi_pager::theme::Theme;
-use pi_pager::views::prompt_widget::{PromptBg, PromptInfo, PromptStyle, PromptWidget};
-use pi_pager::views::question_view::{feedback_input, inline_text_width};
+use pi_pager::views::prompt_widget::{PromptBg, PromptStyle, PromptWidget};
+use pi_pager::views::question_view::inline_text_width;
 
 /// Which prompt-anchored dropdown is currently shown.
 ///
@@ -113,7 +113,7 @@ fn app_modal_target(base: u16, ceiling: u16) -> u16 {
 }
 
 /// Target live-viewport height for a prompt-replacing modal (permission /
-/// question / rewind): the `modal_h` rows of the modal, one status row, the
+/// question): the `modal_h` rows of the modal, one status row, the
 /// uncommitted live `tail_h` rows **above** it, and the `sl_h` rows of the
 /// configured `[ui.status_line]` row **below** it.
 ///
@@ -229,8 +229,8 @@ fn compute_target(app: &mut AppView, term_h: u16, width: u16) -> u16 {
     // Committed appearance (timestamps off) so the measured tail height matches
     // exactly what `draw_tail` renders.
     let commit_app = super::commit::committed_appearance(&app.appearance);
-    // Theme + prompt style: built after the agent is known so bash/feedback/
-    // remember chrome matches `draw_live` (same `prompt_style` inputs).
+    // Theme + prompt style: built after the agent is known so bash chrome
+    // matches `draw_live` (same `prompt_style` inputs).
     // Minimal is flush-left (W-38): prompt-replacing modals span the live
     // region's full width (no outer horizontal padding), so measure their
     // height at that same width — it must match `live::draw_live`'s
@@ -250,15 +250,15 @@ fn compute_target(app: &mut AppView, term_h: u16, width: u16) -> u16 {
         return needed.max(base).min(ceiling);
     };
     let id = *id;
-    // Snapshot mode/multiline before the mut agent borrow so `prompt_style` can
+    // Snapshot the mode before the mut agent borrow so `prompt_style` can
     // still read `app.appearance` (same inputs as `draw_live`).
-    let (input_mode, multiline) = app
+    let input_mode = app
         .agents
         .get(&id)
-        .map(|a| (a.prompt_input_mode, a.multiline_mode))
+        .map(|a| a.prompt_input_mode)
         .unwrap_or_default();
     let theme = pi_pager::theme::Theme::current();
-    let style = super::live::prompt_style(&app.appearance, input_mode, &theme, multiline);
+    let style = super::live::prompt_style(&app.appearance, input_mode, &theme);
 
     let Some(agent) = app.agents.get_mut(&id) else {
         return base;
@@ -273,19 +273,18 @@ fn compute_target(app: &mut AppView, term_h: u16, width: u16) -> u16 {
         return super::panel::panel_height(agent, kind, width, ceiling);
     }
 
-    // A centered app-modal (command palette / settings / pickers) or the
-    // extensions modal (hooks / plugins / marketplace / skills) reuses the
+    // A centered app-modal (command palette / settings / pickers) reuses the
     // full-TUI popup renderer, which fills whatever area it's given. Grow to a
     // moderate, bottom-anchored height — NOT the full ceiling. Growing to the
     // ceiling and shrinking on close left a *screen-tall* blank band above the
     // prompt (committed rows scrolled into native scrollback can't be pulled
     // back). A capped panel keeps that band small while still giving the
     // list/editor room (its inner content scrolls).
-    if app_modal_active(agent) || minimal_api::extensions_modal(agent).is_some() {
+    if app_modal_active(agent) {
         return app_modal_target(base, ceiling);
     }
 
-    // A prompt-replacing modal (permission / question / rewind) takes the bottom
+    // A prompt-replacing modal (permission / question) takes the bottom
     // region in place of the prompt. Size to fit the uncommitted live tail
     // ABOVE the modal too (+ the status row between them): a tool blocked on a
     // permission / question is held in the tail (`is_pending_user_input`, see
@@ -438,11 +437,10 @@ pub fn render(
 //
 // Unlike the prompt-anchored dropdowns above, these modals *replace* the prompt:
 // they occupy the bottom region and the user interacts with them directly. Keys
-// already route to the shared permission / question / rewind handlers (minimal
+// already route to the shared permission / question handlers (minimal
 // did not change input routing), so this is a render + sizing concern only.
 //
-// The permission, question, rewind-picker, and cancel-turn confirm modals are
-// all hosted here. Plan approval is hosted separately via [`plan`] (its full-TUI
+// The permission and question modals are hosted here. Plan approval is hosted separately via [`plan`] (its full-TUI
 // surface is a fullscreen line-viewer + live prompt, so it gets its own minimal
 // treatment rather than a `render_*` reuse).
 
@@ -451,26 +449,16 @@ pub fn render(
 pub enum Modal {
     Permission,
     Question,
-    Rewind,
-    /// The "subagents are still running — stop them?" confirm shown when
-    /// cancelling a turn with running subagents (`AgentView::cancel_turn_view`).
-    Cancel,
     /// Plan approval (`AgentView::plan_approval_view`) — rendered compactly by
     /// [`super::plan`] in place of the full TUI's fullscreen line viewer.
     Plan,
 }
 
 /// The active prompt-replacing modal, in the full-TUI render precedence
-/// (cancel-confirm > plan > permission > question > rewind), or `None`.
+/// (plan > permission > question), or `None`.
 pub fn active_modal(agent: &AgentView) -> Option<Modal> {
-    // The cancel-turn confirm is checked first to match the input router, which
-    // intercepts keys for `cancel_turn_view` ahead of the question view
-    // (`AgentView::handle_input`).
-    if minimal_api::cancel_turn_view(agent).is_some() {
-        return Some(Modal::Cancel);
-    }
     // Plan approval routes through the line viewer (kept open in minimal) and is
-    // mutually exclusive with permission/question in practice; check it next.
+    // mutually exclusive with permission/question in practice; check it first.
     if minimal_api::plan_approval_view(agent).is_some() {
         return Some(Modal::Plan);
     }
@@ -479,9 +467,6 @@ pub fn active_modal(agent: &AgentView) -> Option<Modal> {
     }
     if minimal_api::question_view(agent).is_some() {
         return Some(Modal::Question);
-    }
-    if minimal_api::rewind_state(agent).is_some() {
-        return Some(Modal::Rewind);
     }
     None
 }
@@ -495,9 +480,7 @@ pub fn modal_height(modal: Modal, agent: &mut AgentView, screen_h: u16, content_
             .permission_queue
             .front()
             .map(|p| {
-                pi_pager::views::permission_view::permission_view_height(
-                    p, screen_h, content_w,
-                )
+                pi_pager::views::permission_view::permission_view_height(p, screen_h, content_w)
             })
             .unwrap_or(0),
         Modal::Question => {
@@ -517,22 +500,10 @@ pub fn modal_height(modal: Modal, agent: &mut AgentView, screen_h: u16, content_
             };
             minimal_api::question_view_mut(agent)
                 .map(|qv| {
-                    pi_pager::views::question_view::question_view_height(
-                        qv, screen_h, content_w,
-                    )
-                    .saturating_add(editor_extra)
+                    pi_pager::views::question_view::question_view_height(qv, screen_h, content_w)
+                        .saturating_add(editor_extra)
                 })
                 .unwrap_or(0)
-        }
-        Modal::Rewind => minimal_api::rewind_state(agent)
-            .map(|rw| pi_pager::views::rewind::rewind_overlay_height(&rw.phase, screen_h))
-            .unwrap_or(0),
-        Modal::Cancel => {
-            if minimal_api::cancel_turn_view(agent).is_some() {
-                pi_pager::views::modal::cancel_turn_panel_height(screen_h)
-            } else {
-                0
-            }
         }
         Modal::Plan => super::plan::height(agent),
     }
@@ -554,35 +525,6 @@ pub fn render_modal(
     match modal {
         Modal::Permission => render_permission(buf, area, agent, theme),
         Modal::Question => render_question(buf, area, agent, theme, screen_h),
-        Modal::Rewind => {
-            if let Some(rw) = minimal_api::rewind_state(agent) {
-                pi_pager::views::rewind::render_rewind_overlay(buf, area, &rw.phase, true);
-            }
-            None
-        }
-        Modal::Cancel => {
-            // The prompt is always focused in minimal, so the confirm is too.
-            // `cancel_turn_view` (shared) and `cancel_turn_buttons_mut` (exclusive)
-            // can't both be borrowed from the agent at once through the facade, so
-            // render the hit-test rects into a local Vec and store them back after.
-            let mut buttons: Vec<Rect> = Vec::new();
-            let drawn = if let Some(ctv) = minimal_api::cancel_turn_view(agent) {
-                pi_pager::views::modal::render_cancel_turn_panel(
-                    buf,
-                    area,
-                    ctv,
-                    true,
-                    &mut buttons,
-                );
-                true
-            } else {
-                false
-            };
-            if drawn {
-                *minimal_api::cancel_turn_buttons_mut(agent) = buttons;
-            }
-            None
-        }
         Modal::Plan => super::plan::render(buf, area, agent, theme),
     }
 }
@@ -723,10 +665,6 @@ fn render_question(
         );
     }
 
-    if input_mode && is_feedback_pane(agent) {
-        return render_feedback_editor(buf, area, agent, theme, input_h);
-    }
-
     if input_mode {
         let row_y = area.y + area.height.saturating_sub(input_h);
         let is_multi = minimal_api::question_view(agent)
@@ -788,68 +726,6 @@ fn render_question(
     None
 }
 
-/// Whether the open question pane is the bare `/feedback` report box.
-fn is_feedback_pane(agent: &AgentView) -> bool {
-    minimal_api::question_view(agent).is_some_and(|qv| qv.is_feedback())
-}
-
-/// The bare `/feedback` report box, painted over the bottom `input_h` rows of the question card.
-fn render_feedback_editor(
-    buf: &mut Buffer,
-    area: Rect,
-    agent: &mut AgentView,
-    theme: &Theme,
-    input_h: u16,
-) -> Option<(u16, u16)> {
-    // The box lives inside `area`: the inline viewport can be shorter than the height request, and drawing past it indexes outside the frame.
-    let box_h = input_h.min(area.height);
-    if box_h == 0 {
-        return None;
-    }
-    let input_area = Rect {
-        x: area.x + 3,
-        y: area.y + area.height.saturating_sub(box_h),
-        width: feedback_input::width(area.width),
-        height: box_h,
-    };
-
-    // Carry the card's surface and accent bar down the report rows.
-    buf.set_style(
-        Rect {
-            x: area.x,
-            y: input_area.y,
-            width: area.width,
-            height: box_h,
-        },
-        Style::default().bg(theme.bg_light),
-    );
-    for y in input_area.y..input_area.y.saturating_add(box_h) {
-        if let Some(cell) = buf.cell_mut((area.x, y)) {
-            cell.set_symbol(pi_pager::glyphs::accent_bar());
-            cell.set_style(Style::default().fg(theme.accent_user).bg(theme.bg_light));
-        }
-    }
-
-    // Drop the outline when the box is too squeezed for it, so the text stays visible.
-    let outlined = box_h >= feedback_input::MIN_HEIGHT;
-    let style = if outlined {
-        feedback_input::style(theme)
-    } else {
-        feedback_input::flat_style(theme)
-    };
-    agent
-        .prompt
-        .draw(
-            buf,
-            input_area,
-            None,
-            &style,
-            outlined.then_some(&PromptInfo::default()),
-            None,
-        )
-        .cursor_pos
-}
-
 /// Height cap for the inline question editor — the full TUI's policy
 /// (`agent_view/render.rs`, `inline_prompt_max`).
 fn question_editor_cap(screen_h: u16) -> u16 {
@@ -858,26 +734,7 @@ fn question_editor_cap(screen_h: u16) -> u16 {
 
 /// Desired height of the inline question editor (InputMode), bounded by `cap`.
 fn question_editor_h(agent: &AgentView, area_w: u16, cap: u16, theme: &Theme) -> u16 {
-    if is_feedback_pane(agent) {
-        feedback_editor_h(agent, area_w, cap, theme)
-    } else {
-        freeform_editor_h(agent, area_w, cap, theme)
-    }
-}
-
-/// The bare `/feedback` report box: its rules plus at least one text row, growing with the report.
-/// Unlike the full TUI it reserves no rows up front, because `cap` is all the room the inline viewport has.
-fn feedback_editor_h(agent: &AgentView, area_w: u16, cap: u16, theme: &Theme) -> u16 {
-    let min_h = feedback_input::MIN_HEIGHT.min(cap.max(1));
-    agent
-        .prompt
-        .desired_height(
-            feedback_input::width(area_w),
-            &feedback_input::style(theme),
-            true,
-            cap.max(min_h),
-        )
-        .max(min_h)
+    freeform_editor_h(agent, area_w, cap, theme)
 }
 
 /// The one-line freeform answer row, growing with what the user types.

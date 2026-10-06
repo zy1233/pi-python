@@ -723,7 +723,6 @@ fn contextual_tip_kind_label(t: events::ContextualTipKind) -> &'static str {
         events::ContextualTipKind::Undo => "undo",
         events::ContextualTipKind::PlanMode => "plan_mode",
         events::ContextualTipKind::ImageInput => "image_input",
-        events::ContextualTipKind::SendNow => "send_now",
         events::ContextualTipKind::SmallScreen => "small_screen",
         events::ContextualTipKind::WordSelect => "word_select",
         events::ContextualTipKind::SshWrap => "ssh_wrap",

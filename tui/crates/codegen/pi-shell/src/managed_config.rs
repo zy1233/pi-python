@@ -4,12 +4,12 @@
 mod response;
 
 use crate::auth::GrokAuth;
-pub use response::ManagedConfigError;
+pub(crate) use response::ManagedConfigError;
 use response::{ApplyOutcome, ManagedConfigResponse, ManagedConfigSource, verify_signed_envelope};
 
 /// Server-synced policy artifacts. Excludes the sync marker ([`remove_managed_config_files`]
 /// removes that last, only on full success).
-pub const MANAGED_ARTIFACT_FILES: [&str; 4] = [
+pub(crate) const MANAGED_ARTIFACT_FILES: [&str; 4] = [
     pi_config::MANAGED_CONFIG_FILENAME,
     pi_config::REQUIREMENTS_FILENAME,
     pi_config::signed_policy::SIGNATURE_SIDECAR_FILE,
@@ -34,10 +34,7 @@ fn remove_managed_config_files(home: &std::path::Path) {
     // its rename fails and self-heals).
     let atomic_write_tmp_prefixes = [
         format!("{}.", pi_config::MANAGED_CONFIG_CACHE_FILE),
-        format!(
-            "{}.",
-            pi_config::signed_policy::SIGNATURE_SIDECAR_FILE
-        ),
+        format!("{}.", pi_config::signed_policy::SIGNATURE_SIDECAR_FILE),
         format!(
             "{}.",
             pi_config::signed_policy::MANAGED_IDENTITY_SIDECAR_FILE
@@ -189,10 +186,6 @@ fn try_lock_managed_config(home: &std::path::Path) -> Option<std::fs::File> {
 enum SyncBudget {
     /// Background loop and explicit `grok setup`; runs retries to completion.
     Standard,
-    /// Post-login sync; capped because login latency is user-visible.
-    Login,
-    /// Session-start refresh; capped so startup never stalls.
-    SessionStart,
 }
 
 impl SyncBudget {
@@ -200,27 +193,9 @@ impl SyncBudget {
     fn max_attempts(self) -> u32 {
         match self {
             Self::Standard => 5,
-            Self::Login | Self::SessionStart => 2,
-        }
-    }
-
-    /// Wall-clock cap, or `None` to let retries run to completion.
-    fn deadline(self) -> Option<std::time::Duration> {
-        match self {
-            Self::Standard => None,
-            Self::Login => Some(std::time::Duration::from_secs(15)),
-            Self::SessionStart => Some(std::time::Duration::from_secs(8)),
         }
     }
 }
-
-/// Budget for the pre-heal `auth()` refresh, so a degraded network can't stall startup;
-/// on timeout the heal proceeds with no refreshed override.
-const SESSION_START_AUTH_DEADLINE: std::time::Duration = std::time::Duration::from_secs(8);
-
-/// One retry of the gate purge's lock ([`purge_prior_tenant_on_identity_change`]): a routine
-/// concurrent apply shouldn't become a session-start refusal, but a wedged holder can't stall start.
-const PURGE_LOCK_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// Exponential backoff for retry `attempt` (caller guarantees `attempt >= 1`).
 /// Base is 1s; `GROK_DEPLOYMENT_CONFIG_BACKOFF_MS` overrides it for tests.
@@ -413,67 +388,19 @@ async fn fetch_managed_config_once(
         .map_err(|e| ManagedConfigError::InvalidResponse(e.to_string()))
 }
 
-/// Override with `GROK_DEPLOYMENT_CONFIG_REFRESH_INTERVAL_SECS`. Clamped to
-/// >= 1s: `tokio::time::interval` panics on a zero period.
-fn managed_config_sync_interval() -> std::time::Duration {
-    if let Ok(s) = std::env::var("GROK_DEPLOYMENT_CONFIG_REFRESH_INTERVAL_SECS")
-        && let Ok(secs) = s.parse::<u64>()
-    {
-        return std::time::Duration::from_secs(secs.max(1));
-    }
-    std::time::Duration::from_secs(5 * 60)
-}
-
-/// Periodically sync managed config in the background. Best-effort.
-pub fn spawn_sync(cancel: tokio_util::sync::CancellationToken) {
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(managed_config_sync_interval());
-        interval.tick().await; // skip immediate first tick
-
-        loop {
-            tokio::select! {
-                _ = cancel.cancelled() => break,
-                _ = interval.tick() => {}
-            }
-
-            // Clear a logged-out team's files before deciding to fetch, so
-            // stale enforced policy never outlives the tick.
-            clear_orphan();
-            // Raise the floor each tick so a long offline session keeps recording
-            // observed time; otherwise a later rollback could make an expired policy
-            // read valid.
-            bump_managed_rollback_floor();
-
-            if !crate::config::is_managed_config_stale_for(&current_serving_identity())
-                || !is_fetch_enabled()
-            {
-                continue;
-            }
-
-            match sync().await {
-                Ok(true) => tracing::info!("background managed config sync: updated"),
-                Ok(false) => {}
-                Err(e) => tracing::debug!("background managed config sync failed: {e}"),
-            }
-        }
-
-        tracing::debug!("managed config sync task stopped");
-    });
-}
-
 /// Deployment id reported for `deployment_key` on chat requests, credential
 /// snapshots, and OTel: the **server** GrokBuildDeployment UUID (the id
 /// server-side dashboards filter on) when the managed-config sync marker was
 /// written by this same key (fingerprint match), else UUIDv5 of the key.
 /// `None` key (team/OAuth) → `None`, never a stale marker value.
-pub fn resolve_deployment_id(deployment_key: Option<&str>) -> Option<String> {
+pub(crate) fn resolve_deployment_id(deployment_key: Option<&str>) -> Option<String> {
     let key = deployment_key.filter(|k| !k.is_empty())?;
     crate::config::managed_deployment_id(&deployment_key_fingerprint(key))
         .or_else(|| Some(crate::agent::config::deployment_id_from_key(key)))
 }
 
 /// Resolve deployment key from `GROK_DEPLOYMENT_KEY` env var, then config files.
-pub fn resolve_deployment_key() -> Option<String> {
+pub(crate) fn resolve_deployment_key() -> Option<String> {
     let config_val = crate::config::load_effective_config()
         .map_err(|e| tracing::warn!("failed to load config files for deployment key: {e}"))
         .ok()
@@ -536,43 +463,14 @@ pub async fn sync() -> Result<bool, ManagedConfigError> {
 
 struct SyncOutcome {
     wrote: bool,
-    /// Server returned a config row for the consulted principal (independent of apply).
-    served: bool,
-    /// Apply persisted nothing and recorded no marker — see [`ApplyOutcome::Skipped`].
-    skipped: bool,
-    /// Credential consulted (team vs deployment wording for callers).
-    source: Option<ManagedConfigSource>,
-    /// Verification active and envelope rejected — nothing persisted.
-    signature_rejected: bool,
 }
 
 impl SyncOutcome {
     /// Reports only what callers render; marker identity fields live in [`apply_fetched`].
-    fn from_fetch(
-        body: &ManagedConfigResponse,
-        source: ManagedConfigSource,
-        outcome: &ApplyOutcome,
-    ) -> Self {
+    fn from_fetch(outcome: &ApplyOutcome) -> Self {
         Self {
             wrote: outcome.wrote(),
-            served: body.config_exists(),
-            skipped: outcome.skipped(),
-            source: Some(source),
-            signature_rejected: outcome.signature_rejected(),
         }
-    }
-}
-
-/// Runs a sync under `budget`'s deadline, returning `None` when the deadline
-/// elapses first.
-async fn sync_bounded(
-    budget: SyncBudget,
-    team_override: Option<GrokAuth>,
-) -> Option<Result<SyncOutcome, ManagedConfigError>> {
-    let sync = sync_with_budget(budget, team_override);
-    match budget.deadline() {
-        Some(deadline) => tokio::time::timeout(deadline, sync).await.ok(),
-        None => Some(sync.await),
     }
 }
 
@@ -666,21 +564,15 @@ async fn sync_with_budget(
                 body.deployment_id.as_deref(),
                 Some(&fingerprint),
             )?;
-            Ok(SyncOutcome::from_fetch(&body, source, &outcome))
+            Ok(SyncOutcome::from_fetch(&outcome))
         }
         FetchedConfig::Team { auth, body } => {
             let source = ManagedConfigSource::TeamOauth;
             // Team identity is bound via principal (team id), not a key fingerprint.
             let outcome = apply_fetched(&body, source, auth.team_id.as_deref(), None)?;
-            Ok(SyncOutcome::from_fetch(&body, source, &outcome))
+            Ok(SyncOutcome::from_fetch(&outcome))
         }
-        FetchedConfig::NoPrincipal => Ok(SyncOutcome {
-            wrote: false,
-            served: false,
-            skipped: false,
-            source: None,
-            signature_rejected: false,
-        }),
+        FetchedConfig::NoPrincipal => Ok(SyncOutcome { wrote: false }),
     }
 }
 
@@ -821,81 +713,9 @@ fn credential_present(source: ManagedConfigSource) -> bool {
     }
 }
 
-/// Outcome of [`post_login_sync`], for the CLI to render. The
-/// TUI/agent path ignores it (the sync is best-effort and detached there).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ManagedConfigSync {
-    /// No eligible principal, fetch disabled, or nothing due — no fetch made.
-    Skipped,
-    /// New config was written. `is_team` lets the caller word the confirmation
-    /// (team vs deployment).
-    Updated { is_team: bool },
-    /// Fetch ran; nothing new to write.
-    NoChange,
-    /// Fetch failed or timed out (already logged); the background loop retries.
-    Failed,
-}
-
-/// Post-login hook for `grok login` and the ACP/TUI authenticate flow: clear any
-/// orphaned files, then fetch the new principal's config immediately rather than
-/// waiting for the background tick. `authenticated` pins the just-logged-in
-/// principal (`None` = on-disk team). Latency-bounded by [`SyncBudget::Login`];
-/// failures are logged, not propagated (the background loop retries).
-pub async fn post_login_sync(authenticated: Option<GrokAuth>) -> ManagedConfigSync {
-    clear_orphan();
-    if !is_fetch_enabled() {
-        return ManagedConfigSync::Skipped;
-    }
-    // The just-authenticated team, else the on-disk one — reused for the gate
-    // and the sync (one auth.json read). With no team, only sync if due anyway.
-    let team = authenticated
-        .and_then(eligible_team_principal)
-        .or_else(read_active_team_auth);
-    if team.is_none() && !crate::config::is_managed_config_stale_for(&current_serving_identity()) {
-        return ManagedConfigSync::Skipped;
-    }
-    match sync_bounded(SyncBudget::Login, team).await {
-        // Nothing was persisted for a rejected envelope — that's a failure to
-        // report, not "no change" (the gate may refuse the next session).
-        Some(Ok(SyncOutcome {
-            signature_rejected: true,
-            ..
-        })) => {
-            tracing::warn!("post-login managed config sync: server envelope rejected");
-            ManagedConfigSync::Failed
-        }
-        Some(Ok(SyncOutcome {
-            wrote: true,
-            source,
-            ..
-        })) => {
-            tracing::info!("post-login managed config sync: updated");
-            ManagedConfigSync::Updated {
-                is_team: source == Some(ManagedConfigSource::TeamOauth),
-            }
-        }
-        Some(Ok(_)) => ManagedConfigSync::NoChange,
-        Some(Err(e)) => {
-            tracing::debug!("post-login managed config sync failed: {e}");
-            ManagedConfigSync::Failed
-        }
-        None => {
-            tracing::debug!("post-login managed config sync timed out");
-            ManagedConfigSync::Failed
-        }
-    }
-}
-
 /// Whether a credential exists that `grok setup` could install config for.
 pub fn has_principal() -> bool {
     resolve_deployment_key().is_some() || read_active_team_auth().is_some()
-}
-
-/// Whether a managed identity owns this machine, IGNORING token expiry (unlike [`has_principal`]) so an
-/// expired/backdated `auth.json` can't disarm the gate. Unreadable → present (fail-safe; the gate ANDs this
-/// with [`crate::config::managed_policy_compromised_for`], which a personal user never satisfies).
-fn managed_principal_present() -> bool {
-    resolve_deployment_key().is_some() || team_principal_signed_in().unwrap_or(true)
 }
 
 /// The serving identity for an optional team id: a configured deployment key always
@@ -924,7 +744,7 @@ pub fn current_serving_identity() -> crate::config::ServingIdentity {
 /// The client's team_id, IGNORING token expiry (the binding must survive the cold-start
 /// expired window). Must NOT special-case a configured deployment key — that would
 /// disable envelope binding for a real team user. Used at fetch time to bind the envelope.
-pub fn active_team_id_any_expiry() -> Option<String> {
+pub(crate) fn active_team_id_any_expiry() -> Option<String> {
     let home = crate::util::grok_home::grok_home();
     let store = crate::auth::read_auth_json(&home.join("auth.json")).ok()?;
     store
@@ -935,248 +755,6 @@ pub fn active_team_id_any_expiry() -> Option<String> {
         // binding (an untrimmed id here would fail `check_fetch_identity` against a trimmed
         // signed payload forever).
         .and_then(|a| crate::config::normalize_identity(a.team_id.as_deref()))
-}
-
-/// Like [`current_serving_identity`] but IGNORING token expiry, for the enforcement gate:
-/// a backdated `auth.json` must not resolve the team to `None` and relax the identity
-/// checks. The refetch path stays expiry-filtered (a stray refetch is harmless).
-fn current_serving_identity_any_expiry() -> crate::config::ServingIdentity {
-    serving_identity_from(active_team_id_any_expiry())
-}
-
-/// Disk-only classification for the startup `auth_mode` label.
-pub fn classify_auth_mode() -> pi_telemetry::startup::AuthMode {
-    auth_mode(
-        resolve_deployment_key().is_some(),
-        &team_principal_signed_in(),
-    )
-}
-
-fn auth_mode(
-    has_deployment_key: bool,
-    signed_in_team: &std::io::Result<bool>,
-) -> pi_telemetry::startup::AuthMode {
-    use pi_telemetry::startup::AuthMode;
-    match (has_deployment_key, signed_in_team) {
-        (true, _) => AuthMode::Deployment,
-        (false, Ok(true)) => AuthMode::Team,
-        (false, Ok(false)) => AuthMode::Personal,
-        (false, Err(_)) => AuthMode::Unknown,
-    }
-}
-
-/// Best-effort session-start refresh: a bounded token refresh, then a bounded refetch only when the cache is
-/// hard-stale. NEVER fails the session — on failure it continues on cached / OS-protected policy.
-pub async fn ensure_managed_policy_present(
-    auth_manager: &std::sync::Arc<crate::auth::AuthManager>,
-) {
-    pi_telemetry::startup::enter(pi_telemetry::startup::StartupPhase::ManagedPolicy);
-    // Classify before the fetch gate: the label is disk-only and fetch-disabled
-    // users still deserve a real auth_mode split.
-    let has_deployment_key = resolve_deployment_key().is_some();
-    let signed_in_team = team_principal_signed_in();
-    pi_telemetry::startup::set_auth_mode(auth_mode(has_deployment_key, &signed_in_team));
-    // Gated on fetch-enabled, not `cfg!(test)` — that would diverge test behavior from production.
-    if !is_fetch_enabled() {
-        return;
-    }
-    // Disk-only gates first; `Err` reading `auth.json` is not "no principal",
-    // which would skip enforcement on a transient read blip.
-    if !has_deployment_key && matches!(&signed_in_team, Ok(false)) {
-        return;
-    }
-    let identity = current_serving_identity();
-    if !matches!(identity, crate::config::ServingIdentity::None)
-        && !crate::config::is_managed_config_hard_stale_for(&identity)
-    {
-        return;
-    }
-    // Refresh before the heal so an expired-but-refreshable team token isn't dropped by
-    // the expiry filter. Bounded; deploy-key machines have no OAuth (auth() → None).
-    let team = tokio::time::timeout(SESSION_START_AUTH_DEADLINE, auth_manager.auth())
-        .await
-        .ok()
-        .and_then(Result::ok)
-        .filter(GrokAuth::is_team_principal);
-    if !has_principal() {
-        return;
-    }
-    if !crate::config::is_managed_config_hard_stale_for(&current_serving_identity()) {
-        return;
-    }
-    match sync_bounded(SyncBudget::SessionStart, team).await {
-        Some(Ok(_)) => {}
-        Some(Err(e)) => tracing::warn!("session-start managed policy refresh failed: {e}"),
-        None => tracing::warn!("session-start managed policy refresh timed out"),
-    }
-}
-
-/// Shown when a managed principal's enforced policy is missing/substituted and the refetch couldn't restore it.
-const MANAGED_POLICY_MISSING_MSG: &str = "Managed policy is required for this account but is \
-missing or could not be verified, and could not be restored from the server.\nThis check needs \
-network access: reconnect and start again. If you can't reconnect, contact your administrator.";
-
-/// Fail-closed session-start gate for managed principals. On a confirmed offline team
-/// switch, first purges the prior team's artifacts ([`purge_prior_tenant_on_identity_change`]).
-/// Without a signing key the user-writable marker is best-effort; root/MDM/signed cache
-/// are the non-forgeable layers. Recovery: reconnect / `grok setup`; ceasing to serve
-/// `fail_closed` rolls back.
-pub fn managed_policy_gate() -> Result<(), String> {
-    // Lib unit tests skip: bootstrap would hit the host's real marker/auth. Pure decision
-    // is unit-tested; integration tests exercise this path.
-    if cfg!(test) {
-        return Ok(());
-    }
-    // Purge first so an offline team switch isn't misread as a substituted cache.
-    purge_prior_tenant_on_identity_change();
-    // Raise the floor after the purge so a purged marker stays absent.
-    bump_managed_rollback_floor();
-    managed_policy_gate_decision(
-        managed_principal_present(),
-        // Expiry-ignoring: a backdated auth.json must not resolve Team→None and relax binding.
-        crate::config::managed_policy_compromised_for(&current_serving_identity_any_expiry()),
-    )
-}
-
-/// Purge prior team (A) artifacts on a confirmed offline team switch so the gate admits
-/// team B. Detector is marker-scoped ([`crate::config::confirmed_team_switch`]): key-scoped
-/// markers never purge here; config.toml blips are not switches. Under the managed-config
-/// lock (one retry on contention, else skip like [`clear_orphan`]); a skip may refuse one
-/// signed-build start until the next purge.
-fn purge_prior_tenant_on_identity_change() {
-    let crate::config::ServingIdentity::Team(team_id) = current_serving_identity_any_expiry()
-    else {
-        return;
-    };
-    // Same home for pre-check, lock, detector, and delete.
-    let home = crate::util::grok_home::grok_home();
-    // Unlocked pre-check: common no-switch start takes no lock; re-check under lock before delete.
-    if crate::config::confirmed_team_switch_at(&home, &team_id).is_none() {
-        return;
-    }
-    let Some(_lock) = try_lock_managed_config(&home).or_else(|| {
-        std::thread::sleep(PURGE_LOCK_RETRY_DELAY);
-        try_lock_managed_config(&home)
-    }) else {
-        return; // mid-apply/remove; holder owns the transition
-    };
-    if let Some(evicted) = crate::config::confirmed_team_switch_at(&home, &team_id) {
-        tracing::warn!(
-            team_id = %team_id,
-            evicted_principal = %evicted,
-            "identity changed; purging the prior tenant's managed config"
-        );
-        remove_managed_config_files(&home);
-    }
-}
-
-/// Floor tick (session start + background sync tick), best-effort under the
-/// managed-config lock — a failed tick must not refuse a session.
-fn bump_managed_rollback_floor() {
-    // Re-checked inside `bump_rollback_floor`; this early-out skips the lock I/O when dark.
-    if !pi_config::signed_policy::verification_active() {
-        return;
-    }
-    let home = crate::util::grok_home::grok_home();
-    match try_lock_managed_config(&home) {
-        Some(_lock) => {
-            pi_config::bump_rollback_floor(&home);
-        }
-        None => tracing::debug!("managed-config lock contended; skipping the floor tick"),
-    }
-}
-
-/// Pure decision behind [`managed_policy_gate`]: fail closed only when a managed principal is active AND its policy is compromised.
-fn managed_policy_gate_decision(
-    managed_principal_present: bool,
-    policy_compromised: bool,
-) -> Result<(), String> {
-    if managed_principal_present && policy_compromised {
-        return Err(MANAGED_POLICY_MISSING_MSG.to_string());
-    }
-    Ok(())
-}
-
-/// Outcome of the `grok setup` sync. The caller renders it — CLI presentation
-/// and exit codes stay out of the library.
-#[derive(Debug)]
-pub enum SetupOutcome {
-    /// Config was written to `~/.grok`.
-    Installed,
-    /// The principal is valid but the server has no config for it.
-    NothingConfigured,
-    /// Nothing persisted by THIS run (another process held the apply lock, or the credential
-    /// vanished mid-fetch); re-running converges.
-    Skipped,
-    /// The fetch failed.
-    Failed(ManagedConfigError),
-}
-
-/// Result of `grok setup --json`: what the server serves for the current
-/// principal, verbatim. `managed_config` may embed the enforced deployment key,
-/// exactly as `grok setup` would write it to disk.
-#[derive(Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SetupReport {
-    /// The credential that served: `"deploymentKey"` or `"teamOauth"`, or
-    /// `None` when no principal was available.
-    pub source: Option<&'static str>,
-    /// Whether the server has a configuration for the principal.
-    pub configured: bool,
-    pub deployment_id: Option<String>,
-    pub team_id: Option<String>,
-    /// TOML documents exactly as `grok setup` would install them.
-    pub managed_config: Option<String>,
-    pub requirements: Option<String>,
-    pub fail_closed: bool,
-}
-
-/// Fetches the report behind `grok setup --json` without writing anything:
-/// no artifacts, no signature sidecar, no sync marker.
-pub async fn fetch_setup_report() -> Result<SetupReport, ManagedConfigError> {
-    let (source, body) = match fetch_for_principal(SyncBudget::Standard, None).await? {
-        FetchedConfig::DeploymentKey { body, .. } => (Some("deploymentKey"), body),
-        FetchedConfig::Team { body, .. } => (Some("teamOauth"), body),
-        FetchedConfig::NoPrincipal => (None, ManagedConfigResponse::default()),
-    };
-    // Match the installer's trust decision: a payload `grok setup` would refuse
-    // is reported as an error, not printed as installable config.
-    if source.is_some()
-        && pi_config::signed_policy::verification_active()
-        && let Err(e) = verify_signed_envelope(&body, active_team_id_any_expiry().as_deref())
-    {
-        tracing::warn!("managed config signature rejected: {e}");
-        return Err(ManagedConfigError::SignatureRejected);
-    }
-    Ok(SetupReport {
-        source,
-        configured: body.config_exists(),
-        fail_closed: body.requirements_fail_closed(),
-        deployment_id: body.deployment_id,
-        team_id: body.team_id,
-        managed_config: body.managed_config,
-        requirements: body.requirements,
-    })
-}
-
-/// Run the `grok setup` sync for the current principal. The caller must check
-/// [`has_principal`] first and render the no-principal guidance.
-pub async fn run_setup() -> SetupOutcome {
-    match sync_with_budget(SyncBudget::Standard, None).await {
-        // A rejected envelope persisted nothing — reporting Installed would mask a
-        // fetch the gate is about to refuse.
-        Ok(SyncOutcome {
-            signature_rejected: true,
-            ..
-        }) => SetupOutcome::Failed(ManagedConfigError::SignatureRejected),
-        // A skip persisted nothing: not Installed (this run wrote nothing) nor NothingConfigured
-        // (the server does have config).
-        Ok(SyncOutcome { skipped: true, .. }) => SetupOutcome::Skipped,
-        // `served` (not `wrote`) so an unchanged re-fetch isn't reported as "no config".
-        Ok(SyncOutcome { served: true, .. }) => SetupOutcome::Installed,
-        Ok(_) => SetupOutcome::NothingConfigured,
-        Err(e) => SetupOutcome::Failed(e),
-    }
 }
 
 // Tests in a sibling file (they dwarf the module) but a child module, for private access.

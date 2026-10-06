@@ -358,59 +358,6 @@ impl AgentView {
         id
     }
 
-    /// Drain this agent's inline-media placement tracking and return the
-    /// Kitty delete escapes for every image it has placed on the GPU.
-    ///
-    /// Kitty graphics are independent of the cell grid: they survive
-    /// redraws until explicitly deleted, and every regular clear path
-    /// lives inside [`AgentView::draw`]. When another view takes over the
-    /// frame (e.g. the agent dashboard), those per-frame clears stop
-    /// running, so the caller uses this to delete whatever this agent
-    /// left on screen. Resetting `inline_media_ids` forces a fresh
-    /// transmit when this agent next draws; any active inline playback
-    /// is stopped, mirroring the scrolled-off-screen clear path.
-    ///
-    /// Returns `None` when this agent (and its subagent views) has no
-    /// placements.
-    pub(crate) fn take_inline_media_clear_escapes(&mut self) -> Option<String> {
-        let mut clear_esc = self
-            .take_own_inline_media_clear_escapes()
-            .unwrap_or_default();
-        if let Some(esc) = self.take_subagent_inline_media_clear_escapes() {
-            clear_esc.push_str(&esc);
-        }
-        (!clear_esc.is_empty()).then_some(clear_esc)
-    }
-
-    /// This view's own placements only, leaving `subagent_views` untouched.
-    /// Used by the fullscreen-subagent takeover in [`AgentView::draw`]: the
-    /// parent's images must be deleted, but the child is about to draw and
-    /// manages its own placements — draining it too would just force a
-    /// re-transmit.
-    pub(super) fn take_own_inline_media_clear_escapes(&mut self) -> Option<String> {
-        // Also proceed when only playback state remains (`inline_video` Some
-        // with no active placements — e.g. frames finished loading after the
-        // media scrolled off): the drain must still stop the ticking video,
-        // or it keeps holding the animation gate open invisibly and its
-        // eventual drop is never purged.
-        if !self.inline_media_active
-            && self.inline_media_ids.is_empty()
-            && self.inline_video.is_none()
-        {
-            return None;
-        }
-        self.inline_media_active = false;
-        self.stop_inline_playback();
-        let mut clear_esc = String::new();
-        for &id in self.inline_media_ids.values() {
-            clear_esc.push_str(&crate::terminal::image::clear_kitty_image(id));
-        }
-        self.inline_media_ids.clear();
-        self.inline_media_iterm_emitted.clear();
-        self.last_placed_ids.clear();
-        (!clear_esc.is_empty()).then_some(clear_esc)
-    }
-
     /// Stop inline video playback, dropping the pre-extracted frame set
     /// (~50–300 MB), and request a post-draw purge for it. Returns whether a
     /// video was actually playing — callers on the draw path rely on the
@@ -432,18 +379,6 @@ impl AgentView {
             // Switching videos: the previous frame set just dropped.
             crate::memory_release::request_release_after_draw("inline-video-replace");
         }
-    }
-
-    /// Subagent fullscreen views render inline media with their own ids —
-    /// drain those (recursively), leaving this view's placements alone.
-    pub(super) fn take_subagent_inline_media_clear_escapes(&mut self) -> Option<String> {
-        let mut clear_esc = String::new();
-        for child in self.subagent_views.values_mut() {
-            if let Some(esc) = child.take_inline_media_clear_escapes() {
-                clear_esc.push_str(&esc);
-            }
-        }
-        (!clear_esc.is_empty()).then_some(clear_esc)
     }
 
     /// Refresh [`Self::media_link_paths`] — the absolute paths of media
@@ -755,73 +690,6 @@ mod tests {
             test_support::calls(),
             before + 1,
             "closing the viewer must purge after the frame set drops"
-        );
-    }
-
-    /// Draining inline-media placements requests a POST-DRAW purge only when
-    /// live playback (a frame set) was actually dropped — image-only clears
-    /// must not, and the purge must never run synchronously (these paths sit
-    /// inside `draw`). Serialized: the deferred-request flag is process-wide.
-    #[test]
-    #[serial_test::serial(MEMORY_RELEASE_DEFER)]
-    fn inline_media_clear_defers_release_only_for_video() {
-        test_support::install_counting_hook();
-        // Drain any stale request left by an earlier test in this group.
-        crate::memory_release::run_deferred_release();
-
-        let mut agent = make_agent();
-
-        // Image-only placements active: clear drops no frames → no request.
-        agent.inline_media_active = true;
-        let before = test_support::calls();
-        let _ = agent.take_inline_media_clear_escapes();
-        crate::memory_release::run_deferred_release();
-        assert_eq!(
-            test_support::calls(),
-            before,
-            "an image-only media clear must not purge"
-        );
-
-        // Active inline playback: sync no purge; the drain runs it → one.
-        agent.inline_media_active = true;
-        agent.inline_video = Some(stub_inline_video());
-        let before = test_support::calls();
-        let _ = agent.take_inline_media_clear_escapes();
-        assert!(agent.inline_video.is_none());
-        assert_eq!(
-            test_support::calls(),
-            before,
-            "draw-path video stop must never purge synchronously"
-        );
-        crate::memory_release::run_deferred_release();
-        assert_eq!(
-            test_support::calls(),
-            before + 1,
-            "the post-draw drain must purge the dropped frame set"
-        );
-
-        // Orphaned playback (frames finished loading after the media
-        // scrolled off: no active flag, no placements): the drain must still
-        // stop the video and request its purge.
-        agent.inline_media_active = false;
-        agent.inline_video = Some(stub_inline_video());
-        let before = test_support::calls();
-        assert!(agent.take_inline_media_clear_escapes().is_none());
-        assert!(
-            agent.inline_video.is_none(),
-            "orphaned playback must be stopped by the drain"
-        );
-        crate::memory_release::run_deferred_release();
-        assert_eq!(test_support::calls(), before + 1);
-
-        // Nothing at all: the early no-placement return → no request.
-        let before = test_support::calls();
-        let _ = agent.take_inline_media_clear_escapes();
-        crate::memory_release::run_deferred_release();
-        assert_eq!(
-            test_support::calls(),
-            before,
-            "a no-op clear must not purge"
         );
     }
 

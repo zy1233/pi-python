@@ -19,16 +19,11 @@ use super::{
     RawLinePeek, RawParamsPeek, RawUpdatePeek, SessionUpdate, SessionUpdateEnvelope,
     filter_rewind_lines, replay_updates_path_in_dir, strip_context_wrappers,
 };
-use crate::extensions::notification::SessionNotification;
 use crate::extensions::notification::SessionUpdate as PiUpdate;
 use crate::session::wire_tags::{
     AVAILABLE_COMMANDS_UPDATE, TOOL_CALL_STATUS_IN_PROGRESS, TOOL_CALL_UPDATE,
 };
 
-// `_meta` protocol field names (not enum discriminants).
-/// `_meta` key holding the running token count. The serde `rename` below must
-/// match it by hand (serde attrs can't reference a const).
-const TOTAL_TOKENS_KEY: &str = "totalTokens";
 /// `_meta` key holding the per-event id used for cursor-based reconnect.
 const EVENT_ID_KEY: &str = "eventId";
 
@@ -58,18 +53,6 @@ pub struct ReplayPathHint<'a> {
 pub struct PreparedReplay<'a> {
     /// Rewind-filtered replay lines, each borrowed from the input transcript.
     pub lines: Vec<&'a str>,
-    pub(crate) mark_replay: bool,
-    pub(crate) last_tokens: u64,
-    /// Highest `eventId` counter across all live (rewind-filtered) lines, used
-    /// to re-seed the process-global event counter on resume so post-load live
-    /// events keep monotonically increasing ids (see
-    /// [`crate::util::event_id::ensure_event_counter_at_least`]). `None` when no
-    /// line carried a parseable `eventId` (older shell).
-    pub(crate) max_event_seq: Option<u64>,
-    pub(crate) total_live: usize,
-    /// Replayed spawns with no matching finish (a rewind can drop the finish):
-    /// `(subagent_id, child_session_id)`, reconciled on load.
-    pub(crate) unfinished_subagents: Vec<(String, String)>,
 }
 
 /// Whether a replay stream forwarded any ACP update. Gates the caller's
@@ -150,11 +133,6 @@ impl ReplayToolCollapser {
         std::mem::take(&mut self.pending)
             .into_values()
             .map(acp::SessionUpdate::ToolCall)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn pending_len(&self) -> usize {
-        self.pending.len()
     }
 }
 
@@ -393,38 +371,6 @@ fn rewind_filtered_live(raw: &str) -> Vec<&str> {
     filter_rewind_lines(raw.lines().filter(|l| !l.trim().is_empty()).collect())
 }
 
-/// Unpaired spawns across the rewind-filtered timeline. Substring pre-filter
-/// keeps non-subagent lines off the JSON path.
-pub(crate) fn collect_unfinished_subagents(filtered: &[&str]) -> Vec<(String, String)> {
-    let mut pending: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
-    for line in filtered {
-        if !line.contains("subagent_spawned") && !line.contains("subagent_finished") {
-            continue;
-        }
-        let raw = serde_json::from_str::<RawLinePeek<'_>>(line)
-            .ok()
-            .and_then(|e| e.params.map(|p| p.get()))
-            .unwrap_or(line);
-        let Ok(notification) = serde_json::from_str::<SessionNotification>(raw) else {
-            continue;
-        };
-        match notification.update {
-            PiUpdate::SubagentSpawned {
-                subagent_id,
-                child_session_id,
-                ..
-            } => {
-                pending.insert(subagent_id, child_session_id);
-            }
-            PiUpdate::SubagentFinished { subagent_id, .. } => {
-                pending.remove(&subagent_id);
-            }
-            _ => {}
-        }
-    }
-    pending.into_iter().collect()
-}
-
 /// The raw `_meta` object of a persisted line, if any, without allocating a
 /// `serde_json::Value`. Handles both the enveloped (`{method,params}`) and legacy
 /// (params-at-top-level) on-disk formats.
@@ -463,22 +409,6 @@ pub(crate) fn line_is_dropped_on_replay(line: &str) -> bool {
     line_is_available_commands_update(line) || line_is_in_progress_tool_call_update(line)
 }
 
-/// Extract `_meta.totalTokens` from a persisted update line without allocating a
-/// `serde_json::Value`. Returns `None` when the line carries no token count.
-fn line_total_tokens(line: &str) -> Option<u64> {
-    if !line.contains(TOTAL_TOKENS_KEY) {
-        return None;
-    }
-    #[derive(serde::Deserialize)]
-    struct TokensPeek {
-        #[serde(rename = "totalTokens")]
-        total_tokens: Option<u64>,
-    }
-    serde_json::from_str::<TokensPeek>(line_meta(line)?.get())
-        .ok()
-        .and_then(|t| t.total_tokens)
-}
-
 /// This line's `_meta.eventId`, if any. Cheap peek (no `Value`).
 fn line_event_id(line: &str) -> Option<std::borrow::Cow<'_, str>> {
     if !line.contains(EVENT_ID_KEY) {
@@ -499,9 +429,8 @@ fn line_has_event_id(line: &str, cursor_id: &str) -> bool {
     line_event_id(line).as_deref() == Some(cursor_id)
 }
 
-/// Rewind-filter, resolve the reconnect cursor, drop redundant command
-/// catalogs and InProgress tool_call_updates, and scan `totalTokens`. Pure
-/// data processing, no I/O.
+/// Rewind-filter, resolve the reconnect cursor, and drop redundant command
+/// catalogs and InProgress tool_call_updates. Pure data processing, no I/O.
 ///
 /// The cursor is resolved before dropping ACUs / InProgress lines, because an
 /// idle client often reconnects with one of those `eventId`s as its cursor;
@@ -513,30 +442,6 @@ fn line_has_event_id(line: &str, cursor_id: &str) -> bool {
 #[doc(hidden)]
 pub fn prepare_replay_lines<'a>(contents: &'a str, cursor: Option<&str>) -> PreparedReplay<'a> {
     let filtered = filter_rewind_lines(contents.lines().filter(|l| !l.trim().is_empty()).collect());
-
-    let mut max_event_seq: Option<u64> = None;
-    for line in &filtered {
-        if line.contains("eventId")
-            && let Ok(env) = serde_json::from_str::<RawLinePeek<'_>>(line)
-            && let Some(raw) = env.params.map(|p| p.get())
-            && let Ok(pp) = serde_json::from_str::<RawParamsPeek<'_>>(raw)
-            && let Some(meta_raw) = pp.meta
-            && let Ok(meta) = serde_json::from_str::<serde_json::Value>(meta_raw.get())
-            && let Some(seq) = meta
-                .get("eventId")
-                .and_then(|v| v.as_str())
-                .and_then(|s| s.rsplit('-').next())
-                .and_then(|c| c.parse::<u64>().ok())
-        {
-            max_event_seq = Some(max_event_seq.map_or(seq, |m| m.max(seq)));
-        }
-    }
-
-    let last_tokens = filtered
-        .iter()
-        .rev()
-        .find_map(|l| line_total_tokens(l))
-        .unwrap_or(0);
 
     let cursor_pos = cursor
         .and_then(|id| filtered.iter().rposition(|l| line_has_event_id(l, id)))
@@ -551,40 +456,14 @@ pub fn prepare_replay_lines<'a>(contents: &'a str, cursor: Option<&str>) -> Prep
             }
             bounded
         });
-    let mark_replay = cursor_pos.is_none();
     let start = cursor_pos.map_or(0, |pos| pos + 1);
 
-    let mut lines: Vec<&str> = Vec::with_capacity(filtered.len().saturating_sub(start));
-    let mut total_live = 0usize;
-    for (i, &line) in filtered.iter().enumerate() {
-        if line_is_dropped_on_replay(line) {
-            continue;
-        }
-        total_live += 1;
-        if i >= start {
-            lines.push(line);
-        }
-    }
-
-    PreparedReplay {
-        lines,
-        mark_replay,
-        last_tokens,
-        max_event_seq,
-        total_live,
-        unfinished_subagents: collect_unfinished_subagents(&filtered),
-    }
-}
-
-/// Blank-strip, drop redundant command catalogs and InProgress tool updates,
-/// and rewind-filter a raw `updates.jsonl` segment. Shared by the delta-replay
-/// path (which has no reconnect cursor); the initial replay path is
-/// [`prepare_replay_lines`], which additionally resolves a cursor (and so must
-/// see ACUs / InProgress lines) before dropping them.
-pub(crate) fn filter_delta_replay_lines(contents: &str) -> Vec<&str> {
-    let live: Vec<&str> = contents
-        .lines()
-        .filter(|l| !l.trim().is_empty() && !line_is_dropped_on_replay(l))
+    let lines: Vec<&str> = filtered
+        .iter()
+        .enumerate()
+        .filter(|&(i, &line)| i >= start && !line_is_dropped_on_replay(line))
+        .map(|(_, &line)| line)
         .collect();
-    filter_rewind_lines(live)
+
+    PreparedReplay { lines }
 }

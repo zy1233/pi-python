@@ -14,7 +14,6 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 pi-auth = { workspace = true, features = ["middleware"] }
 pi-extra-ca = { workspace = true }
-pi-sampler = { path = "../pi-sampler" }
 pi-telemetry = { workspace = true }
 pi-version = { workspace = true }
 pi-workspace = { workspace = true }

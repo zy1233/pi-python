@@ -137,8 +137,8 @@ pub(crate) fn presandbox_resume_target(
     if pi_shell::session::resolve_local_session_any_cwd(arg).is_some() {
         return Ok(PinnedResumeTarget::Id(arg.to_string()));
     }
-    let summaries = pi_shell::session::persistence::local_summaries_for_cwd_sync(cwd)
-        .map_err(|e| {
+    let summaries =
+        pi_shell::session::persistence::local_summaries_for_cwd_sync(cwd).map_err(|e| {
             anyhow::anyhow!("failed to list local sessions while resolving --resume {arg:?}: {e}")
         })?;
     Ok(select_by_title(arg, &summaries)?
@@ -147,23 +147,6 @@ pub(crate) fn presandbox_resume_target(
             sandbox_profile: s.sandbox_profile.clone(),
         })
         .unwrap_or(PinnedResumeTarget::Unresolved))
-}
-
-/// Failure message for a worktree resume. `local_miss_target` is `Some(arg)`
-/// only when materialization deferred exactly this target after missing local
-/// id/title resolution — provenance is threaded, never inferred from id
-/// shape, so a resolved legacy non-UUID id gets no false no-match hint.
-/// `detail` must already be user-sanitized: sanitizing the composed message
-/// instead would collapse disk-full chains whole and erase the appended hint.
-pub(crate) fn worktree_resume_failure_message(
-    local_miss_target: Option<&str>,
-    detail: &str,
-) -> String {
-    let msg = format!("couldn't resume worktree session: {detail}");
-    match local_miss_target {
-        Some(target) => format!("{msg}; {}", title_miss_hint(target)),
-        None => msg,
-    }
 }
 
 #[cfg(test)]

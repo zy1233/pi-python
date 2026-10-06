@@ -125,34 +125,6 @@ pub struct OAuth2ProviderConfig {
     pub referrer: Option<String>,
 }
 pub const PI_OAUTH2_ISSUER: &str = "https://auth.x.ai";
-/// Production accounts-app origin allowlist. Its own const so the frozen
-/// contract test pins the production allowlist even when the non-production
-/// feature adds staging/local origins.
-const PROD_ACCOUNTS_APP_ORIGINS: &[&str] = &["https://accounts.x.ai"];
-/// Production build: accepts only the production accounts app.
-pub(crate) fn allowed_accounts_app_origins() -> Vec<String> {
-    PROD_ACCOUNTS_APP_ORIGINS
-        .iter()
-        .map(|o| o.to_string())
-        .collect()
-}
-/// Build a CORS layer that accepts requests from the accounts-app deployments
-/// listed in [`allowed_accounts_app_origins`] for the given HTTP method.
-pub(crate) fn accounts_app_cors_layer(method: axum::http::Method) -> tower_http::cors::CorsLayer {
-    tower_http::cors::CorsLayer::new()
-        .allow_origin(tower_http::cors::AllowOrigin::list(
-            allowed_accounts_app_origins()
-                .iter()
-                .filter_map(|origin| match origin.parse() {
-                    Ok(value) => Some(value),
-                    Err(_) => {
-                        tracing::warn!(origin, "skipping malformed accounts-app CORS origin");
-                        None
-                    }
-                }),
-        ))
-        .allow_methods([method])
-}
 /// Local-dev OAuth2 issuer (accounts-app running on localhost).
 const PI_OAUTH2_LOCAL_ISSUER: &str = "http://localhost:22255";
 const DEFAULT_OAUTH2_REFERRER: &str = "grok-build";
@@ -178,9 +150,6 @@ pub fn pi_oauth2_issuer() -> &'static str {
 pub fn is_pi_oauth2_issuer(issuer: &str) -> bool {
     issuer == PI_OAUTH2_ISSUER || issuer == PI_OAUTH2_LOCAL_ISSUER
 }
-/// auth.json scope key used by the pre-OIDC `grok login --legacy` flow.
-/// Matches the key format produced by the original `accounts.x.ai` relay auth.
-pub(crate) const LEGACY_AUTH_SCOPE: &str = "https://accounts.x.ai/sign-in";
 impl GrokComConfig {
     /// Whether `pi.api_key` auth is disabled. Pinning a team
     /// (`force_login_team_uuid`) implies this: team membership can't be verified
@@ -210,10 +179,7 @@ impl GrokComConfig {
     }
 }
 impl OAuth2ProviderConfig {
-    pub fn is_team_principal(&self) -> bool {
-        self.principal_type.as_deref() == Some(TEAM_PRINCIPAL_TYPE)
-    }
-    pub fn from_env() -> Option<Self> {
+    pub(crate) fn from_env() -> Option<Self> {
         let issuer = std::env::var("GROK_OAUTH2_ISSUER").ok()?;
         let client_id = std::env::var("GROK_OAUTH2_CLIENT_ID").ok()?;
         let principal_type = std::env::var("GROK_OAUTH2_PRINCIPAL_TYPE").ok();
@@ -236,19 +202,10 @@ impl OAuth2ProviderConfig {
             ),
         })
     }
-    /// Convert to [`OidcAuthConfig`] to reuse the OIDC login flow.
-    pub(crate) fn as_oidc(&self) -> OidcAuthConfig {
-        OidcAuthConfig {
-            issuer: self.issuer.clone(),
-            client_id: self.client_id.clone(),
-            scopes: self.scopes.clone(),
-            audience: None,
-        }
-    }
     pub(crate) fn base_auth_scope(&self) -> String {
         format!("{}::{}", self.issuer.trim_end_matches('/'), self.client_id)
     }
-    pub fn auth_scope(&self) -> String {
+    pub(crate) fn auth_scope(&self) -> String {
         self.base_auth_scope()
     }
 }
@@ -386,7 +343,7 @@ fn parse_force_login_team(raw: &str) -> Option<ForceLoginTeam> {
     }
 }
 impl OidcAuthConfig {
-    pub fn from_env() -> Option<Self> {
+    pub(crate) fn from_env() -> Option<Self> {
         let issuer = std::env::var("GROK_OIDC_ISSUER").ok()?;
         let client_id = std::env::var("GROK_OIDC_CLIENT_ID").ok()?;
         Some(Self {
@@ -434,17 +391,6 @@ mod tests {
             referrer: Some("grok-build".into()),
         };
         assert_eq!(cfg.auth_scope(), "https://auth.x.ai::client-123");
-    }
-    /// FROZEN loopback contract: the accounts-app origins the CLI's loopback
-    /// callback server accepts cross-origin requests from. The consent page
-    /// (served from accounts.x.ai) delivers the code via `fetch(..., cors)`, so
-    /// removing an origin breaks loopback delivery for already-installed CLIs.
-    /// Keep in sync with the oauth2-provider / accounts-app deployments.
-    /// Non-production / local-dev origins are opt-in only.
-    #[test]
-    fn allowed_accounts_app_origins_are_frozen() {
-        assert_eq!(PROD_ACCOUNTS_APP_ORIGINS, &["https://accounts.x.ai"]);
-        assert_eq!(allowed_accounts_app_origins(), PROD_ACCOUNTS_APP_ORIGINS);
     }
     /// FROZEN client contract: the 10 scopes the pi OAuth2 client requests.
     /// The server must keep accepting all of them; existing tokens carry

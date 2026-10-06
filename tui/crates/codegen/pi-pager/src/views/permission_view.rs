@@ -16,10 +16,6 @@
 //! No rendering or input handling here — this is pure data and helpers.
 
 use agent_client_protocol as acp;
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
 use pi_workspace::permission::bash_command_splitting::{
     BashCommandHighlights, heredoc_payload_byte_ranges, range_fully_inside,
     soft_break_offsets_after_operators,
@@ -28,6 +24,10 @@ use pi_workspace::permission::{
     ALLOW_EDITS_SESSION_OPTION_ID, BashCommandPermission, McpToolPermission, mcp_titleize_segment,
     mcp_tool_action, mcp_tool_display_name,
 };
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
 
 use unicode_width::UnicodeWidthStr;
 
@@ -264,12 +264,6 @@ pub struct PermissionViewState {
     /// Scroll offset for description area.
     pub desc_scroll: u16,
 
-    // -- Subagent provenance --
-    /// If this permission was requested by a subagent, its descriptive label.
-    /// Derived from matching `request.session_id` against known subagent
-    /// sessions. Displayed as a provenance line above the title.
-    pub subagent_label: Option<String>,
-
     // -- Prompt stash (queue-level, not per-request) --
     // NOTE: prompt stash is NOT on PermissionViewState.
     // It lives on AgentView as `permission_stashed_prompt`.
@@ -470,9 +464,6 @@ fn shortcut_label(index: usize) -> &'static str {
 
 // ── Subagent tracking ──────────────────────────────────────────────────
 
-// SubagentInfo lives in app::subagent — re-export for backward compat.
-pub use crate::app::subagent::SubagentInfo;
-
 // ── Height calculation ─────────────────────────────────────────────────
 
 /// Chrome height for the permission view as actually rendered.
@@ -506,9 +497,6 @@ fn permission_chrome_height(state: &PermissionViewState, content_w: usize) -> u1
         .saturating_add(bash_indicator as usize)
         .min(u16::MAX as usize) as u16;
     let mut h: u16 = 1; // vpad top
-    if state.subagent_label.is_some() {
-        h += 1; // provenance line
-    }
     h += 1; // title line
     h = h.saturating_add(bash_line_count);
     // Planned MCP arguments: same `mcp_args_visible_rows` budget as the
@@ -727,20 +715,6 @@ pub fn render_permission_view(
     // bottom of a short terminal they must not write past it (ratatui's
     // set_line panics on an out-of-bounds row).
     let area_bottom = area.y + area.height;
-
-    // Subagent provenance line (if present).
-    if let Some(ref label) = state.subagent_label {
-        if y < area_bottom {
-            let prov_style = Style::default().fg(theme.gray);
-            buf.set_line(
-                content_x,
-                y,
-                &Line::from(Span::styled(label.clone(), prov_style)),
-                content_width,
-            );
-        }
-        y += 1;
-    }
 
     // Title (bold, accent color) — e.g. bash tool description or "Allow Edit?"
     if y < area_bottom {
@@ -1904,7 +1878,7 @@ fn build_permission_option_line<'a>(
         if scope_is_mcp {
             spans.push(Span::styled(truncated, label_style));
         } else {
-            for s in crate::views::tasks_pane::highlight_bash_command(&truncated) {
+            for s in crate::views::bash_highlight::highlight_bash_command(&truncated) {
                 spans.push(Span::styled(s.content.into_owned(), s.style.bg(row_bg)));
             }
         }
@@ -2049,21 +2023,6 @@ pub(crate) fn allow_scope_label(
     }
 }
 
-/// Plain-string form of [`dynamic_option_label`] for surfaces without span
-/// styling (dashboard peek). Keeps every render surface on the one label
-/// source so what is shown always equals the scope the dispatch persists.
-pub(crate) fn option_label_for_selection(
-    option: &acp::PermissionOption,
-    selected_words: Option<&str>,
-    mcp_scope: Option<&McpScopeState>,
-) -> String {
-    let (prefix, scope_text) = dynamic_option_label(option, selected_words, mcp_scope);
-    match scope_text {
-        Some(scope) => format!("{prefix}{scope}"),
-        None => prefix,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2164,7 +2123,6 @@ mod tests {
             description: vec![],
             args_expanded: false,
             desc_scroll: 0,
-            subagent_label: Some("subagent: worker".to_string()),
             options_area_height: 0,
             options_scroll_offset: 0,
         }
@@ -2208,7 +2166,6 @@ mod tests {
                         }
                         let mut state = long_args_state();
                         state.args_expanded = expanded;
-                        state.subagent_label = Some("subagent: worker".into());
                         let area = Rect::new(0, area_y, buf_w, area_h);
                         let mut buf = Buffer::empty(Rect::new(0, 0, buf_w.max(1), 10));
                         let _ = render_permission_view(
@@ -2320,7 +2277,6 @@ mod tests {
             description: vec![],
             args_expanded: false,
             desc_scroll: 0,
-            subagent_label: None,
             options_area_height: 0,
             options_scroll_offset: 0,
         }
@@ -3013,38 +2969,6 @@ mod tests {
         let (prefix, scope_text) = dynamic_option_label(&opt, Some("cargo test"), None);
         assert_eq!(prefix, "Never allow: ");
         assert_eq!(scope_text.as_deref(), Some("cargo test"));
-    }
-
-    #[test]
-    fn option_label_for_selection_matches_persisted_scope() {
-        // Peek surface contract: the composed label must show exactly the
-        // words the dispatch meta will persist, not the static full name.
-        let opt = acp::PermissionOption::new(
-            acp::PermissionOptionId::new(Arc::from("reject-always-command")),
-            "Never allow: cargo test --workspace".to_owned(),
-            acp::PermissionOptionKind::RejectAlways,
-        )
-        .meta(
-            serde_json::to_value(BashCommandPermission {
-                prompt_prefix: "Never allow:".to_owned(),
-            })
-            .ok()
-            .and_then(|v| v.as_object().cloned()),
-        );
-        assert_eq!(
-            option_label_for_selection(&opt, Some("cargo"), None),
-            "Never allow: cargo"
-        );
-        // Options without scope meta keep their static name.
-        let plain = acp::PermissionOption::new(
-            acp::PermissionOptionId::new(Arc::from("allow-once")),
-            "Yes, proceed".to_owned(),
-            acp::PermissionOptionKind::AllowOnce,
-        );
-        assert_eq!(
-            option_label_for_selection(&plain, Some("cargo"), None),
-            "Yes, proceed"
-        );
     }
 
     #[test]

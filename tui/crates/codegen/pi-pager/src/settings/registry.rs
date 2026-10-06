@@ -39,7 +39,6 @@ pub enum SettingCategory {
     Mouse,
     Editor,
     Agent,
-    Privacy,
     Models,
     Session,
     Advanced,
@@ -52,7 +51,6 @@ impl SettingCategory {
         Self::Mouse,
         Self::Editor,
         Self::Agent,
-        Self::Privacy,
         Self::Models,
         Self::Session,
         Self::Advanced,
@@ -65,7 +63,6 @@ impl SettingCategory {
             Self::Mouse => "Mouse",
             Self::Editor => "Editor & Input",
             Self::Agent => "Agent & Approval",
-            Self::Privacy => "Privacy",
             Self::Models => "Models",
             Self::Session => "Session",
             Self::Advanced => "Advanced",
@@ -227,23 +224,6 @@ pub enum SettingValue {
     Int(i64),
 }
 
-/// Why `coding_data_sharing` cannot be changed in the settings modal.
-/// Computed by `AppView::coding_data_sharing_lock`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CodingDataSharingLock {
-    Zdr,
-    TeamManaged,
-}
-
-impl CodingDataSharingLock {
-    pub fn reason(self) -> &'static str {
-        match self {
-            Self::Zdr => "Your team has Zero Data Retention.",
-            Self::TeamManaged => "Managed by your team admin.",
-        }
-    }
-}
-
 /// Snapshot of pager-local state captured when the modal opens.
 /// Used by `current_value_for` to render against LIVE state rather
 /// than the on-disk `UiConfig`. Refreshed by
@@ -265,13 +245,6 @@ pub struct PagerLocalSnapshot {
     /// Cloned into the snapshot so the modal's validator/resolver is
     /// self-contained (the modal outlives the borrow on `app.agents`).
     pub available_models: Vec<(String, acp::ModelId)>,
-    /// Whether the user has opted OUT of coding data sharing.
-    /// Lives in auth metadata (no `UiConfig` field). Inverted mapping:
-    /// `opt_out == false` → canonical "opt-in". Snapshot default is
-    /// `true` (opted out) to match the safer consumer default.
-    pub coding_data_sharing_opt_out: bool,
-    /// Why `coding_data_sharing` cannot be changed here (`None` = editable).
-    pub coding_data_sharing_lock: Option<CodingDataSharingLock>,
     /// Whether plan mode is active. Uses effective state
     /// (`pending.unwrap_or(active)`) so rapid toggles don't double-send.
     /// Refreshed on all mutation paths including ACP `CurrentModeUpdate`.
@@ -315,8 +288,6 @@ impl Default for PagerLocalSnapshot {
             auto_mode: false,
             current_model_name: None,
             available_models: Vec::new(),
-            coding_data_sharing_opt_out: true,
-            coding_data_sharing_lock: None,
             plan_mode_active: false,
             show_tips: None,
             auto_update: None,
@@ -521,10 +492,6 @@ pub fn current_value_for(
         "combine_queued_prompts" => Some(SettingValue::Bool(
             crate::appearance::cache::load_combine_queued_prompts(),
         )),
-        "follow_up_behavior" => Some(SettingValue::Enum(
-            crate::appearance::cache::load_follow_up_behavior().as_canonical(),
-        )),
-        "confirm_before_rewind" => Some(SettingValue::Bool(ui.confirm_before_rewind_enabled())),
         "simple_mode" => Some(SettingValue::Bool(ui.simple_mode.unwrap_or(true))),
         // Per-tip contextual hints — `None` (inherit) reads as the default ON.
         "contextual_hints.undo" => {
@@ -535,9 +502,6 @@ pub fn current_value_for(
         )),
         "contextual_hints.image_input" => Some(SettingValue::Bool(
             ui.contextual_hints.image_input.unwrap_or(true),
-        )),
-        "contextual_hints.send_now" => Some(SettingValue::Bool(
-            ui.contextual_hints.send_now.unwrap_or(true),
         )),
         "contextual_hints.small_screen" => Some(SettingValue::Bool(
             ui.contextual_hints.small_screen.unwrap_or(true),
@@ -691,12 +655,6 @@ pub fn current_value_for(
         )),
         // max_thoughts_width: `u16` widened to `i64`.
         "max_thoughts_width" => Some(SettingValue::Int(ui.max_thoughts_width as i64)),
-        // coding_data_sharing: inverts the `_opt_out` bool.
-        "coding_data_sharing" => Some(SettingValue::Enum(if pager.coding_data_sharing_opt_out {
-            "opt-out"
-        } else {
-            "opt-in"
-        })),
         // plan_mode: canonical via `PlanModeKind::from_bool().as_canonical()`.
         "plan_mode" => Some(SettingValue::Enum(
             crate::app::actions::PlanModeKind::from_bool(pager.plan_mode_active).as_canonical(),
@@ -724,11 +682,6 @@ pub fn current_value_for(
 
         _ => None,
     }
-}
-
-/// Consent chooser: no docs tip, and no `d` reset (hint or key).
-pub fn is_consent_chooser(key: &str) -> bool {
-    key == "coding_data_sharing"
 }
 
 /// Default value for `key`, derived from the registry metadata.
@@ -797,13 +750,6 @@ mod tests {
                         "contextual_hints.image_input default drifts from UiConfig::default()"
                     );
                 }
-                ("contextual_hints.send_now", SettingKind::Bool { default }) => {
-                    assert_eq!(
-                        *default,
-                        ui.contextual_hints.send_now.unwrap_or(true),
-                        "contextual_hints.send_now default drifts from UiConfig::default()"
-                    );
-                }
                 ("contextual_hints.small_screen", SettingKind::Bool { default }) => {
                     assert_eq!(
                         *default,
@@ -848,25 +794,11 @@ mod tests {
                         "page_flip_on_send default drifts from UiConfig::default()"
                     );
                 }
-                ("confirm_before_rewind", SettingKind::Bool { default }) => {
-                    assert_eq!(
-                        *default,
-                        ui.confirm_before_rewind_enabled(),
-                        "confirm_before_rewind default drifts from UiConfig::default()"
-                    );
-                }
                 ("combine_queued_prompts", SettingKind::Bool { default }) => {
                     assert_eq!(
                         *default,
                         ui.combine_queued_prompts.unwrap_or(false),
                         "combine_queued_prompts default drifts from UiConfig::default()"
-                    );
-                }
-                ("follow_up_behavior", SettingKind::Enum { default, .. }) => {
-                    assert_eq!(
-                        *default,
-                        ui.follow_up_behavior(),
-                        "follow_up_behavior default drifts from UiConfig::default()"
                     );
                 }
                 ("simple_mode", SettingKind::Bool { default }) => {
@@ -951,18 +883,6 @@ mod tests {
                     assert_eq!(
                         *default, ui.max_thoughts_width as i64,
                         "max_thoughts_width default drifts from UiConfig::default()",
-                    );
-                }
-                // coding_data_sharing: no UiConfig field; default pinned
-                // against auth metadata (opt_out=true → "opt-out").
-                ("coding_data_sharing", SettingKind::Enum { default, .. }) => {
-                    let expected = "opt-out";
-                    assert_eq!(
-                        *default, expected,
-                        "coding_data_sharing registry default must be 'opt-out' — \
-                         the on-disk source of truth is `AuthEntry::coding_data_retention_opt_out: \
-                         bool` (defaults to `true`, i.e. user has opted out until they \
-                         explicitly share or the server opts them in)",
                     );
                 }
                 // CLI batch: fields live on CliConfig, not UiConfig.
@@ -1396,10 +1316,7 @@ mod tests {
         }
         assert!(saw_auto, "settings must offer System (auto)");
 
-        let crate_codes: HashSet<&str> = pi_voice::STT_LANGUAGES
-            .iter()
-            .map(|l| l.code)
-            .collect();
+        let crate_codes: HashSet<&str> = pi_voice::STT_LANGUAGES.iter().map(|l| l.code).collect();
         assert_eq!(
             setting_codes, crate_codes,
             "settings concrete languages must match pi_voice::STT_LANGUAGES exactly"
@@ -1668,7 +1585,6 @@ mod tests {
                 "contextual_hints.undo",
                 "contextual_hints.plan_mode",
                 "contextual_hints.image_input",
-                "contextual_hints.send_now",
                 "contextual_hints.small_screen",
                 "contextual_hints.word_select",
                 "contextual_hints.ssh_wrap",

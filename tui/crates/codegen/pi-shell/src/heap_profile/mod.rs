@@ -4,15 +4,6 @@
 //! non-jemalloc builds) every seam API is inert. The monitor polls
 //! `stats.resident` and uploads dumps via `gcs::upload_file`.
 
-mod monitor;
-
-pub use monitor::{
-    DumpAttemptOutcome, HARD_DUMP_SIZE_CAP_BYTES, HeapProfileMonitor, HeapProfileUploadHandles,
-    JemallocHeapProfileConfig, SCOPED_KILL_SWITCH_INTERVAL, build_upload_handles,
-    clamp_poll_interval_secs, is_valid_session_id, normalize_thresholds, object_paths,
-    resolve_jemalloc_heap_profile, sanitize_version, should_latch,
-};
-
 /// Recommended jemalloc `lg_prof_sample` (2^19 bytes ≈ 512 KiB).
 ///
 /// Keep process `MALLOC_CONF` / `_RJEM_MALLOC_CONF` and dump meta in sync with

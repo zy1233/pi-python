@@ -829,119 +829,6 @@
     // ── handle_child_session_notification ──────────────────────────────
 
     #[test]
-    fn child_compact_completed_updates_subagent_info() {
-        let mut agent = make_agent(Some("root-sess"));
-        let child_sid = "child-sess-1";
-        agent
-            .subagent_sessions
-            .insert(child_sid.into(), make_subagent_info(child_sid));
-        let child_view = make_agent(Some(child_sid));
-        agent
-            .subagent_views
-            .insert(child_sid.into(), Box::new(child_view));
-
-        let update = PiSessionUpdate::AutoCompactCompleted {
-            tokens_before: Some(90000),
-            tokens_after: 25000,
-            elapsed_ms: Some(300),
-            summary_preview: None,
-        };
-        let changed = handle_child_session_notification(update, child_sid, &mut agent, false);
-        assert!(changed);
-
-        let info = agent.subagent_sessions.get(child_sid).unwrap();
-        assert_eq!(info.tokens_used, Some(25000));
-        // 25000 / 131072 * 100 ~= 19
-        assert_eq!(info.context_usage_pct, Some(19));
-
-        // The child view's context_state.used (context-bar numerator) must
-        // also be reset — see the comment in handle_child_session_notification.
-        let child_view = agent.subagent_views.get(child_sid).unwrap();
-        assert_eq!(
-            child_view.context_state.as_ref().map(|c| c.used),
-            Some(25000)
-        );
-    }
-
-    #[test]
-    fn child_compact_started_does_not_reset_context_used() {
-        // Sibling variants in the same outer arm must not touch the numerator;
-        // guards against accidental widening of the AutoCompactCompleted gate.
-        let mut agent = make_agent(Some("root-sess"));
-        let child_sid = "child-sess-3";
-        agent
-            .subagent_sessions
-            .insert(child_sid.into(), make_subagent_info(child_sid));
-        let mut child_view = make_agent(Some(child_sid));
-        child_view.context_state = Some(pi_shell::session::ContextInfo::from_notification(
-            90_000, 131_072,
-        ));
-        agent
-            .subagent_views
-            .insert(child_sid.into(), Box::new(child_view));
-
-        let update = PiSessionUpdate::AutoCompactStarted {
-            tokens_used: 95_000,
-            context_window: 131_072,
-            percentage: 72,
-            reason: "threshold".into(),
-        };
-        let _ = handle_child_session_notification(update, child_sid, &mut agent, false);
-
-        let child_view = agent.subagent_views.get(child_sid).unwrap();
-        assert_eq!(
-            child_view.context_state.as_ref().map(|c| c.used),
-            Some(90_000)
-        );
-    }
-
-    #[test]
-    fn child_notification_without_view_returns_false() {
-        let mut agent = make_agent(Some("root-sess"));
-        // No child view registered.
-        let update = PiSessionUpdate::AutoCompactStarted {
-            tokens_used: 90000,
-            context_window: 131072,
-            percentage: 85,
-            reason: "threshold".into(),
-        };
-        let changed = handle_child_session_notification(update, "unknown-child", &mut agent, false);
-        assert!(!changed);
-    }
-
-    #[test]
-    fn child_compact_completed_without_view_returns_false() {
-        let mut agent = make_agent(Some("root-sess"));
-        let child_sid = "child-sess-2";
-        // SubagentInfo exists but no child view (race between notification and spawn).
-        agent
-            .subagent_sessions
-            .insert(child_sid.into(), make_subagent_info(child_sid));
-
-        let update = PiSessionUpdate::AutoCompactCompleted {
-            tokens_before: Some(90000),
-            tokens_after: 25000,
-            elapsed_ms: Some(300),
-            summary_preview: None,
-        };
-        let changed = handle_child_session_notification(update, child_sid, &mut agent, false);
-        // No child_view means nothing visible changed — must not trigger redraw.
-        assert!(!changed);
-        // SubagentInfo should still be updated (data correctness).
-        let info = agent.subagent_sessions.get(child_sid).unwrap();
-        assert_eq!(info.tokens_used, Some(25000));
-        assert_eq!(info.context_usage_pct, Some(19));
-    }
-
-    #[test]
-    fn child_unknown_event_returns_false() {
-        let mut agent = make_agent(Some("root-sess"));
-        let update = PiSessionUpdate::MemoryFlushStarted;
-        let changed = handle_child_session_notification(update, "child-1", &mut agent, false);
-        assert!(!changed);
-    }
-
-    #[test]
     fn tool_call_delta_chunk_sets_writing_activity() {
         let mut app = make_app_with_agent("sess-1");
         app.agents.get_mut(&AgentId(0)).unwrap().session.state = AgentState::TurnRunning;
@@ -1008,16 +895,10 @@
         );
     }
 
-    /// Hook / image-intake diagnostics must not consume the Ctrl+C rewind stash.
+    /// Image-intake diagnostics must not consume the Ctrl+C rewind stash.
     #[test]
-    fn hook_and_image_intake_notifications_keep_in_flight_prompt() {
+    fn image_intake_notifications_keep_in_flight_prompt() {
         let updates = [
-            PiSessionUpdate::HookExecution {
-                event_name: "user_prompt_submit".into(),
-                tool_name: None,
-                prompt_id: Some("p1".into()),
-                runs: vec![],
-            },
             PiSessionUpdate::ImageCompressed {
                 images: vec![],
                 message: "resized".into(),
@@ -1199,100 +1080,6 @@
         );
     }
 
-    fn summary_generated_ext(
-        session_id: &str,
-        title: &str,
-        title_is_manual: bool,
-    ) -> acp::ExtNotification {
-        let meta = if title_is_manual {
-            Some(pi_shell::extensions::notification::title_is_manual_meta())
-        } else {
-            None
-        };
-        let notif = SessionNotification {
-            session_id: acp::SessionId::new(session_id),
-            update: PiSessionUpdate::SessionSummaryGenerated {
-                session_summary: title.into(),
-            },
-            meta,
-        };
-        let raw = serde_json::value::to_raw_value(&notif).unwrap();
-        acp::ExtNotification::new("pi/session_notification", std::sync::Arc::from(raw))
-    }
-
-    #[test]
-    fn manual_title_notification_sets_display_name_without_entity_decode() {
-        let mut app = make_app_with_agent("sess-1");
-        let changed = handle_session_notification(
-            &summary_generated_ext("sess-1", "a &amp; b", true),
-            &mut app,
-        );
-        assert!(changed);
-        let agent = &app.agents[&AgentId(0)];
-        assert_eq!(
-            agent.display_name.as_deref(),
-            Some("a &amp; b"),
-            "manual meta must set display_name from the raw title"
-        );
-        assert_eq!(
-            agent.generated_session_title.as_deref(),
-            Some("a &amp; b"),
-            "manual meta must skip HTML-entity decode"
-        );
-    }
-
-    #[test]
-    fn auto_title_blank_after_sanitize_does_not_clear_existing() {
-        let mut app = make_app_with_agent("sess-1");
-        app.agents.get_mut(&AgentId(0)).unwrap().generated_session_title =
-            Some("Keep Me".into());
-        assert!(handle_session_notification(
-            &summary_generated_ext("sess-1", "\u{1b}\u{07}", false),
-            &mut app,
-        ));
-        assert_eq!(
-            app.agents[&AgentId(0)]
-                .generated_session_title
-                .as_deref(),
-            Some("Keep Me"),
-            "control-only auto replay must not wipe an existing title"
-        );
-    }
-
-    #[test]
-    fn auto_title_notification_does_not_set_display_name() {
-        let mut app = make_app_with_agent("sess-1");
-        let changed = handle_session_notification(
-            &summary_generated_ext("sess-1", "a &amp; b", false),
-            &mut app,
-        );
-        assert!(changed);
-        let agent = &app.agents[&AgentId(0)];
-        assert!(
-            agent.display_name.is_none(),
-            "auto titles must not promote to display_name"
-        );
-        assert_eq!(
-            agent.generated_session_title.as_deref(),
-            Some("a & b"),
-            "auto titles still HTML-entity-decode"
-        );
-    }
-
-    #[test]
-    fn auto_title_notification_does_not_clobber_existing_display_name() {
-        let mut app = make_app_with_agent("sess-1");
-        app.agents.get_mut(&AgentId(0)).unwrap().display_name = Some("Pinned".into());
-        let changed = handle_session_notification(
-            &summary_generated_ext("sess-1", "a &amp; b", false),
-            &mut app,
-        );
-        assert!(changed);
-        let agent = &app.agents[&AgentId(0)];
-        assert_eq!(agent.display_name.as_deref(), Some("Pinned"));
-        assert_eq!(agent.generated_session_title.as_deref(), Some("a & b"));
-    }
-
     #[test]
     fn manual_meta_false_clears_display_name() {
         let mut app = make_app_with_agent("sess-1");
@@ -1345,56 +1132,6 @@
             agent.generated_session_title.as_deref(),
             Some("Auto"),
             "empty unpin fan-out must not wipe a leftover auto title"
-        );
-    }
-
-    #[test]
-    fn auto_title_notification_strips_controls_and_caps() {
-        use pi_shell::session::persistence::MAX_TITLE_SCALARS;
-        let mut app = make_app_with_agent("sess-1");
-        let dirty = format!(
-            "ok\u{1b}]0;PWNED\u{07}{}",
-            "é".repeat(MAX_TITLE_SCALARS + 5)
-        );
-        assert!(handle_session_notification(
-            &summary_generated_ext("sess-1", &dirty, false),
-            &mut app,
-        ));
-        const PREFIX: &str = "ok]0;PWNED";
-        let expected = format!(
-            "{PREFIX}{}",
-            "é".repeat(MAX_TITLE_SCALARS - PREFIX.chars().count())
-        );
-        let agent = &app.agents[&AgentId(0)];
-        assert!(
-            agent.display_name.is_none(),
-            "auto titles must not promote to display_name"
-        );
-        assert_eq!(
-            agent.generated_session_title.as_deref(),
-            Some(expected.as_str())
-        );
-    }
-
-    #[test]
-    fn manual_title_notification_strips_controls_and_caps() {
-        use pi_shell::session::persistence::MAX_TITLE_SCALARS;
-        let mut app = make_app_with_agent("sess-1");
-        let dirty = format!("ok\u{1b}]0;PWNED\u{07}{}", "é".repeat(MAX_TITLE_SCALARS + 5));
-        assert!(handle_session_notification(
-            &summary_generated_ext("sess-1", &dirty, true),
-            &mut app,
-        ));
-        const PREFIX: &str = "ok]0;PWNED";
-        let expected = format!(
-            "{PREFIX}{}",
-            "é".repeat(MAX_TITLE_SCALARS - PREFIX.chars().count())
-        );
-        let agent = &app.agents[&AgentId(0)];
-        assert_eq!(agent.display_name.as_deref(), Some(expected.as_str()));
-        assert_eq!(
-            agent.generated_session_title.as_deref(),
-            Some(expected.as_str())
         );
     }
 

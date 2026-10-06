@@ -9,9 +9,10 @@ from typing import Any
 
 from pi_agent_cli.config import (
     CliConfig,
+    ModelChoice,
+    api_key_getter,
     expand_config_path,
     is_project_relative_path,
-    make_get_api_key,
     pi_home,
 )
 from pi_agent_cli.create_harness import build_coding_agent_harness_system_prompt
@@ -42,6 +43,28 @@ def _detect_vlm_support(provider: str, model_id: str, configured: bool | None = 
     if provider.lower() in _TEXT_ONLY_PROVIDERS:
         return any(kw in mid for kw in ("vl", "vision", "4.1flash", "omni"))
     return True
+
+
+def model_for_choice(choice: ModelChoice, *, reasoning: bool = False) -> Model:
+    """Harness ``Model`` for a resolved ``ModelChoice``.
+
+    The choice is the ``[model]`` default or a ``[[models]]`` entry. ``reasoning`` (whether
+    the model can think, ``CliConfig.model_reasoning``) is a property of the whole session
+    configuration, so every choice gets the same value.
+    """
+    provider = choice.provider or "mock"
+    return Model(
+        provider=provider,
+        model_id=choice.id,
+        base_url=choice.base_url,
+        supports_images=_detect_vlm_support(provider, choice.id, choice.supports_images),
+        reasoning=reasoning,
+    )
+
+
+def api_key_for_choice(choice: ModelChoice) -> Callable[[str], str | None] | None:
+    """``get_api_key`` callback for a resolved ``ModelChoice``, scoped to its provider."""
+    return api_key_getter(choice.api_key_env, choice.provider or "mock")
 
 
 def default_stream_fn() -> StreamFn:
@@ -128,6 +151,7 @@ async def create_session_harness(
     tools: list[Any] | None = None,
     extensions: list[Any] | None = None,
     trust: ProjectTrust | None = None,
+    model_choice: ModelChoice | None = None,
 ) -> AgentHarness:
     """Build the harness for one session.
 
@@ -136,6 +160,9 @@ async def create_session_harness(
     started takes effect on the next turn (extensions are the exception: they load once, so
     the caller passes the answer on with ``AgentHarness.set_trust_project_extensions``
     before that). Without one, the configuration decides.
+
+    *model_choice*: the model to start with, for a session that was last used with another
+    one (``/model``). Without one, the ``[model]`` table decides.
     """
     cwd_s = str(Path(normalize_host_path(str(cwd))).resolve())
     home_path = pi_home(home)
@@ -155,15 +182,8 @@ async def create_session_harness(
         )
     )
     resolved_resources = resources or AgentHarnessResources()
-    model = Model(
-        provider=config.provider,
-        model_id=config.model_id,
-        base_url=config.base_url,
-        supports_images=_detect_vlm_support(
-            config.provider, config.model_id, config.supports_images
-        ),
-        reasoning=config.model_reasoning,
-    )
+    choice = model_choice or config.default_choice()
+    model = model_for_choice(choice, reasoning=config.model_reasoning)
 
     async def system_prompt_callback(ctx: dict[str, Any]) -> str:
         active_tools = ctx.get("active_tools") or tools_list
@@ -199,7 +219,7 @@ async def create_session_harness(
         env=LocalExecutionEnv(cwd_s),
         tools=tools_list,
         resources=resolved_resources,
-        get_api_key=make_get_api_key(config),
+        get_api_key=api_key_for_choice(choice),
         system_prompt=system_prompt_callback,
         thinking_level=config.thinking_level,
         max_turns=config.max_turns,

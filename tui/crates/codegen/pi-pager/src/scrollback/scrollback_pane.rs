@@ -257,15 +257,6 @@ impl ScrollbackPane {
         let Some(entry) = state.entry(hover_idx) else {
             return;
         };
-        if !matches!(
-            entry.block,
-            crate::scrollback::block::RenderBlock::ToolCall(_)
-                | crate::scrollback::block::RenderBlock::Thinking(_)
-                | crate::scrollback::block::RenderBlock::BgTask(_)
-                | crate::scrollback::block::RenderBlock::Subagent(_)
-        ) {
-            return;
-        }
         // Skip hover bg whenever the entry isn't collapsed. Once the user
         // has folded the entry open (Truncated for `Execute`/`Other` while
         // streaming, `Expanded` for Edit/markdown), the row already has

@@ -17,7 +17,7 @@ pub(crate) fn combine_prompt_with_voice_text(existing: &str, text: &str) -> Stri
     }
 }
 
-/// Append `text` to the prompt bound at capture start (agent or dashboard).
+/// Append `text` to the prompt bound at capture start.
 ///
 /// Finals always append at end (or replace a blank draft). The caret follows
 /// when it was at end; mid-text edits keep their place.
@@ -39,26 +39,6 @@ fn append_voice_text_to_prompt(app: &mut AppView, text: &str) {
                 return;
             };
             append(&mut agent.prompt);
-        }
-        Some(target @ (VoiceTarget::DashboardDispatch | VoiceTarget::DashboardPeekReply(_))) => {
-            let Some(dashboard) = app.dashboard.as_mut() else {
-                return;
-            };
-            // Peek reply is shared across rows: only land if still on the bound row.
-            let prompt = match target {
-                VoiceTarget::DashboardPeekReply(rec) => {
-                    let peeked = match dashboard.peek.as_ref().map(|p| &p.row) {
-                        Some(crate::views::dashboard::DashboardRowId::TopLevel(id)) => Some(*id),
-                        _ => None,
-                    };
-                    if peeked != Some(rec) {
-                        return;
-                    }
-                    &mut dashboard.peek_reply
-                }
-                _ => &mut dashboard.dispatch,
-            };
-            append(prompt);
         }
         None => {}
     }
@@ -99,10 +79,9 @@ pub fn handle_voice_event(app: &mut AppView, event: VoiceEvent) -> bool {
             let target = app.voice_recording_target();
             app.voice_reset();
             app.show_toast(&format!("Voice: {message}"));
-            // Long fix steps: agent/peek scrollback only (toast is one line;
-            // dashboard dispatch has no scrollback).
+            // Long fix steps: agent scrollback only (the toast is one line).
             if let Some(hint) = hint
-                && let Some(VoiceTarget::Agent(id) | VoiceTarget::DashboardPeekReply(id)) = target
+                && let Some(VoiceTarget::Agent(id)) = target
                 && let Some(agent) = app.agents.get_mut(&id)
             {
                 agent

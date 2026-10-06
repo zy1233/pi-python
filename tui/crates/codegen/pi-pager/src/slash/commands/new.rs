@@ -19,10 +19,6 @@ impl SlashCommand for NewCommand {
         "Start a new session"
     }
 
-    fn usage(&self) -> &str {
-        "/new"
-    }
-
     fn run(&self, _ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {
         CommandResult::Action(Action::NewSession)
     }

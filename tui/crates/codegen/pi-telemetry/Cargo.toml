@@ -31,12 +31,10 @@ git2 = { version = "0.20", default-features = false, features = [
 ] }
 reqwest = { workspace = true }
 url = { workspace = true }
-pi-env = { workspace = true }
 pi-secrets = { workspace = true }
 pi-mixpanel = { workspace = true }
 pi-config = { workspace = true }
 pi-extra-ca = { workspace = true }
-pi-sampler = { workspace = true }
 pi-token-estimation = { workspace = true }
 dirs = { workspace = true }
 sentry = { version = "0.42.0", default-features = false, features = [
@@ -61,7 +59,6 @@ pi-tty-utils = { workspace = true }
 pi-version = { workspace = true }
 whoami = { workspace = true }
 uuid = { workspace = true, features = ["v5", "v7"] }
-obfstr = { workspace = true, optional = true }
 mid = "4.0.0"
 tokio = { workspace = true, features = ["macros", "sync", "rt", "time"] }
 parking_lot = { workspace = true }

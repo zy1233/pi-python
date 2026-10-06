@@ -104,10 +104,6 @@ impl SlashCommand for AcpSlashCommand {
         }
     }
 
-    fn usage(&self) -> &str {
-        &self.name
-    }
-
     fn takes_args(&self) -> bool {
         self.has_args
     }
@@ -141,7 +137,6 @@ impl SlashCommand for AcpSlashCommand {
                 display_text: text.clone(),
                 prompt_blocks: vec![acp::ContentBlock::Text(acp::TextContent::new(text))],
                 display_as_skill: true,
-                scheduled_task_preview: None,
             },
         }
     }
@@ -326,14 +321,9 @@ mod tests {
     fn make_exec_ctx() -> CommandExecCtx<'static> {
         use crate::acp::model_state::ModelState;
         let models = Box::leak(Box::new(ModelState::default()));
-        let bundle = Box::leak(Box::new(crate::app::bundle::BundleState::default()));
         CommandExecCtx {
             models,
-            session_id: None,
-            bundle_state: bundle,
             screen_mode: crate::app::ScreenMode::Inline,
-            billing_surface_visible: true,
-            usage_command_visible: true,
             pager_state: crate::settings::PagerLocalSnapshot {
                 multiline_mode: false,
                 yolo_mode: false,

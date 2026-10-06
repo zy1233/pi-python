@@ -11,52 +11,19 @@
 
 use crate::acp::model_state::ModelState;
 use crate::app::actions::Action;
-use crate::app::bundle::BundleState;
 use crate::slash::mode_support::ModeSupport;
 use agent_client_protocol as acp;
-
-/// Provisional scheduled task info for immediate display in the tasks pane.
-///
-/// Created by `/loop` when the user submits the command so the task appears
-/// instantly, rather than waiting for the LLM round-trip through
-/// `scheduler_create`.
-#[derive(Debug, Clone)]
-pub struct ScheduledTaskPreview {
-    pub prompt: String,
-    pub human_schedule: String,
-    pub next_fire_at: Option<String>,
-    /// Tag shown in the tasks pane (e.g. "loop", "check"). Defaults to "loop".
-    pub tag: String,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DoctorRequest {
-    Report,
-    ListFixes,
-    Fix(crate::diagnostics::DiagnosticId),
-}
 
 /// Result of running a slash command.
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
 pub enum CommandResult {
-    /// Command handled successfully, no visible output needed.
-    /// Included for TUI parity; no phase-1 command uses this directly.
-    Handled,
-    /// Command handled but was a no-op (e.g., model already selected).
-    /// Included for TUI parity. Dispatch treats it identically to Handled.
-    HandledNoOp,
-    /// Build or act on TUI doctor state from live app/session inputs.
-    Doctor(DoctorRequest),
     /// Command failed with an error message.
     Error(String),
     /// Command produced a user-visible message.
     Message(String),
     /// Command produced a pager Action to dispatch (e.g., SwitchModel, Quit).
     Action(Action),
-    /// Command should be sent through the queued command pipeline
-    /// (e.g., /compact). The String is the raw command text.
-    QueueCommand(String),
     /// Skill invocation: pager read the SKILL.md, applied substitutions,
     /// and constructed structured prompt blocks for the wire.
     /// `display_text` is what the user sees in scrollback.
@@ -66,12 +33,8 @@ pub enum CommandResult {
         prompt_blocks: Vec<agent_client_protocol::ContentBlock>,
         /// Whether to display as a skill invocation (teal accent) in scrollback.
         /// `true` for real skills (e.g. /commit), `false` for built-in commands
-        /// like /loop that inject structured prompts but aren't skills.
+        /// that inject structured prompts but aren't skills.
         display_as_skill: bool,
-        /// If set, immediately show a provisional scheduled task in the tasks
-        /// pane (replaced when the real `ScheduledTaskCreated` notification
-        /// arrives from the shell).
-        scheduled_task_preview: Option<ScheduledTaskPreview>,
     },
     /// Command text should be sent as a regular prompt. The shell resolves it.
     ///
@@ -107,45 +70,6 @@ pub struct WorkflowChoice {
     pub description: String,
 }
 
-/// A session workflow run the `/workflow` manage verbs can target.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkflowRunChoice {
-    pub name: String,
-    pub status: String,
-    pub builtin: bool,
-}
-
-impl WorkflowRunChoice {
-    pub fn can_pause(&self) -> bool {
-        self.status == "active"
-    }
-
-    pub fn can_resume(&self) -> bool {
-        // Picker: only runs the user stopped (`/workflow stop`) or paused
-        // (`/workflow pause`). System pauses (blocked / back-off / budget)
-        // stay off this list; they are still resumable if typed by name.
-        matches!(self.status.as_str(), "user_paused" | "cancelled")
-    }
-
-    pub fn can_stop(&self) -> bool {
-        !matches!(
-            self.status.as_str(),
-            "interrupted" | "complete" | "failed" | "cancelled"
-        )
-    }
-
-    pub fn can_save(&self, definitions: &[WorkflowChoice]) -> bool {
-        // Shell save requires display name == script `meta.name`. First
-        // runs keep the catalog name; uniquified copies (`review-pr-2`)
-        // do not. A definition literally named `sprint-2` is still
-        // savable because that name is in the catalog.
-        !self.builtin
-            && definitions
-                .iter()
-                .any(|workflow| workflow.name == self.name)
-    }
-}
-
 impl WorkflowChoice {
     /// `None` when the command is not a workflow definition.
     pub fn from_acp(cmd: &acp::AvailableCommand) -> Option<Self> {
@@ -168,30 +92,11 @@ impl WorkflowChoice {
 /// Kept minimal -- extend as needed.
 pub struct AppCtx<'a> {
     pub models: &'a ModelState,
-    /// Working directory of the active session (for filesystem completions).
-    pub cwd: &'a std::path::Path,
-    /// Session announcements (critical or promo) exist (gates `/announcements` visibility).
-    pub has_session_announcements: bool,
-    /// Consumer billing surface (`AppView::usage_visible`). Gates `/usage` subcommands.
-    pub billing_surface_visible: bool,
-    /// Whether `/usage` is offered and executable. False for external-auth
-    /// deployments with no grok.com billing session.
-    pub usage_command_visible: bool,
-    pub workflows_available: bool,
-    /// Saved / built-in workflow definitions advertised by the shell
-    /// (`_meta.workflowSource`). Backs `/workflow` argument suggestions.
-    pub saved_workflows: &'a [WorkflowChoice],
-    /// Live session runs. Backs `/workflow pause|resume|stop|save` name
-    /// suggestions so a manage verb never auto-picks a run.
-    pub workflow_runs: &'a [WorkflowRunChoice],
     /// Effective render mode of this process (gates `/minimal` and
     /// `/fullscreen` visibility). Same source of truth as
     /// [`CommandExecCtx::screen_mode`], carried by the owning
     /// [`SlashController`](crate::slash::SlashController).
     pub(crate) screen_mode: crate::app::ScreenMode,
-    /// Current session title for `/rename` ghost-prefill (`display_name`,
-    /// else `generated_session_title`). `None` when there is no title yet.
-    pub current_title: Option<&'a str>,
 }
 
 /// Mutable execution context for `SlashCommand::run()`.
@@ -200,14 +105,7 @@ pub struct AppCtx<'a> {
 /// calls return `CommandResult::Action(...)` and let dispatch handle the effect.
 pub struct CommandExecCtx<'a> {
     pub models: &'a ModelState,
-    pub session_id: Option<&'a acp::SessionId>,
-    pub bundle_state: &'a BundleState,
     pub(crate) screen_mode: crate::app::ScreenMode,
-    /// Consumer billing surface (`AppView::usage_visible`). Gates `/usage` subcommands.
-    pub billing_surface_visible: bool,
-    /// Whether `/usage` is offered and executable. False for external-auth
-    /// deployments with no grok.com billing session.
-    pub usage_command_visible: bool,
     /// Snapshot of the active agent's PAGER-owned settings, built at
     /// command-build time by the dispatcher. Slash commands like
     /// `/multiline` read this to compute `!current` and dispatch a
@@ -264,9 +162,6 @@ pub trait SlashCommand: Send + Sync {
         CommandProvenance::Builtin
     }
 
-    /// Usage string shown in help. E.g., `"/model <name>"`.
-    fn usage(&self) -> &str;
-
     /// Whether the command accepts arguments at all.
     fn takes_args(&self) -> bool {
         false
@@ -311,56 +206,11 @@ pub trait SlashCommand: Send + Sync {
         true
     }
 
-    /// Whether this command operates on a single agent session — its
-    /// conversation, context, model, turns, plan, etc. — rather than the
-    /// pager as a whole.
-    ///
-    /// Session-scoped commands (`/compact`, `/fork`, `/rewind`, …) need a
-    /// "current session" to act on, so they are suppressed on session-less
-    /// surfaces. Today that means the agent dashboard's dispatch input,
-    /// which offers only pager-global commands (`/theme`, `/settings`,
-    /// `/mcps`, …). Surfaces that always have a session (the agent view)
-    /// ignore this flag and continue to show every command.
-    ///
-    /// Defaults to `false` (pager-global).
-    fn session_scoped(&self) -> bool {
-        false
-    }
-
-    /// Whether a `session_scoped()` command should still be offered on
-    /// session-less surfaces (the agent dashboard's dispatch input).
-    ///
-    /// A handful of session-scoped commands have a meaningful session-less
-    /// interpretation: `/model` and `/plan` configure the *next* agent the
-    /// dashboard spawns; `/multiline` toggles compose mode on the dashboard
-    /// inputs. Those override this to `true` so they appear in the dashboard
-    /// dropdown even though `session_scoped()` is `true`. Has no effect for
-    /// non-session-scoped commands (they're always offered).
-    ///
-    /// Defaults to `false`.
-    fn offered_when_session_less(&self) -> bool {
-        false
-    }
-
-    /// Whether this command should ONLY be offered on the session-less
-    /// dashboard surface — the inverse of [`Self::session_scoped`]. The
-    /// dashboard's dispatch input is the one surface where
-    /// `hide_session_scoped` is set, so a `dashboard_only` command shows
-    /// there and is suppressed on every session surface (the agent view) and
-    /// the welcome screen.
-    ///
-    /// `/cd` changes where the dashboard dispatches new agents, so it is
-    /// meaningless in an agent session and hidden there. Defaults to `false`.
-    fn dashboard_only(&self) -> bool {
-        false
-    }
-
     /// Which render modes this command functions in.
     ///
     /// Minimal mode (`grok --minimal`) deletes the interactive fullscreen
-    /// scrollback pane, the in-app mouse selection path, and the agent
-    /// dashboard, handing scroll / search / selection back to the terminal
-    /// (K7); a few commands exist only there, because the full TUI solves the
+    /// scrollback pane and the in-app mouse selection path, handing scroll /
+    /// search / selection back to the terminal (K7); a few commands exist only there, because the full TUI solves the
     /// same problem with a pane or a chord. Declaring the mode here is the
     /// single source for both behaviors: the command is hidden from every
     /// completion surface in the modes it does not support (`command_offered`),

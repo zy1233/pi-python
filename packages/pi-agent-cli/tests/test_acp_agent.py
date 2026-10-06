@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +13,7 @@ from acp import RequestError, text_block
 from acp.schema import AllowedOutcome, DeniedOutcome, RequestPermissionResponse
 
 from pi_agent_cli.agent import PiAcpAgent
-from pi_agent_cli.config import CliConfig
+from pi_agent_cli.config import CliConfig, ModelChoice
 from pi_agent_cli.events import project_event, tool_kind
 from pi_agent_cli.permissions import needs_permission, permission_tool_call
 from pi_agent_core.event_stream import AssistantMessageEventStream
@@ -103,6 +104,124 @@ async def test_session_responses_include_model_meta(tmp_path):
     resumed = await agent.resume_session(session_id=created.session_id, cwd=cwd)
     assert resumed.field_meta is not None
     assert resumed.field_meta.get("pi/currentModelId") == "mock"
+
+
+def _multi_model_agent(tmp_path: Path) -> PiAcpAgent:
+    return PiAcpAgent(
+        stream_fn=mock_text_stream,
+        home=tmp_path,
+        config=CliConfig(
+            provider="mock",
+            model_id="mock",
+            models=(ModelChoice(id="mock-pro", name="Mock Pro"),),
+        ),
+    )
+
+
+def _model_option(options):
+    assert options is not None
+    (option,) = [o for o in options if o.id == "model"]
+    return option
+
+
+@pytest.mark.asyncio
+async def test_session_responses_advertise_model_config_option(tmp_path):
+    agent = _multi_model_agent(tmp_path)
+    agent.on_connect(FakeClient())
+    cwd = str(tmp_path.resolve())
+
+    created = await agent.new_session(cwd=cwd)
+    option = _model_option(created.config_options)
+    assert option.type == "select"
+    assert option.category == "model"
+    assert option.current_value == "mock"
+    assert [(o.value, o.name) for o in option.options] == [
+        ("mock", "mock"),
+        ("mock-pro", "Mock Pro"),
+    ]
+
+    loaded = await agent.load_session(cwd=cwd, session_id=created.session_id)
+    assert loaded is not None
+    assert _model_option(loaded.config_options).current_value == "mock"
+    resumed = await agent.resume_session(session_id=created.session_id, cwd=cwd)
+    assert _model_option(resumed.config_options).current_value == "mock"
+
+
+@pytest.mark.asyncio
+async def test_set_config_option_switches_model_and_persists(tmp_path):
+    agent = _multi_model_agent(tmp_path)
+    agent.on_connect(FakeClient())
+    cwd = str(tmp_path.resolve())
+    created = await agent.new_session(cwd=cwd)
+    sid = created.session_id
+
+    resp = await agent.set_config_option(config_id="model", session_id=sid, value="mock-pro")
+    assert resp is not None
+    assert _model_option(resp.config_options).current_value == "mock-pro"
+    assert agent._harnesses[sid].model.model_id == "mock-pro"
+    # legacy pi/* hints follow the switch
+    assert agent._session_response_meta(sid)["pi/currentModelId"] == "mock-pro"
+    assert agent._session_response_meta(sid)["pi/currentModelDisplayName"] == "Mock Pro"
+
+    # a fresh agent process resuming the same session restores the persisted model
+    agent2 = _multi_model_agent(tmp_path)
+    agent2.on_connect(FakeClient())
+    resumed = await agent2.resume_session(session_id=sid, cwd=cwd)
+    assert _model_option(resumed.config_options).current_value == "mock-pro"
+    assert agent2._harnesses[sid].model.model_id == "mock-pro"
+
+
+@pytest.mark.asyncio
+async def test_a_chosen_model_keeps_the_reasoning_setting_and_gets_only_its_own_key(
+    tmp_path, monkeypatch
+):
+    """``/model`` meets two other rules: ``Model.reasoning`` follows the configured thinking
+    level whichever model is active, and an ``api_key_env`` is the key of its own provider only."""
+    monkeypatch.setenv("DEFAULT_KEY", "default-secret")
+    monkeypatch.setenv("OTHER_KEY", "other-secret")
+    agent = PiAcpAgent(
+        stream_fn=mock_text_stream,
+        home=tmp_path,
+        config=CliConfig(
+            provider="mock",
+            model_id="mock",
+            api_key_env="DEFAULT_KEY",
+            thinking_level="high",
+            models=(ModelChoice(id="other", provider="otherco", api_key_env="OTHER_KEY"),),
+        ),
+    )
+    agent.on_connect(FakeClient())
+    sid = (await agent.new_session(cwd=str(tmp_path.resolve()))).session_id
+    harness = agent._harnesses[sid]
+
+    assert harness.model.reasoning is True
+    assert harness.get_api_key("mock") == "default-secret"
+    assert harness.get_api_key("otherco") is None
+
+    await agent.set_config_option(config_id="model", session_id=sid, value="other")
+
+    assert harness.model.provider == "otherco"
+    assert harness.model.reasoning is True
+    assert harness.get_api_key("otherco") == "other-secret"
+    assert harness.get_api_key("mock") is None
+
+
+@pytest.mark.asyncio
+async def test_set_config_option_rejects_unknown_option_and_model(tmp_path):
+    agent = _multi_model_agent(tmp_path)
+    agent.on_connect(FakeClient())
+    created = await agent.new_session(cwd=str(tmp_path.resolve()))
+    sid = created.session_id
+
+    with pytest.raises(RequestError):
+        await agent.set_config_option(config_id="nope", session_id=sid, value="mock")
+    with pytest.raises(RequestError):
+        await agent.set_config_option(config_id="model", session_id=sid, value="missing")
+    with pytest.raises(RequestError):
+        await agent.set_config_option(config_id="model", session_id=sid, value=True)
+    with pytest.raises(RequestError):
+        await agent.set_config_option(config_id="model", session_id="unknown", value="mock")
+    assert agent._harnesses[sid].model.model_id == "mock"
 
 
 @pytest.mark.asyncio
@@ -207,6 +326,22 @@ async def test_list_load_close_session(tmp_path):
     await agent.close_session(session_id=created.session_id)
     with pytest.raises(RequestError):
         await agent.prompt(session_id=created.session_id, prompt=[text_block("x")])
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_titles_follow_the_first_prompt(tmp_path):
+    agent = _agent(tmp_path)
+    agent.on_connect(FakeClient())
+    cwd = str(tmp_path.resolve())
+    empty = await agent.new_session(cwd=cwd)
+    talked = await agent.new_session(cwd=cwd)
+    await agent.prompt(session_id=talked.session_id, prompt=[text_block("explain\n  the   build")])
+
+    listed = {s.session_id: s for s in (await agent.list_sessions()).sessions}
+    assert listed[empty.session_id].title == "(no messages)"
+    assert listed[talked.session_id].title == "explain the build"
+    updated = datetime.fromisoformat(listed[talked.session_id].updated_at.replace("Z", "+00:00"))
+    assert updated.tzinfo is not None
 
 
 @pytest.mark.asyncio

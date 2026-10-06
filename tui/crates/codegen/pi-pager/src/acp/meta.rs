@@ -46,32 +46,11 @@ pub struct NotificationMeta {
     pub event_seq: Option<u64>,
 }
 
-/// Serializable counterpart of the replay stamp the agent injects on
-/// replayed notifications (`_meta.isReplay`, stamped by pi-shell's
-/// `forward_raw_replay_line` during `session/load`).
-///
-/// [`NotificationMeta::from_json`] is the parse side; this is the build
-/// side, so code that constructs a replay-stamped `_meta` (test fixtures,
-/// playgrounds) shares the wire key with the parser instead of hand-writing
-/// `json!` literals.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ReplayMetaStamp {
-    pub is_replay: bool,
-}
-
-impl ReplayMetaStamp {
-    /// `_meta` value for a replayed (`session/load`) notification.
-    pub fn replayed() -> serde_json::Value {
-        serde_json::to_value(Self { is_replay: true }).expect("serialize replay meta stamp")
-    }
-}
-
 /// User-prompt content-block `_meta` keys (`TextContent.meta`), shared by the
 /// producers (`dispatch/queue.rs` drain, `effects.rs` prompt send) and the
 /// replay consumer (`acp/tracker.rs` `handle_user_message`) so the wire keys
 /// cannot drift. Tests keep raw literals — they pin the wire values.
-pub mod user_prompt_meta {
+pub(crate) mod user_prompt_meta {
     /// Clean display text shown in scrollback instead of the wire text.
     pub const DISPLAY_TEXT: &str = "displayText";
     /// Render the display text as a skill invocation (teal leading token).
@@ -88,7 +67,7 @@ pub mod user_prompt_meta {
 
 /// `UserMessageChunk` / `ContentChunk._meta` keys stamped by the shell and
 /// read by the pager (live and on replay).
-pub mod user_message_chunk_meta {
+pub(crate) mod user_message_chunk_meta {
     /// Prompt index for rewind / attribution.
     pub const PROMPT_INDEX: &str = "promptIndex";
     /// When true, the chunk must not become a scrollback user prompt
@@ -184,17 +163,6 @@ mod tests {
         let meta = NotificationMeta::from_json(Some(map));
 
         assert!(meta.is_replay);
-    }
-
-    /// The build side ([`ReplayMetaStamp::replayed`]) and the parse side
-    /// ([`NotificationMeta::from_json`]) must agree on the wire key — a
-    /// rename on either side breaks replay detection silently otherwise.
-    #[test]
-    fn replay_meta_stamp_round_trips_through_parser() {
-        let stamp = ReplayMetaStamp::replayed();
-        let map = stamp.as_object().unwrap();
-        let meta = NotificationMeta::from_json(Some(map));
-        assert!(meta.is_replay, "stamped meta must parse as a replay");
     }
 
     #[test]

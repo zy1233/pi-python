@@ -1,9 +1,6 @@
 //! Discovery shapes for plugins and hooks surfaced by `OpsChunk::Plugins`,
 //! `OpsChunk::Plugin`, `WorkspaceEvent::PluginsChanged`, and
 //! `WorkspaceEvent::HooksChanged`.
-//!
-//! TODO(workspace): align with the canonical types in
-//! `pi-hooks-plugins-types` and `pi-plugin-marketplace`.
 
 use serde::{Deserialize, Serialize};
 

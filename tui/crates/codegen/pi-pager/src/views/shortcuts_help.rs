@@ -82,7 +82,6 @@ const CATEGORY_ORDER: &[(Category, &str)] = &[
     (Category::ConversationAction, "Conversation Actions"),
     (Category::Panels, "Panels"),
     (Category::Session, "Session"),
-    (Category::Dashboard, "Dashboard"),
 ];
 
 pub fn default_collapsed() -> std::collections::HashSet<usize> {
@@ -90,7 +89,7 @@ pub fn default_collapsed() -> std::collections::HashSet<usize> {
 }
 
 // Man-page body for the paste pseudo-row (Enter detail). Keep claims that
-// hold on every host (agent + dashboard); non-image file paths are agent-only.
+// hold on every host; non-image file paths are agent-only.
 #[cfg(target_os = "windows")]
 const PASTE_LONG_HELP: &str = "\
 Pastes clipboard images into the prompt as chips, and plain text as typed.\n\
@@ -150,29 +149,10 @@ pub fn build_entries(
 ) -> Vec<ShortcutsHelpEntry> {
     let mut entries: Vec<ShortcutsHelpEntry> = Vec::new();
 
-    // Keys the dashboard session-overlay claims while it is up. The
-    // overlay intercept consults `When::DashboardOverlay` before
-    // forwarding a key to the agent, so a lit row from another context
-    // advertising one of these keys would be lying (e.g. the
-    // cheatsheet's Ctrl+X alt is shadowed by the overlay stop).
-    let overlay_claimed: std::collections::HashSet<KeyShortcut> =
-        if active_contexts.contains(&When::DashboardOverlay) {
-            registry
-                .all()
-                .iter()
-                .filter(|d| d.context == When::DashboardOverlay)
-                .map(|d| d.default_key)
-                .collect()
-        } else {
-            std::collections::HashSet::new()
-        };
-
     for (cat_idx, &(cat, label)) in CATEGORY_ORDER.iter().enumerate() {
         // Dedup per category on the default key, preferring the def
-        // whose `When` context is active: `DashboardStop` (list) and
-        // `DashboardOverlayStop` (overlay) share Ctrl+X and category,
-        // and whichever matches the current surface must win
-        // regardless of registration order.
+        // whose `When` context is active, so whichever def matches the
+        // current surface wins regardless of registration order.
         let mut seen_in_cat: std::collections::HashMap<KeyShortcut, usize> =
             std::collections::HashMap::new();
         let defs: Vec<&ActionDef> = registry
@@ -240,24 +220,6 @@ pub fn build_entries(
                 }
             }
             let dimmed = !active_contexts.contains(&def.context);
-            // Strip overlay-claimed keys from lit rows of other
-            // contexts (the overlay intercept shadows them). Dimmed
-            // rows already say "not applicable here", so they keep
-            // their keys for discoverability.
-            if !dimmed
-                && def.context != When::DashboardOverlay
-                && item.keys.iter().any(|k| overlay_claimed.contains(k))
-            {
-                item.keys.retain(|k| !overlay_claimed.contains(k));
-                if item.keys.is_empty() {
-                    // Every key is shadowed — the binding is
-                    // genuinely unreachable inside the overlay.
-                    continue;
-                }
-                // The custom display no longer matches the surviving
-                // keys; render them verbatim.
-                item.custom_display = None;
-            }
             // Identical row for both arms; `item` moves in, `dimmed`/`def.id` are Copy.
             let hint = ShortcutsHelpEntry::Hint {
                 item,
@@ -313,10 +275,9 @@ pub fn build_entries(
             });
         }
         // Clipboard + textarea chords not in ActionRegistry. Super/Cmd omitted
-        // (often swallowed). Lit on agent prompt and dashboard reply hosts.
+        // (often swallowed). Lit on the agent prompt.
         if cat == Category::Input {
-            let dimmed = !active_contexts.contains(&When::PromptFocused)
-                && !active_contexts.contains(&When::DashboardFocused);
+            let dimmed = !active_contexts.contains(&When::PromptFocused);
             let push_pseudo = |entries: &mut Vec<ShortcutsHelpEntry>,
                                item: HintItem,
                                long_help: Option<&'static str>| {
@@ -345,9 +306,8 @@ pub fn build_entries(
             redo.keys.push(crate::key!('r', CONTROL));
             push_pseudo(&mut entries, redo, Some(REDO_LONG_HELP));
 
-            // Prompt history (Up / /history). Not part of the shared paste/undo/redo
-            // `dimmed`: that also lights on DashboardFocused, but Up-history is
-            // prompt-only, so give it its own PromptFocused-scoped dim.
+            // Prompt history (Up / /history). Up-history is prompt-only, so it
+            // gets its own PromptFocused-scoped dim.
             let mut history = HintItem::new(crate::key!(Up), "history");
             history.description = Some("Prompt history".into());
             let history_dimmed = !active_contexts.contains(&When::PromptFocused);
@@ -542,10 +502,6 @@ fn picker_config(non_sel: &[bool]) -> PickerConfig<'_> {
         shortcuts_area: None,
         tabs: None,
         active_tab: 0,
-        filter_label: None,
-        filter_key_hint: None,
-        filter_active: false,
-        header_note: None,
         action_keys: &[],
         disable_search: false,
         compact_bottom_bar: false,
@@ -820,15 +776,6 @@ pub fn expand_key(entry: &ShortcutsHelpEntry) -> Option<ExpandKey> {
     }
 }
 
-/// Whether this hint can participate in inline expand (registry-backed rows only).
-/// Prefer [`expand_key`] for new code; kept for call sites that need an ActionId.
-pub fn hint_expand_action_id(entry: &ShortcutsHelpEntry) -> Option<crate::actions::ActionId> {
-    match expand_key(entry) {
-        Some(ExpandKey::Action(id)) => Some(id),
-        _ => None,
-    }
-}
-
 /// Flip `value`'s membership in `set`: insert when absent, remove when present.
 /// Shared by both modal hosts for the section-collapse and inline-expand toggles.
 pub fn toggle_membership<T: Eq + std::hash::Hash>(
@@ -1074,8 +1021,7 @@ pub fn handle_mouse(
 // ---------------------------------------------------------------------------
 
 /// Footer hints painted along the bottom border of the cheatsheet
-/// modal. Identical visual vocabulary for the agent view and the
-/// dashboard so muscle memory ports across surfaces.
+/// modal.
 pub fn modal_footer(filter_active: bool) -> Vec<crate::views::modal_window::Shortcut<'static>> {
     use crate::views::modal_window::Shortcut;
     let mut shortcuts = vec![
@@ -1153,8 +1099,8 @@ enum CheatsheetRowKind {
     Other,
 }
 
-/// Owned per-frame buffers backing the cheatsheet picker rows, shared by both
-/// modal hosts (agent inline render + dashboard [`render_modal`]). The
+/// Owned per-frame buffers backing the cheatsheet picker rows, shared by the
+/// modal hosts (agent inline render + [`render_modal`]). The
 /// [`crate::views::picker::PickerEntry`] list from [`Self::picker_entries`]
 /// borrows these buffers, so this value must outlive the render call.
 pub struct CheatsheetRows {
@@ -1306,201 +1252,6 @@ impl CheatsheetRows {
                 }
             })
             .collect()
-    }
-}
-
-/// Render the cheatsheet modal in full (chrome + picker content).
-///
-/// Pulled out of `AgentView::draw` so the dashboard can paint the
-/// exact same modal without re-plumbing `ModalWindowConfig` /
-/// picker-inner glue. The agent view continues to drive its own
-/// modal via `views::modal::ActiveModal::ShortcutsHelp`; this
-/// function consumes the same fields by reference.
-///
-/// The signature mirrors the destructured `ActiveModal::ShortcutsHelp`
-/// fields one-to-one so callers can splat them directly — packing
-/// these into a wrapper struct would force every call site to
-/// build an intermediate just to take it apart again at the
-/// chrome / picker boundary.
-#[allow(clippy::too_many_arguments)]
-pub fn render_modal(
-    buf: &mut ratatui::buffer::Buffer,
-    area: ratatui::layout::Rect,
-    entries: &[ShortcutsHelpEntry],
-    state: &mut PickerState,
-    window: &mut crate::views::modal_window::ModalWindowState,
-    filter_active: bool,
-    collapsed_sections: &std::collections::HashSet<usize>,
-    expanded_ids: &std::collections::HashSet<ExpandKey>,
-    mode: &ShortcutsHelpMode,
-    theme: &crate::theme::Theme,
-    compact: bool,
-) {
-    use crate::views::modal_window as mw;
-    use crate::views::picker::{self, PickerHitAreas};
-    use ratatui::layout::Rect;
-
-    // Detail screen reuses the same modal chrome with a different footer.
-    if mode.is_detail() {
-        render_detail(buf, area, window, mode, theme, compact);
-        return;
-    }
-
-    let rows = CheatsheetRows::build(entries, state.query(), filter_active, collapsed_sections);
-    let help_refs = rows.help_refs();
-    let picker_entries = rows.picker_entries(state, expanded_ids, &help_refs);
-    let non_sel: Vec<bool> = vec![false; picker_entries.len()];
-    let footer = modal_footer(filter_active);
-    let modal_config = mw::ModalWindowConfig {
-        title: "Keyboard Shortcuts",
-        tabs: None,
-        shortcuts: &footer,
-        sizing: modal_sizing(compact),
-        fold_info: None,
-    };
-    let Some(mca) = mw::render_modal_window(buf, area, window, &modal_config, theme) else {
-        return;
-    };
-    let content_area = mca.content;
-    let inner_x = mca.inner_x;
-    let inner_width = mca.inner_width;
-    let searching = state.search_active || !state.query().is_empty();
-    let show_search_hint = !searching;
-
-    picker::render_picker_search_bar(
-        buf,
-        content_area.x,
-        content_area.y,
-        content_area.width,
-        theme,
-        state,
-        searching,
-        show_search_hint,
-        Some(theme.bg_base),
-    );
-    let sep_y = content_area.y + 1;
-    if sep_y < content_area.y + content_area.height {
-        picker::render_divider(buf, inner_x, sep_y, inner_width, theme, Some(theme.bg_base));
-    }
-    let entries_start_y = sep_y + 1;
-    let search_bar_rect = Rect::new(content_area.x, content_area.y, content_area.width, 1);
-    let entries_area = Rect {
-        x: content_area.x,
-        y: entries_start_y,
-        width: content_area.width,
-        height: content_area
-            .height
-            .saturating_sub(entries_start_y.saturating_sub(content_area.y)),
-    };
-    let content_hit = picker::render_picker_content_with_scrollbar_x(
-        buf,
-        entries_area,
-        theme,
-        state,
-        &picker_entries,
-        &non_sel,
-        &[],
-        Some(theme.bg_base),
-        false,
-        0,
-        inner_x + inner_width - 1,
-    );
-    state.hit_areas = Some(PickerHitAreas {
-        close_button: Rect::default(),
-        search_bar: search_bar_rect,
-        item_rects: content_hit.item_rects,
-        entry_indices: content_hit.entry_indices,
-        tab_rects: vec![],
-        filter_rect: None,
-    });
-}
-
-/// Outcome of routing a key through the cheatsheet's
-/// chrome + picker pipeline.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ModalKeyOutcome {
-    /// User asked to close the modal (Esc in browse, Ctrl+./Ctrl+X,
-    /// or the close chrome button).
-    Close,
-    /// `f` was pressed — caller should flip `filter_active`.
-    ToggleFilter,
-    /// User toggled a section header (collapse / expand).
-    ToggleSection(usize),
-    /// Toggle inline help for a hint row (registry or long_help pseudo).
-    ToggleExpand(ExpandKey),
-    /// Visual state changed (cursor, query, scroll, or detail enter/back).
-    Changed,
-    /// Nothing changed.
-    Unchanged,
-}
-
-/// Route a key through the cheatsheet's modal-window chrome + the
-/// picker `handle_input`. Mirrors the agent view's per-modal
-/// handler so the dashboard can reuse the exact same key
-/// semantics. Caller owns `filter_active` / `collapsed_sections`
-/// so the result mutations stay local to the wrapping struct.
-///
-/// Args follow the same one-to-one shape as the field set behind
-/// `ActiveModal::ShortcutsHelp` so dashboards and agents can call
-/// it via plain destructuring instead of building / unpacking a
-/// wrapper struct.
-#[allow(clippy::too_many_arguments)]
-pub fn handle_modal_key(
-    key: &crossterm::event::KeyEvent,
-    entries: &[ShortcutsHelpEntry],
-    state: &mut PickerState,
-    window: &mut crate::views::modal_window::ModalWindowState,
-    filter_active: bool,
-    collapsed_sections: &std::collections::HashSet<usize>,
-    expanded_ids: &std::collections::HashSet<ExpandKey>,
-    mode: &mut ShortcutsHelpMode,
-    compact: bool,
-) -> ModalKeyOutcome {
-    use crate::views::modal_window as mw;
-    use crossterm::event::KeyCode;
-
-    let searching = state.search_active || !state.query().is_empty();
-    if mode.is_browse() && searching && key.code == KeyCode::Esc {
-        state.set_query("");
-        state.search_active = false;
-        state.selected = 0;
-        return ModalKeyOutcome::Changed;
-    }
-    let footer = if mode.is_detail() {
-        modal_footer_detail()
-    } else {
-        modal_footer(filter_active)
-    };
-    let chrome_cfg = mw::ModalWindowConfig {
-        title: "Keyboard Shortcuts",
-        tabs: None,
-        shortcuts: &footer,
-        sizing: modal_sizing(compact),
-        fold_info: None,
-    };
-    // Detail owns Esc (back to browse); skip chrome so it doesn't close the modal.
-    if mode.is_browse() {
-        match mw::handle_modal_key(window, key, &chrome_cfg) {
-            mw::ModalWindowOutcome::CloseRequested => return ModalKeyOutcome::Close,
-            mw::ModalWindowOutcome::Unhandled => {}
-            _ => return ModalKeyOutcome::Changed,
-        }
-    }
-    match handle_input(
-        key,
-        entries,
-        state,
-        filter_active,
-        collapsed_sections,
-        expanded_ids,
-        mode,
-    ) {
-        ShortcutsHelpOutcome::Close => ModalKeyOutcome::Close,
-        ShortcutsHelpOutcome::ToggleFilter => ModalKeyOutcome::ToggleFilter,
-        ShortcutsHelpOutcome::ToggleSection(idx) => ModalKeyOutcome::ToggleSection(idx),
-        ShortcutsHelpOutcome::ToggleExpand(id) => ModalKeyOutcome::ToggleExpand(id),
-        ShortcutsHelpOutcome::Changed => ModalKeyOutcome::Changed,
-        ShortcutsHelpOutcome::Unchanged => ModalKeyOutcome::Unchanged,
     }
 }
 

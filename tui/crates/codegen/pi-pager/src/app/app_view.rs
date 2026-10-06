@@ -6,7 +6,6 @@
 use super::ScreenMode;
 use crate::acp::model_state::ModelState;
 use crate::actions::{ActionId, ActionRegistry, When};
-use crate::app::consent::ConsentState;
 use crate::appearance::AppearanceConfig;
 use crate::input::KeyboardNormalizer;
 use crate::input::key::KeyShortcut;
@@ -19,91 +18,12 @@ use crate::scrollback::render::ScratchBuffer;
 use crate::views::prompt_widget::PromptWidget;
 use crate::views::welcome::WelcomePromptFocus;
 use agent_client_protocol as acp;
-use crossterm::event::{Event, KeyCode, KeyEventKind, MouseButton, MouseEventKind};
+use crossterm::event::{Event, KeyCode, KeyEventKind};
 use indexmap::IndexMap;
+use pi_acp_lib::AcpAgentTx;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use pi_acp_lib::AcpAgentTx;
-/// State for the "New Worktree" popup dialog on the welcome screen.
-#[derive(Debug, Default)]
-pub struct NewWorktreeDialogState {
-    /// Text input for the worktree label (empty = auto-generated name).
-    label: LineEditor,
-}
-const MAX_WORKTREE_LABEL_BYTES: usize = 100;
-impl NewWorktreeDialogState {
-    pub fn new() -> Self {
-        Self {
-            label: LineEditor::default(),
-        }
-    }
-    pub fn label(&self) -> &str {
-        self.label.text()
-    }
-    pub(crate) fn viewport(&self, width: usize) -> pi_ratatui_textarea::SingleLineViewport {
-        self.label.viewport(width)
-    }
-    #[cfg(test)]
-    pub(crate) fn set_label(&mut self, label: impl Into<String>) {
-        self.label.set_text(label);
-    }
-    #[cfg(test)]
-    pub(crate) fn set_cursor_byte(&mut self, cursor_byte: usize) -> LineEditOutcome {
-        self.label.set_cursor_byte(cursor_byte)
-    }
-    pub fn insert_paste(&mut self, text: &str) -> NewWorktreeDialogOutcome {
-        Self::from_line_edit(
-            self.label
-                .insert_paste_with_byte_limit(text, MAX_WORKTREE_LABEL_BYTES),
-        )
-    }
-    /// Handle a key event. Returns the dialog outcome.
-    pub fn handle_key(&mut self, key: &crossterm::event::KeyEvent) -> NewWorktreeDialogOutcome {
-        use crossterm::event::{KeyCode, KeyModifiers};
-        if crate::input::key::is_paste_key(key) {
-            return crate::clipboard::system_clipboard_get()
-                .map_or(NewWorktreeDialogOutcome::Unchanged, |text| {
-                    self.insert_paste(&text)
-                });
-        }
-        if key.modifiers.contains(KeyModifiers::CONTROL)
-            && !crate::input::key::is_altgr(key.modifiers)
-            && matches!(key.code, KeyCode::Char('c' | 'd' | 'q'))
-        {
-            return NewWorktreeDialogOutcome::Cancelled;
-        }
-        if key.code == KeyCode::Enter && !key.modifiers.is_empty() {
-            return NewWorktreeDialogOutcome::Unchanged;
-        }
-        match key.code {
-            KeyCode::Enter if key.modifiers.is_empty() => {
-                let label = self.label().trim().to_string();
-                NewWorktreeDialogOutcome::Submitted(if label.is_empty() {
-                    None
-                } else {
-                    Some(label)
-                })
-            }
-            KeyCode::Esc => NewWorktreeDialogOutcome::Cancelled,
-            _ => {
-                let remaining = MAX_WORKTREE_LABEL_BYTES.saturating_sub(self.label().len());
-                let outcome = self.label.handle_key_with_insert_policy(key, |character| {
-                    character.len_utf8() <= remaining
-                });
-                Self::from_line_edit(outcome)
-            }
-        }
-    }
-    fn from_line_edit(outcome: LineEditOutcome) -> NewWorktreeDialogOutcome {
-        match outcome {
-            LineEditOutcome::TextChanged
-            | LineEditOutcome::CursorChanged
-            | LineEditOutcome::HandledNoChange => NewWorktreeDialogOutcome::Changed,
-            LineEditOutcome::Unhandled => NewWorktreeDialogOutcome::Unchanged,
-        }
-    }
-}
 /// Per-visit announcement UI state on the welcome screen. Reset on every
 /// return-to-welcome transition (see `show_welcome`) so a previously expanded
 /// announcement can't leak into a freshly shown screen; the non-`expanded`
@@ -118,19 +38,6 @@ pub struct WelcomeAnnouncementState {
     pub truncated: bool,
     /// Hit-test rect for the full announcement block (click anywhere to toggle).
     pub rect: Option<ratatui::layout::Rect>,
-}
-/// Outcome of handling input in the new-worktree dialog.
-#[derive(Debug)]
-pub enum NewWorktreeDialogOutcome {
-    /// User pressed Enter — create the worktree.
-    /// `None` means auto-generate the name.
-    Submitted(Option<String>),
-    /// User pressed Esc — close without creating.
-    Cancelled,
-    /// Input changed (redraw needed).
-    Changed,
-    /// Nothing happened.
-    Unchanged,
 }
 /// Persisted worktree preference for `/new` and `/fork`.
 ///
@@ -196,8 +103,7 @@ impl WorktreeMode {
     }
     /// Same as [`Self::resolve_from_hints`], for merged effective config (`toml::Value`).
     pub fn resolve_from_hints_value(hints: Option<&toml::Value>) -> (Self, Self) {
-        let (new_session, fork) =
-            pi_shell::util::config::WorktreeHintMode::resolve_pair(hints);
+        let (new_session, fork) = pi_shell::util::config::WorktreeHintMode::resolve_pair(hints);
         (new_session.into(), fork.into())
     }
     fn resolve_from_hint_strings(get_str: impl Fn(&str) -> Option<Self>) -> (Self, Self) {
@@ -214,47 +120,21 @@ impl WorktreeMode {
 use super::PagerTerminal;
 use super::actions::Action;
 use super::agent::AgentId;
-use super::agent_view::{AgentView, AppRenderParams, McpInitProgress};
-use super::bundle::BundleState;
+use super::agent_view::{AgentView, AppRenderParams};
 /// Which view is currently displayed.
 ///
-/// Note: `AgentDashboard` does not carry state directly because
-/// `DashboardState` is not `Copy`. The dashboard view-state lives on
-/// `AppView::dashboard` and is only "active" when `active_view == AgentDashboard`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveView {
     Welcome,
     Agent(AgentId),
-    /// The top-level Agent Dashboard. State lives in `AppView::dashboard`.
-    AgentDashboard,
 }
 impl ActiveView {
     /// The agent on screen, or `None` for a view that shows no single agent.
     pub fn agent_id(self) -> Option<AgentId> {
         match self {
             ActiveView::Agent(id) => Some(id),
-            ActiveView::Welcome | ActiveView::AgentDashboard => None,
+            ActiveView::Welcome => None,
         }
-    }
-}
-/// Target restored when leaving the dashboard (Ctrl+\ / Esc).
-/// Consumed by `dispatch_exit_dashboard`; dead agents fall back to
-/// insertion-order first / Welcome.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DashboardReturn {
-    /// Plain agent view (no session-overlay chrome).
-    Agent(AgentId),
-    /// Session overlay: re-set `attached_agent` on the way back.
-    Overlay(AgentId),
-}
-impl DashboardReturn {
-    pub fn agent_id(self) -> AgentId {
-        match self {
-            Self::Agent(id) | Self::Overlay(id) => id,
-        }
-    }
-    pub fn is_overlay(self) -> bool {
-        matches!(self, Self::Overlay(_))
     }
 }
 /// Tick cadence demanded by the current view state — see
@@ -276,25 +156,13 @@ pub const SLOW_TICK_INTERVAL: Duration = Duration::from_millis(83);
 /// Welcome toast lifetime (wall clock, so the duration holds whether the
 /// event loop is ticking Slow or Fast).
 const WELCOME_TOAST_DURATION: Duration = Duration::from_secs(2);
-fn reconnect_success_hides_mismatch(current: Option<&str>, incoming: &str) -> bool {
-    current.is_some_and(crate::acp::is_version_mismatch_banner)
-        && (incoming.starts_with("Reconnected.") || incoming.starts_with("Session restored."))
-}
 /// Which prompt box in-flight voice dictation appends its finalized text to.
 /// Captured when recording **starts** so a trailing STT final still lands where
-/// the user was dictating, even if they navigate away — or toggle a dashboard
-/// row's peek panel — mid-utterance.
+/// the user was dictating, even if they navigate away mid-utterance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VoiceTarget {
     /// A live agent session's prompt box.
     Agent(AgentId),
-    /// The dashboard's new-agent dispatch input (no row peek was open at start).
-    DashboardDispatch,
-    /// The dashboard's peek reply input, bound to the agent whose peek was open
-    /// at start. The id pins the row: selecting a different row mid-utterance
-    /// stops capture (the reply widget is shared and clears on row change), so a
-    /// final can't land on the wrong agent's reply.
-    DashboardPeekReply(AgentId),
 }
 /// The voice-dictation lifecycle. Exactly one state holds at a time, so the
 /// "is the mic live / is a start queued / does a Ctrl+Space hold own it / which
@@ -362,8 +230,7 @@ impl VoiceState {
         matches!(self, Self::ColdStart { hold, .. } | Self::Recording { hold, .. } if *hold)
     }
 }
-/// Entry from the session list wire: welcome/resume pickers and non-leader
-/// dashboard roster fallback (`session_picker_entry_to_roster`).
+/// Entry from the session list wire: welcome/resume pickers.
 #[derive(Debug, Clone)]
 pub struct SessionPickerEntry {
     pub id: String,
@@ -384,8 +251,7 @@ pub struct SessionPickerEntry {
     /// Human-readable worktree label (if the session was created in a named worktree).
     pub worktree_label: Option<String>,
     /// Per-turn secondary line (`lastTurnSummary` on the session/list wire).
-    /// Shown as the "Last turn" line on the expanded resume card and used for
-    /// non-leader dashboard roster rows.
+    /// Shown as the "Last turn" line on the expanded resume card.
     pub last_turn_summary: Option<String>,
     /// Latest session recap (`lastRecap` on the session/list wire), shown on the
     /// expanded resume card whenever available. Distinct from `last_turn_summary`.
@@ -491,11 +357,6 @@ pub(crate) enum PasteProvenance {
     #[allow(dead_code)]
     X11Primary,
 }
-impl PasteProvenance {
-    pub(crate) fn may_probe_clipboard_attachments(self) -> bool {
-        matches!(self, Self::Terminal)
-    }
-}
 /// A pending action awaiting double-press confirmation.
 ///
 /// Set when a `requires_confirmation` action is triggered. The shortcuts bar
@@ -519,10 +380,8 @@ impl PendingAction {
     pub fn new(action: Action, shortcut: KeyShortcut, label: &'static str) -> Self {
         Self::with_ttl(action, shortcut, Some(label), Self::TTL)
     }
-    /// Like [`Self::new`] but with an explicit confirm window. Used by
-    /// the dashboard-overlay stop (Ctrl+X), which mirrors the
-    /// dashboard's [`crate::views::dashboard::state::CONFIRM_WINDOW`]
-    /// rather than the default double-press TTL.
+    /// Like [`Self::new`] but with an explicit confirm window instead of the
+    /// default double-press TTL.
     pub fn with_ttl(
         action: Action,
         shortcut: KeyShortcut,
@@ -603,15 +462,6 @@ pub struct ScreenModeRelaunch {
     /// Active session to reopen via `--resume`.
     pub session_id: String,
 }
-/// A consented `/feedback` trace upload deferred until the coding-data
-/// sharing opt-in write claimed at `seq` resolves.
-#[derive(Debug, Clone)]
-pub struct PendingFeedbackTraceUpload {
-    /// The `coding_data_write_seq` generation this upload waits on.
-    pub seq: u64,
-    pub agent_id: AgentId,
-    pub session_id: acp::SessionId,
-}
 /// Root view component — owns all application state.
 pub struct AppView {
     /// Taken by whichever path reaches a usable session (or interactive idle) first.
@@ -647,8 +497,6 @@ pub struct AppView {
     pub cwd_has_git_ancestor: bool,
     /// ACP channel for sending requests (shared resource, cloned into agents).
     pub acp_tx: AcpAgentTx,
-    /// Local cache of bundle sync/status state from the shell.
-    pub(crate) bundle_state: BundleState,
     /// Reusable scratch buffer for rendering.
     pub scratch: ScratchBuffer,
     /// Cursor state for blink-preserving cursor management.
@@ -705,12 +553,6 @@ pub struct AppView {
     pub announcements_last_gen: u64,
     /// Selected welcome announcement for this pager launch.
     pub announcement: Option<pi_announcements::RemoteAnnouncement>,
-    /// Cached changelog markdown (for `/release-notes`). Populated by
-    /// `FetchChangelog` at startup; `None` until the fetch completes.
-    pub changelog_markdown: Option<String>,
-    /// Cached changelog bullets (for welcome screen). Populated by
-    /// `FetchChangelog` at startup; empty until the fetch completes.
-    pub changelog_bullets: Vec<String>,
     /// Resolved tip list from config layers.
     pub tips: Vec<String>,
     /// Selected tip for the current launch/session.
@@ -720,14 +562,6 @@ pub struct AppView {
     /// Whether the `/share` slash command is available. Currently forced off
     /// while session share links are temporarily disabled in clients.
     pub sharing_enabled: bool,
-    /// Whether the plugin marketplace CTA is enabled. Env `GROK_PLUGIN_CTA`
-    /// overrides `RemoteSettings.plugin_cta` (remote settings); defaults to `false`.
-    pub plugin_cta_enabled: bool,
-    /// Marketplace source name the plugin CTA draws candidates from, when
-    /// `[marketplace].plugin_cta_marketplace` is set in the effective config.
-    /// `None` keeps the default pi Official source.
-    pub plugin_cta_marketplace: Option<String>,
-    pub workspace_dashboard_enabled: bool,
     /// Consumer billing surface (credit fetches / warnings). False for team
     /// and API-key auth. `/usage` itself stays available for session token/cost
     /// unless [`Self::has_external_auth_provider`].
@@ -738,16 +572,9 @@ pub struct AppView {
     /// Slash commands denied for the current subscription tier
     /// ([`TIER_RESTRICTED_COMMANDS`] when the user is on the free / X Basic
     /// tier, empty otherwise). Recomputed by [`Self::apply_tier_restrictions`]
-    /// and fanned out to every slash registry (welcome prompt, agents,
-    /// dashboard); deny wins over all other visibility gates.
+    /// and fanned out to every slash registry (welcome prompt, agents);
+    /// deny wins over all other visibility gates.
     pub tier_restricted_commands: Vec<String>,
-    /// Whether the pager is connected via a leader (leader mode). The Agent
-    /// Dashboard entry points (`/dashboard`, `Ctrl+\`, `grok dashboard`, the
-    /// startup hook) are only meaningful when a leader is coordinating a
-    /// fleet of sessions, so they are gated on this flag. Set in
-    /// `event_loop::run` from `connection.leader_status_rx.is_some()`;
-    /// defaults to `false` (non-leader, dashboard hidden).
-    pub leader_mode: bool,
     /// App-level credit balance used to show the usage warning on the
     /// welcome screen before any agent session exists.
     pub credit_balance: Option<crate::views::credit_bar::CreditBalance>,
@@ -755,40 +582,6 @@ pub struct AppView {
     pub auto_topup: Option<crate::views::credit_bar::AutoTopupInfo>,
     /// Periodic billing poll requested (credits >= 99%).
     pub billing_poll_wanted: bool,
-    /// Leader-mode session roster (FleetView dashboard). Populated from
- /// `legacy ext RPC` polls and `legacy ext RPC` broadcasts.
-    /// Empty in non-leader mode, which naturally gates roster rendering.
-    pub leader_roster: Vec<crate::app::roster::RosterEntry>,
-    /// Local on-disk session list (dormant/idle sessions) surfaced on the
-    /// dashboard when NOT in leader mode. There is no live leader roster to
- /// poll outside leader mode, so we fetch the same `legacy ext RPC` the
-    /// resume picker uses and render those as idle rows. Entries are stored as
-    /// [`crate::app::roster::RosterEntry`] (activity `Dormant`) so they reuse
-    /// the existing roster-row rendering / attach path. Empty in leader mode.
-    pub dashboard_local_sessions: Vec<crate::app::roster::RosterEntry>,
-    /// Whether the dashboard is currently loading local sessions (non-leader mode).
-    pub dashboard_sessions_loading: bool,
-    /// Server-authoritative shared prompt queues, keyed by `sessionId`
- /// Reconciled from `legacy ext RPC` broadcasts so
-    /// every client renders the same ordered queue (including prompts queued
-    /// by other clients). Empty in non-leader mode.
-    pub shared_prompt_queues:
-        std::collections::HashMap<String, Vec<crate::app::prompt_queue::QueueEntryWire>>,
-    /// Optimistic echo rows for prompts the pager sent server-authoritatively
-    /// (plain prompt typed while a turn is running) but for which the
- /// confirming `legacy ext RPC` broadcast has not yet arrived. Keyed by
-    /// `sessionId`. Pinned into `shared_prompt_queues` on reconcile so the row
-    /// doesn't flicker, and dropped once the authoritative broadcast reflects
-    /// the id (or it starts running). Never persisted.
-    pub optimistic_prompt_echoes:
-        std::collections::HashMap<String, Vec<crate::app::prompt_queue::QueueEntryWire>>,
-    /// Server-authoritative running prompts that drained into the running slot
-    /// while the previous turn was still finishing locally (handoff race).
-    /// Keyed by `AgentId`. Consumed by the `PromptResponse` handler after
-    /// `finish_turn` clears `current_prompt_id`, which then adopts the prompt
-    /// and runs the turn-start shim. Never persisted.
-    pub(crate) pending_running_adoptions:
-        std::collections::HashMap<AgentId, crate::app::acp_handler::PendingRunningAdoption>,
     /// Whether the session picker groups entries by repo name with
     /// non-selectable headers. Gated by `GROK_SESSION_PICKER_GROUPED` env var
     /// or remote settings `session_picker_grouped`; defaults to `false`.
@@ -796,7 +589,7 @@ pub struct AppView {
     /// Startup-only seed for `AgentView::scheduler_background_loops`, resolved
     /// once from the config layers plus the remote tier known at connect.
     /// Read only until a session's own value arrives on its `session/new` /
-    /// `session/load` response, and by the session-less dashboard. Never
+    /// `session/load` response. Never
     /// refreshed afterwards — the authoritative value is per session, pinned by
     /// the shell when that session's actor spawned.
     pub scheduler_background_loops_seed: bool,
@@ -804,29 +597,15 @@ pub struct AppView {
     /// back into the input box. Gated by `GROK_CANCEL_REWIND` env /
     /// `[features] cancel_rewind` config / remote settings flag.
     pub cancel_rewind_enabled: bool,
-    /// Whether session recap (`/recap` + automatic away recap) is rolled out,
-    /// resolved by the shell and advertised on ACP initialize (`sessionRecap`).
- /// When false, the pager must not request recaps (zero `legacy ext RPC` traffic).
-    pub session_recap_available: bool,
-    /// Shell-advertised eligibility for the `/feedback` trace-upload offer,
-    /// exactly as received (initialize meta / auth-meta refreshes). Read it
-    /// through [`Self::feedback_trace_offer`], which subtracts the latch.
-    pub shell_feedback_trace_offer: bool,
-    /// A persisted card answer was made this session; keeps auth-meta
-    /// refreshes from re-offering before the async config write lands.
-    pub feedback_trace_choice_latched: bool,
-    /// Trace upload parked until the same card answer's sharing opt-in write
-    /// confirms (the storage proxy rejects uploads while opted out).
-    pub feedback_trace_upload_pending: Option<PendingFeedbackTraceUpload>,
     /// Stateful prompt widget rendered on the welcome screen (persists input across frames).
     pub welcome_prompt: PromptWidget,
     /// The single slash-command MRU/recency store. Owned here and injected
-    /// into every agent prompt and the dashboard dispatch via
+    /// into every agent prompt via
     /// [`PromptWidget::adopt_slash_mru`] so command recency is shared across
     /// surfaces (single-threaded UI; no process-global singleton).
     pub(crate) slash_mru: std::rc::Rc<std::cell::RefCell<crate::slash::mru::SlashMru>>,
     /// The single resolved per-command tag map (canonical name → free-form tag).
-    /// Owned here and injected into every agent prompt and the dashboard dispatch
+    /// Owned here and injected into every agent prompt
     /// via [`PromptWidget::adopt_command_tags`] so slash-dropdown tags are shared
     /// across surfaces. Populated from remote settings + local config; updated
     /// in place so adopters see refreshes without re-adopting.
@@ -867,12 +646,6 @@ pub struct AppView {
     pub welcome_menu_index: Option<usize>,
     /// Hit-test rects for welcome menu items (populated during render).
     pub welcome_menu_rects: Vec<ratatui::layout::Rect>,
-    /// Whether the welcome menu currently includes a "Changelog" row (above
-    /// Quit). Set during render; the input handler uses it to size the menu and
-    /// map the extra row to the release-notes action.
-    pub welcome_show_changelog_action: bool,
-    /// Hit-test rect for the import-claude banner on the welcome screen.
-    pub welcome_import_banner_rect: Option<ratatui::layout::Rect>,
     /// Last known mouse position (column, row), updated on every Mouse event.
     /// Used by the welcome screen to render fine-grained hover effects (e.g.
     /// brighter red on the import row's `[x]` when the mouse is exactly on
@@ -892,8 +665,6 @@ pub struct AppView {
     pub welcome_auth_url_rect: Option<ratatui::layout::Rect>,
     /// Whether the mouse pointer was last over the auth URL (for OSC 22 cursor shape).
     pub welcome_on_auth_url: bool,
-    /// Mouse last over the changelog block (drives hover color + redraws).
-    pub welcome_on_changelog_cta: bool,
     /// Per-visit announcement UI state on the welcome screen (expansion, hover,
     /// overflow flag, hit-rect).
     pub welcome_announcement: WelcomeAnnouncementState,
@@ -903,13 +674,6 @@ pub struct AppView {
     pub welcome_refresh_rect: Option<ratatui::layout::Rect>,
     /// Hit-test rect for the gate URL link on the paywall CTA.
     pub welcome_gate_url_rect: Option<ratatui::layout::Rect>,
-    /// Rewritten by every welcome frame, so a resize leaves no stale click target.
-    pub welcome_consent_link_rects: Vec<(usize, ratatui::layout::Rect)>,
-    /// Consent link the mouse is over, so every run of a wrapped link brightens together.
-    pub welcome_consent_hover_link: Option<usize>,
-    /// The disk write is a spawned task, so a settings refresh that lands first would otherwise
-    /// re-arm a notice the user has already accepted.
-    pub consent_answered: Option<(String, i32)>,
     /// Hit-test rect for the welcome hero upgrade CTA `[label]` button
     /// (click → `AnnouncementsOpenCta(Welcome)`).
     pub welcome_upgrade_cta_rect: Option<ratatui::layout::Rect>,
@@ -917,20 +681,12 @@ pub struct AppView {
     pub welcome_privacy_banner_opt_out_rect: Option<ratatui::layout::Rect>,
     pub welcome_privacy_banner_terms_rect: Option<ratatui::layout::Rect>,
     pub welcome_privacy_banner_policy_rect: Option<ratatui::layout::Rect>,
-    /// Hit-test rects for the welcome workspace-mode picker.
-    #[cfg(feature = "local-workspace")]
-    pub welcome_workspace_mode_rects: crate::views::welcome::WorkspaceModeHitRects,
-    /// Sticky hover flag for the workspace-mode picker (redraw on enter/leave).
-    #[cfg(feature = "local-workspace")]
-    pub welcome_on_workspace_mode: bool,
     /// Transient welcome toast: (message, wall-clock expiry).
     pub welcome_toast: Option<(String, std::time::Instant)>,
     /// Sticky hover flag for the privacy banner buttons (redraw on enter/leave).
     pub welcome_on_privacy_banner: bool,
     /// Sticky hover flag for the welcome upgrade CTA (redraw on enter/leave).
     pub welcome_on_upgrade_cta: bool,
-    /// Hit-test rect for the clickable changelog info block (opens release notes).
-    pub welcome_changelog_cta_rect: Option<ratatui::layout::Rect>,
     /// Show the raw auth URL with mouse capture disabled for manual copy.
     pub auth_show_raw_url: bool,
     /// We turned capture off for native select and owe a restore on leave.
@@ -941,40 +697,13 @@ pub struct AppView {
     pub session_picker_loading: bool,
     /// Unified picker state for the session picker.
     pub session_picker_state: crate::views::picker::PickerState,
-    /// Source filter for the welcome-screen session picker.
-    pub session_picker_source_filter: crate::views::session_picker::SourceFilter,
-    /// Directory whose relaxed-scope notice has fired, keyed by the browse cwd
-    /// (`app.cwd`); a cwd-scoped browse clears it so a later relax re-notifies.
-    pub session_picker_relaxed_notified_for: Option<std::path::PathBuf>,
-    /// Content-based (deep search) results from ACP session search.
-    pub session_picker_content_results:
-        Option<Vec<pi_shell::extensions::session_search::SearchSessionHit>>,
-    /// Whether a deep search is currently in flight.
-    pub session_picker_content_loading: bool,
-    /// Monotonically increasing sequence number for deep search requests.
-    pub session_picker_deep_search_seq: u64,
     /// Monotonically increasing sequence number for session list fetches
     /// (`Effect::FetchSessionList`): only the seq-current response is
     /// applied, so a stale completion can't clobber newer results. Bumped
-    /// only under chat mode (server-search supersede); in Build mode it
-    /// stays 0 so plain list responses keep their pre-existing
-    /// last-write-wins behavior.
+    /// when the welcome-screen picker is dismissed (a late response for the
+    /// closed picker is dropped); otherwise it stays 0 so plain list
+    /// responses keep last-write-wins behavior.
     pub session_picker_list_seq: u64,
-    /// Resolved compat-session cells used before checking resume-skill paths.
-    pub(crate) foreign_session_compat: pi_foreign_sessions::EnabledForeignSessionSources,
-    /// Monotonic picker scan sequence, bumped on every open and close.
-    pub(crate) foreign_session_scan_seq: u64,
-    /// Coalesces obsolete foreign scans across welcome and modal pickers.
-    pub(crate) foreign_scan_coordinator: crate::app::ForeignScanCoordinator,
-    /// Foreign lane completion and deferred native-lane notice.
-    pub(crate) session_picker_lanes: crate::views::session_picker::SessionPickerLanes,
-    /// Invalidates detail reads when picker rows or filters change.
-    pub(crate) session_picker_detail_generation: u64,
-    /// The search query `session_picker_entries` were server-fetched with
-    /// (`None` = unfiltered fetch). Via
-    /// [`crate::views::session_picker::effective_filter_query`], skips the
-    /// local fuzzy re-filter for server search results.
-    pub session_picker_entries_query: Option<String>,
     pub session_picker_pending_delete: Option<crate::views::session_picker::PendingDelete>,
     /// Tick counter for welcome screen spinner animation.
     pub welcome_tick: u64,
@@ -1017,34 +746,11 @@ pub struct AppView {
     /// Enable the ask-user-question tool for new sessions (`--ask-user`).
     /// Automatically enabled by `plan_mode`.
     pub ask_user: bool,
-    /// Process-wide gateway light-frontend from CLI `--chat` only.
- /// Stamps `_meta key.kind = "chat"` and omits Build agent
-    /// profiles on create/load while set. `/chat` does **not** set this
-    /// (uses [`Self::deferred_startup`] one-shot state instead).
-    pub chat_mode: bool,
-    /// Welcome picker mode; ignored when `local_workspace_startup_locked`.
-    #[cfg(feature = "local-workspace")]
-    pub welcome_workspace_mode: crate::views::welcome::WelcomeWorkspaceMode,
-    /// CLI/env already stamped local workspace; welcome must not override.
-    #[cfg(feature = "local-workspace")]
-    pub local_workspace_startup_locked: bool,
-    /// One-shot next-session stamp: `Some(None)` sandbox, `Some(cfg)` local.
-    #[cfg(feature = "local-workspace")]
-    pub welcome_session_local_workspace:
-        Option<Option<crate::app::session_startup::LocalWorkspaceConfig>>,
-    /// First-run Local ACK still pending in the TUI.
-    #[cfg(feature = "local-workspace")]
-    pub welcome_local_workspace_ack_pending: bool,
-    /// Next welcome history load is local-disk/build (does not set `chat_mode`).
-    #[cfg(feature = "local-workspace")]
-    pub welcome_history_load_as_build: bool,
     /// Whether mouse capture is currently enabled. Disabled during the
     /// Authenticating state so the terminal handles native text selection.
     pub mouse_captured: bool,
-    /// Active "New Worktree" dialog on the welcome screen.
-    pub new_worktree_dialog: Option<NewWorktreeDialogState>,
     /// Resolved per-tip gates for the contextual ephemeral hints (undo tip,
-    /// plan nudge, clipboard-image tip, send-now tip). Default all ON; resolved
+    /// plan nudge, clipboard-image tip). Default all ON; resolved
     /// at startup and on settings toggles from `GROK_CONTEXTUAL_HINTS` (master)
     /// > `[ui.contextual_hints]` user config > remote tier > default.
     pub contextual_hints: pi_shell::util::config::ResolvedContextualHints,
@@ -1109,10 +815,6 @@ pub struct AppView {
     /// when `Pending`, the welcome screen shows the trust question and session
     /// creation is deferred (gated after auth) until it is answered.
     pub trust_state: TrustState,
-    /// Resolves before folder trust: the account-level answer gates the workspace-level one.
-    pub consent_state: crate::app::consent::ConsentState,
-    /// Scopes the consent answer, the only identity the pager has for it.
-    pub account_email: Option<String>,
     /// Login button label from `AuthMethod.name` (e.g., "grok.com", "Acme Corp").
     pub login_label: Option<String>,
     /// The auth method ID to use for login.
@@ -1150,13 +852,6 @@ pub struct AppView {
     pub privacy_banner_reshow_days: Option<u64>,
     /// Local `[privacy].privacy_banner_acked` (RFC 3339 UTC).
     pub privacy_banner_acked: Option<String>,
-    /// In-flight opt-in write whose ack waits on ACP success.
-    pub privacy_banner_opt_in_inflight: bool,
-    /// Newest `SetCodingDataSharing` write. Bumped per dispatch and echoed
-    /// on the `TaskResult`, so an older write's late reply — whose
-    /// `rollback_to_opted_in` was captured before the newer one — cannot
-    /// clobber the current value.
-    pub coding_data_write_seq: u64,
     /// Persisted `[cli].show_tips` mirror. `None` = no override (default `true`).
     pub show_tips: Option<bool>,
     /// Persisted `[cli].auto_update` mirror. `None` = no override (default `true`).
@@ -1196,8 +891,6 @@ pub struct AppView {
     pub pending_gate_verification: Option<pi_shell::auth::GateInfo>,
     /// Generation stamp of the current gate verification.
     pub gate_verify_gen: u64,
-    /// Whether a leader reconnect is in progress (blocks prompt submission).
-    pub reconnect_pending: bool,
     /// Structured startup warnings collected from the terminal diagnostics
     /// engine at launch. Empty when the environment is healthy.
     pub startup_warnings: Vec<crate::startup::StartupWarning>,
@@ -1210,18 +903,11 @@ pub struct AppView {
     /// When true, the event loop should exit so the user can relaunch
     /// to pick up the downloaded update.
     pub quit_for_update: bool,
-    /// Generation and state for the one launch-scoped foreign resume detection.
-    pub(crate) foreign_resume_launch_generation: u64,
-    pub(crate) foreign_resume_launch: Option<crate::app::foreign_sessions::ForeignResumeLaunch>,
     /// When set, the event loop should exit and the process re-exec into the
     /// other screen mode. Driven by `/minimal` and `/fullscreen`. Captures the
     /// session id at action time so a later teardown cannot drop `--resume`.
     pub relaunch: Option<ScreenModeRelaunch>,
-    /// Whether importable `.claude/` settings were detected at startup.
-    pub has_claude_import: bool,
-    /// When set, the welcome screen renders an interactive import modal instead of normal content.
-    pub import_claude_modal: Option<crate::views::import_claude_modal::ImportClaudeModalState>,
-    /// Doc viewer overlay for the welcome screen (release notes via Ctrl+L).
+    /// Doc viewer overlay for the welcome screen (`/docs <guide>`).
     pub welcome_doc_viewer: Option<crate::views::modal::ActiveModal>,
     /// Whether the pager uses fullscreen (alt-screen) or inline mode.
     /// Set from the resolved terminal state at startup; updated by the
@@ -1233,18 +919,6 @@ pub struct AppView {
     /// works over both the welcome screen and an agent session. Opened by
     /// `/tutorial` (also in the command palette).
     pub tutorial: Option<crate::views::tutorial::TutorialState>,
-    /// Agent Dashboard state. `Some(_)` only when the dashboard view
-    /// is active (`active_view == AgentDashboard`) or recently closed.
-    /// Held outside the `ActiveView` discriminant because `DashboardState`
-    /// is not `Copy` (owns its prompt widget, peek panel, etc.).
-    pub dashboard: Option<crate::views::dashboard::DashboardState>,
-    /// Where to return when leaving the dashboard. See [`DashboardReturn`].
-    pub dashboard_return: Option<DashboardReturn>,
-    /// Persisted dashboard configuration (pinned rows, reorderings,
-    /// grouping). Loaded once on startup from
-    /// `~/.grok/config.toml`. `None` when the file/section is absent
-    /// or contained malformed data — falls back to in-memory defaults.
-    pub dashboard_persisted: Option<crate::views::dashboard::PersistedDashboard>,
     /// Per-platform key event normalizer.
     ///
     /// NOTE: new event consumers that bypass `AppView::handle_input`
@@ -1289,10 +963,7 @@ fn privacy_banner_reshow_elapsed(acked_at: &str, reshow_days: Option<u64>) -> bo
 impl AppView {
     /// Finishes startup if this view still holds the obligation; does nothing after.
     pub(crate) fn finish_startup(&mut self, outcome: pi_telemetry::startup::StartupOutcome) {
-        pi_telemetry::startup::PendingStartup::finish_held(
-            &mut self.pending_startup,
-            outcome,
-        );
+        pi_telemetry::startup::PendingStartup::finish_held(&mut self.pending_startup, outcome);
     }
     /// Releases the obligation without recording; does nothing after finish.
     pub(crate) fn abandon_startup(&mut self) {
@@ -1318,23 +989,6 @@ impl AppView {
                 .team_role
                 .as_deref()
                 .is_some_and(|r| r.eq_ignore_ascii_case("admin"))
-    }
-    /// Whether `/feedback` may offer the trace-consent card: the shell
-    /// advertised the offer and no card answer latched it off this session.
-    /// Derived so no code path can fabricate an offer the shell never made.
-    pub fn feedback_trace_offer(&self) -> bool {
-        self.shell_feedback_trace_offer && !self.feedback_trace_choice_latched
-    }
-    /// Why `coding_data_sharing` is locked for this user (`None` = editable).
-    /// Mirrors the dispatch guards in `set_coding_data_sharing`.
-    pub fn coding_data_sharing_lock(&self) -> Option<crate::settings::CodingDataSharingLock> {
-        if self.is_zdr {
-            Some(crate::settings::CodingDataSharingLock::Zdr)
-        } else if self.is_team_non_admin() {
-            Some(crate::settings::CodingDataSharingLock::TeamManaged)
-        } else {
-            None
-        }
     }
     /// Welcome privacy banner visibility gates.
     pub fn privacy_banner_should_show(&self) -> bool {
@@ -1369,9 +1023,7 @@ impl AppView {
     /// startup sites; trust is gated AFTER auth so a pending trust question
     /// defers session creation until answered.
     pub fn session_startup_allowed(&self) -> bool {
-        matches!(self.auth_state, AuthState::Done)
-            && matches!(self.trust_state, TrustState::Done)
-            && matches!(self.consent_state, ConsentState::Done)
+        matches!(self.auth_state, AuthState::Done) && matches!(self.trust_state, TrustState::Done)
     }
     /// Whether startup type-ahead captured while the app was loading may be
     /// replayed into the input channel: every startup screen that consumes raw
@@ -1385,7 +1037,6 @@ impl AppView {
             && self.has_access()
             && !self.is_zdr_blocked()
             && matches!(self.trust_state, TrustState::Done)
-            && matches!(self.consent_state, ConsentState::Done)
     }
     /// Extract `GateInfo` from `RemoteSettings`.
     pub fn gate_from_settings(
@@ -1405,22 +1056,18 @@ impl AppView {
     pub fn apply_auth_meta(&mut self, meta: &pi_shell::auth::AuthMeta) {
         self.pending_gate_verification = None;
         let was_gated = self.gate.is_some();
-        self.account_email = meta.email.clone();
         self.team_id = meta.team_id.clone();
         self.team_name = meta.team_name.clone();
         self.is_zdr = meta.is_zdr;
         self.team_role = meta.team_role.clone();
         self.coding_data_retention_opt_out = meta.coding_data_retention_opt_out;
-        self.shell_feedback_trace_offer = meta.feedback_trace_offer;
         self.gate = meta.gate.clone();
         if was_gated && self.gate.is_none() {
             self.paywall_check_started = None;
-            pi_telemetry::session_ctx::log_event(
-                pi_telemetry::events::SubscriptionActivated {
-                    auth_method: self.login_method_id.as_ref().map(|id| id.0.to_string()),
-                    upsell_shown_this_session: self.access_gate_shown_logged,
-                },
-            );
+            pi_telemetry::session_ctx::log_event(pi_telemetry::events::SubscriptionActivated {
+                auth_method: self.login_method_id.as_ref().map(|id| id.0.to_string()),
+                upsell_shown_this_session: self.access_gate_shown_logged,
+            });
         }
         self.subscription_tier = meta.subscription_tier.clone();
         let was_api_key = self.is_api_key_auth;
@@ -1445,7 +1092,7 @@ impl AppView {
         }
     }
     /// Mirror billing + `/usage` gates onto every slash surface (agents,
-    /// welcome, dashboard dispatch / peek-reply).
+    /// welcome).
     pub(crate) fn sync_billing_surface_to_agents(&mut self) {
         let billing = self.usage_visible;
         let usage_cmd = !self.has_external_auth_provider;
@@ -1459,20 +1106,6 @@ impl AppView {
         self.welcome_prompt
             .slash_controller
             .set_usage_command_visible(usage_cmd);
-        if let Some(dash) = self.dashboard.as_mut() {
-            dash.dispatch
-                .slash_controller
-                .set_billing_surface_visible(billing);
-            dash.dispatch
-                .slash_controller
-                .set_usage_command_visible(usage_cmd);
-            dash.peek_reply
-                .slash_controller
-                .set_billing_surface_visible(billing);
-            dash.peek_reply
-                .slash_controller
-                .set_usage_command_visible(usage_cmd);
-        }
     }
     /// Force voice on for API-key sessions when only a remote rule left it off.
     /// Requirement / env / config pins still win.
@@ -1497,9 +1130,6 @@ impl AppView {
         let mut welcome_prompt = PromptWidget::new();
         welcome_prompt.adopt_slash_mru(slash_mru.clone());
         welcome_prompt.adopt_command_tags(command_tags.clone());
-        welcome_prompt
-            .slash_controller
-            .enable_pi_standard_slash_menu();
         Self {
             pending_startup: None,
             active_view: ActiveView::Welcome,
@@ -1515,7 +1145,6 @@ impl AppView {
                 .ok()
                 .is_some_and(|c| c.ancestors().any(|p| p.join(".git").exists())),
             acp_tx,
-            bundle_state: BundleState::default(),
             scratch: ScratchBuffer::new(),
             cursor: CursorState::new(),
             pending_action: None,
@@ -1534,8 +1163,6 @@ impl AppView {
             hidden_announcement_ids: Default::default(),
             announcements_last_gen: 0,
             announcement: None,
-            changelog_markdown: None,
-            changelog_bullets: Vec::new(),
             tips: Vec::new(),
             tip: None,
             welcome_prompt,
@@ -1550,35 +1177,24 @@ impl AppView {
             minimal_state: crate::minimal_api::MinimalState::default(),
             welcome_menu_index: None,
             welcome_menu_rects: Vec::new(),
-            welcome_show_changelog_action: false,
-            welcome_import_banner_rect: None,
             last_mouse_pos: None,
             last_scroll_pos: None,
             last_cache_evict_at: None,
             welcome_prompt_rect: None,
             welcome_auth_url_rect: None,
             welcome_on_auth_url: false,
-            welcome_on_changelog_cta: false,
             welcome_announcement: WelcomeAnnouncementState::default(),
             welcome_auth_fallback_rect: None,
             welcome_refresh_rect: None,
             welcome_gate_url_rect: None,
-            welcome_consent_link_rects: Vec::new(),
-            welcome_consent_hover_link: None,
-            consent_answered: None,
             welcome_upgrade_cta_rect: None,
             welcome_privacy_banner_opt_in_rect: None,
             welcome_privacy_banner_opt_out_rect: None,
             welcome_privacy_banner_terms_rect: None,
             welcome_privacy_banner_policy_rect: None,
-            #[cfg(feature = "local-workspace")]
-            welcome_workspace_mode_rects: Default::default(),
-            #[cfg(feature = "local-workspace")]
-            welcome_on_workspace_mode: false,
             welcome_toast: None,
             welcome_on_privacy_banner: false,
             welcome_on_upgrade_cta: false,
-            welcome_changelog_cta_rect: None,
             auth_show_raw_url: false,
             native_select_hold: false,
             session_picker_entries: None,
@@ -1586,18 +1202,7 @@ impl AppView {
             session_picker_state: crate::views::picker::PickerState::with_mode(
                 crate::views::picker::PickerMode::FullScreen,
             ),
-            session_picker_source_filter: crate::views::session_picker::SourceFilter::default(),
-            session_picker_relaxed_notified_for: None,
-            session_picker_content_results: None,
-            session_picker_content_loading: false,
-            session_picker_deep_search_seq: 0,
             session_picker_list_seq: 0,
-            foreign_session_compat: Default::default(),
-            foreign_session_scan_seq: 0,
-            foreign_scan_coordinator: Default::default(),
-            session_picker_lanes: Default::default(),
-            session_picker_detail_generation: 0,
-            session_picker_entries_query: None,
             session_picker_pending_delete: None,
             welcome_tick: 0,
             welcome_shimmer_frame: 0,
@@ -1613,19 +1218,7 @@ impl AppView {
             plan_mode: false,
             subagents: false,
             ask_user: false,
-            chat_mode: false,
-            #[cfg(feature = "local-workspace")]
-            welcome_workspace_mode: crate::views::welcome::WelcomeWorkspaceMode::Sandbox,
-            #[cfg(feature = "local-workspace")]
-            local_workspace_startup_locked: false,
-            #[cfg(feature = "local-workspace")]
-            welcome_session_local_workspace: None,
-            #[cfg(feature = "local-workspace")]
-            welcome_local_workspace_ack_pending: false,
-            #[cfg(feature = "local-workspace")]
-            welcome_history_load_as_build: false,
             mouse_captured: true,
-            new_worktree_dialog: None,
             contextual_hints: Default::default(),
             remote_contextual_hints: None,
             tip_seen_counts: Default::default(),
@@ -1643,8 +1236,6 @@ impl AppView {
             auth_methods: Vec::new(),
             auth_state: AuthState::Done,
             trust_state: TrustState::Done,
-            consent_state: crate::app::consent::ConsentState::Done,
-            account_email: None,
             login_label: None,
             login_method_id: None,
             auth_start_mode: AuthMode::Pending,
@@ -1663,8 +1254,6 @@ impl AppView {
             privacy_notice_rollout: false,
             privacy_banner_reshow_days: None,
             privacy_banner_acked: None,
-            privacy_banner_opt_in_inflight: false,
-            coding_data_write_seq: 0,
             show_tips: None,
             auto_update: None,
             ask_user_question_timeout_enabled: None,
@@ -1679,48 +1268,26 @@ impl AppView {
             subscription_watch_interval_secs: None,
             pending_gate_verification: None,
             gate_verify_gen: 0,
-            reconnect_pending: false,
             startup_warnings: Vec::new(),
             is_api_key_auth: false,
             pending_update_version: None,
-            foreign_resume_launch_generation: 0,
-            foreign_resume_launch: None,
             quit_for_update: false,
             relaunch: None,
-            has_claude_import: false,
-            import_claude_modal: None,
             welcome_doc_viewer: None,
             screen_mode: ScreenMode::Inline,
             pending_screen_mode_switch: None,
             show_resolved_model: true,
             sharing_enabled: false,
-            plugin_cta_enabled: false,
-            plugin_cta_marketplace: None,
-            workspace_dashboard_enabled: false,
             usage_visible: true,
             has_external_auth_provider: false,
             tier_restricted_commands: Vec::new(),
-            leader_mode: false,
             credit_balance: None,
             auto_topup: None,
             billing_poll_wanted: false,
-            leader_roster: Vec::new(),
-            dashboard_local_sessions: Vec::new(),
-            dashboard_sessions_loading: false,
-            shared_prompt_queues: std::collections::HashMap::new(),
-            optimistic_prompt_echoes: std::collections::HashMap::new(),
-            pending_running_adoptions: std::collections::HashMap::new(),
             session_picker_grouped: false,
             scheduler_background_loops_seed: true,
             cancel_rewind_enabled: true,
-            session_recap_available: false,
-            shell_feedback_trace_offer: false,
-            feedback_trace_choice_latched: false,
-            feedback_trace_upload_pending: None,
             tutorial: None,
-            dashboard: None,
-            dashboard_return: None,
-            dashboard_persisted: None,
             keyboard_normalizer: KeyboardNormalizer::from_terminal_context(),
             voice_mode_enabled: false,
             voice_ui_active: false,
@@ -1733,7 +1300,7 @@ impl AppView {
     /// Seed `deferred_model_switch` from CLI `-m`. The CLI effort token is
     /// resolved later against the authoritative session catalog in
     /// [`take_deferred_model_switch`](crate::app::dispatch::session::lifecycle::take_deferred_model_switch);
-    /// resolving it here would use the pre-session dashboard catalog and a
+    /// resolving it here would use the pre-session catalog and a
     /// remapped menu id could resolve differently.
     pub fn deferred_model_switch_from_cli(&self) -> Option<crate::app::agent::DeferredModelSwitch> {
         Some(crate::app::agent::DeferredModelSwitch {
@@ -1758,7 +1325,6 @@ impl AppView {
         self.voice_mode_enabled && pi_voice::AUDIO_SUPPORTED
     }
     /// Sync voice availability into slash surfaces, cheatsheet, and settings.
-    /// Mirrors `apply_session_recap_available` for `/recap`.
     pub fn apply_voice_mode_enabled(&mut self, enabled: bool) {
         self.voice_mode_enabled = enabled;
         crate::app::VOICE_MODE_ENABLED.store(enabled, std::sync::atomic::Ordering::Release);
@@ -1778,9 +1344,6 @@ impl AppView {
             }
         }
         self.welcome_prompt.set_voice_visible(enabled);
-        if let Some(dashboard) = self.dashboard.as_mut() {
-            dashboard.set_voice_visible(enabled);
-        }
     }
     /// Sync the auto permission-mode feature gate into every slash surface.
     /// `/auto` is hard-hidden when `self.auto_mode_gate` is off; otherwise both
@@ -1793,17 +1356,14 @@ impl AppView {
             agent.prompt.set_auto_mode_available(available);
         }
         self.welcome_prompt.set_auto_mode_available(available);
-        if let Some(dashboard) = self.dashboard.as_mut() {
-            dashboard.set_auto_mode_available(available);
-        }
     }
     /// Recompute the tier-restricted slash commands from the current auth
     /// state and sync the deny list into every slash surface (welcome
-    /// prompt, all agents, dashboard) so restricted commands hide/show in
+    /// prompt, all agents) so restricted commands hide/show in
     /// lockstep. Mirrors [`Self::apply_voice_mode_enabled`].
     ///
     /// Called from [`Self::apply_auth_meta`] (startup / login) and from the
- /// `legacy ext RPC` handler when the subscription tier changes, so
+    /// `legacy ext RPC` handler when the subscription tier changes, so
     /// a mid-session upgrade lifts the restrictions without a restart.
     pub fn apply_tier_restrictions(&mut self) {
         let restricted = self.team_name.is_none()
@@ -1822,9 +1382,6 @@ impl AppView {
             agent.set_restricted_commands(&names);
         }
         self.welcome_prompt.set_restricted_commands(&names);
-        if let Some(dashboard) = self.dashboard.as_mut() {
-            dashboard.set_restricted_commands(&names);
-        }
         self.tier_restricted_commands = names;
     }
     /// Whether voice mode is withheld for the current subscription tier
@@ -1861,9 +1418,6 @@ impl AppView {
                 .prompt
                 .slash_controller
                 .set_has_session_announcements(has);
-            for child in agent.subagent_views.values_mut() {
-                child.set_has_session_announcements(has);
-            }
         }
     }
     /// Mic is live (the [`VoiceState::Recording`] state).
@@ -1958,52 +1512,26 @@ impl AppView {
     }
     /// Whether the active view still owns the bound dictation `target` — i.e. the
     /// box dictation started in is the one currently on screen and selected. The
-    /// target is bound at capture start; on the dashboard that means dispatch
-    /// requires no peek open, a peek reply requires the *same* top-level row still
-    /// peeked (the shared reply widget clears on row change), and any open
-    /// attached-agent popup (which occludes the dashboard inputs) disqualifies it.
-    /// `false` when no dictation is bound.
+    /// target is bound at capture start. `false` when no dictation is bound.
     fn voice_target_on_active_surface(&self) -> bool {
         let Some(target) = self.voice_recording_target() else {
             return false;
         };
-        if matches!(self.active_view, ActiveView::AgentDashboard)
-            && self
-                .dashboard
-                .as_ref()
-                .is_some_and(|d| d.attached_agent.is_some())
-        {
-            return false;
-        }
-        let peeked_top_level = self
-            .dashboard
-            .as_ref()
-            .and_then(|d| match d.peek.as_ref()?.row {
-                crate::views::dashboard::DashboardRowId::TopLevel(id) => Some(id),
-                _ => None,
-            });
         match (self.active_view, target) {
             (ActiveView::Agent(active), VoiceTarget::Agent(rec)) => active == rec,
-            (ActiveView::AgentDashboard, VoiceTarget::DashboardDispatch) => {
-                self.dashboard.as_ref().is_none_or(|d| d.peek.is_none())
-            }
-            (ActiveView::AgentDashboard, VoiceTarget::DashboardPeekReply(rec)) => {
-                peeked_top_level == Some(rec)
-            }
             _ => false,
         }
     }
     /// Auto-release the mic if the user navigates away from the box that started
-    /// recording (another agent / dashboard popup / a changed peek row). Keeps
-    /// stop controls and the recording session aligned. Event-loop each tick;
-    /// no-op unless recording.
+    /// recording (e.g. another agent). Keeps stop controls and the recording
+    /// session aligned. Event-loop each tick; no-op unless recording.
     pub fn enforce_voice_session_bound(&mut self) {
         if !self.voice_state.listening() || self.voice_target_on_active_surface() {
             return;
         }
         self.voice_reset();
     }
-    /// Esc handling shared by the agent and dashboard surfaces: while voice is
+    /// Esc handling shared by the agent surfaces: while voice is
     /// active, Esc aborts it (and consumes the key) rather than falling into the
     /// surface's own Esc behaviour. Gated on voice state only (not the remote
     /// flag) so Esc can always abort. `None` means Esc isn't ours — the caller
@@ -2034,33 +1562,16 @@ impl AppView {
     /// tracing pane (step 1a consumes all non-global keys), the cloud modal
     /// (step 1d), the import-Claude modal (agent-arm intercept),
     /// [`Self::voice_esc_outcome`] — listening OR pending cold-start, the
-    /// handler's actual condition, not the render-only recording flag — and
-    /// the dashboard's attached-agent popup (dashboard-arm intercept). Keep
+    /// handler's actual condition, not the render-only recording flag. Keep
     /// this list in lockstep with those intercepts when adding a top-level
     /// Esc owner.
     pub(crate) fn esc_owned_before_agent(&self) -> bool {
-        if matches!(self.active_view, ActiveView::AgentDashboard)
-            && self
-                .dashboard
-                .as_ref()
-                .and_then(|d| d.attached_agent)
-                .is_some_and(|id| self.agents.contains_key(&id))
-        {
-            return true;
-        }
-        self.import_claude_modal.is_some()
-            || self.voice_listening()
-            || self.voice_state.pending_cold_start()
+        self.voice_listening() || self.voice_state.pending_cold_start()
     }
     /// Commit interim on real send keys only (not multiline bare Enter).
     fn maybe_commit_voice_interim_before_submit_key(&mut self, key: &crossterm::event::KeyEvent) {
-        if self.registry.matches_id(ActionId::InterjectPrompt, key) {
-            let _ = crate::voice::commit_interim_into_prompt(self);
-            return;
-        }
         let multiline = match self.active_view {
             ActiveView::Agent(id) => self.agents.get(&id).is_some_and(|a| a.multiline_mode),
-            ActiveView::AgentDashboard => self.dashboard.as_ref().is_some_and(|d| d.multiline_mode),
             _ => false,
         };
         let is_send = if multiline {
@@ -2096,56 +1607,16 @@ impl AppView {
     }
     /// Show a toast on the currently active view.
     ///
-    /// From the dashboard, toasts route into the dispatch input's inline
-    /// error slot. From an agent view the existing per-agent toast machinery
-    /// fires. On welcome, an overlay above the prompt for
-    /// [`WELCOME_TOAST_DURATION`].
-    ///
-    /// Reconnect success copy is skipped when a leader version-mismatch toast
-    /// is already showing: registration (and thus the mismatch notif) finishes
-    /// during reconnect, and the later "Reconnected." / "Session restored…"
-    /// line would hide a still-true skew. Restore-failed and connection-failed
-    /// toasts still replace it.
+    /// From an agent view the existing per-agent toast machinery fires. On
+    /// welcome, an overlay above the prompt for [`WELCOME_TOAST_DURATION`].
     pub fn show_toast(&mut self, msg: &str) {
         match self.active_view {
             ActiveView::Agent(id) => {
                 if let Some(agent) = self.agents.get_mut(&id) {
-                    if let Some(child_sid) = agent.active_subagent.clone()
-                        && let Some(child) = agent.subagent_views.get_mut(&child_sid)
-                    {
-                        if reconnect_success_hides_mismatch(
-                            child.toast.as_ref().map(|(m, _)| m.as_str()),
-                            msg,
-                        ) {
-                            return;
-                        }
-                        child.show_toast(msg);
-                    } else {
-                        if reconnect_success_hides_mismatch(
-                            agent.toast.as_ref().map(|(m, _)| m.as_str()),
-                            msg,
-                        ) {
-                            return;
-                        }
-                        agent.show_toast(msg);
-                    }
-                }
-            }
-            ActiveView::AgentDashboard => {
-                if let Some(d) = self.dashboard.as_mut() {
-                    if reconnect_success_hides_mismatch(d.error_toast.as_deref(), msg) {
-                        return;
-                    }
-                    d.error_toast = Some(crate::glyphs::sanitize_toast_message(msg).into_owned());
+                    agent.show_toast(msg);
                 }
             }
             ActiveView::Welcome => {
-                if reconnect_success_hides_mismatch(
-                    self.welcome_toast.as_ref().map(|(m, _)| m.as_str()),
-                    msg,
-                ) {
-                    return;
-                }
                 self.welcome_toast = Some((
                     crate::glyphs::sanitize_toast_message(msg).into_owned(),
                     std::time::Instant::now() + WELCOME_TOAST_DURATION,
@@ -2153,165 +1624,11 @@ impl AppView {
             }
         }
     }
-    /// Insert or replace a leader roster entry, keyed by `session_id`.
-    pub fn upsert_roster_entry(&mut self, entry: crate::app::roster::RosterEntry) {
-        if let Some(existing) = self
-            .leader_roster
-            .iter_mut()
-            .find(|e| e.session_id == entry.session_id)
-        {
-            *existing = entry;
-        } else {
-            self.leader_roster.push(entry);
-        }
-    }
-    /// Remove a leader roster entry by `session_id`.
-    pub fn remove_roster_entry(&mut self, sid: &str) {
-        self.leader_roster.retain(|e| e.session_id != sid);
-    }
-    /// The roster source the dashboard renders alongside locally-hosted
-    /// agents. In leader mode this is the live leader roster (FleetView). With
-    /// no leader there is nothing to poll, so we fall back to the local
-    /// on-disk session list ([`Self::dashboard_local_sessions`]) so the
-    /// dashboard still shows idle/dormant sessions instead of being empty.
-    pub fn dashboard_roster(&self) -> &[crate::app::roster::RosterEntry] {
-        if self.leader_mode {
-            &self.leader_roster
-        } else {
-            &self.dashboard_local_sessions
-        }
-    }
-    /// Reconcile the shared prompt queue for a session from a
- /// `legacy ext RPC` broadcast. The broadcast is
-    /// authoritative: it fully replaces the previously-known queue for that
-    /// session. An empty list clears the entry.
-    ///
-    /// Returns `(old_id, new_id)` for echoes retired via the kind+text
-    /// fallback (re-keyed: the old id never appears in any broadcast). The
-    /// caller routes these through `AgentView::note_queue_echo_rekeyed` so
-    /// per-agent state moves with the message instead of leaking.
-    pub fn apply_queue_changed(
-        &mut self,
-        changed: crate::app::prompt_queue::QueueChanged,
-    ) -> Vec<(String, String)> {
-        let crate::app::prompt_queue::QueueChanged {
-            session_id,
-            mut entries,
-            running_prompt_id,
-            running_text: _,
-            running_kind: _,
-            running_combined_texts: _,
-        } = changed;
-        let mut rekeyed_echo_ids: Vec<(String, String)> = Vec::new();
-        let running_row: Option<(String, String)> = running_prompt_id.as_ref().and_then(|pid| {
-            self.shared_prompt_queues
-                .get(&session_id)
-                .and_then(|q| q.iter().find(|e| &e.id == pid))
-                .map(|e| (e.kind.clone(), e.text.clone()))
-        });
-        if let Some(opt) = self.optimistic_prompt_echoes.get_mut(&session_id) {
-            opt.retain(|e| {
-                let id_matches_running = running_prompt_id.as_deref() == Some(e.id.as_str());
-                let id_matches_entry = entries.iter().any(|x| x.id == e.id);
-                let content_match_id = running_row
-                    .as_ref()
-                    .filter(|(kind, text)| *kind == e.kind && *text == e.text)
-                    .and_then(|_| running_prompt_id.clone())
-                    .or_else(|| {
-                        entries
-                            .iter()
-                            .find(|x| x.kind == e.kind && x.text == e.text)
-                            .map(|x| x.id.clone())
-                    });
-                let retired = id_matches_running || id_matches_entry || content_match_id.is_some();
-                if retired
-                    && !id_matches_running
-                    && !id_matches_entry
-                    && let Some(new_id) = content_match_id
-                {
-                    rekeyed_echo_ids.push((e.id.clone(), new_id));
-                }
-                !retired
-            });
-            for e in opt.iter() {
-                if !entries.iter().any(|x| x.id == e.id) {
-                    let mut pinned = e.clone();
-                    pinned.position = entries.len();
-                    entries.push(pinned);
-                }
-            }
-            if opt.is_empty() {
-                self.optimistic_prompt_echoes.remove(&session_id);
-            }
-        }
-        if entries.is_empty() {
-            self.shared_prompt_queues.remove(&session_id);
-        } else {
-            self.shared_prompt_queues.insert(session_id, entries);
-        }
-        rekeyed_echo_ids
-    }
-    /// Push an optimistic echo row for a server-authoritative prompt the pager
-    /// just sent (a plain prompt or agent-bound kind typed while a turn is
-    /// running). The row is keyed by `prompt_id` so the authoritative
- /// `legacy ext RPC` broadcast replaces it (matched by `id`) rather than
-    /// duplicating it. `kind` (`"prompt"`/`"bash"`/…) drives the row's display
-    /// and, on adoption, the turn-start shim's block + focus flag.
-    pub fn push_optimistic_prompt_echo(
-        &mut self,
-        session_id: &str,
-        prompt_id: &str,
-        text: &str,
-        kind: &str,
-    ) {
-        let entry = crate::app::prompt_queue::QueueEntryWire {
-            id: prompt_id.to_string(),
-            version: 0,
-            owner: None,
-            last_editor: None,
-            kind: kind.to_string(),
-            text: text.to_string(),
-            combined_texts: None,
-            position: 0,
-        };
-        let opt = self
-            .optimistic_prompt_echoes
-            .entry(session_id.to_string())
-            .or_default();
-        if !opt.iter().any(|e| e.id == entry.id) {
-            opt.push(entry.clone());
-        }
-        let shared = self
-            .shared_prompt_queues
-            .entry(session_id.to_string())
-            .or_default();
-        if !shared.iter().any(|e| e.id == entry.id) {
-            let mut e = entry;
-            e.position = shared.len();
-            shared.push(e);
-        }
-    }
-    /// The shared (server-authoritative) prompt queue for a session, if any.
-    pub fn shared_prompt_queue(
-        &self,
-        session_id: &str,
-    ) -> Option<&Vec<crate::app::prompt_queue::QueueEntryWire>> {
-        self.shared_prompt_queues.get(session_id)
-    }
     /// Apply a (possibly hot-reloaded) appearance config to all agents.
     pub fn set_appearance(&mut self, config: AppearanceConfig) {
         crate::render::bidi::set_enabled(config.scrollback.display.rtl_bidi);
         for agent in self.agents.values_mut() {
             agent.scrollback.set_appearance(config.clone());
-            for child in agent.subagent_views.values_mut() {
-                child.scrollback.set_appearance(config.clone());
-                child.prompt.sync_tab_width_from_appearance();
-            }
-            agent
-                .prompt
-                .slash_controller
-                .registry_mut()
-                .set_plugins_visible(!config.disable_plugins);
             agent.prompt.sync_tab_width_from_appearance();
         }
         self.welcome_prompt.sync_tab_width_from_appearance();
@@ -2339,19 +1656,15 @@ impl AppView {
         }
     }
     /// Viewport height (rows) of the surface a scroll would move — the
-    /// active agent's (or its fullscreen subagent's) scrollback pane, as
-    /// measured at the last draw. 0 = unknown (welcome/dashboard views),
-    /// which keeps the trackpad per-flush cap at its floor.
+    /// active agent's scrollback pane, as measured at the last draw.
+    /// 0 = unknown (welcome view), which keeps the trackpad per-flush cap at
+    /// its floor.
     fn scroll_viewport_height(&self) -> u16 {
         match self.active_view {
-            ActiveView::Agent(id) => self.agents.get(&id).map_or(0, |agent| {
-                let scrollback = agent
-                    .active_subagent
-                    .as_ref()
-                    .and_then(|sid| agent.subagent_views.get(sid))
-                    .map_or(&agent.scrollback, |child| &child.scrollback);
-                scrollback.scroll_info().1
-            }),
+            ActiveView::Agent(id) => self
+                .agents
+                .get(&id)
+                .map_or(0, |agent| agent.scrollback.scroll_info().1),
             _ => 0,
         }
     }
@@ -2372,11 +1685,7 @@ impl AppView {
             .debug_snapshot(&config, std::time::Instant::now());
         let view = match self.active_view {
             ActiveView::Agent(id) => self.agents.get(&id).map(|agent| {
-                let scrollback = agent
-                    .active_subagent
-                    .as_ref()
-                    .and_then(|sid| agent.subagent_views.get(sid))
-                    .map_or(&agent.scrollback, |child| &child.scrollback);
+                let scrollback = &agent.scrollback;
                 let (scroll_offset, viewport, total_height) = scrollback.scroll_info();
                 let max_offset = total_height.saturating_sub(viewport as usize);
                 crate::views::scroll_debug_hud::ViewportDebug {
@@ -2406,12 +1715,6 @@ impl AppView {
         match self.active_view {
             ActiveView::Agent(id) => {
                 if let Some(agent) = self.agents.get_mut(&id) {
-                    if let Some(child_sid) = agent.active_subagent.clone()
-                        && let Some(child) = agent.subagent_views.get_mut(&child_sid)
-                    {
-                        child.handle_scroll(lines, column, row);
-                        return;
-                    }
                     agent.handle_scroll(lines, column, row);
                 }
             }
@@ -2420,69 +1723,6 @@ impl AppView {
                     self.welcome_doc_viewer.as_mut()
                 {
                     crate::views::modal::apply_doc_scroll_delta(scroll, lines);
-                }
-            }
-            ActiveView::AgentDashboard => {
-                let popup_target = self.dashboard.as_ref().and_then(|d| {
-                    d.attached_agent
-                        .zip(d.popup_outer_rect)
-                        .filter(|(_, outer)| {
-                            column >= outer.x
-                                && column < outer.x + outer.width
-                                && row >= outer.y
-                                && row < outer.y + outer.height
-                        })
-                });
-                if let Some((agent_id, _outer)) = popup_target {
-                    if let Some(agent) = self.agents.get_mut(&agent_id) {
-                        if let Some(child_sid) = agent.active_subagent.clone()
-                            && let Some(child) = agent.subagent_views.get_mut(&child_sid)
-                        {
-                            child.handle_scroll(lines, column, row);
-                            return;
-                        }
-                        agent.handle_scroll(lines, column, row);
-                    }
-                    return;
-                }
-                let in_file_search_dropdown = self
-                    .dashboard
-                    .as_ref()
-                    .and_then(|d| d.file_search_dropdown_items_area)
-                    .is_some_and(|dd| {
-                        column >= dd.x
-                            && column < dd.x + dd.width
-                            && row >= dd.y
-                            && row < dd.y + dd.height
-                    });
-                if in_file_search_dropdown {
-                    if let Some(ref mut dashboard) = self.dashboard {
-                        dashboard
-                            .dropdown_file_search_mut()
-                            .move_selection(lines.signum() as isize);
-                    }
-                    return;
-                }
-                let in_slash_dropdown = self
-                    .dashboard
-                    .as_ref()
-                    .and_then(|d| d.slash_dropdown_items_area)
-                    .is_some_and(|dd| {
-                        column >= dd.x
-                            && column < dd.x + dd.width
-                            && row >= dd.y
-                            && row < dd.y + dd.height
-                    });
-                if in_slash_dropdown {
-                    if let Some(ref mut dashboard) = self.dashboard {
-                        dashboard
-                            .dispatch
-                            .slash_scroll_selection(lines.signum() as isize);
-                    }
-                    return;
-                }
-                if let Some(ref mut dashboard) = self.dashboard {
-                    dashboard.handle_scroll(lines);
                 }
             }
         }
@@ -2519,9 +1759,6 @@ impl AppView {
         if let Event::Resize(_, rows) = ev {
             for agent in self.agents.values_mut() {
                 agent.note_terminal_resize();
-                for child in agent.subagent_views.values_mut() {
-                    child.note_terminal_resize();
-                }
             }
             self.last_known_terminal_rows = *rows;
             self.apply_effective_compact();
@@ -2529,17 +1766,15 @@ impl AppView {
         if let Some(key) = key_event
             && let Some(pending) = &self.pending_action
         {
-            let stale_idle_arm_while_busy = matches!(
-                pending.action,
-                Action::ClearPrompt | Action::RewindShowPicker
-            ) && matches!(
-                self.active_view,
-                ActiveView::Agent(id) if self.agents.get(&id).is_some_and(|a| {
-                    a.session.state.is_turn_running()
-                        || a.session.state.is_cancelling()
-                        || a.wake_turn_active()
-                })
-            );
+            let stale_idle_arm_while_busy = matches!(pending.action, Action::ClearPrompt)
+                && matches!(
+                    self.active_view,
+                    ActiveView::Agent(id) if self.agents.get(&id).is_some_and(|a| {
+                        a.session.state.is_turn_running()
+                            || a.session.state.is_cancelling()
+                            || a.wake_turn_active()
+                    })
+                );
             if !stale_idle_arm_while_busy && !pending.expired() && pending.shortcut.matches(key) {
                 let action = self.pending_action.take().unwrap().action;
                 return InputOutcome::Action(action);
@@ -2567,14 +1802,6 @@ impl AppView {
         }
         if let Event::Mouse(mouse) = ev {
             self.last_mouse_pos = Some((mouse.column, mouse.row));
-            let is_mouse_action = matches!(
-                mouse.kind,
-                MouseEventKind::Down(MouseButton::Left)
-                    | MouseEventKind::Drag(MouseButton::Left)
-                    | MouseEventKind::Up(MouseButton::Left)
-                    | MouseEventKind::Moved
-            );
-            if is_mouse_action {}
         }
         if let Some(tutorial) = self.tutorial.as_mut()
             && matches!(ev, Event::Key(_) | Event::Mouse(_) | Event::Paste(_))
@@ -2589,50 +1816,27 @@ impl AppView {
         }
         let zdr_blocked = self.is_zdr_blocked();
         let has_access = self.has_access();
-        let welcome_pinned_upgrade_cta = crate::views::announcements::promo_cta(
-            &self.active_announcements,
-            &self.hidden_announcement_ids,
-        )
-        .is_some_and(|(owner, _, _)| !crate::views::announcements::is_dismissible(owner));
-        let has_foreign_resume = self.foreign_resume_hint().is_some();
         let sp_loading = crate::views::session_picker::loading_spinner_active(
             self.session_picker_entries.as_deref(),
-            self.session_picker_source_filter,
             self.session_picker_loading,
-            &self.session_picker_lanes,
         );
-        #[cfg(feature = "local-workspace")]
-        let session_picker_open = self.session_picker_entries.is_some() || sp_loading;
         let outcome = match self.active_view {
             ActiveView::Welcome => handle_welcome_input(
                 ev,
                 &mut WelcomeInputCtx {
                     auth_state: &self.auth_state,
                     trust_state: &self.trust_state,
-                    consent_state: &self.consent_state,
-                    consent_link_rects: &self.welcome_consent_link_rects,
-                    consent_hover_link: &mut self.welcome_consent_hover_link,
-                    arrived_at,
                     cwd: &self.cwd,
                     mid_session_login: self.auth_return_view.is_some(),
                     auth_code_input: &mut self.auth_code_input,
                     prompt: &mut self.welcome_prompt,
                     prompt_focused: &mut self.welcome_prompt_focused,
-                    new_worktree_dialog: &mut self.new_worktree_dialog,
                     menu_index: &mut self.welcome_menu_index,
                     menu_rects: &self.welcome_menu_rects,
-                    menu_count: if zdr_blocked {
-                        2
-                    } else {
-                        3 + if self.has_claude_import { 1 } else { 0 }
-                            + if self.welcome_show_changelog_action {
-                                1
-                            } else {
-                                0
-                            }
-                    },
+                    // Access gate: CTA / Logout / Quit; otherwise Resume / Quit (or
+                    // Logout / Quit when ZDR-blocked).
+                    menu_count: if !zdr_blocked && !has_access { 3 } else { 2 },
                     prompt_rect: self.welcome_prompt_rect.as_ref(),
-                    import_banner_rect: self.welcome_import_banner_rect.as_ref(),
                     auth_url_rect: self.welcome_auth_url_rect.as_ref(),
                     auth_fallback_rect: self.welcome_auth_fallback_rect.as_ref(),
                     refresh_rect: self.welcome_refresh_rect.as_ref(),
@@ -2644,9 +1848,6 @@ impl AppView {
                     privacy_banner_policy_rect: self.welcome_privacy_banner_policy_rect.as_ref(),
                     on_privacy_banner: &mut self.welcome_on_privacy_banner,
                     on_upgrade_cta: &mut self.welcome_on_upgrade_cta,
-                    upgrade_cta_keyboard: welcome_pinned_upgrade_cta,
-                    changelog_cta_rect: self.welcome_changelog_cta_rect.as_ref(),
-                    on_changelog_cta: &mut self.welcome_on_changelog_cta,
                     announcement_truncated: self.welcome_announcement.truncated,
                     announcement_rect: self.welcome_announcement.rect.as_ref(),
                     on_announcement_cta: &mut self.welcome_announcement.on_cta,
@@ -2657,203 +1858,13 @@ impl AppView {
                     sp_entries: &mut self.session_picker_entries,
                     sp_loading,
                     sp_state: &mut self.session_picker_state,
-                    sp_content_results: &self.session_picker_content_results,
-                    sp_content_loading: self.session_picker_content_loading,
-                    sp_entries_query: &self.session_picker_entries_query,
-                    has_claude_import: self.has_claude_import,
-                    import_claude_modal: &mut self.import_claude_modal,
                     welcome_doc_viewer: &mut self.welcome_doc_viewer,
-                    changelog_markdown: &self.changelog_markdown,
-                    show_changelog_action: self.welcome_show_changelog_action,
                     has_pending_update: self.pending_update_version.is_some(),
-                    has_foreign_resume,
-                    cwd_has_git_ancestor: self.cwd_has_git_ancestor,
                     session_picker_grouped: self.session_picker_grouped,
-                    sp_source_filter: &mut self.session_picker_source_filter,
                     sp_pending_delete: &mut self.session_picker_pending_delete,
-                    chat_mode: self.chat_mode,
-                    #[cfg(feature = "local-workspace")]
-                    workspace_mode: &mut self.welcome_workspace_mode,
-                    #[cfg(feature = "local-workspace")]
-                    workspace_mode_rects: &self.welcome_workspace_mode_rects,
-                    #[cfg(feature = "local-workspace")]
-                    on_workspace_mode: &mut self.welcome_on_workspace_mode,
-                    #[cfg(feature = "local-workspace")]
-                    workspace_mode_startup_locked: self.local_workspace_startup_locked,
-                    #[cfg(feature = "local-workspace")]
-                    workspace_mode_ack_pending: &mut self.welcome_local_workspace_ack_pending,
-                    #[cfg(feature = "local-workspace")]
-                    history_load_as_build: &mut self.welcome_history_load_as_build,
-                    #[cfg(feature = "local-workspace")]
-                    deferred_startup: &mut self.deferred_startup,
-                    #[cfg(feature = "local-workspace")]
-                    session_picker_open,
                 },
             ),
             ActiveView::Agent(id) => {
-                let overlay_active = self
-                    .dashboard
-                    .as_ref()
-                    .is_some_and(|d| d.attached_agent == Some(id));
-                if !overlay_active
-                    && let Event::Key(key) = ev
-                    && key.kind != KeyEventKind::Release
-                {
-                    match self
-                        .registry
-                        .lookup(key, crate::actions::When::DashboardOverlay)
-                    {
-                        Some(crate::actions::ActionId::DashboardOverlayPrev) => {
-                            return InputOutcome::Action(Action::DashboardOverlayPrev);
-                        }
-                        Some(crate::actions::ActionId::DashboardOverlayNext) => {
-                            return InputOutcome::Action(Action::DashboardOverlayNext);
-                        }
-                        _ => {}
-                    }
-                }
-                if overlay_active {
-                    if let Event::Key(key) = ev
-                        && key.kind != KeyEventKind::Release
-                    {
-                        let lookup = self
-                            .registry
-                            .lookup(key, crate::actions::When::DashboardOverlay)
-                            .or_else(|| self.registry.lookup(key, crate::actions::When::Always));
-                        match lookup {
-                            Some(crate::actions::ActionId::OpenDashboard)
-                            | Some(crate::actions::ActionId::DashboardOverlayExit) => {
-                                return InputOutcome::Action(Action::DashboardOverlayExit);
-                            }
-                            Some(crate::actions::ActionId::DashboardOverlayPrev) => {
-                                return InputOutcome::Action(Action::DashboardOverlayPrev);
-                            }
-                            Some(crate::actions::ActionId::DashboardOverlayNext) => {
-                                return InputOutcome::Action(Action::DashboardOverlayNext);
-                            }
-                            Some(crate::actions::ActionId::DashboardOverlayStop) => {
-                                if let Some(agent) = self.agents.get_mut(&id)
-                                    && agent.arm_dashboard_stop()
-                                {
-                                    return InputOutcome::Action(Action::CancelTurn);
-                                }
-                                self.pending_action = Some(PendingAction::with_ttl(
-                                    Action::DashboardOverlayStop,
-                                    KeyShortcut::from(*key),
-                                    Some("close this session"),
-                                    crate::views::dashboard::state::CONFIRM_WINDOW,
-                                ));
-                                return InputOutcome::Changed;
-                            }
-                            _ => {}
-                        }
-                        if key.code == KeyCode::Left
-                            && key.modifiers.is_empty()
-                            && self
-                                .agents
-                                .get(&id)
-                                .is_some_and(|a| a.is_empty_focused_prompt())
-                        {
-                            return InputOutcome::Action(Action::DashboardOverlayExit);
-                        }
-                        if key.code == KeyCode::Esc
-                            && key.modifiers.is_empty()
-                            && self
-                                .agents
-                                .get(&id)
-                                .is_some_and(|a| a.overlay_esc_backs_out_from_prompt())
-                        {
-                            return InputOutcome::Action(Action::DashboardOverlayExit);
-                        }
-                        if key.modifiers.is_empty()
-                            && self.agents.get(&id).is_some_and(|a| match key.code {
-                                KeyCode::Esc => a.overlay_esc_backs_out(),
-                                KeyCode::Left => a.overlay_left_backs_out(),
-                                _ => false,
-                            })
-                        {
-                            return InputOutcome::Action(Action::DashboardOverlayExit);
-                        }
-                        let neutral = self.agents.get(&id).is_some_and(|a| {
-                            a.is_bare_scrollback() && a.no_input_overlay_pending()
-                        });
-                        if key.code == KeyCode::Char('q') && key.modifiers.is_empty() && neutral {
-                            return InputOutcome::Action(Action::DashboardOverlayExit);
-                        }
-                        if key.code == KeyCode::Esc
-                            && key.modifiers.is_empty()
-                            && neutral
-                            && self.agents.get(&id).is_some_and(|a| {
-                                a.no_esc_consumer_pending()
-                                    && !a.session.state.is_turn_running()
-                                    && !a.session.state.is_cancelling()
-                                    && !a.wake_turn_active()
-                            })
-                        {
-                            return InputOutcome::Action(Action::DashboardOverlayExit);
-                        }
-                    }
-                    if let Event::Mouse(mouse) = ev {
-                        use crossterm::event::{MouseButton, MouseEventKind};
-                        match mouse.kind {
-                            MouseEventKind::Moved => {
-                                let mut changed = false;
-                                if let Some(d) = self.dashboard.as_mut() {
-                                    changed |=
-                                        d.overlay_close_hit.update_hover(mouse.column, mouse.row);
-                                    changed |=
-                                        d.overlay_prev_hit.update_hover(mouse.column, mouse.row);
-                                    changed |=
-                                        d.overlay_next_hit.update_hover(mouse.column, mouse.row);
-                                }
-                                if changed {
-                                    return InputOutcome::Changed;
-                                }
-                            }
-                            MouseEventKind::Down(MouseButton::Left) => {
-                                if let Some(d) = self.dashboard.as_ref() {
-                                    if d.overlay_close_hit.contains(mouse.column, mouse.row) {
-                                        return InputOutcome::Action(Action::DashboardOverlayExit);
-                                    }
-                                    if d.overlay_prev_hit.contains(mouse.column, mouse.row) {
-                                        return InputOutcome::Action(Action::DashboardOverlayPrev);
-                                    }
-                                    if d.overlay_next_hit.contains(mouse.column, mouse.row) {
-                                        return InputOutcome::Action(Action::DashboardOverlayNext);
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                if let Some(modal) = self.import_claude_modal.as_mut() {
-                    use crate::views::import_claude_modal::ImportClaudeModalOutcome;
-                    let outcome_to_input = |o: ImportClaudeModalOutcome| match o {
-                        ImportClaudeModalOutcome::Confirmed => {
-                            InputOutcome::Action(Action::ImportClaudeConfirm)
-                        }
-                        ImportClaudeModalOutcome::Cancelled => {
-                            InputOutcome::Action(Action::ImportClaudeCancel)
-                        }
-                        ImportClaudeModalOutcome::Changed => InputOutcome::Changed,
-                        ImportClaudeModalOutcome::Unchanged => InputOutcome::Unchanged,
-                    };
-                    if let Event::Key(key) = ev {
-                        if key.kind == KeyEventKind::Release {
-                            return InputOutcome::Unchanged;
-                        }
-                        return outcome_to_input(modal.handle_key(key));
-                    }
-                    if let Event::Mouse(mouse) = ev {
-                        return outcome_to_input(modal.handle_mouse(
-                            mouse.kind,
-                            mouse.column,
-                            mouse.row,
-                        ));
-                    }
-                    return InputOutcome::Unchanged;
-                }
                 if let Some(outcome) = self.voice_esc_outcome(key_event) {
                     return outcome;
                 }
@@ -2869,11 +1880,9 @@ impl AppView {
                 {
                     return outcome;
                 }
-                let prompt_paging = !overlay_active && !self.screen_mode.is_minimal();
+                let prompt_paging = !self.screen_mode.is_minimal();
                 let outcome = match self.agents.get_mut(&id) {
                     Some(agent) => {
-                        let transcript_before = agent.active_subagent.clone();
-                        let workflows_before = agent.show_workflows;
                         let outcome = if self.screen_mode.is_minimal() {
                             agent.handle_minimal_input(ev, &self.registry)
                         } else if prompt_paging {
@@ -2881,17 +1890,10 @@ impl AppView {
                         } else {
                             agent.handle_input(ev, &self.registry)
                         };
-                        let transcript_opened =
-                            transcript_before.is_none() && agent.active_subagent.is_some();
-                        let workflows_opened = !workflows_before && agent.show_workflows;
                         if let Event::Key(key) = ev {
                             agent.record_input(key, &outcome);
                         }
                         self.pending_effects.append(&mut agent.pending_effects);
-                        if transcript_opened || workflows_opened {
-                            self.scroll_state.cancel_stream();
-                            self.last_scroll_pos = None;
-                        }
                         outcome
                     }
                     None => InputOutcome::Unchanged,
@@ -2904,151 +1906,12 @@ impl AppView {
                     outcome
                 }
             }
-            ActiveView::AgentDashboard => {
-                if let Some(outcome) = self.voice_esc_outcome(key_event) {
-                    return outcome;
-                }
-                if let Event::Key(key) = ev
-                    && key.kind != KeyEventKind::Release
-                {
-                    self.maybe_commit_voice_interim_before_submit_key(key);
-                }
-                let attached_raw = self.dashboard.as_ref().and_then(|d| d.attached_agent);
-                let attached = attached_raw.filter(|id| self.agents.contains_key(id));
-                if attached_raw.is_some()
-                    && attached.is_none()
-                    && let Some(d) = self.dashboard.as_mut()
-                {
-                    d.close_popup();
-                }
-                if let Some(agent_id) = attached {
-                    if let Event::Key(key) = ev
-                        && key.kind != KeyEventKind::Release
-                    {
-                        let close_via_esc = key.code == KeyCode::Esc;
-                        let close_via_action = self
-                            .registry
-                            .lookup(key, crate::actions::When::Always)
-                            .is_some_and(|id| {
-                                matches!(
-                                    id,
-                                    crate::actions::ActionId::OpenDashboard
-                                        | crate::actions::ActionId::DashboardExit
-                                )
-                            });
-                        if close_via_action || close_via_esc {
-                            if let Some(d) = self.dashboard.as_mut() {
-                                d.close_popup();
-                            }
-                            if let Some(agent) = self.agents.get_mut(&agent_id) {
-                                agent.close_subagent_fullscreen();
-                            }
-                            return InputOutcome::Changed;
-                        }
-                    }
-                    if let Event::Mouse(mouse) = ev
-                        && matches!(
-                            mouse.kind,
-                            crossterm::event::MouseEventKind::Down(
-                                crossterm::event::MouseButton::Left
-                            )
-                        )
-                    {
-                        let (close_rect, outer_rect, row_target) = {
-                            let dash = self.dashboard.as_ref();
-                            let close_rect = dash.and_then(|d| d.popup_close_rect);
-                            let outer_rect = dash.and_then(|d| d.popup_outer_rect);
-                            let row_target = dash.and_then(|d| {
-                                d.row_rects
-                                    .iter()
-                                    .find(|(_, r)| {
-                                        mouse.column >= r.x
-                                            && mouse.column < r.x + r.width
-                                            && mouse.row >= r.y
-                                            && mouse.row < r.y + r.height
-                                    })
-                                    .map(|(id, _)| id.clone())
-                            });
-                            (close_rect, outer_rect, row_target)
-                        };
-                        let in_close = close_rect.is_some_and(|r| {
-                            mouse.column >= r.x
-                                && mouse.column < r.x + r.width
-                                && mouse.row >= r.y
-                                && mouse.row < r.y + r.height
-                        });
-                        let in_outer = outer_rect.is_some_and(|r| {
-                            mouse.column >= r.x
-                                && mouse.column < r.x + r.width
-                                && mouse.row >= r.y
-                                && mouse.row < r.y + r.height
-                        });
-                        if in_close {
-                            if let Some(d) = self.dashboard.as_mut() {
-                                d.close_popup();
-                            }
-                            if let Some(agent) = self.agents.get_mut(&agent_id) {
-                                agent.close_subagent_fullscreen();
-                            }
-                            return InputOutcome::Changed;
-                        }
-                        if !in_outer && let Some(target) = row_target {
-                            return InputOutcome::Action(Action::DashboardAttach(target));
-                        }
-                        if !in_outer {
-                            return InputOutcome::Unchanged;
-                        }
-                    }
-                    match self.agents.get_mut(&agent_id) {
-                        Some(agent) => {
-                            let transcript_before = agent.active_subagent.clone();
-                            let workflows_before = agent.show_workflows;
-                            let outcome = agent.handle_input(ev, &self.registry);
-                            let transcript_opened =
-                                transcript_before.is_none() && agent.active_subagent.is_some();
-                            let workflows_opened = !workflows_before && agent.show_workflows;
-                            if let Event::Key(key) = ev {
-                                agent.record_input(key, &outcome);
-                            }
-                            self.pending_effects.append(&mut agent.pending_effects);
-                            if transcript_opened || workflows_opened {
-                                self.scroll_state.cancel_stream();
-                                self.last_scroll_pos = None;
-                            }
-                            if matches!(outcome, InputOutcome::Action(Action::ExitSession)) {
-                                if let Some(d) = self.dashboard.as_mut() {
-                                    d.close_popup();
-                                }
-                                if let Some(agent) = self.agents.get_mut(&agent_id) {
-                                    agent.close_subagent_fullscreen();
-                                }
-                                return InputOutcome::Changed;
-                            }
-                            outcome
-                        }
-                        None => InputOutcome::Unchanged,
-                    }
-                } else if let Some(ref mut dashboard) = self.dashboard {
-                    let outcome = dashboard.handle_input_with_paste_provenance(
-                        ev,
-                        &self.registry,
-                        paste_provenance,
-                    );
-                    self.pending_effects.append(&mut dashboard.pending_effects);
-                    outcome
-                } else {
-                    InputOutcome::Unchanged
-                }
-            }
         };
         if let InputOutcome::Action(Action::Quit) = &outcome {
             return self.apply_quit_confirmation(key_event);
         }
         if let InputOutcome::Action(Action::QuitConfirmed) = &outcome {
             return InputOutcome::Action(Action::Quit);
-        }
-        if let InputOutcome::Action(Action::ExitSessionConfirmed) = &outcome {
-            return InputOutcome::Action(Action::ExitSession);
         }
         if let InputOutcome::ArmPending {
             action,
@@ -3059,11 +1922,6 @@ impl AppView {
         {
             self.pending_action = Some(PendingAction::with_ttl(action, shortcut, label, ttl));
             return InputOutcome::Changed;
-        }
-        if let InputOutcome::Action(Action::ExitSession) = &outcome
-            && matches!(self.active_view, ActiveView::Agent(_))
-        {
-            return self.apply_exit_session_confirmation(key_event);
         }
         if matches!(
             outcome,
@@ -3119,10 +1977,7 @@ impl AppView {
         }
         if let Some(key) = key_event
             && (key!('c', CONTROL).matches(key) || key!('d', CONTROL).matches(key))
-            && matches!(
-                self.active_view,
-                ActiveView::Agent(_) | ActiveView::AgentDashboard
-            )
+            && matches!(self.active_view, ActiveView::Agent(_))
         {
             self.pending_action = Some(PendingAction::new(
                 Action::Quit,
@@ -3145,12 +2000,6 @@ impl AppView {
         let action = match action_id {
             ActionId::Quit => Action::Quit,
             ActionId::NewSession => Action::NewSession,
-            ActionId::NewSessionInWorktree => Action::NewWorktreeSession {
-                load_session_id: None,
-                label: None,
-                git_ref: None,
-            },
-            ActionId::OpenDashboard => Action::OpenDashboard,
             ActionId::VoiceToggle => {
                 if !self.current_ui.voice_keybind_enabled.unwrap_or(true) {
                     return InputOutcome::Unchanged;
@@ -3195,32 +2044,10 @@ impl AppView {
             InputOutcome::Action(Action::Quit)
         }
     }
-    /// Apply exit-session confirmation (double-press). Works like quit confirmation
-    /// but transitions to the welcome screen instead of quitting.
-    fn apply_exit_session_confirmation(
-        &mut self,
-        key_event: Option<&crossterm::event::KeyEvent>,
-    ) -> InputOutcome {
-        let Some(key) = key_event else {
-            return InputOutcome::Action(Action::ExitSession);
-        };
-        let Some(def) = self.registry.find(ActionId::ExitSession) else {
-            return InputOutcome::Action(Action::ExitSession);
-        };
-        if def.requires_confirmation {
-            let shortcut = KeyShortcut::from(*key);
-            self.pending_action =
-                Some(PendingAction::new(Action::ExitSession, shortcut, def.label));
-            InputOutcome::Changed
-        } else {
-            InputOutcome::Action(Action::ExitSession)
-        }
-    }
 }
 pub(crate) use crate::views::session_picker::filter_session_entries;
 use crate::views::session_picker::{
-    CONTENT_EXPAND_OFFSET, PickerItem, SessionPickerWorktreeSelection, build_entry_map,
-    session_picker_worktree_selection, sync_session_picker_query_expansion,
+    PickerItem, build_entry_map, sync_session_picker_query_expansion,
 };
 /// Context for welcome-view input handling.
 struct WelcomeInputCtx<'a> {
@@ -3228,11 +2055,6 @@ struct WelcomeInputCtx<'a> {
     /// Folder-trust state. When `Pending` (and auth is `Done`), the trust
     /// question intercepts keys and swallows the rest so no session starts.
     trust_state: &'a TrustState,
-    consent_state: &'a ConsentState,
-    consent_link_rects: &'a [(usize, ratatui::layout::Rect)],
-    consent_hover_link: &'a mut Option<usize>,
-    /// When this event reached the process, so a key typed before the notice painted is no answer.
-    arrived_at: Instant,
     /// Live working directory (tracks `Effect::SetWorkingDir`), used to pin
     /// the current repo's group to the top of the session picker.
     cwd: &'a std::path::Path,
@@ -3243,12 +2065,10 @@ struct WelcomeInputCtx<'a> {
     auth_code_input: &'a mut LineEditor,
     prompt: &'a mut PromptWidget,
     prompt_focused: &'a mut bool,
-    new_worktree_dialog: &'a mut Option<NewWorktreeDialogState>,
     menu_index: &'a mut Option<usize>,
     menu_rects: &'a [ratatui::layout::Rect],
     menu_count: usize,
     prompt_rect: Option<&'a ratatui::layout::Rect>,
-    import_banner_rect: Option<&'a ratatui::layout::Rect>,
     auth_url_rect: Option<&'a ratatui::layout::Rect>,
     auth_fallback_rect: Option<&'a ratatui::layout::Rect>,
     refresh_rect: Option<&'a ratatui::layout::Rect>,
@@ -3266,13 +2086,6 @@ struct WelcomeInputCtx<'a> {
     /// Sticky hover flag for the upgrade CTA (redraw on enter/leave so the
     /// button brightens/dims).
     on_upgrade_cta: &'a mut bool,
-    /// A pinned (non-dismissible) promo CTA is live, so `Ctrl+O` opens it
-    /// (the welcome screen has no YOLO toggle to preserve).
-    upgrade_cta_keyboard: bool,
-    /// Hit-test rect for the clickable changelog info block (opens release notes).
-    changelog_cta_rect: Option<&'a ratatui::layout::Rect>,
-    /// Sticky hover flag for the changelog block (redraw on enter/leave).
-    on_changelog_cta: &'a mut bool,
     /// Whether the announcement overflowed — the "expandable" signal for click-to-toggle.
     announcement_truncated: bool,
     /// Hit-test rect for the full announcement block (click anywhere to toggle).
@@ -3289,69 +2102,13 @@ struct WelcomeInputCtx<'a> {
     /// picker still owns input (Esc must dismiss it, not hit the hidden menu).
     sp_loading: bool,
     sp_state: &'a mut crate::views::picker::PickerState,
-    sp_content_results:
-        &'a Option<Vec<pi_shell::extensions::session_search::SearchSessionHit>>,
-    sp_content_loading: bool,
-    /// The query `sp_entries` were server-fetched with (see
-    /// [`crate::views::session_picker::effective_filter_query`]).
-    sp_entries_query: &'a Option<String>,
-    has_claude_import: bool,
-    import_claude_modal: &'a mut Option<crate::views::import_claude_modal::ImportClaudeModalState>,
     welcome_doc_viewer: &'a mut Option<crate::views::modal::ActiveModal>,
-    changelog_markdown: &'a Option<String>,
-    /// Whether the welcome menu currently includes a "Changelog" row (above
-    /// Quit), so index→action mapping accounts for it.
-    show_changelog_action: bool,
     has_pending_update: bool,
-    /// A recent foreign session is available to resume when no update is pending.
-    has_foreign_resume: bool,
-    cwd_has_git_ancestor: bool,
     session_picker_grouped: bool,
-    sp_source_filter: &'a mut crate::views::session_picker::SourceFilter,
     sp_pending_delete: &'a mut Option<crate::views::session_picker::PendingDelete>,
-    /// Process-wide `--chat`: the session picker hides its source filter
-    /// (conversations-only list), so `f` must not cycle it.
-    chat_mode: bool,
-    #[cfg(feature = "local-workspace")]
-    workspace_mode: &'a mut crate::views::welcome::WelcomeWorkspaceMode,
-    #[cfg(feature = "local-workspace")]
-    workspace_mode_rects: &'a crate::views::welcome::WorkspaceModeHitRects,
-    #[cfg(feature = "local-workspace")]
-    on_workspace_mode: &'a mut bool,
-    #[cfg(feature = "local-workspace")]
-    workspace_mode_startup_locked: bool,
-    #[cfg(feature = "local-workspace")]
-    workspace_mode_ack_pending: &'a mut bool,
-    #[cfg(feature = "local-workspace")]
-    history_load_as_build: &'a mut bool,
-    #[cfg(feature = "local-workspace")]
-    deferred_startup: &'a mut crate::app::session_startup::DeferredStartupActions,
-    #[cfg(feature = "local-workspace")]
-    session_picker_open: bool,
 }
 /// Welcome view input -- auth-state-aware routing.
 fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutcome {
-    if let Some(modal) = ctx.import_claude_modal.as_mut() {
-        use crate::views::import_claude_modal::ImportClaudeModalOutcome;
-        let outcome_to_input = |o: ImportClaudeModalOutcome| match o {
-            ImportClaudeModalOutcome::Confirmed => {
-                InputOutcome::Action(Action::ImportClaudeConfirm)
-            }
-            ImportClaudeModalOutcome::Cancelled => InputOutcome::Action(Action::ImportClaudeCancel),
-            ImportClaudeModalOutcome::Changed => InputOutcome::Changed,
-            ImportClaudeModalOutcome::Unchanged => InputOutcome::Unchanged,
-        };
-        if let Event::Key(key) = ev {
-            if key.kind == crossterm::event::KeyEventKind::Release {
-                return InputOutcome::Unchanged;
-            }
-            return outcome_to_input(modal.handle_key(key));
-        }
-        if let Event::Mouse(mouse) = ev {
-            return outcome_to_input(modal.handle_mouse(mouse.kind, mouse.column, mouse.row));
-        }
-        return InputOutcome::Unchanged;
-    }
     if let Some(modal) = ctx.welcome_doc_viewer {
         if let Event::Key(key) = ev {
             if key.kind == crossterm::event::KeyEventKind::Release {
@@ -3400,49 +2157,6 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
         }
         return InputOutcome::Unchanged;
     }
-    if let Some(dialog) = ctx.new_worktree_dialog.as_mut() {
-        let outcome = match ev {
-            Event::Key(key) if key.kind != crossterm::event::KeyEventKind::Release => {
-                dialog.handle_key(key)
-            }
-            Event::Paste(text) => dialog.insert_paste(text),
-            Event::Resize(_, _) => return InputOutcome::Changed,
-            _ => NewWorktreeDialogOutcome::Unchanged,
-        };
-        match outcome {
-            NewWorktreeDialogOutcome::Submitted(label) => {
-                *ctx.new_worktree_dialog = None;
-                return InputOutcome::Action(Action::NewWorktreeSession {
-                    load_session_id: None,
-                    label,
-                    git_ref: None,
-                });
-            }
-            NewWorktreeDialogOutcome::Cancelled => {
-                *ctx.new_worktree_dialog = None;
-                return InputOutcome::Changed;
-            }
-            NewWorktreeDialogOutcome::Changed => return InputOutcome::Changed,
-            NewWorktreeDialogOutcome::Unchanged => return InputOutcome::Unchanged,
-        }
-    }
-    if matches!(ctx.auth_state, AuthState::Done)
-        && ctx.has_access
-        && !ctx.is_zdr_blocked
-        && matches!(ctx.consent_state, ConsentState::Pending { .. })
-    {
-        return crate::app::consent::handle_answer(
-            ev,
-            &mut crate::app::consent::ConsentInputCtx {
-                state: ctx.consent_state,
-                arrived_at: ctx.arrived_at,
-                menu_rects: ctx.menu_rects,
-                link_rects: ctx.consent_link_rects,
-                menu_index: ctx.menu_index,
-                hover_link: ctx.consent_hover_link,
-            },
-        );
-    }
     if matches!(ctx.auth_state, AuthState::Done)
         && ctx.has_access
         && !ctx.is_zdr_blocked
@@ -3485,115 +2199,18 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
         }
         return InputOutcome::Unchanged;
     }
-    #[cfg(feature = "local-workspace")]
-    if *ctx.workspace_mode_ack_pending
-        && matches!(ctx.auth_state, AuthState::Done)
-        && ctx.has_access
-        && !ctx.is_zdr_blocked
-    {
-        if let Event::Key(key) = ev {
-            if key.kind == KeyEventKind::Release {
-                return InputOutcome::Unchanged;
-            }
-            if key!('y').matches(key) || key!('Y').matches(key) || key!(Enter).matches(key) {
-                return InputOutcome::Action(Action::ConfirmWelcomeLocalWorkspaceAck);
-            }
-            if key!('n').matches(key) || key!('N').matches(key) || key!(Esc).matches(key) {
-                *ctx.workspace_mode_ack_pending = false;
-                *ctx.workspace_mode = crate::views::welcome::WelcomeWorkspaceMode::Sandbox;
-                let was_worktree = ctx.deferred_startup.worktree;
-                ctx.deferred_startup.worktree = false;
-                ctx.deferred_startup.worktree_label = None;
-                ctx.deferred_startup.worktree_ref = None;
-                if was_worktree {
-                    ctx.deferred_startup.session = None;
-                    ctx.deferred_startup.preferred_session_id = None;
-                }
-                *ctx.history_load_as_build = false;
-                ctx.deferred_startup.history_load_as_build = false;
-                crate::views::welcome::workspace_mode::log_welcome_ack("cancelled");
-                return InputOutcome::Changed;
-            }
-            return InputOutcome::Unchanged;
-        }
-        if matches!(ev, Event::Resize(_, _)) {
-            return InputOutcome::Changed;
-        }
-        return InputOutcome::Unchanged;
-    }
-    #[cfg(feature = "local-workspace")]
-    if crate::views::welcome::workspace_mode::picker_interactive(
-        ctx.chat_mode,
-        ctx.has_access,
-        matches!(ctx.auth_state, AuthState::Done),
-        ctx.is_zdr_blocked,
-        ctx.session_picker_open,
-        ctx.workspace_mode_startup_locked,
-    ) {
-        if let Event::Key(key) = ev
-            && key.kind != KeyEventKind::Release
-            && key!('e', CONTROL).matches(key)
-        {
-            *ctx.workspace_mode = ctx.workspace_mode.cycle_next();
-            crate::views::welcome::workspace_mode::log_welcome_mode_selected(
-                *ctx.workspace_mode,
-                "ctrl_e",
-                ctx.workspace_mode_startup_locked,
-            );
-            return InputOutcome::Changed;
-        }
-        if let Event::Mouse(mouse) = ev
-            && matches!(
-                mouse.kind,
-                crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left)
-            )
-            && let Some(mode) = crate::views::welcome::hit_test_workspace_mode(
-                ctx.workspace_mode_rects,
-                mouse.column,
-                mouse.row,
-            )
-        {
-            *ctx.workspace_mode = mode;
-            crate::views::welcome::workspace_mode::log_welcome_mode_selected(
-                mode,
-                "click",
-                ctx.workspace_mode_startup_locked,
-            );
-            return InputOutcome::Changed;
-        }
-    }
     if (ctx.sp_entries.is_some() || ctx.sp_loading) && matches!(ctx.auth_state, AuthState::Done) {
         use crate::views::picker::{PickerConfig, PickerOutcome, handle_picker_input};
-        let source_filter = *ctx.sp_source_filter;
         let current_repo =
             crate::views::session_picker::repo_name_from_cwd(&ctx.cwd.to_string_lossy());
         let entry_map = build_entry_map(
             ctx.sp_entries.as_deref(),
-            ctx.sp_content_results.as_deref(),
-            crate::views::session_picker::effective_filter_query(
-                ctx.sp_state.query(),
-                ctx.sp_entries_query.as_deref(),
-            ),
+            ctx.sp_state.query(),
             ctx.session_picker_grouped,
-            ctx.sp_content_loading,
-            source_filter,
             Some(current_repo.as_str()),
         );
         let entry_count = entry_map.len();
         let non_selectable_flags: Vec<bool> = entry_map.iter().map(|e| e.is_none()).collect();
-        let focused_is_foreign = match entry_map
-            .get(ctx.sp_state.selected)
-            .and_then(|entry| entry.as_ref())
-        {
-            Some(PickerItem::Fuzzy { original_index }) => ctx
-                .sp_entries
-                .as_ref()
-                .and_then(|entries| entries.get(*original_index))
-                .is_some_and(|entry| {
-                    crate::app::foreign_sessions::is_foreign_picker_source(&entry.source)
-                }),
-            _ => false,
-        };
         let config = PickerConfig {
             title: Some("Resume session"),
             show_search_hint: true,
@@ -3606,15 +2223,7 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
             shortcuts_area: None,
             tabs: None,
             active_tab: 0,
-            filter_label: (!ctx.chat_mode).then(|| source_filter.label()),
-            filter_key_hint: (!ctx.chat_mode).then_some("f"),
-            filter_active: !ctx.chat_mode && source_filter.is_active(),
-            header_note: None,
-            action_keys: if ctx.chat_mode || focused_is_foreign {
-                &[]
-            } else {
-                &[('d', "delete")]
-            },
+            action_keys: &[('d', "delete")],
             disable_search: false,
             compact_bottom_bar: false,
             search_only_on_slash: false,
@@ -3640,26 +2249,6 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
             {
                 return InputOutcome::Action(Action::Quit);
             }
-            if let Some(selection) = session_picker_worktree_selection(
-                key,
-                ctx.sp_state,
-                &entry_map,
-                &non_selectable_flags,
-                ctx.sp_entries.as_deref(),
-                ctx.sp_content_results.as_deref(),
-            ) {
-                return InputOutcome::Action(match selection {
-                    SessionPickerWorktreeSelection::Fuzzy(original_index) => {
-                        Action::PickSessionInWorktree(original_index)
-                    }
-                    SessionPickerWorktreeSelection::Content { session_id, cwd } => {
-                        Action::PickContentSessionInWorktree { session_id, cwd }
-                    }
-                    SessionPickerWorktreeSelection::Unavailable => {
-                        return InputOutcome::Changed;
-                    }
-                });
-            }
         }
         let selected_before = ctx.sp_state.selected;
         let outcome = handle_picker_input(ev, ctx.sp_state, entry_count, &config);
@@ -3671,31 +2260,19 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                 Some(PickerItem::Fuzzy { original_index }) => {
                     return InputOutcome::Action(Action::PickSession(*original_index));
                 }
-                Some(PickerItem::Content { hit_index }) => {
-                    if let Some(hits) = ctx.sp_content_results.as_ref()
-                        && let Some(hit) = hits.get(*hit_index)
-                    {
-                        return InputOutcome::Action(Action::PickContentSession {
-                            session_id: hit.session_id.clone(),
-                            cwd: hit.cwd.clone(),
-                        });
-                    }
-                    return InputOutcome::Changed;
-                }
                 None => return InputOutcome::Changed,
             },
             PickerOutcome::SubmitQuery => {
                 if let Some(sid) =
                     crate::views::session_picker::session_id_for_direct_load(ctx.sp_state.query())
                 {
-                    return InputOutcome::Action(Action::LoadSession(sid.to_string(), None, false));
+                    return InputOutcome::Action(Action::LoadSession(sid.to_string(), None));
                 }
                 return InputOutcome::Unchanged;
             }
             PickerOutcome::Closed => {
                 *ctx.sp_entries = None;
                 ctx.sp_state.reset();
-                *ctx.sp_source_filter = crate::views::session_picker::SourceFilter::default();
                 *ctx.sp_pending_delete = None;
                 return InputOutcome::Action(Action::SessionPickerClosed);
             }
@@ -3704,23 +2281,10 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                     Some(PickerItem::Fuzzy { original_index }) => {
                         if let Some(ents) = ctx.sp_entries.as_ref()
                             && let Some(entry) = ents.get(*original_index)
-                            && !crate::app::foreign_sessions::is_foreign_picker_source(
-                                &entry.source,
-                            )
                         {
                             return InputOutcome::Action(Action::ExpandSessionCard {
                                 source: entry.source.clone(),
                                 session_id: entry.id.clone(),
-                            });
-                        }
-                    }
-                    Some(PickerItem::Content { hit_index }) => {
-                        if let Some(hits) = ctx.sp_content_results.as_ref()
-                            && let Some(hit) = hits.get(*hit_index)
-                        {
-                            return InputOutcome::Action(Action::ExpandSessionCard {
-                                source: "local".into(),
-                                session_id: hit.session_id.clone(),
                             });
                         }
                     }
@@ -3741,18 +2305,6 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                             });
                         }
                     }
-                    Some(PickerItem::Content { hit_index }) => {
-                        let key = CONTENT_EXPAND_OFFSET + hit_index;
-                        if ctx.sp_state.expanded.contains(&key)
-                            && let Some(hits) = ctx.sp_content_results.as_ref()
-                            && let Some(hit) = hits.get(*hit_index)
-                        {
-                            return InputOutcome::Action(Action::ExpandSessionCard {
-                                source: "local".into(),
-                                session_id: hit.session_id.clone(),
-                            });
-                        }
-                    }
                     None => {}
                 }
                 return InputOutcome::Changed;
@@ -3766,37 +2318,20 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
             PickerOutcome::QueryChanged => {
                 sync_session_picker_query_expansion(
                     ctx.sp_entries.as_deref(),
-                    ctx.sp_content_results.as_deref(),
-                    ctx.sp_entries_query.as_deref(),
                     ctx.sp_state,
                     ctx.session_picker_grouped,
-                    ctx.sp_content_loading,
-                    source_filter,
                     Some(current_repo.as_str()),
                 );
-                return InputOutcome::Action(Action::TriggerDeepSearch);
+                return InputOutcome::Changed;
             }
             PickerOutcome::Changed => return InputOutcome::Changed,
-            PickerOutcome::Unchanged => {
-                if let Event::Key(key) = ev
-                    && key.kind == KeyEventKind::Press
-                    && key!('/', CONTROL).matches(key)
-                    && !ctx.sp_state.query().trim().is_empty()
-                {
-                    return InputOutcome::Action(Action::ForceDeepSearch);
-                }
-                return InputOutcome::Unchanged;
-            }
-            PickerOutcome::FilterCycled => {
-                return InputOutcome::Action(Action::CycleSessionSourceFilter);
-            }
+            PickerOutcome::Unchanged => return InputOutcome::Unchanged,
             PickerOutcome::Action('d') => {
                 *ctx.sp_pending_delete =
                     crate::views::session_picker::pending_delete_from_selection(
                         ctx.sp_state.selected,
                         &entry_map,
                         ctx.sp_entries.as_deref(),
-                        ctx.sp_content_results.as_deref(),
                     );
                 return InputOutcome::Changed;
             }
@@ -3834,28 +2369,11 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
             return InputOutcome::Action(Action::NewSession);
         }
         if matches!(ctx.auth_state, AuthState::Done) {
-            if ctx.upgrade_cta_keyboard && key!('o', CONTROL).matches(key) {
-                return InputOutcome::Action(Action::AnnouncementsOpenCta(
-                    pi_telemetry::events::AnnouncementCtaSurface::Keyboard,
-                ));
-            }
-            if key!('w', CONTROL).matches(key) && ctx.cwd_has_git_ancestor {
-                return InputOutcome::Action(Action::OpenNewWorktreeDialog);
-            }
             if key!(F(3)).matches(key) {
                 return InputOutcome::Action(Action::FetchSessionList);
             }
             if ctx.has_pending_update && key!('u', CONTROL).matches(key) {
                 return InputOutcome::Action(Action::QuitForUpdate);
-            }
-            if ctx.has_foreign_resume && key!('u', CONTROL).matches(key) {
-                return InputOutcome::Action(Action::ResumeForeignSession);
-            }
-            if ctx.has_claude_import && key!('i', CONTROL).matches(key) {
-                return InputOutcome::Action(Action::ImportClaudeSettings);
-            }
-            if ctx.has_claude_import && key!('I', CONTROL | SHIFT).matches(key) {
-                return InputOutcome::Action(Action::DismissClaudeImport);
             }
         }
         if matches!(ctx.auth_state, AuthState::Done) && crate::input::key::is_shift_tab(key) {
@@ -3893,12 +2411,7 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
             if key!(Enter).matches(key)
                 && let Some(idx) = *ctx.menu_index
             {
-                return dispatch_menu_action(
-                    idx,
-                    ctx.has_claude_import,
-                    ctx.show_changelog_action,
-                    ctx.changelog_markdown.as_deref(),
-                );
+                return dispatch_menu_action(idx);
             }
             if crate::input::key::is_text_input_key(key) {
                 *ctx.prompt_focused = true;
@@ -4028,19 +2541,7 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                         if !ctx.has_access {
                             return dispatch_access_gate_menu_action(i);
                         }
-                        if ctx.has_claude_import
-                            && i == 0
-                            && mouse.column >= rect.x + rect.width.saturating_sub(4)
-                            && mouse.column < rect.x + rect.width.saturating_sub(1)
-                        {
-                            return InputOutcome::Action(Action::DismissClaudeImport);
-                        }
-                        return dispatch_menu_action(
-                            i,
-                            ctx.has_claude_import,
-                            ctx.show_changelog_action,
-                            ctx.changelog_markdown.as_deref(),
-                        );
+                        return dispatch_menu_action(i);
                     }
                 }
                 if let Some(rect) = ctx.refresh_rect
@@ -4053,45 +2554,12 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                 {
                     return InputOutcome::Action(Action::OpenSupergrokUrl);
                 }
-                if let Some(rect) = ctx.upgrade_cta_rect
-                    && rect.contains(ratatui::layout::Position::new(mouse.column, mouse.row))
-                {
-                    return InputOutcome::Action(Action::AnnouncementsOpenCta(
-                        pi_telemetry::events::AnnouncementCtaSurface::Welcome,
-                    ));
-                }
-                if let Some(rect) = ctx.privacy_banner_opt_in_rect
-                    && rect.contains(ratatui::layout::Position::new(mouse.column, mouse.row))
-                {
-                    return InputOutcome::Action(Action::PrivacyBannerOptIn);
-                }
-                if let Some(rect) = ctx.privacy_banner_opt_out_rect
-                    && rect.contains(ratatui::layout::Position::new(mouse.column, mouse.row))
-                {
-                    return InputOutcome::Action(Action::PrivacyBannerOptOut);
-                }
-                if let Some(rect) = ctx.privacy_banner_terms_rect
-                    && rect.contains(ratatui::layout::Position::new(mouse.column, mouse.row))
-                {
-                    return InputOutcome::Action(Action::OpenUrl(
-                        crate::views::privacy_banner::PRIVACY_BANNER_TERMS_URL.to_string(),
-                    ));
-                }
                 if let Some(rect) = ctx.privacy_banner_policy_rect
                     && rect.contains(ratatui::layout::Position::new(mouse.column, mouse.row))
                 {
                     return InputOutcome::Action(Action::OpenUrl(
                         crate::views::privacy_banner::PRIVACY_BANNER_POLICY_URL.to_string(),
                     ));
-                }
-                if let Some(rect) = ctx.changelog_cta_rect
-                    && rect.contains(ratatui::layout::Position::new(mouse.column, mouse.row))
-                    && let Some(md) = ctx.changelog_markdown.as_deref()
-                {
-                    return InputOutcome::Action(Action::ShowReleaseNotes {
-                        title: "Release Notes".to_string(),
-                        content: md.trim().to_string(),
-                    });
                 }
                 if let Some(rect) = ctx.announcement_rect
                     && (ctx.announcement_truncated || *ctx.announcement_expanded)
@@ -4111,15 +2579,6 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                     && rect.contains(ratatui::layout::Position::new(mouse.column, mouse.row))
                 {
                     return InputOutcome::Action(Action::ShowRawAuthUrl);
-                }
-                if let Some(rect) = ctx.import_banner_rect
-                    && matches!(ctx.auth_state, AuthState::Done)
-                    && mouse.column >= rect.x
-                    && mouse.column < rect.x + rect.width
-                    && mouse.row >= rect.y
-                    && mouse.row < rect.y + rect.height
-                {
-                    return InputOutcome::Action(Action::ImportClaudeSettings);
                 }
                 if let Some(rect) = ctx.prompt_rect
                     && matches!(ctx.auth_state, AuthState::Done)
@@ -4148,33 +2607,11 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                     *ctx.menu_index = new_index;
                     return InputOutcome::Changed;
                 }
-                if ctx.has_claude_import && new_index == Some(0) {
-                    return InputOutcome::Changed;
-                }
                 let pos = ratatui::layout::Position::new(mouse.column, mouse.row);
-                let over_cta = ctx.changelog_cta_rect.is_some_and(|r| r.contains(pos));
-                if over_cta != *ctx.on_changelog_cta {
-                    *ctx.on_changelog_cta = over_cta;
-                    return InputOutcome::Changed;
-                }
                 let over_upgrade = ctx.upgrade_cta_rect.is_some_and(|r| r.contains(pos));
                 if over_upgrade != *ctx.on_upgrade_cta {
                     *ctx.on_upgrade_cta = over_upgrade;
                     return InputOutcome::Changed;
-                }
-                #[cfg(feature = "local-workspace")]
-                {
-                    let over_ws = ctx
-                        .workspace_mode_rects
-                        .row
-                        .is_some_and(|r| r.contains(pos));
-                    if over_ws != *ctx.on_workspace_mode {
-                        *ctx.on_workspace_mode = over_ws;
-                        return InputOutcome::Changed;
-                    }
-                    if over_ws {
-                        return InputOutcome::Changed;
-                    }
                 }
                 let over_banner = ctx
                     .privacy_banner_opt_in_rect
@@ -4289,45 +2726,13 @@ fn dispatch_access_gate_menu_action(index: usize) -> InputOutcome {
 }
 /// Dispatch an action for a welcome menu item by index.
 ///
-/// Menu order: `[Import]`, New worktree, Resume session, `[Changelog]`, Quit.
-/// `show_changelog_action` is true when the Changelog row is rendered; release
-/// notes open only once `changelog_md` is available.
-fn dispatch_menu_action(
-    index: usize,
-    has_claude_import: bool,
-    show_changelog_action: bool,
-    changelog_md: Option<&str>,
-) -> InputOutcome {
-    let base = if has_claude_import { 1 } else { 0 };
-    let worktree_idx = base;
-    let resume_idx = base + 1;
-    let (changelog_idx, quit_idx) = if show_changelog_action {
-        (Some(base + 2), base + 3)
-    } else {
-        (None, base + 2)
-    };
-    if has_claude_import && index == 0 {
-        return InputOutcome::Action(Action::ImportClaudeSettings);
+/// Menu order: Resume session, Quit.
+fn dispatch_menu_action(index: usize) -> InputOutcome {
+    match index {
+        0 => InputOutcome::Action(Action::FetchSessionList),
+        1 => InputOutcome::Action(Action::Quit),
+        _ => InputOutcome::Unchanged,
     }
-    if index == worktree_idx {
-        return InputOutcome::Action(Action::OpenNewWorktreeDialog);
-    }
-    if index == resume_idx {
-        return InputOutcome::Action(Action::FetchSessionList);
-    }
-    if Some(index) == changelog_idx {
-        if let Some(md) = changelog_md {
-            return InputOutcome::Action(Action::ShowReleaseNotes {
-                title: "Release Notes".to_string(),
-                content: md.trim().to_string(),
-            });
-        }
-        return InputOutcome::Unchanged;
-    }
-    if index == quit_idx {
-        return InputOutcome::Action(Action::Quit);
-    }
-    InputOutcome::Unchanged
 }
 impl AppView {
     /// Merge notification escape sequences with render-produced post-flush
@@ -4354,52 +2759,6 @@ impl AppView {
             (Some(first), None) => Some(first),
             (None, second) => second,
         }
-    }
-    /// Build the Kitty delete escapes that remove image placements left
-    /// behind by agent views that are not drawn this frame.
-    ///
-    /// Kitty graphics survive cell redraws until explicitly deleted, and
-    /// every regular clear lives inside `AgentView::draw` / the prompt
-    /// widget's per-frame self-heal. Once the dashboard takes over the
-    /// frame those paths stop running, so an image overlay (or inline
-    /// scrollback media) the user left open in the agent view would float
-    /// above the dashboard forever. Called from the
-    /// `ActiveView::AgentDashboard` draw branch every frame:
-    ///
-    /// - Placement id 1 is cleared only when no popup agent is drawn; a popup
-    ///   owns and reuses that slot across consecutive dashboard frames.
-    /// - Inline scrollback media ids (2+) are drained per agent via
-    ///   `AgentView::take_inline_media_clear_escapes`, which resets the
-    ///   agent's placement tracking — a one-shot sweep per transition,
-    ///   not a per-frame cost. The popup-attached agent is skipped: it
-    ///   just drew and manages its own placements. The clears-before-popup
-    ///   ordering also means a drained id that collides with one the popup
-    ///   re-places this frame ends up displayed, not deleted.
-    fn dashboard_stale_image_clears(
-        agents: &mut IndexMap<AgentId, AgentView>,
-        drawn_agent: Option<AgentId>,
-    ) -> Option<crate::terminal::overlay::PostFlush> {
-        if crate::terminal::image::detect_graphics_protocol()
-            == crate::terminal::image::GraphicsProtocol::None
-        {
-            return None;
-        }
-        let mut clears = crate::terminal::overlay::PostFlush::default();
-        let mut has_escapes = false;
-        for (id, agent) in agents.iter_mut() {
-            if Some(*id) == drawn_agent {
-                continue;
-            }
-            if let Some(esc) = agent.take_inline_media_clear_escapes() {
-                clears.append_plain(&esc);
-                has_escapes = true;
-            }
-        }
-        if drawn_agent.is_none() {
-            clears.append(crate::terminal::overlay::clear_kitty().into());
-            has_escapes = true;
-        }
-        has_escapes.then_some(clears)
     }
     /// Minimal mode: queue the most-recently committed folded block (collapsed
     /// reasoning / truncated tool output) to be re-printed fully expanded below
@@ -4437,20 +2796,10 @@ impl AppView {
     ///   the scrollback-pane fold.
     /// - `Ctrl+O` opens the whole conversation fully expanded in `$PAGER` (the
     ///   "expand everything" view, the honest equivalent of a full
-    ///   transcript mode for a static native scrollback). The full-TUI Ctrl+O is
-    ///   interject, which keeps its Ctrl+Enter / Ctrl+I alt bindings —
-    ///   **except on Apple Terminal**, where Ctrl+O *is* the interject chord
-    ///   (kitty keyboard protocol unavailable → Ctrl+Enter doesn't arrive and
-    ///   Ctrl+I aliases to Tab, see `default_actions`'s terminal-aware
-    ///   `InterjectPrompt` binding). There the remap yields to interject only
-    ///   while an interject would actually consume the press (turn running with
-    ///   a non-empty composer, turn running with a queued follow-up on an empty
-    ///   composer, or editing a queued row) — otherwise minimal on Apple
-    ///   Terminal would have no working interject key at all. At idle / with an
-    ///   empty composer and no queue the interject path is a silent no-op, so
-    ///   the remap keeps the key and the transcript opens (it looked simply
-    ///   dead before); see `minimal_api::minimal_ctrl_o_opens_transcript`, which
-    ///   the info-row hint shares so it always advertises what a press would do.
+    ///   transcript mode for a static native scrollback), except while a pinned
+    ///   upgrade CTA is live; see `minimal_api::minimal_ctrl_o_opens_transcript`,
+    ///   which the info-row hint shares so it always advertises what a press
+    ///   would do.
     /// - The `ToggleQueue` chord (Ctrl+; by default; registry-resolved because
     ///   it is remappable and terminal-dependent) commits the read-only
     ///   `/queue` snapshot instead of toggling the full-TUI queue pane: the
@@ -4550,14 +2899,6 @@ impl AppView {
         self.maybe_trigger_small_screen_tip();
         self.maybe_trigger_ssh_wrap_tip();
         let compact = self.appearance.prompt.compact;
-        let (header_pad_left, header_pad_right, header_pad_top) = {
-            let layout_cfg = &self.appearance.scrollback.layout;
-            (
-                layout_cfg.eff_hpad_left(compact),
-                layout_cfg.eff_hpad_right(compact),
-                layout_cfg.eff_outer_vpad(compact),
-            )
-        };
         let zdr_blocked_for_draw = self.is_zdr_blocked();
         let has_access = self.has_access();
         let privacy_banner = self.privacy_banner_should_show();
@@ -4571,7 +2912,6 @@ impl AppView {
         let scroll_debug_panel = self.scroll_debug_panel();
         let dev_fps_rows = self.dev_fps_rows();
         let fps_overlay = self.fps_hud.overlay(dev_fps_rows);
-        let foreign_resume_hint = self.foreign_resume_hint().cloned();
         let privacy_banner_agent = self.privacy_banner_should_show()
             && !crate::views::announcements::has_critical_session_announcement(
                 &self.active_announcements,
@@ -4673,8 +3013,6 @@ impl AppView {
                             cwd: &self.cwd,
                             auth_state: &self.auth_state,
                             trust_state: &self.trust_state,
-                            consent_state: &self.consent_state,
-                            consent_hover_link: self.welcome_consent_hover_link,
                             login_label: self.login_label.as_deref(),
                             auth_code_input: self.auth_code_input.text(),
                             auth_code_cursor_byte: self.auth_code_input.cursor_byte(),
@@ -4687,53 +3025,32 @@ impl AppView {
                             selected: self.welcome_menu_index,
                             team_name: self.team_name.as_deref(),
                             has_access,
-                            has_claude_import: self.has_claude_import,
                             mouse_pos: self.last_mouse_pos,
                             is_zdr_blocked: zdr_blocked_for_draw,
                             session_picker: self.session_picker_entries.as_deref(),
                             session_picker_loading:
                                 crate::views::session_picker::loading_spinner_active(
                                     self.session_picker_entries.as_deref(),
-                                    self.session_picker_source_filter,
                                     self.session_picker_loading,
-                                    &self.session_picker_lanes,
                                 ),
                             compact,
                             pending_hint,
                             startup_warnings: &self.startup_warnings,
                             pending_update_version: self.pending_update_version.as_deref(),
-                            foreign_resume_hint: foreign_resume_hint.as_ref(),
-                            session_picker_content_results: self
-                                .session_picker_content_results
-                                .as_deref(),
-                            session_picker_content_loading: self.session_picker_content_loading,
-                            session_picker_entries_query: self
-                                .session_picker_entries_query
-                                .as_deref(),
                             welcome_tick: self.welcome_tick,
                             gate: self.gate.as_ref(),
                             subscription_tier: self.subscription_tier.as_deref(),
                             session_picker_grouped: self.session_picker_grouped,
-                            session_picker_source_filter: self.session_picker_source_filter,
                             session_picker_pending_delete: self
                                 .session_picker_pending_delete
                                 .is_some(),
-                            chat_mode: self.chat_mode,
                             credit_balance: self.credit_balance.as_ref(),
                             auto_topup: self.auto_topup.as_ref(),
                             usage_visible: self.usage_visible,
                             is_api_key_auth: self.is_api_key_auth,
-                            changelog_bullets: &self.changelog_bullets,
-                            changelog_has_full_notes: self.changelog_markdown.is_some(),
                             welcome_announcement_expanded: self.welcome_announcement.expanded,
                             upgrade_cta: hero_cta.map(|(_owner, label, _)| label),
                             privacy_banner,
-                            #[cfg(feature = "local-workspace")]
-                            workspace_mode: self.welcome_workspace_mode,
-                            #[cfg(feature = "local-workspace")]
-                            workspace_mode_startup_locked: self.local_workspace_startup_locked,
-                            #[cfg(feature = "local-workspace")]
-                            workspace_mode_ack_pending: self.welcome_local_workspace_ack_pending,
                         };
                         let result = crate::views::welcome::render_welcome(
                             view_area,
@@ -4743,29 +3060,17 @@ impl AppView {
                             &mut self.session_picker_state,
                         );
                         self.welcome_menu_rects = result.menu_rects;
-                        self.welcome_show_changelog_action = result.changelog_action_present;
                         self.welcome_prompt_rect = result.prompt_rect;
-                        self.welcome_import_banner_rect = result.import_banner_rect;
                         self.welcome_auth_url_rect = result.auth_url_rect;
                         self.welcome_auth_fallback_rect = result.auth_fallback_rect;
                         self.welcome_refresh_rect = result.refresh_rect;
                         self.welcome_gate_url_rect = result.gate_url_rect;
-                        self.welcome_consent_link_rects = result.consent_link_rects;
-                        if self.welcome_consent_link_rects.is_empty() {
-                            self.welcome_consent_hover_link = None;
-                        }
-                        record_consent_paint(&mut self.consent_state, result.consent_legibility);
                         self.welcome_upgrade_cta_rect = result.upgrade_cta_rect;
                         self.welcome_privacy_banner_opt_in_rect = result.privacy_banner_opt_in_rect;
                         self.welcome_privacy_banner_opt_out_rect =
                             result.privacy_banner_opt_out_rect;
                         self.welcome_privacy_banner_terms_rect = result.privacy_banner_terms_rect;
                         self.welcome_privacy_banner_policy_rect = result.privacy_banner_policy_rect;
-                        #[cfg(feature = "local-workspace")]
-                        {
-                            self.welcome_workspace_mode_rects = result.workspace_mode_rects;
-                        }
-                        self.welcome_changelog_cta_rect = result.changelog_cta_rect;
                         if let Some((ref msg, _)) = self.welcome_toast {
                             crate::views::welcome::paint_welcome_toast(
                                 f.buffer_mut(),
@@ -4777,23 +3082,6 @@ impl AppView {
                         self.welcome_announcement.truncated = result.announcement_truncated;
                         self.welcome_announcement.rect = result.announcement_rect;
                         self.session_picker_state.hit_areas = result.session_picker_hit_areas;
-                        if let Some(modal) = self.import_claude_modal.as_mut() {
-                            let theme = crate::theme::Theme::current();
-                            crate::views::import_claude_modal::render_import_claude_modal(
-                                f.buffer_mut(),
-                                view_area,
-                                modal,
-                                &theme,
-                                compact,
-                            );
-                        }
-                        if let Some(dialog) = self.new_worktree_dialog.as_ref() {
-                            crate::views::new_worktree_dialog::render_new_worktree_dialog(
-                                view_area,
-                                f.buffer_mut(),
-                                dialog,
-                            );
-                        }
                         if let Some(crate::views::modal::ActiveModal::DocViewer {
                             ref title,
                             ref content,
@@ -4820,8 +3108,7 @@ impl AppView {
                             self.access_gate_shown_logged = true;
                             pi_telemetry::session_ctx::log_event(
                                 pi_telemetry::events::SuperGrokUpsellShown {
-                                    source:
-                                        pi_telemetry::events::SuperGrokUpsell::WelcomeScreen,
+                                    source: pi_telemetry::events::SuperGrokUpsell::WelcomeScreen,
                                     auth_method: self
                                         .login_method_id
                                         .as_ref()
@@ -4884,68 +3171,7 @@ impl AppView {
                     }
                     ActiveView::Agent(id) => {
                         let overlay_focused = false;
-                        let overlay_active = self
-                            .dashboard
-                            .as_ref()
-                            .is_some_and(|d| d.attached_agent == Some(id));
-                        let position: Option<(usize, usize)> =
-                            if overlay_active && let Some(d) = self.dashboard.as_ref() {
-                                let order = crate::views::dashboard::overlay_cycle_order(d, agents);
-                                order
-                                    .iter()
-                                    .position(|i| *i == id)
-                                    .map(|idx| (idx + 1, order.len()))
-                            } else {
-                                None
-                            };
-                        let overlay_can_cycle = position.is_some_and(|(_, n)| n > 1);
-                        let (agent_area, header) = if overlay_active {
-                            let theme = crate::theme::Theme::current();
-                            let title = agents
-                                .get(&id)
-                                .map(crate::views::session_title::entry_title)
-                                .unwrap_or_else(|| "(session)".to_string());
-                            let (hover_prev, hover_next, hover_close) = self
-                                .dashboard
-                                .as_ref()
-                                .map(|d| {
-                                    (
-                                        d.overlay_prev_hit.hovered,
-                                        d.overlay_next_hit.hovered,
-                                        d.overlay_close_hit.hovered,
-                                    )
-                                })
-                                .unwrap_or((false, false, false));
-                            let header = crate::views::dashboard::render_dashboard_session_header(
-                                f.buffer_mut(),
-                                view_area,
-                                &theme,
-                                &title,
-                                position,
-                                hover_prev,
-                                hover_next,
-                                hover_close,
-                                header_pad_left,
-                                header_pad_right,
-                                header_pad_top,
-                            );
-                            match header {
-                                Some(chrome) => (chrome.content, Some(chrome)),
-                                None => (view_area, None),
-                            }
-                        } else {
-                            (view_area, None)
-                        };
-                        if let Some(d) = self.dashboard.as_mut() {
-                            d.overlay_close_hit.set(header.and_then(|c| c.close_rect));
-                            d.overlay_prev_hit.set(header.and_then(|c| c.prev_rect));
-                            d.overlay_next_hit.set(header.and_then(|c| c.next_rect));
-                        }
-                        if let Some(d) = self.dashboard.as_mut()
-                            && d.peek_viewport.is_some()
-                        {
-                            d.restore_peek_viewport(agents);
-                        }
+                        let agent_area = view_area;
                         if let Some(agent) = agents.get_mut(&id) {
                             let announcement_banner_h =
                                 crate::views::announcements::session_banner_height(
@@ -4986,9 +3212,6 @@ impl AppView {
                                         None
                                     },
                                 },
-                                &self.bundle_state,
-                                overlay_active,
-                                overlay_can_cycle,
                                 link_spans,
                                 AppRenderParams {
                                     voice_available,
@@ -4998,16 +3221,6 @@ impl AppView {
                                     status_line: status_line_frame.clone(),
                                 },
                             );
-                            if let Some(modal) = self.import_claude_modal.as_mut() {
-                                let theme = crate::theme::Theme::current();
-                                crate::views::import_claude_modal::render_import_claude_modal(
-                                    f.buffer_mut(),
-                                    view_area,
-                                    modal,
-                                    &theme,
-                                    compact,
-                                );
-                            }
                             if let Some(tutorial) = self.tutorial.as_mut() {
                                 crate::views::tutorial::render_tutorial(
                                     f.buffer_mut(),
@@ -5024,10 +3237,7 @@ impl AppView {
                             }
                             let (cursor_pos, post_flush) = result;
                             let has_cloud = false;
-                            if has_cloud
-                                || self.import_claude_modal.is_some()
-                                || self.tutorial.is_some()
-                            {
+                            if has_cloud || self.tutorial.is_some() {
                                 link_spans.clear();
                             }
                             let cursor = if has_cloud || self.tutorial.is_some() {
@@ -5036,123 +3246,6 @@ impl AppView {
                                 cursor_pos
                             };
                             return (cursor, Self::merge_escapes(notif_escapes, post_flush));
-                        }
-                    }
-                    ActiveView::AgentDashboard => {
-                        if let Some(dashboard) = self.dashboard.as_mut() {
-                            dashboard.voice_listening = voice_listening;
-                            dashboard.voice_interim = voice_interim.clone();
-                            if let Some(id) = dashboard.attached_agent
-                                && !agents.contains_key(&id)
-                            {
-                                dashboard.close_popup();
-                                if dashboard.error_toast.is_none() {
-                                    dashboard.error_toast = Some(format!(
-                                        "{} Session closed",
-                                        crate::glyphs::check_mark()
-                                    ));
-                                }
-                            }
-                            let dashboard_roster: &[crate::app::roster::RosterEntry] =
-                                if self.leader_mode {
-                                    &self.leader_roster
-                                } else {
-                                    &self.dashboard_local_sessions
-                                };
-                            let dash_upgrade_cta = crate::views::announcements::promo_cta(
-                                &self.active_announcements,
-                                &self.hidden_announcement_ids,
-                            )
-                            .map(
-                                |(owner, label, _)| crate::views::dashboard::HeaderUpgradeCta {
-                                    label,
-                                    pinned: !crate::views::announcements::is_dismissible(owner),
-                                    caption: crate::views::announcements::usable_cta_caption(owner),
-                                },
-                            );
-                            let dash_cursor = crate::views::dashboard::render_dashboard(
-                                f.buffer_mut(),
-                                view_area,
-                                dashboard,
-                                agents,
-                                registry,
-                                pending_hint,
-                                dashboard_roster,
-                                self.dashboard_sessions_loading,
-                                dash_upgrade_cta,
-                            );
-                            let (popup_cursor, popup_post_flush, drawn_popup_agent) =
-                                if let Some(agent_id) = dashboard.attached_agent {
-                                    let theme = crate::theme::Theme::current();
-                                    let popup_area = crate::views::dashboard::popup_rect(view_area);
-                                    let title = agents
-                                        .get(&agent_id)
-                                        .map(crate::views::session_title::entry_title)
-                                        .unwrap_or_else(|| "(session)".to_string());
-                                    let bundle_state = &self.bundle_state;
-                                    let (cursor, post_flush, drawn) =
-                                        crate::views::dashboard::render_popup_overlay(
-                                            f.buffer_mut(),
-                                            popup_area,
-                                            &theme,
-                                            &title,
-                                            dashboard,
-                                            |inner, buf| {
-                                                if let Some(agent) = agents.get_mut(&agent_id) {
-                                                    agent.draw(
-                                                    inner,
-                                                    buf,
-                                                    registry,
-                                                    scratch,
-                                                    None,
-                                                    false,
-                                                    crate::app::agent_view::BannerSlotParams::none(
-                                                    ),
-                                                    bundle_state,
-                                                    false,
-                                                    false,
-                                                    link_spans,
-                                                    AppRenderParams {
-                                                        esc_owned_before_agent,
-                                                        ..Default::default()
-                                                    },
-                                                )
-                                                } else {
-                                                    (None, None)
-                                                }
-                                            },
-                                        );
-                                    (cursor, post_flush, drawn.then_some(agent_id))
-                                } else {
-                                    (None, None, None)
-                                };
-                            let stale_clears =
-                                Self::dashboard_stale_image_clears(agents, drawn_popup_agent);
-                            let popup_post_flush =
-                                Self::merge_post_flush(stale_clears, popup_post_flush);
-                            let tutorial_open = self.tutorial.is_some();
-                            if let Some(tutorial) = self.tutorial.as_mut() {
-                                crate::views::tutorial::render_tutorial(
-                                    f.buffer_mut(),
-                                    view_area,
-                                    tutorial,
-                                    compact,
-                                );
-                            }
-                            if let Some(fps) = &fps_overlay {
-                                fps.render(full_area, f.buffer_mut());
-                            }
-                            if let Some(panel) = &scroll_debug_panel {
-                                panel.render(full_area, f.buffer_mut());
-                            }
-                            let cursor = if tutorial_open {
-                                None
-                            } else if dashboard.attached_agent.is_some() {
-                                popup_cursor
-                            } else {
-                                dash_cursor
-                            };
-                            return (cursor, Self::merge_escapes(notif_escapes, popup_post_flush));
                         }
                     }
                 }
@@ -5180,8 +3273,8 @@ impl AppView {
     /// promo emits nothing.
     pub(crate) fn log_announcement_cta_impressions(&mut self) {
         use pi_telemetry::events::AnnouncementCtaSurface;
-        let (banner, welcome, header, dashboard) = match self.active_view {
-            ActiveView::Welcome => (false, self.welcome_upgrade_cta_rect.is_some(), false, false),
+        let (banner, welcome, header) = match self.active_view {
+            ActiveView::Welcome => (false, self.welcome_upgrade_cta_rect.is_some(), false),
             ActiveView::Agent(agent_id) => match self.agents.get(&agent_id) {
                 Some(a) => {
                     let cta_rect = a.hit_announcement_cta.rect;
@@ -5190,21 +3283,12 @@ impl AppView {
                         cta_rect.is_some_and(|r| !a.rect_occluded(r)),
                         false,
                         header_rect.is_some_and(|r| !a.rect_occluded(r)),
-                        false,
                     )
                 }
                 None => return,
             },
-            ActiveView::AgentDashboard => (
-                false,
-                false,
-                false,
-                self.dashboard
-                    .as_ref()
-                    .is_some_and(|d| d.upgrade_cta_hit.rect.is_some()),
-            ),
         };
-        if !(banner || welcome || header || dashboard) {
+        if !(banner || welcome || header) {
             return;
         }
         let Some((owner, _label, _url)) = crate::views::announcements::promo_cta(
@@ -5219,26 +3303,23 @@ impl AppView {
             (AnnouncementCtaSurface::Banner, banner),
             (AnnouncementCtaSurface::Welcome, welcome),
             (AnnouncementCtaSurface::Header, header),
-            (AnnouncementCtaSurface::Dashboard, dashboard),
         ];
         for (surface, _) in surfaces.into_iter().filter(|(_, painted)| *painted) {
             if self
                 .announcement_cta_impressions_logged
                 .insert((key.clone(), surface))
             {
-                pi_telemetry::session_ctx::log_event(
-                    pi_telemetry::events::AnnouncementCtaShown {
-                        id: id.clone(),
-                        source: surface,
-                    },
-                );
+                pi_telemetry::session_ctx::log_event(pi_telemetry::events::AnnouncementCtaShown {
+                    id: id.clone(),
+                    source: surface,
+                });
             }
         }
     }
     /// Interval between off-screen render-cache eviction sweeps.
     const CACHE_EVICT_INTERVAL: Duration = Duration::from_secs(5);
     /// Throttled sweep of off-screen render caches for the active view's
-    /// scrollback (parent agent, or the open fullscreen subagent child).
+    /// scrollback.
     /// A sweep is an O(entries) walk of pointer-sized cache slots — trivial
     /// next to a frame render — but there's no reason to run it per frame.
     fn maybe_evict_offscreen_caches(&mut self) {
@@ -5254,55 +3335,19 @@ impl AppView {
         }
         self.last_cache_evict_at = Some(now);
         if let Some(agent) = self.agents.get_mut(&id) {
-            let evicted = if let Some(child_sid) = agent.active_subagent.clone() {
-                agent
-                    .subagent_views
-                    .get(&child_sid)
-                    .map(|child| child.scrollback.evict_offscreen_render_caches())
-                    .unwrap_or(0)
-            } else {
-                agent.scrollback.evict_offscreen_render_caches()
-            };
+            let evicted = agent.scrollback.evict_offscreen_render_caches();
             if evicted > 0 {
                 tracing::debug!(evicted, "scrollback.evicted_offscreen_render_caches");
             }
         }
     }
 }
-/// The renderer is the only thing that knows whether the body fitted, and accept is gated on that.
-fn record_consent_paint(
-    state: &mut ConsentState,
-    reported: Option<crate::app::consent::ConsentLegibility>,
-) {
-    let ConsentState::Pending {
-        legibility,
-        painted_at,
-        ..
-    } = state
-    else {
-        return;
-    };
-    let Some(painted) = reported else {
-        *legibility = crate::app::consent::ConsentLegibility::Illegible;
-        return;
-    };
-    *legibility = painted;
-    if painted_at.is_none() {
-        *painted_at = Some(Instant::now());
-    }
-}
 impl AppView {
     /// True when any modal that should swallow scroll input is open.
     fn is_scroll_blocking_modal_open(&self) -> bool {
-        let cloud_modal_open = false;
-        matches!(self.active_view, ActiveView::Agent(id) if self.agents.get(&id).is_some_and(|a| a.extensions_modal.is_some() || a.active_modal.is_some()))
-            || self.import_claude_modal.is_some()
-            || self.new_worktree_dialog.is_some()
+        matches!(self.active_view, ActiveView::Agent(id) if self.agents.get(&id).is_some_and(|a| a.active_modal.is_some()))
             || self.welcome_doc_viewer.is_some()
             || self.tutorial.is_some()
-            || matches!(self.active_view, ActiveView::AgentDashboard
-                if self.dashboard.as_ref().is_some_and(|d| d.shortcuts_modal.is_some()))
-            || cloud_modal_open
     }
     /// Store the resolved per-tip gates and propagate the prompt-relevant tips
     /// (undo + plan nudge) to every agent's prompt. Reused by startup and the
@@ -5496,14 +3541,10 @@ impl AppView {
                 }
                 needs_redraw = true;
             }
-            if self.session_picker_content_loading
-                || crate::views::session_picker::loading_spinner_active(
-                    self.session_picker_entries.as_deref(),
-                    self.session_picker_source_filter,
-                    self.session_picker_loading,
-                    &self.session_picker_lanes,
-                )
-            {
+            if crate::views::session_picker::loading_spinner_active(
+                self.session_picker_entries.as_deref(),
+                self.session_picker_loading,
+            ) {
                 needs_redraw = true;
             } else {
                 let frame = crate::views::welcome::shimmer_frame();
@@ -5512,14 +3553,6 @@ impl AppView {
                     needs_redraw = true;
                 }
             }
-        }
-        if matches!(self.active_view, ActiveView::AgentDashboard)
-            && let Some(d) = self.dashboard.as_mut()
-        {
-            d.spinner_tick = d.spinner_tick.wrapping_add(1);
-            needs_redraw = true;
-            d.dispatch.poll_file_search();
-            d.peek_reply.poll_file_search();
         }
         if let Some(pending) = &self.pending_action
             && pending.expired()
@@ -5534,37 +3567,15 @@ impl AppView {
             None;
         for agent in self.agents.values_mut() {
             needs_redraw |= agent.edit_hl_tick();
-            for child in agent.subagent_views.values_mut() {
-                needs_redraw |= child.edit_hl_tick();
-            }
         }
         if let ActiveView::Agent(id) = self.active_view
             && let Some(agent) = self.agents.get_mut(&id)
         {
             needs_redraw |= agent.scrollback.tick();
             needs_redraw |= agent.todo.list_state.tick();
-            needs_redraw |= agent.tasks.tick();
-            for child_view in agent.subagent_views.values_mut() {
-                needs_redraw |= child_view.scrollback.tick();
-                needs_redraw |= child_view.tick_toast();
-                needs_redraw |= child_view.tick_ephemeral_tip();
-                needs_redraw |= child_view.tick_mode_banner();
-                needs_redraw |= child_view.tick_selection_highlight();
-                needs_redraw |= child_view.tick_drag_autoscroll();
-                needs_redraw |= child_view.poll_link_modifier();
-                needs_redraw |= child_view.poll_scrollback_search();
-                needs_redraw |= child_view.mermaid_tick();
-                needs_redraw |= Self::tick_agent_image_load(child_view);
-                needs_redraw |= Self::tick_agent_block_viewer(child_view);
-            }
             let spinner_frame_tick =
                 agent.scrollback.animation_tick() % crate::views::turn_status::SPINNER_DIVISOR == 0;
             needs_redraw |= !agent.session.state.is_idle() && spinner_frame_tick;
-            needs_redraw |= agent
-                .mcp_init_progress
-                .as_ref()
-                .is_some_and(McpInitProgress::is_visible)
-                && spinner_frame_tick;
             needs_redraw |= matches!(
                 agent.btw_state,
                 Some(crate::views::btw_overlay::BtwOverlayState::Loading { .. })
@@ -5574,36 +3585,13 @@ impl AppView {
                 Some(crate::views::modal::ActiveModal::SessionPicker {
                     entries,
                     loading,
-                    lanes,
-                    source_filter,
                     ..
                 }) if crate::views::session_picker::loading_spinner_active(
                     entries.as_deref(),
-                    *source_filter,
                     *loading,
-                    lanes,
                 )
             ) && spinner_frame_tick;
             needs_redraw |= agent.drain_blocked();
-            agent.prompt.slash_controller.set_workflows_available(
-                agent
-                    .session
-                    .available_commands
-                    .iter()
-                    .any(|c| c.name == "workflow")
-                    || !agent.workflow_runs.is_empty(),
-            );
-            agent.prompt.slash_controller.set_workflow_runs(
-                agent
-                    .workflow_runs
-                    .iter()
-                    .map(|run| crate::slash::command::WorkflowRunChoice {
-                        name: run.name.clone(),
-                        status: run.status.clone(),
-                        builtin: run.builtin,
-                    })
-                    .collect(),
-            );
             if agent.acp_synced_generation != agent.session.available_commands_generation {
                 agent.prompt.sync_acp_commands(
                     &agent.session.available_commands,
@@ -5618,7 +3606,6 @@ impl AppView {
             needs_redraw |= agent.prompt.history_search.poll();
             needs_redraw |= agent.poll_scrollback_search();
             needs_redraw |= agent.tick_toast();
-            needs_redraw |= agent.tick_extensions_result_notice();
             needs_redraw |= agent.tick_ephemeral_tip();
             needs_redraw |= agent.tick_mode_banner();
             needs_redraw |= agent.tick_selection_highlight();
@@ -5669,9 +3656,6 @@ impl AppView {
         if let Some(commands) = bootstrap_commands_update {
             self.welcome_prompt
                 .sync_acp_commands(&commands, None, &self.models);
-            if let Some(d) = self.dashboard.as_mut() {
-                d.dispatch.sync_acp_commands(&commands, None, &self.models);
-            }
             self.bootstrap_acp_commands = commands;
         }
         self.update_notifications();
@@ -5805,13 +3789,7 @@ impl AppView {
     fn tick_agent_block_viewer(agent: &mut AgentView) -> bool {
         let mut needs_redraw = false;
         if let Some(ref mut viewer) = agent.block_viewer {
-            if viewer.kind == crate::views::block_viewer::ViewerKind::BgTask
-                && let Some(ref task_id) = viewer.bg_task_id.clone()
-                && let Some(task) = agent.session.bg_tasks.get(task_id)
-            {
-                let is_running = task.status == crate::app::agent::BgTaskStatus::Running;
-                needs_redraw |= viewer.tick_bg_task(&task.stdout, is_running);
-            } else if let Some(entry) = agent.scrollback.get_by_id(viewer.entry_id) {
+            if let Some(entry) = agent.scrollback.get_by_id(viewer.entry_id) {
                 needs_redraw |= viewer.tick(entry);
             } else {
                 agent.block_viewer = None;
@@ -5848,12 +3826,11 @@ impl AppView {
         {
             return TickDemand::Fast;
         }
-        if self.agents.values().any(|a| {
-            a.pending_cancel_resend.is_some()
-                || a.subagent_views
-                    .values()
-                    .any(|c| c.pending_cancel_resend.is_some())
-        }) {
+        if self
+            .agents
+            .values()
+            .any(|a| a.pending_cancel_resend.is_some())
+        {
             return TickDemand::Fast;
         }
         if self.deferred_notification.is_some() {
@@ -5862,16 +3839,7 @@ impl AppView {
         if self.voice_listening() {
             return TickDemand::Fast;
         }
-        if self.session_picker_content_loading {
-            return TickDemand::Fast;
-        }
-        if self.agents.values().any(|agent| {
-            agent.edit_hl_needs_tick()
-                || agent
-                    .subagent_views
-                    .values()
-                    .any(|c| c.edit_hl_needs_tick())
-        }) {
+        if self.agents.values().any(|agent| agent.edit_hl_needs_tick()) {
             return TickDemand::Fast;
         }
         match self.active_view {
@@ -5881,16 +3849,10 @@ impl AppView {
                 };
                 let fast = agent.scrollback.needs_animation()
                     || agent.todo.list_state.needs_tick()
-                    || agent.tasks.needs_tick()
                     || agent.acp_synced_generation != agent.session.available_commands_generation
                     || !agent.session.state.is_idle()
                     || agent.wake_turn_active()
                     || agent.session.loading_replay
-                    || agent
-                        .mcp_init_progress
-                        .as_ref()
-                        .is_some_and(McpInitProgress::is_visible)
-                    || agent.plugin_cta.phase.is_spinner()
                     || matches!(
                         agent.btw_state,
                         Some(crate::views::btw_overlay::BtwOverlayState::Loading { .. })
@@ -5901,10 +3863,6 @@ impl AppView {
                     || agent.scrollback_search.is_some()
                     || agent.line_viewer.is_some()
                     || agent.toast.is_some()
-                    || agent
-                        .extensions_modal
-                        .as_ref()
-                        .is_some_and(|m| m.result_notice.is_some())
                     || agent.ephemeral_tip_needs_tick()
                     || agent.mode_switch_banner.is_some()
                     || agent.has_drag_autoscroll()
@@ -5923,65 +3881,19 @@ impl AppView {
                         Some(crate::views::modal::ActiveModal::SessionPicker {
                             entries,
                             loading,
-                            lanes,
-                            source_filter,
                             ..
                         }) if crate::views::session_picker::loading_spinner_active(
                             entries.as_deref(),
-                            *source_filter,
                             *loading,
-                            lanes,
                         )
-                    )
-                    || agent.subagent_views.iter().any(|(sid, child)| {
-                        child.toast.is_some()
-                            || child.ephemeral_tip_needs_tick()
-                            || child.mode_switch_banner.is_some()
-                            || child.has_drag_autoscroll()
-                            || child.selection_created_at.is_some()
-                            || (agent.active_subagent.as_deref() == Some(sid.as_str())
-                                && child.scrollback.needs_animation())
-                            || child.any_cancel_pending()
-                            || child.scrollback_search.is_some()
-                            || child.block_viewer.is_some()
-                            || child.image_viewer.as_ref().is_some_and(|v| v.loading)
-                            || child.image_load_rx.is_some()
-                            || child.mermaid_needs_tick()
-                    });
+                    );
                 if fast {
                     return TickDemand::Fast;
                 }
-                if cfg!(target_os = "macos")
-                    && (agent.needs_link_modifier_poll()
-                        || agent
-                            .subagent_views
-                            .values()
-                            .any(|child| child.needs_link_modifier_poll()))
-                {
+                if cfg!(target_os = "macos") && agent.needs_link_modifier_poll() {
                     return TickDemand::Slow;
                 }
                 TickDemand::None
-            }
-            ActiveView::AgentDashboard => {
-                let agents_need = self.agents.values().any(|agent| {
-                    !agent.session.state.is_idle()
-                        || !agent.permission_queue.is_empty()
-                        || agent.session.loading_replay
-                        || agent
-                            .subagent_sessions
-                            .values()
-                            .any(|info| !info.finished && info.workflow_run_id.is_none())
-                        || agent.workflow_runs.iter().any(|run| run.is_active())
-                });
-                let dash_search = self.dashboard.as_ref().is_some_and(|d| {
-                    d.dispatch.file_search.context().is_some()
-                        || d.peek_reply.file_search.context().is_some()
-                });
-                if agents_need || dash_search {
-                    TickDemand::Fast
-                } else {
-                    TickDemand::None
-                }
             }
             ActiveView::Welcome => TickDemand::Slow,
         }
@@ -6004,15 +3916,10 @@ impl AppView {
                     .as_deref()
                     .or(agent.generated_session_title.as_deref());
                 let model = agent.session.models.current_model_name();
-                let parked = agent.renders_parked();
-                let activity = if parked {
-                    None
-                } else {
-                    agent.resolve_turn_activity()
-                };
+                let activity = agent.resolve_turn_activity();
                 let has_perms = !agent.permission_queue.is_empty();
-                let elapsed = if parked { None } else { agent.turn_elapsed() };
-                let is_busy = agent.session.state.is_busy() && !parked;
+                let elapsed = agent.turn_elapsed();
+                let is_busy = agent.session.state.is_busy();
                 (name, model, activity, has_perms, elapsed, is_busy)
             } else {
                 (None, None, None, false, None, false)

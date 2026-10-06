@@ -7,29 +7,9 @@ use agent_client_protocol as acp;
 
 /// Set multiline input mode — swap Enter and Shift+Enter behavior.
 ///
-/// PAGER-OWNED: ephemeral, no `Effect::PersistSetting`. On the agent
-/// view this is per-session (`AgentView::multiline_mode`); on the
-/// dashboard it lives on `DashboardState::multiline_mode`. Idempotent.
+/// PAGER-OWNED: ephemeral, no `Effect::PersistSetting`. Per-session
+/// (`AgentView::multiline_mode`). Idempotent.
 pub(in crate::app::dispatch) fn set_multiline_mode(app: &mut AppView, new: bool) -> Vec<Effect> {
-    if matches!(app.active_view, ActiveView::AgentDashboard) {
-        let Some(d) = app.dashboard.as_mut() else {
-            return vec![];
-        };
-        if d.multiline_mode == new {
-            return vec![];
-        }
-        d.multiline_mode = new;
-        tracing::info!(
-            target: "settings",
-            key = "multiline_mode",
-            value = new,
-            surface = "dashboard",
-            "setting changed",
-        );
-        app.show_toast(&save_success_toast("Multiline", new));
-        return vec![];
-    }
-
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };
@@ -291,14 +271,12 @@ pub(in crate::app::dispatch) fn set_voice_stt_language(
 }
 
 /// State-only mutation for `vim_mode`. Propagates to every in-process
-/// agent so background subagents and side panes pick up the change
-/// without restart. The cache mirror lets new agents created later
-/// read the same value via `cache::load_vim_mode()` in `AgentView::new`.
+/// agent so background agents pick up the change without restart. The
+/// cache mirror lets new agents created later read the same value via
+/// `cache::load_vim_mode()` in `AgentView::new`.
 pub(super) fn set_vim_mode_inner(app: &mut AppView, new: bool) {
     for agent in app.agents.values_mut() {
-        // Recursive so open subagent views also pick up the change —
-        // otherwise their scrollback j/k stay in the vim-OFF fallback.
-        agent.set_vim_mode_recursive(new);
+        agent.vim_mode = new;
     }
     crate::appearance::cache::set_vim_mode(new);
 }
@@ -412,10 +390,6 @@ pub(super) fn set_show_thinking_blocks_inner(app: &mut AppView, new: bool) {
     for agent in app.agents.values_mut() {
         agent.scrollback.clear_group_expansion();
         agent.scrollback.invalidate_heights();
-        for child in agent.subagent_views.values_mut() {
-            child.scrollback.clear_group_expansion();
-            child.scrollback.invalidate_heights();
-        }
     }
 }
 
@@ -456,10 +430,6 @@ pub(super) fn set_group_tool_verbs_inner(app: &mut AppView, new: bool) {
     for agent in app.agents.values_mut() {
         agent.scrollback.clear_group_expansion();
         agent.scrollback.invalidate_heights();
-        for child in agent.subagent_views.values_mut() {
-            child.scrollback.clear_group_expansion();
-            child.scrollback.invalidate_heights();
-        }
     }
 }
 
@@ -499,9 +469,6 @@ pub(super) fn set_collapsed_edit_blocks_inner(app: &mut AppView, new: bool) {
     // (the flip policy lives on ScrollbackState).
     for agent in app.agents.values_mut() {
         agent.scrollback.apply_collapsed_edit_blocks_flip(prev, new);
-        for child in agent.subagent_views.values_mut() {
-            child.scrollback.apply_collapsed_edit_blocks_flip(prev, new);
-        }
     }
 }
 
@@ -976,30 +943,6 @@ pub(in crate::app::dispatch) fn set_page_flip_on_send(app: &mut AppView, new: bo
     }]
 }
 
-pub(in crate::app::dispatch) fn set_confirm_before_rewind_inner(app: &mut AppView, new: bool) {
-    app.current_ui.confirm_before_rewind = Some(new);
-}
-
-/// SHARED: `[ui].confirm_before_rewind` via `Effect::PersistSetting`.
-pub(in crate::app::dispatch) fn set_confirm_before_rewind(
-    app: &mut AppView,
-    new: bool,
-) -> Vec<Effect> {
-    let prev = app.current_ui.confirm_before_rewind_enabled();
-    if prev == new {
-        return vec![];
-    }
-    set_confirm_before_rewind_inner(app, new);
-    refresh_open_settings_modals(app);
-    tracing::info!(target: "settings", key = "confirm_before_rewind", value = new, "setting changed");
-    app.show_toast(&save_success_toast("Confirm before rewind", new));
-    vec![Effect::PersistSetting {
-        key: "confirm_before_rewind",
-        value: crate::settings::SettingValue::Bool(new),
-        rollback_value: crate::settings::SettingValue::Bool(prev),
-    }]
-}
-
 pub(super) fn set_combine_queued_prompts_inner(app: &mut AppView, new: bool) {
     app.current_ui.combine_queued_prompts = Some(new);
     crate::appearance::cache::set_combine_queued_prompts(new);
@@ -1022,46 +965,6 @@ pub(in crate::app::dispatch) fn set_combine_queued_prompts(
         key: "combine_queued_prompts",
         value: crate::settings::SettingValue::Bool(new),
         rollback_value: crate::settings::SettingValue::Bool(prev),
-    }]
-}
-
-pub(super) fn set_follow_up_behavior_inner(
-    app: &mut AppView,
-    new: crate::appearance::FollowUpBehavior,
-) {
-    app.current_ui.follow_up_behavior = Some(new.as_canonical().to_string());
-    crate::appearance::cache::set_follow_up_behavior(new);
-    // Same-process atomic only (tests / in-proc shell). The real agent is a
-    // separate process; it re-resolves Steer from config.toml mtime after the
-    // PersistSetting disk write lands.
-    pi_shell::util::config::set_follow_up_steer_cache(new.is_steer());
-}
-
-pub(in crate::app::dispatch) fn set_follow_up_behavior(
-    app: &mut AppView,
-    new: crate::appearance::FollowUpBehavior,
-) -> Vec<Effect> {
-    let prev = crate::appearance::cache::load_follow_up_behavior();
-    if prev == new {
-        return vec![];
-    }
-    set_follow_up_behavior_inner(app, new);
-    refresh_open_settings_modals(app);
-    tracing::info!(
-        target: "settings",
-        key = "follow_up_behavior",
-        value = new.as_canonical(),
-        "setting changed",
-    );
-    let label = match new {
-        crate::appearance::FollowUpBehavior::Queue => "Queue",
-        crate::appearance::FollowUpBehavior::Steer => "Steer",
-    };
-    app.show_toast(&format!("\u{2713} Follow-up behavior: {label}"));
-    vec![Effect::PersistSetting {
-        key: "follow_up_behavior",
-        value: crate::settings::SettingValue::Enum(new.as_canonical()),
-        rollback_value: crate::settings::SettingValue::Enum(prev.as_canonical()),
     }]
 }
 
@@ -1199,21 +1102,6 @@ pub(in crate::app::dispatch) fn set_contextual_hint_image_input(
         "Image input hint",
         prev,
         |h, v| h.image_input = v,
-        new,
-    )
-}
-
-pub(in crate::app::dispatch) fn set_contextual_hint_send_now(
-    app: &mut AppView,
-    new: bool,
-) -> Vec<Effect> {
-    let prev = app.current_ui.contextual_hints.send_now;
-    set_contextual_hint(
-        app,
-        "contextual_hints.send_now",
-        "Send now hint",
-        prev,
-        |h, v| h.send_now = v,
         new,
     )
 }
@@ -1766,22 +1654,17 @@ pub(in crate::app::dispatch) fn set_default_model(
     // The shell's `resolve_default_model` matches by slug / map key,
     // so persisting the human-readable name (e.g. "Grok Build")
     // would silently fail to resolve on the next startup.
-    //
-    // Chat (`--chat` / GROK_CHAT_MODE) catalogs use opaque `/rest/modes`
-    // slugs that must not become the global Build `default_model`.
     let mut effects: Vec<Effect> = Vec::new();
-    if !pi_shell::agent::chat_modes::process_chat_mode_enabled() {
-        let new_id_str = new_id.0.to_string();
-        let prev_id_str = prev_id
-            .as_ref()
-            .map(|id| id.0.to_string())
-            .unwrap_or_default();
-        effects.push(Effect::PersistSetting {
-            key: "default_model",
-            value: crate::settings::SettingValue::String(new_id_str),
-            rollback_value: crate::settings::SettingValue::String(prev_id_str),
-        });
-    }
+    let new_id_str = new_id.0.to_string();
+    let prev_id_str = prev_id
+        .as_ref()
+        .map(|id| id.0.to_string())
+        .unwrap_or_default();
+    effects.push(Effect::PersistSetting {
+        key: "default_model",
+        value: crate::settings::SettingValue::String(new_id_str),
+        rollback_value: crate::settings::SettingValue::String(prev_id_str),
+    });
 
     // Best-effort session-level switch. The `Effect::SwitchModel`
     // pipeline handles its own deferred-switch semantics for the
@@ -1789,8 +1672,10 @@ pub(in crate::app::dispatch) fn set_default_model(
     if let Some(sid) = session_id {
         // We already hold a reference path to the agent above; re-borrow
         // mutably here to flip `model_switch_pending`.
+        let mut config_option_id = None;
         if let Some(agent) = app.agents.get_mut(&aid) {
             agent.session.model_switch_pending = true;
+            config_option_id = agent.session.models.config_option_id.clone();
         }
         effects.push(Effect::SwitchModel {
             agent_id: aid,
@@ -1798,6 +1683,7 @@ pub(in crate::app::dispatch) fn set_default_model(
             model_id: new_id,
             effort: None,
             prev_model_id: prev_id.clone(),
+            config_option_id,
         });
     } else if let Some(agent) = app.agents.get_mut(&aid) {
         // No session id yet — stash for

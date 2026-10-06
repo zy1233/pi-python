@@ -159,7 +159,7 @@ impl ModalSizing {
     /// Returns adjusted sizing for compact mode with *very little margins*.
     ///
     /// Goal: maximize usable content area inside every popup (command palette,
-    /// /resume sessions, plugins/hooks/mcps, import-claude, docs, etc.).
+    /// /resume sessions, docs, etc.).
     pub fn with_compact(mut self, compact: bool) -> Self {
         if compact {
             // Almost no outer centering margin — the popup can nearly touch

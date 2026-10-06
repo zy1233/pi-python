@@ -39,17 +39,6 @@ pub struct WorkflowAgentInfo {
 /// `SessionInfoUpdate`). Old clients ignore unknown meta.
 pub const TITLE_IS_MANUAL_META_KEY: &str = "x.ai/titleIsManual";
 
-/// `_meta` object carried on a manual-rename fan-out.
-pub fn title_is_manual_meta() -> serde_json::Value {
-    serde_json::json!({ TITLE_IS_MANUAL_META_KEY: true })
-}
-
-/// `_meta` object carried on `/rename --auto` fan-out. Distinct from
-/// *absent* meta (auto title — must not clobber `display_name`).
-pub fn title_is_unpinned_meta() -> serde_json::Value {
-    serde_json::json!({ TITLE_IS_MANUAL_META_KEY: false })
-}
-
 /// pi-specific session notification (parallel to acp::SessionNotification)
 /// This wraps an PiSessionUpdate with session context for persistence and replay.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -104,44 +93,6 @@ pub struct PromptUsage {
 }
 
 impl PromptUsage {
-    /// Project a ledger snapshot for the wire. Returns `Some` whenever
-    /// `incomplete` is set — even if `ledger` is `None` — so the flag is never
-    /// dropped by omission. Always scrubs untrustworthy costs.
-    pub(crate) fn project_from_ledger(
-        ledger: Option<&pi_chat_state::UsageLedger>,
-        incomplete: bool,
-    ) -> Option<Self> {
-        let mut usage = match ledger {
-            Some(ledger) => {
-                let mut usage = Self::from(ledger);
-                if incomplete {
-                    usage.usage_is_incomplete = true;
-                }
-                usage
-            }
-            None if incomplete => Self {
-                usage_is_incomplete: true,
-                ..Default::default()
-            },
-            None => return None,
-        };
-        usage.scrub_untrustworthy_costs();
-        Some(usage)
-    }
-
-    /// Error-path attach: any open ledger is always incomplete (may under-count
-    /// without a freeze drain). `may_undercount` only matters when the ledger is empty.
-    pub(crate) fn for_error_path(
-        ledger: Option<&pi_chat_state::UsageLedger>,
-        may_undercount: bool,
-    ) -> Option<Self> {
-        match (ledger, may_undercount) {
-            (Some(l), _) => Self::project_from_ledger(Some(l), true),
-            (None, true) => Self::project_from_ledger(None, true),
-            (None, false) => None,
-        }
-    }
-
     /// Drop cost ticks when partial or incomplete so all wire surfaces fail closed.
     /// Incomplete bills clear ticks even when `cost_is_partial` is false.
     pub(crate) fn scrub_untrustworthy_costs(&mut self) {
@@ -155,30 +106,6 @@ impl PromptUsage {
                 m.cost_is_partial = true;
             }
         }
-    }
-
-    fn is_token_empty(&self) -> bool {
-        // Exhaustive destructure: a new token field must decide whether it
-        // counts as "billed something" here.
-        let PromptUsageModel {
-            input_tokens,
-            output_tokens,
-            total_tokens: _, // derived from input + output
-            cached_read_tokens,
-            cache_creation_tokens, // subset of input_tokens on the wire
-            reasoning_tokens: _,   // subset of output_tokens
-            model_calls,
-            api_duration_ms: _, // timing, not tokens
-            cost_usd_ticks: _,  // cost without usage cannot occur
-            cost_is_partial: _,
-            cost_missing_calls: _,
-        } = self.totals;
-        model_calls == 0
-            && input_tokens == 0
-            && output_tokens == 0
-            && cached_read_tokens == 0
-            && cache_creation_tokens == 0
-            && self.model_usage.is_empty()
     }
 }
 
@@ -289,148 +216,11 @@ impl From<&pi_chat_state::UsageLedger> for PromptUsage {
 }
 
 /// Server cost scale: 1 USD = 10^10 ticks. ACP exposes ticks; headless converts to float USD.
-pub const USD_TICKS_PER_USD: f64 = 1e10;
+pub(crate) const USD_TICKS_PER_USD: f64 = 1e10;
 
 /// Convert server cost ticks to float USD (headless only).
 pub fn ticks_to_usd(ticks: i64) -> f64 {
     ticks as f64 / USD_TICKS_PER_USD
-}
-
-/// Full ACP input → headless uncached input (`full − cache_read`).
-pub(crate) fn uncached_input_tokens(full_input: u64, cached_read: u64) -> u64 {
-    full_input.saturating_sub(cached_read)
-}
-
-/// Project usage onto a headless result object.
-///
-/// - `usage.input_tokens` = uncached (`full − cache_read − cache_creation`), so
-///   the three prompt buckets are disjoint; identity
-///   `input_tokens + cache_read + cache_creation + output = total_tokens`.
-/// - Omits all cost floats when partial or incomplete (absence ≠ free).
-/// - Incomplete with no tokens emits only `usage_is_incomplete` (no zero usage object).
-/// - `modelUsage` rows are a reduced external-compat schema (camelCase; no reasoning/duration).
-pub(crate) fn project_result_usage(result: &mut serde_json::Value, usage: &PromptUsage) {
-    if usage.usage_is_incomplete && usage.is_token_empty() {
-        result["usage_is_incomplete"] = true.into();
-        return;
-    }
-
-    // Exhaustive destructure: a new wire field is a compile error until it is
-    // either projected or named as deliberately dropped from the headless shape.
-    let PromptUsageModel {
-        input_tokens,
-        output_tokens,
-        total_tokens,
-        cached_read_tokens,
-        cache_creation_tokens,
-        reasoning_tokens,
-        model_calls: _,     // totals-level; headless carries num_turns instead
-        api_duration_ms: _, // dropped: not part of the frozen headless shape
-        cost_usd_ticks,
-        cost_is_partial,
-        cost_missing_calls: _, // internal partiality count; the flag suffices
-    } = usage.totals;
-    result["usage"] = serde_json::json!({
-        "input_tokens": uncached_input_tokens(input_tokens, cached_read_tokens)
-            .saturating_sub(cache_creation_tokens),
-        "cache_read_input_tokens": cached_read_tokens,
-        "cache_creation_input_tokens": cache_creation_tokens,
-        "output_tokens": output_tokens,
-        "reasoning_tokens": reasoning_tokens,
-        "total_tokens": total_tokens,
-    });
-    result["num_turns"] = usage.num_turns.into();
-    if usage.usage_is_incomplete {
-        result["usage_is_incomplete"] = true.into();
-    }
-    let hide_costs = cost_is_partial || usage.usage_is_incomplete;
-    if hide_costs {
-        if cost_is_partial {
-            result["cost_is_partial"] = true.into();
-        }
-    } else if let Some(ticks) = cost_usd_ticks {
-        result["total_cost_usd"] = serde_json::json!(ticks_to_usd(ticks));
-        // Exact integer ticks beside the float, under the same trust gate:
-        // reconciliation sums ticks exactly, which floats cannot guarantee.
-        result["total_cost_usd_ticks"] = serde_json::json!(ticks);
-    }
-    if !usage.model_usage.is_empty() {
-        let mut model_usage = serde_json::Map::new();
-        for (name, m) in &usage.model_usage {
-            let PromptUsageModel {
-                input_tokens,
-                output_tokens,
-                total_tokens: _, // derivable per row
-                cached_read_tokens,
-                cache_creation_tokens,
-                reasoning_tokens: _, // dropped: reduced per-model schema
-                model_calls,
-                api_duration_ms: _, // dropped: reduced per-model schema
-                cost_usd_ticks,
-                cost_is_partial,
-                cost_missing_calls: _,
-            } = *m;
-            let mut entry = serde_json::json!({
-                "inputTokens": uncached_input_tokens(input_tokens, cached_read_tokens)
-                    .saturating_sub(cache_creation_tokens),
-                "outputTokens": output_tokens,
-                "cacheReadInputTokens": cached_read_tokens,
-                "cacheCreationInputTokens": cache_creation_tokens,
-                "modelCalls": model_calls,
-            });
-            if !hide_costs
-                && let Some(ticks) = cost_usd_ticks
-                && !cost_is_partial
-            {
-                entry["costUSD"] = serde_json::json!(ticks_to_usd(ticks));
-            }
-            model_usage.insert(name.clone(), entry);
-        }
-        result["modelUsage"] = model_usage.into();
-    }
-}
-
-/// Fail-closed attach for headless results: parse failure becomes
-/// `usage_is_incomplete` (never omit silently — absence must not look free).
-pub fn attach_result_usage_fail_closed(result: &mut serde_json::Value, usage: &serde_json::Value) {
-    match serde_json::from_value::<PromptUsage>(usage.clone()) {
-        Ok(parsed) => project_result_usage(result, &parsed),
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                "headless: _meta.usage failed to parse; marking usage_is_incomplete"
-            );
-            result["usage_is_incomplete"] = true.into();
-        }
-    }
-}
-
-/// Status of a single hook run (wire format).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase", tag = "status")]
-pub enum HookRunStatusDto {
-    Success {
-        elapsed_ms: u64,
-    },
-    Skipped,
-    Failed {
-        error: String,
-        elapsed_ms: u64,
-        /// Stop-gate block (the hook's decision, not a failure). Rides `failed`
-        /// so old pagers keep rendering it. TODO: promote to a dedicated status.
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        blocked: bool,
-    },
-}
-
-/// A single hook run entry (wire format).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct HookRunEntryDto {
-    pub name: String,
-    pub status: HookRunStatusDto,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output: Option<String>,
 }
 
 /// Why auto-compaction stopped before completing.
@@ -546,42 +336,6 @@ pub enum SessionUpdate {
         attempts: u32,
         /// The final error message
         error: String,
-    },
-    /// A hook annotation message for the TUI scrollback.
-    /// Rendered inline with the preceding tool call block.
-    HookAnnotation {
-        /// The hook message to display (e.g., "🪝 Running post_tool_use hooks for `Edit`...")
-        message: String,
-    },
-    /// Structured hook execution data attached to tool call blocks.
-    HookExecution {
-        /// The hook event name ("pre_tool_use" or "post_tool_use").
-        event_name: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        tool_name: Option<String>,
-        /// Keeps a delayed turn-end batch off the wrong turn's marker.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        prompt_id: Option<String>,
-        runs: Vec<HookRunEntryDto>,
-    },
-    /// Hooks registry changed (after reload or trust/untrust).
-    /// Sent so the pager modal can auto-refresh if open.
-    HooksChanged {
-        hooks: Vec<pi_hooks_plugins_types::HookInfo>,
-        project_trusted: bool,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        load_errors: Vec<String>,
-    },
-    /// Plugins registry changed (after reload).
-    /// Sent so the pager modal can auto-refresh if open.
-    PluginsChanged {
-        plugins: Vec<pi_hooks_plugins_types::PluginInfo>,
-    },
-    /// Marketplace plugin updates were auto-installed on session start.
-    /// Sent so desktop/pager can show a notification to the user.
-    PluginUpdatesInstalled {
-        /// List of (plugin_name, old_version, new_version).
-        updates: Vec<(String, String, String)>,
     },
     /// Status snapshot for client status lines. Send-only: never persisted,
     /// since the next emit supersedes it.
@@ -2372,88 +2126,6 @@ mod tests {
     }
 
     #[test]
-    fn project_result_hides_costs_when_partial_or_incomplete() {
-        let mut model_usage = indexmap::IndexMap::new();
-        model_usage.insert(
-            "m".into(),
-            PromptUsageModel {
-                input_tokens: 100,
-                cached_read_tokens: 40,
-                output_tokens: 10,
-                total_tokens: 110,
-                model_calls: 4,
-                cost_usd_ticks: Some(1_000_000_000),
-                ..Default::default()
-            },
-        );
-        let partial = PromptUsage {
-            totals: PromptUsageModel {
-                input_tokens: 100,
-                cached_read_tokens: 40,
-                output_tokens: 10,
-                total_tokens: 110,
-                model_calls: 5,
-                cost_usd_ticks: Some(1_000_000_000),
-                cost_is_partial: true,
-                cost_missing_calls: 1,
-                ..Default::default()
-            },
-            model_usage: model_usage.clone(),
-            num_turns: 2,
-            usage_is_incomplete: false,
-        };
-        let mut result = serde_json::json!({});
-        project_result_usage(&mut result, &partial);
-        assert_eq!(result["usage"]["input_tokens"], 60);
-        assert!(result.get("total_cost_usd").is_none());
-        assert!(result.get("total_cost_usd_ticks").is_none());
-        assert_eq!(result["cost_is_partial"], true);
-        assert!(result["modelUsage"]["m"].get("costUSD").is_none());
-
-        let mut incomplete = PromptUsage {
-            totals: PromptUsageModel {
-                input_tokens: 50,
-                output_tokens: 5,
-                total_tokens: 55,
-                model_calls: 1,
-                cost_usd_ticks: Some(5_000_000_000),
-                ..Default::default()
-            },
-            model_usage,
-            num_turns: 1,
-            usage_is_incomplete: true,
-        };
-        incomplete.scrub_untrustworthy_costs();
-        assert!(incomplete.totals.cost_usd_ticks.is_none());
-        let mut result = serde_json::json!({});
-        project_result_usage(&mut result, &incomplete);
-        assert_eq!(result["usage_is_incomplete"], true);
-        assert!(result.get("total_cost_usd").is_none());
-        assert!(result.get("total_cost_usd_ticks").is_none());
-        assert!(result["modelUsage"]["m"].get("costUSD").is_none());
-    }
-
-    #[test]
-    fn project_result_incomplete_empty_omits_zero_usage() {
-        let usage = PromptUsage::project_from_ledger(None, true).unwrap();
-        let mut result = serde_json::json!({});
-        project_result_usage(&mut result, &usage);
-        assert_eq!(result["usage_is_incomplete"], true);
-        assert!(result.get("usage").is_none());
-        assert!(result.get("num_turns").is_none());
-        assert!(result.get("total_cost_usd").is_none());
-    }
-
-    #[test]
-    fn attach_result_usage_fail_closed_on_parse_error() {
-        let mut result = serde_json::json!({"ok": true});
-        attach_result_usage_fail_closed(&mut result, &serde_json::json!("not-an-object"));
-        assert_eq!(result["usage_is_incomplete"], true);
-        assert!(result.get("usage").is_none());
-        assert_eq!(result["ok"], true);
-    }
-
-    #[test]
     fn cost_missing_calls_not_on_acp_wire() {
         let model = PromptUsageModel {
             input_tokens: 1,
@@ -2485,57 +2157,6 @@ mod tests {
         usage.scrub_untrustworthy_costs();
         assert!(usage.totals.cost_usd_ticks.is_none());
         assert!(usage.totals.cost_is_partial);
-    }
-
-    #[test]
-    fn project_result_token_identity_uncached_plus_cache_plus_output() {
-        let mut model_usage = indexmap::IndexMap::new();
-        model_usage.insert(
-            "m".into(),
-            PromptUsageModel {
-                input_tokens: 100,
-                cached_read_tokens: 40,
-                output_tokens: 10,
-                total_tokens: 110,
-                model_calls: 1,
-                cost_usd_ticks: Some(2_000_000_000),
-                ..Default::default()
-            },
-        );
-        let usage = PromptUsage {
-            totals: PromptUsageModel {
-                input_tokens: 100,
-                cached_read_tokens: 40,
-                output_tokens: 10,
-                total_tokens: 110,
-                model_calls: 1,
-                cost_usd_ticks: Some(2_000_000_000),
-                ..Default::default()
-            },
-            model_usage,
-            num_turns: 1,
-            usage_is_incomplete: false,
-        };
-        let mut result = serde_json::json!({});
-        project_result_usage(&mut result, &usage);
-        let uncached = result["usage"]["input_tokens"].as_u64().unwrap();
-        let cache = result["usage"]["cache_read_input_tokens"].as_u64().unwrap();
-        let output = result["usage"]["output_tokens"].as_u64().unwrap();
-        let total = result["usage"]["total_tokens"].as_u64().unwrap();
-        assert_eq!(uncached, 60);
-        assert_eq!(cache, 40);
-        assert_eq!(output, 10);
-        assert_eq!(total, uncached + cache + output);
-        // ACP serde keeps full input_tokens; headless identity differs.
-        let acp = serde_json::to_value(&usage).unwrap();
-        assert_eq!(acp["inputTokens"], 100);
-        assert_eq!(acp["cachedReadTokens"], 40);
-        assert_ne!(acp["inputTokens"], result["usage"]["input_tokens"]);
-        assert_eq!(result["modelUsage"]["m"]["inputTokens"], 60);
-        assert_eq!(result["modelUsage"]["m"]["cacheReadInputTokens"], 40);
-        assert_eq!(result["total_cost_usd"], 0.2);
-        // Exact ticks accompany the float for tick-exact reconciliation.
-        assert_eq!(result["total_cost_usd_ticks"], 2_000_000_000_i64);
     }
 
     #[test]

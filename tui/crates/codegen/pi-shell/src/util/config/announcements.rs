@@ -2,7 +2,7 @@ use toml::Value as TomlValue;
 
 /// Announcement entry received from cli-chat-proxy `/v1/settings`.
 /// Re-exported from `pi-announcements` for backward compatibility.
-pub use pi_announcements::RemoteAnnouncement;
+pub(crate) use pi_announcements::RemoteAnnouncement;
 
 // ---------------------------------------------------------------------------
 // Announcements & tips from TOML

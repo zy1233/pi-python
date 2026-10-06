@@ -36,10 +36,6 @@ impl SlashCommand for ThemeCommand {
         })
     }
 
-    fn usage(&self) -> &str {
-        "/theme <name>"
-    }
-
     fn takes_args(&self) -> bool {
         true
     }
@@ -174,15 +170,7 @@ mod tests {
             let models = crate::acp::model_state::ModelState::default();
             let ctx = AppCtx {
                 models: &models,
-                cwd: std::path::Path::new("."),
-                has_session_announcements: false,
-                billing_surface_visible: true,
-                usage_command_visible: true,
-                workflows_available: true,
-                saved_workflows: &[],
-                workflow_runs: &[],
                 screen_mode: crate::app::ScreenMode::Fullscreen,
-                current_title: None,
             };
             let items = cmd.suggest_args(&ctx, "").expect("should return items");
             assert_eq!(items[0].insert_text, "auto");
@@ -200,15 +188,7 @@ mod tests {
             let models = crate::acp::model_state::ModelState::default();
             let ctx = AppCtx {
                 models: &models,
-                cwd: std::path::Path::new("."),
-                has_session_announcements: false,
-                billing_surface_visible: true,
-                usage_command_visible: true,
-                workflows_available: true,
-                saved_workflows: &[],
-                workflow_runs: &[],
                 screen_mode: crate::app::ScreenMode::Fullscreen,
-                current_title: None,
             };
             let items = cmd.suggest_args(&ctx, "").expect("should return items");
             assert!(
@@ -227,15 +207,7 @@ mod tests {
             let models = crate::acp::model_state::ModelState::default();
             let ctx = AppCtx {
                 models: &models,
-                cwd: std::path::Path::new("."),
-                has_session_announcements: false,
-                billing_surface_visible: true,
-                usage_command_visible: true,
-                workflows_available: true,
-                saved_workflows: &[],
-                workflow_runs: &[],
                 screen_mode: crate::app::ScreenMode::Fullscreen,
-                current_title: None,
             };
             let items = cmd.suggest_args(&ctx, "").expect("should return items");
             assert!(
@@ -255,15 +227,7 @@ mod tests {
             let models = crate::acp::model_state::ModelState::default();
             let ctx = AppCtx {
                 models: &models,
-                cwd: std::path::Path::new("."),
-                has_session_announcements: false,
-                billing_surface_visible: true,
-                usage_command_visible: true,
-                workflows_available: true,
-                saved_workflows: &[],
-                workflow_runs: &[],
                 screen_mode: crate::app::ScreenMode::Fullscreen,
-                current_title: None,
             };
             let items = cmd.suggest_args(&ctx, "").expect("should return items");
             let groknight = items
@@ -287,15 +251,7 @@ mod tests {
             let models = crate::acp::model_state::ModelState::default();
             let ctx = AppCtx {
                 models: &models,
-                cwd: std::path::Path::new("."),
-                has_session_announcements: false,
-                billing_surface_visible: true,
-                usage_command_visible: true,
-                workflows_available: true,
-                saved_workflows: &[],
-                workflow_runs: &[],
                 screen_mode: crate::app::ScreenMode::Fullscreen,
-                current_title: None,
             };
             let items = cmd.suggest_args(&ctx, "").expect("should return items");
             // No concrete theme should show "(active)" in auto mode.
@@ -318,14 +274,9 @@ mod tests {
         with_test_env(|| {
             let cmd = ThemeCommand;
             let models = crate::acp::model_state::ModelState::default();
-            let bundle = crate::app::bundle::BundleState::default();
             let mut ctx = CommandExecCtx {
                 models: &models,
-                session_id: None,
-                bundle_state: &bundle,
                 screen_mode: crate::app::ScreenMode::Inline,
-                billing_surface_visible: true,
-                usage_command_visible: true,
                 pager_state: crate::settings::PagerLocalSnapshot {
                     multiline_mode: false,
                     yolo_mode: false,
@@ -361,14 +312,9 @@ mod tests {
             );
             let cmd = ThemeCommand;
             let models = crate::acp::model_state::ModelState::default();
-            let bundle = crate::app::bundle::BundleState::default();
             let mut ctx = CommandExecCtx {
                 models: &models,
-                session_id: None,
-                bundle_state: &bundle,
                 screen_mode: crate::app::ScreenMode::Inline,
-                billing_surface_visible: true,
-                usage_command_visible: true,
                 pager_state: crate::settings::PagerLocalSnapshot {
                     multiline_mode: false,
                     yolo_mode: false,
@@ -393,14 +339,9 @@ mod tests {
         with_test_env(|| {
             let cmd = ThemeCommand;
             let models = crate::acp::model_state::ModelState::default();
-            let bundle = crate::app::bundle::BundleState::default();
             let mut ctx = CommandExecCtx {
                 models: &models,
-                session_id: None,
-                bundle_state: &bundle,
                 screen_mode: crate::app::ScreenMode::Inline,
-                billing_surface_visible: true,
-                usage_command_visible: true,
                 pager_state: crate::settings::PagerLocalSnapshot {
                     multiline_mode: false,
                     yolo_mode: false,
@@ -423,14 +364,9 @@ mod tests {
         with_test_env(|| {
             let cmd = ThemeCommand;
             let models = crate::acp::model_state::ModelState::default();
-            let bundle = crate::app::bundle::BundleState::default();
             let mut ctx = CommandExecCtx {
                 models: &models,
-                session_id: None,
-                bundle_state: &bundle,
                 screen_mode: crate::app::ScreenMode::Inline,
-                billing_surface_visible: true,
-                usage_command_visible: true,
                 pager_state: crate::settings::PagerLocalSnapshot {
                     multiline_mode: false,
                     yolo_mode: false,
@@ -531,14 +467,9 @@ mod tests {
         with_test_env(|| {
             let cmd = ThemeCommand;
             let models = crate::acp::model_state::ModelState::default();
-            let bundle = crate::app::bundle::BundleState::default();
             let mut ctx = CommandExecCtx {
                 models: &models,
-                session_id: None,
-                bundle_state: &bundle,
                 screen_mode: crate::app::ScreenMode::Inline,
-                billing_surface_visible: true,
-                usage_command_visible: true,
                 pager_state: crate::settings::PagerLocalSnapshot {
                     multiline_mode: false,
                     yolo_mode: false,
@@ -560,14 +491,9 @@ mod tests {
         with_test_env(|| {
             let cmd = ThemeCommand;
             let models = crate::acp::model_state::ModelState::default();
-            let bundle = crate::app::bundle::BundleState::default();
             let mut ctx = CommandExecCtx {
                 models: &models,
-                session_id: None,
-                bundle_state: &bundle,
                 screen_mode: crate::app::ScreenMode::Inline,
-                billing_surface_visible: true,
-                usage_command_visible: true,
                 pager_state: crate::settings::PagerLocalSnapshot {
                     multiline_mode: false,
                     yolo_mode: false,

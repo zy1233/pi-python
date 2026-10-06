@@ -98,7 +98,7 @@ mod tests {
     /// Verify round-trip fidelity for every `WorkspaceError` variant.
     #[test]
     fn error_code_round_trip_all_variants() {
-        let mut variants: Vec<WorkspaceError> = vec![
+        let variants: Vec<WorkspaceError> = vec![
             WorkspaceError::ParentSessionNotFound("p".into()),
             WorkspaceError::SessionNotFound("s".into()),
             WorkspaceError::SessionAlreadyExists("s".into()),

@@ -5,52 +5,32 @@
 //! and pi session extension notifications (`legacy ext RPC` and
 //! replay-path `legacy ext RPC`).
 
-use std::collections::hash_map::Entry;
-use std::path::PathBuf;
-use std::sync::Arc;
-
 use agent_client_protocol as acp;
 use pi_acp_lib::AcpClientMessage;
 
-use super::actions::Effect;
 use pi_shell::extensions::notification::{
     SessionNotification, SessionUpdate as PiSessionUpdate, is_reauthable_failure,
 };
 use pi_shell::tools::todo::todo_item_from_plan_entry;
-use pi_tools::notification::ScheduledTaskRemovedReason;
 use pi_workspace::permission::bash_command_splitting::BashCommandHighlights;
 
 use crate::acp::meta::NotificationMeta;
-use crate::acp::tracker::AcpUpdateTracker;
 use crate::acp::tracker::TurnActivity;
-use crate::app::agent::{
-    AgentId, AgentSession, AgentState, BgTaskState, BgTaskStatus, GoalDisplayPhase,
-    GoalDisplayState, GoalDisplayStatus,
-};
+use crate::app::agent::{AgentId, AgentSession, AgentState};
 use crate::notifications::{NotificationEvent, NotificationEventKind};
 use crate::scrollback::block::RenderBlock;
 use crate::scrollback::blocks::SessionEvent;
 use crate::views::permission_view::{
-    McpScope, McpScopeState, PermissionFocus, PermissionViewState, SubagentInfo,
+    McpScope, McpScopeState, PermissionFocus, PermissionViewState,
 };
-use crate::views::plan_approval_view::PlanReviewSource;
 
-use super::agent_view::{AgentPane, AgentView, InputMode};
+use super::agent_view::{AgentPane, AgentView};
 use super::app_view::{ActiveView, AppView};
 
-mod background;
-mod follow_ups;
-mod interactions;
-mod mcp;
 mod permissions;
 mod prompt_origin;
-mod queue;
 mod routing;
 mod session_notification;
-mod settings;
-mod subagent_activity;
-mod subagent_lifecycle;
-mod workflow_ingest;
 
 #[cfg(test)]
 use permissions::{MCP_ARGS_MAX_LINE_CHARS, MCP_ARGS_MAX_LINES, mcp_args_lines};
@@ -60,10 +40,7 @@ use permissions::{
 };
 
 // Hub + child modules (via `use super::*`) need sibling symbols in this scope.
-use routing::{
-    SessionMatch, find_session_match, interaction_target_agent, is_matched_agent_active,
-    mcp_target_agent, resolve_notif_agent, resolve_target_view,
-};
+use routing::{find_session_match, is_matched_agent_active};
 
 use prompt_origin::{finish_wake_turn, viewer_turn_anchor};
 pub(crate) use prompt_origin::{
@@ -71,85 +48,23 @@ pub(crate) use prompt_origin::{
     should_adopt_running_prompt,
 };
 
-pub(crate) use subagent_activity::finalize_killed_subagent;
-use subagent_activity::{subagent_activity_label, sync_subagent_activity};
-use subagent_lifecycle::{
-    LifecycleDelivery, LifecycleOrigin, classify_subagent_lifecycle, gate_subagent_lifecycle,
-    redispatched_subagent_finish, take_deferred_subagent_finish,
-};
-
-use workflow_ingest::ingest_workflow_update;
-
-pub(crate) use session_notification::apply_child_view_session_event;
 #[cfg(test)]
 pub(crate) use session_notification::apply_session_event_for_test;
 pub(crate) use session_notification::drop_unexpected_replay;
 use session_notification::{
     advance_reconnect_cursor, confirm_context_used, detect_plan_mode_change,
-    handle_session_notification, handle_session_notification_with_origin,
+    handle_session_notification,
 };
 
-pub(crate) use queue::PendingRunningAdoption;
-#[allow(unused_imports)]
-use queue::{handle_prompt_complete, handle_queue_changed};
-
-#[allow(unused_imports)]
-use background::{
-    derive_child_cwd, handle_git_head_changed, handle_monitor_event, handle_scheduled_task_created,
-    handle_scheduled_task_deleted, handle_scheduled_task_fired,
-    handle_scheduled_task_inject_prompt, handle_task_backgrounded, handle_task_completed,
-    route_bg_task_stdout,
-};
-#[allow(unused_imports)]
-use follow_ups::handle_follow_ups;
-pub(crate) use interactions::handle_ask_user_question;
-#[allow(unused_imports)]
-use interactions::{handle_exit_plan_mode, handle_mcp_elicit};
-#[allow(unused_imports)]
-use mcp::{
-    handle_mcp_elicit_complete, handle_mcp_init_progress, handle_mcp_server_status,
-    handle_mcp_servers_updated, handle_mcp_tools_changed, push_server_status_enabled,
-};
-#[allow(unused_imports)]
-use settings::{
-    handle_announcements_update, handle_models_update, handle_sessions_changed,
-    handle_settings_update,
-};
-
-// Test-only bare-name surface for `tests/*` (`use super::*`).
-#[cfg(test)]
-#[allow(unused_imports)]
-use background::*;
-#[cfg(test)]
-#[allow(unused_imports)]
-use follow_ups::*;
-#[cfg(test)]
-#[allow(unused_imports)]
-use interactions::*;
-#[cfg(test)]
-#[allow(unused_imports)]
-use mcp::*;
 #[cfg(test)]
 #[allow(unused_imports)]
 use prompt_origin::*;
-#[cfg(test)]
-#[allow(unused_imports)]
-use queue::*;
 #[cfg(test)]
 #[allow(unused_imports)]
 use routing::*;
 #[cfg(test)]
 #[allow(unused_imports)]
 use session_notification::*;
-#[cfg(test)]
-#[allow(unused_imports)]
-use settings::*;
-#[cfg(test)]
-#[allow(unused_imports)]
-use subagent_activity::*;
-#[cfg(test)]
-#[allow(unused_imports)]
-use workflow_ingest::*;
 
 /// Handle an ACP notification (session update, permission request, etc.).
 ///
@@ -164,13 +79,8 @@ pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
             let mut meta = NotificationMeta::from_json(notif.request.meta.as_ref());
 
             let affected = match find_session_match(app, &notif.request.session_id) {
-                Some(SessionMatch::Root(id)) => {
+                Some(id) => {
                     let is_active = is_matched_agent_active(app, id);
-                    // Read before the agent borrow below.
-                    let stashed_adoption_pid = app
-                        .pending_running_adoptions
-                        .get(&id)
-                        .map(|p| p.prompt_id.clone());
                     let agent = app
                         .agents
                         .get_mut(&id)
@@ -269,7 +179,6 @@ pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
                     }
 
                     let mut plan_mode_modal_refresh_needed = false;
-                    let mut workflows_modal_refresh = false;
 
                     // Extract Plan updates before passing to tracker (tracker skips them).
                     let mutated = if dedup_drop {
@@ -293,45 +202,6 @@ pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
                         agent.mark_reload_todo_update();
                         advance_reconnect_cursor(agent, &mut meta);
                         !meta.is_replay && !agent.session.loading_replay
-                    } else if let acp::SessionUpdate::ToolCallUpdate(ref tcu) = notif.request.update
-                        && route_bg_task_stdout(tcu, &mut agent.session)
-                    {
-                        // Stdout chunk for a bg task — routed to central store,
-                        // not to the scrollback tracker.
-                        advance_reconnect_cursor(agent, &mut meta);
-                        !meta.is_replay && !agent.session.loading_replay
-                    } else if !meta.is_replay
-                        && let Some(notif_pid) = meta.prompt_id.as_ref()
-                        && agent.session.current_prompt_id.as_ref() != Some(notif_pid)
-                        && !agent.attached_as_viewer
-                        && stashed_adoption_pid.as_deref() == Some(notif_pid.as_str())
-                    {
-                        // FIFO handoff: the server already promoted this
-                        // prompt but its adoption waits on the previous turn's
-                        // PromptResponse — buffer for the shim's flush. Not
-                        // applied, so the reconnect cursor does not advance.
-                        if agent.pending_adoption_updates.len()
-                            < super::agent_view::MAX_PENDING_ADOPTION_UPDATES
-                        {
-                            tracing::debug!(
-                                target: "qtrace",
-                                pid = std::process::id(),
-                                event = "adoption_update_buffered",
-                                prompt_id = %notif_pid,
-                                "buffering session/update for the stashed pending adoption",
-                            );
-                            agent.pending_adoption_updates.push((
-                                notif_pid.clone(),
-                                notif.request.update,
-                                meta.clone(),
-                            ));
-                        } else {
-                            tracing::debug!(
-                                prompt_id = %notif_pid,
-                                "pending-adoption buffer full; dropping update (kept prefix)",
-                            );
-                        }
-                        false
                     } else if !meta.is_replay
                         && let Some(notif_pid) = meta.prompt_id.as_ref()
                         && agent.session.current_prompt_id.as_ref() != Some(notif_pid)
@@ -380,11 +250,6 @@ pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
                         // PromptResponses get discarded. Their content still
                         // renders — the drop gate above passes synthetic deltas
                         // through when `current_prompt_id` is None/synthetic.
-                        //
-                        // (Cron `scheduler-fired-…` turns ARE client-driven and
-                        // have a `prompt_complete` exit; a viewer enters their
-                        // running chrome via the `queue/changed` shim adoption
-                        // in `handle_queue_changed`, not here.)
                         if let Some(notif_pid) = meta.prompt_id.as_ref()
                             && agent.session.current_prompt_id.as_ref() != Some(notif_pid)
                             && agent.attached_as_viewer
@@ -445,13 +310,8 @@ pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
                         // This is the SINGLE generation bump site — ensures exactly
                         // one bump per AvailableCommandsUpdate received.
                         if let Some(commands) = agent.session.tracker.take_pending_acp_commands() {
-                            let workflows_changed = workflow_commands(&commands)
-                                != workflow_commands(&agent.session.available_commands);
                             agent.session.available_commands = commands;
                             agent.session.available_commands_generation += 1;
-                            refresh_workflow_run_capabilities(agent);
-                            workflows_modal_refresh =
-                                workflows_changed && agent.extensions_modal.is_some();
                         }
                         // Tools list arrives in the same update's `meta` payload.
                         // Stash it on the session so the per-frame sync in
@@ -468,7 +328,7 @@ pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
                         // turn of its own and never calls start_turn(), so it
                         // would stay `Idle` — hiding the "⠿ Responding…" status
                         // line, the elapsed/token counter, and the Ctrl+c:cancel
-                        // / Ctrl+Enter:interject footer hints (all gated on
+                        // footer hint (all gated on
                         // `AgentState::TurnRunning`). Enter TurnRunning whenever a
                         // turn is in flight (a prompt id is adopted) and we are
                         // not already running.
@@ -524,48 +384,9 @@ pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
                     if plan_mode_modal_refresh_needed {
                         crate::app::dispatch::refresh_open_settings_modals(app);
                     }
-                    if workflows_modal_refresh {
-                        queue_open_workflows_modal_refresh(app, id);
-                    }
-
                     // Mutation always happens; redraw only when the matched
                     // agent is the visible one.
                     mutated && is_active
-                }
-                Some(SessionMatch::Child(parent_id)) => {
-                    let is_active = is_matched_agent_active(app, parent_id);
-                    let parent = app
-                        .agents
-                        .get_mut(&parent_id)
-                        .expect("find_session_match returned an existing AgentId");
-                    // Re-derive the &str key to avoid making SessionMatch::Child
-                    // carry an owned String (see find_session_match docs).
-                    let child_key: &str = notif.request.session_id.0.as_ref();
-
-                    let activity_label = {
-                        let child_view = parent
-                            .child_view_for_live_update_mut(child_key)
-                            .expect("find_session_match returned an existing subagent_views key");
-                        if let Some(tokens) = meta.total_tokens {
-                            confirm_context_used(child_view, tokens);
-                        }
-                        if let Some(ts) = meta.turn_start_ms {
-                            child_view.turn_start_ms = Some(ts);
-                        }
-                        child_view.session.handle_update(
-                            notif.request.update,
-                            &meta,
-                            &mut child_view.scrollback,
-                        );
-                        for entry_id in child_view.session.tracker.take_pending_edit_hl() {
-                            child_view.submit_edit_highlight(entry_id);
-                        }
-                        subagent_activity_label(child_view)
-                    };
-
-                    sync_subagent_activity(parent, child_key, activity_label);
-
-                    is_active
                 }
                 None => {
                     tracing::debug!(
@@ -585,7 +406,7 @@ pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
             ext.response_tx.send(Ok(())).ok();
             affected
         }
-        AcpClientMessage::ExtMethod(ext) => handle_ext_method(ext, app),
+        AcpClientMessage::ExtMethod(ext) => handle_ext_method(ext),
         AcpClientMessage::WaitForTerminalExit(args) => {
             args.response_tx
                 .send(Err(crate::acp::wait_for_exit_not_supported("pager")))
@@ -626,229 +447,33 @@ pub(super) fn note_first_turn_activity(agent: &mut AgentView) {
     }
 }
 
-fn workflow_commands(
-    commands: &[acp::AvailableCommand],
-) -> Vec<(&str, &str, Option<&str>, Option<&str>)> {
-    commands
-        .iter()
-        .filter_map(|command| {
-            let meta = command.meta.as_ref()?;
-            let source = meta.get("workflowSource")?.as_str();
-            Some((
-                command.name.as_str(),
-                command.description.as_str(),
-                source,
-                meta.get("workflowPath").and_then(serde_json::Value::as_str),
-            ))
-        })
-        .collect()
-}
-
-pub(super) fn is_builtin_workflow_handle(
-    commands: &[acp::AvailableCommand],
-    display_name: &str,
-) -> bool {
-    let is_builtin = |command: &acp::AvailableCommand| {
-        command.meta.as_ref().is_some_and(|meta| {
-            meta.get("workflowSource")
-                .and_then(serde_json::Value::as_str)
-                == Some("builtin")
-        })
-    };
-    if let Some(exact) = commands.iter().find(|command| command.name == display_name) {
-        return is_builtin(exact);
-    }
-    commands.iter().any(|command| {
-        is_builtin(command)
-            && display_name
-                .strip_prefix(command.name.as_str())
-                .and_then(|suffix| suffix.strip_prefix('-'))
-                .is_some_and(|ordinal| ordinal.parse::<u32>().is_ok_and(|n| n >= 2))
-    })
-}
-
-pub(crate) fn refresh_workflow_run_capabilities(agent: &mut AgentView) {
-    let management_available = agent
-        .session
-        .available_commands
-        .iter()
-        .any(|command| command.name == "workflow");
-    for run in &mut agent.workflow_runs {
-        run.management_available = management_available;
-        run.builtin = is_builtin_workflow_handle(&agent.session.available_commands, &run.name);
-    }
-}
-
-fn queue_open_workflows_modal_refresh(app: &mut AppView, agent_id: AgentId) {
-    let Some(session_id) = app
-        .agents
-        .get(&agent_id)
-        .and_then(|agent| agent.session.session_id.clone())
-    else {
-        return;
-    };
-    let already_pending = app.pending_effects.iter().any(|effect| {
-        matches!(
-            effect,
-            Effect::FetchWorkflowsList {
-                agent_id: pending_id,
-                ..
-            } if *pending_id == agent_id
-        )
-    });
-    if !already_pending {
-        app.pending_effects.push(Effect::FetchWorkflowsList {
-            agent_id,
-            session_id,
-        });
-    }
-}
-
 /// Handle an extension notification.
 ///
-/// Standard ACP agents (pi-agent-cli) never emit `legacy ext RPC`. Ignore those
-/// vendor notifications so leftover UI paths cannot depend on them.
+/// Standard ACP agents (pi-agent-cli) never emit the legacy vendor namespace.
+/// Ignore those notifications so leftover UI paths cannot depend on them.
 fn handle_ext_notification(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
     let method = notif.method.as_ref();
-    if !cfg!(test) && crate::acp::vendor::is_vendor_ext_method(method) {
-        tracing::debug!(method, "ignoring vendor ext notification (standard ACP only)");
+    if crate::acp::vendor::is_vendor_ext_method(method) {
+        tracing::debug!(
+            method,
+            "ignoring vendor ext notification (standard ACP only)"
+        );
         return false;
     }
     if crate::acp::is_session_update_ext_method(method) {
         return handle_session_notification(notif, app);
     }
-    #[cfg(test)]
-    return dispatch_legacy_ext_notification(notif, app);
     false
-}
-
-/// Test-only dispatch for legacy grok-shell ext notifications (suffix match).
-#[cfg(test)]
-fn dispatch_legacy_ext_notification(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
-    let method = notif.method.as_ref();
-    match method {
-        m if m.ends_with("/follow_ups") => handle_follow_ups(notif, app),
-        m if m.ends_with("/task_backgrounded") => handle_task_backgrounded(notif, app),
-        m if m.ends_with("/task_completed") => handle_task_completed(notif, app),
-        m if m.ends_with("/models/update") => handle_models_update(notif, app),
-        m if m.ends_with("/settings/update") => handle_settings_update(notif, app),
-        m if m.ends_with("/sessions/changed") => handle_sessions_changed(notif, app),
-        m if m.ends_with("/queue/changed") => handle_queue_changed(notif, app),
-        m if m.ends_with("/session/prompt_complete") => handle_prompt_complete(notif, app),
-        m if m.ends_with("/session/interjection") => handle_interjection(notif, app),
-        m if m.ends_with("/monitor_event") => handle_monitor_event(notif, app),
-        m if m.ends_with("/scheduled_task_created") => handle_scheduled_task_created(notif, app),
-        m if m.ends_with("/scheduled_task_fired") => handle_scheduled_task_fired(notif, app),
-        m if m.ends_with("/scheduled_task_deleted") => handle_scheduled_task_deleted(notif, app),
-        m if m.ends_with("/scheduled_task_inject_prompt") => {
-            handle_scheduled_task_inject_prompt(notif, app)
-        }
-        m if m.ends_with("/announcements/update") => handle_announcements_update(notif, app),
-        m if m.ends_with("/git_head_changed") => handle_git_head_changed(notif, app),
-        m if m.ends_with("/leader/version_mismatch") => handle_version_mismatch(notif, app),
-        m if m.ends_with("/mcp/init_progress") => handle_mcp_init_progress(notif, app),
-        m if m.ends_with("/mcp/tools_changed") || m.ends_with("/mcp_initialized") => {
-            handle_mcp_tools_changed(notif, app)
-        }
-        m if m.ends_with("/mcp/server_status") && push_server_status_enabled() => {
-            handle_mcp_server_status(notif, app)
-        }
-        m if m.ends_with("/mcp/elicit_complete") => handle_mcp_elicit_complete(notif, app),
-        m if m.ends_with("/mcp/servers_updated") => handle_mcp_servers_updated(notif, app),
-        _ => false,
-    }
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-fn handle_version_mismatch(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
-    let Some(banner) = crate::acp::version_mismatch_banner(notif.params.get()) else {
-        tracing::warn!("ignoring leader/version_mismatch without usable versions");
-        return false;
-    };
-    app.show_toast(&banner);
-    true
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-/// Handle `legacy ext RPC` — the leader broadcasts this
-/// sessionId-bearing notification to every attached client when a mid-turn
-/// interjection is queued (emitted from the session actor's `Interject`
-/// command handler). Each client renders the interjection as a scrollback
-/// block.
-///
-/// The originating pager renders an optimistic block immediately in
-/// `dispatch_interject` and records the interjection id in
-/// `self_interjection_ids`; when its own broadcast echoes back here it is
-/// deduped (dropped) by that id. Other panes (which never minted the id) render
-/// the block — fixing the multi-client bug where an interjection typed in one
-/// pane was invisible in the others. A `null`/absent id (older shell) always
-/// renders, so legacy shells degrade to "render everywhere" rather than drop.
-fn handle_interjection(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
-    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(notif.params.get()) else {
-        tracing::warn!("Failed to parse session/interjection");
-        return false;
-    };
-    let Some(session_id) = parsed.get("sessionId").and_then(|v| v.as_str()) else {
-        return false;
-    };
-    let Some(text) = parsed.get("text").and_then(|v| v.as_str()) else {
-        return false;
-    };
-    let interjection_id = parsed.get("interjectionId").and_then(|v| v.as_str());
-
-    let sid = acp::SessionId::new(session_id.to_string());
-    let Some(SessionMatch::Root(id)) = find_session_match(app, &sid) else {
-        return false;
-    };
-    let is_active = is_matched_agent_active(app, id);
-    let Some(agent) = app.agents.get_mut(&id) else {
-        return false;
-    };
-
-    if let Some(iid) = interjection_id {
-        // Two self-message flows land here, painted differently on the
-        // originator: a direct interjection (already an interjection block,
-        // tracked by `self_interjection_ids`) is a pure dedup — drop it; a goal
-        // Send Now (a plain user-prompt block in `send_now_painted_blocks`) must
-        // instead be converted to interjection styling.
-        if agent.self_interjection_ids.remove(iid) {
-            return false;
-        }
-        // `edited` is ignored: the painted block already holds the authoritative
-        // (possibly edited) text — we only restyle it. Drift resolution via
-        // `edited` matters only on the turn-start adoption path.
-        if agent.is_self_originated_prompt(iid)
-            && let Some((entry_id, _)) = agent.send_now_painted_blocks.remove(iid)
-        {
-            agent.clear_send_now_expectation();
-            if let Some(index) = agent.scrollback.index_of_id(entry_id)
-                && let Some(RenderBlock::UserPrompt(block)) = agent
-                    .scrollback
-                    .entry_mut(index)
-                    .map(|entry| &mut entry.block)
-            {
-                block.is_interjection = true;
-            }
-            return false;
-        }
-    }
-
-    agent
-        .scrollback
-        .push_block(RenderBlock::interjection_prompt(text));
-    is_active
 }
 
 /// Handle an ACP `ext_method` request (blocking request that expects a response).
 ///
-/// Dispatches on method string. Unknown methods get `method_not_found` error.
-/// The response sender is stashed (for `ask_user_question`) or replied to
-/// immediately (for unknown methods).
-fn handle_ext_method(ext: pi_acp_lib::AcpArgs<acp::ExtRequest>, app: &mut AppView) -> bool {
+/// The pager registers no reverse `ext_method` handlers: every request gets a
+/// `method_not_found` error. Legacy vendor requests are acknowledged with an
+/// empty result so a stray vendor agent is not left waiting on a reply.
+fn handle_ext_method(ext: pi_acp_lib::AcpArgs<acp::ExtRequest>) -> bool {
     let method = ext.request.method.as_ref();
-    if !cfg!(test) && crate::acp::vendor::is_vendor_ext_method(method) {
+    if crate::acp::vendor::is_vendor_ext_method(method) {
         tracing::debug!(method, "ignoring vendor ext_method (standard ACP only)");
         let dummy = serde_json::from_value(serde_json::json!({}))
             .or_else(|_| serde_json::from_value(serde_json::Value::Null));
@@ -858,14 +483,15 @@ fn handle_ext_method(ext: pi_acp_lib::AcpArgs<acp::ExtRequest>, app: &mut AppVie
             }
             Err(_) => {
                 ext.response_tx
-                    .send(Err(acp::Error::new(-32601, format!("Method not found: {method}"))))
+                    .send(Err(acp::Error::new(
+                        -32601,
+                        format!("Method not found: {method}"),
+                    )))
                     .ok();
             }
         }
         return false;
     }
-    #[cfg(test)]
-    return dispatch_legacy_ext_method(ext, app);
     tracing::warn!("Unknown ext_method: {method}");
     ext.response_tx
         .send(Err(acp::Error::new(
@@ -874,30 +500,6 @@ fn handle_ext_method(ext: pi_acp_lib::AcpArgs<acp::ExtRequest>, app: &mut AppVie
         )))
         .ok();
     false
-}
-
-/// Test-only dispatch for legacy grok-shell reverse `ext_method` requests.
-#[cfg(test)]
-fn dispatch_legacy_ext_method(
-    ext: pi_acp_lib::AcpArgs<acp::ExtRequest>,
-    app: &mut AppView,
-) -> bool {
-    let method = ext.request.method.as_ref();
-    match method {
-        m if m.ends_with("/ask_user_question") => handle_ask_user_question(ext, app),
-        m if m.ends_with("/exit_plan_mode") => handle_exit_plan_mode(ext, app),
-        m if m.ends_with("/mcp/elicit") => handle_mcp_elicit(ext, app),
-        _ => {
-            tracing::warn!("Unknown ext_method: {method}");
-            ext.response_tx
-                .send(Err(acp::Error::new(
-                    -32601,
-                    format!("Method not found: {method}"),
-                )))
-                .ok();
-            false
-        }
-    }
 }
 
 #[cfg(test)]

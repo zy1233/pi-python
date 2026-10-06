@@ -144,11 +144,6 @@ impl EphemeralTipState {
         self.slot.is_some()
     }
 
-    /// Remaining TTL ticks, if a tip is active.
-    pub fn ticks_remaining(&self) -> Option<u16> {
-        self.slot.as_ref().map(|t| t.ticks_remaining)
-    }
-
     /// The active tip's pre-styled line, if any.
     pub fn line(&self) -> Option<&Line<'static>> {
         self.slot.as_ref().map(|t| &t.line)

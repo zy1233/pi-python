@@ -221,15 +221,6 @@ device-code URL or a browser prompt reaches you. Exiting promptly on
 instead makes you wait out the refresh timeout on every start. Mid-session, the
 turn fails with a re-auth prompt and `/login` re-runs the binary interactively.
 
-One case stays ambiguous, and only in **leader mode** (`--leader`, or
-`[cli] use_leader = true`; off by default): with no credential at all, the
-leader makes one extra attempt in the background just after startup, and that
-run has the variable unset, like a sign-in. A binary that mints without help
-(service account, keytab, mounted token) succeeds there and the session heals
-itself. One that must prompt just sits, up to the 300s sign-in ceiling —
-nothing waits on it, the sign-in screen is already up, and that run's stderr
-goes to `~/.grok/leader.log` rather than to you.
-
 ### Environment Variables
 
 | Variable | Description |
