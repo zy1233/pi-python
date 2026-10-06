@@ -367,4 +367,5 @@ def create_grep_tool(cwd: str, *, use_fallback: bool = False) -> AgentTool:
         parameters=GrepParams,
         execute_fn=execute,
         prompt_snippet="Search file contents for patterns (respects .gitignore)",
+        annotations={"readOnlyHint": True},
     )

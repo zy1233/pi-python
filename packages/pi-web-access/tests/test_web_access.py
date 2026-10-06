@@ -5,12 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from pi_web_access.fetch_url import (
-    FetchUrlParams,
-    _simple_html_to_text,
-    create_fetch_url_tool,
-    fetch_url_execute,
-)
+from pi_web_access.fetch_url import _simple_html_to_text, create_fetch_url_tool
 from pi_web_access.web_search import (
     WebSearchParams,
     _detect_provider,
@@ -129,52 +124,7 @@ class TestWebSearchExecute:
         assert "Unknown provider" in text
 
 
-# ---------------------------------------------------------------------------
-# fetch_url — execute with mock
-# ---------------------------------------------------------------------------
-
-
-class TestFetchUrlExecute:
-    async def test_fetch_html_extract(self) -> None:
-        html = "<html><body><p>Hello World</p></body></html>"
-        mock_response = AsyncMock()
-        mock_response.status_code = 200
-        mock_response.text = html
-        mock_response.headers = {"content-type": "text/html; charset=utf-8"}
-        mock_response.raise_for_status = lambda: None
-
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-
-        with patch("pi_web_access.fetch_url.httpx.AsyncClient", return_value=mock_client):
-            result = await fetch_url_execute("tc-1", FetchUrlParams(url="https://example.com"))
-
-        text = result.content[0]["text"]
-        assert "Hello World" in text
-        assert result.details["statusCode"] == 200
-
-    async def test_fetch_raw_no_extract(self) -> None:
-        raw = '{"key": "value"}'
-        mock_response = AsyncMock()
-        mock_response.status_code = 200
-        mock_response.text = raw
-        mock_response.headers = {"content-type": "application/json"}
-        mock_response.raise_for_status = lambda: None
-
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-
-        with patch("pi_web_access.fetch_url.httpx.AsyncClient", return_value=mock_client):
-            result = await fetch_url_execute(
-                "tc-1", FetchUrlParams(url="https://api.example.com/data", extract_text=False)
-            )
-
-        text = result.content[0]["text"]
-        assert '"key"' in text
+# fetch_url's execution (network, safety, limits, output) is tested in test_fetch_url_safety.py.
 
 
 # ---------------------------------------------------------------------------

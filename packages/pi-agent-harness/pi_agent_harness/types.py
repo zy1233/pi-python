@@ -489,6 +489,15 @@ class ToolCallEvent(BaseModel):
     toolCallId: str
     toolName: str
     input: dict[str, Any]
+    origin: dict[str, Any] | None = None
+    """Where the call came from when it is not this session's own agent, e.g.
+    ``{"kind": "subagent", "cwd": ..., "label": ...}`` for a workflow sub-agent
+    (``label`` is text the workflow script chose). ``None`` for the session's own calls."""
+    annotations: dict[str, Any] | None = None
+    """What the session's tool of that name declares about itself (MCP-style hints such as
+    ``{"readOnlyHint": True}``), copied from the harness's own tool registry. ``None`` when
+    the tool declares nothing or the session has no tool of that name. A workflow
+    sub-agent's call is looked up in the session's tools by name too."""
 
 
 class ToolResultEvent(BaseModel):

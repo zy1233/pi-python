@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 from pi_agent_cli.config import CliConfig, load_config, pi_home
+from pi_agent_cli.extension_notices import failed_extensions_notice
+from pi_agent_cli.extension_trust import (
+    ProjectTrust,
+    decide_project_trust,
+    notice_reason,
+    skipped_project_resources,
+    untrusted_project_notice,
+)
 from pi_agent_cli.factory import create_session_harness, default_stream_fn, load_session_resources
 from pi_agent_harness import JsonlSessionRepo
 
@@ -109,14 +119,34 @@ async def run_print(
         config = apply_prompt_overrides(config, prompt_overrides)
     repo = JsonlSessionRepo(sessions_dir)
     session = await repo.create({"cwd": cwd_s})
-    resources = await load_session_resources(cwd=cwd_s, config=config)
+    # Nobody can be asked here (upstream pi does not prompt in non-interactive modes either),
+    # but an answer given earlier, in an ACP session, still counts while the files are the same.
+    decision = await asyncio.to_thread(decide_project_trust, config, cwd_s, home=home_path)
+    trust = ProjectTrust(decision)
+    resources = await load_session_resources(cwd=cwd_s, config=config, trusted=trust.trusted)
     harness = await create_session_harness(
         session=session,
         cwd=cwd_s,
         config=config,
         stream_fn=default_stream_fn(),
         resources=resources,
+        home=home_path,
+        trust=trust,
     )
+    await harness.load_extensions()
+    # stderr: stdout carries only the assistant's answer.
+    notice = untrusted_project_notice(
+        extensions=harness.skipped_extensions,
+        resources=skipped_project_resources(config, cwd_s, trusted=trust.trusted),
+        cwd=cwd_s,
+        home=home_path,
+        why=notice_reason(decision),
+    )
+    if notice is not None:
+        print(notice, file=sys.stderr, flush=True)
+    failed = failed_extensions_notice(harness.failed_extensions)
+    if failed is not None:
+        print(failed, file=sys.stderr, flush=True)
     message = await harness.prompt(text)
     out = assistant_text(message)
     print(out, end="" if out.endswith("\n") else "\n")

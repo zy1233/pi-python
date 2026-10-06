@@ -14,6 +14,15 @@ from pi_agent_cli.config import (
 )
 
 
+def test_the_cli_and_the_extension_loader_share_one_pi_home():
+    """The CLI honoured PI_HOME while the extension loader and the workflow extension went
+    to ``Path.home()`` directly; one resolver keeps them from drifting apart again."""
+    from pi_agent_cli import config as cli_config
+    from pi_agent_core import home as core_home
+
+    assert cli_config.pi_home is core_home.pi_home
+
+
 def test_load_config_defaults_when_missing(tmp_path: Path):
     assert load_config(tmp_path) == CliConfig()
 
@@ -66,9 +75,34 @@ command = "python -m pi_agent_cli"
 
 def test_make_get_api_key_reads_env(monkeypatch):
     monkeypatch.setenv("MY_KEY", "secret")
-    getter = make_get_api_key(CliConfig(api_key_env="MY_KEY"))  # type: ignore[arg-type]
+    getter = make_get_api_key(CliConfig(provider="deepseek", api_key_env="MY_KEY"))
     assert getter is not None
     assert getter("deepseek") == "secret"
+
+
+def test_make_get_api_key_is_scoped_to_the_configured_provider(monkeypatch):
+    """``api_key_env`` is the key of ``provider`` only.
+
+    A sub-agent routed to another provider must not receive it; returning ``None`` lets
+    that provider's SDK fall back to its own standard env var (e.g. ANTHROPIC_API_KEY).
+    """
+    monkeypatch.setenv("MY_KEY", "secret")
+    getter = make_get_api_key(CliConfig(provider="deepseek", api_key_env="MY_KEY"))
+    assert getter is not None
+    assert getter("anthropic") is None
+    assert getter("openai") is None
+    assert getter("DeepSeek") == "secret"  # provider names compare case-insensitively
+
+
+def test_make_get_api_key_returns_none_when_env_is_unset(monkeypatch):
+    monkeypatch.delenv("MY_KEY", raising=False)
+    getter = make_get_api_key(CliConfig(provider="deepseek", api_key_env="MY_KEY"))
+    assert getter is not None
+    assert getter("deepseek") is None
+
+
+def test_make_get_api_key_is_none_without_api_key_env():
+    assert make_get_api_key(CliConfig(provider="deepseek")) is None
 
 
 def test_load_local_env_does_not_override_existing(tmp_path: Path, monkeypatch):
@@ -174,3 +208,37 @@ supports_images = false
     )
     config2 = load_config(tmp_path)
     assert config2.supports_images is False
+
+
+def test_reasoning_is_not_set_unless_the_file_says_so(tmp_path: Path):
+    assert load_config(tmp_path).reasoning is None
+    (tmp_path / "agent.toml").write_text('[model]\nid = "m"\n', encoding="utf-8")
+
+    assert load_config(tmp_path).reasoning is None
+
+
+def test_load_config_parses_reasoning(tmp_path: Path):
+    config_path = tmp_path / "agent.toml"
+
+    for text, expected in [
+        ("[model]\nreasoning = true\n", True),
+        ("[model]\nreasoning = false\n", False),
+        ('[model]\nreasoning = "false"\n', False),
+        ('[model]\nreasoning = "yes"\n', True),
+        ("reasoning = true\n", True),
+        ("reasoning = true\n[model]\nreasoning = false\n", False),
+    ]:
+        config_path.write_text(text, encoding="utf-8")
+
+        assert load_config(tmp_path).reasoning is expected, text
+
+
+def test_model_reasoning_follows_the_thinking_level_unless_set():
+    """Asking for a thinking level is how a user says the model can reason; an explicit
+    ``reasoning`` setting overrides that either way."""
+    assert CliConfig().model_reasoning is False
+    assert CliConfig(thinking_level="off").model_reasoning is False
+    for level in ("minimal", "low", "medium", "high", "xhigh"):
+        assert CliConfig(thinking_level=level).model_reasoning is True  # type: ignore[arg-type]
+    assert CliConfig(thinking_level="high", reasoning=False).model_reasoning is False
+    assert CliConfig(thinking_level="off", reasoning=True).model_reasoning is True

@@ -4,6 +4,9 @@
 # LLM keys are read from environment variables — never put secrets in this file.
 
 permission = "ask" # ask | auto | always-approve
+# `ask` asks before each tool call, except for tools that declare themselves harmless: read-only
+# or only keeping the agent's own notes (read, grep, find, ls, web_search, fetch_url, goal_*).
+# A tool that declares nothing is asked about; bash, edit, write and workflow always are.
 
 thinking_level = "off" # off | minimal | low | medium | high | xhigh
 max_turns = 50
@@ -12,7 +15,10 @@ max_turns = 50
 provider = "deepseek"
 id = "deepseek-ai/DeepSeek-V4-Flash"
 base_url = "https://api.siliconflow.cn/v1"
-api_key_env = "REAL_LLM_API_KEY"
+api_key_env = "REAL_LLM_API_KEY" # key for `provider` only; other providers use their own (e.g. ANTHROPIC_API_KEY)
+# Can the model reason? A thinking_level other than "off" is sent to the provider only if so.
+# Unset: any level but "off" says it can. `false` keeps a model that rejects reasoning parameters out of them.
+# reasoning = true
 
 # Extra models for the TUI `/model` picker (ACP session config option "model").
 # `[model]` above is always offered first; unset fields inherit from it, but
@@ -28,6 +34,7 @@ api_key_env = "REAL_LLM_API_KEY"
 # api_key_env = "OPENAI_API_KEY"
 
 [skills]
+# ".pi/skills" is relative to the project, so it loads only for a trusted project (see [extensions]).
 paths = ["~/.pi-python/skills", ".pi/skills"]
 
 [agent]
@@ -42,6 +49,31 @@ command = "python -m pi_agent_cli"
 # append_system_prompt_file = "~/.pi-python/agent/APPEND_SYSTEM.md"
 
 [git]
+# A `git status` snapshot (branch name and the paths of changed and untracked files) is added to
+# the system prompt at the start of a session, so it is sent to the model provider with every
+# request. Set enabled = false if such names are sensitive.
 # enabled = true
-# timeout_seconds = 2
+# timeout_seconds = 2   # one budget for the whole snapshot (up to four git commands), not per command
 # max_status_lines = 40
+
+[extensions]
+# Project trust. Extensions in <project>/.pi-python/extensions run arbitrary Python as soon as a
+# session opens, and the project's .pi/SYSTEM.md, .pi/APPEND_SYSTEM.md and project-relative
+# [skills] paths decide what the model is told, so none of them is used until the project is
+# trusted. Only this file, the command line and your own answers decide that (never a config
+# inside the project). Installed extension packages, ~/.pi-python/extensions, AGENTS.md and
+# absolute or ~ skills paths are not affected.
+#
+# An ACP client (the TUI) asks about a project that ships such files, once per directory.
+# "Trust and remember" is saved in ~/.pi-python/agent/trust.json with a fingerprint of those
+# files, so you are asked again when one of them changes (after a git pull, say). Delete the
+# project's entry from that file to take the trust back. Headless (-p) runs never ask, but
+# honour an answer given earlier for the same files.
+# default_project_trust = "ask"         # "ask" (default): ask in an ACP client
+#                                       # "never": do not ask; only the entries and answers below apply
+#                                       # "always": trust every project without asking
+# trusted_projects = ["~/work/my-repo"] # absolute or ~ paths, never asked about; subdirectories are
+#                                       # trusted too (Windows: use forward slashes, "C:/work/my-repo")
+# trust_project_extensions = false      # older switch: true means default_project_trust = "always"
+#                                       # (an explicit default_project_trust wins)
+# One-off alternatives: --trust-project-extensions, or PI_TRUST_PROJECT_EXTENSIONS=1

@@ -44,9 +44,9 @@ MATRIX: tuple[ProviderRow, ...] = (
     ProviderRow(
         id="deepseek",
         provider="deepseek",
-        model_id="deepseek-chat",
+        model_id="deepseek-v4-flash",
         api_key_env="DEEPSEEK_API_KEY",
-        capabilities=("text", "tools", "usage", "thinking", "abort"),
+        capabilities=("text", "tools", "usage", "thinking", "thinking_tools", "abort"),
         require_thinking=True,
     ),
     ProviderRow(

@@ -12,21 +12,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from pi_agent_core.home import pi_home
 from pi_agent_core.types import ThinkingLevel
 
 PermissionMode = Literal["ask", "auto", "always-approve"]
+# What to do about a project nobody has vouched for: ask the user, leave it alone, or trust it.
+DefaultProjectTrust = Literal["ask", "never", "always"]
 
 _VALID_PERMISSION: set[str] = {"ask", "auto", "always-approve"}
+_VALID_DEFAULT_TRUST: set[str] = {"ask", "never", "always"}
 _VALID_THINKING: set[str] = {"off", "minimal", "low", "medium", "high", "xhigh"}
 
-
-def pi_home(override: Path | str | None = None) -> Path:
-    if override is not None:
-        return Path(override).expanduser()
-    raw = os.environ.get("PI_HOME")
-    if raw:
-        return Path(raw).expanduser()
-    return Path.home() / ".pi-python"
+# ``pi_home`` (imported above and re-exported from here) is the one place that decides where
+# pi-python keeps its files; the extension loader and the extensions use the same function.
 
 
 def load_local_env(home: Path | str | None = None) -> None:
@@ -69,6 +67,15 @@ def expand_config_path(raw: str, *, cwd: str | Path) -> str:
     return str(path.resolve())
 
 
+def is_project_relative_path(raw: str) -> bool:
+    """Does ``expand_config_path`` resolve *raw* against the project (cwd)?
+
+    Such an entry points into whatever project is open, so what it finds is the project's
+    own content, not the user's.
+    """
+    return not Path(os.path.expanduser(raw)).is_absolute()
+
+
 @dataclass(frozen=True)
 class ModelChoice:
     """One selectable model (the ``/model`` picker; ACP session config option ``model``).
@@ -96,6 +103,9 @@ class CliConfig:
     max_turns: int | None = None
     api_key_env: str | None = None
     supports_images: bool | None = None
+    # Whether the model can reason (``Model.reasoning``). ``None``: not set, and then asking
+    # for a thinking level is taken as saying so (``model_reasoning``).
+    reasoning: bool | None = None
     skills_dirs: tuple[str, ...] = ()
     agent_command: str | None = None
     no_context_files: bool = False
@@ -106,7 +116,27 @@ class CliConfig:
     git_enabled: bool = True
     git_timeout_seconds: float = 2.0
     git_max_status_lines: int = 40
+    # Project-local extensions (<project>/.pi-python/extensions) run arbitrary Python when
+    # loaded. They are skipped unless the project is trusted; see ``extension_trust``.
+    trust_project_extensions: bool = False
+    trusted_projects: tuple[str, ...] = ()
+    # ``None``: not set. Then the older ``trust_project_extensions`` decides ("always" if it is
+    # on), and otherwise the answer is "ask". See ``extension_trust.effective_default_trust``.
+    default_project_trust: DefaultProjectTrust | None = None
     models: tuple[ModelChoice, ...] = ()
+
+    @property
+    def model_reasoning(self) -> bool:
+        """``Model.reasoning`` for the configured model.
+
+        The adapter asks a provider to think only when the model can (this) and the request
+        asks for it (``thinking_level`` other than ``off``). The level comes from the same
+        file, so a user who sets one has said the model can reason, unless ``reasoning``
+        says otherwise.
+        """
+        if self.reasoning is not None:
+            return self.reasoning
+        return self.thinking_level != "off"
 
     def default_choice(self) -> ModelChoice:
         """The ``[model]`` table as a fully-resolved choice."""
@@ -160,12 +190,20 @@ def load_config(home: Path | str | None = None) -> CliConfig:
     return CliConfig()
 
 
-def api_key_getter(env_name: str | None) -> Callable[[str], str | None] | None:
-    """``get_api_key`` hook reading ``env_name`` from the environment (``None`` when unset)."""
+def api_key_getter(env_name: str | None, provider: str) -> Callable[[str], str | None] | None:
+    """Build the ``get_api_key`` callback for a model of ``provider``.
+
+    ``None`` when no ``env_name`` is configured. ``env_name`` is the key of ``provider`` only.
+    Any other provider (e.g. a sub-agent routed elsewhere) gets ``None`` so its SDK falls back
+    to its own standard env var (``ANTHROPIC_API_KEY`` ...) instead of receiving a credential
+    meant for a different vendor.
+    """
     if not env_name:
         return None
 
-    def get_api_key(_provider: str) -> str | None:
+    def get_api_key(requested: str) -> str | None:
+        if requested.casefold() != provider.casefold():
+            return None
         return os.environ.get(env_name) or None
 
     return get_api_key
@@ -174,7 +212,12 @@ def api_key_getter(env_name: str | None) -> Callable[[str], str | None] | None:
 def make_get_api_key(
     config: CliConfig,
 ) -> Callable[[str], str | None] | None:
-    return api_key_getter(config.api_key_env)
+    """Build the ``get_api_key`` callback for the ``[model]`` default.
+
+    ``None`` when no ``api_key_env`` is configured. ``api_key_env`` is the key of
+    ``config.provider`` only (see ``api_key_getter``).
+    """
+    return api_key_getter(config.api_key_env, config.provider)
 
 
 def _from_toml(data: dict[str, Any]) -> CliConfig:
@@ -183,6 +226,7 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
     agent = data.get("agent") if isinstance(data.get("agent"), dict) else {}
     prompt = data.get("prompt") if isinstance(data.get("prompt"), dict) else {}
     git = data.get("git") if isinstance(data.get("git"), dict) else {}
+    extensions = data.get("extensions") if isinstance(data.get("extensions"), dict) else {}
 
     permission = data.get("permission", "ask")
     if permission not in _VALID_PERMISSION:
@@ -204,6 +248,11 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         supports_images_raw = data.get("supports_images")
     supports_images = bool(supports_images_raw) if supports_images_raw is not None else None
 
+    reasoning_raw = model.get("reasoning")
+    if reasoning_raw is None:
+        reasoning_raw = data.get("reasoning")
+    reasoning = _as_bool(reasoning_raw, False) if reasoning_raw is not None else None
+
     agent_command = agent.get("command")
     if agent_command is not None:
         agent_command = str(agent_command).strip() or None
@@ -213,6 +262,11 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
             return None
         text = str(value).strip()
         return text or None
+
+    raw_trusted = extensions.get("trusted_projects")
+    trusted_projects: tuple[str, ...] = ()
+    if isinstance(raw_trusted, list):
+        trusted_projects = tuple(str(item).strip() for item in raw_trusted if str(item).strip())
 
     models: list[ModelChoice] = []
     raw_models = data.get("models")
@@ -244,6 +298,7 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         max_turns=max_turns,
         api_key_env=model.get("api_key_env") or data.get("api_key_env"),
         supports_images=supports_images,
+        reasoning=reasoning,
         skills_dirs=skills_dirs,
         agent_command=agent_command,
         no_context_files=bool(prompt.get("no_context_files", False)),
@@ -254,8 +309,20 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         git_enabled=_as_bool(git.get("enabled"), True),
         git_timeout_seconds=_as_float(git.get("timeout_seconds"), 2.0),
         git_max_status_lines=_as_int(git.get("max_status_lines"), 40),
+        trust_project_extensions=_as_bool(extensions.get("trust_project_extensions"), False),
+        trusted_projects=trusted_projects,
+        default_project_trust=_default_project_trust(extensions.get("default_project_trust")),
         models=tuple(models),
     )
+
+
+def _default_project_trust(value: object) -> DefaultProjectTrust | None:
+    """``ask``, ``never`` or ``always``; anything else is treated as if it were not set, so a
+    typo never quietly picks a side."""
+    if not isinstance(value, str):
+        return None
+    text = value.strip().lower()
+    return text if text in _VALID_DEFAULT_TRUST else None  # type: ignore[return-value]
 
 
 def _as_bool(value: object, default: bool) -> bool:

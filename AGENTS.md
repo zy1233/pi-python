@@ -24,7 +24,7 @@ AgentMessage[] → transform_context() → convert_to_llm() → LangChain BaseMe
 | Module | Role | TS counterpart |
 |--------|------|----------------|
 | `pi_agent_core/messages.py` | Canonical messages, content blocks, `Usage` | `pi-ai` messages |
-| `pi_agent_core/types.py` | `Model`, `AgentTool`, contexts, events, `AgentLoopConfig` | `types.ts` |
+| `pi_agent_core/types.py` | `Model`, `AgentTool`, `ToolAnnotations`, contexts, events, `AgentLoopConfig` | `types.ts` |
 | `pi_agent_core/event_stream.py` | `EventStream` / `AssistantMessageEventStream` | `pi-ai` EventStream |
 | `pi_agent_core/agent_loop.py` | Core loop: turns, tool execution, hooks, events | `agent-loop.ts` |
 | `pi_agent_core/agent.py` | Stateful `Agent`: prompt/steer/follow-up queues, abort | `agent.ts` |
@@ -33,6 +33,7 @@ AgentMessage[] → transform_context() → convert_to_llm() → LangChain BaseMe
 | `pi_agent_core/tools.py`, `validation.py`, `queues.py` | `SimpleTool`, argument validation, queues | — |
 | `pi_agent_core/coding_tools/` | Built-in coding tools (`read`/`bash`/`edit`/`write`/`grep`/`find`/`ls`) | pi coding tools |
 | `packages/pi-agent-harness/` | Sessions, AgentHarness, compaction, skills, LocalExecutionEnv | `harness/` |
+| `packages/pi-dynamic-workflows/` | `workflow` tool and runtime. Scripts run in a child process (`sandbox/host.py` ⇄ stdlib-only `sandbox/child.py`, JSON lines): the kernel limits are the boundary, the audit hook is a speed bump. Sandbox work starts from `docs/specs/2026-10-01-workflow-sandbox-design.md` and runs `tests/test_sandbox_*.py` on Windows **and** WSL (the layers differ per platform) | `@quintinshaw/pi-dynamic-workflows` |
 | `packages/pi-agent-cli/` | Standard-ACP CLI (`python -m pi_agent_cli`); config `agent.example.toml`, home `~/.pi-python`; TUI binary `zypi` under `tui/`. See [`packages/pi-agent-cli/AGENTS.md`](packages/pi-agent-cli/AGENTS.md) for spawn, config, and prompt pipeline | — |
 
 ### Invariants
@@ -41,9 +42,10 @@ AgentMessage[] → transform_context() → convert_to_llm() → LangChain BaseMe
 2. **Parallel tool ordering** — `tool_execution_end` fires in completion order; `toolResult` messages persist in source order.
 3. **Terminate semantics** — skip next LLM turn only when **all** finalized tool results have `terminate=True`.
 4. **StreamFn contract** — never raises; failures encoded as `error` event (`stop_reason=error|aborted`).
-5. **Thinking gating** — reasoning params injected iff `Model.reasoning=True` and `thinking_level != "off"`; same flag drives thinking-history stripping in `transform_messages`.
+5. **Thinking gating** — reasoning params injected iff `Model.reasoning=True` and `thinking_level != "off"`; same flag drives thinking-history stripping in `transform_messages`. One exception: DeepSeek's own API (no `base_url`, or one on `deepseek.com`) thinks by default, so with the gate closed it gets an explicit `thinking: disabled`; gateways serving DeepSeek models get nothing. With thinking on, that API wants every earlier assistant message's `reasoning_content` back (400 otherwise): `adapters/deepseek_replay.py` sends it, on that API only and only while thinking is asked for (not verified against the real API).
 6. **Usage accumulation** — per-field max, not sum (providers report cumulative snapshots or complementary splits).
 7. **Structured output** — `response_schema` via prompt injection + `response_format`; `with_structured_output` kills streaming.
+8. **Permission by declaration** — the CLI's `ask` mode asks about a tool call unless the tool's `annotations` (`ToolAnnotations`, MCP's hints) declare it harmless (`readOnlyHint`, or neither destructive nor open-world); no annotations means asked. A new tool that only reads should say so; `bash`/`edit`/`write`/`workflow` say nothing on purpose. See `packages/pi-agent-cli/AGENTS.md`.
 
 ## Development
 
@@ -64,7 +66,7 @@ Use venv Python — Windows `python3` may alias the Store stub.
 
 | Action | Command |
 |--------|---------|
-| Tests (mock) | `.venv\Scripts\python.exe -m pytest` |
+| Tests (mock) | `.venv\Scripts\python.exe -m pytest` (`real_llm` tests are left out by `addopts`; a later `-m` overrides it) |
 | Tests (real LLM) | `.venv-test-real\Scripts\python.exe -m pytest -m real_llm -v` |
 | Eval | `scripts/run_eval.py --frontier-30 --task <id>` — see `docs/benchmarks/` |
 

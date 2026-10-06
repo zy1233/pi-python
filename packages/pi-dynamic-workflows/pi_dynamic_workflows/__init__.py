@@ -14,7 +14,7 @@ Install: ``pip install pi-dynamic-workflows-py``
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pi_dynamic_workflows.builtin_workflows import (
     BUILTIN_WORKFLOW_NAMES,
@@ -23,6 +23,7 @@ from pi_dynamic_workflows.builtin_workflows import (
 from pi_dynamic_workflows.builtin_workflows import (
     resolve_builtin_workflow as resolve_builtin_workflow,
 )
+from pi_dynamic_workflows.runtime import UnavailableSubagentExecutor
 from pi_dynamic_workflows.workflow_tool import create_workflow_tool
 
 if TYPE_CHECKING:
@@ -65,30 +66,61 @@ def _register_builtin_commands(pi: ExtensionAPI) -> None:
         )
 
 
-def _try_build_real_executor(pi: ExtensionAPI) -> tuple:
-    """Try to build a HarnessSubagentExecutor from the bridge. Returns (executor, manager)."""
+def _unavailable(reason: str, *, exc_info: bool = False) -> tuple[None, None, str]:
+    logger.warning(
+        "Workflow sub-agents are unavailable: %s. The `workflow` tool will say so instead of "
+        "running scripts.",
+        reason,
+        exc_info=exc_info,
+    )
+    return None, None, reason
+
+
+def _build_executor(pi: ExtensionAPI) -> tuple[Any, Any, str | None]:
+    """``(executor, manager, None)``; or ``(None, None, reason)`` when sub-agents cannot run.
+
+    The reason is logged as a warning and reaches the user through the ``workflow`` tool.
+    """
     try:
         bridge = pi._require_bridge()
-        stream_fn = getattr(bridge, "stream_fn", None)
-        model = getattr(bridge, "model", None)
-        get_api_key = getattr(bridge, "get_api_key_fn", None)
-        if stream_fn is None or model is None:
-            return None, None
+    except Exception as exc:
+        return _unavailable(f"the extension is not connected to a harness ({exc})")
 
+    stream_fn = getattr(bridge, "stream_fn", None)
+    model = getattr(bridge, "model", None)
+    if stream_fn is None or model is None:
+        return _unavailable("the harness provides no stream_fn/model to run agents with")
+
+    try:
         from pi_dynamic_workflows.manager import WorkflowManager
         from pi_dynamic_workflows.subagent import HarnessSubagentExecutor
 
+        # Sub-agents run on harnesses of their own; the gate is how the session's
+        # tool_call policy (permission prompts, extension hooks) reaches their tool calls.
+        tool_call_gate = getattr(bridge, "tool_call_gate", None)
+        if tool_call_gate is None:
+            logger.warning(
+                "Harness bridge exposes no tool_call_gate: workflow sub-agents will run "
+                "outside the session's tool_call policy (permission prompts included)."
+            )
         executor = HarnessSubagentExecutor(
             stream_fn=stream_fn,
             parent_model=model,
             cwd=pi.cwd,
-            get_api_key=get_api_key,
+            get_api_key=getattr(bridge, "get_api_key_fn", None),
+            tool_call_gate=tool_call_gate,
         )
         manager = WorkflowManager(bridge)
-        return executor, manager
-    except Exception:
-        logger.debug("Could not build real executor; falling back to mock", exc_info=True)
-        return None, None
+    except Exception as exc:
+        return _unavailable(f"{type(exc).__name__}: {exc}", exc_info=True)
+    return executor, manager, None
+
+
+def _try_build_real_executor(pi: ExtensionAPI) -> tuple:
+    """Build a HarnessSubagentExecutor from the bridge. Returns ``(executor, manager)``, or
+    ``(None, None)`` (with a logged warning) when sub-agents cannot run in this session."""
+    executor, manager, _reason = _build_executor(pi)
+    return executor, manager
 
 
 def _register_saved_workflows(pi: ExtensionAPI) -> None:
@@ -96,7 +128,7 @@ def _register_saved_workflows(pi: ExtensionAPI) -> None:
     try:
         from pi_dynamic_workflows.store import WorkflowStore
 
-        store = WorkflowStore(cwd=pi.cwd)
+        store = WorkflowStore(cwd=pi.cwd, pi_home=pi.home)
         for wf in store.scan():
             if wf.name in BUILTIN_WORKFLOW_NAMES:
                 continue
@@ -110,14 +142,20 @@ def _register_saved_workflows(pi: ExtensionAPI) -> None:
                 ),
             )
     except Exception:
-        logger.debug("Saved workflow scan failed", exc_info=True)
+        logger.warning("Saved workflow scan failed; no saved workflow commands", exc_info=True)
 
 
 def activate(pi: ExtensionAPI) -> None:
     """Extension entry point — called by the ExtensionLoader."""
-    executor, manager = _try_build_real_executor(pi)
+    executor, manager, reason = _build_executor(pi)
+    if executor is None:
+        # Never the mock: the tool then refuses, and says why, rather than "completing"
+        # workflows against canned answers.
+        executor = UnavailableSubagentExecutor(reason or "unknown reason")
 
-    pi.register_tool(create_workflow_tool(executor=executor, cwd=pi.cwd, manager=manager))
+    pi.register_tool(
+        create_workflow_tool(executor=executor, cwd=pi.cwd, manager=manager, home=pi.home)
+    )
 
     pi.register_command(
         "workflows",
@@ -130,4 +168,5 @@ def activate(pi: ExtensionAPI) -> None:
 
     if manager is not None:
         bridge = pi._require_bridge()
-        bridge.register_cleanup(manager.shutdown)
+        # Closing the session ends its background runs (it does not wait them out).
+        bridge.register_cleanup(manager.close)

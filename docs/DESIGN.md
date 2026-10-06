@@ -146,7 +146,7 @@ agent_start → turn_start → message_start(user) → message_end(user)
 
 ### 5.2 Thinking / Reasoning
 
-`ThinkingLevel`（off/minimal/low/medium/high/xhigh）映射为 provider 参数：Anthropic `thinking.budget_tokens` + 联动 `max_tokens`；OpenAI `reasoning_effort`。Anthropic thinking 块流式捕获为 `ThinkingContent`（含 `signature` 用于多轮工具回放），以 `thinking_delta` 事件实时发射。DeepSeek `reasoning_content` 同样捕获。
+`ThinkingLevel`（off/minimal/low/medium/high/xhigh）映射为 provider 参数：Anthropic `thinking.budget_tokens` + 联动 `max_tokens`；OpenAI `reasoning_effort`；DeepSeek 官方 API 经 `extra_body` 发 `thinking: enabled|disabled` 与 `reasoning_effort`（它默认开启思考，所以闸门关闭时显式发 `disabled`；网关不发。见 Phase 6 规格 §5.4）。Anthropic thinking 块流式捕获为 `ThinkingContent`（含 `signature` 用于多轮工具回放），以 `thinking_delta` 事件实时发射。DeepSeek `reasoning_content` 同样捕获；DeepSeek 官方 API 开启思考时，之前 assistant 消息的这部分在后续请求里按 `reasoning_content` 回传（不回传会 400；`adapters/deepseek_replay.py`，Phase 6 规格 §5.5），网关不回传。
 
 ### 5.3 跨 Provider 消息回放 (`transform.py`)
 
@@ -304,7 +304,7 @@ spawn 默认为 `python -m pi_agent_cli`（`PI_AGENT_COMMAND` / `PI_PYTHON` 可�
 
 ### 8.4 权限与配置
 
-`before_tool_call` 对 bash/edit/write 发 ACP `session/request_permission`。Python agent：`~/.pi-python/agent.toml`（model、permission、skills、`[agent].command`）。Rust TUI：`config.toml` 仅 grok 格式（勿写 Python 的 `permission = "ask"`）。示例见 `packages/pi-agent-cli/agent.example.toml`；Windows 见 `docs/WINDOWS.md`。
+`before_tool_call` 在 `ask` 模式下对每个工具调用发 ACP `session/request_permission`，除非该工具自己声明无害（MCP 风格的 `annotations`：`readOnlyHint`，或 `destructiveHint` 与 `openWorldHint` 都为 false；没声明就问，所以 bash/edit/write/workflow 与不带 annotations 的扩展工具都会问）。`workflow` 子代理的每次工具调用经桥接的 `tool_call_gate` 走同一权限层，按父会话里同名工具的 annotations 判定（见 Phase 7 spec §12「权限模型」）。Python agent：`~/.pi-python/agent.toml`（model、permission、skills、`[agent].command`）。Rust TUI：`config.toml` 仅 grok 格式（勿写 Python 的 `permission = "ask"`）。示例见 `packages/pi-agent-cli/agent.example.toml`；Windows 见 `docs/WINDOWS.md`。
 
 ---
 

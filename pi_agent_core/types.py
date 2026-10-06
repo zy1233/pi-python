@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict
 
 if TYPE_CHECKING:
     from pi_agent_core.event_stream import AssistantMessageEventStream
@@ -96,7 +96,33 @@ class AgentToolResult(BaseModel):
 AgentToolUpdateCallback = Callable[[AgentToolResult], Any]
 
 
+class ToolAnnotations(TypedDict, total=False):
+    """What a tool says about itself, named and meant as in the Model Context Protocol.
+
+    Every key is optional and a missing one means "not declared". The MCP defaults assume
+    the worst (not read-only, destructive, open world), so a tool that declares nothing
+    counts as one that changes things and reaches out. A hint is the tool author's claim,
+    not something the runtime checks.
+
+    The CLI's ``ask`` mode lets a call through unasked when the tool declares
+    ``readOnlyHint: true``, or ``destructiveHint: false`` together with
+    ``openWorldHint: false``; it asks about everything else.
+    """
+
+    readOnlyHint: bool
+    destructiveHint: bool
+    idempotentHint: bool
+    openWorldHint: bool
+
+
 class AgentTool(Protocol):
+    """A tool the agent loop can run.
+
+    A tool may also carry ``annotations`` (:class:`ToolAnnotations`). That attribute is
+    optional, so it is not a member of this protocol: read it with
+    ``getattr(tool, "annotations", None)``.
+    """
+
     name: str
     description: str
     label: str

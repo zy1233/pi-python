@@ -1,13 +1,20 @@
 """Opt-in live matrix over openai / anthropic / deepseek / SiliconFlow.
 
-Skipped when the row's API key is unset. Not a default CI gate; run with:
+The live cases are marked ``real_llm``, which the pytest configuration leaves out of a plain
+run (``addopts``), so keys that happen to be in a developer's shell never turn ``pytest`` into
+paid API calls. They also skip when the row's API key is unset. Not a CI gate; run with:
 
     pytest -m real_llm pi_agent_core/tests/test_provider_matrix.py -v
+
+The unmarked tests at the end of the file run offline: they check the table and the workflow.
+``test_real_llm_selection.py`` checks that a plain run leaves the live cases out.
 """
 
 from __future__ import annotations
 
 import asyncio
+import re
+from pathlib import Path
 
 import pytest
 from pydantic import BaseModel, Field
@@ -19,7 +26,7 @@ from pi_agent_core.tests.provider_matrix import MATRIX, ProviderRow, resolve_row
 from pi_agent_core.tools import SimpleTool
 from pi_agent_core.types import AgentToolResult
 
-pytestmark = pytest.mark.real_llm
+_ROOT = Path(__file__).resolve().parents[2]
 
 _CASES = [
     pytest.param(row, capability, id=f"{row.id}-{capability}")
@@ -85,6 +92,22 @@ def _has_thinking(message: object) -> bool:
     )
 
 
+def _echo_tool() -> SimpleTool:
+    class EchoParams(BaseModel):
+        text: str = Field(description="Text to echo back")
+
+    async def echo(_tool_call_id, params: EchoParams, _signal, _on_update):
+        return AgentToolResult(content=[{"type": "text", "text": f"echo:{params.text}"}])
+
+    return SimpleTool(
+        name="echo",
+        description="Echo the given text exactly. Always call this tool.",
+        label="echo",
+        parameters=EchoParams,
+        execute_fn=echo,
+    )
+
+
 async def _run(row: ProviderRow, prompt: str, *, reasoning: bool = False, tools=None, signal=None):
     events: list = []
 
@@ -101,6 +124,7 @@ async def _run(row: ProviderRow, prompt: str, *, reasoning: bool = False, tools=
     return messages, events
 
 
+@pytest.mark.real_llm
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("row", "capability"), _CASES)
 async def test_provider_capability(row: ProviderRow, capability: str):
@@ -117,25 +141,30 @@ async def test_provider_capability(row: ProviderRow, capability: str):
         assert usage.input > 0 or usage.totalTokens > 0
         return
 
-    if capability == "tools":
-
-        class EchoParams(BaseModel):
-            text: str = Field(description="Text to echo back")
-
-        async def echo(_tool_call_id, params: EchoParams, _signal, _on_update):
-            return AgentToolResult(content=[{"type": "text", "text": f"echo:{params.text}"}])
-
-        tool = SimpleTool(
-            name="echo",
-            description="Echo the given text exactly. Always call this tool.",
-            label="echo",
-            parameters=EchoParams,
-            execute_fn=echo,
-        )
+    if capability == "thinking_tools":
+        # What audit P6-03 left open: with thinking on, a request that carries tools must send
+        # the earlier assistant messages' reasoning_content back, or DeepSeek answers 400 once
+        # the first tool round is over. The adapter sends it (``deepseek_replay``); this is
+        # where that is checked against the real API.
         messages, _events = await _run(
             row,
             "Call the echo tool with text matrix-token. Then repeat the tool result.",
-            tools=[tool],
+            reasoning=True,
+            tools=[_echo_tool()],
+        )
+        final = messages[-1]
+        assert final.stopReason == "stop", getattr(final, "errorMessage", None)
+        assert [m for m in messages if getattr(m, "role", None) == "toolResult"], (
+            "model did not call the echo tool"
+        )
+        assert "matrix-token" in _text(final)
+        return
+
+    if capability == "tools":
+        messages, _events = await _run(
+            row,
+            "Call the echo tool with text matrix-token. Then repeat the tool result.",
+            tools=[_echo_tool()],
         )
         combined = " ".join(_text(message) for message in messages)
         assert "echo:matrix-token" in combined or any(
@@ -193,9 +222,53 @@ def test_matrix_rows_cover_spec():
     assert by_id["siliconflow"].base_url == "https://api.siliconflow.cn/v1"
 
 
+def test_thinking_with_tools_is_checked_on_deepseeks_own_api_only():
+    """The reasoning_content replay is for DeepSeek's own API; a gateway is left as it was."""
+    by_id = {row.id: row for row in MATRIX}
+
+    assert "thinking_tools" in by_id["deepseek"].capabilities
+    assert all("thinking_tools" not in row.capabilities for row in MATRIX if row.id != "deepseek")
+
+
 def test_unconfigured_row_skips(monkeypatch: pytest.MonkeyPatch):
     """Collecting the matrix without secrets must skip, not fail."""
     row = MATRIX[0]
     monkeypatch.delenv(row.api_key_env, raising=False)
     with pytest.raises(pytest.skip.Exception):
         _model(row)
+
+
+def test_no_row_asks_for_a_model_deepseek_has_retired():
+    """``deepseek-chat`` and ``deepseek-reasoner`` were retired on 2026-07-24 (audit P6-03).
+
+    ``deepseek-chat`` was also the non-thinking alias, so the row's thinking case could not pass.
+    """
+    assert {row.model_id for row in MATRIX} & {"deepseek-chat", "deepseek-reasoner"} == set()
+
+
+class TestWorkflow:
+    """``.github/workflows/provider-matrix.yml``, read as text (no YAML parser needed)."""
+
+    @pytest.fixture
+    def text(self) -> str:
+        return (_ROOT / ".github" / "workflows" / "provider-matrix.yml").read_text(encoding="utf-8")
+
+    def test_it_can_still_be_started_by_hand(self, text: str):
+        assert re.search(r"^\s*workflow_dispatch:", text, re.MULTILINE)
+
+    def test_it_also_runs_on_a_schedule(self, text: str):
+        """Nobody notices a provider drifting if the matrix only ever runs by hand (P6-03)."""
+        match = re.search(
+            r"^\s*schedule:[ \t]*\n"
+            r"(?:[ \t]*#[^\n]*\n)*"  # comment lines may sit between the key and the entry
+            r"[ \t]*-[ \t]*cron:[ \t]*['\"]([^'\"\n]+)['\"]",
+            text,
+            re.MULTILINE,
+        )
+
+        assert match, "no cron schedule"
+        assert len(match.group(1).split()) == 5, match.group(1)
+
+    def test_it_asks_for_the_live_cases_itself(self, text: str):
+        """A plain run leaves them out, so this one has to select them."""
+        assert re.search(r"^\s*run: pytest .*-m real_llm\b", text, re.MULTILINE)

@@ -258,7 +258,7 @@ AgentHarness(
 
 ### 4.5 turn state 快照与 prepare_next_turn
 
-每 turn 开始 `_create_turn_state()`：`session.build_context()` + resources 快照 + stream_options 克隆 + system_prompt 解析（回调则 await）。**turn 中 setter 只写缓冲与内存字段，正在跑的 turn 用旧快照**；`prepare_next_turn`（core 回调）= flush 缓冲 → 重建 turn state → 返回 `{context, model, thinking_level}` 给 loop——下一 turn 生效。这是 pi "harness 状态变更按 turn 边界生效"语义的核心。
+每 turn 开始 `_create_turn_state()`：`session.build_context()` + resources 快照 + stream_options 克隆 + system_prompt 解析（回调则 await；**结果在会话内缓存**于 `_cached_system_prompt`，仅 `invalidate_system_prompt_cache()` 会触发重算，以保持 provider 提示前缀缓存稳定——提交 `bee053c`）。**turn 中 setter 只写缓冲与内存字段，正在跑的 turn 用旧快照**；`prepare_next_turn`（core 回调）= flush 缓冲 → 重建 turn state → 返回 `{context, model, thinking_level}` 给 loop——下一 turn 生效。这是 pi "harness 状态变更按 turn 边界生效"语义的核心。
 
 ### 4.6 API 面
 

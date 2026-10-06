@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from pi_agent_core.types import (
     AgentToolResult,
     AgentToolUpdateCallback,
+    ToolAnnotations,
     ToolExecutionMode,
 )
 
@@ -20,7 +21,9 @@ class CodingTool:
     """A built-in tool instance (implements the ``AgentTool`` protocol).
 
     ``prompt_snippet``/``prompt_guidelines`` carry pi's prompt-assembly
-    metadata for harness consumers; the core loop ignores them.
+    metadata for harness consumers; the core loop ignores them. ``annotations`` (MCP-style
+    hints such as ``{"readOnlyHint": True}``) are for permission layers; the loop ignores
+    those too.
     """
 
     name: str
@@ -32,6 +35,7 @@ class CodingTool:
     prepare_arguments: Callable[[Any], Any] | None = None
     prompt_snippet: str | None = None
     prompt_guidelines: list[str] = field(default_factory=list)
+    annotations: ToolAnnotations | None = None
 
     async def execute(
         self,

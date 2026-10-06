@@ -2,6 +2,10 @@ name: Provider matrix
 
 on:
   workflow_dispatch:
+  schedule:
+    # Weekly (Mondays 03:00 UTC): a provider retiring a model or changing its API shows up
+    # here instead of in use. Rows whose secret is not set skip, so the run stays green.
+    - cron: "0 3 * * 1"
 
 jobs:
   matrix:

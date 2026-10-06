@@ -111,4 +111,5 @@ def create_ls_tool(cwd: str) -> AgentTool:
         parameters=LsParams,
         execute_fn=execute,
         prompt_snippet="List directory contents",
+        annotations={"readOnlyHint": True},
     )

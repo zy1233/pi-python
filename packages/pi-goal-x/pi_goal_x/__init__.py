@@ -4,8 +4,11 @@ Provides:
   - ``/goal <description>`` command to start goal-driven mode
   - ``goal_update`` tool for the agent to report step progress
   - ``goal_complete`` tool for the agent to mark goal completion
-  - ``turn_end`` hook that checks goal progress each turn
+  - ``turn_end`` hook that reminds the agent to finish a goal whose steps are all done
   - ``session_start`` hook that restores goal state from session
+
+Every change to the goal is saved in the session when it happens (``/goal``, ``goal_update``,
+``goal_complete``), so the last saved state is the current one.
 
 Install: ``pip install pi-goal-x-py``
 """
@@ -23,6 +26,17 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# A reminder is a message, and a message starts another turn. An agent that ignores it would
+# be reminded on every turn until the harness's turn limit ended the run in an error, so the
+# reminders are limited. Changing a step so that the goal is no longer all done starts the
+# count again.
+MAX_COMPLETION_REMINDERS = 2
+
+
+def _save(pi: ExtensionAPI, state: GoalState) -> None:
+    """Put the current goal state in the session (it is written when the turn ends)."""
+    pi.append_entry("goal_state", state.to_dict())
+
 
 def _start_goal(pi: ExtensionAPI, state: GoalState, args: str) -> None:
     """Handler for ``/goal <description>``."""
@@ -35,7 +49,7 @@ def _start_goal(pi: ExtensionAPI, state: GoalState, args: str) -> None:
         return
 
     state.start(description)
-    pi.append_entry("goal_state", state.to_dict())
+    _save(pi, state)
     pi.send_message(
         f"🎯 Goal set: {description}\n\n"
         "I'll break this down into steps and track progress. "
@@ -44,16 +58,22 @@ def _start_goal(pi: ExtensionAPI, state: GoalState, args: str) -> None:
 
 
 def _check_goal_progress(pi: ExtensionAPI, state: GoalState, event: Any) -> None:
-    """``turn_end`` hook — remind the agent about incomplete goals."""
-    if not state.active:
+    """``turn_end`` hook — remind the agent to call goal_complete once every step is done."""
+    if not state.all_done:
+        state.reminders_sent = 0
         return
-    if state.all_done and not state.completed:
-        pi.send_message(
-            f"All steps are done for goal: {state.description}\n"
-            "Call goal_complete with a summary to finish."
+    if not state.active:
+        return  # already completed
+    if state.reminders_sent >= MAX_COMPLETION_REMINDERS:
+        logger.debug(
+            "Goal %r: not reminding again; the agent has not completed it", state.description
         )
-    elif state.active:
-        pi.append_entry("goal_state", state.to_dict())
+        return
+    state.reminders_sent += 1
+    pi.send_message(
+        f"All steps are done for goal: {state.description}\n"
+        "Call goal_complete with a summary to finish."
+    )
 
 
 def _restore_goal_state(pi: ExtensionAPI, state: GoalState, event: Any) -> None:
@@ -85,8 +105,11 @@ def activate(pi: ExtensionAPI) -> None:
     """Extension entry point — called by the ExtensionLoader."""
     state = GoalState()
 
-    pi.register_tool(create_goal_update_tool(state))
-    pi.register_tool(create_goal_complete_tool(state))
+    def save() -> None:
+        _save(pi, state)
+
+    pi.register_tool(create_goal_update_tool(state, on_change=save))
+    pi.register_tool(create_goal_complete_tool(state, on_change=save))
 
     pi.register_command(
         "goal",

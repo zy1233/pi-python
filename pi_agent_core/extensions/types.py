@@ -2,19 +2,38 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from pydantic import BaseModel
 
-from pi_agent_core.types import AgentToolResult, ToolExecutionMode
+from pi_agent_core.types import AgentToolResult, ToolAnnotations, ToolExecutionMode
 
 # ---------------------------------------------------------------------------
 # Tool definitions
 # ---------------------------------------------------------------------------
 
 ExecuteFn = Callable[..., Awaitable[AgentToolResult] | AgentToolResult]
+
+TOOL_NAME_PATTERN = re.compile(r"[a-zA-Z0-9_-]{1,128}")
+"""What model providers accept as a function name (OpenAI, DeepSeek and others)."""
+
+
+def validate_tool_name(name: str, *, extension: str | None = None) -> None:
+    """Raise ``ValueError`` unless *name* is a tool name every provider accepts.
+
+    A name outside ``[a-zA-Z0-9_-]{1,128}`` is not rejected locally but by the provider,
+    on *every* request from then on, so the whole session stops working. Fail at
+    registration instead, where the culprit is known.
+    """
+    if not isinstance(name, str) or TOOL_NAME_PATTERN.fullmatch(name) is None:
+        origin = f" from extension {extension!r}" if extension else ""
+        raise ValueError(
+            f"Invalid tool name {name!r}{origin}: a tool name must match "
+            "[a-zA-Z0-9_-]{1,128}; model providers reject any other name on every request."
+        )
 
 
 @dataclass
@@ -34,6 +53,10 @@ class ToolDefinition:
     prompt_guidelines: list[str] = field(default_factory=list)
     execution_mode: ToolExecutionMode | None = None
     prepare_arguments: Callable[[Any], Any] | None = None
+    annotations: ToolAnnotations | None = None
+    """MCP-style hints about the tool (``readOnlyHint`` ...). In the CLI's ``ask`` mode a
+    call is asked about unless the tool declares ``readOnlyHint: true`` (or
+    ``destructiveHint: false`` with ``openWorldHint: false``); no annotations, no exemption."""
 
 
 # ---------------------------------------------------------------------------

@@ -34,8 +34,25 @@ class HarnessBridge(Protocol):
     def trigger_prompt(self, text: str) -> None:
         """Schedule a prompt on the harness if idle, otherwise steer.
 
+        The text is treated as if the user had typed it (slash commands included), so it
+        is only for input the user themselves asked for. Output of tools or agents belongs
+        in ``trigger_message``. Does nothing once the harness is closed.
+
         Implementations should use ``asyncio.create_task`` internally so this
         can be called from sync code (like done-callbacks).
+        """
+        ...
+
+    def trigger_message(self, custom_type: str, text: str, *, details: Any = None) -> None:
+        """Deliver *text* as a typed (custom) message, starting a turn if the harness is idle.
+
+        The message records where it came from (*custom_type*, *details*) and is never taken
+        for a slash command. A turn in progress picks it up as steering; an idle harness
+        starts a turn with it. Does nothing once the harness is closed. The model still
+        reads it as context, so what comes from an untrusted source has to be marked as
+        such in *text* itself.
+
+        Like ``trigger_prompt`` this can be called from sync code.
         """
         ...
 
@@ -68,6 +85,19 @@ class HarnessBridge(Protocol):
     @property
     def get_api_key_fn(self) -> Any:
         """The parent harness's get_api_key callback (or None)."""
+        ...
+
+    @property
+    def tool_call_gate(self) -> Any:
+        """Async ``(tool_call_id, tool_name, tool_input, *, origin=None)`` callable that runs
+        the parent harness's ``tool_call`` policy chain (permission layer, extension hooks)
+        for a tool call made *outside* the harness's own loop.
+
+        Extensions that run agents of their own (dynamic workflows) put every tool call of
+        those agents through it. It returns ``None`` to allow, or
+        ``{"block": True, "reason": ...}`` to deny; it raises when the policy cannot decide,
+        which callers must treat as a denial.
+        """
         ...
 
     def add_hook(self, event: str, handler: Any) -> None:

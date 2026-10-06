@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pi_agent_core.extensions.registry import ExtensionRegistry
@@ -19,7 +20,9 @@ from pi_agent_core.extensions.types import (
     ExtensionMeta,
     ToolDefinition,
     ToolInfo,
+    validate_tool_name,
 )
+from pi_agent_core.home import pi_home
 
 if TYPE_CHECKING:
     from pi_agent_core.extensions._harness_bridge import HarnessBridge
@@ -39,9 +42,12 @@ class ExtensionAPI:
         self,
         registry: ExtensionRegistry,
         meta: ExtensionMeta,
+        *,
+        home: Path | str | None = None,
     ) -> None:
         self._registry = registry
         self._meta = meta
+        self._home = home
         self._bridge: HarnessBridge | None = None
         self._loading = True  # suppresses bridge side-effects during activate
 
@@ -66,7 +72,11 @@ class ExtensionAPI:
         During ``activate()`` only writes to registry; the harness injects
         all registered tools later via ``_apply_extension_registrations()``.
         After loading, dynamically registered tools are injected immediately.
+
+        Raises ``ValueError`` for a name model providers would reject (anything outside
+        ``[a-zA-Z0-9_-]{1,128}``). During ``activate()`` that fails the extension's load.
         """
+        validate_tool_name(definition.name, extension=self._meta.name)
         self._registry.add_tool(definition, extension_name=self._meta.name)
         if not self._loading and self._bridge is not None:
             self._bridge.inject_tool(definition)
@@ -172,6 +182,16 @@ class ExtensionAPI:
     def session_id(self) -> str:
         """Unique identifier of the current session."""
         return self._require_bridge().session_id
+
+    @property
+    def home(self) -> Path:
+        """The pi-python home directory of this session (``$PI_HOME`` or ``~/.pi-python``).
+
+        Keep an extension's own state below it rather than under ``Path.home()``, so a
+        session started with ``PI_HOME`` set does not scatter files into the real home.
+        Available during ``activate()``; needs no harness.
+        """
+        return pi_home(self._home)
 
     @property
     def extension_name(self) -> str:

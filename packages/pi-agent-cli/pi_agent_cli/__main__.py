@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import contextlib
 import json
+import os
 import signal
 import sys
 from pathlib import Path
@@ -18,6 +19,7 @@ from acp import run_agent
 
 from pi_agent_cli.agent import PiAcpAgent
 from pi_agent_cli.config import load_local_env
+from pi_agent_cli.extension_trust import TRUST_ENV
 from pi_agent_cli.headless import HeadlessPromptOverrides, resolve_print_prompt, run_print
 
 _PROMPT_CLI_FLAG_NAMES = (
@@ -136,7 +138,22 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Omit the <git_status> section from the system prompt (headless only).",
     )
+    parser.add_argument(
+        "--trust-project-extensions",
+        action="store_true",
+        help=(
+            "Load extensions from <project>/.pi-python/extensions, which run arbitrary "
+            f"Python (same as {TRUST_ENV}=1). Without it they are skipped unless the "
+            "project is listed under [extensions] trusted_projects in agent.toml."
+        ),
+    )
     return parser
+
+
+def _apply_trust_flag(args: argparse.Namespace) -> None:
+    """``--trust-project-extensions`` is ``PI_TRUST_PROJECT_EXTENSIONS=1`` for this process."""
+    if args.trust_project_extensions:
+        os.environ[TRUST_ENV] = "1"
 
 
 def _prompt_overrides_from_args(args: argparse.Namespace) -> HeadlessPromptOverrides:
@@ -158,6 +175,7 @@ def main() -> None:
     load_local_env()
     parser = _build_parser()
     args = parser.parse_args()
+    _apply_trust_flag(args)
     headless = any(
         value is not None for value in (args.print_prompt, args.prompt_json, args.prompt_file)
     )

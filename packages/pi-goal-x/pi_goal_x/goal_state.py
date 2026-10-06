@@ -39,6 +39,9 @@ class GoalState:
     steps: list[GoalStep] = field(default_factory=list)
     completed: bool = False
     summary: str | None = None
+    # How many times the agent was reminded, since the steps last stopped being all done, to
+    # call goal_complete. Bookkeeping of this process only: never saved with the goal.
+    reminders_sent: int = field(default=0, repr=False, compare=False)
 
     @property
     def active(self) -> bool:
@@ -63,6 +66,7 @@ class GoalState:
         self.steps = []
         self.completed = False
         self.summary = None
+        self.reminders_sent = 0
 
     def update_step(
         self,
@@ -72,23 +76,42 @@ class GoalState:
         status: StepStatus | None = None,
         details: str | None = None,
     ) -> GoalStep:
-        """Update an existing step or append a new one."""
-        if step_index is not None and 0 <= step_index < len(self.steps):
-            step = self.steps[step_index]
-            if description is not None:
-                step.description = description
-            if status is not None:
-                step.status = status
-            if details is not None:
-                step.details = details
-            return step
-        new_step = GoalStep(
-            description=description or "Unnamed step",
-            status=status or "pending",
-            details=details,
-        )
-        self.steps.append(new_step)
-        return new_step
+        """Update the step at *step_index* (0-based), or append a new one if it is None.
+
+        Raises ``ValueError`` when *step_index* names no step, and when a new step has no
+        description. Making up a step ("Unnamed step") would hide the mistake: the caller
+        believes it changed a step that is still as it was.
+        """
+        if step_index is None:
+            if not description:
+                raise ValueError("A new step needs a description.")
+            new_step = GoalStep(
+                description=description, status=status or "pending", details=details
+            )
+            self.steps.append(new_step)
+            return new_step
+        if not 0 <= step_index < len(self.steps):
+            raise ValueError(
+                f"There is no step {step_index}: this goal {self._step_indexes()}. "
+                "Leave step_index out to add a new step."
+            )
+        step = self.steps[step_index]
+        if description is not None:
+            step.description = description
+        if status is not None:
+            step.status = status
+        if details is not None:
+            step.details = details
+        return step
+
+    def _step_indexes(self) -> str:
+        """The steps that exist, as a caller needs to name them ("has 2 steps, 0 and 1")."""
+        count = len(self.steps)
+        if count == 0:
+            return "has no steps yet"
+        if count == 1:
+            return "has 1 step, index 0"
+        return f"has {count} steps, indexes 0 to {count - 1}"
 
     def complete(self, summary: str | None = None) -> None:
         """Mark the goal as completed."""
@@ -124,7 +147,9 @@ class GoalState:
             icon = {"pending": "⬜", "in_progress": "🔄", "done": "✅", "blocked": "🚫"}.get(
                 step.status, "⬜"
             )
-            lines.append(f"  {icon} Step {i + 1}: {step.description}")
+            # The number goal_update's step_index takes (0-based), not a count from 1: a model
+            # that reads "Step 2" and passes 2 would change the wrong step.
+            lines.append(f"  {icon} [{i}] {step.description}")
             if step.details:
                 lines.append(f"       {step.details}")
         lines.append(f"\nProgress: {self.progress}")

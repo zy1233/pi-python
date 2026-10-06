@@ -283,6 +283,9 @@ class TestBridgeDuringActivate:
             def trigger_prompt(self, text: str) -> None:
                 pass
 
+            def trigger_message(self, custom_type: str, text: str, *, details: Any = None) -> None:
+                pass
+
             def add_hook(self, event: str, handler: Any) -> None:
                 pass
 
@@ -319,6 +322,10 @@ class TestBridgeDuringActivate:
 
             @property
             def get_api_key_fn(self) -> Any:
+                return None
+
+            @property
+            def tool_call_gate(self) -> Any:
                 return None
 
         assert isinstance(FakeBridge(), HarnessBridge)
@@ -376,6 +383,9 @@ class TestBridgeToolValidation:
             def trigger_prompt(self, text: str) -> None:
                 pass
 
+            def trigger_message(self, custom_type: str, text: str, *, details: Any = None) -> None:
+                pass
+
             def add_hook(self, event: str, handler: Any) -> None:
                 pass
 
@@ -412,6 +422,10 @@ class TestBridgeToolValidation:
 
             @property
             def get_api_key_fn(self) -> Any:
+                return None
+
+            @property
+            def tool_call_gate(self) -> Any:
                 return None
 
         assert isinstance(FakeBridge(), HarnessBridge)
@@ -457,6 +471,9 @@ class TestUnsubscribeRemovesHook:
             def trigger_prompt(self, text: str) -> None:
                 pass
 
+            def trigger_message(self, custom_type: str, text: str, *, details: Any = None) -> None:
+                pass
+
             def add_hook(self, event: str, handler: Any) -> None:
                 pass
 
@@ -493,6 +510,10 @@ class TestUnsubscribeRemovesHook:
 
             @property
             def get_api_key_fn(self) -> Any:
+                return None
+
+            @property
+            def tool_call_gate(self) -> Any:
                 return None
 
         assert isinstance(TrackingBridge(), HarnessBridge)
@@ -678,12 +699,12 @@ class TestSameNameOverride:
                 )
             )
 
-        harness.load_extension(ext_old)
+        harness.load_extension(ext_old, name="same")
         await harness._ensure_extensions_loaded()
         assert "old-tool" in harness._tools
         assert len(harness._hooks.get("tool_call", [])) == 1
 
-        harness.load_extension(ext_new)
+        harness.load_extension(ext_new, name="same")
         assert "old-tool" not in harness._tools
         assert "new-tool" in harness._tools
         assert len(harness._hooks.get("tool_call", [])) == 0
@@ -743,13 +764,13 @@ class TestSameNameOverride:
         def ext_bad(pi: ExtensionAPI) -> None:
             raise RuntimeError("new activate crashed")
 
-        harness.load_extension(ext_good)
+        harness.load_extension(ext_good, name="same")
         await harness._ensure_extensions_loaded()
         assert "old-tool" in harness._tools
         assert len(harness._hooks.get("tool_call", [])) == 1
 
         with pytest.raises(RuntimeError, match="new activate crashed"):
-            harness.load_extension(ext_bad)
+            harness.load_extension(ext_bad, name="same")
 
         # Registry restored
         assert "old-tool" in harness._extension_registry.get_tools()
@@ -891,3 +912,174 @@ class TestLoaderLoadAlias:
         loader = ExtensionLoader()
         with pytest.raises(TypeError, match="Cannot resolve"):
             loader.load(42, name="bad")
+
+
+# ---------------------------------------------------------------------------
+# P7-02: project-local extensions are opt-in
+# ---------------------------------------------------------------------------
+#
+# Importing ``<cwd>/.pi-python/extensions`` executes whatever the repository ships, the
+# moment a session opens. The project directory is therefore scanned only when trusted;
+# the user's own directory and installed entry points are not affected.
+
+
+def _write_extension(directory: Path, name: str, marker: Path, *, package: bool = False) -> None:
+    """An extension whose *import* leaves ``marker`` behind (the hazard being guarded)."""
+    source = (
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).write_text('imported')\n"
+        "def activate(pi):\n"
+        f"    pi.register_command({name!r}, description='ext', handler=lambda args: None)\n"
+    )
+    if package:
+        (directory / name).mkdir(parents=True, exist_ok=True)
+        (directory / name / "__init__.py").write_text(source, encoding="utf-8")
+    else:
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / f"{name}.py").write_text(source, encoding="utf-8")
+
+
+class TestProjectExtensionTrust:
+    @pytest.fixture()
+    def dirs(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+        from types import SimpleNamespace
+
+        home = tmp_path / "home"
+        project = tmp_path / "project"
+        home.mkdir()
+        project.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+        return SimpleNamespace(
+            user_ext=home / ".pi-python" / "extensions",
+            project=project,
+            project_ext=project / ".pi-python" / "extensions",
+            marker=tmp_path / "imported.marker",
+        )
+
+    def test_untrusted_project_extension_is_not_imported(self, dirs: Any) -> None:
+        _write_extension(dirs.project_ext, "proj_untrusted_a", dirs.marker)
+        loader = ExtensionLoader()
+
+        assert loader.discover_default_dirs(str(dirs.project)) == []
+
+        assert not dirs.marker.exists()  # its code never ran
+
+    def test_untrusted_project_extension_is_reported_not_silently_dropped(
+        self, dirs: Any, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        _write_extension(dirs.project_ext, "proj_untrusted_b", dirs.marker)
+        loader = ExtensionLoader()
+
+        with caplog.at_level(logging.WARNING, logger="pi_agent_core.extensions.loader"):
+            loader.discover_default_dirs(str(dirs.project))
+
+        ((skipped),) = loader.skipped
+        assert skipped.directory == dirs.project_ext
+        assert skipped.names == ("proj_untrusted_b.py",)
+        assert any(
+            "proj_untrusted_b.py" in record.getMessage() and record.levelno == logging.WARNING
+            for record in caplog.records
+        )
+
+    def test_trusted_project_extension_is_loaded(self, dirs: Any) -> None:
+        _write_extension(dirs.project_ext, "proj_trusted", dirs.marker)
+        loader = ExtensionLoader()
+
+        fns = loader.discover_default_dirs(str(dirs.project), trust_project=True)
+
+        assert len(fns) == 1
+        assert dirs.marker.exists()
+        assert loader.skipped == []
+
+    def test_package_style_project_extension_is_skipped_without_import(self, dirs: Any) -> None:
+        _write_extension(dirs.project_ext, "proj_pkg", dirs.marker, package=True)
+        loader = ExtensionLoader()
+
+        assert loader.discover_default_dirs(str(dirs.project)) == []
+
+        assert not dirs.marker.exists()
+        assert [s.names for s in loader.skipped] == [("proj_pkg",)]
+
+    def test_user_extension_loads_whatever_the_project_trust(self, dirs: Any) -> None:
+        _write_extension(dirs.user_ext, "user_ext_a", dirs.marker)
+        loader = ExtensionLoader()
+
+        fns = loader.discover_default_dirs(str(dirs.project))
+
+        assert len(fns) == 1
+        assert dirs.marker.exists()
+        assert loader.skipped == []
+
+    def test_a_session_in_the_home_directory_does_not_call_the_user_directory_skipped(
+        self, dirs: Any
+    ) -> None:
+        """With cwd = home, ``<home>/.pi-python/extensions`` is the user's own directory and
+        also the "project" one. It loads, and nothing is reported as skipped."""
+        _write_extension(dirs.user_ext, "user_in_home", dirs.marker)
+        loader = ExtensionLoader()
+
+        fns = loader.discover_default_dirs(str(dirs.user_ext.parent.parent))
+
+        assert len(fns) == 1
+        assert dirs.marker.exists()
+        assert loader.skipped == []
+
+    def test_the_home_directory_is_scanned_once_when_the_project_is_trusted(
+        self, dirs: Any
+    ) -> None:
+        _write_extension(dirs.user_ext, "user_in_home_once", dirs.marker)
+        loader = ExtensionLoader()
+
+        fns = loader.discover_default_dirs(str(dirs.user_ext.parent.parent), trust_project=True)
+
+        assert len(fns) == 1  # not once as the user directory and again as the project's
+
+    def test_files_the_scanner_ignores_are_not_reported(self, dirs: Any) -> None:
+        dirs.project_ext.mkdir(parents=True)
+        (dirs.project_ext / "_private.py").write_text("x = 1\n", encoding="utf-8")
+        (dirs.project_ext / "notes.txt").write_text("hello\n", encoding="utf-8")
+        (dirs.project_ext / "not_a_package").mkdir()
+        loader = ExtensionLoader()
+
+        assert loader.discover_default_dirs(str(dirs.project)) == []
+
+        assert loader.skipped == []  # nothing that would have been imported
+
+    def test_a_project_without_an_extensions_directory_skips_nothing(self, dirs: Any) -> None:
+        loader = ExtensionLoader()
+
+        assert loader.discover_default_dirs(str(dirs.project)) == []
+
+        assert loader.skipped == []
+
+    def test_load_all_leaves_untrusted_project_extensions_alone_by_default(
+        self, dirs: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write_extension(dirs.project_ext, "proj_via_load_all", dirs.marker)
+        loader = ExtensionLoader()
+        monkeypatch.setattr(loader, "discover_entry_points", lambda: [])
+
+        loader.load_all(cwd=str(dirs.project), auto_discover=True)
+
+        assert "proj_via_load_all" not in loader.registry.get_commands()
+        assert not dirs.marker.exists()
+
+    def test_load_all_loads_project_extensions_once_trusted(
+        self, dirs: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write_extension(dirs.project_ext, "proj_via_load_all_trusted", dirs.marker)
+        loader = ExtensionLoader()
+        monkeypatch.setattr(loader, "discover_entry_points", lambda: [])
+
+        loader.load_all(cwd=str(dirs.project), auto_discover=True, trust_project_extensions=True)
+
+        assert "proj_via_load_all_trusted" in loader.registry.get_commands()
+
+    def test_explicit_directories_are_the_callers_choice_and_still_load(self, dirs: Any) -> None:
+        _write_extension(dirs.project_ext, "proj_explicit", dirs.marker)
+        loader = ExtensionLoader()
+
+        assert len(loader.discover_directory(dirs.project_ext)) == 1
+        assert dirs.marker.exists()
