@@ -22,7 +22,8 @@ pub(super) fn render(failure: &StartupFailure) -> String {
             rows.push(("Try", CONNECT_UI_TIMEOUT_TRY_COMMAND.to_owned()));
             let explanation = fill_indented(&advice.explanation(), "  ", "  ");
             format!(
-                "Couldn't start Grok: startup timed out after {}.\n\n{explanation}",
+                "Couldn't start {}: startup timed out after {}.\n\n{explanation}",
+                crate::brand::PRODUCT_TITLE,
                 whole_seconds(*waited)
             )
         }

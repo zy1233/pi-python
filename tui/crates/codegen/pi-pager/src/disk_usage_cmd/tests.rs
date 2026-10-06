@@ -821,8 +821,8 @@ fn print_report_renders_registry_notices() {
             name: "a corrupt registry names the file even with no rows",
             registry: RegistryState::Corrupt,
             rows: false,
-            expected: &["Worktree registry is damaged", "Remove", "worktrees.db"],
-            absent: &[],
+            expected: &["Worktree registry is damaged", "worktrees.db"],
+            absent: &["db rebuild", "Remove"],
         },
         Case {
             name: "a busy registry blames the peer, never the file",
@@ -873,25 +873,26 @@ fn print_report_renders_registry_notices() {
     }
 }
 
-// Bare `gc` reclaims nothing: without `--max-age` the age pass is off, and
-// the pass only walks registry records.
+// zypi has no `worktree` subcommand (no gc, no rm, no db rebuild), so no
+// hint may send the user to one. The one piece of advice that holds is to
+// delete what the table lists.
 #[test]
-fn reclaim_hint_names_a_sequence_that_frees_space() {
-    const AGE: &str = "run `grok worktree gc --max-age 7d --dry-run`";
-    const RM: &str = "Remove one with `grok worktree rm --dry-run <path>`";
+fn reclaim_hint_names_no_command_zypi_lacks() {
     let tracked = tracked_row(60, record("wt-1", 0));
-
-    let text = render_report(&worktrees_report(vec![tracked], 100), 0);
-    assert!(text.contains(AGE), "{text}");
-    assert!(!text.contains(RM), "{text}");
-    assert!(
-        text.contains("keeps a worktree whose work it cannot find elsewhere"),
-        "the hint must say what gc will refuse to reclaim: {text}"
-    );
-
-    let text = render_report(&worktrees_report(vec![untracked_row(60)], 100), 0);
-    assert!(text.contains(RM), "{text}");
-    assert!(!text.contains(AGE), "{text}");
+    for rows in [vec![tracked], vec![untracked_row(60)]] {
+        let text = render_report(&worktrees_report(rows, 100), 0);
+        assert!(
+            text.contains("To reclaim space, delete the worktrees listed above"),
+            "{text}"
+        );
+        for gone in ["worktree gc", "worktree rm", "db rebuild", "--max-age"] {
+            assert!(
+                !text.contains(gone),
+                "{gone:?} must not be suggested: {text}"
+            );
+        }
+        assert!(!text.to_lowercase().contains("grok"), "{text}");
+    }
 }
 
 #[cfg(unix)]

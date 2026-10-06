@@ -28,7 +28,7 @@ const SSH_WRAP_TIP_SEEN_CAP: u32 = 1;
 /// the TTL pauses while occluded instead of burning off-screen.
 pub(crate) const SSH_WRAP_TIP_TICKS: u16 = 300;
 
-/// Build the `/doctor` discovery notice, seen-gated to
+/// Build the `zypi doctor` discovery notice, seen-gated to
 /// [`SSH_WRAP_TIP_SEEN_CAP`] show per session. It is about the transport, not
 /// the draft, so submitting a prompt right after session load must not
 /// retire it, and occlusion pauses (not burns) its TTL.
@@ -44,7 +44,7 @@ pub fn ssh_wrap_tip() -> EphemeralTip {
             SSH_WRAP_TIP_KEY,
             Line::from(vec![
                 Span::styled("Run ", dim),
-                Span::styled("/doctor", command),
+                Span::styled("zypi doctor", command),
                 Span::styled(" for details and fixes.", dim),
             ]),
         )
@@ -70,7 +70,7 @@ mod tests {
         let tip = ssh_wrap_tip();
         assert_eq!(tip.key, SSH_WRAP_TIP_KEY);
         let text: String = tip.line.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert_eq!(text, "Run /doctor for details and fixes.");
+        assert_eq!(text, "Run zypi doctor for details and fixes.");
     }
 
     #[test]

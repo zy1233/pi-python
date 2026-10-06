@@ -144,7 +144,7 @@ pub fn print_report(
         RegistryState::Corrupt => {
             writeln!(
                 out,
-                "  Worktree registry is damaged; rows show as untracked. Remove {} and run `grok worktree db rebuild` to recreate it.",
+                "  Worktree registry is damaged; rows show as untracked. The registry file is {}.",
                 abbreviate(&report.registry_path, &report.grok_home, &home_label)
             )?;
         }
@@ -188,22 +188,14 @@ pub fn print_report(
         }
     }
 
-    // gc's age pass needs `--max-age` and walks registry records, so neither
-    // half of the hint holds for both row kinds.
+    // zypi has no `worktree` subcommand (no gc, no rm), so the only reclaim
+    // advice that holds is deleting what is listed above.
     if report.worktrees_dominate() && !report.worktrees.is_empty() {
         writeln!(out)?;
-        if report.worktrees.iter().any(WorktreeUsage::is_tracked) {
-            writeln!(
-                out,
-                "To reclaim space, run `grok worktree gc --max-age 7d --dry-run`, then the same command without `--dry-run`. Without `--max-age`, gc expires nothing, and it keeps a worktree whose work it cannot find elsewhere, naming each one."
-            )?;
-        }
-        if !report.worktrees.iter().all(WorktreeUsage::is_tracked) {
-            writeln!(
-                out,
-                "Untracked rows are not in the registry, so gc never visits them. Remove one with `grok worktree rm --dry-run <path>`, then without `--dry-run`."
-            )?;
-        }
+        writeln!(
+            out,
+            "To reclaim space, delete the worktrees listed above that you no longer need."
+        )?;
     }
     Ok(())
 }

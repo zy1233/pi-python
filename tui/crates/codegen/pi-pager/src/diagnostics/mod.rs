@@ -80,9 +80,9 @@ fn voice_missing_finding(error: String) -> DiagnosticFinding {
         automatic_remediation: None,
         note: Some(
             "Connect or select a microphone in your system sound settings. On Linux, install a \
-             supported audio recorder if none was found on PATH. Then run `/doctor` or `grok \
-             doctor` again. Doctor can't detect denied macOS microphone access when the system \
-             returns silence; follow the message shown when dictation fails."
+             supported audio recorder if none was found on PATH. Then run `zypi doctor` again. \
+             Doctor can't detect denied macOS microphone access when the system returns \
+             silence; follow the message shown when dictation fails."
                 .to_owned(),
         ),
     }
@@ -246,9 +246,9 @@ pub(crate) fn collect_startup_warnings_from(
             None,
         );
         warning.note = Some(
-            "Grok also saves each copy to the backup file shown in the copy message. To copy \
-             directly, run `grok wrap ssh <host>` on your local computer or use a terminal that \
-             supports OSC 52. You can also use `/copy <file>` or `/minimal`."
+            "zypi also saves each copy to the backup file shown in the copy message. To copy \
+             directly, run `zypi wrap ssh <host>` on your local computer or use a terminal that \
+             supports OSC 52. You can also start zypi with `--minimal`."
                 .to_owned(),
         );
         warnings.push(warning);
@@ -279,7 +279,7 @@ pub(crate) fn collect_startup_warnings_from(
     {
         let message = match fullscreen_active {
             Some(true) => "Fullscreen may be unreliable in tmux control mode",
-            Some(false) => "Grok is using inline mode because tmux control mode limits fullscreen",
+            Some(false) => "zypi is using inline mode because tmux control mode limits fullscreen",
             None => "Display may be limited in tmux control mode",
         };
         let mut warning = TerminalWarning::new(WarningCategory::ControlMode, message, None, None);
@@ -394,7 +394,7 @@ pub(crate) fn wezterm_kitty_keyboard_warning_from(
             None,
         );
         warning.note = Some(
-            "For this session, type `\\` and then press Enter. Grok can't negotiate the Kitty \
+            "For this session, type `\\` and then press Enter. zypi can't negotiate the Kitty \
              keyboard protocol over SSH yet. `enable_kitty_keyboard = true` applies only to \
              local WezTerm sessions."
                 .to_string(),
@@ -436,7 +436,7 @@ fn sandbox_profile_conflict_warning_from(conflicts: Vec<String>) -> Option<Termi
         fix: None,
         config_path: None,
         note: Some(format!(
-            "Grok is using the user profile. Compare `.grok/sandbox.toml` with {}, then rename \
+            "zypi is using the user profile. Compare `.grok/sandbox.toml` with {}, then rename \
              or remove the conflicting project profile. Project settings can add profile names \
              but can't redefine a user profile.",
             crate::util::display_user_grok_path("sandbox.toml")
@@ -444,8 +444,8 @@ fn sandbox_profile_conflict_warning_from(conflicts: Vec<String>) -> Option<Termi
     })
 }
 
-/// Pure SSH `grok wrap` recommendation — suggests launching the session
-/// through `grok wrap ssh <host>` on the user's local machine, which gives a
+/// Pure SSH `zypi wrap` recommendation — suggests launching the session
+/// through `zypi wrap ssh <host>` on the user's local machine, which gives a
 /// remote session reliable clipboard forwarding plus terminal-mode restore
 /// when the connection drops.
 ///
@@ -479,7 +479,7 @@ pub fn ssh_wrap_hint(
     let mut warning = TerminalWarning::new(
         WarningCategory::SshWithoutWrap,
         "Use local SSH wrapping for more reliable clipboard copy and terminal recovery",
-        Some("grok wrap ssh <host>"),
+        Some("zypi wrap ssh <host>"),
         None,
     );
     warning.note = Some(
@@ -580,7 +580,7 @@ pub(crate) fn collect_notification_warnings_with_method(
     {
         let mut warning = TerminalWarning::new(
             WarningCategory::NotificationProtocolFallback,
-            "Grok is using the terminal bell because the terminal was not recognized",
+            "zypi is using the terminal bell because the terminal was not recognized",
             None,
             None,
         );
@@ -803,7 +803,7 @@ pub fn color_support_warning(
             None,
             None,
         );
-        warning.note = Some("Unset `NO_COLOR`, then restart Grok.".to_string());
+        warning.note = Some("Unset `NO_COLOR`, then restart zypi.".to_string());
         return Some(warning);
     }
 
@@ -822,7 +822,7 @@ pub fn color_support_warning(
         warning.note = Some(format!(
             "Run `tmux source-file {tmux_config_path}`, then detach and reattach: the server \
              reads the option only on reload, and a client fixes its color depth only at attach. \
-             If Grok still reports less than truecolor afterwards, also add `set -g \
+             If zypi still reports less than truecolor afterwards, also add `set -g \
              default-terminal \"tmux-256color\"` and `export COLORTERM=truecolor` to your shell \
              startup file."
         ));
@@ -861,7 +861,7 @@ pub fn color_support_warning(
         warning.note = Some(format!(
             "In the same tmux config, also add `set -g default-terminal \"tmux-256color\"`. Add \
              `export COLORTERM=truecolor` to your shell startup file. Then reload tmux with \
-             `tmux source-file {tmux_config_path}`, then detach and reattach, and restart Grok."
+             `tmux source-file {tmux_config_path}`, then detach and reattach, and restart zypi."
         ));
         return Some(warning);
     }
@@ -874,7 +874,7 @@ pub fn color_support_warning(
     );
     warning.note = Some(
         "Add this export to your shell startup file, such as `~/.zshrc` or `~/.bashrc`, then \
-         restart Grok."
+         restart zypi."
             .to_string(),
     );
     Some(warning)
@@ -1910,14 +1910,14 @@ mod tests {
         assert!(out[1].message.contains("sandbox settings"));
     }
 
-    // -- ssh_wrap_hint: `grok wrap ssh` recommendation --------------------------
+    // -- ssh_wrap_hint: `zypi wrap ssh` recommendation --------------------------
 
     #[test]
     fn ssh_wrap_hint_fires_over_plain_ssh() {
         // is_ssh, no sink, not VS Code remote → recommend wrap.
         let w = ssh_wrap_hint(true, false, false).expect("hint must fire");
         assert_eq!(w.category, WarningCategory::SshWithoutWrap);
-        assert_eq!(w.fix.as_deref(), Some("grok wrap ssh <host>"));
+        assert_eq!(w.fix.as_deref(), Some("zypi wrap ssh <host>"));
         assert!(
             w.config_path.is_none(),
             "fix is a command, not a config line"
@@ -2268,7 +2268,7 @@ mod tests {
         assert!(finding.automatic_remediation.is_none());
         assert!(finding.note.as_deref().is_some_and(|note| {
             note.contains("install a supported audio recorder")
-                && note.contains("grok doctor")
+                && note.contains("`zypi doctor`")
                 && note.contains("can't detect denied macOS microphone access")
         }));
     }

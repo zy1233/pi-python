@@ -1,6 +1,6 @@
 # Rust Agent Runtime 剥离计划
 
-> 状态：r5。r2 的计划稿之上，**已拆除 Rust runtime 并恢复 `/model`（r3）；r4 补了阶段 0 的 Linux CI 与基线工具、清掉 leader 的 UI 状态残留、完成 1.R3 的命名；r5 在 Linux CI 上跑通并启用了基线，执行入口审计（0.6）并完成阶段 A（A.3、A.4）——又删了约 23 万行 Rust、8 个 crate，消费者构建 0 告警**。分支已 push，draft PR [#7](https://github.com/zy1233/pi-python/pull/7)；执行记录见 §10。§1–§9 保留 r2 原文作为决策依据，与 §10 冲突处以 §10 和 ADR3（r3）为准。负责人：待指派。
+> 状态：r7。r2 的计划稿之上，**已拆除 Rust runtime 并恢复 `/model`（r3）；r4 补了阶段 0 的 Linux CI 与基线工具、清掉 leader 的 UI 状态残留、完成 1.R3 的命名；r5 在 Linux CI 上跑通并启用了基线，执行入口审计（0.6）并完成阶段 A（A.3、A.4）——又删了约 23 万行 Rust、8 个 crate，消费者构建 0 告警**。分支已 push，PR [#7](https://github.com/zy1233/pi-python/pull/7) 已转 ready for review；**r6 清理了品牌残留（把还写着 Grok、或指向不存在的命令 / 目录的提示改成真的东西，见 §10.8），在叠加分支 `codex/branding-cleanup` 上；r7 合并了 `main` 上另一台机器推的 7 个提交，6 个文件的冲突已解，并修了 macOS 上 `AGENTS.md` 被读两遍的 bug（见 §10.9）**；执行记录见 §10。§1–§9 保留 r2 原文作为决策依据，与 §10 冲突处以 §10 和 ADR3（r3）为准。负责人：待指派。
 > 基线：分支 `codex/rust-agent-runtime-removal-plan`；r2 / r3 的比较基线是 HEAD `07a3574`，r4 / r5 的提交见 §10。
 > 验证方式：r2 为静态分析（源码阅读、`Cargo.toml` 解析、模块级引用统计，复现方法见附录 B）；r3 起拆除结果由 `cargo check`（macOS 本机，消费者构建 `pi-pager-bin` / `pi-pager-minimal` / `pi-update` 及 `pi-shell` / `pi-pager` 的 `--tests` 类型检查）、`cargo test`（触及的 crate）、Python 侧 pytest，以及伪终端里 `zypi` ↔ `pi_agent_cli` ↔ OpenRouter 的真实会话（含 `/model` 切换）验证。标「需实测」的其余结论仍是静态推断；Linux / Windows 的 `cfg` 代码本机无法编译，见 §10.4。
 > 与既有文档的关系：承接 [Phase 4 设计](../specs/2026-08-25-phase4-coding-agent-cli-design.md) §3「第一轮允许 pager 继续链接 `xai-grok-shell`……变瘦不是迁入前提」和 [`AUDIT-PHASE4-PHASE5.md`](../AUDIT/AUDIT-PHASE4-PHASE5.md) 的「TUI 瘦身长期里程碑」，是 Phase 4 的第二轮。与既有决定的张力见 §3。
@@ -247,9 +247,9 @@ Rust（pager）：
 - 新增 TUI 功能（MCP、queue、subagent UI 等）——另立计划并过 P2 准入。（`/model` 不在此列：r3 已按 ADR3 经 Session Config Options 恢复。）
 - 多会话共享进程（leader 的替代方案）。
 
-## 10. 执行记录（r3、r4、r5）
+## 10. 执行记录（r3、r4、r5、r6、r7）
 
-r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
+r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
 | 提交 | 内容 |
 |---|---|
@@ -496,7 +496,72 @@ r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶�
 3. **A.3 的尾巴**（可选，同样的折叠器办法）：3d-6 CLI 旗标瘦身——欢迎页与选择器里的 worktree 入口已在 `ac1d3ff` 删掉，但 `-w/--worktree`、`--worktree-ref`、`--restore-code`、`/new` 的 worktree 模式（`new_session_worktree_mode`、`Action::NewWorktreeSession`、`Action::ChooseNewSessionMode`）和 `allow_remote_restore` / `suppress_code_restore` 的「远端恢复」世界仍在，标准 ACP 下 `Effect::CreateWorktreeSession` 恒返回 `WorktreeSessionFailed`，这些路径恒假；它们归 1.P6 的旗标契约一起定。欢迎页隐私横幅（`views/privacy_banner.rs`，「Help improve Grok」数据共享广告）按代码读只有设了环境变量 `GROK_PRIVACY_NOTICE_ROLLOUT` 或远端设置才会出现（没有实测），同属「靠数据恒假」的世界，约 1k 行、15 个文件。3f plan 审批 / btw / cta；3d-4 认证 / 计费界面归阶段 D.3。
 4. **A.4 的尾巴**（可选）：`pi-shell-base` 等其余 crate 的 `pub` 瘦身（没做过）；`pi-shell-base/src/env.rs` 里死掉的 gateway-bridge 常量；约 25 处局部 `#[allow(dead_code | unused*)]`（有的是平台门控，要看 Linux）；`pi-shell/src/session/storage` 的 `relocation`（`#[allow(dead_code)]`，归 D.2）。
 5. **阶段 1 才开了个头**：做了 1.P1 的一半（标题与 `updated_at`）、1.P5 的一个 bug（`session/close` / `resume` 的路由）、0.3 / 1.P7 的 Python 一侧（stdio 契约套件）。余下的需要拍板：① 优雅退出（1.P2、1.R3 ②）**已做**（`f14e321`、`e8557e5`），宽限取了 3 s（`AGENT_EOF_GRACE`，一个常量，要换数字由用户定）；还剩 `stderr` 去向（1.R3 ①）、zypi 不是会话首进程时被 `kill -9` 的端到端情形、Linux / Windows 上的退出行为；② pager 跟 `nextCursor`（才能在 Python 端分页）；③ 1.R1 ADR1（`--continue` / `--resume` 的磁盘读取）；④ 1.P6 旗标契约。阶段 0 的 0.3 的 Rust 一侧、0.5、0.7–0.9 仍未做。
-6. **文档与声明**：C.2 内嵌 user-guide；C.3 `tui/NOTICE` 与 `THIRD-PARTY-NOTICES`（依赖已少了 28 个包，需要重新生成；对外发布二进制前由用户定措辞）。还有**品牌残留**：用户看得见的有 `/theme` 里的「Grok Night / Grok Day」、桌面通知标题「Grok」（审批请求、会话就绪、回合结束）、`zypi doctor` 的「Grok Doctor」、`zypi disk-usage` 提示里的 `grok worktree gc`；代码里还有 `grok-pager` 之类的客户端标识。是否改名、改成什么，由用户定。
+6. **文档与声明**：C.2 内嵌 user-guide；C.3 `tui/NOTICE` 与 `THIRD-PARTY-NOTICES`（依赖已少了 28 个包，需要重新生成；对外发布二进制前由用户定措辞）。**品牌残留**：~~用户看得见的~~ r6 已清理（§10.8；用户没给新名字，沿用 zypi）。没清的是用户看不见的标识，列在 §10.8 的「有意没动的」。
+
+### 10.8 r6 追加：品牌残留清理
+
+**起点与决定。** §10.7 遗留第 6 项把品牌残留留给用户定名字。用户选了「清理 Grok 品牌残留」，没有给新名字；r6 沿用产品里本来就有的名字 **zypi**（`brand.rs` 的 `PRODUCT_TITLE`、终端标题、英雄区、`--help` 早就是它）。要换名字，改 `brand.rs` 的常量和下面两个主题 id 即可。工作在分支 `codex/branding-cleanup` 上，作为叠在 PR #7 之上的 PR（base 是 `codex/rust-agent-runtime-removal-plan`），不动 #7。
+
+**改了什么。** 只改用户看得见的。其中三处不只是名字问题，而是提示指向了不存在的东西：
+
+1. **`zypi doctor fix ssh-wrap` 会写出坏掉的 alias。** 受管块里写的是 `alias ssh='grok wrap ssh'`，`grok` 这个命令不存在，用户一执行 fix，之后每次 `ssh` 都会失败。现在写 `alias ssh='zypi wrap ssh'`，块标记从 `# >>> grok doctor >>>` 改为 `# >>> zypi doctor >>>`（以前跑过 fix 的人要手动删掉旧块；旧块不会被新版识别）。
+2. **路径提示指向不存在的目录。** 配置目录在消息里叫 `~/.grok` / `$GROK_HOME`，实际是 `~/.pi-python` / `$PI_HOME`（`pi-home` crate）。设置页脚、复制提示里的备份文件路径、doctor 对 `config.toml` / `sandbox.toml` 的指引，都会让用户去打开一个不存在的文件。现在 `display_grok_home_prefix_for` 返回 `~/.pi-python` / `$PI_HOME`。
+3. **提示里的命令不存在。** 内置斜杠命令里没有 `/doctor`、`/minimal`、`/fullscreen`、`/copy`；CLI 里没有 `grok wrap`、`grok worktree gc|rm|db rebuild`。改成真有的：`zypi doctor`、`zypi wrap ssh <host>`、`zypi --minimal` / `--fullscreen`；`zypi du` 里指向 `worktree gc / rm / db rebuild` 的提示删掉，只留「删掉上面列出的、不再需要的 worktree」。
+
+| 位置 | 之前 | 之后 |
+|---|---|---|
+| `/theme`、设置里的主题 | `Grok Night` / `Grok Day`，落盘 id `groknight` / `grokday` | `zypi Night` / `zypi Day`，落盘 id `zypinight` / `zypiday`。旧 id 与别名（`groknight`、`grok-night`、`GrokNight`、`grokday`、`grok-day`、`dark`、`light`、`day`）仍可解析，读到旧值会规范成新 id，已有的 `config.toml` 不用改 |
+| 桌面通知标题 | `Grok`（审批请求、会话就绪、回合结束） | `zypi`（`brand::PRODUCT_TITLE`）；通知命令模板的注释同改 |
+| `zypi doctor` | 标题 `Grok Doctor`，结尾指向不存在的 `/doctor` | `zypi Doctor`，说明某些检查只在运行中的 zypi 会话里做 |
+| 启动提示、SSH 提示 | 「Run /doctor for details and fixes.」 | 「Run zypi doctor for details and fixes.」 |
+| 设置页 | 「Switch this session only with /minimal or /fullscreen」「Show a /doctor tip…」「(Grok STT)」 | 「…by starting zypi with --minimal or --fullscreen」「Show a zypi doctor tip…」，去掉 Grok STT |
+| 复制提示 | 「use grok wrap or /minimal」「Try /doctor or /minimal」 | 「use zypi wrap or --minimal」「Try zypi doctor or --minimal」 |
+| `--minimal` 模式 | 欢迎页标题 `Grok Build`；信任提示「Grok Build may run or modify…」 | `zypi` |
+| 其他 | 启动超时「Couldn't start Grok」、语音「Restart Grok」、状态栏脚本「encode Grok's payload」、`zypi wrap` 的报错前缀 `grok wrap:` | `zypi` |
+
+**提交**（都在 `codex/branding-cleanup`，叠在 `ea5a60d` 之上）：`dbc8d7d` 路径标签与复制提示；`a08f12f` 主题改名与设置页文案；`1f3006b` doctor 与 ssh-wrap fix；`111d46d` 通知标题；`665b539` `zypi du`；`0f05f83` 其余字符串。每个提交带自己的测试，改动里没有重排或格式化。
+
+**有意没动的。**
+
+- 用户设置的接口：`GROK_*` 环境变量名（`GROK_HOME` 一个名字就被引用 241 次，`GROK_SANDBOX` 还出现在 `--help` 里）、项目级路径 `.grok/sandbox.toml`、`zypi du --json` 的 `grok_home` 字段（机器可读，改了要升 schema 版本）。改名是破坏性变更，要用户另行决定。
+- 内部标识：`ThemeKind::GrokNight` / `GrokDay`、`Theme::groknight()` / `grokday()`、`theme/groknight.rs` / `grokday.rs`、`assets/grok-night.tmTheme` / `grok-day.tmTheme`、`grok_*` 函数与字段名（`default_grok_home`、`display_user_grok_path`）、HTTP 头 `x-grok-*`、`xai_grok_pager__*.snap` 快照文件名。
+- 死世界里的字符串：计费 / SuperGrok（`app/dispatch/billing.rs`）、tutorial（`views/tutorial.rs`）、隐私横幅（`views/privacy_banner.rs`）、`pi-update`（`grok update`、`version_policy.rs`）、`pi-auth` / `pi-shell` / `pi-workspace` 里的 `grok login` 提示、`pi-tools` 里给模型看的参数说明（例如 workflow 工具的 `~/.grok/workflows/`）、ACP 的 auth method「Grok」。它们归 A.3 的尾巴 / 阶段 D；现在改只会和之后的删除互相冲突。
+- `tui/crates/codegen/pi-pager/docs/user-guide/`：整套是上游文档（C.2），主题表里还写着 `GrokNight`。旧名字仍是有效别名，文档不会误导，只是旧。
+
+**验证。**
+
+- **编译**：`cargo check -p pi-pager-render -p pi-pager -p pi-pager-minimal --all-targets` 0 错误 0 告警；debug `zypi` 构建 0 告警。
+- **单测**（macOS 本机，`--test-threads=2`，只跑相关过滤）：pi-pager-render 的 theme / util / clipboard 265 通过；pi-pager-minimal 79；pi-pager `--lib` 的 theme / settings / doctor / diagnostics / disk_usage / notifications / startup / tips / wrap / status_line 1,068；`settings_e2e` 251；`grok_home_paths` 2；`doctor_early_dispatch`（真二进制，`--ignored`）13，其中包括往 rc 里写 alias 的那一条。
+- **新增的回归测试**：旧主题 id 与别名仍可解析、主题的落盘 id 与显示名不含 grok（`pre_rename_theme_names_still_resolve`、`house_themes_are_named_after_the_product`、`current_value_for_theme_reads_pre_rename_ids`）；路径标签指向真实目录（`home_labels_name_the_real_home_directory`）；fix 命令与 alias 用 `brand::CLI_NAME`（`fix_commands_and_alias_name_this_binary`）；`DOCTOR_ACTION` 不带斜杠；复制提示、设置页文案、剪贴板修复提示不含 grok 和不存在的斜杠命令；`zypi du` 不再提示 `worktree gc|rm`、`db rebuild`。
+- **PTY**（debug `zypi` + mock agent）：全屏模式扫了欢迎页、命令面板、`/help`、`/theme`、`/settings`（逐行走完整个列表，共 16 屏）、`/model`、一个回合、`/resume`、Ctrl+C 提示；`--minimal` 扫了欢迎页、`/help`、一个回合——含 `grok` 或不存在的斜杠命令的行：0。`config.toml` 里写旧值 `theme = "grokday"`，`/theme` 把 `zypiday` 标成 active；默认家目录时设置页脚写 `~/.pi-python/config.toml`，`PI_HOME` 指到别处时写 `$PI_HOME/config.toml`。
+- **CLI**：顶层与每个子命令（`completions`、`doctor`、`doctor fix`、`du`、`export`、`help`、`version`、`wrap`）的 `--help`，加上 `zypi doctor`、`du`、`version` 的输出：只剩顶层 `--help` 里的 `[env: GROK_SANDBOX=]`（环境变量名，有意不动）。
+- **已知的本机波动**：有一次过滤运行里 `session_startup::tests::remote_miss_restore_code_with_worktree_defers` 失败。它在 macOS 上读真实的 `~/.pi-python/sessions/<临时仓库路径>`（`/var` 与 `/private/var` 的差别），目录不存在就报错，跟本次改动无关；之后的运行里通过。
+- **Linux CI**（`33374a3`，PR [#8](https://github.com/zy1233/pi-python/pull/8)）：`TUI CI` run [37408839608](https://github.com/zy1233/pi-python/actions/runs/37408839608)（check 6 m 27 s，test 19 m 11 s）✓ 门禁全过；依赖图 980、消费者构建 0 告警、`cargo check --workspace --tests` 0 个错误；8 个 suite 共 7,444 通过 / 0 失败 / 20 忽略（`pi-pager` 5,559，比 `b617575` 的 5,554 多 5；上面那条 macOS 本机波动的测试在 Linux 上通过）；`CI`（Ruff + Python 3.11–3.13）run 37408839645 ✓。
+- **CI 没覆盖到的**：`TUI CI` 的 8 个 suite 里没有 `pi-pager-render` 和 `pi-pager-minimal`（`scripts/tui_baseline.toml`），所以本次在这两个 crate 里新增和改动的测试——主题别名、路径标签、剪贴板提示、`--minimal` 欢迎页——只在 macOS 上跑过，Linux 上只做了编译检查（`cargo check --workspace --tests`）。把这两个 crate 加进基线是个小改动，但要先在 Linux 上量出各自的 `reference_passed`，而且会改 CI 门禁（`enforce = true`），所以没有顺手做，留给用户决定。
+
+### 10.9 r7 追加：合并 `main`（另一台机器推的 7 个提交）
+
+**背景。** 用户另一台机器上的功能提交推到了 `main`：`09fc38d..7e7d4d4`，7 个提交、122 个文件（+21,174 / −809），是 Phase 6 / 7 审计的实现——项目信任（`extension_trust`、`trust_prompt`、`trust_store`）、按 provider 限定的 API key、`Model.reasoning`、workflow 沙箱、工具注解与权限、后台 turn 之后排队的 prompt、0.5.0 发版。**没有一个文件在 `tui/` 下**，Rust 一侧不受影响。两个 PR 相对 `main` 是 61 个提交。
+
+**冲突。** 先用 `git merge-tree` 查，再动手：两边都改过的有 10 个文件，其中 6 个文本冲突、共 17 处——`pi_agent_cli/agent.py`（6）、`config.py`（4）、`factory.py`（3）、`packages/pi-agent-cli/AGENTS.md`（2）、`__main__.py`（1）、`pyproject.toml`（1）。其余 4 个自动合并。冲突全在 Python 一侧，#7 和 #8 的冲突一样（#8 没有新增）。选 merge 而不是 rebase：61 个提交会把同样的冲突逐个重放，而且最终要 squash。
+
+**怎么合。** 两边的功能都留，真正需要决定的只有接缝处的三件事：
+
+- **API key 的归属。** main 规定 `api_key_env` 只给自己的 provider 用（请求别的 provider 时返回 `None`）。我们的 `/model` 里每个模型有自己的 `api_key_env` 和 `provider`，所以改成 `api_key_getter(env_name, provider)`：`make_get_api_key(config)` 是 `[model]` 默认项的特例，`factory.api_key_for_choice(choice)` 给 `[[models]]` 里的某一项用。
+- **`Model.reasoning`。** main 在构造 `Model` 时按 `CliConfig.model_reasoning` 设它；我们的 `model_for_choice` 不带，切换模型会把它丢掉。现在 `model_for_choice(choice, reasoning=…)`，值对所有 choice 相同（它是会话级的设置，不是模型的属性）。
+- **会话启动。** main 把 `_schedule_deferred_advertise` 扩成了 `_schedule_deferred_setup`（问信任、广播命令、报告被跳过或加载失败的扩展），合并后沿用 main 的。`_bind_session` 先决定信任，再恢复持久化的模型选择，两个都交给 `create_session_harness(trust=…, model_choice=…)`；会话响应仍带 `configOptions` 和每会话的 `pi/*` 提示。
+
+新增测试 `test_a_chosen_model_keeps_the_reasoning_setting_and_gets_only_its_own_key` 守住这个接缝；`packages/pi-agent-cli/AGENTS.md` 的「Model selection」一节记了同样的规则。
+
+**验证（macOS 本机）。** `ruff check` 与 `ruff format --check` 通过（204 个文件）。pytest 全量 1,999 通过、6 失败、33 跳过、31 取消选择（需要真实 API 的测试，main 新加的 `addopts` 默认排除）。**这 6 个失败在纯 `origin/main`（`7e7d4d4`，临时 worktree）上原样复现，与合并无关**，都是 macOS 专属（修掉第一个之后，macOS 上全量是 2,001 通过、5 失败）：
+
+- `test_context_files_are_loaded_whatever_the_trust`：`context_files.py` 的候选名同时有 `AGENTS.md` 和 `AGENTS.MD`（`CLAUDE.md` / `CLAUDE.MD` 同理）。大小写不敏感的文件系统上两个名字命中同一个文件，而 `Path.resolve()` 在 macOS 上保留写法，按路径字符串去重失效，项目的 `AGENTS.md` 会被读两遍、进提示词两次。不是测试的问题，是 Phase 5 起就有的真 bug（`f96ccb1`），main 新加的测试第一次在 macOS 上暴露它。**已在 #8 修掉**：`context_files.py` 改按文件身份（设备号 + inode）去重，不再按路径字符串，硬链接也一并算作同一个文件；新测试 `test_one_file_under_two_names_is_loaded_once` 在大小写不敏感的文件系统上靠文件系统本身、在 Linux 上靠硬链接造出「一个文件两个名字」（拿掉修复，它和 main 的那条测试一起失败）。
+- `test_a_path_that_is_not_valid_text_can_still_be_saved`：macOS 不允许非 UTF-8 的文件名（`Errno 92`），测试自己建不出那个目录。
+- `test_sandbox_isolation.py` 的 4 个：macOS 上沙箱只报告 `process`、`rlimit-core`、`rlimit-cpu`、`rlimit-nofile`、`rlimit-fsize` 几层，没有 `rlimit-as`；「不靠审计钩子，内核也拦得住子进程和大内存」这一组在 macOS 上不成立；子进程还多了 macOS 自己补的 `__CF_USER_TEXT_ENCODING`。
+
+**PTY 冒烟**（debug `zypi` + 合并后的 agent，`PI_USE_MOCK`）：启动、一个回合、`/model` 选择器列出两个模型、切到第二个并发一轮、切回、`/exit` 退出码 0 且没有残留的 agent 进程。Linux CI 的结果见 PR。
+
+**合入 `main`。** 用户要求 squash、不保留逐个提交。#7 以一个提交合入（`455527c`，树与 #7 的头 `9b71a57` 完全一致）。#8 的基底是 #7 的分支，squash 之后它的历史里还带着那 54 个提交，直接合会在两边都改过的行上冲突，所以先 `git rebase --onto origin/main 9b71a57 codex/branding-cleanup`，只重放 #8 自己的提交（合并提交被丢掉）；重放后的树与重放前（`00df03f`）逐字节一致。再把 PR 的基底改到 `main`，强推，等 CI，squash。
 
 ## 附录 A：能力矩阵（阶段 0.8 的初稿）
 
@@ -760,3 +825,5 @@ LoC 用 `python3` 递归统计 `*.rs` 行数（沙箱内 `xargs wc -l` 可能失
 - r3：在工作区执行 Rust runtime 拆除并恢复 `/model`（当时未提交，现已本地提交，见 §10）。主要变化：新增 §10 执行记录；ADR3 推翻 r2 的「`/model` 从白名单移除」，改为经 ACP Session Config Options 恢复（Python 公布 `configOptions` 并路由 `session/set_config_option`，pager 读 `configOptions`、无该配置项时退回旧 `session/set_model`）；P1 增补「任何 runtime（含将来的 pi-rust）都必须作为独立 ACP agent 位于 ACP 之后」；§7 勾选 A.1、A.2（主体）、B.1、B.5、B.6，A.3、A.4、B.3 未做，B.2、B.4 换了做法或只做了一部分；§4.4 关于「出站 `x.ai/*` 被 `channel.rs` 丢弃」的判断被实测推翻（§10.4）。验证以消费者构建、单测、PTY 真机 `/model` 切换与 OpenRouter 真实会话为准，没有 Linux / Windows 结果，阶段 0（CI、基线、契约 / e2e）仍未做。
 - r4：把 r3 的工作区改动提交到本地分支（**未 push**），并补三件事：① 阶段 0 的 0.1 / 0.2 / 0.4——Linux CI workflow、基线执行器与清单、基线报告 `docs/baselines/tui.md`（0.4 勾选；0.1 / 0.2 因为 workflow 没在 Linux 上跑过而不勾选）；② 清掉 leader 的 UI 状态残留（A.2 的尾巴），生产行为不变，测试夹具改用生产默认值；③ 1.R3 的命名与提示语（行为不变，`stderr` 去向、优雅退出、残留进程实测仍未做）。同时把 §10.4 的 leader 残留改写为四类「不是 UI 残留」的剩余（273 行 / 80 个文件），新增 §10.6，并更正测试基线（清理 leader 时随被删代码删掉 18 个测试，10,857 → 10,839）。验证仍是 macOS 一台机器：门禁、`--workspace --tests`、8 个 suite、PTY 烟测；没有 Linux / Windows 结果。
 - r5：推送分支、开 draft PR [#7](https://github.com/zy1233/pi-python/pull/7)，并完成阶段 A 与阶段 0 的 0.1 / 0.6。① 第一次 Linux `TUI CI` 全绿后把基线转为阻塞，依赖图上限 995 → 980、告警上限 20 → 0、各 suite 设 `min_passed`；② 入口审计（0.6）按附录 A 的默认执行，A.3 删除 dashboard、白名单外的斜杠命令、agents / extensions / persona 模态、tasks / 后台 / 定时任务、subagents / workflows / goals、共享 prompt 队列、MCP / hooks / plugins / marketplace 入口、rewind / fork / jump、recap / feedback / consent、changelog、`--chat` 世界、session rename 的死链路；③ A.4 去掉各 crate 根的 `#![allow]`（消费者构建 0 告警）、`pi-shell` 的 `pub mod` 降级、删未用依赖与 8 个无人依赖的 crate、删 `cfg(feature = "local-workspace")` 代码；④ `-p` 无沙箱时拒绝运行（ADR7 的最小版本）。净效果：`tui/crates` 的 `.rs` 从 1,252,374 行降到 1,019,041 行，`Cargo.lock` 1,285 → 1,257 个包，Linux 依赖图 995 → 980。新增 §10.7 与附录 A 的 r5 结果。⑤ 收尾：PTY 烟测发现并删掉欢迎页与选择器里的死 worktree 入口（`ac1d3ff`）；手动 `release_baseline` 回填了 release 数（`zypi` 422,034,120 B，−10.3 %；冷缓存构建 1,155 s，−29.9 %；0.2 勾选）；阶段 1 开了头——`session/list` 的标题与 `updated_at`（1.P1 一半）、stdio 契约套件并修了 `session/close` / `resume` 的路由（0.3 / 1.P7 的 Python 一侧、1.P5 的一个 bug）、优雅退出（1.P2 完成，1.R3 ② 完成：退出 zypi 时 bash 工具进程不再残留——双击 Ctrl+Q、`kill -9 zypi`、SIGTERM、关终端都量过，前因后果见 §10.7）。验证：Linux CI（`0e71894`、`cca48b0`、`ac1d3ff`）、macOS 本机、PTY。阶段 1 的其余部分和 0.5 / 0.7–0.9 未做，见 §10.7 的遗留。
+- r6：清理品牌残留（用户选了「清理 Grok 品牌残留」，没给新名字，沿用 zypi），分支 `codex/branding-cleanup`，叠在 PR #7 之上；PR #7 同时转为 ready for review。改动：主题改名为 `zypi Night` / `zypi Day`（落盘 id `zypinight` / `zypiday`，旧 id 与别名仍可解析）、桌面通知标题、`zypi doctor` 的标题与全部提示、启动 / SSH 提示、设置页描述、复制提示、`--minimal` 欢迎页与信任提示、`zypi wrap` 报错前缀。顺带修了三处「提示指向不存在的东西」：`zypi doctor fix ssh-wrap` 写进 shell rc 的是 `alias ssh='grok wrap ssh'`（`grok` 不存在）；配置目录在消息里叫 `~/.grok` / `$GROK_HOME`（实际是 `~/.pi-python` / `$PI_HOME`）；`/doctor`、`/minimal`、`/copy`、`grok worktree gc|rm|db rebuild` 都不存在。有意没动的见 §10.8。验证见 §10.8。
+- r7：合并 `main` 上另一台机器推的 7 个提交（Phase 6 / 7 审计的实现，没有一个文件在 `tui/` 下）。6 个文件、17 处冲突，都在 `packages/pi-agent-cli` 与 `pyproject.toml`；接缝处的三个决定：`api_key_getter(env_name, provider)`（key 只给自己的 provider，`/model` 里的每个模型都适用）、`model_for_choice(choice, reasoning=…)`（切换模型不丢 `Model.reasoning`）、`_bind_session` 先决定信任再恢复模型选择。纯 `origin/main` 上就失败的 6 个 macOS 专属测试里，一个是真 bug（macOS 上项目的 `AGENTS.md` 会被读两遍），已按文件身份去重修掉；其余 5 个没有动。见 §10.9。

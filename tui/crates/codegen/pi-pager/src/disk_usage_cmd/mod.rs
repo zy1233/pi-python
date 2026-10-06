@@ -1,4 +1,4 @@
-//! `grok du`: what the user grok home uses on disk. It creates no grok home,
+//! `zypi du`: what the zypi home uses on disk. It creates no zypi home,
 //! registry file, or schema, but a read-only open of a WAL database leaves
 //! `-shm` and `-wal` sidecars, so sizes are collected before it opens.
 
@@ -27,10 +27,7 @@ const SCHEMA_VERSION: u32 = 1;
 #[derive(Clone, Debug, clap::Args)]
 #[command(
     after_help = "Lists every top-level directory in the zypi home, largest first, then every \
-worktree under `worktrees/` and `worktree_pool/` with its size, age, and label. To reclaim space, preview a sweep with \
-`zypi worktree gc --max-age 7d --dry-run`: without `--max-age`, gc expires nothing, it \
-visits only worktrees the registry tracks, and it keeps a worktree whose work \
-it cannot find elsewhere."
+worktree under `worktrees/` and `worktree_pool/` with its size, age, and label."
 )]
 pub struct DiskUsageArgs {
     /// Emit machine-readable JSON output.
@@ -272,6 +269,9 @@ impl WorktreeUsage {
         }
     }
 
+    /// Only the tests ask: with the `worktree gc` hints gone, nothing in the
+    /// report itself branches on whether a row is registered.
+    #[cfg(test)]
     pub(crate) fn is_tracked(&self) -> bool {
         self.registration.record().is_some()
     }
@@ -283,7 +283,7 @@ impl WorktreeUsage {
             .unwrap_or("")
     }
 
-    /// What gc's age pass measures: the newer of created and last accessed.
+    /// What the age column shows: the newer of created and last accessed.
     pub(crate) fn age_stamp(&self) -> Option<i64> {
         match self.registration.record() {
             Some(rec) => Some(

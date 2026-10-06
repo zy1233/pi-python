@@ -182,7 +182,7 @@ enabled = true
 items = [\"action-required\", \"spinner\", \"activity\", \"session-name\", \"zypi\"]
 
 # [[ui.notifications.hooks]]
-# command = \"terminal-notifier -title 'Grok' -message '$GROK_MESSAGE'\"
+# command = \"terminal-notifier -title 'zypi' -message '$GROK_MESSAGE'\"
 # events = [\"turn_complete\", \"approval_required\"]
 # only_unfocused = true
 # timeout_secs = 10

@@ -230,14 +230,14 @@ mod tests {
                 screen_mode: crate::app::ScreenMode::Fullscreen,
             };
             let items = cmd.suggest_args(&ctx, "").expect("should return items");
-            let groknight = items
+            let zypinight = items
                 .iter()
-                .find(|i| i.insert_text == "groknight")
-                .expect("groknight should be in list");
+                .find(|i| i.insert_text == "zypinight")
+                .expect("zypinight should be in list");
             assert!(
-                groknight.description.contains("(active)"),
+                zypinight.description.contains("(active)"),
                 "explicit theme should show (active), got: {}",
-                groknight.description
+                zypinight.description
             );
         });
     }
@@ -283,12 +283,12 @@ mod tests {
                     ..crate::settings::PagerLocalSnapshot::default()
                 },
             };
-            let result = cmd.run(&mut ctx, "groknight");
+            let result = cmd.run(&mut ctx, "zypinight");
             match result {
                 CommandResult::Action(Action::SetTheme(name)) => {
-                    assert_eq!(name, "groknight");
+                    assert_eq!(name, "zypinight");
                 }
-                other => panic!("expected Action::SetTheme(\"groknight\"), got {other:?}"),
+                other => panic!("expected Action::SetTheme(\"zypinight\"), got {other:?}"),
             }
         });
     }
@@ -377,9 +377,9 @@ mod tests {
             let result = cmd.run(&mut ctx, "dark");
             match result {
                 CommandResult::Action(Action::SetTheme(name)) => {
-                    assert_eq!(name, "groknight", "alias must normalise to canonical");
+                    assert_eq!(name, "zypinight", "alias must normalise to canonical");
                 }
-                other => panic!("expected Action::SetTheme(\"groknight\"), got {other:?}"),
+                other => panic!("expected Action::SetTheme(\"zypinight\"), got {other:?}"),
             }
         });
     }
@@ -403,7 +403,7 @@ mod tests {
         with_test_env(|| {
             theme_cache::set(ThemeKind::GrokNight);
             let cmd = ThemeCommand;
-            cmd.preview_arg("grokday");
+            cmd.preview_arg("zypiday");
             assert_eq!(Theme::current_kind(), ThemeKind::GrokDay);
         });
     }
@@ -432,11 +432,11 @@ mod tests {
             theme_cache::set(ThemeKind::GrokNight);
             let cmd = ThemeCommand;
             // Simulate user navigating into a different theme during preview.
-            cmd.preview_arg("grokday");
+            cmd.preview_arg("zypiday");
             assert_eq!(Theme::current_kind(), ThemeKind::GrokDay);
 
             // Then Escape (or arg picker dismissal): restore.
-            cmd.cancel_preview("groknight");
+            cmd.cancel_preview("zypinight");
             assert_eq!(
                 Theme::current_kind(),
                 ThemeKind::GrokNight,

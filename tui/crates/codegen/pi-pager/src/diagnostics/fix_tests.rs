@@ -4,9 +4,9 @@ use super::*;
 fn canonical_and_short_ids_resolve_to_canonical_id() {
     assert_eq!(resolve_fix_id("terminal.ssh-wrap").unwrap(), SSH_WRAP_ID);
     let command = human_fix_command(SSH_WRAP_ID).expect("SSH fix command");
-    assert_eq!(command, "grok doctor fix ssh-wrap");
+    assert_eq!(command, "zypi doctor fix ssh-wrap");
     assert_eq!(
-        resolve_fix_id(command.strip_prefix("grok doctor fix ").unwrap()).unwrap(),
+        resolve_fix_id(command.strip_prefix("zypi doctor fix ").unwrap()).unwrap(),
         SSH_WRAP_ID
     );
     assert!(human_fix_command(DiagnosticId::new("terminal", "unknown")).is_none());
@@ -14,6 +14,30 @@ fn canonical_and_short_ids_resolve_to_canonical_id() {
         resolve_fix_id("terminal.unknown"),
         Err(FixError::UnknownId(_))
     ));
+}
+
+/// What the fixer prints and installs must name a binary that exists. The
+/// ssh-wrap alias is written into the user's shell rc, so a wrong name there
+/// breaks `ssh` itself.
+#[test]
+fn fix_commands_and_alias_name_this_binary() {
+    let cli = crate::brand::CLI_NAME;
+    for spec in FIX_REGISTRY {
+        assert!(
+            spec.command.starts_with(&format!("{cli} doctor fix ")),
+            "{}",
+            spec.command
+        );
+        assert_eq!(
+            human_fix_command(spec.id).as_deref(),
+            Some(format!("{cli} doctor fix {}", spec.handle).as_str())
+        );
+    }
+    assert!(SSH_WRAP_FIX_COMMAND.starts_with(&format!("{cli} doctor fix ")));
+    assert!(SSH_WRAP_ONE_OFF.starts_with(&format!("{cli} wrap ssh")));
+    assert!(SSH_WRAP_ALIAS_POSIX.contains(&format!("'{cli} wrap ssh'")));
+    assert!(SSH_WRAP_ALIAS_FISH.contains(&format!("'{cli} wrap ssh'")));
+    assert_eq!(MANAGED_NAMESPACE, format!("{cli} doctor"));
 }
 
 #[test]
@@ -183,7 +207,7 @@ fn conflicting_direct_form_after_managed_block_fails_persistent_verification() {
         std::fs::write(
             &path,
             format!(
-                "# >>> grok doctor >>>\n# >>> terminal.tmux-clipboard >>>\nset -g set-clipboard on\n# <<< terminal.tmux-clipboard <<<\n# <<< grok doctor <<<\n{conflict}\n"
+                "# >>> zypi doctor >>>\n# >>> terminal.tmux-clipboard >>>\nset -g set-clipboard on\n# <<< terminal.tmux-clipboard <<<\n# <<< zypi doctor <<<\n{conflict}\n"
             ),
         )
         .unwrap();
@@ -313,11 +337,11 @@ fn managed_alias_with_later_unmanaged_conflict_is_not_configured() {
     let cases = [
         (
             ShellKind::Bash,
-            "# >>> grok doctor >>>\n# >>> terminal.ssh-wrap >>>\nalias ssh='grok wrap ssh'\n# <<< terminal.ssh-wrap <<<\n# <<< grok doctor <<<\nalias ssh='ssh -A'\n",
+            "# >>> zypi doctor >>>\n# >>> terminal.ssh-wrap >>>\nalias ssh='zypi wrap ssh'\n# <<< terminal.ssh-wrap <<<\n# <<< zypi doctor <<<\nalias ssh='ssh -A'\n",
         ),
         (
             ShellKind::Fish,
-            "# >>> grok doctor >>>\n# >>> terminal.ssh-wrap >>>\nalias ssh 'grok wrap ssh'\n# <<< terminal.ssh-wrap <<<\n# <<< grok doctor <<<\nfunction ssh\n  command ssh -A $argv\nend\n",
+            "# >>> zypi doctor >>>\n# >>> terminal.ssh-wrap >>>\nalias ssh 'zypi wrap ssh'\n# <<< terminal.ssh-wrap <<<\n# <<< zypi doctor <<<\nfunction ssh\n  command ssh -A $argv\nend\n",
         ),
     ];
     for (shell, content) in cases {
@@ -334,9 +358,9 @@ fn managed_alias_with_later_unmanaged_conflict_is_not_configured() {
 fn shell_aliases_expand_to_exact_argv_and_bypass_is_explicit() {
     let temp = tempfile::tempdir().unwrap();
     let capture = temp.path().join("capture");
-    let grok = temp.path().join("grok");
+    let zypi = temp.path().join("zypi");
     std::fs::write(
-        &grok,
+        &zypi,
         format!(
             "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n",
             capture.display()
@@ -344,11 +368,11 @@ fn shell_aliases_expand_to_exact_argv_and_bypass_is_explicit() {
     )
     .unwrap();
     use std::os::unix::fs::PermissionsExt as _;
-    std::fs::set_permissions(&grok, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::set_permissions(&zypi, std::fs::Permissions::from_mode(0o755)).unwrap();
 
     if let Some(bash) = find_on_path("bash") {
         let rc = temp.path().join("bashrc");
-        std::fs::write(&rc, "alias ssh='grok wrap ssh'\n").unwrap();
+        std::fs::write(&rc, "alias ssh='zypi wrap ssh'\n").unwrap();
         let command = format!(
             "source '{}'; source '{}'; eval 'ssh -p 2222 host'",
             rc.display(),
@@ -379,7 +403,7 @@ fn shell_aliases_expand_to_exact_argv_and_bypass_is_explicit() {
     }
     if let Some(zsh) = find_on_path("zsh") {
         let rc = temp.path().join("zshrc");
-        std::fs::write(&rc, "alias ssh='grok wrap ssh'\n").unwrap();
+        std::fs::write(&rc, "alias ssh='zypi wrap ssh'\n").unwrap();
         let command = format!(
             "source '{}'; source '{}'; eval 'ssh -p 2222 host'",
             rc.display(),
@@ -419,7 +443,7 @@ fn shell_aliases_expand_to_exact_argv_and_bypass_is_explicit() {
     };
     let mut shell = std::process::Command::new(bash);
     shell
-        .args(["-ic", "alias ssh='grok wrap ssh'; command ssh host"])
+        .args(["-ic", "alias ssh='zypi wrap ssh'; command ssh host"])
         .env("CAPTURE", &capture)
         .env(
             "PATH",
@@ -441,18 +465,18 @@ fn shell_aliases_expand_to_exact_argv_and_bypass_is_explicit() {
 
     if let Some(fish) = find_on_path("fish") {
         let fish_capture = temp.path().join("fish-capture");
-        let fish_grok = temp.path().join("fish-grok");
+        let fish_zypi = temp.path().join("fish-zypi");
         std::fs::write(
-            &fish_grok,
+            &fish_zypi,
             format!(
                 "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n",
                 fish_capture.display()
             ),
         )
         .unwrap();
-        std::fs::set_permissions(&fish_grok, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&fish_zypi, std::fs::Permissions::from_mode(0o755)).unwrap();
         let rc = temp.path().join("config.fish");
-        std::fs::write(&rc, "alias ssh 'fish-grok wrap ssh'\n").unwrap();
+        std::fs::write(&rc, "alias ssh 'fish-zypi wrap ssh'\n").unwrap();
         let command = format!(
             "source '{}'; source '{}'; ssh -p 2222 host; env | string match -rq '^ssh='; and exit 9; or exit 0",
             rc.display(),

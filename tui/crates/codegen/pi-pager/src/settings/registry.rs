@@ -73,9 +73,9 @@ impl SettingCategory {
 /// One choice in an `Enum` setting.
 #[derive(Debug, Clone, Copy)]
 pub struct EnumChoice {
-    /// Canonical persisted value (e.g. `"groknight"`).
+    /// Canonical persisted value (e.g. `"zypinight"`).
     pub canonical: &'static str,
-    /// Display label shown in the chooser (e.g. `"Grok Night"`).
+    /// Display label shown in the chooser (e.g. `"zypi Night"`).
     pub display: &'static str,
     /// Sub-text shown in the chooser sheet (e.g. `"Dark + magenta accent"`).
     pub description: &'static str,
@@ -587,21 +587,21 @@ pub fn current_value_for(
             ui.theme
                 .as_deref()
                 .and_then(crate::theme::canonical_name)
-                .unwrap_or("groknight"),
+                .unwrap_or("zypinight"),
         )),
         "auto_dark_theme" => Some(SettingValue::Enum(
             ui.auto_dark_theme
                 .as_deref()
                 .and_then(crate::theme::canonical_name)
                 .filter(|s| *s != "auto")
-                .unwrap_or("groknight"),
+                .unwrap_or("zypinight"),
         )),
         "auto_light_theme" => Some(SettingValue::Enum(
             ui.auto_light_theme
                 .as_deref()
                 .and_then(crate::theme::canonical_name)
                 .filter(|s| *s != "auto")
-                .unwrap_or("grokday"),
+                .unwrap_or("zypiday"),
         )),
         // render_mermaid: SHELL-owned (persisted to `[ui].render_mermaid`).
         // Read from the process-wide cache mirror, which reflects the live value
@@ -817,7 +817,7 @@ mod tests {
                         .theme
                         .as_deref()
                         .and_then(crate::theme::canonical_name)
-                        .unwrap_or("groknight");
+                        .unwrap_or("zypinight");
                     assert_eq!(
                         *default, expected,
                         "theme default drifts from UiConfig::default()",
@@ -833,7 +833,7 @@ mod tests {
                         .as_deref()
                         .and_then(crate::theme::canonical_name)
                         .filter(|s| *s != "auto")
-                        .unwrap_or("groknight");
+                        .unwrap_or("zypinight");
                     assert_eq!(
                         *default, expected,
                         "auto_dark_theme default drifts from UiConfig::default()",
@@ -849,7 +849,7 @@ mod tests {
                         .as_deref()
                         .and_then(crate::theme::canonical_name)
                         .filter(|s| *s != "auto")
-                        .unwrap_or("grokday");
+                        .unwrap_or("zypiday");
                     assert_eq!(
                         *default, expected,
                         "auto_light_theme default drifts from UiConfig::default()",
@@ -1372,7 +1372,7 @@ mod tests {
         let value = current_value_for("auto_dark_theme", &ui, &pager).expect("must resolve");
         assert_eq!(
             value,
-            SettingValue::Enum("groknight"),
+            SettingValue::Enum("zypinight"),
             "corrupted `auto_dark_theme = \"auto\"` must fall back to canonical default",
         );
     }
@@ -1387,7 +1387,7 @@ mod tests {
         let value = current_value_for("auto_light_theme", &ui, &pager).expect("must resolve");
         assert_eq!(
             value,
-            SettingValue::Enum("grokday"),
+            SettingValue::Enum("zypiday"),
             "corrupted `auto_light_theme = \"auto\"` must fall back to canonical default",
         );
     }
@@ -1401,7 +1401,49 @@ mod tests {
         };
         let pager = PagerLocalSnapshot::default();
         let value = current_value_for("auto_dark_theme", &ui, &pager).expect("must resolve");
-        assert_eq!(value, SettingValue::Enum("groknight"));
+        assert_eq!(value, SettingValue::Enum("zypinight"));
+    }
+
+    /// A `config.toml` written before the theme rename keeps working: the
+    /// pre-rename ids on disk show up as the renamed house themes.
+    #[test]
+    fn current_value_for_theme_reads_pre_rename_ids() {
+        let pager = PagerLocalSnapshot::default();
+        for (disk, shown) in [
+            ("groknight", "zypinight"),
+            ("grok-night", "zypinight"),
+            ("GrokNight", "zypinight"),
+            ("grokday", "zypiday"),
+            ("grok-day", "zypiday"),
+        ] {
+            for key in ["theme", "auto_dark_theme", "auto_light_theme"] {
+                let mut ui = UiConfig::default();
+                match key {
+                    "theme" => ui.theme = Some(disk.into()),
+                    "auto_dark_theme" => ui.auto_dark_theme = Some(disk.into()),
+                    _ => ui.auto_light_theme = Some(disk.into()),
+                }
+                let value = current_value_for(key, &ui, &pager).expect("must resolve");
+                assert_eq!(value, SettingValue::Enum(shown), "{key} = {disk:?}");
+            }
+        }
+    }
+
+    /// Setting text is read by users of this binary: it must not name the
+    /// product the fork came from, nor slash commands the TUI does not have.
+    #[test]
+    fn setting_text_names_no_other_product_or_missing_commands() {
+        for meta in SettingsRegistry::defaults().all() {
+            for text in [meta.label, meta.description] {
+                for stale in ["Grok", "grok", "/minimal", "/fullscreen", "/doctor"] {
+                    assert!(
+                        !text.contains(stale),
+                        "setting `{}` mentions {stale:?}: {text:?}",
+                        meta.key
+                    );
+                }
+            }
+        }
     }
 
     /// The persisted `fork_secondary_model` slug resolves to the catalog
