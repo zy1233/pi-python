@@ -124,3 +124,79 @@ async def test_a_refused_change_leaves_the_earlier_choice_in_force(project: Path
 
     assert "shipped" in _commands(harness)
     assert harness.skipped_extensions == []
+
+
+# ---------------------------------------------------------------------------
+# What an extension is told about the project (audit F7-01)
+#
+# An extension that reads something the repository ships (the dynamic-workflows extension
+# reads ``<project>/.pi-python/workflows``) needs the same answer the harness used for the
+# project's extensions, and it reads it while it activates.
+# ---------------------------------------------------------------------------
+
+
+def _probe(seen: list[Any]):
+    def activate(pi):
+        seen.append(pi.project_trusted)
+
+    return activate
+
+
+async def test_an_extension_is_told_the_project_is_not_trusted_unless_the_caller_vouched(
+    project: Path,
+):
+    seen: list[Any] = []
+    harness = await _harness(project, extensions=[_probe(seen)])
+
+    await harness.load_extensions()
+
+    assert seen == [False]
+
+
+async def test_an_extension_is_told_about_trust_given_when_the_harness_is_built(project: Path):
+    seen: list[Any] = []
+    harness = await _harness(project, trust_project_extensions=True, extensions=[_probe(seen)])
+
+    await harness.load_extensions()
+
+    assert seen == [True]
+
+
+async def test_an_extension_is_told_about_trust_given_afterwards(project: Path):
+    seen: list[Any] = []
+    harness = await _harness(project, extensions=[_probe(seen)])
+    harness.set_trust_project_extensions(True)
+
+    await harness.load_extensions()
+
+    assert seen == [True]
+
+
+async def test_an_extension_is_told_about_trust_taken_back(project: Path):
+    seen: list[Any] = []
+    harness = await _harness(project, trust_project_extensions=True, extensions=[_probe(seen)])
+    harness.set_trust_project_extensions(False)
+
+    await harness.load_extensions()
+
+    assert seen == [False]
+
+
+async def test_the_answer_is_a_real_bool_whatever_the_caller_passed(project: Path):
+    seen: list[Any] = []
+    harness = await _harness(project, trust_project_extensions=1, extensions=[_probe(seen)])  # type: ignore[arg-type]
+
+    await harness.load_extensions()
+
+    assert seen == [True]
+
+
+async def test_the_harnesss_bridge_carries_it(project: Path):
+    from pi_agent_core.extensions._harness_bridge import HarnessBridge
+
+    harness = await _harness(project, trust_project_extensions=True)
+
+    bridge = harness._create_bridge()
+
+    assert isinstance(bridge, HarnessBridge)
+    assert bridge.project_trusted is True

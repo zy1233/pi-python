@@ -58,11 +58,13 @@ command = "python -m pi_agent_cli"
 
 [extensions]
 # Project trust. Extensions in <project>/.pi-python/extensions run arbitrary Python as soon as a
-# session opens, and the project's .pi/SYSTEM.md, .pi/APPEND_SYSTEM.md and project-relative
-# [skills] paths decide what the model is told, so none of them is used until the project is
-# trusted. Only this file, the command line and your own answers decide that (never a config
-# inside the project). Installed extension packages, ~/.pi-python/extensions, AGENTS.md and
-# absolute or ~ skills paths are not affected.
+# session opens, saved workflows in <project>/.pi-python/workflows become slash commands that
+# have the model run their scripts, and the project's .pi/SYSTEM.md, .pi/APPEND_SYSTEM.md and
+# project-relative [skills] paths decide what the model is told, so none of them is used until
+# the project is trusted. Only this file, the command line and your own answers decide that
+# (never a config inside the project). Installed extension packages, ~/.pi-python/extensions,
+# your own saved workflows (~/.pi-python/workflows), AGENTS.md and absolute or ~ skills paths
+# are not affected.
 #
 # An ACP client (the TUI) asks about a project that ships such files, once per directory.
 # "Trust and remember" is saved in ~/.pi-python/agent/trust.json with a fingerprint of those

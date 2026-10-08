@@ -96,7 +96,16 @@ class ExtensionAPI:
         When *passthrough* is True the command appears in client autocomplete
         but the text is forwarded to the LLM as a regular prompt instead of
         being intercepted.  Use this for commands backed by LLM tools.
+
+        Raises ``TypeError`` when *description* is not text (audit P7-17): clients are sent it
+        as ``AvailableCommand.description``, and one that is not a string made the whole
+        update invalid. During ``activate()`` that fails the extension's load.
         """
+        if not isinstance(description, str):
+            raise TypeError(
+                f"Extension {self._meta.name!r}: the description of command /{name} must be a "
+                f"string, not {type(description).__name__}"
+            )
         self._registry.add_command(
             CommandDef(
                 name=name,
@@ -182,6 +191,18 @@ class ExtensionAPI:
     def session_id(self) -> str:
         """Unique identifier of the current session."""
         return self._require_bridge().session_id
+
+    @property
+    def project_trusted(self) -> bool:
+        """Whether the user vouched for the project this session runs in (audit F7-01).
+
+        The answer that lets the project's own extensions load, final by the time an
+        extension activates. Read what a repository ships (``<cwd>/.pi-python/...``: scripts
+        you turn into commands, text you hand to the model) only when this is ``True``; the
+        user's own files, under ``pi.home``, need no such answer. Only an actual ``True`` is a
+        yes: a bridge that hands back anything else is read as "not trusted".
+        """
+        return self._require_bridge().project_trusted is True
 
     @property
     def home(self) -> Path:

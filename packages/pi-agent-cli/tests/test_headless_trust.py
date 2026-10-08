@@ -195,3 +195,52 @@ async def test_the_given_home_is_where_the_users_own_extensions_are_found(
 
     assert code == 0
     assert marker.exists()
+
+
+async def test_the_projects_saved_workflows_are_reported_as_left_out(
+    world: Any, capsys: pytest.CaptureFixture[str]
+):
+    """They are what the dynamic-workflows extension would have turned into slash commands
+    (audit F7-01); a headless run has none, but the notice is the same as for the rest."""
+    workflows = world.project / ".pi-python" / "workflows"
+    workflows.mkdir()
+    (workflows / "review.py").write_text("meta = {}\n", encoding="utf-8")
+
+    code, _, err = await _run(world, capsys)
+
+    assert code == 0
+    assert str(workflows) in err
+
+
+async def test_an_answer_about_other_workflows_is_not_honoured(
+    world: Any, capsys: pytest.CaptureFixture[str]
+):
+    workflows = world.project / ".pi-python" / "workflows"
+    workflows.mkdir()
+    script = workflows / "review.py"
+    script.write_text("meta = {}\n", encoding="utf-8")
+    _remember_current_files(world)
+    script.write_text("meta = {'description': 'added by a pull'}\n", encoding="utf-8")
+
+    code, _, err = await _run(world, capsys)
+
+    assert code == 0
+    assert not world.marker.exists()
+    assert "changed since you last trusted it" in err
+    assert str(workflows) in err
+
+
+async def test_started_in_the_directory_that_holds_the_pi_home_the_workflows_are_the_users(
+    world: Any, capsys: pytest.CaptureFixture[str], tmp_path: Path
+):
+    """``<cwd>/.pi-python/workflows`` is ``<pi home>/workflows`` here: nothing of the
+    project's, so nothing is reported as left out."""
+    bare = tmp_path / "bare"
+    (bare / ".pi-python" / "workflows").mkdir(parents=True)
+    (bare / ".pi-python" / "workflows" / "mine.py").write_text("meta = {}\n", encoding="utf-8")
+
+    code = await run_print("hello", cwd=bare, home=bare / ".pi-python")
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert "Skipped project resources" not in captured.err

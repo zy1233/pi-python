@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -135,6 +136,111 @@ class TestExtensionAPI:
         reg = ExtensionRegistry()
         api = ExtensionAPI(registry=reg, meta=ExtensionMeta(name="my-ext"))
         assert api.extension_name == "my-ext"
+
+
+# ---------------------------------------------------------------------------
+# P7-17: a command's description is text, or the extension does not load
+# ---------------------------------------------------------------------------
+
+
+class TestCommandDescription:
+    """A description goes to clients as ``AvailableCommand.description``, which must be text:
+    a client (or the ACP model) that rejects it takes every command down with it."""
+
+    @pytest.mark.parametrize("bad", [None, 5, True, ["a"], {"x": 1}, b"bytes"])
+    def test_a_description_that_is_not_text_is_refused(self, bad: Any) -> None:
+        reg = ExtensionRegistry()
+        api = ExtensionAPI(registry=reg, meta=ExtensionMeta(name="test-ext"))
+
+        with pytest.raises(TypeError, match="description"):
+            api.register_command("hello", description=bad, handler=lambda: None)
+
+        assert "hello" not in reg.get_commands()
+
+    def test_the_error_names_the_extension_and_the_command(self) -> None:
+        api = ExtensionAPI(registry=ExtensionRegistry(), meta=ExtensionMeta(name="test-ext"))
+
+        with pytest.raises(TypeError) as raised:
+            api.register_command("hello", description=5, handler=lambda: None)  # type: ignore[arg-type]
+
+        assert "test-ext" in str(raised.value)
+        assert "/hello" in str(raised.value)
+
+    @pytest.mark.parametrize("fine", ["", "Say hello", "说你好"])
+    def test_text_is_accepted(self, fine: str) -> None:
+        reg = ExtensionRegistry()
+        api = ExtensionAPI(registry=reg, meta=ExtensionMeta(name="test-ext"))
+
+        api.register_command("hello", description=fine, handler=lambda: None)
+
+        assert reg.get_commands()["hello"].description == fine
+
+    def test_the_description_stays_optional(self) -> None:
+        reg = ExtensionRegistry()
+        api = ExtensionAPI(registry=reg, meta=ExtensionMeta(name="test-ext"))
+
+        api.register_command("hello", handler=lambda: None)
+
+        assert reg.get_commands()["hello"].description == ""
+
+    def test_an_extension_that_does_it_fails_its_load_and_the_others_still_load(self) -> None:
+        def bad_extension(pi: ExtensionAPI) -> None:
+            pi.register_command("fine-one", description="ok", handler=lambda: None)
+            pi.register_command("broken", description=None, handler=lambda: None)  # type: ignore[arg-type]
+
+        loader = ExtensionLoader()
+        loader.load_all(extra=[bad_extension, sample_extension], auto_discover=False)
+
+        commands = loader.registry.get_commands()
+        assert "hello" in commands  # the other extension
+        assert "fine-one" not in commands and "broken" not in commands  # rolled back
+        (failure,) = loader.failed
+        assert "description" in failure.error
+
+
+# ---------------------------------------------------------------------------
+# F7-01: extensions can ask whether the project they run in is trusted
+# ---------------------------------------------------------------------------
+
+
+class TestProjectTrusted:
+    @pytest.mark.parametrize("answer", [True, False])
+    def test_an_extension_reads_the_harnesss_answer_while_it_activates(self, answer: bool) -> None:
+        seen: list[Any] = []
+
+        def ext(pi: ExtensionAPI) -> None:
+            seen.append(pi.project_trusted)
+
+        ExtensionLoader().load_callable(
+            ext, name="x", bridge=SimpleNamespace(project_trusted=answer)
+        )
+
+        assert seen == [answer]
+
+    @pytest.mark.parametrize("answer", [None, 0, 1, "", "yes", object()])
+    def test_only_an_actual_yes_is_a_yes(self, answer: Any) -> None:
+        """A gate that reads whatever is truthy as a yes lets a mistaken value open it."""
+        seen: list[Any] = []
+
+        def ext(pi: ExtensionAPI) -> None:
+            seen.append(pi.project_trusted)
+
+        ExtensionLoader().load_callable(
+            ext, name="x", bridge=SimpleNamespace(project_trusted=answer)
+        )
+
+        assert seen == [False]
+
+    def test_without_a_bridge_it_raises_like_the_other_accessors(self) -> None:
+        api = ExtensionAPI(registry=ExtensionRegistry(), meta=ExtensionMeta(name="x"))
+
+        with pytest.raises(RuntimeError, match="not connected"):
+            _ = api.project_trusted
+
+    def test_the_bridge_protocol_declares_it(self) -> None:
+        from pi_agent_core.extensions._harness_bridge import HarnessBridge
+
+        assert isinstance(vars(HarnessBridge)["project_trusted"], property)
 
 
 # ---------------------------------------------------------------------------
@@ -328,6 +434,10 @@ class TestBridgeDuringActivate:
             def tool_call_gate(self) -> Any:
                 return None
 
+            @property
+            def project_trusted(self) -> bool:
+                return False
+
         assert isinstance(FakeBridge(), HarnessBridge)
 
         def my_ext(pi: ExtensionAPI) -> None:
@@ -428,6 +538,10 @@ class TestBridgeToolValidation:
             def tool_call_gate(self) -> Any:
                 return None
 
+            @property
+            def project_trusted(self) -> bool:
+                return False
+
         assert isinstance(FakeBridge(), HarnessBridge)
 
         reg = ExtensionRegistry()
@@ -515,6 +629,10 @@ class TestUnsubscribeRemovesHook:
             @property
             def tool_call_gate(self) -> Any:
                 return None
+
+            @property
+            def project_trusted(self) -> bool:
+                return False
 
         assert isinstance(TrackingBridge(), HarnessBridge)
 

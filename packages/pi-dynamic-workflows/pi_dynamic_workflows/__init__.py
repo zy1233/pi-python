@@ -123,15 +123,58 @@ def _try_build_real_executor(pi: ExtensionAPI) -> tuple:
     return executor, manager
 
 
+# The extension's own commands. A saved workflow of the same name would take one over
+# (the registry keeps the last registration), so none may.
+_RESERVED_COMMAND_NAMES = frozenset({"workflows", *BUILTIN_WORKFLOW_NAMES})
+
+
+def _project_trusted(pi: ExtensionAPI) -> bool:
+    """Whether the user vouched for the project; ``False`` whenever that cannot be told.
+
+    Not knowing is read as no: an older core has no ``project_trusted``, and a gate that
+    opened for a missing answer would be no gate.
+    """
+    try:
+        return pi.project_trusted is True
+    except Exception as exc:
+        logger.warning(
+            "Cannot read `pi.project_trusted` (%s: %s): the project's own saved workflows "
+            "are not loaded.",
+            type(exc).__name__,
+            exc,
+        )
+        return False
+
+
 def _register_saved_workflows(pi: ExtensionAPI) -> None:
-    """Scan saved workflow directories and register slash commands."""
+    """Scan the saved workflow directories and register a slash command for each script.
+
+    The user's own (``<pi home>/workflows``) always are. The project's
+    (``<cwd>/.pi-python/workflows``) are only when the user vouched for the project
+    (``pi.project_trusted``): a repository's scripts would otherwise become commands, with a
+    description it wrote, as the session opens (audit F7-01). A script cannot take the place
+    of one of this extension's own commands, and one that cannot be registered does not stop
+    the others (audit P7-17).
+    """
     try:
         from pi_dynamic_workflows.store import WorkflowStore
 
-        store = WorkflowStore(cwd=pi.cwd, pi_home=pi.home)
-        for wf in store.scan():
-            if wf.name in BUILTIN_WORKFLOW_NAMES:
-                continue
+        store = WorkflowStore(cwd=pi.cwd, pi_home=pi.home, include_project=_project_trusted(pi))
+        workflows = store.scan()
+    except Exception:
+        logger.warning("Saved workflow scan failed; no saved workflow commands", exc_info=True)
+        return
+    for wf in workflows:
+        if wf.name in _RESERVED_COMMAND_NAMES:
+            logger.warning(
+                "Saved workflow %r (%s) is not registered as a command: /%s is one of this "
+                "extension's own commands.",
+                wf.name,
+                wf.path,
+                wf.name,
+            )
+            continue
+        try:
             pi.register_command(
                 wf.name,
                 description=wf.description or f"Run saved workflow: {wf.name}",
@@ -141,8 +184,13 @@ def _register_saved_workflows(pi: ExtensionAPI) -> None:
                     f"Description: {_wf.description}"
                 ),
             )
-    except Exception:
-        logger.warning("Saved workflow scan failed; no saved workflow commands", exc_info=True)
+        except Exception:
+            logger.warning(
+                "Saved workflow %r (%s) could not be registered as a command",
+                wf.name,
+                wf.path,
+                exc_info=True,
+            )
 
 
 def activate(pi: ExtensionAPI) -> None:

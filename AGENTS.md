@@ -46,6 +46,7 @@ AgentMessage[] → transform_context() → convert_to_llm() → LangChain BaseMe
 6. **Usage accumulation** — per-field max, not sum (providers report cumulative snapshots or complementary splits).
 7. **Structured output** — `response_schema` via prompt injection + `response_format`; `with_structured_output` kills streaming.
 8. **Permission by declaration** — the CLI's `ask` mode asks about a tool call unless the tool's `annotations` (`ToolAnnotations`, MCP's hints) declare it harmless (`readOnlyHint`, or neither destructive nor open-world); no annotations means asked. A new tool that only reads should say so; `bash`/`edit`/`write`/`workflow` say nothing on purpose. See `packages/pi-agent-cli/AGENTS.md`.
+9. **Project trust** — what the project directory supplies (extensions, saved workflows, `.pi/SYSTEM.md`, project skills) is used only once the user vouched for the project. An extension that reads such files itself checks `pi.project_trusted is True` first; anything else means no. See `packages/pi-agent-cli/AGENTS.md`.
 
 ## Development
 

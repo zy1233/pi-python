@@ -27,6 +27,7 @@ from pi_agent_cli.trust_fingerprint import (
 )
 
 ACTIVATE = "def activate(api):\n    pass\n"
+WORKFLOW = 'meta = {"name": "deploy", "description": "Ship it"}\nasync def main():\n    pass\n'
 
 
 def _project(tmp_path: Path, name: str = "project") -> Path:
@@ -43,6 +44,18 @@ def _ext_dir(project: Path) -> Path:
 
 def _extension(project: Path, name: str = "hook.py", body: str = ACTIVATE) -> Path:
     path = _ext_dir(project) / name
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def _workflows_dir(project: Path) -> Path:
+    directory = project / ".pi-python" / "workflows"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def _workflow(project: Path, name: str = "deploy.py", body: str = WORKFLOW) -> Path:
+    path = _workflows_dir(project) / name
     path.write_text(body, encoding="utf-8")
     return path
 
@@ -208,14 +221,63 @@ def test_a_skills_entry_that_points_nowhere_asks_for_nothing(tmp_path: Path):
     assert _resources(_project(tmp_path), tmp_path, **SKILLS) == []
 
 
+def test_the_projects_saved_workflows_are_gated(tmp_path: Path):
+    """A saved workflow becomes a slash command whose description the repository wrote, and a
+    script the model is then told to run (audit F7-01)."""
+    project = _project(tmp_path)
+    directory = _workflows_dir(project)
+    (directory / "b.py").write_text(WORKFLOW, encoding="utf-8")
+    (directory / "a.py").write_text(WORKFLOW, encoding="utf-8")
+
+    [resource] = _resources(project, tmp_path)
+
+    assert resource.kind == "workflows"
+    assert resource.label == ".pi-python/workflows"
+    assert resource.path.resolve() == directory.resolve()
+    assert "a.py, b.py" in resource.describe()
+
+
+def test_a_workflows_directory_with_no_script_asks_for_nothing(tmp_path: Path):
+    """The store reads ``*.py`` files of that directory and nothing else."""
+    project = _project(tmp_path)
+    directory = _workflows_dir(project)
+    (directory / "notes.txt").write_text("hello\n", encoding="utf-8")
+    (directory / "data").mkdir()
+    (directory / "folder.py").mkdir()  # named like a script, read as none
+
+    assert _resources(project, tmp_path) == []
+
+
+def test_the_users_own_workflows_directory_is_not_the_projects(tmp_path: Path):
+    """With the home directory as the project, ``<cwd>/.pi-python/workflows`` is the user's
+    own directory, which the store reads without asking."""
+    project = _project(tmp_path)
+    _workflow(project)
+
+    resources = gated_project_resources(CliConfig(), project, home=project / ".pi-python")
+
+    assert resources == []
+
+
+def test_a_workflows_directory_elsewhere_than_the_users_is_the_projects(tmp_path: Path):
+    project = _project(tmp_path)
+    _workflow(project)
+
+    [resource] = gated_project_resources(CliConfig(), project, home=tmp_path / "somewhere-else")
+
+    assert resource.kind == "workflows"
+
+
 def test_resources_come_in_a_fixed_order(tmp_path: Path):
     project = _project(tmp_path)
     _skill(project)
     _prompt(project)
+    _workflow(project)
     _extension(project)
 
     assert [r.kind for r in _resources(project, tmp_path, **SKILLS)] == [
         "extensions",
+        "workflows",
         "prompt",
         "skills",
     ]
@@ -270,6 +332,36 @@ def test_changing_an_extension_changes_the_fingerprint(tmp_path: Path):
     path.write_text(ACTIVATE + "import os\n", encoding="utf-8")
 
     assert _fingerprint(project, tmp_path) != before
+
+
+def test_changing_a_saved_workflow_changes_the_fingerprint(tmp_path: Path):
+    project = _project(tmp_path)
+    path = _workflow(project)
+    before = _fingerprint(project, tmp_path)
+
+    path.write_text(WORKFLOW + "# changed by a pull\n", encoding="utf-8")
+
+    assert _fingerprint(project, tmp_path) != before
+
+
+def test_adding_a_saved_workflow_changes_the_fingerprint(tmp_path: Path):
+    """A project trusted for its extensions is asked again once a ``git pull`` brings workflows."""
+    project = _project(tmp_path)
+    _extension(project)
+    before = _fingerprint(project, tmp_path)
+
+    _workflow(project)
+
+    assert _fingerprint(project, tmp_path) != before
+
+
+def test_the_same_file_as_a_workflow_and_as_an_extension_is_not_the_same_thing(tmp_path: Path):
+    """What a file is trusted *as* is part of the digest: the same bytes mean different things."""
+    as_workflow, as_extension = _project(tmp_path, "one"), _project(tmp_path, "two")
+    _workflow(as_workflow, "same.py", ACTIVATE)
+    _extension(as_extension, "same.py", ACTIVATE)
+
+    assert _fingerprint(as_workflow, tmp_path) != _fingerprint(as_extension, tmp_path)
 
 
 def test_a_single_changed_byte_is_enough(tmp_path: Path):

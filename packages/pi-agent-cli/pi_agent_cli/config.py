@@ -117,7 +117,8 @@ class CliConfig:
     git_timeout_seconds: float = 2.0
     git_max_status_lines: int = 40
     # Project-local extensions (<project>/.pi-python/extensions) run arbitrary Python when
-    # loaded. They are skipped unless the project is trusted; see ``extension_trust``.
+    # loaded, and the project's saved workflows, prompt files and skills decide what the model
+    # runs or is told. All are skipped unless the project is trusted; see ``extension_trust``.
     trust_project_extensions: bool = False
     trusted_projects: tuple[str, ...] = ()
     # ``None``: not set. Then the older ``trust_project_extensions`` decides ("always" if it is

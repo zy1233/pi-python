@@ -73,6 +73,18 @@ class HarnessBridge(Protocol):
     def session_id(self) -> str: ...
 
     @property
+    def project_trusted(self) -> bool:
+        """Whether the user vouched for the project this session runs in.
+
+        The answer that lets the project's own extensions load (``trust_project_extensions``
+        of the harness), and final by the time an extension activates. An extension that
+        reads what a repository ships (scripts it turns into commands, text it hands to the
+        model) has to read it only when this is ``True``; the user's own files need no such
+        answer.
+        """
+        ...
+
+    @property
     def stream_fn(self) -> Any:
         """The parent harness's StreamFn."""
         ...

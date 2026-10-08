@@ -1,10 +1,12 @@
 """What a project asks to be trusted for, and a fingerprint that pins it (audit P7-02).
 
-Three things a repository ships can act on the user's behalf, and each is gated behind project
+Four things a repository ships can act on the user's behalf, and each is gated behind project
 trust (see ``extension_trust``):
 
 - ``<project>/.pi-python/extensions``: Python that is *imported*, so it runs, the moment a
   session opens;
+- ``<project>/.pi-python/workflows``: scripts the dynamic-workflows extension turns into slash
+  commands (with a description the repository wrote) and has the model run as sub-agents;
 - ``<project>/.pi/SYSTEM.md`` and ``.pi/APPEND_SYSTEM.md``: they decide what the model is told;
 - the project-relative entries of ``[skills].paths``: skill text goes into the system prompt,
   and a skill may ship scripts the model is told to run.
@@ -50,9 +52,9 @@ from pi_agent_cli.context_files import (
 from pi_agent_core.extensions.loader import extension_module_names
 from pi_agent_core.home import pi_home
 
-ResourceKind = Literal["extensions", "prompt", "skills"]
+ResourceKind = Literal["extensions", "workflows", "prompt", "skills"]
 
-# A project's own extensions and skills are a handful of small files. These bounds keep a
+# A project's own extensions, workflows and skills are a handful of small files. These bounds keep a
 # hostile or accidental tree (a whole checkout named as a skills directory) from stalling
 # session start; past them there is simply no fingerprint. Directories count as entries too.
 MAX_ENTRIES = 2000
@@ -62,6 +64,7 @@ MAX_BYTES = 64 * 1024 * 1024
 _SKIPPED_NAMES = frozenset({"__pycache__", ".git"})
 _CHUNK = 1024 * 1024
 _EXTENSIONS_LABEL = ".pi-python/extensions"
+_WORKFLOWS_LABEL = ".pi-python/workflows"
 
 
 @dataclass(frozen=True)
@@ -87,12 +90,13 @@ def gated_project_resources(
     config: CliConfig, cwd: str | Path, *, home: Path | str | None = None
 ) -> list[GatedResource]:
     """Everything in this project that would apply if it were trusted, in a fixed order:
-    extensions, then prompt files, then skills. ``[]``: the project asks for nothing.
+    extensions, then saved workflows, then prompt files, then skills. ``[]``: the project asks
+    for nothing.
 
     Mirrors what the loaders skip for an untrusted project. A prompt the user's own config
     already sets is not listed (the project's file would never be read), nor is a skills entry
-    that is absolute or ``~``-relative (that is the user's), nor the user's own extensions
-    directory (a session run from the home directory sees it as the project's too).
+    that is absolute or ``~``-relative (that is the user's), nor the user's own extensions or
+    workflows directory (a session run from the home directory sees them as the project's too).
     """
     project = Path(cwd).resolve()
     found: list[GatedResource] = []
@@ -103,6 +107,14 @@ def gated_project_resources(
         if names:
             found.append(
                 GatedResource("extensions", _EXTENSIONS_LABEL, extensions, ", ".join(names))
+            )
+
+    workflows = project / ".pi-python" / "workflows"
+    if not _same_directory(workflows, pi_home(home) / "workflows"):
+        scripts = _workflow_script_names(workflows)
+        if scripts:
+            found.append(
+                GatedResource("workflows", _WORKFLOWS_LABEL, workflows, ", ".join(scripts))
             )
 
     if config.custom_system_prompt is None and not config.custom_system_prompt_file:
@@ -227,3 +239,12 @@ def _hash_file(path: str, limit: int) -> tuple[str, int]:
 
 def _same_directory(a: Path, b: Path) -> bool:
     return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+
+
+def _workflow_script_names(directory: Path) -> tuple[str, ...]:
+    """The scripts in a saved-workflows directory, as the workflow store reads them: the
+    ``*.py`` files directly inside it (what is below, or not a file, it never opens)."""
+    try:
+        return tuple(sorted(path.name for path in directory.glob("*.py") if path.is_file()))
+    except OSError:
+        return ()
