@@ -312,6 +312,12 @@ pub(crate) fn bwrap_reexec_command_ex(
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut cmd = std::process::Command::new("bwrap");
     cmd.arg("--cap-drop").arg("ALL");
+    // The sandboxed process must not outlive bwrap. A plain bwrap just waits for its child, so
+    // when it is killed (`kill $!`, `timeout`, an IDE's stop button, a supervisor that signals only
+    // the process it started) the TUI, its agent and the agent's tool processes would keep running
+    // on the terminal. With this flag the child gets SIGKILL when bwrap dies (and bwrap itself when
+    // its parent dies); the agent then sees EOF on stdin and reaps its tools on the way out.
+    cmd.arg("--die-with-parent");
     cmd.arg("--bind").arg("/").arg("/");
     for path in deny_write_optional {
         if Path::new(path).exists() {
@@ -782,6 +788,33 @@ mod tests {
             assert!(pos.unwrap() < leaf_pos.unwrap());
         }
         let _ = std::fs::remove_dir_all(&root);
+    }
+    /// Killing the `bwrap` process must take the sandboxed program with it. Measured on Linux
+    /// (bubblewrap 0.9.0, `zypi --sandbox workspace` run from an interactive shell): `SIGKILL`,
+    /// `SIGTERM` and `SIGHUP` sent to bwrap left zypi, the Python agent and a running bash tool
+    /// alive; with `--die-with-parent` all of them are gone within a second.
+    #[test]
+    #[serial(bwrap_env)]
+    #[cfg(target_os = "linux")]
+    fn bwrap_reexec_dies_with_parent() {
+        let _g = EnvGuard::remove(BWRAP_ENV_VAR);
+        let cmd = bwrap_reexec_command(&[], &[]).unwrap();
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        let flag = args
+            .iter()
+            .position(|a| a == "--die-with-parent")
+            .unwrap_or_else(|| panic!("expected --die-with-parent, got args: {args:?}"));
+        let separator = args
+            .iter()
+            .position(|a| a == "--")
+            .unwrap_or_else(|| panic!("expected `--` before the command, got args: {args:?}"));
+        assert!(
+            flag < separator,
+            "--die-with-parent must be a bwrap option, not an argument of the command: {args:?}"
+        );
     }
     #[test]
     #[serial(bwrap_env)]
