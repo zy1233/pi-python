@@ -74,6 +74,8 @@ struct GlobalSandboxState {
     profile: String,
     logger: SandboxLogger,
     applied: bool,
+    /// Why the profile that was asked for is not in force (see [`SandboxManager::not_enforced`]).
+    not_enforced: Option<String>,
     restrict_network_at_known_linux_launches: bool,
 }
 fn restrict_network_at_known_linux_launches(applied: bool, configured: bool) -> bool {
@@ -124,6 +126,44 @@ pub fn profile_name() -> Option<&'static str> {
         .filter(|s| s.applied)
         .map(|s| s.profile.as_str())
 }
+
+/// The profile this process was asked to run under and the reason it is **not** in force, when
+/// applying it did not work: the platform cannot enforce it (on Linux, a kernel without Landlock)
+/// or the attempt failed. `None` when no sandbox was asked for, or the one asked for is applied.
+///
+/// This is what [`profile_name`] cannot say: it is `None` both for "no sandbox" and for "a
+/// sandbox that did not take", and the second needs telling.
+pub fn not_enforced() -> Option<(&'static str, &'static str)> {
+    SANDBOX
+        .get()
+        .and_then(|s| Some((s.profile.as_str(), s.not_enforced.as_deref()?)))
+}
+
+/// The warning for a profile that could not be put in force, as printed at start-up.
+///
+/// It says what is lost, because "could not be applied" alone reads like a detail: the file and
+/// network limits of the profile are the sandbox.
+pub fn not_enforced_warning(profile: &str, reason: &str) -> String {
+    // The reasons that come from the platform end in a full stop of their own.
+    let reason = reason.trim_end_matches('.');
+    format!(
+        "warning: the '{profile}' sandbox could not be put in force ({reason}). Its file and \
+         network limits do not apply: the agent can read, write and reach whatever it could \
+         without a sandbox."
+    )
+}
+
+/// The status-bar label for a profile that is not in force, e.g. `sandbox:workspace (not
+/// enforced)`; `None` when there is nothing to report (see [`not_enforced`]). Where the label for
+/// an applied profile (`sandbox:workspace`, from [`profile_name`]) is drawn, this one is drawn
+/// instead of leaving the place empty, which would read as "no sandbox was asked for".
+pub fn not_enforced_label() -> Option<String> {
+    not_enforced().map(|(profile, _)| not_enforced_label_for(profile))
+}
+
+fn not_enforced_label_for(profile: &str) -> String {
+    format!("sandbox:{profile} (not enforced)")
+}
 /// Log a sandbox violation. Immediately flushed to disk.
 /// No-op if sandbox is not active.
 pub fn log_violation(target: &str, operation: &str) {
@@ -154,6 +194,7 @@ pub struct SandboxManager {
     logger: SandboxLogger,
     net_restricted: bool,
     applied: bool,
+    not_enforced: Option<String>,
 }
 impl SandboxManager {
     /// Create a sandbox manager. Does not apply until `apply()` is called.
@@ -164,7 +205,19 @@ impl SandboxManager {
             logger: SandboxLogger::new(),
             net_restricted,
             applied: false,
+            not_enforced: None,
         }
+    }
+    /// Note that the profile is not in force and why: the event goes to the sandbox log, the
+    /// reason is kept for [`SandboxManager::not_enforced`] (and, once installed, [`not_enforced`]).
+    /// `apply` goes on without a sandbox in these cases, so the user has to be told elsewhere.
+    fn record_not_enforced(&mut self, workspace: &Path, reason: &str) {
+        self.logger.log(SandboxEvent::apply_failed(
+            &self.profile.to_string(),
+            workspace,
+            &reason,
+        ));
+        self.not_enforced = Some(reason.to_string());
     }
     /// Apply the sandbox to the current process. **Irreversible.**
     /// Degrades gracefully if the platform doesn't support it.
@@ -189,11 +242,7 @@ impl SandboxManager {
                 details = %support.details,
                 "Sandbox not supported on this platform, continuing without sandbox"
             );
-            self.logger.log(SandboxEvent::apply_failed(
-                &self.profile.to_string(),
-                workspace,
-                &support.details,
-            ));
+            self.record_not_enforced(workspace, &support.details);
             return Ok(());
         }
         let caps = ProfileName::capability_set_from_profile(workspace, &resolved)?;
@@ -220,22 +269,24 @@ impl SandboxManager {
                     error = %e,
                     "Sandbox could not be applied, continuing without sandbox"
                 );
-                self.logger.log(SandboxEvent::apply_failed(
-                    &self.profile.to_string(),
-                    workspace,
-                    &e,
-                ));
+                self.record_not_enforced(workspace, &e.to_string());
                 Ok(())
             }
         }
     }
     /// Stub when `enforce` feature is disabled — sandbox is not applied.
     #[cfg(not(all(feature = "enforce", unix)))]
-    pub fn apply(&mut self, _workspace: &Path) -> anyhow::Result<()> {
+    pub fn apply(&mut self, workspace: &Path) -> anyhow::Result<()> {
         tracing::info!(
             profile = %self.profile,
             "Sandbox enforcement unavailable (built without 'enforce' feature)"
         );
+        if self.profile != ProfileName::Off {
+            self.record_not_enforced(
+                workspace,
+                "this build of zypi has no sandbox enforcement for this platform",
+            );
+        }
         Ok(())
     }
     /// Store globally for session-lifetime violation logging.
@@ -245,6 +296,7 @@ impl SandboxManager {
             profile: self.profile.to_string(),
             logger: self.logger,
             applied: self.applied,
+            not_enforced: self.not_enforced,
             restrict_network_at_known_linux_launches: restrict_network_at_known_linux_launches(
                 self.applied,
                 self.net_restricted,
@@ -259,6 +311,12 @@ impl SandboxManager {
     /// Whether the sandbox was successfully applied.
     pub fn is_applied(&self) -> bool {
         self.applied
+    }
+    /// Why the profile is not in force, when `apply` went on without it: the platform cannot
+    /// enforce it (on Linux, a kernel without Landlock) or the attempt failed. `apply` returns
+    /// `Ok` in both cases, so this is the only place that says so.
+    pub fn not_enforced(&self) -> Option<&str> {
+        self.not_enforced.as_deref()
     }
     /// Whether known Linux child launch paths should install the seccomp network filter.
     pub fn restrict_child_network(&self) -> bool {
@@ -837,6 +895,52 @@ mod tests {
     fn configured_profile_is_recorded() {
         set_configured_profile("read-only");
         assert_eq!(configured_profile_name(), Some("read-only"));
+    }
+    /// `apply` goes on without a sandbox and returns `Ok` when the platform cannot enforce the
+    /// profile; the manager is then the only thing that knows. (`apply` itself is not called: it
+    /// would confine the test process for good where the kernel does support it.)
+    #[test]
+    fn a_profile_that_is_not_in_force_says_why() {
+        let workspace = std::env::temp_dir();
+        let mut manager = SandboxManager::new(ProfileName::Workspace, &workspace);
+        assert_eq!(
+            manager.not_enforced(),
+            None,
+            "nothing is wrong before apply"
+        );
+        manager.record_not_enforced(&workspace, "Landlock not available");
+        assert_eq!(manager.not_enforced(), Some("Landlock not available"));
+        assert!(!manager.is_applied());
+    }
+    #[test]
+    fn the_not_enforced_warning_names_the_profile_the_reason_and_what_is_lost() {
+        let text = not_enforced_warning("read-only", "Landlock not available");
+        assert!(text.starts_with("warning: "), "{text}");
+        assert!(text.contains("'read-only'"), "{text}");
+        assert!(text.contains("(Landlock not available)"), "{text}");
+        assert!(text.contains("do not apply"), "{text}");
+    }
+    #[test]
+    fn the_not_enforced_warning_does_not_double_the_full_stop_of_the_reason() {
+        let text = not_enforced_warning("workspace", "Landlock not available. Requires 5.13+.");
+        assert!(
+            text.contains("(Landlock not available. Requires 5.13+)."),
+            "{text}"
+        );
+        assert!(!text.contains(".)"), "{text}");
+    }
+    #[test]
+    fn the_not_enforced_label_reads_like_the_applied_one_with_a_caveat() {
+        assert_eq!(
+            not_enforced_label_for("workspace"),
+            "sandbox:workspace (not enforced)"
+        );
+        assert_eq!(not_enforced_label(), None, "nothing installed in this test");
+    }
+    #[test]
+    fn no_sandbox_installed_means_nothing_to_report() {
+        // The process-wide state is only set by `install`, which no test in this crate calls.
+        assert_eq!(not_enforced(), None);
     }
     #[test]
     fn profile_confines_only_for_non_off_profiles() {

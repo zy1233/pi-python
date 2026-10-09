@@ -78,6 +78,14 @@ pub(crate) fn location_line_at(theme: &Theme, cwd: &Path) -> Line<'static> {
             Style::default().fg(theme.accent_user),
         ));
     }
+    // A sandbox that was asked for and did not take: said here as well as on the session status
+    // bar, since the stderr warning is behind the alternate screen by the time this is drawn.
+    if let Some(label) = pi_sandbox::not_enforced_label() {
+        parts.push(Span::styled(
+            format!("{label} "),
+            Style::default().fg(theme.accent_error),
+        ));
+    }
     let cwd_display = format_cwd_display(cwd, info.as_ref());
     let cwd_style = Style::default().fg(theme.gray_dim);
     parts.push(Span::styled(cwd_display, cwd_style));
