@@ -14,6 +14,7 @@ import os
 import signal
 import sys
 from pathlib import Path
+from typing import Any
 
 from acp import run_agent
 
@@ -38,32 +39,127 @@ _STOP_SIGNALS = tuple(
     getattr(signal, name) for name in ("SIGTERM", "SIGHUP") if hasattr(signal, name)
 )
 
+# `zypi -p` gives this process the user's own terminal as stdin, so the way the TUI's agent learns
+# that its client is gone (EOF on stdin) does not exist there. zypi names itself in this variable
+# instead, and the run stops once that process is no longer the parent: the kernel re-parents a
+# child whatever killed its parent, SIGKILL included.
+PARENT_PID_ENV = "PI_AGENT_PARENT_PID"
+PARENT_POLL_SECONDS = 0.5
+
+
+class _StopRequest:
+    """Ends the main task once, and remembers what asked for it."""
+
+    def __init__(self, task: asyncio.Task[Any]) -> None:
+        self._task = task
+        self.signum: int | None = None
+
+    def install_signal_handlers(self) -> None:
+        """Stop on SIGTERM / SIGHUP the way EOF on stdin stops the stdio agent.
+
+        The main task is cancelled, so `asyncio.run` cancels the in-flight turns and each running
+        tool's process group is reaped. Without a handler the signal ends the process at once and
+        its tools outlive it. (SIGKILL cannot be handled; there the tools are orphaned.)
+        """
+        loop = asyncio.get_running_loop()
+        for stop_signal in _STOP_SIGNALS:
+            with contextlib.suppress(NotImplementedError, RuntimeError):
+                loop.add_signal_handler(stop_signal, self.request, int(stop_signal))
+
+    def request(self, signum: int) -> None:
+        if self.signum is not None:
+            return
+        self.signum = signum
+        # A repeated signal gets the default action, so a process that hangs while it shuts down
+        # (a thread that cannot be cancelled) can still be stopped.
+        loop = asyncio.get_running_loop()
+        for stop_signal in _STOP_SIGNALS:
+            with contextlib.suppress(NotImplementedError, RuntimeError):
+                loop.remove_signal_handler(stop_signal)
+        self._task.cancel()
+
 
 async def serve(agent: PiAcpAgent) -> None:
     """Serve ``agent`` over stdio until stdin closes or the process is told to stop."""
-    # A stop signal ends the agent the way EOF on stdin does: the main task is cancelled, so
-    # `asyncio.run` cancels the in-flight turns and each running tool's process group is
-    # reaped. Without a handler the signal ends the process at once and its tools outlive it.
-    # (SIGKILL cannot be handled; there the tools are orphaned.)
     main_task = asyncio.current_task()
     if main_task is not None:
-        loop = asyncio.get_running_loop()
-
-        def request_stop() -> None:
-            # A repeated signal gets the default action, so an agent that hangs while it
-            # shuts down (a thread that cannot be cancelled) can still be stopped.
-            for stop_signal in _STOP_SIGNALS:
-                with contextlib.suppress(NotImplementedError, RuntimeError):
-                    loop.remove_signal_handler(stop_signal)
-            main_task.cancel()
-
-        for stop_signal in _STOP_SIGNALS:
-            with contextlib.suppress(NotImplementedError, RuntimeError):
-                loop.add_signal_handler(stop_signal, request_stop)
+        _StopRequest(main_task).install_signal_handlers()
     # `session/close` and `session/resume` are unstable in the SDK and answered with
     # "Method not found" unless this flag is set, although `initialize` advertises both.
     with contextlib.suppress(asyncio.CancelledError):
         await run_agent(agent, use_unstable_protocol=True)
+
+
+def _process_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # it exists, it is just not ours
+    return True
+
+
+def _take_parent_pid() -> int | None:
+    """The pid in ``PI_AGENT_PARENT_PID`` if this run should stop when that process goes away.
+
+    The variable is removed either way, so nothing this process starts (a tool, a nested
+    ``pi -p``) inherits a parent that is not its own. It counts when it names this process's
+    parent, or a process that no longer exists (the parent died while this one was starting; the
+    first check then stops the run). A live process that is not the parent is a wrapper in
+    between, and what this process should wait on is not its pid.
+    """
+    raw = os.environ.pop(PARENT_PID_ENV, None)
+    if os.name != "posix" or raw is None:
+        return None
+    try:
+        pid = int(raw)
+    except ValueError:
+        return None
+    if not 0 < pid < 2**31:
+        return None
+    if pid == os.getppid() or not _process_exists(pid):
+        return pid
+    return None
+
+
+async def _watch_parent(parent_pid: int, stop: _StopRequest) -> None:
+    """Ask for a stop once ``parent_pid`` is no longer this process's parent."""
+    while os.getppid() == parent_pid:
+        await asyncio.sleep(PARENT_POLL_SECONDS)
+    stop.request(signal.SIGTERM)
+
+
+async def _print_main(
+    prompt: str,
+    *,
+    cwd: Path | None,
+    prompt_overrides: HeadlessPromptOverrides,
+    parent_pid: int | None,
+) -> int:
+    """One ``-p`` turn, ended early by a stop signal or by the death of the process that started it.
+
+    A stop cancels the turn the way it does for the stdio agent, so the process group of every
+    running tool is reaped; the exit status is 128 plus the signal number, as a shell reports a
+    killed process.
+    """
+    task = asyncio.current_task()
+    if task is None:
+        return await run_print(prompt, cwd=cwd, prompt_overrides=prompt_overrides)
+    stop = _StopRequest(task)
+    stop.install_signal_handlers()
+    watcher = (
+        asyncio.create_task(_watch_parent(parent_pid, stop)) if parent_pid is not None else None
+    )
+    try:
+        return await run_print(prompt, cwd=cwd, prompt_overrides=prompt_overrides)
+    except asyncio.CancelledError:
+        if stop.signum is None:
+            raise
+        return 128 + stop.signum
+    finally:
+        if watcher is not None:
+            watcher.cancel()
 
 
 async def _amain() -> None:
@@ -172,6 +268,7 @@ def _has_prompt_cli_flags(args: argparse.Namespace) -> bool:
 
 
 def main() -> None:
+    parent_pid = _take_parent_pid()  # first: nothing started from here may inherit the variable
     load_local_env()
     parser = _build_parser()
     args = parser.parse_args()
@@ -199,10 +296,11 @@ def main() -> None:
             raise SystemExit(2) from exc
         raise SystemExit(
             asyncio.run(
-                run_print(
+                _print_main(
                     prompt,
                     cwd=args.cwd,
                     prompt_overrides=_prompt_overrides_from_args(args),
+                    parent_pid=parent_pid,
                 )
             )
         )
