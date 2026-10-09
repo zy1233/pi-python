@@ -175,6 +175,10 @@ zypi
 #   @         — browse local directory listing
 ```
 
+The TUI owns the screen, so what the agent writes to stderr (a Python traceback, a warning) is not shown there. It is appended to `~/.pi-python/logs/agent.stderr.log` (owner-only, one `--- agent started ... ---` line per run, moved to `agent.stderr.log.1` once it passes 1 MiB); look there when the agent dies or misbehaves. With `zypi -p` the agent's stderr is your terminal as usual.
+
+`zypi --sandbox <profile>` confines zypi and the agent it starts with Landlock on Linux (kernel 5.13 or newer; Seatbelt on macOS). On a kernel without Landlock zypi still starts, but the profile's file and network limits do not apply: it warns on stderr and shows `sandbox:<profile> (not enforced)` in red at the top of the screen.
+
 ### ACP stdio mode (for editors)
 
 The agent works with any ACP-compatible editor (Zed, Neovim, etc.):

@@ -1,6 +1,6 @@
 # Rust Agent Runtime 剥离计划
 
-> 状态：r7。r2 的计划稿之上，**已拆除 Rust runtime 并恢复 `/model`（r3）；r4 补了阶段 0 的 Linux CI 与基线工具、清掉 leader 的 UI 状态残留、完成 1.R3 的命名；r5 在 Linux CI 上跑通并启用了基线，执行入口审计（0.6）并完成阶段 A（A.3、A.4）——又删了约 23 万行 Rust、8 个 crate，消费者构建 0 告警**。分支已 push，PR [#7](https://github.com/zy1233/pi-python/pull/7) 已转 ready for review；**r6 清理了品牌残留（把还写着 Grok、或指向不存在的命令 / 目录的提示改成真的东西，见 §10.8），在叠加分支 `codex/branding-cleanup` 上；r7 合并了 `main` 上另一台机器推的 7 个提交，6 个文件的冲突已解，并修了 macOS 上 `AGENTS.md` 被读两遍的 bug（见 §10.9）**；执行记录见 §10。§1–§9 保留 r2 原文作为决策依据，与 §10 冲突处以 §10 和 ADR3（r3）为准。负责人：待指派。
+> 状态：r8。r2 的计划稿之上，**已拆除 Rust runtime 并恢复 `/model`（r3）；r4 补了阶段 0 的 Linux CI 与基线工具、清掉 leader 的 UI 状态残留、完成 1.R3 的命名；r5 在 Linux CI 上跑通并启用了基线，执行入口审计（0.6）并完成阶段 A（A.3、A.4）——又删了约 23 万行 Rust、8 个 crate，消费者构建 0 告警**。分支已 push，PR [#7](https://github.com/zy1233/pi-python/pull/7) 已转 ready for review；**r6 清理了品牌残留（把还写着 Grok、或指向不存在的命令 / 目录的提示改成真的东西，见 §10.8），在叠加分支 `codex/branding-cleanup` 上；r7 合并了 `main` 上另一台机器推的 7 个提交，6 个文件的冲突已解，并修了 macOS 上 `AGENTS.md` 被读两遍的 bug（见 §10.9）**；**r8 在 WSL2 / Linux 上补测：退出行为（含沙箱下）、0.9 的真机检查、CI 没跑的 Rust 测试，并修了沙箱 re-exec 缺 `--die-with-parent`、会在 shell 里留下整棵进程树的问题；之后又按用户的选择做了六件事：`-p` 只杀 zypi 时 agent 不再残留、没生效的沙箱现在在屏幕上说一声、agent 的 `stderr` 落到日志文件、CI 清单加了两个 suite 并去掉 `doctor_cmd::` 的 `skip`、PTY 驱动脚本入库、清理 WSL（见 §10.10）**；执行记录见 §10。§1–§9 保留 r2 原文作为决策依据，与 §10 冲突处以 §10 和 ADR3（r3）为准。负责人：待指派。
 > 基线：分支 `codex/rust-agent-runtime-removal-plan`；r2 / r3 的比较基线是 HEAD `07a3574`，r4 / r5 的提交见 §10。
 > 验证方式：r2 为静态分析（源码阅读、`Cargo.toml` 解析、模块级引用统计，复现方法见附录 B）；r3 起拆除结果由 `cargo check`（macOS 本机，消费者构建 `pi-pager-bin` / `pi-pager-minimal` / `pi-update` 及 `pi-shell` / `pi-pager` 的 `--tests` 类型检查）、`cargo test`（触及的 crate）、Python 侧 pytest，以及伪终端里 `zypi` ↔ `pi_agent_cli` ↔ OpenRouter 的真实会话（含 `/model` 切换）验证。标「需实测」的其余结论仍是静态推断；Linux / Windows 的 `cfg` 代码本机无法编译，见 §10.4。
 > 与既有文档的关系：承接 [Phase 4 设计](../specs/2026-08-25-phase4-coding-agent-cli-design.md) §3「第一轮允许 pager 继续链接 `xai-grok-shell`……变瘦不是迁入前提」和 [`AUDIT-PHASE4-PHASE5.md`](../AUDIT/AUDIT-PHASE4-PHASE5.md) 的「TUI 瘦身长期里程碑」，是 Phase 4 的第二轮。与既有决定的张力见 §3。
@@ -157,7 +157,7 @@ zypi（Rust）                                     pi_agent_cli（Python，通�
 - [x] 0.6（r5 已做：用户选「直接按附录 A 默认执行，不逐项确认」；结果是 A.3 的删除，分类见 §10.7，附录 A 的「r5 结果」列）**入口审计**：从 `Effect` / `Action` 枚举与键位表出发，逐入口标注可达性、所需 ACP 方法、决策（保留｜隐藏｜删除）；覆盖斜杠、键位、模态、欢迎页、dashboard、状态栏，并复用现有 19 处「standard ACP」降级点。
 - [ ] 0.7 **磁盘读取点清单**（约 19 个文件）与 ADR1 的落地设计。
 - [ ] 0.8 **能力矩阵定稿**（附录 A）与 **ACP 版本配对表**（两端各方法的支持情况、升级策略；Python 侧不得依赖 Rust 端 unstable 方法）。
-- [ ] 0.9 **实测结案**：子进程是否继承沙箱；`zypi export <python-session-id>`；`/model` 经 `session/set_config_option` 的真机切换（r3 已用 OpenRouter 实测 Python 侧，见 §10.3；TUI 全屏交互仍需 PTY 实测）；子进程 `stderr` 对全屏 TUI 的影响；退出后是否残留 Python / bash 进程；`config.toml` 的解析严格性。
+- [ ] 0.9（r8 部分：**Linux / WSL2 上六项都有了记录**，见 §10.10；**没做**：沙箱的 Landlock 层——WSL 的内核 5.10 没有 Landlock，要在内核 ≥ 5.13 的机器上做，`pi-sandbox` 的端到端用例在这里软跳过；macOS 与 Windows 上对应各项）**实测结案**：子进程是否继承沙箱；`zypi export <python-session-id>`；`/model` 经 `session/set_config_option` 的真机切换（r3 已用 OpenRouter 实测 Python 侧，见 §10.3；TUI 全屏交互仍需 PTY 实测）；子进程 `stderr` 对全屏 TUI 的影响；退出后是否残留 Python / bash 进程；`config.toml` 的解析严格性。**Linux 上的结论**：沙箱——bwrap 层被 agent 与工具继承，Landlock 层不存在时 `zypi` 照常启动，原先屏幕上没有任何提示（现在启动时 `stderr` 有一行警告，欢迎页与状态栏标 `sandbox:<profile> (not enforced)`）；`zypi export <Python 会话>`——`Session '…' not found.`，退出码 1；`/model` 与全屏交互——PTY 烟测 18/18（入库后的脚本是 23/23）；`stderr`——TUI 模式下 agent 的 stderr 是 `/dev/null`，对全屏界面没有影响（原先一个字也看不到，现在落到 `agent.stderr.log`）；残留进程——TUI 的退出矩阵全部干净（沙箱下补了 `--die-with-parent` 之后），`-p` 模式下只杀 zypi 会留下 agent（已修：Python 一侧监视父进程）；`config.toml`——未知的小节与顶层键被忽略；TOML 不合法、Python 风格的顶层 `permission = "ask"`、`[[models]]` 数组这三种会让 `zypi` 起不来（退出码 1，错误信息直接打印）；`[agent] command` 写错类型不报错。
 
 **退出条件**：CI 绿且基线入库；矩阵、入口审计、deny-list 无「未决」行（有则标 owner 与日期）；0.9 每项有记录。
 
@@ -186,11 +186,11 @@ Rust（pager）：
 
 - [ ] 1.R1 ADR1 落地：移除对 session 文件的读取；`export` 的去向。
 - [ ] 1.R2 按能力隐藏 Python 不路由的方法的入口（`session/set_model`、`session/set_mode` 等）；method-not-found 不 panic、不重复报错；`/model` 按 ADR3 恢复（r3 已做，不在隐藏之列）。
-- [ ] 1.R3 子进程生命周期（P6）。**r4 已做（命名与提示语，行为不变）**：`SpawnedAgent` → `AgentProcess`（`thread_handle` → `bridge_thread`，`AcpConnection.agent_thread` → `bridge_thread`）、`AgentShutdownGuard` → `AgentProcessGuard`、`spawn_grok_shell` → `spawn_agent_process`（顺手去掉没人用的 `_memory_config` 参数）、`SESSION_FLUSH_GRACE` / `AGENT_JOIN_SLACK` → `AGENT_EXIT_GRACE` / `BRIDGE_JOIN_SLACK`（仍是 10 s + 2 s，`exit_timeout` 的 20 s 预算不变）、`join_agent_thread` → `join_bridge_thread`；慢退出提示从「Finishing session…」改为「Stopping agent…」，超时告警不再声称 SessionEnd teardown 可能不完整，只说 agent 进程可能还在；守卫的文档改为只有 `app::run` 持有。**r5 已做（`e8557e5`）**：② 优雅退出——取消时先关 agent 的 stdin，等它自己退出（`AGENT_EOF_GRACE` = 3 s，编译期断言小于 `AGENT_EXIT_GRACE`），超时才 `start_kill()`；退出期间继续读（并丢弃）agent 的 stdout，免得它写到已关闭的管道；③ 的大部分——用脚本化 agent 在 bash 工具（`exec sleep 300`）运行时从 PTY 里退出 zypi，见 §10.7 的表：双击 Ctrl+Q 旧版残留、新版回收；`kill -9 zypi`（zypi 是会话首进程）要 Python 也处理 SIGHUP 才回收；SIGTERM、关终端、单按 Ctrl-C 都不残留。**未做**：① 确定 `stderr` 去向（现为继承，agent 打印的任何东西都会写在 TUI 所在的终端上）；③ 的其余——zypi 不是会话首进程时被 `kill -9`（agent 只看到 stdin 的 EOF，单元层面有测试，端到端没测）、MCP 子进程、Linux / Windows 上的行为。
+- [ ] 1.R3 子进程生命周期（P6）。**r4 已做（命名与提示语，行为不变）**：`SpawnedAgent` → `AgentProcess`（`thread_handle` → `bridge_thread`，`AcpConnection.agent_thread` → `bridge_thread`）、`AgentShutdownGuard` → `AgentProcessGuard`、`spawn_grok_shell` → `spawn_agent_process`（顺手去掉没人用的 `_memory_config` 参数）、`SESSION_FLUSH_GRACE` / `AGENT_JOIN_SLACK` → `AGENT_EXIT_GRACE` / `BRIDGE_JOIN_SLACK`（仍是 10 s + 2 s，`exit_timeout` 的 20 s 预算不变）、`join_agent_thread` → `join_bridge_thread`；慢退出提示从「Finishing session…」改为「Stopping agent…」，超时告警不再声称 SessionEnd teardown 可能不完整，只说 agent 进程可能还在；守卫的文档改为只有 `app::run` 持有。**r5 已做（`e8557e5`）**：② 优雅退出——取消时先关 agent 的 stdin，等它自己退出（`AGENT_EOF_GRACE` = 3 s，编译期断言小于 `AGENT_EXIT_GRACE`），超时才 `start_kill()`；退出期间继续读（并丢弃）agent 的 stdout，免得它写到已关闭的管道；③ 的大部分——用脚本化 agent 在 bash 工具（`exec sleep 300`）运行时从 PTY 里退出 zypi，见 §10.7 的表：双击 Ctrl+Q 旧版残留、新版回收；`kill -9 zypi`（zypi 是会话首进程）要 Python 也处理 SIGHUP 才回收；SIGTERM、关终端、单按 Ctrl-C 都不残留。**r8 补（Linux / WSL2，§10.10）**：③ 里 Linux 的部分做完了——zypi 是会话首进程、以及只是 shell 里的一个作业（`kill -9` 时 agent 只看到 stdin 的 EOF）两种启动方式，乘以六种退出方式，含沙箱下，都不留进程；这一遍测出沙箱 re-exec 缺 `--die-with-parent`（只杀 bwrap 的做法——`kill $!`、`timeout`、IDE 的停止按钮——会把整棵树留下），已补。① 的前提也变了：agent 的 `stderr` 在 TUI 里是 `/dev/null`（`app::run` 一开头的 `redirect_native_stderr()` 把 fd 2 指过去，agent 继承的就是它），不是「写在 TUI 所在的终端上」，所以对全屏界面没有影响，代价是 agent 的 stderr 一个字也看不到、也没处可查；`-p` 路径不做这个重定向，继承终端。**随后用户选了做**：① 的去向——agent 的 `stderr` 现在追加到 `<home>/logs/agent.stderr.log`（0600，每次启动一行标记，超过 1 MiB 在下次启动时轮转；§10.10 发现 2）；`-p` 模式下只杀 zypi 时 agent 子进程残留——Python 一侧监视父进程（`PI_AGENT_PARENT_PID`，§10.10 发现 6）。**未做**：MCP 子进程；Windows 上的行为。
 - [ ] 1.R4 `-p` 派发顺序与沙箱（ADR7）。
 - [ ] 1.R5 解码精简：`initialize._meta` 只读 Python 实际公布的键；`pi/*` 解码按 ADR4 清理。
 
-**退出条件**：ACP 契约 / e2e 通过；矩阵无「未决」行；`-p` 每个旗标都有去向；`zypi` 正常退出、崩溃、Ctrl-C 之后无残留 Python 与 bash 子进程（Linux、macOS 实测，Windows 记录现状）。
+**退出条件**：ACP 契约 / e2e 通过；矩阵无「未决」行；`-p` 每个旗标都有去向；`zypi` 正常退出、崩溃、Ctrl-C 之后无残留 Python 与 bash 子进程（Linux、macOS 实测，Windows 记录现状）。（r8 对照：Linux、macOS 的实测都有了，Linux 见 §10.10；Windows 仍未测。）
 
 ### 阶段 B：拆除 Rust runtime（行为层收口）
 
@@ -231,7 +231,7 @@ Rust（pager）：
 | R2 | 没有 Rust 回归安全网，验收全部依赖它 | 阶段 0 的 CI、基线、ACP 契约测试先于任何删除 |
 | R3 | 残留 UI 入口调用已删 runtime，或发送 Python 不路由的方法 | 入口审计 + 能力驱动 UI（P3）+ method-not-found 契约测试；去掉全局 allow 后由编译器验证 |
 | R4 | 误把有入口的代码当死代码 | 入口审计 + A.4 去 allow + e2e；每类删除单独 PR |
-| R5 | 子进程生命周期：孤儿 bash 进程、Windows 行为未知 | 阶段 1 的优雅退出协议 + 实测；Windows 先记录现状。r5：macOS 上已实测并修掉退出 zypi 后残留的 bash 进程（§10.7）；zypi 不是会话首进程时 `kill -9` 的端到端情形与 Windows 仍未测 |
+| R5 | 子进程生命周期：孤儿 bash 进程、Windows 行为未知 | 阶段 1 的优雅退出协议 + 实测；Windows 先记录现状。r5：macOS 上已实测并修掉退出 zypi 后残留的 bash 进程（§10.7）；zypi 不是会话首进程时 `kill -9` 的端到端情形与 Windows 当时仍未测。r8：Linux（WSL2）上两种启动方式 × 六种退出方式都实测了，含沙箱下，并补上沙箱 re-exec 的 `--die-with-parent`（§10.10）；`-p` 模式（只杀 zypi 时 agent 子进程残留）随后也修了：Python 一侧监视父进程（§10.10 发现 6）；Windows 仍未处理 |
 | R6 | ACP 两端版本偏差 | 配对表 + 升级同步 + 契约测试；不依赖 Rust 端 unstable 方法 |
 | R7 | 删除 `agent::config` 字段破坏用户 `config.toml` | ADR5 |
 | R8 | 沙箱随 `agent::config` 被误删 | ADR7 + B.4 明确保留 + 测试（含 `-p`） |
@@ -247,9 +247,9 @@ Rust（pager）：
 - 新增 TUI 功能（MCP、queue、subagent UI 等）——另立计划并过 P2 准入。（`/model` 不在此列：r3 已按 ADR3 经 Session Config Options 恢复。）
 - 多会话共享进程（leader 的替代方案）。
 
-## 10. 执行记录（r3、r4、r5、r6、r7）
+## 10. 执行记录（r3、r4、r5、r6、r7、r8）
 
-r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
+r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
 | 提交 | 内容 |
 |---|---|
@@ -495,7 +495,7 @@ r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶�
 2. ~~`release_baseline`~~：已做（0.2 勾选）。
 3. **A.3 的尾巴**（可选，同样的折叠器办法）：3d-6 CLI 旗标瘦身——欢迎页与选择器里的 worktree 入口已在 `ac1d3ff` 删掉，但 `-w/--worktree`、`--worktree-ref`、`--restore-code`、`/new` 的 worktree 模式（`new_session_worktree_mode`、`Action::NewWorktreeSession`、`Action::ChooseNewSessionMode`）和 `allow_remote_restore` / `suppress_code_restore` 的「远端恢复」世界仍在，标准 ACP 下 `Effect::CreateWorktreeSession` 恒返回 `WorktreeSessionFailed`，这些路径恒假；它们归 1.P6 的旗标契约一起定。欢迎页隐私横幅（`views/privacy_banner.rs`，「Help improve Grok」数据共享广告）按代码读只有设了环境变量 `GROK_PRIVACY_NOTICE_ROLLOUT` 或远端设置才会出现（没有实测），同属「靠数据恒假」的世界，约 1k 行、15 个文件。3f plan 审批 / btw / cta；3d-4 认证 / 计费界面归阶段 D.3。
 4. **A.4 的尾巴**（可选）：`pi-shell-base` 等其余 crate 的 `pub` 瘦身（没做过）；`pi-shell-base/src/env.rs` 里死掉的 gateway-bridge 常量；约 25 处局部 `#[allow(dead_code | unused*)]`（有的是平台门控，要看 Linux）；`pi-shell/src/session/storage` 的 `relocation`（`#[allow(dead_code)]`，归 D.2）。
-5. **阶段 1 才开了个头**：做了 1.P1 的一半（标题与 `updated_at`）、1.P5 的一个 bug（`session/close` / `resume` 的路由）、0.3 / 1.P7 的 Python 一侧（stdio 契约套件）。余下的需要拍板：① 优雅退出（1.P2、1.R3 ②）**已做**（`f14e321`、`e8557e5`），宽限取了 3 s（`AGENT_EOF_GRACE`，一个常量，要换数字由用户定）；还剩 `stderr` 去向（1.R3 ①）、zypi 不是会话首进程时被 `kill -9` 的端到端情形、Linux / Windows 上的退出行为；② pager 跟 `nextCursor`（才能在 Python 端分页）；③ 1.R1 ADR1（`--continue` / `--resume` 的磁盘读取）；④ 1.P6 旗标契约。阶段 0 的 0.3 的 Rust 一侧、0.5、0.7–0.9 仍未做。
+5. **阶段 1 才开了个头**：做了 1.P1 的一半（标题与 `updated_at`）、1.P5 的一个 bug（`session/close` / `resume` 的路由）、0.3 / 1.P7 的 Python 一侧（stdio 契约套件）。余下的需要拍板：① 优雅退出（1.P2、1.R3 ②）**已做**（`f14e321`、`e8557e5`），宽限取了 3 s（`AGENT_EOF_GRACE`，一个常量，要换数字由用户定）；还剩 ~~`stderr` 去向（1.R3 ①）~~（r8 随后做了：落到 `agent.stderr.log`，§10.10）、~~zypi 不是会话首进程时被 `kill -9` 的端到端情形、Linux 上的退出行为~~（r8 已做，§10.10）、Windows 上的退出行为；② pager 跟 `nextCursor`（才能在 Python 端分页）；③ 1.R1 ADR1（`--continue` / `--resume` 的磁盘读取）；④ 1.P6 旗标契约。阶段 0 的 0.3 的 Rust 一侧、0.5、0.7–0.9 仍未做。
 6. **文档与声明**：C.2 内嵌 user-guide；C.3 `tui/NOTICE` 与 `THIRD-PARTY-NOTICES`（依赖已少了 28 个包，需要重新生成；对外发布二进制前由用户定措辞）。**品牌残留**：~~用户看得见的~~ r6 已清理（§10.8；用户没给新名字，沿用 zypi）。没清的是用户看不见的标识，列在 §10.8 的「有意没动的」。
 
 ### 10.8 r6 追加：品牌残留清理
@@ -537,7 +537,7 @@ r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶�
 - **CLI**：顶层与每个子命令（`completions`、`doctor`、`doctor fix`、`du`、`export`、`help`、`version`、`wrap`）的 `--help`，加上 `zypi doctor`、`du`、`version` 的输出：只剩顶层 `--help` 里的 `[env: GROK_SANDBOX=]`（环境变量名，有意不动）。
 - **已知的本机波动**：有一次过滤运行里 `session_startup::tests::remote_miss_restore_code_with_worktree_defers` 失败。它在 macOS 上读真实的 `~/.pi-python/sessions/<临时仓库路径>`（`/var` 与 `/private/var` 的差别），目录不存在就报错，跟本次改动无关；之后的运行里通过。
 - **Linux CI**（`33374a3`，PR [#8](https://github.com/zy1233/pi-python/pull/8)）：`TUI CI` run [37408839608](https://github.com/zy1233/pi-python/actions/runs/37408839608)（check 6 m 27 s，test 19 m 11 s）✓ 门禁全过；依赖图 980、消费者构建 0 告警、`cargo check --workspace --tests` 0 个错误；8 个 suite 共 7,444 通过 / 0 失败 / 20 忽略（`pi-pager` 5,559，比 `b617575` 的 5,554 多 5；上面那条 macOS 本机波动的测试在 Linux 上通过）；`CI`（Ruff + Python 3.11–3.13）run 37408839645 ✓。
-- **CI 没覆盖到的**：`TUI CI` 的 8 个 suite 里没有 `pi-pager-render` 和 `pi-pager-minimal`（`scripts/tui_baseline.toml`），所以本次在这两个 crate 里新增和改动的测试——主题别名、路径标签、剪贴板提示、`--minimal` 欢迎页——只在 macOS 上跑过，Linux 上只做了编译检查（`cargo check --workspace --tests`）。把这两个 crate 加进基线是个小改动，但要先在 Linux 上量出各自的 `reference_passed`，而且会改 CI 门禁（`enforce = true`），所以没有顺手做，留给用户决定。
+- **CI 没覆盖到的**：`TUI CI` 的 8 个 suite 里没有 `pi-pager-render` 和 `pi-pager-minimal`（`scripts/tui_baseline.toml`），所以本次在这两个 crate 里新增和改动的测试——主题别名、路径标签、剪贴板提示、`--minimal` 欢迎页——只在 macOS 上跑过，Linux 上只做了编译检查（`cargo check --workspace --tests`）。把这两个 crate 加进基线是个小改动，但要先在 Linux 上量出各自的 `reference_passed`，而且会改 CI 门禁（`enforce = true`），所以没有顺手做，留给用户决定。（r8 已在 Linux 上量出：`pi-pager-render` 1,092 通过 / 2 忽略、`pi-pager-minimal` 79 通过；后者有个用例缺 `test_lock()`，默认线程数下大概率失败，r8 已补上，并按用户的选择把这两个 crate 加进了清单，见 §10.10。）
 
 ### 10.9 r7 追加：合并 `main`（另一台机器推的 7 个提交）
 
@@ -562,6 +562,130 @@ r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶�
 **PTY 冒烟**（debug `zypi` + 合并后的 agent，`PI_USE_MOCK`）：启动、一个回合、`/model` 选择器列出两个模型、切到第二个并发一轮、切回、`/exit` 退出码 0 且没有残留的 agent 进程。Linux CI 的结果见 PR。
 
 **合入 `main`。** 用户要求 squash、不保留逐个提交。#7 以一个提交合入（`455527c`，树与 #7 的头 `9b71a57` 完全一致）。#8 的基底是 #7 的分支，squash 之后它的历史里还带着那 54 个提交，直接合会在两边都改过的行上冲突，所以先 `git rebase --onto origin/main 9b71a57 codex/branding-cleanup`，只重放 #8 自己的提交（合并提交被丢掉）；重放后的树与重放前（`00df03f`）逐字节一致。再把 PR 的基底改到 `main`，强推，等 CI，squash。
+
+### 10.10 r8 追加：Linux 补测（WSL2）
+
+**起点与范围。** macOS 一侧的工作（r3–r7）已经合入 `main`（PR #6 / #7 / #8）。r8 在 WSL2 里补 Linux 一侧。计划留给 Linux 的有四件，逐项做了：① 阶段 1 退出条件里的「Linux、macOS 实测」——1.R3 没做完的 ③：zypi 不是会话首进程时被 `kill -9`，以及沙箱下的退出行为；② 0.9 的六项真机检查；③ CI 没跑到的 Rust 测试：`doctor_cmd::`（r5 起被 `skip`）、不在 8 个 suite 里的 `pi-pager-render` / `pi-pager-minimal`（§10.8）、其余没选入 suite 的 crate、`pi-fast-worktree`；④ Linux 上的 PTY 烟测（§10.7 写的是「没有 PTY 烟测」）。**已拆成 8 个提交（分支 `codex/linux-wsl-r8`，走 PR 合入，CI 的结果看该 PR）**；仓库里的改动见本节末尾。第一轮测完之后，用户又选了六件事（发现 2、5、6 里的三处行为、CI 清单、PTY 驱动脚本入库、清理 WSL 里留下的东西），做在同一批改动里，在相应条目里标「已改」。
+
+**环境，以及它证明不了什么。**
+
+- WSL2，Ubuntu 24.04.5，内核 `5.10.16.3-microsoft-standard-WSL2`，glibc 2.39，bubblewrap 0.9.0，git 2.43.0，`/bin/sh` 是 dash；rustc 1.94.0（钉的版本）、protoc 28.3、Python 3.12.3。构建与测试的环境变量照 `tui-ci.yml`（`CARGO_INCREMENTAL=0`、`CARGO_PROFILE_DEV_DEBUG=0`），`HOME` 是空目录，`NO_COLOR`、`PI_HOME` 等由清单的 `unset_env` 清掉。
+- 在 ext4 上的克隆里跑（`~/pi-linux`，`main` 的 `eafc578`），不在 `/mnt/d`：那里是 9p，权限位、inode 和时间戳的行为都与真正的 Linux 文件系统不同。
+- **内核没有 Landlock**（要 ≥ 5.13；LSM 列表是空的）。沙箱的结论因此只覆盖 bwrap 那一层，Landlock 那一层在这台机器上验证不了。`pi-sandbox` 的两个端到端文件（`deny_paths_e2e`、`read_write_trailing_glob_e2e`）在内核不支持时直接 `return`，**在这里的「通过」是空转**；设了 `SANDBOX_E2E_REQUIRE_ENFORCEMENT` 才会把跳过变成 panic。
+- 内核是 `CONFIG_HZ=100`：粗粒度时间戳一个刻度 10 ms，这是发现 8 里 `media` 用例失败的原因。
+- **WSL 的登录脚本导出了 `PI_HOME`，指向 Windows 一侧的真实配置目录。** 基线执行器（`unset_env`）与 pytest（根目录的 `conftest.py`）会清掉它，CI 与正常流程不受影响；直接跑测试二进制、或拿 `zypi` 做实验的人会读写那个目录。r8 自己踩到过一次，之后所有手工命令都先 `unset` 并换一次性的 `HOME`；`docs/baselines/tui.md` 加了一条提醒。
+
+**验证。**
+
+| 检查 | 结果 |
+|---|---|
+| `tui_baseline.py gates` | ✓ 依赖图 980（与 CI 一致） |
+| debug `zypi` 构建 | ✓ 0 告警；冷构建 4 m 53 s（机器 12 核 / 24 GB，`CARGO_BUILD_JOBS=8`） |
+| 8 个 suite，`doctor_cmd::` 不再被跳过（基线执行器，清环境；第一轮） | ✓ **7,456 通过 / 0 失败 / 20 忽略**：`pi-shell` 1,056、`pi-pager` 5,571、`pi-pager-bin` 20、`pi-acp-lib` 21、`pi-http` 13、`pi-telemetry` 239、`pi-file-utils` 216、`pi-sampling-types` 320。与 CI（`33374a3`，7,444）对账：多出的 12 个正是 `doctor_cmd::`，其余 7 个 suite 与 CI 逐项相同 |
+| 10 个 suite（同上；做了六件事之后的清单，含 `pi-pager-render`、`pi-pager-minimal`） | ✓ 执行器退出码 0，1,469 s：**8,633 通过 / 1 个已知失败 / 22 忽略**。`pi-shell` 1,056、`pi-pager` 5,577（再 +6 个 `agent_stderr` 用例）、`pi-pager-render` 1,091（另有 1 个已知失败，见发现 8）、`pi-pager-minimal` 79、`pi-pager-bin` 21（+1 个 `-p` 用例）、`pi-acp-lib` 21、`pi-http` 13、`pi-telemetry` 239、`pi-file-utils` 216、`pi-sampling-types` 320 |
+| `doctor_cmd::`（12 个，r5 起 CI 一直跳过） | ✓ 12 通过，不需要音频设备 |
+| `pi-pager-render`、`pi-pager-minimal`（当时不在清单里，现在在）整个 crate | ✓ `pi-pager-render` 1,092 通过 / 0 失败 / 2 忽略；`pi-pager-minimal` 79 通过（其中一个用例缺锁、整个 crate 默认线程数下 30 次失败 25 次，已修，见发现 8） |
+| 其余 crate 逐个 `--lib --tests`（含 `pi-fast-worktree`） | 74 个：68 个全过（其中 5 个没有测试），5 个有失败用例（共 13 个），1 个编译不过；11,807 通过 / 13 失败 / 23 忽略；见发现 8 |
+| Python 全量 pytest（Linux，3.12.3，`main` 的 `eafc578`） | ✓ 2,135 通过 / 0 失败 / 30 跳过（缺 `langchain_deepseek`、Windows 专属）/ 31 取消选择（`real_llm`），123.9 s。r7 记的 6 个 macOS 专属失败在 Linux 上都通过 |
+| Python 全量 pytest（六件事做完之后，含 `test_print_shutdown.py` 的 15 个与 `test_tui_pty.py` 的 10 个） | ✓ Linux：2,160 通过 / 0 失败 / 30 跳过 / 31 取消选择，97 s。Windows：2,156 通过 / 0 失败 / 34 跳过 / 31 取消选择，273 s（`-p` 的 15 个与依赖 `pty` 的 5 个跳过）。`ruff check .` 与 `ruff format --check .` 干净 |
+| PTY 烟测（`PI_USE_MOCK=1`，`pyte`） | ✓ 第一轮 18/18：欢迎页、无 panic、恰好一个 agent 进程、一轮对话、状态栏的模型名、`/model` 选择器、切换后状态栏跟着变、切换后再来一轮、`/exit` 退出码 0 且无残留进程、一个会话文件且带 `model_change`、重启后 `/resume` 列出旧会话并回放历史、恢复后保留所选模型、第二次 `/exit` 干净。入库成 `scripts/tui_pty/smoke.py` 并加上 stderr 日志的检查（在 `PI_HOME/logs` 下、权限 0600、第二次启动追加到同一个文件、替身 agent 写的 `STDERR-MARK` 进了日志而没画在屏幕上）后：**23/23**；加 `--sandbox workspace`：**26/26**（多出的 3 项：欢迎页与状态栏上有 `(not enforced)`，终端里有那行警告） |
+| 入库的 PTY 脚本（`scripts/tui_pty/`） | ✓ `exit_matrix.py` 12/12（无沙箱）、14/14（`--sandbox workspace`）；`print_exit.py` 4/4；`scripts/tests/test_tui_pty.py` 与 `packages/pi-agent-cli/tests/test_print_shutdown.py` 在 Linux 上 25/25 |
+| 沙箱（5 个 profile）、`stderr`、`config.toml`、`zypi export` | 见发现 2–5 |
+| 退出矩阵 | 见下 |
+
+**退出矩阵（Linux，debug 构建的 zypi；agent 在跑 `exec sleep 300`，退出后最多等 12 s 轮询 `kill -0`，表里的秒数是各进程消失的时间）。** 两种启动方式：zypi 是会话首进程（PTY 的会话 leader），或只是交互 shell 里的一个前台作业（IDE 的终端、`tmux` 里的 shell 就是这样）；沙箱时 zypi 先 re-exec 成 `bwrap … -- zypi`，所以多一个 `kill` 的目标。
+
+| 退出方式 | 无沙箱（两种启动方式都干净） | `--sandbox workspace`（两种启动方式都干净） | 沙箱、补丁前（shell 作业） |
+|---|---|---|---|
+| 双击 Ctrl+Q | zypi 退出码 0；agent 0.5 s、工具 0.4 s | 退出码 0；agent 0.5 s、工具 0.4 s | 干净 |
+| `kill -9`（沙箱下是给外层 bwrap） | agent 0.2 s、工具 0.1 s | bwrap 与 zypi 0.1 s，agent 0.1–0.2 s、工具 0.1 s | **zypi、agent、工具全部残留** |
+| `kill -TERM`（同上） | zypi 优雅退出（0）；agent 0.2 s、工具 0.1 s | bwrap 被信号杀死，zypi 随即被 SIGKILL；agent 0.1–0.2 s、工具 0.1 s | **全部残留** |
+| `kill -HUP`（同上） | 同 `-TERM` | 同 `-TERM` | **全部残留** |
+| 关闭 PTY master（关终端） | 退出码 0；agent 0.2 s、工具 0.0 s | agent 0.1–0.2 s、工具 0.0 s | 干净 |
+| 单按 Ctrl+C | 取消当前 turn，工具 0.1 s 内回收；zypi 与 agent 继续运行 | 同左 | 干净 |
+| 只杀沙箱里的 zypi | — | bwrap 随之退出（退出码 137）；agent 0.1–0.2 s、工具 0.1 s | 干净 |
+
+「补丁前」一栏是修之前同一套用例的结果（shell 作业 × 沙箱，7 例里 4 例干净）。修后：无沙箱 12/12，`workspace` 14/14（上表）；沙箱的全部组合共 35/35（5 组 × 7 例，含上表的 14 例）。**一个代价**：给外层 bwrap 发 SIGTERM / SIGHUP 时，zypi 收到的是 SIGKILL，来不及恢复终端（备用屏幕、原始模式）；补丁前是整棵树继续在终端上跑，所以取这个。
+
+**发现。**
+
+1. **沙箱的 re-exec 缺 `--die-with-parent`（已修）。** 启用沙箱时 zypi 先 re-exec 成 `bwrap … -- zypi`。bwrap 默认只是等它的子进程，所以只杀 bwrap 的做法——`kill $!`、`timeout`、IDE 的停止按钮、只给自己启动的那个进程发信号的 supervisor——会让 zypi、agent 与工具继续在终端上跑。实测（zypi 是 shell 的一个作业，`--sandbox workspace`）：给 bwrap 发 SIGKILL、SIGTERM、SIGHUP，三例都留下整棵进程树（zypi、agent、`sleep 300`），其余四例（双击 Ctrl+Q、关终端、Ctrl+C、只杀内层的 zypi）干净；单独拿 bwrap 验证，结果一样：没有 `--die-with-parent` 时子进程在三种信号之后都活着，加上之后都死。zypi 是会话首进程时不受影响，因为内核会给整个前台进程组发 SIGHUP。修法：`pi-sandbox` 的 `bwrap_reexec_command_ex` 加这一个选项（bwrap 一死，子进程收到 SIGKILL；agent 随后在 stdin 上看到 EOF，走原有的优雅退出路径回收工具），并新增单测 `bwrap_reexec_dies_with_parent`（要求它出现在 `--` 之前，是 bwrap 的选项而不是被执行命令的参数；拿掉那一行，它按预期失败）。复测：5 组（shell 作业 × `workspace` / `read-only` / `strict`，会话首进程 × `workspace` / `read-only`）× 7 例，35/35 干净。这一条只在 Linux 上有：macOS 用 Seatbelt，没有 bwrap。
+2. **TUI 模式下 agent 的 `stderr` 是 `/dev/null`。** `app::run` 一开头调 `pi_tty_utils::redirect_native_stderr()`，把 fd 2 指向 `/dev/null`，agent 继承的就是它。实测：`/proc/<pid>/fd/2` 对 zypi 和 agent 都是 `/dev/null`（agent 的 stdin / stdout 是 ACP 的两根管道）；`-p` 路径不做这个重定向，子进程的 stderr 与 stdin 都是终端。让 agent 往 `stderr` 持续打带标记的行，在启动时、一个回合进行中、agent 安静之后、以及两次改变窗口大小（整屏重绘）之后，屏幕上都是 0 行。所以 1.R3 ① 的前提错了——不是「写在 TUI 所在的终端上」，也就没有污染全屏界面的风险；代价是 agent 打到 `stderr` 的任何东西（Python 的 traceback、告警）都没地方看。`acp/spawn.rs` 里同一处注释也是错的，已改。**已改（用户选了落到文件）**：拉起 agent 时 `spawn.rs` 打开 `<home>/logs/agent.stderr.log`，把 agent 的 `stderr` 接到它——只追加，Unix 上权限 0600（traceback 里可能有提示词、路径和密钥），每次启动写一行 `--- agent started <时间> (zypi pid N) ---`，启动时发现它超过 1 MiB 就挪成 `agent.stderr.log.1`（覆盖旧的），所以最多留下两个文件；打不开日志就退回丢弃，不挡 agent 启动；运行中不限大小（那是 agent 自己的输出，除非它卡在打印的死循环里，否则很小）。屏幕上仍然什么都没有。实测：一个启动就往 `stderr` 打 `STDERR-MARK` 的替身 agent，日志里有这一行，屏幕上没有（`smoke.py` 的最后一步）；真 agent 在正常情况下不往 `stderr` 打东西，日志里只有那一行起始标记。`-p` 不受影响，仍然是终端。
+3. **`config.toml` 的解析严格性。** Rust 的配置文件是 `$PI_HOME/config.toml`，Python 的是 `agent.toml`。把 Python 一侧的写法放进 `config.toml`，试了 9 种内容：
+
+   | `config.toml` 的内容 | 结果 |
+   |---|---|
+   | 没有这个文件；未知小节 `[zzz]`；未知顶层键 | 正常启动（未知的忽略） |
+   | Python 的 `[model]` 表（`provider`、`id`） | 正常启动 |
+   | `[agent] command = "…"`（合法）；`command = 5`（类型错） | 正常启动（类型错也不报错） |
+   | Python 风格的顶层 `permission = "ask"` | **起不来**，退出码 1：`Failed to create agent config: invalid type: string "ask", expected struct PermissionKnownKeys`（在 `permission` 处） |
+   | Python 的 `[[models]]` 数组 | **起不来**，退出码 1：`invalid type: map, expected a string`（在 `models` 处） |
+   | TOML 不合法 | **起不来**，退出码 1：`Failed to load config: TOML parse error at line 1, column 8…`（同一条错误打印了两遍） |
+
+   Rust 对它认识的键类型检查是严格的，对不认识的键是宽容的；两边的配置不要混在 `config.toml` 里。
+4. **`zypi export` 读不到 Python 写的会话（ADR1，没做；第一轮之后用户选了不动）。** 四种写法——会话 id、文件名去掉扩展名，各带或不带输出文件——都是 `Error: Session '…' not found.`，退出码 1，stdout 为空。`export` 是又一个读磁盘上旧格式会话的地方，0.7 的读取点清单里要有它。
+5. **内核没有 Landlock 时，沙箱静默降级。** `--sandbox workspace` / `read-only` / `strict` 照常启动，原先启动前、退出后、屏幕上都没有任何提示（现在见本条末尾的「已改」）；唯一的记录是 `$PI_HOME/sandbox-events.jsonl` 里的一行 `{"event_type":"ApplyFailed","profile":"workspace","platform":"linux/landlock","enforced":false,"error":"Landlock not available. …"}`。这与内嵌文档 `18-sandbox.md` 写的一致（「记一条警告，不带强制继续」），只是这条「警告」实际落在一个没人会看的文件里。bwrap 那一层照常生效，并被 agent 与工具继承（zypi 与 agent 在同一个新的 mount namespace 里，`NoNewPrivs=1`、`Seccomp=2`）；它做的是丢能力、关特权、拦嵌套 namespace、把 hooks 目录只读绑定，**不限制写入范围**（`--bind / /`）——那是 Landlock 的事。agent 的工具进程里实测：
+
+   | profile | 进程树 | 工作区可写 | 工作区外可写 | hooks 目录可写 | 嵌套 user / mount ns | `NoNewPrivs` / `Seccomp` |
+   |---|---|---|---|---|---|---|
+   | 无、`off` | zypi → agent | 是 | 是 | 是 | 可以 | 0 / 0 |
+   | `workspace` | bwrap → zypi → agent | 是 | **是** | 否（只读） | 否（EPERM） | 1 / 2 |
+   | `read-only` | 同上 | **是** | **是** | 否 | 否 | 1 / 2 |
+   | `strict` | 同上 | **是** | **是** | 否 | 否 | 1 / 2 |
+   | `devbox` | 同上 | 是 | 是 | 是 | 可以 | 1 / 0 |
+
+   所以在这样的内核上，`read-only` 与 `strict` 并不限制写，原先却没有任何提示。Landlock 那一层要在内核 ≥ 5.13 的机器上，用 `SANDBOX_E2E_REQUIRE_ENFORCEMENT=1` 跑 `pi-sandbox` 的端到端用例才算验证过。
+
+   **已改（用户选了在屏幕上说）**：`SandboxManager::apply` 在这两种情况（平台不支持、`Sandbox::apply` 出错）都继续运行并返回 `Ok`，所以调用方原本无从知道。现在 `SandboxManager` 记下「没生效」和原因（`not_enforced()`，`install()` 之后是 `pi_sandbox::not_enforced()`），三处用它：① 启动时 `apply_sandbox`（`pi-shell`）往 `stderr` 打一行警告——`warning: the 'workspace' sandbox could not be put in force (Landlock not available. Requires Linux kernel 5.13+ with Landlock enabled). Its file and network limits do not apply: the agent can read, write and reach whatever it could without a sandbox.`；② 欢迎页顶栏、③ 会话状态栏，在已生效的 `sandbox:workspace` 标签所在的位置画 `sandbox:workspace (not enforced)`（`accent_error` 红色）——原先没生效时那个位置什么都没有，读起来像「没要求沙箱」。警告在备用屏幕之前，进入 TUI 后看不到，所以屏幕上的两处才是要紧的。`sandbox-events.jsonl` 里的 `ApplyFailed` 照旧。实测（WSL2，无 Landlock）：`smoke.py --sandbox workspace` 26/26，含欢迎页与状态栏上有这个标签、终端里有这行警告；内核支持 Landlock 时不出现（`not_enforced` 为空，靠单测，没在真机上看过）。
+6. **`-p` 模式下只杀 zypi，agent 子进程会留下（已改）。** `run_python_print` 用 `.status()` 等子进程，Python 的 `-p` 路径没有信号处理。把 agent 换成 `bash -c 'sleep 300'` 的替身，只给 zypi 发信号：SIGTERM、SIGKILL、SIGHUP、SIGINT 四例，zypi 都退了，`sleep 300` 都还在（给整个进程组发信号、关终端没有测）。它属于 1.R3 的范围。
+
+   **已改（用户选了 Python 一侧监视父进程）**。没用 `PR_SET_PDEATHSIG`：它只在 Linux 上有（macOS 没有），管的是创建子进程的那个*线程*；信号选 SIGKILL，agent 来不及回收它的工具（bash 的进程组成了孤儿），选 SIGTERM 又得 Python 一侧自己处理——所以逻辑本来就要放在 Python 里。做法：zypi 起 agent 时设 `PI_AGENT_PARENT_PID=<自己的 pid>`（`print_mode::agent_command`，`pi-pager-bin`）；Python 的 `main()` 一进来就把这个变量从环境里取走——之后起的工具与嵌套的 `-p` 都继承不到——并且只在它等于真正的父进程、或指向一个已经不存在的进程（agent 还在启动时父进程就死了，立刻停）时才启用；指向一个活着但不是父进程的 pid（中间隔了包装脚本）就不启用。启用后每 0.5 s 查一次 `os.getppid()`，变了就走 `serve()` 同一条停止路径：取消主任务，asyncio 取消回合，bash 工具回收各自的进程组。`-p` 同时装上 SIGTERM / SIGHUP 处理器（与 `serve()` 共用 `_StopRequest`），退出码 `128 + 信号号`（父进程死掉引起的停止是 143）。只在 POSIX 上生效：Windows 上父进程死后 `getppid()` 仍报它的 pid。用环境变量而不用命令行旗标，是为了新 zypi 配旧 agent、旧 zypi 配新 agent 都不出错。复测：`scripts/tui_pty/print_exit.py`（真 zypi + 真 `main()`，LLM 换成一轮脚本化的长 bash 调用）只给 zypi 发 SIGTERM / SIGKILL / SIGHUP / SIGINT，四例 zypi 0.1 s、工具 0.4 s、agent 0.5 s 内都消失，agent 拿到的 `PI_AGENT_PARENT_PID` 等于 zypi 的 pid，工具看不到它；Python 一侧 `test_print_shutdown.py` 15 个用例（停止信号、启动者被 `kill -9`、无关的活进程、已经不在的父进程、变量取值）。把监视关掉再跑（变异检查），「启动者被杀」与「启动者已不在」两例按预期失败。
+7. **退出耗时离 3 s 的宽限还有余量。** 双击 Ctrl+Q 时 agent 退出最慢，空闲 0.5 s；12 个忙循环占满 CPU 时 0.7–0.8 s；cargo 在后台编译（`CARGO_BUILD_JOBS=12`）时 0.8 s；cargo 加每核两个忙循环（负载升到 24，核数的 2 倍）时无沙箱 1.0 s、沙箱 1.3 s。这三种负载下的矩阵（每种 26 例，共 78 例）全部干净。更早有一次在机器被构建与大量测试同时压着时量到过 3.5–3.9 s，没能复现，当时的清理结果也没有单独记录；超过 `AGENT_EOF_GRACE`（3 s），zypi 会 `start_kill()` agent，工具进程就可能留下（r5 之前的情形），所以只当作提醒。
+8. **Rust 测试在 Linux 上的分诊。** 8 个 suite 之外的 74 个 crate 里，5 个有失败用例，1 个编译不过，都与 runtime 拆除无关（`pi-pager-minimal` 在那一轮碰巧全过，它的问题见表后）：
+
+   | crate | 失败用例 | 判断 |
+   |---|---|---|
+   | `pi-pager-render` | `terminal::tmux_probe::tests::successful_near_deadline_exit_still_returns_captured_output` | 偶发：靠近 deadline 的 tmux 探测（1.5 s 的预算里脚本烧 1.2 s，只留 0.3 s 给进程启动），只在分诊那一遍失败；之后空闲与满载各重复 30 次，0 次复现，整个 crate 在最终复测里 1,092 全过。清单的第一次完整运行里它又失败了一次（那次整个 crate 用了 8.6 s，平时 1.3 s），同样是刚链接完的第一次运行；之后又重复 34 次（空闲 17、12 个忙循环占满 CPU 17）都没复现。猜是刚链接完磁盘写回拖慢了进程启动，没有证实；已放进清单的 `known_failures` |
+   | `pi-workspace` | `hub_auth::proactive::tests::disabled_flag_does_not_refresh_or_spawn` | 偶发，同上（0/60） |
+   | `pi-workspace` | `session::git::*` 共 7 项：`normalize_*`（5 个）、`resolve_normalized_remote_urls_deduplicates_across_transports`、`restore_code_tests::ensure_binding_forks_conv_branch_off_base_and_is_idempotent` | `docs/baselines/tui.md` 已记的那 7 项（`xai-org` → `pi-org` 改名遗留与 OID 断言），macOS 上也失败 |
+   | `pi-agent` | `prompt::template::tests::test_encrypted_templates_not_stale` | 加密模板字节过期（已记） |
+   | `pi-shell-base` | `util::tests::is_grok_process_self_true_impossible_pid_false`、`…is_grok_process_strict_self_true_impossible_pid_false` | 按进程名 `grok` 判断（已记）；这个函数没有调用者 |
+   | `pi-hooks` | `runner::command::tests::test_hook_child_cannot_open_dev_tty` | 用例没有控制终端时自己跳过（CI 就是这样），有终端时跑 `sh -c 'exec 3>/dev/tty 2>/dev/null && exit 1 \|\| exit 0'`。`/bin/sh` 是 dash 时，`exec` 的重定向失败会让 shell 直接以 2 退出，走不到 `\|\| exit 0`：是用例对 `sh` 的假设，不是 hook 的行为（子进程确实打不开 `/dev/tty`） |
+   | `pi-fast-worktree` | 编译不过：`failed to resolve: could not find 'tests' in 'confined'` | 与 macOS 相同（已记） |
+
+   8 个 suite 里那 1 个失败是 `pi-pager` 的 `app::agent_view::paste::paste_key_tests::tool_media_same_length_same_mtime_rewrite_retries_failed_load`，在干净环境里 30 次失败 26 次（空闲）/ 27 次（满载）。`MediaFileStamp` 的 `ctime` 取自内核的粗粒度时钟，`CONFIG_HZ=100` 时一个刻度是 10 ms，两次写入落在同一刻度就得到相同的 `ctime`，缓存认为文件没变；CI 与 macOS 上没出现过。真实的「慢写」不会那么快，所以这是用例的时间假设，不是产品缺陷。修法：用例在重写前等 25 ms，并把注释里的「一次重写总会推进 `ctime`」改成「推进到内核时钟的刻度」。修后在干净环境里空闲 40/40、满载（12 个 CPU 全占）40/40，完整的 `pi-pager` suite 里也通过。
+
+   `pi-pager-minimal`（不在清单里）的 `commit::tests::committed_edit_keeps_diff_line_backgrounds`：整个 crate 用默认线程数跑，30 次失败 25 次（12 核空闲；CPU 全占时 2/30）；`--test-threads=1` 或单独跑这个用例，30/30 通过。`terminal_native_lock_paints_only_native_colors` 与 `committed_thinking_paints_a_dim_rail_in_column_zero` 在持有 `theme_cache::test_lock()` 期间把进程级的 `set_terminal_native_lock(true)` 打开，而这个用例没拿那把锁，撞上这个窗口就拿到原生配色、画不出 diff 背景。是用例缺锁，不是产品缺陷（§10.8 里 macOS 本机 79 个全过，应是没撞上这个窗口）。修法：补上同样的 `test_lock()` 守卫。修后整个 crate 默认线程数 40/40、单线程 40/40、单独 40/40、CPU 全占 40/40。这一条决定了 `pi-pager-minimal` 能不能放进清单：不修就是个高概率的抖动 suite。
+
+**仓库里的改动。**
+
+| 文件 | 改动 |
+|---|---|
+| `tui/crates/codegen/pi-sandbox/src/lib.rs` | 发现 1：`bwrap_reexec_command_ex` 加 `--die-with-parent`，单测 `bwrap_reexec_dies_with_parent`。发现 5：全局状态与 `SandboxManager` 记下「没生效」及原因，`not_enforced()`、`not_enforced_warning()`、`not_enforced_label()`，加单测 |
+| `tui/crates/codegen/pi-shell/src/config/mod.rs` | 发现 5：`apply_sandbox` 在沙箱没生效时往 `stderr` 打一条警告 |
+| `tui/crates/codegen/pi-pager/src/app/agent_view/render.rs`、`views/welcome/top_bar.rs` | 发现 5：状态栏与欢迎页顶栏在没生效时画 `sandbox:<profile> (not enforced)`（红色） |
+| `tui/crates/codegen/pi-pager/src/acp/spawn.rs` | 发现 2：agent 的 `stderr` 落到 `<home>/logs/agent.stderr.log`（追加、0600、启动标记、超过 1 MiB 在下次启动时轮转），6 个单测；改了错的注释 |
+| `tui/crates/codegen/pi-pager-bin/src/print_mode.rs`、`main.rs` | 发现 6：`-p` 起 agent 时设 `PI_AGENT_PARENT_PID`（`agent_command`），1 个单测 |
+| `tui/crates/codegen/pi-pager/src/app/agent_view/paste.rs` | 发现 8 的 `media` 用例：重写前等 25 ms，并改注释（只动测试） |
+| `tui/crates/codegen/pi-pager-minimal/src/commit_tests.rs` | 发现 8：`committed_edit_keeps_diff_line_backgrounds` 补 `test_lock()` 守卫（只动测试） |
+| `packages/pi-agent-cli/pi_agent_cli/__main__.py` | 发现 6：`-p` 取走 `PI_AGENT_PARENT_PID`、每 0.5 s 查父进程、处理 SIGTERM / SIGHUP；`serve()` 与 `-p` 共用 `_StopRequest`（只在 POSIX 上起作用） |
+| `packages/pi-agent-cli/tests/test_print_shutdown.py`、`_print_agent.py`（新） | 发现 6 的 15 个用例（POSIX 才跑；Windows 上整个文件跳过） |
+| `scripts/tui_baseline.toml` | 去掉 `doctor_cmd::` 的 `skip`；加 `pi-pager-render`（带一个 `known_failures`）与 `pi-pager-minimal` 两个 suite；`pi-pager` 与 `pi-pager-bin` 的 `reference_passed` 随之更新。现在是 10 个 suite |
+| `scripts/tui_pty/`（新：`smoke.py`、`exit_matrix.py`、`print_exit.py`、驱动 `pty_term.py`、`zypi_env.py`、README）、`scripts/tests/test_tui_pty.py`（新） | 本节用到的 PTY 驱动入库；每次都用一次性的 `PI_HOME` / `HOME` / 工作目录，环境从头构建。辅助逻辑有单测（Linux 10 个；Windows 上依赖 `pty` 的 5 个跳过） |
+| `AGENTS.md`、`packages/pi-agent-cli/AGENTS.md`、`CHANGELOG.md`、`docs/TUI-AND-CODE-AGENT.md` | 新行为的说明（stderr 日志、`PI_AGENT_PARENT_PID`、没生效的提示）、基线执行器与 `PI_HOME` 的提醒、PTY 脚本的位置 |
+| 本文件、`docs/baselines/tui.md` | r8 的记录；基线页加了 `doctor_cmd::` 的 Linux 结果、新 suite、未选入 suite 的 crate 的分诊、PTY 载体（§3.3）、WSL 的 `PI_HOME` 提醒 |
+
+「仓库里的改动」里的 Rust 与 Python 改动都在 `main` 的 `eafc578` 之上，拆成 8 个提交（分支 `codex/linux-wsl-r8`）。`docs/baselines/tui.md` 里的数是 WSL2 量的，不是 CI 的；清单里 `doctor_cmd::`、`pi-pager-render`、`pi-pager-minimal` 的结果要等第一次 CI 运行证实。
+
+**没有验证的。** Landlock 那一层（内核 ≥ 5.13；见发现 5）；GitHub 的 `ubuntu-24.04` runner 默认限制非特权 user namespace，bwrap 要先放开 `kernel.apparmor_restrict_unprivileged_userns`（凭文档，没试）；bwrap 缺失或被禁用时的行为；Windows；MCP 子进程；用真实模型跑 PTY（只用了 mock）；`/bin/sh` 不是 dash 的发行版、musl；`-p` 模式下给整个进程组发信号；`PI_AGENT_COMMAND` 指向包装脚本时的 `-p`（agent 的父进程不是 zypi，监视不启用，只杀 zypi 仍会留下 agent）。「内核支持 Landlock 时不出现没生效的提示」只有单测，没在真机上看过。Windows 上的 `PI_AGENT_PARENT_PID`（监视只在 POSIX 上启用）与 `agent.stderr.log` 的轮转（`rename` 的语义不同）都没跑过。CI：去掉 `skip` 的 `doctor_cmd::` 与两个新 suite 在 GitHub runner 上的结果。macOS 一侧没有重测：r8 的 Rust 改动都是平台无关或 Unix 通用的代码，只在 Linux 上编译、测过，Python 的父进程监视在 macOS 上应当同样可用（`os.getppid()`），也没跑过；`--die-with-parent` 只在 Linux 上存在。
+
+**留给用户决定的。**
+
+1. `zypi export` 要不要读 Python 的会话（ADR1，发现 4）。第一轮之后用户选了不动它，仍是 `Session '…' not found.`。
+2. CI：`pi-sandbox` 的端到端用例要在带 Landlock 的 runner（内核 ≥ 5.13）上并设 `SANDBOX_E2E_REQUIRE_ENFORCEMENT=1` 才有意义——这要换 runner 或加一个 job。去掉 `skip` 的 `doctor_cmd::` 与两个新 suite 先看第一次 CI 运行，不过就按 `docs/baselines/tui.md` 的办法分诊。
+3. 发现 1 的代价要不要接受：给外层 bwrap 发 SIGTERM / SIGHUP 时，zypi 收到的是 SIGKILL，来不及恢复终端；补丁前则是整棵树留在终端上继续跑。
+4. 提交与推送：已拆成 8 个提交，推到分支 `codex/linux-wsl-r8` 并开了 PR。`main` 上的 `eafc578`（phase7 的修复）原本也没推，PR 会一并带上；`--die-with-parent` 单独是一个提交（发现 1），不想要这个代价时可以单独 revert，但 CHANGELOG 与本节里对它的描述要一起改。
+5. WSL 的清理：r8 在最后一步清掉了自己留下的东西——`~/pi-linux`（克隆加构建产物，34 GB）、`~/zypi-bin`、`~/pi-linux-logs`、`~/pi-test-home`，以及 `/tmp` 下这次任务期间创建的 182 个条目（测试留下的临时目录与输出、下载的压缩包、临时脚本）和 pytest 的基础目录。**留着没删**的：`~/.local/protoc` 与 `~/.local/bin/{protoc,rg}`（为构建装的，要删就删这三个）、`~/.cargo/registry` 里新下载的约 27 MB crate 与 `~/.cache/uv` 里的几个条目（共享缓存，删了只会让下次构建重新下载）；用户自己的 `CARGO_TARGET_DIR`（`/mnt/d/work/cargo-target`）没有碰过。`~/.profile` / `~/.bashrc` 里对 `PI_HOME` 的导出是用户自己的配置，没有动——建议删掉，免得再有人直接跑 `zypi` 时读写 Windows 一侧的配置目录。
 
 ## 附录 A：能力矩阵（阶段 0.8 的初稿）
 
@@ -827,3 +951,4 @@ LoC 用 `python3` 递归统计 `*.rs` 行数（沙箱内 `xargs wc -l` 可能失
 - r5：推送分支、开 draft PR [#7](https://github.com/zy1233/pi-python/pull/7)，并完成阶段 A 与阶段 0 的 0.1 / 0.6。① 第一次 Linux `TUI CI` 全绿后把基线转为阻塞，依赖图上限 995 → 980、告警上限 20 → 0、各 suite 设 `min_passed`；② 入口审计（0.6）按附录 A 的默认执行，A.3 删除 dashboard、白名单外的斜杠命令、agents / extensions / persona 模态、tasks / 后台 / 定时任务、subagents / workflows / goals、共享 prompt 队列、MCP / hooks / plugins / marketplace 入口、rewind / fork / jump、recap / feedback / consent、changelog、`--chat` 世界、session rename 的死链路；③ A.4 去掉各 crate 根的 `#![allow]`（消费者构建 0 告警）、`pi-shell` 的 `pub mod` 降级、删未用依赖与 8 个无人依赖的 crate、删 `cfg(feature = "local-workspace")` 代码；④ `-p` 无沙箱时拒绝运行（ADR7 的最小版本）。净效果：`tui/crates` 的 `.rs` 从 1,252,374 行降到 1,019,041 行，`Cargo.lock` 1,285 → 1,257 个包，Linux 依赖图 995 → 980。新增 §10.7 与附录 A 的 r5 结果。⑤ 收尾：PTY 烟测发现并删掉欢迎页与选择器里的死 worktree 入口（`ac1d3ff`）；手动 `release_baseline` 回填了 release 数（`zypi` 422,034,120 B，−10.3 %；冷缓存构建 1,155 s，−29.9 %；0.2 勾选）；阶段 1 开了头——`session/list` 的标题与 `updated_at`（1.P1 一半）、stdio 契约套件并修了 `session/close` / `resume` 的路由（0.3 / 1.P7 的 Python 一侧、1.P5 的一个 bug）、优雅退出（1.P2 完成，1.R3 ② 完成：退出 zypi 时 bash 工具进程不再残留——双击 Ctrl+Q、`kill -9 zypi`、SIGTERM、关终端都量过，前因后果见 §10.7）。验证：Linux CI（`0e71894`、`cca48b0`、`ac1d3ff`）、macOS 本机、PTY。阶段 1 的其余部分和 0.5 / 0.7–0.9 未做，见 §10.7 的遗留。
 - r6：清理品牌残留（用户选了「清理 Grok 品牌残留」，没给新名字，沿用 zypi），分支 `codex/branding-cleanup`，叠在 PR #7 之上；PR #7 同时转为 ready for review。改动：主题改名为 `zypi Night` / `zypi Day`（落盘 id `zypinight` / `zypiday`，旧 id 与别名仍可解析）、桌面通知标题、`zypi doctor` 的标题与全部提示、启动 / SSH 提示、设置页描述、复制提示、`--minimal` 欢迎页与信任提示、`zypi wrap` 报错前缀。顺带修了三处「提示指向不存在的东西」：`zypi doctor fix ssh-wrap` 写进 shell rc 的是 `alias ssh='grok wrap ssh'`（`grok` 不存在）；配置目录在消息里叫 `~/.grok` / `$GROK_HOME`（实际是 `~/.pi-python` / `$PI_HOME`）；`/doctor`、`/minimal`、`/copy`、`grok worktree gc|rm|db rebuild` 都不存在。有意没动的见 §10.8。验证见 §10.8。
 - r7：合并 `main` 上另一台机器推的 7 个提交（Phase 6 / 7 审计的实现，没有一个文件在 `tui/` 下）。6 个文件、17 处冲突，都在 `packages/pi-agent-cli` 与 `pyproject.toml`；接缝处的三个决定：`api_key_getter(env_name, provider)`（key 只给自己的 provider，`/model` 里的每个模型都适用）、`model_for_choice(choice, reasoning=…)`（切换模型不丢 `Model.reasoning`）、`_bind_session` 先决定信任再恢复模型选择。纯 `origin/main` 上就失败的 6 个 macOS 专属测试里，一个是真 bug（macOS 上项目的 `AGENTS.md` 会被读两遍），已按文件身份去重修掉；其余 5 个没有动。见 §10.9。
+- r8：在 WSL2（Ubuntu 24.04，内核 5.10，没有 Landlock）上补 Linux 一侧的实测，拆成 8 个提交（分支 `codex/linux-wsl-r8`，走 PR 合入）。做了：退出矩阵（会话首进程 / shell 作业 × 双击 Ctrl+Q、`kill -9`、SIGTERM、SIGHUP、关终端、Ctrl-C，含沙箱下；空闲、CPU 占满、cargo 构建三种负载；1.R3 ③ 的 Linux 部分）、0.9 的六项、PTY 烟测 18/18、`doctor_cmd::` 去掉 `skip`（12 个通过；8 个 suite 7,456 通过，等于 CI 的 7,444 加这 12 个）、Python 全量 pytest（第一轮 Linux 2,135 通过；六件事做完之后 Linux 2,160、Windows 2,156）、74 个未选入 suite 的 crate 的分诊。修了三处：沙箱的 bwrap re-exec 缺 `--die-with-parent`（只杀 bwrap 会把 zypi、agent 与工具整棵树留下）；`media` 用例对 10 ms 时钟刻度的时间假设（`CONFIG_HZ=100` 上 30 次失败 26 次）；`pi-pager-minimal` 的一个用例缺 `test_lock()`（默认线程数下 30 次失败 25 次）。更正了 1.R3 ① 的前提：agent 的 `stderr` 在 TUI 里是 `/dev/null`，不是继承终端。第一轮留下了几处（`-p` 孤儿、沙箱静默降级、`stderr` 去向、`zypi export`），用户随后选了前三处，加上 CI 清单、PTY 脚本入库、清理 WSL，都做了：`-p` 只杀 zypi 时 agent 与工具不再残留（`PI_AGENT_PARENT_PID` + Python 一侧监视父进程，`-p` 也处理 SIGTERM / SIGHUP；`print_exit.py` 4/4）；Landlock 缺失时沙箱不再静默降级（启动时 `stderr` 一行警告，欢迎页与状态栏标 `sandbox:<profile> (not enforced)`）；agent 的 `stderr` 落到 `<home>/logs/agent.stderr.log`（0600、追加、超过 1 MiB 轮转）；CI 清单去掉 `doctor_cmd::` 的 `skip` 并加 `pi-pager-render`、`pi-pager-minimal`（10 个 suite，8,633 通过 / 1 个已知失败）；PTY 驱动脚本入库为 `scripts/tui_pty/`（`smoke.py` 23/23，沙箱下 26/26，退出矩阵 12/12 与 14/14）；WSL 里的克隆、构建产物与日志清掉了。没做：`zypi export` 读不到 Python 会话（用户选了不动）；Landlock 层、Windows 与 MCP 子进程未验证；清单的新内容要等第一次 CI 运行证实。见 §10.10。

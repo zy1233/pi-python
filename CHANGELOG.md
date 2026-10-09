@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The TUI keeps the agent's stderr**: `zypi` points its own stderr at `/dev/null` and the agent inherited it, so a Python traceback or warning from the agent went nowhere. It is now appended to `<home>/logs/agent.stderr.log` (mode 0600 on Unix, one `--- agent started ... ---` line per run, moved to `agent.stderr.log.1` once it is over 1 MiB at the next start). `zypi -p` is unchanged: the agent's stderr stays on the terminal.
+- **A sandbox that cannot be put in force says so (TUI)**: on a kernel without Landlock (Linux before 5.13, or with it disabled) `zypi --sandbox <profile>` used to start without the file and network limits and without a word; the only trace was an `ApplyFailed` line in `sandbox-events.jsonl`. It now prints a warning on stderr at start-up and shows `sandbox:<profile> (not enforced)` in the welcome page's top bar and the status bar, where the label of an applied profile is drawn. Where the sandbox is applied nothing changes.
+
+### Fixed
+
+- **`zypi -p` left the agent and its tools running when only `zypi` was killed**: `kill <pid>`, `kill -9`, `timeout` or an IDE's stop button reached `zypi` but not the agent, which kept running (and kept running its `bash` call) on the user's terminal. `zypi` now passes its pid in `PI_AGENT_PARENT_PID`; `python -m pi_agent_cli -p` watches its parent and stops the way it stops on a signal (turn cancelled, tools reaped), and `-p` now handles SIGTERM and SIGHUP too (exit status 128 + the signal number). POSIX only; the variable is removed from the environment at start-up, so tools do not inherit it, and it is ignored when it names a live process that is not the agent's parent (a wrapper script).
+- **`zypi --sandbox ...` on Linux left the whole process tree running when only the outer `bwrap` was killed**: the sandbox re-launches `zypi` under `bwrap`, which by default just waits for its child, so signalling the process the shell started (`kill $!`, a supervisor) left `zypi`, the agent and its tools on the terminal. `bwrap` now runs with `--die-with-parent`. **Trade-off**: a SIGTERM or SIGHUP sent to that outer `bwrap` now reaches `zypi` as SIGKILL, so the terminal is not restored (alternate screen, raw mode); before, the tree kept running instead.
+
 ## [0.5.0] - 2026-10-02
 
 ### Added

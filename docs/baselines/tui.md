@@ -2,7 +2,7 @@
 
 对应 [`PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`](../PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md) 阶段 0 的 0.1（Rust CI job）、0.2（基线报告）、0.4（deny-list）。权威环境是 CI 的 Linux runner（ADR6：`ubuntu-24.04` + `tui/rust-toolchain.toml` 钉的 1.94.0）。
 
-> **状态（r5）**：门禁与 CI job 已在 Linux 上跑通并阻塞，release 基线也有了数。最近一次完整的 Linux 结果是 PR #7 的 `ac1d3ff`（入口审计、阶段 A 与欢迎页残留清理之后）：`TUI CI` run [37389447358](https://github.com/zy1233/pi-python/actions/runs/37389447358)（PR）与手动触发的 run [37389455793](https://github.com/zy1233/pi-python/actions/runs/37389455793)（带 `release_baseline`）全绿——门禁全过，依赖图 **980** 个包，消费者构建 **0** 条告警，`--workspace --tests` 0 个错误，8 个 suite 共 **7,437 通过 / 0 失败 / 20 忽略**；`release-dist` 的 `zypi` **422,034,120 B**（比拆除前小 10.3 %），冷缓存构建 **1,155 s**（拆除前 1,647 s，快 29.9 %），`--version` 中位数 **23.1 ms**。清单已按 Linux 数收紧（依赖图上限 995 → 980，`max_warnings` 20 → 0，各 suite 的 `min_passed` 下限）。权威数字以 Linux 一栏为准；macOS 一栏是本机实测，用于对照。
+> **状态（r5）**：门禁与 CI job 已在 Linux 上跑通并阻塞，release 基线也有了数。最近一次完整的 Linux 结果是 PR #7 的 `ac1d3ff`（入口审计、阶段 A 与欢迎页残留清理之后）：`TUI CI` run [37389447358](https://github.com/zy1233/pi-python/actions/runs/37389447358)（PR）与手动触发的 run [37389455793](https://github.com/zy1233/pi-python/actions/runs/37389455793)（带 `release_baseline`）全绿——门禁全过，依赖图 **980** 个包，消费者构建 **0** 条告警，`--workspace --tests` 0 个错误，8 个 suite 共 **7,437 通过 / 0 失败 / 20 忽略**；`release-dist` 的 `zypi` **422,034,120 B**（比拆除前小 10.3 %），冷缓存构建 **1,155 s**（拆除前 1,647 s，快 29.9 %），`--version` 中位数 **23.1 ms**。清单已按 Linux 数收紧（依赖图上限 995 → 980，`max_warnings` 20 → 0，各 suite 的 `min_passed` 下限）。权威数字以 Linux 一栏为准；macOS 一栏是本机实测，用于对照。r8 又在 WSL2（Ubuntu 24.04、内核 5.10）里跑了同一组命令。第一轮去掉 `doctor_cmd::` 的 `skip`，8 个 suite 共 7,456 通过 / 0 失败 / 20 忽略，比 CI（`33374a3`）的 7,444 多出的正是那 12 个；之后按用户的选择把清单扩成 10 个 suite（加了 `pi-pager-render`、`pi-pager-minimal`，见 §3.2），基线执行器在 WSL2 上的结果是 **8,633 通过 / 1 个已知失败 / 22 忽略**。这些数都还没有 CI 运行证实。详见计划 §10.10。
 
 ## 1. 文件与命令
 
@@ -35,7 +35,7 @@ python scripts/tui_baseline.py release           # release-dist 构建 + 体积 
 | 消费者构建 | `cargo check --locked -p pi-pager-bin -p pi-pager-minimal -p pi-update` | 是 |
 | 全工作区类型检查 | `cargo check --workspace --tests --keep-going`（排除 `pi-fast-worktree`，其 lib 测试在 HEAD 上就编译不过） | 是，`enforce_workspace_tests = true` |
 | 告警数 | 消费者构建的 `dead_code` 等告警，按 lint / crate 汇总 | 是，`max_warnings = 0` |
-| 测试 | 8 个 suite，见 §3.2 | 是，`[test] enforce = true`（意外失败、超时、构建错误都会失败；每个 suite 有 `min_passed` 下限） |
+| 测试 | 10 个 suite，见 §3.2 | 是，`[test] enforce = true`（意外失败、超时、构建错误都会失败；每个 suite 有 `min_passed` 下限） |
 | release 体积 | `release-dist` 的 `zypi` 不大于 v0.4.0 | 是，仅手动 job |
 
 ## 3. 基线数据
@@ -66,7 +66,7 @@ macOS 环境：Apple Silicon，Homebrew `cargo` / `rustc` 1.96.1（**不是**钉
 
 ### 3.2 测试
 
-**Linux（权威）**：手动 run 37389455793（`ac1d3ff`），`test` job 约 27 m；同一提交的 PR run 37389447358 结果相同。`macOS` 一栏的数是 `ac1d3ff` 上的本机轻量运行（`--test-threads=2`，只跑了 `pi-pager`）；命令：`env -u NO_COLOR TERM=xterm-256color COLORTERM=truecolor`（沙箱默认的 `NO_COLOR=1`、`TERM=dumb` 会让约 10 个颜色 / 光标断言失败）；`PI_HOME` 等变量由清单的 `unset_env` 清掉（`PI_HOME` 的优先级高于配置隔离测试自己设的 `GROK_HOME`，不清掉会让 `test_config_update_isolation` 失败）。
+**Linux（权威）**：手动 run 37389455793（`ac1d3ff`），`test` job 约 27 m；同一提交的 PR run 37389447358 结果相同。`macOS` 一栏的数是 `ac1d3ff` 上的本机轻量运行（`--test-threads=2`，只跑了 `pi-pager`）；命令：`env -u NO_COLOR TERM=xterm-256color COLORTERM=truecolor`（沙箱默认的 `NO_COLOR=1`、`TERM=dumb` 会让约 10 个颜色 / 光标断言失败）；`PI_HOME` 等变量由清单的 `unset_env` 清掉（`PI_HOME` 的优先级高于配置隔离测试自己设的 `GROK_HOME`，不清掉会让 `test_config_update_isolation` 失败）。**在 WSL 里跑**：克隆放在 ext4 上，不要放在 `/mnt/<盘>`（9p，权限位与时间戳的行为不是 Linux 的）；登录脚本常会导出 `PI_HOME`（指向 Windows 一侧的配置目录），绕过执行器直接跑 `cargo test` 或测试二进制会读写那个目录——要么走执行器，要么先 `unset PI_HOME GROK_HOME` 并把 `HOME` 指到一次性目录。
 
 | suite（`cargo test -p …`） | 目标 | 通过（Linux） | 失败 | 忽略 | 耗时（含增量编译） | `min_passed` | 说明 |
 |---|---|---|---|---|---|---|---|
@@ -80,17 +80,28 @@ macOS 环境：Apple Silicon，Homebrew `cargo` / `rustc` 1.96.1（**不是**钉
 | `pi-sampling-types` | `--lib` | 320 | 0 | 0 | 107 s | 310 | |
 | **合计** | | **7,437** | **0** | **20** | | | |
 
+**`ac1d3ff` 之后的变化（r8，WSL2 实测，未经 CI）**：CI 最近一次（`33374a3`）是这 8 个 suite 共 7,444。r8 去掉了 `doctor_cmd::` 的 `skip`（`pi-pager` +12），新增 6 个 `agent_stderr` 用例（`pi-pager` +6，5,559 → 5,577）与 1 个 `-p` 用例（`pi-pager-bin` 20 → 21），并把 `pi-pager-render`（带一个 `known_failures`）与 `pi-pager-minimal` 加进清单。10 个 suite 在基线执行器里的结果（退出码 0，1,469 s，含增量编译）：`pi-shell` 1,056、`pi-pager` 5,577、`pi-pager-render` 1,091（另有 1 个已知失败、2 个忽略）、`pi-pager-minimal` 79、`pi-pager-bin` 21、`pi-acp-lib` 21、`pi-http` 13、`pi-telemetry` 239、`pi-file-utils` 216、`pi-sampling-types` 320，**合计 8,633 通过 / 1 个已知失败 / 22 忽略**。清单里 `pi-pager`（5,577）、`pi-pager-bin`（21）的 `reference_passed` 随之更新，`pi-pager-render`（1,092）与 `pi-pager-minimal`（79）是新增的；`min_passed` 都取实测值下方几个百分点。
+
 对比第一次 Linux 运行（10,851 通过 / 75 忽略）：少了 3,414 个通过，是随被删功能一起删的用例（`0e71894` 时是 7,478，即 −3,373：`pi-pager` −3,281，`pi-shell` −93，`pi-telemetry` −5；另有 `-p` 沙箱守卫新增的 9 个用例——`pi-shell` +3、`pi-pager-bin` +6——已含在净数里；其后 `5fcec14` 删 `chat_mode` 世界又少 21 个，`ac1d3ff` 删 worktree 对话框又少 20 个，都在 `pi-pager`）；`min_passed` 取实测值下方 3–6 %，让今后无意的丢失会失败，有意的删除要改清单。
 
 **清单里的已知失败 / 跳过，及原因**
 
 | 项 | 处理 | 原因 |
 |---|---|---|
-| `doctor_cmd::`（`pi-pager`，现在 12 个） | `skip` | 原先探测音频输入设备，在 macOS 上卡在 CoreAudio（疑似等麦克风授权）。r5 删掉了 `diagnostics::apply_voice_probe`，本机不加 `skip` 时这 12 个用例几秒内全部通过；**Linux 上仍被跳过，没有被验证过**，要去掉 `skip` 就在一次专门的 CI 运行里试 |
+| `terminal::tmux_probe::tests::successful_near_deadline_exit_still_returns_captured_output`（`pi-pager-render`） | `known_failures` | 在 1.5 s 的预算里用 shell 脚本烧 1.2 s，只给 `sh` 与 `perl` 的启动留 0.3 s，机器一卡就失败。WSL2 上失败过两次，都是测试二进制刚链接完的第一次运行（逐 crate 那一遍；清单的第一次完整运行——整个 crate 用了 8.6 s，平时是 1.3 s），之后重复 94 次（空闲与 12 个忙循环占满 CPU 各一半）都没复现，所以猜是刚链接完磁盘写回拖慢了进程启动，没有证实。容忍而不是跳过：用例照跑，报告里点它的名，天天失败的话看得出来，但不阻塞 |
 | `vendor_x_ai_ext_is_dropped_without_sending`（`pi-acp-lib`） | `skip` | **永久挂起**：`acp::ExtRequest` 序列化时丢了 `method`，丢弃逻辑不触发（计划 §10.4） |
 | `pi-pager-bin/tests/update_never_blocked_by_config.rs` | 未选入 | 按 `CARGO_BIN_EXE_pi-pager` 找二进制，而二进制叫 `zypi`（fork 改名遗留） |
 
-**没有选入 suite 的 crate**：`pi-agent`（1 项失败：加密模板字节过期）、`pi-shell-base`（1 项：按进程名 `grok` 判断）、`pi-workspace`（`session::git::*` 7 项：`xai-org` 改名遗留与 OID 断言）、`pi-fast-worktree`（lib 测试编译不过），以及其余没动过的 crate（`pi-tools`、`pi-hooks` 等）。这些失败与 runtime 拆除无关，各自分诊后再纳入。
+**去掉的 `skip`**：`doctor_cmd::`（`pi-pager`，12 个）。它原先探测音频输入设备，在 macOS 上卡在 CoreAudio（疑似等麦克风授权），所以清单里一直跳过。r5 删掉了 `diagnostics::apply_voice_probe`，之后在 macOS 本机不加 `skip` 时这 12 个用例几秒内全部通过；r8 又在没有音频设备的 WSL2 上跑了一遍，也都通过，于是去掉了 `skip`（`pi-pager` 的 `reference_passed` 加 12）。CI 的 runner 上还没跑过；若第一次运行里它们出问题，把 `skip = ["doctor_cmd::"]` 放回清单并写明原因。
+
+**没有选入 suite 的 crate**：r8 在 Linux（WSL2，计划 §10.10）上逐个跑过它们的 `--lib --tests`：74 个 crate，68 个全过（含 `pi-sandbox`、`pi-tools`、`pi-pager-minimal`，其中 5 个没有测试），共 11,807 通过 / 13 失败 / 23 忽略。有失败的都与 runtime 拆除无关：`pi-agent`（1 项：加密模板字节过期）、`pi-shell-base`（2 项：按进程名 `grok` 判断，函数没有调用者）、`pi-workspace`（`session::git::*` 7 项：`xai-org` 改名遗留与 OID 断言）、`pi-hooks`（1 项：`test_hook_child_cannot_open_dev_tty` 假定 `sh` 的 `exec` 重定向失败后会接着往下走，dash 不会；它只在有控制终端时才跑，CI 上会自己跳过）、`pi-fast-worktree`（lib 测试编译不过）；另有两个偶发（`pi-pager-render` 的 tmux 探测、`pi-workspace` 的 `hub_auth::proactive`），之后各重复 60 次都没复现。
+
+- 已加进清单（r8，用户选了做）：`pi-pager-render`（整个 crate 1,092 通过 / 2 忽略，带上面那个 `known_failures`）与 `pi-pager-minimal`（79 通过）。后者有个用例缺 `test_lock()`，默认线程数下 30 次失败 25 次，r8 已补上，补后 40/40。它们和 `doctor_cmd::` 的 `skip` 一样，是在 WSL2 里量的，没有 CI 运行证实过；第一次 CI 运行如果在 runner 上有不同的结果，就按 §5 的办法分诊——要么修，要么（`doctor_cmd::`）把 `skip` 放回去并写明原因。
+- `pi-sandbox` 的端到端用例（`deny_paths_e2e`、`read_write_trailing_glob_e2e`）在内核不支持 Landlock 时直接 `return`，「通过」是空转；要在带 Landlock 的 runner（内核 ≥ 5.13）上并设 `SANDBOX_E2E_REQUIRE_ENFORCEMENT=1` 才算数。这一项还没做，仍会改 CI 门禁（要换 runner 或加一个 job）。
+
+### 3.3 PTY 载体
+
+`scripts/tui_pty/`（r8，Linux；README 在同目录）用 pyte 当屏幕，在真 PTY 里跑真的 `zypi`，查两件事：画面（欢迎页、一轮对话、`/model`、重启后 `/resume`、`--sandbox` 时状态栏的标签）和进程树（以六种方式离开 zypi，之后不能有进程留下；`-p` 下只杀 zypi，agent 与工具也得停）。它们要一个已构建的 `zypi`，所以不在 `pytest` 或 CI 里；WSL2 上的结果是 `smoke.py` 23/23（加 `--sandbox workspace` 26/26）、`exit_matrix.py` 12/12（沙箱下 14/14）、`print_exit.py` 4/4。脚本本身的辅助逻辑有 `scripts/tests/test_tui_pty.py`（Windows 上跳过依赖 `pty` 的 5 个）。
 
 ## 4. deny-list 与保留理由（0.4）
 
@@ -121,4 +132,4 @@ macOS 环境：Apple Silicon，Homebrew `cargo` / `rustc` 1.96.1（**不是**钉
 
 ## 6. 尚未覆盖
 
-0.3（ACP 契约 / e2e 载体）、0.5（模块级调用图工具化）、0.7（磁盘读取点清单）、0.8（能力矩阵与 ACP 版本配对表）、0.9（实测结案）都不在本页范围；见计划 §7 阶段 0（0.6 入口审计在 r5 按附录 A 的默认做完，结果见计划 §10.7）。「启动耗时」目前只有 `--version` 延迟，不含「到欢迎页」的时间，后者需要 PTY 载体。
+0.3（ACP 契约 / e2e 载体）、0.5（模块级调用图工具化）、0.7（磁盘读取点清单）、0.8（能力矩阵与 ACP 版本配对表）、0.9（实测结案）都不在本页范围；见计划 §7 阶段 0（0.6 入口审计在 r5 按附录 A 的默认做完，结果见计划 §10.7；0.9 的 Linux 一侧 r8 做了，结果见计划 §10.10）。「启动耗时」目前只有 `--version` 延迟，不含「到欢迎页」的时间；PTY 载体有了（§3.3），但还没有加计时。
