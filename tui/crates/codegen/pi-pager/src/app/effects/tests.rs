@@ -957,6 +957,67 @@ async fn fetch_session_list_uses_standard_session_list() {
         other => panic!("expected SessionListLoaded, got {other:?}"),
     }
 }
+/// zypi hands the agent no MCP servers (plan 1.P4): the Python agent connects to none, so what the
+/// project and the user's other tools configure stays with them instead of being sent to a process
+/// that drops it. `session/new` and `session/load` both carry an empty list.
+#[tokio::test]
+async fn session_new_and_load_send_no_mcp_servers() {
+    use pi_acp_lib::AcpAgentMessage;
+    let project = tempfile::tempdir().expect("temp dir");
+    std::fs::write(
+        project.path().join(".mcp.json"),
+        r#"{"mcpServers":{"files":{"command":"npx","args":["-y","some-server"],"env":{"TOKEN":"secret"}}}}"#,
+    )
+    .expect("write .mcp.json");
+    // The premise: what zypi used to send is not empty for this project.
+    let found = pi_shell::util::config::load_mcp_servers(
+        project.path(),
+        &pi_tools::types::compat::CompatConfig::default(),
+    );
+    assert!(!found.is_empty(), "the fixture must be something discovery finds");
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut tasks = JoinSet::new();
+    execute(
+        Effect::CreateSession {
+            agent_id: agent::AgentId(0),
+            cwd: project.path().to_path_buf(),
+            model_id: None,
+            permission_mode_override: None,
+            preferred_session_id: None,
+        },
+        &mut tasks,
+        &tx,
+        project.path(),
+        &SessionFlags::default(),
+    );
+    execute(
+        Effect::LoadSession {
+            agent_id: agent::AgentId(0),
+            session_id: "s1".to_string(),
+            session_cwd: Some(project.path().to_path_buf()),
+        },
+        &mut tasks,
+        &tx,
+        project.path(),
+        &SessionFlags::default(),
+    );
+    let (mut created, mut loaded) = (false, false);
+    for _ in 0..2 {
+        match rx.recv().await.expect("a request") {
+            AcpAgentMessage::NewSession(args) => {
+                assert!(args.request.mcp_servers.is_empty(), "session/new sent MCP servers");
+                created = true;
+            }
+            AcpAgentMessage::LoadSession(args) => {
+                assert!(args.request.mcp_servers.is_empty(), "session/load sent MCP servers");
+                loaded = true;
+            }
+            other => panic!("unexpected request {other:?}"),
+        }
+    }
+    assert!(created && loaded);
+}
 /// A scripted `session/list` agent: answers request number `n` with `pages[n]` (`None` ends the
 /// script with an error). Every request's `(cwd, cursor)` is recorded.
 type ListRequests = std::sync::Arc<std::sync::Mutex<Vec<(Option<String>, Option<String>)>>>;
