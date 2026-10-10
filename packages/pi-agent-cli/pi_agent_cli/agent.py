@@ -78,7 +78,12 @@ from pi_agent_cli.permissions import (
     outcome_allows,
     permission_tool_call,
 )
-from pi_agent_cli.session_list import read_session_previews
+from pi_agent_cli.session_list import (
+    SESSION_LIST_PAGE_SIZE,
+    decode_cursor,
+    encode_cursor,
+    read_session_previews,
+)
 from pi_agent_cli.trust_prompt import (
     trust_explanation,
     trust_options,
@@ -239,8 +244,18 @@ class PiAcpAgent(Agent):
     async def list_sessions(
         self, cwd: str | None = None, cursor: str | None = None, **kwargs: Any
     ) -> ListSessionsResponse:
-        # One page: the pager does not follow ``nextCursor``, so ``cursor`` is not used.
-        listed = await self._repo.list({"cwd": cwd} if cwd is not None else None)
+        after = None
+        if cursor is not None:
+            try:
+                after = decode_cursor(cursor)
+            except ValueError:
+                raise RequestError.invalid_params(
+                    {"cursor": cursor, "reason": "not a cursor this agent issued"}
+                ) from None
+        page = await self._repo.list_page(
+            {"cwd": cwd, "limit": SESSION_LIST_PAGE_SIZE, "after": after}
+        )
+        listed = page.sessions
         previews = await asyncio.to_thread(
             read_session_previews, [(item.path, item.createdAt) for item in listed]
         )
@@ -253,7 +268,8 @@ class PiAcpAgent(Agent):
             )
             for item, preview in zip(listed, previews, strict=True)
         ]
-        return ListSessionsResponse(sessions=sessions)
+        next_cursor = encode_cursor(page.next_after) if page.next_after is not None else None
+        return ListSessionsResponse(sessions=sessions, next_cursor=next_cursor)
 
     async def resume_session(
         self,
@@ -472,10 +488,7 @@ class PiAcpAgent(Agent):
         return harness
 
     async def _find_metadata(self, session_id: str) -> Any:
-        for item in await self._repo.list():
-            if item.id == session_id:
-                return item
-        return None
+        return await self._repo.find(session_id)
 
     async def _bind_session(self, session_id: str, session: Session, cwd: str) -> None:
         cwd = normalize_host_path(cwd)

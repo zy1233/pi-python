@@ -55,6 +55,12 @@ The Rust TUI (`zypi`) spawns the Python agent via (priority order):
 
 **The agent's stderr.** The TUI owns the screen, and its own fd 2 is `/dev/null` (`pi_tty_utils::redirect_native_stderr`), so the agent's stderr goes to `<home>/logs/agent.stderr.log` instead (`acp/spawn.rs`, `agent_stderr`): appended across runs, one `--- agent started <time> (zypi pid N) ---` line per spawn, mode 0600 on Unix (a traceback can quote prompts, paths and keys), and a log longer than 1 MiB is moved to `agent.stderr.log.1` at the next spawn. A log that cannot be opened is skipped, not fatal. This is where a Python traceback or a warning from the agent ends up; the agent should still write diagnostics to stderr, not stdout (stdout is the ACP channel). `-p` runs are not redirected: there the agent's stderr is the user's terminal.
 
+## Listing sessions
+
+`session/list` returns `SESSION_LIST_PAGE_SIZE` (50) sessions at a time, newest first, with `nextCursor` while more follow; the TUI keeps asking until it is gone. The order is the harness's (`JsonlSessionRepo.list_page`): creation time, which the session file names start with, so a page reads a file's header only when it gets that far and costs the files it looks at, not the directory (a `cwd` filter makes it skip other projects' files). `nextCursor` is opaque to the client and carries the file name the next page continues below; the agent keeps nothing between requests, so a cursor survives a restart, a session created meanwhile is simply newer than the cursor, and one deleted meanwhile moves nothing. A page that carries a cursor is never followed by an empty one (the agent looks one session ahead). A string the agent did not issue is `invalid_params`. `updated_at` is still the file's mtime, so it need not be in the order of the list.
+
+Looking a session up by id (`load` / `resume` / `pi/session/delete`) is `JsonlSessionRepo.find`: the file name ends in `-<id>.jsonl`, so only that file's header is read. `scripts/session_list_bench.py` measures all of this against the real agent (`start`, first page, every page, `session/load`) on a synthetic home; numbers and the decisions that rest on them are in `docs/PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md` §10.11.
+
 ## ACP contract tests
 
 `tests/test_acp_stdio_contract.py` drives an agent *process* over stdio the way the TUI does: `initialize`, `session/new`, streamed `prompt`, the `model` config option, `session/list` (first-prompt title), `session/load` replay and `session/resume` across a restart, `session/close`, unknown methods answered with an error, exit code 0 on stdin EOF. It uses the mock LLM (`PI_USE_MOCK=1`) and a throw-away `PI_HOME`. Set `PI_ACP_CONTRACT_COMMAND` to run the same suite against another stdio ACP agent (it must honour `PI_HOME` and answer prompts with `Hello from mock`, without network), e.g. a future `pi-rust`.
@@ -99,6 +105,6 @@ The agent must reap the tools it is running when its client goes away: the TUI c
 | `headless.py` | `-p` one-shot mode, prompt override application |
 | `events.py` | Internal events → ACP `session_update` projection |
 | `permissions.py` | Tool permission gating (ask / auto / always-approve); in `ask` mode a tool is asked about unless its annotations say it is harmless (see Tool permissions) |
-| `session_list.py` | `session/list` display data: first-user-message title and file-mtime `updated_at` (bounded read; one page, no cursor) |
+| `session_list.py` | `session/list` display data: first-user-message title and file-mtime `updated_at` (bounded read), `SESSION_LIST_PAGE_SIZE`, the opaque `nextCursor` (`encode_cursor` / `decode_cursor`) |
 | `create_harness.py` | Harness-level system prompt, coding tool wiring |
 | `benchmarks/` | Pelican benchmark suite, evaluator, Docker runner |
