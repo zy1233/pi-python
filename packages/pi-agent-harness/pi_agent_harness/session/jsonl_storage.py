@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import Any, Protocol
 
+from ..text_lines import read_head_lines
 from ..types import (
     JsonlSessionMetadata,
     LabelEntry,
@@ -35,11 +36,7 @@ class _PathJsonlStorageFs:
         return await asyncio.to_thread(Path(path).read_text, encoding="utf-8")
 
     async def read_text_lines(self, path: str, max_lines: int | None = None) -> list[str]:
-        def read() -> list[str]:
-            lines = Path(path).read_text(encoding="utf-8").splitlines()
-            return lines[:max_lines] if max_lines is not None else lines
-
-        return await asyncio.to_thread(read)
+        return await asyncio.to_thread(read_head_lines, path, max_lines)
 
     async def write_file(self, path: str, content: str | bytes) -> None:
         def write() -> None:
