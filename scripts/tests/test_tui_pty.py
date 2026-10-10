@@ -246,6 +246,21 @@ def test_the_mode_scenarios_are_well_formed():
     assert {0, 1, 2, 3, 4} <= pressed
     assert any("--always-approve" in scenario.flags for scenario in mp.SCENARIOS)
     assert all(set(scenario.keys) <= {mp.SHIFT_TAB} for scenario in mp.SCENARIOS)
+    # Every value `zypi --permission-mode` takes is probed, each as its own command line.
+    by_flag = {
+        scenario.flags[1]: scenario.flags
+        for scenario in mp.SCENARIOS
+        if scenario.flags[:1] == ("--permission-mode",)
+    }
+    assert set(by_flag) == {
+        "default",
+        "acceptEdits",
+        "auto",
+        "dontAsk",
+        "bypassPermissions",
+        "plan",
+    }
+    assert all(flags == ("--permission-mode", mode) for mode, flags in by_flag.items())
 
 
 def test_the_status_label_is_read_from_the_frame_of_the_prompt_box():
