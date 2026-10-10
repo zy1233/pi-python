@@ -434,10 +434,7 @@ fn run_python_print(args: &PagerArgs) -> i32 {
     if args.no_context_files {
         agent_args.push("--no-context-files".into());
     }
-    match std::process::Command::new(&program)
-        .args(&agent_args)
-        .status()
-    {
+    match print_mode::agent_command(&program, &agent_args).status() {
         Ok(status) => status.code().unwrap_or(1),
         Err(err) => {
             eprintln!(

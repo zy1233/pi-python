@@ -1,11 +1,15 @@
-"""Which projects may speak for the user: their extensions, prompt files and skills (audit P7-02).
+"""Which projects may speak for the user: their extensions, saved workflows, prompt files and
+skills (audit P7-02, F7-01).
 
 ``<project>/.pi-python/extensions`` ships with the repository, and importing an extension
 executes its code the moment a session opens, before the user has typed anything. The
 project's ``.pi/SYSTEM.md``, ``.pi/APPEND_SYSTEM.md`` and project-relative skills run nothing,
 but they decide what the model is told. Upstream pi puts all of these behind project trust, and
 so does this module: they are skipped unless the user vouched for the project, and only
-somewhere the project itself cannot write. In order of strength:
+somewhere the project itself cannot write. So are the saved workflows in
+``<project>/.pi-python/workflows``: the dynamic-workflows extension makes each script a slash
+command with a description the repository wrote, and has the model run it. In order of
+strength:
 
 1. ``--trust-project-extensions`` on the command line, or the ``PI_TRUST_PROJECT_EXTENSIONS``
    environment variable (the same thing): for headless and CI runs.
@@ -171,21 +175,30 @@ def decide_project_trust(
 
 
 def skipped_project_resources(
-    config: CliConfig, cwd: str | Path, *, trusted: bool | None = None
+    config: CliConfig,
+    cwd: str | Path,
+    *,
+    trusted: bool | None = None,
+    home: Path | str | None = None,
 ) -> list[Path]:
-    """Project prompt files and skills that exist and would have applied, but are ignored.
+    """Project saved workflows, prompt files and skills that exist and would have applied, but
+    are ignored.
 
-    Mirrors what ``load_system_prompt_options`` and ``load_session_resources`` skip, so the
-    user is told about exactly what was left out (nothing when the project is trusted, and
-    nothing for a prompt the user's own config already overrides). The extensions are
-    reported by the loader that skipped them. Pass *trusted* when the session knows better
-    than the configuration does (the user said yes in a prompt).
+    Mirrors what the extension that reads the workflows, ``load_system_prompt_options`` and
+    ``load_session_resources`` skip, so the user is told about exactly what was left out
+    (nothing when the project is trusted, and nothing for a prompt the user's own config
+    already overrides). The extensions are reported by the loader that skipped them. Pass
+    *trusted* when the session knows better than the configuration does (the user said yes in
+    a prompt), and *home* when the session runs with a pi home other than the default (it
+    tells the project's own directories from the user's).
     """
     if trusted is None:
         trusted = project_extensions_trusted(config, cwd)
     if trusted:
         return []
-    return [r.path for r in gated_project_resources(config, cwd) if r.kind != "extensions"]
+    return [
+        r.path for r in gated_project_resources(config, cwd, home=home) if r.kind != "extensions"
+    ]
 
 
 _WHY: dict[str, str] = {
@@ -243,7 +256,8 @@ def untrusted_project_notice(
     entry = Path(cwd).as_posix()
     return (
         f"Skipped project resources ({'; '.join(parts)}). Extensions run arbitrary Python when "
-        "loaded, and prompt files and skills change what the model is told, and "
+        "loaded, saved workflows add commands that have the model run their scripts, and "
+        "prompt files and skills change what the model is told, and "
         f"{_WHY[why or 'undecided']}. "
         f'To load them, add "{entry}" to `trusted_projects` under `[extensions]` in '
         f"{agent_config_path(home)}, or start the agent with --trust-project-extensions "

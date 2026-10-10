@@ -88,18 +88,44 @@ targets = [
     "--test",
     "selection_model_public_api",
 ]
-# doctor_cmd:: probes the audio input device (hangs on a macOS CoreAudio query without mic access).
-skip = ["doctor_cmd::"]
-reference_passed = 5552
+# 5,559 in the last CI run before r8 (33374a3, `doctor_cmd::` skipped) plus the 12 `doctor_cmd::`
+# tests plus the 6 `agent_stderr` tests of the agent's stderr log. The first CI run with them
+# (PR #9) measured 5,576 passed and 1 failed: the doctor test that counts issues also counted the
+# one the voice probe adds on a host with no recorder on PATH (pw-record / parec / arecord), as the
+# runner is. It now leaves that finding out (plan section 10.10, "CI results").
+reference_passed = 5577
 min_passed = 5300
+
+# Lib tests only; they were outside the manifest until r8 (plan section 10.10: 1,092 passed,
+# 2 ignored on Linux, 1.4 s).
+[[test.suite]]
+package = "pi-pager-render"
+targets = ["--lib"]
+# Burns 1.2 s of a 1.5 s budget in a shell script, so it fails when the machine stalls. It failed
+# twice on WSL2, both times on the first run after the test binary was linked (the
+# one-crate-at-a-time sweep, then the first manifest run), and never in the 94 runs after that,
+# idle or with every core busy. Tolerated rather than skipped: the report still names it when it
+# fails, so a test that fails on every run is visible, but it does not block.
+known_failures = ["tmux_probe::tests::successful_near_deadline_exit_still_returns_captured_output"]
+reference_passed = 1092
+min_passed = 1040
+
+# Lib tests only (79 passed on Linux). Its diff-background test used to fail under the default
+# thread count for want of the theme lock; with the lock it is stable (40/40 in each mode).
+[[test.suite]]
+package = "pi-pager-minimal"
+targets = ["--lib"]
+reference_passed = 79
+min_passed = 75
 
 [[test.suite]]
 package = "pi-pager-bin"
 targets = ["--bin", "zypi"]
 # tests/update_never_blocked_by_config.rs is not selected: it looks for CARGO_BIN_EXE_pi-pager,
 # but the binary is named zypi (fork-rename leftover, unrelated to the runtime removal).
-reference_passed = 20
-min_passed = 20
+# 20 in the last CI run plus the test that names zypi as the agent's parent in `-p` mode.
+reference_passed = 21
+min_passed = 21
 
 [[test.suite]]
 package = "pi-acp-lib"

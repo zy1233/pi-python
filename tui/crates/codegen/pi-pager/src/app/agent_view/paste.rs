@@ -1858,7 +1858,7 @@ pub(super) mod paste_key_tests {
     }
     /// A same-length in-place rewrite whose mtime does not move (coarse
     /// clock) must still retry a negative-cached failure: the Unix stamp
-    /// includes inode + ctime, which a rewrite always advances.
+    /// includes inode + ctime, which a rewrite advances (to within the kernel's clock tick).
     #[cfg(unix)]
     #[test]
     fn tool_media_same_length_same_mtime_rewrite_retries_failed_load() {
@@ -1883,6 +1883,10 @@ pub(super) mod paste_key_tests {
         let placement = tool_media_placement(path.clone());
         assert!(agent.build_inline_media_escapes(&placement).is_none());
         assert!(agent.inline_media_load_failed.contains_key(&path));
+        // `ctime` comes from the kernel's coarse clock, one tick of which is 10 ms at CONFIG_HZ=100
+        // (WSL2's 5.10 kernel): a rewrite that lands in the same tick as the first stamp carries the
+        // same ctime and looks unchanged. A real slow write is never that fast; let a tick pass.
+        std::thread::sleep(std::time::Duration::from_millis(25));
         std::fs::write(&path, &png).unwrap();
         pin_mtime(&path);
         assert!(

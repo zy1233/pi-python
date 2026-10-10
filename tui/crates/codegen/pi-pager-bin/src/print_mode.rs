@@ -10,12 +10,31 @@
 //!
 //! The full flag contract is plan item 1.P6 (`docs/PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`).
 
+use std::ffi::{OsStr, OsString};
+
 use pi_pager::app::PagerArgs;
 use pi_pager::app::cli::OutputFormat;
 use pi_shell::config::RequestedSandbox;
 
 /// Exit status when print mode refuses to run (the same class as a command-line usage error).
 pub(crate) const REFUSED_EXIT_CODE: i32 = 2;
+
+/// The variable that tells the agent which process started it (read by `pi_agent_cli`).
+///
+/// The TUI's agent finds out that zypi is gone from EOF on its stdin. Here stdin is the user's own
+/// terminal, so the agent gets zypi's pid instead and stops once that is no longer its parent;
+/// without it, killing only zypi (`kill -9`, `kill <pid>`, an IDE's stop button) leaves the agent
+/// and the tools it is running going on the terminal.
+pub(crate) const PARENT_PID_ENV: &str = "PI_AGENT_PARENT_PID";
+
+/// The agent process for `-p`: `program` with `args`, told which process started it.
+pub(crate) fn agent_command(program: &OsStr, args: &[OsString]) -> std::process::Command {
+    let mut command = std::process::Command::new(program);
+    command
+        .args(args)
+        .env(PARENT_PID_ENV, std::process::id().to_string());
+    command
+}
 
 /// The message printed when print mode refuses to start because `requested` cannot be applied.
 pub(crate) fn sandbox_refusal(requested: &RequestedSandbox) -> String {
@@ -124,6 +143,22 @@ mod tests {
                 "--resume",
                 "--no-plan"
             ]
+        );
+    }
+
+    #[test]
+    fn the_agent_is_told_which_process_started_it() {
+        let command = agent_command(OsStr::new("agent"), &[OsString::from("-p")]);
+        assert_eq!(command.get_program(), OsStr::new("agent"));
+        assert_eq!(command.get_args().collect::<Vec<_>>(), [OsStr::new("-p")]);
+        let pid = std::process::id().to_string();
+        let given: Vec<_> = command
+            .get_envs()
+            .filter(|(name, _)| *name == OsStr::new(PARENT_PID_ENV))
+            .collect();
+        assert_eq!(
+            given,
+            [(OsStr::new(PARENT_PID_ENV), Some(OsStr::new(&pid)))]
         );
     }
 

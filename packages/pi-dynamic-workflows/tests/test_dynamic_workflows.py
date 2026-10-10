@@ -539,6 +539,10 @@ class _BridgeStub:
     def tool_call_gate(self):
         return None
 
+    @property
+    def project_trusted(self):
+        return False
+
 
 class TestActivate:
     def test_activate_registers_tool_and_commands(self) -> None:

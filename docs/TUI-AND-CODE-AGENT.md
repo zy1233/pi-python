@@ -119,15 +119,16 @@ command = "python -m pi_agent_cli"
 
 [extensions]
 # Projects that may use their own <project>/.pi-python/extensions (arbitrary Python),
-# .pi/SYSTEM.md, .pi/APPEND_SYSTEM.md and project-relative skills, without being asked.
+# <project>/.pi-python/workflows, .pi/SYSTEM.md, .pi/APPEND_SYSTEM.md and project-relative
+# skills, without being asked.
 trusted_projects = ["~/work/my-repo"]
 # "ask" (the default), "never" (don't ask) or "always" (trust every project)
 default_project_trust = "ask"
 ```
 
-A project's own extensions, `.pi/SYSTEM.md`, `.pi/APPEND_SYSTEM.md` and project-relative skills (such as `.pi/skills`) are not used until the project is trusted. When you open a project that ships any of them, the agent tells you in the session which files they are and what each does, then asks "Allow loading this project's extensions and prompt files?" with two answers: **Don't trust** (the session goes on without them) and **Trust and remember**. The session's first prompt waits for your answer. "Trust and remember" is saved in `~/.pi-python/agent/trust.json` together with a fingerprint of those files, so you are asked again when one of them changes (after a `git pull`, say) and the agent says that they changed; refusing is never remembered. To take a trust back, delete the project's entry from that file. The TUI's YOLO mode does not answer this question for you: it has no "allow once" answer, so it always waits for you. The TUI does, however, pre-highlight the kind of answer you confirmed last time, so if that was an "always" answer, "Trust and remember" is the highlighted row: read the message above the question before pressing Enter.
+A project's own extensions, saved workflows (`.pi-python/workflows/*.py`, which become slash commands), `.pi/SYSTEM.md`, `.pi/APPEND_SYSTEM.md` and project-relative skills (such as `.pi/skills`) are not used until the project is trusted. When you open a project that ships any of them, the agent tells you in the session which files they are and what each does, then asks "Allow loading this project's …?" (naming what it ships, for example "extensions, saved workflows and prompt files") with two answers: **Don't trust** (the session goes on without them) and **Trust and remember**. The session's first prompt waits for your answer. "Trust and remember" is saved in `~/.pi-python/agent/trust.json` together with a fingerprint of those files, so you are asked again when one of them changes (after a `git pull`, say) and the agent says that they changed; refusing is never remembered. To take a trust back, delete the project's entry from that file. The TUI's YOLO mode does not answer this question for you: it has no "allow once" answer, so it always waits for you. The TUI does, however, pre-highlight the kind of answer you confirmed last time, so if that was an "always" answer, "Trust and remember" is the highlighted row: read the message above the question before pressing Enter.
 
-The question is skipped, and the project's files used or left out, when the decision is already made: the project is under `trusted_projects` (subdirectories count), you start with `PI_TRUST_PROJECT_EXTENSIONS=1` / `--trust-project-extensions`, `default_project_trust` is `always` (trusted) or `never` (not), or you answered before and the files have not changed. A project whose files are too many, too large or unreadable to fingerprint is never asked about; list it under `trusted_projects`. When files are left out, the agent says so in the session. Headless `-p` runs never ask, but honour an answer given earlier. Extension packages installed with `pip`, `~/.pi-python/extensions`, `AGENTS.md`, and skills paths that are absolute or start with `~` always load. The TUI's own folder trust (`/hooks trust`) does not apply here.
+The question is skipped, and the project's files used or left out, when the decision is already made: the project is under `trusted_projects` (subdirectories count), you start with `PI_TRUST_PROJECT_EXTENSIONS=1` / `--trust-project-extensions`, `default_project_trust` is `always` (trusted) or `never` (not), or you answered before and the files have not changed. A project whose files are too many, too large or unreadable to fingerprint is never asked about; list it under `trusted_projects`. When files are left out, the agent says so in the session. Headless `-p` runs never ask, but honour an answer given earlier. Extension packages installed with `pip`, `~/.pi-python/extensions`, your own saved workflows in `~/.pi-python/workflows`, `AGENTS.md`, and skills paths that are absolute or start with `~` always load. The TUI's own folder trust (`/hooks trust`) does not apply here.
 
 ### `config.toml` — TUI-only config (optional)
 
@@ -173,6 +174,10 @@ zypi
 #   /quit     — exit
 #   @         — browse local directory listing
 ```
+
+The TUI owns the screen, so what the agent writes to stderr (a Python traceback, a warning) is not shown there. It is appended to `~/.pi-python/logs/agent.stderr.log` (owner-only, one `--- agent started ... ---` line per run, moved to `agent.stderr.log.1` once it passes 1 MiB); look there when the agent dies or misbehaves. With `zypi -p` the agent's stderr is your terminal as usual.
+
+`zypi --sandbox <profile>` confines zypi and the agent it starts with Landlock on Linux (kernel 5.13 or newer; Seatbelt on macOS). On a kernel without Landlock zypi still starts, but the profile's file and network limits do not apply: it warns on stderr and shows `sandbox:<profile> (not enforced)` in red at the top of the screen.
 
 ### ACP stdio mode (for editors)
 

@@ -44,6 +44,7 @@ from acp.schema import (
     TextContentBlock,
     UnstructuredCommandInput,
 )
+from pydantic import ValidationError
 
 from pi_agent_cli.config import (
     CliConfig,
@@ -100,7 +101,8 @@ MODEL_CONFIG_ID = "model"
 
 @dataclass
 class _SessionTrust:
-    """One session's standing on its project's own extensions, prompt files and skills.
+    """One session's standing on its project's own extensions, saved workflows, prompt files
+    and skills.
 
     ``trust`` is what the session's resource loaders consult. The project's files are hashed
     when the session opens; when the answer is the user's to give, the question is put after
@@ -481,8 +483,8 @@ class PiAcpAgent(Agent):
         async def on_tool_call(event: Any) -> dict[str, Any] | None:
             return await self._handle_tool_call(session_id, event)
 
-        # Decide about the project's own extensions, prompt files and skills before any of
-        # them is read.
+        # Decide about the project's own extensions, saved workflows, prompt files and skills
+        # before any of them is read.
         decision = await self._decide_trust(cwd)
         state = _SessionTrust(trust=ProjectTrust(decision), why=notice_reason(decision))
         resources = await load_session_resources(
@@ -692,8 +694,8 @@ class PiAcpAgent(Agent):
         state.settled.set()
 
     async def _notify_untrusted_project(self, session_id: str) -> None:
-        """Tell the user which project extensions, prompt files and skills were left out
-        because the project is untrusted (extensions were never imported), and how to
+        """Tell the user which project extensions, saved workflows, prompt files and skills were
+        left out because the project is untrusted (extensions were never imported), and how to
         enable them; and if a yes could not be saved, that it will have to be given again."""
         harness = self._harnesses.get(session_id)
         cwd = self._session_cwds.get(session_id)
@@ -702,7 +704,9 @@ class PiAcpAgent(Agent):
             return
         notice = untrusted_project_notice(
             extensions=harness.skipped_extensions,
-            resources=skipped_project_resources(self._config, cwd, trusted=state.trust.trusted),
+            resources=skipped_project_resources(
+                self._config, cwd, trusted=state.trust.trusted, home=self._home
+            ),
             cwd=cwd,
             home=self._home,
             why=state.why,
@@ -744,14 +748,24 @@ class PiAcpAgent(Agent):
             return
         available: list[AvailableCommand] = []
         for name, cmd in commands.items():
-            ac = AvailableCommand(
-                name=name,
-                description=cmd.description,
-                input=AvailableCommandInput(
-                    root=UnstructuredCommandInput(hint="<args>"),
-                ),
-            )
+            try:
+                ac = AvailableCommand(
+                    name=name,
+                    description=cmd.description,
+                    input=AvailableCommandInput(
+                        root=UnstructuredCommandInput(hint="<args>"),
+                    ),
+                )
+            except Exception as exc:
+                # A command the schema rejects (an extension that put a non-text description
+                # into the registry) must not take the other commands down with it. This is
+                # sent again with every prompt until it succeeds, so one bad entry used to make
+                # every ``session/prompt`` fail (audit P7-17).
+                logger.warning("Command /%s is not advertised: %s", name, _why_invalid(exc))
+                continue
             available.append(ac)
+        if not available:
+            return
         logger.debug(
             "_advertise_commands: sending %d commands: %s",
             len(available),
@@ -839,6 +853,17 @@ def _prompt_to_text_images(
 def _is_busy(exc: Exception) -> bool:
     """Whether *exc* is the harness saying it is running something else."""
     return isinstance(exc, AgentHarnessError) and exc.code == "busy"
+
+
+def _why_invalid(exc: Exception) -> str:
+    """A short reason a command was rejected, e.g. ``description: Input should be a valid
+    string`` (pydantic's own text also repeats the value, which may be anything)."""
+    if isinstance(exc, ValidationError):
+        return "; ".join(
+            f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
+            for error in exc.errors()
+        )
+    return f"{type(exc).__name__}: {exc}"
 
 
 def _stop_reason(message: Any) -> str:

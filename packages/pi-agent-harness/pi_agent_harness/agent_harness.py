@@ -311,7 +311,9 @@ class AgentHarness:
         self._session_id: str = ""
         self._cached_custom_entries: list[Any] = []
         # ``trust_project_extensions``: with auto-discovery, also import (= run)
-        # ``<cwd>/.pi-python/extensions``. Off unless the caller vouches for the project.
+        # ``<cwd>/.pi-python/extensions``. Off unless the caller vouches for the project. It
+        # is also what extensions read as ``pi.project_trusted`` before they use anything
+        # else a repository ships.
         self._extension_config = {
             "extensions": extensions or [],
             "extension_dirs": extension_dirs or [],
@@ -327,6 +329,9 @@ class AgentHarness:
 
     def set_trust_project_extensions(self, trusted: bool) -> None:
         """Decide whether ``<cwd>/.pi-python/extensions`` may be imported (= run).
+
+        The same answer is what extensions see as ``pi.project_trusted``: the saved workflows a
+        project ships are read (by the dynamic-workflows extension) only when it is ``True``.
 
         For a caller that cannot know when it builds the harness: an ACP agent has to open the
         session before it may ask the user about the project. Accepted only until the
@@ -526,6 +531,10 @@ class AgentHarness:
             @property
             def session_id(self) -> str:
                 return harness._session_id
+
+            @property
+            def project_trusted(self) -> bool:
+                return bool(harness._extension_config["trust_project_extensions"])
 
             @property
             def stream_fn(self) -> Any:

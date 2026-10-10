@@ -953,6 +953,13 @@ impl AgentView {
             let sandbox_style = Style::default().fg(theme.warning).bg(theme.bg_base);
             path_offset += sandbox_text.width() as u16;
             parts.push(Span::styled(sandbox_text, sandbox_style));
+        } else if let Some(label) = pi_sandbox::not_enforced_label() {
+            // A sandbox was asked for and did not take (Linux without Landlock). No label at all
+            // would read as "none asked for", the opposite; the reason went to stderr at start-up.
+            let sandbox_text = format!("{label} ");
+            let sandbox_style = Style::default().fg(theme.accent_error).bg(theme.bg_base);
+            path_offset += sandbox_text.width() as u16;
+            parts.push(Span::styled(sandbox_text, sandbox_style));
         }
         let path_width = short.width() as u16;
         let path_style = if self.hit_cwd.hovered {

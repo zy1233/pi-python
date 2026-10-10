@@ -155,11 +155,12 @@ async def create_session_harness(
 ) -> AgentHarness:
     """Build the harness for one session.
 
-    *trust*: whether the project's own extensions, prompt files and skills may be used. It is
-    read again whenever the system prompt is built, so an answer given after the session
-    started takes effect on the next turn (extensions are the exception: they load once, so
-    the caller passes the answer on with ``AgentHarness.set_trust_project_extensions``
-    before that). Without one, the configuration decides.
+    *trust*: whether the project's own extensions, saved workflows, prompt files and skills may
+    be used. It is read again whenever the system prompt is built, so an answer given after
+    the session started takes effect on the next turn (extensions are the exception: they load
+    once, so the caller passes the answer on with ``AgentHarness.set_trust_project_extensions``
+    before that; the workflows follow it, being read by the extension that turns them into
+    commands as it loads). Without one, the configuration decides.
 
     *model_choice*: the model to start with, for a session that was last used with another
     one (``/model``). Without one, the ``[model]`` table decides.

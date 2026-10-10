@@ -1315,6 +1315,15 @@ pub fn apply_sandbox(
         if let Err(e) = sandbox.apply(&workspace) {
             eprintln!("warning: sandbox could not be applied: {e}");
         }
+        // `apply` also returns `Ok` when the platform cannot enforce the profile (Linux without
+        // Landlock) and the run goes on without one. The status bar says so once the TUI is up;
+        // this is for the terminal before it and after it.
+        if let Some(reason) = sandbox.not_enforced() {
+            eprintln!(
+                "{}",
+                pi_sandbox::not_enforced_warning(&sandbox.profile().to_string(), reason)
+            );
+        }
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             #[cfg(target_os = "macos")]

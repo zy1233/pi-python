@@ -3,7 +3,8 @@
 Scans user-level (``~/.pi-python/workflows/``) and project-level
 (``.pi-python/workflows/``) directories for ``.py`` scripts, extracts
 ``meta`` dicts via ``ast.literal_eval`` (no script execution), and
-exposes them for slash-command registration.
+exposes them for slash-command registration. Whatever a script's ``meta`` holds is somebody
+else's text: a field of the wrong type is dropped, never passed on.
 """
 
 from __future__ import annotations
@@ -67,6 +68,10 @@ class WorkflowStore:
     The user directory is ``<pi home>/workflows``. ``pi_home`` names that home directory
     (``PI_HOME`` / ``~/.pi-python`` when omitted). ``home`` is the older spelling and names
     the *user* home, with ``.pi-python`` below it; ``pi_home`` wins when both are given.
+
+    ``include_project=False`` leaves ``<cwd>/.pi-python/workflows`` out of what is scanned: the
+    directory belongs to the repository, whose scripts only a user who trusts it wants as
+    commands (audit F7-01). The store does not know what the user trusts; its caller does.
     """
 
     def __init__(
@@ -75,10 +80,12 @@ class WorkflowStore:
         home: Path | None = None,
         *,
         pi_home: Path | str | None = None,
+        include_project: bool = True,
     ) -> None:
         self._cwd = cwd
         self._pi_home = pi_home
         self._home = home
+        self._include_project = include_project
 
     def _user_dir(self) -> Path:
         if self._pi_home is None and self._home is not None:
@@ -89,14 +96,18 @@ class WorkflowStore:
         return Path(self._cwd) / ".pi-python" / "workflows"
 
     def scan(self) -> list[SavedWorkflow]:
-        """Scan user and project directories. Project overrides user on name collision."""
+        """Scan user and project directories. Project overrides user on name collision.
+
+        Without the project directory (``include_project=False``) there is nothing to override.
+        """
         results: list[SavedWorkflow] = []
         seen: set[str] = set()
 
-        for directory, source in [
-            (self._project_dir(), "project"),
-            (self._user_dir(), "user"),
-        ]:
+        directories: list[tuple[Path, Literal["project", "user"]]] = []
+        if self._include_project:
+            directories.append((self._project_dir(), "project"))
+        directories.append((self._user_dir(), "user"))
+        for directory, source in directories:
             if not directory.is_dir():
                 continue
             for path in sorted(directory.glob("*.py")):
@@ -172,11 +183,16 @@ class WorkflowStore:
         if not isinstance(name, str) or not NAME_RE.fullmatch(name):
             logger.debug("Skipping %s: invalid name %r", path, name)
             return None
+        # The same goes for the rest of it. ``description`` travels on to a client as the
+        # description of a command, and a number there made the whole list of commands invalid:
+        # every prompt of the session failed (audit P7-17).
+        description = meta.get("description")
+        when_to_use = meta.get("when_to_use")
 
         return SavedWorkflow(
             name=name,
-            description=meta.get("description", ""),
-            when_to_use=meta.get("when_to_use"),
+            description=description if isinstance(description, str) else "",
+            when_to_use=when_to_use if isinstance(when_to_use, str) else None,
             source=source,  # type: ignore[arg-type]
             path=path,
             script=script,

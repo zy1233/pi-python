@@ -40,6 +40,7 @@ TUI_RESERVED_KEYS = {"command", "variant", "tool_name", "tool_input", "file_path
 def _decision(*kinds: str, reason: Any = "undecided") -> ProjectTrustDecision:
     labels = {
         "extensions": (".pi-python/extensions", "hook.py, pack"),
+        "workflows": (".pi-python/workflows", "deploy.py"),
         "prompt": (".pi/SYSTEM.md", ""),
         "skills": (".pi/skills", ""),
     }
@@ -123,6 +124,11 @@ def test_the_title_reads_after_allow_and_names_what_is_being_loaded():
         (("skills",), "loading this project's skills"),
         (("extensions", "prompt"), "loading this project's extensions and prompt files"),
         (("prompt", "skills"), "loading this project's prompt files and skills"),
+        (("workflows",), "loading this project's saved workflows"),
+        (
+            ("extensions", "workflows", "prompt", "skills"),
+            "loading this project's extensions, saved workflows, prompt files and skills",
+        ),
         # Each kind is named once, however many files of it there are (SYSTEM.md and
         # APPEND_SYSTEM.md are both "prompt files"), and nothing listed still reads as a title.
         (("prompt", "prompt"), "loading this project's prompt files"),
@@ -193,12 +199,26 @@ def test_the_explanation_says_what_each_thing_can_do():
     assert "skills: `.pi/skills`" in text
 
 
+def test_the_explanation_says_what_saved_workflows_do():
+    text = _text("/p", _decision("workflows"))
+
+    assert "workflows: `.pi-python/workflows` (`deploy.py`)" in text
+    assert "slash commands" in text
+    assert "scripts" in text
+    assert "Python code" not in text  # the one thing it does not do: run as the session opens
+
+
 def test_each_resource_is_a_bullet_of_its_own():
-    text = _text("/p", _decision("extensions", "prompt", "skills"))
+    text = _text("/p", _decision("extensions", "workflows", "prompt", "skills"))
 
     bullets = text.split("\n\n")[2].split("\n")
 
-    assert [line.split(":")[0] for line in bullets] == ["- extensions", "- prompt", "- skills"]
+    assert [line.split(":")[0] for line in bullets] == [
+        "- extensions",
+        "- workflows",
+        "- prompt",
+        "- skills",
+    ]
 
 
 def test_the_explanation_lists_only_what_is_there():

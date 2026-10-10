@@ -38,9 +38,15 @@ TRUST_OPTION_ID = "trust-project"
 REJECT_OPTION_ID = "dont-trust-project"
 
 # Reads after the TUI's "Allow {title}?".
-_TITLE_NOUN = {"extensions": "extensions", "prompt": "prompt files", "skills": "skills"}
+_TITLE_NOUN = {
+    "extensions": "extensions",
+    "workflows": "saved workflows",
+    "prompt": "prompt files",
+    "skills": "skills",
+}
 _WHAT_IT_DOES = {
     "extensions": "runs Python code as soon as the session opens",
+    "workflows": "adds slash commands that have the model run its scripts as workflows",
     "prompt": "changes what the model is told",
     "skills": "adds instructions (and possibly scripts to run) to what the model is told",
 }

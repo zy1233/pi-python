@@ -137,7 +137,7 @@ async def run_print(
     # stderr: stdout carries only the assistant's answer.
     notice = untrusted_project_notice(
         extensions=harness.skipped_extensions,
-        resources=skipped_project_resources(config, cwd_s, trusted=trust.trusted),
+        resources=skipped_project_resources(config, cwd_s, trusted=trust.trusted, home=home_path),
         cwd=cwd_s,
         home=home_path,
         why=notice_reason(decision),

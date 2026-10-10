@@ -788,9 +788,17 @@ fn small_commit_is_not_capped() {
 
 #[test]
 fn committed_edit_keeps_diff_line_backgrounds() {
+    use pi_pager::theme::cache as theme_cache;
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
     use similar::ChangeTag;
+
+    // `Theme::current()` follows a process-wide switch that the terminal-native tests turn on while
+    // they hold this lock. Without it this test can run inside that window, get the native palette
+    // and find no diff backgrounds.
+    let _guard = theme_cache::test_lock()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
 
     let hunk = vec![
         DiffLine {

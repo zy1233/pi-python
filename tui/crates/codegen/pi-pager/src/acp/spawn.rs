@@ -409,13 +409,82 @@ mod pi_agent_command_tests {
     }
 }
 
+/// Where the agent's stderr goes while the TUI runs, under the config home.
+const AGENT_STDERR_LOG: &str = "agent.stderr.log";
+
+/// A log longer than this at spawn time is moved to `agent.stderr.log.1` (replacing the one that
+/// was there) and a new one is started, so the two files hold a few runs at most. The size is not
+/// enforced while an agent runs: it is the agent's own output, which is small unless it is stuck
+/// in a loop that prints.
+const AGENT_STDERR_LOG_ROTATE_BYTES: u64 = 1024 * 1024;
+
+fn agent_stderr_log_path(home: &std::path::Path) -> std::path::PathBuf {
+    home.join("logs").join(AGENT_STDERR_LOG)
+}
+
+/// Open the agent's stderr log for appending, rotating it first if it has grown past
+/// `rotate_over`, and write a line that says where this run's output starts: the file outlives
+/// the run. Owner-only on Unix, since a traceback can quote prompts, paths and keys.
+fn open_agent_stderr_log(
+    path: &std::path::Path,
+    rotate_over: u64,
+) -> std::io::Result<std::fs::File> {
+    use std::io::Write as _;
+
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    if std::fs::metadata(path).is_ok_and(|meta| meta.len() > rotate_over) {
+        let mut older = path.as_os_str().to_owned();
+        older.push(".1");
+        // Renaming over an existing file fails on Windows. A rotation that cannot be done is not
+        // worth losing the log for: keep appending to the big file.
+        let _ = std::fs::remove_file(&older);
+        let _ = std::fs::rename(path, &older);
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    writeln!(
+        file,
+        "--- agent started {} (zypi pid {}) ---",
+        chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, false),
+        std::process::id()
+    )?;
+    Ok(file)
+}
+
+/// The agent's stderr in the TUI: its log file, or nothing when that cannot be opened (a log that
+/// cannot be written must not keep the agent from starting). It cannot be the terminal: the
+/// screen belongs to the TUI.
+fn agent_stderr(home: &std::path::Path) -> std::process::Stdio {
+    let path = agent_stderr_log_path(home);
+    match open_agent_stderr_log(&path, AGENT_STDERR_LOG_ROTATE_BYTES) {
+        Ok(file) => file.into(),
+        Err(error) => {
+            tracing::warn!(
+                path = %path.display(),
+                %error,
+                "cannot open the agent's stderr log; its stderr is discarded"
+            );
+            std::process::Stdio::null()
+        }
+    }
+}
+
 /// Spawn the agent child and the thread that bridges its stdio to `channel`.
 ///
 /// The returned thread owns the child: on `cancel` it closes the child's stdin
 /// (EOF is the stop request), gives it [`AGENT_EOF_GRACE`] to exit by itself,
-/// kills it if it does not, reaps it, and returns. The child inherits this
-/// process's stderr, so anything it prints lands on the terminal (plan 1.R3
-/// leaves its destination open).
+/// kills it if it does not, reaps it, and returns. The child's stderr is
+/// `<home>/logs/agent.stderr.log` (see [`agent_stderr`]); before it was written there it went
+/// to this process's stderr, which `app::run` has already pointed at `/dev/null`, so Python
+/// tracebacks and warnings were thrown away.
 async fn spawn_python_stdio_bridge(
     channel: AcpAgentChannel,
     cancel: CancellationToken,
@@ -444,7 +513,7 @@ async fn spawn_python_stdio_bridge(
                     .args(&args)
                     .stdin(std::process::Stdio::piped())
                     .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::inherit())
+                    .stderr(agent_stderr(&home))
                     .env("PI_HOME", &home)
                     .kill_on_drop(true)
                     .spawn()
@@ -659,5 +728,98 @@ mod tests {
             classify_join(Err(Box::new(7u32))),
             JoinOutcome::Panicked("non-string panic payload".to_string())
         );
+    }
+}
+
+#[cfg(test)]
+mod agent_stderr_tests {
+    use super::*;
+
+    fn log_in(home: &std::path::Path) -> std::path::PathBuf {
+        agent_stderr_log_path(home)
+    }
+
+    #[test]
+    fn the_log_lives_under_logs_in_the_config_home() {
+        let home = std::path::Path::new("some-home");
+        let path = agent_stderr_log_path(home);
+        assert!(path.starts_with(home), "{path:?}");
+        assert!(path.ends_with("logs/agent.stderr.log"), "{path:?}");
+    }
+
+    #[test]
+    fn opening_creates_the_directory_and_marks_where_a_run_starts() {
+        let home = tempfile::tempdir().unwrap();
+        let path = log_in(home.path());
+        let _file = open_agent_stderr_log(&path, u64::MAX).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with("--- agent started "), "{text:?}");
+        assert!(
+            text.contains(&format!("(zypi pid {})", std::process::id())),
+            "{text:?}"
+        );
+        assert!(text.ends_with(" ---\n"), "{text:?}");
+    }
+
+    #[test]
+    fn the_next_run_appends_to_what_the_last_one_wrote() {
+        use std::io::Write as _;
+
+        let home = tempfile::tempdir().unwrap();
+        let path = log_in(home.path());
+        let mut first = open_agent_stderr_log(&path, u64::MAX).unwrap();
+        writeln!(first, "Traceback: the first run").unwrap();
+        drop(first);
+        drop(open_agent_stderr_log(&path, u64::MAX).unwrap());
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(text.matches("--- agent started ").count(), 2, "{text}");
+        let before = text.find("Traceback: the first run").unwrap();
+        let second_marker = text.rfind("--- agent started ").unwrap();
+        assert!(before < second_marker, "{text}");
+    }
+
+    #[test]
+    fn a_log_past_the_limit_is_moved_aside_and_the_old_one_replaced() {
+        let home = tempfile::tempdir().unwrap();
+        let path = log_in(home.path());
+        let older = path.with_file_name("agent.stderr.log.1");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&older, "two runs ago\n").unwrap();
+        std::fs::write(&path, "x".repeat(40)).unwrap();
+
+        // At the limit: kept. One byte past it: rotated.
+        drop(open_agent_stderr_log(&path, 40).unwrap());
+        assert_eq!(std::fs::read_to_string(&older).unwrap(), "two runs ago\n");
+        let before = std::fs::read_to_string(&path).unwrap();
+        assert!(before.starts_with(&"x".repeat(40)), "{before}");
+
+        // The file now holds those 40 bytes and a marker, so it is past the limit.
+        drop(open_agent_stderr_log(&path, 40).unwrap());
+        assert_eq!(std::fs::read_to_string(&older).unwrap(), before);
+        let now = std::fs::read_to_string(&path).unwrap();
+        assert!(now.starts_with("--- agent started "), "{now}");
+        assert!(!now.contains("xxxx"), "{now}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_new_log_is_readable_by_its_owner_only() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let home = tempfile::tempdir().unwrap();
+        let path = log_in(home.path());
+        drop(open_agent_stderr_log(&path, u64::MAX).unwrap());
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "{mode:o}");
+    }
+
+    #[test]
+    fn a_log_that_cannot_be_opened_is_an_error_not_a_panic() {
+        let home = tempfile::tempdir().unwrap();
+        // `logs` is a file, so the directory cannot be made.
+        std::fs::write(home.path().join("logs"), "in the way").unwrap();
+        assert!(open_agent_stderr_log(&log_in(home.path()), u64::MAX).is_err());
+        // The spawn path turns that into "discard" instead of failing the agent's start.
+        let _stdio = agent_stderr(home.path());
     }
 }
