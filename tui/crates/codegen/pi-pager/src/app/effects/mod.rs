@@ -339,13 +339,9 @@ pub(crate) fn execute(
             let cwd = cwd.to_path_buf();
             tasks
                 .spawn(async move {
-                    let request = acp::ListSessionsRequest::default().cwd(cwd.clone());
-                    let result = acp_send(request, &tx).await;
+                    let result = fetch_session_list(&tx, &cwd).await;
                     match result {
-                        Ok(resp) => TaskResult::SessionListLoaded {
-                            sessions: session_picker_entries_from_acp(&resp),
-                            seq,
-                        },
+                        Ok(sessions) => TaskResult::SessionListLoaded { sessions, seq },
                         Err(e) => TaskResult::SessionListFailed {
                             error: sanitize_user_error(&format!("{e}")),
                             seq,
