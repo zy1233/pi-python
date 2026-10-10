@@ -124,7 +124,13 @@ fn fake_standalone_facts_compose_through_shared_view() {
         false,
         RuntimeEvidence::Available(ColorLevel::TrueColor),
     );
-    let report = collect_report_with(snapshot);
+    let mut report = collect_report_with(snapshot);
+    // `collect_report_with` also probes this machine's microphone (`apply_voice_probe`), and a
+    // host without a recorder on `PATH` (a CI runner) adds a `voice.no-input-device` issue that
+    // says nothing about the facts composed above. Leave it out of the count.
+    report
+        .findings
+        .retain(|finding| finding.id != crate::diagnostics::VOICE_NO_INPUT_DEVICE_ID);
 
     assert_eq!(report.issue_count(), 1);
     assert!(

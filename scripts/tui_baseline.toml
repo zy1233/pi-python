@@ -88,10 +88,11 @@ targets = [
     "--test",
     "selection_model_public_api",
 ]
-# 5,559 in the last CI run (33374a3, `doctor_cmd::` skipped) plus the 12 `doctor_cmd::` tests,
-# which pass without an audio device (the voice probe is gone, plan section 10.10), plus the 6
-# `agent_stderr` tests of the agent's stderr log. Measured in WSL2, not on the runner: the first
-# CI run with them is what confirms the number.
+# 5,559 in the last CI run before r8 (33374a3, `doctor_cmd::` skipped) plus the 12 `doctor_cmd::`
+# tests plus the 6 `agent_stderr` tests of the agent's stderr log. The first CI run with them
+# (PR #9) measured 5,576 passed and 1 failed: the doctor test that counts issues also counted the
+# one the voice probe adds on a host with no recorder on PATH (pw-record / parec / arecord), as the
+# runner is. It now leaves that finding out (plan section 10.10, "CI results").
 reference_passed = 5577
 min_passed = 5300
 
