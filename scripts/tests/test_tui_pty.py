@@ -29,6 +29,7 @@ def _load(name: str):
 
 zenv = _load("zypi_env")  # stdlib only, so it loads everywhere
 rmx = _load("resume_matrix")  # plain Python until `run`, which is what imports the PTY driver
+mp = _load("mode_probe")  # likewise: the PTY driver is imported by `observe`
 
 
 @pytest.fixture(scope="module")
@@ -232,3 +233,36 @@ def test_sessions_reads_the_id_from_each_header(tmp_path):
         "c.jsonl": "<unreadable>",
     }
     assert rmx.sessions(tmp_path / "nowhere") == {}
+
+
+# ---- mode_probe: which modes the Python agent honours ----------------------------------
+
+
+def test_the_mode_scenarios_are_well_formed():
+    names = [scenario.name for scenario in mp.SCENARIOS]
+    assert len(names) == len(set(names))
+    # Every mode the TUI cycles through, and the command-line flag, is probed.
+    pressed = {len(scenario.keys) for scenario in mp.SCENARIOS}
+    assert {0, 1, 2, 3, 4} <= pressed
+    assert any("--always-approve" in scenario.flags for scenario in mp.SCENARIOS)
+    assert all(set(scenario.keys) <= {mp.SHIFT_TAB} for scenario in mp.SCENARIOS)
+
+
+def test_the_status_label_is_read_from_the_frame_of_the_prompt_box():
+    screen = "  ╭────────────╮\n  │ hello      │\n  ╰─ mock · plan ─╯\n\n  Shift+Tab:mode\n"
+    assert mp.status_label(screen) == "mock · plan"
+    assert mp.status_label("nothing to see\n") == ""
+
+
+def test_a_row_says_whether_the_question_came_and_what_was_written():
+    scenario = mp.Scenario("Plan", keys=(mp.SHIFT_TAB,) * 3)
+    asked = mp.Observation(scenario, ready=True, label="mock · plan", asked=True)
+    asked.written_after_answer = True
+    row = mp.format_row(asked)
+    assert "asked=yes" in row and "written without an answer=no" in row
+    assert row.endswith("written after an answer=yes")
+    silent = mp.Observation(scenario, ready=True, written_unasked=True)
+    assert "asked=no" in mp.format_row(silent)
+    assert "written without an answer=yes" in mp.format_row(silent)
+    assert mp.format_row(silent).endswith("written after an answer=-")
+    assert "label=(none)" in mp.format_row(silent)
