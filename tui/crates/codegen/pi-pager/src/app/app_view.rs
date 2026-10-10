@@ -722,11 +722,18 @@ pub struct AppView {
     /// `default_yolo`. Cleared on user Shift+Tab / settings / CLI claim.
     /// Not inferred from the rendered permission string.
     pub permission_mode_from_soft_default: bool,
-    /// Whether the **auto** permission-mode feature gate is enabled (resolved at
-    /// startup from env / `[auto_mode] enabled` / remote settings, default OFF). When
-    /// `false`, the Shift+Tab cycle skips Auto. See
-    /// `pi_shell::util::config::resolve_auto_permission_mode_enabled`.
+    /// Whether Auto is offered: the agent honours it (`agent_modes::AUTO`) and the **auto**
+    /// permission-mode feature gate is on (resolved at startup from env / `[auto_mode] enabled` /
+    /// remote settings). When `false`, the Shift+Tab cycle skips Auto and the settings picker
+    /// hides it. See `pi_shell::util::config::resolve_auto_permission_mode_enabled`.
     pub auto_mode_gate: bool,
+    /// Whether Plan is offered (`agent_modes::PLAN`). When `false` the Shift+Tab cycle has no
+    /// Plan stop, the `plan_mode` setting and its hint toggle are hidden and the plan nudge never
+    /// shows.
+    pub plan_mode_gate: bool,
+    /// Whether "Default" is offered as a permission mode (`agent_modes::DEFAULT`). When `false`
+    /// the settings picker hides it and a saved `default` is shown as Ask.
+    pub default_mode_gate: bool,
     /// Managed-policy pin (set at startup); gates every runtime always-approve enable.
     pub yolo_policy_block: Option<&'static str>,
     /// One-shot notice that a launch `--yolo` was pinned off; shown on the first agent view.
@@ -1210,7 +1217,10 @@ impl AppView {
             cli_effort_token: None,
             default_yolo: false,
             permission_mode_from_soft_default: true,
-            auto_mode_gate: pi_shell::util::config::auto_permission_mode_enabled_from_disk(),
+            auto_mode_gate: crate::app::agent_modes::AUTO
+                && pi_shell::util::config::auto_permission_mode_enabled_from_disk(),
+            plan_mode_gate: crate::app::agent_modes::PLAN,
+            default_mode_gate: crate::app::agent_modes::DEFAULT,
             yolo_policy_block: None,
             yolo_launch_block_notice: None,
             screen_mode_switch_hint: None,
@@ -3354,8 +3364,10 @@ impl AppView {
     /// settings live-apply path so a runtime toggle reaches existing agents.
     pub fn apply_contextual_hints(
         &mut self,
-        resolved: pi_shell::util::config::ResolvedContextualHints,
+        mut resolved: pi_shell::util::config::ResolvedContextualHints,
     ) {
+        // The plan nudge points at Shift+Tab → Plan: with no Plan stop there is nothing to point at.
+        resolved.plan_mode &= self.plan_mode_gate;
         self.contextual_hints = resolved;
         for agent in self.agents.values_mut() {
             agent

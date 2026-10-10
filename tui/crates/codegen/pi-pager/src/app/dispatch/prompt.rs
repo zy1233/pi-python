@@ -150,7 +150,8 @@ pub(in crate::app) fn show_ssh_wrap_tip(app: &mut AppView) {
 }
 
 pub(super) fn dispatch_show_plan_nudge(app: &mut AppView) -> Vec<Effect> {
-    if !app.contextual_hints.plan_mode {
+    // No Plan stop on the Shift+Tab ring means nothing for the tip to point at.
+    if !app.plan_mode_gate || !app.contextual_hints.plan_mode {
         return vec![];
     }
     let ActiveView::Agent(id) = app.active_view else {
@@ -281,6 +282,8 @@ pub(super) fn dispatch_send_prompt_inner(
     let auto_update_from_app = app.auto_update;
     let respect_manual_folds_from_app = app.appearance.scrollback.scroll.respect_manual_folds;
     let auto_mode_gate_from_app = app.auto_mode_gate;
+    let plan_mode_gate_from_app = app.plan_mode_gate;
+    let default_mode_gate_from_app = app.default_mode_gate;
     let ask_user_question_timeout_enabled_from_app = app.ask_user_question_timeout_enabled;
     let voice_stt_language_from_app = app.voice_config.language.clone();
     let scheduler_background_loops_seed = app.scheduler_background_loops_seed;
@@ -381,6 +384,8 @@ pub(super) fn dispatch_send_prompt_inner(
                     scroll_speed: crate::appearance::cache::load_scroll_speed(),
                     respect_manual_folds: respect_manual_folds_from_app,
                     auto_mode_gate: auto_mode_gate_from_app,
+                    plan_mode_gate: plan_mode_gate_from_app,
+                    default_mode_gate: default_mode_gate_from_app,
                     ask_user_question_timeout_enabled: ask_user_question_timeout_enabled_from_app,
                     voice_stt_language: voice_stt_language_from_app,
                     // This session's own value (what its fires will actually

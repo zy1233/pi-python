@@ -1,4 +1,9 @@
 //! Plan, yolo, auto, and permission mode transitions and toasts.
+//!
+//! Which of these the user can reach depends on what the agent honours
+//! (`crate::app::agent_modes`): with the Python agent that is Normal and Always-Approve, and
+//! the Plan / Auto / Default paths below stay behind `plan_mode_gate`, `auto_mode_gate` and
+//! `default_mode_gate`.
 
 use super::ctx::NO_SESSION_NOTICE;
 use super::settings::ui::{refresh_open_settings_modals, save_success_toast};
@@ -18,10 +23,17 @@ use pi_telemetry::session_ctx::log_event;
 /// the next `CurrentModeUpdate` or session restart.
 ///
 /// Idempotent: same value toasts but skips the ACP round-trip.
+///
+/// Inert while the agent does not honour Plan (`plan_mode_gate`): the row is hidden, so this is
+/// only reached by a reset-to-default or a stale binding, and a Plan the agent ignores must not
+/// be switched on (or announced).
 pub(super) fn set_plan_mode(
     app: &mut AppView,
     kind: crate::app::actions::PlanModeKind,
 ) -> Vec<Effect> {
+    if !app.plan_mode_gate {
+        return vec![];
+    }
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };
@@ -124,6 +136,19 @@ pub(crate) fn downgrade_displayed_auto_if_gated(app: &mut AppView) {
         agent.session.auto_mode = false;
     }
     if app.current_ui.permission_mode.as_deref() == Some("auto") {
+        app.current_ui.permission_mode = Some("ask".into());
+    }
+}
+
+/// When "Default" is not offered ([`AppView::default_mode_gate`]), show a saved `default` as Ask.
+/// A spelling of Ask the agent never learns about is only a trap: after Always-Approve it would
+/// say Default while the agent keeps approving everything (plan §10.11). Applied at launch beside
+/// [`downgrade_displayed_auto_if_gated`]; the file on disk is left as it is.
+pub(crate) fn downgrade_displayed_default_if_gated(app: &mut AppView) {
+    if app.default_mode_gate {
+        return;
+    }
+    if app.current_ui.permission_mode.as_deref() == Some("default") {
         app.current_ui.permission_mode = Some("ask".into());
     }
 }
@@ -305,13 +330,16 @@ pub(super) fn set_permission_mode(
     // Feature gate: a commit to Auto is inert when the auto permission-mode
     // feature is disabled. Reading `app.auto_mode_gate` here (the same source
     // the Shift+Tab cycle uses) keeps the settings modal and the cycle in
-    // lockstep — both degrade Auto → Ask when the gate is off.
-    let kind =
-        if matches!(kind, crate::app::actions::PermissionModeKind::Auto) && !app.auto_mode_gate {
-            crate::app::actions::PermissionModeKind::Ask
-        } else {
-            kind
-        };
+    // lockstep — both degrade Auto → Ask when the gate is off. Default degrades
+    // the same way while the agent cannot tell it from Ask.
+    let kind = {
+        use crate::app::actions::PermissionModeKind;
+        match kind {
+            PermissionModeKind::Auto if !app.auto_mode_gate => PermissionModeKind::Ask,
+            PermissionModeKind::Default if !app.default_mode_gate => PermissionModeKind::Ask,
+            other => other,
+        }
+    };
     // Managed policy pins always-approve off — keep the modal on live state.
     if let Some(blocked) = refuse_if_yolo_locked(app, kind.is_always_approve()) {
         refresh_open_settings_modals(app);
@@ -497,7 +525,13 @@ pub(super) fn active_agent_plan_nudge_state(app: &AppView) -> (bool, bool) {
 /// Uses `plan_mode_pending` (optimistic) when available, falling back to
 /// `plan_mode_active` (confirmed by ACP). This prevents double-sends when
 /// the user presses Shift+Tab faster than the ACP round-trip.
+///
+/// When the agent does not honour Plan (`plan_mode_gate` off, the case for the Python agent) the
+/// ring is [`dispatch_cycle_mode_without_plan`] instead.
 fn dispatch_cycle_mode_inner(app: &mut AppView) -> Vec<Effect> {
+    if !app.plan_mode_gate {
+        return dispatch_cycle_mode_without_plan(app);
+    }
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };
@@ -822,4 +856,128 @@ fn dispatch_cycle_mode_inner(app: &mut AppView) -> Vec<Effect> {
             effects
         }
     }
+}
+
+/// Where Shift+Tab goes next on the ring that has no Plan stop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RingStep {
+    Normal,
+    Auto,
+    AlwaysApprove,
+    /// Always-Approve is next and the managed-policy pin forbids it: nowhere to go.
+    Stay,
+}
+
+/// The step after the current mode on Normal → (Auto →) Always-Approve → Normal, and whether the
+/// managed-policy pin is what held the ring back (the user then gets the policy's warning).
+///
+/// `in_plan` is a Plan the pager believes in although nothing on this ring starts one (a stale
+/// flag): leaving it lands on Normal, like the full ring's catch-all. Auto is a stop only while
+/// `auto_gate` is on.
+pub(super) fn next_ring_step_without_plan(
+    in_plan: bool,
+    in_auto: bool,
+    in_yolo: bool,
+    auto_gate: bool,
+    yolo_pinned: bool,
+) -> (RingStep, bool) {
+    if in_plan || in_yolo {
+        return (RingStep::Normal, false);
+    }
+    if in_auto {
+        return if yolo_pinned {
+            (RingStep::Normal, true)
+        } else {
+            (RingStep::AlwaysApprove, false)
+        };
+    }
+    if auto_gate {
+        (RingStep::Auto, false)
+    } else if yolo_pinned {
+        (RingStep::Stay, true)
+    } else {
+        (RingStep::AlwaysApprove, false)
+    }
+}
+
+/// The Shift+Tab ring for an agent that does not honour Plan (`plan_mode_gate` off): Normal →
+/// Always-Approve → Normal, with Auto between them while `auto_gate` is on.
+///
+/// State writes, banners and persistence are those of the arms of [`dispatch_cycle_mode_inner`]
+/// (pre-session: stash for `SessionCreated`; with a session: `set_yolo_mode_inner` and a
+/// `PersistPermissionMode`), minus every Plan stop. Nothing here sends `session/set_mode` except
+/// to leave a stale Plan flag.
+fn dispatch_cycle_mode_without_plan(app: &mut AppView) -> Vec<Effect> {
+    let ActiveView::Agent(id) = app.active_view else {
+        return vec![];
+    };
+    let yolo_locked = app.yolo_policy_block;
+    let auto_gate = app.auto_mode_gate;
+    let Some(agent) = app.agents.get_mut(&id) else {
+        return vec![];
+    };
+    let in_plan = agent.plan_mode_pending.unwrap_or(agent.plan_mode_active);
+    let in_auto = agent.session.is_auto();
+    let in_yolo = agent.session.is_yolo();
+    let session_id = agent.session.session_id.clone();
+    let (step, pin_blocked) =
+        next_ring_step_without_plan(in_plan, in_auto, in_yolo, auto_gate, yolo_locked.is_some());
+
+    let mut effects = Vec::new();
+    if in_plan {
+        agent.plan_mode_pending = Some(false);
+        agent.deferred_session_mode = None;
+        if let Some(session_id) = session_id.clone() {
+            effects.push(Effect::SetSessionMode {
+                session_id,
+                mode_id: acp::SessionModeId::new(pi_tools::types::SessionMode::Default.as_id()),
+            });
+        }
+    }
+    if pin_blocked && let Some(warning) = yolo_locked {
+        agent.show_toast(warning);
+    }
+    let (canonical, banner) = match step {
+        RingStep::Stay => {
+            tracing::info!("Mode cycle: Normal stays (always-approve blocked by policy)");
+            return effects;
+        }
+        RingStep::Normal => ("ask", "Normal"),
+        RingStep::Auto => ("auto", "Auto"),
+        RingStep::AlwaysApprove => ("always-approve", "Always-Approve"),
+    };
+    let yolo = step == RingStep::AlwaysApprove;
+    tracing::info!(
+        ?step,
+        has_session = session_id.is_some(),
+        "Mode cycle (no plan)"
+    );
+
+    match &session_id {
+        // No session yet (Shift+Tab from the welcome screen or a fresh tab): write the flags
+        // `SessionCreated` reads and persist for the next launch; nothing to tell the agent.
+        None => {
+            agent.session.yolo_mode = yolo;
+            app.default_yolo = yolo;
+            app.current_ui.permission_mode = Some(canonical.into());
+            agent.show_mode_switch_banner(banner);
+        }
+        Some(_) => {
+            set_yolo_mode_inner(app, yolo);
+            app.current_ui.permission_mode = Some(canonical.into());
+            if let Some(a) = app.agents.get_mut(&id) {
+                a.show_mode_switch_banner(banner);
+            }
+        }
+    }
+    refresh_open_settings_modals(app);
+    // Leaving a mode that was already Normal (a stale Plan flag only) changes nothing to persist.
+    if step != RingStep::Normal || in_yolo || in_auto {
+        effects.push(Effect::PersistPermissionMode {
+            canonical,
+            session_id,
+            persist: crate::app::actions::PermissionModePersist::BestEffort,
+        });
+    }
+    effects
 }

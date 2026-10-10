@@ -217,7 +217,7 @@ impl SettingsModalState {
         ui_snapshot: UiConfig,
         pager_snapshot: PagerLocalSnapshot,
     ) -> Self {
-        let rows = build_rows(&registry);
+        let rows = build_rows(&registry, &pager_snapshot);
         // Start on the first selectable (non-header) row.
         let selected = rows
             .iter()
@@ -293,7 +293,7 @@ impl SettingsModalState {
             SettingsMode::Browse | SettingsMode::FilterFocused => None,
         };
 
-        self.rows = build_rows(&self.registry);
+        self.rows = build_rows(&self.registry, &self.pager_snapshot);
         self.invalidate_filter();
 
         if let Some(key) = subpane_key {
@@ -813,7 +813,7 @@ pub(super) fn setting_row_visible(
     true
 }
 
-fn build_rows(registry: &SettingsRegistry) -> Vec<RowEntry> {
+fn build_rows(registry: &SettingsRegistry, snapshot: &PagerLocalSnapshot) -> Vec<RowEntry> {
     let kitty_releases = crate::app::kitty_releases_reported();
     let minimal = crate::app::minimal_mode_active();
     let voice_mode = crate::app::voice_mode_enabled();
@@ -837,6 +837,9 @@ fn build_rows(registry: &SettingsRegistry) -> Vec<RowEntry> {
                 continue;
             }
             if !setting_row_visible(meta, kitty_releases, minimal, voice_mode) {
+                continue;
+            }
+            if setting_gated_off_by_agent(meta.key, snapshot) {
                 continue;
             }
             if group_children.contains(meta.key) {
@@ -1054,25 +1057,40 @@ pub(super) fn validate_string(
 /// Grok STT language list (25 codes + client-only `auto` = 26) with headroom.
 pub(crate) const MAX_PICKER_CHOICES: usize = 32;
 
-/// The children of a group setting, or an empty slice if `key` is not a group.
-pub(super) fn group_children(state: &SettingsModalState, key: SettingKey) -> &'static [SettingKey] {
+/// The children of a group setting that are offered, or an empty list if `key` is not a group.
+/// Children the agent cannot back (see [`setting_gated_off_by_agent`]) are left out.
+pub(super) fn group_children(state: &SettingsModalState, key: SettingKey) -> Vec<SettingKey> {
     match state.registry.find(key).map(|m| &m.kind) {
-        Some(SettingKind::Group { children }) => children,
-        _ => &[],
+        Some(SettingKind::Group { children }) => children
+            .iter()
+            .copied()
+            .filter(|child| !setting_gated_off_by_agent(child, &state.pager_snapshot))
+            .collect(),
+        _ => Vec::new(),
     }
 }
 
+/// Whether the agent cannot back this setting and the modal must not offer it: with no Plan
+/// (`plan_mode_gate` off) both the `plan_mode` setting and the plan-nudge hint toggle
+/// `contextual_hints.plan_mode` are hidden, as a toggle that changes nothing is a lie. Pure (the
+/// gate is read from the snapshot) so it is unit-testable.
+pub(super) fn setting_gated_off_by_agent(key: SettingKey, snapshot: &PagerLocalSnapshot) -> bool {
+    !snapshot.plan_mode_gate && matches!(key, "plan_mode" | "contextual_hints.plan_mode")
+}
+
 /// Whether `(key, canonical)` is gated off and must not be offered as a choice:
-/// `permission_mode`'s "auto" when the auto gate is off, and
+/// `permission_mode`'s "auto" when the auto gate is off, its "default" when the
+/// default gate is off (the agent cannot tell it from Ask), and
 /// `voice_capture_mode`'s "hold" without key-release reporting. Pure (gates
 /// passed as args) so it's unit-testable without touching process globals.
 pub(super) fn enum_choice_gated_off(
     key: SettingKey,
     canonical: &str,
-    auto_mode_gate: bool,
+    snapshot: &PagerLocalSnapshot,
     kitty_releases: bool,
 ) -> bool {
-    (key == "permission_mode" && canonical == "auto" && !auto_mode_gate)
+    (key == "permission_mode" && canonical == "auto" && !snapshot.auto_mode_gate)
+        || (key == "permission_mode" && canonical == "default" && !snapshot.default_mode_gate)
         || (key == "voice_capture_mode" && canonical == "hold" && !kitty_releases)
 }
 
@@ -1087,8 +1105,6 @@ pub(super) fn effective_enum_choices<'a>(
     let kitty_releases = crate::app::kitty_releases_reported();
     choices
         .iter()
-        .filter(|c| {
-            !enum_choice_gated_off(key, c.canonical, snapshot.auto_mode_gate, kitty_releases)
-        })
+        .filter(|c| !enum_choice_gated_off(key, c.canonical, snapshot, kitty_releases))
         .collect()
 }

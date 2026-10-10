@@ -375,13 +375,13 @@ pub struct PagerArgs {
         value_parser = clap::value_parser!(u32).range(1..)
     )]
     pub max_turns: Option<u32>,
-    /// Permission mode.
+    /// Permission mode: `default` (ask before tool calls) or `bypassPermissions` (same as
+    /// `--always-approve`). The agent acts on no other mode, so `plan`, `auto`, `acceptEdits`
+    /// and `dontAsk` are rejected rather than accepted and ignored.
     #[arg(
         long = "permission-mode",
         value_name = "MODE",
-        value_parser = clap::builder::PossibleValuesParser::new(
-            pi_shell::agent::config::PermissionMode::VALID_VALUES
-        )
+        value_parser = parse_permission_mode_flag
     )]
     pub permission_mode_flag: Option<String>,
     /// Disable web search and web fetch tools.
@@ -705,6 +705,30 @@ impl PagerArgs {
             .filter(|s| !s.is_empty())
     }
 }
+/// `--permission-mode` value parser: only the values the agent can act on
+/// (`agent_modes::permission_mode_flag_values`).
+///
+/// The flag used to take six values and the agent behind it acts on one of them
+/// (`bypassPermissions`), so the others did nothing while looking accepted
+/// (plan §10.11): `plan` and `auto` promised a mode that never took effect, and
+/// `acceptEdits` / `dontAsk` name modes that exist nowhere in the pager or the
+/// agent. Each now fails with the reason and the values that work.
+pub(crate) fn parse_permission_mode_flag(value: &str) -> Result<String, String> {
+    let accepted = crate::app::agent_modes::permission_mode_flag_values();
+    if accepted.contains(&value) {
+        return Ok(value.to_string());
+    }
+    let valid = accepted.join(", ");
+    if pi_shell::agent::config::PermissionMode::VALID_VALUES.contains(&value) {
+        Err(format!(
+            "the agent does not act on `{value}`, so the flag would change nothing \
+             (valid values: {valid})"
+        ))
+    } else {
+        Err(format!("unknown mode (valid values: {valid})"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -835,6 +859,70 @@ mod tests {
         assert!(args.fullscreen && !args.minimal);
         let err = PagerArgs::try_parse_from(["zypi", "--minimal", "--fullscreen"]).unwrap_err();
         assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+    /// `--permission-mode` takes the two values the agent acts on: `default` (ask) and
+    /// `bypassPermissions` (always approve). Bare, it stays unset.
+    #[test]
+    fn permission_mode_flag_accepts_only_what_the_agent_acts_on() {
+        for accepted in ["default", "bypassPermissions"] {
+            let args = PagerArgs::try_parse_from(["zypi", "--permission-mode", accepted])
+                .unwrap_or_else(|e| panic!("{accepted} must parse: {e}"));
+            assert_eq!(args.permission_mode_flag.as_deref(), Some(accepted));
+        }
+        // The `=` spelling goes through the same parser.
+        let args = PagerArgs::try_parse_from(["zypi", "--permission-mode=bypassPermissions"])
+            .expect("--permission-mode=VALUE parses");
+        assert_eq!(
+            args.permission_mode_flag.as_deref(),
+            Some("bypassPermissions")
+        );
+        assert_eq!(
+            PagerArgs::try_parse_from(["zypi"])
+                .unwrap()
+                .permission_mode_flag,
+            None
+        );
+    }
+    /// The four values that used to be accepted and ignored now fail with exit code 2, naming the
+    /// value, why, and what does work. Unknown values get the same list.
+    #[test]
+    fn permission_mode_flag_rejects_modes_the_agent_ignores() {
+        for rejected in ["plan", "auto", "acceptEdits", "dontAsk"] {
+            let err = PagerArgs::try_parse_from(["zypi", "--permission-mode", rejected])
+                .expect_err("a mode the agent ignores must be rejected");
+            assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+            assert_eq!(err.exit_code(), 2);
+            let message = err.to_string();
+            assert!(
+                message.contains(&format!("`{rejected}`"))
+                    && message.contains("would change nothing")
+                    && message.contains("valid values: default, bypassPermissions"),
+                "{rejected}: {message}"
+            );
+        }
+        for unknown in ["bogus", "", "Plan", "bypasspermissions"] {
+            let err = PagerArgs::try_parse_from(["zypi", "--permission-mode", unknown])
+                .expect_err("an unknown mode must be rejected");
+            assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+            assert!(
+                err.to_string()
+                    .contains("unknown mode (valid values: default, bypassPermissions)"),
+                "{unknown:?}: {err}"
+            );
+        }
+    }
+    /// The parser is the one place the accepted set is decided: it follows `agent_modes`, so
+    /// flipping a capability there is all it takes to take the value again.
+    #[test]
+    fn permission_mode_flag_parser_follows_agent_modes() {
+        let accepted = crate::app::agent_modes::permission_mode_flag_values();
+        for value in pi_shell::agent::config::PermissionMode::VALID_VALUES {
+            assert_eq!(
+                parse_permission_mode_flag(value).is_ok(),
+                accepted.contains(value),
+                "{value}"
+            );
+        }
     }
     #[test]
     fn resolve_startup_sandbox_cases() {

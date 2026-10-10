@@ -2122,3 +2122,473 @@ fn set_plan_mode_idempotency_uses_pending_over_active() {
         "OFF transition must set optimistic pending to Some(false)"
     );
 }
+
+// ── The modes the agent behind the pager honours (`app::agent_modes`) ────────
+//
+// The fixtures above offer every mode (`test_app` turns all three gates on) so the Plan / Auto /
+// Default tests keep running; the tests below turn the gates off, as a real launch has them.
+
+/// A freshly built app — what a launch starts from — offers neither Plan, Auto nor Default.
+#[test]
+fn a_new_app_offers_neither_plan_auto_nor_default() {
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let app = AppView::new(tx, ModelState::default(), Vec::new());
+    assert!(!app.plan_mode_gate, "Plan hidden");
+    assert!(!app.auto_mode_gate, "Auto hidden");
+    assert!(!app.default_mode_gate, "Default hidden");
+}
+
+/// The test fixture with the gates a launch has (Plan hidden, Auto hidden, Default hidden).
+fn app_without_plan() -> AppView {
+    let mut app = test_app_with_agent();
+    app.plan_mode_gate = false;
+    app.auto_mode_gate = false;
+    app.default_mode_gate = false;
+    app
+}
+
+fn banner_text(app: &AppView) -> Option<String> {
+    app.agents[&AgentId(0)]
+        .mode_switch_banner
+        .as_ref()
+        .map(|(message, _)| message.clone())
+}
+
+fn persisted(effects: &[Effect]) -> Vec<&'static str> {
+    effects
+        .iter()
+        .filter_map(|e| match e {
+            Effect::PersistPermissionMode { canonical, .. } => Some(*canonical),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The step table of the ring without a Plan stop: Normal → Always-Approve → Normal, Auto only
+/// while its gate is on, a policy pin stops the way into Always-Approve, a stale Plan lands on
+/// Normal.
+#[test]
+fn ring_step_table_without_plan() {
+    use crate::app::dispatch::modes::{RingStep, next_ring_step_without_plan as step};
+    // (in_plan, in_auto, in_yolo, auto_gate, pinned) → (step, blocked by the pin)
+    for (state, expected) in [
+        (
+            (false, false, false, false, false),
+            (RingStep::AlwaysApprove, false),
+        ),
+        (
+            (false, false, true, false, false),
+            (RingStep::Normal, false),
+        ),
+        ((false, false, false, true, false), (RingStep::Auto, false)),
+        (
+            (false, true, false, true, false),
+            (RingStep::AlwaysApprove, false),
+        ),
+        ((false, false, true, true, false), (RingStep::Normal, false)),
+        // Pinned: Normal has nowhere to go; Auto falls back to Normal; leaving yolo is allowed.
+        ((false, false, false, false, true), (RingStep::Stay, true)),
+        ((false, true, false, true, true), (RingStep::Normal, true)),
+        ((false, false, true, false, true), (RingStep::Normal, false)),
+        // Auto's gate on and pinned: Normal → Auto is still allowed (no yolo involved).
+        ((false, false, false, true, true), (RingStep::Auto, false)),
+        // A stale Plan flag (nothing on this ring starts one) resets to Normal.
+        (
+            (true, false, false, false, false),
+            (RingStep::Normal, false),
+        ),
+        ((true, true, false, true, false), (RingStep::Normal, false)),
+        ((true, false, true, false, false), (RingStep::Normal, false)),
+    ] {
+        let (in_plan, in_auto, in_yolo, auto_gate, pinned) = state;
+        assert_eq!(
+            step(in_plan, in_auto, in_yolo, auto_gate, pinned),
+            expected,
+            "(plan, auto, yolo, auto_gate, pinned) = {state:?}"
+        );
+    }
+}
+
+/// With a session the ring is Normal → Always-Approve → Normal: it never enters Plan, never tells
+/// the agent about a session mode, and each stop persists and announces itself.
+#[test]
+fn cycle_without_plan_toggles_normal_and_always_approve_with_a_session() {
+    let mut app = app_without_plan();
+
+    let effects = dispatch(Action::CycleMode, &mut app);
+    let agent = &app.agents[&AgentId(0)];
+    assert!(agent.session.is_yolo(), "Normal → Always-Approve");
+    assert!(app.default_yolo);
+    assert_eq!(
+        agent.plan_mode_pending, None,
+        "no Plan stop: the flag is never touched"
+    );
+    assert_eq!(
+        app.current_ui.permission_mode.as_deref(),
+        Some("always-approve")
+    );
+    assert_eq!(
+        banner_text(&app).as_deref(),
+        Some("Switched to mode: Always-Approve")
+    );
+    assert_eq!(persisted(&effects), vec!["always-approve"]);
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [Effect::PersistPermissionMode {
+                session_id: Some(_),
+                persist: crate::app::actions::PermissionModePersist::BestEffort,
+                ..
+            }]
+        ),
+        "exactly one best-effort persist for the session, got {effects:?}"
+    );
+
+    let effects = dispatch(Action::CycleMode, &mut app);
+    assert!(!app.agents[&AgentId(0)].session.is_yolo(), "→ Normal");
+    assert!(!app.default_yolo);
+    assert_eq!(app.current_ui.permission_mode.as_deref(), Some("ask"));
+    assert_eq!(
+        banner_text(&app).as_deref(),
+        Some("Switched to mode: Normal")
+    );
+    assert_eq!(persisted(&effects), vec!["ask"]);
+    assert!(
+        !effects
+            .iter()
+            .any(|e| matches!(e, Effect::SetSessionMode { .. })),
+        "the agent is never sent a session mode, got {effects:?}"
+    );
+
+    // Round and round: Plan never shows up.
+    for _ in 0..4 {
+        let effects = dispatch(Action::CycleMode, &mut app);
+        assert!(
+            !effects
+                .iter()
+                .any(|e| matches!(e, Effect::SetSessionMode { .. })),
+            "got {effects:?}"
+        );
+        assert_eq!(app.agents[&AgentId(0)].plan_mode_pending, None);
+    }
+}
+
+/// Normal → Always-Approve approves the permission request that was waiting (`AllowOnce`, never a
+/// cancel), as the full ring's arms do: the shared `set_yolo_mode_inner` does the drain.
+#[test]
+fn cycle_without_plan_into_always_approve_approves_the_queued_request() {
+    use crate::views::permission_view::{PermissionFocus, PermissionViewState};
+    use std::sync::Arc;
+
+    let mut app = app_without_plan();
+    let (response_tx, mut response_rx) = tokio::sync::oneshot::channel();
+    let request = acp::RequestPermissionRequest::new(
+        acp::SessionId::new(Arc::from("test-sess")),
+        acp::ToolCallUpdate::new(
+            acp::ToolCallId::new(Arc::from("tc-no-plan-1")),
+            acp::ToolCallUpdateFields::default(),
+        ),
+        vec![acp::PermissionOption::new(
+            acp::PermissionOptionId::new(Arc::from("opt-allow-once")),
+            "Allow once",
+            acp::PermissionOptionKind::AllowOnce,
+        )],
+    );
+    let options = request.options.clone();
+    app.agents
+        .get_mut(&AgentId(0))
+        .unwrap()
+        .permission_queue
+        .push_back(PermissionViewState {
+            request: pi_acp_lib::AcpArgs {
+                request,
+                response_tx,
+            },
+            id: 1,
+            focus: PermissionFocus::Options,
+            options,
+            active_idx: 0,
+            bash_highlights: None,
+            bash_selection_count: 0,
+            bash_deny_selection_count: 0,
+            bash_command_raw: None,
+            mcp_scope: None,
+            title: "no-plan-cycle".to_string(),
+            description: vec![],
+            args_expanded: false,
+            desc_scroll: 0,
+            options_area_height: 0,
+            options_scroll_offset: 0,
+        });
+
+    let _ = dispatch(Action::CycleMode, &mut app);
+
+    assert!(app.agents[&AgentId(0)].session.is_yolo());
+    assert!(
+        app.agents[&AgentId(0)].permission_queue.is_empty(),
+        "Normal → Always-Approve must drain the queue"
+    );
+    match response_rx.try_recv() {
+        Ok(Ok(acp::RequestPermissionResponse {
+            outcome:
+                acp::RequestPermissionOutcome::Selected(acp::SelectedPermissionOutcome {
+                    option_id,
+                    ..
+                }),
+            ..
+        })) => assert_eq!(
+            option_id,
+            acp::PermissionOptionId::new(Arc::from("opt-allow-once")),
+            "the drain must select AllowOnce, not cancel"
+        ),
+        other => panic!("expected the queued request to be approved, got {other:?}"),
+    }
+}
+
+/// Before the session exists (Shift+Tab on the welcome screen) the ring stages the choice for
+/// `SessionCreated` and persists it for the next launch with no session id.
+#[test]
+fn cycle_without_plan_pre_session_stages_and_persists() {
+    let mut app = app_without_plan();
+    app.agents.get_mut(&AgentId(0)).unwrap().session.session_id = None;
+
+    let effects = dispatch(Action::CycleMode, &mut app);
+    let agent = &app.agents[&AgentId(0)];
+    assert!(agent.session.is_yolo(), "staged on the agent");
+    assert!(
+        app.default_yolo,
+        "and on the global default CreateSession reads"
+    );
+    assert_eq!(agent.plan_mode_pending, None);
+    assert_eq!(agent.deferred_session_mode, None, "no Plan is deferred");
+    assert_eq!(
+        app.current_ui.permission_mode.as_deref(),
+        Some("always-approve")
+    );
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [Effect::PersistPermissionMode {
+                canonical: "always-approve",
+                session_id: None,
+                persist: crate::app::actions::PermissionModePersist::BestEffort,
+            }]
+        ),
+        "got {effects:?}"
+    );
+
+    let effects = dispatch(Action::CycleMode, &mut app);
+    assert!(!app.agents[&AgentId(0)].session.is_yolo());
+    assert!(!app.default_yolo, "CreateSession must seed yoloMode=false");
+    assert_eq!(app.current_ui.permission_mode.as_deref(), Some("ask"));
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [Effect::PersistPermissionMode {
+                canonical: "ask",
+                session_id: None,
+                ..
+            }]
+        ),
+        "Always-Approve → Normal must persist 'ask' (a stale config relaunches yolo), got {effects:?}"
+    );
+}
+
+/// A managed policy pin keeps Always-Approve off: Normal has nowhere to go, so the press only
+/// shows the policy's reason — nothing changes, nothing is persisted or sent.
+#[test]
+fn cycle_without_plan_normal_stays_put_under_policy_pin() {
+    let mut app = app_without_plan();
+    app.yolo_policy_block = Some(POLICY_WARNING);
+
+    let effects = dispatch(Action::CycleMode, &mut app);
+
+    assert!(effects.is_empty(), "got {effects:?}");
+    assert!(!app.agents[&AgentId(0)].session.is_yolo());
+    assert!(!app.default_yolo);
+    assert_ne!(
+        app.current_ui.permission_mode.as_deref(),
+        Some("always-approve")
+    );
+    assert_eq!(agent_toast(&app).as_deref(), Some(POLICY_WARNING));
+    assert_eq!(banner_text(&app), None, "no mode switch to announce");
+}
+
+/// Leaving Always-Approve is never blocked by the pin (a yolo that predates it can be turned
+/// off), and no toast is needed for it.
+#[test]
+fn cycle_without_plan_leaves_always_approve_under_policy_pin() {
+    let mut app = app_without_plan();
+    app.agents.get_mut(&AgentId(0)).unwrap().session.yolo_mode = true;
+    app.default_yolo = true;
+    app.yolo_policy_block = Some(POLICY_WARNING);
+
+    let effects = dispatch(Action::CycleMode, &mut app);
+
+    assert!(!app.agents[&AgentId(0)].session.is_yolo());
+    assert_eq!(persisted(&effects), vec!["ask"]);
+    assert_eq!(agent_toast(&app), None);
+}
+
+/// Auto is a stop only while its own gate is on (a hypothetical agent that classifies): Normal →
+/// Auto → Always-Approve → Normal, and under a pin Auto falls back to Normal with the reason.
+#[test]
+fn cycle_without_plan_visits_auto_only_while_the_auto_gate_is_on() {
+    let mut app = app_without_plan();
+    app.auto_mode_gate = true;
+
+    let effects = dispatch(Action::CycleMode, &mut app);
+    assert_eq!(app.current_ui.permission_mode.as_deref(), Some("auto"));
+    assert!(app.agents[&AgentId(0)].session.is_auto());
+    assert!(!app.agents[&AgentId(0)].session.is_yolo());
+    assert_eq!(persisted(&effects), vec!["auto"]);
+
+    let effects = dispatch(Action::CycleMode, &mut app);
+    assert_eq!(
+        app.current_ui.permission_mode.as_deref(),
+        Some("always-approve")
+    );
+    assert!(app.agents[&AgentId(0)].session.is_yolo());
+    assert!(!app.agents[&AgentId(0)].session.is_auto());
+    assert_eq!(persisted(&effects), vec!["always-approve"]);
+
+    let effects = dispatch(Action::CycleMode, &mut app);
+    assert_eq!(app.current_ui.permission_mode.as_deref(), Some("ask"));
+    assert!(!app.agents[&AgentId(0)].session.is_yolo());
+    assert_eq!(persisted(&effects), vec!["ask"]);
+
+    // Pinned: Normal → Auto → (Always-Approve refused) → Normal with the reason.
+    let mut pinned = app_without_plan();
+    pinned.auto_mode_gate = true;
+    pinned.yolo_policy_block = Some(POLICY_WARNING);
+    dispatch(Action::CycleMode, &mut pinned);
+    assert_eq!(pinned.current_ui.permission_mode.as_deref(), Some("auto"));
+    let effects = dispatch(Action::CycleMode, &mut pinned);
+    assert_eq!(pinned.current_ui.permission_mode.as_deref(), Some("ask"));
+    assert!(!pinned.agents[&AgentId(0)].session.is_yolo());
+    assert_eq!(persisted(&effects), vec!["ask"]);
+    assert_eq!(agent_toast(&pinned).as_deref(), Some(POLICY_WARNING));
+}
+
+/// Nothing in the ring can start Plan, but a Plan flag the pager already holds (restored state)
+/// must not strand the user: the press clears it, tells the agent to leave Plan and lands on
+/// Normal.
+#[test]
+fn cycle_without_plan_leaves_a_stale_plan_flag() {
+    let mut app = app_without_plan();
+    app.agents.get_mut(&AgentId(0)).unwrap().plan_mode_pending = Some(true);
+
+    let effects = dispatch(Action::CycleMode, &mut app);
+
+    assert_eq!(app.agents[&AgentId(0)].plan_mode_pending, Some(false));
+    assert!(!app.agents[&AgentId(0)].session.is_yolo());
+    assert_eq!(app.current_ui.permission_mode.as_deref(), Some("ask"));
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [Effect::SetSessionMode { mode_id, .. }] if &*mode_id.0 == "default"
+        ),
+        "leave Plan on the agent and persist nothing, got {effects:?}"
+    );
+}
+
+/// With Plan hidden, `SetPlanMode` (a reset-to-default or a stale binding) is inert: no pending
+/// flag, no toast, no session-mode request.
+#[test]
+fn set_plan_mode_is_inert_without_plan() {
+    let mut app = app_without_plan();
+    for kind in [
+        crate::app::actions::PlanModeKind::On,
+        crate::app::actions::PlanModeKind::Off,
+    ] {
+        let effects = dispatch(Action::SetPlanMode(kind), &mut app);
+        assert!(effects.is_empty(), "{kind:?}: {effects:?}");
+        assert_eq!(app.agents[&AgentId(0)].plan_mode_pending, None);
+        assert_eq!(agent_toast(&app), None);
+    }
+}
+
+/// "Default" and "Auto" degrade to Ask when they are not offered, so a stale picker or binding
+/// can never leave the UI claiming a mode the agent does not know; Always approve and Ask pass
+/// through.
+#[test]
+fn set_permission_mode_degrades_hidden_modes_to_ask() {
+    use crate::app::actions::PermissionModeKind;
+    for hidden in [PermissionModeKind::Default, PermissionModeKind::Auto] {
+        let mut app = app_without_plan();
+        let effects = dispatch(Action::SetPermissionMode(hidden), &mut app);
+        assert_eq!(
+            app.current_ui.permission_mode.as_deref(),
+            Some("ask"),
+            "{hidden:?}"
+        );
+        assert!(!app.agents[&AgentId(0)].session.is_yolo());
+        assert!(!app.agents[&AgentId(0)].session.is_auto());
+        assert_eq!(persisted(&effects), vec!["ask"], "{hidden:?}");
+    }
+    let mut app = app_without_plan();
+    let effects = dispatch(
+        Action::SetPermissionMode(PermissionModeKind::AlwaysApprove),
+        &mut app,
+    );
+    assert!(app.agents[&AgentId(0)].session.is_yolo());
+    assert_eq!(persisted(&effects), vec!["always-approve"]);
+
+    // The Default gate on (the fixture's value) keeps the distinction, as before.
+    let mut app = app_without_plan();
+    app.default_mode_gate = true;
+    dispatch(
+        Action::SetPermissionMode(PermissionModeKind::Default),
+        &mut app,
+    );
+    assert_eq!(app.current_ui.permission_mode.as_deref(), Some("default"));
+}
+
+/// A `default` saved by an earlier version is shown as Ask while Default is hidden (the agent never
+/// learns the spelling: after Always-Approve it would say Default and keep approving); everything
+/// else is left alone, and the gate on leaves Default as it is.
+#[test]
+fn a_saved_default_is_shown_as_ask_while_default_is_hidden() {
+    let mut app = app_without_plan();
+    app.current_ui.permission_mode = Some("default".into());
+    downgrade_displayed_default_if_gated(&mut app);
+    assert_eq!(app.current_ui.permission_mode.as_deref(), Some("ask"));
+
+    for untouched in ["ask", "always-approve", "auto"] {
+        app.current_ui.permission_mode = Some(untouched.into());
+        downgrade_displayed_default_if_gated(&mut app);
+        assert_eq!(app.current_ui.permission_mode.as_deref(), Some(untouched));
+    }
+    app.current_ui.permission_mode = None;
+    downgrade_displayed_default_if_gated(&mut app);
+    assert_eq!(app.current_ui.permission_mode, None);
+
+    app.default_mode_gate = true;
+    app.current_ui.permission_mode = Some("default".into());
+    downgrade_displayed_default_if_gated(&mut app);
+    assert_eq!(app.current_ui.permission_mode.as_deref(), Some("default"));
+}
+
+/// The plan nudge points at Shift+Tab → Plan; with no Plan stop it never shows, whatever the
+/// per-tip gate says, and the resolved hints cannot switch it back on.
+#[test]
+fn the_plan_nudge_is_off_without_plan() {
+    let mut app = app_without_plan();
+    let id = AgentId(0);
+    app.agents.get_mut(&id).unwrap().last_terminal_size = (80, 30);
+    app.contextual_hints.plan_mode = true;
+
+    let effects = dispatch(Action::ShowPlanNudge, &mut app);
+    assert!(effects.is_empty());
+    assert!(app.tip_seen_counts.is_empty(), "no count burned");
+    assert!(!app.agents[&id].ephemeral_tip.is_active());
+
+    // Resolved hints (all tips on, as the defaults resolve) are clamped on the way in.
+    app.apply_contextual_hints(pi_shell::util::config::ResolvedContextualHints::default());
+    assert!(!app.contextual_hints.plan_mode, "plan nudge clamped off");
+    assert!(app.contextual_hints.undo, "the other tips are untouched");
+
+    app.plan_mode_gate = true;
+    app.apply_contextual_hints(pi_shell::util::config::ResolvedContextualHints::default());
+    assert!(app.contextual_hints.plan_mode, "with Plan offered it is on");
+}
