@@ -55,6 +55,10 @@ The Rust TUI (`zypi`) spawns the Python agent via (priority order):
 
 **The agent's stderr.** The TUI owns the screen, and its own fd 2 is `/dev/null` (`pi_tty_utils::redirect_native_stderr`), so the agent's stderr goes to `<home>/logs/agent.stderr.log` instead (`acp/spawn.rs`, `agent_stderr`): appended across runs, one `--- agent started <time> (zypi pid N) ---` line per spawn, mode 0600 on Unix (a traceback can quote prompts, paths and keys), and a log longer than 1 MiB is moved to `agent.stderr.log.1` at the next spawn. A log that cannot be opened is skipped, not fatal. This is where a Python traceback or a warning from the agent ends up; the agent should still write diagnostics to stderr, not stdout (stdout is the ACP channel). `-p` runs are not redirected: there the agent's stderr is the user's terminal.
 
+## MCP servers
+
+The agent connects to **no** MCP server (Phase 4 non-goal; tools come from the harness and its extensions). `session/new`, `load` and `resume` accept `mcp_servers` and ignore them, which departs from ACP, whose session setup says an agent MUST support stdio servers; `initialize` advertises no `mcpCapabilities` (no `http`, no `sse`). The departure is made visible instead of silent: each time a session is set up with a non-empty list, the agent logs a warning and sends one agent message naming the servers (`mcp_notice`, from `_deferred_session_setup`, after the response has flushed like the other notices). Only the **names** are used: `env`, `headers`, `args` and `url` routinely hold tokens. `zypi` itself sends an empty list (it used to forward whatever it found in `.mcp.json`, `~/.claude.json` and Cursor's `mcp.json`), so there the notice never appears; it is for other ACP clients (an editor that passes its own servers). `tests/test_mcp_notice.py`. To implement MCP, start from the notice: it is the one place that sees the list.
+
 ## Listing sessions
 
 `session/list` returns `SESSION_LIST_PAGE_SIZE` (50) sessions at a time, newest first, with `nextCursor` while more follow; the TUI keeps asking until it is gone. The order is the harness's (`JsonlSessionRepo.list_page`): creation time, which the session file names start with, so a page reads a file's header only when it gets that far and costs the files it looks at, not the directory (a `cwd` filter makes it skip other projects' files). `nextCursor` is opaque to the client and carries the file name the next page continues below; the agent keeps nothing between requests, so a cursor survives a restart, a session created meanwhile is simply newer than the cursor, and one deleted meanwhile moves nothing. A page that carries a cursor is never followed by an empty one (the agent looks one session ahead). A string the agent did not issue is `invalid_params`. `updated_at` is still the file's mtime, so it need not be in the order of the list.
@@ -99,6 +103,7 @@ The agent must reap the tools it is running when its client goes away: the TUI c
 | `trust_store.py` | `<home>/agent/trust.json`: answers saved per directory with the fingerprint they were about |
 | `trust_prompt.py` | The `session/request_permission` question (shape, option ids, how an answer is read) and its explanation message |
 | `extension_notices.py` | The "these extensions failed to load" notice (`AgentHarness.failed_extensions`): ACP agent message after `session/new`, headless stderr |
+| `mcp_notice.py` | The "these MCP servers were ignored" notice: names only, never `env` / `headers` / `args` / `url` |
 | `system_prompt.py` | `build_system_prompt`, tool snippet/guideline consumption |
 | `context_files.py` | AGENTS.md / CLAUDE.md / .pi/SYSTEM.md discovery |
 | `git_context.py` | Read-only branch and `git status` snapshot for the system prompt |
