@@ -124,6 +124,8 @@ pub(crate) fn test_app() -> AppView {
         default_yolo: false,
         permission_mode_from_soft_default: true,
         auto_mode_gate: true,
+        plan_mode_gate: true,
+        default_mode_gate: true,
         yolo_policy_block: None,
         yolo_launch_block_notice: None,
         screen_mode_switch_hint: None,

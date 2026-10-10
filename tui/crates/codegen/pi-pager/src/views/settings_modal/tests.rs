@@ -127,43 +127,172 @@ fn effective_enum_choices_hides_auto_for_permission_mode_when_gated_off() {
 }
 
 /// `voice_capture_mode`'s "hold" choice is gated off without key releases and
-/// available with them; "toggle" is never gated. Permission_mode's "auto"
-/// gating is preserved. Pure — no process-global mutation.
+/// available with them; "toggle" is never gated. Permission_mode's "auto" and
+/// "default" gating is preserved. Pure — no process-global mutation.
 #[test]
 fn enum_choice_gated_off_covers_voice_and_permission() {
+    let gates = |auto_mode_gate: bool, default_mode_gate: bool| PagerLocalSnapshot {
+        auto_mode_gate,
+        default_mode_gate,
+        ..PagerLocalSnapshot::default()
+    };
     // voice "hold": gated iff no key releases.
     assert!(enum_choice_gated_off(
         "voice_capture_mode",
         "hold",
-        true,
+        &gates(true, true),
         false
     ));
     assert!(!enum_choice_gated_off(
         "voice_capture_mode",
         "hold",
-        true,
+        &gates(true, true),
         true
     ));
     // voice "toggle": never gated.
     assert!(!enum_choice_gated_off(
         "voice_capture_mode",
         "toggle",
-        true,
+        &gates(true, true),
         false
     ));
     // permission_mode "auto": gated iff the auto gate is off.
     assert!(enum_choice_gated_off(
         "permission_mode",
         "auto",
-        false,
+        &gates(false, true),
         true
     ));
     assert!(!enum_choice_gated_off(
         "permission_mode",
         "auto",
-        true,
+        &gates(true, false),
         true
     ));
+    // permission_mode "default": gated iff the default gate is off, whatever the auto gate says.
+    assert!(enum_choice_gated_off(
+        "permission_mode",
+        "default",
+        &gates(true, false),
+        true
+    ));
+    assert!(!enum_choice_gated_off(
+        "permission_mode",
+        "default",
+        &gates(false, true),
+        true
+    ));
+    // The two permission choices that always work are never gated.
+    for canonical in ["ask", "always-approve"] {
+        assert!(!enum_choice_gated_off(
+            "permission_mode",
+            canonical,
+            &gates(false, false),
+            false
+        ));
+    }
+}
+
+/// The permission_mode picker hides "Default" while the agent cannot tell it from Ask (it would
+/// drop `default`, so the picker would say Default while the agent keeps approving everything
+/// after Always-Approve), and offers it when the gate is on. With every agent-dependent gate off —
+/// what the shipped Python agent gets — only Ask and Always approve are left.
+#[test]
+fn permission_mode_picker_offers_only_what_the_agent_honours() {
+    let reg = SettingsRegistry::defaults();
+    let SettingKind::Enum { choices, .. } = &meta_for(&reg, "permission_mode").kind else {
+        panic!("permission_mode must be Enum");
+    };
+    let canonicals = |snapshot: &PagerLocalSnapshot| -> Vec<&'static str> {
+        effective_enum_choices("permission_mode", choices, snapshot)
+            .iter()
+            .map(|c| c.canonical)
+            .collect()
+    };
+
+    assert_eq!(
+        canonicals(&PagerLocalSnapshot::default()),
+        vec!["ask", "always-approve"],
+        "the shipped agent honours Ask and Always approve only"
+    );
+    let default_on = PagerLocalSnapshot {
+        default_mode_gate: true,
+        ..PagerLocalSnapshot::default()
+    };
+    assert_eq!(
+        canonicals(&default_on),
+        vec!["default", "ask", "always-approve"]
+    );
+    let everything = PagerLocalSnapshot {
+        auto_mode_gate: true,
+        default_mode_gate: true,
+        ..PagerLocalSnapshot::default()
+    };
+    assert_eq!(
+        canonicals(&everything),
+        vec!["default", "ask", "auto", "always-approve"],
+        "with every gate on the full catalog is back"
+    );
+}
+
+/// With no Plan to back it (`plan_mode_gate` off) the `plan_mode` setting and the plan-nudge hint
+/// toggle disappear: from the top-level rows, from the hints sub-sheet, and from the sheet's key
+/// routing; every other child stays. Turning the gate on brings both back.
+#[test]
+fn plan_mode_settings_are_hidden_without_plan() {
+    let is_plan_row = |s: &SettingsModalState| {
+        s.rows
+            .iter()
+            .any(|r| matches!(r, RowEntry::Setting { key, .. } if *key == "plan_mode"))
+    };
+
+    let hidden = make_state();
+    assert!(!hidden.pager_snapshot.plan_mode_gate);
+    assert!(!is_plan_row(&hidden), "plan_mode row must be hidden");
+    let children = group_children(&hidden, "contextual_hints");
+    assert!(
+        !children.contains(&"contextual_hints.plan_mode"),
+        "the plan-nudge toggle must be hidden, got {children:?}"
+    );
+    assert!(
+        children.contains(&"contextual_hints.undo")
+            && children.contains(&"contextual_hints.image_input"),
+        "the other hint toggles stay, got {children:?}"
+    );
+
+    let shown = SettingsModalState::new(
+        Arc::new(SettingsRegistry::defaults()),
+        UiConfig::default(),
+        PagerLocalSnapshot {
+            plan_mode_gate: true,
+            ..PagerLocalSnapshot::default()
+        },
+    );
+    assert!(is_plan_row(&shown), "plan_mode row must be back");
+    assert!(group_children(&shown, "contextual_hints").contains(&"contextual_hints.plan_mode"));
+}
+
+/// Pure predicate behind the hiding above: only the two Plan-dependent keys, only while the gate
+/// is off.
+#[test]
+fn setting_gated_off_by_agent_names_only_the_plan_settings() {
+    let off = PagerLocalSnapshot::default();
+    let on = PagerLocalSnapshot {
+        plan_mode_gate: true,
+        ..PagerLocalSnapshot::default()
+    };
+    for key in ["plan_mode", "contextual_hints.plan_mode"] {
+        assert!(setting_gated_off_by_agent(key, &off), "{key} gated off");
+        assert!(!setting_gated_off_by_agent(key, &on), "{key} offered");
+    }
+    for key in [
+        "permission_mode",
+        "contextual_hints",
+        "contextual_hints.undo",
+        "theme",
+    ] {
+        assert!(!setting_gated_off_by_agent(key, &off), "{key} untouched");
+    }
 }
 
 /// Look up a setting's registered metadata by key (test helper).
@@ -561,8 +690,8 @@ fn render_setting_row_shows_full_label_when_one_line_fits() {
 
 /// The default registry contains Appearance settings
 /// (3 bools + 3 enums + 1 int = 7 entries), the Editor entry
-/// `multiline_mode`, the Agent entries `permission_mode` and
-/// `plan_mode`, the
+/// `multiline_mode`, the Agent entry `permission_mode` (and `plan_mode`
+/// once the agent honours Plan; the default snapshot hides it), the
 /// Models entry `default_model`, and the Advanced entries
 /// `show_tips` and `auto_update`. `default_reasoning_effort` and
 /// `auto_compact_threshold_percent` are not exposed in the modal.
@@ -673,8 +802,9 @@ fn rows_contain_categories_and_settings_through_pr_14() {
             // SHELL-owned ask_user_question timeout (Agent category,
             // registered directly above plan_mode).
             "toolset.ask_user_question.timeout_enabled",
-            // PAGER-owned plan_mode (Agent category).
-            "plan_mode",
+            // PAGER-owned plan_mode (Agent category) is not here: the default snapshot has
+            // `plan_mode_gate` off, so the row is hidden
+            // (`plan_mode_settings_are_hidden_without_plan`).
             // SHELL-owned default_model (Models category).
             "default_model",
             // Models category. `default_reasoning_effort`,

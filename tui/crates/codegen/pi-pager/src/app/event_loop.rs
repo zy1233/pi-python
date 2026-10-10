@@ -960,7 +960,9 @@ pub(crate) async fn run(
     // Gated launch-auto (CLI `--permission-mode auto`, config, or the
     // interactive soft default when nothing selects a mode). Hoisted so it can
     // be re-applied after `load_initial_ui_config()` replaces `current_ui` below.
-    let launch_auto = pi_shell::util::config::effective_auto_for_launch_interactive(
+    // Never true while the agent does not honour Auto (`agent_modes`): a saved
+    // `auto` or the soft default then launches as Ask.
+    let launch_auto = super::agent_modes::launch_auto(
         args.yolo,
         args.permission_mode_flag.as_deref(),
         remote_permission_mode,
@@ -1518,6 +1520,9 @@ pub(crate) async fn run(
     };
     app.current_ui.permission_mode = Some(display_mode.to_string());
     super::dispatch::downgrade_displayed_auto_if_gated(&mut app);
+    // A saved `default` (the one spelling the resolver keeps) shows as Ask while "Default"
+    // is not offered.
+    super::dispatch::downgrade_displayed_default_if_gated(&mut app);
     // Seed `/auto` feature-gate visibility from the resolved gate (so `/auto`
     // is offered on the welcome prompt when available).
     app.sync_permission_mode_slash_gate();

@@ -48,6 +48,8 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
     let auto_update_from_app = app.auto_update;
     let respect_manual_folds_from_app = app.appearance.scrollback.scroll.respect_manual_folds;
     let auto_mode_gate_from_app = app.auto_mode_gate;
+    let plan_mode_gate_from_app = app.plan_mode_gate;
+    let default_mode_gate_from_app = app.default_mode_gate;
     let ask_user_question_timeout_enabled_from_app = app.ask_user_question_timeout_enabled;
     let voice_stt_language_from_app = app.voice_config.language.clone();
     let scheduler_background_loops_seed = app.scheduler_background_loops_seed;
@@ -85,6 +87,8 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
                 scroll_speed: crate::appearance::cache::load_scroll_speed(),
                 respect_manual_folds: respect_manual_folds_from_app,
                 auto_mode_gate: auto_mode_gate_from_app,
+                plan_mode_gate: plan_mode_gate_from_app,
+                default_mode_gate: default_mode_gate_from_app,
                 ask_user_question_timeout_enabled: ask_user_question_timeout_enabled_from_app,
                 voice_stt_language: voice_stt_language_from_app.clone(),
                 scheduler_background_loops: agent
@@ -168,6 +172,8 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
     let auto_update_from_app = app.auto_update;
     let respect_manual_folds_from_app = app.appearance.scrollback.scroll.respect_manual_folds;
     let auto_mode_gate_from_app = app.auto_mode_gate;
+    let plan_mode_gate_from_app = app.plan_mode_gate;
+    let default_mode_gate_from_app = app.default_mode_gate;
     let ask_user_question_timeout_enabled_from_app = app.ask_user_question_timeout_enabled;
     let voice_stt_language_from_app = app.voice_config.language.clone();
     let scheduler_background_loops_seed = app.scheduler_background_loops_seed;
@@ -214,6 +220,8 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
         scroll_speed: crate::appearance::cache::load_scroll_speed(),
         respect_manual_folds: respect_manual_folds_from_app,
         auto_mode_gate: auto_mode_gate_from_app,
+        plan_mode_gate: plan_mode_gate_from_app,
+        default_mode_gate: default_mode_gate_from_app,
         ask_user_question_timeout_enabled: ask_user_question_timeout_enabled_from_app,
         voice_stt_language: voice_stt_language_from_app,
         scheduler_background_loops: agent
@@ -611,6 +619,8 @@ pub(crate) fn build_pager_snapshot(app: &AppView) -> crate::settings::PagerLocal
         scroll_speed: crate::appearance::cache::load_scroll_speed(),
         respect_manual_folds: app.appearance.scrollback.scroll.respect_manual_folds,
         auto_mode_gate: app.auto_mode_gate,
+        plan_mode_gate: app.plan_mode_gate,
+        default_mode_gate: app.default_mode_gate,
         ask_user_question_timeout_enabled: app.ask_user_question_timeout_enabled,
         voice_stt_language: app.voice_config.language.clone(),
         scheduler_background_loops: agent_scheduler_background_loops(app),

@@ -85,7 +85,11 @@ fn test_app() -> AppView {
         cli_effort_token: None,
         default_yolo: false,
         permission_mode_from_soft_default: true,
+        // The fixture offers every mode so the Plan / Auto / Default tests below keep running;
+        // `AppView::new` offers none (`agent_modes`), covered by the tests that turn them off.
         auto_mode_gate: true,
+        plan_mode_gate: true,
+        default_mode_gate: true,
         yolo_policy_block: None,
         yolo_launch_block_notice: None,
         screen_mode_switch_hint: None,

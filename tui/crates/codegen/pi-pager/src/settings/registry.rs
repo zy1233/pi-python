@@ -266,6 +266,13 @@ pub struct PagerLocalSnapshot {
     /// permission-mode picker hides the "Auto" choice (matches the Shift+Tab
     /// cycle, which skips Auto when the feature gate is off).
     pub auto_mode_gate: bool,
+    /// Mirrors `AppView::plan_mode_gate` at snapshot time. When false the
+    /// `plan_mode` row and the plan-nudge hint toggle are hidden (the Shift+Tab
+    /// cycle has no Plan stop either).
+    pub plan_mode_gate: bool,
+    /// Mirrors `AppView::default_mode_gate` at snapshot time. When false the
+    /// permission-mode picker hides the "Default" choice.
+    pub default_mode_gate: bool,
     /// `[toolset.ask_user_question].timeout_enabled` mirror (effective TOML
     /// merge, like `show_tips`). `None` = unset in TOML → default `true`.
     pub ask_user_question_timeout_enabled: Option<bool>,
@@ -298,6 +305,8 @@ impl Default for PagerLocalSnapshot {
             scroll_speed: 50,
             respect_manual_folds: crate::appearance::ScrollConfig::default().respect_manual_folds,
             auto_mode_gate: false,
+            plan_mode_gate: false,
+            default_mode_gate: false,
             ask_user_question_timeout_enabled: None,
             voice_stt_language: pi_voice::STT_LANGUAGE_DEFAULT.to_string(),
             // Matches `resolve_scheduler_background_loops`'s default.

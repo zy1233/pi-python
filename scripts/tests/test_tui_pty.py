@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 import time
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -241,9 +242,11 @@ def test_sessions_reads_the_id_from_each_header(tmp_path):
 def test_the_mode_scenarios_are_well_formed():
     names = [scenario.name for scenario in mp.SCENARIOS]
     assert len(names) == len(set(names))
-    # Every mode the TUI cycles through, and the command-line flag, is probed.
+    # Every stop of the Shift+Tab ring (Normal, Always-Approve) and one more lap, and the
+    # command-line flag, are probed. There is no Plan or Auto stop to press for any more.
     pressed = {len(scenario.keys) for scenario in mp.SCENARIOS}
-    assert {0, 1, 2, 3, 4} <= pressed
+    assert {0, 1, 2, 3} <= pressed
+    assert not {4, 5} & pressed
     assert any("--always-approve" in scenario.flags for scenario in mp.SCENARIOS)
     assert all(set(scenario.keys) <= {mp.SHIFT_TAB} for scenario in mp.SCENARIOS)
     # Every value `zypi --permission-mode` takes is probed, each as its own command line.
@@ -252,15 +255,107 @@ def test_the_mode_scenarios_are_well_formed():
         for scenario in mp.SCENARIOS
         if scenario.flags[:1] == ("--permission-mode",)
     }
-    assert set(by_flag) == {
-        "default",
-        "acceptEdits",
-        "auto",
-        "dontAsk",
-        "bypassPermissions",
-        "plan",
-    }
+    assert set(by_flag) == {"default", "bypassPermissions"}
     assert all(flags == ("--permission-mode", mode) for mode, flags in by_flag.items())
+    # So are the modes an earlier zypi saved in config.toml (Auto and Default must come up asking).
+    saved_modes = {
+        tomllib.loads(scenario.config)["ui"]["permission_mode"]
+        for scenario in mp.SCENARIOS
+        if scenario.config
+    }
+    assert saved_modes == {"auto", "default", "always-approve"}
+    assert all(not scenario.config for scenario in mp.SCENARIOS if scenario.flags or scenario.keys)
+
+
+def test_the_values_the_flag_refuses_are_the_rest_of_the_six_it_used_to_take():
+    # `zypi --help` used to list these six; two work, four are refused and probed as refusals.
+    old_values = {"default", "acceptEdits", "auto", "dontAsk", "bypassPermissions", "plan"}
+    assert set(mp.ACCEPTED_PERMISSION_MODES) == {"default", "bypassPermissions"}
+    assert set(mp.REJECTED_PERMISSION_MODES) == {"acceptEdits", "auto", "dontAsk", "plan"}
+    assert set(mp.ACCEPTED_PERMISSION_MODES) | set(mp.REJECTED_PERMISSION_MODES) == old_values
+    assert not set(mp.ACCEPTED_PERMISSION_MODES) & set(mp.REJECTED_PERMISSION_MODES)
+
+
+# The Permission mode picker as zypi draws it (pyte's display, borders kept short): the top border
+# names "Settings" and "Permission mode", each choice is "Label · description", and the footer says
+# "Enter select". The title's separator is U+203A, written as an escape (ruff flags the glyph).
+TWO_CHOICES = [
+    ("Ask", "Prompt for permission before tool actions."),
+    ("Always approve", "Auto-approve every tool action. Skips ALL permission prompts."),
+]
+FOUR_CHOICES = [
+    ("Default", "Use the agent's default permission behavior (currently equivalent to Ask)."),
+    TWO_CHOICES[0],
+    ("Auto", "LLM classifier approves safe tools; dangerous actions may still prompt or deny."),
+    TWO_CHOICES[1],
+]
+
+
+def picker_screen(choices: list[tuple[str, str]]) -> str:
+    def row(text: str = "") -> str:
+        return "                  │" + text.ljust(70) + "│"
+
+    lines = [
+        "                  ┌─ Settings \u203a Permission mode " + "─" * 40 + " [x] ─┐",
+        row("  Permission mode"),
+        row("  Ask prompts for each tool action; Always approve grants all permissions"),
+        row(),
+        *(row(f"   ○  {label} · {text}") for label, text in choices),
+        row(),
+        row("      ↑/↓ nav  |  Enter select  |  Esc cancel  |  d reset"),
+    ]
+    return "\n".join(lines) + "\n"
+
+
+PICKER_OF_TWO = picker_screen(TWO_CHOICES)
+PICKER_OF_FOUR = picker_screen(FOUR_CHOICES)
+
+
+def test_the_permission_picker_is_read_from_the_screen():
+    assert mp.picker_choices(PICKER_OF_TWO) == ["Ask", "Always approve"]
+    # The page as it was before 1.P3 (a): four choices, in the page's order.
+    assert mp.picker_choices(PICKER_OF_FOUR) == ["Default", "Ask", "Auto", "Always approve"]
+    # No picker on the screen (the page is still the list, or nothing is open): nothing to read.
+    assert mp.picker_choices("") == []
+    assert mp.picker_choices("  Permission mode        Ask\n  Remember tool approvals   on") == []
+    # What is behind the page, or after the footer, is not a choice.
+    behind = "  Auto · mock-a\n" + PICKER_OF_TWO + "  Default · after the footer\n"
+    assert mp.picker_choices(behind) == ["Ask", "Always approve"]
+
+
+def test_what_the_settings_page_offers_is_one_line():
+    shown = mp.format_settings(mp.SettingsOffer(True, False, ["Ask", "Always approve"]))
+    assert shown == (
+        "settings page: a 'Plan mode' row for the search 'plan': no; "
+        "picker offers: Ask, Always approve"
+    )
+    assert "row for the search 'plan': yes" in mp.format_settings(mp.SettingsOffer(True, True, []))
+    assert "(the picker did not open)" in mp.format_settings(mp.SettingsOffer(True, False, []))
+    assert mp.format_settings(mp.SettingsOffer()) == "settings page: did not open"
+    # Every choice a picker can list is one the parser looks for.
+    assert mp.PICKER_CHOICES == ("Default", "Ask", "Auto", "Always approve")
+
+
+def test_a_refusal_is_reported_by_its_first_line_and_exit_code():
+    stderr = (
+        "\n"
+        "error: invalid value 'plan' for '--permission-mode <MODE>': the agent does not act on "
+        "`plan`, so the flag would change nothing (valid values: default, bypassPermissions)\n"
+        "\n"
+        "For more information, try '--help'.\n"
+    )
+    message = mp.rejection_message(stderr)
+    assert message.startswith("error: invalid value 'plan' for '--permission-mode <MODE>'")
+    assert "valid values: default, bypassPermissions" in message
+    assert mp.rejection_message("") == ""
+    assert mp.rejection_message("  \n \n") == ""
+
+    refused = mp.format_rejection(mp.Rejection("plan", 2, message))
+    assert refused.startswith("--permission-mode plan")
+    assert "exit 2" in refused and message in refused
+    # A zypi that did not refuse is a result too: it started up and was killed.
+    started = mp.format_rejection(mp.Rejection("auto"))
+    assert "still running" in started and "(no message)" in started
 
 
 def test_the_status_label_is_read_from_the_frame_of_the_prompt_box():
@@ -270,8 +365,8 @@ def test_the_status_label_is_read_from_the_frame_of_the_prompt_box():
 
 
 def test_a_row_says_whether_the_question_came_and_what_was_written():
-    scenario = mp.Scenario("Plan", keys=(mp.SHIFT_TAB,) * 3)
-    asked = mp.Observation(scenario, ready=True, label="mock · plan", asked=True)
+    scenario = mp.Scenario("Always-Approve", keys=(mp.SHIFT_TAB,))
+    asked = mp.Observation(scenario, ready=True, label="mock · ask", asked=True)
     asked.written_after_answer = True
     row = mp.format_row(asked)
     assert "asked=yes" in row and "written without an answer=no" in row

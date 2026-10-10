@@ -86,6 +86,10 @@ const THEME_CHOICES: &[EnumChoice] = &[
 // false` because toggling YOLO drains the permission queue (unsafe
 // for per-keystroke preview).
 //
+// The catalog stays complete, but the picker offers only the modes the agent honours
+// (`app::agent_modes`): "default" and "auto" are hidden by `enum_choice_gated_off` while the
+// snapshot's `default_mode_gate` / `auto_mode_gate` are off.
+//
 // Adding new modes requires: (1) `PermissionModeKind` variant,
 // (2) `EnumChoice` here, (3) `set_yolo_mode_inner` update,
 // (4) `load_permission_mode` arm, (5) tests. `Plan` is excluded —
@@ -752,9 +756,9 @@ pub fn default_settings() -> Vec<SettingMeta> {
             category: SettingCategory::Agent,
             owner: SettingOwner::Shell,
             label: "Permission mode",
-            description: "Default uses the agent's built-in behavior; \
-                          Ask prompts for each tool action; \
-                          Auto uses an LLM classifier for risky tools; \
+            // Names only the modes the agent honours. The picker hides Default and Auto
+            // (`app::agent_modes`, gated per snapshot); name them here again when they come back.
+            description: "Ask prompts for each tool action; \
                           Always approve grants all permissions automatically.",
             keywords: &[
                 "permission",

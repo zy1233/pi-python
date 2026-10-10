@@ -11,6 +11,7 @@
 //! - [`event_loop`] — biased tokio::select! loop
 pub mod actions;
 pub mod agent;
+pub(crate) mod agent_modes;
 pub mod agent_view;
 pub mod app_view;
 pub(crate) mod cancel_latency;
@@ -584,7 +585,7 @@ pub async fn run(
         args.permission_mode_flag.as_deref(),
         remote_permission_mode,
     );
-    let launch_auto = pi_shell::util::config::effective_auto_for_launch_interactive(
+    let launch_auto = agent_modes::launch_auto(
         args.yolo,
         args.permission_mode_flag.as_deref(),
         remote_permission_mode,

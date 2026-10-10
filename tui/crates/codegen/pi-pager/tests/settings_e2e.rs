@@ -116,10 +116,14 @@ fn make_state() -> SettingsModalState {
     SettingsModalState::new(
         Arc::new(SettingsRegistry::defaults()),
         UiConfig::default(),
-        // auto_mode_gate on so the permission_mode picker shows the full catalog
-        // (including Auto); the gate-off filtering is covered by a dedicated test.
+        // Every agent-dependent gate on so the permission_mode picker shows the full catalog
+        // (including Auto and Default) and the Plan rows are present; the gate-off filtering is
+        // covered by dedicated tests (`views/settings_modal/tests.rs` and the ones at the end of
+        // this file).
         PagerLocalSnapshot {
             auto_mode_gate: true,
+            plan_mode_gate: true,
+            default_mode_gate: true,
             ..PagerLocalSnapshot::default()
         },
     )
@@ -3068,6 +3072,7 @@ fn pr6_picker_seeds_choices_idx_from_pager_snapshot_yolo_true() {
         multiline_mode: false,
         yolo_mode: true,
         auto_mode_gate: true,
+        default_mode_gate: true,
         ..PagerLocalSnapshot::default()
     };
     let mut s = SettingsModalState::new(
@@ -3792,8 +3797,9 @@ fn expanded_description_wraps_to_modal_width() {
     let rendered = render_modal_to_string(&mut s, 80, 34);
     // Distinctive phrases from the description text:
     assert!(
-        rendered.contains("Default") || rendered.contains("default"),
-        "wrapped description must include the 'Default uses' phrase"
+        rendered.contains("Ask prompts"),
+        "wrapped description must include the 'Ask prompts for each tool action' phrase, \
+         got:\n{rendered}"
     );
     assert!(
         rendered.contains("Always") && rendered.contains("automatically"),
@@ -4813,6 +4819,7 @@ fn pr10_plan_mode_picker_esc_does_not_dispatch_action() {
 fn pr10_picker_seeds_choices_idx_from_pager_snapshot_plan_mode_active() {
     let snapshot = PagerLocalSnapshot {
         plan_mode_active: true,
+        plan_mode_gate: true,
         ..PagerLocalSnapshot::default()
     };
     let mut s = SettingsModalState::new(
@@ -7088,4 +7095,132 @@ fn collapsed_edit_blocks_renders_under_appearance_category_shell_owned() {
         "collapsed_edit_blocks must be immediately below group_tool_verbs; \
          Appearance order: {keys:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Modes the agent does not honour are not offered (`app::agent_modes`)
+//
+// The Python agent acts on two permission behaviours: ask and always-approve. Plan, Auto and
+// "Default" are hidden, because offering a mode that does nothing is worse than not offering it
+// (plan §10.11). Everything above runs with every gate on (`make_state`), so these tests are the
+// ones that hold the shipped state: every agent-dependent gate off.
+// ---------------------------------------------------------------------------
+
+/// The modal as it opens with the shipped Python agent.
+fn hidden_modes_state() -> SettingsModalState {
+    pi_pager::app::set_voice_mode_enabled_for_test(true);
+    SettingsModalState::new(
+        Arc::new(SettingsRegistry::defaults()),
+        UiConfig::default(),
+        PagerLocalSnapshot {
+            auto_mode_gate: false,
+            plan_mode_gate: false,
+            default_mode_gate: false,
+            ..PagerLocalSnapshot::default()
+        },
+    )
+}
+
+/// The permission picker walks over Ask and Always approve and nothing else. It opens on Ask, so
+/// Up must stop at Ask (no hidden choice in front of it) and Down at Always approve (none behind
+/// it); every Enter commits one of the two.
+#[test]
+fn hidden_modes_permission_picker_commits_only_ask_or_always_approve() {
+    use pi_pager::app::actions::PermissionModeKind;
+    // (Down presses, then Up presses, what Enter then commits): Ask first, Always approve last,
+    // no third stop on either side.
+    for (downs, ups, expected) in [
+        (0, 0, PermissionModeKind::Ask),
+        (1, 0, PermissionModeKind::AlwaysApprove),
+        (6, 0, PermissionModeKind::AlwaysApprove),
+        (0, 6, PermissionModeKind::Ask),
+        (1, 6, PermissionModeKind::Ask),
+    ] {
+        let mut s = hidden_modes_state();
+        navigate_to(&mut s, "permission_mode");
+        let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
+        assert!(matches!(s.mode(), SettingsModalMode::PickingEnum { .. }));
+        for _ in 0..downs {
+            let _ = handle_settings_key(&mut s, &press(KeyCode::Down));
+        }
+        for _ in 0..ups {
+            let _ = handle_settings_key(&mut s, &press(KeyCode::Up));
+        }
+        let keys = format!("{downs} Down then {ups} Up presses");
+        match handle_settings_key(&mut s, &press(KeyCode::Enter)) {
+            SettingsKeyOutcome::Action(Action::SetPermissionMode(kind)) => {
+                assert_eq!(kind, expected, "{keys}");
+            }
+            other => panic!("{keys}: expected a SetPermissionMode, got {other:?}"),
+        }
+    }
+}
+
+/// The Plan setting is not a row and the plan-nudge toggle is not in the hints sheet; Space on
+/// the second child lands on the image-input toggle, i.e. the Plan child is skipped by key
+/// routing too, and the sheet still reaches its last child.
+#[test]
+fn hidden_modes_plan_settings_are_not_offered() {
+    let mut s = hidden_modes_state();
+    assert!(
+        !s.rows
+            .iter()
+            .any(|r| matches!(r, RowEntry::Setting { key, .. } if *key == "plan_mode")),
+        "the plan_mode row must not be listed"
+    );
+
+    navigate_to(&mut s, "contextual_hints");
+    let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
+    assert!(matches!(
+        s.mode(),
+        SettingsModalMode::PickingGroup { child_idx: 0, .. }
+    ));
+    let out = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
+    assert!(
+        matches!(
+            out,
+            SettingsKeyOutcome::Action(Action::SetContextualHintUndo(false))
+        ),
+        "first child is still undo, got {out:?}"
+    );
+    let _ = handle_settings_key(&mut s, &press(KeyCode::Char('j')));
+    let out = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
+    assert!(
+        matches!(
+            out,
+            SettingsKeyOutcome::Action(Action::SetContextualHintImageInput(false))
+        ),
+        "second child must be image_input (plan nudge skipped), got {out:?}"
+    );
+    for _ in 0..10 {
+        let _ = handle_settings_key(&mut s, &press(KeyCode::Char('j')));
+    }
+    let out = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
+    assert!(
+        matches!(
+            out,
+            SettingsKeyOutcome::Action(Action::SetContextualHintSshWrap(_))
+        ),
+        "the sheet ends at the last child (ssh_wrap), got {out:?}"
+    );
+}
+
+/// The row text no longer promises Default or Auto, which the picker does not offer.
+#[test]
+fn hidden_modes_permission_mode_row_describes_only_the_two_modes() {
+    let reg = SettingsRegistry::defaults();
+    let description = reg
+        .find("permission_mode")
+        .expect("permission_mode registered")
+        .description;
+    assert!(
+        description.contains("Ask") && description.contains("Always approve"),
+        "{description}"
+    );
+    for gone in ["Default", "Auto", "classifier"] {
+        assert!(
+            !description.contains(gone),
+            "the row description must not mention {gone}: {description}"
+        );
+    }
 }

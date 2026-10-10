@@ -101,8 +101,11 @@ targets = [
 # +10 `python_agent_e2e` (that test target; on a host where `PI_E2E_PYTHON` is unset they pass as
 # skips), +8 `agent_exit_tests` (the agent's exit notice), +6 `fetch_session_list_*` (cursor
 # following) and +1 `session_new_and_load_send_no_mcp_servers`: 5,602 (one local run on Linux,
-# plan section 10.11). The next CI run confirms it.
-reference_passed = 5602
+# plan section 10.11; PR #10's CI run counted the same 5,602, 8,659 over the ten suites). Then
+# +24 for offering only the permission modes the agent honours (21 lib tests, 3 `settings_e2e`):
+# 5,626 (one local run on Linux, plan section 10.13; PR #12's CI run counted the same 5,626,
+# 8,683 over the ten suites).
+reference_passed = 5626
 min_passed = 5300
 
 # Lib tests only; they were outside the manifest until r8 (plan section 10.10: 1,092 passed,
