@@ -141,7 +141,6 @@ CASES: list[Case] = [
         "work",
         "a new session file whose header carries the id",
         lambda o, ids: ids["fresh"] in o.new_sessions.values(),
-        gap="session/new's _meta.sessionId is ignored: the agent picks its own id",
     ),
     Case(
         "--session-id <id in use> is refused",
@@ -149,8 +148,9 @@ CASES: list[Case] = [
         "work",
         "exit 1, 'already in use', no new session",
         lambda o, ids: o.code == 1 and not o.new_sessions,
-        gap="the in-use check reads the old layout, so it never sees the session: zypi starts "
-        "a new one under another id",
+        gap="the in-use check reads the old layout, so zypi never sees the session and sends "
+        "session/new; the agent refuses it (no new session), but the TUI shows 'Session creation "
+        "failed: Invalid params: {...}' and stays up instead of exiting 1",
     ),
     Case(
         "export <id> prints the transcript",

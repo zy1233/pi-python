@@ -17,6 +17,7 @@ import os
 import shlex
 import subprocess
 import sys
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -179,6 +180,52 @@ async def test_resume_reattaches_a_session_without_replaying_history(tmp_path):
             conn.prompt(session_id=created.session_id, prompt=[text_block("second")])
         )
     assert again.stop_reason == "end_turn"
+
+
+async def test_a_client_can_choose_the_id_of_a_new_session_and_a_taken_id_is_refused(tmp_path):
+    # ACP v1 has no field for it: the TUI's --session-id travels as `_meta.sessionId`.
+    chosen = str(uuid.uuid4())
+    async with running_agent(tmp_path) as (conn, _client, _process):
+        await _wire(conn.initialize(protocol_version=PROTOCOL_VERSION))
+        created = await _wire(conn.new_session(cwd=str(tmp_path), mcp_servers=[], sessionId=chosen))
+        assert created.session_id == chosen
+        with pytest.raises(RequestError) as taken:
+            await _wire(conn.new_session(cwd=str(tmp_path), mcp_servers=[], sessionId=chosen))
+        assert taken.value.code == -32602
+        with pytest.raises(RequestError) as malformed:
+            await _wire(conn.new_session(cwd=str(tmp_path), mcp_servers=[], sessionId="nope"))
+        assert malformed.value.code == -32602
+        # The refusals leave the connection, and the session, as they were.
+        result = await _wire(conn.prompt(session_id=chosen, prompt=[text_block("still there")]))
+        assert result.stop_reason == "end_turn"
+
+    async with running_agent(tmp_path) as (conn, _client, _process):
+        await _wire(conn.initialize(protocol_version=PROTOCOL_VERSION))
+        listed = await _wire(conn.list_sessions(cwd=str(tmp_path)))
+        assert [s.session_id for s in listed.sessions] == [chosen]
+        with pytest.raises(RequestError):  # still taken after a restart
+            await _wire(conn.new_session(cwd=str(tmp_path), mcp_servers=[], sessionId=chosen))
+
+
+async def test_loading_a_session_says_which_directory_it_works_in(tmp_path):
+    made_in = tmp_path / "made-in"
+    asked_from = tmp_path / "asked-from"
+    made_in.mkdir()
+    asked_from.mkdir()
+    async with running_agent(tmp_path) as (conn, _client, _process):
+        await _wire(conn.initialize(protocol_version=PROTOCOL_VERSION))
+        created = await _wire(conn.new_session(cwd=str(made_in), mcp_servers=[]))
+        assert (created.field_meta or {}).get("pi/cwd") == str(made_in)
+
+    # `--resume <id>` from another directory: the agent works where the session was made, and
+    # tells the client, which only knows the directory it was started in.
+    async with running_agent(tmp_path) as (conn, _client, _process):
+        await _wire(conn.initialize(protocol_version=PROTOCOL_VERSION))
+        loaded = await _wire(
+            conn.load_session(cwd=str(asked_from), session_id=created.session_id, mcp_servers=[])
+        )
+        assert loaded is not None
+        assert (loaded.field_meta or {}).get("pi/cwd") == str(made_in)
 
 
 async def test_a_closed_session_rejects_further_prompts(tmp_path):

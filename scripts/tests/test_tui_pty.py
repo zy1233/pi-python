@@ -203,10 +203,10 @@ def test_the_cases_are_well_formed():
         assert case.cwd in ("work", "other"), case.name
         filled = rmx.fill(case.argv, {"existing": "E", "unknown": "U", "fresh": "F"})
         assert all("{" not in part for part in filled), case.name
-    # Every flag ADR1 moves from files to the agent has a case, and the known gaps are those.
+    # Every flag ADR1 moves from files to the agent has a case. (A known gap is a statement about
+    # today and goes when it closes, so no test pins which cases have one.)
     flags = {case.argv[0] for case in rmx.CASES}
     assert {"--continue", "--resume", "--session-id", "export"} <= flags
-    assert all(case.gap for case in rmx.CASES if "{fresh}" in case.argv)
 
 
 def test_the_session_id_cases_tell_a_used_id_from_a_fresh_one():
