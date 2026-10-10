@@ -13,12 +13,17 @@ on:
       - "scripts/tui_baseline.py"
       - "scripts/tui_baseline.toml"
       - ".github/workflows/tui-ci.yml"
+      # The Python agent is what the pager's end-to-end tests talk to (its ACP surface).
+      - "packages/pi-agent-cli/pi_agent_cli/**"
+      - "packages/pi-agent-cli/tests/_tool_agent.py"
   pull_request:
     paths:
       - "tui/**"
       - "scripts/tui_baseline.py"
       - "scripts/tui_baseline.toml"
       - ".github/workflows/tui-ci.yml"
+      - "packages/pi-agent-cli/pi_agent_cli/**"
+      - "packages/pi-agent-cli/tests/_tool_agent.py"
   workflow_dispatch:
     inputs:
       release_baseline:
@@ -110,6 +115,15 @@ jobs:
           workspaces: tui
           shared-key: tui-linux-x86_64-test
           save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # The pager's client against the real Python agent (tui/crates/codegen/pi-pager/tests/
+      # python_agent_e2e.rs, plan 0.3): the tests need a Python that has the agent installed, and
+      # fail without one (PI_E2E_REQUIRED) instead of skipping, so a CI that lost it is not green.
+      - name: Install the Python agent for the end-to-end tests
+        run: |
+          pip install -e ".[dev]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent-cli" -e "./packages/pi-web-access" -e "./packages/pi-goal-x" -e "./packages/pi-dynamic-workflows"
+          echo "PI_E2E_PYTHON=$(command -v python)" >> "$GITHUB_ENV"
+          echo "PI_E2E_REQUIRED=1" >> "$GITHUB_ENV"
 
       # Report-only until `[test] enforce = true` in scripts/tui_baseline.toml (after the first
       # Linux run has been triaged); the per-suite table lands in the job summary either way.

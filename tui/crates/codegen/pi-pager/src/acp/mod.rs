@@ -214,7 +214,15 @@ pub async fn connect(cancel: &CancellationToken, flags: ConnectFlags) -> Result<
         default_auth_method_id,
         available_commands,
         cancel_rewind_enabled,
-    ) = initialize(&tx, &flags).await?;
+    ) = match initialize(&tx, &flags).await {
+        Ok(initialized) => initialized,
+        // What `initialize` saw is a closed channel; the bridge knows why it closed.
+        Err(error) => {
+            return Err(
+                spawn::explain_failed_start(error, spawned.cancel, spawned.bridge_thread).await,
+            );
+        }
+    };
 
     // Determine whether interactive login is needed.
     let (needs_login, login_label, login_method_id, auth_start_mode) =

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, cast
@@ -72,13 +73,19 @@ from pi_agent_cli.factory import (
     load_session_resources,
     model_for_choice,
 )
+from pi_agent_cli.mcp_notice import ignored_mcp_servers_notice, mcp_server_names
 from pi_agent_cli.permissions import (
     PERMISSION_OPTIONS,
     needs_permission,
     outcome_allows,
     permission_tool_call,
 )
-from pi_agent_cli.session_list import read_session_previews
+from pi_agent_cli.session_list import (
+    SESSION_LIST_PAGE_SIZE,
+    decode_cursor,
+    encode_cursor,
+    read_session_previews,
+)
 from pi_agent_cli.trust_prompt import (
     trust_explanation,
     trust_options,
@@ -205,7 +212,7 @@ class PiAcpAgent(Agent):
         # that are silently dropped.  Schedule via create_task + sleep(0) so
         # the response is flushed first.  (See zed#60199, zed#53161.)  The same goes
         # for the question about trusting the project, a request to the client.
-        self._schedule_deferred_setup(session_id)
+        self._schedule_deferred_setup(session_id, mcp_servers)
         return NewSessionResponse(
             session_id=session_id,
             config_options=self._config_options(session_id),
@@ -230,7 +237,7 @@ class PiAcpAgent(Agent):
             for msg in context.messages:
                 for update in project_message_replay(msg):
                     await self._conn.session_update(session_id=session_id, update=update)
-        self._schedule_deferred_setup(session_id)
+        self._schedule_deferred_setup(session_id, mcp_servers)
         return LoadSessionResponse(
             config_options=self._config_options(session_id),
             field_meta=self._session_response_meta(session_id),
@@ -239,8 +246,18 @@ class PiAcpAgent(Agent):
     async def list_sessions(
         self, cwd: str | None = None, cursor: str | None = None, **kwargs: Any
     ) -> ListSessionsResponse:
-        # One page: the pager does not follow ``nextCursor``, so ``cursor`` is not used.
-        listed = await self._repo.list({"cwd": cwd} if cwd is not None else None)
+        after = None
+        if cursor is not None:
+            try:
+                after = decode_cursor(cursor)
+            except ValueError:
+                raise RequestError.invalid_params(
+                    {"cursor": cursor, "reason": "not a cursor this agent issued"}
+                ) from None
+        page = await self._repo.list_page(
+            {"cwd": cwd, "limit": SESSION_LIST_PAGE_SIZE, "after": after}
+        )
+        listed = page.sessions
         previews = await asyncio.to_thread(
             read_session_previews, [(item.path, item.createdAt) for item in listed]
         )
@@ -253,7 +270,8 @@ class PiAcpAgent(Agent):
             )
             for item, preview in zip(listed, previews, strict=True)
         ]
-        return ListSessionsResponse(sessions=sessions)
+        next_cursor = encode_cursor(page.next_after) if page.next_after is not None else None
+        return ListSessionsResponse(sessions=sessions, next_cursor=next_cursor)
 
     async def resume_session(
         self,
@@ -269,7 +287,7 @@ class PiAcpAgent(Agent):
         session = await self._repo.open(metadata)
         await self._bind_session(session_id, session, metadata.cwd or cwd)
         # ACP session/resume intentionally does not replay history.
-        self._schedule_deferred_setup(session_id)
+        self._schedule_deferred_setup(session_id, mcp_servers)
         return ResumeSessionResponse(
             config_options=self._config_options(session_id),
             field_meta=self._session_response_meta(session_id),
@@ -472,10 +490,7 @@ class PiAcpAgent(Agent):
         return harness
 
     async def _find_metadata(self, session_id: str) -> Any:
-        for item in await self._repo.list():
-            if item.id == session_id:
-                return item
-        return None
+        return await self._repo.find(session_id)
 
     async def _bind_session(self, session_id: str, session: Session, cwd: str) -> None:
         cwd = normalize_host_path(cwd)
@@ -523,16 +538,32 @@ class PiAcpAgent(Agent):
         # Eagerly load extensions so slash commands are available.
         await harness.load_extensions()
 
-    def _schedule_deferred_setup(self, session_id: str) -> None:
-        """Fire-and-forget: finish setting the session up after the current response flushes."""
-        task = asyncio.create_task(self._deferred_session_setup(session_id))
+    def _schedule_deferred_setup(
+        self, session_id: str, mcp_servers: Sequence[Any] | None = None
+    ) -> None:
+        """Fire-and-forget: finish setting the session up after the current response flushes.
+
+        ``mcp_servers`` is what the client passed with the request; none of it is used, and the
+        user is told so (``mcp_notice``). Only the names are kept.
+        """
+        ignored = mcp_server_names(mcp_servers)
+        if ignored:
+            logger.warning(
+                "Ignoring %d MCP server(s) the client passed for session %s: %s",
+                len(ignored),
+                session_id,
+                ", ".join(ignored),
+            )
+        task = asyncio.create_task(self._deferred_session_setup(session_id, ignored))
         state = self._trust.get(session_id)
         if state is not None:
             state.task = task
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
 
-    async def _deferred_session_setup(self, session_id: str) -> None:
+    async def _deferred_session_setup(
+        self, session_id: str, ignored_mcp_servers: Sequence[str] = ()
+    ) -> None:
         """Ask about the project if need be, advertise commands, report what did not load.
 
         Zed registers ACP sessions only after processing the response to
@@ -546,6 +577,7 @@ class PiAcpAgent(Agent):
         await self._advertise_commands(session_id)
         await self._notify_untrusted_project(session_id)
         await self._notify_failed_extensions(session_id)
+        await self._notify_ignored_mcp_servers(session_id, ignored_mcp_servers)
 
     async def _settle_project_trust(self, session_id: str) -> None:
         """Put the question about the project to the user, act on the answer, load extensions.
@@ -731,6 +763,15 @@ class PiAcpAgent(Agent):
             return
         notice = failed_extensions_notice(harness.failed_extensions)
         if notice is None:
+            return
+        await self._conn.session_update(
+            session_id=session_id, update=update_agent_message_text(notice)
+        )
+
+    async def _notify_ignored_mcp_servers(self, session_id: str, names: Sequence[str]) -> None:
+        """Tell the user the MCP servers their client passed are not used (names only)."""
+        notice = ignored_mcp_servers_notice(names)
+        if self._conn is None or notice is None:
             return
         await self._conn.session_update(
             session_id=session_id, update=update_agent_message_text(notice)

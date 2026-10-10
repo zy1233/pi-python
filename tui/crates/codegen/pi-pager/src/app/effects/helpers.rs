@@ -619,6 +619,52 @@ pub(super) fn session_picker_entries_from_acp(
     parse_session_picker_entries(&serde_json::json!({ "sessions": sessions }))
 }
 
+/// How many `session/list` pages one fill of the picker follows. The Python agent's pages hold
+/// 50 sessions, so this is 5000 of them: more than a picker can use, and a bound on an agent
+/// that never stops handing out cursors.
+pub(super) const MAX_SESSION_LIST_PAGES: usize = 100;
+
+/// Ask the agent for `session/list` of `cwd`, page after page, and return the picker rows.
+///
+/// A response without `nextCursor` is the last page (ACP). The cursor is opaque: it is only
+/// ever handed back, never read. The loop ends early on a cursor that is empty or that the agent
+/// already gave (it would go round forever), and at [`MAX_SESSION_LIST_PAGES`]; the pages
+/// collected so far are returned then, with a warning in the log. An error on any page is the
+/// error of the whole fill: a list that silently stops half way would hide sessions.
+pub(super) async fn fetch_session_list(
+    tx: &AcpAgentTx,
+    cwd: &Path,
+) -> Result<Vec<crate::app::app_view::SessionPickerEntry>, acp::Error> {
+    let mut entries = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut cursor: Option<String> = None;
+    for _ in 0..MAX_SESSION_LIST_PAGES {
+        let request = acp::ListSessionsRequest::default()
+            .cwd(cwd.to_path_buf())
+            .cursor(cursor.take());
+        let resp = acp_send(request, tx).await?;
+        entries.extend(session_picker_entries_from_acp(&resp));
+        match resp.next_cursor {
+            None => return Ok(entries),
+            Some(next) if next.is_empty() || !seen.insert(next.clone()) => {
+                tracing::warn!(
+                    "session/list: the agent sent an empty or repeated nextCursor; \
+                     showing the {} sessions received so far",
+                    entries.len()
+                );
+                return Ok(entries);
+            }
+            Some(next) => cursor = Some(next),
+        }
+    }
+    tracing::warn!(
+        "session/list: stopped after {MAX_SESSION_LIST_PAGES} pages; \
+         showing the {} sessions received so far",
+        entries.len()
+    );
+    Ok(entries)
+}
+
 pub(super) async fn send_logout(_tx: &AcpAgentTx) {}
 
 /// Best-effort auth cancel: stops the shell's device/loopback wait so a

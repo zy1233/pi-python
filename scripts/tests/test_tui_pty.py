@@ -28,6 +28,8 @@ def _load(name: str):
 
 
 zenv = _load("zypi_env")  # stdlib only, so it loads everywhere
+rmx = _load("resume_matrix")  # plain Python until `run`, which is what imports the PTY driver
+mp = _load("mode_probe")  # likewise: the PTY driver is imported by `observe`
 
 
 @pytest.fixture(scope="module")
@@ -163,3 +165,119 @@ def test_a_zombie_does_not_count_as_alive(pt):
         assert not pt.alive(child.pid)
     finally:
         child.wait()
+
+
+# ---- resume_matrix: how a run is judged -------------------------------------------------
+
+IDS = {"existing": "e", "unknown": "u", "fresh": "f"}
+REPLAYED = rmx.Outcome(None, f"{rmx.FIRST}\n{rmx.REPLY}")
+FAILED = rmx.Outcome(1, "Error: no such session")
+
+
+def _case(holds, gap=""):
+    return rmx.Case("c", ["--continue"], "work", "something", holds, gap=gap)
+
+
+def test_a_case_that_holds_passes_and_one_that_does_not_fails():
+    case = _case(lambda o, ids: o.replayed)
+    assert rmx.judge(case, REPLAYED, IDS) == "PASS"
+    assert rmx.judge(case, FAILED, IDS) == "FAIL"
+
+
+def test_a_known_gap_is_reported_and_only_strict_fails_it():
+    case = _case(lambda o, ids: o.replayed, gap="the pager reads the old layout")
+    assert rmx.judge(case, FAILED, IDS) == "GAP"
+    assert rmx.judge(case, FAILED, IDS, strict=True) == "FAIL"
+
+
+def test_a_gap_that_has_closed_is_called_out_even_when_strict():
+    case = _case(lambda o, ids: o.replayed, gap="stale")
+    assert rmx.judge(case, REPLAYED, IDS) == "FIXED"
+    assert rmx.judge(case, REPLAYED, IDS, strict=True) == "FIXED"
+
+
+def test_the_cases_are_well_formed():
+    names = [case.name for case in rmx.CASES]
+    assert len(names) == len(set(names))
+    for case in rmx.CASES:
+        assert case.cwd in ("work", "other"), case.name
+        filled = rmx.fill(case.argv, {"existing": "E", "unknown": "U", "fresh": "F"})
+        assert all("{" not in part for part in filled), case.name
+    # Every flag ADR1 moves from files to the agent has a case, and the known gaps are those.
+    flags = {case.argv[0] for case in rmx.CASES}
+    assert {"--continue", "--resume", "--session-id", "export"} <= flags
+    assert all(case.gap for case in rmx.CASES if "{fresh}" in case.argv)
+
+
+def test_the_session_id_cases_tell_a_used_id_from_a_fresh_one():
+    fresh = next(case for case in rmx.CASES if "{fresh}" in case.argv)
+    taken = next(case for case in rmx.CASES if case.argv == ["--session-id", "{existing}"])
+    started_as_asked = rmx.Outcome(None, "", new_sessions={"x.jsonl": "f"})
+    started_as_another = rmx.Outcome(None, "", new_sessions={"x.jsonl": "other"})
+    refused = rmx.Outcome(1, "Error: Session ID e is already in use.")
+    assert fresh.holds(started_as_asked, IDS)
+    assert not fresh.holds(started_as_another, IDS)
+    assert taken.holds(refused, IDS)
+    assert not taken.holds(started_as_another, IDS)
+
+
+def test_sessions_reads_the_id_from_each_header(tmp_path):
+    folder = tmp_path / "sessions"
+    folder.mkdir()
+    (folder / "a.jsonl").write_text('{"type": "session", "id": "abc"}\n{"x": 1}\n', "utf-8")
+    (folder / "b.jsonl").write_text("", "utf-8")
+    (folder / "c.jsonl").write_text("not json\n", "utf-8")
+    assert rmx.sessions(tmp_path) == {
+        "a.jsonl": "abc",
+        "b.jsonl": "<unreadable>",
+        "c.jsonl": "<unreadable>",
+    }
+    assert rmx.sessions(tmp_path / "nowhere") == {}
+
+
+# ---- mode_probe: which modes the Python agent honours ----------------------------------
+
+
+def test_the_mode_scenarios_are_well_formed():
+    names = [scenario.name for scenario in mp.SCENARIOS]
+    assert len(names) == len(set(names))
+    # Every mode the TUI cycles through, and the command-line flag, is probed.
+    pressed = {len(scenario.keys) for scenario in mp.SCENARIOS}
+    assert {0, 1, 2, 3, 4} <= pressed
+    assert any("--always-approve" in scenario.flags for scenario in mp.SCENARIOS)
+    assert all(set(scenario.keys) <= {mp.SHIFT_TAB} for scenario in mp.SCENARIOS)
+    # Every value `zypi --permission-mode` takes is probed, each as its own command line.
+    by_flag = {
+        scenario.flags[1]: scenario.flags
+        for scenario in mp.SCENARIOS
+        if scenario.flags[:1] == ("--permission-mode",)
+    }
+    assert set(by_flag) == {
+        "default",
+        "acceptEdits",
+        "auto",
+        "dontAsk",
+        "bypassPermissions",
+        "plan",
+    }
+    assert all(flags == ("--permission-mode", mode) for mode, flags in by_flag.items())
+
+
+def test_the_status_label_is_read_from_the_frame_of_the_prompt_box():
+    screen = "  ╭────────────╮\n  │ hello      │\n  ╰─ mock · plan ─╯\n\n  Shift+Tab:mode\n"
+    assert mp.status_label(screen) == "mock · plan"
+    assert mp.status_label("nothing to see\n") == ""
+
+
+def test_a_row_says_whether_the_question_came_and_what_was_written():
+    scenario = mp.Scenario("Plan", keys=(mp.SHIFT_TAB,) * 3)
+    asked = mp.Observation(scenario, ready=True, label="mock · plan", asked=True)
+    asked.written_after_answer = True
+    row = mp.format_row(asked)
+    assert "asked=yes" in row and "written without an answer=no" in row
+    assert row.endswith("written after an answer=yes")
+    silent = mp.Observation(scenario, ready=True, written_unasked=True)
+    assert "asked=no" in mp.format_row(silent)
+    assert "written without an answer=yes" in mp.format_row(silent)
+    assert mp.format_row(silent).endswith("written after an answer=-")
+    assert "label=(none)" in mp.format_row(silent)

@@ -144,12 +144,9 @@ pub(crate) fn execute(
             preferred_session_id,
         } => {
             let tx = acp_tx.clone();
-            let compat = pi_tools::types::compat::CompatConfig::default();
-            let mcp_servers = pi_shell::util::config::load_mcp_servers(
-                &session_cwd,
-                &compat,
-            );
-            let mcp_count = mcp_servers.len();
+            // No `mcp_servers` on the request: the Python agent connects to none (plan 1.P4), so
+            // what the project and the user's other tools configure (`.mcp.json`,
+            // `~/.claude.json`, Cursor's `mcp.json`) is not sent to a process that would drop it.
             #[allow(unused_mut)]
             let mut meta = session_flags.to_meta();
             apply_permission_mode_override(&mut meta, permission_mode_override);
@@ -177,15 +174,10 @@ pub(crate) fn execute(
                         }
                     }
                     let _phase = startup::phase_scope(StartupPhase::SessionCreate);
-                    ulog::info(
-                        "session.create.start",
-                        None,
-                        Some(serde_json::json!({"mcp_server_count": mcp_count})),
-                    );
+                    ulog::info("session.create.start", None, None);
                     let create_start = std::time::Instant::now();
                     let result = helpers::acp_send_bounded(
                             acp::NewSessionRequest::new(session_cwd.clone())
-                                .mcp_servers(mcp_servers)
                                 .meta(meta),
                             &tx,
                             "Session creation",
@@ -200,7 +192,6 @@ pub(crate) fn execute(
                                 Some(
                                     serde_json::json!({
                                 "elapsed_ms": create_elapsed_ms,
-                                "mcp_server_count": mcp_count,
                             }),
                                 ),
                             );
@@ -252,16 +243,7 @@ pub(crate) fn execute(
             let tx = acp_tx.clone();
             let meta = session_flags.to_meta();
             let cwd = session_cwd.unwrap_or_else(|| cwd.to_path_buf());
-            let mcp_started = std::time::Instant::now();
-            let mcp_servers = pi_shell::util::config::load_mcp_servers(
-                &cwd,
-                &pi_tools::types::compat::CompatConfig::default(),
-            );
-            tracing::info!(
-                elapsed_ms = mcp_started.elapsed().as_millis() as u64,
-                server_count = mcp_servers.len(),
-                "load_session: mcp server discovery"
-            );
+            // No `mcp_servers`, as in `CreateSession`.
             let acp_session_id = acp::SessionId::new(session_id);
             tasks
                 .spawn(async move {
@@ -273,7 +255,6 @@ pub(crate) fn execute(
                                     acp_session_id.clone(),
                                     cwd.clone(),
                                 )
-                                .mcp_servers(mcp_servers.clone())
                                 .meta(meta.clone()),
                             &tx,
                             "Session loading",
@@ -339,13 +320,9 @@ pub(crate) fn execute(
             let cwd = cwd.to_path_buf();
             tasks
                 .spawn(async move {
-                    let request = acp::ListSessionsRequest::default().cwd(cwd.clone());
-                    let result = acp_send(request, &tx).await;
+                    let result = fetch_session_list(&tx, &cwd).await;
                     match result {
-                        Ok(resp) => TaskResult::SessionListLoaded {
-                            sessions: session_picker_entries_from_acp(&resp),
-                            seq,
-                        },
+                        Ok(sessions) => TaskResult::SessionListLoaded { sessions, seq },
                         Err(e) => TaskResult::SessionListFailed {
                             error: sanitize_user_error(&format!("{e}")),
                             seq,

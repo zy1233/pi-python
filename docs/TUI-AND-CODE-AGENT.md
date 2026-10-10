@@ -12,7 +12,7 @@ This document covers how to install, configure, and use the pi-python coding age
 ┌─────────────────────────────────────┐
 │          zypi (Rust TUI)            │   Full-screen terminal UI
 │  Session management, markdown       │   Apache-2.0 (vendored grok-build fork)
-│  rendering, MCP, Mermaid, etc.      │
+│  rendering, Mermaid, etc.           │
 └────────────┬────────────────────────┘
              │ ACP (Agent Client Protocol) over stdio
              ▼
@@ -193,6 +193,10 @@ The agent works with any ACP-compatible editor (Zed, Neovim, etc.):
   }
 }
 ```
+
+**MCP servers are not connected.** Editors can hand an ACP agent MCP servers when they open a session; this agent ignores them (it gets its tools from the built-in coding tools and its extensions), and says so in the session: one message naming the servers it ignored (only their names; never their commands, URLs or tokens). `zypi` sends none.
+
+**Long session lists arrive in pages.** `session/list` returns 50 sessions at a time, newest first, with `nextCursor` while there are more; `zypi` follows the cursor, so its session picker shows them all.
 
 ---
 

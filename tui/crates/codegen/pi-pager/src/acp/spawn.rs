@@ -46,6 +46,14 @@ const JOIN_NOTICE_AFTER: Duration = Duration::from_millis(1500);
 /// Stderr notice after a slow join: the agent process is not gone yet.
 const JOIN_NOTICE: &str = "Stopping agent…";
 
+/// When the agent has gone away on its own, how long the bridge lets the reader finish with what
+/// the agent wrote before it went (the end of its output is what ends the reader).
+const EXIT_OUTPUT_DRAIN: Duration = Duration::from_secs(2);
+
+/// Then how long that last output gets to be handled by the connection (an answer written just
+/// before the exit is still an answer) before the bridge ends the requests that wait for more.
+const EXIT_OUTPUT_SETTLE: Duration = Duration::from_millis(100);
+
 /// A spawned ACP agent process, seen from the pager.
 pub struct AgentProcess {
     /// OS thread running the stdio bridge, which owns the child process: on
@@ -90,6 +98,9 @@ impl Drop for AgentProcessGuard {
             JoinOutcome::Joined => {}
             JoinOutcome::Failed(error) => {
                 tracing::warn!(%error, "agent bridge exited with error after cancel");
+                // The bridge ends with an error only when the agent went away on its own, and
+                // by now the screen it went away on is gone: say it where the user reads it.
+                eprintln!("Error: {error}");
             }
             JoinOutcome::Panicked(panic) => {
                 tracing::warn!(%panic, "agent bridge panicked after cancel");
@@ -176,6 +187,32 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
         s.clone()
     } else {
         "non-string panic payload".to_string()
+    }
+}
+
+/// `initialize` got no answer: say why, as far as the bridge knows.
+///
+/// A bridge that could not start the agent, or whose agent went away, ends with the reason (see
+/// [`spawn_python_stdio_bridge`]); only whoever joins the thread reads it, and what `initialize`
+/// itself saw is a closed channel. Cancelling first also stops an agent that is up but did not
+/// answer. For the way out of a failed start: the join gives up on a stuck bridge after the same
+/// budget as the exit does.
+pub(crate) async fn explain_failed_start(
+    error: anyhow::Error,
+    cancel: CancellationToken,
+    bridge: thread::JoinHandle<Result<()>>,
+) -> anyhow::Error {
+    cancel.cancel();
+    let timeout = AGENT_EXIT_GRACE + BRIDGE_JOIN_SLACK;
+    match tokio::task::spawn_blocking(move || join_bridge_thread(bridge, timeout)).await {
+        Ok(JoinOutcome::Failed(reason)) => {
+            tracing::debug!(%error, "initialize failed; the bridge says why");
+            anyhow::anyhow!(reason)
+        }
+        _ => error.context(format!(
+            "the agent did not answer `initialize` (what it wrote to stderr is in {})",
+            agent_stderr_log_path(&grok_home()).display()
+        )),
     }
 }
 
@@ -422,6 +459,80 @@ fn agent_stderr_log_path(home: &std::path::Path) -> std::path::PathBuf {
     home.join("logs").join(AGENT_STDERR_LOG)
 }
 
+/// What the line that opens a run in the agent's stderr log begins with.
+const AGENT_STARTED_MARKER: &str = "--- agent started ";
+
+/// How much of the agent's stderr an error message carries: the last lines, and no more than this
+/// many bytes of them.
+const STDERR_TAIL_LINES: usize = 12;
+const STDERR_TAIL_BYTES: usize = 4 * 1024;
+
+/// The last lines the agent wrote to stderr in its latest run (what follows the newest
+/// `--- agent started` line in the log), for an error that has to say why the agent is gone: a
+/// Python that cannot find `pi_agent_cli` says so there, and nowhere else. `None` when it wrote
+/// nothing, or the log cannot be read.
+fn agent_stderr_tail(path: &std::path::Path) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    let text = String::from_utf8_lossy(&bytes);
+    let run: &str = match text.rfind(AGENT_STARTED_MARKER) {
+        Some(at) => text[at..]
+            .split_once('\n')
+            .map_or("", |(_marker, rest)| rest),
+        None => &text,
+    };
+    let lines: Vec<&str> = run.lines().filter(|line| !line.trim().is_empty()).collect();
+    let mut tail = lines[lines.len().saturating_sub(STDERR_TAIL_LINES)..].join("\n");
+    if tail.is_empty() {
+        return None;
+    }
+    if tail.len() > STDERR_TAIL_BYTES {
+        let mut cut = tail.len() - STDERR_TAIL_BYTES;
+        while !tail.is_char_boundary(cut) {
+            cut += 1;
+        }
+        tail = format!("…{}", &tail[cut..]);
+    }
+    Some(tail)
+}
+
+/// The error for an agent that exited without being asked to: how it ended, and what it said.
+fn agent_exit_message(
+    program: &std::ffi::OsStr,
+    status: &std::io::Result<std::process::ExitStatus>,
+    log: &std::path::Path,
+) -> String {
+    use std::fmt::Write as _;
+
+    let how = match status {
+        Ok(status) => status.to_string(),
+        Err(error) => format!("waiting for it failed: {error}"),
+    };
+    let mut message = format!(
+        "the agent ({}) exited on its own ({how}).",
+        program.to_string_lossy()
+    );
+    match agent_stderr_tail(log) {
+        Some(tail) => {
+            let _ = write!(
+                message,
+                "\nLast of what it wrote to stderr (all of it is in {}):",
+                log.display()
+            );
+            for line in tail.lines() {
+                let _ = write!(message, "\n  {line}");
+            }
+        }
+        None => {
+            let _ = write!(
+                message,
+                "\nIt wrote nothing to stderr that could be read ({}).",
+                log.display()
+            );
+        }
+    }
+    message
+}
+
 /// Open the agent's stderr log for appending, rotating it first if it has grown past
 /// `rotate_over`, and write a line that says where this run's output starts: the file outlives
 /// the run. Owner-only on Unix, since a traceback can quote prompts, paths and keys.
@@ -452,7 +563,7 @@ fn open_agent_stderr_log(
     let mut file = options.open(path)?;
     writeln!(
         file,
-        "--- agent started {} (zypi pid {}) ---",
+        "{AGENT_STARTED_MARKER}{} (zypi pid {}) ---",
         chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, false),
         std::process::id()
     )?;
@@ -537,7 +648,7 @@ async fn spawn_python_stdio_bridge(
                 let (outgoing_read, outgoing_write) = simplex(MAX_BUF);
 
                 let cancel_r = cancel.clone();
-                let reader_task = tokio::task::spawn_local(async move {
+                let mut reader_task = tokio::task::spawn_local(async move {
                     let mut lines = BufReader::new(child_stdout).lines();
                     // After cancel the lines are read and dropped until the agent
                     // closes its stdout: a stopping agent must not find the pipe
@@ -603,7 +714,31 @@ async fn spawn_python_stdio_bridge(
                 tokio::task::spawn_local(gw_rx.run());
                 tokio::task::yield_now().await;
 
-                cancel.cancelled().await;
+                // Two ways to get past this point: the pager asks for the stop (cancel), or
+                // the agent goes away on its own (a crash, a `kill`, a Python that cannot import
+                // `pi_agent_cli`). The second used to go unnoticed — nothing waited on the child
+                // — so the pager sat on requests that could not be answered, and the event
+                // loop's "agent disconnected" arm (it quits on `connection.cancel`) never fired.
+                let exited_on_its_own = tokio::select! {
+                    biased;
+                    () = cancel.cancelled() => None,
+                    status = child.wait() => Some(status),
+                };
+                if let Some(status) = exited_on_its_own {
+                    // Let what the agent wrote last be read, and handled, before the requests
+                    // still waiting are ended: dropping this thread's tasks is what answers them
+                    // with an error (their senders are in those tasks).
+                    let _ = tokio::time::timeout(EXIT_OUTPUT_DRAIN, &mut reader_task).await;
+                    tokio::time::sleep(EXIT_OUTPUT_SETTLE).await;
+                    let message =
+                        agent_exit_message(&program, &status, &agent_stderr_log_path(&home));
+                    tracing::warn!(error = %message, "agent process exited on its own");
+                    cancel.cancel();
+                    writer_task.abort();
+                    reader_task.abort();
+                    return Err(anyhow::anyhow!(message));
+                }
+
                 // Stop request: end the writer task, which drops the child's stdin
                 // (EOF). The Python agent treats EOF as "the client is gone".
                 writer_task.abort();
@@ -821,5 +956,127 @@ mod agent_stderr_tests {
         assert!(open_agent_stderr_log(&log_in(home.path()), u64::MAX).is_err());
         // The spawn path turns that into "discard" instead of failing the agent's start.
         let _stdio = agent_stderr(home.path());
+    }
+}
+
+#[cfg(test)]
+mod agent_exit_tests {
+    use super::*;
+
+    /// A log as the spawn path leaves it: one marker line per run, then what that run wrote.
+    fn log_with(runs: &[&str]) -> (tempfile::TempDir, std::path::PathBuf) {
+        let home = tempfile::tempdir().unwrap();
+        let path = agent_stderr_log_path(home.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut text = String::new();
+        for (n, output) in runs.iter().enumerate() {
+            text.push_str(&format!("{AGENT_STARTED_MARKER}run {n} (zypi pid 1) ---\n"));
+            text.push_str(output);
+        }
+        std::fs::write(&path, text).unwrap();
+        (home, path)
+    }
+
+    #[test]
+    fn the_tail_is_what_the_latest_run_wrote() {
+        let (_home, path) = log_with(&["Traceback: the old run\n", "ModuleNotFoundError: x\n"]);
+        assert_eq!(
+            agent_stderr_tail(&path).as_deref(),
+            Some("ModuleNotFoundError: x")
+        );
+    }
+
+    #[test]
+    fn the_tail_keeps_the_last_lines_and_skips_blank_ones() {
+        let output: String = (1..=30).map(|n| format!("line {n}\n\n")).collect();
+        let (_home, path) = log_with(&[&output]);
+        let tail = agent_stderr_tail(&path).unwrap();
+        let lines: Vec<&str> = tail.lines().collect();
+        assert_eq!(lines.len(), STDERR_TAIL_LINES, "{tail}");
+        assert_eq!(lines.first(), Some(&"line 19"), "{tail}");
+        assert_eq!(lines.last(), Some(&"line 30"), "{tail}");
+    }
+
+    #[test]
+    fn a_long_tail_is_cut_at_the_front_on_a_character_boundary() {
+        // Three-byte characters: 6000 bytes, so the cut at 6000 - 4096 = 1904 falls inside one.
+        let output = format!("{}\n", "€".repeat(2000));
+        assert_eq!((2000 * '€'.len_utf8()) - STDERR_TAIL_BYTES, 1904);
+        assert_ne!(1904 % '€'.len_utf8(), 0);
+        let (_home, path) = log_with(&[&output]);
+        let tail = agent_stderr_tail(&path).unwrap();
+        assert!(tail.starts_with('…'), "{tail:.20}");
+        assert!(
+            tail.len() <= STDERR_TAIL_BYTES + '…'.len_utf8(),
+            "{}",
+            tail.len()
+        );
+        assert!(tail.trim_start_matches('…').chars().all(|c| c == '€'));
+    }
+
+    #[test]
+    fn there_is_no_tail_without_output() {
+        let (_home, path) = log_with(&["", "  \n\n"]);
+        assert_eq!(
+            agent_stderr_tail(&path),
+            None,
+            "marker and blank lines only"
+        );
+        let (_home, path) = log_with(&[]);
+        assert_eq!(agent_stderr_tail(&path), None, "empty file");
+        let missing = path.with_file_name("not-there.log");
+        assert_eq!(agent_stderr_tail(&missing), None, "no file");
+    }
+
+    #[test]
+    fn a_log_without_a_marker_is_read_whole() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("plain.log");
+        std::fs::write(&path, "first\nsecond\n").unwrap();
+        assert_eq!(agent_stderr_tail(&path).as_deref(), Some("first\nsecond"));
+    }
+
+    #[test]
+    fn the_message_says_which_agent_how_it_ended_and_what_it_wrote() {
+        let (_home, path) =
+            log_with(&["Traceback (most recent call last):\nModuleNotFoundError: pi_agent_cli\n"]);
+        let status = Err(std::io::Error::other("no such child"));
+        let message = agent_exit_message(std::ffi::OsStr::new("python3"), &status, &path);
+        assert!(
+            message.starts_with(
+                "the agent (python3) exited on its own (waiting for it failed: no such child)."
+            ),
+            "{message}"
+        );
+        assert!(
+            message.contains(
+                "\n  Traceback (most recent call last):\n  ModuleNotFoundError: pi_agent_cli"
+            ),
+            "{message}"
+        );
+        assert!(message.contains(&path.display().to_string()), "{message}");
+    }
+
+    #[test]
+    fn the_message_points_at_the_log_when_there_is_nothing_in_it() {
+        let (_home, path) = log_with(&[""]);
+        let status = Err(std::io::Error::other("gone"));
+        let message = agent_exit_message(std::ffi::OsStr::new("agent"), &status, &path);
+        assert!(message.contains("wrote nothing to stderr"), "{message}");
+        assert!(message.contains(&path.display().to_string()), "{message}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_message_carries_the_exit_status() {
+        let mut child = tokio::process::Command::new("sh")
+            .args(["-c", "exit 3"])
+            .spawn()
+            .expect("spawn sh");
+        let status = child.wait().await;
+        let (_home, path) = log_with(&["boom\n"]);
+        let message = agent_exit_message(std::ffi::OsStr::new("sh"), &status, &path);
+        assert!(message.contains("(exit status: 3)"), "{message}");
+        assert!(message.contains("\n  boom"), "{message}");
     }
 }

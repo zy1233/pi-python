@@ -957,6 +957,205 @@ async fn fetch_session_list_uses_standard_session_list() {
         other => panic!("expected SessionListLoaded, got {other:?}"),
     }
 }
+/// zypi hands the agent no MCP servers (plan 1.P4): the Python agent connects to none, so what the
+/// project and the user's other tools configure stays with them instead of being sent to a process
+/// that drops it. `session/new` and `session/load` both carry an empty list.
+#[tokio::test]
+async fn session_new_and_load_send_no_mcp_servers() {
+    use pi_acp_lib::AcpAgentMessage;
+    let project = tempfile::tempdir().expect("temp dir");
+    std::fs::write(
+        project.path().join(".mcp.json"),
+        r#"{"mcpServers":{"files":{"command":"npx","args":["-y","some-server"],"env":{"TOKEN":"secret"}}}}"#,
+    )
+    .expect("write .mcp.json");
+    // The premise: what zypi used to send is not empty for this project.
+    let found = pi_shell::util::config::load_mcp_servers(
+        project.path(),
+        &pi_tools::types::compat::CompatConfig::default(),
+    );
+    assert!(!found.is_empty(), "the fixture must be something discovery finds");
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut tasks = JoinSet::new();
+    execute(
+        Effect::CreateSession {
+            agent_id: agent::AgentId(0),
+            cwd: project.path().to_path_buf(),
+            model_id: None,
+            permission_mode_override: None,
+            preferred_session_id: None,
+        },
+        &mut tasks,
+        &tx,
+        project.path(),
+        &SessionFlags::default(),
+    );
+    execute(
+        Effect::LoadSession {
+            agent_id: agent::AgentId(0),
+            session_id: "s1".to_string(),
+            session_cwd: Some(project.path().to_path_buf()),
+        },
+        &mut tasks,
+        &tx,
+        project.path(),
+        &SessionFlags::default(),
+    );
+    let (mut created, mut loaded) = (false, false);
+    for _ in 0..2 {
+        match rx.recv().await.expect("a request") {
+            AcpAgentMessage::NewSession(args) => {
+                assert!(args.request.mcp_servers.is_empty(), "session/new sent MCP servers");
+                created = true;
+            }
+            AcpAgentMessage::LoadSession(args) => {
+                assert!(args.request.mcp_servers.is_empty(), "session/load sent MCP servers");
+                loaded = true;
+            }
+            other => panic!("unexpected request {other:?}"),
+        }
+    }
+    assert!(created && loaded);
+}
+/// A scripted `session/list` agent: answers request number `n` with `pages[n]` (`None` ends the
+/// script with an error). Every request's `(cwd, cursor)` is recorded.
+type ListRequests = std::sync::Arc<std::sync::Mutex<Vec<(Option<String>, Option<String>)>>>;
+fn scripted_list_agent(
+    pages: impl Fn(usize) -> Option<serde_json::Value> + Send + 'static,
+) -> (pi_acp_lib::AcpAgentTx, ListRequests) {
+    use pi_acp_lib::AcpAgentMessage;
+    let seen: ListRequests = Default::default();
+    let seen_by_agent = seen.clone();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            if let AcpAgentMessage::ListSessions(args) = msg {
+                let mut seen = seen_by_agent.lock().unwrap();
+                let n = seen.len();
+                seen.push((
+                    args.request.cwd.as_ref().map(|c| c.to_string_lossy().into_owned()),
+                    args.request.cursor.clone(),
+                ));
+                drop(seen);
+                let answer = match pages(n) {
+                    Some(page) => Ok(serde_json::from_value(page).expect("list response")),
+                    None => Err(acp::Error::new(acp::ErrorCode::InternalError.into(), "boom")),
+                };
+                let _ = args.response_tx.send(answer);
+            }
+        }
+    });
+    (tx, seen)
+}
+fn list_page(ids: &[&str], next_cursor: Option<&str>) -> serde_json::Value {
+    let sessions: Vec<_> = ids
+        .iter()
+        .map(|id| serde_json::json!({
+            "sessionId": id, "cwd": "/work", "title": id, "updatedAt": "2026-10-01T10:00:00Z",
+        }))
+        .collect();
+    match next_cursor {
+        Some(c) => serde_json::json!({ "sessions": sessions, "nextCursor": c }),
+        None => serde_json::json!({ "sessions": sessions }),
+    }
+}
+async fn run_fetch_session_list(tx: &pi_acp_lib::AcpAgentTx, seq: u64) -> TaskResult {
+    let mut tasks = JoinSet::new();
+    execute(
+        Effect::FetchSessionList { seq },
+        &mut tasks,
+        tx,
+        Path::new("/work"),
+        &SessionFlags::default(),
+    );
+    tasks.join_next().await.expect("task").expect("no panic")
+}
+/// ACP: `nextCursor` present means more pages. The picker is filled from all of them, in order,
+/// and each request carries the cwd and the cursor of the page before (the cursor is opaque:
+/// it comes back exactly as it was sent).
+#[tokio::test]
+async fn fetch_session_list_follows_next_cursor() {
+    let (tx, seen) = scripted_list_agent(|n| match n {
+        0 => Some(list_page(&["s5", "s4"], Some("opaque/+=cursor 1"))),
+        1 => Some(list_page(&["s3", "s2"], Some("c2"))),
+        2 => Some(list_page(&["s1"], None)),
+        _ => None,
+    });
+    match run_fetch_session_list(&tx, 3).await {
+        TaskResult::SessionListLoaded { sessions, seq } => {
+            assert_eq!(seq, 3);
+            let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
+            assert_eq!(ids, ["s5", "s4", "s3", "s2", "s1"], "all pages, in the agent's order");
+        }
+        other => panic!("expected SessionListLoaded, got {other:?}"),
+    }
+    let seen = seen.lock().unwrap().clone();
+    let cursors: Vec<Option<&str>> = seen.iter().map(|(_, c)| c.as_deref()).collect();
+    assert_eq!(cursors, [None, Some("opaque/+=cursor 1"), Some("c2")]);
+    assert!(seen.iter().all(|(cwd, _)| cwd.as_deref() == Some("/work")), "cwd on every page");
+}
+/// A page without a cursor is the end: one request, as before pagination existed.
+#[tokio::test]
+async fn fetch_session_list_without_a_cursor_is_one_request() {
+    let (tx, seen) = scripted_list_agent(|n| (n == 0).then(|| list_page(&["only"], None)));
+    assert!(matches!(
+        run_fetch_session_list(&tx, 1).await,
+        TaskResult::SessionListLoaded { sessions, .. } if sessions.len() == 1
+    ));
+    assert_eq!(seen.lock().unwrap().len(), 1);
+}
+/// An agent that keeps handing out the cursor it already gave must not trap the picker in a loop:
+/// the sessions received so far are shown.
+#[tokio::test]
+async fn fetch_session_list_stops_on_a_repeated_cursor() {
+    let (tx, seen) = scripted_list_agent(|n| Some(list_page(&[format!("s{n}").as_str()], Some("same"))));
+    match run_fetch_session_list(&tx, 1).await {
+        TaskResult::SessionListLoaded { sessions, .. } => {
+            let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
+            assert_eq!(ids, ["s0", "s1"], "the page that repeated the cursor is kept");
+        }
+        other => panic!("expected SessionListLoaded, got {other:?}"),
+    }
+    assert_eq!(seen.lock().unwrap().len(), 2, "no third request");
+}
+/// An empty cursor is not a position to continue from.
+#[tokio::test]
+async fn fetch_session_list_treats_an_empty_cursor_as_the_end() {
+    let (tx, seen) = scripted_list_agent(|n| (n == 0).then(|| list_page(&["a"], Some(""))));
+    assert!(matches!(
+        run_fetch_session_list(&tx, 1).await,
+        TaskResult::SessionListLoaded { sessions, .. } if sessions.len() == 1
+    ));
+    assert_eq!(seen.lock().unwrap().len(), 1);
+}
+/// An agent whose cursors never end is cut off at `MAX_SESSION_LIST_PAGES`.
+#[tokio::test]
+async fn fetch_session_list_is_bounded_by_the_page_cap() {
+    let (tx, seen) = scripted_list_agent(|n| {
+        Some(list_page(&[format!("s{n}").as_str()], Some(format!("c{n}").as_str())))
+    });
+    match run_fetch_session_list(&tx, 1).await {
+        TaskResult::SessionListLoaded { sessions, .. } => {
+            assert_eq!(sessions.len(), MAX_SESSION_LIST_PAGES);
+        }
+        other => panic!("expected SessionListLoaded, got {other:?}"),
+    }
+    assert_eq!(seen.lock().unwrap().len(), MAX_SESSION_LIST_PAGES);
+}
+/// A failure on a later page fails the fill (and echoes `seq`): a picker that quietly stopped
+/// half way would hide sessions.
+#[tokio::test]
+async fn fetch_session_list_fails_when_a_later_page_fails() {
+    let (tx, _seen) = scripted_list_agent(|n| (n == 0).then(|| list_page(&["a"], Some("c1"))));
+    match run_fetch_session_list(&tx, 7).await {
+        TaskResult::SessionListFailed { seq, error } => {
+            assert_eq!(seq, 7);
+            assert!(error.contains("boom"), "error text is surfaced: {error}");
+        }
+        other => panic!("expected SessionListFailed, got {other:?}"),
+    }
+}
 #[tokio::test]
 async fn fetch_session_list_echoes_seq_on_error() {
     use pi_acp_lib::AcpAgentMessage;

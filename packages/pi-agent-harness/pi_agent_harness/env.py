@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from pi_agent_core.coding_tools.path_utils import normalize_host_path
+from pi_agent_harness.text_lines import read_head_lines
 from pi_agent_harness.types import ExecResult, ExecutionError, FileError, FileInfo
 
 _IS_WINDOWS = sys.platform == "win32"
@@ -52,9 +53,7 @@ class LocalExecutionEnv:
         return await asyncio.to_thread(target.read_text, encoding="utf-8")
 
     async def read_text_lines(self, path: str | Path, max_lines: int | None = None) -> list[str]:
-        text = await self.read_text_file(path)
-        lines = text.splitlines()
-        return lines[:max_lines] if max_lines is not None else lines
+        return await asyncio.to_thread(read_head_lines, self._resolve(path), max_lines)
 
     async def read_binary_file(self, path: str | Path) -> bytes:
         target = self._resolve(path)
@@ -107,8 +106,49 @@ class LocalExecutionEnv:
             raise FileError("not_found", f"Directory not found: {path}", str(target))
         if not target.is_dir():
             raise FileError("not_directory", f"Not a directory: {path}", str(target))
-        children = sorted(target.iterdir(), key=lambda p: p.name)
-        return [await self.file_info(child) for child in children]
+        return await asyncio.to_thread(self._list_dir_sync, target)
+
+    def _list_dir_sync(self, target: Path) -> list[FileInfo]:
+        """What ``file_info`` of every child gives, in one pass.
+
+        One ``scandir`` (the entry type and ``lstat`` come with it) and one ``resolve`` for the
+        directory, instead of a worker-thread round trip and a handful of ``stat`` / ``realpath``
+        calls per child: listing a session directory of 1000 files took 1.3 s on Windows that way.
+        A child that disappears while the directory is being read is left out.
+        """
+        cwd = Path(self.cwd).resolve()
+        directory = target.resolve()
+        with os.scandir(target) as scanned:
+            entries = sorted(scanned, key=lambda entry: entry.name)
+        infos: list[FileInfo] = []
+        for entry in entries:
+            try:
+                stat = entry.stat(follow_symlinks=False)
+                if entry.is_symlink():
+                    kind = "symlink"
+                elif entry.is_dir(follow_symlinks=False):
+                    kind = "directory"
+                elif entry.is_file(follow_symlinks=False):
+                    kind = "file"
+                else:
+                    raise FileError("invalid", f"Unsupported file type: {entry.path}", entry.path)
+            except FileNotFoundError:
+                continue
+            resolved = Path(entry.path).resolve() if kind == "symlink" else directory / entry.name
+            try:
+                shown = resolved.relative_to(cwd).as_posix()
+            except ValueError:
+                shown = resolved.as_posix()
+            infos.append(
+                FileInfo(
+                    name=entry.name,
+                    path=shown,
+                    kind=kind,
+                    size=stat.st_size,
+                    mtimeMs=stat.st_mtime * 1000,
+                )
+            )
+        return infos
 
     async def create_dir(self, path: str | Path) -> None:
         await asyncio.to_thread(self._resolve(path).mkdir, parents=True, exist_ok=True)
