@@ -97,9 +97,12 @@ targets = [
 # 5,559 in the last CI run before r8 (33374a3, `doctor_cmd::` skipped) plus the 12 `doctor_cmd::`
 # tests plus the 6 `agent_stderr` tests of the agent's stderr log: 5,577 (the second CI run of
 # PR #9; the first failed one doctor test that counted the issue the voice probe adds on a host
-# with no recorder on PATH, as the runner is; plan section 10.10, "CI results"). Plus the 10
-# tests of `python_agent_e2e` (Linux; macOS runs 8, they are Linux-only checks of /proc).
-reference_passed = 5587
+# with no recorder on PATH, as the runner is; plan section 10.10, "CI results"). Since then:
+# +10 `python_agent_e2e` (that test target; on a host where `PI_E2E_PYTHON` is unset they pass as
+# skips), +8 `agent_exit_tests` (the agent's exit notice), +6 `fetch_session_list_*` (cursor
+# following) and +1 `session_new_and_load_send_no_mcp_servers`: 5,602 (one local run on Linux,
+# plan section 10.11). The next CI run confirms it.
+reference_passed = 5602
 min_passed = 5300
 
 # Lib tests only; they were outside the manifest until r8 (plan section 10.10: 1,092 passed,
