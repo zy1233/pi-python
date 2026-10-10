@@ -28,6 +28,7 @@ def _load(name: str):
 
 
 zenv = _load("zypi_env")  # stdlib only, so it loads everywhere
+rmx = _load("resume_matrix")  # plain Python until `run`, which is what imports the PTY driver
 
 
 @pytest.fixture(scope="module")
@@ -163,3 +164,71 @@ def test_a_zombie_does_not_count_as_alive(pt):
         assert not pt.alive(child.pid)
     finally:
         child.wait()
+
+
+# ---- resume_matrix: how a run is judged -------------------------------------------------
+
+IDS = {"existing": "e", "unknown": "u", "fresh": "f"}
+REPLAYED = rmx.Outcome(None, f"{rmx.FIRST}\n{rmx.REPLY}")
+FAILED = rmx.Outcome(1, "Error: no such session")
+
+
+def _case(holds, gap=""):
+    return rmx.Case("c", ["--continue"], "work", "something", holds, gap=gap)
+
+
+def test_a_case_that_holds_passes_and_one_that_does_not_fails():
+    case = _case(lambda o, ids: o.replayed)
+    assert rmx.judge(case, REPLAYED, IDS) == "PASS"
+    assert rmx.judge(case, FAILED, IDS) == "FAIL"
+
+
+def test_a_known_gap_is_reported_and_only_strict_fails_it():
+    case = _case(lambda o, ids: o.replayed, gap="the pager reads the old layout")
+    assert rmx.judge(case, FAILED, IDS) == "GAP"
+    assert rmx.judge(case, FAILED, IDS, strict=True) == "FAIL"
+
+
+def test_a_gap_that_has_closed_is_called_out_even_when_strict():
+    case = _case(lambda o, ids: o.replayed, gap="stale")
+    assert rmx.judge(case, REPLAYED, IDS) == "FIXED"
+    assert rmx.judge(case, REPLAYED, IDS, strict=True) == "FIXED"
+
+
+def test_the_cases_are_well_formed():
+    names = [case.name for case in rmx.CASES]
+    assert len(names) == len(set(names))
+    for case in rmx.CASES:
+        assert case.cwd in ("work", "other"), case.name
+        filled = rmx.fill(case.argv, {"existing": "E", "unknown": "U", "fresh": "F"})
+        assert all("{" not in part for part in filled), case.name
+    # Every flag ADR1 moves from files to the agent has a case, and the known gaps are those.
+    flags = {case.argv[0] for case in rmx.CASES}
+    assert {"--continue", "--resume", "--session-id", "export"} <= flags
+    assert all(case.gap for case in rmx.CASES if "{fresh}" in case.argv)
+
+
+def test_the_session_id_cases_tell_a_used_id_from_a_fresh_one():
+    fresh = next(case for case in rmx.CASES if "{fresh}" in case.argv)
+    taken = next(case for case in rmx.CASES if case.argv == ["--session-id", "{existing}"])
+    started_as_asked = rmx.Outcome(None, "", new_sessions={"x.jsonl": "f"})
+    started_as_another = rmx.Outcome(None, "", new_sessions={"x.jsonl": "other"})
+    refused = rmx.Outcome(1, "Error: Session ID e is already in use.")
+    assert fresh.holds(started_as_asked, IDS)
+    assert not fresh.holds(started_as_another, IDS)
+    assert taken.holds(refused, IDS)
+    assert not taken.holds(started_as_another, IDS)
+
+
+def test_sessions_reads_the_id_from_each_header(tmp_path):
+    folder = tmp_path / "sessions"
+    folder.mkdir()
+    (folder / "a.jsonl").write_text('{"type": "session", "id": "abc"}\n{"x": 1}\n', "utf-8")
+    (folder / "b.jsonl").write_text("", "utf-8")
+    (folder / "c.jsonl").write_text("not json\n", "utf-8")
+    assert rmx.sessions(tmp_path) == {
+        "a.jsonl": "abc",
+        "b.jsonl": "<unreadable>",
+        "c.jsonl": "<unreadable>",
+    }
+    assert rmx.sessions(tmp_path / "nowhere") == {}
