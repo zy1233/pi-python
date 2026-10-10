@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -167,6 +168,9 @@ class PiAcpAgent(Agent):
         self._prompts_in_flight: dict[str, int] = {}
         self._trust: dict[str, _SessionTrust] = {}
         self._project_locks: dict[str, asyncio.Lock] = {}
+        # Held while a session is created under an id the client chose, so two requests for the
+        # same id cannot both find it free.
+        self._chosen_id_lock = asyncio.Lock()
 
     def on_connect(self, conn: Client) -> None:
         self._conn = conn
@@ -204,7 +208,11 @@ class PiAcpAgent(Agent):
         mcp_servers: list[HttpMcpServer | SseMcpServer | McpServerStdio] | None = None,
         **kwargs: Any,
     ) -> NewSessionResponse:
-        session = await self._repo.create({"cwd": cwd})
+        chosen_id = _chosen_session_id(kwargs)
+        if chosen_id is None:
+            session = await self._repo.create({"cwd": cwd})
+        else:
+            session = await self._create_session_with_id(chosen_id, cwd)
         session_id = (await session.get_metadata()).id
         await self._bind_session(session_id, session, cwd)
         # Defer available_commands_update: Zed only registers the session
@@ -451,19 +459,27 @@ class PiAcpAgent(Agent):
         ]
 
     def _session_response_meta(self, session_id: str) -> dict[str, Any] | None:
-        """Legacy ``pi/*`` model hints (kept for clients that predate config options)."""
+        """What the response that opens a session says beyond the standard fields.
+
+        ``pi/cwd`` is the directory the session works in. It is the session's own when it is
+        loaded or resumed (``session/load`` and ``session/resume`` take a ``cwd`` too, and the
+        saved one wins), so it can differ from the one the client sent; a client that does
+        not know the directory a session was made in learns it here. The ``pi/*`` model hints
+        are kept for clients that predate config options.
+        """
+        meta: dict[str, Any] = {}
+        cwd = self._session_cwds.get(session_id)
+        if cwd:
+            meta["pi/cwd"] = cwd
         current = self._current_choice(session_id)
         model_id = current.id.strip()
-        if not model_id:
-            return None
-        meta: dict[str, Any] = {
-            "pi/currentModelId": model_id,
-            "pi/currentModelDisplayName": current.name or model_id,
-        }
-        provider = (current.provider or "").strip()
-        if provider:
-            meta["pi/provider"] = provider
-        return meta
+        if model_id:
+            meta["pi/currentModelId"] = model_id
+            meta["pi/currentModelDisplayName"] = current.name or model_id
+            provider = (current.provider or "").strip()
+            if provider:
+                meta["pi/provider"] = provider
+        return meta or None
 
     async def _restored_choice(self, session: Session) -> ModelChoice | None:
         """Model persisted in the session, if it is still configured.
@@ -491,6 +507,20 @@ class PiAcpAgent(Agent):
 
     async def _find_metadata(self, session_id: str) -> Any:
         return await self._repo.find(session_id)
+
+    async def _create_session_with_id(self, session_id: str, cwd: str) -> Session:
+        """Create the session under the id the client chose; an id already in use is refused.
+
+        The repository does not refuse it: a session's file name starts with its creation time,
+        so a second session with the same id would be written beside the first and either would
+        answer a later ``session/load``.
+        """
+        async with self._chosen_id_lock:
+            if await self._repo.has_session(session_id):
+                raise RequestError.invalid_params(
+                    {"sessionId": session_id, "reason": "a session with this id already exists"}
+                )
+            return await self._repo.create({"cwd": cwd, "id": session_id})
 
     async def _bind_session(self, session_id: str, session: Session, cwd: str) -> None:
         cwd = normalize_host_path(cwd)
@@ -894,6 +924,24 @@ def _prompt_to_text_images(
 def _is_busy(exc: Exception) -> bool:
     """Whether *exc* is the harness saying it is running something else."""
     return isinstance(exc, AgentHarnessError) and exc.code == "busy"
+
+
+def _chosen_session_id(meta: dict[str, Any]) -> str | None:
+    """The id the client chose for a new session, from the ``_meta`` of ``session/new``.
+
+    ACP v1 has no field for it; the TUI's ``--session-id`` is sent as ``_meta.sessionId``.
+    ``None`` when the client chose none. The id becomes part of a file name, so it must be a
+    UUID, and it comes back in the canonical form (lower case, hyphens) whatever form it came in.
+    """
+    raw = meta.get("sessionId")
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        try:
+            return str(uuid.UUID(raw))
+        except ValueError:
+            pass
+    raise RequestError.invalid_params({"sessionId": raw, "reason": "must be a UUID"})
 
 
 def _why_invalid(exc: Exception) -> str:

@@ -17,7 +17,11 @@ per session. This script measures that price on a synthetic home, with the real 
   ``JsonlSessionRepo.list`` (one header read per session file, whatever the ``cwd``),
   ``JsonlSessionRepo.list_page`` (the first page only) and ``read_session_previews`` (title and
   mtime of the sessions that match);
-* ``load``     - ``session/load`` of the newest session of the project (``--entries`` entries).
+* ``load``     - ``session/load`` of the newest session of the project (``--entries`` entries);
+* ``new`` and ``new id`` - ``session/new`` without and with ``_meta.sessionId`` (a free id: the
+  agent has to know nobody has it), in another directory so the sessions made stay out of the
+  project's listing; ``find`` and ``has_session`` of a free id, in-process: ``find`` opens every
+  file, ``has_session`` only those whose name does not say they belong to another session.
 
 Times are medians of ``--runs`` runs, in milliseconds. The OS file cache is warm (the files were
 just written); a cold disk is slower and is not simulated. Run it where the home will live: the
@@ -175,6 +179,14 @@ async def one_run(home: Path, project: str) -> dict[str, float]:
                 conn.load_session(cwd=project, session_id=target, mcp_servers=[])
             )
             row["replayed"] = float(client.updates)
+        # ``session/new``, with and without a chosen id. In another directory, so the sessions
+        # made here stay out of the project's listing; the first call is a warm-up.
+        fresh = f"{project}-new"
+        await _timed(conn.new_session(cwd=fresh, mcp_servers=[]))
+        row["new"], _ = await _timed(conn.new_session(cwd=fresh, mcp_servers=[]))
+        row["new_id"], _ = await _timed(
+            conn.new_session(cwd=fresh, mcp_servers=[], sessionId=str(uuid.uuid4()))
+        )
     return row
 
 
@@ -198,6 +210,14 @@ async def in_process(home: Path, project: str) -> dict[str, float]:
         started = time.perf_counter()
         await repo.list_page({"cwd": project, "limit": page_size})
         result["repo_page"] = (time.perf_counter() - started) * 1000
+    free = str(uuid.uuid4())  # an id nobody has: what a new session with a chosen id asks about
+    started = time.perf_counter()
+    await repo.find(free)
+    result["find_free"] = (time.perf_counter() - started) * 1000
+    if hasattr(repo, "has_session"):  # absent before chosen ids
+        started = time.perf_counter()
+        await repo.has_session(free)
+        result["has_free"] = (time.perf_counter() - started) * 1000
     return result
 
 
@@ -271,6 +291,13 @@ def main() -> int:
     for count, r in results.items():
         load_ms, replayed = r.get("load", float("nan")), r.get("replayed", 0)
         print(f"  {count} sessions: {load_ms:.0f} ms, {replayed:.0f} updates")
+    print("\nsession/new, and the question 'does anybody have this id?' (a free id):")
+    for count, r in results.items():
+        asked = f"has_session {r['has_free']:.0f} ms, " if "has_free" in r else ""
+        print(
+            f"  {count} sessions: new {r['new']:.0f} ms, new with an id {r['new_id']:.0f} ms; "
+            f"in process {asked}find {r['find_free']:.0f} ms"
+        )
     return 0
 
 

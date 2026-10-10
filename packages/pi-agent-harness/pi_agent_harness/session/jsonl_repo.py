@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -45,6 +46,11 @@ def _safe_filename_timestamp(timestamp: str) -> str:
         .replace("+", "")
         .replace("Z", "Z")
     )
+
+
+# What ``JsonlSessionRepo._session_path`` writes: ``<timestamp>-<id>.jsonl``, the timestamp being
+# ``_safe_filename_timestamp`` of an ISO time (``20261001T100500123Z``).
+_OWN_FILE_NAME = re.compile(r"[0-9]{8}T[0-9]+Z-(?P<id>.+)\.jsonl")
 
 
 @dataclass(frozen=True)
@@ -206,6 +212,28 @@ class JsonlSessionRepo:
                 if metadata is not None and metadata.id == session_id:
                     return metadata
         return None
+
+    async def has_session(self, session_id: str) -> bool:
+        """Whether some session has this id, without opening every file to find out.
+
+        ``find`` answers the same, but for an id nobody has it reads every header, and that is
+        the usual case when the id is about to be given to a new session. Here a file named the
+        way this repo names them (``<timestamp>-<id>.jsonl``) is opened only if its name carries
+        the id; a file named otherwise, put there by someone else, has its header as the only
+        place its id is written, so it is opened. A free id therefore costs the listing and the
+        odd stray file, not a read per session.
+
+        One difference from ``find``: a file named the repo's way but renamed by hand to carry
+        another id is taken for what its name says.
+        """
+        for name in await self._session_names():
+            own = _OWN_FILE_NAME.fullmatch(name)
+            if own is not None and own["id"] != session_id:
+                continue
+            metadata = await self._read_metadata(name)
+            if metadata is not None and metadata.id == session_id:
+                return True
+        return False
 
     async def delete(self, metadata: JsonlSessionMetadata) -> None:
         # pi deletes with `force: true`: deleting a missing session is a no-op.
