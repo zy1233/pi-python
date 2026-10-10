@@ -1,6 +1,6 @@
 # Rust Agent Runtime 剥离计划
 
-> 状态：r8。r2 的计划稿之上，**已拆除 Rust runtime 并恢复 `/model`（r3）；r4 补了阶段 0 的 Linux CI 与基线工具、清掉 leader 的 UI 状态残留、完成 1.R3 的命名；r5 在 Linux CI 上跑通并启用了基线，执行入口审计（0.6）并完成阶段 A（A.3、A.4）——又删了约 23 万行 Rust、8 个 crate，消费者构建 0 告警**。分支已 push，PR [#7](https://github.com/zy1233/pi-python/pull/7) 已转 ready for review；**r6 清理了品牌残留（把还写着 Grok、或指向不存在的命令 / 目录的提示改成真的东西，见 §10.8），在叠加分支 `codex/branding-cleanup` 上；r7 合并了 `main` 上另一台机器推的 7 个提交，6 个文件的冲突已解，并修了 macOS 上 `AGENTS.md` 被读两遍的 bug（见 §10.9）**；**r8 在 WSL2 / Linux 上补测：退出行为（含沙箱下）、0.9 的真机检查、CI 没跑的 Rust 测试，并修了沙箱 re-exec 缺 `--die-with-parent`、会在 shell 里留下整棵进程树的问题；之后又按用户的选择做了六件事：`-p` 只杀 zypi 时 agent 不再残留、没生效的沙箱现在在屏幕上说一声、agent 的 `stderr` 落到日志文件、CI 清单加了两个 suite 并去掉 `doctor_cmd::` 的 `skip`、PTY 驱动脚本入库、清理 WSL（见 §10.10）**；执行记录见 §10。§1–§9 保留 r2 原文作为决策依据，与 §10 冲突处以 §10 和 ADR3（r3）为准。负责人：待指派。
+> 状态：r9。r2 的计划稿之上，**已拆除 Rust runtime 并恢复 `/model`（r3）；r4 补了阶段 0 的 Linux CI 与基线工具、清掉 leader 的 UI 状态残留、完成 1.R3 的命名；r5 在 Linux CI 上跑通并启用了基线，执行入口审计（0.6）并完成阶段 A（A.3、A.4）——又删了约 23 万行 Rust、8 个 crate，消费者构建 0 告警**。分支已 push，PR [#7](https://github.com/zy1233/pi-python/pull/7) 已转 ready for review；**r6 清理了品牌残留（把还写着 Grok、或指向不存在的命令 / 目录的提示改成真的东西，见 §10.8），在叠加分支 `codex/branding-cleanup` 上；r7 合并了 `main` 上另一台机器推的 7 个提交，6 个文件的冲突已解，并修了 macOS 上 `AGENTS.md` 被读两遍的 bug（见 §10.9）**；**r8 在 WSL2 / Linux 上补测：退出行为（含沙箱下）、0.9 的真机检查、CI 没跑的 Rust 测试，并修了沙箱 re-exec 缺 `--die-with-parent`、会在 shell 里留下整棵进程树的问题；之后又按用户的选择做了六件事：`-p` 只杀 zypi 时 agent 不再残留、没生效的沙箱现在在屏幕上说一声、agent 的 `stderr` 落到日志文件、CI 清单加了两个 suite 并去掉 `doctor_cmd::` 的 `skip`、PTY 驱动脚本入库、清理 WSL（见 §10.10）**；**r9 在 PR #9 之上补阶段 0 的收尾与阶段 1 里不需要拍板的部分（用户选了 e2e、阶段 0 的门、阶段 1 的免决策项、盯 PR #9 的 CI，没有选「替我拍板」）：0.3 的 Rust 一侧（pager 的 ACP client 对着真的 Python agent 的 10 个 e2e 用例，接进 `tui-ci.yml`；它第一次跑就抓出两个产品 bug——agent 起不来时的原因被吞成「channel closed」、agent 一启动就退出时 `connect` 挂住——都修了）、0.7（会话列表与 `session/load` 的延迟实测并修掉读盘的慢点、pager 一侧的读盘调用点清单、13 个旗标 / 子命令的 PTY 验收矩阵、ADR1 的落地设计）、0.8（附录 A 定稿，新增 ACP 版本配对表）、1.P1（pager 跟 `nextCursor`，Python 分页）、1.P4（显式忽略 `mcp_servers` 并说一声）、1.P7 的余项；每一项会改变产品行为的决定（沙箱顺序、`--session-id`、`export`、模式映射……）都只写成提议，见 §10.11 末尾「留给用户决定的」**；执行记录见 §10。§1–§9 保留 r2 原文作为决策依据，与 §10 冲突处以 §10 和 ADR3（r3）为准。负责人：待指派。
 > 基线：分支 `codex/rust-agent-runtime-removal-plan`；r2 / r3 的比较基线是 HEAD `07a3574`，r4 / r5 的提交见 §10。
 > 验证方式：r2 为静态分析（源码阅读、`Cargo.toml` 解析、模块级引用统计，复现方法见附录 B）；r3 起拆除结果由 `cargo check`（macOS 本机，消费者构建 `pi-pager-bin` / `pi-pager-minimal` / `pi-update` 及 `pi-shell` / `pi-pager` 的 `--tests` 类型检查）、`cargo test`（触及的 crate）、Python 侧 pytest，以及伪终端里 `zypi` ↔ `pi_agent_cli` ↔ OpenRouter 的真实会话（含 `/model` 切换）验证。标「需实测」的其余结论仍是静态推断；Linux / Windows 的 `cfg` 代码本机无法编译，见 §10.4。
 > 与既有文档的关系：承接 [Phase 4 设计](../specs/2026-08-25-phase4-coding-agent-cli-design.md) §3「第一轮允许 pager 继续链接 `xai-grok-shell`……变瘦不是迁入前提」和 [`AUDIT-PHASE4-PHASE5.md`](../AUDIT/AUDIT-PHASE4-PHASE5.md) 的「TUI 瘦身长期里程碑」，是 Phase 4 的第二轮。与既有决定的张力见 §3。
@@ -151,12 +151,12 @@ zypi（Rust）                                     pi_agent_cli（Python，通�
 
 - [x] 0.1（r5 已做：Linux 上跑通且阻塞——`TUI CI` run [37379203134](https://github.com/zy1233/pi-python/actions/runs/37379203134) 全绿，门禁、消费者构建、`--workspace --tests`、8 个 suite；`enforce = true`、`enforce_workspace_tests = true`）**Rust CI job**：`cargo check -p pi-pager-bin` + 选定 crate 的 `cargo test`（Linux，ADR6）。（r4 已写好 `.github/workflows/tui-ci.yml`：`check`、`test`、手动的 `release-baseline` 三个 job，执行器是 `scripts/tui_baseline.py`，actionlint 与单测通过，本机 macOS 全部跑通；**尚未在 Linux 上运行**，所以不勾选，第一次运行之后的收尾步骤见 [`docs/baselines/tui.md`](../baselines/tui.md) §5。）
 - [x] 0.2（r5 已做：Linux 一栏的依赖图、告警、测试数已回填，告警清零；手动 run [37389455793](https://github.com/zy1233/pi-python/actions/runs/37389455793) 补齐了 release 数：`zypi` 422,034,120 B，比拆除前小 10.3 %，冷缓存构建 1,155 s，比 1,647 s 快 29.9 %，`--version` 中位数 23.1 ms）**基线报告**入库：测试通过 / 失败 / 忽略数、`cargo tree -p pi-pager-bin` 节点数、release 二进制体积、冷编译与启动耗时、去掉全局 allow 后的告警数。（r4 已入库 [`docs/baselines/tui.md`](../baselines/tui.md)：拆除前（v0.4.0）与拆除后（macOS）的依赖图节点数、告警数、8 个 suite 的测试数、v0.4.0 的 release 体积与构建耗时；**Linux 一栏、拆除后的 release 体积 / 冷编译耗时 / `--version` 延迟在 r5 回填**，「到欢迎页」的启动耗时需要 PTY 载体，未测。「去掉全局 allow 后的告警数」随 A.4 做。）
-- [ ] 0.3（r5 部分：Python 侧的 stdio 契约套件已有，见 1.P7；Rust client ↔ Python mock agent 的 e2e 仍未做）**ACP 契约 / e2e 载体**：Rust client ↔ Python mock agent（脚本化 `stream_fn` 的 `PiAcpAgent` stdio 进程），覆盖 initialize、new、prompt 流式、权限往返、cancel、list、load、Python 缺失时报错、子进程退出；不依赖 PTY（PTY 烟测可选）。
+- [x] 0.3（r5：Python 侧的 stdio 契约套件，见 1.P7；**r9：Rust 一侧做完**——`tui/crates/codegen/pi-pager/tests/python_agent_e2e.rs`，10 个用例，接进 `tui-ci.yml`，见 §10.11）**ACP 契约 / e2e 载体**：Rust client ↔ Python mock agent（脚本化 `stream_fn` 的 `PiAcpAgent` stdio 进程），覆盖 initialize、new、prompt 流式、权限往返、cancel、list、load、Python 缺失时报错、子进程退出；不依赖 PTY（PTY 烟测可选）。
 - [x] 0.4（r4 已做）**deny-list**：硬性 `pi-sampler`；条件性 `async-openai`、`pi-sampling-types`（由阶段 D 决定）；对 `pi-tools`、`pi-agent`、`pi-workspace`、`pi-hooks`、`pi-mcp` 逐个写「保留理由或缩减方案」。（`pi-sampler` 及 `MvpAgent` / `acp_session_impl` / `SamplerActor` 三个词是 `tui_baseline.py gates` 的阻塞门禁；七个条件性 crate 的直接依赖者、理由与缩减方案见 [`docs/baselines/tui.md`](../baselines/tui.md) §4，依赖者列表每次 `check` 重新生成。）
 - [ ] 0.5 **模块级调用图 → support 保留清单**：把附录 B.2 的脚本入库为工具，取代「举例」式清单。
-- [x] 0.6（r5 已做：用户选「直接按附录 A 默认执行，不逐项确认」；结果是 A.3 的删除，分类见 §10.7，附录 A 的「r5 结果」列）**入口审计**：从 `Effect` / `Action` 枚举与键位表出发，逐入口标注可达性、所需 ACP 方法、决策（保留｜隐藏｜删除）；覆盖斜杠、键位、模态、欢迎页、dashboard、状态栏，并复用现有 19 处「standard ACP」降级点。
-- [ ] 0.7 **磁盘读取点清单**（约 19 个文件）与 ADR1 的落地设计。
-- [ ] 0.8 **能力矩阵定稿**（附录 A）与 **ACP 版本配对表**（两端各方法的支持情况、升级策略；Python 侧不得依赖 Rust 端 unstable 方法）。
+- [x] 0.6（r5 已做：用户选「直接按附录 A 默认执行，不逐项确认」；结果是 A.3 的删除，分类见 §10.7，附录 A.4 的 r5 执行结果）**入口审计**：从 `Effect` / `Action` 枚举与键位表出发，逐入口标注可达性、所需 ACP 方法、决策（保留｜隐藏｜删除）；覆盖斜杠、键位、模态、欢迎页、dashboard、状态栏，并复用现有 19 处「standard ACP」降级点。
+- [x] 0.7（r9，§10.11：pager 一侧 13 处读盘调用、8 个文件——r2 估的「约 19 个文件」把实现层也算在内；冷启动延迟实测；13 例 PTY 验收矩阵 `scripts/tui_pty/resume_matrix.py`；落地设计含沙箱顺序与 PR 切分。**设计成文，落地没动**，等用户确认 §10.11 末尾的提议）**磁盘读取点清单**与 ADR1 的落地设计。
+- [x] 0.8（r9，附录 A：A.1 能力矩阵逐行标了「已定」「提议」或「未定」，A.2 版本配对，A.3 逐方法的两端支持情况；「提议」的行改行为，等用户确认）**能力矩阵定稿**（附录 A）与 **ACP 版本配对表**（两端各方法的支持情况、升级策略；Python 侧不得依赖 Rust 端 unstable 方法）。
 - [ ] 0.9（r8 部分：**Linux / WSL2 上六项都有了记录**，见 §10.10；**没做**：沙箱的 Landlock 层——WSL 的内核 5.10 没有 Landlock，要在内核 ≥ 5.13 的机器上做，`pi-sandbox` 的端到端用例在这里软跳过；macOS 与 Windows 上对应各项）**实测结案**：子进程是否继承沙箱；`zypi export <python-session-id>`；`/model` 经 `session/set_config_option` 的真机切换（r3 已用 OpenRouter 实测 Python 侧，见 §10.3；TUI 全屏交互仍需 PTY 实测）；子进程 `stderr` 对全屏 TUI 的影响；退出后是否残留 Python / bash 进程；`config.toml` 的解析严格性。**Linux 上的结论**：沙箱——bwrap 层被 agent 与工具继承，Landlock 层不存在时 `zypi` 照常启动，原先屏幕上没有任何提示（现在启动时 `stderr` 有一行警告，欢迎页与状态栏标 `sandbox:<profile> (not enforced)`）；`zypi export <Python 会话>`——`Session '…' not found.`，退出码 1；`/model` 与全屏交互——PTY 烟测 18/18（入库后的脚本是 23/23）；`stderr`——TUI 模式下 agent 的 stderr 是 `/dev/null`，对全屏界面没有影响（原先一个字也看不到，现在落到 `agent.stderr.log`）；残留进程——TUI 的退出矩阵全部干净（沙箱下补了 `--die-with-parent` 之后），`-p` 模式下只杀 zypi 会留下 agent（已修：Python 一侧监视父进程）；`config.toml`——未知的小节与顶层键被忽略；TOML 不合法、Python 风格的顶层 `permission = "ask"`、`[[models]]` 数组这三种会让 `zypi` 起不来（退出码 1，错误信息直接打印）；`[agent] command` 写错类型不报错。
 
 **退出条件**：CI 绿且基线入库；矩阵、入口审计、deny-list 无「未决」行（有则标 owner 与日期）；0.9 每项有记录。
@@ -174,19 +174,19 @@ zypi（Rust）                                     pi_agent_cli（Python，通�
 
 Python（`pi_agent_cli`）：
 
-- [ ] 1.P1（r5 部分：`title` = 会话第一条 user message，`updated_at` = 会话文件 mtime，`50ccfb1`；**`cursor` 分页没做**——pager 不跟 `nextCursor`，只要 Python 分页，列表就会被截断，所以要先让 pager 跟游标）`list_sessions`：真实 title、`updated_at`（最后活动）、`cursor` 分页（ACP `session/list` 字段，[RFD](https://github.com/agentclientprotocol/agent-client-protocol/blob/main/docs/rfds/session-list.mdx)）。
+- [x] 1.P1（r5：`title` = 会话第一条 user message，`updated_at` = 会话文件 mtime，`50ccfb1`；**r9：游标分页做完**——先让 pager 跟游标（`9f7bc35`：`fetch_session_list` 跟 `nextCursor` 到没有，上限 100 页，空游标或重复游标就停），再让 Python 分页（`c1f02c8`：每页 50、无状态游标、非法游标 `invalid_params`），harness 一侧配 `list_page` / `find`（`1b9fb47`）与读头部不读全文件（`54a38fe`）；1000 个会话时首页 2.0 s → 0.11 s，见 §10.11）`list_sessions`：真实 title、`updated_at`（最后活动）、`cursor` 分页（ACP `session/list` 字段，[RFD](https://github.com/agentclientprotocol/agent-client-protocol/blob/main/docs/rfds/session-list.mdx)）。
 - [x] 1.P2 优雅退出（r5，`f14e321`）：处理 stdin EOF / SIGTERM，回收工具进程组。实测（macOS，脚本化的 bash 调用）：stdin EOF 本来就是优雅的——`run_agent` 返回，`asyncio.run` 取消在途 turn，bash 工具杀进程组，退出码 0、工具不残留；SIGTERM 则立刻终止进程（−15），工具残留。现在 `__main__.serve()` 把 SIGTERM 与 SIGHUP（`421d497`：终端消失、或 zypi 作为会话首进程被杀时，内核把 SIGHUP 发给前台进程组，agent 在其中，默认动作让它立刻死掉）接到同一条路径（POSIX；Windows 没有 `add_signal_handler` 与 SIGHUP，只靠 EOF）。处理器只生效一次（第一个信号后就摘掉），所以停到一半卡住的 agent（比如 `asyncio.run` 在等一个取消不了的线程）仍可被第二个 SIGTERM 杀掉。SIGKILL 无法处理，工具仍会残留，所以 Rust 一侧不能一上来就 SIGKILL（1.R3）。契约：`tests/test_acp_shutdown.py`（EOF、SIGTERM、SIGHUP 都要退出码 0 且回收工具；重复的信号要能杀掉卡住的 agent；去掉 SIGTERM 处理器后第一个用例以 −15 失败，去掉自摘除后最后一个用例超时）。
 - [ ] 1.P3 `set_session_mode`（或 `configOptions` 的 `mode`）取代仅靠 `ext_notification` 的权限模式切换，映射由矩阵定。
-- [ ] 1.P4 `mcp_servers`：显式忽略并在文档声明（Phase 4 非目标），或实现。
+- [x] 1.P4（r9，`935e4b8`、`7becb49`、`9798e1d`）`mcp_servers`：**显式忽略并在文档声明**（Phase 4 非目标），或实现。做了前者：pager 不再发（`session/new` / `load` 的 `mcp_servers` 恒为空，有单测）；Python 收到非空列表时记一条警告并发一条只含名字的 agent 消息（`mcp_notice.py`、`tests/test_mcp_notice.py`）；`packages/pi-agent-cli/AGENTS.md` 的「MCP servers」与 `docs/TUI-AND-CODE-AGENT.md` 写明这是对 ACP「agent 必须支持 stdio 服务器」的有意偏离。`pi_shell::util::config::load_mcp_servers` 与 `mcp.rs` 现在没有调用者（清理候选，见 §10.11）。
 - [ ] 1.P5（r5 部分：`initialize` 公布了 `session/close` 与 `session/resume`，但 `run_agent` 没开 `use_unstable_protocol`，SDK 对这两个方法回「Method not found」，`5163592` 已改；其余公布项与 pager 需求的对照没做）`initialize` 的 capabilities / `_meta`：只公布 pager 实际需要且已登记（P2）的键。
 - [ ] 1.P6 `-p` 旗标契约：以 `__main__` 接受的旗标为权威；每个 `PagerArgs` 旗标逐项「支持｜非 0 退出并报错｜文档删除」。
-- [ ] 1.P7（r5 部分：`packages/pi-agent-cli/tests/test_acp_stdio_contract.py` 起子进程走 stdio，8 个用例——initialize、new、流式 prompt、`model` 配置项、重启后 list / load 回放 / resume、close、未知方法与连接存活、stdin EOF 退出码 0；`PI_ACP_CONTRACT_COMMAND` 可对准别的 stdio ACP agent。**没做**权限往返与 cancel 的线上用例：mock 流不会产生 tool call）契约测试：mock `stream_fn` 驱动 ACP stdio，断言方法面（含既有的「不注册 `x.ai/`」）。
+- [x] 1.P7（**r9：权限往返与 cancel 的线上用例补上了**——`28fed94`：`tests/test_acp_stdio_tools.py`，用 `_tool_agent.py` 让一次脚本化的 tool call 走完真实 stdio，Rust 一侧的同类用例见 0.3；r5 部分：`packages/pi-agent-cli/tests/test_acp_stdio_contract.py` 起子进程走 stdio，8 个用例——initialize、new、流式 prompt、`model` 配置项、重启后 list / load 回放 / resume、close、未知方法与连接存活、stdin EOF 退出码 0；`PI_ACP_CONTRACT_COMMAND` 可对准别的 stdio ACP agent。当时没有权限往返与 cancel 的线上用例，因为 mock 流不会产生 tool call，r9 的 `_tool_agent.py` 补上了）契约测试：mock `stream_fn` 驱动 ACP stdio，断言方法面（含既有的「不注册 `x.ai/`」）。
 
 Rust（pager）：
 
-- [ ] 1.R1 ADR1 落地：移除对 session 文件的读取；`export` 的去向。
+- [ ] 1.R1（r9：读盘调用点清单、落地设计、PR 切分、验收矩阵与延迟实测都在 §10.11；**没有动手**——沙箱顺序、`--session-id` 契约、`export` 的去向要用户确认，见该节末尾）ADR1 落地：移除对 session 文件的读取；`export` 的去向。
 - [ ] 1.R2 按能力隐藏 Python 不路由的方法的入口（`session/set_model`、`session/set_mode` 等）；method-not-found 不 panic、不重复报错；`/model` 按 ADR3 恢复（r3 已做，不在隐藏之列）。
-- [ ] 1.R3 子进程生命周期（P6）。**r4 已做（命名与提示语，行为不变）**：`SpawnedAgent` → `AgentProcess`（`thread_handle` → `bridge_thread`，`AcpConnection.agent_thread` → `bridge_thread`）、`AgentShutdownGuard` → `AgentProcessGuard`、`spawn_grok_shell` → `spawn_agent_process`（顺手去掉没人用的 `_memory_config` 参数）、`SESSION_FLUSH_GRACE` / `AGENT_JOIN_SLACK` → `AGENT_EXIT_GRACE` / `BRIDGE_JOIN_SLACK`（仍是 10 s + 2 s，`exit_timeout` 的 20 s 预算不变）、`join_agent_thread` → `join_bridge_thread`；慢退出提示从「Finishing session…」改为「Stopping agent…」，超时告警不再声称 SessionEnd teardown 可能不完整，只说 agent 进程可能还在；守卫的文档改为只有 `app::run` 持有。**r5 已做（`e8557e5`）**：② 优雅退出——取消时先关 agent 的 stdin，等它自己退出（`AGENT_EOF_GRACE` = 3 s，编译期断言小于 `AGENT_EXIT_GRACE`），超时才 `start_kill()`；退出期间继续读（并丢弃）agent 的 stdout，免得它写到已关闭的管道；③ 的大部分——用脚本化 agent 在 bash 工具（`exec sleep 300`）运行时从 PTY 里退出 zypi，见 §10.7 的表：双击 Ctrl+Q 旧版残留、新版回收；`kill -9 zypi`（zypi 是会话首进程）要 Python 也处理 SIGHUP 才回收；SIGTERM、关终端、单按 Ctrl-C 都不残留。**r8 补（Linux / WSL2，§10.10）**：③ 里 Linux 的部分做完了——zypi 是会话首进程、以及只是 shell 里的一个作业（`kill -9` 时 agent 只看到 stdin 的 EOF）两种启动方式，乘以六种退出方式，含沙箱下，都不留进程；这一遍测出沙箱 re-exec 缺 `--die-with-parent`（只杀 bwrap 的做法——`kill $!`、`timeout`、IDE 的停止按钮——会把整棵树留下），已补。① 的前提也变了：agent 的 `stderr` 在 TUI 里是 `/dev/null`（`app::run` 一开头的 `redirect_native_stderr()` 把 fd 2 指过去，agent 继承的就是它），不是「写在 TUI 所在的终端上」，所以对全屏界面没有影响，代价是 agent 的 stderr 一个字也看不到、也没处可查；`-p` 路径不做这个重定向，继承终端。**随后用户选了做**：① 的去向——agent 的 `stderr` 现在追加到 `<home>/logs/agent.stderr.log`（0600，每次启动一行标记，超过 1 MiB 在下次启动时轮转；§10.10 发现 2）；`-p` 模式下只杀 zypi 时 agent 子进程残留——Python 一侧监视父进程（`PI_AGENT_PARENT_PID`，§10.10 发现 6）。**未做**：MCP 子进程；Windows 上的行为。
+- [ ] 1.R3 子进程生命周期（P6）。**r4 已做（命名与提示语，行为不变）**：`SpawnedAgent` → `AgentProcess`（`thread_handle` → `bridge_thread`，`AcpConnection.agent_thread` → `bridge_thread`）、`AgentShutdownGuard` → `AgentProcessGuard`、`spawn_grok_shell` → `spawn_agent_process`（顺手去掉没人用的 `_memory_config` 参数）、`SESSION_FLUSH_GRACE` / `AGENT_JOIN_SLACK` → `AGENT_EXIT_GRACE` / `BRIDGE_JOIN_SLACK`（仍是 10 s + 2 s，`exit_timeout` 的 20 s 预算不变）、`join_agent_thread` → `join_bridge_thread`；慢退出提示从「Finishing session…」改为「Stopping agent…」，超时告警不再声称 SessionEnd teardown 可能不完整，只说 agent 进程可能还在；守卫的文档改为只有 `app::run` 持有。**r5 已做（`e8557e5`）**：② 优雅退出——取消时先关 agent 的 stdin，等它自己退出（`AGENT_EOF_GRACE` = 3 s，编译期断言小于 `AGENT_EXIT_GRACE`），超时才 `start_kill()`；退出期间继续读（并丢弃）agent 的 stdout，免得它写到已关闭的管道；③ 的大部分——用脚本化 agent 在 bash 工具（`exec sleep 300`）运行时从 PTY 里退出 zypi，见 §10.7 的表：双击 Ctrl+Q 旧版残留、新版回收；`kill -9 zypi`（zypi 是会话首进程）要 Python 也处理 SIGHUP 才回收；SIGTERM、关终端、单按 Ctrl-C 都不残留。**r8 补（Linux / WSL2，§10.10）**：③ 里 Linux 的部分做完了——zypi 是会话首进程、以及只是 shell 里的一个作业（`kill -9` 时 agent 只看到 stdin 的 EOF）两种启动方式，乘以六种退出方式，含沙箱下，都不留进程；这一遍测出沙箱 re-exec 缺 `--die-with-parent`（只杀 bwrap 的做法——`kill $!`、`timeout`、IDE 的停止按钮——会把整棵树留下），已补。① 的前提也变了：agent 的 `stderr` 在 TUI 里是 `/dev/null`（`app::run` 一开头的 `redirect_native_stderr()` 把 fd 2 指过去，agent 继承的就是它），不是「写在 TUI 所在的终端上」，所以对全屏界面没有影响，代价是 agent 的 stderr 一个字也看不到、也没处可查；`-p` 路径不做这个重定向，继承终端。**随后用户选了做**：① 的去向——agent 的 `stderr` 现在追加到 `<home>/logs/agent.stderr.log`（0600，每次启动一行标记，超过 1 MiB 在下次启动时轮转；§10.10 发现 2）；`-p` 模式下只杀 zypi 时 agent 子进程残留——Python 一侧监视父进程（`PI_AGENT_PARENT_PID`，§10.10 发现 6）。**r9 补（`affda9e`，§10.11）**：agent 自己退出了，pager 现在知道也说得出原因——桥在等取消的同时等子进程，退出后排空它已写出的输出，拼一条消息（程序、退出状态、`agent.stderr.log` 的末尾几行），让在途请求以失败结束，`connect()` 把失败的 `initialize` 解释成这条消息，TUI 起来之后由 `AgentProcessGuard` 在还原的终端上打印；e2e 里 agent 起不来、一启动就退出、回合中途被杀都有用例。`zypi` 自己的退出状态没动。**未做**：MCP 子进程；Windows 上的行为。
 - [ ] 1.R4 `-p` 派发顺序与沙箱（ADR7）。
 - [ ] 1.R5 解码精简：`initialize._meta` 只读 Python 实际公布的键；`pi/*` 解码按 ADR4 清理。
 
@@ -247,9 +247,9 @@ Rust（pager）：
 - 新增 TUI 功能（MCP、queue、subagent UI 等）——另立计划并过 P2 准入。（`/model` 不在此列：r3 已按 ADR3 经 Session Config Options 恢复。）
 - 多会话共享进程（leader 的替代方案）。
 
-## 10. 执行记录（r3、r4、r5、r6、r7、r8）
+## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9）
 
-r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
+r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
 | 提交 | 内容 |
 |---|---|
@@ -689,34 +689,276 @@ r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶�
 4. 提交与推送：已拆成 8 个提交，推到分支 `codex/linux-wsl-r8` 并开了 PR。`main` 上的 `eafc578`（phase7 的修复）原本也没推，PR 会一并带上；`--die-with-parent` 单独是一个提交（发现 1），不想要这个代价时可以单独 revert，但 CHANGELOG 与本节里对它的描述要一起改。
 5. WSL 的清理：r8 在最后一步清掉了自己留下的东西——`~/pi-linux`（克隆加构建产物，34 GB）、`~/zypi-bin`、`~/pi-linux-logs`、`~/pi-test-home`，以及 `/tmp` 下这次任务期间创建的 182 个条目（测试留下的临时目录与输出、下载的压缩包、临时脚本）和 pytest 的基础目录。**留着没删**的：`~/.local/protoc` 与 `~/.local/bin/{protoc,rg}`（为构建装的，要删就删这三个）、`~/.cargo/registry` 里新下载的约 27 MB crate 与 `~/.cache/uv` 里的几个条目（共享缓存，删了只会让下次构建重新下载）；用户自己的 `CARGO_TARGET_DIR`（`/mnt/d/work/cargo-target`）没有碰过。`~/.profile` / `~/.bashrc` 里对 `PI_HOME` 的导出是用户自己的配置，没有动——建议删掉，免得再有人直接跑 `zypi` 时读写 Windows 一侧的配置目录。
 
-## 附录 A：能力矩阵（阶段 0.8 的初稿）
+### 10.11 r9 追加：阶段 0 收口（0.3 / 0.7 / 0.8）与阶段 1 里不需要拍板的部分
 
-| 能力 | pager 侧 | Python 现状 | 默认决策 |
+**起点与范围。** PR [#9](https://github.com/zy1233/pi-python/pull/9) 之后，用户问：接下来处理什么，阶段 1 何时开始，有没有必须先完成的阶段 0 项。我的回答是：阶段 1 没有被技术挡住；挡住它的是几个只有用户能定的行为——模式切换怎么映射、`zypi export` 的去向、`-p` 与交互模式的旗标契约、恢复会话时要不要沿用保存的沙箱 profile；阶段 0 还欠 0.3 的 Rust 一侧、0.7、0.8。用户选了四件：`e2e`（0.3 的 Rust 一侧）、`p0_gate`（0.7 与 0.8 收口）、`free_p1`（阶段 1 里不需要拍板的部分）、`ci_pr`（盯 PR #9 的 CI 并报告）；`decide` 那一项**没有选**，也就是没有授权我替他定会改变行为的决定。所以这些决定本节一律只写成**提议**，集中在末尾的「留给用户决定的」，没有动手。做了的是 0.3、0.7 的测量与清单、0.8 的定稿，以及 1.P1、1.P4、1.P7 的余项。本分支的 16 个提交（末尾有表，最后一个是本节的文档）叠在 PR #9 的 `d84d98a` 之上，分支 `codex/phase1-contract-docs`，**只在本地，没有推送**。验证环境：WSL2（同 §10.10）与 Windows 10（Python 3.12.7）。
+
+**CI 结果（PR #9 的第二次运行，`d84d98a`）。** [run 38052332014](https://github.com/zy1233/pi-python/actions/runs/38052332014) 全绿：`cargo test (Linux x86_64)` 32 m 40 s（第一次 24 m 44 s，差了 8 分钟，原因没有查，缓存命中的情况与 runner 的波动都可能；job 上限 150 分钟），`Gates + cargo check` 8 m 21 s，其余 job 也通过。10 个 suite 合计 **8,634 通过 / 0 失败 / 22 忽略**，每个都等于清单里的 `reference_passed`：`pi-shell` 1,056、`pi-pager` 5,577（13 忽略）、`pi-pager-render` 1,092（2 忽略）、`pi-pager-minimal` 79、`pi-pager-bin` 21、`pi-acp-lib` 21、`pi-http` 13、`pi-telemetry` 239、`pi-file-utils` 216（6 忽略）、`pi-sampling-types` 320。r8 留下的几个问题因此有了答案：① 去掉 `skip` 的 `doctor_cmd::` 在 runner 上通过，包括 `d84d98a` 修掉的那个；② 两个新 suite 的数与 WSL2 逐项相同；③ `pi-pager-render` 的 `known_failures`（tmux 探测）在 runner 上没有失败，合计因此比 WSL2 的 8,633 多 1；④ 清单的数字不用改。
+
+**0.3：pager 的 ACP client 对着真的 Python agent（Rust 一侧，已做）。**
+
+- **是什么。** `tui/crates/codegen/pi-pager/tests/python_agent_e2e.rs`，10 个用例，用 pager 自己的 `pi_pager::acp::connect`——`zypi` 启动时调的同一个函数，含 stdio 桥与 agent 进程的管理——对着真的 `python -m pi_agent_cli`（`PI_USE_MOCK=1`）说话，不经过 PTY。要工具调用的用例换成 `packages/pi-agent-cli/tests/_tool_agent.py`（第一回合按脚本调一次 `write` 或 `bash` 的替身，r5 随 PR #7 引入）。每个用例用一次性的 `PI_HOME`，起的进程都带同一个标记（`PI_E2E_MARK`），结束时扫 `/proc` 确认没有带标记的进程留下。
+- **怎么跑。** `PI_E2E_PYTHON` 指向装了 `pi_agent_cli` 的 Python。没设时用例打印一行说明并通过——没有这样的 Python 的开发者照样能跑清单；`PI_E2E_REQUIRED=1` 把「没有」变成失败。`tui-ci.yml` 的 `cargo test` job 在跑 suite 之前 `pip install` 六个包并设这两个变量（步骤名 `Install the Python agent for the end-to-end tests`），CI 里丢了 Python 不会假绿。workflow 的路径过滤加了 `packages/pi-agent-cli/pi_agent_cli/**` 与 `packages/pi-agent-cli/tests/_tool_agent.py`：改 agent 现在也会触发 TUI CI（约多 30 分钟 runner 时间）；harness 与 core 的改动不触发，由 Python CI 与 stdio 契约套件兜底。这是取舍，不是白送的。
+- **用例。**
+
+| 用例 | 证明什么 |
+|---|---|
+| `connect_runs_the_handshake_and_stop_leaves_nothing_behind` | `acp::connect` 完成握手；`stop` 之后没有带标记的进程 |
+| `a_prompt_streams_the_reply_and_ends_the_turn` | 一个提示得到流式回复，回合正常结束 |
+| `a_session_is_listed_with_a_title_and_replayed_by_a_later_agent` | 会话出现在 `session/list` 里且带标题；另起一个 agent 后 `session/load` 回放历史 |
+| `session_list_pages_are_followed_by_cursor` | 51 个会话分两页，pager 跟着 `nextCursor` 取全；非法游标得到 `InvalidParams` |
+| `a_permission_question_reaches_the_client_and_its_answer_decides` | 权限问题到达 client，答复决定工具执行与否 |
+| `cancel_ends_a_running_tool_as_cancelled_and_reaps_it`（仅 Linux） | 取消让运行中的工具以 cancelled 结束，工具进程被回收 |
+| `a_missing_agent_is_an_error_that_says_what_to_do` | 找不到 agent 程序：错误里有程序名，并说明 `PI_AGENT_COMMAND` 怎么设 |
+| `an_agent_that_exits_at_once_is_an_error_with_what_it_wrote`（Unix） | agent 一启动就退出：错误里有退出状态（`exit status: 3`）与它写在 stderr 的字，`agent.stderr.log` 里也有 |
+| `a_python_without_the_agent_says_so` | `python` 没装 `pi_agent_cli`：错误说明这一点 |
+| `an_agent_that_dies_mid_turn_ends_the_requests_and_fires_cancel`（仅 Linux） | agent 在回合中途被杀：在途请求以失败结束，连接的 `cancel` 触发，消息里有 `exited on its own` 与 `signal: 9` |
+
+- **它第一次跑就抓到两个产品 bug，都修了（`affda9e`）。** ① agent 起不来时，用户看到的是 `channel closed … recv_failed`；真正的原因（程序不存在、`PI_AGENT_COMMAND` 该怎么设）在桥线程的错误里被丢掉了。② agent 一启动就退出（比如 Python 没装 `pi_agent_cli`）时 `connect()` 一直等：没有人等子进程，`initialize` 既没有回答也没有错误，30 s 之后还挂着。修法：桥在等取消的同时等子进程（`select! { biased; cancel, child.wait() }`），退出后先排空它已经写出的输出（`EXIT_OUTPUT_DRAIN` 2 s、再等 100 ms），拼一条消息（程序、退出状态、`agent.stderr.log` 末尾 12 行 / 4 KiB），让在途请求以失败结束，触发连接的 `cancel`，把消息作为桥的结果；`connect()` 在 `initialize` 失败时返回这条消息（`explain_failed_start`）；TUI 已经起来之后 agent 自己死掉，`AgentProcessGuard` 在还原后的终端上打印 `Error: …`。`zypi` 自己的退出状态没变。8 个单测在 `acp::spawn::agent_exit_tests`。**变异检查**：把桥改回只等取消，依赖这条修复的三个用例里 `an_agent_that_exits_at_once…`（挂住）与 `an_agent_that_dies_mid_turn…`（取消不触发）按预期失败，`a_missing_agent…` 仍通过（它走的是 spawn 失败的路径，由 `explain_failed_start` 覆盖，不依赖桥等子进程）。
+- **没覆盖的。** 真 LLM（只用 mock）；pager 的事件循环与界面（e2e 到 `acp::connect` 为止，界面归 PTY 脚本）；Windows 与 macOS（macOS 上应当会跑其中 8 个，另两个读 `/proc`，都没跑过）；CI 里那一步安装——还没在 GitHub 上跑过（没有推送）。
+
+**0.7：磁盘读取点、冷启动延迟与 ADR1 的落地设计。**
+
+*(1) 延迟——ADR1 的覆盖条件触发了吗？* ADR1 把会话来源改成纯 ACP：列表不再是本地读盘，agent 要先起来，再每个会话开一个文件。覆盖条件是「冷启动列表延迟不可接受」（§6），所以先量，脚本是 `scripts/session_list_bench.py`：合成的 `PI_HOME`，真 agent（`python -m pi_agent_cli`，mock LLM）走 stdio；每三个会话里一个属于被查的目录，其余分散在 20 个别的目录；每项取 3 次的中位数；OS 文件缓存是热的（冷盘没模拟）。`list` 是该目录的第一页，`pages` 是按 `nextCursor` 翻完，`load` 是 `session/load` 该目录最新的会话（120 条记录）。改前是 `d84d98a` 的 agent，改后是本分支（`54a38fe` 只读文件头、`1b9fb47` 分页与按 id 查、`c1f02c8` Python 分页）。
+
+| 平台（会话 × 条目） | `list` 改前 → 改后 | `load` 改前 → 改后 | 逐页翻完（改后） |
 |---|---|---|---|
-| session new / load / resume / close | 标准 ACP（pager 只调用 new / load，没有 resume / close 的调用点） | 已覆盖（`agent.py:123-200`）；r5 起 `resume` / `close` 在线上真正可用（`run_agent` 开了 `use_unstable_protocol`），有契约测试 | 保留 |
-| session list | `ListSessionsRequest`（`effects/mod.rs:472,528`） | 部分（r5）：`title` = 第一条 user message，`updated_at` = 文件 mtime；仍忽略 `cursor`（pager 不跟 `nextCursor`） | 阶段 1 补齐 `cursor`（先让 pager 跟游标） |
-| session delete | `pi/session/delete`（`effects/mod.rs:1905`） | 已覆盖（`agent.py:236-251`） | 保留并登记；SDK 补路由后迁标准方法 |
-| session rename | 恒返回「not supported in standard ACP」（`effects/mod.rs:2291-2302`） | 无 | 隐藏入口，不新增 |
-| prompt / cancel | 标准 ACP | 已覆盖 | 保留 |
-| 权限请求 | `request_permission` | 部分：仅 bash / edit / write；选项仅 allow-once / reject-once | 保留；阶段 0 确认 pager 是否依赖 allow-always / 规则 |
-| 模型选择 | r3：读 `configOptions`（`category: "model"`）+ `SetSessionConfigOptionRequest`（`effects/mod.rs`）；无该配置项时退回 `SetSessionModelRequest` | r3：`configOptions` + `set_config_option`（`agent.py`），`[[models]]` 提供候选 | **恢复**（ADR3，r3 已做） |
-| 模式切换（yolo / auto） | `SetSessionModeRequest`（`effects/mod.rs:1005,1025`）、`pi/yolo_mode_changed` | 部分：仅 `ext_notification` | 阶段 1 定映射 |
-| MCP | `pi/mcp/*`（仅测试代码） | 无（`mcp_servers` 被忽略） | 降级，删 UI |
-| queue / interjection | `pi/queue/changed`、`pi/session/interjection`（仅测试代码） | 无 | 删解码 |
-| compaction | 触发与展示 | 部分：`auto_compact` 由 `max_turns >= 30` 推导 | 降级 |
-| subagents / 后台任务 | `pi/task_*`、`AgentSession.bg_tasks` | 无 | 删（Phase 4 非目标） |
-| skills | slash / `available_commands` | 已覆盖 | 保留 |
-| hooks / plugins / marketplace | `pi/marketplace/*`、`pi/plugins/notify-updates`（仅测试代码） | 无 | 删（Phase 4 非目标） |
-| image | 剪贴板图片 | 已覆盖 | 保留 |
-| status line | `ConnectFlags.status_line` | 无 | 阶段 0 决策 |
-| 历史回放 | `load_session` | 已覆盖（`resume` 不回放） | 保留 |
-| `initialize._meta` 键 | `modelState`、`grokShell`、`availableCommands`、`cancelRewind`、`sessionRecap`、`feedbackTraceOffer` | 无 `_meta` | 逐键：删除解码或登记 |
+| Windows 10 / NTFS，100 × 120 | 203 → 45 ms | 246 → 68 ms | 45 ms（1 页） |
+| Windows 10 / NTFS，1,000 × 120 | 2,026 → 113 ms | 2,041 → 117 ms | 806 ms（7 页） |
+| WSL2 / ext4，100 × 120 | 55 → 27 ms | 89 → 43 ms | 26 ms（1 页） |
+| WSL2 / ext4，1,000 × 120 | 570 → 81 ms | 626 → 84 ms | 607 ms（7 页） |
 
-**r5 执行结果（对照上表的「默认决策」）**：
+agent 自己的启动（spawn 到 `initialize` 有回答）与会话数无关：WSL2 约 0.9 s，Windows 约 1.6–1.9 s（Python 的导入；今天的 TUI 在第一个提示之前本来就要付）。改前的代价随会话数线性增长，因为每次 `list` 读每个文件的全文，`session/load` 还要先列一遍目录找 id；现在首页只读文件头，按 id 查只读一个文件头。每个会话约 1 MB（2,000 条）、100 个会话时：Windows `list` 667 → 46 ms、`load` 752 → 240 ms；WSL2 172 → 28 ms、372 → 217 ms。**结论：覆盖条件没有触发。** 最坏的一项——1,000 个会话、`--resume <标题>` 要翻完 7 页——在 Windows 上多花 0.8 s，加在已经要 1.6 s 的 agent 启动上；`--continue` 只要首页（0.1 s）。没量的：冷磁盘、网络文件系统、超过 1,000 个会话。
+
+*(2) 读盘调用点。* 范围：`pi-pager` 与 `pi-pager-bin` 的生产代码里读「会话文件」的地方，按 `persistence::`、`session::storage`、`grok_home().join("sessions")` 与 `resolve_local_session*` 检索（`pi-pager-bin`、`pi-pager-minimal`、`pi-pager-render`、`pi-acp-lib` 没有；`recent_dirs.rs` 只剩一行文档注释）。**13 处，8 个文件。** r2 估的「约 19 个文件」把 `pi-shell` 里的实现层（`session/persistence.rs`、`session/storage/**`）也算进去了；这里只数 pager 一侧的调用点，实现层随 ADR1 整块删。`session_notification.rs` 与 `views/session_title.rs` 只用 `persistence` 里的纯函数（清洗标题），不读盘，不在表里。
+
+| # | 位置 | 读什么 | 为谁 | 对 Python 会话 | ADR1 之后 |
+|---|---|---|---|---|---|
+| 1 | `session_startup.rs` `most_recent_session_id` → `list_summaries(Some(cwd))` | 旧布局 `sessions/<编码后的 cwd>/<id>/summary.json` | `--continue` | 读不到，落到 #2 | `session/list{cwd}` |
+| 2 | `session_startup.rs` `find_most_recent_jsonl_session` | 顶层 `sessions/*.jsonl` 的首行，按文件名倒序，直到 `cwd` 相同 | `--continue` 的退路——**唯一碰巧读得懂 Python 会话的一处** | 能用，但没有标题 | 删 |
+| 3 | `session_startup.rs` `resolve_existing_session` → `resolve_local_session`、`resolve_local_session_any_cwd` | 旧布局 | `--resume <id>` | 命中不了，走「UUID 直接交给 agent」那一支，`original_cwd` 为 `None` | 在 `session/list`（不带 `cwd`）里找 id，取它的 `cwd` |
+| 4 | `session_startup.rs` `resolve_session_by_title` → `list_summaries(Some(cwd))` | 旧布局 | `--resume <标题>` | 读不到：`no session id or title matched`（GAP） | `session/list{cwd}` 翻页，`select_by_title` 匹配 |
+| 5 | `session_startup.rs` `ensure_session_id_available` → `session_exists_for_cwd` | 旧布局 | `--session-id` 查重 | 看不见 Python 会话（GAP） | 交给 agent 拒绝重复 |
+| 6 | `session_startup.rs` `parent_session_is_worktree` | 旧布局的 `summary.json`，再退到 git 检查 | `--worktree` 与被恢复的父会话 | 文件不存在，只剩 git 检查 | 删读文件的那一段 |
+| 7 | `session_title_resolve.rs` `presandbox_resume_target`（由 `cli.rs` 的 `pin_local_resume_target` 调用） | 旧布局（`resolve_local_session*`、`local_summaries_for_cwd_sync`） | 沙箱施加前把 `--resume` 的目标钉成 id | 恒为 `Unresolved` | 删（见下「沙箱顺序」） |
+| 8 | `cli.rs` `saved_resume_profile_for_cwd` → `resumed_session_sandbox_profile` | 旧会话保存的沙箱 profile | 恢复时沿用沙箱 | 恒为 `None` | 删 |
+| 9 | `app/mod.rs`（`materialize_startup` 之后）`list_summaries(None)` | 全部旧布局 summary | 给被恢复的会话补标题 | 读不到，没有标题 | 用 `session/list` 带回的标题 |
+| 10 | `dispatch/session/load.rs`（选择器 / `/resume` 加载） | `resolve_local_session*` | 本地命中就带上 `original_cwd` | 命中不了，走 ACP 那一支，用选择器那一行的 `cwd`——**已经是 ADR1 的形状** | 删前两个判断 |
+| 11 | `effects/helpers.rs` `parse_session_picker_entries` | `extract_first_user_prompt` 读 `chat_history.jsonl`；对 `source == "remote"` 的行再调 `resolve_local_session_any_cwd` | 选择器行没有摘要时的退路；把远程行改标本地 | ACP 的行永远有标题（缺省用 id）、`source` 恒为 `local`，走不到 | 删 |
+| 12 | `export_cmd.rs` `load_updates_for_replay` | 旧布局的 `updates.jsonl` | `zypi export <id>` | 找不到：`Session '<id>' not found.`，退出 1（GAP） | 见「决定 6」 |
+| 13 | `app/agent_view/plan.rs` `plan_file_path` | `sessions/<编码后的 cwd>/<id>/plan.md` | Plan 预览 | 没有人写这个文件 | 随 Plan 的去留（决定 7） |
+
+*(3) 现状实测：13 例 PTY 验收矩阵。* `scripts/tui_pty/resume_matrix.py`（`babd75f`）用 TUI 做出一个会话（mock 模型，第一条消息 `remember this`），再带着各旗标重新起 `zypi`，看它有没有做帮助文字承诺的事。WSL2 上 **9 PASS、4 GAP、0 FAIL**；GAP 不让脚本失败，`--strict` 让它们失败——落地 ADR1 的改动要让 `--strict` 全绿。
+
+| # | 用例 | 结果 | 现状 |
+|---|---|---|---|
+| 1 | `--continue` 恢复本目录最近的会话 | PASS | 只因为 #2 的退路碰巧读得懂 Python 的文件头；标题丢了 |
+| 2 | `--continue`，本目录没有会话 | PASS | `No session found`，退出 1 |
+| 3 | `--resume <id>`，在会话的目录 | PASS | 本地读不到，交给 agent 的 `session/load` |
+| 4 | `--resume <id>`，换一个目录 | PASS | 同上；Python 绑定的是会话保存的 cwd（`metadata.cwd or cwd`），TUI 一侧的目录见「没有验证的」 |
+| 5 | `--resume <标题>`，在会话的目录 | **GAP** | 只匹配旧 agent 的摘要：`no session id or title matched`，退出 1 |
+| 6 | `--resume <标题>`，在没有该会话的目录 | PASS | 同样的报错，退出 1（标题按目录匹配，期望如此） |
+| 7 | `--resume`（无参数） | PASS | 选择器，本来就是 ACP |
+| 8 | `--resume <未知 id>` 报错并点名这个 id | PASS | 但进了 TUI 才报 `Turn failed: Couldn't load session: Resource not found`，状态栏的模型名是 `unknown`；用例按「屏幕上或退出状态里有」放行，提议 5 要把它收紧成「进 TUI 之前就退出 1」 |
+| 9 | `--resume <未知标题>` | PASS | 退出 1 |
+| 10 | `--session-id <新 uuid>` 用这个 id 开新会话 | **GAP** | Python 忽略 `session/new` 的 `_meta.sessionId`，自己挑 id |
+| 11 | `--session-id <已用的 id>` 被拒绝 | **GAP** | pager 的占用检查读旧布局，看不见 Python 的会话，于是用另一个 id 开了新会话 |
+| 12 | `zypi export <id>` 输出会话 | **GAP** | `Session '<id>' not found.`，退出 1 |
+| 13 | `zypi export <未知 id>` 失败且没有输出 | PASS | |
+
+矩阵之外看到的两件事：选择器丢掉 `updatedAt` 早于 30 天的行（`parse_session_picker_entries`，Grok 留下的）——Python 会话 30 天没动就从 `/resume` 里消失，`--resume <id>` 仍能恢复；选择器要等所有页回来才画（`fetch_session_list`，最多 `MAX_SESSION_LIST_PAGES` = 100 页，即 5,000 个会话；重复游标与空游标当作结束，中途某页失败则整体失败，不会悄悄少一半）。
+
+*(4) 落地设计（提议；改变行为的地方标「需确认」）。*
+
+**流程。** 今天：`main.rs` 的 `apply_sandbox`（不可逆）→ `app::run` → `materialize_startup`（读盘，约 544 行）→ … → `bounded_connect(acp::connect)`（约 716 行）。ADR1 之后：`apply_sandbox` → `app::run` → `bounded_connect(acp::connect)` → **`resolve_startup(&AcpAgentTx, intent, cwd)`**（只用 `session/list`）→ 起 TUI。`SessionStartupIntent`（纯函数，不读盘）原样保留；`materialized`、`session_title`、`session_cwd` 在 `app/mod.rs` 里只有两处用到（`connect` 之前设终端标题的 691 行，与交给 App 的 766–769 行），挪到 `connect` 之后不难。注意终端在 `connect` 之前就准备好了（`terminal`、`restore_terminal`）：解析出错要走 `connect` 失败的那条路径——还原终端、返回 `Err`、由 `main` 打印并退出 1——而不是进了 TUI 才报。
+
+**逐旗标。**
+
+| 旗标 | 解析方式 | 需要 Python 做的 |
+|---|---|---|
+| `--continue` | `session/list{cwd}`；没有 → `No session found for current directory`，退出 1。「最近」按哪个排序见决定 4（需确认） | 无 |
+| `--resume <id>` | `session/list`（不带 `cwd`）翻页找 id；找到就取它的 `cwd` 作 `session_cwd`（选择器已经这样做）；找不到 → 进 TUI 之前退出 1（需确认，决定 5） | 无 |
+| `--resume <标题>` | `session/list{cwd}` 翻页，用现成的 `select_by_title`（纯函数）匹配 | 无 |
+| `--resume`（无参数） | 选择器，不变 | — |
+| `--session-id <uuid>` | 带 `_meta.sessionId` 发 `session/new`；agent 拒绝重复，pager 按错误退出 1（需确认，决定 3） | **兑现 `_meta.sessionId`**：校验是 UUID，不存在就用它做会话 id（`JsonlSessionRepo.create` 已经接受 `options["id"]`），已存在则 `invalid_params`；约 10 行加测试 |
+| `zypi export <id>` | 决定 6 | 看选项 |
+
+**沙箱顺序（落地设计里最硬的一处）。** 今天 `--continue` 与 `--resume <标题或 id>` 在 `apply_sandbox` 之前，由 `PagerArgs::pin_local_resume_target`（`cli.rs`；调用 `session_title_resolve::presandbox_resume_target`）把目标钉成会话 id，再由 `saved_resume_profile` → `resumed_session_sandbox_profile` 去看该会话**保存的**沙箱 profile，让恢复的会话沿用创建时的沙箱；与 `--sandbox` 冲突时 `resolve_startup_sandbox` 报 `SandboxStartup::Conflict`（`pi-pager-bin/src/main.rs`）。这与 ADR1 正面冲突：沙箱不可逆，必须在 agent 起来之前施加；而按 ADR1 解析目标，要先起 agent。三条路：
+
+1. **去掉「恢复时沿用保存的 profile」**：沙箱只由 `--sandbox` 与配置决定。
+2. 先起一个不带沙箱的「查询用」agent 解析目标，再施加沙箱起真的那个：冷启动翻倍，还有一段没有沙箱的窗口。
+3. 让 Python 把 profile 存进会话，经 `session/list` 的 `_meta` 公布：仍然要先起 agent，同 2。
+
+**提议 1。** Python 会话从来不存 profile，`resumed_session_sandbox_profile` 对它恒返回 `None`（矩阵里 `--continue` 与 `--resume <id>` 两例都没读到过 profile），所以对现有会话**没有行为变化**，只是删掉一条对 Python 永远不生效的分支。可以整块删：`pin_local_resume_target`、`PinnedResumeTarget`、`resume_target_pinned`、`pinned_resume_profile`、`saved_resume_profile`、`SandboxStartup::Conflict`、`TitleResolution::PinnedPreSandbox`；「钉住」要防的竞争（两次标题查找之间被改名）在只查一次时不存在。代价：将来想要「会话记住自己的沙箱」，要另想办法（那也该是 agent 的事，并且要先解决「沙箱先于 agent」的顺序）。
+
+**Python 一侧的两项要求。** ① `session/new` 兑现 `_meta.sessionId`（见上）。② `session/load` 的响应带上会话的 cwd（放在 `_meta` 里）：今天 `load_session` 的响应只有 `configOptions` 与 `pi/*` 模型提示。选择器那一条路径已经把选中行的 `cwd` 传给 `session/load`；CLI 的 `--resume <id>` 今天传 `None`（表 #3），所以从别的目录 `--resume <id>` 时，agent 在会话的目录里干活，TUI 却在启动目录里（影响 `@` 搜索、diff、git 信息——**没有验证**，见下）。按本设计，`resolve_startup` 找到会话时就带着它的 `cwd`，两条路径一致，第 ② 项就只是保险。
+
+**验收。** ① `resume_matrix.py --strict` 13/13 PASS（用例 8 收紧后）。② 门禁：把 `session::persistence`、`session::storage`、`resolve_local_session`、`list_summaries` 加进 `tui_baseline.py gates` 的 deny-list（和 `MvpAgent` 同一类），`pi-pager` 与 `pi-pager-bin` 的非测试代码里零命中。③ `python_agent_e2e.rs` 加用例：对一个有会话的 agent 解析 `--continue`、跨页的 `--resume <标题>`、未知 id 的错误、`_meta.sessionId` 被兑现与重复被拒。
+
+**PR 切分（提议）。** PR 1（Python，不动 TUI）：`_meta.sessionId` 与 `session/load` 带 cwd，加到 `test_acp_stdio_contract.py`。PR 2（Rust，只加不删）：`resolve_startup` 与它的 e2e，接上 `--continue`、`--resume`、`--session-id`；此时旧的读盘路径还在。PR 3（Rust，删）：沙箱顺序那一整块、`find_most_recent_jsonl_session`、#6–#11 的读盘、`list_summaries(None)` 补标题；`export_cmd` 按决定 6；再之后（阶段 B）删 `pi-shell` 的 `session::{persistence, storage}` 实现层。
+
+**覆盖条件：没有触发**（见 (1)），ADR1 的默认值不变。
+
+**模式切换与权限的实测（0.8 的证据、1.P3 的输入）。** `scripts/tui_pty/mode_probe.py`（`679cccb`；`d426253` 又加了 `--permission-mode` 的六个值）用真 zypi 与 `_tool_agent.py`（权限模式 `ask`，脚本化地让模型调一次 `write`，写 `probe.txt`），对每种选模式的办法看：状态栏写什么，问不问，没人回答时文件写了没有，答「允许」后写了没有。它不判对错，只记录。WSL2：
+
+| 选了什么 | 状态栏 | 问了吗 | 没人回答就写了吗 | 答「允许」后写了吗 |
+|---|---|---|---|---|
+| Normal（什么都没选） | （无） | 问 | 否 | 是 |
+| `--always-approve` | `· always-approve` | 不问 | **是** | — |
+| Shift+Tab ×1：Always-Approve | `mock · always-approve` | 不问 | **是** | — |
+| Shift+Tab ×2：回到 Normal | `mock` | 问 | 否 | 是 |
+| Shift+Tab ×3：Plan | `mock · plan` | 问 | 否 | **是** |
+| Shift+Tab ×4：Auto | `mock · auto` | **不问** | **是** | — |
+| `--permission-mode default` | （无） | 问 | 否 | 是 |
+| `--permission-mode acceptEdits` | （无） | 问 | 否 | 是 |
+| `--permission-mode auto` | （无） | 问 | 否 | 是 |
+| `--permission-mode dontAsk` | （无） | 问 | 否 | 是 |
+| `--permission-mode bypassPermissions` | `· always-approve` | 不问 | **是** | — |
+| `--permission-mode plan` | （无） | 问 | 否 | 是 |
+
+四个事实，都是提议的依据：
+
+1. **Plan 不限制任何东西。** 它只是 UI：`Effect::SetSessionMode` 发 `session/set_mode`，失败只记日志（`effects/mod.rs`）；Python 没有 `set_session_mode`，SDK 的路由登记了这个方法但没有处理器，对方得到 `method_not_found`（`acp/router.py` 的 `Route.handle`）。界面照样显示 `plan`，用户以为在只读规划，agent 按 Normal 的规则照写（表第 5 行：问了，答「允许」就写出）。`--permission-mode plan` 连 Plan 都不进（表末行：状态栏什么也没有）。
+2. **Auto 在 Python 里等于 Always-Approve。** `needs_permission` 对 `auto` 与 `always-approve` 都返回「不问」（`permissions.py`）；而 pager 对 Auto 的描述是「LLM classifier」（设置页 `settings/defs.rs`、切换时的提示 `Permission mode: Auto (classifier)`）。分类器随 Rust runtime 一起没了，界面却还在承诺它。Always-Approve 则另有一层：pager 在 yolo 模式下自己代答 agent 的权限请求（`acp_handler/permissions.rs`：选 `AllowOnce` 选项立即答复），所以屏幕上不出现问题；Auto 没有这一层，Auto 的静默完全靠 Python 收到了模式变更。
+3. **设置里的「Default」被 Python 丢掉。** `pi/yolo_mode_changed` 的 `permission_mode` 是 `default` 时，Python 只认 `ask` / `auto` / `always-approve`（`_permission_mode_from_notification` 对其他值返回 `None`），agent 的模式不变：在 Always-Approve 之后选 Default，界面说 Default，agent 仍不问（这一条是读代码加 Python 一侧的断言，没有用 PTY 走设置菜单）。Shift+Tab 回到 Normal 发的是 `ask`，没有这个问题（表第 4 行）。
+4. **启动时选的模式，agent 并不知道。** pager 在 `session/new` / `session/load` 的 `_meta` 里放 `yoloMode`、`autoMode`（连同 `agentProfile`、`askUserQuestion`，以及设了才有的 `modelId`、`sessionId`；`SessionFlags::to_meta`），Python 一个都不读（SDK 把 `_meta` 摊平成关键字参数交给 `new_session(**kwargs)`，没有人取用）。所以 `--always-approve` 与 `--permission-mode bypassPermissions` 能生效，靠的是上面说的 pager 代答，不是 agent 被告知了；而 `--permission-mode` 的其余五个值（`default`、`acceptEdits`、`auto`、`dontAsk`、`plan`）与不带旗标一模一样：不显示，照样问——`acceptEdits` 并没有自动接受编辑，`dontAsk` 并没有不问。`--help` 把六个值都列为可选。
+
+另外，权限模式有两个所有者：pager 的 `config.toml`（`[ui].permission_mode`，每次切换都写盘）与 Python 的 `agent.toml`（`permission`），运行中靠 `pi/yolo_mode_changed` 单向同步，启动时没有同步（见事实 4）。
+
+**旗标（1.P6 的输入，读代码加上面的 PTY）。** 交互模式下，`--system-prompt-override` 与 `--rules` 经 `initialize._meta`（`systemPromptOverride`、`rules`，连同 `clientType`、`clientVersion`）发出，Python 一个都不读（`pi_agent_cli` 里搜不到这四个键）；`--allow` / `--deny` 进了 `AgentConfig.cli_agent_overrides.permission_rules`（`acp/mod.rs`），而 `spawn.rs` 起子进程时只带命令行参数与 `PI_HOME`，所以到不了 Python。`-m` / `--model` 的 `modelId` 同样放在 `session/new` 的 `_meta` 里，Python 不读；是否另有路径让它生效（例如会话建好之后的 `session/set_config_option`）没有查。已经看到有效的只有 `--always-approve`、`--permission-mode bypassPermissions`，以及 `--continue` / `--resume` / `--session-id` 的一部分（矩阵）。**其余旗标没有逐个实测。**契约要用户定（决定 8）。
+
+**1.P1 / 1.P4 / 1.P7（阶段 1 里不需要拍板的部分，都已提交）。**
+
+- **1.P1 的余项。** pager 的选择器跟着 `nextCursor` 翻页（`9f7bc35`，`fetch_session_list`，6 个单测）；Python 的 `session/list` 分页（`c1f02c8`）：每页 50，游标是不透明、无状态的（里面是下一页接着往下的文件名，agent 不记任何状态，重启后游标照样有效），不是自己发的游标得 `invalid_params`，响应里没有 `nextCursor` 就是到头——与 ACP 对 `session/list` 的要求一致（游标不透明、客户端不解析、缺省 `nextCursor` 表示结束、agent 自己限页大小、非法游标应报错；经 Context7 核对 ACP 文档）。harness 一侧：`JsonlSessionRepo.list_page` / `find`（`1b9fb47`），读文件头不读全文（`54a38fe`）。数字见 (1)。ACP 文档对 `session/list` 的排序只说「默认排序」；Python 按文件名（创建时间）倒序，`updated_at` 是文件修改时间。
+- **1.P4。** pager 不再往 `session/new` / `session/load` 里放 `mcp_servers`（`7becb49`，单测 `session_new_and_load_send_no_mcp_servers`）；Python 忽略 `mcp_servers`，并在会话开始时说一次哪些被忽略了（`mcp_notice.py`，`935e4b8`）。这是一处**有文档的偏离**：ACP v1 要求 agent 支持 stdio 传输的 MCP，而本项目不接 MCP（Phase 4 非目标）。`docs/TUI-AND-CODE-AGENT.md`（`9798e1d`）与 `packages/pi-agent-cli/AGENTS.md`（`935e4b8`、`c1f02c8`）已写明。`load_mcp_servers` 与 `mcp.rs` 现在没有调用者，是清理候选（决定 10）。
+- **1.P7。** 权限往返与 `session/cancel` 的线上用例（`28fed94`，`test_acp_stdio_tools.py`；`_tool_agent.py` 可由 `PI_TEST_TOOL_CALL`、`PI_TEST_PERMISSION`、`PI_TEST_TOOL_PIDFILE`、`PI_TEST_STUCK_THREAD` 配置）。
+
+**仓库里的改动。** 15 个代码与脚本提交（31 个文件，+3,701 / −88），叠在 `d84d98a` 之上；第 16 个提交是本节与附录的文档。
+
+| 提交 | 内容 |
+|---|---|
+| `28fed94` | 1.P7：权限往返与取消的线上用例，`_tool_agent.py` 可配置 |
+| `54a38fe`、`1b9fb47` | harness：读文件头不读全文；`list_page` / `find` |
+| `e944ed5` | `scripts/session_list_bench.py` |
+| `9f7bc35`、`c1f02c8` | 1.P1：pager 跟 `nextCursor`；Python 分页 |
+| `935e4b8`、`7becb49`、`9798e1d` | 1.P4：Python 说明被忽略的 MCP；pager 不发 `mcp_servers`；文档 |
+| `affda9e` | agent 自己退出时的提示、启动失败的原因（e2e 发现的两个 bug） |
+| `3fc182b` | 0.3：`python_agent_e2e.rs`，`tui-ci.yml`，清单 |
+| `babd75f` | 0.7：`resume_matrix.py` |
+| `bee3a36` | 清单里 `pi-pager` 的 `reference_passed` 按一次真实运行改成 5,602 |
+| `679cccb`、`d426253` | 1.P3 的输入：`mode_probe.py`（Shift+Tab 的循环与 `--always-approve`；再加 `--permission-mode` 的六个值） |
+
+**验证。**
+
+| 检查 | 结果 |
+|---|---|
+| 10 个 suite 整套（基线执行器，清环境，`PI_E2E_PYTHON` 与 `PI_E2E_REQUIRED=1`，WSL2，增量编译，退出码 0，整条命令约 26 分钟） | ✓ **合计 8,659 通过 / 0 失败 / 22 忽略**（= CI 的 8,634 + 25）。`pi-pager` 5,602（13 忽略），比 `d84d98a` 的 5,577 多 25 个：10 个 e2e、8 个 `agent_exit_tests`、6 个 `fetch_session_list_*`、1 个 `session_new_and_load_send_no_mcp_servers`；10 个 e2e 用例真的对着 Python agent 跑了（`PI_E2E_REQUIRED=1`，该目标用时 27.9 s）。其余 9 个 suite 都等于各自的 `reference_passed`（`pi-shell` 1,056、`pi-pager-render` 1,092、`pi-pager-minimal` 79、`pi-pager-bin` 21、`pi-acp-lib` 21、`pi-http` 13、`pi-telemetry` 239、`pi-file-utils` 216、`pi-sampling-types` 320）；`pi-pager-render` 的 `known_failures`（tmux 探测）这一轮没有失败。更早只跑 `pi-pager` 的那次：5,602 / 0 / 13，223 s |
+| Python 全量 pytest（`real_llm` 除外） | ✓ Linux（WSL2 的 ext4 克隆，Python 3.12.3）：**2,352 通过 / 0 失败 / 35 跳过 / 31 取消选择**，105 s；Windows（Python 3.12.7）：**2,351 通过 / 0 失败 / 36 跳过 / 31 取消选择**，296 s。比 r8 多 192 / 195 个，都是本分支新增的用例。Linux 的 35 个跳过里有 5 个是这个 venv 没装 `pyte`，带上 `pyte` 单独跑 `scripts/tests/test_tui_pty.py`：19 通过；其余是 `langchain_deepseek` 缺失与 Windows 专属。Windows 的跳过多数是 POSIX 专属 |
+| `resume_matrix.py`（WSL2） | 9 PASS / 4 GAP / 0 FAIL |
+| `mode_probe.py`（WSL2） | 12 个场景，见「模式切换与权限的实测」的表 |
+| `ruff check .`、`ruff format --check .` | ✓ 项目 venv 的 Ruff 0.16.10 与 CI 钉的 0.16.0（`uvx --from ruff==0.16.0`）：`ruff check .` 全过，`ruff format --check .` 226 个文件已格式化 |
+
+**没有验证的。**
+
+- 新的 CI 步骤（装 Python agent、`PI_E2E_*`）与新增的路径过滤，在 GitHub 上没跑过；清单里 `pi-pager` 的 5,602 与整套的 8,659 是 WSL2 上本地运行的数，**要等第一次 CI 运行证实**。
+- Rust 的 e2e 与 PTY 脚本只在 Linux（WSL2）上跑过；macOS 与 Windows 没有。Windows 的延迟数只量了 Python 一侧，TUI 没有参与。
+- 延迟：冷磁盘、网络文件系统、超过 1,000 个会话、真实形状的会话（量的是合成的 12 / 120 / 2,000 条消息）。
+- **跨目录的 `--resume <id>`**：TUI 的当前目录与 agent 绑定的会话目录可能不同，`@` 搜索、diff、git 信息用哪个目录没有验证；选择器那条路径传了 `cwd`，CLI 那条传 `None`。
+- 设置菜单里选 Default 的那条路径只有代码与 Python 一侧的断言，没有 PTY 走过；旗标除了 `--always-approve`、`--permission-mode`（`mode_probe.py`）与 `--continue` / `--resume` / `--session-id`（矩阵），没有逐个验证交互模式下是否生效，`-m` / `--model` 尤其没有查。
+- 落地设计（`resolve_startup`、沙箱顺序、两项 Python 要求）是纸面设计，没有写一行代码。
+- 全部用 mock，没有真实 LLM。
+
+**留给用户决定的。** 十二项，每项给出我的倾向；没有一项已经动手。
+
+1. **ADR1 的落地要不要开工，按上面的 PR 切分。** 覆盖条件没有触发。倾向：开工，先做 PR 1（Python 两项，不动 TUI，风险最小）。
+2. **沙箱顺序。** 倾向：去掉「恢复时沿用保存的沙箱 profile」（对 Python 会话没有行为变化）。备选是先起查询用的 agent（冷启动翻倍、有无沙箱的窗口）。
+3. **`--session-id` 的契约。** ACP v1 的 `session/new` 没有 session id 参数，`_meta.sessionId` 是 pager 与 agent 之间的约定。倾向：Python 兑现它，重复由 agent 以 `invalid_params` 拒绝。也可以直接删掉这个旗标。
+4. **`--continue` 的「最近」。** Python 的列表按创建时间倒序（ACP 对排序只说「默认排序」）。选项：最近创建（取第一页第一条，最快）；最近活动（`updatedAt` 最大，要翻完所有页，1,000 个会话在 Windows 上约 0.8 s）。倾向：最近活动——用户续的通常是上次用过的，不是上次建的。
+5. **未知 id 的报错时机。** `--resume <未知 id>` 现在进了 TUI 才报，状态栏的模型名还是 `unknown`。倾向：进 TUI 之前报错退出 1（`resume_matrix.py` 的用例 8 随之收紧）。
+6. **`zypi export`。** (a) 经 ACP 回放导出：起 agent、`session/load`、收 `session/update` 回放，复用现成的 `render_blocks_to_markdown`，约 100 行，多 1–2 s 的 agent 启动；(b) 删掉这个子命令；(c) 维持现状——对 Python 会话恒报 not found，一个静默坏掉的命令。r8 时用户选了不动。倾向：(a) 或 (b)，不要 (c)。
+7. **模式映射（1.P3）。** 依据是上面的四个事实。(a) 立刻隐藏 Plan、Auto、Default（Shift+Tab 只剩 Normal ↔ Always-Approve），并让 `--permission-mode` 只接受有效果的值（`bypassPermissions`；`default` 等于不带旗标），其余值报错说明，不动 agent；(b) 做 `session/set_mode`：Python 实现 `set_session_mode` 并公布 `modes`，Plan = 把工具集裁到只读；(c) 其他。Python 的 `auto` 也要定义：今天等于 always-approve，设置页却说是分类器——改名、删除，或真做分类器。倾向：(a) 先行，因为 Plan 现在给用户的是虚假的安全感；(b) 另议。
+8. **旗标契约（1.P6）。** `--system-prompt-override`、`--rules` 在交互模式下无效；`--allow` / `--deny` 没有传给 agent；`--permission-mode` 的六个值里只有 `bypassPermissions` 有效；`-m` 的路径没有查清。选项：Python 读 `initialize._meta`（前两项各几行）；或 pager 在对着 Python agent 时拒绝这些旗标并说明；`-p` 另行定义。要用户定哪些旗标属于产品契约。
+9. **选择器的 30 天截止。** 倾向：去掉（agent 已分页，不怕多）；或者改成可配置。
+10. **清理。** `load_mcp_servers` / `mcp.rs`（1.P4 之后没有调用者）、`recent_dirs.rs`（只剩一行文档注释）；ADR1 落地后的 `pi-shell` 的 `session::{persistence, storage}` 实现层（阶段 B）。
+11. **选择器边翻边显示。** 现在等所有页回来再画（1,000 个会话约 0.8 s，Windows）。倾向：不做，除非有人遇到。
+12. **推送与 PR。** 分支 `codex/phase1-contract-docs`（16 个提交，叠在 PR #9 上）要不要推、怎么切。倾向：两个 PR——代码（1.P1 / 1.P4 / 1.P7、e2e、退出提示）与脚本加文档，或者一个。推之前按仓库规则先跑 Ruff 与两个平台的 pytest（见「验证」）。注意 `tui-ci.yml` 现在改 `pi_agent_cli/**` 也会跑；新的 e2e 步骤与 5,602 要等第一次 CI 运行证实。PR #9 若先被 squash 合并，用 `git rebase --onto origin/main <PR #9 的旧头> codex/phase1-contract-docs` 摘下来。
+
+## 附录 A：能力矩阵与 ACP 版本配对（阶段 0.8，r9 定稿）
+
+「状态」一列：**已定**＝按 r2 的默认决策做完，或有实测支撑；**提议**＝会改变行为，写在 §10.11 末尾「留给用户决定的」里，等用户确认；**未定**＝阶段 1 的待办，r9 没有动。r5 对初稿的执行结果留作 A.4。测试名与脚本名都在仓库里能搜到。
+
+### A.1 能力矩阵
+
+| 能力 | pager 侧 | Python 现状（r9 实测） | 决定 | 状态 | 证据 |
+|---|---|---|---|---|---|
+| session new / load / resume / close | 标准 ACP；pager 只调用 new / load，没有 resume / close 的调用点 | 已覆盖：`new_session`、`load_session`、`resume_session`、`close_session`；`initialize` 公布 `load_session` 与 `session_capabilities.{list, resume, close}`；`run_agent(use_unstable_protocol=True)` 让 unstable 的 `close` / `resume` 在线上可用 | 保留 | 已定（r5） | `test_acp_stdio_contract.py`；`connect_runs_the_handshake_and_stop_leaves_nothing_behind` |
+| session list | `ListSessionsRequest{cwd, cursor}`；选择器跟 `nextCursor`，最多 100 页 | 已覆盖：每页 50，不透明无状态游标，非法游标 `invalid_params`；`title` = 第一条 user message，`updated_at` = 文件 mtime；顺序是创建时间倒序 | 保留；「最近」的语义见决定 4，30 天截止见决定 9 | 已定（1.P1，r9） | `test_session_list_paging.py`；`session_list_pages_are_followed_by_cursor`；`session_list_bench.py` |
+| session delete | `pi/session/delete`（扩展请求） | 已覆盖（`ext_method`）；SDK 0.12.1 没有标准的 `session/delete` 路由 | 保留并登记（ADR4）；SDK 补路由后迁到标准方法 | 已定 | `test_session_lifecycle.py` |
+| session rename | 入口与整条链路已删 | 无 | 删 | 已定（r5） | A.4 |
+| 恢复的入口：`--continue`、`--resume <id｜标题>` | 现在读盘解析（13 处读盘调用，§10.11） | `session/list` 加 `session/load` 够用；延迟实测没有触发 ADR1 的覆盖条件 | 改为经 ACP 解析（ADR1） | 已定（ADR1）；落地设计与细节待确认（决定 1–5） | `resume_matrix.py`（9 PASS / 4 GAP）；`session_list_bench.py` |
+| `zypi export` | 读旧布局的会话文件 | 无 | 决定 6：经 ACP 回放，或删子命令 | **提议** | `resume_matrix.py` 用例 12、13 |
+| prompt / cancel | 标准 ACP | 已覆盖；取消后正在跑的 `bash` 进程被回收（Linux 的用例） | 保留 | 已定 | `a_prompt_streams_the_reply_and_ends_the_turn`；`cancel_ends_a_running_tool_as_cancelled_and_reaps_it` |
+| 权限请求 | 应答 `session/request_permission`；yolo 模式下 pager 自己代答（选 `AllowOnce`，`acp_handler/permissions.rs`） | 已覆盖：`ask` 模式下问 `bash` / `edit` / `write` / `workflow`（没声明无害的工具，AGENTS.md 不变量 8）；工具调用的选项只有 allow-once / reject-once（`permissions.py`）；项目信任的问题另带 `allow_always`（`trust_prompt.py`） | 保留；工具调用不做 allow-always 与规则 | 已定：pager 不依赖 allow-always（PTY 里两个选项的问题框能画、能答）；提议：不做 | `a_permission_question_reaches_the_client_and_its_answer_decides`；`mode_probe.py` |
+| 模型选择 | 读 `configOptions`（`category: "model"`），`session/set_config_option`；没有该配置项时退回 `session/set_model` | `configOptions`（`model`）与 `set_config_option`（只认 `model`，其他 `invalid_params`）；`[[models]]` 提供候选；`session/set_model` 没有路由，但 Python 总是公布 `model` 配置项，退回路径用不到 | 恢复（ADR3） | 已定（r3） | §10.2、§10.3；`test_acp_agent.py` |
+| 模式切换 | Shift+Tab 循环（Normal → Always-Approve → Normal → Plan → Auto）、`--always-approve`、`--permission-mode`（六个值）；`pi/yolo_mode_changed` 通知；Plan 另发 `session/set_mode`；`session/new` 的 `_meta.yoloMode` / `autoMode` | 只认 `pi/yolo_mode_changed` 里的 `ask` / `auto` / `always-approve`；`session/set_mode` → `method_not_found`；`_meta` 不读；`auto` 等于 `always-approve`；`default` 被丢弃 | 隐藏 Plan / Auto / Default；`--permission-mode` 只收有效的值；做不做真的 Plan 另议（决定 7） | **提议** | `mode_probe.py`（§10.11 的 12 行表） |
+| MCP | UI 已删（r5）；不再发 `mcp_servers`（`7becb49`） | 忽略 `mcp_servers`，会话开始时说一次哪些被忽略（`mcp_notice.py`） | 降级为显式忽略；ACP v1 要求 agent 支持 stdio MCP，这是有文档的偏离 | 已定（默认决策，r9 实现） | `test_mcp_notice.py`；`session_new_and_load_send_no_mcp_servers` |
+| queue / interjection | 已删（r5，含 steer、send-now） | 无 | 删 | 已定（r5） | A.4 |
+| compaction | 触发与展示 | 部分：`auto_compact` 由 `max_turns >= 30` 推导 | 降级 | 未定（r9 没有重新核对） | — |
+| subagents / 后台任务 | 已删（r5） | 无 | 删（Phase 4 非目标） | 已定（r5） | A.4 |
+| skills | slash 命令与 `available_commands_update` | 已覆盖；`available_commands_update` 在响应之后发（Zed 要收到响应才登记会话，`new_session` 里有注释） | 保留 | 已定 | `test_acp_agent.py` |
+| hooks / plugins / marketplace | 已删（r5） | 无 | 删（Phase 4 非目标） | 已定（r5） | A.4 |
+| image | 图片附件 | 代码有（`prompt_capabilities.image`、`_prompt_to_text_images`），**`packages/pi-agent-cli/tests` 里没有走这条路径的用例** | 保留 | 已定；缺测试 | — |
+| status line | pager 本地功能（用户脚本画状态栏，`pi-status-line`）；`ConnectFlags.status_line` 已不再公布给 agent（`client_capabilities_meta` 返回空） | 与 agent 无关 | 保留功能；那个没人读的字段是清理候选；payload 里的字段在 Python 会话下是否为空没有查 | 提议（清理）；其余未定，不挡阶段 1 | — |
+| 历史回放 | `session/load` | 已覆盖（`isReplay` 的 `session/update`）；`session/resume` 不回放 | 保留 | 已定 | `a_session_is_listed_with_a_title_and_replayed_by_a_later_agent` |
+| 登录 | `auth_methods` 为空时不要求登录 | `auth_methods=[]`；`authenticate` 没有处理器 | 保留 | 已定 | `connect_runs_the_handshake_and_stop_leaves_nothing_behind` |
+| `initialize._meta`：响应里的键 | 解 `modelState`、`grokShell`、`availableCommands`、`cancelRewind`、`sessionRecap`、`feedbackTraceOffer` | Python 的响应没有 `_meta`，都落到缺省 | 逐键删解码（1.R5） | 未定（阶段 1 待办） | — |
+| `initialize._meta`：请求里的键 | 发 `clientType`、`clientVersion`；带 `--system-prompt-override` / `--rules` 时再发 `systemPromptOverride`、`rules` | 一个都不读 | 要么 Python 读，要么 pager 拒绝这两个旗标（决定 8） | **提议** | §10.11「旗标」 |
+| `--session-id` | `session/new` 的 `_meta.sessionId`；占用检查读旧布局 | 忽略 `_meta.sessionId`，自己挑 id | Python 兑现，重复由 agent 拒绝（决定 3） | **提议** | `resume_matrix.py` 用例 10、11 |
+
+### A.2 ACP 版本配对与升级策略
+
+| | Rust（pager） | Python（agent） |
+|---|---|---|
+| 包 | `agent-client-protocol` 0.10.4（`tui/Cargo.toml`，feature `unstable`；`Cargo.lock` 固定）；`agent-client-protocol-schema` 0.11.4（`Cargo.lock`） | `agent-client-protocol` `>=0.12.0`（`packages/pi-agent-cli/pyproject.toml`；开发环境装的是 0.12.1）；SDK 里的 schema 记为 `schema-v1.19.0`（`acp/meta.py` 头部的 `Schema ref`） |
+| 线上版本 | `initialize` 发 `ProtocolVersion::V1`（`acp/mod.rs`） | `acp.PROTOCOL_VERSION` = 1；`initialize` 回 `min(请求的版本, 1)`（`agent.py`） |
+| unstable | feature `unstable` 开着 | `run_agent(use_unstable_protocol=True)`；SDK 里 `session/close`、`session/resume`、`session/fork` 的路由标着 `unstable=True` |
+
+规则（ACP 文档，经 Context7 核对；本仓库没有为 v2 写过任何东西）：
+
+1. **线上兼容只看 `initialize` 协商出的整数 `protocolVersion`，与 crate、schema、SDK 的发行版本号无关**；同一个 `protocolVersion` 之内，用交换的 capabilities 判断可选的消息与特性。上表里 Rust 的 0.10.4 / 0.11.4 与 Python 的 0.12.1 / `schema-v1.19.0` 是不同的编号，不能互相比大小。
+2. 协商：client 发它支持的最高版本；agent 支持就确认，不支持就回它自己支持的最高版本；client 不能接受就应当断开。
+3. ACP 文档里已经有 **v2**，是破坏性升级：`initialize` 的 `clientCapabilities` / `clientInfo` 变成 `capabilities` / `info`；agent 的能力标记（`loadSession`、`list`、`resume`、`close`）去掉，prompt 与 MCP 的能力挪到 `session` 下；`session/request_permission` 多了必填的 `title`。**只支持 v1 的 agent 收到 v2 的 `initialize` 会回 `protocolVersion: 1`**，由 client 决定继续还是断开。本仓库里已有的痕迹：`agent.py` 的 `_run_prompt` 记着 v2 草案里的 `state_update` 两边都解析不了，所以 agent 从不声称自己是协议 2。
+4. 现在两侧都是 v1，配对成立；`connect_runs_the_handshake_and_stop_leaves_nothing_behind` 每次 CI 都在验证这一点。
+5. **升级策略（提议）**：Rust 一侧由 `Cargo.lock` 固定，不会自己动；Python 一侧只有下限 `>=0.12.0`，SDK 还是 0.x，次版本号的升级可以带破坏性改动。提议给 SDK 依赖加上限（`<0.13`），升级成为一次有意的改动：在同一个分支里升，跑 `test_acp_stdio_*` 与 `python_agent_e2e.rs`，再合。两边都有 v2 之后，Rust crate 与 Python SDK 一起升，并且 pager 与 agent 各自保留对 v1 的回退，直到旧版本不再需要。
+6. 到 v2 时，「忽略 `mcp_servers`」是否仍算偏离，取决于 v2 是否还要求 agent 支持 stdio MCP——文档里 MCP 的能力已经是 agent 公布的项，**没有查证**要求有没有变。
+
+### A.3 逐方法：pager 发什么，Python 怎么答
+
+| 方法 | pager 发送 | Python 的回答 | 备注 / 证据 |
+|---|---|---|---|
+| `initialize` | `protocolVersion: 1`；`_meta`：`clientType`、`clientVersion`，可选 `systemPromptOverride`、`rules`；client 能力里 `fs`、`terminal` 由隐藏旗标 `--fs-read`、`--fs-write`、`--terminal` 决定（默认关），能力的 `_meta` 为空 | 公布 `load_session`、`prompt_capabilities.image`、`session_capabilities.{list, resume, close}`；`auth_methods=[]`；`agent_info`；响应没有 `_meta`；请求的 `client_capabilities`、`client_info`、`_meta` 存下或丢掉，不读 | 握手的 e2e |
+| `authenticate` | 不发（没有 auth 方法） | 路由有，agent 没有处理器：`method_not_found` | — |
+| `session/new` | `cwd`，空的 `mcp_servers`；`_meta`：`yoloMode`、`autoMode` 总有，`agentProfile`、`askUserQuestion: false`、`modelId`、`sessionId` 视情形（`SessionFlags::to_meta`） | 建会话；响应带 `configOptions`（`model`）与 `_meta`（`pi/currentModelId`、`pi/currentModelDisplayName`、`pi/provider`）；`mcp_servers` 非空时通知一次；**请求的 `_meta` 一个都不读**（SDK 把它摊平成关键字参数，没有人取用） | `resume_matrix.py` |
+| `session/load` | `session_id`、`cwd`、空的 `mcp_servers`、同样的 `_meta` | 先回放历史（`isReplay` 的 `session/update`）再回应；工作目录用会话保存的 `cwd`（没有才用请求的）；未知 id → `resource_not_found`；响应不带 cwd | `a_session_is_listed_with_a_title_and_replayed_by_a_later_agent` |
+| `session/list` | 当前目录的 `cwd`、`cursor`（跟 `nextCursor`，最多 100 页） | 每页 50，不透明游标；非法游标 `invalid_params`；`title`、`updated_at`、`cwd` | 与 ACP 文档对分页的要求一致；`session_list_pages_are_followed_by_cursor` |
+| `session/resume`、`session/close` | 不发 | 已实现（`resume` 不回放） | `test_acp_stdio_contract.py` |
+| `session/fork` | 不发 | 路由有（unstable），agent 没有处理器：`method_not_found` | — |
+| `session/prompt` | 文本与图片块；`_meta.screenMode`（遥测） | 流式 `session/update`，回合结束给 `stopReason`；`_meta` 不读 | `a_prompt_streams_the_reply_and_ends_the_turn` |
+| `session/cancel`（通知） | 取消当前回合 | 取消回合；正在跑的 `bash` 进程被回收 | `cancel_ends_a_running_tool_as_cancelled_and_reaps_it`（仅 Linux） |
+| `session/request_permission`（agent → client） | 应答；yolo 模式下 pager 自己选 `AllowOnce` | 工具调用的选项 allow-once / reject-once；被拒时工具调用返回 `User denied permission` | `a_permission_question_reaches_the_client_and_its_answer_decides` |
+| `session/set_config_option` | `model`（`/model`） | 只认 `model`，其他 `invalid_params` | r3 的 PTY |
+| `session/set_model` | 仅当 agent 没公布 `model` 配置项时（兼容路径） | **SDK 没有这个路由**；Python 总是公布 `model`，用不到 | `acp/agent/router.py` |
+| `session/set_mode` | Plan（Shift+Tab 第三档）；失败只记日志 | 路由有，agent 没有处理器：`method_not_found` | `mode_probe.py` |
+| `pi/yolo_mode_changed`（通知） | 每次切换发，带 `yolo_mode`、`auto_mode`、`permission_mode`（要有会话才发） | `ext_notification`：只认 `ask` / `auto` / `always-approve`，其他值忽略 | `mode_probe.py` |
+| `pi/session/delete`（扩展请求） | 删除会话 | 已实现；幂等（会话不存在也返回成功） | `test_session_lifecycle.py` |
+| `fs/*`、`terminal/*`（agent → client） | 旗标开了才公布 | Python 一个都不调用（工具在本地执行）；`terminal_output` 只出现在 tool-call 更新的 `_meta` 里 | `events.py` |
+
+### A.4 r5 执行结果（对照 r5 时初稿里的「默认决策」；r9 的更新见 A.1）
 
 - **已按默认执行**：MCP——UI 已删（模态、init seed、elicitation 卡片、Claude 导入；`pi/mcp/*` 只剩 `pi-mcp` 自己的测试里出现）；queue / interjection——已删（含 steer、send-now）；subagents / 后台任务——已删（tasks 窗格、定时任务、workflows、goals）；hooks / plugins / marketplace——已删（含 `pi-plugin-marketplace` 与 `pi-hooks-plugins-types` 两个 crate）；session rename——入口与整条链路已删。
 - **仍是阶段 1 的待办，r5 没动**：session list 的 Python 补齐（1.P1）；模式切换的映射（1.P3）；compaction 的降级展示；权限 allow-always；status line；`initialize._meta` 的解码精简（1.R5：`acp/mod.rs` 仍在解 `grokShell`、`modelState`、`cancelRewind`、`availableCommands`，其中 `cancelRewind` 对应的功能已删）。
 - **新增的删除（表里没有）**：dashboard、recap / feedback / consent / coding-data-sharing、rewind / fork / jump / 外部会话、changelog、`--chat` 世界、`local-workspace`。它们都是入口审计里「Python 不路由、pager 也无法触发」的类别。
+- **r9 的更新（0.8 定稿）**：1.P1（pager 跟 `nextCursor`，Python 分页）与 1.P4（pager 不再发 `mcp_servers`，Python 说明被忽略的）已做，1.P7 的余项补上了，见 §10.11。上面「仍是阶段 1 的待办」里剩下的：模式切换的映射（1.P3）、权限 allow-always、status line，r9 做了实测或核对并写成提议，没有改代码（A.1 的状态列）；`initialize._meta` 的解码精简（1.R5）与 compaction 的降级展示没动。`--session-id`、`--system-prompt-override` / `--rules`、`zypi export` 是 r9 新发现的待决项（A.1 里标「提议」的行）。
 
 ## 附录 B：复现方法
 
@@ -944,6 +1186,34 @@ rg -n 'user-guide|docs/user' . --glob '*.py'                               # 无
 
 LoC 用 `python3` 递归统计 `*.rs` 行数（沙箱内 `xargs wc -l` 可能失败）；测试数以 `#[test]` / `#[tokio::test]` / `#[rstest]` 计数，`#[ignore` 另计，均为近似值。
 
+**B.4 r9 的复现**（Linux 或 WSL2；克隆放在 ext4 上，先 `cd tui && cargo build -p pi-pager-bin`，PTY 脚本的前提见 `scripts/tui_pty/README.md`）
+
+```bash
+# 0.7 的读盘调用点（§10.11 的表）。期望 12 个文件：表里的 8 个，加上不读会话文件的 4 个——
+# session_notification.rs 与 views/session_title.rs（只用清洗标题的纯函数）、test_util.rs 与
+# disk_usage_cmd/tests.rs（测试代码）；pi-pager-bin 没有命中。
+# 模式里用 . 代替引号：Windows PowerShell 5.1 会吃掉传给 rg 的内层引号。
+rg -c 'persistence::|session::storage|resolve_local_session|list_summaries|local_summaries_for_cwd_sync|extract_first_user_prompt|join\(.sessions.\)' \
+  tui/crates/codegen/pi-pager/src tui/crates/codegen/pi-pager-bin/src
+
+# 0.7 的延迟（§10.11 (1) 的表是 --entries 120；每个会话约 1 MB 的那组用 --entries 2000 --sessions 100）。
+# 「改前」的数：让 pi_agent_cli 解析到 d84d98a 的检出，其余相同。在会话所在的文件系统上跑
+python scripts/session_list_bench.py --sessions 100 1000 --entries 120 --runs 3
+
+# 13 例恢复矩阵（今天 9 PASS / 4 GAP；落地 ADR1 之后 --strict 要全绿）
+python scripts/tui_pty/resume_matrix.py --zypi tui/target/debug/zypi --python .venv/bin/python [--strict]
+
+# 权限模式的 12 个场景（只记录，不判对错）
+python scripts/tui_pty/mode_probe.py --zypi tui/target/debug/zypi --python .venv/bin/python
+
+# 0.3 的 e2e：先装 agent（与 tui-ci.yml 同一组包），再走基线执行器
+pip install -e ".[dev]" -e ./packages/pi-agent-harness -e ./packages/pi-agent-cli \
+  -e ./packages/pi-web-access -e ./packages/pi-goal-x -e ./packages/pi-dynamic-workflows
+PI_E2E_PYTHON="$(command -v python)" PI_E2E_REQUIRED=1 python scripts/tui_baseline.py test --suite pi-pager
+```
+
+附录 A.2 里的版本号：Rust 一侧看 `tui/Cargo.toml` 与 `tui/Cargo.lock`（`agent-client-protocol`、`agent-client-protocol-schema`），Python 一侧看 `python -c "import acp, importlib.metadata as m; print(m.version('agent-client-protocol'), acp.PROTOCOL_VERSION)"` 与 `acp/meta.py` 头部的 `Schema ref`；SDK 的路由面（哪些方法有路由、哪些是 `unstable`）在 `acp/agent/router.py`。ACP 的版本协商与 v2 的变化来自 ACP 文档（经 Context7 查）。
+
 ## 修订记录
 
 - r1：初稿（仅建分支并新增计划文档，未改 runtime 实现）。
@@ -954,3 +1224,4 @@ LoC 用 `python3` 递归统计 `*.rs` 行数（沙箱内 `xargs wc -l` 可能失
 - r6：清理品牌残留（用户选了「清理 Grok 品牌残留」，没给新名字，沿用 zypi），分支 `codex/branding-cleanup`，叠在 PR #7 之上；PR #7 同时转为 ready for review。改动：主题改名为 `zypi Night` / `zypi Day`（落盘 id `zypinight` / `zypiday`，旧 id 与别名仍可解析）、桌面通知标题、`zypi doctor` 的标题与全部提示、启动 / SSH 提示、设置页描述、复制提示、`--minimal` 欢迎页与信任提示、`zypi wrap` 报错前缀。顺带修了三处「提示指向不存在的东西」：`zypi doctor fix ssh-wrap` 写进 shell rc 的是 `alias ssh='grok wrap ssh'`（`grok` 不存在）；配置目录在消息里叫 `~/.grok` / `$GROK_HOME`（实际是 `~/.pi-python` / `$PI_HOME`）；`/doctor`、`/minimal`、`/copy`、`grok worktree gc|rm|db rebuild` 都不存在。有意没动的见 §10.8。验证见 §10.8。
 - r7：合并 `main` 上另一台机器推的 7 个提交（Phase 6 / 7 审计的实现，没有一个文件在 `tui/` 下）。6 个文件、17 处冲突，都在 `packages/pi-agent-cli` 与 `pyproject.toml`；接缝处的三个决定：`api_key_getter(env_name, provider)`（key 只给自己的 provider，`/model` 里的每个模型都适用）、`model_for_choice(choice, reasoning=…)`（切换模型不丢 `Model.reasoning`）、`_bind_session` 先决定信任再恢复模型选择。纯 `origin/main` 上就失败的 6 个 macOS 专属测试里，一个是真 bug（macOS 上项目的 `AGENTS.md` 会被读两遍），已按文件身份去重修掉；其余 5 个没有动。见 §10.9。
 - r8：在 WSL2（Ubuntu 24.04，内核 5.10，没有 Landlock）上补 Linux 一侧的实测，拆成 8 个提交（分支 `codex/linux-wsl-r8`，走 PR 合入）。做了：退出矩阵（会话首进程 / shell 作业 × 双击 Ctrl+Q、`kill -9`、SIGTERM、SIGHUP、关终端、Ctrl-C，含沙箱下；空闲、CPU 占满、cargo 构建三种负载；1.R3 ③ 的 Linux 部分）、0.9 的六项、PTY 烟测 18/18、`doctor_cmd::` 去掉 `skip`（12 个通过；8 个 suite 7,456 通过，等于 CI 的 7,444 加这 12 个）、Python 全量 pytest（第一轮 Linux 2,135 通过；六件事做完之后 Linux 2,160、Windows 2,156）、74 个未选入 suite 的 crate 的分诊。修了三处：沙箱的 bwrap re-exec 缺 `--die-with-parent`（只杀 bwrap 会把 zypi、agent 与工具整棵树留下）；`media` 用例对 10 ms 时钟刻度的时间假设（`CONFIG_HZ=100` 上 30 次失败 26 次）；`pi-pager-minimal` 的一个用例缺 `test_lock()`（默认线程数下 30 次失败 25 次）。更正了 1.R3 ① 的前提：agent 的 `stderr` 在 TUI 里是 `/dev/null`，不是继承终端。第一轮留下了几处（`-p` 孤儿、沙箱静默降级、`stderr` 去向、`zypi export`），用户随后选了前三处，加上 CI 清单、PTY 脚本入库、清理 WSL，都做了：`-p` 只杀 zypi 时 agent 与工具不再残留（`PI_AGENT_PARENT_PID` + Python 一侧监视父进程，`-p` 也处理 SIGTERM / SIGHUP；`print_exit.py` 4/4）；Landlock 缺失时沙箱不再静默降级（启动时 `stderr` 一行警告，欢迎页与状态栏标 `sandbox:<profile> (not enforced)`）；agent 的 `stderr` 落到 `<home>/logs/agent.stderr.log`（0600、追加、超过 1 MiB 轮转）；CI 清单去掉 `doctor_cmd::` 的 `skip` 并加 `pi-pager-render`、`pi-pager-minimal`（10 个 suite，8,633 通过 / 1 个已知失败）；PTY 驱动脚本入库为 `scripts/tui_pty/`（`smoke.py` 23/23，沙箱下 26/26，退出矩阵 12/12 与 14/14）；WSL 里的克隆、构建产物与日志清掉了。没做：`zypi export` 读不到 Python 会话（用户选了不动）；Landlock 层、Windows 与 MCP 子进程未验证；清单的新内容要等第一次 CI 运行证实；PR #9 的第一次运行已证实：8,633 通过，两个新 suite 的数与 WSL2 一致，只有 `doctor_cmd::` 的一个用例在没有录音程序的 runner 上失败（已修，r8 写的「`doctor_cmd::` 不需要音频设备」不对）。见 §10.10 的「CI 结果」。
+- r9：在 PR #9 之上补阶段 0 的收尾与阶段 1 里不需要拍板的部分，分支 `codex/phase1-contract-docs`（16 个提交，叠在 PR #9 的 `d84d98a` 之上，**没有推送**）。用户在「接下来处理什么」之后选了四件：`e2e`、`p0_gate`、`free_p1`、`ci_pr`；没有选 `decide`，所以每一项会改变行为的决定都只写成提议（§10.11 末尾「留给用户决定的」十二项），一项也没有动手。做了：① PR #9 的第二次 CI 运行（`d84d98a`）全绿，10 个 suite 合计 8,634 通过 / 0 失败 / 22 忽略，每个都等于清单里的 `reference_passed`；② 0.3 的 Rust 一侧——`python_agent_e2e.rs`（10 个用例，pager 的 ACP client 对着真的 Python agent），接进 `tui-ci.yml`；它第一次跑就抓出两个产品 bug（agent 起不来时的原因被吞成 `channel closed`；agent 一启动就退出时 `connect()` 挂住），修在 `affda9e`；③ 0.7——会话列表与 `session/load` 的延迟实测并修掉读盘的慢点（1,000 个会话、Windows：首页 2.0 s → 0.11 s，`session/load` 2.0 s → 0.12 s），pager 一侧 13 处读盘调用、8 个文件的清单，13 例 PTY 验收矩阵（9 PASS / 4 GAP），ADR1 的落地设计（流程、逐旗标、沙箱顺序、PR 切分、验收），覆盖条件没有触发；④ 0.8——附录 A 定稿（A.1 能力矩阵逐行标「已定」「提议」「未定」，A.2 ACP 版本配对与升级策略，A.3 逐方法的两端支持情况，A.4 是 r5 的执行结果），其间实测了权限模式（12 个场景）：Plan 不限制任何东西，Auto 在 Python 里等于 Always-Approve，设置里的 Default 被 Python 丢掉，`--permission-mode` 的六个值里只有 `bypassPermissions` 有效，`--system-prompt-override` / `--rules` / `--allow` / `--deny` 到不了 Python；⑤ 阶段 1 的免决策项——1.P1（pager 跟 `nextCursor`、Python 分页）、1.P4（pager 不再发 `mcp_servers`，Python 说明被忽略的）、1.P7 的余项（权限往返与 cancel 的线上用例）。验证：Python 全量 pytest（Linux 2,352 通过、Windows 2,351 通过）、10 个 suite 整套 8,659 通过 / 0 失败 / 22 忽略（WSL2，其中 `pi-pager` 5,602）、Ruff。没做：所有改变行为的决定；本分支的 CI 运行（清单里 `pi-pager` 的 5,602 与新的 e2e 安装步骤要等第一次运行证实）；Windows 与 macOS 上的 e2e 与 PTY 脚本。见 §10.11。
