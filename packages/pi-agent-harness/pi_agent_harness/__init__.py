@@ -10,6 +10,7 @@ from pi_agent_harness.prompt_templates import (
 )
 from pi_agent_harness.session import (
     JsonlRepoFs,
+    JsonlSessionPage,
     JsonlSessionRepo,
     JsonlSessionStorage,
     JsonlStorageFs,
@@ -90,6 +91,7 @@ __all__ = [
     "FileSystem",
     "JsonlRepoFs",
     "JsonlSessionMetadata",
+    "JsonlSessionPage",
     "JsonlSessionRepo",
     "JsonlSessionStorage",
     "JsonlStorageFs",

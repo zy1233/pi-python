@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -44,6 +45,19 @@ def _safe_filename_timestamp(timestamp: str) -> str:
         .replace("+", "")
         .replace("Z", "Z")
     )
+
+
+@dataclass(frozen=True)
+class JsonlSessionPage:
+    """A page of ``JsonlSessionRepo.list_page``.
+
+    ``next_after`` goes into the next call's ``after``. It is set only when there is at least
+    one more session, so a page that carries it is never followed by an empty one; ``None``
+    means this was the last page.
+    """
+
+    sessions: list[JsonlSessionMetadata]
+    next_after: str | None = None
 
 
 class JsonlSessionRepo:
@@ -111,6 +125,87 @@ class JsonlSessionRepo:
         # pi sorts newest-first by header createdAt.
         result.sort(key=lambda metadata: _created_at_ms(metadata.createdAt), reverse=True)
         return result
+
+    async def _session_names(self) -> list[str]:
+        """File names of the directory's session files, newest first; none if it is missing."""
+        try:
+            entries = await self._fs.list_dir(str(self._directory))
+        except FileError as exc:
+            if exc.code == "not_found":
+                return []
+            raise
+        return sorted(
+            (e.name for e in entries if e.kind != "directory" and e.name.endswith(".jsonl")),
+            reverse=True,
+        )
+
+    async def _read_metadata(self, name: str) -> JsonlSessionMetadata | None:
+        """The session in file ``name``; ``None`` for a file that is not one (or just vanished)."""
+        try:
+            return await load_jsonl_session_metadata(self._fs, str(self._directory / name))
+        except SessionError as exc:
+            if exc.code == "invalid_session":  # as in ``list``: a stray file is not an error
+                return None
+            raise
+        except FileNotFoundError:
+            return None
+        except FileError as exc:
+            if exc.code == "not_found":
+                return None
+            raise
+
+    async def list_page(self, options: dict[str, Any] | None = None) -> JsonlSessionPage:
+        """``list`` one page at a time, reading a file's header only once the page reaches it.
+
+        Options: ``limit`` (page size, required), ``after`` (a file name: carry on below it, the
+        ``next_after`` of the page before) and ``cwd``. A file this repo names starts with its
+        creation time, so newest first is the file names in reverse; the walk stops as soon as
+        the page is full and the next session is in sight, so a page costs the files it looks
+        at, not the whole directory. For such files the order is ``list``'s (newest header
+        ``createdAt`` first); a file named by someone else sorts by its name.
+        """
+        options = options or {}
+        limit = options.get("limit")
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+            raise ValueError("limit must be a positive integer")
+        after = options.get("after")
+        names = await self._session_names()
+        if after is not None:
+            names = [name for name in names if name < after]
+        page: list[JsonlSessionMetadata] = []
+        for index, name in enumerate(names):
+            metadata = await self._read_metadata(name)
+            if metadata is None:
+                continue
+            if options.get("cwd") is not None and metadata.cwd != options["cwd"]:
+                continue
+            if len(page) == limit:
+                # The page is full and this session would be the next one: say so, and have the
+                # next page start here (below the file before it, which is all the cursor needs).
+                return JsonlSessionPage(page, names[index - 1])
+            page.append(metadata)
+        return JsonlSessionPage(page, None)
+
+    async def find(self, session_id: str) -> JsonlSessionMetadata | None:
+        """The session whose header has ``id == session_id``, without reading every header.
+
+        A file this repo names ends in ``-<id>.jsonl``, so the names pick the candidates and
+        only those are read. Only when none of them is the session does the search fall back to
+        every file (a file named by someone else), as ``list`` would.
+        """
+        suffix = f"-{session_id}.jsonl"
+        names = await self._session_names()
+        for name in names:
+            if name.endswith(suffix):
+                metadata = await self._read_metadata(name)
+                if metadata is not None and metadata.id == session_id:
+                    return metadata
+        for name in names:
+            if not name.endswith(suffix):
+                metadata = await self._read_metadata(name)
+                if metadata is not None and metadata.id == session_id:
+                    return metadata
+        return None
 
     async def delete(self, metadata: JsonlSessionMetadata) -> None:
         # pi deletes with `force: true`: deleting a missing session is a no-op.
