@@ -1,0 +1,12 @@
+---
+description: 新建 git 分支时不要用 codex/ 前缀
+alwaysApply: true
+---
+
+# 分支命名
+
+新建分支时，**不要**用 `codex/` 前缀。
+
+- 用说明用途的前缀，再加一个短主题：`docs/`、`feat/`、`fix/`、`test/`、`ci/`、`chore/`、`refactor/`。例如：`docs/archive-plan-execution-log`。前缀与提交信息的类型一致（`feat(tui): …`、`docs: …`）。
+- 只管新建的分支。已有的 `codex/*` 分支不用改名。
+- 文档里引用的旧分支名（如计划文档的执行记录里的 `codex/phase1-mode-a`）是历史，不用改。
