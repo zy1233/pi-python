@@ -1,7 +1,8 @@
-# Rust TUI (grok-shell) config for ~/.pi-python/config.toml
+# Rust TUI config for ~/.pi-python/config.toml
 #
-# Leave this file empty or use grok-compatible keys only.
+# Leave this file empty, or write only keys that the TUI knows.
 # Python agent settings belong in agent.toml — NOT here.
 #
-# Top-level ``permission = "ask"`` will break TUI startup (grok expects a
-# ``[permission]`` table, not a string).
+# Top-level ``permission = "ask"`` will break TUI startup (the TUI expects a
+# ``[permission]`` table, not a string). A ``[[models]]`` array and invalid TOML
+# stop it too. Keys that the TUI does not know are ignored.

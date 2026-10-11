@@ -1,6 +1,7 @@
 # Copy to ~/.pi-python/agent.toml (or set PI_HOME).
 # Python ACP agent settings ONLY — do not duplicate these keys in config.toml
-# (the Rust TUI parses config.toml as grok-shell config).
+# (the Rust TUI reads config.toml with its own typed schema: a key it knows, such as a top-level
+# `permission = "ask"`, stops it at start).
 # LLM keys are read from environment variables — never put secrets in this file.
 
 permission = "ask" # ask | auto | always-approve

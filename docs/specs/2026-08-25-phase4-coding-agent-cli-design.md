@@ -30,6 +30,7 @@
 
 1. **Fork TUI，不 embed。** grok TUI 是 Rust/ratatui ACP 客户端，与 `xai-grok-shell` 链在同一 composition root；官方无「指向第三方 agent」开关。
 2. **整树迁入 `tui/`，不抽纯 pager crate。** pager 依赖 shell/tools/agent/workspace/acp-lib 等；根 `Cargo.toml` 约 80 个 member。
+   - **修订（Rust runtime 剥离计划 r11，阶段 C 收口）**：这条的原因只有一部分还成立。当时 pager 与 shell 的 agent 运行时链在一起，拆不开；现在运行时（模型采样、agent loop、工具执行、MCP 客户端、子代理）已从 `pi-shell` 删除，`tui/crates` 的 `.rs` 行数由 1,620,612 降到约 1,019,000（数字见 [`docs/baselines/tui.md`](../baselines/tui.md)），TUI 进程里没有发起 LLM 请求的代码，进程级审计（`scripts/tui_pty/net_audit.py`）也没有看到 `zypi` 连到机器之外的任何地址。仍然成立的是 `pi-tools`（工具展示类型，14 个 crate 依赖它）与 `pi-workspace`（发现、目录信任）这两处依赖：pager 离不开它们，所以仍不抽纯 pager crate；怎么拆这两处是计划的阶段 D.1。另一处变化：`tui/` 现在是硬分叉（`tui/NOTICE`），不再合并上游，所以「整树迁入便于跟上游」也不再是理由。见 [`PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`](../PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md)。
 3. **先仓外 clone，再进 monorepo。** Spike 通过后再复制工作区。
 4. **双许可证分区。** 根与 Python 包 MIT；`tui/` Apache-2.0（保留 LICENSE + NOTICE）。
 
@@ -104,6 +105,8 @@ pi-python/
 5. 开发：Python 用 `.venv`；TUI 用 `cd tui && cargo run -p pi-pager-bin`（产物二进制名 `pi`）。CI 可另加 cargo check job。
 
 第一轮允许 pager **继续链接** `xai-grok-shell`（编译期），但运行时不走它的 loop。变瘦（减 member）不是迁入前提。
+
+> **修订（r11）**：该 crate 现名 `pi-shell`，loop 与采样已删除，变瘦已做了大半，见 §1.3 #2 的修订。
 
 ---
 

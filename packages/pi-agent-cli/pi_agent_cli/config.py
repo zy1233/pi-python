@@ -1,7 +1,7 @@
 """`~/.pi-python/agent.toml` (Python ACP agent). Override with PI_HOME.
 
-Do not put Python agent settings in ``config.toml`` — the Rust TUI parses that
-file as grok-shell config and will fail on keys like ``permission = \"ask\"``.
+Do not put Python agent settings in ``config.toml`` — the Rust TUI reads that
+file with its own typed schema and stops on keys like ``permission = \"ask\"``.
 """
 
 from __future__ import annotations

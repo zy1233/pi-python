@@ -16,7 +16,9 @@ Home: `~/.pi-python/` (override with `PI_HOME`). One resolver, `pi_agent_core.ho
 | File | Owner | Scope |
 |------|-------|-------|
 | `agent.toml` | Python agent | model, permission, skills, prompt overrides |
-| `config.toml` | Rust TUI only | grok-shell settings; Python-only keys break TUI parsing |
+| `config.toml` | Rust TUI only | TUI settings (`[ui]`, theme, sandbox); a key the TUI knows, written with another type, stops it |
+
+Keep the two files apart. The TUI is strict about the keys it knows and tolerant of the keys it does not know (measured with `zypi`; execution log section 10.10, item 3). A `config.toml` that is missing, has an unknown table or key, or has a Python `[model]` table starts normally. These stop `zypi` with exit code 1: a top-level `permission = "ask"` (the TUI expects a table there), a `[[models]]` array, and invalid TOML. A wrong type for `[agent].command` is ignored without a message. The agent reads `agent.toml`; only when that file does not exist does it fall back to `config.toml` (`load_config`, kept for old setups). The TUI reads `[agent].command` from `agent.toml` and, if that file does not set it, from `config.toml` (`acp/spawn.rs`); it reads no other agent key.
 
 `local.env` in home loads `KEY=VALUE` pairs into env without overwriting (secrets stay out of TOML). See `agent.example.toml` for all keys.
 
@@ -51,7 +53,7 @@ A prompt that arrives while a turn the client did not start (a `workflow` result
 The Rust TUI (`zypi`) spawns the Python agent via (priority order):
 
 1. `PI_AGENT_COMMAND` env var
-2. `[agent].command` in `agent.toml`
+2. `[agent].command` in `agent.toml`, then in `config.toml`
 3. `PI_PYTHON` env var (appends `-m pi_agent_cli`)
 
 **The agent's stderr.** The TUI owns the screen, and its own fd 2 is `/dev/null` (`pi_tty_utils::redirect_native_stderr`), so the agent's stderr goes to `<home>/logs/agent.stderr.log` instead (`acp/spawn.rs`, `agent_stderr`): appended across runs, one `--- agent started <time> (zypi pid N) ---` line per spawn, mode 0600 on Unix (a traceback can quote prompts, paths and keys), and a log longer than 1 MiB is moved to `agent.stderr.log.1` at the next spawn. A log that cannot be opened is skipped, not fatal. This is where a Python traceback or a warning from the agent ends up; the agent should still write diagnostics to stderr, not stdout (stdout is the ACP channel). `-p` runs are not redirected: there the agent's stderr is the user's terminal.
