@@ -140,6 +140,46 @@ def test_scan_words_matches_whole_words_and_skips_target_dirs(tmp_path):
     assert tb.scan_words(tmp_path, []) == []
 
 
+def test_count_residue_ignores_case_and_wants_no_letter_or_digit_before_the_phrase(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "target").mkdir()
+    (tmp_path / "src" / "a.rs").write_text(
+        "// x.ai/session is a vendor method\n"  # counts for x.ai
+        'let url = "https://api.x.ai/v1";\n'  # counts for x.ai (a dot before is fine)
+        'const M: &str = "_x.ai/notify";\n'  # counts for x.ai (an underscore before is fine)
+        "// the domain max.ai is not ours\n"  # no match: a letter right before
+        "// a2x.ai neither\n"  # no match: a digit and a letter before
+        "Leader mode, LEADER, leader\n"  # one line, counts once for leader
+        "let is_leader_mode = false;\n"  # counts for leader
+        "// misleader\n"  # no match: a letter right before
+        "Run `grok agent stdio` and GROK AGENT\n"  # one line, counts once for grok agent
+        "grok  agent\n",  # no match: two spaces
+        encoding="utf-8",
+    )
+    (tmp_path / "src" / "b.md").write_text("leader\n", encoding="utf-8")
+    (tmp_path / "src" / "c.bin").write_text("leader x.ai", encoding="utf-8")  # not a text suffix
+    (tmp_path / "target" / "d.rs").write_text("leader x.ai", encoding="utf-8")  # skipped dir
+    counts = tb.count_residue(tmp_path, ["x.ai", "leader", "grok agent", "mvp"])
+    assert counts == {"x.ai": 3, "leader": 3, "grok agent": 1, "mvp": 0}
+    assert tb.count_residue(tmp_path, []) == {}
+
+
+def test_manifest_residue_ceilings_are_whole_numbers():
+    residue = _manifest()["gates"]["residue"]
+    assert residue["grok agent"] == 0, "this one reached zero; it must stay there"
+    for phrase, ceiling in residue.items():
+        assert isinstance(ceiling, int) and not isinstance(ceiling, bool), phrase
+        assert ceiling >= 0, phrase
+
+
+def test_the_residue_ceilings_hold_in_this_tree():
+    """The same ratchet as `tui_baseline.py gates`, so the Python CI job also sees a regression."""
+    residue = _manifest()["gates"]["residue"]
+    counts = tb.count_residue(REPO_ROOT / "tui" / "crates", list(residue))
+    over = {p: (counts[p], limit) for p, limit in residue.items() if counts[p] > limit}
+    assert not over, f"lines now vs ceiling in scripts/tui_baseline.toml: {over}"
+
+
 # ---- suite evaluation -------------------------------------------------------------------------
 
 
@@ -258,6 +298,7 @@ def _sample_report(detail: str = "a | b") -> dict:
         "checks": [{"name": "x", "status": "fail", "detail": detail}],
         "warnings": {"total": 3, "by_lint": {"dead_code": 3}, "by_crate": {}},
         "graph": {"x86_64-unknown-linux-gnu": 995},
+        "residue": {"leader": 7, "x.ai": 0},
         "tracked": {"pi-tools": ["pi-agent"], "gone": None},
         "enforced": False,
         "suites": [
@@ -280,6 +321,7 @@ def test_render_markdown_smoke():
     assert "a \\| b" in markdown
     assert "report only" in markdown
     assert "(not in graph)" in markdown
+    assert "Leftover words under `tui/crates` (lines): `leader` 7, `x.ai` 0" in markdown
 
 
 def test_publish_survives_a_legacy_default_encoding(tmp_path):

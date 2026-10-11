@@ -256,9 +256,10 @@ pub fn process_client_identifier() -> String {
 /// metric label.
 pub const CLIENT_MODE_HEADER: &str = "x-grok-client-mode";
 
-/// One-way latch: set to `"headless"` at startup by the non-TUI entry points
-/// (`run_single_turn` for `grok -p`, `run_headless_inner` for
-/// `grok agent [headless]`), `"interactive"` otherwise.
+/// One-way latch: an entry point that runs a single prompt sets it to `"headless"` at
+/// startup, and the mode is `"interactive"` otherwise. The entry points that did so
+/// (`run_single_turn`, `run_headless_inner`) went with the Rust agent runtime, so nothing
+/// sets it now and the mode is always `"interactive"`.
 static CLIENT_MODE: OnceLock<&'static str> = OnceLock::new();
 
 /// Mark this process as headless (single-prompt). No-op if already set.

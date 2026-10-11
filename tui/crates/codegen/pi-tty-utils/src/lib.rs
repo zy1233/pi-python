@@ -467,8 +467,8 @@ pub fn kill_on_parent_death_std(cmd: &mut std::process::Command) {
 /// process that spawned it dies. No-op elsewhere.
 ///
 /// This is the child-side variant of [`kill_on_parent_death_std`] for protocol
-/// servers whose parents are not spawned from this workspace (IDE clients,
-/// the agent SDKs, `grok-desktop` all spawn `grok agent … stdio`): the
+/// servers whose parents are not spawned from this workspace (IDE clients and
+/// agent SDKs that start an ACP server over stdio): the
 /// child arms the binding itself at startup instead of relying on every
 /// external spawner to.
 ///

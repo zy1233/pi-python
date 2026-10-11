@@ -28,7 +28,7 @@ import sys
 import threading
 import time
 import tomllib
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -176,12 +176,13 @@ def collect_errors(lines: Iterable[str]) -> list[str]:
     return errors
 
 
-def scan_words(root: Path, words: Sequence[str]) -> list[str]:
-    """`path:line: text` for every whole-word occurrence of any word under `root`."""
-    if not words:
-        return []
-    pattern = re.compile(r"\b(?:" + "|".join(re.escape(w) for w in words) + r")\b")
-    hits: list[str] = []
+def iter_text_lines(root: Path, prefilter: re.Pattern[str]) -> Iterator[tuple[Path, int, str]]:
+    """`(path, line number, line)` for every line of the text files under `root` that match.
+
+    A file is split into lines only when `prefilter` matches somewhere in it. That keeps the walk
+    fast: most files hold none of the words, and a regex over a whole file is cheaper than one
+    regex per line. The caller still has to test each line.
+    """
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
         for name in filenames:
@@ -192,10 +193,44 @@ def scan_words(root: Path, words: Sequence[str]) -> list[str]:
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
+            if not prefilter.search(text):
+                continue
             for number, line in enumerate(text.splitlines(), 1):
-                if pattern.search(line):
-                    hits.append(f"{path}:{number}: {line.strip()[:120]}")
-    return hits
+                yield path, number, line
+
+
+def scan_words(root: Path, words: Sequence[str]) -> list[str]:
+    """`path:line: text` for every whole-word occurrence of any word under `root`."""
+    if not words:
+        return []
+    pattern = re.compile(r"\b(?:" + "|".join(re.escape(w) for w in words) + r")\b")
+    return [
+        f"{path}:{number}: {line.strip()[:120]}"
+        for path, number, line in iter_text_lines(root, pattern)
+        if pattern.search(line)
+    ]
+
+
+def count_residue(root: Path, phrases: Sequence[str]) -> dict[str, int]:
+    """How many lines under `root` hold each phrase.
+
+    The match ignores case. It needs no letter or digit right before the phrase, so `x.ai` does
+    not match inside `max.ai`, and it does match in `_x.ai/session` and `api.x.ai`. A line counts
+    once for a phrase, however often the phrase is in it.
+    """
+    patterns = {
+        phrase: re.compile(r"(?<![A-Za-z0-9])" + re.escape(phrase), re.IGNORECASE)
+        for phrase in phrases
+    }
+    counts = dict.fromkeys(phrases, 0)
+    if not patterns:
+        return counts
+    any_phrase = re.compile("|".join(p.pattern for p in patterns.values()), re.IGNORECASE)
+    for _path, _number, line in iter_text_lines(root, any_phrase):
+        for phrase, pattern in patterns.items():
+            if pattern.search(line):
+                counts[phrase] += 1
+    return counts
 
 
 def evaluate_suite(
@@ -372,7 +407,7 @@ def tool_versions(cwd: Path) -> dict[str, str]:
 def run_gates(manifest: dict[str, Any], tui_dir: Path) -> tuple[list[Check], dict[str, Any]]:
     """Static gates. Returns the checks and extra data (graph sizes, tracked-crate dependents)."""
     checks: list[Check] = []
-    extra: dict[str, Any] = {"graph": {}, "tracked": {}}
+    extra: dict[str, Any] = {"graph": {}, "tracked": {}, "residue": {}}
     package = manifest["graph"]["package"]
     gates = manifest["gates"]
 
@@ -411,6 +446,27 @@ def run_gates(manifest: dict[str, Any], tui_dir: Path) -> tuple[list[Check], dic
             "no occurrences under tui/crates" if not hits else "; ".join(hits[:5]),
         )
     )
+
+    residue = gates.get("residue", {})
+    if residue:
+        counts = count_residue(tui_dir / "crates", list(residue))
+        extra["residue"] = counts
+        over = [
+            f"{p}: {counts[p]} lines > ceiling {limit}"
+            for p, limit in residue.items()
+            if counts[p] > limit
+        ]
+        slack = [p for p, limit in residue.items() if counts[p] < limit]
+        shown = ", ".join(f"{p} {counts[p]}/{limit}" for p, limit in residue.items())
+        if slack:
+            shown += f" (lower the ceiling of {', '.join(slack)})"
+        checks.append(
+            Check(
+                f"residue ceilings ({', '.join(residue)})",
+                "fail" if over else "pass",
+                "; ".join(over) if over else shown,
+            )
+        )
 
     for triple, ceiling in manifest["graph"].get("max_nodes", {}).items():
         proc = cargo(
@@ -636,6 +692,9 @@ def render_markdown(command: str, report: dict[str, Any]) -> str:
     if report.get("graph"):
         sizes = ", ".join(f"{t}: {n}" for t, n in report["graph"].items())
         lines += [f"Dependency graph (unique packages): {sizes}", ""]
+    if report.get("residue"):
+        words = ", ".join(f"`{p}` {n}" for p, n in report["residue"].items())
+        lines += [f"Leftover words under `tui/crates` (lines): {words}", ""]
     if report.get("tracked"):
         lines += ["| Tracked crate | Direct dependents in `pi-pager-bin` |", "|---|---|"]
         for crate, dependents in report["tracked"].items():

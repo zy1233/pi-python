@@ -28,6 +28,17 @@ tracked_crates = [
     "pi-mcp",
 ]
 
+# Plan phase C asked for zero hits of `grok agent`, `leader`, `x.ai` and `MvpAgent`. `MvpAgent` is
+# a deny word above, and `grok agent` is at zero. The other two still occur, on purpose or in code
+# that phase D removes (docs/baselines/tui.md section 4 says what is left and why). Each phrase has
+# a ceiling: lines under tui/crates that hold it, ignoring case, with no letter or digit right before
+# it (`x.ai` does not match in `max.ai`). A ceiling only goes down; lower it in the commit that
+# removes lines.
+[gates.residue]
+"grok agent" = 0
+"leader" = 245
+"x.ai" = 304
+
 [graph]
 package = "pi-pager-bin"
 
