@@ -17,6 +17,11 @@
 | `scripts/tui_baseline.toml` | 清单：工具链、deny-list、依赖图上限、测试 suite、release 参照值。改数字只动这里 |
 | `scripts/tui_baseline.py` | 执行器：`gates` / `check` / `test` / `release`，输出 `tui-baseline/<命令>.{md,json}`，在 CI 里同时写入 job summary |
 | `scripts/tests/test_tui_baseline.py` | 执行器的单测（解析、棘轮判定、清单与 workspace / 工作流的一致性），随 `pytest` 跑 |
+| `scripts/tui_callgraph.py` | 模块级调用图（0.5，r11）：`crates`（crate 的依赖闭包）、`units`（一个或几个 crate 里，哪些模块还有活代码在引用）、`keep`（support crate 的保留清单，写成 [`tui-support.md`](tui-support.md)）。只读源码文本，不编译；方法与局限在脚本的 docstring 里 |
+| `scripts/tests/test_tui_callgraph.py` | 它的单测（35 个；对脚本做 9 处改动，每一处都让测试失败） |
+| [`docs/baselines/tui-support.md`](tui-support.md) | `tui_callgraph.py keep` 的输出，**生成的，不手改**；取代原来「举例」式的保留清单 |
+| `scripts/tui_notices.py` | `tui/THIRD-PARTY-NOTICES` 与 `Cargo.lock` 对账（C.3，r11）：`check` 不一致就退出 1，`update --write` 来改；新条目标 `needs review`，要人读过 |
+| `scripts/tests/test_tui_notices.py` | 它的单测（62 个） |
 | `.github/workflows/tui-ci.yml` | 三个 job：`check`、`test`、`release-baseline`（仅 `workflow_dispatch` 且勾选 `release_baseline`） |
 
 本机复现（需要 `protoc`；macOS 已验证，Linux 由 CI 验证，Windows 没跑过——脚本只用显式 UTF-8 读写，并用 `PYTHONUTF8=0 LC_ALL=C` 模拟过 Windows 的默认编码）：
@@ -37,6 +42,7 @@ python scripts/tui_baseline.py release           # release-dist 构建 + 体积 
 | 工具链钉 | 清单 `channel` = `tui/rust-toolchain.toml` | 是 |
 | deny crate | `pi-sampler` 不在 `tui/Cargo.lock`，`cargo tree -p pi-pager-bin -i pi-sampler` 报 `did not match any packages` | 是 |
 | deny word | `MvpAgent`、`acp_session_impl`、`SamplerActor` 在 `tui/crates` 下整词零命中 | 是 |
+| 残留词上限 | `tui/crates` 下含 `grok agent`、`leader`、`x.ai` 的行数（忽略大小写，词前不紧跟字母或数字）各不超过清单 `[gates.residue]` 的上限：0 / 245 / 304，见 §4。`pytest` 里也跑一遍（`test_the_residue_ceilings_hold_in_this_tree`） | 是 |
 | 依赖图上限 | `cargo tree -p pi-pager-bin --target x86_64-unknown-linux-gnu` 的唯一包数 ≤ 980（Linux 实测 980） | 是 |
 | 消费者构建 | `cargo check --locked -p pi-pager-bin -p pi-pager-minimal -p pi-update` | 是 |
 | 全工作区类型检查 | `cargo check --workspace --tests --keep-going`（排除 `pi-fast-worktree`，其 lib 测试在 HEAD 上就编译不过） | 是，`enforce_workspace_tests = true` |
@@ -111,6 +117,24 @@ macOS 环境：Apple Silicon，Homebrew `cargo` / `rustc` 1.96.1（**不是**钉
 
 硬性禁止：`pi-sampler`（crate、`Cargo.lock`、依赖图）；词级禁止：`MvpAgent`、`acp_session_impl`、`SamplerActor`。
 
+### 残留词（计划阶段 C 的退出条件）
+
+计划 C 的退出条件原文是「`grok agent`、`leader`、`x.ai`、`MvpAgent` 在文档与代码中的 grep 结果为 0（历史文档除外）」。r11 的结果：
+
+- `MvpAgent`：0，它本来就是 deny word（§2）。
+- `grok agent`：**0**（`docs/PLAN` 之外的所有文件）。13 处过时的指针都改了：`pi-shell/README.md` 原来是上游 Grok CLI 的用户手册（1,968 行，含会装上官方 CLI 的安装脚本），换成一页说明这个 crate 现在是什么；`pi-test-support` 与 `pi-agent`、`pi-http`、`pi-tty-utils` 的文档注释不再提这条命令。
+- `leader`（245 行）与 `x.ai`（304 行）**清不到零**：阶段 D 之前，这些行还在活着的代码里。原文的「0」改成棘轮：`[gates.residue]` 给每个词一个上限，只降不升（§1 的执行器检查它，`pytest` 也检查）。下表说这些行是什么、去哪里。
+
+| 词 | 行数 | 是什么 | 去向 |
+|---|---|---|---|
+| `leader` | 236 | 已删除的 leader 进程这个概念的名字与注释：遥测的 `LeaderMode`、`leader_converge`（36 行）；自动更新的「leader 重启」「leader 每小时检查」（25）；`pi-workspace` 的 `leader_reaped`（26）；`pi-mcp` 的「旧 leader」（19）；`pi-pager` 里的注释（42）等 | 阶段 D：遥测与更新的清理，D.4 |
+| `leader` | 9 | POSIX 的 session leader / 进程组 leader（`pi-shell-terminal`、`pi-mermaid`、`pi-workspace-daemon` 等） | 留下：这是正确的用词 |
+| `x.ai` | 170 | xAI 的服务地址与网页：`api.x.ai/v1`、`auth.x.ai`、`docs.x.ai`、语音的 `wss://api.x.ai/v1/stt`、`x.ai/cli/install.sh` 等，在认证、语音、远程、更新与 `pi-tools` 的代码和测试里 | 阶段 D.3（auth 层）、D.1（`pi-tools`），更新与语音随各自的清理 |
+| `x.ai` | 118 | 旧 Rust agent 的扩展方法名（`x.ai/mcp/…`、`x.ai/fs/…`、`x.ai/tool…`、`x.ai/search/fuzzy/…`），出现在注释、文档与测试里；pager 不再发它们 | 随所在代码一起删（D.4） |
+| `x.ai` | 16 | 过滤本身：入口处丢弃 `x.ai/` 与 `_x.ai/` 开头的扩展通知（`acp/vendor.rs`、`channel.rs` 与它们的测试）；其余是对 `x.ai` 域名的判断和测试夹具 | 过滤留下，它是「不实现 `x.ai/*`」的执行点；其余随 D.3 |
+
+分类用的是同一条匹配规则（先判地址与网页，再判方法名，剩下的算其他）；`leader` 的 9 行是行里同时有 `session leader`、`process group leader` 或 `setsid` 的。行数是 r11 的末态；行数降了，就同时降清单里的上限。
+
 下列 crate **允许存在**，但必须有理由与缩减方案；`check` 会把它们在 `pi-pager-bin` 依赖图里的直接依赖者列进报告，便于看出是否有新的依赖方悄悄加入。
 
 | crate | 直接依赖者（r5 实测，Linux CI `ac1d3ff`；与 `0e71894` 相比只有 `pi-agent` 一行变了） | 现状理由 | 缩减方案 |
@@ -129,7 +153,7 @@ r5 做完了这六步（工具链、依赖图、测试分诊、开关、release 
 
 ## 6. 尚未覆盖
 
-0.5（模块级调用图工具化）、0.9（实测结案）不在本页范围；0.3 的 Rust 一侧（`python_agent_e2e.rs`）r9 起在清单里（§3.2），0.7（磁盘读取点清单）与 0.8（能力矩阵、ACP 版本配对表）r9 做了，见计划 §10.11 与附录 A；见计划 §7 阶段 0（0.6 入口审计在 r5 按附录 A 的默认做完，结果见计划 §10.7；0.9 的 Linux 一侧 r8 做了，结果见计划 §10.10）。「启动耗时」目前只有 `--version` 延迟，不含「到欢迎页」的时间；PTY 载体有了（§3.3），但还没有加计时。
+0.9（实测结案）不在本页范围（0.5 在 r11 做了，见 §1）；0.3 的 Rust 一侧（`python_agent_e2e.rs`）r9 起在清单里（§3.2），0.7（磁盘读取点清单）与 0.8（能力矩阵、ACP 版本配对表）r9 做了，见计划 §10.11 与附录 A；见计划 §7 阶段 0（0.6 入口审计在 r5 按附录 A 的默认做完，结果见计划 §10.7；0.9 的 Linux 一侧 r8 做了，结果见计划 §10.10）。「启动耗时」目前只有 `--version` 延迟，不含「到欢迎页」的时间；PTY 载体有了（§3.3），但还没有加计时。
 
 <!-- 链接定义 -->
 [hist]: archive/tui-history.md
