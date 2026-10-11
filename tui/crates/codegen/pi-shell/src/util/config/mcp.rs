@@ -236,7 +236,7 @@ fn deserialize_mcp_server_config(
 }
 
 /// Turn a failed `[mcp_servers.<name>]` entry into an actionable problem. The
-/// transport-less case is steered to `disabled_mcp_servers`, Grok's real
+/// transport-less case is steered to `disabled_mcp_servers`, the real
 /// disable mechanism.
 fn diagnose_invalid_entry(name: &str, value: &TomlValue, error: &str) -> McpServerConfigProblem {
     let has_command = value.get("command").is_some();
@@ -245,14 +245,10 @@ fn diagnose_invalid_entry(name: &str, value: &TomlValue, error: &str) -> McpServ
         format!(
             "`mcp_servers.{name}` has no transport. To run it, set `command = \"...\"` or \
              `url = \"...\"`. To turn it off, add \"{name}\" to `disabled_mcp_servers` instead of \
-             leaving an entry with no transport. \
-             See ~/.grok/docs/user-guide/07-mcp-servers.md"
+             leaving an entry with no transport."
         )
     } else {
-        format!(
-            "`mcp_servers.{name}` has an invalid transport: {error}. \
-             See ~/.grok/docs/user-guide/07-mcp-servers.md"
-        )
+        format!("`mcp_servers.{name}` has an invalid transport: {error}.")
     };
     McpServerConfigProblem {
         server: name.to_string(),
@@ -291,7 +287,7 @@ pub(crate) fn parse_mcp_servers_with_problems(root: &TomlValue) -> ParsedMcpServ
                         severity: McpServerProblemSeverity::Warning,
                         message: format!(
                             "`mcp_servers.{name}` has an unrecognized field `{field}`; it is \
-                             ignored. See ~/.grok/docs/user-guide/07-mcp-servers.md"
+                             ignored."
                         ),
                     });
                 }
@@ -305,7 +301,7 @@ pub(crate) fn parse_mcp_servers_with_problems(root: &TomlValue) -> ParsedMcpServ
                         message: format!(
                             "`mcp_servers.{name}` is enabled but its `{field}` is blank. \
                              Set a value, or add \"{name}\" to `disabled_mcp_servers` to turn it \
-                             off. See ~/.grok/docs/user-guide/07-mcp-servers.md"
+                             off."
                         ),
                     });
                     continue;

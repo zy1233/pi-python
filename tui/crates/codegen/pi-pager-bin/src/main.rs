@@ -493,7 +493,6 @@ fn main() {
         release: env!("VERSION_WITH_COMMIT"),
         disabled: pi_shell::agent::config::is_error_reporting_disabled_sync(),
     });
-    pi_pager::docs::extract_user_guide_docs(&pi_shell::util::grok_home::grok_home());
     pi_crash_handler::install_terminal_restore_only();
     if pi_shell::util::config::load_crash_handler_enabled_sync() {
         let crash_dir = pi_shell::util::grok_home::grok_home().join("crash");
