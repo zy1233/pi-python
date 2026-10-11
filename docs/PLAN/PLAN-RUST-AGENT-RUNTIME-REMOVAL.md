@@ -2,7 +2,7 @@
 
 > **状态：r10（2026-10-11）。** r3–r10 的工作已全部合入 `main`（PR [#7][pr-7]、[#8][pr-8]、[#9][pr-9]、[#10][pr-10]、[#11][pr-11]、[#12][pr-12]）。做到哪了，见[当前状态](#当前状态)。
 >
-> **这份文档只写计划和状态。** 每一轮做了什么、怎么测的、数字是多少，在[执行记录（归档）][log]里。§1–§9 保留 r2 原文作为决策依据（§7 的每一项后面加了一行状态）；与执行记录冲突处，以执行记录和 ADR3（r3）为准。
+> **这份文档只写计划和状态。** 每一轮做了什么、怎么测的、数字是多少，在[执行记录（归档）][log]里。§1–§3、§6–§9 保留 r2 原文作为决策依据（§7 的每一项后面加了一行状态）。§4、§5 是 r2 的源码事实与规模估计，描述拆除之前的代码，原文在归档里。与执行记录冲突处，以执行记录和 ADR3（r3）为准。
 >
 > 与既有文档的关系：承接 [Phase 4 设计](../specs/2026-08-25-phase4-coding-agent-cli-design.md) §3「第一轮允许 pager 继续链接 `xai-grok-shell`……变瘦不是迁入前提」和 [`AUDIT-PHASE4-PHASE5.md`](../AUDIT/AUDIT-PHASE4-PHASE5.md) 的「TUI 瘦身长期里程碑」，是 Phase 4 的第二轮。与既有决定的张力见 §3。
 >
@@ -15,6 +15,7 @@
 | 做到哪了，下一步做什么 | [当前状态](#当前状态) |
 | 有哪些事在等用户决定 | [待决策](#待决策) |
 | 为什么这样设计 | §1–§3（目标、架构、与现有文档的关系）、§6（ADR1–ADR7） |
+| r2 核对过的源码事实、改动规模的估计 | §4、§5（只剩索引，原文在[归档的附录 E][logE]） |
 | 每个阶段还剩什么 | §7（每项一行状态） |
 | 某一轮怎么做的、测了什么、数字是多少 | [执行记录（归档）][log]；§10 有索引 |
 | 能力矩阵、ACP 版本配对 | 附录 A |
@@ -122,7 +123,7 @@
 |---|---|
 | 目标架构是否合理 | **合理。** 「Rust = ACP Client + UI，Python = ACP Agent + runtime」就是 Phase 4 已确立的边界，本计划只是把它落实为代码层面的瘦身。需要补的不是方向，而是四件事：把终态拆成「行为层 / 依赖图层」两层（§2.1）；补上协议所有权、能力驱动 UI、数据真源、安全边界等七条原则 P1–P7（§2.2）；`pi/` 扩展由「保留或迁移」改为**准入制**（P2、ADR4）；会话数据改为**纯 ACP**（ADR1）。 |
 | 是否与现有架构冲突 | **方向不冲突**，有 2 处既有决定需要修订、3 处需要落实（§3）：支持面范围（原稿「保留或迁移」会重开 Phase 4 已划为非目标的范围）；Phase 4 §1.3 #2「不抽纯 pager crate」被部分取代；会话真源、`config.toml` 兼容、method-not-found 三项已有的口径需要落实到代码。Python 的 `pi_agent_core` / harness 与 AGENTS.md 的不变量不受影响。 |
-| 改动如何 | **行为层**：删除约 14.5 万行 Rust（`pi-shell` 非测试代码的 43%、`pi-sampler`、pager 死代码），编辑 24 个存活的 `pi-shell` 单元；Python 只动 `pi_agent_cli` 的 ACP 投影。**依赖图层**（`async-openai` 离开 `cargo tree`）要拆 `pi-tools` / `pi-sampling-types` 的耦合，量级更大、收益待测，列为可选阶段 D。详见 §5。 |
+| 改动如何 | **行为层**：删除约 14.5 万行 Rust（`pi-shell` 非测试代码的 43%、`pi-sampler`、pager 死代码），编辑 24 个存活的 `pi-shell` 单元；Python 只动 `pi_agent_cli` 的 ACP 投影。**依赖图层**（`async-openai` 离开 `cargo tree`）要拆 `pi-tools` / `pi-sampling-types` 的耦合，量级更大、收益待测，列为可选阶段 D。详见 [§5][l5]。 |
 
 ## 2. 目标架构
 
@@ -174,73 +175,27 @@ zypi（Rust）                                     pi_agent_cli（Python，通�
 | # | 既有决定（出处） | 本计划的影响 | 性质 / 处理 |
 |---|---|---|---|
 | 1 | Rust = ACP Client，Python = ACP Agent；线上只走标准 ACP，不实现 `x.ai/*`（Phase 4 §1.1 / §1.2，DESIGN §8.1 / §8.3） | 一致。`pi/` 扩展已在用（`pi/session/delete`、`_meta` 的 `pi/currentModelId` 等），缺的是准入规则 | 一致；P2 写入 DESIGN §8 |
-| 2 | 斜杠菜单只留 `/new` `/resume` `/quit` 与本地 chrome；`/model` 等无标准对照者拿掉（Phase 4 §1.2 / §4，DESIGN §8.3）——**r3：`/model` 有标准对照（Session Config Options），按用户决定恢复，见 ADR3**；`TUI-AND-CODE-AGENT.md`「What is NOT included」已声明移除 xAI 登录、`x.ai/*`、`agent` 子命令、`/loop`、`/share`、dashboard、auto-update、marketplace | 原稿「`pi/` 扩展保留或迁移」「补齐 MCP / queue / compaction / subagent」会**重开**已划出的范围。代码与文档也已不一致：白名单含 `model`，r2 时 Python 无法服务它（§4.4；r3 已补齐）；dashboard 文档称已移除，`views/dashboard/` 仍在 | **需修订**：默认「降级 / 隐藏 / 删除」，新增能力须过 P2；`/model` 见 ADR3 |
+| 2 | 斜杠菜单只留 `/new` `/resume` `/quit` 与本地 chrome；`/model` 等无标准对照者拿掉（Phase 4 §1.2 / §4，DESIGN §8.3）——**r3：`/model` 有标准对照（Session Config Options），按用户决定恢复，见 ADR3**；`TUI-AND-CODE-AGENT.md`「What is NOT included」已声明移除 xAI 登录、`x.ai/*`、`agent` 子命令、`/loop`、`/share`、dashboard、auto-update、marketplace | 原稿「`pi/` 扩展保留或迁移」「补齐 MCP / queue / compaction / subagent」会**重开**已划出的范围。代码与文档也已不一致：白名单含 `model`，r2 时 Python 无法服务它（[§4.4][l4-4]；r3 已补齐）；dashboard 文档称已移除，`views/dashboard/` 仍在 | **需修订**：默认「降级 / 隐藏 / 删除」，新增能力须过 P2；`/model` 见 ADR3 |
 | 3 | §1.3 #2「整树迁入 `tui/`，不抽纯 pager crate」；§3「第一轮允许 pager 继续链接 `xai-grok-shell`」 | 本计划即第二轮。#2 的理由（pager 依赖 shell / tools / agent / workspace）对 shell 的 runtime 部分不再成立，对 `pi-tools` / `pi-workspace` 仍成立 | **需修订**：在 Phase 4 spec 增补修订记录，标明 #2 被部分取代 |
 | 4 | 会话真源 = AgentHarness JSONL v3，TUI 本地缓存不是真源（DESIGN §8.1） | 一致，但 pager 仍按 Rust 布局 `updates.jsonl` 读本地 session，而其写入方（Rust session actor）正是要删的部分 | **需落实**：ADR1 |
-| 5 | `pi -p` = 纯 Python headless，不复用 grok headless（DESIGN §8.3） | 一致。原稿「`pi -p` 与 headless 委托 Python ACP」措辞不准：`-p` 是直接子进程、不走 ACP；真问题是旗标被静默丢弃、`--sandbox` 在派发之后才生效（§4.1） | 一致；措辞更正，落实为 `-p` 旗标契约 |
+| 5 | `pi -p` = 纯 Python headless，不复用 grok headless（DESIGN §8.3） | 一致。原稿「`pi -p` 与 headless 委托 Python ACP」措辞不准：`-p` 是直接子进程、不走 ACP；真问题是旗标被静默丢弃、`--sandbox` 在派发之后才生效（[§4.1][l4-1]） | 一致；措辞更正，落实为 `-p` 旗标契约 |
 | 6 | 配置分属：`agent.toml`（Python）/ `config.toml`（仅 Rust 的 grok 格式）（DESIGN §8.4） | 删除 `agent::config`（约 90 个字段）会影响既有用户的 `config.toml` | **需落实**：ADR5 |
 | 7 | 「TUI 不得在 method-not-found 上 panic」（Phase 4 §4） | pager 会发送 Python 不路由的方法（`session/set_model`、`session/set_mode`） | **需落实**：阶段 1 + 契约测试 |
 | 8 | AGENTS.md 不变量（事件契约、终止语义、StreamFn、Usage 等） | 不触及；`pi_agent_core` / harness 不改 | 一致 |
 
-## 4. 源码事实基线
+## 4. 源码事实基线（已归档）
 
-> r2 的基线，写于拆除之前，描述的是当时的代码。与现状冲突处，以[执行记录（归档）][log]为准（拆除后的规模见 [§10.1][l10-1]，残留见 [§10.4][l10-4]）。
+r2 在动手之前核对了源码。它描述的是拆除之前的代码，不是现状。原文在[执行记录（归档）][log]的[附录 E][logE]。拆除后的规模见 [§10.1][l10-1]，残留见 [§10.4][l10-4]。
 
-### 4.1 运行路径
+- [4.1 运行路径][l4-1]
+- [4.2 Rust runtime 与耦合面][l4-2]
+- [4.3 Python 侧][l4-3]
+- [4.4 协议与版本][l4-4]
+- [4.5 验证基础设施与文档][l4-5]
 
-- **默认路径**：`acp::connect()` → `spawn_grok_shell()` → `pi_agent_command()`（`PI_AGENT_COMMAND` / `[agent].command` / `PI_PYTHON` / `python3 -m pi_agent_cli`）→ stdio 桥（`acp/mod.rs:181-227`，`acp/spawn.rs:179,235,383`）。子进程只注入 `PI_HOME`，`stderr` 继承，`kill_on_drop(true)`（`spawn.rs:411-413`），取消后 `start_kill()`（`:503`）。`spawn_grok_shell`、`SpawnedAgent` 等名称与注释仍是「in-process grok-shell」语义（r4 已改名并重写注释，见 1.R3）。
-- **`pi -p`**：直接子进程，不走 ACP（`pi-pager-bin/src/main.rs:404-458`，`:474` 在 `async_main` 之前派发并退出）。只转发 `-p`、`--prompt-json`、`--prompt-file`、`--cwd`、`--system-prompt(-file)`、`--rules`、`--append-system-prompt-file`、`--no-context-files`；`PagerArgs` 的 `--model`、`--output-format`、`--json-schema`、`--reasoning-effort`、`--resume` / `--session-id`、`--yolo`、`--allow` / `--deny`、`--permission-mode`、`--agents-json`、`--max-turns`、`--worktree`（`app/cli.rs:117-373`）被静默忽略；`apply_sandbox`（`main.rs:612`）在派发之后，`-p --sandbox` 实际**没有沙箱**。因此 `main.rs:667-731` 的 `headless::run_single_turn` 整块与 `headless.rs` + `headless/`（约 7.5k 行）在产品内不可达。
-- **leader**：默认关闭，且**从未随已发布版本暴露**——`agent` / `leader` 子命令只存在于未发布提交 `730fa18`–`ace8852`（2026-08-26 至 08-28）；`v0.2.0`–`v0.4.0` 的 `Command` 均只有 6 个变体（`Doctor / Wrap / Export / Version / Completions / DiskUsage`，`app/cli.rs:8-49`），`main.rs` 无 `run_*` 调用。`--leader` 只会 spawn 一个必然失败的 `zypi agent leader`（`pi-shell/src/leader/mod.rs:1687-1692`），超时后回退 embedded（`app/mod.rs:955-980`）。
-- **死代码**：`spawn_agent_thread_direct`（`spawn.rs:514-515`，`#[allow(dead_code)]`，构造 `MvpAgent`）；8 个无入口模块 `sessions_cmd` / `memory_cmd` / `plugin_cmd` / `mcp_cmd` / `trace_cmd` / `share_cmd` / `worktree_cmd` / `models`（合计 4,648 行）；`main.rs:34` 导入的 `run_headless` / `run_leader` / `run_stdio_agent`。`pi-pager-bin`、`pi-pager`、`pi-shell`、`pi-workspace` 四个 crate 根都有 `#![allow(unused_imports, unused_variables, unused_mut, unreachable_code, dead_code)]`，且 `pi-pager` 是库 crate、死模块为 `pub mod`，编译器**无法**验证清理。
-- **斜杠菜单**：`builtin_commands()`（`slash/commands/mod.rs:79-165`）仍注册约 70 个命令，但三处构造点无条件启用白名单（`app/app_view.rs:1502`、`app/agent_view/session.rs:404`、`views/dashboard/state.rs:1336`）：`PI_STANDARD_SLASH_NAMES` = `new resume quit help theme settings multiline model home`（`slash/registry.rs:33-43`）；白名单外的命令既无触发器也不可派发（`registry.rs:615-620`）。ACP 公布的命令（skills）不受过滤。
+## 5. 改动规模（已归档）
 
-### 4.2 Rust runtime 与耦合面
-
-- **provider 栈**：`async-openai`（`tui/Cargo.toml:4` 的 `[patch.crates-io]` 指向 GitHub fork 的固定 rev）的直接使用者是 `pi-sampler`、`pi-sampling-types`、`pi-shell`、`pi-tools`；`pi-sampler` 的直接使用者是 `pi-shell`、`pi-telemetry`、`pi-http`——后两者只为 re-export `OriginClientInfo`（`pi-telemetry/Cargo.toml:39` + `src/http.rs:8`，`pi-http/Cargo.toml:17` + `src/lib.rs:100`）。自 `pi-pager-bin` 可达 82 个内部 crate，其中 67 个不经过 `pi-shell`；整体剪掉 `pi-shell` 最多释放 14 个。
-- **pager 对其它 crate 的真实用量**（非测试代码）：`pi_shell::util` 249 处 / 44 文件（`util::config` 159、`with_locked_stderr` 45、`grok_home` 22）、`session` 110 / 37、`agent` 72 / 30（`agent::config` 47 / 26）、`extensions` 61 / 28（`notification` 28、`session_search` 18——ACP 扩展的 **wire 类型定义在 shell 里**）、`config` + `auth` 43 / 30、`sampling` 26 / 17（实际只用 18 个符号）。`pi_tools` 126 处 / 56 文件，约 55 个不同路径，几乎全是类型与小工具（`grok_home`、`ask_user_question::*`、`SkillInfo` / `SkillScope`、`SessionMode`、`ConfigSource`、`output::*`）；`pi_workspace` 60 / 28（`permission` 43）；`pi_agent` 16 / 3（10 处在死的 `plugin_cmd`）；`pi_sampling_types` / `pi_hooks` / `pi_mcp` 无直接引用。`pi-pager-render`、`pi-pager-diff` 等渲染 crate 也直接依赖 `pi-tools`。
-- **`MvpAgent` 的非 spawn 引用**：`app/mod.rs:658` `warm_async_http_client()`（每次启动预热 Rust provider HTTP 客户端）；`views/agents_modal.rs:739` `MvpAgent::resolve_agent_definition`。
-- **`agent::config`**：`Config` 约 90 个 pub 字段（`agent/config.rs` 5.5k 行），`spawn_grok_shell` 只读其中的 `grok_com_config`（`spawn.rs:186`），`acp::connect()` 却先构建并 resolve 整个 `AgentConfig`（`acp/mod.rs:181-210`）；沙箱配置 `SandboxSettingsConfig` 也在其中（`config/mod.rs:1421` `apply_sandbox`）。
-- **session 存储**：Rust 布局 `sessions/<encoded_cwd>/<session_id>/updates.jsonl`，写入方是 Rust session actor（`session/storage/mod.rs:1040-1054`、`storage/jsonl/mod.rs:523`）；Python 布局 `sessions/<timestamp>-<session_id>.jsonl`（JSONL v3，`jsonl_repo.py:54-55`）。pager 约 19 个非测试文件按 Rust 布局**读取**：`export_cmd.rs:25`（无 Python 布局 fallback）、`app/session_startup.rs:775,861,1246`、`app/mod.rs:763`、`recent_dirs.rs:7`、`app/session_title_resolve.rs:140`、`app/effects/mod.rs:2314`、`app/subagent.rs`；只有 `session_startup.rs:788-822` 有一个 Python 布局 fallback。`zypi export <python-session-id>` 静态上大概率不可用（需实测）。
-
-### 4.3 Python 侧（`pi_agent_cli`，共 4,114 行，`agent.py` 472 行）
-
-- **已有**：`initialize`（`load_session`、`session_capabilities.{list,resume,close}`、`prompt_capabilities.image`、`auth_methods=[]`，无 `_meta`）、`new_session` / `load_session`（回放）/ `resume_session`（不回放）/ `list_sessions` / `close_session` / `prompt` / `cancel`、`ext_method("pi/session/delete")`、`ext_notification`（权限模式）、`available_commands_update`（skills）、`session/request_permission`（仅 bash / edit / write，选项仅 allow-once / reject-once，`permissions.py:11-23`）；`_meta` 键 `pi/currentModelId`、`pi/currentModelDisplayName`、`pi/provider`（`agent.py:259-270`）。
-- **缺口**：`set_session_mode`、`set_config_option`、`authenticate`；`mcp_servers` 形参被忽略（`agent.py:127,147,184`）；`list_sessions` 的 title 是合成的 `"{created_at} ({id8})"`、`updated_at = createdAt`、忽略 `cursor`（`:164-177,388-390`）；无 queue / interjection、无 ACP 级 compaction（仅 `factory.py:147,156` 由 `max_turns >= 30` 推导 `auto_compact`）、无 subagent、无 status line；`__main__` 无 EOF / 信号收尾。
-- **harness 已具备、只缺 ACP 投影**：`steer`、`follow_up`、`set_model`、`set_thinking_level`、`abort`、`close`、`compact`、`navigate_tree`。补齐只发生在 `pi_agent_cli`。
-
-### 4.4 协议与版本
-
-- **配对**：Rust `agent-client-protocol 0.10.4`（`unstable`）+ schema `0.11.4`（`tui/Cargo.toml:107`、`Cargo.lock`）；Python SDK `0.12.1`，捆绑 schema `v1.19.0`（`acp/meta.py`）。
-- **模型选择**（r2 基线；r3 已落地，见 [§10.2][l10-2]）：上游已移除从未稳定的 `session/set_model`，模型选择走 Session Config Options（`configOptions` 中 `category: "model"` + `session/set_config_option`，[RFD](https://github.com/agentclientprotocol/agent-client-protocol/blob/main/docs/rfds/session-config-options.mdx)）。r2 基线时 pager 仍发 `SetSessionModelRequest`（`effects/mod.rs:1126`），候选项来自 `initialize` 响应的 `_meta.modelState`（`acp/mod.rs:562-566`）；Python 既不路由该方法也不提供 `modelState`，pager 对 `configOptions` 零引用，所以 `/model` 可见却不可用。
-- **模式**：`SetSessionModeRequest`（`effects/mod.rs:1005,1025`）同样没有 Python 实现。
-- **路由面**：SDK 0.12.1 的 router 路由 `session/{new,load,list,close,set_mode,set_config_option,prompt,fork,resume}`、`authenticate`、`session/cancel`，扩展方法按 ACP 规范以 `_` 前缀分发给 `ext_method`；`session/delete` 虽有 schema 与能力位 `sessionCapabilities.delete`，SDK **没有路由**，所以 Python 用 `pi/session/delete` 扩展（`agent.py:236`）。
-- **`pi/*` 没有生产者**：`pi-shell/src` 有 716 处 `x.ai/…` 字面量、0 处 `pi/…`；pager 非测试代码用到 8 个 `pi/*` 名称（`currentModelId`、`currentModelDisplayName`、`provider`、`session`、`session/delete`、`session/update`、`tool`、`yolo_mode_changed`），另有 36 个只出现在测试里（`pi/queue/changed`、`pi/mcp/*`、`pi/scheduled_task_*`、`pi/session/interjection`、`pi/task_*` 等）；Python 只涉及 4 个。出站 `x.ai/*` 被 `pi-acp-lib/src/channel.rs:18,72` 丢弃，入站被 `pi-pager/src/acp/vendor.rs:8-11` 过滤。每一个 `pi/*` 的 Python 实现都是**新设计**，不是「补齐」。
-- **`initialize._meta`**：pager 读取 `modelState`、`grokShell`、`availableCommands`、`cancelRewind`、`sessionRecap`、`feedbackTraceOffer`（`acp/mod.rs:527-590`），Python 一个都不给。
-
-### 4.5 验证基础设施与文档
-
-- `.github/workflows/ci.yml` 只有 `lint`（ruff）与 `test`（pytest），**没有 cargo job**；`release.yml` 仅 `v*` tag 触发 `cargo build --profile release-dist -p pi-pager-bin`（Linux + macOS arm64），不跑测试。PTY e2e crates 在 fork 时已删（`tui/NOTICE:39-40`）；`pi-pager/tests/scenarios/` 的 46 个 YAML 场景中 45 个依赖 Rust 侧 `mock:` 模型且无 runner；Rust 代码里没有任何测试 spawn Python agent 或 mock ACP agent。没有删除前的基线。Rust 测试量级（`#[test]` 计数，近似）：`pi-pager` 9.3k（93 ignored）、`pi-shell` 6.6k（122 ignored）、`pi-tools` 3.1k、`pi-workspace` 1.9k。toolchain 固定 1.94.0（`tui/rust-toolchain.toml`），AGENTS.md 约定在 WSL 验证。
-- 陈旧文档：内嵌 user-guide（`pi-pager/docs/`，38 个 md，仍是 Grok 原文，命令名 `grok`，`15-agent-mode.md` 描述 `grok agent … leader`）经 `include_str!` 编入二进制，每次启动由 `extract_user_guide_docs`（`main.rs:508`）写入 `<grok_home>/docs/user-guide/`，Python 侧没有消费者，`app/status_line_tests.rs:358,403,450` 还把 `25-status-line.md` 当测试夹具；`tui/NOTICE` 仍写「Product binary is `pi` (`pi-grok-pager-bin`)」；`packages/pi-agent-cli/AGENTS.md` 称 `config.toml` 含 Python-only 键会破坏 TUI 解析（Rust 侧未找到 `deny_unknown_fields`，需实测）；`docs/TUI-AND-CODE-AGENT.md` 把 MCP 列在 TUI 能力里（Python 忽略 `mcp_servers`），且 ACP 链接指向 `anthropics/agent-protocol`。
-
-## 5. 改动规模
-
-> r2 的静态估计。实际规模见[执行记录（归档）][log]的 [§10.1][l10-1]。
-
-**口径**：`pi-shell/src` 非测试代码 265.6k 行 / 234 个单元（深度 ≤ 2 的模块路径）；含测试文件共 379.6k 行（其中测试文件 113.8k），另有集成测试 20.3k 行 / 55 文件。「可删」= runtime 禁用集 + 禁用后不再被 pager 根引用可达的单元。**模块级、类型引用也算边，是上界估计**；须由阶段 A / B 的编译结果校正。
-
-| 对象 | 规模（非测试） | 处理 |
-|---|---|---|
-| runtime 禁用集（24 个单元） | 78.6k 行：`session::acp_session_impl` 40.5k、`agent::mvp_agent` 15.8k、`leader` 8.7k（8 个单元）、`agent::subagent` 8.1k、`agent::app` 2.1k、shell `tools` 2.4k、`sampling` 1.0k | 删除 |
-| 连带不可达（70 个单元） | 34.4k 行：`extensions::suggest` 3.8k、`session::worktree_pool` 2.4k、`inspect` 2.3k、`session::compaction` 2.3k、`session::acp_conversion` 1.3k、`session::goal_strategist` 1.3k 等 | 删除 |
-| **`pi-shell` 可删合计** | **113.0k 行（43%）**；存活 152.6k 行（57%） | |
-| `pi-sampler` | 12.5k 行（另有测试 1.8k） | 删除 |
-| pager 死代码 | 约 19.8k 行：8 个无入口模块 4.6k、`headless*` 7.5k、白名单外斜杠命令模块约 7.7k | 删除 |
-| **Rust 删除合计** | **约 145k 行**，另有与之对应的测试（含 5 个 `test_leader_*.rs`、`app/leader_cluster`） | |
-| 需编辑的 cut point | 存活的 `pi-shell` 单元里引用 runtime 禁用集的有 **24 个**：`agent`、`agent::config`、`agent::config_model_override_parse`、`agent::init`、`agent::model_providers`、`agent::models`、`agent::server`、`config`、`extensions::notification`、`remote::client`、`remote::pull`、`session::acp_session`、`session::agent_rebuild`、`session::feedback_manager`、`session::goal_planner`、`session::handle`、`session::helpers`、`session::image_describe`、`session::memory`、`session::persistence`、`session::storage`、`session::summary`、`upload::trace`、`util::config`。其中 provider 栈类型渗透 28 个单元 / 46 文件 / 169 处。阶段 A 删除 pager 死代码后 cut point 仍是 24 个（只多释放约 1.0k 行），所以阶段 B 的工作量不会被阶段 A 摊薄 | 编辑 |
-| pager 侧需编辑的引用 | `MvpAgent` 8 文件 / 12 处、`run_*` 1 / 5、leader 7 / 27、`sampling` 17 / 26、shell `tools` 4 / 4 | 编辑 |
-| Python | 仅 `pi_agent_cli` 的 ACP 投影（§7 阶段 1），不改 `pi_agent_core` / harness | 新增 / 修改 |
-
-**第二梯队（阶段 D，决策门控）**：存活的 152.6k 行里，`session`（68.3k）与 `auth`（18.0k）最大。ADR1（纯 ACP）落地后 `session::{storage,persistence,unified_list}` 及 `relay` 约 16.6k 行不再可达；放弃 xAI auth 层（Phase 4 §4 已要求跳过登录，但 pager 仍有 `GateInfo` / `AuthMeta` / `AuthManager` 约 30 处 / 14 文件引用）约 18.1k 行。两者合计存活 152.6k → 117.9k 行。
+r2 的静态估计：口径、各对象的行数、需要编辑的 cut point、第二梯队。原文在[附录 E][logE]的 [5. 改动规模][l5]。实际规模见 [§10.1][l10-1]。
 
 ## 6. 决策记录
 
@@ -311,7 +266,7 @@ Rust（pager）：
 - [ ] B.2 把 pager 用到的 18 个 `sampling` 符号迁到不依赖 provider 栈的叶子 crate：对话项类型（`ConversationItem` / `UserItem` / `AssistantItem`）、reasoning-effort 元数据（`ReasoningEffort`、`ReasoningEffortOption`、`REASONING_EFFORT_META_KEY`、`parse_*`、`supports_reasoning_effort_meta` 等）、错误分类与文案（`RATE_LIMITED_ERROR_CODE`、`error_detail_from_data`、`format_rate_limited_user_message`、`http_status_from_error`、`is_free_usage_exhausted_error`、`prompt_usage_from_error`、`stop_reason_for_turn_error`）。**状态**：r3 换了做法，没有新建叶子 crate：`pi_shell::sampling` 留作薄壳，符号仍从 `pi-sampling-types` 重导出。provider 栈没有因此离开依赖图，见阶段 D。
 - [ ] B.3 ACP 扩展 wire 类型（`extensions::notification` / `session_search` 等）迁入 `pi-acp-lib` 或同级协议 crate（P2）。**状态**：r3 没做。
 - [ ] B.4 从 `agent::config` 抽出 pager 实际使用的部分（含 `SandboxSettingsConfig`、`grok_com_config`），其余字段按 ADR5 废弃。**状态**：r3 做了一部分：`agent::config` 就地瘦身并接收了 `AuthScheme`，没有抽成独立模块。ADR5 的首次启动告警没做。
-- [x] B.5 处理 §5 列出的 24 个 cut point 里对 runtime / provider 栈的引用。**状态**（r3）：编译器验证。
+- [x] B.5 处理 [§5][l5] 列出的 24 个 cut point 里对 runtime / provider 栈的引用。**状态**（r3）：编译器验证。
 - [x] B.6 删除 94 个单元（113.0k 行）与 `pi-sampler` crate；清理依赖声明、feature、生成配置、测试 harness 与遗留名称。**状态**：r3。实际规模与「94 个单元 / 113.0k 行」的静态估计不同，见 [§10.1][l10-1]。
 
 **PR 切分**：B.1–B.4 是纯迁移（行为不变）先合；B.5 次之；B.6 的大删除最后。
@@ -383,6 +338,7 @@ Rust（pager）：
 | [附录 B][logB] | r2–r10 | 复现方法（依赖图、模块级闭包、各轮的测量与测试命令） | — |
 | [附录 C][logC] | r10 | §7 的逐项注释（原文） | — |
 | [附录 D][logD] | r10 | 计划头部的状态文字（原文） | — |
+| [附录 E][logE] | r2 | §4、§5 的原文（源码事实基线与改动规模估计） | — |
 | [修订记录][logRev] | r1–r10 | 逐轮的完整说明 | — |
 
 ## 附录 A：能力矩阵与 ACP 版本配对（阶段 0.8，r9 定稿）
@@ -469,7 +425,7 @@ Rust（pager）：
 - r8：WSL2 / Linux 补测（[#9][pr-9]）。
 - r9：阶段 0 收尾；阶段 1 里不需要拍板的部分（[#10][pr-10]）。
 - r10：ADR1 的 PR 1（[#11][pr-11]）；1.P3 的 (a)（[#12][pr-12]）。
-- 整理（r10 之后，2026-10-11）：执行记录移到[执行记录（归档）][log]；本文只留计划、状态、待决策和 §10 索引；§7 改成每项一行状态。
+- 整理（r10 之后，2026-10-11）：执行记录移到[执行记录（归档）][log]；本文只留计划、状态、待决策和 §10 索引；§7 改成每项一行状态；§4、§5（r2 的源码事实与规模估计）也移到归档的附录 E，只留索引。
 
 <!-- 链接定义 -->
 [log]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md
@@ -486,10 +442,17 @@ Rust（pager）：
 [l10-11]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1011-r9-追加阶段-0-收口03--07--08与阶段-1-里不需要拍板的部分
 [l10-12]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1012-r10-追加adr1-的-pr-1python-一侧
 [l10-13]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1013-r10-追加1p3-azypi-只提供-agent-真会照做的权限模式
+[l4-1]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#41-运行路径
+[l4-2]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#42-rust-runtime-与耦合面
+[l4-3]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#43-python-侧pi_agent_cli共-4114-行agentpy-472-行
+[l4-4]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#44-协议与版本
+[l4-5]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#45-验证基础设施与文档
+[l5]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#5-改动规模
 [logA4]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#a4-r5-执行结果对照-r5-时初稿里的默认决策r9-的更新见-a1
 [logB]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#附录-b复现方法
 [logC]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#附录-c计划-7-的逐项注释r10-原文
 [logD]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#附录-d计划头部的状态文字r10-原文
+[logE]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#附录-e计划-45r2-的基线原文
 [logRev]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#修订记录
 [pr-7]: https://github.com/zy1233/pi-python/pull/7
 [pr-8]: https://github.com/zy1233/pi-python/pull/8

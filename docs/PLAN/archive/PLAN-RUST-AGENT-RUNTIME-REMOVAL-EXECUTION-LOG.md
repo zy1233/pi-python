@@ -4,8 +4,8 @@
 >
 > **怎么读**
 >
-> - 编号沿用原文。本文里的 §10.x 是执行记录的节。§1–§9 和附录 A 指计划。附录 A.4（r5 的执行结果）、附录 B（复现方法）和修订记录在本文。
-> - 附录 C 是计划 §7 在 r10 时的全文，含每一项的执行细节。附录 D 是计划头部在 r10 时的状态文字。两处只为留档；现状以计划为准。
+> - 编号沿用原文。本文里的 §10.x 是执行记录的节。§1–§3、§6–§9 和附录 A 指计划。附录 A.4（r5 的执行结果）、附录 B（复现方法）和修订记录在本文。
+> - 附录 C 是计划 §7 在 r10 时的全文，含每一项的执行细节。附录 D 是计划头部在 r10 时的状态文字。附录 E 是计划 §4、§5 的全文（r2 的源码事实基线与改动规模估计）。三处只为留档；现状以计划为准。
 > - 本文是历史记录。数字是当时的实测值，不再更新。要更正明显的错误，改在原处并注明。
 > - 记新的一轮时：在「10.」末尾追加一节（`### 10.14 …`），在计划的 §10 索引里加一行，在计划里改状态。不要把过程写回计划。
 > - 文中的分支名（`codex/…`）是当时的名字。这些分支在合并后已删除；提交都在对应的 PR 里。
@@ -31,6 +31,14 @@
 - [附录 B：复现方法](#附录-b复现方法)
 - [附录 C：计划 §7 的逐项注释（r10 原文）](#附录-c计划-7-的逐项注释r10-原文)
 - [附录 D：计划头部的状态文字（r10 原文）](#附录-d计划头部的状态文字r10-原文)
+- [附录 E：计划 §4、§5（r2 的基线，原文）](#附录-e计划-45r2-的基线原文)
+  - [4. 源码事实基线](#4-源码事实基线)
+  - [4.1 运行路径](#41-运行路径)
+  - [4.2 Rust runtime 与耦合面](#42-rust-runtime-与耦合面)
+  - [4.3 Python 侧（`pi_agent_cli`，共 4,114 行，`agent.py` 472 行）](#43-python-侧pi_agent_cli共-4114-行agentpy-472-行)
+  - [4.4 协议与版本](#44-协议与版本)
+  - [4.5 验证基础设施与文档](#45-验证基础设施与文档)
+  - [5. 改动规模](#5-改动规模)
 - [修订记录](#修订记录)
 
 ## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10）
@@ -1183,6 +1191,66 @@ Rust（pager）：
 > 验证方式：r2 为静态分析（源码阅读、`Cargo.toml` 解析、模块级引用统计，复现方法见附录 B）；r3 起拆除结果由 `cargo check`（macOS 本机，消费者构建 `pi-pager-bin` / `pi-pager-minimal` / `pi-update` 及 `pi-shell` / `pi-pager` 的 `--tests` 类型检查）、`cargo test`（触及的 crate）、Python 侧 pytest，以及伪终端里 `zypi` ↔ `pi_agent_cli` ↔ OpenRouter 的真实会话（含 `/model` 切换）验证。标「需实测」的其余结论仍是静态推断；Linux / Windows 的 `cfg` 代码本机无法编译，见 §10.4。
 > 与既有文档的关系：承接 [Phase 4 设计](../../specs/2026-08-25-phase4-coding-agent-cli-design.md) §3「第一轮允许 pager 继续链接 `xai-grok-shell`……变瘦不是迁入前提」和 [`AUDIT-PHASE4-PHASE5.md`](../../AUDIT/AUDIT-PHASE4-PHASE5.md) 的「TUI 瘦身长期里程碑」，是 Phase 4 的第二轮。与既有决定的张力见 §3。
 
+## 附录 E：计划 §4、§5（r2 的基线，原文）
+
+下面是计划 §4（源码事实基线）与 §5（改动规模）在 r10 时的全文，原样保留。它们写于 r2，拆除之前，描述的是当时的代码，不是现状；与现状冲突处，以本文的 §10 为准（拆除后的规模见 §10.1，残留见 §10.4）。两个节标题降了一级（`##` → `###`），正文没有改。计划里的 §4、§5 现在只剩一个索引。
+
+### 4. 源码事实基线
+
+### 4.1 运行路径
+
+- **默认路径**：`acp::connect()` → `spawn_grok_shell()` → `pi_agent_command()`（`PI_AGENT_COMMAND` / `[agent].command` / `PI_PYTHON` / `python3 -m pi_agent_cli`）→ stdio 桥（`acp/mod.rs:181-227`，`acp/spawn.rs:179,235,383`）。子进程只注入 `PI_HOME`，`stderr` 继承，`kill_on_drop(true)`（`spawn.rs:411-413`），取消后 `start_kill()`（`:503`）。`spawn_grok_shell`、`SpawnedAgent` 等名称与注释仍是「in-process grok-shell」语义（r4 已改名并重写注释，见 1.R3）。
+- **`pi -p`**：直接子进程，不走 ACP（`pi-pager-bin/src/main.rs:404-458`，`:474` 在 `async_main` 之前派发并退出）。只转发 `-p`、`--prompt-json`、`--prompt-file`、`--cwd`、`--system-prompt(-file)`、`--rules`、`--append-system-prompt-file`、`--no-context-files`；`PagerArgs` 的 `--model`、`--output-format`、`--json-schema`、`--reasoning-effort`、`--resume` / `--session-id`、`--yolo`、`--allow` / `--deny`、`--permission-mode`、`--agents-json`、`--max-turns`、`--worktree`（`app/cli.rs:117-373`）被静默忽略；`apply_sandbox`（`main.rs:612`）在派发之后，`-p --sandbox` 实际**没有沙箱**。因此 `main.rs:667-731` 的 `headless::run_single_turn` 整块与 `headless.rs` + `headless/`（约 7.5k 行）在产品内不可达。
+- **leader**：默认关闭，且**从未随已发布版本暴露**——`agent` / `leader` 子命令只存在于未发布提交 `730fa18`–`ace8852`（2026-08-26 至 08-28）；`v0.2.0`–`v0.4.0` 的 `Command` 均只有 6 个变体（`Doctor / Wrap / Export / Version / Completions / DiskUsage`，`app/cli.rs:8-49`），`main.rs` 无 `run_*` 调用。`--leader` 只会 spawn 一个必然失败的 `zypi agent leader`（`pi-shell/src/leader/mod.rs:1687-1692`），超时后回退 embedded（`app/mod.rs:955-980`）。
+- **死代码**：`spawn_agent_thread_direct`（`spawn.rs:514-515`，`#[allow(dead_code)]`，构造 `MvpAgent`）；8 个无入口模块 `sessions_cmd` / `memory_cmd` / `plugin_cmd` / `mcp_cmd` / `trace_cmd` / `share_cmd` / `worktree_cmd` / `models`（合计 4,648 行）；`main.rs:34` 导入的 `run_headless` / `run_leader` / `run_stdio_agent`。`pi-pager-bin`、`pi-pager`、`pi-shell`、`pi-workspace` 四个 crate 根都有 `#![allow(unused_imports, unused_variables, unused_mut, unreachable_code, dead_code)]`，且 `pi-pager` 是库 crate、死模块为 `pub mod`，编译器**无法**验证清理。
+- **斜杠菜单**：`builtin_commands()`（`slash/commands/mod.rs:79-165`）仍注册约 70 个命令，但三处构造点无条件启用白名单（`app/app_view.rs:1502`、`app/agent_view/session.rs:404`、`views/dashboard/state.rs:1336`）：`PI_STANDARD_SLASH_NAMES` = `new resume quit help theme settings multiline model home`（`slash/registry.rs:33-43`）；白名单外的命令既无触发器也不可派发（`registry.rs:615-620`）。ACP 公布的命令（skills）不受过滤。
+
+### 4.2 Rust runtime 与耦合面
+
+- **provider 栈**：`async-openai`（`tui/Cargo.toml:4` 的 `[patch.crates-io]` 指向 GitHub fork 的固定 rev）的直接使用者是 `pi-sampler`、`pi-sampling-types`、`pi-shell`、`pi-tools`；`pi-sampler` 的直接使用者是 `pi-shell`、`pi-telemetry`、`pi-http`——后两者只为 re-export `OriginClientInfo`（`pi-telemetry/Cargo.toml:39` + `src/http.rs:8`，`pi-http/Cargo.toml:17` + `src/lib.rs:100`）。自 `pi-pager-bin` 可达 82 个内部 crate，其中 67 个不经过 `pi-shell`；整体剪掉 `pi-shell` 最多释放 14 个。
+- **pager 对其它 crate 的真实用量**（非测试代码）：`pi_shell::util` 249 处 / 44 文件（`util::config` 159、`with_locked_stderr` 45、`grok_home` 22）、`session` 110 / 37、`agent` 72 / 30（`agent::config` 47 / 26）、`extensions` 61 / 28（`notification` 28、`session_search` 18——ACP 扩展的 **wire 类型定义在 shell 里**）、`config` + `auth` 43 / 30、`sampling` 26 / 17（实际只用 18 个符号）。`pi_tools` 126 处 / 56 文件，约 55 个不同路径，几乎全是类型与小工具（`grok_home`、`ask_user_question::*`、`SkillInfo` / `SkillScope`、`SessionMode`、`ConfigSource`、`output::*`）；`pi_workspace` 60 / 28（`permission` 43）；`pi_agent` 16 / 3（10 处在死的 `plugin_cmd`）；`pi_sampling_types` / `pi_hooks` / `pi_mcp` 无直接引用。`pi-pager-render`、`pi-pager-diff` 等渲染 crate 也直接依赖 `pi-tools`。
+- **`MvpAgent` 的非 spawn 引用**：`app/mod.rs:658` `warm_async_http_client()`（每次启动预热 Rust provider HTTP 客户端）；`views/agents_modal.rs:739` `MvpAgent::resolve_agent_definition`。
+- **`agent::config`**：`Config` 约 90 个 pub 字段（`agent/config.rs` 5.5k 行），`spawn_grok_shell` 只读其中的 `grok_com_config`（`spawn.rs:186`），`acp::connect()` 却先构建并 resolve 整个 `AgentConfig`（`acp/mod.rs:181-210`）；沙箱配置 `SandboxSettingsConfig` 也在其中（`config/mod.rs:1421` `apply_sandbox`）。
+- **session 存储**：Rust 布局 `sessions/<encoded_cwd>/<session_id>/updates.jsonl`，写入方是 Rust session actor（`session/storage/mod.rs:1040-1054`、`storage/jsonl/mod.rs:523`）；Python 布局 `sessions/<timestamp>-<session_id>.jsonl`（JSONL v3，`jsonl_repo.py:54-55`）。pager 约 19 个非测试文件按 Rust 布局**读取**：`export_cmd.rs:25`（无 Python 布局 fallback）、`app/session_startup.rs:775,861,1246`、`app/mod.rs:763`、`recent_dirs.rs:7`、`app/session_title_resolve.rs:140`、`app/effects/mod.rs:2314`、`app/subagent.rs`；只有 `session_startup.rs:788-822` 有一个 Python 布局 fallback。`zypi export <python-session-id>` 静态上大概率不可用（需实测）。
+
+### 4.3 Python 侧（`pi_agent_cli`，共 4,114 行，`agent.py` 472 行）
+
+- **已有**：`initialize`（`load_session`、`session_capabilities.{list,resume,close}`、`prompt_capabilities.image`、`auth_methods=[]`，无 `_meta`）、`new_session` / `load_session`（回放）/ `resume_session`（不回放）/ `list_sessions` / `close_session` / `prompt` / `cancel`、`ext_method("pi/session/delete")`、`ext_notification`（权限模式）、`available_commands_update`（skills）、`session/request_permission`（仅 bash / edit / write，选项仅 allow-once / reject-once，`permissions.py:11-23`）；`_meta` 键 `pi/currentModelId`、`pi/currentModelDisplayName`、`pi/provider`（`agent.py:259-270`）。
+- **缺口**：`set_session_mode`、`set_config_option`、`authenticate`；`mcp_servers` 形参被忽略（`agent.py:127,147,184`）；`list_sessions` 的 title 是合成的 `"{created_at} ({id8})"`、`updated_at = createdAt`、忽略 `cursor`（`:164-177,388-390`）；无 queue / interjection、无 ACP 级 compaction（仅 `factory.py:147,156` 由 `max_turns >= 30` 推导 `auto_compact`）、无 subagent、无 status line；`__main__` 无 EOF / 信号收尾。
+- **harness 已具备、只缺 ACP 投影**：`steer`、`follow_up`、`set_model`、`set_thinking_level`、`abort`、`close`、`compact`、`navigate_tree`。补齐只发生在 `pi_agent_cli`。
+
+### 4.4 协议与版本
+
+- **配对**：Rust `agent-client-protocol 0.10.4`（`unstable`）+ schema `0.11.4`（`tui/Cargo.toml:107`、`Cargo.lock`）；Python SDK `0.12.1`，捆绑 schema `v1.19.0`（`acp/meta.py`）。
+- **模型选择**（r2 基线；r3 已落地，见 §10.2）：上游已移除从未稳定的 `session/set_model`，模型选择走 Session Config Options（`configOptions` 中 `category: "model"` + `session/set_config_option`，[RFD](https://github.com/agentclientprotocol/agent-client-protocol/blob/main/docs/rfds/session-config-options.mdx)）。r2 基线时 pager 仍发 `SetSessionModelRequest`（`effects/mod.rs:1126`），候选项来自 `initialize` 响应的 `_meta.modelState`（`acp/mod.rs:562-566`）；Python 既不路由该方法也不提供 `modelState`，pager 对 `configOptions` 零引用，所以 `/model` 可见却不可用。
+- **模式**：`SetSessionModeRequest`（`effects/mod.rs:1005,1025`）同样没有 Python 实现。
+- **路由面**：SDK 0.12.1 的 router 路由 `session/{new,load,list,close,set_mode,set_config_option,prompt,fork,resume}`、`authenticate`、`session/cancel`，扩展方法按 ACP 规范以 `_` 前缀分发给 `ext_method`；`session/delete` 虽有 schema 与能力位 `sessionCapabilities.delete`，SDK **没有路由**，所以 Python 用 `pi/session/delete` 扩展（`agent.py:236`）。
+- **`pi/*` 没有生产者**：`pi-shell/src` 有 716 处 `x.ai/…` 字面量、0 处 `pi/…`；pager 非测试代码用到 8 个 `pi/*` 名称（`currentModelId`、`currentModelDisplayName`、`provider`、`session`、`session/delete`、`session/update`、`tool`、`yolo_mode_changed`），另有 36 个只出现在测试里（`pi/queue/changed`、`pi/mcp/*`、`pi/scheduled_task_*`、`pi/session/interjection`、`pi/task_*` 等）；Python 只涉及 4 个。出站 `x.ai/*` 被 `pi-acp-lib/src/channel.rs:18,72` 丢弃，入站被 `pi-pager/src/acp/vendor.rs:8-11` 过滤。每一个 `pi/*` 的 Python 实现都是**新设计**，不是「补齐」。
+- **`initialize._meta`**：pager 读取 `modelState`、`grokShell`、`availableCommands`、`cancelRewind`、`sessionRecap`、`feedbackTraceOffer`（`acp/mod.rs:527-590`），Python 一个都不给。
+
+### 4.5 验证基础设施与文档
+
+- `.github/workflows/ci.yml` 只有 `lint`（ruff）与 `test`（pytest），**没有 cargo job**；`release.yml` 仅 `v*` tag 触发 `cargo build --profile release-dist -p pi-pager-bin`（Linux + macOS arm64），不跑测试。PTY e2e crates 在 fork 时已删（`tui/NOTICE:39-40`）；`pi-pager/tests/scenarios/` 的 46 个 YAML 场景中 45 个依赖 Rust 侧 `mock:` 模型且无 runner；Rust 代码里没有任何测试 spawn Python agent 或 mock ACP agent。没有删除前的基线。Rust 测试量级（`#[test]` 计数，近似）：`pi-pager` 9.3k（93 ignored）、`pi-shell` 6.6k（122 ignored）、`pi-tools` 3.1k、`pi-workspace` 1.9k。toolchain 固定 1.94.0（`tui/rust-toolchain.toml`），AGENTS.md 约定在 WSL 验证。
+- 陈旧文档：内嵌 user-guide（`pi-pager/docs/`，38 个 md，仍是 Grok 原文，命令名 `grok`，`15-agent-mode.md` 描述 `grok agent … leader`）经 `include_str!` 编入二进制，每次启动由 `extract_user_guide_docs`（`main.rs:508`）写入 `<grok_home>/docs/user-guide/`，Python 侧没有消费者，`app/status_line_tests.rs:358,403,450` 还把 `25-status-line.md` 当测试夹具；`tui/NOTICE` 仍写「Product binary is `pi` (`pi-grok-pager-bin`)」；`packages/pi-agent-cli/AGENTS.md` 称 `config.toml` 含 Python-only 键会破坏 TUI 解析（Rust 侧未找到 `deny_unknown_fields`，需实测）；`docs/TUI-AND-CODE-AGENT.md` 把 MCP 列在 TUI 能力里（Python 忽略 `mcp_servers`），且 ACP 链接指向 `anthropics/agent-protocol`。
+
+### 5. 改动规模
+
+**口径**：`pi-shell/src` 非测试代码 265.6k 行 / 234 个单元（深度 ≤ 2 的模块路径）；含测试文件共 379.6k 行（其中测试文件 113.8k），另有集成测试 20.3k 行 / 55 文件。「可删」= runtime 禁用集 + 禁用后不再被 pager 根引用可达的单元。**模块级、类型引用也算边，是上界估计**；须由阶段 A / B 的编译结果校正。
+
+| 对象 | 规模（非测试） | 处理 |
+|---|---|---|
+| runtime 禁用集（24 个单元） | 78.6k 行：`session::acp_session_impl` 40.5k、`agent::mvp_agent` 15.8k、`leader` 8.7k（8 个单元）、`agent::subagent` 8.1k、`agent::app` 2.1k、shell `tools` 2.4k、`sampling` 1.0k | 删除 |
+| 连带不可达（70 个单元） | 34.4k 行：`extensions::suggest` 3.8k、`session::worktree_pool` 2.4k、`inspect` 2.3k、`session::compaction` 2.3k、`session::acp_conversion` 1.3k、`session::goal_strategist` 1.3k 等 | 删除 |
+| **`pi-shell` 可删合计** | **113.0k 行（43%）**；存活 152.6k 行（57%） | |
+| `pi-sampler` | 12.5k 行（另有测试 1.8k） | 删除 |
+| pager 死代码 | 约 19.8k 行：8 个无入口模块 4.6k、`headless*` 7.5k、白名单外斜杠命令模块约 7.7k | 删除 |
+| **Rust 删除合计** | **约 145k 行**，另有与之对应的测试（含 5 个 `test_leader_*.rs`、`app/leader_cluster`） | |
+| 需编辑的 cut point | 存活的 `pi-shell` 单元里引用 runtime 禁用集的有 **24 个**：`agent`、`agent::config`、`agent::config_model_override_parse`、`agent::init`、`agent::model_providers`、`agent::models`、`agent::server`、`config`、`extensions::notification`、`remote::client`、`remote::pull`、`session::acp_session`、`session::agent_rebuild`、`session::feedback_manager`、`session::goal_planner`、`session::handle`、`session::helpers`、`session::image_describe`、`session::memory`、`session::persistence`、`session::storage`、`session::summary`、`upload::trace`、`util::config`。其中 provider 栈类型渗透 28 个单元 / 46 文件 / 169 处。阶段 A 删除 pager 死代码后 cut point 仍是 24 个（只多释放约 1.0k 行），所以阶段 B 的工作量不会被阶段 A 摊薄 | 编辑 |
+| pager 侧需编辑的引用 | `MvpAgent` 8 文件 / 12 处、`run_*` 1 / 5、leader 7 / 27、`sampling` 17 / 26、shell `tools` 4 / 4 | 编辑 |
+| Python | 仅 `pi_agent_cli` 的 ACP 投影（§7 阶段 1），不改 `pi_agent_core` / harness | 新增 / 修改 |
+
+**第二梯队（阶段 D，决策门控）**：存活的 152.6k 行里，`session`（68.3k）与 `auth`（18.0k）最大。ADR1（纯 ACP）落地后 `session::{storage,persistence,unified_list}` 及 `relay` 约 16.6k 行不再可达；放弃 xAI auth 层（Phase 4 §4 已要求跳过登录，但 pager 仍有 `GateInfo` / `AuthMeta` / `AuthManager` 约 30 处 / 14 文件引用）约 18.1k 行。两者合计存活 152.6k → 117.9k 行。
+
 ## 修订记录
 
 - r1：初稿（仅建分支并新增计划文档，未改 runtime 实现）。
@@ -1195,4 +1263,4 @@ Rust（pager）：
 - r8：在 WSL2（Ubuntu 24.04，内核 5.10，没有 Landlock）上补 Linux 一侧的实测，拆成 8 个提交（分支 `codex/linux-wsl-r8`，走 PR 合入）。做了：退出矩阵（会话首进程 / shell 作业 × 双击 Ctrl+Q、`kill -9`、SIGTERM、SIGHUP、关终端、Ctrl-C，含沙箱下；空闲、CPU 占满、cargo 构建三种负载；1.R3 ③ 的 Linux 部分）、0.9 的六项、PTY 烟测 18/18、`doctor_cmd::` 去掉 `skip`（12 个通过；8 个 suite 7,456 通过，等于 CI 的 7,444 加这 12 个）、Python 全量 pytest（第一轮 Linux 2,135 通过；六件事做完之后 Linux 2,160、Windows 2,156）、74 个未选入 suite 的 crate 的分诊。修了三处：沙箱的 bwrap re-exec 缺 `--die-with-parent`（只杀 bwrap 会把 zypi、agent 与工具整棵树留下）；`media` 用例对 10 ms 时钟刻度的时间假设（`CONFIG_HZ=100` 上 30 次失败 26 次）；`pi-pager-minimal` 的一个用例缺 `test_lock()`（默认线程数下 30 次失败 25 次）。更正了 1.R3 ① 的前提：agent 的 `stderr` 在 TUI 里是 `/dev/null`，不是继承终端。第一轮留下了几处（`-p` 孤儿、沙箱静默降级、`stderr` 去向、`zypi export`），用户随后选了前三处，加上 CI 清单、PTY 脚本入库、清理 WSL，都做了：`-p` 只杀 zypi 时 agent 与工具不再残留（`PI_AGENT_PARENT_PID` + Python 一侧监视父进程，`-p` 也处理 SIGTERM / SIGHUP；`print_exit.py` 4/4）；Landlock 缺失时沙箱不再静默降级（启动时 `stderr` 一行警告，欢迎页与状态栏标 `sandbox:<profile> (not enforced)`）；agent 的 `stderr` 落到 `<home>/logs/agent.stderr.log`（0600、追加、超过 1 MiB 轮转）；CI 清单去掉 `doctor_cmd::` 的 `skip` 并加 `pi-pager-render`、`pi-pager-minimal`（10 个 suite，8,633 通过 / 1 个已知失败）；PTY 驱动脚本入库为 `scripts/tui_pty/`（`smoke.py` 23/23，沙箱下 26/26，退出矩阵 12/12 与 14/14）；WSL 里的克隆、构建产物与日志清掉了。没做：`zypi export` 读不到 Python 会话（用户选了不动）；Landlock 层、Windows 与 MCP 子进程未验证；清单的新内容要等第一次 CI 运行证实；PR #9 的第一次运行已证实：8,633 通过，两个新 suite 的数与 WSL2 一致，只有 `doctor_cmd::` 的一个用例在没有录音程序的 runner 上失败（已修，r8 写的「`doctor_cmd::` 不需要音频设备」不对）。见 §10.10 的「CI 结果」。
 - r9：在 PR #9 之上补阶段 0 的收尾与阶段 1 里不需要拍板的部分，分支 `codex/phase1-contract-docs`（16 个提交，叠在 PR #9 的 `d84d98a` 之上，**没有推送**）。用户在「接下来处理什么」之后选了四件：`e2e`、`p0_gate`、`free_p1`、`ci_pr`；没有选 `decide`，所以每一项会改变行为的决定都只写成提议（§10.11 末尾「留给用户决定的」十二项），一项也没有动手。做了：① PR #9 的第二次 CI 运行（`d84d98a`）全绿，10 个 suite 合计 8,634 通过 / 0 失败 / 22 忽略，每个都等于清单里的 `reference_passed`；② 0.3 的 Rust 一侧——`python_agent_e2e.rs`（10 个用例，pager 的 ACP client 对着真的 Python agent），接进 `tui-ci.yml`；它第一次跑就抓出两个产品 bug（agent 起不来时的原因被吞成 `channel closed`；agent 一启动就退出时 `connect()` 挂住），修在 `affda9e`；③ 0.7——会话列表与 `session/load` 的延迟实测并修掉读盘的慢点（1,000 个会话、Windows：首页 2.0 s → 0.11 s，`session/load` 2.0 s → 0.12 s），pager 一侧 13 处读盘调用、8 个文件的清单，13 例 PTY 验收矩阵（9 PASS / 4 GAP），ADR1 的落地设计（流程、逐旗标、沙箱顺序、PR 切分、验收），覆盖条件没有触发；④ 0.8——附录 A 定稿（A.1 能力矩阵逐行标「已定」「提议」「未定」，A.2 ACP 版本配对与升级策略，A.3 逐方法的两端支持情况，A.4 是 r5 的执行结果），其间实测了权限模式（12 个场景）：Plan 不限制任何东西，Auto 在 Python 里等于 Always-Approve，设置里的 Default 被 Python 丢掉，`--permission-mode` 的六个值里只有 `bypassPermissions` 有效，`--system-prompt-override` / `--rules` / `--allow` / `--deny` 到不了 Python；⑤ 阶段 1 的免决策项——1.P1（pager 跟 `nextCursor`、Python 分页）、1.P4（pager 不再发 `mcp_servers`，Python 说明被忽略的）、1.P7 的余项（权限往返与 cancel 的线上用例）。验证：Python 全量 pytest（Linux 2,352 通过、Windows 2,351 通过）、10 个 suite 整套 8,659 通过 / 0 失败 / 22 忽略（WSL2，其中 `pi-pager` 5,602）、Ruff。没做：所有改变行为的决定；本分支的 CI 运行（清单里 `pi-pager` 的 5,602 与新的 e2e 安装步骤要等第一次运行证实）；Windows 与 macOS 上的 e2e 与 PTY 脚本。见 §10.11。
 - r10：r9 的分支在 r10 开头推成了 PR [#10](https://github.com/zy1233/pi-python/pull/10)（上面写的「没有推送」是 r9 当时的状态）；在它之上按用户的选择（`push_pr`、`adr1_pr1`、`mode_a`）做了两件事，各在一个分支上，做完时都只在本地。① `adr1_pr1`：ADR1 的 PR 1，分支 `codex/adr1-pr1-python`（PR #11）——Python 兑现 `session/new` 的 `_meta.sessionId`（规范成小写带连字符的 UUID；别的值与已用的 id 都以 `invalid_params` 拒绝；同一个 id 的并发请求由进程内的锁串行），`session/new` / `load` / `resume` 的响应带 `_meta["pi/cwd"]`（保存的工作目录压过客户端传的）；harness 新增 `JsonlSessionRepo.has_session`——第一版用 `find` 检查「没人用的 id」，5,000 个会话时要 1.7 s，改成只打开名字对得上的文件后约 0.3 s，剩下的成本是 `list_dir` 给每个条目造 `FileInfo`（新提议 13，没有动）。27 个新测试、11 个变异检查全部被抓住；恢复矩阵由 9 PASS / 4 GAP 变成 10 / 3。验证：Python 全量 pytest（Windows 2,378 通过、Linux 2,379 通过）、Ruff。没做：pager 不读 `pi/cwd`、不预检 `--session-id` 的重复（PR 2）；两个 agent 进程共用一个 home 时的并发。见 §10.12。② `mode_a`：1.P3 的 (a)，分支 `codex/phase1-mode-a`（叠在 `codex/adr1-pr1-python` 之上，PR #12）——`zypi` 只提供 Python agent 真会照做的权限模式。Plan（不限制任何东西）、Auto（等于 Always-Approve，界面却承诺分类器）、设置页的 Default（被 Python 丢掉）藏在 `app/agent_modes.rs` 的三个常量后面：Shift+Tab 只在 Normal ↔ Always-Approve 之间切；设置页没有 Plan mode 行，权限选择器只剩 Ask / Always approve；存着的 `auto` / `default` 显示成 Ask（文件不改）；`--permission-mode` 只收 `default` 与 `bypassPermissions`，另外四个值以退出码 2 拒绝并说明原因。Python 一侧没动；被藏起来的代码与旧测试还在（夹具把门打开），翻一个常量就能让某个模式带着自己的测试回来。24 个新 Rust 测试（`pi-pager` 5,602 → 5,626，10 个 suite 合计 8,683 通过 / 0 失败 / 22 忽略）；12 个变异检查全部被抓住（其中一个 e2e 用例原来看不见选择器里排在 Ask 前面的 Default，补了 Up；第一个 M5 的写法让 rustc 1.94.0 崩了，换了写法）；真 zypi 上的 `mode_probe.py` 改成 10 个场景加 4 个被拒绝的值与设置页的检查，结果都如预期。验证：Python 全量 pytest（Windows 2,382 通过、Linux 2,383 通过）、Ruff（0.16.10 与 CI 钉的 0.16.0）。这一轮开头 PR #10 的 CI 也跑完了，证实了 r9 留下的数（见 §10.12）。没做：Python 一侧的 `auto` 怎么定义、真的 Plan（决定 7 的 (b)、(c)）；设置页里其余可能无效的权限项（候选 14）；内嵌用户指南与 `--no-plan` 里关于 Plan 的旧说明；macOS 与 Windows 上的 zypi。见 §10.13。③ 收尾：用户选了 `push_stack`，并要求「同步 main 到 origin，然后合并 3 个处理过的 PR」。栈里实际有四个 PR——[#9](https://github.com/zy1233/pi-python/pull/9)、[#10](https://github.com/zy1233/pi-python/pull/10) 和这两个新开的 [#11](https://github.com/zy1233/pi-python/pull/11)、[#12](https://github.com/zy1233/pi-python/pull/12)，下面的 PR 不合并，上面的就没有可合并的基础，所以按四个处理：自下而上逐个 squash 合并（#7、#8 的惯例），每个合并前先把 base 改成 `main`，合并后核对 `main` 的树与该分支的树相同。本地 `main` 比 `origin/main` 多的 9 个提交，除一个已被 #9 里修订过的文档取代的之外都已在 #9 的分支里，所以没有直接推 `main`；合并完把本地 `main` 对齐 `origin/main`，旧的 `main` 留在一个备份分支上。实际过程：#9 先合并（`60033a4`）。#10 随后冲突了——#9 是 squash，#10 的分支里还是 #9 原来的提交，两边在相近的行上都改过（改法相同），git 算作冲突。解法是在 #10 的分支里合并一次 `main`（`-s ours`：`main` 的树就是 #9 最后一个提交的树，没有什么是分支没有的，分支的树不变），再 squash 合并（`1dcfcaf`）。#11、#12 每个都在前一个合并之后 `rebase --onto origin/main <原来的 base 提交>`（树不变）、改 base 为 `main`、再 squash 合并（#11 是 `e60ae25`）。每次合并后都核对了 `main` 的树与该分支的树相同。教训：叠起来的 PR 用 squash 合并时，下一个 PR 要先对齐 `main`，直接改 base 会冲突（用「合并提交」合并下面的 PR 则不会，因为提交的身份保留了）。CI：#10（合并 `main` 之后的 `b0d001b`）、#11、#12 在各自推送时的提交上都是全绿，#12 的数与本地一致（`docs/baselines/tui.md`）；重新对齐之后的提交树与已经绿了的相同，没有再等它们的 CI，合并后 `main` 上的那次运行是最后的核对。
-- 整理（r10 之后，2026-10-11）：计划与执行记录分开存放。本文件收下计划里的 §10 执行记录、附录 A.4、附录 B 和这份修订记录；计划 §7 的逐项注释与 §8 的 R5 一行、计划头部的状态文字，原样存入附录 C、附录 D。计划里的 §7 改成每项一行状态，另加「当前状态」「待决策」和 §10 索引。只搬，没有删。
+- 整理（r10 之后，2026-10-11）：计划与执行记录分开存放。本文件收下计划里的 §10 执行记录、附录 A.4、附录 B 和这份修订记录；计划 §7 的逐项注释与 §8 的 R5 一行、计划头部的状态文字，原样存入附录 C、附录 D；计划 §4、§5（r2 的源码事实基线与改动规模估计）原样存入附录 E。计划里的 §7 改成每项一行状态，§4、§5 只留索引，另加「当前状态」「待决策」和 §10 索引。只搬，没有删。
