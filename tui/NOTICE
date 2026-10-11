@@ -1,7 +1,7 @@
 Apache License 2.0 — NOTICE
 ===========================
 
-This directory (tui/) is a vendored fork of Grok Build:
+This directory (tui/) is a hard fork of Grok Build:
 
     https://github.com/xai-org/grok-build
     Copyright 2023-2026 SpaceXAI
@@ -10,34 +10,73 @@ This directory (tui/) is a vendored fork of Grok Build:
 It is not the official Grok Build product and is not affiliated with,
 endorsed by, or maintained by SpaceXAI / xAI.
 
-Upstream identifiers
---------------------
+Hard fork
+---------
+
+This fork does not follow upstream. Nobody merges upstream changes into it.
+The code, the crate names and the behavior already differ from upstream, and
+the difference grows with each commit. Do not expect a change in upstream to
+apply here.
+
+Upstream identifiers (the state at the time of the fork):
 
 - grok-build git commit (GitHub, depth-1 clone used for this vendor):
   c2ad97f87aea4303b6000a2c22128bc91ee76c9b
 - Upstream SOURCE_REV (SpaceXAI monorepo SHA, also in this directory):
   437c7c928f3fcd13e9d37a51d887f41d7f84185d
 
+The product
+-----------
+
+The product binary is `zypi` (Cargo package `pi-pager-bin`). It is a terminal
+UI. It starts the Python agent (`python -m pi_agent_cli`) and talks to it over
+standard ACP on stdio. Override the command with `PI_AGENT_COMMAND` or
+`PI_PYTHON`. The home directory is `PI_HOME` (`GROK_HOME` is still read when
+`PI_HOME` is not set), or `~/.pi-python`.
+
 Modifications relative to upstream
 ----------------------------------
 
-Tracked in the pi-python git history under tui/. At vendor time:
+Every change is in the pi-python git history under tui/. This list is a
+summary of the changes (Apache License 2.0, section 4(b)). The plan
+docs/PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md and its execution log give the
+details of each removal.
 
-- Relocated the Cargo workspace from the grok-build repository root into
-  tui/ of the pi-python monorepo.
-- Added this NOTICE and .gitattributes (LF for shebangs / Rust sources)
-  so Windows checkouts do not break bin/protoc.
+- At vendor time: moved the Cargo workspace from the root of the grok-build
+  repository into tui/ of the pi-python monorepo. Added this NOTICE and
+  .gitattributes (LF for shebangs and Rust sources, so that Windows checkouts
+  do not break bin/protoc). Removed the PTY e2e crates (`ptyctl`,
+  `ptyctl-cli`, `pi-grok-pager-pty-harness`).
+- Replaced the in-process Rust agent runtime with the Python agent. Removed
+  the `pi-sampler` crate and the runtime parts of `pi-shell` (model sampling,
+  the agent loop, the leader process, headless mode). The pager now only
+  speaks standard ACP to the agent.
+- Removed the screens, commands and crates that need that runtime (for
+  example: the agents, subagents, tasks, workflows, goals and MCP screens,
+  hooks and plugins, rewind and fork, the dashboard). The slash commands are
+  limited to a short fixed list.
+- Renamed the crates from `xai-grok-*` to `pi-*` (for example, the product
+  crate is now `pi-pager-bin`). Renamed the product to `zypi`. Changed the
+  names that a user sees (themes, notifications, paths, help text).
+- Reduced the embedded user guide to the pages that describe `zypi`. `zypi`
+  no longer writes the guide to disk at start.
+- Added tests and tools for the ACP link between the pager and the Python
+  agent (see scripts/tui_baseline.py, scripts/tui_pty/ and
+  crates/codegen/pi-pager/tests/python_agent_e2e.rs).
 
-Phase 4 fork changes (also in git history under tui/):
-
-- Interactive spawn is `python -m pi_agent_cli` over standard ACP stdio
-  (override with `PI_AGENT_COMMAND` / `PI_PYTHON`). Home is `PI_HOME` /
-  `GROK_HOME` / `~/.pi-python`.
-- Outbound `x.ai/*` / `_x.ai/*` extension RPCs are dropped in `acp_send`
-  so they never reach the Python agent. Vendor `_meta` keys are not
-  written on initialize / session create.
-- Product binary is `pi` (`pi-grok-pager-bin`). PTY e2e crates
-  (`ptyctl`, `ptyctl-cli`, `pi-grok-pager-pty-harness`) were removed.
+Third-party notices
+-------------------
 
 See LICENSE (Apache-2.0) and THIRD-PARTY-NOTICES in this directory.
+THIRD-PARTY-NOTICES lists the packages that ship in `zypi`. Keep it in step
+with Cargo.lock with scripts/tui_notices.py:
+
+    python scripts/tui_notices.py check             # exit 1 on a difference
+    python scripts/tui_notices.py update --write    # fix the difference
+
+Run these commands where cargo is installed (for example WSL). The script
+describes the method in its docstring. A person must read each new entry that
+it marks "needs review". The script does not change the hand-written sections
+of THIRD-PARTY-NOTICES.
+
 The rest of the pi-python repository (Python packages) is MIT.
