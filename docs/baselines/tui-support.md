@@ -2,7 +2,7 @@
 
 This file is generated. Do not edit it by hand.
 
-- Command: `python scripts/tui_callgraph.py keep`. Commit: `214c553`.
+- Command: `python scripts/tui_callgraph.py keep`. Commit: `24907ef`.
 - Run the command again after a change that moves code between modules or crates.
 - It replaces the hand-written list of examples in item 0.5 of
   [`PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`](../PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md).
@@ -15,20 +15,23 @@ This file is generated. Do not edit it by hand.
 - The numbers are an estimate. A `use` counts. A type in a signature counts.
   A macro that reaches code without a name does not count.
 - A *dead* unit is a candidate for deletion, not proof. Delete it, then run `cargo check`.
+- *Check first* counts the dead units that have `impl` blocks for types that other units define.
+  Code uses such an impl without a name (`?` calls `impl From<A> for B`), so the compiler may
+  need the unit.
 - Method, limits and flags: the docstring of `scripts/tui_callgraph.py`.
 
 
 ## Summary
 
-| crate | non-test lines | live | dead | dead units | provider-stack references |
-|---|---|---|---|---|---|
-| `pi-shell` | 40,985 | 39,979 (98%) | 1,006 (2%) | 7 | 32 |
-| `pi-sampling-types` | 12,043 | 12,024 (100%) | 19 (0%) | 1 | 1 |
-| `pi-tools` | 130,727 | 130,234 (100%) | 493 (0%) | 3 | 1 |
-| `pi-agent` | 22,902 | 22,878 (100%) | 24 (0%) | 1 | 5 |
-| `pi-workspace` | 81,282 | 79,241 (97%) | 2,041 (3%) | 3 | 0 |
-| `pi-hooks` | 9,026 | 4,687 (52%) | 4,339 (48%) | 5 | 0 |
-| `pi-mcp` | 8,616 | 8,577 (100%) | 39 (0%) | 1 | 0 |
+| crate | non-test lines | live | dead | dead units | check first | provider-stack refs |
+|---|---|---|---|---|---|---|
+| `pi-shell` | 40,985 | 39,979 (98%) | 1,006 (2%) | 7 | 1 | 32 |
+| `pi-sampling-types` | 12,043 | 12,043 (100%) | 0 (0%) | 0 | 0 | 1 |
+| `pi-tools` | 130,727 | 130,407 (100%) | 320 (0%) | 2 | 1 | 1 |
+| `pi-agent` | 22,902 | 22,878 (100%) | 24 (0%) | 1 | 0 | 5 |
+| `pi-workspace` | 81,282 | 80,820 (99%) | 462 (1%) | 1 | 0 | 0 |
+| `pi-hooks` | 9,026 | 4,687 (52%) | 4,339 (48%) | 5 | 0 | 0 |
+| `pi-mcp` | 8,616 | 8,577 (100%) | 39 (0%) | 1 | 0 | 0 |
 
 ## Per crate
 
@@ -44,6 +47,8 @@ Non-test code: 40,985 lines in 73 units.
 Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampling`): 11 live units, 14 files, 32 references: `agent::config` (1), `agent::model_providers` (1), `extensions::notification` (5), `remote::client` (9), `sampling` (1), `sampling::conversation` (1), `sampling::types` (1), `session::persistence` (1), `session::storage` (10), `session::workflow` (1), `util::config` (1).
 
 Dead units (nothing live refers to them): `auth::flow` (45), `config::reloader` (77), `session::events` (589), `session::telemetry` (174), `session::unified_list` (103), `upload` (1), `upload::turn` (17).
+
+Check these dead units first. Each has `impl` blocks for types that other units define, and code uses an impl without naming it, so the compiler may need the unit: `session::events` (`GoalClassifierVerdictTelemetry`).
 
 <details><summary>Live units</summary>
 
@@ -124,12 +129,10 @@ Non-test code: 12,043 lines in 12 units.
 
 | | units | lines | share |
 |---|---|---|---|
-| live | 11 | 12,024 | 100% |
-| dead | 1 | 19 | 0% |
+| live | 12 | 12,043 | 100% |
+| dead | 0 | 0 | 0% |
 
 Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampling`): 1 live units, 1 files, 1 references: `<root>` (1).
-
-Dead units (nothing live refers to them): `serde_helpers` (19).
 
 Unresolved: 4 references from outside name nothing that is a unit here (an item of the root file, a glob re-export, or a macro): CompactionsRemaining::Dynamic (1), DanglingToolCallReason::HarnessHalted (1), HostedTool::WebSearch (1), HostedTool::XSearch (1).
 
@@ -148,6 +151,7 @@ Unresolved: 4 references from outside name nothing that is a unit here (an item 
 | `conversation::responses` | 374 | 0 |
 | `conversation::chat_completions` | 314 | 0 |
 | `<root>` | 35 | 60 |
+| `serde_helpers` | 19 | 0 |
 
 </details>
 
@@ -157,12 +161,14 @@ Non-test code: 130,727 lines in 89 units.
 
 | | units | lines | share |
 |---|---|---|---|
-| live | 86 | 130,234 | 100% |
-| dead | 3 | 493 | 0% |
+| live | 87 | 130,407 | 100% |
+| dead | 2 | 320 | 0% |
 
 Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampling`): 1 live units, 1 files, 1 references: `implementations::web_search` (1).
 
-Dead units (nothing live refers to them): `implementations::editor_infra` (276), `types::error` (44), `util::serde_base64` (173).
+Dead units (nothing live refers to them): `implementations::editor_infra` (276), `types::error` (44).
+
+Check these dead units first. Each has `impl` blocks for types that other units define, and code uses an impl without naming it, so the compiler may need the unit: `types::error` (`ToolError`).
 
 <details><summary>Live units</summary>
 
@@ -226,6 +232,7 @@ Dead units (nothing live refers to them): `implementations::editor_infra` (276),
 | `reminders` | 189 | 4 |
 | `util::remap` | 180 | 0 |
 | `util::shared_http` | 179 | 0 |
+| `util::serde_base64` | 173 | 0 |
 | `util::binary` | 163 | 0 |
 | `retry` | 154 | 0 |
 | `normalization` | 152 | 0 |
@@ -313,10 +320,10 @@ Non-test code: 81,282 lines in 77 units.
 
 | | units | lines | share |
 |---|---|---|---|
-| live | 74 | 79,241 | 97% |
-| dead | 3 | 2,041 | 3% |
+| live | 76 | 80,820 | 99% |
+| dead | 1 | 462 | 1% |
 
-Dead units (nothing live refers to them): `hub_auth` (820), `hub_auth::proactive` (759), `publish` (462).
+Dead units (nothing live refers to them): `publish` (462).
 
 <details><summary>Live units</summary>
 
@@ -350,8 +357,10 @@ Dead units (nothing live refers to them): `hub_auth` (820), `hub_auth::proactive
 | `file_system::client_fs` | 915 | 0 |
 | `recovery` | 887 | 0 |
 | `permission::types` | 859 | 4 |
+| `hub_auth` | 820 | 0 |
 | `session::checkpoint_store` | 794 | 0 |
 | `session::swap_policy` | 779 | 0 |
+| `hub_auth::proactive` | 759 | 0 |
 | `export_github` | 753 | 0 |
 | `envrc` | 737 | 1 |
 | `upload` | 673 | 0 |
@@ -369,7 +378,7 @@ Dead units (nothing live refers to them): `hub_auth` (820), `hub_auth::proactive
 | `permission::rules` | 375 | 1 |
 | `file_system::codebase_index` | 358 | 0 |
 | `file_system::walk` | 344 | 0 |
-| `file_system` | 334 | 5 |
+| `file_system` | 334 | 6 |
 | `capability` | 333 | 0 |
 | `file_system::content` | 301 | 0 |
 | `file_system::git_status` | 294 | 0 |

@@ -376,6 +376,112 @@ def test_crate_graph_counts_the_provider_stack_per_unit(tui):
     assert off.leak == {}
 
 
+def test_a_path_in_an_attribute_string_is_a_reference(tui):
+    # `serde(with = "crate::tested")` names the module inside a string, but the attribute is code
+    _write(
+        tui / "crates" / "mid" / "src" / "alpha.rs",
+        """
+        pub struct S {
+            #[cfg_attr(feature = "serde", serde(with = "crate::tested"))]
+            #[serde(default = "leaf::exclusive::x")]
+            pub field: u8,
+        }
+        // serde(with = "crate::unused")
+        const NOTE: &str = "serde(with = \\"crate::deep::dead_inner\\")";
+        #[cfg(test)]
+        mod tests {
+            #[serde(with = "crate::deep::dead_inner")]
+            fn t() {}
+        }
+        pub fn run() {}
+        pub fn exported() {}
+        """,
+    )
+    ws = tg.load_workspace(tui)
+    g = tg.build_crate_graph(ws, "mid")
+    # the declaring root and `tested`; a comment, a string and a test item do not count
+    assert g.edges["alpha"] == {"<root>", "tested"}
+    assert ("leaf", ("exclusive", "x")) in g.xrefs["alpha"]  # a path into another crate too
+    reports = tg.analyse(ws, ["mid", "leaf"], live_crates=["app"])
+    assert "tested" in reports["mid"].live
+    assert "deep::dead_inner" in reports["mid"].dead
+    assert "exclusive" in reports["leaf"].live  # alpha is live, and it names leaf::exclusive
+
+
+def test_a_path_that_starts_at_a_child_module_is_a_reference(tui):
+    # no `use`: `child::f()` in the module that declares `child` (the 2018 edition allows it)
+    _write(
+        tui / "crates" / "mid" / "src" / "style18.rs",
+        """
+        pub mod child;
+        pub fn entry() {
+            child::f();
+            // child::g();
+            deep::child::h();
+            unused::thing();
+        }
+        """,
+    )
+    g = tg.build_crate_graph(tg.load_workspace(tui), "mid")
+    # `child` is a child of style18; `deep` and `unused` are not, and `deep::child` is a path
+    # into another module
+    assert g.edges["style18"] == {"<root>", "style18::child"}
+    # the crate root declares `unused`, so a bare `unused::thing()` there does name that unit
+    _write(
+        tui / "crates" / "mid" / "src" / "lib.rs",
+        (tui / "crates" / "mid" / "src" / "lib.rs").read_text(encoding="utf-8")
+        + "pub fn boot() { unused::thing(); }\n",
+    )
+    g = tg.build_crate_graph(tg.load_workspace(tui), "mid")
+    assert "unused" in g.edges["<root>"]
+
+
+def test_impl_blocks_for_types_that_other_units_define_are_found(tui):
+    _write(
+        tui / "crates" / "mid" / "src" / "deep" / "dead_inner.rs",
+        """
+        pub struct Own<T>(T);
+        impl<T> Own<T> {}
+        impl<F: Fn() -> u8> Own<F> where F: Clone {}
+        unsafe impl Send for Own<u8> {}
+        impl From<Own<u8>> for crate::alpha::Shared {}
+        impl<T: Into<String>> Marker for Vec<T> where T: Clone {}
+        impl<'a> Marker for &'a mut Other {}
+        impl<F: Fn() -> u8> Marker for F {}
+        impl Marker for (u8, u8) {}
+        pub fn takes(x: impl Iterator<Item = u8>) -> impl Fn() {}
+        #[cfg(test)]
+        mod tests {
+            impl Marker for Test {}
+        }
+        """,
+    )
+    # a unit whose only impl is for a generic type of its own: nothing foreign
+    _write(
+        tui / "crates" / "mid" / "src" / "unused.rs",
+        "pub struct Mine<T>(T);\nimpl<T> Mine<T> {}\npub fn thing() { leaf::exclusive::x(); }\n",
+    )
+    ws = tg.load_workspace(tui)
+    g = tg.build_crate_graph(ws, "mid")
+    # `Own` is defined here; a signature's `impl Trait` and a test module are not impl items
+    assert g.foreign_impls == {"deep::dead_inner": ["?", "F", "Other", "Shared", "Vec"]}
+    mid = tg.analyse(ws, ["mid"], live_crates=["app"])["mid"]
+    assert "deep::dead_inner" in mid.dead
+    assert mid.dead_impls == g.foreign_impls
+    assert tg.report_to_json(mid)["dead_impls"] == g.foreign_impls
+    assert "Check these dead units first" in tg.render_units_markdown(mid)
+    assert "`deep::dead_inner` (`?`, `F`, `Other`, `Shared`, `Vec`)" in tg.render_units_markdown(
+        mid
+    )
+    assert "check first): deep::dead_inner (?, F, Other, Shared, Vec)" in tg.render_units_text(mid)
+
+
+def test_a_dead_unit_without_foreign_impls_is_not_listed_apart(tui):
+    mid = tg.analyse(tg.load_workspace(tui), ["mid"], live_crates=["app"])["mid"]
+    assert mid.dead_impls == {}
+    assert "Check these dead units first" not in tg.render_units_markdown(mid)
+
+
 def test_analyse_follows_references_from_live_code_only(tui):
     ws = tg.load_workspace(tui)
     reports = tg.analyse(ws, ["mid", "leaf", "aliased-name"], live_crates=["app"])

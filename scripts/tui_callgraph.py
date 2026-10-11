@@ -30,6 +30,21 @@ It is an estimate, an upper bound on what is live. A path in a type position cou
 a ``use`` counts even when the name is never used, and a unit that a macro or a trait object
 reaches without naming it is missed. What it cannot resolve it reports (``unresolved``) rather
 than drop silently. The compiler has the last word: check a deletion with ``cargo check``.
+
+What counts as a reference, beyond a ``use`` statement: a path that starts with ``crate``,
+``self`` or ``super``; a path that starts at a child module of the module that writes it
+(``hub_auth::init_metrics()`` in ``lib.rs``); a path that starts at another crate; and a path
+inside a string of an attribute (``#[serde(with = "crate::util::serde_base64")]``). A reference
+in a comment, a string or a ``#[cfg(test)]`` item does not count.
+
+One thing it cannot see is an ``impl`` that code uses without a name (``?`` calls
+``impl From<A> for B``). A dead unit that has ``impl`` blocks for types it does not define is
+reported apart ("check first"). Items inside a live unit are out of scope: it finds modules, not
+functions.
+
+Check on the tree of 2026-10 (docs/PLAN/archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md
+section 10.14): the files of all 17 units reported dead were deleted from a copy; ``cargo check``
+failed for exactly one of them, and that one was in the "check first" list.
 """
 
 from __future__ import annotations
@@ -280,6 +295,41 @@ _PATH_MODULE = re.compile(
 _MACRO_EXPORT = re.compile(
     r"#\s*\[\s*macro_export\b[^\]]*\]\s*(?:#\s*\[[^\]]*\]\s*)*macro_rules!\s*([A-Za-z_]\w*)"
 )
+# A path written as a string in an attribute, which `mask_non_code` blanks:
+# `#[serde(with = "crate::util::serde_base64")]`. Read from the original text; the caller checks
+# that the attribute itself is code.
+_ATTRIBUTE_PATH_STRING = re.compile(
+    r"\b(?:with|serialize_with|deserialize_with|default|skip_serializing_if|from|into|try_from)"
+    r'\s*=\s*"([A-Za-z_]\w*(?:::[A-Za-z_]\w*)+)"'
+)
+# An `impl` item (at the start of a line; `-> impl Trait` in a signature is not one) up to its `{`.
+_IMPL_ITEM = re.compile(r"(?m)^[ \t]*(?:unsafe[ \t]+)?impl\b([^{};]*)\{")
+_TYPE_ITEM = re.compile(r"\b(?:struct|enum|union|trait|type)\s+([A-Za-z_]\w*)")
+_IMPL_TARGET = re.compile(
+    r"[&\s]*(?:'\w+\s+)?(?:mut\s+)?(?:dyn\s+)?([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)"
+)
+
+
+def impl_types(code: str) -> set[str]:
+    """The type each ``impl`` item in ``code`` is for (``impl Tr for Ty`` and ``impl Ty``).
+
+    The last segment of the path is the name; ``?`` stands for a type it cannot read (a tuple, a
+    slice, a macro variable).
+    """
+    names: set[str] = set()
+    for m in _IMPL_ITEM.finditer(code):
+        head = m.group(1).strip().replace("->", "--")  # the `>` of an arrow is not a bracket
+        if head.startswith("<"):  # the generics of the impl
+            depth = 0
+            for i, ch in enumerate(head):
+                depth += (ch == "<") - (ch == ">")
+                if depth == 0:
+                    head = head[i + 1 :].strip()
+                    break
+        after_for = re.search(r"\bfor\s+(?!<)(.*)$", head, re.S)  # not the `for<'a>` of a bound
+        target = _IMPL_TARGET.match(after_for.group(1) if after_for else head)
+        names.add(target.group(1).split("::")[-1] if target else "?")
+    return names
 
 
 def is_test_path(rel: str) -> bool:
@@ -397,6 +447,7 @@ class FileInfo:
     test_modules: list[tuple[str, str | None]]
     path_attributes: int
     path_modules: list[tuple[str, str]]  # (module name, file) of `#[path = "file"] mod name;`
+    attribute_paths: list[tuple[str, ...]] = field(default_factory=list)  # `with = "a::b"`
 
 
 @dataclass
@@ -417,6 +468,8 @@ class CrateGraph:
     module_aliases: dict[tuple[str, ...], tuple[str, ...]] = field(default_factory=dict)
     leak: dict[str, list[int]] = field(default_factory=dict)  # unit -> [files, hits]
     path_attributes: dict[str, int] = field(default_factory=dict)  # unit -> `#[path]` count
+    # unit -> types its `impl` blocks are for, when the unit does not define them (see `impl_types`)
+    foreign_impls: dict[str, list[str]] = field(default_factory=dict)
     test_files: int = 0
 
     @property
@@ -454,6 +507,11 @@ def _read_files(src: Path) -> list[FileInfo]:
                     (m.group(2), m.group(1))
                     for m in _PATH_MODULE.finditer(original)
                     if code[m.start()] == "#"  # code, not a comment, a string or a test item
+                ],
+                attribute_paths=[
+                    tuple(m.group(1).split("::"))
+                    for m in _ATTRIBUTE_PATH_STRING.finditer(original)
+                    if code[m.start()] != " "  # the attribute is code, not text or a test item
                 ],
             )
         )
@@ -502,9 +560,18 @@ def build_crate_graph(
     files = _read_files(crate.src)
     graph.test_files = sum(f.test for f in files)
     prod = [f for f in files if not f.test]
+    defined: dict[str, set[str]] = collections.defaultdict(set)
+    implemented: dict[str, set[str]] = collections.defaultdict(set)
     for f in prod:
         unit = "::".join(f.mod_path[:depth]) or ROOT_UNIT
         graph.loc[unit] = graph.loc.get(unit, 0) + f.loc
+        defined[unit].update(_TYPE_ITEM.findall(f.code))
+        implemented[unit].update(impl_types(f.code))
+    graph.foreign_impls = {
+        unit: sorted(names - defined[unit])
+        for unit, names in implemented.items()
+        if names - defined[unit]
+    }
 
     children: dict[tuple[str, ...], set[str]] = collections.defaultdict(set)
     for f in files:
@@ -552,6 +619,18 @@ def build_crate_graph(
                 (m.group(1), *[s for s in m.group(2).split("::") if s])
                 for m in foreign.finditer(body)
             ]
+        # `child::init()` in a module that declares `child`: a path may start at a child module.
+        if kids := children.get(f.mod_path):
+            child_path = re.compile(
+                r"(?<![\w:])("
+                + "|".join(re.escape(k) for k in sorted(kids))
+                + r")((?:::[A-Za-z_]\w*)+)"
+            )
+            inline += [
+                (m.group(1), *[s for s in m.group(2).split("::") if s])
+                for m in child_path.finditer(body)
+            ]
+        inline += f.attribute_paths
         return leaves, inline
 
     for f in prod:
@@ -671,6 +750,8 @@ class CrateReport:
     unresolved: dict[str, int]  # names reached from outside that match no unit
     path_attributes: int
     test_files: int
+    # dead unit -> types its `impl` blocks are for that it does not define: "check first"
+    dead_impls: dict[str, list[str]] = field(default_factory=dict)
 
     @property
     def live_lines(self) -> int:
@@ -773,13 +854,14 @@ def analyse(
         graph = graphs[name]
         gone = banned_units[name]
         cut = sorted(u for u in live[name] if graph.edges.get(u, set()) & gone)
+        dead = sorted(set(graph.loc) - live[name] - gone)
         reports[name] = CrateReport(
             crate=name,
             live_crate=name in tops,
             total_lines=sum(graph.loc.values()),
             loc=dict(graph.loc),
             live=sorted(live[name]),
-            dead=sorted(set(graph.loc) - live[name] - gone),
+            dead=dead,
             roots=dict(roots[name]),
             banned=sorted(gone),
             cut_points=cut,
@@ -787,6 +869,7 @@ def analyse(
             unresolved=dict(unresolved[name].most_common()),
             path_attributes=sum(graph.path_attributes.values()),
             test_files=graph.test_files,
+            dead_impls={u: graph.foreign_impls[u] for u in dead if u in graph.foreign_impls},
         )
     return reports
 
@@ -837,6 +920,9 @@ def render_units_text(report: CrateReport) -> str:
         lines.append(f"  #[path = ...] in non-test code: {report.path_attributes} (not followed)")
     if report.dead:
         lines.append("  dead units: " + ", ".join(f"{u} ({report.loc[u]:,})" for u in report.dead))
+    if report.dead_impls:
+        which = "; ".join(f"{u} ({', '.join(t)})" for u, t in report.dead_impls.items())
+        lines.append(f"  dead, with impls for types defined elsewhere (check first): {which}")
     return "\n".join(lines)
 
 
@@ -872,6 +958,17 @@ def render_units_markdown(report: CrateReport, *, level: int = 3) -> str:
     if report.dead:
         which = ", ".join(f"`{u}` ({report.loc[u]:,})" for u in report.dead)
         out += [f"Dead units (nothing live refers to them): {which}.", ""]
+    if report.dead_impls:
+        which = "; ".join(
+            f"`{u}` ({', '.join(f'`{t}`' for t in types)})"
+            for u, types in report.dead_impls.items()
+        )
+        out += [
+            "Check these dead units first. Each has `impl` blocks for types that other units "
+            "define, and code uses an impl without naming it, so the compiler may need the unit: "
+            f"{which}.",
+            "",
+        ]
     if report.unresolved:
         count = sum(report.unresolved.values())
         out += [
@@ -907,6 +1004,7 @@ def report_to_json(report: CrateReport) -> dict[str, Any]:
         "units": len(report.loc),
         "live": {u: report.loc[u] for u in report.live},
         "dead": {u: report.loc[u] for u in report.dead},
+        "dead_impls": report.dead_impls,
         "live_lines": report.live_lines,
         "dead_lines": report.dead_lines,
         "roots": report.roots,
@@ -1005,6 +1103,9 @@ This file is generated. Do not edit it by hand.
 - The numbers are an estimate. A `use` counts. A type in a signature counts.
   A macro that reaches code without a name does not count.
 - A *dead* unit is a candidate for deletion, not proof. Delete it, then run `cargo check`.
+- *Check first* counts the dead units that have `impl` blocks for types that other units define.
+  Code uses such an impl without a name (`?` calls `impl From<A> for B`), so the compiler may
+  need the unit.
 - Method, limits and flags: the docstring of `scripts/tui_callgraph.py`.
 
 """
@@ -1017,15 +1118,16 @@ def build_keep_document(
         ws, [c for c in crates if c in ws.crates], live_crates=live_crates, depth=depth
     )
     summary = [
-        "| crate | non-test lines | live | dead | dead units | provider-stack references |",
-        "|---|---|---|---|---|---|",
+        "| crate | non-test lines | live | dead | dead units | check first | provider-stack refs |",
+        "|---|---|---|---|---|---|---|",
     ]
     for r in reports.values():
         live = f"{r.live_lines:,} ({_pct(r.live_lines, r.total_lines)})"
         dead = f"{r.dead_lines:,} ({_pct(r.dead_lines, r.total_lines)})"
         hits = _leak_totals(r)[2]
         summary.append(
-            f"| `{r.crate}` | {r.total_lines:,} | {live} | {dead} | {len(r.dead)} | {hits} |"
+            f"| `{r.crate}` | {r.total_lines:,} | {live} | {dead} | {len(r.dead)} "
+            f"| {len(r.dead_impls)} | {hits} |"
         )
     parts = [
         KEEP_HEADER.format(
