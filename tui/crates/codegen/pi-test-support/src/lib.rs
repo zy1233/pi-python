@@ -3,7 +3,8 @@
 //!
 //! Provides:
 //! - [`MockInferenceServer`] — Mock /v1/chat/completions + /v1/responses with request logging
-//! - [`GrokStdioClient`] — ACP client that drives `grok agent stdio` as a subprocess
+//! - [`GrokStdioClient`] — ACP client that drives an agent binary in `agent stdio` mode
+//!   (the binary has no such mode now and nothing uses the client: plan phase D.5)
 //! - [`RawStdioClient`] — raw-wire ACP driver for bytes the typed client can't
 //!   produce (Foundation `\/` methods, string UUID ids)
 //! - [`TestSandbox`] — Own isolated paths, hermetic child env, optional git setup, diagnostics

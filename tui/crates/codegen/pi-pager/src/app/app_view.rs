@@ -922,10 +922,6 @@ pub struct AppView {
     pub(crate) screen_mode: super::ScreenMode,
     /// Pending in-process mode-switch target, consumed by the event loop.
     pub(crate) pending_screen_mode_switch: Option<super::ScreenMode>,
-    /// Onboarding tutorial overlay, if open. Top-level (not per-agent) so it
-    /// works over both the welcome screen and an agent session. Opened by
-    /// `/tutorial` (also in the command palette).
-    pub tutorial: Option<crate::views::tutorial::TutorialState>,
     /// Per-platform key event normalizer.
     ///
     /// NOTE: new event consumers that bypass `AppView::handle_input`
@@ -1297,7 +1293,6 @@ impl AppView {
             session_picker_grouped: false,
             scheduler_background_loops_seed: true,
             cancel_rewind_enabled: true,
-            tutorial: None,
             keyboard_normalizer: KeyboardNormalizer::from_terminal_context(),
             voice_mode_enabled: false,
             voice_ui_active: false,
@@ -1812,17 +1807,6 @@ impl AppView {
         }
         if let Event::Mouse(mouse) = ev {
             self.last_mouse_pos = Some((mouse.column, mouse.row));
-        }
-        if let Some(tutorial) = self.tutorial.as_mut()
-            && matches!(ev, Event::Key(_) | Event::Mouse(_) | Event::Paste(_))
-        {
-            match crate::views::tutorial::handle_tutorial_input(ev, tutorial) {
-                crate::views::tutorial::TutorialOutcome::Closed => {
-                    self.tutorial = None;
-                }
-                crate::views::tutorial::TutorialOutcome::Consumed => {}
-            }
-            return InputOutcome::Changed;
         }
         let zdr_blocked = self.is_zdr_blocked();
         let has_access = self.has_access();
@@ -3126,14 +3110,6 @@ impl AppView {
                                 },
                             );
                         }
-                        if let Some(tutorial) = self.tutorial.as_mut() {
-                            crate::views::tutorial::render_tutorial(
-                                f.buffer_mut(),
-                                view_area,
-                                tutorial,
-                                compact,
-                            );
-                        }
                         if let Some(fps) = &fps_overlay {
                             fps.render(full_area, f.buffer_mut());
                         }
@@ -3141,7 +3117,7 @@ impl AppView {
                             panel.render(full_area, f.buffer_mut());
                         }
                         let has_cloud_modal = false;
-                        let cursor = if has_cloud_modal || self.tutorial.is_some() {
+                        let cursor = if has_cloud_modal {
                             None
                         } else {
                             result.cursor_pos
@@ -3231,14 +3207,6 @@ impl AppView {
                                     status_line: status_line_frame.clone(),
                                 },
                             );
-                            if let Some(tutorial) = self.tutorial.as_mut() {
-                                crate::views::tutorial::render_tutorial(
-                                    f.buffer_mut(),
-                                    view_area,
-                                    tutorial,
-                                    compact,
-                                );
-                            }
                             if let Some(fps) = &fps_overlay {
                                 fps.render(full_area, f.buffer_mut());
                             }
@@ -3247,10 +3215,10 @@ impl AppView {
                             }
                             let (cursor_pos, post_flush) = result;
                             let has_cloud = false;
-                            if has_cloud || self.tutorial.is_some() {
+                            if has_cloud {
                                 link_spans.clear();
                             }
-                            let cursor = if has_cloud || self.tutorial.is_some() {
+                            let cursor = if has_cloud {
                                 None
                             } else {
                                 cursor_pos
@@ -3357,7 +3325,6 @@ impl AppView {
     fn is_scroll_blocking_modal_open(&self) -> bool {
         matches!(self.active_view, ActiveView::Agent(id) if self.agents.get(&id).is_some_and(|a| a.active_modal.is_some()))
             || self.welcome_doc_viewer.is_some()
-            || self.tutorial.is_some()
     }
     /// Store the resolved per-tip gates and propagate the prompt-relevant tips
     /// (undo + plan nudge) to every agent's prompt. Reused by startup and the

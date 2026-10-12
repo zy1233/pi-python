@@ -45,7 +45,7 @@ $env:PI_USE_MOCK = '1'   # omit for real LLM
 ### Config (`%USERPROFILE%\.pi-python\`)
 
 - **`agent.toml`** — Python ACP agent (`[model]`, `permission`, `[skills]`, `[agent].command`). Copy from `packages/pi-agent-cli/agent.example.toml`.
-- **`config.toml`** — Rust TUI / grok-shell only. Keep empty or use `packages/pi-agent-cli/config.toml.example`. Do **not** put `permission = "ask"` here (grok expects a `[permission]` table).
+- **`config.toml`** — Rust TUI only. Keep empty or use `packages/pi-agent-cli/config.toml.example`. Do **not** put the agent's settings here: a top-level `permission = "ask"` stops the TUI at start (it expects a `[permission]` table).
 
 Override home directory with `PI_HOME`.
 

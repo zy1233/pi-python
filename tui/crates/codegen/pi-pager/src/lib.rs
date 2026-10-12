@@ -34,7 +34,6 @@ pub mod settings;
 pub(crate) mod slash;
 pub(crate) mod startup;
 pub(crate) mod tips;
-pub(crate) mod tutorial_docs;
 pub(crate) mod wrap_clipboard_image;
 pub mod wrap_cmd;
 pub(crate) mod wrap_filter;

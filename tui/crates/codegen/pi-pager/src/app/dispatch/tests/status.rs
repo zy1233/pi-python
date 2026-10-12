@@ -208,6 +208,4 @@ fn minimal_update_notice_no_active_agent_is_noop() {
     commit_minimal_update_notice(&mut app, "9.9.9");
 }
 
-// ── Tutorial dispatch tests ──────────────────────────────────────────
-
 // ── Usage modal (full TUI) dispatch tests ────────────────────────────

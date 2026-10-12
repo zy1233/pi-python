@@ -296,15 +296,29 @@ pi (Rust TUI)  --stdio 标准 ACP-->  python -m pi_agent_cli  -->  AgentHarness
 
 ### 8.2 仓库
 
-整棵 grok-build Cargo workspace 已放进 `tui/`（不要只拷 pager 两 crate）。`tui/` Apache-2.0，不进 Python sdist/wheel。
+整棵 grok-build Cargo workspace 已放进 `tui/`（不要只拷 pager 两 crate）。`tui/` Apache-2.0，不进 Python sdist/wheel。它现在是硬分叉：不再合并上游，crate 名与行为都已与上游不同（`tui/NOTICE`）。
 
 ### 8.3 TUI 改造要点
 
-spawn 默认为 `python -m pi_agent_cli`（`PI_AGENT_COMMAND` / `PI_PYTHON` 可覆盖）。`acp_send` 丢弃 `x.ai/*` 扩展 RPC；空 `auth_methods` 跳过 xAI 登录；auto-update 关闭；交互路径不装 otel。家目录 `PI_HOME` / `~/.pi-python`。斜杠菜单保留 `/new` `/resume` `/quit` 与本地 chrome（`/help` `/theme` `/settings` `/multiline`）；`/resume` 走标准 `session/list` + `session/load`。`pi -p` 转发到 `python -m pi_agent_cli -p`，不复用 grok headless。
+spawn 默认为 `python -m pi_agent_cli`（`PI_AGENT_COMMAND` / `PI_PYTHON` 可覆盖）。`acp_send` 丢弃 `x.ai/*` 扩展 RPC；空 `auth_methods` 跳过 xAI 登录；auto-update 关闭；交互路径不装 otel。家目录 `PI_HOME` / `~/.pi-python`。斜杠菜单只有 `/new` `/resume` `/model` `/exit`（别名 `/quit`）与本地命令（`/help` `/theme` `/settings` `/multiline` `/home`）；`/resume` 走标准 `session/list` + `session/load`，`/model` 走 ACP Session Config Options（`session/set_config_option`）。`pi -p` 转发到 `python -m pi_agent_cli -p`，不复用 grok headless。
 
 ### 8.4 权限与配置
 
-`before_tool_call` 在 `ask` 模式下对每个工具调用发 ACP `session/request_permission`，除非该工具自己声明无害（MCP 风格的 `annotations`：`readOnlyHint`，或 `destructiveHint` 与 `openWorldHint` 都为 false；没声明就问，所以 bash/edit/write/workflow 与不带 annotations 的扩展工具都会问）。`workflow` 子代理的每次工具调用经桥接的 `tool_call_gate` 走同一权限层，按父会话里同名工具的 annotations 判定（见 Phase 7 spec §12「权限模型」）。Python agent：`~/.pi-python/agent.toml`（model、permission、skills、`[agent].command`）。Rust TUI：`config.toml` 仅 grok 格式（勿写 Python 的 `permission = "ask"`）。示例见 `packages/pi-agent-cli/agent.example.toml`；Windows 见 `docs/WINDOWS.md`。
+`before_tool_call` 在 `ask` 模式下对每个工具调用发 ACP `session/request_permission`，除非该工具自己声明无害（MCP 风格的 `annotations`：`readOnlyHint`，或 `destructiveHint` 与 `openWorldHint` 都为 false；没声明就问，所以 bash/edit/write/workflow 与不带 annotations 的扩展工具都会问）。`workflow` 子代理的每次工具调用经桥接的 `tool_call_gate` 走同一权限层，按父会话里同名工具的 annotations 判定（见 Phase 7 spec §12「权限模型」）。Python agent：`~/.pi-python/agent.toml`（model、permission、skills、`[agent].command`）。Rust TUI：`config.toml` 由 TUI 自己的类型化 schema 解析——认识的键写错类型会让 `zypi` 以退出码 1 退出（顶层 `permission = "ask"`、`[[models]]`、不合法的 TOML），不认识的键被忽略；勿写 Python 的配置。示例见 `packages/pi-agent-cli/agent.example.toml`；Windows 见 `docs/WINDOWS.md`。
+
+### 8.5 线上协议准入（P2）
+
+TUI 与 agent 之间的线上协议是标准 ACP，加上登记在册的 `pi/` 扩展。新增一个 `pi/` 方法、通知或 `_meta` 键，必须同时满足五条：
+
+1. **没有标准等价。** 以 ACP 现行 schema / RFD 为准。例如模型选择走 Session Config Options，`session/set_model` 已被上游移除，所以不能再为它造 `pi/` 方法。
+2. **Python 侧有生产者与测试。**
+3. **在 `docs/specs/` 登记**方法名、方向、schema 和能力键。
+4. **wire 类型只定义一次**，放在 `pi-acp-lib`（或同级的协议 crate），不留在 runtime crate 里。
+5. **经 `initialize` 协商**，对 Zed 等第三方客户端无害：Python agent 仍是通用的 ACP agent。
+
+五条缺一，就不加；已有的、不满足的，按「降级 / 隐藏 / 删除」处理（计划 ADR3）。TUI 一侧不实现 `x.ai/*`：入口处丢弃以 `x.ai/` 或 `_x.ai/` 开头的扩展通知。
+
+现状：登记处还不完整。已在用的扩展（`_meta.sessionId`、`_meta["pi/cwd"]`、`pi/session/delete`、`pi/yolo_mode_changed`）目前写在 `packages/pi-agent-cli/AGENTS.md` 的各小节里（例如「Two things the TUI and the agent agree on beyond ACP v1」）；迁到 `docs/specs/` 是计划条目 1.P5 与 B.3。
 
 ---
 

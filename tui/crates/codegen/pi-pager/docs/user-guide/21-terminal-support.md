@@ -1,284 +1,149 @@
 # Terminal Support and Troubleshooting
 
-Grok Build runs as a full-screen TUI. It relies on terminal support for color,
-clipboard, keyboard input, mouse input, and full-screen display. Terminals,
-multiplexers, containers, and SSH sessions can handle these features differently.
+`zypi` is a full-screen terminal program. It needs terminal support for color, clipboard, keyboard input, mouse input, and full-screen display. Terminals, multiplexers, containers, and SSH connections handle these features in different ways.
 
-## Diagnose and Fix Terminal Problems
+## Find and fix terminal problems
 
-Run `/doctor` in Grok to check the current session and see available fixes. If
-Grok cannot start, run `grok doctor` in your shell. Use `grok doctor --json`
-for a machine-readable report.
+Run `zypi doctor` in your shell. It checks the terminal, the multiplexer, color support, keyboard and newline behavior, and the clipboard routes. It does not start the agent. For a report that a program can read, run `zypi doctor --json`.
 
-Doctor checks the terminal, multiplexer, color support, keyboard and newline
-behavior, clipboard routes, and microphone availability when audio capture is
-included. The in-app command can also check live session details such as
-notification focus tracking and sandbox profile conflicts.
+When `zypi doctor` finds a tmux setting that is not healthy, it can fix the setting. To list the fixes that are available, run:
 
-A report can contain issues or recommendations and still exit successfully.
-`grok doctor --json` reports the same color capability when piped. Microphone
-checks do not start recording, so Doctor cannot detect macOS permission failures
-that appear only as silence during capture.
+```
+zypi doctor fix
+```
 
-`/terminal-setup`, `/terminal-check`, and `/terminal-info` remain aliases for
-`/doctor`.
+Apply one named fix at a time. For example:
 
-When Doctor finds an explicit unhealthy tmux setting, `/doctor fix` lists the
-available automatic fixes. Apply one named fix at a time, for example
-`/doctor fix tmux-clipboard` or `grok doctor fix dcs-passthrough --yes`.
-Doctor can persist these four tmux options:
+```
+zypi doctor fix tmux-clipboard
+zypi doctor fix dcs-passthrough --yes
+```
 
-- `terminal.tmux-clipboard` — `set -g set-clipboard on`
-- `terminal.dcs-passthrough` — `set -wg allow-passthrough on`
-- `terminal.tmux-extended-keys` — `set -g extended-keys on`
-- `terminal.tmux-truecolor` — `set -as terminal-features ",*:RGB"`
+`--yes` applies the change without a question. These tmux options can be fixed:
 
-A tmux fix edits only the persistent config on the computer hosting the affected
-tmux server, including remote sessions. Plain tmux uses the real
-`$HOME/.tmux.conf`; Byobu-tmux uses its effective `BYOBU_CONFIG_DIR` and refuses
-to guess if that directory is unavailable or unsafe. Grok preserves the file's
-line endings and mode, makes a backup when changing an existing file, and
-refuses conflicting or ambiguous direct assignments.
+- `terminal.tmux-clipboard`: `set -g set-clipboard on`
+- `terminal.dcs-passthrough`: `set -wg allow-passthrough on`
+- `terminal.tmux-extended-keys`: `set -g extended-keys on`
+- `terminal.tmux-truecolor`: `set -as terminal-features ",*:RGB"`
 
-Grok deliberately does **not** run `tmux source-file` or change the live tmux
-server. Reload with the exact command shown after apply, or detach and reattach,
-then run `/doctor` again. Until reload, the live finding is expected to remain.
-The conservative config scan checks direct global assignments only; review
-sourced files, conditionals, plugins, and generated tmux setup yourself.
+A tmux fix changes only the persistent tmux configuration file on the computer that hosts the tmux server. This is also true for a remote session. Plain tmux uses `$HOME/.tmux.conf`. Byobu-tmux uses its `BYOBU_CONFIG_DIR`. If `BYOBU_CONFIG_DIR` is not set, the fix stops.
 
----
+`zypi` does not run `tmux source-file` and does not change the running tmux server. After a fix, reload the tmux configuration with the command that `zypi` shows, or detach and attach again. Then run `zypi doctor` again.
 
-## Detected Terminals
+The scan checks only direct global assignments. Check files that tmux sources, conditions, plugins, and generated setup yourself.
 
-Grok detects these terminal emulators from environment variables:
+## Detected terminals
 
-- **Apple Terminal**
-- **Ghostty**
-- **iTerm2**
-- **Warp**
-- **WezTerm**
-- **Kitty**
-- **Alacritty**
-- **Rio**
-- **foot** (Wayland-native, Linux)
-- **VS Code**, **Cursor**, **Windsurf**, and **Zed** integrated terminals
-- **JetBrains** IDE terminals
-- **Grok Desktop**
-- **VTE**-based terminals such as GNOME Terminal, GNOME Console, and Tilix
-- **Windows Terminal**
+`zypi` finds these terminals from environment variables:
 
-Detection has these limitations:
+- Apple Terminal, Ghostty, iTerm2, Warp, WezTerm, Kitty, Alacritty, Rio, and foot.
+- The integrated terminals of VS Code, Cursor, Windsurf, and Zed.
+- The terminals of JetBrains IDEs.
+- Terminals that are based on VTE, such as GNOME Terminal, GNOME Console, and Tilix.
+- Windows Terminal.
 
-- Inside tmux, variables that identify the outer terminal may not reach Grok.
-- Over SSH, many terminal variables are not forwarded.
-- tmux's global environment reflects the first client attached to the server,
-  not necessarily the current terminal.
+The detection has these limits:
 
----
+- In tmux, the variables that name the outer terminal can be missing.
+- Over SSH, most terminal variables are not forwarded.
+- The global environment of tmux shows the first client that attached to the server. This client is not always the current terminal.
 
-## Common Problems and Fixes
+## Common problems
 
-### Colors look wrong or lack truecolor
+### Colors are wrong or truecolor is missing
 
-Run `/doctor`. A fully supported setup shows `color truecolor` and `themes all`.
-If it does not, Doctor shows the detected limitation and the relevant fix.
+Run `zypi doctor`. A fully supported setup shows `color truecolor` and `themes all`. If it does not, `zypi doctor` shows the limit that it found and the fix.
 
-Inside tmux there are two separate questions: what color Grok emits, and what
-color survives the multiplexer. The `color` line answers the first. For the
-second, when the attached client is not marked `RGB`, tmux rewrites every
-24-bit color to the nearest color the outer terminal's terminfo advertises,
-which can be as few as eight. Themes then look washed out even though `color`
-reads `truecolor`. Doctor reports this as `terminal.tmux-truecolor`. Reload
-your tmux config and then detach and reattach: the server reads the new option
-only on reload, and a client fixes its color depth only at attach, so neither
-step alone changes anything.
+In tmux, two questions are separate: what color `zypi` sends, and what color tmux passes on. The `color` line answers the first question. For the second question, look at the tmux client. If the client is not marked `RGB`, tmux changes each 24-bit color to the nearest color that the terminfo of the outer terminal lists. That can be as few as eight colors. The themes then look washed out, but `color` still reads `truecolor`. `zypi doctor` reports this as `terminal.tmux-truecolor`. Reload the tmux configuration, then detach and attach again. Do both steps. The server reads a new option only at reload. A client fixes its color depth only when it attaches.
+
+See [Theming and Appearance](06-theming.md) for the themes.
 
 ### Clipboard problems
 
-Grok writes through up to three routes, shown in `/doctor` under **Clipboard**:
+`zypi` copies text through up to three routes. `zypi doctor` shows them under **Clipboard**:
 
-- **native** — the local operating-system clipboard.
-- **tmux** — the tmux paste buffer when Grok runs inside tmux.
-- **OSC 52** — an escape sequence that can cross tmux, containers, or SSH.
+- **native**: the clipboard of the local operating system.
+- **tmux**: the tmux paste buffer, when `zypi` runs in tmux.
+- **OSC 52**: an escape sequence that can cross tmux, containers, and SSH.
+
+Each copy is also saved in a backup file. The message on the screen names the file when `zypi` cannot confirm that the copy arrived. To choose the path of the file, set the `GROK_COPY_FILE` environment variable. A path that starts with `~` is allowed.
 
 #### Wayland
 
-Modern Wayland compositors can update the clipboard without keeping the
-terminal focused. Older compositors may require Grok to remain focused until
-the copy message appears. Grok shows a startup warning when this applies; run
-`/doctor` for the detected status and steps.
+New Wayland compositors let a program change the clipboard when the terminal does not have the focus. Old compositors can need the focus until the copy message shows. `zypi` shows a warning at start when this applies.
 
-`GROK_CLIPBOARD_NO_DATA_CONTROL=1` is an advanced fallback that disables the
-data-control route. Copies then use command-line clipboard tools.
+`GROK_CLIPBOARD_NO_DATA_CONTROL=1` turns off the data-control route. Copies then use command-line clipboard tools. Use it only as a fallback.
 
-#### OSC 52 kill switch
+#### OSC 52
 
-Grok emits OSC 52 on Linux and across tmux, SSH, or displayless containers when
-that route is enabled. A terminal that does not implement OSC 52 may display the
-encoded payload as text. Set `GROK_CLIPBOARD_NO_OSC52=1` before starting Grok to
-disable that route. `/doctor` then shows `osc 52 off`; native and tmux routes are
-unchanged.
+On Linux, and across tmux, SSH, or containers that have no display, `zypi` sends OSC 52 when that route is on. A terminal that does not know OSC 52 can show the encoded text. To turn this route off, set `GROK_CLIPBOARD_NO_OSC52=1` before you start `zypi`. `zypi doctor` then shows `osc 52 off`. The native and tmux routes do not change.
 
 #### Linux X11 selections
 
-X11 **PRIMARY** and **CLIPBOARD** are separate:
+X11 has two selections: PRIMARY and CLIPBOARD.
 
-- An unmodified middle click reads PRIMARY only when `DISPLAY` is set. Under
-  XWayland, `xclip` or `xsel` must be on `PATH`.
-- `Ctrl+V` reads CLIPBOARD and never falls back to PRIMARY.
-- `Shift+Insert` remains the terminal's selected-text paste.
+- A middle click without a modifier key reads PRIMARY only when `DISPLAY` is set. Under XWayland, `xclip` or `xsel` must be on `PATH`.
+- `Ctrl+V` reads CLIPBOARD. It does not read PRIMARY.
+- `Shift+Insert` pastes the text that the terminal selected.
 
 #### SSH and selected text
 
-A remote Grok process normally cannot read the local terminal's selection. Use
-terminal-native `Shift+Insert`, or hold `Shift` while middle-clicking when the
-terminal uses that gesture to bypass mouse reporting.
-
-When Grok cannot identify the outer terminal over SSH, it predicts that OSC 52
-will be sent but marks the route as not verified. The copy toast then names the
-backup file so you can retrieve the text. Run `/doctor` for other copy options.
+A `zypi` process on a remote computer cannot read the selection of your local terminal. Use `Shift+Insert` of the terminal. Or hold `Shift` while you click the middle button, if your terminal uses this gesture to bypass mouse reporting.
 
 #### Apple Terminal over SSH
 
-Apple Terminal does not support OSC 52, so a remote copy cannot reach the local
-clipboard. Each copy is still saved to a backup file (`~/.grok/last-copy.txt` by
-default; override with `GROK_COPY_FILE`); the toast names that path when delivery
-is unverified or the clipboard is unreachable. You can also use `/copy <file>` or
-`/minimal`.
+Apple Terminal does not support OSC 52. A copy on a remote computer cannot reach your local clipboard. The backup file still holds the text.
 
-For direct clipboard forwarding, run the SSH command from the local computer
-through `grok wrap`, for example `grok wrap ssh user@host`. The same command can
-wrap container and pod shells. It also restores terminal modes after a dropped
-connection.
+To forward the clipboard, start the SSH connection from your local computer through `zypi wrap`:
 
-When an SSH session is not using `grok wrap`, Grok shows the one-time tip
-“Run `/doctor` for details and fixes.” The tip stops appearing after the session
-is launched through wrap. Turn it off with `/settings` → **Show contextual
-hints** → **SSH wrap**, or set `ssh_wrap = false` under
-`[ui.contextual_hints]` in `$GROK_HOME/config.toml`. This setting does not hide
-the Doctor recommendation.
+```
+zypi wrap ssh user@host
+```
 
-For repeated SSH use, Doctor offers `grok doctor fix ssh-wrap`. It also shows
-the one-off command, the file that would change, and the cases where the alias
-should be bypassed. The ID `terminal.ssh-wrap` remains accepted and appears in
-JSON.
+You can wrap the shell of a container or a pod in the same way:
 
-> **Warning**: `grok wrap` is experimental and may not work in every setup.
+```
+zypi wrap docker exec -it my-container bash
+```
+
+`zypi wrap` also restores the terminal modes after a connection drops. For repeated SSH use, run `zypi doctor fix ssh-wrap`. It shows the command, the file that it changes, and the cases where you must bypass the alias.
+
+> **Warning**: `zypi wrap` is experimental. It can fail in some setups.
 
 #### iTerm2
 
-iTerm2 can require permission for OSC 52 clipboard access. Run `/doctor`; the
-`terminal.iterm2-clipboard-permission` recommendation shows the setting to
-check.
+iTerm2 can ask for permission before it lets a program use the clipboard through OSC 52. `zypi doctor` shows the setting to check in the `terminal.iterm2-clipboard-permission` recommendation.
 
-### Fullscreen or alternate screen does not activate
+### The full screen does not start
 
-Zellij and tmux control mode can limit the alternate screen. Grok normally uses
-inline mode in those environments. Run `/doctor` to see the detected condition.
-You can configure `[terminal] alt_screen` in `~/.grok/pager.toml`, or run
-`grok --no-alt-screen` to confirm inline mode works.
+Zellij and tmux control mode limit the alternate screen. In these cases `zypi` runs inline. To see which condition `zypi` found, run `zypi doctor`. To test inline mode, run `zypi --no-alt-screen`. To set the policy, use `[terminal] alt_screen` in `~/.pi-python/pager.toml`. See [Theming and Appearance](06-theming.md).
 
-### Zellij keybindings interfere with Grok
+### Zellij keys interfere with `zypi`
 
-Zellij can intercept Ctrl/Alt keys before they reach Grok. On Zellij 0.41 or
-later, use the **Unlock-First (non-colliding)** preset:
+Zellij can take Ctrl and Alt keys before they reach `zypi`. On Zellij 0.41 or later, use the **Unlock-First (non-colliding)** preset:
 
 1. Press `Ctrl+o`, then `c`.
 2. Open **Change Mode Behavior**.
 3. Select **Unlock-First (non-colliding)**.
-4. Press `Enter` to apply it.
+4. Press `Enter`.
 
-Press `Ctrl+g` when you need Zellij's own pane or session controls. In minimal
-mode, if `Ctrl+G` still does not reach Grok, open the command palette and select
-**Edit Prompt in External Editor**. This preserves the current draft; typing
-`/edit-prompt` starts an empty editor draft because the command itself occupies
-the composer.
+When you need the pane or session controls of Zellij, press `Ctrl+g`.
 
-### Ctrl+Enter does not interject in WezTerm
+### Some key chords do not arrive in WezTerm
 
-WezTerm ships with the Kitty keyboard protocol disabled. Run `/doctor` in Grok.
-The `terminal.wezterm-kitty` finding shows the setting and restart step. Over
-SSH, Doctor shows only the workaround that can work in the current session.
-Apple Terminal uses `Ctrl+O` for interjection because it cannot distinguish the
-modified Enter chord.
+WezTerm ships with the Kitty keyboard protocol off. Then `zypi` cannot tell some chords apart, for example `Ctrl+Enter` and `Enter`. Run `zypi doctor`. The `terminal.wezterm-kitty` finding shows the setting and the restart step. Over SSH, `zypi doctor` shows only the workaround that can work in the current session.
 
-### Shift+Enter does not insert a newline in VS Code
+### Shift+Enter does not insert a new line in VS Code
 
-VS Code, Cursor, Windsurf, and Zed terminals use xterm.js, which only partially
-implements the Kitty keyboard protocol and mis-encodes some shifted printable
-keys. Grok therefore does not negotiate the protocol there, and Shift+Enter can
-arrive as the same `CR` as Enter. This also affects VS Code reached over SSH when
-`TERM_PROGRAM` is not forwarded. Use `Alt+Enter` to insert a newline; `/doctor`
-reports `terminal.newline-fallback` with the detected explanation and workaround.
+The terminals of VS Code, Cursor, Windsurf, and Zed use xterm.js. xterm.js implements the Kitty keyboard protocol only in part, so `zypi` does not use the protocol there. `Shift+Enter` can then arrive as the same code as `Enter`. This also applies to VS Code over SSH when `TERM_PROGRAM` is not forwarded. Press `Alt+Enter` to insert a new line. `zypi doctor` reports `terminal.newline-fallback` with the reason and the workaround.
 
-### Mouse scrolling stops working
+### Mouse scrolling does not work
 
-If Grok stops receiving mouse input, re-enable mouse reporting in the terminal:
+If `zypi` does not get mouse input, turn on mouse reporting in the terminal:
 
 - **Apple Terminal**: **View → Allow Mouse Reporting** (`Cmd+R`).
 - **iTerm2**: **Settings → Profiles → Terminal → Enable mouse reporting**.
 
-### Voice dictation records nothing
-
-After about 10 seconds without a transcript, Grok stops capture and shows
-**“No speech was detected. Voice stopped.”** with microphone fix steps. On macOS,
-a denied microphone grant can look the same as silence because permission belongs
-to the terminal hosting Grok. Open **System Settings → Privacy & Security →
-Microphone**, enable the terminal, and restart it. If access is already on, check
-the input device and level under **System Settings → Sound → Input** and try
-again.
-
-Run `grok doctor`, or run `/doctor` while voice mode is on. The **Voice** section
-shows the microphone Grok would use. If no input device is available, Doctor
-shows `voice.no-input-device` and the next steps. Doctor cannot detect denied
-macOS microphone access passively when macOS supplies silence.
-
-On macOS, each dictation uses a short-lived capture helper process so the audio
-stack's memory is released when capture ends. If the helper itself may be the
-problem, set `GROK_VOICE_CAPTURE=inprocess` to use the in-process fallback for
-comparison.
-
 ### Byobu with GNU screen
 
-Byobu on GNU screen has limited support. `/doctor` reports
-`terminal.byobu-screen` and explains how to switch to Byobu's tmux backend.
-
-### Arabic and Persian (RTL) text
-
-Many terminals already reorder right-to-left text themselves (VTE-based
-terminals, Terminal.app, Konsole, mlterm, and others). Grok Build therefore
-**does not** reorder RTL by default.
-
-If Arabic or Persian in **scrollback** (or list content) reads backwards,
-enable app-side reordering in `~/.grok/pager.toml` (or project config):
-
-```toml
-[scrollback.display]
-rtl_bidi = true
-```
-
-The setting reloads with appearance config (no full restart required). If text
-looks correct with the default and becomes wrong after enabling this, turn it
-back off — your terminal is already handling bidi.
-
-When enabled:
-
-- Reorders full content lines in scrollback, list content, and the fullscreen
-  block viewer (plus the dashboard peek preview and hook popup, which mirror
-  scrollback). Chrome, dropdowns, and modals stay logical so their hit-testing
-  stays consistent.
-- Leaves markdown table columns unchanged.
-- Search highlights, selection/drag-copy, double-click word/URL selection, and
-  link hit targets all map between the painted (visual) cells and the logical
-  text of the same row, so on-screen highlights land on the right glyphs while
-  clipboard paste stays in logical order.
-- Base direction is resolved per painted row. A soft-wrapped continuation that
-  starts with English can take a different base than the paragraph's first row.
-
-This is not a full mirrored RTL UI.
-
----
-
-## Still Stuck?
-
-Run `/feedback` to report it.
+Byobu on GNU screen has limited support. `zypi doctor` reports `terminal.byobu-screen` and tells you how to change to the tmux backend of Byobu.

@@ -1,8 +1,12 @@
-//! In-app how-to documentation data (embedded markdown).
+//! How-to documentation data (embedded markdown).
 //!
 //! Single source of truth: the static `USER_GUIDE` array holds every doc. All
 //! lookups are zero-allocation; `DocEntry` exists only for backward
 //! compatibility with the TUI doc picker.
+//!
+//! The pages are compiled into the binary. `zypi` does not write them to disk.
+//! No slash command opens the doc picker or the doc viewer now; the pages are
+//! also the repository's user guide (`docs/user-guide/`).
 
 /// A compile-time document entry. All fields are `&'static str`.
 #[derive(Debug)]
@@ -49,117 +53,37 @@ pub static USER_GUIDE: &[Doc] = &[
     guide!(
         "01-getting-started.md",
         "Getting Started",
-        "Installation, first launch, and basic interaction"
-    ),
-    guide!(
-        "02-authentication.md",
-        "Authentication",
-        "Browser login, API keys, OIDC, external auth providers"
-    ),
-    guide!(
-        "03-keyboard-shortcuts.md",
-        "Keyboard Shortcuts",
-        "Complete reference for all TUI key bindings"
+        "Set up the model, start zypi, and the keys to learn first"
     ),
     guide!(
         "04-slash-commands.md",
         "Slash Commands",
-        "All / commands, including goals, research, and workflow management"
-    ),
-    guide!(
-        "05-configuration.md",
-        "Configuration",
-        "config.toml, pager.toml, environment variables, file locations"
+        "The built-in / commands and the command palette"
     ),
     guide!(
         "06-theming.md",
         "Theming and Appearance",
-        "Themes, color support, pager.toml customization"
-    ),
-    guide!(
-        "07-mcp-servers.md",
-        "MCP Servers",
-        "Setting up external tool integrations via MCP"
-    ),
-    guide!(
-        "08-skills.md",
-        "Skills",
-        "Creating and using reusable prompt packages"
-    ),
-    guide!(
-        "11-custom-models.md",
-        "Custom Models",
-        "BYOK, Ollama, OpenAI-compatible endpoints"
-    ),
-    guide!(
-        "12-project-rules.md",
-        "Project Rules (AGENTS.md)",
-        "Per-directory instructions and precedence rules"
-    ),
-    guide!(
-        "13-memory.md",
-        "Memory",
-        "Cross-session knowledge persistence and search"
-    ),
-    guide!(
-        "14-headless-mode.md",
-        "Headless Mode and Scripting",
-        "Non-interactive CLI for automation and CI/CD"
-    ),
-    guide!(
-        "15-agent-mode.md",
-        "Agent Mode and IDE Integration",
-        "ACP stdio transport, WebSocket relay, SDK integration"
-    ),
-    guide!(
-        "16-subagents.md",
-        "Subagents and Personas",
-        "Spawning parallel child agents with specialized roles"
+        "Themes, auto mode, minimal mode, and pager.toml"
     ),
     guide!(
         "17-sessions.md",
-        "Session Management",
-        "Save, load, resume, rewind, and compact sessions"
-    ),
-    guide!(
-        "18-sandbox.md",
-        "Sandbox Mode",
-        "OS-level filesystem and network isolation"
-    ),
-    guide!(
-        "19-plan-mode.md",
-        "Plan Mode",
-        "Structured planning with approval dialogs"
-    ),
-    guide!(
-        "20-background-tasks.md",
-        "Background Tasks and Monitoring",
-        "Background commands, /loop, monitor, scheduler"
+        "Sessions",
+        "Where sessions are stored, how to continue one, and how to export one"
     ),
     guide!(
         "21-terminal-support.md",
         "Terminal Support and Troubleshooting",
-        "tmux, Byobu, Zellij, SSH, truecolor, clipboard, and diagnostics"
+        "zypi doctor, tmux, SSH, truecolor, and the clipboard"
     ),
     guide!(
         "22-permissions-and-safety.md",
         "Permissions and Safety",
-        "Modes, authorization order, allow/ask/deny rules, matching, and hooks"
-    ),
-    guide!(
-        "24-monitoring-usage.md",
-        "Monitoring Usage (External OpenTelemetry)",
-        "Export usage metrics to a customer OpenTelemetry collector"
+        "Permission modes, project trust, and what the agent sends to the model provider"
     ),
     guide!(
         "25-status-line.md",
         "Status Line",
-        "A bottom row of live session context, or the output of your own script"
-    ),
-    guide!(
-        "26-config-reference.md",
-        "Configuration Reference",
-        "Field list for config.toml, managed_config.toml, and requirements.toml"
+        "The status row and its stdin JSON contract (empty with the Python agent)"
     ),
 ];
 
@@ -190,43 +114,6 @@ pub fn list_howto_titles() -> Vec<String> {
 /// Returns all docs as owned `DocEntry` values for the TUI doc picker.
 pub fn default_howto_entries() -> Vec<DocEntry> {
     USER_GUIDE.iter().map(DocEntry::from).collect()
-}
-
-/// Extract user-guide docs to `<grok_home>/docs/user-guide/`.
-///
-/// Called from the pager binary startup so the model can read them from disk.
-pub fn extract_user_guide_docs(grok_home: &std::path::Path) {
-    let docs_dir = grok_home.join("docs").join("user-guide");
-    if let Err(e) = std::fs::create_dir_all(&docs_dir) {
-        tracing::warn!(error = %e, "Failed to create user-guide docs directory");
-        return;
-    }
-    for doc in USER_GUIDE {
-        if let Err(e) = std::fs::write(docs_dir.join(doc.filename), doc.content) {
-            tracing::debug!(error = %e, filename = doc.filename, "Failed to extract user-guide doc");
-        }
-    }
-    // Clean up stale managed docs (files removed from USER_GUIDE since last run).
-    // Only remove files matching the managed naming pattern (NN-*.md).
-    if let Ok(entries) = std::fs::read_dir(&docs_dir) {
-        let valid: std::collections::HashSet<&str> =
-            USER_GUIDE.iter().map(|d| d.filename).collect();
-        for dir_entry in entries.flatten() {
-            if let Some(name) = dir_entry.file_name().to_str() {
-                let is_managed = name.len() > 3
-                    && name.as_bytes()[0].is_ascii_digit()
-                    && name.as_bytes()[1].is_ascii_digit()
-                    && name.as_bytes()[2] == b'-'
-                    && name.ends_with(".md");
-                if is_managed
-                    && !valid.contains(name)
-                    && let Err(e) = std::fs::remove_file(dir_entry.path())
-                {
-                    tracing::debug!(error = %e, filename = name, "Failed to remove stale user-guide doc");
-                }
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -301,30 +188,38 @@ mod tests {
         assert_eq!(titles.len(), USER_GUIDE.len());
     }
 
+    /// The pages describe `zypi`. A page that still names the product it was
+    /// forked from, or its paths and hosts, is stale (the `GROK_*` environment
+    /// variables are real names and are upper case, so they do not match).
     #[test]
-    fn extract_writes_docs_and_cleans_stale() {
-        let tmp = tempfile::tempdir().unwrap();
-        let docs_dir = tmp.path().join("docs").join("user-guide");
-
-        std::fs::create_dir_all(&docs_dir).unwrap();
-        std::fs::write(docs_dir.join("99-removed.md"), "stale").unwrap();
-        std::fs::write(docs_dir.join("notes.md"), "user notes").unwrap();
-
-        extract_user_guide_docs(tmp.path());
-
+    fn user_guide_pages_do_not_name_the_old_product() {
         for doc in USER_GUIDE {
-            let path = docs_dir.join(doc.filename);
-            assert!(path.exists(), "Expected doc {} to exist", doc.filename);
-            let got = std::fs::read_to_string(&path).unwrap();
-            assert_eq!(got, doc.content, "Content mismatch for {}", doc.filename);
+            for stale in ["Grok", "grok ", "~/.grok", ".grok/", "x.ai", "SpaceXAI"] {
+                assert!(
+                    !doc.content.contains(stale),
+                    "{} still contains {stale:?}",
+                    doc.filename
+                );
+            }
         }
-        assert!(
-            !docs_dir.join("99-removed.md").exists(),
-            "Stale doc should be cleaned up"
-        );
-        assert!(
-            docs_dir.join("notes.md").exists(),
-            "User file should not be deleted"
-        );
+    }
+
+    /// A page file that `USER_GUIDE` does not list is compiled into nothing
+    /// and cannot be reached: it must be listed or deleted.
+    #[test]
+    fn every_page_in_the_guide_directory_is_listed() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/user-guide");
+        let listed: std::collections::HashSet<&str> =
+            USER_GUIDE.iter().map(|d| d.filename).collect();
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name == "README.md" {
+                continue;
+            }
+            assert!(
+                listed.contains(name.as_str()),
+                "{name} is in docs/user-guide but not in USER_GUIDE"
+            );
+        }
     }
 }

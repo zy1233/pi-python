@@ -76,8 +76,6 @@ sync with your window size.
 Examples:
   zypi wrap docker exec -it my-container bash
   zypi wrap kubectl exec -it my-pod -- bash
-
-See ~/.pi-python/README.md for more information.
 ")]
     Wrap(WrapArgs),
     /// Export a session transcript as Markdown

@@ -1,6 +1,6 @@
 # Rust Agent Runtime 剥离计划
 
-> **状态：r10（2026-10-11）。** r3–r10 的工作已全部合入 `main`（PR [#7][pr-7]、[#8][pr-8]、[#9][pr-9]、[#10][pr-10]、[#11][pr-11]、[#12][pr-12]）。做到哪了，见[当前状态](#当前状态)。
+> **状态：r11（2026-10-11）。** r3–r10 的工作已全部合入 `main`（PR [#7][pr-7]、[#8][pr-8]、[#9][pr-9]、[#10][pr-10]、[#11][pr-11]、[#12][pr-12]）。r11（0.5 与阶段 C，[§10.14][l10-14]）在分支 `chore/phase-c-closeout` 上，还没有合入 `main`。做到哪了，见[当前状态](#当前状态)。
 >
 > **这份文档只写计划和状态。** 每一轮做了什么、怎么测的、数字是多少，在[执行记录（归档）][log]里。§1–§3、§6–§9 保留 r2 原文作为决策依据（§7 的每一项后面加了一行状态）。§4、§5 是 r2 的源码事实与规模估计，描述拆除之前的代码，原文在归档里。与执行记录冲突处，以执行记录和 ADR3（r3）为准。
 >
@@ -22,26 +22,26 @@
 
 ## 当前状态
 
-截至 r10（`main` 在 `ef03afd`）：Python 的 CI 与 TUI CI 都通过。TUI CI 的 10 个 suite 合计 8,683 通过 / 0 失败 / 22 忽略。
+截至 r11：`origin/main` 在 `ef03afd`，Python 的 CI 与 TUI CI 都通过（本地 `main` 在 `df812d1`，多 4 个提交：计划与基线文档的整理，还没有推送），TUI CI 的 10 个 suite 合计 8,683 通过 / 0 失败 / 22 忽略。r11 的分支在 WSL2 上本地跑过同一组：8,665 通过 / 0 失败 / 22 忽略，门禁与 `--workspace --tests` 全过，还没有 CI 运行；比 r10 少的 18 个在 `pi-pager`，是 C.2 随教程叠层与旧用户指南一起删掉的用例。
 
 | 阶段 | 状态 | 已完成 | 还差 |
 |---|---|---|---|
-| 0 基线与门禁 | 基本完成 | Linux CI 与基线（0.1、0.2）；ACP 契约与 e2e（0.3）；deny-list（0.4）；入口审计（0.6）；读盘调用点与 ADR1 落地设计（0.7）；能力矩阵与版本配对（0.8）；Linux 上的实测（0.9 的大部分） | 0.5（调用图工具化）；0.9 的 Landlock 层（要内核 ≥ 5.13），以及 macOS、Windows 一侧 |
+| 0 基线与门禁 | 基本完成 | Linux CI 与基线（0.1、0.2）；ACP 契约与 e2e（0.3）；deny-list（0.4）；调用图工具化（0.5，r11）；入口审计（0.6）；读盘调用点与 ADR1 落地设计（0.7）；能力矩阵与版本配对（0.8）；Linux 上的实测（0.9 的大部分） | 0.9 的 Landlock 层（要内核 ≥ 5.13），以及 macOS、Windows 一侧 |
 | A 死代码先行 | 完成 | A.1–A.4 | — |
 | 1 协议与 Python | 完成一半 | 1.P1 会话列表分页；1.P2 优雅退出；1.P4 显式忽略 `mcp_servers`；1.P7 契约测试；1.R1 的 PR 1；1.R3 的大部分；1.P3 的 (a) | 1.P3 的 (b)、(c)；1.P5；1.P6；1.R1 的 PR 2、PR 3；1.R2；1.R4；1.R5；1.R3 的 MCP 子进程与 Windows |
 | B 拆除 runtime | 删除完成，迁移没有完成 | B.1、B.5、B.6：`pi-sampler` 与 `pi-shell` 的 runtime 单元已删 | B.2、B.3、B.4：r3 换了做法，没有抽出叶子 crate |
-| C 验收与文档 | 没有开始 | — | C.1–C.4 |
-| D 依赖图瘦身（可选） | 没有开始 | — | D.1–D.4；等基线数据再定 |
+| C 验收与文档 | 完成（r11，在分支上） | C.1–C.4：`zypi` 没有到 LLM provider 的外连（实测，含一次真模型）；内嵌指南缩成 7 页，启动不再解压；`NOTICE` 重写，`THIRD-PARTY-NOTICES` 有工具对账；`grok agent` 清零，`leader`、`x.ai` 有上限 | 退出条件里的 `leader`、`x.ai` 清不到 0，改成了棘轮（§7 的 C） |
+| D 依赖图瘦身（可选） | 没有开始 | — | D.1–D.9；等基线数据再定 |
 
 ### 下一步
 
-- **要等用户决定：** ADR1 的 PR 2（决策 4、5）与 PR 3（决策 2、6）；1.P6 的旗标契约（决策 8）；真的 Plan 模式（决策 7 的 (b)）。
-- **不用等决定：** 0.5（调用图工具化）；阶段 C（C.1–C.4：运行时验收、内嵌 user-guide、NOTICE、文档收口）。
+- **要等用户决定：** ADR1 的 PR 2（决策 4、5）与 PR 3（决策 2、6）；1.P6 的旗标契约（决策 8）；真的 Plan 模式（决策 7 的 (b)）；自定义状态行怎么办（决策 15）。
+- **不用等决定：** 没有了。0.5 与阶段 C 在 r11 做完；r11 的分支还要合入 `main`。阶段 D 做不做，看 [`docs/baselines/tui.md`](../baselines/tui.md) 的数据；r11 又提出 D.5–D.9 五个候选。
 
 ### 还没有验证的
 
 - **平台。** Rust 的 e2e 用例与 `scripts/tui_pty/` 的 PTY 脚本只在 Linux（WSL2）上跑过；macOS 与 Windows 上没有。Windows 上只量了 Python 一侧的延迟，TUI 没有参与。
-- **真实 LLM。** r9、r10 的实测都用 mock。
+- **真实 LLM。** r9、r10 的实测都用 mock。r11 用真模型跑了一轮网络审计（C.1，只看 `zypi` 有没有外连），没有用它验证别的功能。
 - **沙箱的 Landlock 层。** WSL 的内核 5.10 没有 Landlock；`pi-sandbox` 的端到端用例在那里空转（软跳过）。
 - **延迟。** 只量了合成的会话（12 / 120 / 2,000 条消息）。冷磁盘、网络文件系统、超过 1,000 个会话、真实形状的会话没有量。
 - **跨目录的 `--resume <id>`。** TUI 的当前目录与会话保存的目录不同时，`@` 搜索、diff、git 信息用哪个目录，没有验证。
@@ -49,14 +49,14 @@
 - **设置页里其余的权限项**（`remember_tool_approvals`、`default_selected_permission` 等）对 Python 是否有效，没有验证（待决策 14）。
 - **同一个 id 的并发。** 锁只在进程内。两个 agent 进程共用一个 home 时，同一个 id 仍可能各建一个会话。
 
-出处：执行记录 [§10.10][l10-10]–[§10.13][l10-13] 各节的「没有验证」。
+出处：执行记录 [§10.10][l10-10]–[§10.14][l10-14] 各节的「没有验证」。
 
 ## 待决策
 
-共十四项。能给出倾向的，都写了倾向。没有一项会在用户确认之前动手。编号沿用 r9 的提议（[§10.11][l10-11] 末尾「留给用户决定的」十二项，原文留在那里）；13、14 是 r10 加的。附录 A 的「决定 N」指这里的第 N 项。
+共十五项。能给出倾向的，都写了倾向。没有一项会在用户确认之前动手。编号沿用 r9 的提议（[§10.11][l10-11] 末尾「留给用户决定的」十二项，原文留在那里）；13、14 是 r10 加的，15 是 r11 加的。附录 A 的「决定 N」指这里的第 N 项。
 
 - **已做：** 1 的 PR 1、3、7 的 (a)、12。
-- **待定：** 1 的 PR 2 与 PR 3（等 2、4、5、6）、2、4、5、6、7 的 (b)(c)、8、9、10、11、13、14。
+- **待定：** 1 的 PR 2 与 PR 3（等 2、4、5、6）、2、4、5、6、7 的 (b)(c)、8、9、10、11、13、14、15。
 
 1. **ADR1 的落地。** PR 1：Python；PR 2：Rust，只加不删；PR 3：Rust，删。
     - 倾向：开工，先做 PR 1。
@@ -112,6 +112,11 @@
     - 倾向：像对模式做的那样，逐个对着真 agent 测，再决定藏起来还是接线。先测 `remember_tool_approvals` 与 `default_selected_permission`（离权限最近，错了代价最高）。还没有证据。
     - 状态：待定。
     - 详情：[§10.13][l10-13]
+15. **自定义状态行（`[ui.status_line]`）。** 这一行在 Python agent 下永远不画，配了命令脚本也不会跑：它的数据来自一条 `session_status` 通知，只有旧的 Rust agent 发过，Python 从不发（`status_line_probe.py` 实测）。内嵌指南的 `25-status-line.md` 已照实写了这一点。
+    - 选项：(a) Python 发这条通知——要走 `_pi/session_notification` 载体（`x.ai/` 开头的方法在入口被丢），是新的 `pi/` 扩展，要先过 DESIGN §8.5 的五条；(b) pager 用本地已有的东西画（工作目录、模型、权限模式、git 分支），不靠 agent；(c) 删掉这一行的设置、代码与指南页。
+    - 倾向：(b) 或 (c)，不倾向 (a)：行里的字段大多是 pager 自己就知道的。没有证据说有人在用它。
+    - 状态：待定。
+    - 详情：[§10.14][l10-14]
 
 ## 1. 目标与结论
 
@@ -221,7 +226,7 @@ r2 的静态估计：口径、各对象的行数、需要编辑的 cut point、�
 - [x] 0.2 **基线报告**入库：测试通过 / 失败 / 忽略数、`cargo tree -p pi-pager-bin` 节点数、release 二进制体积、冷编译与启动耗时、去掉全局 allow 后的告警数。**状态**（r5）：Linux 一栏已回填，告警清零。`zypi` release 422,034,120 B，比拆除前小 10.3 %；冷缓存构建 1,155 s，比 1,647 s 快 29.9 %。报告在 [`docs/baselines/tui.md`](../baselines/tui.md)。记录 [§10.6][l10-6]、[§10.7][l10-7]。
 - [x] 0.3 **ACP 契约 / e2e 载体**：Rust client ↔ Python mock agent，不依赖 PTY。**状态**：r5 做了 Python 一侧的 stdio 契约套件（见 1.P7）。r9 做了 Rust 一侧：`tui/crates/codegen/pi-pager/tests/python_agent_e2e.rs` 的 10 个用例，已接进 `tui-ci.yml`。记录 [§10.11][l10-11]。
 - [x] 0.4 **deny-list**：硬性 `pi-sampler`；条件性 `async-openai`、`pi-sampling-types`（由阶段 D 决定）；对 `pi-tools`、`pi-agent`、`pi-workspace`、`pi-hooks`、`pi-mcp` 逐个写「保留理由或缩减方案」。**状态**（r4）：`pi-sampler` 与 `MvpAgent` / `acp_session_impl` / `SamplerActor` 三个词是 `tui_baseline.py gates` 的阻塞门禁。条件性 crate 的理由与缩减方案在 [`docs/baselines/tui.md`](../baselines/tui.md) §4。记录 [§10.6][l10-6]。
-- [ ] 0.5 **模块级调用图 → support 保留清单**：把附录 B.2 的脚本入库为工具，取代「举例」式清单。**状态**：没做。脚本在[执行记录的附录 B][logB]。
+- [x] 0.5 **模块级调用图 → support 保留清单**：把附录 B.2 的脚本入库为工具，取代「举例」式清单。**状态**（r11）：工具是 `scripts/tui_callgraph.py`（`crates`、`units`、`keep` 三个子命令；只读源码文本，不要 cargo），39 个单测，对工具做 17 处改动、每一处都让单测失败。保留清单是它生成的 [`docs/baselines/tui-support.md`](../baselines/tui-support.md)：support 的 7 个 crate 共 305,581 行，报死的 17 个单元 6,190 行，其中 `pi-hooks` 占 4,339 行（48 %）。准确度用编译器查过：在副本里删掉这 17 个单元的文件，`cargo check` 只在一个单元上失败（`pi-tools` 的 `types::error`，里面是 `?` 要用的 `impl From<…> for ToolError`，报告把它标在「check first」里）；留下它则通过。第一版报了 21 个，其中 4 个是活的，已改工具。工具只到模块一级：没有名字的 `impl` 它看不见，活模块里的死函数它找不到。记录 [§10.14][l10-14]。
 - [x] 0.6 **入口审计**：逐入口标注可达性、所需 ACP 方法、决策（保留｜隐藏｜删除）。**状态**（r5）：用户选了「直接按附录 A 默认执行，不逐项确认」；结果是 A.3 的删除。记录 [§10.7][l10-7]，以及[执行记录 A.4][logA4]。
 - [x] 0.7 **磁盘读取点清单**与 ADR1 的落地设计。**状态**（r9）：pager 一侧有 13 处读盘调用，分布在 8 个文件；冷启动延迟已实测，没有触发 ADR1 的覆盖条件；13 例 PTY 验收矩阵在 `scripts/tui_pty/resume_matrix.py`；落地设计含沙箱顺序与 PR 切分。落地见 1.R1。记录 [§10.11][l10-11]。
 - [x] 0.8 **能力矩阵定稿**（附录 A）与 **ACP 版本配对表**（两端各方法的支持情况、升级策略；Python 侧不得依赖 Rust 端 unstable 方法）。**状态**（r9）：A.1 逐行标了「已定」「提议」或「未定」；A.2 是版本配对；A.3 是逐方法的两端支持情况。记录 [§10.11][l10-11]。
@@ -275,12 +280,12 @@ Rust（pager）：
 
 ### 阶段 C：验收与文档收口
 
-- [ ] C.1 运行时验收：阶段 0.3 的 mock-ACP e2e 全绿；一次可选的真实模型 smoke，用进程级网络连接核对 `zypi` 进程无到 LLM provider 的外连。
-- [ ] C.2 内嵌 user-guide 裁剪或重写（同步 `status_line_tests.rs` 夹具），并停止每次启动的 `extract_user_guide_docs`。
-- [ ] C.3 `tui/NOTICE`（产品二进制名、声明 `tui/` 为 hard fork、不再跟随 upstream）；`tui/THIRD-PARTY-NOTICES`（18,898 行，含 `async-openai`）在依赖变化后重新生成并记录方式。
-- [ ] C.4 `packages/pi-agent-cli/AGENTS.md` 的 config 约束；`docs/TUI-AND-CODE-AGENT.md`（MCP 归属、ACP 链接应为 [agentclientprotocol.com](https://agentclientprotocol.com)）；Phase 4 spec 增补修订记录（§1.3 #2）；DESIGN §8 增补 P2 准入规则。
+- [x] C.1 运行时验收：阶段 0.3 的 mock-ACP e2e 全绿；一次可选的真实模型 smoke，用进程级网络连接核对 `zypi` 进程无到 LLM provider 的外连。**状态**（r11，Linux / WSL2）：e2e（`python_agent_e2e`，`PI_E2E_REQUIRED=1`，不是跳过）在本分支上全绿。网络审计是 `scripts/tui_pty/net_audit.py`：在 PTY 里跑一轮对话，约每 9 ms 读一次 `zypi` 与它之下每个进程的 socket（`/proc/<pid>/fd` 对 `/proc/<pid>/net/*`），查 13 项。mock LLM 13/13，放进没有网络的命名空间（`bwrap --unshare-net`）再跑一次也是 13/13；真模型一次（本机配置的 provider）13/13：`zypi` 没有到非本机地址的连接，也没有监听；agent 有到两个远端地址的连接，这是正向对照，说明采样看得见外连。另有一个发现：配了 `[ui.status_line]` 也画不出那一行，因为 Python agent 不发画它所需的消息（待决策 15）。记录 [§10.14][l10-14]。
+- [x] C.2 内嵌 user-guide 裁剪或重写（同步 `status_line_tests.rs` 夹具），并停止每次启动的 `extract_user_guide_docs`。**状态**（r11）：`pi-pager/docs/` 原有 33 个文件（用户指南 23 页加 README，教程 9 页，全是 Grok 原文），删了 25 个（用户指南 16 页、教程 9 页），现在只剩 `user-guide/` 里的 7 页加一份 README（入门、斜杠命令、主题、会话、终端支持、权限与安全、状态行），按代码和 `agent.toml` 重写。教程叠层（`views/tutorial.rs`、`tutorial_docs.rs`）删了：A.3 之后没有入口，页面讲的是 zypi 没有的命令。`extract_user_guide_docs` 与它在 `pi-pager-bin` 里的调用删了，启动不再往 home 写文档。`status_line_tests.rs` 里把 `25-status-line.md` 当夹具的三个用例没动，对重写后的页面仍通过。两个守卫用例（页面里没有旧产品名；目录里每个文件都在 `USER_GUIDE` 里）。`pi-pager` 的测试 5,626 → 5,608。记录 [§10.14][l10-14]。
+- [x] C.3 `tui/NOTICE`（产品二进制名、声明 `tui/` 为 hard fork、不再跟随 upstream）；`tui/THIRD-PARTY-NOTICES`（18,898 行，含 `async-openai`）在依赖变化后重新生成并记录方式。**状态**（r11）：`NOTICE` 重写：产品是 `zypi`，`tui/` 是 hard fork、不再跟随 upstream，并列出改动。`THIRD-PARTY-NOTICES` 不是整份重新生成：`scripts/tui_notices.py` 取 `pi-pager-bin` 的 normal 与 build 依赖闭包（五个目标三元组）里会进二进制的包，与文件对账——去掉 222 条过期的、补上 44 条缺的，手写的段落保留；文件从 18,898 行变成 16,548 行（`wc -l`）。新条目的许可证措辞抄自同一 SPDX 表达式的旧条目，工具自己不加许可证政策；没有可抄的就写成朴素格式，并在工具的输出里列为 `needs review`，要人读过。`check` 不一致就退出 1，`update --write` 来改，62 个单测。`check` 还没有接进 CI（它要 cargo；接上要改 `tui-ci.yml`，本分支没有 CI 运行，没法先试）。`third_party/` 里过期的 `nfsserve` 条目也去掉了。记录 [§10.14][l10-14]。
+- [x] C.4 `packages/pi-agent-cli/AGENTS.md` 的 config 约束；`docs/TUI-AND-CODE-AGENT.md`（MCP 归属、ACP 链接应为 [agentclientprotocol.com](https://agentclientprotocol.com)）；Phase 4 spec 增补修订记录（§1.3 #2）；DESIGN §8 增补 P2 准入规则。**状态**（r11）：四项都做了。`pi-agent-cli/AGENTS.md` 写了实测的 `config.toml` 约束：`zypi` 认得的键按类型严格解析（顶层的 `permission` 写成字符串、`[[models]]` 写成数组、TOML 本身有误，都会让它以 1 退出），不认得的键忽略；Python agent 只在没有 `agent.toml` 时才回落到 `config.toml`。`TUI-AND-CODE-AGENT.md` 改了 ACP 链接、`[model]` 的真实键、斜杠命令，并写明 zypi 里没有 MCP 客户端。Phase 4 spec 的 §1.3 #2 与 §3 加了修订说明。DESIGN §8.5 写了 `pi/` 扩展的五条准入条件。另外清掉 `grok agent` 的 13 处过时指针（`pi-shell/README.md` 原是上游的用户手册，换成一页说明）。记录 [§10.14][l10-14]。
 
-**退出条件**：`grok agent`、`leader`、`x.ai`、`MvpAgent` 在文档与代码中的 grep 结果为 0（历史文档除外）。
+**退出条件**：`grok agent`、`leader`、`x.ai`、`MvpAgent` 在文档与代码中的 grep 结果为 0（历史文档除外）。（r11 对照：`MvpAgent` 与 `grok agent` 没有命中 ✓；只有门禁自己写出这两个词的地方除外（清单、门禁的单测、`tui.md`），`docs/PLAN` 也除外。`leader`（245 行）、`x.ai`（304 行）清不到 0 ✗：这些行在活着的代码里，是已删除的 leader 进程的名字、xAI 的服务地址，以及「不实现 `x.ai/*`」的过滤本身。所以改成棘轮：`tui_baseline.py` 的 `[gates.residue]` 给每个词一个上限，只降不升，`pytest` 也查；每一类是什么、去哪里，见 [`tui.md` §4](../baselines/tui.md)。文档里剩下的 `x.ai` 是「不实现 `x.ai/*`」的说明或历史审计，没有改。）
 
 ### 阶段 D（可选，决策门控）：依赖图与 support 层瘦身
 
@@ -290,6 +295,11 @@ Rust（pager）：
 - [ ] D.2 session 数据层（`session::{storage,persistence,unified_list}`、`relay`，约 16.6k 行）。
 - [ ] D.3 xAI auth 层（约 18.1k 行）。
 - [ ] D.4 视 `pi-workspace`（101k 行，pager 主要用 `permission`）、`pi-agent`（`agents_modal` 删除后几乎无活引用）的剩余耦合决定是否继续。
+- [ ] D.5 `pi-test-support`（7,384 行）：外部只有 `EnvGuard`、`scaled`、`resources`（`pi-shell`、`pi-tools` 的测试），和一个 `pi-pager` 测试里的 `TestProcess`、`TestSandbox` 在用；mock 推理服务器、SSE 生成器、ACP stdio 客户端、headless 运行器、计数服务器与脚本化响应共 5,003 行没有外部用户（模块之间的相互引用没有查）。出处：r11 的搜索，[§10.14][l10-14]。
+- [ ] D.6 内嵌指南的查看器：`ActiveModal::DocPicker` 与 `DocViewer` 没有入口（非测试代码里，`howto_list_modal` 只被查看器的 Esc 调用，`welcome_doc_viewer` 只在测试里被赋值），启动时的解压又在 C.2 删了，所以七页指南现在没有读者。二选一：接一个入口（斜杠命令或快捷键），或连同选择器、查看器一起删。出处：[§10.14][l10-14]。
+- [ ] D.7 发行与更新的遗留：`pi-pager/npm/` 下 7 个打包目录与 `pi-update` 里还写着 npm 包名 `@pi-official/grok` 和 `x.ai/cli/install.*` 的安装提示。自动更新在 Phase 4 §4.4 已禁用（`pi-pager-bin/src/main.rs` 里 `bg_update_rx = None`），这些不会跑，只是遗留。出处：[§10.14][l10-14]。
+- [ ] D.8 删掉调用图工具报死、编译器也认可的 16 个模块（被删文件共 6,143 行）：`pi-hooks` 的 `dispatcher`、`result`、`runner`、`runner::command`、`runner::http`（4,339 行）；`pi-shell` 的 `session::events`、`session::telemetry`、`session::unified_list`、`config::reloader`、`auth::flow`、`upload`、`upload::turn`（1,006 行）；`pi-workspace` 的 `publish`（462 行）；`pi-tools` 的 `implementations::editor_infra`（276 行）；`pi-mcp` 的 `wire`（39 行）；`pi-agent` 的 `prompt::browser_verification`（24 行）。第 17 个报死的模块，`pi-tools` 的 `types::error`（44 行），**不能删**：里面是 `?` 要用的 `impl From<…> for ToolError`。要一起删的还有 `pi-hooks/tests/integration.rs`（822 行，测的就是被删的模块），以及删完没人用的 `env_expand::expand_env_vars_with_extra`（`pi-hooks`）。证据：在副本里这样删，三个产品 crate 的 `cargo check` 与 `cargo check --workspace --tests` 都通过，只多那一条告警。没有真的删；副本里没有跑测试，所以不知道会少几个测试。`session::events`、`session::unified_list` 与 D.2 有重叠。出处：[§10.14][l10-14]。
+- [ ] D.9 `tui_baseline.py test` 在开发者自己的 `HOME` 下跑 `cargo test`，有测试会往真实的 `~/.pi-python` 与 `/tmp` 写东西。脚本只清了 `PI_HOME`、`GROK_HOME`（好让测试自己设的 `GROK_HOME` 生效），没有隔离 `HOME`。r11 在 WSL 里跑 `cargo test` 之后，`~/.pi-python` 多了 `agent_id`、`worktrees.db`、`config.toml`、`trusted_folders.toml`（18 条，全是已经不存在的 `/tmp/.tmpXXXX` 目录）、`last-copy.txt`、`logs/`；`/tmp` 里有 46 个 `grok-unified-log-test-*` 目录，r11 的运行留下 13 个，其余是更早的运行留下的。18 条信任记录里，16 条的时间与测试建这些目录的时间相差不到 5 秒；另 2 条没有对上的目录。具体是哪个测试写的，没有查。办法：测试运行时把 `HOME` 设成临时目录，并先钉住 `CARGO_HOME` 与 `RUSTUP_HOME`（不然 cargo 找不到工具链）；CI 的 runner 本来就是空 home，这样本地与 CI 更接近。没有做：要把整套测试重跑一遍（本次 22 m）才能验证，而且它改的脚本 TUI CI 也在用。出处：r11 收尾时的检查，[§10.14][l10-14]。
 
 ## 8. 风险与处理
 
@@ -334,12 +344,13 @@ Rust（pager）：
 | [§10.11][l10-11] | r9 | 阶段 0 收口（0.3、0.7、0.8）与阶段 1 里不需要拍板的部分；末尾是十二项待决策的原文 | [#10][pr-10] |
 | [§10.12][l10-12] | r10 | ADR1 的 PR 1（Python 一侧） | [#11][pr-11] |
 | [§10.13][l10-13] | r10 | 1.P3 的 (a)：`zypi` 只提供 agent 会照做的权限模式 | [#12][pr-12] |
+| [§10.14][l10-14] | r11 | 0.5 调用图工具化与阶段 C 收口：网络审计（C.1）、内嵌指南（C.2）、NOTICE（C.3）、文档与残留词门禁（C.4） | 分支 `chore/phase-c-closeout`，未合入 |
 | [附录 A.4][logA4] | r5 | 入口审计的 r5 执行结果 | [#7][pr-7] |
-| [附录 B][logB] | r2–r10 | 复现方法（依赖图、模块级闭包、各轮的测量与测试命令） | — |
+| [附录 B][logB] | r2–r11 | 复现方法（依赖图、模块级闭包、各轮的测量与测试命令） | — |
 | [附录 C][logC] | r10 | §7 的逐项注释（原文） | — |
 | [附录 D][logD] | r10 | 计划头部的状态文字（原文） | — |
 | [附录 E][logE] | r2 | §4、§5 的原文（源码事实基线与改动规模估计） | — |
-| [修订记录][logRev] | r1–r10 | 逐轮的完整说明 | — |
+| [修订记录][logRev] | r1–r11 | 逐轮的完整说明 | — |
 
 ## 附录 A：能力矩阵与 ACP 版本配对（阶段 0.8，r9 定稿）
 
@@ -366,7 +377,7 @@ Rust（pager）：
 | skills | slash 命令与 `available_commands_update` | 已覆盖；`available_commands_update` 在响应之后发（Zed 要收到响应才登记会话，`new_session` 里有注释） | 保留 | 已定 | `test_acp_agent.py` |
 | hooks / plugins / marketplace | 已删（r5） | 无 | 删（Phase 4 非目标） | 已定（r5） | [执行记录 A.4][logA4] |
 | image | 图片附件 | 代码有（`prompt_capabilities.image`、`_prompt_to_text_images`），**`packages/pi-agent-cli/tests` 里没有走这条路径的用例** | 保留 | 已定；缺测试 | — |
-| status line | pager 本地功能（用户脚本画状态栏，`pi-status-line`）；`ConnectFlags.status_line` 已不再公布给 agent（`client_capabilities_meta` 返回空） | 与 agent 无关 | 保留功能；那个没人读的字段是清理候选；payload 里的字段在 Python 会话下是否为空没有查 | 提议（清理）；其余未定，不挡阶段 1 | — |
+| status line（`[ui.status_line]`） | pager 本地画一行（命令脚本或内置字段，`pi-status-line`），数据来自 agent 发的 `session_status` 通知，经 `_pi/session_notification` 载体；`ConnectFlags.status_line` 已不再公布给 agent（`client_capabilities_meta` 返回空） | **从不发**那条通知，所以这一行在 Python agent 下不画，命令脚本也不跑（r11 实测） | 决定 15：Python 发（要过 P2）、pager 本地画、或删除；那个没人读的字段是清理候选 | **提议**（r11，决定 15）；其余不挡阶段 1 | `status_line_probe.py`（4/4，[§10.14][l10-14]） |
 | 历史回放 | `session/load` | 已覆盖（`isReplay` 的 `session/update`）；`session/resume` 不回放 | 保留 | 已定 | `a_session_is_listed_with_a_title_and_replayed_by_a_later_agent` |
 | 登录 | `auth_methods` 为空时不要求登录 | `auth_methods=[]`；`authenticate` 没有处理器 | 保留 | 已定 | `connect_runs_the_handshake_and_stop_leaves_nothing_behind` |
 | `initialize._meta`：响应里的键 | 解 `modelState`、`grokShell`、`availableCommands`、`cancelRewind`、`sessionRecap`、`feedbackTraceOffer` | Python 的响应没有 `_meta`，都落到缺省 | 逐键删解码（1.R5） | 未定（阶段 1 待办） | — |
@@ -425,6 +436,7 @@ Rust（pager）：
 - r8：WSL2 / Linux 补测（[#9][pr-9]）。
 - r9：阶段 0 收尾；阶段 1 里不需要拍板的部分（[#10][pr-10]）。
 - r10：ADR1 的 PR 1（[#11][pr-11]）；1.P3 的 (a)（[#12][pr-12]）。
+- r11：0.5 与阶段 C（本地分支 `chore/phase-c-closeout`，未推送）。调用图工具化（`tui_callgraph.py`）；`zypi` 的网络审计（含一次真模型）；内嵌指南缩成七页并停止启动时解压；`NOTICE` 重写、`THIRD-PARTY-NOTICES` 与 `Cargo.lock` 对账（`tui_notices.py`）；`grok agent` 的残留清零，`leader`、`x.ai` 改成棘轮上限；新增待决策 15 与阶段 D 的 D.5–D.9。
 - 整理（r10 之后，2026-10-11）：执行记录移到[执行记录（归档）][log]；本文只留计划、状态、待决策和 §10 索引；§7 改成每项一行状态；§4、§5（r2 的源码事实与规模估计）也移到归档的附录 E，只留索引。
 
 <!-- 链接定义 -->
@@ -442,6 +454,7 @@ Rust（pager）：
 [l10-11]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1011-r9-追加阶段-0-收口03--07--08与阶段-1-里不需要拍板的部分
 [l10-12]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1012-r10-追加adr1-的-pr-1python-一侧
 [l10-13]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1013-r10-追加1p3-azypi-只提供-agent-真会照做的权限模式
+[l10-14]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1014-r11-追加调用图工具化05与阶段-c-收口
 [l4-1]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#41-运行路径
 [l4-2]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#42-rust-runtime-与耦合面
 [l4-3]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#43-python-侧pi_agent_cli共-4114-行agentpy-472-行

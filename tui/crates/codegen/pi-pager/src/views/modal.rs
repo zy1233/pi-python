@@ -725,33 +725,6 @@ pub fn apply_doc_mouse_scroll(kind: crossterm::event::MouseEventKind, scroll: &m
         _ => false,
     }
 }
-const DOCS_USER_GUIDE_REL: &str = "docs/user-guide";
-/// Prefer keeping the on-disk path when width is tight.
-fn fit_docs_ask_grok_tip(docs_path: &str, width: usize) -> String {
-    use crate::render::line_utils::truncate_str;
-    if width == 0 {
-        return String::new();
-    }
-    let long =
-        format!("Tip · Ask Grok about the docs ({docs_path}), e.g. \"how do I set up MCP?\"");
-    if long.width() <= width {
-        return long;
-    }
-    let short = format!("Tip · Ask Grok about the docs · {docs_path}");
-    if short.width() <= width {
-        return short;
-    }
-    let path_only = format!("Tip · {docs_path}");
-    if path_only.width() <= width {
-        return path_only;
-    }
-    const PREFIX: &str = "Tip · ";
-    let budget = width.saturating_sub(PREFIX.width());
-    if budget == 0 {
-        return truncate_str("Tip", width);
-    }
-    format!("{PREFIX}{}", truncate_str(docs_path, budget))
-}
 pub fn render_doc_picker_overlay(
     buf: &mut ratatui::buffer::Buffer,
     area: Rect,
@@ -761,10 +734,7 @@ pub fn render_doc_picker_overlay(
     compact: bool,
     theme: &Theme,
 ) {
-    use super::modal_window::{
-        self as mw, ModalSizing, ModalWindowConfig, Shortcut, footer_lines_with_tip_gap,
-        render_centered_tip_footer, split_content_for_tip_footer,
-    };
+    use super::modal_window::{self as mw, ModalSizing, ModalWindowConfig, Shortcut};
     use super::picker::{self, PickerEntry, PickerRow};
     let filtered: Vec<_> = if state.query().is_empty() {
         entries.iter().enumerate().collect()
@@ -797,7 +767,7 @@ pub fn render_doc_picker_overlay(
         },
     ];
     mw::push_vim_nav_search_hint(&mut picker_shortcuts, state.search_active);
-    let base_sizing = ModalSizing {
+    let sizing = ModalSizing {
         width_pct: 0.70,
         max_width: 120,
         min_width: 44,
@@ -807,10 +777,6 @@ pub fn render_doc_picker_overlay(
         footer_lines: 2,
     }
     .with_compact(compact);
-    let sizing = ModalSizing {
-        footer_lines: footer_lines_with_tip_gap(area, &base_sizing, &picker_shortcuts),
-        ..base_sizing
-    };
     let modal_config = ModalWindowConfig {
         title: "How-to Guides",
         tabs: None,
@@ -821,12 +787,7 @@ pub fn render_doc_picker_overlay(
     let Some(mca) = mw::render_modal_window(buf, area, window, &modal_config, theme) else {
         return;
     };
-    let (picker_area, tip_area) = split_content_for_tip_footer(mca.content);
-    if let Some(tip_rect) = tip_area {
-        let docs_path = crate::util::display_user_grok_path(DOCS_USER_GUIDE_REL);
-        let tip_line = fit_docs_ask_grok_tip(&docs_path, tip_rect.width as usize);
-        render_centered_tip_footer(buf, tip_rect, theme, &tip_line);
-    }
+    let picker_area = mca.content;
     const NARROW_THRESHOLD: u16 = 70;
     let narrow = picker_area.width < NARROW_THRESHOLD;
     let desc_slices: Vec<Vec<&str>> = if narrow {
@@ -912,8 +873,7 @@ pub fn render_doc_viewer_overlay(
         &doc_shortcuts,
     );
 }
-/// [`render_doc_viewer_overlay`] with caller-supplied footer shortcuts (the
-/// tutorial adds a next-topic hint).
+/// [`render_doc_viewer_overlay`] with caller-supplied footer shortcuts.
 #[allow(clippy::too_many_arguments)]
 pub fn render_doc_viewer_overlay_with_shortcuts(
     buf: &mut ratatui::buffer::Buffer,
@@ -1104,30 +1064,12 @@ mod palette_tests {
     }
 }
 #[cfg(test)]
-mod doc_picker_tip_tests {
-    use super::{
-        ActiveModal, DOCS_USER_GUIDE_REL, fit_docs_ask_grok_tip, howto_list_modal,
-        render_doc_picker_overlay,
-    };
+mod doc_picker_tests {
+    use super::{ActiveModal, howto_list_modal, render_doc_picker_overlay};
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
-    use unicode_width::UnicodeWidthStr;
     #[test]
-    fn fit_docs_tip_prefers_path_and_never_overflows() {
-        let path = crate::util::display_user_grok_path(DOCS_USER_GUIDE_REL);
-        let long = format!("Tip · Ask Grok about the docs ({path}), e.g. \"how do I set up MCP?\"");
-        let short = format!("Tip · Ask Grok about the docs · {path}");
-        let path_only = format!("Tip · {path}");
-        assert_eq!(fit_docs_ask_grok_tip(&path, long.width()), long);
-        assert_eq!(fit_docs_ask_grok_tip(&path, short.width()), short);
-        assert_eq!(fit_docs_ask_grok_tip(&path, path_only.width()), path_only);
-        for w in [5usize, 12, 20, 30] {
-            let line = fit_docs_ask_grok_tip(&path, w);
-            assert!(line.width() <= w, "overflow at {w}: {line:?}");
-        }
-    }
-    #[test]
-    fn doc_picker_renders_tip_with_path() {
+    fn doc_picker_lists_the_guide_pages_and_shows_no_disk_tip() {
         let area = Rect {
             x: 0,
             y: 0,
@@ -1157,12 +1099,12 @@ mod doc_picker_tip_tests {
             all.push('\n');
         }
         assert!(
-            all.contains("Tip") && all.contains("Ask Grok"),
-            "missing tip footer:\n{all}"
+            all.contains("Getting Started"),
+            "the picker must list the guide pages:\n{all}"
         );
         assert!(
-            all.contains("docs/user-guide") || all.contains("docs\\user-guide"),
-            "missing docs path:\n{all}"
+            !all.contains("Tip") && !all.contains("docs/user-guide"),
+            "the pages are not on disk, so the picker must not point at a path:\n{all}"
         );
     }
 }

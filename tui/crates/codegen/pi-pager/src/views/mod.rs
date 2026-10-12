@@ -39,5 +39,4 @@ pub mod suggestion_controller;
 pub(crate) mod timeline;
 pub mod todo_pane;
 pub mod turn_status;
-pub(crate) mod tutorial;
 pub(crate) mod welcome;

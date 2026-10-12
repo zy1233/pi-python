@@ -189,7 +189,7 @@ fn merge_subagents(
 /// 4. `~/.grok/bundled/agents/` (bundled, lowest priority)
 ///
 /// Deduplicates by name — higher-priority definitions win.
-/// User-level agent directories in priority order: user grok agents, `.claude`
+/// User-level agent directories in priority order: the user's `.grok/agents`, `.claude`
 /// compat agents, then bundled. `.grok` dirs resolve from `grok_home`
 /// (GROK_HOME-aware) plus the legacy literal `~/.grok` when GROK_HOME points
 /// elsewhere; `.claude` resolves from `home`.

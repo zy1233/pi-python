@@ -247,7 +247,6 @@ pub(crate) fn test_app() -> AppView {
         session_picker_grouped: false,
         scheduler_background_loops_seed: true,
         cancel_rewind_enabled: true,
-        tutorial: None,
         keyboard_normalizer: KeyboardNormalizer::from_terminal_context(),
         voice_mode_enabled: false,
         voice_ui_active: false,
@@ -3235,7 +3234,16 @@ fn scroll_event_stashes_origin_for_residual_flush() {
 #[test]
 fn scroll_event_does_not_stash_when_blocking_modal_open() {
     let mut app = test_app();
-    app.tutorial = Some(crate::views::tutorial::TutorialState::new());
+    app.active_view = ActiveView::Welcome;
+    app.welcome_doc_viewer = Some(crate::views::modal::ActiveModal::DocViewer {
+        title: "Guide".into(),
+        content: "line\n".repeat(80),
+        scroll: 0,
+        window: crate::views::modal_window::ModalWindowState::new(),
+        cached_lines: None,
+        previous_palette: None,
+        standalone: true,
+    });
     assert!(app.is_scroll_blocking_modal_open());
     let _ = app.handle_input(&scroll_event(MouseEventKind::ScrollDown, 42, 17));
     assert!(
@@ -3299,45 +3307,6 @@ fn welcome_doc_viewer_is_scroll_blocking_and_wheel_scrolls_content() {
         _ => panic!("expected DocViewer"),
     };
     assert!(scroll > 0, "wheel must advance doc scroll, got {scroll}");
-}
-#[test]
-fn tutorial_is_scroll_blocking_and_wheel_scrolls_topic() {
-    let mut app = test_app();
-    app.active_view = ActiveView::Welcome;
-    let mut tut = crate::views::tutorial::TutorialState::new();
-    let _ = crate::views::tutorial::handle_tutorial_input(
-        &Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-        &mut tut,
-    );
-    app.tutorial = Some(tut);
-    assert!(
-        app.is_scroll_blocking_modal_open(),
-        "tutorial overlay must block background scroll",
-    );
-    let outcome = app.handle_input(&scroll_event(MouseEventKind::ScrollDown, 40, 12));
-    assert!(matches!(outcome, InputOutcome::Changed));
-    assert!(
-        app.last_scroll_pos.is_none(),
-        "wheel must not reach the background scroll path while the tutorial is open",
-    );
-    let tut = app.tutorial.as_ref().expect("tutorial stays open");
-    assert!(
-        tut.scroll > 0,
-        "wheel must advance topic scroll, got {}",
-        tut.scroll
-    );
-}
-#[test]
-fn tutorial_esc_on_list_closes_overlay() {
-    let mut app = test_app();
-    app.active_view = ActiveView::Welcome;
-    app.tutorial = Some(crate::views::tutorial::TutorialState::new());
-    let outcome = app.handle_input(&Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
-    assert!(matches!(outcome, InputOutcome::Changed));
-    assert!(
-        app.tutorial.is_none(),
-        "Esc on the list closes the tutorial"
-    );
 }
 /// Esc with a voice cold-start still queued (pipeline spawning, mic not yet
 /// open) must cancel it so the event loop doesn't open the mic after the user

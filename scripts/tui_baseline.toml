@@ -28,6 +28,17 @@ tracked_crates = [
     "pi-mcp",
 ]
 
+# Plan phase C asked for zero hits of `grok agent`, `leader`, `x.ai` and `MvpAgent`. `MvpAgent` is
+# a deny word above, and `grok agent` is at zero. The other two still occur, on purpose or in code
+# that phase D removes (docs/baselines/tui.md section 4 says what is left and why). Each phrase has
+# a ceiling: lines under tui/crates that hold it, ignoring case, with no letter or digit right before
+# it (`x.ai` does not match in `max.ai`). A ceiling only goes down; lower it in the commit that
+# removes lines.
+[gates.residue]
+"grok agent" = 0
+"leader" = 245
+"x.ai" = 304
+
 [graph]
 package = "pi-pager-bin"
 
@@ -104,8 +115,11 @@ targets = [
 # plan section 10.11; PR #10's CI run counted the same 5,602, 8,659 over the ten suites). Then
 # +24 for offering only the permission modes the agent honours (21 lib tests, 3 `settings_e2e`):
 # 5,626 (one local run on Linux, plan section 10.13; PR #12's CI run counted the same 5,626,
-# 8,683 over the ten suites).
-reference_passed = 5626
+# 8,683 over the ten suites). Then -18 net for the embedded user guide (plan section 10.14): the
+# tutorial overlay (`views/tutorial.rs`, `tutorial_docs.rs`) and the tests of the upstream guide
+# are gone, and the seven zypi pages have two guard tests: 5,608 (one local run on Linux; 8,665
+# over the ten suites, the other nine unchanged).
+reference_passed = 5608
 min_passed = 5300
 
 # Lib tests only; they were outside the manifest until r8 (plan section 10.10: 1,092 passed,

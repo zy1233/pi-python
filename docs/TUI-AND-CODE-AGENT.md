@@ -37,7 +37,7 @@ This document covers how to install, configure, and use the pi-python coding age
 └─────────────────────────────────────┘
 ```
 
-The TUI (`zypi`) is the interactive frontend. It communicates with the Python coding agent (`pi_agent_cli`) over the [Agent Client Protocol (ACP)](https://github.com/anthropics/agent-protocol) via stdio. The Python agent handles all LLM calls, tool execution, and session management through the core engine.
+The TUI (`zypi`) is the interactive frontend. It communicates with the Python coding agent (`pi_agent_cli`) over the [Agent Client Protocol (ACP)](https://agentclientprotocol.com) via stdio. The Python agent handles all LLM calls, tool execution, and session management through the core engine. `zypi` has no model client, no tool runner and no MCP client. A process-level audit of a real turn (`docs/PLAN/archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md`, section 10.14) found no connection from `zypi` to any address outside the machine.
 
 You can use the coding agent in two ways:
 
@@ -73,7 +73,7 @@ sudo mv zypi /usr/local/bin/
 
 #### Option B: Build from source
 
-Requires a Rust toolchain (1.85+), protoc, and a Linux environment (WSL2 recommended on Windows):
+Requires a Rust toolchain (`tui/rust-toolchain.toml` pins 1.94.0; rustup installs it on the first build), protoc, and a Linux environment (WSL2 recommended on Windows):
 
 ```bash
 cd tui
@@ -101,17 +101,17 @@ cp packages/pi-agent-cli/agent.example.toml ~/.pi-python/agent.toml
 Key settings:
 
 ```toml
+permission = "ask"                                 # "ask" | "auto" | "always-approve"
+
 [model]
 provider = "deepseek"                              # or "openai", "anthropic"
-model_id = "deepseek-ai/DeepSeek-V3"
+id = "deepseek-ai/DeepSeek-V4-Flash"
 api_key_env = "REAL_LLM_API_KEY"                   # env var holding the key for `provider` only
 base_url = "https://api.siliconflow.cn/v1"         # for OpenAI-compatible gateways
-context_window = 65536
-
-permission = "auto-edit"                           # "auto-edit" | "ask" | "auto-full"
 
 [skills]
-enabled = true
+# ".pi/skills" is relative to the project, so it loads only for a trusted project (see [extensions]).
+paths = ["~/.pi-python/skills", ".pi/skills"]
 
 [agent]
 # Override how the TUI spawns the Python agent (optional)
@@ -126,6 +126,8 @@ trusted_projects = ["~/work/my-repo"]
 default_project_trust = "ask"
 ```
 
+`ask` asks before each tool call, except for a tool that declares itself harmless (`read`, `grep`, `find`, `ls`). `auto` and `always-approve` ask about nothing. `packages/pi-agent-cli/agent.example.toml` lists every key.
+
 A project's own extensions, saved workflows (`.pi-python/workflows/*.py`, which become slash commands), `.pi/SYSTEM.md`, `.pi/APPEND_SYSTEM.md` and project-relative skills (such as `.pi/skills`) are not used until the project is trusted. When you open a project that ships any of them, the agent tells you in the session which files they are and what each does, then asks "Allow loading this project's …?" (naming what it ships, for example "extensions, saved workflows and prompt files") with two answers: **Don't trust** (the session goes on without them) and **Trust and remember**. The session's first prompt waits for your answer. "Trust and remember" is saved in `~/.pi-python/agent/trust.json` together with a fingerprint of those files, so you are asked again when one of them changes (after a `git pull`, say) and the agent says that they changed; refusing is never remembered. To take a trust back, delete the project's entry from that file. The TUI's YOLO mode does not answer this question for you: it has no "allow once" answer, so it always waits for you. The TUI does, however, pre-highlight the kind of answer you confirmed last time, so if that was an "always" answer, "Trust and remember" is the highlighted row: read the message above the question before pressing Enter.
 
 The question is skipped, and the project's files used or left out, when the decision is already made: the project is under `trusted_projects` (subdirectories count), you start with `PI_TRUST_PROJECT_EXTENSIONS=1` / `--trust-project-extensions`, `default_project_trust` is `always` (trusted) or `never` (not), or you answered before and the files have not changed. A project whose files are too many, too large or unreadable to fingerprint is never asked about; list it under `trusted_projects`. When files are left out, the agent says so in the session. Headless `-p` runs never ask, but honour an answer given earlier. Extension packages installed with `pip`, `~/.pi-python/extensions`, your own saved workflows in `~/.pi-python/workflows`, `AGENTS.md`, and skills paths that are absolute or start with `~` always load. The TUI's own folder trust (`/hooks trust`) does not apply here.
@@ -133,6 +135,8 @@ The question is skipped, and the project's files used or left out, when the deci
 ### `config.toml` — TUI-only config (optional)
 
 For TUI-specific settings. Usually keep empty or use `packages/pi-agent-cli/config.toml.example`.
+
+Do not put the agent's settings here. `zypi` ignores a table or key that it does not know. A key that it knows, written with another type, stops it with exit code 1: a top-level `permission = "ask"` does (the TUI expects a table there), and so do a `[[models]]` array and invalid TOML. The one agent key that the TUI reads is `[agent].command`: from `agent.toml`, then from `config.toml`.
 
 ### `local.env` — API keys (recommended for TUI)
 
@@ -171,7 +175,9 @@ zypi
 #   Type your prompt and press Enter to send
 #   /new      — start a new session
 #   /resume   — list and resume a previous session
-#   /quit     — exit
+#   /model    — pick a model (the choices come from [model] and [[models]] in agent.toml)
+#   /exit     — exit (also /quit)
+#   /settings /theme /multiline /home /help — local TUI commands, no agent involved
 #   @         — browse local directory listing
 ```
 
@@ -251,6 +257,8 @@ The TUI is a vendored fork of [xai-org/grok-build](https://github.com/xai-org/gr
 - xAI login / authentication
 - `x.ai/*` vendor extension RPCs (680+ references stripped)
 - grok CLI subcommands (`agent`, `/loop`, `/share`, dashboard)
+- The Rust agent runtime: model sampling, the agent loop, tool execution, the MCP client, subagents, hooks (the Python agent does that work)
+- Most of grok's slash commands, screens and modals (agents, tasks, workflows, goals, MCP, plugins, rewind, fork). Only `/settings`, `/new`, `/model`, `/resume`, `/theme`, `/multiline`, `/home`, `/help` and `/exit` stay
 - Auto-update from grok servers
 - Marketplace integration
 - `~/.grok` home directory (replaced by `~/.pi-python`)
@@ -267,3 +275,5 @@ The TUI is a vendored fork of [xai-org/grok-build](https://github.com/xai-org/gr
 | [Benchmark report](benchmarks/FRONTIER-HARNESS-30-EVAL-REPORT.md) | FrontierHarness 30-task evaluation |
 | [Pelican benchmark](benchmarks/PELCAN-BICYCLE.md) | Foundation SVG smoke test |
 | [P0 TUI spike](AUDIT/SPIKE-P0-GROK-TUI.md) | grok pager `x.ai/*` strip inventory |
+| [Runtime-removal plan](PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md) | What was taken out of the TUI, and what is next |
+| [TUI baseline](baselines/tui.md) | Test counts, gates, call-graph tools and PTY checks for `zypi` |

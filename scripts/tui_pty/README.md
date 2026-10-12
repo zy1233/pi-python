@@ -12,9 +12,12 @@ a built `zypi`, so they are not part of `pytest` or CI.
 | `print_exit.py` | `zypi -p ...` while only zypi gets `SIGTERM` / `SIGKILL` / `SIGHUP` / `SIGINT`: the agent and its tool call must stop too |
 | `resume_matrix.py` | What `--continue`, `--resume <id>`, `--resume <title>`, `--session-id` and `zypi export` do with a session the Python agent wrote (13 cases). Three are **known gaps** (reported as `GAP`, not failures; `--strict` fails them): the pager still reads the old Rust agent's session files for them (a fourth, `--session-id <fresh uuid>`, closed when the agent began to honour `_meta.sessionId`). Landing ADR1 (execution log section 10.11) has to close them and drop each case's `gap` text; a gap that has closed shows as `FIXED` |
 | `mode_probe.py` | Which permission modes the TUI offers (Shift+Tab cycle, `--always-approve`, `--permission-mode default\|bypassPermissions`) the Python agent honours: for each, whether a `write` is asked about and whether it is carried out unasked; then the four `--permission-mode` values that are refused (`acceptEdits`, `auto`, `dontAsk`, `plan`), each of which must exit at once with the reason; last, the settings page (does a search for "plan" find a "Plan mode" row, which choices does the Permission mode picker list). Judges nothing, prints a table (execution log section 10.13; plan appendix A, 1.P3 (a)): Plan, Auto and the settings page's Default are hidden because the agent honours neither (section 10.11 has the measurements from before they were hidden) |
+| `net_audit.py` | Whether zypi talks to the network (plan C.1). It plays one turn and, every few milliseconds, lists the sockets of zypi and of each process below it (`/proc/<pid>/fd` joined with `/proc/<pid>/net/*`). zypi must have no connection to a non-loopback address, and it must listen on none. `--mock` uses the mock LLM (the agent must be silent too). `--model-from FILE` plays one real turn with the `[model]` table of that `agent.toml`: the agent must then hold an established connection to a non-loopback address (the positive control, which shows that the sampler can see traffic), and the output names no host, address or key. `--no-network` (with `--mock`) runs everything in an empty network namespace (`bwrap --unshare-net`): the turn must still end |
+| `status_line_probe.py` | Whether the status row is drawn (`[ui.status_line]`, `type = "command"` and `"builtin"`). With the plain Python agent the row must not be drawn, and a command script must not run. With `status_proxy_agent.py`, which adds the `session_status` message that the old Rust agent sent, the row must be drawn: this second run is the control that shows the config text is right. Execution log section 10.14 has the result |
 
 `pty_term.py` is the driver (`Term`, plus `/proc` helpers); `zypi_env.py` finds the binary and builds
-a throw-away home.
+a throw-away home. `status_proxy_agent.py` is a stand-in agent: the Python agent plus one extra message.
+`status_line_probe.py` starts it through `PI_AGENT_COMMAND`.
 
 ## Running
 
@@ -29,6 +32,12 @@ python scripts/tui_pty/exit_matrix.py --zypi tui/target/debug/zypi --python .ven
 python scripts/tui_pty/print_exit.py  --zypi tui/target/debug/zypi --python .venv/bin/python
 python scripts/tui_pty/resume_matrix.py --zypi tui/target/debug/zypi --python .venv/bin/python
 python scripts/tui_pty/mode_probe.py --zypi tui/target/debug/zypi --python .venv/bin/python
+python scripts/tui_pty/status_line_probe.py --zypi tui/target/debug/zypi --python .venv/bin/python
+python scripts/tui_pty/net_audit.py --mock --zypi tui/target/debug/zypi --python .venv/bin/python
+python scripts/tui_pty/net_audit.py --mock --no-network --zypi tui/target/debug/zypi --python .venv/bin/python
+# One real turn. The key comes from the environment, never from the command line:
+REAL_LLM_API_KEY=... python scripts/tui_pty/net_audit.py --model-from ~/.pi-python/agent.toml \
+    --zypi tui/target/debug/zypi --python .venv/bin/python
 ```
 
 - `--zypi` falls back to `$ZYPI`, then `tui/target/{debug,release}/zypi`. Cargo writes somewhere else
@@ -46,6 +55,10 @@ Every run uses a fresh temporary `PI_HOME`, `HOME` and working directory, and th
 from scratch: what your shell exports (`PI_HOME`, `PI_AGENT_COMMAND`, ...) is not passed on, so the
 scripts never touch a real `~/.pi-python`. A run that is interrupted may leave processes behind; they
 are found by their `PI_HOME=/tmp/pi-...` environment entry.
+
+`net_audit.py --model-from FILE` is the one exception. It copies only the `[model]` table of FILE into the
+temporary home (a key that is written in the table stays behind), and it passes on one variable from your
+environment: the one that `api_key_env` in that table names. It reads no `local.env`.
 
 ## WSL
 

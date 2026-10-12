@@ -22,8 +22,9 @@ use crate::mock_server::MockInferenceServer;
 use crate::process::{TestOutput, TestProcess, TestProcessConfig, TestStdin};
 use crate::sandbox::TestSandbox;
 
-/// Spawn `grok agent stdio` with the sandbox's canonical hermetic environment.
-/// `leading_args` go before the `agent stdio` subcommand (global flags).
+/// Spawn the agent binary in `agent stdio` mode with the sandbox's canonical hermetic
+/// environment. `leading_args` go before the `agent stdio` subcommand (global flags).
+/// The binary has no such subcommand now, and nothing uses this client (plan phase D.5).
 fn spawn_agent_process(
     sandbox: &mut TestSandbox,
     server: &MockInferenceServer,
@@ -46,7 +47,7 @@ fn spawn_agent_process(
         cmd,
         sandbox,
         TestProcessConfig::new()
-            .label("grok agent stdio")
+            .label("agent stdio")
             .stdin(TestStdin::Piped)
             .stdout(TestOutput::Piped),
     )
@@ -108,7 +109,7 @@ impl acp::Client for TestAcpClient {
     }
 }
 
-/// Drives `grok agent stdio` via the ACP protocol over pipes.
+/// Drives an agent binary in `agent stdio` mode via the ACP protocol over pipes.
 ///
 /// Handles the full lifecycle: spawn → initialize → authenticate → session → prompt.
 /// Child process is killed on drop.
@@ -424,7 +425,7 @@ impl GrokStdioClient {
     }
 }
 
-/// Drives `grok agent stdio` with verbatim newline-delimited JSON-RPC lines.
+/// Drives an agent binary in `agent stdio` mode with verbatim newline-delimited JSON-RPC lines.
 ///
 /// Exists for wire shapes the typed [`GrokStdioClient`] (`ClientSideConnection`,
 /// integer ids) can never produce — e.g. Xcode's Swift/Foundation `JSONEncoder`
