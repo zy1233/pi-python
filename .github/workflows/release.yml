@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - "v*"
+  # A manual run is a dry run. It tests and builds everything and keeps the artifacts,
+  # but it publishes nothing: publish-pypi and github-release run only for a tag push.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -145,6 +148,8 @@ jobs:
   publish-pypi:
     name: Publish to PyPI
     needs: build
+    # Only a tag push publishes. Test the event too: a manual run can name a tag as its ref.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     environment: pypi
     steps:
@@ -162,6 +167,8 @@ jobs:
   github-release:
     name: GitHub Release
     needs: [build, build-tui, build-tui-macos-arm]
+    # Same rule as publish-pypi.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
