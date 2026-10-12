@@ -292,7 +292,7 @@
 | 11 | P7-09 | 走代理时，代理把公开域名解析到私网地址拦不住，也没有「校验的地址即连接的地址」的保证（需要更强保证就在代理一侧限制出口，或不设代理走直连）；工具不响应 turn 的 abort 信号，靠 30 秒总时限兜底，超时后 `trafilatura` 的工作线程会自己跑完；服务端无视 `Accept-Encoding: identity` 发压缩正文时，一次读取的 64 KiB 压缩数据最多瞬时膨胀到约 64 MiB，之后被 5 MiB 上限截断 |
 | 12 | P7-11 | 提醒次数只在本进程内计，不随状态保存 |
 | 13 | P6-03 | 官方 DeepSeek 上开启思考且带工具时回传 `reasoning_content`（批 6）与 CLI 的 `Model.reasoning` 接线都**没有对真实 API 验证**（没有密钥；矩阵 `deepseek` 行的 `thinking_tools` 用例是第一次真实检验）。请求的形状取自 DeepSeek 的文档与样例；测试走已安装的 `langchain-deepseek` 真实的请求构造路径（`_get_request_payload`）与一次完整的工具往返（伪造的只是网络那一端）。网关上的 DeepSeek 模型（SiliconFlow、vLLM 等）刻意不回放：它们各自的要求不同，也没有验证 |
-| 14 | P7-15 | 扩展的版本下限必须随核心发布一起上调（`test_extension_packaging.py` 会拦住不同步的情况）。批 7 把核心、`pi-agent-harness-lc`、`pi-agent-cli-lc` 升到 0.5.0，三个扩展包的下限同步成 `>=0.5.0`，并把扩展包自己的版本从 0.1.0 升到 0.2.0（发布工作流的 PyPI 步骤带 `skip-existing`，版本号不变就会让 PyPI 上已有的旧构建原样留着）；六个包都用 `uv build` 构建过，wheel 元数据的版本与依赖符合预期。**只做了本地提交：没有打 tag、没有发布、没有推送**；0.5.0 这个版本号与扩展包的 0.2.0 是按惯例选的，发布者可以改。今后每次发布都要重复这一步。另外 ACP 的 `agentInfo.version`（`agent.py` 的 `_AGENT_INFO`）一直硬编码为 `0.1.0`，与包版本早就对不上，这次没有改 |
+| 14 | P7-15 | 扩展的版本下限必须随核心发布一起上调（`test_extension_packaging.py` 会拦住不同步的情况）。批 7 把核心、`pi-agent-harness-lc`、`pi-agent-cli-lc` 升到 0.5.0，三个扩展包的下限同步成 `>=0.5.0`，并把扩展包自己的版本从 0.1.0 升到 0.2.0（发布工作流的 PyPI 步骤带 `skip-existing`，版本号不变就会让 PyPI 上已有的旧构建原样留着）；六个包都用 `uv build` 构建过，wheel 元数据的版本与依赖符合预期。**只做了本地提交：没有打 tag、没有发布、没有推送**；0.5.0 这个版本号与扩展包的 0.2.0 是按惯例选的，发布者可以改。今后每次发布都要重复这一步。另外 ACP 的 `agentInfo.version`（`agent.py` 的 `_AGENT_INFO`）一直硬编码为 `0.1.0`，与包版本早就对不上，这次没有改（后来改了：现在读已装包 `pi-agent-cli-lc` 的版本，见 CHANGELOG 的 0.5.0） |
 | 15 | P7-03 | 模型 id 写成 `provider/model`，按第一个 `/` 拆分，对自身含 `/` 的网关模型 id（如 `Qwen/Qwen3-8B`）有歧义，需写成 `<provider>/Qwen/Qwen3-8B` |
 | 16 | 编号 | 本文件与 `AUDIT-PHASE7-EXTENSION-API.md` 的编号重名，见文件开头的说明 |
 
