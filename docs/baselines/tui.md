@@ -7,7 +7,7 @@
 - **测试**：10 个 suite 合计 8,665 通过 / 0 失败 / 22 忽略。出处：分支 `chore/phase-c-closeout` 的 `4fadcf3`，WSL2 上基线执行器的一次本地运行（22 m 22 s，清环境，`PI_E2E_PYTHON` 与 `PI_E2E_REQUIRED=1`）；**还没有 CI 运行**。比 r10 的 8,683 少 18 个，都在 `pi-pager`（5,626 → 5,608：C.2 删了教程叠层与上游用户指南的用例，加了两个守卫用例）。各 suite 见 §3.2。r10 的 CI 对账（PR [#12](https://github.com/zy1233/pi-python/pull/12) 的 `bd44289`，`TUI CI` [run 38074038191](https://github.com/zy1233/pi-python/actions/runs/38074038191)）在[基线历史][hist-tests]。
 - **门禁**：依赖图 980 个包，消费者构建 0 条告警，`--workspace --tests` 0 个错误，残留词 `grok agent` 0 / `leader` 245 / `x.ai` 304（§2、§4）。出处：同一分支的 `24907ef`，`check` 的一次本地运行，5 m 24 s。`4fadcf3` 之后 `tui/` 只改了文档注释、一个标签和两份 README，测试没有重跑。
 - **耗时**（CI，r10 的 `bd44289`）：`cargo test` job 29 m 13 s，`Gates + cargo check` 5 m 46 s。r11 的分支还没有 CI 运行，上面两条本地耗时与它们不可比。
-- **release**：`zypi` 422,034,120 B（比拆除前小 10.3 %），冷缓存构建 1,155 s（比 1,647 s 快 29.9 %），`--version` 中位数 23.1 ms。这三项是 r5 的实测（`ac1d3ff`），之后没有重测：该 job 只手动触发。
+- **release**：`zypi` 420,767,096 B（比拆除前小 10.6 %），冷缓存构建 1,195 s（比 1,647 s 快 27.4 %），`--version` 中位数 23.4 ms。出处：r12，`4fc028a`，手动触发的 `TUI CI`（带 `release_baseline`）[run 38221952524](https://github.com/zy1233/pi-python/actions/runs/38221952524)。r5（`ac1d3ff`）是 422,034,120 B / 1,155 s / 23.1 ms。该 job 只手动触发，两次之间没有别的测量。
 - **历史**：每一轮数字怎么变的、CI 对账的 run 号、已经做完的事，在[基线历史][hist]。
 
 ## 1. 文件与命令
@@ -71,6 +71,8 @@ python scripts/tui_baseline.py release           # release-dist 构建 + 体积 
 | `release-dist` 的 `zypi`（Linux x86_64） | 470,461,776 B（448.7 MiB） | — | — | **422,034,120 B（402.5 MiB，−10.3 %）** | — |
 | `release-dist` 冷缓存构建耗时 | 27 m 27 s（`ubuntu-24.04`，v0.4.0 的发布 job） | — | — | **19 m 15 s（1,155 s，−29.9 %）** | — |
 | `zypi --version` 延迟（5 次中位数） | 未测 | — | — | 23.1 ms | — |
+
+r12（Linux CI，`4fc028a`，[run 38221952524](https://github.com/zy1233/pi-python/actions/runs/38221952524)）：`release-dist` 的 `zypi` 420,767,096 B（401.3 MiB，比拆除前小 10.6 %，比 r5 小 1,267,024 B）；冷缓存构建 1,195 s（19 m 55 s，比 1,647 s 快 27.4 %，比 r5 慢 40 s）；`zypi --version` 中位数 23.4 ms。同一次运行的 `check` 与 `test` 与 `4fc028a` 的 PR 运行一致：依赖图 980、0 条告警、8,665 通过 / 0 失败 / 22 忽略。
 
 macOS 环境：Apple Silicon，Homebrew `cargo` / `rustc` 1.96.1（**不是**钉的 1.94.0）。依赖图节点数只取决于 `Cargo.lock` 与目标三元组，与工具链版本无关；告警数与耗时会随工具链漂移，所以只当参考。
 
