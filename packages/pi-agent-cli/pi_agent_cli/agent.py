@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.metadata
 import logging
 import uuid
 from collections.abc import Sequence
@@ -101,7 +102,25 @@ from pi_agent_harness import AgentHarness, AgentHarnessError, JsonlSessionRepo, 
 
 logger = logging.getLogger(__name__)
 
-_AGENT_INFO = Implementation(name="pi-agent-cli", title="pi-python ACP agent", version="0.1.0")
+# The package this agent ships in. Its version is the version of the release.
+_DISTRIBUTION = "pi-agent-cli-lc"
+
+
+def _installed_version() -> str:
+    """The version of the installed package, for ACP ``agentInfo.version``.
+
+    Without package metadata (a checkout that was never installed) the answer is
+    ``0.0.0+unknown``, which is still a valid version.
+    """
+    try:
+        return importlib.metadata.version(_DISTRIBUTION)
+    except importlib.metadata.PackageNotFoundError:
+        return "0.0.0+unknown"
+
+
+_AGENT_INFO = Implementation(
+    name="pi-agent-cli", title="pi-python ACP agent", version=_installed_version()
+)
 
 # ACP Session Config Option id for the model selector (``session/set_config_option``).
 MODEL_CONFIG_ID = "model"
