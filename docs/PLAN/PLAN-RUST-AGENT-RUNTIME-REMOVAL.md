@@ -1,6 +1,6 @@
 # Rust Agent Runtime 剥离计划
 
-> **状态：r11（2026-10-11）。** r3–r10 的工作已全部合入 `main`（PR [#7][pr-7]、[#8][pr-8]、[#9][pr-9]、[#10][pr-10]、[#11][pr-11]、[#12][pr-12]）。r11（0.5 与阶段 C，[§10.14][l10-14]）在分支 `chore/phase-c-closeout` 上，还没有合入 `main`。做到哪了，见[当前状态](#当前状态)。
+> **状态：r12（2026-10-12）。** r3–r11 的工作已全部合入 `main`（PR [#7][pr-7]、[#8][pr-8]、[#9][pr-9]、[#10][pr-10]、[#11][pr-11]、[#12][pr-12]、[#13][pr-13]）。r12（[§10.15][l10-15]）：按剥离的现状定下 V0.5 的发布里程碑。这个 PR（[#16][pr-16]）只改文档；里程碑的条件由两个别的 PR（[#14][pr-14] 发布演练，[#15][pr-15] 发布说明）和两次 CI 运行去做。做到哪了，见[当前状态](#当前状态)；V0.5 要做什么，见[发布里程碑 V0.5](#发布里程碑-v05)。
 >
 > **这份文档只写计划和状态。** 每一轮做了什么、怎么测的、数字是多少，在[执行记录（归档）][log]里。§1–§3、§6–§9 保留 r2 原文作为决策依据（§7 的每一项后面加了一行状态）。§4、§5 是 r2 的源码事实与规模估计，描述拆除之前的代码，原文在归档里。与执行记录冲突处，以执行记录和 ADR3（r3）为准。
 >
@@ -13,6 +13,7 @@
 | 想知道 | 看哪里 |
 |---|---|
 | 做到哪了，下一步做什么 | [当前状态](#当前状态) |
+| V0.5 发布要做什么、带着什么问题发 | [发布里程碑 V0.5](#发布里程碑-v05) |
 | 有哪些事在等用户决定 | [待决策](#待决策) |
 | 为什么这样设计 | §1–§3（目标、架构、与现有文档的关系）、§6（ADR1–ADR7） |
 | r2 核对过的源码事实、改动规模的估计 | §4、§5（只剩索引，原文在[归档的附录 E][logE]） |
@@ -22,7 +23,7 @@
 
 ## 当前状态
 
-截至 r11：`origin/main` 在 `ef03afd`，Python 的 CI 与 TUI CI 都通过（本地 `main` 在 `df812d1`，多 4 个提交：计划与基线文档的整理，还没有推送），TUI CI 的 10 个 suite 合计 8,683 通过 / 0 失败 / 22 忽略。r11 的分支在 WSL2 上本地跑过同一组：8,665 通过 / 0 失败 / 22 忽略，门禁与 `--workspace --tests` 全过，还没有 CI 运行；比 r10 少的 18 个在 `pi-pager`，是 C.2 随教程叠层与旧用户指南一起删掉的用例。
+截至 r12：`origin/main` 在 `4fc028a`（r11 的 PR [#13][pr-13] 的合并提交）。[`CI`][ci-run-4fc028a] 与 [`TUI CI`][tui-ci-run-4fc028a] 在这个提交上都通过；`TUI CI` 的 10 个 suite 合计 8,665 通过 / 0 失败 / 22 忽略（`PI_E2E_REQUIRED=1`），与 r11 在 WSL2 上的本地数相同；比 r10 的 8,683 少的 18 个在 `pi-pager`，是 C.2 随教程叠层与旧用户指南一起删掉的用例。r3–r11 都已合入 `main`。V0.5 的发布里程碑见[发布里程碑 V0.5](#发布里程碑-v05)。
 
 | 阶段 | 状态 | 已完成 | 还差 |
 |---|---|---|---|
@@ -30,13 +31,42 @@
 | A 死代码先行 | 完成 | A.1–A.4 | — |
 | 1 协议与 Python | 完成一半 | 1.P1 会话列表分页；1.P2 优雅退出；1.P4 显式忽略 `mcp_servers`；1.P7 契约测试；1.R1 的 PR 1；1.R3 的大部分；1.P3 的 (a) | 1.P3 的 (b)、(c)；1.P5；1.P6；1.R1 的 PR 2、PR 3；1.R2；1.R4；1.R5；1.R3 的 MCP 子进程与 Windows |
 | B 拆除 runtime | 删除完成，迁移没有完成 | B.1、B.5、B.6：`pi-sampler` 与 `pi-shell` 的 runtime 单元已删 | B.2、B.3、B.4：r3 换了做法，没有抽出叶子 crate |
-| C 验收与文档 | 完成（r11，在分支上） | C.1–C.4：`zypi` 没有到 LLM provider 的外连（实测，含一次真模型）；内嵌指南缩成 7 页，启动不再解压；`NOTICE` 重写，`THIRD-PARTY-NOTICES` 有工具对账；`grok agent` 清零，`leader`、`x.ai` 有上限 | 退出条件里的 `leader`、`x.ai` 清不到 0，改成了棘轮（§7 的 C） |
+| C 验收与文档 | 完成（r11，PR [#13][pr-13]） | C.1–C.4：`zypi` 没有到 LLM provider 的外连（实测，含一次真模型）；内嵌指南缩成 7 页，启动不再解压；`NOTICE` 重写，`THIRD-PARTY-NOTICES` 有工具对账；`grok agent` 清零，`leader`、`x.ai` 有上限 | 退出条件里的 `leader`、`x.ai` 清不到 0，改成了棘轮（§7 的 C） |
 | D 依赖图瘦身（可选） | 没有开始 | — | D.1–D.9；等基线数据再定 |
+
+### 发布里程碑 V0.5
+
+**是什么。** 第一个不带 Rust agent runtime 的发布：`zypi` 只做终端界面和 ACP client，Python 是唯一的 agent。它把两条线一起发：Python 一侧的 Phase 6/7（0.5.0 的版本号与 `CHANGELOG.md` 的 `[0.5.0]` 段已经在 `main` 上，没有打 tag），和 TUI 一侧的 r3–r11（原来在 `CHANGELOG.md` 的 `[Unreleased]` 段，PR [#15][pr-15] 把它并进 `[0.5.0]`）。相对 v0.4.0：23 个提交；`tui/` 里 1,512 个文件、+12,275 / −641,224 行；`pi-sampler` 的 31 个文件变成 0 个。GitHub 里程碑：[v0.5.0][ms-v050]，没有挂 PR 与 issue（条件在这里记，不记两处）。依据与没有验证的见 [§10.15][l10-15]。
+
+**范围按现状定。** 阶段 0、A、C 完成，阶段 B 的删除完成，阶段 1 完成一半，阶段 D 没有开始（见上表）。V0.5 按这个状态发，不等阶段 1 的余项、ADR1 的 PR 2 与 PR 3、阶段 D。下面「已知问题」里的各项，有的 v0.4.0 就有，有的是剥离带来的，没有逐项分开量过；条件 4 就是为了分开它们。
+
+**退出条件。** 打 tag 之前，六项都要有结果。
+
+1. **CI 绿。** `CI` 与 `TUI CI` 在要打 tag 的提交上通过。现状：`4fc028a` 上都通过。
+2. **再量一次 release 体积。** 手动触发 `TUI CI` 的 `release_baseline`（约 30 分钟），把结果回填 [`docs/baselines/tui.md`](../baselines/tui.md)。条件：Linux 的 `zypi` 不大于 v0.4.0 的 470,461,776 B。上一次是 r5 的 422,034,120 B；#7 合入之后 `tui/` 又合入 5 个提交（#8、#9、#10、#12、#13）：115 个文件，+4,481 / −16,045 行。**结果（r12）**：[run 38221952524][run-baseline]，在 `4fc028a` 上：**420,767,096 B**（比 v0.4.0 小 10.6 %，比 r5 小 1,267,024 B），构建 1,195 s（v0.4.0：1,647 s），`--version` 中位数 23.4 ms。条件满足，数字已回填 [`docs/baselines/tui.md`](../baselines/tui.md)。之后到 tag 之间，`tui/` 若有改动，要再量一次。
+3. **发布构建演练。** `release.yml` 只在 `v*` tag 上触发，没有手动入口；macOS arm64 的 job（2026-10-01 加的）从来没有在发布里跑过。`github-release` 等它，`publish-pypi` 不等：它失败时，PyPI 上的包已经发出，GitHub 上没有 Release。Linux CI 编不到 macOS 专属的代码：`tui/crates` 里 75 个文件带 `cfg(target_os = "macos")`，最后一次在 macOS 上构建是 r7，之后 `tui/` 改了 88 个文件，其中 8 个带这样的代码。v0.3.0 的发布工作流跑了三次才通过。做法：给 `release.yml` 加 `workflow_dispatch`，构建 job 照跑并上传产物，`publish-pypi` 与 `github-release` 只在 tag 上跑。这改的是发布工作流，所以先问了用户：用户同意了（r12），PR [#14][pr-14] 就是这一改。两个发布 job 的 `if` 不只看 ref，还要求事件是 `push`，因为手动运行可以把一个 tag 当作 ref。条件：Linux 与 macOS arm64 的 `release-dist` 构建、六个 Python 包的构建都成功。**结果（r12）**：演练 [run 38223353755][run-dry-run] 从 PR 分支 `ci/release-dry-run`（`04cea48`）手动触发；GitHub 接受了分支上的 `workflow_dispatch`，不用先合入 `main`。结果：成功，共 27 分钟。测试 97 s，Python 包的构建 29 s，Linux x86_64 的 `release-dist` 构建 16 m 26 s，macOS arm64 的 `release-dist` 构建 25 m 27 s；`publish-pypi` 与 `github-release` 跳过，没有发布任何东西。三个产物（`dist`、`tui-binary`、`tui-binary-macos-arm64`）保留到 2027-01-10。macOS 的 job 第一次在发布工作流里跑，它编译的 `cfg(target_os = "macos")` 代码 Linux 的 CI 编译不到，现在通过了。**没有验证**：没有人运行过那个 macOS 二进制，我也没有下载它（试过 `gh run download`，太慢，见 [§10.15][l10-15]）；`if` 为真的一侧（tag 的 `push`）要等真正的 tag 才跑得到。
+4. **与 v0.4.0 对照。** 用 `scripts/tui_pty/` 的 `smoke.py`、`exit_matrix.py`、`resume_matrix.py`、`mode_probe.py`（都有 `--zypi PATH`）和同一个 Python agent，分别跑 v0.4.0 的 `zypi-linux-x86_64` 与新构建，比较结果。有差别的，要么在 `CHANGELOG.md` 里有一条，要么是缺陷。只在 Linux（WSL2）上做。
+5. **发布说明。** 发布页的正文只取 `CHANGELOG.md` 里与 tag 同版本的一段，所以：把 `[Unreleased]` 并进 `[0.5.0]`，日期改成发布日（现在是 2026-10-02）；补上 `CHANGELOG.md` 里还没有的条目——Rust runtime 的删除与随之删掉的界面和命令（r3、r5）、`/model` 经 ACP `configOptions` 恢复（r3）、`-p` 在要求沙箱时拒绝运行（r5）、品牌清理（r6）；写「已知问题」（下）；用 `release.yml` 里同一段 `awk` 在本地预览。`docs/TUI-AND-CODE-AGENT.md` 只写了 Linux x86_64 有预编译二进制；`zypi-macos-arm64` 随版本发的话要补上。**状态（r12）**：PR [#15][pr-15] 把 `[Unreleased]` 并进了 `[0.5.0]`，补了 19 条（Added 1、Changed 2、Removed 2、Fixed 6、已知问题 8），日期写 2026-10-12（打 tag 那天不是这天，就改）。用 `release.yml` 里那段 `awk` 预览过（Git for Windows 的 `awk`，输入是 LF 文本）：正文 44 KB，五个分组。没做：`zypi-macos-arm64` 的条目和 `docs/TUI-AND-CODE-AGENT.md` 的改动，要等演练的结果。
+6. **打 tag（用户）。** 先按 `pre-push-ruff` 的规则在 Windows 与 WSL 跑 ruff 和 pytest；`git tag v0.5.0`、`git push origin v0.5.0`；再核对 Release 的运行：PyPI 上六个包（核心、harness、cli 是 0.5.0，三个扩展包是 0.2.0），GitHub Release 上的 wheel、sdist 与 `zypi-*` 二进制。
+
+**带着发布的已知问题**，除非用户在打 tag 之前决定。最好先定的是决策 6、8、14、15；16 已选 (a)，实施之前仍带着；不定，就带着发。
+
+- `zypi export <id>` 对 Python agent 的会话恒报 `Session '<id>' not found.`，退出码 1（决策 6）。
+- `--resume <标题>` 找不到 Python 会话（`no session id or title matched`，退出码 1）。`--session-id <已用的 id>` 被 agent 拒绝，TUI 却显示 `Session creation failed: Invalid params: …` 并留在界面里，不退出（ADR1 的 PR 2）。`--resume <未知 id>` 进了 TUI 才报错（决策 5）。`--continue` 取最近创建的会话，不是最近活动的（决策 4）。
+- 交互模式下 `--system-prompt-override` 与 `--rules` 无效，`--allow` 与 `--deny` 到不了 agent，`zypi --help` 还列着没有逐个核对过的 Grok 时代旗标（决策 8）。
+- 设置页里权限模式以外的项对 Python agent 可能没有效果；`remember_tool_approvals` 与 `default_selected_permission` 没有测过（决策 14）。
+- `[ui.status_line]` 在 Python agent 下永远不画（决策 15）；内嵌指南已照实写了。
+- 内嵌的七页指南没有入口可以打开（D.6）。
+- `zypi --version` 打印继承来的 `1.0.8`，ACP 的 `agentInfo.version` 写死 `0.1.0`（决策 16：改法已定，没有实施；实施后，这一条和 `CHANGELOG.md` 里对应的一条一起删）。
+- Python 一侧：Phase 6/7 审计的 F7-02 至 F7-06（低危：扩展 API 的几处小缺陷）与 F7-07 至 F7-09（规格的文档备注）没有修复批次（[`AUDIT-PHASE6-PHASE7-2026-09-30.md`](../AUDIT/AUDIT-PHASE6-PHASE7-2026-09-30.md) 第八节）。
+- 上面「还没有验证的」里的各项：平台（只在 Linux 上验证过）、Landlock 层、延迟、跨目录的 `--resume <id>`、发行构建。
+
+**不在 V0.5。** ADR1 的 PR 2 与 PR 3，和决策 2、4、5；决策 7 的 (b)、(c)；决策 9–11、13；阶段 D 全部；B.2–B.4；1.P5、1.R2、1.R5；0.9 的余项。它们归哪个里程碑，等用户排 V0.6 时再定。
 
 ### 下一步
 
-- **要等用户决定：** ADR1 的 PR 2（决策 4、5）与 PR 3（决策 2、6）；1.P6 的旗标契约（决策 8）；真的 Plan 模式（决策 7 的 (b)）；自定义状态行怎么办（决策 15）。
-- **不用等决定：** 没有了。0.5 与阶段 C 在 r11 做完；r11 的分支还要合入 `main`。阶段 D 做不做，看 [`docs/baselines/tui.md`](../baselines/tui.md) 的数据；r11 又提出 D.5–D.9 五个候选。
+- **要等用户决定：** ADR1 的 PR 2（决策 4、5）与 PR 3（决策 2、6）；1.P6 的旗标契约（决策 8）；真的 Plan 模式（决策 7 的 (b)）；自定义状态行怎么办（决策 15）。发行构建的版本戳（决策 16）用户已选 (a)，等他说动手。V0.5 之前最好定的是 6、8、14、15；不定，就作为已知问题带着发（[发布里程碑 V0.5](#发布里程碑-v05)）。
+- **不用等决定：** V0.5 的退出条件 1–5。条件 2 已有结果；条件 3、5 各有一个 PR（[#14][pr-14]、[#15][pr-15]），条件 3 的演练已经跑过；条件 4（与 v0.4.0 对照）用户没有选，没做；条件 6（打 tag）归用户。阶段 D 做不做，看 [`docs/baselines/tui.md`](../baselines/tui.md) 的数据；r11 又提出 D.5–D.9 五个候选。
 
 ### 还没有验证的
 
@@ -48,15 +78,17 @@
 - **旗标。** 除 `--always-approve`、`--permission-mode`、`--continue`、`--resume`、`--session-id` 外，没有逐个验证旗标在交互模式下是否生效。`-m` / `--model` 尤其没有查。
 - **设置页里其余的权限项**（`remember_tool_approvals`、`default_selected_permission` 等）对 Python 是否有效，没有验证（待决策 14）。
 - **同一个 id 的并发。** 锁只在进程内。两个 agent 进程共用一个 home 时，同一个 id 仍可能各建一个会话。
+- **发行构建。** 最近一次 `release-dist` 构建是 r12 的 [run 38221952524][run-baseline]（`4fc028a`，体积见条件 2）；`release.yml` 的 macOS arm64 job 只在演练里跑过（条件 3），没有在真正的发布里跑过；发行二进制里 `zypi --version` 与版本戳的行为是读代码得出的（决策 16），没有跑过：这台机器的 WSL 起不来（[§10.15][l10-15]）。
 
-出处：执行记录 [§10.10][l10-10]–[§10.14][l10-14] 各节的「没有验证」。
+出处：执行记录 [§10.10][l10-10]–[§10.15][l10-15] 各节的「没有验证」。
 
 ## 待决策
 
-共十五项。能给出倾向的，都写了倾向。没有一项会在用户确认之前动手。编号沿用 r9 的提议（[§10.11][l10-11] 末尾「留给用户决定的」十二项，原文留在那里）；13、14 是 r10 加的，15 是 r11 加的。附录 A 的「决定 N」指这里的第 N 项。
+共十六项。能给出倾向的，都写了倾向。没有一项会在用户确认之前动手。编号沿用 r9 的提议（[§10.11][l10-11] 末尾「留给用户决定的」十二项，原文留在那里）；13、14 是 r10 加的，15 是 r11 加的，16 是 r12 加的。附录 A 的「决定 N」指这里的第 N 项。
 
 - **已做：** 1 的 PR 1、3、7 的 (a)、12。
 - **待定：** 1 的 PR 2 与 PR 3（等 2、4、5、6）、2、4、5、6、7 的 (b)(c)、8、9、10、11、13、14、15。
+- **已定，没有实施：** 16（r12，用户选了 (a)）。
 
 1. **ADR1 的落地。** PR 1：Python；PR 2：Rust，只加不删；PR 3：Rust，删。
     - 倾向：开工，先做 PR 1。
@@ -117,6 +149,13 @@
     - 倾向：(b) 或 (c)，不倾向 (a)：行里的字段大多是 pager 自己就知道的。没有证据说有人在用它。
     - 状态：待定。
     - 详情：[§10.14][l10-14]
+16. **发行构建的版本戳。** `zypi --version` 里的版本号是 `1.0.8`（后面跟提交的前 12 位）：`pi-pager-bin/build.rs` 取环境变量 `GROK_VERSION`，没有就取 crate 的版本，而 `pi-pager-bin` 与 `pi-version` 的版本都是继承自上游的 1.0.8。仓库里没有任何文件设 `GROK_VERSION`，`release.yml` 在 v0.3.0、v0.4.0 与 `main` 上都没设。ACP 的 `agentInfo.version` 写死 `0.1.0`（`pi_agent_cli/agent.py` 的 `_AGENT_INFO`），Phase 6/7 审计记过，没改。
+    - **不要靠在 `release.yml` 里设 `GROK_VERSION` 来修。** 同一个变量还决定「是不是发行构建」（`pi_version::IS_DEV_BUILD`）：没有它就是开发构建，发行二进制至今都是开发构建。开发构建里文件夹信任整个是惰性的（`folder_trust_inert()`）：从不提示，不读写 `trusted_folders.toml`，不管配置怎么写。盖了戳，它按默认开启，会对仓库里的本地配置（`.envrc`、`.claude`、hooks、插件、MCP、LSP）问「信任这个文件夹吗」。这些配置里，MCP 的加载代码在 1.P4 之后没有调用者（决策 10）；其余没有逐项核对。遥测客户端的 `dev_build` 字段也随戳翻转。
+    - 选项：(a) 不盖戳；把 `pi-pager-bin` 与 `pi-version` 的 crate 版本改成发行版本，`_AGENT_INFO` 读已装包的版本；(b) 盖戳，再处理文件夹信任（删掉，或查清它还管着什么）与遥测；(c) 维持现状，写进已知问题。
+    - 倾向：(a)。
+    - 核对（r12）：版本号从 1.0.8 改小，会碰到三处按版本比较的代码。① `pi-config` 的 `version_overrides`：配置里的补丁用 `minimum_version` / `maximum_version` 限定版本范围，比较的是 `pi_version::installed_semver()`；版本改小之后，要求 `minimum_version` 高于新版本的补丁不再生效。仓库里没有默认配置带这样的补丁（只有代码与测试）；用户自己写的，无从查起。② `pi-update` 的 `version_policy.rs` 与 `auto_update.rs` 按 semver 比较：自动更新没有启动（`pi-pager-bin/src/main.rs` 里是 `let bg_update_rx = None;`，子命令里也没有 `update`），这些比较不会跑。③ `pi-shell` 的模型缓存（`agent/models/cache.rs`）只判断版本字符串是否相等。没有发现必须先改的逻辑。
+    - 状态：**已定 (a)**（用户在 r12 选了；那是倾向，不是「现在改」，所以没有实施）。要改的是 `pi-pager-bin` 与 `pi-version` 的 `Cargo.toml`（`Cargo.lock` 里这两个包的版本跟着变）、`pi_agent_cli/agent.py` 的 `_AGENT_INFO`（读已装包的版本），再加一个测试，防止它们和发行版本脱节。实施之前，这一条留在「已知问题」里。以上都是读代码得出的，没有跑发行构建，也没有跑 `zypi --version`。
+    - 详情：[§10.15][l10-15]
 
 ## 1. 目标与结论
 
@@ -344,7 +383,8 @@ Rust（pager）：
 | [§10.11][l10-11] | r9 | 阶段 0 收口（0.3、0.7、0.8）与阶段 1 里不需要拍板的部分；末尾是十二项待决策的原文 | [#10][pr-10] |
 | [§10.12][l10-12] | r10 | ADR1 的 PR 1（Python 一侧） | [#11][pr-11] |
 | [§10.13][l10-13] | r10 | 1.P3 的 (a)：`zypi` 只提供 agent 会照做的权限模式 | [#12][pr-12] |
-| [§10.14][l10-14] | r11 | 0.5 调用图工具化与阶段 C 收口：网络审计（C.1）、内嵌指南（C.2）、NOTICE（C.3）、文档与残留词门禁（C.4） | 分支 `chore/phase-c-closeout`，未合入 |
+| [§10.14][l10-14] | r11 | 0.5 调用图工具化与阶段 C 收口：网络审计（C.1）、内嵌指南（C.2）、NOTICE（C.3）、文档与残留词门禁（C.4） | [#13][pr-13] |
+| [§10.15][l10-15] | r12 | V0.5 的发布里程碑：范围与退出条件的依据、`GROK_VERSION` 的发现（待决策 16） | PR [#16][pr-16] |
 | [附录 A.4][logA4] | r5 | 入口审计的 r5 执行结果 | [#7][pr-7] |
 | [附录 B][logB] | r2–r11 | 复现方法（依赖图、模块级闭包、各轮的测量与测试命令） | — |
 | [附录 C][logC] | r10 | §7 的逐项注释（原文） | — |
@@ -436,8 +476,9 @@ Rust（pager）：
 - r8：WSL2 / Linux 补测（[#9][pr-9]）。
 - r9：阶段 0 收尾；阶段 1 里不需要拍板的部分（[#10][pr-10]）。
 - r10：ADR1 的 PR 1（[#11][pr-11]）；1.P3 的 (a)（[#12][pr-12]）。
-- r11：0.5 与阶段 C（本地分支 `chore/phase-c-closeout`，未推送）。调用图工具化（`tui_callgraph.py`）；`zypi` 的网络审计（含一次真模型）；内嵌指南缩成七页并停止启动时解压；`NOTICE` 重写、`THIRD-PARTY-NOTICES` 与 `Cargo.lock` 对账（`tui_notices.py`）；`grok agent` 的残留清零，`leader`、`x.ai` 改成棘轮上限；新增待决策 15 与阶段 D 的 D.5–D.9。
+- r11：0.5 与阶段 C（PR [#13][pr-13]）。调用图工具化（`tui_callgraph.py`）；`zypi` 的网络审计（含一次真模型）；内嵌指南缩成七页并停止启动时解压；`NOTICE` 重写、`THIRD-PARTY-NOTICES` 与 `Cargo.lock` 对账（`tui_notices.py`）；`grok agent` 的残留清零，`leader`、`x.ai` 改成棘轮上限；新增待决策 15 与阶段 D 的 D.5–D.9。
 - 整理（r10 之后，2026-10-11）：执行记录移到[执行记录（归档）][log]；本文只留计划、状态、待决策和 §10 索引；§7 改成每项一行状态；§4、§5（r2 的源码事实与规模估计）也移到归档的附录 E，只留索引。
+- r12：V0.5 的发布里程碑（分支 `docs/v0.5-milestone`，只改文档）。按剥离的现状定范围：阶段 0、A、C 完成，阶段 1 完成一半，阶段 D 没有开始，V0.5 不等它们；写六项退出条件（CI、体积再量、发布构建演练、与 v0.4.0 对照、发布说明、打 tag）、带着发布的已知问题、不在 V0.5 的项；建 GitHub 里程碑 [v0.5.0][ms-v050]；新增待决策 16（发行构建的版本戳：`zypi --version` 与「是不是发行构建」共用 `GROK_VERSION`，不能靠在 `release.yml` 里设它来改版本号）；状态更新到 `main` 的 `4fc028a`。里程碑建好之后，用户选了四件事，都在别的 PR 或 CI 运行里做了，本 PR 只记录：并入 `[Unreleased]` 并补条目（PR [#15][pr-15]，条件 5）；给 `release.yml` 加手动演练（PR [#14][pr-14]，条件 3），并从分支跑了一次（[run 38223353755][run-dry-run]：Linux 与 macOS arm64 都构建成功，什么也没发布）；`release_baseline`（[run 38221952524][run-baseline]，420,767,096 B，条件 2）；推送本分支并开 PR。决策 16 选了 (a)，没有实施。没做：与 v0.4.0 的对照（用户没选）、在 Linux 上运行发行二进制（WSL 起不来）。见 [§10.15][l10-15]。
 
 <!-- 链接定义 -->
 [log]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md
@@ -455,6 +496,7 @@ Rust（pager）：
 [l10-12]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1012-r10-追加adr1-的-pr-1python-一侧
 [l10-13]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1013-r10-追加1p3-azypi-只提供-agent-真会照做的权限模式
 [l10-14]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1014-r11-追加调用图工具化05与阶段-c-收口
+[l10-15]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1015-r12-追加v05-的发布里程碑
 [l4-1]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#41-运行路径
 [l4-2]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#42-rust-runtime-与耦合面
 [l4-3]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#43-python-侧pi_agent_cli共-4114-行agentpy-472-行
@@ -473,4 +515,13 @@ Rust（pager）：
 [pr-10]: https://github.com/zy1233/pi-python/pull/10
 [pr-11]: https://github.com/zy1233/pi-python/pull/11
 [pr-12]: https://github.com/zy1233/pi-python/pull/12
+[pr-13]: https://github.com/zy1233/pi-python/pull/13
+[pr-14]: https://github.com/zy1233/pi-python/pull/14
+[pr-15]: https://github.com/zy1233/pi-python/pull/15
+[pr-16]: https://github.com/zy1233/pi-python/pull/16
 [ci-run-r5]: https://github.com/zy1233/pi-python/actions/runs/37379203134
+[ci-run-4fc028a]: https://github.com/zy1233/pi-python/actions/runs/38196042958
+[tui-ci-run-4fc028a]: https://github.com/zy1233/pi-python/actions/runs/38196042998
+[ms-v050]: https://github.com/zy1233/pi-python/milestone/1
+[run-baseline]: https://github.com/zy1233/pi-python/actions/runs/38221952524
+[run-dry-run]: https://github.com/zy1233/pi-python/actions/runs/38223353755
