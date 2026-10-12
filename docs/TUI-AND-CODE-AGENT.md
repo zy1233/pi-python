@@ -60,16 +60,23 @@ pip install -e ".[dev]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent
 
 ### 2. TUI binary (`zypi`)
 
-#### Option A: Download prebuilt binary (Linux x86_64)
+#### Option A: Download prebuilt binary (Linux x86_64, macOS arm64)
 
-Prebuilt binaries are attached to [GitHub Releases](https://github.com/zy1233/pi-python/releases) starting from v0.3.0:
+Prebuilt binaries are attached to [GitHub Releases](https://github.com/zy1233/pi-python/releases). The Linux x86_64 binary has been there since v0.3.0. The macOS arm64 binary (Apple silicon) starts with v0.5.0.
 
 ```bash
-# Download
+# Linux x86_64
 curl -L -o zypi https://github.com/zy1233/pi-python/releases/latest/download/zypi-linux-x86_64
 chmod +x zypi
 sudo mv zypi /usr/local/bin/
+
+# macOS arm64
+curl -L -o zypi https://github.com/zy1233/pi-python/releases/latest/download/zypi-macos-arm64
+chmod +x zypi
+sudo mv zypi /usr/local/bin/
 ```
+
+The release workflow builds the macOS binary on a GitHub runner (`macos-14`). It does not sign the binary with a Developer ID and it does not notarize it. Nobody has started this build yet: CI only builds it. A file that a browser downloaded may carry the quarantine flag, and macOS may refuse to open it. In that case, remove the flag with `xattr -d com.apple.quarantine zypi`. A file that `curl` downloads has no such flag. If the binary does not start, use Option B.
 
 #### Option B: Build from source
 
@@ -243,7 +250,8 @@ This matches the pi upstream `packages/coding-agent/src/core/system-prompt.ts` a
 |----------|-------------|--------------|
 | Linux x86_64 | ✅ | ✅ prebuilt binary |
 | Linux arm64 | ✅ | Build from source |
-| macOS (arm64/x86_64) | ✅ | Build from source |
+| macOS arm64 | ✅ | ✅ prebuilt binary (built in CI, not yet run by a person) |
+| macOS x86_64 | ✅ | Build from source |
 | Windows | ✅ (Git Bash required for `bash` tool) | Build from source via WSL2 |
 
 See [Windows notes](WINDOWS.md) for detailed Windows/WSL2 setup instructions.

@@ -124,13 +124,16 @@ pip install -e "./packages/pi-dynamic-workflows"
 
 ### TUI binary (`zypi`) — beta
 
-Download the prebuilt Linux x86_64 binary from [GitHub Releases](https://github.com/zy1233/pi-python/releases):
+Download the prebuilt binary for Linux x86_64 or macOS arm64 from [GitHub Releases](https://github.com/zy1233/pi-python/releases):
 
 ```bash
 # Download and install (Linux x86_64)
 curl -L -o zypi https://github.com/zy1233/pi-python/releases/latest/download/zypi-linux-x86_64
 chmod +x zypi
 sudo mv zypi /usr/local/bin/
+
+# macOS arm64 (Apple silicon): the same steps with the file zypi-macos-arm64
+# (built in CI, not yet run by a person; see the TUI guide)
 
 # Or build from source (requires Rust toolchain)
 cd tui && cargo build --profile release-dist -p pi-pager-bin
@@ -423,7 +426,7 @@ Use `.venv-test-real` for pytest real-LLM tests; the smoke script can run from t
 
 ### Next
 
-- **TUI platform expansion** — planned: prebuilt binaries for macOS (arm64/x86_64) and Windows; auto-update support
+- **TUI platform expansion** — planned: prebuilt binaries for macOS x86_64 and Windows; auto-update support
 
 ## License
 
