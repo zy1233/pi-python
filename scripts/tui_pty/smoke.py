@@ -40,7 +40,10 @@ def show(term: pt.Term, title: str) -> None:
 
 
 def status_line(term: pt.Term) -> str:
-    """The label on the input box's bottom border, e.g. ``mock-a · auto`` or ``Second model``."""
+    """The label on the input box's bottom border: the model name (``mock-a``, ``Second model``).
+
+    A flag follows the name when one is set (``mock-a · always-approve``).
+    """
     for line in reversed(term.text().splitlines()):
         stripped = line.strip()
         if stripped.startswith("╰") and stripped.endswith("╯"):
@@ -177,7 +180,9 @@ def main() -> int:
             term.send("\x1b[B")  # down: onto "Second model"
             term.pump(0.4)
             term.send("\r")
-            switched = term.wait_for(r"Second model\s+·", 10)
+            # The new name is on the border (`Second model ─╯`, with or without a flag after it).
+            # The picker row has nothing after the name, so it cannot match.
+            switched = term.wait_for(r"Second model(?: · [^─╯]*)? ─╯", 10)
             show(term, "after choosing")
             check("status line follows the switch", switched, status_line(term))
         term.type("again\r")
