@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use pi_status_line::{StatusLineConfig, StatusLineContext, StatusLineTrigger};
+use pi_status_line::{StatusLineConfig, StatusLineContext, StatusLineTrigger, StatusLineTurn};
 
 use crate::app::actions::Effect;
 use crate::app::agent::AgentId;
@@ -49,9 +49,77 @@ fn display_for(text: &str) -> Option<StatusLineDisplay> {
 /// is watched by the code that applies it. `trigger` is client-stamped too
 /// but lives outside: it is a property of one run, not a staleness input the
 /// row must rebuild over.
+///
+/// Two kinds of field are here. `session_name` is the client's own, because a
+/// session can be renamed locally: it always replaces what the agent sent. The
+/// others are facts the client holds about the session, and [`Self::apply_to`]
+/// writes them only where the agent left a field empty. An agent that sends no
+/// status, as the Python agent does, therefore gets a row built from these alone.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ClientOwnedFields {
     pub(crate) session_name: Option<String>,
+    pub(crate) cwd: String,
+    pub(crate) session_id: Option<String>,
+    pub(crate) model_id: Option<String>,
+    pub(crate) model_name: Option<String>,
+    /// Whether a turn is running. Only the staleness check reads it: the row is
+    /// built again when a turn starts and when it ends, so a timer item, or a
+    /// script that draws one, does not keep the last value of a turn that is
+    /// over. The payload's `turn` is stamped from the clock, not from this flag.
+    pub(crate) turn_running: bool,
+}
+
+impl ClientOwnedFields {
+    /// Writes the fields into `ctx`, and gives it this release as `version`
+    /// when the agent named none.
+    pub(crate) fn apply_to(self, ctx: &mut StatusLineContext) {
+        // Destructured, so a field added above is a compile error here rather
+        // than one the staleness check watches and nothing applies.
+        let Self {
+            session_name,
+            cwd,
+            session_id,
+            model_id,
+            model_name,
+            // Watched, not applied: see the field.
+            turn_running: _,
+        } = self;
+        ctx.session_name = session_name;
+        if ctx.workspace.current_dir.is_empty() {
+            ctx.workspace.current_dir.clone_from(&cwd);
+        }
+        if ctx.cwd.is_empty() {
+            ctx.cwd = cwd;
+        }
+        ctx.session_id = ctx.session_id.take().or(session_id);
+        ctx.model.id = ctx.model.id.take().or(model_id);
+        ctx.model.display_name = ctx.model.display_name.take().or(model_name);
+        if ctx.version.is_empty() {
+            ctx.version = crate::client_identity::PAGER_CLIENT_VERSION.to_owned();
+        }
+    }
+}
+
+/// What only a clock can give: how long this process has held the session, and
+/// when the turn in flight began. Each is written only where the agent sent
+/// nothing, so an agent that counts for itself keeps its own numbers.
+/// `turn_elapsed` is the pager's own, with the time spent in question views taken
+/// out, so the stamp agrees with the `turn-timer` item.
+pub(crate) fn fill_from_clocks(
+    ctx: &mut StatusLineContext,
+    attached_for: Duration,
+    turn_elapsed: Option<Duration>,
+    now_ms: i64,
+) {
+    if ctx.cost.total_duration_ms == 0 {
+        ctx.cost.total_duration_ms = u64::try_from(attached_for.as_millis()).unwrap_or(u64::MAX);
+    }
+    if ctx.turn.is_none() {
+        ctx.turn = turn_elapsed.map(|elapsed| StatusLineTurn {
+            started_at_ms: now_ms
+                .saturating_sub(i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)),
+        });
+    }
 }
 
 /// Identifies one run of the user's script, so a result that outlived the run
@@ -152,6 +220,14 @@ pub struct StatusLineRun {
     command: String,
     ctx: Box<StatusLineContext>,
     term_size: RowSize,
+}
+
+#[cfg(test)]
+impl StatusLineRun {
+    /// What the script is given on stdin, for the tests of what the row sends.
+    pub(crate) fn context(&self) -> &StatusLineContext {
+        &self.ctx
+    }
 }
 
 /// What one run produced. A failure carries both the text it would paint and

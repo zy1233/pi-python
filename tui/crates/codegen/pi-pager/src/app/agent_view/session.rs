@@ -151,6 +151,7 @@ impl AgentView {
             modal_hovered_key: None,
             context_state: None,
             status_context: None,
+            attached_at: Instant::now(),
             last_status_line_size: None,
             credit_balance: None,
             auto_topup: None,

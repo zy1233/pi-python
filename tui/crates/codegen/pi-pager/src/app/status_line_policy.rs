@@ -8,7 +8,7 @@ use pi_status_line::{ResolvedStatusLine, StatusLineContext, StatusLineItem};
 use super::app_view::{AppView, TickDemand};
 use super::status_line::{
     AfterSupersede, ClientOwnedFields, FinishDisposition, ForcePolicy, RunId, RunOutcome, RunSlot,
-    draws_a_row,
+    draws_a_row, fill_from_clocks,
 };
 use crate::views::status_line::RowSize;
 
@@ -228,26 +228,41 @@ impl AppView {
         self.update_status_line_at(now);
     }
 
-    /// The fields the shell cannot fill, since only the client knows what the
-    /// session is called. Read here alone, so the overlay and the check agree.
+    /// What the client knows about the session itself: its name, which only the
+    /// client can give, and the facts it holds whatever the agent is (directory,
+    /// id, model, whether a turn runs). Read here alone, so the overlay and the
+    /// check agree.
     fn client_owned_fields(&self) -> ClientOwnedFields {
         let Some(agent) = self.active_agent() else {
             return ClientOwnedFields::default();
         };
+        let session = &agent.session;
         ClientOwnedFields {
             session_name: agent
                 .display_name
                 .clone()
                 .or_else(|| agent.generated_session_title.clone()),
+            cwd: session.cwd.to_string_lossy().into_owned(),
+            session_id: session.session_id.as_ref().map(|id| id.0.to_string()),
+            model_id: session.models.current_model_id_str().map(str::to_owned),
+            model_name: session.models.current_model_name(),
+            turn_running: agent.turn_started_at.is_some(),
         }
     }
 
+    /// What one built-in row or one script run is made from: the last status the
+    /// agent sent, if it sent one, with what the client knows put around it. An
+    /// agent that sends none still gets a row; the Python agent never sends one.
     fn shell_status_context(&self) -> Option<StatusLineContext> {
-        let mut ctx = self.active_agent()?.status_context.clone()?;
-        // Destructured, so a field added to the overlay is a compile error here
-        // rather than one the staleness check watches and nothing applies.
-        let ClientOwnedFields { session_name } = self.client_owned_fields();
-        ctx.session_name = session_name;
+        let agent = self.active_agent()?;
+        let mut ctx = agent.status_context.clone().unwrap_or_default();
+        self.client_owned_fields().apply_to(&mut ctx);
+        fill_from_clocks(
+            &mut ctx,
+            agent.attached_at.elapsed(),
+            agent.turn_elapsed(),
+            chrono::Utc::now().timestamp_millis(),
+        );
         Some(ctx)
     }
 
