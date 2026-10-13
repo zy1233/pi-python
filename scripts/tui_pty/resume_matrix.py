@@ -13,6 +13,8 @@ The cases that fail today are known gaps (``Case.gap`` says what is wrong). They
 GAP and do not fail the run; ``--strict`` makes them fail. The change that lands ADR1 (the pager
 asks the agent over ACP instead of reading files) has to close them and drop the ``gap`` text, and
 a gap that has closed shows as FIXED until it is dropped. Exit status 0 when nothing FAILed.
+``zypi export`` is already on that path (it starts an agent and replays the session with
+``session/load``), so its two cases have no gap.
 
 Linux only (it needs a pty); everything but ``run`` is plain Python and is tested on any platform.
 """
@@ -44,6 +46,8 @@ class Outcome:
     text: str  # the screen, or what a run that ended printed
     stdout: str = ""  # `zypi export` only
     new_sessions: dict[str, str] = field(default_factory=dict)  # file name -> id in its header
+    # `zypi export` only: the processes of the run that were still alive when it ended
+    left_behind: list[str] = field(default_factory=list)
 
     @property
     def replayed(self) -> bool:
@@ -156,17 +160,24 @@ CASES: list[Case] = [
         "export <id> prints the transcript",
         ["export", "{existing}"],
         "work",
-        "exit 0 and the conversation on stdout",
-        lambda o, ids: o.code == 0 and FIRST in o.stdout,
-        gap="export reads the old layout: \"Session '<id>' not found.\", exit 1",
+        "exit 0, both sides of the conversation on stdout, no agent left running",
+        lambda o, ids: (
+            o.code == 0 and FIRST in o.stdout and REPLY in o.stdout and not o.left_behind
+        ),
         export=True,
     ),
     Case(
         "export <unknown id> fails without output",
         ["export", "{unknown}"],
         "work",
-        "exit non-zero, nothing on stdout",
-        lambda o, ids: o.failed and not o.stdout.strip(),
+        "exit non-zero, an error that names the id, nothing on stdout, no agent left running",
+        lambda o, ids: (
+            o.failed
+            and not o.stdout.strip()
+            and ids["unknown"] in o.text
+            and "not found" in o.text
+            and not o.left_behind
+        ),
         export=True,
     ),
 ]
@@ -258,7 +269,13 @@ def run(args: argparse.Namespace) -> int:
                 done = subprocess.run(
                     [zypi, *argv], env=run_env, cwd=cwd, capture_output=True, text=True, timeout=60
                 )
-                outcome = Outcome(done.returncode, done.stderr, stdout=done.stdout)
+                outcome = Outcome(
+                    done.returncode,
+                    done.stderr,
+                    stdout=done.stdout,
+                    # The export starts an agent of its own; it has to stop it before it exits.
+                    left_behind=[cmd for _pid, _state, cmd in pt.processes_with_env(marker)],
+                )
             else:
                 term = start(argv, cwd)
                 try:
