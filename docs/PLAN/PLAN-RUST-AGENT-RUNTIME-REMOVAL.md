@@ -112,7 +112,7 @@
     - 详情：[§10.11][l10-11]
 6. **`zypi export`。** 现在对 Python 会话恒报 not found，是一个静默坏掉的命令。r8 时用户选了不动。
     - 倾向：(a) 经 ACP 回放导出：起 agent、`session/load`、收 `session/update`，复用 `render_blocks_to_markdown`，约 100 行，多 1–2 s 的 agent 启动；(b) 删掉子命令。不要 (c) 维持现状。
-    - 状态：**已定 (a)，已做成 PR，等用户合入**（用户，2026-10-13，r12 续 5；记录 [§10.15][l10-15] 续 6）。做法按倾向里写的：`export_cmd` 起 agent、发 `session/load`、收 `session/update`，经 `AcpUpdateTracker` 与 `render_blocks_to_markdown` 写成 Markdown，与 `/export` 同一条渲染路径；命令结束时（失败时也一样）agent 被停掉。最后几条回放可能比 `session/load` 的响应晚到，所以响应之后静默 500 ms 才算收齐；agent 60 s 不出声算错误。代码约 300 行（不是估计的 100 行：收集、静默期、对 agent 的请求逐一回答占了大头），测试 18 个加一个对着真 agent 的 e2e。ADR1 的 PR 3 删旧存储层之前要先做完这一项：做完了，`export_cmd` 不再引用 `pi_shell::session::storage`（`tui-support.md` 里它的外部引用 1 → 0）。合入之前，V0.5 里 `zypi export` 仍是已知问题。
+    - 状态：**已定 (a)，已做成 PR，等用户合入**（PR [#18](https://github.com/zy1233/pi-python/pull/18)；用户，2026-10-13，r12 续 5；记录 [§10.15][l10-15] 续 6）。做法按倾向里写的：`export_cmd` 起 agent、发 `session/load`、收 `session/update`，经 `AcpUpdateTracker` 与 `render_blocks_to_markdown` 写成 Markdown，与 `/export` 同一条渲染路径；命令结束时（失败时也一样）agent 被停掉。最后几条回放可能比 `session/load` 的响应晚到，所以响应之后静默 500 ms 才算收齐；agent 60 s 不出声算错误。代码约 300 行（不是估计的 100 行：收集、静默期、对 agent 的请求逐一回答占了大头），测试 18 个加一个对着真 agent 的 e2e。ADR1 的 PR 3 删旧存储层之前要先做完这一项：做完了，`export_cmd` 不再引用 `pi_shell::session::storage`（`tui-support.md` 里它的外部引用 1 → 0）。合入之前，V0.5 里 `zypi export` 仍是已知问题。
     - 详情：[§10.11][l10-11]、[§10.15][l10-15]
 7. **模式映射（1.P3）。** (a) 只提供 agent 会照做的模式；(b) 做 `session/set_mode`，Plan = 把工具集裁到只读；(c) 定义 Python 的 `auto`（今天等于 always-approve，设置页却说是分类器：改名、删除，或真做分类器）。
     - 倾向：(a) 先行，因为 Plan 现在给用户的是虚假的安全感；(b) 另议。
