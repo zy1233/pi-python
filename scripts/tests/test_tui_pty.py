@@ -702,11 +702,16 @@ def test_the_sampler_does_not_record_traffic_on_loopback():
 # ---- status_line_probe and status_proxy_agent: the status row and the message behind it --
 
 
-def test_the_status_line_scenarios_cover_both_row_types_with_and_without_the_message():
+def test_the_status_line_scenarios_cover_both_row_types_with_and_without_a_status_from_the_agent():
     assert {(s.kind, s.injected) for s in slp.SCENARIOS} == {
         (kind, injected) for kind in ("command", "builtin") for injected in (False, True)
     }
     assert len({s.name for s in slp.SCENARIOS}) == len(slp.SCENARIOS)
+
+
+def test_the_probe_names_the_model_the_proxy_sends():
+    assert slp.PROXY_MODEL == spa.MODEL
+    assert slp.AGENT_MODEL != slp.PROXY_MODEL  # or the precedence test could not tell them apart
 
 
 def test_a_scenarios_config_text_is_a_status_line_section(tmp_path):
@@ -724,10 +729,11 @@ def test_the_row_patterns_match_the_row_and_nothing_else_on_the_screen():
     def scenario(kind, injected):
         return next(s for s in slp.SCENARIOS if (s.kind, s.injected) == (kind, injected))
 
-    with_message, without = scenario("builtin", True), scenario("builtin", False)
-    assert re.search(with_message.row, "  work  │  proxy-model  │  25% ctx")
-    assert not re.search(with_message.row, "  work  │  mock-a")  # the model must be the message's
-    assert re.search(without.row, "  work  │  mock-a")  # any built-in row that starts with the dir
+    with_status, without = scenario("builtin", True), scenario("builtin", False)
+    assert re.search(with_status.row, "  work  │  proxy-model  │  25% ctx")
+    assert not re.search(with_status.row, "  work  │  mock-a")  # the model must be the agent's
+    assert re.search(without.row, "  work  │  mock-a")  # the client's own model, no context item
+    assert not re.search(without.row, "  work  │  proxy-model")
     for elsewhere in ("  /tmp/pi-statusline-x/work", "  │ >                       │"):
         assert not re.search(without.row, elsewhere)
     command = scenario("command", False)
@@ -735,29 +741,71 @@ def test_the_row_patterns_match_the_row_and_nothing_else_on_the_screen():
     assert not re.search(command.row, "  STATUSROW")
 
 
-def test_a_run_is_what_the_page_says_when_the_row_follows_the_message():
+def test_a_run_is_what_the_page_says_when_the_row_is_drawn_from_the_right_facts():
     def says(kind, injected, **seen):
         return slp.verdict(slp.Scenario(kind, injected), **seen)[0]
 
-    ok = {"replied": True, "ran": False, "shown": False}
-    # Plain Python agent: no row, and no script run.
-    assert says("command", False, **ok)
-    assert says("builtin", False, **ok)
-    assert not says("command", False, **{**ok, "ran": True})  # the script ran: the page is wrong
-    assert not says("builtin", False, **{**ok, "shown": True})  # a row without any message
-    # With the message: the row is drawn, and a command script was run.
-    assert says("command", True, replied=True, ran=True, shown=True)
-    assert not says("command", True, replied=True, ran=False, shown=True)
-    assert says("builtin", True, replied=True, ran=False, shown=True)  # no script to run
-    assert not says("builtin", True, **ok)  # the control failed: the config text is suspect
-    # A turn that was never answered tested nothing.
-    assert not says("command", False, **{**ok, "replied": False})
+    drawn = {"replied": True, "ran": True, "shown": True}
+    # The row is drawn with the plain agent as well as with one that sends a status.
+    for injected in (False, True):
+        assert says("command", injected, **drawn)
+        assert says("builtin", injected, replied=True, ran=False, shown=True)  # no script to run
+        assert not says("command", injected, **{**drawn, "shown": False})  # no row on the screen
+        assert not says("builtin", injected, replied=True, ran=False, shown=False)
+        assert not says("command", injected, **{**drawn, "ran": False})  # the script did not run
+        assert not says("command", injected, **drawn, problems=["session_id is missing"])
+        # A turn that was never answered tested nothing.
+        assert not says("command", injected, **{**drawn, "replied": False})
 
 
 def test_the_fields_a_command_script_was_given_are_read_from_its_payload():
     assert slp.payload_fields('{"b": 1, "a": {"c": 2}}') == ["a", "b"]
     assert slp.payload_fields("not json") == []
     assert slp.payload_fields("[1, 2]") == []
+    assert slp.payload_of('{"a": 1}') == {"a": 1}
+    assert slp.payload_of("not json") == {} and slp.payload_of("[1]") == {}
+
+
+def _payload(model, **more):
+    """What a script is given when the session is in /tmp/x/work and the model is `model`."""
+    return {
+        "schema_version": 1,
+        "cwd": "/tmp/x/work",
+        "session_id": "s-1",
+        "version": "0.5.0",
+        "model": {"id": model, "display_name": model},
+        "workspace": {"current_dir": "/tmp/x/work"},
+        "cost": {"total_duration_ms": 10},
+        "context_window": {},
+        **more,
+    }
+
+
+def test_a_payload_is_checked_for_the_facts_the_client_knows():
+    plain = slp.Scenario("command", False)
+    assert slp.payload_problems(plain, _payload("mock-a")) == []
+    # The other scenario's model is a problem: the precedence went the wrong way.
+    assert slp.payload_problems(plain, _payload("proxy-model")) == [
+        "model.display_name is not 'mock-a'"
+    ]
+    assert slp.payload_problems(slp.Scenario("command", True), _payload("proxy-model")) == []
+    # Every fact that is missing is named.
+    assert len(slp.payload_problems(plain, {})) == 6
+
+
+def test_a_payload_has_no_number_the_client_cannot_know_unless_the_agent_sent_it():
+    plain, proxy = slp.Scenario("command", False), slp.Scenario("command", True)
+    for field, section in (
+        ("used_percentage", "context_window"),
+        ("context_tokens", "context_window"),
+        ("context_window_size", "context_window"),
+        ("total_cost_usd", "cost"),
+    ):
+        number = _payload("mock-a", **{section: {field: 0}})
+        assert len(slp.payload_problems(plain, number)) == 1, field  # zero is a made-up number
+        # An agent that sent the number is believed.
+        agent_number = _payload("proxy-model", **{section: {field: 25}})
+        assert slp.payload_problems(proxy, agent_number) == [], field
 
 
 NEW_SESSION = b'{"jsonrpc": "2.0", "id": 2, "result": {"sessionId": "s-1"}}\n'

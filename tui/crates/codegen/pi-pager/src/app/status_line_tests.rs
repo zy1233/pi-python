@@ -532,3 +532,182 @@ fn section<'a>(guide: &'a str, heading: &str) -> &'a str {
         None => rest,
     }
 }
+
+/// A client that knows something about every field it holds.
+fn client_facts() -> ClientOwnedFields {
+    ClientOwnedFields {
+        session_name: Some("mine".into()),
+        cwd: "/home/me/project".into(),
+        session_id: Some("sess-1".into()),
+        model_id: Some("model-a".into()),
+        model_name: Some("Model A".into()),
+        turn_running: true,
+    }
+}
+
+/// What an agent that names a model, a directory, a session and a version sends.
+fn agent_status() -> StatusLineContext {
+    StatusLineContext {
+        cwd: "/srv/theirs".into(),
+        session_id: Some("their-sess".into()),
+        model: pi_status_line::StatusLineModel {
+            id: Some("their-id".into()),
+            display_name: Some("Theirs".into()),
+        },
+        workspace: pi_status_line::StatusLineWorkspace {
+            current_dir: "/srv/theirs/sub".into(),
+            ..Default::default()
+        },
+        version: "9.9.9".into(),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn an_agent_that_sent_no_status_gets_the_facts_of_the_client() {
+    let mut ctx = StatusLineContext::default();
+    client_facts().apply_to(&mut ctx);
+
+    assert_eq!(ctx.cwd, "/home/me/project");
+    assert_eq!(ctx.workspace.current_dir, "/home/me/project");
+    assert_eq!(ctx.session_id.as_deref(), Some("sess-1"));
+    assert_eq!(ctx.session_name.as_deref(), Some("mine"));
+    assert_eq!(ctx.model.id.as_deref(), Some("model-a"));
+    assert_eq!(ctx.model.display_name.as_deref(), Some("Model A"));
+    assert_eq!(ctx.version, crate::client_identity::PAGER_CLIENT_VERSION);
+    assert_eq!(
+        ctx.schema_version,
+        Some(pi_status_line::STATUS_LINE_SCHEMA_VERSION),
+        "a payload built here states the shape it has"
+    );
+    assert_eq!(
+        ctx.turn, None,
+        "the flag that a turn runs is watched by the check; the start comes from the clock"
+    );
+}
+
+#[test]
+fn what_the_agent_said_is_kept() {
+    let mut ctx = agent_status();
+    client_facts().apply_to(&mut ctx);
+
+    assert_eq!(ctx.cwd, "/srv/theirs");
+    assert_eq!(ctx.workspace.current_dir, "/srv/theirs/sub");
+    assert_eq!(ctx.session_id.as_deref(), Some("their-sess"));
+    assert_eq!(ctx.model.id.as_deref(), Some("their-id"));
+    assert_eq!(ctx.model.display_name.as_deref(), Some("Theirs"));
+    assert_eq!(ctx.version, "9.9.9");
+}
+
+#[test]
+fn a_gap_in_the_status_of_the_agent_is_filled_field_by_field() {
+    // The agent names the model and nothing else.
+    let mut ctx = StatusLineContext {
+        model: pi_status_line::StatusLineModel {
+            id: Some("their-id".into()),
+            display_name: None,
+        },
+        ..Default::default()
+    };
+    client_facts().apply_to(&mut ctx);
+
+    assert_eq!(ctx.model.id.as_deref(), Some("their-id"), "the agent's id");
+    assert_eq!(
+        ctx.model.display_name.as_deref(),
+        Some("Model A"),
+        "the name it left out comes from the client"
+    );
+    assert_eq!(ctx.cwd, "/home/me/project");
+    assert_eq!(ctx.session_id.as_deref(), Some("sess-1"));
+}
+
+#[test]
+fn the_session_name_is_the_client_s_even_when_the_agent_sent_one() {
+    let mut ctx = StatusLineContext {
+        session_name: Some("theirs".into()),
+        ..Default::default()
+    };
+    client_facts().apply_to(&mut ctx);
+    assert_eq!(ctx.session_name.as_deref(), Some("mine"));
+
+    let mut ctx = StatusLineContext {
+        session_name: Some("theirs".into()),
+        ..Default::default()
+    };
+    ClientOwnedFields::default().apply_to(&mut ctx);
+    assert_eq!(
+        ctx.session_name, None,
+        "a client with no name has none to give, and the agent's does not stand in for it"
+    );
+}
+
+#[test]
+fn a_client_that_knows_nothing_leaves_the_fields_empty() {
+    let mut ctx = StatusLineContext::default();
+    ClientOwnedFields::default().apply_to(&mut ctx);
+
+    assert_eq!(ctx.cwd, "");
+    assert_eq!(ctx.workspace.current_dir, "");
+    assert_eq!(ctx.session_id, None, "an unknown id is absent, not empty");
+    assert_eq!(ctx.model.id, None);
+    assert_eq!(ctx.model.display_name, None);
+}
+
+#[test]
+fn the_clocks_fill_the_duration_and_the_turn_start_of_an_agent_that_sent_none() {
+    let mut ctx = StatusLineContext::default();
+    fill_from_clocks(
+        &mut ctx,
+        Duration::from_millis(2_500),
+        Some(Duration::from_secs(5)),
+        1_000_000,
+    );
+
+    assert_eq!(ctx.cost.total_duration_ms, 2_500);
+    assert_eq!(
+        ctx.turn,
+        Some(StatusLineTurn {
+            started_at_ms: 995_000
+        }),
+        "the turn began five seconds before now"
+    );
+}
+
+#[test]
+fn between_turns_there_is_no_turn_start() {
+    let mut ctx = StatusLineContext::default();
+    fill_from_clocks(&mut ctx, Duration::from_secs(1), None, 1_000_000);
+    assert_eq!(ctx.turn, None);
+}
+
+#[test]
+fn an_agent_that_counts_for_itself_keeps_its_numbers() {
+    let mut ctx = StatusLineContext::default();
+    ctx.cost.total_duration_ms = 7;
+    ctx.turn = Some(StatusLineTurn { started_at_ms: 42 });
+    fill_from_clocks(
+        &mut ctx,
+        Duration::from_secs(60),
+        Some(Duration::from_secs(5)),
+        1_000_000,
+    );
+
+    assert_eq!(ctx.cost.total_duration_ms, 7);
+    assert_eq!(ctx.turn, Some(StatusLineTurn { started_at_ms: 42 }));
+}
+
+#[test]
+fn a_turn_longer_than_the_clock_does_not_wrap() {
+    let mut ctx = StatusLineContext::default();
+    fill_from_clocks(
+        &mut ctx,
+        Duration::ZERO,
+        Some(Duration::from_millis(u64::MAX)),
+        1_000,
+    );
+    let turn = ctx.turn.expect("a turn is running");
+    assert!(
+        turn.started_at_ms <= 1_000,
+        "the start cannot lie after now: {turn:?}"
+    );
+}

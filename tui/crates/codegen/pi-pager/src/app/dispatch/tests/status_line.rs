@@ -134,14 +134,15 @@ fn owed_refresh_is_deferred_never_dropped_and_consumed_by_the_first_run() {
 }
 
 #[test]
-fn refresh_with_no_shell_context_settles_empty_and_parks_the_loop() {
+fn refresh_with_no_agent_behind_the_view_settles_empty_and_parks_the_loop() {
     let mut now = Instant::now();
     let mut app = refresh_timer_app();
-    app.agents.get_mut(&AgentId(0)).unwrap().status_context = None;
+    // The view still names the agent, but the agent is gone: nothing to describe.
+    app.agents.shift_remove(&AgentId(0));
 
     now += Duration::from_secs(300);
     app.note_status_line_refresh_due_at(now);
-    assert!(!queued_a_run(&app), "no payload, nothing to run");
+    assert!(!queued_a_run(&app), "no agent, nothing to run");
     assert!(
         !app.status_line.refresh_due(),
         "settling empty takes the request with it: whatever starved this \
@@ -171,23 +172,260 @@ fn row_that_cannot_resolve_paints_the_problem_verbatim() {
     assert_eq!(app.status_line.display().as_deref(), Some(&problem));
 }
 
-#[test]
-fn builtin_status_line_waits_for_the_agent_snapshot() {
-    let now = Instant::now();
+/// The model list of an agent that offers one model, which is the current one.
+fn model_state(id: &str, name: &str) -> crate::acp::model_state::ModelState {
+    let id = acp::ModelId::new(std::sync::Arc::from(id));
+    let mut models = crate::acp::model_state::ModelState::default();
+    models.available.insert(
+        id.clone(),
+        acp::ModelInfo::new(id.clone(), name.to_string()),
+    );
+    models.current = Some(id);
+    models
+}
+
+/// The built-in row as painted: one text per segment.
+fn row_texts(app: &AppView) -> Vec<String> {
+    let display = app.status_line.display();
+    let Some(StatusLineDisplay::Segments(segments)) = display.as_deref() else {
+        return Vec::new();
+    };
+    segments
+        .iter()
+        .map(|segment| segment.text().to_owned())
+        .collect()
+}
+
+/// A built-in row with these items, over an agent that has sent no status and
+/// knows this directory and this model: the Python agent's case.
+fn builtin_app_without_agent_status(items: Vec<StatusLineItem>) -> AppView {
     let mut app = status_line_app(StatusLineType::Builtin);
-    app.agents.get_mut(&AgentId(0)).unwrap().status_context = None;
+    app.current_ui.status_line = command_row(StatusLineType::Builtin)
+        .with_items(items)
+        .into_config();
+    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+    agent.status_context = None;
+    agent.session.cwd = std::path::PathBuf::from("/tmp/project");
+    agent.session.models = model_state("model-a", "Model A");
+    app
+}
+
+#[test]
+fn builtin_row_is_built_from_what_the_client_knows_when_the_agent_sends_no_status() {
+    let now = Instant::now();
+    let mut app = builtin_app_without_agent_status(vec![
+        StatusLineItem::Cwd,
+        StatusLineItem::Model,
+        StatusLineItem::Context,
+    ]);
 
     app.refresh_status_line_now_at(now);
-    assert!(app.status_line.display().is_none(), "no snapshot, no row");
+
+    assert_eq!(
+        row_texts(&app),
+        ["project", "Model A"],
+        "the directory and the model come from the client, and the context item has \
+         no percentage to show: the Python agent does not know its window"
+    );
     assert_eq!(
         app.status_line_tick_demand_at(now),
         TickDemand::None,
-        "a row with nothing to draw must let the loop park"
+        "a settled row must let the loop park"
+    );
+}
+
+#[test]
+fn builtin_row_has_no_context_or_cost_to_show_without_a_status_from_the_agent() {
+    let now = Instant::now();
+    let mut app =
+        builtin_app_without_agent_status(vec![StatusLineItem::Context, StatusLineItem::Cost]);
+
+    app.refresh_status_line_now_at(now);
+
+    assert!(
+        app.status_line.display().is_none(),
+        "a number the client cannot know is not drawn as zero"
+    );
+}
+
+#[test]
+fn the_status_the_agent_sent_wins_over_what_the_client_knows() {
+    let now = Instant::now();
+    let mut app =
+        builtin_app_without_agent_status(vec![StatusLineItem::Cwd, StatusLineItem::Model]);
+    // The agent names a directory and no model.
+    app.agents.get_mut(&AgentId(0)).unwrap().status_context =
+        Some(test_context("/srv/theirs"));
+
+    app.refresh_status_line_now_at(now);
+
+    assert_eq!(
+        row_texts(&app),
+        ["theirs", "Model A"],
+        "its directory stands, and the model it left out is the client's"
+    );
+}
+
+#[test]
+fn switching_the_model_rebuilds_a_row_that_had_already_settled() {
+    let mut now = Instant::now();
+    let mut app = builtin_app_without_agent_status(vec![StatusLineItem::Model]);
+    app.refresh_status_line_now_at(now);
+    assert_eq!(row_texts(&app), ["Model A"]);
+    assert_eq!(
+        app.status_line_tick_demand_at(now),
+        TickDemand::None,
+        "a settled row must park the loop, or the assertion below proves nothing"
     );
 
-    app.agents.get_mut(&AgentId(0)).unwrap().status_context = Some(test_context("/tmp/project"));
+    app.agents.get_mut(&AgentId(0)).unwrap().session.models = model_state("model-b", "Model B");
+    assert_eq!(
+        app.status_line_tick_demand_at(now),
+        TickDemand::Slow,
+        "the row asks for the tick that rebuilds it"
+    );
+
+    // Throttled like any other rebuild: the new model lands on the tick after
+    // the floor passes.
+    app.update_status_line_at(now);
+    now += MIN_REFRESH_INTERVAL_MS;
+    app.update_status_line_at(now);
+    assert_eq!(row_texts(&app), ["Model B"]);
+    assert_eq!(
+        app.status_line_tick_demand_at(now),
+        TickDemand::None,
+        "the rebuilt row parks again rather than ticking on the same switch"
+    );
+}
+
+#[test]
+fn the_end_of_a_turn_rebuilds_a_row_that_had_already_settled() {
+    let mut now = Instant::now();
+    let mut app = builtin_app_without_agent_status(vec![
+        StatusLineItem::Model,
+        StatusLineItem::TurnTimer,
+    ]);
+    let began = Instant::now()
+        .checked_sub(Duration::from_secs(12))
+        .expect("the monotonic clock is older than twelve seconds");
+    app.agents.get_mut(&AgentId(0)).unwrap().turn_started_at = Some(began);
     app.refresh_status_line_now_at(now);
-    assert!(app.status_line.display().is_some(), "the snapshot paints");
+    assert_eq!(
+        row_texts(&app),
+        ["Model A", "12s"],
+        "the timer shows the turn that runs"
+    );
+
+    // The turn ends. Nothing else changes, and the timer needs no tick any more,
+    // so only the flag that a turn runs can ask for the rebuild.
+    app.agents.get_mut(&AgentId(0)).unwrap().turn_started_at = None;
+    assert_eq!(
+        app.status_line_tick_demand_at(now),
+        TickDemand::Slow,
+        "the row asks for the tick that rebuilds it"
+    );
+    app.update_status_line_at(now);
+    now += MIN_REFRESH_INTERVAL_MS;
+    app.update_status_line_at(now);
+
+    assert_eq!(
+        row_texts(&app),
+        ["Model A"],
+        "a timer must not stay on the row after its turn"
+    );
+    assert_eq!(
+        app.status_line_tick_demand_at(now),
+        TickDemand::None,
+        "the rebuilt row parks again"
+    );
+}
+
+#[test]
+fn the_end_of_a_turn_runs_a_script_once_more_with_no_turn_in_its_payload() {
+    let mut now = Instant::now();
+    let mut app = status_line_app(StatusLineType::Command);
+    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+    agent.status_context = None;
+    agent.turn_started_at = Some(Instant::now());
+    app.update_status_line_at(now);
+    assert!(
+        context_of_first_run(&app).turn.is_some(),
+        "the last run of the turn names its start"
+    );
+    app.pending_effects.clear();
+    app.on_status_line_command_finished_at(now, RunId(0), RunOutcome::Output("busy".to_string()));
+
+    // The turn ends. A script runs on every tick of a turn and on none after
+    // it, so only the flag that a turn runs can ask for this run.
+    app.agents.get_mut(&AgentId(0)).unwrap().turn_started_at = None;
+    now += MIN_REFRESH_INTERVAL_MS;
+    app.update_status_line_at(now);
+
+    assert!(
+        context_of_first_run(&app).turn.is_none(),
+        "the script is told that the turn is over"
+    );
+}
+
+/// The context a script run starts with, for an agent that has sent no status.
+fn context_of_first_run(app: &AppView) -> pi_status_line::StatusLineContext {
+    let [Effect::RunStatusLineCommand(run)] = app.pending_effects.as_slice() else {
+        panic!("the update starts a run");
+    };
+    run.context().clone()
+}
+
+#[test]
+fn a_script_is_given_the_facts_of_the_client_when_the_agent_sends_no_status() {
+    let now = Instant::now();
+    let mut app = status_line_app(StatusLineType::Command);
+    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+    agent.status_context = None;
+    agent.session.cwd = std::path::PathBuf::from("/tmp/project");
+    agent.session.models = model_state("model-a", "Model A");
+
+    app.update_status_line_at(now);
+
+    let ctx = context_of_first_run(&app);
+    assert_eq!(ctx.cwd, "/tmp/project");
+    assert_eq!(ctx.workspace.current_dir, "/tmp/project");
+    assert_eq!(ctx.session_id.as_deref(), Some("test-session"));
+    assert_eq!(ctx.model.id.as_deref(), Some("model-a"));
+    assert_eq!(ctx.model.display_name.as_deref(), Some("Model A"));
+    assert_eq!(ctx.version, crate::client_identity::PAGER_CLIENT_VERSION);
+    assert_eq!(
+        ctx.schema_version,
+        Some(pi_status_line::STATUS_LINE_SCHEMA_VERSION)
+    );
+    assert_eq!(ctx.trigger, Some(pi_status_line::StatusLineTrigger::State));
+    assert!(ctx.cost.total_duration_ms < 60_000, "counted from the attach");
+    assert!(ctx.turn.is_none(), "no turn is running");
+    assert!(
+        ctx.cost.total_cost_usd.is_none()
+            && ctx.context_window.context_window_size.is_none()
+            && ctx.context_window.context_tokens.is_none()
+            && ctx.context_window.used_percentage.is_none(),
+        "what the client cannot know is absent, not zero"
+    );
+}
+
+#[test]
+fn a_script_run_during_a_turn_is_told_when_the_turn_began() {
+    let now = Instant::now();
+    let mut app = status_line_app(StatusLineType::Command);
+    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+    agent.status_context = None;
+    agent.turn_started_at = Some(Instant::now());
+
+    app.update_status_line_at(now);
+
+    let ctx = context_of_first_run(&app);
+    let began = ctx.turn.expect("a turn is running").started_at_ms;
+    let wall_now = chrono::Utc::now().timestamp_millis();
+    assert!(
+        (wall_now - began).abs() < 5_000,
+        "the turn began just now: {began} against {wall_now}"
+    );
 }
 
 #[test]
@@ -491,7 +729,7 @@ fn row_nobody_asked_for_arms_nothing_that_outlives_the_turn() {
 
 #[test]
 fn only_a_row_that_can_change_mid_turn_holds_the_loop_awake_for_one() {
-    let now = Instant::now();
+    let mut now = Instant::now();
     for (kind, demand) in [
         (StatusLineType::Command, TickDemand::Slow),
         (StatusLineType::Builtin, TickDemand::None),
@@ -509,6 +747,19 @@ fn only_a_row_that_can_change_mid_turn_holds_the_loop_awake_for_one() {
             RunOutcome::Output("row".to_string()),
         );
         app.agents.get_mut(&AgentId(0)).unwrap().turn_started_at = Some(std::time::Instant::now());
+
+        // The row is built from whether a turn runs, so the start of a turn makes it
+        // stale once. Let that one rebuild happen, and settle the run it starts, so
+        // that what is left to ask for a tick is the turn itself and nothing else.
+        now += MIN_REFRESH_INTERVAL_MS;
+        app.update_status_line_at(now);
+        if matches!(kind, StatusLineType::Command) {
+            app.on_status_line_command_finished_at(
+                now,
+                RunId(1),
+                RunOutcome::Output("row".to_string()),
+            );
+        }
 
         assert_eq!(app.status_line_tick_demand_at(now), demand, "{kind:?}");
     }

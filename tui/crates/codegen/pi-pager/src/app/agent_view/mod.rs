@@ -718,7 +718,13 @@ pub struct AgentView {
     pub(crate) modal_hovered_key: Option<char>,
     /// Cached server-reported context state.
     pub context_state: Option<pi_shell::session::ContextInfo>,
+    /// The last status the agent sent. The Python agent sends none, so for it
+    /// this stays `None` and the row is built from what the client knows (see
+    /// `status_line_policy`).
     pub status_context: Option<pi_status_line::StatusLineContext>,
+    /// When this process attached the session: `cost.total_duration_ms` of the
+    /// status payload counts from here, so a resumed session counts from the resume.
+    pub(crate) attached_at: Instant,
     /// Held across a frame that clamps the row away, so a script keeps the size
     /// it last painted at.
     pub last_status_line_size: Option<crate::views::status_line::RowSize>,
