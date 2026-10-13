@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`zypi export <id>` works with the Python agent (TUI)**: it read the session files of the old Rust agent, so it answered `Session '<id>' not found.` for every session that the Python agent stored. It now asks the agent, as a resume does: it starts the agent, sends `session/load`, collects the `session/update` messages that the agent replays, and writes the Markdown transcript as before (to stdout, to a file, or to the clipboard; plan decision 6, option (a)). The agent is stopped when the command ends, also when the command fails. The command does not stop at the answer to `session/load`, because the last replayed messages can arrive after it: it waits until no replayed message has come for 500 ms. An agent that says nothing for 60 s is an error (`it said nothing for 60 s`), and a permission request from the agent is refused. A session that was compacted exports from the compaction on, as a resume shows it. The session file is not changed. Time, on a debug build in WSL2: 2,000 entries (1.4 MB) 2.5 s, 5,000 entries (3.6 MB) 5.7 s, 20,000 entries (14.2 MB) 63 s. The agent alone needs 0.24 s, 0.53 s and 2.5 s for the same sessions, so the rest is `zypi` turning the messages into text, and that time grows faster than the size. Tests: 18 unit tests, 1 end-to-end test against the real agent, and `scripts/tui_pty/resume_matrix.py` cases 12 and 13, which now also check that no process is left behind.
+
 ## [0.5.0] - 2026-10-12
 
 `zypi` no longer has an agent of its own. It draws the terminal screen and talks ACP to the Python agent (`python -m pi_agent_cli`), and that agent is now the only agent. **Removed** says what went with the Rust agent runtime. **Known issues** says what does not work yet. This release also has the Phase 6 and Phase 7 changes to the Python packages: project trust, a sandbox for workflow scripts, DeepSeek thinking with tools, and tool annotations.

@@ -491,6 +491,53 @@ async fn a_session_is_listed_with_a_title_and_replayed_by_a_later_agent() {
     second.stop().await;
 }
 
+/// `zypi export <id>`: the command starts an agent of its own, replays the session through
+/// `session/load`, writes it as Markdown and stops the agent again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial(pi_agent)]
+async fn export_replays_a_stored_session_through_an_agent_of_its_own() {
+    let Some(python) = python() else { return };
+    use_cli_agent(&python);
+    let cwd = tempfile::tempdir().unwrap();
+
+    let first = Live::start(Answer::Cancelled).await;
+    let created = new_session(&first.tx, cwd.path()).await.session_id;
+    prompt(&first.tx, &created, "remember  this").await;
+    first.stop().await;
+
+    let markdown = tokio::time::timeout(
+        WIRE_TIMEOUT,
+        pi_pager::export_cmd::transcript(&created.to_string()),
+    )
+    .await
+    .expect("the export did not finish")
+    .unwrap_or_else(|error| panic!("the export failed: {error:#}"));
+    assert_eq!(
+        markdown,
+        format!("## User\n\nremember  this\n\n## Assistant\n\n{MOCK_REPLY}")
+    );
+    assert_eq!(
+        marked_processes(),
+        Vec::new(),
+        "the export left its agent running"
+    );
+
+    // An id that no session has: an error that names it, and no agent left running either.
+    let error = tokio::time::timeout(
+        WIRE_TIMEOUT,
+        pi_pager::export_cmd::transcript("no-such-session"),
+    )
+    .await
+    .expect("the export did not finish")
+    .expect_err("an unknown session cannot be exported");
+    assert_eq!(error.to_string(), "Session 'no-such-session' not found.");
+    assert_eq!(
+        marked_processes(),
+        Vec::new(),
+        "the failed export left its agent running"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[serial_test::serial(pi_agent)]
 async fn session_list_pages_are_followed_by_cursor() {

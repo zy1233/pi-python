@@ -230,6 +230,29 @@ def test_the_session_id_cases_tell_a_used_id_from_a_fresh_one():
     assert not taken.holds(started_as_another, IDS)
 
 
+def test_the_export_cases_tell_a_transcript_from_a_refusal():
+    printed = next(case for case in rmx.CASES if case.argv == ["export", "{existing}"])
+    unknown = next(case for case in rmx.CASES if case.argv == ["export", "{unknown}"])
+    conversation = f"## User\n\n{rmx.FIRST}\n\n## Assistant\n\n{rmx.REPLY}"
+    transcript = rmx.Outcome(0, "", stdout=conversation)
+    half = rmx.Outcome(0, "", stdout=f"## User\n\n{rmx.FIRST}")
+    agent_left = rmx.Outcome(0, "", stdout=conversation, left_behind=["python -m pi_agent_cli"])
+    not_found = rmx.Outcome(1, "Error: Session 'u' not found.")
+    # The export goes through the agent now, so neither case may carry a gap.
+    assert not printed.gap
+    assert not unknown.gap
+    assert printed.holds(transcript, IDS)
+    assert not printed.holds(half, IDS)
+    assert not printed.holds(agent_left, IDS)
+    assert not printed.holds(not_found, IDS)
+    assert unknown.holds(not_found, IDS)
+    assert not unknown.holds(rmx.Outcome(1, "Error: boom"), IDS)
+    assert not unknown.holds(rmx.Outcome(0, "", stdout=conversation), IDS)
+    assert not unknown.holds(
+        rmx.Outcome(1, "Error: Session 'u' not found.", left_behind=["python"]), IDS
+    )
+
+
 def test_sessions_reads_the_id_from_each_header(tmp_path):
     folder = tmp_path / "sessions"
     folder.mkdir()

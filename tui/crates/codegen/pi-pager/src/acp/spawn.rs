@@ -71,9 +71,10 @@ pub struct AgentProcess {
 /// joins its thread on drop, so the child is killed and reaped before the pager
 /// exits — on normal return, `?` bail, or panic unwind alike.
 ///
-/// Only `app::run` owns one. It drops it explicitly, after the terminal is
+/// `app::run` owns one. It drops it explicitly, after the terminal is
 /// restored and before the telemetry drain and the process-scope sweep, so the
-/// child is gone first.
+/// child is gone first. `zypi export` owns one too, for the short life of the
+/// agent that replays the session (`export_cmd::replay`).
 pub struct AgentProcessGuard {
     cancel: CancellationToken,
     thread: Option<thread::JoinHandle<Result<()>>>,

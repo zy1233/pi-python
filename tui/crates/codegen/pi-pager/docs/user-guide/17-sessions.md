@@ -42,3 +42,7 @@ zypi export <session-id> notes.md
 ```
 
 If you omit the file name, `zypi` writes the Markdown to stdout. To copy the Markdown to the clipboard, add `-c`.
+
+`zypi export` asks the agent for the session. It starts the agent, loads the session and stops the agent when it has the text. This takes about as long as `zypi --resume` takes to show the conversation. The Markdown has what a resumed session shows: your messages, the replies of the agent, and one line for each tool call. If the agent compacted the session, the text starts at the first message that the compaction kept.
+
+If no session has the id, `zypi` shows an error and writes nothing.
