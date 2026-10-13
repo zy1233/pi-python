@@ -2,7 +2,7 @@
 
 This file is generated. Do not edit it by hand.
 
-- Command: `python scripts/tui_callgraph.py keep`. Commit: `24907ef`.
+- Command: `python scripts/tui_callgraph.py keep`. Commit: `34bf8f6`.
 - Run the command again after a change that moves code between modules or crates.
 - It replaces the hand-written list of examples in item 0.5 of
   [`PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`](../PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md).
@@ -54,7 +54,7 @@ Check these dead units first. Each has `impl` blocks for types that other units 
 
 | unit | lines | references from live code outside |
 |---|---|---|
-| `session::storage` | 7,372 | 1 |
+| `session::storage` | 7,372 | 0 |
 | `util::config` | 6,770 | 94 |
 | `auth::manager` | 3,754 | 0 |
 | `agent::config` | 3,167 | 26 |

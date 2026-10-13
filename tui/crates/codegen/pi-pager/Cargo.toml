@@ -170,6 +170,8 @@ criterion = { workspace = true }
 tempfile = { workspace = true }
 serial_test = { workspace = true }
 pi-agent = { workspace = true }
+# `#[tokio::test(start_paused = true)]` in the tests of the export's replay reader.
+tokio = { workspace = true, features = ["test-util"] }
 
 [[bench]]
 name = "render"

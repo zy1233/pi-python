@@ -631,7 +631,7 @@ async fn async_main(args: PagerArgs) -> Result<()> {
             }
             Command::Export(export_args) => {
                 init_tracing_simple("cli");
-                return pi_pager::export_cmd::run(export_args);
+                return pi_pager::export_cmd::run(export_args).await;
             }
             Command::Wrap(ref wrap_args) => {
                 return pi_pager::wrap_cmd::run(wrap_args);

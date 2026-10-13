@@ -49,9 +49,9 @@
 5. **发布说明。** 发布页的正文只取 `CHANGELOG.md` 里与 tag 同版本的一段，所以：把 `[Unreleased]` 并进 `[0.5.0]`，日期改成发布日（现在是 2026-10-02）；补上 `CHANGELOG.md` 里还没有的条目——Rust runtime 的删除与随之删掉的界面和命令（r3、r5）、`/model` 经 ACP `configOptions` 恢复（r3）、`-p` 在要求沙箱时拒绝运行（r5）、品牌清理（r6）；写「已知问题」（下）；用 `release.yml` 里同一段 `awk` 在本地预览。`docs/TUI-AND-CODE-AGENT.md` 只写了 Linux x86_64 有预编译二进制；`zypi-macos-arm64` 随版本发的话要补上。**状态（r12）**：PR [#15][pr-15] 把 `[Unreleased]` 并进了 `[0.5.0]`，补了 20 条（Added 2、Changed 2、Removed 2、Fixed 6、已知问题 8），日期写 2026-10-12（打 tag 那天不是这天，就改）。用 `release.yml` 里那段 `awk` 预览过（Git for Windows 的 `awk`，输入是 LF 文本）：正文 45,076 B，五个分组。演练成功之后，PR [#15][pr-15] 又加了 `zypi-macos-arm64` 的条目（Added），并改了 `README.md` 与 `docs/TUI-AND-CODE-AGENT.md`：三处都写明这个二进制由 CI 构建，没有人运行过。PR [#17][pr-17] 再加 1 条 Changed（版本号，见决策 16），并去掉 1 条已知问题；那之后正文是 45,855 B。PR [#15][pr-15]（`59545c1`）与 PR [#17][pr-17]（`d57fd9b`）都已合入。
 6. **打 tag（用户）。** 先按 `pre-push-ruff` 的规则在 Windows 与 WSL 跑 ruff 和 pytest；`git tag v0.5.0`、`git push origin v0.5.0`；再核对 Release 的运行：PyPI 上六个包（核心、harness、cli 是 0.5.0，三个扩展包是 0.2.0），GitHub Release 上的 wheel、sdist 与 `zypi-*` 二进制。
 
-**带着发布的已知问题**，除非用户在打 tag 之前决定。用户在 r12 续 5 定了决策 6 与 15（都选 (a)），8 与 14 仍待定。定了不等于做了：6 与 15 的实现还没开始，所以下面四条在 V0.5 里都还是已知问题，除非在打 tag 之前做完。决策 16 已做并已合入（PR [#17][pr-17]，`d57fd9b`），所以「已知问题」里没有版本号一条。
+**带着发布的已知问题**，除非用户在打 tag 之前决定。用户在 r12 续 5 定了决策 6 与 15，8 与 14 仍待定。6 与 15 各做成了一个 PR（r12 续 6、续 7；15 在复核后从 (a) 改成了 (b)），没有合入 `main`，所以下面四条在 V0.5 里都还是已知问题，除非那两个 PR 在打 tag 之前合入（合入时要同时改 `CHANGELOG.md` 与这四条）。决策 16 已做并已合入（PR [#17][pr-17]，`d57fd9b`），所以「已知问题」里没有版本号一条。
 
-- `zypi export <id>` 对 Python agent 的会话恒报 `Session '<id>' not found.`，退出码 1（决策 6：已定 (a)，还没做）。
+- `zypi export <id>` 对 Python agent 的会话恒报 `Session '<id>' not found.`，退出码 1（决策 6：已定 (a)，已做成 PR，合入之前它仍是已知问题；见 [§10.15][l10-15] 续 6）。
 - `--resume <标题>` 找不到 Python 会话（`no session id or title matched`，退出码 1）。`--session-id <已用的 id>` 被 agent 拒绝，TUI 却显示 `Session creation failed: Invalid params: …` 并留在界面里，不退出（ADR1 的 PR 2）。`--resume <未知 id>` 进了 TUI 才报错（决策 5）。`--continue` 取最近创建的会话，不是最近活动的（决策 4）。
 - 交互模式下 `--system-prompt-override` 与 `--rules` 无效，`--allow` 与 `--deny` 到不了 agent，`zypi --help` 还列着没有逐个核对过的 Grok 时代旗标（决策 8，仍待定）。
 - 设置页里权限模式以外的项对 Python agent 可能没有效果；`remember_tool_approvals` 与 `default_selected_permission` 没有测过（决策 14，仍待定）。
@@ -64,8 +64,8 @@
 
 ### 下一步
 
-- **要等用户决定：** ADR1 的 PR 2（决策 4、5）与 PR 3（决策 2；决策 6 已定 (a)，它的实现要先做完）；1.P6 的旗标契约（决策 8）；设置页里其余的项（决策 14）；真的 Plan 模式（决策 7 的 (b)）。
-- **已定，等用户排期：** 决策 6 的 (a)（`zypi export` 经 ACP 回放）与决策 15 的 (a)（Python 发 `session_status`），r12 续 5。V0.5 之前做不做，由用户定；不做，它们就作为已知问题带着发（[发布里程碑 V0.5](#发布里程碑-v05)）。
+- **要等用户决定：** ADR1 的 PR 2（决策 4、5）与 PR 3（决策 2；决策 6 的实现已做成 PR，它合入之后才能删旧存储层）；1.P6 的旗标契约（决策 8）；设置页里其余的项（决策 14）；真的 Plan 模式（决策 7 的 (b)）。
+- **已定，已做成 PR，等用户合入：** 决策 6 的 (a)（`zypi export` 经 ACP 回放）与决策 15 的 (b)（pager 用本地已有的数据画状态行；原选的 (a) 在复核时没有过 DESIGN §8.5 的五条），r12 续 6、续 7。合入就进 V0.5，除非那时已打 tag；不合入，它们就作为已知问题带着发（[发布里程碑 V0.5](#发布里程碑-v05)）。
 - **不用等决定：** V0.5 的退出条件 1–5。条件 2 已有结果；条件 3、5 各有一个 PR（[#14][pr-14]、[#15][pr-15]，都已合入），条件 3 的演练已经跑过；条件 4（与 v0.4.0 对照）用户决定不做；条件 6（打 tag）归用户。发行构建的版本号（决策 16）做在 PR [#17][pr-17] 里，已合入（先合 #15，再把 #17 改基到 `main` 并合入）。打 tag 之前，条件 1 要在那个提交上再看一次。阶段 D 做不做，看 [`docs/baselines/tui.md`](../baselines/tui.md) 的数据；r11 又提出 D.5–D.9 五个候选。
 
 ### 还没有验证的
@@ -87,12 +87,12 @@
 共十六项。能给出倾向的，都写了倾向。没有一项会在用户确认之前动手。编号沿用 r9 的提议（[§10.11][l10-11] 末尾「留给用户决定的」十二项，原文留在那里）；13、14 是 r10 加的，15 是 r11 加的，16 是 r12 加的。附录 A 的「决定 N」指这里的第 N 项。
 
 - **已做：** 1 的 PR 1、3、7 的 (a)、12、16 的 (a)（PR [#17][pr-17]）。
-- **已定，还没做：** 6 的 (a)、15 的 (a)（用户，2026-10-13；[§10.15][l10-15] 续 5）。
-- **待定：** 1 的 PR 2 与 PR 3（等 2、4、5 的决定，和 6 的实现）、2、4、5、7 的 (b)(c)、8、9、10、11、13、14。
+- **已定，已做成 PR，等用户合入：** 6 的 (a)、15 的 (b)（用户，2026-10-13；[§10.15][l10-15] 续 5 起；15 原选 (a)，复核后改为 (b)，见该条）。
+- **待定：** 1 的 PR 2 与 PR 3（等 2、4、5 的决定，和 6 的 PR 合入）、2、4、5、7 的 (b)(c)、8、9、10、11、13、14。
 
 1. **ADR1 的落地。** PR 1：Python；PR 2：Rust，只加不删；PR 3：Rust，删。
     - 倾向：开工，先做 PR 1。
-    - 状态：**PR 1 已做**（r10，PR [#11][pr-11]）。PR 2、PR 3 等决策 2、4、5，和决策 6 的实现（6 已定 (a)，r12 续 5）。
+    - 状态：**PR 1 已做**（r10，PR [#11][pr-11]）。PR 2、PR 3 等决策 2、4、5，和决策 6 的 PR 合入（6 已定 (a)，已做成 PR，r12 续 6）。
     - 详情：[§10.11][l10-11]、[§10.12][l10-12]
 2. **沙箱顺序。**
     - 倾向：去掉「恢复时沿用保存的沙箱 profile」（对 Python 会话没有行为变化）。备选：先起查询用的 agent（冷启动翻倍，还有有无沙箱的窗口）。
@@ -112,7 +112,7 @@
     - 详情：[§10.11][l10-11]
 6. **`zypi export`。** 现在对 Python 会话恒报 not found，是一个静默坏掉的命令。r8 时用户选了不动。
     - 倾向：(a) 经 ACP 回放导出：起 agent、`session/load`、收 `session/update`，复用 `render_blocks_to_markdown`，约 100 行，多 1–2 s 的 agent 启动；(b) 删掉子命令。不要 (c) 维持现状。
-    - 状态：**已定 (a)，还没做**（用户，2026-10-13，r12 续 5）。做法按倾向里写的：经 ACP 回放导出。它要改 `pi-pager` 的 `export_cmd.rs`，那里今天读的是旧的 Rust 存储（`load_updates_for_replay`），所以 ADR1 的 PR 3 删旧存储层之前，要先做完这一项。实现还没开始；V0.5 里 `zypi export` 仍是已知问题。
+    - 状态：**已定 (a)，已做成 PR，等用户合入**（PR [#18](https://github.com/zy1233/pi-python/pull/18)；用户，2026-10-13，r12 续 5；记录 [§10.15][l10-15] 续 6）。做法按倾向里写的：`export_cmd` 起 agent、发 `session/load`、收 `session/update`，经 `AcpUpdateTracker` 与 `render_blocks_to_markdown` 写成 Markdown，与 `/export` 同一条渲染路径；命令结束时（失败时也一样）agent 被停掉。最后几条回放可能比 `session/load` 的响应晚到，所以响应之后静默 500 ms 才算收齐；agent 60 s 不出声算错误。代码约 300 行（不是估计的 100 行：收集、静默期、对 agent 的请求逐一回答占了大头），测试 18 个加一个对着真 agent 的 e2e。ADR1 的 PR 3 删旧存储层之前要先做完这一项：做完了，`export_cmd` 不再引用 `pi_shell::session::storage`（`tui-support.md` 里它的外部引用 1 → 0）。合入之前，V0.5 里 `zypi export` 仍是已知问题。
     - 详情：[§10.11][l10-11]、[§10.15][l10-15]
 7. **模式映射（1.P3）。** (a) 只提供 agent 会照做的模式；(b) 做 `session/set_mode`，Plan = 把工具集裁到只读；(c) 定义 Python 的 `auto`（今天等于 always-approve，设置页却说是分类器：改名、删除，或真做分类器）。
     - 倾向：(a) 先行，因为 Plan 现在给用户的是虚假的安全感；(b) 另议。
@@ -296,7 +296,7 @@ Python（`pi_agent_cli`）：
 
 Rust（pager）：
 
-- [ ] 1.R1 ADR1 落地：移除对 session 文件的读取；`export` 的去向。**状态**（r9）：读盘调用点清单、落地设计、PR 切分、验收矩阵都在 [§10.11][l10-11]。r10 只做了 PR 1，即 Python 一侧的 `_meta.sessionId` 与 `pi/cwd`（PR [#11][pr-11]，记录 [§10.12][l10-12]）。PR 2（Rust，只加不删）与 PR 3（Rust，删）没有动手，等决策 2、4、5，和决策 6 的实现（6 已定 (a)，r12 续 5）。
+- [ ] 1.R1 ADR1 落地：移除对 session 文件的读取；`export` 的去向。**状态**（r9）：读盘调用点清单、落地设计、PR 切分、验收矩阵都在 [§10.11][l10-11]。r10 只做了 PR 1，即 Python 一侧的 `_meta.sessionId` 与 `pi/cwd`（PR [#11][pr-11]，记录 [§10.12][l10-12]）。PR 2（Rust，只加不删）与 PR 3（Rust，删）没有动手，等决策 2、4、5，和决策 6 的 PR 合入（6 已定 (a)，已做成 PR，r12 续 6：`export_cmd` 不再引用 `pi_shell::session::storage`）。
 - [ ] 1.R2 按能力隐藏 Python 不路由的方法的入口（`session/set_model`、`session/set_mode` 等）；method-not-found 不 panic、不重复报错；`/model` 按 ADR3 恢复（r3 已做，不在隐藏之列）。
 - [ ] 1.R3 子进程生命周期（P6）。**状态**：做了大半。r4：命名与提示语。r5：先关 agent 的 stdin 再杀；做了 macOS 的退出实测。r8：Linux 的退出矩阵；沙箱下补了 `--die-with-parent`；agent 的 `stderr` 落到 `<home>/logs/agent.stderr.log`；`-p` 模式下 Python 一侧监视父进程。r9：agent 自己退出时，pager 说得出原因。没做：MCP 子进程；Windows 上的行为。记录 [§10.6][l10-6]、[§10.7][l10-7]、[§10.10][l10-10]、[§10.11][l10-11]。
 - [ ] 1.R4 `-p` 派发顺序与沙箱（ADR7）。
@@ -405,7 +405,7 @@ Rust（pager）：
 | session delete | `pi/session/delete`（扩展请求） | 已覆盖（`ext_method`）；SDK 0.12.1 没有标准的 `session/delete` 路由 | 保留并登记（ADR4）；SDK 补路由后迁到标准方法 | 已定 | `test_session_lifecycle.py` |
 | session rename | 入口与整条链路已删 | 无 | 删 | 已定（r5） | [执行记录 A.4][logA4] |
 | 恢复的入口：`--continue`、`--resume <id｜标题>` | 现在读盘解析（13 处读盘调用，[§10.11][l10-11]） | `session/list` 加 `session/load` 够用；延迟实测没有触发 ADR1 的覆盖条件 | 改为经 ACP 解析（ADR1） | 已定（ADR1）；落地设计与细节待确认（决定 1–5） | `resume_matrix.py`（9 PASS / 4 GAP）；`session_list_bench.py` |
-| `zypi export` | 读旧布局的会话文件 | 无 | 决定 6：经 ACP 回放，或删子命令 | **提议** | `resume_matrix.py` 用例 12、13 |
+| `zypi export` | 读旧布局的会话文件；PR（r12 续 6）合入后改为经 ACP 回放：起 agent、`session/load`、收 `session/update` | 没有专门的方法，用已有的 `session/load` 回放 | 决定 6 的 (a)：经 ACP 回放 | **已定 (a)，已做成 PR**（r12 续 5、续 6） | `resume_matrix.py` 用例 12、13；`export_cmd::tests`；`python_agent_e2e` |
 | prompt / cancel | 标准 ACP | 已覆盖；取消后正在跑的 `bash` 进程被回收（Linux 的用例） | 保留 | 已定 | `a_prompt_streams_the_reply_and_ends_the_turn`；`cancel_ends_a_running_tool_as_cancelled_and_reaps_it` |
 | 权限请求 | 应答 `session/request_permission`；yolo 模式下 pager 自己代答（选 `AllowOnce`，`acp_handler/permissions.rs`） | 已覆盖：`ask` 模式下问 `bash` / `edit` / `write` / `workflow`（没声明无害的工具，AGENTS.md 不变量 8）；工具调用的选项只有 allow-once / reject-once（`permissions.py`）；项目信任的问题另带 `allow_always`（`trust_prompt.py`） | 保留；工具调用不做 allow-always 与规则 | 已定：pager 不依赖 allow-always（PTY 里两个选项的问题框能画、能答）；提议：不做 | `a_permission_question_reaches_the_client_and_its_answer_decides`；`mode_probe.py` |
 | 模型选择 | 读 `configOptions`（`category: "model"`），`session/set_config_option`；没有该配置项时退回 `session/set_model` | `configOptions`（`model`）与 `set_config_option`（只认 `model`，其他 `invalid_params`）；`[[models]]` 提供候选；`session/set_model` 没有路由，但 Python 总是公布 `model` 配置项，退回路径用不到 | 恢复（ADR3） | 已定（r3） | [§10.2][l10-2]、[§10.3][l10-3]；`test_acp_agent.py` |
@@ -478,7 +478,7 @@ Rust（pager）：
 - r10：ADR1 的 PR 1（[#11][pr-11]）；1.P3 的 (a)（[#12][pr-12]）。
 - r11：0.5 与阶段 C（PR [#13][pr-13]）。调用图工具化（`tui_callgraph.py`）；`zypi` 的网络审计（含一次真模型）；内嵌指南缩成七页并停止启动时解压；`NOTICE` 重写、`THIRD-PARTY-NOTICES` 与 `Cargo.lock` 对账（`tui_notices.py`）；`grok agent` 的残留清零，`leader`、`x.ai` 改成棘轮上限；新增待决策 15 与阶段 D 的 D.5–D.9。
 - 整理（r10 之后，2026-10-11）：执行记录移到[执行记录（归档）][log]；本文只留计划、状态、待决策和 §10 索引；§7 改成每项一行状态；§4、§5（r2 的源码事实与规模估计）也移到归档的附录 E，只留索引。
-- r12：V0.5 的发布里程碑（分支 `docs/v0.5-milestone`，只改文档）。按剥离的现状定范围：阶段 0、A、C 完成，阶段 1 完成一半，阶段 D 没有开始，V0.5 不等它们；写六项退出条件（CI、体积再量、发布构建演练、与 v0.4.0 对照、发布说明、打 tag）、带着发布的已知问题、不在 V0.5 的项；建 GitHub 里程碑 [v0.5.0][ms-v050]；新增待决策 16（发行构建的版本戳：`zypi --version` 与「是不是发行构建」共用 `GROK_VERSION`，不能靠在 `release.yml` 里设它来改版本号）；状态更新到 `main` 的 `4fc028a`。里程碑建好之后，用户选了四件事，都在别的 PR 或 CI 运行里做了，本 PR 只记录：并入 `[Unreleased]` 并补条目（PR [#15][pr-15]，条件 5）；给 `release.yml` 加手动演练（PR [#14][pr-14]，条件 3），并从分支跑了一次（[run 38223353755][run-dry-run]：Linux 与 macOS arm64 都构建成功，什么也没发布）；`release_baseline`（[run 38221952524][run-baseline]，420,767,096 B，条件 2）；推送本分支并开 PR。决策 16 选了 (a)。之后用户又答了三个问题：决策 16 现在做，另开 PR（[#17][pr-17]，叠在 #15 上：crate 版本改成 0.5.0，`agentInfo.version` 读已装包的版本，两个新测试文件）；macOS 二进制的条目写进 #15（`CHANGELOG.md`、`README.md`、`docs/TUI-AND-CODE-AGENT.md`，注明「CI 构建，没有人运行过」）；条件 4 不做，V0.5 不等它。续 3：用户让先把 PR 合入；#15、#17、#14 依次 squash 合入（`59545c1`、`d57fd9b`、`0efd400`），本分支改基到 `0efd400`。用户也修好了 WSL：在 `0efd400` 上跑了 Linux 的 `pytest`（2,539 通过 / 16 跳过 / 31 取消选择）、`zypi --version`（`zypi 0.5.0 (0efd40071ca0)`）和 `scripts/tui_pty/` 的脚本（`smoke.py` 22/23，其余符合预期；`smoke.py` 里失败的那一项检查过期了，不是 TUI 的退化）。续 4：这项过期的检查修好了（用户说不另开 PR，直接提交到 `main`）：`smoke.py` 23/23，加 `--sandbox workspace` 26/26；GitHub 里程碑的描述改到合入之后。续 5：用户答了决策 6、8、14、15：6 与 15 选 (a)（都还没做），8 与 14 待定；最后一个本地旧分支也删了。没做：运行 CI 的 `release-dist` 产物。见 [§10.15][l10-15]。
+- r12：V0.5 的发布里程碑（分支 `docs/v0.5-milestone`，只改文档）。按剥离的现状定范围：阶段 0、A、C 完成，阶段 1 完成一半，阶段 D 没有开始，V0.5 不等它们；写六项退出条件（CI、体积再量、发布构建演练、与 v0.4.0 对照、发布说明、打 tag）、带着发布的已知问题、不在 V0.5 的项；建 GitHub 里程碑 [v0.5.0][ms-v050]；新增待决策 16（发行构建的版本戳：`zypi --version` 与「是不是发行构建」共用 `GROK_VERSION`，不能靠在 `release.yml` 里设它来改版本号）；状态更新到 `main` 的 `4fc028a`。里程碑建好之后，用户选了四件事，都在别的 PR 或 CI 运行里做了，本 PR 只记录：并入 `[Unreleased]` 并补条目（PR [#15][pr-15]，条件 5）；给 `release.yml` 加手动演练（PR [#14][pr-14]，条件 3），并从分支跑了一次（[run 38223353755][run-dry-run]：Linux 与 macOS arm64 都构建成功，什么也没发布）；`release_baseline`（[run 38221952524][run-baseline]，420,767,096 B，条件 2）；推送本分支并开 PR。决策 16 选了 (a)。之后用户又答了三个问题：决策 16 现在做，另开 PR（[#17][pr-17]，叠在 #15 上：crate 版本改成 0.5.0，`agentInfo.version` 读已装包的版本，两个新测试文件）；macOS 二进制的条目写进 #15（`CHANGELOG.md`、`README.md`、`docs/TUI-AND-CODE-AGENT.md`，注明「CI 构建，没有人运行过」）；条件 4 不做，V0.5 不等它。续 3：用户让先把 PR 合入；#15、#17、#14 依次 squash 合入（`59545c1`、`d57fd9b`、`0efd400`），本分支改基到 `0efd400`。用户也修好了 WSL：在 `0efd400` 上跑了 Linux 的 `pytest`（2,539 通过 / 16 跳过 / 31 取消选择）、`zypi --version`（`zypi 0.5.0 (0efd40071ca0)`）和 `scripts/tui_pty/` 的脚本（`smoke.py` 22/23，其余符合预期；`smoke.py` 里失败的那一项检查过期了，不是 TUI 的退化）。续 4：这项过期的检查修好了（用户说不另开 PR，直接提交到 `main`）：`smoke.py` 23/23，加 `--sandbox workspace` 26/26；GitHub 里程碑的描述改到合入之后。续 5：用户答了决策 6、8、14、15：6 与 15 选 (a)（都还没做），8 与 14 待定；最后一个本地旧分支也删了。续 6：决策 6 的 (a) 做成了 PR（分支 `feat/export-via-acp-replay`，没有合入）：`zypi export <id>` 改问 agent，经 `session/load` 回放；18 个单元测试、一个端到端测试；`resume_matrix.py` 11 PASS / 2 GAP / 0 FAIL；调试构建下，2,000、5,000、20,000 条的会话要 2.5、5.7、63 s；发现三处没有修的问题（agent 读到条目 id 重复的文件会死循环；基准脚本在 4,096 条之后写出这样的文件；`isReplay` 在 agent 与 pager 里放的 `_meta` 层级不同）。没做：运行 CI 的 `release-dist` 产物。见 [§10.15][l10-15]。
 
 <!-- 链接定义 -->
 [log]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md
