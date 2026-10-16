@@ -180,6 +180,102 @@ def test_the_residue_ceilings_hold_in_this_tree():
     assert not over, f"lines now vs ceiling in scripts/tui_baseline.toml: {over}"
 
 
+# ---- session disk-read gate (ADR1) ------------------------------------------------------------
+
+
+def _crate(tmp_path: Path, files: dict[str, str]) -> Path:
+    """A fake `tui/` with one crate `codegen/pi-pager`; returns the `tui` directory."""
+    src = tmp_path / "tui" / "crates" / "codegen" / "pi-pager" / "src"
+    for name, text in files.items():
+        path = src / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return tmp_path / "tui"
+
+
+def _scan(tui: Path, patterns=("list_summaries", 'join("sessions")')) -> list[str]:
+    return tb.scan_session_disk_reads(tui, ["codegen/pi-pager"], list(patterns))
+
+
+def test_session_disk_read_scan_reports_production_code_with_path_and_line(tmp_path):
+    reads = (
+        'fn a() {\n    let rows = list_summaries(cwd).await;\n    let d = h.join("sessions");\n}\n'
+    )
+    tui = _crate(tmp_path, {"app/a.rs": reads, "app/clean.rs": "fn b() {}\n"})
+    hits = _scan(tui)
+    assert hits == [
+        "crates/codegen/pi-pager/src/app/a.rs:2: let rows = list_summaries(cwd).await;",
+        'crates/codegen/pi-pager/src/app/a.rs:3: let d = h.join("sessions");',
+    ]
+    assert tb.scan_session_disk_reads(tui, ["codegen/pi-pager"], []) == []
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "app/dispatch/tests/mod.rs",
+        "app/effects/tests.rs",
+        "app/session_resolve_tests.rs",
+        "test_util.rs",
+        "app/agent_view/test_fixtures.rs",
+    ],
+)
+def test_session_disk_read_scan_skips_test_files(tmp_path, name):
+    tui = _crate(tmp_path, {name: "fn t() { list_summaries(); }\n"})
+    assert _scan(tui) == []
+
+
+def test_session_disk_read_scan_skips_comments_and_inline_test_modules(tmp_path):
+    text = (
+        "// list_summaries used to be called here\n"
+        '/// Reads `join("sessions")`, formerly.\n'
+        "fn live() {}\n"
+        "#[cfg(test)]\n"
+        "#[allow(dead_code)]\n"
+        "pub(crate) mod tests {\n"
+        "    fn t() {\n"
+        "        list_summaries();\n"
+        "    }\n"
+        "}\n"
+        "fn after_the_tests() {\n"
+        "    list_summaries();\n"
+        "}\n"
+    )
+    tui = _crate(tmp_path, {"a.rs": text})
+    assert _scan(tui) == ["crates/codegen/pi-pager/src/a.rs:12: list_summaries();"]
+
+
+def test_a_cfg_test_on_a_single_item_does_not_hide_the_code_after_it(tmp_path):
+    """`plan.rs` has `#[cfg(test)] use ...;` at the top; the read at line 35 must still show."""
+    text = (
+        "#[cfg(test)]\n"
+        "use super::test_fixtures;\n"
+        '#[cfg(test)]\n#[path = "a_tests.rs"]\nmod tests;\n'
+        "fn read() {\n"
+        "    list_summaries();\n"
+        "}\n"
+    )
+    tui = _crate(tmp_path, {"a.rs": text})
+    assert _scan(tui) == ["crates/codegen/pi-pager/src/a.rs:7: list_summaries();"]
+
+
+def test_manifest_session_disk_read_gate_is_well_formed():
+    gate = _manifest()["gates"]["session_disk_reads"]
+    assert gate["crates"] and gate["patterns"]
+    for crate in gate["crates"]:
+        assert (REPO_ROOT / "tui" / "crates" / crate / "src").is_dir(), crate
+    assert all(isinstance(p, str) and p for p in gate["patterns"])
+    # The pure title helpers stay allowed: a bare `session::persistence` would forbid them.
+    assert "session::persistence" not in gate["patterns"]
+
+
+def test_no_pager_code_reads_session_files_in_this_tree():
+    """The same gate as `tui_baseline.py gates`, so the Python CI job also sees a regression."""
+    gate = _manifest()["gates"]["session_disk_reads"]
+    hits = tb.scan_session_disk_reads(REPO_ROOT / "tui", gate["crates"], gate["patterns"])
+    assert not hits, "the pager reads session files again (ADR1): " + "; ".join(hits[:5])
+
+
 # ---- suite evaluation -------------------------------------------------------------------------
 
 

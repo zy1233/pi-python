@@ -22,7 +22,7 @@ use chrono::{DateTime, Utc};
 use pi_acp_lib::AcpAgentTx;
 
 use super::session_startup::{MaterializedStartup, SessionStartupIntent, require_uuid_session_id};
-use super::session_title_resolve::{is_uuid_shaped, select_listed_by_title, title_miss_hint};
+use super::session_title_resolve::{is_uuid_shaped, select_by_title, title_miss_hint};
 use crate::acp::session_list::{MAX_SESSION_LIST_PAGES, WalkEnd, walk_session_list};
 
 /// One row of `session/list`, reduced to what the startup lookup uses.
@@ -215,7 +215,7 @@ pub async fn resolve_startup(
             ..
         } => {
             let (rows, end) = list_all(tx, Some(cwd)).await.map_err(list_error)?;
-            let Some(session) = select_listed_by_title(&arg, &rows)? else {
+            let Some(session) = select_by_title(&arg, &rows)? else {
                 anyhow::bail!(
                     "Session does not exist: {}{}",
                     title_miss_hint(&arg),

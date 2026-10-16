@@ -395,50 +395,6 @@ pub(crate) struct EffectMeta {
     /// `AppView.auth_url_poll_handle` when the seq still matches).
     pub auth_url_poll_handle: Option<(u64, tokio::task::AbortHandle)>,
 }
-/// Extract the first user prompt text from a session's `chat_history.jsonl`.
-///
-/// Returns the first line of the `<user_query>` content (if present),
-/// or the first line of the raw user message text.
-pub(super) fn extract_first_user_prompt(
-    info: &pi_shell::session::info::Info,
-) -> Option<String> {
-    use std::io::BufRead;
-    let history_path = pi_shell::session::persistence::session_dir(info)
-        .join("chat_history.jsonl");
-    let file = std::fs::File::open(history_path).ok()?;
-    let reader = std::io::BufReader::new(file);
-    for line in reader.lines() {
-        let line = line.ok()?;
-        let v: serde_json::Value = serde_json::from_str(&line).ok()?;
-        if v.get("type").and_then(|t| t.as_str()) != Some("user") {
-            continue;
-        }
-        let content = v.get("content");
-        let text = content
-            .and_then(|c| c.as_array())
-            .and_then(|arr| {
-                arr
-                    .iter()
-                    .find_map(|block| {
-                        if block.get("type")?.as_str()? == "text" {
-                            block.get("text")?.as_str().map(String::from)
-                        } else {
-                            None
-                        }
-                    })
-            })
-            .or_else(|| content.and_then(|c| c.as_str()).map(String::from))?;
-        if let Some(start) = text.find("<user_query>") {
-            let after = &text[start + "<user_query>".len()..];
-            let end = after.find("</user_query>").unwrap_or(after.len());
-            let query = after[..end].trim();
-            if !query.is_empty() && !query.starts_with('<') {
-                return Some(query.to_string());
-            }
-        }
-    }
-    None
-}
 /// Parse the `legacy ext RPC` response payload (the unwrapped
 /// `{ "sessions": [...] }` object) into [`SessionPickerEntry`] rows.
 ///
@@ -500,16 +456,10 @@ pub(super) fn parse_session_picker_entries(
             } else if !summary.is_empty() {
                 extract_skill_display_text(&summary).unwrap_or(summary)
             } else {
-                let info_cwd = v
-                    .get("cwd")
-                    .and_then(|s| s.as_str())
-                    .unwrap_or_default()
-                    .to_string();
-                let info = pi_shell::session::info::Info {
-                    id: acp::SessionId::new(id.clone()),
-                    cwd: info_cwd,
-                };
-                extract_first_user_prompt(&info).unwrap_or_default()
+                // Nothing to show: the row is dropped below. The pager used to read the first
+                // prompt out of the session's `chat_history.jsonl` here; it reads no session
+                // files now (ADR1), and the agent always sends a title or the id.
+                String::new()
             };
             let created_at: chrono::DateTime<chrono::Utc> = parsed_created
                 .unwrap_or(updated_at);
@@ -575,18 +525,7 @@ pub(super) fn parse_session_picker_entries(
                 card_detail: None,
             })
         })
-        .filter_map(|mut e| {
-            if e.summary.is_empty() {
-                return None;
-            }
-            if e.source == "remote"
-                && pi_shell::session::resolve_local_session_any_cwd(&e.id)
-                    .is_some()
-            {
-                e.source = "local".to_string();
-            }
-            Some(e)
-        })
+        .filter(|e| !e.summary.is_empty())
         .collect()
 }
 

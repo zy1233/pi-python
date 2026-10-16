@@ -26,19 +26,6 @@ fn log_plan_submit(action: &str) {
     });
 }
 impl AgentView {
-    /// Resolve the absolute path to the plan file for this session.
-    fn plan_file_path(&self) -> Option<std::path::PathBuf> {
-        let session_id = self.session.session_id.as_ref()?;
-        let cwd_str = self.session.cwd.to_string_lossy().into_owned();
-        let encoded_cwd = urlencoding::encode(&cwd_str);
-        Some(
-            pi_shell::util::grok_home::grok_home()
-                .join("sessions")
-                .join(encoded_cwd.as_ref())
-                .join(session_id.0.as_ref())
-                .join("plan.md"),
-        )
-    }
     /// Whether the current line viewer is showing a plan preview.
     pub(super) fn is_plan_viewer(&self) -> bool {
         self.line_viewer.as_ref().is_some_and(|v| {
@@ -86,10 +73,9 @@ impl AgentView {
     }
     /// Resolve the plan body for the line-viewer preview.
     ///
-    /// Prefers content carried on the approval request (inline plan-creation or
-    /// the shell-read file body), then falls back to the on-disk plan file.
-    /// Request body first keeps file-backed previews working when the path
-    /// resolution fails or the file disappears between intercept and open.
+    /// Takes the content carried on the approval request (inline plan-creation or
+    /// the shell-read file body), then the latest inline plan. There is no on-disk
+    /// fallback: the agent owns its session files and the pager reads none (ADR1).
     pub(super) fn plan_body_for_preview(&self) -> Option<String> {
         if let Some(content) = self
             .plan_approval_view
@@ -106,9 +92,7 @@ impl AgentView {
         {
             return Some(content.to_owned());
         }
-        self.plan_file_path()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .filter(|s| !s.trim().is_empty())
+        None
     }
     /// Open the plan preview when content exists, or when plan approval is
     /// parked with an empty body (so the decision surface always pops).
@@ -136,8 +120,6 @@ impl AgentView {
                 crate::views::plan_approval_view::EMPTY_PLAN_PLACEHOLDER.to_owned(),
                 None,
             )
-        } else if let Some(plan_path) = self.plan_file_path() {
-            LineViewerState::open_markdown(&plan_path, None)
         } else {
             None
         }) else {
@@ -719,10 +701,7 @@ impl AgentView {
             self.show_toast("No comments to send.");
             return InputOutcome::Changed;
         }
-        let plan_content = self.inline_plan_content().map(str::to_owned).or_else(|| {
-            let path = self.plan_file_path()?;
-            std::fs::read_to_string(path).ok()
-        });
+        let plan_content = self.inline_plan_content().map(str::to_owned);
         let body = crate::views::plan_approval_view::format_plan_comments(
             &self.plan_comments,
             plan_content.as_deref(),

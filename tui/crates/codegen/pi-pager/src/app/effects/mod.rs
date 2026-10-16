@@ -158,21 +158,10 @@ pub(crate) fn execute(
                 meta.get_or_insert_with(acp::Meta::new)
                     .insert("sessionId".into(), serde_json::json!(sid));
             }
-            let preferred_for_preflight = preferred_session_id.clone();
+            // No check that a client-chosen id is free: `resolve_startup` asked the agent before
+            // the terminal started, and the agent refuses a duplicate `sessionId` itself.
             tasks
                 .spawn(async move {
-                    if let Some(ref sid) = preferred_for_preflight {
-                        let session_cwd_str = session_cwd.to_string_lossy();
-                        if let Err(e) = crate::app::session_startup::ensure_session_id_available(
-                            sid,
-                            &session_cwd_str,
-                        ) {
-                            return TaskResult::SessionFailed {
-                                agent_id,
-                                error: sanitize_user_error(&e.to_string()),
-                            };
-                        }
-                    }
                     let _phase = startup::phase_scope(StartupPhase::SessionCreate);
                     ulog::info("session.create.start", None, None);
                     let create_start = std::time::Instant::now();

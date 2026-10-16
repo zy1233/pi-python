@@ -272,8 +272,9 @@ pub struct PagerArgs {
     pub append_system_prompt_file: Option<PathBuf>,
     /// Resume a session by ID or title, or the most recent if omitted.
     /// Non-ID values match session titles for the current directory
-    /// (ignoring letter case; a sole renamed match wins among duplicates,
-    /// otherwise ambiguity errors; UUID-shaped values always mean IDs).
+    /// (ignoring letter case; two sessions with the same title is an error
+    /// that lists them; UUID-shaped values always mean IDs). The agent says
+    /// which sessions exist; an unknown one ends the run with exit status 1.
     #[arg(
         long = "resume",
         short = 'r',
@@ -291,18 +292,8 @@ pub struct PagerArgs {
         conflicts_with_all = ["continue_last_session"]
     )]
     pub load_session: Option<String>,
-    /// Set by [`Self::pin_local_resume_target`]: the resume target was
-    /// resolved (or definitively missed) before the OS sandbox, so
-    /// materialization must not re-run local title selection.
-    #[clap(skip)]
-    pub resume_target_pinned: bool,
-    /// Sandbox profile of the title-pinned session, captured at pin time from
-    /// the selected summary (outer `None` = no title pin happened). The
-    /// id-based peek cannot re-derive it: a legacy id duplicated across cwd
-    /// dirs makes that lookup ambiguous.
-    #[clap(skip)]
-    pub(crate) pinned_resume_profile: Option<Option<String>>,
-    /// Continue the most recent session for the current working directory.
+    /// Continue the most recent session for the current working directory
+    /// (the one with the latest activity).
     #[arg(
         short = 'c',
         long = "continue",
@@ -311,7 +302,7 @@ pub struct PagerArgs {
     )]
     pub continue_last_session: bool,
     /// Use a specific session UUID for a **new** conversation (must be a valid
-    /// UUID and must not already exist under the target session directory).
+    /// UUID and must not be the ID of a session the agent already has).
     /// Not valid together with `--resume` / `--continue`. Does not resume
     /// existing sessions, use `--resume` / `--continue` instead.
     #[arg(short = 's', long = "session-id", value_name = "SESSION_ID")]
@@ -480,27 +471,6 @@ pub struct PagerArgs {
     #[command(subcommand, next_display_order = 0)]
     pub command: Option<Command>,
 }
-/// Outcome of resolving the startup sandbox profile for a (possibly resumed)
-/// session. See [`PagerArgs::startup_sandbox_profile`].
-#[derive(Debug, PartialEq, Eq)]
-pub enum SandboxStartup {
-    /// Apply this profile. `None` means fall through to config/`off`.
-    Apply(Option<String>),
-    /// Resume requested a profile that differs from the one the session was
-    /// created with. Refused so resuming can't silently change the sandbox.
-    Conflict { requested: String, saved: String },
-}
-/// How resume-selection flags resolve for sandbox profile lookup.
-/// Derived from [`PagerArgs::session_startup_intent`]; new-with-id is not a resume.
-#[derive(Debug, PartialEq, Eq)]
-pub enum ResumeTarget {
-    /// Resume a specific session id.
-    SessionId(String),
-    /// Resume the most recent session for the current directory.
-    MostRecentForCwd,
-    /// Not resuming an existing session (new auto or new-with-id).
-    None,
-}
 fn anchor_to_launch_dir(path: PathBuf, launch_dir: Option<&std::path::Path>) -> PathBuf {
     if path.is_absolute() {
         strip_cur_dir(path)
@@ -573,123 +543,6 @@ impl PagerArgs {
     /// Whether `--resume` was used without a session ID (meaning "resume most recent").
     pub fn resume_most_recent(&self) -> bool {
         self.resume_session.as_deref() == Some("")
-    }
-    /// Classify flags for sandbox profile lookup on an existing session.
-    ///
-    /// Uses [`Self::session_startup_intent`]; invalid combos fall through to
-    /// `None` (caller should have rejected intent errors earlier at startup).
-    pub fn resume_target(&self) -> ResumeTarget {
-        use crate::app::session_startup::SessionStartupIntent;
-        match self.session_startup_intent() {
-            Ok(SessionStartupIntent::Resume {
-                session_id: Some(id),
-                ..
-            }) => ResumeTarget::SessionId(id),
-            Ok(SessionStartupIntent::Resume {
-                most_recent_for_cwd: true,
-                ..
-            }) => ResumeTarget::MostRecentForCwd,
-            _ => ResumeTarget::None,
-        }
-    }
-    /// Resolve the sandbox profile to apply at startup, accounting for the
-    /// profile the resumed session was created with. `saved` is the resumed
-    /// session's persisted profile (read once via [`Self::saved_resume_profile`]).
-    ///
-    /// A session's profile is fixed at creation. Resuming restores it; passing an
-    /// explicit `--sandbox`/`GROK_SANDBOX` that differs from the saved profile is
-    /// refused (changing a session's sandbox on resume is a safety footgun). A
-    /// matching flag, or no flag, resumes with the saved profile.
-    pub fn startup_sandbox_profile(&self, saved: Option<&str>) -> SandboxStartup {
-        let explicit = self.sandbox.as_deref().filter(|s| !s.is_empty());
-        Self::resolve_startup_sandbox(explicit, saved.map(String::from))
-    }
-    /// Pin an explicit non-UUID, non-chat resume/load target to its canonical
-    /// local session id, before the (irreversible) OS sandbox is applied.
-    ///
-    /// Resolving once — recorded via `resume_target_pinned` so materialization
-    /// never re-runs local title selection — makes the saved-profile peek and
-    /// materialization consume the same immutable target; re-selecting after
-    /// the sandbox would race a concurrent rename/create. Listing failures
-    /// and ambiguity are hard errors here (fail closed / surfaced before the
-    /// sandbox); a definitive no-match keeps the raw arg for the legacy
-    /// remote/worktree id path.
-    pub fn pin_local_resume_target(&mut self) -> anyhow::Result<()> {
-        let cwd_buf = std::env::current_dir().ok();
-        let cwd_str = cwd_buf.as_deref().map(|p| p.to_string_lossy());
-        self.pin_local_resume_target_for_cwd(cwd_str.as_deref())
-    }
-    /// Same as [`Self::pin_local_resume_target`] with an explicit cwd, so
-    /// tests never mutate the process cwd.
-    pub fn pin_local_resume_target_for_cwd(&mut self, cwd: Option<&str>) -> anyhow::Result<()> {
-        let Some(target) = self.session_to_resume().map(str::to_owned) else {
-            return Ok(());
-        };
-        use crate::app::session_title_resolve::{PinnedResumeTarget, presandbox_resume_target};
-        let pinned = presandbox_resume_target(&target, cwd)?;
-        self.resume_target_pinned = true;
-        if let PinnedResumeTarget::Title {
-            ref id,
-            ref sandbox_profile,
-        } = pinned
-        {
-            eprintln!("Resuming session {} (matched by title)", id);
-            self.pinned_resume_profile = Some(sandbox_profile.clone());
-        }
-        let Some(id) = pinned.id() else {
-            return Ok(());
-        };
-        if self
-            .resume_session
-            .as_deref()
-            .is_some_and(|s| !s.is_empty())
-        {
-            self.resume_session = Some(id);
-        } else if self.load_session.as_deref().is_some_and(|s| !s.is_empty()) {
-            self.load_session = Some(id);
-        }
-        Ok(())
-    }
-    /// The sandbox profile persisted with the session being resumed, if any.
-    /// Local, best-effort; `None` when not resuming or nothing is found. Read once
-    /// for the profile resume resolution.
-    pub fn saved_resume_profile(&self) -> Option<String> {
-        let cwd_buf = std::env::current_dir().ok();
-        let cwd_str = cwd_buf.as_deref().map(|p| p.to_string_lossy());
-        self.saved_resume_profile_for_cwd(cwd_str.as_deref())
-    }
-    /// Same as [`Self::saved_resume_profile`] with an explicit cwd, so tests
-    /// never mutate the process cwd.
-    pub fn saved_resume_profile_for_cwd(&self, cwd: Option<&str>) -> Option<String> {
-        if let Some(pinned) = &self.pinned_resume_profile {
-            return pinned.clone();
-        }
-        match self.resume_target() {
-            ResumeTarget::SessionId(id) => {
-                pi_shell::session::persistence::resumed_session_sandbox_profile(Some(&id), cwd)
-            }
-            ResumeTarget::MostRecentForCwd => {
-                pi_shell::session::persistence::resumed_session_sandbox_profile(None, cwd)
-            }
-            ResumeTarget::None => None,
-        }
-    }
-    /// Pure resolution of the explicit flag against the resumed session's saved
-    /// profile. Separated from disk access so it can be unit-tested.
-    fn resolve_startup_sandbox(explicit: Option<&str>, saved: Option<String>) -> SandboxStartup {
-        match (explicit, saved) {
-            (Some(x), Some(s))
-                if x.parse::<pi_sandbox::ProfileName>().ok()
-                    != s.parse::<pi_sandbox::ProfileName>().ok() =>
-            {
-                SandboxStartup::Conflict {
-                    requested: x.to_owned(),
-                    saved: s,
-                }
-            }
-            (Some(x), _) => SandboxStartup::Apply(Some(x.to_owned())),
-            (None, saved) => SandboxStartup::Apply(saved),
-        }
     }
     /// The initial interactive prompt from the positional argument, trimmed.
     ///
@@ -815,37 +668,6 @@ mod tests {
             assert_eq!(error.exit_code(), 2);
         }
     }
-    #[test]
-    fn resume_target_classifies_flags() {
-        assert_eq!(
-            PagerArgs::try_parse_from(["zypi"]).unwrap().resume_target(),
-            ResumeTarget::None
-        );
-        assert_eq!(
-            PagerArgs::try_parse_from(["zypi", "-c"])
-                .unwrap()
-                .resume_target(),
-            ResumeTarget::MostRecentForCwd
-        );
-        assert_eq!(
-            PagerArgs::try_parse_from(["zypi", "--resume"])
-                .unwrap()
-                .resume_target(),
-            ResumeTarget::MostRecentForCwd
-        );
-        assert_eq!(
-            PagerArgs::try_parse_from(["zypi", "--resume", "sess-1"])
-                .unwrap()
-                .resume_target(),
-            ResumeTarget::SessionId("sess-1".to_string())
-        );
-        assert_eq!(
-            PagerArgs::try_parse_from(["zypi", "-s", "sess-2"])
-                .unwrap()
-                .resume_target(),
-            ResumeTarget::None
-        );
-    }
     /// The screen-mode flags are mutually exclusive: the pair exists so one
     /// can override the other's sticky config value, so accepting both in one
     /// invocation would be ambiguous.
@@ -921,59 +743,6 @@ mod tests {
                 "{value}"
             );
         }
-    }
-    #[test]
-    fn resolve_startup_sandbox_cases() {
-        use SandboxStartup::{Apply, Conflict};
-        assert_eq!(
-            PagerArgs::resolve_startup_sandbox(Some("strict"), None),
-            Apply(Some("strict".to_string()))
-        );
-        assert_eq!(
-            PagerArgs::resolve_startup_sandbox(Some("workspace"), Some("workspace".to_string())),
-            Apply(Some("workspace".to_string()))
-        );
-        assert_eq!(
-            PagerArgs::resolve_startup_sandbox(Some("read-only"), Some("workspace".to_string())),
-            Conflict {
-                requested: "read-only".to_string(),
-                saved: "workspace".to_string(),
-            }
-        );
-        assert_eq!(
-            PagerArgs::resolve_startup_sandbox(None, Some("workspace".to_string())),
-            Apply(Some("workspace".to_string()))
-        );
-        assert_eq!(PagerArgs::resolve_startup_sandbox(None, None), Apply(None));
-        assert_eq!(
-            PagerArgs::resolve_startup_sandbox(Some("readonly"), Some("read-only".to_string())),
-            Apply(Some("readonly".to_string()))
-        );
-        assert_eq!(
-            PagerArgs::resolve_startup_sandbox(Some("none"), Some("off".to_string())),
-            Apply(Some("none".to_string()))
-        );
-    }
-    #[test]
-    fn startup_sandbox_profile_no_resume() {
-        assert_eq!(
-            PagerArgs::try_parse_from(["zypi", "--sandbox", "strict"])
-                .unwrap()
-                .startup_sandbox_profile(None),
-            SandboxStartup::Apply(Some("strict".to_string()))
-        );
-        assert_eq!(
-            PagerArgs::try_parse_from(["zypi", "--sandbox", ""])
-                .unwrap()
-                .startup_sandbox_profile(None),
-            SandboxStartup::Apply(None)
-        );
-        assert_eq!(
-            PagerArgs::try_parse_from(["zypi"])
-                .unwrap()
-                .startup_sandbox_profile(None),
-            SandboxStartup::Apply(None)
-        );
     }
     #[test]
     fn launch_directory_anchoring_precedes_cwd_change() {
