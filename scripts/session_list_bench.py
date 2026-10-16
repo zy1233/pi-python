@@ -13,6 +13,9 @@ per session. This script measures that price on a synthetic home, with the real 
   first-call imports);
 * ``pages``    - every page of that listing, following ``nextCursor`` (how many pages in brackets);
 * ``all``      - the first page of ``session/list`` without ``cwd`` (a picker across projects);
+* ``walk all`` - every page of ``session/list`` without ``cwd``, following ``nextCursor`` (how
+  many pages in brackets): the walk that ``zypi --session-id`` makes to see that an id is free,
+  and that ``zypi --resume <id>`` makes until it finds the id (ADR1, plan item 1.R1);
 * ``repo``, ``repo page`` and ``preview`` - the parts of a list, measured in-process:
   ``JsonlSessionRepo.list`` (one header read per session file, whatever the ``cwd``),
   ``JsonlSessionRepo.list_page`` (the first page only) and ``read_session_previews`` (title and
@@ -172,6 +175,15 @@ async def one_run(home: Path, project: str) -> dict[str, float]:
         row["listed"] = float(listed)
         row["all"], everything = await _timed(conn.list_sessions())
         row["all_listed"] = float(len(everything.sessions))
+        started = time.perf_counter()
+        walk_pages, cursor = 0, None
+        while True:
+            response = await asyncio.wait_for(conn.list_sessions(cursor=cursor), WIRE_TIMEOUT)
+            walk_pages, cursor = walk_pages + 1, response.next_cursor
+            if cursor is None or walk_pages > 10_000:
+                break
+        row["walk_all"] = (time.perf_counter() - started) * 1000
+        row["walk_all_pages"] = float(walk_pages)
         row["bytes"] = float(len(first.model_dump_json(by_alias=True, exclude_none=True)))
         if first.sessions:
             target = first.sessions[0].session_id
@@ -265,6 +277,7 @@ def main() -> int:
         "list 2nd",
         "pages (n)",
         "all",
+        "walk all (n)",
         "repo",
         "repo page",
         "preview",
@@ -281,6 +294,7 @@ def main() -> int:
             f"{r['list2']:.0f}",
             f"{r['pages']:.0f} ({r['page_count']:.0f})",
             f"{r['all']:.0f}",
+            f"{r['walk_all']:.0f} ({r['walk_all_pages']:.0f})",
             f"{r['repo']:.0f}",
             f"{r['repo_page']:.0f}" if "repo_page" in r else "-",
             f"{r['preview']:.0f}",

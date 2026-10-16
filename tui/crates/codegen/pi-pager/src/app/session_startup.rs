@@ -295,14 +295,19 @@ const REMOTE_RESTORE_NEEDS_WORKTREE: &str = "--restore-code on a remote session 
 /// `--worktree` resume without `--restore-code`: conversation only.
 pub(crate) const WORKTREE_NO_RESTORE_CODE_NOTICE: &str =
     "Snapshot code will not be restored into the worktree; pass --restore-code to restore it.";
-/// Preflight: preferred id must be a UUID and not a persisted session under `cwd`.
+/// `--session-id` must be a UUID.
 ///
 /// Agent `session/new` rejects non-UUID `_meta.sessionId`; fail fast here so
 /// CLI users get a clear error before ACP.
-pub fn ensure_session_id_available(session_id: &str, cwd: &str) -> anyhow::Result<()> {
+pub(crate) fn require_uuid_session_id(session_id: &str) -> anyhow::Result<()> {
     if uuid::Uuid::try_parse(session_id).is_err() {
-        anyhow::bail!("Error: --session-id must be a valid UUID (got '{session_id}').");
+        anyhow::bail!("--session-id must be a valid UUID (got '{session_id}').");
     }
+    Ok(())
+}
+/// Preflight: preferred id must be a UUID and not a persisted session under `cwd`.
+pub fn ensure_session_id_available(session_id: &str, cwd: &str) -> anyhow::Result<()> {
+    require_uuid_session_id(session_id)?;
     if pi_shell::session::persistence::session_exists_for_cwd(session_id, cwd) {
         anyhow::bail!("Error: Session ID {session_id} is already in use.");
     }

@@ -40,7 +40,8 @@ mod mouse;
 mod queue_edit;
 pub(crate) mod screen_mode_relaunch;
 mod session_load_barrier;
-pub(crate) mod session_startup;
+pub mod session_resolve;
+pub mod session_startup;
 pub(crate) mod session_title_resolve;
 pub(crate) mod signal_handler;
 mod startup_failure;
@@ -502,6 +503,38 @@ async fn bounded_connect(
         }
     }
 }
+/// A failed lookup of the session the flags name (see [`bounded_resolve`]).
+struct ResolveFailure {
+    /// The run was cancelled (a signal), not refused or timed out.
+    cancelled: bool,
+    error: anyhow::Error,
+}
+
+/// Bound the lookup of the session the flags name, so an agent that stops answering cannot leave
+/// a blank screen for ever. It has the budget of the connect (`GROK_CONNECT_UI_TIMEOUT_SECS`).
+async fn bounded_resolve(
+    cancel: &CancellationToken,
+    timeout: std::time::Duration,
+    resolve: impl std::future::Future<Output = anyhow::Result<session_startup::MaterializedStartup>>,
+) -> Result<session_startup::MaterializedStartup, ResolveFailure> {
+    tokio::select! {
+        biased;
+        () = cancel.cancelled() => Err(ResolveFailure {
+            cancelled: true,
+            error: anyhow::anyhow!("startup cancelled while looking up the session"),
+        }),
+        resolved = resolve => resolved.map_err(|error| ResolveFailure { cancelled: false, error }),
+        () = tokio::time::sleep(timeout) => Err(ResolveFailure {
+            cancelled: false,
+            error: anyhow::anyhow!(
+                "looking up the session timed out after {}s; {} sets the limit",
+                timeout.as_secs(),
+                connect_timeout::CONNECT_UI_TIMEOUT_ENV
+            ),
+        }),
+    }
+}
+
 /// Main entry point: connect to agent, init terminal, run event loop, restore.
 ///
 /// If a session ID is provided via `--resume` / `--load` / `--continue`, the
@@ -536,37 +569,14 @@ pub async fn run(
             }
         }
     }
+    // Which session the flags name is asked of the agent once it is up (`resolve_startup`, below):
+    // the pager does not read session files (plan section 10.16). The flags themselves are
+    // checked here, before any terminal or agent exists.
     let intent = args
         .session_startup_intent()
         .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let mut materialize_ctx = session_startup::MaterializeCtx::from_pager_args(&args);
-    materialize_ctx.restore_progress_on_stdout =
-        std::io::IsTerminal::is_terminal(&std::io::stdout());
-    let materialized = session_startup::materialize_startup(materialize_ctx, intent).await?;
-    let mut session_title = match &materialized {
-        session_startup::MaterializedStartup::Resume { title, .. } => title.clone(),
-        _ => None,
-    };
-    let title_lookup_id = match &materialized {
-        session_startup::MaterializedStartup::Resume { session_id, .. } => {
-            Some(session_id.as_str())
-        }
-        _ => None,
-    };
-    if session_title.is_none()
-        && let Some(id) = title_lookup_id
-    {
-        let summaries = pi_shell::session::persistence::list_summaries(None).await?;
-        if let Some(s) = summaries.iter().find(|s| s.info.id.0.as_ref() == id)
-            && let Some(title) = s.display_title_opt()
-        {
-            session_title = Some(title);
-        }
-    }
-    let session_cwd = match &materialized {
-        session_startup::MaterializedStartup::Resume { original_cwd, .. } => original_cwd.clone(),
-        _ => None,
-    };
+    let startup_cwd =
+        std::env::current_dir().map_err(|e| anyhow::anyhow!("Failed to get cwd: {e}"))?;
     let env_hunk_tracker_mode = std::env::var("GROK_HUNK_TRACKER").ok();
     let config_hunk_tracker_mode = raw_config
         .get("ui")
@@ -689,9 +699,6 @@ pub async fn run(
     );
     apply_screen_mode_globals(screen_mode);
     finish_theme_after_probe(minimal, screen_mode);
-    if let Some(ref t) = session_title {
-        set_terminal_title(t);
-    }
     let connect_ui_timeout_env = std::env::var(connect_timeout::CONNECT_UI_TIMEOUT_ENV).ok();
     let connect_ui_timeout = connect_timeout::resolve(connect_ui_timeout_env.as_deref());
     if let Some(raw) = connect_ui_timeout_env {
@@ -743,6 +750,39 @@ pub async fn run(
     };
     let agent_guard =
         crate::acp::spawn::AgentProcessGuard::new(cancel.clone(), connection.bridge_thread.take());
+    // The agent is up: ask it which session `--continue`, `--resume` and `--session-id` mean.
+    // A session that does not exist ends the run here, with the terminal restored and the agent
+    // stopped, as a failed connect does.
+    let materialized = match bounded_resolve(
+        &cancel,
+        connect_ui_timeout,
+        session_resolve::resolve_startup(&connection.tx, intent, &startup_cwd),
+    )
+    .await
+    {
+        Ok(materialized) => materialized,
+        Err(failure) => {
+            if failure.cancelled {
+                pending_startup.abandon();
+            } else {
+                pending_startup.finish(crate::acp::StartupOutcome::Error);
+            }
+            crate::unified_log::flush_blocking().await;
+            let _ = restore_terminal(terminal, writer_thread, screen_mode);
+            drop(agent_guard);
+            return Err(failure.error);
+        }
+    };
+    let session_cwd = match &materialized {
+        session_startup::MaterializedStartup::Resume { original_cwd, .. } => original_cwd.clone(),
+        _ => None,
+    };
+    if let session_startup::MaterializedStartup::Resume {
+        title: Some(title), ..
+    } = &materialized
+    {
+        set_terminal_title(title);
+    }
     let effective_args = PagerArgs {
         resume_session: None,
         load_session: None,
@@ -1935,5 +1975,78 @@ mod tests {
         print_exit_resume_hint(&bare_exit_info("pipe-sid", true), 80, &mut writer);
         print_exit_resume_hint(&full_exit_info("pipe-sid"), 80, &mut writer);
         print_relaunch_failure_hint(&"exec failed", "pipe-sid", false, &mut writer);
+    }
+
+    type Looked = anyhow::Result<session_startup::MaterializedStartup>;
+
+    fn failure_of(
+        outcome: Result<session_startup::MaterializedStartup, ResolveFailure>,
+    ) -> ResolveFailure {
+        match outcome {
+            Ok(found) => panic!("expected a failure, got {found:?}"),
+            Err(failure) => failure,
+        }
+    }
+
+    #[tokio::test]
+    async fn bounded_resolve_hands_on_what_the_lookup_found() {
+        let found = bounded_resolve(
+            &CancellationToken::new(),
+            std::time::Duration::from_secs(30),
+            async { Looked::Ok(session_startup::MaterializedStartup::NewAuto) },
+        )
+        .await;
+        assert!(matches!(
+            found,
+            Ok(session_startup::MaterializedStartup::NewAuto)
+        ));
+    }
+
+    #[tokio::test]
+    async fn bounded_resolve_hands_on_a_refusal_as_it_is() {
+        let failure = failure_of(
+            bounded_resolve(
+                &CancellationToken::new(),
+                std::time::Duration::from_secs(30),
+                async { Looked::Err(anyhow::anyhow!("Session does not exist: abc")) },
+            )
+            .await,
+        );
+        assert!(!failure.cancelled);
+        assert_eq!(failure.error.to_string(), "Session does not exist: abc");
+    }
+
+    #[tokio::test]
+    async fn bounded_resolve_gives_up_on_an_agent_that_does_not_answer() {
+        let failure = failure_of(
+            bounded_resolve(
+                &CancellationToken::new(),
+                std::time::Duration::from_millis(20),
+                std::future::pending::<Looked>(),
+            )
+            .await,
+        );
+        assert!(!failure.cancelled);
+        let text = failure.error.to_string();
+        assert!(text.contains("timed out"), "{text}");
+        assert!(
+            text.contains(connect_timeout::CONNECT_UI_TIMEOUT_ENV),
+            "{text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn bounded_resolve_stops_at_a_cancel_before_the_lookup_is_done() {
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let failure = failure_of(
+            bounded_resolve(
+                &cancel,
+                std::time::Duration::from_secs(30),
+                std::future::pending::<Looked>(),
+            )
+            .await,
+        );
+        assert!(failure.cancelled);
     }
 }
