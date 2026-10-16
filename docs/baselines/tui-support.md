@@ -2,7 +2,7 @@
 
 This file is generated. Do not edit it by hand.
 
-- Command: `python scripts/tui_callgraph.py keep`. Commit: `34bf8f6`.
+- Command: `python scripts/tui_callgraph.py keep`. Commit: `9600cdf`.
 - Run the command again after a change that moves code between modules or crates.
 - It replaces the hand-written list of examples in item 0.5 of
   [`PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`](../PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md).
@@ -55,15 +55,15 @@ Check these dead units first. Each has `impl` blocks for types that other units 
 | unit | lines | references from live code outside |
 |---|---|---|
 | `session::storage` | 7,372 | 0 |
-| `util::config` | 6,770 | 94 |
+| `util::config` | 6,770 | 93 |
 | `auth::manager` | 3,754 | 0 |
 | `agent::config` | 3,167 | 26 |
 | `extensions::notification` | 2,169 | 9 |
-| `config` | 1,397 | 19 |
+| `config` | 1,397 | 18 |
 | `auth::recovery` | 1,073 | 0 |
 | `auth::oidc` | 927 | 0 |
 | `agent::config_model_override_parse` | 860 | 0 |
-| `session::persistence` | 803 | 12 |
+| `session::persistence` | 803 | 3 |
 | `agent::folder_trust` | 799 | 1 |
 | `managed_config` | 763 | 5 |
 | `remote::client` | 748 | 0 |
@@ -86,7 +86,7 @@ Check these dead units first. Each has `impl` blocks for types that other units 
 | `heap_profile` | 202 | 4 |
 | `claude_import` | 201 | 0 |
 | `tools::config` | 184 | 0 |
-| `session` | 173 | 25 |
+| `session` | 173 | 16 |
 | `auth::error` | 171 | 0 |
 | `auth::external_auth` | 160 | 0 |
 | `auth::token_output` | 155 | 0 |
@@ -112,7 +112,7 @@ Check these dead units first. Each has `impl` blocks for types that other units 
 | `session::pending_interaction` | 31 | 0 |
 | `<root>` | 26 | 0 |
 | `auth::devbox_login_stub` | 25 | 0 |
-| `util` | 16 | 67 |
+| `util` | 16 | 63 |
 | `sampling` | 12 | 0 |
 | `tools` | 11 | 3 |
 | `agent` | 9 | 0 |

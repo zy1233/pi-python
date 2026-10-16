@@ -7,12 +7,12 @@
 > - 编号沿用原文。本文里的 §10.x 是执行记录的节。§1–§3、§6–§9 和附录 A 指计划。附录 A.4（r5 的执行结果）、附录 B（复现方法）和修订记录在本文。
 > - 附录 C 是计划 §7 在 r10 时的全文，含每一项的执行细节。附录 D 是计划头部在 r10 时的状态文字。附录 E 是计划 §4、§5 的全文（r2 的源码事实基线与改动规模估计）。三处只为留档；现状以计划为准。
 > - 本文是历史记录。数字是当时的实测值，不再更新。要更正明显的错误，改在原处并注明。
-> - 记新的一轮时：在「10.」末尾追加一节（`### 10.16 …`），在计划的 §10 索引里加一行，在计划里改状态。不要把过程写回计划。
+> - 记新的一轮时：在「10.」末尾追加一节（`### 10.17 …`），在计划的 §10 索引里加一行，在计划里改状态。不要把过程写回计划。
 > - 文中的分支名（`codex/…`）是当时的名字。这些分支在合并后已删除；提交都在对应的 PR 里。
 
 ## 目录
 
-- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12）](#10-执行记录r3r4r5r6r7r8r9r10r11r12)
+- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13)
   - [10.1 范围、方法与规模](#101-范围方法与规模)
   - [10.2 `/model` 恢复（ADR3 r3）](#102-model-恢复adr3-r3)
   - [10.3 验证（r3 的实测）](#103-验证r3-的实测)
@@ -28,6 +28,7 @@
   - [10.13 r10 追加：1.P3 (a)——`zypi` 只提供 agent 真会照做的权限模式](#1013-r10-追加1p3-azypi-只提供-agent-真会照做的权限模式)
   - [10.14 r11 追加：调用图工具化（0.5）与阶段 C 收口](#1014-r11-追加调用图工具化05与阶段-c-收口)
   - [10.15 r12 追加：V0.5 的发布里程碑](#1015-r12-追加v05-的发布里程碑)
+  - [10.16 r13 追加：ADR1 的 PR 2 与 PR 3](#1016-r13-追加adr1-的-pr-2-与-pr-3)
 - [附录 A（摘录）：A.4](#附录-a摘录a4)
   - [A.4 r5 执行结果（对照 r5 时初稿里的「默认决策」；r9 的更新见 A.1）](#a4-r5-执行结果对照-r5-时初稿里的默认决策r9-的更新见-a1)
 - [附录 B：复现方法](#附录-b复现方法)
@@ -43,9 +44,9 @@
   - [5. 改动规模](#5-改动规模)
 - [修订记录](#修订记录)
 
-## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12）
+## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13）
 
-r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
+r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
 | 提交 | 内容 |
 |---|---|
@@ -1084,6 +1085,112 @@ agent 自己的启动（spawn 到 `initialize` 有回答）与会话数无关：
 - *没有解释的差别。* 发布的 `zypi-linux-x86_64` 比 `release_baseline` 量到的多 53,408 B（420,720,608 B 对 420,667,200 B），两次构建的 `tui/` 树相同；差在哪里没有查。`zypi-macos-arm64` 只有 49,272,472 B，两边用同一个 `release-dist` 配置；原因也没有查。
 - *没有做的。* 本地的 pytest 与 cargo 测试（用户说不用；`CI` 与 `Release` 的 `test` job 跑了）；macOS 二进制没有人运行过（构建通过，只证明它能编译与链接）；Windows 没有二进制；`TUI CI` 没有在打 tag 的提交上跑（只改文档的提交不触发它；`tui/` 的树与它通过的 `9058ab3` 相同）；`release.yml` 的 `repo-token` 没有加（要先问用户）。
 
+### 10.16 r13 追加：ADR1 的 PR 2 与 PR 3
+
+用户在 2026-10-16 说：「完成 ADR1 的落地，决策 2、4、5、7 按你的倾向来，我看过比较合适。」四项都按计划里写的倾向做。决策 10（删 `pi-shell` 里的旧存储层，阶段 B）不在答复里，这一轮没有动它。做成两个 PR，都没有合入 `main`：PR 2（[#23](https://github.com/zy1233/pi-python/pull/23)，分支 `feat/adr1-resolve-startup`，基 `main`）加新的解析路径；PR 3（[#24](https://github.com/zy1233/pi-python/pull/24)，分支 `refactor/adr1-drop-session-disk-reads`，叠在 PR 2 上）删旧的读盘代码，并加一道门禁。
+
+| 决策 | 答复 | 做在哪 |
+|---|---|---|
+| 2 沙箱顺序 | 去掉「恢复时沿用保存的沙箱 profile」 | PR 3 |
+| 4 `--continue` 的「最近」 | 最近活动：`updatedAt` 最大，翻完所有页 | PR 2 |
+| 5 未知 id 的报错时机 | 进 TUI 之前报错，退出码 1 | PR 2 |
+| 7 模式映射 | (a) 保持（r10 已做，PR [#12](https://github.com/zy1233/pi-python/pull/12)）；(b)、(c) 另议 | PR 3：Plan 预览读 `plan.md` 的代码删了 |
+
+**PR 2：`resolve_startup`。** 只加新的路径，旧代码留到 PR 3；所以 PR 2 单独合入也是完整的（旧代码对 Python 会话读不到东西，没有害处）。
+
+*顺序。* 以前：`apply_sandbox` → `app::run` → `materialize_startup`（读盘）→ `acp::connect`。现在：`apply_sandbox` → `app::run` → `acp::connect` → `resolve_startup`（只问 agent）→ 事件循环。终端在 `connect` 之前就准备好了，所以解析出错走与 `connect` 失败同一条路：还原终端、停 agent、返回 `Err`，由 `main` 打印并退出 1（信息本身不以 `Error:` 开头，`main` 会加）。整个解析有 30 s 的上限，与 `connect` 的预算是同一个值（`GROK_CONNECT_UI_TIMEOUT_SECS`）；到时间，或收到信号（取消），都照样收尾退出，不会留一块空白屏。
+
+*各旗标。*
+
+| 旗标 | 读什么 | 找什么 |
+|---|---|---|
+| `--continue`、不带值的 `--resume` | 本目录的会话，翻完所有页 | `updatedAt` 最大的一个。时间相同取列表里靠前的（agent 把最后创建的排前面）；没有时间的排在有时间的后面。没有会话：`No session found for current directory`，退出 1 |
+| `--resume <id>` | 所有目录的会话，找到就停 | 这个 id（UUID 按 UUID 比较，不管大小写与连字符）；取这一行的 `cwd` 交给 `session/load`（与选择器一样）。没有：`Session does not exist: <id>`，退出 1 |
+| `--resume <标题>` | 本目录的会话，翻完所有页 | 标题相同的一个（不分大小写，去掉两端空白）；同一个标题有两个以上的会话是错误，信息里列出它们的 id 与最后活动时间。没有：`Session does not exist: …`，退出 1 |
+| `--session-id <id>` | 所有目录的会话，找到就停 | 什么也不找，id 必须没人用：有人用就 `Session ID <id> is already in use.`，退出 1；不是 UUID 也在这里拒绝。`session/new` 带 `_meta.sessionId` 照旧，agent 仍然拒绝重复（r10） |
+| `--resume`（带值）与 `--session-id` 同时给 | — | `--session-id cannot be combined with --continue or --resume.`，退出 1 |
+
+*边界。*
+
+- 翻页：新的翻页器 `acp::session_list::walk_session_list` 取代选择器里原来的翻页循环，选择器与启动解析共用它。规则与 r9 一样：跟 `nextCursor`，空游标与重复游标当作结束，某页失败则整体失败；最多 `MAX_SESSION_LIST_PAGES`（100）页，即 5,000 个会话。到上限被截断时，`--resume` 的「找不到」信息多一句「列表被截断，会话可能在没读到的部分」。
+- agent 不提供 `session/list`（`MethodNotFound`）：`--session-id` 跳过预检，由 `session/new` 拒绝重复（预检从不比 agent 更严）；`--continue`、`--resume` 报「could not list the sessions of the agent」，退出 1。
+- r9 的表（§10.11 (4)）把不带值的 `--resume` 写成「选择器，不变」，不对：代码里它与 `--continue` 是同一个意图（`most_recent_for_cwd`），`resume_matrix.py` 的用例 7 期望的也是「回放」；选择器是 `/resume` 与 F3。内嵌指南 `17-sessions.md` 本来就这样写。r13 按代码写。
+
+**PR 3：删旧代码，加门禁。**
+
+删的（Rust，`pi-pager` 与 `pi-pager-bin`；行数是 `git diff --numstat 506769b…`，加 149 行，删 1,829 行）：
+
+- `session_startup.rs`：`materialize_startup`（及 `_for_cwd`、`MaterializeCtx`）、`most_recent_session_id`、`find_most_recent_jsonl_session`、`resolve_existing_session`、`resolve_session_by_title`、`ensure_session_id_available`、`parent_session_is_worktree`（留下只看目录的 `cwd_is_worktree`）、远程恢复一支（`restore_session_from_remote`、`plan_remote_miss`、`RemoteMissPlan`、`in_place_restore_code_allowed`）与 16 个测试。`MaterializedStartup::Resume` 的 `deferred_local_miss`、`suppress_code_restore` 留着（agent 列出的会话恒为 `false`；远程与 worktree 的恢复归 1.P6）。
+- `cli.rs`：`pin_local_resume_target`（及 `_for_cwd`）、`saved_resume_profile`（及 `_for_cwd`）、`ResumeTarget`、`SandboxStartup`、`startup_sandbox_profile`，与 3 个测试；`pi-pager-bin/src/main.rs` 的 `resolve_startup_sandbox`（钉目标、与 `--sandbox` 冲突）换成一行 `apply_sandbox(None, <旗标>, <目录>)`。这就是决策 2。
+- `session_title_resolve.rs`：`TitleResolution`、`PinnedResumeTarget`、`presandbox_resume_target`、按旧摘要匹配的 `select_listed_by_title`；留下 `select_by_title`（按 `ListedSession` 匹配）。测试 16 → 8，改写成对 `ListedSession` 的用例。
+- `effects/helpers.rs`：`extract_first_user_prompt`（读 `chat_history.jsonl`）与 `parse_session_picker_entries` 里把远程行改标本地的一段；`effects/mod.rs`：创建会话前的 `ensure_session_id_available`；`dispatch/session/load.rs`：选择器加载前的 `resolve_local_session*` 两个判断。
+- `agent_view/plan.rs`：`plan_file_path` 与 Plan 预览读盘的退路（预览只用审批请求带来的内容；决策 7）；`views/file_search/line_viewer.rs`：随之无人调用的 `open_markdown(path)`；`test_util.rs`：`GrokHomeFixture`（81 行，没有用户了）。
+
+*新门禁* `gates.session_disk_reads`（`scripts/tui_baseline.py` 与 `scripts/tui_baseline.toml`）：`pi-pager` 与 `pi-pager-bin` 的 `src/` 里，生产代码不得出现八个模式：`list_summaries`、`resolve_local_session`、`session_exists_for_cwd`、`resumed_session_sandbox_profile`、`local_summaries_for_cwd_sync`、`session::storage`、`persistence::session_dir`，以及拼会话目录的 `join("sessions")`。`session::persistence` 整体不在列表里：`sanitize_and_cap_title`、`is_forbidden_title_char` 是纯字符串函数，pager 有意用它们。测试文件（`tests.rs`、`*_tests.rs`、`test_util.rs`、`tests/` 目录）、内联的 `#[cfg(test)] mod … { … }` 块与注释行不查；只标在单个 item 上的 `#[cfg(test)]` 不会藏住它后面的代码。命中时报路径与行号。门禁在 `gates`、`check` 里跑，`pytest` 里也跑一遍。变异检查：把同一个扫描器指到 `12349d3`（`main`）得 18 处命中，指到 `506769b`（PR 2）得 17 处，指到 PR 3 得 0 处。
+
+**13 处读盘调用点（§10.11 (2) 的表）的去向。**
+
+| # | 位置 | 去向 |
+|---|---|---|
+| 1 | `most_recent_session_id` | PR 2 起 `--continue` 走 `resolve_startup`；PR 3 删 |
+| 2 | `find_most_recent_jsonl_session` | PR 3 删 |
+| 3 | `resolve_existing_session` → `resolve_local_session*` | PR 2 起 `--resume <id>` 由 `find_by_id` 解析；PR 3 删 |
+| 4 | `resolve_session_by_title` | PR 2 起由 `list_all` 加 `select_by_title`；PR 3 删 |
+| 5 | `ensure_session_id_available` | PR 2 起由 `find_by_id` 查，agent 仍拒绝重复；PR 3 删（含 `effects/mod.rs` 里创建会话前的那一次） |
+| 6 | `parent_session_is_worktree` | PR 3 删读文件的一段，留 `cwd_is_worktree` |
+| 7 | `presandbox_resume_target`、`pin_local_resume_target` | PR 3 删（决策 2） |
+| 8 | `saved_resume_profile_for_cwd`、`resumed_session_sandbox_profile` | PR 3 删（决策 2） |
+| 9 | `app/mod.rs` 里 `list_summaries(None)` 补标题 | PR 2：标题取自 `session/list` 的那一行 |
+| 10 | `dispatch/session/load.rs` | PR 3 删两个判断 |
+| 11 | `effects/helpers.rs` 的 `extract_first_user_prompt` 与远程行改标 | PR 3 删 |
+| 12 | `export_cmd.rs` 的 `load_updates_for_replay` | r12 续 6，PR [#18](https://github.com/zy1233/pi-python/pull/18)，已合入 |
+| 13 | `agent_view/plan.rs` 的 `plan_file_path` | PR 3 删（决策 7） |
+
+**对着真 zypi：13 例恢复矩阵（WSL2，`resume_matrix.py --strict`）。** 13 PASS / 0 GAP / 0 FAIL。变化的用例：
+
+| # | 用例 | r9 | r13 |
+|---|---|---|---|
+| 5 | `--resume <标题>`，在会话的目录 | GAP（只匹配旧 agent 的摘要） | PASS |
+| 8 | `--resume <未知 id>` | PASS，但进了 TUI 才报 | PASS，要求「进 TUI 之前退出 1」（决策 5） |
+| 10 | `--session-id <新 uuid>` | GAP | PASS（r10） |
+| 11 | `--session-id <已用的 id>` | GAP | PASS：`Session ID <id> is already in use.`，退出 1，没有新会话 |
+| 12 | `zypi export <id>` | GAP | PASS（r12 续 6） |
+
+用例 1（`--continue`）在 r9 时只因为旧代码的退路碰巧读得懂 Python 的文件头才通过；现在它走 `session/list`。数字：r9 的 9 PASS / 4 GAP → r10 的 10 / 3 → r12 续 6 的 11 / 2 → r13 的 13 / 0。
+
+**实测：翻页的代价**（`scripts/session_list_bench.py`，合成 home，每项 3 次中位数，括号里是页数；每页 50 个会话，三分之一的会话属于本目录）。`--continue` 与 `--resume <标题>` 取本目录的页：表里「带 `cwd` 翻完」，脚本里是 `pages`。`--session-id` 与（找不到时的）`--resume <id>` 取所有目录的页：「不带 `cwd` 翻完」，脚本里是新加的 `walk all`。`--resume <id>` 找到就停，所以最坏（id 在最老的一页）才等于 `walk all`：
+
+| 会话数 | 本目录的 | `--continue`：带 `cwd` 翻完（Linux） | 同（Windows） | `--session-id`：不带 `cwd` 翻完（Linux） | 同（Windows） |
+|---|---|---|---|---|---|
+| 100 | 34 | 27 ms（1 页） | 50 ms（1 页） | 42 ms（3 页） | 90 ms（3 页） |
+| 1,000 | 334 | 641 ms（7 页） | 814 ms（7 页） | 1,299 ms（21 页） | 1,787 ms（21 页） |
+| 5,000 | 1,667 | 10,159 ms（34 页） | 12,287 ms（34 页） | 28,165 ms（101 页） | 33,877 ms（101 页） |
+
+每一页的代价随**总**会话数涨：agent 对每次 `session/list` 都重新列一遍目录，并为每个文件建一个 `FileInfo`（`JsonlSessionRepo._session_names` → `LocalExecutionEnv.list_dir`）。所以翻完所有页的代价是「页数 × 目录大小」，增长得比会话数快：会话数 ×5（1,000 → 5,000）时，不带 `cwd` 的整趟从 1.3 s 涨到 28.2 s（Linux），从 1.8 s 涨到 33.9 s（Windows）。33.9 s 超过 30 s 的上限：在 Windows 上有约 5,000 个会话时，`--session-id` 会因为超时而失败（信息里点了 `GROK_CONNECT_UI_TIMEOUT_SECS`，可以调大）。`--continue` 与 `--resume <标题>` 只取本目录的页，5,000 个会话（本目录 1,667 个）时要 10–12 s。1,000 个会话以内都在 2 s 以内。
+
+每页的代价几乎全在目录列表：同一个目录用 `os.listdir` 只要 2–11 ms（`packages/pi-agent-cli/AGENTS.md`）。试了一个草稿来看修法值多少（**没有提交，已还原**；只在 Windows 上跑，每项 1 次，不是 3 次中位数）：`_session_names` 只取文件名，不建 `FileInfo`。5,000 个会话时：带 `cwd` 翻完 12.3 s → 2.2 s，不带 `cwd` 翻完 33.9 s → 3.6 s，`session/load` 372 → 59 ms，带 id 的 `session/new` 325 → 33 ms；1,000 个会话时 0.81 s → 0.37 s、1.79 s → 0.57 s。修法在 Python 一侧（`pi-agent-harness`），这一轮没有做；新增待决策 18。
+
+**验证。**
+
+- PR 2 的新测试 32 个。`session_resolve_tests.rs` 25 个，对一个脚本化的 agent：最近活动不是第一行、时间相同取靠前的、没有时间的排后面、翻完所有页、本目录没有会话、不带值的 `--resume` 就是 `--continue`、按 id 找时问所有目录且找到就停、UUID 不分大小写、未知 id 点名、被截断的列表在错误里说明、标题不分大小写、同一个标题有两个会话时列出它们、空白标题什么也不匹配、某一页失败则整体失败、`--session-id` 的各种情形（不是 UUID、已用、空闲、agent 不提供 `session/list`、列表出错）。`app/mod.rs` 里 4 个，测 30 s 上限与取消：结果照原样交回、拒绝照原样交回、agent 不答时到点放弃并点出环境变量、取消时不等查完。`python_agent_e2e.rs` 里 3 个，对着真的 Python agent：`--continue`、`--resume <id>`、`--resume <标题>` 的解析；同一个标题有两个会话是歧义；`--session-id` 对已用的 id 拒绝、对空闲的 id 用 agent 兑现的 id，之后它就算已用。
+- PR 3 净少 27 个测试（`session_startup.rs` 16、`cli.rs` 3、`session_title_resolve_tests.rs` 8，都是被删代码的用例），门禁加了 6 个 pytest 测试函数，共 10 个用例（`scripts/tests/test_tui_baseline.py`；其中「测试文件不查」带 5 个参数）：命中报路径与行号、测试文件不查、注释与内联测试模块不查、单个 item 上的 `#[cfg(test)]` 不藏住后面的代码、清单的格式、本树里零命中。
+- WSL2（Linux，`$HOME/pi-verify`，ext4）：PR 2 的整套清单 **8,730 通过 / 2 失败 / 22 忽略**，`pi-pager` 5,675 通过 / 0 失败 / 13 忽略；那 2 个失败都是计时用例，在这两个 PR 没有碰的 crate 里：`pi-shell` 的 `auth::manager::lock::tests::dropping_the_guard_silences_the_heartbeat_before_anyone_else_can_hold_the_lock`（心跳）与 `pi-pager-render` 的 `tmux_probe::tests::successful_near_deadline_exit_still_returns_captured_output`（清单里的 `known_failures`）。它们单独跑都过（`pi-shell` 的 `lock::tests` 21 通过 / 1 忽略；`tmux_probe::tests` 7 通过）；整套那一次机器同时在编译，所以只能说「负载下偶发」，没有查心跳用例的根因。PR [#23](https://github.com/zy1233/pi-python/pull/23) 的 CI（`506769b`，`TUI CI` [run 38889657279](https://github.com/zy1233/pi-python/actions/runs/38889657279)）：10 个 suite 合计 **8,732 通过 / 0 失败 / 22 忽略**（= 合入 #18、#19 之后 CI 的 8,700 加 32），`pi-pager` 5,675，那 2 个计时用例在 runner 上都通过；`CI`（Ruff、pytest 3.11 / 3.12 / 3.13）也通过。PR 3：整套 10 个 suite 在最终提交（`9600cdf`）上用基线执行器跑了一遍（清环境，`PI_E2E_PYTHON` 与 `PI_E2E_REQUIRED=1`，WSL2，增量编译，14 m 18 s）：**8,705 通过 / 1 个已知失败 / 21 忽略**，退出码 0。`pi-pager` 5,649 通过 / 0 失败 / 12 忽略（含 `python_agent_e2e` 的 14 个），`pi-pager-bin` 21，`pi-shell` 1,056，`pi-pager-render` 1,091，`pi-pager-minimal` 79，`pi-acp-lib` 21，`pi-http` 13，`pi-telemetry` 239，`pi-file-utils` 216，`pi-sampling-types` 320。比 PR 2 的 5,675 / 13 忽略，`pi-pager` 少 26 个通过、1 个忽略（被删代码的用例；忽略的那个是 `materialize_resume_id_without_chat_still_resolves_on_disk`）。那 1 个已知失败是 `pi-pager-render` 的 tmux 探测（清单里的 `known_failures`；清单里的说明：机器一卡就失败，在 WSL2 上多是刚链接完的测试二进制的第一次运行，这一次也是这样）；其余 9 个 suite 都等于各自的 `reference_passed`，所以清单里的和是 8,706（8,705 加那一个）。这个提交的前一版（同样的生产代码）上，先单独跑过 `pi-pager` 与 `pi-pager-bin`，数相同（5,649 / 12 忽略；21），6 m 39 s。
+- `check`（门禁 + 消费者构建 + `cargo check --workspace --tests`）：所有门禁通过，告警 0，类型检查 0 个错误。第一遍有 1 条告警（`LineViewerState::open_markdown` 随预览读盘一起变成无人调用），删掉它之后为 0。
+- PTY 脚本（真 `zypi`，mock 模型，WSL2）：`resume_matrix.py --strict` 13 PASS / 0 GAP / 0 FAIL（退出 0）；`smoke.py` 23/23；`exit_matrix.py` 12/12；`print_exit.py` 全部通过；`mode_probe.py`；`status_line_probe.py` 4/4；`net_audit.py --mock` 13/13。这六个脚本的退出码都是 0。`zypi` 是在 PR 3 的代码上建的（debug 构建，WSL2，2 m 18 s）。
+- Python 测试，Windows 与 Linux 各跑一遍：完整的 `pytest`（`real_llm` 不选）：Windows 2,531 通过 / 39 跳过 / 31 不选（5 m 50 s）；Linux（WSL2，`9600cdf`，我自己的 venv，装了 `AGENTS.md` 里重建 venv 清单的全部包）2,540 通过 / 30 跳过 / 31 不选（1 m 42 s）。`scripts/tests` 单独在 Windows 上 184 通过 / 8 跳过（PR 2 时 174 通过）。`ruff check .` 与 `ruff format --check .` 通过。
+
+**没有验证 / 留下的。**
+
+- **空会话。** Python 在 `session/new` 时就建会话文件，所以没发过消息的会话以标题 `(no messages)` 留在列表里，`zypi --continue` 在它是本目录最近活动的会话时会取到它。pager 里没有特判（特判会把 agent 建文件的时机带进 pager，也会漏掉真的空会话）；真正的修法在 Python：第一条用户消息时才写文件。新增待决策 17。内嵌指南 `17-sessions.md` 照实写了。
+- `--continue` 在列表被截断时（本目录超过 5,000 个会话）取的是读到的那一部分里最近的，不提示；`--resume <标题>` 与 `--resume <id>` 会在「找不到」里说。没有用 5,000 个以上的会话试过。
+- **翻页的代价增长得比会话数快**（上表）：每一页 agent 都重新列一遍目录，总代价是页数 × 目录大小。1,000 个会话以内都在 2 s 以内；5,000 个会话时 `--continue` 要 10–12 s，`--session-id` 要 28–34 s，在 Windows 上超过 30 s 的上限（会超时，信息里点了 `GROK_CONNECT_UI_TIMEOUT_SECS`）。`--session-id` 对每个新建会话付这笔钱，没有缓存。决策 4 与 ADR1 接受了「翻完所有页」，但那时看的数是 1,000 个会话约 0.8 s（带 `cwd`）；5,000 个会话时的数这一轮才第一次有。修法在 Python 一侧（草稿的数在上表下面），没有做；新增待决策 18。
+- 选择器的 30 天截止（决策 9）与「等所有页回来再画」（决策 11）没动。`--resume <id>` 不受 30 天限制。
+- `--resume <id>` 从别的目录起：pager 现在把会话自己的目录交给 `session/load`，agent 在那里干活；TUI 一侧（`@` 搜索、diff、git 信息）用哪个目录没有验证（r9 起就是这一项，§10.11）。
+- 只在 Linux（WSL2）上跑了 Rust 测试与 PTY 脚本；没有 Windows 与 macOS 的二进制，也没有用真实 LLM（e2e 与 PTY 用的是 mock 模型）。
+- 决策 10（删 `pi-shell` 里的 `session::{persistence, storage}`）没动：`tui-support.md` 重生成后，`session::storage` 的外部引用是 0，`session::persistence` 是 12 → 3（只剩清洗标题的纯函数），`session` 25 → 16。
+
+**新的提议（17、18）。** 17：空会话（Python 在第一条用户消息时才建文件）。18：翻页的代价（Python 一侧的 `_session_names` 只取文件名；草稿的数在上面「实测」）。两项都写在计划的「待决策」里，都没有动手。
+
 ## 附录 A（摘录）：A.4
 
 附录 A 的 A.1–A.3（能力矩阵、ACP 版本配对、逐方法）是活的参考，留在[计划](../PLAN-RUST-AGENT-RUNTIME-REMOVAL.md)里。A.4 记 r5 的执行结果，搬到这里。
@@ -1324,7 +1431,7 @@ LoC 用 `python3` 递归统计 `*.rs` 行数（沙箱内 `xargs wc -l` 可能失
 **B.4 r9 的复现**（Linux 或 WSL2；克隆放在 ext4 上，先 `cd tui && cargo build -p pi-pager-bin`，PTY 脚本的前提见 `scripts/tui_pty/README.md`）
 
 ```bash
-# 0.7 的读盘调用点（§10.11 的表）。期望 12 个文件：表里的 8 个，加上不读会话文件的 4 个——
+# 0.7 的读盘调用点（§10.11 的表；r13 之后期望 0 处，见 B.8）。r9 时期望 12 个文件：表里的 8 个，加上不读会话文件的 4 个——
 # session_notification.rs 与 views/session_title.rs（只用清洗标题的纯函数）、test_util.rs 与
 # disk_usage_cmd/tests.rs（测试代码）；pi-pager-bin 没有命中。
 # 模式里用 . 代替引号：Windows PowerShell 5.1 会吃掉传给 rg 的内层引号。
@@ -1335,7 +1442,7 @@ rg -c 'persistence::|session::storage|resolve_local_session|list_summaries|local
 # 「改前」的数：让 pi_agent_cli 解析到 d84d98a 的检出，其余相同。在会话所在的文件系统上跑
 python scripts/session_list_bench.py --sessions 100 1000 --entries 120 --runs 3
 
-# 13 例恢复矩阵（今天 9 PASS / 4 GAP；落地 ADR1 之后 --strict 要全绿）
+# 13 例恢复矩阵（r9 时 9 PASS / 4 GAP；r13 落地 ADR1 之后 --strict 13/13，见 B.8）
 python scripts/tui_pty/resume_matrix.py --zypi tui/target/debug/zypi --python .venv/bin/python [--strict]
 
 # 权限模式（只记录，不判对错）。r9 时是 12 个场景（§10.11 的表）；r10 起是 10 个场景、4 个被拒绝的
@@ -1424,6 +1531,31 @@ python -m pytest scripts/tests/test_tui_baseline.py scripts/tests/test_tui_pty.p
 ```
 
 附录 A.2 里的版本号：Rust 一侧看 `tui/Cargo.toml` 与 `tui/Cargo.lock`（`agent-client-protocol`、`agent-client-protocol-schema`），Python 一侧看 `python -c "import acp, importlib.metadata as m; print(m.version('agent-client-protocol'), acp.PROTOCOL_VERSION)"` 与 `acp/meta.py` 头部的 `Schema ref`；SDK 的路由面（哪些方法有路由、哪些是 `unstable`）在 `acp/agent/router.py`。ACP 的版本协商与 v2 的变化来自 ACP 文档（经 Context7 查）。
+
+**B.8 r13 的复现**（ADR1 的 PR 2 与 PR 3；Linux 或 WSL2，前提同 B.4）
+
+```bash
+# 读盘门禁：pager 与 pager-bin 的生产代码里读会话文件的调用，期望 0 处。
+# 同一个扫描器指到 main 的 12349d3 是 18 处，指到 PR 2 的 506769b 是 17 处。
+python scripts/tui_baseline.py gates
+python -m pytest scripts/tests/test_tui_baseline.py -k session_disk_read
+
+# 解析路径的单元测试（对脚本化的 agent）与对真 agent 的 e2e
+cd tui
+cargo test --locked -p pi-pager --lib -- session_resolve bounded_resolve session_title
+PI_E2E_PYTHON="$(command -v python)" PI_E2E_REQUIRED=1 \
+  cargo test --locked -p pi-pager --test python_agent_e2e
+cd ..
+
+# 13 例恢复矩阵：--strict 要 13/13
+python scripts/tui_pty/resume_matrix.py --zypi tui/target/debug/zypi --python .venv/bin/python --strict
+
+# 翻页的代价（`walk all` 一列）；在会话所在的文件系统上跑
+python scripts/session_list_bench.py --sessions 100 1000 5000 --runs 3
+
+# 支持 crate 的清单（PR 3 之后 session::persistence 的外部引用 12 → 3）
+python scripts/tui_callgraph.py keep --out docs/baselines/tui-support.md
+```
 
 ## 附录 C：计划 §7 的逐项注释（r10 原文）
 
@@ -1598,3 +1730,4 @@ Rust（pager）：
 - 整理（r10 之后，2026-10-11）：计划与执行记录分开存放。本文件收下计划里的 §10 执行记录、附录 A.4、附录 B 和这份修订记录；计划 §7 的逐项注释与 §8 的 R5 一行、计划头部的状态文字，原样存入附录 C、附录 D；计划 §4、§5（r2 的源码事实基线与改动规模估计）原样存入附录 E。计划里的 §7 改成每项一行状态，§4、§5 只留索引，另加「当前状态」「待决策」和 §10 索引。只搬，没有删。
 - r11：0.5 与阶段 C，分支 `chore/phase-c-closeout`（叠在本地 `main` 的 `df812d1` 上，**没有推送**）。用户说这些「不用等决定」，并说本机配了真实的 LLM，需要时可以用。做了五件事。① 0.5：`scripts/tui_callgraph.py`（`crates`、`units`、`keep`）与生成的保留清单 `docs/baselines/tui-support.md`：support 的 7 个 crate 共 305,581 行，17 个单元（6,190 行）没有活代码引用，`pi-hooks` 一家占 4,339 行。准确度用编译器查了五轮：第一版报了 21 个，其中 4 个是活的（路径写在属性的字符串里、路径以子模块起头），按反馈改了工具；改完之后，把其中 16 个的文件在副本里删掉，三个产品 crate 的 `cargo check` 与 `--workspace --tests` 都通过；第 17 个（`pi-tools` 的 `types::error`，里面是 `?` 要用的 `impl From<…> for ToolError`）不能删，工具把它标在「check first」里。② C.1：`net_audit.py`——一轮对话期间 `zypi` 没有到非本机地址的连接，也不监听（mock 13/13；进程树放进空的网络命名空间 13/13；真模型一次 13/13，含 agent 有外连的正向对照）；`status_line_probe.py`——`[ui.status_line]` 在 Python agent 下画不出（4/4），因为 agent 不发 `session_status`（新的待决策 15）。③ C.2：内嵌用户指南从 33 个文件缩成 7 页加 README，删教程叠层，启动不再解压（`pi-pager` 5,626 → 5,608）。④ C.3：`tui_notices.py` 把 `THIRD-PARTY-NOTICES` 与 `Cargo.lock` 对账（去掉 222 条、补上 44 条，现在 989 对 989），`NOTICE` 重写。⑤ C.4：`config.toml` 的约束、TUI 指南、Phase 4 spec、DESIGN §8.5；`grok agent` 清零；`leader`（245）与 `x.ai`（304）清不到零，改成棘轮上限。新增阶段 D 的 D.5–D.9。验证：10 个 suite 8,665 通过 / 0 失败 / 22 忽略（WSL2，一次本地运行）、`check`（5 m 24 s）、Python 全量 pytest（Windows 2,510、Linux 2,538 通过）、Ruff。没做：本分支的 CI 运行；macOS 与 Windows 上的审计；16 个可删单元的真正删除；`THIRD-PARTY-NOTICES` 措辞的人工阅读。见 §10.14。
 - r12：V0.5 的发布里程碑，分支 `docs/v0.5-milestone`（叠在 `main` 的 `4fc028a` 上）。用户说 PR #13 已合入、CI 没有问题，让按当前的剥离状态设置发布 V0.5 的里程碑。只改文档，另在 GitHub 上建了里程碑。做了：① 建 GitHub 里程碑 [v0.5.0](https://github.com/zy1233/pi-python/milestone/1)（没有挂 PR 与 issue）；② 计划里新加「发布里程碑 V0.5」：范围按现状定（阶段 0、A、C 与阶段 B 的删除完成，阶段 1 完成一半，阶段 D 没有开始；不等阶段 1 的余项、ADR1 的 PR 2 与 PR 3、阶段 D），六项退出条件（CI、release 体积再量、发布构建演练、与 v0.4.0 对照、发布说明、打 tag），带着发布的已知问题，不在 V0.5 的项；③ 新增待决策 16：`zypi --version` 打印继承来的 `1.0.8`，而同一个环境变量 `GROK_VERSION` 还决定「是不是发行构建」，发行二进制一直是开发构建（文件夹信任惰性），所以不能靠在 `release.yml` 里盖戳来改版本号；④ 状态更新到 `main` 的 `4fc028a`（`CI` 与 `TUI CI` 都通过，8,665 / 0 / 22）。还查到：`CHANGELOG.md` 里没有 Rust runtime 的删除、入口的删除、`/model` 的恢复、`-p` 拒绝沙箱、品牌清理的条目（发布说明只取 `[0.5.0]` 一段）；macOS arm64 的发布 job 从来没有跑过。里程碑建好之后，用户选了四件事，都在别的 PR 或 CI 运行里做了，本 PR 只记录：并入 `[Unreleased]` 并补条目（PR #15，条件 5）；给 `release.yml` 加手动演练（PR #14，条件 3），并从分支跑了一次（run 38223353755：Linux 与 macOS arm64 都构建成功，什么也没发布）；`release_baseline`（run 38221952524：420,767,096 B，比 v0.4.0 小 10.6 %，条件 2）；推送本分支并开 PR。决策 16 选了 (a)；之后用户又答了三个问题（§10.15 续 2）：决策 16 现在做，另开 PR #17（叠在 #15 上）；macOS 二进制的条目写进 #15；条件 4 不做，V0.5 不等它。续 3：#15、#17、#14 合入（`59545c1`、`d57fd9b`、`0efd400`）；WSL 修好后在 `0efd400` 上跑了 Linux 的 `pytest`、`zypi --version` 与 PTY 脚本（`smoke.py` 22/23，其余符合预期）。续 4：`smoke.py` 过期的那项检查修好了（用户说不另开 PR，直接提交到 `main`）：`smoke.py` 23/23，加 `--sandbox workspace` 26/26；里程碑的描述改到合入之后；删了五个本地旧分支。续 5：用户答了决策 6、8、14、15：6 与 15 选 (a)（都还没做），8 与 14 待定；又删了最后一个本地旧分支。续 6：决策 6 的 (a) 做成了 PR（分支 `feat/export-via-acp-replay`，没有合入）：`zypi export <id>` 改问 agent，经 `session/load` 回放；18 个单元测试、一个端到端测试；`resume_matrix.py` 11 PASS / 2 GAP / 0 FAIL；调试构建下，2,000、5,000、20,000 条的会话要 2.5、5.7、63 s；发现三处没有修的问题（agent 读到条目 id 重复的文件会死循环；基准脚本在 4,096 条之后写出这样的文件；`isReplay` 在 agent 与 pager 里放的 `_meta` 层级不同）。续 7：决策 15 复核后从 (a) 改成 (b)，做成了 PR（分支 `feat/status-line-local-facts`，没有合入）：DESIGN §8.5 的五条里，(a) 有两条不过（没有标准对应物；线上类型要放在旧运行时的 crate 里），用户改选 (b)；`zypi` 用已有的数据（目录、会话 id、模型、会话名、版本，加两个钟）画状态行，agent 发来的状态仍然优先；`context` 与 `cost` 不造数；Python 与线上协议都没动；新增 16 个单元测试、重写 2 个、调整 1 个；`status_line_probe.py` 4/4（r11 时 4 个都画不出）；整套运行时有一个与这次无关的失败，原因是本机真实 home 里一个没跑完的运行留下的目录（见 §10.15 续 7）。续 8：用户让把 #18、#19 合入 `main`、放进 V0.5，不再重复本地测试，再打 tag 发布（这条改了先前的两条约定：「PR 只开不合」与「不自己打 tag」）。#18 先 squash 合入（`ec7d455`）；#19 与它在三个文档文件上冲突，在 #19 的分支里合入 `main` 解决（`1fa18cf`，代码没有冲突）。`tui/` 又变了，所以条件 2、3 在 `1fa18cf` 上重做（[release_baseline](https://github.com/zy1233/pi-python/actions/runs/38353042677)、[发布演练](https://github.com/zy1233/pi-python/actions/runs/38353038777)）。`CHANGELOG.md` 把两条并进 `[0.5.0]`，日期改成 2026-10-13，删去 `zypi export` 的已知问题，改窄 `[ui.status_line]` 的。这些文档改动在两个只改文档的 PR 里合入（#20；#21 又改了状态行探针的条目）。`v0.5.0` 打在 `be3f8a8`，`Release` 发布了 PyPI 的六个包与 GitHub Release（macOS 的构建因 `setup-protoc` 被 GitHub 的 API 限流，失败两次，第 3 次通过）；发布的 Linux 二进制下载后跑过 PTY 脚本。没做：本地的 pytest 与 cargo 测试（用户说不用）；macOS 的二进制没有人运行过。见 §10.15。
+- r13：ADR1 落地（2026-10-16）。用户说「完成 ADR1 的落地，决策 2、4、5、7 按你的倾向来，我看过比较合适」。决策 10（删 `pi-shell` 里的旧存储层）不在答复里，没动。做成两个 PR，都没有合入：分支 `feat/adr1-resolve-startup`（PR [#23](https://github.com/zy1233/pi-python/pull/23)，基 `main` 的 `12349d3`）与 `refactor/adr1-drop-session-disk-reads`（PR [#24](https://github.com/zy1233/pi-python/pull/24)，叠在前一个上）。PR 2：agent 起来之后经 `session/list`、`session/load` 解析 `--continue`、`--resume`、`--session-id`（`resolve_startup`），一个共用的翻页器（选择器也用），30 s 的上限，解析失败时还原终端、停 agent、退出 1；`--continue` 取最近活动（决策 4），未知 id 在进 TUI 之前报错（决策 5）；新增 32 个测试，`resume_matrix.py --strict` 13/13；CI（`506769b`）8,732 通过 / 0 失败 / 22 忽略。PR 3：删 pager 里读会话文件、钉沙箱（决策 2）、读 `plan.md`（决策 7）的代码，Rust 加 149 行、删 1,829 行，净少 27 个测试（26 通过、1 忽略）；加门禁 `gates.session_disk_reads`（`main` 上 18 处命中，现在 0 处）；用户指南 `17-sessions.md`、`CHANGELOG.md`、`packages/pi-agent-cli/AGENTS.md`、基线与计划同步。验证（WSL2）：`check` 告警 0；整套清单 8,705 通过 / 1 个已知失败（`pi-pager-render` 的 tmux 探测）/ 21 忽略；`resume_matrix.py --strict` 13/13，其余 PTY 脚本全过；完整 `pytest`：Windows 2,531 通过，Linux 2,540 通过。新发现：翻页的代价增长得比会话数快（每页都重新列目录），5,000 个会话时不带 `cwd` 翻完要 28–34 s，在 Windows 上超过 30 s 的上限；1,000 个会话以内在 2 s 以内。新增待决策 17（空会话：Python 在 `session/new` 时就建文件，`--continue` 可能取到标题为 `(no messages)` 的空会话）与 18（翻页的代价；一个没有提交的草稿让 5,000 个会话的翻完从 33.9 s 降到 3.6 s）。没做：决策 10；Python 一侧的延迟建文件与翻页提速。见 §10.16。
