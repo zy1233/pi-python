@@ -1132,6 +1132,7 @@ async fn fetch_session_list_treats_an_empty_cursor_as_the_end() {
 /// An agent whose cursors never end is cut off at `MAX_SESSION_LIST_PAGES`.
 #[tokio::test]
 async fn fetch_session_list_is_bounded_by_the_page_cap() {
+    use crate::acp::session_list::MAX_SESSION_LIST_PAGES;
     let (tx, seen) = scripted_list_agent(|n| {
         Some(list_page(&[format!("s{n}").as_str()], Some(format!("c{n}").as_str())))
     });

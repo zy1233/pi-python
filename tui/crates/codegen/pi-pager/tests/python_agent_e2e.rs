@@ -26,6 +26,8 @@ use std::time::{Duration, Instant};
 use agent_client_protocol as acp;
 use pi_acp_lib::{AcpAgentTx, AcpClientMessage, AcpClientRx, acp_send};
 use pi_pager::acp::{ConnectFlags, connect};
+use pi_pager::app::session_resolve::resolve_startup;
+use pi_pager::app::session_startup::{MaterializedStartup, SessionStartupIntent};
 use tokio_util::sync::CancellationToken;
 
 const WIRE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -584,6 +586,204 @@ async fn session_list_pages_are_followed_by_cursor() {
         .await
         .expect_err("a made-up cursor must be refused");
     assert_eq!(error.code, acp::ErrorCode::InvalidParams, "{error:?}");
+    live.stop().await;
+}
+
+fn resume_intent(arg: &str) -> SessionStartupIntent {
+    SessionStartupIntent::Resume {
+        session_id: Some(arg.to_owned()),
+        most_recent_for_cwd: false,
+    }
+}
+
+fn resumed(started: MaterializedStartup) -> (String, Option<PathBuf>, Option<String>) {
+    match started {
+        MaterializedStartup::Resume {
+            session_id,
+            original_cwd,
+            title,
+            ..
+        } => (session_id, original_cwd, title),
+        other => panic!("expected Resume, got {other:?}"),
+    }
+}
+
+/// `--continue`, `--resume <id>` and `--resume <title>`: what the pager asks the agent before the
+/// event loop starts (plan section 10.16, ADR1). The pager reads no session file for this.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial(pi_agent)]
+async fn continue_and_resume_are_resolved_by_asking_the_agent() {
+    let Some(python) = python() else { return };
+    use_cli_agent(&python);
+    let work = tempfile::tempdir().unwrap();
+    let other = tempfile::tempdir().unwrap();
+    let pause = || tokio::time::sleep(Duration::from_millis(60));
+
+    let first = Live::start(Answer::Cancelled).await;
+    let old = new_session(&first.tx, work.path()).await.session_id;
+    prompt(&first.tx, &old, "first topic").await;
+    pause().await;
+    let recent = new_session(&first.tx, work.path()).await.session_id;
+    prompt(&first.tx, &recent, "Second  Topic").await;
+    pause().await;
+    let away = new_session(&first.tx, other.path()).await.session_id;
+    prompt(&first.tx, &away, "third topic").await;
+    pause().await;
+    // The session created first is the one used last.
+    prompt(&first.tx, &old, "back to the first").await;
+    first.stop().await;
+
+    // A new agent process, as after a restart: it only has the session files to go on.
+    let live = Live::start(Answer::Cancelled).await;
+    let here = |path: &tempfile::TempDir| path.path().to_path_buf();
+
+    // `--continue`: the latest activity in this directory, not the latest creation, and not the
+    // session of the other directory.
+    let (id, original_cwd, title) = resumed(
+        resolve_startup(
+            &live.tx,
+            SessionStartupIntent::Resume {
+                session_id: None,
+                most_recent_for_cwd: true,
+            },
+            &here(&work),
+        )
+        .await
+        .expect("--continue"),
+    );
+    assert_eq!(id, old.to_string());
+    assert_eq!(original_cwd, None, "the session is in this directory");
+    assert_eq!(title.as_deref(), Some("first topic"));
+
+    // `--continue` in a directory without sessions.
+    let empty = tempfile::tempdir().unwrap();
+    let error = resolve_startup(
+        &live.tx,
+        SessionStartupIntent::Resume {
+            session_id: None,
+            most_recent_for_cwd: true,
+        },
+        empty.path(),
+    )
+    .await
+    .expect_err("no session in that directory");
+    assert!(error.to_string().contains("No session found"), "{error:#}");
+
+    // `--resume <id>` from another directory: the session's own directory is what it loads in.
+    let (id, original_cwd, _) = resumed(
+        resolve_startup(&live.tx, resume_intent(&recent.to_string()), &here(&other))
+            .await
+            .expect("--resume <id>"),
+    );
+    assert_eq!(id, recent.to_string());
+    assert_eq!(original_cwd, Some(here(&work)));
+
+    // `--resume <title>`: the title is the first message with its white space collapsed, matched
+    // without regard to letter case, in this directory.
+    let (id, ..) = resumed(
+        resolve_startup(&live.tx, resume_intent("second topic"), &here(&work))
+            .await
+            .expect("--resume <title>"),
+    );
+    assert_eq!(id, recent.to_string());
+    let error = resolve_startup(&live.tx, resume_intent("second topic"), &here(&other))
+        .await
+        .expect_err("titles are matched per directory");
+    assert!(
+        error.to_string().contains("no session id or title matched"),
+        "{error:#}"
+    );
+
+    // An id that no session has: an error before any terminal exists, and it names the id.
+    let unknown = uuid::Uuid::new_v4().to_string();
+    let error = resolve_startup(&live.tx, resume_intent(&unknown), &here(&work))
+        .await
+        .expect_err("an unknown id");
+    assert!(error.to_string().contains(&unknown), "{error:#}");
+    live.stop().await;
+}
+
+/// Two sessions that began with the same words: the title does not say which one is meant.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial(pi_agent)]
+async fn a_title_two_sessions_share_is_ambiguous() {
+    let Some(python) = python() else { return };
+    use_cli_agent(&python);
+    let work = tempfile::tempdir().unwrap();
+
+    let live = Live::start(Answer::Cancelled).await;
+    let one = new_session(&live.tx, work.path()).await.session_id;
+    prompt(&live.tx, &one, "hello").await;
+    let two = new_session(&live.tx, work.path()).await.session_id;
+    prompt(&live.tx, &two, "Hello").await;
+
+    let error = resolve_startup(&live.tx, resume_intent("hello"), work.path())
+        .await
+        .expect_err("two sessions have that title");
+    let message = error.to_string();
+    assert!(
+        message.contains("Multiple sessions match title"),
+        "{message}"
+    );
+    assert!(
+        message.contains(&one.to_string()) && message.contains(&two.to_string()),
+        "{message}"
+    );
+    live.stop().await;
+}
+
+/// `--session-id`: an id that a session has is refused before the terminal starts; a free one is
+/// used by the agent as given (`session/new` `_meta.sessionId`), and is then in use.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial(pi_agent)]
+async fn a_session_id_is_checked_against_the_agents_sessions() {
+    let Some(python) = python() else { return };
+    use_cli_agent(&python);
+    let work = tempfile::tempdir().unwrap();
+    let new_with_id = |id: &str| SessionStartupIntent::NewWithId {
+        session_id: id.to_owned(),
+    };
+
+    let live = Live::start(Answer::Cancelled).await;
+    let existing = new_session(&live.tx, work.path()).await.session_id;
+
+    let error = resolve_startup(&live.tx, new_with_id(&existing.to_string()), work.path())
+        .await
+        .expect_err("the id is in use");
+    assert!(error.to_string().contains("is already in use"), "{error:#}");
+    let error = resolve_startup(&live.tx, new_with_id("my-run-1"), work.path())
+        .await
+        .expect_err("not a UUID");
+    assert!(
+        error.to_string().contains("must be a valid UUID"),
+        "{error:#}"
+    );
+
+    let fresh = uuid::Uuid::new_v4().to_string();
+    match resolve_startup(&live.tx, new_with_id(&fresh), work.path())
+        .await
+        .expect("a free id")
+    {
+        MaterializedStartup::NewWithId { session_id } => assert_eq!(session_id, fresh),
+        other => panic!("expected NewWithId, got {other:?}"),
+    }
+
+    // What the event loop sends next: the agent uses the id, and from then on the id is taken.
+    let mut meta = acp::Meta::new();
+    meta.insert("sessionId".into(), serde_json::json!(fresh));
+    let created = wire(
+        "session/new with an id",
+        acp_send(
+            acp::NewSessionRequest::new(work.path().to_path_buf()).meta(meta),
+            &live.tx,
+        ),
+    )
+    .await;
+    assert_eq!(created.session_id.to_string(), fresh);
+    let error = resolve_startup(&live.tx, new_with_id(&fresh), work.path())
+        .await
+        .expect_err("the id is in use now");
+    assert!(error.to_string().contains("is already in use"), "{error:#}");
     live.stop().await;
 }
 
