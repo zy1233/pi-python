@@ -777,15 +777,10 @@ impl LineViewerState {
         })
     }
 
-    /// Open a file and create the viewer with markdown rendering.
+    /// Create the viewer with markdown rendering, from content that is already in memory.
     ///
     /// Same as `open()` but renders the content as rich markdown instead of
     /// raw syntax-highlighted text. Source-line-based navigation is preserved.
-    pub fn open_markdown(path: &Path, element_id: Option<ElementId>) -> Option<Self> {
-        let content = std::fs::read_to_string(path).ok()?;
-        Self::open_markdown_content(path.to_path_buf(), content, element_id)
-    }
-
     pub fn open_markdown_content(
         path: impl Into<PathBuf>,
         content: String,

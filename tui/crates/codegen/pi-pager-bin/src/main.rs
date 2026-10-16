@@ -581,20 +581,11 @@ async fn async_main(args: PagerArgs) -> Result<()> {
     if let Some(Command::Wrap(ref wrap_args)) = args.command {
         return pi_pager::wrap_cmd::run(wrap_args);
     }
-    args.pin_local_resume_target()?;
-    let saved_profile = args.saved_resume_profile();
-    let sandbox_profile_arg = match args.startup_sandbox_profile(saved_profile.as_deref()) {
-        pi_pager::app::cli::SandboxStartup::Apply(profile) => profile,
-        pi_pager::app::cli::SandboxStartup::Conflict { requested, saved } => {
-            eprintln!(
-                "error: cannot resume this session under sandbox profile '{requested}' — \
-                 it was created with '{saved}'. Omit --sandbox to resume with '{saved}', \
-                 or start a new session to use '{requested}'."
-            );
-            std::process::exit(1);
-        }
-    };
-    pi_shell::config::apply_sandbox(None, sandbox_profile_arg.as_deref(), args.cwd.as_deref());
+    // The sandbox profile comes from the flag (or the config / deployment requirement `apply_sandbox`
+    // reads). A resumed session does not carry one: its transcript lives in the agent, which stores
+    // no profile (ADR1: the pager reads no session files).
+    let sandbox_profile_arg = args.sandbox.as_deref().filter(|profile| !profile.is_empty());
+    pi_shell::config::apply_sandbox(None, sandbox_profile_arg, args.cwd.as_deref());
     let is_interactive = args.command.is_none()
         && args.single.is_none()
         && args.prompt_json.is_none()

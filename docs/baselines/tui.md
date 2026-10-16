@@ -2,11 +2,11 @@
 
 对应 [`PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`](../PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md) 阶段 0 的 0.1（Rust CI job）、0.2（基线报告）、0.4（deny-list）、0.5（调用图），以及阶段 C 的残留词与许可证声明。权威环境是 CI 的 Linux runner（ADR6：`ubuntu-24.04` + `tui/rust-toolchain.toml` 钉的 1.94.0）。
 
-## 当前基线（r11）
+## 当前基线（r13）
 
-- **测试**：10 个 suite 合计 8,665 通过 / 0 失败 / 22 忽略。出处：分支 `chore/phase-c-closeout` 的 `4fadcf3`，WSL2 上基线执行器的一次本地运行（22 m 22 s，清环境，`PI_E2E_PYTHON` 与 `PI_E2E_REQUIRED=1`）；**还没有 CI 运行**。比 r10 的 8,683 少 18 个，都在 `pi-pager`（5,626 → 5,608：C.2 删了教程叠层与上游用户指南的用例，加了两个守卫用例）。各 suite 见 §3.2。r10 的 CI 对账（PR [#12](https://github.com/zy1233/pi-python/pull/12) 的 `bd44289`，`TUI CI` [run 38074038191](https://github.com/zy1233/pi-python/actions/runs/38074038191)）在[基线历史][hist-tests]。
-- **门禁**：依赖图 980 个包，消费者构建 0 条告警，`--workspace --tests` 0 个错误，残留词 `grok agent` 0 / `leader` 245 / `x.ai` 304（§2、§4）。出处：同一分支的 `24907ef`，`check` 的一次本地运行，5 m 24 s。`4fadcf3` 之后 `tui/` 只改了文档注释、一个标签和两份 README，测试没有重跑。
-- **耗时**（CI，r10 的 `bd44289`）：`cargo test` job 29 m 13 s，`Gates + cargo check` 5 m 46 s。r11 的分支还没有 CI 运行，上面两条本地耗时与它们不可比。
+- **测试**：10 个 suite 合计 8,706 通过 / 0 失败 / 21 忽略（清单里 `reference_passed` 的和）。出处：分支 `refactor/adr1-drop-session-disk-reads`（PR [#24](https://github.com/zy1233/pi-python/pull/24)）的 `9600cdf`，WSL2 上基线执行器对整套 10 个 suite 的一次本地运行（14 m 18 s，清环境，`PI_E2E_PYTHON` 与 `PI_E2E_REQUIRED=1`）：8,705 通过 / 1 个已知失败 / 21 忽略。那 1 个已知失败是 `pi-pager-render` 的 tmux 探测（清单里的 `known_failures`；清单按通过算它，所以和是 8,706）。**CI 对账**（PR #24，`79e01ee`，`TUI CI` [run 38896545799](https://github.com/zy1233/pi-python/actions/runs/38896545799)）：10 个 suite 合计 **8,706 通过 / 0 失败 / 21 忽略**，同清单里的和；`pi-pager` 5,649（12 忽略），`pi-pager-bin` 21，那个 tmux 探测在 runner 上通过。上一个 PR（[#23](https://github.com/zy1233/pi-python/pull/23)）的 CI（`506769b`，`TUI CI` [run 38889657279](https://github.com/zy1233/pi-python/actions/runs/38889657279)）是 8,732 通过 / 0 失败 / 22 忽略。比 r11 的 8,665 多 41 个，都在 `pi-pager`：#18、#19 加了 35 个（清单当时没改），PR #23 加了 32 个，PR #24 删了 26 个；PR #24 还删了 1 个忽略的用例，所以忽略数 22 → 21。各 suite 见 §3.2。r10 的 CI 对账（PR [#12](https://github.com/zy1233/pi-python/pull/12) 的 `bd44289`，`TUI CI` [run 38074038191](https://github.com/zy1233/pi-python/actions/runs/38074038191)）在[基线历史][hist-tests]。
+- **门禁**：依赖图 980 个包，消费者构建 0 条告警，`--workspace --tests` 0 个错误，残留词 `grok agent` 0 / `leader` 245 / `x.ai` 304（§2、§4），读盘门禁 0 处命中（§2）。出处：PR #24 的 `9600cdf`，`check` 的一次本地运行（WSL2，2 m 55 s）；CI 的 `Gates + cargo check` 在 `79e01ee` 上通过。
+- **耗时**（CI，PR #24 的 `79e01ee`）：`cargo test` job 16 m 31 s，`Gates + cargo check` 3 m 50 s。同一份清单在 PR #23 的 `506769b` 上是 12 m 20 s 与 3 m 22 s，在 r10 的 `bd44289` 上是 29 m 13 s 与 5 m 46 s。上面「测试」「门禁」两条里的本地耗时（14 m 18 s，2 m 55 s）与它们不可比。
 - **release**：`zypi` 420,667,200 B（比拆除前小 10.6 %），冷缓存构建 1,194 s（比 1,647 s 快 27.5 %），`--version` 中位数 22.9 ms。出处：r12 续 8，`1fa18cf`（#18 与 #19 合并之后的树，也是 V0.5 的树），手动触发的 `TUI CI`（带 `release_baseline`）[run 38353042677](https://github.com/zy1233/pi-python/actions/runs/38353042677)。r12 开头（`4fc028a`）是 420,767,096 B / 1,195 s / 23.4 ms，r5（`ac1d3ff`）是 422,034,120 B / 1,155 s / 23.1 ms。该 job 只手动触发，三次之间没有别的测量。发布的 `zypi-linux-x86_64`（v0.5.0，`be3f8a8`，[`Release` 的运行 38358144687](https://github.com/zy1233/pi-python/actions/runs/38358144687)）是 420,720,608 B，比这一数多 53,408 B（同一个 `tui/` 树，差在哪里没有查），仍小于 v0.4.0 的 470,461,776 B。
 - **历史**：每一轮数字怎么变的、CI 对账的 run 号、已经做完的事，在[基线历史][hist]。
 
@@ -42,6 +42,7 @@ python scripts/tui_baseline.py release           # release-dist 构建 + 体积 
 | 工具链钉 | 清单 `channel` = `tui/rust-toolchain.toml` | 是 |
 | deny crate | `pi-sampler` 不在 `tui/Cargo.lock`，`cargo tree -p pi-pager-bin -i pi-sampler` 报 `did not match any packages` | 是 |
 | deny word | `MvpAgent`、`acp_session_impl`、`SamplerActor` 在 `tui/crates` 下整词零命中 | 是 |
+| 读盘 | `pi-pager` 与 `pi-pager-bin` 的生产代码（`src/`）不调用 `pi-shell` 会话存储的读取函数，也不拼会话目录；模式见清单 `[gates.session_disk_reads]`。测试文件、`#[cfg(test)]` 模块与注释行不查。`pytest` 里也跑一遍（`test_no_pager_code_reads_session_files_in_this_tree`）。ADR1 落地时加（r13）：`main` 上 18 处命中，现在 0 处 | 是 |
 | 残留词上限 | `tui/crates` 下含 `grok agent`、`leader`、`x.ai` 的行数（忽略大小写，词前不紧跟字母或数字）各不超过清单 `[gates.residue]` 的上限：0 / 245 / 304，见 §4。`pytest` 里也跑一遍（`test_the_residue_ceilings_hold_in_this_tree`） | 是 |
 | 依赖图上限 | `cargo tree -p pi-pager-bin --target x86_64-unknown-linux-gnu` 的唯一包数 ≤ 980（Linux 实测 980） | 是 |
 | 消费者构建 | `cargo check --locked -p pi-pager-bin -p pi-pager-minimal -p pi-update` | 是 |
@@ -85,7 +86,7 @@ macOS 环境：Apple Silicon，Homebrew `cargo` / `rustc` 1.96.1（**不是**钉
 | suite（`cargo test -p …`） | 目标 | 通过 | 忽略 | `min_passed` | 说明 |
 |---|---|---|---|---|---|
 | `pi-shell` | `--lib` + 2 个集成 | 1,056 | 1 | 1,000 |  |
-| `pi-pager` | `--lib` + 4 个集成 | 5,608 | 13 | 5,300 | 含 `python_agent_e2e`：pager 的 ACP client 对着真的 Python agent（要 `PI_E2E_PYTHON`） |
+| `pi-pager` | `--lib` + 4 个集成 | 5,649 | 12 | 5,300 | 含 `python_agent_e2e`：pager 的 ACP client 对着真的 Python agent（要 `PI_E2E_PYTHON`） |
 | `pi-pager-render` | `--lib` | 1,092 | 2 | 1,040 | r8 起在清单里；另有 1 个 `known_failures`（见下） |
 | `pi-pager-minimal` | `--lib` | 79 | 0 | 75 | r8 起在清单里 |
 | `pi-pager-bin` | `--bin zypi` | 21 | 0 | 21 | 含 `-p` 守卫用例 |
@@ -94,9 +95,9 @@ macOS 环境：Apple Silicon，Homebrew `cargo` / `rustc` 1.96.1（**不是**钉
 | `pi-telemetry` | `--lib` | 239 | 0 | 230 |  |
 | `pi-file-utils` | `--lib` | 216 | 6 | 210 |  |
 | `pi-sampling-types` | `--lib` | 320 | 0 | 310 |  |
-| **合计** | | **8,665** | **22** | | |
+| **合计** | | **8,706** | **21** | | |
 
-「通过」是清单里的 `reference_passed`，「`min_passed`」是下限（棘轮规则见 §1）。每一轮数字的变化（r8、r9、r10 的 CI 对账，含 run 号；r11 的 −18）在[基线历史][hist-tests]。
+「通过」是清单里的 `reference_passed`，「`min_passed`」是下限（棘轮规则见 §1）。每一轮数字的变化（r8、r9、r10 的 CI 对账，含 run 号；r11 的 −18；r13 的 +41）在[基线历史][hist-tests]。
 
 **清单里的已知失败 / 跳过，及原因**
 
@@ -115,7 +116,7 @@ macOS 环境：Apple Silicon，Homebrew `cargo` / `rustc` 1.96.1（**不是**钉
 
 ### 3.3 PTY 载体
 
-`scripts/tui_pty/`（r8，Linux；README 在同目录）用 pyte 当屏幕，在真 PTY 里跑真的 `zypi`，查两件事：画面（欢迎页、一轮对话、`/model`、重启后 `/resume`、`--sandbox` 时状态栏的标签）和进程树（以六种方式离开 zypi，之后不能有进程留下；`-p` 下只杀 zypi，agent 与工具也得停）。它们要一个已构建的 `zypi`，所以不在 `pytest` 或 CI 里；WSL2 上的结果是 `smoke.py` 23/23（加 `--sandbox workspace` 26/26）、`exit_matrix.py` 12/12（沙箱下 14/14）、`print_exit.py` 4/4。脚本本身的辅助逻辑有 `scripts/tests/test_tui_pty.py`（Windows 上跳过依赖 `pty` 的 5 个）。r9 又加了两个：`resume_matrix.py`（`--continue`、`--resume <id｜标题>`、`--session-id`、`zypi export` 对 Python 写的会话做了什么，13 例，WSL2 上 9 PASS / 4 GAP，GAP 不让脚本失败，`--strict` 才让）与 `mode_probe.py`（权限模式，只记录、不判对错：r9 时 12 个场景，结果见计划 §10.11；r10 起是 10 个场景、4 个被拒绝的 `--permission-mode` 值与设置页的一项检查，结果见 §10.13）。r11 又加了三个：`net_audit.py`（`zypi` 有没有外连，13 项检查：mock LLM 13/13，放进没有网络的命名空间再跑一次 13/13，真模型一次 13/13，含 agent 确有外连的正向对照）、`status_line_probe.py`（`[ui.status_line]` 画不画：r11 时 4 个运行都与指南页所写一致，Python agent 下不画；r12 续 7 之后 pager 用本地已有的事实画这一行，探针的预期随之改了，见计划 §10.15 续 7）与它用的替身 agent `status_proxy_agent.py`；结果见计划 §10.14。
+`scripts/tui_pty/`（r8，Linux；README 在同目录）用 pyte 当屏幕，在真 PTY 里跑真的 `zypi`，查两件事：画面（欢迎页、一轮对话、`/model`、重启后 `/resume`、`--sandbox` 时状态栏的标签）和进程树（以六种方式离开 zypi，之后不能有进程留下；`-p` 下只杀 zypi，agent 与工具也得停）。它们要一个已构建的 `zypi`，所以不在 `pytest` 或 CI 里；WSL2 上的结果是 `smoke.py` 23/23（加 `--sandbox workspace` 26/26）、`exit_matrix.py` 12/12（沙箱下 14/14）、`print_exit.py` 4/4。脚本本身的辅助逻辑有 `scripts/tests/test_tui_pty.py`（Windows 上跳过依赖 `pty` 的 5 个）。r9 又加了两个：`resume_matrix.py`（`--continue`、`--resume <id｜标题>`、`--session-id`、`zypi export` 对 Python 写的会话做了什么，13 例，r9 时 WSL2 上 9 PASS / 4 GAP，GAP 不让脚本失败，`--strict` 才让；r13 落地 ADR1 之后 13/13 PASS，`--strict` 通过）与 `mode_probe.py`（权限模式，只记录、不判对错：r9 时 12 个场景，结果见计划 §10.11；r10 起是 10 个场景、4 个被拒绝的 `--permission-mode` 值与设置页的一项检查，结果见 §10.13）。r11 又加了三个：`net_audit.py`（`zypi` 有没有外连，13 项检查：mock LLM 13/13，放进没有网络的命名空间再跑一次 13/13，真模型一次 13/13，含 agent 确有外连的正向对照）、`status_line_probe.py`（`[ui.status_line]` 画不画：r11 时 4 个运行都与指南页所写一致，Python agent 下不画；r12 续 7 之后 pager 用本地已有的事实画这一行，探针的预期随之改了，见计划 §10.15 续 7）与它用的替身 agent `status_proxy_agent.py`；结果见计划 §10.14。
 
 ## 4. deny-list 与保留理由（0.4）
 

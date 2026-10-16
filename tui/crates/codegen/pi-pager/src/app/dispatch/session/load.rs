@@ -108,8 +108,7 @@ fn dispatch_load_session_ungated(
             state: AgentState::Idle,
             tracker: AcpUpdateTracker::new(),
             cwd: session_cwd.clone().unwrap_or_else(|| app.cwd.clone()),
-            is_worktree: crate::app::session_startup::parent_session_is_worktree(
-                &session_id,
+            is_worktree: crate::app::session_startup::cwd_is_worktree(
                 session_cwd.as_deref().unwrap_or(app.cwd.as_path()),
             ),
             forked_from: None,
@@ -223,19 +222,10 @@ pub(in crate::app::dispatch) fn dispatch_pick_session(
         return vec![];
     }
     let local_cwd = app.cwd.to_string_lossy().to_string();
-    if pi_shell::session::resolve_local_session(&session_id, &local_cwd).is_some() {
-        return dispatch_load_session(app, session_id, None);
-    }
-    if let Some(original_cwd) = pi_shell::session::resolve_local_session_any_cwd(&session_id) {
-        return dispatch_load_session(
-            app,
-            session_id,
-            Some(std::path::PathBuf::from(original_cwd)),
-        );
-    }
     // In pi-python architecture, sessions are managed by the ACP agent backend (JsonlSessionRepo)
     // rather than grok's legacy ~/.pi-python/sessions/<encoded_cwd>/<session_id>/summary.json.
-    // When selected from the session picker, the session is already known to the ACP agent.
+    // A row of the session picker is a row of `session/list`, so the agent already knows the
+    // session; the pager looks at no session files (ADR1).
     let session_cwd = if cwd.is_empty() || cwd == local_cwd {
         None
     } else {
