@@ -30,6 +30,8 @@ A title that you give to `--resume` matches the titles of the sessions of the cu
 
 A session id that you choose with `--session-id` must be a UUID. No session in any directory can have this id. To check this, `zypi` reads the whole list of sessions. If a session has the id, `zypi` prints `Session ID <id> is already in use.` and stops with exit status 1. Do not use `--session-id` together with `--resume` or `-c`.
 
+The lookup stops after 30 seconds (the limit of `GROK_CONNECT_UI_TIMEOUT_SECS`). The agent lists its sessions page by page, and each page takes longer when you have more sessions. With about 1,000 sessions, `--session-id` takes about 2 seconds. With about 5,000 sessions, it can take about 30 seconds.
+
 The agent writes the file of a session when the session starts. A session in which you typed nothing has the title `(no messages)`. `zypi -c` takes such a session when it is the latest one.
 
 ## What a session keeps
