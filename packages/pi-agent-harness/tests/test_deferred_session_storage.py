@@ -24,6 +24,7 @@ from pi_agent_harness import (
     SessionError,
     UserMessage,
 )
+from pi_agent_harness.session import jsonl_repo, jsonl_storage
 
 
 def session_files(directory: Path) -> list[Path]:
@@ -144,10 +145,20 @@ async def test_after_the_first_message_each_entry_is_appended(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_the_header_and_the_file_name_carry_the_time_the_session_was_made(tmp_path: Path):
+async def test_the_header_and_the_file_name_carry_the_time_the_session_was_made(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Every look at the clock gives another time, as it would a moment later. So a header that
+    # took its time from a second look would not match the name of the file.
+    ticks = iter(range(1000))
+
+    def clock() -> str:
+        return f"2026-10-18T10:00:00.{next(ticks):03d}Z"
+
+    monkeypatch.setattr(jsonl_repo, "iso_now", clock)
+    monkeypatch.setattr(jsonl_storage, "iso_now", clock)
     session = await make(tmp_path)
     made = (await session.get_metadata()).createdAt
-    await asyncio.sleep(0.05)
     await session.append_message(hello())
 
     (path,) = session_files(tmp_path)

@@ -7,6 +7,7 @@ files or at a restarted agent first have the user type something (``say``)."""
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -247,6 +248,22 @@ async def test_an_id_that_another_process_took_meanwhile_is_refused_when_the_ses
             await say(agent, chosen)
         assert refused.value.code == INVALID_PARAMS
     assert session_files(tmp_path) == [theirs]
+
+
+@pytest.mark.asyncio
+async def test_a_session_with_a_chosen_id_takes_more_than_one_message(tmp_path):
+    # The look for an id that another process took is made before the first message only: the
+    # session's own file is no reason to refuse its next message.
+    chosen = str(uuid.uuid4())
+    agent = make_agent(tmp_path)
+    await agent.new_session(cwd=str(tmp_path), sessionId=chosen)
+    for _ in range(3):
+        await say(agent, chosen)
+
+    (path,) = session_files(tmp_path)
+    entries = [json.loads(line) for line in path.read_text("utf-8").splitlines()]
+    roles = [entry["message"]["role"] for entry in entries if entry.get("type") == "message"]
+    assert roles.count("user") == 3
 
 
 @pytest.mark.asyncio
