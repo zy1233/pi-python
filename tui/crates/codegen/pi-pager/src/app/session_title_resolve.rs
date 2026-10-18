@@ -1,15 +1,10 @@
-//! Resume-by-title selection shared by startup paths.
+//! Resume-by-title selection.
 //!
-//! The composition root pins an explicit non-id resume target to its
-//! canonical session id BEFORE the irreversible OS sandbox
-//! ([`super::cli::PagerArgs::pin_local_resume_target`]), so the saved-profile
-//! peek and materialization act on one immutable target instead of racing a
-//! concurrent rename between two title lookups. Materialization keeps
-//! [`select_by_title`] as the authoritative error source (ambiguity /
-//! no-match) and as a fallback for callers that bypass pinning.
+//! `--resume <title>` is matched in memory against the rows `session/list` returns
+//! ([`super::session_resolve::resolve_startup`]). The pager reads no session files, so a title is
+//! whatever the agent says it is (ADR1; execution log section 10.16).
 
 use super::session_resolve::ListedSession;
-use pi_shell::session::persistence::Summary;
 
 /// UUID-shaped resume args always take the id path, even when no such id
 /// exists and a session is titled with that exact UUID.
@@ -23,9 +18,8 @@ fn title_key(s: &str) -> String {
     s.trim().to_lowercase()
 }
 
-/// Hint appended to every terminal failure for a non-id resume target, so the
-/// title miss stays visible even when remote restore produces the final error.
-/// Debug formatting: the arg is arbitrary user text.
+/// Hint appended to the failure for a non-id resume target, so the title miss
+/// stays visible. Debug formatting: the arg is arbitrary user text.
 pub(crate) fn title_miss_hint(arg: &str) -> String {
     format!(
         "no session id or title matched {arg:?} for this directory; \
@@ -34,60 +28,7 @@ pub(crate) fn title_miss_hint(arg: &str) -> String {
     )
 }
 
-/// Select the local session a resume arg names by title.
-///
-/// - `Ok(None)`: UUID-shaped or blank arg, or no title matched — the caller
-///   keeps id-miss behavior.
-/// - `Ok(Some)`: exactly one match, or a sole manual `/rename` among
-///   duplicates (explicit user intent beats colliding auto titles).
-/// - `Err`: ambiguous — never silently pick one, headless scripts need
-///   determinism. Candidate titles are Debug-escaped: `/rename` accepts
-///   arbitrary text, and raw control characters would corrupt the listing.
-pub(crate) fn select_by_title<'a>(
-    arg: &str,
-    summaries: &'a [Summary],
-) -> anyhow::Result<Option<&'a Summary>> {
-    if is_uuid_shaped(arg) {
-        return Ok(None);
-    }
-    let needle = title_key(arg);
-    if needle.is_empty() {
-        return Ok(None);
-    }
-    let matches: Vec<&Summary> = summaries
-        .iter()
-        .filter(|s| title_key(s.display_title()) == needle)
-        .collect();
-    match matches.as_slice() {
-        [] => Ok(None),
-        [only] => Ok(Some(*only)),
-        _ => {
-            let manual: Vec<&&Summary> = matches
-                .iter()
-                .filter(|s| {
-                    s.manual_title_opt()
-                        .is_some_and(|t| title_key(&t) == needle)
-                })
-                .collect();
-            if let [only] = manual.as_slice() {
-                return Ok(Some(**only));
-            }
-            let listing = matches
-                .iter()
-                .map(|s| format!("  {}  {:?}", s.info.id, s.display_title()))
-                .collect::<Vec<_>>()
-                .join("\n");
-            anyhow::bail!(
-                "Multiple sessions match title {:?}:\n{listing}\n\
-                 Resume by session id instead: {} --resume <session-id>",
-                arg.trim(),
-                crate::brand::CLI_NAME
-            );
-        }
-    }
-}
-
-/// [`select_by_title`] for the rows of `session/list` (what `--resume <title>` reads).
+/// Select the session a resume arg names by title, among the rows of `session/list`.
 ///
 /// - `Ok(None)`: UUID-shaped or blank arg, or no title matched.
 /// - `Ok(Some)`: exactly one row has that title.
@@ -96,7 +37,7 @@ pub(crate) fn select_by_title<'a>(
 ///   with the same words are common; the message lists them with their last activity. Titles
 ///   are Debug-escaped: they are arbitrary user text, and raw control characters would corrupt
 ///   the listing.
-pub(crate) fn select_listed_by_title<'a>(
+pub(crate) fn select_by_title<'a>(
     arg: &str,
     rows: &'a [ListedSession],
 ) -> anyhow::Result<Option<&'a ListedSession>> {
@@ -138,69 +79,6 @@ pub(crate) fn select_listed_by_title<'a>(
             );
         }
     }
-}
-
-/// Outcome of the pre-sandbox resolution of an explicit resume arg.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum PinnedResumeTarget {
-    /// Nothing local resolved (UUID-shaped, no cwd, junk, or ambiguous
-    /// title): leave the raw arg alone — materialization owns the
-    /// authoritative error / remote path.
-    Unresolved,
-    /// Resolved as a local id (possibly the restored child of a remote id).
-    Id(String),
-    /// Resolved by title to this session. The selected summary's persisted
-    /// sandbox profile rides along: re-deriving it from the id is ambiguous
-    /// when a legacy id is duplicated across cwd dirs.
-    Title {
-        id: String,
-        sandbox_profile: Option<String>,
-    },
-}
-
-impl PinnedResumeTarget {
-    pub(crate) fn id(self) -> Option<String> {
-        match self {
-            Self::Unresolved => None,
-            Self::Id(id) | Self::Title { id, .. } => Some(id),
-        }
-    }
-}
-
-/// Resolve an explicit resume arg to a pinned local session id before the
-/// (irreversible) OS sandbox: the saved-profile peek and materialization must
-/// consume one immutable target, not re-run title selection against mutable
-/// summaries. Id lookups stay authoritative (same order as
-/// `resolve_existing_session`), preserving the restored-child id so the peek
-/// cannot drift to a same-id session in another cwd. Errs on a listing
-/// failure (fail closed instead of guessing) and on ambiguity, which must
-/// surface before the sandbox rather than after it.
-pub(crate) fn presandbox_resume_target(
-    arg: &str,
-    cwd: Option<&str>,
-) -> anyhow::Result<PinnedResumeTarget> {
-    if is_uuid_shaped(arg) {
-        return Ok(PinnedResumeTarget::Unresolved);
-    }
-    let Some(cwd) = cwd else {
-        return Ok(PinnedResumeTarget::Unresolved);
-    };
-    if let Some(local_id) = pi_shell::session::resolve_local_session(arg, cwd) {
-        return Ok(PinnedResumeTarget::Id(local_id));
-    }
-    if pi_shell::session::resolve_local_session_any_cwd(arg).is_some() {
-        return Ok(PinnedResumeTarget::Id(arg.to_string()));
-    }
-    let summaries =
-        pi_shell::session::persistence::local_summaries_for_cwd_sync(cwd).map_err(|e| {
-            anyhow::anyhow!("failed to list local sessions while resolving --resume {arg:?}: {e}")
-        })?;
-    Ok(select_by_title(arg, &summaries)?
-        .map(|s| PinnedResumeTarget::Title {
-            id: s.info.id.to_string(),
-            sandbox_profile: s.sandbox_profile.clone(),
-        })
-        .unwrap_or(PinnedResumeTarget::Unresolved))
 }
 
 #[cfg(test)]

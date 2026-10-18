@@ -1190,7 +1190,7 @@ pub struct AgentView {
     /// (`TaskResult::SessionMetaFromDisk`). Drives the prompt-border inline
     /// title and wins precedence for the OSC terminal title.
     pub display_name: Option<String>,
-    /// Short title from shell `SessionSummaryGenerated` or `summary.json` on load/resume.
+    /// Short title from shell `SessionSummaryGenerated`.
     /// Precedence in the dashboard title is below `display_name`, above first-prompt text.
     pub generated_session_title: Option<String>,
     /// Ultra-short summary of the most recent successful turn (shell

@@ -39,6 +39,26 @@ tracked_crates = [
 "leader" = 245
 "x.ai" = 304
 
+# ADR1 (plan section 10.16): the pager asks the agent which sessions exist (`session/list`) and
+# reads no session files itself. Production code in these crates (paths under tui/crates) must
+# not call the readers of `pi-shell`'s session store, nor name the sessions directory. Skipped:
+# test files (`tests.rs`, `*_tests.rs`, `test_util.rs`, `tests/` directories), inline
+# `#[cfg(test)] mod ... {}` blocks, and comment lines. The patterns are plain substrings, and
+# `session::persistence` as a whole is not listed: `sanitize_and_cap_title` and
+# `is_forbidden_title_char` are pure string helpers that the pager uses on purpose.
+[gates.session_disk_reads]
+crates = ["codegen/pi-pager", "codegen/pi-pager-bin"]
+patterns = [
+    "list_summaries",
+    "resolve_local_session",
+    "session_exists_for_cwd",
+    "resumed_session_sandbox_profile",
+    "local_summaries_for_cwd_sync",
+    "session::storage",
+    "persistence::session_dir",
+    'join("sessions")',
+]
+
 [graph]
 package = "pi-pager-bin"
 
@@ -118,8 +138,14 @@ targets = [
 # 8,683 over the ten suites). Then -18 net for the embedded user guide (plan section 10.14): the
 # tutorial overlay (`views/tutorial.rs`, `tutorial_docs.rs`) and the tests of the upstream guide
 # are gone, and the seven zypi pages have two guard tests: 5,608 (one local run on Linux; 8,665
-# over the ten suites, the other nine unchanged).
-reference_passed = 5608
+# over the ten suites, the other nine unchanged). Then +35 from #18 (19 tests: `zypi export` asks
+# the agent) and #19 (16 tests: the status line), counted by CI at `1fa18cf` as 5,643 (8,700 over
+# the ten suites; this number was not changed then). Then +32 for resolving the start-up session
+# through `session/list` (plan section 10.16, ADR1 PR 2: 25 `session_resolve`, 4 `bounded_resolve`,
+# 3 `python_agent_e2e`): 5,675. Then -26 passed and -1 ignored with the code that read the session
+# files (ADR1 PR 3; 27 tests went with the code): 5,649 (one local run on Linux; 8,706 over the
+# ten suites, the other nine unchanged).
+reference_passed = 5649
 min_passed = 5300
 
 # Lib tests only; they were outside the manifest until r8 (plan section 10.10: 1,092 passed,

@@ -233,6 +233,80 @@ def count_residue(root: Path, phrases: Sequence[str]) -> dict[str, int]:
     return counts
 
 
+TEST_FILE_STEMS = frozenset({"tests", "test_util", "test_fixtures"})
+TEST_MODULE_OPEN_RE = re.compile(r"^(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{$")
+
+
+def is_test_source(relative: Path) -> bool:
+    """Whether a Rust file holds test code only, judged by its path inside the crate's `src`.
+
+    Test files are named `tests.rs`, `*_tests.rs`, `test_util.rs` or `test_fixtures.rs`, or live in
+    a directory called `tests`.
+    """
+    return (
+        relative.stem in TEST_FILE_STEMS
+        or relative.stem.endswith("_tests")
+        or "tests" in relative.parts[:-1]
+    )
+
+
+def production_lines(text: str) -> Iterator[tuple[int, str]]:
+    """`(line number, stripped line)` for the lines of a Rust file that are not test or comment.
+
+    Left out: comment lines, and an inline test module (`#[cfg(test)]`, optionally more attributes,
+    then `mod name {`) up to its closing brace in column 0. A `#[cfg(test)]` on anything else is
+    not special: a `use` or a one-line `mod tests;` declaration holds no code to hide, and
+    skipping to the end of the file would hide the code that follows.
+    """
+    pending_cfg_test = False
+    in_test_module = False
+    for number, line in enumerate(text.splitlines(), 1):
+        stripped = line.strip()
+        if in_test_module:
+            in_test_module = line.rstrip() != "}"
+            continue
+        if stripped == "#[cfg(test)]":
+            pending_cfg_test = True
+            continue
+        if pending_cfg_test:
+            if stripped.startswith("#["):
+                continue
+            pending_cfg_test = False
+            if TEST_MODULE_OPEN_RE.match(stripped):
+                in_test_module = True
+                continue
+        if stripped.startswith("//"):
+            continue
+        yield number, stripped
+
+
+def scan_session_disk_reads(
+    tui_dir: Path, crates: Sequence[str], patterns: Sequence[str]
+) -> list[str]:
+    """`path:line: text` for every line of production code in `crates` that reads session files.
+
+    `crates` are paths under `tui/crates` (`codegen/pi-pager`). Only `src` is read: integration
+    tests live next to it. A pattern is a plain substring.
+    """
+    if not patterns:
+        return []
+    pattern = re.compile("|".join(re.escape(p) for p in patterns))
+    hits: list[str] = []
+    for crate in crates:
+        src = tui_dir / "crates" / crate / "src"
+        for path in sorted(src.rglob("*.rs")):
+            if is_test_source(path.relative_to(src)):
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if not pattern.search(text):
+                continue
+            for number, stripped in production_lines(text):
+                if pattern.search(stripped):
+                    where = path.relative_to(tui_dir).as_posix()
+                    hits.append(f"{where}:{number}: {stripped[:120]}")
+    return hits
+
+
 def evaluate_suite(
     suite: dict[str, Any],
     totals: SuiteTotals,
@@ -465,6 +539,20 @@ def run_gates(manifest: dict[str, Any], tui_dir: Path) -> tuple[list[Check], dic
                 f"residue ceilings ({', '.join(residue)})",
                 "fail" if over else "pass",
                 "; ".join(over) if over else shown,
+            )
+        )
+
+    disk_reads = gates.get("session_disk_reads", {})
+    if disk_reads:
+        hits = scan_session_disk_reads(tui_dir, disk_reads["crates"], disk_reads["patterns"])
+        extra["session_disk_reads"] = len(hits)
+        checks.append(
+            Check(
+                f"no session file reads in {', '.join(Path(c).name for c in disk_reads['crates'])}",
+                "pass" if not hits else "fail",
+                "no production code reads or locates session files"
+                if not hits
+                else "; ".join(hits[:5]),
             )
         )
 
