@@ -7,12 +7,12 @@
 > - 编号沿用原文。本文里的 §10.x 是执行记录的节。§1–§3、§6–§9 和附录 A 指计划。附录 A.4（r5 的执行结果）、附录 B（复现方法）和修订记录在本文。
 > - 附录 C 是计划 §7 在 r10 时的全文，含每一项的执行细节。附录 D 是计划头部在 r10 时的状态文字。附录 E 是计划 §4、§5 的全文（r2 的源码事实基线与改动规模估计）。三处只为留档；现状以计划为准。
 > - 本文是历史记录。数字是当时的实测值，不再更新。要更正明显的错误，改在原处并注明。
-> - 记新的一轮时：在「10.」末尾追加一节（`### 10.18 …`），在计划的 §10 索引里加一行，在计划里改状态。不要把过程写回计划。
+> - 记新的一轮时：在「10.」末尾追加一节（`### 10.19 …`），在计划的 §10 索引里加一行，在计划里改状态。不要把过程写回计划。
 > - 文中的分支名（`codex/…`）是当时的名字。这些分支在合并后已删除；提交都在对应的 PR 里。
 
 ## 目录
 
-- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14)
+- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15)
   - [10.1 范围、方法与规模](#101-范围方法与规模)
   - [10.2 `/model` 恢复（ADR3 r3）](#102-model-恢复adr3-r3)
   - [10.3 验证（r3 的实测）](#103-验证r3-的实测)
@@ -30,6 +30,7 @@
   - [10.15 r12 追加：V0.5 的发布里程碑](#1015-r12-追加v05-的发布里程碑)
   - [10.16 r13 追加：ADR1 的 PR 2 与 PR 3](#1016-r13-追加adr1-的-pr-2-与-pr-3)
   - [10.17 r14 追加：空会话（决策 17）与四个答复](#1017-r14-追加空会话决策-17与四个答复)
+  - [10.18 r15 追加：删 `pi-shell` 的旧存储层（决策 10）](#1018-r15-追加删-pi-shell-的旧存储层决策-10)
 - [附录 A（摘录）：A.4](#附录-a摘录a4)
   - [A.4 r5 执行结果（对照 r5 时初稿里的「默认决策」；r9 的更新见 A.1）](#a4-r5-执行结果对照-r5-时初稿里的默认决策r9-的更新见-a1)
 - [附录 B：复现方法](#附录-b复现方法)
@@ -45,9 +46,9 @@
   - [5. 改动规模](#5-改动规模)
 - [修订记录](#修订记录)
 
-## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14）
+## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15）
 
-r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）；r14 合入这两个 PR，并做决策 17：会话文件在第一条用户消息时才写（§10.17）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
+r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）；r14 合入这两个 PR，并做决策 17：会话文件在第一条用户消息时才写（§10.17）；r15 做决策 10 的存储层一项：删 `pi-shell` 里的旧存储层（§10.18）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
 | 提交 | 内容 |
 |---|---|
@@ -1201,7 +1202,7 @@ agent 自己的启动（spawn 到 `initialize` 有回答）与会话数无关：
 | #23、#24 怎么办 | 现在合入 | 都已合入 `main`（见「合入」） |
 | 决策 18：翻页的代价 | 不做 | 计划里记为「已定，不做」；没有改代码 |
 | 决策 17：空会话 | 做 | PR [#25](https://github.com/zy1233/pi-python/pull/25)（分支 `fix/write-session-at-first-message`，基 `main`，没有合入）：本节 |
-| 决策 10：删 `pi-shell` 里的旧存储层（阶段 B） | 做 | 还没做 |
+| 决策 10：删 `pi-shell` 里的旧存储层（阶段 B） | 做 | 这一轮还没做；r15 做了：PR [#26](https://github.com/zy1233/pi-python/pull/26)，见 [§10.18](#1018-r15-追加删-pi-shell-的旧存储层决策-10) |
 
 **合入。**
 
@@ -1314,7 +1315,141 @@ agent 自己的启动（spawn 到 `initialize` 有回答）与会话数无关：
 - 别的 ACP 客户端：在发第一条消息之前就对一个会话调 `session/load` 或 `session/resume` 的客户端，现在得到 `resource_not_found`（以前成功）。`zypi` 不这样做；别的客户端没有试。
 - 旧版本 agent 写的空会话文件还在列表里（标题 `(no messages)`）；要删它们，用 `pi/session/delete`。
 - 只在 Linux（WSL2）上跑了 Rust 与 PTY；没有 Windows 与 macOS 的 `zypi`，也没有用真实 LLM（e2e 与 PTY 用的是 mock 模型）。
-- 决策 10（删 `pi-shell` 里的旧存储层）：用户答复了「做」，还没有动手。
+- 决策 10（删 `pi-shell` 里的旧存储层）：用户答复了「做」，这一轮还没有动手（r15 做了，§10.18）。
+
+### 10.18 r15 追加：删 `pi-shell` 的旧存储层（决策 10）
+
+用户在 2026-10-18 答复决策 10：做。他的答复只说了存储层，所以这一轮只做存储层这一项：PR [#26](https://github.com/zy1233/pi-python/pull/26)（分支 `refactor/delete-pi-shell-session-store`，基是 #25 的分支 `fix/write-session-at-first-message`，没有合入）。生产代码没有行为变化。分支上有三个提交：`5a39e09`（删除）、`332ba75`（一个测试的串行键，见本节末的「一次失败的测试，和它的原因」）和文档。
+
+**决策 10 有三项。**
+
+| 项 | 内容 | 状态 |
+|---|---|---|
+| 存储层 | `pi-shell` 的 `session::storage` 与 `session::persistence` | 本节做了 |
+| MCP 配置 | `load_mcp_servers`（`pi-shell/src/util/config/mcp.rs`）；pager 只在一个测试里调用它 | 没做：没有问过 |
+| 最近目录 | `pi-pager/src/recent_dirs.rs` | 没做：没有问过 |
+
+**起点。** ADR1 的 PR 3（[#24](https://github.com/zy1233/pi-python/pull/24)）之后，pager 不读会话文件，`gates.session_disk_reads` 守着。pager 一侧对 `session::storage` 的引用是 0。对 `session::persistence` 只剩 3 处：`session_notification.rs` 2 处，`session_title.rs` 1 处。三处用的都是清洗标题的纯函数，不读盘。
+
+**做法。**
+
+1. **搬走 pager 要用的东西。** 新模块 `session::title`（`pi-shell/src/session/title.rs`，140 行）放四项：常量 `MAX_TITLE_SCALARS`（100）；函数 `is_forbidden_title_char` 与 `sanitize_and_cap_title`；私有的 `sanitize_title`（旧名 `sanitize_rename_title`，没有别的调用者）。函数体照旧文件搬来，只改了注释（旧注释讲的是被删的代码）。pager 的两个文件改了引用。
+2. **删存储层。** `session::storage`：14 个文件，10,007 行（5 个是测试文件，`mod.rs` 里还有内联的测试）。`session::persistence`：12 个文件，2,009 行（11 个是测试文件）。r14 估的「约 8,200 行」是调用图数的非测试行（7,372 + 803）；算上测试文件是 12,016 行。
+3. **删只有它们在用的代码。** 删了这两个模块之后，编译器对 `pi-shell` 报了 41 处 `dead_code`（门禁的上限是 0）。把它们和只测它们的测试删掉，再重新编译，直到消费者构建与 `--workspace --tests` 的告警都是 0。结果见下表。
+4. **留下一个类型。** `GoalClassifierVerdict`（`Achieved` 与 `NotAchieved`，序列化成 `snake_case`）原来在 `goal_tracker.rs` 里；`extensions/notification.rs` 与 `session/events.rs` 还要用它。它搬到 `extensions/notification.rs`，加了一个测试（`classifier_verdict_serializes_as_snake_case`）。
+5. **门禁与基线。** `scripts/tui_baseline.toml`：`[gates.session_disk_reads]` 的说明改了（存储层已删，8 个模式留着当护栏，防止它被写回来；`session::title` 不在模式里，它不读盘）；`pi-shell` 的 `reference_passed` 改成 864，`min_passed` 改成 820。`scripts/tests/test_tui_baseline.py` 加一条断言：`session::title` 不在这个门禁的模式里。`docs/baselines/tui-support.md` 重新生成。
+6. **没有动的。** `[storage] cleanup_ttl_days`（`agent/config.rs` 的 `StorageConfig`）：它清理旧会话文件，现在没有代码读它。配置里仍然接受这个键，注释里写明它没人读；删它是另一个改动。`Cargo.lock` 没有变，也没有删依赖（见「留下的」）。
+7. **一个测试的串行键。** `util/config/consent_tests.rs`：`set_consent_answer_is_monotonic_per_account` 的 `#[serial_test::serial(GROK_HOME)]` 改成 `#[serial_test::serial]`，加了 4 行注释。这是单独的提交 `332ba75`（+5 / −1，只有这一个测试文件）。原因见「一次失败的测试，和它的原因」。
+
+*第 3 步删掉的东西。*
+
+| 删掉（或删去一部分）的文件 | 它是什么 | 删的行数 |
+|---|---|---|
+| `session/goal_tracker.rs`、`goal_tracker_tests.rs` | 目标模式的状态（`GoalTracker`） | 978（478 + 500） |
+| `session/signals.rs` | 会话信号（给反馈判断用） | 237 |
+| `session/workflow/{registry,store,tracker}.rs` | workflow 的状态类型 | 200（15 + 98 + 84，另有 `mod.rs` 的 3 行） |
+| `session/wire_tags.rs` | 回放时与 `updates.jsonl` 里的行比对的标签 | 66 |
+| `session/announcement_state.rs` | 恢复会话用的公告状态 | 76 |
+| `session/plan_mode.rs` | plan 模式快照 | 61 |
+| `session/image_normalize.rs`（只留 `ImageCompressionInfo`）、`image_normalize_tests.rs` | 加载时的图片检查 | 145（68 + 77） |
+| `session/helpers/session_summary.rs` | 会话标题的自动生成 | 69（68，另有 `mod.rs` 的 1 行） |
+| `sampling/conversation.rs`（只留一行 `pub use`）、`conversation_tests.rs` | `fork_filter_chat`（fork 时过滤对话历史） | 279（63 + 216） |
+| 其他 | `tools/todo.rs` 1 行；`test_support` 里的 `unix_mode` 7 行；`pi-subagent-resolution/src/context.rs` 里的一条 NOTE 6 行；`session/mod.rs` 的模块声明 11 行；`events.rs`、`config.rs`、`notification.rs` 与 pager 两个文件里被改的 13 行 | 38 |
+
+表里的 2,149 行加上存储层的 12,016 行，就是 14,165 行。
+
+**规模。** `c74cc18` 是 #25 的头，`5a39e09` 是这个 PR 的代码提交。
+
+| 指标 | `c74cc18` | `5a39e09` | 差 |
+|---|---|---|---|
+| `tui/` 的改动 | — | — | 52 个文件，+185 / −14,165（删 38 个文件，加 1 个，改 13 个） |
+| `tui/crates` 下的 `.rs` | 1,760 个文件，1,021,858 行 | 1,723 个文件，1,007,878 行 | −37 个文件，−13,980 行 |
+| `pi-shell` 的非测试代码（调用图的数） | 40,985 行，73 个单元 | 31,653 行，67 个单元 | −9,332 行，−6 个单元 |
+| `pi-shell` 的测试（Linux） | 1,056 | 864 | −192 |
+| 清单里 `reference_passed` 的和 | 8,706 | 8,514 | −192 |
+
+`332ba75`（测试里的串行键）在 `tui/` 里只改一个文件，+5 / −1，上表的 `5a39e09` 一列不含它。含它，`tui/` 对 `c74cc18` 的改动是 53 个文件，+190 / −14,166。测试的个数没有变。
+
+**测试的账。** 被删的文件里有 202 个测试属性；其中 1 个只在 macOS 上编译（`session/storage/jsonl/durable_tests.rs`），所以 Linux 上少 201 个。新加 9 个：`session::title` 的 8 个，`GoalClassifierVerdict` 的 1 个。1,056 − 201 + 9 = 864，与实测相同。8 个新的清洗标题的测试是新写的，没有从旧文件搬：一个干净的标题不复制；两头的空白会去掉；终端转义与别的控制字符会去掉（C1 控制字符也是）；bidi 覆盖与标记会去掉；去掉禁用字符后留在两头的空格也去掉；什么也不剩时得 `None`；长标题按标量个数截断，不在一个字符中间（用 2 字节的字符测）；`is_forbidden_title_char` 的类与 pager 画标题时用的类相同（U+200D 不禁用）。
+
+**变异检查 `session::title`。** 在 WSL 的克隆里一次改一处，跑 `cargo test --locked -p pi-shell --lib session::title`，记下失败的用例，再还原（脚本在每次之后检查文件回到干净的状态）。
+
+不改的基线是 8 个全过。14 个改动，**13 个被抓住，1 个活下来**（`332ba75` 上跑的，每个约 90 秒，因为每次都要重新编译 `pi-shell`）：
+
+| # | 改动 | 失败的用例 |
+|---|---|---|
+| M1 | 控制字符不再禁用（`c.is_control()` 改成 `false`） | 3：`a_title_with_nothing_left_is_none`、`terminal_escapes_and_other_controls_are_dropped`、`the_forbidden_class_is_the_one_the_pager_uses_to_draw_a_title` |
+| M2 | U+200E 不再禁用 | 1：`the_forbidden_class_is_…` |
+| M3 | U+200F 不再禁用 | 2：`bidi_overrides_and_marks_are_dropped`、`spaces_that_a_dropped_character_leaves_at_the_ends_are_trimmed_too` |
+| M4 | bidi 覆盖的范围少一个（`202A..=202E` 改成 `..=202D`） | 3：`a_title_with_nothing_left_is_none`、`spaces_that_…_trimmed_too`、`bidi_overrides_and_marks_are_dropped` |
+| M5 | bidi 隔离的范围少一个（`2066..=2069` 改成 `..=2068`） | 1：`the_forbidden_class_is_…` |
+| M6 | 干净的标题被复制 | 1：`a_clean_title_is_kept_and_not_copied` |
+| M7 | 脏标题不去两头的空白 | 2：`spaces_that_…_trimmed_too`、`spaces_at_the_ends_are_trimmed` |
+| M8 | 干净的标题不去两头的空白 | 1：`a_title_with_nothing_left_is_none` |
+| M9 | 空白的标题被留下 | 1：`a_title_with_nothing_left_is_none` |
+| M10 | 截断多留一个标量 | 1：`a_long_title_is_cut_at_a_number_of_scalars_and_not_in_a_character` |
+| M11 | 按字节截断 | 1：同上 |
+| M12 | U+200D（连接符）也被禁用 | 1：`the_forbidden_class_is_…` |
+| M13 | 不查转义（`if false`） | 4：`bidi_overrides_and_marks_are_dropped`、`a_title_with_nothing_left_is_none`、`spaces_that_…_trimmed_too`、`terminal_escapes_and_other_controls_are_dropped` |
+| M14 | 上限改成 101 | **没有**：活下来了 |
+
+M14 是已知的缺口，没有补：测试用的是常量 `MAX_TITLE_SCALARS` 本身，所以上限改成什么都过；一个钉住 100 的测试只是把常量抄一遍。100 是旧代码的值，原样搬来。脚本把每个改动是「被抓住」还是「编译不过」标错了：它看输出里有没有以 `error:` 开头的行，而 `cargo` 在测试失败时也打一行 `error: test failed`。所以上面的 13 个在脚本的日志里写着「BROKEN (does not compile)」；它们都列了失败的用例，说明编译通过、断言失败，是被抓住了。真编译不过的改动不会有失败的用例。每次之后文件都回到干净的状态（脚本最后核对了 `git status`）。
+
+**验证。**
+
+- `scripts/tui_baseline.py check`（WSL2；`5a39e09` 上 3 m 19 s，`332ba75` 上 2 m 46 s；两次都全过，数相同）：消费者构建 0 条告警，`--workspace --tests` 0 个错误、0 条告警，依赖图 980，读盘 0 处命中，残留词 `grok agent` 0 / `leader` 243（上限 245）/ `x.ai` 297（上限 304）。r15 的删除让 `leader` 少 2 行，`x.ai` 少 7 行；上限没有降（`check` 的输出提示可以降）。
+- `scripts/tui_notices.py check`（`332ba75`）：989 个包，989 条，缺 0、旧 0（`Cargo.lock` 没有变）。
+- 整套 10 个 suite（`scripts/tui_baseline.py test`，WSL2，清环境，`PI_E2E_PYTHON` 与 `PI_E2E_REQUIRED=1`，增量编译），在最后一个代码提交 `332ba75` 上，16 m 24 s，退出码 0：**合计 8,513 通过 / 1 个已知失败 / 21 忽略**，清单里的和是 8,514（已知失败是 `pi-pager-render` 的 tmux 探测，清单按通过算）。`pi-pager` 5,649（12 忽略），`pi-pager-render` 1,091（另有那 1 个已知失败，2 忽略），`pi-pager-minimal` 79，`pi-pager-bin` 21，`pi-acp-lib` 21，`pi-http` 13，`pi-telemetry` 239，`pi-file-utils` 216（6 忽略），`pi-sampling-types` 320，`pi-shell` 864（`--lib` 859，两个集成测试目标共 5）。在压成一个提交之前的 WIP 提交 `43f291f` 上（19 m 28 s，那时 consent 测试还没改，`pi-shell` 那一轮碰巧没有失败）整套的数完全相同（8,513 / 1 / 21）。
+- PTY 脚本（真 `zypi`，mock 模型，WSL2）：`resume_matrix.py --strict` 16 PASS / 0 GAP / 0 FAIL；`smoke.py` 23/23；`exit_matrix.py` 12/12；`print_exit.py`；`mode_probe.py`；`status_line_probe.py` 4/4；`net_audit.py --mock` 13/13。`zypi` 是从 WIP 提交 `2f33815` 构建的。`2f33815`、`5a39e09` 与 `332ba75` 的生产代码相同：差别都在 `#[cfg(test)]` 里（`test_support` 里 7 行辅助函数；consent 测试的一个属性），所以没有重跑 PTY。
+- Python 全量 `pytest`（`real_llm` 不选；`332ba75`）：Windows 2,559 通过 / 39 跳过 / 31 不选（5 m 27 s）；Linux（WSL2，我自己的 venv，`rg` 在 `PATH` 上）2,568 通过 / 30 跳过 / 31 不选（1 m 46 s）。两个数都与 r14 相同：这个 PR 没有加 Python 测试。第一遍 Linux 没有把 `rg` 放进 `PATH`，是 2,564 通过 / 34 跳过：多出的 4 个跳过是搜索用例；总数都是 2,598。
+- `ruff check .` 与 `ruff format --check .`（ruff 0.16.10）通过。
+- 文档：`CHANGELOG.md`（`[Unreleased]`）、`docs/baselines/tui.md`、`docs/baselines/archive/tui-history.md`、`docs/baselines/tui-support.md`（重新生成）、计划（r15）和本文件（本节、B.10、修订记录）。
+- 本地运行之后的残留（计划 D.9：Rust 测试不隔离 `HOME`）：查了 WSL 里的两处，都清了。**`~/.pi-python`**：这一天的测试写了 7 项：`agent_id`、`config.toml`、`last-copy.txt`、`logs/unified.jsonl`、`trusted_folders.toml`（1,145 段，路径全在 `/tmp/` 下）、`trusted_folders.toml.lock`、`worktrees.db`。r14 清完之后这里只剩 `workflow-journals`，所以这 7 项都是 r14 之后的运行写的，已删；现在又只剩 `workflow-journals`（9 月 24 日的，不是这次留下的，没动）。**`/tmp`**：`grok-unified-log-test-*` 1,045 个、`.tmp*` 目录 1,658 个（10 个不空，里面是 `worktrees.db`、`config.toml`、图片缓存文件等测试写的文件）、我自己的 `adr1-*` 8 项、`key_owner_line_viewer.txt`（`pi-pager` 的一个测试写的固定文件名）；Python 的两遍 `pytest` 每遍留下 `pytest-of-zy`、一个 `pi-workflow-*` 目录和一个 `pi-output-*.log`。清了之后 `/tmp` 从 3,017 项降到 302 项。没动的：10 月 19 日之前的 101 个 `.tmp*`（最早 9 月 16 日）、更早的 39 个 `pi-workflow-*` 与 57 个 `pi-output-*.log`，以及 `wsl-venv` 等；它们不是这一天的运行留下的。清理按修改时间的窗口和名字删，没有用通配符删整个 `/tmp`。
+
+**一次失败的测试，和它的原因。**
+
+失败的测试是 `pi-shell` 的 `session::worktree::tests::resolve_worktree_by_id_or_path_existing_dir_returns_path`。错误是 `failed to init worktree DB schema`，原因 `disk I/O error`，`Error code 1802: Error invoking fstat to get file metadata`。第一次整套运行（WIP 提交 `43f291f`）通过。之后在同一棵 `tui/` 树上单跑 `pi-shell` 这个 suite，失败了一次（863 通过 / 1 失败）。再往后直接跑测试二进制：`--lib` 整个运行 20 次，20 次都失败（12 个测试线程；线程数 ≤ 4 时不失败）。
+
+*它不是这个 PR 带来的。* 用同样的筛选（`session::worktree`、`remote::`、`util::`、`config::tests`）跑 `c74cc18` 的测试二进制，15 次全失败：`existing_dir_returns_path` 13 次，同一模块的 `nonexistent_returns_none` 2 次。这个 PR 删了约 200 个测试，只改了整套运行里各个测试的先后与重叠。为什么 `c74cc18` 的整套运行没有遇到它（15 次 0 失败），没有查。
+
+*原因：两个测试同时运行。*
+
+- `util/config/consent_tests.rs` 的 `set_consent_answer_is_monotonic_per_account` 把进程的环境变量 `GROK_HOME` 设成自己的临时目录，结束时删掉这个目录。它的串行键是有名字的 `serial(GROK_HOME)`。
+- 其余设 `GROK_HOME` 的测试（`config/tests.rs`、`agent/folder_trust.rs`、`util/config/mcp.rs`）用默认键 `#[serial]`。`session::worktree` 的两个测试也用默认键。它们调用 `pi_workspace::worktree::resolve_worktree_by_id_or_path`；这个函数每次调用都读 `GROK_HOME`，在那里打开 `worktrees.db`。
+- `serial_test`（3.2.0）的文档说：加了键，就是互不依赖的子集，每个子集内部串行；不同键的测试可以同时运行。`EnvGuard` 自己没有锁（它的注释要求调用者用默认的 `#[serial_test::serial]`）。所以 consent 测试是唯一能与那些测试同时运行的设 `GROK_HOME` 的测试。
+- 两个测试重叠时：worktree 测试在 consent 测试的临时目录里建 `worktrees.db`；consent 测试结束，目录被删；worktree 测试接着要为数据库开 `-wal` 文件。SQLite 这时对数据库的路径做 `stat`（为了把权限抄给新文件），得 ENOENT，就返回 1802。1802 的名字（`SQLITE_IOERR_FSTAT`）有误导：失败的是对路径的 `stat`，不是 `fstat`。
+
+*怎么查到的。* 先排除环境：换一个新的 `HOME` 照样失败；只跑 `session::worktree` 这个模块，230 次（30 次 cargo 运行加 200 次直接运行）都通过；筛选里去掉 `remote::`、`util::`、`config::tests` 中任何一组，都不失败（这几组决定哪些测试同时运行）。然后用一个 `LD_PRELOAD` 的探针（一个 C 文件，记下路径含 `worktrees.db` 的 `open`、`close`、`unlink`、`rename`、`stat`、`fstat`，每条带调用栈）跑失败的运行。第一版只看 `fstat`：一个失败也没有。测试二进制里 SQLite 的反汇编显示，能返回 1802 的函数有五个，其中 `getFileMode` 是对路径做 `stat` 的。第二版加上对路径的 `stat`，一次失败的运行是这样（`<tmp>` 是 consent 测试的临时目录）：
+
+| 时间 | 线程 | 事件 |
+|---|---|---|
+| 0 ms | A：worktree 测试 | 在 `<tmp>/worktrees.db` 建数据库，再建它的日志文件（`GROK_HOME` 这时是 consent 测试的目录） |
+| 139 ms | B：consent 测试（调用栈里是它） | 测试结束，`TempDir` 的析构删了 `worktrees.db-journal` 与 `worktrees.db` |
+| 297 ms | A | 删日志文件；对 `<tmp>/worktrees.db` 做 `stat64`，两次都得 ENOENT；调用栈 `getFileMode` ← `findCreateFileMode` ← `unixOpen` ← `sqlite3WalOpen`；测试失败 |
+
+另一次失败的运行（探针同上）里，A 从建数据库到失败只隔 24 ms，B 在第 12 ms 删了 `worktrees.db`。窗口的长短每次不同；没有查 A 在那 297 ms 里在做什么。提交 `332ba75` 的信息里写的「130 ms」是当时估的数；跟踪里是 139 ms。提交信息没有改。
+
+*修。* 把 consent 测试的键改成默认的 `#[serial_test::serial]`（`332ba75`，只有测试文件）。和其他设 `GROK_HOME` 的测试一样，它现在与 worktree 的两个测试互斥。生产代码没有改。
+
+*改之前与改之后。* 同一台机器，12 个测试线程，同样的命令。
+
+| 运行 | 改之前（`5a39e09` 的二进制） | 改之后（`332ba75` 的二进制） |
+|---|---|---|
+| 四组筛选，15 次 | 15 次失败 | 0 次失败 |
+| `pi-shell` 的整个 `--lib`，20 次 | 20 次失败（另有 2 次是下面说的心跳用例） | worktree 测试 0 次失败（另有 1 次心跳用例） |
+| 基线执行器跑 `pi-shell` 这个 suite | 一次：863 通过 / 1 失败（单跑这个 suite） | 一次：864 通过 / 0 失败（整套运行里的那一次） |
+
+*另一个老的偶发失败，与这个无关。* `auth::manager::lock::tests::dropping_the_guard_silences_the_heartbeat_before_anyone_else_can_hold_the_lock`（心跳）在整个 `--lib` 运行里偶发失败：`c74cc18` 的二进制 15 次里 5 次，上表两列的 20 次里各 2 次与 1 次。r13 也记过它（负载下偶发，没有查根因）。
+
+**没有验证 / 留下的。**
+
+- 决策 10 的另两项（`mcp.rs`、`recent_dirs.rs`）：没有问过，没有做。
+- 同一类竞争的其他可能：`pi-pager` 里还有两处 `serial(GROK_HOME)`（`app/dispatch/tests/session/lifecycle.rs` 一个，`tests/grok_home_paths.rs` 两个）；`pi-shell` 里剩下的命名键有 `force_dark_wake_env`、`attribution_emit_count`、`heap_profile_hooks`。没有看这些测试读不读 `GROK_HOME`，也没有找读 `GROK_HOME` 又没有任何 `serial` 的测试：它们仍会遇到同样的竞争。
+- 依赖：删完之后，`pi-shell` 的 `Cargo.toml` 里有 7 个依赖不再被它的源码点名：`urlencoding`、`pi-compaction-transcript`、`pi-workflow`、`tdigests`、`nix`，和 dev 依赖 `pretty_assertions`、`pi-test-utils`（`c74cc18` 上是 0 个；方法见 B.10：对源码按整词搜名字，是文本搜索，宏与改名会骗过它）。没有核实，也没有删。要删的话，另做一个改动，并跑 `scripts/tui_notices.py check`，因为 `Cargo.lock` 与 `THIRD-PARTY-NOTICES` 可能变。
+- 调用图现在报死的两个单元：`session::helpers`（21 行）与 `session::worktree`（359 行）。rustc 不告警（里面是 `pub(crate)` 的项与重新导出）。没有删，并进计划 D.8。`session::events` 因为那个 `From` 的实现，由 589 行变成 591 行。
+- `leader` 与 `x.ai` 的上限（245 与 304）现在高于实测（243 与 297）；没有降。要降的话，一个改清单的小改动就够。
+- 只在 Linux（WSL2）上跑了 Rust 与 PTY；没有 Windows 与 macOS 的 `zypi`。被删的文件里有 1 个只在 macOS 上编译的测试，没有在 macOS 上看过。
+- 这个 PR 叠在 #25 上。#25 合入之后，把 #26 的基改成 `main`，再把 `main` 合进它的分支（`git merge -s ours`，两边的树相同时；做法同 §10.17 的 #24）。没有合入 #26。
 
 ## 附录 A（摘录）：A.4
 
@@ -1709,6 +1844,40 @@ python scripts/tui_pty/smoke.py --zypi tui/target/debug/zypi --python .venv/bin/
 #   `test_session_chosen_id.py`、`test_acp_stdio_contract.py`、`test_acp_agent.py`；每一处都要有测试失败。
 ```
 
+**B.10 r15 的复现**（决策 10 的存储层一项；`check`、PTY 与测试要 Linux 或 WSL2，前提同 B.4；调用图与基线脚本的单测在三个平台上都行）
+
+```bash
+# 旧存储层没有了。读盘门禁、告警（0）、依赖图（980）、全工作区类型检查都在 check 里；期望退出码 0。
+ls tui/crates/codegen/pi-shell/src/session/storage        # No such file or directory
+python scripts/tui_baseline.py check
+
+# 清洗标题的 8 个单元测试；pi-shell 的整个 suite（864 通过）；整套清单
+# （8,513 通过 + 1 个已知失败，清单里的和是 8,514）
+cd tui
+cargo test --locked -p pi-shell --lib session::title
+cd ..
+python scripts/tui_baseline.py test --suite pi-shell
+python scripts/tui_baseline.py test
+
+# 规模：`c74cc18` 是 #25 的头，`5a39e09` 是这个 PR 的代码提交。
+git diff --shortstat c74cc18 5a39e09 -- tui                # 52 files changed, 185 insertions(+), 14165 deletions(-)
+git grep -c "^" 5a39e09 -- "tui/crates/*.rs"               # 逐文件的行数；加起来 1,007,878，共 1,723 个文件
+git grep -c "^" c74cc18 -- "tui/crates/*.rs"               # 1,021,858，共 1,760 个文件
+
+# 支持 crate 的清单：再生成一次，应当与提交的文件相同（`Commit:` 一行是生成时的 HEAD）。
+python scripts/tui_callgraph.py keep --out docs/baselines/tui-support.md
+git diff --stat -- docs/baselines/tui-support.md
+
+# THIRD-PARTY-NOTICES 与 Cargo.lock（这个 PR 没有改 Cargo.lock）：989 个包，989 条，缺 0、旧 0
+python scripts/tui_notices.py check
+
+# 不再被 pi-shell 的源码点名的依赖：`c74cc18` 上 0 个，`5a39e09` 上 7 个。方法：对 `pi-shell/Cargo.toml` 的
+# [dependencies]、[dev-dependencies]、[build-dependencies] 里的每一项，在 `src/`、`tests/`、`benches/`、
+# `examples/` 的 `*.rs` 与 `build.rs` 里按整词找它的名字（`-` 换成 `_`）。这是文本搜索，宏与改名会骗过它。
+```
+
+*变异检查 `session::title`*：在 WSL 的克隆里一次改一处，跑 `cargo test --locked -p pi-shell --lib session::title`，记下哪些用例失败，再用 `git checkout -- tui/crates/codegen/pi-shell/src/session/title.rs` 还原。改的是什么，见 §10.18 的表。
+
 ## 附录 C：计划 §7 的逐项注释（r10 原文）
 
 下面是计划 §7（分阶段计划）在 r10 时的全文，原样保留，含每一项的执行细节。计划里的 §7 现在每项只留一行状态。末尾是 §8 风险表里 R5 一行的 r10 原文。
@@ -1884,3 +2053,4 @@ Rust（pager）：
 - r12：V0.5 的发布里程碑，分支 `docs/v0.5-milestone`（叠在 `main` 的 `4fc028a` 上）。用户说 PR #13 已合入、CI 没有问题，让按当前的剥离状态设置发布 V0.5 的里程碑。只改文档，另在 GitHub 上建了里程碑。做了：① 建 GitHub 里程碑 [v0.5.0](https://github.com/zy1233/pi-python/milestone/1)（没有挂 PR 与 issue）；② 计划里新加「发布里程碑 V0.5」：范围按现状定（阶段 0、A、C 与阶段 B 的删除完成，阶段 1 完成一半，阶段 D 没有开始；不等阶段 1 的余项、ADR1 的 PR 2 与 PR 3、阶段 D），六项退出条件（CI、release 体积再量、发布构建演练、与 v0.4.0 对照、发布说明、打 tag），带着发布的已知问题，不在 V0.5 的项；③ 新增待决策 16：`zypi --version` 打印继承来的 `1.0.8`，而同一个环境变量 `GROK_VERSION` 还决定「是不是发行构建」，发行二进制一直是开发构建（文件夹信任惰性），所以不能靠在 `release.yml` 里盖戳来改版本号；④ 状态更新到 `main` 的 `4fc028a`（`CI` 与 `TUI CI` 都通过，8,665 / 0 / 22）。还查到：`CHANGELOG.md` 里没有 Rust runtime 的删除、入口的删除、`/model` 的恢复、`-p` 拒绝沙箱、品牌清理的条目（发布说明只取 `[0.5.0]` 一段）；macOS arm64 的发布 job 从来没有跑过。里程碑建好之后，用户选了四件事，都在别的 PR 或 CI 运行里做了，本 PR 只记录：并入 `[Unreleased]` 并补条目（PR #15，条件 5）；给 `release.yml` 加手动演练（PR #14，条件 3），并从分支跑了一次（run 38223353755：Linux 与 macOS arm64 都构建成功，什么也没发布）；`release_baseline`（run 38221952524：420,767,096 B，比 v0.4.0 小 10.6 %，条件 2）；推送本分支并开 PR。决策 16 选了 (a)；之后用户又答了三个问题（§10.15 续 2）：决策 16 现在做，另开 PR #17（叠在 #15 上）；macOS 二进制的条目写进 #15；条件 4 不做，V0.5 不等它。续 3：#15、#17、#14 合入（`59545c1`、`d57fd9b`、`0efd400`）；WSL 修好后在 `0efd400` 上跑了 Linux 的 `pytest`、`zypi --version` 与 PTY 脚本（`smoke.py` 22/23，其余符合预期）。续 4：`smoke.py` 过期的那项检查修好了（用户说不另开 PR，直接提交到 `main`）：`smoke.py` 23/23，加 `--sandbox workspace` 26/26；里程碑的描述改到合入之后；删了五个本地旧分支。续 5：用户答了决策 6、8、14、15：6 与 15 选 (a)（都还没做），8 与 14 待定；又删了最后一个本地旧分支。续 6：决策 6 的 (a) 做成了 PR（分支 `feat/export-via-acp-replay`，没有合入）：`zypi export <id>` 改问 agent，经 `session/load` 回放；18 个单元测试、一个端到端测试；`resume_matrix.py` 11 PASS / 2 GAP / 0 FAIL；调试构建下，2,000、5,000、20,000 条的会话要 2.5、5.7、63 s；发现三处没有修的问题（agent 读到条目 id 重复的文件会死循环；基准脚本在 4,096 条之后写出这样的文件；`isReplay` 在 agent 与 pager 里放的 `_meta` 层级不同）。续 7：决策 15 复核后从 (a) 改成 (b)，做成了 PR（分支 `feat/status-line-local-facts`，没有合入）：DESIGN §8.5 的五条里，(a) 有两条不过（没有标准对应物；线上类型要放在旧运行时的 crate 里），用户改选 (b)；`zypi` 用已有的数据（目录、会话 id、模型、会话名、版本，加两个钟）画状态行，agent 发来的状态仍然优先；`context` 与 `cost` 不造数；Python 与线上协议都没动；新增 16 个单元测试、重写 2 个、调整 1 个；`status_line_probe.py` 4/4（r11 时 4 个都画不出）；整套运行时有一个与这次无关的失败，原因是本机真实 home 里一个没跑完的运行留下的目录（见 §10.15 续 7）。续 8：用户让把 #18、#19 合入 `main`、放进 V0.5，不再重复本地测试，再打 tag 发布（这条改了先前的两条约定：「PR 只开不合」与「不自己打 tag」）。#18 先 squash 合入（`ec7d455`）；#19 与它在三个文档文件上冲突，在 #19 的分支里合入 `main` 解决（`1fa18cf`，代码没有冲突）。`tui/` 又变了，所以条件 2、3 在 `1fa18cf` 上重做（[release_baseline](https://github.com/zy1233/pi-python/actions/runs/38353042677)、[发布演练](https://github.com/zy1233/pi-python/actions/runs/38353038777)）。`CHANGELOG.md` 把两条并进 `[0.5.0]`，日期改成 2026-10-13，删去 `zypi export` 的已知问题，改窄 `[ui.status_line]` 的。这些文档改动在两个只改文档的 PR 里合入（#20；#21 又改了状态行探针的条目）。`v0.5.0` 打在 `be3f8a8`，`Release` 发布了 PyPI 的六个包与 GitHub Release（macOS 的构建因 `setup-protoc` 被 GitHub 的 API 限流，失败两次，第 3 次通过）；发布的 Linux 二进制下载后跑过 PTY 脚本。没做：本地的 pytest 与 cargo 测试（用户说不用）；macOS 的二进制没有人运行过。见 §10.15。
 - r13：ADR1 落地（2026-10-16）。用户说「完成 ADR1 的落地，决策 2、4、5、7 按你的倾向来，我看过比较合适」。决策 10（删 `pi-shell` 里的旧存储层）不在答复里，没动。做成两个 PR，都没有合入：分支 `feat/adr1-resolve-startup`（PR [#23](https://github.com/zy1233/pi-python/pull/23)，基 `main` 的 `12349d3`）与 `refactor/adr1-drop-session-disk-reads`（PR [#24](https://github.com/zy1233/pi-python/pull/24)，叠在前一个上）。PR 2：agent 起来之后经 `session/list`、`session/load` 解析 `--continue`、`--resume`、`--session-id`（`resolve_startup`），一个共用的翻页器（选择器也用），30 s 的上限，解析失败时还原终端、停 agent、退出 1；`--continue` 取最近活动（决策 4），未知 id 在进 TUI 之前报错（决策 5）；新增 32 个测试，`resume_matrix.py --strict` 13/13；CI（`506769b`）8,732 通过 / 0 失败 / 22 忽略。PR 3：删 pager 里读会话文件、钉沙箱（决策 2）、读 `plan.md`（决策 7）的代码，Rust 加 149 行、删 1,829 行，净少 27 个测试（26 通过、1 忽略）；加门禁 `gates.session_disk_reads`（`main` 上 18 处命中，现在 0 处）；用户指南 `17-sessions.md`、`CHANGELOG.md`、`packages/pi-agent-cli/AGENTS.md`、基线与计划同步。验证（WSL2）：`check` 告警 0；整套清单 8,705 通过 / 1 个已知失败（`pi-pager-render` 的 tmux 探测）/ 21 忽略；`resume_matrix.py --strict` 13/13，其余 PTY 脚本全过；完整 `pytest`：Windows 2,531 通过，Linux 2,540 通过。新发现：翻页的代价增长得比会话数快（每页都重新列目录），5,000 个会话时不带 `cwd` 翻完要 28–34 s，在 Windows 上超过 30 s 的上限；1,000 个会话以内在 2 s 以内。新增待决策 17（空会话：Python 在 `session/new` 时就建文件，`--continue` 可能取到标题为 `(no messages)` 的空会话）与 18（翻页的代价；一个没有提交的草稿让 5,000 个会话的翻完从 33.9 s 降到 3.6 s）。没做：决策 10；Python 一侧的延迟建文件与翻页提速。见 §10.16。
 - r14：空会话（2026-10-19）。用户在 2026-10-18 答复了四个问题：合并、决策 18、决策 17、决策 10。① 合入：#23（`7e0ca5a`）与 #24（基改成 `main`、把 `main` 合进它的分支之后，`0476ea4`）；`CI` 与 `TUI CI` 在两个提交上都通过。② 决策 18：不做；计划里记为「已定，不做」，`CHANGELOG.md` 写了 5,000 个会话时的数。③ 决策 17：做成 PR [#25](https://github.com/zy1233/pi-python/pull/25)（分支 `fix/write-session-at-first-message`，基 `main`，没有合入）。agent 在 `session/new` 时只在内存里建会话（`DeferredJsonlSessionStorage`）；第一条用户消息才把文件头、之前攒下的条目和这条消息一次写下去。没发过消息的会话没有文件，不在列表里，`session/load` 与 `session/resume` 答 `resource_not_found`，所以 `zypi --continue` 取不到它。客户端指定的 id 由 agent 记到会话关闭（`_reserved_ids`）；另一个进程先存了同一个 id 时，这个会话的第一次 `prompt` 被拒绝（缩小了两个 agent 进程之间的空隙，没有堵死）。pager 的生产代码没有改。新测试：Python 16 个（存储 10、agent 6）与 `scripts/tests` 的 12 个；PTY 恢复矩阵 13 → 16 例（`--session-id` 与 `/new` 各一个「不发消息、没有文件」的用例，加一个「`/new` 之后发消息」的用例），用例可以分步输入；`smoke.py` 不再按 ↓；`python_agent_e2e.rs` 的用例先发一条消息再找会话（仍是 14 个）。变异检查：PTY 一层的第一版（14 例）看不见「立即写」的变异（不带旗标的 `zypi` 在第一条消息之前不发 `session/new`），改成 `--session-id` 与 `/new` 之后，两个单行变异分别被 1 个与 3 个用例抓住；Python 一层 15 个改动，第一次跑 13 个被抓住，2 个（H5、A7）补测试之后也被抓住。验证：Python 全量 pytest（Windows 2,559、Linux 2,568 通过）、`python_agent_e2e` 14/14、PTY 脚本全过（`resume_matrix.py --strict` 16/16）、Ruff。本地运行留在 WSL `/tmp` 的残留（29 项，含 r13 留下的 20 个）已删，`~/.pi-python` 没有新文件。没做：决策 10（用户答复了「做」，下一个 PR，§10.18）；Windows 与 macOS 上的 `zypi`；真实 LLM；两个 agent 进程之间的空隙。见 §10.17。
+- r15：删 `pi-shell` 的旧存储层（2026-10-19）。用户 2026-10-18 的四个答复里，r14 做了前三个；这一条做第四个：决策 10。他的答复只说了存储层，所以只做这一项；决策 10 的另两项（`util/config/mcp.rs` 的 `load_mcp_servers`、`pi-pager/src/recent_dirs.rs`）没有问过，没动。做成 PR [#26](https://github.com/zy1233/pi-python/pull/26)（分支 `refactor/delete-pi-shell-session-store`，基是 #25 的分支 `fix/write-session-at-first-message`，没有合入）。① 删除：`session::storage`（14 个文件，10,007 行）与 `session::persistence`（12 个文件，2,009 行），再加只有它们在用的代码（编译器报了 41 处 `dead_code`：goal 跟踪、会话信号、workflow 状态、图片检查、`fork_filter_chat` 等，共 2,149 行）。`pi-pager` 还要用的标题清洗函数搬进新模块 `session::title`（140 行，8 个测试）；`GoalClassifierVerdict` 搬进 `extensions/notification.rs`。`tui/` 共 53 个文件，+190 / −14,166；`pi-shell` 的非测试代码 40,985 → 31,653 行，测试 1,056 → 864；清单里 `reference_passed` 的和 8,706 → 8,514。生产代码没有行为变化。② 一个测试的竞争：删除之后，整个 `pi-shell` 的 `--lib` 有一个失败（`session::worktree` 的测试，SQLite 错误 1802）；直接跑测试二进制 20 次，20 次都出现。原因：`consent` 的一个测试把 `GROK_HOME` 设成自己的临时目录，用的串行键却是具名的 `GROK_HOME`；其他读 `GROK_HOME` 的测试用默认键，而 `serial_test` 让不同的键同时跑，`EnvGuard` 自己又没有锁。所以 worktree 测试把 `worktrees.db` 建在那个临时目录里，consent 测试结束时把目录删了，SQLite 打开 WAL 文件时对数据库路径做 `stat`，得到 ENOENT，返回 1802（错误名是 `SQLITE_IOERR_FSTAT`，失败的调用却是对路径的 `stat`）。这是用 `LD_PRELOAD` 的跟踪找到的。这个竞争在 #25 的头 `c74cc18` 上就有（同样的筛选运行 15 次失败 15 次），不是这个 PR 带来的。修：那个测试改用默认的 `#[serial_test::serial]`（`332ba75`，+5 / −1，只改测试文件）；筛选运行 15 次失败 0 次，整个 `--lib` 20 次失败 0 次。③ 验证（WSL2）：`check` 在 `5a39e09` 与 `332ba75` 上都通过；整套 10 个 suite 在 `332ba75` 上 8,513 通过 / 1 个已知失败 / 21 忽略（16 m 24 s）；`tui_notices.py check` 989 / 989；对 `session::title` 的变异检查（14 个改动）：13 个被抓住，1 个（标题长度上限 100 → 101）漏过，已记下，没补；Python：Windows 2,559 通过 / 39 跳过 / 31 不选，Linux 2,568 / 30 / 31；Ruff 通过。本地运行在 WSL 的 `~/.pi-python` 与 `/tmp` 里留下的残留已删。没做：决策 10 的另两项；`pi-shell` 里 7 个没人引用的依赖的删除；新出现的死单元 `session::helpers` 与 `session::worktree`（→ D.8）；`leader` 与 `x.ai` 上限的降低（现在是 243 与 297）；`[storage] cleanup_ttl_days`；同类风险的检查（`pi-pager` 里的 `serial(GROK_HOME)`、其他具名键）；`c74cc18` 的整套运行为什么没有碰到这个竞争；`auth::manager::lock` 的心跳测试偶发失败的原因；Windows 与 macOS 上的构建。见 §10.18。

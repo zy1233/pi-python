@@ -108,8 +108,8 @@ COLORTERM = "truecolor"
 package = "pi-shell"
 targets = ["--lib", "--test", "sandbox_requirements_pin", "--test", "test_config_update_isolation"]
 # 1,056 before plan decision 10 (r15) deleted the session store of `pi-shell` and the state types
-# that only it used. The deleted files held 202 tests, and 9 new ones came (the title helpers and
-# the verdict); the Linux run counts 192 fewer in total.
+# that only it used. The deleted files held 202 tests (one of them compiles only on macOS), and 9
+# new ones came (the title helpers and the verdict): 1,056 - 201 + 9 = 864 on Linux.
 reference_passed = 864
 min_passed = 820
 

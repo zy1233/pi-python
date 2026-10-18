@@ -2,7 +2,7 @@
 
 This file is generated. Do not edit it by hand.
 
-- Command: `python scripts/tui_callgraph.py keep`. Commit: `2f33815`.
+- Command: `python scripts/tui_callgraph.py keep`. Commit: `332ba75`.
 - Run the command again after a change that moves code between modules or crates.
 - It replaces the hand-written list of examples in item 0.5 of
   [`PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`](../PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md).
