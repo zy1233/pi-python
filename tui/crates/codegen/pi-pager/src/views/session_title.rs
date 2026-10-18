@@ -154,14 +154,14 @@ fn truncate_title(text: &str) -> String {
 /// Strip C0/C1 and bidi/format controls that could inject terminal escape
 /// sequences or spoof the title. Replaces them with `U+FFFD` so the caller
 /// can still see something was there. Same character class as
-/// [`pi_shell::session::persistence::is_forbidden_title_char`]; persist
-/// drops, display replaces.
+/// [`pi_shell::session::title::is_forbidden_title_char`]; a title that is
+/// kept drops them, a title that is shown replaces them.
 ///
 /// Returns `Cow::Borrowed(s)` when no sanitization is needed, so the
 /// common per-render call on a clean cached display_name does not
 /// allocate.
 pub(crate) fn sanitize_display_text(s: &str) -> Cow<'_, str> {
-    use pi_shell::session::persistence::is_forbidden_title_char;
+    use pi_shell::session::title::is_forbidden_title_char;
     if s.chars().any(is_forbidden_title_char) {
         Cow::Owned(
             s.chars()

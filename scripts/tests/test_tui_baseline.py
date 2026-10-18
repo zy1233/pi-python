@@ -265,8 +265,8 @@ def test_manifest_session_disk_read_gate_is_well_formed():
     for crate in gate["crates"]:
         assert (REPO_ROOT / "tui" / "crates" / crate / "src").is_dir(), crate
     assert all(isinstance(p, str) and p for p in gate["patterns"])
-    # The pure title helpers stay allowed: a bare `session::persistence` would forbid them.
-    assert "session::persistence" not in gate["patterns"]
+    # The pure title helpers (`session::title`) stay allowed: the pager uses them on purpose.
+    assert "session::title" not in gate["patterns"]
 
 
 def test_no_pager_code_reads_session_files_in_this_tree():

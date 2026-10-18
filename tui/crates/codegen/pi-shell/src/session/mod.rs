@@ -1,13 +1,8 @@
 pub(crate) mod acp_types;
-pub(crate) mod announcement_state;
 pub(crate) mod handle;
 pub(crate) mod pending_interaction;
 pub use self::acp_types::*;
 pub use self::handle::*;
-pub use self::persistence::{
-    LocalFeedbackEntry, UserFeedbackEntry, find_local_child_for_remote, resolve_local_session,
-    resolve_local_session_any_cwd, session_exists_for_cwd,
-};
 pub use self::result::{Empty, ExtMethodResult};
 pub use prod_mc_cli_chat_proxy_types::feedback_types::{
     ClientType, FeedbackImage, FeedbackTerminalInfo, MAX_FEEDBACK_IMAGE_BYTES,
@@ -157,17 +152,12 @@ mod tests {
 pub(crate) mod share {}
 pub(crate) mod events;
 pub(crate) mod feedback;
-pub(crate) mod goal_tracker;
 pub(crate) mod helpers;
 pub(crate) mod image_normalize;
 pub use pi_shared::session::info;
-pub mod persistence;
-pub(crate) mod plan_mode;
 pub(crate) mod result;
-pub(crate) mod signals;
-pub mod storage;
 pub(crate) mod telemetry;
+pub mod title;
 pub(crate) mod unified_list;
-pub(crate) mod wire_tags;
 pub(crate) mod workflow;
 pub(crate) mod worktree;
