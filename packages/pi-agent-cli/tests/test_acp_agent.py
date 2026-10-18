@@ -95,6 +95,8 @@ async def test_session_responses_include_model_meta(tmp_path):
     created = await agent.new_session(cwd=cwd)
     assert created.field_meta is not None
     assert created.field_meta.get("pi/currentModelId") == "mock"
+    # A session is saved with its first message, and only a saved session can be loaded.
+    await agent.prompt(session_id=created.session_id, prompt=[text_block("hi")])
 
     loaded = await agent.load_session(cwd=cwd, session_id=created.session_id)
     assert loaded is not None
@@ -139,6 +141,7 @@ async def test_session_responses_advertise_model_config_option(tmp_path):
         ("mock", "mock"),
         ("mock-pro", "Mock Pro"),
     ]
+    await agent.prompt(session_id=created.session_id, prompt=[text_block("hi")])  # saves it
 
     loaded = await agent.load_session(cwd=cwd, session_id=created.session_id)
     assert loaded is not None
@@ -162,6 +165,9 @@ async def test_set_config_option_switches_model_and_persists(tmp_path):
     # legacy pi/* hints follow the switch
     assert agent._session_response_meta(sid)["pi/currentModelId"] == "mock-pro"
     assert agent._session_response_meta(sid)["pi/currentModelDisplayName"] == "Mock Pro"
+
+    # The session has no file yet, so the choice is held; the first message saves it too.
+    await agent.prompt(session_id=sid, prompt=[text_block("hi")])
 
     # a fresh agent process resuming the same session restores the persisted model
     agent2 = _multi_model_agent(tmp_path)
@@ -269,6 +275,7 @@ async def test_ext_method_pi_session_delete_removes_repo_session(tmp_path):
     agent.on_connect(FakeClient())
     cwd = str(tmp_path.resolve())
     created = await agent.new_session(cwd=cwd)
+    await agent.prompt(session_id=created.session_id, prompt=[text_block("hi")])  # saves it
     before = await agent.list_sessions()
     assert any(s.session_id == created.session_id for s in before.sessions)
 
@@ -318,6 +325,7 @@ async def test_list_load_close_session(tmp_path):
     agent.on_connect(FakeClient())
     cwd = str(tmp_path.resolve())
     created = await agent.new_session(cwd=cwd)
+    await agent.prompt(session_id=created.session_id, prompt=[text_block("hi")])  # saves it
     listed = await agent.list_sessions()
     match = next(s for s in listed.sessions if s.session_id == created.session_id)
     assert match.title
@@ -338,7 +346,7 @@ async def test_list_sessions_titles_follow_the_first_prompt(tmp_path):
     await agent.prompt(session_id=talked.session_id, prompt=[text_block("explain\n  the   build")])
 
     listed = {s.session_id: s for s in (await agent.list_sessions()).sessions}
-    assert listed[empty.session_id].title == "(no messages)"
+    assert empty.session_id not in listed  # no message: the session has no file, so no entry
     assert listed[talked.session_id].title == "explain the build"
     updated = datetime.fromisoformat(listed[talked.session_id].updated_at.replace("Z", "+00:00"))
     assert updated.tzinfo is not None

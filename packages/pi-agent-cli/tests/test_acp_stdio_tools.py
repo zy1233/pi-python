@@ -246,7 +246,7 @@ async def test_cancel_with_nothing_running_is_harmless(tmp_path):
         await conn.cancel(session_id="no-such-session")  # nor an error for a session it lacks
         listed = await asyncio.wait_for(conn.list_sessions(), WIRE_TIMEOUT)  # still answering
         assert process.returncode is None
-    assert [s.session_id for s in listed.sessions] == [session_id]
+    assert listed.sessions == []  # nobody typed in the session, so it has no file to list
 
 
 # --- a running tool: needs POSIX processes (``bash``, ``sleep``, ``kill -0``) --------------------

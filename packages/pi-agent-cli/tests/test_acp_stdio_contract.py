@@ -151,6 +151,28 @@ async def test_sessions_survive_a_restart_listed_with_a_title_and_replayed_on_lo
         assert again.stop_reason == "end_turn"
 
 
+async def test_a_session_in_which_nobody_typed_is_not_kept(tmp_path):
+    # `--continue` takes the latest session in the directory: a session that was only opened
+    # (the user started the TUI and left) must not be one.
+    async with running_agent(tmp_path) as (conn, _client, _process):
+        await _wire(conn.initialize(protocol_version=PROTOCOL_VERSION))
+        opened = await _wire(conn.new_session(cwd=str(tmp_path), mcp_servers=[]))
+        talked = await _wire(conn.new_session(cwd=str(tmp_path), mcp_servers=[]))
+        await _wire(conn.prompt(session_id=talked.session_id, prompt=[text_block("say hi")]))
+        # While the agent runs, the session has no file: it cannot be listed or loaded.
+        listed = await _wire(conn.list_sessions(cwd=str(tmp_path)))
+        assert [s.session_id for s in listed.sessions] == [talked.session_id]
+        with pytest.raises(RequestError):
+            await _wire(conn.load_session(cwd=str(tmp_path), session_id=opened.session_id))
+
+    async with running_agent(tmp_path) as (conn, _client, _process):
+        await _wire(conn.initialize(protocol_version=PROTOCOL_VERSION))
+        listed = await _wire(conn.list_sessions(cwd=str(tmp_path)))
+        assert [s.session_id for s in listed.sessions] == [talked.session_id]
+        with pytest.raises(RequestError):
+            await _wire(conn.load_session(cwd=str(tmp_path), session_id=opened.session_id))
+
+
 async def test_unknown_requests_are_errors_and_the_connection_survives(tmp_path):
     async with running_agent(tmp_path) as (conn, _client, _process):
         await _wire(conn.initialize(protocol_version=PROTOCOL_VERSION))
@@ -216,6 +238,8 @@ async def test_loading_a_session_says_which_directory_it_works_in(tmp_path):
         await _wire(conn.initialize(protocol_version=PROTOCOL_VERSION))
         created = await _wire(conn.new_session(cwd=str(made_in), mcp_servers=[]))
         assert (created.field_meta or {}).get("pi/cwd") == str(made_in)
+        # (A session is saved with its first message; only a saved session can be loaded.)
+        await _wire(conn.prompt(session_id=created.session_id, prompt=[text_block("hi")]))
 
     # `--resume <id>` from another directory: the agent works where the session was made, and
     # tells the client, which only knows the directory it was started in.

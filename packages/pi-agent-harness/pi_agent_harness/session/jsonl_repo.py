@@ -9,7 +9,13 @@ from typing import Any, Protocol
 
 from ..env import LocalExecutionEnv
 from ..types import FileError, FileInfo, JsonlSessionMetadata, SessionError
-from .jsonl_storage import JsonlSessionStorage, JsonlStorageFs, load_jsonl_session_metadata
+from .jsonl_storage import (
+    DeferredJsonlSessionStorage,
+    JsonlSessionStorage,
+    JsonlStorageFs,
+    load_jsonl_session_metadata,
+    new_session_header,
+)
 from .repo_utils import get_entries_to_fork
 from .session import Session, iso_now, iso_to_ms
 from .uuid7 import uuid7
@@ -75,6 +81,11 @@ class JsonlSessionRepo:
         return self._directory / f"{_safe_filename_timestamp(created_at)}-{session_id}.jsonl"
 
     async def create(self, options: dict[str, Any] | None = None) -> Session:
+        """Make a session.
+
+        Options: ``id``, ``cwd``, ``parentSessionPath`` and ``deferred``. A deferred session has
+        no file until its first message (see ``DeferredJsonlSessionStorage``).
+        """
         options = options or {}
         session_id = options.get("id") or uuid7()
         cwd = options.get("cwd") or str(Path.cwd())
@@ -82,6 +93,14 @@ class JsonlSessionRepo:
         path = self._session_path(session_id, created_at)
         if await self._fs.exists(path):
             raise SessionError("invalid_session", f"Session file {path} already exists")
+        if options.get("deferred"):
+            header = new_session_header(
+                cwd=cwd,
+                session_id=session_id,
+                parent_session_path=options.get("parentSessionPath"),
+                timestamp=created_at,
+            )
+            return Session(DeferredJsonlSessionStorage(self._fs, str(path), header))
         storage = await JsonlSessionStorage.create(
             self._fs,
             str(path),

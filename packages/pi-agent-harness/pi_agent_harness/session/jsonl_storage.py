@@ -118,6 +118,26 @@ def _header_to_metadata(header: dict[str, Any], path: str) -> JsonlSessionMetada
     )
 
 
+def new_session_header(
+    *,
+    cwd: str,
+    session_id: str,
+    parent_session_path: str | None = None,
+    timestamp: str | None = None,
+) -> dict[str, Any]:
+    """The first line of a session file."""
+    header: dict[str, Any] = {
+        "type": "session",
+        "version": 3,
+        "id": session_id,
+        "timestamp": timestamp if timestamp is not None else iso_now(),
+        "cwd": cwd,
+    }
+    if parent_session_path is not None:
+        header["parentSession"] = parent_session_path
+    return header
+
+
 def _entry_to_json(entry: SessionTreeEntry) -> str:
     data = entry.model_dump(exclude_none=True)
     # pi v3 entries always carry parentId, even for root entries where it is
@@ -221,15 +241,9 @@ class JsonlSessionStorage:
         session_id: str,
         parent_session_path: str | None = None,
     ) -> JsonlSessionStorage:
-        header: dict[str, Any] = {
-            "type": "session",
-            "version": 3,
-            "id": session_id,
-            "timestamp": iso_now(),
-            "cwd": cwd,
-        }
-        if parent_session_path is not None:
-            header["parentSession"] = parent_session_path
+        header = new_session_header(
+            cwd=cwd, session_id=session_id, parent_session_path=parent_session_path
+        )
         await fs.write_file(file_path, f"{_json_dumps(header)}\n")
         return cls(fs, file_path, header, [], None)
 
@@ -277,6 +291,10 @@ class JsonlSessionStorage:
         if entry.id in self._by_id:
             raise SessionError("invalid_entry", f"Duplicate entry id {entry.id}")
         await self._fs.append_file(self._file_path, f"{_entry_to_json(entry)}\n")
+        self._record(entry)
+
+    def _record(self, entry: SessionTreeEntry) -> None:
+        """Take the entry into the in-memory state (the file is the caller's business)."""
         self._entries.append(entry)
         self._by_id[entry.id] = entry
         if isinstance(entry, LabelEntry):
@@ -311,6 +329,53 @@ class JsonlSessionStorage:
 
     async def get_entries(self) -> list[SessionTreeEntry]:
         return list(self._entries)
+
+
+class DeferredJsonlSessionStorage(JsonlSessionStorage):
+    """A session whose file is written with its first message, not when the session is made.
+
+    A session that nobody wrote to leaves nothing on disk: no file to list, to resume or to
+    carry an id. Until the first ``message`` entry arrives, ``append_entry`` holds every entry
+    (a model change, a label, a leaf move, a custom entry) in memory. The first ``message``
+    entry writes the header, the held entries and itself in one go. After that, each entry is
+    appended as in ``JsonlSessionStorage``.
+
+    The write comes before the entry is recorded. If it fails, the entry is not in the session,
+    and the next message tries the whole write again.
+    """
+
+    def __init__(self, fs: JsonlStorageFs, file_path: str, header: dict[str, Any]) -> None:
+        super().__init__(fs, file_path, header, [], None)
+        self._header = header
+        self._written = False
+        # One writer at a time: two first messages must not both write the whole file, and the
+        # entries must reach the file in the order they were recorded.
+        self._lock = asyncio.Lock()
+
+    @property
+    def written(self) -> bool:
+        """Whether the file exists, that is, whether a message has been recorded."""
+        return self._written
+
+    async def append_entry(self, entry: SessionTreeEntry) -> None:
+        async with self._lock:
+            if self._written:
+                await super().append_entry(entry)
+                return
+            if entry.id in self._by_id:
+                raise SessionError("invalid_entry", f"Duplicate entry id {entry.id}")
+            if entry.type == "message":
+                await self._write_file_with(entry)
+            self._record(entry)
+
+    async def _write_file_with(self, first_message: SessionTreeEntry) -> None:
+        lines = [
+            _json_dumps(self._header),
+            *(_entry_to_json(held) for held in self._entries),
+            _entry_to_json(first_message),
+        ]
+        await self._fs.write_file(self._file_path, "\n".join(lines) + "\n")
+        self._written = True
 
 
 async def load_jsonl_session_metadata(

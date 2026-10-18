@@ -98,7 +98,13 @@ from pi_agent_cli.trust_store import TrustStore
 from pi_agent_core.coding_tools.path_utils import normalize_host_path
 from pi_agent_core.messages import ImageContent
 from pi_agent_core.types import StreamFn
-from pi_agent_harness import AgentHarness, AgentHarnessError, JsonlSessionRepo, Session
+from pi_agent_harness import (
+    AgentHarness,
+    AgentHarnessError,
+    DeferredJsonlSessionStorage,
+    JsonlSessionRepo,
+    Session,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +196,10 @@ class PiAcpAgent(Agent):
         # Held while a session is created under an id the client chose, so two requests for the
         # same id cannot both find it free.
         self._chosen_id_lock = asyncio.Lock()
+        # The ids the client chose for sessions that are open here and may have no file yet (a
+        # new session is written with its first message). The files cannot say that such an id
+        # is taken, so this does. An id leaves when its session is closed or deleted.
+        self._reserved_ids: set[str] = set()
 
     def on_connect(self, conn: Client) -> None:
         self._conn = conn
@@ -228,12 +238,18 @@ class PiAcpAgent(Agent):
         **kwargs: Any,
     ) -> NewSessionResponse:
         chosen_id = _chosen_session_id(kwargs)
+        # The session has no file yet: it is written with its first message. A session in which
+        # nobody typed anything leaves nothing to list, and nothing for ``--continue`` to take.
         if chosen_id is None:
-            session = await self._repo.create({"cwd": cwd})
+            session = await self._repo.create({"cwd": cwd, "deferred": True})
         else:
             session = await self._create_session_with_id(chosen_id, cwd)
         session_id = (await session.get_metadata()).id
-        await self._bind_session(session_id, session, cwd)
+        try:
+            await self._bind_session(session_id, session, cwd)
+        except BaseException:
+            self._reserved_ids.discard(session_id)
+            raise
         # Defer available_commands_update: Zed only registers the session
         # AFTER it receives NewSessionResponse, so notifications sent before
         # that are silently dropped.  Schedule via create_task + sleep(0) so
@@ -322,6 +338,7 @@ class PiAcpAgent(Agent):
 
     async def close_session(self, session_id: str, **kwargs: Any) -> CloseSessionResponse | None:
         self._session_models.pop(session_id, None)
+        self._reserved_ids.discard(session_id)
         harness = self._harnesses.pop(session_id, None)
         self._permission_locks.pop(session_id, None)
         self._drop_trust(session_id)
@@ -349,6 +366,7 @@ class PiAcpAgent(Agent):
         # Fallback: re-advertise commands if the deferred task was missed.
         if session_id not in self._commands_advertised:
             await self._advertise_commands(session_id)
+        await self._refuse_id_taken_meanwhile(session_id, harness)
         text, images = _prompt_to_text_images(prompt)
         message = await self._run_prompt(session_id, harness, text, images)
         if message is None:
@@ -429,6 +447,7 @@ class PiAcpAgent(Agent):
             session_id = session_id_raw.strip()
             metadata = await self._find_metadata(session_id)
             harness = self._harnesses.pop(session_id, None)
+            self._reserved_ids.discard(session_id)
             self._permission_locks.pop(session_id, None)
             self._drop_trust(session_id)
             if harness is not None:
@@ -530,16 +549,35 @@ class PiAcpAgent(Agent):
     async def _create_session_with_id(self, session_id: str, cwd: str) -> Session:
         """Create the session under the id the client chose; an id already in use is refused.
 
-        The repository does not refuse it: a session's file name starts with its creation time,
-        so a second session with the same id would be written beside the first and either would
-        answer a later ``session/load``.
+        In use means that a session file has the id, or that a session open here was made under
+        it and has no file yet (it is written with its first message). The repository does not
+        refuse it: a session's file name starts with its creation time, so a second session with
+        the same id would be written beside the first and either would answer a later
+        ``session/load``.
         """
         async with self._chosen_id_lock:
-            if await self._repo.has_session(session_id):
-                raise RequestError.invalid_params(
-                    {"sessionId": session_id, "reason": "a session with this id already exists"}
-                )
-            return await self._repo.create({"cwd": cwd, "id": session_id})
+            if session_id in self._reserved_ids or await self._repo.has_session(session_id):
+                raise _id_in_use(session_id)
+            session = await self._repo.create({"cwd": cwd, "id": session_id, "deferred": True})
+            self._reserved_ids.add(session_id)
+            return session
+
+    async def _refuse_id_taken_meanwhile(self, session_id: str, harness: AgentHarness) -> None:
+        """Before the first message of a session made under a chosen id: is the id still free?
+
+        Another process may have saved a session under that id since this one was made, and the
+        check at that time could not see it. Saving this one too would put a second session with
+        the id beside the first. The check is made once: a session that has its file is no
+        longer in question.
+        """
+        storage = harness.session.get_storage()
+        if (
+            session_id in self._reserved_ids
+            and isinstance(storage, DeferredJsonlSessionStorage)
+            and not storage.written
+            and await self._repo.has_session(session_id)
+        ):
+            raise _id_in_use(session_id)
 
     async def _bind_session(self, session_id: str, session: Session, cwd: str) -> None:
         cwd = normalize_host_path(cwd)
@@ -961,6 +999,12 @@ def _chosen_session_id(meta: dict[str, Any]) -> str | None:
         except ValueError:
             pass
     raise RequestError.invalid_params({"sessionId": raw, "reason": "must be a UUID"})
+
+
+def _id_in_use(session_id: str) -> RequestError:
+    return RequestError.invalid_params(
+        {"sessionId": session_id, "reason": "a session with this id already exists"}
+    )
 
 
 def _why_invalid(exc: Exception) -> str:

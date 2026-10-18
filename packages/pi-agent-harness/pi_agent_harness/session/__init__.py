@@ -2,6 +2,7 @@
 
 from pi_agent_harness.session.jsonl_repo import JsonlRepoFs, JsonlSessionPage, JsonlSessionRepo
 from pi_agent_harness.session.jsonl_storage import (
+    DeferredJsonlSessionStorage,
     JsonlSessionStorage,
     JsonlStorageFs,
     load_jsonl_session_metadata,
@@ -18,6 +19,7 @@ from pi_agent_harness.session.session import (
 from pi_agent_harness.session.uuid7 import uuid7
 
 __all__ = [
+    "DeferredJsonlSessionStorage",
     "JsonlRepoFs",
     "JsonlSessionPage",
     "JsonlSessionRepo",

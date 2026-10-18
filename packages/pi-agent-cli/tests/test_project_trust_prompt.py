@@ -451,6 +451,7 @@ async def test_a_remembered_answer_takes_effect_before_session_new_returns(world
 async def test_load_and_resume_ask_and_remember_like_new(world: Any):
     first, session_id = await _open(world, _Client(REFUSE))
     await _idle(first)
+    await first.prompt(session_id=session_id, prompt=[text_block("hi")])  # saves the session
 
     loading = _Client(TRUST)
     second = _agent(world, loading)
@@ -907,8 +908,14 @@ async def test_a_cancel_that_finds_nothing_waiting_is_not_kept_for_later(world: 
 
 
 async def test_binding_a_session_again_withdraws_the_question_of_the_first_binding(world: Any):
+    # A session that can be resumed: another agent made it, and the user typed in it.
+    maker, session_id = await _open(world, _Client(REFUSE))
+    await _idle(maker)
+    await maker.prompt(session_id=session_id, prompt=[text_block("hi")])
+
     client = _Client(TRUST, hold=True)
-    agent, session_id = await _open(world, client)
+    agent = _agent(world, client)
+    await agent.resume_session(session_id=session_id, cwd=str(world.project))
     await asyncio.wait_for(client.asked.wait(), 5)
     first = agent._harnesses[session_id]
 
