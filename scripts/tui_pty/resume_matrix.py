@@ -4,17 +4,16 @@
 
 Plan 0.7 / ADR1. The pager used to read the session files of the old Rust agent to resolve
 ``--continue``, ``--resume <title>``, ``--session-id`` and ``zypi export``; the Python agent writes
-a different layout, so each flag works on a Python session only by accident, by falling back to
-the agent, or not at all. This script makes one session through the TUI (mock model, first message
-"remember this"), starts zypi again with each flag and says whether it did what its help text
-promises.
+a different layout, so each flag worked on a Python session only by accident, by falling back to
+the agent, or not at all. Now the pager asks the agent over ACP (``session/list``, then
+``session/load``) and reads no session file. This script makes one session through the TUI (mock
+model, first message "remember this"), starts zypi again with each flag and says whether it did
+what its help text promises.
 
-The cases that fail today are known gaps (``Case.gap`` says what is wrong). They are reported as
-GAP and do not fail the run; ``--strict`` makes them fail. The change that lands ADR1 (the pager
-asks the agent over ACP instead of reading files) has to close them and drop the ``gap`` text, and
-a gap that has closed shows as FIXED until it is dropped. Exit status 0 when nothing FAILed.
-``zypi export`` is already on that path (it starts an agent and replays the session with
-``session/load``), so its two cases have no gap.
+Every case has to hold. A case that is known not to hold carries a ``Case.gap`` text that says
+what is wrong; it is reported as GAP and does not fail the run, and ``--strict`` makes it fail. A
+gap that has closed shows as FIXED until its text is dropped. No case has a gap at present. Exit
+status 0 when nothing FAILed.
 
 Linux only (it needs a pty); everything but ``run`` is plain Python and is tested on any platform.
 """
@@ -108,8 +107,6 @@ CASES: list[Case] = [
         "work",
         "the conversation is replayed",
         lambda o, ids: o.replayed,
-        gap="the title is matched against the old agent's summaries only: exit 1, 'no session id "
-        "or title matched'",
     ),
     Case(
         "--resume <title> from a directory without that session",
@@ -129,8 +126,8 @@ CASES: list[Case] = [
         "--resume <unknown id> names the id in an error",
         ["--resume", "{unknown}"],
         "work",
-        "an error naming the id, on screen or as exit status; nothing replayed",
-        lambda o, ids: (o.failed or "not found" in o.text.lower()) and not o.replayed,
+        "exit 1 before the TUI is up, an error that names the id; nothing replayed",
+        lambda o, ids: o.code == 1 and ids["unknown"] in o.text and not o.replayed,
     ),
     Case(
         "--resume <unknown title> exits with an error",
@@ -151,10 +148,7 @@ CASES: list[Case] = [
         ["--session-id", "{existing}"],
         "work",
         "exit 1, 'already in use', no new session",
-        lambda o, ids: o.code == 1 and not o.new_sessions,
-        gap="the in-use check reads the old layout, so zypi never sees the session and sends "
-        "session/new; the agent refuses it (no new session), but the TUI shows 'Session creation "
-        "failed: Invalid params: {...}' and stays up instead of exiting 1",
+        lambda o, ids: o.code == 1 and "already in use" in o.text and not o.new_sessions,
     ),
     Case(
         "export <id> prints the transcript",

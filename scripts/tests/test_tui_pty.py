@@ -228,6 +228,20 @@ def test_the_session_id_cases_tell_a_used_id_from_a_fresh_one():
     assert not fresh.holds(started_as_another, IDS)
     assert taken.holds(refused, IDS)
     assert not taken.holds(started_as_another, IDS)
+    # Exit 1 for another reason is not a refusal of the id, and the TUI that stays up is not one.
+    assert not taken.holds(rmx.Outcome(1, "Error: boom"), IDS)
+    assert not taken.holds(rmx.Outcome(None, "Session creation failed: Invalid params: {...}"), IDS)
+
+
+def test_the_unknown_id_case_wants_an_exit_before_the_tui_that_names_the_id():
+    case = next(case for case in rmx.CASES if case.argv == ["--resume", "{unknown}"])
+    refused = rmx.Outcome(1, "Error: Session does not exist: u")
+    # What it used to be: the TUI came up and showed the error, and kept running.
+    in_the_tui = rmx.Outcome(None, "Turn failed: Couldn't load session: Resource not found u")
+    assert case.holds(refused, IDS)
+    assert not case.holds(in_the_tui, IDS)
+    assert not case.holds(rmx.Outcome(1, "Error: boom"), IDS)
+    assert not case.holds(rmx.Outcome(1, f"u {rmx.FIRST} {rmx.REPLY}"), IDS)
 
 
 def test_the_export_cases_tell_a_transcript_from_a_refusal():

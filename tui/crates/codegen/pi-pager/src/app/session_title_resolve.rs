@@ -8,6 +8,7 @@
 //! [`select_by_title`] as the authoritative error source (ambiguity /
 //! no-match) and as a fallback for callers that bypass pinning.
 
+use super::session_resolve::ListedSession;
 use pi_shell::session::persistence::Summary;
 
 /// UUID-shaped resume args always take the id path, even when no such id
@@ -74,6 +75,59 @@ pub(crate) fn select_by_title<'a>(
             let listing = matches
                 .iter()
                 .map(|s| format!("  {}  {:?}", s.info.id, s.display_title()))
+                .collect::<Vec<_>>()
+                .join("\n");
+            anyhow::bail!(
+                "Multiple sessions match title {:?}:\n{listing}\n\
+                 Resume by session id instead: {} --resume <session-id>",
+                arg.trim(),
+                crate::brand::CLI_NAME
+            );
+        }
+    }
+}
+
+/// [`select_by_title`] for the rows of `session/list` (what `--resume <title>` reads).
+///
+/// - `Ok(None)`: UUID-shaped or blank arg, or no title matched.
+/// - `Ok(Some)`: exactly one row has that title.
+/// - `Err`: more than one has. Never silently pick one: a script needs the same session every
+///   time. The agent's titles are the first message of a session, so two sessions that began
+///   with the same words are common; the message lists them with their last activity. Titles
+///   are Debug-escaped: they are arbitrary user text, and raw control characters would corrupt
+///   the listing.
+pub(crate) fn select_listed_by_title<'a>(
+    arg: &str,
+    rows: &'a [ListedSession],
+) -> anyhow::Result<Option<&'a ListedSession>> {
+    if is_uuid_shaped(arg) {
+        return Ok(None);
+    }
+    let needle = title_key(arg);
+    if needle.is_empty() {
+        return Ok(None);
+    }
+    let matches: Vec<&ListedSession> = rows
+        .iter()
+        .filter(|row| row.title.as_deref().is_some_and(|t| title_key(t) == needle))
+        .collect();
+    match matches.as_slice() {
+        [] => Ok(None),
+        [only] => Ok(Some(*only)),
+        _ => {
+            let listing = matches
+                .iter()
+                .map(|row| {
+                    let active = row
+                        .updated_at
+                        .map(|t| t.format("%Y-%m-%d %H:%M UTC").to_string())
+                        .unwrap_or_else(|| "unknown".to_owned());
+                    format!(
+                        "  {}  {:?}  (last activity {active})",
+                        row.id,
+                        row.title.as_deref().unwrap_or_default()
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join("\n");
             anyhow::bail!(

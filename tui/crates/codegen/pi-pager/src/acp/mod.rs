@@ -5,6 +5,7 @@
 
 pub(crate) mod meta;
 pub(crate) mod model_state;
+pub(crate) mod session_list;
 pub mod spawn;
 pub mod tracker;
 pub(crate) mod vendor;
