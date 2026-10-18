@@ -30,8 +30,12 @@ account = "other@example.com"
     assert_eq!(reparsed, consent);
 }
 
+// The default `serial` key, like every other test that sets `GROK_HOME`. `EnvGuard` has no lock of
+// its own: a named key lets this test run at the same time as the tests that read `GROK_HOME`
+// (for example `session::worktree`), and they then open their files in the temporary home that
+// this test deletes at its end.
 #[tokio::test]
-#[serial_test::serial(GROK_HOME)]
+#[serial_test::serial]
 async fn set_consent_answer_is_monotonic_per_account() {
     let home = tempfile::tempdir().expect("home");
     let _guard = pi_test_support::env::EnvGuard::set("GROK_HOME", home.path());
