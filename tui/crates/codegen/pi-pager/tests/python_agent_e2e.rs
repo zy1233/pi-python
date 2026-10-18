@@ -367,6 +367,26 @@ async fn new_session(tx: &AcpAgentTx, cwd: &Path) -> acp::NewSessionResponse {
     .await
 }
 
+/// `session/new` with `_meta.sessionId`, the way `--session-id` sends it. The answer can be the
+/// agent's refusal, so it is not unwrapped.
+async fn new_session_with_id(
+    tx: &AcpAgentTx,
+    cwd: &Path,
+    id: &str,
+) -> Result<acp::NewSessionResponse, acp::Error> {
+    let mut meta = acp::Meta::new();
+    meta.insert("sessionId".into(), serde_json::json!(id));
+    tokio::time::timeout(
+        WIRE_TIMEOUT,
+        acp_send(
+            acp::NewSessionRequest::new(cwd.to_path_buf()).meta(meta),
+            tx,
+        ),
+    )
+    .await
+    .expect("session/new with an id timed out")
+}
+
 fn prompt_request(session: &acp::SessionId, text: &str) -> acp::PromptRequest {
     acp::PromptRequest::new(
         session.clone(),
@@ -548,10 +568,13 @@ async fn session_list_pages_are_followed_by_cursor() {
     let cwd = tempfile::tempdir().unwrap();
 
     let live = Live::start(Answer::Cancelled).await;
-    // One more than a page (`SESSION_LIST_PAGE_SIZE` is 50 in pi_agent_cli.session_list).
+    // One more than a page (`SESSION_LIST_PAGE_SIZE` is 50 in pi_agent_cli.session_list). The
+    // agent saves a session with its first message, and only a saved session is listed.
     let mut created = Vec::new();
     for _ in 0..51 {
-        created.push(new_session(&live.tx, cwd.path()).await.session_id);
+        let session = new_session(&live.tx, cwd.path()).await.session_id;
+        prompt(&live.tx, &session, "hello").await;
+        created.push(session);
     }
 
     let first = list(&live.tx, cwd.path(), None).await.expect("first page");
@@ -733,7 +756,9 @@ async fn a_title_two_sessions_share_is_ambiguous() {
 }
 
 /// `--session-id`: an id that a session has is refused before the terminal starts; a free one is
-/// used by the agent as given (`session/new` `_meta.sessionId`), and is then in use.
+/// used by the agent as given (`session/new` `_meta.sessionId`), and is then in use: for the
+/// agent at once, for the check of the pager once the session has its first message (the agent
+/// saves a session with it, and the check goes through `session/list`).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[serial_test::serial(pi_agent)]
 async fn a_session_id_is_checked_against_the_agents_sessions() {
@@ -746,6 +771,7 @@ async fn a_session_id_is_checked_against_the_agents_sessions() {
 
     let live = Live::start(Answer::Cancelled).await;
     let existing = new_session(&live.tx, work.path()).await.session_id;
+    prompt(&live.tx, &existing, "hello").await;
 
     let error = resolve_startup(&live.tx, new_with_id(&existing.to_string()), work.path())
         .await
@@ -768,18 +794,21 @@ async fn a_session_id_is_checked_against_the_agents_sessions() {
         other => panic!("expected NewWithId, got {other:?}"),
     }
 
-    // What the event loop sends next: the agent uses the id, and from then on the id is taken.
-    let mut meta = acp::Meta::new();
-    meta.insert("sessionId".into(), serde_json::json!(fresh));
-    let created = wire(
-        "session/new with an id",
-        acp_send(
-            acp::NewSessionRequest::new(work.path().to_path_buf()).meta(meta),
-            &live.tx,
-        ),
-    )
-    .await;
+    // What the event loop sends next: the agent uses the id.
+    let created = new_session_with_id(&live.tx, work.path(), &fresh)
+        .await
+        .expect("session/new with an id");
     assert_eq!(created.session_id.to_string(), fresh);
+
+    // The session has no file yet, so no listing shows the id. The agent keeps the id of every
+    // session it holds all the same, and refuses it for a second one.
+    let error = new_session_with_id(&live.tx, work.path(), &fresh)
+        .await
+        .expect_err("the agent holds the id");
+    assert_eq!(error.code, acp::ErrorCode::InvalidParams, "{error:?}");
+
+    // With its first message the session is saved, and the check of the pager finds the id too.
+    prompt(&live.tx, &created.session_id, "hello").await;
     let error = resolve_startup(&live.tx, new_with_id(&fresh), work.path())
         .await
         .expect_err("the id is in use now");

@@ -178,7 +178,7 @@ def test_a_zombie_does_not_count_as_alive(pt):
 
 # ---- resume_matrix: how a run is judged -------------------------------------------------
 
-IDS = {"existing": "e", "unknown": "u", "fresh": "f"}
+IDS = {"existing": "e", "unknown": "u", "fresh": "f", "idle": "i"}
 REPLAYED = rmx.Outcome(None, f"{rmx.FIRST}\n{rmx.REPLY}")
 FAILED = rmx.Outcome(1, "Error: no such session")
 
@@ -210,12 +210,15 @@ def test_the_cases_are_well_formed():
     assert len(names) == len(set(names))
     for case in rmx.CASES:
         assert case.cwd in ("work", "other"), case.name
-        filled = rmx.fill(case.argv, {"existing": "E", "unknown": "U", "fresh": "F"})
+        filled = rmx.fill(case.argv, {"existing": "E", "unknown": "U", "fresh": "F", "idle": "I"})
         assert all("{" not in part for part in filled), case.name
     # Every flag ADR1 moves from files to the agent has a case. (A known gap is a statement about
     # today and goes when it closes, so no test pins which cases have one.)
-    flags = {case.argv[0] for case in rmx.CASES}
+    flags = {case.argv[0] for case in rmx.CASES if case.argv}
     assert {"--continue", "--resume", "--session-id", "export"} <= flags
+    for case in rmx.CASES:
+        if case.steps:
+            assert case.ready, f"{case.name}: it cannot type before the TUI is up"
 
 
 def test_the_session_id_cases_tell_a_used_id_from_a_fresh_one():
@@ -226,11 +229,182 @@ def test_the_session_id_cases_tell_a_used_id_from_a_fresh_one():
     refused = rmx.Outcome(1, "Error: Session ID e is already in use.")
     assert fresh.holds(started_as_asked, IDS)
     assert not fresh.holds(started_as_another, IDS)
+    # A new session is saved with its first message, so the run has to type one.
+    assert [step.text for step in fresh.steps] == [rmx.SECOND] and fresh.ready
+    assert not fresh.holds(rmx.Outcome(None, ""), IDS)
     assert taken.holds(refused, IDS)
     assert not taken.holds(started_as_another, IDS)
     # Exit 1 for another reason is not a refusal of the id, and the TUI that stays up is not one.
     assert not taken.holds(rmx.Outcome(1, "Error: boom"), IDS)
     assert not taken.holds(rmx.Outcome(None, "Session creation failed: Invalid params: {...}"), IDS)
+
+
+def _idle_session_case() -> rmx.Case:
+    return next(case for case in rmx.CASES if "{idle}" in case.argv)
+
+
+def _new_command_cases() -> tuple[rmx.Case, rmx.Case]:
+    left = next(case for case in rmx.CASES if case.name.startswith("/new, left"))
+    typed = next(case for case in rmx.CASES if case.name.startswith("/new, then"))
+    return left, typed
+
+
+def test_a_session_nobody_typed_in_must_leave_no_session_file():
+    # A header-only file is what the agent wrote at session/new before decision 17.
+    header_only = {"x.jsonl": "i"}
+    idle = _idle_session_case()
+    assert not idle.steps and idle.ready  # it waits for the TUI, then types nothing
+    assert idle.holds(rmx.Outcome(None, f"... {rmx.UP}"), IDS)
+    assert not idle.holds(rmx.Outcome(None, f"... {rmx.UP}", new_sessions=header_only), IDS)
+    # It does not hold for a run that never got as far as having a session: nothing to be saved.
+    assert not idle.holds(rmx.Outcome(None, "welcome page, no model yet"), IDS)
+    assert not idle.holds(rmx.Outcome(1, f"Error: boom {rmx.UP}"), IDS)
+
+    left, _ = _new_command_cases()
+    assert [step.text for step in left.steps] == ["/new"]
+    banner = "Session s, use /resume to switch between sessions"
+    assert left.holds(rmx.Outcome(None, banner), IDS)
+    assert not left.holds(rmx.Outcome(None, banner, new_sessions=header_only), IDS)
+    assert not left.holds(rmx.Outcome(None, "the command did nothing"), IDS)  # no session made
+
+
+def test_a_new_session_that_got_a_message_must_be_saved_as_another_session():
+    _, typed = _new_command_cases()
+    assert [step.text for step in typed.steps] == ["/new", rmx.SECOND]
+    assert typed.holds(rmx.Outcome(None, "", new_sessions={"x.jsonl": "n"}), IDS)
+    assert not typed.holds(rmx.Outcome(None, ""), IDS)  # saved nowhere
+    assert not typed.holds(rmx.Outcome(None, "", new_sessions={"x.jsonl": "e"}), IDS)  # the old one
+    assert not typed.holds(
+        rmx.Outcome(None, "", new_sessions={"x.jsonl": "n", "y.jsonl": "m"}), IDS
+    )
+
+
+def test_the_new_command_cases_start_from_a_named_session_not_the_newest_one():
+    # The cases before them leave newer sessions in the same home (and an agent that is wrong
+    # leaves empty ones); `--continue` would start from whichever of them is the newest.
+    for case in _new_command_cases():
+        assert case.argv == ["--resume", "{existing}"], case.name
+
+
+class FakeTerm:
+    """What ``wait_for_run`` uses of ``pty_term.Term``: a screen that changes as time goes, and
+    that shows what the TUI does with a line once it has been typed and sent (``reactions``)."""
+
+    class Proc:
+        def __init__(self, exits_after: int | None) -> None:
+            self.exits_after = exits_after
+            self.pumps = 0
+
+        def poll(self) -> int | None:
+            return 0 if self.exits_after is not None and self.pumps >= self.exits_after else None
+
+    def __init__(
+        self,
+        screens: list[str],
+        exits_after: int | None = None,
+        reactions: dict[str, str] | None = None,
+    ) -> None:
+        self.screens = screens
+        self.proc = self.Proc(exits_after)
+        self.reactions = reactions or {}
+        self.typed: list[str] = []
+        self.sent: list[str] = []
+
+    def pump(self, seconds: float) -> None:
+        self.proc.pumps += 1
+
+    def text(self) -> str:
+        index = min(self.proc.pumps, len(self.screens)) - 1
+        return self.screens[max(index, 0)]
+
+    def type(self, text: str) -> None:
+        self.typed.append(text)
+
+    def send(self, keys: str) -> None:
+        self.sent.append(keys)
+        reaction = self.reactions.get(self.typed[-1]) if self.typed else None
+        if keys == "\r" and reaction is not None:
+            # From the next pump on, the screen shows what the TUI made of the line.
+            self.screens = [*self.screens[: self.proc.pumps], reaction]
+
+
+def _wait(term: FakeTerm, case: rmx.Case, wait: float = 5.0) -> int:
+    rmx.wait_for_run(term, case, wait)
+    return term.proc.pumps
+
+
+def test_a_run_ends_when_the_earlier_conversation_is_on_the_screen():
+    case = _case(lambda o, ids: o.replayed)
+    term = FakeTerm(["", "starting", f"{rmx.FIRST}\n{rmx.REPLY}", "never shown"])
+    assert _wait(term, case) == 3
+    assert term.typed == []
+
+
+def test_a_run_ends_when_zypi_has_exited():
+    case = _case(lambda o, ids: o.replayed)
+    term = FakeTerm(["", "Error: no such session"], exits_after=2)
+    assert _wait(term, case) == 2
+
+
+def test_a_run_that_waits_for_the_tui_ends_when_it_is_up_and_types_nothing():
+    idle = _idle_session_case()
+    term = FakeTerm(["", "starting", f"... {rmx.UP} ...", "later"])
+    assert _wait(term, idle) == 3
+    assert term.typed == [] and term.sent == []
+
+
+def test_a_run_that_types_a_first_message_ends_with_the_reply_to_it():
+    fresh = next(case for case in rmx.CASES if "{fresh}" in case.argv)
+    answer = f"{rmx.SECOND}\n{rmx.REPLY}"
+    term = FakeTerm(["", f"{rmx.UP}"], reactions={rmx.SECOND: answer})
+    pumps = _wait(term, fresh)
+    # Typed once the TUI was up, and once only; sent with Enter.
+    assert (term.typed, term.sent) == ([rmx.SECOND], ["\r"])
+    assert pumps >= 4  # and it went on pumping until the reply showed
+
+
+def test_a_reply_that_is_already_on_the_screen_is_not_the_reply_to_the_message():
+    fresh = next(case for case in rmx.CASES if "{fresh}" in case.argv)
+    # The reply is there, above the message: it is not the answer to it.
+    term = FakeTerm(["", rmx.UP], reactions={rmx.SECOND: f"{rmx.REPLY}\n{rmx.SECOND}"})
+    rmx.wait_for_run(term, fresh, 0.2)
+    assert term.typed == [rmx.SECOND]
+    assert term.proc.pumps > 10  # it kept waiting until the time was up
+
+
+def test_a_run_with_two_steps_goes_on_when_the_screen_shows_the_first_one_took_effect():
+    _, typed = _new_command_cases()
+    resumed = f"{rmx.FIRST}\n{rmx.REPLY}\n{rmx.UP}"
+    banner = "Session s, use /resume to switch between sessions"
+    answer = f"{banner}\n{rmx.SECOND}\n{rmx.REPLY}"
+    term = FakeTerm([resumed], reactions={"/new": banner, rmx.SECOND: answer})
+    _wait(term, typed)
+    assert (term.typed, term.sent) == (["/new", rmx.SECOND], ["\r", "\r"])
+
+
+def test_a_run_does_not_type_the_next_step_before_the_first_one_took_effect():
+    _, typed = _new_command_cases()
+    resumed = f"{rmx.FIRST}\n{rmx.REPLY}\n{rmx.UP}"
+    term = FakeTerm([resumed], reactions={"/new": "Error: no such command"})
+    rmx.wait_for_run(term, typed, 0.2)
+    assert term.typed == ["/new"]  # and not the message, which would start a session by itself
+
+
+def test_a_run_types_nothing_before_a_resumed_session_is_up():
+    _, typed = _new_command_cases()
+    # The model label is there, the conversation is not yet: the TUI is still loading the session.
+    term = FakeTerm([f"... {rmx.UP}"])
+    rmx.wait_for_run(term, typed, 0.2)
+    assert term.typed == [] and term.sent == []
+
+
+def test_a_run_gives_up_after_the_wait():
+    case = _case(lambda o, ids: o.replayed)
+    term = FakeTerm(["nothing happens"])
+    start = rmx.time.monotonic()
+    rmx.wait_for_run(term, case, 0.0)
+    assert rmx.time.monotonic() - start < 1
+    assert term.proc.pumps == 0
 
 
 def test_the_unknown_id_case_wants_an_exit_before_the_tui_that_names_the_id():
