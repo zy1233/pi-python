@@ -9,7 +9,7 @@ The tools in this directory find such places.
 | Tool | What it finds |
 |------|---------------|
 | `envspy.sh` with `envspy.c`, `runner.sh` and `analyze.py` | The tests that change an environment variable (`std::env::set_var` and `remove_var`) while another test runs, the tests that leave a variable changed, the tests that read a variable that another test has changed, and the places that change the working directory. It lists the tests and does not judge them |
-| `stress.sh` | The tests that fail when the order of the tests or the number of test threads changes. This finds every kind of shared state (environment, `static`, file, port), but it names only the test that failed, not the test that caused the failure |
+| `stress.sh` | The tests that fail when the order of the tests or the number of test threads changes. This finds every kind of shared state (environment, `static`, file, port), but it names only the test that failed, not the test that caused the failure. Run a suspect pair (two filters, two threads) to find the cause |
 
 The two tools work together. `stress.sh` shows that a problem exists. `envspy.sh` shows which
 tests write an environment variable. Section 3.4 of `docs/baselines/tui.md` has the numbers of the
@@ -93,8 +93,10 @@ stress test to find the failures.
 ../scripts/tui_envspy/stress.sh pi-shell 20 4 1 101    # 20 runs, 4 threads (the CI runner), seeds 101...
 ```
 
-The script builds the lib test binary of the package and runs it many times. With the shuffle
-flag it gives each run a seed (`--shuffle-seed`), so you can repeat a failing run:
+The script builds the lib test binary of the package and runs it many times. It skips the tests
+that the manifest skips (`skip` in `scripts/tui_baseline.toml`: today one test of `pi-acp-lib`
+that hangs forever, so that the run never ends). With the shuffle flag it gives each run a seed
+(`--shuffle-seed`), so you can repeat a failing run:
 
 ```bash
 cd tui/crates/codegen/pi-pager && RUSTC_BOOTSTRAP=1 <test binary> -Z unstable-options --shuffle-seed 4 --test-threads 32
@@ -122,6 +124,34 @@ ENVSPY_TAG=shuf ../scripts/tui_envspy/stress.sh pi-shell 5 32 1 1
 ../scripts/tui_envspy/envspy.sh report shuf
 ```
 
+### Find the test that causes a failure
+
+The stress summary names the test that failed, not the test that caused the failure. To find the
+cause, run the failing test beside one suspect, many times. Words after `--` are filters: a test
+runs when its name contains one of them. With two filters and two test threads, both tests start
+at once:
+
+```bash
+../scripts/tui_envspy/stress.sh pi-pager 200 2 0 1 -- failing_test suspect_test    # order of the names
+../scripts/tui_envspy/stress.sh pi-pager 200 2 1 1 -- failing_test suspect_test    # random order
+../scripts/tui_envspy/stress.sh pi-pager 200 2 0 1 -- failing_test unrelated_test  # the control
+```
+
+The first run line must say `2 passed` or `1 passed; 1 failed`: that shows that both filters
+matched one test. A test that fails in every run beside the suspect, and in no run beside the
+control, is a victim of the suspect. Use both orders: when the suspect starts first, it can be
+finished before the failing test reads the shared state. To find a suspect, look in the code for
+the `static` (an `AtomicBool`, a `OnceLock`) that the failing assertion depends on, and grep for
+the tests that write it.
+
+A pair can miss a victim whose window is a few microseconds long. Then run the victim beside a
+whole group of suspects. A filter is a substring of the full test name, so a module path selects a
+module: `-- failing_test scrollback::state::selection::tests::`. Use 32 threads, a random order and
+60 runs, and compare with a group of tests that cannot be the cause. On this tree, three `rtl_*`
+tests failed in 52 of 60 runs beside the tests of `scrollback::state::selection::tests::` (which
+call `set_appearance`), and in 0 of 60 runs alone and beside two other groups. When you have
+found the writers, read the rules below: a lock is rarely the answer.
+
 ## Rules for a test that changes process-wide state
 
 - Pass a value as a parameter when the code allows it. Do not set a variable.
@@ -135,6 +165,24 @@ ENVSPY_TAG=shuf ../scripts/tui_envspy/stress.sh pi-shell 5 32 1 1
   (`#[parallel(KEY)]` against `#[serial(KEY)]` in `serial_test`).
 - `pi_env::EnvVarGuard` takes one global lock for the life of the guard and panics when one thread
   holds two guards. Chain the keys with `and_set` and `and_remove`.
+- **A lock keeps apart only the tests that take it.** When hundreds of tests read a process-wide
+  `static` and take no lock (the theme, the colour level, the minimal-mode flag, the bidi latch),
+  and a few tests write it, do not look for every reader. Run each writer in a process of its
+  own: `crate::test_util::in_own_process(|| { … })` in `pi-pager`. The body runs in a child
+  process (the same test binary, one test), so the change cannot get out. The test fails when the
+  child fails, and it prints what the child wrote. `with_theme_test_env`, `with_test_env` (the
+  theme) and `with_rtl_bidi` (the bidi latch) do this for the tests that use them.
+- The code of the test before and after the call of `in_own_process` runs in both processes. Only
+  the body is skipped in the parent. Do not change process-wide state outside the body. The child
+  has the environment variables that the parent had when it started the child. It costs about
+  30 ms for each test.
+- Do not add `pin_theme()` to each victim that you find. It keeps apart only the tests that take
+  it, and every reader that does not take it is a new victim. On this tree, each `pin_theme()`
+  fixed one test, and the next population run found five more victims in `scrollback::`. When the
+  writers ran in their own processes, the victims were gone (section 3.4 of
+  `docs/baselines/tui.md`).
+- A test that only reads such a `static` needs nothing, as long as no test of the same process
+  writes it.
 
 ## What these tools do not find
 
@@ -154,7 +202,44 @@ ENVSPY_TAG=shuf ../scripts/tui_envspy/stress.sh pi-shell 5 32 1 1
 
 `cargo nextest run` starts each test in its own process. The environment, the `static`s and the
 working directory are then private to the test, and the races above cannot happen. The tests of
-this tree come from a project that runs them with nextest; several comments say so (for example in
-`pi-shell/src/config/tests.rs`, `pi-workspace/src/folder_trust.rs` and
-`pi-telemetry/src/debug_log.rs`) and add locks only for "the rare in-process `cargo test` thread".
-The CI of this repository runs `cargo test`, where all tests share one process.
+this tree come from a project that runs them with nextest. Comments in the code say so:
+`pi-shell/src/config/tests.rs` ("reliable only under nextest's process-per-test isolation"),
+`pi-workspace/src/lib.rs` and `folder_trust.rs` (a lock for "the rare in-process `cargo test`
+thread"), `pi-telemetry/src/debug_log.rs` and `pi-pager-render/src/terminal/xtversion.rs`. Only
+one crate, `pi-fast-worktree` (`src/db/mod.rs`), says that its suite must also pass under
+`cargo test`. The CI of this repository runs `cargo test`, where all tests share one process.
+
+What the experiment showed (commit `aa76df4`, WSL2): nextest ran the lib tests of `pi-pager` 11
+times (32 threads 10 times, 4 threads once) and of `pi-shell` 5 times (32 threads) with no
+failure. `cargo test` with a random order and 32 threads failed in 3 of 32 runs of `pi-pager`
+after the first fixes of this directory (6 of 32 before them), and in none of 10 runs with the
+fixed order of CI and 32 threads. The price, as wall time with 4 threads: the lib tests of
+`pi-pager` took 79.5 s under nextest and 29.7 s under `cargo test`. `in_own_process` gives the
+same isolation to the 57 tests that need it. With it, `cargo test` failed in 0 of 60 runs (random
+order, 32 threads). With 4 threads, the time that libtest prints for the lib tests of `pi-pager`
+is 27.2 to 28.0 s in 3 runs (28.8 s at `aa76df4`): the 57 child processes add no time that these
+runs can show.
+
+What nextest does not change: files and ports that tests share (a test still needs its own
+temporary directory), and the threads and child processes that one test starts. nextest does not
+run doctests, so run `cargo test --doc` as well. In GitHub Actions, install it with
+`taiki-e/install-action@nextest`.
+
+## Disk space
+
+A debug build of the whole `tui/` tree, with its test binaries, needs tens of gigabytes in
+`CARGO_TARGET_DIR` (about 30 GB in the runs for this tool). Build on the Linux file system, and
+delete the target directory when you are done.
+
+On WSL2 the disk file of the distribution (`ext4.vhdx`) grows when you write data and does not
+shrink when you delete it. When the Windows disk that holds the file is full, WSL stops, and the
+processes in it die with `Bus error`. To get the space back, delete the data in WSL, run
+`wsl --shutdown`, and compact the file from an administrator shell:
+
+```text
+diskpart
+  select vdisk file="<path of ext4.vhdx>"
+  attach vdisk readonly
+  compact vdisk
+  detach vdisk
+```

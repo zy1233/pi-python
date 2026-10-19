@@ -7,12 +7,12 @@
 > - 编号沿用原文。本文里的 §10.x 是执行记录的节。§1–§3、§6–§9 和附录 A 指计划。附录 A.4（r5 的执行结果）、附录 B（复现方法）和修订记录在本文。
 > - 附录 C 是计划 §7 在 r10 时的全文，含每一项的执行细节。附录 D 是计划头部在 r10 时的状态文字。附录 E 是计划 §4、§5 的全文（r2 的源码事实基线与改动规模估计）。三处只为留档；现状以计划为准。
 > - 本文是历史记录。数字是当时的实测值，不再更新。要更正明显的错误，改在原处并注明。
-> - 记新的一轮时：在「10.」末尾追加一节（`### 10.19 …`），在计划的 §10 索引里加一行，在计划里改状态。不要把过程写回计划。
+> - 记新的一轮时：在「10.」末尾追加一节（`### 10.21 …`），在计划的 §10 索引里加一行，在计划里改状态。不要把过程写回计划。
 > - 文中的分支名（`codex/…`）是当时的名字。这些分支在合并后已删除；提交都在对应的 PR 里。
 
 ## 目录
 
-- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15)
+- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17)
   - [10.1 范围、方法与规模](#101-范围方法与规模)
   - [10.2 `/model` 恢复（ADR3 r3）](#102-model-恢复adr3-r3)
   - [10.3 验证（r3 的实测）](#103-验证r3-的实测)
@@ -31,6 +31,8 @@
   - [10.16 r13 追加：ADR1 的 PR 2 与 PR 3](#1016-r13-追加adr1-的-pr-2-与-pr-3)
   - [10.17 r14 追加：空会话（决策 17）与四个答复](#1017-r14-追加空会话决策-17与四个答复)
   - [10.18 r15 追加：删 `pi-shell` 的旧存储层（决策 10）](#1018-r15-追加删-pi-shell-的旧存储层决策-10)
+  - [10.19 r16 追加：合入 #25 与 #26，删 `pi-shell` 里剩下的死代码](#1019-r16-追加合入-25-与-26删-pi-shell-里剩下的死代码)
+  - [10.20 r17 追加：检查测试之间的竞争，只改测试与工具](#1020-r17-追加检查测试之间的竞争只改测试与工具)
 - [附录 A（摘录）：A.4](#附录-a摘录a4)
   - [A.4 r5 执行结果（对照 r5 时初稿里的「默认决策」；r9 的更新见 A.1）](#a4-r5-执行结果对照-r5-时初稿里的默认决策r9-的更新见-a1)
 - [附录 B：复现方法](#附录-b复现方法)
@@ -46,9 +48,9 @@
   - [5. 改动规模](#5-改动规模)
 - [修订记录](#修订记录)
 
-## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15）
+## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17）
 
-r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）；r14 合入这两个 PR，并做决策 17：会话文件在第一条用户消息时才写（§10.17）；r15 做决策 10 的存储层一项：删 `pi-shell` 里的旧存储层（§10.18）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
+r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）；r14 合入这两个 PR，并做决策 17：会话文件在第一条用户消息时才写（§10.17）；r15 做决策 10 的存储层一项：删 `pi-shell` 里的旧存储层（§10.18）；r16 合入 #25 与 #26，并删 `pi-shell` 里剩下的死代码（§10.19）；r17 检查测试之间的竞争，只改测试与工具（§10.20）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
 | 提交 | 内容 |
 |---|---|
@@ -1534,6 +1536,168 @@ M14 是已知的缺口，没有补：测试用的是常量 `MAX_TITLE_SCALARS` �
 - 只在 Linux（WSL2）上跑了 Rust 与 PTY；没有 Windows 与 macOS 的 `zypi`。
 - 这个 PR 的 CI（推送 `6bd7db5` 之后，两个运行都通过，数与预期相同）：`CI` [run 39193752450](https://github.com/zy1233/pi-python/actions/runs/39193752450)：Ruff 9 s，Python 3.11 / 3.12 / 3.13 的 `pytest` 2 m 24 s / 2 m 25 s / 2 m 20 s。`TUI CI` [run 39193752451](https://github.com/zy1233/pi-python/actions/runs/39193752451)（03:14:37Z 到 03:32:15Z）：`Gates + cargo check` 4 m 24 s，依赖图 970（上限 970），`leader` 243 / `x.ai` 297，0 条告警，`--workspace --tests` 0 个错误，读盘门禁 0 处命中；`cargo test` 17 m 34 s，**8,488 通过 / 0 失败 / 21 忽略**（`pi-shell` 838，`pi-pager` 5,649，`pi-pager-render` 1,092，`pi-pager-minimal` 79，`pi-pager-bin` 21，`pi-acp-lib` 21，`pi-http` 13，`pi-telemetry` 239，`pi-file-utils` 216，`pi-sampling-types` 320）。`pi-pager-render` 在 CI 是 1,092；本地是 1,091 加 1 个已知失败（tmux 探测，在 CI 的 runner 上通过）。各 suite 的测试自己用的时间（`test result` 行里的 `finished in`）加起来约 54 s（`pi-shell` 7.28 s，`pi-pager` 的库测试 9.11 s）；job 的其余时间是编译与准备。
 
+### 10.20 r17 追加：检查测试之间的竞争，只改测试与工具
+
+用户在 2026-10-19 选的四项里，最后一项是 `race_audit`：检查同类竞争（起因是 §10.18 里的 `GROK_HOME` 串行键）。这一节记它。结果是一个只改测试、脚本与文档的 PR：[#28](https://github.com/zy1233/pi-python/pull/28)（分支 `test/tui-env-race-audit`，叠在 #27 的分支 `refactor/tui-session-store-leftovers` 上，**没有合入**；#27 合入之后，把它的基改成 `main`）。生产代码没有改。
+
+**结果。**
+
+- 随机顺序、32 个测试线程，`pi-pager` 的整个 lib 测试：修之前 6/32 遍有测试失败（种子 1–32）；修之后 0/60（种子 1–60）与 0/32（新种子 201–232）。`pi-shell`：2/20 → 0/20。
+- 偶发失败有两类原因。第一类是测试自己的缺陷（4 项）：两把互不排斥的锁；一个测试往别的测试的输出里写；`fork` 出的子进程还拿着锁文件；5 个测试改了环境变量却不还原。这些在测试里修了。
+- 第二类是**进程级的 `static`**（6 族）：颜色等级与终端原生调色板、最小模式的标志、双向文字的闩、内嵌弹窗的标志、语音的门、主题。读它们的测试有几百个，都不拿锁，所以加锁修不了。改它们的 57 个测试，现在各在自己的进程里跑（`test_util::in_own_process`，每个多约 30 ms）。
+- 工具在 `scripts/tui_envspy/`：环境变量探针，和压力脚本（随机顺序，多个线程；可以跑配对与人口实验）。
+
+**为什么会有这类竞争。** 一个 Rust 测试二进制里的所有测试，是同一个进程里的线程。它们共用环境变量、当前目录和每一个 `static`。这个树里的测试来自一个用 `cargo nextest`（一个测试一个进程）跑测试的项目，所以很多锁只管一部分测试。代码里有注释这样说：`pi-shell/src/config/tests.rs:2513-2516`（"reliable only under nextest's process-per-test isolation"）、`pi-workspace/src/lib.rs:77-80` 与 `folder_trust.rs:919-920`、`pi-telemetry/src/debug_log.rs:528`、`pi-pager-render/src/terminal/xtversion.rs:210`、`pi-update/tests/test_install_sh.rs:14`。只有 `pi-fast-worktree/src/db/mod.rs:466-468` 反着说（"must also pass under `cargo test`"）。这个仓库的 CI 跑 `cargo test`：顺序固定（按名字），4 个 vCPU 就是 4 个测试线程。这样的运行找不到这类竞争，所以 **CI 通过不能证明它们不存在**。r15 就是一例：`session::worktree` 的竞争在 `c74cc18` 里已经有，要等删代码改变了时序，才在每一遍整套测试里出现（§10.18）。
+
+**工具（`scripts/tui_envspy/`，只在 Linux 上）。**
+
+| 提交 | 内容 |
+|---|---|
+| `5421459` | 探针：`envspy.c`（一个 `LD_PRELOAD` 共享库，包住 `getenv`、`secure_getenv`、`setenv`、`unsetenv`、`putenv`、`chdir`、`fchdir`）、`envspy.sh`、`runner.sh`（把探针设成 cargo 的测试运行器）、`analyze.py`（报告）、`selftest.sh`；压力脚本 `stress.sh`；README；`scripts/tests/test_tui_envspy.py`（10 个用例）；`AGENTS.md` 里一句话 |
+| `b00ea06` | `stress.sh` 可以经探针运行（`ENVSPY_TAG`） |
+| `37b825e` | `stress.sh` 可以只跑几个点名的测试（`--` 之后的词是过滤器），用于配对与人口实验 |
+| `6b434b0` | `stress.sh` 跳过清单跳过的测试（清单里 `skip`）。`pi-acp-lib` 有一个测试永远不结束（`vendor_x_ai_ext_is_dropped_without_sending`，§10.4：`acp::ExtRequest` 序列化时丢掉了 `method`，所以丢弃逻辑不触发，排队的请求没有人回答）；整个 lib 的普查第一次跑它时，第一遍就没有结束，我是用 `gdb` 看到那个线程停在 `block_on` 里才查到的。清单早就跳过它；脚本以前不知道 |
+
+探针记下每次改环境变量的测试和线程，报告三类事：一个测试改变量时，另一个测试还在跑（重叠）；一个测试改了变量却没有还原（泄漏）；一个测试读了别的测试改过的变量。测试的名字取自符号化的调用栈。压力脚本用 libtest 的 `--shuffle-seed` 与 `--test-threads N`（`RUSTC_BOOTSTRAP=1`，只在运行时设）把 `pi-pager` 或 `pi-shell` 的 lib 测试跑很多遍。每一遍有自己的种子，失败的一遍可以重复。探针只看环境变量；`static` 与别的共享状态只有压力脚本找得到，而且它只说出哪个测试失败，不说是哪个测试造成的。找原因用两个办法：配对与人口（下面「怎么找到肇事的测试」）。
+
+**找到的失败。** 压力运行找到 9 个偶发失败的测试（`pi-pager` 7 个，`pi-shell` 2 个）。配对与人口实验又找到 10 个受害者，共 19 个。另有 2 个失败，原因没有查明（见「留下的」）。每个测试的原因都用实验查过，除了下面点名的几处。
+
+**表 1：测试自己的缺陷（4 项）。**
+
+| 测试 | 原因 | 证据 | 修法（提交） |
+|---|---|---|---|
+| `pi-shell` `config::tests::subagents_config_models_with_env_var_enables` | `GROK_SUBAGENTS` 受两把互不排斥的锁保护：`config/tests.rs` 里的一把 `Mutex`，`agent/config_tests.rs` 里的一个 `#[serial]` 键 | 32 线程，修前 2 次运行失败（共 30 次） | 三把共享的锁（`config/test_env_locks.rs`，管 `GROK_SUBAGENTS` 等、`GROK_RESPECT_GITIGNORE` 等、`GROK_*_MODEL`），两边都用（`272c339`） |
+| `pi-pager` `memory_trace::tests::sample_events_are_valid_jsonl_and_rotate` | 别的测试不拿「进程级追踪输出」的锁，却往里写了一行 | 32 线程，修前 5/40 | 只检查样本行，接受别的测试写进来的行（`1c20d7c`） |
+| `pi-shell` `auth::manager::lock::tests::dropping_the_guard_silences_the_heartbeat_before_anyone_else_can_hold_the_lock`（心跳） | 别的测试 `fork` 出的子进程，在 `exec` 之前还拿着锁文件的描述符；守卫释放之后马上再加锁，得到 `WouldBlock`（见下面的更正） | 修前：普查 1/20；§10.18 里的 `--lib` 运行 5/15；`fork` 风暴实验 363/1,500 轮（见下） | 加锁失败时重试，最多 5 s（`f0335a5`） |
+| 5 个 `pi-pager` 测试：4 个 `persist_permission_mode_*` 与 `trust_folder_grants_and_resolves` | 设了 `GROK_HOME`（后一个还设了 `GROK_TEST_VERSION`），然后不还原。同一个进程里后面的测试因此读到一个已经删掉的目录，或者看到一个模拟的发行构建 | 探针（整套清单的一遍，默认顺序，12 个线程）：重叠 3、泄漏 1、进程结束时仍被改的变量 2；读到泄漏值的约 12,900 次 | 用守卫还原；那 4 个测试加了 `serial(GROK_HOME)`（`91a22de`）。修后：重叠 0，泄漏 0，进程结束时仍被改的变量 0，读到泄漏值 0 |
+
+`pi-shell` 的探针结果前后都是 0 / 0 / 0。三个集成测试二进制里也有设了变量却不还原的地方。我没有当它们是缺陷，没有动：`pi-pager` 的 `python_agent_e2e`（12 处泄漏，进程结束时 6 个）与 `grok_home_paths`（1 处泄漏，进程结束时 1 个），`pi-shell` 的 `test_config_update_isolation`（进程结束时 1 个）。每个文件是一个单独的测试二进制，一个进程只给本文件的测试用。变量或者在开头为整个二进制设一次（`test_config_update_isolation`；`python_agent_e2e` 也先设一次），或者由 `serial` 测试各自重设（`python_agent_e2e`、`grok_home_paths`）。
+
+**表 2：进程级的 `static`（6 族，57 个测试）。** 写者 = 改这个状态的测试。受害者 = 读这个状态、被别的测试的改动弄失败的测试。
+
+| 族 | 进程级的状态 | 写者（现在各在自己的进程里） | 受害者与证据 |
+|---|---|---|---|
+| 1 颜色等级与终端原生调色板 | `COLOR_LEVEL_CAP`（`pi-markdown/src/colors.rs:134`）；原生调色板的锁（`set_terminal_native_lock`，`pi-pager-render/src/theme/cache.rs:115`） | `thinking_body_dim_italic_survives_the_terminal_native_palette`；`reseed_round_trip_flips_every_mode_derived_gate` | `background_block_gutter_uses_block_background_fill`：配对 200/200 失败，对照 0/200。`execute_header_display_matches_overlay_body`：种子 20（32 线程）6/6 失败；配对没有复现（两种顺序各 200 次，0 次），原因是从代码推断的 |
+| 2 最小模式的标志 | `MINIMAL_MODE_ACTIVE`（`app/mod.rs:143`；屏幕模式、内嵌与滚动条的几个全局量由 `apply_screen_mode_globals` 一起设） | `minimal_double_ctrl_c_arms_then_quits`；`reseed_round_trip_flips_every_mode_derived_gate`（同上） | `ordinary_picker_keeps_tip_and_reset`：配对 200/200，对照 0/200；种子 104（4 线程）4/6 |
+| 3 双向文字的闩 | `RTL_BIDI_ENABLED`（`pi-pager-render/src/render/bidi.rs:25`） | 6 个 `rtl` 用例（`with_rtl_bidi`）；它们同时是受害者：至少 60 处 `set_appearance` 把闩存成 `false`，且不拿锁 | 3 个 `rtl_*` 用例在压力运行里失败；人口实验：与调 `set_appearance` 的三组测试一起跑，52/60、44/60、29/60 次运行失败，单独和与另外两组一起跑 0/60。`visual_selectable_cols_shifts_region_past_rtl_ellipsis`：与 5 个打开闩的测试配对 198/200，压力运行里没见过 |
+| 4 内嵌弹窗的标志 | `modal_window::EMBEDDED`（`views/modal_window.rs:38`） | 3 个：`embedded_fills_area_without_centering`、`embedded_cursor_row_takes_selection_accent`、`dropdown_chrome_embedded_is_flush_left` | `settings_modal` 的 4 个用例（`modal_widens_when_editing_max_thoughts_width`、`modal_returns_to_default_width_when_leaving_edit_mode`、`footer_total_height_grows_when_hints_wrap`、`footer_has_blank_line_between_tip_and_hints_when_hints_wrap`）：`views::` 人口 14/60 次运行失败。配对（`modal_widens_…`）修前 10/100 与 7/100，对照 0/100；其余 3 个没有配对，原因从失败信息推断（弹窗宽度 200，应为 192 或 110） |
+| 5 语音设置的门 | `VOICE_MODE_ENABLED`（`app/mod.rs:182`） | 2 个：`rebuild_rows_drops_voice_settings_when_gate_turns_off`、`voice_settings_update_omitted_leaves_gate_unchanged` | `rows_contain_categories_and_settings_through_pr_14`：配对 100/100 与 100/100，对照 0/100 |
+| 6 主题 | `theme::cache`（进程级；代码里 `pin_theme()` 出现 54 处，只有拿它的测试互相排斥） | 43 个，经两个帮助函数：`with_theme_test_env`（`app/dispatch/tests/mod.rs`，27 个用户）与 `with_test_env`（`slash/commands/theme.rs`，16 个用户） | `run_job_succeeds_on_temp_file`（`left: TokyoNight`；配对 0/100 与 1/100：窗口很短）、`mermaid_view_pending_dedup_wins_over_disk_hit_race`（配对 96/100 与 94/100，对照 0/100）、`ghost_text_renders_at_cursor_when_at_end`（配对 92/100 与 90/100，对照 0/100）；`mermaid_view_disk_hit_runs_action_without_dispatch` 失败过一次，没有配对。`app::` 人口 9/60 次运行失败 |
+
+写者合计：8 个直接用 `in_own_process`（族 1、2 的 3 个，族 4 的 3 个，族 5 的 2 个）+ 6 个 `rtl` 用例 + 43 个主题用例 = **57 个**。族 1 与 2 共用 `reseed_round_trip_flips_every_mode_derived_gate`，所以 8 个里它只算一次。配对表里的 5 行（族 4、5、6）是在 `4736014`（族 1–3 已隔离，族 4–6 还没有）与最后的提交上各跑 100 遍：见「验证」。
+
+**为什么不给受害者加锁，而是隔离写者。** 受害者有几百个（一个读主题的渲染测试都是），而且每一轮人口实验都找到新的。写者只有 57 个。锁只管拿锁的测试，所以要给每一个读者都加上；一个漏掉的读者就是一个偶发失败。把写者放进自己的进程，读者不用动，已经找到的和还没找到的受害者一起修好。
+
+**做法：`in_own_process`。** `pi-pager/src/test_util.rs` 里的 `in_own_process(|| { … })` 把一个测试的主体放进子进程里跑。
+
+- 父进程（`cargo test` 里的一个测试线程）取自己线程的名字。libtest 用测试的全名给测试线程命名（rustc 1.94.0 上查过：默认线程数、`--test-threads 1`、`--exact`、`RUST_TEST_THREADS=1` 下都是）。
+- 它再启动同一个测试二进制：`--exact <全名> --nocapture --test-threads 1`，并设环境变量 `PI_PAGER_TEST_IN_OWN_PROCESS`。子进程里这同一个测试再跑一遍；`in_own_process` 看到这个变量，就直接执行主体。
+- 父进程**不**执行主体。它等子进程结束，要求退出码是 0，并且子进程的输出里有 `test result: ok. 1 passed;`（恰好一个测试通过；子进程什么也没跑，测试就不能通过）。不满足就 panic，信息里带子进程的 stdout 与 stderr。
+- 子进程有自己的 `static`、环境变量与当前目录，主体里的改动出不去。
+
+限制：
+
+- 调用之前与之后的代码，在两个进程里都跑；只有主体在父进程里被跳过。所以不要在调用之外改进程级状态。
+- 子进程继承启动那一刻父进程的环境变量。那一刻若有另一个测试正在改环境变量，子进程会带着它。整个 lib 随机顺序运行 60 遍，没有出现这个问题。
+- 取不到带 `::` 的线程名时（测试没有在 libtest 的线程里跑），主体在当前进程里直接跑：没有隔离，也不失败。自检 `a_change_in_the_body_stays_in_the_child` 会发现这种情况：父进程里的标志被改了。
+- 代价：每个用到它的测试多一次进程启动，约 30 ms；57 个合计约 1.7 s 的 CPU 时间，分在各个线程上。
+- 与 `cargo nextest` 兼容：nextest 本来就一个测试一个进程，子进程再启动一次，结果相同。
+- 自检（2 个新测试，所以 lib 的测试 5,377 → 5,379，清单里 `reference_passed` 的和 8,488 → 8,490）：`a_change_in_the_body_stays_in_the_child`（主体里的改动只留在子进程里）与 `a_failure_in_the_body_fails_the_parent`（主体失败，父进程失败）。
+
+**先走过的路（没有采用）。**
+
+1. 给受害者加锁。项目里已有 `pin_theme()`：它拿一把锁，钉住主题与颜色等级。我给找到的受害者加了它。每加一个，修好一个测试；下一轮人口实验又在 `scrollback::` 里找到 5 个新的受害者。读者太多，锁加不完。
+2. 重试。`with_rtl_bidi` 的第一版在闩被别的测试关掉时，把测试主体再跑一遍（最多 100 次）。它要求主体没有副作用，而且受害者的窗口还在。
+
+这两个做法的提交只在本地的备份分支里，不在 PR 里。
+
+**普查（随机顺序）。** `stress.sh`：每个格子里是「有失败的运行数 / 运行数」。
+
+| 运行 | 修之前（`739d2bb`） | 修了缺陷与前 3 个（`aa76df4`） | 最后（`88e04e9`） |
+|---|---|---|---|
+| `pi-pager` lib，32 线程，种子 1–32 | 6/32 | 3/32 | 0/60（种子 1–60，整个 lib 的人口） |
+| `pi-pager` lib，32 线程，种子 201–232（新种子） | — | — | 0/32 |
+| `pi-shell` lib，32 线程，种子 1–20 | 2/20 | 0/20 | 0/20（`pi-shell` 的测试代码在 `aa76df4` 之后没有变；在最后的树上又跑了一遍） |
+| `pi-pager` lib，4 线程（CI 的线程数），种子 101–120 | 0/20 | 1/20 | 0/20 |
+| `pi-pager` lib，固定顺序（CI 的顺序），32 线程，10 遍 | — | 0/10 | 0/10 |
+| 曾经一再失败的种子，各 6 遍：32 线程的种子 20、21、24，4 线程的种子 104 | — | 6/6、6/6、3/6、4/6 | 0/6、0/6、0/6、0/6 |
+
+修之前的另一批：`pi-shell` 32 线程 1/10，`pi-pager` 32 线程 3/8，`pi-shell` 4 线程 0/5，`pi-pager` 4 线程 1/5。每个失败的运行在输出文件里有 panic 信息。一个测试线程（种子 20、21、24、104）：0/1，所以这些失败需要至少两个测试同时跑。
+
+其他 7 个 suite（`pi-pager-render`、`pi-pager-minimal`、`pi-acp-lib`、`pi-http`、`pi-telemetry`、`pi-file-utils`、`pi-sampling-types`）的 lib：32 线程，随机顺序，各 10 遍：每个都是 0/10（`pi-pager-render` 1,092 个测试，`pi-pager-minimal` 79，`pi-http` 13，`pi-telemetry` 239，`pi-file-utils` 216，`pi-sampling-types` 320，`pi-acp-lib` 21；最后一个不含清单跳过的那个不结束的测试）。
+
+**人口实验（一个模块的测试，32 线程，随机顺序，种子 1–60）。** 在修之前的提交和最后的提交上各跑一遍：
+
+| 模块 | 测试数 | 之前 | 之后（`e6e5f98` 的树） |
+|---|---|---|---|
+| `views::` | 1,341（另 2 个忽略） | 14/60（`20232d3`） | 0/60 |
+| `app::` | 2,027（另 9 个忽略） | 9/60（`20232d3`） | 0/60 |
+| `scrollback::` | 956 | 7/60（`181a254`） | 0/60 |
+| 整个 lib | 5,377（另 12 个忽略） | 见上表 | 0/60 |
+
+**配对实验（一个受害者与一个写者，2 个线程，100 遍，两种顺序；对照 = 受害者与无关的测试）。** 「之前」是 `4736014`（族 1–3 已隔离，族 4–6 还没有），「之后」是最后的提交。
+
+| 族 | 受害者 + 写者，名字顺序 | 受害者 + 写者，随机顺序 | 对照 | 之后（三行都是） |
+|---|---|---|---|---|
+| 4 内嵌弹窗的标志 | 10/100 | 7/100 | 0/100 | 0/100 |
+| 6 主题（`run_job_succeeds_on_temp_file`） | 0/100 | 1/100 | 0/100 | 0/100 |
+| 5 语音设置的门 | 100/100 | 100/100 | 0/100 | 0/100 |
+| 6 主题（`mermaid_view_pending_dedup_…`） | 96/100 | 94/100 | 0/100 | 0/100 |
+| 6 主题（`ghost_text_renders_at_cursor_…`） | 92/100 | 90/100 | 0/100 | 0/100 |
+
+每一行第一遍的结果：对照和「之后」的行是 `2 passed`；「之前」的语音设置的门、`mermaid`、`ghost_text` 三行是 `1 passed; 1 failed`（它们几乎每遍都失败）。两种结果都说明两个过滤器各选中一个测试。族 1、2、3 的配对与人口数字是更早测的：族 1、2：200/200 → 0/200（同一批配对）；种子 20（32 线程）6/6 → 0/6；种子 104（4 线程）4/6 → 0/6；族 3：人口 52/60、44/60、29/60 → 0。
+
+**探针（`ENVSPY_TAG`，经随机顺序运行）。** `pi-pager` 与 `pi-shell` 的 lib 各 5 遍，经探针运行（32 线程，随机顺序，种子 1–5，`88e04e9`）：10 遍里重叠 0，泄漏 0，进程结束时仍被改的变量 0，读到已结束的测试留下的值（`GET-LEAK`）0 组。还在的是 `GET-FOREIGN`（一个测试读一个别的测试正在改着的变量）：`pi-pager` 每遍 6 组，变量是 `GROK_HOME` 与 `GROK_TEST_VERSION`，每组 1 到 41 个读者测试；`pi-shell` 每遍 25 组（`GROK_HOME` 12 组，`GROK_TEST_VERSION` 11 组，`GROK_AUTH_EARLY_INVALIDATION_SECS` 2 组）。这些读者不拿锁。探针不能说读者是否依赖这个值，我也没有逐组读，所以这些组留在「留下的」里。对照（`aa76df4` 之后的整套清单，默认顺序，12 个线程）：`pi-pager` 重叠 0、泄漏 0、进程结束时仍被改的变量 0、`GET-LEAK` 0 组、`GET-FOREIGN` 7 组；`pi-shell` 重叠 0、泄漏 0、`GET-FOREIGN` 16 组。修之前同样的运行：`pi-pager` 重叠 3、泄漏 1、进程结束时仍被改的变量 2、`GET-LEAK` 3 组、`GET-FOREIGN` 4 组。这几个数不能直接比：运行的线程数与顺序不同，一组是一个调用点，不是一次读。
+
+**怎么找到肇事的测试。** 压力运行只说出哪个测试失败，不说是哪个测试造成的。两个办法：
+
+- **配对。** 把失败的测试和一个嫌疑测试一起跑 100 到 200 次（`stress.sh … 200 2 0 1 -- 失败的测试 嫌疑测试`：两个过滤器、两个线程，两个测试同时开始），再换成一个无关的测试做对照。两种顺序都要试：嫌疑测试先开始时，它可能在受害者读状态之前就跑完了。
+- **人口。** 受害者的窗口只有几微秒时，配对不够（`run_job_succeeds_on_temp_file` 与主题写者：0/100 与 1/100，而整个 `app::` 模块一起跑是 9/60）。把受害者与一整个模块的测试一起跑（过滤器是测试全名的子串，`scrollback::state::selection::tests::` 选整个模块），32 线程、随机顺序、60 遍，并与不会造成失败的模块对照。
+
+三个 `rtl_*` 用例是这样找到肇事者的：与一个调 `set_appearance` 的测试的配对没有复现（两种顺序各 200 次，0 次失败），人口实验复现了（在隔离了族 1、2、还没有隔离 `rtl` 的中间提交 `181a254` 上；它是本地提交，不在 PR 里）：
+
+| 与谁一起 | 有失败的运行 |
+|---|---|
+| 单独 | 0/60 |
+| `views::permission_view::tests::`（不调 `set_appearance`） | 0/60 |
+| `views::settings_modal::tests::`（不调 `set_appearance`） | 0/60 |
+| `scrollback::state::selection::tests::`（70 个测试，调 `set_appearance`） | 52/60 |
+| `scrollback::state::layout::tests::`（63 个测试，调 `set_appearance`） | 44/60 |
+| `scrollback::render::tests::`（72 个测试，调 `set_appearance`） | 29/60 |
+
+`set_appearance`（`scrollback/state/mod.rs:361`）把 `rtl_bidi` 的值（默认 `false`）存进进程级的闩 `RTL_BIDI_ENABLED`；`AppView::set_appearance`（`app/app_view.rs:1634`）也存它。`rtl_*` 测试把闩开几微秒，这时任何一个这样的测试都能把它关掉。
+
+**心跳用例：原因更正。** §10.16 与 §10.18 把这个用例记成「负载下偶发，没有查根因」。根因是：另一个测试（任何一个会 `fork` 的测试，比如起子进程的）在 `fork` 之后、`exec` 之前，子进程还拿着父进程所有打开的描述符的副本，包括锁文件的。守卫释放之后马上重新加锁，`flock` 因此得到 `WouldBlock`（os error 11）。**`fork` 风暴实验**（临时分支 `tmp/fork-storm`，不在任何 PR 里；代码在 B.12）：一个测试 300 轮「加锁、起心跳、释放守卫、再加锁」，数第二次加锁立刻失败的轮数。单独跑：5 遍共 1,500 轮，0 轮失败。另一个测试同时不停地 `fork` `/bin/true`（`--test-threads 4`，风暴 6 s）：5 遍分别 65、72、83、68、75 轮失败，共 363/1,500（24.2%）。修过的真测试在同样的风暴下通过 5/5。
+
+**混沌模式什么也没找到。** 探针有一个「混沌」模式：一个测试改了变量之后，同一个测试第一次读它时睡 N 毫秒，把窗口拉宽。它只能拉宽本来就重叠的两个测试之间的窗口。`pi-shell` 与 `pi-pager` 各跑 4 遍、50 ms（修之前），没有失败。压力运行找到了失败：CI 的固定顺序与 4 个线程下，会冲突的测试根本不同时跑。
+
+**`cargo nextest`。** 一个测试一个进程时，环境、`static` 与当前目录是每个测试自己的，这类竞争不会发生。`aa76df4` 上（那时 `static` 的 6 族还没有隔离）：`pi-pager` 的 lib 跑了 11 遍（32 线程 10 遍，4 线程 1 遍），`pi-shell` 的 lib 跑了 5 遍（32 线程），共 16 遍，0 个失败；测试集合相同（`pi-pager` 5,377 通过 + 12 忽略，`pi-shell` 833 + 1）。代价：`pi-pager` 的 lib 在 4 线程下，nextest 79.5 s，`cargo test` 29.7 s（约 2.7 倍）；32 线程下 `pi-pager` 38.3–46.0 s，`pi-shell` 9.5–9.9 s。nextest 不管：测试共用的文件与端口、一个测试自己起的线程与子进程。它不跑文档测试，要另外跑 `cargo test --doc`。装法：GitHub Actions 里 `taiki-e/install-action@nextest`（本地用的是 cargo-nextest 0.9.148）。**没有改 CI。** 现在已知的失败都在测试里修了，nextest 不再是为它们而需要的；它的好处是，以后新写的测试也不会犯这类错；代价见上。改不改，等用户决定。
+
+**一个没有关系的发现：`protoc` 让 `pi-tools-api` 一遍遍重新构建。** 在 WSL 里跑 `cargo` 时，每次都先编译 `pi-tools-api` 与它上面的 crate（`pi-pager` 要约 2 分钟）。原因：`pi-proto-build/src/find_protoc.rs`（第 3 步，约 81–84 行）在 `$PROTOC` 与 `bin/protoc` 都没有、`PATH` 上有 `protoc` 时，返回一个**裸名字** `protoc`；`pi-proto-build/src/lib.rs`（137–142 行）把它原样打成 `cargo:rerun-if-changed=protoc`。这个路径（相对包目录）不存在，cargo 因此认为构建脚本每次都过期。CI 里也一样（`TUI CI` [run 39193752451](https://github.com/zy1233/pi-python/actions/runs/39193752451)，在 #27 的 `6bd7db5` 上，数日志里的 `Compiling` 行）：`cargo test` 一个 job（117871929387）里，`pi-tools-api` 编译 7 次，`pi-shell` 4 次，`pi-pager` 3 次；`Gates + cargo check` 一个 job（117871929167）里，2 次、2 次、0 次。本地的绕法：设一个**绝对路径**的 `PROTOC`（B.12 的命令就这样做）。修法有三个（都没有做）：在 `find_protoc` 里返回绝对路径；名字是裸名字时不打 `rerun-if-changed`；在 `tui-ci.yml` 里设 `PROTOC`。这是上游代码，还是 CI 配置，所以先问用户。
+
+**验证。**
+
+**验证。**
+
+- **长运行在 `88e04e9` 上**（整套清单、整个 lib 的 60 遍、人口、配对与探针）。整套清单（`scripts/tui_baseline.py test`，WSL2，清环境，增量编译，约 4 m 56 s）：**8,490 通过 / 0 失败 / 21 忽略**；`pi-pager` 5,651，`pi-shell` 838，其余各 suite 等于各自的 `reference_passed`。r16 记的那个已知失败（`pi-pager-render` 的 tmux 探测）这一遍通过了。
+- **最后的提交 `6438b59`。** 长运行之后，提交的顺序重写过。它的 `tui/` 与 `88e04e9` 只差 `test_util.rs` 里的两处：一个空行，和 panic 信息的格式串（`({}; …` 代替 `(exit {}; …`：`ExitStatus` 的文字已经带 `exit status`，原来打出两个 `exit`）。`scripts/` 差两处：`stress.sh` 跳过清单跳过的测试，`tui_baseline.toml` 里的注释与 `reference_passed`。这个提交上跑了：
+  - `scripts/tui_baseline.py check`：`cargo check --workspace --tests` 退出码 0，0 个错误；告警 0（上限 0）；依赖图 970；`leader` 243，`x.ai` 297。
+  - `rustfmt --check`，20 个改动的 Rust 文件：没有新的 hunk（rustfmt 1.8.0，2024 版）。
+  - `stress.sh` 里「跳过」那一段（提取出来单独跑，不用 `cargo`）：`pi-acp-lib` 得到 `--skip vendor_x_ai_ext_is_dropped_without_sending`，`pi-pager` 什么也没有；`set -u` 下展开正常。
+- **`6438b59` 上没有跑测试，也没有跑 `clippy`。** 我本来要在这个提交上再跑整套清单、整个 lib 的 60 遍、两个自检、负面检查和 `pi-acp-lib` 的跳过。这时 WSL 的虚拟磁盘（它的文件在 D: 盘上，只增不减）已经长到 80 GB，把 D: 盘写满：WSL 停了，一次在跑的检查以 `Bus error` 结束。大头是构建目录（29 GB）。我用 NTFS 压缩腾出 0.5 GB，重启 WSL，删了我在 WSL 里的构建与测试产物（31 GB → 0.2 GB）。虚拟磁盘文件仍是 80 GB：压缩它要管理员权限，由用户做。所以 **CI 是第一次在这个提交上跑测试**。
+- **Python。** `ruff check .` 与 `ruff format --check .` 通过。全部 `pytest`（`real_llm` 不算，含 `test_tui_envspy.py` 的 10 个）：Windows 2,569 通过 / 39 跳过 / 31 未选；Linux（WSL2，`rg` 在 `PATH` 上）2,578 通过 / 30 跳过 / 31 未选。两边都对 `6438b59`。
+
+**没有验证 / 留下的。**
+
+1. **约 140 个测试写外观缓存里的别的设置**（21 个文件：`set_show_thinking_blocks` 69、`set_group_tool_verbs` 20、`set_collapsed_edit_blocks` 16、`set_vim_mode` 15、`set_render_mermaid` 12、`set_keep_text_selection` 7、`set_simple_mode` 7 等）。没有隔离：压力运行与配对实验没有为它们找到受害者，我只隔离了有受害者的写者。
+2. **2 个失败没有查明。** `blank_quote_line_survives_drag_copy_as_blank` 失败过一次，没有复现。`command_palette_search_bar_cursor_only_when_focused` 在 `20232d3` 上 1/60 遍失败；它可能读 vim 模式（15 个测试写它），我没有用配对证实；隔离之后的运行里它没有再失败。
+3. **`GET-FOREIGN` 的组**（见「探针」）：读 `GROK_HOME`、`GROK_TEST_VERSION`、`GROK_AUTH_EARLY_INVALIDATION_SECS` 又不拿锁的测试。r16 把「读 `GROK_HOME` 又没有任何 `serial` 的测试」列为要查的一项；这一轮的结果是：探针列出了它们，混沌模式（50 ms，修之前，每个包 4 遍）和随机顺序的 lib 运行（`pi-pager` 92 遍，`pi-shell` 20 遍）没有因它们失败，我没有逐个读。
+4. **`pi-shell` 里有名字的 `serial` 键**（r16 点名的第二处；第一处，`pi-pager` 里的 `serial(GROK_HOME)`，是表 1 里那 4 个测试：它们现在与别的 `GROK_HOME` 测试用同一个键）。`force_dark_wake_env`（`GROK_AUTH_FORCE_DARK_WAKE`）：5 遍探针里没有测试在它被改的时候读它。`heap_profile_hooks`：保护一个只装一次的 `OnceLock`，这个键下只有一个测试，我没有查别处。`attribution_emit_count`：保护进程级计数器 `EMIT_COUNT`；整个 `pi-shell` 里只有 `StorageClientAttributionBridge::record_401`（`auth/credential_provider.rs`）会在这两个测试之外增加它，哪个测试会走到那里，我没有查；探针看不到计数器。
+5. **别的 crate。** 其他 7 个 suite 的 lib 只各跑了 10 遍；清单外的 crate（`pi-workspace`、`pi-fast-worktree`、`pi-update` 等）和集成测试二进制（上面三个有泄漏的文件除外）没有查。
+6. **只在一台机器的 Linux（WSL2，12 个 CPU，32 线程）上。** 另一台机器、macOS、Windows 可能有别的竞争。工具只能在 Linux 上用。0/60 是一个样本：窗口只有几微秒时，一遍找不到的，一千遍也许找得到（配对实验里的 `run_job_succeeds_on_temp_file` 就是 0/100 与 1/100）。
+7. **`in_own_process` 的限制**（见上）。
+8. **没有做、要等用户决定的**：`TUI CI` 改用 `cargo nextest`；`protoc` 的重新构建问题；决策 10 的另外两项。
+
 ## 附录 A（摘录）：A.4
 
 附录 A 的 A.1–A.3（能力矩阵、ACP 版本配对、逐方法）是活的参考，留在[计划](../PLAN-RUST-AGENT-RUNTIME-REMOVAL.md)里。A.4 记 r5 的执行结果，搬到这里。
@@ -2013,6 +2177,126 @@ git ls-tree -r -l HEAD -- tui/crates/codegen/pi-pager/npm                # 24 �
 git grep -n "include_str!" -- tui/crates/codegen/pi-pager/src/views/welcome/logo.rs    # logo07.txt、logo05.txt
 ```
 
+**B.12 r17 的复现**（要 Linux 或 WSL2；前提同 B.4；在 `tui/` 里跑。不要在清单之外启动 `zypi` 或测试二进制，除非先清掉 `PI_HOME` 与相关变量。整套构建的目录约 29 GB；WSL2 的虚拟磁盘文件只增不减，做完要删掉构建目录再压缩它，见 `scripts/tui_envspy/README.md` 的「Disk space」）
+
+```bash
+# 绝对路径的 PROTOC：不设的话，每次 cargo 调用都先编译 pi-tools-api 与它上面的 crate（见 §10.20 的 protoc 一节）
+export PROTOC="$(command -v protoc)"
+
+# 探针：自检，整套运行，报告。期望自检打印 SELFTEST OK；报告不判断，只列出测试。
+../scripts/tui_envspy/envspy.sh selftest
+../scripts/tui_envspy/envspy.sh run all cargo test --locked -p pi-shell -p pi-pager
+../scripts/tui_envspy/envspy.sh report all > /tmp/envspy-all.txt
+../scripts/tui_envspy/envspy.sh report all --key GROK_HOME --detail    # 一个变量，按调用栈
+# 混沌模式（修之前没有找到失败）
+../scripts/tui_envspy/envspy.sh chaos shell1 50 4 cargo test --locked -p pi-shell --lib
+
+# 普查：格式 stress.sh <包> <遍数> <线程数> <随机顺序 0|1> [第一个种子] [-- 过滤器…]
+../scripts/tui_envspy/stress.sh pi-pager 60 32 1 1      # 种子 1–60；修之前（种子 1–32）6/32；最后 0/60
+../scripts/tui_envspy/stress.sh pi-pager 32 32 1 201    # 新种子；最后 0/32
+../scripts/tui_envspy/stress.sh pi-shell 20 32 1 1      # 修之前 2/20，之后 0/20
+../scripts/tui_envspy/stress.sh pi-pager 20 4 1 101     # CI 的线程数；修之前 0/20，aa76df4 上 1/20
+../scripts/tui_envspy/stress.sh pi-shell 10 4 1 101     # 0/10
+../scripts/tui_envspy/stress.sh pi-pager 10 32 0        # 固定顺序（CI 的顺序）
+# 同一个种子重复；一个线程（用来区分「顺序问题」与「需要同时运行」）
+for i in 1 2 3 4 5 6; do ../scripts/tui_envspy/stress.sh pi-pager 1 32 1 20; done    # 修之前 6/6
+../scripts/tui_envspy/stress.sh pi-pager 1 1 1 20
+# 经探针运行随机顺序（日志在 $ENVSPY_WORK/logs/<标签>/，每遍一个）
+ENVSPY_TAG=shuf ../scripts/tui_envspy/stress.sh pi-pager 5 32 1 1
+ENVSPY_TAG=shuf ../scripts/tui_envspy/stress.sh pi-shell 5 32 1 1
+../scripts/tui_envspy/envspy.sh report shuf
+# 其他 suite 的 lib（每个 10 遍）
+for p in pi-pager-render pi-pager-minimal pi-acp-lib pi-http pi-telemetry pi-file-utils pi-sampling-types; do
+  ../scripts/tui_envspy/stress.sh "$p" 10 32 1 1
+done
+
+# 配对（`--` 之后的词是过滤器；两个过滤器、两个线程；第一行应当是 `2 passed` 或 `1 passed; 1 failed`）。
+# 格式：受害者 写者。名字顺序（第 4 个参数 0）与随机顺序（1）各一遍；再换成无关的测试做对照。
+../scripts/tui_envspy/stress.sh pi-pager 100 2 0 1 -- \
+  views::settings_modal::tests::rows_contain_categories_and_settings_through_pr_14 \
+  views::settings_modal::tests::rebuild_rows_drops_voice_settings_when_gate_turns_off          # 族 5，修之前 100/100
+../scripts/tui_envspy/stress.sh pi-pager 100 2 0 1 -- \
+  app::mermaid_worker::tests::mermaid_view_pending_dedup_wins_over_disk_hit_race \
+  app::dispatch::tests::status::dispatch_confirm_reset_setting_reset_dispatches_typed_setter_for_shared_enum   # 族 6，修之前 96/100
+../scripts/tui_envspy/stress.sh pi-pager 100 2 0 1 -- \
+  views::settings_modal::tests::rows_contain_categories_and_settings_through_pr_14 \
+  views::modal_window::tests::centered_tip_footer_centers_and_clips                            # 对照 0/100
+../scripts/tui_envspy/stress.sh pi-pager 200 2 0 1 -- \
+  background_block_gutter_uses_block_background_fill thinking_body_dim_italic_survives_the_terminal_native_palette   # 族 1，修之前 200/200
+../scripts/tui_envspy/stress.sh pi-pager 200 2 0 1 -- \
+  ordinary_picker_keeps_tip_and_reset minimal_double_ctrl_c_arms_then_quits                                           # 族 2，修之前 200/200
+# 人口（过滤器是测试全名的子串；一个模块路径选整个模块）：几个受害者 + 一组测试，32 线程，60 遍
+../scripts/tui_envspy/stress.sh pi-pager 60 32 1 1 -- \
+  rtl_overlay_slice_maps_painted_region_not_trimmed_text rtl_overlay_override_row_copies_whole_stored_text \
+  rtl_override_row_copies_whole_stored_text scrollback::state::selection::tests::              # 族 3，修之前 52/60
+../scripts/tui_envspy/stress.sh pi-pager 60 32 1 1 -- views::      # 修之前 14/60
+../scripts/tui_envspy/stress.sh pi-pager 60 32 1 1 -- app::        # 修之前 9/60
+../scripts/tui_envspy/stress.sh pi-pager 60 32 1 1 -- scrollback:: # 修之前 7/60
+../scripts/tui_envspy/stress.sh pi-pager 60 32 1 1 -- ::           # 整个 lib（5,379 个测试，另 12 个忽略）
+
+# cargo nextest（工具装在自己的目录，不动别的）
+CARGO_TARGET_DIR=$HOME/pi-verify/tools-target cargo install cargo-nextest --locked --root $HOME/pi-verify/tools
+cargo nextest run --locked -p pi-pager --lib --test-threads 4 --no-fail-fast       # 79.5 s，5,377 通过 / 12 跳过（aa76df4）
+cargo nextest run --locked -p pi-pager --lib --test-threads 32 --no-fail-fast      # 10 遍：38.3–46.0 s
+cargo nextest run --locked -p pi-shell --lib --test-threads 32 --no-fail-fast       # 5 遍：9.5–9.9 s，833 通过 / 1 跳过
+(cd crates/codegen/pi-pager && cargo test --locked -p pi-pager --lib -- --test-threads 4)   # `finished in` 27.2、27.6、28.0 s（对照：aa76df4 上 28.8 s；墙钟 29.7 s）
+
+# 整套清单（基线执行器；清环境）
+python3 ../scripts/tui_baseline.py test                     # 8,490 通过 / 0 失败 / 21 忽略（`88e04e9` 上，约 4 m 56 s，增量编译）
+
+# in_own_process 的反向检查：在一个一次性的克隆里，把 views/modal_window.rs 里
+# embedded_fills_area_without_centering 的 `set_embedded(true);` 改成 `set_embedded(false);`，再跑它
+cargo test --locked -p pi-pager --lib -- embedded_fills_area_without_centering
+# 期望：测试失败，信息里有 `did not pass in its own process`、子进程的 `--- stdout ---` 与断言信息 `embedded fills the whole area`
+git checkout -- crates/codegen/pi-pager/src/views/modal_window.rs   # 改回来
+
+# 工具的 pytest（Windows 与 Linux 上都行；在仓库根目录）
+python -m pytest scripts/tests/test_tui_envspy.py            # 10 通过
+
+# CI 里一个 crate 被编译几次：数 job 日志里的 Compiling 行
+gh run view 39193752451 --job 117871929387 --log > job.log   # `cargo test` 的 job
+grep -cE 'Compiling\S* +\S*pi-tools-api ' job.log            # 7；pi-shell 4，pi-pager 3
+gh run view 39193752451 --job 117871929167 --log > job2.log  # `Gates + cargo check` 的 job：2、2、0
+
+# 规模
+git diff --shortstat 739d2bb 6438b59 -- tui scripts      # 29 个文件，+2,358 / −357
+```
+
+*`fork` 风暴实验*：在一个临时分支（`tmp/fork-storm`，提交 `33c4efe`，不在任何 PR 里）把下面三个函数追加到 `pi-shell/src/auth/manager/lock_tests.rs` 的末尾（`cfg(unix)`），在 `pi-shell` 的 lib 测试二进制的包目录里（设 `CARGO_MANIFEST_DIR` 与 `CARGO_PKG_NAME`）运行：(a) `--test-threads 1 --nocapture zz_rounds`；(b) `--test-threads 4 --nocapture zz_rounds zz_fork_storm`；(c) `--test-threads 4 dropping_the_guard_silences zz_fork_storm`（真测试，要通过）。5 遍。
+
+```rust
+fn zz_round() -> bool {
+    let dir = TempDir::new().unwrap();
+    let lock_path = dir.path().join("auth.json.lock");
+    let file = OpenOptions::new().read(true).write(true).create(true).truncate(true).open(&lock_path).unwrap();
+    file.try_lock_exclusive().unwrap();
+    let heartbeat = LockHeartbeat::spawn(file.try_clone().unwrap(), StdDuration::from_millis(1));
+    drop(AuthFileLock { heartbeat: Some(heartbeat), file });
+    let second = OpenOptions::new().read(true).write(true).create(true).truncate(true).open(&lock_path).unwrap();
+    second.try_lock_exclusive().is_ok()
+}
+
+#[test]
+fn zz_fork_storm() {
+    let end = std::time::Instant::now() + StdDuration::from_secs(6);
+    let mut forks = 0u32;
+    while std::time::Instant::now() < end {
+        let _ = std::process::Command::new("/bin/true").status();
+        forks += 1;
+    }
+    eprintln!("ZZ forks {forks}");
+}
+
+#[test]
+fn zz_rounds() {
+    let rounds = 300;
+    let busy = (0..rounds).filter(|_| !zz_round()).count();
+    eprintln!("ZZ busy {busy} of {rounds}");
+}
+```
+
+结果：(a) 5 遍都是 `busy 0 of 300`；(b) `busy` 65、72、83、68、75（共 363/1,500）；(c) 5 遍都通过。
+
 ## 附录 C：计划 §7 的逐项注释（r10 原文）
 
 下面是计划 §7（分阶段计划）在 r10 时的全文，原样保留，含每一项的执行细节。计划里的 §7 现在每项只留一行状态。末尾是 §8 风险表里 R5 一行的 r10 原文。
@@ -2190,3 +2474,4 @@ Rust（pager）：
 - r14：空会话（2026-10-19）。用户在 2026-10-18 答复了四个问题：合并、决策 18、决策 17、决策 10。① 合入：#23（`7e0ca5a`）与 #24（基改成 `main`、把 `main` 合进它的分支之后，`0476ea4`）；`CI` 与 `TUI CI` 在两个提交上都通过。② 决策 18：不做；计划里记为「已定，不做」，`CHANGELOG.md` 写了 5,000 个会话时的数。③ 决策 17：做成 PR [#25](https://github.com/zy1233/pi-python/pull/25)（分支 `fix/write-session-at-first-message`，基 `main`，没有合入）。agent 在 `session/new` 时只在内存里建会话（`DeferredJsonlSessionStorage`）；第一条用户消息才把文件头、之前攒下的条目和这条消息一次写下去。没发过消息的会话没有文件，不在列表里，`session/load` 与 `session/resume` 答 `resource_not_found`，所以 `zypi --continue` 取不到它。客户端指定的 id 由 agent 记到会话关闭（`_reserved_ids`）；另一个进程先存了同一个 id 时，这个会话的第一次 `prompt` 被拒绝（缩小了两个 agent 进程之间的空隙，没有堵死）。pager 的生产代码没有改。新测试：Python 16 个（存储 10、agent 6）与 `scripts/tests` 的 12 个；PTY 恢复矩阵 13 → 16 例（`--session-id` 与 `/new` 各一个「不发消息、没有文件」的用例，加一个「`/new` 之后发消息」的用例），用例可以分步输入；`smoke.py` 不再按 ↓；`python_agent_e2e.rs` 的用例先发一条消息再找会话（仍是 14 个）。变异检查：PTY 一层的第一版（14 例）看不见「立即写」的变异（不带旗标的 `zypi` 在第一条消息之前不发 `session/new`），改成 `--session-id` 与 `/new` 之后，两个单行变异分别被 1 个与 3 个用例抓住；Python 一层 15 个改动，第一次跑 13 个被抓住，2 个（H5、A7）补测试之后也被抓住。验证：Python 全量 pytest（Windows 2,559、Linux 2,568 通过）、`python_agent_e2e` 14/14、PTY 脚本全过（`resume_matrix.py --strict` 16/16）、Ruff。本地运行留在 WSL `/tmp` 的残留（29 项，含 r13 留下的 20 个）已删，`~/.pi-python` 没有新文件。没做：决策 10（用户答复了「做」，下一个 PR，§10.18）；Windows 与 macOS 上的 `zypi`；真实 LLM；两个 agent 进程之间的空隙。见 §10.17。
 - r15：删 `pi-shell` 的旧存储层（2026-10-19）。用户 2026-10-18 的四个答复里，r14 做了前三个；这一条做第四个：决策 10。他的答复只说了存储层，所以只做这一项；决策 10 的另两项（`util/config/mcp.rs` 的 `load_mcp_servers`、`pi-pager/src/recent_dirs.rs`）没有问过，没动。做成 PR [#26](https://github.com/zy1233/pi-python/pull/26)（分支 `refactor/delete-pi-shell-session-store`，基是 #25 的分支 `fix/write-session-at-first-message`，没有合入）。① 删除：`session::storage`（14 个文件，10,007 行）与 `session::persistence`（12 个文件，2,009 行），再加只有它们在用的代码（编译器报了 41 处 `dead_code`：goal 跟踪、会话信号、workflow 状态、图片检查、`fork_filter_chat` 等，共 2,149 行）。`pi-pager` 还要用的标题清洗函数搬进新模块 `session::title`（140 行，8 个测试）；`GoalClassifierVerdict` 搬进 `extensions/notification.rs`。`tui/` 共 53 个文件，+190 / −14,166；`pi-shell` 的非测试代码 40,985 → 31,653 行，测试 1,056 → 864；清单里 `reference_passed` 的和 8,706 → 8,514。生产代码没有行为变化。② 一个测试的竞争：删除之后，整个 `pi-shell` 的 `--lib` 有一个失败（`session::worktree` 的测试，SQLite 错误 1802）；直接跑测试二进制 20 次，20 次都出现。原因：`consent` 的一个测试把 `GROK_HOME` 设成自己的临时目录，用的串行键却是具名的 `GROK_HOME`；其他读 `GROK_HOME` 的测试用默认键，而 `serial_test` 让不同的键同时跑，`EnvGuard` 自己又没有锁。所以 worktree 测试把 `worktrees.db` 建在那个临时目录里，consent 测试结束时把目录删了，SQLite 打开 WAL 文件时对数据库路径做 `stat`，得到 ENOENT，返回 1802（错误名是 `SQLITE_IOERR_FSTAT`，失败的调用却是对路径的 `stat`）。这是用 `LD_PRELOAD` 的跟踪找到的。这个竞争在 #25 的头 `c74cc18` 上就有（同样的筛选运行 15 次失败 15 次），不是这个 PR 带来的。修：那个测试改用默认的 `#[serial_test::serial]`（`332ba75`，+5 / −1，只改测试文件）；筛选运行 15 次失败 0 次，整个 `--lib` 20 次失败 0 次。③ 验证（WSL2）：`check` 在 `5a39e09` 与 `332ba75` 上都通过；整套 10 个 suite 在 `332ba75` 上 8,513 通过 / 1 个已知失败 / 21 忽略（16 m 24 s）；`tui_notices.py check` 989 / 989；对 `session::title` 的变异检查（14 个改动）：13 个被抓住，1 个（标题长度上限 100 → 101）漏过，已记下，没补；Python：Windows 2,559 通过 / 39 跳过 / 31 不选，Linux 2,568 / 30 / 31；Ruff 通过。CI（PR #26 的 `69932cf`）：`TUI CI` 8,514 通过 / 0 失败 / 21 忽略，`Gates + cargo check` 通过（依赖图 980，告警 0）；`CI` 的 Ruff 与 `pytest` 3.11、3.12、3.13（各 2,559 / 39 / 31）通过。CI 的测试线程是 4 个，竞争在这个线程数下本来就不出现，所以 CI 通过不算修好的证据。本地运行在 WSL 的 `~/.pi-python` 与 `/tmp` 里留下的残留已删。没做：决策 10 的另两项；`pi-shell` 里 7 个没人引用的依赖的删除；新出现的死单元 `session::helpers` 与 `session::worktree`（→ D.8）；`leader` 与 `x.ai` 上限的降低（现在是 243 与 297）；`[storage] cleanup_ttl_days`；同类风险的检查（`pi-pager` 里的 `serial(GROK_HOME)`、其他具名键）；`c74cc18` 的整套运行为什么没有碰到这个竞争；`auth::manager::lock` 的心跳测试偶发失败的原因；Windows 与 macOS 上的构建。见 §10.18。
 - r16：合入 #25 与 #26，删 `pi-shell` 里剩下的死代码（2026-10-19）。用户从「接下来做哪些」里选了 `merge_25_26`、`dead_units`、`small_cleanup`、`race_audit`；没选 `d10_rest`（决策 10 的另两项）。① 合入：#25（`2b0baf3`）与 #26（`7d82c27`；#25 合入后基改成 `main`，把 `main` 合进它的分支，`git merge -s ours`，因为两边的树相同）；`CI` 与 `TUI CI` 在两个 `main` 提交上都通过（`TUI CI` 在 `7d82c27` 上 8,514 通过 / 0 失败 / 21 忽略）。② PR [#27](https://github.com/zy1233/pi-python/pull/27)（分支 `refactor/tui-session-store-leftovers`，基是 `7d82c27`，没有合入）：6 个提交，`tui/` 共 28 个文件，+13 / −1,644。删了：15 个没人加载的文件（14 个 `goal_*.md` 与 `deep_research.rhai`，最后的引用在 #7 里没有了）；死单元 `session::worktree` 与 `session::helpers`；`[storage]` 段（`StorageConfig`；旧的配置照常加载，这一段被报成不认识的键；1 个新测试）；`util::config::worktree`（第一遍 `check` 的一条 `unused_imports` 告警找到的）；`pi-shell` 的 10 个依赖（依赖图 980 → 970，`Cargo.lock` 少 `tdigests`，`THIRD-PARTY-NOTICES` 少 5 条）。清单：`leader` 245 → 243，`x.ai` 304 → 297，依赖图 980 → 970，`pi-shell` 864 → 838（和 8,514 → 8,488）。生产代码没有行为变化。③ 验证（WSL2）：`check` 两遍（第一遍 1 条告警，已修；第二遍全过）；`tui_notices.py check` 984 / 984；整套 10 个 suite 8,487 通过 / 1 个已知失败 / 21 忽略（23 m 56 s）；PTY 脚本全过（`resume_matrix.py --strict` 16 PASS / 0 GAP / 0 FAIL）；新测试的变异检查（把 `StorageConfig` 放回去，测试失败）；Python：Windows 2,559 通过 / 39 跳过 / 31 不选，Linux 2,568 / 30 / 31；Ruff 通过；本地运行留在 WSL 与 Windows 临时目录里的残留已清；推送后 `CI` 与 `TUI CI` 在 `6bd7db5` 上通过（`TUI CI` 8,488 通过 / 0 失败 / 21 忽略，依赖图 970，`leader` 243 / `x.ai` 297）。④ 本地验证之后、推送之前，用 `git cherry-pick` 重建了这个分支的 6 个提交，因为第一个提交的信息把 `deep_research.rhai` 的行数写成了 564（应为 584）；每个提交的树没有变。⑤ 没做：`race_audit`（下一个只改测试的 PR）；调用图仍报死的 7 个单元（1,008 行）、没有用户的 crate `pi-workflow`（9 个文件，3,570 行）、`Config.storage_mode` 与 `--storage-mode`、约 88 个候选的没人加载的文件（→ D.8）；决策 10 的另两项；Windows 与 macOS 上的构建。见 §10.19。
+- r17：检查测试之间的竞争（2026-10-19）。用户选的四项里剩下的一项，`race_audit`（检查同类竞争）。做成了一个只改测试与工具的 PR：[#28](https://github.com/zy1233/pi-python/pull/28)（分支 `test/tui-env-race-audit`，叠在 #27 的分支上，没有合入）。生产代码没有改；清单里 `reference_passed` 的和 8,488 → 8,490（多的 2 个是 `in_own_process` 的自检）。① 工具：`scripts/tui_envspy/`：环境变量探针（`envspy.sh`，一个 `LD_PRELOAD` 的共享库）与压力脚本（`stress.sh`：随机顺序、多个线程；可以只跑点名的测试，做配对与人口实验）；10 个新的 `pytest`。② 压力运行找到 9 个偶发失败的测试；配对与人口实验又找到 10 个，共 19 个。**3 个是测试自己的缺陷**：`pi-shell` 的 `subagents_config_models_with_env_var_enables`（两把互不排斥的锁保护同一个变量）与心跳用例（别的测试 `fork` 出的子进程还拿着锁的文件描述符）；`pi-pager` 的 `memory_trace` 样本用例（别的测试写进了进程级的追踪输出）。另有 5 个测试改了 `GROK_HOME` 等变量却不还原。这些在测试里修了。**16 个由进程级的 `static` 引起**：颜色等级与终端原生调色板、最小模式的标志、双向文字的闩、内嵌弹窗的标志、语音的门、主题。读它们的测试有几百个，都不拿锁，所以加锁修不了。改它们的 57 个测试现在各在自己的进程里跑（`pi-pager` 的 `test_util::in_own_process`：父进程用 `--exact` 再启动同一个测试二进制，子进程跑测试的主体，子进程失败则父进程失败；每个多约 30 ms）。③ 数字（WSL2，本地；32 线程、随机顺序）：`pi-pager` 的 lib，修前 6/32 遍有失败，修后 0/60（种子 1–60）与 0/32（种子 201–232）；`pi-shell` 2/20 → 0/20；4 线程（CI 的线程数，种子 101–120）0/20 → 0/20（中间一次 1/20）；固定顺序（32 线程，10 遍）0/10 → 0/10；其他 7 个 suite 各 0/10。配对（一个受害者与一个写者，100 遍）：族 5 语音的门 100/100 → 0/100，族 6 主题 96/100 与 92/100 → 0/100。整套清单 8,490 通过 / 0 失败 / 21 忽略（`88e04e9`，WSL2）。④ `cargo nextest`（一个测试一个进程）在隔离之前就让 16 遍运行都没有失败；要不要在 `TUI CI` 里改用它，由用户决定：`pi-pager` 的 lib 在 4 个线程下由 29.7 s 变成 79.5 s，nextest 不跑文档测试，基线执行器要改。⑤ 另一个发现，没有改：`find_protoc()` 在 `PATH` 上找到 `protoc` 时返回不带路径的 `protoc`，构建脚本因此发出 `rerun-if-changed=protoc`，这个路径不存在，所以 `pi-tools-api` 与它上面的 crate 每次调用 cargo 都重新编译；CI 的 `cargo test` job 里 `pi-tools-api` 编译了 7 次。⑥ 没验证 / 留下的：约 140 个测试写外观缓存里的别的设置（`set_show_thinking_blocks` 等），没有隔离，没有已知的受害者；2 个失败原因没有查明（`blank_quote_line_survives_drag_copy_as_blank` 一次；`command_palette_search_bar_cursor_only_when_focused` 1/60，隔离之后没有再出现）；别的 7 个 suite 只各跑了 10 遍，清单外的 crate 没有查；只在 Linux；`in_own_process` 的限制见 §10.20。⑦ 验证的范围：长运行（整套清单、60 遍、人口、配对）在 `88e04e9` 上；最后的提交 `6438b59` 的 `tui/` 与它只差 `test_util.rs` 里两行。`6438b59` 上只跑了门禁（`check`）、`rustfmt` 和 `stress.sh` 的跳过段，没有跑测试：WSL 的虚拟磁盘把 D: 盘写满了（构建目录 29 GB，之后删了；虚拟磁盘文件还要压缩）。CI 是第一次在这个提交上跑测试。做法与数字见 §10.20。
