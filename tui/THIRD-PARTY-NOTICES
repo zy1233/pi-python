@@ -8985,40 +8985,6 @@ Copyright notice:
 License text: see Part II — MIT
 
 --------------------------------------------------------------------------------
-rhai 1.25.1
---------------------------------------------------------------------------------
-Source:  https://github.com/rhaiscript/rhai
-License: MIT  (upstream declares: MIT OR Apache-2.0)
-
-Copyright notice:
-  Copyright holders / authors (from package metadata):
-    - Jonathan Turner
-    - Lukáš Hozda
-    - Stephen Chung
-    - jhwgh1968
-
-License text: see Part II — MIT
-
-Additional requirements / notices:
-  Upstream license expression: MIT OR Apache-2.0. For this distribution, obligations are satisfied under: MIT.
-
---------------------------------------------------------------------------------
-rhai_codegen 3.2.0
---------------------------------------------------------------------------------
-Source:  https://github.com/rhaiscript/rhai
-License: MIT  (upstream declares: MIT OR Apache-2.0)
-
-Copyright notice:
-  Copyright holders / authors (from package metadata):
-    - jhwgh1968
-    - Stephen Chung
-
-License text: see Part II — MIT
-
-Additional requirements / notices:
-  Upstream license expression: MIT OR Apache-2.0. For this distribution, obligations are satisfied under: MIT.
-
---------------------------------------------------------------------------------
 ring 0.17.14
 --------------------------------------------------------------------------------
 Source:  https://github.com/briansmith/ring
@@ -10314,21 +10280,6 @@ Additional requirements / notices:
   Upstream license expression: MIT OR Apache-2.0. For this distribution, obligations are satisfied under: MIT.
 
 --------------------------------------------------------------------------------
-smartstring 1.0.1
---------------------------------------------------------------------------------
-Source:  https://github.com/bodil/smartstring
-License: MPL-2.0  (upstream declares: MPL-2.0+)
-
-Copyright notice:
-  Copyright holders / authors (from package metadata):
-    - Bodil Stokke <bodil@bodil.org>
-
-License text: see Part II — MPL-2.0
-
-Additional requirements / notices:
-  MPL-2.0 notice: Certain source files in this package are licensed under the Mozilla Public License, v. 2.0. Those files remain under the MPL-2.0; this product as a whole is not required to be licensed under the MPL-2.0. You may obtain a copy of the MPL at https://mozilla.org/MPL/2.0/.
-
---------------------------------------------------------------------------------
 smawk 0.3.2
 --------------------------------------------------------------------------------
 Source:  https://github.com/mgeisler/smawk
@@ -11332,17 +11283,6 @@ Additional requirements / notices:
   Upstream license expression: MIT OR Apache-2.0. For this distribution, obligations are satisfied under: MIT.
 
 --------------------------------------------------------------------------------
-tdigests 1.0.1
---------------------------------------------------------------------------------
-Source:  https://github.com/andylokandy/tdigests
-License: MIT
-
-Copyright notice:
-  Copyright (c) 2024 Andy Lok
-
-License text: see Part II — MIT
-
---------------------------------------------------------------------------------
 tempfile 3.27.0
 --------------------------------------------------------------------------------
 Source:  https://github.com/Stebalien/tempfile
@@ -11394,21 +11334,6 @@ Copyright notice:
   Copyright (c) 2016 Martin Geisler
 
 License text: see Part II — MIT
-
---------------------------------------------------------------------------------
-thin-vec 0.2.18
---------------------------------------------------------------------------------
-Source:  https://github.com/mozilla/thin-vec
-License: MIT  (upstream declares: MIT OR Apache-2.0)
-
-Copyright notice:
-  Copyright holders / authors (from package metadata):
-    - Aria Beingessner <a.beingessner@gmail.com>
-
-License text: see Part II — MIT
-
-Additional requirements / notices:
-  Upstream license expression: MIT OR Apache-2.0. For this distribution, obligations are satisfied under: MIT.
 
 --------------------------------------------------------------------------------
 thiserror 1.0.69

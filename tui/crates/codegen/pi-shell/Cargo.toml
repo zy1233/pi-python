@@ -58,17 +58,14 @@ tracing = { workspace = true }
 obfstr = { workspace = true }
 uuid = { workspace = true, features = ["v4", "v5", "v7"] }
 backon = { workspace = true }
-urlencoding = { workspace = true }
 git2 = { version = "0.20", default-features = false, features = [
     "vendored-libgit2",
 ] }
 arc-swap = { workspace = true }
 image = { workspace = true, features = ["png", "jpeg", "gif", "webp"] }
 dhat = { workspace = true, optional = true }
-base64 = { workspace = true }
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 strum = { workspace = true }
-pi-fast-worktree = { path = "../pi-fast-worktree", features = ["metadata"] }
 
 pi-shell-base = { workspace = true }
 pi-shell-terminal = { workspace = true }
@@ -76,14 +73,11 @@ pi-shared = { workspace = true }
 pi-status-line = { workspace = true }
 pi-sandbox = { path = "../pi-sandbox", default-features = false }
 pi-chat-state = { path = "../pi-chat-state" }
-# Segment markdown rendering + the `compaction/` store path convention.
-pi-compaction-transcript = { workspace = true }
 pi-extra-ca = { workspace = true }
 pi-token-estimation = { workspace = true }
 pi-sampling-types = { path = "../pi-sampling-types" }
 pi-tools = { path = "../pi-tools" }
 pi-tty-utils = { workspace = true }
-pi-workflow = { path = "../pi-workflow" }
 pi-system-power = { workspace = true }
 pi-workspace = { workspace = true }
 pi-subagent-resolution = { path = "../pi-subagent-resolution" }
@@ -99,13 +93,11 @@ pi-http = { workspace = true }
 pi-models = { workspace = true }
 prod-mc-cli-chat-proxy-types = { path = "../../../prod/mc/cli-chat-proxy-types" }
 fs2 = { workspace = true }
-tdigests = "1.0"
 semver = { workspace = true }
 parking_lot.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
-nix = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true }
@@ -116,7 +108,6 @@ pi-status-line = { workspace = true, features = ["test-support"] }
 # Pre-main unified-log redirect (`test_support::redirect_unified_log_for_tests`).
 ctor = { workspace = true }
 filetime = { workspace = true }
-pretty_assertions = { workspace = true }
 tempfile = { workspace = true }
 # `extensions::bundle` tests build archives with `bundle::test_helpers`, which
 # is `#[cfg(test)]`-only inside pi-bundle without this feature.
@@ -129,10 +120,8 @@ serial_test = { workspace = true }
 # this crate's test targets.
 pi-shell-base = { workspace = true, features = ["test-support"] }
 pi-test-support = { workspace = true, features = [] }
-pi-test-utils = { workspace = true }
 # Mock HTTP servers and tracing capture used by in-crate unit tests.
 axum = { workspace = true, features = ["ws", "multipart"] }
-tokio-util = { workspace = true, features = ["compat", "rt"] }
 tracing-subscriber = { workspace = true, features = [
     "env-filter",
     "fmt",
