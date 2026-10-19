@@ -195,6 +195,7 @@ Anthropic 原生 image blocks；其他 provider 回退为 user-message 注入；
 - **11 种 SessionTreeEntry**（pydantic discriminated union）：message、thinkingLevelChange、modelChange、activeToolsChange、compaction、branchSummary、custom、customMessage、label、sessionInfo、leaf
 - **树结构**：`parentId` 构成树；分支 = 从任意历史 entry 续写；leaf entry 实现叶子指针移动
 - **两种存储**：`JsonlSessionStorage`（文件 I/O + 内存索引）、`MemorySessionStorage`（纯内存，测试用）
+- **延迟写（Python 一侧的扩展，默认不开）**：`JsonlSessionRepo.create({"deferred": True})` 返回 `DeferredJsonlSessionStorage`（`JsonlSessionStorage` 的子类）。第一条 `message` entry 到来之前，entry 只记在内存里；那时才一次写下 header、攒下的 entry 与这条消息。没发过消息的会话不留文件，`list`、`find`、`has_session` 也看不到它。`pi-agent-cli` 的 `session/new` 用它（计划决策 17）。
 - **Repo**：create/open/list/delete/fork；fork 语义忠实对齐 pi `getEntriesToFork`
 
 ### 6.2 AgentHarness 主类

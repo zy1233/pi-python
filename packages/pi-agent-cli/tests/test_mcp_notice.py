@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from acp import text_block
 from acp.schema import EnvVariable, HttpHeader, HttpMcpServer, McpServerStdio, SseMcpServer
 
 from pi_agent_cli.agent import PiAcpAgent
@@ -166,7 +167,10 @@ async def test_load_and_resume_say_it_too(world: Any):
     agent, client = make_agent(world)
     created = await agent.new_session(cwd=str(world.project))
     await settle(agent)
+    # A session is saved with its first message, and only a saved session can be loaded.
+    await agent.prompt(session_id=created.session_id, prompt=[text_block("hi")])
     await agent.close_session(session_id=created.session_id)
+    client.updates.clear()
     assert client.agent_messages() == []
 
     await agent.load_session(
@@ -179,7 +183,9 @@ async def test_load_and_resume_say_it_too(world: Any):
     )
     await settle(agent)
 
-    load_notice, resume_notice = client.agent_messages()
+    # (Loading replays the conversation, and the replay is agent messages too.)
+    notices = [m for m in client.agent_messages() if "MCP server" in m]
+    load_notice, resume_notice = notices
     assert "(loaded)" in load_notice
     assert "(resumed)" in resume_notice
 

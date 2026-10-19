@@ -9,6 +9,7 @@ from pi_agent_harness.prompt_templates import (
     substitute_args,
 )
 from pi_agent_harness.session import (
+    DeferredJsonlSessionStorage,
     JsonlRepoFs,
     JsonlSessionPage,
     JsonlSessionRepo,
@@ -84,6 +85,7 @@ __all__ = [
     "CompactionSettings",
     "CustomEntry",
     "CustomMessageEntry",
+    "DeferredJsonlSessionStorage",
     "ExecutionEnv",
     "ExecutionError",
     "FileError",

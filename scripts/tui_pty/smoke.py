@@ -226,9 +226,8 @@ def main() -> int:
         show(term, "resume picker")
         check("/resume lists the earlier session by its first message", picker)
         if picker:
-            # first row is the fresh empty session (plan 10.7); the one to restore is below it
-            term.send("\x1b[B")
-            term.pump(0.4)
+            # The fresh session of this start has no file yet (the agent writes it with the first
+            # message, plan decision 17), so it is not listed: the earlier session is the first row.
             term.send("\r")
             replayed = term.wait_for(r"Hello from mock", 15)
             show(term, "after resume")

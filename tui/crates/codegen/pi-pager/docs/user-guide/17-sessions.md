@@ -32,7 +32,7 @@ A session id that you choose with `--session-id` must be a UUID. No session in a
 
 The lookup stops after 30 seconds (the limit of `GROK_CONNECT_UI_TIMEOUT_SECS`). The agent lists its sessions page by page, and each page takes longer when you have more sessions. With about 1,000 sessions, `--session-id` takes about 2 seconds. With about 5,000 sessions, it can take about 30 seconds.
 
-The agent writes the file of a session when the session starts. A session in which you typed nothing has the title `(no messages)`. `zypi -c` takes such a session when it is the latest one.
+The agent writes the file of a session when you send the first message. A session in which you typed nothing has no file. It is not in the list, and `zypi -c` does not take it. Older versions of the agent wrote the file when the session started. A file of that kind is in the list with the title `(no messages)`.
 
 ## What a session keeps
 
