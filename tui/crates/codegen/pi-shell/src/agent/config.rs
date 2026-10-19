@@ -1027,18 +1027,6 @@ pub struct MarketplaceSourceEntry {
     #[serde(default)]
     pub branch: Option<String>,
 }
-/// `[storage]` section from config.toml.
-///
-/// Nothing reads `cleanup_ttl_days` now. The code that did (`resolve_cleanup_ttl_days`, in the
-/// deleted `session::persistence`) cleaned up session files, and the pager keeps none: the agent
-/// owns them. The field stays so this removal does not change the shape of [`Config`]; take it
-/// out in its own change.
-#[derive(Clone, Debug, Default, Deserialize)]
-#[serde(default)]
-pub struct StorageConfig {
-    /// Number of days to keep stale sessions before cleanup. Default: 30.
-    pub cleanup_ttl_days: Option<u32>,
-}
 /// `[paths]` configuration: extra directories to scan for skills, rules, etc.
 ///
 /// These supplement the built-in scan locations (`.grok/skills/`,
@@ -1210,9 +1198,6 @@ pub struct Config {
     /// `[tools]` — also read by `ToolsConfig::resolve()`.
     #[serde(default, skip_serializing)]
     pub tools: crate::config::ToolsConfig,
-    /// `[storage]` — no code reads it now (see [`StorageConfig`]).
-    #[serde(default, skip_serializing)]
-    pub storage: StorageConfig,
     /// `[marketplace]` — also read by `pi_plugin_marketplace::load_sources()`.
     #[serde(default, skip_serializing)]
     pub marketplace: MarketplaceConfig,
@@ -1542,7 +1527,6 @@ impl Default for Config {
             tips: None,
             permission: PermissionKnownKeys::default(),
             tools: crate::config::ToolsConfig::default(),
-            storage: StorageConfig::default(),
             marketplace: MarketplaceConfig::default(),
             diagnostics: DiagnosticsConfig::default(),
             storage_mode: StorageMode::resolve(None, None),
