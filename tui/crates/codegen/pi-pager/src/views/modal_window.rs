@@ -1159,49 +1159,50 @@ mod tests {
 
     /// Embedded mode (minimal) fills the given area with no centered popup box;
     /// the default (full TUI) renders a smaller, centered popup.
+    ///
+    /// The test sets the process-wide `EMBEDDED` flag, which every modal test
+    /// reads without a lock, so it runs in a process of its own.
     #[test]
-    #[serial_test::serial]
     fn embedded_fills_area_without_centering() {
-        use ratatui::buffer::Buffer;
-        use ratatui::layout::Rect;
+        crate::test_util::in_own_process(|| {
+            use ratatui::buffer::Buffer;
+            use ratatui::layout::Rect;
 
-        let theme = Theme::current();
-        let area = Rect::new(0, 0, 80, 24);
-        let config = dummy_config();
+            let theme = Theme::current();
+            let area = Rect::new(0, 0, 80, 24);
+            let config = dummy_config();
 
-        // Default (full TUI): a centered popup strictly smaller than the area.
-        set_embedded(false);
-        let mut buf = Buffer::empty(area);
-        let mut state = ModalWindowState::new();
-        let centered =
-            render_modal_window(&mut buf, area, &mut state, &config, &theme).expect("renders");
-        assert_ne!(
-            state.popup_area,
-            Some(area),
-            "full TUI centers a smaller popup"
-        );
+            // Default (full TUI): a centered popup strictly smaller than the area.
+            set_embedded(false);
+            let mut buf = Buffer::empty(area);
+            let mut state = ModalWindowState::new();
+            let centered =
+                render_modal_window(&mut buf, area, &mut state, &config, &theme).expect("renders");
+            assert_ne!(
+                state.popup_area,
+                Some(area),
+                "full TUI centers a smaller popup"
+            );
 
-        // Embedded (minimal): fills the full area, borderless — so content is
-        // wider than the centered popup's content.
-        set_embedded(true);
-        let mut buf = Buffer::empty(area);
-        let mut state = ModalWindowState::new();
-        let embedded =
-            render_modal_window(&mut buf, area, &mut state, &config, &theme).expect("renders");
-        assert_eq!(
-            state.popup_area,
-            Some(area),
-            "embedded fills the whole area (no centered box)"
-        );
-        assert!(
-            embedded.content.width > centered.content.width,
-            "embedded content ({}) spans wider than the centered popup ({})",
-            embedded.content.width,
-            centered.content.width
-        );
-
-        // Reset the process-global flag for other tests.
-        set_embedded(false);
+            // Embedded (minimal): fills the full area, borderless — so content is
+            // wider than the centered popup's content.
+            set_embedded(true);
+            let mut buf = Buffer::empty(area);
+            let mut state = ModalWindowState::new();
+            let embedded =
+                render_modal_window(&mut buf, area, &mut state, &config, &theme).expect("renders");
+            assert_eq!(
+                state.popup_area,
+                Some(area),
+                "embedded fills the whole area (no centered box)"
+            );
+            assert!(
+                embedded.content.width > centered.content.width,
+                "embedded content ({}) spans wider than the centered popup ({})",
+                embedded.content.width,
+                centered.content.width
+            );
+        });
     }
 
     #[test]

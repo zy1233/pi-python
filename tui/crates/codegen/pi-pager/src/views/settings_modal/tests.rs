@@ -340,32 +340,34 @@ fn setting_row_visible_hides_voice_rows_when_voice_mode_off() {
 
 #[test]
 fn rebuild_rows_drops_voice_settings_when_gate_turns_off() {
-    let prev = crate::app::voice_mode_enabled();
-    crate::app::set_voice_mode_enabled_for_test(true);
-    let mut state = make_state();
-    let has_voice_lang = |s: &SettingsModalState| {
-        s.rows.iter().any(|r| {
-            matches!(
-                r,
-                RowEntry::Setting {
-                    key: "voice_stt_language",
-                    ..
-                }
-            )
-        })
-    };
-    assert!(
-        has_voice_lang(&state),
-        "voice_stt_language should be listed with gate on"
-    );
+    // The voice gate is process-wide and the tests that read it (the settings
+    // rows) hold no lock. So the test turns it on in a process of its own.
+    crate::test_util::in_own_process(|| {
+        crate::app::set_voice_mode_enabled_for_test(true);
+        let mut state = make_state();
+        let has_voice_lang = |s: &SettingsModalState| {
+            s.rows.iter().any(|r| {
+                matches!(
+                    r,
+                    RowEntry::Setting {
+                        key: "voice_stt_language",
+                        ..
+                    }
+                )
+            })
+        };
+        assert!(
+            has_voice_lang(&state),
+            "voice_stt_language should be listed with gate on"
+        );
 
-    crate::app::set_voice_mode_enabled_for_test(false);
-    state.rebuild_rows();
-    assert!(
-        !has_voice_lang(&state),
-        "rebuild after gate off must hide voice_stt_language"
-    );
-    crate::app::set_voice_mode_enabled_for_test(prev);
+        crate::app::set_voice_mode_enabled_for_test(false);
+        state.rebuild_rows();
+        assert!(
+            !has_voice_lang(&state),
+            "rebuild after gate off must hide voice_stt_language"
+        );
+    });
 }
 
 #[test]
