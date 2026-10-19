@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: stress.sh <package> <runs> <threads> <shuffle 0|1> [first_seed]
+# Usage: stress.sh <package> <runs> <threads> <shuffle 0|1> [first_seed] [-- <filter>...]
 #
 # Run the lib tests of <package> (a package of the tui workspace) <runs> times with <threads> test
 # threads. With <shuffle> = 1 every run takes a random order of the tests (libtest --shuffle-seed N,
@@ -16,6 +16,11 @@
 # fails in some runs only, and passes with --test-threads 1, shares process-wide state with another
 # test (an environment variable, a static, a file). Keep the seed of the failing run to repeat it.
 #
+# Words after `--` are filters for the test binary (a test runs when its name contains one of them).
+# Use two filters and --test-threads 2 to run one suspect pair many times: if the first test fails
+# beside the second and never beside an unrelated test, the second one is the cause.
+#   stress.sh pi-pager 300 2 0 1 -- victim_test culprit_test
+#
 # With ENVSPY_TAG=<tag> every run goes through the env spy (envspy.sh), and its logs go to
 # $ENVSPY_WORK/logs/<tag>/. Then `envspy.sh report <tag>` lists the tests that changed an environment
 # variable at the same time in these random orders, also when no test failed. The spy makes a run
@@ -25,15 +30,27 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 work="${ENVSPY_WORK:-${XDG_CACHE_HOME:-$HOME/.cache}/pi-envspy}"
 
-[ "$#" -ge 4 ] || {
-  echo "usage: stress.sh <package> <runs> <threads> <shuffle 0|1> [first_seed]" >&2
+# The words after `--` go to the test binary.
+positional=()
+filters=()
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--" ]; then
+    shift
+    filters=("$@")
+    break
+  fi
+  positional+=("$1")
+  shift
+done
+[ "${#positional[@]}" -ge 4 ] || {
+  echo "usage: stress.sh <package> <runs> <threads> <shuffle 0|1> [first_seed] [-- <filter>...]" >&2
   exit 2
 }
-package="$1"
-runs="$2"
-threads="$3"
-shuffle="$4"
-first_seed="${5:-1}"
+package="${positional[0]}"
+runs="${positional[1]}"
+threads="${positional[2]}"
+shuffle="${positional[3]}"
+first_seed="${positional[4]:-1}"
 
 out_dir="$work/stress"
 mkdir -p "$out_dir"
@@ -100,6 +117,9 @@ fi
 echo "binary: $bin"
 echo "package directory: $crate_dir"
 echo "runs: $runs  threads: $threads  shuffle: $shuffle  first seed: $first_seed"
+if [ "${#filters[@]}" -gt 0 ]; then
+  echo "filters: ${filters[*]}"
+fi
 if [ "${#spy[@]}" -gt 0 ]; then
   echo "env spy: logs in $work/logs/$ENVSPY_TAG"
 fi
@@ -115,7 +135,7 @@ for i in $(seq 1 "$runs"); do
   out="$out_dir/$package-t$threads-run$i.out"
   code=0
   CARGO_MANIFEST_DIR="$crate_dir" CARGO_PKG_NAME="$package" RUSTC_BOOTSTRAP=1 \
-    env "${scrub[@]}" ${spy[@]+"${spy[@]}"} "$bin" "${args[@]}" >"$out" 2>&1 || code=$?
+    env "${scrub[@]}" ${spy[@]+"${spy[@]}"} "$bin" "${args[@]}" ${filters[@]+"${filters[@]}"} >"$out" 2>&1 || code=$?
   result="$(grep -E '^test result:' "$out" | tail -1 | cut -c1-120 || true)"
   mapfile -t names < <(failed_names "$out")
   echo "run $i seed=$seed exit=$code failed=${#names[@]}  $result"
