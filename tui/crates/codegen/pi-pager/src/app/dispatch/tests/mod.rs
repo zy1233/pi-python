@@ -509,20 +509,25 @@ fn agent_toast(app: &AppView) -> Option<String> {
         .as_ref()
         .map(|(s, _)| s.clone())
 }
-/// Use the `theme_cache::test_lock` to serialize tests that touch
-/// the in-memory theme state (single mutable global). Mirrors the
-/// pattern used by `theme::cache::tests`.
+/// Run a test body that changes the in-memory theme state (a single mutable
+/// global) in a process of its own. The tests that read the theme do not all
+/// take the theme test lock, so a lock cannot keep them away from a body that
+/// switches the theme; a child process can (see
+/// `test_util::in_own_process`). The lock stays for the case that the test
+/// does not run on a thread of its own.
 fn with_theme_test_env(f: impl FnOnce()) {
-    let _guard = crate::theme::cache::test_lock()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    crate::theme::cache::reset_for_test();
-    crate::theme::cache::seed_auto_theme_defaults_for_test();
-    crate::theme::cache::set(crate::theme::ThemeKind::GrokNight);
-    crate::theme::system_appearance::clear_mock();
-    f();
-    crate::theme::system_appearance::clear_mock();
-    crate::theme::cache::reset_for_test();
+    crate::test_util::in_own_process(|| {
+        let _guard = crate::theme::cache::test_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        crate::theme::cache::reset_for_test();
+        crate::theme::cache::seed_auto_theme_defaults_for_test();
+        crate::theme::cache::set(crate::theme::ThemeKind::GrokNight);
+        crate::theme::system_appearance::clear_mock();
+        f();
+        crate::theme::system_appearance::clear_mock();
+        crate::theme::cache::reset_for_test();
+    });
 }
 fn agent_scrollback_len(app: &AppView) -> usize {
     app.agents.get(&AgentId(0)).unwrap().scrollback.len()

@@ -146,19 +146,23 @@ mod tests {
     use crate::theme::{cache as theme_cache, system_appearance};
 
     /// Run a test with a clean in-memory state. Prevents disk reads by
-    /// pre-loading the theme state.
+    /// pre-loading the theme state. The body runs in a process of its own: it
+    /// switches the theme, and the tests that read the theme do not all take
+    /// the theme test lock (see `test_util::in_own_process`).
     fn with_test_env(f: impl FnOnce()) {
-        let _guard = theme_cache::test_lock()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        theme_cache::reset_for_test();
-        theme_cache::seed_auto_theme_defaults_for_test();
-        system_appearance::clear_mock();
-        // Set LOADED=true so current_kind() doesn't try to read from disk.
-        theme_cache::set(ThemeKind::GrokNight);
-        f();
-        system_appearance::clear_mock();
-        theme_cache::reset_for_test();
+        crate::test_util::in_own_process(|| {
+            let _guard = theme_cache::test_lock()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            theme_cache::reset_for_test();
+            theme_cache::seed_auto_theme_defaults_for_test();
+            system_appearance::clear_mock();
+            // Set LOADED=true so current_kind() doesn't try to read from disk.
+            theme_cache::set(ThemeKind::GrokNight);
+            f();
+            system_appearance::clear_mock();
+            theme_cache::reset_for_test();
+        });
     }
 
     // -- suggest_args ---------------------------------------------------------
