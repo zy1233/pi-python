@@ -2,7 +2,7 @@
 
 This file is generated. Do not edit it by hand.
 
-- Command: `python scripts/tui_callgraph.py keep`. Commit: `332ba75`.
+- Command: `python scripts/tui_callgraph.py keep`. Commit: `1a8abee`.
 - Run the command again after a change that moves code between modules or crates.
 - It replaces the hand-written list of examples in item 0.5 of
   [`PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`](../PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md).
@@ -25,7 +25,7 @@ This file is generated. Do not edit it by hand.
 
 | crate | non-test lines | live | dead | dead units | check first | provider-stack refs |
 |---|---|---|---|---|---|---|
-| `pi-shell` | 31,653 | 30,265 (96%) | 1,388 (4%) | 9 | 2 | 20 |
+| `pi-shell` | 31,191 | 30,183 (97%) | 1,008 (3%) | 7 | 1 | 20 |
 | `pi-sampling-types` | 12,043 | 12,043 (100%) | 0 (0%) | 0 | 0 | 1 |
 | `pi-tools` | 130,727 | 130,407 (100%) | 320 (0%) | 2 | 1 | 1 |
 | `pi-agent` | 22,902 | 22,878 (100%) | 24 (0%) | 1 | 0 | 5 |
@@ -37,26 +37,26 @@ This file is generated. Do not edit it by hand.
 
 ### `pi-shell`
 
-Non-test code: 31,653 lines in 67 units.
+Non-test code: 31,191 lines in 65 units.
 
 | | units | lines | share |
 |---|---|---|---|
-| live | 58 | 30,265 | 96% |
-| dead | 9 | 1,388 | 4% |
+| live | 58 | 30,183 | 97% |
+| dead | 7 | 1,008 | 3% |
 
 Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampling`): 8 live units, 8 files, 20 references: `agent::config` (1), `agent::model_providers` (1), `extensions::notification` (5), `remote::client` (9), `sampling` (1), `sampling::conversation` (1), `sampling::types` (1), `util::config` (1).
 
-Dead units (nothing live refers to them): `auth::flow` (45), `config::reloader` (77), `session::events` (591), `session::helpers` (21), `session::telemetry` (174), `session::unified_list` (103), `session::worktree` (359), `upload` (1), `upload::turn` (17).
+Dead units (nothing live refers to them): `auth::flow` (45), `config::reloader` (77), `session::events` (591), `session::telemetry` (174), `session::unified_list` (103), `upload` (1), `upload::turn` (17).
 
-Check these dead units first. Each has `impl` blocks for types that other units define, and code uses an impl without naming it, so the compiler may need the unit: `session::events` (`GoalClassifierVerdictTelemetry`); `session::worktree` (`ShellWorktreeType`, `WorktreeType`).
+Check these dead units first. Each has `impl` blocks for types that other units define, and code uses an impl without naming it, so the compiler may need the unit: `session::events` (`GoalClassifierVerdictTelemetry`).
 
 <details><summary>Live units</summary>
 
 | unit | lines | references from live code outside |
 |---|---|---|
-| `util::config` | 6,770 | 93 |
+| `util::config` | 6,706 | 93 |
 | `auth::manager` | 3,754 | 0 |
-| `agent::config` | 3,169 | 26 |
+| `agent::config` | 3,153 | 26 |
 | `extensions::notification` | 2,195 | 9 |
 | `config` | 1,397 | 18 |
 | `auth::recovery` | 1,073 | 0 |
@@ -81,7 +81,7 @@ Check these dead units first. Each has `impl` blocks for types that other units 
 | `claude_import` | 201 | 0 |
 | `tools::config` | 184 | 0 |
 | `auth::error` | 171 | 0 |
-| `session` | 163 | 16 |
+| `session` | 161 | 16 |
 | `auth::external_auth` | 160 | 0 |
 | `auth::token_output` | 155 | 0 |
 | `session::title` | 140 | 3 |
