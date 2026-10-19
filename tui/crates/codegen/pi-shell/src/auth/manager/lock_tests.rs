@@ -489,7 +489,18 @@ fn dropping_the_guard_silences_the_heartbeat_before_anyone_else_can_hold_the_loc
         .truncate(true)
         .open(&lock_path)
         .unwrap();
-    second.try_lock_exclusive().unwrap();
+    // A test on another thread can fork a child while the guard drops. The child holds a copy of
+    // the lock file's descriptor until it execs, and `flock` belongs to the open file description,
+    // not to the descriptor: the lock is free again a few milliseconds later. Wait for that. A lock
+    // that stays held is still a failure.
+    let deadline = std::time::Instant::now() + StdDuration::from_secs(5);
+    while let Err(e) = second.try_lock_exclusive() {
+        assert!(
+            e.kind() == io::ErrorKind::WouldBlock && std::time::Instant::now() < deadline,
+            "the lock must be free once the guard is dropped: {e}"
+        );
+        std::thread::sleep(StdDuration::from_millis(5));
+    }
     write!(second, "sentinel").unwrap();
     second.sync_all().unwrap();
     std::thread::sleep(StdDuration::from_millis(30));
