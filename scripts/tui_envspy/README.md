@@ -218,7 +218,9 @@ fixed order of CI and 32 threads. The price, as wall time with 4 threads: the li
 same isolation to the 57 tests that need it. With it, `cargo test` failed in 0 of 60 runs (random
 order, 32 threads). With 4 threads, the time that libtest prints for the lib tests of `pi-pager`
 is 27.2 to 28.0 s in 3 runs (28.8 s at `aa76df4`): the 57 child processes add no time that these
-runs can show.
+runs can show. In `TUI CI` (PR 28, run 39240903399) the same time is 15.55 s. Five earlier runs of
+`TUI CI`, without the isolation, took 8.21 to 14.83 s. The cost of the 57 processes (about 1.7 s on
+the machine above) is smaller than the difference between runs on the CI runners.
 
 What nextest does not change: files and ports that tests share (a test still needs its own
 temporary directory), and the threads and child processes that one test starts. nextest does not
