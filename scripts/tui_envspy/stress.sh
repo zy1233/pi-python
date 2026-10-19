@@ -9,7 +9,8 @@
 #
 # Run it in tui/. It builds the test binary with cargo (nothing to do when it is current) and then
 # starts the binary itself, which is faster than `cargo test` for many runs. The environment is the
-# one tui_baseline.py gives the tests (`unset_env` and `[test.env]` of scripts/tui_baseline.toml).
+# one tui_baseline.py gives the tests (`unset_env` and `[test.env]` of scripts/tui_baseline.toml), and
+# the tests that the manifest skips for the package (`skip` of its suite) are skipped here too.
 # The output of run N is $ENVSPY_WORK/stress/<package>-t<threads>-run<N>.out.
 #
 # The summary lists each test that failed, with the number of runs in which it failed. A test that
@@ -96,6 +97,22 @@ for key, value in manifest.get("env", {}).items():
 EOF
 )
 
+# The tests that the manifest skips for the lib of this package (`skip` of the suite). One of them
+# hangs forever, and a run that does not end shows nothing. tui_baseline.py passes them as --skip too.
+mapfile -t skips < <(python3 - "$here/../tui_baseline.toml" "$package" <<'EOF'
+import sys
+import tomllib
+
+with open(sys.argv[1], "rb") as fh:
+    suites = tomllib.load(fh)["test"].get("suite", [])
+for suite in suites:
+    if suite.get("package") == sys.argv[2] and "--lib" in suite.get("targets", []):
+        for name in suite.get("skip", []):
+            print("--skip")
+            print(name)
+EOF
+)
+
 # The names in the last "failures:" list of a libtest output. The "test x ... FAILED" line is not
 # reliable: a test that prints to the terminal can break it.
 failed_names() {
@@ -120,6 +137,9 @@ echo "runs: $runs  threads: $threads  shuffle: $shuffle  first seed: $first_seed
 if [ "${#filters[@]}" -gt 0 ]; then
   echo "filters: ${filters[*]}"
 fi
+if [ "${#skips[@]}" -gt 0 ]; then
+  echo "skipped (as in the manifest): ${skips[*]}"
+fi
 if [ "${#spy[@]}" -gt 0 ]; then
   echo "env spy: logs in $work/logs/$ENVSPY_TAG"
 fi
@@ -135,7 +155,7 @@ for i in $(seq 1 "$runs"); do
   out="$out_dir/$package-t$threads-run$i.out"
   code=0
   CARGO_MANIFEST_DIR="$crate_dir" CARGO_PKG_NAME="$package" RUSTC_BOOTSTRAP=1 \
-    env "${scrub[@]}" ${spy[@]+"${spy[@]}"} "$bin" "${args[@]}" ${filters[@]+"${filters[@]}"} >"$out" 2>&1 || code=$?
+    env "${scrub[@]}" ${spy[@]+"${spy[@]}"} "$bin" "${args[@]}" ${skips[@]+"${skips[@]}"} ${filters[@]+"${filters[@]}"} >"$out" 2>&1 || code=$?
   result="$(grep -E '^test result:' "$out" | tail -1 | cut -c1-120 || true)"
   mapfile -t names < <(failed_names "$out")
   echo "run $i seed=$seed exit=$code failed=${#names[@]}  $result"
