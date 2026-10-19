@@ -504,13 +504,23 @@ fn spawn_fake_acp_agent(
     });
     counter
 }
-/// Redirect `GROK_HOME` to a tempdir for test isolation.
-fn setup_grok_home_in_tempdir() -> tempfile::TempDir {
-    let tmp = tempfile::tempdir().expect("tempdir creation");
-    unsafe {
-        std::env::set_var("GROK_HOME", tmp.path());
+/// Holds the `GROK_HOME` override of one test. The fields drop in the order shown: the variable gets
+/// its old value back first, and only then is the directory removed. A later test never reads a
+/// path that is gone.
+struct GrokHomeGuard {
+    _env: crate::test_util::EnvVarGuard,
+    _dir: tempfile::TempDir,
+}
+
+/// Redirect `GROK_HOME` to a tempdir for test isolation. The variable is process-wide, so every
+/// caller must be `#[serial_test::serial(GROK_HOME)]` (the key of the other tests that override it).
+fn setup_grok_home_in_tempdir() -> GrokHomeGuard {
+    let dir = tempfile::tempdir().expect("tempdir creation");
+    let env = crate::test_util::EnvVarGuard::set("GROK_HOME", dir.path());
+    GrokHomeGuard {
+        _env: env,
+        _dir: dir,
     }
-    tmp
 }
 fn register_session_in(root: &std::path::Path, id: &str) -> acp::SessionId {
     use pi_active_sessions::{ActiveSession, register_in};
@@ -591,6 +601,7 @@ fn unregister_best_effort_swallows_io_error() {
 /// BestEffort path fires exactly one ACP notification regardless
 /// of disk outcome.
 #[tokio::test]
+#[serial_test::serial(GROK_HOME)]
 async fn persist_permission_mode_acp_notification_fires_once_on_best_effort() {
     use agent_client_protocol as acp;
     let _guard = setup_grok_home_in_tempdir();
@@ -625,6 +636,7 @@ async fn persist_permission_mode_acp_notification_fires_once_on_best_effort() {
 /// WithRollback: notification count matches disk outcome
 /// (1 on Ok, 0 on Err).
 #[tokio::test]
+#[serial_test::serial(GROK_HOME)]
 async fn persist_permission_mode_acp_notification_gated_on_disk_for_with_rollback() {
     use agent_client_protocol as acp;
     let _guard = setup_grok_home_in_tempdir();
@@ -662,6 +674,7 @@ async fn persist_permission_mode_acp_notification_gated_on_disk_for_with_rollbac
 }
 /// `session_id: None` suppresses ACP notification unconditionally.
 #[tokio::test]
+#[serial_test::serial(GROK_HOME)]
 async fn persist_permission_mode_no_session_id_suppresses_acp() {
     let _guard = setup_grok_home_in_tempdir();
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -684,6 +697,7 @@ async fn persist_permission_mode_no_session_id_suppresses_acp() {
 }
 /// BestEffort + disk failure must NOT return `SettingPersisted`.
 #[tokio::test]
+#[serial_test::serial(GROK_HOME)]
 async fn persist_permission_mode_best_effort_failure_returns_dedicated_variant() {
     let _guard = setup_grok_home_in_tempdir();
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
