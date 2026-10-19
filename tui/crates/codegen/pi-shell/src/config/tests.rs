@@ -1,5 +1,6 @@
 #![cfg_attr(rustfmt, rustfmt::skip)]
 use super::*;
+use super::test_env_locks::{MODEL_OVERRIDES_ENV_LOCK, SUBAGENTS_ENV_LOCK, TOOLS_ENV_LOCK};
 /// Mutex to serialize tests that touch the GROK_MEMORY env var.
 /// Env vars are process-global, so parallel tests race on them.
 static MEMORY_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -913,8 +914,8 @@ max_results = 8
         assert!((mem.search.mmr.lambda - 0.3).abs() < f64::EPSILON);
     });
 }
-/// Mutex to serialize tests that touch the GROK_SUBAGENTS env var.
-static SUBAGENTS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+// `SUBAGENTS_ENV_LOCK` (see `test_env_locks`) serializes the tests that touch the GROK_SUBAGENTS
+// env var.
 /// Run `f` with GROK_SUBAGENTS explicitly unset.
 fn without_grok_subagents<T>(f: impl FnOnce() -> T) -> T {
     let _guard = SUBAGENTS_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -1426,8 +1427,7 @@ fn with_model_overrides_env_full<T>(
     ps: Option<&str>,
     f: impl FnOnce() -> T,
 ) -> T {
-    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = MODEL_OVERRIDES_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     with_env_var_opt(
         "GROK_WEB_SEARCH_MODEL",
         ws,
@@ -1930,9 +1930,8 @@ fn model_overrides_prompt_suggestion_blank_values_are_unset() {
         },
     );
 }
-/// Lock shared by every test that touches the env vars read by
-/// `ToolsConfig::resolve`, so tests across both fields can't race.
-static TOOLS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+// `TOOLS_ENV_LOCK` (see `test_env_locks`) is shared by every test that touches the env vars read
+// by `ToolsConfig::resolve`, so tests across both fields can't race.
 /// Set both `ToolsConfig` env vars for the duration of `f`, then
 /// restore. `None` clears the var.
 fn with_tools_env<T>(

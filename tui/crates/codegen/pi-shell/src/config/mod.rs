@@ -1394,4 +1394,6 @@ pub(crate) fn resolve_effective_plugins_config(
 }
 pub(crate) use pi_config::{deep_merge_toml, expand_env_vars_in_string};
 #[cfg(test)]
+pub(crate) mod test_env_locks;
+#[cfg(test)]
 mod tests;
