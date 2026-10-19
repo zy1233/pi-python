@@ -1604,22 +1604,19 @@ mod tests {
         }
     }
 
-    // Serialize the process-global bidi latch; restore it on scope exit even if
-    // `f` panics, so a failed assertion can't leak `rtl_bidi = true` into other
-    // tests in the process. LTR cases need no reorder so only these RTL cases
-    // need the guard. "خوب" avoids the lam-alef ligature so columns map 1:1.
-    static BIDI_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    struct BidiLatchGuard(bool);
-    impl Drop for BidiLatchGuard {
-        fn drop(&mut self) {
-            crate::render::bidi::set_enabled(self.0);
-        }
-    }
-    fn with_rtl_bidi<R>(f: impl FnOnce() -> R) -> R {
-        let _g = BIDI_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let _latch = BidiLatchGuard(crate::render::bidi::is_enabled());
-        crate::render::bidi::set_enabled(true);
-        f()
+    /// Run `body` with the bidi latch on, in a process of its own.
+    ///
+    /// The latch is process-wide. About sixty other tests call `set_appearance`,
+    /// which stores `false` in it, and they take no lock. A lock cannot keep the
+    /// latch on for an RTL test, and it cannot keep the latch off for them: they
+    /// would see it on while an RTL test runs. LTR cases need no reorder, so
+    /// only the RTL cases use this. "خوب" avoids the lam-alef ligature so
+    /// columns map 1:1.
+    fn with_rtl_bidi(body: impl FnOnce()) {
+        crate::test_util::in_own_process(|| {
+            crate::render::bidi::set_enabled(true);
+            body();
+        });
     }
 
     /// A drag over painted (visual) RTL cells copies the logical text, not a
