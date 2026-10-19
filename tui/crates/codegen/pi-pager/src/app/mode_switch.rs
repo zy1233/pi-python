@@ -239,42 +239,43 @@ mod tests {
 
     #[test]
     fn reseed_round_trip_flips_every_mode_derived_gate() {
-        // Serializes process-global mutation with other theme-touching tests.
-        let _guard = crate::theme::cache::pin_theme();
-        // Pretend startup resolved a theme so reseed never reads the host config.
-        mark_theme_resolved();
+        // A reseed flips the screen mode, the minimal flag, the native-palette
+        // lock (and the color cap), the embedded-modal flag and more. All of
+        // them are process-wide and most tests that read them hold no lock. So
+        // the test runs in a process of its own.
+        crate::test_util::in_own_process(|| {
+            // Pretend startup resolved a theme so reseed never reads the host config.
+            mark_theme_resolved();
 
-        let mut app = crate::app::app_view::tests::test_app_with_agent();
-        let agent_id = *app.agents.keys().next().expect("agent present");
+            let mut app = crate::app::app_view::tests::test_app_with_agent();
+            let agent_id = *app.agents.keys().next().expect("agent present");
 
-        for &(mode, minimal) in &[
-            (ScreenMode::Minimal, true),
-            (ScreenMode::Fullscreen, false),
-            (ScreenMode::Minimal, true),
-        ] {
-            reseed_screen_mode(&mut app, mode);
+            for &(mode, minimal) in &[
+                (ScreenMode::Minimal, true),
+                (ScreenMode::Fullscreen, false),
+                (ScreenMode::Minimal, true),
+            ] {
+                reseed_screen_mode(&mut app, mode);
 
-            assert_eq!(app.screen_mode, mode);
-            assert_eq!(crate::app::minimal_mode_active(), minimal);
-            assert_eq!(crate::app::current_screen_mode(), mode);
-            assert_eq!(crate::views::modal_window::embedded(), minimal);
-            assert_eq!(crate::render::scrollbar::scrollbars_hidden(), minimal);
-            assert_eq!(crate::theme::cache::terminal_native_locked(), minimal);
-            assert_eq!(
-                crate::terminal::image::scrollback_inline_overlay_forced_off(),
-                minimal
-            );
-            assert_eq!(
-                app.welcome_prompt.slash_controller.screen_mode(),
-                mode,
-                "welcome prompt slash gate"
-            );
-            let agent = &app.agents[&agent_id];
-            assert_eq!(agent.is_minimal_mode(), minimal, "agent gate");
-        }
-
-        // Leave the fullscreen baseline other tests expect.
-        reseed_screen_mode(&mut app, ScreenMode::Fullscreen);
+                assert_eq!(app.screen_mode, mode);
+                assert_eq!(crate::app::minimal_mode_active(), minimal);
+                assert_eq!(crate::app::current_screen_mode(), mode);
+                assert_eq!(crate::views::modal_window::embedded(), minimal);
+                assert_eq!(crate::render::scrollbar::scrollbars_hidden(), minimal);
+                assert_eq!(crate::theme::cache::terminal_native_locked(), minimal);
+                assert_eq!(
+                    crate::terminal::image::scrollback_inline_overlay_forced_off(),
+                    minimal
+                );
+                assert_eq!(
+                    app.welcome_prompt.slash_controller.screen_mode(),
+                    mode,
+                    "welcome prompt slash gate"
+                );
+                let agent = &app.agents[&agent_id];
+                assert_eq!(agent.is_minimal_mode(), minimal, "agent gate");
+            }
+        });
     }
 
     #[test]

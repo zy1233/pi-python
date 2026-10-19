@@ -3373,19 +3373,21 @@ fn voice_target_on_active_agent_stays_bound() {
 }
 #[test]
 fn minimal_double_ctrl_c_arms_then_quits() {
-    let prev = crate::app::minimal_mode_active();
-    crate::app::set_minimal_mode_active_for_test(true);
-    let mut app = test_app_with_agent();
-    if let ActiveView::Agent(id) = app.active_view {
-        app.agents.get_mut(&id).unwrap().active_pane = crate::views::agent::ActivePane::Prompt;
-    }
-    let o1 = app.handle_input(&key_event(KeyCode::Char('c'), KeyModifiers::CONTROL));
-    let armed = app.pending_action.is_some();
-    let o2 = app.handle_input(&key_event(KeyCode::Char('c'), KeyModifiers::CONTROL));
-    crate::app::set_minimal_mode_active_for_test(prev);
-    assert!(armed, "first Ctrl+C should arm quit (o1={o1:?})");
-    assert!(
-        matches!(o2, InputOutcome::Action(crate::app::actions::Action::Quit)),
-        "second Ctrl+C should quit (o2={o2:?})"
-    );
+    // The minimal flag is process-wide, and the tests that read it hold no
+    // lock. So the test sets the flag in a process of its own.
+    crate::test_util::in_own_process(|| {
+        crate::app::set_minimal_mode_active_for_test(true);
+        let mut app = test_app_with_agent();
+        if let ActiveView::Agent(id) = app.active_view {
+            app.agents.get_mut(&id).unwrap().active_pane = crate::views::agent::ActivePane::Prompt;
+        }
+        let o1 = app.handle_input(&key_event(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        let armed = app.pending_action.is_some();
+        let o2 = app.handle_input(&key_event(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        assert!(armed, "first Ctrl+C should arm quit (o1={o1:?})");
+        assert!(
+            matches!(o2, InputOutcome::Action(crate::app::actions::Action::Quit)),
+            "second Ctrl+C should quit (o2={o2:?})"
+        );
+    });
 }
