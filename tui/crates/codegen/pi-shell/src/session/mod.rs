@@ -152,7 +152,6 @@ mod tests {
 pub(crate) mod share {}
 pub(crate) mod events;
 pub(crate) mod feedback;
-pub(crate) mod helpers;
 pub(crate) mod image_normalize;
 pub use pi_shared::session::info;
 pub(crate) mod result;
@@ -160,4 +159,3 @@ pub(crate) mod telemetry;
 pub mod title;
 pub(crate) mod unified_list;
 pub(crate) mod workflow;
-pub(crate) mod worktree;
