@@ -78,6 +78,13 @@ The command runs 4 times with 50 ms. It prints the tests that failed and the num
 which each failed. A test that fails in chaos mode and passes without it reads a variable that
 another test sets. The default is all variables (`ENVSPY_CHAOS_KEYS=ALL`).
 
+Chaos mode finds nothing when no two tests overlap. It makes a window wider only between tests
+that already run at the same time. On this tree it found no failure (4 runs with 50 ms for
+`pi-shell` and for `pi-pager`, before the fixes), and the stress test found the failures: with the
+fixed order and 4 threads of CI, the tests that conflict do not run at the same time. Use chaos
+mode after the spy report shows an overlap, to see whether the overlap breaks a test. Use the
+stress test to find the failures.
+
 ## Run the stress test
 
 ```bash
@@ -105,6 +112,15 @@ output files (`$ENVSPY_WORK/stress/<package>-t<threads>-run<N>.out`) for the pan
 
 A failure that shows with 32 threads and not with 4 is still a real defect. CI has 4 threads and a
 fixed order, so it finds the problem later and less often.
+
+To list the overlaps of these random orders also when no test fails, run the stress test through
+the spy. Set `ENVSPY_TAG`; the logs go to `$ENVSPY_WORK/logs/<tag>/` (one per run), and the spy
+makes each run several times slower:
+
+```bash
+ENVSPY_TAG=shuf ../scripts/tui_envspy/stress.sh pi-shell 5 32 1 1
+../scripts/tui_envspy/envspy.sh report shuf
+```
 
 ## Rules for a test that changes process-wide state
 

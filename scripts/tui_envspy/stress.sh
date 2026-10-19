@@ -15,6 +15,11 @@
 # The summary lists each test that failed, with the number of runs in which it failed. A test that
 # fails in some runs only, and passes with --test-threads 1, shares process-wide state with another
 # test (an environment variable, a static, a file). Keep the seed of the failing run to repeat it.
+#
+# With ENVSPY_TAG=<tag> every run goes through the env spy (envspy.sh), and its logs go to
+# $ENVSPY_WORK/logs/<tag>/. Then `envspy.sh report <tag>` lists the tests that changed an environment
+# variable at the same time in these random orders, also when no test failed. The spy makes a run
+# several times slower.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -84,9 +89,20 @@ failed_names() {
   ' "$1"
 }
 
+# The env spy as the runner of the binary (only when ENVSPY_TAG is set).
+spy=()
+if [ -n "${ENVSPY_TAG:-}" ]; then
+  bash "$here/envspy.sh" build >/dev/null
+  mkdir -p "$work/logs/$ENVSPY_TAG"
+  spy=(env ENVSPY_DIR="$work/logs/$ENVSPY_TAG" ENVSPY_SO="$work/libenvspy.so" bash "$here/runner.sh")
+fi
+
 echo "binary: $bin"
 echo "package directory: $crate_dir"
 echo "runs: $runs  threads: $threads  shuffle: $shuffle  first seed: $first_seed"
+if [ "${#spy[@]}" -gt 0 ]; then
+  echo "env spy: logs in $work/logs/$ENVSPY_TAG"
+fi
 declare -A fails=()
 bad_runs=0
 cd "$crate_dir"
@@ -99,7 +115,7 @@ for i in $(seq 1 "$runs"); do
   out="$out_dir/$package-t$threads-run$i.out"
   code=0
   CARGO_MANIFEST_DIR="$crate_dir" CARGO_PKG_NAME="$package" RUSTC_BOOTSTRAP=1 \
-    env "${scrub[@]}" "$bin" "${args[@]}" >"$out" 2>&1 || code=$?
+    env "${scrub[@]}" ${spy[@]+"${spy[@]}"} "$bin" "${args[@]}" >"$out" 2>&1 || code=$?
   result="$(grep -E '^test result:' "$out" | tail -1 | cut -c1-120 || true)"
   mapfile -t names < <(failed_names "$out")
   echo "run $i seed=$seed exit=$code failed=${#names[@]}  $result"
