@@ -36,8 +36,8 @@ tracked_crates = [
 # removes lines.
 [gates.residue]
 "grok agent" = 0
-"leader" = 245
-"x.ai" = 304
+"leader" = 243
+"x.ai" = 297
 
 # ADR1 (plan section 10.16): the pager asks the agent which sessions exist (`session/list`) and
 # reads no session files itself. Production code in these crates (paths under tui/crates) must
@@ -67,9 +67,11 @@ package = "pi-pager-bin"
 # Ceiling for the number of unique packages in `cargo tree -p pi-pager-bin --target <triple>`.
 [graph.max_nodes]
 # Measured on the Linux runner (TUI CI run 37379203134, commit 0e71894): 980, down from 995 after
-# the unused-dependency sweep and the removal of pi-memory / pi-fsnotify. A new dependency has to
-# lower the count elsewhere or raise this number on purpose.
-x86_64-unknown-linux-gnu = 980
+# the unused-dependency sweep and the removal of pi-memory / pi-fsnotify. Then 970 (plan r16: ten
+# packages left when `pi-shell` dropped the dependencies that no source file named: `pi-workflow`
+# and nine registry packages; one local run on Linux). A new dependency has to lower the count
+# elsewhere or raise this number on purpose.
+x86_64-unknown-linux-gnu = 970
 
 [check]
 # Consumer build: everything that ships (`zypi`, the minimal pager, the updater).
@@ -109,8 +111,11 @@ package = "pi-shell"
 targets = ["--lib", "--test", "sandbox_requirements_pin", "--test", "test_config_update_isolation"]
 # 1,056 before plan decision 10 (r15) deleted the session store of `pi-shell` and the state types
 # that only it used. The deleted files held 202 tests (one of them compiles only on macOS), and 9
-# new ones came (the title helpers and the verdict): 1,056 - 201 + 9 = 864 on Linux.
-reference_passed = 864
+# new ones came (the title helpers and the verdict): 1,056 - 201 + 9 = 864 on Linux. Then plan r16
+# deleted `session::worktree` (24 tests, Unix only), `session::helpers` (2) and
+# `util::config::worktree` (1), and added 1 (a `[storage]` section is reported as unrecognized):
+# 864 - 24 - 2 - 1 + 1 = 838 on Linux (one local run). The ten reference numbers add up to 8,488.
+reference_passed = 838
 min_passed = 820
 
 [[test.suite]]
