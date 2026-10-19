@@ -1029,8 +1029,10 @@ pub struct MarketplaceSourceEntry {
 }
 /// `[storage]` section from config.toml.
 ///
-/// Controls session persistence settings like cleanup TTL.
-/// Read by `resolve_cleanup_ttl_days()` in `session/persistence.rs`.
+/// Nothing reads `cleanup_ttl_days` now. The code that did (`resolve_cleanup_ttl_days`, in the
+/// deleted `session::persistence`) cleaned up session files, and the pager keeps none: the agent
+/// owns them. The field stays so this removal does not change the shape of [`Config`]; take it
+/// out in its own change.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct StorageConfig {
@@ -1208,7 +1210,7 @@ pub struct Config {
     /// `[tools]` — also read by `ToolsConfig::resolve()`.
     #[serde(default, skip_serializing)]
     pub tools: crate::config::ToolsConfig,
-    /// `[storage]` — also read by `resolve_cleanup_ttl_days()`.
+    /// `[storage]` — no code reads it now (see [`StorageConfig`]).
     #[serde(default, skip_serializing)]
     pub storage: StorageConfig,
     /// `[marketplace]` — also read by `pi_plugin_marketplace::load_sources()`.

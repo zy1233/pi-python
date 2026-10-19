@@ -103,12 +103,6 @@ pub fn normalize_forked_context(items: Vec<ConversationItem>) -> (Vec<Conversati
 /// so those are skipped both before the Assistant and within the
 /// post-assistant tool-result run — otherwise long forked histories would
 /// register zero turns and never summarize, blowing up token usage.
-///
-/// NOTE: this is one of two reasoning-aware turn-boundary scanners that must move
-/// together — the other is `fork_filter_chat` in
-/// `pi-shell/src/session/storage/jsonl.rs` (it truncates to the last
-/// complete turn before this counts them). Keep their notions of a "complete
-/// turn" in sync if the turn item model changes.
 fn count_complete_turns(items: &[&ConversationItem]) -> Vec<usize> {
     let mut turn_ends = Vec::new();
     let mut i = 0;

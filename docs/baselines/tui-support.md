@@ -2,7 +2,7 @@
 
 This file is generated. Do not edit it by hand.
 
-- Command: `python scripts/tui_callgraph.py keep`. Commit: `9600cdf`.
+- Command: `python scripts/tui_callgraph.py keep`. Commit: `332ba75`.
 - Run the command again after a change that moves code between modules or crates.
 - It replaces the hand-written list of examples in item 0.5 of
   [`PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`](../PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md).
@@ -25,7 +25,7 @@ This file is generated. Do not edit it by hand.
 
 | crate | non-test lines | live | dead | dead units | check first | provider-stack refs |
 |---|---|---|---|---|---|---|
-| `pi-shell` | 40,985 | 39,979 (98%) | 1,006 (2%) | 7 | 1 | 32 |
+| `pi-shell` | 31,653 | 30,265 (96%) | 1,388 (4%) | 9 | 2 | 20 |
 | `pi-sampling-types` | 12,043 | 12,043 (100%) | 0 (0%) | 0 | 0 | 1 |
 | `pi-tools` | 130,727 | 130,407 (100%) | 320 (0%) | 2 | 1 | 1 |
 | `pi-agent` | 22,902 | 22,878 (100%) | 24 (0%) | 1 | 0 | 5 |
@@ -37,33 +37,31 @@ This file is generated. Do not edit it by hand.
 
 ### `pi-shell`
 
-Non-test code: 40,985 lines in 73 units.
+Non-test code: 31,653 lines in 67 units.
 
 | | units | lines | share |
 |---|---|---|---|
-| live | 66 | 39,979 | 98% |
-| dead | 7 | 1,006 | 2% |
+| live | 58 | 30,265 | 96% |
+| dead | 9 | 1,388 | 4% |
 
-Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampling`): 11 live units, 14 files, 32 references: `agent::config` (1), `agent::model_providers` (1), `extensions::notification` (5), `remote::client` (9), `sampling` (1), `sampling::conversation` (1), `sampling::types` (1), `session::persistence` (1), `session::storage` (10), `session::workflow` (1), `util::config` (1).
+Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampling`): 8 live units, 8 files, 20 references: `agent::config` (1), `agent::model_providers` (1), `extensions::notification` (5), `remote::client` (9), `sampling` (1), `sampling::conversation` (1), `sampling::types` (1), `util::config` (1).
 
-Dead units (nothing live refers to them): `auth::flow` (45), `config::reloader` (77), `session::events` (589), `session::telemetry` (174), `session::unified_list` (103), `upload` (1), `upload::turn` (17).
+Dead units (nothing live refers to them): `auth::flow` (45), `config::reloader` (77), `session::events` (591), `session::helpers` (21), `session::telemetry` (174), `session::unified_list` (103), `session::worktree` (359), `upload` (1), `upload::turn` (17).
 
-Check these dead units first. Each has `impl` blocks for types that other units define, and code uses an impl without naming it, so the compiler may need the unit: `session::events` (`GoalClassifierVerdictTelemetry`).
+Check these dead units first. Each has `impl` blocks for types that other units define, and code uses an impl without naming it, so the compiler may need the unit: `session::events` (`GoalClassifierVerdictTelemetry`); `session::worktree` (`ShellWorktreeType`, `WorktreeType`).
 
 <details><summary>Live units</summary>
 
 | unit | lines | references from live code outside |
 |---|---|---|
-| `session::storage` | 7,372 | 0 |
 | `util::config` | 6,770 | 93 |
 | `auth::manager` | 3,754 | 0 |
-| `agent::config` | 3,167 | 26 |
-| `extensions::notification` | 2,169 | 9 |
+| `agent::config` | 3,169 | 26 |
+| `extensions::notification` | 2,195 | 9 |
 | `config` | 1,397 | 18 |
 | `auth::recovery` | 1,073 | 0 |
 | `auth::oidc` | 927 | 0 |
 | `agent::config_model_override_parse` | 860 | 0 |
-| `session::persistence` | 803 | 3 |
 | `agent::folder_trust` | 799 | 1 |
 | `managed_config` | 763 | 5 |
 | `remote::client` | 748 | 0 |
@@ -72,39 +70,30 @@ Check these dead units first. Each has `impl` blocks for types that other units 
 | `auth::credential_provider` | 647 | 1 |
 | `auth::storage` | 623 | 0 |
 | `auth::config` | 507 | 0 |
-| `session::goal_tracker` | 478 | 0 |
 | `agent::models` | 457 | 1 |
 | `agent::model_providers` | 415 | 0 |
 | `auth::model` | 368 | 0 |
-| `session::worktree` | 359 | 0 |
 | `managed_config::response` | 255 | 0 |
-| `session::signals` | 237 | 0 |
 | `util::subprocess` | 237 | 0 |
 | `sampling::error` | 234 | 8 |
 | `session::acp_types` | 226 | 0 |
-| `session::workflow` | 208 | 0 |
 | `heap_profile` | 202 | 4 |
 | `claude_import` | 201 | 0 |
 | `tools::config` | 184 | 0 |
-| `session` | 173 | 16 |
 | `auth::error` | 171 | 0 |
+| `session` | 163 | 16 |
 | `auth::external_auth` | 160 | 0 |
 | `auth::token_output` | 155 | 0 |
+| `session::title` | 140 | 3 |
 | `auth::auth_provider` | 128 | 0 |
 | `agent::auth_method` | 104 | 4 |
 | `session::feedback` | 104 | 0 |
-| `session::helpers` | 90 | 0 |
-| `session::image_normalize` | 78 | 0 |
 | `util::grok_auth_credentials` | 78 | 0 |
-| `session::announcement_state` | 76 | 0 |
-| `sampling::conversation` | 67 | 0 |
-| `session::wire_tags` | 66 | 0 |
 | `auth::meta` | 63 | 0 |
-| `session::plan_mode` | 61 | 0 |
 | `session::result` | 58 | 0 |
 | `tier` | 57 | 1 |
 | `auth::token_type` | 52 | 0 |
-| `tools::todo` | 51 | 1 |
+| `tools::todo` | 50 | 1 |
 | `util::dual_clock` | 46 | 0 |
 | `extensions::prompt_meta` | 43 | 1 |
 | `instrumentation` | 40 | 0 |
@@ -114,10 +103,13 @@ Check these dead units first. Each has `impl` blocks for types that other units 
 | `auth::devbox_login_stub` | 25 | 0 |
 | `util` | 16 | 63 |
 | `sampling` | 12 | 0 |
+| `session::image_normalize` | 12 | 0 |
 | `tools` | 11 | 3 |
 | `agent` | 9 | 0 |
 | `remote` | 9 | 1 |
 | `session::handle` | 9 | 0 |
+| `session::workflow` | 8 | 0 |
+| `sampling::conversation` | 4 | 0 |
 | `sampling::types` | 3 | 18 |
 | `extensions` | 2 | 0 |
 
@@ -150,7 +142,7 @@ Unresolved: 4 references from outside name nothing that is a unit here (an item 
 | `conversation::messages` | 399 | 0 |
 | `conversation::responses` | 374 | 0 |
 | `conversation::chat_completions` | 314 | 0 |
-| `<root>` | 35 | 60 |
+| `<root>` | 35 | 53 |
 | `serde_helpers` | 19 | 0 |
 
 </details>
@@ -174,7 +166,7 @@ Check these dead units first. Each has `impl` blocks for types that other units 
 
 | unit | lines | references from live code outside |
 |---|---|---|
-| `implementations::grok_build` | 48,252 | 84 |
+| `implementations::grok_build` | 48,252 | 83 |
 | `computer::local` | 9,788 | 6 |
 | `implementations::grok_build_hashline` | 8,402 | 0 |
 | `implementations::opencode` | 7,830 | 2 |
@@ -189,7 +181,7 @@ Check these dead units first. Each has `impl` blocks for types that other units 
 | `types::resources` | 1,652 | 8 |
 | `implementations::read_file` | 1,408 | 0 |
 | `implementations::web_search` | 1,066 | 3 |
-| `util::image_validate` | 1,041 | 3 |
+| `util::image_validate` | 1,041 | 2 |
 | `bridge` | 1,020 | 4 |
 | `types::agents_md_tracker` | 959 | 1 |
 | `versions` | 954 | 0 |
@@ -331,9 +323,9 @@ Dead units (nothing live refers to them): `publish` (462).
 |---|---|---|
 | `permission::manager` | 11,250 | 0 |
 | `handle` | 4,902 | 0 |
-| `session::git` | 3,693 | 9 |
+| `session::git` | 3,693 | 4 |
 | `permission::auto_mode` | 3,593 | 0 |
-| `worktree` | 3,395 | 1 |
+| `worktree` | 3,395 | 0 |
 | `permission::shell_access` | 3,343 | 0 |
 | `activity` | 2,617 | 0 |
 | `workspace_ops` | 2,609 | 0 |
@@ -342,7 +334,7 @@ Dead units (nothing live refers to them): `publish` (462).
 | `hub` | 1,969 | 0 |
 | `permission::bash_command_splitting` | 1,957 | 6 |
 | `permission::resolution` | 1,945 | 2 |
-| `session::file_state` | 1,813 | 3 |
+| `session::file_state` | 1,813 | 0 |
 | `file_system::index` | 1,566 | 0 |
 | `status_config` | 1,566 | 0 |
 | `trust` | 1,563 | 3 |

@@ -43,9 +43,11 @@ tracked_crates = [
 # reads no session files itself. Production code in these crates (paths under tui/crates) must
 # not call the readers of `pi-shell`'s session store, nor name the sessions directory. Skipped:
 # test files (`tests.rs`, `*_tests.rs`, `test_util.rs`, `tests/` directories), inline
-# `#[cfg(test)] mod ... {}` blocks, and comment lines. The patterns are plain substrings, and
-# `session::persistence` as a whole is not listed: `sanitize_and_cap_title` and
-# `is_forbidden_title_char` are pure string helpers that the pager uses on purpose.
+# `#[cfg(test)] mod ... {}` blocks, and comment lines. The patterns are plain substrings. The
+# session store of `pi-shell` (`session::storage`, `session::persistence`) is deleted (plan
+# decision 10); the patterns stay as a guard against writing it back. `session::title` is not
+# listed: `sanitize_and_cap_title` and `is_forbidden_title_char` are pure string helpers that the
+# pager uses on purpose.
 [gates.session_disk_reads]
 crates = ["codegen/pi-pager", "codegen/pi-pager-bin"]
 patterns = [
@@ -105,8 +107,11 @@ COLORTERM = "truecolor"
 [[test.suite]]
 package = "pi-shell"
 targets = ["--lib", "--test", "sandbox_requirements_pin", "--test", "test_config_update_isolation"]
-reference_passed = 1056
-min_passed = 1000
+# 1,056 before plan decision 10 (r15) deleted the session store of `pi-shell` and the state types
+# that only it used. The deleted files held 202 tests (one of them compiles only on macOS), and 9
+# new ones came (the title helpers and the verdict): 1,056 - 201 + 9 = 864 on Linux.
+reference_passed = 864
+min_passed = 820
 
 [[test.suite]]
 package = "pi-pager"

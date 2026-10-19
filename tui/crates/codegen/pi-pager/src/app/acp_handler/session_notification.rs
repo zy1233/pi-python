@@ -258,7 +258,7 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
             match title_is_manual {
                 Some(true) => {
                     if let Some(clean) =
-                        pi_shell::session::persistence::sanitize_and_cap_title(&session_summary)
+                        pi_shell::session::title::sanitize_and_cap_title(&session_summary)
                     {
                         agent.display_name = Some(clean.clone());
                         agent.generated_session_title = Some(clean);
@@ -271,8 +271,7 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
                         None
                     };
                     let decoded = crate::util::decode_html_entities(&session_summary);
-                    if let Some(clean) =
-                        pi_shell::session::persistence::sanitize_and_cap_title(&decoded)
+                    if let Some(clean) = pi_shell::session::title::sanitize_and_cap_title(&decoded)
                     {
                         agent.generated_session_title = Some(clean);
                     } else if other == Some(false)

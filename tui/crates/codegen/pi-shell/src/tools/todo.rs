@@ -6,7 +6,6 @@
 pub use pi_tools::implementations::grok_build::todo::TodoId;
 pub use pi_tools::implementations::grok_build::todo::TodoItem;
 pub use pi_tools::implementations::grok_build::todo::TodoPriority;
-pub(crate) use pi_tools::implementations::grok_build::todo::TodoState;
 pub use pi_tools::implementations::grok_build::todo::TodoStatus;
 
 use agent_client_protocol as acp;

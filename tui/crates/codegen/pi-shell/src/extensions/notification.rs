@@ -3,7 +3,15 @@ use pi_tools::types::TaskSnapshot;
 
 use crate::session::feedback::FeedbackRequest as FeedbackRequestData;
 
-pub use crate::session::goal_tracker::GoalClassifierVerdict;
+/// Aggregate verdict produced by the goal-verification stage. `Achieved` means the goal is judged
+/// complete; `NotAchieved` means another worker round is due. Serialized in snake_case. The name
+/// keeps the `Classifier` prefix for wire stability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GoalClassifierVerdict {
+    Achieved,
+    NotAchieved,
+}
 
 /// Retained for wire backwards compatibility; always empty in the
 /// simplified goal model (no deliverables).
@@ -1225,6 +1233,24 @@ pub struct RecapRequestFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The verdict is sent to the pager, so its wire form is part of the protocol: snake_case,
+    /// both ways, both variants named in the test (no wildcard).
+    #[test]
+    fn classifier_verdict_serializes_as_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&GoalClassifierVerdict::Achieved).unwrap(),
+            "\"achieved\""
+        );
+        assert_eq!(
+            serde_json::to_string(&GoalClassifierVerdict::NotAchieved).unwrap(),
+            "\"not_achieved\""
+        );
+        let a: GoalClassifierVerdict = serde_json::from_str("\"achieved\"").unwrap();
+        let n: GoalClassifierVerdict = serde_json::from_str("\"not_achieved\"").unwrap();
+        assert_eq!(a, GoalClassifierVerdict::Achieved);
+        assert_eq!(n, GoalClassifierVerdict::NotAchieved);
+    }
 
     #[test]
     fn recap_request_file_roundtrips() {

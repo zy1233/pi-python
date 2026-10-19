@@ -444,9 +444,11 @@ impl GoalRoleModelFailOpenReason {
 
 /// Bridge `GoalClassifierVerdict` (shell) → `GoalClassifierVerdictTelemetry`.
 /// The exhaustive match catches drift if either side adds a variant.
-impl From<crate::session::goal_tracker::GoalClassifierVerdict> for GoalClassifierVerdictTelemetry {
-    fn from(verdict: crate::session::goal_tracker::GoalClassifierVerdict) -> Self {
-        use crate::session::goal_tracker::GoalClassifierVerdict;
+impl From<crate::extensions::notification::GoalClassifierVerdict>
+    for GoalClassifierVerdictTelemetry
+{
+    fn from(verdict: crate::extensions::notification::GoalClassifierVerdict) -> Self {
+        use crate::extensions::notification::GoalClassifierVerdict;
         match verdict {
             GoalClassifierVerdict::Achieved => Self::Achieved,
             GoalClassifierVerdict::NotAchieved => Self::NotAchieved,
