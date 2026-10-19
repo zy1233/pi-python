@@ -780,14 +780,22 @@ mod tests {
         let rotated = dir.path().join("t.jsonl.1");
         assert!(rotated.exists(), "rotation must produce a .1 file");
         assert!(path.exists(), "rotation reopens the live file eagerly");
+        // The sink is process-wide, and a test that does not hold `MEMTRACE_SINK` can write to it
+        // while this one runs: closing an agent writes a `purge` line, for example. So every line
+        // must be valid JSON with a timestamp, but only the `sample` lines have to match the
+        // sample shape, and there must be some.
+        let mut samples = 0;
         for p in [&path, &rotated] {
             let body = std::fs::read_to_string(p).unwrap();
             for line in body.lines() {
                 let v: serde_json::Value = serde_json::from_str(line).expect("valid JSON line");
-                assert_eq!(v["kind"], "sample");
                 assert!(v["ts_ms"].as_u64().unwrap() > 0);
+                if v["kind"] == "sample" {
+                    samples += 1;
+                }
             }
         }
+        assert!(samples > 0, "the sink must hold sample lines");
     }
 
     #[test]
@@ -840,9 +848,15 @@ mod tests {
 
         record_crash_sample();
 
+        // The sink is process-wide: a test that does not hold `MEMTRACE_SINK` can write a line
+        // of its own into it (see `sample_events_are_valid_jsonl_and_rotate`).
         let body = std::fs::read_to_string(&path).unwrap();
-        let event: serde_json::Value = serde_json::from_str(body.trim()).unwrap();
-        assert_eq!(event["kind"], "crash");
+        let crash_lines = body
+            .lines()
+            .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+            .filter(|v| v["kind"] == "crash")
+            .count();
+        assert_eq!(crash_lines, 1, "exactly one crash event in:\n{body}");
     }
 
     #[test]
