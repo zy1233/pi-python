@@ -75,10 +75,10 @@ r12 续 8（2026-10-13）：PR [#18][pr-18]（决策 6，`zypi export`）与 PR 
 
 ### 下一步
 
-- **做完了，等合入：** PR [#27][pr-27]（r16：`pi-shell` 里剩下的死代码、10 个没点名的依赖、`[storage]` 设置，见 [§10.19][l10-19]）；PR [#28][pr-28]（r17：测试之间的竞争，只改测试与工具，叠在 #27 上；`CI` 与 `TUI CI` 通过：[`CI`][ci-run-ea9609f]、[`TUI CI`][tui-ci-run-ea9609f]；见 [§10.20][l10-20]）；PR [#29][pr-29]（`release.yml` 里两处 `arduino/setup-protoc` 加 `repo-token`，叠在 #28 上；只改一个工作流文件，下一个 tag 才会跑它）。#27 合入之后，把 #28 的基改成 `main`；#28 合入之后，把 #29 的基改成 `main`。
+- **做完了，等合入：** PR [#27][pr-27]（r16：`pi-shell` 里剩下的死代码、10 个没点名的依赖、`[storage]` 设置，见 [§10.19][l10-19]）；PR [#28][pr-28]（r17：测试之间的竞争，只改测试与工具，叠在 #27 上；`CI` 与 `TUI CI` 通过：[`CI`][ci-run-ea9609f]、[`TUI CI`][tui-ci-run-ea9609f]；见 [§10.20][l10-20]）；PR [#29][pr-29]（`release.yml` 里两处 `arduino/setup-protoc` 加 `repo-token`，叠在 #28 上；只改一个工作流文件，下一个 tag 才会跑它）；PR [#30][pr-30]（`find_protoc()` 返回 `PATH` 上 `protoc` 的绝对路径，同一条 `cargo` 命令重复运行时 `pi-tools-api` 不再每次重新构建；CI 上收益很小，`cargo test` job 的用时没有变，见 [§10.20][l10-20]；叠在 #29 上；`CI` 与 `TUI CI` 通过）。#27 合入之后，把 #28 的基改成 `main`；#28 合入之后，把 #29 的基改成 `main`；#29 合入之后，把 #30 的基改成 `main`。
 - **已合入 `main`，还没发布：** ADR1 的 PR 2（[#23][pr-23]，`7e0ca5a`）与 PR 3（[#24][pr-24]，`0476ea4`）；决策 2、4、5、7 按倾向做（r13，见 [§10.16][l10-16]；r14 合入，见 [§10.17][l10-17]）。决策 17 的 PR [#25][pr-25]（r14 做，`2b0baf3`）与决策 10 的存储层 PR [#26][pr-26]（r15 做，`7d82c27`）：r16 按这个顺序合入（#25 先合，#26 的基改成 `main`，把 `main` 合进它的分支，`git merge -s ours`，树相同时；见 [§10.19][l10-19]）。
 - **已定，不做：** 翻页的代价（决策 18；用户在 2026-10-18 答复：不做，1,000 个会话以内够用）。
-- **要等用户决定：** 1.P6 的旗标契约（决策 8）；设置页里其余的项（决策 14）；真的 Plan 模式（决策 7 的 (b)）；`TUI CI` 要不要改用 `cargo nextest`（r17，[§10.20][l10-20]：它让这一类失败不再出现，包括以后新写的测试；但 `pi-pager` 的 lib 在 4 个线程下由 29.7 s 变成 79.5 s，不跑文档测试，基线执行器要改；这是改 CI，所以先问用户）；`find_protoc()` 的重新构建问题要不要修（r17，[§10.20][l10-20]；一处在 `pi-proto-build`，或者在 `tui-ci.yml` 里设 `PROTOC`）。
+- **要等用户决定：** 1.P6 的旗标契约（决策 8）；设置页里其余的项（决策 14）；真的 Plan 模式（决策 7 的 (b)）；`TUI CI` 要不要改用 `cargo nextest`（r17，[§10.20][l10-20]：它让这一类失败不再出现，包括以后新写的测试；但 `pi-pager` 的 lib 在 4 个线程下由 29.7 s 变成 79.5 s，不跑文档测试，基线执行器要改；这是改 CI，所以先问用户）。
 - **已合入，进 V0.5：** 决策 6 的 (a)（`zypi export` 经 ACP 回放，PR [#18][pr-18]）与决策 15 的 (b)（pager 用本地已有的数据画状态行，PR [#19][pr-19]；原选的 (a) 在复核时没有过 DESIGN §8.5 的五条），r12 续 6、续 7、续 8。
 - **已发布：** V0.5 的六项退出条件都有结果（条件 4 是用户决定不做），v0.5.0 在 r12 续 8 发布（条件 6）。条件 3、5 各有一个 PR（[#14][pr-14]、[#15][pr-15]，都已合入）；发行构建的版本号（决策 16）做在 PR [#17][pr-17] 里，已合入。
 - **不用等决定：** 阶段 D 做不做，看 [`docs/baselines/tui.md`](../baselines/tui.md) 的数据；r11 又提出 D.5–D.9 五个候选。r15 之后的四个小项（[§10.18][l10-18]）r16 都做了（PR [#27][pr-27]，等合入；[§10.19][l10-19]）：`pi-shell` 里没人点名的依赖（10 个）；`leader`、`x.ai` 的上限降到 243 与 297；调用图报死的 `session::helpers` 与 `session::worktree`；`[storage] cleanup_ttl_days` 这个设置。r17 做了同类竞争的检查（PR [#28][pr-28]，等合入；[§10.20][l10-20]）。还剩：D.8 的新候选（`pi-workflow`、`Config.storage_mode`、没人加载的文件）。
@@ -570,6 +570,7 @@ Rust（pager）：
 [pr-27]: https://github.com/zy1233/pi-python/pull/27
 [pr-28]: https://github.com/zy1233/pi-python/pull/28
 [pr-29]: https://github.com/zy1233/pi-python/pull/29
+[pr-30]: https://github.com/zy1233/pi-python/pull/30
 [ci-run-7b27775]: https://github.com/zy1233/pi-python/actions/runs/39244339779
 [tui-ci-run-7b27775]: https://github.com/zy1233/pi-python/actions/runs/39244339476
 [ci-run-ea9609f]: https://github.com/zy1233/pi-python/actions/runs/39240903417
