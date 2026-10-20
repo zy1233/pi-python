@@ -2183,79 +2183,76 @@ mod tests {
     /// Regression: on the terminal-native palette (`bg_visual = Reset`) the
     /// embedded cursor row used to be indistinguishable except for a bold
     /// label.
+    ///
+    /// The test sets the process-wide `EMBEDDED` flag, which every modal test
+    /// reads without a lock, so it runs in a process of its own.
     #[test]
-    #[serial_test::serial]
     fn embedded_cursor_row_takes_selection_accent() {
-        use ratatui::style::Color;
+        crate::test_util::in_own_process(|| {
+            use ratatui::style::Color;
 
-        struct EmbedReset;
-        impl Drop for EmbedReset {
-            fn drop(&mut self) {
-                crate::views::modal_window::set_embedded(false);
-            }
-        }
-        let _reset = EmbedReset;
-        crate::views::modal_window::set_embedded(true);
+            crate::views::modal_window::set_embedded(true);
 
-        let theme = Theme::terminal_default();
-        let q = make_question("Pick one?", &["Alpha", "Beta"], false);
-        let lines = build_flat_option_lines(
-            &q,
-            80,
-            0,
-            None,
-            &QuestionSelection::Single(None),
-            &theme,
-            true,
-            "",
-            false,
-            true,
-        );
+            let theme = Theme::terminal_default();
+            let q = make_question("Pick one?", &["Alpha", "Beta"], false);
+            let lines = build_flat_option_lines(
+                &q,
+                80,
+                0,
+                None,
+                &QuestionSelection::Single(None),
+                &theme,
+                true,
+                "",
+                false,
+                true,
+            );
 
-        // Cursor row (option 0): every colored span carries the accent, and
-        // the row stays transparent.
-        let cursor_line = &lines[0];
-        assert!(
-            cursor_line
-                .spans
-                .iter()
-                .filter(|s| !s.content.trim().is_empty())
-                .all(|s| s.style.fg == Some(theme.fuzzy_accent)),
-            "cursor row must recolor all text with the selection accent, got {:?}",
-            cursor_line
-                .spans
-                .iter()
-                .map(|s| (s.content.clone(), s.style.fg))
-                .collect::<Vec<_>>()
-        );
-        assert!(
-            cursor_line
-                .spans
-                .iter()
-                .all(|s| s.style.bg == Some(Color::Reset) || s.style.bg.is_none()),
-            "embedded rows must not paint a background band"
-        );
+            // Cursor row (option 0): every colored span carries the accent, and
+            // the row stays transparent.
+            let cursor_line = &lines[0];
+            assert!(
+                cursor_line
+                    .spans
+                    .iter()
+                    .filter(|s| !s.content.trim().is_empty())
+                    .all(|s| s.style.fg == Some(theme.fuzzy_accent)),
+                "cursor row must recolor all text with the selection accent, got {:?}",
+                cursor_line
+                    .spans
+                    .iter()
+                    .map(|s| (s.content.clone(), s.style.fg))
+                    .collect::<Vec<_>>()
+            );
+            assert!(
+                cursor_line
+                    .spans
+                    .iter()
+                    .all(|s| s.style.bg == Some(Color::Reset) || s.style.bg.is_none()),
+                "embedded rows must not paint a background band"
+            );
 
-        // Non-cursor row keeps normal colors (label = text_primary).
-        let other_line = &lines[1];
-        assert!(
-            other_line
-                .spans
-                .iter()
-                .any(|s| s.content.contains("Beta") && s.style.fg == Some(theme.text_primary)),
-            "non-cursor row keeps the normal label color"
-        );
+            // Non-cursor row keeps normal colors (label = text_primary).
+            let other_line = &lines[1];
+            assert!(
+                other_line
+                    .spans
+                    .iter()
+                    .any(|s| s.content.contains("Beta") && s.style.fg == Some(theme.text_primary)),
+                "non-cursor row keeps the normal label color"
+            );
 
-        // Freeform row on cursor: same accent treatment.
-        let freeform_cursor = build_freeform_line(true, false, "", false, false, &theme, true);
-        assert!(
-            freeform_cursor
-                .spans
-                .iter()
-                .filter(|s| !s.content.trim().is_empty())
-                .all(|s| s.style.fg == Some(theme.fuzzy_accent)),
-            "freeform cursor row must take the accent"
-        );
+            // Freeform row on cursor: same accent treatment.
+            let freeform_cursor = build_freeform_line(true, false, "", false, false, &theme, true);
+            assert!(
+                freeform_cursor
+                    .spans
+                    .iter()
+                    .filter(|s| !s.content.trim().is_empty())
+                    .all(|s| s.style.fg == Some(theme.fuzzy_accent)),
+                "freeform cursor row must take the accent"
+            );
+        });
     }
 
     #[test]

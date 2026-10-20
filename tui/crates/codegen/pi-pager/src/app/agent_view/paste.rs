@@ -1681,61 +1681,58 @@ pub(super) mod paste_key_tests {
     /// horizontal padding around the panel and no content inset for the item
     /// rows, so the dropdown's `❯` marker sits at column 0 under the prompt's.
     /// The full TUI keeps the layout hpad + 1-col item inset in its boxed panel.
+    ///
+    /// The test sets the process-wide `EMBEDDED` flag, which every modal test
+    /// reads without a lock, so it runs in a process of its own.
     #[test]
-    #[serial_test::serial]
     fn dropdown_chrome_embedded_is_flush_left() {
-        use crate::appearance::LayoutConfig;
-        use ratatui::buffer::Buffer;
-        use ratatui::layout::Rect;
-        struct EmbedReset;
-        impl Drop for EmbedReset {
-            fn drop(&mut self) {
-                crate::views::modal_window::set_embedded(false);
-            }
-        }
-        let theme = Theme::current();
-        let layout_cfg = LayoutConfig::default();
-        let area = Rect::new(0, 0, 80, 25);
-        let prompt = Rect::new(0, 10, 80, 2);
-        let mut buf = Buffer::empty(area);
-        let full = render_dropdown_chrome(
-            &mut buf,
-            3,
-            3,
-            None,
-            prompt,
-            area,
-            &layout_cfg,
-            false,
-            false,
-            &theme,
-        )
-        .expect("full chrome fits");
-        assert_eq!(full.panel.x, area.x + layout_cfg.eff_hpad_left(false));
-        assert_eq!(full.items.x, prompt.x + crate::glyphs::PROMPT_ARROW_WIDTH);
-        let _reset = EmbedReset;
-        crate::views::modal_window::set_embedded(true);
-        let mut buf = Buffer::empty(area);
-        let embedded = render_dropdown_chrome(
-            &mut buf,
-            3,
-            3,
-            None,
-            prompt,
-            area,
-            &layout_cfg,
-            false,
-            true,
-            &theme,
-        )
-        .expect("embedded chrome fits");
-        assert_eq!(embedded.panel.x, area.x, "no outer hpad in minimal");
-        assert_eq!(embedded.panel.width, area.width, "panel spans full width");
-        assert_eq!(
-            embedded.items.x, prompt.x,
-            "items flush with the prompt's left edge"
-        );
-        assert_eq!(embedded.items.width, prompt.width);
+        crate::test_util::in_own_process(|| {
+            use crate::appearance::LayoutConfig;
+            use ratatui::buffer::Buffer;
+            use ratatui::layout::Rect;
+            let theme = Theme::current();
+            let layout_cfg = LayoutConfig::default();
+            let area = Rect::new(0, 0, 80, 25);
+            let prompt = Rect::new(0, 10, 80, 2);
+            let mut buf = Buffer::empty(area);
+            let full = render_dropdown_chrome(
+                &mut buf,
+                3,
+                3,
+                None,
+                prompt,
+                area,
+                &layout_cfg,
+                false,
+                false,
+                &theme,
+            )
+            .expect("full chrome fits");
+            assert_eq!(full.panel.x, area.x + layout_cfg.eff_hpad_left(false));
+            assert_eq!(full.items.x, prompt.x + crate::glyphs::PROMPT_ARROW_WIDTH);
+            crate::views::modal_window::set_embedded(true);
+            let mut buf = Buffer::empty(area);
+            let embedded = render_dropdown_chrome(
+                &mut buf,
+                3,
+                3,
+                None,
+                prompt,
+                area,
+                &layout_cfg,
+                false,
+                true,
+                &theme,
+            )
+            .expect("embedded chrome fits");
+            assert_eq!(embedded.panel.x, area.x, "no outer hpad in minimal");
+            assert_eq!(embedded.panel.width, area.width, "panel spans full width");
+            assert_eq!(
+                embedded.items.x, prompt.x,
+                "items flush with the prompt's left edge"
+            );
+            assert_eq!(embedded.items.width, prompt.width);
+        });
     }
     /// The tool-media inline-image path (`build_inline_media_escapes`, still live
     /// for tool calls) transmits the bytes (`a=t`) before placing them (`a=p`) on

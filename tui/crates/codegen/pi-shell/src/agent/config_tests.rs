@@ -1,4 +1,5 @@
 use super::*;
+use crate::config::test_env_locks::RuntimeEnvLocks;
 use pi_test_support::EnvGuard;
 use serial_test::serial;
 /// `AutoModeConfig` parses identically from a local `[auto_mode]` TOML table
@@ -2052,7 +2053,9 @@ fn external_otel_carries_internal_consumed_flag() {
 fn empty_config() -> toml::Value {
     toml::Value::Table(toml::map::Map::new())
 }
-fn clear_runtime_env_vars() {
+/// Remove the variables that `resolve_runtime_fields` reads. The caller holds the locks of
+/// `clear_runtime_env_vars`.
+fn remove_runtime_env_vars() {
     unsafe {
         std::env::remove_var("GROK_SUBAGENTS");
         std::env::remove_var("GROK_RESPECT_GITIGNORE");
@@ -2065,6 +2068,15 @@ fn clear_runtime_env_vars() {
         std::env::remove_var("GROK_CLAUDE_RULES_ENABLED");
         std::env::remove_var("GROK_CLAUDE_AGENTS_ENABLED");
     }
+}
+/// Remove the variables that `resolve_runtime_fields` reads, and keep the tests of
+/// `config/tests.rs` away from the first four of them until the returned value drops. Those tests
+/// set the variables under their own locks, which `#[serial]` does not cover. Call it once per
+/// test: the locks are not reentrant (use `remove_runtime_env_vars` for a second clean-up).
+fn clear_runtime_env_vars() -> RuntimeEnvLocks {
+    let locks = RuntimeEnvLocks::acquire();
+    remove_runtime_env_vars();
+    locks
 }
 fn clear_managed_mcp_env_vars() {
     unsafe {
@@ -2348,7 +2360,7 @@ fn resolve_runtime_fields_compat_asymmetric_sources() {
 #[test]
 #[serial]
 fn resolve_runtime_fields_interactive_defaults() {
-    clear_runtime_env_vars();
+    let _env_locks = clear_runtime_env_vars();
     clear_managed_mcp_env_vars();
     let raw = empty_config();
     let mut cfg = Config::new_from_toml_cfg(&raw).unwrap();
@@ -2382,7 +2394,7 @@ fn resolve_runtime_fields_interactive_defaults() {
 #[test]
 #[serial]
 fn resolve_runtime_fields_headless_defaults() {
-    clear_runtime_env_vars();
+    let _env_locks = clear_runtime_env_vars();
     clear_managed_mcp_env_vars();
     let raw = empty_config();
     let mut cfg = Config::new_from_toml_cfg(&raw).unwrap();
@@ -2408,7 +2420,7 @@ fn resolve_runtime_fields_headless_defaults() {
 #[test]
 #[serial]
 fn resolve_runtime_fields_managed_gateway_tools_from_remote() {
-    clear_runtime_env_vars();
+    let _env_locks = clear_runtime_env_vars();
     clear_managed_mcp_env_vars();
     let raw = empty_config();
     let remote = crate::util::config::RemoteSettings {
@@ -2434,7 +2446,7 @@ fn resolve_runtime_fields_managed_gateway_tools_from_remote() {
 #[test]
 #[serial]
 fn resolve_runtime_fields_subagents_from_config() {
-    clear_runtime_env_vars();
+    let _env_locks = clear_runtime_env_vars();
     let raw: toml::Value = toml::from_str("[subagents]\nenabled = true").unwrap();
     let mut cfg = Config::new_from_toml_cfg(&raw).unwrap();
     cfg.resolve_runtime_fields(&RuntimeResolutionContext {
@@ -2455,7 +2467,7 @@ fn resolve_runtime_fields_subagents_from_config() {
 #[test]
 #[serial]
 fn resolve_runtime_fields_cli_subagents_override() {
-    clear_runtime_env_vars();
+    let _env_locks = clear_runtime_env_vars();
     let raw = empty_config();
     let mut cfg = Config::new_from_toml_cfg(&raw).unwrap();
     cfg.resolve_runtime_fields(&RuntimeResolutionContext {
@@ -2476,7 +2488,7 @@ fn resolve_runtime_fields_cli_subagents_override() {
 #[test]
 #[serial]
 fn resolve_runtime_fields_gitignore_from_env() {
-    clear_runtime_env_vars();
+    let _env_locks = clear_runtime_env_vars();
     unsafe { std::env::set_var("GROK_RESPECT_GITIGNORE", "0") };
     let raw = empty_config();
     let mut cfg = Config::new_from_toml_cfg(&raw).unwrap();
@@ -2494,12 +2506,12 @@ fn resolve_runtime_fields_gitignore_from_env() {
         storage_mode: None,
     });
     assert!(!cfg.respect_gitignore);
-    clear_runtime_env_vars();
+    remove_runtime_env_vars();
 }
 #[test]
 #[serial]
 fn resolve_runtime_fields_model_overrides_from_cli() {
-    clear_runtime_env_vars();
+    let _env_locks = clear_runtime_env_vars();
     let raw = empty_config();
     let mut cfg = Config::new_from_toml_cfg(&raw).unwrap();
     cfg.resolve_runtime_fields(&RuntimeResolutionContext {
@@ -2521,7 +2533,7 @@ fn resolve_runtime_fields_model_overrides_from_cli() {
 #[test]
 #[serial]
 fn resolve_runtime_fields_path_hints_from_remote() {
-    clear_runtime_env_vars();
+    let _env_locks = clear_runtime_env_vars();
     let raw = empty_config();
     let remote = crate::util::config::RemoteSettings {
         path_not_found_hints: Some(true),
@@ -2546,7 +2558,7 @@ fn resolve_runtime_fields_path_hints_from_remote() {
 #[test]
 #[serial]
 fn resolve_runtime_fields_idempotent() {
-    clear_runtime_env_vars();
+    let _env_locks = clear_runtime_env_vars();
     let raw: toml::Value = toml::from_str("[subagents]\nenabled = true").unwrap();
     let mut cfg = Config::new_from_toml_cfg(&raw).unwrap();
     let ctx = RuntimeResolutionContext {

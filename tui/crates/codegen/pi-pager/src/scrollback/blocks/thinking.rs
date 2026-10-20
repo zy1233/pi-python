@@ -647,41 +647,36 @@ mod tests {
     /// fade is a no-op, so the distinction has to live in SGR attributes.
     #[test]
     fn thinking_body_dim_italic_survives_the_terminal_native_palette() {
-        let _guard = crate::theme::cache::test_lock()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        struct LockReset;
-        impl Drop for LockReset {
-            fn drop(&mut self) {
-                crate::theme::cache::set_terminal_native_lock(false);
-            }
-        }
-        let _reset = LockReset;
-        crate::theme::cache::set_terminal_native_lock(true);
+        // The native-palette lock lowers the color cap to ANSI-16, for the whole
+        // process, and most tests that render colors hold no lock. So the test
+        // engages the palette in a process of its own.
+        crate::test_util::in_own_process(|| {
+            crate::theme::cache::set_terminal_native_lock(true);
 
-        let mut appearance = AppearanceConfig::default();
-        appearance.scrollback.blocks.thinking.header = false;
-        appearance.scrollback.blocks.thinking.body_dim_italic = true;
-        let ctx = BlockContext {
-            appearance,
-            ..ctx(DisplayMode::Expanded, 40)
-        };
-        let block = ThinkingBlock::new("weighing the `options` with **care**");
-        let out = block.output(&ctx);
+            let mut appearance = AppearanceConfig::default();
+            appearance.scrollback.blocks.thinking.header = false;
+            appearance.scrollback.blocks.thinking.body_dim_italic = true;
+            let ctx = BlockContext {
+                appearance,
+                ..ctx(DisplayMode::Expanded, 40)
+            };
+            let block = ThinkingBlock::new("weighing the `options` with **care**");
+            let out = block.output(&ctx);
 
-        assert!(!out.lines.is_empty());
-        for line in &out.lines {
-            for span in &line.content.spans {
-                assert!(
-                    span.style.add_modifier.contains(Modifier::DIM),
-                    "every reasoning span must be dim under the native palette: {span:?}"
-                );
-                assert!(
-                    span.style.add_modifier.contains(Modifier::ITALIC),
-                    "every reasoning span must be italic: {span:?}"
-                );
+            assert!(!out.lines.is_empty());
+            for line in &out.lines {
+                for span in &line.content.spans {
+                    assert!(
+                        span.style.add_modifier.contains(Modifier::DIM),
+                        "every reasoning span must be dim under the native palette: {span:?}"
+                    );
+                    assert!(
+                        span.style.add_modifier.contains(Modifier::ITALIC),
+                        "every reasoning span must be italic: {span:?}"
+                    );
+                }
             }
-        }
+        });
     }
 
     #[test]

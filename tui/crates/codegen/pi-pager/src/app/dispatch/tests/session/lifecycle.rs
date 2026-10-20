@@ -1,9 +1,11 @@
 //! Tests for session create, exit, trust, startup actions, worktree creation, and cloud lifecycle.
 use super::*;
 /// Simulate a release-stamped build so folder-trust is active (a local/dev
-/// build auto-trusts and persists nothing). Mirrors this module's raw env idiom.
-fn simulate_release_build() {
-    unsafe { std::env::set_var(pi_version::TEST_VERSION_ENV, "0.0.0-sim") };
+/// build auto-trusts and persists nothing). Hold the returned guard for the
+/// test body: when it drops, the variable gets its old value back, so the tests
+/// that run later do not see a simulated release build.
+fn simulate_release_build() -> crate::test_util::EnvVarGuard {
+    crate::test_util::EnvVarGuard::set(pi_version::TEST_VERSION_ENV, "0.0.0-sim")
 }
 #[test]
 fn voice_on_welcome_creates_session_and_records() {
@@ -816,8 +818,9 @@ fn finish_trust_resolves_and_replays_startup() {
 fn trust_folder_grants_and_resolves() {
     use pi_workspace::trust::{TrustStore, workspace_key};
     let home = tempfile::tempdir().expect("home tempdir");
-    unsafe { std::env::set_var("GROK_HOME", home.path()) };
-    simulate_release_build();
+    // The guards drop before `home` does: the variables are put back, then the directory goes.
+    let _home_env = crate::test_util::EnvVarGuard::set("GROK_HOME", home.path());
+    let _release = simulate_release_build();
     let repo = tempfile::tempdir().expect("repo tempdir");
     let workspace = workspace_key(repo.path());
     let mut app = test_app();

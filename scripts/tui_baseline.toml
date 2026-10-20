@@ -114,7 +114,7 @@ targets = ["--lib", "--test", "sandbox_requirements_pin", "--test", "test_config
 # new ones came (the title helpers and the verdict): 1,056 - 201 + 9 = 864 on Linux. Then plan r16
 # deleted `session::worktree` (24 tests, Unix only), `session::helpers` (2) and
 # `util::config::worktree` (1), and added 1 (a `[storage]` section is reported as unrecognized):
-# 864 - 24 - 2 - 1 + 1 = 838 on Linux (one local run). The ten reference numbers add up to 8,488.
+# 864 - 24 - 2 - 1 + 1 = 838 on Linux (one local run). The ten reference numbers add up to 8,490.
 reference_passed = 838
 min_passed = 820
 
@@ -154,8 +154,10 @@ targets = [
 # through `session/list` (plan section 10.16, ADR1 PR 2: 25 `session_resolve`, 4 `bounded_resolve`,
 # 3 `python_agent_e2e`): 5,675. Then -26 passed and -1 ignored with the code that read the session
 # files (ADR1 PR 3; 27 tests went with the code): 5,649 (one local run on Linux; 8,706 over the
-# ten suites, the other nine unchanged).
-reference_passed = 5649
+# ten suites, the other nine unchanged). Then +2 for the self-tests of `in_own_process`, the helper
+# that runs a test in a process of its own (plan section 10.20): 5,651 (one local run on Linux;
+# 8,490 over the ten suites, the other nine unchanged).
+reference_passed = 5651
 min_passed = 5300
 
 # Lib tests only; they were outside the manifest until r8 (plan section 10.10: 1,092 passed,

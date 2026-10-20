@@ -122,6 +122,57 @@ impl Drop for EnvVarGuard {
         }
     }
 }
+
+/// Name of the environment variable that tells a test, in a child process that
+/// [`in_own_process`] started, to run its body instead of starting a child.
+const OWN_PROCESS_ENV: &str = "PI_PAGER_TEST_IN_OWN_PROCESS";
+
+/// Run `body` in a child process that runs only this one test.
+///
+/// Use it for a test that changes process-wide state which other tests read
+/// without a lock (the color cap, the native-palette lock, the minimal-mode
+/// flag, the embedded-modal flag, the theme, ...). All tests of one test
+/// binary are threads of one process and share these statics, so a change
+/// inside the body can break any other test that runs at the same time. A
+/// child process has its own statics, so the change cannot get out. A lock
+/// does not help when the tests that read the state do not take it, and there
+/// are too many of them to change.
+///
+/// The parent starts this test binary again with `--exact` and the name of the
+/// test, and waits for it. libtest names the thread of a test after the test,
+/// so the call needs no name. The parent fails, and prints what the child
+/// wrote, when the child fails or when it did not run exactly one test, so a
+/// child that ran nothing cannot make the test pass. When the thread has no
+/// such name (the test did not start on a thread of its own), nothing runs at
+/// the same time, and the body runs here. The code of the test that is before
+/// the call runs in both processes; the code after it runs in both too, but
+/// the parent does not run `body`.
+pub fn in_own_process(body: impl FnOnce()) {
+    if std::env::var_os(OWN_PROCESS_ENV).is_some() {
+        body();
+        return;
+    }
+    let thread = std::thread::current();
+    let Some(name) = thread.name().filter(|name| name.contains("::")) else {
+        body();
+        return;
+    };
+    let exe = std::env::current_exe().expect("path of the test binary");
+    let output = std::process::Command::new(exe)
+        .args(["--exact", name, "--nocapture", "--test-threads", "1"])
+        .env(OWN_PROCESS_ENV, name)
+        .output()
+        .expect("start the test binary again");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success() && stdout.contains("test result: ok. 1 passed;"),
+        "`{name}` did not pass in its own process ({}; the child must run exactly one \
+         test)\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}",
+        output.status,
+    );
+}
+
 /// On-disk git checkout living under a tempdir. Dropping the fixture deletes it.
 pub struct TempGitRepo {
     _dir: tempfile::TempDir,
@@ -233,5 +284,32 @@ fn copy_dir_all(src: &Path, dst: &Path) {
         } else {
             std::fs::copy(entry.path(), to).unwrap();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    /// The body runs in the child only, so a change that it makes to a `static`
+    /// does not reach the parent. The code after the call runs in both
+    /// processes: the flag is set in the process that ran the body, and in no
+    /// other.
+    #[test]
+    fn a_change_in_the_body_stays_in_the_child() {
+        static FLAG: AtomicBool = AtomicBool::new(false);
+        let is_child = std::env::var_os(OWN_PROCESS_ENV).is_some();
+        in_own_process(|| FLAG.store(true, Ordering::SeqCst));
+        assert_eq!(FLAG.load(Ordering::SeqCst), is_child);
+    }
+
+    /// A panic in the body fails the parent, and the message of the parent
+    /// says so. The child fails too: its panic does not carry the expected
+    /// message. That failure is what the parent reports.
+    #[test]
+    #[should_panic(expected = "did not pass in its own process")]
+    fn a_failure_in_the_body_fails_the_parent() {
+        in_own_process(|| panic!("the body of the test fails"));
     }
 }

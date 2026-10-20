@@ -3,23 +3,27 @@
 
     #[test]
     fn voice_settings_update_omitted_leaves_gate_unchanged() {
-        // Unrelated settings push must not flip the gate (default-on stays on;
-        // kill-switch stays off until an explicit true/false).
-        let mut app = make_app_with_agent("sess-1");
-        app.apply_voice_mode_enabled(true);
-        let omit = acp::ExtNotification::new(
-            "pi/settings/update",
-            std::sync::Arc::from(
-                serde_json::value::to_raw_value(&serde_json::json!({ "sharing_enabled": true }))
-                    .unwrap(),
-            ),
-        );
-        let _ = handle_ext_notification(&omit, &mut app);
-        assert!(app.voice_mode_enabled);
+        // `apply_voice_mode_enabled` also sets the process-wide voice gate, which the
+        // settings rows read without a lock. So the test runs in a process of its own.
+        crate::test_util::in_own_process(|| {
+            // Unrelated settings push must not flip the gate (default-on stays on;
+            // kill-switch stays off until an explicit true/false).
+            let mut app = make_app_with_agent("sess-1");
+            app.apply_voice_mode_enabled(true);
+            let omit = acp::ExtNotification::new(
+                "pi/settings/update",
+                std::sync::Arc::from(
+                    serde_json::value::to_raw_value(&serde_json::json!({ "sharing_enabled": true }))
+                        .unwrap(),
+                ),
+            );
+            let _ = handle_ext_notification(&omit, &mut app);
+            assert!(app.voice_mode_enabled);
 
-        app.apply_voice_mode_enabled(false);
-        let _ = handle_ext_notification(&omit, &mut app);
-        assert!(!app.voice_mode_enabled);
+            app.apply_voice_mode_enabled(false);
+            let _ = handle_ext_notification(&omit, &mut app);
+            assert!(!app.voice_mode_enabled);
+        });
     }
 
     /// User-owned mode must not re-arm default_yolo or rewrite UI from remote.
