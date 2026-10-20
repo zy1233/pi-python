@@ -32,8 +32,8 @@ account = "other@example.com"
 
 // The default `serial` key, like every other test that sets `GROK_HOME`. `EnvGuard` has no lock of
 // its own: a named key lets this test run at the same time as the tests that read `GROK_HOME`
-// (for example `session::worktree`), and they then open their files in the temporary home that
-// this test deletes at its end.
+// (a test that opens a file under it, for example), and they then work in the temporary home
+// that this test deletes at its end.
 #[tokio::test]
 #[serial_test::serial]
 async fn set_consent_answer_is_monotonic_per_account() {

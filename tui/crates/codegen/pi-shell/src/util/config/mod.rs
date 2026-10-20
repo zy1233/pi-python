@@ -11,7 +11,6 @@ mod persist;
 mod resolve;
 mod settings_writes;
 mod tips;
-mod worktree;
 
 pub use announcements::*;
 pub use campaigns::{
@@ -35,4 +34,3 @@ pub use pi_config_types::{
 pub use resolve::*;
 pub use settings_writes::*;
 pub use tips::*;
-pub(crate) use worktree::*;

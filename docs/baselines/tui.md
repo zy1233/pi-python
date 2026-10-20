@@ -2,11 +2,11 @@
 
 对应 [`PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`](../PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md) 阶段 0 的 0.1（Rust CI job）、0.2（基线报告）、0.4（deny-list）、0.5（调用图），以及阶段 C 的残留词与许可证声明。权威环境是 CI 的 Linux runner（ADR6：`ubuntu-24.04` + `tui/rust-toolchain.toml` 钉的 1.94.0）。
 
-## 当前基线（r15）
+## 当前基线（r16）
 
-- **测试**：10 个 suite 合计 8,514 通过 / 0 失败 / 21 忽略（清单里 `reference_passed` 的和）。出处：分支 `refactor/delete-pi-shell-session-store`（PR [#26](https://github.com/zy1233/pi-python/pull/26)，叠在 [#25](https://github.com/zy1233/pi-python/pull/25) 上）的最后一个代码提交 `332ba75`，WSL2 上基线执行器对整套 10 个 suite 的一次本地运行（16 m 24 s，清环境，`PI_E2E_PYTHON` 与 `PI_E2E_REQUIRED=1`）：8,513 通过 / 1 个已知失败 / 21 忽略。那 1 个已知失败是 `pi-pager-render` 的 tmux 探测（清单里的 `known_failures`；清单按通过算它，所以和是 8,514）。压成一个提交之前的 WIP 提交 `43f291f`（那一次 19 m 28 s）数完全相同。比 r13 的 8,706 少 192 个，全在 `pi-shell`（1,056 → 864）：PR #26 删了 `pi-shell` 里的旧存储层，和只有它在用的代码；删掉的文件里有 202 个测试属性，其中 1 个只在 macOS 上编译（`durable_tests.rs`），所以 Linux 上少 201 个；新加 9 个（清洗标题的 8 个，`GoalClassifierVerdict` 的 1 个）：1,056 − 201 + 9 = 864，与实测相同。r15 的 **CI 对账**（PR #26，`69932cf`，`TUI CI` [run 39165328437](https://github.com/zy1233/pi-python/actions/runs/39165328437)）：10 个 suite 合计 **8,514 通过 / 0 失败 / 21 忽略**，同清单里的和；`pi-shell` 864（1 忽略），`pi-pager` 5,649（12 忽略），`pi-pager-render` 1,092（2 忽略）。那个 tmux 探测在 runner 上通过，所以 `pi-pager-render` 比本地多 1 个。`69932cf` 与 `332ba75` 只差文档。r13 的 **CI 对账**（PR #24，`79e01ee`，`TUI CI` [run 38896545799](https://github.com/zy1233/pi-python/actions/runs/38896545799)）：10 个 suite 合计 **8,706 通过 / 0 失败 / 21 忽略**，同当时清单里的和；`pi-pager` 5,649（12 忽略），`pi-pager-bin` 21，那个 tmux 探测在 runner 上通过。上一个 PR（[#23](https://github.com/zy1233/pi-python/pull/23)）的 CI（`506769b`，`TUI CI` [run 38889657279](https://github.com/zy1233/pi-python/actions/runs/38889657279)）是 8,732 通过 / 0 失败 / 22 忽略。比 r11 的 8,665 多 41 个，都在 `pi-pager`：#18、#19 加了 35 个（清单当时没改），PR #23 加了 32 个，PR #24 删了 26 个；PR #24 还删了 1 个忽略的用例，所以忽略数 22 → 21。各 suite 见 §3.2。r10 的 CI 对账（PR [#12](https://github.com/zy1233/pi-python/pull/12) 的 `bd44289`，`TUI CI` [run 38074038191](https://github.com/zy1233/pi-python/actions/runs/38074038191)）在[基线历史][hist-tests]。
-- **门禁**：依赖图 980 个包，消费者构建 0 条告警，`--workspace --tests` 0 个错误，残留词 `grok agent` 0 / `leader` 243（上限 245）/ `x.ai` 297（上限 304）（§2、§4），读盘门禁 0 处命中（§2）。出处：PR #26 的 `5a39e09` 与 `332ba75`，`check` 各一次本地运行（WSL2，数相同）。r15 的删除让 `leader` 少 2 行、`x.ai` 少 7 行，上限没有跟着降（`check` 的输出提示可以降）。r15 的对账：CI 的 `Gates + cargo check` 在 PR #26 的 `69932cf` 上通过（同一次 run）：依赖图 980（上限 980），告警 0，`--workspace --tests` 0 个错误，残留词 `grok agent` 0 / `leader` 243 / `x.ai` 297，读盘门禁通过。r13 的对账：CI 的 `Gates + cargo check` 在 PR #24 的 `79e01ee` 上通过。
-- **耗时**（CI，PR #26 的 `69932cf`）：`cargo test` job 16 m 14 s，`Gates + cargo check` 3 m 41 s。同一份清单在 PR #24 的 `79e01ee` 上是 16 m 31 s 与 3 m 50 s，在 PR #23 的 `506769b` 上是 12 m 20 s 与 3 m 22 s，在 r10 的 `bd44289` 上是 29 m 13 s 与 5 m 46 s。上面「测试」「门禁」两条里的本地耗时（16 m 24 s，2 m 46 s）与它们不可比。
+- **测试**：10 个 suite 合计 8,488 通过 / 0 失败 / 21 忽略（清单里 `reference_passed` 的和）。出处：分支 `refactor/tui-session-store-leftovers`（PR [#27](https://github.com/zy1233/pi-python/pull/27)，叠在 `main` 的 `7d82c27` 上）的依赖提交 `8b146e7`，WSL2 上基线执行器对整套 10 个 suite 的一次本地运行（23 m 56 s，含增量编译；清环境，`PI_E2E_PYTHON` 与 `PI_E2E_REQUIRED=1`）：8,487 通过 / 1 个已知失败 / 21 忽略。那 1 个已知失败是 `pi-pager-render` 的 tmux 探测（清单里的 `known_failures`；清单按通过算它，所以和是 8,488）。其后的提交只改清单与文档。比 r15 的 8,514 少 26 个，全在 `pi-shell`（864 → 838）：删掉的 `session::worktree` 有 24 个测试（只在 Unix 上编译），`session::helpers` 有 2 个，`util::config::worktree` 有 1 个；新加 1 个（配置里的 `[storage]` 段被报成「不认识的键」）：864 − 24 − 2 − 1 + 1 = 838，与实测相同。其余 9 个 suite 没有变。CI 在 `6bd7db5` 上给出同样的和：8,488 通过 / 0 失败 / 21 忽略（`TUI CI` [run 39193752451](https://github.com/zy1233/pi-python/actions/runs/39193752451)；`pi-pager-render` 是 1,092：那个 tmux 探测在 CI 的 runner 上通过）。r15 与更早的对账（CI 的 run 号、各 suite 的数）在[基线历史][hist-tests]。
+- **门禁**：依赖图 970 个包，消费者构建 0 条告警，`--workspace --tests` 0 个错误，残留词 `grok agent` 0 / `leader` 243 / `x.ai` 297（清单里的上限现在就是 970 / 243 / 297，§2、§4），读盘门禁 0 处命中（§2）。出处：PR #27 的 `check`，WSL2 上本地一次运行（3 m 27 s，增量编译），对的是依赖提交 `8b146e7` 的源码。r16 把三个上限降到实测值：依赖图 980 → 970（`pi-shell` 去掉不再用的依赖，10 个包离开了依赖图：`pi-workflow` 和 9 个来自注册表的包），`leader` 245 → 243 与 `x.ai` 304 → 297（这两个数 r15 就是 243 与 297，上限没有跟着降）。第一遍 `check`（`a97abd3`，删了 `session::worktree` 与 `session::helpers` 之后）有 1 条告警：`util/config/mod.rs` 的一条 `unused_imports`，因为 `util::config::worktree` 失去了唯一的用户；`7ae0cc5` 删了那个模块，告警回到 0。`tui_notices.py check`：984 个包，984 条（删依赖之前是 989 条，旧的 5 条是 `rhai`、`rhai_codegen`、`smartstring`、`tdigests`、`thin-vec`，已用 `update --write` 去掉）。CI 的 `Gates + cargo check`（同一个 run）给出同样的数：970 / 243 / 297，0 条告警。r15 与更早的对账在[基线历史][hist-tests]。
+- **耗时**（CI，PR #27 的 `6bd7db5`）：`cargo test` job 17 m 34 s，`Gates + cargo check` 4 m 24 s（各 suite 的测试自己用的时间加起来约 54 s，其余是编译与准备）。同一份清单在 PR #26 的 `69932cf` 上是 16 m 14 s 与 3 m 41 s，在 PR #24 的 `79e01ee` 上是 16 m 31 s 与 3 m 50 s，在 PR #23 的 `506769b` 上是 12 m 20 s 与 3 m 22 s，在 r10 的 `bd44289` 上是 29 m 13 s 与 5 m 46 s。上面「测试」「门禁」两条里的本地耗时（23 m 56 s，3 m 27 s）与它们不可比。
 - **release**：`zypi` 420,667,200 B（比拆除前小 10.6 %），冷缓存构建 1,194 s（比 1,647 s 快 27.5 %），`--version` 中位数 22.9 ms。出处：r12 续 8，`1fa18cf`（#18 与 #19 合并之后的树，也是 V0.5 的树），手动触发的 `TUI CI`（带 `release_baseline`）[run 38353042677](https://github.com/zy1233/pi-python/actions/runs/38353042677)。r12 开头（`4fc028a`）是 420,767,096 B / 1,195 s / 23.4 ms，r5（`ac1d3ff`）是 422,034,120 B / 1,155 s / 23.1 ms。该 job 只手动触发，三次之间没有别的测量。发布的 `zypi-linux-x86_64`（v0.5.0，`be3f8a8`，[`Release` 的运行 38358144687](https://github.com/zy1233/pi-python/actions/runs/38358144687)）是 420,720,608 B，比这一数多 53,408 B（同一个 `tui/` 树，差在哪里没有查），仍小于 v0.4.0 的 470,461,776 B。
 - **历史**：每一轮数字怎么变的、CI 对账的 run 号、已经做完的事，在[基线历史][hist]。
 
@@ -43,8 +43,8 @@ python scripts/tui_baseline.py release           # release-dist 构建 + 体积 
 | deny crate | `pi-sampler` 不在 `tui/Cargo.lock`，`cargo tree -p pi-pager-bin -i pi-sampler` 报 `did not match any packages` | 是 |
 | deny word | `MvpAgent`、`acp_session_impl`、`SamplerActor` 在 `tui/crates` 下整词零命中 | 是 |
 | 读盘 | `pi-pager` 与 `pi-pager-bin` 的生产代码（`src/`）不调用 `pi-shell` 会话存储的读取函数，也不拼会话目录；模式见清单 `[gates.session_disk_reads]`。测试文件、`#[cfg(test)]` 模块与注释行不查。`pytest` 里也跑一遍（`test_no_pager_code_reads_session_files_in_this_tree`）。ADR1 落地时加（r13）：`main` 上 18 处命中，现在 0 处。r15 删了 `pi-shell` 里的存储层本身，模式留着，防止它被写回来 | 是 |
-| 残留词上限 | `tui/crates` 下含 `grok agent`、`leader`、`x.ai` 的行数（忽略大小写，词前不紧跟字母或数字）各不超过清单 `[gates.residue]` 的上限：0 / 245 / 304，见 §4。`pytest` 里也跑一遍（`test_the_residue_ceilings_hold_in_this_tree`） | 是 |
-| 依赖图上限 | `cargo tree -p pi-pager-bin --target x86_64-unknown-linux-gnu` 的唯一包数 ≤ 980（Linux 实测 980） | 是 |
+| 残留词上限 | `tui/crates` 下含 `grok agent`、`leader`、`x.ai` 的行数（忽略大小写，词前不紧跟字母或数字）各不超过清单 `[gates.residue]` 的上限：0 / 243 / 297，见 §4。`pytest` 里也跑一遍（`test_the_residue_ceilings_hold_in_this_tree`） | 是 |
+| 依赖图上限 | `cargo tree -p pi-pager-bin --target x86_64-unknown-linux-gnu` 的唯一包数 ≤ 970（r16 在 Linux 上本地实测 970；r15 与更早是 980） | 是 |
 | 消费者构建 | `cargo check --locked -p pi-pager-bin -p pi-pager-minimal -p pi-update` | 是 |
 | 全工作区类型检查 | `cargo check --workspace --tests --keep-going`（排除 `pi-fast-worktree`，其 lib 测试在 HEAD 上就编译不过） | 是，`enforce_workspace_tests = true` |
 | 告警数 | 消费者构建的 `dead_code` 等告警，按 lint / crate 汇总 | 是，`max_warnings = 0` |
@@ -55,23 +55,23 @@ python scripts/tui_baseline.py release           # release-dist 构建 + 体积 
 
 ### 3.1 构建与依赖图
 
-「拆除前」= 发布版 v0.4.0（`tui/` 与提交 `07a3574` 完全相同）。「r3」= 提交 `9add266`（拆除 Rust runtime）。「r11」= 分支 `chore/phase-c-closeout` 的 `24907ef`（WSL2 上本地；依赖图与告警来自 `check`，行数与包数是在工作树上数的，没有测耗时）。「r5」= 入口审计与阶段 A 之后：行数、包数与 macOS 一栏测于 `ac1d3ff`（依赖图只取决于 `Cargo.lock`，`fe1fc65` 之后它没变），Linux 一栏来自 `ac1d3ff` 的两次 CI 运行（PR run 37389447358；手动 run 37389455793，带 release 基线）。
+「拆除前」= 发布版 v0.4.0（`tui/` 与提交 `07a3574` 完全相同）。「r3」= 提交 `9add266`（拆除 Rust runtime）。「r11」= 分支 `chore/phase-c-closeout` 的 `24907ef`（WSL2 上本地；依赖图与告警来自 `check`，行数与包数是在工作树上数的，没有测耗时）。「r5」= 入口审计与阶段 A 之后：行数、包数与 macOS 一栏测于 `ac1d3ff`（依赖图只取决于 `Cargo.lock`，`fe1fc65` 之后它没变），Linux 一栏来自 `ac1d3ff` 的两次 CI 运行（PR run 37389447358；手动 run 37389455793，带 release 基线）。「r16」= 分支 `refactor/tui-session-store-leftovers`（PR [#27](https://github.com/zy1233/pi-python/pull/27)）的提交 `1a8abee`：WSL2 上本地；依赖图与告警来自 `check`，`.rs` 的行数与文件数用同一种方法数 `7d82c27`（1,723 个文件，1,007,882 行）与 `1a8abee`（1,718 个文件，1,007,386 行），包数是 `Cargo.lock` 里 `[[package]]` 的个数；没有测耗时。其他三元组的依赖图与 release 的数 r16 没有重测；依赖图变小，其他三元组的数也会变小。
 
-| 指标 | 拆除前 | r3（macOS） | r5（macOS） | r5（Linux CI） | r11（WSL2，本地） |
-|---|---|---|---|---|---|
-| `tui/crates` 下 `.rs` 行数 | 1,620,612 | 1,254,693 | 1,019,041 | 同左（同一份源码） | 1,021,067（1,755 个文件） |
-| `Cargo.lock` 包数 | 1,311 | 1,285 | 1,257 | 同左 | 1,257 |
-| 依赖图唯一包数 `x86_64-unknown-linux-gnu` | 1,026 | 995 | 980 | 980 | 980 |
-| `aarch64-unknown-linux-gnu` | 1,025 | 994 | 979 | — | — |
-| `aarch64-apple-darwin` | 990 | 957 | 943 | — | — |
-| `x86_64-apple-darwin` | 991 | 958 | 944 | — | — |
-| `x86_64-pc-windows-msvc` | 972 | 939 | 926 | — | — |
-| 消费者构建告警 | 未测 | 20（全是 `pi-shell` 的 `dead_code`） | 0 | 0 | 0 |
-| `cargo check` 消费者构建耗时 | 未测 | 94 s（本机，缓存状态不受控，只作参考） | — | 204 s（runner；缓存状态不受控，第一次冷缓存运行是 272 s） | — |
-| `cargo check --workspace --tests` 耗时 | 未测 | 162 s（同上），0 个错误 | — | 164 s，0 个错误（第一次冷缓存运行是 229 s） | — |
-| `release-dist` 的 `zypi`（Linux x86_64） | 470,461,776 B（448.7 MiB） | — | — | **422,034,120 B（402.5 MiB，−10.3 %）** | — |
-| `release-dist` 冷缓存构建耗时 | 27 m 27 s（`ubuntu-24.04`，v0.4.0 的发布 job） | — | — | **19 m 15 s（1,155 s，−29.9 %）** | — |
-| `zypi --version` 延迟（5 次中位数） | 未测 | — | — | 23.1 ms | — |
+| 指标 | 拆除前 | r3（macOS） | r5（macOS） | r5（Linux CI） | r11（WSL2，本地） | r16（WSL2，本地） |
+|---|---|---|---|---|---|---|
+| `tui/crates` 下 `.rs` 行数 | 1,620,612 | 1,254,693 | 1,019,041 | 同左（同一份源码） | 1,021,067（1,755 个文件） | 1,007,386（1,718 个文件） |
+| `Cargo.lock` 包数 | 1,311 | 1,285 | 1,257 | 同左 | 1,257 | 1,256 |
+| 依赖图唯一包数 `x86_64-unknown-linux-gnu` | 1,026 | 995 | 980 | 980 | 980 | **970** |
+| `aarch64-unknown-linux-gnu` | 1,025 | 994 | 979 | — | — | — |
+| `aarch64-apple-darwin` | 990 | 957 | 943 | — | — | — |
+| `x86_64-apple-darwin` | 991 | 958 | 944 | — | — | — |
+| `x86_64-pc-windows-msvc` | 972 | 939 | 926 | — | — | — |
+| 消费者构建告警 | 未测 | 20（全是 `pi-shell` 的 `dead_code`） | 0 | 0 | 0 | 0 |
+| `cargo check` 消费者构建耗时 | 未测 | 94 s（本机，缓存状态不受控，只作参考） | — | 204 s（runner；缓存状态不受控，第一次冷缓存运行是 272 s） | — | — |
+| `cargo check --workspace --tests` 耗时 | 未测 | 162 s（同上），0 个错误 | — | 164 s，0 个错误（第一次冷缓存运行是 229 s） | — | — |
+| `release-dist` 的 `zypi`（Linux x86_64） | 470,461,776 B（448.7 MiB） | — | — | **422,034,120 B（402.5 MiB，−10.3 %）** | — | — |
+| `release-dist` 冷缓存构建耗时 | 27 m 27 s（`ubuntu-24.04`，v0.4.0 的发布 job） | — | — | **19 m 15 s（1,155 s，−29.9 %）** | — | — |
+| `zypi --version` 延迟（5 次中位数） | 未测 | — | — | 23.1 ms | — | — |
 
 r12（Linux CI，`4fc028a`，[run 38221952524](https://github.com/zy1233/pi-python/actions/runs/38221952524)）：`release-dist` 的 `zypi` 420,767,096 B（401.3 MiB，比拆除前小 10.6 %，比 r5 小 1,267,024 B）；冷缓存构建 1,195 s（19 m 55 s，比 1,647 s 快 27.4 %，比 r5 慢 40 s）；`zypi --version` 中位数 23.4 ms。同一次运行的 `check` 与 `test` 与 `4fc028a` 的 PR 运行一致：依赖图 980、0 条告警、8,665 通过 / 0 失败 / 22 忽略。
 
@@ -85,7 +85,7 @@ macOS 环境：Apple Silicon，Homebrew `cargo` / `rustc` 1.96.1（**不是**钉
 
 | suite（`cargo test -p …`） | 目标 | 通过 | 忽略 | `min_passed` | 说明 |
 |---|---|---|---|---|---|
-| `pi-shell` | `--lib` + 2 个集成 | 864 | 1 | 820 | r15：1,056 → 864（删了旧存储层；见「当前基线」） |
+| `pi-shell` | `--lib` + 2 个集成 | 838 | 1 | 820 | r15：1,056 → 864（删了旧存储层）；r16：864 → 838（删了 `session::worktree` 等；见「当前基线」） |
 | `pi-pager` | `--lib` + 4 个集成 | 5,649 | 12 | 5,300 | 含 `python_agent_e2e`：pager 的 ACP client 对着真的 Python agent（要 `PI_E2E_PYTHON`） |
 | `pi-pager-render` | `--lib` | 1,092 | 2 | 1,040 | r8 起在清单里；另有 1 个 `known_failures`（见下） |
 | `pi-pager-minimal` | `--lib` | 79 | 0 | 75 | r8 起在清单里 |
@@ -95,9 +95,9 @@ macOS 环境：Apple Silicon，Homebrew `cargo` / `rustc` 1.96.1（**不是**钉
 | `pi-telemetry` | `--lib` | 239 | 0 | 230 |  |
 | `pi-file-utils` | `--lib` | 216 | 6 | 210 |  |
 | `pi-sampling-types` | `--lib` | 320 | 0 | 310 |  |
-| **合计** | | **8,514** | **21** | | |
+| **合计** | | **8,488** | **21** | | |
 
-「通过」是清单里的 `reference_passed`，「`min_passed`」是下限（棘轮规则见 §1）。每一轮数字的变化（r8、r9、r10 的 CI 对账，含 run 号；r11 的 −18；r13 的 +41；r15 的 −192）在[基线历史][hist-tests]。
+「通过」是清单里的 `reference_passed`，「`min_passed`」是下限（棘轮规则见 §1）。每一轮数字的变化（r8、r9、r10 的 CI 对账，含 run 号；r11 的 −18；r13 的 +41；r15 的 −192；r16 的 −26）在[基线历史][hist-tests]。
 
 **清单里的已知失败 / 跳过，及原因**
 
@@ -128,7 +128,7 @@ macOS 环境：Apple Silicon，Homebrew `cargo` / `rustc` 1.96.1（**不是**钉
 
 - `MvpAgent`：0，它本来就是 deny word（§2）。
 - `grok agent`：**0**（`docs/PLAN` 之外的所有文件）。13 处过时的指针都改了：`pi-shell/README.md` 原来是上游 Grok CLI 的用户手册（2,682 行，含会装上官方 CLI 的安装脚本），换成一页说明这个 crate 现在是什么；`pi-test-support` 与 `pi-agent`、`pi-http`、`pi-tty-utils` 的文档注释不再提这条命令。
-- `leader`（245 行）与 `x.ai`（304 行）**清不到零**：阶段 D 之前，这些行还在活着的代码里。原文的「0」改成棘轮：`[gates.residue]` 给每个词一个上限，只降不升（§1 的执行器检查它，`pytest` 也检查）。下表说这些行是什么、去哪里。
+- `leader`（243 行）与 `x.ai`（297 行）**清不到零**：阶段 D 之前，这些行还在活着的代码里。（r11 是 245 与 304；r15 的删除让它们少了 2 行与 7 行，r16 把上限降到现在的数。）原文的「0」改成棘轮：`[gates.residue]` 给每个词一个上限，只降不升（§1 的执行器检查它，`pytest` 也检查）。下表说这些行是什么、去哪里。
 
 | 词 | 行数 | 是什么 | 去向 |
 |---|---|---|---|
@@ -138,7 +138,7 @@ macOS 环境：Apple Silicon，Homebrew `cargo` / `rustc` 1.96.1（**不是**钉
 | `x.ai` | 118 | 旧 Rust agent 的扩展方法名（`x.ai/mcp/…`、`x.ai/fs/…`、`x.ai/tool…`、`x.ai/search/fuzzy/…`），出现在注释、文档与测试里；pager 不再发它们 | 随所在代码一起删（D.4） |
 | `x.ai` | 16 | 过滤本身：入口处丢弃 `x.ai/` 与 `_x.ai/` 开头的扩展通知（`acp/vendor.rs`、`channel.rs` 与它们的测试）；其余是对 `x.ai` 域名的判断和测试夹具 | 过滤留下，它是「不实现 `x.ai/*`」的执行点；其余随 D.3 |
 
-分类用的是同一条匹配规则（先判地址与网页，再判方法名，剩下的算其他）；`leader` 的 9 行是行里同时有 `session leader`、`process group leader` 或 `setsid` 的。行数是 r11 的末态；行数降了，就同时降清单里的上限。
+分类用的是同一条匹配规则（先判地址与网页，再判方法名，剩下的算其他）；`leader` 的 9 行是行里同时有 `session leader`、`process group leader` 或 `setsid` 的。行数是 r11 的末态（245 与 304），r15 之后的 243 与 297 没有按类重算；行数降了，就同时降清单里的上限。
 
 下列 crate **允许存在**，但必须有理由与缩减方案；`check` 会把它们在 `pi-pager-bin` 依赖图里的直接依赖者列进报告，便于看出是否有新的依赖方悄悄加入。
 

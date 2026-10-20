@@ -8278,7 +8278,6 @@ dependencies = [
  "async-trait",
  "axum",
  "backon",
- "base64",
  "blake3",
  "chrono",
  "ctor",
@@ -8294,7 +8293,6 @@ dependencies = [
  "jsonwebtoken",
  "libc",
  "loom",
- "nix 0.30.1",
  "obfstr",
  "parking_lot",
  "pi-agent",
@@ -8302,11 +8300,9 @@ dependencies = [
  "pi-auth",
  "pi-bundle",
  "pi-chat-state",
- "pi-compaction-transcript",
  "pi-config",
  "pi-config-types",
  "pi-extra-ca",
- "pi-fast-worktree",
  "pi-file-utils",
  "pi-http",
  "pi-models",
@@ -8321,14 +8317,11 @@ dependencies = [
  "pi-system-power",
  "pi-telemetry",
  "pi-test-support",
- "pi-test-utils",
  "pi-token-estimation",
  "pi-tools",
  "pi-tty-utils",
  "pi-version",
- "pi-workflow",
  "pi-workspace",
- "pretty_assertions",
  "prod-mc-cli-chat-proxy-types",
  "reqwest 0.12.24",
  "reqwest-middleware 0.4.2",
@@ -8339,15 +8332,12 @@ dependencies = [
  "serial_test",
  "strum 0.27.2",
  "tar",
- "tdigests",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
- "tokio-util",
  "toml",
  "tracing",
  "tracing-subscriber",
- "urlencoding",
  "uuid",
  "windows 0.61.3",
 ]
@@ -11569,12 +11559,6 @@ dependencies = [
  "libc",
  "xattr",
 ]
-
-[[package]]
-name = "tdigests"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8cc794f115de9eb67bb1bf4e8de08ac1b3d2f43bfdbec083636450da72a0986"
 
 [[package]]
 name = "tempfile"

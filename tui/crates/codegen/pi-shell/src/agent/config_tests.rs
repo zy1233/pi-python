@@ -1279,6 +1279,17 @@ fn config_warns_on_section_typo() {
     );
     assert!(unused.iter().any(|k| k == "endpoint"), "got: {unused:?}");
 }
+/// `[storage]` held `cleanup_ttl_days`, which cleaned the session files of the old Rust agent.
+/// The section is not part of [`Config`] now: a config file that still has it loads, and the
+/// section is reported as unrecognized (a warning), not rejected.
+#[test]
+fn a_removed_storage_section_is_reported_as_unrecognized() {
+    let toml_str = "[storage]\ncleanup_ttl_days = 7\n";
+    let raw: toml::Value = toml::from_str(toml_str).unwrap();
+    Config::new_from_toml_cfg(&raw).expect("a config that still has [storage] must load");
+    let unused = unused_keys_from_toml(toml_str);
+    assert!(unused.iter().any(|k| k == "storage"), "got: {unused:?}");
+}
 #[test]
 fn known_non_serde_config_paths_are_not_reported_unused() {
     let unused = unused_keys_from_toml(
@@ -1413,8 +1424,6 @@ fn config_accepts_all_known_sections() {
             [auth.oidc]
             issuer = "https://sso.corp.com"
             client_id = "abc123"
-            [storage]
-            cleanup_ttl_days = 7
             [[marketplace.sources]]
             name = "Local Dev"
             path = "/tmp/plugins"
