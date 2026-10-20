@@ -207,7 +207,10 @@ this tree come from a project that runs them with nextest. Comments in the code 
 `pi-workspace/src/lib.rs` and `folder_trust.rs` (a lock for "the rare in-process `cargo test`
 thread"), `pi-telemetry/src/debug_log.rs` and `pi-pager-render/src/terminal/xtversion.rs`. Only
 one crate, `pi-fast-worktree` (`src/db/mod.rs`), says that its suite must also pass under
-`cargo test`. The CI of this repository runs `cargo test`, where all tests share one process.
+`cargo test`. The CI of this repository ran `cargo test`, where all tests share one process.
+`TUI CI` runs `cargo nextest` now (`runner = "nextest"` in `scripts/tui_baseline.toml`), so a race
+of this class cannot fail it. A local `cargo test` still runs all tests of a binary in one process,
+and the tools of this directory are for that run.
 
 What the experiment showed (commit `aa76df4`, WSL2): nextest ran the lib tests of `pi-pager` 11
 times (32 threads 10 times, 4 threads once) and of `pi-shell` 5 times (32 threads) with no
@@ -225,8 +228,9 @@ a small sample: the earlier runs differ from each other by up to 6.6 s.
 
 What nextest does not change: files and ports that tests share (a test still needs its own
 temporary directory), and the threads and child processes that one test starts. nextest does not
-run doctests, so run `cargo test --doc` as well. In GitHub Actions, install it with
-`taiki-e/install-action@nextest`.
+run doctests. The suites of `scripts/tui_baseline.toml` name their targets (`--lib`, `--test`,
+`--bin`), so they never ran doctests, with `cargo test` either. In GitHub Actions, `tui-ci.yml`
+installs a pinned version with `taiki-e/install-action@v2` (`tool: nextest@0.9.148`).
 
 ## Disk space
 

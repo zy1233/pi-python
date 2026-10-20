@@ -2,13 +2,13 @@
 
 对应 [`PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`](../PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md) 阶段 0 的 0.1（Rust CI job）、0.2（基线报告）、0.4（deny-list）、0.5（调用图），以及阶段 C 的残留词与许可证声明。权威环境是 CI 的 Linux runner（ADR6：`ubuntu-24.04` + `tui/rust-toolchain.toml` 钉的 1.94.0）。
 
-## 当前基线（r17）
+## 当前基线（r18）
 
-- **测试**：10 个 suite 合计 8,490 通过 / 0 失败 / 21 忽略（清单里 `reference_passed` 的和）。出处：分支 `test/tui-env-race-audit`（PR [#28](https://github.com/zy1233/pi-python/pull/28)，叠在 PR #27 的分支上）的长运行在 `88e04e9` 上（提交的顺序重写之前的本地提交，没有推送）：WSL2 上基线执行器对整套 10 个 suite 的一次本地运行（约 4 m 56 s，增量编译；清环境，`PI_E2E_PYTHON` 与 `PI_E2E_REQUIRED=1`）：8,490 通过 / 0 失败 / 21 忽略。r16 记的那 1 个已知失败（`pi-pager-render` 的 tmux 探测）这一遍通过了。比 r16 的 8,488 多 2 个，在 `pi-pager`（5,649 → 5,651）：`test_util::in_own_process` 的两个自检。其余 9 个 suite 没有变。最后的提交 `6438b59` 的 `tui/` 与 `88e04e9` 只差 `test_util.rs` 里的两处（一个空行；panic 信息的格式串）。`6438b59` 上我没有跑测试（WSL 的虚拟磁盘把它所在的盘写满了，见 §3.4）。**CI 对账**（PR #28，`ea9609f`，比 `6438b59` 只多一个只改文档的提交）：`TUI CI` [run 39240903399](https://github.com/zy1233/pi-python/actions/runs/39240903399) 是 8,490 通过 / 0 失败 / 21 忽略，同清单里 `reference_passed` 的和，每个 suite 都等于它自己的 `reference_passed`；`CI` [run 39240903417](https://github.com/zy1233/pi-python/actions/runs/39240903417) 也通过。r16 与更早的对账（CI 的 run 号、各 suite 的数）在[基线历史][hist-tests]。
+- **测试**：10 个 suite 合计 8,490 通过 / 0 失败 / 22 跳过（清单里 `reference_passed` 的和）。r18 起 `TUI CI` 与基线执行器用 `cargo nextest` 跑（一个测试一个进程）；它把 `#[ignore]` 的 21 个与 `--skip` 去掉的 1 个（`pi-acp-lib`）合在一起算「跳过」，所以 22；r17 及以前用 `cargo test`，数是 21 忽略。**r18 的 CI 对账**（PR [#31](https://github.com/zy1233/pi-python/pull/31)，`1a49eef`，nextest）：`TUI CI` [run 39359879537](https://github.com/zy1233/pi-python/actions/runs/39359879537) 是 8,490 通过 / 0 失败 / 22 跳过，每个 suite 都等于它自己的 `reference_passed`（日志里 8,490 行 `PASS`，没有 `SLOW`、`LEAK`、`FLAKY`、`TIMEOUT`；`python_agent_e2e` 的 14 个用例通过）；`CI` [run 39359879347](https://github.com/zy1233/pi-python/actions/runs/39359879347) 也通过。数字本身是 r17 的（r18 没有改测试），出处：分支 `test/tui-env-race-audit`（PR [#28](https://github.com/zy1233/pi-python/pull/28)，叠在 PR #27 的分支上）的长运行在 `88e04e9` 上（提交的顺序重写之前的本地提交，没有推送）：WSL2 上基线执行器对整套 10 个 suite 的一次本地运行（约 4 m 56 s，增量编译；清环境，`PI_E2E_PYTHON` 与 `PI_E2E_REQUIRED=1`）：8,490 通过 / 0 失败 / 21 忽略。r16 记的那 1 个已知失败（`pi-pager-render` 的 tmux 探测）这一遍通过了。比 r16 的 8,488 多 2 个，在 `pi-pager`（5,649 → 5,651）：`test_util::in_own_process` 的两个自检。其余 9 个 suite 没有变。最后的提交 `6438b59` 的 `tui/` 与 `88e04e9` 只差 `test_util.rs` 里的两处（一个空行；panic 信息的格式串）。`6438b59` 上我没有跑测试（WSL 的虚拟磁盘把它所在的盘写满了，见 §3.4）。**CI 对账**（PR #28，`ea9609f`，比 `6438b59` 只多一个只改文档的提交）：`TUI CI` [run 39240903399](https://github.com/zy1233/pi-python/actions/runs/39240903399) 是 8,490 通过 / 0 失败 / 21 忽略，同清单里 `reference_passed` 的和，每个 suite 都等于它自己的 `reference_passed`；`CI` [run 39240903417](https://github.com/zy1233/pi-python/actions/runs/39240903417) 也通过。r16 与更早的对账（CI 的 run 号、各 suite 的数）在[基线历史][hist-tests]。
 - **门禁**：依赖图 970 个包，消费者构建 0 条告警，`--workspace --tests` 0 个错误，残留词 `grok agent` 0 / `leader` 243 / `x.ai` 297（清单里的上限就是 970 / 243 / 297，§2、§4），读盘门禁 0 处命中（§2）。出处：PR #28 的 `check`，WSL2 上本地一次运行（约 4 m，增量编译），对的是 `6438b59`。数字与 r16 相同：这一轮没有改依赖，也没有改生产代码，所以没有再跑 `tui_notices.py check`。r16 把三个上限降到实测值（依赖图 980 → 970，`leader` 245 → 243，`x.ai` 304 → 297），细节在[基线历史][hist-tests]。CI 的 `Gates + cargo check` job 在 `ea9609f` 上给出同样的数（依赖图 970，0 条告警，243，297）。
-- **耗时**（CI，PR #28 的 `ea9609f`）：`cargo test` job 22 m 04 s，`Gates + cargo check` 3 m 47 s（各 suite 的测试自己用的时间加起来约 61 s，其余是编译与准备）。同一份清单在 PR #27 的 `6bd7db5` 上是 17 m 34 s 与 4 m 24 s（测试约 54 s），在 PR #26 的 `69932cf` 上是 16 m 14 s 与 3 m 41 s，在 PR #24 的 `79e01ee` 上是 16 m 31 s 与 3 m 50 s，在 PR #23 的 `506769b` 上是 12 m 20 s 与 3 m 22 s，在 r10 的 `bd44289` 上是 29 m 13 s 与 5 m 46 s。job 的总时间在运行之间差很多（编译与缓存不同），要比测试，看测试自己用的时间。`pi-pager` 的 lib 在 CI 上 libtest 用时：15.55 s 与 15.79 s（`ea9609f` 与只改文档的 `7b27775`，两次运行）；之前 5 次运行（没有隔离）是 8.21–14.83 s，平均 12.1 s。上面「测试」「门禁」两条里的本地耗时（约 4 m 56 s，约 4 m）与它们不可比。
+- **耗时**（r18，CI，PR #31 的 `1a49eef`，nextest）：`cargo nextest` job 36 m 17 s，`Gates + cargo check` 4 m 28 s。测试自己用的时间（nextest 的 `Summary`，各 suite 相加）约 130 s（`pi-shell` 10.6 s，`pi-pager` 85.2 s，`pi-pager-render` 8.9 s，`pi-file-utils` 20.5 s，其余 6 个 suite 合计约 5 s）；同一份代码用 `cargo test`（PR #30 的 `e2de4c4`，各 suite 的 libtest `finished in` 相加）约 64.5 s。所以测试自己多约 66 s，其中 `pi-pager` 约 48 s。`e2de4c4` 上 `cargo test` job 是 33 m 56 s，`Gates` 4 m 36 s：同一份代码，总用时就差到这样（这棵树上最近 7 次 `cargo test` job 是 17 m 34 s 到 33 m 56 s），所以总用时不是可靠的度量。下面是 r17 及更早的数字（`cargo test`）。**耗时**（CI，PR #28 的 `ea9609f`）：`cargo test` job 22 m 04 s，`Gates + cargo check` 3 m 47 s（各 suite 的测试自己用的时间加起来约 61 s，其余是编译与准备）。同一份清单在 PR #27 的 `6bd7db5` 上是 17 m 34 s 与 4 m 24 s（测试约 54 s），在 PR #26 的 `69932cf` 上是 16 m 14 s 与 3 m 41 s，在 PR #24 的 `79e01ee` 上是 16 m 31 s 与 3 m 50 s，在 PR #23 的 `506769b` 上是 12 m 20 s 与 3 m 22 s，在 r10 的 `bd44289` 上是 29 m 13 s 与 5 m 46 s。job 的总时间在运行之间差很多（编译与缓存不同），要比测试，看测试自己用的时间。`pi-pager` 的 lib 在 CI 上 libtest 用时：15.55 s 与 15.79 s（`ea9609f` 与只改文档的 `7b27775`，两次运行）；之前 5 次运行（没有隔离）是 8.21–14.83 s，平均 12.1 s。上面「测试」「门禁」两条里的本地耗时（约 4 m 56 s，约 4 m）与它们不可比。
 - **release**：`zypi` 420,667,200 B（比拆除前小 10.6 %），冷缓存构建 1,194 s（比 1,647 s 快 27.5 %），`--version` 中位数 22.9 ms。出处：r12 续 8，`1fa18cf`（#18 与 #19 合并之后的树，也是 V0.5 的树），手动触发的 `TUI CI`（带 `release_baseline`）[run 38353042677](https://github.com/zy1233/pi-python/actions/runs/38353042677)。r12 开头（`4fc028a`）是 420,767,096 B / 1,195 s / 23.4 ms，r5（`ac1d3ff`）是 422,034,120 B / 1,155 s / 23.1 ms。该 job 只手动触发，三次之间没有别的测量。发布的 `zypi-linux-x86_64`（v0.5.0，`be3f8a8`，[`Release` 的运行 38358144687](https://github.com/zy1233/pi-python/actions/runs/38358144687)）是 420,720,608 B，比这一数多 53,408 B（同一个 `tui/` 树，差在哪里没有查），仍小于 v0.4.0 的 470,461,776 B。
-- **测试之间的竞争**：随机顺序、32 个测试线程，`pi-pager` 的 lib 在修之前 6/32 遍有测试失败，修之后 0/60（`88e04e9`）；`pi-shell` 2/20 → 0/20。CI 的运行（4 个线程，固定顺序）看不到这些失败，所以 **CI 通过不能证明它们不存在**。数字与做法见 §3.4 和计划 §10.20。
+- **测试之间的竞争**：随机顺序、32 个测试线程，`pi-pager` 的 lib 在修之前 6/32 遍有测试失败，修之后 0/60（`88e04e9`）；`pi-shell` 2/20 → 0/20。r17 以前 CI 跑 `cargo test`（4 个线程，固定顺序），看不到这些失败，所以那时 **CI 通过不能证明它们不存在**。r18 起 CI 跑 nextest（一个测试一个进程）：进程内共享的状态不再共用，这一类失败不会出现，CI 通过对这一类有意义（测试共用的文件、端口与 `/tmp` 不在内）；本地的 `cargo test` 仍然会遇到。数字与做法见 §3.4 和计划 §10.20、§10.21。
 - **历史**：每一轮数字怎么变的、CI 对账的 run 号、已经做完的事，在[基线历史][hist]。
 
 ## 1. 文件与命令
@@ -82,23 +82,23 @@ macOS 环境：Apple Silicon，Homebrew `cargo` / `rustc` 1.96.1（**不是**钉
 
 ### 3.2 测试
 
-**怎么跑**：`env -u NO_COLOR TERM=xterm-256color COLORTERM=truecolor`（沙箱默认的 `NO_COLOR=1`、`TERM=dumb` 会让约 10 个颜色 / 光标断言失败）；`PI_HOME` 等变量由清单的 `unset_env` 清掉（`PI_HOME` 的优先级高于配置隔离测试自己设的 `GROK_HOME`，不清掉会让 `test_config_update_isolation` 失败）。**在 WSL 里跑**：克隆放在 ext4 上，不要放在 `/mnt/<盘>`（9p，权限位与时间戳的行为不是 Linux 的）；登录脚本常会导出 `PI_HOME`（指向 Windows 一侧的配置目录），绕过执行器直接跑 `cargo test` 或测试二进制会读写那个目录——要么走执行器，要么先 `unset PI_HOME GROK_HOME` 并把 `HOME` 指到一次性目录。
+**怎么跑**：`env -u NO_COLOR TERM=xterm-256color COLORTERM=truecolor`（沙箱默认的 `NO_COLOR=1`、`TERM=dumb` 会让约 10 个颜色 / 光标断言失败）；`PI_HOME` 等变量由清单的 `unset_env` 清掉（`PI_HOME` 的优先级高于配置隔离测试自己设的 `GROK_HOME`，不清掉会让 `test_config_update_isolation` 失败）。**在 WSL 里跑**：克隆放在 ext4 上，不要放在 `/mnt/<盘>`（9p，权限位与时间戳的行为不是 Linux 的）；登录脚本常会导出 `PI_HOME`（指向 Windows 一侧的配置目录），绕过执行器直接跑 `cargo test`、`cargo nextest` 或测试二进制会读写那个目录——要么走执行器，要么先 `unset PI_HOME GROK_HOME` 并把 `HOME` 指到一次性目录。
 
-| suite（`cargo test -p …`） | 目标 | 通过 | 忽略 | `min_passed` | 说明 |
+| suite（`cargo nextest run -p …`） | 目标 | 通过 | 跳过 | `min_passed` | 说明 |
 |---|---|---|---|---|---|
 | `pi-shell` | `--lib` + 2 个集成 | 838 | 1 | 820 | r15：1,056 → 864（删了旧存储层）；r16：864 → 838（删了 `session::worktree` 等；见「当前基线」） |
 | `pi-pager` | `--lib` + 4 个集成 | 5,651 | 12 | 5,300 | 含 `python_agent_e2e`：pager 的 ACP client 对着真的 Python agent（要 `PI_E2E_PYTHON`）；r17：+2（`in_own_process` 的自检） |
 | `pi-pager-render` | `--lib` | 1,092 | 2 | 1,040 | r8 起在清单里；另有 1 个 `known_failures`（见下） |
 | `pi-pager-minimal` | `--lib` | 79 | 0 | 75 | r8 起在清单里 |
 | `pi-pager-bin` | `--bin zypi` | 21 | 0 | 21 | 含 `-p` 守卫用例 |
-| `pi-acp-lib` | `--lib` | 21 | 0 | 21 | 跳过 1 个会永久挂起的用例（见下） |
+| `pi-acp-lib` | `--lib` | 21 | 1 | 21 | `--skip` 去掉 1 个会永久挂起的用例（见下），算在「跳过」里 |
 | `pi-http` | `--lib` | 13 | 0 | 13 |  |
 | `pi-telemetry` | `--lib` | 239 | 0 | 230 |  |
 | `pi-file-utils` | `--lib` | 216 | 6 | 210 |  |
 | `pi-sampling-types` | `--lib` | 320 | 0 | 310 |  |
-| **合计** | | **8,490** | **21** | | |
+| **合计** | | **8,490** | **22** | | |
 
-「通过」是清单里的 `reference_passed`，「`min_passed`」是下限（棘轮规则见 §1）。每一轮数字的变化（r8、r9、r10 的 CI 对账，含 run 号；r11 的 −18；r13 的 +41；r15 的 −192；r16 的 −26；r17 的 +2）在[基线历史][hist-tests]。
+「通过」是清单里的 `reference_passed`，「`min_passed`」是下限（棘轮规则见 §1）。「跳过」是 nextest 的算法：`#[ignore]` 的加 `--skip` 去掉的（r17 及以前用 `cargo test`，这一列叫「忽略」，不含 `--skip` 去掉的那 1 个）。每一轮数字的变化（r8、r9、r10 的 CI 对账，含 run 号；r11 的 −18；r13 的 +41；r15 的 −192；r16 的 −26；r17 的 +2）在[基线历史][hist-tests]。
 
 **清单里的已知失败 / 跳过，及原因**
 
@@ -121,7 +121,7 @@ macOS 环境：Apple Silicon，Homebrew `cargo` / `rustc` 1.96.1（**不是**钉
 
 ### 3.4 测试之间的竞争
 
-一个 Rust 测试二进制里的所有测试，是同一个进程里的线程：它们共用环境变量、当前目录与每一个 `static`。这个树里的测试来自一个用 `cargo nextest`（一个测试一个进程）跑测试的项目，所以很多锁只管一部分测试。CI 跑 `cargo test`，顺序固定，4 个线程。这样的运行找不到这类竞争，所以 **CI 通过不能证明它们不存在**。r17 用 `scripts/tui_envspy/`（环境变量探针与压力脚本；README 在同目录）查了 `pi-pager` 与 `pi-shell`。原因与做法在计划 §10.20，这一节只记数字。均为 WSL2、本地、Linux。
+一个 Rust 测试二进制里的所有测试，是同一个进程里的线程：它们共用环境变量、当前目录与每一个 `static`。这个树里的测试来自一个用 `cargo nextest`（一个测试一个进程）跑测试的项目，所以很多锁只管一部分测试。r17 以前 CI 跑 `cargo test`（4 个线程，顺序固定）。那样的运行找不到这类竞争，所以那时 **CI 通过不能证明它们不存在**。r18 起 CI 与基线执行器跑 nextest（一个测试一个进程）：进程内共享的状态不再共用，这一类竞争不会出现；本地的 `cargo test` 仍然会遇到。r17 用 `scripts/tui_envspy/`（环境变量探针与压力脚本；README 在同目录）查了 `pi-pager` 与 `pi-shell`。原因与做法在计划 §10.20，这一节只记数字。均为 WSL2、本地、Linux。
 
 **压力运行。** `stress.sh`：libtest 的 `--shuffle-seed N` 与 `--test-threads T`，每遍整个 lib。每个格子是「有失败的运行数 / 运行数」。
 

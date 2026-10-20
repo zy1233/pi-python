@@ -6,7 +6,7 @@ Config:  scripts/tui_baseline.toml. Standard library only (Python >= 3.11).
 
     python scripts/tui_baseline.py gates     # dependency-graph and source gates (no compilation)
     python scripts/tui_baseline.py check     # gates + cargo check (consumer build, workspace tests)
-    python scripts/tui_baseline.py test      # cargo test per suite
+    python scripts/tui_baseline.py test      # cargo nextest per suite (--runner cargo: cargo test)
     python scripts/tui_baseline.py release   # release-dist build: binary size, build time, startup
 
 Every command streams the underlying cargo output, writes JSON and Markdown under --out and, when
@@ -42,12 +42,28 @@ TEST_RESULT_RE = re.compile(
     r"\d+ measured; (\d+) filtered out"
 )
 TEST_FAILED_RE = re.compile(r"^test (\S+) \.\.\. FAILED$")
+# cargo-nextest (human output, no TTY). The closing summary and the recap of failed tests that
+# follows it; see `parse_nextest_output`. Formats: nextest-runner `displayer/imp.rs`.
+NEXTEST_SUMMARY_RE = re.compile(r"^\s*Summary \[\s*[\d.]+s\] \d+(?:/\d+)? tests? run: (.*)$")
+NEXTEST_COUNT_RE = re.compile(r"(\d+) (passed|failed|exec failed|timed out|skipped)")
+NEXTEST_STATUS_RE = re.compile(
+    r"^\s*(?P<label>[A-Z][A-Z0-9 +/-]*?) \[\s*>?\s*[\d.]+s\]"
+    r"(?: \[[^\]]*\])?"  # stress-run iteration, not used here
+    r" \([^)]*\) "  # the counter, e.g. `(4/8)`
+    r"(?P<binary>\S+) (?P<name>\S+)\s*$"
+)
+# Status labels of a test that did not fail. Any other label in the recap is a failure.
+NEXTEST_PASSING_LABEL_RE = re.compile(
+    r"^(?:PASS|LEAK|TIMEOUT-PASS|SLOW(?: \+ LEAK|\+TMPASS)?|FLAKY \d+/\d+|TRY \d+ PASS)$"
+)
 RUSTC_SUMMARY_RE = re.compile(r"^(?:\d+ warnings? emitted|aborting due to .*)$")
 TEXT_SUFFIXES = frozenset(
     {".rs", ".toml", ".md", ".txt", ".json", ".yaml", ".yml", ".sh", ".py", ".proto", ".html"}
 )
 SKIP_DIRS = frozenset({"target", ".git", "node_modules"})
 REFERENCE_TOLERANCE = 0.05
+# After the timeout of a command: the time between the SIGTERM and the SIGKILL (see `stream`).
+STOP_GRACE_SECONDS = 20.0
 
 
 # --------------------------------------------------------------------------------------------
@@ -116,6 +132,50 @@ def parse_test_output(text: str) -> SuiteTotals:
         elif m := TEST_FAILED_RE.match(line):
             totals.failed_tests.append(m.group(1))
     return totals
+
+
+def parse_nextest_output(text: str) -> SuiteTotals:
+    """Read the totals and the failed tests from the output of `cargo nextest run`.
+
+    The totals are in the `Summary` line. nextest calls every test that it did not run "skipped":
+    the `#[ignore]` tests, and the tests that a `-- --skip` filter removed. libtest counts the two
+    apart; here both go to `ignored`. `exec failed` and `timed out` count as failed.
+
+    The names are in the recap that nextest prints after the summary (it lists the tests that did
+    not pass). Only the recap is read. The live part before the summary holds the captured output
+    of the failed tests, and a line of that output can look like a status line.
+    """
+    totals = SuiteTotals()
+    in_recap = False
+    for raw in text.splitlines():
+        line = ANSI_RE.sub("", raw).rstrip()
+        if m := NEXTEST_SUMMARY_RE.match(line):
+            counts = {label: int(n) for n, label in NEXTEST_COUNT_RE.findall(m.group(1))}
+            totals.passed += counts.get("passed", 0)
+            totals.failed += sum(counts.get(k, 0) for k in ("failed", "exec failed", "timed out"))
+            totals.ignored += counts.get("skipped", 0)
+            totals.result_lines += 1
+            in_recap = True
+        elif in_recap and (m := NEXTEST_STATUS_RE.match(line)):
+            name = m.group("name")
+            if NEXTEST_PASSING_LABEL_RE.match(m.group("label")) or name in totals.failed_tests:
+                continue
+            totals.failed_tests.append(name)
+    return totals
+
+
+TEST_RUNNERS = ("cargo", "nextest")
+
+
+def suite_command(runner: str, suite: dict[str, Any]) -> list[str]:
+    """The command line of one manifest suite. `runner`: "cargo" (libtest) or "nextest"."""
+    # --no-fail-fast: a failing lib test must not hide the integration targets behind it.
+    cmd = ["cargo", "nextest", "run"] if runner == "nextest" else ["cargo", "test"]
+    cmd += ["--locked", "--no-fail-fast", "-p", suite["package"], *suite.get("targets", [])]
+    skips = suite.get("skip", [])
+    if skips:
+        cmd += ["--", *(arg for s in skips for arg in ("--skip", s))]
+    return cmd
 
 
 def count_tree_nodes(text: str) -> int:
@@ -315,7 +375,7 @@ def evaluate_suite(
     timed_out: bool,
     seconds: float,
 ) -> SuiteResult:
-    """Classify one `cargo test` invocation against the manifest entry."""
+    """Classify one test run (`cargo test` or `cargo nextest run`) against the manifest entry."""
     known = suite.get("known_failures", [])
     unexpected = [t for t in totals.failed_tests if not any(t.endswith(k) for k in known)]
     known_seen = [t for t in totals.failed_tests if t not in unexpected]
@@ -418,11 +478,21 @@ def stream(
     )
     timed_out = threading.Event()
 
+    def force() -> None:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(proc.pid, signal.SIGKILL)
+
+    escalate = threading.Timer(STOP_GRACE_SECONDS, force)
+
     def kill() -> None:
         timed_out.set()
         with contextlib.suppress(ProcessLookupError, PermissionError):
             if hasattr(os, "killpg"):
-                os.killpg(proc.pid, signal.SIGKILL)
+                # Ask first. nextest puts each test in a process group of its own, so a SIGKILL
+                # to the group of nextest leaves the running tests alive; a nextest that gets a
+                # SIGTERM stops them. The SIGKILL follows if the group does not end.
+                os.killpg(proc.pid, signal.SIGTERM)
+                escalate.start()
             else:  # pragma: no cover - Windows
                 proc.kill()
 
@@ -440,6 +510,7 @@ def stream(
     finally:
         if timer:
             timer.cancel()
+        escalate.cancel()
     return proc.returncode, "".join(collected), timed_out.is_set()
 
 
@@ -457,9 +528,12 @@ def echo_diagnostic(line: str) -> None:
             print(rendered, end="", flush=True)
 
 
-def tool_versions(cwd: Path) -> dict[str, str]:
+def tool_versions(cwd: Path, runner: str = "cargo") -> dict[str, str]:
     versions = {}
-    for name, cmd in (("rustc", ["rustc", "-vV"]), ("cargo", ["cargo", "-V"])):
+    commands = [("rustc", ["rustc", "-vV"]), ("cargo", ["cargo", "-V"])]
+    if runner == "nextest":
+        commands.append(("nextest", ["cargo", "nextest", "--version"]))
+    for name, cmd in commands:
         proc = subprocess.run(
             cmd,
             cwd=cwd,
@@ -469,7 +543,10 @@ def tool_versions(cwd: Path) -> dict[str, str]:
             encoding="utf-8",
             errors="replace",
         )
-        versions[name] = proc.stdout.strip().replace("\n", "; ")
+        output = proc.stdout.strip()
+        if name == "nextest":  # the first line is the version, the others are build details
+            output = output.split("\n")[0]
+        versions[name] = output.replace("\n", "; ")
     return versions
 
 
@@ -655,10 +732,34 @@ def select_suites(suites: Sequence[dict[str, Any]], only: Sequence[str]) -> list
     return [suite for suite in suites if suite["package"] in only]
 
 
+def pick_runner(cfg: dict[str, Any], requested: str | None = None) -> str:
+    """The test runner: the one asked for (`--runner`), else the manifest's `[test] runner`."""
+    runner = requested or cfg.get("runner", "cargo")
+    if runner not in TEST_RUNNERS:
+        raise SystemExit(f"unknown test runner {runner!r} (use one of: {', '.join(TEST_RUNNERS)})")
+    return runner
+
+
+def require_nextest(tui_dir: Path) -> None:
+    """Stop at once, with a hint, when `cargo nextest` is not installed (not after a long build)."""
+    if cargo(["nextest", "--version"], tui_dir).returncode != 0:
+        raise SystemExit(
+            "cargo-nextest is not installed. Install it (https://nexte.st/docs/installation/), "
+            "or run the tests with libtest: --runner cargo"
+        )
+
+
 def run_tests(
-    manifest: dict[str, Any], tui_dir: Path, only: Sequence[str] = ()
+    manifest: dict[str, Any],
+    tui_dir: Path,
+    only: Sequence[str] = (),
+    runner: str | None = None,
 ) -> tuple[dict[str, Any], bool]:
     cfg = manifest["test"]
+    runner = pick_runner(cfg, runner)
+    if runner == "nextest":
+        require_nextest(tui_dir)
+    parse = parse_nextest_output if runner == "nextest" else parse_test_output
     env = os.environ.copy()
     env.update(cfg.get("env", {}))
     for key in cfg.get("unset_env", []):
@@ -667,19 +768,7 @@ def run_tests(
 
     results: list[SuiteResult] = []
     for suite in select_suites(cfg["suite"], only):
-        # --no-fail-fast: a failing lib test must not hide the integration targets behind it.
-        cmd = [
-            "cargo",
-            "test",
-            "--locked",
-            "--no-fail-fast",
-            "-p",
-            suite["package"],
-            *suite.get("targets", []),
-        ]
-        skips = suite.get("skip", [])
-        if skips:
-            cmd += ["--", *(arg for s in skips for arg in ("--skip", s))]
+        cmd = suite_command(runner, suite)
         with log_group(" ".join(cmd)):
             started = time.monotonic()
             code, out, timed_out = stream(
@@ -689,7 +778,7 @@ def run_tests(
         results.append(
             evaluate_suite(
                 suite,
-                parse_test_output(out),
+                parse(out),
                 exit_code=code,
                 timed_out=timed_out,
                 seconds=seconds,
@@ -697,7 +786,8 @@ def run_tests(
         )
     ok = all(r.status == "pass" for r in results)
     report = {
-        "tools": tool_versions(tui_dir),
+        "runner": runner,
+        "tools": tool_versions(tui_dir, runner),
         "enforced": bool(cfg.get("enforce")),
         "suites": [asdict(r) for r in results],
         "totals": {
@@ -770,7 +860,8 @@ def render_markdown(command: str, report: dict[str, Any]) -> str:
     lines = [f"## TUI baseline — `{command}`", ""]
     tools = report.get("tools", {})
     if tools:
-        lines += [f"`{tools.get('cargo', '')}`", ""]
+        shown = [tools[name] for name in ("cargo", "nextest") if tools.get(name)]
+        lines += [", ".join(f"`{version}`" for version in shown) or "``", ""]
     if "checks" in report:
         lines += [*render_checks(report["checks"]), ""]
     if "warnings" in report:
@@ -791,7 +882,11 @@ def render_markdown(command: str, report: dict[str, Any]) -> str:
         lines.append("")
     if "suites" in report:
         mode = "enforced" if report["enforced"] else "report only"
-        lines += [f"Tests ({mode})", "", "| Suite | Result | Passed | Failed | Ignored | Notes |"]
+        runner = report.get("runner", "cargo")
+        # nextest does not tell an ignored test from one that a `--skip` filter removed.
+        unrun = "Skipped" if runner == "nextest" else "Ignored"
+        lines += [f"Tests ({mode}, runner: {runner})", ""]
+        lines += [f"| Suite | Result | Passed | Failed | {unrun} | Notes |"]
         lines.append("|---|---|---|---|---|---|")
         for s in report["suites"]:
             notes = "; ".join(s["notes"] + s["unexpected_failures"][:3])
@@ -800,11 +895,14 @@ def render_markdown(command: str, report: dict[str, Any]) -> str:
                 f"| {s['ignored']} | {notes} |"
             )
         t = report["totals"]
-        lines += [
-            "",
-            f"Total: **{t['passed']}** passed, {t['failed']} failed, {t['ignored']} ignored",
-            "",
-        ]
+        total = f"**{t['passed']}** passed, {t['failed']} failed, {t['ignored']} {unrun.lower()}"
+        lines += ["", f"Total: {total}", ""]
+        if runner == "nextest":
+            lines += [
+                "nextest counts the `#[ignore]` tests and the tests that a `--skip` filter "
+                "removed together as skipped.",
+                "",
+            ]
     if "binary_bytes" in report:
         ref = report["reference"]
         lines += [
@@ -853,6 +951,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         metavar="PACKAGE",
         help="`test` only: run just this manifest suite (repeatable); default is all of them",
     )
+    parser.add_argument(
+        "--runner",
+        choices=TEST_RUNNERS,
+        help="`test` only: the test runner; default is `[test] runner` in the manifest",
+    )
     args = parser.parse_args(argv)
 
     manifest = tomllib.loads(args.manifest.read_text(encoding="utf-8"))
@@ -865,7 +968,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.command == "check":
         report, ok = run_check(manifest, tui_dir)
     elif args.command == "test":
-        report, ok = run_tests(manifest, tui_dir, args.suite)
+        report, ok = run_tests(manifest, tui_dir, args.suite, args.runner)
     else:
         report, ok = run_release(manifest, tui_dir)
 

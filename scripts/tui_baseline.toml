@@ -88,6 +88,13 @@ workspace_tests_exclude = ["pi-fast-worktree"]
 enforce_workspace_tests = true
 
 [test]
+# "nextest" (cargo-nextest, one process per test) or "cargo" (libtest, all tests of a binary as
+# threads of one process). The vendored tests were written for nextest, and some of them are
+# reliable only under it (docs/PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md, sections 10.20 and
+# 10.21). The command line `--runner` takes the other one. nextest counts the ignored tests and
+# the tests that `skip` removes together as skipped, and it runs no doctests (these suites select
+# explicit targets, so `cargo test` did not run them either).
+runner = "nextest"
 # The first Linux run passed every suite with 0 failures, so unexpected failures now block.
 enforce = true
 timeout_minutes = 60

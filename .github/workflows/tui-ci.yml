@@ -87,7 +87,7 @@ jobs:
           path: tui-baseline/
 
   test:
-    name: cargo test (Linux x86_64)
+    name: cargo nextest (Linux x86_64)
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     steps:
@@ -116,6 +116,14 @@ jobs:
           shared-key: tui-linux-x86_64-test
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      # The runner is `[test] runner` in scripts/tui_baseline.toml: cargo-nextest, one process per
+      # test (the vendored tests were written for it). The version is pinned because
+      # scripts/tui_baseline.py reads its output; change it together with the parser and its tests.
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest@0.9.148
+
       # The pager's client against the real Python agent (tui/crates/codegen/pi-pager/tests/
       # python_agent_e2e.rs, plan 0.3): the tests need a Python that has the agent installed, and
       # fail without one (PI_E2E_REQUIRED) instead of skipping, so a CI that lost it is not green.
@@ -125,8 +133,8 @@ jobs:
           echo "PI_E2E_PYTHON=$(command -v python)" >> "$GITHUB_ENV"
           echo "PI_E2E_REQUIRED=1" >> "$GITHUB_ENV"
 
-      # Report-only until `[test] enforce = true` in scripts/tui_baseline.toml (after the first
-      # Linux run has been triaged); the per-suite table lands in the job summary either way.
+      # What blocks (`[test] enforce`, the per-suite floors) is in scripts/tui_baseline.toml; the
+      # per-suite table lands in the job summary either way.
       - name: Test suites
         run: python scripts/tui_baseline.py test --out tui-baseline
 

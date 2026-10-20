@@ -6,8 +6,10 @@ import importlib.util
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
+import time
 import tomllib
 from pathlib import Path
 
@@ -65,6 +67,217 @@ def test_parse_test_output_ignores_ansi_colour_codes():
     coloured = "\x1b[0mtest result: ok. 5 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out\n"
     totals = tb.parse_test_output(coloured)
     assert (totals.passed, totals.ignored, totals.result_lines) == (5, 1, 1)
+
+
+# Real output of cargo-nextest 0.9.148 (no terminal, stderr merged) for
+# `cargo nextest run --no-fail-fast -p demo --lib --test it --bin demo -- --skip skipme`
+# on a small crate of 14 tests: 4 are `#[ignore]`, 2 are removed by the filter, 8 run. In
+# NEXTEST_FAIL three of the 8 fail.
+NEXTEST_FAIL = """\
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s
+────────────
+ Nextest run ID ea55175a-70df-438a-a72d-777a4068ebed with nextest profile: default
+    Starting 8 tests across 3 binaries (6 tests skipped)
+        PASS [   0.003s] (1/8) demo::bin/demo tests::bin_ok
+        PASS [   0.003s] (2/8) demo tests::nested::nested_ok
+        PASS [   0.003s] (3/8) demo tests::ok_two
+        FAIL [   0.003s] (4/8) demo tests::fails
+  stdout ───
+
+    running 1 test
+    test tests::fails ... FAILED
+
+    failures:
+
+    failures:
+        tests::fails
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'tests::fails' (7139) panicked at src/lib.rs:12:66:
+    boom
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        PASS [   0.004s] (5/8) demo::it it_ok
+        PASS [   0.004s] (6/8) demo tests::ok_one
+        FAIL [   0.004s] (7/8) demo tests::nested::nested_fails
+  stdout ───
+
+    running 1 test
+    test tests::nested::nested_fails ... FAILED
+
+    failures:
+
+    failures:
+        tests::nested::nested_fails
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'tests::nested::nested_fails' (7142) panicked at src/lib.rs:15:77:
+    assertion `left == right` failed: nested boom
+      left: 1
+     right: 2
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        FAIL [   0.004s] (8/8) demo::it it_fails
+  stdout ───
+
+    running 1 test
+    test it_fails ... FAILED
+
+    failures:
+
+    failures:
+        it_fails
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'it_fails' (7143) panicked at tests/it.rs:2:65:
+    it boom
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+────────────
+     Summary [   0.004s] 8 tests run: 5 passed, 3 failed, 6 skipped
+        FAIL [   0.003s] (4/8) demo tests::fails
+        FAIL [   0.004s] (7/8) demo tests::nested::nested_fails
+        FAIL [   0.004s] (8/8) demo::it it_fails
+error: test run failed
+"""  # noqa: E501 (the lines are the real output)
+
+# The same crate, all 8 tests pass.
+NEXTEST_PASS = """\
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s
+────────────
+ Nextest run ID b94e9677-fe9c-4ac6-ac36-b61cd8b71784 with nextest profile: default
+    Starting 8 tests across 3 binaries (6 tests skipped)
+        PASS [   0.016s] (1/8) demo::bin/demo tests::bin_ok
+        PASS [   0.016s] (2/8) demo tests::nested::nested_fails
+        PASS [   0.016s] (3/8) demo tests::ok_two
+        PASS [   0.016s] (4/8) demo tests::fails
+        PASS [   0.016s] (5/8) demo tests::ok_one
+        PASS [   0.016s] (6/8) demo::it it_ok
+        PASS [   0.016s] (7/8) demo::it it_fails
+        PASS [   0.016s] (8/8) demo tests::nested::nested_ok
+────────────
+     Summary [   0.016s] 8 tests run: 8 passed, 6 skipped
+"""
+
+# The same crate, a name filter that no test has (exit code 4).
+NEXTEST_NONE = """\
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s
+────────────
+ Nextest run ID da5643a6-cff3-4f7f-8c75-4c2d3717e2a6 with nextest profile: default
+    Starting 0 tests across 3 binaries (14 tests skipped)
+────────────
+     Summary [   0.000s] 0 tests run: 0 passed, 14 skipped
+error: no tests to run
+(hint: use `--no-tests` to customize)
+"""
+
+# The status labels that the recap of nextest can show (from the snapshot tests of nextest-runner,
+# `displayer/imp.rs`), with whether the test failed.
+NEXTEST_LABELS = {
+    "PASS": False,
+    "LEAK": False,
+    "TIMEOUT-PASS": False,
+    "SLOW": False,
+    "SLOW + LEAK": False,
+    "SLOW+TMPASS": False,
+    "FLAKY 2/2": False,
+    "FLKY-FL 2/2": True,
+    "FAIL": True,
+    "FAIL + LEAK": True,
+    "XFAIL": True,
+    "LEAK-FAIL": True,
+    "TIMEOUT": True,
+    "SIGSEGV": True,
+    "ABORT": True,
+    "TRY 2 FAIL": True,
+    "TRY 2 FL+LK": True,
+    "TRY 2 LKFAIL": True,
+    "TRY 2 TMT": True,
+}
+
+
+def test_parse_nextest_output_reads_the_totals_and_the_recap_of_failures():
+    totals = tb.parse_nextest_output(NEXTEST_FAIL)
+    assert (totals.passed, totals.failed, totals.ignored, totals.result_lines) == (5, 3, 6, 1)
+    # Once each, in the order of the recap, without the binary id.
+    assert totals.failed_tests == ["tests::fails", "tests::nested::nested_fails", "it_fails"]
+
+
+def test_parse_nextest_output_of_a_clean_run():
+    totals = tb.parse_nextest_output(NEXTEST_PASS)
+    assert (totals.passed, totals.failed, totals.ignored, totals.result_lines) == (8, 0, 6, 1)
+    assert totals.failed_tests == []
+
+
+def test_parse_nextest_output_of_a_run_with_no_test_still_has_a_summary():
+    totals = tb.parse_nextest_output(NEXTEST_NONE)
+    assert (totals.passed, totals.failed, totals.ignored, totals.result_lines) == (0, 0, 14, 1)
+
+
+def test_parse_nextest_output_has_no_result_without_a_summary():
+    """A build error stops nextest before it prints a summary."""
+    totals = tb.parse_nextest_output(
+        "error[E0432]: unresolved import `x`\nerror: could not compile"
+    )
+    assert (totals.passed, totals.failed, totals.result_lines) == (0, 0, 0)
+
+
+def test_parse_nextest_output_ignores_ansi_colour_codes():
+    coloured = (
+        "\x1b[32;1m     Summary\x1b[0m [   0.004s] \x1b[1m8\x1b[0m tests run: "
+        "\x1b[1m7\x1b[0m \x1b[32;1mpassed\x1b[0m, \x1b[1m1\x1b[0m \x1b[31;1mfailed\x1b[0m, "
+        "\x1b[1m6\x1b[0m \x1b[33;1mskipped\x1b[0m\n"
+        "\x1b[31;1m        FAIL\x1b[0m [   0.003s] (4/8) \x1b[35;1mdemo\x1b[0m "
+        "\x1b[36mtests\x1b[0m\x1b[36m::\x1b[0m\x1b[34;1mfails\x1b[0m\n"
+    )
+    totals = tb.parse_nextest_output(coloured)
+    assert (totals.passed, totals.failed, totals.ignored) == (7, 1, 6)
+    assert totals.failed_tests == ["tests::fails"]
+
+
+def test_parse_nextest_output_counts_exec_failed_and_timed_out_as_failed():
+    summary = (
+        "     Summary [  15.750s] 8/10 tests run: 5 passed (1 slow, 1 flaky, 1 leaky), "
+        "2 failed, 1 exec failed, 1 timed out, 2 skipped\n"
+        "warning: 2/10 tests were not run due to signal\n"
+    )
+    totals = tb.parse_nextest_output(summary)
+    assert (totals.passed, totals.failed, totals.ignored) == (5, 4, 2)
+
+
+def test_parse_nextest_output_tells_failed_from_passed_labels_in_the_recap():
+    lines = ["     Summary [   1.000s] 19 tests run: 7 passed, 12 failed, 0 skipped"]
+    for number, label in enumerate(NEXTEST_LABELS, start=1):
+        lines.append(f"{label:>12} [   1.000s] ({number:>3}/100) my-binary-id test_{number}")
+    totals = tb.parse_nextest_output("\n".join(lines))
+    failing = [f"test_{n}" for n, failed in enumerate(NEXTEST_LABELS.values(), start=1) if failed]
+    assert totals.failed_tests == failing
+
+
+def test_parse_nextest_output_reads_only_the_recap_for_names():
+    """The captured output of a failed test is before the summary; a line of it can look like a
+    status line, and must not count as a failed test."""
+    text = "\n".join(
+        [
+            "        FAIL [   0.010s] (1/2) pkg tests::boom",
+            "  stdout ───",
+            "",
+            "    FAIL [   0.001s] (9/9) fake::bin some::other_name",
+            "────────────",
+            "     Summary [   0.011s] 2 tests run: 1 passed, 1 failed, 0 skipped",
+            "        FAIL [   0.010s] (1/2) pkg tests::boom",
+        ]
+    )
+    assert tb.parse_nextest_output(text).failed_tests == ["tests::boom"]
 
 
 def test_count_tree_nodes_dedupes_repeat_markers_and_headers():
@@ -332,6 +545,25 @@ def test_evaluate_suite_enforces_floor_and_notes_reference_drift():
     assert not _evaluate(_suite(reference_passed=100), _totals(passed=97)).notes
 
 
+def test_a_nextest_run_is_judged_like_a_libtest_run():
+    suite = _suite(known_failures=["tests::fails"], min_passed=5)
+    result = _evaluate(suite, tb.parse_nextest_output(NEXTEST_FAIL), exit_code=100)
+    assert result.status == "fail"
+    assert result.known_failures_seen == ["tests::fails"]
+    assert result.unexpected_failures == ["tests::nested::nested_fails", "it_fails"]
+    assert (result.passed, result.failed, result.ignored) == (5, 3, 6)
+    clean = _evaluate(_suite(min_passed=8), tb.parse_nextest_output(NEXTEST_PASS))
+    assert (clean.status, clean.passed, clean.ignored) == ("pass", 8, 6)
+    assert _evaluate(_suite(min_passed=9), tb.parse_nextest_output(NEXTEST_PASS)).status == "fail"
+
+
+def test_a_nextest_run_that_ran_no_test_fails():
+    """Exit code 4 and a floor: a filter that no test matches must not look like a pass."""
+    totals = tb.parse_nextest_output(NEXTEST_NONE)
+    assert _evaluate(_suite(), totals, exit_code=4).status == "fail"
+    assert _evaluate(_suite(min_passed=1), totals, exit_code=0).status == "fail"
+
+
 # ---- manifest and workflow consistency -----------------------------------------------------------
 
 
@@ -379,6 +611,83 @@ def test_select_suites_narrows_by_package_and_rejects_unknown_names():
 
 def test_tests_run_without_fail_fast_so_one_failing_target_cannot_hide_the_rest():
     assert '"--no-fail-fast"' in SCRIPT.read_text(encoding="utf-8")
+
+
+def test_suite_command_for_each_runner():
+    suite = {"package": "pi-acp-lib", "targets": ["--lib"], "skip": ["a_test", "b_test"]}
+    assert tb.suite_command("nextest", suite) == [
+        *("cargo", "nextest", "run", "--locked", "--no-fail-fast", "-p", "pi-acp-lib", "--lib"),
+        *("--", "--skip", "a_test", "--skip", "b_test"),
+    ]
+    assert tb.suite_command(
+        "cargo", {"package": "pi-http", "targets": ["--lib", "--test", "t"]}
+    ) == [
+        *("cargo", "test", "--locked", "--no-fail-fast", "-p", "pi-http", "--lib", "--test", "t"),
+    ]
+
+
+def test_the_cargo_flags_come_before_the_arguments_of_the_test_binary_with_each_runner():
+    for runner in tb.TEST_RUNNERS:
+        for suite in _manifest()["test"]["suite"]:
+            command = tb.suite_command(runner, suite)
+            cargo_part = command[: command.index("--")] if "--" in command else command
+            assert {"--locked", "--no-fail-fast"} <= set(cargo_part), (runner, suite["package"])
+
+
+def test_pick_runner_takes_the_flag_before_the_manifest_and_rejects_unknown_names():
+    assert tb.pick_runner({"runner": "nextest"}) == "nextest"
+    assert tb.pick_runner({"runner": "nextest"}, "cargo") == "cargo"
+    assert tb.pick_runner({}) == "cargo"
+    with pytest.raises(SystemExit, match="unknown test runner 'libtest'"):
+        tb.pick_runner({"runner": "libtest"})
+
+
+def test_manifest_names_a_known_test_runner():
+    assert _manifest()["test"]["runner"] in tb.TEST_RUNNERS
+
+
+def test_require_nextest_stops_with_a_hint_when_it_is_not_installed(monkeypatch, tmp_path):
+    def fake_cargo(args, cwd):
+        assert list(args) == ["nextest", "--version"]
+        return subprocess.CompletedProcess(["cargo", *args], returncode)
+
+    monkeypatch.setattr(tb, "cargo", fake_cargo)
+    returncode = 0
+    tb.require_nextest(tmp_path)  # installed: no error
+    returncode = 101
+    with pytest.raises(SystemExit, match=r"cargo-nextest is not installed.*--runner cargo"):
+        tb.require_nextest(tmp_path)
+
+
+def test_tool_versions_keeps_only_the_first_line_of_the_nextest_version(monkeypatch, tmp_path):
+    outputs = {
+        "rustc": "rustc 1.94.0\nhost: x86_64",
+        "cargo": "cargo 1.94.0",
+        "nextest": "cargo-nextest 0.9.148 (abc 2026-10-07)\nrelease: 0.9.148\nhost: x86_64",
+    }
+
+    def fake_run(cmd, **_kwargs):
+        name = "nextest" if "nextest" in cmd else cmd[0]
+        return subprocess.CompletedProcess(cmd, 0, stdout=outputs[name], stderr="")
+
+    monkeypatch.setattr(tb.subprocess, "run", fake_run)
+    assert tb.tool_versions(tmp_path, "nextest") == {
+        "rustc": "rustc 1.94.0; host: x86_64",
+        "cargo": "cargo 1.94.0",
+        "nextest": "cargo-nextest 0.9.148 (abc 2026-10-07)",
+    }
+    assert set(tb.tool_versions(tmp_path)) == {"rustc", "cargo"}
+
+
+def test_the_test_job_installs_the_pinned_nextest_when_the_manifest_asks_for_it():
+    if _manifest()["test"]["runner"] != "nextest":
+        pytest.skip("the manifest does not use nextest")
+    text = WORKFLOW.read_text(encoding="utf-8")
+    job = text.split("\n  test:\n", 1)[1].split("\n  release-baseline:\n", 1)[0]
+    assert re.search(
+        r"uses: taiki-e/install-action@v2\n\s+with:\n\s+tool: nextest@\d+\.\d+\.\d+", job
+    )
+    assert job.index("taiki-e/install-action") < job.index("scripts/tui_baseline.py test")
 
 
 def test_workflow_runs_the_documented_commands():
@@ -448,3 +757,54 @@ def test_publish_survives_a_legacy_default_encoding(tmp_path):
     assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
     assert "\u2014" in (out_dir / "test.md").read_text(encoding="utf-8")
     assert "\u2705" in proc.stdout.decode("utf-8")
+
+
+def test_render_markdown_says_skipped_for_nextest_and_ignored_for_libtest():
+    libtest = tb.render_markdown("test", _sample_report())
+    assert "runner: cargo" in libtest
+    assert "| Suite | Result | Passed | Failed | Ignored | Notes |" in libtest
+    assert "Total: **1** passed, 0 failed, 0 ignored" in libtest
+
+    report = _sample_report()
+    report["runner"] = "nextest"
+    report["tools"]["nextest"] = "cargo-nextest 0.9.148"
+    nextest = tb.render_markdown("test", report)
+    assert "runner: nextest" in nextest
+    assert "`cargo 1.94.0`, `cargo-nextest 0.9.148`" in nextest
+    assert "| Suite | Result | Passed | Failed | Skipped | Notes |" in nextest
+    assert "Total: **1** passed, 0 failed, 0 skipped" in nextest
+    assert "together as skipped" in nextest
+
+
+# ---- the timeout of a command ----------------------------------------------------------------
+
+posix_only = pytest.mark.skipif(not hasattr(os, "killpg"), reason="process groups need POSIX")
+
+
+@posix_only
+def test_stream_asks_the_group_to_stop_before_it_kills(tmp_path):
+    """nextest puts each test in a process group of its own, so only a nextest that gets a SIGTERM
+    stops its tests (measured: after a SIGKILL to the group of nextest the test lives on)."""
+    cmd = ["sh", "-c", "trap 'echo got-sigterm; exit 0' TERM; while true; do sleep 0.05; done"]
+    code, out, timed_out = tb.stream(cmd, tmp_path, timeout_s=0.5, merge_stderr=True)
+    assert timed_out
+    assert "got-sigterm" in out
+    assert code == 0
+
+
+@posix_only
+def test_stream_kills_a_group_that_ignores_sigterm_after_the_grace_time(tmp_path, monkeypatch):
+    monkeypatch.setattr(tb, "STOP_GRACE_SECONDS", 0.5)
+    cmd = ["sh", "-c", "trap '' TERM; while true; do sleep 0.05; done"]
+    started = time.monotonic()
+    code, _, timed_out = tb.stream(cmd, tmp_path, timeout_s=0.5, merge_stderr=True)
+    assert timed_out
+    assert code == -signal.SIGKILL
+    assert time.monotonic() - started < 15
+
+
+@posix_only
+def test_stream_returns_the_output_of_a_command_that_ends_before_the_timeout(tmp_path):
+    cmd = ["sh", "-c", "echo done; exit 3"]
+    code, out, timed_out = tb.stream(cmd, tmp_path, timeout_s=30, merge_stderr=True)
+    assert (code, out.strip(), timed_out) == (3, "done", False)
