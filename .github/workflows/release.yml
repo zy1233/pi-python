@@ -91,6 +91,7 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           version: "28.x"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build zypi (release-dist)
         working-directory: tui
@@ -130,6 +131,7 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           version: "28.x"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build zypi (release-dist)
         working-directory: tui
