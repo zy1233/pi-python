@@ -10,6 +10,7 @@ from pi_agent_core.extensions.api import ExtensionAPI
 from pi_agent_core.extensions.loader import ExtensionLoader, FailedExtension, SkippedExtensions
 from pi_agent_core.extensions.registry import ExtensionRegistry
 from pi_agent_core.extensions.types import (
+    ClientMcpServer,
     CommandDef,
     CommandHandler,
     EventHandler,
@@ -19,6 +20,7 @@ from pi_agent_core.extensions.types import (
 )
 
 __all__ = [
+    "ClientMcpServer",
     "CommandDef",
     "CommandHandler",
     "EventHandler",

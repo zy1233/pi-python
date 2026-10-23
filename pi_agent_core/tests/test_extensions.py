@@ -360,6 +360,27 @@ class TestFailedActivateRollback:
 # ---------------------------------------------------------------------------
 
 
+class _ClientStubs:
+    """The members of ``HarnessBridge`` about what the client passed and about the user.
+
+    The fake bridges below are not about them (``test_client_mcp_hooks.py`` is); they only have
+    to satisfy the protocol.
+    """
+
+    @property
+    def client_mcp_servers(self) -> tuple[Any, ...]:
+        return ()
+
+    def claim_client_mcp_servers(self, names: Any) -> None:
+        pass
+
+    def notify(self, text: str) -> None:
+        pass
+
+    def add_turn_barrier(self, wait: Any) -> None:
+        pass
+
+
 class TestBridgeDuringActivate:
     def test_bridge_injected_before_activate(self) -> None:
         """Extension can call pi.cwd during activate() when bridge is passed."""
@@ -367,7 +388,7 @@ class TestBridgeDuringActivate:
 
         captured: dict[str, Any] = {}
 
-        class FakeBridge:
+        class FakeBridge(_ClientStubs):
             def inject_tool(self, defn: Any) -> None:
                 pass
 
@@ -470,7 +491,7 @@ class TestBridgeToolValidation:
         """Bridge.set_active_tool_names raises for unknown tools."""
         from pi_agent_core.extensions._harness_bridge import HarnessBridge
 
-        class FakeBridge:
+        class FakeBridge(_ClientStubs):
             def inject_tool(self, defn: Any) -> None:
                 pass
 
@@ -563,7 +584,7 @@ class TestUnsubscribeRemovesHook:
 
         removed: list[tuple[str, Any]] = []
 
-        class TrackingBridge:
+        class TrackingBridge(_ClientStubs):
             def inject_tool(self, defn: Any) -> None:
                 pass
 

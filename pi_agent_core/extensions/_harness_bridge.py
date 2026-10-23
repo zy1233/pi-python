@@ -6,9 +6,10 @@ This is a narrow interface that ``AgentHarness`` implements so that
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any, Protocol, runtime_checkable
 
-from pi_agent_core.extensions.types import ToolDefinition, ToolInfo
+from pi_agent_core.extensions.types import ClientMcpServer, ToolDefinition, ToolInfo
 
 
 @runtime_checkable
@@ -143,4 +144,25 @@ class HarnessBridge(Protocol):
         *callback* must be an async callable (no arguments) invoked when
         the harness owner (e.g. ACP agent) calls ``harness.close()``.
         """
+        ...
+
+    @property
+    def client_mcp_servers(self) -> tuple[ClientMcpServer, ...]:
+        """The MCP servers the client passed for this session (``()``: none)."""
+        ...
+
+    def claim_client_mcp_servers(self, names: Iterable[str]) -> None:
+        """Record that an extension takes care of the servers with these *names*."""
+        ...
+
+    def notify(self, text: str) -> None:
+        """Show *text* to the user (a ``NoticeEvent`` to the subscribers); not to the model.
+
+        Like ``trigger_prompt`` this can be called from sync code. Does nothing once the
+        harness is closed.
+        """
+        ...
+
+    def add_turn_barrier(self, wait: Any) -> None:
+        """Await *wait* (an async callable, no arguments) before each turn's tool list is built."""
         ...
