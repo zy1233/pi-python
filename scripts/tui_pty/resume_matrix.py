@@ -236,11 +236,14 @@ CASES: list[Case] = [
         ["export", "{unknown}"],
         "work",
         "exit non-zero, an error that names the id, nothing on stdout, no agent left running",
+        # The unknown id is a UUID, and the agent opens a UUID that has no file as an empty
+        # session (it cannot tell it from a thread in which nobody typed), so the pager finds
+        # nothing to export. An id of another form is still "not found".
         lambda o, ids: (
             o.failed
             and not o.stdout.strip()
             and ids["unknown"] in o.text
-            and "not found" in o.text
+            and ("not found" in o.text or "no conversation content" in o.text)
             and not o.left_behind
         ),
         export=True,

@@ -426,6 +426,8 @@ def test_the_export_cases_tell_a_transcript_from_a_refusal():
     half = rmx.Outcome(0, "", stdout=f"## User\n\n{rmx.FIRST}")
     agent_left = rmx.Outcome(0, "", stdout=conversation, left_behind=["python -m pi_agent_cli"])
     not_found = rmx.Outcome(1, "Error: Session 'u' not found.")
+    # The agent opens a UUID that has no file as an empty session, so there is nothing to export.
+    empty = rmx.Outcome(1, "Error: Session 'u' has no conversation content to export")
     # The export goes through the agent now, so neither case may carry a gap.
     assert not printed.gap
     assert not unknown.gap
@@ -433,7 +435,9 @@ def test_the_export_cases_tell_a_transcript_from_a_refusal():
     assert not printed.holds(half, IDS)
     assert not printed.holds(agent_left, IDS)
     assert not printed.holds(not_found, IDS)
+    assert not printed.holds(empty, IDS)
     assert unknown.holds(not_found, IDS)
+    assert unknown.holds(empty, IDS)
     assert not unknown.holds(rmx.Outcome(1, "Error: boom"), IDS)
     assert not unknown.holds(rmx.Outcome(0, "", stdout=conversation), IDS)
     assert not unknown.holds(
