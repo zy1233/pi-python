@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pi-mcp-py"
+version = "0.1.0"
+description = "Connects the MCP servers an ACP client passes to the pi-python agent (an extension)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [
+    { name = "zy1233", email = "zy1233@users.noreply.github.com" },
+]
+keywords = ["agent", "mcp", "acp", "pi", "extension"]
+dependencies = [
+    "pi-agent-core-lc>=0.5.0",
+    "langchain-mcp-adapters>=0.3.2",
+    "mcp>=1.30,<2",
+    "anyio>=4.5",
+    "httpx>=0.27",
+]
+
+[project.entry-points."pi_agent.extensions"]
+pi-mcp = "pi_mcp:activate"
+
+[project.urls]
+Homepage = "https://github.com/zy1233/pi-python"
+Repository = "https://github.com/zy1233/pi-python"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pi_mcp"]
+
+[tool.uv.sources]
+pi-agent-core-lc = { workspace = true }

@@ -34,6 +34,7 @@ AgentMessage[] → transform_context() → convert_to_llm() → LangChain BaseMe
 | `pi_agent_core/coding_tools/` | Built-in coding tools (`read`/`bash`/`edit`/`write`/`grep`/`find`/`ls`) | pi coding tools |
 | `packages/pi-agent-harness/` | Sessions, AgentHarness, compaction, skills, LocalExecutionEnv | `harness/` |
 | `packages/pi-dynamic-workflows/` | `workflow` tool and runtime. Scripts run in a child process (`sandbox/host.py` ⇄ stdlib-only `sandbox/child.py`, JSON lines): the kernel limits are the boundary, the audit hook is a speed bump. Sandbox work starts from `docs/specs/2026-10-01-workflow-sandbox-design.md` and runs `tests/test_sandbox_*.py` on Windows **and** WSL (the layers differ per platform) | `@quintinshaw/pi-dynamic-workflows` |
+| `packages/pi-mcp/` | Optional extension `pi-mcp-py` (entry point `pi-mcp`): connects the MCP servers (stdio, http, sse) that an ACP client passes in `session/new`, one runner task per server, tools named `mcp__<server>__<tool>`, `/mcp` command. Core, harness and CLI have no MCP client; they hand the servers over as data (`ClientMcpServer`, `ExtensionAPI.client_mcp_servers`). Design: `docs/specs/2026-10-23-mcp-extension-design.md`. Its tests are left out of a run that did not install the package (the header says so) | — |
 | `packages/pi-agent-cli/` | Standard-ACP CLI (`python -m pi_agent_cli`); config `agent.example.toml`, home `~/.pi-python`; TUI binary `zypi` under `tui/`. See [`packages/pi-agent-cli/AGENTS.md`](packages/pi-agent-cli/AGENTS.md) for spawn, config, and prompt pipeline | — |
 
 ### Invariants
@@ -80,7 +81,7 @@ Only if a venv is broken — recreate from scratch:
 ```powershell
 # Dev
 uv venv --python 3.12 .venv
-uv pip install --python .venv -e ".[dev]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent-cli" -e "./packages/pi-web-access" -e "./packages/pi-goal-x" -e "./packages/pi-dynamic-workflows"
+uv pip install --python .venv -e ".[dev]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent-cli" -e "./packages/pi-web-access" -e "./packages/pi-goal-x" -e "./packages/pi-dynamic-workflows" -e "./packages/pi-mcp"
 
 # Real-LLM
 uv venv --python 3.12 .venv-test-real

@@ -28,7 +28,7 @@ from packaging.version import Version
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGES = ROOT / "packages"
-EXTENSIONS = ("pi-web-access", "pi-goal-x", "pi-dynamic-workflows")
+EXTENSIONS = ("pi-web-access", "pi-goal-x", "pi-dynamic-workflows", "pi-mcp")
 
 pytestmark = pytest.mark.skipif(
     not all((PACKAGES / name / "pyproject.toml").is_file() for name in EXTENSIONS),

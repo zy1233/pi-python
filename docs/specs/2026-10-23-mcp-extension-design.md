@@ -171,7 +171,7 @@ class ClientMcpServer:
 |------|------|
 | 新 core + 没装 `pi-mcp` | 通知变清楚一点，其余不变 |
 | 新 core + `pi-mcp` | 工具可用 |
-| 旧 core + 新 `pi-mcp` | `pi-mcp` 的 `activate` 用 `getattr(pi, "client_mcp_servers", None)` 探测。没有就什么也不做，记一条 warning，写明需要 `pi-agent-core-lc>=0.6.0` |
+| 旧 core + 新 `pi-mcp` | `pi-mcp` 的 `activate` 读 `pi.client_mcp_servers`，旧 core 上这是 `AttributeError`。捕获它，什么也不做，记一条 warning，写明需要 `pi-agent-core-lc` 0.6.0 或更新。没有 bridge 时（`RuntimeError`）当作没有 server，仍注册 `/mcp` |
 
 `pi-mcp-py` 的下限由 `test_extension_packaging.py` 固定为「本检出版本」。发布 0.6.0 时一起抬高。
 
@@ -198,6 +198,8 @@ class ClientMcpServer:
 | `transport.py` | 开 stdio / http / sse 会话（§5.2、§6.2） |
 | `tools.py` | 工具命名、包装、结果裁剪（§5.3） |
 | `redact.py` | 从错误文字里抹掉密钥（§6.1） |
+| `errors.py` | 异常类型；把 SDK 的异常组、`McpError`、`httpx` 错误变成一行原因；判断「连接断了」属于哪一类（§5.2） |
+| `settings.py` | 环境变量与常量（§5.6） |
 
 ### 5.2 一个 server 的生命周期
 
@@ -216,8 +218,10 @@ runner 任务            开 transport → ClientSession.initialize() → load_m
 - **一个 server 一个任务。** MCP SDK 用 anyio 的 cancel scope。scope 必须在进入它的那个任务里退出。工具调用可以从别的任务发起，因为它们只经过内存流。
 - **`session_start` 不能等。** 常见会话里 CLI 在 `session/new` 处理中 `await load_extensions()`。在那里等 `npx` 下载包，会让 `session/new` 卡住几秒。
 - **屏障保证第一回合有工具。** 用户在 server 起来之前发第一条消息时，屏障最多等 `BARRIER_WAIT`（10 秒）。超时的 server 继续在后台起，工具在它 ready 之后注册，从**下一个回合**起生效。同时发一条通知（§5.4）。
-- **状态**：`starting → ready → dead → starting …`；`failed`（启动失败）；`closed`。
-- **重连**：工具调用发现 runner 已结束（`dead`）时，先自动重连一次，再失败。每个 server 每会话最多自动重连 3 次，之后立刻报错。`/mcp reconnect <name>` 手动重连，不受次数限制。重连后用新的工具表更新映射；新出现的工具补注册；消失的工具保持注册，调用时报「server 不再提供」。
+- **状态**：`new → starting → ready`；`ready → dead`（调用或 `/mcp` 发现它没了，或 runner 任务出错）；`stopped`（被要求停下，例如重连时）；`failed`（启动失败，或重连没成功）；`closed`（会话结束）。`dead`、`stopped`、`failed` 的 server 收到调用时都会先重连。
+- **重连**：下一次工具调用发现 server 不是 `ready` 时，先重连再调用。**连续**最多自动重连 3 次：一次调用拿到了答复（结果，或 server 自己返回的错误）就把计数清零，`/mcp reconnect <name>` 成功也清零。设计初稿写的是「每会话 3 次」；那样一个每天崩一次的 server 到第四次就永远连不上，所以改成「连续」。用完之后调用立刻报错，指向 `/mcp reconnect <name>`（它不受次数限制）。同时到来的几个调用只重连一次（`_generation` 对比）。重连后用新的工具表更新映射；新出现的工具补注册；消失的工具保持注册，调用时报「server 不再提供」。
+- **调用已经发出时 server 死了**：不重发，这次调用失败，错误文字写明原因，下一次调用才重连。server 可能已经执行了它（一个「发邮件」工具不该发两封）。只有请求**确定没发出去**（连接已关：`ClosedResourceError`、`BrokenResourceError`、`ConnectError`、`ConnectTimeout`、`session terminated`）时才在重连后重发，且只重发一次。其余的连接错误（`CONNECTION_CLOSED`、`EndOfStream`、`RemoteProtocolError`、`ReadError`、`WriteError` 等）算「可能已执行」。
+- **连接断了要让等待中的调用知道**：stdio 流结束时，SDK 会让挂起的请求收到 `McpError(CONNECTION_CLOSED)`。但传输因**取消**而结束时（例如 Streamable HTTP 的 POST 出错，错误发生在子任务里），挂起的请求得不到任何通知，会一直等到调用超时。`ServerConnection` 因此给每次启动一个 `gone` future：runner 任务结束时完成，调用和它竞争，赢了就按「可能已执行」处理（`ConnectionEnded`）。实测：HTTP server 在调用中退出，调用在约 3 秒内返回，不是等 30 秒。已知的例外：旧式 SSE 传输的 `post_writer` 把 POST 错误吞掉，这样的调用只能等到调用超时。
 - **`startup_timeout`**（60 秒）：从开 transport 到 `load_mcp_tools` 结束。超时算 `failed`，进程被关掉。
 
 ### 5.3 工具
@@ -252,11 +256,13 @@ runner 任务            开 transport → ClientSession.initialize() → load_m
 |------|----------|
 | server 启动失败 | `MCP server "<name>" did not start: <原因>. Its tools are not available in this session. Log: <路径>` |
 | 超过屏障时间还没好 | `MCP server "<name>" is still starting. Its tools join in a later turn.` |
-| 运行中退出 | `MCP server "<name>" stopped: <原因>. The next tool call tries to reconnect.` |
-| 重连用完 | `MCP server "<name>" stopped and cannot reconnect. Use /mcp reconnect <name>.` |
+| 运行中退出 | **不发通知**。在途的调用失败，工具结果里写 `MCP server "<name>" stopped while the tool ran: <原因>. The next call tries to connect it again.`（用户在工具卡片里看到，模型也看到）。空闲时死掉的 server 要到下一次调用或 `/mcp` 才被发现，下一次调用会自动重连，成功就不说什么 |
+| 重连用完 | `MCP server "<name>" stopped and cannot reconnect by itself. Use /mcp reconnect <name>.` |
+| 重连没成功 | `MCP server "<name>" stopped and did not come back: <原因>. Use /mcp reconnect <name>.` |
+| 同名 server | `The client passed the MCP server name "<name>" twice. Only the first is used.`（CLI 已经给重名加后缀，这是防御） |
 | 一切正常 | **什么也不发** |
 
-- 每个 server、每种事件最多发一条。
+- 每个 server、每种事件最多发一条（`Manager._say` 按（名字，种类）去重）。
 - `<原因>` 先解开 `ExceptionGroup`，取第一个叶子，过 `redact`，截到 300 字符。
 - 「命令找不到」单独成句：`command not found: "<可执行文件名>". Check that it is on PATH.`。只写文件名，不写参数。
 - 成功不发通知。这样没有 MCP 问题的线程保持空白，不会因为一条通知变成「有内容的线程」（见 PR #34 的 Zed 行为）。
@@ -265,7 +271,7 @@ runner 任务            开 transport → ClientSession.initialize() → load_m
 
 | 命令 | 输出 |
 |------|------|
-| `/mcp` | 每个 server 一行：名字、transport、状态、工具数；启动失败的加原因 |
+| `/mcp` | 每个 server 一行：名字、transport、状态、工具数；启动失败的加原因和日志路径；`dead` 的写 `stopped: <原因>. The next tool call connects it again`。输出前先 ping 每个 `ready` 的 server（最多 3 秒），连接已经没了的标成 `dead`；只是忙（ping 超时）的不算死 |
 | `/mcp reconnect <name>` | 重连这个 server，并报结果 |
 
 输出里**不写** `command` 的参数、`env`、`url` 的路径和查询串、`headers`。stdio 只写可执行文件名，http 和 sse 只写主机名。
@@ -330,6 +336,7 @@ runner 任务            开 transport → ClientSession.initialize() → load_m
 
 - 用 `httpx` 的默认 TLS 校验。不提供关闭校验的开关。
 - `headers` 的值按密钥处理（§6.1）。
+- 地址在本机（`localhost`、`127.0.0.1`、`::1`）的 server 用一个**不读系统代理**的 `httpx` 客户端（`trust_env=False`，超时与 SDK 默认相同，不跟随重定向）。原因：`httpx` 会读环境变量，以及 Windows 和 macOS 的系统代理设置，而且不像别的 HTTP 客户端那样绕过回环地址，本机的 MCP server 会被送到用户的代理去（在注册表里设了系统代理的 Windows 机器上就是这样）。测试 `test_a_server_on_this_machine_is_not_reached_through_a_proxy` 把代理环境变量指向一个打不通的地址，只有直连客户端能通过。远程 server 仍按系统设置走代理。
 - 需要 OAuth 的远程 server 不在范围内。Zed 对没有 `Authorization` 头的远程 server 走自己的 OAuth 流程，是否把令牌作为 `headers` 传给 agent，我没有核实；若不传，这类 server 在这里会得到 401，通知里会写出来。
 
 ---
@@ -341,7 +348,7 @@ runner 任务            开 transport → ClientSession.initialize() → load_m
 | 命令解析 | SDK 的 `get_windows_executable_command` 把 `npx` 找成 `npx.cmd` | 直接 `PATH` 查找 |
 | 进程树 | 每个 server 进程放进 Job Object（`KILL_ON_JOB_CLOSE`，靠 `pywin32`，`mcp` 在 win32 上自带） | 新会话 + `killpg`（SDK） |
 | 事件循环 | 必须是 `ProactorEventLoop`（Python 默认）。`SelectorEventLoop` 不支持子进程，SDK 会退到 `Popen` | 默认 |
-| stderr | 每个 server 一个日志文件 `<home>/logs/mcp/<name>.log`，每次启动覆盖 | 同 |
+| stderr | 每个 stdio server 一个日志文件 `<home>/logs/mcp/<name>.log`。追加写（两个会话可以跑同一个 server），每次启动先写一行 `--- <时间> start ---`，文件超过 512 KB 时这次从头写。写不了文件时输出丢弃 | 同，另外权限 `0600`（server 可能把拿到的令牌打出来） |
 
 stderr 写文件，不继承 agent 的 stderr：话多的 server 会塞满 Zed 读的管道，agent 就会卡住。
 
@@ -359,20 +366,30 @@ stderr 写文件，不继承 agent 的 stderr：话多的 server 会塞满 Zed �
 
 **PR-B**
 
-用 `mcp.server.fastmcp.FastMCP` 写一个测试 server 脚本（`tests/mock_server.py`，用 `sys.executable` 启动）。工具：`echo`、`add`、`slow`、`fail`（`isError`）、`big`（大输出）、`readonly`（带 `readOnlyHint`）、`env_names`（返回环境变量名）、`env_value`（返回某个变量的值）、`crash`（进程退出）、`structured`（只有 `structuredContent`）。
+用 `mcp.server.fastmcp.FastMCP` 写一个测试 server 脚本（`tests/mock_server.py`，用 `sys.executable` 启动）。工具：`echo`、`add`、`slow`、`fail`（`isError`）、`big`（大输出）、`readonly`（带 `readOnlyHint`）、`env_names`（返回环境变量名）、`env_value`（返回某个变量的值）、`header`（返回收到的请求头）、`pid`、`cwd`、`crash`（进程退出）、`structured`（只有 `structuredContent`）、`image`、`noisy`（往 stderr 写）、`bash`（和内置工具重名）。5 个测试文件，共 192 个测试，全部用真实的子进程或真实的本地 HTTP server，不 mock MCP SDK：
+
+| 文件 | 测什么 |
+|------|--------|
+| `test_mcp_units.py` | 不需要 server 的部分：名字、结果整形、脱敏、异常分类、子进程环境、日志文件、设置值 |
+| `test_mcp_connection.py` | stdio server：注册、调用、失败的启动、运行中退出与重连、清理、环境、屏障 |
+| `test_mcp_http.py` | Streamable HTTP 与 SSE、server 退出后重连、本机地址不走系统代理 |
+| `test_mcp_extension.py` | `activate`（旧 core、认领、命令、清理）；真实 `AgentHarness` + 脚本化 LLM |
+| `test_mcp_acp.py` | 真实 `PiAcpAgent` 走完整 ACP：`session/new` 带 server → 工具 → `ask` 模式的权限请求 → `session/close` 结束子进程 |
+
+覆盖的内容：
 
 - 连接并注册：名字、schema、annotations、`label`。
 - 调用：文字结果；`isError`；超时；取消；大输出被裁；只有结构化内容。
 - 失败：命令不存在；进程立刻退出；启动超时。别的 server 不受影响，通知只发一次。
-- 运行中退出：通知；下一次调用自动重连；重连用完。
+- 运行中退出：调用失败并写明原因；下一次调用自动重连，工具只注册一次；请求已发出时不重发，没发出去时重发一次；同时到来的几个调用只重连一次；连续重连到上限后报错，调用成功或 `/mcp reconnect` 把次数还回来；等待中的调用在连接断掉时立刻返回，不等超时。
 - 清理：`harness.close()` 之后子进程不在了（检查 PID）。
 - 环境：agent 里的密钥变量在 server 里不可见；客户端 `env` 里的 `${HOME}` **不**被展开；代理变量会传过去。
 - 脱敏：令牌出现在 `url`、`headers`、`env` 值里，都不出现在通知和错误里。
 - 命名：清洗、截断、重名、不覆盖内置工具。
 - `/mcp` 和 `/mcp reconnect`。
 - 屏障：慢 server 时第一回合等到工具；超时后回合照常。
-- streamable HTTP：用同一个脚本以 HTTP 模式起一个本地 server，连、调、关。
-- 端到端：`PiAcpAgent` + `pi_mcp.activate` + 脚本化的 LLM 调用 MCP 工具，在 `ask` 模式下检查权限请求。
+- Streamable HTTP 与 SSE：同一个脚本以 HTTP 或 SSE 模式起一个本地 server，连、调、关；`headers` 到达 server；server 退出后重连；本机地址不走系统代理（用打不通的代理环境变量证明）。
+- 端到端：`AgentHarness` 和 `PiAcpAgent` + 脚本化的 LLM 调用 MCP 工具；`ask` 模式下，没声明的工具要问，`readOnlyHint` 的不问，被拒绝的调用不到达 server。
 
 ---
 
@@ -390,8 +407,8 @@ stderr 写文件，不继承 agent 的 stderr：话多的 server 会塞满 Zed �
 **PR-B**
 
 - 根 `pyproject.toml`：workspace 成员和 `testpaths`。
-- `.github/workflows/ci.yml`、`tui-ci.yml` 的安装行。**不改** `release.yml`：本期不发布 `pi-mcp-py`；发布前要补三处（构建、发布列表、README 的包表）。
-- `AGENTS.md`：「Venv recovery」的安装行。
+- `.github/workflows/ci.yml` 的安装行。**不改** `tui-ci.yml`：那里的安装行只是给 Rust 端到端测试准备一个 Python agent，`zypi` 不传 server，装了 `pi-mcp` 只会改变 `initialize` 的能力，对这些测试没有意义。**不改** `release.yml`：本期不发布 `pi-mcp-py`；发布前要补四处（预发布测试的安装行、构建步骤、发布列表、README 的包表）。预发布的 `pytest -v` 照常能过：`packages/pi-mcp/tests/conftest.py` 在没装 `mcp`、`langchain_mcp_adapters`、`pi_mcp` 的环境里让这些测试不被收集，并在运行头里说一句。
+- `AGENTS.md`：模块表和「Venv recovery」的安装行。
 - `README.md`：包表、「MCP」几行（现在写「MCP tools via langchain-mcp-adapters work out of the box」，仍然对，但要加一句扩展包）。
 - `pi_agent_core/tests/test_extension_packaging.py`：`EXTENSIONS` 加 `pi-mcp`。
 
@@ -411,5 +428,8 @@ stderr 写文件，不继承 agent 的 stderr：话多的 server 会塞满 Zed �
 | Q6 | 声明 http / sse 能力 | 装了 `pi-mcp` 才声明 | 总是声明（没装时 server 仍会被忽略并通知） |
 | Q7 | 超时 | 启动 60 秒，调用 120 秒，屏障 10 秒 | 调用不限时（Claude Code 的做法），靠用户取消 |
 | Q8 | 通知渠道 | 只通知失败 | 也通知「已连接 N 个工具」。会让每个线程都不再空白 |
+| Q9 | 地址在本机的 http / sse server | 不走系统代理 | 照 `httpx` 默认（读系统代理，本机 server 会被送去代理） |
+| Q10 | server 在空闲时死了 | 不通知；下一次调用重连；`/mcp` 看得到 | 一死就通知（可能没有人在用它，却打扰了用户） |
+| Q11 | 重连次数 | 连续 3 次，调用成功后清零 | 每会话 3 次（初稿）；不限次数 |
 
 已知的客户端问题（不是本设计能解决的）：Zed 在项目的第一个工作树加载完成之前创建的线程，会传一个**空的** `mcpServers`（zed#64611）。这样的线程里没有 MCP 工具，新开一个线程即可。
