@@ -7,6 +7,8 @@
 > 上游参照：[earendil-works/pi](https://github.com/earendil-works/pi) `packages/coding-agent`。
 > 上游 README 写明 **No MCP**：core 与 CLI 不连接服务器、不发现 `mcp.json`。需要 MCP 的人写扩展，或自己把工具接进来。
 > pi-python 对齐这一点。MCP 服务器产出的工具若要进循环，调用方先经 `langchain-mcp-adapters` 得到 `BaseTool`，再走已有的 `from_langchain_tool()`。本期不新增 MCP 模块。
+>
+> **修订（2026-10-23）**：用户另选了一条通路：可选扩展包 `pi-mcp-py`，连接**客户端**（编辑器）随 `session/new` 传来的 MCP server。本文的立场不变：core、harness 与 CLI 里仍没有 MCP 客户端，不发现 `mcp.json`，不管理 stdio 子进程。它们只多了一个数据类型（`ClientMcpServer`）和几个通用的扩展入口，MCP 本身留在扩展里，正是本文说的「需要 MCP 的人写扩展」。下文 §1.2、§3 是当时的决定，原样保留。设计与理由见 [MCP 扩展设计](2026-10-23-mcp-extension-design.md)。（「Phase 4 非目标」的说法不准确：Phase 4 规格没有讨论 MCP，出处是本文。）
 
 ---
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -19,7 +19,7 @@ from pi_agent_core.extensions.loader import (
     SkippedExtensions,
 )
 from pi_agent_core.extensions.registry import ExtensionRegistry
-from pi_agent_core.extensions.types import ToolDefinition, ToolInfo
+from pi_agent_core.extensions.types import ClientMcpServer, ToolDefinition, ToolInfo
 from pi_agent_core.messages import AssistantMessage, ImageContent, TextContent, Usage, UserMessage
 from pi_agent_core.types import (
     AfterToolCallContext,
@@ -78,6 +78,7 @@ from pi_agent_harness.types import (
     MessageEntry,
     ModelUpdateEvent,
     NavigateTreeResult,
+    NoticeEvent,
     QueueUpdateEvent,
     ResourcesUpdateEvent,
     SavePointEvent,
@@ -310,6 +311,13 @@ class AgentHarness:
         self._extension_bridge: Any = None
         self._session_id: str = ""
         self._cached_custom_entries: list[Any] = []
+        # What the client passed (``set_client_mcp_servers``) and which of it extensions took
+        # over (``claim_client_mcp_servers``). Data only: the harness connects to nothing.
+        self._client_mcp_servers: tuple[ClientMcpServer, ...] = ()
+        self._claimed_client_mcp_servers: set[str] = set()
+        # Async callables that extensions asked to be awaited before each turn's tool list is
+        # built (``ExtensionAPI.add_turn_barrier``).
+        self._turn_barriers: list[Callable[[], Awaitable[Any]]] = []
         # ``trust_project_extensions``: with auto-discovery, also import (= run)
         # ``<cwd>/.pi-python/extensions``. Off unless the caller vouches for the project. It
         # is also what extensions read as ``pi.project_trusted`` before they use anything
@@ -345,6 +353,69 @@ class AgentHarness:
                 "Extensions are already loaded; project trust can no longer change",
             )
         self._extension_config["trust_project_extensions"] = trusted
+
+    def set_client_mcp_servers(self, servers: Sequence[ClientMcpServer]) -> None:
+        """Record the MCP servers that the client passed for this session.
+
+        Extensions read them as ``pi.client_mcp_servers`` and may claim them. The harness itself
+        connects to none of them: MCP is the business of an extension (``pi-mcp-py``). Accepted
+        only until the extensions have loaded, as with ``set_trust_project_extensions``, because
+        an extension reads the list as it loads.
+        """
+        if self._extensions_loaded:
+            raise AgentHarnessError(
+                "invalid_state",
+                "Extensions are already loaded; the client's MCP servers can no longer change",
+            )
+        self._client_mcp_servers = tuple(servers)
+
+    @property
+    def client_mcp_servers(self) -> tuple[ClientMcpServer, ...]:
+        """The MCP servers the client passed for this session (``()``: none)."""
+        return self._client_mcp_servers
+
+    @property
+    def unclaimed_client_mcp_servers(self) -> tuple[ClientMcpServer, ...]:
+        """The client's MCP servers that no extension took over (nothing connects to them).
+
+        Final once the extensions have loaded.
+        """
+        claimed = self._claimed_client_mcp_servers
+        return tuple(server for server in self._client_mcp_servers if server.name not in claimed)
+
+    def add_turn_barrier(self, wait: Callable[[], Awaitable[Any]]) -> None:
+        """Await *wait* before the tool list of each turn is built (see ``ExtensionAPI``)."""
+        self._turn_barriers.append(wait)
+
+    async def wait_turn_barriers(self) -> None:
+        """Wait for every turn barrier. Runs them together; one that raises is logged.
+
+        ``_run_turn`` calls this. A caller that has to stay cancellable while it waits (the ACP
+        agent: ``session/cancel``) can call it first, and race it against its own signal: the
+        barriers that are already done return at once, so the turn does not wait twice.
+        """
+        barriers = list(self._turn_barriers)
+        if not barriers:
+            return
+
+        async def run(wait: Callable[[], Awaitable[Any]]) -> None:
+            try:
+                await _maybe_await(wait())
+            except Exception:
+                logger.warning("A turn barrier of an extension failed", exc_info=True)
+
+        await asyncio.gather(*(run(wait) for wait in barriers))
+
+    def _notify(self, text: str) -> None:
+        """Show *text* to the user: a ``NoticeEvent`` for the subscribers, in the background."""
+        if self._closed or not isinstance(text, str) or not text.strip():
+            return
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            logger.warning("A notice from an extension was dropped: no running event loop")
+            return
+        self._start_background(lambda: self._emit_any(NoticeEvent(text=text)), "notice")
 
     async def _ensure_extensions_loaded(self) -> None:
         """Load extensions (once) before the first prompt."""
@@ -566,6 +637,21 @@ class AgentHarness:
 
             def register_cleanup(self, callback: Any) -> None:
                 harness._cleanup_callbacks.append(callback)
+
+            @property
+            def client_mcp_servers(self) -> tuple[ClientMcpServer, ...]:
+                return harness.client_mcp_servers
+
+            def claim_client_mcp_servers(self, names: Iterable[str]) -> None:
+                harness._claimed_client_mcp_servers.update(
+                    name for name in names if isinstance(name, str)
+                )
+
+            def notify(self, text: str) -> None:
+                harness._notify(text)
+
+            def add_turn_barrier(self, wait: Any) -> None:
+                harness.add_turn_barrier(wait)
 
         return _Bridge()
 
@@ -1341,6 +1427,14 @@ class AgentHarness:
         message: AgentMessage | None = None,
     ) -> AssistantMessage:
         self._set_phase("turn")
+        try:
+            # Before the tool list is built: what an extension still sets up in the background
+            # (a connection that supplies tools) is then in it, or given up. A long wait can be
+            # cancelled, and the harness must not stay busy after that.
+            await self.wait_turn_barriers()
+        except asyncio.CancelledError:
+            self._set_phase("idle")
+            raise
         try:
             return await self._execute_turn(
                 await self._create_turn_state(), text, images, message=message

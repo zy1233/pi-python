@@ -682,7 +682,9 @@ workflow}`），名单之外的工具——包括任何扩展注册的——不�
 - 提示是工具作者的一面之词，运行时不验证。内置与随包工具是我们自己的；扩展是用户选择加载的代码（它本来就能做更糟的
   事，标错一个提示并没有让它多出能力）。MCP 规范要求客户端把 annotations 视为不可信，除非来自受信任的服务器（恶意服务器
   可以把破坏性的工具标成只读）；`from_langchain_tool` 原样转交 `tool.metadata` 里的提示，所以连接了不信任的 MCP 服务器的
-  调用者要先去掉这些提示。本 CLI 目前不把 ACP `session/new` 的 `mcpServers` 接成工具（该参数被忽略），不受此影响。
+  调用者要先去掉这些提示。本 CLI 自己不把 ACP `session/new` 的 `mcpServers` 接成工具，不受此影响。（2026-10-23：`mcpServers`
+  现在作为数据交给扩展，见 `ExtensionAPI.client_mcp_servers`；可选扩展 `pi-mcp-py` 连接它们。那些工具的提示怎么处理，见
+  [MCP 扩展设计](2026-10-23-mcp-extension-design.md) §6.3。）
   没有按工具放行的配置项：想放行一个没声明的第三方工具，只能补上 annotations，或改用 `auto` 模式。
 - 行为变化：`ask` 模式下，不声明 annotations 的扩展工具现在会询问（此前直接执行）。
 
@@ -690,6 +692,11 @@ workflow}`），名单之外的工具——包括任何扩展注册的——不�
 只读属性，`activate()` 据此构造真实 executor；另有 `trigger_message(custom_type, text, *, details=None)`
 （§13，后台结果的交付）。`HarnessBridge` 是 `runtime_checkable` 协议，自制 bridge（测试替身之类）要补上该方法才能通过
 `isinstance`。
+
+2026-10-23 又加四个成员：`client_mcp_servers`（属性）、`claim_client_mcp_servers(names)`、`notify(text)`、
+`add_turn_barrier(wait)`，对应 `ExtensionAPI` 的同名入口（另有 `ExtensionAPI.register_cleanup`，它公开了 bridge 早就有的
+`register_cleanup`）。自制 bridge 要再补上这四个。它们是一组通用入口，MCP 只是第一个用户；设计见
+[MCP 扩展设计](2026-10-23-mcp-extension-design.md) §4。
 
 ---
 

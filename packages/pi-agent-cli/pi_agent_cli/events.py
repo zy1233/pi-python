@@ -93,6 +93,13 @@ def tool_kind(name: str) -> str:
 
 def project_event(event: AgentEvent, cwd: str | None = None) -> Iterator[SessionUpdate]:
     etype = getattr(event, "type", None)
+    if etype == "notice":
+        # A line an extension sent to the user (``ExtensionAPI.notify``), no part of a turn.
+        text = getattr(event, "text", None)
+        if isinstance(text, str) and text.strip():
+            yield update_agent_message_text(text)
+        return
+
     if etype == "message_end":
         message = getattr(event, "message", None)
         stop = getattr(message, "stopReason", None)
