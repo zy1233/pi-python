@@ -60,8 +60,15 @@ catch {
     exit 0
 }
 
+# Does the command run "git push"? This is the same pattern as the "matcher" in .cursor/hooks.json: keep the two
+# equal. "git push" must stand at the start of a statement: at the start of the command, or after ";", "&", "|",
+# "(", "{" or a line break. Options such as "-C <dir>" and "git.exe" are fine. The words "git push" inside a quoted
+# string or a note (for example a JSON payload in a test) do not count. A quoted text that follows ";" or a line
+# break still counts.
+$GitPushPattern = '(?:^|[;&\|\(\{\r\n])\s*git(?:\.exe)?(?:\s+-[Cc]\s+\S+)*\s+push(?:[\s;&\|\)\}]|$)'
+
 $command = [string]$payload.command
-if ($command -notmatch "(?i)\bgit\s+push\b") {
+if ($command -notmatch $GitPushPattern) {
     exit 0
 }
 

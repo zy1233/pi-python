@@ -4,7 +4,7 @@
     "afterShellExecution": [
       {
         "command": "powershell -NoProfile -ExecutionPolicy Bypass -File .cursor/hooks/on_git_push.ps1 -AutofixModel composer-2.5",
-        "matcher": "git\\s+push",
+        "matcher": "(?:^|[;&\\|\\(\\{\\r\\n])\\s*git(?:\\.exe)?(?:\\s+-[Cc]\\s+\\S+)*\\s+push(?:[\\s;&\\|\\)\\}]|$)",
         "timeout": 10
       }
     ]
