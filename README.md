@@ -21,7 +21,7 @@ This repository is a monorepo containing:
 - `pi-web-access-py` / `pi_web_access`: web search and URL fetch extension.
 - `pi-goal-x-py` / `pi_goal_x`: goal-planning extension.
 - `pi-dynamic-workflows-py` / `pi_dynamic_workflows`: workflow orchestration extension.
-- `pi-mcp-py` / `pi_mcp`: optional extension that connects the MCP servers an ACP client (an editor) passes (not on PyPI yet; see [`packages/pi-mcp`](packages/pi-mcp/README.md)).
+- `pi-mcp-py` / `pi_mcp`: optional extension that connects the MCP servers an ACP client (an editor) passes (see [`packages/pi-mcp`](packages/pi-mcp/README.md)).
 
 **Rust TUI** (beta — prebuilt binary in [GitHub Releases](https://github.com/zy1233/pi-python/releases)):
 
@@ -37,7 +37,7 @@ This repository is a monorepo containing:
 | `pi-web-access-py` | **Beta** | [PyPI](https://pypi.org/project/pi-web-access-py/) |
 | `pi-goal-x-py` | **Beta** | [PyPI](https://pypi.org/project/pi-goal-x-py/) |
 | `pi-dynamic-workflows-py` | **Beta** | [PyPI](https://pypi.org/project/pi-dynamic-workflows-py/) |
-| `pi-mcp-py` | **Alpha** | Not published yet: install from this repository (`pip install -e ./packages/pi-mcp`) |
+| `pi-mcp-py` | **Alpha** | [PyPI](https://pypi.org/project/pi-mcp-py/) (from 0.6.0) |
 | `zypi` (Rust TUI) | **Beta** | [GitHub Releases](https://github.com/zy1233/pi-python/releases) (Linux x86_64) |
 
 ## Features
@@ -103,6 +103,7 @@ pip install pi-agent-cli-lc        # optional: ACP stdio / headless agent
 pip install pi-web-access-py       # optional: web search / fetch extension
 pip install pi-goal-x-py           # optional: goal planning extension
 pip install pi-dynamic-workflows-py  # optional: workflow extension
+pip install pi-mcp-py              # optional: MCP servers that the editor passes
 
 # Optional LLM providers:
 pip install pi-agent-core-lc[openai]      # ChatOpenAI

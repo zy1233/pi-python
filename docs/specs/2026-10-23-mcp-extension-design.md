@@ -407,7 +407,8 @@ stderr 写文件，不继承 agent 的 stderr：话多的 server 会塞满 Zed �
 **PR-B**
 
 - 根 `pyproject.toml`：workspace 成员和 `testpaths`。
-- `.github/workflows/ci.yml` 的安装行。**不改** `tui-ci.yml`：那里的安装行只是给 Rust 端到端测试准备一个 Python agent，`zypi` 不传 server，装了 `pi-mcp` 只会改变 `initialize` 的能力，对这些测试没有意义。**不改** `release.yml`：本期不发布 `pi-mcp-py`；发布前要补四处（预发布测试的安装行、构建步骤、发布列表、README 的包表）。预发布的 `pytest -v` 照常能过：`packages/pi-mcp/tests/conftest.py` 在没装 `mcp`、`langchain_mcp_adapters`、`pi_mcp` 的环境里让这些测试不被收集，并在运行头里说一句。
+- `.github/workflows/ci.yml` 的安装行。**不改** `tui-ci.yml`：那里的安装行只是给 Rust 端到端测试准备一个 Python agent，`zypi` 不传 server，装了 `pi-mcp` 只会改变 `initialize` 的能力，对这些测试没有意义。`release.yml` 见下一条。`packages/pi-mcp/tests/conftest.py` 在没装 `mcp`、`langchain_mcp_adapters`、`pi_mcp` 的环境里让这些测试不被收集，并在运行头里说一句；`ci.yml` 装了包，所以这些测试在 CI 里真的会跑。
+- **发布**（PR-B 开出之后，用户要求在合入前补上）：`.github/workflows/release.yml` 改两处：预发布测试 job 的安装行加 `-e "./packages/pi-mcp"`，构建 job 加一步 `Build pi-mcp`。没有单独的「发布列表」：`publish-pypi` 发布 `dist/` 里的全部文件，`github-release` 附上 `dist/*`，所以构建步骤就是发布列表。装了包之后，预发布的 `pytest -v` 也跑 `packages/pi-mcp/tests`。README 的包表和安装行、包自己的 README（它就是 PyPI 上的说明）、`CHANGELOG.md`、`pi_mcp/__init__.py` 的 docstring 里「还不在 PyPI」的说法都改成「0.6.0 起在 PyPI 上」。首次上传一个新的 PyPI 项目，要求 `PYPI_API_TOKEN` 有创建项目的权限（账号范围的令牌，或这个名字的待定发布者）；令牌的范围这里查不到，要维护者确认。`pi-mcp-py` 这个名字在 PyPI 上没有人占（2026-10-25 查：`/pypi/pi-mcp-py/json` 返回 404）。发布 0.6.0 把核心抬到 0.6.0 时，`test_extension_packaging.py` 会要求 `pi-mcp-py` 的下限同时抬到 `>=0.6.0`。
 - `AGENTS.md`：模块表和「Venv recovery」的安装行。
 - `README.md`：包表、「MCP」几行（现在写「MCP tools via langchain-mcp-adapters work out of the box」，仍然对，但要加一句扩展包）。
 - `pi_agent_core/tests/test_extension_packaging.py`：`EXTENSIONS` 加 `pi-mcp`。

@@ -6,12 +6,14 @@ ACP client (an editor such as Zed) passes to the agent, and gives their tools to
 The agent itself has no MCP client. Without this package, the servers that the editor passes are not
 connected, and the agent says so. With it, the agent connects them.
 
-The package is not on PyPI yet. Install it from a checkout of the repository, into the environment of
-the agent:
+Install it into the environment of the agent:
 
 ```bash
-pip install -e ./packages/pi-mcp
+pip install pi-mcp-py
 ```
+
+The package is on PyPI from the 0.6.0 release of pi-python. In a checkout of the repository, use
+`pip install -e ./packages/pi-mcp`.
 
 Nothing else to set up. The servers come from the editor (Zed: `context_servers` in the settings).
 It needs `pi-agent-core-lc` 0.6.0 or later: an older core does not hand over the servers of the

@@ -6,8 +6,8 @@ An editor such as Zed hands the agent its configured MCP servers in ``session/ne
 connects them: stdio, http and sse servers, one connection per server and session. Their tools
 reach the model as ``mcp__<server>__<tool>``; ``/mcp`` shows the state of the servers.
 
-Install: ``pip install -e ./packages/pi-mcp`` (the package is not on PyPI yet). Nothing is
-configured here: the servers come from the editor.
+Install: ``pip install pi-mcp-py`` (or ``pip install -e ./packages/pi-mcp`` from a checkout of the
+repository). Nothing is configured here: the servers come from the editor.
 
 Environment variables:
   - ``PI_MCP_STARTUP_TIMEOUT`` -- seconds a server may take to start (default 60)
