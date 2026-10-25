@@ -221,6 +221,9 @@ def observe(scenario: Scenario, zypi: str, python: str, show: bool) -> Observati
     term = pt.Term([zypi, *scenario.flags], run_env, cwd=str(root / "work"))
     try:
         obs.ready = term.wait_for(r"Thanks for trying zypi", 25)
+        # The status bar can show its label a few frames after the welcome text. Without this
+        # wait, a scenario that sends no key sometimes read the label before it was drawn.
+        term.pump(1.0)
         for key in scenario.keys:
             term.send(key)
             term.pump(1.0)
