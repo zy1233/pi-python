@@ -196,9 +196,12 @@ class PiAcpAgent(Agent):
         # Held while a session is created under an id the client chose, so two requests for the
         # same id cannot both find it free.
         self._chosen_id_lock = asyncio.Lock()
-        # The ids the client chose for sessions that are open here and may have no file yet (a
-        # new session is written with its first message). The files cannot say that such an id
-        # is taken, so this does. An id leaves when its session is closed or deleted.
+        # The ids that the client chose, or asked for again (``_reopen_blank_session``), for
+        # sessions that are open here and may have no file yet (a new session is written with
+        # its first message). The files cannot say that such an id is taken, so this does. An id
+        # leaves when its session is closed or deleted. (The id that the agent itself gives to a
+        # new session is not here: the check at the first message costs a directory listing, and
+        # it would be paid by every session.)
         self._reserved_ids: set[str] = set()
 
     def on_connect(self, conn: Client) -> None:
@@ -272,15 +275,17 @@ class PiAcpAgent(Agent):
     ) -> LoadSessionResponse | None:
         metadata = await self._find_metadata(session_id)
         if metadata is None:
-            raise RequestError.resource_not_found(session_id)
-        session = await self._repo.open(metadata)
-        await self._bind_session(session_id, session, metadata.cwd or cwd)
-        if self._conn is not None:
-            context = await session.build_context()
-            for msg in context.messages:
-                for update in project_message_replay(msg):
-                    await self._conn.session_update(session_id=session_id, update=update)
-        self._schedule_deferred_setup(session_id, mcp_servers)
+            # No file: nobody typed in it (there is nothing to replay), or the id is unknown.
+            await self._reopen_blank_session(session_id, cwd, mcp_servers)
+        else:
+            session = await self._repo.open(metadata)
+            await self._bind_session(session_id, session, metadata.cwd or cwd)
+            if self._conn is not None:
+                context = await session.build_context()
+                for msg in context.messages:
+                    for update in project_message_replay(msg):
+                        await self._conn.session_update(session_id=session_id, update=update)
+            self._schedule_deferred_setup(session_id, mcp_servers)
         return LoadSessionResponse(
             config_options=self._config_options(session_id),
             field_meta=self._session_response_meta(session_id),
@@ -326,11 +331,12 @@ class PiAcpAgent(Agent):
     ) -> ResumeSessionResponse:
         metadata = await self._find_metadata(session_id)
         if metadata is None:
-            raise RequestError.resource_not_found(session_id)
-        session = await self._repo.open(metadata)
-        await self._bind_session(session_id, session, metadata.cwd or cwd)
-        # ACP session/resume intentionally does not replay history.
-        self._schedule_deferred_setup(session_id, mcp_servers)
+            await self._reopen_blank_session(session_id, cwd, mcp_servers)
+        else:
+            session = await self._repo.open(metadata)
+            await self._bind_session(session_id, session, metadata.cwd or cwd)
+            # ACP session/resume intentionally does not replay history.
+            self._schedule_deferred_setup(session_id, mcp_servers)
         return ResumeSessionResponse(
             config_options=self._config_options(session_id),
             field_meta=self._session_response_meta(session_id),
@@ -562,13 +568,48 @@ class PiAcpAgent(Agent):
             self._reserved_ids.add(session_id)
             return session
 
+    async def _reopen_blank_session(
+        self, session_id: str, cwd: str, mcp_servers: Sequence[Any] | None
+    ) -> None:
+        """``session/load`` or ``session/resume`` of an id that has no session file.
+
+        A session in which nobody typed has no file (plan decision 17), but a client can still
+        hold its id. Zed saves the id of every thread that shows anything, and the notices of
+        this agent are something (the ignored MCP servers, the question about the project). It
+        asks for the id again when it starts, and when the thread is opened from its history.
+        ``resource_not_found`` left such a thread unusable ("Failed to Launch" and a Retry that
+        fails the same way). The session is as empty as it was, so it is opened empty. It still
+        has no file until its first message.
+
+        Only an id of the kind this agent makes is taken for such a session: a UUID in its
+        canonical form (the form the agent gives out, and the form a file's header holds). Any
+        other id is unknown, and ``resource_not_found`` is still the answer.
+        """
+        try:
+            ours = str(uuid.UUID(session_id)) == session_id
+        except (ValueError, AttributeError, TypeError):
+            ours = False
+        if not ours:
+            raise RequestError.resource_not_found(session_id)
+        if session_id in self._harnesses:
+            return  # Open here already, and with no file, so empty: nothing to bind or replay.
+        session = await self._create_session_with_id(session_id, cwd)
+        try:
+            await self._bind_session(session_id, session, cwd)
+        except BaseException:
+            self._reserved_ids.discard(session_id)
+            raise
+        logger.info("Session %s has no file (nobody typed in it): opened empty", session_id)
+        self._schedule_deferred_setup(session_id, mcp_servers)
+
     async def _refuse_id_taken_meanwhile(self, session_id: str, harness: AgentHarness) -> None:
         """Before the first message of a session made under a chosen id: is the id still free?
 
-        Another process may have saved a session under that id since this one was made, and the
-        check at that time could not see it. Saving this one too would put a second session with
-        the id beside the first. The check is made once: a session that has its file is no
-        longer in question.
+        The same holds for a blank session that the client asked for again with ``session/load``
+        (``_reopen_blank_session``). Another process may have saved a session under that id
+        since this one was made, and the check at that time could not see it. Saving this one
+        too would put a second session with the id beside the first. The check is made once: a
+        session that has its file is no longer in question.
         """
         storage = harness.session.get_storage()
         if (

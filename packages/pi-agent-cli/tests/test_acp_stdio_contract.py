@@ -159,18 +159,68 @@ async def test_a_session_in_which_nobody_typed_is_not_kept(tmp_path):
         opened = await _wire(conn.new_session(cwd=str(tmp_path), mcp_servers=[]))
         talked = await _wire(conn.new_session(cwd=str(tmp_path), mcp_servers=[]))
         await _wire(conn.prompt(session_id=talked.session_id, prompt=[text_block("say hi")]))
-        # While the agent runs, the session has no file: it cannot be listed or loaded.
+        # While the agent runs, the session has no file: it is not listed.
         listed = await _wire(conn.list_sessions(cwd=str(tmp_path)))
         assert [s.session_id for s in listed.sessions] == [talked.session_id]
-        with pytest.raises(RequestError):
-            await _wire(conn.load_session(cwd=str(tmp_path), session_id=opened.session_id))
 
     async with running_agent(tmp_path) as (conn, _client, _process):
         await _wire(conn.initialize(protocol_version=PROTOCOL_VERSION))
         listed = await _wire(conn.list_sessions(cwd=str(tmp_path)))
         assert [s.session_id for s in listed.sessions] == [talked.session_id]
-        with pytest.raises(RequestError):
-            await _wire(conn.load_session(cwd=str(tmp_path), session_id=opened.session_id))
+        assert opened.session_id not in [s.session_id for s in listed.sessions]
+
+
+async def test_an_editor_can_open_a_thread_in_which_nobody_typed_after_a_restart(tmp_path):
+    # Zed saves the id of every thread that shows something (a notice of the agent is enough)
+    # and asks for it with session/load when it starts again. The thread is empty, and it
+    # works: its first message writes the file.
+    async with running_agent(tmp_path) as (conn, _client, _process):
+        await _wire(conn.initialize(protocol_version=PROTOCOL_VERSION))
+        opened = await _wire(conn.new_session(cwd=str(tmp_path), mcp_servers=[]))
+
+    async with running_agent(tmp_path) as (conn, client, _process):
+        await _wire(conn.initialize(protocol_version=PROTOCOL_VERSION))
+        loaded = await _wire(
+            conn.load_session(cwd=str(tmp_path), session_id=opened.session_id, mcp_servers=[])
+        )
+        assert loaded is not None
+        assert client.user_text(opened.session_id) == ""
+        assert client.agent_text(opened.session_id) == ""
+        # The thread is not a session of the directory yet: still nothing to list.
+        listed = await _wire(conn.list_sessions(cwd=str(tmp_path)))
+        assert listed.sessions == []
+
+        result = await _wire(
+            conn.prompt(session_id=opened.session_id, prompt=[text_block("first words")])
+        )
+        assert result.stop_reason == "end_turn"
+        assert client.agent_text(opened.session_id) == MOCK_REPLY
+        listed = await _wire(conn.list_sessions(cwd=str(tmp_path)))
+        assert [(s.session_id, s.title) for s in listed.sessions] == [
+            (opened.session_id, "first words")
+        ]
+
+    # A later start finds it like any other session.
+    async with running_agent(tmp_path) as (conn, client, _process):
+        await _wire(conn.initialize(protocol_version=PROTOCOL_VERSION))
+        await _wire(conn.load_session(cwd=str(tmp_path), session_id=opened.session_id))
+        assert client.user_text(opened.session_id) == "first words"
+
+
+async def test_a_thread_that_is_open_can_be_opened_again_and_closed(tmp_path):
+    # Zed loads a thread from its history, and closes the session when the thread view goes.
+    async with running_agent(tmp_path) as (conn, client, _process):
+        await _wire(conn.initialize(protocol_version=PROTOCOL_VERSION))
+        opened = await _wire(conn.new_session(cwd=str(tmp_path), mcp_servers=[]))
+        await _wire(conn.load_session(cwd=str(tmp_path), session_id=opened.session_id))
+        await _wire(conn.resume_session(cwd=str(tmp_path), session_id=opened.session_id))
+        await _wire(conn.close_session(session_id=opened.session_id))
+        await _wire(conn.load_session(cwd=str(tmp_path), session_id=opened.session_id))
+        result = await _wire(
+            conn.prompt(session_id=opened.session_id, prompt=[text_block("still here")])
+        )
+        assert result.stop_reason == "end_turn"
+        assert client.agent_text(opened.session_id) == MOCK_REPLY
 
 
 async def test_unknown_requests_are_errors_and_the_connection_survives(tmp_path):
