@@ -76,6 +76,8 @@ chmod +x zypi
 sudo mv zypi /usr/local/bin/
 ```
 
+The Linux binary needs glibc 2.39 or newer. The release workflow builds it on a GitHub runner with Ubuntu 24.04 (`ubuntu-24.04`), which has glibc 2.39. A system with an older glibc cannot start it: the dynamic loader reports that a `GLIBC_2.39` version is missing. Ubuntu 22.04 (glibc 2.35) is too old. On such a system, use Option B.
+
 The release workflow builds the macOS binary on a GitHub runner (`macos-14`). It does not sign the binary with a Developer ID and it does not notarize it. Nobody has started this build yet: CI only builds it. A file that a browser downloaded may carry the quarantine flag, and macOS may refuse to open it. In that case, remove the flag with `xattr -d com.apple.quarantine zypi`. A file that `curl` downloads has no such flag. If the binary does not start, use Option B.
 
 #### Option B: Build from source
