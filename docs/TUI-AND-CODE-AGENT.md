@@ -207,7 +207,7 @@ The agent works with any ACP-compatible editor (Zed, Neovim, etc.):
 }
 ```
 
-**MCP servers are not connected.** Editors can hand an ACP agent MCP servers when they open a session; this agent ignores them (it gets its tools from the built-in coding tools and its extensions), and says so in the session: one message naming the servers it ignored (only their names; never their commands, URLs or tokens). `zypi` sends none.
+**MCP servers need the optional package `pi-mcp-py`.** Editors can hand an ACP agent MCP servers when they open a session. The agent itself does not connect them (it gets its tools from the built-in coding tools and its extensions). With `pi-mcp-py` installed (`pip install pi-mcp-py`; it is on PyPI from the 0.6.0 release), the agent connects them (stdio, Streamable HTTP and SSE) and gives their tools to the model, named `mcp__<server>__<tool>`. Without the package, the agent says so in the session: one message that names the servers nobody took over (only their names; never their commands, URLs or tokens) and tells the user to install the package. `zypi` sends no servers.
 
 **Long session lists arrive in pages.** `session/list` returns 50 sessions at a time, newest first, with `nextCursor` while there are more; `zypi` follows the cursor, so its session picker shows them all.
 
