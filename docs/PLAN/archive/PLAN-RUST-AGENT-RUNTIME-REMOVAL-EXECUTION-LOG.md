@@ -12,7 +12,7 @@
 
 ## 目录
 
-- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20)
+- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21)
   - [10.1 范围、方法与规模](#101-范围方法与规模)
   - [10.2 `/model` 恢复（ADR3 r3）](#102-model-恢复adr3-r3)
   - [10.3 验证（r3 的实测）](#103-验证r3-的实测)
@@ -36,6 +36,7 @@
   - [10.21 r18 追加：改用 `cargo nextest`、`protoc` 的路径、`release.yml` 的令牌](#1021-r18-追加改用-cargo-nextestprotoc-的路径releaseyml-的令牌)
   - [10.22 r19 追加：用 `gh stack` 合入 #27–#31、V0.6 的发布里程碑、开发暂停](#1022-r19-追加用-gh-stack-合入-2731v06-的发布里程碑开发暂停)
   - [10.23 r20 追加：MCP 的方向（可选扩展包）、空白对话的修复、发布内容、合入 #33–#36](#1023-r20-追加mcp-的方向可选扩展包空白对话的修复发布内容合入-3336)
+  - [10.24 r21 追加：V0.6 的版本号、合入 #38 与 #39、条件 1–4 的结果](#1024-r21-追加v06-的版本号合入-38-与-39条件-14-的结果)
 - [附录 A（摘录）：A.4](#附录-a摘录a4)
   - [A.4 r5 执行结果（对照 r5 时初稿里的「默认决策」；r9 的更新见 A.1）](#a4-r5-执行结果对照-r5-时初稿里的默认决策r9-的更新见-a1)
 - [附录 B：复现方法](#附录-b复现方法)
@@ -51,9 +52,9 @@
   - [5. 改动规模](#5-改动规模)
 - [修订记录](#修订记录)
 
-## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20）
+## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21）
 
-r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）；r14 合入这两个 PR，并做决策 17：会话文件在第一条用户消息时才写（§10.17）；r15 做决策 10 的存储层一项：删 `pi-shell` 里的旧存储层（§10.18）；r16 合入 #25 与 #26，并删 `pi-shell` 里剩下的死代码（§10.19）；r17 检查测试之间的竞争，只改测试与工具（§10.20）；r18 改用 `cargo nextest`，改 `protoc` 的路径与 `release.yml` 的令牌（§10.21）；r19 用 `gh stack` 合入 #27–#31，并设 V0.6 的发布里程碑（§10.22）；r20 定 MCP 的方向（可选扩展包），修空白对话，补发布内容，并合入 #33–#36（§10.23）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
+r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）；r14 合入这两个 PR，并做决策 17：会话文件在第一条用户消息时才写（§10.17）；r15 做决策 10 的存储层一项：删 `pi-shell` 里的旧存储层（§10.18）；r16 合入 #25 与 #26，并删 `pi-shell` 里剩下的死代码（§10.19）；r17 检查测试之间的竞争，只改测试与工具（§10.20）；r18 改用 `cargo nextest`，改 `protoc` 的路径与 `release.yml` 的令牌（§10.21）；r19 用 `gh stack` 合入 #27–#31，并设 V0.6 的发布里程碑（§10.22）；r20 定 MCP 的方向（可选扩展包），修空白对话，补发布内容，并合入 #33–#36（§10.23）；r21 做 V0.6 的版本号与发布说明（条件 5），合入 #38 与 #39，并做条件 1–4（§10.24）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
 | 提交 | 内容 |
 |---|---|
@@ -1782,6 +1783,89 @@ M14 是已知的缺口，没有补：测试用的是常量 `MAX_TITLE_SCALARS` �
 ⑩ 演练不发布，所以 `publish-pypi` 没有真的发过 `pi-mcp-py`；演练里的两个 TUI 构建 job 取消了，所以它不证明要打 tag 的提交能构建 TUI（V0.6 的条件 3 仍要在那个提交上做）。
 ⑪ #36 最后几处只改测试的修改与发布内容的提交之后，我没有再在本地跑整套 `pytest`（Windows 与 WSL）；`e0f2a36` 上有 CI 的结果（Linux，Python 3.11–3.13，通过）。
 
+### 10.24 r21 追加：V0.6 的版本号、合入 #38 与 #39、条件 1–4 的结果
+
+用户说「开始下一步」。我做了 V0.6 的条件 5（版本号与发布说明），做成 PR [#39](https://github.com/zy1233/pi-python/pull/39)。之后我问了用户两件事，用户答复：现在合入 #39 与 #38；条件 4（与 v0.5.0 对照）做。我合入了两个 PR，再做条件 1–4。这一轮没有打 tag，没有发布。
+
+**条件 5：#39**（分支 `chore/prepare-0.6.0`，头 `ae93ae4`，合入 `5f73e07`；11 个文件，+40 / −22 行；没有代码，没有工作流）。版本号：
+
+```text
+pi-agent-core-lc          0.5.0 -> 0.6.0   extras 用 == 钉 harness 与 cli
+pi-agent-harness-lc       0.5.0 -> 0.6.0   用 == 钉核心
+pi-agent-cli-lc           0.5.0 -> 0.6.0   用 == 钉核心与 harness
+pi-pager-bin, pi-version  0.5.0 -> 0.6.0   与 tui/Cargo.lock 里这两项（要等于 pi-agent-cli-lc）
+pi-web-access-py          0.2.0 -> 0.3.0   核心下限 >=0.5.0 -> >=0.6.0
+pi-goal-x-py              0.2.0 -> 0.3.0   核心下限 >=0.5.0 -> >=0.6.0
+pi-dynamic-workflows-py   0.2.0 -> 0.3.0   核心与 harness 的下限 >=0.5.0 -> >=0.6.0
+pi-mcp-py                 0.1.0（新）      核心下限 >=0.5.0 -> >=0.6.0
+```
+
+三个已发布的扩展包为什么升到 0.3.0：`publish-pypi` 用 `skip-existing: true`。版本号不变的话，PyPI 保留 0.2.0 的文件，它们的元数据写 `>=0.5.0`，而仓库里同一个版本号写 `>=0.6.0`。它们的代码自 v0.5.0 起没有变（`git diff v0.5.0 main` 在这三个包里：`pi-dynamic-workflows` 的一个测试文件加 13 行）。0.3.0 这一位是我的选择：V0.5 的 `7e7d4d4` 把它们从 0.1.0 抬到 0.2.0，我照做；用户答「按你的倾向来」，没有单独说这一位（决策 20）。要 0.2.1 的话，要在 tag 之前改。
+
+**更正 r20。** 计划里写「四个扩展包的核心下限都要变成 `>=0.6.0`」，漏了一处：`pi-dynamic-workflows-py` 还有一个 harness 的下限（`pi-agent-harness-lc>=0.5.0`），它也要抬到 `>=0.6.0`。`test_extension_packaging.py` 对每个扩展包只报一个失败：测试在循环里对每个工作区依赖做 `assert`，停在第一个不对的依赖上（核心）。所以 r20 数到的「4 个失败」没有露出 harness 的这一处。我改每个包的 `pyproject.toml` 时看到了它。
+
+**`CHANGELOG.md`。** `## [Unreleased]` 改成 `## [0.6.0] - 2026-10-25`，上面留一个空的 `## [Unreleased]`；加开头一段（v0.5.0 有一段，发布页先显示它）；`### Changed` 加一条「新版本号」（所有 Python 包与 TUI）；新的 `### Known issues`，9 条（v0.5.0 的 6 条里，会话的那一条已经解决，删去；新增 4 条：翻页的代价、同一个 id 的并发、从没存在过的 UUID 也能 `session/load`、`pi-mcp-py` 是 Alpha）；底部加 `[0.6.0]` 的链接。日期 `2026-10-25` 是占位，是写这条的日子，不是 tag 的日子。用 `release.yml` 里同一段 `awk` 预览发布页的正文：33,725 B（GitHub 的限额是 125,000 个字符）；Added 3、Changed 7、Removed 3、Fixed 5、Known issues 9。
+
+**#39 的验证。**
+- 修之前（只把三个核心包抬到 0.6.0，在一个 `main` 的临时工作树里）：`test_extension_packaging.py` 与 `test_release_versions.py` 共 7 个失败，9 个通过（四个扩展包各一个下限，`pi-pager-bin`、`pi-version`、`tui/Cargo.lock`）。修之后：16 个通过。
+- 整套 `pytest`，在装了 7 个包的新 venv 里，与 `ci.yml` 一样：Windows 2,886 通过 / 61 跳过 / 31 取消选择；WSL（Linux，Python 3.12）2,912 通过 / 35 跳过 / 31 取消选择。
+- 7 个包都能 `python -m build`；14 个文件通过 `twine check --strict`；wheel 的 `Requires-Dist` 与 diff 一致（三个核心包之间 `==0.6.0`，四个扩展包 `>=0.6.0`）。在干净的 venv 里装这些 wheel：`uv pip check` 说 "All installed packages are compatible"，四个扩展包的入口点都能找到。
+- `tui/` 里 `cargo metadata --locked --offline`：退出码 0，`Cargo.lock` 没有变，所以手改的两项就是 cargo 会写的。
+- `ruff check .` 与 `ruff format --check .` 通过。
+- 分支头 `ae93ae4` 上的 CI：[`CI`](https://github.com/zy1233/pi-python/actions/runs/40168528272) 的 `Ruff` 与 3 个 `pytest` job 通过（Python 3.12：2,908 通过 / 39 跳过 / 31 取消选择，与 `main` 相同）；[`TUI CI`](https://github.com/zy1233/pi-python/actions/runs/40168528293)：`cargo nextest` 8,490 通过 / 0 失败 / 22 跳过，`Gates` 与 `main` 相同。
+
+**合入。** 用户答复之后：`gh pr merge 38 --squash`（2026-10-25 07:24:08 UTC，`60864af`），再 `gh pr merge 39 --squash`（07:24:47 UTC，`5f73e07`）。先合 #38，因为它的文字描述的是 `main` 在 `e0f2a36` 时的状态；#39 的分支基也是 `e0f2a36`，两个 PR 没有改同一个文件，所以没有冲突。树的核对：`60864af` 的树等于 #38 的分支头 `9ceee1d` 的树；`5f73e07` 的树等于 #39 的分支头 `ae93ae4` 的树，加上 #38 的四个文档文件（`git diff --name-only ae93ae4 5f73e07` 恰好列出这四个）。GitHub 删了两个远端分支（`git ls-remote --heads origin` 现在只有 `main`，和下面 #40 的分支）。
+
+**条件 1：`main` 上的 CI。** `5f73e07` 上，`CI` [run 40172668652](https://github.com/zy1233/pi-python/actions/runs/40172668652) 通过：`Ruff` 9 s；`pytest` 在 Python 3.11、3.12、3.13 上用时 248 s、292 s、261 s，都是 2,908 通过 / 39 跳过 / 31 取消选择（与 `e0f2a36` 相同）。`TUI CI` 在这个提交上有两次：推送触发的那次，被我随后的手动触发取消了（`tui-ci.yml` 的并发组是工作流名加 ref，`cancel-in-progress: true`）；手动触发的 [run 40172721728](https://github.com/zy1233/pi-python/actions/runs/40172721728)（勾选 `release_baseline`）通过：`Gates + cargo check` 232 s，警告 0，依赖图 970/970，`leader` 243/243，`x.ai` 297/297，`grok agent` 0；`cargo nextest` 1,099 s（18 m 19 s），8,490 通过 / 0 失败 / 22 跳过；`Release build baseline` 936 s。这次手动触发同时给出条件 2 的数字。
+
+**条件 2：体积。** 同一次运行里 `Release build baseline` 的报告（产物 `tui-baseline-release`）：release 构建退出码 0；Linux 的 `zypi` **406,911,320 B**（388.1 MiB）；构建 895 s；`--version` 中位数 22.4 ms。对照：v0.5.0 发布件 420,720,608 B（这一条的上限）：小 13,809,288 B（3.3 %）；V0.5 量到的 420,667,200 B：小 13,755,880 B；拆除前（v0.4.0）470,461,776 B：小 13.5 %。构建时间：v0.4.0 是 1,647 s，V0.5 是 1,194 s，这次 895 s。变小的原因没有逐项量：自 v0.5.0 起 `tui/` 净减约 15,700 行（+2,314 / −18,027），依赖图 980 → 970。数字回填 [`docs/baselines/tui.md`](../../baselines/tui.md)。
+
+**条件 3：演练。** `Release` [run 40172723794](https://github.com/zy1233/pi-python/actions/runs/40172723794)（`workflow_dispatch`，`5f73e07`）：全部成功。`Pre-release tests` 217 s（2,908 通过 / 39 跳过 / 31 取消选择；pytest 自己计 182.74 s）；`Build Python packages` 29 s（含 `Build pi-mcp`）；`Build TUI binary (Linux x86_64)` 1,056 s（17 m 36 s）；`Build TUI binary (macOS arm64)` 1,791 s（29 m 51 s）；`Publish to PyPI` 与 `GitHub Release` 跳过，没有发布任何东西。三个产物（`dist` 3,512,535 B、`tui-binary` 93,526,441 B、`tui-binary-macos-arm64` 19,999,529 B；都是压缩包）保留到 2027-01-23。macOS 的构建这次第一次就成功；v0.5.0 的发布里，它在 `Install protoc` 一步失败了两次（GitHub 接口的限额）。这不证明 #29 的 `repo-token` 有效：限额是随机的，只有真正的 tag 才证明。
+
+**条件 4：与 v0.5.0 对照**（用户答「做」）。
+
+*做法。* 只在 WSL2（Ubuntu，Linux）上做，所有文件放在 tmpfs（`/dev/shm`），不写系统盘。
+1. 一个 Python 3.12 的 venv，装了 `pyte`（0.8.2）和本仓库（可编辑安装，`main` 在 `5f73e07`）。两个 `zypi` 对着同一个 Python agent，所以差别只在 `zypi` 一侧。
+2. v0.5.0 的 `zypi`：GitHub Release 上的 `zypi-linux-x86_64`（420,720,608 B）。从 Windows 下载时连接卡住（与 r12、r19 一样），所以在 WSL 里下载；SHA-256 与 GitHub 给出的摘要相同，前缀 `9be1d218`，也与 r12 续 8 的记录相同；`zypi --version` 打印 `zypi 0.5.0 (be3f8a8e5e20)`。
+3. 新的 `zypi`：条件 3 的演练产出的 `tui-binary`（`release-dist` 构建，也就是 `release.yml` 会为这棵树发布的那个文件）：406,911,320 B，SHA-256 前缀 `3bbabd33`，`zypi --version` 打印 `zypi 0.6.0 (5f73e07964f1)`。它的字节数与条件 2 的基线构建相同（两个工作流，两次构建）。V0.5 时发布件比基线多 53,408 B，原因没有查；这次没有这个差。从 Windows 下载这个产物（93.5 MB）超时；在 WSL 里用 `curl` 下载，GitHub 的令牌只经环境变量传给 WSL，没有写进文件，也没有打印。
+4. 对每个二进制跑 `scripts/tui_pty/` 的五个脚本：`smoke.py`、`exit_matrix.py`、`resume_matrix.py --strict`、`mode_probe.py`、`status_line_probe.py`，参数 `--zypi PATH --python <venv 的 Python>`。清掉 `PI_HOME`、`PI_AGENT_COMMAND`、`REAL_LLM_API_KEY`（WSL 的登录 shell 会导出它们）；脚本自己建临时的 `PI_HOME`、`HOME` 与工作目录。
+
+*结果。*
+
+| 脚本 | v0.5.0 的 `zypi` | 新的 `zypi` |
+|---|---|---|
+| `smoke.py` | 23/23 | 23/23 |
+| `exit_matrix.py` | 12 个用例，都没留下进程 | 同 |
+| `resume_matrix.py --strict` | 13 通过 / 3 失败 | 16 通过 |
+| `mode_probe.py` | 一行不同（见下，是探针的竞争） | 修探针之后两张表相同 |
+| `status_line_probe.py` | 4/4 | 4/4 |
+
+*`resume_matrix.py` 的三个差别*就是计划预计的那三个。`CHANGELOG.md` 的 `[0.6.0]` 里有一条说它们（`### Changed`，「`zypi --continue`, `--resume` and `--session-id` ask the agent which session is meant (TUI)」：`--resume <title>` 找不到会话；未知 id 在界面启动之后才失败；用过的 `--session-id` 让界面开着，并显示 `Session creation failed: Invalid params`）。v0.5.0 的 `zypi`：`--resume <标题>`（在会话的目录里）退出码 1，说 `no session id or title matched`；`--resume <未知 id>` 的界面起来了，没有退出；`--session-id <用过的 id>` 的界面开着，显示 `Session creation failed: Invalid params`。新的 `zypi`：三个都通过。
+
+*`mode_probe.py` 的一行不同。* 第一次完整的对照里，只有一行不同：`config.toml: permission_mode = always-approve`。v0.5.0 的状态栏没有标签（`(none)`），新的 `zypi` 的标签是 `· always-approve`；两边都是 `asked=no`、`written without an answer=yes`（agent 照做，不问）。计划的要求是：有差别的，要么在 `CHANGELOG.md` 里有一条，要么是缺陷。`CHANGELOG.md` 里没有关于这个标签的条目，所以我查了。
+1. 代码：`git diff v0.5.0 main -- tui/crates` 的新增行里，没有一行提到权限模式。我搜了 `always_approve`、`AlwaysApprove`、`permission_mode`、`launch_auto`、`PermissionMode`、`always-approve`；唯一的命中是两个 `Cargo.toml` 的版本号。
+2. 重复运行这一个场景（`mode_probe.py --only 9`，每次一个新进程），探针不变：v0.5.0 共 17 次（含第一次完整运行）：14 次有标签，3 次没有；新的 `zypi` 17 次都有。同一个 v0.5.0 二进制两种结果都出现，所以这不是构建的性质。原因：探针在欢迎页的文字出现的那一帧就读状态栏，而标签可以晚几帧才画出来；有按键的场景在每个键之后等 1 s，没有按键的场景（旗标，保存的 `config.toml`）没有这段等待。
+3. 修复：探针在欢迎页出现之后等 1 s（3 行）。修之后：v0.5.0 37 次、新的 `zypi` 13 次，都有标签；完整的 `mode_probe.py` 输出（15 行：10 个场景、4 个被拒的值、设置页）对两个构建逐行相同（`diff` 为空）。
+
+*一个没有查的小事。* 修之前，v0.5.0 缺 3/17、新的 `zypi` 缺 0/17。如果两个构建的缺失率一样（3/17），新的 `zypi` 17 次都有的概率约 4 %。所以新的 `zypi` 可能画得稍早一点。一个猜测：启动时不再读会话文件（#23、#24）。我没有查，它也不改结论。
+
+**#40**（分支 `fix/mode-probe-settle`，头 `bdf6721`，没有合入）：只改 `scripts/tui_pty/mode_probe.py` 的 3 行（上面的修复）。[`CI`](https://github.com/zy1233/pi-python/actions/runs/40176329687) 通过：`Ruff`，`pytest` 在 Python 3.11、3.12、3.13 上。`TUI CI` 没有为它运行（路径过滤）。本地：`scripts/tests/test_tui_pty.py` 在 Windows 上 59 通过 / 8 跳过（伪终端的部分在那里跳过）；改的代码在 `observe()` 里，要 Linux 伪终端，所以由上面在 WSL 里的运行来测。
+
+**里程碑的描述。** GitHub 里程碑 [v0.6.0](https://github.com/zy1233/pi-python/milestone/2) 的描述还是 r19 的内容（「`main` 在 `b33017a`」「暂停」，六项条件都是 NOT DONE）。这一轮我按计划的现状改写了它（条件 1–5 有结果，条件 6 等用户）。描述是英文，计划是权威。
+
+**没验证 / 留下的。**
+① 条件 4 只在 Linux（WSL2）做。macOS 的二进制仍没有人运行过；Windows 没有二进制。
+② v0.5.0 的 `zypi` 是对着新的 Python agent 跑的（计划写的是「同一个 Python agent」）。这只量 `zypi` 一侧的差别；v0.5.0 加它自己的 agent，没有跑。
+③ 对照用的新二进制是演练的产物，不是真 tag 构建出来的文件。同一棵树，字节数预计相同（这一轮两次构建的字节数相同，见上）。打 tag 之后，把发布的 `zypi-linux-x86_64` 的大小与 SHA-256 同演练的比一下。
+④ 条件 1–3 都在 `5f73e07` 上做。如果 tag 打在之后的提交上（只改文档与脚本的提交；V0.5 的 tag 就是这样），`CI` 会在那个提交上自己跑；`TUI CI` 按路径过滤，不一定跑，那就要核对 `tui/` 与 `packages/` 的树没变（`git diff 5f73e07 <提交> -- tui packages` 为空），再用这一轮的结果。
+⑤ `mode_probe` 里新旧两个构建缺标签的概率不同（17 次里 0 次对 3 次），没有查原因。
+⑥ macOS 的构建这次一次成功，不证明 `setup-protoc` 的限额问题已经解决。
+⑦ `PYPI_API_TOKEN` 能不能为 `pi-mcp-py` 建新项目，从这里查不了。PyPI 上这个名字现在是空的（2026-10-25 再查了一次，接口回 404）；别的六个包还是 v0.5.0 的版本（核心、harness、cli 0.5.0；三个扩展包 0.2.0）。`publish-pypi` 用 `skip-existing: true`，令牌修好后重跑是安全的。
+⑧ `CHANGELOG.md` 里的日期 `2026-10-25` 是占位。在另一天打 tag，就在 tag 的提交里改它；`release.yml` 的 `awk` 只找 `## [0.6.0]`，不读日期。
+⑨ 三个已发布的扩展包的 0.3.0 那一位是我的选择（见「条件 5」）。
+⑩ #40 只在 Windows 上跑了它的测试文件，整套 `pytest` 由 CI 跑（Linux）。
+⑪ 条件 4 用到的临时文件（WSL 的 tmpfs：venv、两个二进制、日志）用完删了；数字都在本节里。
+
 ## 附录 A（摘录）：A.4
 
 附录 A 的 A.1–A.3（能力矩阵、ACP 版本配对、逐方法）是活的参考，留在[计划](../PLAN-RUST-AGENT-RUNTIME-REMOVAL.md)里。A.4 记 r5 的执行结果，搬到这里。
@@ -2562,3 +2646,4 @@ Rust（pager）：
 - r18：改用 `cargo nextest`、`protoc` 的路径、`release.yml` 的令牌（2026-10-20）。用户从「接下来做哪些」里选了 `release_token`、`protoc_abs`、`nextest_ci`；没选 `protoc_ci_env`、`d10_rest`、`merge_27_28`。三个 PR 一个叠在一个上（#28 → #29 → #30 → #31），生产代码没有行为变化，都没有合入。① [#29](https://github.com/zy1233/pi-python/pull/29)：`release.yml` 里两处 `arduino/setup-protoc` 加 `repo-token`；只改一个工作流文件；`CI` 通过；在分支上手动跑了一次演练：通过（[run 39360804691](https://github.com/zy1233/pi-python/actions/runs/39360804691)，细节见 §10.21）。② [#30](https://github.com/zy1233/pi-python/pull/30)：`find_protoc()` 返回 `PATH` 上 `protoc` 的绝对路径；同一条 `cargo` 命令重复运行时 `pi-tools-api` 不再每次重新构建（WSL2：第 3 遍 2.2 s → 0.3 s）；`CI` 与 `TUI CI` 通过（8,490 通过 / 0 失败 / 21 忽略）。**更正 r17：**CI 的 `cargo test` job 里 `pi-tools-api` 编译 7 次不是这个问题造成的（每个 suite 一条 `cargo` 命令，各按自己的 feature 编译一次）；修了之后还是 7 / 4 / 3，job 用时也没变（22 m 08 s）；只有 `Gates + cargo check` job 里 2 次 → 1 次。③ [#31](https://github.com/zy1233/pi-python/pull/31)：`TUI CI` 与基线执行器改用 `cargo nextest`（清单 `[test] runner = "nextest"`，`--runner cargo` 回到 libtest）；解析 nextest 的 `Summary` 行与汇总；「跳过」把 `#[ignore]` 与 `--skip` 合在一起算（预计 22）；不跑文档测试，而这些 suite 从来没跑过；超时先 SIGTERM、20 秒后 SIGKILL（nextest 把每个测试放在自己的进程组里）；21 个新的 `pytest`（Windows 50 通过 / 3 跳过，Linux 53 通过）。#31 的 `TUI CI` 通过：8,490 通过 / 0 失败 / 22 跳过（整棵树第一次在 nextest 下跑），测试自己的时间约 130 s（`cargo test` 约 65 s），job 36 m 17 s。#29 在分支上手动跑了一次 `Release` 的演练，通过。 没验证：整棵树在 nextest 下只在 CI 里跑过，本地没有跑过整套清单；`-I<前缀>/include` 在日志里看不到；`release.yml` 的演练通过不证明限额问题已经解决，要等下一个 tag。见 §10.21。
 - r19：用 `gh stack` 合入 #27–#31，V0.6 的发布里程碑，开发暂停（2026-10-20）。用户要三件事：用 `gh stack` 合入当前的 5 个 PR；按现状设 V0.6 的里程碑；开发先停 1–2 天。① `gh stack`：官方 `gh` 扩展（v0.2.1）装上后，`gh-stack.exe` 被截断（597,406 B，发布件 27,340,800 B）；用 `curl.exe` 经本地代理续传下载，SHA-256 与 GitHub 的摘要相同，复制到扩展目录。② 合入：`gh stack link 27 28 29 30 31` 建 stack #32；`gh stack merge 32 --yes --squash` 一次原子合入（前三次调用在取 stack 时 `TLS handshake timeout`，合并没有开始；第四次成功）。`main` `7d82c27` → `b33017a`，5 个 squash 提交（`7542062`、`ce29cd8`、`c3dc73e`、`d2182d9`、`b33017a`），每个提交的树等于它的 PR 分支头的树；5 个远端分支由 GitHub 删了，本地的 5 个分支我删了。`CI` 与 `TUI CI` 在 `b33017a` 上通过（`TUI CI`：8,490 通过 / 0 失败 / 22 跳过）。③ 里程碑：GitHub 里程碑 [v0.6.0](https://github.com/zy1233/pi-python/milestone/2)；计划新增「发布里程碑 V0.6」（范围按现状：v0.5.0 之后的 10 个提交；六项退出条件；已知问题；不在 V0.6 的项）；六项条件都没有满足。④ 暂停：开发停 1–2 天，不开 PR，不启动发布验证的 CI。没验证的见 §10.22。
 - r20：MCP 的方向（可选扩展包）、空白对话的修复、发布内容、合入 #33–#36（2026-10-25；分支 `docs/plan-r20-mcp-extension`，只改文档）。用户在 2026-10-23 报告 Zed 里的两个问题：每个新对话开头的 MCP 提示；退出 Zed 后没发过消息的对话打不开。原因：agent 从来没有 MCP 客户端（Phase 6 的决定），r9 只是把「静默丢弃」改成「明说」；决策 17 让没发过消息的会话没有文件，Zed 重启后用 `session/load` 要这个对话，得到 `resource_not_found`。用户答复：MCP 做成可选扩展包（core 与 CLI 仍不内置）；空白对话的修复现在发 PR。做成三个叠在一起的 PR：#34（`session/load` 与 `session/resume` 对没有文件的规范 UUID 开一个空会话；17 + 2 个新测试）、#35（给扩展的挂钩：客户端传来的 server、`pi.notify`、`pi.add_turn_barrier`；MCP 提示改写；再次打开同一个会话时关旧的 harness；103 个新测试）、#36（新包 `pi-mcp-py` 0.1.0：stdio、Streamable HTTP、SSE；工具名 `mcp__<server>__<tool>`；`/mcp`；192 个测试，28 处单行变异；真的 context7 server 与真模型各跑一次）。用户在 2026-10-25 让先补发布内容，再合入 #33–#36：`release.yml` 加两处（`test` job 装这个包，`build` job 加 `Build pi-mcp`），README、包的 README、CHANGELOG、设计文档 §9 同步；`actionlint`、本地构建与 `twine check --strict` 通过；`Release` 的演练通过（[run 40162795623](https://github.com/zy1233/pi-python/actions/runs/40162795623)：发布跳过，`dist` 14 个文件）。合入：#33 `gh pr merge --squash`（`ca2ab85`）；#34–#36 用 `gh stack link 34 35 36`（stack #37）与 `gh stack merge 37 --yes --squash`（`fa4887b`、`34c11d9`、`e0f2a36`）；每个提交的树等于 PR 分支头的树加上 #33 的两个文档文件。`CI` 与 `TUI CI` 在 `e0f2a36` 上通过。计划：新增决策 19（MCP 的方向，已定）、20（扩展包的版本号与下限）、21（设计文档的 11 个默认值）；用户在 2026-10-25 对 20、21 答「按你的倾向来」，都已定（20：下限抬到 `>=0.6.0`，三个已发布的扩展包抬到 0.3.0；21：全按默认）；决策 17 加更正；V0.6 的范围、条件 3、5、6 与已知问题改写；更正 r19 的「三个扩展包不动」。没验证：新项目的第一次上传需要的 PyPI 令牌；「0.6.0 起」是假设；没有在真的 Zed 里看过；OAuth 等没做。见 §10.23。
+- r21：V0.6 的版本号、合入 #38 与 #39、条件 1–4 的结果（2026-10-25；分支 `docs/plan-r21-release-checks`，只改文档）。用户说「开始下一步」；我做了条件 5，成 PR [#39](https://github.com/zy1233/pi-python/pull/39)；用户答复：现在合入 #39 与 #38，条件 4 做。① 条件 5（#39，`5f73e07`）：核心、harness、cli 升到 0.6.0；三个已发布的扩展包升到 0.3.0，`pi-mcp-py` 仍是 0.1.0，四个扩展包的核心下限抬到 `>=0.6.0`；`pi-pager-bin`、`pi-version`、`tui/Cargo.lock` 升到 0.6.0；`CHANGELOG.md` 的 `[0.6.0]`、空的 `[Unreleased]`、9 条已知问题。**更正** r20：`pi-dynamic-workflows-py` 还有一个 harness 下限，也要抬（测试对每个扩展包只报一个失败）。② 合入 #38（`60864af`）与 #39（`5f73e07`），`gh pr merge --squash`；树的核对。③ 条件 1–3 在 `5f73e07` 上通过：`CI` [run 40172668652](https://github.com/zy1233/pi-python/actions/runs/40172668652)；`TUI CI` [run 40172721728](https://github.com/zy1233/pi-python/actions/runs/40172721728)（手动触发；8,490 通过 / 0 失败 / 22 跳过；`zypi` 406,911,320 B，构建 895 s，`--version` 22.4 ms）；`Release` 的演练 [run 40172723794](https://github.com/zy1233/pi-python/actions/runs/40172723794)（全部成功，macOS arm64 第一次就成功；不发布）。④ 条件 4（WSL2；v0.5.0 的 `zypi` 对新的 `zypi`，同一个 Python agent）：`smoke`、`exit_matrix`、`status_line_probe` 相同；`resume_matrix` 13 通过 / 3 失败 → 16 通过，三个差别是预计的，`CHANGELOG.md` 里有一条；`mode_probe` 的一行不同是探针的竞争（同一个 v0.5.0 二进制 17 次里 3 次没有标签），加 1 s 的等待之后两个构建的表相同；修复是 PR [#40](https://github.com/zy1233/pi-python/pull/40)（没有合入）。⑤ GitHub 里程碑 [v0.6.0](https://github.com/zy1233/pi-python/milestone/2) 的描述改写（它还是 r19 的内容）。没有打 tag，没有发布。没验证：条件 4 只在 Linux 做；v0.5.0 的 `zypi` 是对着新的 Python agent 跑的；新旧构建缺标签的概率不同，没有查；`PYPI_API_TOKEN`；日期占位。见 §10.24。
