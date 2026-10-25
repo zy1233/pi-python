@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The release workflow builds the Linux binary on `ubuntu-24.04`, not on `ubuntu-latest` (CI)**: GitHub moves the label `ubuntu-latest` to Ubuntu 26. A binary that is built there can need a newer glibc than the 2.39 of Ubuntu 24.04, and then a machine with Ubuntu 24.04 could not start it. The job `build-tui` in `release.yml` now names the image, as `TUI CI` does (ADR6) and as `build-tui-macos-arm` does with `macos-14`. Nothing changes for the files of a release: the build of `v0.6.0` ran on `ubuntu-24.04` already. The other jobs of `release.yml` (tests, Python packages, publishing) still use `ubuntu-latest`; they ship no binary.
+- **The documentation says that the Linux binary needs glibc 2.39 or newer (docs)**: `docs/TUI-AND-CODE-AGENT.md`, Option A. The binary of `v0.6.0` has `GLIBC_2.39` as its highest versioned symbol, so a system with an older glibc cannot start it (Ubuntu 22.04 has 2.35). Option B (build from source) works there.
+
 ## [0.6.0] - 2026-10-25
 
 This release makes `zypi` ask the Python agent for sessions, and it adds an optional package that connects MCP servers. **Changed** says how `--continue`, `--resume` and `--session-id` work now, and that a session in which nobody typed has no file. `pi-mcp-py` (**Added**) connects the MCP servers that an editor such as Zed passes to the agent; without it, the agent still has no MCP client. **Fixed** has the Zed thread that did not open again after a restart. **Removed** lists the TUI code that read session files, and other dead code. **Known issues** says what does not work yet. **Changed** also has the new version numbers: the extension packages need the new core.

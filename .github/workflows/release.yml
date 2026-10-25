@@ -73,7 +73,9 @@ jobs:
   build-tui:
     name: Build TUI binary (Linux x86_64)
     needs: test
-    runs-on: ubuntu-latest
+    # Pinned. The label ubuntu-latest moves to a newer image, and a binary that is built there can need
+    # a newer glibc to start (the binary of v0.6.0 needs 2.39). TUI CI builds on this image too (ADR6).
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 

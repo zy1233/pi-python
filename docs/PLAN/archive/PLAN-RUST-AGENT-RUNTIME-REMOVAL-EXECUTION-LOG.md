@@ -1935,7 +1935,7 @@ pi-mcp-py                 0.1.0（新）      核心下限 >=0.5.0 -> >=0.6.0
 **打扫。** 核对用到的东西都在 WSL 的 tmpfs（`/dev/shm`）：用完删了，现在是空的。PTY 脚本没有留下东西：`/tmp` 里没有新条目，没有残留进程。`pytest` 在 `/tmp/pytest-of-zy/` 里留下一个目录（`pytest-11`，`pi-mcp` 的测试用的）：我删了它；更早的两个（`pytest-9`、`pytest-10`）不是这一轮的，没动。
 
 **留下的（要用户定，或以后做；都没有改）。**
-① **`release.yml` 的 Linux 构建用 `ubuntu-latest`。** `tui-ci.yml` 钉 `ubuntu-24.04`（ADR6 的权威环境），`release.yml` 的 `build-tui` 没有钉。运行的通知说 `ubuntu-latest` 要迁到 Ubuntu 26；这次的 job 还是 `ubuntu-24.04`。迁了之后，Linux 的二进制会按更新的 glibc 链接：Ubuntu 24.04 上就加载不了，发布构建也不再是 `TUI CI` 的环境。做法：把 `build-tui` 的 `runs-on` 改成 `ubuntu-24.04`（一行；`macos-14` 已经钉了）。我倾向钉。我没有改：这是对发布工作流的改动，用户没有要求。别的 job 不产出要运行的二进制，迁了最多让它们失败，到时再看。
+① **`release.yml` 的 Linux 构建用 `ubuntu-latest`。** `tui-ci.yml` 钉 `ubuntu-24.04`（ADR6 的权威环境），`release.yml` 的 `build-tui` 没有钉。运行的通知说 `ubuntu-latest` 要迁到 Ubuntu 26；这次的 job 还是 `ubuntu-24.04`。迁了之后，Linux 的二进制可能要更新的 glibc：Ubuntu 24.04 上就可能加载不了，发布构建也不再是 `TUI CI` 的环境。做法：把 `build-tui` 的 `runs-on` 改成 `ubuntu-24.04`（一行；`macos-14` 已经钉了）。我倾向钉。我没有改：这是对发布工作流的改动，用户没有要求。别的 job 不产出要运行的二进制，迁了最多让它们失败，到时再看。
 ② **glibc 的下限没有写在文档里。** 见上：2.39。可以在 `docs/TUI-AND-CODE-AGENT.md` 里补一句。
 ③ **Actions 的警告。** Node.js 20 的弃用要升级几个 action 的主版本（`actions/cache`、`upload-artifact`、`download-artifact`、`arduino/setup-protoc`）；PyPI 一侧要改用 Trusted Publishing，需要账号所有人在 PyPI 上给七个项目各设一个 publisher，我做不了。现在都不影响发布。
 
@@ -1947,6 +1947,8 @@ pi-mcp-py                 0.1.0（新）      核心下限 >=0.5.0 -> >=0.6.0
 ⑤ 三次构建（`TUI CI` 的基线、演练、tag）的字节数相同；它们的缓存状态我没有逐个查（tag 的两个构建恢复了缓存）。
 ⑥ `repo-token` 只有一次真 tag 的结果（加两次演练）；它不证明限额问题不会再出现。
 ⑦ PyPI 上新版本出现的时间我没有量：只知道上传后头几分钟 JSON 页还是旧的，和 `uv` 的索引缓存会让安装失败（见「索引的缓存」）。
+
+**续 1（用户答复之后）。** 用户对「留下的」答了三个问题。① 钉 `build-tui`：答「钉」，开 PR，不合入。PR [#42](https://github.com/zy1233/pi-python/pull/42)：`release.yml` 的 `build-tui` 改用 `ubuntu-24.04`（一行加两行注释）。标签是有效的（`tui-ci.yml` 用它；`v0.6.0` 的构建本来就在这个映像上），所以我没有在分支上跑演练；要跑的话：`gh workflow run release.yml --ref ci/pin-release-build-runner`，约 20 分钟。Cargo 缓存的键里只有 `runner.os`（`Linux`），没有映像的版本，所以钉了之后现有的缓存仍然有效。② glibc 的下限：答「补」。同一个 PR 在 `docs/TUI-AND-CODE-AGENT.md` 的选项 A 下补了一段（要 glibc 2.39 或更新；Ubuntu 22.04 的 2.35 太旧；旧的系统用选项 B）；`CHANGELOG.md` 的 `[Unreleased]` 有两条。我没有在 Ubuntu 22.04 上试过这个二进制：那一段说的是加载器的规则，不是一次试验的结果。③ 本地分支：答「删」。我先核对了 7 个本地分支（`chore/prepare-0.6.0`、`docs/plan-r20-mcp-extension`、`docs/plan-r21-release-checks`、`fix/mode-probe-settle`、`fix/write-session-at-first-message`、`refactor/adr1-drop-session-disk-reads`、`refactor/delete-pi-shell-session-store`）：每个的头都等于一个已合入 PR 的头（#39、#38、#41、#40、#25、#24、#26），没有只在本地的提交；然后 `git branch -D`。`fix/benchmark-verifier-isolation` 没有远端，不是这一轮的，没动。④ 更正：上面「留下的」①说「会按更新的 glibc 链接：……加载不了」，说得太满。映像迁到 Ubuntu 26 之后，构建的二进制可能要更新的 glibc；我没有在更新的映像上构建过，所以没有量过。已改成「可能」。⑤ 补记：r22 的 PR（#41）还改了计划与执行记录里的 12 处粗体。GitHub 在这样的文字里把星号原样显示：收尾的 `**` 前是中文标点，后面紧跟一个字（例如 `**更正 r17：**CI 的`）。标点现在放在粗体外面；查法是用 GitHub 的 markdown 接口（`gh api markdown`）渲染文件，再找剩下的 `*`。写新文字时，收尾的 `**` 前如果是标点，后面要空一格，或把标点放到外面。
 
 ## 附录 A（摘录）：A.4
 
