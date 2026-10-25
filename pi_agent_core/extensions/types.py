@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -111,6 +111,34 @@ class ExtensionMeta:
     name: str
     path: str | None = None
     source: str = "unknown"  # "entry_point" | "directory" | "programmatic"
+
+
+# ---------------------------------------------------------------------------
+# MCP servers the client passed (data only)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ClientMcpServer:
+    """One MCP server that the client (an editor, say) asked the agent to connect.
+
+    This is data and nothing more. Core, harness and CLI only carry it; an extension acts on it
+    (``pi-mcp-py`` does). They hold no MCP client code (``docs/specs/2026-10-23-mcp-extension-
+    design.md``).
+
+    ``command``, ``args``, ``env``, ``url`` and ``headers`` often hold tokens, so they stay out
+    of ``repr``: a log line with the whole object is safe. ``env`` and ``headers`` are tuples of
+    ``(name, value)`` pairs in the order the client sent them, so the object is immutable and
+    hashable. The fields that do not apply to a transport stay empty.
+    """
+
+    name: str
+    transport: Literal["stdio", "http", "sse"]
+    command: str = field(default="", repr=False)
+    args: tuple[str, ...] = field(default=(), repr=False)
+    env: tuple[tuple[str, str], ...] = field(default=(), repr=False)
+    url: str = field(default="", repr=False)
+    headers: tuple[tuple[str, str], ...] = field(default=(), repr=False)
 
 
 # ---------------------------------------------------------------------------

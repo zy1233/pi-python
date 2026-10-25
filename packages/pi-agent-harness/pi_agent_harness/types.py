@@ -563,6 +563,17 @@ class SessionTreeEvent(BaseModel):
     result: NavigateTreeResult
 
 
+class NoticeEvent(BaseModel):
+    """One line for the user, from an extension (``ExtensionAPI.notify``).
+
+    The model never sees it, and the session does not save it. Subscribers decide how to show
+    it: the CLI sends it to the client as an agent message.
+    """
+
+    type: Literal["notice"] = "notice"
+    text: str
+
+
 AgentHarnessOwnEvent = (
     QueueUpdateEvent
     | SavePointEvent
@@ -583,6 +594,7 @@ AgentHarnessOwnEvent = (
     | SessionCompactEvent
     | SessionBeforeTreeEvent
     | SessionTreeEvent
+    | NoticeEvent
 )
 
 AgentHarnessEvent = AgentEvent | AgentHarnessOwnEvent

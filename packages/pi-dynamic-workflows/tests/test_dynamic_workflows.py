@@ -543,6 +543,19 @@ class _BridgeStub:
     def project_trusted(self):
         return False
 
+    @property
+    def client_mcp_servers(self):
+        return ()
+
+    def claim_client_mcp_servers(self, names):
+        pass
+
+    def notify(self, text):
+        pass
+
+    def add_turn_barrier(self, wait):
+        pass
+
 
 class TestActivate:
     def test_activate_registers_tool_and_commands(self) -> None:

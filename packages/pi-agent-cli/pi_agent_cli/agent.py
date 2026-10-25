@@ -29,6 +29,7 @@ from acp.schema import (
     InitializeResponse,
     ListSessionsResponse,
     LoadSessionResponse,
+    McpCapabilities,
     McpServerStdio,
     NewSessionResponse,
     PromptCapabilities,
@@ -49,6 +50,7 @@ from acp.schema import (
 )
 from pydantic import ValidationError
 
+from pi_agent_cli.client_mcp import client_mcp_servers, mcp_extension_installed
 from pi_agent_cli.config import (
     CliConfig,
     ModelChoice,
@@ -75,7 +77,7 @@ from pi_agent_cli.factory import (
     load_session_resources,
     model_for_choice,
 )
-from pi_agent_cli.mcp_notice import ignored_mcp_servers_notice, mcp_server_names
+from pi_agent_cli.mcp_notice import ignored_mcp_servers_notice
 from pi_agent_cli.permissions import (
     PERMISSION_OPTIONS,
     needs_permission,
@@ -203,6 +205,11 @@ class PiAcpAgent(Agent):
         # new session is not here: the check at the first message costs a directory listing, and
         # it would be paid by every session.)
         self._reserved_ids: set[str] = set()
+        # Lines for the user that an extension sent (``ExtensionAPI.notify``). The client drops
+        # what it gets before it knows the session (zed#60199), so they are held until the
+        # deferred setup of the session has run, then sent in order.
+        self._notices_open: set[str] = set()
+        self._held_notices: dict[str, list[str]] = {}
 
     def on_connect(self, conn: Client) -> None:
         self._conn = conn
@@ -216,6 +223,7 @@ class PiAcpAgent(Agent):
     ) -> InitializeResponse:
         self._client_capabilities = client_capabilities
         self._client_info = client_info
+        remote_mcp = mcp_extension_installed()
         return InitializeResponse(
             protocol_version=min(protocol_version, PROTOCOL_VERSION),
             agent_capabilities=AgentCapabilities(
@@ -223,6 +231,9 @@ class PiAcpAgent(Agent):
                 prompt_capabilities=PromptCapabilities(
                     image=True, audio=False, embedded_context=False
                 ),
+                # stdio servers are always allowed in ACP. A client passes remote ones only when
+                # the agent says it takes them, and only the ``pi-mcp`` extension does.
+                mcp_capabilities=McpCapabilities(http=remote_mcp, sse=remote_mcp),
                 session_capabilities=SessionCapabilities(
                     list=SessionListCapabilities(),
                     resume=SessionResumeCapabilities(),
@@ -249,7 +260,7 @@ class PiAcpAgent(Agent):
             session = await self._create_session_with_id(chosen_id, cwd)
         session_id = (await session.get_metadata()).id
         try:
-            await self._bind_session(session_id, session, cwd)
+            await self._bind_session(session_id, session, cwd, mcp_servers)
         except BaseException:
             self._reserved_ids.discard(session_id)
             raise
@@ -258,7 +269,7 @@ class PiAcpAgent(Agent):
         # that are silently dropped.  Schedule via create_task + sleep(0) so
         # the response is flushed first.  (See zed#60199, zed#53161.)  The same goes
         # for the question about trusting the project, a request to the client.
-        self._schedule_deferred_setup(session_id, mcp_servers)
+        self._schedule_deferred_setup(session_id)
         return NewSessionResponse(
             session_id=session_id,
             config_options=self._config_options(session_id),
@@ -279,13 +290,13 @@ class PiAcpAgent(Agent):
             await self._reopen_blank_session(session_id, cwd, mcp_servers)
         else:
             session = await self._repo.open(metadata)
-            await self._bind_session(session_id, session, metadata.cwd or cwd)
+            await self._bind_session(session_id, session, metadata.cwd or cwd, mcp_servers)
             if self._conn is not None:
                 context = await session.build_context()
                 for msg in context.messages:
                     for update in project_message_replay(msg):
                         await self._conn.session_update(session_id=session_id, update=update)
-            self._schedule_deferred_setup(session_id, mcp_servers)
+            self._schedule_deferred_setup(session_id)
         return LoadSessionResponse(
             config_options=self._config_options(session_id),
             field_meta=self._session_response_meta(session_id),
@@ -334,9 +345,9 @@ class PiAcpAgent(Agent):
             await self._reopen_blank_session(session_id, cwd, mcp_servers)
         else:
             session = await self._repo.open(metadata)
-            await self._bind_session(session_id, session, metadata.cwd or cwd)
+            await self._bind_session(session_id, session, metadata.cwd or cwd, mcp_servers)
             # ACP session/resume intentionally does not replay history.
-            self._schedule_deferred_setup(session_id, mcp_servers)
+            self._schedule_deferred_setup(session_id)
         return ResumeSessionResponse(
             config_options=self._config_options(session_id),
             field_meta=self._session_response_meta(session_id),
@@ -348,6 +359,7 @@ class PiAcpAgent(Agent):
         harness = self._harnesses.pop(session_id, None)
         self._permission_locks.pop(session_id, None)
         self._drop_trust(session_id)
+        self._forget_notices(session_id)
         if harness is not None:
             await harness.close()
         return CloseSessionResponse()
@@ -368,6 +380,10 @@ class PiAcpAgent(Agent):
         # Until the user has answered the question about the project, nothing of it is
         # loaded, and a prompt would run without it (and then again with it, differently).
         if not await self._wait_for_trust(session_id, harness):
+            return PromptResponse(stop_reason="cancelled")
+        # An extension may still be setting up what the turn needs (the tools of an MCP server
+        # that is starting). The wait ends when it is done, or given up, or on ``session/cancel``.
+        if not await self._wait_for_turn_barriers(session_id, harness):
             return PromptResponse(stop_reason="cancelled")
         # Fallback: re-advertise commands if the deferred task was missed.
         if session_id not in self._commands_advertised:
@@ -456,6 +472,7 @@ class PiAcpAgent(Agent):
             self._reserved_ids.discard(session_id)
             self._permission_locks.pop(session_id, None)
             self._drop_trust(session_id)
+            self._forget_notices(session_id)
             if harness is not None:
                 # Deleting ends the session, like ``session/close``: stop the turn, then run
                 # the extensions' cleanup (background workflows, worktrees).
@@ -595,12 +612,12 @@ class PiAcpAgent(Agent):
             return  # Open here already, and with no file, so empty: nothing to bind or replay.
         session = await self._create_session_with_id(session_id, cwd)
         try:
-            await self._bind_session(session_id, session, cwd)
+            await self._bind_session(session_id, session, cwd, mcp_servers)
         except BaseException:
             self._reserved_ids.discard(session_id)
             raise
         logger.info("Session %s has no file (nobody typed in it): opened empty", session_id)
-        self._schedule_deferred_setup(session_id, mcp_servers)
+        self._schedule_deferred_setup(session_id)
 
     async def _refuse_id_taken_meanwhile(self, session_id: str, harness: AgentHarness) -> None:
         """Before the first message of a session made under a chosen id: is the id still free?
@@ -620,7 +637,35 @@ class PiAcpAgent(Agent):
         ):
             raise _id_in_use(session_id)
 
-    async def _bind_session(self, session_id: str, session: Session, cwd: str) -> None:
+    async def _end_replaced_harness(self, session_id: str, old: AgentHarness) -> None:
+        """End a harness that a new one has replaced: ``close()`` stops its turn and runs the
+        cleanup of its extensions (an MCP server is a child process).
+
+        A client can ask for a session that is open already (a second ``session/load``, a retry
+        after "Failed to Launch"), and the new harness takes the place of the old one. Nothing
+        else would ever call the ``close()`` of the old one, and what its extensions started
+        would run on.
+        """
+        try:
+            await old.close()
+        except Exception:
+            logger.warning(
+                "Could not end the earlier harness of session %s", session_id, exc_info=True
+            )
+
+    async def _bind_session(
+        self,
+        session_id: str,
+        session: Session,
+        cwd: str,
+        mcp_servers: Sequence[Any] | None = None,
+    ) -> None:
+        """Build the harness of a session and make it the one that answers for the id.
+
+        *mcp_servers* is what the client passed with the request. They go to the harness as data
+        (``client_mcp``), before the extensions load; an extension may connect them. This agent
+        connects none itself.
+        """
         cwd = normalize_host_path(cwd)
 
         async def on_tool_call(event: Any) -> dict[str, Any] | None:
@@ -646,6 +691,7 @@ class PiAcpAgent(Agent):
             trust=state.trust,
             model_choice=choice,
         )
+        harness.set_client_mcp_servers(client_mcp_servers(mcp_servers))
         self._session_models[session_id] = choice
 
         async def on_event(event: Any, signal: Any | None = None) -> None:
@@ -653,9 +699,15 @@ class PiAcpAgent(Agent):
 
         harness.subscribe(on_event)
         self._drop_trust(session_id)  # binding again: a question still open is for the old one
+        # The response to this request is not sent yet, so the client may not know the session
+        # (a retry after a failed load): lines for the user wait for ``_open_notices`` again.
+        self._notices_open.discard(session_id)
+        replaced = self._harnesses.get(session_id)
         self._harnesses[session_id] = harness
         self._session_cwds[session_id] = cwd
         self._trust[session_id] = state
+        if replaced is not None and replaced is not harness:
+            await self._end_replaced_harness(session_id, replaced)
 
         if decision.can_ask:
             # The user decides, and can only be asked once the client knows the session
@@ -666,32 +718,16 @@ class PiAcpAgent(Agent):
         # Eagerly load extensions so slash commands are available.
         await harness.load_extensions()
 
-    def _schedule_deferred_setup(
-        self, session_id: str, mcp_servers: Sequence[Any] | None = None
-    ) -> None:
-        """Fire-and-forget: finish setting the session up after the current response flushes.
-
-        ``mcp_servers`` is what the client passed with the request; none of it is used, and the
-        user is told so (``mcp_notice``). Only the names are kept.
-        """
-        ignored = mcp_server_names(mcp_servers)
-        if ignored:
-            logger.warning(
-                "Ignoring %d MCP server(s) the client passed for session %s: %s",
-                len(ignored),
-                session_id,
-                ", ".join(ignored),
-            )
-        task = asyncio.create_task(self._deferred_session_setup(session_id, ignored))
+    def _schedule_deferred_setup(self, session_id: str) -> None:
+        """Fire-and-forget: finish setting the session up after the current response flushes."""
+        task = asyncio.create_task(self._deferred_session_setup(session_id))
         state = self._trust.get(session_id)
         if state is not None:
             state.task = task
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
 
-    async def _deferred_session_setup(
-        self, session_id: str, ignored_mcp_servers: Sequence[str] = ()
-    ) -> None:
+    async def _deferred_session_setup(self, session_id: str) -> None:
         """Ask about the project if need be, advertise commands, report what did not load.
 
         Zed registers ACP sessions only after processing the response to
@@ -703,9 +739,12 @@ class PiAcpAgent(Agent):
         await asyncio.sleep(0)
         await self._settle_project_trust(session_id)
         await self._advertise_commands(session_id)
+        # The client has taken an update for the session, so it knows the session: the lines
+        # that extensions sent before can go out, and the ones that follow need not wait.
+        await self._open_notices(session_id)
         await self._notify_untrusted_project(session_id)
         await self._notify_failed_extensions(session_id)
-        await self._notify_ignored_mcp_servers(session_id, ignored_mcp_servers)
+        await self._notify_ignored_mcp_servers(session_id)
 
     async def _settle_project_trust(self, session_id: str) -> None:
         """Put the question about the project to the user, act on the answer, load extensions.
@@ -845,13 +884,15 @@ class PiAcpAgent(Agent):
 
     def _drop_trust(self, session_id: str) -> None:
         """Forget a session's standing on its project. A question still open is withdrawn,
-        and a prompt held back by it is let go."""
+        and a prompt held back (by it, or by an extension's turn barrier) is let go: it ends
+        as cancelled, for the session it waited on is gone."""
         state = self._trust.pop(session_id, None)
         if state is None:
             return
         if state.task is not None:
             state.task.cancel()
         state.settled.set()
+        state.cancelled.set()
 
     async def _notify_untrusted_project(self, session_id: str) -> None:
         """Tell the user which project extensions, saved workflows, prompt files and skills were
@@ -896,14 +937,73 @@ class PiAcpAgent(Agent):
             session_id=session_id, update=update_agent_message_text(notice)
         )
 
-    async def _notify_ignored_mcp_servers(self, session_id: str, names: Sequence[str]) -> None:
-        """Tell the user the MCP servers their client passed are not used (names only)."""
-        notice = ignored_mcp_servers_notice(names)
-        if self._conn is None or notice is None:
+    async def _notify_ignored_mcp_servers(self, session_id: str) -> None:
+        """Tell the user which MCP servers their client passed are not used (names only).
+
+        A server that an extension took over (``claim_client_mcp_servers``) is not one of them:
+        that extension reports on it itself. Called when the extensions are loaded.
+        """
+        harness = self._harnesses.get(session_id)
+        if self._conn is None or harness is None:
+            return
+        names = [server.name for server in harness.unclaimed_client_mcp_servers]
+        if not names:
+            return
+        logger.warning(
+            "Ignoring %d MCP server(s) the client passed for session %s: %s",
+            len(names),
+            session_id,
+            ", ".join(names),
+        )
+        notice = ignored_mcp_servers_notice(names, extension_installed=mcp_extension_installed())
+        if notice is None:
             return
         await self._conn.session_update(
             session_id=session_id, update=update_agent_message_text(notice)
         )
+
+    async def _open_notices(self, session_id: str) -> None:
+        """From here on the client knows the session. Send the lines that extensions sent
+        before (``ExtensionAPI.notify``), in order; the lines that follow go out at once."""
+        if session_id not in self._harnesses:
+            return  # closed in the meantime
+        while True:
+            held = self._held_notices.pop(session_id, [])
+            if not held:
+                break
+            if self._conn is None:
+                continue
+            for text in held:
+                await self._conn.session_update(
+                    session_id=session_id, update=update_agent_message_text(text)
+                )
+        # No ``await`` between the last check of the held lines and this: a line that comes in
+        # while the lines above are sent is held too, and the loop sends it.
+        self._notices_open.add(session_id)
+
+    def _forget_notices(self, session_id: str) -> None:
+        self._notices_open.discard(session_id)
+        self._held_notices.pop(session_id, None)
+
+    async def _wait_for_turn_barriers(self, session_id: str, harness: AgentHarness) -> bool:
+        """Hold a prompt back while an extension still sets up what the turn needs.
+
+        The harness waits for the same barriers before it builds a turn. Here the wait can end
+        on ``session/cancel`` too: ``False`` means the prompt must end as cancelled instead
+        (the session may also have been closed while it waited).
+        """
+        state = self._trust.get(session_id)
+        cancel = state.cancelled if state is not None else asyncio.Event()
+        barriers = asyncio.ensure_future(harness.wait_turn_barriers())
+        cancelled = asyncio.ensure_future(cancel.wait())
+        try:
+            await asyncio.wait({barriers, cancelled}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            barriers.cancel()
+            cancelled.cancel()
+        if cancel.is_set():
+            return False
+        return self._harnesses.get(session_id) is harness
 
     async def _advertise_commands(self, session_id: str) -> None:
         """Send ``AvailableCommandsUpdate`` so ACP clients show slash commands."""
@@ -951,6 +1051,13 @@ class PiAcpAgent(Agent):
 
     async def _emit_updates(self, session_id: str, event: Any) -> None:
         if self._conn is None:
+            return
+        if getattr(event, "type", None) == "notice" and session_id not in self._notices_open:
+            # Too early for the client (``_open_notices`` sends it). A session that is closed
+            # has nothing to hold it for.
+            text = getattr(event, "text", None)
+            if isinstance(text, str) and text.strip() and session_id in self._harnesses:
+                self._held_notices.setdefault(session_id, []).append(text)
             return
         cwd = self._session_cwds.get(session_id)
         for update in project_event(event, cwd=cwd):

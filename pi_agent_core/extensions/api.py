@@ -7,12 +7,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pi_agent_core.extensions.registry import ExtensionRegistry
 from pi_agent_core.extensions.types import (
+    ClientMcpServer,
     CommandDef,
     CommandHandler,
     EventHandler,
@@ -167,6 +168,62 @@ class ExtensionAPI:
     def get_custom_entries(self, custom_type: str) -> list[Any]:
         """Read all persisted custom entries of *custom_type* from the session."""
         return self._require_bridge().get_custom_entries(custom_type)
+
+    # -- what the client passed ----------------------------------------------
+
+    @property
+    def client_mcp_servers(self) -> tuple[ClientMcpServer, ...]:
+        """The MCP servers that the client (an editor, say) passed for this session.
+
+        ``()`` when it passed none. Available during ``activate()``. They are descriptions
+        and nothing more: connecting is for an extension that wants to, and the user should hear
+        of it when that fails (``notify``). Core, harness and CLI hold no MCP client.
+        """
+        return tuple(self._require_bridge().client_mcp_servers)
+
+    def claim_client_mcp_servers(self, names: Iterable[str]) -> None:
+        """Say that this extension takes care of the servers with these *names*.
+
+        The CLI tells the user that the client's MCP servers were ignored, but only about the
+        ones that no extension claimed.
+        """
+        self._require_bridge().claim_client_mcp_servers(list(names))
+
+    # -- talking to the user -------------------------------------------------
+
+    def notify(self, text: str) -> None:
+        """Show *text* to the user, as one line of the agent. The model does not see it.
+
+        For what the user must know and the model need not: a failed connection, say. It is
+        not part of the conversation and is not saved in the session. The client may get it
+        a moment later, after it knows the session. Does nothing once the session is closed.
+        """
+        self._require_bridge().notify(text)
+
+    # -- session lifecycle ---------------------------------------------------
+
+    def register_cleanup(self, callback: Callable[[], Any]) -> None:
+        """Run *callback* when the session ends (``harness.close()``).
+
+        *callback* takes no arguments and may be a coroutine function. Use it to stop what the
+        extension started: background tasks, child processes, connections. Callbacks run once,
+        in the order they were registered, and one that raises does not stop the others.
+        """
+        self._require_bridge().register_cleanup(callback)
+
+    def add_turn_barrier(self, wait: Callable[[], Awaitable[Any]]) -> None:
+        """Hold every turn back until *wait* returns.
+
+        The harness awaits *wait* before it builds the tool list of a turn, so work that
+        the extension began in the background (a connection that supplies tools) is done, or
+        given up, before the model sees the tools. The rules:
+
+        - *wait* ends by itself. The harness sets no limit.
+        - *wait* returns at once when there is nothing to wait for: it is called for every turn.
+        - If *wait* raises, the harness logs a warning and the turn goes on.
+        - A turn that waits here can not be aborted yet; keep the wait short.
+        """
+        self._require_bridge().add_turn_barrier(wait)
 
     # -- shell execution -----------------------------------------------------
 
