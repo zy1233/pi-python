@@ -21,6 +21,7 @@ This repository is a monorepo containing:
 - `pi-web-access-py` / `pi_web_access`: web search and URL fetch extension.
 - `pi-goal-x-py` / `pi_goal_x`: goal-planning extension.
 - `pi-dynamic-workflows-py` / `pi_dynamic_workflows`: workflow orchestration extension.
+- `pi-mcp-py` / `pi_mcp`: optional extension that connects the MCP servers an ACP client (an editor) passes (see [`packages/pi-mcp`](packages/pi-mcp/README.md)).
 
 **Rust TUI** (beta — prebuilt binary in [GitHub Releases](https://github.com/zy1233/pi-python/releases)):
 
@@ -36,6 +37,7 @@ This repository is a monorepo containing:
 | `pi-web-access-py` | **Beta** | [PyPI](https://pypi.org/project/pi-web-access-py/) |
 | `pi-goal-x-py` | **Beta** | [PyPI](https://pypi.org/project/pi-goal-x-py/) |
 | `pi-dynamic-workflows-py` | **Beta** | [PyPI](https://pypi.org/project/pi-dynamic-workflows-py/) |
+| `pi-mcp-py` | **Alpha** | [PyPI](https://pypi.org/project/pi-mcp-py/) (from 0.6.0) |
 | `zypi` (Rust TUI) | **Beta** | [GitHub Releases](https://github.com/zy1233/pi-python/releases) (Linux x86_64) |
 
 ## Features
@@ -65,6 +67,7 @@ This repository is a monorepo containing:
 
 - Built-in coding tools (`pi_agent_core.coding_tools`): read / bash / edit / write / grep / find / ls with pi-faithful truncation notices and `details` payloads
 - LangChain `BaseTool` → `AgentTool` adapter (`from_langchain_tool`) — MCP tools via `langchain-mcp-adapters` work out of the box
+- The CLI itself has no MCP client. The optional `pi-mcp-py` extension connects the MCP servers that an ACP client passes in `session/new` (stdio, Streamable HTTP, SSE) and shows their tools as `mcp__<server>__<tool>`; without it, the agent says that their tools are not available in the session
 
 **Coding Agent CLI** (Phase 4 — beta)
 
@@ -100,6 +103,7 @@ pip install pi-agent-cli-lc        # optional: ACP stdio / headless agent
 pip install pi-web-access-py       # optional: web search / fetch extension
 pip install pi-goal-x-py           # optional: goal planning extension
 pip install pi-dynamic-workflows-py  # optional: workflow extension
+pip install pi-mcp-py              # optional: MCP servers that the editor passes
 
 # Optional LLM providers:
 pip install pi-agent-core-lc[openai]      # ChatOpenAI
@@ -118,6 +122,7 @@ pip install -e "./packages/pi-agent-cli"
 pip install -e "./packages/pi-web-access"
 pip install -e "./packages/pi-goal-x"
 pip install -e "./packages/pi-dynamic-workflows"
+pip install -e "./packages/pi-mcp"   # optional: MCP servers that the editor passes
 ```
 
 </details>
@@ -420,7 +425,7 @@ Use `.venv-test-real` for pytest real-LLM tests; the smoke script can run from t
 - **Phase 3.5 (tool ecosystem)** — done: all 7 built-in tools (read/bash/edit/write/grep/find/ls), group factories, and the LangChain `BaseTool` adapter ([design doc](docs/specs/2026-07-03-phase3.5-tool-ecosystem-design.md))
 - **Phase 4 (Coding Agent CLI — beta)** — done: `tui/` vendored grok-build fork (Apache-2.0); `pi_agent_cli` standard ACP agent; TUI binary `zypi`; `x.ai/*` vendor RPCs removed; session management (`/new` `/resume` `/quit`); headless `-p`; `config.toml` + Windows notes ([design doc](docs/specs/2026-08-25-phase4-coding-agent-cli-design.md), [Windows](docs/WINDOWS.md), [TUI guide](docs/TUI-AND-CODE-AGENT.md))
 - **Phase 5 (Coding Agent prompt engine)** — done: pi-aligned `build_system_prompt` + tool contributions + context files + `<available_skills>` ([design doc](docs/specs/2026-09-02-phase5-prompt-engine-design.md))
-- **Phase 6 (extended integrations)** — done: git workspace context in the system prompt; opt-in multi-provider live matrix. MCP stays a caller-side `BaseTool` import ([design doc](docs/specs/2026-09-24-phase6-extended-integrations-design.md))
+- **Phase 6 (extended integrations)** — done: git workspace context in the system prompt; opt-in multi-provider live matrix. MCP stays a caller-side `BaseTool` import ([design doc](docs/specs/2026-09-24-phase6-extended-integrations-design.md)); the optional `pi-mcp-py` extension (2026-10) connects the servers an editor passes, and the core, harness and CLI still hold no MCP client ([design doc](docs/specs/2026-10-23-mcp-extension-design.md))
 - **Phase 7 (extension packages)** — done: `pi-web-access-py`, `pi-goal-x-py`, `pi-dynamic-workflows-py` ([design doc](docs/specs/2026-09-22-phase7-extension-api-design.md))
 - **FrontierHarness Eval** — done: 30-task benchmark (21 Terminal-Bench + 9 DeepSWE); Windows + WSL Docker runtimes; side-by-side Pi comparison ([report](docs/benchmarks/FRONTIER-HARNESS-30-EVAL-REPORT.md))
 
