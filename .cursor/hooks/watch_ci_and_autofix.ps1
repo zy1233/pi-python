@@ -24,6 +24,12 @@ $WorktreeBaseDir = Join-Path $RepoRoot ".cursor/hooks/worktrees"
 $Timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $LogPath = Join-Path $LogDir ("ci-autofix-{0}-{1}.log" -f $SafeBranch, $Timestamp)
 
+# Only a run that ended with one of these conclusions is a failure that an autofix can work on.
+# "cancelled" is not one of them: when a newer push arrives, the CI workflow cancels the run of the
+# older commit (concurrency, cancel-in-progress), and a cancelled run has no failure to fix.
+# Other conclusions (timed_out, startup_failure, skipped, ...) are left to the user.
+$FixableConclusions = @("failure")
+
 function Ensure-Dir {
     param([Parameter(Mandatory = $true)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path)) {
@@ -97,6 +103,39 @@ function Invoke-External {
 function Is-TransientGhError {
     param([Parameter(Mandatory = $true)][string]$Message)
     return $Message -match "(?i)tls handshake timeout|i/o timeout|timed out|connection reset|temporary failure|502 bad gateway|503 service unavailable"
+}
+
+function Get-RemoteBranchHead {
+    # Sha of the branch on origin. Returns $null when it cannot be read (no network, branch not on origin).
+    $res = Invoke-External `
+        -Exe "git" `
+        -Args @("ls-remote", "origin", "refs/heads/$Branch") `
+        -Cwd $RepoRoot `
+        -AllowFailure $true
+
+    if ($res.ExitCode -ne 0) {
+        Write-Log ("Cannot read the head of branch {0} from origin (git ls-remote exit={1}); treating it as unchanged." -f $Branch, $res.ExitCode)
+        return $null
+    }
+
+    foreach ($line in ($res.Output -split '\r?\n')) {
+        if ($line -match '^([0-9a-f]{40})\s+refs/heads/(\S+)\s*$' -and $Matches[2] -ceq $Branch) {
+            return $Matches[1]
+        }
+    }
+    return $null
+}
+
+function Get-NewerBranchHead {
+    # Sha of the branch head when somebody pushed a newer commit than $Sha. Returns $null when the head is
+    # still $Sha, and when it cannot be read.
+    param([Parameter(Mandatory = $true)][string]$Sha)
+
+    $head = Get-RemoteBranchHead
+    if ($null -ne $head -and $head -ne $Sha) {
+        return $head
+    }
+    return $null
 }
 
 function Get-CiRunForSha {
@@ -237,6 +276,18 @@ function Run-AutofixAttempt {
 
     $worktreeDir = Join-Path $WorktreeBaseDir ("{0}-attempt{1}-{2}" -f $SafeBranch, $Attempt, (Get-Date -Format "yyyyMMddHHmmss"))
 
+    # The watcher follows the branch head, and a commit that was pushed from another clone is not in this
+    # repository yet.
+    $haveRes = Invoke-External `
+        -Exe "git" `
+        -Args @("cat-file", "-e", ($CurrentSha + '^{commit}')) `
+        -Cwd $RepoRoot `
+        -AllowFailure $true
+    if ($haveRes.ExitCode -ne 0) {
+        Write-Log ("Commit {0} is not in the local repository; fetching branch {1} from origin." -f $CurrentSha, $Branch)
+        $null = Invoke-External -Exe "git" -Args @("fetch", "origin", $Branch) -Cwd $RepoRoot
+    }
+
     $null = Invoke-External `
         -Exe "git" `
         -Args @("worktree", "add", "--force", "--detach", $worktreeDir, $CurrentSha) `
@@ -297,7 +348,21 @@ Return a short summary of what was fixed.
             throw "Agent CLI failed on attempt=$Attempt. See $agentLogPath"
         }
 
+        # The agent and the local checks take minutes. When somebody pushed meanwhile, a fix that is built on
+        # the old commit is of no use (its push would be rejected). Drop it; the caller follows the new head.
+        $newerHead = Get-NewerBranchHead -Sha $CurrentSha
+        if ($null -ne $newerHead) {
+            Write-Log ("Branch head moved to sha={0} while the agent ran; dropping the autofix for sha={1}." -f $newerHead, $CurrentSha)
+            return $null
+        }
+
         Run-LocalChecks -WorkingDir $worktreeDir
+
+        $newerHead = Get-NewerBranchHead -Sha $CurrentSha
+        if ($null -ne $newerHead) {
+            Write-Log ("Branch head moved to sha={0} while the local checks ran; dropping the autofix for sha={1}." -f $newerHead, $CurrentSha)
+            return $null
+        }
 
         $statusRes = Invoke-External -Exe "git" -Args @("status", "--porcelain") -Cwd $worktreeDir
         if ([string]::IsNullOrWhiteSpace($statusRes.Output)) {
@@ -350,14 +415,36 @@ try {
     $attempt = 0
 
     while ($true) {
+        # Follow the branch. The push hook starts no second watcher while this one lives, so this is where a
+        # newer push is noticed. A new head gets its own autofix attempts.
+        $newerHead = Get-NewerBranchHead -Sha $currentSha
+        if ($null -ne $newerHead) {
+            Write-Log ("Branch head moved: {0} -> {1}; watching the new head (autofix attempts reset)." -f $currentSha, $newerHead)
+            $currentSha = $newerHead
+            $attempt = 0
+        }
+
         Write-LockState -Status "watching" -CurrentSha $currentSha -Attempt $attempt
 
         $run = Get-CiRunForSha -Sha $currentSha
         $runId = [string]$run.databaseId
         $final = Wait-CiRunCompletion -RunId $runId
 
+        # The result of an old commit says nothing about the new head. This is also the usual case of a
+        # cancelled run: the newer push cancelled it.
+        $newerHead = Get-NewerBranchHead -Sha $currentSha
+        if ($null -ne $newerHead) {
+            Write-Log ("Run {0} for sha={1} ended with conclusion={2}, but the branch head is now sha={3}; ignoring that result." -f $runId, $currentSha, $final.conclusion, $newerHead)
+            continue
+        }
+
         if ($final.conclusion -eq "success") {
             Write-Log ("CI success for sha={0}; no autofix needed." -f $currentSha)
+            break
+        }
+
+        if ($FixableConclusions -notcontains [string]$final.conclusion) {
+            Write-Log ("CI run {0} ended with conclusion={1}; that is not a failure to autofix (autofix handles: {2}). Nothing to do." -f $runId, $final.conclusion, ($FixableConclusions -join ", "))
             break
         }
 
@@ -370,7 +457,12 @@ try {
         Write-LockState -Status "autofixing" -CurrentSha $currentSha -Attempt $attempt
         Write-Log ("CI failed (run={0}, conclusion={1}), starting autofix attempt {2}/{3}" -f $runId, $final.conclusion, $attempt, $MaxAttempts)
 
-        $currentSha = Run-AutofixAttempt -CurrentSha $currentSha -RunId $runId -Attempt $attempt
+        $fixedSha = Run-AutofixAttempt -CurrentSha $currentSha -RunId $runId -Attempt $attempt
+        if ($null -eq $fixedSha) {
+            # The branch moved while the autofix ran. The top of the loop switches to the new head.
+            continue
+        }
+        $currentSha = $fixedSha
         Write-Log ("Autofix attempt complete; monitoring new sha={0}" -f $currentSha)
     }
 }

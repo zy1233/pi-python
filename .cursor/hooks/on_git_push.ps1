@@ -65,8 +65,12 @@ if ($command -notmatch "(?i)\bgit\s+push\b") {
     exit 0
 }
 
-$repoRoot = (& git rev-parse --show-toplevel 2>$null | Select-Object -First 1)
-if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($repoRoot)) {
+# Read all of the output of git first. With "| Select-Object -First 1" the pipeline stops early, PowerShell
+# can then end git and set $LASTEXITCODE to -1, and the check below could make the hook exit before it started the watcher.
+$repoRootOut = & git rev-parse --show-toplevel 2>$null
+$repoRootExit = $LASTEXITCODE
+$repoRoot = ($repoRootOut | Select-Object -First 1)
+if ($repoRootExit -ne 0 -or [string]::IsNullOrWhiteSpace($repoRoot)) {
     exit 0
 }
 $repoRoot = $repoRoot.Trim()
@@ -111,7 +115,7 @@ if (Test-Path -LiteralPath $lockPath) {
         $existingPid = [int]$existing.pid
         $existingProcess = Get-Process -Id $existingPid -ErrorAction SilentlyContinue
         if ($null -ne $existingProcess) {
-            Write-Log -Path $logPath -Message "Skip watcher: existing watcher pid=$existingPid branch=$branch"
+            Write-Log -Path $logPath -Message "Skip watcher: existing watcher pid=$existingPid branch=$branch (it follows the branch head, so it picks up sha=$sha)"
             exit 0
         }
     }
