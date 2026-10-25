@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["agent", "mcp", "acp", "pi", "extension"]
 dependencies = [
-    "pi-agent-core-lc>=0.5.0",
+    "pi-agent-core-lc>=0.6.0",
     "langchain-mcp-adapters>=0.3.2",
     "mcp>=1.30,<2",
     "anyio>=4.5",
