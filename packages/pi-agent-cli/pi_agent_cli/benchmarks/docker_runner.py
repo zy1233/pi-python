@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -125,9 +126,16 @@ class DockerContainerSession:
             "environment", {}
         ).get("image")
         self.is_running = False
+        # The commit that HEAD in /app pointed to when the container started. See ``_rewind_head``.
+        self._start_head: str | None = None
 
     def setup(self) -> None:
-        """Pull image, extract starter files, and start container with bind-mount."""
+        """Pull image, extract starter files, and start container with bind-mount.
+
+        The verifier's ``tests/`` are not copied here. The agent works inside this
+        container and could read them (``test.patch``, ``grader.py``,
+        ``test_outputs.py``). ``run_verifier`` installs them after the agent is done.
+        """
         if not self.image:
             raise ValueError(f"No docker_image found for task: {self.task.id}")
 
@@ -230,10 +238,82 @@ class DockerContainerSession:
                 "*",
             ]
         )
+        self._start_head = self._read_head()
 
-        # 4. Copy tests if present
+    def _read_head(self) -> str | None:
+        """The commit that HEAD in ``/app`` points to, or ``None`` (no repository, no git)."""
+        res = run_docker_sync(
+            ["exec", self.container_name, "git", "-C", "/app", "rev-parse", "HEAD"]
+        )
+        head = res.stdout.strip() if res.returncode == 0 and res.stdout else ""
+        return head if re.fullmatch(r"[0-9a-f]{40,64}", head) else None
+
+    def _uses_deepswe_grader(self) -> bool:
+        """True for a task whose verifier is DeepSWE's ``grader.py`` (it has a ``config.json``)."""
+        tests_dir = self.task.task_dir / "tests"
+        return (tests_dir / "grader.py").is_file() and (tests_dir / "config.json").is_file()
+
+    def _rewind_head(self) -> None:
+        """Move HEAD back to where it was at the start, before the DeepSWE verifier runs.
+
+        The task text tells the agent to work on a new branch and to commit. DeepSWE's
+        ``grader.py`` assumes that HEAD is the base commit: it resets the files that
+        ``test.patch`` touches with ``git checkout HEAD -- <file>``, and it deletes a file
+        only if HEAD does not have it. The official run applies the agent's diff to a fresh
+        container, so the agent's commits never matter there. Here the agent's commit is in
+        HEAD. If the agent committed a file with the name of a hidden test, the reset keeps
+        it, ``git apply`` fails with "already exists in working directory", and the run
+        scores -1 although the code may be right.
+
+        ``git reset --mixed`` moves HEAD and the index only. The files in the working tree
+        stay as the agent left them; its commits become ordinary uncommitted changes, which
+        is the state that the grader expects. Other tasks are left alone: for some of them
+        (``sanitize-git-repo``) the new history is the answer.
+        """
+        if not self._start_head or not self._uses_deepswe_grader():
+            return
+        head = self._read_head()
+        if head is None or head == self._start_head:
+            return
+        res = run_docker_sync(
+            [
+                "exec",
+                self.container_name,
+                "git",
+                "-C",
+                "/app",
+                "reset",
+                "--mixed",
+                "-q",
+                self._start_head,
+            ]
+        )
+        if res.returncode == 0:
+            print(
+                f"[DOCKER] HEAD moved from {head[:10]} back to {self._start_head[:10]} "
+                "for the verifier; the agent's commits stay as uncommitted changes."
+            )
+        else:
+            print(
+                f"[DOCKER] WARNING: could not move HEAD back for the verifier: {res.stderr.strip()}"
+            )
+
+    def _install_tests(self) -> str | None:
+        """Copy the verifier's ``tests/`` into the container as ``/tests``.
+
+        Only ``run_verifier`` calls this, after the agent has finished. If the files
+        were there while the agent works, it can read the expected behaviour instead
+        of deriving it from the task text. (DeepSWE's ``task.toml`` declares
+        ``environment_mode = "separate"`` for its verifier.)
+
+        Returns an error message, or ``None`` when the tests are in place (or the
+        task has none).
+        """
         tests_dir = self.task.task_dir / "tests"
         if tests_dir.is_dir():
+            # The agent had a shell in this container. Remove anything it left at
+            # /tests, so that a planted ``test.sh`` cannot merge into the real one.
+            run_docker_sync(["exec", self.container_name, "rm", "-rf", "/tests"])
             cp_test = run_docker_sync(
                 [
                     "cp",
@@ -281,6 +361,9 @@ class DockerContainerSession:
                         "/tests",
                     ]
                 )
+            else:
+                return f"Failed to copy tests into the container: {cp_test.stderr.strip()}"
+        return None
 
     def teardown(self) -> None:
         """Stop and remove container, copying back any modified workspace files."""
@@ -297,6 +380,12 @@ class DockerContainerSession:
         """Execute the verifier inside the container."""
         if not self.is_running:
             return (False, "Container is not running.")
+
+        # The agent is done. Only now may the verifier's files enter the container.
+        install_error = self._install_tests()
+        if install_error:
+            return (False, install_error)
+        self._rewind_head()
 
         # Check for test.sh
         test_sh = self.task.task_dir / "tests" / "test.sh"

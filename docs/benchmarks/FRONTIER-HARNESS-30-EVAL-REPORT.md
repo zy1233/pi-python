@@ -3,9 +3,114 @@
 > **评测基准**：FrontierHarness Eval (30 Tasks: 21 Terminal-Bench + 9 DeepSWE)  
 > **对标基线**：Official Pi (`pi-responses` v17.4.0, Kimi K3 on Fireworks)  
 > **评测对象**：`pi-python` Agent Harness (`pi-agent-harness` + `pi-agent-cli`)  
-> **被测模型**：`deepseek-ai/DeepSeek-V4-Flash` (via SiliconFlow API)  
-> **评测时间**：2026-09-04  
+> **被测模型**：`deepseek-ai/DeepSeek-V4-Flash` (via SiliconFlow API)。2026-10-16 和 2026-10-26 的 DeepSWE 重跑改用内网网关的 `deepseek-flash`（网关把它路由到哪个模型，客户端无法核实）  
+> **评测时间**：2026-09-04 起；2026-10-16 重跑 DeepSWE 9 题（60 轮上限），并核查全部存档运行的数据有效性；2026-10-26 把其中 6 道未通过的题用 100 轮上限重跑  
 > **测试环境**：Windows 10 / WSL2 Ubuntu 24.04 / Docker 29.1 / v2ray Proxy / Python 3.12
+
+---
+
+## 数据有效性声明（2026-10-16；2026-10-26 更新）
+
+先读这一节，再读后面的数字。
+
+2026-10-16 重跑 DeepSWE 时，我们发现评测框架里有两个口子，能让智能体拿到答案。第一个已经修复。第二个只做了记录，没有修复。我们据此核查了全部存档的运行，并更正了受影响的数字。
+
+2026-10-26 用 100 轮上限重跑 6 道题时，又发现评分流程的一个缺陷：它会把正确的结果判成 -1。它已经修复（第 1b 点）。这次重跑还有两点要先知道：第一，智能体的工具用法与 10-16 明显不同，原因没有查清（第 5 点）；第二，现在 DeepSWE 的结果来自两种轮次上限。
+
+### 1. 已修复：验证器的测试文件对智能体可见
+
+- **缺陷**：`DockerContainerSession.setup()` 在容器启动时就把任务的 `tests/` 复制到容器的 `/tests`。智能体在同一个容器里有 shell，所以能读到 `test.sh`、`test.patch`、`grader.py`、`test_outputs.py`。这个行为从评测器的第一个版本（2026-09-04）就存在。
+- **官方的要求**：DeepSWE 的 `task.toml` 写明 `[verifier] environment_mode = "separate"`。意思是验证器在单独的环境里运行，智能体看不到测试。
+- **修复**：`setup()` 不再复制 `tests/`。新增的 `_install_tests()` 只由 `run_verifier()` 在智能体结束后调用。它先 `rm -rf /tests`（清掉智能体可能自建的目录），再复制。复制失败时，验证器直接报失败，不会运行旧文件。
+- **验证**：回归测试 `packages/pi-agent-cli/tests/test_docker_runner_verifier_isolation.py`（4 个用例；旧代码上 3 个失败，新代码上全部通过；Windows 和 WSL 都跑过）。在真实容器里，智能体运行期间 `docker exec <容器> ls /tests` 报目录不存在。修复后的 8 题批次里，轨迹没有任何 `/tests` 访问。
+
+### 1b. 已修复：智能体提交了与隐藏测试同名的文件，评分为 -1（2026-10-26）
+
+- **缺陷**：任务文字要求智能体“在新分支上工作，并提交所有改动”。DeepSWE 的 `grader.py` 假定 HEAD 是基准提交。它用 `git checkout HEAD -- <文件>` 重置 `test.patch` 涉及的文件，而且只有 HEAD 里没有这个文件时才删除它。官方流程把智能体的 diff 打到一个新容器上，所以智能体的提交没有影响。我们在同一个容器里评分，HEAD 已经包含智能体的提交。
+- **后果**：`httpx-multipart-response-parsing`（10-26 的第二次运行）的智能体提交了 `tests/test_multipart_response.py`，和隐藏测试同名。重置保留了它，`git apply test.patch` 报 `already exists in working directory`，评分为 -1。一个测试也没有运行，所以智能体的代码没有被评判。
+- **修复**：`setup()` 记下容器启动时的 HEAD。`run_verifier()` 在验证器启动前，对使用 `grader.py` 的任务执行 `git reset --mixed <起始 HEAD>`。它只移动 HEAD 和索引。工作区的文件不变，智能体的提交变成未提交的改动，这正是 `grader.py` 期望的状态。Terminal-Bench 任务不受影响：`sanitize-git-repo` 要求改写历史，历史就是答案。
+- **验证**：回归测试 `packages/pi-agent-cli/tests/test_docker_runner_verifier_head.py`（7 个用例，Windows 和 WSL 都通过）。真实重放：同一份工作区，不退回 HEAD 时仍是 -1，报错和原来完全一样；退回 HEAD 后，F2P 122/122，P2P 1272/1272。
+- **别的结果是否受影响**：没有。10-26 的 expr、katex、meriyah 三个试验也有提交（HEAD 变了）。用修复后的流程重新评分，三个试验的 F2P / P2P 与原来完全相同。arktype 和 python-statemachine 的 HEAD 没有变。搜索全部已保存的 `verifier_output.txt`（包括 10-16 的 60 轮批次），只有这一个试验有这个报错。
+- **官方流程的确认**：为了不依赖这个修复，我们按官方方式给 6 个最终结果各评一次。每次用一个全新的容器（不挂载工作区，没有网络），只放入两样东西：智能体的 diff（`/logs/artifacts/model.patch`）和 `/tests`。然后运行 `test.sh`。`grader.py` 从这个 `model.patch` 取智能体的工作，不从别处取。所以智能体的提交、HEAD 的退回都不起作用。6 个试验的 F2P / P2P 都与本报告采用的评分完全一致：
+
+  | 任务 | 官方流程的评分 | 报告采用的评分 |
+  | :--- | :--- | :--- |
+  | `arktype-json-schema-refs-dependencies` | ✅ 25/25，1679/1679 | 相同 |
+  | `expr-try-catch-errors` | ✅ 79/79，66265/66265 | 相同 |
+  | `httpx-multipart-response-parsing` | ✅ 122/122，1272/1272 | 相同 |
+  | `katex-multicolumn-array-spans` | ✅ 94/94，599/599 | 相同 |
+  | `meriyah-explicit-resource-declarations` | ❌ 45/49，51469/51469 | 相同 |
+  | `python-statemachine-state-data-scoping` | ❌ 63/72，1286/1286 | 相同 |
+
+  每个试验目录里有 `model.patch`（智能体的最终 diff）和 `official-flow-regrade.json`（完整的验证器输出）。`model.patch` 的生成方式：最终工作区与基准提交的 diff，包含新文件，排除验证器自己的文件（`test.patch` 涉及的路径）和构建缓存（如 expr 的 `.gocache`）。官方框架自己如何生成 diff，我们没有核对。
+- **重新评分的限制**：第一种重新评分（`regrade-*.json`）在一个新容器里进行，挂载保存的工作区副本。只有 `/app` 里的文件来自智能体；它在容器的其他位置做过的改动不在。官方流程只读 `model.patch`，所以这一点与官方一致。运行目录里的 `trial.json` 和 `REPORT.md` 没有改，仍写 FAIL。重新评分的结果在同一目录的 `regrade-fixed.json`，修复前的对照在 `regrade-control-no-rewind.json`。
+
+### 2. 核查范围和方法
+
+核查对象是 `.pi-eval/runs/` 里全部 66 条轨迹：61 条在 Docker 里跑，1 条是 `--no-docker`（`polyglot-c-py`），4 条是 9 月 4 日的早期运行（没有记录运行模式）。五项只读扫描：
+
+| 扫描 | 找什么 |
+| :--- | :--- |
+| A | 工具调用的参数里出现**根目录**的 `/tests`（不算仓库自带的 `/app/tests`、`./tests`） |
+| B | 工具的输出里出现只有验证器才有的内容（`/logs/verifier/reward`、`terminal-bench-canary`、`BENCHMARK DATA SHOULD NEVER APPEAR`、`f2p_total`、`FAIL_TO_PASS`） |
+| C | `read`、`ls`、`grep`、`find`、`edit`、`write` 访问 `/app`、`/data` 之外的绝对路径 |
+| D | `bash` 命令引用宿主机上的任务缓存（`.cache/…/tasks/<任务>/`） |
+| E | `bash` 命令访问 GitHub 或基准仓库（`terminal-bench`、`harbor-framework`、`laude-institute`、`datacurve` 等） |
+
+另外检查了 9 个 DeepSWE 镜像里 `/app/.git` 的历史：没有包含任务修复的“未来提交”。这些扫描是一次性脚本，没有入库。方法如上，可以重做。
+
+### 3. 核查结果
+
+| 运行 | 任务 | 命中 | 对本报告的影响 |
+| :--- | :--- | :--- | :--- |
+| `20260907-031708`（Docker） | `extract-elf` | 第 12–14 轮 `ls /tests`，然后读 `/tests/test.sh` 和 `/tests/test_outputs.py`（扫描 A、B、C） | 第三节第 13 行的 PASS 作废 |
+| `20260910-064928`（`--no-docker`） | `polyglot-c-py` | 第 13–15 轮读宿主机任务缓存里的 `instruction.md`、`task.toml`、`README.md`、`tests/test.sh`、`tests/test_outputs.py` 和 `solution/solve.sh`（扫描 B、C、D）。智能体写道：“The user's request is actually a terminal-bench task. Let me look at the test and solution” | 本报告没有用这个运行。第 3 行用的是 `20260910-071513`（Docker），五项扫描都没有命中它 |
+| `20261016-deepswe-remaining8-…`（本次，修复之前启动） | `anko`、`arktype` | 列出 `/tests/`，读 `test.sh`、`test.patch`、`grader.py`（扫描 A、B、C） | 发现后停止了这批运行，修复后重跑。这批只留作证据，不进报告 |
+| `20261016-tb-extract-elf-clean-…`（修复之后，`allowlist` 模式） | `extract-elf` | 第 8–17 轮经代理从 GitHub 下载参考解和测试文件并照抄（扫描 B、E，见第 4 点） | 这次 PASS 作废 |
+
+- 扫描 A 另有 1 条命中是误报：`sanitize-git-repo`（9 月 7 日）用 `grep -viE "uuid|/tests/|\.jsonl"` 过滤搜索结果，没有读 `/tests`。
+- 其余运行没有发现泄漏，包括第三节里其他所有行，以及修复后的 8 题批次。有些运行在扫描 C、E 里有命中，但都是良性的：读自己的 `/tmp` 临时文件；断网时失败的联网尝试；`build-cython-ext` 要构建的软件的 `git clone`。
+- `anko` 在泄漏的那批里通过了（作废），在修复后的干净批次里也通过了（有效）。所以这个通过不依赖泄漏。
+- **10-26 的 100 轮重跑**（7 条轨迹：6 题的批次，加 httpx 的第二次运行）做了同样的扫描。A、B、C、D 零命中。E 有 6 条命中：5 条是联网尝试，1 条是误报（katex 第 60 轮在改 `docs/support_table.md`，文本里有仓库自带的 GitHub issue 链接）。联网命令一共 7 条：arktype 第 8 轮，expr 第 14 轮，httpx 第一次运行第 6 轮，katex 第 9 轮，meriyah 第 10、11 轮（3 条）。它们都想取上游的代码或版本信息，例如 `curl raw.githubusercontent.com/…`、`git ls-remote`、`npm view`。断网下全部失败：无法解析主机名，或没有输出。
+
+### 4. 未修复：Terminal-Bench 的出站白名单没有执行
+
+- Terminal-Bench 任务用 `allowlist` 模式。代码（`egress_policy.py`）只把代理的环境变量（`http_proxy`、`https_proxy` 等）传给容器。`allowed_hosts` 只写进 `run.json`，没有任何代码按它过滤。
+- 2026-10-16 实测：在 `allowlist` 模式的容器里，经代理访问清单之外的 `example.org`、`huggingface.co`、`httpbin.org`，都返回 200。所以实际效果是开放互联网（只要宿主机的代理不过滤）。
+- 官方清单本身包含 `github.com`、`*.github.com`、`*.githubusercontent.com`。就算清单被执行，智能体也能读 GitHub 上公开的 `terminal-bench` 仓库，里面有参考解和测试文件。
+- 有一次运行用了这条路：`extract-elf`（修复验证器隔离之后的第一次重测）在第 8–17 轮从 `harbor-framework/terminal-bench-1` 下载 `solution.sh` 和 `tests/test_outputs.py`，然后照抄。第 17 轮它写道：“I found the actual benchmark task and its reference solution.” 这次 PASS 作废。
+- 其他 Terminal-Bench 运行里，扫描 E 没有发现访问基准仓库的记录。扫描 E 里，唯一访问 GitHub 的其他运行是 `build-cython-ext`（9 月）：它 `git clone` 任务要构建的软件 `pyknotid`，而且该题没有通过。
+- 断网（`--egress-mode no-network`）能排除这条路。代价是需要联网装依赖的任务会失败（例如 `dna-insert` 要 `apt-get install primer3`）。所以其余 Terminal-Bench 题没有统一用断网重跑，它们的 PASS / FAIL 仍然是 9 月在开放网络下得到的。
+- DeepSWE 不受影响：它用 `--network none`。10-16 的 8 题批次里，智能体至少 7 次想从 GitHub 抓上游实现，全部失败。10-26 的 100 轮重跑里又有 7 条联网命令，也全部失败。**这说明断网是 DeepSWE 成立的前提。**
+
+### 5. 其他限制（没有修复）
+
+- **`--no-docker` 没有任何隔离。** 智能体和宿主机共享文件系统，能读任务缓存里的 `solution/` 和 `tests/`。这个模式只用于冒烟，不要用它计分。
+- **验证器和智能体用同一个容器。** 官方的 DeepSWE 用独立的验证环境。现在测试在智能体结束后才复制进去，所以智能体看不到测试。第 1b 点的缺陷就来自这个共用：智能体的提交留在了验证器的仓库里，现在由退回 HEAD 来消除。但智能体留下的后台进程，或被改过的系统文件，仍可能影响验证。目前的轨迹里没有看到这种行为。
+- **文件工具在宿主机上运行。** `read`、`ls`、`grep`、`find`、`edit`、`write` 在宿主机的工作区里执行，能到达宿主机上 `/app`、`/data` 之外的绝对路径。扫描 C 没有发现滥用。
+- **没有默认的命令超时。** Docker 的 `bash` 工具在智能体不传 `timeout` 时一直等。`extract-elf` 的断网重测因此卡在一条 `grep -rl … /` 上 13 分钟，直到 900 s 的智能体超时。
+- **模型别名没有核实。** 网关的 `deepseek-flash` 是否就是 `deepseek-ai/DeepSeek-V4-Flash`，客户端无法确认。
+- **每题只跑一次，而且 DeepSWE 现在混用两种上限。** 3 题是 60 轮（fastapi、anko、scc，10-16 通过后没有重跑），6 题是 100 轮。同一题的两次运行差别可以很大：python-statemachine 在 60 轮时 F2P 70/72，在 100 轮时反而是 63/72。所以一次运行的结果，不能当作这个模型在这道题上的稳定能力。
+- **两个批次的智能体工具用法不同，原因没有查清。**
+  - 同样这 6 题，在 10-16 的 60 轮批次里：bash 302 次，read 130 次，edit 30 次，write 4 次，ls 5 次，grep 1 次。
+  - 在 10-26 的 100 轮批次里（含 httpx 的第二次运行）：bash 571 次，edit 2 次，write 1 次，ls 1 次，没有 read。智能体几乎只用 bash 读文件和改文件。
+  - 已经排除：两个批次的提交（`12349d3` 到 `af5db69`）没有改动系统提示、工具列表和主循环。它们只改了 MCP、通知和会话存储的代码。两个批次里，思考文本都保留在历史里（用提示词的增量检验）。
+  - 没有排除：`~/.pi-python/agent.toml` 在两个批次之间（10-20）改过，现在是 `thinking_level = "high"`。60 轮批次当时的值没有记录。网关把别名 `deepseek-flash` 路由到哪个后端，也没有记录。
+  - 影响：验证器只看最终代码，所以判分不受影响。但“60 轮到 100 轮”的变化，不能全部归因于轮次上限。
+- **成本是估算值。** 评测器按 $1 / $0.1 / $2 每百万 token 算，不是网关的账单。
+- **`run.json` 里的 commit 不含修复。** 10-16 的批次记录的是 `12349d3`，而验证器隔离的修复当时在未提交的工作区里。10-26 的批次记录的是 `af5db69`，它含隔离修复，但不含第 1b 点的修复。httpx 的结果来自用第 1b 点的修复重新评分，而这个修复在 `af5db69` 之后才提交。所以 `af5db69` 本身不能复现 httpx 的结果。不过，保存的 `model.patch` 加官方流程（第 1b 点）不需要这个修复，就能复现全部 6 个结果。
+
+### 6. 对本报告数字的影响
+
+| 指标 | 旧版报告 | 10-16 重跑后 | 现在（10-26） | 原因 |
+| :--- | :---: | :---: | :---: | :--- |
+| 全量通过率 | 60.0% (18/30) | 66.7% (20/30) | **80.0% (24/30)** | Terminal-Bench 少 1 题，DeepSWE 多 7 题 |
+| Terminal-Bench | 85.7% (18/21) | 81.0% (17/21) | **81.0% (17/21)** | `extract-elf` 的 PASS 作废，断网重测未通过 |
+| DeepSWE | 0.0% (0/9) | 33.3% (3/9) | **77.8% (7/9)** | 10-16：60 轮上限，通过 3 题。10-26：对另外 6 题用 100 轮上限重跑，通过 4 题（其中 httpx 是重新评分的结果，见第 1b 点） |
+
+其余 20 道 Terminal-Bench 题没有重跑。它们的结果来自 9 月的运行，已通过五项扫描，没有发现泄漏。
+
+DeepSWE 的 7 / 9 要这样读：模型是 `deepseek-flash`，不是官方的 Kimi K3；每题只跑 1 次；3 题的上限是 60 轮，6 题是 100 轮；两次批次的智能体行为不同（第 5 点）。官方 Pi 在 DeepSWE 上是 2 / 9。它没有 60 轮或 100 轮的上限（最多的一题跑了 334 轮）。所以这两个数字不是严格的对标。
 
 ---
 
@@ -19,41 +124,49 @@ FrontierHarness Eval 是当前业界评估 **Coding Agent Harness（脚手架/�
 
 1. **当前实测总体通过率与关键指标 (Overall Pass Rate & Performance)**：
    截止目前，`pi-python` 在 WSL2 隔离 Docker 沙箱与本地环境中已完成全部 30 题的 **100% 全量端到端真实评测**（覆盖 21 道 Terminal-Bench 与 9 道 DeepSWE 工业级真实代码仓库任务）：
-   - **全量总体通过率 (Overall Pass Rate)**：**60.0%** (18 / 30 PASS)
-   - **Terminal-Bench 任务集通过率**：**85.7%** (18 / 21 PASS，全量 21 题完毕)
-     - 通关任务 (18 题)：`regex-log`、`sqlite-db-truncate`、`openssl-selfsigned-cert`、`git-leak-recovery`、`log-summary-date-ranges`、`constraints-scheduling`、`db-wal-recovery`、`modernize-scientific-stack`、`multi-source-data-merger`、`vulnerable-secret`、`extract-elf`、`largest-eigenval` (突破官方失败点)、`polyglot-c-py`（修复基础设施 CRLF Bug 后通过）、`merge-diff-arc-agi-task`（25 轮额度重跑通过）、`kv-store-grpc`（修复 Docker 代理泄漏后 7/7 通过，突破官方失败点）、`chess-best-move`（修复非 VLM 模型图片降级后通过，突破官方失败点）、`code-from-image`（修复非 VLM 模型图片降级后通过，突破官方失败点）、`dna-insert`（黄金快照与出站白名单体系下，主动通过 apt 安装 primer3 并调用 oligotm 闭环自测通过）
-     - 未通关任务 (2 题)：`gcode-to-text`（无多模态渲染，同官方）、`build-cython-ext`（numpy 2.x 弃用符号批量替换不完整）
+   - **全量总体通过率 (Overall Pass Rate)**：**80.0%** (24 / 30 PASS)。已扣除 `extract-elf`：它旧的 PASS 无效，断网重测未通过（见“数据有效性声明”）。DeepSWE 的 7 题来自两次重跑（2026-10-16 的 3 题，2026-10-26 的 4 题），Terminal-Bench 的 17 题来自 9 月的运行。
+   - **Terminal-Bench 任务集通过率**：**81.0%** (17 / 21 PASS，全量 21 题完毕)
+     - 通关任务 (17 题)：`regex-log`、`sqlite-db-truncate`、`openssl-selfsigned-cert`、`git-leak-recovery`、`log-summary-date-ranges`、`constraints-scheduling`、`db-wal-recovery`、`modernize-scientific-stack`、`multi-source-data-merger`、`vulnerable-secret`、`largest-eigenval` (突破官方失败点)、`polyglot-c-py`（修复基础设施 CRLF Bug 后通过）、`merge-diff-arc-agi-task`（25 轮额度重跑通过）、`kv-store-grpc`（修复 Docker 代理泄漏后 7/7 通过，突破官方失败点）、`chess-best-move`（修复非 VLM 模型图片降级后通过，突破官方失败点）、`code-from-image`（修复非 VLM 模型图片降级后通过，突破官方失败点）、`dna-insert`（黄金快照与出站白名单体系下，主动通过 apt 安装 primer3 并调用 oligotm 闭环自测通过）
+     - 未通关任务 (3 题)：`gcode-to-text`（无多模态渲染，同官方）、`build-cython-ext`（numpy 2.x 弃用符号批量替换不完整）、`extract-elf`（旧的 PASS 无效；断网重测 1 次未通过：智能体转去找参考答案，一条 `grep -rl … /` 命令 13 分钟没有返回，900 s 超时）
      - 特殊判定任务 (1 题)：`sanitize-git-repo`（清除工作全部完成且数据测试全通，但历史重写后基准 commit SHA 变动导致用例断言失败）
-   - **DeepSWE 工业级代码集通过率**：**0.0%** (0 / 9 PASS，全量 9 题完毕)
-     - `fastapi-deprecation-response-headers`：基底 3134 用例 100% 保持通过，未破坏已有系统，但 137 个新增断言未完工；
-     - `python-statemachine-state-data-scoping`：涉及大范围状态生命周期与回调重构，20 轮上限内未完工（官方 Pi 耗费 90 轮方才通过）；
-     - `anko-typed-variable-bindings`：Go 解释器类型系统 Bug 修复，官方 Pi 耗费 83 轮 $2.14 强攻通过，当前在 20 轮限制下未及完工；
-     - `expr-try-catch-errors`：Go 表达式 AST 异常链传递，与官方表现一致（官方 12 轮失败）；
-     - `arktype-json-schema-refs-dependencies`：已有 1679 项测试 100% 保持通过，官方原版跑满 334 轮 1 小时耗资 $10.43 严重超时，`pi-python` 21 轮受控止损；
-     - `httpx-multipart-response-parsing`：已有 1185 项测试保持通过（P2P 93.2%），多部件解析边缘 Case 官方 31 轮亦未攻克；
-     - `katex-multicolumn-array-spans`：已有 599 项测试 100% 保持通过（P2P 100%），官方耗费 217 轮 $6.56 失败；
-     - `scc-bounded-memory-spilling`：已有 286 项测试 100% 保持通过（P2P 100%），官方 100 轮 $3.28 失败；
-     - `meriyah-explicit-resource-declarations`：已有 51469 项测试 100% 保持通过（P2P 100%），官方耗费 254 轮 $9.15 失败。
-   - **通关任务中位耗资 (Median Cost per Pass)**：**$0.0406**（通关任务单题平均约 $0.046，仅为官方 Pi $2.43 的约 **1/50**）
-   - **通关任务平均交互轮次 (Mean Turns)**：**10.6 轮**（远低于官方 Pi 的 18.7 轮，展现出极强的低空转高密度执行特征）
-   - **Prompt Cache 命中率**：典型中位数 **77.9%** (校正前因评估器分母双重计数 Bug 误报为 45.4%，校正后区间 65.0% ~ 82.5%，与官方 Pi 的 79.4% 完全对齐)
-   - **无动作空转轮次 (Mean No-Action)**：**1.0 ~ 1.3 轮**
+   - **DeepSWE 工业级代码集通过率**：**77.8%** (7 / 9 PASS)。数据来自两次重跑，都用 `deepseek-flash`（经内网网关）、容器断网、每题只跑 1 次。2026-10-16 跑了 9 题，上限 60 轮，通过 3 题。2026-10-26 把没有通过的 6 题用 100 轮上限重跑，通过 4 题。两次的智能体行为不同，所以不要把两个批次直接比较（见“数据有效性声明”第 5 点）。（F2P = 目标用例，P2P = 既有用例。）
+     - 60 轮上限通过（3 题，没有重跑）：
+       - `fastapi-deprecation-response-headers`：F2P 137/137，P2P 3134/3134。官方 Pi 117 轮 $2.99 未通过。这一次在修复验证器泄漏之前启动；已核对轨迹，没有读 `/tests`；
+       - `anko-typed-variable-bindings`：F2P 9/9，P2P 94/94。官方 Pi 83 轮 $2.15 通过；
+       - `scc-bounded-memory-spilling`：F2P 31/31，P2P 286/286。官方 Pi 100 轮 $3.28 未通过；
+     - 100 轮上限重跑后通过（4 题；括号里是 60 轮时的结果）：
+       - `arktype-json-schema-refs-dependencies`：F2P 25/25，P2P 1679/1679（60 轮：F2P 0/25）。用满 100 轮。官方 Pi 334 轮失败；
+       - `expr-try-catch-errors`：F2P 79/79，P2P 66265/66265（60 轮：最终代码无法编译）。89 轮自行结束。官方 Pi 12 轮失败；
+       - `katex-multicolumn-array-spans`：F2P 94/94，P2P 599/599（60 轮：F2P 87/94）。78 轮自行结束。官方 Pi 217 轮失败；
+       - `httpx-multipart-response-parsing`：F2P 122/122，P2P 1272/1272（60 轮：F2P 120/122）。28 轮自行结束。官方 Pi 31 轮失败。**这是重新评分的结果**：原评分是 -1，因为评分流程有缺陷（见“数据有效性声明”第 1b 点）；
+     - 100 轮上限仍未通过（2 题）：
+       - `python-statemachine-state-data-scoping`：F2P 63/72，P2P 1286/1286（60 轮：F2P 70/72，**100 轮反而更差**）。用满 100 轮。官方 Pi 90 轮通过；
+       - `meriyah-explicit-resource-declarations`：F2P 45/49，P2P 51469/51469（60 轮：F2P 0/49）。用满 100 轮。差 4 个用例：`using` 在 `switch` 的 `case` 里；`await using` 和 `using` 的数组解构应报错（2 个）；`for-of` 里把 `of` 当绑定名。官方 Pi 254 轮失败。
+   - **通关任务中位耗资 (Median Cost per Pass)**：**$0.0692**（24 个通过的任务；均值 $0.258）。只算 Terminal-Bench 的 17 题：中位 $0.0356，均值 $0.0611。DeepSWE 的 7 题：$0.25~$1.08（中位 $0.675，均值 $0.737）。这是评测器的估算值，模型也和官方不同，所以不要直接拿它去除官方 Pi 的 $2.43。
+   - **通关任务平均交互轮次 (Mean Turns)**：**29.7 轮**（24 个通过的任务，中位 17.0）。只算 Terminal-Bench 的 17 题：均值 13.8，中位 12.0。DeepSWE 的 7 题：3 题用满 60 轮，1 题用满 100 轮，3 题自行结束（28、78、89 轮）。旧版报告写的“10.6 轮”与第三节的逐题表对不上，这里按逐题表重算。官方 Pi 的 18.7 轮是 30 题的平均，口径不同，不能直接比。
+   - **Prompt Cache 命中率**：Terminal-Bench 运行的典型中位数 **77.9%** (校正前因评估器分母双重计数 Bug 误报为 45.4%，校正后区间 65.0% ~ 82.5%，与官方 Pi 的 79.4% 完全对齐)；DeepSWE 采用的 9 个结果为 96.5% ~ 98.7%
+   - **无动作轮次 (Mean No-Action)**：Terminal-Bench 运行 **1.0 ~ 1.3 轮**。DeepSWE：60 轮的 3 题是 9~19 轮，多是只调用 `read` / `grep` / `ls` 的读代码轮；100 轮的 6 题每题只有 1 轮，是评测器记入的合成消息（`Agent loop exceeded max_turns=100`），或最后一条总结消息。评测器只把调用了 `write`、`edit` 或 `bash` 的轮次算作“有动作”，而 100 轮批次里的智能体几乎只调用 `bash`（见“数据有效性声明”第 5 点），所以这个指标在 100 轮批次上没有区分度。
 
 2. **客观真实的容器化能力格局分析概要 (Scaffold Analysis Summary)**：
-   - **强项一：极简无废话的状态循环与超低空转**：`pi-python` 的平均 No-Action 轮次仅为 1.0~1.3 轮（首轮规划或末轮输出），几乎每一轮均包含 `write`、`edit` 或 `bash` 动作，没有多余的寒暄与反复确认。
+   - **强项一：极简无废话的状态循环与超低空转**：在 Terminal-Bench 运行中，`pi-python` 的平均 No-Action 轮次仅为 1.0~1.3 轮（首轮规划或末轮输出），几乎每一轮均包含 `write`、`edit` 或 `bash` 动作，没有多余的寒暄与反复确认。DeepSWE 重跑里的无动作轮多是读代码轮（见上）。
    - **强项二：闭环自愈能力极强**：在 `regex-log`（写测试脚本验算边界）、`git-leak-recovery`（深入 reflog/fsck 追溯）、`sqlite-db-truncate`（解析二进制叶子节点并校准 IEEE 754 浮点值）、`db-wal-recovery`（WAL 逆向解密）、`modernize-scientific-stack`（旧 API 升级）、`vulnerable-secret`（边界计算与二进制注入）中均展现了极高的首轮成功率或自愈收敛速度。
-   - **强项三：突破官方 Pi 四个失败用例**：
+   - **强项三：突破官方 Pi 的失败用例（Terminal-Bench 4 个，DeepSWE 6 个）**：
      - `largest-eigenval`：官方 Pi 24 轮 $0.40 失败 → `pi-python` 18 轮 $0.054 满分攻克（数值计算）
      - `kv-store-grpc`：官方 Pi 72 轮 $0.54 失败 → `pi-python` 12 轮 $0.016 满分攻克（修复 Docker 代理泄漏）
      - `chess-best-move`：官方 Pi 17 轮 $0.17 失败 → `pi-python` 15 轮 $0.030 满分攻克（修复 VLM 检测 + 棋引擎）
      - `code-from-image`：官方 Pi 156 轮 $2.26 失败 → `pi-python` 23 轮 $0.027 满分攻克（修复 VLM 检测 + OCR 降级）
-   - **能力边界一（已在黄金快照机制下攻克）：从依赖死循环到自主依赖闭环修复**：在早期评测中，`dna-insert` 因容器缺少 `primer3` 导致 20 轮探索超时；在启用黄金快照与 Egress 白名单网络策略后，智能体能够主动执行 `apt-get` 探测并安装 `primer3`，随后调用 `oligotm` 求解退火温度并编写 `verify.pl` 严密验证，31 轮满分攻克；
+     - DeepSWE 6 题：官方 Pi 未通过，`pi-python` 各通过 1 次。`fastapi`（官方 117 轮）和 `scc`（官方 100 轮）是 2026-10-16 的结果，上限 60 轮。`arktype`（官方 334 轮）、`expr`（官方 12 轮）、`katex`（官方 217 轮）、`httpx`（官方 31 轮）是 2026-10-26 的结果，上限 100 轮。每题只跑一次，模型与官方不同（`deepseek-flash` 对 Kimi K3），所以这不是严格的对标
+   - **能力边界一（已在黄金快照机制下攻克）：从依赖死循环到自主依赖闭环修复**：在早期评测中，`dna-insert` 因容器缺少 `primer3` 导致 20 轮探索超时；在启用黄金快照与 Egress 白名单网络策略后（白名单实际没有被执行，容器能访问开放网络，见开头的“数据有效性声明”），智能体能够主动执行 `apt-get` 探测并安装 `primer3`，随后调用 `oligotm` 求解退火温度并编写 `verify.pl` 严密验证，31 轮满分攻克；
    - **能力边界二（已大幅修正）：多模态与渲染瓶颈已基本解决**：`polyglot-c-py` 已修复（CRLF 基础设施 Bug 误判），`merge-diff-arc-agi-task` 在 25 轮额度下已通过，`chess-best-move` 和 `code-from-image` 通过 VLM 检测 + 图片降级修复后已通过。剩余瓶颈仅在 `gcode-to-text` 中无渲染模块导致长程盲猜；
-   - **能力边界三：超大型仓库的长程代码重构轮次瓶颈**：在 FastAPI、Python-Statemachine、Anko 等 SWE-bench 级任务中，数百至数千个测试的庞大工程给模型带来巨大的上下文认知负荷，在 20 轮限制下难以完成全局重构（官方 Pi 均需 80~120 轮长程交互）。
+   - **能力边界三：大型仓库的长程重构需要轮次，但轮次不是全部**：2026-10-16 把上限放到 60 轮后，DeepSWE 通过 3 / 9（FastAPI、Anko、SCC）。2026-10-26 对其余 6 题用 100 轮上限重跑，又通过 4 题（ArkType、expr、KaTeX、httpx），合计 7 / 9。
+     - 60 轮时，expr、katex、httpx 最后一次改文件发生在第 60 轮，也就是被上限打断。在 100 轮重跑里，它们分别在第 89、78、28 轮自行结束。对这三题，“轮次不够”是 60 轮时失败的一个原因。
+     - ArkType 在 100 轮时用满上限，但已经通过。
+     - 仍失败的 2 题：meriyah 差 4 个用例，python-statemachine 差 9 个用例。python-statemachine 在 100 轮时（63/72）比 60 轮时（70/72）更差，所以对它来说，多给轮次没有帮助。
+     - 每题只跑 1 次，而且两个批次的智能体工具用法不同（见“数据有效性声明”第 5 点）。所以不要把“60 轮到 100 轮”的变化全部算作轮次的效果。
 
 3. **核心机制与原版 Pi 高度一致且平均轮次极简**：
    - 在 `sqlite-db-truncate` 中，`pi-python` 11 轮完成（官方 10 轮），花费 $0.1171 vs $0.1371；
-   - 在成功通过的 Terminal-Bench 任务中，平均仅耗费 6~8 轮，真实前缀缓存命中稳定在 70%~82%（经公式校正），充分印证了 `pi-python` 基于单流式函数适配、原生工具调度与会话状态机的工程健壮性。
+   - 在成功通过的 Terminal-Bench 任务中，平均耗费 13.8 轮（中位 12 轮；旧版报告写的“6~8 轮”与第三节的逐题表对不上，已按逐题表重算），真实前缀缓存命中稳定在 70%~82%（经公式校正），充分印证了 `pi-python` 基于单流式函数适配、原生工具调度与会话状态机的工程健壮性。
 
 4. **Docker 运行时桥接架构与跨平台 POSIX 权限完美适配**：
    完成了针对 `pi-python` 的完整容器评估调度层：
@@ -110,7 +223,7 @@ FrontierHarness Eval 是当前业界评估 **Coding Agent Harness（脚手架/�
 | 10 | `terminal-bench/largest-eigenval` | Terminal-Bench | ❌ FAIL | 24 | $0.3967 | 624.2s | ✅ PASS (Docker) | 18 | $0.0540 | **重大突破：官方 Pi 失败点被成功攻克**！幂法/Lanczos 特征值求解数值计算。官方 Pi 因浮点收敛精度未达标在 24 轮失败（$0.3967）；`pi-python` 智能体在容器中编写并调试 scipy/numpy 幂迭代算法，18 轮满分通过（Reward 1，成本仅 $0.0540）。 |
 | 11 | `terminal-bench/merge-diff-arc-agi-task` | Terminal-Bench | ✅ PASS | 15 | $0.0709 | 374.7s | ✅ PASS (Docker) | 23 | $0.0843 | **重跑后 Docker 满分通过**。首次运行 20 轮耗尽（4 轮 apt 超时 + 5 轮 git ref 试错），冲突标记残留；第二次 25 轮额度下 23 轮完成 git bundle 提取→分支合并→冲突解决→ARC-AGI 模式泛化（`output[i][j]=d[(i+j)%3]`），5/5 测试通过（含隐藏用例），Cache 91.3%。 |
 | 12 | `terminal-bench/vulnerable-secret` | Terminal-Bench | ✅ PASS | 11 | $0.0872 | 501.5s | ✅ PASS (Docker) | 7 | $0.0151 | **双双满分通过，pi-python 轮次更少成本更低**。C 源码缓冲区溢出与认证绕过利用。智能体在容器中通过逆向输入边界精确触发目标分支提取 Secret，仅用 7 轮 $0.0151 满分通关（官方 Pi 11 轮 $0.0872）。 |
-| 13 | `terminal-bench/extract-elf` | Terminal-Bench | ✅ PASS | 17 | $0.3197 | 653.3s | ✅ PASS (Docker) | 21 | $0.0849 | **双双通过，成本低于官方 1/3**。二进制 ELF 头提取与 Section 修复。智能体在容器内执行 Python 脚本定位 ELF 魔数与 Section Header 结构并修复 a.out，满分通过（官方 17 轮 $0.3197）。 |
+| 13 | `terminal-bench/extract-elf` | Terminal-Bench | ✅ PASS | 17 | $0.3197 | 653.3s | ❌ FAIL (Docker, 断网重测) | 13 | $0.0598 | **9 月的 PASS 无效，重测未通过。** 9 月的运行（21 轮 $0.0849）在第 13–14 轮读了 `/tests/test.sh` 和 `/tests/test_outputs.py`。验证器隔离修复后的第一次重测（`allowlist` 模式，21 轮 $0.1102）在第 8–17 轮经代理从 GitHub 下载了参考解和测试文件并照抄，也无效。最后一次用 `--egress-mode no-network` 重测：前 4 轮读 ELF，第 5–13 轮的大部分命令在容器里找参考答案或试图联网（`find / -iname '*solution*'`、`curl github.com`、`pip download terminal-bench`、读 `.bash_history`）。最后一条 `grep -rl … /` 没设超时，13 分钟都没有返回，900 s 智能体超时，没有写出答案。单次运行。官方 Pi 17 轮 $0.3197 通过。 |
 | 14 | `terminal-bench/build-cython-ext` | Terminal-Bench | ✅ PASS | 46 | $0.5402 | 1022.7s | ❌ FAIL (Docker) | 21 | $0.0492 | **模型一致性瓶颈（最佳 9/11）**。Cython C 扩展编译调试。智能体可成功编译 Cython 并安装至全局，多次重跑最佳达 9/11 测试通过，但对 `numpy.int`/`numpy.float` 等 NumPy 2.x 弃用符号的批量替换不完整且每次修复的子集不一致。官方 46 轮通关。 |
 | 15 | `terminal-bench/kv-store-grpc` | Terminal-Bench | ❌ FAIL | 72 | $0.5391 | 1397.7s | ✅ PASS (Docker) | 12 | $0.0164 | **修复后全面通过，突破官方 Pi 失败点**。分布式 gRPC 协议服务。首次运行因 Docker 容器继承宿主 `http_proxy` 环境变量但缺少 `no_proxy=127.0.0.1,localhost`，导致 gRPC 客户端连接 `127.0.0.1:5328` 时被劫持到 v2ray 代理 `172.20.35.30:10809` 而失败（6/7 通过）。修复 `docker_runner.py` 添加 `no_proxy`/`NO_PROXY` 后，智能体 12 轮完成 proto 定义→代码生成→服务实现→后台启动，7/7 测试全部通过，Cache 85.9%。官方 Pi 72 轮 $0.5391 失败。 |
 | 16 | `terminal-bench/chess-best-move` | Terminal-Bench | ❌ FAIL | 17 | $0.1655 | 904.7s | ✅ PASS (Docker) | 15 | $0.0298 | **修复后全面通过，突破官方 Pi 失败点**。国际象棋残局最佳走法搜索。首次运行因 DeepSeek V4-Flash 非 VLM（视觉模型），`read` 工具返回的图片内容发送至 LLM 时触发 400 错误 `"The model is not a VLM"`，循环在第 2 轮即崩溃退出。修复 `factory.py` 添加 VLM 自动检测（`_detect_vlm_support`）后，`transform.py` 的 `strip_unsupported_images` 正确将图片降级为 `[image content removed]`，智能体转而安装 `python-chess` + Stockfish 引擎分析棋盘 PNG 像素定位棋子，15 轮完成走法推演并写入 `move.txt`，Cache 83.4%。官方 Pi 17 轮 $0.1655 失败。 |
@@ -119,15 +232,66 @@ FrontierHarness Eval 是当前业界评估 **Coding Agent Harness（脚手架/�
 | 19 | `terminal-bench/modernize-scientific-stack` | Terminal-Bench | ✅ PASS | 5 | $0.0352 | 330.1s | ✅ PASS (Docker) | 5 | $0.0163 | **双双极速满分通过，pi-python 仅用 14s**。将旧版 SciPy/NumPy 语法升级为现代标准。智能体 5 轮完成，耗资仅 $0.0163（官方 5 轮 $0.0352）。 |
 | 20 | `terminal-bench/multi-source-data-merger` | Terminal-Bench | ✅ PASS | 6 | $0.0426 | 530.5s | ✅ PASS (Docker) | 16 | $0.0469 | **双双通过**。多数据源（JSON/CSV/Parquet）冲突合并与去重。智能体在容器内迭代调整合并与冲突记录逻辑，16 轮满分通过。 |
 | 21 | `terminal-bench/sanitize-git-repo` | Terminal-Bench | ✅ PASS | 11 | $0.1238 | 447.9s | ❌ FAIL (Docker) | 21 | $0.1855 | **重写历史与断言冲突**。智能体成功使用 git-filter-repo 彻底清理了敏感信息并完成正确替换（2 项测试通过），但因改写了 commit 历史树导致测试中硬编码基准 commit SHA 查找失败。 |
-| 22 | `datacurve/anko-typed-variable-bindings` | DeepSWE | ✅ PASS | 83 | $2.1483 | 1542.1s | ❌ FAIL (Docker) | 101 | $0.6452 | **100 轮耗尽仍编译失败（模型能力瓶颈）**。修复 mattn/anko Go 解释器类型绑定 Bug。100 轮限制重跑后，智能体花 101 轮修改 Go 代码但引入编译错误（`vm` 包 `[setup failed]`），导致全部 67 个 vm 测试 skip，P2P 仅 27/94（`env` 包），F2P 0/9。根因：DeepSeek V4-Flash 对复杂 Go 解释器类型系统的代码修改不够精准，无法保持编译通过。官方 Pi (Kimi K3) 83 轮通过。 |
-| 23 | `datacurve/arktype-json-schema-refs-dependencies` | DeepSWE | ❌ FAIL | 334 | $10.4291 | 3600.0s | ❌ FAIL (Docker) | 21 | $0.0639 | **官方严重超时，pi-python 极速止损**。JSON Schema 依赖类型推导。原版 Pi 耗费 334 轮 $10.43 跑满 1 小时陷入循环失败；`pi-python` 保持 1679 项已有测试 100% 全通（P2P 100%），在 20 轮上限精准止损（$0.0639）。 |
-| 24 | `datacurve/fastapi-deprecation-response-headers` | DeepSWE | ❌ FAIL | 117 | $2.9887 | 2944.1s | ❌ FAIL (Docker) | 4 | $0.0060 | **客观真实数据**。完整加载 3271 个用例的 SWE-bench 套件：基底已有用例 P2P 3134/3134 全通（未退化），目标用例 F2P 0/137 未通过，Reward 0。官方 Pi 117 轮也未能解决。 |
-| 25 | `datacurve/httpx-multipart-response-parsing` | DeepSWE | ❌ FAIL | 31 | $0.7211 | 1345.1s | ❌ FAIL (Docker) | 21 | $0.2137 | **工业级流式分块解析边缘 Bug**。HTTPX 流式 Multipart 响应解析。已有测试 1185 项保持通过（P2P 93.2%），与官方表现一致（官方 31 轮 $0.72 失败）。 |
-| 26 | `datacurve/expr-try-catch-errors` | DeepSWE | ❌ FAIL | 12 | $0.5579 | 2744.4s | ❌ FAIL (Docker) | 21 | $0.0464 | **SWE-bench 长程重构轮次瓶颈**。表达式解析器异常链传递修复。在 20 轮限制下未及重构 Go 表达式 AST 异常链，与官方 Pi 表现一致（官方 12 轮失败）。 |
-| 27 | `datacurve/python-statemachine-state-data-scoping` | DeepSWE | ✅ PASS | 90 | $2.5032 | 2350.5s | ❌ FAIL (Docker) | 52 | $0.5815 | **接近通过但差在深层语义（模型能力瓶颈）**。100 轮限制重跑后，智能体 52 轮完成主体框架，P2P 1286/1286=100%（未破坏已有测试），F2P 47/72=65.3%。失败的 25 个新测试集中在：回调参数 `state_data` 注入、子状态数据遮蔽/合并、`is_active` 检测错误、SCXML datamodel 解析、以及无 data 状态应返回 `None` 而非 `{}`。Partial 0.98。根因：DeepSeek V4-Flash 实现了基础 state data 但高级层次合并语义不完整。官方 Pi (Kimi K3) 90 轮通过。 |
-| 28 | `datacurve/katex-multicolumn-array-spans` | DeepSWE | ❌ FAIL | 217 | $6.5588 | 2324.3s | ❌ FAIL (Docker) | 21 | $0.0919 | **官方失控死循环，pi-python 保底基底测试**。KaTeX 复杂表格排版跨列渲染 Bug。官方耗费 217 轮 $6.56 失败；`pi-python` 599 项已有测试 100% 保持通过（P2P 100%），21 轮平稳受控。 |
-| 29 | `datacurve/scc-bounded-memory-spilling` | DeepSWE | ❌ FAIL | 100 | $3.2808 | 1499.5s | ❌ FAIL (Docker) | 21 | $0.0612 | **C 语言强连通分量内存溢出控制**。基底 286 项测试保持 100% 全通（P2P 100%），未及在 20 轮内完成内存溢出控制参数重构，与官方一致（官方 100 轮 $3.28 失败）。 |
-| 30 | `datacurve/meriyah-explicit-resource-declarations` | DeepSWE | ❌ FAIL | 254 | $9.1455 | 2734.4s | ❌ FAIL (Docker) | 21 | $0.0760 | **JS AST 解析器 ES 提议特性支持**。全量 51469 项既有测试 100% 全通（P2P 100%），新语法 await using 49 项用例未及完工。官方耗费 254 轮 $9.15 失败。 |
+| 22 | `datacurve/anko-typed-variable-bindings` | DeepSWE | ✅ PASS | 83 | $2.1483 | 1542.1s | ✅ PASS (Docker) | 61 | $0.6754 | **通过**（10-16 重跑）。F2P 9/9，P2P 94/94。用满 60 轮上限。智能体第 11 轮想 `git clone` 上游仓库，因断网失败，之后在本地实现并自测。9 月的 100 轮运行曾因 `vm` 包编译错误失败（F2P 0/9）。官方 Pi 83 轮 $2.1483 通过。 |
+| 23 | `datacurve/arktype-json-schema-refs-dependencies` | DeepSWE | ❌ FAIL | 334 | $10.4291 | 3600.0s | ✅ PASS (Docker, 100 轮) | 101 | $1.0574 | **通过**（10-26 用 100 轮上限重跑）。F2P 25/25，P2P 1679/1679。用满 100 轮上限，压缩了 2 次（第 43、53 轮）。第 8 轮想用 `curl` 下载上游的 json-schema 实现，因断网失败。60 轮时：F2P 0/25，P2P 1678/1679（有 1 个既有用例被破坏），$0.5179。官方 Pi 跑满 334 轮 $10.4291 / 3600 s 后失败。 |
+| 24 | `datacurve/fastapi-deprecation-response-headers` | DeepSWE | ❌ FAIL | 117 | $2.9887 | 2944.1s | ✅ PASS (Docker) | 61 | $0.5787 | **通过**（10-16 重跑）。F2P 137/137，P2P 3134/3134（共 3271 个用例）。用满 60 轮上限。这一次在验证器修复之前启动；已核对轨迹：没有读 `/tests`，也没有联网尝试。9 月的运行只跑了 4 轮就失败（F2P 0/137）。官方 Pi 117 轮 $2.9887 未通过。 |
+| 25 | `datacurve/httpx-multipart-response-parsing` | DeepSWE | ❌ FAIL | 31 | $0.7211 | 1345.1s | ✅ PASS (Docker, 100 轮, 重新评分) | 28 | $0.2524 | **通过**（10-26 重跑，重新评分）。F2P 122/122，P2P 1272/1272。28 轮自行结束。这一题跑了两次。第一次在第 10 轮被网关的内容审核中止（HTTP 500 `sensitive_words_detected`），没有结果，花费 $0.0965。第二次的原评分是 -1：智能体提交了与隐藏测试同名的 `tests/test_multipart_response.py`，验证器的 `test.patch` 打不上，一个测试也没有运行（见“数据有效性声明”第 1b 点）。修复后对保存的工作区重新评分，得到上面的结果；修复前的对照重放仍是 -1。60 轮时：F2P 120/122，P2P 1272/1272，$0.6940。官方 Pi 31 轮 $0.7211 失败。 |
+| 26 | `datacurve/expr-try-catch-errors` | DeepSWE | ❌ FAIL | 12 | $0.5579 | 2744.4s | ✅ PASS (Docker, 100 轮) | 89 | $1.0804 | **通过**（10-26 重跑）。F2P 79/79，P2P 66265/66265。89 轮自行结束，压缩了 2 次（第 29、65 轮）。第 14 轮有 1 条 `curl` 想取上游代码，断网下没有结果。60 轮时：最终代码无法编译（验证器报 43 个包 `[build failed]`），F2P 0/79，P2P 395/66265，$0.6315。官方 Pi 12 轮 $0.5579 失败。 |
+| 27 | `datacurve/python-statemachine-state-data-scoping` | DeepSWE | ✅ PASS | 90 | $2.5032 | 2350.5s | ❌ FAIL (Docker, 100 轮) | 101 | $1.0908 | **差 9 个目标用例**（10-26 重跑）。F2P 63/72，P2P 1286/1286。用满 100 轮上限，压缩了 2 次（第 20、77 轮）。**比 60 轮时更差**：60 轮时 F2P 70/72，$0.6441。9 月的 100 轮运行是 F2P 47/72（失败集中在回调参数 `state_data` 注入、子状态数据遮蔽/合并、SCXML datamodel 解析）。官方 Pi 90 轮 $2.5032 通过。 |
+| 28 | `datacurve/katex-multicolumn-array-spans` | DeepSWE | ❌ FAIL | 217 | $6.5588 | 2324.3s | ✅ PASS (Docker, 100 轮) | 78 | $0.8887 | **通过**（10-26 重跑）。F2P 94/94，P2P 599/599。78 轮自行结束，压缩了 1 次（第 45 轮）。第 9 轮想用 `git ls-remote` 查上游 KaTeX，因断网失败。60 轮时：F2P 87/94，P2P 599/599，$0.6684；第 14 轮想从 GitHub 下载上游 `array.ts`，也因断网失败。官方 Pi 217 轮 $6.5588 失败。 |
+| 29 | `datacurve/scc-bounded-memory-spilling` | DeepSWE | ❌ FAIL | 100 | $3.2808 | 1499.5s | ✅ PASS (Docker) | 61 | $0.6280 | **通过**（10-16 重跑）。F2P 31/31，P2P 286/286。用满 60 轮上限。官方 Pi 100 轮 $3.2808 未通过。 |
+| 30 | `datacurve/meriyah-explicit-resource-declarations` | DeepSWE | ❌ FAIL | 254 | $9.1455 | 2734.4s | ❌ FAIL (Docker, 100 轮) | 101 | $1.1123 | **差 4 个目标用例**（10-26 重跑）。F2P 45/49，P2P 51469/51469。用满 100 轮上限，压缩了 2 次（第 32、68 轮）。失败的 4 个用例：`using` 在 `switch` 的 `case` 里；`await using` 和 `using` 的数组解构应报错（2 个）；`for-of` 里把 `of` 当绑定名。第 10、11 轮有 3 条联网命令（`npm view`、`curl`），断网下全部失败。60 轮时：F2P 0/49（新语法 `await using` 的用例一个都没过），$0.4763。官方 Pi 254 轮 $9.1455 失败。 |
+
+### DeepSWE 重跑（第 22–30 行）的说明与用量
+
+- 第 22–30 行来自两次重跑。两次都用 `deepseek-flash`（经内网网关）、容器断网、每题 1 次。
+  - 2026-10-16：9 题，60 轮上限。原计划用 `kimi-k3`，但网关对 K3 返回 403（上游 7 天额度用完），所以改用 `deepseek-flash`。
+  - 2026-10-26：对 10-16 没有通过的 6 题（arktype、httpx、expr、python-statemachine、katex、meriyah），用 `--max-turns 100` 重跑。
+- 每行采用哪次结果：anko、fastapi、scc 用 10-16 的结果（60 轮，已经通过，没有重跑）。其余 6 行用 10-26 的结果（100 轮）。
+- 什么时候才换一次运行：只有当这次运行没有产生结果，而且原因在基础设施时。这次有两例，都在 httpx。第一次运行被网关的内容审核中止（第 10 轮，HTTP 500），没有结果。第二次运行的原评分是 -1（验证流程的缺陷），用修复后的流程对同一份工作区重新评分，没有重新采样。没有任何一次运行因为结果不好而被换掉。
+- “轮次 61 / 101” = 60 / 100 轮上限 + 评测器记入的 1 条合成消息（`Agent loop exceeded max_turns`）。自行结束的运行没有这条消息：expr 89 轮，katex 78 轮，httpx 28 轮。
+- “成本”是评测器按 $1 / $0.1 / $2 每百万 token（输入 / 缓存输入 / 输出）算的估值，不是网关的账单。官方列是 Kimi K3 的真实价格。模型不同，每题只跑一次，所以这张表不是严格的对标。
+- 缓存命中率是 96.5%–98.7%，高于 9 月 Terminal-Bench 运行的约 78%。原因没有单独验证。
+
+采用的 9 个结果：
+
+| 任务 | 结果 | 轮次上限 | 轮次 | 耗时 (s) | 输入 token | 其中缓存 | 输出 token | 估算成本 |
+| :--- | :---: | :---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `fastapi-deprecation-response-headers` | ✅ | 60 | 61 | 422 | 4,138,240 | 4,084,608 | 58,304 | $0.5787 |
+| `anko-typed-variable-bindings` | ✅ | 60 | 61 | 406 | 4,240,441 | 4,095,744 | 60,367 | $0.6754 |
+| `scc-bounded-memory-spilling` | ✅ | 60 | 61 | 392 | 4,611,990 | 4,550,912 | 55,724 | $0.6280 |
+| `httpx-multipart-response-parsing` | ✅（重新评分） | 100 | 28 | 239 | 1,374,589 | 1,330,688 | 37,536 | $0.2524 |
+| `python-statemachine-state-data-scoping` | ❌ | 100 | 101 | 579 | 7,481,809 | 7,228,288 | 57,058 | $1.0908 |
+| `katex-multicolumn-array-spans` | ✅ | 100 | 78 | 465 | 6,109,631 | 5,938,560 | 61,720 | $0.8887 |
+| `arktype-json-schema-refs-dependencies` | ✅ | 100 | 101 | 595 | 6,846,284 | 6,605,568 | 78,071 | $1.0574 |
+| `meriyah-explicit-resource-declarations` | ❌ | 100 | 101 | 698 | 7,536,160 | 7,286,144 | 66,677 | $1.1123 |
+| `expr-try-catch-errors` | ✅ | 100 | 89 | 623 | 6,949,621 | 6,706,048 | 82,920 | $1.0804 |
+| **合计** | **7 / 9** | | | **4,419** | **49,288,765** | **47,826,560** | **558,377** | **$7.3641** |
+
+推理 token 是输出 token 的一部分（LangChain 的 `output_token_details.reasoning`），这 9 个结果合计 385,535。按 Kimi K3 的价格（$3 / $0.3 / $15 每百万 token）折算，这 9 个结果是 $27.12。
+
+被 100 轮结果取代的 60 轮结果（10-16）。F2P / P2P 的对比：
+
+| 任务 | 60 轮：结果 | F2P | P2P | 估算成本 | 100 轮：结果 | F2P | P2P |
+| :--- | :---: | ---: | ---: | ---: | :---: | ---: | ---: |
+| `httpx-multipart-response-parsing` | ❌ | 120/122 | 1272/1272 | $0.6940 | ✅（重新评分） | 122/122 | 1272/1272 |
+| `python-statemachine-state-data-scoping` | ❌ | 70/72 | 1286/1286 | $0.6441 | ❌ | 63/72 | 1286/1286 |
+| `katex-multicolumn-array-spans` | ❌ | 87/94 | 599/599 | $0.6684 | ✅ | 94/94 | 599/599 |
+| `arktype-json-schema-refs-dependencies` | ❌ | 0/25 | 1678/1679 | $0.5179 | ✅ | 25/25 | 1679/1679 |
+| `meriyah-explicit-resource-declarations` | ❌ | 0/49 | 51469/51469 | $0.4763 | ❌ | 45/49 | 51469/51469 |
+| `expr-try-catch-errors` | ❌ | 0/79 | 395/66265 | $0.6315 | ✅ | 79/79 | 66265/66265 |
+
+httpx 被中止的第一次运行（10-26）：10 轮，121 s，输入 237,586 token（其中缓存 202,112），输出 20,238 token，估算 $0.0965。网关返回 HTTP 500 `sensitive_words_detected`，智能体循环在重试 2 次后中止。它没有结果，不进上面的表。
+
+**10-26 这次工作的总用量**（6 题的批次，含 httpx 被中止的第一次运行；加 httpx 的第二次运行）：
+
+| | 时间窗口 (UTC+8) | 输入 token | 其中缓存 | 输出 token | 其中推理 | 估算成本 | 按 K3 价格折算 |
+| :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 6 题批次 | 2026-10-26 00:11:29 – 01:11:08 | 35,161,091 | 33,966,720 | 366,684 | 248,631 | $5.3261 | $19.28 |
+| httpx 第二次运行 | 2026-10-26 01:12:46 – 01:16:54 | 1,374,589 | 1,330,688 | 37,536 | 29,482 | $0.2524 | $1.10 |
+| **合计** | | **36,535,680** | **35,297,408**（96.6%） | **404,220** | **278,113** | **$5.5785** | **$20.37** |
+
+httpx 的重新评分不调用模型，没有 token 用量。
 
 ---
 
@@ -255,6 +419,7 @@ FrontierHarness Eval 是当前业界评估 **Coding Agent Harness（脚手架/�
   4. **Verifier 1.0 满分**：测试验证器运行 `pytest /tests/test_outputs.py` 一次性全部 PASS，Reward 获得 1.0 满分。
 - **架构价值**：
   这一突破证明了：**黄金快照提供的纯净初始环境 + Egress 策略明确保障的官方依赖下载网络通道**，使 Code Agent Harness 能够彻底跨越“工具链缺失”带来的试错死循环，实现从“被动摸索环境”到“主动自愈工具链并收敛求解”的质的提升。
+  > 注（2026-10-16）：这次运行的容器能访问任意互联网，白名单没有被执行。`apt-get install primer3` 能成功，靠的是开放的出站网络，不是白名单。见开头的“数据有效性声明”。
 
 ---
 
@@ -283,7 +448,8 @@ FrontierHarness Eval 是当前业界评估 **Coding Agent Harness（脚手架/�
 |       |        \-- bash tool: create_docker_bash_tool                         |
 |       |                \-- docker exec -i -w /app <cid> bash -lc <cmd>        |
 |       |                                                                       |
-|       \--> Verifier:                                                          |
+|       \--> Verifier (智能体结束后才开始):                                      |
+|                |-- rm -rf /tests; docker cp tests/. <cid>:/tests/            |
 |                \-- docker exec <cid> bash /tests/test.sh                      |
 |                    (自动去除 CRLF，解析 reward.json / reward.txt / pytest XML) |
 +-------------------------------------------------------------------------------+
@@ -302,7 +468,7 @@ FrontierHarness Eval 是当前业界评估 **Coding Agent Harness（脚手架/�
 - 容器内预装的 `gcc`、`python 3.12`、`pytest`、`git` 等完整工具链即开即用。
 
 ### 4. 容器内原生自动化打分与报告解析
-- 测试套件在测试启动时自动拷贝进容器 `/tests/`，并执行 `sed -i 's/\r$//' /tests/*` 自动剔除跨平台 CRLF 换行符；
+- 测试套件**只在验证阶段**（智能体结束后）才拷贝进容器 `/tests/`（先 `rm -rf /tests`），并执行 `sed -i 's/\r$//' /tests/*` 自动剔除跨平台 CRLF 换行符。智能体运行期间，容器里没有 `/tests`。2026-10-16 之前不是这样，见开头的“数据有效性声明”；
 - 评测脚本运行后，自动读取容器内部生成的 `/logs/verifier/reward.json`（针对 SWE-bench/DeepSWE）或 `/logs/verifier/reward.txt`（针对 Terminal-Bench），实现 100% 无人工干预的客观判定。
 
 ### 5. 跨文件系统权限桥接 (WSL drvfs vs ext4 /tmp 隔离沙箱)
@@ -329,7 +495,7 @@ Terminal-Bench 任务原为 Docker 容器定制，指令普遍含有硬编码 `/
 
 ### 3. 空转轮次 (No-Action Turns) 统计与防死锁
 - 在 `sqlite-db-truncate` 运行中，`pi-python` 曾遇到模型盲目执行 `find / -name "trunc.db"` 导致全盘扫描卡死。评测器通过进程监控与超时机制及时介入，保障了任务不发生进程挂起。
-- 统计数据显示，`pi-python` 的平均 No-Action 轮次仅为 1.0 轮左右（仅在首轮思考规划与末轮总结时无文件工具调用），工具执行密度极高。
+- 统计数据显示，在 Terminal-Bench 运行中，`pi-python` 的平均 No-Action 轮次仅为 1.0 轮左右（仅在首轮思考规划与末轮总结时无文件工具调用），工具执行密度极高。DeepSWE 重跑的数字不同，见第一节。
 
 ### 4. 纯 Python 编码工具集的高保真度
 `pi-python` 的 7 大核心工具（`read`, `edit`, `write`, `bash`, `grep`, `find`, `ls`）均由 Python 原生标准库与正则表达式实现，完全摆脱了对外部 `sed` / `awk` / `ripgrep` 可执行文件的强依赖，在跨平台 Windows/Linux 下展现了极其一致的返回格式与错误码协议。
@@ -340,12 +506,13 @@ Terminal-Bench 任务原为 Docker 容器定制，指令普遍含有硬编码 `/
 
 1. **Docker 沙箱隔离执行与环境桥接已全面落地**：
    本次实测完成了全量 30 题在 WSL2 Docker 容器沙箱内的无缝集成，解决了 AWS ECR 海外代理拉取、Windows drvfs POSIX 权限缺失（自适应 ext4 /tmp 隔离沙箱）以及 CRLF/safe.directory 等跨平台摩擦。
-2. **SWE-bench / 工业级超大工程长程轮次限制扩展 [已实现分级策略]**：
-   实测表明，DeepSWE 任务均涉及千个既有测试用例（如 Meriyah 51,469 用例、FastAPI 3,271 用例、ArkType 1,679 用例）。`pi-python` 均做到了基底既有用例 100% 保持通过不退化（P2P 100%），但受限于 20 轮上限无法在短程内完成深度架构重构（官方 Pi 依赖 80~120 轮长程探索）。已在 `evaluator.py` 中实现分级轮次策略（`_suite_default_turns`）：Terminal-Bench 默认 25 轮，DeepSWE/datacurve/swe-bench 默认 60 轮，释放模型的长程工业级重构潜力。
+2. **SWE-bench / 工业级超大工程长程轮次限制扩展 [已实现分级策略；已按 60 轮和 100 轮实测]**：
+   DeepSWE 任务涉及成百上千个既有用例（Meriyah 51,469、expr 66,265、FastAPI 3,271、ArkType 1,679）。`evaluator.py` 的分级轮次策略（`_SUITE_DEFAULT_TURNS`）给 Terminal-Bench 25 轮，给 DeepSWE / datacurve / swe-bench 60 轮。2026-10-16 按 60 轮重跑：9 题通过 3 题，9 题都用满了上限。2026-10-26 对其余 6 题用 `--max-turns 100` 重跑：通过 4 题（arktype、expr、katex、httpx），合计 7 / 9。meriyah 差 4 个用例，python-statemachine 差 9 个用例，两题都用满了 100 轮。默认上限仍是 60，没有改。
+   下一步：（a）把 DeepSWE 的 9 题用同一个上限和同一份配置跑完。现在 3 题是 60 轮，6 题是 100 轮。（b）查清两个批次工具用法不同的原因（见“数据有效性声明”第 5 点），再比较“轮次”的效果。（c）对仍失败的 2 题多跑几次，看结果的波动。
 3. **前缀缓存对齐优化 (Cache-Alignment) [已完成]**：
    已完成评测器双重计数公式修复（`cached / input`），实测命中率校正为 **77.9%**，与官方 Pi 的 79.4% 完全对齐。并在 `AgentHarness` 落地了会话级 System Prompt 缓存与 Anthropic `cache_control` 滑动断点支持，彻底消除了前缀统计失真与抖动隐患。
 4. **长程对话上下文压缩 (Compaction) 策略实测**：
-   针对 30+ 轮的长任务，利用 `pi-agent-harness` 的 `compaction` 机制进行滑动窗口剪枝与工具结果摘要，防范类似官方 Pi 在 `arktype` 任务中 334 轮失控消耗 $10+ 的现象。实测中 `pi-python` 在 `arktype` 任务仅耗资 $0.0639 即安全退出，展现出更优的工程防御性。
+   针对 30+ 轮的长任务，可以用 `pi-agent-harness` 的 `compaction` 机制做滑动窗口剪枝与工具结果摘要，防范类似官方 Pi 在 `arktype` 任务中 334 轮失控消耗 $10+ 的现象。旧版报告里的“实测 `arktype` 仅耗资 $0.0639 即安全退出”来自 20 轮上限下的旧运行，是轮次上限的结果，不能说明压缩机制有效。2026-10-16 的 60 轮重跑里，`arktype` 估算 $0.5179，累计输入 3.73M token（98.0% 命中缓存），会话里没有压缩记录。评测路径会在 `max_turns >= 30` 时自动开启压缩（`create_session_harness` 的 `auto_compact`）。2026-10-26 的 100 轮重跑里，会话文件里有压缩记录：arktype 压缩 2 次（第 43、53 轮），expr 2 次（第 29、65 轮），katex 1 次（第 45 轮），meriyah 2 次（第 32、68 轮），python-statemachine 2 次（第 20、77 轮）。arktype 在 100 轮上限下通过，估算 $1.0574，累计输入 6.85M token（96.5% 命中缓存）。官方 Pi 在同一题上跑了 334 轮，花 $10.4291，没有通过。这个差别主要来自轮次上限和模型价格的不同，所以它仍然不能说明压缩机制有效。
 
 ---
 
