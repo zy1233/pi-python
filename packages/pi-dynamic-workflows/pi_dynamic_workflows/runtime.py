@@ -181,6 +181,10 @@ class _RuntimeHost:
 
         req_hash: str | None = None
         if runtime._journal is not None:
+            # What makes two calls "the same request" (spec §14, audit F7-09): the prompt and this
+            # subset of ``opts``. Not ``timeout_ms``: a resume with a longer timeout still gets
+            # the old answer. ``cwd`` is the string the script gave (the project root when it
+            # gave none), not the resolved path.
             deterministic_opts = {
                 "tier": opts.get("tier"),
                 "model": opts.get("model"),

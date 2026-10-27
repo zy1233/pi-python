@@ -43,6 +43,10 @@ class ExtensionRegistry:
     def get_tools(self) -> dict[str, ToolDefinition]:
         return dict(self._tools)
 
+    def tool_owner(self, name: str) -> str | None:
+        """The name of the extension that registered tool *name*, if it is known."""
+        return self._tool_owners.get(name)
+
     # -- commands ------------------------------------------------------------
 
     def add_command(self, command: CommandDef) -> None:

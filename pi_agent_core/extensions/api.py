@@ -21,6 +21,7 @@ from pi_agent_core.extensions.types import (
     ExtensionMeta,
     ToolDefinition,
     ToolInfo,
+    validate_command_name,
     validate_tool_name,
 )
 from pi_agent_core.home import pi_home
@@ -98,10 +99,14 @@ class ExtensionAPI:
         but the text is forwarded to the LLM as a regular prompt instead of
         being intercepted.  Use this for commands backed by LLM tools.
 
-        Raises ``TypeError`` when *description* is not text (audit P7-17): clients are sent it
-        as ``AvailableCommand.description``, and one that is not a string made the whole
-        update invalid. During ``activate()`` that fails the extension's load.
+        Raises ``ValueError`` when *name* can never be dispatched (audit F7-04): the harness
+        finds a command by the text between the ``/`` and the first white space, so a name that
+        is empty, holds white space or starts with ``/`` would be sent to the clients and never
+        run. Raises ``TypeError`` when *description* is not text (audit P7-17): clients are sent
+        it as ``AvailableCommand.description``, and one that is not a string made the whole
+        update invalid. During ``activate()`` either fails the extension's load.
         """
+        validate_command_name(name, extension=self._meta.name)
         if not isinstance(description, str):
             raise TypeError(
                 f"Extension {self._meta.name!r}: the description of command /{name} must be a "
@@ -162,11 +167,19 @@ class ExtensionAPI:
     # -- session persistence -------------------------------------------------
 
     def append_entry(self, custom_type: str, data: Any = None) -> None:
-        """Persist a custom entry in the session tree (survives restart)."""
+        """Persist a custom entry in the session tree (survives restart).
+
+        The session writes it a little later (at the next save point), not in this call.
+        ``get_custom_entries`` returns it at once, though.
+        """
         self._require_bridge().append_entry(custom_type, data)
 
     def get_custom_entries(self, custom_type: str) -> list[Any]:
-        """Read all persisted custom entries of *custom_type* from the session."""
+        """Read the custom entries of *custom_type*: the session's, then what was appended since.
+
+        What this extension (or any other) wrote with ``append_entry`` is included at once, also
+        before the session has written it. Such an entry has an empty ``id``.
+        """
         return self._require_bridge().get_custom_entries(custom_type)
 
     # -- what the client passed ----------------------------------------------
@@ -278,6 +291,17 @@ class ExtensionAPI:
     # -- convenience: schedule an async callback on the running loop ---------
 
     def run_async(self, coro: Any) -> asyncio.Task[Any]:
-        """Fire-and-forget an async task on the running event loop."""
-        loop = asyncio.get_event_loop()
+        """Fire-and-forget an async task on the running event loop.
+
+        Raises ``RuntimeError`` when no event loop is running (audit F7-03): there is nothing to
+        start the task on. *coro* is closed then, so it does not add a "never awaited" warning
+        to the error.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            close = getattr(coro, "close", None)
+            if callable(close):
+                close()
+            raise
         return loop.create_task(coro)

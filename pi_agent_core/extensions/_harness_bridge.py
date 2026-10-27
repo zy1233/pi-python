@@ -134,7 +134,9 @@ class HarnessBridge(Protocol):
         """Return all ``CustomEntry`` objects with matching *custom_type*.
 
         Entries are returned in session order (oldest first).  Each entry
-        has at least ``customType`` and ``data`` attributes/keys.
+        has at least ``customType`` and ``data`` attributes/keys.  The entries
+        include those that ``append_entry`` queued and the session has not yet
+        written (audit F7-02); such an entry has an empty ``id``.
         """
         ...
 

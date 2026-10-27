@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import logging
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -225,6 +226,80 @@ class TestLoadFailures:
         ((failure),) = loader.failed
         assert (failure.name, failure.source) == ("my_ext", "directory")
         assert failure.error == "RuntimeError: half-written"
+
+    # F7-05: a module that fails as it is imported does not stay in sys.modules.
+
+    @pytest.fixture()
+    def _no_leftover_modules(self):
+        """The loader names its modules ``_pi_ext_<name>``; take away what a test left."""
+        before = set(sys.modules)
+        yield
+        for name in set(sys.modules) - before:
+            if name.startswith("_pi_ext_"):
+                del sys.modules[name]
+
+    @pytest.mark.usefixtures("_no_leftover_modules")
+    def test_a_module_that_fails_as_it_is_imported_does_not_stay_in_sys_modules(
+        self, tmp_path: Path
+    ):
+        """The loader puts the module into ``sys.modules`` before it runs it. The import
+        system does that too, and it takes the entry away again when the module raises. A
+        half-initialised module that stayed was found again by the name, and the same name
+        (``_pi_ext_<file>``) is shared by the extension files of every project."""
+        (tmp_path / "f7_half_written.py").write_text(
+            "X = 1\nraise RuntimeError('half-written')\n", encoding="utf-8"
+        )
+        loader = ExtensionLoader()
+
+        assert loader.discover_directory(tmp_path) == []
+
+        assert "_pi_ext_f7_half_written" not in sys.modules
+        ((failure),) = loader.failed
+        assert failure.error == "RuntimeError: half-written"  # still recorded
+
+    @pytest.mark.usefixtures("_no_leftover_modules")
+    def test_a_module_that_exits_as_it_is_imported_does_not_stay_either(self, tmp_path: Path):
+        """``sys.exit()`` and Ctrl+C are not ``Exception``s. The entry goes all the same."""
+        from pi_agent_core.extensions.loader import _load_module_from_file
+
+        path = tmp_path / "f7_exits.py"
+        path.write_text("import sys\nsys.exit(3)\n", encoding="utf-8")
+
+        with pytest.raises(SystemExit):
+            _load_module_from_file(path)
+
+        assert "_pi_ext_f7_exits" not in sys.modules
+
+    @pytest.mark.usefixtures("_no_leftover_modules")
+    def test_a_package_that_fails_as_it_is_imported_does_not_stay_either(self, tmp_path: Path):
+        package = tmp_path / "f7_half_package"
+        package.mkdir()
+        (package / "__init__.py").write_text(
+            "raise RuntimeError('half-written')\n", encoding="utf-8"
+        )
+
+        assert ExtensionLoader().discover_directory(tmp_path) == []
+
+        assert "_pi_ext_f7_half_package" not in sys.modules
+
+    @pytest.mark.usefixtures("_no_leftover_modules")
+    def test_a_failed_import_puts_back_the_module_that_had_the_name(self, tmp_path: Path):
+        """A file of the same name in another directory (the project's, next to the user's)
+        that fails must not take the entry of the one that loaded."""
+        user, project = tmp_path / "user", tmp_path / "project"
+        user.mkdir()
+        project.mkdir()
+        (user / "f7_same.py").write_text("def activate(pi):\n    pass\n", encoding="utf-8")
+        (project / "f7_same.py").write_text(
+            "raise RuntimeError('half-written')\n", encoding="utf-8"
+        )
+        loader = ExtensionLoader()
+        assert len(loader.discover_directory(user)) == 1
+        loaded = sys.modules["_pi_ext_f7_same"]
+
+        assert loader.discover_directory(project) == []
+
+        assert sys.modules["_pi_ext_f7_same"] is loaded
 
     def test_an_entry_point_that_cannot_be_loaded_is_recorded(
         self, monkeypatch: pytest.MonkeyPatch
