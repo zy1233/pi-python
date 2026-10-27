@@ -82,7 +82,7 @@
 - 平台：只在 Linux（WSL2）上验证过；macOS 的二进制没有人运行过；Windows 没有二进制；Landlock 层没有测过（WSL 的内核 5.10 没有 Landlock）。
 - 翻页的代价（决策 18，已定不做）：agent 给每一页都重新列一次会话目录，所以读完所有页的代价随会话数快速增长。`--session-id` 在 5,000 个会话时：Linux 28 s、Windows 34 s（Windows 上超过 30 s 的限额）；1,000 个会话时 1.3 s、1.8 s。1,000 个会话以内够用。
 - 同一个 id 的并发没有关死：两个 agent 进程共用一个 home 时，同一个 id 仍可能各建一个会话；先存盘的赢，另一个的第一条消息被拒（`a session with this id already exists`）。
-- `pi-mcp-py` 是 Alpha（[#36][pr-36]）：没做 OAuth，MCP 的 resources、prompts、sampling、roots、elicitation、`tools/list_changed`，websocket 的 server；对一个已死的 SSE server 发调用，要等 120 s 的时限；Zed 在第一个工作树加载之前发的 `session/new`，`mcpServers` 是空的（zed#64611），那样的对话里没有 MCP 工具，也没有提示；`zypi` 里没有配 server 的办法；server 声明的 `annotations` 照单全收（决策 21 的 Q3）；没有在真的 Zed 的界面里验证过。
+- `pi-mcp-py` 是 Alpha（[#36][pr-36]）：没做 OAuth，MCP 的 resources、prompts、sampling、roots、elicitation、`tools/list_changed`，websocket 的 server；对一个已死的 SSE server 发调用，要等 120 s 的时限；Zed 在第一个工作树加载之前发的 `session/new`，`mcpServers` 是空的（zed#64611），那样的对话里没有 MCP 工具，也没有提示；`zypi` 里没有配 server 的办法；server 声明的 `annotations` 照单全收（决策 21 的 Q3）；发布时没有在真的 Zed 的界面里验证过，用户在 2026-10-27 答复核对通过（[§10.26][l10-26] 续 2）。
 - 从没存在过的 UUID 也能 `session/load`（[#34][pr-34]）：agent 分不出它和空白对话的 id，所以会开一个空会话；`zypi export <uuid>` 对它说「没有可导出的内容」。
 
 **不在 V0.6。** 决策 7 的 (b)(c)、8、9、10 的 `mcp.rs` 与 `recent_dirs.rs` 两项、14（决策 11、13 已定，不做，r23；决策 20 已定并已做：条件 5，[#39][pr-39]；决策 21 已定，没有要做的）；阶段 0 的余项（0.9 的 Landlock 层，macOS 与 Windows 一侧）；阶段 1 的余项（1.P3 的 (b)(c)、1.P5、1.P6、1.R2、1.R4、1.R5、1.R3 的 MCP 子进程与 Windows）；B.2–B.4；阶段 D 全部（D.1–D.9）；`protoc_ci_env`（在 `tui-ci.yml` 里设 `PROTOC`）。它们归哪个里程碑，由用户排；现在没有 V0.7 的里程碑。决策 14 的倾向里，第一步是对着真 agent 测 `remember_tool_approvals` 与 `default_selected_permission`；这一步只量不改，不用等用户定。
@@ -187,7 +187,7 @@
     - 详情：[§10.15][l10-15]
 17. **空会话。** Python 在 `session/new` 时就建会话文件，没发过消息的会话以标题 `(no messages)` 留在列表里。`zypi --continue` 在它是本目录最近活动的会话时会取到它（r13 的已知限制，[§10.16][l10-16]）。
     - 倾向：Python 在第一条用户消息时才写会话文件。要查的：已发出 id、文件还没有时，`session/load`、`has_session`（重复 id 检查）与列表各怎么答。备选：pager 在 `--continue` 里跳过没有标题的会话——这把 agent 建文件的时机带进 pager，也会漏掉真的空会话；不倾向。
-    - 状态：**已定，已做**（用户，2026-10-18：做；r14，PR [#25][pr-25]，`2b0baf3`）。agent 在 `session/new` 时只在内存里建会话，第一条用户消息才写文件（`DeferredJsonlSessionStorage`）：没发过消息的会话没有文件，不在列表里；客户端指定的 id 由 agent 记着（`_reserved_ids`）；两个 agent 进程之间的空隙缩小了，没有堵死。**r20 的更正**（PR [#34][pr-34]，`fa4887b`；[§10.23][l10-23]）：Zed 重启后用 `session/load` 要同一个 id，答 `resource_not_found` 会让它显示 *Failed to Launch*；现在没有文件、id 是规范 UUID 时，`session/load` 与 `session/resume` 在内存里再开一次这个 id（空会话）。副作用：从没存在过的 UUID 也会打开；再打开的空会话占着自己的 id。没在真的 Zed 里验证过。
+    - 状态：**已定，已做**（用户，2026-10-18：做；r14，PR [#25][pr-25]，`2b0baf3`）。agent 在 `session/new` 时只在内存里建会话，第一条用户消息才写文件（`DeferredJsonlSessionStorage`）：没发过消息的会话没有文件，不在列表里；客户端指定的 id 由 agent 记着（`_reserved_ids`）；两个 agent 进程之间的空隙缩小了，没有堵死。**r20 的更正**（PR [#34][pr-34]，`fa4887b`；[§10.23][l10-23]）：Zed 重启后用 `session/load` 要同一个 id，答 `resource_not_found` 会让它显示 *Failed to Launch*；现在没有文件、id 是规范 UUID 时，`session/load` 与 `session/resume` 在内存里再开一次这个 id（空会话）。副作用：从没存在过的 UUID 也会打开；再打开的空会话占着自己的 id。当时没在真的 Zed 里验证过；用户在 2026-10-27 答复核对通过（[§10.26][l10-26] 续 2）。
     - 详情：[§10.16][l10-16]、[§10.17][l10-17]、[§10.23][l10-23]
 18. **翻页的代价。** agent 对每次 `session/list` 都重新列一遍目录，并为每个文件建一个 `FileInfo`（`JsonlSessionRepo._session_names` → `LocalExecutionEnv.list_dir`），所以翻完所有页的代价是「页数 × 目录大小」，增长得比会话数快（实测见 [§10.16][l10-16]）。1,000 个会话以内在 2 s 以内；5,000 个会话时，`--continue`（带 `cwd`）要 10–12 s，`--session-id`（不带 `cwd`，翻完）要 28–34 s，在 Windows 上超过 30 s 的上限，会超时。
     - 倾向：Python 一侧让 `_session_names` 只取文件名（`os.listdir`），不 `stat`、不建 `FileInfo`。一个没有提交的草稿（Windows，每项 1 次运行）：5,000 个会话时，带 `cwd` 翻完 12.3 s → 2.2 s，不带 `cwd` 翻完 33.9 s → 3.6 s，带 id 的 `session/new` 325 → 33 ms。改动在 `pi-agent-harness`，约十行；要查的：`list_dir` 的其他调用者，测试里的假 fs（没有 `list_names` 时要退回 `list_dir`）。备选：`--session-id` 不预检，直接 `session/new`，由 agent 拒绝重复的 id（要把 `session/new` 挪到进事件循环之前，改动大）；或者什么也不做（1,000 个会话以内没有问题）。
@@ -444,7 +444,7 @@ Rust（pager）：
 | [§10.23][l10-23] | r20 | MCP 的方向（可选扩展包，决策 19）与两个问题的原因；#34 空白对话再打开、#35 给扩展的挂钩、#36 `pi-mcp-py`；用 `gh stack` 合入 #33–#36；决策 20、21 | PR [#33][pr-33]–[#36][pr-36] |
 | [§10.24][l10-24] | r21 | V0.6 的条件 5（#39）；合入 #38 与 #39；条件 1–4 的结果（`mode_probe` 的探针竞争与 #40） | PR [#39][pr-39]、[#40][pr-40] |
 | [§10.25][l10-25] | r22 | 打 tag `v0.6.0`（`5f73e07`）、`Release` 的运行、PyPI 与 GitHub Release、两个二进制、PTY 脚本与 `pi-mcp` 测试的核对、合入 #40；留下的与没验证的；续 1（#42、glibc 的下限、删本地分支） | PR [#40][pr-40]、[#41][pr-41]、[#42][pr-42] |
-| [§10.26][l10-26] | r23 | 整理计划的分支 squash 进本地 `main`，删三个分支；#43：三个 action 升到 Node 24 的版本，`Release` 的演练；#44：扩展 API 的审计批 9（F7-02 至 F7-09），测试与变异检查；决策 11、13 记成不做；`docs/PLAN` 的 Cursor 规则；续 1：推送 `main`，合入 #43 与 #44，`main` 上的 `CI` 与 `TUI CI` | PR [#43][pr-43]、[#44][pr-44] |
+| [§10.26][l10-26] | r23 | 整理计划的分支 squash 进本地 `main`，删三个分支；#43：三个 action 升到 Node 24 的版本，`Release` 的演练；#44：扩展 API 的审计批 9（F7-02 至 F7-09），测试与变异检查；决策 11、13 记成不做；`docs/PLAN` 的 Cursor 规则；续 1：推送 `main`，合入 #43 与 #44，`main` 上的 `CI` 与 `TUI CI`；续 2：用户答复 Zed 里的核对通过 | PR [#43][pr-43]、[#44][pr-44] |
 | [附录 A.4][logA4] | r5 | 入口审计的 r5 执行结果 | [#7][pr-7] |
 | [附录 B][logB] | r2–r17 | 复现方法（依赖图、模块级闭包、各轮的测量与测试命令） | — |
 | [附录 C][logC] | r10 | §7 的逐项注释（原文） | — |
@@ -552,7 +552,7 @@ Rust（pager）：
 - r22：打 tag `v0.6.0`、发布、发布后的核对；合入 #40（2026-10-25）。见 [§10.25][l10-25]。
 - r22 续 1：钉 `build-tui` 的运行器，补 glibc 的下限（PR [#42][pr-42]；2026-10-25；用户已合入）；删 7 个已合入的本地分支。见 [§10.25][l10-25] 的「续 1」。
 - 整理（r22 续 1 之后，2026-10-27）：照 r10 之后那次的做法再整理一次。被缩短的各段原文存入归档的[附录 F][logF]：头部的状态文字、「当前状态」里逐轮的状态文字、两个发布里程碑、「下一步」、「还没有验证的」与「待决策」里改短的条目、§7 里阶段 C 与 D 的长状态、§10 索引里的长行，和本节 r12 到 r22 续 1 的长条目。计划里改成现在的状态，一轮一行。章节编号与锚点没有变。PR [#42][pr-42] 已由用户合入，状态据此更新。
-- r23：三个 action 升到 Node 24 的版本（PR [#43][pr-43]）；扩展 API 的审计批 9（PR [#44][pr-44]）；决策 11、13 已定，不做；新增 `docs/PLAN` 的 Cursor 规则（2026-10-27）。续 1：推送 `main`；用户让合入 #43 与 #44，都已合入（`969062b`、`e860fd9`）。见 [§10.26][l10-26]。
+- r23：三个 action 升到 Node 24 的版本（PR [#43][pr-43]）；扩展 API 的审计批 9（PR [#44][pr-44]）；决策 11、13 已定，不做；新增 `docs/PLAN` 的 Cursor 规则（2026-10-27）。续 1：推送 `main`；用户让合入 #43 与 #44，都已合入（`969062b`、`e860fd9`）。续 2：用户答复 Zed 里的核对通过（核对两项：空白对话再打开；`pi-mcp-py`）。见 [§10.26][l10-26]。
 
 <!-- 链接定义 -->
 [log]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md
