@@ -129,13 +129,15 @@ def activate(pi: ExtensionAPI) -> None:
 | 方法 | 签名 | 对应上游 | 实现路径 |
 |---|---|---|---|
 | `register_tool` | `(definition: ToolDefinition) -> None` | `pi.registerTool()` | 构建 `SimpleTool` → harness `set_tools()` |
-| `register_command` | `(name, *, description, handler) -> None` | `pi.registerCommand()` | 存入 registry → CLI 消费；`description` 不是字符串时抛 `TypeError`（它会原样发给客户端，类型不对会让整份命令列表失效；激活期间抛出即该扩展加载失败并回滚） |
+| `register_command` | `(name, *, description, handler) -> None` | `pi.registerCommand()` | 存入 registry → CLI 消费；`description` 不是字符串时抛 `TypeError`（它会原样发给客户端，类型不对会让整份命令列表失效）；`name` 派发不到时抛 `ValueError`（空、含空白、以 `/` 开头：harness 用 `/` 之后到第一个空白之间的文字找命令，这样的名字永远匹配不上，却会广播给客户端；F7-04）。激活期间抛出即该扩展加载失败并回滚 |
 | `on` | `(event: str, handler) -> Unsubscribe` | `pi.on()` | 委托 harness `subscribe()` 按类型过滤 |
 | `get_active_tools` | `() -> list[str]` | `pi.getActiveTools()` | 委托 `harness.active_tool_names` |
 | `set_active_tools` | `(names: list[str]) -> None` | `pi.setActiveTools()` | 委托 `harness.set_active_tools()` |
 | `get_all_tools` | `() -> list[ToolInfo]` | `pi.getAllTools()` | 从 harness `_tools` 读取 |
 | `send_message` | `(text: str) -> None` | `pi.sendMessage()` | 委托 harness steer queue |
-| `append_entry` | `(custom_type: str, data) -> None` | `pi.appendEntry()` | 委托 session `append_custom_entry()` |
+| `append_entry` | `(custom_type: str, data) -> None` | `pi.appendEntry()` | 排进 `pending_session_writes`，在下一个 save point 由 session `append_custom_entry()` 落盘；`get_custom_entries` 立刻读得到（F7-02） |
+| `get_custom_entries` | `(custom_type: str) -> list[CustomEntry]` | —（本移植版新增） | 会话在扩展加载时已有的条目，再加上此后用 `append_entry` 写的；按写入顺序。还没落盘的条目 `id` 为空，`customType`、`data`、`timestamp` 都有 |
+| `run_async` | `(coro) -> asyncio.Task` | — | 在运行中的事件循环上起任务。没有运行中的循环时抛 `RuntimeError`，并关闭 `coro`（F7-03） |
 | `exec` | `async (command, *, cwd, timeout) -> ExecResult` | `pi.exec()` | 委托 `ExecutionEnv.exec()` |
 | `cwd` | `@property -> str` | `pi.cwd` | 从 harness env 读取 |
 | `session_id` | `@property -> str` | `pi.sessionId` | 从 session metadata 读取 |
@@ -170,13 +172,32 @@ class ToolDefinition:
 `ToolDefinition` → `CodingTool`（或 `SimpleTool`）的映射在 `register_tool` 内部完成，
 调用者无需关心内部工具实现类型。`annotations` 一并转发：CLI 的 `ask` 模式据此决定要不要问用户。
 
+**`execute` 的调用契约**（F7-08；同样写在 `ExecuteFn` 的文档串里）：harness 固定以四个位置参数调用
+`execute(tool_call_id, params, signal, on_update)`，同步或异步函数都可以，返回 `AgentToolResult`。
+
+| 参数 | 内容 |
+|---|---|
+| `tool_call_id` | 这次工具调用的 id（`str`） |
+| `params` | 校验后的参数：`parameters` 是 Pydantic 模型时为它的实例，否则为参数字典 |
+| `signal` | 本次 run 的取消信号，或 `None` |
+| `on_update` | 接收部分结果（进度）的回调，或 `None` |
+
+只接受两个位置参数的函数（上游 TS 工具常这样写）在**模型调用工具时**才抛 `TypeError`，注册时不会。
+不用后两个参数时，给它们默认值：`signal=None, on_update=None`。
+
+**登记与重名**（F7-06）：扩展工具与内置工具重名时，扩展的工具取代内置的（被信任的扩展可以这样包装 `bash`）。
+harness 对此记一条 warning（工具名与扩展名各一）。权限查询按工具名找，所以取代者按**它自己**声明的
+`annotations` 判定；声明只读的扩展工具取代 `bash` 后，`ask` 模式不再问。扩展与扩展之间的重名由 registry 记 warning
+（后加载的赢）。动态注入的路径（`register_tool` 在 `activate()` 之后调用）不发 `ToolsUpdateEvent`，与 `activate()`
+期间的注册一致；ACP 投影不消费该事件。
+
 ### 3.5 事件映射
 
 | `pi.on(event)` | 匹配的 `AgentHarnessEvent.type` | 阻塞能力 |
 |---|---|---|
 | `"tool_call"` | `tool_call` (harness own) | 可返回 `{ block, reason }` |
 | `"tool_result"` | `tool_result` (harness own) | 可返回 `AfterToolCallResult` 修改 content/terminate |
-| `"session_start"` | `before_agent_start` | 只读 |
+| `"session_start"` | 没有对应的 harness 事件：扩展加载完后发一次（§4.3 第 6 步），事件是 `{"type": "session_start"}` 的平字典 | 只读 |
 | `"agent_end"` | `agent_end` | 只读 |
 | `"turn_start"` | `turn_start` | 只读 |
 | `"turn_end"` | `turn_end` | 只读 |
@@ -184,6 +205,9 @@ class ToolDefinition:
 | `"message_end"` | `message_end` | 只读 |
 | `"tool_execution_start"` | `tool_execution_start` | 只读 |
 | `"tool_execution_end"` | `tool_execution_end` | 只读 |
+
+`session_start` 每个 harness 只发一次（第一次加载扩展时：`prompt()` 或 `load_extensions()`），不是每个回合；
+每个回合之前要做的事用 `"turn_start"`（F7-07）。
 
 `tool_call` 是唯一具有阻塞能力的事件（返回 `{"block": True, "reason": "..."}` 等价于
 `BeforeToolCallResult(block=True, reason=...)`），与上游 pi 行为一致。
@@ -208,7 +232,8 @@ class ToolDefinition:
 2. **目录扫描**：`<家目录>/extensions/`（家目录默认 `~/.pi-python`，可由 `PI_HOME` 或
    `home=` 参数改变，见 §4.5）和 `.pi-python/extensions/` ——
    对齐上游 pi 的 `~/.pi/agent/extensions/` 和 `.pi/extensions/`。
-   扫描目录下的 Python 模块，import 并查找 `activate` 函数。
+   扫描目录下的 Python 模块，import 并查找 `activate` 函数。模块以 `_pi_ext_<文件名>` 为名放进
+   `sys.modules`；import 抛错时，这个条目被移除（原来有同名条目则放回去），与标准的 `import` 一致（F7-05）。
    项目目录（`.pi-python/extensions/`）需要显式信任才会扫描，见 §4.4。
 3. **编程注入**：`ExtensionLoader.load(module_or_callable)` ——
    测试和嵌入场景，传入 module 对象或 `activate` 函数均可。
@@ -763,7 +788,10 @@ workflow}`），名单之外的工具——包括任何扩展注册的——不�
 ## 14. Run persistence / resume ✅
 
 `Journal`（`journal.py`）— append-only JSONL 日志，记录每个 `agent()` 调用的
-`hash_request("agent", {prompt, opts})` SHA-256 + 返回值。
+`hash_request("agent", {"prompt": prompt, **字段})` SHA-256 + 返回值。参与哈希的是 `prompt` 与 `opts`
+里的一个**子集**（F7-09）：`tier`、`model`、`label`、`phase`（该调用所在的 phase）、`schema`、`cwd`。
+`cwd` 取脚本给的原始字符串（没给就是项目根），不是解析后的路径。`timeout_ms` 不参与：resume 时放宽超时，
+同一请求照样回放旧答案。改 `label` 则不回放。
 
 **重放**：journal 是「按请求索引的缓存」，不是逐步对账的记录。`try_replay(kind, req_hash)` 返回**同一请求**
 中本次 run 尚未用过的最早一条记录（命中则跳过 LLM 调用），与记录顺序无关（`parallel()` 按完成顺序写入），

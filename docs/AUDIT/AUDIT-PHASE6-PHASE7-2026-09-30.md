@@ -1,6 +1,6 @@
 # AUDIT：Phase 6 / Phase 7 设计与实现审计（2026-09-30）
 
-> **审计日期**：2026-09-30（发现与前三批修复在同一天完成；批 4 在 10 月 1 日，批 5 至 7 在 10 月 2 日）。2026-10-08 另一个会话做了一轮只读的符合性复核（它的文档没有保留；有用的结论与逐条重新核对的结果都在第八节），批 8 在同一天修复了其中的两个中危问题
+> **审计日期**：2026-09-30（发现与前三批修复在同一天完成；批 4 在 10 月 1 日，批 5 至 7 在 10 月 2 日）。2026-10-08 另一个会话做了一轮只读的符合性复核（它的文档没有保留；有用的结论与逐条重新核对的结果都在第八节），批 8 在同一天修复了其中的两个中危问题，批 9（2026-10-27）修复了其余的低危问题并改了文档备注
 >
 > **审计范围**：
 > - Phase 6：`packages/pi-agent-cli/pi_agent_cli/{git_context,prompt_options,system_prompt,factory}.py`、`pi_agent_core/adapters/langchain_stream.py`、`pi_agent_core/tests/{provider_matrix,test_provider_matrix}.py`、`.github/workflows/provider-matrix.yml`
@@ -10,7 +10,7 @@
 >
 > **方法**：代码阅读；在 Windows（zh-CN 区域设置）上用探针脚本实测；provider 文档（DeepSeek 等）对照核对。探针是临时脚本，没有入库；每一项的回归测试入库，并且都先红后绿。
 >
-> **修复批次**：批 1 `6aaf29a`、批 2 `cf92422`、批 3 `b3de95f`、批 4（P7-02 的交互式信任提示与内容哈希）`0a1dd67`、批 5（P7-01 的子 agent `cwd` 约束与脚本沙盒）`9baefa6`、批 6（第七节的 4–6：DeepSeek 的 `reasoning_content` 回放与 CLI 的 `Model.reasoning`、按 annotations 放行的权限模型、后台 turn 期间到达的 prompt）`d4ab3f8`、批 7（第七节的 7：发布准备，版本 0.5.0）`7e7d4d4`、批 8（第七节的 8–9：F7-01 项目级 saved workflows 纳入项目信任门，P7-17 一个坏的 `meta.description` 不再让整个会话不可用）随本文档的这次更新一起提交（`git log -- docs/AUDIT/AUDIT-PHASE6-PHASE7-2026-09-30.md`）。第八节里 2026-10-08 复核的其余发现（F7-02 至 F7-09，低危与文档备注）还没有修复批次
+> **修复批次**：批 1 `6aaf29a`、批 2 `cf92422`、批 3 `b3de95f`、批 4（P7-02 的交互式信任提示与内容哈希）`0a1dd67`、批 5（P7-01 的子 agent `cwd` 约束与脚本沙盒）`9baefa6`、批 6（第七节的 4–6：DeepSeek 的 `reasoning_content` 回放与 CLI 的 `Model.reasoning`、按 annotations 放行的权限模型、后台 turn 期间到达的 prompt）`d4ab3f8`、批 7（第七节的 7：发布准备，版本 0.5.0）`7e7d4d4`、批 8（第七节的 8–9：F7-01 项目级 saved workflows 纳入项目信任门，P7-17 一个坏的 `meta.description` 不再让整个会话不可用）随本文档的这次更新一起提交（`git log -- docs/AUDIT/AUDIT-PHASE6-PHASE7-2026-09-30.md`）。批 9（第七节的 10–12：第八节里 2026-10-08 复核的其余发现 F7-02 至 F7-09，低危与文档备注）随本文档的这次更新一起提交。第八节的发现至此都已处理（F7-06 里「动态注入路径补发 `ToolsUpdateEvent`」是可选项，没有做，理由见 8.2）
 >
 > **最终测试状态**（批 7 收尾时，`7e7d4d4`）：
 > - Windows：`1980 passed, 10 skipped, 31 deselected`（10 个 skip 是只在 POSIX 上有意义的用例：批 4 的 5 个（符号链接的显示路径、命名管道、权限位 2 个、非法文件名），批 5 的 5 个（`RLIMIT_NPROC`、rlimit 数值、`prctl`、文件描述符上限、信号名）；31 个 deselected 是 `real_llm` 用例，批 6 起矩阵的 `deepseek` 行多一项 `thinking_tools`；审计开始时 `576 passed, 30 skipped`）
@@ -19,6 +19,7 @@
 > - `ruff check .` + `ruff format --check .`：All checks passed（本地 0.15.20，也用 CI 钉住的 0.16.0 跑过一遍）
 > - 2026-10-08，当前 HEAD（`4b5848f`）：Windows `2025 passed, 14 skipped, 31 deselected`（复核的作者与之后的核对各跑了一遍，结果相同）；WSL `2024 passed, 15 skipped, 31 deselected`；`ruff check .` + `ruff format --check .`：All checks passed（本地 ruff 现在是 0.16.10，CI 钉住的 0.16.0 也跑过一遍）。与批 7 收尾时相比，Windows 多 45 个通过、4 个 skip，WSL 多 49 个通过，原因是批 7 之后合入的两个 TUI 重构提交（`455527c`、`4b5848f`）新增了用例：ACP stdio 契约、关闭、session 列表、配置、上下文文件，以及 `scripts/tests/test_tui_baseline.py`；多出的 4 个 skip 是 `test_acp_shutdown.py` 里需要 POSIX 信号与进程组的用例（Windows 跳过，WSL 里运行）。既有用例全部仍然通过
 > - 批 8 收尾时（在 `4b5848f` 之上的工作区，随本文档的这次更新一起提交）：Windows `2151 passed, 14 skipped, 31 deselected`；WSL `2150 passed, 15 skipped, 31 deselected`；WSL 的 Python 3.11 与 3.13（各用一个临时 venv，没装 `langchain-deepseek`）都是 `2131 passed, 34 skipped, 31 deselected`（与 3.12 的差，仍是那 19 个 DeepSeek 用例）；`ruff check .` + `ruff format --check .`：All checks passed（本地 0.16.10，CI 钉住的 0.16.0 也跑过）。与 `4b5848f` 相比，Windows 与 WSL 各多 126 个通过，skip 数不变：都是批 8 新增的用例（指纹、提示、通知、store、扩展注册、API 门面、harness 的桥，以及 ACP 与 headless 的端到端）；既有用例全部仍然通过
+> - 批 9（在批 8 之后的 `main` 上，随本文档的这次更新一起提交）：新增用例先红后绿（红：24 个失败，一个都没有因为写错而红）。本机（Windows）资源紧张，没有跑全量，只跑了受影响的 20 个测试文件（扩展核心、harness 的扩展 / 会话 / 生命周期 / 项目信任、goal-x、dynamic-workflows 的扩展与信任、CLI 的扩展与 ACP 用例）：`739 passed, 1 skipped`；全量以及 Linux 与 Python 3.11 / 3.13 由 GitHub CI 承担（见该 PR 的检查结果）。`ruff check .` + `ruff format --check .`：All checks passed（本地 0.16.10，CI 钉住的 0.16.0 也跑过）
 >
 > **状态图例**：`[x]` 已修复并验证 · `[x/~]` 主路径已修复，有已记录的残留（见第五节）· `[ ]` 已记录，尚未处理（第八节）
 
@@ -80,12 +81,12 @@
 |----|------|------|------|
 | F7-01 | 项目级 saved workflows（`.pi-python/workflows/`）游离于项目信任门之外：不受信任的项目也会把里面的脚本注册成斜杠命令，描述进入补全与会话上下文；同名脚本还能顶替用户自己的 saved workflow，甚至 `/workflows` 命令本身 | 中 | `[x]`（批 8） |
 | P7-17 | saved workflow 的 `meta.description` 不是字符串时，`AvailableCommand` 校验失败：该会话里每个 `session/prompt` 都报错，命令一个也不广播（核对 F7-01 时另外发现的） | 中 | `[x]`（批 8） |
-| F7-02 | `get_custom_entries` 只反映加载时的快照，读不到本会话刚写的条目 | 低 | `[ ]` |
-| F7-03 | `ExtensionAPI.run_async` 用 `asyncio.get_event_loop()`：没有运行中的循环时，3.12 起发弃用警告，3.14 起抛错 | 低 | `[ ]` |
-| F7-04 | `register_command` 不校验命令名：含空白的名字永远派发不到，却照常广播给客户端 | 低 | `[ ]` |
-| F7-05 | 目录扩展 import 失败后，半初始化的模块留在 `sys.modules` | 低 | `[ ]` |
-| F7-06 | 扩展工具静默覆盖同名内置工具；动态注入路径不发 `ToolsUpdateEvent` | 低 | `[ ]` |
-| F7-07 至 F7-09 | 文档：规格 §3.5 的 `session_start` 映射与 §4.3 矛盾；`ToolDefinition.execute` 的调用契约没写；§14 的 journal 哈希写成 `{prompt, opts}`，实际是子集 | 备注 | `[ ]` |
+| F7-02 | `get_custom_entries` 只反映加载时的快照，读不到本会话刚写的条目 | 低 | `[x]`（批 9） |
+| F7-03 | `ExtensionAPI.run_async` 用 `asyncio.get_event_loop()`：没有运行中的循环时，3.12 起发弃用警告，3.14 起抛错 | 低 | `[x]`（批 9） |
+| F7-04 | `register_command` 不校验命令名：含空白的名字永远派发不到，却照常广播给客户端 | 低 | `[x]`（批 9） |
+| F7-05 | 目录扩展 import 失败后，半初始化的模块留在 `sys.modules` | 低 | `[x]`（批 9） |
+| F7-06 | 扩展工具静默覆盖同名内置工具；动态注入路径不发 `ToolsUpdateEvent` | 低 | `[x]`（批 9；可选的 `ToolsUpdateEvent` 没做，见 8.2） |
+| F7-07 至 F7-09 | 文档：规格 §3.5 的 `session_start` 映射与 §4.3 矛盾；`ToolDefinition.execute` 的调用契约没写；§14 的 journal 哈希写成 `{prompt, opts}`，实际是子集 | 备注 | `[x]`（批 9） |
 
 ---
 
@@ -254,7 +255,7 @@
 | Phase 7 规格 §3.5 | `tool_call` 是唯一具有阻塞能力的事件 | 首个 block 短路，与上游一致（P7-08） |
 | `AUDIT-PHASE7-EXTENSION-API.md` 的最终判定 | 10 个高影响、20 个中影响问题全部关闭 | 该文件全文没有沙盒、信任、权限、SSRF 相关条目（关键字检索无匹配），本文件补上。它的已记录限制 1（未跟踪的文件不会回写 worktree）已被 P7-10 取代：新文件现在会回写；限制 2（结果遇到运行中的 turn 时并入该 turn）仍然成立，交付方式由 P7-07 改成带类型的 custom 消息。旧文件只在开头加了一条编号说明 |
 
-2026-10-08 的复核另外发现三处规格与实现没有对齐（第八节）：Phase 7 规格 §4.4 的受门约束资源表与 §16 都没有项目级 saved workflows，实现与规格一致，是共有的缺口（F7-01）——批 8 把实现与规格一起补上（§3.2、§4.4、§16）；另外两处还没改：§3.5 的事件表把 `session_start` 映到 `before_agent_start`，与 §4.3 自相矛盾，实现取一次性的 `session_start`（F7-07）；§14 写 `hash_request("agent", {prompt, opts})`，实际只哈希 `opts` 的子集（F7-09）。
+2026-10-08 的复核另外发现三处规格与实现没有对齐（第八节）：Phase 7 规格 §4.4 的受门约束资源表与 §16 都没有项目级 saved workflows，实现与规格一致，是共有的缺口（F7-01）——批 8 把实现与规格一起补上（§3.2、§4.4、§16）；另外两处批 9 改了：§3.5 的事件表把 `session_start` 映到 `before_agent_start`，与 §4.3 自相矛盾，实现取一次性的 `session_start`（F7-07，表已改）；§14 写 `hash_request("agent", {prompt, opts})`，实际只哈希 `opts` 的子集（F7-09，已写明是哪个子集）。
 
 ### 系统性缺口的收口情况
 
@@ -281,7 +282,7 @@
 |---|------|------|
 | 1 | P7-01 | 脚本现在跑在独立进程里并受内核限制（批 5），但审计钩子是 Python，写给它的脚本能把它拆掉，所以这仍**不是**对抗恶意脚本的安全边界。钩子被绕过后：Linux 上脚本能读用户可读的一切文件（含宿主与同用户其他进程的 `/proc/<pid>/environ`，没有 Yama 时还能 `ptrace` 宿主、读它的内存）、截断 / 删除 / 改名文件（写不了内容）、联网、杀宿主；Windows 上能读文件、联网、杀宿主（写文件、起进程、读宿主内存、复制宿主句柄都被拒）。root 不受 `RLIMIT_NPROC` 约束；Windows 的 CPU 限制检查很粗（1 s 的限制约 8 s 才生效，墙钟更及时但默认关闭）；macOS 没有验证。没做：Landlock 或用户 / 挂载命名空间（隔离 Linux 的文件系统与 `/proc`；本机 WSL 内核 5.10 没有 Landlock，无法验证）、seccomp、Windows 的 AppContainer / 受限令牌（后两者按机制推断会很脆弱，没有尝试）。要对抗这类脚本，请在容器里运行 agent。详见沙盒规格 §9 |
 | 2 | P7-01 | 子 agent 的 `cwd` 已限制在项目内（批 5）。残留：`isolation=True`（worktree）时子 agent 在 worktree 根运行，`cwd` 的子目录被忽略；检查与使用之间的符号链接竞态（TOCTOU）：脚本自己不能写文件，要改只能经受权限策略约束的子 agent |
-| 3 | P7-01 | `auto` / `always-approve` 模式下，子 agent 可以做会话允许的一切；没有 gate 的 executor（独立使用，或 bridge 没有 `tool_call_gate`）里的子 agent 不受限，`activate()` 只记一条 warning。权限模型已按审计的建议改为「默认需授权、按 annotations 放行」（批 6），残留：annotations 是工具作者的一面之词，运行时不验证；`agent.toml` 没有按工具放行的配置，想放行一个没声明的第三方工具只能补上 annotations 或改用 `auto`；子 agent 的调用按父会话里同名工具判定，父会话没有的名字要问；CLI 不接 MCP 服务器（`session/new` 的 `mcpServers` 被忽略），所以 MCP 工具的提示目前不会被读到（MCP 规范要求把不受信任的服务器的 annotations 当作不可信；`from_langchain_tool` 原样转交，库用户自己接入不信任的 MCP 服务器时要先去掉这些提示）；`ask` 模式下不声明 annotations 的扩展工具会让用户被询问（这是有意的行为变化）；扩展工具与内置工具重名时，harness 查到的是扩展的那一个，所以按它自己声明的 annotations 判定，而重名覆盖目前不留任何日志（F7-06，第八节） |
+| 3 | P7-01 | `auto` / `always-approve` 模式下，子 agent 可以做会话允许的一切；没有 gate 的 executor（独立使用，或 bridge 没有 `tool_call_gate`）里的子 agent 不受限，`activate()` 只记一条 warning。权限模型已按审计的建议改为「默认需授权、按 annotations 放行」（批 6），残留：annotations 是工具作者的一面之词，运行时不验证；`agent.toml` 没有按工具放行的配置，想放行一个没声明的第三方工具只能补上 annotations 或改用 `auto`；子 agent 的调用按父会话里同名工具判定，父会话没有的名字要问；CLI 不接 MCP 服务器（`session/new` 的 `mcpServers` 被忽略），所以 MCP 工具的提示目前不会被读到（MCP 规范要求把不受信任的服务器的 annotations 当作不可信；`from_langchain_tool` 原样转交，库用户自己接入不信任的 MCP 服务器时要先去掉这些提示）；`ask` 模式下不声明 annotations 的扩展工具会让用户被询问（这是有意的行为变化）；扩展工具与内置工具重名时，harness 查到的是扩展的那一个，所以按它自己声明的 annotations 判定，判定的规则没有变，但批 9 起重名覆盖会记一条 warning（F7-06，第八节） |
 | 4 | P7-02 | 授权以整个项目目录为单位，不区分单个扩展或资源；保存的回答只适用于精确目录，不像白名单那样覆盖子目录；没有 `/trust` 命令，也没有「对此项目永不信任」的持久化（收回信任要手工删 `trust.json` 里的条目）；指纹只在会话开始时核对（加上对话框关闭后复核一次），会话进行中再改文件不会撤销信任；换行符转换（`core.autocrlf`）会改变内容哈希而触发重新询问；客户端可以自动批准 `session/request_permission`（ACP 允许；问题没有 `allow_once` 以避开 TUI 的 YOLO，但 TUI 按上次确认的选项类型粘性预选光标，上次选 “always” 类时高亮的就是「Trust and remember」）；客户端丢弃请求时，取消被当作拒绝；TUI 自己的目录信任（`/hooks trust`）不适用于此；`[extensions]` 这个配置名同时管所有项目资源（扩展、saved workflows、提示文件、skills）。（批 4 之前这一条还包括「按路径而非内容」「没有交互式提示」，已解决） |
 | 5 | P7-02、F7-01 | `AGENTS.md` / `CLAUDE.md`（上游不论信任与否都会加载）、`agent.toml` 里直接给出的 prompt、绝对路径或 `~` 开头的 skills 路径、用户自己的 `<pi home>/workflows` 不受门控。项目级 saved workflows（`.pi-python/workflows/`）曾是**缺口，不是取舍**，批 8 起受门控（F7-01，第八节）。门由读取方遵守：harness 管得住自己加载的扩展，管不住扩展加载之后自己去读什么；dynamic-workflows 扩展读 `pi.project_trusted`，第三方扩展若自己读 `<cwd>/.pi-python/…` 而不看它，没有机制拦它（根目录 `AGENTS.md` 的第 9 条不变量写明了这条规矩）。从没保存过 workflows 的回答升级上来的项目，只要 `.pi-python/workflows` 里有 `*.py`，已保存的回答就随指纹失效，会再问一次（宁可多问） |
 | 6 | P7-02 | 项目扩展一旦被信任，就是完整的进程内代码执行 |
@@ -335,15 +336,17 @@
   | F7-01（批 8）扩展一侧的门：`_project_trusted`、`ExtensionAPI.project_trusted`、store 的 `include_project`、保留的命令名 | 8 | 全部被杀 |
   | F7-01（批 8）harness 的桥 `project_trusted` | 2 | 全部被杀 |
   | F7-01（批 8）CLI 一侧的门：指纹、提示与通知文案、判定与通知的 `home`、ACP 与 headless 的接线 | 14 | 全部被杀（首轮幸存 1 个，见下） |
-  | 合计 | 828 | 827 被杀 |
+  | F7-02 至 F7-08（批 9）扩展 API 的几处缺陷：自己的写入读得回、`run_async`、命令名校验、`sys.modules` 的清理、重名内置工具的告警、`execute` 的调用契约 | 25 | 全部被杀 |
+  | 合计 | 853 | 852 被杀 |
 
 - **批 5 的变异检查**：沙盒的变异体在 Windows（87 个）与 WSL（89 个）上各整套跑了一遍，其中 76 个两边相同；Windows 另有 11 个（Job Object、低完整性、Windows 的环境清理与启动器），WSL 另有 13 个（各项 rlimit、`NO_NEW_PRIVS`、信号名、POSIX 的环境清理），所以上表的 100 个是两边的并集。`cwd` 的 15 个也在两个平台上跑过：Windows 上全部被杀，WSL 上 14 个被杀，剩下的「NUL 字符」是 POSIX 上的等价变异（POSIX 的 `realpath` 自己就因 NUL 抛 `ValueError`；Windows 的则原样返回，所以那里需要显式的检查）；其中运行时衔接的 5 个在沙盒重写运行时之后按新代码重新写过（旧写法已经匹配不上，运行时报告的是 SKIP，不是幸存）。Windows 首轮 87 个里幸存 13 个，全是用例的毛病，不是实现的：① 审计钩子名单里 `shutil` / `socket` / `subprocess` / `ctypes` 掉出去没有人察觉——原有的「连接服务器」用例其实是被 `create_connection` 途中加载 `idna` 编码时的 `open` 拦下的，并没有碰到 `socket` 本身；`shutil`（最终要 `open`）与 `subprocess`（最终是 `_winapi.CreateProcess`）身后各有第二道墙，更不会被察觉。补了逐条列出策略的用例（每个被拒的事件族和被拒的导入各一例，再各一个放行的反例），连接服务器改成直接 `socket().connect`；② 「任意函数名都能调用」的用例用的调用 id 恰与随后那次 `agent()` 撞车，被「重复 id」的同一句错误提前拦下；日志字符上限的用例里没有任何一行跨在上限上；③ 预算视图的「恰在总额处就算用尽」「剩余不为负」没有用例；④ `parallel()` 里有 thunk 起不来时，已经起了的任务应当被取消，而不是留下来继续向宿主发请求；⑤ 经 `WorkflowRuntime` 的用例没有检查脚本拿到的 `cwd` 与预算总额（新用例连 `args` 一并检查），也没有检查 phase 只列一次；⑥ 系统拒绝降低完整性级别时，不该把它记为一层（用一个换掉 `SetTokenInformation` 的一次性解释器来测）。逐项补了用例之后这 13 个都被杀。WSL 上 89 个里 88 个被杀，幸存的是 `-X utf8`：脚本进程的环境是清空的，区域设置成了 C，Python 本来就会启用 UTF-8 模式，所以它在 POSIX 上是等价变异；在 Windows 上它被杀（stderr 里的中文要按 UTF-8 读出来）。WSL 上有 4 个变异体把用例挂住、由超时判死（调用 id 可以重复、已完成的调用留在在途表里、结束时不取消在途调用、stdin 没有指向空设备）；为了让这类回归变成失败而不是挂住整套用例，沙盒用例的 `run()` 在没有别的限制时给 120 s 的墙钟（重跑其中两个，已改为用例失败）。另外还有一项不是变异体发现的：随包带的五个工作流（`deep-research` 等）原先只检查过「是合法的 Python」，从没在沙盒里跑过；现在 `test_the_bundled_workflows_run` 逐个跑它们（去掉命名空间里的 `zip` 就会失败），并要求新增的内置工作流在该表里登记参数。
 - **批 6 的变异检查**：87 个变异体都在最终代码上整套跑过（思考回放与 `Model.reasoning` 接线 37、权限模型 35、turn 之外的 prompt 15）。思考回放有 3 个变异体的匹配模式因后来把条件拆成 `thinks` 变量而失效（运行时报告 SKIP，不是幸存），按新代码重写后单独重跑，均被杀。权限模型首轮 35 个里幸存 1 个，「harness 不复制工具的 hints 就放进事件」，它是等价变异：事件是 pydantic 模型，校验时本来就会复制字典字段（实测：事件上的字典不是工具持有的那个对象，改它不影响工具，`MappingProxyType` 也被接受），显式的 `dict(hints)` 是多余的，已删掉改成一行注释，并换成「不查是否为映射就放行」等变异体，全部被杀。权限模型的变异体覆盖：每个只读内置工具与每个会改东西的工具（声称只读）、三种工具类型各自缺字段、LangChain 转换（不传、任意类型都取、丢掉某个提示、不查 metadata）、harness 的查询与映射检查、判定规则的每一处（`and` 换 `or`、真值代替 `is True`、只查一个提示、`auto` / `always-approve` 询问、`ask` 从不 / 总是询问、事件上的 annotations 被忽略）、随包五个工具各自的声明（`workflow` 声称只读、`goal_*` 声称联网）。turn 之外的 prompt：总是 / 从不 `busy`、阈值、计数泄漏与残留的零项、取消与关闭会话被忽略、不等空闲、每次新建取消事件、吞掉非 `busy` 的错误、`busy` 判反、`cancelled` 映射成 `end_turn`、重试前不等待、`initialize` 声称请求的版本。
 - **批 8 的变异检查**：33 个变异体都在最终代码上整套跑过（用脚本逐个改坏一处，只跑对应的测试，无论结果怎样都把文件字节级还原；Windows）。覆盖：store 对 `description` 与 `when_to_use` 的清洗（各一个），`register_command` 的类型检查，`_advertise_commands` 的跳过，逐个捕获，扫描失败的隔离，告警文字（写 pydantic 的原文、什么都不写、其他失败不带类型），`_project_trusted`（总是信任、读不到时放行、真值代替 `is True`），`ExtensionAPI.project_trusted`（真值代替 `is True`），保留的命令名（去掉 `workflows`，整个检查去掉），store 的 `include_project`（总是读项目目录、默认值反过来），harness 的桥（总是信任、从不信任），指纹（用户目录算作项目的、与脚本同名的目录当作脚本、忘记资源种类），资源的顺序，workflows 不受门控，`home` 在四处被丢掉（判定、`skipped_project_resources`、ACP 通知、headless 通知，各一个），文案（通知里没有 workflows 的那一句、说明里没有 workflows 的作用、标题里 workflows 换了名字），通知的过滤条件反过来，headless 不报告被跳过的资源。首轮幸存 2 个，都是用例的毛病，不是实现的：① 「扫描失败被 `except` 包住」换成只捕获别的异常类型没有被发现（那个 `try` 批 8 之前就在，批 8 把 store 的构造与信任的读取也放进了它里面；没有用例让 `scan()` 抛错），补了 `test_a_scan_that_fails_leaves_no_saved_workflow_commands_and_says_so`；② headless 的「被跳过的资源」少传 `home`：整个 CLI 的用例目录（650 个）里没有一个从「家目录就在项目里」起的 headless 运行，补了该用例，并补了 headless 报告被跳过的 workflows、承认与不承认已保存的回答各一个。另外，写变异体时发现告警里的原因（`_why_invalid`）没有用例钉住，在跑那三个变异体之前先补了两个（字段名在、值不在日志里；其他失败按类型与文字报告）。
+- **批 9 的变异检查**：25 个变异体都在最终代码上整套跑过（用脚本逐个改坏一行，只跑批 9 的三个测试文件，无论结果怎样都把文件字节级还原；Windows），首轮全部被杀，没有幸存。覆盖：F7-02 读取时只给加载时的条目、只给新写的条目、顺序反了、不按类型过滤、`append_entry` 不记下条目；F7-03 改回 `get_event_loop()`、不关闭协程；F7-04 `register_command` 不校验、空名字、以 `/` 开头、只把空格当空白（制表符、换行、全角空格漏过）、不查是否为字符串；F7-05 失败的模块留着、不放回原来的同名条目、只处理 `Exception`（`sys.exit()` 漏过）、总是移除而不放回；F7-06 对扩展自己的工具再次告警、对每个工具都告警、从不告警、不记住扩展的工具、日志里没有扩展名、注册表不知道属主、动态注入的路径不告警；F7-08 `execute` 只收到两个参数、参数顺序错。写变异体之前就补了 `sys.exit()` 的用例，所以它在首轮被杀。F7-07 与 F7-09 只改文档与注释，没有变异体。
 - **探针重跑**：审计时用探针脚本复现问题，修复后重跑，行为已变成预期（探针是临时脚本，没有入库；对应的回归测试入库）。
 - **跨平台**：Windows 与 WSL 各跑一遍全量。WSL 首跑暴露了 4 个失败：这台机器的 WSL 导出了 `PI_HOME`，让「把 `Path.home()` 指向临时目录」的测试读到真实目录（P7-13 让加载器也认 `PI_HOME` 之后才出现）。根目录 `conftest.py` 现在为每个测试清掉 `PI_HOME`，`test_home.py` 里有回归测试。批 4 里有 5 个用例只在 POSIX 上有意义（符号链接的显示路径、命名管道、权限位、非法文件名），Windows 上跳过、在 WSL 里跑；对应的两个只能在 POSIX 上被杀的变异体也在 WSL 里重跑过。根目录 `conftest.py` 现在还清掉 `PI_TRUST_PROJECT_EXTENSIONS`（同类泄漏：开发者为自己的项目导出它，所有「项目不受信任」的用例就会随 shell 而变）。批 5 的沙盒用例里有 5 个只在 POSIX 上有意义（Linux 的 rlimit 数值与 `RLIMIT_NPROC`、`prctl`、文件描述符上限、信号名），8 个只在 Windows 上有意义（Job Object、低完整性、驱动器号与 Windows 的路径规则），各在对应的平台上跑，其余在两边都跑；平台独有的变异体也只在对应的平台上跑（见上）。批 8 没有新增只在一边有意义的用例（两边的 skip 数与批 7 之后相同），它的变异体只在 Windows 上跑过（用例两边都跑）。
 - **provider 文档**：DeepSeek 的模型名与下线日期、`thinking` / `reasoning_effort` 参数、`reasoning_content` 回传要求，以及 DeepSeek 为 pi 写的接入文档（`reasoningEffortMap`），都对照官方文档核对过；与真实 API 的对接没有验证（没有密钥）。
-- **2026-10-08 的复核**：另一个会话读规格与代码做的符合性核对，没有改代码，也没有跑变异检查（沙盒内部不在范围内）。第八节的每条发现都对着当前 HEAD 的代码与规格原文重新核对过（只读，没有改代码）。F7-01 的同名顶替与 P7-17 用真实的 `PiAcpAgent` 和临时项目实测过（含对照实验）；F7-03、F7-05 另在 Python 3.12.7 上实测（没有运行中的循环：`DeprecationWarning`，在运行中的循环里返回同一个循环；手写的导入流程在模块抛错后留着 `sys.modules` 的条目，标准的 `import` 会清掉），并对照了 CPython 的文档。探针是临时脚本，没有入库；F7-01 与 P7-17 的回归测试随批 8 入库，其余的等修复时再写。测试与 lint 的复跑结果在开头的状态块里。
+- **2026-10-08 的复核**：另一个会话读规格与代码做的符合性核对，没有改代码，也没有跑变异检查（沙盒内部不在范围内）。第八节的每条发现都对着当前 HEAD 的代码与规格原文重新核对过（只读，没有改代码）。F7-01 的同名顶替与 P7-17 用真实的 `PiAcpAgent` 和临时项目实测过（含对照实验）；F7-03、F7-05 另在 Python 3.12.7 上实测（没有运行中的循环：`DeprecationWarning`，在运行中的循环里返回同一个循环；手写的导入流程在模块抛错后留着 `sys.modules` 的条目，标准的 `import` 会清掉），并对照了 CPython 的文档。探针是临时脚本，没有入库；F7-01 与 P7-17 的回归测试随批 8 入库，其余的随批 9 入库。测试与 lint 的复跑结果在开头的状态块里。
 
 ---
 
@@ -358,27 +361,27 @@
 7. ~~**发布时**：上调三个扩展包的版本下限~~：已在批 7 完成（核心 0.5.0，扩展包 0.2.0；只做了本地提交，没有打 tag、没有发布；第五节 14）。
 8. ~~**项目级 saved workflows 纳入项目信任门**~~：已在批 8 完成（F7-01；第八节）。
 9. ~~**一个坏的 saved workflow 不该拖垮整个会话**~~：已在批 8 完成（P7-17；第八节）。
-10. **一次清理**（F7-02 至 F7-05，低；第八节）：`append_entry` 时同步更新 `get_custom_entries` 读到的缓存（或在文档里写明只有快照语义）；`run_async` 改用 `asyncio.get_running_loop()`；`register_command` 校验命令名（非空、不含空白、不以 `/` 开头），失败时像 `register_tool` 一样在 `activate()` 阶段回滚；`_load_module_from_file` 在 `exec_module` 失败时清掉 `sys.modules` 里的条目。每项各补一个先红后绿的测试。
-11. **覆盖内置工具时留痕**（F7-06，低；第八节）：扩展工具与内置工具重名时记一条 warning；动态注入路径补发 `ToolsUpdateEvent`（可选）。
-12. **改文档**（F7-07 至 F7-09，备注；第八节）：Phase 7 规格 §3.5 事件表里 `session_start` 的映射改成「加载后发一次」，与 §4.3 一致；`ToolDefinition.execute` 的 4 参调用契约写进 `ExecuteFn` 的文档串与规格 §3.4；§14 补一句 journal 哈希包含 `opts` 的哪些字段。
+10. ~~**一次清理**（F7-02 至 F7-05，低；第八节）~~：已在批 9 完成。`append_entry` 的条目马上读得到；`run_async` 改用 `asyncio.get_running_loop()`；`register_command` 校验命令名（非空、不含空白、不以 `/` 开头），失败时像 `register_tool` 一样在 `activate()` 阶段回滚；`_load_module_from_file` 在 `exec_module` 失败时清掉 `sys.modules` 里的条目。每项各补了先红后绿的测试。
+11. ~~**覆盖内置工具时留痕**（F7-06，低；第八节）~~：已在批 9 完成。扩展工具与内置工具重名时记一条 warning。动态注入路径补发 `ToolsUpdateEvent` 是可选项，没有做（理由见 8.2）。
+12. ~~**改文档**（F7-07 至 F7-09，备注；第八节）~~：已在批 9 完成。Phase 7 规格 §3.5 的表、§3.4 的 `execute` 调用契约（也写进 `ExecuteFn` 的文档串）、§14 的 journal 哈希字段都已改。
 
-第 1 至 9 项都做完了；第 10 至 12 项（低危与文档备注）是 2026-10-08 复核新增的，批 8 只处理了其中的中危问题，它们还没有开始。其余仍然开放的是：第 3 项里写的加固方向（Landlock / 用户与挂载命名空间、seccomp，需要 ≥ 5.13 的 Linux 内核才能验证，本机 WSL 是 5.10）、用真实的 DeepSeek API 验证批 6 的回放（第五节 13）、以及 TUI 怎样渲染 turn 之外的更新（第五节 10）。
+第 1 至 12 项都做完了（第 11 项里可选的 `ToolsUpdateEvent` 除外）。其余仍然开放的是：第 3 项里写的加固方向（Landlock / 用户与挂载命名空间、seccomp，需要 ≥ 5.13 的 Linux 内核才能验证，本机 WSL 是 5.10）、用真实的 DeepSeek API 验证批 6 的回放（第五节 13）、以及 TUI 怎样渲染 turn 之外的更新（第五节 10）。
 
 ---
 
 ## 八、2026-10-08 复核（另一个会话的符合性审计）
 
-2026-10-08，另一个会话做了一轮**只读**的审计：没有改任何代码与既有文档，它的文档也没有保留，有用的部分都在本节。它做的是「实现 ↔ 规格」的符合性核对：逐节比对 Phase 6 / Phase 7 两份规格与当时的代码，并检查本文件与 `AUDIT-PHASE7-EXTENSION-API.md` 声称已修复的项是不是真的在位。它**不是**又一轮攻击测试，也不审 workflow 脚本沙盒的内部（沙盒有独立的规格与测试）。8.1 是它的结论（本文件没有逐项重做），8.2 的每条发现都对着当时的 HEAD（`4b5848f`）重新核对过。批 8 修复了其中的两个中危问题（F7-01、P7-17），其余的低危与文档备注还没有处理。
+2026-10-08，另一个会话做了一轮**只读**的审计：没有改任何代码与既有文档，它的文档也没有保留，有用的部分都在本节。它做的是「实现 ↔ 规格」的符合性核对：逐节比对 Phase 6 / Phase 7 两份规格与当时的代码，并检查本文件与 `AUDIT-PHASE7-EXTENSION-API.md` 声称已修复的项是不是真的在位。它**不是**又一轮攻击测试，也不审 workflow 脚本沙盒的内部（沙盒有独立的规格与测试）。8.1 是它的结论（本文件没有逐项重做），8.2 的每条发现都对着当时的 HEAD（`4b5848f`）重新核对过。批 8 修复了其中的两个中危问题（F7-01、P7-17），批 9 处理了其余的低危与文档备注。
 
 ### 8.1 复核的结论
 
 - 总评：两份规格都已忠实落地，**没有发现高危问题**。Phase 6 的五个小节（MCP 立场、git 上下文、矩阵、DeepSeek 思考开关与 `reasoning_content` 回传、CLI 的 `Model.reasoning`）逐项符合规格，P6-01 至 P6-06 的修复都在位。
 - Phase 7：ExtensionAPI 门面、发现与加载顺序、信任链（§4.4 的八级判定、内容指纹、`trust.json`、提问的形状与时机）、权限模型（§12 的 annotations）、后台运行与生命周期（§13）、journal（§14）、worktree（§15）、store（§16）、三个扩展包的打包，与规格一致，或是规格明示的取舍。
 - 规格里写明的「已知限制」逐条核对过：没有实现超出声明的限制，也没有声明了却没做的。
-- 规格的测试矩阵与测试文件的对应关系都落实，此前两轮审计补入的回归测试都在位。缺口只有 F7-01（项目 workflows 的信任门）与 F7-04（命令名校验）：行为本身缺失，所以没有测试；F7-01 的一组随批 8 补上，F7-04 修复时补。
+- 规格的测试矩阵与测试文件的对应关系都落实，此前两轮审计补入的回归测试都在位。缺口只有 F7-01（项目 workflows 的信任门）与 F7-04（命令名校验）：行为本身缺失，所以没有测试；F7-01 的一组随批 8 补上，F7-04 的随批 9 补上。
 - 复核时的测试基线（Windows `2025 passed, 14 skipped, 31 deselected`）与之后在 `4b5848f` 上的重跑一致，数字与来历见开头的状态块。
 
-### 8.2 新发现（F7-01 与 P7-17 已在批 8 修复，其余都还没有修复）
+### 8.2 新发现（F7-01 与 P7-17 已在批 8 修复，其余在批 9 处理）
 
 #### F7-01. [x] 项目级 saved workflows 游离于项目信任门之外（中；批 8）
 
@@ -410,40 +413,58 @@
 - **验证**：先红后绿；端到端用真实的 `PiAcpAgent` 与真实的扩展，用户级与项目级各一组，`description` 取 `5`、`True`、`["a"]`、`{"x": 1}`、`1.5`：命令照常广播（默认描述），`session/prompt` 返回 `end_turn`；另有直接往注册表里塞一个 `CommandDef(description=5)` 的用例（`_advertise_commands` 的一层），其余命令照常广播、会话记为已广播、告警里有字段名而没有值。变异检查见第六节。
 - **规格**：Phase 7 规格 §3.2（`register_command` 的 `description` 必须是字符串）、§16（meta 里不是文本的 `description` / `when_to_use` 被丢弃；注册规则）。
 
-#### F7-02. [ ] `get_custom_entries` 只反映加载时的快照（低）
+#### F7-02. [x] `get_custom_entries` 只反映加载时的快照（低；批 9）
 
 - **位置**：`agent_harness.py::_ensure_extensions_loaded` 一次性把会话里的 custom 条目填进 `_cached_custom_entries`，bridge 的 `get_custom_entries` 只过滤这份缓存；`append_entry` 只是排进 `pending_session_writes`，既不更新缓存，落盘之后也不刷新。
 - **问题**：扩展在同一会话里先写后读，读不到自己刚写的条目，而 `ExtensionAPI.get_custom_entries` 的文档写的是「读取会话里持久化的全部条目」。goal-x 只在 `session_start` 读，不受影响。
 - **补充**：一个看似可行的办法是「读取时重新拉 `session.get_entries()`」，这行不通：`get_custom_entries` 是同步方法，`get_entries()` 是协程。可行的是在 `append_entry` 时同步把条目记进缓存（读到的对象要有与落盘条目一样的 `customType` 与 `data`），或者在文档里写明只有快照语义。
 
-#### F7-03. [ ] `ExtensionAPI.run_async` 用 `asyncio.get_event_loop()`（低）
+- **修复**（批 9）：bridge 的 `append_entry` 在把写入排进 `pending_session_writes` 的同时，把一个 `CustomEntry`（`customType`、`data`、`timestamp`；`id` 为空，因为 id 由 session 落盘时给）记进 harness 的 `_appended_custom_entries`。`get_custom_entries` 返回两份的并集，按顺序：加载时会话里已有的（缓存，之后不再刷新），再加此后写的（这个列表）。一条写入只在其中一份里，所以落盘之后不会被读到两次；也不需要在落盘时同步缓存，落盘是异步的，那样会有「已从待写队列弹出、还没进缓存」的空档。扩展在 `activate()` 期间写的条目，到 `session_start` 时读得到。`ExtensionAPI` 两个方法的文档串与规格 §3.2 写明了这一点。
+- **没有照做的一处**：没有深拷贝 `data`。读到的就是写入时的那个对象，之后落盘的也是它（落盘在下一个 save point），两者一致；深拷贝会让不能拷贝的对象在 `append_entry` 处抛错，这是新的失败方式。
+- **验证**：先红后绿（`packages/pi-agent-harness/tests/test_harness_extension_state.py::TestCustomEntriesSeeOwnWrites`）：写后即读；顺序与类型过滤；落盘之后不重复；`activate()` 期间的写入在 `session_start` 可读；加载前就有的条目仍读得到（goal-x 的用法）；没落盘的条目没有 `id`、有时间。5 个变异体全部被杀（第六节）。
+
+#### F7-03. [x] `ExtensionAPI.run_async` 用 `asyncio.get_event_loop()`（低；批 9）
 
 - **位置**：`extensions/api.py` 末尾。
 - **问题**：在运行中的循环里它与 `get_running_loop()` 等价（实测返回同一个循环）。没有运行中的循环时，Python 3.12、3.13 发 `DeprecationWarning`（3.12.7 上实测）并悄悄新建一个不会运行的循环，任务永远不执行；3.14 起直接抛 `RuntimeError`，不再隐式新建循环（CPython 3.14 的 What's New）；函数本身还在，被移除的只是隐式新建。
 - **建议**：改成 `asyncio.get_running_loop()`（没有循环就立刻报错），与 bridge 里 `set_active_tool_names` 用的一致。
 
-#### F7-04. [ ] `register_command` 不校验命令名（低）
+- **修复**（批 9）：用 `asyncio.get_running_loop()`。没有运行中的循环时，先关闭传入的协程（否则它被回收时 Python 会再补一条「was never awaited」警告），再让 `RuntimeError` 照常抛出。**行为变化**：以前在没有循环时调用，得到的是一个永远不会运行的任务（3.14 起是 `RuntimeError`）；现在所有版本都是立刻抛 `RuntimeError`。仓库里没有任何扩展调用 `run_async`。
+- **验证**：先红后绿（`pi_agent_core/tests/test_extension_api_rules.py::TestRunAsync`）：在运行中的循环里任务照常起；没有循环时立刻抛 `RuntimeError`（把 `DeprecationWarning` 当作失败），协程已关闭。2 个变异体全部被杀。
+
+#### F7-04. [x] `register_command` 不校验命令名（低；批 9）
 
 - **位置**：`extensions/api.py::register_command`。
 - **问题**：`register_tool` 校验名字，失败时在 `activate()` 阶段回滚（P7-16 的教训：坏名字要在注册处失败）；`register_command` 什么都不查。`_try_slash_dispatch` 用 `split(None, 1)` 取命令名，含空白的名字永远派发不到，而 `_advertise_commands` 把注册表里所有命令名原样广播给客户端。
 - **建议**：校验命令名（规则见第七节 10），失败时回滚该扩展；`description` 的类型检查已随 P7-17 加上（批 8）。
 
-#### F7-05. [ ] 目录扩展 import 失败后 `sys.modules` 残留（低）
+- **修复**（批 9）：`validate_command_name`（`extensions/types.py`，与 `validate_tool_name` 并列）。名字必须是非空字符串、不以 `/` 开头、不含空白（按 `str.isspace()`，与 `_try_slash_dispatch` 的 `split(None, 1)` 同一个定义，所以制表符、换行、全角空格也算）。`register_command` 在检查 `description` 之前先调它；错误信息含扩展名与规则。激活期间抛出即该扩展加载失败并回滚（记进 `failed`），其余扩展照常加载。saved workflow 的名字早已由 store 的 `NAME_RE` 限定（`[a-z0-9-]{1,64}`），不受影响；这条校验面向第三方扩展。**行为变化**：以前能注册的坏名字，现在让该扩展加载失败。
+- **验证**：先红后绿（`TestCommandName`）：10 个坏名字（空、纯空白、含空格 / 制表符 / 换行 / 全角空格、以 `/` 开头、`//`、`None`、整数）被拒，注册表里没有留下东西；常见名字（含 `-`、`_`、`.`、`:`、大写、中文）照收；名字先于描述被检查；一个扩展里的坏名字让它整个回滚，另一个扩展照常加载。5 个变异体全部被杀。
+- **规格**：Phase 7 规格 §3.2（`register_command` 一行）。
+
+#### F7-05. [x] 目录扩展 import 失败后 `sys.modules` 残留（低；批 9）
 
 - **位置**：`extensions/loader.py::_load_module_from_file`。
 - **问题**：先 `sys.modules[module_name] = module` 再 `exec_module`，抛错时不清除（实测：这样手写的导入流程在模块抛错后留着条目，标准的 `import` 则会清掉它）。半初始化的模块留在 `sys.modules` 里；模块名 `_pi_ext_<名字>` 又是所有项目共用的，同一个进程里两个项目的同名扩展文件会互相覆盖这个条目。影响很小：失败已计入 `failed`，不会重复导入。
 - **建议**：`except BaseException:` 里 `sys.modules.pop(module_name, None)` 再重新抛出。
 
-#### F7-06. [ ] 扩展工具静默覆盖同名内置工具；注入路径不发 `ToolsUpdateEvent`（低）
+- **修复**（批 9）：`_load_module_from_file` 在 `exec_module` 之前记下 `sys.modules` 里同名的旧条目；抛错时（`except BaseException`，所以 `sys.exit()` 与 Ctrl+C 也算）把条目移除，原来有同名模块的话放回去，然后原样重新抛出。失败仍记进 `failed`，错误文字不变。成功的模块照旧留在 `sys.modules` 里；两个目录里同名的成功文件互相覆盖这个条目，是原有行为，不属于 F7-05。规格 §4.1 写明了这一点。
+- **验证**：先红后绿（`test_extension_loading_rules.py::TestLoadFailures`）：单文件、包、`sys.exit()` 三种失败之后条目都不在；另一个目录里的同名文件失败时，先加载的那个模块的条目还在。4 个变异体全部被杀。
+
+#### F7-06. [x] 扩展工具静默覆盖同名内置工具；注入路径不发 `ToolsUpdateEvent`（低；批 9）
 
 - **位置**：`agent_harness.py::_apply_extension_registrations` 与 bridge 的 `inject_tool`，两处都直接 `self._tools[名字] = tool`。
 - **问题**：扩展覆盖扩展，registry 层有 warning（后加载的赢，规格允许）；扩展覆盖内置工具（`read`、`bash` 等）没有任何日志。`set_active_tool_names` 会发 `ToolsUpdateEvent`，注册与动态注入的路径不发，订阅方无从得知工具集变了（ACP 投影目前不消费该事件，没有用户可见的影响）。
 - **补充（与批 6 的关系）**：harness 的权限查询取的是 `self._tools.get(名字)` 的 annotations，所以被覆盖的内置名字按扩展工具自己的声明判定：一个声明只读的扩展工具顶替 `bash` 或 `write`，`ask` 模式下就不会被问。对被信任的扩展，这是设计内的行为（扩展本来就是进程内代码；不受信任的项目的扩展根本不会加载，见 P7-02），所以没有升级，但至少该留一条 warning。
 - **建议**：见第七节 11。
 
-#### F7-07 至 F7-09（备注，改文档）以及无需处理的 F6-01、F6-02
+- **修复**（批 9）：`AgentHarness._put_extension_tool` 是 `activate()` 之后放入扩展工具的唯一入口（`_apply_extension_registrations` 与 bridge 的 `inject_tool` 都走它）。名字已在 `_tools` 里、又不是扩展放进去的（`_extension_tool_names`）时，记一条 warning：写明工具名与扩展名（`ExtensionRegistry.tool_owner()`，新增），并说明此后调用按扩展自己声明的 annotations 判定。取代仍然被允许。每个后加载的扩展都会让 `_apply_extension_registrations` 重放全部注册，`_extension_tool_names` 保证先前的工具不被重复告警。规格 §3.4 写明了这条规则。
+- **没有照做的一处**：「动态注入路径补发 `ToolsUpdateEvent`」。审计里它就是可选的；没有订阅者读它（ACP 投影不消费），也就没有用户可见的效果；`inject_tool` 是同步方法，而发事件要走异步的 `_emit_any`，得像 `notify` 那样另起后台任务，换来的是事件顺序上的新变数（与根目录 `AGENTS.md` 的事件契约相邻），得不偿失。等有订阅者需要时再做。规格 §3.4 写明「动态注入不发该事件」。
+- **验证**：先红后绿（`test_harness_extension_state.py::TestToolsThatTakeABuiltInName`）：日志有工具名与扩展名，替换仍然发生；新名字不记；后加载的扩展不让前一个重复告警；`activate()` 之后注册同样记；扩展对扩展不算内置（那是 registry 的 warning）。7 个变异体全部被杀。
 
-- **F7-07**：规格 §3.5 的事件表把 `on("session_start")` 映到 `before_agent_start`（每回合之前），§4.3 第 6 步又要求扩展加载后发一次 `session_start`。实现取后者（`_emit_hook_simple("session_start")`，一次性的平字典事件），goal-x 的恢复依赖它，每回合的钩子由 `turn_start` 承担，有测试钉住（`TestSessionStartEvent`）。要改的是 §3.5 的表。
-- **F7-08**：`_tool_from_definition` 固定以四个位置参数调用 `execute(tool_call_id, params, signal, on_update)`，而 `ExecuteFn = Callable[..., ...]` 没有表达这一点。一方扩展都写了四个参数（后两个带默认值）；第三方照上游 TS 的习惯只写两个，会在运行时 `TypeError`。要写进 `ExecuteFn` 的文档串与规格 §3.4，或者换成 `Protocol`。
-- **F7-09**：`_RuntimeHost.agent` 的 journal 哈希只含 `prompt` 与 `tier` / `model` / `label` / `phase` / `schema` / `cwd`，不含 `timeout_ms`（resume 时放宽超时照样回放旧答案，合理；改 label 则不回放），`cwd` 取脚本给的原始字符串（没给就是项目根），不是解析后的路径（批 5 明示的选择）。规格 §14 写的是 `hash_request("agent", {prompt, opts})`，要写明是子集。
+#### F7-07 至 F7-09（备注，改文档；批 9 已改）以及无需处理的 F6-01、F6-02
+
+- **F7-07**：规格 §3.5 的事件表把 `on("session_start")` 映到 `before_agent_start`（每回合之前），§4.3 第 6 步又要求扩展加载后发一次 `session_start`。实现取后者（`_emit_hook_simple("session_start")`，一次性的平字典事件），goal-x 的恢复依赖它，每回合的钩子由 `turn_start` 承担，有测试钉住（`TestSessionStartEvent`）。要改的是 §3.5 的表。**已改**（批 9）：该行写成「没有对应的 harness 事件：扩展加载完后发一次」，表后补了一句说明每回合要做的事用 `turn_start`。
+- **F7-08**：`_tool_from_definition` 固定以四个位置参数调用 `execute(tool_call_id, params, signal, on_update)`，而 `ExecuteFn = Callable[..., ...]` 没有表达这一点。一方扩展都写了四个参数（后两个带默认值）；第三方照上游 TS 的习惯只写两个，会在运行时 `TypeError`。要写进 `ExecuteFn` 的文档串与规格 §3.4，或者换成 `Protocol`。**已改**（批 9）：`ExecuteFn` 的文档串与规格 §3.4 写明四个位置参数的调用契约、每个参数的内容，以及两参数的函数在**调用时**（不是注册时）抛 `TypeError`。没有换成 `Protocol`：那会改动类型标注，而收益只是一条提示。`TestToolExecuteCall` 钉住这个契约（四个位置参数、同步函数可用、两参数的函数在调用时失败）。
+- **F7-09**：`_RuntimeHost.agent` 的 journal 哈希只含 `prompt` 与 `tier` / `model` / `label` / `phase` / `schema` / `cwd`，不含 `timeout_ms`（resume 时放宽超时照样回放旧答案，合理；改 label 则不回放），`cwd` 取脚本给的原始字符串（没给就是项目根），不是解析后的路径（批 5 明示的选择）。规格 §14 写的是 `hash_request("agent", {prompt, opts})`，要写明是子集。**已改**（批 9）：§14 列出参与哈希的字段，写明 `cwd` 取原始字符串、`timeout_ms` 不参与；`runtime.py` 里哈希处补了同样的注释。
 - **F6-01、F6-02**（核对后无需处理）：矩阵的 `MATRIX_<ID>_BASE_URL` 覆盖对没有默认 base_url 的行（openai / anthropic / deepseek）也生效（`resolve_row` 的 `else` 分支），与规格 §5.2 的文字一致，让「指向自家网关的 openai 兼容端点」可测；`provider-matrix.yml` 用 `pip install -e` 而不是 uv，与 `ci.yml`、`release.yml` 一致，不构成偏差。

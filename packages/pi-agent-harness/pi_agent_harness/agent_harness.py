@@ -59,7 +59,7 @@ from pi_agent_harness.compaction import (
 )
 from pi_agent_harness.messages import CustomMessage, harness_convert_to_llm
 from pi_agent_harness.prompt_templates import substitute_args
-from pi_agent_harness.session.session import Session
+from pi_agent_harness.session.session import Session, iso_now
 from pi_agent_harness.skills import format_skill_invocation
 from pi_agent_harness.system_prompt import build_harness_system_prompt
 from pi_agent_harness.types import (
@@ -73,6 +73,7 @@ from pi_agent_harness.types import (
     BeforeProviderRequestEvent,
     CompactionResult,
     ContextEvent,
+    CustomEntry,
     CustomMessageEntry,
     ExecutionEnv,
     MessageEntry,
@@ -311,6 +312,13 @@ class AgentHarness:
         self._extension_bridge: Any = None
         self._session_id: str = ""
         self._cached_custom_entries: list[Any] = []
+        # What extensions wrote with ``append_entry`` in this run. The session gets it later
+        # (``pending_session_writes``); ``get_custom_entries`` reads it back from here, so an
+        # extension finds its own writes at once (audit F7-02).
+        self._appended_custom_entries: list[CustomEntry] = []
+        # The tools that extensions put into ``_tools``. A name that is in ``_tools`` and not
+        # here belongs to a built-in tool (audit F7-06).
+        self._extension_tool_names: set[str] = set()
         # What the client passed (``set_client_mcp_servers``) and which of it extensions took
         # over (``claim_client_mcp_servers``). Data only: the harness connects to nothing.
         self._client_mcp_servers: tuple[ClientMcpServer, ...] = ()
@@ -463,10 +471,7 @@ class AgentHarness:
     def _apply_extension_registrations(self) -> None:
         """Inject extension tools and wire event handlers into the runtime."""
         for defn in self._extension_registry.get_tools().values():
-            tool = _tool_from_definition(defn)
-            self._tools[tool.name] = tool
-            if tool.name not in self.active_tool_names:
-                self.active_tool_names.append(tool.name)
+            self._put_extension_tool(defn)
         self.invalidate_system_prompt_cache()
 
         for event, registrations in self._extension_registry.get_all_event_handlers().items():
@@ -475,20 +480,40 @@ class AgentHarness:
                 if reg.handler not in hooks_list:
                     hooks_list.append(reg.handler)
 
+    def _put_extension_tool(self, definition: ToolDefinition) -> None:
+        """Make an extension's tool one of the tools the model can call.
+
+        An extension tool that has the name of a built-in tool replaces it. That is allowed:
+        the user trusts the extension, and an extension may mean to wrap ``bash``. But it is
+        logged (audit F7-06), because the permission check finds a call by the tool name, so the
+        replacement is judged by what *it* declares about itself (``annotations``). It is
+        logged once: every extension that loads later applies all registrations again.
+        """
+        tool = _tool_from_definition(definition)
+        if tool.name in self._tools and tool.name not in self._extension_tool_names:
+            logger.warning(
+                "Extension %s replaces the built-in tool %r. Calls to it are now run, and "
+                "checked for permission, as that extension declares.",
+                self._extension_registry.tool_owner(tool.name) or "(unknown)",
+                tool.name,
+            )
+        self._extension_tool_names.add(tool.name)
+        self._tools[tool.name] = tool
+        if tool.name not in self.active_tool_names:
+            self.active_tool_names.append(tool.name)
+
     def _create_bridge(self) -> HarnessBridge:
         """Build the ``HarnessBridge`` implementation backed by this harness."""
         harness = self
 
         class _Bridge:
             def inject_tool(self, definition: ToolDefinition) -> None:
-                tool = _tool_from_definition(definition)
-                harness._tools[tool.name] = tool
-                if tool.name not in harness.active_tool_names:
-                    harness.active_tool_names.append(tool.name)
+                harness._put_extension_tool(definition)
                 harness.invalidate_system_prompt_cache()
 
             def remove_tool(self, name: str) -> None:
                 harness._tools.pop(name, None)
+                harness._extension_tool_names.discard(name)
                 if name in harness.active_tool_names:
                     harness.active_tool_names.remove(name)
                 harness.invalidate_system_prompt_cache()
@@ -579,6 +604,17 @@ class AgentHarness:
                 harness.pending_session_writes.append(
                     {"type": "custom_entry", "custom_type": custom_type, "data": data}
                 )
+                # The session writes it later, and gives it its ``id``. Until then the
+                # extension still reads it back, without an ``id`` (audit F7-02).
+                harness._appended_custom_entries.append(
+                    CustomEntry(
+                        id="",
+                        parentId=None,
+                        timestamp=iso_now(),
+                        customType=custom_type,
+                        data=data,
+                    )
+                )
 
             async def exec(
                 self,
@@ -632,7 +668,10 @@ class AgentHarness:
                     handlers.remove(handler)
 
             def get_custom_entries(self, custom_type: str) -> list[Any]:
-                entries = harness._cached_custom_entries or []
+                # What the session held when the extensions loaded, then what extensions
+                # wrote since. A write is in one of the two lists only: the first is never
+                # refreshed, and the second is not read from the session.
+                entries = [*harness._cached_custom_entries, *harness._appended_custom_entries]
                 return [e for e in entries if getattr(e, "customType", None) == custom_type]
 
             def register_cleanup(self, callback: Any) -> None:

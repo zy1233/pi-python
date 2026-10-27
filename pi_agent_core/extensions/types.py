@@ -16,6 +16,22 @@ from pi_agent_core.types import AgentToolResult, ToolAnnotations, ToolExecutionM
 # ---------------------------------------------------------------------------
 
 ExecuteFn = Callable[..., Awaitable[AgentToolResult] | AgentToolResult]
+"""The ``execute`` of an extension tool. It can be sync or async, and returns an
+``AgentToolResult``.
+
+The harness always calls it with four positional arguments (audit F7-08):
+``execute(tool_call_id, params, signal, on_update)``.
+
+- ``tool_call_id``: the id of the tool call (``str``).
+- ``params``: the validated arguments. An instance of ``parameters`` when that is a Pydantic
+  model, else the argument ``dict``.
+- ``signal``: the abort signal of the run, or ``None``.
+- ``on_update``: a callback that takes a partial ``AgentToolResult`` (progress), or ``None``.
+
+A function that takes fewer positional arguments fails with ``TypeError`` when the model calls
+the tool, not when it is registered. Upstream TS tools often take two. Give the last two a default
+(``signal=None, on_update=None``) when the tool does not use them.
+"""
 
 TOOL_NAME_PATTERN = re.compile(r"[a-zA-Z0-9_-]{1,128}")
 """What model providers accept as a function name (OpenAI, DeepSeek and others)."""
@@ -33,6 +49,28 @@ def validate_tool_name(name: str, *, extension: str | None = None) -> None:
         raise ValueError(
             f"Invalid tool name {name!r}{origin}: a tool name must match "
             "[a-zA-Z0-9_-]{1,128}; model providers reject any other name on every request."
+        )
+
+
+def validate_command_name(name: str, *, extension: str | None = None) -> None:
+    """Raise ``ValueError`` unless *name* is a slash-command name that can be typed and found.
+
+    The harness takes the name from the text after the ``/``, up to the first white space
+    (``AgentHarness._try_slash_dispatch``). So a name that is empty, that holds white space, or
+    that starts with ``/`` can never be matched, yet the clients are told about it as a
+    command. Fail at registration instead, where the culprit is known.
+    """
+    if (
+        not isinstance(name, str)
+        or not name
+        or name.startswith("/")
+        or any(char.isspace() for char in name)
+    ):
+        origin = f" from extension {extension!r}" if extension else ""
+        raise ValueError(
+            f"Invalid command name {name!r}{origin}: a command name must not be empty, must "
+            "not start with '/' and must not hold white space; the harness finds a command by "
+            "the text between the '/' and the first white space."
         )
 
 

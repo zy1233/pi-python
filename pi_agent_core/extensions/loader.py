@@ -426,12 +426,23 @@ def _load_module_from_file(
     """Import a Python file and return its ``activate`` function (if any).
 
     Raises whatever the module raises as it is imported; the caller decides what that means.
+    A module that raises does not stay in ``sys.modules`` (audit F7-05), as in the import
+    system itself: the name is ``_pi_ext_<file name>``, the same for the extension files of
+    every project, and a half-written module that stayed would be found by that name.
     """
     module_name = f"_pi_ext_{package_name or path.stem}"
     spec = importlib.util.spec_from_file_location(module_name, str(path))
     if spec is None or spec.loader is None:
         return None
     module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
+    previous = sys.modules.get(module_name)
+    sys.modules[module_name] = module  # in place before it runs, as the import system does
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        if previous is None:
+            sys.modules.pop(module_name, None)
+        else:
+            sys.modules[module_name] = previous
+        raise
     return _resolve_activate(module)
