@@ -39,6 +39,8 @@ Changelog = "https://github.com/zy1233/pi-python/blob/main/CHANGELOG.md"
 
 [project.scripts]
 pi-agent-cli = "pi_agent_cli.__main__:main"
+# `uvx pi-agent-cli-lc` runs the executable that has the name of the package.
+pi-agent-cli-lc = "pi_agent_cli.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["pi_agent_cli"]

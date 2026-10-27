@@ -147,6 +147,32 @@ cd tui && cargo build --profile release-dist -p pi-pager-bin
 
 After installing, set up config and start the TUI — see [TUI & Code-Agent Guide](docs/TUI-AND-CODE-AGENT.md).
 
+### In Zed (custom agent)
+
+The agent speaks ACP over stdio, so [Zed](https://zed.dev) can start it as a custom agent. Install [uv](https://docs.astral.sh/uv/), then add this entry to the Zed settings:
+
+```json
+{
+  "agent_servers": {
+    "pi-python": {
+      "type": "custom",
+      "command": "uvx",
+      "args": [
+        "--from", "pi-agent-cli-lc",
+        "--with", "pi-agent-core-lc[deepseek]",
+        "pi-agent-cli"
+      ],
+      "env": {}
+    }
+  }
+}
+```
+
+- `--with` installs the LangChain provider package. Use `[openai]` or `[anthropic]` for those providers.
+- Put the model and the name of the key variable in `~/.pi-python/agent.toml` (start from [`agent.example.toml`](packages/pi-agent-cli/agent.example.toml)). Never write the key in that file. Give it to the agent in an environment variable that Zed can see, in the `env` of the entry above, or in `~/.pi-python/local.env` (`KEY=VALUE` lines).
+- To run the code of a checkout, set `command` to the Python of its virtual environment and `args` to `["-m", "pi_agent_cli"]`.
+- The agent is not in Zed's ACP registry, so add it as a custom agent as shown.
+
 ## Quick start
 
 ```python

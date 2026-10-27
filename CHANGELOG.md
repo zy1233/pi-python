@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A console script with the name of the package (`pi-agent-cli`)**: `pi-agent-cli-lc` starts the same function as `pi-agent-cli`, which stays. `uvx <package>` runs the executable that has the name of the package, and it stops with an error when the package has none. The package had only `pi-agent-cli`, so `uvx pi-agent-cli-lc==0.6.0` printed "An executable named `pi-agent-cli-lc` is not provided by package `pi-agent-cli-lc`". The ACP registry starts a PyPI agent only in this form (`uvx <package> <args>`; it has no `--from`), so a registry entry needs this script. It reaches PyPI with the next release. `uvx --from pi-agent-cli-lc pi-agent-cli` works with every release. Test: `packages/pi-agent-cli/tests/test_console_scripts.py`.
+- **The README tells how to start the agent in Zed as a custom agent (docs)**: the section "In Zed (custom agent)" has the `agent_servers` entry (`uvx --from pi-agent-cli-lc`), the place of the model and key settings, and the entry for a checkout. The command of the entry was run with the published 0.6.0 package: the agent answered `initialize` in an empty home. It was not run inside Zed.
+
 ### Changed
 
 - **The release workflow builds the Linux binary on `ubuntu-24.04`, not on `ubuntu-latest` (CI)**: GitHub moves the label `ubuntu-latest` to Ubuntu 26. A binary that is built there can need a newer glibc than the 2.39 of Ubuntu 24.04, and then a machine with Ubuntu 24.04 could not start it. The job `build-tui` in `release.yml` now names the image, as `TUI CI` does (ADR6) and as `build-tui-macos-arm` does with `macos-14`. Nothing changes for the files of a release: the build of `v0.6.0` ran on `ubuntu-24.04` already. The other jobs of `release.yml` (tests, Python packages, publishing) still use `ubuntu-latest`; they ship no binary.
