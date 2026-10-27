@@ -12,7 +12,7 @@
 
 ## 目录
 
-- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22)
+- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23)
   - [10.1 范围、方法与规模](#101-范围方法与规模)
   - [10.2 `/model` 恢复（ADR3 r3）](#102-model-恢复adr3-r3)
   - [10.3 验证（r3 的实测）](#103-验证r3-的实测)
@@ -38,6 +38,7 @@
   - [10.23 r20 追加：MCP 的方向（可选扩展包）、空白对话的修复、发布内容、合入 #33–#36](#1023-r20-追加mcp-的方向可选扩展包空白对话的修复发布内容合入-3336)
   - [10.24 r21 追加：V0.6 的版本号、合入 #38 与 #39、条件 1–4 的结果](#1024-r21-追加v06-的版本号合入-38-与-39条件-14-的结果)
   - [10.25 r22 追加：打 tag v0.6.0、发布、发布后的核对](#1025-r22-追加打-tag-v060发布发布后的核对)
+  - [10.26 r23 追加：三个 action 升到 Node 24、扩展 API 的审计批 9、决策 11 与 13](#1026-r23-追加三个-action-升到-node-24扩展-api-的审计批-9决策-11-与-13)
 - [附录 A（摘录）：A.4](#附录-a摘录a4)
   - [A.4 r5 执行结果（对照 r5 时初稿里的「默认决策」；r9 的更新见 A.1）](#a4-r5-执行结果对照-r5-时初稿里的默认决策r9-的更新见-a1)
 - [附录 B：复现方法](#附录-b复现方法)
@@ -64,9 +65,9 @@
   - [F.10 修订记录摘要里的长条目](#f10-修订记录摘要里的长条目)
 - [修订记录](#修订记录)
 
-## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22）
+## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23）
 
-r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）；r14 合入这两个 PR，并做决策 17：会话文件在第一条用户消息时才写（§10.17）；r15 做决策 10 的存储层一项：删 `pi-shell` 里的旧存储层（§10.18）；r16 合入 #25 与 #26，并删 `pi-shell` 里剩下的死代码（§10.19）；r17 检查测试之间的竞争，只改测试与工具（§10.20）；r18 改用 `cargo nextest`，改 `protoc` 的路径与 `release.yml` 的令牌（§10.21）；r19 用 `gh stack` 合入 #27–#31，并设 V0.6 的发布里程碑（§10.22）；r20 定 MCP 的方向（可选扩展包），修空白对话，补发布内容，并合入 #33–#36（§10.23）；r21 做 V0.6 的版本号与发布说明（条件 5），合入 #38 与 #39，并做条件 1–4（§10.24）；r22 打 tag `v0.6.0`、发布、做发布后的核对（§10.25）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
+r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）；r14 合入这两个 PR，并做决策 17：会话文件在第一条用户消息时才写（§10.17）；r15 做决策 10 的存储层一项：删 `pi-shell` 里的旧存储层（§10.18）；r16 合入 #25 与 #26，并删 `pi-shell` 里剩下的死代码（§10.19）；r17 检查测试之间的竞争，只改测试与工具（§10.20）；r18 改用 `cargo nextest`，改 `protoc` 的路径与 `release.yml` 的令牌（§10.21）；r19 用 `gh stack` 合入 #27–#31，并设 V0.6 的发布里程碑（§10.22）；r20 定 MCP 的方向（可选扩展包），修空白对话，补发布内容，并合入 #33–#36（§10.23）；r21 做 V0.6 的版本号与发布说明（条件 5），合入 #38 与 #39，并做条件 1–4（§10.24）；r22 打 tag `v0.6.0`、发布、做发布后的核对（§10.25）；r23 把三个 action 升到 Node 24 的版本，处理扩展 API 的审计批 9，并把决策 11、13 记成不做（§10.26）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
 | 提交 | 内容 |
 |---|---|
@@ -1961,6 +1962,33 @@ pi-mcp-py                 0.1.0（新）      核心下限 >=0.5.0 -> >=0.6.0
 
 **续 1（用户答复之后）。** 用户对「留下的」答了三个问题。① 钉 `build-tui`：答「钉」，开 PR，不合入。PR [#42](https://github.com/zy1233/pi-python/pull/42)：`release.yml` 的 `build-tui` 改用 `ubuntu-24.04`（一行加两行注释）。标签是有效的（`tui-ci.yml` 用它；`v0.6.0` 的构建本来就在这个映像上），所以我没有在分支上跑演练；要跑的话：`gh workflow run release.yml --ref ci/pin-release-build-runner`，约 20 分钟。Cargo 缓存的键里只有 `runner.os`（`Linux`），没有映像的版本，所以钉了之后现有的缓存仍然有效。② glibc 的下限：答「补」。同一个 PR 在 `docs/TUI-AND-CODE-AGENT.md` 的选项 A 下补了一段（要 glibc 2.39 或更新；Ubuntu 22.04 的 2.35 太旧；旧的系统用选项 B）；`CHANGELOG.md` 的 `[Unreleased]` 有两条。我没有在 Ubuntu 22.04 上试过这个二进制：那一段说的是加载器的规则，不是一次试验的结果。③ 本地分支：答「删」。我先核对了 7 个本地分支（`chore/prepare-0.6.0`、`docs/plan-r20-mcp-extension`、`docs/plan-r21-release-checks`、`fix/mode-probe-settle`、`fix/write-session-at-first-message`、`refactor/adr1-drop-session-disk-reads`、`refactor/delete-pi-shell-session-store`）：每个的头都等于一个已合入 PR 的头（#39、#38、#41、#40、#25、#24、#26），没有只在本地的提交；然后 `git branch -D`。`fix/benchmark-verifier-isolation` 没有远端，不是这一轮的，没动。④ 更正：上面「留下的」①说「会按更新的 glibc 链接：……加载不了」，说得太满。映像迁到 Ubuntu 26 之后，构建的二进制可能要更新的 glibc；我没有在更新的映像上构建过，所以没有量过。已改成「可能」。⑤ 补记：r22 的 PR（#41）还改了计划与执行记录里的 12 处粗体。GitHub 在这样的文字里把星号原样显示：收尾的 `**` 前是中文标点，后面紧跟一个字（例如 `**更正 r17：**CI 的`）。标点现在放在粗体外面；查法是用 GitHub 的 markdown 接口（`gh api markdown`）渲染文件，再找剩下的 `*`。写新文字时，收尾的 `**` 前如果是标点，后面要空一格，或把标点放到外面。
 
+### 10.26 r23 追加：三个 action 升到 Node 24、扩展 API 的审计批 9、决策 11 与 13
+
+用户在 2026-10-27 说：把 `docs/slim-runtime-removal-plan` squash 合入本地 `main`，先不要推送；`ci/pin-release-build-runner` 与 `docs/slim-runtime-removal-plan` 一起删；再按现状建议下一步。他还说机器的资源紧张，尽量不跑全量的测试与 Rust 构建。我做完这些，给了建议；用户从问卷里选了五项：`py_audit`、`bookkeeping`、`delete_bench_branch`、`ci_actions`、`zed_check`。没有选「推送 `main`」，所以 `63cd72c` 当时只在本地。这一轮没有在本机跑全量的 `pytest`，也没有构建 Rust：全套留给 GitHub 的 CI。
+
+**合入与删分支。** 用 `git merge --squash` 把 `docs/slim-runtime-removal-plan` 合入本地 `main`：`63cd72c`；本地 `main` 比 `origin/main`（`a25c916`）多这一个提交。squash 之后 git 不把源分支算作「已合入」，所以用 `git branch -D` 删。`ci/pin-release-build-runner` 的 PR #42 已由用户合入（`e65af4d`）。`fix/benchmark-verifier-isolation`（头 `90501d6`，没有远端）是问卷里选的：它的树与 `origin/main` 上的 `a25c916` 相同（`git diff 90501d6 a25c916` 没有输出），内容已经在 `main` 里。三个分支都删了；别的分支没动。
+
+**#43：三个 action 升到 Node 24 的版本（`ci_actions`）。** GitHub 在 2026-09-23 从 runner 上拿掉了 Node 20：用 Node 20 的 action 被强制在 Node 24 上运行，并打印警告（r22 的「留下的」③）。PR [#43](https://github.com/zy1233/pi-python/pull/43)（分支 `ci/node24-actions`，头 `578f1c1`）改了 `release.yml` 与 `tui-ci.yml` 共 12 行：`actions/upload-artifact` v4 → v6（6 处）、`actions/download-artifact` v4 → v7（4 处）、`actions/cache` v4 → v5（2 处）；`CHANGELOG.md` 的 `[Unreleased]` 加一条。新版本只换了运行时，工作流用到的输入不变。`arduino/setup-protoc@v3` 留着：它没有 Node 24 的版本，在 Node 24 上照常运行（演练里 macOS 的构建通过了 `Install protoc`）。
+
+结果：`CI`（Ruff；`pytest` 3.11、3.12、3.13）与 `TUI CI`（`Gates + cargo check` 3 m 44 s；`cargo nextest` 17 m 12 s）都通过。`Release` 的演练（[run 40467256952](https://github.com/zy1233/pi-python/actions/runs/40467256952)）：四个 job 成功（测试、Python 包、Linux x86_64 与 macOS arm64 的构建）；两个发布的 job 跳过（手动运行都这样）。Linux 与 macOS 的构建用了 `upload-artifact@v6` 与 `cache@v5`；`Build Python packages` 上传了 `dist`。演练里的警告现在只点名 `arduino/setup-protoc@v3`；以前还有 `upload-artifact@v4` 与 `cache@v4`。`download-artifact@v7` 只在两个发布的 job 里用，所以这次没有测到，下一次真的发布才第一次运行；它的输入（`name`、`path`）与 v4 相同。我在 PR 上留了[结果的评论](https://github.com/zy1233/pi-python/pull/43#issuecomment-6436584660)。没有合入。顺便看到：这次演练里 `ubuntu-latest` 还是 Ubuntu 24.04（映像 `20261012.334.1`），尽管通知说 2026-10-19 起迁到 Ubuntu 26；`build-tui` 已在 #42 里钉住，别的 job 还用 `ubuntu-latest`。
+
+**#44：扩展 API 的审计批 9（`py_audit`）。** PR [#44](https://github.com/zy1233/pi-python/pull/44)（分支 `fix/extension-audit-cleanup`；两个提交：`880d001` 是代码、测试与 `CHANGELOG.md`，`da2b975` 是设计文档与审计文件）处理[审计文件](../../AUDIT/AUDIT-PHASE6-PHASE7-2026-09-30.md)第八节的 F7-02 至 F7-09。每处代码改动都先有一个失败的测试。
+
+- F7-02：`get_custom_entries` 看不到同一个扩展刚用 `append_entry` 写的条目（它读的是加载时的条目）。现在是「加载时的条目」加「之后追加的条目」（`id` 为空的 `CustomEntry`）；`data` 不复制，读回的就是之后存盘的那个对象。
+- F7-03（行为变化）：`run_async` 用 `get_event_loop`；没有在跑的循环时，它建出一个永远不会运行的任务，还报 `DeprecationWarning`。现在用 `get_running_loop`；没有循环时关掉协程并抛 `RuntimeError`。仓库里没有代码调用它。
+- F7-04（行为变化）：`register_command` 收下没人打得出来的名字（空、中间有空白、以 `/` 开头），还把它发给客户端。现在 `validate_command_name` 抛 `ValueError`，这个扩展加载失败（记在 `loader.failed`，会话开始时告诉用户）。已存的 workflow 的名字本来就受 `NAME_RE`（`[a-z0-9-]{1,64}`）限制，所以只影响第三方扩展。
+- F7-05：扩展文件导入失败时，没写完的 `_pi_ext_<名字>` 模块留在 `sys.modules` 里。现在拿掉（原来有同名的模块，就放回去）。
+- F7-06：扩展的工具与内置工具同名时，悄悄把它换掉。现在记一条警告，带工具名与扩展名（`_put_extension_tool`、`ExtensionRegistry.tool_owner()`）；换掉仍然允许。有意没做：加载之后再加工具时发 `ToolsUpdateEvent`（没有消费者；`inject_tool` 是同步的，发事件要一个后台任务；还会动事件的顺序）。
+- F7-07 至 F7-09：只改文档：Phase 7 设计文档的 3.2、3.4、3.5、4.1、14 节；`ExecuteFn` 的文档字符串（四个位置参数；两个参数的函数在调用时报 `TypeError`）；`pi_dynamic_workflows/runtime.py` 里 `deterministic_opts` 上面的注释（日志的哈希只用这个子集）。
+
+证据：新增 40 个测试（`pytest` 的总数 2,919 → 2,959；2,919 是 #43 的 CI 的数，#43 没改 Python）；其中 24 个在旧代码上失败；三个测试文件（两个新的，一个加了用例）里的 82 个测试通过。变异检查：25 个变异（对改动行的单行破坏）对着这三个文件跑，全被抓住（清单在审计文件第六节）。本机（Windows）：相关的 20 个测试文件 739 通过 / 1 跳过；`ruff check .` 与 `ruff format --check .` 在 ruff 0.16.10 与 CI 钉的 0.16.0 上都通过。全套与 Linux 没有在本机跑；CI（[run 40469559398](https://github.com/zy1233/pi-python/actions/runs/40469559398)，头 `da2b975`）：Ruff 通过，`pytest` 在 3.11、3.12、3.13 上都是 2,959 通过 / 39 跳过 / 31 取消选择。`TUI CI` 没有运行（#44 没改 `tui/`）。没有合入。
+
+**决策 11 与 13（`bookkeeping`）。** 用户选了问卷里的「记账」一项：把决策 11（选择器边翻边显示）与 13（会话目录的列举太慢）记成「已定，不做」。倾向本来就是不做（11：「不做，除非有人遇到」；13 的做法约 25 行加测试，没有实现也没有量），所以没有代码要改。计划里改了：「待决策」开头的三行清单、两项各自的状态行、「不在 V0.6」、「下一步」、§10 索引、修订记录（摘要）与链接定义。另外新增 Cursor 规则 `.cursor/rules/plan-docs.mdc`（只在打开 `docs/PLAN` 下的文件时加载）：计划只写状态，过程写进归档；记一轮要改哪几处；锚点与链接的约定；粗体的收尾规则。
+
+**Zed 里的核对（`zed_check`）。** 步骤写在给用户的回复里，由用户做；我没有在 Zed 里试。要点：先重启 Zed 里的 agent，让它加载 `.venv` 里装的 `pi-mcp-py`（0.1.0，入口点 `pi-mcp`）。① 新建空白对话，什么都不发，退出 Zed 再打开：这个对话应该能打开，而且新建对话不用重启 Zed。② 配了 `mcp-server-context7` 时新建对话：`/mcp` 应该列出它，工具名是 `mcp__context7__*`。出问题时，用 Zed 的 `dev: open acp logs`（命令面板）看 Zed 与 agent 之间的消息。
+
+**留下的与没验证的。** ① #43 的 `download-artifact@v7` 要到下一次真的发布才第一次运行。② #44 的全套与 Linux 只在 CI 上跑过；本机只跑了 Windows 上相关的 20 个测试文件。③ Zed 里的核对没有结果。④ `63cd72c` 与这一轮的计划改动当时只在本地，没有推送；#43、#44 合入之后，计划里的「等用户合入」一条要改。⑤ `ubuntu-latest` 迁到 Ubuntu 26 到 2026-10-27 还没发生；迁了之后别的 job 会不会失败，没有查。
+
 ## 附录 A（摘录）：A.4
 
 附录 A 的 A.1–A.3（能力矩阵、ACP 版本配对、逐方法）是活的参考，留在[计划](../PLAN-RUST-AGENT-RUNTIME-REMOVAL.md)里。A.4 记 r5 的执行结果，搬到这里。
@@ -2976,3 +3004,4 @@ r12 续 8（2026-10-13）：PR [#18](https://github.com/zy1233/pi-python/pull/18
 - r22：打 tag `v0.6.0`、发布、发布后的核对（2026-10-25；分支 `docs/plan-r21-release-checks`，只改文档；与 r21 在同一个 PR [#41](https://github.com/zy1233/pi-python/pull/41) 里）。用户答复：tag 打在 `5f73e07`，#40 与 #41 在 tag 之后合入；由我来打并核对。① tag `v0.6.0`（带注释，tag 对象 `6b92a0d`）；`Release` 的 [run 40180264121](https://github.com/zy1233/pi-python/actions/runs/40180264121) 一次全部成功（测试 266 s，Python 包 32 s，`publish-pypi` 31 s，Linux 构建 584 s，macOS 构建 922 s，`GitHub Release` 25 s）。② PyPI 七个包；`pi-mcp-py` 是新项目，第一次上传成功；14 个文件的 SHA-256 与 GitHub Release 的资产逐个相同。③ [GitHub Release](https://github.com/zy1233/pi-python/releases/tag/v0.6.0)：16 个资产；正文等于 `CHANGELOG.md` 的 `[0.6.0]`；Linux 的 `zypi` 406,911,320 B，与构建产物逐字节相同。④ 核对（WSL2）：干净 venv 里 `uv pip check`，四个扩展包能加载；`pi-mcp` 的 192 个测试对着从 PyPI 装的包；PTY 脚本对着发布的 `zypi`（`smoke` 23/23、`exit_matrix` 12 个用例、`resume_matrix` 16 通过、`mode_probe` 15 行如预期、`status_line_probe` 4/4；第一次因我复制的层次错了，两个脚本没有起来，第二次通过）。⑤ 合入 #40（`75f83ae`）；GitHub 里程碑 [v0.6.0](https://github.com/zy1233/pi-python/milestone/2) 关闭。没发现缺陷。留下的：`release.yml` 的 Linux 构建用 `ubuntu-latest`（GitHub 要把它迁到 Ubuntu 26）；Linux 的二进制要 glibc 2.39 或更新，文档里没写；macOS 的二进制没人运行过。见 §10.25。
 - r22 续 1：留下的三件事（2026-10-25，分支 `ci/pin-release-build-runner`，PR [#42](https://github.com/zy1233/pi-python/pull/42)；不与 r21、r22 的 PR 合并）。用户答复：钉 `build-tui`，开 PR，不合入；在文档里补 glibc 的下限，放在同一个 PR；删 7 个已合入的本地分支。① PR [#42](https://github.com/zy1233/pi-python/pull/42)：`release.yml` 的 `build-tui` 改用 `ubuntu-24.04`（一行加注释）；`docs/TUI-AND-CODE-AGENT.md` 的选项 A 补一段（glibc 2.39 或更新）；`CHANGELOG.md` 的 `[Unreleased]` 两条。没有在分支上跑演练。② 本地分支：先核对每个分支的头等于一个已合入 PR 的头，再 `git branch -D`；`fix/benchmark-verifier-isolation` 没有远端，没动。③ 计划里改的：状态里的 ⑦、当前状态的 r22 一段、下一步的「发布之后留下的」、§10 索引、本条；执行记录 §10.25 加「续 1」。④ 更正：§10.25 与下一步原来写的是：迁了之后，二进制会按更新的 glibc 链接，在 Ubuntu 24.04 上加载不了。这说得太满；没有在更新的映像上构建过，只能说「可能」，已改。⑤ 补记（r22 的 PR [#41](https://github.com/zy1233/pi-python/pull/41) 里做了，当时没记）：计划与执行记录里 12 处粗体，GitHub 显示成字面星号（例如 `**更正 r17：**CI 的`：收尾的 `**` 前是中文标点，后面紧跟一个字）；标点移到了粗体外面。查法：用 GitHub 的 markdown 接口（`gh api markdown`）渲染文件，再找剩下的 `*`。写新文字时，收尾的 `**` 前如果是标点，后面要空一格，或把标点放到外面。见 [§10.25](#1025-r22-追加打-tag-v060发布发布后的核对) 的「续 1」。
 - 整理（r22 续 1 之后，2026-10-27；分支 `docs/slim-runtime-removal-plan`，只改文档）：计划又长到 690 行、217,395 字节：r12 到 r22 的每一轮都把过程写回了头部、「当前状态」、两个发布里程碑、「下一步」与「待决策」，违背了 r10 之后定的规则（计划只写计划与状态）。照那次的做法再整理一次：被缩短的各段原文一字不改地存入附录 F（F.1 头部的状态文字；F.2「当前状态」里逐轮的状态文字；F.3、F.4 两个发布里程碑；F.5「下一步」；F.6「还没有验证的」里的两条；F.7「待决策」里的七项；F.8 §7 里阶段 C 与 D 的长状态；F.9 §10 索引里的长行；F.10「修订记录（摘要）」的长条目）；计划里改成现在的状态，一轮一行。章节编号与锚点没有变。另外补了本文缺的 r22 续 1 一条（原来只在计划的摘要里）。
+- r23：三个 action 升到 Node 24 的版本、扩展 API 的审计批 9、决策 11 与 13（2026-10-27；本地 `main`，只改文档，当时没有推送）。用户让把整理计划的分支 squash 合入本地 `main`（`63cd72c`，不推送），删 `ci/pin-release-build-runner` 与 `docs/slim-runtime-removal-plan`，再给建议；机器的资源紧张，不跑全量测试与 Rust 构建。问卷里用户选了五项：① `ci_actions`：PR [#43](https://github.com/zy1233/pi-python/pull/43)（分支 `ci/node24-actions`，头 `578f1c1`）：`upload-artifact` v4 → v6（6 处）、`download-artifact` v4 → v7（4 处）、`cache` v4 → v5（2 处）；`CI` 与 `TUI CI` 通过；`Release` 的演练（[run 40467256952](https://github.com/zy1233/pi-python/actions/runs/40467256952)）四个 job 成功；`arduino/setup-protoc@v3` 留着（没有 Node 24 的版本）；`download-artifact@v7` 没有测到（只在发布的 job 里用）。② `py_audit`：PR [#44](https://github.com/zy1233/pi-python/pull/44)（分支 `fix/extension-audit-cleanup`，`880d001`、`da2b975`）：审计的 F7-02 至 F7-09；新增 40 个测试，其中 24 个在旧代码上失败；25 个变异全部被抓住；`CI`（[run 40469559398](https://github.com/zy1233/pi-python/actions/runs/40469559398)）通过，`pytest` 在 3.11、3.12、3.13 上各 2,959 通过；两处行为变化（F7-03 的 `run_async`、F7-04 的命令名）。③ `bookkeeping`：决策 11、13 记成「已定，不做」；计划与本文件记 r23；新增 `.cursor/rules/plan-docs.mdc`。④ `delete_bench_branch`：删 `fix/benchmark-verifier-isolation`（头 `90501d6`，树与 `a25c916` 相同）。⑤ `zed_check`：给用户核对步骤，没有在 Zed 里试。两个 PR 都没有合入。没验证：`download-artifact@v7`；#44 的全套与 Linux 只在 CI 上跑；Zed 里的核对。见 [§10.26](#1026-r23-追加三个-action-升到-node-24扩展-api-的审计批-9决策-11-与-13)。

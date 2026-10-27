@@ -1,6 +1,6 @@
 # Rust Agent Runtime 剥离计划
 
-> **状态：截至 r22 续 1（2026-10-25）；2026-10-27 整理。** v0.5.0（2026-10-13）与 v0.6.0（2026-10-25）都已发布。阶段 A、C 完成；阶段 0 基本完成；阶段 B 的删除完成，迁移没有完成；阶段 1 完成一半；阶段 D 没有开始（[当前状态](#当前状态)）。PR [#42][pr-42]（钉 `build-tui` 的运行器，补 glibc 的下限）已由用户合入 `main`（`e65af4d`）。在等用户决定的事见[待决策](#待决策)；发布之后留下的事见[下一步](#下一步)。每一轮的过程在[执行记录（归档）][log]。
+> **状态：截至 r23（2026-10-27）。** v0.5.0（2026-10-13）与 v0.6.0（2026-10-25）都已发布。阶段 A、C 完成；阶段 0 基本完成；阶段 B 的删除完成，迁移没有完成；阶段 1 完成一半；阶段 D 没有开始（[当前状态](#当前状态)）。PR [#42][pr-42]（钉 `build-tui` 的运行器，补 glibc 的下限）已由用户合入 `main`（`e65af4d`）。PR [#43][pr-43]（三个 Actions 升到 Node 24 的版本）与 [#44][pr-44]（扩展 API 的审计批 9）开着，没有合入。在等用户决定的事见[待决策](#待决策)；发布之后留下的事见[下一步](#下一步)。每一轮的过程在[执行记录（归档）][log]。
 >
 > **这份文档只写计划和状态。** 每一轮做了什么、怎么测的、数字是多少，在[执行记录（归档）][log]里。§1–§3、§6–§9 保留 r2 原文作为决策依据（§7 的每一项后面加了一行状态）。§4、§5 是 r2 的源码事实与规模估计，描述拆除之前的代码，原文在归档里。与执行记录冲突处，以执行记录和 ADR3（r3）为准。
 >
@@ -27,7 +27,7 @@
 
 这一节只写现在是什么。一轮做了什么，写在[执行记录][log]的 §10.x 里，不要写回这里；发布里程碑与「下一步」也一样。
 
-截至 r22 续 1：**v0.5.0 与 v0.6.0 都已发布。** 计划的 PR 都已合入 `main`。v0.6.0 之后合入的有：PR [#40][pr-40]（`mode_probe.py` 的探针修复）、[#41][pr-41]（r21、r22 的文档）、[#42][pr-42]（`release.yml` 的 `build-tui` 钉 `ubuntu-24.04`；`docs/TUI-AND-CODE-AGENT.md` 补 glibc 的下限）。它们都不在 v0.6.0 里。没有 V0.7 的里程碑。整理前逐轮的状态文字（r12 续 8 到 r22 续 1）在[归档的附录 F.2][logF2]。
+截至 r23：**v0.5.0 与 v0.6.0 都已发布。** 计划的 PR 都已合入 `main`。v0.6.0 之后合入的有：PR [#40][pr-40]（`mode_probe.py` 的探针修复）、[#41][pr-41]（r21、r22 的文档）、[#42][pr-42]（`release.yml` 的 `build-tui` 钉 `ubuntu-24.04`；`docs/TUI-AND-CODE-AGENT.md` 补 glibc 的下限）。它们都不在 v0.6.0 里。开着、没有合入的 PR 有两个：[#43][pr-43]（`release.yml` 与 `tui-ci.yml` 里三个 action 升到 Node 24 的版本）与 [#44][pr-44]（扩展 API 的审计批 9：F7-02 至 F7-09）。没有 V0.7 的里程碑。整理前逐轮的状态文字（r12 续 8 到 r22 续 1）在[归档的附录 F.2][logF2]。
 
 | 阶段 | 状态 | 已完成 | 还差 |
 |---|---|---|---|
@@ -78,22 +78,23 @@
 - 设置页里权限模式以外的项对 Python agent 可能没有效果；`remember_tool_approvals` 与 `default_selected_permission` 没有测过（决策 14，待定）。
 - `[ui.status_line]` 在 Python agent 下没有 `context` 与 `cost` 两项，脚本也拿不到 `context_window.*`、`cost.total_cost_usd`、`workspace.branch`、`workspace.repo_root`（决策 15 的 (b)；agent 不告诉 `zypi` 上下文窗口、已用的 token 与费用）。
 - 内嵌的七页指南没有入口可以打开（D.6）。
-- Python 一侧：Phase 6/7 审计的 F7-02 至 F7-09 没有修复批次（[`AUDIT-PHASE6-PHASE7-2026-09-30.md`](../AUDIT/AUDIT-PHASE6-PHASE7-2026-09-30.md) 第八节）。
+- Python 一侧：Phase 6/7 审计的 F7-02 至 F7-09 没有修复批次（[`AUDIT-PHASE6-PHASE7-2026-09-30.md`](../AUDIT/AUDIT-PHASE6-PHASE7-2026-09-30.md) 第八节）。r23 的 PR [#44][pr-44] 处理了它们，没有合入；已发布的 v0.6.0 仍带着它们。
 - 平台：只在 Linux（WSL2）上验证过；macOS 的二进制没有人运行过；Windows 没有二进制；Landlock 层没有测过（WSL 的内核 5.10 没有 Landlock）。
 - 翻页的代价（决策 18，已定不做）：agent 给每一页都重新列一次会话目录，所以读完所有页的代价随会话数快速增长。`--session-id` 在 5,000 个会话时：Linux 28 s、Windows 34 s（Windows 上超过 30 s 的限额）；1,000 个会话时 1.3 s、1.8 s。1,000 个会话以内够用。
 - 同一个 id 的并发没有关死：两个 agent 进程共用一个 home 时，同一个 id 仍可能各建一个会话；先存盘的赢，另一个的第一条消息被拒（`a session with this id already exists`）。
 - `pi-mcp-py` 是 Alpha（[#36][pr-36]）：没做 OAuth，MCP 的 resources、prompts、sampling、roots、elicitation、`tools/list_changed`，websocket 的 server；对一个已死的 SSE server 发调用，要等 120 s 的时限；Zed 在第一个工作树加载之前发的 `session/new`，`mcpServers` 是空的（zed#64611），那样的对话里没有 MCP 工具，也没有提示；`zypi` 里没有配 server 的办法；server 声明的 `annotations` 照单全收（决策 21 的 Q3）；没有在真的 Zed 的界面里验证过。
 - 从没存在过的 UUID 也能 `session/load`（[#34][pr-34]）：agent 分不出它和空白对话的 id，所以会开一个空会话；`zypi export <uuid>` 对它说「没有可导出的内容」。
 
-**不在 V0.6。** 决策 7 的 (b)(c)、8、9、10 的 `mcp.rs` 与 `recent_dirs.rs` 两项、11、13、14（决策 20 已定并已做：条件 5，[#39][pr-39]；决策 21 已定，没有要做的）；阶段 0 的余项（0.9 的 Landlock 层，macOS 与 Windows 一侧）；阶段 1 的余项（1.P3 的 (b)(c)、1.P5、1.P6、1.R2、1.R4、1.R5、1.R3 的 MCP 子进程与 Windows）；B.2–B.4；阶段 D 全部（D.1–D.9）；`protoc_ci_env`（在 `tui-ci.yml` 里设 `PROTOC`）。它们归哪个里程碑，由用户排；现在没有 V0.7 的里程碑。决策 14 的倾向里，第一步是对着真 agent 测 `remember_tool_approvals` 与 `default_selected_permission`；这一步只量不改，不用等用户定。
+**不在 V0.6。** 决策 7 的 (b)(c)、8、9、10 的 `mcp.rs` 与 `recent_dirs.rs` 两项、14（决策 11、13 已定，不做，r23；决策 20 已定并已做：条件 5，[#39][pr-39]；决策 21 已定，没有要做的）；阶段 0 的余项（0.9 的 Landlock 层，macOS 与 Windows 一侧）；阶段 1 的余项（1.P3 的 (b)(c)、1.P5、1.P6、1.R2、1.R4、1.R5、1.R3 的 MCP 子进程与 Windows）；B.2–B.4；阶段 D 全部（D.1–D.9）；`protoc_ci_env`（在 `tui-ci.yml` 里设 `PROTOC`）。它们归哪个里程碑，由用户排；现在没有 V0.7 的里程碑。决策 14 的倾向里，第一步是对着真 agent 测 `remember_tool_approvals` 与 `default_selected_permission`；这一步只量不改，不用等用户定。
 
 ### 下一步
 
 - **已发布：** v0.5.0（2026-10-13）与 v0.6.0（2026-10-25）。V0.6 的六项退出条件都有结果，发布后的核对没有发现缺陷（[§10.25][l10-25]）。GitHub 里程碑 [v0.5.0][ms-v050] 与 [v0.6.0][ms-v060] 都已关闭。
-- **发布之后留下的（r22；①② 在 PR [#42][pr-42] 里做了，用户已合入，`e65af4d`）：** ① `release.yml` 的 `build-tui` 钉 `ubuntu-24.04`：`ubuntu-latest` 要迁到 Ubuntu 26，迁了之后 Linux 的二进制可能要更新的 glibc（现在要 glibc 2.39 或更新）。② glibc 的下限写进 `docs/TUI-AND-CODE-AGENT.md`。③ **没做**：Node.js 20 弃用的警告（`actions/cache`、`upload-artifact`、`download-artifact`、`arduino/setup-protoc`）与 PyPI 一侧的 Trusted Publishing（要账号所有人在 PyPI 上设）；现在都不影响发布。
+- **发布之后留下的（r22；①② 在 PR [#42][pr-42] 里做了，用户已合入，`e65af4d`）：** ① `release.yml` 的 `build-tui` 钉 `ubuntu-24.04`：`ubuntu-latest` 要迁到 Ubuntu 26，迁了之后 Linux 的二进制可能要更新的 glibc（现在要 glibc 2.39 或更新）。② glibc 的下限写进 `docs/TUI-AND-CODE-AGENT.md`。③ Node.js 20 弃用的警告：PR [#43][pr-43]（r23，开着，没有合入）把 `upload-artifact` 升到 v6、`download-artifact` 升到 v7、`cache` 升到 v5；`arduino/setup-protoc` 没有 Node 24 的版本，留着。**没做**：PyPI 一侧的 Trusted Publishing（要账号所有人在 PyPI 上设）；现在都不影响发布。
+- **等用户合入（r23）：** PR [#43][pr-43]（`CI`、`TUI CI` 与 `Release` 的演练都通过；`download-artifact@v7` 只在发布 job 里用，要到下一次真的发布才第一次运行）与 PR [#44][pr-44]（`CI` 通过；改了行为的两处写在 `CHANGELOG.md` 里）。
 - **要等用户决定：** 1.P6 的旗标契约（决策 8）；设置页里其余的项（决策 14）；真的 Plan 模式（决策 7 的 (b)）；「不在 V0.6」里的各项归哪个里程碑（现在没有 V0.7 的里程碑）。
 - **不用等决定：** 阶段 D 做不做，看 [`docs/baselines/tui.md`](../baselines/tui.md) 的数据；D.5–D.9 是候选（§7）。D.8 还剩新候选：`pi-workflow`、`Config.storage_mode`、没人加载的文件。
-- **已定，不做：** 翻页的代价（决策 18；用户在 2026-10-18 答复：不做，1,000 个会话以内够用）。
+- **已定，不做：** 翻页的代价（决策 18；用户在 2026-10-18 答复：不做，1,000 个会话以内够用）；选择器边翻边显示（决策 11）与会话目录的列举太慢（决策 13）（用户，2026-10-27：不做）。
 
 ### 还没有验证的
 
@@ -115,8 +116,8 @@
 共二十一项。能给出倾向的，都写了倾向。没有一项会在用户确认之前动手。编号沿用 r9 的提议（[§10.11][l10-11] 末尾「留给用户决定的」十二项，原文留在那里）；13、14 是 r10 加的，15 是 r11 加的，16 是 r12 加的，17、18 是 r13 加的，19–21 是 r20 加的。附录 A 的「决定 N」指这里的第 N 项。
 
 - **已做：** 1 的 PR 1（PR [#11][pr-11]）、PR 2（PR [#23][pr-23]）、PR 3（PR [#24][pr-24]；后两个 r14 合入 `main`）、2、3、4、5、6 的 (a)（PR [#18][pr-18]）、7 的 (a)、12、15 的 (b)（PR [#19][pr-19]）、16 的 (a)（PR [#17][pr-17]）、17（PR [#25][pr-25]，r16 合入；r20 的更正：PR [#34][pr-34]）、10 的存储层一项（PR [#26][pr-26]，r16 合入）与它的收尾（PR [#27][pr-27]，r19 合入）、19（PR [#35][pr-35]、[#36][pr-36]，r20 合入）、20（PR [#39][pr-39]，r21 合入）、21（用户，2026-10-25：按倾向，即全按默认；默认值已在 PR [#36][pr-36] 里）。
-- **已定，不做：** 18（用户，2026-10-18）。
-- **待定：** 7 的 (b)(c)、8、9、10 的 `mcp.rs` 与 `recent_dirs.rs` 两项、11、13、14。
+- **已定，不做：** 18（用户，2026-10-18）、11 与 13（用户，2026-10-27）。
+- **待定：** 7 的 (b)(c)、8、9、10 的 `mcp.rs` 与 `recent_dirs.rs` 两项、14。
 
 1. **ADR1 的落地。** PR 1：Python；PR 2：Rust，只加不删；PR 3：Rust，删。
     - 倾向：开工，先做 PR 1。
@@ -159,14 +160,14 @@
     - 详情：[§10.11][l10-11]、[§10.18][l10-18]
 11. **选择器边翻边显示。** 现在等所有页回来再画（1,000 个会话约 0.8 s，Windows）。
     - 倾向：不做，除非有人遇到。
-    - 状态：待定。
+    - 状态：**已定，不做**（用户，2026-10-27；r23）。
     - 详情：[§10.11][l10-11]
 12. **推送与 PR。**
     - 状态：**已做**：PR [#9][pr-9]–[#12][pr-12] 已合入 `main`。
     - 详情：[§10.12][l10-12]
 13. **会话目录的列举太慢。** `LocalExecutionEnv.list_dir` 给每个条目造一个 `FileInfo`：5,000 个文件要 286–372 ms，`os.listdir` 只要 2–11 ms。`session/list` 的每一页、`find`、`has_session` 都付这笔钱。
     - 倾向：给仓库一条只列名字的路径（约 25 行加测试）。5,000 个会话时首页估计从 404 / 319 ms 降到约 80 / 40 ms（Windows / WSL2）；这是估算，没有实现也没有量。
-    - 状态：待定。
+    - 状态：**已定，不做**（用户，2026-10-27；r23）。要改主意时，倾向里的做法仍然可用。
     - 详情：[§10.12][l10-12]
 14. **设置页里其余对 Python 没有效果的项。**
     - 倾向：像对模式做的那样，逐个对着真 agent 测，再决定藏起来还是接线。先测 `remember_tool_approvals` 与 `default_selected_permission`（离权限最近，错了代价最高）。还没有证据。
@@ -443,13 +444,14 @@ Rust（pager）：
 | [§10.23][l10-23] | r20 | MCP 的方向（可选扩展包，决策 19）与两个问题的原因；#34 空白对话再打开、#35 给扩展的挂钩、#36 `pi-mcp-py`；用 `gh stack` 合入 #33–#36；决策 20、21 | PR [#33][pr-33]–[#36][pr-36] |
 | [§10.24][l10-24] | r21 | V0.6 的条件 5（#39）；合入 #38 与 #39；条件 1–4 的结果（`mode_probe` 的探针竞争与 #40） | PR [#39][pr-39]、[#40][pr-40] |
 | [§10.25][l10-25] | r22 | 打 tag `v0.6.0`（`5f73e07`）、`Release` 的运行、PyPI 与 GitHub Release、两个二进制、PTY 脚本与 `pi-mcp` 测试的核对、合入 #40；留下的与没验证的；续 1（#42、glibc 的下限、删本地分支） | PR [#40][pr-40]、[#41][pr-41]、[#42][pr-42] |
+| [§10.26][l10-26] | r23 | 整理计划的分支 squash 进本地 `main`，删三个分支；#43：三个 action 升到 Node 24 的版本，`Release` 的演练；#44：扩展 API 的审计批 9（F7-02 至 F7-09），测试与变异检查；决策 11、13 记成不做；`docs/PLAN` 的 Cursor 规则 | PR [#43][pr-43]、[#44][pr-44] |
 | [附录 A.4][logA4] | r5 | 入口审计的 r5 执行结果 | [#7][pr-7] |
 | [附录 B][logB] | r2–r17 | 复现方法（依赖图、模块级闭包、各轮的测量与测试命令） | — |
 | [附录 C][logC] | r10 | §7 的逐项注释（原文） | — |
 | [附录 D][logD] | r10 | 计划头部的状态文字（原文） | — |
 | [附录 E][logE] | r2 | §4、§5 的原文（源码事实基线与改动规模估计） | — |
 | [附录 F][logF] | r22 续 1 | 计划整理前的状态文字（原文）：头部、「当前状态」逐轮、两个里程碑、「下一步」，「还没有验证的」「待决策」「§7」「§10 索引」里改短的条目，「修订记录（摘要）」的长条目 | — |
-| [修订记录][logRev] | r1–r22 续 1 | 逐轮的完整说明 | — |
+| [修订记录][logRev] | r1–r23 | 逐轮的完整说明 | — |
 
 ## 附录 A：能力矩阵与 ACP 版本配对（阶段 0.8，r9 定稿）
 
@@ -550,6 +552,7 @@ Rust（pager）：
 - r22：打 tag `v0.6.0`、发布、发布后的核对；合入 #40（2026-10-25）。见 [§10.25][l10-25]。
 - r22 续 1：钉 `build-tui` 的运行器，补 glibc 的下限（PR [#42][pr-42]；2026-10-25；用户已合入）；删 7 个已合入的本地分支。见 [§10.25][l10-25] 的「续 1」。
 - 整理（r22 续 1 之后，2026-10-27）：照 r10 之后那次的做法再整理一次。被缩短的各段原文存入归档的[附录 F][logF]：头部的状态文字、「当前状态」里逐轮的状态文字、两个发布里程碑、「下一步」、「还没有验证的」与「待决策」里改短的条目、§7 里阶段 C 与 D 的长状态、§10 索引里的长行，和本节 r12 到 r22 续 1 的长条目。计划里改成现在的状态，一轮一行。章节编号与锚点没有变。PR [#42][pr-42] 已由用户合入，状态据此更新。
+- r23：三个 action 升到 Node 24 的版本（PR [#43][pr-43]）；扩展 API 的审计批 9（PR [#44][pr-44]）；决策 11、13 已定，不做；新增 `docs/PLAN` 的 Cursor 规则（2026-10-27）。两个 PR 开着，没有合入。见 [§10.26][l10-26]。
 
 <!-- 链接定义 -->
 [log]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md
@@ -578,6 +581,7 @@ Rust（pager）：
 [l10-23]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1023-r20-追加mcp-的方向可选扩展包空白对话的修复发布内容合入-3336
 [l10-24]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1024-r21-追加v06-的版本号合入-38-与-39条件-14-的结果
 [l10-25]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1025-r22-追加打-tag-v060发布发布后的核对
+[l10-26]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1026-r23-追加三个-action-升到-node-24扩展-api-的审计批-9决策-11-与-13
 [l4-1]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#41-运行路径
 [l4-2]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#42-rust-runtime-与耦合面
 [l4-3]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#43-python-侧pi_agent_cli共-4114-行agentpy-472-行
@@ -622,6 +626,8 @@ Rust（pager）：
 [pr-40]: https://github.com/zy1233/pi-python/pull/40
 [pr-41]: https://github.com/zy1233/pi-python/pull/41
 [pr-42]: https://github.com/zy1233/pi-python/pull/42
+[pr-43]: https://github.com/zy1233/pi-python/pull/43
+[pr-44]: https://github.com/zy1233/pi-python/pull/44
 [ci-run-5f73e07]: https://github.com/zy1233/pi-python/actions/runs/40172668652
 [tui-ci-run-5f73e07]: https://github.com/zy1233/pi-python/actions/runs/40172721728
 [run-dry-run-5f73e07]: https://github.com/zy1233/pi-python/actions/runs/40172723794
