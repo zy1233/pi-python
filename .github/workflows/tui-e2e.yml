@@ -56,6 +56,19 @@ jobs:
           rustup show active-toolchain || rustup toolchain install
           rustc --version --verbose
 
+      # The same step as in tui-ci.yml (a test keeps them equal). It also keeps the cache key of
+      # this job equal to the key of the `test` job there: rust-cache hashes every installed
+      # toolchain, so both jobs must have the same ones.
+      - name: Keep only the pinned Rust toolchain
+        working-directory: tui
+        run: |
+          pinned="$(basename "$(rustc --print sysroot)")"
+          rustup default "$pinned"
+          for t in $(rustup toolchain list --quiet); do
+            [ "$t" = "$pinned" ] || rustup toolchain uninstall "$t" || echo "::warning::could not uninstall the Rust toolchain $t"
+          done
+          rustup toolchain list
+
       - name: Install protoc
         uses: arduino/setup-protoc@v3
         with:

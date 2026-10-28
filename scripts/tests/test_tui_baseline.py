@@ -793,6 +793,118 @@ def test_the_end_to_end_workflow_restores_the_cache_of_the_test_job_and_never_sa
     assert "save-if: ${{" not in end_to_end
 
 
+# ---- one toolchain on the runner (the key of rust-cache) -----------------------------------------
+#
+# rust-cache puts the version of every Rust toolchain on the runner into its cache key. The image
+# has its own `stable`, and a new image has a new version of it: the key changed, no cache matched,
+# and the next run built everything again (about 30 minutes). The jobs keep only the pinned
+# toolchain. These tests keep that step the same in every job and before the cache step, and keep
+# the variables that the key hashes the same in both workflows (the end-to-end job restores the key
+# of the `test` job, so the two hashes must be equal).
+
+INSTALL_STEP = "Install Rust toolchain (pinned by tui/rust-toolchain.toml)"
+PIN_STEP = "Keep only the pinned Rust toolchain"
+CACHE_ENV_PREFIXES = ("CARGO", "CC", "CFLAGS", "CXX", "CMAKE", "RUST")  # what rust-cache hashes
+
+
+def _jobs(text: str) -> dict[str, str]:
+    """Every job of a workflow file by name: the text under its `  <name>:` line."""
+    body = text.split("\njobs:\n", 1)[1]
+    jobs: dict[str, list[str]] = {}
+    current: list[str] | None = None
+    for line in body.splitlines():
+        header = re.fullmatch(r"  ([\w-]+):", line)
+        if header:
+            current = jobs.setdefault(header.group(1), [])
+        elif current is not None:
+            current.append(line)
+    return {name: "\n".join(lines) for name, lines in jobs.items()}
+
+
+def _all_jobs() -> dict[str, str]:
+    """The jobs of both workflow files, named `<file>:<job>`."""
+    found: dict[str, str] = {}
+    for path in (WORKFLOW, E2E_WORKFLOW):
+        for name, text in _jobs(path.read_text(encoding="utf-8")).items():
+            found[f"{path.name}:{name}"] = text
+    return found
+
+
+def _step_text(job: str, name: str) -> str:
+    """One step of a job, from its `- name:` line to the next step (or its comment)."""
+    lines = job.splitlines()
+    start = lines.index(f"      - name: {name}")
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        if re.match(r"^      (- |#)", lines[index]):
+            end = index
+            break
+    return "\n".join(lines[start:end]).rstrip()
+
+
+def _workflow_env(text: str) -> dict[str, str]:
+    """The variables of the top-level `env:` block of a workflow file."""
+    lines = text.split("\njobs:\n", 1)[0].splitlines()
+    env: dict[str, str] = {}
+    for line in lines[lines.index("env:") + 1 :]:
+        if line.strip() and not line.startswith("  "):
+            break
+        item = re.fullmatch(r"  ([A-Z_]+): (.+)", line)
+        if item:
+            env[item.group(1)] = item.group(2).strip('"')
+    return env
+
+
+def test_the_jobs_of_the_two_workflows_are_read():
+    # Without this, the next tests could pass because a helper found nothing.
+    jobs = _all_jobs()
+    names = {
+        "tui-ci.yml:check",
+        "tui-ci.yml:test",
+        "tui-ci.yml:release-baseline",
+        "tui-e2e.yml:e2e",
+    }
+    assert names <= set(jobs)
+    assert "Swatinem/rust-cache@v2" in jobs["tui-ci.yml:test"]
+    assert "Swatinem/rust-cache@v2" in jobs["tui-e2e.yml:e2e"]
+
+
+def test_every_job_that_installs_the_pinned_toolchain_then_keeps_only_that_one():
+    jobs = {key: job for key, job in _all_jobs().items() if f"- name: {INSTALL_STEP}" in job}
+    assert {"tui-ci.yml:check", "tui-ci.yml:test", "tui-e2e.yml:e2e"} <= set(jobs)
+    for key, job in jobs.items():
+        assert f"- name: {PIN_STEP}" in job, key
+        assert job.index(f"- name: {INSTALL_STEP}") < job.index(f"- name: {PIN_STEP}"), key
+        if "Swatinem/rust-cache@v2" in job:
+            # rust-cache makes its key when its step starts, so the toolchains must be gone by then.
+            assert job.index(f"- name: {PIN_STEP}") < job.index("Swatinem/rust-cache@v2"), key
+
+
+def test_the_step_that_keeps_only_the_pinned_toolchain_is_the_same_in_every_job():
+    steps = {
+        key: _step_text(job, PIN_STEP)
+        for key, job in _all_jobs().items()
+        if f"- name: {PIN_STEP}" in job
+    }
+    assert len(steps) >= 4
+    assert len(set(steps.values())) == 1, steps
+    step = next(iter(steps.values()))
+    assert "working-directory: tui" in step  # rust-toolchain.toml is read there
+    assert "rustc --print sysroot" in step  # the toolchain that the file selects
+    assert 'rustup default "$pinned"' in step  # so a command outside tui/ uses it too
+    assert "rustup toolchain list --quiet" in step
+    assert 'rustup toolchain uninstall "$t"' in step
+
+
+def test_the_two_workflows_set_the_same_variables_that_the_cache_key_hashes():
+    def hashed(path: Path) -> dict[str, str]:
+        env = _workflow_env(path.read_text(encoding="utf-8"))
+        return {key: value for key, value in env.items() if key.startswith(CACHE_ENV_PREFIXES)}
+
+    assert hashed(WORKFLOW)  # the helper found the block
+    assert hashed(WORKFLOW) == hashed(E2E_WORKFLOW)
+
+
 def _sample_report(detail: str = "a | b") -> dict:
     return {
         "tools": {"cargo": "cargo 1.94.0"},

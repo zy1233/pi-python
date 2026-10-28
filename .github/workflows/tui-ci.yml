@@ -64,6 +64,21 @@ jobs:
           rustup show active-toolchain || rustup toolchain install
           rustc --version --verbose
 
+      # rust-cache puts the version of every Rust toolchain on the runner into its cache key. The
+      # image has its own `stable`, and a new image has a new version of it: the key changes, no
+      # cache matches, and the next run builds everything again (about 30 minutes). With only the
+      # pinned toolchain left, the key does not depend on the image. A test keeps this step equal
+      # in every job of this file and of tui-e2e.yml.
+      - name: Keep only the pinned Rust toolchain
+        working-directory: tui
+        run: |
+          pinned="$(basename "$(rustc --print sysroot)")"
+          rustup default "$pinned"
+          for t in $(rustup toolchain list --quiet); do
+            [ "$t" = "$pinned" ] || rustup toolchain uninstall "$t" || echo "::warning::could not uninstall the Rust toolchain $t"
+          done
+          rustup toolchain list
+
       - name: Install protoc
         uses: arduino/setup-protoc@v3
         with:
@@ -102,6 +117,17 @@ jobs:
         run: |
           rustup show active-toolchain || rustup toolchain install
           rustc --version --verbose
+
+      # The same step as in the job `check` (see the comment there).
+      - name: Keep only the pinned Rust toolchain
+        working-directory: tui
+        run: |
+          pinned="$(basename "$(rustc --print sysroot)")"
+          rustup default "$pinned"
+          for t in $(rustup toolchain list --quiet); do
+            [ "$t" = "$pinned" ] || rustup toolchain uninstall "$t" || echo "::warning::could not uninstall the Rust toolchain $t"
+          done
+          rustup toolchain list
 
       - name: Install protoc
         uses: arduino/setup-protoc@v3
@@ -161,6 +187,17 @@ jobs:
         run: |
           rustup show active-toolchain || rustup toolchain install
           rustc --version --verbose
+
+      # The same step as in the job `check` (see the comment there).
+      - name: Keep only the pinned Rust toolchain
+        working-directory: tui
+        run: |
+          pinned="$(basename "$(rustc --print sysroot)")"
+          rustup default "$pinned"
+          for t in $(rustup toolchain list --quiet); do
+            [ "$t" = "$pinned" ] || rustup toolchain uninstall "$t" || echo "::warning::could not uninstall the Rust toolchain $t"
+          done
+          rustup toolchain list
 
       - name: Install protoc
         uses: arduino/setup-protoc@v3
