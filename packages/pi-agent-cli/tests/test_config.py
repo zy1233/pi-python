@@ -11,6 +11,7 @@ from pi_agent_cli.config import (
     load_config,
     load_local_env,
     make_get_api_key,
+    read_local_env,
 )
 
 
@@ -119,6 +120,24 @@ def test_load_local_env_sets_missing_keys(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("REAL_LLM_API_KEY", raising=False)
     load_local_env(tmp_path)
     assert os.environ.get("REAL_LLM_API_KEY") == "from-file"
+
+
+def test_read_local_env_returns_the_pairs_and_leaves_the_environment_alone(
+    tmp_path: Path, monkeypatch
+):
+    (tmp_path / "local.env").write_text(
+        '# comment\nA=1\nexport B="two"\nC=\nno equals sign\n=no name\nA=second\n',
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("A", raising=False)
+    monkeypatch.delenv("B", raising=False)
+    assert read_local_env(tmp_path) == {"A": "1", "B": "two", "C": ""}  # the first line of A counts
+    assert "A" not in os.environ
+    assert "B" not in os.environ
+
+
+def test_read_local_env_of_a_missing_file_is_empty(tmp_path: Path):
+    assert read_local_env(tmp_path) == {}
     rel = tmp_path / "skills"
     rel.mkdir()
     got = expand_config_path(".pi/skills", cwd=tmp_path / "proj")

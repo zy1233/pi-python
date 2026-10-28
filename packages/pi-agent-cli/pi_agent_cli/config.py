@@ -27,25 +27,49 @@ _VALID_THINKING: set[str] = {"off", "minimal", "low", "medium", "high", "xhigh"}
 # pi-python keeps its files; the extension loader and the extensions use the same function.
 
 
-def load_local_env(home: Path | str | None = None) -> None:
-    """Load ``~/.pi-python/local.env`` (KEY=value) without overwriting existing env."""
+def _parse_local_env_line(raw_line: str) -> tuple[str, str] | None:
+    """``(name, value)`` of one ``local.env`` line, or ``None`` for a line that sets nothing."""
+    line = raw_line.strip()
+    if not line or line.startswith("#"):
+        return None
+    if line.startswith("export "):
+        line = line[7:].strip()
+    key, sep, value = line.partition("=")
+    key = key.strip()
+    if not sep or not key:
+        return None
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        value = value[1:-1]
+    return key, value
+
+
+def local_env_line_key(raw_line: str) -> str | None:
+    """The variable name that one line of ``local.env`` sets (``None``: not an assignment)."""
+    parsed = _parse_local_env_line(raw_line)
+    return parsed[0] if parsed else None
+
+
+def read_local_env(home: Path | str | None = None) -> dict[str, str]:
+    """The ``KEY=value`` pairs of ``~/.pi-python/local.env``; the first line of a key counts.
+
+    Nothing is read when the file is not there. The environment is not touched.
+    """
     path = pi_home(home) / "local.env"
     if not path.is_file():
-        return
+        return {}
+    pairs: dict[str, str] = {}
     for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("export "):
-            line = line[7:].strip()
-        key, sep, value = line.partition("=")
-        if not sep:
-            continue
-        key = key.strip()
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
-        if key and key not in os.environ:
+        parsed = _parse_local_env_line(raw_line)
+        if parsed is not None:
+            pairs.setdefault(*parsed)
+    return pairs
+
+
+def load_local_env(home: Path | str | None = None) -> None:
+    """Load ``~/.pi-python/local.env`` (KEY=value) without overwriting existing env."""
+    for key, value in read_local_env(home).items():
+        if key not in os.environ:
             os.environ[key] = value
 
 
@@ -56,6 +80,11 @@ def agent_config_path(home: Path | str | None = None) -> Path:
 def legacy_config_path(home: Path | str | None = None) -> Path:
     """Legacy path; breaks the Rust TUI if it contains Python-only keys."""
     return pi_home(home) / "config.toml"
+
+
+# The provider of a configuration that sets no model (``CliConfig``'s default). It is the name
+# of the scripted test LLM (``PI_USE_MOCK=1``), not of a real provider.
+MOCK_PROVIDER = "mock"
 
 
 def expand_config_path(raw: str, *, cwd: str | Path) -> str:
@@ -96,7 +125,7 @@ class ModelChoice:
 @dataclass(frozen=True)
 class CliConfig:
     permission: PermissionMode = "ask"
-    provider: str = "mock"
+    provider: str = MOCK_PROVIDER
     model_id: str = "mock"
     base_url: str | None = None
     thinking_level: ThinkingLevel = "off"
@@ -292,7 +321,7 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
 
     return CliConfig(
         permission=permission,  # type: ignore[arg-type]
-        provider=str(model.get("provider") or data.get("provider") or "mock"),
+        provider=str(model.get("provider") or data.get("provider") or MOCK_PROVIDER),
         model_id=str(model.get("id") or model.get("model_id") or data.get("model_id") or "mock"),
         base_url=model.get("base_url") or data.get("base_url"),
         thinking_level=thinking,  # type: ignore[arg-type]
