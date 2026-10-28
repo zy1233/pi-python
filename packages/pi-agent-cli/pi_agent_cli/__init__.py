@@ -17,3 +17,5 @@ __all__ = [
     "make_get_api_key",
     "pi_home",
 ]
+
+# CI probe (PR is closed, not merged): this comment only tests which workflows start.
