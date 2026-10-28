@@ -17,6 +17,7 @@ from acp.interfaces import Agent, Client
 from acp.schema import (
     AgentCapabilities,
     AudioContentBlock,
+    AuthenticateResponse,
     AvailableCommand,
     AvailableCommandInput,
     AvailableCommandsUpdate,
@@ -50,12 +51,20 @@ from acp.schema import (
 )
 from pydantic import ValidationError
 
+from pi_agent_cli.auth_methods import (
+    SETUP_METHOD_ID,
+    auth_required_error,
+    setup_auth_method,
+    terminal_auth_form,
+)
 from pi_agent_cli.client_mcp import client_mcp_servers, mcp_extension_installed
 from pi_agent_cli.config import (
     CliConfig,
     ModelChoice,
     PermissionMode,
+    config_problem,
     load_config,
+    load_local_env,
     pi_home,
 )
 from pi_agent_cli.events import project_event, project_message_replay
@@ -179,6 +188,10 @@ class PiAcpAgent(Agent):
         self._home = pi_home(home)
         self._config = config if config is not None else load_config(self._home)
         self._stream_fn = stream_fn if stream_fn is not None else default_stream_fn()
+        # The terminal login (``--setup``) is for an agent that reads its model and key from the
+        # files of the home folder. Code that gives its own configuration or stream function
+        # (tests, an embedding program) has other ways to set them.
+        self._offers_setup = stream_fn is None and config is None
         sessions_dir = self._home / "sessions"
         sessions_dir.mkdir(parents=True, exist_ok=True)
         self._repo = repo if repo is not None else JsonlSessionRepo(sessions_dir)
@@ -224,6 +237,9 @@ class PiAcpAgent(Agent):
         self._client_capabilities = client_capabilities
         self._client_info = client_info
         remote_mcp = mcp_extension_installed()
+        setup_method = (
+            setup_auth_method(client_capabilities, self._home) if self._offers_setup else None
+        )
         return InitializeResponse(
             protocol_version=min(protocol_version, PROTOCOL_VERSION),
             agent_capabilities=AgentCapabilities(
@@ -240,9 +256,36 @@ class PiAcpAgent(Agent):
                     close=SessionCloseCapabilities(),
                 ),
             ),
-            auth_methods=[],
+            auth_methods=[setup_method] if setup_method is not None else [],
             agent_info=_AGENT_INFO,
         )
+
+    def _refresh_config(self) -> None:
+        """Read ``agent.toml`` and ``local.env`` again when what the agent has cannot run a turn.
+
+        ``--setup`` may have run in a terminal of the client while this process was up. Only a
+        configuration that was read from the files is read again, and only while it is unusable,
+        so a working one never changes under a running agent.
+        """
+        if not self._offers_setup or config_problem(self._config) is None:
+            return
+        load_local_env(self._home)
+        try:
+            self._config = load_config(self._home)
+        except (OSError, ValueError):
+            logger.warning("could not read the configuration again", exc_info=True)
+
+    async def authenticate(self, method_id: str, **kwargs: Any) -> AuthenticateResponse | None:
+        """The client ran the terminal login and asks whether it worked."""
+        if not self._offers_setup or method_id != SETUP_METHOD_ID:
+            raise RequestError.invalid_params(
+                {"methodId": method_id, "reason": "not an authentication method of this agent"}
+            )
+        self._refresh_config()
+        problem = config_problem(self._config)
+        if problem is not None:
+            raise auth_required_error(problem)
+        return AuthenticateResponse()
 
     async def new_session(
         self,
@@ -251,6 +294,12 @@ class PiAcpAgent(Agent):
         mcp_servers: list[HttpMcpServer | SseMcpServer | McpServerStdio] | None = None,
         **kwargs: Any,
     ) -> NewSessionResponse:
+        # A client that can run the terminal login is sent to it when a session could not work.
+        # A client that cannot gets the session, and the first turn says what is missing.
+        self._refresh_config()
+        problem = config_problem(self._config) if self._offers_setup else None
+        if problem is not None and terminal_auth_form(self._client_capabilities) is not None:
+            raise auth_required_error(problem)
         chosen_id = _chosen_session_id(kwargs)
         # The session has no file yet: it is written with its first message. A session in which
         # nobody typed anything leaves nothing to list, and nothing for ``--continue`` to take.
@@ -284,6 +333,7 @@ class PiAcpAgent(Agent):
         additional_directories: list[str] | None = None,
         **kwargs: Any,
     ) -> LoadSessionResponse | None:
+        self._refresh_config()  # old history can be read without a model, so this never refuses
         metadata = await self._find_metadata(session_id)
         if metadata is None:
             # No file: nobody typed in it (there is nothing to replay), or the id is unknown.
@@ -340,6 +390,7 @@ class PiAcpAgent(Agent):
         mcp_servers: list[HttpMcpServer | SseMcpServer | McpServerStdio] | None = None,
         **kwargs: Any,
     ) -> ResumeSessionResponse:
+        self._refresh_config()
         metadata = await self._find_metadata(session_id)
         if metadata is None:
             await self._reopen_blank_session(session_id, cwd, mcp_servers)

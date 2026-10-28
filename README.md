@@ -169,7 +169,8 @@ The agent speaks ACP over stdio, so [Zed](https://zed.dev) can start it as a cus
 ```
 
 - `--with` installs the LangChain provider package. Use `[openai]` or `[anthropic]` for those providers.
-- Put the model and the name of the key variable in `~/.pi-python/agent.toml` (start from [`agent.example.toml`](packages/pi-agent-cli/agent.example.toml)). Never write the key in that file. Give it to the agent in an environment variable that Zed can see, in the `env` of the entry above, or in `~/.pi-python/local.env` (`KEY=VALUE` lines).
+- First run: the agent has no model and no key yet. Zed offers the login "Set up model and API key" for a new thread. It runs the agent command with `--setup` in a terminal. The command asks for the provider, the model and the key. It writes the model and the name of the key variable to `~/.pi-python/agent.toml`, and the key to `~/.pi-python/local.env`. To run it yourself in a shell: `uvx --from pi-agent-cli-lc --with "pi-agent-core-lc[deepseek]" pi-agent-cli --setup`. The login in Zed is not tried yet in Zed itself; a script that acts as the client tested it.
+- To set up by hand: put the model and the name of the key variable in `~/.pi-python/agent.toml` (start from [`agent.example.toml`](packages/pi-agent-cli/agent.example.toml)). Never write the key in that file. Give it to the agent in an environment variable that Zed can see, in the `env` of the entry above, or in `~/.pi-python/local.env` (`KEY=VALUE` lines).
 - To run the code of a checkout, set `command` to the Python of its virtual environment and `args` to `["-m", "pi_agent_cli"]`.
 - The agent is not in Zed's ACP registry, so add it as a custom agent as shown.
 

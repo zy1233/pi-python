@@ -7,7 +7,7 @@ file with its own typed schema and stops on keys like ``permission = \"ask\"``.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -27,25 +27,49 @@ _VALID_THINKING: set[str] = {"off", "minimal", "low", "medium", "high", "xhigh"}
 # pi-python keeps its files; the extension loader and the extensions use the same function.
 
 
-def load_local_env(home: Path | str | None = None) -> None:
-    """Load ``~/.pi-python/local.env`` (KEY=value) without overwriting existing env."""
+def _parse_local_env_line(raw_line: str) -> tuple[str, str] | None:
+    """``(name, value)`` of one ``local.env`` line, or ``None`` for a line that sets nothing."""
+    line = raw_line.strip()
+    if not line or line.startswith("#"):
+        return None
+    if line.startswith("export "):
+        line = line[7:].strip()
+    key, sep, value = line.partition("=")
+    key = key.strip()
+    if not sep or not key:
+        return None
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        value = value[1:-1]
+    return key, value
+
+
+def local_env_line_key(raw_line: str) -> str | None:
+    """The variable name that one line of ``local.env`` sets (``None``: not an assignment)."""
+    parsed = _parse_local_env_line(raw_line)
+    return parsed[0] if parsed else None
+
+
+def read_local_env(home: Path | str | None = None) -> dict[str, str]:
+    """The ``KEY=value`` pairs of ``~/.pi-python/local.env``; the first line of a key counts.
+
+    Nothing is read when the file is not there. The environment is not touched.
+    """
     path = pi_home(home) / "local.env"
     if not path.is_file():
-        return
+        return {}
+    pairs: dict[str, str] = {}
     for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("export "):
-            line = line[7:].strip()
-        key, sep, value = line.partition("=")
-        if not sep:
-            continue
-        key = key.strip()
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
-        if key and key not in os.environ:
+        parsed = _parse_local_env_line(raw_line)
+        if parsed is not None:
+            pairs.setdefault(*parsed)
+    return pairs
+
+
+def load_local_env(home: Path | str | None = None) -> None:
+    """Load ``~/.pi-python/local.env`` (KEY=value) without overwriting existing env."""
+    for key, value in read_local_env(home).items():
+        if key not in os.environ:
             os.environ[key] = value
 
 
@@ -56,6 +80,29 @@ def agent_config_path(home: Path | str | None = None) -> Path:
 def legacy_config_path(home: Path | str | None = None) -> Path:
     """Legacy path; breaks the Rust TUI if it contains Python-only keys."""
     return pi_home(home) / "config.toml"
+
+
+# The provider of a configuration that sets no model (``CliConfig``'s default). It is the name
+# of the scripted test LLM (``PI_USE_MOCK=1``), not of a real provider.
+MOCK_PROVIDER = "mock"
+
+
+NO_MODEL = "No model is set."
+
+# The variable that the SDK of a provider reads when it is given no key (see ``api_key_getter``).
+STANDARD_KEY_ENV = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+}
+
+
+def no_model_message(home: Path | str | None = None) -> str:
+    """What to tell a user whose configuration sets no model."""
+    return (
+        f"{NO_MODEL} Run the agent with --setup, "
+        f"or add a [model] table to {agent_config_path(home)}."
+    )
 
 
 def expand_config_path(raw: str, *, cwd: str | Path) -> str:
@@ -96,7 +143,7 @@ class ModelChoice:
 @dataclass(frozen=True)
 class CliConfig:
     permission: PermissionMode = "ask"
-    provider: str = "mock"
+    provider: str = MOCK_PROVIDER
     model_id: str = "mock"
     base_url: str | None = None
     thinking_level: ThinkingLevel = "off"
@@ -221,6 +268,29 @@ def make_get_api_key(
     return api_key_getter(config.api_key_env, config.provider)
 
 
+def config_problem(config: CliConfig, environ: Mapping[str, str] | None = None) -> str | None:
+    """Why ``config`` cannot start a turn, as a sentence (``None``: nothing is missing).
+
+    This looks at what the files say and uses no network: is a model set, and has the variable
+    that holds its key a value? A key that the provider turns down is not found here. The
+    scripted test LLM (``PI_USE_MOCK=1``) has no problem. The variable that the provider's SDK
+    reads when it gets no key counts as a key too (``STANDARD_KEY_ENV``).
+    """
+    env = os.environ if environ is None else environ
+    if env.get("PI_USE_MOCK") == "1":
+        return None
+    provider = config.provider.casefold()
+    if provider == MOCK_PROVIDER:
+        return NO_MODEL
+    name = config.api_key_env
+    if not name or env.get(name):
+        return None
+    standard = STANDARD_KEY_ENV.get(provider)
+    if standard and env.get(standard):
+        return None
+    return f"The variable {name} has no value."
+
+
 def _from_toml(data: dict[str, Any]) -> CliConfig:
     model = data.get("model") if isinstance(data.get("model"), dict) else {}
     skills = data.get("skills") if isinstance(data.get("skills"), dict) else {}
@@ -292,7 +362,7 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
 
     return CliConfig(
         permission=permission,  # type: ignore[arg-type]
-        provider=str(model.get("provider") or data.get("provider") or "mock"),
+        provider=str(model.get("provider") or data.get("provider") or MOCK_PROVIDER),
         model_id=str(model.get("id") or model.get("model_id") or data.get("model_id") or "mock"),
         base_url=model.get("base_url") or data.get("base_url"),
         thinking_level=thinking,  # type: ignore[arg-type]

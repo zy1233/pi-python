@@ -3,6 +3,8 @@
 # (the Rust TUI reads config.toml with its own typed schema: a key it knows, such as a top-level
 # `permission = "ask"`, stops it at start).
 # LLM keys are read from environment variables — never put secrets in this file.
+# `python -m pi_agent_cli --setup` asks for a model and a key, writes the [model] table below to
+# agent.toml, and writes the key to local.env (KEY=VALUE lines in the same folder).
 
 permission = "ask" # ask | auto | always-approve
 # `ask` asks before each tool call, except for tools that declare themselves harmless: read-only

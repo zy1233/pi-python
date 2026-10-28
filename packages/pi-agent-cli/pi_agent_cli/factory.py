@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
+import time
 from collections.abc import Awaitable, Callable, Iterable
 from pathlib import Path
 from typing import Any
 
 from pi_agent_cli.config import (
+    MOCK_PROVIDER,
     CliConfig,
     ModelChoice,
     api_key_getter,
     expand_config_path,
     is_project_relative_path,
+    no_model_message,
     pi_home,
 )
 from pi_agent_cli.create_harness import build_coding_agent_harness_system_prompt
@@ -21,7 +25,9 @@ from pi_agent_cli.prompt_options import load_system_prompt_options
 from pi_agent_core.coding_tools import create_all_tools
 from pi_agent_core.coding_tools.bash import create_bash_tool
 from pi_agent_core.coding_tools.path_utils import normalize_host_path
-from pi_agent_core.types import Model, StreamFn
+from pi_agent_core.event_stream import AssistantMessageEventStream
+from pi_agent_core.messages import AssistantMessage, Usage
+from pi_agent_core.types import ErrorEvent, LlmContext, Model, StreamFn, StreamOptions
 from pi_agent_harness import AgentHarness, AgentHarnessResources, LocalExecutionEnv, Session
 from pi_agent_harness.compaction import CompactionSettings
 from pi_agent_harness.skills import load_skills
@@ -76,7 +82,47 @@ def default_stream_fn() -> StreamFn:
         return mock_text_stream
     from pi_agent_core.adapters.langchain_stream import langchain_stream
 
-    return langchain_stream
+    return _say_when_no_model(langchain_stream)
+
+
+def _say_when_no_model(inner: StreamFn) -> StreamFn:
+    """``inner``, except that the ``mock`` provider gets an error that says what is wrong.
+
+    A configuration that sets no model falls back to ``mock``. LangChain has no such provider,
+    and what it says is about a missing package (``pip install langchain``), which sends the
+    user the wrong way.
+    """
+
+    async def stream(
+        model: Model, context: LlmContext, options: StreamOptions
+    ) -> AssistantMessageEventStream:
+        if model.provider.casefold() == MOCK_PROVIDER:
+            return _error_stream(model, no_model_message())
+        result = inner(model, context, options)
+        return await result if inspect.isawaitable(result) else result
+
+    return stream
+
+
+def _error_stream(model: Model, text: str) -> AssistantMessageEventStream:
+    """A stream that ends at once with an ``error`` (what a stream function does, never raises)."""
+    message = AssistantMessage(
+        content=[],
+        api=model.api,
+        provider=model.provider,
+        model=model.model_id,
+        usage=Usage(),
+        stopReason="error",
+        errorMessage=text,
+        timestamp=int(time.time() * 1000),
+    )
+    stream = AssistantMessageEventStream()
+    stream.push(
+        ErrorEvent(partial=message.model_copy(deep=True), reason="error", error_message=text)
+    )
+    stream.set_final_message(message)
+    stream.end()
+    return stream
 
 
 async def load_session_resources(

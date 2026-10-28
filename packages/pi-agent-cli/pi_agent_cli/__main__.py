@@ -2,6 +2,7 @@
 
 Default: ACP agent on stdio.
 `python -m pi_agent_cli -p "..."`: one-shot headless turn (no TUI).
+`python -m pi_agent_cli --setup`: choose a model and save its API key, in a terminal.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from pi_agent_cli.agent import PiAcpAgent
 from pi_agent_cli.config import load_local_env
 from pi_agent_cli.extension_trust import TRUST_ENV
 from pi_agent_cli.headless import HeadlessPromptOverrides, resolve_print_prompt, run_print
+from pi_agent_cli.setup_command import run_setup
 
 _PROMPT_CLI_FLAG_NAMES = (
     "system_prompt",
@@ -190,6 +192,14 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Read the single-turn prompt from a file.",
     )
+    src.add_argument(
+        "--setup",
+        action="store_true",
+        help=(
+            "Choose a model and save its API key (asks in the terminal), then exit. "
+            "Writes the [model] table of agent.toml and the key line of local.env."
+        ),
+    )
     parser.add_argument(
         "--cwd",
         metavar="PATH",
@@ -284,6 +294,8 @@ def main() -> None:
             file=sys.stderr,
         )
         raise SystemExit(2)
+    if args.setup:
+        raise SystemExit(run_setup())
     if headless:
         try:
             prompt = resolve_print_prompt(
