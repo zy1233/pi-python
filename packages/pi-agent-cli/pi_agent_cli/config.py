@@ -87,6 +87,14 @@ def legacy_config_path(home: Path | str | None = None) -> Path:
 MOCK_PROVIDER = "mock"
 
 
+def no_model_message(home: Path | str | None = None) -> str:
+    """What to tell a user whose configuration sets no model."""
+    return (
+        "No model is set. Run the agent with --setup, "
+        f"or add a [model] table to {agent_config_path(home)}."
+    )
+
+
 def expand_config_path(raw: str, *, cwd: str | Path) -> str:
     """Expand ~ and resolve relative skill/config paths against cwd."""
     expanded = os.path.expanduser(raw)

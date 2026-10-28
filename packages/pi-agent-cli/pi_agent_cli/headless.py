@@ -149,5 +149,12 @@ async def run_print(
         print(failed, file=sys.stderr, flush=True)
     message = await harness.prompt(text)
     out = assistant_text(message)
-    print(out, end="" if out.endswith("\n") else "\n")
+    model_failed = getattr(message, "stopReason", None) == "error"
+    if out or not model_failed:
+        print(out, end="" if out.endswith("\n") else "\n")
+    if model_failed:
+        # stdout carries only the answer: the reason goes to stderr, and the status says it failed.
+        reason = getattr(message, "errorMessage", None) or "the model request failed"
+        print(f"error: {reason}", file=sys.stderr, flush=True)
+        return 1
     return 0
