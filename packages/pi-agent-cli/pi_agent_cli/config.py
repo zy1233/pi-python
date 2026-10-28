@@ -7,7 +7,7 @@ file with its own typed schema and stops on keys like ``permission = \"ask\"``.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -87,10 +87,20 @@ def legacy_config_path(home: Path | str | None = None) -> Path:
 MOCK_PROVIDER = "mock"
 
 
+NO_MODEL = "No model is set."
+
+# The variable that the SDK of a provider reads when it is given no key (see ``api_key_getter``).
+STANDARD_KEY_ENV = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+}
+
+
 def no_model_message(home: Path | str | None = None) -> str:
     """What to tell a user whose configuration sets no model."""
     return (
-        "No model is set. Run the agent with --setup, "
+        f"{NO_MODEL} Run the agent with --setup, "
         f"or add a [model] table to {agent_config_path(home)}."
     )
 
@@ -256,6 +266,29 @@ def make_get_api_key(
     ``config.provider`` only (see ``api_key_getter``).
     """
     return api_key_getter(config.api_key_env, config.provider)
+
+
+def config_problem(config: CliConfig, environ: Mapping[str, str] | None = None) -> str | None:
+    """Why ``config`` cannot start a turn, as a sentence (``None``: nothing is missing).
+
+    This looks at what the files say and uses no network: is a model set, and has the variable
+    that holds its key a value? A key that the provider turns down is not found here. The
+    scripted test LLM (``PI_USE_MOCK=1``) has no problem. The variable that the provider's SDK
+    reads when it gets no key counts as a key too (``STANDARD_KEY_ENV``).
+    """
+    env = os.environ if environ is None else environ
+    if env.get("PI_USE_MOCK") == "1":
+        return None
+    provider = config.provider.casefold()
+    if provider == MOCK_PROVIDER:
+        return NO_MODEL
+    name = config.api_key_env
+    if not name or env.get(name):
+        return None
+    standard = STANDARD_KEY_ENV.get(provider)
+    if standard and env.get(standard):
+        return None
+    return f"The variable {name} has no value."
 
 
 def _from_toml(data: dict[str, Any]) -> CliConfig:

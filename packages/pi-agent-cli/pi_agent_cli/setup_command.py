@@ -34,6 +34,7 @@ from typing import TextIO
 
 from pi_agent_cli.config import (
     MOCK_PROVIDER,
+    STANDARD_KEY_ENV,
     agent_config_path,
     legacy_config_path,
     load_config,
@@ -41,10 +42,6 @@ from pi_agent_cli.config import (
     pi_home,
     read_local_env,
 )
-
-# The id of the terminal login that ``initialize`` offers, and the arguments that start it.
-SETUP_METHOD_ID = "pi-setup"
-SETUP_ARGS = ("--setup",)
 
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
@@ -54,33 +51,20 @@ class Preset:
     """A provider that the agent can use once its LangChain package is installed."""
 
     label: str
-    provider: str
-    key_env: str  # the usual name of the variable that holds the key
-    extra: str  # the extra of ``pi-agent-core-lc`` that installs the package
-    module: str  # what the package imports as
+    provider: str  # also the name of the extra of ``pi-agent-core-lc`` that installs the package
+    module: str  # what that package imports as
     asks_base_url: bool
+
+    @property
+    def key_env(self) -> str:
+        """The usual name of the variable that holds the key."""
+        return STANDARD_KEY_ENV[self.provider]
 
 
 PRESETS = (
-    Preset(
-        "OpenAI, or an OpenAI-compatible endpoint",
-        "openai",
-        "OPENAI_API_KEY",
-        "openai",
-        "langchain_openai",
-        True,
-    ),
-    Preset(
-        "Anthropic", "anthropic", "ANTHROPIC_API_KEY", "anthropic", "langchain_anthropic", False
-    ),
-    Preset(
-        "DeepSeek, or a DeepSeek-style gateway",
-        "deepseek",
-        "DEEPSEEK_API_KEY",
-        "deepseek",
-        "langchain_deepseek",
-        True,
-    ),
+    Preset("OpenAI, or an OpenAI-compatible endpoint", "openai", "langchain_openai", True),
+    Preset("Anthropic", "anthropic", "langchain_anthropic", False),
+    Preset("DeepSeek, or a DeepSeek-style gateway", "deepseek", "langchain_deepseek", True),
 )
 
 
@@ -445,8 +429,8 @@ def _dialog(home: Path, io: SetupIO, environ: Mapping[str, str]) -> int:
         io.say()
         io.say(f"Note: the package for {preset.provider} is not installed in this environment.")
         io.say(
-            f'  uvx (for example in Zed): add "--with", "pi-agent-core-lc[{preset.extra}]" '
+            f'  uvx (for example in Zed): add "--with", "pi-agent-core-lc[{preset.provider}]" '
             'to the arguments, before "pi-agent-cli".'
         )
-        io.say(f'  pip: pip install "pi-agent-core-lc[{preset.extra}]"')
+        io.say(f'  pip: pip install "pi-agent-core-lc[{preset.provider}]"')
     return 0
