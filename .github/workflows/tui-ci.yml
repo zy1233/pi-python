@@ -4,6 +4,11 @@ name: TUI CI
 # TUI workspace (tui/). Authoritative environment (ADR6): ubuntu-24.04 + the toolchain pinned in
 # tui/rust-toolchain.toml. What is enforced vs report-only lives in scripts/tui_baseline.toml; the
 # report is docs/baselines/tui.md. Python code is covered by ci.yml.
+#
+# A change that touches only the Python agent (`packages/pi-agent-cli/pi_agent_cli/**`,
+# `packages/pi-agent-cli/tests/_tool_agent.py`) does not start this workflow: the end-to-end tests
+# of the pager are the only tests that read the agent, and tui-e2e.yml runs them alone. This
+# workflow still includes them, for a change that starts it.
 
 on:
   push:
@@ -13,17 +18,12 @@ on:
       - "scripts/tui_baseline.py"
       - "scripts/tui_baseline.toml"
       - ".github/workflows/tui-ci.yml"
-      # The Python agent is what the pager's end-to-end tests talk to (its ACP surface).
-      - "packages/pi-agent-cli/pi_agent_cli/**"
-      - "packages/pi-agent-cli/tests/_tool_agent.py"
   pull_request:
     paths:
       - "tui/**"
       - "scripts/tui_baseline.py"
       - "scripts/tui_baseline.toml"
       - ".github/workflows/tui-ci.yml"
-      - "packages/pi-agent-cli/pi_agent_cli/**"
-      - "packages/pi-agent-cli/tests/_tool_agent.py"
   workflow_dispatch:
     inputs:
       release_baseline:
@@ -64,6 +64,21 @@ jobs:
           rustup show active-toolchain || rustup toolchain install
           rustc --version --verbose
 
+      # rust-cache puts the version of every Rust toolchain on the runner into its cache key. The
+      # image has its own `stable`, and a new image has a new version of it: the key changes, no
+      # cache matches, and the next run builds everything again (about 30 minutes). With only the
+      # pinned toolchain left, the key does not depend on the image. A test keeps this step equal
+      # in every job of this file and of tui-e2e.yml.
+      - name: Keep only the pinned Rust toolchain
+        working-directory: tui
+        run: |
+          pinned="$(basename "$(rustc --print sysroot)")"
+          rustup default "$pinned"
+          for t in $(rustup toolchain list --quiet); do
+            [ "$t" = "$pinned" ] || rustup toolchain uninstall "$t" || echo "::warning::could not uninstall the Rust toolchain $t"
+          done
+          rustup toolchain list
+
       - name: Install protoc
         uses: arduino/setup-protoc@v3
         with:
@@ -102,6 +117,17 @@ jobs:
         run: |
           rustup show active-toolchain || rustup toolchain install
           rustc --version --verbose
+
+      # The same step as in the job `check` (see the comment there).
+      - name: Keep only the pinned Rust toolchain
+        working-directory: tui
+        run: |
+          pinned="$(basename "$(rustc --print sysroot)")"
+          rustup default "$pinned"
+          for t in $(rustup toolchain list --quiet); do
+            [ "$t" = "$pinned" ] || rustup toolchain uninstall "$t" || echo "::warning::could not uninstall the Rust toolchain $t"
+          done
+          rustup toolchain list
 
       - name: Install protoc
         uses: arduino/setup-protoc@v3
@@ -161,6 +187,17 @@ jobs:
         run: |
           rustup show active-toolchain || rustup toolchain install
           rustc --version --verbose
+
+      # The same step as in the job `check` (see the comment there).
+      - name: Keep only the pinned Rust toolchain
+        working-directory: tui
+        run: |
+          pinned="$(basename "$(rustc --print sysroot)")"
+          rustup default "$pinned"
+          for t in $(rustup toolchain list --quiet); do
+            [ "$t" = "$pinned" ] || rustup toolchain uninstall "$t" || echo "::warning::could not uninstall the Rust toolchain $t"
+          done
+          rustup toolchain list
 
       - name: Install protoc
         uses: arduino/setup-protoc@v3

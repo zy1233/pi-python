@@ -19,6 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "tui_baseline.py"
 MANIFEST = REPO_ROOT / "scripts" / "tui_baseline.toml"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "tui-ci.yml"
+E2E_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "tui-e2e.yml"
 
 
 def _load():
@@ -695,6 +696,213 @@ def test_workflow_runs_the_documented_commands():
     for command in ("check", "test", "release"):  # `gates` runs inside `check`
         assert f"scripts/tui_baseline.py {command}" in text, command
     assert "scripts/tui_baseline.toml" in text  # path filter, so manifest edits trigger the job
+
+
+# ---- the end-to-end workflow (tui-e2e.yml) -------------------------------------------------------
+#
+# A change that touches only the Python agent starts tui-e2e.yml (one test target) and not
+# tui-ci.yml (ten suites, 18 to 35 minutes). These tests keep the two files from drifting apart.
+
+# What the end-to-end tests read on the Python side.
+AGENT_PATHS = (
+    "packages/pi-agent-cli/pi_agent_cli/**",
+    "packages/pi-agent-cli/tests/_tool_agent.py",
+)
+
+
+def _trigger_paths(text: str, event: str) -> list[str]:
+    """The entries of `on.<event>.paths` of a workflow file, as written (comments left out)."""
+    lines = text.splitlines()
+    start = lines.index(f"  {event}:")
+    paths: list[str] = []
+    in_paths = False
+    for line in lines[start + 1 :]:
+        if line.strip() and not line.startswith("   "):  # the next event, or the next block
+            break
+        item = line.strip()
+        if item == "paths:":
+            in_paths = True
+        elif in_paths and item.startswith("- "):
+            paths.append(item[2:].strip().strip('"'))
+        elif in_paths and item and not item.startswith("#"):
+            break  # another key of the event: the list is over
+    return paths
+
+
+def test_the_trigger_paths_of_the_full_workflow_are_read():
+    # Without this, the next test could pass because the helper found nothing.
+    text = WORKFLOW.read_text(encoding="utf-8")
+    for event in ("push", "pull_request"):
+        paths = _trigger_paths(text, event)
+        assert "tui/**" in paths, event
+        assert ".github/workflows/tui-ci.yml" in paths, event
+
+
+def test_a_change_of_the_python_agent_alone_starts_the_end_to_end_workflow_and_not_the_full_one():
+    full = WORKFLOW.read_text(encoding="utf-8")
+    end_to_end = E2E_WORKFLOW.read_text(encoding="utf-8")
+    for event in ("push", "pull_request"):
+        of_full = set(_trigger_paths(full, event))
+        of_end_to_end = set(_trigger_paths(end_to_end, event))
+        assert set(AGENT_PATHS) <= of_end_to_end, event
+        assert not set(AGENT_PATHS) & of_full, (event, "tui-ci.yml would run for the agent alone")
+        # A change of the workflow file is its own test.
+        assert ".github/workflows/tui-e2e.yml" in of_end_to_end, event
+
+
+def test_the_end_to_end_workflow_runs_a_target_of_the_manifest_with_the_flags_of_the_script():
+    pager = next(s for s in _manifest()["test"]["suite"] if s["package"] == "pi-pager")
+    targets = pager["targets"]
+    assert targets[targets.index("python_agent_e2e") - 1] == "--test"
+    command = tb.suite_command(
+        "nextest", {"package": "pi-pager", "targets": ["--test", "python_agent_e2e"]}
+    )
+    assert " ".join(command) in E2E_WORKFLOW.read_text(encoding="utf-8")
+
+
+def test_the_end_to_end_workflow_has_the_environment_of_the_manifest():
+    text = E2E_WORKFLOW.read_text(encoding="utf-8")
+    test_config = _manifest()["test"]
+    for key, value in test_config["env"].items():
+        assert re.search(rf"^\s+{re.escape(key)}: {re.escape(value)}$", text, re.MULTILINE), key
+    for key in test_config["unset_env"]:  # the manifest unsets them; the job must not set them
+        assert key not in text, key
+
+
+def test_the_end_to_end_workflow_installs_the_agent_and_nextest_as_the_test_job_does():
+    full = WORKFLOW.read_text(encoding="utf-8")
+    end_to_end = E2E_WORKFLOW.read_text(encoding="utf-8")
+    for pattern in (r"^\s*pip install .+$", r"tool: (nextest@\S+)"):
+        found = re.findall(pattern, end_to_end, re.MULTILINE)
+        assert found, pattern
+        assert found == re.findall(pattern, full, re.MULTILINE), pattern
+    # A Python without the agent is a failure of the job, not a skipped test.
+    assert 'echo "PI_E2E_PYTHON=$(command -v python)" >> "$GITHUB_ENV"' in end_to_end
+    assert 'echo "PI_E2E_REQUIRED=1" >> "$GITHUB_ENV"' in end_to_end
+
+
+def test_the_end_to_end_workflow_restores_the_cache_of_the_test_job_and_never_saves_it():
+    full = WORKFLOW.read_text(encoding="utf-8")
+    test_job = full.split("\n  test:\n", 1)[1].split("\n  release-baseline:\n", 1)[0]
+    key = re.search(r"shared-key: (\S+)", test_job).group(1)
+    end_to_end = E2E_WORKFLOW.read_text(encoding="utf-8")
+    # Same key, so the job finds the cache of the full job. It saves nothing: a cache with the
+    # same key but fewer artifacts would stop the full job from saving the whole one.
+    assert f"shared-key: {key}\n" in end_to_end
+    assert 'save-if: "false"' in end_to_end
+    assert "save-if: ${{" not in end_to_end
+
+
+# ---- one toolchain on the runner (the key of rust-cache) -----------------------------------------
+#
+# rust-cache puts the version of every Rust toolchain on the runner into its cache key. The image
+# has its own `stable`, and a new image has a new version of it: the key changed, no cache matched,
+# and the next run built everything again (about 30 minutes). The jobs keep only the pinned
+# toolchain. These tests keep that step the same in every job and before the cache step, and keep
+# the variables that the key hashes the same in both workflows (the end-to-end job restores the key
+# of the `test` job, so the two hashes must be equal).
+
+INSTALL_STEP = "Install Rust toolchain (pinned by tui/rust-toolchain.toml)"
+PIN_STEP = "Keep only the pinned Rust toolchain"
+CACHE_ENV_PREFIXES = ("CARGO", "CC", "CFLAGS", "CXX", "CMAKE", "RUST")  # what rust-cache hashes
+
+
+def _jobs(text: str) -> dict[str, str]:
+    """Every job of a workflow file by name: the text under its `  <name>:` line."""
+    body = text.split("\njobs:\n", 1)[1]
+    jobs: dict[str, list[str]] = {}
+    current: list[str] | None = None
+    for line in body.splitlines():
+        header = re.fullmatch(r"  ([\w-]+):", line)
+        if header:
+            current = jobs.setdefault(header.group(1), [])
+        elif current is not None:
+            current.append(line)
+    return {name: "\n".join(lines) for name, lines in jobs.items()}
+
+
+def _all_jobs() -> dict[str, str]:
+    """The jobs of both workflow files, named `<file>:<job>`."""
+    found: dict[str, str] = {}
+    for path in (WORKFLOW, E2E_WORKFLOW):
+        for name, text in _jobs(path.read_text(encoding="utf-8")).items():
+            found[f"{path.name}:{name}"] = text
+    return found
+
+
+def _step_text(job: str, name: str) -> str:
+    """One step of a job, from its `- name:` line to the next step (or its comment)."""
+    lines = job.splitlines()
+    start = lines.index(f"      - name: {name}")
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        if re.match(r"^      (- |#)", lines[index]):
+            end = index
+            break
+    return "\n".join(lines[start:end]).rstrip()
+
+
+def _workflow_env(text: str) -> dict[str, str]:
+    """The variables of the top-level `env:` block of a workflow file."""
+    lines = text.split("\njobs:\n", 1)[0].splitlines()
+    env: dict[str, str] = {}
+    for line in lines[lines.index("env:") + 1 :]:
+        if line.strip() and not line.startswith("  "):
+            break
+        item = re.fullmatch(r"  ([A-Z_]+): (.+)", line)
+        if item:
+            env[item.group(1)] = item.group(2).strip('"')
+    return env
+
+
+def test_the_jobs_of_the_two_workflows_are_read():
+    # Without this, the next tests could pass because a helper found nothing.
+    jobs = _all_jobs()
+    names = {
+        "tui-ci.yml:check",
+        "tui-ci.yml:test",
+        "tui-ci.yml:release-baseline",
+        "tui-e2e.yml:e2e",
+    }
+    assert names <= set(jobs)
+    assert "Swatinem/rust-cache@v2" in jobs["tui-ci.yml:test"]
+    assert "Swatinem/rust-cache@v2" in jobs["tui-e2e.yml:e2e"]
+
+
+def test_every_job_that_installs_the_pinned_toolchain_then_keeps_only_that_one():
+    jobs = {key: job for key, job in _all_jobs().items() if f"- name: {INSTALL_STEP}" in job}
+    assert {"tui-ci.yml:check", "tui-ci.yml:test", "tui-e2e.yml:e2e"} <= set(jobs)
+    for key, job in jobs.items():
+        assert f"- name: {PIN_STEP}" in job, key
+        assert job.index(f"- name: {INSTALL_STEP}") < job.index(f"- name: {PIN_STEP}"), key
+        if "Swatinem/rust-cache@v2" in job:
+            # rust-cache makes its key when its step starts, so the toolchains must be gone by then.
+            assert job.index(f"- name: {PIN_STEP}") < job.index("Swatinem/rust-cache@v2"), key
+
+
+def test_the_step_that_keeps_only_the_pinned_toolchain_is_the_same_in_every_job():
+    steps = {
+        key: _step_text(job, PIN_STEP)
+        for key, job in _all_jobs().items()
+        if f"- name: {PIN_STEP}" in job
+    }
+    assert len(steps) >= 4
+    assert len(set(steps.values())) == 1, steps
+    step = next(iter(steps.values()))
+    assert "working-directory: tui" in step  # rust-toolchain.toml is read there
+    assert "rustc --print sysroot" in step  # the toolchain that the file selects
+    assert 'rustup default "$pinned"' in step  # so a command outside tui/ uses it too
+    assert "rustup toolchain list --quiet" in step
+    assert 'rustup toolchain uninstall "$t"' in step
+
+
+def test_the_two_workflows_set_the_same_variables_that_the_cache_key_hashes():
+    def hashed(path: Path) -> dict[str, str]:
+        env = _workflow_env(path.read_text(encoding="utf-8"))
+        return {key: value for key, value in env.items() if key.startswith(CACHE_ENV_PREFIXES)}
+
+    assert hashed(WORKFLOW)  # the helper found the block
+    assert hashed(WORKFLOW) == hashed(E2E_WORKFLOW)
 
 
 def _sample_report(detail: str = "a | b") -> dict:

@@ -1,0 +1,110 @@
+name: TUI E2E
+
+# The end-to-end tests of the pager against the real Python agent
+# (tui/crates/codegen/pi-pager/tests/python_agent_e2e.rs, plan 0.3), and nothing else.
+#
+# These tests are the only part of the Rust workspace that reads the Python agent. So a change
+# that touches only the agent (`pi_agent_cli/**`, `tests/_tool_agent.py`) runs this workflow, and
+# not the whole TUI CI (tui-ci.yml: ten suites, 18 to 35 minutes). A change under `tui/**`, in
+# the baseline script or in its manifest runs tui-ci.yml, which includes these tests. A change
+# of both runs both workflows. Python code is covered by ci.yml.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/pi-agent-cli/pi_agent_cli/**"
+      - "packages/pi-agent-cli/tests/_tool_agent.py"
+      - ".github/workflows/tui-e2e.yml"
+  pull_request:
+    paths:
+      - "packages/pi-agent-cli/pi_agent_cli/**"
+      - "packages/pi-agent-cli/tests/_tool_agent.py"
+      - ".github/workflows/tui-e2e.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  # No debuginfo for dev/test builds: smaller target dir and faster links on the runner.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  e2e:
+    name: python_agent_e2e (Linux x86_64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Rust toolchain (pinned by tui/rust-toolchain.toml)
+        working-directory: tui
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustc --version --verbose
+
+      # The same step as in tui-ci.yml (a test keeps them equal). It also keeps the cache key of
+      # this job equal to the key of the `test` job there: rust-cache hashes every installed
+      # toolchain, so both jobs must have the same ones.
+      - name: Keep only the pinned Rust toolchain
+        working-directory: tui
+        run: |
+          pinned="$(basename "$(rustc --print sysroot)")"
+          rustup default "$pinned"
+          for t in $(rustup toolchain list --quiet); do
+            [ "$t" = "$pinned" ] || rustup toolchain uninstall "$t" || echo "::warning::could not uninstall the Rust toolchain $t"
+          done
+          rustup toolchain list
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "28.x"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Restore only, with the key of the `test` job of tui-ci.yml: this job builds a part of what
+      # that job builds, so it can use its cache. It must not save: a cache with the same key but
+      # fewer artifacts would stop that job from saving the whole one (a key is saved once).
+      - name: Restore the cargo registry and target of the test job
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tui
+          shared-key: tui-linux-x86_64-test
+          save-if: "false"
+
+      # The same version as in tui-ci.yml (a test keeps the two equal).
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest@0.9.148
+
+      # The tests need a Python that has the agent installed, and fail without one
+      # (PI_E2E_REQUIRED) instead of skipping, so a CI that lost it is not green. The install line
+      # is the one of tui-ci.yml (a test keeps the two equal).
+      - name: Install the Python agent for the end-to-end tests
+        run: |
+          pip install -e ".[dev]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent-cli" -e "./packages/pi-web-access" -e "./packages/pi-goal-x" -e "./packages/pi-dynamic-workflows"
+          echo "PI_E2E_PYTHON=$(command -v python)" >> "$GITHUB_ENV"
+          echo "PI_E2E_REQUIRED=1" >> "$GITHUB_ENV"
+
+      # The command is what scripts/tui_baseline.py runs for this target of the `pi-pager` suite
+      # of the manifest, with the terminal variables of `[test.env]` (a test keeps them equal).
+      - name: python_agent_e2e
+        working-directory: tui
+        env:
+          TERM: xterm-256color
+          COLORTERM: truecolor
+        run: cargo nextest run --locked --no-fail-fast -p pi-pager --test python_agent_e2e

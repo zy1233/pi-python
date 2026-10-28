@@ -23,7 +23,10 @@
 | [`docs/baselines/tui-support.md`](tui-support.md) | `tui_callgraph.py keep` 的输出，**生成的，不手改**；取代原来「举例」式的保留清单 |
 | `scripts/tui_notices.py` | `tui/THIRD-PARTY-NOTICES` 与 `Cargo.lock` 对账（C.3，r11）：`check` 不一致就退出 1，`update --write` 来改；新条目标 `needs review`，要人读过。还没有接进 CI（要 cargo）；依赖变了之后手动跑一次 |
 | `scripts/tests/test_tui_notices.py` | 它的单测（62 个） |
-| `.github/workflows/tui-ci.yml` | 三个 job：`check`、`test`、`release-baseline`（仅 `workflow_dispatch` 且勾选 `release_baseline`） |
+| `.github/workflows/tui-ci.yml` | 三个 job：`check`、`test`、`release-baseline`（仅 `workflow_dispatch` 且勾选 `release_baseline`）。`tui/**`、基线脚本、清单与它自己变化时启动；只改 Python agent 的 PR 不启动它。每个 job 在缓存步骤之前只留固定的 Rust 工具链（见下） |
+| `.github/workflows/tui-e2e.yml` | 一个 job：`python_agent_e2e`（`pi-pager` 的这一个测试 target；缓存未命中时 12 分 25 秒：编译 11 分 16 秒，14 个测试 11 秒，[run 40646047155](https://github.com/zy1233/pi-python/actions/runs/40646047155)）。只改 Python agent（`packages/pi-agent-cli/pi_agent_cli/**`、`tests/_tool_agent.py`）的 PR 启动它。缓存只读：用 `tui-ci.yml` 的 `test` job 的键，不保存 |
+
+**CI 缓存键**：`Swatinem/rust-cache` 把 runner 上**所有**已装 Rust 工具链的版本算进缓存键。镜像自带一个 `stable`，镜像一更新它就变（2026-10-25：1.99.0 → 1.99.1）：键变了，`test` 从零编译（约 31 分钟）。所以每个 job 在 `rust-cache` 之前先做 `Keep only the pinned Rust toolchain`：把 `tui/rust-toolchain.toml` 固定的工具链设为默认，卸载其余工具链。两个 workflow 文件里四个 job 的这一步文字相同；`scripts/tests/test_tui_baseline.py` 守着它（顺序、文字，以及两个 workflow 里 `CARGO_*`、`RUST_*` 变量相同）。不要用 `add-rust-environment-hash-key: false` 代替：它连 `Cargo.lock` 的哈希也去掉，键永远不变，缓存只存一次，之后会过期。PR 的运行只读缓存，只有 `main` 保存（`save-if`），所以改了工具链列表之后，`main` 上的第一次运行从零编译并保存。
 
 本机复现（需要 `protoc`；macOS 已验证，Linux 由 CI 验证，Windows 没跑过——脚本只用显式 UTF-8 读写，并用 `PYTHONUTF8=0 LC_ALL=C` 模拟过 Windows 的默认编码）：
 
