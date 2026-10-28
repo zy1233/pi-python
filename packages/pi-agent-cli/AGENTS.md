@@ -5,7 +5,8 @@ Standard-ACP agent over `AgentHarness`. Two modes:
 | Mode | Entry | Purpose |
 |------|-------|---------|
 | ACP stdio | `python -m pi_agent_cli` | TUI-spawned agent; `/new` `/resume` `/quit` map to ACP methods |
-| Headless | `python -m pi_agent_cli -p "prompt"` | One-shot turn, prints assistant text, exits |
+| Headless | `python -m pi_agent_cli -p "prompt"` | One-shot turn, prints assistant text, exits; exit status 1 and `error: <reason>` on stderr when the model fails |
+| Setup | `python -m pi_agent_cli --setup` | Asks for a model and an API key in a terminal and writes `agent.toml` and `local.env` (see First run) |
 
 Headless flags: `--system-prompt`, `--append-system-prompt`, `--no-context-files`, `--no-git-context` — see `--help`. `--trust-project-extensions` works in both modes (see Project extensions).
 
@@ -21,6 +22,15 @@ Home: `~/.pi-python/` (override with `PI_HOME`). One resolver, `pi_agent_core.ho
 Keep the two files apart. The TUI is strict about the keys it knows and tolerant of the keys it does not know (measured with `zypi`; execution log section 10.10, item 3). A `config.toml` that is missing, has an unknown table or key, or has a Python `[model]` table starts normally. These stop `zypi` with exit code 1: a top-level `permission = "ask"` (the TUI expects a table there), a `[[models]]` array, and invalid TOML. A wrong type for `[agent].command` is ignored without a message. The agent reads `agent.toml`; only when that file does not exist does it fall back to `config.toml` (`load_config`, kept for old setups). The TUI reads `[agent].command` from `agent.toml` and, if that file does not set it, from `config.toml` (`acp/spawn.rs`); it reads no other agent key.
 
 `local.env` in home loads `KEY=VALUE` pairs into env without overwriting (secrets stay out of TOML). See `agent.example.toml` for all keys.
+
+## First run: `--setup` and the terminal login
+
+A home with no `agent.toml` has no model and no key. The configuration then falls back to the provider `mock`, which LangChain does not have. Design: `docs/specs/2026-10-28-acp-terminal-auth-setup-design.md`.
+
+- **What the user sees.** A turn with no model fails with `No model is set. Run the agent with --setup, or add a [model] table to <agent.toml>.` (`factory._say_when_no_model` wraps the LangChain stream function; the scripted LLM `PI_USE_MOCK=1` is not touched). `-p` writes `error: <reason>` to stderr and exits 1 when the model fails; stdout keeps only an answer.
+- **`--setup`** (`setup_command.py`) asks in a terminal and writes the files. It needs a terminal on stdin and stdout (exit 2 if not) and saves nothing when the input ends. `agent.toml` gets a `[model]` table: a new file, or the table at the end of a file that has none, with the text that is there kept to the byte. It refuses, before the first question, a file that is not TOML, a `[model]` table that sets no provider, and a home that has only the old `config.toml` (a new `agent.toml` would hide that file from the agent). The key goes to `local.env` as `NAME=key`: mode 0600 on POSIX, read without echo, never printed, logged or written to `agent.toml`. Both files are replaced by a rename of a file written beside them, and a symbolic link is followed. A model that has no key gets only the key question; a model that has one is asked before the key is replaced. A running agent keeps the old key (`load_local_env` never overwrites), so a replaced key needs a new agent process.
+- **The terminal login** (`auth_methods.py`). `initialize` offers `--setup` as an authentication method, but only to a client that says it can run one. `auth.terminal = true` (Zed) gets a method of type `terminal` (`args = ["--setup"]`; Zed adds them to the agent command). `_meta["terminal-auth"] = true` alone (older clients, the registry validator) gets a method of the default type that has the whole command in `_meta["terminal-auth"]` and `PI_HOME` in its `env`. Any other client, `zypi` included, gets `authMethods: []`, and the pager relies on that (`standard_acp` in `event_loop.rs`). The SDK drops an invalid item of `authMethods` without a word (a plain `AuthMethodTerminal` has no `type`), so build it with `TerminalAuthMethod(type="terminal", …)` and read the raw JSON in a test.
+- **When a session is sent to it** (`agent.py`). `config_problem()` says why a configuration cannot run a turn (no model; or `api_key_env` and the provider's own variable both empty). `session/new` then answers `auth_required` (-32000) to a client that can run the login, and makes no session. Other clients get the session. `session/load` and `session/resume` never refuse. While there is a problem, the agent reads `agent.toml` and `local.env` again at `new`, `load` and `resume`, because `--setup` runs in the client's terminal while the agent is up. `authenticate("pi-setup")` answers `{}` when there is no problem and `auth_required` when there is; any other id is `invalid_params`. An agent that was given its own `config` or `stream_fn` offers nothing.
 
 ## Model selection (`/model`)
 
@@ -117,7 +127,9 @@ The agent must reap the tools it is running when its client goes away: the TUI c
 | Module | Role |
 |--------|------|
 | `agent.py` | `PiAcpAgent` — ACP methods, permission handling, event projection |
-| `config.py` | TOML loading, `pi_home()`, `CliConfig` dataclass |
+| `config.py` | TOML loading, `pi_home()`, `CliConfig` dataclass; `read_local_env`, `config_problem`, `no_model_message` |
+| `setup_command.py` | `--setup`: the dialog and the writers of `agent.toml` and `local.env` |
+| `auth_methods.py` | The terminal login for `initialize` (two forms), and the `auth_required` error |
 | `factory.py` | `create_session_harness` — wires tools, model, stream_fn, skills into harness |
 | `extension_trust.py` | `decide_project_trust` / `ProjectTrust`: whether a project may load its own extensions, saved workflows, prompt files and skills; the "skipped" and "could not be saved" notices |
 | `trust_fingerprint.py` | The gated resources of a project and a content fingerprint of them |

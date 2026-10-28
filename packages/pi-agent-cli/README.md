@@ -7,6 +7,7 @@ Standard [Agent Client Protocol (ACP)](https://agentclientprotocol.com/) agent o
 - headless one-shot: `python -m pi_agent_cli -p "..."` 
 - Headless prompt overrides (override `agent.toml` `[prompt]`): `--system-prompt`, `--system-prompt-file`, `--append-system-prompt` / `--rules`, `--append-system-prompt-file`, `--no-context-files`
 - Config: `~/.pi-python/agent.toml` (see `agent.example.toml` in this directory)
+- First run: `python -m pi_agent_cli --setup` asks for a model and an API key in a terminal. It writes `agent.toml` and `local.env` (the key) in the home. An editor that can run a terminal login (Zed) offers the same dialog as the login "Set up model and API key"
 - No `x.ai/*` vendor RPCs — core + harness + ACP only
 
 Install:
