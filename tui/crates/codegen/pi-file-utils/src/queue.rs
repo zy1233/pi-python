@@ -2340,7 +2340,8 @@ pub fn cleanup_orphaned_uploads(grok_home: &Path, max_age: Duration) -> u64 {
 /// When `stats` is `Some`, each deleted lone queue file (temp without sidecar
 /// or vice versa) bumps `cleanup_orphan_mismatched`. Pairing is decided against
 /// a name snapshot taken before any deletion, so the count is independent of
-/// visit order.
+/// visit order. So is every age: all of them are read before the first file is
+/// deleted (a pair's age lives in its sidecar file, see [`pair_age`]).
 fn cleanup_queue_dir(queue_dir: &Path, max_age: Duration, stats: Option<&UploadQueueStats>) -> u64 {
     let entries: Vec<std::fs::DirEntry> = match std::fs::read_dir(queue_dir) {
         Ok(e) => e.flatten().collect(),
@@ -2349,6 +2350,11 @@ fn cleanup_queue_dir(queue_dir: &Path, max_age: Duration, stats: Option<&UploadQ
     let all_names: HashSet<std::ffi::OsString> = entries.iter().map(|e| e.file_name()).collect();
     let mut cleaned = 0u64;
     let mut cleaned_bytes = 0u64;
+    // Decide first, delete after. `pair_age` reads the sidecar file when it is called. If the
+    // sidecar of a pair were deleted before its temp file is looked at, the temp file would be
+    // judged by its own mtime, and the result would depend on the order in which the file
+    // system lists the two names (`read_dir` makes no promise about it).
+    let mut expired: Vec<(PathBuf, std::ffi::OsString, std::fs::Metadata)> = Vec::new();
     for entry in &entries {
         let Ok(metadata) = entry.metadata() else {
             continue;
@@ -2372,6 +2378,9 @@ fn cleanup_queue_dir(queue_dir: &Path, max_age: Duration, stats: Option<&UploadQ
         if age <= max_age {
             continue;
         }
+        expired.push((path, name, metadata));
+    }
+    for (path, name, metadata) in expired {
         if metadata.is_dir() {
             let size = dir_size(&path).unwrap_or(0);
             if std::fs::remove_dir_all(&path).is_ok() {
