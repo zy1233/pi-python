@@ -136,9 +136,9 @@ targets = [
     "--test",
     "selection_model_public_api",
     # The pager's ACP client against the real Python agent (plan 0.3). It needs a Python that has
-    # pi_agent_cli installed: PI_E2E_PYTHON names it, and PI_E2E_REQUIRED=1 (set by tui-ci.yml)
-    # makes a missing one a failure; without either the tests say so and pass, so a developer
-    # who has no such Python can still run the manifest.
+    # pi_agent_cli installed: PI_E2E_PYTHON names it, and PI_E2E_REQUIRED=1 (set by tui-ci.yml and
+    # tui-e2e.yml) makes a missing one a failure; without either the tests say so and pass, so a
+    # developer who has no such Python can still run the manifest.
     "--test",
     "python_agent_e2e",
 ]

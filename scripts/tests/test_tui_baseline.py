@@ -19,6 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "tui_baseline.py"
 MANIFEST = REPO_ROOT / "scripts" / "tui_baseline.toml"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "tui-ci.yml"
+E2E_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "tui-e2e.yml"
 
 
 def _load():
@@ -695,6 +696,101 @@ def test_workflow_runs_the_documented_commands():
     for command in ("check", "test", "release"):  # `gates` runs inside `check`
         assert f"scripts/tui_baseline.py {command}" in text, command
     assert "scripts/tui_baseline.toml" in text  # path filter, so manifest edits trigger the job
+
+
+# ---- the end-to-end workflow (tui-e2e.yml) -------------------------------------------------------
+#
+# A change that touches only the Python agent starts tui-e2e.yml (one test target) and not
+# tui-ci.yml (ten suites, 18 to 35 minutes). These tests keep the two files from drifting apart.
+
+# What the end-to-end tests read on the Python side.
+AGENT_PATHS = (
+    "packages/pi-agent-cli/pi_agent_cli/**",
+    "packages/pi-agent-cli/tests/_tool_agent.py",
+)
+
+
+def _trigger_paths(text: str, event: str) -> list[str]:
+    """The entries of `on.<event>.paths` of a workflow file, as written (comments left out)."""
+    lines = text.splitlines()
+    start = lines.index(f"  {event}:")
+    paths: list[str] = []
+    in_paths = False
+    for line in lines[start + 1 :]:
+        if line.strip() and not line.startswith("   "):  # the next event, or the next block
+            break
+        item = line.strip()
+        if item == "paths:":
+            in_paths = True
+        elif in_paths and item.startswith("- "):
+            paths.append(item[2:].strip().strip('"'))
+        elif in_paths and item and not item.startswith("#"):
+            break  # another key of the event: the list is over
+    return paths
+
+
+def test_the_trigger_paths_of_the_full_workflow_are_read():
+    # Without this, the next test could pass because the helper found nothing.
+    text = WORKFLOW.read_text(encoding="utf-8")
+    for event in ("push", "pull_request"):
+        paths = _trigger_paths(text, event)
+        assert "tui/**" in paths, event
+        assert ".github/workflows/tui-ci.yml" in paths, event
+
+
+def test_a_change_of_the_python_agent_alone_starts_the_end_to_end_workflow_and_not_the_full_one():
+    full = WORKFLOW.read_text(encoding="utf-8")
+    end_to_end = E2E_WORKFLOW.read_text(encoding="utf-8")
+    for event in ("push", "pull_request"):
+        of_full = set(_trigger_paths(full, event))
+        of_end_to_end = set(_trigger_paths(end_to_end, event))
+        assert set(AGENT_PATHS) <= of_end_to_end, event
+        assert not set(AGENT_PATHS) & of_full, (event, "tui-ci.yml would run for the agent alone")
+        # A change of the workflow file is its own test.
+        assert ".github/workflows/tui-e2e.yml" in of_end_to_end, event
+
+
+def test_the_end_to_end_workflow_runs_a_target_of_the_manifest_with_the_flags_of_the_script():
+    pager = next(s for s in _manifest()["test"]["suite"] if s["package"] == "pi-pager")
+    targets = pager["targets"]
+    assert targets[targets.index("python_agent_e2e") - 1] == "--test"
+    command = tb.suite_command(
+        "nextest", {"package": "pi-pager", "targets": ["--test", "python_agent_e2e"]}
+    )
+    assert " ".join(command) in E2E_WORKFLOW.read_text(encoding="utf-8")
+
+
+def test_the_end_to_end_workflow_has_the_environment_of_the_manifest():
+    text = E2E_WORKFLOW.read_text(encoding="utf-8")
+    test_config = _manifest()["test"]
+    for key, value in test_config["env"].items():
+        assert re.search(rf"^\s+{re.escape(key)}: {re.escape(value)}$", text, re.MULTILINE), key
+    for key in test_config["unset_env"]:  # the manifest unsets them; the job must not set them
+        assert key not in text, key
+
+
+def test_the_end_to_end_workflow_installs_the_agent_and_nextest_as_the_test_job_does():
+    full = WORKFLOW.read_text(encoding="utf-8")
+    end_to_end = E2E_WORKFLOW.read_text(encoding="utf-8")
+    for pattern in (r"^\s*pip install .+$", r"tool: (nextest@\S+)"):
+        found = re.findall(pattern, end_to_end, re.MULTILINE)
+        assert found, pattern
+        assert found == re.findall(pattern, full, re.MULTILINE), pattern
+    # A Python without the agent is a failure of the job, not a skipped test.
+    assert 'echo "PI_E2E_PYTHON=$(command -v python)" >> "$GITHUB_ENV"' in end_to_end
+    assert 'echo "PI_E2E_REQUIRED=1" >> "$GITHUB_ENV"' in end_to_end
+
+
+def test_the_end_to_end_workflow_restores_the_cache_of_the_test_job_and_never_saves_it():
+    full = WORKFLOW.read_text(encoding="utf-8")
+    test_job = full.split("\n  test:\n", 1)[1].split("\n  release-baseline:\n", 1)[0]
+    key = re.search(r"shared-key: (\S+)", test_job).group(1)
+    end_to_end = E2E_WORKFLOW.read_text(encoding="utf-8")
+    # Same key, so the job finds the cache of the full job. It saves nothing: a cache with the
+    # same key but fewer artifacts would stop the full job from saving the whole one.
+    assert f"shared-key: {key}\n" in end_to_end
+    assert 'save-if: "false"' in end_to_end
+    assert "save-if: ${{" not in end_to_end
 
 
 def _sample_report(detail: str = "a | b") -> dict:

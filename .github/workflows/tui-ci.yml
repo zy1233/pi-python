@@ -4,6 +4,11 @@ name: TUI CI
 # TUI workspace (tui/). Authoritative environment (ADR6): ubuntu-24.04 + the toolchain pinned in
 # tui/rust-toolchain.toml. What is enforced vs report-only lives in scripts/tui_baseline.toml; the
 # report is docs/baselines/tui.md. Python code is covered by ci.yml.
+#
+# A change that touches only the Python agent (`packages/pi-agent-cli/pi_agent_cli/**`,
+# `packages/pi-agent-cli/tests/_tool_agent.py`) does not start this workflow: the end-to-end tests
+# of the pager are the only tests that read the agent, and tui-e2e.yml runs them alone. This
+# workflow still includes them, for a change that starts it.
 
 on:
   push:
@@ -13,17 +18,12 @@ on:
       - "scripts/tui_baseline.py"
       - "scripts/tui_baseline.toml"
       - ".github/workflows/tui-ci.yml"
-      # The Python agent is what the pager's end-to-end tests talk to (its ACP surface).
-      - "packages/pi-agent-cli/pi_agent_cli/**"
-      - "packages/pi-agent-cli/tests/_tool_agent.py"
   pull_request:
     paths:
       - "tui/**"
       - "scripts/tui_baseline.py"
       - "scripts/tui_baseline.toml"
       - ".github/workflows/tui-ci.yml"
-      - "packages/pi-agent-cli/pi_agent_cli/**"
-      - "packages/pi-agent-cli/tests/_tool_agent.py"
   workflow_dispatch:
     inputs:
       release_baseline:
