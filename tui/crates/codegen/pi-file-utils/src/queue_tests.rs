@@ -4551,6 +4551,63 @@ fn cleanup_orphans_uses_sidecar_age_for_pairs() {
     assert!(!drop_sc.exists(), "expired-by-sidecar sidecar removed");
 }
 
+/// A pair is two directory entries, and `read_dir` lists them in the order of
+/// the file system (by hash on ext4, by creation on tmpfs), which differs from
+/// one machine to the next. The age of a pair comes from its sidecar, so the
+/// sweep must not depend on which of the two it meets first: a temp file whose
+/// sidecar was already deleted in the same sweep must still go. The pairs below
+/// are created in both orders, so whatever order the file system lists them
+/// in, some of them have the sidecar first.
+#[test]
+fn cleanup_orphans_removes_expired_pairs_whatever_the_listing_order() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let queue_dir = temp.path().join("upload_queue");
+    std::fs::create_dir_all(&queue_dir).unwrap();
+
+    // Fresh mtime (the files are new) but expired enqueued_at.
+    let sidecar = QueueItemSidecar {
+        schema_version: 1,
+        session_id: "s".to_string(),
+        turn_number: 1,
+        gcs_path: "s/turn_1/a".to_string(),
+        content_type: "application/gzip".to_string(),
+        artifact_name: "a".to_string(),
+        enqueued_at: (chrono::Utc::now() - chrono::Duration::hours(3)).to_rfc3339(),
+        sha256: "0".repeat(64),
+    };
+    let manifest = serde_json::to_vec(&sidecar).unwrap();
+
+    let mut pairs = Vec::new();
+    for n in 0..32 {
+        let tmp = queue_dir.join(format!("turn1_drop_{n}.tar.gz_{n}_0"));
+        let sc = sidecar_path_for(&tmp);
+        if n % 2 == 0 {
+            std::fs::write(&tmp, b"bytes").unwrap();
+            std::fs::write(&sc, &manifest).unwrap();
+        } else {
+            std::fs::write(&sc, &manifest).unwrap();
+            std::fs::write(&tmp, b"bytes").unwrap();
+        }
+        pairs.push((tmp, sc));
+    }
+
+    let cleaned = cleanup_queue_dir(&queue_dir, Duration::from_secs(2 * 3600), None);
+
+    for (tmp, sc) in &pairs {
+        assert!(
+            !tmp.exists(),
+            "expired-by-sidecar temp removed: {}",
+            tmp.display()
+        );
+        assert!(
+            !sc.exists(),
+            "expired-by-sidecar sidecar removed: {}",
+            sc.display()
+        );
+    }
+    assert_eq!(cleaned, 64, "both files of every pair are counted");
+}
+
 /// `remove_owned_source` deletes both variants — both are queue-owned (a
 /// working-tree source is snapshotted, never enqueued directly).
 #[test]
