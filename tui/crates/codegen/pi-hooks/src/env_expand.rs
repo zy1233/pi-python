@@ -1,13 +1,9 @@
 //! Environment variable expansion helper for hook config strings.
 //!
 //! Provides `${VAR}` / `$VAR` substitution that prefers a per-hook
-//! `extra_env` map over the process environment. Used by:
-//!
-//! * the JSON hook parser ([`crate::config::parse_hook_file`]) to expand
-//!   `command` and `url` fields at config-load time, and
-//! * the HTTP runner ([`crate::runner::http`]) to expand `spec.url` once
-//!   more right before SSRF validation, so plugin URLs that reference
-//!   plugin-injected vars (e.g. `${CLAUDE_PLUGIN_ROOT}/check`) resolve.
+//! `extra_env` map over the process environment. It is used by the JSON
+//! hook parser ([`crate::config::parse_hook_file`]) to expand `command` and
+//! `url` fields at config-load time.
 //!
 //! The expansion is **lossless on missing vars and on every parameter-
 //! expansion-modifier form** -- both unset plain references (e.g.
@@ -17,24 +13,20 @@
 //!
 //! * config-load-time expansion is idempotent (re-running it on an already
 //!   expanded string is a no-op),
-//! * vars that are intentionally deferred to runtime (set later by the
-//!   shell, the dispatcher, or `extra_env`) survive the load-time pass and
-//!   are caught by the runtime pre-flight check in
-//!   [`crate::runner::command`] if they remain unset at execution, and
+//! * vars that are intentionally deferred to the time the hook runs (set
+//!   later by the shell or by `extra_env`) survive the load-time pass, and
 //! * shell-specific modifier semantics (especially `${VAR:-x}` for
-//!   set-but-empty values) stay the responsibility of the runtime
-//!   `sh -c` branch where they apply correctly.
+//!   set-but-empty values) stay the responsibility of the `sh -c` that runs
+//!   the command, where they apply correctly.
 //!
 //! Parameter-expansion forms (`${VAR:-default}`, `${VAR-default}`,
 //! `${VAR:=x}`, `${VAR:?msg}`, `${VAR:+x}`, `${VAR%pat}`, `${VAR#pat}`,
 //! `${VAR/pat/repl}`, `${VAR:N}`, `${VAR:N:M}`) are also preserved
 //! verbatim. These forms have shell-specific semantics (notably the
 //! "set-but-empty" behaviour of `:-` differs between `sh` and the
-//! shellexpand crate) that the runtime `sh -c` branch resolves
-//! correctly. Mirroring the modifier-skip behaviour in
-//! [`crate::runner::command::find_unresolved_env_vars`] keeps the two
-//! layers in sync: the user wrote the modifier form because they wanted
-//! the shell's interpretation, so we leave it for the shell.
+//! shellexpand crate) that the `sh -c` that runs the command resolves
+//! correctly: the user wrote the modifier form because they wanted the
+//! shell's interpretation, so we leave it for the shell.
 //!
 //! Same underlying engine (`shellexpand::env_with_context_no_errors`)
 //! and same lossless-on-missing semantics as
@@ -42,15 +34,8 @@
 //! per-hook `extra` map consulted before process env, and with the
 //! parameter-expansion-modifier preservation described above.
 //!
-//! ## Asymmetry between `command` and `url`
-//!
 //! Load-time expansion in [`crate::config::parse_hook_file`] runs once
-//! using a snapshot of process env at parse time. The HTTP runner does
-//! a second pass at runtime so plugin-injected vars that arrive in
-//! `extra_env` after parsing (e.g. `CLAUDE_PLUGIN_ROOT`) resolve, and
-//! so mid-session changes to process env are picked up for URLs.
-//! Command paths are not value-expanded at spawn. Unix `sh -c` expands `$VAR`
-//! from the child env; Windows PowerShell rewrites known `$VAR` to `$env:VAR`.
+//! using a snapshot of process env at parse time.
 
 use std::collections::HashMap;
 
@@ -104,19 +89,15 @@ fn make_sentinel() -> String {
 ///
 /// Lookup order for each reference:
 /// 1. `extra` (the per-hook `extra_env` map)
-/// 2. The current process environment
+/// 2. The current process environment, except the names in `skip_process_env`
 ///
 /// Unresolved references are preserved verbatim so this function is safe
 /// to call repeatedly (idempotent on already-expanded strings) and so
-/// references that are intentionally resolved at runtime (e.g. by the
-/// dispatcher's always-set `GROK_HOOK_*` vars) survive the load-time pass.
+/// references that are intentionally resolved when the hook runs survive
+/// the load-time pass.
 ///
 /// Parameter-expansion-modifier forms (`${VAR:-x}`, `${VAR%pat}`, etc.)
 /// are ALSO preserved verbatim; see the module-level rustdoc for why.
-pub(crate) fn expand_env_vars_with_extra(input: &str, extra: &HashMap<String, String>) -> String {
-    expand_env_vars_with_process_skip(input, extra, &[])
-}
-
 pub(crate) fn expand_env_vars_with_process_skip(
     input: &str,
     extra: &HashMap<String, String>,
@@ -175,8 +156,7 @@ pub(crate) fn expand_env_vars_with_process_skip(
 ///
 /// "Modifier" here means anything inside the braces after the
 /// identifier name: `:-`, `-`, `:=`, `=`, `:?`, `?`, `:+`, `+`, `%`,
-/// `#`, `/`, `:N` (digit), `:N:M`, etc. This shares its detection
-/// logic with [`crate::runner::command::find_unresolved_env_vars`] via
+/// `#`, `/`, `:N` (digit), `:N:M`, etc. The references come from
 /// [`iter_env_var_references`].
 fn mask_modifier_forms(input: &str, sentinel: &str) -> String {
     let mut out = String::with_capacity(input.len());
@@ -341,6 +321,11 @@ impl<'a> Iterator for EnvVarRefIter<'a> {
 mod tests {
     use super::*;
     use crate::test_support::with_env_var;
+
+    /// `expand_env_vars_with_process_skip` with no process variable skipped.
+    fn expand_env_vars_with_extra(input: &str, extra: &HashMap<String, String>) -> String {
+        expand_env_vars_with_process_skip(input, extra, &[])
+    }
 
     #[test]
     fn expands_braced_var_from_extra() {

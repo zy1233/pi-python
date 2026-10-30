@@ -7738,20 +7738,16 @@ version = "0.1.0"
 dependencies = [
  "fastrand",
  "pi-config",
- "pi-extra-ca",
  "pi-tools",
  "regex",
- "reqwest 0.12.24",
  "serde",
  "serde_json",
  "shellexpand",
  "strum 0.27.2",
  "tempfile",
  "thiserror 2.0.18",
- "tokio",
  "toml",
  "tracing",
- "url",
 ]
 
 [[package]]
