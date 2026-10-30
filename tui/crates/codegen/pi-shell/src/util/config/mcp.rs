@@ -181,34 +181,6 @@ pub(crate) fn parse_mcp_servers_from_toml(root: &TomlValue) -> IndexMap<String, 
     servers
 }
 
-/// Plugin registry for one-shot CLI discovery (matches mcp doctor gating).
-///
-/// Resolves the same cwd-effective `[plugins]` table as session startup
-/// (`resolve_effective_plugins_config`), so trusted project `[plugins].paths`
-/// plugins are included, not just the global config. Also used by the pager's
-/// `/agents` modal to list plugin-provided agents without a live session
-/// registry snapshot.
-pub fn load_cli_plugin_registry(cwd: &std::path::Path) -> pi_agent::plugins::PluginRegistry {
-    let trust_store = pi_agent::plugins::TrustStore::load();
-    // Resolve/record the folder-trust verdict first: the effective-plugins
-    // resolve below gates project [plugins].paths on the cached verdict.
-    let project_trusted = crate::agent::folder_trust::resolve_and_record(cwd, None, false);
-    let plugins_cfg = crate::config::resolve_effective_plugins_config(cwd);
-    let mut plugin_config = plugins_cfg.to_discovery_config();
-    let discovered = pi_agent::plugins::discover_plugins(
-        Some(cwd),
-        &plugin_config,
-        &trust_store,
-        project_trusted,
-    );
-    plugin_config.populate_plugin_lists(&discovered);
-    pi_agent::plugins::PluginRegistry::from_discovered(
-        discovered,
-        &plugin_config.disabled,
-        &plugin_config.enabled,
-    )
-}
-
 fn config_path() -> PathBuf {
     crate::util::grok_home::grok_home().join("config.toml")
 }
@@ -218,137 +190,10 @@ pub(crate) fn user_config_path() -> PathBuf {
     config_path()
 }
 
-/// Returns `Some(true/false)` when `[cli] session_registry` is set in config.toml,
-/// `None` when absent (allowing remote settings fallback).
-/// Local config takes precedence over remote settings.
-pub(crate) fn session_registry_from_toml_opt(root: &TomlValue) -> Option<bool> {
-    if let TomlValue::Table(table) = root
-        && let Some(TomlValue::Table(cli)) = table.get("cli")
-    {
-        cli.get("session_registry").and_then(|v| v.as_bool())
-    } else {
-        None
-    }
-}
-
-/// Overrides `[cli] session_registry`; usable before `~/.grok/config.toml` exists.
-pub(crate) const SESSION_REGISTRY_ENV_VAR: &str = "GROK_SESSION_REGISTRY";
-
-pub(crate) fn session_registry_from_env_opt() -> Option<bool> {
-    pi_config::env_bool(SESSION_REGISTRY_ENV_VAR)
-}
-
-/// Where a local session-registry override came from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RegistrySource {
-    /// [`SESSION_REGISTRY_ENV_VAR`].
-    Env,
-    /// `[cli] session_registry` in config.toml.
-    ConfigToml,
-}
-
-impl RegistrySource {
-    /// The user-facing name of this source, for diagnostics.
-    pub const fn label(self) -> &'static str {
-        match self {
-            RegistrySource::Env => SESSION_REGISTRY_ENV_VAR,
-            RegistrySource::ConfigToml => "[cli] session_registry",
-        }
-    }
-}
-
-/// Env var, then `[cli] session_registry`; `None` defers to remote settings.
-pub fn session_registry_local_override_sourced(
-    root: Option<&TomlValue>,
-) -> Option<(bool, RegistrySource)> {
-    if let Some(v) = session_registry_from_env_opt() {
-        return Some((v, RegistrySource::Env));
-    }
-    root.and_then(session_registry_from_toml_opt)
-        .map(|v| (v, RegistrySource::ConfigToml))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use toml::Value as TomlValue;
-
-    /// Env beats config.toml; unrecognized env defers; both absent defers to remote.
-    #[test]
-    #[serial_test::serial]
-    fn session_registry_local_override_precedence() {
-        let toml_true: TomlValue = toml::from_str("[cli]\nsession_registry = true").unwrap();
-        {
-            let _g = pi_test_support::EnvGuard::set(SESSION_REGISTRY_ENV_VAR, "false");
-            assert_eq!(
-                session_registry_local_override_sourced(Some(&toml_true)),
-                Some((false, RegistrySource::Env)),
-                "env wins and reports itself as the source"
-            );
-        }
-        {
-            let _g = pi_test_support::EnvGuard::set(SESSION_REGISTRY_ENV_VAR, "bogus");
-            assert_eq!(
-                session_registry_local_override_sourced(Some(&toml_true)),
-                Some((true, RegistrySource::ConfigToml)),
-                "unrecognized env values defer to config.toml"
-            );
-        }
-        {
-            let _g = pi_test_support::EnvGuard::unset(SESSION_REGISTRY_ENV_VAR);
-            assert_eq!(session_registry_local_override_sourced(None), None);
-        }
-    }
-
-    /// A trusted project's `[plugins].paths` plugin (session-startup config
-    /// source) must be discovered by the one-shot CLI registry, including its
-    /// agents. Dev builds are folder-trust-inert, so the project path merges.
-    #[test]
-    #[serial_test::serial]
-    fn load_cli_plugin_registry_includes_project_config_path_plugins() {
-        let home = tempfile::tempdir().unwrap();
-        let _env = pi_test_support::EnvGuard::set("GROK_HOME", home.path());
-
-        let repo = tempfile::tempdir().unwrap();
-        git2::Repository::init(repo.path()).unwrap();
-
-        // Project-declared [plugins].paths plugin providing one agent.
-        let plugin_dir = repo.path().join("proj-plugin");
-        let agents_dir = plugin_dir.join("agents");
-        std::fs::create_dir_all(&agents_dir).unwrap();
-        std::fs::write(
-            plugin_dir.join("plugin.json"),
-            r#"{"name": "proj-plugin", "agents": "./agents"}"#,
-        )
-        .unwrap();
-        std::fs::write(
-            agents_dir.join("reviewer.md"),
-            "---\nname: reviewer\ndescription: Project reviewer\n---\nBody.\n",
-        )
-        .unwrap();
-
-        let grok = repo.path().join(".grok");
-        std::fs::create_dir_all(&grok).unwrap();
-        std::fs::write(
-            grok.join("config.toml"),
-            format!("[plugins]\npaths = [\"{}\"]\n", plugin_dir.display()),
-        )
-        .unwrap();
-
-        let registry = load_cli_plugin_registry(repo.path());
-        assert!(
-            registry.get("proj-plugin").is_some(),
-            "project [plugins].paths plugin must be discovered"
-        );
-        let agents = pi_agent::discovery::plugin_agents(&registry);
-        assert!(
-            agents
-                .iter()
-                .any(|a| a.qualified_name == "proj-plugin:reviewer"),
-            "project config-path plugin agent must be enumerable, got: {:?}",
-            agents.iter().map(|a| &a.qualified_name).collect::<Vec<_>>()
-        );
-    }
 
     /// Covers all canonical wire values plus the unknown/corrupt fallback.
     #[test]
