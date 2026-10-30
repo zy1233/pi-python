@@ -445,7 +445,7 @@ Rust（pager）：
 | [§10.24][l10-24] | r21 | V0.6 的条件 5（#39）；合入 #38 与 #39；条件 1–4 的结果（`mode_probe` 的探针竞争与 #40） | PR [#39][pr-39]、[#40][pr-40] |
 | [§10.25][l10-25] | r22 | 打 tag `v0.6.0`（`5f73e07`）、`Release` 的运行、PyPI 与 GitHub Release、两个二进制、PTY 脚本与 `pi-mcp` 测试的核对、合入 #40；留下的与没验证的；续 1（#42、glibc 的下限、删本地分支） | PR [#40][pr-40]、[#41][pr-41]、[#42][pr-42] |
 | [§10.26][l10-26] | r23 | 整理计划的分支 squash 进本地 `main`，删三个分支；#43：三个 action 升到 Node 24 的版本，`Release` 的演练；#44：扩展 API 的审计批 9（F7-02 至 F7-09），测试与变异检查；决策 11、13 记成不做；`docs/PLAN` 的 Cursor 规则；续 1：推送 `main`，合入 #43 与 #44，`main` 上的 `CI` 与 `TUI CI`；续 2：用户答复 Zed 里的核对通过 | PR [#43][pr-43]、[#44][pr-44] |
-| [§10.27][l10-27] | r24 | 0.9 的 Landlock 层：内核 6.12（ABI 6）上的实测，计划与代码的三处不一致，新测试 `landlock_enforcement_e2e`，变异检查，没验证的 | PR [#TBD][pr-tbd] |
+| [§10.27][l10-27] | r24 | 0.9 的 Landlock 层：内核 6.12（ABI 6）上的实测，计划与代码的三处不一致，新测试 `landlock_enforcement_e2e`，变异检查，没验证的 | PR [#58][pr-58] |
 | [附录 A.4][logA4] | r5 | 入口审计的 r5 执行结果 | [#7][pr-7] |
 | [附录 B][logB] | r2–r17 | 复现方法（依赖图、模块级闭包、各轮的测量与测试命令） | — |
 | [附录 C][logC] | r10 | §7 的逐项注释（原文） | — |
@@ -554,7 +554,7 @@ Rust（pager）：
 - r22 续 1：钉 `build-tui` 的运行器，补 glibc 的下限（PR [#42][pr-42]；2026-10-25；用户已合入）；删 7 个已合入的本地分支。见 [§10.25][l10-25] 的「续 1」。
 - 整理（r22 续 1 之后，2026-10-27）：照 r10 之后那次的做法再整理一次。被缩短的各段原文存入归档的[附录 F][logF]：头部的状态文字、「当前状态」里逐轮的状态文字、两个发布里程碑、「下一步」、「还没有验证的」与「待决策」里改短的条目、§7 里阶段 C 与 D 的长状态、§10 索引里的长行，和本节 r12 到 r22 续 1 的长条目。计划里改成现在的状态，一轮一行。章节编号与锚点没有变。PR [#42][pr-42] 已由用户合入，状态据此更新。
 - r23：三个 action 升到 Node 24 的版本（PR [#43][pr-43]）；扩展 API 的审计批 9（PR [#44][pr-44]）；决策 11、13 已定，不做；新增 `docs/PLAN` 的 Cursor 规则（2026-10-27）。续 1：推送 `main`；用户让合入 #43 与 #44，都已合入（`969062b`、`e860fd9`）。续 2：用户答复 Zed 里的核对通过（核对两项：空白对话再打开；`pi-mcp-py`）。见 [§10.26][l10-26]。
-- r24：0.9 的 Landlock 层在内核 6.12 的云 VM 上实测：生效；`deny_paths_e2e` 在 Linux 上测的是 `bwrap`，新加 `landlock_enforcement_e2e`（2026-10-30；PR [#TBD][pr-tbd]）。见 [§10.27][l10-27]。
+- r24：0.9 的 Landlock 层在内核 6.12 的云 VM 上实测：生效；`deny_paths_e2e` 在 Linux 上测的是 `bwrap`，新加 `landlock_enforcement_e2e`（2026-10-30；PR [#58][pr-58]）。见 [§10.27][l10-27]。
 
 <!-- 链接定义 -->
 [log]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md
@@ -631,6 +631,7 @@ Rust（pager）：
 [pr-42]: https://github.com/zy1233/pi-python/pull/42
 [pr-43]: https://github.com/zy1233/pi-python/pull/43
 [pr-44]: https://github.com/zy1233/pi-python/pull/44
+[pr-58]: https://github.com/zy1233/pi-python/pull/58
 [ci-run-5f73e07]: https://github.com/zy1233/pi-python/actions/runs/40172668652
 [tui-ci-run-5f73e07]: https://github.com/zy1233/pi-python/actions/runs/40172721728
 [run-dry-run-5f73e07]: https://github.com/zy1233/pi-python/actions/runs/40172723794
