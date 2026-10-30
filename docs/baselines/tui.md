@@ -120,7 +120,7 @@ macOS 环境：Apple Silicon，Homebrew `cargo` / `rustc` 1.96.1（**不是**钉
 **没有选入 suite 的 crate**：r8 在 Linux（WSL2，计划 §10.10）上逐个跑过它们的 `--lib --tests`：74 个 crate，68 个全过（含 `pi-sandbox`、`pi-tools`、`pi-pager-minimal`，其中 5 个没有测试），共 11,807 通过 / 13 失败 / 23 忽略。有失败的都与 runtime 拆除无关：`pi-agent`（1 项：加密模板字节过期）、`pi-shell-base`（2 项：按进程名 `grok` 判断，函数没有调用者）、`pi-workspace`（`session::git::*` 7 项：`xai-org` 改名遗留与 OID 断言）、`pi-hooks`（1 项：`test_hook_child_cannot_open_dev_tty` 假定 `sh` 的 `exec` 重定向失败后会接着往下走，dash 不会；它只在有控制终端时才跑，CI 上会自己跳过）、`pi-fast-worktree`（lib 测试编译不过）；另有两个偶发（`pi-pager-render` 的 tmux 探测、`pi-workspace` 的 `hub_auth::proactive`），之后各重复 60 次都没复现。
 
 - 已加进清单（r8，用户选了做）：`pi-pager-render`（整个 crate 1,092 通过 / 2 忽略，带上面那个 `known_failures`）与 `pi-pager-minimal`（79 通过）。后者有个用例缺 `test_lock()`，默认线程数下 30 次失败 25 次，r8 已补上，补后 40/40。第一次 CI 运行（PR #9）在 runner 上证实了这两个 suite 的数：`pi-pager-render` 1,092 通过 / 2 忽略（`known_failures` 里的那个用例在 runner 上没有失败），`pi-pager-minimal` 79 通过。
-- `pi-sandbox` 的端到端用例（`deny_paths_e2e`、`read_write_trailing_glob_e2e`）在内核不支持 Landlock 时直接 `return`，「通过」是空转；要在带 Landlock 的 runner（内核 ≥ 5.13）上并设 `SANDBOX_E2E_REQUIRE_ENFORCEMENT=1` 才算数。这一项还没做，仍会改 CI 门禁（要换 runner 或加一个 job）。
+- `pi-sandbox` 不在清单里，CI 不跑它。它的端到端用例有两种跳过：`read_write_trailing_glob_e2e` 在内核不支持 Landlock 时 `return`；`deny_paths_e2e` 还在没有可用的 `bwrap` 时 `return`，而且在 Linux 上它测的是 `bwrap`，不是 Landlock（r24 的变异检查：Landlock 不生效，它的 8 个用例照样通过）。不设 `SANDBOX_E2E_REQUIRE_ENFORCEMENT` 时，这些「通过」可能是空转。r24 在内核 6.12（Landlock ABI 6）的云 VM 上跑过，并加了测试 `landlock_enforcement_e2e`（见计划 §10.27）。要进 CI：把 `pi-sandbox` 加进清单，runner 要有 Landlock、`bwrap` 与可用的用户命名空间，并设 `SANDBOX_E2E_REQUIRE_ENFORCEMENT=1`；GitHub 的 `ubuntu-24.04` runner 满不满足，没有查。这一项还没做，会改 CI 门禁。
 
 ### 3.3 PTY 载体
 

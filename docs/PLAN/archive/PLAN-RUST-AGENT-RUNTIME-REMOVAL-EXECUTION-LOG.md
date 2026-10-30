@@ -12,7 +12,7 @@
 
 ## 目录
 
-- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23)
+- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24)
   - [10.1 范围、方法与规模](#101-范围方法与规模)
   - [10.2 `/model` 恢复（ADR3 r3）](#102-model-恢复adr3-r3)
   - [10.3 验证（r3 的实测）](#103-验证r3-的实测)
@@ -39,6 +39,7 @@
   - [10.24 r21 追加：V0.6 的版本号、合入 #38 与 #39、条件 1–4 的结果](#1024-r21-追加v06-的版本号合入-38-与-39条件-14-的结果)
   - [10.25 r22 追加：打 tag v0.6.0、发布、发布后的核对](#1025-r22-追加打-tag-v060发布发布后的核对)
   - [10.26 r23 追加：三个 action 升到 Node 24、扩展 API 的审计批 9、决策 11 与 13](#1026-r23-追加三个-action-升到-node-24扩展-api-的审计批-9决策-11-与-13)
+  - [10.27 r24 追加：Landlock 层的实测](#1027-r24-追加landlock-层的实测)
 - [附录 A（摘录）：A.4](#附录-a摘录a4)
   - [A.4 r5 执行结果（对照 r5 时初稿里的「默认决策」；r9 的更新见 A.1）](#a4-r5-执行结果对照-r5-时初稿里的默认决策r9-的更新见-a1)
 - [附录 B：复现方法](#附录-b复现方法)
@@ -65,7 +66,7 @@
   - [F.10 修订记录摘要里的长条目](#f10-修订记录摘要里的长条目)
 - [修订记录](#修订记录)
 
-## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23）
+## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24）
 
 r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）；r14 合入这两个 PR，并做决策 17：会话文件在第一条用户消息时才写（§10.17）；r15 做决策 10 的存储层一项：删 `pi-shell` 里的旧存储层（§10.18）；r16 合入 #25 与 #26，并删 `pi-shell` 里剩下的死代码（§10.19）；r17 检查测试之间的竞争，只改测试与工具（§10.20）；r18 改用 `cargo nextest`，改 `protoc` 的路径与 `release.yml` 的令牌（§10.21）；r19 用 `gh stack` 合入 #27–#31，并设 V0.6 的发布里程碑（§10.22）；r20 定 MCP 的方向（可选扩展包），修空白对话，补发布内容，并合入 #33–#36（§10.23）；r21 做 V0.6 的版本号与发布说明（条件 5），合入 #38 与 #39，并做条件 1–4（§10.24）；r22 打 tag `v0.6.0`、发布、做发布后的核对（§10.25）；r23 把三个 action 升到 Node 24 的版本，处理扩展 API 的审计批 9，并把决策 11、13 记成不做（§10.26）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
@@ -2004,6 +2005,72 @@ pi-mcp-py                 0.1.0（新）      核心下限 >=0.5.0 -> >=0.6.0
 - 没有改的：`CHANGELOG.md` 的 `[0.6.0]`（`Known issues`）写着 "Nobody has used the package in the real Zed window"，GitHub Release 的正文与这一段逐字相同。那是发布时的状态；只改一边，两处会不一致，所以不改。
 - 上面「留下的与没验证的」：③ 现在有结果（通过）；④ 在续 1 里已经处理。
 
+### 10.27 r24 追加：Landlock 层的实测
+
+计划的 0.9 还差一项：沙箱的 Landlock 层。r8 在 WSL2（内核 5.10）上没有做，因为那个内核没有 Landlock。这一轮在一台 Linux 云 VM 上做（分支 `test/tui-landlock-verification`，只加一个测试文件并改文档；没有改产品代码）。
+
+**环境。**
+
+```
+$ uname -a
+Linux cursor 6.12.94+ #1 SMP PREEMPT_DYNAMIC Tue Oct 27 12:38:43 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+$ cat /sys/kernel/security/lsm
+capability,landlock,selinux,bpf
+$ dmesg | grep -i landlock
+[    0.192578] landlock: Up and running.
+$ python3 -c 'import ctypes; l=ctypes.CDLL(None); print(l.syscall(444, None, 0, 1))'   # landlock_create_ruleset(NULL, 0, VERSION)
+6
+```
+
+Ubuntu 24.04.5，内核配置有 `CONFIG_SECURITY_LANDLOCK=y`，Landlock 的 ABI 是 6（文件、重命名跨目录、截断、TCP、设备 ioctl、进程范围）。`nono` 0.53.0 的 `support_info()` 报 `Landlock available (Landlock V6, …)`。4 vCPU，可用内存约 5 GiB，`CARGO_BUILD_JOBS=2`。`rustc` 1.94.0，`cargo-nextest` 0.9.148。这台 VM 一开始没有 `bwrap`；用 `apt-get install bubblewrap`（0.9.0）装上了。非特权用户命名空间可用（`unshare -Urm true` 成功，`bwrap --bind / / -- true` 成功）。
+
+**计划与代码不一致的三处（以代码为准）。**
+
+1. 计划写的是：两个端到端文件「在内核不支持 Landlock 时直接 `return`」。代码里这只对 `read_write_trailing_glob_e2e` 成立。`deny_paths_e2e` 在 Linux 上还有第二个跳过条件：没有可用的 `bwrap`（`bwrap --bind / / -- true` 失败）。这台 VM 有 Landlock、没有 `bwrap`：不设变量时，101 个测试全部「通过」（其中 8 个 `deny_paths_e2e` 用例各用 3 到 7 毫秒，什么也没测）；设 `SANDBOX_E2E_REQUIRE_ENFORCEMENT=1` 时，8 个 `deny_paths_e2e` 用例全部 panic：`enforcement required … but bwrap unavailable`。所以「在带 Landlock 的 runner 上设这个变量」还不够，runner 也要有 `bwrap`。
+2. `deny_paths_e2e` 在 Linux 上测的是 `bwrap`，不是 Landlock。变异检查：把 `SandboxManager::apply` 里的 `Sandbox::apply(&caps)` 换成什么也不做（`is_applied()` 仍为 true），再跑：`deny_paths_e2e` 的 8 个用例仍全部通过；只有 `read_write_trailing_glob_e2e` 失败（`FAIL: write outside all grants succeeded (sandbox not enforced?)`）。代码注释也是这样说的：Landlock 不能在已授权的目录里拒绝子路径，读禁止由 `bwrap` 的 bind-over 做。结果：原来只有一个用例（`trailing_glob_read_write_grants_parent_directory`）真的测 Landlock，而且只测「`read_write` 的授权」这一条。
+3. `pi-sandbox` 不在 `scripts/tui_baseline.toml` 里，也不在 `.github/workflows/tui-ci.yml` 里：CI 从来不跑这些测试。`docs/baselines/tui.md` §3.2 把这一项写成「要换 runner 或加一个 job」；实际上先要有这个 suite。这一轮没有改 CI（见下面「没有做」）。
+
+**加了什么。** `tui/crates/codegen/pi-sandbox/tests/landlock_enforcement_e2e.rs`（4 个测试，只在 Linux 上编译）：
+
+- `kernel_abi_probe_agrees_with_support_info`：用 `landlock_create_ruleset` 的版本查询问内核，要求结果与 `SandboxManager::support_info()` 一致。
+- `workspace_profile_writes_only_inside_grants`、`read_only_profile_blocks_workspace_writes`、`strict_profile_blocks_reads_outside_allowlist`：在子进程里应用内置的 `workspace`、`read-only`、`strict`（应用不可撤销），再做 19 到 21 次探测（`workspace` 20、`read-only` 19、`strict` 21）：授权范围内读、写、`mkdir`、`rename`、`unlink` 必须成功；授权范围外的创建、覆盖、截断、`mkdir`、`unlink`、跨目录 `rename`、`symlink`、写 `HOME` 必须返回 `EACCES`（跨目录 `rename` 也接受 `EXDEV`）；`strict` 里授权范围外的读与列目录必须 `EACCES`；子进程（`sh -c 'echo x > …'`、`cat`）继承限制；`no_new_privs` 已设（读 `/proc/thread-self/status`：Landlock 与 `no_new_privs` 是每线程的，测试线程不是主线程）；`is_applied()` 为 true 且 `not_enforced()` 为空。
+- 对照：父进程先不加沙箱，做同样的操作（创建、覆盖、`mkdir`、`rename`、`rmdir`、`unlink`、子进程写），必须全部成功；所以拒绝只能来自 Landlock。夹具在 `~/.cache/pi-landlock-e2e/run-…`（不在 `/tmp`、`TMPDIR`、工作区里，这些地方每个 profile 都授权），用完删除，包括空的父目录。
+- 内核不支持时跳过并打印原因；设 `SANDBOX_E2E_REQUIRE_ENFORCEMENT=1` 则失败。这个文件不需要 `bwrap`。
+
+**结果（内核 6.12.94+，Landlock ABI 6）。**
+
+| 运行 | 结果 |
+|---|---|
+| `examples/sandbox_smoke_test`，`workspace` / `read-only` / `strict` | 都 `Sandbox applied (kernel-enforced)`。`workspace`：写 CWD 与 `/tmp` 成功，写 `~/` 被拒（`EACCES`）。`read-only`：写 CWD 与 `~/` 被拒，写 `/tmp` 成功（`read-only` 的 `read_write` 只有 grok 的状态目录加临时目录，这是设计）。`strict`：读 `~/` 被拒 |
+| 新文件，`SANDBOX_E2E_REQUIRE_ENFORCEMENT=1` | 4 / 4 通过，每个 profile 的探测全部 `OK`（拒绝的都是 `Permission denied (os error 13)`） |
+| 新文件，变异（`Sandbox::apply` 什么也不做） | 3 个 profile 用例全部失败，各有 10 到 15 项探测失败（含 `no_new_privs`、写工作区外、`strict` 的读）；ABI 一致性用例通过 |
+| 已有的 e2e，`bwrap` 已装，`REQUIRE=1` | 9 / 9 通过（`deny_paths_e2e` 8 个，`read_write_trailing_glob_e2e` 1 个） |
+| 整个 `pi-sandbox`，`REQUIRE=1` | 105 通过，3 个跳过（`#[ignore]` 的子进程入口） |
+| `cargo clippy -p pi-sandbox --tests` | 新文件没有告警（其他文件的 2 条告警是原有的） |
+
+命令：
+
+```
+cd tui
+unset PI_HOME GROK_HOME PI_AGENT_COMMAND PI_PYTHON GROK_SANDBOX
+export CARGO_BUILD_JOBS=2
+SANDBOX_E2E_REQUIRE_ENFORCEMENT=1 cargo nextest run -p pi-sandbox --no-fail-fast
+SANDBOX_E2E_REQUIRE_ENFORCEMENT=1 cargo nextest run -p pi-sandbox -E 'binary(landlock_enforcement_e2e)'
+```
+
+**副作用的检查（`AGENTS.md` 要求）。** 跑完以后比较了 `/tmp`、`~` 与 `~/.cache` 的列表。已有的测试留下了东西，不是这一轮的新文件造成的：`deny_paths_e2e` 在 `/tmp` 里留下 `grok-sandbox-e2e-exact-grok-<pid>-<时间>` 目录（不删除；几次运行累计留下 5 个），并向真实的 `~/.pi-python/` 写 `hooks/`、`hooks-paths`、`sandbox-blocked.*` 与 `sandbox-blocked-dir.*`（`bwrap` 的占位文件，权限 000；每次运行新增）；`read_write_trailing_glob_e2e` 留下空目录 `~/.cache/grok-starstar-e2e`。新文件不留任何东西。这些泄漏没有改。
+
+**没有做 / 没有验证的。**
+
+- 内核低于 5.13、或内核没有启用 Landlock 时的行为：这台机器的内核有 Landlock，无法测。新测试的跳过分支和 `not_enforced` 的降级路径（`stderr` 警告、`(not enforced)` 标签）没有在这样的内核上跑过；r8 在 WSL2（内核 5.10）上测过降级，见 [§10.10](#1010-r8-追加linux-补测wsl2)。
+- 内核 ≥ 5.13 但低于 6.7（只有文件的 Landlock，没有 TCP）、以及 ABI 1 到 5 的各版本：没有测。
+- `zypi --sandbox <profile>` 的真机运行（`scripts/tui_pty/smoke.py --sandbox workspace`）：没有构建 `zypi`，没有跑。`bwrap` 加 Landlock 叠加（真正的启动路径）只由已有的 `deny_paths_e2e` 覆盖，其中 Landlock 一半没有断言（见上面不一致的第 2 条）。
+- `restrict_network`：代码里它由 seccomp 的子进程过滤做（`child_net.rs`），不是 Landlock 的 TCP 规则。没有测。
+- CI：没有把 `pi-sandbox` 加进 `scripts/tui_baseline.toml` 或 `tui-ci.yml`；GitHub 的 `ubuntu-24.04` runner 是否有 Landlock、`bwrap` 与可用的用户命名空间，没有查。
+- macOS（Seatbelt）与 Windows：没有测。新文件只在 Linux 上编译。
+- 没有 Windows 与 WSL：Python 的测试与 Ruff 没有受影响（只改了 Rust 测试与文档），Ruff 在推送前跑过。
+- 另一个架构（aarch64）：系统调用号 444 在两个架构上相同，但没有在 aarch64 上跑。
+
 ## 附录 A（摘录）：A.4
 
 附录 A 的 A.1–A.3（能力矩阵、ACP 版本配对、逐方法）是活的参考，留在[计划](../PLAN-RUST-AGENT-RUNTIME-REMOVAL.md)里。A.4 记 r5 的执行结果，搬到这里。
@@ -3020,3 +3087,4 @@ r12 续 8（2026-10-13）：PR [#18](https://github.com/zy1233/pi-python/pull/18
 - r22 续 1：留下的三件事（2026-10-25，分支 `ci/pin-release-build-runner`，PR [#42](https://github.com/zy1233/pi-python/pull/42)；不与 r21、r22 的 PR 合并）。用户答复：钉 `build-tui`，开 PR，不合入；在文档里补 glibc 的下限，放在同一个 PR；删 7 个已合入的本地分支。① PR [#42](https://github.com/zy1233/pi-python/pull/42)：`release.yml` 的 `build-tui` 改用 `ubuntu-24.04`（一行加注释）；`docs/TUI-AND-CODE-AGENT.md` 的选项 A 补一段（glibc 2.39 或更新）；`CHANGELOG.md` 的 `[Unreleased]` 两条。没有在分支上跑演练。② 本地分支：先核对每个分支的头等于一个已合入 PR 的头，再 `git branch -D`；`fix/benchmark-verifier-isolation` 没有远端，没动。③ 计划里改的：状态里的 ⑦、当前状态的 r22 一段、下一步的「发布之后留下的」、§10 索引、本条；执行记录 §10.25 加「续 1」。④ 更正：§10.25 与下一步原来写的是：迁了之后，二进制会按更新的 glibc 链接，在 Ubuntu 24.04 上加载不了。这说得太满；没有在更新的映像上构建过，只能说「可能」，已改。⑤ 补记（r22 的 PR [#41](https://github.com/zy1233/pi-python/pull/41) 里做了，当时没记）：计划与执行记录里 12 处粗体，GitHub 显示成字面星号（例如 `**更正 r17：**CI 的`：收尾的 `**` 前是中文标点，后面紧跟一个字）；标点移到了粗体外面。查法：用 GitHub 的 markdown 接口（`gh api markdown`）渲染文件，再找剩下的 `*`。写新文字时，收尾的 `**` 前如果是标点，后面要空一格，或把标点放到外面。见 [§10.25](#1025-r22-追加打-tag-v060发布发布后的核对) 的「续 1」。
 - 整理（r22 续 1 之后，2026-10-27；分支 `docs/slim-runtime-removal-plan`，只改文档）：计划又长到 690 行、217,395 字节：r12 到 r22 的每一轮都把过程写回了头部、「当前状态」、两个发布里程碑、「下一步」与「待决策」，违背了 r10 之后定的规则（计划只写计划与状态）。照那次的做法再整理一次：被缩短的各段原文一字不改地存入附录 F（F.1 头部的状态文字；F.2「当前状态」里逐轮的状态文字；F.3、F.4 两个发布里程碑；F.5「下一步」；F.6「还没有验证的」里的两条；F.7「待决策」里的七项；F.8 §7 里阶段 C 与 D 的长状态；F.9 §10 索引里的长行；F.10「修订记录（摘要）」的长条目）；计划里改成现在的状态，一轮一行。章节编号与锚点没有变。另外补了本文缺的 r22 续 1 一条（原来只在计划的摘要里）。
 - r23：三个 action 升到 Node 24 的版本、扩展 API 的审计批 9、决策 11 与 13（2026-10-27；本地 `main`，只改文档，当时没有推送）。用户让把整理计划的分支 squash 合入本地 `main`（`63cd72c`，不推送），删 `ci/pin-release-build-runner` 与 `docs/slim-runtime-removal-plan`，再给建议；机器的资源紧张，不跑全量测试与 Rust 构建。问卷里用户选了五项：① `ci_actions`：PR [#43](https://github.com/zy1233/pi-python/pull/43)（分支 `ci/node24-actions`，头 `578f1c1`）：`upload-artifact` v4 → v6（6 处）、`download-artifact` v4 → v7（4 处）、`cache` v4 → v5（2 处）；`CI` 与 `TUI CI` 通过；`Release` 的演练（[run 40467256952](https://github.com/zy1233/pi-python/actions/runs/40467256952)）四个 job 成功；`arduino/setup-protoc@v3` 留着（没有 Node 24 的版本）；`download-artifact@v7` 没有测到（只在发布的 job 里用）。② `py_audit`：PR [#44](https://github.com/zy1233/pi-python/pull/44)（分支 `fix/extension-audit-cleanup`，`880d001`、`da2b975`）：审计的 F7-02 至 F7-09；新增 40 个测试，其中 24 个在旧代码上失败；25 个变异全部被抓住；`CI`（[run 40469559398](https://github.com/zy1233/pi-python/actions/runs/40469559398)）通过，`pytest` 在 3.11、3.12、3.13 上各 2,959 通过；两处行为变化（F7-03 的 `run_async`、F7-04 的命令名）。③ `bookkeeping`：决策 11、13 记成「已定，不做」；计划与本文件记 r23；新增 `.cursor/rules/plan-docs.mdc`。④ `delete_bench_branch`：删 `fix/benchmark-verifier-isolation`（头 `90501d6`，树与 `a25c916` 相同）。⑤ `zed_check`：给用户核对步骤，没有在 Zed 里试。两个 PR 当时都没有合入。没验证：`download-artifact@v7`；#44 的全套与 Linux 只在 CI 上跑；Zed 里的核对。续 1（用户答复之后）：推送 `main`（`a25c916..a8e893a`）；合入 #43（`969062b`）与 #44（`e860fd9`）；`main` 上的 `CI` 与 `TUI CI` 通过（`pytest` 各 2,959 通过；`cargo nextest` 8,490 通过 / 0 失败 / 22 跳过）。续 2：用户答复 Zed 里的核对通过（核对两项：空白对话再打开；`pi-mcp-py`）。见 [§10.26](#1026-r23-追加三个-action-升到-node-24扩展-api-的审计批-9决策-11-与-13)。
+- r24：0.9 的 Landlock 层在内核 6.12（Landlock ABI 6）的云 VM 上实测（2026-10-30；分支 `test/tui-landlock-verification`，加一个测试文件并改文档，没有改产品代码）。结论：Landlock 在这台 VM 上真的生效；计划与代码有三处不一致（`deny_paths_e2e` 还要 `bwrap`，它在 Linux 上测的是 `bwrap` 而不是 Landlock，`pi-sandbox` 不在 CI 里）。见 [§10.27](#1027-r24-追加landlock-层的实测)。
