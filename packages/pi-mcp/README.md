@@ -16,8 +16,9 @@ The package is on PyPI from the 0.6.0 release of pi-python. In a checkout of the
 `pip install -e ./packages/pi-mcp`.
 
 Nothing else to set up. The servers come from the editor (Zed: `context_servers` in the settings).
-It needs `pi-agent-core-lc` 0.6.0 or later: an older core does not hand over the servers of the
-client, and then the package logs a warning and does nothing.
+It needs `pi-agent-core-lc` 0.7.0 or later: the extensions are released with the core, so the
+floor of the package is the release it ships with. A core older than 0.6.0 does not hand over
+the servers of the client, and then the package logs a warning and does nothing.
 
 ## What it does
 
