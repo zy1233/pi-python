@@ -121,7 +121,39 @@ The site is a Cloudflare Worker that has static assets only. It has no script.
 Cloudflare serves the files in `dist/` directly. The address of the site is
 `https://zycode.dev`.
 
-### Deploy a change
+There are two ways to deploy. A merge into `main` deploys the site by itself (see
+"Deploy after a merge"). You can also deploy from your computer (see "Deploy by hand").
+
+### Deploy after a merge
+
+Cloudflare Workers Builds deploys the site. It runs on the machines of Cloudflare, not on
+GitHub Actions.
+
+1. A pull request that changes a file in `web/` is merged into `main`.
+2. Cloudflare clones the repository and uses `/web` as the root directory.
+3. Cloudflare runs the build command `npm run check && npm run build`. Then it runs the
+   deploy command `npx wrangler deploy`.
+4. The new files are live on `https://zycode.dev`. A run takes about one minute.
+
+A merge that changes no file in `web/` starts no build. A change to the Python packages
+is an example.
+
+GitHub shows the result on the merge commit as the check `Workers Builds: zycode-web`.
+To read the log, open the Worker `zycode-web` in the Cloudflare dashboard. Open
+**Deployments**, then **View build history**. Cloudflare keeps each log for 90 days.
+
+> **Caution:** A merge into `main` that changes `web/` changes the live site. Read the
+> pull request before you merge it.
+
+The workflow `.github/workflows/web-ci.yml` runs `npm run check` and `npm run build` on
+each pull request that changes `web/`, and on each push to `main` that changes `web/`.
+Its check is `Site (check + build)`. It does not deploy. It shows an error before the
+merge.
+
+### Deploy by hand
+
+Use this way to deploy from your computer. It deploys to the same Worker and the same
+address.
 
 1. Run `npx wrangler login`. A browser window opens. Select **Allow**. You do this one
    time on each computer.
@@ -157,11 +189,32 @@ site to another account, make them again. All of them are free.
 | DNSSEC                           | On                                                                                 | Cloudflare Registrar sends the DS record to the registry. This takes up to two days. |
 | Configuration rule               | `disable_rum` for all requests                                                     | See "No script from Cloudflare".                                                     |
 | Mail records                     | Four DNS records                                                                   | See "No mail on the domain".                                                         |
+| Workers Builds                   | See "Workers Builds settings".                                                     | A merge into `main` deploys the site.                                                |
 | Registrar lock and WHOIS privacy | On (the default)                                                                   | Nobody can move the domain. The public WHOIS record does not show your contact data. |
 
 The file `public/_headers` also sets `Strict-Transport-Security`. The top-level domain
 `.dev` is on the HSTS preload list of the browsers, so a browser uses HTTPS for the site
 before it sends a request.
+
+### Workers Builds settings
+
+These settings are in the Worker `zycode-web`, under **Settings** and **Build**. They are
+not in this repository. If you move the site to another account, make them again.
+Cloudflare applies a saved change to the next build.
+
+| Setting                   | Value                                                | Reason                                                                             |
+| ------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Git repository            | `zy1233/pi-python`                                   | The GitHub App of Cloudflare has access to this one repository.                    |
+| Production branch         | `main`                                               | A merge into `main` deploys the site.                                              |
+| Root directory            | `/web`                                               | The site is in a folder of a larger repository.                                    |
+| Build command             | `npm run check && npm run build`                     | The `&&` stops at the first error.                                                 |
+| Deploy command            | `npx wrangler deploy`                                | Wrangler uploads `dist/` and keeps the Custom Domain.                              |
+| Build watch path          | Include `web/*`                                      | A change outside `web/` starts no build.                                           |
+| Builds for other branches | Off                                                  | The site has one address. A branch gets no preview.                                |
+| Build variables           | None                                                 | `SITE_URL` keeps its default value, `https://zycode.dev`.                          |
+| Node.js                   | From `.node-version` (24)                            | Cloudflare reads the file. The web CI reads it too.                                |
+| npm                       | 10.9.2 (the default of Cloudflare, October 2026)     | The web CI uses the npm of Node.js 24 (11.x). The lockfile must install with both. |
+| Build token               | Cloudflare made it when you connected the repository | The build needs a token to upload the files.                                       |
 
 ### No script from Cloudflare
 
@@ -224,3 +277,6 @@ tag to each page.
 3. Run `npm run preview`. Look at the home page and `/zh/` in the light theme and in the
    dark theme, at a width of 1440 pixels and at a width of 360 pixels.
 4. Make sure that the page does not scroll sideways at a width of 320 pixels.
+
+The web CI does steps 1 and 2 on each pull request that changes `web/`. Steps 3 and 4
+need your eyes. Do them before you merge, because a merge deploys the site.
