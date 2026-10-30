@@ -463,8 +463,21 @@ fn needs_animation_gates_prompt_history_tick_delivery() {
         app.needs_animation(),
         "an open prompt history overlay must request animation ticks"
     );
+    // `activate` already copied whatever the daemon had published, so that
+    // snapshot may hold both entries before the first tick (the daemon is
+    // quick) or none (it is slow). `tick()` only reports a change for a newer
+    // generation. Ask for a fresh one, which the daemon publishes after
+    // `activate` took its copy whichever case happened, then wait for `tick()`
+    // to deliver it. The deadline only ends a hang; a pass returns at once.
+    app.agents
+        .get_mut(&id)
+        .unwrap()
+        .prompt
+        .history_search
+        .update_query("");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     let mut delivered = false;
-    for _ in 0..1000 {
+    while std::time::Instant::now() < deadline {
         if app.tick() && app.agents[&id].prompt.history_search.result_count() == 2 {
             delivered = true;
             break;
