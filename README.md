@@ -5,6 +5,8 @@
 [![Python](https://img.shields.io/pypi/pyversions/pi-agent-core-lc)](https://pypi.org/project/pi-agent-core-lc/)
 [![License](https://img.shields.io/pypi/l/pi-agent-core-lc)](https://github.com/zy1233/pi-python/blob/main/LICENSE)
 
+**zycode** is an open-source coding agent for your terminal and your editor. It is built from this repository: the ACP agent `pi-agent-cli-lc` and the terminal UI `zypi`. Website: [zycode.dev](https://zycode.dev) ([中文](https://zycode.dev/zh/)).
+
 > Unofficial project: this repository is not affiliated with, endorsed by, or maintained by the official [pi](https://github.com/earendil-works/pi) project or its maintainers.
 
 Python port of [pi-agent-core](https://github.com/earendil-works/pi/tree/main/packages/agent) from the [pi](https://github.com/earendil-works/pi) project, with **LangChain** replacing `pi-ai` for LLM calls.

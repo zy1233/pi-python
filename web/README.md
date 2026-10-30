@@ -42,7 +42,7 @@ Run all commands in this folder (`web/`).
 ```
 web/
 ├── brand/             Pictures that the site does not serve: the avatar and the header for X
-├── public/            Files that are copied without a change: favicon, social card, _headers
+├── public/            Files that are copied without a change: icons, social card, _headers
 ├── src/
 │   ├── components/    One file for each part of the page
 │   ├── data/site.ts   The links and the list of packages
@@ -92,6 +92,47 @@ The build does not make it. To make the image again:
 1. Run `npm run dev`.
 2. Open `http://localhost:4321/dev/og/` in a window that is 1200 pixels wide.
 3. Save a screenshot of the card, 1200 × 630 pixels, as `public/og.png`.
+
+## Icons
+
+The folder `public/` holds three icons. All of them show the mark in `favicon.svg`.
+
+| File                   | Size                  | Use                                                                   |
+| ---------------------- | --------------------- | --------------------------------------------------------------------- |
+| `favicon.svg`          | Any size              | Browsers that support SVG. It is the source of the other two icons.   |
+| `favicon.ico`          | 16, 32, and 48 pixels | Search engines and old browsers ask for `/favicon.ico`.               |
+| `apple-touch-icon.png` | 180 × 180 pixels      | The icon of the site on the home screen of an iPhone or an iPad.      |
+
+The ICO file has rounded corners and a clear background. The Apple icon is a full square
+with no clear pixels, because iOS cuts the corners itself.
+
+If you change the mark in `favicon.svg`, make the two files again. Use the same shapes and
+the same colors. Pack the three sizes into one ICO file. Look at the 16-pixel size: the mark
+must stay clear there.
+
+## Search engines
+
+The `<head>` in `src/layouts/Base.astro` holds what a search engine reads:
+
+- the title, the description, and the canonical link;
+- the language links (`hreflang`) between `/` and `/zh/`;
+- the Open Graph tags and the Twitter tags for links that people share
+  (`twitter:site` comes from the X link in `src/data/site.ts`);
+- JSON-LD data (schema.org) with two nodes: `WebSite` and `SoftwareSourceCode`.
+
+The files `src/pages/robots.txt.ts` and `src/pages/sitemap.xml.ts` make `robots.txt` and
+`sitemap.xml`. The sitemap lists the two home pages. It has no `lastmod` date, because the
+build cannot know when the text changed.
+
+Obey these rules for the JSON-LD:
+
+- Each value must come from this repository: the text of the page, `src/data/site.ts`,
+  or the licenses in the root `README.md`.
+- Do not add `aggregateRating` or `review`. The project has no ratings. A false rating
+  breaks the rules of the search engines.
+- A preview address gets no JSON-LD. The same rule gives it `noindex`.
+- After a change, run `npm run build`. Open `dist/index.html`. Make sure that the JSON-LD
+  is valid JSON and that each property is a property of its type in schema.org.
 
 ## Pictures for X
 
