@@ -12,7 +12,7 @@
 
 ## 目录
 
-- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24)
+- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25)
   - [10.1 范围、方法与规模](#101-范围方法与规模)
   - [10.2 `/model` 恢复（ADR3 r3）](#102-model-恢复adr3-r3)
   - [10.3 验证（r3 的实测）](#103-验证r3-的实测)
@@ -40,6 +40,7 @@
   - [10.25 r22 追加：打 tag v0.6.0、发布、发布后的核对](#1025-r22-追加打-tag-v060发布发布后的核对)
   - [10.26 r23 追加：三个 action 升到 Node 24、扩展 API 的审计批 9、决策 11 与 13](#1026-r23-追加三个-action-升到-node-24扩展-api-的审计批-9决策-11-与-13)
   - [10.27 r24 追加：Landlock 层的实测](#1027-r24-追加landlock-层的实测)
+  - [10.28 r25 追加：`pi-sandbox` 进 CI](#1028-r25-追加pi-sandbox-进-ci)
 - [附录 A（摘录）：A.4](#附录-a摘录a4)
   - [A.4 r5 执行结果（对照 r5 时初稿里的「默认决策」；r9 的更新见 A.1）](#a4-r5-执行结果对照-r5-时初稿里的默认决策r9-的更新见-a1)
 - [附录 B：复现方法](#附录-b复现方法)
@@ -66,7 +67,7 @@
   - [F.10 修订记录摘要里的长条目](#f10-修订记录摘要里的长条目)
 - [修订记录](#修订记录)
 
-## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24）
+## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25）
 
 r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）；r14 合入这两个 PR，并做决策 17：会话文件在第一条用户消息时才写（§10.17）；r15 做决策 10 的存储层一项：删 `pi-shell` 里的旧存储层（§10.18）；r16 合入 #25 与 #26，并删 `pi-shell` 里剩下的死代码（§10.19）；r17 检查测试之间的竞争，只改测试与工具（§10.20）；r18 改用 `cargo nextest`，改 `protoc` 的路径与 `release.yml` 的令牌（§10.21）；r19 用 `gh stack` 合入 #27–#31，并设 V0.6 的发布里程碑（§10.22）；r20 定 MCP 的方向（可选扩展包），修空白对话，补发布内容，并合入 #33–#36（§10.23）；r21 做 V0.6 的版本号与发布说明（条件 5），合入 #38 与 #39，并做条件 1–4（§10.24）；r22 打 tag `v0.6.0`、发布、做发布后的核对（§10.25）；r23 把三个 action 升到 Node 24 的版本，处理扩展 API 的审计批 9，并把决策 11、13 记成不做（§10.26）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
@@ -2071,6 +2072,52 @@ SANDBOX_E2E_REQUIRE_ENFORCEMENT=1 cargo nextest run -p pi-sandbox -E 'binary(lan
 - 没有 Windows 与 WSL：Python 的测试与 Ruff 没有受影响（只改了 Rust 测试与文档），Ruff 在推送前跑过。
 - 另一个架构（aarch64）：系统调用号 444 在两个架构上相同，但没有在 aarch64 上跑。
 
+### 10.28 r25 追加：`pi-sandbox` 进 CI
+
+r24 查出：`pi-sandbox` 不在 `scripts/tui_baseline.toml` 与 `.github/workflows/tui-ci.yml` 里，CI 从来不跑它（[§10.27](#1027-r24-追加landlock-层的实测) 的不一致第 3 条）。这一轮把它接进去。分支 `ci/tui-sandbox-gate`，叠在 `test/tui-landlock-verification`（PR [#58](https://github.com/zy1233/pi-python/pull/58)）上，PR [#59](https://github.com/zy1233/pi-python/pull/59) 的基准分支也是它，所以 diff 只有这一轮的改动。没有改产品代码，没有改 #58 的分支。
+
+**第一步：探针。** 一个一次性的 job（分支 `ci/tui-sandbox-probe`，已删除），跑在 `ubuntu-24.04`，打印内核、LSM、Landlock、`bwrap` 与用户命名空间。结果：
+
+```
+Linux 7.0.0-1017-azure #17~24.04.1-Ubuntu SMP PREEMPT x86_64      (Ubuntu 24.04.5)
+/sys/kernel/security/lsm: lockdown,capability,landlock,yama,apparmor,ima,evm
+landlock: Up and running.
+landlock_create_ruleset(NULL, 0, VERSION) = 8
+bwrap: not installed
+kernel.unprivileged_userns_clone = 1
+kernel.apparmor_restrict_unprivileged_userns = 1
+unshare -U true            -> ok
+unshare -Ur id             -> unshare: write failed /proc/self/uid_map: Operation not permitted
+apt-get install bubblewrap -> bubblewrap 0.9.0
+bwrap --ro-bind / / true   -> bwrap: setting up uid map: Permission denied
+```
+
+Runner 有 Landlock（ABI 8），没有 `bwrap`；装上 `bwrap` 也不能用，因为 Ubuntu 24.04 用 AppArmor 挡了非特权用户命名空间。第二次探针（同一个一次性分支）：装 `bubblewrap` 后执行 `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`，`bwrap --bind / / -- true` 与 `bwrap --ro-bind / / --dev /dev --proc /proc --unshare-user --unshare-pid --unshare-net true` 都成功；`sudo` 不要密码。探针的运行：[41098455107](https://github.com/zy1233/pi-python/actions/runs/41098455107)（第一次）、[41098617932](https://github.com/zy1233/pi-python/actions/runs/41098617932)（第二次）。
+
+**第二步：接进去。**
+
+- `scripts/tui_baseline.toml`：新 suite `pi-sandbox`，目标是 `--lib` 加四个集成文件（`deny_paths_e2e`、`integration_test`、`landlock_enforcement_e2e`、`read_write_trailing_glob_e2e`），`reference_passed = 105`，`min_passed = 100`。本地（内核 6.12，装了 `bwrap`，设了变量）用基线执行器跑：105 通过 / 0 失败 / 3 跳过。
+- `tui-ci.yml` 的 `test` job：一步 `apt-get install bubblewrap` 并设 `kernel.apparmor_restrict_unprivileged_userns=0`（最小的办法：只放开这一项，只影响这台一次性的 runner；别的办法如给 `bwrap` 写 AppArmor 的 profile 要多维护一个文件）；`Test suites` 一步设 `SANDBOX_E2E_REQUIRE_ENFORCEMENT=1`。
+- 变量放在 workflow 里，不放清单的 `[test.env]`：清单在本地也读，放进去会让没有 `bwrap` 的开发机、macOS 与 Windows 上的运行失败。代价：本地不设变量时 `pi-sandbox` 在没有 `bwrap` 的主机上仍会空转；`min_passed` 拦不住这一点（空转的用例也算「通过」）。所以加了测试 `test_the_test_job_makes_the_sandbox_tests_fail_when_they_cannot_enforce`（`scripts/tests/test_tui_baseline.py`），守住三件事：清单里有 `pi-sandbox`；`Test suites` 一步设了变量；装 `bubblewrap` 与放开 sysctl 在它之前。
+
+**第三步：证明门禁不是空的。**
+
+| 运行 | 提交 | 结果 |
+|---|---|---|
+| `TUI CI` [41099099458](https://github.com/zy1233/pi-python/actions/runs/41099099458)，要求满足 | `cc2817c` | 成功。11 个 suite 全过：`pi-sandbox` 105 通过 / 0 失败 / 3 跳过；合计 8,596 通过 / 0 失败 / 25 跳过（`pi-file-utils` 这次是 217，清单的 `reference_passed` 是 216，差 1，与这一轮无关，没有改） |
+| `TUI CI` [41102790276](https://github.com/zy1233/pi-python/actions/runs/41102790276)，一次性提交去掉 sysctl 那一行 | `386f792` | 失败。`pi-sandbox` 98 通过 / 7 失败 / 3 跳过：7 个 `deny_paths_e2e` 用例 panic，`enforcement required (SANDBOX_E2E_REQUIRE_ENFORCEMENT) but bwrap unavailable`；报告里的原因还有「passed 98 < floor 100」。另外 10 个 suite 全过，所以这个失败只来自去掉的那一行 |
+
+第二个运行用的提交是一次性的，之后已从分支上拿掉（强制推送回 `cc2817c`）；运行本身留在 Actions 里。Landlock 的几个用例（`landlock_enforcement_e2e` 4 个、`read_write_trailing_glob_e2e` 1 个）在失败的那次也通过，因为 runner 有 Landlock；缺的只是 `bwrap`。「没有 Landlock」那一半，没有在 CI 里造出来（GitHub 的 runner 都有）；它由 `landlock_enforcement_e2e` 里「设了变量就失败」的分支承担，该分支这一轮没有在没有 Landlock 的内核上跑过。
+
+**基线的 `TUI CI`，PR #58 的运行。** [41097019349](https://github.com/zy1233/pi-python/actions/runs/41097019349)（`02e1f69`，没有 `pi-sandbox`）的 `cargo nextest` job 失败：`pi-pager` 的 `app::app_view::tests::needs_animation_gates_prompt_history_tick_delivery`（1.135 s）。这个失败不是这一轮造成的：这一轮没有改 `pi-pager`，而同一个基准提交之上的上面两次运行（`cc2817c`、`386f792`）里，`pi-pager` 5,651 个用例都通过。没有查原因，也没有修；按这一轮的约定，由 #58 的负责人处理。
+
+**没有做 / 没有验证的。**
+
+- macOS（Seatbelt）与 Windows 的 CI：没有 `pi-sandbox` 的 job；0.9 的复选框没有勾。
+- 没有在没有 Landlock 的内核上验证「变量使 job 失败」的那一半（见上）。
+- `ubuntu-24.04` 的镜像变了（内核、AppArmor 的默认值）时，这一步 sysctl 可能不再需要，或不够用；有变量在，job 会失败，不会空转。
+- 本地没有跑 Windows / WSL 的 Python 测试；只改了 `scripts/tests/test_tui_baseline.py`（64 个用例在 Linux 上通过）。
+
 ## 附录 A（摘录）：A.4
 
 附录 A 的 A.1–A.3（能力矩阵、ACP 版本配对、逐方法）是活的参考，留在[计划](../PLAN-RUST-AGENT-RUNTIME-REMOVAL.md)里。A.4 记 r5 的执行结果，搬到这里。
@@ -3088,3 +3135,4 @@ r12 续 8（2026-10-13）：PR [#18](https://github.com/zy1233/pi-python/pull/18
 - 整理（r22 续 1 之后，2026-10-27；分支 `docs/slim-runtime-removal-plan`，只改文档）：计划又长到 690 行、217,395 字节：r12 到 r22 的每一轮都把过程写回了头部、「当前状态」、两个发布里程碑、「下一步」与「待决策」，违背了 r10 之后定的规则（计划只写计划与状态）。照那次的做法再整理一次：被缩短的各段原文一字不改地存入附录 F（F.1 头部的状态文字；F.2「当前状态」里逐轮的状态文字；F.3、F.4 两个发布里程碑；F.5「下一步」；F.6「还没有验证的」里的两条；F.7「待决策」里的七项；F.8 §7 里阶段 C 与 D 的长状态；F.9 §10 索引里的长行；F.10「修订记录（摘要）」的长条目）；计划里改成现在的状态，一轮一行。章节编号与锚点没有变。另外补了本文缺的 r22 续 1 一条（原来只在计划的摘要里）。
 - r23：三个 action 升到 Node 24 的版本、扩展 API 的审计批 9、决策 11 与 13（2026-10-27；本地 `main`，只改文档，当时没有推送）。用户让把整理计划的分支 squash 合入本地 `main`（`63cd72c`，不推送），删 `ci/pin-release-build-runner` 与 `docs/slim-runtime-removal-plan`，再给建议；机器的资源紧张，不跑全量测试与 Rust 构建。问卷里用户选了五项：① `ci_actions`：PR [#43](https://github.com/zy1233/pi-python/pull/43)（分支 `ci/node24-actions`，头 `578f1c1`）：`upload-artifact` v4 → v6（6 处）、`download-artifact` v4 → v7（4 处）、`cache` v4 → v5（2 处）；`CI` 与 `TUI CI` 通过；`Release` 的演练（[run 40467256952](https://github.com/zy1233/pi-python/actions/runs/40467256952)）四个 job 成功；`arduino/setup-protoc@v3` 留着（没有 Node 24 的版本）；`download-artifact@v7` 没有测到（只在发布的 job 里用）。② `py_audit`：PR [#44](https://github.com/zy1233/pi-python/pull/44)（分支 `fix/extension-audit-cleanup`，`880d001`、`da2b975`）：审计的 F7-02 至 F7-09；新增 40 个测试，其中 24 个在旧代码上失败；25 个变异全部被抓住；`CI`（[run 40469559398](https://github.com/zy1233/pi-python/actions/runs/40469559398)）通过，`pytest` 在 3.11、3.12、3.13 上各 2,959 通过；两处行为变化（F7-03 的 `run_async`、F7-04 的命令名）。③ `bookkeeping`：决策 11、13 记成「已定，不做」；计划与本文件记 r23；新增 `.cursor/rules/plan-docs.mdc`。④ `delete_bench_branch`：删 `fix/benchmark-verifier-isolation`（头 `90501d6`，树与 `a25c916` 相同）。⑤ `zed_check`：给用户核对步骤，没有在 Zed 里试。两个 PR 当时都没有合入。没验证：`download-artifact@v7`；#44 的全套与 Linux 只在 CI 上跑；Zed 里的核对。续 1（用户答复之后）：推送 `main`（`a25c916..a8e893a`）；合入 #43（`969062b`）与 #44（`e860fd9`）；`main` 上的 `CI` 与 `TUI CI` 通过（`pytest` 各 2,959 通过；`cargo nextest` 8,490 通过 / 0 失败 / 22 跳过）。续 2：用户答复 Zed 里的核对通过（核对两项：空白对话再打开；`pi-mcp-py`）。见 [§10.26](#1026-r23-追加三个-action-升到-node-24扩展-api-的审计批-9决策-11-与-13)。
 - r24：0.9 的 Landlock 层在内核 6.12（Landlock ABI 6）的云 VM 上实测（2026-10-30；分支 `test/tui-landlock-verification`，加一个测试文件并改文档，没有改产品代码）。结论：Landlock 在这台 VM 上真的生效；计划与代码有三处不一致（`deny_paths_e2e` 还要 `bwrap`，它在 Linux 上测的是 `bwrap` 而不是 Landlock，`pi-sandbox` 不在 CI 里）。见 [§10.27](#1027-r24-追加landlock-层的实测)；PR [#58](https://github.com/zy1233/pi-python/pull/58)。
+- r25：`pi-sandbox` 进 `scripts/tui_baseline.toml` 与 `tui-ci.yml`（2026-10-30；分支 `ci/tui-sandbox-gate`，叠在 `test/tui-landlock-verification` 上，没有改产品代码）。先用一个一次性的探针 job 查 `ubuntu-24.04` runner：有 Landlock（内核 7.0，ABI 8），没有 `bwrap`，AppArmor 挡着用户命名空间。workflow 装 `bubblewrap`、把 `kernel.apparmor_restrict_unprivileged_userns` 设为 0、设 `SANDBOX_E2E_REQUIRE_ENFORCEMENT=1`；有要求而满足不了的一次运行失败了（7 个用例）。见 [§10.28](#1028-r25-追加pi-sandbox-进-ci)；PR [#59](https://github.com/zy1233/pi-python/pull/59)。

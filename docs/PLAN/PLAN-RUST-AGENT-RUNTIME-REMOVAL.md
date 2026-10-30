@@ -1,6 +1,6 @@
 # Rust Agent Runtime 剥离计划
 
-> **状态：截至 r24（2026-10-30）。** v0.5.0（2026-10-13）与 v0.6.0（2026-10-25）都已发布。阶段 A、C 完成；阶段 0 基本完成；阶段 B 的删除完成，迁移没有完成；阶段 1 完成一半；阶段 D 没有开始（[当前状态](#当前状态)）。PR [#42][pr-42]（钉 `build-tui` 的运行器，补 glibc 的下限）已由用户合入 `main`（`e65af4d`）。PR [#43][pr-43]（三个 Actions 升到 Node 24 的版本）与 [#44][pr-44]（扩展 API 的审计批 9）也已合入 `main`（`969062b`、`e860fd9`）；`main` 上的 `CI` 与 `TUI CI` 通过。在等用户决定的事见[待决策](#待决策)；发布之后留下的事见[下一步](#下一步)。每一轮的过程在[执行记录（归档）][log]。
+> **状态：截至 r25（2026-10-30）。** v0.5.0（2026-10-13）与 v0.6.0（2026-10-25）都已发布。阶段 A、C 完成；阶段 0 基本完成；阶段 B 的删除完成，迁移没有完成；阶段 1 完成一半；阶段 D 没有开始（[当前状态](#当前状态)）。PR [#42][pr-42]（钉 `build-tui` 的运行器，补 glibc 的下限）已由用户合入 `main`（`e65af4d`）。PR [#43][pr-43]（三个 Actions 升到 Node 24 的版本）与 [#44][pr-44]（扩展 API 的审计批 9）也已合入 `main`（`969062b`、`e860fd9`）；`main` 上的 `CI` 与 `TUI CI` 通过。在等用户决定的事见[待决策](#待决策)；发布之后留下的事见[下一步](#下一步)。每一轮的过程在[执行记录（归档）][log]。
 >
 > **这份文档只写计划和状态。** 每一轮做了什么、怎么测的、数字是多少，在[执行记录（归档）][log]里。§1–§3、§6–§9 保留 r2 原文作为决策依据（§7 的每一项后面加了一行状态）。§4、§5 是 r2 的源码事实与规模估计，描述拆除之前的代码，原文在归档里。与执行记录冲突处，以执行记录和 ADR3（r3）为准。
 >
@@ -31,7 +31,7 @@
 
 | 阶段 | 状态 | 已完成 | 还差 |
 |---|---|---|---|
-| 0 基线与门禁 | 基本完成 | Linux CI 与基线（0.1、0.2）；ACP 契约与 e2e（0.3）；deny-list（0.4）；调用图工具化（0.5，r11）；入口审计（0.6）；读盘调用点与 ADR1 落地设计（0.7）；能力矩阵与版本配对（0.8）；Linux 上的实测（0.9 的大部分，含 r24 的 Landlock 层） | 0.9 的 macOS、Windows 一侧；Landlock 层只在内核 6.12 上测过（[§10.27][l10-27]），低版本内核与 CI 里都没有 |
+| 0 基线与门禁 | 基本完成 | Linux CI 与基线（0.1、0.2）；ACP 契约与 e2e（0.3）；deny-list（0.4）；调用图工具化（0.5，r11）；入口审计（0.6）；读盘调用点与 ADR1 落地设计（0.7）；能力矩阵与版本配对（0.8）；Linux 上的实测（0.9 的大部分，含 r24 的 Landlock 层） | 0.9 的 macOS、Windows 一侧；Landlock 层在内核 6.12 上测过（[§10.27][l10-27]），`pi-sandbox` 的测试 r25 起在 CI 里跑（[§10.28][l10-28]）；低版本内核没有测 |
 | A 死代码先行 | 完成 | A.1–A.4 | — |
 | 1 协议与 Python | 完成一半 | 1.P1 会话列表分页；1.P2 优雅退出；1.P4 显式忽略 `mcp_servers`（r20：装了 `pi-mcp-py` 就连接，决策 19，[#35][pr-35]、[#36][pr-36]）；1.P7 契约测试；1.R1 ADR1 落地（PR 1；PR 2、PR 3 在 [#23][pr-23]、[#24][pr-24]，r13 做成，r14 合入 `main`）；会话文件在第一条消息时才写（决策 17，r14，[#25][pr-25]，r16 合入 `main`；r20 的更正：Zed 重启后空白对话能再打开，[#34][pr-34]）；1.R3 的大部分；1.P3 的 (a) | 1.P3 的 (b)、(c)；1.P5；1.P6；1.R2；1.R4；1.R5；1.R3 的 MCP 子进程与 Windows |
 | B 拆除 runtime | 删除完成，迁移没有完成 | B.1、B.5、B.6：`pi-sampler` 与 `pi-shell` 的 runtime 单元已删；r15：`pi-shell` 的旧存储层 `session::{storage, persistence}` 也删了（决策 10，[#26][pr-26]，r16 合入）；r16：`session::worktree`、`session::helpers` 等死代码与 10 个源码没点名的依赖也删了（[#27][pr-27]，r19 合入 `main`） | B.2、B.3、B.4：r3 换了做法，没有抽出叶子 crate |
@@ -99,7 +99,7 @@
 
 - **平台。** Rust 的 e2e 用例与 `scripts/tui_pty/` 的 PTY 脚本只在 Linux（WSL2）上跑过；macOS 与 Windows 上没有。Windows 上只量了 Python 一侧的延迟，TUI 没有参与。
 - **真实 LLM。** r9、r10 的实测都用 mock。r11 用真模型跑了一轮网络审计（C.1，只看 `zypi` 有没有外连），没有用它验证别的功能。
-- **沙箱的 Landlock 层。** r24 在内核 6.12（Landlock ABI 6）的云 VM 上测了：生效，见 [§10.27][l10-27]。没测的：内核 5.13 到 6.11；`zypi --sandbox` 的真机运行；`bwrap` 加 Landlock 叠加时 Landlock 一半的断言；`restrict_network`（seccomp）。`pi-sandbox` 的测试不在 `tui_baseline.toml` 与 `tui-ci.yml` 里，CI 从来不跑；要进 CI，runner 要有 Landlock、`bwrap` 与用户命名空间。
+- **沙箱的 Landlock 层。** r24 在内核 6.12（Landlock ABI 6）的云 VM 上测了：生效，见 [§10.27][l10-27]。没测的：内核 5.13 到 6.11；`zypi --sandbox` 的真机运行；`bwrap` 加 Landlock 叠加时 Landlock 一半的断言；`restrict_network`（seccomp）。`pi-sandbox` 的测试 r25 起在 `tui_baseline.toml` 与 `tui-ci.yml` 里，CI 设了 `SANDBOX_E2E_REQUIRE_ENFORCEMENT=1`：runner 没有 Landlock 或 `bwrap` 时 job 失败（[§10.28][l10-28]）。
 - **延迟。** 只量了合成的会话（12 / 120 / 2,000 条消息）。冷磁盘、网络文件系统、超过 1,000 个会话、真实形状的会话没有量。
 - **跨目录的 `--resume <id>`。** TUI 的当前目录与会话保存的目录不同时，`@` 搜索、diff、git 信息用哪个目录，没有验证。
 - **旗标。** 除 `--always-approve`、`--permission-mode`、`--continue`、`--resume`、`--session-id` 外，没有逐个验证旗标在交互模式下是否生效。`-m` / `--model` 尤其没有查。
@@ -318,7 +318,7 @@ r2 的静态估计：口径、各对象的行数、需要编辑的 cut point、�
 - [x] 0.6 **入口审计**：逐入口标注可达性、所需 ACP 方法、决策（保留｜隐藏｜删除）。**状态**（r5）：用户选了「直接按附录 A 默认执行，不逐项确认」；结果是 A.3 的删除。记录 [§10.7][l10-7]，以及[执行记录 A.4][logA4]。
 - [x] 0.7 **磁盘读取点清单**与 ADR1 的落地设计。**状态**（r9）：pager 一侧有 13 处读盘调用，分布在 8 个文件；冷启动延迟已实测，没有触发 ADR1 的覆盖条件；13 例 PTY 验收矩阵在 `scripts/tui_pty/resume_matrix.py`；落地设计含沙箱顺序与 PR 切分。落地见 1.R1。记录 [§10.11][l10-11]。
 - [x] 0.8 **能力矩阵定稿**（附录 A）与 **ACP 版本配对表**（两端各方法的支持情况、升级策略；Python 侧不得依赖 Rust 端 unstable 方法）。**状态**（r9）：A.1 逐行标了「已定」「提议」或「未定」；A.2 是版本配对；A.3 是逐方法的两端支持情况。记录 [§10.11][l10-11]。
-- [ ] 0.9 **实测结案**：子进程是否继承沙箱；`zypi export <python-session-id>`；`/model` 经 `session/set_config_option` 的真机切换（r3 已用 OpenRouter 实测 Python 侧，见 [§10.3][l10-3]；TUI 全屏交互仍需 PTY 实测）；子进程 `stderr` 对全屏 TUI 的影响；退出后是否残留 Python / bash 进程；`config.toml` 的解析严格性。**状态**（r8）：Linux / WSL2 上六项都有了记录，记录 [§10.10][l10-10]。r24：沙箱的 Landlock 层在内核 6.12 的云 VM 上有了记录，记录 [§10.27][l10-27]（新测试 `pi-sandbox/tests/landlock_enforcement_e2e.rs`）。没做：内核 5.13 到 6.11 与 CI；macOS 与 Windows 上对应各项。
+- [ ] 0.9 **实测结案**：子进程是否继承沙箱；`zypi export <python-session-id>`；`/model` 经 `session/set_config_option` 的真机切换（r3 已用 OpenRouter 实测 Python 侧，见 [§10.3][l10-3]；TUI 全屏交互仍需 PTY 实测）；子进程 `stderr` 对全屏 TUI 的影响；退出后是否残留 Python / bash 进程；`config.toml` 的解析严格性。**状态**（r8）：Linux / WSL2 上六项都有了记录，记录 [§10.10][l10-10]。r24：沙箱的 Landlock 层在内核 6.12 的云 VM 上有了记录，记录 [§10.27][l10-27]（新测试 `pi-sandbox/tests/landlock_enforcement_e2e.rs`）。r25：`pi-sandbox` 进了 CI（[§10.28][l10-28]）。没做：内核 5.13 到 6.11；macOS 与 Windows 上对应各项。
 
 **退出条件**：CI 绿且基线入库；矩阵、入口审计、deny-list 无「未决」行（有则标 owner 与日期）；0.9 每项有记录。
 
@@ -446,13 +446,14 @@ Rust（pager）：
 | [§10.25][l10-25] | r22 | 打 tag `v0.6.0`（`5f73e07`）、`Release` 的运行、PyPI 与 GitHub Release、两个二进制、PTY 脚本与 `pi-mcp` 测试的核对、合入 #40；留下的与没验证的；续 1（#42、glibc 的下限、删本地分支） | PR [#40][pr-40]、[#41][pr-41]、[#42][pr-42] |
 | [§10.26][l10-26] | r23 | 整理计划的分支 squash 进本地 `main`，删三个分支；#43：三个 action 升到 Node 24 的版本，`Release` 的演练；#44：扩展 API 的审计批 9（F7-02 至 F7-09），测试与变异检查；决策 11、13 记成不做；`docs/PLAN` 的 Cursor 规则；续 1：推送 `main`，合入 #43 与 #44，`main` 上的 `CI` 与 `TUI CI`；续 2：用户答复 Zed 里的核对通过 | PR [#43][pr-43]、[#44][pr-44] |
 | [§10.27][l10-27] | r24 | 0.9 的 Landlock 层：内核 6.12（ABI 6）上的实测，计划与代码的三处不一致，新测试 `landlock_enforcement_e2e`，变异检查，没验证的 | PR [#58][pr-58] |
+| [§10.28][l10-28] | r25 | `pi-sandbox` 进 CI：`ubuntu-24.04` runner 的探针（有 Landlock，没有 `bwrap`，AppArmor 挡用户命名空间）、清单与 workflow 的改动、有要求而满足不了时 job 失败的证明 | PR [#59][pr-59] |
 | [附录 A.4][logA4] | r5 | 入口审计的 r5 执行结果 | [#7][pr-7] |
 | [附录 B][logB] | r2–r17 | 复现方法（依赖图、模块级闭包、各轮的测量与测试命令） | — |
 | [附录 C][logC] | r10 | §7 的逐项注释（原文） | — |
 | [附录 D][logD] | r10 | 计划头部的状态文字（原文） | — |
 | [附录 E][logE] | r2 | §4、§5 的原文（源码事实基线与改动规模估计） | — |
 | [附录 F][logF] | r22 续 1 | 计划整理前的状态文字（原文）：头部、「当前状态」逐轮、两个里程碑、「下一步」，「还没有验证的」「待决策」「§7」「§10 索引」里改短的条目，「修订记录（摘要）」的长条目 | — |
-| [修订记录][logRev] | r1–r24 | 逐轮的完整说明 | — |
+| [修订记录][logRev] | r1–r25 | 逐轮的完整说明 | — |
 
 ## 附录 A：能力矩阵与 ACP 版本配对（阶段 0.8，r9 定稿）
 
@@ -555,6 +556,7 @@ Rust（pager）：
 - 整理（r22 续 1 之后，2026-10-27）：照 r10 之后那次的做法再整理一次。被缩短的各段原文存入归档的[附录 F][logF]：头部的状态文字、「当前状态」里逐轮的状态文字、两个发布里程碑、「下一步」、「还没有验证的」与「待决策」里改短的条目、§7 里阶段 C 与 D 的长状态、§10 索引里的长行，和本节 r12 到 r22 续 1 的长条目。计划里改成现在的状态，一轮一行。章节编号与锚点没有变。PR [#42][pr-42] 已由用户合入，状态据此更新。
 - r23：三个 action 升到 Node 24 的版本（PR [#43][pr-43]）；扩展 API 的审计批 9（PR [#44][pr-44]）；决策 11、13 已定，不做；新增 `docs/PLAN` 的 Cursor 规则（2026-10-27）。续 1：推送 `main`；用户让合入 #43 与 #44，都已合入（`969062b`、`e860fd9`）。续 2：用户答复 Zed 里的核对通过（核对两项：空白对话再打开；`pi-mcp-py`）。见 [§10.26][l10-26]。
 - r24：0.9 的 Landlock 层在内核 6.12 的云 VM 上实测：生效；`deny_paths_e2e` 在 Linux 上测的是 `bwrap`，新加 `landlock_enforcement_e2e`（2026-10-30；PR [#58][pr-58]）。见 [§10.27][l10-27]。
+- r25：`pi-sandbox` 进 `tui_baseline.toml` 与 `tui-ci.yml`，CI 要求内核真的执行沙箱（2026-10-30；PR [#59][pr-59]）。见 [§10.28][l10-28]。
 
 <!-- 链接定义 -->
 [log]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md
@@ -585,6 +587,7 @@ Rust（pager）：
 [l10-25]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1025-r22-追加打-tag-v060发布发布后的核对
 [l10-26]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1026-r23-追加三个-action-升到-node-24扩展-api-的审计批-9决策-11-与-13
 [l10-27]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1027-r24-追加landlock-层的实测
+[l10-28]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1028-r25-追加pi-sandbox-进-ci
 [l4-1]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#41-运行路径
 [l4-2]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#42-rust-runtime-与耦合面
 [l4-3]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#43-python-侧pi_agent_cli共-4114-行agentpy-472-行
@@ -632,6 +635,7 @@ Rust（pager）：
 [pr-43]: https://github.com/zy1233/pi-python/pull/43
 [pr-44]: https://github.com/zy1233/pi-python/pull/44
 [pr-58]: https://github.com/zy1233/pi-python/pull/58
+[pr-59]: https://github.com/zy1233/pi-python/pull/59
 [ci-run-5f73e07]: https://github.com/zy1233/pi-python/actions/runs/40172668652
 [tui-ci-run-5f73e07]: https://github.com/zy1233/pi-python/actions/runs/40172721728
 [run-dry-run-5f73e07]: https://github.com/zy1233/pi-python/actions/runs/40172723794
