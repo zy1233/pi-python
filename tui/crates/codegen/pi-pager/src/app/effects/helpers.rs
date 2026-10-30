@@ -399,8 +399,9 @@ pub(crate) struct EffectMeta {
 /// `{ "sessions": [...] }` object) into [`SessionPickerEntry`] rows.
 ///
 /// Used by the resume picker ([`Effect::FetchSessionList`]).
-/// Sessions older than 30 days, and sessions with no usable user prompt
-/// (empty `summary` after fallbacks), are dropped.
+/// Sessions with no usable user prompt (empty `summary` after fallbacks), and sessions with no
+/// `updatedAt` that parses, are dropped. There is no age limit: the agent pages the list, and
+/// `--resume <id>` has no age limit either.
 pub(super) fn parse_session_picker_entries(
     payload: &serde_json::Value,
 ) -> Vec<crate::app::app_view::SessionPickerEntry> {
@@ -410,8 +411,6 @@ pub(super) fn parse_session_picker_entries(
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
-    let now = chrono::Utc::now();
-    let cutoff = now - chrono::Duration::days(30);
     entries
         .into_iter()
         .filter_map(|v| {
@@ -440,10 +439,7 @@ pub(super) fn parse_session_picker_entries(
                 .or_else(|| v.get("created_at"))
                 .and_then(|s| s.as_str())
                 .and_then(|s| s.parse().ok());
-            let updated_at: chrono::DateTime<chrono::Utc> = match parsed_updated {
-                Some(ts) if ts >= cutoff => ts,
-                _ => return None,
-            };
+            let updated_at: chrono::DateTime<chrono::Utc> = parsed_updated?;
             use pi_tools::implementations::skills::skill::extract_skill_display_text;
             let display = if let Some(ref fp) = first_prompt {
                 if let Some(d) = extract_skill_display_text(fp) {
