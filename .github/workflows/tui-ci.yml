@@ -159,9 +159,27 @@ jobs:
           echo "PI_E2E_PYTHON=$(command -v python)" >> "$GITHUB_ENV"
           echo "PI_E2E_REQUIRED=1" >> "$GITHUB_ENV"
 
+      # The sandbox tests (`pi-sandbox`, plan 0.9, section 10.28) need two things from the runner:
+      # `bwrap` (`deny_paths_e2e` tests the bwrap layer on Linux) and a kernel with Landlock. The
+      # image has no `bwrap`. It has Landlock (kernel 7.0, ABI 8, measured in plan section 10.28).
+      # Ubuntu 24.04 also blocks unprivileged user namespaces through AppArmor
+      # (`kernel.apparmor_restrict_unprivileged_userns=1`): `bwrap` then fails with "setting up uid
+      # map: Permission denied". Setting the sysctl to 0 on this one-use runner is the smallest fix;
+      # it changes nothing else.
+      - name: Install bubblewrap and allow user namespaces (sandbox tests)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bwrap --version
+
       # What blocks (`[test] enforce`, the per-suite floors) is in scripts/tui_baseline.toml; the
-      # per-suite table lands in the job summary either way.
+      # per-suite table lands in the job summary either way. SANDBOX_E2E_REQUIRE_ENFORCEMENT makes
+      # the `pi-sandbox` end-to-end tests fail, not skip, on a runner that has no Landlock or no
+      # working `bwrap`: without it they return early and count as passed. A test keeps it here.
       - name: Test suites
+        env:
+          SANDBOX_E2E_REQUIRE_ENFORCEMENT: "1"
         run: python scripts/tui_baseline.py test --out tui-baseline
 
       - uses: actions/upload-artifact@v6
