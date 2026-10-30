@@ -716,49 +716,6 @@ pub struct PluginsConfig {
     #[serde(skip)]
     pub cli_plugin_dirs: Vec<std::path::PathBuf>,
 }
-impl PluginsConfig {
-    /// Merge `enabledPlugins` from Claude settings files into this config.
-    ///
-    /// Reads `enabledPlugins` from `~/.claude/settings.json` only (user scope).
-    /// Project-level `<git_root>/.claude/settings.json` is intentionally NOT
-    /// read here: a malicious repo could pre-populate `enabledPlugins` to
-    /// bypass the project-plugin auto-disable logic in `populate_plugin_lists`,
-    /// enabling attacker-controlled hooks (e.g. SessionStart → RCE).
-    /// Native `.grok/config.toml` entries already present take precedence:
-    /// a name is only added if it isn't already in the opposite list.
-    pub(crate) fn merge_claude_enabled_plugins(&mut self, _cwd: Option<&std::path::Path>) {
-        if crate::claude_import::is_claude_import_marked_with_log("merge_claude_enabled_plugins") {
-            return;
-        }
-        let mut paths = Vec::new();
-        if let Some(home) = dirs::home_dir() {
-            paths.push(home.join(".claude").join("settings.json"));
-        }
-        for path in &paths {
-            let (claude_enabled, claude_disabled) =
-                pi_agent::plugins::marketplace::load_enabled_disabled_plugins(path);
-            for name in claude_enabled {
-                if !self.disabled.contains(&name) && !self.enabled.contains(&name) {
-                    self.enabled.push(name);
-                }
-            }
-            for name in claude_disabled {
-                if !self.enabled.contains(&name) && !self.disabled.contains(&name) {
-                    self.disabled.push(name);
-                }
-            }
-        }
-    }
-    /// Build a `DiscoveryConfig` from this plugins config.
-    pub(crate) fn to_discovery_config(&self) -> pi_agent::plugins::discovery::DiscoveryConfig {
-        pi_agent::plugins::discovery::DiscoveryConfig {
-            cli_plugin_dirs: self.cli_plugin_dirs.clone(),
-            config_paths: self.paths.iter().map(std::path::PathBuf::from).collect(),
-            disabled: self.disabled.clone(),
-            enabled: self.enabled.clone(),
-        }
-    }
-}
 /// Feedback submission configuration (`[feedback]` in config.toml).
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]

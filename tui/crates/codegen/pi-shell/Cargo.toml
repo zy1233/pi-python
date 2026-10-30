@@ -43,7 +43,6 @@ serde = { workspace = true }
 serde_ignored = "0.1"
 serde_json = { workspace = true, features = ["preserve_order"] }
 thiserror = { workspace = true }
-dirs = "6"
 toml = { workspace = true, features = ["preserve_order"] }
 tokio = { workspace = true, features = [
     "io-std",

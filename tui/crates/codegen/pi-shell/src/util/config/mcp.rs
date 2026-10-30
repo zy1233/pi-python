@@ -15,9 +15,6 @@ pub use pi_config_types::{
 };
 // Permission-policy value types likewise extracted; re-exported to keep paths stable.
 pub(crate) use pi_config_types::PermissionConfig;
-// Relay-sync + MCP-config value types extracted; re-exported to keep paths stable.
-pub(crate) use pi_config_types::McpConfig;
-// Worktree-pool config value type extracted; re-exported to keep paths stable.
 
 /// TUI/CLI settings. Composed from typed section configs defined in `agent::config`.
 #[derive(Debug, Clone, Default)]
@@ -193,6 +190,7 @@ pub(crate) fn user_config_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pi_config_types::McpConfig;
     use toml::Value as TomlValue;
 
     /// Covers all canonical wire values plus the unknown/corrupt fallback.

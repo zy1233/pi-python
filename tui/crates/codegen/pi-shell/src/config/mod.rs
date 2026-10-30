@@ -1354,44 +1354,7 @@ pub fn apply_sandbox(
         sandbox.install();
     }
 }
-pub(crate) use pi_workspace::project_config::find_project_configs;
-/// Resolve the effective `[plugins]` config for a working directory the same
-/// way a session does at reload time: global/user config
-/// ([`load_effective_config`]) plus every ancestor project `.grok/config.toml`
-/// ([`find_project_configs`], extending `paths` and `disabled`) plus the
-/// imported `enabledPlugins` merge.
-///
-/// Shared by `reload_plugins_impl`, `x.ai/commands/list`, and the agent's
-/// eager plugin-registry fan-out so all three discover the same plugins for a
-/// given cwd. Centralizing it prevents the paths/disabled/discovered-command
-/// drift those callers would otherwise accumulate.
-pub(crate) fn resolve_effective_plugins_config(
-    cwd: &std::path::Path,
-) -> crate::agent::config::PluginsConfig {
-    let extract = |toml_val: &toml::Value| -> Option<crate::agent::config::PluginsConfig> {
-        toml_val
-            .get("plugins")
-            .and_then(|v| v.clone().try_into().ok())
-    };
-    let mut plugins_cfg = load_effective_config()
-        .ok()
-        .and_then(|t| extract(&t))
-        .unwrap_or_default();
-    let project_trusted = crate::agent::folder_trust::project_scope_allowed(cwd);
-    for config_path in find_project_configs(cwd) {
-        if let Ok(toml_val) = load_config_file(&config_path)
-            && let Some(proj) = extract(&toml_val)
-        {
-            if project_trusted {
-                plugins_cfg.paths.extend(proj.paths);
-            }
-            plugins_cfg.disabled.extend(proj.disabled);
-        }
-    }
-    plugins_cfg.merge_claude_enabled_plugins(Some(cwd));
-    plugins_cfg
-}
-pub(crate) use pi_config::{deep_merge_toml, expand_env_vars_in_string};
+pub(crate) use pi_config::deep_merge_toml;
 #[cfg(test)]
 pub(crate) mod test_env_locks;
 #[cfg(test)]

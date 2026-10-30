@@ -5,7 +5,6 @@ pub(crate) use pi_telemetry::unified_log;
 pub mod agent;
 pub mod auth;
 pub(crate) use pi_bundle as bundle;
-pub(crate) mod claude_import;
 pub mod config;
 pub use pi_shell_base::env;
 pub mod extensions;

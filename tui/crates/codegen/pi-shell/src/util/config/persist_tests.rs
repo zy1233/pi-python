@@ -1,6 +1,6 @@
 use super::super::load::load_config_from_toml;
-use super::super::mcp::McpConfig;
 use super::*;
+use pi_config_types::McpConfig;
 use toml::Value as TomlValue;
 use toml::map::Map as TomlMap;
 /// The `[toolset.ask_user_question]` settings write merges only that
