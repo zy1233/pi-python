@@ -8497,22 +8497,11 @@ dependencies = [
 name = "pi-test-support"
 version = "0.1.0"
 dependencies = [
- "agent-client-protocol",
- "anyhow",
- "async-trait",
- "axum",
- "futures-util",
  "libc",
- "pi-acp-lib",
  "pi-tty-utils",
  "portable-pty",
- "reqwest 0.12.24",
- "serde",
- "serde_json",
  "tempfile",
  "tokio",
- "tokio-util",
- "tracing",
  "url",
 ]
 

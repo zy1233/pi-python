@@ -1,10 +1,6 @@
-//! Binary resolution, serial env guards, and git sandbox creation.
+//! Environment helpers for tests: a number parser and a guard that restores one variable.
 
 use std::ffi::{OsStr, OsString};
-use std::path::{Path, PathBuf};
-use std::process::Command;
-
-use crate::sandbox::TestSandbox;
 
 /// Parse env var `key` into `T`, falling back to `default` when it is unset or
 /// present-but-unparseable (warning in the latter case).
@@ -61,88 +57,4 @@ impl Drop for EnvGuard {
             None => unsafe { std::env::remove_var(self.key) },
         }
     }
-}
-
-fn workspace_root() -> PathBuf {
-    // nth(3): crate is nested three levels below the cargo workspace root.
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(3)
-        .expect("workspace root")
-        .to_path_buf()
-}
-
-fn target_dir() -> PathBuf {
-    std::env::var_os("CARGO_TARGET_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| workspace_root().join("target"))
-}
-
-fn local_grok_binary_path() -> PathBuf {
-    target_dir()
-        .join("debug")
-        .join(format!("pi-pager{}", std::env::consts::EXE_SUFFIX))
-}
-
-fn ensure_local_grok_binary(binary: &Path) {
-    if binary.exists() {
-        return;
-    }
-
-    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
-    let mut cmd = Command::new(&cargo);
-    cmd.current_dir(workspace_root())
-        .args([
-            "build",
-            "-p",
-            "pi-pager-bin",
-            "--bin",
-            "pi-pager",
-        ])
-        .stdin(std::process::Stdio::null())
-        .envs(pi_tty_utils::pager_env());
-    pi_tty_utils::detach_std_command(&mut cmd);
-    let output = cmd
-        .output()
-        .unwrap_or_else(|e| panic!("failed to spawn {cargo} to build pi-pager: {e}"));
-
-    assert!(
-        output.status.success(),
-        "failed to build pi-pager for lifecycle tests (exit {:?})\nstdout:\n{}\nstderr:\n{}",
-        output.status.code(),
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr),
-    );
-    assert!(
-        binary.exists(),
-        "pi-pager build completed but binary missing at {}",
-        binary.display()
-    );
-}
-
-/// Resolve grok binary: `GROK_BINARY` env (CI) or a locally built `pi-pager` binary.
-pub fn grok_binary() -> PathBuf {
-    if let Ok(path) = std::env::var("GROK_BINARY") {
-        let p = PathBuf::from(path);
-        assert!(p.exists(), "GROK_BINARY does not exist: {}", p.display());
-        // Bazel's GROK_BINARY is runfiles-relative; the harness spawns the child
-        // with a different cwd, so absolutize against the (runfiles-root) cwd now.
-        return std::path::absolute(&p).unwrap_or(p);
-    }
-
-    if let Ok(path) = std::env::var("CARGO_BIN_EXE_pi-pager") {
-        let p = PathBuf::from(path);
-        if p.exists() {
-            return p;
-        }
-    }
-
-    let binary = local_grok_binary_path();
-    ensure_local_grok_binary(&binary);
-    binary
-}
-
-/// Create an owned, git-initialized [`TestSandbox`].
-pub fn git_workdir() -> TestSandbox {
-    TestSandbox::builder().git().build()
 }
