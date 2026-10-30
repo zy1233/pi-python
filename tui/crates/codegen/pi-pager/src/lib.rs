@@ -27,7 +27,6 @@ pub mod minimal_api;
 pub mod minimal_hook;
 pub(crate) mod notifications;
 pub(crate) mod pty_wrap;
-pub(crate) mod recent_dirs;
 pub mod scrollback;
 pub mod search;
 pub mod settings;
