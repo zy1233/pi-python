@@ -1,6 +1,7 @@
 ---
 import { Font } from 'astro:assets';
 import '../styles/global.css';
+import { links, repo } from '../data/site';
 import { homePath, messages, otherLocale, type Locale } from '../i18n';
 import { isPreview } from '../lib/preview';
 
@@ -27,6 +28,46 @@ const pageTitle = title ?? t.meta.title;
 const pageDescription = description ?? t.meta.description;
 const canonical = path ? absolute(path) : undefined;
 const image = absolute('/og.png');
+
+// The handle of the project on X. It comes from the link in data/site.ts.
+const xHandle = `@${new URL(links.x).pathname.split('/').filter(Boolean)[0]}`;
+
+// Facts for search engines (JSON-LD). Each value comes from this repository: the text of the
+// page, the links in data/site.ts, and the licenses in README.md. Add no rating, no review,
+// and no claim that the site does not show. A preview address gets no data: it is not the real site.
+const home = absolute(homePath.en);
+const structuredData =
+  canonical && !hideFromSearch
+    ? {
+        '@context': 'https://schema.org',
+        '@graph': [
+          {
+            '@type': 'WebSite',
+            '@id': `${home}#website`,
+            url: home,
+            name: 'zycode',
+            alternateName: 'zycode.dev',
+            description: t.meta.description,
+            inLanguage: [messages.en.hreflang, messages.zh.hreflang],
+          },
+          {
+            '@type': 'SoftwareSourceCode',
+            '@id': `${home}#software`,
+            name: 'zycode',
+            description: t.meta.description,
+            url: home,
+            codeRepository: repo,
+            programmingLanguage: ['Python', 'Rust'],
+            license: ['https://opensource.org/licenses/MIT', 'https://www.apache.org/licenses/LICENSE-2.0'],
+            isAccessibleForFree: true,
+            keywords: ['coding agent', 'ACP', 'Agent Client Protocol', 'LangChain', 'terminal UI'],
+            sameAs: [repo, links.pypi, links.x],
+          },
+        ],
+      }
+    : undefined;
+// `set:html` does not escape the text. Write `<` as \u003c, so no string can close the script tag.
+const structuredDataJson = structuredData && JSON.stringify(structuredData).replace(/</g, '\\u003c');
 ---
 
 <!doctype html>
@@ -51,7 +92,9 @@ const image = absolute('/og.png');
     <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" content="#f3f0e7" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0f0e0b" media="(prefers-color-scheme: dark)" />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 
     <meta property="og:site_name" content="zycode" />
     <meta property="og:type" content="website" />
@@ -68,6 +111,10 @@ const image = absolute('/og.png');
     <meta name="twitter:title" content={pageTitle} />
     <meta name="twitter:description" content={pageDescription} />
     <meta name="twitter:image" content={image} />
+    <meta name="twitter:image:alt" content={t.meta.ogAlt} />
+    <meta name="twitter:site" content={xHandle} />
+
+    {structuredDataJson && <script type="application/ld+json" set:html={structuredDataJson} />}
 
     <Font cssVariable="--font-sans" preload />
     <Font cssVariable="--font-mono" preload />

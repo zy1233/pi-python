@@ -22,6 +22,7 @@ pi-goal-x = "pi_goal_x:activate"
 
 [project.urls]
 Homepage = "https://github.com/zy1233/pi-python"
+Website = "https://zycode.dev"
 Repository = "https://github.com/zy1233/pi-python"
 
 [tool.hatch.build.targets.wheel]
