@@ -24,6 +24,7 @@ export const zh: Messages = {
   ui: {
     github: 'GitHub',
     pypi: 'PyPI',
+    x: 'X',
     copy: '复制',
     copied: '已复制',
     replay: '重播演示',
@@ -301,7 +302,7 @@ PI_USE_MOCK=1 python -m pi_agent_cli -p "hello" --cwd .`,
   open: {
     eyebrow: '开源',
     title: '可读，可运行，可修改。',
-    body: 'Python 包使用 MIT 许可。`zypi` 是 xai-org/grok-build 的分支，保持 Apache-2.0 许可。',
+    body: 'Python 包使用 MIT 许可。`zypi` 是 `xai-org/grok-build` 的分支，保持 Apache-2.0 许可。',
     unofficial:
       'zycode 基于 pi 项目的 `pi-agent-core` 移植而来。这是一个非官方项目，与 pi 项目及其维护者没有隶属关系，也没有得到他们的认可或维护。',
     ctaStar: '在 GitHub 加星',

@@ -109,9 +109,17 @@ const hrefOf: Record<FooterLinkId, string> = {
     list-style: none;
   }
 
+  /* No underline at rest. The underline shows on hover and on keyboard focus.
+     Its colour, thickness, and offset come from global.css. */
   .footer__group a {
     font-size: 0.93rem;
     color: var(--ink);
+    text-decoration-line: none;
+  }
+
+  .footer__group a:hover,
+  .footer__group a:focus-visible {
+    text-decoration-line: underline;
   }
 
   .footer__base {
