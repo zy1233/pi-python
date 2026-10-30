@@ -295,6 +295,38 @@ fn setting_gated_off_by_agent_names_only_the_plan_settings() {
     }
 }
 
+/// The eight settings that the Python agent does not back (`app::agent_settings`) are gated off
+/// once `hide_unbacked_settings` is on, and only then; every setting that steers the pager is
+/// untouched by it.
+#[test]
+fn setting_gated_off_by_agent_names_the_unbacked_settings_once_hidden() {
+    let shown = PagerLocalSnapshot {
+        plan_mode_gate: true,
+        ..PagerLocalSnapshot::default()
+    };
+    let hidden = PagerLocalSnapshot {
+        plan_mode_gate: true,
+        hide_unbacked_settings: true,
+        ..PagerLocalSnapshot::default()
+    };
+    for key in crate::app::agent_settings::UNBACKED.iter().copied() {
+        assert!(!setting_gated_off_by_agent(key, &shown), "{key} offered");
+        assert!(setting_gated_off_by_agent(key, &hidden), "{key} gated off");
+    }
+    for key in [
+        "permission_mode",
+        "plan_mode",
+        "theme",
+        "show_tips",
+        "contextual_hints",
+        "contextual_hints.undo",
+        "multiline_mode",
+        "voice_stt_language",
+    ] {
+        assert!(!setting_gated_off_by_agent(key, &hidden), "{key} untouched");
+    }
+}
+
 /// Look up a setting's registered metadata by key (test helper).
 fn meta_for(reg: &SettingsRegistry, key: SettingKey) -> &SettingMeta {
     reg.all()
@@ -696,7 +728,9 @@ fn render_setting_row_shows_full_label_when_one_line_fits() {
 /// once the agent honours Plan; the default snapshot hides it), the
 /// Models entry `default_model`, and the Advanced entries
 /// `show_tips` and `auto_update`. `default_reasoning_effort` and
-/// `auto_compact_threshold_percent` are not exposed in the modal.
+/// `auto_compact_threshold_percent` are not exposed in the modal. The default snapshot hides none
+/// of the settings that the Python agent does not back, so this is the whole catalog; the page of
+/// the shipped pager is pinned by `the_page_does_not_offer_the_settings_the_agent_does_not_back`.
 #[test]
 fn rows_contain_categories_and_settings_through_pr_14() {
     let prev_voice = crate::app::voice_mode_enabled();
@@ -827,6 +861,88 @@ fn rows_contain_categories_and_settings_through_pr_14() {
             "hunk_tracker_mode",
         ]
     );
+    crate::app::set_voice_mode_enabled_for_test(prev_voice);
+}
+
+/// The page that the shipped pager offers. The snapshot that `dispatch_open_settings` builds has
+/// `hide_unbacked_settings` on (`app::agent_settings::HIDE_UNBACKED`), so the eight settings that
+/// the Python agent does not back are not rows, and the Models category goes with them: both of
+/// its settings are on the list. The test above pins the whole catalog (the default snapshot
+/// hides nothing); this one pins what the user sees, with the voice rows left out as there.
+#[test]
+fn the_page_does_not_offer_the_settings_the_agent_does_not_back() {
+    let prev_voice = crate::app::voice_mode_enabled();
+    crate::app::set_voice_mode_enabled_for_test(false);
+    let shipped = SettingsModalState::new(
+        Arc::new(SettingsRegistry::defaults()),
+        UiConfig::default(),
+        PagerLocalSnapshot {
+            hide_unbacked_settings: crate::app::agent_settings::HIDE_UNBACKED,
+            ..PagerLocalSnapshot::default()
+        },
+    );
+    let headers: Vec<&SettingCategory> = shipped
+        .rows
+        .iter()
+        .filter_map(|r| match r {
+            RowEntry::Header { category } => Some(category),
+            RowEntry::Setting { .. } => None,
+        })
+        .collect();
+    assert_eq!(
+        headers,
+        vec![
+            &SettingCategory::Appearance,
+            &SettingCategory::Mouse,
+            &SettingCategory::Editor,
+            &SettingCategory::Agent,
+            &SettingCategory::Advanced,
+        ],
+        "the Models category has no setting left, so it has no header"
+    );
+    let settings: Vec<SettingKey> = shipped
+        .rows
+        .iter()
+        .filter_map(|r| match r {
+            RowEntry::Setting { key, .. } => Some(*key),
+            RowEntry::Header { .. } => None,
+        })
+        .collect();
+    assert_eq!(
+        settings,
+        vec![
+            "compact_mode",
+            "screen_mode",
+            "show_timestamps",
+            "show_timeline",
+            "page_flip_on_send",
+            "simple_mode",
+            "vim_mode",
+            "theme",
+            "auto_dark_theme",
+            "auto_light_theme",
+            "render_mermaid",
+            "max_thoughts_width",
+            "show_thinking_blocks",
+            "respect_manual_folds",
+            "group_tool_verbs",
+            "collapsed_edit_blocks",
+            "display_refresh_auto_cadence",
+            "scroll_speed",
+            "scroll_mode",
+            "scroll_lines",
+            "invert_scroll",
+            "keep_text_selection",
+            "combine_queued_prompts",
+            "multiline_mode",
+            "permission_mode",
+            "show_tips",
+            "contextual_hints",
+        ]
+    );
+    for key in crate::app::agent_settings::UNBACKED {
+        assert!(!settings.contains(key), "{key} must not be offered");
+    }
     crate::app::set_voice_mode_enabled_for_test(prev_voice);
 }
 

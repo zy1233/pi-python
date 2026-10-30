@@ -386,6 +386,7 @@ pub(super) fn dispatch_send_prompt_inner(
                     auto_mode_gate: auto_mode_gate_from_app,
                     plan_mode_gate: plan_mode_gate_from_app,
                     default_mode_gate: default_mode_gate_from_app,
+                    hide_unbacked_settings: crate::app::agent_settings::HIDE_UNBACKED,
                     ask_user_question_timeout_enabled: ask_user_question_timeout_enabled_from_app,
                     voice_stt_language: voice_stt_language_from_app,
                     // This session's own value (what its fires will actually

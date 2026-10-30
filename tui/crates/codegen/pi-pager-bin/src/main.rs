@@ -18,6 +18,7 @@ mod jemalloc_malloc_conf {
     #[unsafe(export_name = "_rjem_malloc_conf")]
     static MALLOC_CONF: MallocConfPtr = MallocConfPtr(CONF.as_ptr());
 }
+mod interactive_flags;
 mod print_mode;
 use anyhow::Result;
 use pi_pager::app::{Command, PagerArgs};
@@ -379,6 +380,20 @@ fn dispatch_doctor_if_requested(args: &PagerArgs) -> bool {
     true
 }
 
+/// An interactive session refuses the flags that the Python agent does not back (see
+/// `interactive_flags`). `-p` was handled before this, and a subcommand takes its own flags.
+fn refuse_interactive_flags(args: &PagerArgs) -> Option<i32> {
+    if args.command.is_some() {
+        return None;
+    }
+    let refused = interactive_flags::refused(args);
+    if refused.is_empty() {
+        return None;
+    }
+    eprintln!("{}", interactive_flags::refusal(&refused));
+    Some(interactive_flags::REFUSED_EXIT_CODE)
+}
+
 /// Phase 4 P3: `pi -p` is pure Python headless, not grok `run_headless`.
 fn dispatch_python_print(args: &PagerArgs) -> Option<i32> {
     if args.command.is_some() {
@@ -464,6 +479,9 @@ fn main() {
     }
     if dispatch_version_if_requested(&args) || dispatch_doctor_if_requested(&args) {
         return;
+    }
+    if let Some(code) = refuse_interactive_flags(&args) {
+        std::process::exit(code);
     }
     pi_pager_minimal::install();
     #[cfg(all(feature = "jemalloc", unix))]

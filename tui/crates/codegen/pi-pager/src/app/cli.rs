@@ -160,12 +160,17 @@ pub struct PagerArgs {
     /// Trust this folder and persist the decision to the trust store.
     #[arg(long = "trust", alias = "trust-folder", hide = true)]
     pub trust: bool,
+    // The flags that this struct accepts but the Python agent behind the pager does not back are
+    // hidden from `--help`, and an interactive start refuses them
+    // (`pi-pager-bin/src/interactive_flags.rs`, which lists them with the reason for each). Only
+    // `-p` takes `--rules` and `--system-prompt-override`, so those two stay visible.
     /// Permission allow rule (compat alias: --allowedTools).
     #[arg(
         long = "allow",
         alias = "allowedTools",
         value_name = "RULE",
-        value_delimiter = ','
+        value_delimiter = ',',
+        hide = true
     )]
     pub allow_rules: Vec<String>,
     /// Permission deny rule (compat alias: --disallowedTools).
@@ -173,7 +178,8 @@ pub struct PagerArgs {
         long = "deny",
         alias = "disallowedTools",
         value_name = "RULE",
-        value_delimiter = ','
+        value_delimiter = ',',
+        hide = true
     )]
     pub deny_rules: Vec<String>,
     /// Single-turn prompt. Prints the response to stdout and exits.
@@ -204,19 +210,24 @@ pub struct PagerArgs {
     )]
     pub prompt_file: Option<PathBuf>,
     /// Send the prompt exactly as given.
-    #[clap(long)]
+    #[clap(long, hide = true)]
     pub verbatim: bool,
     /// Output format for headless mode.
-    #[clap(long = "output-format", value_enum, default_value = "plain")]
+    #[clap(
+        long = "output-format",
+        value_enum,
+        default_value = "plain",
+        hide = true
+    )]
     pub output_format: OutputFormat,
     /// Emit incremental `stream_event` lines (text/thinking deltas) alongside
     /// whole messages. Only affects `--output-format streaming-messages-json`.
-    #[clap(long = "include-partial-messages")]
+    #[clap(long = "include-partial-messages", hide = true)]
     pub include_partial_messages: bool,
     /// JSON Schema for structured output. When set, the model is constrained to
     /// produce JSON matching this schema. Implies --output-format json.
     /// Example: --json-schema '{"type":"object","properties":{"name":{"type":"string"}}}'
-    #[clap(long = "json-schema", value_name = "SCHEMA")]
+    #[clap(long = "json-schema", value_name = "SCHEMA", hide = true)]
     pub json_schema: Option<String>,
     /// Model ID to use.
     #[clap(short = 'm', long = "model", value_name = "MODEL")]
@@ -224,12 +235,14 @@ pub struct PagerArgs {
     /// Reasoning effort for reasoning models
     #[clap(
         long = "reasoning-effort",
-        visible_alias = "effort",
+        alias = "effort",
         value_name = "EFFORT",
-        overrides_with = "reasoning_effort"
+        overrides_with = "reasoning_effort",
+        hide = true
     )]
     pub reasoning_effort: Option<String>,
-    /// Extra rules to append to the system prompt.
+    /// Extra rules to append to the system prompt (-p only; an interactive session reads
+    /// .pi/APPEND_SYSTEM.md).
     #[clap(long = "rules", alias = "append-system-prompt")]
     pub rules: Option<String>,
     /// Skip AGENTS.md / CLAUDE.md context file discovery (headless only).
@@ -245,7 +258,8 @@ pub struct PagerArgs {
     /// `GROK_COMPACTION_DETAIL`.
     #[clap(long = "compaction-detail", value_name = "DETAIL", hide = true)]
     pub compaction_detail: Option<String>,
-    /// Override the agent's system prompt (compat alias: --system-prompt).
+    /// Override the agent's system prompt (-p only; an interactive session reads
+    /// .pi/SYSTEM.md; compat alias: --system-prompt).
     #[clap(
         long = "system-prompt-override",
         alias = "system-prompt",
@@ -311,22 +325,27 @@ pub struct PagerArgs {
     /// With `--resume` of a remote session, pass `--restore-code` to apply
     /// the snapshot codebase (conversation is restored either way).
     /// Headless (`-p`) does not create a worktree from this flag.
-    #[arg(short = 'w', long = "worktree", num_args = 0..= 1, default_missing_value = "")]
+    #[arg(short = 'w', long = "worktree", num_args = 0..= 1, default_missing_value = "", hide = true)]
     pub worktree: Option<String>,
     /// Branch, tag, or commit to base the worktree on (with `--worktree`).
     /// Defaults to the current HEAD of the source checkout when omitted.
-    #[arg(long = "worktree-ref", visible_alias = "ref", requires = "worktree")]
+    #[arg(
+        long = "worktree-ref",
+        alias = "ref",
+        requires = "worktree",
+        hide = true
+    )]
     pub worktree_ref: Option<String>,
     /// Restore the original session's repository snapshot when resuming.
     /// Remote sessions require `--worktree` (never checks out into the current
     /// directory). Without this flag, resume restores conversation only.
-    #[arg(long = "restore-code", requires = "resume_session")]
+    #[arg(long = "restore-code", requires = "resume_session", hide = true)]
     pub restore_code: bool,
     /// Disable plan mode.
-    #[arg(long = "no-plan")]
+    #[arg(long = "no-plan", hide = true)]
     pub no_plan: bool,
     /// Disable subagent spawning.
-    #[arg(long = "no-subagents")]
+    #[arg(long = "no-subagents", hide = true)]
     pub no_subagents: bool,
     /// Disable structured question prompts from the agent.
     #[arg(long = "no-ask-user", hide = true)]
@@ -346,22 +365,23 @@ pub struct PagerArgs {
     )]
     pub no_memory: bool,
     /// Agent name or definition file path.
-    #[arg(long = "agent", value_name = "NAME")]
+    #[arg(long = "agent", value_name = "NAME", hide = true)]
     pub agent: Option<String>,
     /// Inline subagent definitions as JSON.
-    #[arg(long = "agents", value_name = "JSON")]
+    #[arg(long = "agents", value_name = "JSON", hide = true)]
     pub agents_json: Option<String>,
     /// Built-in tools to allow (comma-separated).
-    #[arg(long = "tools", value_name = "TOOLS")]
+    #[arg(long = "tools", value_name = "TOOLS", hide = true)]
     pub cli_tools: Option<String>,
     /// Built-in tools to remove (comma-separated).
-    #[arg(long = "disallowed-tools", value_name = "TOOLS")]
+    #[arg(long = "disallowed-tools", value_name = "TOOLS", hide = true)]
     pub cli_disallowed_tools: Option<String>,
     /// Maximum number of agent turns.
     #[arg(
         long = "max-turns",
         value_name = "N",
-        value_parser = clap::value_parser!(u32).range(1..)
+        value_parser = clap::value_parser!(u32).range(1..),
+        hide = true
     )]
     pub max_turns: Option<u32>,
     /// Permission mode: `default` (ask before tool calls) or `bypassPermissions` (same as
@@ -374,7 +394,7 @@ pub struct PagerArgs {
     )]
     pub permission_mode_flag: Option<String>,
     /// Disable web search and web fetch tools.
-    #[arg(long = "disable-web-search")]
+    #[arg(long = "disable-web-search", hide = true)]
     pub disable_web_search: bool,
     /// Exit as soon as the first agent turn ends, without waiting for pending
     /// background bash/monitor tasks or background subagents (headless only).
@@ -457,9 +477,9 @@ pub struct PagerArgs {
     #[arg(long = "force-login", hide = true)]
     pub force_login: bool,
     /// Use OAuth when the welcome screen starts authentication.
-    #[arg(long = "oauth")]
+    #[arg(long = "oauth", hide = true)]
     pub oauth: bool,
-    /// Initial prompt for the interactive session, e.g. `zypi "fix the bug"` or `zypi --worktree=feat "create this feature"`.
+    /// Initial prompt for the interactive session, e.g. `zypi "fix the bug"`.
     #[arg(
         value_name = "PROMPT",
         conflicts_with_all = &["single",

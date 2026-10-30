@@ -163,8 +163,10 @@ targets = [
 # files (ADR1 PR 3; 27 tests went with the code): 5,649 (one local run on Linux; 8,706 over the
 # ten suites, the other nine unchanged). Then +2 for the self-tests of `in_own_process`, the helper
 # that runs a test in a process of its own (plan section 10.20): 5,651 (one local run on Linux;
-# 8,490 over the ten suites, the other nine unchanged).
-reference_passed = 5651
+# 8,490 over the ten suites, the other nine unchanged). Then +5 for hiding the eight settings that
+# the Python agent does not back (3 in `app::agent_settings`, 2 in `settings_modal`): 5,656 (one
+# local run on Linux; 8,505 over the ten suites with the 10 new ones of `pi-pager-bin`).
+reference_passed = 5656
 min_passed = 5300
 
 # Lib tests only; they were outside the manifest until r8 (plan section 10.10: 1,092 passed,
@@ -194,9 +196,11 @@ package = "pi-pager-bin"
 targets = ["--bin", "zypi"]
 # tests/update_never_blocked_by_config.rs is not selected: it looks for CARGO_BIN_EXE_pi-pager,
 # but the binary is named zypi (fork-rename leftover, unrelated to the runtime removal).
-# 20 in the last CI run plus the test that names zypi as the agent's parent in `-p` mode.
-reference_passed = 21
-min_passed = 21
+# 20 in the last CI run plus the test that names zypi as the agent's parent in `-p` mode. Then +10
+# for the flags that an interactive session refuses (`interactive_flags`): 31 (one local run on
+# Linux).
+reference_passed = 31
+min_passed = 31
 
 [[test.suite]]
 package = "pi-acp-lib"

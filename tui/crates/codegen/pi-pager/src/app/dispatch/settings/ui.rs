@@ -89,6 +89,7 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
                 auto_mode_gate: auto_mode_gate_from_app,
                 plan_mode_gate: plan_mode_gate_from_app,
                 default_mode_gate: default_mode_gate_from_app,
+                hide_unbacked_settings: crate::app::agent_settings::HIDE_UNBACKED,
                 ask_user_question_timeout_enabled: ask_user_question_timeout_enabled_from_app,
                 voice_stt_language: voice_stt_language_from_app.clone(),
                 scheduler_background_loops: agent
@@ -222,6 +223,7 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
         auto_mode_gate: auto_mode_gate_from_app,
         plan_mode_gate: plan_mode_gate_from_app,
         default_mode_gate: default_mode_gate_from_app,
+        hide_unbacked_settings: crate::app::agent_settings::HIDE_UNBACKED,
         ask_user_question_timeout_enabled: ask_user_question_timeout_enabled_from_app,
         voice_stt_language: voice_stt_language_from_app,
         scheduler_background_loops: agent
@@ -621,6 +623,7 @@ pub(crate) fn build_pager_snapshot(app: &AppView) -> crate::settings::PagerLocal
         auto_mode_gate: app.auto_mode_gate,
         plan_mode_gate: app.plan_mode_gate,
         default_mode_gate: app.default_mode_gate,
+        hide_unbacked_settings: crate::app::agent_settings::HIDE_UNBACKED,
         ask_user_question_timeout_enabled: app.ask_user_question_timeout_enabled,
         voice_stt_language: app.voice_config.language.clone(),
         scheduler_background_loops: agent_scheduler_background_loops(app),
