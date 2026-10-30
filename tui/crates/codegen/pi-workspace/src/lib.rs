@@ -22,7 +22,6 @@ pub mod mcp;
 pub(crate) mod path_virtualization;
 pub mod permission;
 pub mod project_config;
-pub mod publish;
 pub mod recovery;
 mod restore_fetch;
 pub mod scheduler_liveness;

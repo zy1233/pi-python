@@ -37,4 +37,3 @@ pub mod oauth;
 pub mod oauth_config;
 pub mod owned_clients;
 pub mod servers;
-pub mod wire;
