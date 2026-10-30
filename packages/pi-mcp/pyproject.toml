@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pi-mcp-py"
-version = "0.1.0"
+version = "0.2.0"
 description = "Connects the MCP servers an ACP client passes to the pi-python agent (an extension)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["agent", "mcp", "acp", "pi", "extension"]
 dependencies = [
-    "pi-agent-core-lc>=0.6.0",
+    "pi-agent-core-lc>=0.7.0",
     "langchain-mcp-adapters>=0.3.2",
     "mcp>=1.30,<2",
     "anyio>=4.5",
