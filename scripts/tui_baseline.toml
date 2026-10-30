@@ -36,8 +36,8 @@ tracked_crates = [
 # removes lines.
 [gates.residue]
 "grok agent" = 0
-"leader" = 243
-"x.ai" = 297
+"leader" = 239
+"x.ai" = 282
 
 # ADR1 (plan section 10.16): the pager asks the agent which sessions exist (`session/list`) and
 # reads no session files itself. Production code in these crates (paths under tui/crates) must
@@ -122,8 +122,14 @@ targets = ["--lib", "--test", "sandbox_requirements_pin", "--test", "test_config
 # deleted `session::worktree` (24 tests, Unix only), `session::helpers` (2) and
 # `util::config::worktree` (1), and added 1 (a `[storage]` section is reported as unrecognized):
 # 864 - 24 - 2 - 1 + 1 = 838 on Linux (one local run). The ten reference numbers add up to 8,490.
-reference_passed = 838
-min_passed = 820
+# Then the dead modules and loaders left (plan decision 10 and phase D.8) and took 54 tests with the
+# code: 19 of the folder-trust gate (nothing calls it), 9 of the MCP loaders, 7 of the Claude import
+# marker, 6 of `config::reloader`, 6 of `session::telemetry`, 3 of the plugin-config resolver, 2 of
+# `session::events`, 1 of `auth::flow` and 1 of `upload::turn`. None was added: 838 - 54 = 784 on
+# Linux (one local run; 8,436 over the ten suites, the other nine unchanged). The floor keeps the
+# same distance as before (18).
+reference_passed = 784
+min_passed = 766
 
 [[test.suite]]
 package = "pi-pager"
