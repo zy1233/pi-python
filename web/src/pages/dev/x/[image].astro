@@ -1,0 +1,167 @@
+---
+import { Font } from 'astro:assets';
+import '../../../styles/global.css';
+
+// Development only. This page is the source of brand/zycode-x-header.png (1500 × 500 pixels),
+// the header picture of the X profile.
+// Run `npm run dev`, open /dev/x/header/, and take a screenshot of the picture.
+// The build makes no page from this route.
+export function getStaticPaths() {
+  return import.meta.env.DEV ? [{ params: { image: 'header' } }] : [];
+}
+
+// The same trace as the social card. See `dev/[card].astro`.
+const trace = [
+  { text: 'agent_start', depth: 0 },
+  { text: 'turn_start', depth: 1 },
+  { text: 'message_start', depth: 2 },
+  { text: 'message_update', depth: 2 },
+  { text: 'message_end', depth: 2 },
+  { text: 'tool_execution_start', depth: 2, tool: true },
+  { text: 'tool_execution_end', depth: 2, tool: true },
+  { text: 'turn_end', depth: 1 },
+  { text: 'agent_end', depth: 0 },
+];
+---
+
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="robots" content="noindex" />
+    <title>zycode — X header picture</title>
+    <Font cssVariable="--font-sans" preload />
+    <Font cssVariable="--font-mono" preload />
+  </head>
+  <body>
+    <!--
+      The profile picture covers the lower left of this picture (about x 40–380, y 330–500).
+      The apps put a back button on the upper left. Keep both areas free of text.
+    -->
+    <div class="pic">
+      <div class="pic__grid"></div>
+
+      <div class="pic__main">
+        <p class="pic__brand">zycode<span class="cursor"></span></p>
+        <h1 class="pic__title">A coding agent<br />you can <em>audit</em>.</h1>
+        <p class="pic__meta">
+          <span>Open source</span><span>ACP</span><span>MIT · Apache-2.0</span>
+        </p>
+      </div>
+
+      <div class="pic__trace">
+        {
+          trace.map((line) => (
+            <p class:list={['pic__row', { 'pic__row--tool': line.tool }]} style={`--depth:${line.depth}`}>
+              {line.text}
+            </p>
+          ))
+        }
+      </div>
+    </div>
+  </body>
+</html>
+
+<style is:global>
+  html,
+  body {
+    margin: 0;
+    background: var(--paper);
+  }
+
+  body {
+    width: 1500px;
+    height: 500px;
+    overflow: hidden;
+  }
+
+  .pic {
+    position: relative;
+    width: 1500px;
+    height: 500px;
+  }
+
+  .pic__grid {
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(var(--rule) 1px, transparent 1px), linear-gradient(90deg, var(--rule) 1px, transparent 1px);
+    background-size: 72px 72px;
+    mask-image: radial-gradient(ellipse 80% 130% at 62% 45%, #000 15%, transparent 95%);
+  }
+
+  .pic__main {
+    position: absolute;
+    left: 464px;
+    top: 50%;
+    display: grid;
+    gap: 30px;
+    transform: translateY(-50%);
+  }
+
+  .pic__brand {
+    display: flex;
+    align-items: baseline;
+    font: 700 38px/1 var(--font-mono);
+    letter-spacing: -0.03em;
+  }
+
+  .pic__brand .cursor {
+    animation: none;
+  }
+
+  .pic__title {
+    font-size: 86px;
+    font-weight: 750;
+    line-height: 0.98;
+    letter-spacing: -0.045em;
+    white-space: nowrap;
+  }
+
+  .pic__title em {
+    font-style: normal;
+    color: var(--signal-text);
+    text-decoration: underline;
+    text-decoration-thickness: 0.06em;
+    text-underline-offset: 0.12em;
+    text-decoration-skip-ink: none;
+  }
+
+  .pic__meta {
+    display: flex;
+    gap: 14px;
+    font: 500 22px/1 var(--font-mono);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .pic__meta span + span::before {
+    content: '/';
+    margin-right: 14px;
+    color: var(--rule-2);
+  }
+
+  .pic__trace {
+    position: absolute;
+    right: 64px;
+    top: 50%;
+    padding: 24px 28px;
+    background: var(--term-bg);
+    color: var(--term-ink);
+    border: 2px solid var(--ink);
+    border-radius: 12px;
+    box-shadow: 14px 14px 0 -2px var(--signal);
+    transform: translateY(-50%);
+  }
+
+  .pic__row {
+    margin: 0;
+    padding-left: calc(var(--depth) * 20px);
+    font: 500 19px/1.75 var(--font-mono);
+  }
+
+  .pic__row--tool {
+    color: var(--term-warn);
+  }
+</style>

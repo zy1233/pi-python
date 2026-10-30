@@ -1,0 +1,128 @@
+---
+import { links } from '../data/site';
+import { messages, type Locale } from '../i18n';
+import type { FooterLinkId } from '../i18n/types';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const t = messages[locale].footer;
+const ui = messages[locale].ui;
+
+const groups: { title: string; ids: FooterLinkId[] }[] = [
+  { title: t.groups.project, ids: ['github', 'releases', 'changelog', 'issues'] },
+  { title: t.groups.docs, ids: ['design', 'tuiGuide', 'windows', 'benchmark'] },
+  { title: t.groups.more, ids: ['acp', 'pi'] },
+];
+const hrefOf: Record<FooterLinkId, string> = {
+  github: links.repo,
+  releases: links.releases,
+  changelog: links.changelog,
+  issues: links.issues,
+  design: links.design,
+  tuiGuide: links.tuiGuide,
+  windows: links.windows,
+  benchmark: links.benchmark,
+  acp: links.acp,
+  pi: links.pi,
+};
+---
+
+<footer class="footer">
+  <div class="wrap footer__grid">
+    <div class="footer__brand">
+      <p class="brand footer__logo">
+        <span class="brand__word">zycode</span><span class="cursor" aria-hidden="true"></span>
+      </p>
+      <p class="footer__tagline">{t.tagline}</p>
+    </div>
+
+    {
+      groups.map((group) => (
+        <nav class="footer__group" aria-label={group.title}>
+          <h2 class="footer__heading">{group.title}</h2>
+          <ul>
+            {group.ids.map((id) => (
+              <li>
+                <a href={hrefOf[id]} rel="noopener" target="_blank">
+                  {t.links[id]}
+                  <span class="sr-only"> ({ui.newTab})</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      ))
+    }
+  </div>
+
+  <div class="wrap footer__base">
+    <p>{t.legal}</p>
+    <p>{t.built}</p>
+  </div>
+</footer>
+
+<style>
+  .footer {
+    padding-top: clamp(3rem, 6vw, 4.5rem);
+    border-top: 1px solid var(--ink);
+    background: var(--paper);
+  }
+
+  .footer__grid {
+    display: grid;
+    gap: 2.5rem 2rem;
+  }
+
+  @media (min-width: 760px) {
+    .footer__grid {
+      grid-template-columns: 1.6fr repeat(3, 1fr);
+    }
+  }
+
+  .footer__logo {
+    margin: 0;
+    font-size: 1.5rem;
+  }
+
+  .footer__tagline {
+    margin-top: 0.7rem;
+    max-width: 18rem;
+    color: var(--ink-2);
+  }
+
+  .footer__heading {
+    margin-bottom: 0.9rem;
+    font: 500 0.72rem/1 var(--font-mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .footer__group ul {
+    display: grid;
+    gap: 0.55rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .footer__group a {
+    font-size: 0.93rem;
+    color: var(--ink);
+  }
+
+  .footer__base {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.5rem 2rem;
+    margin-top: clamp(2.5rem, 5vw, 4rem);
+    padding-block: 1.4rem 2rem;
+    border-top: 1px solid var(--rule-2);
+    color: var(--ink-3);
+    font-size: 0.82rem;
+  }
+</style>

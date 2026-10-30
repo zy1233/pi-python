@@ -1,0 +1,70 @@
+---
+import { messages, type Locale } from '../i18n';
+import Icon from './Icon.astro';
+
+interface Props {
+  locale: Locale;
+}
+
+const ui = messages[Astro.props.locale].ui;
+---
+
+<!--
+  The button copies the text of the [data-copy-source] element that is in the same
+  [data-copy-scope] element. One click handler on the document serves every button.
+-->
+<button type="button" class="copy" data-copy data-copied={ui.copied} aria-label={ui.copy}>
+  <Icon name="copy" size={15} class="copy__icon copy__icon--idle" />
+  <Icon name="check" size={15} class="copy__icon copy__icon--done" />
+  <span class="copy__text" data-copy-text data-idle={ui.copy}>{ui.copy}</span>
+</button>
+
+<script>
+  function legacyCopy(text: string): boolean {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
+    document.body.appendChild(area);
+    area.select();
+    let done = false;
+    try {
+      done = document.execCommand('copy');
+    } catch {
+      done = false;
+    }
+    area.remove();
+    return done;
+  }
+
+  document.addEventListener('click', async (event) => {
+    const button = (event.target as Element | null)?.closest<HTMLButtonElement>('[data-copy]');
+    if (!button) return;
+    const source = button.closest('[data-copy-scope]')?.querySelector('[data-copy-source]');
+    const text = source?.textContent?.trimEnd() ?? '';
+    if (!text) return;
+
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      copied = true;
+    } catch {
+      copied = legacyCopy(text);
+    }
+    if (!copied) return;
+
+    const label = button.querySelector<HTMLElement>('[data-copy-text]');
+    const live = document.getElementById('live');
+    window.clearTimeout(Number(button.dataset.timer));
+    button.dataset.state = 'done';
+    if (label) label.textContent = button.dataset.copied ?? '';
+    if (live) live.textContent = button.dataset.copied ?? '';
+    button.dataset.timer = String(
+      window.setTimeout(() => {
+        delete button.dataset.state;
+        if (label) label.textContent = label.dataset.idle ?? '';
+        if (live) live.textContent = '';
+      }, 1800),
+    );
+  });
+</script>

@@ -1,0 +1,157 @@
+---
+import { packages } from '../data/site';
+import { md, messages, type Locale } from '../i18n';
+import SectionHead from './SectionHead.astro';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const t = messages[locale].status;
+---
+
+<section id="status" class="block" aria-labelledby="status-title">
+  <div class="wrap">
+    <SectionHead n="06" eyebrow={t.eyebrow} id="status-title" title={t.title} lead={t.lead} />
+
+    <!-- The roles keep the table semantics when the layout turns into stacked cards on a small screen. -->
+    <div class="board reveal" role="table" aria-label={t.title}>
+      <div class="board__head" role="rowgroup">
+        <div class="board__row" role="row">
+          <span role="columnheader">{t.columns.component}</span>
+          <span role="columnheader">{t.columns.level}</span>
+          <span role="columnheader">{t.columns.role}</span>
+          <span role="columnheader">{t.columns.source}</span>
+        </div>
+      </div>
+      <div role="rowgroup">
+        {
+          packages.map((pkg) => (
+            <div class="board__row" role="row">
+              <span class="board__name" role="rowheader">
+                <code>{pkg.name}</code>
+              </span>
+              <span role="cell" data-label={t.columns.level}>
+                <span class={`level level--${pkg.level}`}>{t.levels[pkg.level]}</span>
+              </span>
+              <span role="cell" data-label={t.columns.role}>
+                {t.descriptions[pkg.id]}
+              </span>
+              <span role="cell" data-label={t.columns.source}>
+                <a href={pkg.href} rel="noopener">
+                  {t.where[pkg.source]}
+                </a>
+              </span>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+
+    <p class="board__next" set:html={md(t.next)} />
+  </div>
+</section>
+
+<style>
+  .board {
+    border: 1px solid var(--ink);
+    border-radius: var(--radius);
+    background: var(--paper-2);
+    overflow: hidden;
+  }
+
+  .board__head {
+    display: none;
+  }
+
+  .board__row {
+    display: grid;
+    gap: 0.4rem 1rem;
+    padding: 1rem 1.15rem;
+    border-bottom: 1px solid var(--rule-2);
+    font-size: 0.93rem;
+  }
+
+  .board__row:last-child {
+    border-bottom: 0;
+  }
+
+  .board__name code {
+    padding: 0;
+    background: none;
+    font-size: 0.92rem;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+  }
+
+  /* Small screens: each row is a card, and the cells show their own label. */
+  [role='cell'][data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 0.1rem;
+    font: 500 0.68rem/1.4 var(--font-mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .level {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    font: 600 0.8rem/1 var(--font-mono);
+  }
+
+  .level::before {
+    content: '';
+    width: 0.6rem;
+    height: 0.6rem;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  .level--stable {
+    color: var(--ok);
+  }
+
+  .level--beta {
+    color: var(--warn);
+  }
+
+  .level--alpha {
+    color: var(--signal-text);
+  }
+
+  @media (min-width: 860px) {
+    .board__head {
+      display: block;
+      background: var(--paper-3);
+      border-bottom: 1px solid var(--ink);
+    }
+
+    .board__head .board__row {
+      padding-block: 0.7rem;
+      border-bottom: 0;
+      font: 500 0.72rem/1.2 var(--font-mono);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+    }
+
+    .board__row {
+      grid-template-columns: minmax(12rem, 1.3fr) 7rem minmax(0, 3fr) minmax(8rem, 1fr);
+      align-items: baseline;
+    }
+
+    [role='cell'][data-label]::before {
+      display: none;
+    }
+  }
+
+  .board__next {
+    margin-top: 1.4rem;
+    color: var(--ink-2);
+    font-size: 0.95rem;
+  }
+</style>

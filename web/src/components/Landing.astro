@@ -1,0 +1,37 @@
+---
+import Base from '../layouts/Base.astro';
+import { homePath, type Locale } from '../i18n';
+import Architecture from './Architecture.astro';
+import Capabilities from './Capabilities.astro';
+import Contract from './Contract.astro';
+import Evidence from './Evidence.astro';
+import Footer from './Footer.astro';
+import Header from './Header.astro';
+import Hero from './Hero.astro';
+import Install from './Install.astro';
+import OpenSource from './OpenSource.astro';
+import Principles from './Principles.astro';
+import Status from './Status.astro';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+---
+
+<Base locale={locale} path={homePath[locale]}>
+  <Header locale={locale} />
+  <main id="main">
+    <Hero locale={locale} />
+    <Principles locale={locale} />
+    <Contract locale={locale} />
+    <Architecture locale={locale} />
+    <Capabilities locale={locale} />
+    <Install locale={locale} />
+    <Status locale={locale} />
+    <Evidence locale={locale} />
+    <OpenSource locale={locale} />
+  </main>
+  <Footer locale={locale} />
+</Base>

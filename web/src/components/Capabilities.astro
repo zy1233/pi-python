@@ -1,0 +1,75 @@
+---
+import { md, messages, type Locale } from '../i18n';
+import type { FeatureId } from '../i18n/types';
+import SectionHead from './SectionHead.astro';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const t = messages[locale].features;
+const ids: FeatureId[] = ['tools', 'sessions', 'headless', 'context', 'extensions', 'sandbox', 'limits', 'thinking'];
+---
+
+<section id="features" class="block" aria-labelledby="features-title">
+  <div class="wrap">
+    <SectionHead n="04" eyebrow={t.eyebrow} id="features-title" title={t.title} lead={t.lead} />
+
+    <ul class="specs">
+      {
+        ids.map((id, index) => (
+          <li class="spec reveal">
+            <span class="spec__n" aria-hidden="true">
+              {`F${index + 1}`}
+            </span>
+            <h3 class="spec__title">{t.items[id].title}</h3>
+            <p class="spec__body" set:html={md(t.items[id].body)} />
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+</section>
+
+<style>
+  .specs {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border-top: 1px solid var(--ink);
+  }
+
+  .spec {
+    display: grid;
+    gap: 0.4rem 1.5rem;
+    padding-block: 1.5rem;
+    border-bottom: 1px solid var(--rule-2);
+  }
+
+  .spec__n {
+    font: 500 0.78rem/1.6 var(--font-mono);
+    letter-spacing: 0.06em;
+    color: var(--signal-text);
+  }
+
+  .spec__title {
+    font-size: var(--step-1);
+    font-weight: 700;
+    line-height: 1.25;
+    letter-spacing: -0.02em;
+  }
+
+  .spec__body {
+    color: var(--ink-2);
+    max-width: 44rem;
+  }
+
+  @media (min-width: 860px) {
+    .spec {
+      grid-template-columns: 3.5rem minmax(0, 0.85fr) minmax(0, 2fr);
+      align-items: baseline;
+      padding-block: 1.6rem;
+    }
+  }
+</style>

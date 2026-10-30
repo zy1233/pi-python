@@ -1,0 +1,23 @@
+---
+import { md } from '../i18n';
+
+interface Props {
+  n: string;
+  eyebrow: string;
+  id: string;
+  title: string;
+  lead?: string;
+}
+
+const { n, eyebrow, id, title, lead } = Astro.props;
+---
+
+<header class="sec-head">
+  <p class="eyebrow">
+    <span class="eyebrow__n">{n}</span>
+    <span class="eyebrow__rule" aria-hidden="true"></span>
+    <span>{eyebrow}</span>
+  </p>
+  <h2 id={id}>{title}</h2>
+  {lead && <p class="lead" set:html={md(lead)} />}
+</header>

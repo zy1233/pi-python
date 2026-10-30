@@ -1,0 +1,243 @@
+---
+import { md, messages, type Locale } from '../i18n';
+import type { EventId, RuleId } from '../i18n/types';
+import SectionHead from './SectionHead.astro';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const t = messages[locale].contract;
+
+// The order of one turn that has a tool call. This is the order in AGENTS.md of the repository.
+// `depth` is only for the indent: a run holds turns, and a turn holds messages and tools.
+const events: { id: EventId; name: string; depth: 0 | 1 | 2; tone: 'run' | 'turn' | 'msg' | 'tool' }[] = [
+  { id: 'agentStart', name: 'agent_start', depth: 0, tone: 'run' },
+  { id: 'turnStart', name: 'turn_start', depth: 1, tone: 'turn' },
+  { id: 'userMsg', name: 'message_start · message_end', depth: 2, tone: 'msg' },
+  { id: 'asstStart', name: 'message_start', depth: 2, tone: 'msg' },
+  { id: 'update', name: 'message_update', depth: 2, tone: 'msg' },
+  { id: 'asstEnd', name: 'message_end', depth: 2, tone: 'msg' },
+  { id: 'toolStart', name: 'tool_execution_start', depth: 2, tone: 'tool' },
+  { id: 'toolEnd', name: 'tool_execution_end', depth: 2, tone: 'tool' },
+  { id: 'toolResult', name: 'message_start · message_end', depth: 2, tone: 'tool' },
+  { id: 'turnEnd', name: 'turn_end', depth: 1, tone: 'turn' },
+  { id: 'agentEnd', name: 'agent_end', depth: 0, tone: 'run' },
+];
+const ruleIds: RuleId[] = ['parallel', 'terminate', 'noRaise', 'usage'];
+---
+
+<section id="contract" class="block" aria-labelledby="contract-title">
+  <div class="wrap">
+    <SectionHead n="02" eyebrow={t.eyebrow} id="contract-title" title={t.title} lead={t.lead} />
+
+    <div class="contract">
+      <div class="trace reveal">
+        <h3 class="trace__title">{t.listTitle}</h3>
+        <ol class="trace__list">
+          {
+            events.map((event, index) => (
+              <li class={`ev ev--${event.tone}`} style={`--depth:${event.depth}`}>
+                <span class="ev__n" aria-hidden="true">
+                  {String(index + 1).padStart(2, '0')}
+                </span>
+                <span class="ev__head">
+                  <span class="ev__dot" aria-hidden="true" />
+                  <code class="ev__name">{event.name}</code>
+                </span>
+                <span class="ev__note" set:html={md(t.notes[event.id])} />
+              </li>
+            ))
+          }
+        </ol>
+      </div>
+
+      <div class="rules">
+        <h3 class="rules__title">{t.rulesTitle}</h3>
+        <ul class="rules__list">
+          {
+            ruleIds.map((id, index) => (
+              <li class="rule reveal" style={`--d:${index * 60}ms`}>
+                <h4 class="rule__title">{t.rules[id].title}</h4>
+                <p class="rule__body" set:html={md(t.rules[id].body)} />
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .contract {
+    display: grid;
+    gap: clamp(2rem, 5vw, 3.5rem);
+    align-items: start;
+  }
+
+  @media (min-width: 1000px) {
+    .contract {
+      grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    }
+  }
+
+  /* The trace is a dark block, like a log in a terminal. */
+  .trace {
+    background: var(--term-bg);
+    color: var(--term-ink);
+    border: 1px solid var(--ink);
+    border-radius: 8px;
+    padding: clamp(1.1rem, 3vw, 1.6rem);
+  }
+
+  .trace__title {
+    margin-bottom: 1.1rem;
+    font: 500 0.74rem/1 var(--font-mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--term-ink-2);
+  }
+
+  .trace__list {
+    position: relative;
+    display: grid;
+    gap: 0.15rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  /* The number and the note stay in fixed columns. Only the name moves right with the depth. */
+  .ev {
+    --step: 1.15rem;
+    display: grid;
+    grid-template-columns: 1.7rem minmax(0, 1fr);
+    column-gap: 0.6rem;
+    row-gap: 0.1rem;
+    align-items: baseline;
+    padding-block: 0.32rem;
+  }
+
+  .ev__n {
+    font: 400 0.7rem/1 var(--font-mono);
+    color: var(--term-ink-2);
+    opacity: 0.8;
+  }
+
+  .ev__head {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding-left: calc(var(--depth) * var(--step));
+  }
+
+  .ev__dot {
+    flex: none;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    border: 1.5px solid var(--term-ink-2);
+  }
+
+  .ev--run .ev__dot {
+    background: var(--term-ink);
+    border-color: var(--term-ink);
+  }
+
+  .ev--turn .ev__dot {
+    border-color: var(--term-signal);
+    background: var(--term-signal);
+  }
+
+  .ev--tool .ev__dot {
+    border-color: var(--term-warn);
+  }
+
+  .ev__name {
+    padding: 0;
+    background: none;
+    font-size: 0.86rem;
+    font-weight: 700;
+    white-space: nowrap;
+    color: var(--term-ink);
+  }
+
+  .ev--tool .ev__name {
+    color: var(--term-warn);
+  }
+
+  /* On a small screen the note sits under the name. */
+  .ev__note {
+    grid-column: 2;
+    padding-left: calc(var(--depth) * var(--step) + 1.05rem);
+    font-size: 0.8rem;
+    line-height: 1.45;
+    color: var(--term-ink-2);
+  }
+
+  .ev__note :global(code) {
+    background: rgb(236 231 216 / 0.12);
+    color: var(--term-ink);
+  }
+
+  /* On a narrow screen the longest name ("message_start · message_end") must be able to wrap. */
+  @media (max-width: 639px) {
+    .ev__name {
+      white-space: normal;
+      font-size: 0.8rem;
+    }
+  }
+
+  @media (max-width: 479px) {
+    .ev {
+      --step: 0.85rem;
+    }
+  }
+
+  @media (min-width: 640px) {
+    .ev {
+      grid-template-columns: 1.7rem minmax(15.5rem, 18.5rem) minmax(0, 1fr);
+    }
+
+    .ev__note {
+      grid-column: 3;
+      padding-left: 0;
+    }
+  }
+
+  .rules__title {
+    margin-bottom: 1.1rem;
+    font: 500 0.74rem/1 var(--font-mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .rules__list {
+    display: grid;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border-top: 1px solid var(--rule-2);
+  }
+
+  .rule {
+    display: grid;
+    gap: 0.35rem;
+    padding-block: 1.1rem;
+    border-bottom: 1px solid var(--rule-2);
+  }
+
+  .rule__title {
+    font-size: var(--step-1);
+    font-weight: 700;
+    letter-spacing: -0.015em;
+  }
+
+  .rule__body {
+    color: var(--ink-2);
+    font-size: 0.95rem;
+  }
+</style>

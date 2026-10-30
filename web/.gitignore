@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.astro/
+.wrangler/
+# Scratch folder for screenshots and one-time scripts.
+.tmp/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store

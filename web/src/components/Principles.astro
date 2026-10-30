@@ -1,0 +1,114 @@
+---
+import { md, messages, type Locale } from '../i18n';
+import type { PrincipleId } from '../i18n/types';
+import SectionHead from './SectionHead.astro';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const t = messages[locale].principles;
+const ids: PrincipleId[] = ['contract', 'protocol', 'noClient', 'permission', 'trust', 'models'];
+---
+
+<section id="why" class="block" aria-labelledby="why-title">
+  <div class="wrap">
+    <SectionHead n="01" eyebrow={t.eyebrow} id="why-title" title={t.title} lead={t.lead} />
+
+    <ul class="cards">
+      {
+        ids.map((id, index) => (
+          <li class="card reveal" style={`--d:${(index % 3) * 70}ms`}>
+            <span class="card__n" aria-hidden="true">
+              {String(index + 1).padStart(2, '0')}
+            </span>
+            <h3 class="card__title">{t.cards[id].title}</h3>
+            <p class="card__body" set:html={md(t.cards[id].body)} />
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+</section>
+
+<style>
+  .cards {
+    display: grid;
+    gap: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border: 1px solid var(--rule-2);
+    border-radius: var(--radius);
+    background: var(--paper-2);
+    overflow: hidden;
+  }
+
+  .card {
+    position: relative;
+    display: grid;
+    align-content: start;
+    gap: 0.7rem;
+    padding: clamp(1.4rem, 3vw, 2rem);
+    border-bottom: 1px solid var(--rule-2);
+  }
+
+  .card:last-child {
+    border-bottom: 0;
+  }
+
+  .card__n {
+    font: 500 0.78rem/1 var(--font-mono);
+    letter-spacing: 0.08em;
+    color: var(--signal-text);
+  }
+
+  .card__title {
+    font-size: var(--step-1);
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+  }
+
+  .card__body {
+    color: var(--ink-2);
+    font-size: 0.97rem;
+  }
+
+  @media (min-width: 720px) {
+    .cards {
+      grid-template-columns: repeat(2, 1fr);
+    }
+
+    .card {
+      border-right: 1px solid var(--rule-2);
+    }
+
+    .card:nth-child(2n) {
+      border-right: 0;
+    }
+
+    .card:nth-last-child(-n + 2) {
+      border-bottom: 0;
+    }
+  }
+
+  @media (min-width: 1060px) {
+    .cards {
+      grid-template-columns: repeat(3, 1fr);
+    }
+
+    .card:nth-child(2n) {
+      border-right: 1px solid var(--rule-2);
+    }
+
+    .card:nth-child(3n) {
+      border-right: 0;
+    }
+
+    .card:nth-last-child(-n + 3) {
+      border-bottom: 0;
+    }
+  }
+</style>

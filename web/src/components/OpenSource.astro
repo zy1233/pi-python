@@ -1,0 +1,146 @@
+---
+import { links } from '../data/site';
+import { md, messages, type Locale } from '../i18n';
+import Icon from './Icon.astro';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const t = messages[locale].open;
+
+// The title is a few short sentences. Each one gets its own line, in both languages.
+const titleLines = t.title.split(/(?<=[.。，,])\s*/).filter(Boolean);
+---
+
+<section id="open" class="open" aria-labelledby="open-title">
+  <div class="wrap open__inner">
+    <p class="eyebrow open__eyebrow">
+      <span class="eyebrow__n">08</span>
+      <span class="eyebrow__rule" aria-hidden="true"></span>
+      <span>{t.eyebrow}</span>
+    </p>
+    <h2 id="open-title" class="open__title">
+      {
+        titleLines.map((line, index) => (
+          <>
+            <span class="open__line">{line}</span>
+            {index < titleLines.length - 1 && ' '}
+          </>
+        ))
+      }
+    </h2>
+    <p class="open__body" set:html={md(t.body)} />
+
+    <div class="open__cta">
+      <a class="btn btn--on-dark" href={links.repo} rel="noopener">
+        <Icon name="github" size={18} />
+        <span>{t.ctaStar}</span>
+      </a>
+      <a class="btn btn--outline-dark" href={links.issues} rel="noopener">
+        <span>{t.ctaIssue}</span>
+        <Icon name="external" size={15} />
+      </a>
+      <a class="btn btn--outline-dark" href={links.changelog} rel="noopener">
+        <span>{t.ctaChangelog}</span>
+        <Icon name="external" size={15} />
+      </a>
+    </div>
+
+    <p class="open__unofficial" set:html={md(t.unofficial)} />
+  </div>
+</section>
+
+<style>
+  /* This block is dark in both themes. It gives the page a strong end. */
+  .open {
+    --o-bg: #12110d;
+    --o-ink: #ece7d8;
+    --o-ink-2: #b4ae9c;
+    --o-rule: rgb(236 231 216 / 0.2);
+    position: relative;
+    padding-block: clamp(4.5rem, 10vw, 8rem);
+    background: var(--o-bg);
+    color: var(--o-ink);
+    border-top: 1px solid var(--ink);
+    overflow: clip;
+  }
+
+  .open::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(rgb(236 231 216 / 0.07) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(236 231 216 / 0.07) 1px, transparent 1px);
+    background-size: 72px 72px;
+    -webkit-mask-image: radial-gradient(ellipse 70% 90% at 20% 100%, #000 10%, transparent 70%);
+    mask-image: radial-gradient(ellipse 70% 90% at 20% 100%, #000 10%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .open__inner {
+    position: relative;
+    display: grid;
+    justify-items: start;
+    gap: 1.5rem;
+  }
+
+  .open__eyebrow {
+    margin: 0;
+    color: var(--o-ink-2);
+  }
+
+  .open__eyebrow .eyebrow__n {
+    color: #ff8a63;
+  }
+
+  .open__eyebrow .eyebrow__rule {
+    background: var(--o-rule);
+  }
+
+  .open__title {
+    font-size: var(--step-4);
+    font-weight: 750;
+    line-height: 1;
+    letter-spacing: -0.04em;
+  }
+
+  .open__line {
+    display: block;
+  }
+
+  :global(:lang(zh-Hans)) .open__title {
+    font-size: var(--step-3);
+    line-height: 1.2;
+  }
+
+  .open__body {
+    max-width: 40rem;
+    font-size: var(--step-1);
+    color: var(--o-ink-2);
+  }
+
+  .open__body :global(code),
+  .open__unofficial :global(code) {
+    background: rgb(236 231 216 / 0.12);
+    color: var(--o-ink);
+  }
+
+  .open__cta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.8rem;
+    margin-top: 0.5rem;
+  }
+
+  .open__unofficial {
+    max-width: 42rem;
+    margin-top: 1.5rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--o-rule);
+    font-size: 0.88rem;
+    color: var(--o-ink-2);
+  }
+</style>
