@@ -1,0 +1,73 @@
+---
+import { highlight, type Lang } from '../lib/highlight';
+import type { Locale } from '../i18n';
+import CopyButton from './CopyButton.astro';
+
+interface Props {
+  locale: Locale;
+  code: string;
+  lang: Lang;
+  label: string;
+}
+
+const { locale, code, lang, label } = Astro.props;
+const html = highlight(code.trim(), lang);
+---
+
+<div class="code" data-copy-scope>
+  <div class="code__bar">
+    <span class="code__label">{label}</span>
+    <CopyButton locale={locale} />
+  </div>
+  <pre class="code__pre" tabindex="0"><code data-copy-source set:html={html} /></pre>
+</div>
+
+<style>
+  .code {
+    min-width: 0;
+    background: var(--term-bg);
+    color: var(--term-ink);
+    border: 1px solid var(--ink);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .code__bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.35rem 0.5rem 0.35rem 1rem;
+    border-bottom: 1px solid var(--term-rule);
+    font: 500 0.74rem/1 var(--font-mono);
+    letter-spacing: 0.06em;
+    color: var(--term-ink-2);
+  }
+
+  .code__pre {
+    margin: 0;
+    padding: 1.1rem 1.15rem 1.25rem;
+    overflow-x: auto;
+    font: 400 0.85rem/1.7 var(--font-mono);
+    tab-size: 2;
+  }
+
+  .code__pre code {
+    padding: 0;
+    background: none;
+    border-radius: 0;
+    font: inherit;
+    color: inherit;
+  }
+
+  .code :global(.copy) {
+    color: var(--term-ink-2);
+    border-color: var(--term-rule);
+  }
+
+  .code :global(.copy:hover) {
+    color: var(--term-ink);
+    border-color: var(--term-ink-2);
+    background: transparent;
+  }
+</style>

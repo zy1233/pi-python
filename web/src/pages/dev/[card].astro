@@ -1,0 +1,159 @@
+---
+import { Font } from 'astro:assets';
+import '../../styles/global.css';
+
+// Development only. This page is the source of public/og.png (1200 × 630 pixels).
+// Run `npm run dev`, open /dev/og/, and take a screenshot of the card.
+// The build makes no page from this route.
+export function getStaticPaths() {
+  return import.meta.env.DEV ? [{ params: { card: 'og' } }] : [];
+}
+
+const trace = [
+  { text: 'agent_start', depth: 0 },
+  { text: 'turn_start', depth: 1 },
+  { text: 'message_start', depth: 2 },
+  { text: 'message_update', depth: 2 },
+  { text: 'message_end', depth: 2 },
+  { text: 'tool_execution_start', depth: 2, tool: true },
+  { text: 'tool_execution_end', depth: 2, tool: true },
+  { text: 'turn_end', depth: 1 },
+  { text: 'agent_end', depth: 0 },
+];
+---
+
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="robots" content="noindex" />
+    <title>zycode — Open Graph card</title>
+    <Font cssVariable="--font-sans" preload />
+    <Font cssVariable="--font-mono" preload />
+  </head>
+  <body>
+    <div class="card">
+      <div class="card__grid"></div>
+
+      <div class="card__main">
+        <p class="card__brand">zycode<span class="cursor"></span></p>
+        <h1 class="card__title">A coding agent you can&nbsp;<em>audit</em>.</h1>
+        <p class="card__meta">
+          <span>Open source</span><span>ACP</span><span>MIT · Apache-2.0</span>
+        </p>
+      </div>
+
+      <div class="card__trace">
+        {
+          trace.map((line) => (
+            <p class:list={['row', { 'row--tool': line.tool }]} style={`--depth:${line.depth}`}>
+              {line.text}
+            </p>
+          ))
+        }
+      </div>
+    </div>
+  </body>
+</html>
+
+<style is:global>
+  html,
+  body {
+    margin: 0;
+    background: var(--paper);
+  }
+
+  body {
+    width: 1200px;
+    height: 630px;
+    overflow: hidden;
+  }
+
+  .card {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr 400px;
+    gap: 48px;
+    align-items: center;
+    width: 1200px;
+    height: 630px;
+    padding: 64px 72px;
+  }
+
+  .card__grid {
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(var(--rule) 1px, transparent 1px), linear-gradient(90deg, var(--rule) 1px, transparent 1px);
+    background-size: 72px 72px;
+    mask-image: radial-gradient(ellipse 90% 90% at 75% 30%, #000 10%, transparent 75%);
+  }
+
+  .card__main {
+    position: relative;
+    display: grid;
+    gap: 34px;
+  }
+
+  .card__brand {
+    display: flex;
+    align-items: baseline;
+    font: 700 40px/1 var(--font-mono);
+    letter-spacing: -0.03em;
+  }
+
+  .card__brand .cursor {
+    animation: none;
+  }
+
+  .card__title {
+    font-size: 92px;
+    font-weight: 750;
+    line-height: 0.98;
+    letter-spacing: -0.045em;
+  }
+
+  .card__title em {
+    font-style: normal;
+    color: var(--signal-text);
+    text-decoration: underline;
+    text-decoration-thickness: 0.06em;
+    text-underline-offset: 0.12em;
+    text-decoration-skip-ink: none;
+  }
+
+  .card__meta {
+    display: flex;
+    gap: 14px;
+    font: 500 21px/1 var(--font-mono);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .card__meta span + span::before {
+    content: '/';
+    margin-right: 14px;
+    color: var(--rule-2);
+  }
+
+  .card__trace {
+    position: relative;
+    padding: 28px 30px;
+    background: var(--term-bg);
+    color: var(--term-ink);
+    border: 2px solid var(--ink);
+    border-radius: 12px;
+    box-shadow: 14px 14px 0 -2px var(--signal);
+  }
+
+  .row {
+    margin: 0;
+    padding-left: calc(var(--depth) * 22px);
+    font: 500 21px/1.8 var(--font-mono);
+  }
+
+  .row--tool {
+    color: var(--term-warn);
+  }
+</style>

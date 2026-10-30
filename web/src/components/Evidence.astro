@@ -1,0 +1,112 @@
+---
+import { links } from '../data/site';
+import { md, messages, type Locale } from '../i18n';
+import Icon from './Icon.astro';
+import SectionHead from './SectionHead.astro';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const t = messages[locale].evidence;
+---
+
+<section id="evidence" class="block" aria-labelledby="evidence-title">
+  <div class="wrap">
+    <SectionHead n="07" eyebrow={t.eyebrow} id="evidence-title" title={t.title} lead={t.lead} />
+
+    <div class="evidence">
+      <div class="stat reveal">
+        <p class="stat__num" aria-label={t.stat}>{t.stat}</p>
+        <p class="stat__label">{t.statLabel}</p>
+        <p class="stat__note">{t.statNote}</p>
+      </div>
+
+      <div class="read">
+        <h3 class="read__title">{t.readTitle}</h3>
+        <ul class="read__list">
+          {t.points.map((point) => <li set:html={md(point)} />)}
+        </ul>
+        <a class="link-arrow" href={links.benchmark} rel="noopener">
+          <span>{t.cta}</span>
+          <Icon name="arrow" size={16} />
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .evidence {
+    display: grid;
+    gap: clamp(2rem, 5vw, 3.5rem);
+    align-items: start;
+  }
+
+  @media (min-width: 900px) {
+    .evidence {
+      grid-template-columns: minmax(0, 4fr) minmax(0, 6fr);
+    }
+  }
+
+  .stat {
+    display: grid;
+    gap: 0.5rem;
+    padding: clamp(1.4rem, 3vw, 2.2rem);
+    border: 1px solid var(--ink);
+    border-radius: 8px;
+    background: var(--paper-2);
+    box-shadow: 8px 8px 0 -1px var(--rule-2);
+  }
+
+  .stat__num {
+    font: 700 clamp(3.4rem, 2rem + 6vw, 6rem) / 0.95 var(--font-mono);
+    letter-spacing: -0.06em;
+    color: var(--ink);
+  }
+
+  .stat__label {
+    font-size: var(--step-1);
+    font-weight: 600;
+    line-height: 1.3;
+  }
+
+  .stat__note {
+    color: var(--ink-3);
+    font: 500 0.78rem/1.4 var(--font-mono);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .read__title {
+    margin-bottom: 1rem;
+    font-size: var(--step-1);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .read__list {
+    display: grid;
+    gap: 0.85rem;
+    margin: 0 0 1.6rem;
+    padding: 0;
+    list-style: none;
+  }
+
+  .read__list li {
+    position: relative;
+    padding-left: 1.5rem;
+    color: var(--ink-2);
+    font-size: 0.97rem;
+  }
+
+  .read__list li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0.66em;
+    width: 0.65rem;
+    border-top: 2px solid var(--signal);
+  }
+</style>

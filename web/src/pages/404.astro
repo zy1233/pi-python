@@ -1,0 +1,58 @@
+---
+import Footer from '../components/Footer.astro';
+import Header from '../components/Header.astro';
+import { homePath, messages } from '../i18n';
+import Base from '../layouts/Base.astro';
+
+// One 404 page serves the whole site, so it shows both languages.
+const en = messages.en.notFound;
+const zh = messages.zh.notFound;
+---
+
+<Base locale="en" title="404 — zycode" noindex>
+  <Header locale="en" showNav={false} />
+  <main id="main" class="wrap lost">
+    <p class="lost__code" aria-hidden="true">404</p>
+    <h1 class="lost__title">{en.title}</h1>
+    <p class="lost__body">{en.body}</p>
+    <p class="lost__actions">
+      <a class="btn btn--primary" href={homePath.en}>{en.back}</a>
+      <a class="btn btn--ghost" href={homePath.zh} lang="zh-Hans">{zh.back}</a>
+    </p>
+  </main>
+  <Footer locale="en" />
+</Base>
+
+<style>
+  .lost {
+    display: grid;
+    justify-items: start;
+    gap: 1.25rem;
+    padding-block: clamp(4rem, 12vw, 9rem);
+  }
+
+  .lost__code {
+    font: 700 clamp(5rem, 3rem + 14vw, 12rem) / 0.9 var(--font-mono);
+    letter-spacing: -0.07em;
+    color: var(--signal-text);
+  }
+
+  .lost__title {
+    font-size: var(--step-3);
+    font-weight: 750;
+    letter-spacing: -0.035em;
+  }
+
+  .lost__body {
+    max-width: 32rem;
+    color: var(--ink-2);
+    font-size: var(--step-1);
+  }
+
+  .lost__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.8rem;
+    margin-top: 0.5rem;
+  }
+</style>

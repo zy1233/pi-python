@@ -1,0 +1,92 @@
+---
+import { Font } from 'astro:assets';
+import '../styles/global.css';
+import { homePath, messages, otherLocale, type Locale } from '../i18n';
+import { isPreview } from '../lib/preview';
+
+interface Props {
+  locale: Locale;
+  /** Path of the page, with a leading slash. It gives the canonical link and the language links. */
+  path?: string;
+  title?: string;
+  description?: string;
+  /** Tell search engines to skip this page. */
+  noindex?: boolean;
+}
+
+const { locale, path, title, description, noindex = false } = Astro.props;
+const t = messages[locale];
+const other = otherLocale(locale);
+const site = Astro.site!;
+const absolute = (value: string) => new URL(value, site).href;
+// A preview address (workers.dev, pages.dev) must not compete with the real domain in search.
+// robots.txt says the same for the whole site.
+const hideFromSearch = noindex || isPreview(site);
+
+const pageTitle = title ?? t.meta.title;
+const pageDescription = description ?? t.meta.description;
+const canonical = path ? absolute(path) : undefined;
+const image = absolute('/og.png');
+---
+
+<!doctype html>
+<html lang={t.lang}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{pageTitle}</title>
+    <meta name="description" content={pageDescription} />
+    {hideFromSearch && <meta name="robots" content="noindex" />}
+    {canonical && <link rel="canonical" href={canonical} />}
+    {
+      canonical && (
+        <>
+          <link rel="alternate" hreflang={messages.en.hreflang} href={absolute(homePath.en)} />
+          <link rel="alternate" hreflang={messages.zh.hreflang} href={absolute(homePath.zh)} />
+          <link rel="alternate" hreflang="x-default" href={absolute(homePath.en)} />
+        </>
+      )
+    }
+
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f3f0e7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0f0e0b" media="(prefers-color-scheme: dark)" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+
+    <meta property="og:site_name" content="zycode" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={pageTitle} />
+    <meta property="og:description" content={pageDescription} />
+    {canonical && <meta property="og:url" content={canonical} />}
+    <meta property="og:image" content={image} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content={t.meta.ogAlt} />
+    <meta property="og:locale" content={t.ogLocale} />
+    <meta property="og:locale:alternate" content={messages[other].ogLocale} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={pageTitle} />
+    <meta name="twitter:description" content={pageDescription} />
+    <meta name="twitter:image" content={image} />
+
+    <Font cssVariable="--font-sans" preload />
+    <Font cssVariable="--font-mono" preload />
+
+    <!-- Runs before the first paint: it marks the page as scripted and applies a saved theme. -->
+    <script is:inline>
+      document.documentElement.classList.add('js');
+      try {
+        var saved = localStorage.getItem('zycode-theme');
+        if (saved === 'light' || saved === 'dark') document.documentElement.dataset.theme = saved;
+      } catch (error) {}
+    </script>
+  </head>
+  <body>
+    <a class="skip" href="#main">{t.skip}</a>
+    <slot />
+    <div id="live" class="sr-only" role="status" aria-live="polite"></div>
+    <script>
+      import '../scripts/main';
+    </script>
+  </body>
+</html>

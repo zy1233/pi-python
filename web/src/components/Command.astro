@@ -1,0 +1,70 @@
+---
+import type { Locale } from '../i18n';
+import CopyButton from './CopyButton.astro';
+
+interface Props {
+  locale: Locale;
+  label: string;
+  command: string;
+}
+
+const { locale, label, command } = Astro.props;
+---
+
+<div class="cmd" data-copy-scope>
+  <span class="cmd__label">{label}</span>
+  <div class="cmd__row">
+    <code class="cmd__code" data-copy-source>{command}</code>
+    <CopyButton locale={locale} />
+  </div>
+</div>
+
+<style>
+  .cmd {
+    max-width: 34rem;
+  }
+
+  .cmd__label {
+    display: block;
+    margin-bottom: 0.45rem;
+    font: 500 0.72rem/1 var(--font-mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .cmd__row {
+    display: flex;
+    align-items: stretch;
+    border: 1px solid var(--ink);
+    border-radius: var(--radius);
+    background: var(--paper-2);
+    overflow: hidden;
+  }
+
+  .cmd__code {
+    flex: 1;
+    min-width: 0;
+    display: block;
+    padding: 0.8rem 0.9rem;
+    background: none;
+    border-radius: 0;
+    font-size: 0.9rem;
+    overflow-x: auto;
+    white-space: nowrap;
+    scrollbar-width: none;
+  }
+
+  .cmd__code::before {
+    content: '$ ';
+    color: var(--signal-text);
+    font-weight: 700;
+  }
+
+  .cmd__row :global(.copy) {
+    border: 0;
+    border-left: 1px solid var(--rule-2);
+    border-radius: 0;
+    padding-inline: 0.9rem;
+  }
+</style>

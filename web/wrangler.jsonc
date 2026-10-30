@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "zycode-web",
+  // Set this to today's date for a new Worker. Review the changes before you move it forward.
+  "compatibility_date": "2026-10-28",
+  // The site has one address: https://zycode.dev. A Custom Domain makes Cloudflare create
+  // the DNS record and use the certificate of the zone. The zone must be in this account.
+  // The host www.zycode.dev is not in this list. A redirect rule in the zone sends it to
+  // zycode.dev (see README.md).
+  "routes": [{ "pattern": "zycode.dev", "custom_domain": true }],
+  // Close the workers.dev addresses. They would show a second copy of the site.
+  "workers_dev": false,
+  "preview_urls": false,
+  // This Worker has no script. Cloudflare serves the files in ./dist directly,
+  // so a request for a file never runs code and there are no logs to collect.
+  "assets": {
+    "directory": "./dist",
+    // Return public/404.html with status 404 for a path that has no file.
+    "not_found_handling": "404-page"
+  }
+}
