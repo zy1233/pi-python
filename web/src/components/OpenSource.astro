@@ -31,21 +31,23 @@ const titleLines = t.title.split(/(?<=[.。，,])\s*/).filter(Boolean);
         ))
       }
     </h2>
-    <p class="open__body" set:html={md(t.body)} />
+    <div class="open__side">
+      <p class="open__body" set:html={md(t.body)} />
 
-    <div class="open__cta">
-      <a class="btn btn--on-dark" href={links.repo} rel="noopener">
-        <Icon name="github" size={18} />
-        <span>{t.ctaStar}</span>
-      </a>
-      <a class="btn btn--outline-dark" href={links.issues} rel="noopener">
-        <span>{t.ctaIssue}</span>
-        <Icon name="external" size={15} />
-      </a>
-      <a class="btn btn--outline-dark" href={links.changelog} rel="noopener">
-        <span>{t.ctaChangelog}</span>
-        <Icon name="external" size={15} />
-      </a>
+      <div class="open__cta">
+        <a class="btn btn--on-dark" href={links.repo} rel="noopener">
+          <Icon name="github" size={18} />
+          <span>{t.ctaStar}</span>
+        </a>
+        <a class="btn btn--outline-dark" href={links.issues} rel="noopener">
+          <span>{t.ctaIssue}</span>
+          <Icon name="external" size={15} />
+        </a>
+        <a class="btn btn--outline-dark" href={links.changelog} rel="noopener">
+          <span>{t.ctaChangelog}</span>
+          <Icon name="external" size={15} />
+        </a>
+      </div>
     </div>
 
     <p class="open__unofficial" set:html={md(t.unofficial)} />
@@ -116,8 +118,16 @@ const titleLines = t.title.split(/(?<=[.。，,])\s*/).filter(Boolean);
     line-height: 1.2;
   }
 
+  /* The text and the buttons are one block. It is below the title, and at a wide width
+     (see the end of this block) it is beside the title. */
+  .open__side {
+    display: grid;
+    justify-items: start;
+    gap: 1.5rem;
+  }
+
   .open__body {
-    max-width: 40rem;
+    max-width: 56rem;
     font-size: var(--step-1);
     color: var(--o-ink-2);
   }
@@ -126,6 +136,8 @@ const titleLines = t.title.split(/(?<=[.。，,])\s*/).filter(Boolean);
   .open__unofficial :global(code) {
     background: rgb(236 231 216 / 0.12);
     color: var(--o-ink);
+    /* A name such as xai-org/grok-build must not break at a hyphen. */
+    white-space: nowrap;
   }
 
   .open__cta {
@@ -136,11 +148,42 @@ const titleLines = t.title.split(/(?<=[.。，,])\s*/).filter(Boolean);
   }
 
   .open__unofficial {
-    max-width: 42rem;
+    /* The rule goes across the whole width of the page content. */
+    justify-self: stretch;
     margin-top: 1.5rem;
     padding-top: 1.25rem;
     border-top: 1px solid var(--o-rule);
     font-size: 0.88rem;
     color: var(--o-ink-2);
+  }
+
+  /* A wide screen: the title on the left, the text and the buttons on the right.
+     The buttons need about 575 pixels, so the right column is wide enough from 1100 pixels. */
+  @media (min-width: 1100px) {
+    .open__inner {
+      grid-template-columns: minmax(14rem, max-content) minmax(0, 1fr);
+      grid-template-areas:
+        'eyebrow eyebrow'
+        'title side'
+        'note note';
+      column-gap: clamp(3rem, 6vw, 5rem);
+      align-items: end;
+    }
+
+    .open__eyebrow {
+      grid-area: eyebrow;
+    }
+
+    .open__title {
+      grid-area: title;
+    }
+
+    .open__side {
+      grid-area: side;
+    }
+
+    .open__unofficial {
+      grid-area: note;
+    }
   }
 </style>

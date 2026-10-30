@@ -70,6 +70,7 @@ export interface Messages {
   ui: {
     github: string;
     pypi: string;
+    x: string;
     copy: string;
     copied: string;
     replay: string;

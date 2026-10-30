@@ -8,6 +8,8 @@ export const links = {
   repo,
   /** The PyPI page of the main package. The install command on the page uses this package. */
   pypi: 'https://pypi.org/project/pi-agent-cli-lc/',
+  /** The X account of the project. */
+  x: 'https://x.com/zycodey1',
   releases: `${repo}/releases`,
   issues: `${repo}/issues`,
   changelog: `${repo}/blob/main/CHANGELOG.md`,

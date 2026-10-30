@@ -24,6 +24,7 @@ export const en: Messages = {
   ui: {
     github: 'GitHub',
     pypi: 'PyPI',
+    x: 'X',
     copy: 'Copy',
     copied: 'Copied',
     replay: 'Replay the demo',
@@ -301,7 +302,7 @@ PI_USE_MOCK=1 python -m pi_agent_cli -p "hello" --cwd .`,
   open: {
     eyebrow: 'Open source',
     title: 'Read it. Run it. Change it.',
-    body: 'The Python packages use the MIT license. `zypi` is a fork of xai-org/grok-build and keeps the Apache-2.0 license.',
+    body: 'The Python packages use the MIT license. `zypi` is a fork of `xai-org/grok-build` and keeps the Apache-2.0 license.',
     unofficial:
       'zycode builds on a port of `pi-agent-core` from the pi project. This is an unofficial project. It is not affiliated with, endorsed by or maintained by the pi project or its maintainers.',
     ctaStar: 'Star on GitHub',

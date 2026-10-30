@@ -70,6 +70,10 @@ const sections = [
         <Icon name="package" size={16} />
         <span class="btn__label">{t.ui.pypi}</span>
       </a>
+      <a class="btn btn--small btn--ghost" href={links.x} rel="noopener">
+        <Icon name="x" size={16} />
+        <span class="btn__label">{t.ui.x}</span>
+      </a>
     </div>
   </div>
 </header>
@@ -141,7 +145,9 @@ const sections = [
     margin-left: 0;
   }
 
-  @media (max-width: 960px) {
+  /* The brand, the six links, and the five controls need about 1010 pixels in English.
+     Below 1060 pixels the links get their own row. */
+  @media (max-width: 1060px) {
     .site-nav {
       order: 3;
       flex: 1 0 100%;
@@ -161,18 +167,8 @@ const sections = [
     }
   }
 
-  /* The smallest phones: close the gaps so that the brand and the four controls stay in one row. */
-  @media (max-width: 380px) {
-    .site-header__bar {
-      column-gap: 1rem;
-    }
-
-    .site-header__actions {
-      gap: 0.4rem;
-    }
-  }
-
-  @media (max-width: 520px) {
+  /* The brand and the five controls with text need about 530 pixels in English. */
+  @media (max-width: 560px) {
     /* The buttons show only the icon here. The text stays for screen readers. */
     .site-header__actions .btn__label {
       position: absolute;
@@ -189,6 +185,34 @@ const sections = [
       height: 2.25rem;
       padding: 0;
       justify-content: center;
+    }
+  }
+
+  /* The smallest phones: make the controls and the gaps smaller, so that the brand and the
+     five controls stay in one row at a width of 320 pixels. This block must come after the
+     block for 560 pixels, because it sets the same properties. */
+  @media (max-width: 380px) {
+    .site-header__bar {
+      column-gap: 0.75rem;
+    }
+
+    .brand {
+      font-size: 1rem;
+    }
+
+    .site-header__actions {
+      gap: 0.3rem;
+    }
+
+    .site-header__actions .btn,
+    .site-header__actions .icon-btn {
+      width: 2rem;
+      height: 2rem;
+    }
+
+    .site-header__actions .pill {
+      height: 2rem;
+      padding-inline: 0.55rem;
     }
   }
 </style>
