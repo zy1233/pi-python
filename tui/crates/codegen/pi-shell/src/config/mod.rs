@@ -1,4 +1,3 @@
-pub(crate) mod reloader;
 use crate::bundle;
 pub use pi_config_types::{
     DEFAULT_RECENCY_DECAY, MemoryConfig, MemoryDreamConfig, MemoryDreamSettings,

@@ -22,5 +22,4 @@ pub(crate) use pi_shell_terminal as terminal;
 pub(crate) mod test_support;
 pub mod tier;
 pub mod tools;
-pub(crate) mod upload;
 pub mod util;

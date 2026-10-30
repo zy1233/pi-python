@@ -6,7 +6,6 @@ pub mod credential_provider;
 pub(crate) mod devbox_login;
 pub(crate) mod error;
 mod external_auth;
-mod flow;
 pub(crate) mod manager;
 mod model;
 pub(crate) mod oidc;

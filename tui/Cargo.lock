@@ -8304,7 +8304,6 @@ dependencies = [
  "pi-models",
  "pi-sampling-types",
  "pi-sandbox",
- "pi-session-events",
  "pi-shared",
  "pi-shell-base",
  "pi-shell-terminal",

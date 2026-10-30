@@ -1,7 +1,5 @@
 /// Canonical `decision_reason` values for the uploaded artifact. This module is
-/// the single owner of the decision-reason vocabulary; downstream telemetry
-/// enums assert coverage against [`reasons::ALL`] so a new reason here fails the
-/// cross-crate drift test rather than being silently dropped.
+/// the single owner of the decision-reason vocabulary.
 pub const YOLO: &str = "yolo";
 pub const POLICY_ALLOW: &str = "policy_allow";
 pub const POLICY_DENY: &str = "policy_deny";
@@ -27,8 +25,7 @@ pub const OPAQUE_SHELL: &str = "opaque_shell";
 pub const REQUESTER_GONE: &str = "requester_gone";
 
 /// Every canonical reason, in declaration order. A new reason constant must be
-/// added here; the telemetry `PermissionDecisionReason` drift test then fails
-/// until the enum gains a matching variant.
+/// added here.
 pub const ALL: &[&str] = &[
     YOLO,
     POLICY_ALLOW,
