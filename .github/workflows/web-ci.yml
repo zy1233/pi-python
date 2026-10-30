@@ -8,7 +8,9 @@ name: Web CI
 # Builds deploys the site after a merge to `main`. It runs the same two commands, so a change that
 # passes here also builds there. A failed run here tells the author before the merge.
 #
-# Node is the version in web/.node-version, the file that Workers Builds also reads.
+# Node.js is the version in web/.node-version, and npm is the version in the `packageManager`
+# field of web/package.json. Workers Builds reads the same two places, so a lockfile installs the
+# same way here and there.
 
 on:
   push:
@@ -45,6 +47,14 @@ jobs:
           node-version-file: web/.node-version
           cache: npm
           cache-dependency-path: web/package-lock.json
+
+      # The runner has the npm that comes with Node.js. Install the version that package.json
+      # names, so that this job and Workers Builds use the same npm.
+      - name: Install the npm version of package.json
+        run: |
+          npm_version=$(node -p "(require('./package.json').packageManager || '').replace(/^npm@/, '')")
+          test -n "$npm_version" || { echo "web/package.json has no packageManager field."; exit 1; }
+          npm install --global "npm@${npm_version}"
 
       - name: Versions
         run: |

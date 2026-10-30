@@ -15,6 +15,10 @@ The site has two languages: English at `/` and Chinese at `/zh/`.
 
 The file `.npmrc` sets `engine-strict`. `npm install` stops on a Node.js version that is too old.
 
+The field `packageManager` in `package.json` names npm 11.19.1. Cloudflare Workers Builds
+and the web CI install this version, so a lockfile installs the same way in both. To use
+another npm version, change only this field.
+
 ## Commands
 
 Run all commands in this folder (`web/`).
@@ -213,7 +217,7 @@ Cloudflare applies a saved change to the next build.
 | Builds for other branches | Off                                                  | The site has one address. A branch gets no preview.                                |
 | Build variables           | None                                                 | `SITE_URL` keeps its default value, `https://zycode.dev`.                          |
 | Node.js                   | From `.node-version` (24)                            | Cloudflare reads the file. The web CI reads it too.                                |
-| npm                       | 10.9.2 (the default of Cloudflare, October 2026)     | The web CI uses the npm of Node.js 24 (11.x). The lockfile must install with both. |
+| npm                       | From `packageManager` in `package.json` (11.19.1)    | Cloudflare and the web CI install this version. Both use the same npm.             |
 | Build token               | Cloudflare made it when you connected the repository | The build needs a token to upload the files.                                       |
 
 ### No script from Cloudflare
