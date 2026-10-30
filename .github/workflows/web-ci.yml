@@ -1,0 +1,61 @@
+name: Web CI
+
+# The product site (web/, https://zycode.dev): `npm run check` (Astro and TypeScript) and
+# `npm run build`.
+#
+# This workflow runs only for a change that touches the site or this file. Python code is covered
+# by ci.yml, and the Rust TUI by tui-ci.yml. This workflow does not deploy. Cloudflare Workers
+# Builds deploys the site after a merge to `main`. It runs the same two commands, so a change that
+# passes here also builds there. A failed run here tells the author before the merge.
+#
+# Node is the version in web/.node-version, the file that Workers Builds also reads.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - ".github/workflows/web-ci.yml"
+  pull_request:
+    paths:
+      - "web/**"
+      - ".github/workflows/web-ci.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  site:
+    name: Site (check + build)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: web/.node-version
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Versions
+        run: |
+          node --version
+          npm --version
+
+      - name: Install (npm ci)
+        run: npm ci
+
+      - name: Check (astro check)
+        run: npm run check
+
+      - name: Build (astro build)
+        run: npm run build
