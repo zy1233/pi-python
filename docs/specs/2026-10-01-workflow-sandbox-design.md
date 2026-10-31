@@ -86,6 +86,7 @@ WorkflowRuntime.execute()
 - **fd 0 / 1**：子进程先 `dup` 出管道，再把 0 和 1 指向空设备，所以脚本（或它调用的库）打印什么都进不了协议；`print` 在命名空间里就是 `log`。
 - **会话**：POSIX 用 `start_new_session=True`，Windows 用 `CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`，终端上的 Ctrl-C 不会直接打到它。
 - **只用标准库**：`-S` 之后 site-packages 不在 `sys.path`，脚本进程里没有宿主的任何代码可以借道。
+- **冻结构建（PyInstaller）**：冻结的 agent 没有解释器可以用来跑 `child.py`，它的 `sys.executable` 是整个 agent。构建时把 `child.py` 单独冻结成一个只含标准库的 onedir 程序（`pi-sandbox-child`），放在 `sandbox/frozen-child/`（`frozen_child_executable()`），宿主用同样的选项（`--memory …`）启动它。要点：一，它必须是**单进程**：onefile 构建在 Windows 上是两个进程（引导程序加真正的解释器），Job 的 `ActiveProcessLimit=1` 会拒绝，所以这个程序用 onedir；二，PyInstaller 的启动程序已经给出 `isolated`、`no_site`、`dont_write_bytecode`，`-X utf8` 在构建时写进程序（测试 `test_the_interpreter_starts_isolated` 在冻结程序上照样通过）；三，它只含标准库，所以 `-S` 的效果（没有宿主代码可借道）保留；四，启动程序会在子进程环境里放 `LD_LIBRARY_PATH` 与 `_PYI_*`（库的位置，不是宿主的值），测试在冻结模式下允许这几个名字；五，onefile 的主程序解包时可能丢掉执行位，宿主在启动前补上。找不到这个程序时按 `SandboxUnavailable` 报，什么都不跑。各层（§5）不变。
 
 ### 3.2 一次运行的顺序
 
@@ -268,6 +269,7 @@ macOS 没有测过（CI 只有 Linux，开发机是 Windows 与 WSL）。
 | `tests/test_sandbox_isolation.py` | 进程、环境、cwd、打印不进协议、解释器标志；钩子拒绝的常规路径；钩子的策略逐条列出（被拒的事件族与被拒的导入各一例，因为有的族身后另有一道墙，掉出名单也不会被常规路径察觉）；钩子关掉后内核层仍然成立（POSIX 的 rlimit 数值与软硬同值、`NO_NEW_PRIVS`、不能起进程 / 线程；Windows 的低完整性、不能读宿主内存、Job 本身的 `KILL_ON_JOB_CLOSE` / `terminate` / 进程数）；低完整性只在系统确实接受时才记为一层；CPU、内存、墙钟；脚本空转时宿主的事件循环照常走 |
 | `tests/test_sandbox_protocol.py` | 值过边界；脚本异常的消息、类型、行号；伪造 / 超长 / 嵌套过深 / 中途断掉的消息；洪泛上限与背压；取消的传播；预算视图（恰在总额处算用尽、剩余不为负）；`parallel()` 里有 thunk 起不来时不留已经起的任务；宿主被杀后不留进程；起不来的各种情形；`WorkflowRuntime` 的衔接（选项检查、cwd / 参数 / 预算送到脚本、phase 随调用且只列一次、meta） |
 | `tests/test_subagent_cwd.py` | `cwd` 约束的规则表、与 journal 的兼容、执行器自检 |
+| `tests/test_sandbox_frozen.py`、`tests/conftest.py` | 冻结模式下命令的选择；POSIX 上用替身程序走一次完整运行；`PI_SANDBOX_FROZEN_CHILD=<程序>` 让本目录所有沙盒测试改用真正冻结出来的程序（构建工作流在每个平台上这样跑一遍，被替换解释器或 `child.py` 的三个测试带标记 `interpreter_child`，在这种模式下跳过） |
 | `packages/pi-agent-cli/tests/test_acp_agent.py` | 经真实 ACP agent：脚本不能把子 agent 派到工作区之外 |
 
 先红后绿；另外对沙盒的宿主、子进程、`winjob`、运行时衔接，以及 `cwd` 约束，各做了手工变异检查，数字见审计追踪文档第六节。

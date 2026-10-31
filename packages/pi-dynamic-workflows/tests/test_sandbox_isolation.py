@@ -92,7 +92,12 @@ class TestTheScriptRunsElsewhere:
         assert "hunter2" not in repr(out.result)
         assert "sk-not-for-scripts" not in repr(out.result)
         # What is left is what the interpreter itself needs (Windows) or sets (the C locale).
-        assert set(out.result) <= {"SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "LC_CTYPE"}
+        # A frozen script process also has what its own start-up program sets for its libraries.
+        allowed = {"SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "LC_CTYPE"}
+        if os.environ.get("PI_SANDBOX_FROZEN_CHILD"):
+            allowed |= {name for name in out.result if name.startswith("_PYI_")}
+            allowed |= {"LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH", "DYLD_FRAMEWORK_PATH"}
+        assert set(out.result) <= allowed
 
     async def test_it_works_in_an_empty_scratch_directory_that_is_removed_afterwards(
         self, tmp_path: Path

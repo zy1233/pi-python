@@ -30,6 +30,11 @@ from typing import Any, Protocol
 logger = logging.getLogger(__name__)
 
 CHILD_SCRIPT = Path(__file__).with_name("child.py")
+# A frozen build has no interpreter to start ``child.py`` with. It carries the script's process
+# as a program of its own (``child.py`` frozen alone, so that it holds the standard library and
+# nothing else), in this folder next to this module.
+FROZEN_CHILD_DIR = "frozen-child"
+FROZEN_CHILD_NAME = "pi-sandbox-child"
 PROTOCOL = 1
 _STDERR_TAIL = 2048
 # The same cut as ``child.py``'s: the script process cuts phase titles before it sends them.
@@ -132,6 +137,35 @@ def _interpreter() -> str:
     return getattr(sys, "_base_executable", None) or sys.executable
 
 
+def frozen_child_executable() -> Path:
+    """Where a frozen build keeps the script process (the file may not exist: a broken build)."""
+    name = FROZEN_CHILD_NAME + (".exe" if os.name == "nt" else "")
+    return Path(__file__).with_name(FROZEN_CHILD_DIR) / name
+
+
+def _is_frozen() -> bool:
+    return bool(getattr(sys, "frozen", False))
+
+
+def _child_command() -> list[str]:
+    """The program, and the arguments before ``--memory``, that start a script process."""
+    if not _is_frozen():
+        return [_interpreter(), "-I", "-S", "-B", "-X", "utf8", str(CHILD_SCRIPT)]
+    # ``sys.executable`` is the whole agent here: it cannot be asked to run ``child.py``, and
+    # starting it again would load everything the script must not have. The frozen script
+    # process is one process on every platform (a one-file build is two, which the Windows job
+    # would refuse), and it was frozen with the isolation flags above (see ``packaging/``).
+    program = frozen_child_executable()
+    if not program.is_file():
+        raise SandboxUnavailable(
+            f"this build does not contain the workflow script process ({program})"
+        )
+    if os.name != "nt" and not os.access(program, os.X_OK):
+        with contextlib.suppress(OSError):  # the archive of a one-file build may drop the bit
+            program.chmod(program.stat().st_mode | 0o111)
+    return [str(program)]
+
+
 class _Child:
     def __init__(self, limits: SandboxLimits, *, audit_hook: bool) -> None:
         self.limits = limits
@@ -147,15 +181,12 @@ class _Child:
 
     async def start(self) -> None:
         limits = self.limits
+        # -I: no PYTHON* variables, no user site, no cwd on sys.path. -S: nothing installed is
+        # importable. -B: no bytecode written. -X utf8: text is UTF-8.
+        command = _child_command()
         self._tmpdir = tempfile.mkdtemp(prefix="pi-workflow-")
         argv = [
-            _interpreter(),
-            "-I",  # isolated: no PYTHON* variables, no user site, no cwd on sys.path
-            "-S",  # no site: nothing installed is importable
-            "-B",  # write no bytecode
-            "-X",
-            "utf8",
-            str(CHILD_SCRIPT),
+            *command,
             "--memory",
             str(limits.memory_bytes),
             "--cpu",

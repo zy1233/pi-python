@@ -28,6 +28,8 @@ from typing import Literal
 from acp import RequestError
 from acp.schema import AuthMethodAgent, ClientCapabilities, TerminalAuthMethod
 
+from pi_agent_core.frozen import is_frozen
+
 # The id of the terminal login, and the arguments that make the agent command run it.
 SETUP_METHOD_ID = "pi-setup"
 SETUP_ARGS = ("--setup",)
@@ -48,6 +50,17 @@ def terminal_auth_form(capabilities: ClientCapabilities | None) -> TerminalAuthF
     return None
 
 
+def _legacy_command() -> tuple[str, list[str]]:
+    """The command that runs the login without the client's help: a program and its arguments.
+
+    A frozen build is one program: ``sys.executable`` is the agent itself and there is no
+    ``-m``. Anywhere else the interpreter runs the module.
+    """
+    if is_frozen():
+        return sys.executable, [*SETUP_ARGS]
+    return sys.executable, ["-m", "pi_agent_cli", *SETUP_ARGS]
+
+
 def setup_auth_method(
     capabilities: ClientCapabilities | None, home: Path
 ) -> TerminalAuthMethod | AuthMethodAgent | None:
@@ -66,6 +79,7 @@ def setup_auth_method(
         # An older client cannot add arguments to its own command for the agent, so the whole
         # command is given, and the home folder with it: the terminal does not have the
         # environment that the agent was started with.
+        command, command_args = _legacy_command()
         return AuthMethodAgent(
             id=SETUP_METHOD_ID,
             name=SETUP_METHOD_NAME,
@@ -73,8 +87,8 @@ def setup_auth_method(
             field_meta={
                 "terminal-auth": {
                     "label": SETUP_METHOD_NAME,
-                    "command": sys.executable,
-                    "args": ["-m", "pi_agent_cli", *SETUP_ARGS],
+                    "command": command,
+                    "args": command_args,
                     "env": {"PI_HOME": str(home)},
                 }
             },

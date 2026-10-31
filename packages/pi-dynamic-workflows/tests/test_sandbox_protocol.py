@@ -601,6 +601,7 @@ class TestALifeCycle:
                 '_imp("os")._exit(1)'
             )
 
+    @pytest.mark.interpreter_child
     async def test_a_process_that_cannot_be_started_is_unavailable(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
@@ -628,6 +629,7 @@ class TestALifeCycle:
         with pytest.raises(SandboxUnavailable, match="cannot start subprocesses"):
             await run("pass")
 
+    @pytest.mark.interpreter_child
     async def test_a_process_that_never_says_ready_is_unavailable_and_is_killed(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
@@ -641,6 +643,7 @@ class TestALifeCycle:
 
         assert time.monotonic() - started < 20
 
+    @pytest.mark.interpreter_child
     async def test_a_process_that_speaks_another_protocol_is_unavailable(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
