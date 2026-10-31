@@ -87,7 +87,7 @@ Each build job runs, on its own platform:
 2. `smoke.py --frozen`: a fake OpenAI-format server on `127.0.0.1`, the agent with
    `provider = "openai"`, one ACP turn. The model asks for the `workflow` tool (a script that
    calls `agent()` once: the frozen script process and a sub-agent run), and on Linux for `bash`
-   (`git --version`, and `LD_LIBRARY_PATH` must be empty). Then it starts a second agent with
+   (`git --version`, and `LD_LIBRARY_PATH` must be the value the agent had when it started). Then it starts a second agent with
    `provider = "anthropic"` and checks the advice text. It opens no connection to a non-local
    address.
 3. The ACP contract tests (`test_acp_stdio_contract.py`) against the program

@@ -217,8 +217,12 @@ def main() -> int:
     if sys.platform.startswith("linux"):
         if "git version" not in said:
             failures.append("the bash tool did not run git")
-        if "ld=[]" not in said and "ld=[" in said:
-            failures.append("a tool started by the agent inherits LD_LIBRARY_PATH")
+        expected = f"ld=[{os.environ.get('LD_LIBRARY_PATH', '')}]"
+        if expected not in said:
+            failures.append(
+                f"a tool started by the agent does not see the LD_LIBRARY_PATH that the agent "
+                f"was started with (expected {expected})"
+            )
     if frozen:
         with tempfile.TemporaryDirectory(prefix="agent-smoke-") as tmp:
             other, _ = asyncio.run(play(command, Path(tmp), port, provider="anthropic"))
