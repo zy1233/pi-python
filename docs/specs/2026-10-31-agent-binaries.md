@@ -170,4 +170,23 @@ Notes:
 
 ## 6. Trial results
 
-See the pull request of the workflow (section "CI trial").
+Trial run on the pull request branch (2026-10-31, run "Agent binaries" 41176423902). All steps
+passed on all five targets: build, smoke test, 13 ACP contract tests against the program, and the
+sandbox tests against the frozen script process. The `publish` job did not run: it runs only for a
+tag, so the upload path is untested until the first real release.
+
+| Target | Runner | Program | Archive | Smoke + contract + sandbox |
+|--------|--------|---------|---------|----------------------------|
+| linux-x86_64 | `ubuntu-22.04` | 76.7 MB | 76.0 MB | pass (154 passed, 10 skipped) |
+| linux-aarch64 | `ubuntu-22.04-arm` | 74.2 MB | 73.5 MB | pass (154 passed, 10 skipped) |
+| darwin-aarch64 | `macos-15` | 41.1 MB | 40.6 MB | pass (149 passed, 15 skipped) |
+| darwin-x86_64 | `macos-15-intel` | 40.9 MB | 40.5 MB | pass (149 passed, 15 skipped) |
+| windows-x86_64 | `windows-2022` | 42.6 MB | 42.1 MB | pass (152 passed, 12 skipped) |
+
+The non-frozen sandbox tests also pass on `windows-2022`, `macos-15` and `macos-15-intel`.
+On macOS the sandbox has no memory limit and no process limit (measured; sandbox design,
+section 5). Those two tests are skipped there.
+
+Not tested by a machine: Gatekeeper and quarantine for the unsigned macOS program, SmartScreen
+and anti-virus for the unsigned Windows program, and a real download and start from Zed or
+JetBrains.
