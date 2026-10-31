@@ -12,7 +12,7 @@
 
 ## 目录
 
-- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27)
+- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28)
   - [10.1 范围、方法与规模](#101-范围方法与规模)
   - [10.2 `/model` 恢复（ADR3 r3）](#102-model-恢复adr3-r3)
   - [10.3 验证（r3 的实测）](#103-验证r3-的实测)
@@ -43,6 +43,7 @@
   - [10.28 r25 追加：`pi-sandbox` 进 CI](#1028-r25-追加pi-sandbox-进-ci)
   - [10.29 r26 追加：v0.7.0 之前的合入与 v0.7.0 的发布](#1029-r26-追加v070-之前的合入与-v070-的发布)
   - [10.30 r27 追加：旗标与设置页的测量与修、选择器的截止、一批清理](#1030-r27-追加旗标与设置页的测量与修选择器的截止一批清理)
+  - [10.31 r28 追加：用 `gh stack` 合入十个 PR](#1031-r28-追加用-gh-stack-合入十个-pr)
 - [附录 A（摘录）：A.4](#附录-a摘录a4)
   - [A.4 r5 执行结果（对照 r5 时初稿里的「默认决策」；r9 的更新见 A.1）](#a4-r5-执行结果对照-r5-时初稿里的默认决策r9-的更新见-a1)
 - [附录 B：复现方法](#附录-b复现方法)
@@ -69,9 +70,9 @@
   - [F.10 修订记录摘要里的长条目](#f10-修订记录摘要里的长条目)
 - [修订记录](#修订记录)
 
-## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27）
+## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28）
 
-r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）；r14 合入这两个 PR，并做决策 17：会话文件在第一条用户消息时才写（§10.17）；r15 做决策 10 的存储层一项：删 `pi-shell` 里的旧存储层（§10.18）；r16 合入 #25 与 #26，并删 `pi-shell` 里剩下的死代码（§10.19）；r17 检查测试之间的竞争，只改测试与工具（§10.20）；r18 改用 `cargo nextest`，改 `protoc` 的路径与 `release.yml` 的令牌（§10.21）；r19 用 `gh stack` 合入 #27–#31，并设 V0.6 的发布里程碑（§10.22）；r20 定 MCP 的方向（可选扩展包），修空白对话，补发布内容，并合入 #33–#36（§10.23）；r21 做 V0.6 的版本号与发布说明（条件 5），合入 #38 与 #39，并做条件 1–4（§10.24）；r22 打 tag `v0.6.0`、发布、做发布后的核对（§10.25）；r23 把三个 action 升到 Node 24 的版本，处理扩展 API 的审计批 9，并把决策 11、13 记成不做（§10.26）；r24 在内核 6.12 的云 VM 上测了沙箱的 Landlock 层（§10.27）；r25 把 `pi-sandbox` 接进 `TUI CI`（§10.28）；r26 补记 v0.7.0 之前的合入（#45 至 #48、web 的 #50 至 #54、版本号 #55）与 v0.7.0 的发布（§10.29）；r27 量了旗标与设置页并修（#57、#60），去掉选择器的 30 天截止（#61），清了一批死代码（#62、#63；§10.30）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
+r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）；r14 合入这两个 PR，并做决策 17：会话文件在第一条用户消息时才写（§10.17）；r15 做决策 10 的存储层一项：删 `pi-shell` 里的旧存储层（§10.18）；r16 合入 #25 与 #26，并删 `pi-shell` 里剩下的死代码（§10.19）；r17 检查测试之间的竞争，只改测试与工具（§10.20）；r18 改用 `cargo nextest`，改 `protoc` 的路径与 `release.yml` 的令牌（§10.21）；r19 用 `gh stack` 合入 #27–#31，并设 V0.6 的发布里程碑（§10.22）；r20 定 MCP 的方向（可选扩展包），修空白对话，补发布内容，并合入 #33–#36（§10.23）；r21 做 V0.6 的版本号与发布说明（条件 5），合入 #38 与 #39，并做条件 1–4（§10.24）；r22 打 tag `v0.6.0`、发布、做发布后的核对（§10.25）；r23 把三个 action 升到 Node 24 的版本，处理扩展 API 的审计批 9，并把决策 11、13 记成不做（§10.26）；r24 在内核 6.12 的云 VM 上测了沙箱的 Landlock 层（§10.27）；r25 把 `pi-sandbox` 接进 `TUI CI`（§10.28）；r26 补记 v0.7.0 之前的合入（#45 至 #48、web 的 #50 至 #54、版本号 #55）与 v0.7.0 的发布（§10.29）；r27 量了旗标与设置页并修（#57、#60），去掉选择器的 30 天截止（#61），清了一批死代码（#62、#63；§10.30）；r28 用一次 `gh stack` 把这五个 PR 与另外五个（#56、#58、#59、#64、#65）合入 `main`（§10.31）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
 | 提交 | 内容 |
 |---|---|
@@ -2176,6 +2177,61 @@ Runner 有 Landlock（ABI 8），没有 `bwrap`；装上 `bwrap` 也不能用，
 
 **合入的次序与冲突。** #61 叠在 #60 上，先合 #60。`CHANGELOG.md` 在 #60、#61、#62、#63 之间冲突（都在 `[Unreleased]` 下加一节）：全部保留。#62 与 #56、#57、#58、#59 做过测试合并，没有冲突；与 #60、#61 只有 `CHANGELOG.md` 冲突。#62 与 #63 合在一起也只有 `CHANGELOG.md` 冲突。#59 在 `scripts/tui_baseline.toml` 里加 `pi-sandbox` 的 suite（「十一个 suite」），#60 至 #62 改的是同一个文件里别的行，合入时看一眼。#56、#58、#59 与本 PR 都在计划与执行记录的同一处加行，要依次合入、依次改号。这一节写的数字是 #57–#63 各自的树上的；`docs/baselines/tui.md` 没有改，它的数要等这些 PR 合入后在 `main` 上量。
 
+### 10.31 r28 追加：用 `gh stack` 合入十个 PR
+
+这一节记 2026-10-31 的一次合入：用一次 `gh stack merge` 把十个 PR 合入 `main`（UTC 03:17）。`main` 从 `7cb9e23`（v0.7.0 的 tag）到 `032ddbb`。这一轮只改文档：计划里「开着，没有合入」的句子改成已合入；`docs/baselines/tui.md` 的数换成 `main` 上这一次 CI 的数。Python 代码与 `tui/` 没有改。
+
+**用户的话（2026-10-31）。** 「使用gh stack合并这7个PR,另外我云端开了3个PR，你可以一起合并了。」7 个是我开的：[#56](https://github.com/zy1233/pi-python/pull/56)、[#57](https://github.com/zy1233/pi-python/pull/57)、[#60](https://github.com/zy1233/pi-python/pull/60)、[#61](https://github.com/zy1233/pi-python/pull/61)、[#62](https://github.com/zy1233/pi-python/pull/62)、[#63](https://github.com/zy1233/pi-python/pull/63)、[#64](https://github.com/zy1233/pi-python/pull/64)。3 个是用户在云端会话里开的：[#58](https://github.com/zy1233/pi-python/pull/58)、[#59](https://github.com/zy1233/pi-python/pull/59)、[#65](https://github.com/zy1233/pi-python/pull/65)。这句话取代 r27 的「开 PR，不合入」，只对这十个 PR 有效。本轮的文档 PR 仍然只开不合。
+
+**栈的次序。** `gh stack link` 把十个 PR 连成 stack #66。次序从下到上：#58、#59、#56、#57、#60、#61、#62、#63、#64、#65。每个 PR 的 base 是下面那个 PR 的分支。
+- #58 与 #59 在最下面。它们已经一个叠在另一个上（r24、r25），号不动。
+- #56 记 r26，在 #59 之上。它原来记 r24，与 #58 重号，所以改号（见「冲突」）。
+- #57 与 #60 至 #63 照 r27 的次序。#61 本来就叠在 #60 上。
+- #64 记 r27，放在它所记的五个 PR 之后。
+- #65 只改 `pi-pager` 的一个测试（`app::app_view::tests::needs_animation_gates_prompt_history_tick_delivery`），放在最上面。
+
+**重建分支。** `gh stack` 要求每个 PR 的分支含有下面所有 PR 的提交。当时只有三对是叠着的：#59 在 #58 上，#61 在 #60 上，#64 在 #56 上；别的 PR 各自从 `main`（`7cb9e23`）分出来。我重建了八个分支的头（#58 与 #59 不动）：在一个临时工作树里，把各 PR 的提交按栈的次序放到前一个 PR 的头上。先把每个 PR 的 base 改到链上的下一个，再推分支，这样 CI 不会对着旧的 base 跑。推送用 `git push --atomic --force-with-lease=<分支>:<旧头的完整 SHA>`：远端的头不是我记下的那个，推送就失败。#65 的分支是用户的云端会话建的，我用同样的办法推了它。
+
+| 位置 | PR | 旧头 | 新头 | 与旧头的差别 |
+|---|---|---|---|---|
+| 1 | #58 | `02e1f69` | 同 | 没有动 |
+| 2 | #59 | `86cc535` | 同 | 没有动 |
+| 3 | #56 | `0baa02f` | `cbaaded` | 改号：r24 → r26，§10.27 → §10.29 |
+| 4 | #57 | `a526a28` | `5152753` | 补丁相同，除了一处：`scripts/tui_pty/settings_probe.py` 的文档字符串指向 §10.30（原来是 §10.27，那是这一轮的记录更早一版的号） |
+| 5 | #60 | `67e1d5c` | `8ed04c7` | 补丁相同（补丁 id 相同） |
+| 6 | #61 | `69d6ef4` | `de053f2` | 补丁相同（补丁 id 相同） |
+| 7 | #62 | `272a52a` | `f3b280e` | 8 个提交，7 个补丁相同；最后一个（`CHANGELOG.md` 与 `docs/baselines/tui-support.md`）改了一处，见「冲突」 |
+| 8 | #63 | `adc3664` | `f457906` | 代码提交的补丁相同；`CHANGELOG.md` 的提交改了一处，见「冲突」 |
+| 9 | #64 | `98660b5` | `675a694` | 文字与改号后的 #56 及 #58、#59 合并；只有轮号、各轮的列表与说明轮号的句子变了（#64 的描述里有「Round numbers」一节） |
+| 10 | #65 | `b414624` | `e354af5` | 补丁相同（补丁 id 相同） |
+
+**冲突。**
+1. 计划与执行记录：#56、#58、#59 与 #64 在两个文件的同一处加行，所以合并有冲突。我逐处解。#58、#59 的 r24、r25 不动；#56 改成 r26 / §10.29；#64 保持 r27 / §10.30，它原来写的「与 #56 重号」换成准确的句子。标题、目录、第 10 节的标题与引言、索引行、「修订记录」里的每一个轮号都核对过。
+2. `CHANGELOG.md`：#60、#61、#62、#63 都在 `[Unreleased]` 下加一节。全部保留，次序按 Keep a Changelog：Changed（#60 的两条）、Removed（#62 与 #63 的条目在同一小节）、Fixed（#61）。
+3. `scripts/tui_baseline.toml`、`tui/Cargo.lock`、`docs/baselines/tui-support.md`：没有冲突。`Cargo.lock` 与 cargo 自己写的相同（`cargo metadata --locked` 通过）。`tui-support.md` 在栈上的树里重新生成：除了含提交号的那一行，与已提交的相同。
+
+**合入前的检查（栈顶的树）。** 本地，在 Windows 与 WSL（Linux）上：`ruff check` 与 `ruff format --check` 通过；`scripts/tests` Windows 251 通过，Linux 257 通过；`tui_baseline.py check`（门禁、`cargo check`、`cargo check --workspace --tests`）0 条告警，依赖图 970、`leader` 239、`x.ai` 282（都在上限）；`tui_notices.py check` 984 / 984；`tui/Cargo.lock` 与 cargo 写的相同。Rust 的测试本地没有跑，只在 CI 里跑。十个 PR 的最终头上，触发的检查都通过。有几次取消的运行：同一个头上的旧运行被 `concurrency` 取消，第二次运行通过。[#58](https://github.com/zy1233/pi-python/pull/58) 的 `TUI CI` 第一次运行失败在 `app::app_view::tests::needs_animation_gates_prompt_history_tick_delivery`（已知的偶发失败，#65 修它）；重跑那一个 job 后通过。
+
+**合入。** `gh stack merge 66 --yes --squash`：一次合入，全部成功或全部不成功。输出是「Merged #58, #59, #56, #57, #60, #61, #62, #63, #64, #65 into main (032ddbb)」。UTC 03:17:44 到 03:17:54，十个 PR 都变成 MERGED；每个 PR 一个 squash 提交，在 `main` 上的次序同栈：`6b82e6c`（#58）、`2131ad2`（#59）、`f746e7c`（#56）、`fb4cc65`（#57）、`cf5de08`（#60）、`bd55dd1`（#61）、`c837402`（#62）、`a624038`（#63）、`25f92bc`（#64）、`032ddbb`（#65）。`main` 的树是 `0cad78ba21b6cac941cce98bc2bfdfc3b2cb9273`，与 #65 的新头 `e354af5` 的树相同（`git rev-parse <提交>^{tree}`）：合入没有丢东西，也没有多出东西。远端的十个 PR 分支由 GitHub 自动删除。`main` 上没有必需的检查，GitHub 只查 PR 是打开的、不是草稿。本地：`main` 快进到 `032ddbb`；删了 7 个已合入的本地分支（它们的旧头在上表里；squash 合入后 `git branch -d` 查不出祖先关系，所以用 `-D`，PR 的状态先在 GitHub 上核对过）。
+
+**合入后 `main` 上的 CI（UTC 03:18 起，`032ddbb`）。** 都通过。
+- [`CI` run 41163765675](https://github.com/zy1233/pi-python/actions/runs/41163765675)：`Ruff` 8 s；`pytest` 在 Python 3.11、3.12、3.13 上分别 3 m 56 s、3 m 21 s、4 m 29 s。
+- [`TUI CI` run 41163765734](https://github.com/zy1233/pi-python/actions/runs/41163765734)：`cargo nextest` 18 m 7 s，`Gates + cargo check` 4 m 14 s；`Release build baseline` 按设计跳过（只在手动触发时跑）。nextest 是 8,558 通过 / 0 失败 / 25 跳过：`pi-shell` 784、`pi-pager` 5,657、`pi-pager-render` 1,092、`pi-pager-minimal` 79、`pi-pager-bin` 31、`pi-acp-lib` 21、`pi-http` 13、`pi-telemetry` 239、`pi-file-utils` 217、`pi-sampling-types` 320、`pi-sandbox` 105。门禁：依赖图 970，告警 0，`--workspace --tests` 0 个错误，残留词 `grok agent` 0 / `leader` 239 / `x.ai` 282（都等于上限）。
+- 这些 suite 的数，除了 `pi-file-utils`，都等于清单里的 `reference_passed`。`pi-file-utils` 是 217，清单写 216：[#47](https://github.com/zy1233/pi-python/pull/47) 在这个 crate 加了一个测试，清单没有跟着改。2026-10-30 的另外两次运行（#62 与 #65 的 PR 运行）也是 217。偏差在 5 % 内，判定不受影响；这一轮没有改清单。
+
+**基线报告。** `docs/baselines/tui.md` 的数原来是 r27 之前的（11 个 suite 合计 8,595 通过，`leader` 243，`x.ai` 297）。这一轮换成 `main` 上这一次 CI 与清单的数：
+- 「当前基线」：标题 r18 → r28。测试的和 8,595 → 8,557（清单的和；少 38：`pi-shell` −54，随 #62 删的死代码走；`pi-pager` +6，#60 加 5 个、#61 加 1 个；`pi-pager-bin` +10，#60），再加这一次 CI 的对账（8,558，`pi-file-utils` 的差别）。门禁的 `leader` 243 → 239、`x.ai` 297 → 282，出处换成这一次 CI。耗时加这一次的数：`cargo nextest` job 18 m 7 s，各 suite 自己用的时间相加约 107 s（r18 时约 130 s）。
+- §2 的残留词一行、§3.2 的表（`pi-shell` 838 → 784，`min_passed` 820 → 766；`pi-pager` 5,651 → 5,657；`pi-pager-bin` 21 → 31，`min_passed` 21 → 31；合计 8,595 → 8,557）、§4 的残留词（243 与 297 → 239 与 282）与「保留清单」的最后一句（D.8 已做）。
+- 没有改清单（`scripts/tui_baseline.toml`）：它的数早已是这些（#60、#61、#62 改过）。release 的数（体积、构建耗时、`--version` 延迟）仍是 r21、r22 的，没有重量。
+
+**留下的与没验证的。**
+1. 这一轮没有发布。下一个版本的号与日期没有定；`CHANGELOG.md` 的 `[Unreleased]` 有 r27 的条目。
+2. `release-dist` 的构建没有跑：`Release build baseline` 只手动触发。所以 `zypi` 在这些改动之后的体积与启动耗时没有量。
+3. #60 的 PTY 回归只对调试构建跑过（§10.30）。
+4. Rust 的改动只在 Linux 上测：这一轮本地（WSL2）只对栈顶的树跑了门禁与构建检查；测试在 CI 的 `ubuntu-24.04` runner 上（r27 时各 PR 的测试也在本地跑过，§10.30）；macOS 与 Windows 上没有。
+5. #58、#59、#65 是云端会话写的。这一轮没有改它们的代码，也没有在本地重跑它们的测试。CI 的 runner 上它们通过：`pi-sandbox` 105 通过，CI 里设了 `SANDBOX_E2E_REQUIRE_ENFORCEMENT=1`，所以 Landlock 的用例在 runner 上真的执行了（§10.28）。
+6. `docs/baselines/tui.md` 的耗时是一次运行的数，没有重复。
+
 ## 附录 A（摘录）：A.4
 
 附录 A 的 A.1–A.3（能力矩阵、ACP 版本配对、逐方法）是活的参考，留在[计划](../PLAN-RUST-AGENT-RUNTIME-REMOVAL.md)里。A.4 记 r5 的执行结果，搬到这里。
@@ -3196,3 +3252,4 @@ r12 续 8（2026-10-13）：PR [#18](https://github.com/zy1233/pi-python/pull/18
 - r25：`pi-sandbox` 进 `scripts/tui_baseline.toml` 与 `tui-ci.yml`（2026-10-30；分支 `ci/tui-sandbox-gate`，叠在 `test/tui-landlock-verification` 上，没有改产品代码）。先用一个一次性的探针 job 查 `ubuntu-24.04` runner：有 Landlock（内核 7.0，ABI 8），没有 `bwrap`，AppArmor 挡着用户命名空间。workflow 装 `bubblewrap`、把 `kernel.apparmor_restrict_unprivileged_userns` 设为 0、设 `SANDBOX_E2E_REQUIRE_ENFORCEMENT=1`；有要求而满足不了的一次运行失败了（7 个用例）。见 [§10.28](#1028-r25-追加pi-sandbox-进-ci)；PR [#59](https://github.com/zy1233/pi-python/pull/59)。
 - r26：v0.7.0 之前的合入与 v0.7.0 的发布（2026-10-30；分支 `docs/plan-r24`，只改文档）。补记 r23 之后的事：PR [#47](https://github.com/zy1233/pi-python/pull/47)（队列清扫先读完所有年龄再删）、[#45](https://github.com/zy1233/pi-python/pull/45)（控制台脚本 `pi-agent-cli-lc` 与 Zed 的说明）、[#46](https://github.com/zy1233/pi-python/pull/46)（`--setup` 与终端登录）、[#48](https://github.com/zy1233/pi-python/pull/48)（只改 Python agent 的 PR 只跑 `tui-e2e.yml`；缓存键不再随 runner 映像变）；web 的 #50 至 #54 与版本号 #55 是用户在另一个会话里做的，只记从仓库与 Actions 查到的事实。tag `v0.7.0` 在 `7cb9e23`；`Release` 的六个 job 成功；PyPI 上七个包是预期的版本；发布页有 16 个资产。`download-artifact@v7` 这次测到了（成功）。留下的：`--setup` 的终端登录没有在 Zed 里运行过；缓存键在下一次映像更新之后是否还不变，没有验证；macOS 的二进制没人运行过。计划：头部状态行、「当前状态」、「下一步」、「还没有验证的」（删 `download-artifact@v7` 一条）、§10 索引、「修订记录（摘要）」与链接定义更新到 r26。没有跑测试。见 [§10.29](#1029-r26-追加v070-之前的合入与-v070-的发布)。
 - r27：旗标与设置页的测量与修、选择器的截止、一批清理（2026-10-30；分支 `docs/plan-record-settings-and-cleanup`，叠在 `docs/plan-r24` 上，只改文档）。用户的答复：决策 14 与 8 照倾向改（藏掉无效的设置，无效的旗标报错并说明，Python 不动；开 PR，不合入）；清理批次也可以做。做成五个 PR，都开着、没有合入：[#57](https://github.com/zy1233/pi-python/pull/57)（两个探针，对 v0.7.0 的二进制测：63 个旗标用例里，不兑现的旗标没有一个改变 LLM 的调用；设置页 37 行里 8 项没有效果）、[#60](https://github.com/zy1233/pi-python/pull/60)（设置页 37 行 → 29 行；21 个旗标在交互模式下退出码 2 并说明原因）、[#61](https://github.com/zy1233/pi-python/pull/61)（决策 9：去掉选择器的 30 天截止）、[#62](https://github.com/zy1233/pi-python/pull/62)（D.8 的 16 个模块与决策 10 的 `mcp.rs`、`recent_dirs.rs`，连同只有它们调用的代码：`tui/` 下 −9,067 行；`pi-shell` 838 → 784）、[#63](https://github.com/zy1233/pi-python/pull/63)（D.5：`pi-test-support` 少 7 个模块与 11 个依赖，−5,646 行）。计划：头部状态行、「当前状态」、「待决策」的清单与 8、9、10、14 四项、§7 的 D.5 与 D.8、「下一步」、「还没有验证的」的两条、§10 索引、「修订记录（摘要）」与链接定义。轮号：#58 与 #59 记成 r24 与 r25；#56 原来也记成 r24，合入前改成 r26。没有改 `docs/baselines/tui.md`（它的数要等 PR 合入后在 `main` 上量）。见 [§10.30](#1030-r27-追加旗标与设置页的测量与修选择器的截止一批清理)。
+- r28：用 `gh stack` 合入十个 PR（2026-10-31；分支 `docs/plan-r28-stack-merge`，只改文档）。用户的话：「使用gh stack合并这7个PR,另外我云端开了3个PR，你可以一起合并了。」stack #66，次序从下到上：[#58](https://github.com/zy1233/pi-python/pull/58)、[#59](https://github.com/zy1233/pi-python/pull/59)、[#56](https://github.com/zy1233/pi-python/pull/56)、[#57](https://github.com/zy1233/pi-python/pull/57)、[#60](https://github.com/zy1233/pi-python/pull/60)、[#61](https://github.com/zy1233/pi-python/pull/61)、[#62](https://github.com/zy1233/pi-python/pull/62)、[#63](https://github.com/zy1233/pi-python/pull/63)、[#64](https://github.com/zy1233/pi-python/pull/64)、[#65](https://github.com/zy1233/pi-python/pull/65)；一次 `gh stack merge 66 --yes --squash`，UTC 03:17 全部合入（`main`：`7cb9e23` → `032ddbb`；`main` 的树与 #65 新头的树相同）。八个分支的头重建过（#58、#59 不动）；#56 改记 r26 / §10.29，#64 是 r27 / §10.30；`CHANGELOG.md` 的 `[Unreleased]` 按 Changed、Removed、Fixed 排。`main` 上的 `CI` 与 `TUI CI` 都通过：8,558 通过 / 0 失败 / 25 跳过，门禁在上限（依赖图 970，0 条告警，`leader` 239，`x.ai` 282）。计划：头部状态行、「当前状态」、阶段 D 的状态、§7 的 D.5 与 D.8（打勾）、「下一步」「还没有验证的」「待决策」里「没有合入」的句子、§10 索引、「修订记录（摘要）」与链接定义。`docs/baselines/tui.md` 的数按 `main` 上的 CI 重写。删了 7 个已合入的本地分支。见 [§10.31](#1031-r28-追加用-gh-stack-合入十个-pr)。
