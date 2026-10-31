@@ -126,23 +126,45 @@ fn picker_drops_conversation_without_updated_at_in_standard_acp_mode() {
         "legacy conversation rows without updatedAt are not special-cased"
     );
 }
+/// The picker has no age limit (plan decision 9). It used to drop a session whose `updatedAt` was
+/// more than 30 days old, so a Python session that nobody touched for a month left `/resume`
+/// (`--resume <id>` still found it). The agent pages `session/list`; the picker shows every row.
 #[test]
-fn picker_drops_old_conversation_past_cutoff_in_standard_acp_mode() {
+fn picker_keeps_a_session_older_than_30_days() {
     let payload = serde_json::json!({
             "sessions": [{
-                "sessionId": "conv_old",
-                "cwd": "",
+                "sessionId": "s_old",
+                "cwd": "/work",
                 "summary": "Ancient chat",
-                "source": "conversation",
-                "updatedAt": "2020-01-01T00:00:00Z",
-                "_meta": { "pi/session": { "kind": "chat" } }
+                "source": "local",
+                "updatedAt": "2020-01-01T00:00:00Z"
             }]
         });
     let entries = parse_session_picker_entries(&payload);
-    assert!(
-        entries.is_empty(),
-        "legacy conversation cutoff is not applied without vendor session kind"
+    assert_eq!(entries.len(), 1, "an old session stays in the picker");
+    assert_eq!(entries[0].id, "s_old");
+    assert_eq!(entries[0].summary, "Ancient chat");
+    assert_eq!(
+        entries[0].updated_at,
+        "2020-01-01T00:00:00Z".parse::<chrono::DateTime<chrono::Utc>>().unwrap()
     );
+}
+/// The same through a standard ACP `session/list` page: an old session and a new one are both
+/// rows, and the order of the agent is kept.
+#[test]
+fn acp_session_list_page_keeps_old_and_new_sessions() {
+    let recent = chrono::Utc::now().to_rfc3339();
+    let page: acp::ListSessionsResponse = serde_json::from_value(serde_json::json!({
+        "sessions": [
+            { "sessionId": "s_new", "cwd": "/work", "title": "New", "updatedAt": recent },
+            { "sessionId": "s_old", "cwd": "/work", "title": "Old", "updatedAt": "2020-01-01T00:00:00Z" },
+            { "sessionId": "s_older", "cwd": "/work", "title": "Older", "updatedAt": "2019-06-01T12:00:00Z" },
+        ]
+    }))
+    .expect("list response");
+    let entries = session_picker_entries_from_acp(&page);
+    let ids: Vec<&str> = entries.iter().map(|e| e.id.as_str()).collect();
+    assert_eq!(ids, ["s_new", "s_old", "s_older"]);
 }
 #[test]
 fn picker_drops_local_with_missing_updated_at() {

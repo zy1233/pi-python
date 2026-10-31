@@ -165,8 +165,10 @@ targets = [
 # that runs a test in a process of its own (plan section 10.20): 5,651 (one local run on Linux;
 # 8,490 over the ten suites, the other nine unchanged). Then +5 for hiding the eight settings that
 # the Python agent does not back (3 in `app::agent_settings`, 2 in `settings_modal`): 5,656 (one
-# local run on Linux; 8,505 over the ten suites with the 10 new ones of `pi-pager-bin`).
-reference_passed = 5656
+# local run on Linux; 8,505 over the ten suites with the 10 new ones of `pi-pager-bin`). Then +1
+# net for the resume picker without an age limit (plan decision 9: one test gone, two new):
+# 5,657 (one local run on Linux; 8,506 over the ten suites).
+reference_passed = 5657
 min_passed = 5300
 
 # Lib tests only; they were outside the manifest until r8 (plan section 10.10: 1,092 passed,
