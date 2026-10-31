@@ -273,6 +273,10 @@ pub struct PagerLocalSnapshot {
     /// Mirrors `AppView::default_mode_gate` at snapshot time. When false the
     /// permission-mode picker hides the "Default" choice.
     pub default_mode_gate: bool,
+    /// Mirrors `app::agent_settings::HIDE_UNBACKED` at snapshot time. When true the settings
+    /// that the Python agent does not back (`agent_settings::UNBACKED`) are not offered. `Default`
+    /// is `false`, so a fixture built from `default()` still sees every row.
+    pub hide_unbacked_settings: bool,
     /// `[toolset.ask_user_question].timeout_enabled` mirror (effective TOML
     /// merge, like `show_tips`). `None` = unset in TOML → default `true`.
     pub ask_user_question_timeout_enabled: Option<bool>,
@@ -307,6 +311,7 @@ impl Default for PagerLocalSnapshot {
             auto_mode_gate: false,
             plan_mode_gate: false,
             default_mode_gate: false,
+            hide_unbacked_settings: false,
             ask_user_question_timeout_enabled: None,
             voice_stt_language: pi_voice::STT_LANGUAGE_DEFAULT.to_string(),
             // Matches `resolve_scheduler_background_loops`'s default.

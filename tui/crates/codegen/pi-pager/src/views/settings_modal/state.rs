@@ -1070,12 +1070,17 @@ pub(super) fn group_children(state: &SettingsModalState, key: SettingKey) -> Vec
     }
 }
 
-/// Whether the agent cannot back this setting and the modal must not offer it: with no Plan
-/// (`plan_mode_gate` off) both the `plan_mode` setting and the plan-nudge hint toggle
-/// `contextual_hints.plan_mode` are hidden, as a toggle that changes nothing is a lie. Pure (the
-/// gate is read from the snapshot) so it is unit-testable.
+/// Whether the agent cannot back this setting and the modal must not offer it, as a toggle that
+/// changes nothing is a lie:
+///
+/// - with no Plan (`plan_mode_gate` off) both the `plan_mode` setting and the plan-nudge hint toggle
+///   `contextual_hints.plan_mode` are hidden;
+/// - with `hide_unbacked_settings` on, the settings in `app::agent_settings::UNBACKED` are hidden.
+///
+/// Pure (the gates are read from the snapshot) so it is unit-testable.
 pub(super) fn setting_gated_off_by_agent(key: SettingKey, snapshot: &PagerLocalSnapshot) -> bool {
-    !snapshot.plan_mode_gate && matches!(key, "plan_mode" | "contextual_hints.plan_mode")
+    (!snapshot.plan_mode_gate && matches!(key, "plan_mode" | "contextual_hints.plan_mode"))
+        || (snapshot.hide_unbacked_settings && crate::app::agent_settings::UNBACKED.contains(&key))
 }
 
 /// Whether `(key, canonical)` is gated off and must not be offered as a choice:

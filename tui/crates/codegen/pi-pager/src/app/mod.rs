@@ -12,6 +12,7 @@
 pub mod actions;
 pub mod agent;
 pub(crate) mod agent_modes;
+pub(crate) mod agent_settings;
 pub mod agent_view;
 pub mod app_view;
 pub(crate) mod cancel_latency;
