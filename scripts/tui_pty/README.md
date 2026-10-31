@@ -15,9 +15,19 @@ a built `zypi`, so they are not part of `pytest` or CI.
 | `net_audit.py` | Whether zypi talks to the network (plan C.1). It plays one turn and, every few milliseconds, lists the sockets of zypi and of each process below it (`/proc/<pid>/fd` joined with `/proc/<pid>/net/*`). zypi must have no connection to a non-loopback address, and it must listen on none. `--mock` uses the mock LLM (the agent must be silent too). `--model-from FILE` plays one real turn with the `[model]` table of that `agent.toml`: the agent must then hold an established connection to a non-loopback address (the positive control, which shows that the sampler can see traffic), and the output names no host, address or key. `--no-network` (with `--mock`) runs everything in an empty network namespace (`bwrap --unshare-net`): the turn must still end |
 | `status_line_probe.py` | Whether the status row is drawn from the right facts (`[ui.status_line]`, `type = "command"` and `"builtin"`). The Python agent sends no status, so with the plain agent the row is built from what zypi knows (directory, session id, model): it must be drawn with the model of the session, and a command script must run with a payload that names that model and session and has no number zypi cannot know (a context percentage, a cost). With `status_proxy_agent.py`, which adds a `session_status` message of its own, the row must show the model that message names: this second run shows that a status from the agent is read first. Execution log section 10.14 has the first result (the row stayed empty); section 10.15 has the change |
 
+| `flags_probe.py` | Which command-line flags of the interactive `zypi` change anything for the Python agent (plan 1.P6, decision 8). It runs zypi once without the flag and once with it, in a throw-away home, and prints what is different: the ACP lines zypi sent, the agent's arguments and variables, the model, the tools and the system prompt of the LLM call, the label on the prompt box, the files that appeared, or that zypi refused to start (exit status and first line). `NO CHANGE` means that the flag does not reach the agent; a flag that works inside zypi (`--no-alt-screen`) or writes a file (`--debug-file`) shows in `label` and `files`. About 65 flags, about 5 minutes. Judges nothing; `-p` has its own contract (`print_mode.rs`) and is not run |
+| `settings_probe.py` | The same question for the settings page (plan decision 14): the rows that the page offers; the permission question with `remember_tool_approvals` unset, on and off; the row that the cursor is on for each value of `default_selected_permission`; whether `[models].default` is the model of the next start; whether a config file that sets the other settings meant for the old agent changes anything on the wire. Judges nothing |
+
 `pty_term.py` is the driver (`Term`, plus `/proc` helpers); `zypi_env.py` finds the binary and builds
 a throw-away home. `status_proxy_agent.py` is a stand-in agent: the Python agent plus a status message of its own.
 `status_line_probe.py` starts it through `PI_AGENT_COMMAND`.
+
+`wire_probe.py` is what `flags_probe.py` and `settings_probe.py` share: `execute` runs one zypi, types a
+prompt, answers the permission question and returns what the two ends saw. zypi gives the Python agent
+no argument and no variable but `PI_HOME`, so a flag or a setting that does not show up in the ACP lines
+cannot change what the agent does. `wire_log_agent.py` is the stand-in agent that copies the ACP lines
+both ways into a log; it starts `context_spy_agent.py`, which is the Python agent with each LLM call recorded
+(model, reasoning option, tools, system prompt) and a scripted tool call (`PI_TEST_TOOL_CALL`).
 
 ## Running
 
@@ -33,6 +43,8 @@ python scripts/tui_pty/print_exit.py  --zypi tui/target/debug/zypi --python .ven
 python scripts/tui_pty/resume_matrix.py --zypi tui/target/debug/zypi --python .venv/bin/python
 python scripts/tui_pty/mode_probe.py --zypi tui/target/debug/zypi --python .venv/bin/python
 python scripts/tui_pty/status_line_probe.py --zypi tui/target/debug/zypi --python .venv/bin/python
+python scripts/tui_pty/flags_probe.py --zypi tui/target/debug/zypi --python .venv/bin/python   # --only TEXT, --list, --raw DIR
+python scripts/tui_pty/settings_probe.py --zypi tui/target/debug/zypi --python .venv/bin/python   # --list: only the rows
 python scripts/tui_pty/net_audit.py --mock --zypi tui/target/debug/zypi --python .venv/bin/python
 python scripts/tui_pty/net_audit.py --mock --no-network --zypi tui/target/debug/zypi --python .venv/bin/python
 # One real turn. The key comes from the environment, never from the command line:
