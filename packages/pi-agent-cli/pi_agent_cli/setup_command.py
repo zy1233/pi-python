@@ -42,6 +42,7 @@ from pi_agent_cli.config import (
     pi_home,
     read_local_env,
 )
+from pi_agent_core.frozen import is_frozen
 
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
@@ -246,19 +247,33 @@ def _ask_until(ask: Callable[[], str], check: Callable[[str], str | None], io: S
         io.say(problem)
 
 
+def _offered_presets() -> tuple[Preset, ...]:
+    """The providers to choose from. A frozen build can use only the ones that it contains."""
+    if not is_frozen():
+        return PRESETS
+    return tuple(preset for preset in PRESETS if _installed(preset.module))
+
+
 def _find_preset(answer: str) -> Preset | None:
-    if answer.isdigit() and 1 <= int(answer) <= len(PRESETS):
-        return PRESETS[int(answer) - 1]
-    return next((p for p in PRESETS if p.provider == answer.casefold()), None)
+    presets = _offered_presets()
+    if answer.isdigit() and 1 <= int(answer) <= len(presets):
+        return presets[int(answer) - 1]
+    return next((p for p in presets if p.provider == answer.casefold()), None)
 
 
 def _ask_preset(io: SetupIO) -> Preset:
+    presets = _offered_presets()
     io.say("Which provider do you use?")
-    for number, preset in enumerate(PRESETS, start=1):
+    for number, preset in enumerate(presets, start=1):
         io.say(f"  {number}. {preset.label}")
+    if is_frozen():
+        io.say(
+            "(This build has only the provider that is listed. Most gateways and many vendors "
+            "serve its format: give their address when it asks for one.)"
+        )
 
     def check(answer: str) -> str | None:
-        return None if _find_preset(answer) else f"Type a number from 1 to {len(PRESETS)}."
+        return None if _find_preset(answer) else f"Type a number from 1 to {len(presets)}."
 
     answer = _ask_until(lambda: io.ask("Number: "), check, io)
     found = _find_preset(answer)
@@ -425,7 +440,12 @@ def _dialog(home: Path, io: SetupIO, environ: Mapping[str, str]) -> int:
     io.say("Start a new session in your agent client.")
     if replaced_key:
         io.say("An agent that is running keeps the old key until it is started again.")
-    if preset is not None and not _installed(preset.module):
+    if preset is not None and not _installed(preset.module) and is_frozen():
+        io.say()
+        io.say(f"Note: this build does not contain the provider {preset.provider}, so the model")
+        io.say('  above cannot run. Set provider = "openai" and base_url in agent.toml, or run')
+        io.say("  the Python package (pi-agent-cli-lc) with the extra of that provider.")
+    elif preset is not None and not _installed(preset.module):
         io.say()
         io.say(f"Note: the package for {preset.provider} is not installed in this environment.")
         io.say(

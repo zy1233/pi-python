@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 from pi_agent_core.adapters.deepseek_replay import replaying_chat_deepseek
 from pi_agent_core.adapters.langchain_convert import agent_tool_to_lc_schema, convert_to_langchain
 from pi_agent_core.event_stream import AssistantMessageEventStream
+from pi_agent_core.frozen import is_frozen
 from pi_agent_core.messages import (
     AssistantMessage,
     ThinkingContent,
@@ -403,6 +404,37 @@ def _extract_text_delta(content: Any) -> str:
     return ""
 
 
+def _provider_missing(provider: str, package: str | None) -> ImportError:
+    """The error for a provider whose LangChain package cannot be imported.
+
+    A frozen build holds only the providers that were put into it. Installing a package does
+    not help there, so the text names what does: the OpenAI-format provider with a ``base_url``
+    (most gateways and many vendors serve that format), or the Python package.
+    """
+    if is_frozen() and provider == "openai":
+        return ImportError(
+            "The OpenAI-format provider is missing from this build. Install it again."
+        )
+    if is_frozen():
+        python_package = (
+            f"pi-agent-cli-lc with the extra pi-agent-core-lc[{provider}]"
+            if package is not None
+            else f"pi-agent-cli-lc with the LangChain package of '{provider}'"
+        )
+        return ImportError(
+            f"The '{provider}' provider is not part of this build. This build has only the "
+            'OpenAI-format provider: set provider = "openai" and base_url = "<the OpenAI-format '
+            'endpoint>" in the [model] table of agent.toml (--setup writes that table), or run '
+            f"the Python package ({python_package}) to use '{provider}' itself."
+        )
+    if package is None:
+        return ImportError(
+            f"Provider '{provider}' needs init_chat_model from the 'langchain' package: "
+            "pip install langchain"
+        )
+    return ImportError(f"Install {package}: pip install 'pi-agent-core[{provider}]'")
+
+
 def resolve_chat_model(
     model: Model,
     api_key: str | None = None,
@@ -421,9 +453,7 @@ def resolve_chat_model(
         try:
             from langchain_openai import ChatOpenAI
         except ImportError as e:
-            raise ImportError(
-                "Install langchain-openai: pip install 'pi-agent-core[openai]'"
-            ) from e
+            raise _provider_missing("openai", "langchain-openai") from e
         # Chat Completions does not stream usage stats unless asked to.
         kwargs.setdefault("stream_usage", True)
         return ChatOpenAI(**kwargs)
@@ -431,9 +461,7 @@ def resolve_chat_model(
         try:
             from langchain_anthropic import ChatAnthropic
         except ImportError as e:
-            raise ImportError(
-                "Install langchain-anthropic: pip install 'pi-agent-core[anthropic]'"
-            ) from e
+            raise _provider_missing("anthropic", "langchain-anthropic") from e
         return ChatAnthropic(**kwargs)
     if provider == "deepseek":
         # Also the right provider for DeepSeek-style OpenAI-compatible gateways
@@ -442,9 +470,7 @@ def resolve_chat_model(
         try:
             chat_cls = replaying_chat_deepseek()
         except ImportError as e:
-            raise ImportError(
-                "Install langchain-deepseek: pip install 'pi-agent-core[deepseek]'"
-            ) from e
+            raise _provider_missing("deepseek", "langchain-deepseek") from e
         kwargs.setdefault("stream_usage", True)
         # Its own API wants the thinking back on the earlier assistant messages whenever it
         # was asked to think (and gets nothing it did not ask for); a gateway is left alone.
@@ -455,10 +481,7 @@ def resolve_chat_model(
     try:
         from langchain.chat_models import init_chat_model
     except ImportError as e:
-        raise ImportError(
-            f"Provider '{provider}' needs init_chat_model from the 'langchain' package: "
-            "pip install langchain"
-        ) from e
+        raise _provider_missing(provider, None) from e
 
     # init_chat_model takes the model id positionally; drop it from kwargs to
     # avoid "got multiple values for argument 'model'".

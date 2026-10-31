@@ -162,6 +162,24 @@ async def test_an_older_client_gets_the_command_in_meta(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_a_frozen_build_gives_an_older_client_its_own_program_without_dash_m(
+    monkeypatch, tmp_path
+):
+    """Frozen, ``sys.executable`` is the agent itself: it has no ``-m``, only its own flags."""
+    _env(monkeypatch, tmp_path)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    agent = PiAcpAgent(home=tmp_path)
+    response = await agent.initialize(
+        protocol_version=1, client_capabilities=caps(REGISTRY_VALIDATOR)
+    )
+    (method,) = response.model_dump(by_alias=True, exclude_none=True)["authMethods"]
+    login = method["_meta"]["terminal-auth"]
+    assert login["command"] == sys.executable
+    assert login["args"] == ["--setup"]
+    assert login["env"] == {"PI_HOME": str(tmp_path)}
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("wire", [ZYPI, NOTHING, None], ids=["zypi", "nothing", "no-capabilities"])
 async def test_a_client_that_cannot_run_a_terminal_login_gets_no_method(
     monkeypatch, tmp_path, wire

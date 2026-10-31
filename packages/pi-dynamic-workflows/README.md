@@ -43,6 +43,29 @@ then, per platform, is in
 (section 9); run the agent in a container if scripts cannot be trusted. Sub-agents' tool calls
 still go through the session's permission policy.
 
+### macOS: weaker limits
+
+On macOS the sandbox has **no kernel limit on memory and none on the number of processes**
+(measured in CI on `macos-15` and `macos-15-intel`). The system does not enforce `RLIMIT_AS`, and
+there is no process-count limit. CPU time, open files, core size and file size are limited. A
+script can use as much memory as the machine has, and it can start child processes. Only the
+audit hook stands in the way, and a script written to break out can undo the hook (see above).
+Linux and Windows have kernel limits for memory and for processes; the tests check them there.
+The macOS tests that need them are skipped, with the reason in the test.
+
+What you can do about it:
+
+- The `workflow` tool declares no "harmless" annotations. In the default permission mode
+  (`permission = "ask"` in `agent.toml`), the agent asks you before every `workflow` call, and a
+  sub-agent's tool call is judged by the session's tool of the same name. Keep `ask` on macOS.
+  The modes `auto` and `always-approve` never ask, and headless runs (`-p`) use `auto`.
+- Do not start a workflow from a prompt or a project that you do not trust. Saved workflows of a
+  project (`<project>/.pi-python/workflows`) load only for a trusted project.
+- If scripts cannot be trusted, run the agent in a container or a virtual machine.
+- There is no setting that turns the tool off for an installed extension. With the Python
+  packages, do not install `pi-dynamic-workflows-py` (or uninstall it). The prebuilt `zycode-agent`
+  program contains it.
+
 ## Built-in Patterns
 
 - `/deep-research` — Research a question across the web with cross-checked sources

@@ -29,6 +29,7 @@ from sandbox_support import SPIN, run
 
 WINDOWS = sys.platform == "win32"
 LINUX = sys.platform.startswith("linux")
+MACOS = sys.platform == "darwin"
 ROOT_USER = hasattr(os, "geteuid") and os.geteuid() == 0
 
 # What the audit hook refuses, spelled out here rather than read from the code under test.
@@ -92,7 +93,14 @@ class TestTheScriptRunsElsewhere:
         assert "hunter2" not in repr(out.result)
         assert "sk-not-for-scripts" not in repr(out.result)
         # What is left is what the interpreter itself needs (Windows) or sets (the C locale).
-        assert set(out.result) <= {"SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "LC_CTYPE"}
+        # A frozen script process also has what its own start-up program sets for its libraries.
+        allowed = {"SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "LC_CTYPE"}
+        if MACOS:
+            allowed.add("__CF_USER_TEXT_ENCODING")  # set by the system for every process
+        if os.environ.get("PI_SANDBOX_FROZEN_CHILD"):
+            allowed |= {name for name in out.result if name.startswith("_PYI_")}
+            allowed |= {"LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH", "DYLD_FRAMEWORK_PATH"}
+        assert set(out.result) <= allowed
 
     async def test_it_works_in_an_empty_scratch_directory_that_is_removed_afterwards(
         self, tmp_path: Path
@@ -141,9 +149,9 @@ class TestTheScriptRunsElsewhere:
         if WINDOWS:
             assert {"job-object", "low-integrity"} <= set(out.layers)
         else:
-            assert {"rlimit-as", "rlimit-cpu", "rlimit-nofile", "rlimit-core"} <= set(out.layers)
+            assert {"rlimit-cpu", "rlimit-nofile", "rlimit-core"} <= set(out.layers)
         if LINUX:
-            assert {"no-new-privs", "rlimit-nproc"} <= set(out.layers)
+            assert {"rlimit-as", "no-new-privs", "rlimit-nproc"} <= set(out.layers)
 
 
 class TestTheAuditHookRefusesTheObviousRoutes:
@@ -300,6 +308,7 @@ class TestTheKernelHoldsWithoutTheHook:
     off: what is left is what the operating system enforces on the process."""
 
     @pytest.mark.skipif(ROOT_USER, reason="RLIMIT_NPROC does not bind root")
+    @pytest.mark.skipif(MACOS, reason="macOS has no process limit in the sandbox (spec section 5)")
     async def test_it_cannot_start_another_process(self, tmp_path: Path) -> None:
         marker = tmp_path / "ran.txt"
         out = await run(
@@ -392,6 +401,7 @@ class TestTheKernelHoldsWithoutTheHook:
 
         assert out.result == 1
 
+    @pytest.mark.skipif(MACOS, reason="macOS does not enforce RLIMIT_AS (spec section 5)")
     async def test_it_cannot_use_more_memory_than_it_is_given(self) -> None:
         out = await run(
             'result(attempt(lambda: len("a" * (1 << 30))))',

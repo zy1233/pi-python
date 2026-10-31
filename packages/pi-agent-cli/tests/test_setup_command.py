@@ -169,6 +169,40 @@ def test_there_is_no_hint_when_the_package_is_there(tmp_path, monkeypatch):
     assert "pi-agent-core-lc" not in term.out.getvalue()
 
 
+# --- a frozen build -------------------------------------------------------------------------
+
+
+def _frozen_with_only_openai(monkeypatch):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(setup_command, "_installed", lambda module: module == "langchain_openai")
+
+
+def test_a_frozen_build_offers_only_the_providers_it_contains(tmp_path, monkeypatch):
+    _frozen_with_only_openai(monkeypatch)
+    code, term = run(
+        tmp_path, answers=["2", "1", "gpt-x", "https://gw.example/v1", ""], secrets=[KEY]
+    )
+    assert code == 0, term.err.getvalue()
+    shown = term.out.getvalue()
+    assert "OpenAI, or an OpenAI-compatible endpoint" in shown
+    assert "Anthropic" not in shown
+    assert "DeepSeek" not in shown
+    assert "Type a number from 1 to 1." in shown  # 2 was refused; 1 was taken
+    assert load_config(tmp_path).provider == "openai"
+    assert "pi-agent-core-lc" not in shown  # no pip or uvx advice: it cannot help here
+
+
+def test_a_frozen_build_says_what_to_do_about_a_model_it_cannot_run(tmp_path, monkeypatch):
+    _frozen_with_only_openai(monkeypatch)
+    (tmp_path / "agent.toml").write_bytes(MODEL.replace(b"deepseek", b"anthropic"))
+    code, term = run(tmp_path, answers=[], secrets=[KEY])
+    assert code == 0, term.err.getvalue()
+    shown = term.out.getvalue()
+    assert 'provider = "openai"' in shown
+    assert "base_url" in shown
+    assert '"--with"' not in shown
+
+
 # --- a home that has files ------------------------------------------------------------------
 
 
