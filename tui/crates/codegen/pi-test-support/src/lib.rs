@@ -1,19 +1,16 @@
-//! Shared test utilities for grok-build crates: mock inference server, SSE
-//! generators, ACP stdio client, headless runner, env/process sandbox.
+//! Shared test utilities for the TUI crates: env guard, hermetic sandbox, subprocess owner and
+//! resource sampling.
 //!
 //! Provides:
-//! - [`MockInferenceServer`] — Mock /v1/chat/completions + /v1/responses with request logging
-//! - [`GrokStdioClient`] — ACP client that drives an agent binary in `agent stdio` mode
-//!   (the binary has no such mode now and nothing uses the client: plan phase D.5)
-//! - [`RawStdioClient`] — raw-wire ACP driver for bytes the typed client can't
-//!   produce (Foundation `\/` methods, string UUID ids)
+//! - [`EnvGuard`] — Set or unset one environment variable for a `#[serial]` test, then restore it
+//! - [`env::env_parse`] — Read a number from an environment variable, with a default
 //! - [`TestSandbox`] — Own isolated paths, hermetic child env, optional git setup, diagnostics
 //! - [`TestProcess`] — Own detached child lifecycle, process-tree teardown, bounded output tails
-//! - [`run_headless`] — Run `grok -p` against the mock server and capture output
-//! - [`git_workdir`] — Create a git-initialized [`TestSandbox`]
-//! - [`grok_binary`] — Resolve the grok binary path (GROK_BINARY env or cargo_bin)
-//! - [`spawn_counting_server`] — Connection-counting HTTP/1.1 server for wire/pooling tests
 //! - [`ResourceSnapshot`] — RSS/threads/fds sampling for soak tests
+//! - [`scaled`] — Multiply a harness timeout by `GROK_TEST_TIMEOUT_SCALE`
+//!
+//! The mock inference server, the SSE builders, the ACP stdio clients, the headless runner and the
+//! counting server are gone (plan phase D.5): the Rust agent runtime that they tested is gone.
 /// Multiply a harness timeout by `GROK_TEST_TIMEOUT_SCALE` (positive integer,
 /// default 1). CI lanes on shared runner pools raise it so pool load slows
 /// tests instead of failing them (see the Grok Build merge CI workflow).
@@ -25,30 +22,11 @@ pub fn scaled(base: std::time::Duration) -> std::time::Duration {
         .unwrap_or(1);
     base * scale
 }
-pub mod acp_client;
-pub mod counting_server;
 pub mod env;
-pub mod headless;
-mod inference_override;
-pub mod mock_server;
 pub mod process;
 pub mod resources;
 pub mod sandbox;
-pub mod scripted;
-pub mod sse;
-pub use acp_client::{GrokStdioClient, RawStdioClient};
-pub use counting_server::spawn_counting_server;
-pub use env::{EnvGuard, git_workdir, grok_binary};
-pub use headless::{
-    HeadlessResult, assert_headless_success, assert_no_crashes, run_headless,
-    run_headless_in_sandbox, run_headless_in_sandbox_borrowed,
-    run_headless_in_sandbox_borrowed_with_env, run_headless_in_sandbox_with_env,
-    run_headless_with_env, stderr_tail,
-};
-pub use inference_override::{InferenceEndpoint, InferenceExpectation, InferenceRequestMatcher};
-pub use mock_server::{
-    MockInferenceServer, MockModelEntry, ScriptedResponse, SseEvent, StorageUpload,
-};
+pub use env::EnvGuard;
 #[cfg(unix)]
 pub use process::process_has_exited_without_reap;
 pub use process::{
