@@ -154,6 +154,9 @@ Notes:
 - The registry check runs the Linux x86_64 binary (and the `uvx` package) on `ubuntu-latest`
   with a 120 s limit, including the download. It needs an `initialize` answer with a terminal
   authentication method; the agent gives one.
+- The `description` stays plain on purpose. The weaker `workflow` sandbox on macOS (no kernel
+  limit on memory or on process count) is documented in the README of the repository and in
+  `packages/pi-dynamic-workflows/README.md`, not in the registry entry.
 - Do not comment on registry issue #726 and do not open the registry pull request before the
   user agrees.
 
@@ -168,7 +171,74 @@ Notes:
 | No `windows-aarch64` | A Windows on Arm client finds no key for its platform. |
 | Intel Mac | `macos-15-intel` is on GitHub's list of runners that end; check the notices. |
 
-## 6. Trial results
+## 6. Release steps
+
+Order, as the workflow files define it (the user decided on 2026-10-31: publish first, then the
+registry pull request; that pull request is not submitted).
+
+**Before the tag.**
+
+1. Merge #70, then #71, into `main`. A `workflow_run` workflow uses the file on the default
+   branch (GitHub rule; not tried here), so `agent-binaries.yml` must be on `main` before the tag.
+2. Choose a new version. `v0.7.0` is already released (GitHub release and PyPI have `0.7.0`;
+   checked on 2026-10-31), and `release.yml` ends with `gh release create`, which fails for an
+   existing release. Change the version of `pi-agent-core-lc` (root `pyproject.toml`),
+   `pi-agent-harness-lc` and `pi-agent-cli-lc` together, and every `==0.7.0` pin between them
+   (`packages/pi-agent-cli/pyproject.toml`, `packages/pi-agent-harness/pyproject.toml`, the
+   extras in the root `pyproject.toml`). Add a `## [<version>]` section to `CHANGELOG.md`: the
+   release job copies the notes from it. The workflow compares the tag with the version of
+   `pi-agent-cli-lc` and stops if `v<version>` differs.
+
+**After the tag `v<version>` (push of a tag that starts with `v`).**
+
+1. `Release` starts (`release.yml`): tests, builds, the TUI binaries, then `Publish to PyPI`
+   and `GitHub Release`. The last one creates the release with the Python packages and the TUI
+   files.
+2. When `Release` ends with `success` for that tag push, `Agent binaries` starts by itself
+   (`workflow_run`). If `Release` fails in any job, it does not start, even when PyPI already has
+   the packages.
+3. `Agent binaries`: `plan` (checks the tag against the version), then five build jobs (build,
+   smoke test, contract tests, sandbox tests), then `publish`. `publish` attaches the five
+   archives to the release with `gh release upload --clobber` and prints the name, size and
+   digest of each asset. A failure in one build job stops `publish`: nothing is attached.
+
+**If the archives are not attached.** The archives are also kept as workflow artifacts
+(`agent-<target>`). Two ways to fix it:
+
+- Run the workflow again for the tag: `gh workflow run agent-binaries.yml --ref main -f tag=v<version>`
+  (or Actions, "Agent binaries", "Run workflow", field `tag`). It builds the tag (checkout
+  `refs/tags/v<version>`), tests it, and `publish` uploads with `--clobber`, so a second run is
+  safe. It creates the release if it is missing. This works only for a tag whose tree has
+  `packaging/agent/`, so a tag that was made after #71 was merged. That `workflow_dispatch` runs
+  from `main` for an existing release is a GitHub rule; it is **not tested** here, because the
+  file is not on `main` yet.
+- By hand: download the artifacts of a green run (or build with
+  `python packaging/agent/build.py`), then
+  `gh release upload v<version> zycode-agent-<target>-<version>.tar.gz ... --clobber`
+  (`.zip` for Windows). The names must stay `zycode-agent-<target>-<version>.<ext>`: the registry
+  bot rewrites the version in a URL only in the forms `-X.` and `-X-`. Not tested.
+
+**Check the release.** Five assets: `linux-x86_64`, `linux-aarch64`, `darwin-aarch64`,
+`darwin-x86_64` (`.tar.gz`) and `windows-x86_64` (`.zip`), each with a digest
+(`gh release view v<version> --json assets --jq '.assets[] | "\(.name) \(.digest)"'`). The PyPI
+package `pi-agent-cli-lc==<version>` must exist (`uvx` entry).
+
+**What the registry entry needs after the release** (section 4; the pull request waits for the
+user):
+
+- `version`: `<version>` (three numbers, no `v`, no `latest`).
+- The five `archive` URLs with `/v<version>/` and `-<version>.`, and `"uvx": { "package": "pi-agent-cli-lc==<version>" }`.
+  Versions in URLs and package specs must equal `version`; every URL must answer with HTTP 200.
+- No `sha256`: the update bot and Zed read the digest of the release asset. Confirm on the first
+  bump (not tested). Add `sha256` only if the user wants to pin it.
+- `icon.svg` (16x16, monochrome, `currentColor`) next to `agent.json`. Not made yet.
+- After the first pull request, the bot makes the version bumps (hourly). With `binary` and `uvx`
+  in one entry it takes the version that PyPI and the GitHub assets both have, so a release
+  without archives stops the bump.
+- Not tested: the registry verifier (Linux x86_64 binary on `ubuntu-latest`, 120 s with the
+  download), and the first start of the program in Zed or JetBrains.
+
+## 7. Trial results
 
 Trial run on the pull request branch (2026-10-31, run "Agent binaries" 41176423902). All steps
 passed on all five targets: build, smoke test, 13 ACP contract tests against the program, and the
