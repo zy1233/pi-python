@@ -115,7 +115,7 @@ jobs:
   build-tui-macos-arm:
     name: Build TUI binary (macOS arm64)
     needs: test
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
 
