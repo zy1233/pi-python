@@ -155,14 +155,14 @@ WorkflowRuntime.execute()
 |-----------|-------|-------|---------|
 | 独立进程、清空环境、空 cwd、fd 0/1 空设备（`process`） | ✓ | ✓ | ✓ |
 | 审计钩子（`audit-hook`） | ✓ | ✓ | ✓ |
-| `RLIMIT_CORE`=0、`RLIMIT_AS`、`RLIMIT_CPU`、`RLIMIT_NOFILE`、`RLIMIT_FSIZE`=0，软硬同值，脚本改不回去（`rlimit-core` / `-as` / `-cpu` / `-nofile` / `-fsize`） | ✓ | 能设置的才算（`RLIMIT_AS` 不一定） | — |
+| `RLIMIT_CORE`=0、`RLIMIT_AS`、`RLIMIT_CPU`、`RLIMIT_NOFILE`、`RLIMIT_FSIZE`=0，软硬同值，脚本改不回去（`rlimit-core` / `-as` / `-cpu` / `-nofile` / `-fsize`） | ✓ | 除 `rlimit-as` 外都生效（实测，见下） | — |
 | `PR_SET_NO_NEW_PRIVS`（`no-new-privs`） | ✓ | — | — |
 | `RLIMIT_NPROC`=0：不能 `fork`、不能再起线程；在读线程起来**之后**才设（`rlimit-nproc`） | ✓（root 不受约束） | — | — |
 | Job Object：进程内存上限、CPU 时间上限、`ActiveProcessLimit=1`、UI 限制、`DIE_ON_UNHANDLED_EXCEPTION`、`KILL_ON_JOB_CLOSE`（`job-object`） | — | — | ✓ |
 | 低完整性（`low-integrity`） | — | — | ✓ |
 | 墙钟（`wall_seconds`，默认关闭）：到点杀进程 | ✓ | ✓ | ✓ |
 
-macOS 没有测过（CI 只有 Linux，开发机是 Windows 与 WSL）。
+macOS 在 CI 上实测过（`macos-15`、`macos-15-intel`，2026-10-31）：生效的层是 `process`、`rlimit-core`、`-cpu`、`-nofile`、`-fsize`、`audit-hook`。**没有 `rlimit-as`**（系统不执行 `RLIMIT_AS`，申请 1 GiB 在 256 MiB 上限下照样成功），**没有 `rlimit-nproc`**（脚本进程能再起子进程）。所以 macOS 上内存与进程数不受内核限制，只剩审计钩子这层“减速带”。子进程环境里还有系统自己加的 `__CF_USER_TEXT_ENCODING`。对应测试在 macOS 上跳过，原因写在测试里。
 
 **Job 的指派**：宿主在进程刚起来就把它放进 Job，早于脚本的任何代码。放进去失败按 `SandboxUnavailable` 处理，什么都不跑。宿主进程崩溃时，Job 句柄随进程关闭，`KILL_ON_JOB_CLOSE` 杀掉脚本进程；管道也会断，子进程的读线程见到 EOF 就 `os._exit(3)`，两条路各自独立。
 
@@ -258,7 +258,7 @@ macOS 没有测过（CI 只有 Linux，开发机是 Windows 与 WSL）。
 1. **Linux 文件系统与 `/proc` 的隔离**。Landlock（内核 ≥ 5.13 管文件，≥ 6.7 还管 TCP）是最合适的：非特权、按路径。本机 WSL 内核是 5.10，没有 Landlock，无法验证，所以没做。用户命名空间 + 挂载命名空间也能做到，但依赖发行版配置（Ubuntu 24.04 默认限制非特权用户命名空间；Docker 默认禁止 `unshare`），要有回退。
 2. **seccomp**：只能是黑名单（拒 `ptrace`、`process_vm_*`、`socket`、写方式的 `openat`、`unlink*` 等），还要区分架构；白名单要随 glibc / Python 版本维护。排在 Landlock 之后。
 3. **Windows 限制读文件与联网**：AppContainer 或受限令牌。按机制推断会很脆弱（受限令牌下 Python 可能读不了自己的标准库，因为用户目录下的 ACL 不含 Everyone），没有尝试，所以没做。
-4. **macOS 的限制层**（`sandbox-exec` 已被弃用）没有验证过。
+4. **macOS 的内存与进程数限制**（`sandbox-exec` 已被弃用）：实测 `RLIMIT_AS` 与 `RLIMIT_NPROC` 都不起作用（见 §5），没有替代层。
 
 ---
 

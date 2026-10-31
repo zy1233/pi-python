@@ -70,6 +70,9 @@ class TestTheCommand:
 
         assert program.stat().st_mode & stat.S_IXUSR
 
+    @pytest.mark.skipif(
+        bool(os.environ.get("PI_SANDBOX_FROZEN_CHILD")), reason="conftest points it elsewhere"
+    )
     def test_the_program_sits_next_to_the_sandbox_module(self) -> None:
         program = sandbox_host.frozen_child_executable()
 
