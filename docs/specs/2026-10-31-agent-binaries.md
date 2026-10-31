@@ -3,7 +3,9 @@
 > Scope: ship the ACP agent (`python -m pi_agent_cli`) as one executable per platform, for the
 > `binary` entry of the [ACP registry](https://github.com/agentclientprotocol/registry).
 > Decision: 2026-10-31. The user chose the `binary` route, PyInstaller one-file, five targets,
-> no signing in the first version, and a workflow of its own.
+> no signing in the first version, and a workflow of its own. Release 0.8.0 is the first release
+> that has the archives (section 7). The registry entry is binary only (section 4); the user
+> submits the registry pull request by hand.
 >
 > Code: `packaging/agent/{build.py,zycode-agent.spec,entry.py,smoke.py}`,
 > `.github/workflows/agent-binaries.yml`. Changes for a frozen build:
@@ -19,9 +21,10 @@ Zed reads only `binary` and `npx` entries of the registry. It skips an entry tha
 #147). A registry entry cannot add `--with` or `--from` to a `uvx` command. So a binary is the
 form that reaches Zed users and needs no Node, no `uv` and no Python on the user's machine.
 
-The same entry also has `uvx`. JetBrains and the community DSH adapter read it. For that,
-`pi-agent-cli-lc` depends on the OpenAI-format provider (`pi-agent-core-lc[openai]`): a bare
-`uvx pi-agent-cli-lc` then has a provider.
+The first draft had a `uvx` distribution in the same entry. It was dropped (section 4.1).
+`pi-agent-cli-lc` still depends on the OpenAI-format provider (`pi-agent-core-lc[openai]`), so a
+bare `uvx pi-agent-cli-lc` has a provider; that stays useful for users who start the package
+themselves, as in the README section "In Zed (custom agent)".
 
 ## 2. What is built
 
@@ -97,68 +100,109 @@ Each build job runs, on its own platform:
 The `platform-tests` job (pull request and manual run) runs the tests of the changed code on
 Windows and on macOS (Apple silicon and Intel), where the sandbox layers differ from Linux.
 
-## 4. Registry entry (draft, not submitted)
+## 4. Registry entry (final for 0.8.0, not submitted)
 
-Directory `zycode/` in the registry, files `agent.json` and `icon.svg` (16x16, monochrome,
-`currentColor`; not made yet). `sha256` is left out: the update bot fills it from the
-digests of the GitHub release assets. After a first manual pull request, the bot makes the
-version bumps (hourly). A bump needs the PyPI package and all archives at the new version.
+Directory `zycode/` in the registry, files `agent.json` and `icon.svg`. The user submits the pull
+request by hand. The entry is binary only. `sha256` is set for each archive (the digest of the
+release asset). There is no `icon` field: the registry build makes it from `icon.svg`
+(16x16, monochrome, `currentColor` only).
 
 ```json
 {
   "id": "zycode",
   "name": "zycode",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Coding agent on LangChain: workflows, sub-agents, extensions",
   "repository": "https://github.com/zy1233/pi-python",
   "website": "https://zycode.dev",
   "authors": ["zy1233"],
   "license": "MIT",
   "license_url": "https://github.com/zy1233/pi-python/blob/main/LICENSE",
-  "icon": "./icon.svg",
   "distribution": {
     "binary": {
       "linux-x86_64": {
-        "archive": "https://github.com/zy1233/pi-python/releases/download/v0.7.0/zycode-agent-linux-x86_64-0.7.0.tar.gz",
+        "archive": "https://github.com/zy1233/pi-python/releases/download/v0.8.0/zycode-agent-linux-x86_64-0.8.0.tar.gz",
+        "sha256": "4ab0adec5d2ed3519ed0372862497c6a4efd75c5215138ebaf967cc59a92c5cf",
         "cmd": "./zycode-agent"
       },
       "linux-aarch64": {
-        "archive": "https://github.com/zy1233/pi-python/releases/download/v0.7.0/zycode-agent-linux-aarch64-0.7.0.tar.gz",
+        "archive": "https://github.com/zy1233/pi-python/releases/download/v0.8.0/zycode-agent-linux-aarch64-0.8.0.tar.gz",
+        "sha256": "af9ecddc0cd8f8493d6d6d1c87e2f0bee7165cf91e49c18eb74ee7fb09e8d370",
         "cmd": "./zycode-agent"
       },
       "darwin-aarch64": {
-        "archive": "https://github.com/zy1233/pi-python/releases/download/v0.7.0/zycode-agent-darwin-aarch64-0.7.0.tar.gz",
+        "archive": "https://github.com/zy1233/pi-python/releases/download/v0.8.0/zycode-agent-darwin-aarch64-0.8.0.tar.gz",
+        "sha256": "f2fddfc36432deafdef5705db858a15500ba293abd07df9e8c9145017ce63661",
         "cmd": "./zycode-agent"
       },
       "darwin-x86_64": {
-        "archive": "https://github.com/zy1233/pi-python/releases/download/v0.7.0/zycode-agent-darwin-x86_64-0.7.0.tar.gz",
+        "archive": "https://github.com/zy1233/pi-python/releases/download/v0.8.0/zycode-agent-darwin-x86_64-0.8.0.tar.gz",
+        "sha256": "35dd2ebbf457b9cb5f339bc7de6fc5ec412be7883379ec20f1543d20e307ea52",
         "cmd": "./zycode-agent"
       },
       "windows-x86_64": {
-        "archive": "https://github.com/zy1233/pi-python/releases/download/v0.7.0/zycode-agent-windows-x86_64-0.7.0.zip",
+        "archive": "https://github.com/zy1233/pi-python/releases/download/v0.8.0/zycode-agent-windows-x86_64-0.8.0.zip",
+        "sha256": "972059ec552fe92f219e39508907073a8e5ffec5d685826a5c6cfcf970a8383e",
         "cmd": "./zycode-agent.exe"
       }
-    },
-    "uvx": { "package": "pi-agent-cli-lc==0.7.0" }
+    }
   }
 }
 ```
 
-Notes:
+The files are in the Project Agent Store (`docs/registry-entry/`: `agent.json`, `icon.svg`,
+`submit.md` with the steps and the text of the pull request).
 
-- `cmd` starts with `./` (Zed rejects other forms). Zed appends the arguments of the terminal
-  login to `args`; the entry has none, so `--setup` is the whole argument list.
-- The entry can only be submitted when the first release that has these archives exists (the
-  URLs must answer with HTTP 200). `0.7.0` above is the version of the draft; the first
-  archives will carry the version of the next release.
-- The registry check runs the Linux x86_64 binary (and the `uvx` package) on `ubuntu-latest`
-  with a 120 s limit, including the download. It needs an `initialize` answer with a terminal
-  authentication method; the agent gives one.
+Rules of the registry (read again on 2026-10-31, registry commit `6772a52`; they did not
+change between the first and the second read):
+
+- `sha256` is optional in the schema, but the guide says binary distributions "should pin" it.
+  The update bot writes the digest of the release asset into each binary target at a version bump,
+  and the verifier compares an archive with it when it is set.
+- A `uvx` entry has only `package`, `args` and `env`. `args` come after the package name, so the
+  entry cannot pass `--with` or `--from`. A package name with extras (`name[extra]==1.0`) fails the
+  registry's PyPI check, because it cuts the name at `==`, `<`, `>`, `!` and `@` only. A `uvx`
+  entry therefore cannot add extra packages.
+- Zed reads only `binary` and `npx` and skips an entry that has only `uvx`. The `binary` entries
+  are what Zed reads, so no npm launcher is needed.
+- The platform keys are `darwin-aarch64`, `darwin-x86_64`, `linux-aarch64`, `linux-x86_64`,
+  `windows-aarch64` and `windows-x86_64`. A missing OS family only gives a warning. There is no
+  `windows-aarch64` entry because there is no build (section 2).
+- `cmd` starts with `./` (Zed rejects other forms; the guide's example `your-binary.exe` is
+  not enough for Zed on Windows). Zed appends the arguments of the terminal login to `args`; the
+  entry has none, so `--setup` is the whole argument list.
+- The version in the URLs must equal `version`, a URL must not contain `/latest/`, and every URL
+  must answer with HTTP 200. The pull request has no template. Open pull requests use the title
+  `Add <Name> agent` and the branch `add-<id>`.
+- The registry check runs the Linux x86_64 binary on `ubuntu-latest` with a 120 s limit, including
+  the download. It needs an `initialize` answer with a terminal authentication method; the agent
+  gives one.
+- Checked locally on 2026-10-31 against the final entry: `build_registry.py --agents zycode` (URL
+  checks on) validated it; `verify_agents.py --agent zycode --type binary` and its `--auth-check`
+  passed.
 - The `description` stays plain on purpose. The weaker `workflow` sandbox on macOS (no kernel
   limit on memory or on process count) is documented in the README of the repository and in
-  `packages/pi-dynamic-workflows/README.md`, not in the registry entry.
-- Do not comment on registry issue #726 and do not open the registry pull request before the
-  user agrees.
+  `packages/pi-dynamic-workflows/README.md`, not in the registry entry or in the pull request.
+- Do not comment on registry issue #726.
+
+### 4.1 Decision: no `uvx` in the entry (2026-10-31)
+
+The first draft had `"uvx": { "package": "pi-agent-cli-lc==<version>" }` next to `binary`. The
+user dropped it, for two reasons:
+
+- A plain `uvx pi-agent-cli-lc==0.8.0` has no `workflow` tool. `pi-dynamic-workflows-py` (and the
+  web, goal and MCP extensions) are separate packages that the CLI does not depend on, and an entry
+  cannot add them (see the rules above). With `--with pi-dynamic-workflows-py` the smoke test
+  passes, so only the entry form is the limit. The frozen binary holds the extensions. Two forms
+  under one name would give users a weaker agent without a sign.
+- With `binary` and `uvx` in one entry, the update bot takes the version that PyPI and the GitHub
+  assets both have. In 0.8.0, PyPI was up about 34 minutes before the release and the archives
+  about 11 minutes after it (section 7), so one slow job would block the bump.
+
+What it costs: JetBrains and the community DSH adapter read `uvx` entries (research, with the
+manifest part closed source for JetBrains). Whether JetBrains starts a `binary` entry is not
+checked. A `uvx` form that has the extensions needs a code change (the CLI depends on them, or a
+meta package) and a new release; it is not planned.
 
 ## 5. Limits of the first version
 
@@ -221,29 +265,27 @@ registry pull request; that pull request is not submitted).
 **Check the release.** Five assets: `linux-x86_64`, `linux-aarch64`, `darwin-aarch64`,
 `darwin-x86_64` (`.tar.gz`) and `windows-x86_64` (`.zip`), each with a digest
 (`gh release view v<version> --json assets --jq '.assets[] | "\(.name) \(.digest)"'`). The PyPI
-package `pi-agent-cli-lc==<version>` must exist (`uvx` entry).
+package `pi-agent-cli-lc==<version>` must exist (the version of the archives and of the package
+must be the same).
 
-**What the registry entry needs after the release** (section 4; the pull request waits for the
-user):
+**What the registry entry needs after a release** (section 4; the pull request waits for the
+user, who submits it by hand):
 
 - `version`: `<version>` (three numbers, no `v`, no `latest`).
-- The five `archive` URLs with `/v<version>/` and `-<version>.`, and `"uvx": { "package": "pi-agent-cli-lc==<version>" }`.
-  Versions in URLs and package specs must equal `version`; every URL must answer with HTTP 200.
-- No `sha256`: the update bot and Zed read the digest of the release asset. Confirm on the first
-  bump (not tested). Add `sha256` only if the user wants to pin it.
-- `icon.svg` (16x16, monochrome, `currentColor`) next to `agent.json`. Not made yet.
-- After the first pull request, the bot makes the version bumps (hourly). With `binary` and `uvx`
-  in one entry it takes the version that PyPI and the GitHub assets both have, so a release
-  without archives stops the bump.
-- Not tested: the registry verifier (Linux x86_64 binary on `ubuntu-latest`, 120 s with the
-  download), and the first start of the program in Zed or JetBrains.
+- The five `archive` URLs with `/v<version>/` and `-<version>.`, and the `sha256` of each
+  archive, read from the release (`gh release view v<version> --json assets`).
+  The versions in the URLs must equal `version`; every URL must answer with HTTP 200.
+- `icon.svg` next to `agent.json`: 16x16, monochrome, `currentColor` (the file exists).
+- After the first pull request, the bot makes the version bumps (hourly). It needs the PyPI package
+  and the GitHub assets at the new version, so a release without archives stops the bump.
+  That bump is not seen yet.
 
-## 7. Trial results
+## 7. Trial and release results
 
 Trial run on the pull request branch (2026-10-31, run "Agent binaries" 41176423902). All steps
 passed on all five targets: build, smoke test, 13 ACP contract tests against the program, and the
 sandbox tests against the frozen script process. The `publish` job did not run: it runs only for a
-tag, so the upload path is untested until the first real release.
+tag. The release of 0.8.0 (below) ran it for the first time.
 
 | Target | Runner | Program | Archive | Smoke + contract + sandbox |
 |--------|--------|---------|---------|----------------------------|
@@ -257,6 +299,49 @@ The non-frozen sandbox tests also pass on `windows-2022`, `macos-15` and `macos-
 On macOS the sandbox has no memory limit and no process limit (measured; sandbox design,
 section 5). Those two tests are skipped there.
 
-Not tested by a machine: Gatekeeper and quarantine for the unsigned macOS program, SmartScreen
-and anti-virus for the unsigned Windows program, and a real download and start from Zed or
-JetBrains.
+### 7.1 The release of 0.8.0 (2026-10-31)
+
+The release record of the worker that ran it is in the Project Agent Store
+(`internal/release-0-8-0-merge-status.md`). The facts that matter for this design:
+
+| Time (UTC) | Step |
+|------------|------|
+| by 08:52 | The user merged #70 and #71 into `main`. The agents' token could not merge (`403 Resource not accessible by personal access token`). |
+| 09:21 | The `Release` dry run (`workflow_dispatch`, run 41186552284) ended. The user had to start it, for the same reason. It passed: tests, packages, both TUI builds; `Publish to PyPI` and `GitHub Release` skipped. A `workflow_run` start of `Agent binaries` followed it and skipped every job, as designed. This was the first proof that `workflow_run` starts from the file on `main`. |
+| 09:49 | The user merged #72 (version 0.8.0, changelog). |
+| 09:52 | The tag `v0.8.0` was pushed. `Release` (run 41190427666) started. |
+| 09:57 | `Publish to PyPI` finished (7 packages). It does not wait for the TUI builds. |
+| 10:12 | The TUI build for Linux x86_64 finished. |
+| 10:31 | The TUI build for macOS arm64 finished after about 34 minutes, the slowest job. `GitHub Release` waits for it, so the release (21 assets) came about 34 minutes after the PyPI upload. |
+| 10:31 | `Agent binaries` (run 41193119162) started by `workflow_run`, as designed. `plan` passed the tag check. |
+| 10:35 to 10:43 | The five build jobs passed (four within 5 minutes; `darwin-x86_64` took until 10:42). |
+| 10:43 | `Attach to the release` uploaded the five archives (12 seconds). |
+
+What this shows:
+
+- `workflow_run` worked: no race with `gh release create`, and the archives landed on the release
+  that `Release` made. About 11 minutes passed between the release and the last archive.
+- `Publish to PyPI` runs before the TUI builds finish, and nothing can undo a PyPI upload. A
+  failed TUI job after it leaves PyPI at the new version without a release. So the dry run of
+  `Release` before the tag matters: it is the check that the TUI builds pass.
+- The PyPI upload uses the API-token secret (`password: ${{ secrets.PYPI_API_TOKEN }}` in
+  `release.yml`), so Trusted Publishing is off and the action makes no attestations (PEP 740). The
+  upload worked. A Trusted Publisher could replace the token later; not done.
+- The five archive URLs answer HTTP 200 without credentials. Each download has the size and the
+  sha256 of the release digest. The Linux x86_64 archive, downloaded from the release URL, passes
+  `smoke.py --frozen` (initialize in about 2.2 s; workflow script, sub-agent, `bash`, `git` and the
+  advice for an unbundled provider work). The first run failed once with `Text file busy` (the
+  file was run right after it was written); the second passed. It is a test race, not an archive
+  defect.
+- The registry's own checks pass for the final entry (section 4).
+- A plain `uvx pi-agent-cli-lc==0.8.0` has no `workflow` tool; with `--with
+  pi-dynamic-workflows-py==0.5.0` the full smoke test passes (section 4.1).
+
+### 7.2 Not checked by a person
+
+- The macOS programs (Apple silicon and Intel): Gatekeeper and quarantine for an unsigned
+  program.
+- The Windows program: SmartScreen and anti-virus for an unsigned one-file program.
+- A real download and start from Zed or JetBrains (and whether JetBrains starts a `binary` entry).
+- The registry's update bot (first version bump after the entry is merged).
+- `workflow_dispatch` with a `tag` for an existing release (the repair path).
