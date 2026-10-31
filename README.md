@@ -177,6 +177,53 @@ The agent speaks ACP over stdio, so [Zed](https://zed.dev) can start it as a cus
 - To run the code of a checkout, set `command` to the Python of its virtual environment and `args` to `["-m", "pi_agent_cli"]`.
 - The agent is not in Zed's ACP registry, so add it as a custom agent as shown.
 
+### In DeepSeek Harness (as a subagent)
+
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) has an ACP client for subagents: `@deepseek-ai/dsh-subagent-acp`. It starts any ACP agent as a child process, gives it one task, and returns the final text. zycode can be that child. This is not a DSH plugin of ours, and zycode is not affiliated with DeepSeek or with DSH.
+
+> **Wiring verified with a mock model; real model answers not verified.** Tested with DSH `0.2.2-alpha.2` (`headless` profile), `pi-agent-cli-lc` 0.7.0 on Linux. DSH's main model and zycode's model were both scripted, not real. Details: [Not verified](#not-verified-dsh).
+
+Install the two packages (the `alpha` tag matches DSH `0.2.2-alpha.2`) and add rows to `$DSH_HOME/profiles/<profile>/cordis.patch.yml`. The install adds no row for you:
+
+```sh
+dsh plugin --profile headless add @deepseek-ai/dsh-subagent-acp@alpha @deepseek-ai/dsh-tool-subagent@alpha
+```
+
+```yaml
+- insert:
+    - id: subagent-acp-zycode
+      name: '@deepseek-ai/dsh-subagent-acp'
+      config:
+        providerName: zycode
+        command: uvx
+        args: ['--from', 'pi-agent-cli-lc', '--with', 'pi-agent-core-lc[deepseek]', 'pi-agent-cli']
+        permission: reject
+        env:
+          PI_HOME: /absolute/path/to/zycode-home
+    - id: tool-subagent-zycode
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: zycode
+        toolName: subagent_zycode
+        maxDepth: provider-managed
+```
+
+The model then has a tool `subagent_zycode` (`description`, `prompt`, optional `cwd`). It returns a child id at once; the final text of zycode comes back as a completion notice. The child runs in the `cwd` of the call, or in DSH's current directory.
+
+- **Use an isolated `PI_HOME`** for this child, with its own `agent.toml` and `local.env` (set the model and the key once: `PI_HOME=... uvx --from pi-agent-cli-lc --with "pi-agent-core-lc[deepseek]" pi-agent-cli --setup`). DSH removes credential-shaped variables from the child's environment, so the key must be in `local.env` or in `env` above. Without a model the child answers `Error: No model is set. Run the agent with --setup ...`; this client cannot offer the login.
+- **Permissions.** DSH answers the child's permission requests by its `permission` field, with no question to a person. `reject` (default) denies every request, so zycode in `ask` mode can only use read-only tools (`read`, `grep`, `find`, `ls`). To let it write, set `permission = "auto"` in the `agent.toml` of that isolated home; zycode then runs `bash`, `edit` and `write` without asking.
+- **Warning: do not set `permission: allow` in the DSH row.** zycode asks before it runs a project's own extensions, and the only "yes" it offers is `allow_always` ("Trust and remember"). The DSH client takes the first `allow_once` or `allow_always` option, so it says yes for you, runs the project's code, and saves the answer in `<PI_HOME>/agent/trust.json`. Keep `reject`, and add this to the `agent.toml` of the isolated home so that zycode never asks and never trusts a project:
+
+  ```toml
+  [extensions]
+  default_project_trust = "never"
+  ```
+
+- One process per task: no follow-up messages to a running child, no session resume, and only the final text returns (tool calls and thoughts stay in zycode's own session files under `PI_HOME`).
+
+<a id="not-verified-dsh"></a>
+**Not verified:** any answer of a real model (DSH's or zycode's) and zycode's `[deepseek]` extra with a real key; `permission = "auto"` read from `agent.toml` (checked with a scripted test agent instead); a cold `uvx` download; the DSH Web and Desktop apps (only `headless` ran); Windows and macOS; the `@zaimokuza/dsh-acp-adapter` community plugin.
+
 ## Quick start
 
 ```python
