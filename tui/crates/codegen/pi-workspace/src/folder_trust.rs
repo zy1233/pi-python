@@ -4,8 +4,9 @@
 //! workspace for repo-local code-exec configs, resolves the pure trust
 //! [`decide`] precedence, prompts (MVP stderr), and reads/writes the durable
 //! [`crate::trust::TrustStore`] (`~/.grok/trusted_folders.toml`). The
-//! consume/gating half (the `DECISIONS` cache, `resolve_and_record`,
-//! `project_scope_allowed`, the loader filters) lives in `pi-shell`.
+//! consume/gating half (a cache of verdicts, and the filters of the loaders) lived
+//! in `pi-shell`; it went with the Rust agent runtime (plan phase D.8). The pager's
+//! trust dialog is the caller that is left.
 //!
 //! ## Precedence (canonical — see [`decide`])
 //! 1. Feature flag OFF  → trusted (no gating; preserves prior behavior).
@@ -19,10 +20,6 @@
 //! 4. No repo-local code-exec configs present → trusted (nothing to gate).
 //! 5. Interactive TTY   → prompt the user (y/N).
 //! 6. Otherwise (headless) → untrusted.
-//!
-//! (How the consume side caches this verdict — e.g. that the rule-4 allow is
-//! provisional and re-checked rather than cached — is a `pi-shell`
-//! concern, documented there.)
 
 use std::io::IsTerminal;
 use std::path::Path;

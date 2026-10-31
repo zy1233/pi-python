@@ -522,10 +522,10 @@ pub fn load_claude_env_with_project(cwd: &Path, project_trusted: bool) -> HashMa
 // Phase 2 cutoff marker
 // =============================================================================
 //
-// `pi-shell::claude_import` writes the marker. We re-implement a small
-// reader here because the gate consumers live in this crate and can't depend
-// on shell (it would create a cycle). Caching is intentionally omitted; if
-// this becomes a hotspot we can lift it into a shared crate.
+// The marker is `[claude_compat] imported = true` in `config.toml`. The gate
+// consumers live in this crate, so this crate reads it itself. Caching is
+// intentionally omitted; if this becomes a hotspot we can lift it into a shared
+// crate.
 
 /// True when the user marked Claude settings imported (`[claude_compat].imported`
 /// in config.toml, or the test override). Public so gate-mirroring callers stay consistent.

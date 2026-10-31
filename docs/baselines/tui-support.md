@@ -2,7 +2,7 @@
 
 This file is generated. Do not edit it by hand.
 
-- Command: `python scripts/tui_callgraph.py keep`. Commit: `1a8abee`.
+- Command: `python scripts/tui_callgraph.py keep`. Commit: `ebc6106`.
 - Run the command again after a change that moves code between modules or crates.
 - It replaces the hand-written list of examples in item 0.5 of
   [`PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`](../PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md).
@@ -25,44 +25,39 @@ This file is generated. Do not edit it by hand.
 
 | crate | non-test lines | live | dead | dead units | check first | provider-stack refs |
 |---|---|---|---|---|---|---|
-| `pi-shell` | 31,191 | 30,183 (97%) | 1,008 (3%) | 7 | 1 | 20 |
+| `pi-shell` | 28,378 | 28,378 (100%) | 0 (0%) | 0 | 0 | 20 |
 | `pi-sampling-types` | 12,043 | 12,043 (100%) | 0 (0%) | 0 | 0 | 1 |
-| `pi-tools` | 130,727 | 130,407 (100%) | 320 (0%) | 2 | 1 | 1 |
-| `pi-agent` | 22,902 | 22,878 (100%) | 24 (0%) | 1 | 0 | 5 |
-| `pi-workspace` | 81,282 | 80,820 (99%) | 462 (1%) | 1 | 0 | 0 |
-| `pi-hooks` | 9,026 | 4,687 (52%) | 4,339 (48%) | 5 | 0 | 0 |
-| `pi-mcp` | 8,616 | 8,577 (100%) | 39 (0%) | 1 | 0 | 0 |
+| `pi-tools` | 130,450 | 130,406 (100%) | 44 (0%) | 1 | 1 | 1 |
+| `pi-agent` | 22,877 | 22,877 (100%) | 0 (0%) | 0 | 0 | 5 |
+| `pi-workspace` | 80,813 | 80,813 (100%) | 0 (0%) | 0 | 0 | 0 |
+| `pi-hooks` | 4,672 | 4,672 (100%) | 0 (0%) | 0 | 0 | 0 |
+| `pi-mcp` | 8,576 | 8,576 (100%) | 0 (0%) | 0 | 0 | 0 |
 
 ## Per crate
 
 ### `pi-shell`
 
-Non-test code: 31,191 lines in 65 units.
+Non-test code: 28,378 lines in 57 units.
 
 | | units | lines | share |
 |---|---|---|---|
-| live | 58 | 30,183 | 97% |
-| dead | 7 | 1,008 | 3% |
+| live | 57 | 28,378 | 100% |
+| dead | 0 | 0 | 0% |
 
 Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampling`): 8 live units, 8 files, 20 references: `agent::config` (1), `agent::model_providers` (1), `extensions::notification` (5), `remote::client` (9), `sampling` (1), `sampling::conversation` (1), `sampling::types` (1), `util::config` (1).
-
-Dead units (nothing live refers to them): `auth::flow` (45), `config::reloader` (77), `session::events` (591), `session::telemetry` (174), `session::unified_list` (103), `upload` (1), `upload::turn` (17).
-
-Check these dead units first. Each has `impl` blocks for types that other units define, and code uses an impl without naming it, so the compiler may need the unit: `session::events` (`GoalClassifierVerdictTelemetry`).
 
 <details><summary>Live units</summary>
 
 | unit | lines | references from live code outside |
 |---|---|---|
-| `util::config` | 6,706 | 93 |
+| `util::config` | 5,975 | 93 |
 | `auth::manager` | 3,754 | 0 |
-| `agent::config` | 3,153 | 26 |
+| `agent::config` | 3,110 | 26 |
 | `extensions::notification` | 2,195 | 9 |
-| `config` | 1,397 | 18 |
+| `config` | 1,361 | 18 |
 | `auth::recovery` | 1,073 | 0 |
 | `auth::oidc` | 927 | 0 |
 | `agent::config_model_override_parse` | 860 | 0 |
-| `agent::folder_trust` | 799 | 1 |
 | `managed_config` | 763 | 5 |
 | `remote::client` | 748 | 0 |
 | `auth::refresh` | 723 | 0 |
@@ -78,11 +73,10 @@ Check these dead units first. Each has `impl` blocks for types that other units 
 | `sampling::error` | 234 | 8 |
 | `session::acp_types` | 226 | 0 |
 | `heap_profile` | 202 | 4 |
-| `claude_import` | 201 | 0 |
 | `tools::config` | 184 | 0 |
 | `auth::error` | 171 | 0 |
-| `session` | 161 | 16 |
 | `auth::external_auth` | 160 | 0 |
+| `session` | 158 | 16 |
 | `auth::token_output` | 155 | 0 |
 | `session::title` | 140 | 3 |
 | `auth::auth_provider` | 128 | 0 |
@@ -97,13 +91,14 @@ Check these dead units first. Each has `impl` blocks for types that other units 
 | `util::dual_clock` | 46 | 0 |
 | `extensions::prompt_meta` | 43 | 1 |
 | `instrumentation` | 40 | 0 |
-| `auth` | 34 | 20 |
+| `auth` | 33 | 20 |
 | `session::pending_interaction` | 31 | 0 |
-| `<root>` | 26 | 0 |
 | `auth::devbox_login_stub` | 25 | 0 |
+| `<root>` | 24 | 0 |
 | `util` | 16 | 63 |
 | `sampling` | 12 | 0 |
 | `session::image_normalize` | 12 | 0 |
+| `agent::folder_trust` | 11 | 1 |
 | `tools` | 11 | 3 |
 | `agent` | 9 | 0 |
 | `remote` | 9 | 1 |
@@ -149,16 +144,16 @@ Unresolved: 4 references from outside name nothing that is a unit here (an item 
 
 ### `pi-tools`
 
-Non-test code: 130,727 lines in 89 units.
+Non-test code: 130,450 lines in 88 units.
 
 | | units | lines | share |
 |---|---|---|---|
-| live | 87 | 130,407 | 100% |
-| dead | 2 | 320 | 0% |
+| live | 87 | 130,406 | 100% |
+| dead | 1 | 44 | 0% |
 
 Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampling`): 1 live units, 1 files, 1 references: `implementations::web_search` (1).
 
-Dead units (nothing live refers to them): `implementations::editor_infra` (276), `types::error` (44).
+Dead units (nothing live refers to them): `types::error` (44).
 
 Check these dead units first. Each has `impl` blocks for types that other units define, and code uses an impl without naming it, so the compiler may need the unit: `types::error` (`ToolError`).
 
@@ -195,7 +190,7 @@ Check these dead units first. Each has `impl` blocks for types that other units 
 | `persistence` | 685 | 0 |
 | `util::mcp_truncate` | 682 | 0 |
 | `computer::types` | 640 | 28 |
-| `types::compat` | 632 | 15 |
+| `types::compat` | 632 | 14 |
 | `util::unicode_confusables` | 612 | 0 |
 | `types::schema` | 500 | 0 |
 | `media_gen_limits` | 485 | 5 |
@@ -245,7 +240,7 @@ Check these dead units first. Each has `impl` blocks for types that other units 
 | `<root>` | 42 | 0 |
 | `types` | 37 | 24 |
 | `notification` | 34 | 7 |
-| `implementations` | 29 | 3 |
+| `implementations` | 28 | 3 |
 | `types::api_key_provider` | 26 | 0 |
 | `util::spawn` | 26 | 0 |
 | `mcp_elicitation` | 15 | 11 |
@@ -258,16 +253,14 @@ Check these dead units first. Each has `impl` blocks for types that other units 
 
 ### `pi-agent`
 
-Non-test code: 22,902 lines in 31 units.
+Non-test code: 22,877 lines in 30 units.
 
 | | units | lines | share |
 |---|---|---|---|
-| live | 30 | 22,878 | 100% |
-| dead | 1 | 24 | 0% |
+| live | 30 | 22,877 | 100% |
+| dead | 0 | 0 | 0% |
 
 Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampling`): 3 live units, 3 files, 5 references: `agent` (1), `builder` (3), `config` (1).
-
-Dead units (nothing live refers to them): `prompt::browser_verification` (24).
 
 <details><summary>Live units</summary>
 
@@ -276,7 +269,7 @@ Dead units (nothing live refers to them): `prompt::browser_verification` (24).
 | `config` | 2,699 | 8 |
 | `prompt::skills` | 2,686 | 6 |
 | `builder` | 2,575 | 0 |
-| `plugins::discovery` | 1,865 | 3 |
+| `plugins::discovery` | 1,865 | 1 |
 | `discovery` | 1,603 | 5 |
 | `plugins::git_install` | 1,596 | 0 |
 | `prompt::context` | 1,436 | 2 |
@@ -288,7 +281,7 @@ Dead units (nothing live refers to them): `prompt::browser_verification` (24).
 | `plugins::install_registry` | 631 | 0 |
 | `prompt::user_message` | 566 | 0 |
 | `plugins::hooks_adapter` | 561 | 0 |
-| `plugins::marketplace` | 497 | 1 |
+| `plugins::marketplace` | 497 | 0 |
 | `plugins::trust` | 365 | 1 |
 | `agent` | 297 | 0 |
 | `repo` | 222 | 3 |
@@ -297,31 +290,29 @@ Dead units (nothing live refers to them): `prompt::browser_verification` (24).
 | `compaction` | 46 | 0 |
 | `error` | 41 | 0 |
 | `prompt::ignore` | 37 | 0 |
-| `plugins` | 32 | 7 |
+| `plugins` | 32 | 3 |
 | `timing` | 31 | 0 |
 | `<root>` | 29 | 0 |
 | `prompt::subagent_prompts` | 26 | 0 |
 | `prompt::prompt_encrypted` | 14 | 0 |
-| `prompt` | 10 | 0 |
+| `prompt` | 9 | 0 |
 
 </details>
 
 ### `pi-workspace`
 
-Non-test code: 81,282 lines in 77 units.
+Non-test code: 80,813 lines in 76 units.
 
 | | units | lines | share |
 |---|---|---|---|
-| live | 76 | 80,820 | 99% |
-| dead | 1 | 462 | 1% |
-
-Dead units (nothing live refers to them): `publish` (462).
+| live | 76 | 80,813 | 100% |
+| dead | 0 | 0 | 0% |
 
 <details><summary>Live units</summary>
 
 | unit | lines | references from live code outside |
 |---|---|---|
-| `permission::manager` | 11,250 | 0 |
+| `permission::manager` | 11,247 | 0 |
 | `handle` | 4,902 | 0 |
 | `session::git` | 3,693 | 4 |
 | `permission::auto_mode` | 3,593 | 0 |
@@ -337,12 +328,12 @@ Dead units (nothing live refers to them): `publish` (462).
 | `session::file_state` | 1,813 | 0 |
 | `file_system::index` | 1,566 | 0 |
 | `status_config` | 1,566 | 0 |
-| `trust` | 1,563 | 3 |
+| `trust` | 1,563 | 1 |
 | `hub_server` | 1,320 | 0 |
 | `permission::state` | 1,245 | 0 |
 | `session::tool_config` | 1,244 | 0 |
 | `session` | 1,175 | 0 |
-| `folder_trust` | 1,171 | 14 |
+| `folder_trust` | 1,168 | 6 |
 | `config` | 1,135 | 0 |
 | `session::checkpoint` | 1,066 | 0 |
 | `permission::exec_risk` | 1,022 | 0 |
@@ -376,7 +367,7 @@ Dead units (nothing live refers to them): `publish` (462).
 | `file_system::git_status` | 294 | 0 |
 | `scheduler_liveness` | 284 | 0 |
 | `mcp` | 276 | 0 |
-| `<root>` | 245 | 0 |
+| `<root>` | 244 | 0 |
 | `session::jj` | 229 | 0 |
 | `rpc_envelope` | 226 | 0 |
 | `permission::gate_preflight` | 199 | 0 |
@@ -384,7 +375,7 @@ Dead units (nothing live refers to them): `publish` (462).
 | `file_system::fs` | 152 | 0 |
 | `fs_notify` | 144 | 0 |
 | `hub_channel` | 127 | 0 |
-| `project_config` | 115 | 2 |
+| `project_config` | 115 | 0 |
 | `error` | 103 | 0 |
 | `git_odb` | 97 | 0 |
 | `permission` | 96 | 34 |
@@ -402,14 +393,12 @@ Dead units (nothing live refers to them): `publish` (462).
 
 ### `pi-hooks`
 
-Non-test code: 9,026 lines in 13 units.
+Non-test code: 4,672 lines in 8 units.
 
 | | units | lines | share |
 |---|---|---|---|
-| live | 8 | 4,687 | 52% |
-| dead | 5 | 4,339 | 48% |
-
-Dead units (nothing live refers to them): `dispatcher` (1,224), `result` (72), `runner` (176), `runner::command` (1,971), `runner::http` (896).
+| live | 8 | 4,672 | 100% |
+| dead | 0 | 0 | 0% |
 
 <details><summary>Live units</summary>
 
@@ -418,7 +407,7 @@ Dead units (nothing live refers to them): `dispatcher` (1,224), `result` (72), `
 | `config` | 1,400 | 5 |
 | `event` | 982 | 1 |
 | `discovery` | 944 | 8 |
-| `env_expand` | 872 | 0 |
+| `env_expand` | 857 | 0 |
 | `matcher` | 216 | 0 |
 | `trust` | 171 | 2 |
 | `error` | 52 | 2 |
@@ -428,14 +417,12 @@ Dead units (nothing live refers to them): `dispatcher` (1,224), `result` (72), `
 
 ### `pi-mcp`
 
-Non-test code: 8,616 lines in 11 units.
+Non-test code: 8,576 lines in 10 units.
 
 | | units | lines | share |
 |---|---|---|---|
-| live | 10 | 8,577 | 100% |
-| dead | 1 | 39 | 0% |
-
-Dead units (nothing live refers to them): `wire` (39).
+| live | 10 | 8,576 | 100% |
+| dead | 0 | 0 | 0% |
 
 <details><summary>Live units</summary>
 
@@ -449,7 +436,7 @@ Dead units (nothing live refers to them): `wire` (39).
 | `mcp_http_client` | 497 | 0 |
 | `liveness` | 354 | 0 |
 | `owned_clients` | 94 | 0 |
-| `<root>` | 40 | 1 |
+| `<root>` | 39 | 1 |
 | `oauth_config` | 27 | 2 |
 
 </details>

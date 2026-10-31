@@ -22,8 +22,8 @@ client, no tool runner and no MCP client.
 ## What this crate is now
 
 The runtime part of the crate is gone: model sampling, the agent loop, the leader process and
-headless mode. The code that stays is the code that the pager still reaches: configuration, folder
-trust, the session files that the pager reads, and shared types. Some of it is scheduled for
+headless mode. The code that stays is the code that the pager still reaches: configuration, the
+folder-trust grant, the session files that the pager reads, and shared types. Some of it is scheduled for
 removal. The plan names the session data layer (phase D.2) and the xAI authentication layer
 (phase D.3).
 

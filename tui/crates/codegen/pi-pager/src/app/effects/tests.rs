@@ -1000,17 +1000,13 @@ async fn fetch_session_list_uses_standard_session_list() {
 async fn session_new_and_load_send_no_mcp_servers() {
     use pi_acp_lib::AcpAgentMessage;
     let project = tempfile::tempdir().expect("temp dir");
+    // A project file that the old loader turned into a server for this project: the request
+    // must not carry it now.
     std::fs::write(
         project.path().join(".mcp.json"),
         r#"{"mcpServers":{"files":{"command":"npx","args":["-y","some-server"],"env":{"TOKEN":"secret"}}}}"#,
     )
     .expect("write .mcp.json");
-    // The premise: what zypi used to send is not empty for this project.
-    let found = pi_shell::util::config::load_mcp_servers(
-        project.path(),
-        &pi_tools::types::compat::CompatConfig::default(),
-    );
-    assert!(!found.is_empty(), "the fixture must be something discovery finds");
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let mut tasks = JoinSet::new();

@@ -43,7 +43,6 @@ serde = { workspace = true }
 serde_ignored = "0.1"
 serde_json = { workspace = true, features = ["preserve_order"] }
 thiserror = { workspace = true }
-dirs = "6"
 toml = { workspace = true, features = ["preserve_order"] }
 tokio = { workspace = true, features = [
     "io-std",
@@ -86,7 +85,6 @@ pi-bundle = { workspace = true }
 pi-config = { workspace = true }
 pi-config-types = { workspace = true }
 pi-file-utils = { path = "../pi-file-utils" }
-pi-session-events = { workspace = true }
 pi-auth = { workspace = true, features = ["middleware"] }
 pi-telemetry = { workspace = true }
 pi-http = { workspace = true }

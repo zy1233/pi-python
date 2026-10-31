@@ -1,20 +1,23 @@
 //! # pi-hooks
 //!
-//! Runtime hook system for Grok — file-based discovery, command execution,
-//! and policy enforcement.
+//! Hook definitions: file-based discovery, parsing and trust.
 //!
 //! ## Overview
 //!
-//! This crate provides a minimal hooks system for Grok. Hooks are discovered
-//! from dedicated directories (`~/.grok/hooks/` and `<git-worktree-root>/.grok/hooks/`),
-//! defined in JSON files (compatible settings format), and executed as child processes.
+//! Hooks are discovered from dedicated directories (`~/.grok/hooks/` and
+//! `<git-worktree-root>/.grok/hooks/`) and defined in JSON files (compatible settings format).
+//! This crate loads and checks the definitions. It does not run them: the dispatcher and the
+//! command and HTTP runners are gone (plan D.8), because nothing in `zypi` called them. The
+//! Python agent has no hook system that reads these definitions.
 //!
-//! ## v0 scope
+//! ## What is here
 //!
-//! - Four event types: `session_start`, `pre_tool_use`, `post_tool_use`, `session_end`
-//! - Command-backed hooks only
-//! - `pre_tool_use` hooks can deny/allow (blocking); all others are non-blocking
-//! - Fail-open by default: hook failures do not block normal operation
+//! - `config`: the hook JSON format, `HookSpec`, environment expansion at load time
+//! - `discovery`: `load_hooks`, `HookRegistry`, the hook directories and settings layers
+//! - `event`: the event names and the payloads of the events
+//! - `matcher`: the tool-name matcher of a hook
+//! - `trust`: the legacy trust file of projects (read once, for a migration) and the list of
+//!   disabled hooks
 //!
 //! ## Quick start
 //!
@@ -38,13 +41,10 @@
 
 pub mod config;
 pub mod discovery;
-pub mod dispatcher;
 mod env_expand;
 pub mod error;
 pub mod event;
 pub mod matcher;
-pub mod result;
-pub mod runner;
 #[cfg(test)]
 mod test_support;
 pub mod trust;

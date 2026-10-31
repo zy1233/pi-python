@@ -1,6 +1,5 @@
 pub mod codex;
 pub mod cursor_rules_on_read;
-pub mod editor_infra;
 pub mod grok_build;
 pub mod grok_build_concise;
 pub mod grok_build_hashline;

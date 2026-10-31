@@ -2331,17 +2331,16 @@ fn project_config_never_sources_feedback_user() {
     std::fs::create_dir_all(&grok).unwrap();
     std::fs::write(
             grok.join("config.toml"),
-            "[plugins]\npaths = [\"./p\"]\n\n[feedback.user]\ncommand = \"/evil\"\n",
+            "[feedback.user]\ncommand = \"/evil\"\n",
         )
         .unwrap();
     let cwd = repo.path();
     crate::agent::folder_trust::grant_folder_trust(cwd);
     assert!(
-            resolve_effective_plugins_config(cwd)
-                .paths
+            pi_workspace::project_config::find_project_configs(cwd)
                 .iter()
-                .any(|p| p == "./p"),
-            "trusted project [plugins].paths must merge (proves the project config is read)"
+                .any(|p| p.ends_with(".grok/config.toml")),
+            "the project config must be found (proves it is a real candidate for a merge)"
         );
     let cfg = crate::agent::config::Config::new_from_toml_cfg(
             &load_effective_config().unwrap(),
@@ -2501,186 +2500,6 @@ fn apply_requirements_telemetry_string_form_pins_known_modes_only() {
 /// local/dev build auto-trusts). Hold the returned guard for the test body.
 fn simulate_release_build() -> pi_test_support::EnvGuard {
     pi_test_support::EnvGuard::set(pi_version::TEST_VERSION_ENV, "0.0.0-sim")
-}
-/// SECURITY (plugin-RCE): a PROJECT-declared `[plugins].paths` loads as an
-/// auto-enabled, auto-trusted ConfigPath plugin, so it must merge into the
-/// effective config ONLY when the folder is trusted; project
-/// `[plugins].disabled` is never gated. The closing set-difference proves
-/// the gate toggles ONLY that path (user/global paths pass through both
-/// verdicts untouched). GROK_HOME-isolated + `#[serial]` for folder-trust
-/// store hygiene (empty store ⇒ deterministic untrusted;
-/// `EnvGuard` restores GROK_HOME even on panic). No user-global
-/// `$GROK_HOME/config.toml` is seeded: `grok_home()` is `OnceLock`-cached,
-/// so under a shared-process harness (Bazel) such a seed is read
-/// non-deterministically — reliable only under nextest's process-per-test
-/// isolation.
-#[test]
-#[serial_test::serial]
-fn resolve_effective_plugins_config_gates_project_paths_on_folder_trust() {
-    use pi_test_support::EnvGuard;
-    let home = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::set("GROK_HOME", home.path());
-    let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
-    let _sim = simulate_release_build();
-    let repo = tempfile::tempdir().unwrap();
-    git2::Repository::init(repo.path()).unwrap();
-    let grok = repo.path().join(".grok");
-    std::fs::create_dir_all(&grok).unwrap();
-    std::fs::write(
-            grok.join("config.toml"),
-            "[plugins]\npaths = [\"./proj-plugin\"]\ndisabled = [\"proj-bad\"]\n",
-        )
-        .unwrap();
-    let cwd = repo.path();
-    let proj_path = "./proj-plugin".to_string();
-    let proj_disabled = "proj-bad".to_string();
-    let untrusted = resolve_effective_plugins_config(cwd);
-    assert!(
-            !untrusted.paths.contains(&proj_path),
-            "untrusted folder must NOT merge the project [plugins].paths"
-        );
-    assert!(
-            untrusted.disabled.contains(&proj_disabled),
-            "project [plugins].disabled must merge even when untrusted (fail-safe)"
-        );
-    crate::agent::folder_trust::grant_folder_trust(cwd);
-    let trusted = resolve_effective_plugins_config(cwd);
-    assert!(
-            trusted.paths.contains(&proj_path),
-            "trusted folder must merge the project [plugins].paths"
-        );
-    assert!(
-            trusted.disabled.contains(&proj_disabled),
-            "project [plugins].disabled must merge when trusted too"
-        );
-    let trusted_minus_project: Vec<String> = trusted
-        .paths
-        .iter()
-        .filter(|p| *p != &proj_path)
-        .cloned()
-        .collect();
-    assert_eq!(
-            trusted_minus_project, untrusted.paths,
-            "the trust gate must toggle ONLY the project path; user/global paths unaffected"
-        );
-}
-/// SECURITY (plugin-RCE) end-to-end: prove through the REAL `discover_plugins`
-/// that a PROJECT-declared `[plugins].paths` ConfigPath plugin is EXCLUDED
-/// from discovery while untrusted and included once trusted. The Part-2
-/// set-difference test covers the config merge; this closes the loop at the
-/// discovery boundary (if it is never discovered it can never activate).
-/// Mirrors the Project-scope analog `discover_real_project_plugin_gated_on_project_trusted`
-/// in `pi-agent`. An ABSOLUTE plugin path is used so the merged
-/// `config_paths` entry resolves against the repo — `discover_plugins`' `is_dir()`
-/// check resolves a relative `./x` against the process cwd, not `cwd`.
-/// GROK_HOME-isolated + `#[serial]` (`EnvGuard` restores it even on panic).
-#[test]
-#[serial_test::serial]
-fn discover_plugins_excludes_untrusted_configpath_plugin_end_to_end() {
-    use pi_agent::plugins::{TrustStore, discover_plugins};
-    use pi_test_support::EnvGuard;
-    let home = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::set("GROK_HOME", home.path());
-    let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
-    let _sim = simulate_release_build();
-    let repo = tempfile::tempdir().unwrap();
-    git2::Repository::init(repo.path()).unwrap();
-    let cwd = repo.path();
-    let plugin_dir = cwd.join("cfgpath-probe");
-    std::fs::create_dir_all(&plugin_dir).unwrap();
-    std::fs::write(plugin_dir.join("plugin.json"), r#"{"name":"cfgpath-probe"}"#)
-        .unwrap();
-    let grok = cwd.join(".grok");
-    std::fs::create_dir_all(&grok).unwrap();
-    std::fs::write(
-            grok.join("config.toml"),
-            format!("[plugins]\npaths = ['{}']\n", plugin_dir.display()),
-        )
-        .unwrap();
-    let trust_store = TrustStore::load_from(home.path().join("plugin-trust"));
-    let untrusted_dc = resolve_effective_plugins_config(cwd).to_discovery_config();
-    let untrusted_verdict = crate::agent::folder_trust::project_scope_allowed(cwd);
-    assert!(
-            !untrusted_verdict,
-            "a fresh repo declaring [plugins].paths must resolve untrusted"
-        );
-    assert!(
-            !untrusted_dc
-                .config_paths
-                .iter()
-                .any(|p| p.ends_with("cfgpath-probe")),
-            "untrusted: the project path must be absent from config_paths"
-        );
-    let untrusted_found = discover_plugins(
-            Some(cwd),
-            &untrusted_dc,
-            &trust_store,
-            untrusted_verdict,
-        )
-        .iter()
-        .any(|p| p.manifest.name == "cfgpath-probe");
-    assert!(
-            !untrusted_found,
-            "untrusted folder must EXCLUDE the ConfigPath plugin from discovery"
-        );
-    crate::agent::folder_trust::grant_folder_trust(cwd);
-    crate::agent::folder_trust::resolve_and_record(cwd, None, false);
-    let trusted_dc = resolve_effective_plugins_config(cwd).to_discovery_config();
-    let trusted_verdict = crate::agent::folder_trust::project_scope_allowed(cwd);
-    assert!(trusted_verdict, "a store-granted repo must resolve trusted");
-    let trusted_found = discover_plugins(
-            Some(cwd),
-            &trusted_dc,
-            &trust_store,
-            trusted_verdict,
-        )
-        .iter()
-        .any(|p| p.manifest.name == "cfgpath-probe");
-    assert!(
-            trusted_found,
-            "trusted folder must DISCOVER the merged ConfigPath plugin"
-        );
-}
-/// Kill-switch ordering regression: `resolve_effective_plugins_config` reads
-/// the folder-trust gate internally, so its call sites (commands/list, plugin
-/// fan-out, reload) resolve with the REAL RemoteSettings first. A cold key
-/// under an org kill-switch must end up allowed — if the plugins-config read
-/// ran first, the gate's remote-less backstop would record a durable
-/// kill-switch-blind deny that `resolve_and_record_inner`'s `Some(false)`
-/// arm (store-only reconcile) could never lift. GROK_HOME-isolated (empty
-/// store); GROK_FOLDER_TRUST unset so the kill-switch is the only signal.
-#[test]
-#[serial_test::serial]
-fn kill_switched_cold_cwd_stays_allowed_through_plugins_config_read() {
-    use pi_test_support::EnvGuard;
-    let home = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::set("GROK_HOME", home.path());
-    let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
-    let _sim = simulate_release_build();
-    let repo = tempfile::tempdir().unwrap();
-    git2::Repository::init(repo.path()).unwrap();
-    let grok = repo.path().join(".grok");
-    std::fs::create_dir_all(&grok).unwrap();
-    std::fs::write(grok.join("config.toml"), "[plugins]\npaths = [\"./proj-plugin\"]\n")
-        .unwrap();
-    let cwd = repo.path();
-    let remote = crate::util::config::RemoteSettings {
-        folder_trust_enabled: Some(false),
-        ..Default::default()
-    };
-    assert!(
-            crate::agent::folder_trust::resolve_and_record(cwd, Some(&remote), false),
-            "kill-switch must resolve the cold key trusted"
-        );
-    let cfg = resolve_effective_plugins_config(cwd);
-    assert!(
-            cfg.paths.contains(&"./proj-plugin".to_string()),
-            "kill-switched folder counts trusted, so the project path must merge"
-        );
-    assert!(
-            crate::agent::folder_trust::project_scope_allowed(cwd),
-            "gate must still allow the kill-switched folder after the config read"
-        );
 }
 /// `GROK_SANDBOX` is process-global; serialize the tests that read it.
 static SANDBOX_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
