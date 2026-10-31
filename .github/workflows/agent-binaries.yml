@@ -1,0 +1,210 @@
+name: Agent binaries
+
+# Builds the agent as one executable per platform (PyInstaller, one file) for the ACP registry
+# `binary` entry, tests each on its own platform, and attaches the archives to the GitHub
+# Release of the tag. See docs/specs/2026-10-31-agent-binaries.md.
+#
+# Why `workflow_run`: the Release workflow creates the release (`gh release create`). A run
+# that a tag push starts in parallel could create it first and make that step fail, and an event
+# made with GITHUB_TOKEN starts no workflow, so this workflow waits for the Release workflow to
+# finish and then uploads (and creates the release only if it is not there).
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+  # A run for a pull request builds and tests everything and uploads nothing.
+  pull_request:
+    paths:
+      - ".github/workflows/agent-binaries.yml"
+      - "packaging/agent/**"
+      - "packages/pi-dynamic-workflows/**"
+      - "packages/pi-agent-cli/**"
+      - "pi_agent_core/**"
+  # By hand: with a tag it builds that tag and attaches the archives to its release (also the
+  # way to repair a release whose upload failed); without a tag it is a dry run.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag whose release gets the archives (empty: build and test, upload nothing)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-binaries-${{ github.event.workflow_run.head_branch || github.event.inputs.tag || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-24.04
+    # A Release run counts when it succeeded and was a push of a tag.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       startsWith(github.event.workflow_run.head_branch, 'v'))
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      ref: ${{ steps.plan.outputs.ref }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Choose the tag and the commit
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          RUN_TAG: ${{ github.event.workflow_run.head_branch }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          SHA: ${{ github.sha }}
+        run: |
+          tag=""
+          ref="$SHA"
+          if [ "$EVENT" = "workflow_run" ]; then
+            tag="$RUN_TAG"; ref="$RUN_SHA"
+          elif [ "$EVENT" = "workflow_dispatch" ] && [ -n "$INPUT_TAG" ]; then
+            tag="$INPUT_TAG"; ref="refs/tags/$INPUT_TAG"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.plan.outputs.ref }}
+      - name: Read the version and check it against the tag
+        id: version
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+        run: |
+          version="$(python3 -c "import tomllib; print(tomllib.load(open('packages/pi-agent-cli/pyproject.toml','rb'))['project']['version'])")"
+          if [ -n "$TAG" ] && [ "v$version" != "$TAG" ]; then
+            echo "::error::The tag is $TAG but pi-agent-cli-lc is $version. The registry entry needs one version for the PyPI package and the archives."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  # The changed code on the platforms that the CI of the repository (Linux) does not cover.
+  platform-tests:
+    name: Tests (${{ matrix.os }})
+    needs: plan
+    if: needs.plan.outputs.tag == ''
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, macos-15, macos-15-intel]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install packages (dev)
+        shell: bash
+        run: pip install -e ".[dev]" -e "./packages/pi-agent-harness" -e "./packages/pi-agent-cli" -e "./packages/pi-web-access" -e "./packages/pi-goal-x" -e "./packages/pi-dynamic-workflows" -e "./packages/pi-mcp"
+      - name: Tests of the sandbox, the terminal login, the providers
+        shell: bash
+        run: >-
+          python -m pytest -v -p no:cacheprovider
+          packages/pi-dynamic-workflows/tests
+          pi_agent_core/tests/test_frozen_providers.py
+          packages/pi-agent-cli/tests/test_acp_auth_methods.py
+          packages/pi-agent-cli/tests/test_setup_command.py
+
+  build:
+    name: Build and test (${{ matrix.target }})
+    needs: plan
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x86_64, os: ubuntu-22.04 }
+          - { target: linux-aarch64, os: ubuntu-22.04-arm }
+          - { target: darwin-aarch64, os: macos-15 }
+          - { target: darwin-x86_64, os: macos-15-intel }
+          - { target: windows-x86_64, os: windows-2022 }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install the packages and PyInstaller
+        shell: bash
+        run: >-
+          pip install "pyinstaller~=6.22" pytest pytest-asyncio
+          . ./packages/pi-agent-harness ./packages/pi-agent-cli ./packages/pi-web-access
+          ./packages/pi-goal-x ./packages/pi-dynamic-workflows ./packages/pi-mcp
+      - name: Build
+        shell: bash
+        run: python packaging/agent/build.py
+      - name: Where the programs are
+        shell: bash
+        run: |
+          python - <<'PY' >> "$GITHUB_ENV"
+          import pathlib, sys
+          suffix = ".exe" if sys.platform == "win32" else ""
+          agent = pathlib.Path("dist/agent/zycode-agent" + suffix).resolve()
+          child = pathlib.Path("build/agent/child-dist/pi-sandbox-child/pi-sandbox-child" + suffix).resolve()
+          print(f"AGENT_PROGRAM={agent.as_posix()}")
+          print(f"CHILD_PROGRAM={child.as_posix()}")
+          PY
+      - name: Smoke test (workflow script, bundled provider, tools)
+        shell: bash
+        run: python packaging/agent/smoke.py --frozen "$AGENT_PROGRAM"
+      - name: ACP contract tests against the program
+        shell: bash
+        run: PI_ACP_CONTRACT_COMMAND="$AGENT_PROGRAM" python -m pytest -v -p no:cacheprovider packages/pi-agent-cli/tests/test_acp_stdio_contract.py
+      - name: Sandbox tests against the frozen script process
+        shell: bash
+        run: >-
+          PI_SANDBOX_FROZEN_CHILD="$CHILD_PROGRAM" python -m pytest -v -p no:cacheprovider
+          packages/pi-dynamic-workflows/tests/test_sandbox_isolation.py
+          packages/pi-dynamic-workflows/tests/test_sandbox_protocol.py
+          packages/pi-dynamic-workflows/tests/test_sandbox_frozen.py
+      - name: Sizes
+        shell: bash
+        run: ls -l dist/agent
+      - uses: actions/upload-artifact@v6
+        with:
+          name: agent-${{ matrix.target }}
+          path: |
+            dist/agent/zycode-agent-*.tar.gz
+            dist/agent/zycode-agent-*.zip
+          if-no-files-found: error
+
+  publish:
+    name: Attach to the release
+    needs: [plan, build]
+    if: needs.plan.outputs.tag != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ needs.plan.outputs.tag }}
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: agent-*
+          path: archives
+          merge-multiple: true
+      - name: Create the release if it is not there, then upload
+        run: |
+          ls -l archives
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            # Another run may create it between the check and here; then the upload is enough.
+            gh release create "$TAG" --title "$TAG" --notes "Agent binaries for $TAG." --verify-tag \
+              || gh release view "$TAG" >/dev/null
+          fi
+          gh release upload "$TAG" archives/* --clobber
+          gh release view "$TAG" --json assets --jq '.assets[] | "\(.name) \(.size) \(.digest)"'
