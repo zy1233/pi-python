@@ -691,6 +691,20 @@ def test_the_test_job_installs_the_pinned_nextest_when_the_manifest_asks_for_it(
     assert job.index("taiki-e/install-action") < job.index("scripts/tui_baseline.py test")
 
 
+def test_the_test_job_makes_the_sandbox_tests_fail_when_they_cannot_enforce():
+    # Without SANDBOX_E2E_REQUIRE_ENFORCEMENT the `pi-sandbox` end-to-end tests return early on a
+    # runner with no Landlock or no working `bwrap`, and they count as passed.
+    text = WORKFLOW.read_text(encoding="utf-8")
+    job = text.split("\n  test:\n", 1)[1].split("\n  release-baseline:\n", 1)[0]
+    assert "pi-sandbox" in {s["package"] for s in _manifest()["test"]["suite"]}
+    run = job.index("scripts/tui_baseline.py test")
+    step = job.rindex("      - name:", 0, run)
+    assert re.search(r'env:\n\s+SANDBOX_E2E_REQUIRE_ENFORCEMENT: "1"\n', job[step:run])
+    install = job.index("apt-get install -y -qq bubblewrap")
+    assert install < run
+    assert "kernel.apparmor_restrict_unprivileged_userns=0" in job[install:run]
+
+
 def test_workflow_runs_the_documented_commands():
     text = WORKFLOW.read_text(encoding="utf-8")
     for command in ("check", "test", "release"):  # `gates` runs inside `check`
@@ -701,7 +715,7 @@ def test_workflow_runs_the_documented_commands():
 # ---- the end-to-end workflow (tui-e2e.yml) -------------------------------------------------------
 #
 # A change that touches only the Python agent starts tui-e2e.yml (one test target) and not
-# tui-ci.yml (ten suites, 18 to 35 minutes). These tests keep the two files from drifting apart.
+# tui-ci.yml (eleven suites, 18 to 35 minutes). These tests keep the two files from drifting apart.
 
 # What the end-to-end tests read on the Python side.
 AGENT_PATHS = (

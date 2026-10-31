@@ -231,6 +231,29 @@ targets = ["--lib"]
 reference_passed = 320
 min_passed = 310
 
+# The sandbox: its lib tests and the four end-to-end files (`deny_paths_e2e` needs `bwrap` on
+# Linux; `landlock_enforcement_e2e` and `read_write_trailing_glob_e2e` need Landlock). The files
+# skip on a host that cannot enforce, and pass: only `SANDBOX_E2E_REQUIRE_ENFORCEMENT` turns the
+# skip into a failure. tui-ci.yml sets it for the `test` job, installs `bubblewrap` and lifts the
+# AppArmor block on unprivileged user namespaces of ubuntu-24.04 (plan section 10.28). A local run
+# without the variable on a host without `bwrap` still passes, but the floor below is only the
+# count of the passing tests, so it cannot tell. The CI result is the one that counts.
+[[test.suite]]
+package = "pi-sandbox"
+targets = [
+    "--lib",
+    "--test",
+    "deny_paths_e2e",
+    "--test",
+    "integration_test",
+    "--test",
+    "landlock_enforcement_e2e",
+    "--test",
+    "read_write_trailing_glob_e2e",
+]
+reference_passed = 105
+min_passed = 100
+
 [release]
 profile = "release-dist"
 package = "pi-pager-bin"
