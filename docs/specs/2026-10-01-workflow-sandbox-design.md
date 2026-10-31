@@ -164,6 +164,8 @@ WorkflowRuntime.execute()
 
 macOS 在 CI 上实测过（`macos-15`、`macos-15-intel`，2026-10-31）：生效的层是 `process`、`rlimit-core`、`-cpu`、`-nofile`、`-fsize`、`audit-hook`。**没有 `rlimit-as`**（系统不执行 `RLIMIT_AS`，申请 1 GiB 在 256 MiB 上限下照样成功），**没有 `rlimit-nproc`**（脚本进程能再起子进程）。所以 macOS 上内存与进程数不受内核限制，只剩审计钩子这层“减速带”。子进程环境里还有系统自己加的 `__CF_USER_TEXT_ENCODING`。对应测试在 macOS 上跳过，原因写在测试里。
 
+**决定（2026-10-31）**：macOS 的行为保持现状：`workflow` 在 macOS 上照常启用，不默认关闭，不加看门狗，不改代码；只在文档里写明沙箱较弱（根 `README.md` 与 `packages/pi-dynamic-workflows/README.md`）。
+
 **Job 的指派**：宿主在进程刚起来就把它放进 Job，早于脚本的任何代码。放进去失败按 `SandboxUnavailable` 处理，什么都不跑。宿主进程崩溃时，Job 句柄随进程关闭，`KILL_ON_JOB_CLOSE` 杀掉脚本进程；管道也会断，子进程的读线程见到 EOF 就 `os._exit(3)`，两条路各自独立。
 
 **低完整性**：子进程用 `SetTokenInformation(TokenIntegrityLevel)` 把自己降到低完整性，不需要特权，也升不回去。之后系统无视用户自己的权限，拒绝它写处于普通完整性的对象（实测：临时目录与用户目录里的文件），拒绝读同用户普通完整性进程的内存（宿主也在其中）和复制它们的句柄（实测）。读文件与联网不受影响。
