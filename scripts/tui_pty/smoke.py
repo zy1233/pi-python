@@ -137,23 +137,15 @@ def main() -> int:
             check("the stderr log is owner-only", mode == 0o600, oct(mode))
 
         # 1c. a sandbox that cannot be enforced must say so (Linux without Landlock)
-        if args.sandbox:
-            text = term.text()
-            if landlock_listed():
-                check(
-                    f"status bar shows sandbox:{args.sandbox} (kernel lists Landlock)",
-                    f"sandbox:{args.sandbox}" in text,
-                    "enforced or not-enforced label",
-                )
-            else:
-                check(
-                    "welcome page says the sandbox is not enforced (kernel has no Landlock)",
-                    f"sandbox:{args.sandbox} (not enforced)" in text,
-                )
-                check(
-                    "the start-up warning was written to the terminal",
-                    b"could not be put in force" in bytes(term.raw),
-                )
+        if args.sandbox and not landlock_listed():
+            check(
+                "welcome page says the sandbox is not enforced (kernel has no Landlock)",
+                f"sandbox:{args.sandbox} (not enforced)" in term.text(),
+            )
+            check(
+                "the start-up warning was written to the terminal",
+                b"could not be put in force" in bytes(term.raw),
+            )
 
         # 2. one turn
         term.type("hello\r")
@@ -166,6 +158,13 @@ def main() -> int:
             check(
                 "the session status bar says so too",
                 f"sandbox:{args.sandbox} (not enforced)" in term.text(),
+            )
+        elif args.sandbox:
+            # The welcome page has no status bar; the label is on the bar once a session shows.
+            check(
+                f"status bar shows sandbox:{args.sandbox} (kernel lists Landlock)",
+                f"sandbox:{args.sandbox}" in term.text(),
+                "enforced or not-enforced label",
             )
 
         # 3. /model: the picker lists both configured models, picking one switches it
