@@ -6,7 +6,7 @@ Config:  scripts/tui_baseline.toml. Standard library only (Python >= 3.11).
 
     python scripts/tui_baseline.py gates     # dependency-graph and source gates (no compilation)
     python scripts/tui_baseline.py check     # gates + cargo check (consumer build, workspace tests)
-    python scripts/tui_baseline.py test      # cargo nextest per suite (--runner cargo: cargo test)
+    python scripts/tui_baseline.py test      # cargo nextest per suite, in a temporary HOME
     python scripts/tui_baseline.py release   # release-dist build: binary size, build time, startup
 
 Every command streams the underlying cargo output, writes JSON and Markdown under --out and, when
@@ -25,6 +25,7 @@ import signal
 import statistics
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import tomllib
@@ -749,11 +750,67 @@ def require_nextest(tui_dir: Path) -> None:
         )
 
 
+# Variables that make a program look for its files outside `$HOME` (XDG base directories).
+HOME_LOCATION_VARS = ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME")
+
+
+def isolate_home(env: dict[str, str], home: Path, real_home: Path | None = None) -> dict[str, str]:
+    """A copy of `env` in which a test that writes into its home directory writes into `home`.
+
+    Plan D.9. Some tests write into the real `~/.pi-python`, `~/.config` and the temporary
+    directory. `HOME` (and `USERPROFILE`) and the temporary-directory variables point into `home`,
+    and the XDG variables are dropped so that they fall back to `$HOME`. cargo and rustup find
+    their toolchains through `HOME` too, so `CARGO_HOME` and `RUSTUP_HOME` are first pinned to
+    where they are now (the variables, or `~/.cargo` and `~/.rustup` of the real home).
+
+    This is a Unix measure. A path that a test hard-codes (`/tmp/...`) is not changed by it.
+    """
+    real = real_home if real_home is not None else Path.home()
+    isolated = dict(env)
+    isolated.setdefault("CARGO_HOME", str(real / ".cargo"))
+    isolated.setdefault("RUSTUP_HOME", str(real / ".rustup"))
+    for key in HOME_LOCATION_VARS:
+        isolated.pop(key, None)
+    scratch = home / "tmp"
+    scratch.mkdir(parents=True, exist_ok=True)
+    isolated["HOME"] = isolated["USERPROFILE"] = str(home)
+    isolated["TMPDIR"] = isolated["TMP"] = isolated["TEMP"] = str(scratch)
+    return isolated
+
+
 def run_tests(
     manifest: dict[str, Any],
     tui_dir: Path,
     only: Sequence[str] = (),
     runner: str | None = None,
+    keep_home: bool = False,
+) -> tuple[dict[str, Any], bool]:
+    """Run the manifest suites with a temporary `HOME`, unless `keep_home` is set.
+
+    The temporary home is a hidden directory inside the real home and is removed afterwards. It is
+    not made under the system temporary directory, and not under the checkout, because some tests
+    need a home that is neither under `/tmp` nor inside a git repository: `pi-file-utils` calls a
+    path unsafe when it is under `/tmp` or has a `.git` above it, and the Landlock tests of
+    `pi-sandbox` put their fixture under `$HOME`, which every sandbox profile would grant if it
+    were under `/tmp`. A run that is killed with SIGKILL leaves the `.tui-baseline-home-*`
+    directory behind.
+    """
+    with contextlib.ExitStack() as stack:
+        home = None
+        if not keep_home:
+            scratch = tempfile.TemporaryDirectory(
+                prefix=".tui-baseline-home-", dir=Path.home(), ignore_cleanup_errors=True
+            )
+            home = Path(stack.enter_context(scratch))
+        return _run_tests(manifest, tui_dir, only, runner, home)
+
+
+def _run_tests(
+    manifest: dict[str, Any],
+    tui_dir: Path,
+    only: Sequence[str],
+    runner: str | None,
+    home: Path | None,
 ) -> tuple[dict[str, Any], bool]:
     cfg = manifest["test"]
     runner = pick_runner(cfg, runner)
@@ -764,6 +821,8 @@ def run_tests(
     env.update(cfg.get("env", {}))
     for key in cfg.get("unset_env", []):
         env.pop(key, None)
+    if home is not None:
+        env = isolate_home(env, home)
     timeout_s = float(cfg.get("timeout_minutes", 60)) * 60
 
     results: list[SuiteResult] = []
@@ -789,6 +848,7 @@ def run_tests(
         "runner": runner,
         "tools": tool_versions(tui_dir, runner),
         "enforced": bool(cfg.get("enforce")),
+        "home_isolated": home is not None,
         "suites": [asdict(r) for r in results],
         "totals": {
             "passed": sum(r.passed for r in results),
@@ -956,6 +1016,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         choices=TEST_RUNNERS,
         help="`test` only: the test runner; default is `[test] runner` in the manifest",
     )
+    parser.add_argument(
+        "--keep-home",
+        action="store_true",
+        help="`test` only: do not give the tests a temporary HOME (plan D.9); they use yours",
+    )
     args = parser.parse_args(argv)
 
     manifest = tomllib.loads(args.manifest.read_text(encoding="utf-8"))
@@ -968,7 +1033,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.command == "check":
         report, ok = run_check(manifest, tui_dir)
     elif args.command == "test":
-        report, ok = run_tests(manifest, tui_dir, args.suite, args.runner)
+        report, ok = run_tests(manifest, tui_dir, args.suite, args.runner, args.keep_home)
     else:
         report, ok = run_release(manifest, tui_dir)
 

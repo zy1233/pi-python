@@ -492,15 +492,24 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn abbreviate_path_empty_home_does_not_fake_tilde() {
-        let prev = std::env::var("HOME").ok();
+        // `abbreviate_path` resolves the zypi home first, and with an empty `HOME` that falls
+        // back to the passwd entry and creates `~/.pi-python` in the real home. `PI_HOME` takes
+        // the lookup to a directory of our own (it wins over everything else).
+        let pi_home = tempfile::tempdir().unwrap();
+        let prev_home = std::env::var("HOME").ok();
+        let prev_pi_home = std::env::var("PI_HOME").ok();
         unsafe {
             std::env::set_var("HOME", "");
+            std::env::set_var("PI_HOME", pi_home.path());
         }
-        assert_eq!(abbreviate_path("/foo").as_ref(), "/foo");
+        let abbreviated = abbreviate_path("/foo").into_owned();
 
-        match prev {
-            Some(home) => unsafe { std::env::set_var("HOME", home) },
-            None => unsafe { std::env::remove_var("HOME") },
+        for (key, prev) in [("HOME", prev_home), ("PI_HOME", prev_pi_home)] {
+            match prev {
+                Some(value) => unsafe { std::env::set_var(key, value) },
+                None => unsafe { std::env::remove_var(key) },
+            }
         }
+        assert_eq!(abbreviated, "/foo");
     }
 }
