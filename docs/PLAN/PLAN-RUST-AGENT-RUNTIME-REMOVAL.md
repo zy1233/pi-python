@@ -37,7 +37,7 @@
 | 1 协议与 Python | 完成一半 | 1.P1 会话列表分页；1.P2 优雅退出；1.P4 显式忽略 `mcp_servers`（r20：装了 `pi-mcp-py` 就连接，决策 19，[#35][pr-35]、[#36][pr-36]）；1.P7 契约测试；1.R1 ADR1 落地（PR 1；PR 2、PR 3 在 [#23][pr-23]、[#24][pr-24]，r13 做成，r14 合入 `main`）；会话文件在第一条消息时才写（决策 17，r14，[#25][pr-25]，r16 合入 `main`；r20 的更正：Zed 重启后空白对话能再打开，[#34][pr-34]）；1.R3 的大部分；1.P3 的 (a) | 1.P3 的 (b)、(c)；1.P5；1.P6；1.R2；1.R4；1.R5；1.R3 的 MCP 子进程与 Windows |
 | B 拆除 runtime | 删除完成，迁移没有完成 | B.1、B.5、B.6：`pi-sampler` 与 `pi-shell` 的 runtime 单元已删；r15：`pi-shell` 的旧存储层 `session::{storage, persistence}` 也删了（决策 10，[#26][pr-26]，r16 合入）；r16：`session::worktree`、`session::helpers` 等死代码与 10 个源码没点名的依赖也删了（[#27][pr-27]，r19 合入 `main`） | B.2、B.3、B.4：r3 换了做法，没有抽出叶子 crate |
 | C 验收与文档 | 完成（r11，PR [#13][pr-13]） | C.1–C.4：`zypi` 没有到 LLM provider 的外连（实测，含一次真模型）；内嵌指南缩成 7 页，启动不再解压；`NOTICE` 重写，`THIRD-PARTY-NOTICES` 有工具对账；`grok agent` 清零，`leader`、`x.ai` 有上限 | 退出条件里的 `leader`、`x.ai` 清不到 0，改成了棘轮（§7 的 C） |
-| D 依赖图瘦身（可选） | 开始了一部分 | D.5（PR [#63][pr-63]）；D.8 的 16 个模块（PR [#62][pr-62]）；r28 合入 `main` | D.1–D.4、D.6、D.7、D.9；D.8 还剩新候选（§7）；等基线数据再定 |
+| D 依赖图瘦身（可选） | 开始了一部分 | D.5（PR [#63][pr-63]）；D.8 的 16 个模块（PR [#62][pr-62]）；r28 合入 `main`；D.9（r29，PR [#75][pr-75]） | D.1–D.4、D.6、D.7；D.8 还剩新候选（§7）；等基线数据再定 |
 
 ### 发布里程碑 V0.5
 
@@ -100,7 +100,7 @@
 - **发布之后留下的（r22；①② 在 PR [#42][pr-42] 里做了，用户已合入，`e65af4d`）：** ① `release.yml` 的 `build-tui` 钉 `ubuntu-24.04`：`ubuntu-latest` 要迁到 Ubuntu 26，迁了之后 Linux 的二进制可能要更新的 glibc（现在要 glibc 2.39 或更新）。② glibc 的下限写进 `docs/TUI-AND-CODE-AGENT.md`。③ Node.js 20 弃用的警告：PR [#43][pr-43]（r23，随 v0.7.0 发布）把 `upload-artifact` 升到 v6、`download-artifact` 升到 v7、`cache` 升到 v5；警告现在只点名 `arduino/setup-protoc`，它没有 Node 24 的版本，留着。**没做**：PyPI 一侧的 Trusted Publishing（要账号所有人在 PyPI 上设）；现在都不影响发布。
 - **要等用户决定：** 真的 Plan 模式（决策 7 的 (b)(c)）；「不在 V0.6」里的各项归哪个里程碑（v0.7.0 之后还没有下一个里程碑）。
 - **已合入 `main`，还没有发布（r28）：** r27 的五个 PR（[#57][pr-57]、[#60][pr-60]、[#61][pr-61]、[#62][pr-62]、[#63][pr-63]）与 [#56][pr-56]、[#58][pr-58]、[#59][pr-59]、[#64][pr-64]、[#65][pr-65]，用一次 `gh stack` 合入（[§10.31][l10-31]）。`CHANGELOG.md` 的 `[Unreleased]` 有 r27 的条目（Changed、Removed、Fixed）。下一个版本带上它们；它还没有里程碑，版本号与日期没有定。
-- **不用等决定：** 阶段 D 做不做，看 [`docs/baselines/tui.md`](../baselines/tui.md) 的数据（它的数 r28 在 `main` 上重新量过，[§10.31][l10-31]）；D.6、D.7、D.9 是候选（§7）。D.8 还剩新候选：`pi-workflow`、`Config.storage_mode`、`pi-update`、没人加载的文件，和 PR [#62][pr-62] 之后露出来的（[§10.30][l10-30] 的「留下的」）。
+- **不用等决定：** 阶段 D 做不做，看 [`docs/baselines/tui.md`](../baselines/tui.md) 的数据（它的数 r28 在 `main` 上重新量过，[§10.31][l10-31]）；D.6、D.7 是候选（§7；D.9 在 r29 做了）。D.8 还剩新候选：`pi-workflow`、`Config.storage_mode`、`pi-update`、没人加载的文件，和 PR [#62][pr-62] 之后露出来的（[§10.30][l10-30] 的「留下的」）。
 - **已定，不做：** 翻页的代价（决策 18；用户在 2026-10-18 答复：不做，1,000 个会话以内够用）；选择器边翻边显示（决策 11）与会话目录的列举太慢（决策 13）（用户，2026-10-27：不做）。
 
 ### 还没有验证的
@@ -397,7 +397,7 @@ Rust（pager）：
 - [ ] D.6 内嵌指南的查看器：`ActiveModal::DocPicker` 与 `DocViewer` 没有入口（非测试代码里，`howto_list_modal` 只被查看器的 Esc 调用，`welcome_doc_viewer` 只在测试里被赋值），启动时的解压又在 C.2 删了，所以七页指南现在没有读者。二选一：接一个入口（斜杠命令或快捷键），或连同选择器、查看器一起删。出处：[§10.14][l10-14]。
 - [ ] D.7 发行与更新的遗留：`pi-pager/npm/` 下 7 个打包目录与 `pi-update` 里还写着 npm 包名 `@pi-official/grok` 和 `x.ai/cli/install.*` 的安装提示。自动更新在 Phase 4 §4.4 已禁用（`pi-pager-bin/src/main.rs` 里 `bg_update_rx = None`），这些不会跑，只是遗留。出处：[§10.14][l10-14]。
 - [x] D.8 删掉调用图工具报死、编译器也认可的 16 个模块（被删文件共 6,143 行）：`pi-hooks` 的 `dispatcher`、`result`、`runner`、`runner::command`、`runner::http`（4,339 行）；`pi-shell` 的 `session::events`、`session::telemetry`、`session::unified_list`、`config::reloader`、`auth::flow`、`upload`、`upload::turn`（1,006 行）；`pi-workspace` 的 `publish`（462 行）；`pi-tools` 的 `implementations::editor_infra`（276 行）；`pi-mcp` 的 `wire`（39 行）；`pi-agent` 的 `prompt::browser_verification`（24 行）。第 17 个报死的模块，`pi-tools` 的 `types::error`（44 行），**不能删**：里面是 `?` 要用的 `impl From<…> for ToolError`。要一起删的还有 `pi-hooks/tests/integration.rs`（822 行，测的就是被删的模块），以及删完没人用的 `env_expand::expand_env_vars_with_extra`（`pi-hooks`）。证据：在副本里这样删，三个产品 crate 的 `cargo check` 与 `cargo check --workspace --tests` 都通过，只多那一条告警。没有真的删；副本里没有跑测试，所以不知道会少几个测试。`session::events`、`session::unified_list` 与 D.2 有重叠。出处：[§10.14][l10-14]。 **状态**（r16）：PR [#27][pr-27] 照这一条做了一部分：`session::helpers`、`session::worktree` 与 `util::config::worktree` 删了。现在 `pi-shell` 里调用图报死的单元是 7 个（1,008 行）：`auth::flow`、`config::reloader`、`session::events`、`session::telemetry`、`session::unified_list`、`upload`、`upload::turn`；`session::events`（591 行）在「check first」里（`GoalClassifierVerdictTelemetry` 的 `impl`）。r16 的扫描又找到几个候选，都没有删，只有文本搜索的证据：没有用户的 crate `pi-workflow`（9 个文件，3,570 行；`tui/Cargo.toml` 的成员列表里有它，没有 `Cargo.toml` 依赖它）；`Config.storage_mode` 与隐藏的 `--storage-mode`（在 `.rs` 里没有找到读 `Config.storage_mode` 的代码）；约 88 个没人加载的文件。要删，就先在副本里删、再编译：rustc 不告警（`pub(crate)` 项在死模块里不告警）。清单见 [§10.19][l10-19]。 **状态**（r27；r28 合入 `main`）：PR [#62][pr-62] 做了：16 个模块都删了，连同决策 10 的 `mcp.rs` 与 `recent_dirs.rs`、和只有它们在调用的代码（编译器的 15 条告警清到 0）；`tui/` 下 −9,067 行；调用图里报死的单元 17 个 → 1 个（`pi-tools::types::error`，不能删）；`pi-shell` 的测试 838 → 784。没动的候选与下一层，见 [§10.30][l10-30] 的「留下的」。
-- [ ] D.9 `tui_baseline.py test` 在开发者自己的 `HOME` 下跑测试（r18 起用 `cargo nextest`，以前是 `cargo test`；这一条不变），有测试会往真实的 `~/.pi-python` 与 `/tmp` 写东西（`trusted_folders.toml`、`config.toml`、`worktrees.db`、`/tmp/grok-unified-log-test-*` 等）。脚本只清了 `PI_HOME`、`GROK_HOME`（好让测试自己设的 `GROK_HOME` 生效），没有隔离 `HOME`。具体是哪个测试写的，大多没有查；`worktrees.db` 的一个来源（`session::worktree` 的两个测试）随 r16 的删除没有了。办法：测试运行时把 `HOME` 设成临时目录，并先钉住 `CARGO_HOME` 与 `RUSTUP_HOME`（不然 cargo 找不到工具链）；CI 的 runner 本来就是空 home，这样本地与 CI 更接近。没有做：要把整套测试重跑一遍（本次 22 m）才能验证，而且它改的脚本 TUI CI 也在用。出处：r11 收尾时的检查，[§10.14][l10-14]；[§10.18][l10-18]。
+- [x] D.9 `tui_baseline.py test` 在开发者自己的 `HOME` 下跑测试：有测试会往真实的 `~/.pi-python` 与 `/tmp` 写东西。**状态**（r29，PR [#75][pr-75]）：做了。执行器让测试在临时 `HOME` 里跑（真实 home 里的隐藏目录，跑完删除；`TMPDIR` 在它里面；`XDG_*` 去掉；`CARGO_HOME`、`RUSTUP_HOME` 先钉住；`--keep-home` 关掉它）。整套 11 个 suite 改前改后都是 8,558 通过 / 0 失败 / 25 跳过。真实 home 与 `/tmp` 里的新条目：改前 2,084 个，改后只剩一个空的 `~/.pi-python`（`pi-pager-render` 的一个测试把 `HOME` 设成空）。记录 [§10.32][l10-32]。
 
 ## 8. 风险与处理
 
@@ -460,13 +460,14 @@ Rust（pager）：
 | [§10.29][l10-29] | r26 | v0.7.0 之前的合入：#45 控制台脚本与 Zed 的说明，#46 `--setup` 与终端登录，#47 队列清扫的顺序错误，#48 CI 的收窄与缓存键；web 的 PR 与版本号 #55（用户在另一个会话里做的，只记事实）；v0.7.0 的发布与核对；`download-artifact@v7` 测到了 | PR [#45][pr-45]、[#46][pr-46]、[#47][pr-47]、[#48][pr-48]、[#55][pr-55] |
 | [§10.30][l10-30] | r27 | 旗标与设置页的测量（#57）与修（#60）：21 个旗标在交互模式下被拒绝，设置页 37 行 → 29 行；决策 9 的截止（#61）；D.8 与决策 10 两项（#62）、D.5（#63）；五个 PR 在 r28 合入 | PR [#57][pr-57]、[#60][pr-60]、[#61][pr-61]、[#62][pr-62]、[#63][pr-63] |
 | [§10.31][l10-31] | r28 | 用 `gh stack` 合入十个 PR（#58、#59、#56、#57、#60 至 #65）：栈的次序、八个分支的重建与改号、冲突、合入前后的检查、`main` 上的 CI；基线报告的数重新量 | PR [#56][pr-56]–[#65][pr-65]（栈 #66） |
+| [§10.32][l10-32] | r29 | D.9：`tui_baseline.py test` 用临时 `HOME`；改前改后各跑整套测试，数相同；真实 home 与 `/tmp` 里的新条目 2,084 → 1；三次尝试里两个放错的位置 | PR [#75][pr-75] |
 | [附录 A.4][logA4] | r5 | 入口审计的 r5 执行结果 | [#7][pr-7] |
 | [附录 B][logB] | r2–r17 | 复现方法（依赖图、模块级闭包、各轮的测量与测试命令） | — |
 | [附录 C][logC] | r10 | §7 的逐项注释（原文） | — |
 | [附录 D][logD] | r10 | 计划头部的状态文字（原文） | — |
 | [附录 E][logE] | r2 | §4、§5 的原文（源码事实基线与改动规模估计） | — |
 | [附录 F][logF] | r22 续 1 | 计划整理前的状态文字（原文）：头部、「当前状态」逐轮、两个里程碑、「下一步」，「还没有验证的」「待决策」「§7」「§10 索引」里改短的条目，「修订记录（摘要）」的长条目 | — |
-| [修订记录][logRev] | r1–r28 | 逐轮的完整说明 | — |
+| [修订记录][logRev] | r1–r29 | 逐轮的完整说明 | — |
 
 ## 附录 A：能力矩阵与 ACP 版本配对（阶段 0.8，r9 定稿）
 
@@ -573,6 +574,7 @@ Rust（pager）：
 - r26：补记 v0.7.0 之前的合入（PR [#45][pr-45]、[#46][pr-46]、[#47][pr-47]、[#48][pr-48]；web 的 PR 与 [#55][pr-55] 是用户在另一个会话里做的）与 v0.7.0 的发布（2026-10-30，tag 在 `7cb9e23`）；加「发布里程碑 V0.7」；`download-artifact@v7` 测到了（成功）；「还没有验证的」加三项（`--setup` 的终端登录、缓存键、v0.7.0 的二进制）。只改文档（2026-10-30）。见 [§10.29][l10-29]。
 - r27：旗标与设置页的测量（PR [#57][pr-57]）与修（PR [#60][pr-60]；决策 8、14 照倾向改）、选择器的 30 天截止（PR [#61][pr-61]；决策 9）、一批清理（PR [#62][pr-62]：D.8 与决策 10 的两项；PR [#63][pr-63]：D.5）；五个 PR 都开着，没有合入（2026-10-30）。轮号：另一个会话开的 PR [#58][pr-58]、[#59][pr-59] 记成 r24、r25；#56 原来也记成 r24，合入前改成 r26。只改文档。见 [§10.30][l10-30]。
 - r28：用一次 `gh stack` 把十个 PR（[#58][pr-58]、[#59][pr-59]、[#56][pr-56]、[#57][pr-57]、[#60][pr-60]–[#65][pr-65]）合入 `main`（2026-10-31；`main` 从 `7cb9e23` 到 `032ddbb`）。轮号：#58、#59 是 r24、r25，#56 记成 r26，#64 记成 r27。计划里「开着，没有合入」的句子改成已合入；D.5 与 D.8 打勾，阶段 D 改成「开始了一部分」；`docs/baselines/tui.md` 的数按 `main` 上的 CI 重写。只改文档。见 [§10.31][l10-31]。
+- r29：D.9（PR [#75][pr-75]；2026-11-01）：`tui_baseline.py test` 用临时 `HOME`。只改 `scripts/tui_baseline.py`、它的单测与文档。见 [§10.32][l10-32]。
 
 <!-- 链接定义 -->
 [log]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md
@@ -607,6 +609,7 @@ Rust（pager）：
 [l10-29]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1029-r26-追加v070-之前的合入与-v070-的发布
 [l10-30]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1030-r27-追加旗标与设置页的测量与修选择器的截止一批清理
 [l10-31]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1031-r28-追加用-gh-stack-合入十个-pr
+[l10-32]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1032-r29-追加d9测试用临时-home
 [l4-1]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#41-运行路径
 [l4-2]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#42-rust-runtime-与耦合面
 [l4-3]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#43-python-侧pi_agent_cli共-4114-行agentpy-472-行
@@ -670,6 +673,7 @@ Rust（pager）：
 [pr-63]: https://github.com/zy1233/pi-python/pull/63
 [pr-64]: https://github.com/zy1233/pi-python/pull/64
 [pr-65]: https://github.com/zy1233/pi-python/pull/65
+[pr-75]: https://github.com/zy1233/pi-python/pull/75
 [ci-run-5f73e07]: https://github.com/zy1233/pi-python/actions/runs/40172668652
 [tui-ci-run-5f73e07]: https://github.com/zy1233/pi-python/actions/runs/40172721728
 [run-dry-run-5f73e07]: https://github.com/zy1233/pi-python/actions/runs/40172723794

@@ -680,6 +680,96 @@ def test_tool_versions_keeps_only_the_first_line_of_the_nextest_version(monkeypa
     assert set(tb.tool_versions(tmp_path)) == {"rustc", "cargo"}
 
 
+def test_isolate_home_points_the_home_variables_into_the_given_directory(tmp_path):
+    env = {
+        "HOME": "/real/home",
+        "XDG_CONFIG_HOME": "/real/config",
+        "XDG_DATA_HOME": "/real/data",
+        "XDG_CACHE_HOME": "/real/cache",
+        "XDG_STATE_HOME": "/real/state",
+        "TMPDIR": "/real/tmp",
+        "PATH": "/usr/bin",
+    }
+    isolated = tb.isolate_home(env, tmp_path / "home", real_home=Path("/real/home"))
+    assert isolated["HOME"] == isolated["USERPROFILE"] == str(tmp_path / "home")
+    assert isolated["TMPDIR"] == isolated["TMP"] == isolated["TEMP"] == str(tmp_path / "home/tmp")
+    assert (tmp_path / "home" / "tmp").is_dir()
+    assert not [key for key in isolated if key.startswith("XDG_")]
+    assert isolated["PATH"] == "/usr/bin"
+    assert env["HOME"] == "/real/home" and "XDG_DATA_HOME" in env  # the input is not changed
+
+
+def test_isolate_home_pins_cargo_and_rustup_to_where_they_are_now(tmp_path):
+    real = Path("/real/home")
+    isolated = tb.isolate_home({}, tmp_path, real_home=real)
+    assert isolated["CARGO_HOME"] == str(real / ".cargo")
+    assert isolated["RUSTUP_HOME"] == str(real / ".rustup")
+    # A developer who set them keeps them, also when they are not under the home directory.
+    kept = tb.isolate_home(
+        {"CARGO_HOME": "/opt/cargo", "RUSTUP_HOME": "/opt/rustup"}, tmp_path, real_home=real
+    )
+    assert (kept["CARGO_HOME"], kept["RUSTUP_HOME"]) == ("/opt/cargo", "/opt/rustup")
+
+
+def _run_tests_with_a_fake_stream(monkeypatch, tui_dir, **kwargs):
+    seen = []
+
+    def fake_stream(cmd, cwd, *, env=None, **_kwargs):
+        seen.append(env)
+        return 0, "", False
+
+    monkeypatch.setattr(tb, "stream", fake_stream)
+    monkeypatch.setattr(tb, "require_nextest", lambda _tui_dir: None)
+    monkeypatch.setattr(tb, "tool_versions", lambda *_args: {})
+    manifest = _manifest()
+    tb.run_tests(manifest, tui_dir, [manifest["test"]["suite"][0]["package"]], **kwargs)
+    assert len(seen) == 1
+    return seen[0]
+
+
+def test_run_tests_gives_the_tests_a_temporary_home_and_removes_it_afterwards(
+    monkeypatch, tmp_path
+):
+    real_home = tmp_path / "real"
+    real_home.mkdir()
+    monkeypatch.setenv("HOME", str(real_home))
+    monkeypatch.setenv("USERPROFILE", str(real_home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", "/real/config")
+    monkeypatch.delenv("CARGO_HOME", raising=False)
+    env = _run_tests_with_a_fake_stream(monkeypatch, tmp_path)
+    home = Path(env["HOME"])
+    assert home.name.startswith(".tui-baseline-home-")
+    # Inside the real home (not /tmp, not the checkout): see the docstring of `run_tests`.
+    assert home.parent == real_home
+    assert not home.exists()  # removed when the run is over
+    assert "XDG_CONFIG_HOME" not in env
+    assert env["CARGO_HOME"] == str(real_home / ".cargo")
+    assert env["TERM"] == _manifest()["test"]["env"]["TERM"]  # the manifest's variables stay
+    assert not set(_manifest()["test"]["unset_env"]) & set(env)
+
+
+def test_run_tests_with_keep_home_leaves_the_home_variables_alone(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", "/real/home")
+    monkeypatch.setenv("XDG_CONFIG_HOME", "/real/config")
+    env = _run_tests_with_a_fake_stream(monkeypatch, tmp_path, keep_home=True)
+    assert env["HOME"] == "/real/home" and env["XDG_CONFIG_HOME"] == "/real/config"
+
+
+def test_the_command_line_has_a_keep_home_flag(monkeypatch):
+    seen = {}
+
+    def fake_run_tests(manifest, tui_dir, only, runner, keep_home):
+        seen["keep_home"] = keep_home
+        return {"ok": True}, True
+
+    monkeypatch.setattr(tb, "run_tests", fake_run_tests)
+    monkeypatch.setattr(tb, "publish", lambda *_args: None)
+    assert tb.main(["test", "--keep-home"]) == 0
+    assert seen["keep_home"] is True
+    assert tb.main(["test"]) == 0
+    assert seen["keep_home"] is False
+
+
 def test_the_test_job_installs_the_pinned_nextest_when_the_manifest_asks_for_it():
     if _manifest()["test"]["runner"] != "nextest":
         pytest.skip("the manifest does not use nextest")

@@ -12,7 +12,7 @@
 
 ## 目录
 
-- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28)
+- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29)
   - [10.1 范围、方法与规模](#101-范围方法与规模)
   - [10.2 `/model` 恢复（ADR3 r3）](#102-model-恢复adr3-r3)
   - [10.3 验证（r3 的实测）](#103-验证r3-的实测)
@@ -44,6 +44,7 @@
   - [10.29 r26 追加：v0.7.0 之前的合入与 v0.7.0 的发布](#1029-r26-追加v070-之前的合入与-v070-的发布)
   - [10.30 r27 追加：旗标与设置页的测量与修、选择器的截止、一批清理](#1030-r27-追加旗标与设置页的测量与修选择器的截止一批清理)
   - [10.31 r28 追加：用 `gh stack` 合入十个 PR](#1031-r28-追加用-gh-stack-合入十个-pr)
+  - [10.32 r29 追加：D.9，测试用临时 HOME](#1032-r29-追加d9测试用临时-home)
 - [附录 A（摘录）：A.4](#附录-a摘录a4)
   - [A.4 r5 执行结果（对照 r5 时初稿里的「默认决策」；r9 的更新见 A.1）](#a4-r5-执行结果对照-r5-时初稿里的默认决策r9-的更新见-a1)
 - [附录 B：复现方法](#附录-b复现方法)
@@ -70,7 +71,7 @@
   - [F.10 修订记录摘要里的长条目](#f10-修订记录摘要里的长条目)
 - [修订记录](#修订记录)
 
-## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28）
+## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29）
 
 r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）；r14 合入这两个 PR，并做决策 17：会话文件在第一条用户消息时才写（§10.17）；r15 做决策 10 的存储层一项：删 `pi-shell` 里的旧存储层（§10.18）；r16 合入 #25 与 #26，并删 `pi-shell` 里剩下的死代码（§10.19）；r17 检查测试之间的竞争，只改测试与工具（§10.20）；r18 改用 `cargo nextest`，改 `protoc` 的路径与 `release.yml` 的令牌（§10.21）；r19 用 `gh stack` 合入 #27–#31，并设 V0.6 的发布里程碑（§10.22）；r20 定 MCP 的方向（可选扩展包），修空白对话，补发布内容，并合入 #33–#36（§10.23）；r21 做 V0.6 的版本号与发布说明（条件 5），合入 #38 与 #39，并做条件 1–4（§10.24）；r22 打 tag `v0.6.0`、发布、做发布后的核对（§10.25）；r23 把三个 action 升到 Node 24 的版本，处理扩展 API 的审计批 9，并把决策 11、13 记成不做（§10.26）；r24 在内核 6.12 的云 VM 上测了沙箱的 Landlock 层（§10.27）；r25 把 `pi-sandbox` 接进 `TUI CI`（§10.28）；r26 补记 v0.7.0 之前的合入（#45 至 #48、web 的 #50 至 #54、版本号 #55）与 v0.7.0 的发布（§10.29）；r27 量了旗标与设置页并修（#57、#60），去掉选择器的 30 天截止（#61），清了一批死代码（#62、#63；§10.30）；r28 用一次 `gh stack` 把这五个 PR 与另外五个（#56、#58、#59、#64、#65）合入 `main`（§10.31）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
@@ -2232,6 +2233,28 @@ Runner 有 Landlock（ABI 8），没有 `bwrap`；装上 `bwrap` 也不能用，
 5. #58、#59、#65 是云端会话写的。这一轮没有改它们的代码，也没有在本地重跑它们的测试。CI 的 runner 上它们通过：`pi-sandbox` 105 通过，CI 里设了 `SANDBOX_E2E_REQUIRE_ENFORCEMENT=1`，所以 Landlock 的用例在 runner 上真的执行了（§10.28）。
 6. `docs/baselines/tui.md` 的耗时是一次运行的数，没有重复。
 
+### 10.32 r29 追加：D.9，测试用临时 HOME
+
+这一节记 2026-11-01 做的一个 PR：[#75](https://github.com/zy1233/pi-python/pull/75)。起因：用户的电脑跑不动整套 Rust 测试，所以这一轮在云上的 Linux VM 里做（4 核，15 GB，Rust 1.94.0，`cargo-nextest` 0.9.148，`main` 在 `2b62e68`）。用户先要求讨论，同意后只做 D.9：不做发布构建的验证，不做计划的文档轮。改动只在 `scripts/tui_baseline.py`、`scripts/tests/test_tui_baseline.py`，和写旧行为的文档（根 `AGENTS.md`、`docs/baselines/tui.md`、计划的 D.9 一行、这一节）。`tui/` 与 workflow 文件没有改。
+
+**做法。** `run_tests` 在临时 `HOME` 里跑每个 suite。`isolate_home` 做五件事：`HOME` 与 `USERPROFILE` 指向临时目录；`TMPDIR`、`TMP`、`TEMP` 指向它里面的 `tmp`；去掉四个 `XDG_*`；先把 `CARGO_HOME`、`RUSTUP_HOME` 钉在原来的位置（变量，或真实 home 里的 `.cargo`、`.rustup`）；输入的环境不被改。旗标 `--keep-home` 让测试用自己的 `HOME`。报告的 JSON 有 `home_isolated`。5 个新单测（环境的变化、钉住 cargo 与 rustup、临时目录建在哪里并被删、`--keep-home`、命令行的旗标）；对实现改两处（不去掉 `XDG_*`；不钉 `CARGO_HOME`）各有 2 个单测失败。
+
+**临时目录放哪里，试了三次。**
+1. 放在系统临时目录（`/tmp/tui-baseline-home-*`）：5 个失败，都因为 `HOME` 在 `/tmp` 下。`pi-file-utils` 的 `workspace_classifier::tests::home_and_os_dirs::home_project_is_safe` 失败：分类器把 `/tmp` 下的路径当成不安全。`pi-sandbox` 的 4 个 Landlock 用例失败（`strict_profile_blocks_reads_outside_allowlist`、`trailing_glob_read_write_grants_parent_directory`、`read_only_profile_blocks_workspace_writes`、`workspace_profile_writes_only_inside_grants`）：它们把夹具放在 `$HOME/.cache` 下，每个沙箱 profile 都放行 `/tmp`，所以「放行范围之外」的探针成功了。8,553 通过 / 5 失败。
+2. 放在 `tui/target` 下（仓库里）：`pi-sandbox` 通过，`pi-file-utils` 5 个失败：路径上面有 `.git`，分类器当它是项目目录（`cache_dirs_are_unsafe`、`grok_dirs_are_unsafe`、`grok_prefixed_dirs_are_unsafe`、`other_ai_tool_dirs_are_unsafe`、`home_is_unsafe`）。
+3. 放在真实 home 里的隐藏目录 `.tui-baseline-home-*`（现在的做法）：全部通过。路径里也不能有 `.cache`、`.config` 一类的名字（`has_excluded_component` 逐段查），所以不能放在 `~/.cache` 下。代价：run 被 SIGKILL 杀掉时，目录会留在真实 home 里；名字写明了它是什么，删掉即可。
+
+**测量（Linux，本地，`main` 的树，`PI_E2E_PYTHON` 指向 `.venv`，`PI_E2E_REQUIRED=1`）。**
+- 改前（旧脚本）：8,558 通过 / 0 失败 / 25 跳过；`pi-shell` 784、`pi-pager` 5,657、`pi-pager-render` 1,092、`pi-pager-minimal` 79、`pi-pager-bin` 31、`pi-acp-lib` 21、`pi-http` 13、`pi-telemetry` 239、`pi-file-utils` 217、`pi-sampling-types` 320、`pi-sandbox` 105。冷编译加测试一共 28 m 27 s（`time`：user 72 m 48 s，sys 12 m 36 s；VM 上没有别的负载）。
+- 改后（第三个做法）：每个 suite 的数与改前相同，8,558 / 0 / 25。已编译，2 m 35 s（user 4 m 59 s）。两个耗时不能比，一个含冷编译。
+- 真实 home 与 `/tmp` 里的新条目（运行前后各列一遍 `~` 与 `/tmp`，去掉 `~/.cursor` 等 VM 自己的目录和我自己的临时输出）：改前 2,084 个：`/tmp/grok-unified-log-test-*` 2,054 个，`/tmp/.tmp*` 17 个，`/tmp/key_owner_line_viewer.txt`，`~/.cache/grok-starstar-e2e`，`~/.pi-python` 里 11 个（`agent_id`、`hooks`、`hooks-paths`、`last-copy.txt`、`logs/unified.jsonl`、`worktrees.db`、三个 `sandbox-blocked*`）。改后 1 个：一个空的 `~/.pi-python`。`~/.gitconfig`、`~/.config/gh` 与 `/tmp/agent-store-fuse.log` 在两次都变了，它们是 VM 的环境（`gh`、git 设置），不是测试。
+- **还会写真实 home 的：** `pi-pager-render` 的 `util::tests::abbreviate_path_empty_home_does_not_fake_tilde` 把 `HOME` 设成空，`dirs` 改读 passwd，`pi_home::grok_home()` 在真实 home 里建 `~/.pi-python`（空目录）。逐个 suite、再逐个测试二分找到的；测试在 `tui/` 里，这一轮没有改。
+- **写死 `/tmp` 的：** 这一轮没有测到。读代码：`pi-sandbox` 的 `landlock_enforcement_e2e` 建 `/tmp/.pi-landlock-e2e-<pid>` 并删掉它。`std::env::temp_dir()` 的用户（`grok-unified-log-test-*`、`.tmp*`）都跟着 `TMPDIR` 走了。
+
+**需要真实 `HOME` 的测试。** 没有找到。三次尝试里的失败都是因为 `HOME` 放的位置，不是因为需要真实 home 里的东西；有一点要注意：`pi-file-utils` 与 `pi-sandbox` 要求 `HOME` 不在 `/tmp` 下，也不在 git 仓库里。`git` 的身份没有出问题（没有测试因缺 `~/.gitconfig` 失败）。
+
+**没验证的。** macOS 与 Windows（脚本里的 `USERPROFILE`、`TEMP` 在 Windows 上没有测；`dirs` 在 Windows 上不看环境变量）；macOS 的 `TMPDIR` 路径更长，这里不用它，所以没有影响；真实 home 本身是 git 仓库时（dotfiles），`pi-file-utils` 的测试会失败，这在旧脚本下也一样；`--runner cargo` 没有跑；SIGKILL 之后目录留下来，是推断，没有试。CI 的结果见 PR。
+
 ## 附录 A（摘录）：A.4
 
 附录 A 的 A.1–A.3（能力矩阵、ACP 版本配对、逐方法）是活的参考，留在[计划](../PLAN-RUST-AGENT-RUNTIME-REMOVAL.md)里。A.4 记 r5 的执行结果，搬到这里。
@@ -3253,3 +3276,4 @@ r12 续 8（2026-10-13）：PR [#18](https://github.com/zy1233/pi-python/pull/18
 - r26：v0.7.0 之前的合入与 v0.7.0 的发布（2026-10-30；分支 `docs/plan-r24`，只改文档）。补记 r23 之后的事：PR [#47](https://github.com/zy1233/pi-python/pull/47)（队列清扫先读完所有年龄再删）、[#45](https://github.com/zy1233/pi-python/pull/45)（控制台脚本 `pi-agent-cli-lc` 与 Zed 的说明）、[#46](https://github.com/zy1233/pi-python/pull/46)（`--setup` 与终端登录）、[#48](https://github.com/zy1233/pi-python/pull/48)（只改 Python agent 的 PR 只跑 `tui-e2e.yml`；缓存键不再随 runner 映像变）；web 的 #50 至 #54 与版本号 #55 是用户在另一个会话里做的，只记从仓库与 Actions 查到的事实。tag `v0.7.0` 在 `7cb9e23`；`Release` 的六个 job 成功；PyPI 上七个包是预期的版本；发布页有 16 个资产。`download-artifact@v7` 这次测到了（成功）。留下的：`--setup` 的终端登录没有在 Zed 里运行过；缓存键在下一次映像更新之后是否还不变，没有验证；macOS 的二进制没人运行过。计划：头部状态行、「当前状态」、「下一步」、「还没有验证的」（删 `download-artifact@v7` 一条）、§10 索引、「修订记录（摘要）」与链接定义更新到 r26。没有跑测试。见 [§10.29](#1029-r26-追加v070-之前的合入与-v070-的发布)。
 - r27：旗标与设置页的测量与修、选择器的截止、一批清理（2026-10-30；分支 `docs/plan-record-settings-and-cleanup`，叠在 `docs/plan-r24` 上，只改文档）。用户的答复：决策 14 与 8 照倾向改（藏掉无效的设置，无效的旗标报错并说明，Python 不动；开 PR，不合入）；清理批次也可以做。做成五个 PR，都开着、没有合入：[#57](https://github.com/zy1233/pi-python/pull/57)（两个探针，对 v0.7.0 的二进制测：63 个旗标用例里，不兑现的旗标没有一个改变 LLM 的调用；设置页 37 行里 8 项没有效果）、[#60](https://github.com/zy1233/pi-python/pull/60)（设置页 37 行 → 29 行；21 个旗标在交互模式下退出码 2 并说明原因）、[#61](https://github.com/zy1233/pi-python/pull/61)（决策 9：去掉选择器的 30 天截止）、[#62](https://github.com/zy1233/pi-python/pull/62)（D.8 的 16 个模块与决策 10 的 `mcp.rs`、`recent_dirs.rs`，连同只有它们调用的代码：`tui/` 下 −9,067 行；`pi-shell` 838 → 784）、[#63](https://github.com/zy1233/pi-python/pull/63)（D.5：`pi-test-support` 少 7 个模块与 11 个依赖，−5,646 行）。计划：头部状态行、「当前状态」、「待决策」的清单与 8、9、10、14 四项、§7 的 D.5 与 D.8、「下一步」、「还没有验证的」的两条、§10 索引、「修订记录（摘要）」与链接定义。轮号：#58 与 #59 记成 r24 与 r25；#56 原来也记成 r24，合入前改成 r26。没有改 `docs/baselines/tui.md`（它的数要等 PR 合入后在 `main` 上量）。见 [§10.30](#1030-r27-追加旗标与设置页的测量与修选择器的截止一批清理)。
 - r28：用 `gh stack` 合入十个 PR（2026-10-31；分支 `docs/plan-r28-stack-merge`，只改文档）。用户的话：「使用gh stack合并这7个PR,另外我云端开了3个PR，你可以一起合并了。」stack #66，次序从下到上：[#58](https://github.com/zy1233/pi-python/pull/58)、[#59](https://github.com/zy1233/pi-python/pull/59)、[#56](https://github.com/zy1233/pi-python/pull/56)、[#57](https://github.com/zy1233/pi-python/pull/57)、[#60](https://github.com/zy1233/pi-python/pull/60)、[#61](https://github.com/zy1233/pi-python/pull/61)、[#62](https://github.com/zy1233/pi-python/pull/62)、[#63](https://github.com/zy1233/pi-python/pull/63)、[#64](https://github.com/zy1233/pi-python/pull/64)、[#65](https://github.com/zy1233/pi-python/pull/65)；一次 `gh stack merge 66 --yes --squash`，UTC 03:17 全部合入（`main`：`7cb9e23` → `032ddbb`；`main` 的树与 #65 新头的树相同）。八个分支的头重建过（#58、#59 不动）；#56 改记 r26 / §10.29，#64 是 r27 / §10.30；`CHANGELOG.md` 的 `[Unreleased]` 按 Changed、Removed、Fixed 排。`main` 上的 `CI` 与 `TUI CI` 都通过：8,558 通过 / 0 失败 / 25 跳过，门禁在上限（依赖图 970，0 条告警，`leader` 239，`x.ai` 282）。计划：头部状态行、「当前状态」、阶段 D 的状态、§7 的 D.5 与 D.8（打勾）、「下一步」「还没有验证的」「待决策」里「没有合入」的句子、§10 索引、「修订记录（摘要）」与链接定义。`docs/baselines/tui.md` 的数按 `main` 上的 CI 重写。删了 7 个已合入的本地分支。见 [§10.31](#1031-r28-追加用-gh-stack-合入十个-pr)。
+- r29：D.9（2026-11-01；PR [#75](https://github.com/zy1233/pi-python/pull/75)，分支 `ci/tui-baseline-isolate-home-3df6`）。用户的电脑跑不动整套 Rust 测试，所以在云上的 Linux VM 里做；用户先要求讨论，同意后只做 D.9。`tui_baseline.py test` 用临时 `HOME`；整套测试改前改后都是 8,558 通过 / 0 失败 / 25 跳过。见 [§10.32](#1032-r29-追加d9测试用临时-home)。
