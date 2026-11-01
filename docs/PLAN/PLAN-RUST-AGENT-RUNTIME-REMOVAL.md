@@ -110,14 +110,15 @@
 - **沙箱的 Landlock 层。** r24 在内核 6.12（Landlock ABI 6）的云 VM 上测了：生效，见 [§10.27][l10-27]。没测的：内核 5.13 到 6.11；`zypi --sandbox` 的真机运行；`bwrap` 加 Landlock 叠加时 Landlock 一半的断言；`restrict_network`（seccomp）。`pi-sandbox` 的测试 r25 起在 `tui_baseline.toml` 与 `tui-ci.yml` 里，CI 设了 `SANDBOX_E2E_REQUIRE_ENFORCEMENT=1`：runner 没有 Landlock 或 `bwrap` 时 job 失败（[§10.28][l10-28]）。
 - **延迟。** 只量了合成的会话（12 / 120 / 2,000 条消息）。冷磁盘、网络文件系统、超过 1,000 个会话、真实形状的会话没有量。
 - **跨目录的 `--resume <id>`。** TUI 的当前目录与会话保存的目录不同时，`@` 搜索、diff、git 信息用哪个目录，没有验证。
-- **旗标。** r27 对 v0.7.0 的 Linux 二进制，在交互模式下逐个测了（63 个用例，[§10.30][l10-30]）。没测的：`-p` 模式下的旗标；`-m <未知的 id>` 失败时没有看得见的消息；macOS 与 Windows。PR [#60][pr-60]（已合入）的 PTY 回归只对调试构建跑过。
+- **旗标。** r27 对 v0.7.0 的 Linux 二进制，在交互模式下逐个测了（63 个用例，[§10.30][l10-30]）。没测的：`-p` 模式下的旗标；`-m <未知的 id>` 失败时没有看得见的消息；macOS 与 Windows。PR [#60][pr-60]（已合入）的 PTY 回归 r30 对发行构建与 v0.8.0 的 Linux 二进制跑过，通过（[§10.33][l10-33]）。
 - **设置页。** r27 对 v0.7.0 的 Linux 二进制量了页上 37 行对线上与 agent 的影响（[§10.30][l10-30]）：8 行没有效果，PR [#60][pr-60]（已合入）藏掉它们。macOS 与 Windows 上没有测。
 - **同一个 id 的并发。** 锁只在进程内。两个 agent 进程共用一个 home 时，同一个 id 仍可能各建一个会话。
 - **测试之间的竞争。** r15 修了一个，r17 查了同类：19 个偶发失败的测试和 5 个不还原环境变量的测试都修了（[§10.18][l10-18]、[§10.20][l10-20]）。**还在的：** ① 约 140 个测试（21 个文件）写外观缓存里的别的设置，没有隔离；没有已知的受害者，但有两个测试各失败过一次，原因没有证实。探针还列出读 `GROK_HOME`、`GROK_TEST_VERSION` 又不拿锁的测试（`pi-pager` 6 组，`pi-shell` 25 组）；我没有逐个读。② 别的 7 个 suite 的 lib 只各跑了 10 遍；清单外的 crate 与集成测试二进制没有查。③ `in_own_process` 有限制，见 [§10.20][l10-20]。④ 只在 Linux 查过。竞争只在测试线程多、顺序不同的时候出现（CI 是 4 个线程，顺序固定），所以 **CI 通过不能证明它们不存在**。⑤ `clippy` 还没有跑过。
-- **发行构建。** 发布的两个二进制由 `Release` 的运行构建（v0.6.0：[run][run-release-v060]，`5f73e07`；v0.5.0：[run 38358144687](https://github.com/zy1233/pi-python/actions/runs/38358144687)，`be3f8a8`）。Linux 的那个下载后跑过：v0.6.0 打印 `zypi 0.6.0 (5f73e07964f1)`，`smoke`、`exit_matrix`、`resume_matrix`、`mode_probe`、`status_line_probe` 对着 PyPI 的 agent 都通过，二进制与构建产物逐字节相同（[§10.25][l10-25]）；它要 glibc 2.39 或更新。**macOS 的二进制没有人运行过**：构建通过过（演练与发布各几次），那只证明它能编译与链接；v0.6.0 的只看了文件头（Mach-O arm64）。**Windows 没有二进制。** `TUI CI` 在 PR 上不运行 `zypi --version`；手动的 `release_baseline` 为了量耗时跑它，但丢掉输出，也不看退出码。
+- **发行构建。** 发布的两个二进制由 `Release` 的运行构建（v0.6.0：[run][run-release-v060]，`5f73e07`；v0.5.0：[run 38358144687](https://github.com/zy1233/pi-python/actions/runs/38358144687)，`be3f8a8`）。Linux 的那个下载后跑过：v0.6.0 打印 `zypi 0.6.0 (5f73e07964f1)`，`smoke`、`exit_matrix`、`resume_matrix`、`mode_probe`、`status_line_probe` 对着 PyPI 的 agent 都通过，二进制与构建产物逐字节相同（[§10.25][l10-25]）；它要 glibc 2.39 或更新。**macOS 的二进制没有人运行过**：构建通过过（演练与发布各几次），那只证明它能编译与链接；v0.6.0 的只看了文件头（Mach-O arm64）。**Windows 没有二进制。** v0.8.0 的 Linux 二进制 r30 也跑过（[§10.33][l10-33]）。`TUI CI` 在 PR 上不运行 `zypi --version`；手动的 `release_baseline` 为了量耗时跑它，但丢掉输出，也不看退出码。
 - **`--setup` 的终端登录（v0.7.0）。** 一个充当客户端的脚本在 Linux 上对着活的 agent 进程跑过；没有在 Zed 里运行过（[§10.29][l10-29]）。
 - **TUI CI 的缓存键（PR [#48][pr-48]）。** 同一个键在 `main` 上的两次推送之间命中（19 m 28 s）；runner 映像再更新之后，键是否还不变，没有验证。
-- **v0.7.0 的二进制。** 两个二进制由 `Release` 的[运行][run-release-v070]构建；r26 只核对了资产的名字与大小，没有运行它们。
+- **v0.7.0 的二进制。** 两个二进制由 `Release` 的[运行][run-release-v070]构建；r26 只核对了资产的名字与大小，没有运行它们。v0.8.0 的 Linux 二进制 r30 下载后跑过（内核 6.12.94+；`tui/` 与本地构建的提交相同）：`scripts/tui_pty/` 里不要密钥的脚本通过；macOS 与 Windows 的没有运行（[§10.33][l10-33]）。
+- **`smoke.py --sandbox workspace`（内核有 Landlock 时）。** r30 里 23/24：状态栏的标签在欢迎页上没有，在之后的屏幕上有。脚本的检查位置很可能太早；欢迎页该不该显示标签没有确认。没有修，用户还没有决定要不要改脚本（[§10.33][l10-33]）。
 
 出处：执行记录 [§10.10][l10-10]–[§10.15][l10-15] 各节的「没有验证」。
 
@@ -461,13 +462,14 @@ Rust（pager）：
 | [§10.30][l10-30] | r27 | 旗标与设置页的测量（#57）与修（#60）：21 个旗标在交互模式下被拒绝，设置页 37 行 → 29 行；决策 9 的截止（#61）；D.8 与决策 10 两项（#62）、D.5（#63）；五个 PR 在 r28 合入 | PR [#57][pr-57]、[#60][pr-60]、[#61][pr-61]、[#62][pr-62]、[#63][pr-63] |
 | [§10.31][l10-31] | r28 | 用 `gh stack` 合入十个 PR（#58、#59、#56、#57、#60 至 #65）：栈的次序、八个分支的重建与改号、冲突、合入前后的检查、`main` 上的 CI；基线报告的数重新量 | PR [#56][pr-56]–[#65][pr-65]（栈 #66） |
 | [§10.32][l10-32] | r29 | D.9：`tui_baseline.py test` 用临时 `HOME`；改前改后各跑整套测试，数相同；真实 home 与 `/tmp` 里的新条目 2,084 → 0（含一个测试的修正）；三次尝试里两个放错的位置 | PR [#75][pr-75] |
+| [§10.33][l10-33] | r30 | 发行构建（`release-dist`）与 v0.8.0 的 Linux 二进制在云 VM 上的 PTY 检查：冷构建 11 m 58 s，两个二进制各跑一遍脚本；`smoke.py --sandbox workspace` 23/24（没有修） | — |
 | [附录 A.4][logA4] | r5 | 入口审计的 r5 执行结果 | [#7][pr-7] |
 | [附录 B][logB] | r2–r17 | 复现方法（依赖图、模块级闭包、各轮的测量与测试命令） | — |
 | [附录 C][logC] | r10 | §7 的逐项注释（原文） | — |
 | [附录 D][logD] | r10 | 计划头部的状态文字（原文） | — |
 | [附录 E][logE] | r2 | §4、§5 的原文（源码事实基线与改动规模估计） | — |
 | [附录 F][logF] | r22 续 1 | 计划整理前的状态文字（原文）：头部、「当前状态」逐轮、两个里程碑、「下一步」，「还没有验证的」「待决策」「§7」「§10 索引」里改短的条目，「修订记录（摘要）」的长条目 | — |
-| [修订记录][logRev] | r1–r29 | 逐轮的完整说明 | — |
+| [修订记录][logRev] | r1–r30 | 逐轮的完整说明 | — |
 
 ## 附录 A：能力矩阵与 ACP 版本配对（阶段 0.8，r9 定稿）
 
@@ -575,6 +577,7 @@ Rust（pager）：
 - r27：旗标与设置页的测量（PR [#57][pr-57]）与修（PR [#60][pr-60]；决策 8、14 照倾向改）、选择器的 30 天截止（PR [#61][pr-61]；决策 9）、一批清理（PR [#62][pr-62]：D.8 与决策 10 的两项；PR [#63][pr-63]：D.5）；五个 PR 都开着，没有合入（2026-10-30）。轮号：另一个会话开的 PR [#58][pr-58]、[#59][pr-59] 记成 r24、r25；#56 原来也记成 r24，合入前改成 r26。只改文档。见 [§10.30][l10-30]。
 - r28：用一次 `gh stack` 把十个 PR（[#58][pr-58]、[#59][pr-59]、[#56][pr-56]、[#57][pr-57]、[#60][pr-60]–[#65][pr-65]）合入 `main`（2026-10-31；`main` 从 `7cb9e23` 到 `032ddbb`）。轮号：#58、#59 是 r24、r25，#56 记成 r26，#64 记成 r27。计划里「开着，没有合入」的句子改成已合入；D.5 与 D.8 打勾，阶段 D 改成「开始了一部分」；`docs/baselines/tui.md` 的数按 `main` 上的 CI 重写。只改文档。见 [§10.31][l10-31]。
 - r29：D.9（PR [#75][pr-75]；2026-11-01）：`tui_baseline.py test` 用临时 `HOME`。只改 `scripts/tui_baseline.py`、它的单测与文档。见 [§10.32][l10-32]。
+- r30：发行构建与 v0.8.0 二进制的 PTY 检查（2026-11-01）。只改文档。见 [§10.33][l10-33]。
 
 <!-- 链接定义 -->
 [log]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md
@@ -610,6 +613,7 @@ Rust（pager）：
 [l10-30]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1030-r27-追加旗标与设置页的测量与修选择器的截止一批清理
 [l10-31]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1031-r28-追加用-gh-stack-合入十个-pr
 [l10-32]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1032-r29-追加d9测试用临时-home
+[l10-33]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1033-r30-追加发行构建与-v080-二进制的-pty-检查
 [l4-1]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#41-运行路径
 [l4-2]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#42-rust-runtime-与耦合面
 [l4-3]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#43-python-侧pi_agent_cli共-4114-行agentpy-472-行
