@@ -12,7 +12,7 @@
 
 ## 目录
 
-- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29)
+- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29r30)
   - [10.1 范围、方法与规模](#101-范围方法与规模)
   - [10.2 `/model` 恢复（ADR3 r3）](#102-model-恢复adr3-r3)
   - [10.3 验证（r3 的实测）](#103-验证r3-的实测)
@@ -45,6 +45,7 @@
   - [10.30 r27 追加：旗标与设置页的测量与修、选择器的截止、一批清理](#1030-r27-追加旗标与设置页的测量与修选择器的截止一批清理)
   - [10.31 r28 追加：用 `gh stack` 合入十个 PR](#1031-r28-追加用-gh-stack-合入十个-pr)
   - [10.32 r29 追加：D.9，测试用临时 HOME](#1032-r29-追加d9测试用临时-home)
+  - [10.33 r30 追加：发行构建与 v0.8.0 二进制的 PTY 检查](#1033-r30-追加发行构建与-v080-二进制的-pty-检查)
 - [附录 A（摘录）：A.4](#附录-a摘录a4)
   - [A.4 r5 执行结果（对照 r5 时初稿里的「默认决策」；r9 的更新见 A.1）](#a4-r5-执行结果对照-r5-时初稿里的默认决策r9-的更新见-a1)
 - [附录 B：复现方法](#附录-b复现方法)
@@ -71,7 +72,7 @@
   - [F.10 修订记录摘要里的长条目](#f10-修订记录摘要里的长条目)
 - [修订记录](#修订记录)
 
-## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29）
+## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30）
 
 r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）；r14 合入这两个 PR，并做决策 17：会话文件在第一条用户消息时才写（§10.17）；r15 做决策 10 的存储层一项：删 `pi-shell` 里的旧存储层（§10.18）；r16 合入 #25 与 #26，并删 `pi-shell` 里剩下的死代码（§10.19）；r17 检查测试之间的竞争，只改测试与工具（§10.20）；r18 改用 `cargo nextest`，改 `protoc` 的路径与 `release.yml` 的令牌（§10.21）；r19 用 `gh stack` 合入 #27–#31，并设 V0.6 的发布里程碑（§10.22）；r20 定 MCP 的方向（可选扩展包），修空白对话，补发布内容，并合入 #33–#36（§10.23）；r21 做 V0.6 的版本号与发布说明（条件 5），合入 #38 与 #39，并做条件 1–4（§10.24）；r22 打 tag `v0.6.0`、发布、做发布后的核对（§10.25）；r23 把三个 action 升到 Node 24 的版本，处理扩展 API 的审计批 9，并把决策 11、13 记成不做（§10.26）；r24 在内核 6.12 的云 VM 上测了沙箱的 Landlock 层（§10.27）；r25 把 `pi-sandbox` 接进 `TUI CI`（§10.28）；r26 补记 v0.7.0 之前的合入（#45 至 #48、web 的 #50 至 #54、版本号 #55）与 v0.7.0 的发布（§10.29）；r27 量了旗标与设置页并修（#57、#60），去掉选择器的 30 天截止（#61），清了一批死代码（#62、#63；§10.30）；r28 用一次 `gh stack` 把这五个 PR 与另外五个（#56、#58、#59、#64、#65）合入 `main`（§10.31）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
@@ -2257,6 +2258,49 @@ Runner 有 Landlock（ABI 8），没有 `bwrap`；装上 `bwrap` 也不能用，
 
 **没验证的。** macOS 与 Windows（脚本里的 `USERPROFILE`、`TEMP` 在 Windows 上没有测；`dirs` 在 Windows 上不看环境变量）；macOS 的 `TMPDIR` 路径更长，这里不用它，所以没有影响；真实 home 本身是 git 仓库时（dotfiles），`pi-file-utils` 的测试会失败，这在旧脚本下也一样；`--runner cargo` 没有跑；SIGKILL 之后目录留下来，是推断，没有试。CI 的结果见 PR。
 
+### 10.33 r30 追加：发行构建与 v0.8.0 二进制的 PTY 检查
+
+这一节记 2026-11-01 在云上的 Linux VM 里做的一次检查：按 `Release` 构建 Linux 二进制的办法构建 `zypi`，用 `scripts/tui_pty/` 的脚本跑它，再跑 v0.8.0 发布页上的 `zypi-linux-x86_64`。用户的电脑跑不动整套 Rust 构建，所以在云上做。没有改 `tui/` 与脚本；只写文档。VM：内核 6.12.94+（`/sys/kernel/security/lsm` 列出 `landlock`），4 核，15 GB，Rust 1.94.0，`protoc` 28.3。
+
+**构建。** 提交 `2b62e686bac24185c1d5f361db450d86abf4dc27`（`main`，PR [#74](https://github.com/zy1233/pi-python/pull/74)）。命令与 `release.yml` 的 `build-tui` job 相同，也与计划和基线文档里写的相同：`cd tui && cargo build --profile release-dist -p pi-pager-bin`。冷构建 11 m 58 s（user 38 m 04 s，sys 2 m 22 s），0 条告警；没有内存问题，没有设 `CARGO_BUILD_JOBS`。`tui/target/release-dist/zypi` 是 380,398,296 B；`zypi --version` 打印 `zypi 0.8.0 (2b62e686bac2)`。之后 PR [#75](https://github.com/zy1233/pi-python/pull/75) 合入，`main` 在 `5dd39b037b07f0a643465832a0749a1e05d16bca`；`git diff 2b62e68 5dd39b0 --stat -- tui/` 只有 `pi-pager-render/src/util.rs` 里的一个测试（`mod tests` 内，+14 −5），所以没有重建。
+
+**大小与 CI 的不同（事实与猜测分开）。** 发布页的 `zypi-linux-x86_64`（v0.8.0）是 406,691,056 B，本地这个小 26,292,760 B（6.5 %）。事实：两个二进制的 rustc 是同一个（`rustc/4a4ef493e3a1…`，1.94.0），LLD 也是同一个（21.1.8）；`.rodata` 只差约 1 KB，`.text` 差约 0.5 MB（37.3 MB 对 37.7 MB）；差的大头在 `.debug_*` 节（`.debug_loc` 13.9 MB 对 26.0 MB，`.debug_info` 87.6 MB 对 93.6 MB，发布的那个多一个 `.debug_macro`），`.comment` 节里 C 依赖的编译器不同：本地是 GCC 14.2.0 与 Ubuntu clang 18.1.3，发布的是 GCC 13.3.0 与 clang 21.1.0-rc2。猜测：大小差来自 C 依赖在不同的系统编译器下产出的调试信息；没有逐个依赖验证。本地的数与基线的 406,911,320 B（r21）不能直接比，不要拿它当回归。
+
+**v0.8.0 的资产。** `gh release download v0.8.0 --pattern zypi-linux-x86_64`，5 s；`--version` 打印 `zypi 0.8.0 (a5d32d5b63a4)`（tag 的提交是 `a5d32d5b63a4…`）。`git diff a5d32d5 2b62e68 --stat -- tui/` 是空的：tag 与构建的提交里 `tui/` 完全相同。所以两个二进制测的是同一份 `tui/` 源码，差别只在构建环境。
+
+**方法。** 对两个二进制各跑一遍下表的脚本，一次一个。每次先清掉 shell 里的 `PI_*`、`ZYPI*`、`REAL_LLM*`、`OPENROUTER*`；`--zypi` 与 `--python`（`.venv/bin/python`）都用绝对路径（第一次对 `smoke.py` 给了相对的 `--python`，zypi 在临时目录里找不到它，8/19；那是调用的错，不是脚本的错，已用绝对路径重跑）。`pip install pyte`（0.8.2）进 `.venv`，`apt` 装了 `bubblewrap` 0.9.0（`--no-network` 与 `--sandbox` 要它；第一次 `net_audit.py --mock --no-network` 因为没有 `bwrap` 退出 1，装了以后通过）。没有用模型的密钥。
+
+**结果**（退出码都是 0，除非另写；「本地构建 / v0.8.0 的资产」两个二进制的数相同）：
+
+| 脚本与参数 | 结果 | 用时（本地 / 资产） |
+|---|---|---|
+| `smoke.py` | 23/23 项通过 | 9 s / 6 s |
+| `exit_matrix.py` | 12/12 例，没有进程留下 | 39 s / 39 s |
+| `print_exit.py` | 4 个信号（SIGTERM、SIGKILL、SIGHUP、SIGINT），都没有进程留下 | 6 s / 6 s |
+| `resume_matrix.py` | 16 PASS，0 GAP，0 FIXED，0 FAIL | 30 s / 30 s |
+| `mode_probe.py` | 四个被拒的 `--permission-mode` 值（`acceptEdits`、`auto`、`dontAsk`、`plan`）退出 2 并说明原因；没有「Plan mode」一行；选择器列出 Ask 与 Always approve | 45 s / 45 s |
+| `status_line_probe.py` | 4/4 次运行与页面所说一致 | 20 s / 21 s |
+| `flags_probe.py` | 63 个用例；21 个旗标（表里 25 行）显示 `REFUSED`，与 PR [#60](https://github.com/zy1233/pi-python/pull/60) 一致 | 123 s / 124 s |
+| `settings_probe.py` | 页上 29 行；旧设置在线上、agent 的变量与 LLM 调用里 `NO CHANGE` | 85 s / 84 s |
+| `net_audit.py --mock` | 13/13 项 | 5 s / 6 s |
+| `net_audit.py --mock --no-network` | 13/13 项（`bwrap --unshare-net`） | 5 s / 6 s |
+| `exit_matrix.py --sandbox workspace` | 14/14 例 | 44 s / 44 s |
+| `smoke.py --sandbox workspace` | **退出 1，23/24**：`status bar shows sandbox:workspace (kernel lists Landlock)` 失败 | 7 s / 6 s |
+
+两个二进制的 `flags_probe.py` 输出只差临时调试文件的名字。PR #60 的旗标拒绝也直接试了：`zypi --deny 'Bash(rm *)' --worktree w` 退出 2，打印 `zypi did not start. The Python agent does not support these flags:` 与两个旗标各自的原因，文字与 PR #60 里的相同。
+
+**一个失败：`smoke.py --sandbox workspace`。** 这个参数不在这次要跑的清单里（README 里的可选项）。同一个检查在本地构建上失败两次、在资产上失败一次，没有偶发。没有改脚本，没有修，是一个待办的发现。
+- **事实：** 欢迎页（第一屏）上没有 `sandbox:workspace`。加 `--show` 看每一步的屏幕：第一轮对话之后，脚本打印的 7 个屏幕（第一轮之后、`/model` 菜单、选择器、选定之后、第二轮之后、`/resume` 选择器、恢复之后）的状态栏都有 `sandbox:workspace <目录>`。所以 zypi 在状态栏里显示这个标签，只是欢迎页上没有。
+- **分析（读代码，没有改脚本验证）：** `smoke.py` 第 139 至 148 行在欢迎页那一刻读屏幕，内核列出 Landlock 时要求 `sandbox:<profile>` 在里面。内核没有 Landlock 的那一支（第 149 行起）除了欢迎页的检查，还在第一轮对话之后再查一次状态栏（第 165 至 169 行）；Landlock 那一支没有这第二次检查。所以那个检查很可能看得太早。这支可能只在没有 Landlock 的内核（WSL2 5.x）上试过；没有证据。
+- **没有确认的：** 欢迎页本来就该显示标签，还是只有状态栏该显示。这要看 `tui/` 的设计，这一轮没有查。
+- 脚本要不要改，由用户另外决定。
+
+**一件小事：`zypi --version` 在真实 home 里建 `~/.pi-python`。** 在 VM 上删掉空的 `~/.pi-python` 后，跑 `zypi --version`（`HOME` 与 `PI_HOME` 都没清）就又出现了一个空的 `~/.pi-python`；`smoke.py` 与 `print_exit.py` 不会建它（它们用临时 `HOME`）。这是 §10.32 里 D.9 说的那一类写真实 home 的行为，只是在测试之外，是 `--version` 这条路径；没有查是哪段代码，没有改。
+
+**没跑的。** `net_audit.py --model-from FILE` 要真模型的密钥，没跑（真模型的那次是 r11）。`flags_probe.py` 的 `--only`、`--raw` 与 `settings_probe.py` 的 `--list` 是选项，不是另外的检查。
+
+**没验证的。** macOS 与 Windows 的二进制（`scripts/tui_pty/` 只在 Linux 上跑）；内核 6.12.94+ 以外的内核；Landlock 本身的生效（这些脚本不测它，`pi-sandbox` 的 `landlock_enforcement_e2e` 测）；v0.7.0 的二进制（仍没有运行）；`net_audit.py` 用真模型的一次；Zed 里的运行。对着 PyPI 上的 agent 的运行没有做：这一轮用的是 `.venv` 里的 `pi_agent_cli`（源码树）。
+
 ## 附录 A（摘录）：A.4
 
 附录 A 的 A.1–A.3（能力矩阵、ACP 版本配对、逐方法）是活的参考，留在[计划](../PLAN-RUST-AGENT-RUNTIME-REMOVAL.md)里。A.4 记 r5 的执行结果，搬到这里。
@@ -3279,3 +3323,4 @@ r12 续 8（2026-10-13）：PR [#18](https://github.com/zy1233/pi-python/pull/18
 - r27：旗标与设置页的测量与修、选择器的截止、一批清理（2026-10-30；分支 `docs/plan-record-settings-and-cleanup`，叠在 `docs/plan-r24` 上，只改文档）。用户的答复：决策 14 与 8 照倾向改（藏掉无效的设置，无效的旗标报错并说明，Python 不动；开 PR，不合入）；清理批次也可以做。做成五个 PR，都开着、没有合入：[#57](https://github.com/zy1233/pi-python/pull/57)（两个探针，对 v0.7.0 的二进制测：63 个旗标用例里，不兑现的旗标没有一个改变 LLM 的调用；设置页 37 行里 8 项没有效果）、[#60](https://github.com/zy1233/pi-python/pull/60)（设置页 37 行 → 29 行；21 个旗标在交互模式下退出码 2 并说明原因）、[#61](https://github.com/zy1233/pi-python/pull/61)（决策 9：去掉选择器的 30 天截止）、[#62](https://github.com/zy1233/pi-python/pull/62)（D.8 的 16 个模块与决策 10 的 `mcp.rs`、`recent_dirs.rs`，连同只有它们调用的代码：`tui/` 下 −9,067 行；`pi-shell` 838 → 784）、[#63](https://github.com/zy1233/pi-python/pull/63)（D.5：`pi-test-support` 少 7 个模块与 11 个依赖，−5,646 行）。计划：头部状态行、「当前状态」、「待决策」的清单与 8、9、10、14 四项、§7 的 D.5 与 D.8、「下一步」、「还没有验证的」的两条、§10 索引、「修订记录（摘要）」与链接定义。轮号：#58 与 #59 记成 r24 与 r25；#56 原来也记成 r24，合入前改成 r26。没有改 `docs/baselines/tui.md`（它的数要等 PR 合入后在 `main` 上量）。见 [§10.30](#1030-r27-追加旗标与设置页的测量与修选择器的截止一批清理)。
 - r28：用 `gh stack` 合入十个 PR（2026-10-31；分支 `docs/plan-r28-stack-merge`，只改文档）。用户的话：「使用gh stack合并这7个PR,另外我云端开了3个PR，你可以一起合并了。」stack #66，次序从下到上：[#58](https://github.com/zy1233/pi-python/pull/58)、[#59](https://github.com/zy1233/pi-python/pull/59)、[#56](https://github.com/zy1233/pi-python/pull/56)、[#57](https://github.com/zy1233/pi-python/pull/57)、[#60](https://github.com/zy1233/pi-python/pull/60)、[#61](https://github.com/zy1233/pi-python/pull/61)、[#62](https://github.com/zy1233/pi-python/pull/62)、[#63](https://github.com/zy1233/pi-python/pull/63)、[#64](https://github.com/zy1233/pi-python/pull/64)、[#65](https://github.com/zy1233/pi-python/pull/65)；一次 `gh stack merge 66 --yes --squash`，UTC 03:17 全部合入（`main`：`7cb9e23` → `032ddbb`；`main` 的树与 #65 新头的树相同）。八个分支的头重建过（#58、#59 不动）；#56 改记 r26 / §10.29，#64 是 r27 / §10.30；`CHANGELOG.md` 的 `[Unreleased]` 按 Changed、Removed、Fixed 排。`main` 上的 `CI` 与 `TUI CI` 都通过：8,558 通过 / 0 失败 / 25 跳过，门禁在上限（依赖图 970，0 条告警，`leader` 239，`x.ai` 282）。计划：头部状态行、「当前状态」、阶段 D 的状态、§7 的 D.5 与 D.8（打勾）、「下一步」「还没有验证的」「待决策」里「没有合入」的句子、§10 索引、「修订记录（摘要）」与链接定义。`docs/baselines/tui.md` 的数按 `main` 上的 CI 重写。删了 7 个已合入的本地分支。见 [§10.31](#1031-r28-追加用-gh-stack-合入十个-pr)。
 - r29：D.9（2026-11-01；PR [#75](https://github.com/zy1233/pi-python/pull/75)，分支 `ci/tui-baseline-isolate-home-3df6`）。用户的电脑跑不动整套 Rust 测试，所以在云上的 Linux VM 里做；用户先要求讨论，同意后只做 D.9。`tui_baseline.py test` 用临时 `HOME`；整套测试改前改后都是 8,558 通过 / 0 失败 / 25 跳过。见 [§10.32](#1032-r29-追加d9测试用临时-home)。
+- r30：发行构建与 v0.8.0 二进制的 PTY 检查（2026-11-01；分支 `docs/tui-release-pty-check-c4a1`，只改文档）。在云上的 Linux VM 里按 `Release` 的办法构建 `zypi`（`release-dist`，`main` 的 `2b62e68`，冷构建 11 m 58 s，380,398,296 B），对它与 v0.8.0 的 `zypi-linux-x86_64` 各跑 `scripts/tui_pty/` 里不要密钥的脚本：除 `smoke.py --sandbox workspace`（23/24，待办的发现，没有改脚本）外全部通过，两个二进制的数相同；两个二进制里 `tui/` 的源码相同。见 [§10.33](#1033-r30-追加发行构建与-v080-二进制的-pty-检查)。
