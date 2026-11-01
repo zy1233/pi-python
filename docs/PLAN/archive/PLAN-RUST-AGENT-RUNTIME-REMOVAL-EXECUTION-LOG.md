@@ -12,7 +12,7 @@
 
 ## 目录
 
-- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29r30)
+- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29r30r31)
   - [10.1 范围、方法与规模](#101-范围方法与规模)
   - [10.2 `/model` 恢复（ADR3 r3）](#102-model-恢复adr3-r3)
   - [10.3 验证（r3 的实测）](#103-验证r3-的实测)
@@ -46,6 +46,7 @@
   - [10.31 r28 追加：用 `gh stack` 合入十个 PR](#1031-r28-追加用-gh-stack-合入十个-pr)
   - [10.32 r29 追加：D.9，测试用临时 HOME](#1032-r29-追加d9测试用临时-home)
   - [10.33 r30 追加：发行构建与 v0.8.0 二进制的 PTY 检查](#1033-r30-追加发行构建与-v080-二进制的-pty-检查)
+  - [10.34 r31 追加：`smoke.py --sandbox workspace` 的标签检查](#1034-r31-追加smokepy---sandbox-workspace-的标签检查)
 - [附录 A（摘录）：A.4](#附录-a摘录a4)
   - [A.4 r5 执行结果（对照 r5 时初稿里的「默认决策」；r9 的更新见 A.1）](#a4-r5-执行结果对照-r5-时初稿里的默认决策r9-的更新见-a1)
 - [附录 B：复现方法](#附录-b复现方法)
@@ -72,7 +73,7 @@
   - [F.10 修订记录摘要里的长条目](#f10-修订记录摘要里的长条目)
 - [修订记录](#修订记录)
 
-## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30）
+## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31）
 
 r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）；r14 合入这两个 PR，并做决策 17：会话文件在第一条用户消息时才写（§10.17）；r15 做决策 10 的存储层一项：删 `pi-shell` 里的旧存储层（§10.18）；r16 合入 #25 与 #26，并删 `pi-shell` 里剩下的死代码（§10.19）；r17 检查测试之间的竞争，只改测试与工具（§10.20）；r18 改用 `cargo nextest`，改 `protoc` 的路径与 `release.yml` 的令牌（§10.21）；r19 用 `gh stack` 合入 #27–#31，并设 V0.6 的发布里程碑（§10.22）；r20 定 MCP 的方向（可选扩展包），修空白对话，补发布内容，并合入 #33–#36（§10.23）；r21 做 V0.6 的版本号与发布说明（条件 5），合入 #38 与 #39，并做条件 1–4（§10.24）；r22 打 tag `v0.6.0`、发布、做发布后的核对（§10.25）；r23 把三个 action 升到 Node 24 的版本，处理扩展 API 的审计批 9，并把决策 11、13 记成不做（§10.26）；r24 在内核 6.12 的云 VM 上测了沙箱的 Landlock 层（§10.27）；r25 把 `pi-sandbox` 接进 `TUI CI`（§10.28）；r26 补记 v0.7.0 之前的合入（#45 至 #48、web 的 #50 至 #54、版本号 #55）与 v0.7.0 的发布（§10.29）；r27 量了旗标与设置页并修（#57、#60），去掉选择器的 30 天截止（#61），清了一批死代码（#62、#63；§10.30）；r28 用一次 `gh stack` 把这五个 PR 与另外五个（#56、#58、#59、#64、#65）合入 `main`（§10.31）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
@@ -2289,17 +2290,42 @@ Runner 有 Landlock（ABI 8），没有 `bwrap`；装上 `bwrap` 也不能用，
 
 两个二进制的 `flags_probe.py` 输出只差临时调试文件的名字。PR #60 的旗标拒绝也直接试了：`zypi --deny 'Bash(rm *)' --worktree w` 退出 2，打印 `zypi did not start. The Python agent does not support these flags:` 与两个旗标各自的原因，文字与 PR #60 里的相同。
 
-**一个失败：`smoke.py --sandbox workspace`。** 这个参数不在这次要跑的清单里（README 里的可选项）。同一个检查在本地构建上失败两次、在资产上失败一次，没有偶发。没有改脚本，没有修，是一个待办的发现。
+**一个失败：`smoke.py --sandbox workspace`。** 这个参数不在这次要跑的清单里（README 里的可选项）。同一个检查在本地构建上失败两次、在资产上失败一次，没有偶发。r30 没有改脚本，没有修；r31 修了，见 [§10.34](#1034-r31-追加smokepy---sandbox-workspace-的标签检查)。
 - **事实：** 欢迎页（第一屏）上没有 `sandbox:workspace`。加 `--show` 看每一步的屏幕：第一轮对话之后，脚本打印的 7 个屏幕（第一轮之后、`/model` 菜单、选择器、选定之后、第二轮之后、`/resume` 选择器、恢复之后）的状态栏都有 `sandbox:workspace <目录>`。所以 zypi 在状态栏里显示这个标签，只是欢迎页上没有。
 - **分析（读代码，没有改脚本验证）：** `smoke.py` 第 139 至 148 行在欢迎页那一刻读屏幕，内核列出 Landlock 时要求 `sandbox:<profile>` 在里面。内核没有 Landlock 的那一支（第 149 行起）除了欢迎页的检查，还在第一轮对话之后再查一次状态栏（第 165 至 169 行）；Landlock 那一支没有这第二次检查。所以那个检查很可能看得太早。这支可能只在没有 Landlock 的内核（WSL2 5.x）上试过；没有证据。
 - **没有确认的：** 欢迎页本来就该显示标签，还是只有状态栏该显示。这要看 `tui/` 的设计，这一轮没有查。
-- 脚本要不要改，由用户另外决定。
+- 脚本要不要改，当时由用户另外决定；用户决定改（r31，§10.34）。
 
 **一件小事：`zypi --version` 在真实 home 里建 `~/.pi-python`。** 在 VM 上删掉空的 `~/.pi-python` 后，跑 `zypi --version`（`HOME` 与 `PI_HOME` 都没清）就又出现了一个空的 `~/.pi-python`；`smoke.py` 与 `print_exit.py` 不会建它（它们用临时 `HOME`）。这是 §10.32 里 D.9 说的那一类写真实 home 的行为，只是在测试之外，是 `--version` 这条路径；没有查是哪段代码，没有改。
 
 **没跑的。** `net_audit.py --model-from FILE` 要真模型的密钥，没跑（真模型的那次是 r11）。`flags_probe.py` 的 `--only`、`--raw` 与 `settings_probe.py` 的 `--list` 是选项，不是另外的检查。
 
 **没验证的。** macOS 与 Windows 的二进制（`scripts/tui_pty/` 只在 Linux 上跑）；内核 6.12.94+ 以外的内核；Landlock 本身的生效（这些脚本不测它，`pi-sandbox` 的 `landlock_enforcement_e2e` 测）；v0.7.0 的二进制（仍没有运行）；`net_audit.py` 用真模型的一次；Zed 里的运行。对着 PyPI 上的 agent 的运行没有做：这一轮用的是 `.venv` 里的 `pi_agent_cli`（源码树）。
+
+### 10.34 r31 追加：`smoke.py --sandbox workspace` 的标签检查
+
+这一节记 2026-11-01 的一个小 PR：[#77](https://github.com/zy1233/pi-python/pull/77)（分支 `fix/tui-pty-smoke-sandbox-label`）。它修 §10.33 记下的发现。用户决定另开一个只改脚本的 PR。改动只在 `scripts/tui_pty/smoke.py`（再加这些文档）；`tui/`、别的脚本、workflow 没有改。云上的同一台 VM（内核 6.12.94+，Landlock 列在 `/sys/kernel/security/lsm`）。
+
+**改动。** 内核列出 Landlock 时，`smoke.py --sandbox PROFILE` 原来在欢迎页那一刻找 `sandbox:<profile>`（原第 139 至 148 行）。现在这一支不在那里查，改在第一轮对话之后查屏幕（`status line names the default model` 之后），与没有 Landlock 的那一支的第二次检查同一处：`if args.sandbox and not landlock_listed(): …`，`elif args.sandbox: …`。检查的文字和判断（`sandbox:<profile>` 在屏幕上）不变，只是挪了位置。没有 Landlock 的那一支没有改（欢迎页上的 `(not enforced)`、启动时的警告、第一轮之后的状态栏，三个检查与次序相同）。
+
+**两个事实与一个没有决定的事。**
+- 事实（§10.33 已记，这一轮又看了）：欢迎页上没有 `sandbox:workspace`，第一轮之后每个打印的屏幕里都有。所以检查的位置原来不对。
+- 事实：没有 Landlock 的那一支在欢迎页上查 `(not enforced)`，而这个检查在模拟下通过（见下），即那种情况下欢迎页上有标签。
+- 没有决定、也没有改：欢迎页该显示什么。这一轮只让脚本查标签所在的地方；欢迎页在 Landlock 生效时是否也应有标签，没有确认，没有查 `tui/` 的设计。
+
+**本地结果**（对 `release-dist` 构建 `2b62e68` 与 v0.8.0 的资产各跑一遍；`PI_*` 等变量清掉；绝对路径）：
+
+| 脚本与参数 | 改前 | 改后（构建 / 资产） |
+|---|---|---|
+| `smoke.py --sandbox workspace` | 23/24 | 24/24（7 s / 6 s） |
+| `smoke.py` | 23/23 | 23/23（7 s / 7 s） |
+| `exit_matrix.py --sandbox workspace` | 14/14 | 14/14（45 s / 44 s） |
+
+**没有 Landlock 的那一支。** 用户自己的 WSL2 是内核 5.x，没有 Landlock，所以这一支是他的情形，这台 VM 没有这样的内核。模拟（不提交）：临时的脚本副本，`landlock_listed()` 恒返回 `False`；`zypi` 经一个小包装启动，包装装一个 seccomp 过滤器，让 `landlock_create_ruleset`（x86_64 的 444）返回 `ENOSYS`，再 `exec` 构建的 `zypi`。这样 `zypi` 自己报「没有生效」。旧脚本（`origin/main`，同样强制）与新脚本都是 26/26，两次打印的检查逐行相同，只有 pid 与临时路径不同；其中有 `welcome page says the sandbox is not enforced` 与 `the session status bar says so too`。限度：这是在有 Landlock 的内核上做的模拟，不是在 WSL2 5.x 上跑；seccomp 的 `ENOSYS` 是否与 5.x 内核报的原因文字相同，没有比。两个临时副本已删。
+
+**测试。** `scripts/tests/test_tui_pty.py`：67 通过。没有测试导入 `smoke.py`（逻辑都在 `main()` 里），所以没有加；要加得先把 `main()` 拆开，超出这个 PR 的范围。`ruff check` 与 `ruff format --check` 通过。
+
+**没验证的。** WSL2 5.x 上的真机运行；macOS 与 Windows；CI（这个脚本不在 CI 里）。
 
 ## 附录 A（摘录）：A.4
 
@@ -3324,3 +3350,4 @@ r12 续 8（2026-10-13）：PR [#18](https://github.com/zy1233/pi-python/pull/18
 - r28：用 `gh stack` 合入十个 PR（2026-10-31；分支 `docs/plan-r28-stack-merge`，只改文档）。用户的话：「使用gh stack合并这7个PR,另外我云端开了3个PR，你可以一起合并了。」stack #66，次序从下到上：[#58](https://github.com/zy1233/pi-python/pull/58)、[#59](https://github.com/zy1233/pi-python/pull/59)、[#56](https://github.com/zy1233/pi-python/pull/56)、[#57](https://github.com/zy1233/pi-python/pull/57)、[#60](https://github.com/zy1233/pi-python/pull/60)、[#61](https://github.com/zy1233/pi-python/pull/61)、[#62](https://github.com/zy1233/pi-python/pull/62)、[#63](https://github.com/zy1233/pi-python/pull/63)、[#64](https://github.com/zy1233/pi-python/pull/64)、[#65](https://github.com/zy1233/pi-python/pull/65)；一次 `gh stack merge 66 --yes --squash`，UTC 03:17 全部合入（`main`：`7cb9e23` → `032ddbb`；`main` 的树与 #65 新头的树相同）。八个分支的头重建过（#58、#59 不动）；#56 改记 r26 / §10.29，#64 是 r27 / §10.30；`CHANGELOG.md` 的 `[Unreleased]` 按 Changed、Removed、Fixed 排。`main` 上的 `CI` 与 `TUI CI` 都通过：8,558 通过 / 0 失败 / 25 跳过，门禁在上限（依赖图 970，0 条告警，`leader` 239，`x.ai` 282）。计划：头部状态行、「当前状态」、阶段 D 的状态、§7 的 D.5 与 D.8（打勾）、「下一步」「还没有验证的」「待决策」里「没有合入」的句子、§10 索引、「修订记录（摘要）」与链接定义。`docs/baselines/tui.md` 的数按 `main` 上的 CI 重写。删了 7 个已合入的本地分支。见 [§10.31](#1031-r28-追加用-gh-stack-合入十个-pr)。
 - r29：D.9（2026-11-01；PR [#75](https://github.com/zy1233/pi-python/pull/75)，分支 `ci/tui-baseline-isolate-home-3df6`）。用户的电脑跑不动整套 Rust 测试，所以在云上的 Linux VM 里做；用户先要求讨论，同意后只做 D.9。`tui_baseline.py test` 用临时 `HOME`；整套测试改前改后都是 8,558 通过 / 0 失败 / 25 跳过。见 [§10.32](#1032-r29-追加d9测试用临时-home)。
 - r30：发行构建与 v0.8.0 二进制的 PTY 检查（2026-11-01；分支 `docs/tui-release-pty-check-c4a1`，只改文档）。在云上的 Linux VM 里按 `Release` 的办法构建 `zypi`（`release-dist`，`main` 的 `2b62e68`，冷构建 11 m 58 s，380,398,296 B），对它与 v0.8.0 的 `zypi-linux-x86_64` 各跑 `scripts/tui_pty/` 里不要密钥的脚本：除 `smoke.py --sandbox workspace`（23/24，待办的发现，没有改脚本）外全部通过，两个二进制的数相同；两个二进制里 `tui/` 的源码相同。见 [§10.33](#1033-r30-追加发行构建与-v080-二进制的-pty-检查)。
+- r31：`smoke.py --sandbox workspace` 的标签检查（2026-11-01；PR [#77](https://github.com/zy1233/pi-python/pull/77)，分支 `fix/tui-pty-smoke-sandbox-label`）。Landlock 内核上的检查从欢迎页挪到第一轮对话之后；两个二进制上 24/24；没有 Landlock 的那一支没改，用 seccomp 模拟，新旧脚本都是 26/26。欢迎页该显示什么没有决定。见 [§10.34](#1034-r31-追加smokepy---sandbox-workspace-的标签检查)。

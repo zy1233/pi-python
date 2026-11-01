@@ -118,7 +118,7 @@
 - **`--setup` 的终端登录（v0.7.0）。** 一个充当客户端的脚本在 Linux 上对着活的 agent 进程跑过；没有在 Zed 里运行过（[§10.29][l10-29]）。
 - **TUI CI 的缓存键（PR [#48][pr-48]）。** 同一个键在 `main` 上的两次推送之间命中（19 m 28 s）；runner 映像再更新之后，键是否还不变，没有验证。
 - **v0.7.0 的二进制。** 两个二进制由 `Release` 的[运行][run-release-v070]构建；r26 只核对了资产的名字与大小，没有运行它们。v0.8.0 的 Linux 二进制 r30 下载后跑过（内核 6.12.94+；`tui/` 与本地构建的提交相同）：`scripts/tui_pty/` 里不要密钥的脚本通过；macOS 与 Windows 的没有运行（[§10.33][l10-33]）。
-- **`smoke.py --sandbox workspace`（内核有 Landlock 时）。** r30 里 23/24：状态栏的标签在欢迎页上没有，在之后的屏幕上有。脚本的检查位置很可能太早；欢迎页该不该显示标签没有确认。没有修，用户还没有决定要不要改脚本（[§10.33][l10-33]）。
+- **`smoke.py --sandbox workspace` 的标签。** PR [#77][pr-77] 把内核有 Landlock 时的检查从欢迎页挪到第一轮对话之后，本地 24/24（[§10.34][l10-34]）。没有确认的：欢迎页该不该显示标签；没有在 WSL2 5.x（没有 Landlock）上跑过，只在 Landlock 内核上模拟过。
 
 出处：执行记录 [§10.10][l10-10]–[§10.15][l10-15] 各节的「没有验证」。
 
@@ -462,14 +462,15 @@ Rust（pager）：
 | [§10.30][l10-30] | r27 | 旗标与设置页的测量（#57）与修（#60）：21 个旗标在交互模式下被拒绝，设置页 37 行 → 29 行；决策 9 的截止（#61）；D.8 与决策 10 两项（#62）、D.5（#63）；五个 PR 在 r28 合入 | PR [#57][pr-57]、[#60][pr-60]、[#61][pr-61]、[#62][pr-62]、[#63][pr-63] |
 | [§10.31][l10-31] | r28 | 用 `gh stack` 合入十个 PR（#58、#59、#56、#57、#60 至 #65）：栈的次序、八个分支的重建与改号、冲突、合入前后的检查、`main` 上的 CI；基线报告的数重新量 | PR [#56][pr-56]–[#65][pr-65]（栈 #66） |
 | [§10.32][l10-32] | r29 | D.9：`tui_baseline.py test` 用临时 `HOME`；改前改后各跑整套测试，数相同；真实 home 与 `/tmp` 里的新条目 2,084 → 0（含一个测试的修正）；三次尝试里两个放错的位置 | PR [#75][pr-75] |
-| [§10.33][l10-33] | r30 | 发行构建（`release-dist`）与 v0.8.0 的 Linux 二进制在云 VM 上的 PTY 检查：冷构建 11 m 58 s，两个二进制各跑一遍脚本；`smoke.py --sandbox workspace` 23/24（没有修） | — |
+| [§10.33][l10-33] | r30 | 发行构建（`release-dist`）与 v0.8.0 的 Linux 二进制在云 VM 上的 PTY 检查：冷构建 11 m 58 s，两个二进制各跑一遍脚本；`smoke.py --sandbox workspace` 23/24（r31 修了，见下一行） | — |
+| [§10.34][l10-34] | r31 | `smoke.py --sandbox workspace`：Landlock 内核上的检查从欢迎页挪到第一轮对话之后；两个二进制上 24/24，不带 `--sandbox` 仍 23/23，`exit_matrix` 仍 14/14；没有 Landlock 的那一支用 seccomp 模拟，新旧脚本都是 26/26 | PR [#77][pr-77] |
 | [附录 A.4][logA4] | r5 | 入口审计的 r5 执行结果 | [#7][pr-7] |
 | [附录 B][logB] | r2–r17 | 复现方法（依赖图、模块级闭包、各轮的测量与测试命令） | — |
 | [附录 C][logC] | r10 | §7 的逐项注释（原文） | — |
 | [附录 D][logD] | r10 | 计划头部的状态文字（原文） | — |
 | [附录 E][logE] | r2 | §4、§5 的原文（源码事实基线与改动规模估计） | — |
 | [附录 F][logF] | r22 续 1 | 计划整理前的状态文字（原文）：头部、「当前状态」逐轮、两个里程碑、「下一步」，「还没有验证的」「待决策」「§7」「§10 索引」里改短的条目，「修订记录（摘要）」的长条目 | — |
-| [修订记录][logRev] | r1–r30 | 逐轮的完整说明 | — |
+| [修订记录][logRev] | r1–r31 | 逐轮的完整说明 | — |
 
 ## 附录 A：能力矩阵与 ACP 版本配对（阶段 0.8，r9 定稿）
 
@@ -578,6 +579,7 @@ Rust（pager）：
 - r28：用一次 `gh stack` 把十个 PR（[#58][pr-58]、[#59][pr-59]、[#56][pr-56]、[#57][pr-57]、[#60][pr-60]–[#65][pr-65]）合入 `main`（2026-10-31；`main` 从 `7cb9e23` 到 `032ddbb`）。轮号：#58、#59 是 r24、r25，#56 记成 r26，#64 记成 r27。计划里「开着，没有合入」的句子改成已合入；D.5 与 D.8 打勾，阶段 D 改成「开始了一部分」；`docs/baselines/tui.md` 的数按 `main` 上的 CI 重写。只改文档。见 [§10.31][l10-31]。
 - r29：D.9（PR [#75][pr-75]；2026-11-01）：`tui_baseline.py test` 用临时 `HOME`。只改 `scripts/tui_baseline.py`、它的单测与文档。见 [§10.32][l10-32]。
 - r30：发行构建与 v0.8.0 二进制的 PTY 检查（2026-11-01）。只改文档。见 [§10.33][l10-33]。
+- r31：`smoke.py --sandbox workspace` 的标签检查挪到第一轮对话之后（PR [#77][pr-77]；2026-11-01）。只改 `scripts/tui_pty/smoke.py` 与文档。见 [§10.34][l10-34]。
 
 <!-- 链接定义 -->
 [log]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md
@@ -614,6 +616,7 @@ Rust（pager）：
 [l10-31]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1031-r28-追加用-gh-stack-合入十个-pr
 [l10-32]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1032-r29-追加d9测试用临时-home
 [l10-33]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1033-r30-追加发行构建与-v080-二进制的-pty-检查
+[l10-34]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1034-r31-追加smokepy---sandbox-workspace-的标签检查
 [l4-1]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#41-运行路径
 [l4-2]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#42-rust-runtime-与耦合面
 [l4-3]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#43-python-侧pi_agent_cli共-4114-行agentpy-472-行
@@ -678,6 +681,7 @@ Rust（pager）：
 [pr-64]: https://github.com/zy1233/pi-python/pull/64
 [pr-65]: https://github.com/zy1233/pi-python/pull/65
 [pr-75]: https://github.com/zy1233/pi-python/pull/75
+[pr-77]: https://github.com/zy1233/pi-python/pull/77
 [ci-run-5f73e07]: https://github.com/zy1233/pi-python/actions/runs/40172668652
 [tui-ci-run-5f73e07]: https://github.com/zy1233/pi-python/actions/runs/40172721728
 [run-dry-run-5f73e07]: https://github.com/zy1233/pi-python/actions/runs/40172723794
