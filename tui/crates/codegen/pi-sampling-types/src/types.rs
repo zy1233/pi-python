@@ -774,32 +774,6 @@ pub enum ReasoningEffort {
 }
 
 impl ReasoningEffort {
-    pub fn to_responses_api(self) -> crate::rs::ReasoningEffort {
-        match self {
-            Self::None => crate::rs::ReasoningEffort::None,
-            Self::Minimal => crate::rs::ReasoningEffort::Minimal,
-            Self::Low => crate::rs::ReasoningEffort::Low,
-            Self::Medium => crate::rs::ReasoningEffort::Medium,
-            Self::High => crate::rs::ReasoningEffort::High,
-            Self::Xhigh => crate::rs::ReasoningEffort::Xhigh,
-            Self::Max => crate::rs::ReasoningEffort::Max,
-        }
-    }
-
-    /// Inverse of [`to_responses_api`](Self::to_responses_api): the effort the
-    /// Responses API echoes back on `response.reasoning.effort`.
-    pub fn from_responses_api(effort: crate::rs::ReasoningEffort) -> Self {
-        match effort {
-            crate::rs::ReasoningEffort::None => Self::None,
-            crate::rs::ReasoningEffort::Minimal => Self::Minimal,
-            crate::rs::ReasoningEffort::Low => Self::Low,
-            crate::rs::ReasoningEffort::Medium => Self::Medium,
-            crate::rs::ReasoningEffort::High => Self::High,
-            crate::rs::ReasoningEffort::Xhigh => Self::Xhigh,
-            crate::rs::ReasoningEffort::Max => Self::Max,
-        }
-    }
-
     pub fn as_str(self) -> &'static str {
         match self {
             Self::None => "none",
@@ -1068,83 +1042,10 @@ pub struct SamplingConfig {
     pub stream_tool_calls: Option<bool>,
 }
 
-// ============ Responses API wrapper ============
-
-/// Wrapper around `async_openai::types::responses::CreateResponse` that adds
-/// custom header fields for pi request tracking, similar to
-/// `ChatCompletionRequest`.
-#[derive(Debug, Clone, Default)]
-pub struct CreateResponseWrapper {
-    /// The inner Responses API request.
-    pub inner: crate::rs::CreateResponse,
-
-    /// Custom header: conversation ID for tracking.
-    pub x_grok_conv_id: Option<String>,
-
-    /// Custom header: request ID for tracking.
-    pub x_grok_req_id: Option<String>,
-
-    pub x_grok_session_id: Option<String>,
-    pub x_grok_turn_idx: Option<String>,
-    pub x_grok_agent_id: Option<String>,
-    pub x_grok_deployment_id: Option<String>,
-    pub x_grok_user_id: Option<String>,
-
-    /// Optional tracing context (e.g., where to persist the finalized request payload).
-    pub trace: Option<Box<dyn TraceContext>>,
-
-    /// pi-specific tool definitions that can't be expressed via
-    /// `async_openai`'s `rs::Tool` enum (e.g., `x_search`). Injected
-    /// as raw JSON into the serialized request body's `tools` array.
-    pub extra_tool_entries: Vec<serde_json::Value>,
-}
-
-impl CreateResponseWrapper {
-    /// Create a new wrapper from an existing `CreateResponse`.
-    pub fn new(inner: crate::rs::CreateResponse) -> Self {
-        Self {
-            inner,
-            x_grok_conv_id: None,
-            x_grok_req_id: None,
-            x_grok_session_id: None,
-            x_grok_turn_idx: None,
-            x_grok_agent_id: None,
-            x_grok_deployment_id: None,
-            x_grok_user_id: None,
-            trace: None,
-            extra_tool_entries: vec![],
-        }
-    }
-
-    /// Set the conversation ID header.
-    pub fn with_conv_id(mut self, conv_id: impl Into<String>) -> Self {
-        self.x_grok_conv_id = Some(conv_id.into());
-        self
-    }
-
-    /// Set the request ID header.
-    pub fn with_req_id(mut self, req_id: impl Into<String>) -> Self {
-        self.x_grok_req_id = Some(req_id.into());
-        self
-    }
-
-    /// Set the trace context for request logging.
-    pub fn with_trace(mut self, trace: impl TraceContext + 'static) -> Self {
-        self.trace = Some(Box::new(trace));
-        self
-    }
-}
-
-impl From<crate::rs::CreateResponse> for CreateResponseWrapper {
-    fn from(inner: crate::rs::CreateResponse) -> Self {
-        Self::new(inner)
-    }
-}
-
 // ============ Messages API wrapper ============
 
 /// Wrapper around `MessagesRequest` that adds custom header fields for pi
-/// request tracking, analogous to `CreateResponseWrapper`.
+/// request tracking, analogous to `ChatCompletionRequest`.
 #[derive(Debug, Clone, Default)]
 pub struct MessagesRequestWrapper {
     /// The inner Messages API request.

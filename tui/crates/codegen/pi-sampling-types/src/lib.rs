@@ -31,5 +31,4 @@ pub use self::tool_overrides::{
 };
 pub use self::types::*;
 
-// Re-export async-openai crate Responses API types under `rs` namespace
-pub use async_openai::types::responses as rs;
+pub mod rs;

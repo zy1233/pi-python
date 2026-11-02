@@ -147,25 +147,13 @@ pub(super) fn make_response(message: ConversationItem) -> ConversationResponse {
     }
 }
 
-// KV Cache Invariant Tests (adapted to sibling-Reasoning)
+// KV Cache Invariant Tests
 //
-// These tests enforce prefix stability and correct turn ordering for the
-// Responses API input construction. Prompt caching (server-side prefix
-// match) requires that request N's serialised input is a strict prefix
-// of request N+1's. Any re-ordering of items -- especially reasoning
-// items -- destroys the prefix and tanks the cache hit rate.
-//
-// The invariant asserted is `&input2[..input1.len()] == input1` for
-// every pair of consecutive turns.
-//
-// In the sibling-Reasoning refactor, reasoning rides as
-// `ConversationItem::Reasoning(rs::ReasoningItem)` siblings in the flat
-// ordered `items` list. The serialized wire shape is produced by the
-// `From<&ConversationRequest> for rs::CreateResponse` impl with no
-// placeholder/splice dance. The old `__RAW_OUTPUT_PLACEHOLDER_`
-// / `extract_raw_input_items` / `splice_raw_input_items` tests are
-// structurally obsolete and are not ported; the invariants they pinned
-// are preserved here in a backend-shape-agnostic form.
+// Prompt caching (server-side prefix match) requires that request N's
+// serialised messages are a strict prefix of request N+1's. Any re-ordering
+// of items -- especially reasoning items -- destroys the prefix and tanks the
+// cache hit rate. The invariant asserted is `&input2[..input1.len()] == input1`
+// for every pair of consecutive turns, on the Chat Completions wire.
 
 pub(super) fn reasoning_sibling(
     id: &str,
@@ -184,10 +172,9 @@ pub(super) fn reasoning_sibling(
 }
 
 pub(super) fn input_items_json(req: &ConversationRequest) -> Vec<serde_json::Value> {
-    let cr: rs::CreateResponse = req.into();
-    let mut body = serde_json::to_value(&cr).unwrap();
-    patch_reasoning_text_types(&mut body);
-    body["input"].as_array().cloned().unwrap_or_default()
+    let chat: ChatCompletionRequest = req.clone().into();
+    let body = serde_json::to_value(&chat).unwrap();
+    body["messages"].as_array().cloned().unwrap_or_default()
 }
 
 pub(super) fn summarise_input(items: &[serde_json::Value]) -> Vec<String> {

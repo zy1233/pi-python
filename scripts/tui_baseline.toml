@@ -14,12 +14,11 @@ channel = "1.94.0"
 [gates]
 # `cargo tree -p pi-pager-bin -i <crate>` must fail with "did not match any packages", and the
 # crate must not appear in tui/Cargo.lock.
-deny_crates = ["pi-sampler"]
+deny_crates = ["pi-sampler", "async-openai"]
 # Whole-word matches anywhere under tui/crates are runtime remnants and fail the gate.
 deny_words = ["MvpAgent", "acp_session_impl", "SamplerActor"]
 # Present on purpose; the report lists their direct dependents (reasons: docs/baselines/tui.md).
 tracked_crates = [
-    "async-openai",
     "pi-sampling-types",
     "pi-tools",
     "pi-agent",
@@ -37,7 +36,7 @@ tracked_crates = [
 [gates.residue]
 "grok agent" = 0
 "leader" = 214
-"x.ai" = 253
+"x.ai" = 251
 
 # ADR1 (plan section 10.16): the pager asks the agent which sessions exist (`session/list`) and
 # reads no session files itself. Production code in these crates (paths under tui/crates) must
@@ -71,8 +70,10 @@ package = "pi-pager-bin"
 # packages left when `pi-shell` dropped the dependencies that no source file named: `pi-workflow`
 # and nine registry packages; one local run on Linux). A new dependency has to lower the count
 # elsewhere or raise this number on purpose. Then 965 (the removal of `pi-update`: it left, and
-# with it `indicatif`, `console` and `unit-prefix`; one local run on Linux).
-x86_64-unknown-linux-gnu = 965
+# with it `indicatif`, `console` and `unit-prefix`; one local run on Linux). Then 954 (phase D.1:
+# `async-openai` and ten packages that only it used left; one local run on Linux, 965 on the same
+# base without the change).
+x86_64-unknown-linux-gnu = 954
 
 [check]
 # Consumer build: everything that ships (`zypi`, the minimal pager).
@@ -254,8 +255,13 @@ min_passed = 210
 [[test.suite]]
 package = "pi-sampling-types"
 targets = ["--lib"]
-reference_passed = 320
-min_passed = 310
+# 320 before phase D.1 (r36) deleted the Responses wire conversion of `ConversationRequest` with its
+# 39 tests (`responses_tests.rs`) and 3 more that needed it, and added 2 (the old-session fixture
+# round trip and the `raw_output` lift of every backend tool kind): 320 - 39 - 3 + 2 = 280 on Linux
+# (one local run). The floor keeps the same distance as before (10). `pi-chat-state` is not a suite
+# here; its prefix-stability tests now run on the Chat Completions wire and keep their count.
+reference_passed = 280
+min_passed = 270
 
 # The sandbox: its lib tests and the four end-to-end files (`deny_paths_e2e` needs `bwrap` on
 # Linux; `landlock_enforcement_e2e` and `read_write_trailing_glob_e2e` need Landlock). The files
