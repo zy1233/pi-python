@@ -5,6 +5,11 @@ says about itself is its ``annotations`` (MCP-style hints, see ``ToolAnnotations
 the harness puts on the ``tool_call`` event. There is no list of tool names to keep up to
 date: a tool nobody thought of, an extension's say, is asked about until it declares itself.
 
+``auto`` mode starts from the same test: a tool that declares itself harmless is never asked
+about. For the other calls the Auto rules decide (``auto_mode``); the calls that they cannot
+allow are put to the user in the same way, with the reason in the title of the question.
+``always-approve`` asks about nothing.
+
 ``workflow`` declares nothing, so starting one is a decision of its own; it fans work out to
 sub-agents that can run ``bash`` / ``edit`` / ``write`` themselves. Their tool calls are
 asked about individually (the harness bridge's ``tool_call_gate``), not covered by allowing
@@ -18,6 +23,7 @@ from typing import Any
 
 from acp.schema import AllowedOutcome, DeniedOutcome, PermissionOption, ToolCallUpdate
 
+from pi_agent_cli.auto_reasons import Reason, sentence
 from pi_agent_cli.config import PermissionMode
 from pi_agent_cli.events import tool_kind
 
@@ -48,30 +54,40 @@ def _declares_itself_harmless(annotations: Any) -> bool:
 
 
 def needs_permission(mode: PermissionMode, annotations: Mapping[str, Any] | None = None) -> bool:
-    """Whether a tool call has to be put to the user.
+    """Whether a tool call can be one that the user is asked about.
 
-    ``auto`` and ``always-approve`` never ask. In ``ask`` mode everything is asked about
-    except a tool that declares itself harmless (*annotations*, from the ``tool_call``
-    event); a tool the session does not know has no annotations and is asked about.
+    ``always-approve`` never asks. In ``ask`` mode everything is asked about except a tool that
+    declares itself harmless (*annotations*, from the ``tool_call`` event); a tool the session
+    does not know has no annotations and is asked about. ``auto`` starts from the same test:
+    ``True`` means that Auto has to decide the call (it may allow it), ``False`` that it is
+    allowed with no decision. A tool that declares itself harmless is never asked about in
+    ``auto`` either, so Auto never asks more than ``ask`` does.
     """
-    if mode in {"auto", "always-approve"}:
+    if mode == "always-approve":
         return False
     return not _declares_itself_harmless(annotations)
 
 
-def _prompt_title(tool_name: str, origin: dict[str, Any] | None) -> str:
-    """The tool name, plus where a workflow sub-agent's call runs.
+def _prompt_title(
+    tool_name: str, origin: dict[str, Any] | None, auto_reason: Reason | None = None
+) -> str:
+    """The tool name, plus why Auto asks and where a workflow sub-agent's call runs.
 
     The prompt shows the tool's own input, which for a relative path says nothing about
     the directory it lands in, and a workflow script can point a sub-agent anywhere.
     Only facts from the runtime go into the title: the sub-agent's ``label`` is text the
-    script chose, so it stays out.
+    script chose, so it stays out. The reason of an Auto question is one of the fixed
+    sentences of ``auto_reasons``: no command text, no file name and no model text.
     """
-    if not origin or origin.get("kind") != "subagent":
+    notes: list[str] = []
+    if auto_reason is not None:
+        notes.append(f"Auto: {sentence(auto_reason)}")
+    if origin and origin.get("kind") == "subagent":
+        cwd = origin.get("cwd")
+        notes.append(f"workflow sub-agent{f' in {cwd}' if cwd else ''}")
+    if not notes:
         return tool_name
-    cwd = origin.get("cwd")
-    where = f" in {cwd}" if cwd else ""
-    return f"{tool_name} (workflow sub-agent{where})"
+    return f"{tool_name} ({'; '.join(notes)})"
 
 
 def permission_tool_call(
@@ -79,10 +95,11 @@ def permission_tool_call(
     tool_name: str,
     raw_input: dict[str, Any],
     origin: dict[str, Any] | None = None,
+    auto_reason: Reason | None = None,
 ) -> ToolCallUpdate:
     return ToolCallUpdate(
         tool_call_id=tool_call_id,
-        title=_prompt_title(tool_name, origin),
+        title=_prompt_title(tool_name, origin, auto_reason),
         kind=tool_kind(tool_name),  # type: ignore[arg-type]
         status="pending",
         raw_input=raw_input,

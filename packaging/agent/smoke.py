@@ -150,7 +150,7 @@ async def play(
     command: list[str], home: Path, port: int, provider: str = "openai"
 ) -> tuple[Client, float]:
     (home / "agent.toml").write_text(
-        'permission = "auto"\n\n'
+        'permission = "always-approve"\n\n'
         "[model]\n"
         f'provider = "{provider}"\n'
         'id = "smoke-model"\n'

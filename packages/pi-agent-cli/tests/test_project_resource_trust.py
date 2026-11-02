@@ -426,7 +426,7 @@ async def _open_session(world: Any, config: CliConfig) -> _RecordingClient:
 async def test_the_acp_client_is_told_which_project_resources_were_skipped(world: Any):
     # ``never``: an untrusted project, settled without a question (this client answers none).
     config = CliConfig(
-        permission="auto", default_project_trust="never", skills_dirs=(".pi/skills",)
+        permission="always-approve", default_project_trust="never", skills_dirs=(".pi/skills",)
     )
     client = await _open_session(world, config)
 
@@ -438,7 +438,7 @@ async def test_the_acp_client_is_told_which_project_resources_were_skipped(world
 
 @pytest.mark.asyncio
 async def test_the_acp_client_hears_nothing_when_the_project_is_trusted(world: Any):
-    client = await _open_session(world, _trusting(world, permission="auto"))
+    client = await _open_session(world, _trusting(world, permission="always-approve"))
 
     assert client.agent_text() == ""
 

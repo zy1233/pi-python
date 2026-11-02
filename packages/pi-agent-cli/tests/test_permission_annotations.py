@@ -32,6 +32,7 @@ STAYS_INSIDE = {"destructiveHint": False, "openWorldHint": False}
 # --- the policy itself ---------------------------------------------------------------
 
 
+@pytest.mark.parametrize("mode", ["ask", "auto"])
 @pytest.mark.parametrize(
     "annotations",
     [
@@ -43,10 +44,14 @@ STAYS_INSIDE = {"destructiveHint": False, "openWorldHint": False}
     ],
     ids=["read-only", "reads-the-web", "contradiction", "stays-inside", "writes-but-stays-inside"],
 )
-def test_a_tool_that_only_reads_or_changes_nothing_that_matters_is_not_asked_about(annotations):
-    assert needs_permission("ask", annotations) is False
+def test_a_tool_that_only_reads_or_changes_nothing_that_matters_is_not_asked_about(
+    mode, annotations
+):
+    # ``auto`` starts from the same test: it never asks more than ``ask`` does.
+    assert needs_permission(mode, annotations) is False
 
 
+@pytest.mark.parametrize("mode", ["ask", "auto"])
 @pytest.mark.parametrize(
     "annotations",
     [
@@ -78,14 +83,15 @@ def test_a_tool_that_only_reads_or_changes_nothing_that_matters_is_not_asked_abo
         "a-string",
     ],
 )
-def test_everything_else_is_asked_about(annotations):
-    assert needs_permission("ask", annotations) is True
+def test_everything_else_is_asked_about(mode, annotations):
+    """In ``auto`` it is the Auto rules that answer, and they may allow it: ``True`` here
+    means that a decision is needed."""
+    assert needs_permission(mode, annotations) is True
 
 
-@pytest.mark.parametrize("mode", ["auto", "always-approve"])
 @pytest.mark.parametrize("annotations", [None, {}, {"readOnlyHint": False}, READS])
-def test_the_other_modes_never_ask(mode, annotations):
-    assert needs_permission(mode, annotations) is False
+def test_always_approve_never_asks(annotations):
+    assert needs_permission("always-approve", annotations) is False
 
 
 # --- shipped extensions: no prompt that was not there before -------------------------
@@ -298,8 +304,7 @@ async def test_an_extension_tool_runs_once_the_user_allows_it(tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("permission", ["auto", "always-approve"])
-async def test_the_other_modes_still_run_everything_without_asking(tmp_path, permission):
+async def test_always_approve_still_runs_everything_without_asking(tmp_path):
     ran: list[str] = []
     client = _Client(allow=False)
 
@@ -307,7 +312,44 @@ async def test_the_other_modes_still_run_everything_without_asking(tmp_path, per
         tmp_path,
         _call_once("probe", {"message": "hi"}),
         extensions=[_probe_extension(ran, None)],
-        permission=permission,
+        permission="always-approve",
+    )
+    await _run(agent, client, tmp_path)
+
+    assert client.asked == []
+    assert ran == ["call_1"]
+
+
+@pytest.mark.asyncio
+async def test_auto_asks_about_an_extension_tool_that_declares_nothing(tmp_path):
+    """Design decision D7: Auto cannot judge a tool it knows nothing about, so it asks."""
+    ran: list[str] = []
+    client = _Client(allow=False)
+
+    agent = _agent(
+        tmp_path,
+        _call_once("probe", {"message": "hi"}),
+        extensions=[_probe_extension(ran, None)],
+        permission="auto",
+    )
+    await _run(agent, client, tmp_path)
+
+    assert client.asked == ["probe"]
+    assert ran == []  # the user said no
+    assert client.finished() == ["failed"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("annotations", [READS, STAYS_INSIDE], ids=["reads", "stays-inside"])
+async def test_auto_never_asks_about_a_tool_that_declares_itself_harmless(tmp_path, annotations):
+    ran: list[str] = []
+    client = _Client(allow=False)
+
+    agent = _agent(
+        tmp_path,
+        _call_once("probe", {"message": "hi"}),
+        extensions=[_probe_extension(ran, annotations)],
+        permission="auto",
     )
     await _run(agent, client, tmp_path)
 

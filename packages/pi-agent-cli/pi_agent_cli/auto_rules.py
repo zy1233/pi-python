@@ -1,7 +1,8 @@
 """Rules of the Auto permission mode: the part that needs no model.
 
-Not wired in yet: nothing in the agent calls this module. ``decide`` takes one tool call and
-the session facts (``AutoContext``) and gives back one ``RuleDecision``. Design and reasons:
+``decide`` takes one tool call and the session facts (``AutoContext``) and gives back one
+``RuleDecision``. The agent calls it through ``pi_agent_cli.auto_mode``, which builds the
+context, checks it and keeps the audit record. Design and reasons:
 ``docs/specs/2026-11-02-auto-mode-design.md`` (sections 2, 3.2, 3.3).
 
 The steps, first answer wins:
@@ -23,6 +24,11 @@ this parser could read a command in two ways, the parser refuses.
 Known gaps (the same as for the ``read`` and ``grep`` tools, which ``ask`` mode allows): a glob
 such as ``cat *`` or a recursive ``grep -r`` can read a protected file that is not named. What
 the kernel sandbox stops is the sandbox's job.
+
+What these rules do not protect at all: a tool that declares itself harmless (step 1) is not
+looked at. ``read``, ``grep``, ``find``, ``ls``, ``fetch_url`` and ``web_search`` can read a
+secret, and ``fetch_url`` can send it in a URL. Auto asks about no more than ``ask`` mode does.
+A sandbox is the boundary for these; Auto is not.
 """
 
 from __future__ import annotations
@@ -44,6 +50,23 @@ MAX_PATH_CHARS = 4096
 MAX_GIT_SPEC_PARTS = 16
 MAX_WRAPPER_DEPTH = 5
 MAX_CWD_CANDIDATES = 8
+
+# Files of a project that something else runs, or reads as instructions, after the agent wrote
+# them: a git hook, a task that an editor starts, a workflow of the CI, the settings of other
+# coding agents and their MCP servers. A write to one of them asks, in a project of any trust.
+# Each entry is a glob, tried as ``AutoContext.protected_globs`` are. ``Makefile``,
+# ``package.json`` and ``conftest.py`` are not in the list on purpose: the agent changes them in
+# ordinary work, and asking each time would make Auto useless in most projects. The user adds
+# more with ``[auto] protected`` in ``agent.toml``. To change this list, change this constant.
+DEFAULT_PROTECTED_GLOBS: tuple[str, ...] = (
+    ".husky/*",
+    ".githooks/*",
+    ".claude/*",
+    ".cursor/*",
+    ".mcp.json",
+    ".vscode/tasks.json",
+    ".github/workflows/*",
+)
 
 
 def _words(text: str) -> frozenset[str]:
@@ -227,6 +250,12 @@ def _is_absolute(path: object) -> bool:
     if not isinstance(text, str):
         return False
     return os.path.isabs(text) or (os.name == "nt" and text[:1] in ("/", "\\"))
+
+
+def is_absolute_folder(path: object) -> bool:
+    """Whether *path* is text that names a folder with no base (the test that the rules apply
+    to every folder of the context). ``~`` is not expanded; ``""`` and ``"."`` are not absolute."""
+    return _is_absolute(path)
 
 
 def _context_is_absolute(ctx: AutoContext) -> bool:

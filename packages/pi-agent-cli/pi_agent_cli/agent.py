@@ -6,10 +6,10 @@ import asyncio
 import importlib.metadata
 import logging
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from acp import PROTOCOL_VERSION, RequestError
 from acp.helpers import update_agent_message_text
@@ -23,6 +23,7 @@ from acp.schema import (
     AvailableCommandsUpdate,
     ClientCapabilities,
     CloseSessionResponse,
+    ConfigOptionUpdate,
     EmbeddedResourceContentBlock,
     HttpMcpServer,
     ImageContentBlock,
@@ -45,6 +46,7 @@ from acp.schema import (
     SessionListCapabilities,
     SessionResumeCapabilities,
     SetSessionConfigOptionResponse,
+    SetSessionModeResponse,
     SseMcpServer,
     TextContentBlock,
     UnstructuredCommandInput,
@@ -57,6 +59,15 @@ from pi_agent_cli.auth_methods import (
     setup_auth_method,
     terminal_auth_form,
 )
+from pi_agent_cli.auto_mode import (
+    AUTO_EXTENSION_NAME,
+    AutoSession,
+    BashLimitRegistry,
+    config_notes_message,
+    entry_message,
+    problems_message,
+)
+from pi_agent_cli.auto_reasons import Reason
 from pi_agent_cli.client_mcp import client_mcp_servers, mcp_extension_installed
 from pi_agent_cli.config import (
     CliConfig,
@@ -87,6 +98,14 @@ from pi_agent_cli.factory import (
     model_for_choice,
 )
 from pi_agent_cli.mcp_notice import ignored_mcp_servers_notice
+from pi_agent_cli.permission_modes import (
+    MODE_CONFIG_ID,
+    mode_config_option,
+    mode_from_notification,
+    mode_from_session_meta,
+    selectable_mode,
+    session_mode_state,
+)
 from pi_agent_cli.permissions import (
     PERMISSION_OPTIONS,
     needs_permission,
@@ -223,6 +242,14 @@ class PiAcpAgent(Agent):
         # deferred setup of the session has run, then sent in order.
         self._notices_open: set[str] = set()
         self._held_notices: dict[str, list[str]] = {}
+        # The permission mode of each open session, and the Auto state that goes with it. The
+        # mode is per session; the legacy notification ``pi/yolo_mode_changed`` moves them all.
+        self._session_modes: dict[str, PermissionMode] = {}
+        self._autos: dict[str, AutoSession] = {}
+        # Sessions whose Auto mode came from ``permission = "auto"`` in ``agent.toml`` (which
+        # meant "no question" before): their entry message says what the setting means now.
+        self._auto_from_config: set[str] = set()
+        self._mode_lock = asyncio.Lock()
 
     def on_connect(self, conn: Client) -> None:
         self._conn = conn
@@ -309,7 +336,7 @@ class PiAcpAgent(Agent):
             session = await self._create_session_with_id(chosen_id, cwd)
         session_id = (await session.get_metadata()).id
         try:
-            await self._bind_session(session_id, session, cwd, mcp_servers)
+            await self._bind_session(session_id, session, cwd, mcp_servers, meta=kwargs)
         except BaseException:
             self._reserved_ids.discard(session_id)
             raise
@@ -321,6 +348,7 @@ class PiAcpAgent(Agent):
         self._schedule_deferred_setup(session_id)
         return NewSessionResponse(
             session_id=session_id,
+            modes=session_mode_state(self._session_mode(session_id)),
             config_options=self._config_options(session_id),
             field_meta=self._session_response_meta(session_id),
         )
@@ -337,10 +365,12 @@ class PiAcpAgent(Agent):
         metadata = await self._find_metadata(session_id)
         if metadata is None:
             # No file: nobody typed in it (there is nothing to replay), or the id is unknown.
-            await self._reopen_blank_session(session_id, cwd, mcp_servers)
+            await self._reopen_blank_session(session_id, cwd, mcp_servers, meta=kwargs)
         else:
             session = await self._repo.open(metadata)
-            await self._bind_session(session_id, session, metadata.cwd or cwd, mcp_servers)
+            await self._bind_session(
+                session_id, session, metadata.cwd or cwd, mcp_servers, meta=kwargs
+            )
             if self._conn is not None:
                 context = await session.build_context()
                 for msg in context.messages:
@@ -348,6 +378,7 @@ class PiAcpAgent(Agent):
                         await self._conn.session_update(session_id=session_id, update=update)
             self._schedule_deferred_setup(session_id)
         return LoadSessionResponse(
+            modes=session_mode_state(self._session_mode(session_id)),
             config_options=self._config_options(session_id),
             field_meta=self._session_response_meta(session_id),
         )
@@ -393,13 +424,16 @@ class PiAcpAgent(Agent):
         self._refresh_config()
         metadata = await self._find_metadata(session_id)
         if metadata is None:
-            await self._reopen_blank_session(session_id, cwd, mcp_servers)
+            await self._reopen_blank_session(session_id, cwd, mcp_servers, meta=kwargs)
         else:
             session = await self._repo.open(metadata)
-            await self._bind_session(session_id, session, metadata.cwd or cwd, mcp_servers)
+            await self._bind_session(
+                session_id, session, metadata.cwd or cwd, mcp_servers, meta=kwargs
+            )
             # ACP session/resume intentionally does not replay history.
             self._schedule_deferred_setup(session_id)
         return ResumeSessionResponse(
+            modes=session_mode_state(self._session_mode(session_id)),
             config_options=self._config_options(session_id),
             field_meta=self._session_response_meta(session_id),
         )
@@ -411,6 +445,7 @@ class PiAcpAgent(Agent):
         self._permission_locks.pop(session_id, None)
         self._drop_trust(session_id)
         self._forget_notices(session_id)
+        self._forget_mode(session_id)
         if harness is not None:
             await harness.close()
         return CloseSessionResponse()
@@ -494,8 +529,11 @@ class PiAcpAgent(Agent):
     async def set_config_option(
         self, config_id: str, session_id: str, value: str | bool, **kwargs: Any
     ) -> SetSessionConfigOptionResponse | None:
-        """``session/set_config_option``: only the ``model`` selector is supported."""
+        """``session/set_config_option``: the ``model`` selector and the ``mode`` selector."""
         harness = self._require_harness(session_id)
+        if config_id == MODE_CONFIG_ID:
+            await self._select_mode(session_id, value, {"configId": config_id, "value": value})
+            return SetSessionConfigOptionResponse(config_options=self._config_options(session_id))
         if config_id != MODEL_CONFIG_ID:
             raise RequestError.invalid_params(
                 {"configId": config_id, "reason": "unknown config option"}
@@ -509,6 +547,15 @@ class PiAcpAgent(Agent):
         harness.get_api_key = api_key_for_choice(choice)
         self._session_models[session_id] = choice
         return SetSessionConfigOptionResponse(config_options=self._config_options(session_id))
+
+    async def set_session_mode(
+        self, session_id: str, mode_id: str, **kwargs: Any
+    ) -> SetSessionModeResponse | None:
+        """``session/set_mode``: the same state as the ``mode`` config option, for the ACP v1
+        clients that read ``modes``. Any id but ``ask`` and ``auto`` is ``invalid_params``."""
+        self._require_harness(session_id)
+        await self._select_mode(session_id, mode_id, {"modeId": mode_id})
+        return SetSessionModeResponse()
 
     async def ext_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         if method == "pi/session/delete":
@@ -524,6 +571,7 @@ class PiAcpAgent(Agent):
             self._permission_locks.pop(session_id, None)
             self._drop_trust(session_id)
             self._forget_notices(session_id)
+            self._forget_mode(session_id)
             if harness is not None:
                 # Deleting ends the session, like ``session/close``: stop the turn, then run
                 # the extensions' cleanup (background workflows, worktrees).
@@ -536,10 +584,106 @@ class PiAcpAgent(Agent):
         raise RequestError.method_not_found(method)
 
     async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
-        mode = _permission_mode_from_notification(method, params)
-        if mode is not None:
-            self._config = replace(self._config, permission=mode)
+        """``pi/yolo_mode_changed`` (the TUI's mode setting): the mode of every open session, and
+        the start mode of the sessions that open later. The notification has no session id."""
+        mode = mode_from_notification(method, params)
+        if mode is None:
+            return None
+        self._config = replace(self._config, permission=mode)
+        for session_id in list(self._session_modes):
+            if session_id in self._harnesses and self._session_mode(session_id) != mode:
+                await self._switch_mode(session_id, mode)
+                await self._push_mode_option(session_id)
         return None
+
+    def _session_mode(self, session_id: str) -> PermissionMode:
+        return self._session_modes.get(session_id, self._config.permission)
+
+    def _forget_mode(self, session_id: str) -> None:
+        self._session_modes.pop(session_id, None)
+        self._autos.pop(session_id, None)
+        self._auto_from_config.discard(session_id)
+
+    async def _select_mode(self, session_id: str, value: object, detail: dict[str, Any]) -> None:
+        """A client chose a mode with a standard item. Only ``ask`` and ``auto`` can be chosen;
+        the mode that the session is in already is accepted too, so that a client that sends
+        the current value back is not refused."""
+        mode = selectable_mode(value)
+        if mode is None:
+            if value == self._session_mode(session_id):
+                return
+            raise RequestError.invalid_params({**detail, "reason": "unknown mode"})
+        await self._switch_mode(session_id, mode)
+
+    async def _switch_mode(self, session_id: str, mode: PermissionMode) -> bool:
+        """Put the session in *mode*. ``True`` when that changed it.
+
+        Turning Auto on comes first and the mode after it: until Auto is ready, a call is asked
+        about as in ``ask`` mode. Turning it off sets the mode first, so no call is decided by
+        Auto after the user left it. A session that enters Auto gets the entry message.
+        """
+        async with self._mode_lock:
+            previous = self._session_mode(session_id)
+            registered = session_id in self._session_modes
+            if registered and mode == previous:
+                return False
+            auto = self._autos.get(session_id)
+            if mode == "auto" and auto is not None:
+                await auto.enter()
+            self._session_modes[session_id] = mode
+            if mode != "auto" and auto is not None:
+                auto.leave()
+        if mode == "auto":
+            await self._send_auto_notice(session_id)
+        return True
+
+    async def _send_text(self, session_id: str, text: str) -> None:
+        """One line of the agent to the user. A client that is gone is not an error here."""
+        if self._conn is None:
+            return
+        try:
+            await self._conn.session_update(
+                session_id=session_id, update=update_agent_message_text(text)
+            )
+        except Exception:
+            logger.warning("Could not send a notice for session %s", session_id, exc_info=True)
+
+    async def _send_auto_notice(self, session_id: str) -> None:
+        """Tell the user that the session is in Auto: what it means, and what is wrong with the
+        session if anything is (then Auto asks about every call)."""
+        auto = self._autos.get(session_id)
+        parts = [entry_message(from_config=session_id in self._auto_from_config)]
+        self._auto_from_config.discard(session_id)
+        problems = auto.problems if auto is not None else ()
+        if problems:
+            parts.append(problems_message(problems))
+        await self._send_text(session_id, "\n\n".join(parts))
+
+    async def _push_mode_option(self, session_id: str) -> None:
+        """Tell the client that the mode of a session changed without its asking."""
+        if self._conn is None:
+            return
+        try:
+            await self._conn.session_update(
+                session_id=session_id,
+                update=ConfigOptionUpdate(
+                    session_update="config_option_update",
+                    config_options=self._config_options(session_id),
+                ),
+            )
+        except Exception:
+            logger.warning("Could not send the mode of session %s", session_id, exc_info=True)
+
+    async def _notify_permission_mode(self, session_id: str) -> None:
+        """At the start of a session: the entry message when it is in Auto, and the values of
+        ``[auto]`` that were read and not used."""
+        if self._conn is None or session_id not in self._harnesses:
+            return
+        if self._session_mode(session_id) == "auto":
+            await self._send_auto_notice(session_id)
+        notes = self._config.auto.notes
+        if notes:
+            await self._send_text(session_id, config_notes_message(notes))
 
     def _choice_by_id(self, model_id: str) -> ModelChoice | None:
         for choice in self._config.model_choices():
@@ -551,7 +695,8 @@ class PiAcpAgent(Agent):
         return self._session_models.get(session_id) or self._config.default_choice()
 
     def _config_options(self, session_id: str) -> list[SessionConfigOptionSelect]:
-        """ACP Session Config Options: a ``model`` select (category ``model``) for ``/model``."""
+        """ACP Session Config Options: a ``model`` select (category ``model``) for ``/model``,
+        and a ``mode`` select (category ``mode``) for the permission mode."""
         choices = list(self._config.model_choices())
         current = self._current_choice(session_id)
         if all(choice.id != current.id for choice in choices):
@@ -567,7 +712,8 @@ class PiAcpAgent(Agent):
                     SessionConfigSelectOption(value=choice.id, name=choice.name or choice.id)
                     for choice in choices
                 ],
-            )
+            ),
+            mode_config_option(self._session_mode(session_id)),
         ]
 
     def _session_response_meta(self, session_id: str) -> dict[str, Any] | None:
@@ -637,7 +783,12 @@ class PiAcpAgent(Agent):
             return session
 
     async def _reopen_blank_session(
-        self, session_id: str, cwd: str, mcp_servers: Sequence[Any] | None
+        self,
+        session_id: str,
+        cwd: str,
+        mcp_servers: Sequence[Any] | None,
+        *,
+        meta: Mapping[str, Any] | None = None,
     ) -> None:
         """``session/load`` or ``session/resume`` of an id that has no session file.
 
@@ -663,7 +814,7 @@ class PiAcpAgent(Agent):
             return  # Open here already, and with no file, so empty: nothing to bind or replay.
         session = await self._create_session_with_id(session_id, cwd)
         try:
-            await self._bind_session(session_id, session, cwd, mcp_servers)
+            await self._bind_session(session_id, session, cwd, mcp_servers, meta=meta)
         except BaseException:
             self._reserved_ids.discard(session_id)
             raise
@@ -710,12 +861,15 @@ class PiAcpAgent(Agent):
         session: Session,
         cwd: str,
         mcp_servers: Sequence[Any] | None = None,
+        *,
+        meta: Mapping[str, Any] | None = None,
     ) -> None:
         """Build the harness of a session and make it the one that answers for the id.
 
         *mcp_servers* is what the client passed with the request. They go to the harness as data
         (``client_mcp``), before the extensions load; an extension may connect them. This agent
-        connects none itself.
+        connects none itself. *meta* is the ``_meta`` of the request: the TUI pager sets the
+        permission mode of the session there (``autoMode``, ``yoloMode``).
         """
         cwd = normalize_host_path(cwd)
 
@@ -730,6 +884,7 @@ class PiAcpAgent(Agent):
             cwd=cwd, config=self._config, trusted=state.trust.trusted
         )
         choice = await self._restored_choice(session) or self._config.default_choice()
+        limits = BashLimitRegistry()
         harness = await create_session_harness(
             session=session,
             cwd=cwd,
@@ -741,9 +896,20 @@ class PiAcpAgent(Agent):
             home=self._home,
             trust=state.trust,
             model_choice=choice,
+            bash_limits=limits.take,
         )
         harness.set_client_mcp_servers(client_mcp_servers(mcp_servers))
         self._session_models[session_id] = choice
+        # Built before any extension loads: the tool objects that are ours are taken by identity.
+        auto = AutoSession(
+            harness=harness,
+            get_config=lambda: self._config,
+            home=self._home,
+            trusted=lambda: state.trust.trusted,
+            limits=limits,
+        )
+        harness.load_extension(auto.activate, name=AUTO_EXTENSION_NAME)
+        mode = await self._start_mode(session_id, auto, meta)
 
         async def on_event(event: Any, signal: Any | None = None) -> None:
             await self._emit_updates(session_id, event)
@@ -754,6 +920,8 @@ class PiAcpAgent(Agent):
         # (a retry after a failed load): lines for the user wait for ``_open_notices`` again.
         self._notices_open.discard(session_id)
         replaced = self._harnesses.get(session_id)
+        self._autos[session_id] = auto
+        self._session_modes[session_id] = mode
         self._harnesses[session_id] = harness
         self._session_cwds[session_id] = cwd
         self._trust[session_id] = state
@@ -768,6 +936,26 @@ class PiAcpAgent(Agent):
         state.settled.set()
         # Eagerly load extensions so slash commands are available.
         await harness.load_extensions()
+
+    async def _start_mode(
+        self, session_id: str, auto: AutoSession, meta: Mapping[str, Any] | None
+    ) -> PermissionMode:
+        """The mode a session starts in, and Auto made ready when that is ``auto``.
+
+        The order: what the client asked for in ``_meta`` (the pager's two flags), else the
+        mode the session had when it was bound before, else ``permission`` of ``agent.toml``
+        (which the legacy notification may have changed since).
+        """
+        mode = mode_from_session_meta(meta or {})
+        if mode is None:
+            mode = self._session_modes.get(session_id)
+        if mode is None:
+            mode = self._config.permission
+            if mode == "auto":
+                self._auto_from_config.add(session_id)
+        if mode == "auto":
+            await auto.enter()
+        return mode
 
     def _schedule_deferred_setup(self, session_id: str) -> None:
         """Fire-and-forget: finish setting the session up after the current response flushes."""
@@ -793,6 +981,7 @@ class PiAcpAgent(Agent):
         # The client has taken an update for the session, so it knows the session: the lines
         # that extensions sent before can go out, and the ones that follow need not wait.
         await self._open_notices(session_id)
+        await self._notify_permission_mode(session_id)
         await self._notify_untrusted_project(session_id)
         await self._notify_failed_extensions(session_id)
         await self._notify_ignored_mcp_servers(session_id)
@@ -1116,13 +1305,28 @@ class PiAcpAgent(Agent):
 
     async def _handle_tool_call(self, session_id: str, event: Any) -> dict[str, Any] | None:
         name = event.toolName
-        if not needs_permission(self._config.permission, getattr(event, "annotations", None)):
+        mode = self._session_mode(session_id)
+        if not needs_permission(mode, getattr(event, "annotations", None)):
             return None
+        auto_reason: Reason | None = None
+        if mode == "auto":
+            auto = self._autos.get(session_id)
+            if auto is None:
+                auto_reason = Reason.INTERNAL_ERROR  # no Auto state for the session: ask
+            else:
+                verdict = await auto.decide(event)
+                if verdict.allows:
+                    return None
+                auto_reason = verdict.reason
         if self._conn is None:
             return {"block": True, "reason": "No ACP client connected"}
         raw_input = dict(event.input or {})
         tool_call = permission_tool_call(
-            event.toolCallId, name, raw_input, origin=getattr(event, "origin", None)
+            event.toolCallId,
+            name,
+            raw_input,
+            origin=getattr(event, "origin", None),
+            auto_reason=auto_reason,
         )
         # One prompt at a time per session. Parallel workflow sub-agents would otherwise
         # open several at once, and a client that shows a single dialog would leave the
@@ -1234,27 +1438,3 @@ def _stop_reason(message: Any) -> str:
             return "refusal"
         return "end_turn"
     return "end_turn"
-
-
-def _permission_mode_from_notification(
-    method: str, params: dict[str, Any] | None
-) -> PermissionMode | None:
-    """Best-effort permission mode sync for live sessions.
-
-    TUI settings changes are sent as extension notifications; we accept known
-    suffixes and update in-memory mode so the next tool call in this process
-    uses the new policy immediately.
-    """
-    suffix = method.rsplit("/", 1)[-1].strip().lower()
-    if suffix not in {"yolo_mode_changed", "permission_mode_changed"}:
-        return None
-    payload = params or {}
-    raw = payload.get("permission_mode")
-    if raw is None:
-        raw = payload.get("permissionMode")
-    if not isinstance(raw, str):
-        return None
-    normalized = raw.strip().lower()
-    if normalized not in {"ask", "auto", "always-approve"}:
-        return None
-    return cast(PermissionMode, normalized)

@@ -203,9 +203,11 @@ async def test_a_refusal_keeps_the_tool_from_running_and_the_turn_still_ends(tmp
     assert result.stop_reason == "end_turn"  # the model was told, and answered
 
 
-async def test_auto_mode_never_asks(tmp_path):
+async def test_always_approve_mode_never_asks(tmp_path):
     # This client would refuse, if it were asked.
-    client, result, marker = await run_write_prompt(tmp_path, cancelled, permission="auto")
+    client, result, marker = await run_write_prompt(
+        tmp_path, cancelled, permission="always-approve"
+    )
 
     assert client.requests == []
     assert marker.read_text(encoding="utf-8") == "the tool ran"
@@ -275,7 +277,11 @@ async def _wait_for_tool_pid(pidfile: Path) -> int:
 async def test_cancel_ends_a_running_tool_turn_as_cancelled_and_reaps_the_tool(tmp_path):
     client = ToolClient(cancelled)
     tool_pid: int | None = None
-    async with tool_agent(tmp_path, client, permission="auto") as (conn, process, session_id):
+    async with tool_agent(tmp_path, client, permission="always-approve") as (
+        conn,
+        process,
+        session_id,
+    ):
         prompt = asyncio.ensure_future(
             conn.prompt(session_id=session_id, prompt=[text_block("run it")])
         )
