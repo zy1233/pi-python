@@ -275,7 +275,7 @@ MUTATIONS: list[Mutation] = [
     m(
         "lex: unterminated single quote",
         '            if close < 0:\n                refuse(Reason.UNCLEAR, "bash.unclear.quote")\n            buf.append',
-        '            if False:\n                refuse(Reason.UNCLEAR, "bash.unclear.quote")\n            buf.append',
+        "            if close < 0:\n                close = n\n            buf.append",
     ),
     m(
         "lex: unterminated double quote",
