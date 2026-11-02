@@ -98,7 +98,7 @@
 
 - **已发布：** v0.5.0（2026-10-13）、v0.6.0（2026-10-25）与 v0.7.0（2026-10-30）。V0.6 的六项退出条件都有结果，发布后的核对没有发现缺陷（[§10.25][l10-25]）。v0.7.0 的发布没有清单（[§10.29][l10-29]）。GitHub 里程碑 [v0.5.0][ms-v050] 与 [v0.6.0][ms-v060] 都已关闭。
 - **发布之后留下的（r22；①② 在 PR [#42][pr-42] 里做了，用户已合入，`e65af4d`）：** ① `release.yml` 的 `build-tui` 钉 `ubuntu-24.04`：`ubuntu-latest` 要迁到 Ubuntu 26，迁了之后 Linux 的二进制可能要更新的 glibc（现在要 glibc 2.39 或更新）。② glibc 的下限写进 `docs/TUI-AND-CODE-AGENT.md`。③ Node.js 20 弃用的警告：PR [#43][pr-43]（r23，随 v0.7.0 发布）把 `upload-artifact` 升到 v6、`download-artifact` 升到 v7、`cache` 升到 v5；警告现在只点名 `arduino/setup-protoc`，它没有 Node 24 的版本，留着。**没做**：PyPI 一侧的 Trusted Publishing（要账号所有人在 PyPI 上设）；现在都不影响发布。
-- **要等用户决定：** 真的 Plan 模式（决策 7 的 (b)(c)）；「不在 V0.6」里的各项归哪个里程碑（v0.7.0 之后还没有下一个里程碑）。
+- **要等用户决定：** 「不在 V0.6」里的各项归哪个里程碑（v0.7.0 之后还没有下一个里程碑）。
 - **已合入 `main`，还没有发布（r28）：** r27 的五个 PR（[#57][pr-57]、[#60][pr-60]、[#61][pr-61]、[#62][pr-62]、[#63][pr-63]）与 [#56][pr-56]、[#58][pr-58]、[#59][pr-59]、[#64][pr-64]、[#65][pr-65]，用一次 `gh stack` 合入（[§10.31][l10-31]）。`CHANGELOG.md` 的 `[Unreleased]` 有 r27 的条目（Changed、Removed、Fixed）。下一个版本带上它们；它还没有里程碑，版本号与日期没有定。
 - **不用等决定：** 阶段 D 做不做，看 [`docs/baselines/tui.md`](../baselines/tui.md) 的数据（它的数 r28 在 `main` 上重新量过，[§10.31][l10-31]）；D.6 是候选（§7；D.9 在 r29 做了，D.7 在 r32 做了）。D.8 还剩新候选：`pi-workflow`、`Config.storage_mode`、没人加载的文件，和 PR [#62][pr-62] 之后露出来的（[§10.30][l10-30] 的「留下的」）。
 - **已定，不做：** 翻页的代价（决策 18；用户在 2026-10-18 答复：不做，1,000 个会话以内够用）；选择器边翻边显示（决策 11）与会话目录的列举太慢（决策 13）（用户，2026-10-27：不做）。
@@ -128,7 +128,7 @@
 
 - **已做：** 1 的 PR 1（PR [#11][pr-11]）、PR 2（PR [#23][pr-23]）、PR 3（PR [#24][pr-24]；后两个 r14 合入 `main`）、2、3、4、5、6 的 (a)（PR [#18][pr-18]）、7 的 (a)、12、15 的 (b)（PR [#19][pr-19]）、16 的 (a)（PR [#17][pr-17]）、17（PR [#25][pr-25]，r16 合入；r20 的更正：PR [#34][pr-34]）、10 的存储层一项（PR [#26][pr-26]，r16 合入）与它的收尾（PR [#27][pr-27]，r19 合入）、19（PR [#35][pr-35]、[#36][pr-36]，r20 合入）、20（PR [#39][pr-39]，r21 合入）、21（用户，2026-10-25：按倾向，即全按默认；默认值已在 PR [#36][pr-36] 里）。r27 做了，r28 合入 `main`：8 与 14（PR [#57][pr-57]、[#60][pr-60]；用户，2026-10-30）、9（PR [#61][pr-61]）、10 的 `mcp.rs` 与 `recent_dirs.rs` 两项（PR [#62][pr-62]）。
 - **已定，不做：** 18（用户，2026-10-18）、11 与 13（用户，2026-10-27）。
-- **待定：** 7 的 (b)(c)。
+- **已定，待做：** 7 的 (b)(c)（用户，2026-11-02）：(b) 真的 Plan 不做；(c) 真的 Auto 做，设计与线上准入记录在 [Auto 模式设计](../specs/2026-11-02-auto-mode-design.md)，PR 0 合入后按 PR 1a、1b、2、3 做。
 
 1. **ADR1 的落地。** PR 1：Python；PR 2：Rust，只加不删；PR 3：Rust，删。
     - 倾向：开工，先做 PR 1。
@@ -156,7 +156,7 @@
     - 详情：[§10.11][l10-11]、[§10.15][l10-15]
 7. **模式映射（1.P3）。** (a) 只提供 agent 会照做的模式；(b) 做 `session/set_mode`，Plan = 把工具集裁到只读；(c) 定义 Python 的 `auto`（今天等于 always-approve，设置页却说是分类器：改名、删除，或真做分类器）。
     - 倾向：(a) 先行，因为 Plan 现在给用户的是虚假的安全感；(b) 另议。
-    - 状态：(a) **已做**（r10，PR [#12][pr-12]；用户在 2026-10-16 确认倾向）；(b)、(c) 另议，仍待定。Plan 在界面里已经看不到，所以 PR [#24][pr-24] 把 Plan 预览读 `plan.md` 的代码一起删了（r13）：预览只用审批请求带来的内容。以后做 (b) 时，Plan 的内容要走 ACP，不读盘。
+    - 状态：(a) **已做**（r10，PR [#12][pr-12]；用户在 2026-10-16 确认倾向）；(b) **已定，不做**（用户，2026-11-02：不要真的 Plan；`PLAN` 与 `DEFAULT` 常量保持 `false`，休眠的 Plan 代码怎么处理另议）；(c) **已定，做真的 Auto**（用户，2026-11-02：按设计的全部倾向，见 [Auto 模式设计](../specs/2026-11-02-auto-mode-design.md) 的第 8 节）。Python 的 `auto` 变成规则加模型的分类器，不替用户拒绝，只放行或询问；`pi/yolo_mode_changed` 与 `_meta.autoMode` 作为旧项登记；新装的 `zypi` 仍然默认 `ask`。工作拆成五个 PR：0 设计记录与准入（只改文档）、1a 规则与语料（不接线）、1b 接进 agent（只用规则；它改变现有 `permission = "auto"` 的含义，要单独审）、2 模型步骤、3 翻转 `AUTO`。Plan 在界面里已经看不到，所以 PR [#24][pr-24] 把 Plan 预览读 `plan.md` 的代码一起删了（r13）：预览只用审批请求带来的内容。以后做 (b) 时，Plan 的内容要走 ACP，不读盘。
     - 详情：[§10.11][l10-11]、[§10.13][l10-13]
 8. **旗标契约（1.P6）。** `--system-prompt-override`、`--rules` 在交互模式下无效；`--allow` / `--deny` 没有传给 agent；`-m` 的路径没有查清。`--permission-mode` 已在 r10 收窄到 `default` 与 `bypassPermissions`。
     - 选项：Python 读 `initialize._meta`（前两项各几行）；或 pager 对着 Python agent 拒绝这些旗标并说明；`-p` 另行定义。要定哪些旗标属于产品契约。
@@ -348,7 +348,7 @@ Python（`pi_agent_cli`）：
 
 - [x] 1.P1 `list_sessions`：真实 title、`updated_at`（最后活动）、`cursor` 分页（ACP `session/list` 字段，[RFD](https://github.com/agentclientprotocol/agent-client-protocol/blob/main/docs/rfds/session-list.mdx)）。**状态**（r5）：`title` = 会话第一条 user message，`updated_at` = 会话文件 mtime。r9：pager 跟 `nextCursor`，Python 每页 50 条；1,000 个会话时首页 2.0 s → 0.11 s。记录 [§10.7][l10-7]、[§10.11][l10-11]。
 - [x] 1.P2 优雅退出：处理 stdin EOF / SIGTERM，回收工具进程组。**状态**（r5）：SIGTERM 与 SIGHUP 接到 EOF 的同一条退出路径。POSIX 上生效；Windows 只靠 EOF。契约在 `tests/test_acp_shutdown.py`。记录 [§10.7][l10-7]。
-- [ ] 1.P3 `set_session_mode`（或 `configOptions` 的 `mode`）取代仅靠 `ext_notification` 的权限模式切换，映射由矩阵定。**状态**（r10）：先做了不碰 agent 的 (a)：pager 只提供 agent 真正会做的两个模式（PR [#12][pr-12]，记录 [§10.13][l10-13]）。`set_session_mode` 本身没做，所以不勾。待决策 7。
+- [ ] 1.P3 `set_session_mode`（或 `configOptions` 的 `mode`）取代仅靠 `ext_notification` 的权限模式切换，映射由矩阵定。**状态**（r10）：先做了不碰 agent 的 (a)：pager 只提供 agent 真正会做的两个模式（PR [#12][pr-12]，记录 [§10.13][l10-13]）。`set_session_mode` 本身没做，所以不勾。待决策 7 已定（用户，2026-11-02）：(b) 真的 Plan 不做；(c) 做真的 Auto，经标准的 `mode` 配置项与 `session/set_mode`（v1 兼容），Python 一侧在 PR 1b，翻 `AUTO` 在 PR 3。设计：[Auto 模式设计](../specs/2026-11-02-auto-mode-design.md)。
 - [x] 1.P4 `mcp_servers`：**显式忽略并在文档声明**（Phase 4 非目标），或实现。**状态**（r9）：做了前者。pager 不再发 `mcp_servers`；Python 收到非空列表时记一条警告，并发一条只含名字的 agent 消息。`packages/pi-agent-cli/AGENTS.md` 与 `docs/TUI-AND-CODE-AGENT.md` 写明这是对 ACP「agent 必须支持 stdio 服务器」的有意偏离。记录 [§10.11][l10-11]。**r20 的更正与后续：**「Phase 4 非目标」的说法不准确：Phase 4 的文档没有讨论 MCP，决定来自 Phase 6（`AGENTS.md` 与 `CHANGELOG.md` 在 [#35][pr-35] 里更正了）。用户在 2026-10-23 选了可选扩展包（决策 19）：装了 `pi-mcp-py`，agent 连接客户端传来的 server；没装，行为与 r9 一样（忽略并说明，提示的文字改了）。记录 [§10.23][l10-23]。
 - [ ] 1.P5 `initialize` 的 capabilities / `_meta`：只公布 pager 实际需要且已登记（P2）的键。**状态**：r5 做了一部分：`initialize` 公布了 `session/close` 与 `session/resume`，但 `run_agent` 没开 `use_unstable_protocol`，SDK 对这两个方法回「Method not found」，已改。其余公布项与 pager 需求的对照没做。
 - [ ] 1.P6 `-p` 旗标契约：以 `__main__` 接受的旗标为权威；每个 `PagerArgs` 旗标逐项「支持｜非 0 退出并报错｜文档删除」。**状态**：r27 做了交互模式一侧：PR [#60][pr-60]（已合入）让 21 个无效的旗标在交互模式下以退出码 2 退出并说明原因；`-p` 一侧没有改。决策 8 已定。记录 [§10.30][l10-30]。
@@ -490,7 +490,7 @@ Rust（pager）：
 | prompt / cancel | 标准 ACP | 已覆盖；取消后正在跑的 `bash` 进程被回收（Linux 的用例） | 保留 | 已定 | `a_prompt_streams_the_reply_and_ends_the_turn`；`cancel_ends_a_running_tool_as_cancelled_and_reaps_it` |
 | 权限请求 | 应答 `session/request_permission`；yolo 模式下 pager 自己代答（选 `AllowOnce`，`acp_handler/permissions.rs`） | 已覆盖：`ask` 模式下问 `bash` / `edit` / `write` / `workflow`（没声明无害的工具，AGENTS.md 不变量 8）；工具调用的选项只有 allow-once / reject-once（`permissions.py`）；项目信任的问题另带 `allow_always`（`trust_prompt.py`） | 保留；工具调用不做 allow-always 与规则 | 已定：pager 不依赖 allow-always（PTY 里两个选项的问题框能画、能答）；提议：不做 | `a_permission_question_reaches_the_client_and_its_answer_decides`；`mode_probe.py` |
 | 模型选择 | 读 `configOptions`（`category: "model"`），`session/set_config_option`；没有该配置项时退回 `session/set_model` | `configOptions`（`model`）与 `set_config_option`（只认 `model`，其他 `invalid_params`）；`[[models]]` 提供候选；`session/set_model` 没有路由，但 Python 总是公布 `model` 配置项，退回路径用不到 | 恢复（ADR3） | 已定（r3） | [§10.2][l10-2]、[§10.3][l10-3]；`test_acp_agent.py` |
-| 模式切换 | **r10 起**：Shift+Tab 在 Normal ↔ Always-Approve 之间切（r9 时是 Normal → Always-Approve → Normal → Plan → Auto）、`--always-approve`、`--permission-mode default｜bypassPermissions`（r9 时六个值）；`pi/yolo_mode_changed` 通知；`session/new` 的 `_meta.yoloMode`（`autoMode` 不再为真）。Plan / Auto / 设置页的 Default 藏在 `app/agent_modes.rs` 的三个常量后面，`session/set_mode` 不再发出（[§10.13][l10-13]） | 只认 `pi/yolo_mode_changed` 里的 `ask` / `auto` / `always-approve`；`session/set_mode` → `method_not_found`；`_meta` 不读；`auto` 等于 `always-approve`；`default` 被丢弃 | 隐藏 Plan / Auto / Default；`--permission-mode` 只收有效的值；做不做真的 Plan 另议（决定 7） | (a) **已做**（r10，PR [#12][pr-12]）；真的 Plan（`session/set_mode` 加只读工具集）与真的 Auto 是提议（决定 7 的 (b)、(c)），Python 一侧的行为没变 | `mode_probe.py`（[§10.13][l10-13] 的表是改后的；改前的 12 行表在 [§10.11][l10-11]）；`agent_modes::tests` |
+| 模式切换 | **r10 起**：Shift+Tab 在 Normal ↔ Always-Approve 之间切（r9 时是 Normal → Always-Approve → Normal → Plan → Auto）、`--always-approve`、`--permission-mode default｜bypassPermissions`（r9 时六个值）；`pi/yolo_mode_changed` 通知；`session/new` 的 `_meta.yoloMode`（`autoMode` 不再为真）。Plan / Auto / 设置页的 Default 藏在 `app/agent_modes.rs` 的三个常量后面，`session/set_mode` 不再发出（[§10.13][l10-13]） | 只认 `pi/yolo_mode_changed` 里的 `ask` / `auto` / `always-approve`；`session/set_mode` → `method_not_found`；`_meta` 不读；`auto` 等于 `always-approve`；`default` 被丢弃 | 隐藏 Plan / Auto / Default；`--permission-mode` 只收有效的值；真的 Plan 不做、真的 Auto 要做（决定 7，用户 2026-11-02；设计见 [Auto 模式设计](../specs/2026-11-02-auto-mode-design.md)） | (a) **已做**（r10，PR [#12][pr-12]）；真的 Plan 不做；真的 Auto 已定要做（决定 7 的 (c)），还没有代码，Python 一侧的行为没变，PR 1a、1b、2、3 按设计做 | `mode_probe.py`（[§10.13][l10-13] 的表是改后的；改前的 12 行表在 [§10.11][l10-11]）；`agent_modes::tests` |
 | MCP | UI 已删（r5）；不再发 `mcp_servers`（`7becb49`）；r20 之后仍是这样：`zypi` 不传 server | 忽略 `mcp_servers`，会话开始时说一次哪些被忽略（`mcp_notice.py`）。**r20**：装了 `pi-mcp-py`，它连接这些 server；没装，仍是忽略并说明，提示的文字改了（只写没人接手的 server，并告诉用户装这个包） | 降级为显式忽略；ACP v1 要求 agent 支持 stdio MCP，这是有文档的偏离。**r20**：用户选了可选扩展包（决策 19），连接客户端传来的 server；core 与 CLI 仍不内置 MCP | 已定（r9：默认决策，忽略并说明；r20：用户在 2026-10-23 选了可选扩展包，已做，[#35][pr-35]、[#36][pr-36]） | `test_mcp_notice.py`；`session_new_and_load_send_no_mcp_servers`；`packages/pi-mcp/tests`（192 个） |
 | queue / interjection | 已删（r5，含 steer、send-now） | 无 | 删 | 已定（r5） | [执行记录 A.4][logA4] |
 | compaction | 触发与展示 | 部分：`auto_compact` 由 `max_turns >= 30` 推导 | 降级 | 未定（r9 没有重新核对） | — |
@@ -582,6 +582,7 @@ Rust（pager）：
 - r30：发行构建与 v0.8.0 二进制的 PTY 检查（2026-11-01）。只改文档。见 [§10.33][l10-33]。
 - r31：`smoke.py --sandbox workspace` 的标签检查挪到第一轮对话之后（PR [#77][pr-77]；2026-11-01）。只改 `scripts/tui_pty/smoke.py` 与文档。见 [§10.34][l10-34]。
 - r32：用户选「2B」（2026-11-02）：删 `pi-update`、`pi-pager/npm/` 与安装脚本（PR [#78][pr-78]），README 与站点的「Next」改成「`zypi` 的 Windows 二进制计划，没有日期；不做 macOS x86_64 版本，也不做自动更新」。见 [§10.35][l10-35]。
+- r33：决策 7 的答复（用户，2026-11-02）：(b) 真的 Plan 不做；(c) 真的 Auto 做。新增 [Auto 模式设计](../specs/2026-11-02-auto-mode-design.md)（设计与线上准入记录），同时更新决策 7、1.P3 与附录 A 的「模式切换」。只改文档，没有代码。
 
 <!-- 链接定义 -->
 [log]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md
