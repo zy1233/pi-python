@@ -70,7 +70,6 @@ members = [
     "crates/codegen/pi-token-estimation",
     "crates/codegen/pi-tracing-macros",
     "crates/codegen/pi-tty-utils",
-    "crates/codegen/pi-workflow",
     "crates/common/pi-circuit-breaker",
     "crates/common/pi-computer-hub-core",
     "crates/common/pi-computer-hub-mcp-adapter",
