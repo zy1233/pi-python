@@ -2,7 +2,7 @@
 
 This file is generated. Do not edit it by hand.
 
-- Command: `python scripts/tui_callgraph.py keep`. Commit: `c02468e`.
+- Command: `python scripts/tui_callgraph.py keep`. Commit: `daa5ad9`.
 - Run the command again after a change that moves code between modules or crates.
 - It replaces the hand-written list of examples in item 0.5 of
   [`PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`](../PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md).
@@ -26,8 +26,8 @@ This file is generated. Do not edit it by hand.
 | crate | non-test lines | live | dead | dead units | check first | provider-stack refs |
 |---|---|---|---|---|---|---|
 | `pi-shell` | 25,982 | 25,982 (100%) | 0 (0%) | 0 | 0 | 15 |
-| `pi-sampling-types` | 12,043 | 12,043 (100%) | 0 (0%) | 0 | 0 | 1 |
-| `pi-tools` | 130,450 | 130,406 (100%) | 44 (0%) | 1 | 1 | 1 |
+| `pi-sampling-types` | 11,596 | 11,596 (100%) | 0 (0%) | 0 | 0 | 0 |
+| `pi-tools` | 130,430 | 130,386 (100%) | 44 (0%) | 1 | 1 | 0 |
 | `pi-agent` | 22,877 | 22,877 (100%) | 0 (0%) | 0 | 0 | 5 |
 | `pi-workspace` | 80,813 | 80,813 (100%) | 0 (0%) | 0 | 0 | 0 |
 | `pi-hooks` | 4,672 | 4,672 (100%) | 0 (0%) | 0 | 0 | 0 |
@@ -106,14 +106,12 @@ Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampl
 
 ### `pi-sampling-types`
 
-Non-test code: 12,043 lines in 12 units.
+Non-test code: 11,596 lines in 12 units.
 
 | | units | lines | share |
 |---|---|---|---|
-| live | 12 | 12,043 | 100% |
+| live | 12 | 11,596 | 100% |
 | dead | 0 | 0 | 0% |
-
-Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampling`): 1 live units, 1 files, 1 references: `<root>` (1).
 
 Unresolved: 4 references from outside name nothing that is a unit here (an item of the root file, a glob re-export, or a macro): CompactionsRemaining::Dynamic (1), HostedTool::WebSearch (1), HostedTool::XSearch (1), DanglingToolCallReason::HarnessHalted (1).
 
@@ -121,31 +119,29 @@ Unresolved: 4 references from outside name nothing that is a unit here (an item 
 
 | unit | lines | references from live code outside |
 |---|---|---|
-| `conversation` | 5,719 | 1 |
+| `conversation` | 5,577 | 1 |
 | `error` | 1,646 | 0 |
-| `types` | 1,530 | 1 |
+| `types` | 1,431 | 1 |
 | `doom_loop` | 563 | 0 |
 | `messages` | 503 | 0 |
 | `tool_overrides` | 483 | 1 |
 | `provider_error` | 458 | 0 |
 | `conversation::messages` | 399 | 0 |
-| `conversation::responses` | 374 | 0 |
 | `conversation::chat_completions` | 314 | 0 |
-| `<root>` | 35 | 57 |
+| `rs` | 169 | 0 |
+| `<root>` | 34 | 57 |
 | `serde_helpers` | 19 | 0 |
 
 </details>
 
 ### `pi-tools`
 
-Non-test code: 130,450 lines in 88 units.
+Non-test code: 130,430 lines in 88 units.
 
 | | units | lines | share |
 |---|---|---|---|
-| live | 87 | 130,406 | 100% |
+| live | 87 | 130,386 | 100% |
 | dead | 1 | 44 | 0% |
-
-Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampling`): 1 live units, 1 files, 1 references: `implementations::web_search` (1).
 
 Dead units (nothing live refers to them): `types::error` (44).
 
@@ -169,7 +165,7 @@ Check these dead units first. Each has `impl` blocks for types that other units 
 | `implementations::use_tool` | 1,658 | 1 |
 | `types::resources` | 1,652 | 8 |
 | `implementations::read_file` | 1,408 | 0 |
-| `implementations::web_search` | 1,066 | 3 |
+| `implementations::web_search` | 1,046 | 3 |
 | `util::image_validate` | 1,041 | 2 |
 | `bridge` | 1,020 | 4 |
 | `types::agents_md_tracker` | 959 | 1 |

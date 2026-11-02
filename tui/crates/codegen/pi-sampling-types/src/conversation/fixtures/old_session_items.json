@@ -1,0 +1,166 @@
+{
+  "items": [
+    {
+      "type": "reasoning",
+      "id": "rs_full",
+      "summary": [
+        {
+          "type": "summary_text",
+          "text": "Plan the search"
+        }
+      ],
+      "content": [
+        {
+          "text": "raw chain of thought"
+        }
+      ],
+      "encrypted_content": "enc_blob_1",
+      "status": "completed"
+    },
+    {
+      "type": "reasoning",
+      "id": "tco_resp1_call-1",
+      "summary": [],
+      "encrypted_content": "enc_blob_2",
+      "status": "incomplete"
+    },
+    {
+      "type": "reasoning",
+      "id": "rs_min",
+      "summary": []
+    },
+    {
+      "type": "backend_tool_call",
+      "kind": {
+        "tool_type": "web_search",
+        "action": {
+          "type": "search",
+          "query": "capybara facts",
+          "sources": [
+            {
+              "type": "url",
+              "url": "https://example.com/a"
+            }
+          ]
+        },
+        "id": "ws_1",
+        "status": "completed"
+      }
+    },
+    {
+      "type": "backend_tool_call",
+      "kind": {
+        "tool_type": "web_search",
+        "action": {
+          "type": "search",
+          "query": "no sources",
+          "sources": null
+        },
+        "id": "ws_2",
+        "status": "in_progress"
+      }
+    },
+    {
+      "type": "backend_tool_call",
+      "kind": {
+        "tool_type": "web_search",
+        "action": {
+          "type": "open_page",
+          "url": "https://example.com/b"
+        },
+        "id": "ws_3",
+        "status": "searching"
+      }
+    },
+    {
+      "type": "backend_tool_call",
+      "kind": {
+        "tool_type": "web_search",
+        "action": {
+          "type": "find",
+          "url": "https://example.com/c",
+          "pattern": "needle"
+        },
+        "id": "ws_4",
+        "status": "failed"
+      }
+    },
+    {
+      "type": "backend_tool_call",
+      "kind": {
+        "tool_type": "web_search",
+        "action": {
+          "type": "find_in_page",
+          "url": "https://example.com/d",
+          "pattern": "hay"
+        },
+        "id": "ws_5",
+        "status": "completed"
+      }
+    },
+    {
+      "type": "backend_tool_call",
+      "kind": {
+        "tool_type": "x_search",
+        "call_id": "call_1",
+        "input": "{\"query\":\"rust\"}",
+        "name": "x_keyword_search",
+        "id": "ctc_1"
+      }
+    },
+    {
+      "type": "backend_tool_call",
+      "kind": {
+        "tool_type": "code_interpreter",
+        "code": "print(1)",
+        "container_id": "cntr_1",
+        "id": "ci_1",
+        "outputs": [
+          {
+            "type": "logs",
+            "logs": "1\n"
+          },
+          {
+            "type": "image",
+            "url": "https://example.com/plot.png"
+          }
+        ],
+        "status": "completed"
+      }
+    },
+    {
+      "type": "backend_tool_call",
+      "kind": {
+        "tool_type": "code_interpreter",
+        "container_id": "cntr_2",
+        "id": "ci_2",
+        "status": "interpreting"
+      }
+    }
+  ],
+  "response_formats": [
+    {
+      "type": "text"
+    },
+    {
+      "type": "json_object"
+    },
+    {
+      "type": "json_schema",
+      "json_schema": {
+        "name": "structured_output",
+        "schema": {
+          "type": "object"
+        },
+        "strict": true
+      }
+    },
+    {
+      "type": "json_schema",
+      "json_schema": {
+        "description": "d",
+        "name": "n"
+      }
+    }
+  ]
+}

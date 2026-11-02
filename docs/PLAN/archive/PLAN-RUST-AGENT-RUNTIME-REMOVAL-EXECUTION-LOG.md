@@ -12,7 +12,7 @@
 
 ## 目录
 
-- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r34、r35）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29r30r31r32r34r35)
+- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r34、r35、r36）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29r30r31r32r34r35r36)
   - [10.1 范围、方法与规模](#101-范围方法与规模)
   - [10.2 `/model` 恢复（ADR3 r3）](#102-model-恢复adr3-r3)
   - [10.3 验证（r3 的实测）](#103-验证r3-的实测)
@@ -50,6 +50,7 @@
   - [10.35 r32 追加：删除 `pi-update`、npm 目录与安装脚本（用户选 2B）](#1035-r32-追加删除-pi-updatenpm-目录与安装脚本用户选-2b)
   - [10.36 r34 追加：D.8 余下的死文件，删 `pi-workflow`](#1036-r34-追加d8-余下的死文件删-pi-workflow)
   - [10.37 r35 追加：D.6，删内嵌指南的查看器；死的 `plugins` 停在级联上](#1037-r35-追加d6删内嵌指南的查看器死的-plugins-停在级联上)
+  - [10.38 r36 追加：D.1，`async-openai` 离开依赖图](#1038-r36-追加d1async-openai-离开依赖图)
 - [附录 A（摘录）：A.4](#附录-a摘录a4)
   - [A.4 r5 执行结果（对照 r5 时初稿里的「默认决策」；r9 的更新见 A.1）](#a4-r5-执行结果对照-r5-时初稿里的默认决策r9-的更新见-a1)
 - [附录 B：复现方法](#附录-b复现方法)
@@ -76,7 +77,7 @@
   - [F.10 修订记录摘要里的长条目](#f10-修订记录摘要里的长条目)
 - [修订记录](#修订记录)
 
-## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r34、r35）
+## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r34、r35、r36）
 
 r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）；r14 合入这两个 PR，并做决策 17：会话文件在第一条用户消息时才写（§10.17）；r15 做决策 10 的存储层一项：删 `pi-shell` 里的旧存储层（§10.18）；r16 合入 #25 与 #26，并删 `pi-shell` 里剩下的死代码（§10.19）；r17 检查测试之间的竞争，只改测试与工具（§10.20）；r18 改用 `cargo nextest`，改 `protoc` 的路径与 `release.yml` 的令牌（§10.21）；r19 用 `gh stack` 合入 #27–#31，并设 V0.6 的发布里程碑（§10.22）；r20 定 MCP 的方向（可选扩展包），修空白对话，补发布内容，并合入 #33–#36（§10.23）；r21 做 V0.6 的版本号与发布说明（条件 5），合入 #38 与 #39，并做条件 1–4（§10.24）；r22 打 tag `v0.6.0`、发布、做发布后的核对（§10.25）；r23 把三个 action 升到 Node 24 的版本，处理扩展 API 的审计批 9，并把决策 11、13 记成不做（§10.26）；r24 在内核 6.12 的云 VM 上测了沙箱的 Landlock 层（§10.27）；r25 把 `pi-sandbox` 接进 `TUI CI`（§10.28）；r26 补记 v0.7.0 之前的合入（#45 至 #48、web 的 #50 至 #54、版本号 #55）与 v0.7.0 的发布（§10.29）；r27 量了旗标与设置页并修（#57、#60），去掉选择器的 30 天截止（#61），清了一批死代码（#62、#63；§10.30）；r28 用一次 `gh stack` 把这五个 PR 与另外五个（#56、#58、#59、#64、#65）合入 `main`（§10.31）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
@@ -2456,6 +2457,36 @@ Runner 有 Landlock（ABI 8），没有 `bwrap`；装上 `bwrap` 也不能用，
 - M `scripts/tui_pty/` 对调试构建：见 PR 说明。
 - 没有跑：Windows 与 macOS；CI。
 
+### 10.38 r36 追加：D.1，`async-openai` 离开依赖图
+
+这一节记 2026-11-02 的 D.1（PR [#84](https://github.com/zy1233/pi-python/pull/84)，分支 `refactor/drop-async-openai`）。用户答复「按推荐的来」，D.1 的试验（一个不推送的临时副本，在 `6af773f` 上做的）变成真 PR。同一批里还有四个并行的 PR（#82、#83、#85、#86；含 B.3 把 ACP 扩展类型移入 `pi-acp-lib`、D.8 余下的死文件、D.6 删指南查看器），它们改同一批基线文件。它们先合入；本 PR 最后一个合入，在 `daa5ad9`（含 #82、#83、#85、#86）上 rebase 一次，提交压成一个，重跑了 `tui_baseline.py check` 与 `test`。冲突全在文档与生成的文件里（没有 `.rs` 冲突）：`CHANGELOG.md`、计划、本执行记录、`docs/baselines/tui.md`、`tui-support.md`（取 `main` 的再生成）、`Cargo.lock`（取 `main` 的，让 cargo 按 `Cargo.toml` 重写，`async-openai` 那批包消失）。B.2、B.4、D.2、D.3、D.4 等这一批合入、重测之后，由用户再定。
+
+**做了什么。**
+- `pi-sampling-types/src/rs.rs`（169 行）：会话历史还在存的 20 个 Responses 类型，从 `async-openai`（MIT）抄来、只留在用的字段，serde 属性不变；名字仍叫 `rs`，约 300 处调用不用改。`OutputItem` 只有四个变体（旧 `raw_output` 的提升路径用）；别的类型（`message`、`function_call`……）解析失败，调用方本来就跳过。`THIRD-PARTY-NOTICES` 的「源码移植」一节加了一条 MIT 声明。
+- 删了没人调用的 Responses 线上转换：`conversation/responses.rs`（374 行）、`responses_tests.rs`（1,759 行，39 个测试）、`CreateResponseWrapper`、`ReasoningEffort::{to,from}_responses_api`。
+- `pi-tools` 的 `WebSearchClient` 改成用 `serde_json::Value` 拼请求、读响应；请求体与原来一样（`model`、`input`、`tools:[{type:web_search, filters}]`、`store`、`temperature`、`top_p`、`max_output_tokens`）。
+- 工作区 `Cargo.toml` 与两个 crate 去掉 `async-openai`，`[patch.crates-io]` 一并去掉；`pi-sampling-types` 要补 serde 的 `rc` 特性（原来由 `async-openai` 带进来）。
+- 测试：删 3 个依赖 Responses 线上格式的测试（`multi_tco_...`、`serialization_determinism`、`reasoning_without_encrypted_...`），1 个测试去掉 Responses 分支；前缀稳定性测试（`pi-sampling-types` 2 个、`pi-chat-state` 11 个）改走 Chat Completions 线上格式，数量不变。新增 2 个：`old_session_items_round_trip_byte_for_byte`（夹具 `conversation/fixtures/old_session_items.json` 是旧类型写出的 JSON，在 `6ba5cc4` 上生成并核对过；11 个会话项加 4 个 `response_format`，读出再写回，字节相同）与 `upgrade_legacy_reasoning_raw_output_lifts_every_backend_tool_kind`。
+
+**基线数（Linux，4 核；M = 实测）。** 依赖图与测试数在 `daa5ad9` 上重量过；体积、冷构建与改动行是 rebase 之前在 `6ba5cc4` 上量的（基线 `6ba5cc4`，本 PR 在它之上），D.1 没有碰 #82–#86 的代码，所以没有重量；这一批合入之后，用户要整批重量。
+
+| 项目 | 基线 | 本 PR |
+|---|---|---|
+| 依赖图唯一包数 | 965 (M) | 954 (M) |
+| `release-dist` 的 `zypi` | 380,600,504 B (M) | 379,973,352 B (M)，−627,152 B（−0.16 %） |
+| 冷构建 | 11 m 47 s (M) | 11 m 58 s (M)，在噪声内 |
+| `tui/` 改动行（不含 `Cargo.lock` 与声明文件） | — | +496 −2,581，净减 2,085 (M；含夹具 JSON 165 行) |
+| 11 个 suite 通过数 | 8,541（清单的和；`daa5ad9`） | 8,501（清单的和） |
+| `x.ai` 残留上限 | 253 | 251 |
+
+两次构建在不同的目录里做（基线在 `/home/ubuntu/d1-base`，本 PR 在 `/workspace`）；调试信息里的路径长度不同，所以体积差有几百字节的不确定。试验时在 `6af773f` 上量过一次：体积 −155,856 B，时间 −38 s；这一次时间差是 +11 s，两次都在噪声内，不能说构建变快了。结论：D.1 减的是依赖图与要维护的代码，不是二进制。
+
+**检查（本地，Linux）。** rebase 之后，在 `daa5ad9` 之上重跑：`tui_baseline.py check` 全部通过，954 个包（上限 954），`leader` 214 / 214，`x.ai` 251 / 251，消费者构建 0 条告警，`--workspace --tests` 0 个错误（`pi-pager` 的 `render_done_text` 有一条测试配置下的死代码告警，它在 `main` 上就有，不是本 PR 引入的；门禁只数消费者构建）。`tui_baseline.py test`（nextest，`PI_E2E_PYTHON` 指向有 `pi_agent_cli` 的 Python，`PI_E2E_REQUIRED=1`）：11 个 suite 全过，8,502 通过 / 0 失败（清单的和 8,501；多的 1 个是 `pi-file-utils` 的 217）；`pi-shell` 742，`pi-pager` 5,638，`pi-pager-render` 1,092，`pi-pager-minimal` 79，`pi-pager-bin` 33，`pi-acp-lib` 64，`pi-http` 13，`pi-telemetry` 239，`pi-sampling-types` 280，`pi-sandbox` 105；`python_agent_e2e` 14 个在 `pi-pager` 的 suite 里全过。`tui_notices.py check`：964 / 964，不用 `update --write`（#83 删的 5 条还在，手写的 `64bit/async-openai` MIT 声明在）。`scripts/tests`：262 通过 / 5 跳过。`ruff check .` 与 `ruff format --check .` 通过。PTY 脚本（`release-dist` 构建）是 rebase 之前在 `6ba5cc4` 上跑的：`smoke.py` 23/23，`smoke.py --sandbox workspace` 24/24，`exit_matrix.py` 12/12，`exit_matrix.py --sandbox workspace` 14/14，`print_exit.py` 全过，`resume_matrix.py --strict` 16 PASS，`mode_probe.py` 与 `status_line_probe.py` 退出 0，`net_audit.py --mock` 13/13，`--mock --no-network` 13/13；rebase 之后没有重跑（rebase 只带进文档与别的 PR 的代码，这些脚本不测它们的路径；这一点没有验证）。没有跑：`flags_probe.py`、`settings_probe.py`（只打印，不判）；真实模型的 `net_audit.py`；macOS 与 Windows。
+
+**踩到的。** 这台 VM 起初没有 `bwrap`，带 `--sandbox` 的两个脚本在 `zypi` 起不来时报 5/19 与 0/14；装了 `bubblewrap` 就好。`--python` 要给绝对路径：沙箱把工作目录换了，相对路径找不到 Python。
+
+**没验证的。** 老会话文件的夹具是手写的 JSON 经旧类型规范化而来，不是从真实用户的会话文件里取的；真实文件里要是有只有 fork 类型读的字段，这里发现不了。`WebSearchClient` 只有一个调用方（旧 Rust agent 的工具路径），它的 HTTP 路径只有 wiremock 测试，没有真实服务器。
+
 ## 附录 A（摘录）：A.4
 
 附录 A 的 A.1–A.3（能力矩阵、ACP 版本配对、逐方法）是活的参考，留在[计划](../PLAN-RUST-AGENT-RUNTIME-REMOVAL.md)里。A.4 记 r5 的执行结果，搬到这里。
@@ -3483,3 +3514,4 @@ r12 续 8（2026-10-13）：PR [#18](https://github.com/zy1233/pi-python/pull/18
 - r32：用户选「2B」（2026-11-02；PR [#78](https://github.com/zy1233/pi-python/pull/78)，分支 `refactor/drop-pi-update-npm-install-1b89`；文档在另一个 PR）。删 `pi-update`、`pi-pager/npm/`、四个安装脚本和只有更新器用的 pager 代码；版本策略搬进 `pi-pager-bin`。门禁与整套测试过（8,557 通过 / 0 失败）；依赖图 970 → 965。README 与站点的「Next」改成「`zypi` 的 Windows 二进制计划，没有日期；不做 macOS x86_64 版本，也不做自动更新」（第二次答复后）。macOS x86_64 的 release job 的提案作废。见 [§10.35](#1035-r32-追加删除-pi-updatenpm-目录与安装脚本用户选-2b)。
 - r34：D.8 余下的死文件，删 `pi-workflow`（2026-11-02；分支 `refactor/tui-drop-pi-workflow-and-unloaded-files`）。只删文件：crate `pi-workflow`、`scenarios/*.yaml`、九个 logo、十一个旧名字的 `.snap`；没有改 `.rs`。图仍 965，测试仍 8,557（在 `6ba5cc4` 上测）。见 [§10.36][l10-36]。
 - r35：D.6，删内嵌指南的查看器（2026-11-02；分支 `refactor/tui-drop-guide-viewer`）。`pi-pager` 少 1,018 行、14 个测试；`plugins`、`project_config`、`managed_config` 查过，都没有删。见 [§10.37][l10-37]。
+- r36：D.1（2026-11-02）：`async-openai` 离开依赖图，965 → 954；本地 `rs` 类型、旧会话夹具的往返测试、`pi-tools` 搜索客户端改写；`async-openai` 进 `deny_crates`。见 [§10.35](#1038-r36-追加d1async-openai-离开依赖图)。

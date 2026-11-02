@@ -4152,24 +4152,18 @@ async fn context_window_downgrade_triggers_auto_compact() {
 //   - No `__RAW_OUTPUT_PLACEHOLDER__` sentinels
 //   - No `extract_raw_input_items()` / `splice_raw_input_items()`
 //   - Reasoning lives as `ConversationItem::Reasoning(rs::ReasoningItem)`
-//     siblings; the From<&ConversationRequest> for rs::CreateResponse impl
-//     emits them inline in `input` order.
+//     siblings; the Chat Completions mapping folds them into the next
+//     assistant message in order.
 // ============================================================================
 
-/// Serialize a ConversationRequest using only the public
-/// `From<&ConversationRequest> for rs::CreateResponse` trait impl.
-///
-/// After the sibling-Reasoning refactor there is no placeholder/splice dance: the `Vec<rs::InputItem>`
-/// produced by the From impl is directly the wire shape (modulo
-/// `patch_reasoning_text_types` which only stamps a `type` field on nested
-/// reasoning content blocks and does not reorder items).
+/// Serialize a ConversationRequest to its Chat Completions wire body and expose
+/// the `messages` array under `input`, so the prefix checks below compare
+/// exactly what goes to the provider.
 fn serialize_via_public_api(
     req: &pi_sampling_types::ConversationRequest,
 ) -> serde_json::Value {
-    use pi_sampling_types::rs;
-    let create_response: rs::CreateResponse = req.into();
-    let mut body = serde_json::to_value(&create_response).unwrap();
-    pi_sampling_types::patch_reasoning_text_types(&mut body);
+    let chat: pi_sampling_types::ChatCompletionRequest = req.clone().into();
+    let body = serde_json::to_value(&chat).unwrap();
     // Sanity guard: the placeholder string from the pre-refactor design
     // must never appear in the serialized output. If a future change
     // re-introduces a stringly-typed splice, this catches it.
@@ -4179,7 +4173,7 @@ fn serialize_via_public_api(
         "placeholder sentinel must never appear in serialized output \
          post-sibling-Reasoning refactor"
     );
-    body
+    serde_json::json!({ "input": body["messages"].clone() })
 }
 
 /// Assert that request N's serialized input is a byte-stable prefix of

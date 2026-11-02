@@ -505,30 +505,6 @@ Additional requirements / notices:
   Upstream license expression: Apache-2.0 OR MIT. For this distribution, obligations are satisfied under: MIT.
 
 --------------------------------------------------------------------------------
-async-openai 0.33.1
---------------------------------------------------------------------------------
-Source:  https://github.com/64bit/async-openai
-License: MIT
-
-Copyright notice:
-  Copyright holders / authors (from package metadata):
-    - Himanshu Neema
-
-License text: see Part II — MIT
-
---------------------------------------------------------------------------------
-async-openai-macros 0.1.1
---------------------------------------------------------------------------------
-Source:  https://github.com/64bit/async-openai
-License: MIT
-
-Copyright notice:
-  Copyright holders / authors (from package metadata):
-    - Himanshu Neema
-
-License text: see Part II — MIT
-
---------------------------------------------------------------------------------
 async-process 2.5.0
 --------------------------------------------------------------------------------
 Source:  https://github.com/smol-rs/async-process
@@ -1092,20 +1068,6 @@ Copyright notice:
   Copyright 2021 Axum Contributors
 
 License text: see Part II — MIT
-
---------------------------------------------------------------------------------
-backoff 0.4.0
---------------------------------------------------------------------------------
-Source:  https://github.com/ihrwein/backoff
-License: MIT  (upstream declares: MIT/Apache-2.0)
-
-Copyright notice:
-  Copyright (c) 2016 Tibor Benke <ihrwein@gmail.com>
-
-License text: see Part II — MIT
-
-Additional requirements / notices:
-  Upstream license expression: MIT/Apache-2.0. For this distribution, obligations are satisfied under: MIT.
 
 --------------------------------------------------------------------------------
 backon 1.6.0
@@ -2668,48 +2630,6 @@ Additional requirements / notices:
   Upstream license expression: MIT OR Apache-2.0. For this distribution, obligations are satisfied under: MIT.
 
 --------------------------------------------------------------------------------
-derive_builder 0.20.2
---------------------------------------------------------------------------------
-Source:  https://github.com/colin-kiegel/rust-derive-builder
-License: MIT  (upstream declares: MIT OR Apache-2.0)
-
-Copyright notice:
-  Copyright (c) 2016 rust-derive-builder contributors
-
-License text: see Part II — MIT
-
-Additional requirements / notices:
-  Upstream license expression: MIT OR Apache-2.0. For this distribution, obligations are satisfied under: MIT.
-
---------------------------------------------------------------------------------
-derive_builder_core 0.20.2
---------------------------------------------------------------------------------
-Source:  https://github.com/colin-kiegel/rust-derive-builder
-License: MIT  (upstream declares: MIT OR Apache-2.0)
-
-Copyright notice:
-  Copyright (c) 2016 rust-derive-builder contributors
-
-License text: see Part II — MIT
-
-Additional requirements / notices:
-  Upstream license expression: MIT OR Apache-2.0. For this distribution, obligations are satisfied under: MIT.
-
---------------------------------------------------------------------------------
-derive_builder_macro 0.20.2
---------------------------------------------------------------------------------
-Source:  https://github.com/colin-kiegel/rust-derive-builder
-License: MIT  (upstream declares: MIT OR Apache-2.0)
-
-Copyright notice:
-  Copyright (c) 2016 rust-derive-builder contributors
-
-License text: see Part II — MIT
-
-Additional requirements / notices:
-  Upstream license expression: MIT OR Apache-2.0. For this distribution, obligations are satisfied under: MIT.
-
---------------------------------------------------------------------------------
 derive_more 0.99.20
 --------------------------------------------------------------------------------
 Source:  https://github.com/JelteF/derive_more
@@ -3321,21 +3241,6 @@ Additional requirements / notices:
   Upstream license expression: Apache-2.0 OR MIT. For this distribution, obligations are satisfied under: MIT.
 
 --------------------------------------------------------------------------------
-eventsource-stream 0.2.3
---------------------------------------------------------------------------------
-Source:  https://github.com/jpopesculian/eventsource-stream
-License: MIT  (upstream declares: MIT OR Apache-2.0)
-
-Copyright notice:
-  Copyright holders / authors (from package metadata):
-    - Julian Popescu <jpopesculian@gmail.com>
-
-License text: see Part II — MIT
-
-Additional requirements / notices:
-  Upstream license expression: MIT OR Apache-2.0. For this distribution, obligations are satisfied under: MIT.
-
---------------------------------------------------------------------------------
 fallible-iterator 0.3.0
 --------------------------------------------------------------------------------
 Source:  https://github.com/sfackler/rust-fallible-iterator
@@ -3936,20 +3841,6 @@ License text: see Part II — MIT
 
 Additional requirements / notices:
   Upstream license expression: MIT OR Apache-2.0. For this distribution, obligations are satisfied under: MIT.
-
---------------------------------------------------------------------------------
-futures-timer 3.0.3
---------------------------------------------------------------------------------
-Source:  https://github.com/async-rs/futures-timer
-License: MIT  (upstream declares: MIT/Apache-2.0)
-
-Copyright notice:
-  Copyright (c) 2014 Alex Crichton
-
-License text: see Part II — MIT
-
-Additional requirements / notices:
-  Upstream license expression: MIT/Apache-2.0. For this distribution, obligations are satisfied under: MIT.
 
 --------------------------------------------------------------------------------
 futures-util 0.3.32
@@ -5728,17 +5619,6 @@ Copyright notice:
   Copyright (c) The Ratatui Developers
 
 License text: see Part II — MIT
-
---------------------------------------------------------------------------------
-instant 0.1.12
---------------------------------------------------------------------------------
-Source:  https://github.com/sebcrozet/instant
-License: BSD-3-Clause
-
-Copyright notice:
-  Copyright (c) 2019, Sébastien Crozet
-
-License text: see Part II — BSD-3-Clause
 
 --------------------------------------------------------------------------------
 io-close 0.3.7
@@ -8810,21 +8690,6 @@ Additional requirements / notices:
   Upstream license expression: MIT OR Apache-2.0. For this distribution, obligations are satisfied under: MIT.
 
 --------------------------------------------------------------------------------
-reqwest-eventsource 0.6.0
---------------------------------------------------------------------------------
-Source:  https://github.com/jpopesculian/reqwest-eventsource
-License: MIT  (upstream declares: MIT OR Apache-2.0)
-
-Copyright notice:
-  Copyright holders / authors (from package metadata):
-    - Julian Popescu <jpopesculian@gmail.com>
-
-License text: see Part II — MIT
-
-Additional requirements / notices:
-  Upstream license expression: MIT OR Apache-2.0. For this distribution, obligations are satisfied under: MIT.
-
---------------------------------------------------------------------------------
 reqwest-middleware 0.4.2
 --------------------------------------------------------------------------------
 Source:  https://github.com/TrueLayer/reqwest-middleware
@@ -9314,20 +9179,6 @@ License: MIT  (upstream declares: Apache-2.0 OR MIT)
 
 Copyright notice:
   Copyright (c) 2021-2022 The RustCrypto Project Developers
-
-License text: see Part II — MIT
-
-Additional requirements / notices:
-  Upstream license expression: Apache-2.0 OR MIT. For this distribution, obligations are satisfied under: MIT.
-
---------------------------------------------------------------------------------
-secrecy 0.10.3
---------------------------------------------------------------------------------
-Source:  https://github.com/iqlusioninc/crates/tree/main/secrecy
-License: MIT  (upstream declares: Apache-2.0 OR MIT)
-
-Copyright notice:
-  Copyright (c) 2019-2024 iqlusion
 
 License text: see Part II — MIT
 
@@ -14130,6 +13981,30 @@ Additional requirements / notices:
   included in all copies or substantial portions of the Software (this entry
   and the crate-local THIRD_PARTY_NOTICES.md satisfy that for source
   distributions).
+
+
+--------------------------------------------------------------------------------
+64bit/async-openai
+--------------------------------------------------------------------------------
+Source:  https://github.com/64bit/async-openai
+License: MIT
+Upstream paths: async-openai/src/types/responses/ (response.rs, conversation.rs),
+                async-openai/src/types/shared/response_format.rs
+
+Copyright notice:
+  Copyright (c) 2022 Himanshu Neema
+
+License text: see Part II — MIT
+
+Additional requirements / notices:
+  Type definitions under:
+    crates/codegen/pi-sampling-types/src/rs.rs
+  The crate is no longer a dependency. The Responses API item types that
+  stored sessions still use (reasoning item, backend tool calls, response
+  format) were copied from it, trimmed to the fields in use, and kept
+  serde-compatible. The MIT copyright and permission notice must be included
+  in all copies or substantial portions of the Software (this entry
+  satisfies that).
 
 
 ================================================================================

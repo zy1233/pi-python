@@ -1,7 +1,6 @@
 use super::types::WebSearchConfig;
 use crate::attribution::{SharedAttributionCallback, ToolConsumer};
 use crate::types::SharedApiKeyProvider;
-use async_openai::types::responses as rs;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 /// A minimal, purpose-built HTTP client for calling the Responses API
 /// with web search capability.
@@ -133,9 +132,8 @@ impl WebSearchClient {
     }
     /// Build the serialized `/responses` request body for a single web search.
     ///
-    /// async_openai's `WebSearchToolFilters` models only `allowed_domains`, so
-    /// `excluded_domains` is injected into the tool's `filters` after
-    /// serialization (the backend Responses API accepts it). The request always
+    /// The tool's `filters` carry `allowed_domains` or `excluded_domains`
+    /// (the backend Responses API accepts both). The request always
     /// carries exactly one tool (`web_search`) at index 0.
     fn build_request_json(
         &self,
@@ -143,41 +141,23 @@ impl WebSearchClient {
         allowed_domains: Option<Vec<String>>,
         excluded_domains: Option<Vec<String>>,
     ) -> Result<serde_json::Value, pi_tool_runtime::ToolError> {
-        let err = |msg: String| {
-            pi_tool_runtime::ToolError::execution(
-                pi_tool_protocol::ToolId::new("web_search").expect("valid"),
-                msg,
-            )
-        };
-        let web_search = rs::WebSearchToolArgs::default()
-            .filters(rs::WebSearchToolFilters { allowed_domains })
-            .build()
-            .map_err(|e| err(format!("Failed to build web search tool: {e}")))?;
-        let request = rs::CreateResponseArgs::default()
-            .model(self.model.clone())
-            .input(query.to_string())
-            .tools(vec![rs::Tool::WebSearch(web_search)])
-            .store(false)
-            .temperature(0.1)
-            .top_p(0.95)
-            .max_output_tokens(8192u32)
-            .build()
-            .map_err(|e| err(format!("Failed to build request: {e}")))?;
-        let mut body = serde_json::to_value(&request)
-            .map_err(|e| err(format!("Failed to serialize request: {e}")))?;
-        if let Some(excluded) = excluded_domains.filter(|d| !d.is_empty()) {
-            let tool = body
-                .get_mut("tools")
-                .and_then(|t| t.as_array_mut())
-                .and_then(|arr| arr.first_mut())
-                .and_then(|t| t.as_object_mut());
-            if let Some(tool) = tool {
-                let filters = tool
-                    .entry("filters")
-                    .or_insert_with(|| serde_json::json!({}));
-                filters["excluded_domains"] = serde_json::json!(excluded);
-            }
+        let mut filters = serde_json::Map::new();
+        if let Some(allowed) = allowed_domains {
+            filters.insert("allowed_domains".to_string(), serde_json::json!(allowed));
         }
+        if let Some(excluded) = excluded_domains.filter(|d| !d.is_empty()) {
+            filters.insert("excluded_domains".to_string(), serde_json::json!(excluded));
+        }
+        let tool = serde_json::json!({ "type": "web_search", "filters": filters });
+        let body = serde_json::json!({
+            "model": self.model,
+            "input": query,
+            "tools": [tool],
+            "store": false,
+            "temperature": 0.1,
+            "top_p": 0.95,
+            "max_output_tokens": 8192,
+        });
         Ok(body)
     }
     /// Wire a 401-attribution callback into this client. Idempotent;
@@ -253,14 +233,13 @@ impl WebSearchClient {
                 format!("Failed to read response body: {e}"),
             )
         })?;
-        let response_obj: rs::Response = serde_json::from_slice(&bytes).map_err(|e| {
+        let response_obj: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| {
             pi_tool_runtime::ToolError::execution(
                 pi_tool_protocol::ToolId::new("web_search").expect("valid"),
                 format!("Failed to parse response: {e}"),
             )
         })?;
-        let content = response_obj
-            .output_text()
+        let content = output_text(&response_obj)
             .unwrap_or_else(|| "No search results found.".to_string());
         let citations = extract_citations(&response_obj);
         Ok((content, citations))
@@ -322,86 +301,87 @@ impl WebSearchClient {
                 format!("Failed to read response body: {e}"),
             )
         })?;
-        let response_obj: rs::Response = serde_json::from_slice(&bytes).map_err(|e| {
+        let response_obj: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| {
             pi_tool_runtime::ToolError::execution(
                 pi_tool_protocol::ToolId::new("web_search").expect("valid"),
                 format!("Failed to parse response: {e}"),
             )
         })?;
-        let content = response_obj
-            .output_text()
+        let content = output_text(&response_obj)
             .unwrap_or_else(|| "No search results found.".to_string());
         let pairs = extract_citation_pairs(&response_obj);
         Ok((content, pairs))
     }
 }
-/// Extract citation URLs from the Response output items.
-/// The async-openai crate doesn't provide a helper for this, and the `url` field
-/// in `UrlCitationBody` is private, so we serialize to JSON to extract it.
-fn extract_citations(response: &rs::Response) -> Vec<String> {
-    let mut citations = Vec::new();
-    for output_item in &response.output {
-        if let rs::OutputItem::Message(output_message) = output_item {
-            for message_content in &output_message.content {
-                if let rs::OutputMessageContent::OutputText(text_content) = message_content {
-                    for annotation in &text_content.annotations {
-                        if let rs::Annotation::UrlCitation(url_citation) = annotation
-                            && let Ok(json) = serde_json::to_value(url_citation)
-                            && let Some(url) = json.get("url").and_then(|v| v.as_str())
-                        {
-                            citations.push(url.to_string());
-                        }
-                    }
-                }
-            }
-        }
-    }
+/// Walk the `output_text` blocks of a Responses API body, in order.
+fn output_text_blocks(response: &serde_json::Value) -> impl Iterator<Item = &serde_json::Value> {
+    response
+        .get("output")
+        .and_then(|o| o.as_array())
+        .into_iter()
+        .flatten()
+        .filter(|item| item.get("type").and_then(|t| t.as_str()) == Some("message"))
+        .filter_map(|item| item.get("content").and_then(|c| c.as_array()))
+        .flatten()
+        .filter(|block| block.get("type").and_then(|t| t.as_str()) == Some("output_text"))
+}
+
+/// Join the text of every `output_text` block, or `None` when there is none.
+fn output_text(response: &serde_json::Value) -> Option<String> {
+    let text: String = output_text_blocks(response)
+        .filter_map(|block| block.get("text").and_then(|t| t.as_str()))
+        .collect();
+    (!text.is_empty()).then_some(text)
+}
+
+/// The `url_citation` annotations of a Responses API body, in order.
+fn url_citations(response: &serde_json::Value) -> impl Iterator<Item = &serde_json::Value> {
+    output_text_blocks(response)
+        .filter_map(|block| block.get("annotations").and_then(|a| a.as_array()))
+        .flatten()
+        .filter(|ann| ann.get("type").and_then(|t| t.as_str()) == Some("url_citation"))
+}
+
+/// Extract citation URLs from the Response output items, de-duplicated in
+/// first-seen order.
+fn extract_citations(response: &serde_json::Value) -> Vec<String> {
+    let mut citations: Vec<String> = url_citations(response)
+        .filter_map(|ann| ann.get("url").and_then(|v| v.as_str()))
+        .map(str::to_string)
+        .collect();
     let mut seen = std::collections::HashSet::new();
     citations.retain(|url| seen.insert(url.clone()));
     citations
 }
+
 /// Extract `(title, url)` pairs from the Responses API annotations.
 ///
 /// `title` may be an empty string when upstream doesn't supply one. URLs
 /// are deduplicated while preserving the first-seen order so the rendered
 /// `Links:` list is stable and free of duplicates.
-fn extract_citation_pairs(response: &rs::Response) -> Vec<(String, String)> {
-    let mut pairs: Vec<(String, String)> = Vec::new();
-    for output_item in &response.output {
-        if let rs::OutputItem::Message(output_message) = output_item {
-            for message_content in &output_message.content {
-                if let rs::OutputMessageContent::OutputText(text_content) = message_content {
-                    for annotation in &text_content.annotations {
-                        if let rs::Annotation::UrlCitation(url_citation) = annotation
-                            && let Ok(json) = serde_json::to_value(url_citation)
-                        {
-                            let url = json.get("url").and_then(|v| v.as_str()).unwrap_or("");
-                            if url.is_empty() {
-                                continue;
-                            }
-                            let title = json
-                                .get("title")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_string();
-                            pairs.push((title, url.to_string()));
-                        }
-                    }
-                }
+fn extract_citation_pairs(response: &serde_json::Value) -> Vec<(String, String)> {
+    let mut pairs: Vec<(String, String)> = url_citations(response)
+        .filter_map(|ann| {
+            let url = ann.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            if url.is_empty() {
+                return None;
             }
-        }
-    }
+            let title = ann.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            Some((title.to_string(), url.to_string()))
+        })
+        .collect();
     let mut seen = std::collections::HashSet::new();
     pairs.retain(|(_t, url)| seen.insert(url.clone()));
     pairs
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use indexmap::IndexMap;
     /// Helper to create a Response from JSON for testing.
-    fn response_from_json(json: serde_json::Value) -> rs::Response {
-        serde_json::from_value(json).expect("Failed to parse test Response JSON")
+    fn response_from_json(json: serde_json::Value) -> serde_json::Value {
+        json
     }
     /// Build a client with the given configured domain defaults.
     fn client_with_defaults(

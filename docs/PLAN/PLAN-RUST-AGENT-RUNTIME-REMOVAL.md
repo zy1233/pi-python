@@ -390,13 +390,13 @@ Rust（pager）：
 
 入口条件：阶段 B 完成，且基线对比显示编译时间 / 体积 / 维护成本值得继续。
 
-- [ ] D.1 `async-openai` 离开 `cargo tree`：需处理 `pi-tools`（139k 行，pager 仅用约 55 个类型 / 小工具路径，但渲染 crate 也依赖它）与 `pi-sampling-types`（经 `pi-agent`）。二选一：把「工具展示类型」抽到叶子 crate（`pi-tools-api` 仅 715 行，是现成落点），或对 `async-openai` 的用法做 feature-gate。
+- [x] D.1 `async-openai` 离开 `cargo tree`。**状态**（r36）：做了，没有走原来写的两条路：会话历史还在存的 20 个 Responses 类型抄进 `pi-sampling-types/src/rs.rs`（serde 形状不变，有旧会话夹具的往返测试），没人调用的 Responses 线上转换删了，`pi-tools` 的搜索客户端改用 JSON 值。依赖图 965 → 954（`async-openai` 与 10 个只被它用的包）；`async-openai` 进了 `deny_crates`。体积 −0.16 %，冷构建时间 +11 s（在噪声内；量在 `6ba5cc4` 上，一次测量）；D.1 减的是依赖图与要维护的代码，不是二进制。记录 [§10.38][l10-38]。
 - [ ] D.2 session 数据层（`session::{storage,persistence,unified_list}`、`relay`，约 16.6k 行）。**状态**（r15）：做了一部分：`session::storage` 与 `session::persistence` 删了（决策 10，PR [#26][pr-26]，r16 合入；清洗标题的两个函数留在 `session::title`）。`session::unified_list`（103 行）还在，调用图报死；`relay` 这一轮没有查。记录 [§10.18][l10-18]。
 - [ ] D.3 xAI auth 层（约 18.1k 行）。
 - [ ] D.4 视 `pi-workspace`（101k 行，pager 主要用 `permission`）、`pi-agent`（`agents_modal` 删除后几乎无活引用）的剩余耦合决定是否继续。
 - [x] D.5 `pi-test-support`（7,384 行）：外部只有 `EnvGuard`、`scaled`、`resources`（`pi-shell`、`pi-tools` 的测试），和一个 `pi-pager` 测试里的 `TestProcess`、`TestSandbox` 在用；mock 推理服务器、SSE 生成器、ACP stdio 客户端、headless 运行器、计数服务器与脚本化响应共 5,003 行没有外部用户（模块之间的相互引用没有查）。出处：r11 的搜索，[§10.14][l10-14]。 **状态**（r27；r28 合入 `main`）：PR [#63][pr-63] 做了：删了 `mock_server`、`inference_override`、`scripted`、`sse`、`acp_client`、`headless`、`counting_server` 七个模块（5,443 行，含 47 个测试函数）与只有它们调用的 `grok_binary`、`git_workdir`，少 11 个依赖；留下 `EnvGuard`、`env_parse`、`scaled`、`TestSandbox`、`TestProcess`、`ResourceSnapshot`。记录 [§10.30][l10-30]。
 - [x] D.6 内嵌指南的查看器：`ActiveModal::DocPicker` 与 `DocViewer` 没有入口（非测试代码里，`howto_list_modal` 只被查看器的 Esc 调用，`welcome_doc_viewer` 只在测试里被赋值），启动时的解压又在 C.2 删了，所以七页指南现在没有读者。二选一：接一个入口（斜杠命令或快捷键），或连同选择器、查看器一起删。出处：[§10.14][l10-14]。 **状态**（r35）：用户决定删。`docs.rs`、两个变体、`welcome_doc_viewer` 与相关测试删了（`pi-pager` −1,018 行、−14 个测试）；七页指南留在磁盘上，「不提旧产品」的检查移到 `tests/user_guide_pages.rs`。记录 [§10.37][l10-37]。
-- [x] D.7 发行与更新的遗留：`pi-pager/npm/` 下 7 个打包目录与 `pi-update` 里还写着 npm 包名 `@pi-official/grok` 和 `x.ai/cli/install.*` 的安装提示。自动更新在 Phase 4 §4.4 已禁用（`pi-pager-bin/src/main.rs` 里 `bg_update_rx = None`），这些不会跑，只是遗留。出处：[§10.14][l10-14]。 **状态**（r32，PR [#78][pr-78]）：**已定，已做**（用户，2026-11-02：「2B」）。删了 `pi-update`、`pi-pager/npm/` 与 `pi-pager/scripts/` 的四个安装脚本，和只有更新器用的 pager 代码；版本策略（`required_minimum`、`required_maximum`）搬进 `pi-pager-bin`。自动更新不做；`zypi` 的 Windows 预编译件留作「计划，没有日期」；`zypi` 不做 macOS x86_64 版本，不建、不排期（用户，2026-11-02，同日第二次答复；macOS x86_64 的 release job 的提案作废，没有 workflow、没有 PR）。Python agent 的 macOS Intel 二进制不受影响，`agent-binaries.yml` 仍建五个目标。记录 [§10.35][l10-35]。
+- [x] D.7 发行与更新的遗留：`pi-pager/npm/` 下 7 个打包目录与 `pi-update` 里还写着 npm 包名 `@pi-official/grok` 和 `x.ai/cli/install.*` 的安装提示。自动更新在 Phase 4 §4.4 已禁用（`pi-pager-bin/src/main.rs` 里 `bg_update_rx = None`），这些不会跑，只是遗留。出处：[§10.14][l10-14]。 **状态**（r32，PR [#78][pr-78]）：**已定，已做**（用户，2026-11-02：「2B」）。删了 `pi-update`、`pi-pager/npm/` 与 `pi-pager/scripts/` 的四个安装脚本，和只有更新器用的 pager 代码；版本策略（`required_minimum`、`required_maximum`）搬进 `pi-pager-bin`。自动更新不做；`zypi` 的 Windows 预编译件留作「计划，没有日期」；`zypi` 不做 macOS x86_64 版本，不建、不排期（用户，2026-11-02，同日第二次答复；macOS x86_64 的 release job 的提案作废，没有 workflow、没有 PR）。Python agent 的 macOS Intel 二进制不受影响，`agent-binaries.yml` 仍建五个目标。记录 [§10.38][l10-38]。
 - [x] D.8 删掉调用图工具报死、编译器也认可的 16 个模块（被删文件共 6,143 行）：`pi-hooks` 的 `dispatcher`、`result`、`runner`、`runner::command`、`runner::http`（4,339 行）；`pi-shell` 的 `session::events`、`session::telemetry`、`session::unified_list`、`config::reloader`、`auth::flow`、`upload`、`upload::turn`（1,006 行）；`pi-workspace` 的 `publish`（462 行）；`pi-tools` 的 `implementations::editor_infra`（276 行）；`pi-mcp` 的 `wire`（39 行）；`pi-agent` 的 `prompt::browser_verification`（24 行）。第 17 个报死的模块，`pi-tools` 的 `types::error`（44 行），**不能删**：里面是 `?` 要用的 `impl From<…> for ToolError`。要一起删的还有 `pi-hooks/tests/integration.rs`（822 行，测的就是被删的模块），以及删完没人用的 `env_expand::expand_env_vars_with_extra`（`pi-hooks`）。证据：在副本里这样删，三个产品 crate 的 `cargo check` 与 `cargo check --workspace --tests` 都通过，只多那一条告警。没有真的删；副本里没有跑测试，所以不知道会少几个测试。`session::events`、`session::unified_list` 与 D.2 有重叠。出处：[§10.14][l10-14]。 **状态**（r16）：PR [#27][pr-27] 照这一条做了一部分：`session::helpers`、`session::worktree` 与 `util::config::worktree` 删了。现在 `pi-shell` 里调用图报死的单元是 7 个（1,008 行）：`auth::flow`、`config::reloader`、`session::events`、`session::telemetry`、`session::unified_list`、`upload`、`upload::turn`；`session::events`（591 行）在「check first」里（`GoalClassifierVerdictTelemetry` 的 `impl`）。r16 的扫描又找到几个候选，都没有删，只有文本搜索的证据：没有用户的 crate `pi-workflow`（9 个文件，3,570 行；`tui/Cargo.toml` 的成员列表里有它，没有 `Cargo.toml` 依赖它）；`Config.storage_mode` 与隐藏的 `--storage-mode`（在 `.rs` 里没有找到读 `Config.storage_mode` 的代码）；约 88 个没人加载的文件。要删，就先在副本里删、再编译：rustc 不告警（`pub(crate)` 项在死模块里不告警）。清单见 [§10.19][l10-19]。 **状态**（r27；r28 合入 `main`）：PR [#62][pr-62] 做了：16 个模块都删了，连同决策 10 的 `mcp.rs` 与 `recent_dirs.rs`、和只有它们在调用的代码（编译器的 15 条告警清到 0）；`tui/` 下 −9,067 行；调用图里报死的单元 17 个 → 1 个（`pi-tools::types::error`，不能删）；`pi-shell` 的测试 838 → 784。没动的候选与下一层，见 [§10.30][l10-30] 的「留下的」。
 - [x] D.9 `tui_baseline.py test` 在开发者自己的 `HOME` 下跑测试：有测试会往真实的 `~/.pi-python` 与 `/tmp` 写东西。**状态**（r29，PR [#75][pr-75]）：做了。执行器让测试在临时 `HOME` 里跑（真实 home 里的隐藏目录，跑完删除；`TMPDIR` 在它里面；`XDG_*` 去掉；`CARGO_HOME`、`RUSTUP_HOME` 先钉住；`--keep-home` 关掉它）。整套 11 个 suite 改前改后都是 8,558 通过 / 0 失败 / 25 跳过。真实 home 与 `/tmp` 里的新条目：改前 2,084 个，改后 0 个（`pi-pager-render` 的一个测试把 `HOME` 设成空，会在真实 home 建空的 `~/.pi-python`；它现在同时设 `PI_HOME`，只改测试）。记录 [§10.32][l10-32]。
 
@@ -467,13 +467,14 @@ Rust（pager）：
 | [§10.35][l10-35] | r32 | 用户选「2B」：删 `pi-update`、npm 目录与安装脚本（门禁、整套测试、用户可见的变化）；README 与站点的「Next」改字：Windows 计划，没有日期；不做 macOS x86_64 版本与自动更新 | [#78][pr-78] |
 | [§10.36][l10-36] | r34 | D.8 余下的死文件：删 crate `pi-workflow`（3,570 行）、`scenarios/*.yaml`（43 个）、九个 logo、十一个旧名字的 `.snap`；`Cargo.lock` 少 8 个包；图仍 965，测试仍 8,557；没有改 `.rs` | — |
 | [§10.37][l10-37] | r35 | D.6：删内嵌指南的查看器（`docs.rs`、`DocPicker`、`DocViewer`、`welcome_doc_viewer`）；`pi-pager` −1,018 行、−14 个测试；`plugins`、`project_config`、`managed_config` 查过：`managed_config`、`project_config` 是活的，`plugins` 在源码上连着 `pi-agent` 与 `pi-workspace`，交给 D.4 | — |
+| [§10.38][l10-38] | r36 | 阶段 D.1：`async-openai` 离开依赖图（965 → 954）；本地 `rs` 类型、旧会话夹具、`pi-tools` 搜索客户端改写；测量与检查 | PR [#84][pr-84] |
 | [附录 A.4][logA4] | r5 | 入口审计的 r5 执行结果 | [#7][pr-7] |
 | [附录 B][logB] | r2–r17 | 复现方法（依赖图、模块级闭包、各轮的测量与测试命令） | — |
 | [附录 C][logC] | r10 | §7 的逐项注释（原文） | — |
 | [附录 D][logD] | r10 | 计划头部的状态文字（原文） | — |
 | [附录 E][logE] | r2 | §4、§5 的原文（源码事实基线与改动规模估计） | — |
 | [附录 F][logF] | r22 续 1 | 计划整理前的状态文字（原文）：头部、「当前状态」逐轮、两个里程碑、「下一步」，「还没有验证的」「待决策」「§7」「§10 索引」里改短的条目，「修订记录（摘要）」的长条目 | — |
-| [修订记录][logRev] | r1–r35 | 逐轮的完整说明 | — |
+| [修订记录][logRev] | r1–r36 | 逐轮的完整说明 | — |
 
 ## 附录 A：能力矩阵与 ACP 版本配对（阶段 0.8，r9 定稿）
 
@@ -587,6 +588,7 @@ Rust（pager）：
 - r33：决策 7 的答复（用户，2026-11-02）：(b) 真的 Plan 不做；(c) 真的 Auto 做。新增 [Auto 模式设计](../specs/2026-11-02-auto-mode-design.md)（设计与线上准入记录），同时更新决策 7、1.P3 与附录 A 的「模式切换」。只改文档，没有代码。
 - r34：D.8 余下的死文件，删 `pi-workflow`（2026-11-02）。只删文件，没有改 `.rs`。见 [§10.36][l10-36]。
 - r35：D.6，删内嵌指南的查看器（2026-11-02）。见 [§10.37][l10-37]。
+- r36：阶段 D.1（PR [#84][pr-84]；2026-11-02）：`async-openai` 离开依赖图，965 → 954。见 [§10.38][l10-38]。
 
 <!-- 链接定义 -->
 [log]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md
@@ -627,6 +629,7 @@ Rust（pager）：
 [l10-35]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1035-r32-追加删除-pi-updatenpm-目录与安装脚本用户选-2b
 [l10-36]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1036-r34-追加d8-余下的死文件删-pi-workflow
 [l10-37]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1037-r35-追加d6删内嵌指南的查看器死的-plugins-停在级联上
+[l10-38]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1038-r36-追加d1async-openai-离开依赖图
 [l4-1]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#41-运行路径
 [l4-2]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#42-rust-runtime-与耦合面
 [l4-3]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#43-python-侧pi_agent_cli共-4114-行agentpy-472-行
@@ -693,6 +696,7 @@ Rust（pager）：
 [pr-75]: https://github.com/zy1233/pi-python/pull/75
 [pr-77]: https://github.com/zy1233/pi-python/pull/77
 [pr-78]: https://github.com/zy1233/pi-python/pull/78
+[pr-84]: https://github.com/zy1233/pi-python/pull/84
 [ci-run-5f73e07]: https://github.com/zy1233/pi-python/actions/runs/40172668652
 [tui-ci-run-5f73e07]: https://github.com/zy1233/pi-python/actions/runs/40172721728
 [run-dry-run-5f73e07]: https://github.com/zy1233/pi-python/actions/runs/40172723794

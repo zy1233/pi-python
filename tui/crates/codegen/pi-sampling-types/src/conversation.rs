@@ -6,13 +6,9 @@
 
 mod chat_completions;
 mod messages;
-mod responses;
 
 pub use chat_completions::{conversation_item_to_chat_message, conversation_to_chat_messages};
 pub use messages::build_messages_request;
-pub use responses::{
-    extra_tool_entries, patch_reasoning_text_types, response_to_conversation_items,
-};
 
 use std::sync::Arc;
 
@@ -2401,10 +2397,6 @@ mod test_support;
 mod chat_completions_tests;
 
 #[cfg(test)]
-#[path = "conversation/responses_tests.rs"]
-mod responses_tests;
-
-#[cfg(test)]
 #[path = "conversation/messages_tests.rs"]
 mod messages_tests;
 
@@ -2427,16 +2419,10 @@ mod tests {
 
         for backend in [
             crate::ApiBackend::ChatCompletions,
-            crate::ApiBackend::Responses,
             crate::ApiBackend::Messages,
         ] {
             let on_wire = match backend {
-                crate::ApiBackend::Responses => {
-                    rs::CreateResponse::from(&request())
-                        .prompt_cache_key
-                        .as_deref()
-                        == Some("cache-key-1")
-                }
+                crate::ApiBackend::Responses => unreachable!("not in the list above"),
                 crate::ApiBackend::ChatCompletions => {
                     let mapped = ChatCompletionRequest::from(request());
                     serde_json::to_value(&mapped)
@@ -2639,7 +2625,7 @@ mod tests {
     }
 
     #[test]
-    fn json_schema_converts_to_all_three_api_wire_formats() {
+    fn json_schema_converts_to_both_api_wire_formats() {
         let schema = serde_json::json!({
             "type": "object",
             "properties": { "summary": { "type": "string" } },
@@ -2656,15 +2642,6 @@ mod tests {
         assert_eq!(fmt["json_schema"]["name"], STRUCTURED_OUTPUT_SCHEMA_NAME);
         assert_eq!(fmt["json_schema"]["strict"], true);
         assert_eq!(fmt["json_schema"]["schema"], schema);
-
-        // Responses API: json_schema → text.format
-        let resp: rs::CreateResponse = (&req).into();
-        let rs::TextResponseFormatConfiguration::JsonSchema(f) = resp.text.unwrap().format else {
-            panic!("Expected json_schema format");
-        };
-        assert_eq!(f.name, STRUCTURED_OUTPUT_SCHEMA_NAME);
-        assert_eq!(f.strict, Some(true));
-        assert_eq!(f.schema, Some(schema.clone()));
 
         // Messages API: json_schema → output_config.format
         let msgs_req = build_messages_request(&req);
@@ -5147,119 +5124,6 @@ mod tests {
     // ============================================================================
 
     #[test]
-    fn multi_tco_reasoning_items_round_trip_as_siblings() {
-        let make_reasoning = |suffix: &str, summary: &str, encrypted: Option<&str>| {
-            rs::OutputItem::Reasoning(rs::ReasoningItem {
-                id: format!("rs_resp123_{suffix}"),
-                summary: if summary.is_empty() {
-                    vec![]
-                } else {
-                    vec![rs::SummaryPart::SummaryText(rs::SummaryTextContent {
-                        text: summary.to_string(),
-                    })]
-                },
-                content: None,
-                encrypted_content: encrypted.map(str::to_owned),
-                status: Some(rs::OutputStatus::Completed),
-            })
-        };
-        let make_tco = |suffix: &str| {
-            rs::OutputItem::Reasoning(rs::ReasoningItem {
-                id: format!("tco_resp123_call-{suffix}"),
-                summary: vec![],
-                content: None,
-                encrypted_content: Some(format!("enc_blob_{suffix}")),
-                status: Some(rs::OutputStatus::Completed),
-            })
-        };
-        let make_ws = |suffix: &str, query: &str| {
-            rs::OutputItem::WebSearchCall(rs::WebSearchToolCall {
-                id: format!("ws_resp123_{suffix}"),
-                status: rs::WebSearchToolCallStatus::Completed,
-                action: rs::WebSearchToolCallAction::Search(rs::WebSearchActionSearch {
-                    query: query.to_string(),
-                    sources: Some(vec![]),
-                }),
-            })
-        };
-
-        let response = rs::Response {
-            background: None,
-            billing: None,
-            conversation: None,
-            created_at: 0,
-            completed_at: None,
-            error: None,
-            id: "resp123".to_string(),
-            incomplete_details: None,
-            instructions: None,
-            max_output_tokens: None,
-            metadata: None,
-            model: "grok-build".to_string(),
-            object: "response".to_string(),
-            output: vec![
-                make_reasoning("a", "thinking pre-search", None),
-                make_ws("5", "capybara facts"),
-                make_ws("6", "wombat habitat"),
-                make_tco("5"),
-                make_tco("6"),
-                make_reasoning("b", "follow-up thinking", None),
-                make_ws("7", "platypus venom"),
-                make_tco("7"),
-            ],
-            parallel_tool_calls: None,
-            previous_response_id: None,
-            prompt: None,
-            prompt_cache_key: None,
-            prompt_cache_retention: None,
-            reasoning: None,
-            safety_identifier: None,
-            service_tier: None,
-            status: rs::Status::Completed,
-            temperature: None,
-            text: None,
-            tool_choice: None,
-            tools: None,
-            top_logprobs: None,
-            top_p: None,
-            truncation: None,
-            usage: None,
-        };
-
-        let items = response_to_conversation_items(response);
-
-        // Five reasoning siblings: 2 real `rs_*` + 3 encrypted `tco_*`.
-        let reasoning_ids: Vec<&str> = items
-            .iter()
-            .filter_map(|i| match i {
-                ConversationItem::Reasoning(r) => Some(r.id.as_str()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(
-            reasoning_ids,
-            vec![
-                "rs_resp123_a",
-                "tco_resp123_call-5",
-                "tco_resp123_call-6",
-                "rs_resp123_b",
-                "tco_resp123_call-7",
-            ],
-            "every reasoning item — including all 3 tco_* — must round-trip in emission order"
-        );
-
-        // Exactly one trailing Assistant.
-        assert!(matches!(items.last(), Some(ConversationItem::Assistant(_))));
-
-        // Backend tool calls preserved in order.
-        let bt_count = items
-            .iter()
-            .filter(|i| matches!(i, ConversationItem::BackendToolCall(_)))
-            .count();
-        assert_eq!(bt_count, 3);
-    }
-
-    #[test]
     fn conversation_to_chat_messages_folds_reasoning_into_following_assistant() {
         let items = vec![
             ConversationItem::user("hi"),
@@ -5636,84 +5500,78 @@ mod tests {
         assert_prefix_stable(&req2, &req3);
     }
 
-    /// Canary for `serde_json`'s `preserve_order` feature.
-    ///
-    /// With `preserve_order` (Cargo.toml), `serde_json::Map` is backed by
-    /// `IndexMap` which preserves insertion (struct-declaration) order.
-    /// Without it, `BTreeMap` is used which alphabetizes keys. This test
-    /// serializes once and verifies that a known field ordering matches
-    /// the struct declaration order (not alphabetical). If the feature
-    /// is accidentally removed from Cargo.toml, the assertion will fail.
+    /// Rows and request fields written before the local `rs` types replaced
+    /// the `async-openai` ones. The fixture is the JSON that the old types
+    /// produced (checked against the old build), so a session file on disk
+    /// must load and save back byte for byte.
     #[test]
-    fn serialization_determinism() {
-        let req = ConversationRequest::from_items(vec![
-            ConversationItem::system("You are a helpful assistant."),
-            ConversationItem::user("Hello, how are you?"),
-            reasoning_sibling("r1", "think", Some("enc")),
-            ConversationItem::assistant("I'm well!"),
-            ConversationItem::user("Tell me more."),
-        ]);
+    fn old_session_items_round_trip_byte_for_byte() {
+        let fixture = include_str!("conversation/fixtures/old_session_items.json");
+        let doc: serde_json::Value = serde_json::from_str(fixture).unwrap();
 
-        // Deterministic: same input -> same bytes.
-        let body1 = serde_json::to_string(&input_items_json(&req)).unwrap();
-        let body2 = serde_json::to_string(&input_items_json(&req)).unwrap();
-        assert_eq!(body1, body2, "repeated serialization must be identical");
+        let items: Vec<ConversationItem> =
+            serde_json::from_value(doc["items"].clone()).expect("old session rows still load");
+        assert_eq!(items.len(), 11);
+        assert_eq!(
+            items
+                .iter()
+                .filter(|i| matches!(i, ConversationItem::Reasoning(_)))
+                .count(),
+            3
+        );
+        assert_eq!(
+            items
+                .iter()
+                .filter(|i| matches!(i, ConversationItem::BackendToolCall(_)))
+                .count(),
+            8
+        );
+        assert_eq!(
+            serde_json::to_string(&items).unwrap(),
+            serde_json::to_string(&doc["items"]).unwrap(),
+            "rows must save back exactly as they were written"
+        );
 
-        // Insertion-order preservation: for an EasyInputMessage with
-        // serde tag = "type" (renamed to snake_case), the wire JSON must
-        // emit `type` before `role` before `content`. With BTreeMap
-        // (no preserve_order) these would be alphabetized to
-        // content, role, type.
-        let input = input_items_json(&req);
-        let first_item_str = serde_json::to_string(&input[0]).unwrap();
-        let type_pos = first_item_str
-            .find("\"type\"")
-            .expect("type field must exist");
-        let role_pos = first_item_str
-            .find("\"role\"")
-            .expect("role field must exist");
-        let content_pos = first_item_str
-            .find("\"content\"")
-            .expect("content field must exist");
-        assert!(
-            type_pos < role_pos && role_pos < content_pos,
-            "preserve_order must maintain struct declaration order \
-             (type < role < content), got type@{type_pos} role@{role_pos} \
-             content@{content_pos}. Is `preserve_order` enabled in Cargo.toml?"
+        let formats: Vec<rs::ResponseFormat> =
+            serde_json::from_value(doc["response_formats"].clone())
+                .expect("old response_format values still load");
+        assert_eq!(
+            serde_json::to_string(&formats).unwrap(),
+            serde_json::to_string(&doc["response_formats"]).unwrap()
         );
     }
 
-    /// Reasoning sibling WITHOUT `encrypted_content` (e.g. synthesized
-    /// from Chat Completions plaintext `reasoning_content`) still
-    /// round-trips inline -- there is no "fast path" or "slow path",
-    /// just typed serialization. Replaces the old
-    /// `test_reasoning_without_encrypted_content_no_placeholder`.
+    /// Every item type that a legacy `raw_output` entry can lift, and the
+    /// ones it must skip, go through the local `rs::OutputItem`.
     #[test]
-    fn reasoning_without_encrypted_content_round_trips_inline() {
-        let req = ConversationRequest::from_items(vec![
-            ConversationItem::system("sys"),
-            ConversationItem::user("u1"),
-            reasoning_sibling("r1", "I think about this...", None),
-            ConversationItem::assistant("response text"),
-        ]);
-
-        let input = input_items_json(&req);
-        let summary = summarise_input(&input);
-
-        assert_eq!(summary.len(), 4);
-        assert_eq!(summary[2], "reasoning:r1");
-
-        // Encrypted content absent on the wire.
-        assert!(
-            input[2].get("encrypted_content").is_none()
-                || input[2]
-                    .get("encrypted_content")
-                    .and_then(|v| v.as_str())
-                    .is_none(),
-        );
-
-        // The placeholder sentinel from the pre-refactor world must not appear.
-        let body_str = serde_json::to_string(&input).unwrap();
-        assert!(!body_str.contains("__RAW_OUTPUT_PLACEHOLDER_"));
+    fn upgrade_legacy_reasoning_raw_output_lifts_every_backend_tool_kind() {
+        let raw = serde_json::json!({
+            "type": "assistant",
+            "content": "done",
+            "raw_output": [
+                {"type":"custom_tool_call","call_id":"call_1","input":"{}","name":"x_keyword_search","id":"ctc_1"},
+                {"type":"code_interpreter_call","id":"ci_1","container_id":"cntr_1","status":"completed",
+                 "outputs":[{"type":"logs","logs":"ok"}]},
+                {"type":"function_call","call_id":"fc_1","name":"bash","arguments":"{}"},
+                {"type":"file_search_call","id":"fs_1","queries":[],"status":"completed"},
+                {"type":"web_search_call","id":"ws_bad","status":"no_such_status",
+                 "action":{"type":"search","query":"q","sources":[]}}
+            ]
+        });
+        let mut seen = std::collections::HashSet::new();
+        let siblings = upgrade_legacy_reasoning(&raw, &mut seen);
+        let kinds: Vec<&str> = siblings
+            .iter()
+            .map(|s| match s {
+                ConversationItem::BackendToolCall(b) => match b.kind {
+                    BackendToolKind::XSearch(_) => "x_search",
+                    BackendToolKind::CodeInterpreter(_) => "code_interpreter",
+                    BackendToolKind::WebSearch(_) => "web_search",
+                },
+                _ => "other",
+            })
+            .collect();
+        assert_eq!(kinds, vec!["x_search", "code_interpreter"]);
+        assert!(seen.contains("ctc_1") && seen.contains("ci_1"));
     }
 }

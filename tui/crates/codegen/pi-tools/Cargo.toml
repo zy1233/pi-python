@@ -13,7 +13,6 @@ derive_more = { workspace = true, features = ["from", "try_into"] }
 dunce = { workspace = true }
 fs2 = { workspace = true }
 educe = { workspace = true, features = ["Debug"] }
-async-openai = { workspace = true }
 pi-tty-utils = { workspace = true }
 pi-auth = { workspace = true }
 pi-config = { path = "../pi-config" }
