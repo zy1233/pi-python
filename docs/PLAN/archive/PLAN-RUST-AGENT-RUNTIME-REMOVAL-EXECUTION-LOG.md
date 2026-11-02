@@ -12,7 +12,7 @@
 
 ## 目录
 
-- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29r30r31)
+- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29r30r31r32)
   - [10.1 范围、方法与规模](#101-范围方法与规模)
   - [10.2 `/model` 恢复（ADR3 r3）](#102-model-恢复adr3-r3)
   - [10.3 验证（r3 的实测）](#103-验证r3-的实测)
@@ -47,6 +47,7 @@
   - [10.32 r29 追加：D.9，测试用临时 HOME](#1032-r29-追加d9测试用临时-home)
   - [10.33 r30 追加：发行构建与 v0.8.0 二进制的 PTY 检查](#1033-r30-追加发行构建与-v080-二进制的-pty-检查)
   - [10.34 r31 追加：`smoke.py --sandbox workspace` 的标签检查](#1034-r31-追加smokepy---sandbox-workspace-的标签检查)
+  - [10.35 r32 追加：删除 `pi-update`、npm 目录与安装脚本（用户选 2B）](#1035-r32-追加删除-pi-updatenpm-目录与安装脚本用户选-2b)
 - [附录 A（摘录）：A.4](#附录-a摘录a4)
   - [A.4 r5 执行结果（对照 r5 时初稿里的「默认决策」；r9 的更新见 A.1）](#a4-r5-执行结果对照-r5-时初稿里的默认决策r9-的更新见-a1)
 - [附录 B：复现方法](#附录-b复现方法)
@@ -73,7 +74,7 @@
   - [F.10 修订记录摘要里的长条目](#f10-修订记录摘要里的长条目)
 - [修订记录](#修订记录)
 
-## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31）
+## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32）
 
 r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）；r14 合入这两个 PR，并做决策 17：会话文件在第一条用户消息时才写（§10.17）；r15 做决策 10 的存储层一项：删 `pi-shell` 里的旧存储层（§10.18）；r16 合入 #25 与 #26，并删 `pi-shell` 里剩下的死代码（§10.19）；r17 检查测试之间的竞争，只改测试与工具（§10.20）；r18 改用 `cargo nextest`，改 `protoc` 的路径与 `release.yml` 的令牌（§10.21）；r19 用 `gh stack` 合入 #27–#31，并设 V0.6 的发布里程碑（§10.22）；r20 定 MCP 的方向（可选扩展包），修空白对话，补发布内容，并合入 #33–#36（§10.23）；r21 做 V0.6 的版本号与发布说明（条件 5），合入 #38 与 #39，并做条件 1–4（§10.24）；r22 打 tag `v0.6.0`、发布、做发布后的核对（§10.25）；r23 把三个 action 升到 Node 24 的版本，处理扩展 API 的审计批 9，并把决策 11、13 记成不做（§10.26）；r24 在内核 6.12 的云 VM 上测了沙箱的 Landlock 层（§10.27）；r25 把 `pi-sandbox` 接进 `TUI CI`（§10.28）；r26 补记 v0.7.0 之前的合入（#45 至 #48、web 的 #50 至 #54、版本号 #55）与 v0.7.0 的发布（§10.29）；r27 量了旗标与设置页并修（#57、#60），去掉选择器的 30 天截止（#61），清了一批死代码（#62、#63；§10.30）；r28 用一次 `gh stack` 把这五个 PR 与另外五个（#56、#58、#59、#64、#65）合入 `main`（§10.31）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
@@ -2327,6 +2328,39 @@ Runner 有 Landlock（ABI 8），没有 `bwrap`；装上 `bwrap` 也不能用，
 
 **没验证的。** WSL2 5.x 上的真机运行；macOS 与 Windows；CI（这个脚本不在 CI 里）。
 
+### 10.35 r32 追加：删除 `pi-update`、npm 目录与安装脚本（用户选 2B）
+
+这一节记 2026-11-02 的两个 PR。用户在「剥离计划卡住的三件事」里选了第 2 项的选项 B（「2B」）：放弃自动更新；`zypi` 的 Windows 与 macOS x86_64 预编译二进制保留，写成「计划，没有日期」。PR 1（代码）是 [#78](https://github.com/zy1233/pi-python/pull/78)，分支 `refactor/drop-pi-update-npm-install-1b89`。PR 2（文档，就是这一节、计划、README 与站点的「Next」）在 #78 之后合入。没有动任何 workflow 文件。
+
+**PR 1 做了什么。**
+- 删了 crate `pi-update`（11,603 行，含 11 个测试文件与 `test_install_sh.rs`）、`pi-pager/npm/`（7 个包）、`pi-pager/scripts/`（四个 `install*` 脚本）。`tui/` 下共 −15,262 行 / +34 行（45 个文件是删除）；`.rs` 行数 994,411 → 982,818。
+- 没有一并删的东西：`pi-update` 里还有「必需版本范围」的检查（组织策略 `required_minimum`、`required_maximum`：当前版本在范围外就退出，退出码 1）。它不是更新器的一部分，所以搬进了 `pi-pager-bin/src/version_policy.rs`，连同两个测试；`check_install_target`（只给安装器用）删了。
+- 只有更新器能走到的 pager 代码也删了：`pi_pager::app::run` 的 `bg_update_rx`（`main.rs` 自 Phase 4 起一直传 `None`）、事件循环里的那一支、`pending_update_version`、欢迎页的「update available」提示与 `ctrl+u`（`Action::QuitForUpdate`）、最小模式的「Update available」提示、`RunResult.quit_for_update`、`Ok(true)` 与「Update is disabled」。`run` 现在返回 `Result<()>`。
+- 基线文件：`Cargo.lock`（`pi-update`、`indicatif`、`console`、`unit-prefix` 离开）；`THIRD-PARTY-NOTICES`（`tui_notices.py update --write`，4 条去掉，980 / 980）；`docs/baselines/tui-support.md`（`tui_callgraph.py keep`）；`scripts/tui_baseline.toml`（`[check] packages` 去掉 `pi-update`；依赖图上限 970 → 965，`leader` 239 → 214，`x.ai` 282 → 253；测试的参考数与下限：`pi-pager` 5,657 → 5,654，`pi-pager-bin` 31 → 33）；`scripts/tui_callgraph.py`（`DEFAULT_LIVE` 去掉 `pi-update`）；`docs/baselines/tui.md` 的数；`CHANGELOG.md` 的 `[Unreleased]`（Removed）。
+
+**用户看得见的变化。**
+- `zypi --version` 与 `zypi version --json` 的输出不变。渠道标签原来来自只有更新器会写的缓存，所以一直是空的；JSON 里的渠道仍是 `unknown`。
+- 隐藏旗标 `--no-auto-update` 仍被接受；`[cli].auto_update` 与设置页的 `auto_update` 一行**没有动**（它们本来就没有效果）。删它们会拒绝一个旗标并改设置页，这要用户来选，所以留给用户（见下）。
+- 版本策略的两条消息不再带「(for example, run `grok update`)」与「(for example, run `grok update --version X`)」：`zypi` 没有这个命令。
+- 欢迎页的更新提示、`ctrl+u` 与最小模式的更新提示不会再出现；原来也出现不了。
+- 没有别的旗标、子命令或消息变化。
+
+**数字与测试**（Linux 云 VM，4 vCPU，Rust 1.94.0；一次本地运行）：
+- `tui_baseline.py check`：全部门禁过。依赖图 970 → 965；`leader` 214 / 214，`x.ai` 253 / 253；消费者构建 0 条告警；`--workspace --tests` 0 个错误。
+- `tui_baseline.py test`（nextest，临时 `HOME`）：**8,557 通过 / 0 失败 / 25 跳过**（改前 8,558）。`pi-pager` −3（欢迎页一个、最小模式提示两个），`pi-pager-bin` +2（版本策略）。其余九个 suite 的数没变。
+- `pytest scripts/tests/test_tui_baseline.py scripts/tests/test_tui_callgraph.py`：108 通过。`ruff check .`、`ruff format --check .` 干净。debug 构建的 `zypi`：`--version`、`version --json`、`--no-auto-update --version` 的输出如上。
+- CI（#78，`TUI CI` [run 41435472850](https://github.com/zy1233/pi-python/actions/runs/41435472850)）：`Gates + cargo check` 过（依赖图 965 / 965，`leader` 214 / 214，`x.ai` 253 / 253）；`cargo nextest` 过（18 m 33 s，8,557 通过 / 0 失败 / 25 跳过，与本地相同）；`CI` 的 `Ruff` 与三个 Python 版本的 `pytest` 过。
+
+**没动、留给用户或别的轮的。**
+- `auto_update` 设置与 `--no-auto-update`（见上）：要不要删，用户还没选。
+- `tui-support.md` 现在报 `pi-shell` 的 `managed_config`（763 行）没有活代码引用：D.8 的新候选，这一轮没有碰。
+- `scripts/trim_pager_main.py`（Phase 4 的一次性脚本）里还写着 `pi_update`，没有改。
+- 0.9 与 1.R3 里 Windows 一侧到底要测还是算范围外：用户选的是「Windows 的二进制计划，没有日期」，没有说这两项；计划里这两项没有改。
+
+**macOS x86_64 的 release job（只有提案）。** 用户让写一份提案，不开 PR、不碰 workflow。提案在项目库，不在仓库里：独立的 workflow（像 `agent-binaries.yml`，不改 `release.yml`）；Intel 的 runner 标签是 `macos-15-intel`（docs.github.com 的「GitHub-hosted runners reference」，4 CPU、14 GB；GitHub 说它只到 2027 年 8 月）；资产名 `zypi-macos-x86_64`；触发是 `Release` 的 `workflow_run`（成功、tag 推送）加手动 `workflow_dispatch`；只有上传的 job 有 `contents: write`；失败只让发布件少一个文件，不影响 `Release`。`zypi` 从没在 `x86_64-apple-darwin` 上构建过，所以第一次试跑才知道能不能构建。用户说「做」才做。
+
+**没验证的。** macOS 与 Windows 上的 `zypi`；TUI CI 之外的平台；`x86_64-apple-darwin` 的构建。
+
 ## 附录 A（摘录）：A.4
 
 附录 A 的 A.1–A.3（能力矩阵、ACP 版本配对、逐方法）是活的参考，留在[计划](../PLAN-RUST-AGENT-RUNTIME-REMOVAL.md)里。A.4 记 r5 的执行结果，搬到这里。
@@ -3351,3 +3385,4 @@ r12 续 8（2026-10-13）：PR [#18](https://github.com/zy1233/pi-python/pull/18
 - r29：D.9（2026-11-01；PR [#75](https://github.com/zy1233/pi-python/pull/75)，分支 `ci/tui-baseline-isolate-home-3df6`）。用户的电脑跑不动整套 Rust 测试，所以在云上的 Linux VM 里做；用户先要求讨论，同意后只做 D.9。`tui_baseline.py test` 用临时 `HOME`；整套测试改前改后都是 8,558 通过 / 0 失败 / 25 跳过。见 [§10.32](#1032-r29-追加d9测试用临时-home)。
 - r30：发行构建与 v0.8.0 二进制的 PTY 检查（2026-11-01；分支 `docs/tui-release-pty-check-c4a1`，只改文档）。在云上的 Linux VM 里按 `Release` 的办法构建 `zypi`（`release-dist`，`main` 的 `2b62e68`，冷构建 11 m 58 s，380,398,296 B），对它与 v0.8.0 的 `zypi-linux-x86_64` 各跑 `scripts/tui_pty/` 里不要密钥的脚本：除 `smoke.py --sandbox workspace`（23/24，待办的发现，没有改脚本）外全部通过，两个二进制的数相同；两个二进制里 `tui/` 的源码相同。见 [§10.33](#1033-r30-追加发行构建与-v080-二进制的-pty-检查)。
 - r31：`smoke.py --sandbox workspace` 的标签检查（2026-11-01；PR [#77](https://github.com/zy1233/pi-python/pull/77)，分支 `fix/tui-pty-smoke-sandbox-label`）。Landlock 内核上的检查从欢迎页挪到第一轮对话之后；两个二进制上 24/24；没有 Landlock 的那一支没改，用 seccomp 模拟，新旧脚本都是 26/26。欢迎页该显示什么没有决定。见 [§10.34](#1034-r31-追加smokepy---sandbox-workspace-的标签检查)。
+- r32：用户选「2B」（2026-11-02；PR [#78](https://github.com/zy1233/pi-python/pull/78)，分支 `refactor/drop-pi-update-npm-install-1b89`；文档在另一个 PR）。删 `pi-update`、`pi-pager/npm/`、四个安装脚本和只有更新器用的 pager 代码；版本策略搬进 `pi-pager-bin`。门禁与整套测试过（8,557 通过 / 0 失败）；依赖图 970 → 965。README 与站点的「Next」改成「自动更新不做；macOS x86_64 与 Windows 的二进制计划，没有日期」。macOS x86_64 的 release job 只写了提案。见 [§10.35](#1035-r32-追加删除-pi-updatenpm-目录与安装脚本用户选-2b)。

@@ -280,7 +280,7 @@ PI_USE_MOCK=1 python -m pi_agent_cli -p "hello" --cwd .`,
       workflows: 'Workflows',
       mcp: 'MCP servers that the editor passes',
     },
-    next: 'Next: prebuilt `zypi` binaries for macOS x86_64 and Windows, and automatic updates.',
+    next: 'Next: prebuilt `zypi` binaries for macOS x86_64 and Windows (planned, no date). Automatic updates are dropped.',
   },
   evidence: {
     eyebrow: 'Evidence',
