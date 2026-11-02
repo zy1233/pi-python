@@ -1,5 +1,6 @@
 mod channel;
 mod common;
+pub mod extensions;
 mod gateway;
 mod line_reader;
 mod message;

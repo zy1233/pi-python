@@ -8,7 +8,7 @@
 use agent_client_protocol as acp;
 use pi_acp_lib::AcpClientMessage;
 
-use pi_shell::extensions::notification::{
+use pi_acp_lib::extensions::notification::{
     SessionNotification, SessionUpdate as PiSessionUpdate, is_reauthable_failure,
 };
 use pi_shell::tools::todo::todo_item_from_plan_entry;

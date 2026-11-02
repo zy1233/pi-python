@@ -34,7 +34,7 @@ impl WireErrorType {
             Some("legacy_auth") => Self::LegacyAuth,
             Some("context_length") => Self::ContextLength,
             Some("encrypted_content_mismatch") => Self::EncryptedContentMismatch,
-            Some(s) if s == pi_shell::extensions::notification::DISK_FULL_ERROR_TYPE => {
+            Some(s) if s == pi_acp_lib::extensions::notification::DISK_FULL_ERROR_TYPE => {
                 Self::DiskFull
             }
             Some("api") => Self::Api,

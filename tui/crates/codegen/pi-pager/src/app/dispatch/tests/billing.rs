@@ -693,7 +693,7 @@ fn free_usage_upsell_shows_three_options_with_exact_labels() {
 #[test]
 fn free_usage_failure_opens_paywall_modal() {
     use crate::app::acp_handler::apply_session_event_for_test;
-    use pi_shell::extensions::notification::{RetryState, SessionUpdate};
+    use pi_acp_lib::extensions::notification::{RetryState, SessionUpdate};
 
     let mut app = test_app_with_agent();
     let id = AgentId(0);

@@ -302,7 +302,7 @@
 
     #[test]
     fn apply_retry_state_disk_full_pushes_session_event() {
-        use pi_shell::extensions::notification::{
+        use pi_acp_lib::extensions::notification::{
             DISK_FULL_ERROR_TYPE, DISK_FULL_USER_MESSAGE,
         };
         let mut session = make_session(Some("s1"));
@@ -1043,7 +1043,7 @@
 
     #[test]
     fn retry_failed_encrypted_content_sets_model_incompatible() {
-        use pi_shell::extensions::notification::RetryState;
+        use pi_acp_lib::extensions::notification::RetryState;
         let mut session = make_session(Some("s1"));
         let mut scrollback = ScrollbackState::new();
 
@@ -1063,7 +1063,7 @@
 
     #[test]
     fn retry_failed_other_type_does_not_set_model_incompatible() {
-        use pi_shell::extensions::notification::RetryState;
+        use pi_acp_lib::extensions::notification::RetryState;
         let mut session = make_session(Some("s1"));
         let mut scrollback = ScrollbackState::new();
 
@@ -1091,7 +1091,7 @@
             update: PiSessionUpdate::SessionSummaryGenerated {
                 session_summary: String::new(),
             },
-            meta: Some(serde_json::json!({ pi_shell::extensions::notification::TITLE_IS_MANUAL_META_KEY: false })),
+            meta: Some(serde_json::json!({ pi_acp_lib::extensions::notification::TITLE_IS_MANUAL_META_KEY: false })),
         };
         let raw = serde_json::value::to_raw_value(&n).unwrap();
         let notif = acp::ExtNotification::new("pi/session_notification", std::sync::Arc::from(raw));
@@ -1118,7 +1118,7 @@
             update: PiSessionUpdate::SessionSummaryGenerated {
                 session_summary: String::new(),
             },
-            meta: Some(serde_json::json!({ pi_shell::extensions::notification::TITLE_IS_MANUAL_META_KEY: false })),
+            meta: Some(serde_json::json!({ pi_acp_lib::extensions::notification::TITLE_IS_MANUAL_META_KEY: false })),
         };
         let raw = serde_json::value::to_raw_value(&n).unwrap();
         let notif = acp::ExtNotification::new("pi/session_notification", std::sync::Arc::from(raw));

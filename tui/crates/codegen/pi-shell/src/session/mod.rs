@@ -1,6 +1,5 @@
 pub(crate) mod acp_types;
 pub(crate) mod handle;
-pub(crate) mod pending_interaction;
 pub use self::acp_types::*;
 pub use self::handle::*;
 pub use self::result::{Empty, ExtMethodResult};
@@ -150,8 +149,6 @@ mod tests {
 }
 /// Share session request/response types
 pub(crate) mod share {}
-pub(crate) mod feedback;
-pub(crate) mod image_normalize;
 pub use pi_shared::session::info;
 pub(crate) mod result;
 pub mod title;

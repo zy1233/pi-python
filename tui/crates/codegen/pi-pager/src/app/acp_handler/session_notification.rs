@@ -252,7 +252,7 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
         }
         PiSessionUpdate::SessionSummaryGenerated { session_summary } => {
             let title_is_manual = session_notif.meta.as_ref().and_then(|v| {
-                v.get(pi_shell::extensions::notification::TITLE_IS_MANUAL_META_KEY)
+                v.get(pi_acp_lib::extensions::notification::TITLE_IS_MANUAL_META_KEY)
                     .and_then(|v| v.as_bool())
             });
             match title_is_manual {
@@ -566,7 +566,7 @@ pub(super) fn scrollback_has_recent_compaction_failed(
 /// warning (and is re-materialized on session replay).
 pub(super) fn apply_image_compressed(
     agent: &mut AgentView,
-    images: &[pi_shell::extensions::notification::ImageCompressedEntry],
+    images: &[pi_acp_lib::extensions::notification::ImageCompressedEntry],
     message: &str,
 ) -> bool {
     if images.is_empty() {
@@ -580,14 +580,14 @@ pub(super) fn apply_image_compressed(
     false
 }
 pub(super) fn apply_retry_state(
-    retry: &pi_shell::extensions::notification::RetryState,
+    retry: &pi_acp_lib::extensions::notification::RetryState,
     session: &mut AgentSession,
     scrollback: &mut crate::scrollback::state::ScrollbackState,
     is_api_key_auth: bool,
 ) {
     let mut is_credit_limit = false;
     let mut is_reauth = false;
-    use pi_shell::extensions::notification::RetryState;
+    use pi_acp_lib::extensions::notification::RetryState;
     match retry {
         RetryState::Retrying {
             attempt,

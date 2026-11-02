@@ -129,8 +129,10 @@ targets = ["--lib", "--test", "sandbox_requirements_pin", "--test", "test_config
 # `session::events`, 1 of `auth::flow` and 1 of `upload::turn`. None was added: 838 - 54 = 784 on
 # Linux (one local run; 8,436 over the ten suites, the other nine unchanged). The floor keeps the
 # same distance as before (18).
-reference_passed = 784
-min_passed = 766
+# Then plan B.3 moved `extensions::notification` and `extensions::prompt_meta` (42 tests) to
+# `pi-acp-lib`: 784 - 42 = 742 (one local run on Linux; the floor keeps the distance of 18).
+reference_passed = 742
+min_passed = 724
 
 [[test.suite]]
 package = "pi-pager"
@@ -217,12 +219,14 @@ min_passed = 33
 
 [[test.suite]]
 package = "pi-acp-lib"
-targets = ["--lib"]
+targets = ["--lib", "--test", "ext_wire_golden"]
 # The x.ai drop test hangs forever: acp::ExtRequest serialises `method` away, so the drop logic
 # never fires and the queued request is never answered (docs/PLAN/... section 10.4).
 skip = ["vendor_x_ai_ext_is_dropped_without_sending"]
-reference_passed = 21
-min_passed = 21
+# 21 + 42 tests that came with the extension types in plan B.3 + 1 golden decode test
+# (`ext_wire_golden`): 64 (one local run on Linux).
+reference_passed = 64
+min_passed = 64
 
 [[test.suite]]
 package = "pi-http"

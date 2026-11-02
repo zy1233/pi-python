@@ -25,7 +25,7 @@ fn e2e_compact_auth_failure_holds_prompt_and_resubmits_after_login() {
     use crate::app::agent::{AgentState, InFlightPrompt};
     use crate::scrollback::EntryId;
     use crate::scrollback::block::RenderBlock;
-    use pi_shell::extensions::notification::{RetryState, SessionUpdate as PiSessionUpdate};
+    use pi_acp_lib::extensions::notification::{RetryState, SessionUpdate as PiSessionUpdate};
 
     let mut app = test_app_with_agent();
     let id = AgentId(0);
