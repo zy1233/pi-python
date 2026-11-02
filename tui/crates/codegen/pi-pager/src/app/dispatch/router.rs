@@ -34,7 +34,7 @@ use super::session::worktree_mode::apply_persist_worktree_mode;
 use super::settings::setters::{
     clear_default_model, clear_fork_secondary_model, preview_auto_dark_theme,
     preview_auto_light_theme, preview_theme, set_ask_user_question_timeout_enabled,
-    set_auto_dark_theme, set_auto_light_theme, set_auto_update, set_collapsed_edit_blocks,
+    set_auto_dark_theme, set_auto_light_theme, set_collapsed_edit_blocks,
     set_combine_queued_prompts, set_compact_mode, set_contextual_hint_image_input,
     set_contextual_hint_plan_mode, set_contextual_hint_small_screen, set_contextual_hint_ssh_wrap,
     set_contextual_hint_undo, set_contextual_hint_word_select, set_default_model,
@@ -414,7 +414,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::ClearForkSecondaryModel => clear_fork_secondary_model(app),
         Action::SetMaxThoughtsWidth(v) => set_max_thoughts_width(app, v),
         Action::SetShowTips(v) => set_show_tips(app, v),
-        Action::SetAutoUpdate(v) => set_auto_update(app, v),
         Action::SetDisplayRefreshAutoCadence(v) => set_display_refresh_auto_cadence(app, v),
         Action::PreviewTheme(v) => preview_theme(app, v),
         Action::PreviewAutoDarkTheme(v) => preview_auto_dark_theme(app, v),

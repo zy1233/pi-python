@@ -1205,9 +1205,6 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
         "show_tips" => {
             let _ = dispatch(Action::SetShowTips(false), app);
         }
-        "auto_update" => {
-            let _ = dispatch(Action::SetAutoUpdate(false), app);
-        }
         "vim_mode" => {
             let _ = dispatch(Action::SetVimMode(true), app);
         }

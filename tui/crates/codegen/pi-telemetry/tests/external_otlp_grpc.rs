@@ -61,7 +61,6 @@ fn external_stream_grpc_end_to_end() {
         memory_enabled: false,
         memory_retrieval_mode: pi_telemetry::events::MemoryRetrievalMode::Disabled,
         is_git_repo: true,
-        auto_update: None,
     });
     pi_telemetry::log_event(pi_telemetry::events::PromptSubmitted {
         prompt_length: CANARY_PROMPT.len(),

@@ -727,7 +727,7 @@ fn render_setting_row_shows_full_label_when_one_line_fits() {
 /// `multiline_mode`, the Agent entry `permission_mode` (and `plan_mode`
 /// once the agent honours Plan; the default snapshot hides it), the
 /// Models entry `default_model`, and the Advanced entries
-/// `show_tips` and `auto_update`. `default_reasoning_effort` and
+/// `show_tips`. `default_reasoning_effort` and
 /// `auto_compact_threshold_percent` are not exposed in the modal. The default snapshot hides none
 /// of the settings that the Python agent does not back, so this is the whole catalog; the page of
 /// the shipped pager is pinned by `the_page_does_not_offer_the_settings_the_agent_does_not_back`.
@@ -758,7 +758,7 @@ fn rows_contain_categories_and_settings_through_pr_14() {
             // The Session category has no registered settings, so its
             // header is not emitted.
             // Advanced category (first entries:
-            // `show_tips`, `auto_update`).
+            // `show_tips`).
             &SettingCategory::Advanced,
         ]
     );
@@ -856,7 +856,6 @@ fn rows_contain_categories_and_settings_through_pr_14() {
             // (`contextual_hints.{undo,plan_mode,image_input}`) are hidden
             // from the top-level list and reached via the sub-sheet.
             "contextual_hints",
-            "auto_update",
             // SHELL-owned hunk_tracker_mode (Advanced; `off` disables it).
             "hunk_tracker_mode",
         ]

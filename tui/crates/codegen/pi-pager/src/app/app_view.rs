@@ -861,8 +861,6 @@ pub struct AppView {
     pub privacy_banner_acked: Option<String>,
     /// Persisted `[cli].show_tips` mirror. `None` = no override (default `true`).
     pub show_tips: Option<bool>,
-    /// Persisted `[cli].auto_update` mirror. `None` = no override (default `true`).
-    pub auto_update: Option<bool>,
     /// Persisted `[toolset.ask_user_question].timeout_enabled` mirror, seeded
     /// from the effective TOML merge like `show_tips`. `None` = unset in TOML
     /// (default `true`); toggles write the user layer.
@@ -1254,7 +1252,6 @@ impl AppView {
             privacy_banner_reshow_days: None,
             privacy_banner_acked: None,
             show_tips: None,
-            auto_update: None,
             ask_user_question_timeout_enabled: None,
             zdr_access_enabled: false,
             usage_billing_redirect_url: None,

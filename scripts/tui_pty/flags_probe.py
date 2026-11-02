@@ -168,7 +168,6 @@ def cases() -> list[Case]:
         Case("--compaction-detail minimal", ("--compaction-detail", "minimal")),
         Case("--no-wait-for-background", ("--no-wait-for-background",)),
         Case("--background-wait-timeout 5", ("--background-wait-timeout", "5")),
-        Case("--no-auto-update", ("--no-auto-update",)),
         Case("--log-sampling", ("--log-sampling",)),
     ]
 
