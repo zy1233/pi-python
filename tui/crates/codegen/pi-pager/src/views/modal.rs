@@ -2,14 +2,13 @@
 //!
 //! [`ActiveModal`] wraps concrete modal instances for storage on
 //! `AgentView`. Picker-based variants (`CommandPalette`, `ArgPicker`,
-//! `SessionPicker`, `DocPicker`, `DocViewer`) use the shared
+//! `SessionPicker`) use the shared
 //! [`ModalWindow`](super::modal_window) component for chrome and
 //! [`render_picker_content`](super::picker::render_picker_content) for
 //! entry rendering. `EditConfirm` is a bar-style overlay (not a popup).
 //!
 //! `ModalConfirmation<R>` is a small dialog that blocks all input until
 //! the user presses one of the listed keys.
-use crate::docs::{DocEntry, default_howto_entries};
 use crate::theme::Theme;
 use crate::views::modal_window::ModalWindowState;
 use ratatui::buffer::Buffer;
@@ -126,19 +125,6 @@ impl ModalConfirmation<ResetSettingsResult> {
         }
     }
 }
-/// Returns a ready-to-open DocPicker modal for the how-to guides list.
-///
-/// `previous_palette` is the saved command-palette state; when provided,
-/// pressing Esc in the doc picker restores that palette instead of
-/// closing the modal outright.
-pub fn howto_list_modal(previous_palette: Option<PaletteSnapshot>) -> ActiveModal {
-    ActiveModal::DocPicker {
-        entries: default_howto_entries(),
-        state: crate::views::picker::PickerState::default(),
-        previous_palette,
-        window: ModalWindowState::new(),
-    }
-}
 /// The currently active modal dialog, if any.
 ///
 /// Each variant wraps a `ModalConfirmation<R>` with its concrete result
@@ -191,34 +177,6 @@ pub enum ActiveModal {
         /// Session armed for delete via `d` (see
         /// [`crate::views::session_picker::PendingDelete`]).
         pending_delete: Option<crate::views::session_picker::PendingDelete>,
-    },
-    /// How-to documentation list modal (wider picker style).
-    DocPicker {
-        entries: Vec<DocEntry>,
-        state: crate::views::picker::PickerState,
-        /// Previous command palette state (if opened from palette). Restored on Esc.
-        previous_palette: Option<PaletteSnapshot>,
-        /// Shared modal window chrome state.
-        window: ModalWindowState,
-    },
-    /// Documentation panel showing full content of a selected how-to guide.
-    DocViewer {
-        title: String,
-        content: String,
-        /// Vertical scroll offset in lines.
-        scroll: u16,
-        /// Shared modal window chrome state.
-        window: ModalWindowState,
-        /// Cached pre-rendered markdown lines + the width they were
-        /// rendered at. Invalidated when the content area width changes
-        /// (e.g. terminal resize) so lines are re-parsed at the new width.
-        cached_lines: Option<(u16, Vec<ratatui::text::Line<'static>>)>,
-        /// Palette snapshot shuttled from DocPicker, passed back when returning
-        /// to the doc list on Esc so the DocPicker can still restore the palette.
-        previous_palette: Option<PaletteSnapshot>,
-        /// When true, Esc closes the modal directly instead of returning
-        /// to the DocPicker list (used when a doc is opened directly, e.g. `/docs <name>`).
-        standalone: bool,
     },
     /// All-shortcuts cheatsheet for the current view/state.
     /// Rendered via the unified picker (same look as CommandPalette).
@@ -461,8 +419,6 @@ impl ActiveModal {
             ActiveModal::CommandPalette { .. }
             | ActiveModal::ArgPicker { .. }
             | ActiveModal::SessionPicker { .. }
-            | ActiveModal::DocPicker { .. }
-            | ActiveModal::DocViewer { .. }
             | ActiveModal::ShortcutsHelp { .. }
             | ActiveModal::Settings { .. } => vec![],
         }
@@ -488,8 +444,6 @@ impl ActiveModal {
                 "theme" | "t" => "Pick theme",
                 _ => "Pick option",
             },
-            ActiveModal::DocPicker { .. } => "How-to Guides",
-            ActiveModal::DocViewer { title, .. } => title.as_str(),
             ActiveModal::ShortcutsHelp { .. } => "Keyboard Shortcuts",
             ActiveModal::Settings { .. } => crate::views::settings_modal::MODAL_TITLE,
             ActiveModal::ResetSettingsConfirm { .. } => "Reset setting?",
@@ -666,314 +620,6 @@ pub fn render_modal_overlay(
     }
     ModalRenderResult { buttons }
 }
-/// Apply scroll-key dispatch for a DocViewer modal. Returns `true` if the key
-/// was handled (caller should return `InputOutcome::Changed`).
-pub fn apply_doc_scroll(code: crossterm::event::KeyCode, scroll: &mut u16) -> bool {
-    use crossterm::event::KeyCode;
-    match code {
-        KeyCode::Down | KeyCode::Char('j') => {
-            *scroll = scroll.saturating_add(3);
-            true
-        }
-        KeyCode::Up | KeyCode::Char('k') => {
-            *scroll = scroll.saturating_sub(3);
-            true
-        }
-        KeyCode::PageDown => {
-            *scroll = scroll.saturating_add(20);
-            true
-        }
-        KeyCode::PageUp => {
-            *scroll = scroll.saturating_sub(20);
-            true
-        }
-        KeyCode::Home => {
-            *scroll = 0;
-            true
-        }
-        KeyCode::End => {
-            *scroll = u16::MAX;
-            true
-        }
-        _ => false,
-    }
-}
-/// Apply a signed line delta to a DocViewer scroll offset (positive = down).
-pub fn apply_doc_scroll_delta(scroll: &mut u16, lines: i32) {
-    if lines == 0 {
-        return;
-    }
-    if lines > 0 {
-        *scroll = scroll.saturating_add(lines as u16);
-    } else {
-        *scroll = scroll.saturating_sub(lines.unsigned_abs() as u16);
-    }
-}
-/// Apply mouse-wheel events to a DocViewer scroll offset. Returns `true` if
-/// the event was a scroll and the offset was updated.
-pub fn apply_doc_mouse_scroll(kind: crossterm::event::MouseEventKind, scroll: &mut u16) -> bool {
-    use crossterm::event::MouseEventKind;
-    match kind {
-        MouseEventKind::ScrollDown => {
-            apply_doc_scroll_delta(scroll, 3);
-            true
-        }
-        MouseEventKind::ScrollUp => {
-            apply_doc_scroll_delta(scroll, -3);
-            true
-        }
-        _ => false,
-    }
-}
-pub fn render_doc_picker_overlay(
-    buf: &mut ratatui::buffer::Buffer,
-    area: Rect,
-    window: &mut super::modal_window::ModalWindowState,
-    entries: &[DocEntry],
-    state: &mut super::picker::PickerState,
-    compact: bool,
-    theme: &Theme,
-) {
-    use super::modal_window::{self as mw, ModalSizing, ModalWindowConfig, Shortcut};
-    use super::picker::{self, PickerEntry, PickerRow};
-    let filtered: Vec<_> = if state.query().is_empty() {
-        entries.iter().enumerate().collect()
-    } else {
-        let q = state.query().to_lowercase();
-        entries
-            .iter()
-            .enumerate()
-            .filter(|(_, e)| {
-                e.title.to_lowercase().contains(&q) || e.description.to_lowercase().contains(&q)
-            })
-            .collect()
-    };
-    let non_sel = vec![false; filtered.len()];
-    let mut picker_shortcuts: Vec<Shortcut<'_>> = vec![
-        Shortcut {
-            label: "\u{2191}/\u{2193} nav",
-            clickable: false,
-            id: 0,
-        },
-        Shortcut {
-            label: "Enter select",
-            clickable: false,
-            id: 0,
-        },
-        Shortcut {
-            label: "Esc close",
-            clickable: false,
-            id: 0,
-        },
-    ];
-    mw::push_vim_nav_search_hint(&mut picker_shortcuts, state.search_active);
-    let sizing = ModalSizing {
-        width_pct: 0.70,
-        max_width: 120,
-        min_width: 44,
-        v_margin: 4,
-        h_pad: 2,
-        v_pad: 1,
-        footer_lines: 2,
-    }
-    .with_compact(compact);
-    let modal_config = ModalWindowConfig {
-        title: "How-to Guides",
-        tabs: None,
-        shortcuts: &picker_shortcuts,
-        sizing,
-        fold_info: None,
-    };
-    let Some(mca) = mw::render_modal_window(buf, area, window, &modal_config, theme) else {
-        return;
-    };
-    let picker_area = mca.content;
-    const NARROW_THRESHOLD: u16 = 70;
-    let narrow = picker_area.width < NARROW_THRESHOLD;
-    let desc_slices: Vec<Vec<&str>> = if narrow {
-        filtered
-            .iter()
-            .map(|(_, e)| vec![e.description.as_str()])
-            .collect()
-    } else {
-        Vec::new()
-    };
-    let selected_orig = filtered
-        .get(state.selected)
-        .map(|(o, _)| *o)
-        .unwrap_or(usize::MAX);
-    let picker_entries: Vec<PickerEntry<'_>> = filtered
-        .iter()
-        .enumerate()
-        .map(|(i, (orig_idx, e))| {
-            PickerEntry::Row(PickerRow {
-                label: &e.title,
-                right_label: if narrow { "" } else { &e.description },
-                selected: *orig_idx == selected_orig,
-                expanded: narrow,
-                fields: &[],
-                description_lines: if narrow { &desc_slices[i] } else { &[] },
-                summary_lines: &[],
-                dimmed: false,
-                indent: 0,
-                badge: "",
-                badge_color: None,
-                collapsible: false,
-                underline_last_desc: false,
-            })
-        })
-        .collect();
-    picker::render_picker_in_modal(
-        buf,
-        picker_area,
-        mca.inner_x,
-        mca.inner_width,
-        theme,
-        state,
-        &picker_entries,
-        &non_sel,
-        false,
-    );
-}
-/// Render a DocViewer overlay: modal window chrome + cached markdown content.
-#[allow(clippy::too_many_arguments)]
-pub fn render_doc_viewer_overlay(
-    buf: &mut ratatui::buffer::Buffer,
-    area: Rect,
-    window: &mut super::modal_window::ModalWindowState,
-    title: &str,
-    content: &str,
-    scroll: &mut u16,
-    cached_lines: &mut Option<(u16, Vec<ratatui::text::Line<'static>>)>,
-    compact: bool,
-    theme: &Theme,
-) {
-    let doc_shortcuts = [
-        super::modal_window::Shortcut {
-            label: "\u{2191}/\u{2193} scroll",
-            clickable: false,
-            id: 0,
-        },
-        super::modal_window::Shortcut {
-            label: "Esc back",
-            clickable: false,
-            id: 0,
-        },
-    ];
-    render_doc_viewer_overlay_with_shortcuts(
-        buf,
-        area,
-        window,
-        title,
-        content,
-        scroll,
-        cached_lines,
-        compact,
-        theme,
-        &doc_shortcuts,
-    );
-}
-/// [`render_doc_viewer_overlay`] with caller-supplied footer shortcuts.
-#[allow(clippy::too_many_arguments)]
-pub fn render_doc_viewer_overlay_with_shortcuts(
-    buf: &mut ratatui::buffer::Buffer,
-    area: Rect,
-    window: &mut super::modal_window::ModalWindowState,
-    title: &str,
-    content: &str,
-    scroll: &mut u16,
-    cached_lines: &mut Option<(u16, Vec<ratatui::text::Line<'static>>)>,
-    compact: bool,
-    theme: &Theme,
-    shortcuts: &[super::modal_window::Shortcut<'_>],
-) {
-    use ratatui::widgets::{Paragraph, Widget, Wrap};
-    let modal_config = super::modal_window::ModalWindowConfig {
-        title,
-        tabs: None,
-        shortcuts,
-        sizing: super::modal_window::ModalSizing {
-            width_pct: 0.80,
-            max_width: 120,
-            min_width: 44,
-            v_margin: 4,
-            h_pad: 2,
-            v_pad: 1,
-            footer_lines: 2,
-        }
-        .with_compact(compact),
-        fold_info: None,
-    };
-    if let Some(super::modal_window::ModalContentArea {
-        content: content_area,
-        ..
-    }) = super::modal_window::render_modal_window(buf, area, window, &modal_config, theme)
-    {
-        let w = content_area.width;
-        let needs_reparse = cached_lines
-            .as_ref()
-            .is_none_or(|(cached_w, _)| *cached_w != w);
-        if needs_reparse {
-            let mc = crate::scrollback::blocks::markdown_content::MarkdownContent::new(content);
-            let output = mc.output(w as usize);
-            let lines: Vec<ratatui::text::Line<'static>> =
-                output.lines.into_iter().map(|b| b.content).collect();
-            *cached_lines = Some((w, lines));
-        }
-        let all_lines = &cached_lines.as_ref().unwrap().1;
-        let max_scroll = all_lines.len().saturating_sub(content_area.height as usize);
-        *scroll = (*scroll as usize).min(max_scroll) as u16;
-        let start = *scroll as usize;
-        let visible: Vec<ratatui::text::Line> = all_lines
-            .iter()
-            .skip(start)
-            .take(content_area.height as usize)
-            .cloned()
-            .collect();
-        let para = Paragraph::new(visible).wrap(Wrap { trim: false });
-        para.render(content_area, buf);
-    }
-}
-#[cfg(test)]
-mod doc_viewer_scroll_tests {
-    use super::{apply_doc_mouse_scroll, apply_doc_scroll, apply_doc_scroll_delta};
-    use crossterm::event::{KeyCode, MouseEventKind};
-    #[test]
-    fn apply_doc_scroll_moves_by_key() {
-        let mut scroll = 10u16;
-        assert!(apply_doc_scroll(KeyCode::Down, &mut scroll));
-        assert_eq!(scroll, 13);
-        assert!(apply_doc_scroll(KeyCode::Up, &mut scroll));
-        assert_eq!(scroll, 10);
-        assert!(apply_doc_scroll(KeyCode::Home, &mut scroll));
-        assert_eq!(scroll, 0);
-        assert!(apply_doc_scroll(KeyCode::End, &mut scroll));
-        assert_eq!(scroll, u16::MAX);
-    }
-    #[test]
-    fn apply_doc_scroll_delta_saturates_at_zero() {
-        let mut scroll = 2u16;
-        apply_doc_scroll_delta(&mut scroll, -10);
-        assert_eq!(scroll, 0);
-        apply_doc_scroll_delta(&mut scroll, 4);
-        assert_eq!(scroll, 4);
-    }
-    #[test]
-    fn apply_doc_mouse_scroll_handles_wheel() {
-        let mut scroll = 0u16;
-        assert!(apply_doc_mouse_scroll(
-            MouseEventKind::ScrollDown,
-            &mut scroll
-        ));
-        assert_eq!(scroll, 3);
-        assert!(apply_doc_mouse_scroll(
-            MouseEventKind::ScrollUp,
-            &mut scroll
-        ));
-        assert_eq!(scroll, 0);
-        assert!(!apply_doc_mouse_scroll(MouseEventKind::Moved, &mut scroll));
-    }
-}
 #[cfg(test)]
 mod palette_tests {
     use super::*;
@@ -1048,63 +694,5 @@ mod palette_tests {
                 "palette row {row:?} names no builtin command"
             );
         }
-    }
-    #[test]
-    fn howto_list_modal_opens_on_first_guide() {
-        let modal = howto_list_modal(None);
-        let ActiveModal::DocPicker { state, entries, .. } = modal else {
-            panic!("howto_list_modal should build a DocPicker");
-        };
-        assert!(!state.search_active, "how-to picker must open list-focused");
-        assert_eq!(state.selected, 0);
-        assert_eq!(
-            entries.first().map(|e| e.title.as_str()),
-            Some("Getting Started")
-        );
-    }
-}
-#[cfg(test)]
-mod doc_picker_tests {
-    use super::{ActiveModal, howto_list_modal, render_doc_picker_overlay};
-    use ratatui::buffer::Buffer;
-    use ratatui::layout::Rect;
-    #[test]
-    fn doc_picker_lists_the_guide_pages_and_shows_no_disk_tip() {
-        let area = Rect {
-            x: 0,
-            y: 0,
-            width: 120,
-            height: 40,
-        };
-        let mut modal = howto_list_modal(None);
-        let ActiveModal::DocPicker {
-            entries,
-            state,
-            window,
-            ..
-        } = &mut modal
-        else {
-            panic!("expected DocPicker");
-        };
-        let theme = crate::theme::Theme::current();
-        let mut buf = Buffer::empty(area);
-        render_doc_picker_overlay(&mut buf, area, window, entries, state, false, &theme);
-        let mut all = String::new();
-        for y in 0..area.height {
-            for x in 0..area.width {
-                if let Some(cell) = buf.cell((x, y)) {
-                    all.push_str(cell.symbol());
-                }
-            }
-            all.push('\n');
-        }
-        assert!(
-            all.contains("Getting Started"),
-            "the picker must list the guide pages:\n{all}"
-        );
-        assert!(
-            !all.contains("Tip") && !all.contains("docs/user-guide"),
-            "the pages are not on disk, so the picker must not point at a path:\n{all}"
-        );
     }
 }

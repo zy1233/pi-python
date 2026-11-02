@@ -905,8 +905,6 @@ pub struct AppView {
     /// other screen mode. Driven by `/minimal` and `/fullscreen`. Captures the
     /// session id at action time so a later teardown cannot drop `--resume`.
     pub relaunch: Option<ScreenModeRelaunch>,
-    /// Doc viewer overlay for the welcome screen (`/docs <guide>`).
-    pub welcome_doc_viewer: Option<crate::views::modal::ActiveModal>,
     /// Whether the pager uses fullscreen (alt-screen) or inline mode.
     /// Set from the resolved terminal state at startup; updated by the
     /// in-process `/minimal` ⇄ `/fullscreen` switch (`mode_switch`).
@@ -1267,7 +1265,6 @@ impl AppView {
             startup_warnings: Vec::new(),
             is_api_key_auth: false,
             relaunch: None,
-            welcome_doc_viewer: None,
             screen_mode: ScreenMode::Inline,
             pending_screen_mode_switch: None,
             show_resolved_model: true,
@@ -1711,13 +1708,7 @@ impl AppView {
                     agent.handle_scroll(lines, column, row);
                 }
             }
-            ActiveView::Welcome => {
-                if let Some(crate::views::modal::ActiveModal::DocViewer { scroll, .. }) =
-                    self.welcome_doc_viewer.as_mut()
-                {
-                    crate::views::modal::apply_doc_scroll_delta(scroll, lines);
-                }
-            }
+            ActiveView::Welcome => {}
         }
     }
 }
@@ -1840,7 +1831,6 @@ impl AppView {
                     sp_entries: &mut self.session_picker_entries,
                     sp_loading,
                     sp_state: &mut self.session_picker_state,
-                    welcome_doc_viewer: &mut self.welcome_doc_viewer,
                     session_picker_grouped: self.session_picker_grouped,
                     sp_pending_delete: &mut self.session_picker_pending_delete,
                 },
@@ -2083,60 +2073,11 @@ struct WelcomeInputCtx<'a> {
     /// picker still owns input (Esc must dismiss it, not hit the hidden menu).
     sp_loading: bool,
     sp_state: &'a mut crate::views::picker::PickerState,
-    welcome_doc_viewer: &'a mut Option<crate::views::modal::ActiveModal>,
     session_picker_grouped: bool,
     sp_pending_delete: &'a mut Option<crate::views::session_picker::PendingDelete>,
 }
 /// Welcome view input -- auth-state-aware routing.
 fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutcome {
-    if let Some(modal) = ctx.welcome_doc_viewer {
-        if let Event::Key(key) = ev {
-            if key.kind == crossterm::event::KeyEventKind::Release {
-                return InputOutcome::Unchanged;
-            }
-            use crate::views::modal_window as mw;
-            if let crate::views::modal::ActiveModal::DocViewer { window, scroll, .. } = modal {
-                let chrome_cfg = mw::ModalWindowConfig {
-                    title: "",
-                    tabs: None,
-                    shortcuts: &[],
-                    sizing: mw::ModalSizing::default(),
-                    fold_info: None,
-                };
-                match mw::handle_modal_key(window, key, &chrome_cfg) {
-                    mw::ModalWindowOutcome::CloseRequested => {
-                        *ctx.welcome_doc_viewer = None;
-                        return InputOutcome::Changed;
-                    }
-                    mw::ModalWindowOutcome::Unhandled => {
-                        if crate::views::modal::apply_doc_scroll(key.code, scroll) {
-                            return InputOutcome::Changed;
-                        }
-                        return InputOutcome::Unchanged;
-                    }
-                    _ => return InputOutcome::Changed,
-                }
-            }
-        }
-        if let Event::Mouse(mouse) = ev {
-            use crate::views::modal_window as mw;
-            if let crate::views::modal::ActiveModal::DocViewer { window, scroll, .. } = modal {
-                match mw::handle_modal_mouse(window, mouse.kind, mouse.column, mouse.row) {
-                    mw::ModalWindowOutcome::CloseRequested => {
-                        *ctx.welcome_doc_viewer = None;
-                        return InputOutcome::Changed;
-                    }
-                    mw::ModalWindowOutcome::Unhandled => {
-                        if crate::views::modal::apply_doc_mouse_scroll(mouse.kind, scroll) {
-                            return InputOutcome::Changed;
-                        }
-                    }
-                    _ => return InputOutcome::Changed,
-                }
-            }
-        }
-        return InputOutcome::Unchanged;
-    }
     if matches!(ctx.auth_state, AuthState::Done)
         && ctx.has_access
         && !ctx.is_zdr_blocked
@@ -3058,28 +2999,6 @@ impl AppView {
                         self.welcome_announcement.truncated = result.announcement_truncated;
                         self.welcome_announcement.rect = result.announcement_rect;
                         self.session_picker_state.hit_areas = result.session_picker_hit_areas;
-                        if let Some(crate::views::modal::ActiveModal::DocViewer {
-                            ref title,
-                            ref content,
-                            ref mut scroll,
-                            ref mut window,
-                            ref mut cached_lines,
-                            ..
-                        }) = self.welcome_doc_viewer
-                        {
-                            let theme = crate::theme::Theme::current();
-                            crate::views::modal::render_doc_viewer_overlay(
-                                f.buffer_mut(),
-                                view_area,
-                                window,
-                                title,
-                                content,
-                                scroll,
-                                cached_lines,
-                                compact,
-                                &theme,
-                            );
-                        }
                         if !has_access && !self.access_gate_shown_logged {
                             self.access_gate_shown_logged = true;
                             pi_telemetry::session_ctx::log_event(
@@ -3306,7 +3225,6 @@ impl AppView {
     /// True when any modal that should swallow scroll input is open.
     fn is_scroll_blocking_modal_open(&self) -> bool {
         matches!(self.active_view, ActiveView::Agent(id) if self.agents.get(&id).is_some_and(|a| a.active_modal.is_some()))
-            || self.welcome_doc_viewer.is_some()
     }
     /// Store the resolved per-tip gates and propagate the prompt-relevant tips
     /// (undo + plan nudge) to every agent's prompt. Reused by startup and the

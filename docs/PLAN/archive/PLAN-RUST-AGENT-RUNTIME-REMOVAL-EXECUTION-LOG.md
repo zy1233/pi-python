@@ -12,7 +12,7 @@
 
 ## 目录
 
-- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r34）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29r30r31r32r34)
+- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r34、r35）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29r30r31r32r34r35)
   - [10.1 范围、方法与规模](#101-范围方法与规模)
   - [10.2 `/model` 恢复（ADR3 r3）](#102-model-恢复adr3-r3)
   - [10.3 验证（r3 的实测）](#103-验证r3-的实测)
@@ -49,6 +49,7 @@
   - [10.34 r31 追加：`smoke.py --sandbox workspace` 的标签检查](#1034-r31-追加smokepy---sandbox-workspace-的标签检查)
   - [10.35 r32 追加：删除 `pi-update`、npm 目录与安装脚本（用户选 2B）](#1035-r32-追加删除-pi-updatenpm-目录与安装脚本用户选-2b)
   - [10.36 r34 追加：D.8 余下的死文件，删 `pi-workflow`](#1036-r34-追加d8-余下的死文件删-pi-workflow)
+  - [10.37 r35 追加：D.6，删内嵌指南的查看器；死的 `plugins` 停在级联上](#1037-r35-追加d6删内嵌指南的查看器死的-plugins-停在级联上)
 - [附录 A（摘录）：A.4](#附录-a摘录a4)
   - [A.4 r5 执行结果（对照 r5 时初稿里的「默认决策」；r9 的更新见 A.1）](#a4-r5-执行结果对照-r5-时初稿里的默认决策r9-的更新见-a1)
 - [附录 B：复现方法](#附录-b复现方法)
@@ -75,7 +76,7 @@
   - [F.10 修订记录摘要里的长条目](#f10-修订记录摘要里的长条目)
 - [修订记录](#修订记录)
 
-## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r34）
+## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r34、r35）
 
 r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）；r14 合入这两个 PR，并做决策 17：会话文件在第一条用户消息时才写（§10.17）；r15 做决策 10 的存储层一项：删 `pi-shell` 里的旧存储层（§10.18）；r16 合入 #25 与 #26，并删 `pi-shell` 里剩下的死代码（§10.19）；r17 检查测试之间的竞争，只改测试与工具（§10.20）；r18 改用 `cargo nextest`，改 `protoc` 的路径与 `release.yml` 的令牌（§10.21）；r19 用 `gh stack` 合入 #27–#31，并设 V0.6 的发布里程碑（§10.22）；r20 定 MCP 的方向（可选扩展包），修空白对话，补发布内容，并合入 #33–#36（§10.23）；r21 做 V0.6 的版本号与发布说明（条件 5），合入 #38 与 #39，并做条件 1–4（§10.24）；r22 打 tag `v0.6.0`、发布、做发布后的核对（§10.25）；r23 把三个 action 升到 Node 24 的版本，处理扩展 API 的审计批 9，并把决策 11、13 记成不做（§10.26）；r24 在内核 6.12 的云 VM 上测了沙箱的 Landlock 层（§10.27）；r25 把 `pi-sandbox` 接进 `TUI CI`（§10.28）；r26 补记 v0.7.0 之前的合入（#45 至 #48、web 的 #50 至 #54、版本号 #55）与 v0.7.0 的发布（§10.29）；r27 量了旗标与设置页并修（#57、#60），去掉选择器的 30 天截止（#61），清了一批死代码（#62、#63；§10.30）；r28 用一次 `gh stack` 把这五个 PR 与另外五个（#56、#58、#59、#64、#65）合入 `main`（§10.31）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
@@ -2401,6 +2402,60 @@ Runner 有 Landlock（ABI 8），没有 `bwrap`；装上 `bwrap` 也不能用，
 
 **符号可达性（新的检查办法）。** 构建调试版 `zypi`，`nm -C --defined-only` 取全部符号，按模块路径数符号。一个模块的符号数为 0，表示 `zypi` 的 `main` 到不了它。这不是死代码的证明（只含类型的模块天然没有符号；`pi-pager-minimal` 是另一个二进制），但它给下一个 PR 的候选清单。
 
+### 10.37 r35 追加：D.6，删内嵌指南的查看器；死的 `plugins` 停在级联上
+
+这一节记 2026-11-02 的第一批阶段 D 的第二个 PR（分支 `refactor/tui-drop-guide-viewer`，第一次从 `6ba5cc4` 开出，后来 rebase 到 `c02468e`，那时 #83（§10.36）与 #85 已合并，这一轮因此是 r35）。用户对 D.6 的决定是「删」。同一轮还查了三项（`plugins`、`project_config`、`managed_config`）：都没有删，原因在下面。
+
+**先确认没有入口。** 在 `tui/` 里按名字查 `howto_list_modal`、`ActiveModal::DocPicker`、`ActiveModal::DocViewer`、`welcome_doc_viewer`、`crate::docs`、`pi_pager::docs`：`howto_list_modal` 只被查看器自己的 Esc 处理调用（`app/modals.rs` 两处）；`welcome_doc_viewer` 只在测试里被赋值；没有斜杠命令、快捷键、菜单项或别的 crate 引用 `docs`。所以没有东西能打开它。
+
+**删了什么（`pi-pager` 与基线清单；不含文档，`+47 / −1,018`，10 个文件）。**
+
+| 文件 | 改动 |
+|---|---|
+| `src/docs.rs` | 整个删除（225 行）：`USER_GUIDE`（`include_str!` 七页）、`DocEntry`、`find_doc`、`get_howto_doc`、`list_howto_titles`、`default_howto_entries`、`all_titles`，与 9 个测试 |
+| `src/lib.rs` | 去掉 `pub mod docs;` |
+| `src/views/modal.rs` | 去掉两个变体、`howto_list_modal`、三个滚动函数、两个渲染函数与它们的 5 个测试（`doc_viewer_scroll_tests` 3 个、`howto_list_modal_opens_on_first_guide`、`doc_picker_tests` 1 个） |
+| `src/app/modals.rs` | 去掉两个变体的键、鼠标、粘贴、渲染分支，和 `handle_doc_input`；`Event` 的导入没人用了，一并去掉 |
+| `src/app/app_view.rs` | 去掉字段 `welcome_doc_viewer` 与欢迎页里它的输入、滚动、渲染分支 |
+| `src/app/agent_view/panes.rs` | 去掉滚轮里两个变体的分支 |
+| `src/app/app_view_tests.rs`、`src/app/dispatch/tests/mod.rs` | 去掉字段的赋值和一个只测查看器的测试；`scroll_event_does_not_stash_when_blocking_modal_open` 原来用查看器当「挡住滚动的模态」，改成用 agent 视图里的命令面板，检查的行为不变 |
+| `tests/user_guide_pages.rs`（新） | 原来 `docs.rs` 里的「页面不提旧产品」检查（`Grok`、`grok `、`~/.grok`、`.grok/`、`x.ai`、`SpaceXAI`），现在直接读 `docs/user-guide/*.md`（`README.md` 除外），再加每页以 `#` 开头 |
+| `scripts/tui_baseline.toml` | `pi-pager` 的目标里加 `--test user_guide_pages`；`reference_passed` 5,652 → 5,638 |
+
+七页指南（`docs/user-guide/*.md`）留在磁盘上；它们不再被编进二进制（`25-status-line.md` 仍被一个测试 `include_str!`，`pi-status-line` 的注释也指向它）。
+
+**基线数字。**
+
+| 数字 | 前 | 后 | 为什么 |
+|---|---|---|---|
+| 依赖图 | 965 | 965 | 没有依赖变 |
+| 警告 | 0 | 0 | — |
+| 残留词 `leader` / `x.ai` | 214 / 253 | 214 / 253 | 不变 |
+| `pi-pager` 测试 | 5,652 | 5,638 | 删 15（`docs.rs` 9、`modal.rs` 5、`app_view_tests.rs` 1）加 1 |
+| 全套（清单的和） | 8,555 | 8,541 | 只有 `pi-pager` 变；rebase 后的数是手算（`main` 上 5,652 与 8,555，减 14），由 CI 核对 |
+| `Cargo.lock`、`THIRD-PARTY-NOTICES` | — | 不变 | 没有依赖变 |
+
+删的 15 个：`docs.rs` 9 个，`modal.rs` 里 5 个（滚动 3、`howto_list_modal_opens_on_first_guide`、`doc_picker` 1），`app_view_tests.rs` 里 `welcome_doc_viewer_is_scroll_blocking_and_wheel_scrolls_content` 1 个。加的 1 个是 `user_guide_pages`。
+
+**没有删的三项（都是活的，不是死的）。** 用户让「先查，死了就删」。结果是：
+
+- `managed_config`（`pi-shell`，763 行，加 `response.rs` 255 行与 `tests.rs` 491 行）：**活的。** `auth/credential_provider.rs` 在第 57 与 262 行附近调用 `crate::managed_config::resolve_deployment_id(Some(dk))`，而 `credential_provider` 本身在产品里。新跑的 `tui_callgraph.py keep` 把它列在「活的单元」里（`pi-shell` 的 57 个单元全是活的，死的 0 个），「活代码从外面的引用」一栏是 0。这个 0 不是「没人用」：它的引用者 `auth::credential_provider` 在同一个 crate 里，自己也是活的，所以调用图把引用算在 crate 内部。调试版 `zypi` 里 `managed_config` 有 4 个符号，`auth::credential_provider` 有 22 个。要删它得先改 `credential_provider`，那是 D.3（xAI auth 层）。
+- `project_config`（`pi-workspace`，115 行）：**活的。** `folder_trust.rs`（第 327、337 行）与 `permission/resolution.rs`（第 247 行）用它；项目信任（`AGENTS.md` 的不变量 9）读它。调试版 `zypi` 里它有 12 个符号。
+- `pi-agent::plugins`：**符号上死、源码上连着。** `nm` 数符号：十个文件里八个（`git_install`、`registry`、`manifest`、`local_refresh`、`install_registry`、`hooks_adapter`、`marketplace`、`trust`，共 6,427 行）在 `zypi` 里 0 个符号；`discovery.rs`（1,865 行）有 1 个活符号：`project_plugin_dirs_in`，`pi-workspace/src/folder_trust.rs` 的文件夹信任对话框用它。但源码里还有这些引用：`pi-agent/src/prompt/skills.rs`、`pi-agent/src/discovery.rs`、`pi-agent/src/builder.rs`（都有 `Option<&PluginRegistry>` 之类的参数和测试夹具），`pi-subagent-resolution/src/definition.rs`，`pi-workspace/src/discovery.rs`。试验：删八个文件、`mod.rs` 只留 `discovery` 的导出，`cargo check -p pi-agent` 第一轮就有 26 个错误，分在 `pi-agent/src/discovery.rs`（12）、`plugins/discovery.rs`（8）、`prompt/skills.rs`（4）、`builder.rs`（2），之后还有 `pi-subagent-resolution` 与 `pi-workspace`。要删得改这些文件的签名与测试，范围越过了这一轮「不碰 `pi-agent` 与 `pi-workspace`」的界线，所以试验已还原，没有提交。这一项交给 D.4。
+
+**符号可达性清单。** `nm -C --defined-only` 取调试版 `zypi` 的符号，按模块数；0 个符号的文件共 688 个、291,749 行（`pi-tools` 177 个文件 81,636 行最多）。这是上界估计，不是证明：只含类型或泛型的模块也是 0；`pi-pager-minimal` 是另一个二进制；测试代码不在其中。它给 D.4、D.1 当候选清单；清单与脚本放在 Project store 的 `internal/tui-strip-d8/`。
+
+**本地结果（M = 实测；Linux，4 vCPU，Rust 1.94.0，`cargo-nextest` 0.9.148）。**
+
+- M `python scripts/tui_baseline.py check`（rebase 之后）：全部通过（图 965，警告 0，`cargo check --workspace --tests` 0 个错误）。`--tests` 构建有一条已有的警告（`views/welcome/mod.rs` 的 `render_done_text` 没人用；基线没有它，计数只看消费者构建），这个 PR 没有改它。
+- M `python scripts/tui_baseline.py test`（`PI_E2E_PYTHON` 与 `PI_E2E_REQUIRED=1`），在 rebase 之前的基线 `6ba5cc4` 上：8,543 通过、0 失败、25 跳过；`pi-pager` 5,640（比那时的 5,654 少 14）。rebase 到 `c02468e` 之后没有重跑，交给 CI。
+- M `python scripts/tui_notices.py check`：干净（`Cargo.lock` 没变，没有跑 `update --write`）。
+- M `python scripts/tui_callgraph.py keep --out docs/baselines/tui-support.md`：清单不变，只有 `Commit:` 行。
+- M `scripts/tests`（`pytest`）：267 通过。
+- M `ruff check .` 与 `ruff format --check .`：通过。
+- M `scripts/tui_pty/` 对调试构建：见 PR 说明。
+- 没有跑：Windows 与 macOS；CI。
+
 ## 附录 A（摘录）：A.4
 
 附录 A 的 A.1–A.3（能力矩阵、ACP 版本配对、逐方法）是活的参考，留在[计划](../PLAN-RUST-AGENT-RUNTIME-REMOVAL.md)里。A.4 记 r5 的执行结果，搬到这里。
@@ -3427,3 +3482,4 @@ r12 续 8（2026-10-13）：PR [#18](https://github.com/zy1233/pi-python/pull/18
 - r31：`smoke.py --sandbox workspace` 的标签检查（2026-11-01；PR [#77](https://github.com/zy1233/pi-python/pull/77)，分支 `fix/tui-pty-smoke-sandbox-label`）。Landlock 内核上的检查从欢迎页挪到第一轮对话之后；两个二进制上 24/24；没有 Landlock 的那一支没改，用 seccomp 模拟，新旧脚本都是 26/26。欢迎页该显示什么没有决定。见 [§10.34](#1034-r31-追加smokepy---sandbox-workspace-的标签检查)。
 - r32：用户选「2B」（2026-11-02；PR [#78](https://github.com/zy1233/pi-python/pull/78)，分支 `refactor/drop-pi-update-npm-install-1b89`；文档在另一个 PR）。删 `pi-update`、`pi-pager/npm/`、四个安装脚本和只有更新器用的 pager 代码；版本策略搬进 `pi-pager-bin`。门禁与整套测试过（8,557 通过 / 0 失败）；依赖图 970 → 965。README 与站点的「Next」改成「`zypi` 的 Windows 二进制计划，没有日期；不做 macOS x86_64 版本，也不做自动更新」（第二次答复后）。macOS x86_64 的 release job 的提案作废。见 [§10.35](#1035-r32-追加删除-pi-updatenpm-目录与安装脚本用户选-2b)。
 - r34：D.8 余下的死文件，删 `pi-workflow`（2026-11-02；分支 `refactor/tui-drop-pi-workflow-and-unloaded-files`）。只删文件：crate `pi-workflow`、`scenarios/*.yaml`、九个 logo、十一个旧名字的 `.snap`；没有改 `.rs`。图仍 965，测试仍 8,557（在 `6ba5cc4` 上测）。见 [§10.36][l10-36]。
+- r35：D.6，删内嵌指南的查看器（2026-11-02；分支 `refactor/tui-drop-guide-viewer`）。`pi-pager` 少 1,018 行、14 个测试；`plugins`、`project_config`、`managed_config` 查过，都没有删。见 [§10.37][l10-37]。

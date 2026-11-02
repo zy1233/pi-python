@@ -276,8 +276,7 @@ impl AgentView {
             match modal {
                 ActiveModal::CommandPalette { state, .. }
                 | ActiveModal::ArgPicker { state, .. }
-                | ActiveModal::SessionPicker { state, .. }
-                | ActiveModal::DocPicker { state, .. } => {
+                | ActiveModal::SessionPicker { state, .. } => {
                     let delta = lines.unsigned_abs() as usize;
                     let current = state.scroll_offset.unwrap_or(0);
                     let new_offset = if lines > 0 {
@@ -287,10 +286,6 @@ impl AgentView {
                     };
                     state.scroll_offset = Some(new_offset);
                     state.hovered = None;
-                    return;
-                }
-                ActiveModal::DocViewer { scroll, .. } => {
-                    crate::views::modal::apply_doc_scroll_delta(scroll, lines);
                     return;
                 }
                 _ => {}

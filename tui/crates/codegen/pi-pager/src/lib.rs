@@ -10,7 +10,6 @@ pub mod completions_cmd;
 mod config_toml_edit;
 pub(crate) mod diagnostics;
 pub mod disk_usage_cmd;
-pub mod docs;
 pub mod doctor_cmd;
 pub mod export_cmd;
 pub(crate) mod fs_size;
