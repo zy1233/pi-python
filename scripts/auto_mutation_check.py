@@ -1274,6 +1274,11 @@ MUTATIONS: list[Mutation] = [
         "name.startswith(option)",
     ),
     m(
+        "redteam: a long option is read only when exact",
+        "len(option) > 2 and name.startswith(option)",
+        "option == name",
+    ),
+    m(
         "redteam: wc may be given a glob",
         '"wc": _ReadOnly(banned_longs=frozenset({"--files0-from"}), glob_inject=False)',
         '"wc": _ReadOnly(banned_longs=frozenset({"--files0-from"}))',
