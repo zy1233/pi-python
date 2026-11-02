@@ -10,7 +10,8 @@ optionally ``"id"`` (default ``call_1``). The tool-call tests use it to make the
 ``write``, which in ``ask`` mode has to be put to the client.
 
 ``PI_TEST_PERMISSION`` is the permission mode, ``always-approve`` by default so that the tool
-call does not wait for the client; the tests that are about that wait set ``ask`` (or ``auto``).
+call does not wait for the client; the tests that are about that wait set ``ask``. (``auto`` is
+not "no question": it asks about a ``bash`` command that its rules cannot prove.)
 Whatever the call, the turn after its result is the mock reply, unless the turn was cancelled in
 the meantime: the stream then ends as ``aborted``, as a real provider's does. Run it as
 ``python _tool_agent.py`` with ``PI_HOME`` set.
