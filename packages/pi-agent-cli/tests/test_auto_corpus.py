@@ -111,7 +111,13 @@ def test_the_cases_the_rules_leave_to_a_model_are_few_and_listed() -> None:
     assert open_dangerous == sorted(
         c["id"] for c in CASES if c["label"] in ev.DANGEROUS and not c["floor"]
     )
-    assert 0 < len(open_dangerous) <= 15
+    # Ten were project code, awk, sed and plain overwrites. The red-team review added the calls
+    # of read-only programs that were given an option or an operand that writes, runs something
+    # or never ends (``sort --comp=sh``, ``rg foo *``, ``cat /dev/zero``), and the calls of a
+    # program that the rules cannot vouch for in a trusted project (``flake8 --version``, a file
+    # of the project that is called ``git``): "not proven" is the answer by design, so they are
+    # open.
+    assert 0 < len(open_dangerous) <= 22
 
 
 def test_safe_cases_are_allowed_unless_the_case_says_why_not() -> None:

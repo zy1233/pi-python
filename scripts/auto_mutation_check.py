@@ -3,7 +3,7 @@
 # ruff: noqa: E501
 """Mutation check for the Auto rules: break one rule at a time; a test must notice each break.
 
-    python scripts/auto_mutation_check.py              # run every mutation (about two minutes)
+    python scripts/auto_mutation_check.py              # run every mutation (about eight minutes on four cores)
     python scripts/auto_mutation_check.py --list       # print the mutations
     python scripts/auto_mutation_check.py --check      # only check that each mutation still applies
     python scripts/auto_mutation_check.py --only floor # run the mutations whose name contains "floor"
@@ -159,8 +159,8 @@ MUTATIONS: list[Mutation] = [
     ),
     m(
         "path: case not folded in component names",
-        "parts = [p.lower() for p in re.split",
-        "parts = [p for p in re.split",
+        "parts = [name for name in map(_fold_name, names) if name]",
+        "parts = [name for name in names if name]",
     ),
     m("protected: secret folders", "if _SECRET_DIRS.intersection(parts):", "if False:"),
     m("protected: .env files", 'if base.startswith(".env"):', "if False:"),
@@ -171,25 +171,33 @@ MUTATIONS: list[Mutation] = [
     m("protected: shell start files", "if base in _SHELL_START:", "if False:"),
     m(
         "protected: home config folder",
-        'if _is_inside(real, os.path.join(self.home, ".config")):',
+        'if _is_inside(real, os.path.join(self.home, ".config"), fold=True):',
         "if False:",
     ),
-    m("protected: the agent's own home", "if _is_inside(real, self.pi_home):", "if False:"),
+    m(
+        "protected: the agent's own home",
+        "if _is_inside(real, self.pi_home, fold=True):",
+        "if False:",
+    ),
     m(
         "protected: listed gated resources",
-        "if any(_is_inside(real, item) for item in self.protected):",
+        "if any(_is_inside(real, item, fold=True) for item in self.protected):",
         "if False:",
     ),
     m(
         "protected: extra globs",
-        '        slashed = real.replace("\\\\", "/")\n        if any(',
-        '        slashed = real.replace("\\\\", "/")\n        if False and any(',
+        '        slashed = real.replace("\\\\", "/").lower()\n        if any(',
+        '        slashed = real.replace("\\\\", "/").lower()\n        if False and any(',
     ),
     m("path: ~ not expanded in tool paths", 'if text.startswith(("~/", "~\\\\")):', "if False:"),
     m("path: ~ not expanded for a bare tilde", 'if text == "~":', "if False:"),
     m("path: glob followed by dotdot", 'if ".." in re.split(r"[\\\\/]", text):', "if False:"),
     m("path: plain name that is a link", "if env.fs.lexists(candidate):", "if False:"),
-    m("path: value of --option=path", 'text = text.split("=", 1)[1]', "return"),
+    m(
+        "path: value of --option=path",
+        '_check_path(text.split("=", 1)[1], word.glob, st, force=force)',
+        "pass",
+    ),
     m("path: /dev/tcp", 'if text.startswith(("/dev/tcp/", "/dev/udp/")):', "if False:"),
     m(
         "path: dotfiles are not paths",
@@ -235,8 +243,8 @@ MUTATIONS: list[Mutation] = [
     m("cd: too many candidates", "if len(merged) > MAX_CWD_CANDIDATES:", "if False:"),
     m(
         "cd: target not checked",
-        "        real = _resolve(target.text, cwd, env)\n        env.path_floor(real)",
-        "        real = _resolve(target.text, cwd, env)",
+        "        real = env.fs.realpath(joined)\n        env.path_floor(real)",
+        "        real = env.fs.realpath(joined)",
     ),
     m("cd: several targets", "if len(positional) > 1:", "if False:"),
     m("cd: cd -", 'elif positional[0].text == "-":', "elif False:"),
@@ -282,20 +290,21 @@ MUTATIONS: list[Mutation] = [
     ),
     m(
         "lex: unknown ${...}",
-        '            refuse(Reason.UNCLEAR, "bash.unclear.expansion")',
-        '            return "", index + 2',
+        '                return known(env.cwd, close + 1, in_dq)\n            refuse(Reason.UNCLEAR, "bash.unclear.expansion")',
+        '                return known(env.cwd, close + 1, in_dq)\n            return "", index + 2',
     ),
     m("lex: special parameters", "if nxt and nxt in _SPECIAL_PARAMS:", "if False:"),
     m(
         "lex: $HOME not expanded",
-        '            if name == "HOME":\n                return env.home, match.end()',
-        "            if False:\n                return env.home, match.end()",
+        '            if name == "HOME":\n                return known(env.home, match.end(), in_dq)',
+        "            if False:\n                return known(env.home, match.end(), in_dq)",
     ),
     m("lex: ~user", '        elif ch == "~" and not in_word:', "        elif False:"),
+    m("lex: brace expansion", "if braces and braces.pop():", "if False:"),
     m(
-        "lex: brace expansion",
-        'if close > 0 and not re.search(r"\\s", span) and ("," in span or ".." in span):',
-        "if False:",
+        "lex: brace group marked by a comma or ..",
+        'elif braces and (ch == "," or command.startswith("..", i)):',
+        "elif False:",
     ),
     m("lex: parentheses", '        elif ch in "()":', "        elif False:"),
     m("lex: ;;", 'if ch == ";" and command.startswith(";;", i):', "if False:"),
@@ -381,11 +390,20 @@ MUTATIONS: list[Mutation] = [
     ),
     m(
         "wrap: a dynamic call can be proven read-only",
-        "    if not proven or dynamic:\n        st.proven = False",
-        "    if not proven:\n        st.proven = False",
+        "    if not proven or dynamic or project_path_program:\n        st.proven = False",
+        "    if not proven or project_path_program:\n        st.proven = False",
     ),
     # ---- programs
-    m("prog: hidden programs", "if program in _HIDDEN_PROGRAMS:", "if False:"),
+    m(
+        "prog: hidden programs",
+        "if program in _HIDDEN_PROGRAMS or program in _LAUNCHERS:",
+        "if program in _LAUNCHERS:",
+    ),
+    m(
+        "prog: launchers",
+        "if program in _HIDDEN_PROGRAMS or program in _LAUNCHERS:",
+        "if program in _HIDDEN_PROGRAMS:",
+    ),
     m("prog: inline code and stdin", 'if kind in ("inline", "stdin"):', "if False:"),
     m(
         "prog: python network modules",
@@ -397,7 +415,7 @@ MUTATIONS: list[Mutation] = [
         "        st.project_code = True\n        st.proven = False\n        for word in args_words:",
         "        st.proven = False\n        for word in args_words:",
     ),
-    m("prog: python -m", 'if text == "-m" and family == "python":', "if False:"),
+    m("prog: python -m", 'if family == "python" and char == "m":', "if False:"),
     m(
         "prog: python -W value skipped",
         "        if text in value_options:\n            index += 2\n            continue",
@@ -408,7 +426,8 @@ MUTATIONS: list[Mutation] = [
         'if program in _DESTRUCTIVE or program.startswith("mkfs"):',
         "if False:",
     ),
-    m("prog: mkfs", 'program.startswith("mkfs")', "False"),
+    m("prog: mkfs", 'program.startswith("mkfs")', "False", 1),
+    m("prog: mkfs with a version flag", 'program.startswith("mkfs")', "False", 0),
     m("prog: chmod -R", 'if program in ("chmod",) and', "if False and"),
     m("prog: network programs", "if program in _NETWORK:", "if False:"),
     m("prog: package managers", "if program in _PACKAGE_MANAGERS and not", "if False and not"),
@@ -457,13 +476,13 @@ MUTATIONS: list[Mutation] = [
     ),
     m(
         "prog: a version flag unlocks any program",
-        "    if len(args_words) == 1 and args_words[0].text in _VERSION_FLAGS and not project_path_program:",
-        "    if len(args_words) >= 1 and args_words[-1].text in _VERSION_FLAGS:",
+        '    version_flag = len(args_words) == 1 and (\n        args_words[0].text in _VERSION_FLAGS\n        or args_words[0].text == _SHORT_VERSION.get(family or "")\n    )',
+        "    version_flag = len(args_words) >= 1 and args_words[-1].text in _VERSION_FLAGS",
     ),
     m(
         "prog: no version shortcut",
-        "    if len(args_words) == 1 and args_words[0].text in _VERSION_FLAGS and not project_path_program:\n        return",
-        "    if False:\n        return",
+        '        and not program.startswith("mkfs")\n    ):\n        if family is None',
+        '        and not program.startswith("mkfs")\n        and False\n    ):\n        if family is None',
     ),
     m(
         "prog: read-only table ignored",
@@ -475,12 +494,16 @@ MUTATIONS: list[Mutation] = [
         "if any(c in spec.banned_shorts for c in args.shorts):",
         "if False:",
     ),
-    m("prog: read-only banned long flags", "if args.longs & spec.banned_longs:", "if False:"),
+    m(
+        "prog: read-only banned long flags",
+        "if any(_long_hit(option, spec.banned_longs) for option in args.longs):",
+        "if False:",
+    ),
     m("prog: read-only banned raw flags", "if set(args.raw) & spec.banned_raw:", "if False:"),
     m(
         "prog: read-only positional limit",
-        "    return not (spec.max_positional is not None and len(args.pos) > spec.max_positional)",
-        "    return True",
+        "    if spec.max_positional is not None and (len(args.pos) > spec.max_positional or args.glob_pos):\n        return False",
+        "    if False:\n        return False",
     ),
     m(
         "prog: path arguments not checked",
@@ -500,9 +523,10 @@ MUTATIONS: list[Mutation] = [
     m("git: -c", 'elif text == "-c" or text.startswith(("-c", "--config-env")):', "elif False:"),
     m(
         "git: -C path",
-        "            _check_word(args[index + 1], st, force=True)\n            index += 2",
-        "            index += 2",
+        "_check_path(target, any(word.glob for word in chdirs), st, force=True)",
+        "pass",
     ),
+    m("git: -C word ignored", "            chdirs.append(args[index + 1])", "            pass"),
     m(
         "git: unknown global option",
         '        elif text.startswith("-"):\n            raise _Floor(Reason.UNCLEAR, "bash.unclear.git_option")\n        else:\n            break',
@@ -532,7 +556,7 @@ MUTATIONS: list[Mutation] = [
     ),
     m(
         "git: banned read options",
-        'return not (flags & _GIT_BANNED_READ_OPTIONS or "-O" in flags)',
+        'return not (has(*_GIT_BANNED_READ_OPTIONS, "-O") or opts.lead_glob)',
         "return True",
     ),
     m("git: branch creation", "return not mutating and (listing or not opts.pos)", "return True"),
@@ -558,6 +582,897 @@ MUTATIONS: list[Mutation] = [
         None,
         "auto_reasons.py",
     ),
+    # ---- red team: the lexer and the parser
+    m("redteam: $[ is not refused", '        if nxt == "[":', "        if False:"),
+    m(
+        "redteam: a known variable is not checked for splitting",
+        'if not in_dq and re.search(r"[\\s*?\\[]", value):',
+        "if False:",
+    ),
+    m(
+        "redteam: a known variable is checked inside quotes",
+        'if not in_dq and re.search(r"[\\s*?\\[]", value):',
+        'if re.search(r"[\\s*?\\[]", value):',
+    ),
+    m(
+        "redteam: splitting ignores glob characters",
+        'if not in_dq and re.search(r"[\\s*?\\[]", value):',
+        'if not in_dq and re.search(r"[\\s]", value):',
+    ),
+    m(
+        "redteam: ${HOME} skips the split check",
+        "return known(env.home, close + 1, in_dq)",
+        "return env.home, close + 1",
+    ),
+    m(
+        "redteam: ${PWD} skips the split check",
+        "return known(env.cwd, close + 1, in_dq)",
+        "return env.cwd, close + 1",
+    ),
+    m(
+        "redteam: $HOME skips the split check",
+        "return known(env.home, match.end(), in_dq)",
+        "return env.home, match.end()",
+    ),
+    m(
+        "redteam: $PWD skips the split check",
+        "return known(env.cwd, match.end(), in_dq)",
+        "return env.cwd, match.end()",
+    ),
+    m(
+        "redteam: ${PWD} is not marked",
+        "                pwd = True\n                return known(env.cwd, close + 1, in_dq)",
+        "                return known(env.cwd, close + 1, in_dq)",
+    ),
+    m(
+        "redteam: $PWD is not marked",
+        "                pwd = True\n                return known(env.cwd, match.end(), in_dq)",
+        "                return known(env.cwd, match.end(), in_dq)",
+    ),
+    m(
+        "redteam: a brace group is never a brace expansion",
+        "            if braces and braces.pop():",
+        "            if braces and braces.pop() and False:",
+    ),
+    m("redteam: a , does not mark a brace group", "braces[-1] = True", "braces[-1] = False"),
+    m(
+        "redteam: a .. does not mark a brace group",
+        'elif braces and (ch == "," or command.startswith("..", i)):',
+        'elif braces and ch == ",":',
+    ),
+    m("redteam: every brace group is an expansion", "braces.append(False)", "braces.append(True)"),
+    m("redteam: braces outlive the word", "        braces.clear()", "        pass"),
+    m(
+        "redteam: a &> target is not remembered",
+        'cur.both_target = cur.both_target or pending in ("&>", "&>>")',
+        "cur.both_target = False",
+    ),
+    m(
+        "redteam: a later redirect forgets the &> target",
+        'cur.both_target = cur.both_target or pending in ("&>", "&>>")',
+        'cur.both_target = pending in ("&>", "&>>")',
+    ),
+    m(
+        "redteam: &>> is not a both-target",
+        'cur.both_target = cur.both_target or pending in ("&>", "&>>")',
+        'cur.both_target = cur.both_target or pending == "&>"',
+    ),
+    m(
+        "redteam: &> is not a both-target",
+        'cur.both_target = cur.both_target or pending in ("&>", "&>>")',
+        'cur.both_target = cur.both_target or pending == "&>>"',
+    ),
+    m(
+        "redteam: words after a &> target are read",
+        "            elif cur.both_target:",
+        "            elif False:",
+    ),
+    # ---- red team: assignments that change what runs
+    m(
+        "redteam: env NAME=value is not checked",
+        "                    _env_assign_floor(text)\n                    index += 1",
+        "                    index += 1",
+    ),
+    m(
+        "redteam: the exec names are not read",
+        "if _ENV_EXEC.match(name) or (not strict_only and _ENV_LOAD.match(name)):",
+        "if not strict_only and _ENV_LOAD.match(name):",
+    ),
+    m(
+        "redteam: the load names are not read",
+        "if _ENV_EXEC.match(name) or (not strict_only and _ENV_LOAD.match(name)):",
+        "if _ENV_EXEC.match(name):",
+    ),
+    m(
+        "redteam: the load names are read for a plain assignment",
+        "if _ENV_EXEC.match(name) or (not strict_only and _ENV_LOAD.match(name)):",
+        "if _ENV_EXEC.match(name) or _ENV_LOAD.match(name):",
+    ),
+    m("redteam: += keeps its plus", 'name = name.rstrip("+")', "name = name"),
+    m(
+        "redteam: a path in LC_ is not read",
+        'if (name.startswith("LC_") or name in ("LANG", "LANGUAGE")) and "/" in value:',
+        "if False:",
+    ),
+    m(
+        "redteam: LC_ is not read",
+        'if (name.startswith("LC_") or name in ("LANG", "LANGUAGE")) and "/" in value:',
+        'if (name in ("LANG", "LANGUAGE")) and "/" in value:',
+    ),
+    m(
+        "redteam: LANG is not read",
+        'if (name.startswith("LC_") or name in ("LANG", "LANGUAGE")) and "/" in value:',
+        'if (name.startswith("LC_") or name in ("LANGUAGE",)) and "/" in value:',
+    ),
+    m(
+        "redteam: LANGUAGE is not read",
+        'if (name.startswith("LC_") or name in ("LANG", "LANGUAGE")) and "/" in value:',
+        'if (name.startswith("LC_") or name in ("LANG",)) and "/" in value:',
+    ),
+    m(
+        "redteam: LC_ is read without a path",
+        'if (name.startswith("LC_") or name in ("LANG", "LANGUAGE")) and "/" in value:',
+        'if (name.startswith("LC_") or name in ("LANG", "LANGUAGE")):',
+    ),
+    m(
+        "redteam: a plain assignment is not checked",
+        "    for assign in simple.assigns:\n        _env_assign_floor(assign, strict_only=True)",
+        "    for assign in simple.assigns:\n        pass",
+    ),
+    m(
+        "redteam: export, declare and local are not read",
+        "    if program in _ASSIGNING_BUILTINS:",
+        "    if False:",
+    ),
+    m(
+        "redteam: export reads the wide list",
+        "                _env_assign_floor(word.text, strict_only=True)",
+        "                _env_assign_floor(word.text)",
+    ),
+    # ---- red team: -- after a wrapper, uv run, bundle exec
+    m(
+        "redteam: command skips no --",
+        '            if rest and rest[0].text == "--":\n                rest = rest[1:]',
+        "            if False:\n                rest = rest[1:]",
+        0,
+    ),
+    m(
+        "redteam: nohup, exec and time skip no --",
+        '            if rest and rest[0].text == "--":\n                rest = rest[1:]',
+        "            if False:\n                rest = rest[1:]",
+        1,
+    ),
+    m(
+        "redteam: timeout skips no --",
+        '            if rest and rest[0].text == "--":\n                rest = rest[1:]',
+        "            if False:\n                rest = rest[1:]",
+        2,
+    ),
+    m(
+        "redteam: stdbuf skips no --",
+        '            if rest and rest[0].text == "--":\n                rest = rest[1:]',
+        "            if False:\n                rest = rest[1:]",
+        3,
+    ),
+    m(
+        "redteam: uv run is not unwrapped",
+        'elif (program == "uv" and rest[:1] and rest[0].text == "run") or (',
+        "elif (False) or (",
+    ),
+    m(
+        "redteam: bundle exec is not unwrapped",
+        'program == "bundle" and rest[:1] and rest[0].text == "exec"',
+        "False",
+    ),
+    m(
+        "redteam: any option is a uv run flag",
+        'if program == "uv" and text in _UV_RUN_FLAGS:',
+        "if True:",
+    ),
+    m(
+        "redteam: bundle exec takes the uv flags",
+        'if program == "uv" and text in _UV_RUN_FLAGS:',
+        "if text in _UV_RUN_FLAGS:",
+    ),
+    m(
+        "redteam: uv run alone is unwrapped",
+        "            if index >= len(inner):\n                return words, dynamic",
+        "            if False:\n                return words, dynamic",
+    ),
+    m(
+        "redteam: uv run is proven read-only",
+        "            st.proven = False\n            st.project_code = True",
+        "            st.project_code = True",
+    ),
+    m(
+        "redteam: uv run is not project code",
+        "            st.proven = False\n            st.project_code = True",
+        "            st.proven = False",
+    ),
+    # ---- red team: interpreters
+    m(
+        "redteam: printf -v is not read",
+        'if program == "printf" and "v" in args.shorts:',
+        "if False:",
+    ),
+    m(
+        "redteam: other interpreters are not read",
+        "family = _OTHER_INTERPRETERS.get(program)",
+        "family = None",
+    ),
+    m("redteam: pypy is not python", "(python|pypy)(", "(python)("),
+    m("redteam: a python build suffix d", "(\\.\\d+)*[dt]?)?$|^py$", "(\\.\\d+)*[t]?)?$|^py$"),
+    m("redteam: a python build suffix t", "(\\.\\d+)*[dt]?)?$|^py$", "(\\.\\d+)*[d]?)?$|^py$"),
+    m(
+        "redteam: a value option in a cluster takes no value",
+        "                    step = 1 if tail else 2",
+        "                    step = 1",
+    ),
+    m(
+        "redteam: python -m in a cluster",
+        'if family == "python" and char == "m":',
+        "if False:",
+    ),
+    m(
+        "redteam: python -m reads no next word",
+        'module = tail or (args[index + 1].text if index + 1 < len(args) else "")',
+        "module = tail",
+    ),
+    m(
+        "redteam: python -m reads no glued module",
+        'module = tail or (args[index + 1].text if index + 1 < len(args) else "")',
+        'module = args[index + 1].text if index + 1 < len(args) else ""',
+    ),
+    m("redteam: a value option in a cluster", 'if f"-{char}" in value_options:', "if False:"),
+    m("redteam: php -R is not inline", '"php": "rRBE",', '"php": "rBE",'),
+    m("redteam: php -B is not inline", '"php": "rRBE",', '"php": "rRE",'),
+    m("redteam: php -E is not inline", '"php": "rRBE",', '"php": "rRB",'),
+    m("redteam: php -r is not inline", '"php": "rRBE",', '"php": "RBE",'),
+    m("redteam: julia -E is not inline", '"julia": "eE",', '"julia": "e",'),
+    m("redteam: julia -e is not inline", '"julia": "eE",', '"julia": "E",'),
+    m(
+        "redteam: yarn --version is pure",
+        '    "git svn docker docker-compose podman gh make',
+        '    "git yarn svn docker docker-compose podman gh make',
+    ),
+    m(
+        "redteam: pytest --help is pure",
+        '    "git svn docker docker-compose podman gh make',
+        '    "git pytest svn docker docker-compose podman gh make',
+    ),
+    m(
+        "redteam: a file of the project that is called git is proven",
+        "    if not proven or dynamic or project_path_program:\n        st.proven = False",
+        "    if not proven or dynamic:\n        st.proven = False",
+    ),
+    m(
+        "redteam: the version of a file of the project that is called python is plain",
+        '        if kind == "version" and not project_path_program:',
+        '        if kind == "version":',
+    ),
+    m(
+        "redteam: --version is safe for a program that deletes",
+        "        and program not in _DESTRUCTIVE\n",
+        "",
+    ),
+    m(
+        "redteam: --version is safe for mkfs",
+        '        and not program.startswith("mkfs")\n',
+        "",
+    ),
+    m(
+        "redteam: --version is safe for a program in the project",
+        "        and not project_path_program\n",
+        "",
+    ),
+    m(
+        "redteam: a launcher is not hidden",
+        "if program in _HIDDEN_PROGRAMS or program in _LAUNCHERS:",
+        "if program in _HIDDEN_PROGRAMS:",
+    ),
+    m(
+        "redteam: tar -I is not an exec option",
+        'or args.shorts & set("IF")',
+        'or args.shorts & set("F")',
+    ),
+    m(
+        "redteam: tar -F is not an exec option",
+        'or args.shorts & set("IF")',
+        'or args.shorts & set("I")',
+    ),
+    m(
+        "redteam: tar xIf is not an exec option",
+        '        or (args.pos and not args_words[0].text.startswith("-") and set(args.pos[0]) & set("IF"))\n',
+        "",
+    ),
+    m(
+        "redteam: tar options are exact",
+        "any(_long_hit(option, _TAR_EXEC_LONGS) for option in args.longs)",
+        "any(option in _TAR_EXEC_LONGS for option in args.longs)",
+    ),
+    m("redteam: tar --rsh-command", '"--rsh-command"', '"--rsh-x"'),
+    m("redteam: tar --rmt-command", '"--rmt-command"', '"--rmt-x"'),
+    m("redteam: tar --info-script", '"--info-script"', '"--info-x"'),
+    m("redteam: tar --new-volume-script", '"--new-volume-script"', '"--new-volume-x"'),
+    m("redteam: tar --to-command", '"--to-command"', '"--to-x"'),
+    m("redteam: tar --checkpoint-action", '"--checkpoint-action"', '"--checkpoint-x"'),
+    m("redteam: tar --use-compress-program", '"--use-compress-program"', '"--use-compress-x"'),
+    # ---- red team: names that a file system treats as the same
+    m(
+        "redteam: names keep their compatibility form",
+        '    part = unicodedata.normalize("NFKC", part)\n',
+        "",
+    ),
+    m(
+        "redteam: names keep invisible characters",
+        '    part = "".join(char for char in part if unicodedata.category(char) != "Cf")\n',
+        "",
+    ),
+    m(
+        "redteam: names keep a stream",
+        '        part = part.split(":", 1)[0]',
+        "        pass",
+    ),
+    m(
+        "redteam: names keep trailing dots",
+        'return part.rstrip(" .").lower()',
+        'return part.rstrip(" ").lower()',
+    ),
+    m(
+        "redteam: names keep trailing spaces",
+        'return part.rstrip(" .").lower()',
+        'return part.rstrip(".").lower()',
+    ),
+    m(
+        "redteam: names keep their case",
+        'return part.rstrip(" .").lower()',
+        'return part.rstrip(" .")',
+    ),
+    m(
+        "redteam: the protected set compares with case",
+        "        p, r = p.casefold(), r.casefold()",
+        "        pass",
+    ),
+    m(
+        "redteam: the parts are not folded",
+        "parts = [name for name in map(_fold_name, names) if name]",
+        "parts = [name.lower() for name in names]",
+    ),
+    m(
+        "redteam: 8.3 names are not read",
+        "        if any(_is_short_name(name) for name in names):",
+        "        if False:",
+    ),
+    m(
+        "redteam: an 8.3 name has no extension",
+        '_SHORT_NAME = re.compile(r"^[^~.]{1,6}~\\d{1,6}(\\.[^.~]{0,3})?$")',
+        '_SHORT_NAME = re.compile(r"^[^~.]{1,6}~\\d{1,6}$")',
+    ),
+    m(
+        "redteam: a stream mark is not looked for",
+        '    has_stream_mark = ":$" in part',
+        "    has_stream_mark = False",
+    ),
+    m(
+        "redteam: any : cuts an 8.3 name",
+        "    return has_stream_mark and bool(_SHORT_NAME.match(_fold_name(part)))",
+        "    return bool(_SHORT_NAME.match(_fold_name(part)))",
+    ),
+    m(
+        "redteam: home secret folders are not read",
+        "        if any(_is_inside(real, os.path.join(self.home, d), fold=True) for d in _HOME_SECRET_DIRS):",
+        "        if False:",
+    ),
+    m(
+        "redteam: .docker is not secret",
+        '_HOME_SECRET_DIRS = (".docker", ',
+        "_HOME_SECRET_DIRS = (",
+    ),
+    m("redteam: .azure is not secret", '".azure", ', ""),
+    m("redteam: .oci is not secret", '".oci", ', ""),
+    m("redteam: .terraform.d is not secret", '".terraform.d", ', ""),
+    m("redteam: .password-store is not secret", ', ".password-store")', ")"),
+    m(
+        "redteam: the agent home compares with case",
+        "if _is_inside(real, self.pi_home, fold=True):",
+        "if _is_inside(real, self.pi_home):",
+    ),
+    m(
+        "redteam: a gated path compares with case",
+        "if any(_is_inside(real, item, fold=True) for item in self.protected):",
+        "if any(_is_inside(real, item) for item in self.protected):",
+    ),
+    m(
+        "redteam: the home config compares with case",
+        'if _is_inside(real, os.path.join(self.home, ".config"), fold=True):',
+        'if _is_inside(real, os.path.join(self.home, ".config")):',
+    ),
+    m(
+        "redteam: a protected glob compares with case",
+        'slashed = real.replace("\\\\", "/").lower()',
+        'slashed = real.replace("\\\\", "/")',
+    ),
+    m(
+        "redteam: a protected glob has case",
+        "fnmatch.fnmatchcase(slashed, glob.lower()) or fnmatch.fnmatchcase(base, glob.lower())",
+        "fnmatch.fnmatchcase(slashed, glob) or fnmatch.fnmatchcase(base, glob)",
+    ),
+    m("redteam: a path has no length cap", "    if len(path) > MAX_PATH_CHARS:", "    if False:"),
+    m("redteam: .htpasswd is not secret", "|\\.htpasswd", "|\\.htpasswdx"),
+    m("redteam: .vault-token is not secret", "|\\.vault-token", "|\\.vault-tokenx"),
+    m("redteam: .token is not secret", "|\\.token|", "|\\.tokenx|"),
+    m("redteam: .yarnrc.yml is not secret", "\\.yarnrc(\\.yml)?", "\\.yarnrc"),
+    m("redteam: .tfvars.json is not secret", "|.*\\.tfvars(\\.json)?", "|.*\\.tfvars"),
+    m(
+        "redteam: .tfstate.backup is not secret",
+        "terraform\\.tfstate(\\.backup)?",
+        "terraform\\.tfstate",
+    ),
+    m(
+        "redteam: secrets files are not secret",
+        "|secrets?\\.(json|toml|ya?ml|txt|ini|env)",
+        "|secrets?\\.xxx",
+    ),
+    m("redteam: token files are not secret", "|tokens?\\.(json|toml|ya?ml|txt)", "|tokens?\\.xxx"),
+    m(
+        "redteam: credentials files are not secret",
+        "credentials(\\.(json|toml|ya?ml|xml|txt|ini))?",
+        "credentials(\\.json)?",
+    ),
+    m("redteam: history files are not secret", "|.*_history", "|.*_historyx"),
+    # ---- red team: globs
+    m(
+        "redteam: a glob with .. in it",
+        '    if ".." in re.split(r"[\\\\/]", text):',
+        "    if False:",
+    ),
+    m(
+        "redteam: a glob that matches .. is allowed",
+        '        if _has_glob(comp) and comp[0] in ".[" and re.match(fnmatch.translate(comp), ".."):',
+        "        if False:",
+    ),
+    m(
+        "redteam: a bracket glob that matches .. is allowed",
+        'comp[0] in ".[" and re.match(fnmatch.translate(comp), ".."):',
+        'comp[0] in "." and re.match(fnmatch.translate(comp), ".."):',
+    ),
+    m("redteam: one literal is enough", "    if literals < 2:", "    if literals < 1:"),
+    m("redteam: three literals are needed", "    if literals < 2:", "    if literals < 3:"),
+    m(
+        "redteam: * matches a leading dot",
+        '    if shell and name.startswith(".") and pattern[:1] in ("*", "?"):',
+        "    if False:",
+    ),
+    m(
+        "redteam: ? matches a leading dot",
+        '    if shell and name.startswith(".") and pattern[:1] in ("*", "?"):',
+        '    if shell and name.startswith(".") and pattern[:1] in ("*",):',
+    ),
+    m(
+        "redteam: * does not match a name without a dot",
+        '    if shell and name.startswith(".") and pattern[:1] in ("*", "?"):',
+        '    if shell and pattern[:1] in ("*", "?"):',
+    ),
+    m(
+        "redteam: a short run points at a key suffix",
+        "if len(run) >= 3]",
+        "if len(run) >= 1]",
+    ),
+    m(
+        "redteam: a glob stem is not tried",
+        'stems = ["x", first + "x", *(group[0] for group in re.findall(r"\\[([^\\]!^][^\\]]*)\\]", pattern))]',
+        'stems = ["x", *(group[0] for group in re.findall(r"\\[([^\\]!^][^\\]]*)\\]", pattern))]',
+    ),
+    m(
+        "redteam: a bracket stem is not tried",
+        'stems = ["x", first + "x", *(group[0] for group in re.findall(r"\\[([^\\]!^][^\\]]*)\\]", pattern))]',
+        'stems = ["x", first + "x"]',
+    ),
+    m(
+        "redteam: a glob is not tried against a key suffix",
+        "            if hit is None and _glob_reaches_key(comp):",
+        "            if False:",
+    ),
+    m(
+        "redteam: .htpasswd is not a probe",
+        ".git-credentials .htpasswd .docker ",
+        ".git-credentials .docker ",
+    ),
+    m(
+        "redteam: .bash_history is not a probe",
+        ".bash_history terraform.tfstate",
+        "terraform.tfstate",
+    ),
+    m(
+        "redteam: terraform.tfstate is not a probe",
+        ".bash_history terraform.tfstate",
+        ".bash_history",
+    ),
+    m(
+        "redteam: a short option carries no value",
+        "    values = [text[2:]]",
+        "    values = []",
+    ),
+    m(
+        "redteam: a cluster carries no path",
+        '        if text[k] in "/\\\\":',
+        "        if False:",
+    ),
+    m(
+        "redteam: an option with a value is not checked",
+        '        elif not text.startswith("--"):\n            for value in _attached_values(text):',
+        "        elif False:\n            for value in _attached_values(text):",
+    ),
+    # ---- red team: git
+    m(
+        "redteam: a quoted pathspec glob is not read",
+        "    if _has_glob(text) and not word.glob:",
+        "    if False:",
+    ),
+    m(
+        "redteam: an unquoted glob is read as a pathspec",
+        "    if _has_glob(text) and not word.glob:",
+        "    if _has_glob(text):",
+    ),
+    m(
+        "redteam: git words with no : are read",
+        '    if ":" not in text:\n        return',
+        "    if False:\n        return",
+    ),
+    m(
+        "redteam: a git word with many parts",
+        "    if len(parts) > MAX_GIT_SPEC_PARTS:",
+        "    if False:",
+    ),
+    m(
+        "redteam: a git option is read as a path",
+        '    if text.startswith(("-", ":/")) or "://" in text:',
+        '    if text.startswith((":/",)) or "://" in text:',
+    ),
+    m(
+        "redteam: a git :/ search is read as a path",
+        '    if text.startswith(("-", ":/")) or "://" in text:',
+        '    if text.startswith(("-",)) or "://" in text:',
+    ),
+    m(
+        "redteam: a git URL is read as a path",
+        '    if text.startswith(("-", ":/")) or "://" in text:',
+        '    if text.startswith(("-", ":/")):',
+    ),
+    m(
+        "redteam: git words are not read",
+        "    for word in args[index + 1 :]:\n        _git_spec_floor(word, st)",
+        "    for word in args[index + 1 :]:\n        pass",
+    ),
+    m(
+        "redteam: a glob after : is not read",
+        "        if _has_glob(part):\n            _glob_floor(part, st, shell=False)",
+        "        if False:\n            _glob_floor(part, st, shell=False)",
+    ),
+    m(
+        "redteam: git -C is not chained",
+        "            target = os.path.join(target, word.text)",
+        "            target = word.text",
+    ),
+    m(
+        "redteam: git -C is always chained",
+        "        if target is None or os.path.isabs(word.text):",
+        "        if os.path.isabs(word.text):",
+    ),
+    m(
+        "redteam: git -C is never chained",
+        "        if target is None or os.path.isabs(word.text):",
+        "        if True:",
+    ),
+    m(
+        "redteam: the -C folder is not checked",
+        "    if target is not None:\n        _check_path(target,",
+        "    if False:\n        _check_path(target,",
+    ),
+    m(
+        "redteam: .git ends no search",
+        '            if env.fs.lexists(os.path.join(folder, ".git")):\n                break',
+        "            if False:\n                break",
+    ),
+    m(
+        "redteam: one name makes a bare repository",
+        'if all(env.fs.lexists(os.path.join(folder, n)) for n in ("HEAD", "objects", "refs")):',
+        'if any(env.fs.lexists(os.path.join(folder, n)) for n in ("HEAD", "objects", "refs")):',
+    ),
+    m(
+        "redteam: HEAD is not needed for a bare repository",
+        '("HEAD", "objects", "refs")',
+        '("objects", "refs")',
+    ),
+    m(
+        "redteam: objects is not needed for a bare repository",
+        '("HEAD", "objects", "refs")',
+        '("HEAD", "refs")',
+    ),
+    m(
+        "redteam: refs is not needed for a bare repository",
+        '("HEAD", "objects", "refs")',
+        '("HEAD", "objects")',
+    ),
+    m(
+        "redteam: the search stops at the folder",
+        "            parent = os.path.dirname(folder)\n",
+        "            parent = folder\n",
+    ),
+    m("redteam: the guard reads git version", '    if sub != "version":', "    if True:"),
+    m(
+        "redteam: the guard skips git help",
+        '    if sub != "version":',
+        '    if sub not in ("version", "help"):',
+    ),
+    m("redteam: the guard is off", '    if sub != "version":', "    if False:"),
+    m(
+        "redteam: a git option is read only when exact",
+        'flag == name or (flag.startswith("--") and _long_hit(flag, frozenset({name})))',
+        "flag == name",
+    ),
+    m(
+        "redteam: git global options are exact",
+        '        elif text.split("=", 1)[0] in _GIT_REPO_GLOBALS:',
+        "        elif text in _GIT_REPO_GLOBALS:",
+    ),
+    m(
+        "redteam: git repository options are not read",
+        '        elif text.split("=", 1)[0] in _GIT_REPO_GLOBALS:',
+        "        elif False:",
+    ),
+    m(
+        "redteam: git -O is not banned",
+        'return not (has(*_GIT_BANNED_READ_OPTIONS, "-O") or opts.lead_glob)',
+        "return not (has(*_GIT_BANNED_READ_OPTIONS) or opts.lead_glob)",
+    ),
+    m(
+        "redteam: a git glob is not banned",
+        'return not (has(*_GIT_BANNED_READ_OPTIONS, "-O") or opts.lead_glob)',
+        'return not (has(*_GIT_BANNED_READ_OPTIONS, "-O"))',
+    ),
+    m("redteam: git branch --set-upstream-to", '            "--set-upstream-to",\n', ""),
+    # ---- red team: the read-only table
+    m(
+        "redteam: a leading glob is not read",
+        "    if spec.glob_inject and args.lead_glob:",
+        "    if False:",
+    ),
+    m(
+        "redteam: a glob is dangerous for every program",
+        "    if spec.glob_inject and args.lead_glob:",
+        "    if args.lead_glob:",
+    ),
+    m(
+        "redteam: a glob is dangerous only with a ban",
+        "        guarded = spec.banned_shorts or spec.banned_longs or spec.banned_raw",
+        "        guarded = True",
+    ),
+    m(
+        "redteam: a glob may be many words",
+        "(len(args.pos) > spec.max_positional or args.glob_pos)",
+        "(len(args.pos) > spec.max_positional)",
+    ),
+    m(
+        "redteam: date may set the clock",
+        '    return not (program == "date" and any(_DATE_SET.match(item) for item in args.pos))',
+        "    return True",
+    ),
+    m(
+        "redteam: an option of two dashes",
+        "len(option) > 2 and name.startswith(option)",
+        "name.startswith(option)",
+    ),
+    m(
+        "redteam: wc may be given a glob",
+        '"wc": _ReadOnly(banned_longs=frozenset({"--files0-from"}), glob_inject=False)',
+        '"wc": _ReadOnly(banned_longs=frozenset({"--files0-from"}))',
+    ),
+    m(
+        "redteam: du may be given a glob",
+        '"du": _ReadOnly(banned_longs=frozenset({"--files0-from"}), glob_inject=False)',
+        '"du": _ReadOnly(banned_longs=frozenset({"--files0-from"}))',
+    ),
+    m(
+        "redteam: tail may be given a glob",
+        ', banned_longs=frozenset({"--follow"}), glob_inject=False)',
+        ', banned_longs=frozenset({"--follow"}))',
+    ),
+    m(
+        "redteam: wc --files0-from",
+        '"wc": _ReadOnly(banned_longs=frozenset({"--files0-from"})',
+        '"wc": _ReadOnly(banned_longs=frozenset({"--files0-x"})',
+    ),
+    m(
+        "redteam: du --files0-from",
+        '"du": _ReadOnly(banned_longs=frozenset({"--files0-from"})',
+        '"du": _ReadOnly(banned_longs=frozenset({"--files0-x"})',
+    ),
+    m(
+        "redteam: sort --files0-from",
+        '"--output", "--compress-program", "--files0-from"',
+        '"--output", "--compress-program"',
+    ),
+    m(
+        "redteam: sort --compress-program",
+        '"--output", "--compress-program", "--files0-from"',
+        '"--output", "--files0-from"',
+    ),
+    m(
+        "redteam: sort --output",
+        '"--output", "--compress-program", "--files0-from"',
+        '"--compress-program", "--files0-from"',
+    ),
+    m(
+        "redteam: find -files0-from",
+        '| {"-fprintf", "-fls", "-files0-from"}',
+        '| {"-fprintf", "-fls"}',
+    ),
+    m(
+        "redteam: hostname -b",
+        'banned_shorts="bF", banned_longs=frozenset({"--boot", "--file"}), max_positional=0',
+        'banned_shorts="F", banned_longs=frozenset({"--boot", "--file"}), max_positional=0',
+    ),
+    m(
+        "redteam: hostname -F",
+        'banned_shorts="bF", banned_longs=frozenset({"--boot", "--file"}), max_positional=0',
+        'banned_shorts="b", banned_longs=frozenset({"--boot", "--file"}), max_positional=0',
+    ),
+    m(
+        "redteam: hostname --boot",
+        'banned_shorts="bF", banned_longs=frozenset({"--boot", "--file"}), max_positional=0',
+        'banned_shorts="bF", banned_longs=frozenset({"--file"}), max_positional=0',
+    ),
+    m(
+        "redteam: hostname --file",
+        'banned_shorts="bF", banned_longs=frozenset({"--boot", "--file"}), max_positional=0',
+        'banned_shorts="bF", banned_longs=frozenset({"--boot"}), max_positional=0',
+    ),
+    m(
+        "redteam: hostname NAME",
+        'banned_shorts="bF", banned_longs=frozenset({"--boot", "--file"}), max_positional=0',
+        'banned_shorts="bF", banned_longs=frozenset({"--boot", "--file"})',
+    ),
+    # ---- red team: cd, pushd and $PWD
+    m(
+        "redteam: a folder stack option is followed",
+        '    if any(re.match(r"^[+-]\\d+$", w.text) for w in args_words) or (',
+        "    if False or (",
+    ),
+    m(
+        "redteam: pushd -n is followed",
+        '        program == "pushd" and any(w.text == "-n" for w in args_words)\n',
+        "        False\n",
+    ),
+    m(
+        "redteam: a cd through a link is followed",
+        "        if _key(real) != _key(os.path.normpath(joined)):",
+        "        if False:",
+    ),
+    m(
+        "redteam: a cd does not move $PWD",
+        "    st.add_cwd(new)\n    st.moved = True",
+        "    st.add_cwd(new)",
+    ),
+    m(
+        "redteam: $PWD is the start folder after a cd",
+        "    if st.moved:\n        targets",
+        "    if False:\n        targets",
+    ),
+    m(
+        "redteam: $PWD in a redirect target after a cd",
+        "if any(word.pwd for word in [*simple.words, *targets]):",
+        "if any(word.pwd for word in [*simple.words]):",
+    ),
+    m(
+        "redteam: $PWD in a word after a cd",
+        "if any(word.pwd for word in [*simple.words, *targets]):",
+        "if any(word.pwd for word in [*targets]):",
+    ),
+    m(
+        "redteam: a read of an endless device is not proven",
+        "    if text in _DEV_ENDLESS:\n        st.proven = False\n",
+        "    if text in _DEV_ENDLESS:\n        pass\n",
+    ),
+    m(
+        "redteam: an endless device is a plain path",
+        "    if text in _DEV_ENDLESS:\n        st.proven = False\n        return\n",
+        "",
+    ),
+    m(
+        "redteam: /dev/zero is harmless",
+        '_DEV_ENDLESS = _words("/dev/zero /dev/random /dev/urandom")',
+        '_DEV_ENDLESS = _words("/dev/random /dev/urandom")',
+    ),
+    m(
+        "redteam: /dev/random is harmless",
+        '_DEV_ENDLESS = _words("/dev/zero /dev/random /dev/urandom")',
+        '_DEV_ENDLESS = _words("/dev/zero /dev/urandom")',
+    ),
+    m(
+        "redteam: /dev/urandom is harmless",
+        '_DEV_ENDLESS = _words("/dev/zero /dev/random /dev/urandom")',
+        '_DEV_ENDLESS = _words("/dev/zero /dev/random")',
+    ),
+    m(
+        "redteam: /dev/null is an outside path",
+        '_DEV_OK = _words("/dev/null /dev/stdin /dev/stdout /dev/stderr")',
+        '_DEV_OK = _words("/dev/stdin /dev/stdout /dev/stderr")',
+    ),
+    m(
+        "redteam: /dev/stdin is an outside path",
+        '_DEV_OK = _words("/dev/null /dev/stdin /dev/stdout /dev/stderr")',
+        '_DEV_OK = _words("/dev/null /dev/stdout /dev/stderr")',
+    ),
+    m(
+        "redteam: /dev/stdout is an outside path",
+        '_DEV_OK = _words("/dev/null /dev/stdin /dev/stdout /dev/stderr")',
+        '_DEV_OK = _words("/dev/null /dev/stdin /dev/stderr")',
+    ),
+    m(
+        "redteam: /dev/stderr is an outside path",
+        '_DEV_OK = _words("/dev/null /dev/stdin /dev/stdout /dev/stderr")',
+        '_DEV_OK = _words("/dev/null /dev/stdin /dev/stdout")',
+    ),
+    m(
+        "redteam: the version flag of an unknown program is plain",
+        "        if family is None and program not in _READONLY and program not in _VERSION_PURE:",
+        "        if False:",
+    ),
+    m(
+        "redteam: the version flag of a known program is project code",
+        "        if family is None and program not in _READONLY and program not in _VERSION_PURE:",
+        "        if family is None and program not in _READONLY:",
+    ),
+    m(
+        "redteam: the version flag of a read-only program is project code",
+        "        if family is None and program not in _READONLY and program not in _VERSION_PURE:",
+        "        if family is None and program not in _VERSION_PURE:",
+    ),
+    m(
+        "redteam: the version flag of an interpreter is project code",
+        "        if family is None and program not in _READONLY and program not in _VERSION_PURE:",
+        "        if program not in _READONLY and program not in _VERSION_PURE:",
+    ),
+    m(
+        "redteam: the version flag of an unknown program sets nothing",
+        "            st.project_code = True\n            st.proven = False\n        return\n\n"
+        "    if family is not None:",
+        "            pass\n        return\n\n    if family is not None:",
+    ),
+    m(
+        "redteam: the version flag of an unknown program stays proven in a trusted project",
+        "            st.project_code = True\n            st.proven = False\n        return\n\n"
+        "    if family is not None:",
+        "            st.project_code = True\n        return\n\n    if family is not None:",
+    ),
+    m(
+        "redteam: the version flag of an unknown program is not project code",
+        "            st.project_code = True\n            st.proven = False\n        return\n\n"
+        "    if family is not None:",
+        "            st.proven = False\n        return\n\n    if family is not None:",
+    ),
+    m(
+        "redteam: hg --version is pure",
+        '    "git svn docker docker-compose podman gh make',
+        '    "git hg svn docker docker-compose podman gh make',
+    ),
+    m(
+        "redteam: -v is the version flag of every program",
+        'args_words[0].text == _SHORT_VERSION.get(family or "")',
+        'args_words[0].text == "-v"',
+    ),
+    m(
+        "redteam: no short version flag",
+        'args_words[0].text == _SHORT_VERSION.get(family or "")',
+        "False",
+    ),
+    m("redteam: node -v is not a version flag", '    "node": "-v",', '    "node": "-V",'),
+    m("redteam: ruby -v is not a version flag", '    "ruby": "-v",', '    "ruby": "-V",'),
+    m("redteam: perl -v is not a version flag", '    "perl": "-v",', '    "perl": "-V",'),
+    m("redteam: php -v is not a version flag", '    "php": "-v",', '    "php": "-V",'),
+    m("redteam: lua -v is not a version flag", '    "lua": "-v",', '    "lua": "-V",'),
+    m("redteam: python -VV is not a version flag", '    "python": "-VV",', '    "python": "-vv",'),
 ]
 
 

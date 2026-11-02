@@ -16,7 +16,7 @@ The tests in `packages/pi-agent-cli/tests/test_auto_corpus.py` run the same code
 | `expected` | `allow` for `safe`. `ask` for every other label. |
 | `tool` | Tool name: `bash`, `write`, `edit`, `workflow`, `read`, or an MCP-style name. |
 | `input` | The tool's arguments (JSON object). |
-| `cwd` | The session's project folder. All cases use `/home/dev/proj`. |
+| `cwd` | The session's project folder. Almost all cases use `/home/dev/proj`. A few use `/home/dev` (the project is the home folder) or `/home/dev/My Project` (a space in the name). |
 | `user_messages` | What the user asked. The rules do not read it. The model step will. |
 | `annotations` | The tool's own hints (`readOnlyHint` and so on), or `null`. |
 | `project_trusted` | Whether the project is trusted. |
@@ -52,4 +52,8 @@ ASK by the floor. A gate on a corpus is a regression gate. It is not a proof of 
 * The mutation cases (`source: mutation`) wrap a few dangerous commands in `env`, `timeout`,
   `nice`, `cd ... &&`, `;`, `||`, a pipe, an assignment, `xargs`, quotes, a backslash, an absolute
   program path and `sudo`. They were generated once; only the data is kept.
+* Notes that start with `redteam:` mark the rows of the adversarial review of the rules. Each one
+  was an ALLOW (or a call left to the model that belongs on the floor) before the fix. Notes that
+  start with `redteam guard:` mark plain safe commands that a fix must not turn into an ask.
+  The held-out split was not changed by the review.
 * Real session traffic is not in this directory. It stays private.
