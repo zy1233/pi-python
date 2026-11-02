@@ -36,8 +36,8 @@ tracked_crates = [
 # removes lines.
 [gates.residue]
 "grok agent" = 0
-"leader" = 239
-"x.ai" = 282
+"leader" = 214
+"x.ai" = 253
 
 # ADR1 (plan section 10.16): the pager asks the agent which sessions exist (`session/list`) and
 # reads no session files itself. Production code in these crates (paths under tui/crates) must
@@ -70,12 +70,13 @@ package = "pi-pager-bin"
 # the unused-dependency sweep and the removal of pi-memory / pi-fsnotify. Then 970 (plan r16: ten
 # packages left when `pi-shell` dropped the dependencies that no source file named: `pi-workflow`
 # and nine registry packages; one local run on Linux). A new dependency has to lower the count
-# elsewhere or raise this number on purpose.
-x86_64-unknown-linux-gnu = 970
+# elsewhere or raise this number on purpose. Then 965 (the removal of `pi-update`: it left, and
+# with it `indicatif`, `console` and `unit-prefix`; one local run on Linux).
+x86_64-unknown-linux-gnu = 965
 
 [check]
-# Consumer build: everything that ships (`zypi`, the minimal pager, the updater).
-packages = ["pi-pager-bin", "pi-pager-minimal", "pi-update"]
+# Consumer build: everything that ships (`zypi`, the minimal pager).
+packages = ["pi-pager-bin", "pi-pager-minimal"]
 # Warning ceiling across those packages. Linux and macOS both show 0: the crate-root
 # `#![allow(dead_code, ...)]` attributes are gone (plan A.4) and the code they hid was deleted.
 max_warnings = 0
@@ -173,8 +174,10 @@ targets = [
 # the Python agent does not back (3 in `app::agent_settings`, 2 in `settings_modal`): 5,656 (one
 # local run on Linux; 8,505 over the ten suites with the 10 new ones of `pi-pager-bin`). Then +1
 # net for the resume picker without an age limit (plan decision 9: one test gone, two new):
-# 5,657 (one local run on Linux; 8,506 over the ten suites).
-reference_passed = 5657
+# 5,657 (one local run on Linux; 8,506 over the ten suites). Then -3 with the update notice of the
+# welcome screen and of the minimal mode (one test on the welcome screen, two on the notice;
+# `pi-update` is gone and nothing could set them): 5,654 (one local run on Linux).
+reference_passed = 5654
 min_passed = 5300
 
 # Lib tests only; they were outside the manifest until r8 (plan section 10.10: 1,092 passed,
@@ -206,9 +209,9 @@ targets = ["--bin", "zypi"]
 # but the binary is named zypi (fork-rename leftover, unrelated to the runtime removal).
 # 20 in the last CI run plus the test that names zypi as the agent's parent in `-p` mode. Then +10
 # for the flags that an interactive session refuses (`interactive_flags`): 31 (one local run on
-# Linux).
-reference_passed = 31
-min_passed = 31
+# Linux). Then +2 for the version policy (`version_policy.rs`, moved here from `pi-update`): 33.
+reference_passed = 33
+min_passed = 33
 
 [[test.suite]]
 package = "pi-acp-lib"

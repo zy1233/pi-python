@@ -188,7 +188,6 @@ pub(crate) struct TerminalState {
 /// Result of the event loop run.
 pub(crate) struct RunResult {
     pub exit_info: Option<super::ExitInfo>,
-    pub quit_for_update: bool,
     /// When set, the process should re-exec into the other screen mode after
     /// terminal restore. See `/minimal` and `/fullscreen`.
     pub relaunch: Option<super::app_view::ScreenModeRelaunch>,
@@ -903,9 +902,6 @@ pub(crate) async fn run(
     remote_settings: Option<pi_shell::util::config::RemoteSettings>,
     mut term_state: TerminalState,
     materialized: crate::app::session_startup::MaterializedStartup,
-    bg_update_rx: Option<
-        tokio::sync::oneshot::Receiver<Option<pi_update::auto_update::UpdateAvailable>>,
-    >,
     mut writer_event_rx: tokio::sync::mpsc::UnboundedReceiver<crate::render::draw::WriterEvent>,
 ) -> anyhow::Result<RunResult> {
     // Initialize tracing capture. The channel `rx` will be wired to a
@@ -1971,10 +1967,6 @@ pub(crate) async fn run(
     // armed only when the startup query is still unanswered.
     let mut xt_filter = super::xt_filter::XtversionFilter::new();
 
-    // Background update check: resolves when the spawned update task
-    // determines whether a newer version is available.
-    let mut bg_update_rx = bg_update_rx;
-
     debug_assert_eq!(term_state.initial_theme, theme_cache::current_kind());
     let mut appearance_watcher =
         SystemAppearanceWatcher::start_if_auto(theme_cache::is_auto_mode());
@@ -2396,33 +2388,6 @@ pub(crate) async fn run(
                             tracing::error!("Spawned task panicked: {join_err}");
                         }
                     }
-                }
-            }
-
-            // Background update check completed.
-            result = async {
-                match bg_update_rx.as_mut() {
-                    Some(rx) => rx.await.ok().flatten(),
-                    None => std::future::pending().await,
-                }
-            } => {
-                // Consume the receiver so this arm becomes inert.
-                bg_update_rx = None;
-                if let Some(update) = result {
-                    tracing::info!(
-                        latest_version = %update.latest_version,
-                        "Background update check: newer version available"
-                    );
-                    let latest = update.latest_version;
-                    app.pending_update_version = Some(latest.clone());
-                    // The full TUI surfaces this on the welcome screen, which
-                    // minimal has none of — commit a one-line notice into
-                    // native scrollback instead (update notice). `app`, not
-                    // `term_state`: the mode can switch at runtime.
-                    if app.screen_mode.is_minimal() {
-                        dispatch::commit_minimal_update_notice(&mut app, &latest);
-                    }
-                    presenter.request(false);
                 }
             }
 
@@ -2904,7 +2869,6 @@ fn finish_run(app: &mut AppView) -> RunResult {
     });
     RunResult {
         exit_info,
-        quit_for_update: app.quit_for_update,
         relaunch: app.relaunch.clone(),
     }
 }

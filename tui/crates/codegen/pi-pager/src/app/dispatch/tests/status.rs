@@ -188,24 +188,4 @@ fn dispatch_confirm_reset_setting_reset_dispatches_typed_setter_for_shared_enum(
     });
 }
 
-// ── Minimal update-notice tests ──────────────────────────────────────
-
-#[test]
-fn minimal_update_notice_commits_a_system_block() {
-    let mut app = test_app_with_agent();
-    let before = agent_scrollback_len(&app);
-    commit_minimal_update_notice(&mut app, "9.9.9");
-    assert_eq!(agent_scrollback_len(&app), before + 1);
-    let text = last_system_text(&app, AgentId(0));
-    assert!(text.contains("Update available: v9.9.9"), "got: {text:?}");
-    assert!(text.contains("Restart to apply."), "got: {text:?}");
-}
-
-#[test]
-fn minimal_update_notice_no_active_agent_is_noop() {
-    let mut app = test_app();
-    // Must not panic and must not require an agent.
-    commit_minimal_update_notice(&mut app, "9.9.9");
-}
-
 // ── Usage modal (full TUI) dispatch tests ────────────────────────────

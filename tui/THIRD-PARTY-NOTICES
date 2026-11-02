@@ -1967,17 +1967,6 @@ Additional requirements / notices:
   Upstream license expression: Apache-2.0 OR MIT. For this distribution, obligations are satisfied under: MIT.
 
 --------------------------------------------------------------------------------
-console 0.16.1
---------------------------------------------------------------------------------
-Source:  https://github.com/console-rs/console
-License: MIT
-
-Copyright notice:
-  Copyright (c) 2017 Armin Ronacher <armin.ronacher@active-4.com>
-
-License text: see Part II — MIT
-
---------------------------------------------------------------------------------
 const-hex 1.18.1
 --------------------------------------------------------------------------------
 Source:  https://github.com/danipopes/const-hex
@@ -3091,23 +3080,6 @@ License: MIT  (upstream declares: Apache-2.0 OR MIT)
 
 Copyright notice:
   Copyright (c) 2020-2022 RustCrypto Developers
-
-License text: see Part II — MIT
-
-Additional requirements / notices:
-  Upstream license expression: Apache-2.0 OR MIT. For this distribution, obligations are satisfied under: MIT.
-
---------------------------------------------------------------------------------
-encode_unicode 1.0.0
---------------------------------------------------------------------------------
-Source:  https://github.com/tormol/encode_unicode
-License: MIT  (upstream declares: Apache-2.0 OR MIT)
-
-Copyright notice:
-  Copyright 2018-2020 Torbjørn Birch Moltu
-  Copyright 2016-2022 Torbjørn Birch Moltu
-  Copyright 2018 Aljoscha Meyer
-  Copyright 2018-2019 Torbjørn Birch Moltu
 
 License text: see Part II — MIT
 
@@ -5742,17 +5714,6 @@ License text: see Part II — MIT
 
 Additional requirements / notices:
   Upstream license expression: Apache-2.0 OR MIT. For this distribution, obligations are satisfied under: MIT.
-
---------------------------------------------------------------------------------
-indicatif 0.18.3
---------------------------------------------------------------------------------
-Source:  https://github.com/console-rs/indicatif
-License: MIT
-
-Copyright notice:
-  Copyright (c) 2017 Armin Ronacher <armin.ronacher@active-4.com>
-
-License text: see Part II — MIT
 
 --------------------------------------------------------------------------------
 indoc 2.0.7
@@ -12538,17 +12499,6 @@ License text: see Part II — MIT
 
 Additional requirements / notices:
   Upstream license expression: MIT OR Apache-2.0. For this distribution, obligations are satisfied under: MIT.
-
---------------------------------------------------------------------------------
-unit-prefix 0.5.1
---------------------------------------------------------------------------------
-Source:  https://github.com/commons-rs/unit-prefix
-License: MIT
-
-Copyright notice:
-  Copyright (c) 2024 Benjamin Sago, Fabio Valentini
-
-License text: see Part II — MIT
 
 --------------------------------------------------------------------------------
 unsafe-libyaml 0.2.11

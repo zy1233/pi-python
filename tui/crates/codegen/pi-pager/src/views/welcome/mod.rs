@@ -448,7 +448,6 @@ pub(super) fn render_version_badge(
         spans.push(sep);
     }
 
-    let channel = pi_update::channel_label();
     match &mode {
         VersionBadgeMode::Full { .. } => {
             spans.push(Span::styled(
@@ -458,18 +457,11 @@ pub(super) fn render_version_badge(
                     .add_modifier(Modifier::BOLD),
             ));
             spans.push(Span::styled(
-                format!("{}{}", pi_version::VERSION, channel),
+                pi_version::VERSION.to_string(),
                 Style::default().fg(theme.gray),
             ));
         }
-        VersionBadgeMode::HeroFooter => {
-            if !channel.is_empty() {
-                spans.push(Span::styled(
-                    channel.trim(),
-                    Style::default().fg(theme.gray),
-                ));
-            }
-        }
+        VersionBadgeMode::HeroFooter => {}
         VersionBadgeMode::HeroInline => {
             spans.push(Span::styled(
                 format!("{}  ", crate::brand::PRODUCT_TITLE),
@@ -484,7 +476,7 @@ pub(super) fn render_version_badge(
         }
     }
 
-    // Only alpha and beta builds print a channel, so on stable the spans can end on a separator.
+    // The hero footer prints no channel, so the spans can end on a separator.
     if spans.last().is_some_and(|s| s.content == SEP) {
         spans.pop();
     }
@@ -602,7 +594,6 @@ pub struct WelcomeRenderParams<'a> {
     pub compact: bool,
     pub pending_hint: Option<crate::views::shortcuts_bar::PendingHint>,
     pub startup_warnings: &'a [StartupWarning],
-    pub pending_update_version: Option<&'a str>,
     pub is_api_key_auth: bool,
     pub welcome_tick: u64,
     pub gate: Option<&'a pi_shell::auth::GateInfo>,
@@ -1580,15 +1571,9 @@ fn render_welcome_done(
         let action_line = if w.action.is_some() { 1 } else { 0 };
         msg_lines + action_line + 1 // +1 for buffer spacing
     });
-    let has_update_tip = p.pending_update_version.is_some();
-    // Tip slot precedence: pending update > privacy banner (wraps, so its
-    // height depends on width) > random tip. The update
-    // outranks the upsell so a ready update is never invisible; the banner
-    // takes the slot back once it's applied.
+    // Tip slot precedence: privacy banner (wraps, so its height depends on width) > random tip.
     let tip_height = if !show_picker {
-        if has_update_tip {
-            1u16
-        } else if p.privacy_banner {
+        if p.privacy_banner {
             // Same inset the banner paint below uses, so the reserved rows
             // and the wrapped row count can't drift.
             let inset = prompt::prompt_inset(p.compact);
@@ -1861,9 +1846,8 @@ fn render_welcome_done(
         );
         (None, None)
     } else {
-        // Privacy banner owns the tip slot when visible (above the prompt),
-        // except a pending-update notification, which outranks it.
-        if p.privacy_banner && p.pending_update_version.is_none() && layout.tip.height > 0 {
+        // Privacy banner owns the tip slot when visible (above the prompt).
+        if p.privacy_banner && layout.tip.height > 0 {
             let [_, tip_centered, _] = Layout::horizontal([
                 Constraint::Min(0),
                 Constraint::Length(content_area.width),
@@ -1883,40 +1867,6 @@ fn render_welcome_done(
             privacy_banner_opt_out_rect = Some(rects.opt_out);
             privacy_banner_terms_rect = Some(rects.terms);
             privacy_banner_policy_rect = Some(rects.policy);
-        } else if let Some(ver) = p.pending_update_version
-            && layout.tip.height > 0
-        {
-            // Background update notification in the tip area.
-            let [_, tip_centered, _] = Layout::horizontal([
-                Constraint::Min(0),
-                Constraint::Length(content_area.width),
-                Constraint::Min(0),
-            ])
-            .flex(Flex::Center)
-            .areas(layout.tip);
-            let inset = prompt::prompt_inset(p.compact);
-            let tip_inset = Rect {
-                x: tip_centered.x + inset,
-                y: tip_centered.y,
-                width: tip_centered.width.saturating_sub(inset * 2),
-                height: tip_centered.height,
-            };
-            let key_name = "ctrl+u";
-            let line = Line::from(vec![
-                Span::styled(
-                    "Update: ",
-                    Style::default()
-                        .fg(theme.accent_user)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!("v{ver} available, press {key_name} to restart"),
-                    Style::default().fg(theme.accent_user),
-                ),
-            ]);
-            Paragraph::new(line)
-                .style(Style::default().bg(theme.bg_base))
-                .render(tip_inset, buf);
         }
 
         let warning = p.credit_balance.and_then(|bal| {
@@ -1942,8 +1892,8 @@ fn render_welcome_done(
             p.prompt_focus,
             prompt,
             &usage_info,
-            if p.privacy_banner || p.pending_update_version.is_some() {
-                // Banner/update tip already rendered above with custom styling.
+            if p.privacy_banner {
+                // Banner already rendered above with custom styling.
                 None
             } else {
                 p.tip
@@ -2468,7 +2418,6 @@ mod tests {
             compact: false,
             pending_hint: None,
             startup_warnings: &[],
-            pending_update_version: None,
             is_api_key_auth: false,
             welcome_tick: 0,
             gate: None,
@@ -2491,17 +2440,6 @@ mod tests {
         let mut picker = PickerState::default();
         render_welcome(area, &mut buf, params, &mut prompt, &mut picker);
         buffer_text(&buf)
-    }
-
-    #[test]
-    fn pending_update_shows_available_version() {
-        let auth = AuthState::Done;
-        let trust = TrustState::Done;
-        let mut params = render_params(&auth, &trust, None);
-        params.pending_update_version = Some("9.9.9");
-
-        let text = render_done_text(&params);
-        assert!(text.contains("v9.9.9 available"), "{text}");
     }
 
     fn png() -> [u8; 8] {

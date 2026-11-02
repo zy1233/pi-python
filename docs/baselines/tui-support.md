@@ -2,7 +2,7 @@
 
 This file is generated. Do not edit it by hand.
 
-- Command: `python scripts/tui_callgraph.py keep`. Commit: `ebc6106`.
+- Command: `python scripts/tui_callgraph.py keep`. Commit: `6af773f`.
 - Run the command again after a change that moves code between modules or crates.
 - It replaces the hand-written list of examples in item 0.5 of
   [`PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`](../PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md).
@@ -11,7 +11,7 @@ This file is generated. Do not edit it by hand.
 
 - A *unit* is a module, cut to 2 path segments.
 - A unit is *live* when live non-test code refers to it.
-  The product crates (`pi-pager-bin`, `pi-pager`, `pi-pager-minimal`, `pi-update`) are live in full.
+  The product crates (`pi-pager-bin`, `pi-pager`, `pi-pager-minimal`) are live in full.
 - The numbers are an estimate. A `use` counts. A type in a signature counts.
   A macro that reaches code without a name does not count.
 - A *dead* unit is a candidate for deletion, not proof. Delete it, then run `cargo check`.
@@ -50,15 +50,15 @@ Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampl
 
 | unit | lines | references from live code outside |
 |---|---|---|
-| `util::config` | 5,975 | 93 |
+| `util::config` | 5,975 | 92 |
 | `auth::manager` | 3,754 | 0 |
 | `agent::config` | 3,110 | 26 |
 | `extensions::notification` | 2,195 | 9 |
-| `config` | 1,361 | 18 |
+| `config` | 1,361 | 17 |
 | `auth::recovery` | 1,073 | 0 |
 | `auth::oidc` | 927 | 0 |
 | `agent::config_model_override_parse` | 860 | 0 |
-| `managed_config` | 763 | 5 |
+| `managed_config` | 763 | 0 |
 | `remote::client` | 748 | 0 |
 | `auth::refresh` | 723 | 0 |
 | `auth::attribution` | 708 | 0 |
@@ -91,11 +91,11 @@ Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampl
 | `util::dual_clock` | 46 | 0 |
 | `extensions::prompt_meta` | 43 | 1 |
 | `instrumentation` | 40 | 0 |
-| `auth` | 33 | 20 |
+| `auth` | 33 | 19 |
 | `session::pending_interaction` | 31 | 0 |
 | `auth::devbox_login_stub` | 25 | 0 |
 | `<root>` | 24 | 0 |
-| `util` | 16 | 63 |
+| `util` | 16 | 59 |
 | `sampling` | 12 | 0 |
 | `session::image_normalize` | 12 | 0 |
 | `agent::folder_trust` | 11 | 1 |
@@ -236,7 +236,7 @@ Check these dead units first. Each has `impl` blocks for types that other units 
 | `computer::task_log` | 54 | 0 |
 | `reminders::lsp_diagnostics` | 48 | 0 |
 | `types::definition` | 45 | 3 |
-| `util` | 45 | 51 |
+| `util` | 45 | 40 |
 | `<root>` | 42 | 0 |
 | `types` | 37 | 24 |
 | `notification` | 34 | 7 |

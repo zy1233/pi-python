@@ -100,12 +100,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             effects.push(Effect::Quit);
             effects
         }
-        Action::QuitForUpdate => {
-            let mut effects = unregister_all_active_sessions(app);
-            app.quit_for_update = true;
-            effects.push(Effect::Quit);
-            effects
-        }
         Action::NewSession => dispatch_new_session(app),
         Action::ChooseNewSessionMode => open_new_session_question(app),
         Action::ExitSession => dispatch_exit_session(app),

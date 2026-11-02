@@ -35,8 +35,6 @@ pub enum SwitchModelError {
 pub enum Action {
     /// Quit the application.
     Quit,
-    /// Restart the binary to pick up a downloaded update.
-    QuitForUpdate,
     /// Quit without double-press confirmation (e.g., from command palette or pre-login screens).
     QuitConfirmed,
     /// Create a new session from the welcome screen.

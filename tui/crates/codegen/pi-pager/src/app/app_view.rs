@@ -903,13 +903,6 @@ pub struct AppView {
     pub startup_warnings: Vec<crate::startup::StartupWarning>,
     /// Whether the user authenticated with an API key (shown in the version badge).
     pub is_api_key_auth: bool,
-    /// Latest version string from a background update check. Set when
-    /// a newer version is detected; rendered as a notification on the
-    /// welcome screen.
-    pub pending_update_version: Option<String>,
-    /// When true, the event loop should exit so the user can relaunch
-    /// to pick up the downloaded update.
-    pub quit_for_update: bool,
     /// When set, the event loop should exit and the process re-exec into the
     /// other screen mode. Driven by `/minimal` and `/fullscreen`. Captures the
     /// session id at action time so a later teardown cannot drop `--resume`.
@@ -1276,8 +1269,6 @@ impl AppView {
             gate_verify_gen: 0,
             startup_warnings: Vec::new(),
             is_api_key_auth: false,
-            pending_update_version: None,
-            quit_for_update: false,
             relaunch: None,
             welcome_doc_viewer: None,
             screen_mode: ScreenMode::Inline,
@@ -1853,7 +1844,6 @@ impl AppView {
                     sp_loading,
                     sp_state: &mut self.session_picker_state,
                     welcome_doc_viewer: &mut self.welcome_doc_viewer,
-                    has_pending_update: self.pending_update_version.is_some(),
                     session_picker_grouped: self.session_picker_grouped,
                     sp_pending_delete: &mut self.session_picker_pending_delete,
                 },
@@ -2097,7 +2087,6 @@ struct WelcomeInputCtx<'a> {
     sp_loading: bool,
     sp_state: &'a mut crate::views::picker::PickerState,
     welcome_doc_viewer: &'a mut Option<crate::views::modal::ActiveModal>,
-    has_pending_update: bool,
     session_picker_grouped: bool,
     sp_pending_delete: &'a mut Option<crate::views::session_picker::PendingDelete>,
 }
@@ -2365,9 +2354,6 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
         if matches!(ctx.auth_state, AuthState::Done) {
             if key!(F(3)).matches(key) {
                 return InputOutcome::Action(Action::FetchSessionList);
-            }
-            if ctx.has_pending_update && key!('u', CONTROL).matches(key) {
-                return InputOutcome::Action(Action::QuitForUpdate);
             }
         }
         if matches!(ctx.auth_state, AuthState::Done) && crate::input::key::is_shift_tab(key) {
@@ -3030,7 +3016,6 @@ impl AppView {
                             compact,
                             pending_hint,
                             startup_warnings: &self.startup_warnings,
-                            pending_update_version: self.pending_update_version.as_deref(),
                             welcome_tick: self.welcome_tick,
                             gate: self.gate.as_ref(),
                             subscription_tier: self.subscription_tier.as_deref(),
