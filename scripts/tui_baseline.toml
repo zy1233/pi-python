@@ -150,6 +150,9 @@ targets = [
     # developer who has no such Python can still run the manifest.
     "--test",
     "python_agent_e2e",
+    # The guide pages under pi-pager/docs/user-guide name no stale product (plan D.6).
+    "--test",
+    "user_guide_pages",
 ]
 # 5,559 in the last CI run before r8 (33374a3, `doctor_cmd::` skipped) plus the 12 `doctor_cmd::`
 # tests plus the 6 `agent_stderr` tests of the agent's stderr log: 5,577 (the second CI run of
@@ -180,8 +183,10 @@ targets = [
 # welcome screen and of the minimal mode (one test on the welcome screen, two on the notice;
 # `pi-update` is gone and nothing could set them): 5,654 (one local run on Linux). Then -2 for
 # the setting `auto_update` (two tests of its row on the settings page): 5,652 (one local run on
-# Linux).
-reference_passed = 5652
+# Linux). Then -14 with the guide viewer (plan D.6): 15 tests went with `docs.rs`, `DocPicker`,
+# `DocViewer` and the welcome doc viewer, and one new integration test (`user_guide_pages`) keeps
+# the check that the pages name no stale product: 5,638 (hand count from 5,652; CI counts it).
+reference_passed = 5638
 min_passed = 5300
 
 # Lib tests only; they were outside the manifest until r8 (plan section 10.10: 1,092 passed,

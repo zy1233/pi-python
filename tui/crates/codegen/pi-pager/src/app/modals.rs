@@ -5,7 +5,7 @@
 //! Extracted from `agent_view.rs` as a sibling `impl AgentView` block (same
 //! pattern as `queue_edit.rs` and `mouse.rs`).
 
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
@@ -116,7 +116,6 @@ impl AgentView {
             ActiveModal::CommandPalette { .. }
                 | ActiveModal::ArgPicker { .. }
                 | ActiveModal::SessionPicker { .. }
-                | ActiveModal::DocPicker { .. }
         ) {
             // Extract window state for handle_modal_key.
             let (window, query_empty, esc_clears) = match modal {
@@ -128,9 +127,6 @@ impl AgentView {
                 }
                 ActiveModal::SessionPicker { window, state, .. } => {
                     (window, state.query().is_empty(), false)
-                }
-                ActiveModal::DocPicker { window, state, .. } => {
-                    (window, state.query().is_empty(), true)
                 }
                 _ => unreachable!(),
             };
@@ -154,31 +150,18 @@ impl AgentView {
                                 state.selected = 0;
                                 state.scroll_offset = None;
                             }
-                            ActiveModal::DocPicker { state, .. } => {
-                                state.set_query("");
-                                state.selected = 0;
-                                state.scroll_offset = None;
-                            }
                             _ => {}
                         }
                         return InputOutcome::Changed;
                     }
                     // Otherwise delegate close to the picker handler which
                     // knows about palette snapshots / restore logic.
-                    if matches!(self.active_modal, Some(ActiveModal::DocPicker { .. })) {
-                        let ev = crossterm::event::Event::Key(*key);
-                        return self.handle_doc_input(&ev);
-                    }
                     let ev = crossterm::event::Event::Key(*key);
                     return self.handle_palette_or_arg_input_with_registry(&ev, registry);
                 }
                 ModalWindowOutcome::Unhandled => {
                     // Non-Esc key (including Left/Right/h/l):
                     // forward to picker input handler.
-                    if matches!(self.active_modal, Some(ActiveModal::DocPicker { .. })) {
-                        let ev = crossterm::event::Event::Key(*key);
-                        return self.handle_doc_input(&ev);
-                    }
                     let ev = crossterm::event::Event::Key(*key);
                     return self.handle_palette_or_arg_input_with_registry(&ev, registry);
                 }
@@ -186,42 +169,6 @@ impl AgentView {
             }
         }
 
-        // DocViewer: route through ModalWindow chrome, then handle scroll.
-        if let ActiveModal::DocViewer {
-            window,
-            previous_palette,
-            standalone,
-            ..
-        } = modal
-        {
-            let chrome_cfg = mw::ModalWindowConfig {
-                title: "",
-                tabs: None,
-                shortcuts: &[],
-                sizing: mw::ModalSizing::default(),
-                fold_info: None,
-            };
-            let outcome = mw::handle_modal_key(window, key, &chrome_cfg);
-            match outcome {
-                ModalWindowOutcome::CloseRequested => {
-                    if *standalone {
-                        self.active_modal = None;
-                    } else {
-                        // Esc in DocViewer -> back to DocPicker list.
-                        // Shuttle the palette snapshot so DocPicker can restore it on its own Esc.
-                        let prev = previous_palette.take();
-                        self.active_modal = Some(crate::views::modal::howto_list_modal(prev));
-                    }
-                    return InputOutcome::Changed;
-                }
-                ModalWindowOutcome::Unhandled => {
-                    // Scroll keys (no fold for doc viewer).
-                    let ev = crossterm::event::Event::Key(*key);
-                    return self.handle_doc_input(&ev);
-                }
-                _ => return InputOutcome::Changed,
-            }
-        }
         // ShortcutsHelp: modal window chrome first, then picker / detail.
         if let ActiveModal::ShortcutsHelp {
             entries,
@@ -377,8 +324,6 @@ impl AgentView {
             ActiveModal::CommandPalette { .. }
             | ActiveModal::ArgPicker { .. }
             | ActiveModal::SessionPicker { .. }
-            | ActiveModal::DocPicker { .. }
-            | ActiveModal::DocViewer { .. }
             | ActiveModal::ShortcutsHelp { .. }
             | ActiveModal::Settings { .. }
             | ActiveModal::ResetSettingsConfirm { .. } => unreachable!(),
@@ -393,9 +338,6 @@ impl AgentView {
         use crate::views::modal::ActiveModal;
 
         let event = crossterm::event::Event::Paste(text.to_owned());
-        if matches!(self.active_modal, Some(ActiveModal::DocPicker { .. })) {
-            return self.handle_doc_input(&event);
-        }
         if matches!(
             self.active_modal,
             Some(
@@ -942,129 +884,6 @@ impl AgentView {
         }
     }
 
-    /// Basic input handler for documentation modals (DocPicker list / DocViewer panel).
-    fn handle_doc_input(&mut self, ev: &crossterm::event::Event) -> InputOutcome {
-        use crate::views::modal::ActiveModal;
-        use crate::views::picker::{
-            PickerConfig, PickerEntry, PickerOutcome, PickerRow, handle_picker_input,
-        };
-
-        // DocPicker list: use unified picker for nav/select
-        if let Some(ActiveModal::DocPicker {
-            entries,
-            state,
-            previous_palette,
-            ..
-        }) = &mut self.active_modal
-        {
-            // Filter entries based on search query
-            let filtered: Vec<_> = if state.query().is_empty() {
-                entries.iter().enumerate().collect()
-            } else {
-                let q = state.query().to_lowercase();
-                entries
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, e)| {
-                        e.title.to_lowercase().contains(&q)
-                            || e.description.to_lowercase().contains(&q)
-                    })
-                    .collect()
-            };
-            let entry_count = filtered.len();
-            let non_sel: Vec<bool> = vec![false; entry_count];
-            let _picker_entries: Vec<PickerEntry> = filtered
-                .iter()
-                .map(|(i, e)| {
-                    PickerEntry::Row(PickerRow {
-                        label: &e.title,
-                        right_label: &e.description,
-                        selected: filtered
-                            .get(state.selected)
-                            .map(|(o, _)| *o)
-                            .unwrap_or(usize::MAX)
-                            == *i,
-                        expanded: false,
-                        dimmed: false,
-                        indent: 0,
-                        badge: "",
-                        badge_color: None,
-                        collapsible: false,
-                        underline_last_desc: false,
-                        fields: &[],
-                        description_lines: &[],
-                        summary_lines: &[],
-                    })
-                })
-                .collect();
-            let config = PickerConfig {
-                title: Some("How-to Guides"),
-                show_search_hint: false,
-                expandable: false,
-                esc_clears_query: true,
-                shortcuts: Some(crate::views::picker::picker_shortcuts()),
-                pending_hint: None,
-                non_selectable: &non_sel,
-                non_selectable_clickable: &[],
-                shortcuts_area: None,
-                tabs: None,
-                active_tab: 0,
-                action_keys: &[],
-                disable_search: false,
-                compact_bottom_bar: false,
-                search_only_on_slash: false,
-                vim_normal_first: crate::appearance::cache::load_vim_mode(),
-            };
-            // Handle input
-            match handle_picker_input(ev, state, entry_count, &config) {
-                PickerOutcome::Selected(i) => {
-                    if let Some((orig_idx, _)) = filtered.get(i)
-                        && let Some(doc) = entries.get(*orig_idx)
-                    {
-                        let title = doc.title.clone();
-                        let content = doc.content.to_string();
-                        // Shuttle the palette snapshot through DocViewer so it can
-                        // be passed back to DocPicker when the user presses Esc.
-                        let prev = previous_palette.take();
-                        self.active_modal = Some(ActiveModal::DocViewer {
-                            title,
-                            content,
-                            scroll: 0,
-                            window: crate::views::modal_window::ModalWindowState::new(),
-                            cached_lines: None,
-                            previous_palette: prev,
-                            standalone: false,
-                        });
-                    }
-                    InputOutcome::Changed
-                }
-                PickerOutcome::Closed => {
-                    // Restore the command palette if we have a saved snapshot
-                    // (same pattern as ArgPicker / SessionPicker).
-                    if let Some(snapshot) = previous_palette.take() {
-                        self.active_modal = Some(ActiveModal::CommandPalette {
-                            entries: snapshot.entries,
-                            state: snapshot.state,
-                            window: crate::views::modal_window::ModalWindowState::new(),
-                        });
-                    } else {
-                        self.active_modal = None;
-                    }
-                    InputOutcome::Changed
-                }
-                _ => InputOutcome::Changed,
-            }
-        } else if let Some(ActiveModal::DocViewer { scroll, .. }) = &mut self.active_modal {
-            if let Event::Key(KeyEvent { code, .. }) = ev
-                && modal::apply_doc_scroll(*code, scroll)
-            {
-                return InputOutcome::Changed;
-            }
-            InputOutcome::Changed
-        } else {
-            InputOutcome::Changed
-        }
-    }
     /// Handle mouse events while a modal is active.
     ///
     /// Click on a button → same as pressing that key.
@@ -1086,8 +905,6 @@ impl AgentView {
                 ActiveModal::CommandPalette { .. }
                     | ActiveModal::ArgPicker { .. }
                     | ActiveModal::SessionPicker { .. }
-                    | ActiveModal::DocPicker { .. }
-                    | ActiveModal::DocViewer { .. }
                     | ActiveModal::ShortcutsHelp { .. }
             )
         ) {
@@ -1096,8 +913,6 @@ impl AgentView {
                 Some(ActiveModal::CommandPalette { window, .. }) => window,
                 Some(ActiveModal::ArgPicker { window, .. }) => window,
                 Some(ActiveModal::SessionPicker { window, .. }) => window,
-                Some(ActiveModal::DocPicker { window, .. }) => window,
-                Some(ActiveModal::DocViewer { window, .. }) => window,
                 Some(ActiveModal::ShortcutsHelp { window, .. }) => window,
                 _ => unreachable!(),
             };
@@ -1118,26 +933,12 @@ impl AgentView {
                     // double-take bug where the first consume drops the value
                     // before the second branch can match.
                     match self.active_modal.take() {
-                        Some(ActiveModal::DocViewer {
-                            previous_palette,
-                            standalone,
-                            ..
-                        }) => {
-                            if !standalone {
-                                self.active_modal =
-                                    Some(crate::views::modal::howto_list_modal(previous_palette));
-                            }
-                        }
                         Some(
                             ActiveModal::ArgPicker {
                                 previous_palette: Some(snap),
                                 ..
                             }
                             | ActiveModal::SessionPicker {
-                                previous_palette: Some(snap),
-                                ..
-                            }
-                            | ActiveModal::DocPicker {
                                 previous_palette: Some(snap),
                                 ..
                             },
@@ -1162,19 +963,6 @@ impl AgentView {
                     return InputOutcome::Changed;
                 }
                 ModalWindowOutcome::Unhandled => {
-                    // DocViewer: wheel scrolls the markdown body.
-                    if let Some(ActiveModal::DocViewer { scroll, .. }) = self.active_modal.as_mut()
-                    {
-                        if modal::apply_doc_mouse_scroll(mouse.kind, scroll) {
-                            return InputOutcome::Changed;
-                        }
-                        return InputOutcome::Changed;
-                    }
-                    // Content area events — delegate to picker input.
-                    if matches!(self.active_modal, Some(ActiveModal::DocPicker { .. })) {
-                        let ev = crossterm::event::Event::Mouse(*mouse);
-                        return self.handle_doc_input(&ev);
-                    }
                     if let Some(ActiveModal::ShortcutsHelp {
                         entries,
                         state,
@@ -1677,38 +1465,6 @@ impl AgentView {
                         tab_rects: vec![],
                     });
                 }
-            } else if let modal::ActiveModal::DocPicker {
-                entries,
-                state,
-                window,
-                ..
-            } = active_modal
-            {
-                let compact = self.scrollback.appearance().prompt.compact;
-                modal::render_doc_picker_overlay(
-                    buf, area, window, entries, state, compact, &theme,
-                );
-            } else if let modal::ActiveModal::DocViewer {
-                title,
-                content,
-                scroll,
-                window,
-                cached_lines,
-                ..
-            } = active_modal
-            {
-                let compact = self.scrollback.appearance().prompt.compact;
-                modal::render_doc_viewer_overlay(
-                    buf,
-                    area,
-                    window,
-                    title,
-                    content,
-                    scroll,
-                    cached_lines,
-                    compact,
-                    &theme,
-                );
             } else if let modal::ActiveModal::ShortcutsHelp {
                 entries,
                 state,

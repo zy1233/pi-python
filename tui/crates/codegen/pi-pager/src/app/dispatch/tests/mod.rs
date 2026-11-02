@@ -192,7 +192,6 @@ fn test_app() -> AppView {
         startup_warnings: Vec::new(),
         is_api_key_auth: false,
         relaunch: None,
-        welcome_doc_viewer: None,
         screen_mode: crate::app::ScreenMode::Inline,
         pending_screen_mode_switch: None,
         pending_effects: Vec::new(),

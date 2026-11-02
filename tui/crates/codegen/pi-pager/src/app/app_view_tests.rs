@@ -225,7 +225,6 @@ pub(crate) fn test_app() -> AppView {
         startup_warnings: Vec::new(),
         is_api_key_auth: false,
         relaunch: None,
-        welcome_doc_viewer: None,
         screen_mode: ScreenMode::Inline,
         pending_screen_mode_switch: None,
         pending_effects: Vec::new(),
@@ -3243,17 +3242,15 @@ fn scroll_event_stashes_origin_for_residual_flush() {
 }
 #[test]
 fn scroll_event_does_not_stash_when_blocking_modal_open() {
-    let mut app = test_app();
-    app.active_view = ActiveView::Welcome;
-    app.welcome_doc_viewer = Some(crate::views::modal::ActiveModal::DocViewer {
-        title: "Guide".into(),
-        content: "line\n".repeat(80),
-        scroll: 0,
-        window: crate::views::modal_window::ModalWindowState::new(),
-        cached_lines: None,
-        previous_palette: None,
-        standalone: true,
-    });
+    let mut app = test_app_with_agent();
+    let id = super::super::agent::AgentId(0);
+    app.active_view = ActiveView::Agent(id);
+    app.agents.get_mut(&id).unwrap().active_modal =
+        Some(crate::views::modal::ActiveModal::CommandPalette {
+            entries: Vec::new(),
+            state: crate::views::picker::PickerState::default(),
+            window: crate::views::modal_window::ModalWindowState::new(),
+        });
     assert!(app.is_scroll_blocking_modal_open());
     let _ = app.handle_input(&scroll_event(MouseEventKind::ScrollDown, 42, 17));
     assert!(
@@ -3285,38 +3282,6 @@ fn welcome_privacy_banner_hover_triggers_redraw() {
     assert!(matches!(app.handle_input(&leave), InputOutcome::Changed));
     assert!(!app.welcome_on_privacy_banner);
     assert!(matches!(app.handle_input(&leave), InputOutcome::Unchanged));
-}
-#[test]
-fn welcome_doc_viewer_is_scroll_blocking_and_wheel_scrolls_content() {
-    let mut app = test_app();
-    app.active_view = ActiveView::Welcome;
-    app.welcome_doc_viewer = Some(crate::views::modal::ActiveModal::DocViewer {
-        title: "Guide".into(),
-        content: "line\n".repeat(80),
-        scroll: 0,
-        window: crate::views::modal_window::ModalWindowState::new(),
-        cached_lines: None,
-        previous_palette: None,
-        standalone: true,
-    });
-    assert!(
-        app.is_scroll_blocking_modal_open(),
-        "welcome doc-viewer overlay must block background scroll",
-    );
-    let outcome = app.handle_input(&scroll_event(MouseEventKind::ScrollDown, 40, 12));
-    assert!(
-        matches!(outcome, InputOutcome::Changed),
-        "wheel must be handled by the doc viewer",
-    );
-    assert!(
-        app.last_scroll_pos.is_none(),
-        "wheel must not reach the background scroll path while the doc viewer is open",
-    );
-    let scroll = match app.welcome_doc_viewer.as_ref() {
-        Some(crate::views::modal::ActiveModal::DocViewer { scroll, .. }) => *scroll,
-        _ => panic!("expected DocViewer"),
-    };
-    assert!(scroll > 0, "wheel must advance doc scroll, got {scroll}");
 }
 /// Esc with a voice cold-start still queued (pipeline spawning, mic not yet
 /// open) must cancel it so the event loop doesn't open the mic after the user
