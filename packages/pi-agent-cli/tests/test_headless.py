@@ -61,6 +61,63 @@ async def test_run_print_mock_stdout(tmp_path: Path, monkeypatch, capsys):
     assert sessions, "headless should persist a JSONL session"
 
 
+async def _bash_once_stream(model, context, options=None):
+    """A model that asks to run ``echo ran > marker.txt`` once, then answers."""
+    from pi_agent_core.event_stream import AssistantMessageEventStream
+    from pi_agent_core.tests.mock_stream import _base_partial, mock_text_stream
+    from pi_agent_core.types import DoneEvent, StartEvent
+
+    if any(getattr(m, "role", None) == "toolResult" for m in context.messages):
+        return await mock_text_stream(model, context, options)
+    call = {
+        "type": "toolCall",
+        "id": "call_bash",
+        "name": "bash",
+        "arguments": {"command": "echo ran > marker.txt"},
+    }
+    partial = _base_partial(model, [call])
+    partial.stopReason = "toolUse"
+    stream = AssistantMessageEventStream()
+    stream.push(StartEvent(partial=partial.model_copy(deep=True)))
+    stream.push(DoneEvent(partial=partial.model_copy(deep=True), reason="toolUse"))
+    stream.set_final_message(partial)
+    stream.end()
+    return stream
+
+
+@pytest.mark.parametrize("configured", ["ask", "auto", "always-approve", None])
+@pytest.mark.asyncio
+async def test_run_print_asks_nobody_and_says_so_in_its_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, configured: str | None
+):
+    """Nobody can be asked in ``-p``. The mode is ``always-approve`` whatever agent.toml says:
+    ``auto`` is a real mode now (it asks about what it cannot prove), so it is not that word.
+    """
+    from pi_agent_cli import headless
+
+    home, project = tmp_path / "home", tmp_path / "project"
+    home.mkdir()
+    project.mkdir()
+    if configured is not None:
+        (home / "agent.toml").write_text(f'permission = "{configured}"\n', encoding="utf-8")
+    monkeypatch.setenv("PI_HOME", str(home))
+    monkeypatch.setattr(headless, "default_stream_fn", lambda: _bash_once_stream)
+    seen: list[str] = []
+    original = headless.create_session_harness
+
+    async def spy(**kwargs):
+        seen.append(kwargs["config"].permission)
+        return await original(**kwargs)
+
+    monkeypatch.setattr(headless, "create_session_harness", spy)
+
+    code = await run_print("go", cwd=project, home=home)
+
+    assert code == 0
+    assert seen == ["always-approve"]
+    assert (project / "marker.txt").read_text(encoding="utf-8").strip() == "ran"
+
+
 @pytest.mark.asyncio
 async def test_run_print_rejects_empty(tmp_path: Path, capsys):
     code = await run_print("   ", cwd=tmp_path, home=tmp_path)

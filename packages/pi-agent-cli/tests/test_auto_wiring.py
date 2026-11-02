@@ -655,6 +655,116 @@ async def test_with_no_client_to_ask_a_call_that_asks_is_blocked(world: _World):
     assert not marker.exists()
 
 
+# ------------------------------------------------------- one call at a time, shown on a link (D-03)
+
+
+class _AnswersByTool(_Client):
+    """A client that says yes to the tools in *allow* and no to the rest."""
+
+    def __init__(self, allow: set[str]) -> None:
+        super().__init__(allow=False)
+        self.allowed_tools = allow
+
+    async def request_permission(self, session_id, tool_call, options, **kwargs):
+        self.allow = tool_call.title.split()[0] in self.allowed_tools
+        return await super().request_permission(session_id, tool_call, options, **kwargs)
+
+
+needs_symlinks = pytest.mark.skipif(os.name == "nt", reason="ln -s needs a POSIX shell")
+
+
+def _link_then_write(project: Path, outside: Path) -> tuple[tuple[str, str, dict[str, Any]], ...]:
+    """Two calls of ONE message: a link in the project that points out of it, then a write
+    through the link. Judged before the link exists, the write looks like an edit in the project."""
+    return (
+        ("c1", "bash", {"command": f"ln -s {outside} link"}),
+        ("c2", "write", {"path": str(project / "link" / "escape.txt"), "content": "out\n"}),
+    )
+
+
+@needs_symlinks
+async def test_a_write_through_a_link_that_an_earlier_call_made_is_judged_after_the_link_exists(
+    world: _World, tmp_path: Path
+):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    stream = _calls_stream(*_link_then_write(world.project, outside))
+    client = _AnswersByTool({"bash"})  # yes to the link, no to the write
+    agent, _, session_id = await _open(world, stream, client=client)
+
+    await _prompt(agent, session_id)
+
+    assert [title.split()[0] for title in client.titles()] == ["bash", "write"]
+    # The write was judged on the link as it was by then: a path that leaves the project. (A
+    # question that says "cannot tell" would come from the guard against a parallel batch.)
+    assert client.titles()[1] == f"write (Auto: {sentence(Reason.OUTSIDE_PROJECT)})"
+    assert (world.project / "link").is_symlink()  # the user allowed the first call: it ran
+    assert not (outside / "escape.txt").exists()  # the second was asked about, and refused
+
+
+@needs_symlinks
+async def test_the_same_two_calls_in_ask_mode_are_both_put_to_the_user(
+    world: _World, tmp_path: Path
+):
+    """The control: with no Auto the user is asked about both, whatever order they run in."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    stream = _calls_stream(*_link_then_write(world.project, outside))
+    client = _AnswersByTool({"bash"})
+    agent, _, session_id = await _open(world, stream, client=client, permission="ask")
+
+    await _prompt(agent, session_id)
+
+    assert [title.split()[0] for title in client.titles()] == ["bash", "write"]
+    assert not (outside / "escape.txt").exists()
+
+
+class _LinkInASubagent:
+    """A model for a session that runs one workflow, and for the sub-agent of that workflow.
+
+    The session calls ``workflow`` once. The sub-agent makes the two calls of ``_link_then_write``
+    in ONE message. Which of the two the model is, is told by the tools it is given.
+    """
+
+    SCRIPT = (
+        'meta = {"name": "link"}\nasync def main():\n    await agent("go")\n    result("done")\n'
+    )
+
+    def __init__(self, project: Path, outside: Path) -> None:
+        self._subagent = _calls_stream(*_link_then_write(project, outside))
+
+    async def stream(self, model, context, options=None):
+        if "workflow" in {tool.name for tool in context.tools or []}:
+            if any(getattr(m, "role", None) == "toolResult" for m in context.messages):
+                return await mock_text_stream(model, context, options)
+            return await _calls_stream(("w1", "workflow", {"script": self.SCRIPT, "args": {}}))(
+                model, context, options
+            )
+        return await self._subagent(model, context, options)
+
+
+@needs_symlinks
+async def test_a_subagent_write_through_a_link_that_its_own_earlier_call_made_asks(
+    world: _World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    pytest.importorskip("pi_dynamic_workflows")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    model = _LinkInASubagent(world.project, outside)
+    client = _AnswersByTool({"workflow", "bash"})
+    agent, _, session_id = await _open(world, model.stream, client=client)
+
+    await _prompt(agent, session_id)
+
+    assert [title.split()[0] for title in client.titles()] == ["workflow", "bash", "write"]
+    assert "sub-agent" in client.titles()[2]
+    assert sentence(Reason.OUTSIDE_PROJECT) in client.titles()[2]
+    assert (world.project / "link").is_symlink()
+    assert not (outside / "escape.txt").exists()
+
+
 # -------------------------------------------------------------------- sub-agents (D-03)
 
 
