@@ -351,6 +351,22 @@ def test_a_key_that_is_not_known_is_named_in_a_note(tmp_path: Path):
 
     (note,) = config.auto.notes
     assert "colour" in note
+    assert "not known" in note
+
+
+@pytest.mark.parametrize("key", ["model", "timeout_seconds"])
+def test_a_key_of_the_model_step_is_read_and_says_that_nothing_uses_it_yet(
+    tmp_path: Path, key: str
+):
+    """The design lists these keys. A file that follows it must not be told that they are not
+    known, only that nothing uses them yet."""
+    config = _load(tmp_path, f'[auto]\n{key} = "x"\n')
+
+    (note,) = config.auto.notes
+    assert key in note
+    assert "model step" in note
+    assert "not known" not in note
+    assert config.auto.problems == ()
 
 
 def test_a_value_that_loosens_auto_is_dropped_with_a_note(tmp_path: Path):

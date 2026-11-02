@@ -437,6 +437,10 @@ _AUTO_KEYS = frozenset(
     {"classifier", "extra_roots", "protected", "bash_timeout_seconds", "bash_max_output_mb"}
 )
 
+# Keys of the model step (design section 3.8). They are known so that a file written after the
+# design is not told "not known", but nothing reads them yet.
+_AUTO_MODEL_STEP_KEYS = frozenset({"model", "timeout_seconds"})
+
 
 def _auto_config(value: object) -> AutoConfig:
     """The ``[auto]`` table. A value that cannot be used is dropped, and ``notes`` names it.
@@ -451,11 +455,14 @@ def _auto_config(value: object) -> AutoConfig:
         return AutoConfig(notes=("auto in agent.toml is not a table, and it is ignored.",))
     notes: list[str] = []
     problems: list[str] = []
-    notes.extend(
-        f'The key "{key}" in [auto] is not known, and it is ignored.'
-        for key in value
-        if key not in _AUTO_KEYS
-    )
+    for key in value:
+        if key in _AUTO_MODEL_STEP_KEYS:
+            notes.append(
+                f'The key "{key}" in [auto] is for the model step, which does not exist yet. '
+                "It is ignored."
+            )
+        elif key not in _AUTO_KEYS:
+            notes.append(f'The key "{key}" in [auto] is not known, and it is ignored.')
 
     classifier: AutoClassifier = "rules"
     raw_classifier = value.get("classifier")
