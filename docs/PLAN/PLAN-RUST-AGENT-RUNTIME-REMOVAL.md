@@ -465,13 +465,14 @@ Rust（pager）：
 | [§10.33][l10-33] | r30 | 发行构建（`release-dist`）与 v0.8.0 的 Linux 二进制在云 VM 上的 PTY 检查：冷构建 11 m 58 s，两个二进制各跑一遍脚本；`smoke.py --sandbox workspace` 23/24（r31 修了，见下一行） | — |
 | [§10.34][l10-34] | r31 | `smoke.py --sandbox workspace`：Landlock 内核上的检查从欢迎页挪到第一轮对话之后；两个二进制上 24/24，不带 `--sandbox` 仍 23/23，`exit_matrix` 仍 14/14；没有 Landlock 的那一支用 seccomp 模拟，新旧脚本都是 26/26 | PR [#77][pr-77] |
 | [§10.35][l10-35] | r32 | 用户选「2B」：删 `pi-update`、npm 目录与安装脚本（门禁、整套测试、用户可见的变化）；README 与站点的「Next」改字：Windows 计划，没有日期；不做 macOS x86_64 版本与自动更新 | [#78][pr-78] |
+| [§10.36][l10-36] | r34 | D.8 余下的死文件：删 crate `pi-workflow`（3,570 行）、`scenarios/*.yaml`（43 个）、九个 logo、十一个旧名字的 `.snap`；`Cargo.lock` 少 8 个包；图仍 965，测试仍 8,557；没有改 `.rs` | — |
 | [附录 A.4][logA4] | r5 | 入口审计的 r5 执行结果 | [#7][pr-7] |
 | [附录 B][logB] | r2–r17 | 复现方法（依赖图、模块级闭包、各轮的测量与测试命令） | — |
 | [附录 C][logC] | r10 | §7 的逐项注释（原文） | — |
 | [附录 D][logD] | r10 | 计划头部的状态文字（原文） | — |
 | [附录 E][logE] | r2 | §4、§5 的原文（源码事实基线与改动规模估计） | — |
 | [附录 F][logF] | r22 续 1 | 计划整理前的状态文字（原文）：头部、「当前状态」逐轮、两个里程碑、「下一步」，「还没有验证的」「待决策」「§7」「§10 索引」里改短的条目，「修订记录（摘要）」的长条目 | — |
-| [修订记录][logRev] | r1–r32 | 逐轮的完整说明 | — |
+| [修订记录][logRev] | r1–r34 | 逐轮的完整说明 | — |
 
 ## 附录 A：能力矩阵与 ACP 版本配对（阶段 0.8，r9 定稿）
 
@@ -583,6 +584,7 @@ Rust（pager）：
 - r31：`smoke.py --sandbox workspace` 的标签检查挪到第一轮对话之后（PR [#77][pr-77]；2026-11-01）。只改 `scripts/tui_pty/smoke.py` 与文档。见 [§10.34][l10-34]。
 - r32：用户选「2B」（2026-11-02）：删 `pi-update`、`pi-pager/npm/` 与安装脚本（PR [#78][pr-78]），README 与站点的「Next」改成「`zypi` 的 Windows 二进制计划，没有日期；不做 macOS x86_64 版本，也不做自动更新」。见 [§10.35][l10-35]。
 - r33：决策 7 的答复（用户，2026-11-02）：(b) 真的 Plan 不做；(c) 真的 Auto 做。新增 [Auto 模式设计](../specs/2026-11-02-auto-mode-design.md)（设计与线上准入记录），同时更新决策 7、1.P3 与附录 A 的「模式切换」。只改文档，没有代码。
+- r34：D.8 余下的死文件，删 `pi-workflow`（2026-11-02）。只删文件，没有改 `.rs`。见 [§10.36][l10-36]。
 
 <!-- 链接定义 -->
 [log]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md
@@ -621,6 +623,7 @@ Rust（pager）：
 [l10-33]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1033-r30-追加发行构建与-v080-二进制的-pty-检查
 [l10-34]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1034-r31-追加smokepy---sandbox-workspace-的标签检查
 [l10-35]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1035-r32-追加删除-pi-updatenpm-目录与安装脚本用户选-2b
+[l10-36]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#1036-r34-追加d8-余下的死文件删-pi-workflow
 [l4-1]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#41-运行路径
 [l4-2]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#42-rust-runtime-与耦合面
 [l4-3]: archive/PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md#43-python-侧pi_agent_cli共-4114-行agentpy-472-行

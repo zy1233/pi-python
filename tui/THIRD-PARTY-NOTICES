@@ -2010,34 +2010,6 @@ Additional requirements / notices:
   Upstream license expression: Apache-2.0 OR MIT. For this distribution, obligations are satisfied under: MIT.
 
 --------------------------------------------------------------------------------
-const-random 0.1.18
---------------------------------------------------------------------------------
-Source:  https://github.com/tkaitchuck/constrandom
-License: MIT  (upstream declares: MIT OR Apache-2.0)
-
-Copyright notice:
-  Copyright (c) 2016 Amanieu d'Antras
-
-License text: see Part II — MIT
-
-Additional requirements / notices:
-  Upstream license expression: MIT OR Apache-2.0. For this distribution, obligations are satisfied under: MIT.
-
---------------------------------------------------------------------------------
-const-random-macro 0.1.16
---------------------------------------------------------------------------------
-Source:  https://github.com/tkaitchuck/constrandom
-License: MIT  (upstream declares: MIT OR Apache-2.0)
-
-Copyright notice:
-  Copyright (c) 2016 Amanieu d'Antras
-
-License text: see Part II — MIT
-
-Additional requirements / notices:
-  Upstream license expression: MIT OR Apache-2.0. For this distribution, obligations are satisfied under: MIT.
-
---------------------------------------------------------------------------------
 constant_time_eq 0.3.1
 --------------------------------------------------------------------------------
 Source:  https://github.com/cesarb/constant_time_eq
@@ -2385,17 +2357,6 @@ License: MIT
 
 Copyright notice:
   Copyright (c) 2019 Timon
-
-License text: see Part II — MIT
-
---------------------------------------------------------------------------------
-crunchy 0.2.4
---------------------------------------------------------------------------------
-Source:  https://github.com/eira-fransham/crunchy
-License: MIT
-
-Copyright notice:
-  Copyright 2017-2023 Eira Fransham.
 
 License text: see Part II — MIT
 
@@ -7985,20 +7946,6 @@ Additional requirements / notices:
   Upstream license expression: MIT OR Apache-2.0. For this distribution, obligations are satisfied under: MIT.
 
 --------------------------------------------------------------------------------
-portable-atomic 1.11.1
---------------------------------------------------------------------------------
-Source:  https://github.com/taiki-e/portable-atomic
-License: MIT  (upstream declares: Apache-2.0 OR MIT)
-
-Copyright notice:
-  Copyright (c) the package authors. See the package repository for details.
-
-License text: see Part II — MIT
-
-Additional requirements / notices:
-  Upstream license expression: Apache-2.0 OR MIT. For this distribution, obligations are satisfied under: MIT.
-
---------------------------------------------------------------------------------
 portable-pty 0.9.0
 --------------------------------------------------------------------------------
 Source:  https://github.com/wezterm/wezterm
@@ -11464,18 +11411,6 @@ License text: see Part II — MIT
 
 Additional requirements / notices:
   Upstream license expression: MIT OR Apache-2.0. For this distribution, obligations are satisfied under: MIT.
-
---------------------------------------------------------------------------------
-tiny-keccak 2.0.2
---------------------------------------------------------------------------------
-Source:  https://crates.io/crates/tiny-keccak/2.0.2
-License: CC0-1.0
-
-Copyright notice:
-  Copyright holders / authors (from package metadata):
-    - debris <marek.kotewicz@gmail.com>
-
-License text: see upstream https://crates.io/crates/tiny-keccak/2.0.2 (license: CC0-1.0)
 
 --------------------------------------------------------------------------------
 tiny-skia 0.12.0
