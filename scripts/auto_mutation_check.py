@@ -186,8 +186,8 @@ MUTATIONS: list[Mutation] = [
     ),
     m(
         "protected: extra globs",
-        '        slashed = real.replace("\\\\", "/").lower()\n        if any(',
-        '        slashed = real.replace("\\\\", "/").lower()\n        if False and any(',
+        "        if self._glob_hit(real, parts):",
+        "        if False and self._glob_hit(real, parts):",
     ),
     m("path: ~ not expanded in tool paths", 'if text.startswith(("~/", "~\\\\")):', "if False:"),
     m("path: ~ not expanded for a bare tilde", 'if text == "~":', "if False:"),
@@ -988,14 +988,39 @@ MUTATIONS: list[Mutation] = [
         'if _is_inside(real, os.path.join(self.home, ".config")):',
     ),
     m(
-        "redteam: a protected glob compares with case",
-        'slashed = real.replace("\\\\", "/").lower()',
-        'slashed = real.replace("\\\\", "/")',
+        "redteam: a protected glob has case",
+        'pattern = glob.replace("\\\\", "/").lower()',
+        'pattern = glob.replace("\\\\", "/")',
     ),
     m(
-        "redteam: a protected glob has case",
-        "fnmatch.fnmatchcase(slashed, glob.lower()) or fnmatch.fnmatchcase(base, glob.lower())",
-        "fnmatch.fnmatchcase(slashed, glob) or fnmatch.fnmatchcase(base, glob)",
+        "redteam: a protected glob sees the folded name",
+        'forms = {real.replace("\\\\", "/").lower(), "/" + "/".join(parts)}',
+        'forms = {real.replace("\\\\", "/").lower()}',
+    ),
+    m(
+        "redteam: a protected glob sees the last name",
+        "        if parts:\n            forms.add(parts[-1])",
+        "        if False:\n            forms.add(parts[-1])",
+    ),
+    m(
+        "redteam: a protected glob is read below the project root",
+        "if parts[: len(root_parts)] == root_parts:",
+        "if False:",
+    ),
+    m(
+        "redteam: a protected glob may start with ./",
+        'if pattern.startswith("./"):',
+        "if False:",
+    ),
+    m(
+        "redteam: a protected glob may end with /",
+        'if pattern.endswith("/"):',
+        "if False:",
+    ),
+    m(
+        "redteam: a protected glob may use backslashes",
+        'pattern = glob.replace("\\\\", "/").lower()',
+        "pattern = glob.lower()",
     ),
     m("redteam: a path has no length cap", "    if len(path) > MAX_PATH_CHARS:", "    if False:"),
     m("redteam: .htpasswd is not secret", "|\\.htpasswd", "|\\.htpasswdx"),
@@ -1488,6 +1513,56 @@ MUTATIONS: list[Mutation] = [
     m("redteam: php -v is not a version flag", '    "php": "-v",', '    "php": "-V",'),
     m("redteam: lua -v is not a version flag", '    "lua": "-v",', '    "lua": "-V",'),
     m("redteam: python -VV is not a version flag", '    "python": "-VV",', '    "python": "-vv",'),
+    m(
+        "redteam: a relative folder in the context is trusted",
+        "    if not _context_is_absolute(ctx):",
+        "    if False and not _context_is_absolute(ctx):",
+    ),
+    m(
+        "redteam: the sub-agent folder may be relative",
+        "    if ctx.origin_cwd:\n        folders.append",
+        "    if False:\n        folders.append",
+    ),
+    m(
+        "redteam: the session folder may be relative",
+        "folders = [ctx.cwd, ctx.home_dir, ctx.pi_home, *ctx.extra_roots, *ctx.protected_paths]",
+        "folders = [ctx.home_dir, ctx.pi_home, *ctx.extra_roots, *ctx.protected_paths]",
+    ),
+    m(
+        "redteam: the home folder may be relative",
+        "folders = [ctx.cwd, ctx.home_dir, ctx.pi_home, *ctx.extra_roots, *ctx.protected_paths]",
+        "folders = [ctx.cwd, ctx.pi_home, *ctx.extra_roots, *ctx.protected_paths]",
+    ),
+    m(
+        "redteam: the agent home may be relative",
+        "folders = [ctx.cwd, ctx.home_dir, ctx.pi_home, *ctx.extra_roots, *ctx.protected_paths]",
+        "folders = [ctx.cwd, ctx.home_dir, *ctx.extra_roots, *ctx.protected_paths]",
+    ),
+    m(
+        "redteam: an extra root may be relative",
+        "folders = [ctx.cwd, ctx.home_dir, ctx.pi_home, *ctx.extra_roots, *ctx.protected_paths]",
+        "folders = [ctx.cwd, ctx.home_dir, ctx.pi_home, *ctx.protected_paths]",
+    ),
+    m(
+        "redteam: a protected path may be relative",
+        "folders = [ctx.cwd, ctx.home_dir, ctx.pi_home, *ctx.extra_roots, *ctx.protected_paths]",
+        "folders = [ctx.cwd, ctx.home_dir, ctx.pi_home, *ctx.extra_roots]",
+    ),
+    m(
+        "redteam: a folder that is not text is absolute",
+        "    except TypeError:\n        return False\n    if not isinstance(text, str):",
+        "    except TypeError:\n        return True\n    if not isinstance(text, str):",
+    ),
+    m(
+        "redteam: a folder as bytes is absolute",
+        "    if not isinstance(text, str):\n        return False\n    return os.path.isabs(text)",
+        "    if False:\n        return False\n    return os.path.isabs(text)",
+    ),
+    m(
+        "redteam: every folder is absolute",
+        "    return os.path.isabs(text) or (os.name",
+        "    return True or (os.name",
+    ),
 ]
 
 

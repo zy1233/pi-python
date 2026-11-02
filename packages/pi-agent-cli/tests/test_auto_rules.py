@@ -327,6 +327,55 @@ def test_protected_globs_and_listed_paths_ignore_case(world) -> None:
     assert_ask(decision, Reason.PROTECTED_PATH, "path.pi_home")
 
 
+@pytest.mark.parametrize(
+    ("glob", "path"),
+    [
+        (".github/workflows/*", ".github/workflows/ci.yml"),
+        (".github/workflows/*", ".GITHUB/workflows/deep/ci.yml"),
+        ("./Makefile", "Makefile"),
+        (".husky/", ".husky/pre-commit"),
+        ("scripts\\*.sh", "scripts/build.sh"),
+        ("*/Makefile", "Makefile."),
+        ("*/Makefile", "Makefile "),
+        ("*/Makefile", "Makefile::$DATA"),
+        ("*/.husky/*", ".husky./pre-commit"),
+        (".husky/*", ".husky/pre-commit."),
+        ("Makefile", "sub/deep/Makefile"),
+        ("Makefile", "sub/MAKEFILE."),
+    ],
+)
+def test_protected_globs_match_a_relative_glob_and_the_folded_name(world, glob, path) -> None:
+    """A glob that does not start with ``*/`` is read from the project root, and a name that
+    Windows folds (a trailing dot or space, a stream) is the name it folds to."""
+    decision = run_edit(world, "write", path, protected_globs=(glob,))
+    assert_ask(decision, Reason.PROTECTED_PATH, "path.protected_glob")
+
+
+@pytest.mark.parametrize(
+    ("glob", "path"),
+    [
+        (".github/workflows/*", ".github/other/notes.yml"),
+        (".github/workflows/*", "src/.github/x.yml"),
+        ("./scripts/", "scripts2/x.sh"),
+        ("*/Makefile", "src/a.py"),
+        (".husky/*", "husky/x"),
+    ],
+)
+def test_protected_globs_leave_other_paths_alone(world, glob, path) -> None:
+    decision = run_edit(world, "write", path, protected_globs=(glob,))
+    assert decision.outcome is Outcome.ALLOW, decision
+
+
+def test_a_relative_glob_is_read_below_the_extra_roots_too(world) -> None:
+    other = world.tmp / "other"
+    other.mkdir()
+    ctx = dataclasses.replace(world.ctx, extra_roots=(str(other),), protected_globs=("deploy/*",))
+    decision = decide(ToolCall("write", {"path": str(other / "deploy" / "x.sh")}, None, True), ctx)
+    assert_ask(decision, Reason.PROTECTED_PATH, "path.protected_glob")
+    decision = decide(ToolCall("write", {"path": str(other / "src" / "x.sh")}, None, True), ctx)
+    assert decision.outcome is Outcome.ALLOW, decision
+
+
 def test_listed_protected_paths_cover_files_and_folders(world) -> None:
     (world.project / "gated").mkdir()
     ctx = dataclasses.replace(world.ctx, protected_paths=(str(world.project / "gated"),))
@@ -336,6 +385,52 @@ def test_listed_protected_paths_cover_files_and_folders(world) -> None:
     assert decide(ToolCall("write", {"path": "gated2/x.py"}, None, True), ctx).outcome is (
         Outcome.ALLOW
     )
+
+
+_RELATIVE_CONTEXTS = {
+    "empty cwd": {"cwd": ""},
+    "relative cwd": {"cwd": "proj"},
+    "dot cwd": {"cwd": "."},
+    "empty home": {"home_dir": ""},
+    "tilde home": {"home_dir": "~"},
+    "relative agent home": {"pi_home": ".pi-python"},
+    "relative sub-agent folder": {"origin_cwd": "src"},
+    "dot extra root": {"extra_roots": (".",)},
+    "parent extra root": {"extra_roots": ("../other",)},
+    "tilde extra root": {"extra_roots": ("~/shared",)},
+    "relative protected path": {"protected_paths": ("skills",)},
+    "empty protected path": {"protected_paths": ("",)},
+    "protected path as bytes": {"protected_paths": (b"/skills",)},
+    "cwd as None": {"cwd": None},
+}
+
+
+@pytest.mark.parametrize("change", list(_RELATIVE_CONTEXTS.values()), ids=list(_RELATIVE_CONTEXTS))
+@pytest.mark.parametrize(
+    ("tool", "args"),
+    [
+        ("write", {"path": "src/a.py"}),
+        ("edit", {"path": "src/a.py"}),
+        ("bash", {"command": "ls"}),
+    ],
+)
+def test_a_folder_that_is_not_absolute_in_the_context_asks_for_every_call(
+    world, change, tool, args
+) -> None:
+    ctx = dataclasses.replace(world.ctx, **change)
+    decision = decide(ToolCall(tool, args, None, True), ctx)
+    assert_ask(decision, Reason.UNCLEAR, "floor.context_not_absolute")
+
+
+def test_a_path_object_in_the_context_is_a_folder(world) -> None:
+    ctx = dataclasses.replace(
+        world.ctx, cwd=world.project, protected_paths=(world.project / "gated",)
+    )
+    assert decide(ToolCall("write", {"path": "src/a.py"}, None, True), ctx).outcome is (
+        Outcome.ALLOW
+    )
+    decision = decide(ToolCall("write", {"path": "gated/x.py"}, None, True), ctx)
+    assert_ask(decision, Reason.PROTECTED_PATH, "path.gated_resource")
 
 
 @pytest.mark.parametrize("path", [None, 5, "", "   ", "a\x00b", ["a"]])

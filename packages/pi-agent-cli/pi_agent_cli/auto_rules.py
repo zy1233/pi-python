@@ -117,9 +117,14 @@ class AutoContext:
     ``cwd`` is the session's project folder; with ``extra_roots`` (from the home config) it makes
     the project roots. ``origin_cwd`` is the working folder of a workflow sub-agent: it is
     where relative paths go, and it has to be inside the roots. ``protected_paths`` are files
-    or folders (absolute) that always ask; ``protected_globs`` likewise, matched on the whole
-    path with ``/`` as separator. ``pi_home`` is the agent's own home (config, trust store,
-    sessions): all of it is protected.
+    or folders that always ask; ``protected_globs`` likewise. A glob is tried on the whole path,
+    on the last name and on the path below a project root, so ``.github/workflows/*`` works as
+    it is written. ``pi_home`` is the agent's own home (config, trust store, sessions): all of
+    it is protected.
+
+    Every folder and path in the context has to be absolute (the globs are patterns, not
+    paths). With a relative or empty one the rules cannot know where it points, so every call
+    asks (``floor.context_not_absolute``).
     """
 
     cwd: str
@@ -208,6 +213,27 @@ def _is_inside(path: str, root: str, *, fold: bool = False) -> bool:
 
 def _is_fs_root(path: str) -> bool:
     return os.path.dirname(path) == path
+
+
+def _is_absolute(path: object) -> bool:
+    """Whether *path* is a folder with no base. The rules resolve a relative path against the
+    folder of the process, which is not the project folder, so a relative folder in the context
+    would be read wrongly (a relative protected path protects nothing, a relative root is the
+    wrong folder). ``~`` is not expanded here: the caller does it."""
+    try:
+        text = os.fspath(path)  # type: ignore[call-overload]
+    except TypeError:
+        return False
+    if not isinstance(text, str):
+        return False
+    return os.path.isabs(text) or (os.name == "nt" and text[:1] in ("/", "\\"))
+
+
+def _context_is_absolute(ctx: AutoContext) -> bool:
+    folders = [ctx.cwd, ctx.home_dir, ctx.pi_home, *ctx.extra_roots, *ctx.protected_paths]
+    if ctx.origin_cwd:
+        folders.append(ctx.origin_cwd)
+    return all(_is_absolute(folder) for folder in folders)
 
 
 def _fold_name(part: str, *, stream: bool = True) -> str:
@@ -304,13 +330,30 @@ class _Env:
             return Reason.PROTECTED_PATH, "path.pi_home"
         if any(_is_inside(real, item, fold=True) for item in self.protected):
             return Reason.PROTECTED_PATH, "path.gated_resource"
-        slashed = real.replace("\\", "/").lower()
-        if any(
-            fnmatch.fnmatchcase(slashed, glob.lower()) or fnmatch.fnmatchcase(base, glob.lower())
-            for glob in self.globs
-        ):
+        if self._glob_hit(real, parts):
             return Reason.PROTECTED_PATH, "path.protected_glob"
         return None
+
+    def _glob_hit(self, real: str, parts: list[str]) -> bool:
+        """Whether a protected glob matches *real*. Each glob is tried on the whole path, on the
+        path with every name folded (``Makefile.`` is ``makefile``), on the last name, and on the
+        path below each project root, so ``.github/workflows/*`` works as it is written."""
+        forms = {real.replace("\\", "/").lower(), "/" + "/".join(parts)}
+        if parts:
+            forms.add(parts[-1])
+        for root in self.roots:
+            root_parts = [name for name in map(_fold_name, re.split(r"[\\/]+", root)) if name]
+            if parts[: len(root_parts)] == root_parts:
+                forms.add("/".join(parts[len(root_parts) :]))
+        for glob in self.globs:
+            pattern = glob.replace("\\", "/").lower()
+            if pattern.startswith("./"):
+                pattern = pattern[2:]
+            if pattern.endswith("/"):
+                pattern += "*"
+            if any(fnmatch.fnmatchcase(form, pattern) for form in forms):
+                return True
+        return False
 
     def path_floor(self, real: str) -> None:
         """Raise ``_Floor`` when *real* is protected or outside the project roots."""
@@ -1837,6 +1880,8 @@ def _decide(call: ToolCall, ctx: AutoContext) -> RuleDecision:
         return _ask(Reason.WORKFLOW, "floor.workflow")
     if not call.builtin or call.name not in _OWN_TOOLS:
         return _ask(Reason.UNDECLARED_TOOL, "floor.undeclared_tool")
+    if not _context_is_absolute(ctx):
+        return _ask(Reason.UNCLEAR, "floor.context_not_absolute")
     env = _Env(ctx)
     if not env.inside(env.cwd):
         return _ask(Reason.OUTSIDE_PROJECT, "floor.cwd_outside_project")
