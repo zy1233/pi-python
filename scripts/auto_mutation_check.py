@@ -1227,6 +1227,16 @@ MUTATIONS: list[Mutation] = [
         "return not (has(*_GIT_BANNED_READ_OPTIONS) or opts.lead_glob)",
     ),
     m(
+        "redteam: git cat-file is split in two words",
+        '"status diff log show rev-parse ls-files blame annotate describe shortlog ls-tree cat-file "',
+        '"status diff log show rev-parse ls-files blame annotate describe shortlog ls-tree cat- file "',
+    ),
+    m(
+        "redteam: git --glob-pathspecs is split in two words",
+        '"--no-pager -p -P --paginate --no-replace-objects --literal-pathspecs --glob-pathspecs "',
+        '"--no-pager -p -P --paginate --no-replace-objects --literal-pathspecs --glob- pathspecs "',
+    ),
+    m(
         "redteam: a git glob is not banned",
         'return not (has(*_GIT_BANNED_READ_OPTIONS, "-O") or opts.lead_glob)',
         'return not (has(*_GIT_BANNED_READ_OPTIONS, "-O"))',
