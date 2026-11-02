@@ -12,7 +12,7 @@
 
 ## 目录
 
-- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r34、r35、r36）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29r30r31r32r34r35r36)
+- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r34、r35、r36、r37）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29r30r31r32r34r35r36)
   - [10.1 范围、方法与规模](#101-范围方法与规模)
   - [10.2 `/model` 恢复（ADR3 r3）](#102-model-恢复adr3-r3)
   - [10.3 验证（r3 的实测）](#103-验证r3-的实测)
@@ -51,6 +51,7 @@
   - [10.36 r34 追加：D.8 余下的死文件，删 `pi-workflow`](#1036-r34-追加d8-余下的死文件删-pi-workflow)
   - [10.37 r35 追加：D.6，删内嵌指南的查看器；死的 `plugins` 停在级联上](#1037-r35-追加d6删内嵌指南的查看器死的-plugins-停在级联上)
   - [10.38 r36 追加：D.1，`async-openai` 离开依赖图](#1038-r36-追加d1async-openai-离开依赖图)
+  - [10.39 r37 追加：整批合并之后的重测与候选表](#1039-r37-追加整批合并之后的重测与候选表)
 - [附录 A（摘录）：A.4](#附录-a摘录a4)
   - [A.4 r5 执行结果（对照 r5 时初稿里的「默认决策」；r9 的更新见 A.1）](#a4-r5-执行结果对照-r5-时初稿里的默认决策r9-的更新见-a1)
 - [附录 B：复现方法](#附录-b复现方法)
@@ -77,7 +78,7 @@
   - [F.10 修订记录摘要里的长条目](#f10-修订记录摘要里的长条目)
 - [修订记录](#修订记录)
 
-## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r34、r35、r36）
+## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r34、r35、r36、r37）
 
 r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）；r14 合入这两个 PR，并做决策 17：会话文件在第一条用户消息时才写（§10.17）；r15 做决策 10 的存储层一项：删 `pi-shell` 里的旧存储层（§10.18）；r16 合入 #25 与 #26，并删 `pi-shell` 里剩下的死代码（§10.19）；r17 检查测试之间的竞争，只改测试与工具（§10.20）；r18 改用 `cargo nextest`，改 `protoc` 的路径与 `release.yml` 的令牌（§10.21）；r19 用 `gh stack` 合入 #27–#31，并设 V0.6 的发布里程碑（§10.22）；r20 定 MCP 的方向（可选扩展包），修空白对话，补发布内容，并合入 #33–#36（§10.23）；r21 做 V0.6 的版本号与发布说明（条件 5），合入 #38 与 #39，并做条件 1–4（§10.24）；r22 打 tag `v0.6.0`、发布、做发布后的核对（§10.25）；r23 把三个 action 升到 Node 24 的版本，处理扩展 API 的审计批 9，并把决策 11、13 记成不做（§10.26）；r24 在内核 6.12 的云 VM 上测了沙箱的 Landlock 层（§10.27）；r25 把 `pi-sandbox` 接进 `TUI CI`（§10.28）；r26 补记 v0.7.0 之前的合入（#45 至 #48、web 的 #50 至 #54、版本号 #55）与 v0.7.0 的发布（§10.29）；r27 量了旗标与设置页并修（#57、#60），去掉选择器的 30 天截止（#61），清了一批死代码（#62、#63；§10.30）；r28 用一次 `gh stack` 把这五个 PR 与另外五个（#56、#58、#59、#64、#65）合入 `main`（§10.31）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
@@ -2487,6 +2488,64 @@ Runner 有 Landlock（ABI 8），没有 `bwrap`；装上 `bwrap` 也不能用，
 
 **没验证的。** 老会话文件的夹具是手写的 JSON 经旧类型规范化而来，不是从真实用户的会话文件里取的；真实文件里要是有只有 fork 类型读的字段，这里发现不了。`WebSearchClient` 只有一个调用方（旧 Rust agent 的工具路径），它的 HTTP 路径只有 wiremock 测试，没有真实服务器。
 
+### 10.39 r37 追加：整批合并之后的重测与候选表
+
+这一节记 2026-11-02 的重测。`main` 在 `14c476c`：#82、#83、#85、#86、#84 都已合入（#79 到 #81 在它们之前）。这一轮只读加量，没有改 `tui/`；只改文档。基线是我在 `6ba5cc4` 上量的数。M = 这一轮实测；E = 估算；B = 在 `6ba5cc4` 上量的，没有重量。机器：Linux 6.12.94+，4 vCPU，rustc 1.94.0。
+
+**这条链合入了什么。** #82 与 #85 当时没有自己的轮次，一并记在这里。
+
+| PR | 内容 | 轮次 |
+|---|---|---|
+| [#82](https://github.com/zy1233/pi-python/pull/82) | 去掉死的 `[cli].auto_update` 设置与隐藏旗标 `--no-auto-update`（旧 `config.toml` 里的 `auto_update` 仍可读，值被忽略）。`pi-pager` 5,654 → 5,652。用户可见：脚本里带 `--no-auto-update` 现在以退出码 2 失败 | 无（本节） |
+| [#83](https://github.com/zy1233/pi-python/pull/83) | D.8 余下的死文件：`pi-workflow`、43 个 `scenarios/*.yaml`、九个 logo、十一个旧名 `.snap`；`Cargo.lock` −8 个包 | r34 / §10.36 |
+| [#85](https://github.com/zy1233/pi-python/pull/85) | B.3：ACP 扩展 wire 类型从 `pi-shell` 移入 `pi-acp-lib`（`pi-shell` −42 个测试，`pi-acp-lib` +43：42 个随类型搬来，1 个新的解码测试，对照搬家前写下的 golden 文件） | 无（本节） |
+| [#86](https://github.com/zy1233/pi-python/pull/86) | D.6：删内嵌指南的查看器；`pi-pager` −1,018 行、−14 个测试 | r35 / §10.37 |
+| [#84](https://github.com/zy1233/pi-python/pull/84) | D.1：`async-openai` 离开依赖图；`pi-sampling-types` 320 → 280 | r36 / §10.38 |
+
+**前后对比。**
+
+| 项目 | `6ba5cc4` | `14c476c` | 变化 |
+|---|---|---|---|
+| 依赖图唯一包数（`tui_baseline.py gates`） | 965 (B) | 954 (M) | −11 |
+| `tui/Cargo.lock` 包条目 | 1,252 (M，用 `git show` 数) | 1,233 (M) | −19（#83 −8，#84 −11） |
+| `release-dist` 的 `zypi` | 380,600,504 B (B) | 379,630,232 B (M) | −970,272 B（−0.25 %） |
+| `release-dist` 冷构建 | 707 s = 11 m 47 s (B) | 684 s = 11 m 24 s (M，一次) | −23 s，在噪声内 |
+| `zypi --version` 中位数 | 22.4–23.4 ms（旧行） | 22.6 ms (M) | 无变化 |
+| nextest，11 个 suite | 清单 8,556 | 8,502 通过 / 0 失败 / 25 跳过 (M)；清单 8,501 | 清单 −55 |
+| 测试墙钟（冷 `target/`，`PI_E2E_PYTHON`，`PI_E2E_REQUIRED=1`） | 28 m 27 s（r29 的旧行） | 27 m 16 s (M，一次) | 不是严格对比 |
+| `tui/` 的 `.rs` 行数 | 1,013,020 (M) | 1,006,529 (M) | −6,491 |
+| `tui/` 全部文件（`git diff 6ba5cc4 14c476c`） | | 145 个文件，+1,924 / −10,306 | −8,382 行 |
+| 调试版 `zypi` 里没有符号的 `.rs` 文件 | 688 个，291,749 行（D.8 的数） | 688 个，291,379 行 (M) | −370 行 |
+| `x.ai` 残留上限 | 253 | 251 (M，门禁) | −2 |
+
+噪声：同一台机器上的几次构建是 707 s、718 s（D.1 分支，rebase 之前），D.1 的试验里又有 −38 s 的差，所以一次构建的误差约 30 到 40 s（约 5 %）。−23 s 不能说构建变快了。体积的比较更可靠，但基线在 `/home/ubuntu/d1-base` 里构建，这一次在 `/workspace`，调试信息里的路径不同，−970 KB 里有几百字节不是代码。体积的分步：380,600,504（`6ba5cc4`）→ 379,973,352（D.1 分支，在 `6ba5cc4` 上）→ 379,630,232（五个 PR 之后）。
+
+**每个 suite（清单的 `reference_passed`，`6ba5cc4` → `14c476c`；这一轮实跑的数相同，只有 `pi-file-utils` 实跑 217）。** `pi-shell` 784 → 742，`pi-pager` 5,654 → 5,638，`pi-pager-render` 1,092，`pi-pager-minimal` 79，`pi-pager-bin` 33，`pi-acp-lib` 21 → 64，`pi-http` 13，`pi-telemetry` 239，`pi-file-utils` 216（实跑 217），`pi-sampling-types` 320 → 280，`pi-sandbox` 105。合计 8,556 → 8,501（实跑 8,502）。`python_agent_e2e` 的 14 个用例通过。
+
+**各 crate 的 `.rs` 行数变化（M）。** `pi-workflow` 3,544 → 0；`pi-shell` 42,000 → 39,604（−2,396）；`pi-sampling-types` 15,175 → 12,956（−2,219）；`pi-pager` 297,791 → 296,671（−1,120）；`pi-tools` −20；`pi-telemetry` −10；`pi-acp-lib` 2,387 → 5,212（+2,825，B.3 搬进来的，不是新代码）。所以这一批在行数上不大（净减 6.5 千行，约 0.6 %）。大头在更早的几轮：体积 470.5 MB → 380 MB，构建 1,647 s → 约 700 s。
+
+**PTY 脚本，在新的 `release-dist` 构建上（M，Linux）。** 全部通过，数与 `6ba5cc4` 上相同：`smoke.py` 23/23；`smoke.py --sandbox workspace` 24/24；`exit_matrix.py` 12/12；`exit_matrix.py --sandbox workspace` 14/14；`print_exit.py` 四个信号（SIGTERM、SIGKILL、SIGHUP、SIGINT）都没有留下进程；`resume_matrix.py --strict` 16 PASS / 0 GAP / 0 FIXED / 0 FAIL；`mode_probe.py` 退出 0（被拒的四个值 `acceptEdits`、`auto`、`dontAsk`、`plan` 都退出 2）；`status_line_probe.py` 4/4；`net_audit.py --mock` 13/13，`--mock --no-network` 13/13。另外量了 1.R4：`zypi -p hi --sandbox workspace` 退出 2 并打印说明（ADR7 的「明确报错」一支），所以 1.R4 勾上。没有跑：`flags_probe.py`、`settings_probe.py`、真实模型的 `net_audit.py`、macOS、Windows。
+
+**候选的现状（`14c476c`；行数用 `wc -l`，使用者用 `grep` 找，包数用 `cargo metadata` 的依赖图计算，只看差；这个计算数出 970 个包，门禁的规则数出 954，所以不要拿它与门禁比）。**
+
+| 项 | 现状 | 大小 | 做了能少 | 结论 |
+|---|---|---|---|---|
+| B.2 | `pi_shell::sampling` 是 4 个文件、253 行的薄壳，在 `pi-sampling-types`（12,956 行）之上；`pi-sampler` 与 `async-openai` 都不在了，要隔开的 provider 栈没有了。27 个 `pi-pager` 文件与 5 个 `pi-shell` 文件在用它 | 253 行 (M) | 约 0 行、0 个包 (E) | 前提不在了；建议关闭 |
+| B.4 | `agent/config.rs`、`config_tests.rs`、`config_model_override_parse.rs` 共 6,716 行；`Config` 89 个公开字段，27 个在 `config.rs` 之外没有人读 (E) | 6,716 行 | 最多约 1 到 2 千行、0 个包 (E) | 收益小，风险是旧 `config.toml` 的键（ADR5）；不急 |
+| D.2 | `session::{storage,persistence,unified_list}` 已删；剩 `RelayConfig`（约 16 行）、几行注释；`session/` 596 行是活的；`remote/` 1,861 行归 D.3 | 不到 100 行 (E) | 约 0 个包 | 建议关闭 |
+| D.3 | `auth/` 14,836 行（含约 5,030 行测试）、`managed_config` 746、`remote/` 1,861、`agent/auth_method.rs` 104、pager 的 `billing.rs` 551、`subscription.rs` 493、`dispatch/auth.rs` 458、`voice/auth.rs` 44 | 约 19.5 千行，含测试 (E) | 约 2 个包（`backon`、`pi-system-power`；M，计算） | 要用户答复 |
+| D.4 | `pi-workspace` 100,402 行 / 93 个文件（`permission/` 35,166 行是活的）；`pi-agent` 22,877 行 / 30 个文件 | 见下 | 见下 | 要用户答复 |
+
+D.3 的细节。`pi-auth`（536 行）要留：`pi-http`、`pi-file-utils`、`pi-telemetry`、`pi-tools`、`pi-workspace` 都用它。`pi-shell` 里只有 `auth/` 点名的依赖（`blake3`、`jsonwebtoken`、`reqwest-middleware`、`arc-swap`、`pi-extra-ca`）别的 crate 也用，所以只有两个包会走。风险：pager 用 `GateInfo`（16 处）与 `AuthMeta`（12 处）当线上类型，还有付费墙与 SuperGrok 升级流程、语音登录（`pi-voice`）、`remote::fetch_settings_blocking`（`effects/mod.rs`）和遥测层的凭据提供者。切的时候要留下那两个线上类型，其余要换掉。`managed_config` 是活的（`auth::credential_provider` 调它）。`x.ai` 与 `leader` 的上限大概会降（E；没有数这些行有多少在这些文件里）。要问用户：zypi 还要不要 xAI 登录、计费与付费墙界面、语音听写的登录、远端的模型与设置拉取？全部「不要」，D.3 是两个 PR（先 auth 核心，再 pager 的计费与语音），约 17 到 19 千行，省约 2 个包。
+
+D.4 的细节。`pi-workspace` 有 59 个文件、39,670 行没有符号（上限）；挂在它下面的 crate：`pi-hunk-tracker` 13.2 千行、`pi-codebase-graph` 9.7 千、`pi-workspace-daemon` 3.2 千、`pi-workspace-client` 0.9 千、`pi-workspace-types` 10.4 千（`pi-mcp` 也用）、`pi-mcp` 12.2 千（只有 `pi-config-types` 与 `pi-workspace` 用）、`pi-hooks` 4.8 千。`pi-agent` 有 19 个文件、11,689 行没有符号；用它的有 `pi-pager`（只在测试里）、`pi-shell`、`pi-subagent-resolution`、`pi-workspace`；`tui.md` 写着它「为将来的 pi-rust 保留」。包：整个 `pi-workspace` 节点移走最多少 24 个（7 个 `tree-sitter`、`petgraph`、`mimalloc` 等；M，但 pager 还要用 `permission`，所以是上限）；`pi-mcp` 节点 10 个（`rmcp`、`oauth2` 等）；`pi-agent` 与 `pi-hooks` 各 1 个。合起来最多约 35 个包（3.6 %）。风险：不变式 9（项目信任读 `project_config` 与 `folder_trust`）；权限栈是活的；D.8 里对 `plugins` 的试验，第一轮 `cargo check` 就有 26 个错误，这是重构活代码，不是删文件。要问用户：（1）`pi-agent` 还留给将来的 pi-rust 吗？不留，就做 D.4a：删 `pi-agent`、`pi-hooks` 与 8 个没有符号的 `plugins` 文件，约 12 到 25 千行 (E)，约 2 个包。（2）值不值得做多个 PR 的 `pi-workspace` 重构（留 `permission`、`trust`、`folder_trust`、`project_config`，去掉 hub、daemon、hunk tracker、codebase graph 与 MCP 适配）？上限约 35 个包（含 `tree-sitter` 与 `rmcp`）、约 50 到 90 千行 (E)。我的建议是「现在不做」：构建 11 分钟，二进制 380 MB，图已经只有 954。
+
+**没有符号的文件，新的上限。** 用 D.8 的脚本（`modsyms.py`，对 `14c476c` 的调试版 `zypi` 跑 `nm -C`）：688 个文件、291,379 行（D.8 当时 688 个、291,749 行）。最大的：`pi-tools` 177 个文件 81,616 行；`pi-workspace` 59 个 39,670；`pi-fast-worktree` 56 个 25,717；`pi-computer-hub-sdk` 20 个 14,714；`pi-agent` 19 个 11,689；`pi-sampling-types` 9 个 9,648；`pi-file-utils` 8 个 9,365；`pi-workspace-types` 48 个 9,358；`pi-codebase-graph` 22 个 8,116。这是上限，不是死代码清单：只有类型或泛型的模块也是零个符号。这一批没有碰这个集合（只少了 370 行）。
+
+**发现并改正的一处错误（我在 #84 里写的）。** 计划里 D.7 那一行的结尾是 `记录 [§10.38][l10-38]`，应该是 `[§10.35][l10-35]`（`pi-update` 的记录）。我把 r32 改成 r36 的时候，改错了这一行的链接。这一轮改正；计划里别的 `l10-38` 与 `§10.38`（D.1 行、索引行、修订行、链接定义）是对的。
+
+**没有验证的。** 没有重跑 CI（不启动、不重跑工作流）；没有第二次发行构建，所以没有这一台机器上的重复误差，只有旧的几次；macOS 与 Windows；`flags_probe.py`、`settings_probe.py`；真实模型的 `net_audit.py`。`render_done_text`（`pi-pager`，测试配置下的死代码告警）在 #84 之前的 `main` 上就有，门禁只数消费者构建，所以仍是绿的；这一轮没有碰它。`tui_baseline.py release` 把产物写进 `tui/target`，不看 `CARGO_TARGET_DIR`。
+
 ## 附录 A（摘录）：A.4
 
 附录 A 的 A.1–A.3（能力矩阵、ACP 版本配对、逐方法）是活的参考，留在[计划](../PLAN-RUST-AGENT-RUNTIME-REMOVAL.md)里。A.4 记 r5 的执行结果，搬到这里。
@@ -3515,3 +3574,4 @@ r12 续 8（2026-10-13）：PR [#18](https://github.com/zy1233/pi-python/pull/18
 - r34：D.8 余下的死文件，删 `pi-workflow`（2026-11-02；分支 `refactor/tui-drop-pi-workflow-and-unloaded-files`）。只删文件：crate `pi-workflow`、`scenarios/*.yaml`、九个 logo、十一个旧名字的 `.snap`；没有改 `.rs`。图仍 965，测试仍 8,557（在 `6ba5cc4` 上测）。见 [§10.36][l10-36]。
 - r35：D.6，删内嵌指南的查看器（2026-11-02；分支 `refactor/tui-drop-guide-viewer`）。`pi-pager` 少 1,018 行、14 个测试；`plugins`、`project_config`、`managed_config` 查过，都没有删。见 [§10.37][l10-37]。
 - r36：D.1（2026-11-02）：`async-openai` 离开依赖图，965 → 954；本地 `rs` 类型、旧会话夹具的往返测试、`pi-tools` 搜索客户端改写；`async-openai` 进 `deny_crates`。见 [§10.35](#1038-r36-追加d1async-openai-离开依赖图)。
+- r37：整批合并之后的重测（2026-11-02；`14c476c`；分支 `docs/tui-strip-remeasure`）。只读加量，没有改 `tui/`。依赖图 954，`zypi` 379,630,232 B，冷构建 684 s，测试 8,502 通过，PTY 脚本全过；`.rs` 少 6,491 行；B.2 与 D.2 的前提已不在；D.3 与 D.4 的大小与要问用户的事；勾 1.R4；改正 D.7 的记录链接（我在 #84 里改错的）。#82 与 #85 一并记在这里。
