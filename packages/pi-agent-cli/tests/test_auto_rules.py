@@ -1456,6 +1456,12 @@ def rt_world(world):
         ("env HOME=. git status", Reason.HIDDEN_COMMAND, "bash.hidden.env_assign"),
         ("env RIPGREP_CONFIG_PATH=./c rg foo", Reason.HIDDEN_COMMAND, "bash.hidden.env_assign"),
         ("env GIT_CONFIG_COUNT=1 git status", Reason.HIDDEN_COMMAND, "bash.hidden.env_assign"),
+        (
+            "env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor "
+            "GIT_CONFIG_VALUE_0=./x git status",
+            Reason.HIDDEN_COMMAND,
+            "bash.hidden.env_assign",
+        ),
         ("env LC_ALL=./x ls", Reason.HIDDEN_COMMAND, "bash.hidden.env_assign"),
         ("env LANG=./x ls", Reason.HIDDEN_COMMAND, "bash.hidden.env_assign"),
         ("env LANGUAGE=./x ls", Reason.HIDDEN_COMMAND, "bash.hidden.env_assign"),
