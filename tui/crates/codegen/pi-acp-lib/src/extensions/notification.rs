@@ -1,7 +1,7 @@
 use agent_client_protocol as acp;
 use pi_tools::types::TaskSnapshot;
 
-use crate::session::feedback::FeedbackRequest as FeedbackRequestData;
+use crate::extensions::feedback::FeedbackRequest as FeedbackRequestData;
 
 /// Aggregate verdict produced by the goal-verification stage. `Achieved` means the goal is judged
 /// complete; `NotAchieved` means another worker round is due. Serialized in snake_case. The name
@@ -800,7 +800,7 @@ pub enum SessionUpdate {
     /// not a notification. Subscribers show ⏳ NeedsInput for this session.
     PendingInteraction {
         tool_call_id: String,
-        kind: crate::session::pending_interaction::PendingKind,
+        kind: crate::extensions::pending_interaction::PendingKind,
     },
     /// A previously-pending reverse-request **resolved** (answered, cancelled,
     /// or errored). Fire-and-forget, **never persisted**. Subscribers clear the
@@ -907,8 +907,8 @@ pub struct ImageCompressedEntry {
     pub compressed_height: u32,
 }
 
-impl From<&crate::session::image_normalize::ImageCompressionInfo> for ImageCompressedEntry {
-    fn from(c: &crate::session::image_normalize::ImageCompressionInfo) -> Self {
+impl From<&crate::extensions::image_normalize::ImageCompressionInfo> for ImageCompressedEntry {
+    fn from(c: &crate::extensions::image_normalize::ImageCompressionInfo) -> Self {
         Self {
             index: c.index,
             original_bytes: c.original_bytes,
@@ -1091,7 +1091,7 @@ pub struct CompactionCheckpointFile {
     /// The prompt index at the time compaction completed.
     pub prompt_index_at_compaction: usize,
     /// The exact compacted conversation used by the model.
-    pub compacted_history: Vec<crate::sampling::ConversationItem>,
+    pub compacted_history: Vec<pi_sampling_types::ConversationItem>,
     /// Schema version for forward compatibility.
     pub schema_version: u32,
     /// ISO 8601 timestamp of when the checkpoint was created.
@@ -1154,13 +1154,13 @@ pub struct CompactionRequestFile {
     /// The full `ConversationItem` list sent to the model, with the
     /// summarization prompt already appended as the final user message.
     /// Replaying this against any model reproduces the exact request.
-    pub chat_history: Vec<crate::sampling::ConversationItem>,
+    pub chat_history: Vec<pi_sampling_types::ConversationItem>,
     /// Tool definitions attached to the request (same effective set as the
     /// turn loop, for prompt-prefix/KV-cache alignment). Empty for artifacts
     /// written before tools were attached. Backend-hosted tools are not
     /// recorded (not serializable; IC-side concept).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tools: Vec<crate::sampling::ToolSpec>,
+    pub tools: Vec<pi_sampling_types::ToolSpec>,
     /// Generated summary text, on success. `None` if all retries failed.
     pub summary: Option<String>,
     /// Most recent error message captured during the retry loop, if any.
@@ -1216,7 +1216,7 @@ pub struct RecapRequestFile {
     /// The full `ConversationItem` list sent to the model, with the recap
     /// instruction already appended as the final user message. Replaying
     /// this against any model reproduces the exact request.
-    pub chat_history: Vec<crate::sampling::ConversationItem>,
+    pub chat_history: Vec<pi_sampling_types::ConversationItem>,
     /// Cleaned one-line recap body shown to the user, on success.
     /// `None` if the model call failed or returned empty after cleaning.
     pub summary: Option<String>,

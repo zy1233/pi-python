@@ -8,8 +8,8 @@ use crate::scrollback::entry::EntryId;
 use crate::scrollback::state::ScrollbackState;
 use std::path::PathBuf;
 use std::time::Instant;
-use pi_shell::extensions::notification::RetryState;
-use pi_shell::extensions::notification::SessionUpdate as PiSessionUpdate;
+use pi_acp_lib::extensions::notification::RetryState;
+use pi_acp_lib::extensions::notification::SessionUpdate as PiSessionUpdate;
 pub(super) fn make_session(session_id: Option<&str>) -> AgentSession {
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     AgentSession {
@@ -69,8 +69,8 @@ pub(super) fn recap_block(text: &str) -> RenderBlock {
 }
 pub(super) fn compressed_entry(
     index: usize,
-) -> pi_shell::extensions::notification::ImageCompressedEntry {
-    pi_shell::extensions::notification::ImageCompressedEntry {
+) -> pi_acp_lib::extensions::notification::ImageCompressedEntry {
+    pi_acp_lib::extensions::notification::ImageCompressedEntry {
         index,
         original_bytes: 4_200_000,
         compressed_bytes: 780_000,

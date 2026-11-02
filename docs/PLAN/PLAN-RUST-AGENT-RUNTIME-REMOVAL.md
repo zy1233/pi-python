@@ -368,7 +368,7 @@ Rust（pager）：
 
 - [x] B.1 迁出 `OriginClientInfo`，使 `pi-telemetry` / `pi-http` 不再依赖 `pi-sampler`。**状态**（r3）：`OriginClientInfo` 在 `pi-telemetry/src/http.rs`。
 - [ ] B.2 把 pager 用到的 18 个 `sampling` 符号迁到不依赖 provider 栈的叶子 crate：对话项类型（`ConversationItem` / `UserItem` / `AssistantItem`）、reasoning-effort 元数据（`ReasoningEffort`、`ReasoningEffortOption`、`REASONING_EFFORT_META_KEY`、`parse_*`、`supports_reasoning_effort_meta` 等）、错误分类与文案（`RATE_LIMITED_ERROR_CODE`、`error_detail_from_data`、`format_rate_limited_user_message`、`http_status_from_error`、`is_free_usage_exhausted_error`、`prompt_usage_from_error`、`stop_reason_for_turn_error`）。**状态**：r3 换了做法，没有新建叶子 crate：`pi_shell::sampling` 留作薄壳，符号仍从 `pi-sampling-types` 重导出。provider 栈没有因此离开依赖图，见阶段 D。
-- [ ] B.3 ACP 扩展 wire 类型（`extensions::notification` / `session_search` 等）迁入 `pi-acp-lib` 或同级协议 crate（P2）。**状态**：r3 没做。
+- [x] B.3 ACP 扩展 wire 类型（`extensions::notification` / `session_search` 等）迁入 `pi-acp-lib` 或同级协议 crate（P2）。**状态**：做了：`pi-shell` 的 `extensions::{notification, prompt_meta}` 和只有它们用的 `session::{feedback, pending_interaction, image_normalize}` 迁入 `pi-acp-lib::extensions`，线上格式不变（`session_search` 的 crate 早已删除）；pager 改用 `pi_acp_lib::extensions`。`pi-acp-lib` 因此依赖 `pi-tools`、`pi-chat-state`、`pi-sampling-types`、`pi-status-line`，不再是只依赖 ACP 的叶子。
 - [ ] B.4 从 `agent::config` 抽出 pager 实际使用的部分（含 `SandboxSettingsConfig`、`grok_com_config`），其余字段按 ADR5 废弃。**状态**：r3 做了一部分：`agent::config` 就地瘦身并接收了 `AuthScheme`，没有抽成独立模块。ADR5 的首次启动告警没做。
 - [x] B.5 处理 [§5][l5] 列出的 24 个 cut point 里对 runtime / provider 栈的引用。**状态**（r3）：编译器验证。
 - [x] B.6 删除 94 个单元（113.0k 行）与 `pi-sampler` crate；清理依赖声明、feature、生成配置、测试 harness 与遗留名称。**状态**：r3。实际规模与「94 个单元 / 113.0k 行」的静态估计不同，见 [§10.1][l10-1]。

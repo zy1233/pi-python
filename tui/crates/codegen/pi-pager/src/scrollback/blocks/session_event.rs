@@ -238,7 +238,7 @@ impl SessionEvent {
                     .to_string()
             }
             SessionEvent::DiskFull => {
-                pi_shell::extensions::notification::DISK_FULL_USER_MESSAGE.to_string()
+                pi_acp_lib::extensions::notification::DISK_FULL_USER_MESSAGE.to_string()
             }
             SessionEvent::CompactCompleted { elapsed } => {
                 format!("Compaction completed in {}.", format_duration(*elapsed))

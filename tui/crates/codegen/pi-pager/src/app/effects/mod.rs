@@ -433,7 +433,7 @@ pub(crate) fn execute(
             let is_api_key_auth = session_flags.is_api_key_auth;
             tasks
                 .spawn(async move {
-                    use pi_shell::extensions::prompt_meta::PromptBlockMeta;
+                    use pi_acp_lib::extensions::prompt_meta::PromptBlockMeta;
                     ulog::info(
                         "prompt.acp_send.start",
                         Some(&session_id.0),

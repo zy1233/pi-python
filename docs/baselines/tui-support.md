@@ -2,7 +2,7 @@
 
 This file is generated. Do not edit it by hand.
 
-- Command: `python scripts/tui_callgraph.py keep`. Commit: `767460f`.
+- Command: `python scripts/tui_callgraph.py keep`. Commit: `5601118`.
 - Run the command again after a change that moves code between modules or crates.
 - It replaces the hand-written list of examples in item 0.5 of
   [`PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`](../PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md).
@@ -25,7 +25,7 @@ This file is generated. Do not edit it by hand.
 
 | crate | non-test lines | live | dead | dead units | check first | provider-stack refs |
 |---|---|---|---|---|---|---|
-| `pi-shell` | 28,373 | 28,373 (100%) | 0 (0%) | 0 | 0 | 20 |
+| `pi-shell` | 25,982 | 25,982 (100%) | 0 (0%) | 0 | 0 | 15 |
 | `pi-sampling-types` | 12,043 | 12,043 (100%) | 0 (0%) | 0 | 0 | 1 |
 | `pi-tools` | 130,450 | 130,406 (100%) | 44 (0%) | 1 | 1 | 1 |
 | `pi-agent` | 22,877 | 22,877 (100%) | 0 (0%) | 0 | 0 | 5 |
@@ -37,14 +37,14 @@ This file is generated. Do not edit it by hand.
 
 ### `pi-shell`
 
-Non-test code: 28,373 lines in 57 units.
+Non-test code: 25,982 lines in 51 units.
 
 | | units | lines | share |
 |---|---|---|---|
-| live | 57 | 28,373 | 100% |
+| live | 51 | 25,982 | 100% |
 | dead | 0 | 0 | 0% |
 
-Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampling`): 8 live units, 8 files, 20 references: `agent::config` (1), `agent::model_providers` (1), `extensions::notification` (5), `remote::client` (9), `sampling` (1), `sampling::conversation` (1), `sampling::types` (1), `util::config` (1).
+Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampling`): 7 live units, 7 files, 15 references: `agent::config` (1), `agent::model_providers` (1), `remote::client` (9), `sampling` (1), `sampling::conversation` (1), `sampling::types` (1), `util::config` (1).
 
 <details><summary>Live units</summary>
 
@@ -53,7 +53,6 @@ Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampl
 | `util::config` | 5,970 | 91 |
 | `auth::manager` | 3,754 | 0 |
 | `agent::config` | 3,110 | 26 |
-| `extensions::notification` | 2,195 | 9 |
 | `config` | 1,361 | 17 |
 | `auth::recovery` | 1,073 | 0 |
 | `auth::oidc` | 927 | 0 |
@@ -76,12 +75,11 @@ Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampl
 | `tools::config` | 184 | 0 |
 | `auth::error` | 171 | 0 |
 | `auth::external_auth` | 160 | 0 |
-| `session` | 158 | 16 |
 | `auth::token_output` | 155 | 0 |
+| `session` | 155 | 16 |
 | `session::title` | 140 | 3 |
 | `auth::auth_provider` | 128 | 0 |
 | `agent::auth_method` | 104 | 4 |
-| `session::feedback` | 104 | 0 |
 | `util::grok_auth_credentials` | 78 | 0 |
 | `auth::meta` | 63 | 0 |
 | `session::result` | 58 | 0 |
@@ -89,15 +87,12 @@ Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampl
 | `auth::token_type` | 52 | 0 |
 | `tools::todo` | 50 | 1 |
 | `util::dual_clock` | 46 | 0 |
-| `extensions::prompt_meta` | 43 | 1 |
 | `instrumentation` | 40 | 0 |
 | `auth` | 33 | 19 |
-| `session::pending_interaction` | 31 | 0 |
 | `auth::devbox_login_stub` | 25 | 0 |
-| `<root>` | 24 | 0 |
+| `<root>` | 23 | 0 |
 | `util` | 16 | 59 |
 | `sampling` | 12 | 0 |
-| `session::image_normalize` | 12 | 0 |
 | `agent::folder_trust` | 11 | 1 |
 | `tools` | 11 | 3 |
 | `agent` | 9 | 0 |
@@ -106,7 +101,6 @@ Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampl
 | `session::workflow` | 8 | 0 |
 | `sampling::conversation` | 4 | 0 |
 | `sampling::types` | 3 | 18 |
-| `extensions` | 2 | 0 |
 
 </details>
 
@@ -121,7 +115,7 @@ Non-test code: 12,043 lines in 12 units.
 
 Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampling`): 1 live units, 1 files, 1 references: `<root>` (1).
 
-Unresolved: 4 references from outside name nothing that is a unit here (an item of the root file, a glob re-export, or a macro): CompactionsRemaining::Dynamic (1), DanglingToolCallReason::HarnessHalted (1), HostedTool::WebSearch (1), HostedTool::XSearch (1).
+Unresolved: 4 references from outside name nothing that is a unit here (an item of the root file, a glob re-export, or a macro): CompactionsRemaining::Dynamic (1), HostedTool::WebSearch (1), HostedTool::XSearch (1), DanglingToolCallReason::HarnessHalted (1).
 
 <details><summary>Live units</summary>
 
@@ -137,7 +131,7 @@ Unresolved: 4 references from outside name nothing that is a unit here (an item 
 | `conversation::messages` | 399 | 0 |
 | `conversation::responses` | 374 | 0 |
 | `conversation::chat_completions` | 314 | 0 |
-| `<root>` | 35 | 53 |
+| `<root>` | 35 | 57 |
 | `serde_helpers` | 19 | 0 |
 
 </details>

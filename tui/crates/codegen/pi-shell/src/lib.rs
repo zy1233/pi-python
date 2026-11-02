@@ -7,7 +7,6 @@ pub mod auth;
 pub(crate) use pi_bundle as bundle;
 pub mod config;
 pub use pi_shell_base::env;
-pub mod extensions;
 pub mod heap_profile;
 pub use pi_http as http;
 pub(crate) mod instrumentation;

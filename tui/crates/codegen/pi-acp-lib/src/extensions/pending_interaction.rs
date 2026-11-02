@@ -6,12 +6,12 @@
 //! record it here, keyed by `tool_call_id` (stable, lives in the transcript →
 //! survives reconnect). This registry is the single source of truth for "what
 //! is pending right now" and is read by the roster to surface
-//! [`crate::agent::roster::RosterActivity::NeedsInput`].
+//! `RosterActivity::NeedsInput` in `pi-shell`.
 //!
 //! Pending interactions are **requests, not notifications** — they are never
 //! persisted. We broadcast `pending_interaction` / `interaction_resolved`
 //! **fire-and-forget** via the gateway (same idiom as
-//! [`crate::session::summary`]); the routing layer fans them to every
+//! the session summary); the routing layer fans them to every
 //! subscriber because they carry a `sessionId`.
 
 /// Which kind of blocking reverse-request is pending.
