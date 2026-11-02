@@ -2330,7 +2330,7 @@ Runner 有 Landlock（ABI 8），没有 `bwrap`；装上 `bwrap` 也不能用，
 
 ### 10.35 r32 追加：删除 `pi-update`、npm 目录与安装脚本（用户选 2B）
 
-这一节记 2026-11-02 的两个 PR。用户在「剥离计划卡住的三件事」里选了第 2 项的选项 B（「2B」）：放弃自动更新；`zypi` 的 Windows 与 macOS x86_64 预编译二进制保留，写成「计划，没有日期」。PR 1（代码）是 [#78](https://github.com/zy1233/pi-python/pull/78)，分支 `refactor/drop-pi-update-npm-install-1b89`。PR 2（文档，就是这一节、计划、README 与站点的「Next」）在 #78 之后合入。没有动任何 workflow 文件。
+这一节记 2026-11-02 的两个 PR。用户在「剥离计划卡住的三件事」里选了第 2 项的选项 B（「2B」）：放弃自动更新；`zypi` 的 Windows 与 macOS x86_64 预编译二进制保留，写成「计划，没有日期」。**同日第二次答复改了后半句：** `zypi` 不支持、也不计划 macOS x86_64（Windows 仍是「计划，没有日期」）；macOS x86_64 的 job 不做。下文按最终的决定写，原来的提案过程留在「macOS x86_64 的 release job」一段。PR 1（代码）是 [#78](https://github.com/zy1233/pi-python/pull/78)，分支 `refactor/drop-pi-update-npm-install-1b89`。PR 2（文档，就是这一节、计划、README 与站点的「Next」）在 #78 之后合入。没有动任何 workflow 文件。
 
 **PR 1 做了什么。**
 - 删了 crate `pi-update`（11,603 行，含 11 个测试文件与 `test_install_sh.rs`）、`pi-pager/npm/`（7 个包）、`pi-pager/scripts/`（四个 `install*` 脚本）。`tui/` 下共 −15,262 行 / +34 行（45 个文件是删除）；`.rs` 行数 994,411 → 982,818。
@@ -2357,7 +2357,7 @@ Runner 有 Landlock（ABI 8），没有 `bwrap`；装上 `bwrap` 也不能用，
 - `scripts/trim_pager_main.py`（Phase 4 的一次性脚本）里还写着 `pi_update`，没有改。
 - 0.9 与 1.R3 里 Windows 一侧到底要测还是算范围外：用户选的是「Windows 的二进制计划，没有日期」，没有说这两项；计划里这两项没有改。
 
-**macOS x86_64 的 release job（只有提案）。** 用户让写一份提案，不开 PR、不碰 workflow。提案在项目库，不在仓库里：独立的 workflow（像 `agent-binaries.yml`，不改 `release.yml`）；Intel 的 runner 标签是 `macos-15-intel`（docs.github.com 的「GitHub-hosted runners reference」，4 CPU、14 GB；GitHub 说它只到 2027 年 8 月）；资产名 `zypi-macos-x86_64`；触发是 `Release` 的 `workflow_run`（成功、tag 推送）加手动 `workflow_dispatch`；只有上传的 job 有 `contents: write`；失败只让发布件少一个文件，不影响 `Release`。`zypi` 从没在 `x86_64-apple-darwin` 上构建过，所以第一次试跑才知道能不能构建。用户说「做」才做。
+**macOS x86_64 的 release job（提案已作废）。** 用户先让写一份提案，不开 PR、不碰 workflow；同日用户答复：`zypi` 不支持、也不计划 macOS x86_64，所以这个 job 不做，没有写 workflow 文件。下面是提案当时的内容，只作记录；提案留在项目库，不在仓库里，没有改。当时的设计：独立的 workflow（像 `agent-binaries.yml`，不改 `release.yml`）；Intel 的 runner 标签是 `macos-15-intel`（docs.github.com 的「GitHub-hosted runners reference」，4 CPU、14 GB；GitHub 说它只到 2027 年 8 月）；资产名 `zypi-macos-x86_64`；触发是 `Release` 的 `workflow_run`（成功、tag 推送）加手动 `workflow_dispatch`；只有上传的 job 有 `contents: write`；失败只让发布件少一个文件，不影响 `Release`。`zypi` 从没在 `x86_64-apple-darwin` 上构建过，所以第一次试跑才知道能不能构建。
 
 **没验证的。** macOS 与 Windows 上的 `zypi`；TUI CI 之外的平台；`x86_64-apple-darwin` 的构建。
 
@@ -3385,4 +3385,4 @@ r12 续 8（2026-10-13）：PR [#18](https://github.com/zy1233/pi-python/pull/18
 - r29：D.9（2026-11-01；PR [#75](https://github.com/zy1233/pi-python/pull/75)，分支 `ci/tui-baseline-isolate-home-3df6`）。用户的电脑跑不动整套 Rust 测试，所以在云上的 Linux VM 里做；用户先要求讨论，同意后只做 D.9。`tui_baseline.py test` 用临时 `HOME`；整套测试改前改后都是 8,558 通过 / 0 失败 / 25 跳过。见 [§10.32](#1032-r29-追加d9测试用临时-home)。
 - r30：发行构建与 v0.8.0 二进制的 PTY 检查（2026-11-01；分支 `docs/tui-release-pty-check-c4a1`，只改文档）。在云上的 Linux VM 里按 `Release` 的办法构建 `zypi`（`release-dist`，`main` 的 `2b62e68`，冷构建 11 m 58 s，380,398,296 B），对它与 v0.8.0 的 `zypi-linux-x86_64` 各跑 `scripts/tui_pty/` 里不要密钥的脚本：除 `smoke.py --sandbox workspace`（23/24，待办的发现，没有改脚本）外全部通过，两个二进制的数相同；两个二进制里 `tui/` 的源码相同。见 [§10.33](#1033-r30-追加发行构建与-v080-二进制的-pty-检查)。
 - r31：`smoke.py --sandbox workspace` 的标签检查（2026-11-01；PR [#77](https://github.com/zy1233/pi-python/pull/77)，分支 `fix/tui-pty-smoke-sandbox-label`）。Landlock 内核上的检查从欢迎页挪到第一轮对话之后；两个二进制上 24/24；没有 Landlock 的那一支没改，用 seccomp 模拟，新旧脚本都是 26/26。欢迎页该显示什么没有决定。见 [§10.34](#1034-r31-追加smokepy---sandbox-workspace-的标签检查)。
-- r32：用户选「2B」（2026-11-02；PR [#78](https://github.com/zy1233/pi-python/pull/78)，分支 `refactor/drop-pi-update-npm-install-1b89`；文档在另一个 PR）。删 `pi-update`、`pi-pager/npm/`、四个安装脚本和只有更新器用的 pager 代码；版本策略搬进 `pi-pager-bin`。门禁与整套测试过（8,557 通过 / 0 失败）；依赖图 970 → 965。README 与站点的「Next」改成「自动更新不做；macOS x86_64 与 Windows 的二进制计划，没有日期」。macOS x86_64 的 release job 只写了提案。见 [§10.35](#1035-r32-追加删除-pi-updatenpm-目录与安装脚本用户选-2b)。
+- r32：用户选「2B」（2026-11-02；PR [#78](https://github.com/zy1233/pi-python/pull/78)，分支 `refactor/drop-pi-update-npm-install-1b89`；文档在另一个 PR）。删 `pi-update`、`pi-pager/npm/`、四个安装脚本和只有更新器用的 pager 代码；版本策略搬进 `pi-pager-bin`。门禁与整套测试过（8,557 通过 / 0 失败）；依赖图 970 → 965。README 与站点的「Next」改成「`zypi` 的 Windows 二进制计划，没有日期；不做 macOS x86_64 版本，也不做自动更新」（第二次答复后）。macOS x86_64 的 release job 的提案作废。见 [§10.35](#1035-r32-追加删除-pi-updatenpm-目录与安装脚本用户选-2b)。
