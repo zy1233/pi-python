@@ -5,7 +5,8 @@ watch), with the LLM replaced by a scripted turn. The tool command writes what i
 ``PI_AGENT_PARENT_PID`` to ``PI_TEST_TOOL_ENVFILE``, then its own pid to ``PI_TEST_TOOL_PIDFILE``,
 and ``exec``s ``sleep``, so the pid in that file is the pid of the tool process itself. This
 process writes its own pid to ``PI_TEST_AGENT_PIDFILE``. Run it as ``python _print_agent.py`` with
-``PI_HOME`` set; ``permission`` is forced to ``auto`` by ``-p``, so the tool call never waits.
+``PI_HOME`` set; ``permission`` is forced to ``always-approve`` by ``-p``, so the tool call never
+waits.
 """
 
 from __future__ import annotations

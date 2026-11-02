@@ -176,17 +176,29 @@ async def test_the_mode_option_puts_a_session_in_auto_and_back(tmp_path: Path):
     assert harness.tool_execution == "parallel"
 
 
-async def test_the_entry_message_is_sent_once_for_each_time_auto_is_entered(tmp_path: Path):
+async def test_the_entry_message_is_sent_each_time_auto_is_entered_and_not_when_it_is_set_again(
+    tmp_path: Path,
+):
     agent, client = _agent(tmp_path)
     created = await agent.new_session(cwd=_project(tmp_path))
     await _settled(agent)
     session_id = created.session_id
 
-    for _ in range(2):  # the second one changes nothing
-        await agent.set_config_option(config_id="mode", session_id=session_id, value="auto")
+    def entry_messages() -> int:
+        return len([text for text in client.messages(session_id) if ENTRY_MESSAGE in text])
 
-    assert [t for t in client.messages(session_id) if ENTRY_MESSAGE in t] != []
-    assert len([t for t in client.messages(session_id) if ENTRY_MESSAGE in t]) == 1
+    async def select(value: str) -> None:
+        await agent.set_config_option(config_id="mode", session_id=session_id, value=value)
+
+    assert entry_messages() == 0
+    await select("auto")
+    assert entry_messages() == 1
+    await select("auto")  # nothing changes
+    assert entry_messages() == 1
+    await select("ask")
+    assert entry_messages() == 1
+    await select("auto")  # entered again
+    assert entry_messages() == 2
 
 
 @pytest.mark.parametrize("value", ["always-approve", "plan", "bogus", "", "AUTO"])
