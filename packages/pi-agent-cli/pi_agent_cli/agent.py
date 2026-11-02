@@ -64,6 +64,7 @@ from pi_agent_cli.auto_mode import (
     AutoSession,
     BashLimitRegistry,
     config_notes_message,
+    config_problems_message,
     entry_message,
     problems_message,
 )
@@ -675,12 +676,15 @@ class PiAcpAgent(Agent):
             logger.warning("Could not send the mode of session %s", session_id, exc_info=True)
 
     async def _notify_permission_mode(self, session_id: str) -> None:
-        """At the start of a session: the entry message when it is in Auto, and the values of
-        ``[auto]`` that were read and not used."""
+        """At the start of a session: the entry message when it is in Auto (it lists what is
+        wrong with the settings), else the values of ``[auto]`` that Auto cannot work with; and
+        the values of ``[auto]`` that were read and not used."""
         if self._conn is None or session_id not in self._harnesses:
             return
         if self._session_mode(session_id) == "auto":
             await self._send_auto_notice(session_id)
+        elif self._config.auto.problems:
+            await self._send_text(session_id, config_problems_message(self._config.auto.problems))
         notes = self._config.auto.notes
         if notes:
             await self._send_text(session_id, config_notes_message(notes))
