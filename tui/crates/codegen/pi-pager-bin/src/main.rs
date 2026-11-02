@@ -20,6 +20,7 @@ mod jemalloc_malloc_conf {
 }
 mod interactive_flags;
 mod print_mode;
+mod version_policy;
 use anyhow::Result;
 use pi_pager::app::{Command, PagerArgs};
 use pi_pager::client_identity::PAGER_CLIENT_VERSION;
@@ -44,7 +45,7 @@ fn process_identity(command: Option<&Command>, is_interactive: bool) -> Option<P
         interactivity,
     })
 }
-use pi_update::enforce_version_policy_or_exit;
+use version_policy::enforce_version_policy_or_exit;
 use std::env;
 /// Entrypoint tag for `grok -p`; keys the quiet stderr default in `init_tracing_simple`.
 const HEADLESS_ENTRYPOINT: &str = "headless";
@@ -349,6 +350,9 @@ fn install_heap_profile_hooks() {
         prof_available: jemalloc_prof_available,
     });
 }
+/// The release channel was learned by the auto-updater (a cached pointer to the stable
+/// version). There is no updater, so no channel is known.
+const NO_CHANNEL_LABEL: &str = "";
 fn version_text(channel_label: &str) -> String {
     format!(
         "{} {}\n",
@@ -363,7 +367,7 @@ fn dispatch_version_if_requested(args: &PagerArgs) -> bool {
     if !args.version {
         return false;
     }
-    if let Err(error) = write_version(&mut std::io::stdout().lock(), pi_update::channel_label()) {
+    if let Err(error) = write_version(&mut std::io::stdout().lock(), NO_CHANNEL_LABEL) {
         eprintln!("Error: {error}");
         std::process::exit(1);
     }
@@ -470,9 +474,7 @@ fn main() {
     if let Some(code) = pi_pager::voice::maybe_run_capture_subprocess() {
         std::process::exit(code);
     }
-    set_release_channel(ReleaseChannel::from_label(
-        pi_update::channel_name().unwrap_or_default(),
-    ));
+    set_release_channel(ReleaseChannel::from_label(NO_CHANNEL_LABEL));
     let args = PagerArgs::parse_cli();
     if let Some(code) = dispatch_python_print(&args) {
         std::process::exit(code);
@@ -622,11 +624,11 @@ async fn async_main(args: PagerArgs) -> Result<()> {
                 if json {
                     let payload = serde_json::json!({
                         "currentVersion": env!("VERSION_WITH_COMMIT"),
-                        "channel": pi_update::channel_name().unwrap_or("unknown"),
+                        "channel": "unknown",
                     });
                     println!("{}", serde_json::to_string(&payload)?);
                 } else {
-                    write_version(&mut std::io::stdout().lock(), pi_update::channel_label())?;
+                    write_version(&mut std::io::stdout().lock(), NO_CHANNEL_LABEL)?;
                 }
                 return Ok(());
             }
@@ -654,18 +656,9 @@ async fn async_main(args: PagerArgs) -> Result<()> {
     enforce_version_policy_or_exit();
     // Phase 4: no otel export from the pager; Python owns LLM telemetry if any.
     let _otel_guard: Option<()> = None;
-    // Phase 4: auto-update disabled per design §4.4
-    let bg_update_rx = None;
-    let result = pi_pager::app::run(args, bg_update_rx).await;
+    let result = pi_pager::app::run(args).await;
     pi_sandbox::flush();
-    match result {
-        Ok(true) => {
-            eprintln!("Update is disabled in {}.", pi_pager::brand::CLI_NAME);
-            Ok(())
-        }
-        Ok(false) => Ok(()),
-        Err(e) => Err(e),
-    }
+    result
 }
 
 #[cfg(test)]

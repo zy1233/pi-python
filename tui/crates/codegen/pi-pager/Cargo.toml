@@ -83,7 +83,6 @@ pi-ratatui-textarea = { workspace = true }
 pi-ratatui-inline = { workspace = true }
 
 # Update
-pi-update = { path = "../pi-update" }
 
 # ACP
 agent-client-protocol = { workspace = true }

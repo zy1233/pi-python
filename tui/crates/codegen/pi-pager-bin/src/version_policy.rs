@@ -1,25 +1,15 @@
 //! Startup enforcement of the version policy. The hard `required_*` bounds gate
-//! startup; `minimum`/`maximum` are updater-only. Every knob fails open.
+//! startup. Every knob fails open.
 
-use crate::version::get_installed_grok_version;
+use pi_shell::util::config::VersionPolicy;
 use semver::Version;
 use tracing::warn;
-use pi_shell::util::config::VersionPolicy;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum RequiredRangeDecision {
     InRange,
     Below { current: String, minimum: String },
     Above { current: String, maximum: String },
-}
-
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum VersionPolicyError {
-    #[error(
-        "Cannot install Grok {target}: the minimum allowed version is {minimum}. \
-         Run `grok update` to install the latest allowed version."
-    )]
-    TargetBelowFloor { target: String, minimum: String },
 }
 
 /// Fails open: a contradictory range or an unparseable running version yields
@@ -57,38 +47,18 @@ fn evaluate_required_range(current_version: &str, policy: &VersionPolicy) -> Req
     RequiredRangeDecision::InRange
 }
 
-/// Reject an explicit `--version` pin below the hard floor. A pin above the
-/// ceiling is allowed so a too-new install can recover.
-pub(crate) fn check_install_target(
-    policy: &VersionPolicy,
-    target: &str,
-) -> Result<(), VersionPolicyError> {
-    let Some(min) = policy.installable_floor() else {
-        return Ok(());
-    };
-    if !matches!(Version::parse(target), Ok(t) if t >= min) {
-        return Err(VersionPolicyError::TargetBelowFloor {
-            target: target.to_string(),
-            minimum: min.to_string(),
-        });
-    }
-    Ok(())
-}
-
 fn required_range_message(decision: &RequiredRangeDecision) -> Option<String> {
     match decision {
         RequiredRangeDecision::InRange => None,
         RequiredRangeDecision::Below { current, minimum } => Some(format!(
             "This version of Grok ({current}) is older than the minimum required \
              by your organization ({minimum}).\n\n\
-             Update to an approved version through your organization's approved \
-             method (for example, run `grok update`)."
+             Update to an approved version through your organization's approved method."
         )),
         RequiredRangeDecision::Above { current, maximum } => Some(format!(
             "This version of Grok ({current}) is newer than the maximum allowed \
              by your organization ({maximum}).\n\n\
-             Install an approved version through your organization's approved \
-             method (for example, run `grok update --version {maximum}`)."
+             Install an approved version through your organization's approved method."
         )),
     }
 }
@@ -97,7 +67,7 @@ fn required_range_message(decision: &RequiredRangeDecision) -> Option<String> {
 /// Recovery subcommands return before this, so they stay usable.
 pub fn enforce_version_policy_or_exit() {
     let policy = VersionPolicy::resolve();
-    let current = get_installed_grok_version();
+    let current = pi_version::installed();
     let decision = evaluate_required_range(&current, &policy);
     if let Some(message) = required_range_message(&decision) {
         warn!(?decision, "required version range: refusing to start");
@@ -126,32 +96,6 @@ mod tests {
             required_minimum: rmin.map(v),
             required_maximum: rmax.map(v),
         }
-    }
-
-    #[test]
-    fn check_install_target_enforces_only_the_hard_floor() {
-        assert!(check_install_target(&pol(Some("0.2.100"), None, None, None), "0.2.50").is_ok());
-        let hard = pol(None, None, Some("0.1.100"), None);
-        assert!(check_install_target(&hard, "0.1.150").is_ok());
-        assert!(matches!(
-            check_install_target(&hard, "0.1.50").unwrap_err(),
-            VersionPolicyError::TargetBelowFloor { .. }
-        ));
-        assert!(matches!(
-            check_install_target(&hard, "garbage").unwrap_err(),
-            VersionPolicyError::TargetBelowFloor { .. }
-        ));
-        assert!(check_install_target(&pol(None, None, None, None), "garbage").is_ok());
-        assert!(
-            check_install_target(&pol(None, None, Some("0.3.0"), Some("0.2.0")), "0.1.0").is_ok()
-        );
-        assert!(
-            check_install_target(
-                &pol(None, None, Some("0.2.100"), Some("0.2.150")),
-                "0.2.200"
-            )
-            .is_ok()
-        );
     }
 
     #[test]

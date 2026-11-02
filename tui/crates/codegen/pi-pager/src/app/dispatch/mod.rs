@@ -42,7 +42,6 @@ pub(crate) use prompt::dispatch_initial_prompt;
 pub(in crate::app) use prompt::{show_small_screen_tip, show_ssh_wrap_tip};
 pub(crate) use router::dispatch;
 pub(crate) use settings::ui::refresh_open_settings_modals;
-pub(crate) use status::commit_minimal_update_notice;
 pub(crate) use turn::{reconcile_overdue_cancels, reconcile_overdue_turn_ends};
 
 // Test-only consumers (cfg(test) mods elsewhere in the crate); a plain

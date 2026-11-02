@@ -24,20 +24,6 @@ pub(super) fn scrub_error_for_toast(error: &str) -> String {
     }
 }
 
-/// Commit a one-line "update available" notice into the active agent's
-/// scrollback. Minimal mode has no welcome screen (the full TUI's update
-/// surface), so the background update check's result is shown here instead
-/// No-op when there is no active agent.
-pub(crate) fn commit_minimal_update_notice(app: &mut AppView, latest_version: &str) {
-    if let ActiveView::Agent(id) = app.active_view
-        && let Some(agent) = app.agents.get_mut(&id)
-    {
-        agent.scrollback.push_block(RenderBlock::system(format!(
-            "Update available: v{latest_version}. Restart to apply."
-        )));
-    }
-}
-
 /// `/queue` — commit a read-only list of the queued prompts as a system block.
 /// The text is built by [`crate::app::status_blocks::queue_block_text`]; this
 /// just resolves the active agent and pushes it. Works in every render mode; the

@@ -24,7 +24,6 @@ pi-pager-minimal = { path = "../pi-pager-minimal" }
 # TUI-side services (config, auth, sessions UI plumbing); the agent runtime is
 # an external ACP agent (`pi_agent_cli`), not linked into this binary.
 pi-shell = { workspace = true }
-pi-update = { path = "../pi-update" }
 pi-version = { workspace = true }
 pi-telemetry = { workspace = true }
 pi-workspace = { workspace = true }
@@ -50,6 +49,7 @@ pi-active-sessions = { workspace = true }
 pi-config = { workspace = true }
 pi-sandbox = { path = "../pi-sandbox", default-features = false }
 pi-extra-ca = { workspace = true }
+semver = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 

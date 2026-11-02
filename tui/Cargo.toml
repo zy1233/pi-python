@@ -54,7 +54,6 @@ members = [
     "crates/codegen/pi-test-support",
     "crates/codegen/pi-tools",
     "crates/codegen/pi-tools-api",
-    "crates/codegen/pi-update",
     "crates/codegen/pi-version",
     "crates/codegen/pi-voice",
     "crates/codegen/pi-workspace",

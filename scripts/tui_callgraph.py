@@ -65,8 +65,8 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TUI = REPO_ROOT / "tui"
 
-# What ships: the product binary, its library, the minimal pager and the updater.
-DEFAULT_LIVE = ("pi-pager-bin", "pi-pager", "pi-pager-minimal", "pi-update")
+# What ships: the product binary, its library and the minimal pager.
+DEFAULT_LIVE = ("pi-pager-bin", "pi-pager", "pi-pager-minimal")
 # `keep` reports the support layer: the biggest crate under the pager plus the crates that
 # docs/baselines/tui.md section 4 gives a reason for.
 SUPPORT_CRATES = (
