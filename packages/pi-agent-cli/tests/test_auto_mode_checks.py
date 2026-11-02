@@ -200,6 +200,12 @@ def test_the_entry_message_says_what_auto_does_not_guard():
     assert "/auto-log" in ENTRY_MESSAGE
 
 
+def test_the_entry_message_says_that_auto_never_refuses_a_call_by_itself():
+    """D4: Auto allows or asks. The user can always say yes."""
+    assert "never refuses a call by itself" in ENTRY_MESSAGE
+    assert "you can always say yes" in ENTRY_MESSAGE
+
+
 def test_the_entry_message_of_a_setting_from_agent_toml_says_what_it_meant_before():
     plain = entry_message()
     from_file = entry_message(from_config=True)

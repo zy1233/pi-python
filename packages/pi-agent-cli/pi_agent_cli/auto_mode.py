@@ -206,6 +206,18 @@ def problems_message(problems: Sequence[str]) -> str:
     return "\n".join(lines)
 
 
+def config_problems_message(problems: Sequence[str]) -> str:
+    """The text for the user about the values of ``[auto]`` that Auto cannot work with, in a
+    session that is not in Auto (the entry message of Auto lists them for a session that is)."""
+    return "\n".join(
+        [
+            "Settings in agent.toml that Auto cannot work with. When Auto is on, it asks about "
+            "every call that is not read-only until they are fixed:",
+            *(f"- {problem}" for problem in problems),
+        ]
+    )
+
+
 def config_notes_message(notes: Sequence[str]) -> str:
     """The text for the user about the values of ``agent.toml`` that were not used."""
     return "\n".join(["Settings in agent.toml that are not used:", *(f"- {n}" for n in notes)])

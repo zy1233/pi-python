@@ -120,12 +120,14 @@ def _agent(
     permission: str = "auto",
     extensions: list[Any] | None = None,
     auto: AutoConfig | None = None,
+    project_trust: str | None = None,
 ) -> PiAcpAgent:
     config = CliConfig(
         permission=permission,  # type: ignore[arg-type]
         provider="mock",
         model_id="mock",
         auto=auto or AutoConfig(),
+        default_project_trust=project_trust,  # type: ignore[arg-type]
     )
     return PiAcpAgent(
         stream_fn=stream_fn, home=world.home, config=config, extensions=extensions or []
@@ -308,7 +310,7 @@ def _fake_session(world: _World, tools: list[Any] | None = None, **kwargs: Any):
         harness=harness,
         get_config=lambda: config,
         home=world.home,
-        trusted=lambda: False,
+        trusted=kwargs.pop("trusted", lambda: False),
         environ=kwargs.pop("environ", {"PATH": os.pathsep.join(["/usr/bin", "/bin"])}),
         resolve_shell=kwargs.pop("resolve_shell", lambda _path: SimpleNamespace(shell="/bin/bash")),
     )
@@ -423,6 +425,46 @@ async def test_a_bash_tool_that_cannot_find_a_shell_makes_every_call_ask(
     assert verdict.outcome is Outcome.ASK
 
 
+async def test_a_check_of_the_session_that_fails_makes_every_call_ask_and_says_so(
+    world: _World, monkeypatch: pytest.MonkeyPatch
+):
+    """A check that cannot run is not a check that found nothing."""
+
+    def broken(context):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(auto_mode, "context_problems", broken)
+    agent, client, session_id = await _open(world)
+
+    verdict = await _verdict_of(agent, session_id)("write", {"path": "a.txt", "content": ""})
+
+    assert verdict.outcome is Outcome.ASK
+    assert verdict.rule_id == "session.check_failed"
+    assert "could not read the state of the session" in "\n".join(client.messages())
+
+
+async def test_a_check_of_the_session_that_takes_too_long_makes_every_call_ask(
+    world: _World, monkeypatch: pytest.MonkeyPatch
+):
+    import time
+
+    monkeypatch.setattr(auto_mode, "DECISION_TIMEOUT_SECONDS", 0.2)
+
+    def slow(context):
+        time.sleep(0.6)
+        return []
+
+    monkeypatch.setattr(auto_mode, "context_problems", slow)
+    agent, client, session_id = await _open(world)
+    monkeypatch.setattr(auto_mode, "DECISION_TIMEOUT_SECONDS", 20.0)  # the check is over
+
+    verdict = await _verdict_of(agent, session_id)("write", {"path": "a.txt", "content": ""})
+
+    assert verdict.outcome is Outcome.ASK
+    assert verdict.rule_id == "session.check_failed"
+    assert "could not read the state of the session" in "\n".join(client.messages())
+
+
 @pytest.mark.parametrize("name", ["bash", "write", "edit"])
 async def test_a_tool_of_an_extension_with_the_name_of_ours_is_not_ours(world: _World, name: str):
     """The rules know ``bash``, ``write`` and ``edit`` by what they do. A tool that an
@@ -473,6 +515,36 @@ async def test_a_value_of_auto_that_cannot_be_used_makes_every_call_ask(world: _
 
     assert verdict.outcome is Outcome.ASK
     assert "protected in [auto]" in "\n".join(client.messages())
+
+
+@pytest.mark.parametrize("permission", ["ask", "always-approve"])
+async def test_a_value_of_auto_that_cannot_be_used_is_told_when_the_session_is_not_in_auto(
+    world: _World, permission: str
+):
+    """The user sees it when the config loads, not first when Auto is turned on."""
+    auto = AutoConfig(problems=("An entry of protected in [auto] is not text.",))
+    _, client, _ = await _open(world, permission=permission, auto=auto)
+
+    (text,) = client.messages()
+    assert "protected in [auto]" in text
+    assert "Auto mode is on" not in text
+
+
+async def test_a_value_of_auto_that_cannot_be_used_is_told_once_when_the_session_is_in_auto(
+    world: _World,
+):
+    auto = AutoConfig(problems=("An entry of protected in [auto] is not text.",))
+    _, client, _ = await _open(world, auto=auto)
+
+    (text,) = client.messages()
+    assert text.startswith("Auto mode is on.")
+    assert text.count("protected in [auto]") == 1
+
+
+async def test_a_session_not_in_auto_with_good_settings_says_nothing_about_auto(world: _World):
+    _, client, _ = await _open(world, permission="ask")
+
+    assert client.messages() == []
 
 
 async def test_a_session_with_nothing_wrong_says_only_what_auto_is(world: _World):
@@ -655,6 +727,49 @@ async def test_with_no_client_to_ask_a_call_that_asks_is_blocked(world: _World):
     assert not marker.exists()
 
 
+# --------------------------------------------------------- the trust of the project (invariant 9)
+
+
+async def test_code_of_a_project_that_nobody_vouched_for_asks_and_says_why(world: _World):
+    """What the project brings along runs only after the user vouched for it. The trust of the
+    session goes to the rules as it is."""
+    agent, _, session_id = await _open(world)
+
+    verdict = await _verdict_of(agent, session_id)("bash", {"command": "pytest"})
+
+    assert verdict.outcome is Outcome.ASK
+    assert verdict.reason is Reason.UNTRUSTED_PROJECT_CODE
+    assert verdict.rule_id == "bash.untrusted_project_code"
+
+
+async def test_code_of_a_project_that_the_user_vouched_for_is_left_to_the_next_step(
+    world: _World,
+):
+    agent, _, session_id = await _open(world, project_trust="always")
+
+    verdict = await _verdict_of(agent, session_id)("bash", {"command": "pytest"})
+
+    # The rules cannot prove it harmless, and the model step is not built yet: it asks, but
+    # not for the reason of the first test.
+    assert verdict.outcome is Outcome.ASK
+    assert verdict.reason is Reason.UNCLEAR
+    assert verdict.rule_id == "pipeline.unclear"
+
+
+async def test_the_trust_of_the_project_is_read_again_for_each_call(world: _World):
+    """The user can vouch for the project while the session runs (the question at the start)."""
+    trusted = [False]
+    _, session = _fake_session(world, [_tool("bash")], trusted=lambda: trusted[0])
+    await session.enter()
+
+    before = await session.decide(_event("bash", {"command": "pytest"}, "c1"))
+    trusted[0] = True
+    after = await session.decide(_event("bash", {"command": "pytest"}, "c2"))
+
+    assert before.rule_id == "bash.untrusted_project_code"
+    assert after.rule_id == "pipeline.unclear"
+
+
 # ------------------------------------------------------- one call at a time, shown on a link (D-03)
 
 
@@ -794,24 +909,47 @@ async def test_a_subagent_that_works_outside_the_project_asks(world: _World, tmp
     assert verdict.reason is Reason.OUTSIDE_PROJECT
 
 
-async def test_a_call_with_an_origin_that_is_not_a_subagent_asks(world: _World):
+@pytest.mark.parametrize(
+    "origin",
+    [
+        {"kind": "robot"},
+        {"kind": "robot", "cwd": "PROJECT"},
+        {"cwd": "PROJECT"},
+        {"kind": ["subagent"], "cwd": "PROJECT"},
+        "subagent",
+        ["subagent"],
+        1,
+    ],
+    ids=["other-kind", "other-kind-with-folder", "no-kind", "kind-not-text", "text", "list", "int"],
+)
+async def test_a_call_with_an_origin_that_is_not_a_subagent_asks(world: _World, origin: Any):
+    """An origin that Auto does not know is not judged as the session's own call, nor as a
+    sub-agent's: the folder that it names (if any) is not trusted."""
     agent, _, session_id = await _open(world)
+    if isinstance(origin, dict) and origin.get("cwd") == "PROJECT":
+        origin = {**origin, "cwd": str(world.project)}
 
     verdict = await _verdict_of(agent, session_id)(
-        "write", {"path": str(world.project / "a.txt"), "content": ""}, origin={"kind": "robot"}
+        "write", {"path": str(world.project / "a.txt"), "content": ""}, origin=origin
     )
 
     assert verdict.outcome is Outcome.ASK
+    assert verdict.rule_id == "session.unknown_origin"
 
 
-async def test_a_subagent_without_a_folder_asks(world: _World):
+@pytest.mark.parametrize("folder", [None, "", 1, ["x"]], ids=["missing", "empty", "int", "list"])
+async def test_a_subagent_without_a_folder_asks(world: _World, folder: Any):
     agent, _, session_id = await _open(world)
+    origin: dict[str, Any] = {"kind": "subagent"}
+    if folder is not None:
+        origin["cwd"] = folder
 
     verdict = await _verdict_of(agent, session_id)(
-        "write", {"path": str(world.project / "a.txt"), "content": ""}, origin={"kind": "subagent"}
+        "write", {"path": str(world.project / "a.txt"), "content": ""}, origin=origin
     )
 
     assert verdict.outcome is Outcome.ASK
+    assert verdict.rule_id == "session.subagent_without_cwd"
 
 
 # ------------------------------------------------------------------------- the audit

@@ -2,10 +2,10 @@
 
 > Scope: a real Auto permission mode for `pi_agent_cli`: what it does, how it decides, how it reaches an ACP client, how it is measured, and how it is built in pull requests.
 > Decided: 2026-11-02. The user chose a real Auto mode and **no** real Plan mode (decision 7 of the Rust TUI strip plan, `docs/PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`). The user then accepted every recommendation of the first draft: section 8 is the table of decisions.
-> Status: **design only. No code of this design exists yet.** PR 0 is this record. The code comes in PR 1a, 1b, 2 and 3 (section 9).
+> Status: **PR 0 (this record), PR 1a (the rules and the corpus) and PR 1b (the rules, wired into the agent) exist. PR 2 (the model step) and PR 3 (the pager) do not.** Section 11 says what PR 1b built, where it differs from the text above, and what Auto does not protect. The sections above are the design as it was decided; they were not rewritten.
 > Base of the facts: `origin/main` at `6af773f`. Facts that need a later check say so in section 10.
-> Code (planned): `packages/pi-agent-cli/pi_agent_cli/{auto_rules,auto_reasons,auto_classifier,agent,permissions,config,headless}.py`, `scripts/auto_eval.py`, `tui/crates/codegen/pi-pager/src/app/agent_modes.rs`.
-> Tests (planned): `packages/pi-agent-cli/tests/test_auto_*.py`, `tests/data/auto_corpus/`.
+> Code: `packages/pi-agent-cli/pi_agent_cli/{auto_rules,auto_reasons,auto_mode,permission_modes,agent,permissions,config,headless}.py`, `scripts/auto_eval.py`, `scripts/auto_mutation_check.py`. Planned: `auto_classifier.py` (PR 2), `tui/crates/codegen/pi-pager/src/app/agent_modes.rs` (PR 3).
+> Tests: `packages/pi-agent-cli/tests/test_auto_*.py`, `test_permission_mode_wire.py`, `tests/data/auto_corpus/`, and the mode section of `test_acp_stdio_tools.py`. Planned: `test_auto_classifier.py` (PR 2).
 
 ---
 
@@ -216,6 +216,7 @@ What this does **not** fix, and the plan for each:
 - **R2. The model misses a danger the rules do not know.** Public numbers for a strong classifier on real data: 17% misses on "overeager" actions (Anthropic, 2026). We cannot claim better. Defence: the floor covers the known classes with no model; the corpus gate (section 6) measures the rest; the sandbox limits the harm.
 - **R3. Write, then run.** The agent writes `conftest.py` with bad code (allowed: inside the project), then runs `pytest` (allowed: task work). Defence: for an untrusted project, `pytest` asks. For a trusted project, this is the normal coding loop and the same risk as `always-approve` for that step. A later option gives the model the list of paths written in this session (names only).
 - **R4. Time of check and time of use.** A path can change between the check and the run. Every call is judged on its own realpath at its own time. The kernel sandbox is the only strong defence.
+- **R5. What a call reads or sends.** Auto guards what a call writes or runs. It does not guard what a call reads or sends. The tools that only read (`read`, `grep`, `find`, `ls`, `fetch_url`, `web_search`) run with no question for any path or URL (rule A0, D8), and so does a recursive or glob read in `bash` (`grep -r`, `rg`, `git grep`, `git log -p`, `cat *`). What they read goes to the model provider, and `fetch_url` can send it to a server. The sandbox is the only defence (section 11.3).
 
 ### 3.7 Sandbox profiles and project trust
 
@@ -458,7 +459,7 @@ Invariant to add to root `AGENTS.md` in PR 1b: *"9b. Auto fails closed. An Auto 
 
 ## 10. Not verified
 
-- Nothing was built or run, except the probe in 6.5.
+- At design time nothing was built or run, except the probe in 6.5. Section 11.5 lists what PR 1b did not verify.
 - The pager's launch path for Auto (`_meta.autoMode` at `session/new`; whether `load` and `resume` send it too) is read from source, not run.
 - Whether `zypi` shows a permission request in Auto in the same way as in Ask: read from source only.
 - The ring order of Shift+Tab after the flip (Normal, Always-Approve, Auto?) is not measured.
@@ -467,3 +468,52 @@ Invariant to add to root `AGENTS.md` in PR 1b: *"9b. Auto fails closed. An Auto 
 - The claim "no sandbox profile reaches the agent" comes from a text search, not from a run.
 - The Claude Code numbers (17% misses, 0.4% false blocks, 3 consecutive or 20 total denials) are from the public Anthropic post; they were not reproduced.
 - Windows and macOS behaviour of the path rules and the parser is a design intent, not a measurement.
+
+## 11. What PR 1b built
+
+PR 1b wires the rules of PR 1a into the agent. It has the rules only: the model step (PR 2) and the pager change (PR 3) do not exist. A `bash` call that the rules cannot show to be safe asks the user. `[auto] classifier = "model"` is read and decided as `"rules"`, and the user is told.
+
+### 11.1 What the wiring adds to the design
+
+A review of the rules by an adversary (PR #87) showed that the rules are safe only if the wiring does four things. The text above did not say them. A test covers each, and `scripts/auto_mutation_check.py` breaks each and needs a test to fail.
+
+| Item | What the wiring does | Where |
+|------|----------------------|-------|
+| One call at a time | While Auto is on, the harness runs the calls of one assistant message one by one: decide, run, decide, run. A rule judges a call on the files as they are at that moment, so a `write` has to run before the next call is judged. A workflow sub-agent that has a `tool_call_gate` runs its calls one by one too. A call that is judged while an earlier call of its message is still open asks. | `AutoSession._apply_sequential`, `AgentHarness.tool_execution` |
+| A checked context | The rules trust their context. The session checks it when Auto starts and before each call: the project folder is absolute and exists; the home folder, `PI_HOME`, `extra_roots` and the protected paths are absolute; `builtin` is set by the identity of the tool object, not by its name (an extension can register a tool called `bash`); `PATH` has no empty or relative entry; the Bash tool runs bash. When a check fails, every call that does not declare itself harmless asks, and the user sees the problems. | `auto_mode.context_problems`, `path_problems`, `shell_problems` |
+| A protected list for files that something else runs later | A write to `.husky/*`, `.githooks/*`, `.claude/*`, `.cursor/*`, `.mcp.json`, `.vscode/tasks.json` or `.github/workflows/*` asks. `Makefile`, `package.json` and `conftest.py` do not: the agent changes them in ordinary work, and a question each time would make Auto useless. It is one constant with one test for each entry, so a change of the list is a change of one line. `[auto] protected` adds entries. | `auto_rules.DEFAULT_PROTECTED_GLOBS` |
+| Limits for a call that Auto allowed | A `bash` call that Auto allowed stops after `bash_timeout_seconds` (300) or when its output passes `bash_max_output_mb` (64). A call that the user allowed after a question has no limit. | `bash.BashLimits`, `BashLimitRegistry` |
+
+### 11.2 Where the build differs from the text above
+
+| Section | Text above | Build | Why |
+|---------|------------|-------|-----|
+| 2.5 | One session entry per decision | A call that declares itself harmless is not decided by Auto (rule A0), so it has no entry. | Nothing was decided. The record lists what Auto judged. |
+| 2.5 | `/auto-log` shows tokens and money | It shows counts and the last 20 decisions, and says that no model is used. | No model step yet. |
+| 3.2 | Step 4 is the model | Step 4 is `decide_rules_only`: a call that the rules leave open asks, with the reason `unclear`. | The model step is PR 2. |
+| 3.8 | `[auto]` has `classifier`, `model`, `timeout_seconds`, `extra_roots`, `protected` | It also has `bash_timeout_seconds` and `bash_max_output_mb`. `model` and `timeout_seconds` are known and ignored until PR 2. | The limits above. |
+| 4.1 | `_meta.autoMode` and `_meta.yoloMode` set the mode | A flag that is `true` sets it (`yoloMode` wins). A flag that is false or missing says nothing, and the start value of `agent.toml` stays. | `zypi` sends both flags as false for its Normal mode. That must not turn a user's `always-approve` into `ask`. |
+
+### 11.3 What Auto does not protect
+
+Auto guards what a call writes or runs. It does not guard what a call reads or sends.
+
+- `read`, `grep`, `find`, `ls`, `fetch_url` and `web_search` declare themselves harmless. They run with no question for any path or URL (rule A0, decision D8). They can read a protected file, and `fetch_url` can send what was read to a server.
+- A recursive or glob read in `bash` runs with no question too, because it only reads: `grep -r token .`, `rg --hidden -uuu`, `git grep`, `git log -p`, `cat *`. It can print a protected file that the command never names. The rules cannot see which files such a command reads.
+- What a read prints goes to the model provider with the rest of the context.
+- The boundary is a sandbox: `zypi --sandbox workspace`, a container or a VM. Auto is a convenience, and it is not that boundary (section 3.7). The entry message of Auto, the root and package `AGENTS.md`, the README and `docs/TUI-AND-CODE-AGENT.md` say the same.
+
+### 11.4 Known limits of PR 1b
+
+- Until PR 2, a `bash` command that does work in the project asks: `pytest`, `git commit`, `mkdir`, `ruff format .`, `make`, `npm test`. Auto runs only commands that it can show to be read-only, and edits inside the project folder.
+- Two workflow sub-agents run side by side. Each runs its calls one by one, but a call of one agent can be judged while the other changes the files (risk R4).
+- A `bash` call of a workflow sub-agent has no time or output limit yet. The follow-up is to give the Bash tool of a sub-agent the same limits.
+- `/auto-log` exists in every session, also in `ask`, and says that Auto made no decisions.
+- A session that is not in Auto shows the settings of `[auto]` that Auto cannot work with when it starts. A session in Auto shows them in its entry message.
+
+### 11.5 Not verified
+
+- The Python tests were not run on Windows or WSL for this change (the repository rule asks for both). CI runs all tests on Linux, and the platform tests of `agent-binaries.yml` (workflows, terminal login, setup, and the frozen agent) on Windows and macOS. The Auto tests that need bash or symbolic links skip where there are none.
+- `zypi` with a session in Auto. The pager hides the mode, so the screen says `Normal` while the agent runs Auto. This was not run.
+- A real ACP client (Zed) with the `mode` option. The tests use a test client and a real agent process.
+- A real model. Every test uses a scripted model.
