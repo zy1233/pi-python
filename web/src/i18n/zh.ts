@@ -280,7 +280,7 @@ PI_USE_MOCK=1 python -m pi_agent_cli -p "hello" --cwd .`,
       workflows: '工作流',
       mcp: '编辑器传入的 MCP 服务器',
     },
-    next: '下一步：为 macOS x86_64 和 Windows 提供预编译的 `zypi`，并支持自动更新。',
+    next: '下一步：为 Windows 提供预编译的 `zypi`（计划中，没有日期）。不做 `zypi` 的 macOS x86_64 版本，也不做自动更新。',
   },
   evidence: {
     eyebrow: '证据',

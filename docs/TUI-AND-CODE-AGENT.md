@@ -253,7 +253,7 @@ This matches the pi upstream `packages/coding-agent/src/core/system-prompt.ts` a
 | Linux x86_64 | ✅ | ✅ prebuilt binary |
 | Linux arm64 | ✅ | Build from source |
 | macOS arm64 | ✅ | ✅ prebuilt binary (built in CI, not yet run by a person) |
-| macOS x86_64 | ✅ | Build from source |
+| macOS x86_64 | ✅ | Not supported: no prebuilt binary, and none is planned |
 | Windows | ✅ (Git Bash required for `bash` tool) | Build from source via WSL2 |
 
 See [Windows notes](WINDOWS.md) for detailed Windows/WSL2 setup instructions.

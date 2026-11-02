@@ -565,7 +565,7 @@ Use `.venv-test-real` for pytest real-LLM tests; the smoke script can run from t
 
 ### Next
 
-- **TUI platform expansion** — planned: prebuilt binaries for macOS x86_64 and Windows; auto-update support
+- **TUI platform expansion** — planned, no date: a prebuilt `zypi` binary for Windows. There is no macOS x86_64 build of `zypi` and none is planned, and there is no automatic update
 
 ## License
 
