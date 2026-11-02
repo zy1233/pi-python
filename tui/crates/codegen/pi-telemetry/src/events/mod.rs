@@ -1191,8 +1191,6 @@ pub struct SessionHarness {
     /// carries). Additive analytics-visible field, added for the external
     /// `session_start` event (design ‡ footnote).
     pub is_git_repo: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub auto_update: Option<bool>,
 }
 
 #[derive(Serialize)]

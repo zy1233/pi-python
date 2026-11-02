@@ -137,7 +137,6 @@ fn test_app() -> AppView {
         privacy_banner_reshow_days: None,
         privacy_banner_acked: None,
         show_tips: None,
-        auto_update: None,
         ask_user_question_timeout_enabled: None,
         zdr_access_enabled: false,
         usage_billing_redirect_url: None,

@@ -1930,7 +1930,7 @@ pub(in crate::app::dispatch) fn set_max_thoughts_width(app: &mut AppView, new: i
 // registry entry. Mirror field stays for compat.
 
 // ---------------------------------------------------------------------------
-// show_tips, auto_update — SHELL-OWNED `Option<bool>` setters.
+// show_tips — SHELL-OWNED `Option<bool>` setters.
 // Changes take effect on next session start (restart_required: true).
 // Standard inner/outer split. First commit of the default value
 // persists (so the resolver sees user intent vs managed default).
@@ -1939,13 +1939,12 @@ pub(in crate::app::dispatch) fn set_max_thoughts_width(app: &mut AppView, new: i
 // ---------------------------------------------------------------------------
 
 /// Effective-default lookup for the `Option<bool>` AppView mirrors
-/// (`show_tips`, `auto_update`, ask_user_question timeout).
+/// (`show_tips`, ask_user_question timeout).
 /// Matches the consumer's `.unwrap_or(...)` fallback.
 pub(super) fn pr13_effective_default(key: &str) -> Option<bool> {
     use pi_tools::implementations::grok_build::ask_user_question;
     match key {
         "show_tips" => Some(true),
-        "auto_update" => Some(true),
         "toolset.ask_user_question.timeout_enabled" => {
             Some(ask_user_question::DEFAULT_ASK_USER_QUESTION_TIMEOUT_ENABLED)
         }
@@ -1977,32 +1976,6 @@ pub(in crate::app::dispatch) fn set_show_tips(app: &mut AppView, new: bool) -> V
     ));
     vec![Effect::PersistSetting {
         key: "show_tips",
-        value: crate::settings::SettingValue::Bool(new),
-        rollback_value: crate::settings::SettingValue::Bool(prev_effective),
-    }]
-}
-
-/// State-only mutation for `auto_update`.
-pub(super) fn set_auto_update_inner(app: &mut AppView, value: bool) {
-    app.auto_update = Some(value);
-}
-
-/// Outer dispatcher for `Action::SetAutoUpdate`.
-pub(in crate::app::dispatch) fn set_auto_update(app: &mut AppView, new: bool) -> Vec<Effect> {
-    let prev_state = app.auto_update;
-    let prev_effective = prev_state.unwrap_or(true);
-    if prev_effective == new && prev_state.is_some() {
-        return vec![];
-    }
-    set_auto_update_inner(app, new);
-    refresh_open_settings_modals(app);
-    tracing::info!(target: "settings", key = "auto_update", value = new, "setting changed");
-    app.show_toast(&format!(
-        "{} (restart to apply)",
-        save_success_toast("Auto-update", new),
-    ));
-    vec![Effect::PersistSetting {
-        key: "auto_update",
         value: crate::settings::SettingValue::Bool(new),
         rollback_value: crate::settings::SettingValue::Bool(prev_effective),
     }]

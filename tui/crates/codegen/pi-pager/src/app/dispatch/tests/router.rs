@@ -1106,12 +1106,7 @@ fn entry_title_uses_display_name_when_set() {
 fn pr13_each_setter_writes_to_its_own_mirror() {
     let mut app = test_app_with_agent();
     assert_eq!(app.show_tips, None);
-    assert_eq!(app.auto_update, None);
     let _ = dispatch(Action::SetShowTips(false), &mut app);
-    assert_eq!(app.show_tips, Some(false));
-    assert_eq!(app.auto_update, None);
-    let _ = dispatch(Action::SetAutoUpdate(false), &mut app);
-    assert_eq!(app.auto_update, Some(false));
     assert_eq!(app.show_tips, Some(false));
 }
 /// Three-way alignment pin: the PAGER registry default must agree

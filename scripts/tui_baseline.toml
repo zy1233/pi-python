@@ -176,8 +176,10 @@ targets = [
 # net for the resume picker without an age limit (plan decision 9: one test gone, two new):
 # 5,657 (one local run on Linux; 8,506 over the ten suites). Then -3 with the update notice of the
 # welcome screen and of the minimal mode (one test on the welcome screen, two on the notice;
-# `pi-update` is gone and nothing could set them): 5,654 (one local run on Linux).
-reference_passed = 5654
+# `pi-update` is gone and nothing could set them): 5,654 (one local run on Linux). Then -2 for
+# the setting `auto_update` (two tests of its row on the settings page): 5,652 (one local run on
+# Linux).
+reference_passed = 5652
 min_passed = 5300
 
 # Lib tests only; they were outside the manifest until r8 (plan section 10.10: 1,092 passed,

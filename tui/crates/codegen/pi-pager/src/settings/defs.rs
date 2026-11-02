@@ -1264,20 +1264,6 @@ pub fn default_settings() -> Vec<SettingMeta> {
             restart_required: false,
             hidden_in_minimal: false,
         },
-        SettingMeta {
-            key: "auto_update",
-            category: SettingCategory::Advanced,
-            owner: SettingOwner::Shell,
-            label: "Auto-update",
-            description: "Automatically download and install pager updates on startup. \
-                          Restart required.",
-            keywords: &[
-                "auto", "update", "updates", "upgrade", "version", "install", "channel",
-            ],
-            kind: SettingKind::Bool { default: true },
-            restart_required: true,
-            hidden_in_minimal: false,
-        },
         // SHELL-owned, persisted to `[ui].hunk_tracker_mode`. Restart-required:
         // the mode is read once when the session connects.
         SettingMeta {

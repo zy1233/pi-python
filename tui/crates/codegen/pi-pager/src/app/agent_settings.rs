@@ -16,10 +16,9 @@
 //! - `fork_secondary_model`: forking a session left with the Rust runtime.
 //! - `prompt_suggestions`: nothing in the pager creates a suggestion.
 //! - `hunk_tracker_mode`: only the Rust runtime read it.
-//! - `auto_update`: no code starts a background update check.
 //!
 //! A row that is offered and does nothing is worse than one that is missing, so the page does not
-//! show these eight. The code behind them stays, behind the constant below. A value that an earlier
+//! show these seven. The code behind them stays, behind the constant below. A value that an earlier
 //! version saved stays in `config.toml`, and `reject` for `default_selected_permission` still works
 //! there. Turn the constant off when the agent backs the rows again, or take a key out of
 //! [`UNBACKED`] when its setting works.
@@ -36,7 +35,6 @@ pub(crate) const UNBACKED: &[&str] = &[
     "fork_secondary_model",
     "prompt_suggestions",
     "hunk_tracker_mode",
-    "auto_update",
 ];
 
 #[cfg(test)]
@@ -44,12 +42,12 @@ mod tests {
     use super::*;
     use crate::settings::SettingsRegistry;
 
-    /// The shipped agent backs none of the eight. If this fails because a setting works again,
+    /// The shipped agent backs none of the seven. If this fails because a setting works again,
     /// take its key out of `UNBACKED` and give the setting its own test.
     #[test]
     fn the_shipped_pager_hides_the_unbacked_settings() {
         assert!(HIDE_UNBACKED);
-        assert_eq!(UNBACKED.len(), 8);
+        assert_eq!(UNBACKED.len(), 7);
     }
 
     /// A key that the registry does not know hides nothing, so a rename must not pass unnoticed.

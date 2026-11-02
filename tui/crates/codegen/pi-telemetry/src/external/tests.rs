@@ -321,7 +321,6 @@ fn sentinel_session_harness() -> events::SessionHarness {
         memory_enabled: true,
         memory_retrieval_mode: events::MemoryRetrievalMode::Hybrid,
         is_git_repo: true,
-        auto_update: None,
     }
 }
 

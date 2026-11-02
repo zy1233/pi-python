@@ -292,7 +292,6 @@ mod tests {
             "local",
             "--client-identifier",
             "x",
-            "--no-auto-update",
             "--terminal",
             "--fs-read",
             "--fs-write",

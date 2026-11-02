@@ -15,7 +15,7 @@ or for a prompt that the old agent offered, can change nothing now. This script 
 - ``default_model``: whether the model that the setting saves (``[models].default``) is the one
   that the next start uses (the label on the prompt box after the first turn);
 - ``wire``: a config file that sets the other settings that were meant for the old agent
-  (``hunk_tracker_mode``, ``fork_secondary_model``, ``prompt_suggestions``, ``auto_update``,
+  (``hunk_tracker_mode``, ``fork_secondary_model``, ``prompt_suggestions``,
   the ask-question timeout) against one that does not: the ACP lines, the agent's variables and
   the LLM call are the same, so none of them reaches the agent. The agent has no
   ``ask_user_question`` tool either (``tools``).
@@ -164,7 +164,6 @@ def check_wire(zypi: str, python: str) -> None:
         'fork_secondary_model = "mock-b"\n'
         "prompt_suggestions = false\n"
         "remember_tool_approvals = false\n"
-        "\n[cli]\nauto_update = false\n"
         "\n[toolset.ask_user_question]\ntimeout_enabled = false\n"
     )
     base = wp.summarize(run("wire=base", zypi, python))

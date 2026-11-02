@@ -2,7 +2,7 @@
 
 This file is generated. Do not edit it by hand.
 
-- Command: `python scripts/tui_callgraph.py keep`. Commit: `6af773f`.
+- Command: `python scripts/tui_callgraph.py keep`. Commit: `6ba5cc4`.
 - Run the command again after a change that moves code between modules or crates.
 - It replaces the hand-written list of examples in item 0.5 of
   [`PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`](../PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md).
@@ -25,7 +25,7 @@ This file is generated. Do not edit it by hand.
 
 | crate | non-test lines | live | dead | dead units | check first | provider-stack refs |
 |---|---|---|---|---|---|---|
-| `pi-shell` | 28,378 | 28,378 (100%) | 0 (0%) | 0 | 0 | 20 |
+| `pi-shell` | 28,373 | 28,373 (100%) | 0 (0%) | 0 | 0 | 20 |
 | `pi-sampling-types` | 12,043 | 12,043 (100%) | 0 (0%) | 0 | 0 | 1 |
 | `pi-tools` | 130,450 | 130,406 (100%) | 44 (0%) | 1 | 1 | 1 |
 | `pi-agent` | 22,877 | 22,877 (100%) | 0 (0%) | 0 | 0 | 5 |
@@ -37,11 +37,11 @@ This file is generated. Do not edit it by hand.
 
 ### `pi-shell`
 
-Non-test code: 28,378 lines in 57 units.
+Non-test code: 28,373 lines in 57 units.
 
 | | units | lines | share |
 |---|---|---|---|
-| live | 57 | 28,378 | 100% |
+| live | 57 | 28,373 | 100% |
 | dead | 0 | 0 | 0% |
 
 Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampling`): 8 live units, 8 files, 20 references: `agent::config` (1), `agent::model_providers` (1), `extensions::notification` (5), `remote::client` (9), `sampling` (1), `sampling::conversation` (1), `sampling::types` (1), `util::config` (1).
@@ -50,7 +50,7 @@ Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampl
 
 | unit | lines | references from live code outside |
 |---|---|---|
-| `util::config` | 5,975 | 92 |
+| `util::config` | 5,970 | 91 |
 | `auth::manager` | 3,754 | 0 |
 | `agent::config` | 3,110 | 26 |
 | `extensions::notification` | 2,195 | 9 |
