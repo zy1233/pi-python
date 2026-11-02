@@ -57,6 +57,21 @@ class BashParams(BaseModel):
     )
 
 
+@dataclass(frozen=True)
+class BashLimits:
+    """Limits for one ``bash`` call that someone other than the model asks for.
+
+    The tool has no default timeout and keeps all output (it spills into a file), so a command
+    that never ends blocks the session and one that never stops printing fills the disk. A
+    permission layer that lets a call through without asking the user (``limits_for_call`` of
+    ``create_bash_tool``) bounds it here. A timeout from the model counts too: the shorter of
+    the two wins.
+    """
+
+    timeout_seconds: float | None = None
+    max_output_bytes: int | None = None
+
+
 # --- shell resolution (port of pi utils/shell.ts getShellConfig) ---
 
 
@@ -340,8 +355,13 @@ def create_bash_tool(
     shell_path: str | None = None,
     expose_session_environment: bool = True,
     prepare_env: Callable[[], dict[str, str]] | None = None,
+    limits_for_call: Callable[[str], BashLimits | None] | None = None,
 ) -> AgentTool:
-    """Build a bash tool bound to *cwd* (optionally pinning the shell binary)."""
+    """Build a bash tool bound to *cwd* (optionally pinning the shell binary).
+
+    *limits_for_call* is asked once per call, with the tool call id, just before the command
+    starts; ``None`` means no limits beyond the model's own ``timeout``.
+    """
 
     prompt_guidelines = (
         ["You can inspect PI_* environment variables for current model and session details."]
@@ -350,7 +370,7 @@ def create_bash_tool(
     )
 
     async def execute(
-        _tool_call_id: str,
+        tool_call_id: str,
         params: BashParams,
         signal: Any | None = None,
         on_update: AgentToolUpdateCallback | None = None,
@@ -360,6 +380,12 @@ def create_bash_tool(
         emitter.emit_initial()
 
         timeout = _resolve_timeout(params.timeout)
+        limits = limits_for_call(tool_call_id) if limits_for_call is not None else None
+        max_output = limits.max_output_bytes if limits is not None else None
+        if limits is not None and limits.timeout_seconds is not None:
+            limit_timeout = _resolve_timeout(limits.timeout_seconds)
+            assert limit_timeout is not None
+            timeout = limit_timeout if timeout is None else min(timeout, limit_timeout)
         if signal is not None and getattr(signal, "aborted", False):
             raise RuntimeError("Command aborted")
         shell_config = get_shell_config(shell_path)
@@ -388,6 +414,7 @@ def create_bash_tool(
 
         proc = await asyncio.create_subprocess_exec(*argv, **spawn_kwargs)
         killer = _ProcessTreeKiller(proc.pid)
+        over_output_limit = asyncio.Event()
 
         async def pump() -> None:
             assert proc.stdout is not None
@@ -397,6 +424,8 @@ def create_bash_tool(
                     return
                 output.append(chunk)
                 emitter.mark_dirty()
+                if max_output is not None and output.total_raw_bytes > max_output:
+                    over_output_limit.set()
 
         async def wait_exit() -> int:
             # asyncio's Process.wait() resolves only once every pipe has
@@ -423,6 +452,8 @@ def create_bash_tool(
             watchers[asyncio.create_task(_wait_abort(signal))] = "abort"
         if timeout is not None:
             watchers[asyncio.create_task(asyncio.sleep(timeout))] = "timeout"
+        if max_output is not None:
+            watchers[asyncio.create_task(over_output_limit.wait())] = "output_limit"
         flusher_task = (
             asyncio.create_task(emitter.run_trailing_flusher()) if emitter.enabled else None
         )
@@ -476,11 +507,20 @@ def create_bash_tool(
             raise RuntimeError(_append_status(text, "Command aborted"))
         if kill_reason == "timeout":
             text, _ = _format_output(snapshot, output.get_last_line_bytes(), empty_text="")
-            assert params.timeout is not None
+            assert timeout is not None
             raise RuntimeError(
                 _append_status(
                     text,
-                    f"Command timed out after {_format_timeout_seconds(params.timeout)} seconds",
+                    f"Command timed out after {_format_timeout_seconds(timeout)} seconds",
+                )
+            )
+        if kill_reason == "output_limit":
+            text, _ = _format_output(snapshot, output.get_last_line_bytes(), empty_text="")
+            assert max_output is not None
+            raise RuntimeError(
+                _append_status(
+                    text,
+                    f"Command stopped: its output passed the limit of {format_size(max_output)}",
                 )
             )
 

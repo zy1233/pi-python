@@ -5,7 +5,12 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
+
 from pi_agent_cli.config import (
+    DEFAULT_AUTO_BASH_MAX_OUTPUT_MB,
+    DEFAULT_AUTO_BASH_TIMEOUT_SECONDS,
+    AutoConfig,
     CliConfig,
     expand_config_path,
     load_config,
@@ -261,3 +266,201 @@ def test_model_reasoning_follows_the_thinking_level_unless_set():
         assert CliConfig(thinking_level=level).model_reasoning is True  # type: ignore[arg-type]
     assert CliConfig(thinking_level="high", reasoning=False).model_reasoning is False
     assert CliConfig(thinking_level="off", reasoning=True).model_reasoning is True
+
+
+# ---------------------------------------------------------------------------------------------
+# The ``[auto]`` table and ``permission`` (the Auto permission mode)
+# ---------------------------------------------------------------------------------------------
+
+
+def _load(tmp_path: Path, toml: str) -> CliConfig:
+    (tmp_path / "agent.toml").write_text(toml, encoding="utf-8")
+    return load_config(tmp_path)
+
+
+def test_without_an_auto_table_the_defaults_are_used(tmp_path: Path):
+    config = _load(tmp_path, 'permission = "auto"\n')
+
+    assert config.auto == AutoConfig()
+    assert config.auto.classifier == "rules"
+    assert config.auto.bash_timeout_seconds == DEFAULT_AUTO_BASH_TIMEOUT_SECONDS == 300.0
+    assert config.auto.bash_max_output_mb == DEFAULT_AUTO_BASH_MAX_OUTPUT_MB == 64
+    assert config.auto.notes == ()
+    assert config.auto.problems == ()
+
+
+def test_the_auto_table_is_read(tmp_path: Path):
+    config = _load(
+        tmp_path,
+        """
+[auto]
+classifier = "rules"
+extra_roots = ["/srv/shared", "/data/work"]
+protected = ["secrets/*", "*.pem"]
+bash_timeout_seconds = 90
+bash_max_output_mb = 8
+""",
+    )
+
+    assert config.auto == AutoConfig(
+        classifier="rules",
+        extra_roots=("/srv/shared", "/data/work"),
+        protected=("secrets/*", "*.pem"),
+        bash_timeout_seconds=90.0,
+        bash_max_output_mb=8,
+    )
+
+
+def test_a_home_folder_in_extra_roots_is_expanded(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+
+    config = _load(tmp_path, '[auto]\nextra_roots = ["~/shared"]\n')
+
+    assert config.auto.extra_roots == (os.path.expanduser("~/shared"),)
+
+
+def test_a_folder_that_is_not_absolute_is_kept_so_that_auto_can_see_it_is_wrong(tmp_path: Path):
+    config = _load(tmp_path, '[auto]\nextra_roots = ["relative/dir"]\n')
+
+    assert config.auto.extra_roots == ("relative/dir",)
+
+
+def test_the_model_classifier_is_read_and_says_it_does_not_work_yet(tmp_path: Path):
+    config = _load(tmp_path, '[auto]\nclassifier = "model"\n')
+
+    assert config.auto.classifier == "model"
+    (note,) = config.auto.notes
+    assert "does not work yet" in note
+    assert config.auto.problems == ()
+
+
+@pytest.mark.parametrize("value", ['"bogus"', "3", "true", '""'])
+def test_a_classifier_that_is_not_known_falls_back_to_the_rules_with_a_note(
+    tmp_path: Path, value: str
+):
+    config = _load(tmp_path, f"[auto]\nclassifier = {value}\n")
+
+    assert config.auto.classifier == "rules"
+    (note,) = config.auto.notes
+    assert "classifier" in note
+
+
+def test_a_key_that_is_not_known_is_named_in_a_note(tmp_path: Path):
+    config = _load(tmp_path, '[auto]\ncolour = "red"\n')
+
+    (note,) = config.auto.notes
+    assert "colour" in note
+
+
+def test_a_value_that_loosens_auto_is_dropped_with_a_note(tmp_path: Path):
+    config = _load(tmp_path, '[auto]\nextra_roots = ["/ok", 3, "", "  "]\n')
+
+    assert config.auto.extra_roots == ("/ok",)
+    assert len(config.auto.notes) == 3
+    assert config.auto.problems == ()
+
+
+def test_extra_roots_that_is_not_a_list_is_dropped_with_a_note(tmp_path: Path):
+    config = _load(tmp_path, '[auto]\nextra_roots = "/srv"\n')
+
+    assert config.auto.extra_roots == ()
+    assert any("extra_roots" in note for note in config.auto.notes)
+
+
+def test_a_protected_entry_that_is_not_text_is_a_problem_not_a_silent_drop(tmp_path: Path):
+    """What tightens Auto is not dropped without a word: Auto asks about every call instead."""
+    config = _load(tmp_path, '[auto]\nprotected = ["secrets/*", 3]\n')
+
+    assert config.auto.protected == ("secrets/*",)
+    (problem,) = config.auto.problems
+    assert "protected" in problem
+
+
+def test_protected_that_is_not_a_list_is_a_problem(tmp_path: Path):
+    config = _load(tmp_path, '[auto]\nprotected = "secrets/*"\n')
+
+    assert config.auto.protected == ()
+    (problem,) = config.auto.problems
+    assert "protected" in problem
+
+
+def test_an_empty_protected_entry_is_ignored_with_a_note(tmp_path: Path):
+    config = _load(tmp_path, '[auto]\nprotected = ["secrets/*", " "]\n')
+
+    assert config.auto.protected == ("secrets/*",)
+    assert config.auto.problems == ()
+    assert len(config.auto.notes) == 1
+
+
+@pytest.mark.parametrize("value", ["0", "-5", "true", '"fast"', "nan", "inf", "-inf"])
+def test_a_time_limit_that_is_not_a_positive_number_falls_back_with_a_note(
+    tmp_path: Path, value: str
+):
+    config = _load(tmp_path, f"[auto]\nbash_timeout_seconds = {value}\n")
+
+    assert config.auto.bash_timeout_seconds == DEFAULT_AUTO_BASH_TIMEOUT_SECONDS
+    (note,) = config.auto.notes
+    assert "bash_timeout_seconds" in note
+
+
+def test_a_time_limit_may_be_a_fraction_of_a_second(tmp_path: Path):
+    assert _load(tmp_path, "[auto]\nbash_timeout_seconds = 0.5\n").auto.bash_timeout_seconds == 0.5
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "1.5", "true", '"big"'])
+def test_an_output_limit_that_is_not_a_whole_number_of_one_or_more_falls_back_with_a_note(
+    tmp_path: Path, value: str
+):
+    config = _load(tmp_path, f"[auto]\nbash_max_output_mb = {value}\n")
+
+    assert config.auto.bash_max_output_mb == DEFAULT_AUTO_BASH_MAX_OUTPUT_MB
+    (note,) = config.auto.notes
+    assert "bash_max_output_mb" in note
+
+
+def test_an_auto_that_is_not_a_table_is_ignored_with_a_note(tmp_path: Path):
+    config = _load(tmp_path, "auto = 3\n")
+
+    assert config.auto == AutoConfig(notes=config.auto.notes)
+    (note,) = config.auto.notes
+    assert "not a table" in note
+
+
+@pytest.mark.parametrize("mode", ["ask", "auto", "always-approve"])
+def test_each_of_the_three_permission_modes_is_read_without_a_note(tmp_path: Path, mode: str):
+    config = _load(tmp_path, f'permission = "{mode}"\n')
+
+    assert config.permission == mode
+    assert config.auto.notes == ()
+
+
+@pytest.mark.parametrize("value", ['"yolo"', '"Auto"', "true", '["auto"]', "3", '""'])
+def test_a_permission_that_is_not_one_of_the_three_falls_back_to_ask_and_says_so(
+    tmp_path: Path, value: str
+):
+    config = _load(tmp_path, f"permission = {value}\n")
+
+    assert config.permission == "ask"
+    (note,) = config.auto.notes
+    assert "permission" in note
+    assert '"ask"' in note
+
+
+def test_a_file_of_the_project_cannot_set_the_auto_table(tmp_path: Path):
+    """What a project can set, a project can loosen: ``[auto]`` is read from the home folder
+    only (invariant 9). There is no project-level ``agent.toml``, and this keeps it so."""
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    (project / ".pi-python").mkdir(parents=True)
+    home.mkdir()
+    for folder in (project, project / ".pi-python"):
+        (folder / "agent.toml").write_text(
+            'permission = "always-approve"\n[auto]\nextra_roots = ["/"]\nprotected = []\n',
+            encoding="utf-8",
+        )
+
+    config = load_config(home)
+
+    assert config.permission == "ask"
+    assert config.auto == AutoConfig()

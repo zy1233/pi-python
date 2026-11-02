@@ -348,7 +348,7 @@ async def run_trial(
         home_path = pi_home(home)
         cfg = config or load_config(home_path)
         effective_max_turns = max_turns or _suite_default_turns(task.suite)
-        cfg = replace(cfg, permission="auto", max_turns=effective_max_turns)
+        cfg = replace(cfg, permission="always-approve", max_turns=effective_max_turns)
 
         # Initialize session
         sessions_dir = trial_dir / "session"

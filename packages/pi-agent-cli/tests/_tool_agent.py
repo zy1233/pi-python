@@ -9,11 +9,11 @@ cannot be cancelled (the file then holds the agent's pid), to test a shutdown th
 optionally ``"id"`` (default ``call_1``). The tool-call tests use it to make the agent call
 ``write``, which in ``ask`` mode has to be put to the client.
 
-``PI_TEST_PERMISSION`` is the permission mode, ``auto`` by default so that the tool call does not
-wait for the client; the tests that are about that wait set ``ask``. Whatever the call, the turn
-after its result is the mock reply, unless the turn was cancelled in the meantime: the stream
-then ends as ``aborted``, as a real provider's does. Run it as ``python _tool_agent.py`` with
-``PI_HOME`` set.
+``PI_TEST_PERMISSION`` is the permission mode, ``always-approve`` by default so that the tool
+call does not wait for the client; the tests that are about that wait set ``ask`` (or ``auto``).
+Whatever the call, the turn after its result is the mock reply, unless the turn was cancelled in
+the meantime: the stream then ends as ``aborted``, as a real provider's does. Run it as
+``python _tool_agent.py`` with ``PI_HOME`` set.
 """
 
 from __future__ import annotations
@@ -97,7 +97,7 @@ async def _amain() -> None:
         stream_fn=_tool_once_stream,
         home=Path(os.environ["PI_HOME"]),
         config=CliConfig(  # type: ignore[arg-type]
-            permission=os.environ.get("PI_TEST_PERMISSION", "auto"),
+            permission=os.environ.get("PI_TEST_PERMISSION", "always-approve"),
             provider="mock",
             model_id="mock",
         ),

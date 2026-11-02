@@ -32,6 +32,7 @@ from acp.schema import AllowedOutcome, DeniedOutcome, RequestPermissionResponse
 from pi_agent_cli import agent as agent_module
 from pi_agent_cli import extension_trust
 from pi_agent_cli.agent import PiAcpAgent
+from pi_agent_cli.auto_mode import LOG_COMMAND
 from pi_agent_cli.config import CliConfig
 from pi_agent_cli.extension_trust import TRUST_ENV, decide_project_trust
 from pi_agent_cli.trust_prompt import REJECT_OPTION_ID, TRUST_OPTION_ID
@@ -269,7 +270,8 @@ async def test_the_setup_lets_the_session_new_response_out_before_it_sends_anyth
 
 
 async def test_asking_is_not_switched_off_by_auto_approval_of_tool_calls(world: Any):
-    """``permission = "auto"`` is about tool calls, and asking is not approving."""
+    """``auto`` and ``always-approve`` are about tool calls, and asking is not approving: Auto
+    does not answer the question about the project, and does not skip it."""
     for mode in ("auto", "always-approve"):
         client = _Client(REFUSE)
         agent, _ = await _open(world, client, CliConfig(permission=mode))  # type: ignore[arg-type]
@@ -286,7 +288,9 @@ async def test_nothing_loads_until_the_answer_is_in(world: Any):
 
     assert not world.marker.exists()  # the repository's code has not run
     assert "shipped" not in client.commands()
-    assert agent._harnesses[session_id].extension_registry.get_commands() == {}
+    # Only the agent's own command is there (``/auto-log``); nothing the project ships.
+    commands = agent._harnesses[session_id].extension_registry.get_commands()
+    assert set(commands) <= {LOG_COMMAND}
 
     client.gate.set()
     await _idle(agent)

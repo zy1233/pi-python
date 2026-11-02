@@ -68,8 +68,10 @@ class HarnessSubagentExecutor(SubagentExecutor):
     permission policy. *tool_call_gate* (the parent harness's ``check_tool_call``, via
     the bridge) closes that gap: every tool call a sub-agent makes is put through it
     before it runs. Time spent waiting for a verdict (a permission prompt) counts
-    against ``timeout_ms``. With no gate there is no policy to inherit and sub-agents
-    run unrestricted.
+    against ``timeout_ms``. The calls that one assistant message makes run one after the
+    other, each one asked about just before it runs: a verdict that looks at files (the
+    Auto mode does) must not be given before an earlier call has changed them. With no gate
+    there is no policy to inherit and sub-agents run unrestricted (and in parallel).
     """
 
     def __init__(
@@ -220,6 +222,10 @@ class HarnessSubagentExecutor(SubagentExecutor):
         )
         if self._tool_call_gate is not None:
             harness.on("tool_call", self._tool_call_hook(effective_cwd, label))
+            # The gate judges a call by the files as they are when it is asked. In parallel
+            # mode it is asked about every call of one assistant message before any of them
+            # runs, so a later call is judged on files that an earlier call is about to change.
+            harness.tool_execution = "sequential"
 
         prompt_text = prompt
         if phase:

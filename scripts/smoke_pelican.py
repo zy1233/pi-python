@@ -49,7 +49,7 @@ async def _run(cwd: Path) -> bool:
         return False
 
     home = pi_home()
-    config = replace(load_config(home), permission="auto")
+    config = replace(load_config(home), permission="always-approve")
     repo = JsonlSessionRepo(home / "sessions")
     session = await repo.create({"cwd": str(cwd.resolve())})
     resources = await load_session_resources(cwd=cwd, config=config)

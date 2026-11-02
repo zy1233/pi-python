@@ -40,7 +40,7 @@ async def test_pelican_on_bicycle_agent_path(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("PI_HOME", str(tmp_path))
     monkeypatch.delenv("PI_USE_MOCK", raising=False)
 
-    config = replace(load_config(tmp_path), permission="auto")
+    config = replace(load_config(tmp_path), permission="always-approve")
     repo = JsonlSessionRepo(tmp_path / "sessions")
     session = await repo.create({"cwd": str(tmp_path)})
     resources = await load_session_resources(cwd=tmp_path, config=config)

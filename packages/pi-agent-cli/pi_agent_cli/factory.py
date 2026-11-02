@@ -23,7 +23,7 @@ from pi_agent_cli.create_harness import build_coding_agent_harness_system_prompt
 from pi_agent_cli.extension_trust import ProjectTrust, project_extensions_trusted
 from pi_agent_cli.prompt_options import load_system_prompt_options
 from pi_agent_core.coding_tools import create_all_tools
-from pi_agent_core.coding_tools.bash import create_bash_tool
+from pi_agent_core.coding_tools.bash import BashLimits, create_bash_tool
 from pi_agent_core.coding_tools.path_utils import normalize_host_path
 from pi_agent_core.event_stream import AssistantMessageEventStream
 from pi_agent_core.messages import AssistantMessage, Usage
@@ -152,6 +152,7 @@ def _build_tools(
     session_id: str,
     session_file: str,
     harness_holder: dict[str, AgentHarness | None],
+    bash_limits: Callable[[str], BashLimits | None] | None = None,
 ) -> list[Any]:
     def prepare_pi_env() -> dict[str, str]:
         harness = harness_holder.get("harness")
@@ -172,6 +173,7 @@ def _build_tools(
         cwd,
         expose_session_environment=True,
         prepare_env=prepare_pi_env,
+        limits_for_call=bash_limits,
     )
     return list(tools_dict.values())
 
@@ -198,6 +200,7 @@ async def create_session_harness(
     extensions: list[Any] | None = None,
     trust: ProjectTrust | None = None,
     model_choice: ModelChoice | None = None,
+    bash_limits: Callable[[str], BashLimits | None] | None = None,
 ) -> AgentHarness:
     """Build the harness for one session.
 
@@ -210,6 +213,10 @@ async def create_session_harness(
 
     *model_choice*: the model to start with, for a session that was last used with another
     one (``/model``). Without one, the ``[model]`` table decides.
+
+    *bash_limits*: asked by the Bash tool, with the tool call id, just before it starts a
+    command; the answer is the limits of that call (Auto's, for a call that it let through).
+    Not used with *tools*.
     """
     cwd_s = str(Path(normalize_host_path(str(cwd))).resolve())
     home_path = pi_home(home)
@@ -226,6 +233,7 @@ async def create_session_harness(
             session_id=session_id,
             session_file=session_file,
             harness_holder=harness_holder,
+            bash_limits=bash_limits,
         )
     )
     resolved_resources = resources or AgentHarnessResources()

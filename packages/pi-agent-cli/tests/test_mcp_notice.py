@@ -159,7 +159,7 @@ def make_agent(world: Any) -> tuple[PiAcpAgent, _RecordingClient]:
     agent = PiAcpAgent(
         stream_fn=mock_text_stream,
         home=world.pi_home,
-        config=CliConfig(permission="auto", provider="mock", model_id="mock"),  # type: ignore[arg-type]
+        config=CliConfig(permission="always-approve", provider="mock", model_id="mock"),  # type: ignore[arg-type]
     )
     client = _RecordingClient()
     agent.on_connect(client)
