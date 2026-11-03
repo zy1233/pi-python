@@ -215,10 +215,37 @@ MODEL_ENTRY_SENTENCE = (
     "you are asked."
 )
 
+UNKNOWN_MODEL_ENTRY_SENTENCE = (
+    ' The model that [auto] names, "{model}", is not the id of a model in [model] or '
+    "[[models]]: no model judges, so a shell command that Auto cannot show to be safe asks "
+    'you (fix the id, or set classifier = "rules" in [auto]).'
+)
+
 _FROM_CONFIG_HINT = (
     ' permission = "auto" in agent.toml means this mode. To run with no question at all, '
     'set permission = "always-approve".'
 )
+
+_MAX_SHOWN_ID_CHARS = 64
+
+
+def shown_model_id(text: str) -> str:
+    """A model id from the settings as one line of printable text, cut at 64 characters: it goes
+    into a notice and into a log line. Nothing else of a model entry is ever shown with it (a
+    ``base_url`` or the name of a key variable can hold a secret)."""
+    line = " ".join("".join(ch if ch.isprintable() else " " for ch in text).split())
+    if len(line) > _MAX_SHOWN_ID_CHARS:
+        line = line[: _MAX_SHOWN_ID_CHARS - 3].rstrip() + "..."
+    return line
+
+
+def unknown_judge(config: CliConfig) -> str | None:
+    """The ``[auto] model`` id that no ``[model]`` or ``[[models]]`` entry has, while the model
+    step is on: no model judges then, and every call that needs a judge asks. ``None`` when the
+    step is off (``classifier = "rules"``), when no id is set, or when the id is known."""
+    if config.auto.classifier == "model" and config.auto_model_is_unknown():
+        return config.auto.model
+    return None
 
 
 def entry_message(
@@ -226,14 +253,20 @@ def entry_message(
     from_config: bool = False,
     classifier: str = "model",
     model: str = "the model of this session",
+    unknown_model: str | None = None,
 ) -> str:
     """The text for the user when a session is in Auto. *from_config*: the mode comes from
     ``permission = "auto"`` in ``agent.toml``, which meant "no question" in older versions.
     *classifier* is the ``[auto]`` setting of that name, and *model* says which model judges
-    when it is ``"model"`` (the user's messages and the command go to it)."""
-    step = (
-        MODEL_ENTRY_SENTENCE.format(model=model) if classifier == "model" else RULES_ENTRY_SENTENCE
-    )
+    when it is ``"model"`` (the user's messages and the command go to it). *unknown_model* is
+    the ``[auto] model`` id that no model entry has (``unknown_judge``): no model judges then,
+    and the sentence says so in place of the one that names a model."""
+    if classifier != "model":
+        step = RULES_ENTRY_SENTENCE
+    elif unknown_model:
+        step = UNKNOWN_MODEL_ENTRY_SENTENCE.format(model=shown_model_id(unknown_model))
+    else:
+        step = MODEL_ENTRY_SENTENCE.format(model=model)
     return ENTRY_MESSAGE + step + (_FROM_CONFIG_HINT if from_config else "")
 
 

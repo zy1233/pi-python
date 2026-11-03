@@ -267,6 +267,13 @@ class CliConfig:
             )
         return tuple(out)
 
+    def auto_model_is_unknown(self) -> bool:
+        """``[auto] model`` names an id that no ``[model]`` or ``[[models]]`` entry has. Empty
+        means the model of the session, and that is never unknown. With such an id the model
+        step has no model to ask, and every call that needs a judge asks (``model.no_model``)."""
+        wanted = self.auto.model
+        return bool(wanted) and all(choice.id != wanted for choice in self.model_choices())
+
 
 def load_config(home: Path | str | None = None) -> CliConfig:
     import tomllib
@@ -439,7 +446,7 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         models=tuple(models),
         auto=auto,
     )
-    if auto.model and all(choice.id != auto.model for choice in config.model_choices()):
+    if config.auto_model_is_unknown():
         note = (
             f'model in [auto] is "{auto.model}", which is not the id of a model in [model] or '
             "[[models]]. The model step cannot run, and Auto asks about every command that the "

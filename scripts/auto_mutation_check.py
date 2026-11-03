@@ -13,6 +13,7 @@
     python scripts/auto_mutation_check.py --only "model " # only the model step (PR 2)
     python scripts/auto_mutation_check.py --only "comment " # only the rule for a shell comment (M-06)
     python scripts/auto_mutation_check.py --only "network name" # only the names of decision 7
+    python scripts/auto_mutation_check.py --only "unknown judge" # only the notice for an [auto] model id that no entry has
 
 Each mutation is an exact text replacement in one source file: ``auto_rules.py`` (or
 ``auto_reasons.py``) for the rules, and for the wiring ``auto_mode.py``, ``agent.py``,
@@ -47,8 +48,12 @@ that only send, publish or install) off the network floor list, one at a time, s
 mutations that start with ``model`` break the model step: the parser of the answer (only the exact line ``ALLOW`` allows),
 the data block (the token, the escapes, the limits), the request, the timeout, the cancel, the
 circuit breaker, the counters, the choice of the model, the wiring in the session and in the
-agent, the settings, and the eval harness (its gates and the cap on its spend). Run it again
-after any change to these files; a text that no longer matches is an error, not a pass.
+agent, the settings, and the eval harness (its gates and the cap on its spend). The mutations that
+start with ``unknown judge`` break the start-up notice for an ``[auto] model`` id that no ``[model]``
+or ``[[models]]`` entry has: which id counts as unknown, when the notice is said (not when the rules
+are the switch), how the id is shown (one printable line, cut at 64 characters), the sentence, the
+warning of the agent, and the rule that the notice changes no decision (the call still asks). Run it
+again after any change to these files; a text that no longer matches is an error, not a pass.
 """
 
 from __future__ import annotations
@@ -3530,8 +3535,8 @@ MODEL_MUTATIONS: list[Mutation] = [
     ),
     ms(
         "the entry message of a session with a model is the one of rules",
-        '        MODEL_ENTRY_SENTENCE.format(model=model) if classifier == "model" else RULES_ENTRY_SENTENCE',
-        '        MODEL_ENTRY_SENTENCE.format(model=model) if classifier != "model" else RULES_ENTRY_SENTENCE',
+        '    if classifier != "model":\n        step = RULES_ENTRY_SENTENCE\n',
+        '    if classifier == "model":\n        step = RULES_ENTRY_SENTENCE\n',
     ),
     ms(
         "the prompt of the user is not kept for the model step",
@@ -3629,7 +3634,7 @@ MODEL_MUTATIONS: list[Mutation] = [
     ),
     Mutation(
         "model config: a model that is not in the file raises no note",
-        "    if auto.model and all(choice.id != auto.model for choice in config.model_choices()):",
+        "    if config.auto_model_is_unknown():",
         "    if False:",
         None,
         "config.py",
@@ -3797,6 +3802,166 @@ MODEL_MUTATIONS: list[Mutation] = [
     ),
 ]
 
+_UNKNOWN_MODEL = (_CLI_TESTS + "test_auto_unknown_model.py",)
+
+
+def uj(name: str, old: str, new: str, *, file: str = "auto_mode.py") -> Mutation:
+    """A mutation of the start-up notice for an ``[auto] model`` id that no model entry has: the
+    check in ``config.py``, the id as text and the sentence in ``auto_mode.py``, the call and
+    the warning in ``agent.py``. The tests of the notice run, and they hold the rule that the
+    notice changes no decision."""
+    return Mutation(f"unknown judge: {name}", old, new, None, file, "cli", _UNKNOWN_MODEL)
+
+
+UNKNOWN_JUDGE_MUTATIONS: list[Mutation] = [
+    # ---- which id is unknown (config.py)
+    uj(
+        "no id is unknown",
+        "        return bool(wanted) and all(choice.id != wanted for choice in self.model_choices())\n",
+        "        return False\n",
+        file="config.py",
+    ),
+    uj(
+        "an empty id is unknown",
+        "        return bool(wanted) and all(choice.id != wanted for choice in self.model_choices())\n",
+        "        return all(choice.id != wanted for choice in self.model_choices())\n",
+        file="config.py",
+    ),
+    uj(
+        "an id is unknown when one entry has another id",
+        "        return bool(wanted) and all(choice.id != wanted for choice in self.model_choices())\n",
+        "        return bool(wanted) and any(choice.id != wanted for choice in self.model_choices())\n",
+        file="config.py",
+    ),
+    uj(
+        "an id is matched in any case",
+        "        return bool(wanted) and all(choice.id != wanted for choice in self.model_choices())\n",
+        "        return bool(wanted) and all(\n            choice.id.lower() != wanted.lower() for choice in self.model_choices()\n        )\n",
+        file="config.py",
+    ),
+    uj(
+        "the id of the [model] table is not looked at",
+        "        return bool(wanted) and all(choice.id != wanted for choice in self.model_choices())\n",
+        "        return bool(wanted) and all(choice.id != wanted for choice in self.models)\n",
+        file="config.py",
+    ),
+    # ---- when the id is said (auto_mode.py)
+    uj(
+        "an unknown id is not reported",
+        '    if config.auto.classifier == "model" and config.auto_model_is_unknown():\n        return config.auto.model\n',
+        '    if config.auto.classifier == "model" and config.auto_model_is_unknown():\n        return None\n',
+    ),
+    uj(
+        "an unknown id is reported as an empty id",
+        '    if config.auto.classifier == "model" and config.auto_model_is_unknown():\n        return config.auto.model\n',
+        '    if config.auto.classifier == "model" and config.auto_model_is_unknown():\n        return ""\n',
+    ),
+    uj(
+        "an unknown id is reported when the rules are the switch",
+        '    if config.auto.classifier == "model" and config.auto_model_is_unknown():\n',
+        "    if config.auto_model_is_unknown():\n",
+    ),
+    uj(
+        "an unknown id is reported only when the rules are the switch",
+        '    if config.auto.classifier == "model" and config.auto_model_is_unknown():\n',
+        '    if config.auto.classifier != "model" and config.auto_model_is_unknown():\n',
+    ),
+    # ---- the id as text (auto_mode.py)
+    uj(
+        "the id is not cut",
+        "    if len(line) > _MAX_SHOWN_ID_CHARS:\n",
+        "    if False:\n",
+    ),
+    uj(
+        "the id is cut one character too late",
+        "_MAX_SHOWN_ID_CHARS = 64\n",
+        "_MAX_SHOWN_ID_CHARS = 65\n",
+    ),
+    uj(
+        "the cut id has no dots",
+        '        line = line[: _MAX_SHOWN_ID_CHARS - 3].rstrip() + "..."\n',
+        "        line = line[:_MAX_SHOWN_ID_CHARS]\n",
+    ),
+    uj(
+        "a character that is not printable stays in the id",
+        '    line = " ".join("".join(ch if ch.isprintable() else " " for ch in text).split())\n',
+        '    line = " ".join("".join(ch for ch in text).split())\n',
+    ),
+    uj(
+        "the blanks of the id are not joined",
+        '    line = " ".join("".join(ch if ch.isprintable() else " " for ch in text).split())\n',
+        '    line = "".join(ch if ch.isprintable() else " " for ch in text).strip()\n',
+    ),
+    # ---- the sentence (auto_mode.py)
+    uj(
+        "the sentence is not said",
+        "    elif unknown_model:\n",
+        "    elif False:\n",
+    ),
+    uj(
+        "the sentence names the model of the session",
+        "        step = UNKNOWN_MODEL_ENTRY_SENTENCE.format(model=shown_model_id(unknown_model))\n",
+        "        step = UNKNOWN_MODEL_ENTRY_SENTENCE.format(model=model)\n",
+    ),
+    uj(
+        "the sentence shows the id as it is",
+        "        step = UNKNOWN_MODEL_ENTRY_SENTENCE.format(model=shown_model_id(unknown_model))\n",
+        "        step = UNKNOWN_MODEL_ENTRY_SENTENCE.format(model=unknown_model)\n",
+    ),
+    uj(
+        "the sentence is said when the rules are the switch",
+        '    if classifier != "model":\n        step = RULES_ENTRY_SENTENCE\n    elif unknown_model:\n        step = UNKNOWN_MODEL_ENTRY_SENTENCE.format(model=shown_model_id(unknown_model))\n',
+        '    if unknown_model:\n        step = UNKNOWN_MODEL_ENTRY_SENTENCE.format(model=shown_model_id(unknown_model))\n    elif classifier != "model":\n        step = RULES_ENTRY_SENTENCE\n',
+    ),
+    uj(
+        "the sentence does not say what to do",
+        "    'you (fix the id, or set classifier = \"rules\" in [auto]).'\n",
+        "    'you.'\n",
+    ),
+    uj(
+        "the sentence says that the command runs",
+        '"[[models]]: no model judges, so a shell command that Auto cannot show to be safe asks "\n',
+        '"[[models]]: no model judges, so a shell command that Auto cannot show to be safe runs "\n',
+    ),
+    # ---- the agent: the call and the warning (agent.py)
+    uj(
+        "the agent does not look for an unknown id",
+        "        unknown = unknown_judge(self._config)\n",
+        "        unknown = None\n",
+        file="agent.py",
+    ),
+    uj(
+        "the warning is not a warning",
+        "        if unknown is not None:\n            logger.warning(\n",
+        "        if unknown is not None:\n            logger.debug(\n",
+        file="agent.py",
+    ),
+    uj(
+        "the warning shows the id as it is",
+        "                shown_model_id(unknown),\n                session_id,\n",
+        "                unknown,\n                session_id,\n",
+        file="agent.py",
+    ),
+    uj(
+        "the sentence is not in the message of a session with an Auto session",
+        "                    model=auto.model_description(),\n                    unknown_model=unknown,\n",
+        "                    model=auto.model_description(),\n",
+        file="agent.py",
+    ),
+    uj(
+        "the sentence is not in the message of a session without an Auto session",
+        "                    classifier=self._config.auto.classifier,\n                    unknown_model=unknown,\n",
+        "                    classifier=self._config.auto.classifier,\n",
+        file="agent.py",
+    ),
+    # ---- no decision changes: the model step has no model to ask
+    uj(
+        "an unknown id falls back to the model of the session",
+        "                    choice.id,\n                )\n        return None\n",
+        "                    choice.id,\n                )\n        return ModelTarget(\n            harness.model, harness.stream_fn, harness.get_api_key, harness.model.model_id\n        )\n",
+    ),
+]
+
 
 def apply(source: str, mutation: Mutation) -> str:
     count = source.count(mutation.old)
@@ -3907,6 +4072,7 @@ def main(argv: list[str] | None = None) -> int:
         *COMMENT_MUTATIONS,
         *NETWORK_MUTATIONS,
         *MODEL_MUTATIONS,
+        *UNKNOWN_JUDGE_MUTATIONS,
     ]
     chosen = [mut for mut in everything if args.only in mut.name]
     if args.list:
