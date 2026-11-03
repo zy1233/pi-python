@@ -13,8 +13,10 @@ permission = "ask" # ask | auto | always-approve
 # `auto` runs those harmless calls too, and the calls that its rules show to be safe: an edit in
 # the project folder, a shell command that only reads. It asks about the rest: a path outside the
 # project, a delete, the network, a command that hides what it does, a tool that declares
-# nothing, workflow, and any command that its rules cannot judge. It never refuses a call by
-# itself. This version has rules only (see [auto] at the end of this file).
+# nothing, and workflow. A shell command that its rules cannot judge goes to a model, which
+# answers allow or ask. If the model does not allow it, does not answer in time, or answers in a
+# way that Auto cannot read, you are asked (see [auto] at the end of this file). It never
+# refuses a call by itself.
 # `auto` is not a sandbox. read, grep, find, ls, fetch_url and web_search run with no question
 # for any path or URL, and so does a recursive read in a shell command (grep -r, git grep, cat *).
 # They can show a secret to the model, and fetch_url can send it to a server. Use a sandbox
@@ -98,7 +100,15 @@ command = "python -m pi_agent_cli"
 
 [auto]
 # Settings of the `auto` mode. Only this file sets them, never a config inside the project.
-# classifier = "rules"       # "rules" is the one that works. "model" is read, and decides as "rules".
+# classifier = "model"       # "model" (default): a shell command that the rules cannot judge goes to a
+#                            # model. It gets your messages of this session and the command, and
+#                            # answers allow or ask. "rules": no model is called; such a command asks.
+# model = ""                 # the id of the [model] or [[models]] entry that judges (empty: the model
+#                            # of the session). A model that thinks before it answers cannot do this
+#                            # (it has 16 output tokens): every command would ask.
+# timeout_seconds = 8        # the time that the model has to answer (above 0, at most 120). No answer
+#                            # in time: you are asked. Three failures in a row stop the model step for
+#                            # five minutes.
 # extra_roots = []           # absolute folders that count like the project folder
 # protected = []             # more globs that always ask, for example ["deploy/*", "**/secrets/*"].
 #                            # A glob that starts with **/ matches at any depth below the project.

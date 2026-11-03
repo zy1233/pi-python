@@ -3,7 +3,7 @@
 # ruff: noqa: E501
 """Mutation check for Auto: break one rule or one wiring step at a time; a test must notice each break.
 
-    python scripts/auto_mutation_check.py              # run every mutation (about twenty minutes on four cores)
+    python scripts/auto_mutation_check.py              # run every mutation (about eleven minutes on four cores)
     python scripts/auto_mutation_check.py --list       # print the mutations
     python scripts/auto_mutation_check.py --check      # only check that each mutation still applies
     python scripts/auto_mutation_check.py --only floor # run the mutations whose name contains "floor"
