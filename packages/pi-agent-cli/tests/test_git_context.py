@@ -184,11 +184,14 @@ def test_git_status_sits_between_context_and_skills():
 
 def test_no_git_context_omits_section(tmp_path: Path):
     _init_repo(tmp_path)
-    enabled = load_system_prompt_options(cwd=tmp_path, config=CliConfig(), home=tmp_path)
+    enabled = load_system_prompt_options(
+        cwd=tmp_path, config=CliConfig(), home=tmp_path, trusted=True
+    )
     disabled = load_system_prompt_options(
         cwd=tmp_path,
         config=CliConfig(git_enabled=False),
         home=tmp_path,
+        trusted=True,
     )
     assert enabled.git_status is not None
     assert "<git_status>" in (enabled.git_status or "")
@@ -220,7 +223,11 @@ async def test_git_block_is_a_stable_session_snapshot_and_says_so(tmp_path: Path
 
     session = await JsonlSessionRepo(tmp_path / "sessions").create({"cwd": str(tmp_path)})
     harness = await create_session_harness(
-        session=session, cwd=tmp_path, config=CliConfig(), stream_fn=capture, home=tmp_path
+        session=session,
+        cwd=tmp_path,
+        config=CliConfig(trusted_projects=(str(tmp_path),)),
+        stream_fn=capture,
+        home=tmp_path,
     )
 
     await harness.prompt("first")
@@ -328,7 +335,7 @@ async def test_building_the_prompt_does_not_block_the_event_loop(
     harness = await create_session_harness(
         session=session,
         cwd=tmp_path,
-        config=CliConfig(),
+        config=CliConfig(trusted_projects=(str(tmp_path),)),
         stream_fn=mock_text_stream,
         home=tmp_path,
     )

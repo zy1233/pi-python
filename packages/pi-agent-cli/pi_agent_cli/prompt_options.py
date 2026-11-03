@@ -26,8 +26,9 @@ def load_system_prompt_options(
 ) -> BuildSystemPromptOptions:
     """Build prompt options from agent.toml, context files, and loaded skills.
 
-    *trusted*: whether the project's own prompt files may be used. The session knows (the
-    user may have said yes in a prompt); when it does not say, the configuration decides.
+    *trusted*: whether the project's own prompt files may be used, and whether ``git`` may run
+    in it for the ``<git_status>`` block. The session knows (the user may have said yes in a
+    prompt); when it does not say, the configuration decides.
     """
     cwd_s = str(Path(cwd).resolve())
     home_path = pi_home(home)
@@ -59,7 +60,7 @@ def load_system_prompt_options(
         None if config.no_context_files else discover_context_files(cwd=cwd_s, home=home_path)
     )
     skills = list(resources.skills) if resources and resources.skills else []
-    git_status = _git_status_block(cwd_s, config)
+    git_status = _git_status_block(cwd_s, config, trusted=trusted)
 
     return BuildSystemPromptOptions(
         cwd=cwd_s,
@@ -71,8 +72,12 @@ def load_system_prompt_options(
     )
 
 
-def _git_status_block(cwd: str, config: CliConfig) -> str | None:
+def _git_status_block(cwd: str, config: CliConfig, *, trusted: bool) -> str | None:
     if not config.git_enabled:
+        return None
+    # `git status` runs the program that `core.fsmonitor` in the repository's own
+    # `.git/config` names, so running it in a project nobody vouched for runs the project's code.
+    if not trusted:
         return None
     snapshot = snapshot_git_context(
         cwd,

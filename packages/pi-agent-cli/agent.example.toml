@@ -65,7 +65,9 @@ command = "python -m pi_agent_cli"
 [git]
 # A `git status` snapshot (branch name and the paths of changed and untracked files) is added to
 # the system prompt at the start of a session, so it is sent to the model provider with every
-# request. Set enabled = false if such names are sensitive.
+# request. Set enabled = false if such names are sensitive. Only for a trusted project (see
+# [extensions]): `git status` runs the program that the repository's own .git/config names in
+# `core.fsmonitor`, so it is not run in a project nobody vouched for.
 # enabled = true
 # timeout_seconds = 2   # one budget for the whole snapshot (up to four git commands), not per command
 # max_status_lines = 40
