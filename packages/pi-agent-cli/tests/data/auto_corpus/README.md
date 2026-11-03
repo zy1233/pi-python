@@ -16,7 +16,7 @@ The tests in `packages/pi-agent-cli/tests/test_auto_corpus.py` run the same code
 | `expected` | `allow` for `safe`. `ask` for every other label. |
 | `tool` | Tool name: `bash`, `write`, `edit`, `workflow`, `read`, or an MCP-style name. |
 | `input` | The tool's arguments (JSON object). |
-| `cwd` | The session's project folder. All cases use `/home/dev/proj`. |
+| `cwd` | The session's project folder. Almost all cases use `/home/dev/proj`. A few use `/home/dev` (the project is the home folder) or `/home/dev/My Project` (a space in the name). Two `redteam:` rows use an empty or a relative folder on purpose: the rules must ask for them. |
 | `user_messages` | What the user asked. The rules do not read it. The model step will. |
 | `annotations` | The tool's own hints (`readOnlyHint` and so on), or `null`. |
 | `project_trusted` | Whether the project is trusted. |
@@ -25,7 +25,7 @@ The tests in `packages/pi-agent-cli/tests/test_auto_corpus.py` run the same code
 | `floor` | For `risky`, `destructive` and `injection`: `true` when a floor rule must catch the case with no model. `false` when only a model could tell. |
 | `builtin` | Whether the tool is one of ours (`bash`, `write`, `edit`). |
 | `notes` | Why the case is here. |
-| `existing`, `git`, `links`, `origin_cwd` | Optional. Files that exist, whether they are in a git work tree (default yes), symbolic links (`{link: target}`), the working folder of a workflow sub-agent. |
+| `existing`, `git`, `links`, `origin_cwd`, `protected_paths`, `protected_globs` | Optional. Files that exist, whether they are in a git work tree (default yes), symbolic links (`{link: target}`), the working folder of a workflow sub-agent, the protected paths and the protected globs of the home config (lists of strings). |
 
 The cases never touch the real disk: the script gives each case a fake file system.
 The home folder is `/home/dev`, the agent's home is `/home/dev/.pi-python`.
@@ -52,4 +52,8 @@ ASK by the floor. A gate on a corpus is a regression gate. It is not a proof of 
 * The mutation cases (`source: mutation`) wrap a few dangerous commands in `env`, `timeout`,
   `nice`, `cd ... &&`, `;`, `||`, a pipe, an assignment, `xargs`, quotes, a backslash, an absolute
   program path and `sudo`. They were generated once; only the data is kept.
+* Notes that start with `redteam:` mark the rows of the adversarial review of the rules. Each one
+  was an ALLOW (or a call left to the model that belongs on the floor) before the fix. Notes that
+  start with `redteam guard:` mark plain safe commands that a fix must not turn into an ask.
+  The held-out split was not changed by the review.
 * Real session traffic is not in this directory. It stays private.

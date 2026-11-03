@@ -134,6 +134,8 @@ def decide_case(case: dict, *, rules_only: bool = True):
         pi_home=PI_HOME,
         project_trusted=case["project_trusted"],
         origin_cwd=case.get("origin_cwd"),
+        protected_paths=tuple(case.get("protected_paths", ())),
+        protected_globs=tuple(case.get("protected_globs", ())),
         fs=fs,
     )
     call = ToolCall(case["tool"], case["input"], case["annotations"], case["builtin"])
