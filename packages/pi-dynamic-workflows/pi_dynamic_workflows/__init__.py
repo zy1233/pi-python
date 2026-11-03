@@ -139,7 +139,7 @@ def _project_trusted(pi: ExtensionAPI) -> bool:
     except Exception as exc:
         logger.warning(
             "Cannot read `pi.project_trusted` (%s: %s): the project's own saved workflows "
-            "are not loaded.",
+            "are not loaded and `isolation` is refused.",
             type(exc).__name__,
             exc,
         )
@@ -202,7 +202,13 @@ def activate(pi: ExtensionAPI) -> None:
         executor = UnavailableSubagentExecutor(reason or "unknown reason")
 
     pi.register_tool(
-        create_workflow_tool(executor=executor, cwd=pi.cwd, manager=manager, home=pi.home)
+        create_workflow_tool(
+            executor=executor,
+            cwd=pi.cwd,
+            manager=manager,
+            home=pi.home,
+            project_trusted=_project_trusted(pi),
+        )
     )
 
     pi.register_command(

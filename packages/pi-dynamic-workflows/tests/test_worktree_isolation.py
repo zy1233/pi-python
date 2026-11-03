@@ -69,7 +69,7 @@ def _leftover_worktrees(repo: Path) -> list[str]:
 
 
 async def _isolated(repo: Path) -> tuple[WorktreeManager, str]:
-    manager = WorktreeManager(str(repo))
+    manager = WorktreeManager(str(repo), project_trusted=True)
     return manager, await manager.create()
 
 
@@ -143,7 +143,7 @@ class TestWriteBack:
         plain.mkdir()
 
         with pytest.raises(RuntimeError, match="git add failed"):
-            await WorktreeManager(str(repo)).collect_diff(str(plain))
+            await WorktreeManager(str(repo), project_trusted=True).collect_diff(str(plain))
 
     async def test_a_diff_git_cannot_produce_is_an_error_not_an_empty_patch(
         self, repo: Path, tmp_path: Path
@@ -154,7 +154,7 @@ class TestWriteBack:
         (unborn / "f.txt").write_text("x\n", encoding="utf-8")
 
         with pytest.raises(RuntimeError, match="git diff failed"):
-            await WorktreeManager(str(repo)).collect_diff(str(unborn))
+            await WorktreeManager(str(repo), project_trusted=True).collect_diff(str(unborn))
 
     async def test_nothing_is_written_when_the_subagent_changed_nothing(self, repo: Path):
         manager, wt = await _isolated(repo)
@@ -248,7 +248,7 @@ def _writes(path: str, wrote: asyncio.Event | None = None):
 
 class TestCleanup:
     async def test_a_finished_subagent_leaves_no_worktree(self, repo: Path):
-        manager = WorktreeManager(str(repo))
+        manager = WorktreeManager(str(repo), project_trusted=True)
 
         result = await _executor(mock_text_stream, repo, manager).run_agent("go")
 
@@ -257,7 +257,7 @@ class TestCleanup:
         assert manager._active == []
 
     async def test_a_finished_subagents_changes_are_written_back(self, repo: Path):
-        manager = WorktreeManager(str(repo))
+        manager = WorktreeManager(str(repo), project_trusted=True)
 
         result = await _executor(_writes("note.txt"), repo, manager).run_agent("go")
 
@@ -268,7 +268,7 @@ class TestCleanup:
     async def test_a_timed_out_subagent_leaves_no_worktree_and_writes_nothing_back(
         self, repo: Path
     ):
-        manager = WorktreeManager(str(repo))
+        manager = WorktreeManager(str(repo), project_trusted=True)
         wrote = asyncio.Event()
         executor = _executor(_writes("note.txt", wrote), repo, manager)
 
@@ -289,7 +289,7 @@ class TestCleanup:
             raise RuntimeError("provider exploded")
 
         monkeypatch.setattr(AgentHarness, "prompt", boom)
-        manager = WorktreeManager(str(repo))
+        manager = WorktreeManager(str(repo), project_trusted=True)
 
         result = await _executor(mock_text_stream, repo, manager).run_agent("go")
 
@@ -304,7 +304,7 @@ class TestCleanup:
             started.set()
             await asyncio.sleep(3600)
 
-        manager = WorktreeManager(str(repo))
+        manager = WorktreeManager(str(repo), project_trusted=True)
         task = asyncio.create_task(_executor(hang, repo, manager).run_agent("go"))
         await asyncio.wait_for(started.wait(), timeout=30)
 
@@ -328,7 +328,7 @@ class TestCleanup:
                 await asyncio.sleep(0.5)  # the agent takes its time to wind down
                 raise
 
-        manager = WorktreeManager(str(repo))
+        manager = WorktreeManager(str(repo), project_trusted=True)
         executor = _executor(slow_to_cancel, repo, manager)
         task = asyncio.create_task(executor.run_agent("go", timeout_ms=100))
         await asyncio.wait_for(started.wait(), timeout=30)
@@ -347,7 +347,7 @@ class TestCleanup:
             raise RuntimeError("worktree is locked")
 
         monkeypatch.setattr(WorktreeManager, "cleanup", stuck)
-        manager = WorktreeManager(str(repo))
+        manager = WorktreeManager(str(repo), project_trusted=True)
 
         result = await _executor(mock_text_stream, repo, manager).run_agent("go")
 
@@ -363,7 +363,7 @@ class TestCleanup:
             raise RuntimeError("apply_changes failed: patch does not apply")
 
         monkeypatch.setattr(WorktreeManager, "apply_changes", refuse)
-        manager = WorktreeManager(str(repo))
+        manager = WorktreeManager(str(repo), project_trusted=True)
 
         result = await _executor(mock_text_stream, repo, manager).run_agent("go")
 
@@ -406,7 +406,9 @@ class TestTheRunCleansUpAfterItself:
     async def test_a_foreground_run_removes_worktrees_its_agents_left(
         self, repo: Path, tmp_path: Path
     ):
-        tool = create_workflow_tool(executor=_LeakyExecutor(), cwd=str(repo), home=tmp_path / "pi")
+        tool = create_workflow_tool(
+            executor=_LeakyExecutor(), cwd=str(repo), home=tmp_path / "pi", project_trusted=True
+        )
 
         result = await tool.execute("tc", WorkflowParams(script=ONE_AGENT, isolation=True))
 
@@ -425,7 +427,9 @@ class TestTheRunCleansUpAfterItself:
         executor = HarnessSubagentExecutor(
             stream_fn=hang, parent_model=Model(provider="mock", model_id="m1"), cwd=str(repo)
         )
-        tool = create_workflow_tool(executor=executor, cwd=str(repo), home=tmp_path / "pi")
+        tool = create_workflow_tool(
+            executor=executor, cwd=str(repo), home=tmp_path / "pi", project_trusted=True
+        )
         signal = _AbortSignal()
         call = asyncio.create_task(
             tool.execute("tc", WorkflowParams(script=ONE_AGENT, isolation=True), signal)
@@ -445,7 +449,11 @@ class TestTheRunCleansUpAfterItself:
         bridge = _Bridge()
         manager = WorkflowManager(bridge)  # type: ignore[arg-type]
         tool = create_workflow_tool(
-            executor=_LeakyExecutor(), cwd=str(repo), manager=manager, home=tmp_path / "pi"
+            executor=_LeakyExecutor(),
+            cwd=str(repo),
+            manager=manager,
+            home=tmp_path / "pi",
+            project_trusted=True,
         )
 
         await tool.execute("tc", WorkflowParams(script=ONE_AGENT, isolation=True, background=True))

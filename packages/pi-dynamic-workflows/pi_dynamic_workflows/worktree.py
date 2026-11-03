@@ -2,6 +2,12 @@
 
 Creates linked worktrees via ``git worktree add --detach`` so each subagent
 operates on an independent working directory that shares the ``.git`` store.
+
+Every ``git`` command here runs in the project, and git runs the programs that the
+repository's own configuration names: the ``post-checkout`` hook, ``core.fsmonitor``, checkout
+and clean filters, ``diff.external``. That is the project's code, so the manager starts no
+``git`` unless the caller says the user vouched for the project (``project_trusted``); it
+defaults to no.
 """
 
 from __future__ import annotations
@@ -15,6 +21,10 @@ from dataclasses import dataclass
 from typing import Literal
 
 logger = logging.getLogger(__name__)
+
+
+class UntrustedProjectError(RuntimeError):
+    """The project is not trusted, so no ``git`` was started in it."""
 
 
 @dataclass
@@ -49,9 +59,21 @@ def _text(output: bytes) -> str:
 class WorktreeManager:
     """Create and manage git linked worktrees for isolated execution."""
 
-    def __init__(self, source_cwd: str) -> None:
+    def __init__(self, source_cwd: str, *, project_trusted: bool = False) -> None:
         self._source_cwd = source_cwd
+        self._project_trusted = project_trusted is True
         self._active: list[str] = []
+
+    async def _git(
+        self, args: list[str], cwd: str, stdin: bytes | None = None
+    ) -> tuple[int, bytes, bytes]:
+        """The one door to ``git``: closed for a project that is not trusted."""
+        if not self._project_trusted:
+            raise UntrustedProjectError(
+                "the project is not trusted, so git is not run in it (git runs the hooks and "
+                "programs that the repository's own .git/config names)"
+            )
+        return await _run_git(args, cwd=cwd, stdin=stdin)
 
     async def create(
         self,
@@ -64,7 +86,7 @@ class WorktreeManager:
         wt_dir = os.path.join(tempfile.gettempdir(), f"pi-wt-{tag}")
 
         ref = config.git_ref or "HEAD"
-        rc, _, stderr = await _run_git(
+        rc, _, stderr = await self._git(
             ["worktree", "add", "--detach", wt_dir, ref],
             cwd=self._source_cwd,
         )
@@ -86,17 +108,19 @@ class WorktreeManager:
         """
         # ``--binary``: without it a changed binary file is a "Binary files differ" line that
         # ``git apply`` refuses, and that one file costs the worktree the whole snapshot.
-        _, diff_unstaged, _ = await _run_git(["diff", "--binary", "HEAD"], cwd=self._source_cwd)
+        _, diff_unstaged, _ = await self._git(["diff", "--binary", "HEAD"], cwd=self._source_cwd)
         if diff_unstaged.strip():
-            rc, _, err = await _run_git(["apply", "--allow-empty"], cwd=wt_dir, stdin=diff_unstaged)
+            rc, _, err = await self._git(
+                ["apply", "--allow-empty"], cwd=wt_dir, stdin=diff_unstaged
+            )
             if rc != 0:
                 logger.warning("Snapshot unstaged apply failed: %s", _text(err))
 
-        _, diff_staged, _ = await _run_git(
+        _, diff_staged, _ = await self._git(
             ["diff", "--binary", "--cached", "HEAD"], cwd=self._source_cwd
         )
         if diff_staged.strip():
-            rc, _, err = await _run_git(
+            rc, _, err = await self._git(
                 ["apply", "--cached", "--allow-empty"],
                 cwd=wt_dir,
                 stdin=diff_staged,
@@ -106,8 +130,8 @@ class WorktreeManager:
 
         has_changes = bool(diff_unstaged.strip() or diff_staged.strip())
         if has_changes:
-            await _run_git(["add", "-A"], cwd=wt_dir)
-            await _run_git(
+            await self._git(["add", "-A"], cwd=wt_dir)
+            await self._git(
                 [
                     "-c",
                     "user.email=pi@local",
@@ -131,10 +155,10 @@ class WorktreeManager:
         or the snapshot baseline when the source was dirty, so a dirty source's own changes
         are not part of the patch.
         """
-        rc, _, err = await _run_git(["add", "-A"], cwd=worktree_path)
+        rc, _, err = await self._git(["add", "-A"], cwd=worktree_path)
         if rc != 0:
             raise RuntimeError(f"git add failed: {_text(err)}")
-        rc, stdout, err = await _run_git(
+        rc, stdout, err = await self._git(
             ["diff", "--binary", "--cached", "HEAD"], cwd=worktree_path
         )
         if rc != 0:
@@ -152,13 +176,13 @@ class WorktreeManager:
         if not diff.strip():
             return
         dest = target or self._source_cwd
-        rc, _, err = await _run_git(["apply", "--allow-empty"], cwd=dest, stdin=diff)
+        rc, _, err = await self._git(["apply", "--allow-empty"], cwd=dest, stdin=diff)
         if rc != 0:
             raise RuntimeError(f"apply_changes failed: {_text(err)}")
 
     async def cleanup(self, worktree_path: str) -> None:
         """Remove a linked worktree."""
-        rc, _, err = await _run_git(
+        rc, _, err = await self._git(
             ["worktree", "remove", "--force", worktree_path],
             cwd=self._source_cwd,
         )
