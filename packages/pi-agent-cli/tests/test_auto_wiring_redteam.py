@@ -534,7 +534,7 @@ async def test_an_end_that_has_no_start_is_not_taken_from_the_next_start(tmp_pat
 
 def _session_with_a_config_that_changes(world: _World):
     harness = _FakeHarness(world.project, [_tool("write")])
-    current = {"config": CliConfig(permission="auto", auto=AutoConfig())}
+    current = {"config": CliConfig(permission="auto", auto=AutoConfig(classifier="rules"))}
     session = AutoSession(
         harness=harness,
         get_config=lambda: current["config"],
@@ -555,7 +555,9 @@ async def test_a_value_of_auto_that_a_new_configuration_brings_makes_every_call_
     assert (await session.decide(_event("write", write, "c1"))).outcome is Outcome.ALLOW
 
     problem = "An entry of protected in [auto] is not text."
-    current["config"] = CliConfig(permission="auto", auto=AutoConfig(problems=(problem,)))
+    current["config"] = CliConfig(
+        permission="auto", auto=AutoConfig(classifier="rules", problems=(problem,))
+    )
     later = await session.decide(_event("write", write, "c2"))
 
     assert later.outcome is Outcome.ASK
@@ -568,12 +570,14 @@ async def test_a_value_of_auto_that_is_mended_by_a_new_configuration_asks_no_mor
 ) -> None:
     problem = "An entry of protected in [auto] is not text."
     current, session = _session_with_a_config_that_changes(_World(tmp_path))
-    current["config"] = CliConfig(permission="auto", auto=AutoConfig(problems=(problem,)))
+    current["config"] = CliConfig(
+        permission="auto", auto=AutoConfig(classifier="rules", problems=(problem,))
+    )
     assert await session.enter() == (problem,)
     write = {"path": "b.txt", "content": ""}
     assert (await session.decide(_event("write", write, "c1"))).outcome is Outcome.ASK
 
-    current["config"] = CliConfig(permission="auto", auto=AutoConfig())
+    current["config"] = CliConfig(permission="auto", auto=AutoConfig(classifier="rules"))
 
     assert session.problems == ()
     assert (await session.decide(_event("write", write, "c2"))).outcome is Outcome.ALLOW
@@ -608,7 +612,9 @@ async def test_a_protected_file_below_the_root_asks_through_the_agent(tmp_path: 
 
 async def test_the_default_list_reaches_the_rules_with_two_stars_in_front(tmp_path: Path) -> None:
     world = _World(tmp_path)
-    agent, _, session_id = await _open(world, auto=AutoConfig(protected=("secrets/*",)))
+    agent, _, session_id = await _open(
+        world, auto=AutoConfig(classifier="rules", protected=("secrets/*",))
+    )
     ctx = agent._autos[session_id]._make_context()
 
     assert ctx.protected_globs[-1] == "secrets/*"

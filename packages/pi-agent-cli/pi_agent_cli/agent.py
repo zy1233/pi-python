@@ -446,6 +446,9 @@ class PiAcpAgent(Agent):
         self._permission_locks.pop(session_id, None)
         self._drop_trust(session_id)
         self._forget_notices(session_id)
+        auto = self._autos.get(session_id)
+        if auto is not None:
+            auto.cancel()
         self._forget_mode(session_id)
         if harness is not None:
             await harness.close()
@@ -477,6 +480,9 @@ class PiAcpAgent(Agent):
             await self._advertise_commands(session_id)
         await self._refuse_id_taken_meanwhile(session_id, harness)
         text, images = _prompt_to_text_images(prompt)
+        auto = self._autos.get(session_id)
+        if auto is not None:
+            auto.note_user_message(text)
         message = await self._run_prompt(session_id, harness, text, images)
         if message is None:
             return PromptResponse(stop_reason="cancelled")
@@ -520,6 +526,10 @@ class PiAcpAgent(Agent):
             # event). A prompt put afterwards waits on the fresh one.
             state.cancelled.set()
             state.cancelled = asyncio.Event()
+        auto = self._autos.get(session_id)
+        if auto is not None:
+            # A decision that waits for the model ends, and its call does not run.
+            auto.cancel()
         harness = self._harnesses.get(session_id)
         if harness is None:
             return
@@ -653,7 +663,21 @@ class PiAcpAgent(Agent):
         """Tell the user that the session is in Auto: what it means, and what is wrong with the
         session if anything is (then Auto asks about every call)."""
         auto = self._autos.get(session_id)
-        parts = [entry_message(from_config=session_id in self._auto_from_config)]
+        if auto is not None:
+            parts = [
+                entry_message(
+                    from_config=session_id in self._auto_from_config,
+                    classifier=auto.classifier_name,
+                    model=auto.model_description(),
+                )
+            ]
+        else:
+            parts = [
+                entry_message(
+                    from_config=session_id in self._auto_from_config,
+                    classifier=self._config.auto.classifier,
+                )
+            ]
         self._auto_from_config.discard(session_id)
         problems = auto.problems if auto is not None else ()
         if problems:
@@ -912,6 +936,7 @@ class PiAcpAgent(Agent):
             trusted=lambda: state.trust.trusted,
             limits=limits,
         )
+        await auto.load_history(session)
         harness.load_extension(auto.activate, name=AUTO_EXTENSION_NAME)
         mode = await self._start_mode(session_id, auto, meta)
 
@@ -924,6 +949,9 @@ class PiAcpAgent(Agent):
         # (a retry after a failed load): lines for the user wait for ``_open_notices`` again.
         self._notices_open.discard(session_id)
         replaced = self._harnesses.get(session_id)
+        replaced_auto = self._autos.get(session_id)
+        if replaced_auto is not None and replaced_auto is not auto:
+            replaced_auto.cancel()
         self._autos[session_id] = auto
         self._session_modes[session_id] = mode
         self._harnesses[session_id] = harness
@@ -1321,6 +1349,10 @@ class PiAcpAgent(Agent):
                 verdict = await auto.decide(event)
                 if verdict.allows:
                     return None
+                if verdict.cancelled:
+                    # ``session/cancel`` came while the model step was asked: the user has
+                    # stopped the turn, so the call is not put to them as a question.
+                    return {"block": True, "reason": "Cancelled"}
                 auto_reason = verdict.reason
         if self._conn is None:
             return {"block": True, "reason": "No ACP client connected"}
