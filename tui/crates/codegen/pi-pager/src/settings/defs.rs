@@ -115,7 +115,7 @@ const PERMISSION_MODE_CHOICES: &[EnumChoice] = &[
     EnumChoice {
         canonical: "auto",
         display: "Auto",
-        description: "LLM classifier approves safe tools; dangerous actions may still prompt or deny.",
+        description: "LLM classifier approves safe tools; dangerous actions may still prompt.",
     },
     EnumChoice {
         canonical: "always-approve",

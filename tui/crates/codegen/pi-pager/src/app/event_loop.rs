@@ -953,11 +953,10 @@ pub(crate) async fn run(
         remote_permission_mode,
     );
     app.default_yolo = launch_yolo.yolo;
-    // Gated launch-auto (CLI `--permission-mode auto`, config, or the
-    // interactive soft default when nothing selects a mode). Hoisted so it can
-    // be re-applied after `load_initial_ui_config()` replaces `current_ui` below.
-    // Never true while the agent does not honour Auto (`agent_modes`): a saved
-    // `auto` or the soft default then launches as Ask.
+    // Gated launch-auto (CLI `--permission-mode auto` or a config that chose it;
+    // nothing chosen launches as Ask, not as the vendored soft default). Hoisted so
+    // it can be re-applied after `load_initial_ui_config()` replaces `current_ui`
+    // below. Never true while the agent does not honour Auto (`agent_modes`).
     let launch_auto = super::agent_modes::launch_auto(
         args.yolo,
         args.permission_mode_flag.as_deref(),

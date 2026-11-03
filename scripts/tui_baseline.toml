@@ -138,9 +138,10 @@ targets = ["--lib", "--test", "sandbox_requirements_pin", "--test", "test_config
 # 9 of the credential provider, 30 of `auth::{attribution, recovery}`, 9 of `AuthManager` methods
 # that only these called, 7 of the remote-settings resolvers, 2 of `tier`, and 10 config tests of
 # `ModelEntry` and of the internal OTLP endpoint resolvers: 742 - 132 = 610 on Linux (one local
-# run; the floor keeps the distance of 18).
-reference_passed = 610
-min_passed = 592
+# run; the floor keeps the distance of 18). Then +2 for the launch resolver of Auto (Auto design,
+# PR 3): the two pure tests of `auto_launch_from_selection`: 610 + 2 = 612 (one local run on Linux).
+reference_passed = 612
+min_passed = 594
 
 [[test.suite]]
 package = "pi-pager"
@@ -202,8 +203,12 @@ targets = [
 # `dispatch/tests/open_url.rs`), and +1 (`apply_retry_state_402_is_a_plain_failure_banner`: an agent
 # that is not the Python agent can still send a `retry_state` with HTTP 402, and the test pins that
 # the user sees the plain failure banner and not an upsell): 5,638 - 128 + 3 + 1 = 5,514 (one local
-# run on Linux).
-reference_passed = 5514
+# run on Linux). Then +3 for offering Auto (Auto design, PR 3): the ring test of a launch's gates and
+# the two Auto cases of `python_agent_e2e` (they pass as skipped without `PI_E2E_PYTHON`): 5,514 + 3
+# = 5,517 (one local run on Linux; the test of `agent_modes` and the two of `cli` were rewritten,
+# not added). Then +1 for a third Auto case of `python_agent_e2e` (a shell command that no rule
+# decides, with the model step on and with `classifier = "rules"`): 5,518 (one local run on Linux).
+reference_passed = 5518
 min_passed = 5300
 
 # Lib tests only; they were outside the manifest until r8 (plan section 10.10: 1,092 passed,

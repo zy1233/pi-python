@@ -465,11 +465,11 @@ def test_sessions_reads_the_id_from_each_header(tmp_path):
 def test_the_mode_scenarios_are_well_formed():
     names = [scenario.name for scenario in mp.SCENARIOS]
     assert len(names) == len(set(names))
-    # Every stop of the Shift+Tab ring (Normal, Always-Approve) and one more lap, and the
-    # command-line flag, are probed. There is no Plan or Auto stop to press for any more.
+    # Every stop of the Shift+Tab ring (Normal, Auto, Always-Approve) and one more lap, and the
+    # command-line flag, are probed. There is no Plan stop to press for.
     pressed = {len(scenario.keys) for scenario in mp.SCENARIOS}
-    assert {0, 1, 2, 3} <= pressed
-    assert not {4, 5} & pressed
+    assert {0, 1, 2, 3, 4} <= pressed
+    assert not {5, 6} & pressed
     assert any("--always-approve" in scenario.flags for scenario in mp.SCENARIOS)
     assert all(set(scenario.keys) <= {mp.SHIFT_TAB} for scenario in mp.SCENARIOS)
     # Every value `zypi --permission-mode` takes is probed, each as its own command line.
@@ -478,9 +478,9 @@ def test_the_mode_scenarios_are_well_formed():
         for scenario in mp.SCENARIOS
         if scenario.flags[:1] == ("--permission-mode",)
     }
-    assert set(by_flag) == {"default", "bypassPermissions"}
+    assert set(by_flag) == {"default", "auto", "bypassPermissions"}
     assert all(flags == ("--permission-mode", mode) for mode, flags in by_flag.items())
-    # So are the modes an earlier zypi saved in config.toml (Auto and Default must come up asking).
+    # So are the modes an earlier zypi saved in config.toml (Default must come up asking).
     saved_modes = {
         tomllib.loads(scenario.config)["ui"]["permission_mode"]
         for scenario in mp.SCENARIOS
@@ -488,13 +488,25 @@ def test_the_mode_scenarios_are_well_formed():
     }
     assert saved_modes == {"auto", "default", "always-approve"}
     assert all(not scenario.config for scenario in mp.SCENARIOS if scenario.flags or scenario.keys)
+    # Decision D5b: a start in which nothing chooses a mode is probed (it must come up asking).
+    assert mp.Scenario("Normal (nothing chosen)") in mp.SCENARIOS
+    # Auto and Normal both get a write outside the working directory (Auto must ask about it).
+    outside = [scenario for scenario in mp.SCENARIOS if scenario.outside]
+    assert {len(scenario.keys) for scenario in outside} == {0, 1}
+    assert all(not (scenario.flags or scenario.config) for scenario in outside)
+    # A shell command that no rule decides is probed in Auto twice: with the model step on (its
+    # default; the judge of the test agent cannot answer) and with `classifier = "rules"`.
+    shell = [scenario for scenario in mp.SCENARIOS if scenario.shell]
+    assert {scenario.classifier for scenario in shell} == {"", "rules"}
+    assert all(scenario.keys == (mp.SHIFT_TAB,) and not scenario.outside for scenario in shell)
+    assert not any(scenario.classifier for scenario in mp.SCENARIOS if not scenario.shell)
 
 
 def test_the_values_the_flag_refuses_are_the_rest_of_the_six_it_used_to_take():
-    # `zypi --help` used to list these six; two work, four are refused and probed as refusals.
+    # `zypi --help` used to list these six; three work, three are refused and probed as refusals.
     old_values = {"default", "acceptEdits", "auto", "dontAsk", "bypassPermissions", "plan"}
-    assert set(mp.ACCEPTED_PERMISSION_MODES) == {"default", "bypassPermissions"}
-    assert set(mp.REJECTED_PERMISSION_MODES) == {"acceptEdits", "auto", "dontAsk", "plan"}
+    assert set(mp.ACCEPTED_PERMISSION_MODES) == {"default", "auto", "bypassPermissions"}
+    assert set(mp.REJECTED_PERMISSION_MODES) == {"acceptEdits", "dontAsk", "plan"}
     assert set(mp.ACCEPTED_PERMISSION_MODES) | set(mp.REJECTED_PERMISSION_MODES) == old_values
     assert not set(mp.ACCEPTED_PERMISSION_MODES) & set(mp.REJECTED_PERMISSION_MODES)
 
@@ -506,11 +518,11 @@ TWO_CHOICES = [
     ("Ask", "Prompt for permission before tool actions."),
     ("Always approve", "Auto-approve every tool action. Skips ALL permission prompts."),
 ]
+AUTO_CHOICE = ("Auto", "LLM classifier approves safe tools; dangerous actions may still prompt.")
+THREE_CHOICES = [TWO_CHOICES[0], AUTO_CHOICE, TWO_CHOICES[1]]
 FOUR_CHOICES = [
     ("Default", "Use the agent's default permission behavior (currently equivalent to Ask)."),
-    TWO_CHOICES[0],
-    ("Auto", "LLM classifier approves safe tools; dangerous actions may still prompt or deny."),
-    TWO_CHOICES[1],
+    *THREE_CHOICES,
 ]
 
 
@@ -531,11 +543,14 @@ def picker_screen(choices: list[tuple[str, str]]) -> str:
 
 
 PICKER_OF_TWO = picker_screen(TWO_CHOICES)
+PICKER_OF_THREE = picker_screen(THREE_CHOICES)
 PICKER_OF_FOUR = picker_screen(FOUR_CHOICES)
 
 
 def test_the_permission_picker_is_read_from_the_screen():
     assert mp.picker_choices(PICKER_OF_TWO) == ["Ask", "Always approve"]
+    # The page that offers Auto: three choices, in the page's order.
+    assert mp.picker_choices(PICKER_OF_THREE) == ["Ask", "Auto", "Always approve"]
     # The page as it was before 1.P3 (a): four choices, in the page's order.
     assert mp.picker_choices(PICKER_OF_FOUR) == ["Default", "Ask", "Auto", "Always approve"]
     # No picker on the screen (the page is still the list, or nothing is open): nothing to read.
@@ -563,13 +578,14 @@ def test_a_refusal_is_reported_by_its_first_line_and_exit_code():
     stderr = (
         "\n"
         "error: invalid value 'plan' for '--permission-mode <MODE>': the agent does not act on "
-        "`plan`, so the flag would change nothing (valid values: default, bypassPermissions)\n"
+        "`plan`, so the flag would change nothing "
+        "(valid values: default, bypassPermissions, auto)\n"
         "\n"
         "For more information, try '--help'.\n"
     )
     message = mp.rejection_message(stderr)
     assert message.startswith("error: invalid value 'plan' for '--permission-mode <MODE>'")
-    assert "valid values: default, bypassPermissions" in message
+    assert "valid values: default, bypassPermissions, auto" in message
     assert mp.rejection_message("") == ""
     assert mp.rejection_message("  \n \n") == ""
 
@@ -577,7 +593,7 @@ def test_a_refusal_is_reported_by_its_first_line_and_exit_code():
     assert refused.startswith("--permission-mode plan")
     assert "exit 2" in refused and message in refused
     # A zypi that did not refuse is a result too: it started up and was killed.
-    started = mp.format_rejection(mp.Rejection("auto"))
+    started = mp.format_rejection(mp.Rejection("plan"))
     assert "still running" in started and "(no message)" in started
 
 
@@ -599,6 +615,54 @@ def test_a_row_says_whether_the_question_came_and_what_was_written():
     assert "written without an answer=yes" in mp.format_row(silent)
     assert mp.format_row(silent).endswith("written after an answer=-")
     assert "label=(none)" in mp.format_row(silent)
+    assert "in turn=(none)" in mp.format_row(silent)
+    # The label before the first message and the one in the turn are two facts: a launch in Auto
+    # shows nothing on the welcome page and "auto" once a session exists.
+    started = mp.Observation(scenario, ready=True, label="", label_in_turn="mock · auto")
+    assert "label=(none)" in mp.format_row(started)
+    assert "in turn=mock · auto" in mp.format_row(started)
+
+
+def test_the_question_is_read_from_the_bar_on_its_left():
+    screen = (
+        "  go\n"
+        "  ┃\n"
+        "  ┃  Allow write (Auto: leaves the project folder)?\n"
+        "  ┃\n"
+        "  ┃  1 (●) Allow once\n"
+        "  ┃  2 (○) No, reject (type to add feedback)\n"
+        "  1/2:select  │  Tab:next option\n"
+    )
+    assert mp.question_text(screen) == (
+        "Allow write (Auto: leaves the project folder)? | 1 (●) Allow once"
+        " | 2 (○) No, reject (type to add feedback)"
+    )
+    assert mp.question_text("nothing to ask\n") == ""
+    asked = mp.Observation(mp.Scenario("Auto"), ready=True, asked=True, question="Allow write?")
+    assert mp.format_row(asked).endswith("\n    question: Allow write?")
+
+
+def test_the_autos_record_is_read_from_the_session_file():
+    entry = {
+        "tool_call_id": "call_1",
+        "tool": "bash",
+        "outcome": "ask",
+        "by": "error",
+        "reason": "checker_unreadable",
+        "rule_id": "model.unparseable",
+        "classifier": "model",
+    }
+    lines = [
+        json.dumps({"type": "session", "id": "x"}),
+        json.dumps({"type": "custom", "customType": "pi.auto_decision", "data": entry}),
+        "not json, pi.auto_decision",
+    ]
+    assert mp.auto_records("\n".join(lines)) == [
+        "bash ask by=error reason=checker_unreadable rule=model.unparseable classifier=model"
+    ]
+    assert mp.auto_records("") == []
+    asked = mp.Observation(mp.Scenario("Auto"), ready=True, asked=True, record="bash ask by=floor")
+    assert mp.format_row(asked).endswith("\n    Auto record: bash ask by=floor")
 
 
 # ---- net_audit: what a connection audit reads, and when it fails a run ------------------

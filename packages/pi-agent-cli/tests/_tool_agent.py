@@ -11,7 +11,10 @@ optionally ``"id"`` (default ``call_1``). The tool-call tests use it to make the
 
 ``PI_TEST_PERMISSION`` is the permission mode, ``always-approve`` by default so that the tool
 call does not wait for the client; the tests that are about that wait set ``ask``. (``auto`` is
-not "no question": it asks about a ``bash`` command that its rules cannot prove.)
+not "no question": a ``bash`` command that its rules cannot prove goes to the model step. In this
+agent the model step gets the same scripted turn as every other request, a tool call, and that is
+an answer it cannot read, so the call asks.) ``PI_TEST_AUTO_CLASSIFIER`` (``rules`` or ``model``)
+sets ``[auto] classifier``; with ``rules`` no model is asked at all.
 Whatever the call, the turn after its result is the mock reply, unless the turn was cancelled in
 the meantime: the stream then ends as ``aborted``, as a real provider's does. Run it as
 ``python _tool_agent.py`` with ``PI_HOME`` set.
@@ -27,7 +30,7 @@ from pathlib import Path
 
 from pi_agent_cli.__main__ import serve
 from pi_agent_cli.agent import PiAcpAgent
-from pi_agent_cli.config import CliConfig
+from pi_agent_cli.config import AutoConfig, CliConfig
 from pi_agent_core.event_stream import AssistantMessageEventStream
 from pi_agent_core.messages import ToolCallContent
 from pi_agent_core.tests.mock_stream import _base_partial, mock_text_stream
@@ -99,6 +102,7 @@ async def _amain() -> None:
         home=Path(os.environ["PI_HOME"]),
         config=CliConfig(  # type: ignore[arg-type]
             permission=os.environ.get("PI_TEST_PERMISSION", "always-approve"),
+            auto=AutoConfig(classifier=os.environ.get("PI_TEST_AUTO_CLASSIFIER", "model")),  # type: ignore[arg-type]
             provider="mock",
             model_id="mock",
         ),

@@ -192,6 +192,22 @@ pub fn effective_yolo_for_launch(
     )
 }
 
+/// Whether this launch starts in Auto because something chose it: `--permission-mode auto`, a
+/// `[ui]` permission key or the remote `permission_mode`. When nothing selects a mode the answer is
+/// `false` (Ask); contrast [`effective_auto_for_launch_interactive`], which soft-defaults to Auto.
+pub fn effective_auto_for_launch(
+    cli_always_approve: bool,
+    cli_permission_mode: Option<&str>,
+    remote_permission_mode: Option<&str>,
+) -> bool {
+    effective_auto_for_launch_impl(
+        cli_always_approve,
+        cli_permission_mode,
+        remote_permission_mode,
+        false,
+    )
+}
+
 /// [`effective_auto_for_launch`] for interactive (TUI) launches: identical
 /// precedence, except that when nothing selects a mode — no CLI flag, no
 /// effective TOML `[ui]` permission key, no remote `permission_mode` — the
@@ -236,6 +252,24 @@ fn effective_auto_for_launch_impl(
     if yolo.yolo {
         return false;
     }
+    auto_launch_from_selection(
+        cli_always_approve,
+        cli_permission_mode,
+        || load_selected_permission_mode(remote_permission_mode),
+        unset_defaults_auto,
+    )
+}
+
+/// The part of the launch decision that comes after the gate and the yolo checks. `selected` is
+/// read only when the command line has no `--permission-mode`. `unset_defaults_auto` is what a
+/// launch does when nothing selects a mode: `true` is the interactive soft default (Auto), `false`
+/// is Ask.
+fn auto_launch_from_selection(
+    cli_always_approve: bool,
+    cli_permission_mode: Option<&str>,
+    selected: impl FnOnce() -> Option<PermissionMode>,
+    unset_defaults_auto: bool,
+) -> bool {
     // --yolo + --permission-mode auto: prefer yolo only when mode is full bypass.
     if cli_always_approve && matches!(cli_permission_mode, Some("auto")) {
         return false;
@@ -243,7 +277,7 @@ fn effective_auto_for_launch_impl(
     if let Some(mode) = cli_permission_mode {
         return mode == "auto";
     }
-    match load_selected_permission_mode(remote_permission_mode) {
+    match selected() {
         Some(mode) => mode.is_auto(),
         None => unset_defaults_auto,
     }
@@ -733,6 +767,41 @@ mod tests {
             "--yolo beats the soft default"
         );
         unsafe { std::env::remove_var("GROK_AUTO_PERMISSION_MODE") };
+    }
+
+    /// The one difference between the two launch variants is what a launch does when nothing
+    /// selects a mode: the strict one asks, the interactive one soft-defaults to Auto. Pure: the
+    /// selection is passed in, so the host's config does not matter.
+    #[test]
+    fn nothing_selected_asks_for_the_strict_variant_and_autos_for_the_interactive_one() {
+        let unset = || None;
+        assert!(!auto_launch_from_selection(false, None, unset, false));
+        assert!(auto_launch_from_selection(false, None, unset, true));
+    }
+
+    /// Every explicit choice wins over the fallback, for both variants.
+    #[test]
+    fn an_explicit_choice_decides_whatever_the_fallback_is() {
+        for fallback in [false, true] {
+            let auto = || Some(PermissionMode::Auto);
+            let ask = || Some(PermissionMode::Ask);
+            let bypass = || Some(PermissionMode::AlwaysApprove);
+            assert!(auto_launch_from_selection(false, None, auto, fallback));
+            assert!(!auto_launch_from_selection(false, None, ask, fallback));
+            assert!(!auto_launch_from_selection(false, None, bypass, fallback));
+            // The command line beats the config and is never read together with it.
+            let never = || -> Option<PermissionMode> { panic!("config read despite a CLI mode") };
+            assert!(auto_launch_from_selection(false, Some("auto"), never, fallback));
+            assert!(!auto_launch_from_selection(false, Some("default"), never, fallback));
+            assert!(!auto_launch_from_selection(false, Some("ask"), never, fallback));
+            assert!(!auto_launch_from_selection(
+                false,
+                Some("bypassPermissions"),
+                never,
+                fallback
+            ));
+            assert!(!auto_launch_from_selection(true, Some("auto"), never, fallback));
+        }
     }
 
     // Pure tests for the policy predicate itself live next to its canonical
