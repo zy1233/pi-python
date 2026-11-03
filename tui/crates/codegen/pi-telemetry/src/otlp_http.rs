@@ -1,5 +1,5 @@
 //! Shared construction of the blocking `reqwest` client used by the OTLP
-//! HTTP exporters (spans in `otel_layer`, logs/metrics in `external`).
+//! HTTP exporters (logs and metrics in `external`).
 //!
 //! This uses the workspace `reqwest` 0.12 (`rustls-tls`, embedded webpki
 //! roots) rather than reqwest 0.13. reqwest 0.13's blocking client runs its
@@ -57,13 +57,9 @@ pub(crate) struct ClientIdentityPaths<'a> {
 /// for customer collectors behind a private CA). Errors reading or parsing a
 /// listed bundle fail construction — exporting without a CA the user
 /// explicitly configured would silently verify against the wrong trust set.
-pub(crate) fn build_blocking_client(
-    timeout: std::time::Duration,
-    extra_ca_pem_files: &[&str],
-) -> Result<BlockingOtlpClient, String> {
-    build_blocking_client_with_identity(timeout, extra_ca_pem_files, None)
-}
-
+///
+/// `client_identity` is the mTLS client certificate and key (PEM paths), when
+/// the collector asks for one.
 pub(crate) fn build_blocking_client_with_identity(
     timeout: std::time::Duration,
     extra_ca_pem_files: &[&str],
@@ -167,7 +163,7 @@ mod tests {
     /// with no system CA store.
     #[test]
     fn blocking_otlp_client_builds_with_embedded_roots() {
-        build_blocking_client(std::time::Duration::from_secs(5), &[])
+        build_blocking_client_with_identity(std::time::Duration::from_secs(5), &[], None)
             .expect("client with embedded webpki roots must build on any host");
     }
 
@@ -176,9 +172,10 @@ mod tests {
     /// a client that verifies against the wrong trust set.
     #[test]
     fn blocking_otlp_client_fails_closed_on_missing_ca_file() {
-        let err = build_blocking_client(
+        let err = build_blocking_client_with_identity(
             std::time::Duration::from_secs(5),
             &["/nonexistent/corp-ca.pem"],
+            None,
         )
         .expect_err("missing CA bundle must fail construction");
         assert!(err.contains("OTEL_EXPORTER_OTLP_CERTIFICATE"));
@@ -191,9 +188,10 @@ mod tests {
         let file = tempfile::NamedTempFile::new().expect("temp CA file");
         std::fs::write(file.path(), "# readable, but no PEM certificate blocks\n")
             .expect("write empty bundle");
-        let err = build_blocking_client(
+        let err = build_blocking_client_with_identity(
             std::time::Duration::from_secs(5),
             &[file.path().to_str().expect("utf-8 path")],
+            None,
         )
         .expect_err("certificate-less bundle must fail construction");
         assert!(err.contains("no certificates"));

@@ -85,7 +85,7 @@ fn init_tracing_simple(app_entrypoint: &'static str) {
 /// full crossterm teardown.
 fn shutdown_and_flush_telemetry(exit_code: i32) -> ! {
     pi_telemetry::sentry::flush_on_shutdown();
-    pi_telemetry::otel_layer::shutdown_otel();
+    pi_telemetry::external::shutdown();
     pi_telemetry::debug_log::flush();
     std::process::exit(exit_code);
 }

@@ -172,16 +172,10 @@ pub(crate) fn test_app() -> AppView {
         show_tips: None,
         ask_user_question_timeout_enabled: None,
         zdr_access_enabled: false,
-        usage_billing_redirect_url: None,
         access_gate_shown_logged: false,
         announcement_cta_impressions_logged: Default::default(),
         gate: None,
         subscription_tier: None,
-        paywall_check_started: None,
-        last_subscription_check_at: None,
-        subscription_watch_interval_secs: None,
-        pending_gate_verification: None,
-        gate_verify_gen: 0,
         scroll_debug_hud: crate::views::scroll_debug_hud::ScrollDebugHud::new(),
         fps_hud: crate::views::fps_hud::FpsHud::new(),
         welcome_prompt: crate::views::prompt_widget::PromptWidget::new(),
@@ -201,7 +195,6 @@ pub(crate) fn test_app() -> AppView {
         welcome_on_auth_url: false,
         welcome_announcement: WelcomeAnnouncementState::default(),
         welcome_auth_fallback_rect: None,
-        welcome_refresh_rect: None,
         welcome_gate_url_rect: None,
         welcome_upgrade_cta_rect: None,
         welcome_privacy_banner_opt_in_rect: None,
@@ -234,12 +227,6 @@ pub(crate) fn test_app() -> AppView {
         minimal_state: crate::minimal_api::MinimalState::default(),
         show_resolved_model: true,
         sharing_enabled: false,
-        usage_visible: true,
-        has_external_auth_provider: false,
-        tier_restricted_commands: Vec::new(),
-        credit_balance: None,
-        auto_topup: None,
-        billing_poll_wanted: false,
         session_picker_grouped: false,
         scheduler_background_loops_seed: true,
         cancel_rewind_enabled: true,
@@ -275,8 +262,6 @@ pub(crate) fn test_app_with_agent() -> AppView {
             restore_degree: None,
             rate_limited: false,
             model_incompatible: false,
-            credit_limit_blocked: false,
-            free_usage_blocked: false,
             available_commands: Vec::new(),
             available_commands_generation: 0,
             available_tools: None,
@@ -1119,51 +1104,11 @@ fn resize_event_closes_tip_show_gate_until_redraw() {
     assert_eq!(counts.get("t_seen"), Some(&1));
 }
 #[test]
-fn apply_auth_meta_enables_billing_surface_for_personal_users() {
-    let mut app = test_app();
-    app.usage_visible = false;
-    let meta = pi_shell::auth::AuthMeta::default();
-    app.apply_auth_meta(&meta);
-    assert!(app.usage_visible);
-}
-#[test]
-fn apply_auth_meta_clears_api_key_flag_and_restores_billing_on_personal_login() {
+fn apply_auth_meta_clears_api_key_flag_on_personal_login() {
     let mut app = test_app();
     app.is_api_key_auth = true;
-    app.usage_visible = false;
     app.apply_auth_meta(&pi_shell::auth::AuthMeta::default());
     assert!(!app.is_api_key_auth);
-    assert!(app.usage_visible);
-}
-#[test]
-fn is_restricted_tier_classification() {
-    assert!(is_restricted_tier(None));
-    assert!(is_restricted_tier(Some("")));
-    assert!(is_restricted_tier(Some("Free")));
-    assert!(is_restricted_tier(Some("X Basic")));
-    assert!(is_restricted_tier(Some("x_basic")));
-    assert!(!is_restricted_tier(Some("SuperGrok")));
-    assert!(!is_restricted_tier(Some("SuperGrok Heavy")));
-    assert!(!is_restricted_tier(Some("X Premium")));
-    assert!(!is_restricted_tier(Some("X Premium+")));
-    assert!(!is_restricted_tier(Some("SomeFutureTier")));
-}
-#[test]
-fn voice_included_in_tier_restricted_commands() {
-    assert!(TIER_RESTRICTED_COMMANDS.contains(&"voice"));
-}
-#[test]
-fn is_voice_tier_restricted_tracks_tier() {
-    let mut app = test_app();
-    app.apply_auth_meta(&pi_shell::auth::AuthMeta::default());
-    assert!(app.is_voice_tier_restricted());
-    let mut app = test_app();
-    let meta = pi_shell::auth::AuthMeta {
-        subscription_tier: Some("SuperGrok".into()),
-        ..Default::default()
-    };
-    app.apply_auth_meta(&meta);
-    assert!(!app.is_voice_tier_restricted());
 }
 #[test]
 fn apply_auth_meta_clears_gate_on_subscription() {

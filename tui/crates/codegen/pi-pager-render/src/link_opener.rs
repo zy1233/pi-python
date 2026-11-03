@@ -99,8 +99,8 @@ pub fn open_url(url: &str) -> bool {
     }
 
     // Skip the doomed spawn on headless Linux VMs (no DISPLAY / Wayland)
-    // so billing Upgrade / Buy-credits clicks can fall back to showing the
-    // URL instead of silently no-op'ing.
+    // so link clicks (for example the access-gate CTA) can fall back to
+    // showing the URL instead of silently no-op'ing.
     if !browser_open_likely_available() {
         tracing::info!("skipping browser open: no display server / BROWSER");
         return false;
@@ -347,9 +347,9 @@ pub fn try_open_url(url: &str, filter: SchemeFilter) -> OpenUrlResult {
 /// failure, the original string is returned unchanged so this is safe to apply
 /// to opener input from untrusted sources.
 ///
-/// Used by the SuperGrok upsell flow to attribute clicks to `referrer=grok-build`,
+/// Used by the access-gate link to attribute clicks to `referrer=grok-build`,
 /// matching the OAuth consent screen and x.ai/cli marketing links regardless of
-/// what the remote settings `gate_url` value happens to be.
+/// what the gate's `url` value happens to be.
 pub fn ensure_query_param(url: &str, key: &str, value: &str) -> String {
     let Ok(mut parsed) = url::Url::parse(url) else {
         return url.to_string();

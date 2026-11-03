@@ -265,7 +265,7 @@ fn flush_telemetry_and_exit(exit_code: i32) -> ! {
     pi_tty_utils::restore_native_stderr();
     crate::app::status_line::metrics::global().report_health();
     pi_telemetry::sentry::flush_on_shutdown();
-    pi_telemetry::otel_layer::shutdown_otel();
+    pi_telemetry::external::shutdown();
     // Flush the --debug firehose on TUI signal exit (this path bypasses main's flush).
     pi_telemetry::debug_log::flush();
     std::process::exit(exit_code);

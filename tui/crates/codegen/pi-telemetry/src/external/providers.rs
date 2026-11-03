@@ -5,9 +5,8 @@
 //! The exporters are plain `opentelemetry_otlp` http/protobuf or gRPC/protobuf
 //! exporters built with **only** the customer headers from
 //! `OTEL_EXPORTER_OTLP_HEADERS` — no code path here can attach
-//! `Authorization`/`X-PI-Token-Auth`/`x-userid`;
-//! those constants live in `otel_layer` and are not referenced by this
-//! module. No `AuthCredentialProvider` is ever read.
+//! `Authorization`/`X-PI-Token-Auth`/`x-userid`.
+//! No `AuthCredentialProvider` is ever read.
 
 use std::sync::Arc;
 use std::time::Duration;

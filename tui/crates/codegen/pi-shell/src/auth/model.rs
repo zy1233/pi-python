@@ -128,9 +128,6 @@ impl GrokAuth {
             .num_seconds()
     }
 
-    pub(crate) fn is_team_principal(&self) -> bool {
-        self.principal_type.as_deref() == Some(TEAM_PRINCIPAL_TYPE) && self.team_id.is_some()
-    }
 
     /// Carry `/user`-derived fields from a previous auth so refresh rebuilds don't drop them.
     pub(crate) fn carry_user_profile_from(&mut self, prev: &GrokAuth) {

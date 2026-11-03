@@ -9,9 +9,6 @@
 //! own durable storage and OAuth2 refresh. See "Where model auth providers fit
 //! (and don't)"
 //! in `docs/internal/AUTH.md`.
-//!
-//! This is distinct from the `AuthCredentialProvider` HTTP consumers in
-//! [`crate::auth::credential_provider`].
 
 /// One named `[auth_provider.<name>]` table, honored only from the trusted
 /// config layers (`parse_auth_providers`). A new field here needs a
@@ -34,87 +31,6 @@ pub struct AuthProviderConfig {
 impl AuthProviderConfig {
     pub(crate) fn is_usable(&self) -> bool {
         !self.command.trim().is_empty()
-    }
-}
-
-/// A model's reference to a named auth provider, built by `resolve_model_list`.
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-#[serde(from = "AuthProviderRefData", into = "AuthProviderRefData")]
-pub struct AuthProviderRef {
-    pub(crate) name: String,
-    pub(crate) config: AuthProviderConfig,
-    /// `true` once the trusted table is attached. A ref revived from bytes is
-    /// `false` and never mints or reads until [`AuthProviderRef::attach_trusted_config`]
-    /// joins the shared slot for its name.
-    resolved: bool,
-    fail_closed: bool,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct AuthProviderRefData {
-    name: String,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    fail_closed: bool,
-}
-
-impl From<AuthProviderRefData> for AuthProviderRef {
-    fn from(data: AuthProviderRefData) -> Self {
-        if data.fail_closed {
-            AuthProviderRef::fail_closed(data.name)
-        } else {
-            AuthProviderRef::unresolved(data.name)
-        }
-    }
-}
-
-impl From<AuthProviderRef> for AuthProviderRefData {
-    fn from(provider: AuthProviderRef) -> Self {
-        Self {
-            name: provider.name,
-            fail_closed: provider.fail_closed,
-        }
-    }
-}
-
-impl AuthProviderRef {
-    /// The in-memory form of a ref revived from bytes;
-    /// [`AuthProviderRef::attach_trusted_config`] resolves it.
-    pub(crate) fn unresolved(name: String) -> Self {
-        Self {
-            name,
-            config: AuthProviderConfig::default(),
-            resolved: false,
-            fail_closed: false,
-        }
-    }
-
-    pub(crate) fn fail_closed(name: String) -> Self {
-        Self {
-            name,
-            config: AuthProviderConfig::default(),
-            resolved: true,
-            fail_closed: true,
-        }
-    }
-}
-
-/// Ignores the slot; a deserialized ref compares unequal until resolution
-/// re-attaches its config.
-impl PartialEq for AuthProviderRef {
-    fn eq(&self, other: &Self) -> bool {
-        self.name == other.name && self.config == other.config
-    }
-}
-
-impl Eq for AuthProviderRef {}
-
-impl std::fmt::Debug for AuthProviderRef {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AuthProviderRef")
-            .field("name", &self.name)
-            .field("config", &self.config)
-            .field("resolved", &self.resolved)
-            .finish_non_exhaustive()
     }
 }
 

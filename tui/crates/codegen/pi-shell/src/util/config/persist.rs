@@ -88,43 +88,6 @@ async fn save_config_locked(config: &Config) -> Result<()> {
     tokio::fs::rename(&tmp, &path).await?;
     Ok(())
 }
-/// Atomic write via temp file + `rename` (mirrors [`save_config`]) so a crash
-/// mid-write can't truncate `config.toml`. Preserves the dest mode on unix.
-pub(crate) fn atomic_write_string(path: &std::path::Path, content: &str) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    #[cfg(unix)]
-    let prior_mode: Option<u32> = match std::fs::metadata(path) {
-        Ok(m) => {
-            use std::os::unix::fs::PermissionsExt;
-            Some(m.permissions().mode())
-        }
-        Err(_) => None,
-    };
-    #[cfg(not(unix))]
-    let prior_mode: Option<u32> = None;
-    let suffix = {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        format!("toml.tmp.{}.{}", std::process::id(), nanos)
-    };
-    let tmp = path.with_extension(suffix);
-    std::fs::write(&tmp, content)?;
-    #[cfg(unix)]
-    if let Some(mode) = prior_mode {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode));
-    }
-    let _ = prior_mode;
-    if let Err(e) = std::fs::rename(&tmp, path) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e);
-    }
-    Ok(())
-}
 /// Merge `[toolset.ask_user_question]` into the root table. `[toolset]` is
 /// deliberately NOT merged wholesale — it carries runtime-only structs
 /// (`web_search` sampler etc.) whose serialized defaults must never land in

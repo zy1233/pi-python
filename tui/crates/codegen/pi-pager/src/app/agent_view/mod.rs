@@ -701,10 +701,6 @@ pub struct AgentView {
     pub prompt_stash: Option<PromptStashEntry>,
     /// Set by the send that consumed the user's draft this dispatch; see `note_draft_consumed`.
     pub(crate) draft_consumed: bool,
-    /// Complete prompt stashed from a credit-limit-blocked turn. Used by
-    /// `CreditLimitRecheckComplete` to retry the prompt after a tier
-    /// upgrade instead of showing a stale upsell.
-    pub credit_limit_stashed_prompt: Option<crate::app::agent::InFlightPrompt>,
     /// Complete prompt stashed from a turn that failed because the login
     /// expired (401 / re-auth). Used by the `AuthComplete` handler to
     /// auto-resubmit the prompt after a successful mid-session re-auth so
@@ -728,10 +724,6 @@ pub struct AgentView {
     /// Held across a frame that clamps the row away, so a script keeps the size
     /// it last painted at.
     pub last_status_line_size: Option<crate::views::status_line::RowSize>,
-    /// Mocked credit balance for the status bar indicator.
-    pub credit_balance: Option<crate::views::credit_bar::CreditBalance>,
-    /// Auto top-up rule paired with `credit_balance` for the prompt warning.
-    pub auto_topup: Option<crate::views::credit_bar::AutoTopupInfo>,
     /// UTC ms when the current turn started (`turnStartMs` from notification meta).
     /// Used for turn elapsed display.
     pub turn_start_ms: Option<i64>,
@@ -885,7 +877,6 @@ pub struct AgentView {
     /// Whether the mouse is hovering over the prompt widget.
     pub hovered_prompt: bool,
     pub hit_context: HitArea,
-    pub hit_credits: HitArea,
     pub hit_todo_close: HitArea,
     pub hit_queue_close: HitArea,
     pub hit_plan_button: HitArea,
@@ -1162,10 +1153,6 @@ pub struct AgentView {
     /// refreshed by `legacy ext RPC`: the fire side is pinned for the
     /// session's lifetime, so a live mirror would drift out of agreement.
     pub scheduler_background_loops: Option<bool>,
-    /// Mirrors `AppView::usage_visible` (credit warning + `/usage manage`).
-    pub billing_surface_visible: bool,
-    /// Whether `/usage` is offered. Mirrors `!AppView::has_external_auth_provider`.
-    pub usage_command_visible: bool,
     /// Input flight recorder — rolling buffer of recent key events.
     /// Dumped to file via Esc→d combo for debugging.
     pub(crate) input_log: crate::input_log::InputRingBuffer,
@@ -1352,35 +1339,6 @@ fn translate_local_submit(
                 worktree,
                 persist_mode,
             })
-        }
-        LocalQuestionKind::CreditLimitUpsell { choices } => {
-            let q = qv.questions.first();
-            let url = q
-                .and_then(|q| q.options.get(*idx))
-                .and_then(|o| o.id.as_deref())
-                .unwrap_or(super::dispatch::UPSELL_URL_PAYG);
-            let choice = choices
-                .get(*idx)
-                .copied()
-                .unwrap_or(pi_telemetry::events::CreditLimitChoice::PayAsYouGo);
-            pi_telemetry::session_ctx::log_event(pi_telemetry::events::CreditLimitUpsellClicked {
-                surface: pi_telemetry::events::CreditLimitUpsellSurface::QuestionModal,
-                choice,
-            });
-            InputOutcome::Action(Action::OpenUrl(url.to_string()))
-        }
-        LocalQuestionKind::FreeUsageUpsell { source } => {
-            let url = qv
-                .questions
-                .first()
-                .and_then(|q| q.options.get(*idx))
-                .and_then(|o| o.id.as_deref())
-                .unwrap_or(super::dispatch::UPSELL_URL_UPGRADE);
-            pi_telemetry::session_ctx::log_event(pi_telemetry::events::SuperGrokUpsellClicked {
-                source,
-                auth_method: None,
-            });
-            InputOutcome::Action(Action::OpenUrl(url.to_string()))
         }
         LocalQuestionKind::AgentTypeMismatch { model_id, effort } => {
             let start_new = *idx == 0;
@@ -1883,8 +1841,6 @@ pub(crate) mod test_fixtures {
             restore_degree: None,
             rate_limited: false,
             model_incompatible: false,
-            credit_limit_blocked: false,
-            free_usage_blocked: false,
             available_commands: Vec::new(),
             available_commands_generation: 0,
             available_tools: None,
@@ -1926,8 +1882,6 @@ pub(crate) mod test_fixtures {
                 restore_degree: None,
                 rate_limited: false,
                 model_incompatible: false,
-                credit_limit_blocked: false,
-                free_usage_blocked: false,
                 available_commands: Vec::new(),
                 available_commands_generation: 0,
                 available_tools: None,
@@ -2451,8 +2405,6 @@ pub(crate) fn test_agent_view(session_id: Option<&str>, cwd: std::path::PathBuf)
             restore_degree: None,
             rate_limited: false,
             model_incompatible: false,
-            credit_limit_blocked: false,
-            free_usage_blocked: false,
             available_commands: Vec::new(),
             available_commands_generation: 0,
             available_tools: None,

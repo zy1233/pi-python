@@ -2263,15 +2263,6 @@ trace_upload_endpoint_url = "https://s3.acme-corp.example"
         )
         .unwrap();
     assert_eq!(
-            cfg.endpoints.resolve_managed_config_url(),
-            "https://cli-chat-proxy.grok.com/v1/deployment/config"
-        );
-    assert!(
-            !cfg.endpoints
-                .resolve_managed_config_url()
-                .contains("acme-corp")
-        );
-    assert_eq!(
             cfg.endpoints.trace_upload_endpoint_url.as_deref(),
             Some("https://s3.acme-corp.example")
         );

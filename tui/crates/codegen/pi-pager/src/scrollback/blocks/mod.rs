@@ -5,7 +5,6 @@
 mod agent;
 mod btw;
 mod context_info;
-mod credit_limit;
 pub(crate) mod markdown_content;
 pub mod mermaid_content;
 mod quote_bar;
@@ -18,7 +17,6 @@ mod user;
 pub use agent::AgentMessageBlock;
 pub use btw::BtwBlock;
 pub use context_info::ContextInfoBlock;
-pub use credit_limit::{CreditLimitBlock, CreditLimitCardAction};
 pub use session_event::{SessionEvent, SessionEventBlock};
 pub use system::SystemMessageBlock;
 pub use thinking::ThinkingBlock;

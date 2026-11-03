@@ -1,8 +1,8 @@
 //! Tests for the dispatch module tree: shared fixtures and per-domain test modules.
 mod auth;
-mod billing;
 mod modes;
 mod notes;
+mod open_url;
 mod permissions;
 mod prompt;
 mod router;
@@ -14,10 +14,6 @@ mod task_result;
 mod transcript;
 mod turn;
 mod voice;
-use super::billing::{
-    CreditLimitUpsellMode, credit_limit_upsell_mode, is_max_tier, open_credit_limit_upsell,
-    open_free_usage_upsell,
-};
 use super::ctx::{get_active_agent, get_active_agent_mut};
 use super::modes::{
     YOLO_ON_UNDER_PLAN_TOAST, active_agent_plan_nudge_state, dispatch_cycle_mode_and_sync,
@@ -139,16 +135,10 @@ fn test_app() -> AppView {
         show_tips: None,
         ask_user_question_timeout_enabled: None,
         zdr_access_enabled: false,
-        usage_billing_redirect_url: None,
         access_gate_shown_logged: false,
         announcement_cta_impressions_logged: Default::default(),
         gate: None,
         subscription_tier: None,
-        paywall_check_started: None,
-        last_subscription_check_at: None,
-        subscription_watch_interval_secs: None,
-        pending_gate_verification: None,
-        gate_verify_gen: 0,
         scroll_debug_hud: crate::views::scroll_debug_hud::ScrollDebugHud::new(),
         fps_hud: crate::views::fps_hud::FpsHud::new(),
         welcome_prompt: crate::views::prompt_widget::PromptWidget::new(),
@@ -168,7 +158,6 @@ fn test_app() -> AppView {
         welcome_on_auth_url: false,
         welcome_announcement: WelcomeAnnouncementState::default(),
         welcome_auth_fallback_rect: None,
-        welcome_refresh_rect: None,
         welcome_gate_url_rect: None,
         welcome_upgrade_cta_rect: None,
         welcome_privacy_banner_opt_in_rect: None,
@@ -201,12 +190,6 @@ fn test_app() -> AppView {
         minimal_state: crate::minimal_api::MinimalState::default(),
         show_resolved_model: true,
         sharing_enabled: false,
-        usage_visible: true,
-        has_external_auth_provider: false,
-        tier_restricted_commands: Vec::new(),
-        credit_balance: None,
-        auto_topup: None,
-        billing_poll_wanted: false,
         session_picker_grouped: false,
         scheduler_background_loops_seed: true,
         cancel_rewind_enabled: true,
@@ -245,8 +228,6 @@ fn make_test_agent_session(app: &AppView, id: AgentId, sid: &str) -> AgentSessio
         restore_degree: None,
         rate_limited: false,
         model_incompatible: false,
-        credit_limit_blocked: false,
-        free_usage_blocked: false,
         available_commands: Vec::new(),
         available_commands_generation: 0,
         available_tools: None,
@@ -354,8 +335,6 @@ fn insert_placeholder_agent(app: &mut AppView, id: AgentId) {
             restore_degree: None,
             rate_limited: false,
             model_incompatible: false,
-            credit_limit_blocked: false,
-            free_usage_blocked: false,
             available_commands: Vec::new(),
             available_commands_generation: 0,
             available_tools: None,
@@ -534,18 +513,4 @@ fn reset_mouse_capture_enabled(on: bool) {
 }
 fn mouse_capture_is_enabled() -> bool {
     crate::app::MOUSE_CAPTURE_ENABLED.load(std::sync::atomic::Ordering::Acquire)
-}
-/// Build a minimal `CreditBalance` for billing dispatch tests.
-fn test_bal(usage_pct: f64) -> crate::views::credit_bar::CreditBalance {
-    crate::views::credit_bar::CreditBalance {
-        usage_pct,
-        effective_usage_pct: usage_pct,
-        period_end_display: None,
-        pay_as_you_go: false,
-        on_demand_cap_cents: None,
-        on_demand_used_cents: None,
-        prepaid_balance_cents: None,
-        period_type: None,
-        is_unified_billing_user: None,
-    }
 }

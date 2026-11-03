@@ -318,7 +318,7 @@ const _: () = assert!(ALL_KEYS.len() == <ExternalKey as strum::EnumCount>::COUNT
 
 /// The runtime allowlist the export-time validators enforce: exactly the wire
 /// names of every [`ExternalKey`]. Pinned by an independent literal copy in
-/// the test module (mirroring `otel_layer::redact::allowlist_contents_are_pinned`).
+/// the test module.
 pub(crate) fn external_allowed_keys() -> &'static std::collections::HashSet<&'static str> {
     static SET: std::sync::LazyLock<std::collections::HashSet<&'static str>> =
         std::sync::LazyLock::new(|| ALL_KEYS.iter().map(|k| k.as_str()).collect());

@@ -98,21 +98,6 @@ pub enum LocalQuestionKind {
     /// On submit, the selected option index is translated into an
     /// [`crate::app::actions::Action::NewSessionAnswered`].
     NewSession,
-    /// Modal shown when the user hits the credit/rate limit (403).
-    /// Options map to upsell URLs: upgrade tier or enable on-demand.
-    /// `choices` maps each option index to a telemetry choice variant.
-    CreditLimitUpsell {
-        choices: Vec<pi_telemetry::events::CreditLimitChoice>,
-    },
-    /// SuperGrok upsell modal: the free-usage paywall (429 +
-    /// `subscription:free-usage-exhausted`) or a tier-restricted slash
-    /// command invocation. Upgrade options carry their URL in the option
-    /// `id`.
-    FreeUsageUpsell {
-        /// Telemetry source for `SuperGrokUpsellClicked` — distinguishes
-        /// the paywall from the restricted-command upsell.
-        source: pi_telemetry::events::SuperGrokUpsell,
-    },
     /// Modal shown when the shell rejects a model switch due to agent
     /// type incompatibility. Carries the target model + effort so the
     /// answer handler can create a new session with it.
@@ -211,8 +196,8 @@ pub struct QuestionViewState {
     /// would read as worked time.
     pub opened_at_wall_ms: i64,
     /// When `true`, the freeform "Other" input row is hidden. Used by
-    /// locally-driven questions (e.g. credit-limit upsell) that only
-    /// offer fixed options with no free-text fallback.
+    /// locally-driven questions (e.g. the new-session worktree question) that
+    /// only offer fixed options with no free-text fallback.
     pub no_freeform: bool,
 
     /// Whether Enter on the report advances to the trace-consent question.

@@ -347,7 +347,6 @@ impl AgentView {
         let thinking_label = self.scrollback.thinking_fold_label();
         let selected_is_user_prompt = selected_entry.is_some_and(|e| e.block.is_user_prompt());
         let selected_is_agent_message = selected_entry.is_some_and(|e| e.block.is_agent_message());
-        let selected_is_credit_limit = selected_entry.is_some_and(|e| e.block.is_credit_limit());
         let mut hints = agent::build_hints(
             self.active_pane,
             self.parked_card()
@@ -368,7 +367,6 @@ impl AgentView {
             self.esc_would_cancel_turn(esc_owned_before_agent),
             selected_is_user_prompt,
             selected_is_agent_message,
-            selected_is_credit_limit,
             crate::terminal::terminal_context().shift_enter_unavailable(),
             self.scrollback_search.as_ref(),
         );
@@ -903,7 +901,6 @@ impl AgentView {
         }
         let areas = status.render(buf, layout.status_bar);
         self.hit_context.rect = areas.get("context").copied();
-        self.hit_credits.rect = areas.get("credits").copied();
         self.hit_plan_button.rect = areas.get("plan").copied();
         let home = std::env::var("HOME").ok();
         let display = self.session.cwd.display().to_string();
@@ -1734,16 +1731,6 @@ impl AgentView {
         }
         let mode_flags: &[PromptFlag] = &mode_flags_vec;
         let multiline = self.multiline_mode;
-        let warning = self.credit_balance.as_ref().and_then(|bal| {
-            crate::views::credit_bar::usage_warning(
-                bal,
-                self.auto_topup.as_ref(),
-                self.billing_surface_visible,
-            )
-        });
-        let usage_warning_text: Option<String> = warning.as_ref().map(|(t, _)| t.clone());
-        let usage_warning = usage_warning_text.as_deref();
-        let usage_warning_critical = warning.is_some_and(|(_, critical)| critical);
         let model_label = match self.session.models.reasoning_effort {
             Some(eff) => format!("{model_id} ({eff})"),
             None => model_id,
@@ -1753,8 +1740,6 @@ impl AgentView {
                 model_name: &model_label,
                 flags: mode_flags,
                 multiline,
-                usage_warning,
-                usage_warning_critical,
             },
             PromptMode::EditingQueued { id, .. } => {
                 let pos = self.session.queue_position(*id).map(|i| i + 1).unwrap_or(1);
@@ -1763,8 +1748,6 @@ impl AgentView {
                     model_name: &editing_label,
                     flags: mode_flags,
                     multiline,
-                    usage_warning,
-                    usage_warning_critical,
                 }
             }
         };
@@ -1773,8 +1756,6 @@ impl AgentView {
                 model_name: label,
                 flags: &[],
                 multiline: false,
-                usage_warning,
-                usage_warning_critical,
             }
         } else {
             info

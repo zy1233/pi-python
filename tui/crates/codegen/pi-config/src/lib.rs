@@ -4,8 +4,7 @@
 //! 1. `/etc/grok/managed_config.toml`
 //! 2. `$GROK_HOME/managed_config.toml`
 //! 3. `$GROK_HOME/config.toml`
-//! 4. `$GROK_HOME/requirements.toml` (cloud cache; Ed25519-signed at rest once a
-//!    key is embedded — see [`signed_policy`] — below the OS-protected layers)
+//! 4. `$GROK_HOME/requirements.toml`
 //! 5. `/etc/grok/requirements.toml`
 //! 6. macOS MDM managed preferences (`ai.x.grok`, admin-forced) — macOS only
 //!
@@ -21,11 +20,9 @@ pub mod fs_atomic;
 pub mod global_hook_sources;
 mod loader;
 mod macos_managed;
-mod managed_cache;
 pub mod managed_text;
 mod paths;
 pub mod shell;
-pub mod signed_policy;
 mod validation;
 pub mod version_overrides;
 
@@ -61,13 +58,6 @@ pub use loader::{
     toml_error_detail,
 };
 pub use macos_managed::MDM_REQUIREMENTS_SOURCE;
-pub use managed_cache::{
-    MANAGED_CONFIG_CACHE_FILE, ServingIdentity, SyncMarker, bump_rollback_floor,
-    bump_rollback_floor_with_now, confirmed_team_switch, confirmed_team_switch_at,
-    fail_closed_policy_armed_at, is_managed_config_hard_stale_for, is_managed_config_stale_for,
-    managed_config_identity_changed_at, managed_deployment_id, managed_policy_compromised_for,
-    mark_managed_config_synced, mark_managed_config_synced_at, normalize_identity,
-};
 pub use paths::{
     claude_managed_settings_path, claude_managed_settings_probe_path, create_dir_all_owner_only,
     decode_cwd_from_dirname, default_grok_home, encode_cwd_dirname, ensure_sessions_cwd_dir,

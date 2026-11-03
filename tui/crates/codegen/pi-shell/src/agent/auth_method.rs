@@ -17,11 +17,6 @@ pub(crate) fn read_pi_api_key_env() -> Result<String, std::env::VarError> {
     std::env::var(PI_API_KEY_ENV_VAR).or_else(|_| std::env::var(LEGACY_PI_API_KEY_ENV_VAR))
 }
 
-/// Returns `true` if either `PI_API_KEY` or `GROK_CODE_PI_API_KEY` is set.
-pub fn has_pi_api_key_env() -> bool {
-    read_pi_api_key_env().is_ok()
-}
-
 /// ACP session auth method. Use `is_session_based_method` for classification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthMethodKind {

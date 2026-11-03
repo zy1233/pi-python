@@ -986,9 +986,6 @@ impl AgentView {
                 .entry(idx)
                 .is_some_and(|e| e.block.is_plan_mode_tool());
 
-        // Credit-limit URL click is handled upstream (before this method)
-        // so only the URL line is clickable, not the whole block.
-
         match click_count {
             1 if is_plan_tool => {
                 self.show_plan_preview();

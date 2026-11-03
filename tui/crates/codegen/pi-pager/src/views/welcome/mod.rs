@@ -117,8 +117,6 @@ pub struct WelcomeRenderResult {
     pub auth_url_rect: Option<Rect>,
     /// Hit-test rect for the "show full URL" fallback link.
     pub auth_fallback_rect: Option<Rect>,
-    /// Hit-test rect for the "[Refresh]" button on the paywall tier line.
-    pub refresh_rect: Option<Rect>,
     /// Hit-test rect for the gate URL link (click to open in browser).
     pub gate_url_rect: Option<Rect>,
     /// Whether the announcement overflowed (the "expandable" signal).
@@ -603,12 +601,6 @@ pub struct WelcomeRenderParams<'a> {
     /// Live working directory (tracks `Effect::SetWorkingDir`), used to pin
     /// the current repo's session group to the top of the picker.
     pub cwd: &'a std::path::Path,
-    /// App-level credit balance for showing the usage warning on the welcome screen.
-    pub credit_balance: Option<&'a crate::views::credit_bar::CreditBalance>,
-    /// Auto top-up rule paired with `credit_balance` for the welcome warning.
-    pub auto_topup: Option<&'a crate::views::credit_bar::AutoTopupInfo>,
-    /// Consumer billing surface (false for team / API-key — no credit warning).
-    pub usage_visible: bool,
     /// Whether a long managed-config announcement is expanded inline (vs the
     /// default 2-line collapsed view with a trailing `…`).
     pub welcome_announcement_expanded: bool,
@@ -665,8 +657,6 @@ pub fn render_welcome(
                 model_name: params.model_name,
                 flags: params.flags,
                 multiline: false,
-                usage_warning: None,
-                usage_warning_critical: false,
             };
             let (menu_rects, post_flush_escapes) = render_welcome_blocked(
                 content_area,
@@ -1731,7 +1721,6 @@ fn render_welcome_done(
 
     // Skip the prompt input when picker is visible to save space;
     // shortcuts are rendered inside the picker content area.
-    let mut refresh_hit_rect: Option<Rect> = None;
     let mut gate_url_hit_rect: Option<Rect> = None;
     let mut privacy_banner_opt_in_rect: Option<Rect> = None;
     let mut privacy_banner_opt_out_rect: Option<Rect> = None;
@@ -1748,43 +1737,6 @@ fn render_welcome_done(
         ])
         .flex(Flex::Center)
         .areas(layout.prompt);
-        // Show the user's current tier + clickable refresh button above the gate message.
-        let tier_label = p.subscription_tier.unwrap_or("Free");
-        let tier_prefix = format!("Tier: {tier_label}  ");
-        let refresh_text = "[Refresh]";
-        let total_width = tier_prefix.len() + refresh_text.len();
-        let tier_line = Line::from(vec![
-            Span::styled("Tier: ", Style::default().fg(theme.gray)),
-            Span::styled(
-                tier_label,
-                Style::default()
-                    .fg(theme.gray_bright)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("  ", Style::default()),
-            Span::styled(
-                refresh_text,
-                Style::default()
-                    .fg(theme.accent_user)
-                    .add_modifier(Modifier::UNDERLINED),
-            ),
-        ])
-        .alignment(Alignment::Center);
-        let tier_area = Rect {
-            height: 1,
-            ..centered
-        };
-        Paragraph::new(tier_line).render(tier_area, buf);
-
-        // Compute the click rect for "[Refresh]" within the centered line.
-        let line_start_x = tier_area.x + tier_area.width.saturating_sub(total_width as u16) / 2;
-        refresh_hit_rect = Some(Rect {
-            x: line_start_x + tier_prefix.len() as u16,
-            y: tier_area.y,
-            width: refresh_text.len() as u16,
-            height: 1,
-        });
-
         let gate_text = p
             .gate
             .map(|g| g.message.as_str())
@@ -1796,16 +1748,15 @@ fn render_welcome_done(
         .alignment(Alignment::Center);
         Paragraph::new(msg).render(
             Rect {
-                y: centered.y + 1,
                 height: 1,
                 ..centered
             },
             buf,
         );
 
-        if centered.height > 2 {
+        if centered.height > 1 {
             let url_area = Rect {
-                y: centered.y + 2,
+                y: centered.y + 1,
                 height: 1,
                 ..centered
             };
@@ -1869,19 +1820,10 @@ fn render_welcome_done(
             privacy_banner_policy_rect = Some(rects.policy);
         }
 
-        let warning = p.credit_balance.and_then(|bal| {
-            crate::views::credit_bar::usage_warning(bal, p.auto_topup, p.usage_visible)
-        });
-        let (usage_warning_text, usage_warning_critical) = match warning {
-            Some((text, critical)) => (Some(text), critical),
-            None => (None, false),
-        };
         let usage_info = PromptInfo {
             model_name: p.model_name,
             flags: p.flags,
             multiline: false,
-            usage_warning: usage_warning_text.as_deref(),
-            usage_warning_critical,
         };
 
         render_prompt_and_version(
@@ -1919,7 +1861,6 @@ fn render_welcome_done(
         session_picker_hit_areas: picker_close_button,
         auth_url_rect: None,
         auth_fallback_rect: None,
-        refresh_rect: refresh_hit_rect,
         gate_url_rect: gate_url_hit_rect,
         announcement_truncated,
         announcement_rect,
@@ -2425,23 +2366,11 @@ mod tests {
             session_picker_grouped: false,
             session_picker_pending_delete: false,
             cwd: std::path::Path::new("/repo"),
-            credit_balance: None,
-            auto_topup: None,
-            usage_visible: true,
             welcome_announcement_expanded: false,
             upgrade_cta: None,
             privacy_banner: false,
         }
     }
-    fn render_done_text(params: &WelcomeRenderParams<'_>) -> String {
-        let area = Rect::new(0, 0, 100, 40);
-        let mut buf = Buffer::empty(area);
-        let mut prompt = PromptWidget::new();
-        let mut picker = PickerState::default();
-        render_welcome(area, &mut buf, params, &mut prompt, &mut picker);
-        buffer_text(&buf)
-    }
-
     fn png() -> [u8; 8] {
         [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n']
     }

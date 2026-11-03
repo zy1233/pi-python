@@ -322,8 +322,6 @@ pub(in crate::app::dispatch) fn dispatch_new_session_inner_with_id(
             restore_degree: None,
             rate_limited: false,
             model_incompatible: false,
-            credit_limit_blocked: false,
-            free_usage_blocked: false,
             available_commands: app.bootstrap_acp_commands.clone(),
             available_commands_generation: 1,
             available_tools: None,
@@ -349,21 +347,14 @@ pub(in crate::app::dispatch) fn dispatch_new_session_inner_with_id(
         agent.set_voice_mode_available(app.voice_mode_enabled);
         agent.apply_app_scoped_gates(
             app.sharing_enabled,
-            app.usage_visible,
-            !app.has_external_auth_provider,
             app.screen_mode,
             &app.active_announcements,
-            &app.tier_restricted_commands,
         );
-        agent.apply_credit_balance(app.credit_balance.clone(), app.auto_topup.clone());
         agent.active_pane = ActivePane::Prompt;
     }
     switch_to_agent(app, agent_id, SwitchCause::New);
     if app.screen_mode.is_minimal() {
         app.minimal_state.welcome_pending = true;
-    }
-    if let Some(agent) = app.agents.get_mut(&agent_id) {
-        agent.apply_credit_balance(app.credit_balance.clone(), app.auto_topup.clone());
     }
     let preferred_session_id = app.deferred_startup.preferred_session_id.take();
     effects.push(Effect::CreateSession {
@@ -617,8 +608,6 @@ pub(in crate::app::dispatch) fn dispatch_new_worktree_session(
             restore_degree: None,
             rate_limited: false,
             model_incompatible: false,
-            credit_limit_blocked: false,
-            free_usage_blocked: false,
             available_commands: app.bootstrap_acp_commands.clone(),
             available_commands_generation: 1,
             available_tools: None,
@@ -651,13 +640,9 @@ pub(in crate::app::dispatch) fn dispatch_new_worktree_session(
         agent.set_voice_mode_available(app.voice_mode_enabled);
         agent.apply_app_scoped_gates(
             app.sharing_enabled,
-            app.usage_visible,
-            !app.has_external_auth_provider,
             app.screen_mode,
             &app.active_announcements,
-            &app.tier_restricted_commands,
         );
-        agent.apply_credit_balance(app.credit_balance.clone(), app.auto_topup.clone());
     }
     if let Some(prompt) = prompt
         && let Some(agent) = app.agents.get_mut(&agent_id)
@@ -723,10 +708,6 @@ pub(in crate::app::dispatch) fn handle_session_created(
         }
         let mut drain = maybe_drain_queue(agent);
         let mut effects = std::mem::take(&mut drain.effects);
-        effects.push(Effect::FetchBilling {
-            agent_id,
-            silent: true,
-        });
         if let Some(switch) = deferred {
             effects.push(Effect::SwitchModel {
                 agent_id,

@@ -83,8 +83,6 @@ fn laziness_detector_absent_block_deserializes_to_default() {
         entry.laziness_detector,
         LazinessDetectorPerModelConfig::default()
     );
-    let info = ModelInfo::from_config(&entry);
-    assert!(!info.laziness_detector.enabled);
 }
 #[test]
 fn laziness_detector_block_round_trips_through_serde() {
@@ -520,47 +518,6 @@ fn parses_repo_changes_dedup_config() {
     assert_eq!(dedup.untracked_exclude_globs, vec!["*.zip", "tmp/**"]);
 }
 #[test]
-fn model_info_from_config_propagates_use_concise() {
-    let entry = ModelEntryConfig {
-        id: None,
-        model_family: None,
-        model: "test".to_string(),
-        base_url: "https://test.api/v1".to_string(),
-        name: None,
-        description: None,
-        max_completion_tokens: None,
-        temperature: None,
-        top_p: None,
-        api_key: None,
-        env_key: None,
-        api_backend: ApiBackend::default(),
-        auth_scheme: None,
-        extra_headers: IndexMap::new(),
-        context_window: NonZeroU64::new(200_000).unwrap(),
-        auto_compact_threshold_percent: None,
-        system_prompt_label: None,
-        api_base_url: None,
-        use_concise: true,
-        agent_type: default_agent_type(),
-        inference_idle_timeout_secs: None,
-        max_retries: None,
-        subagent_rate_limit_max_attempts: None,
-        hidden: false,
-        supported_in_api: true,
-        reasoning_effort: None,
-        supports_reasoning_effort: false,
-        reasoning_efforts: Vec::new(),
-        supports_backend_search: false,
-        compactions_remaining: None,
-        compaction_at_tokens: None,
-        show_model_fingerprint: false,
-        stream_tool_calls: None,
-        laziness_detector: LazinessDetectorPerModelConfig::default(),
-    };
-    let info = ModelInfo::from_config(&entry);
-    assert!(info.use_concise);
-}
-#[test]
 fn agent_selection_config_defaults_to_none() {
     let cfg = Config::default();
     assert!(cfg.agent.name.is_none());
@@ -624,88 +581,6 @@ fn agent_selection_not_specified_uses_defaults() {
     let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
     assert!(cfg.agent.name.is_none());
     assert!(cfg.agent.definition.is_none());
-}
-#[test]
-fn model_info_from_config_propagates_agent_type() {
-    let entry = ModelEntryConfig {
-        id: None,
-        model_family: None,
-        model: "test".to_string(),
-        base_url: "https://test.api/v1".to_string(),
-        name: None,
-        description: None,
-        max_completion_tokens: None,
-        temperature: None,
-        top_p: None,
-        api_key: None,
-        env_key: None,
-        api_backend: ApiBackend::default(),
-        auth_scheme: None,
-        extra_headers: IndexMap::new(),
-        context_window: NonZeroU64::new(200_000).unwrap(),
-        auto_compact_threshold_percent: None,
-        system_prompt_label: None,
-        api_base_url: None,
-        use_concise: false,
-        agent_type: "codex".to_string(),
-        inference_idle_timeout_secs: None,
-        max_retries: None,
-        subagent_rate_limit_max_attempts: None,
-        hidden: false,
-        supported_in_api: true,
-        reasoning_effort: None,
-        supports_reasoning_effort: false,
-        reasoning_efforts: Vec::new(),
-        supports_backend_search: false,
-        compactions_remaining: None,
-        compaction_at_tokens: None,
-        show_model_fingerprint: false,
-        stream_tool_calls: None,
-        laziness_detector: LazinessDetectorPerModelConfig::default(),
-    };
-    let info = ModelInfo::from_config(&entry);
-    assert_eq!(info.agent_type, "codex");
-}
-#[test]
-fn inference_idle_timeout_propagates_to_model_info() {
-    let entry = ModelEntryConfig {
-        id: None,
-        model_family: None,
-        model: "test".to_string(),
-        base_url: "https://test.api/v1".to_string(),
-        name: None,
-        description: None,
-        max_completion_tokens: None,
-        temperature: None,
-        top_p: None,
-        api_key: None,
-        env_key: None,
-        api_backend: ApiBackend::default(),
-        auth_scheme: None,
-        extra_headers: IndexMap::new(),
-        context_window: NonZeroU64::new(200_000).unwrap(),
-        auto_compact_threshold_percent: None,
-        system_prompt_label: None,
-        api_base_url: None,
-        use_concise: false,
-        agent_type: default_agent_type(),
-        inference_idle_timeout_secs: Some(120),
-        max_retries: None,
-        subagent_rate_limit_max_attempts: None,
-        hidden: false,
-        supported_in_api: true,
-        reasoning_effort: None,
-        supports_reasoning_effort: false,
-        reasoning_efforts: Vec::new(),
-        supports_backend_search: false,
-        compactions_remaining: None,
-        compaction_at_tokens: None,
-        show_model_fingerprint: false,
-        stream_tool_calls: None,
-        laziness_detector: LazinessDetectorPerModelConfig::default(),
-    };
-    let info = ModelInfo::from_config(&entry);
-    assert_eq!(info.inference_idle_timeout_secs, Some(120));
 }
 #[test]
 fn telemetry_config_parses_custom_values_from_toml() {
@@ -976,56 +851,6 @@ fn config_models_default_is_not_overwritten_by_default_models_json() {
         "[models] default from config.toml must beat remote settings and compiled-in defaults"
     );
 }
-/// Unset every env var that `EndpointsConfig::default()` reads for endpoints,
-/// so the cli-chat-proxy resolver tests below are deterministic regardless of
-/// the ambient environment. Gated behind `#[serial]`.
-fn unset_endpoint_env_vars() {
-    for k in [
-        "GROK_CLI_CHAT_PROXY_BASE_URL",
-        "GROK_PI_API_BASE_URL",
-        "GROK_FEEDBACK_BASE_URL",
-        "GROK_TRACE_UPLOAD_URL",
-        "GROK_MANAGED_CONFIG_URL",
-        "GROK_MODELS_BASE_URL",
-        "GROK_MODELS_LIST_URL",
-        "OTEL_EXPORTER_OTLP_ENDPOINT",
-        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
-        "OTEL_EXPORTER_OTLP_HEADERS",
-        "GROK_INTERNAL_OTLP_TRACES_ENDPOINT",
-        "GROK_INTERNAL_OTLP_HEADERS",
-        "GROK_EXTERNAL_OTEL",
-    ] {
-        unsafe { std::env::remove_var(k) };
-    }
-}
-/// REGRESSION: the managed-config URL never follows `pi_api_base_url`
-/// through the full loader `Config::new_from_toml_cfg` — a distinct construction
-/// path from `from_config_value`, so the deployment key never reaches the
-/// inference host on either.
-#[test]
-#[serial]
-fn loader_managed_config_url_never_follows_inference_endpoint() {
-    unset_endpoint_env_vars();
-    let cfg = Config::new_from_toml_cfg(
-        &toml::from_str(
-            r#"[endpoints]
-                pi_api_base_url = "https://inference.acme-corp.example/pi/v1""#,
-        )
-        .unwrap(),
-    )
-    .expect("config should parse");
-    assert!(cfg.endpoints.cli_chat_proxy_base_url.is_none());
-    assert_eq!(
-        cfg.endpoints.resolve_managed_config_url(),
-        format!("{CLI_CHAT_PROXY_BASE_URL_DEFAULT}/deployment/config")
-    );
-    assert!(
-        !cfg.endpoints
-            .resolve_managed_config_url()
-            .contains("inference.acme-corp.example"),
-        "deployment key would be sent to the inference host"
-    );
-}
 #[test]
 fn e2e_models_endpoint_serde_alias_parses_as_models_list_url() {
     let raw: toml::Value = toml::from_str(
@@ -1041,7 +866,6 @@ fn e2e_models_endpoint_serde_alias_parses_as_models_list_url() {
         Some("https://old-style.acme.com/v1/models"),
         "models_endpoint alias should parse into models_list_url"
     );
-    assert!(cfg.endpoints.has_custom_endpoint());
 }
 #[test]
 fn e2e_config_models_parsed_directly_not_via_deep_merge() {
@@ -1555,52 +1379,6 @@ fn unknown_key_still_warns_next_to_exempt_sections() {
         "exactly the typo'd key must be flagged"
     );
 }
-#[test]
-fn otlp_traces_endpoint_precedence() {
-    let proxy = "https://inference.acme.com/v1".to_string();
-    let derived = EndpointsConfig {
-        cli_chat_proxy_base_url: Some(proxy.clone()),
-        ..Default::default()
-    };
-    assert_eq!(
-        derived.resolve_otlp_traces_endpoint(),
-        "https://inference.acme.com/v1/traces"
-    );
-    let base = EndpointsConfig {
-        cli_chat_proxy_base_url: Some(proxy.clone()),
-        otel_exporter_otlp_endpoint: Some("https://otel.acme.com".to_string()),
-        ..Default::default()
-    };
-    assert_eq!(
-        base.resolve_otlp_traces_endpoint(),
-        "https://otel.acme.com/v1/traces"
-    );
-    let full = EndpointsConfig {
-        cli_chat_proxy_base_url: Some(proxy),
-        otel_exporter_otlp_endpoint: Some("https://ignored.example".to_string()),
-        otel_exporter_otlp_traces_endpoint: Some("https://otel.acme.com/v1/traces".to_string()),
-        ..Default::default()
-    };
-    assert_eq!(
-        full.resolve_otlp_traces_endpoint(),
-        "https://otel.acme.com/v1/traces"
-    );
-}
-#[test]
-fn otlp_headers_parse() {
-    let cfg = EndpointsConfig {
-        otel_exporter_otlp_headers: Some("a=1, b = 2 ,=skip,c=".to_string()),
-        ..Default::default()
-    };
-    assert_eq!(
-        cfg.resolve_otlp_headers(),
-        vec![
-            ("a".to_string(), "1".to_string()),
-            ("b".to_string(), "2".to_string()),
-            ("c".to_string(), String::new()),
-        ]
-    );
-}
 /// Base config for the internal-OTLP tests: pinned proxy, every OTLP knob
 /// explicitly unset so ambient env (via `Default`) can't leak in.
 fn internal_otlp_test_config() -> EndpointsConfig {
@@ -1615,53 +1393,8 @@ fn internal_otlp_test_config() -> EndpointsConfig {
         ..Default::default()
     }
 }
-/// `grok_internal_otlp_traces_endpoint` wins over the legacy `OTEL_*`
-/// fields regardless of the master switch.
-#[test]
-fn internal_otlp_endpoint_grok_internal_wins_regardless_of_switch() {
-    for switch in [false, true] {
-        let cfg = EndpointsConfig {
-            grok_internal_otlp_traces_endpoint: Some(
-                "https://internal.example/traces/".to_string(),
-            ),
-            otel_exporter_otlp_traces_endpoint: Some(
-                "https://legacy.example/v1/traces".to_string(),
-            ),
-            otel_exporter_otlp_endpoint: Some("https://legacy-base.example".to_string()),
-            external_otel_master_switch: switch,
-            ..internal_otlp_test_config()
-        };
-        assert_eq!(
-            cfg.resolve_otlp_traces_endpoint(),
-            "https://internal.example/traces",
-            "switch={switch}: GROK_INTERNAL_OTLP_TRACES_ENDPOINT must win verbatim (trailing / trimmed)"
-        );
-    }
-}
-/// Master switch unset → legacy fallback preserved (back-compat).
-#[test]
-fn internal_otlp_endpoint_legacy_fallback_when_switch_unset() {
-    let traces = EndpointsConfig {
-        otel_exporter_otlp_traces_endpoint: Some("https://legacy.example/v1/traces".to_string()),
-        ..internal_otlp_test_config()
-    };
-    assert_eq!(
-        traces.resolve_otlp_traces_endpoint(),
-        "https://legacy.example/v1/traces"
-    );
-    let base = EndpointsConfig {
-        otel_exporter_otlp_endpoint: Some("https://legacy-base.example/".to_string()),
-        ..internal_otlp_test_config()
-    };
-    assert_eq!(
-        base.resolve_otlp_traces_endpoint(),
-        "https://legacy-base.example/v1/traces"
-    );
-}
-/// Master switch SET → legacy `OTEL_*` endpoint/headers are completely
-/// ignored by the internal pipeline (the external stream owns them); the
-/// internal pipeline falls back to the proxy default and
-/// `internal_otlp_consumed_standard_vars()` is false.
+/// Master switch SET → the standard `OTEL_*` vars belong to the external
+/// stream, so `internal_otlp_consumed_standard_vars()` is false.
 #[test]
 fn internal_otlp_ignores_legacy_vars_when_switch_set() {
     let cfg = EndpointsConfig {
@@ -1673,12 +1406,6 @@ fn internal_otlp_ignores_legacy_vars_when_switch_set() {
         external_otel_master_switch: true,
         ..internal_otlp_test_config()
     };
-    assert_eq!(
-        cfg.resolve_otlp_traces_endpoint(),
-        "https://proxy.example/v1/traces",
-        "internal firehose must never follow OTEL_* to the external collector"
-    );
-    assert_eq!(cfg.resolve_otlp_headers(), Vec::<(String, String)>::new());
     assert!(!cfg.internal_otlp_consumed_standard_vars());
 }
 /// `internal_otlp_consumed_standard_vars()` truth table.
@@ -1779,32 +1506,6 @@ fn internal_otlp_consumed_standard_vars_cases() {
             case.why
         );
     }
-}
-/// Headers precedence: `grok_internal_otlp_headers` wins; legacy
-/// `otel_exporter_otlp_headers` only when the master switch is unset.
-#[test]
-fn internal_otlp_headers_precedence() {
-    for switch in [false, true] {
-        let cfg = EndpointsConfig {
-            grok_internal_otlp_headers: Some("x-debug=1".to_string()),
-            otel_exporter_otlp_headers: Some("legacy=1".to_string()),
-            external_otel_master_switch: switch,
-            ..internal_otlp_test_config()
-        };
-        assert_eq!(
-            cfg.resolve_otlp_headers(),
-            vec![("x-debug".to_string(), "1".to_string())],
-            "switch={switch}"
-        );
-    }
-    let legacy = EndpointsConfig {
-        otel_exporter_otlp_headers: Some("legacy=1".to_string()),
-        ..internal_otlp_test_config()
-    };
-    assert_eq!(
-        legacy.resolve_otlp_headers(),
-        vec![("legacy".to_string(), "1".to_string())]
-    );
 }
 fn ext_env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
     let map: std::collections::HashMap<String, String> = pairs
@@ -2033,10 +1734,6 @@ fn external_otel_master_switch_resolves_from_all_layers() {
         ..internal_otlp_test_config()
     };
     assert!(!cfg.internal_otlp_consumed_standard_vars());
-    assert!(
-        !cfg.resolve_otlp_traces_endpoint()
-            .contains("collector.corp")
-    );
 }
 #[test]
 fn external_otel_carries_internal_consumed_flag() {
@@ -2616,19 +2313,6 @@ telemetry = "garbage"
     )
     .unwrap();
     assert_eq!(telemetry_enabled_from_toml(&unknown), None);
-}
-#[test]
-#[serial]
-fn is_telemetry_explicitly_disabled_sync_env_signals() {
-    unsafe { std::env::set_var("GROK_TELEMETRY_ENABLED", "0") };
-    unsafe { std::env::remove_var("DISABLE_TELEMETRY") };
-    assert!(is_telemetry_explicitly_disabled_sync());
-    unsafe { std::env::set_var("GROK_TELEMETRY_ENABLED", "1") };
-    assert!(!is_telemetry_explicitly_disabled_sync());
-    unsafe { std::env::remove_var("GROK_TELEMETRY_ENABLED") };
-    unsafe { std::env::set_var("DISABLE_TELEMETRY", "1") };
-    assert!(is_telemetry_explicitly_disabled_sync());
-    unsafe { std::env::remove_var("DISABLE_TELEMETRY") };
 }
 #[test]
 fn version_overrides_apply_into_typed_config() {

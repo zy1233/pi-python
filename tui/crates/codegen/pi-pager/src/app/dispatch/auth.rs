@@ -8,6 +8,8 @@ use crate::app::agent_view::AgentView;
 use crate::app::app_view::{ActiveView, AppView, AuthMode, AuthState};
 use crate::scrollback::block::RenderBlock;
 use crate::scrollback::blocks::SessionEvent;
+use pi_telemetry::events::{SuperGrokUpsell, SuperGrokUpsellClicked};
+use pi_telemetry::session_ctx::log_event;
 
 // ---------------------------------------------------------------------------
 // Auth dispatch
@@ -16,6 +18,27 @@ use crate::scrollback::blocks::SessionEvent;
 /// `/logout` -- ask the shell to clear auth, then return to the login screen.
 pub(super) fn dispatch_logout(_app: &mut AppView) -> Vec<Effect> {
     vec![Effect::Logout]
+}
+
+/// Open the link of the access gate: `GateInfo::url`, or the default link that
+/// the gate screen shows when the gate carries none.
+pub(super) fn dispatch_open_supergrok_url(app: &mut AppView) -> Vec<Effect> {
+    log_event(SuperGrokUpsellClicked {
+        source: SuperGrokUpsell::WelcomeScreen,
+        auth_method: app.login_method_id.as_ref().map(|id| id.0.to_string()),
+    });
+    let url = app
+        .gate
+        .as_ref()
+        .and_then(|g| g.url.as_deref())
+        .unwrap_or("https://grok.com/supergrok?referrer=grok-build");
+    // Funnel attribution: tag CLI-originated SuperGrok upsell clicks
+    // with `referrer=grok-build`, matching the OAuth consent flow and
+    // legacy/cli marketing links. If the URL already specifies a
+    // referrer it's left alone.
+    let url = crate::app::link_opener::ensure_query_param(url, "referrer", "grok-build");
+    super::ctx::open_url_or_show(app, &url);
+    vec![]
 }
 
 /// Ensure `login_method_id` is populated from stored auth methods.
@@ -201,8 +224,7 @@ pub(super) fn trailing_session_events(
 /// Strip the trailing run of auth-error blocks — the `ReAuthRequired`
 /// prompt plus any stale `RetryFailed` / `TurnFailed` — from an agent's
 /// scrollback. Called after a successful mid-session re-auth so the prompt
-/// disappears once the user returns to the session. Mirrors the
-/// credit-limit upsell's stale-block strip.
+/// disappears once the user returns to the session.
 pub(super) fn strip_trailing_auth_error_blocks(agent: &mut AgentView) {
     let to_remove: Vec<usize> = trailing_session_events(&agent.scrollback)
         .filter(|(_, ev)| {
@@ -362,8 +384,7 @@ pub(super) fn handle_auth_complete(
             clear_startup_actions(app);
             // Re-auth succeeded — hide the now-stale re-auth prompt
             // (and any trailing error blocks) so the user returns to
-            // a clean session. Mirrors the credit-limit upsell's
-            // stale-block strip.
+            // a clean session.
             // Auth is global, so handle every agent (the login may
             // have been started from a different agent than the one
             // that 401'd).
@@ -383,28 +404,11 @@ pub(super) fn handle_auth_complete(
                     retry_effects.extend(drain.effects);
                 }
             }
-            let mut effects = Vec::new();
-            if app.usage_visible {
-                effects.push(Effect::FetchAppBilling);
-            }
-            effects.extend(retry_effects);
-            return effects;
+            return retry_effects;
         }
 
         // status only; shell auto-syncs post-auth
         let mut effects = Vec::new();
-
-        // Start auto-checking subscription if gated.
-        // Check immediately (don't wait 5s) then schedule the timer.
-        if !app.has_access() {
-            app.paywall_check_started = Some(std::time::Instant::now());
-            effects.push(Effect::CheckSubscription { verify: None });
-            effects.push(Effect::SchedulePaywallCheck);
-        }
-        // Fetch billing so the welcome screen can show a credit warning.
-        if app.usage_visible {
-            effects.push(Effect::FetchAppBilling);
-        }
 
         // ZDR-blocked users stay on the welcome screen — discard any
         // deferred startup (they cannot start a session).

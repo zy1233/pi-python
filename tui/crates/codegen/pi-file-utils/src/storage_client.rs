@@ -50,9 +50,7 @@ fn storage_breaker_config() -> BreakerConfig {
 /// Hook invoked by [`StorageClient`] at every 401 response site so that
 /// the embedding application can record auth-attribution telemetry.
 ///
-/// Mirrors the pattern in `pi-tools::Auth401AttributionCallback`. The shell installs
-/// a bridge implementation that wires into
-/// `crate::auth::attribution::record_consumer_401`.
+/// Mirrors the pattern in `pi-tools::Auth401AttributionCallback`.
 ///
 /// `sent_bearer_prefix` is the first-N characters of the bearer that was
 /// actually sent on the wire (extracted at the trait boundary so the full
@@ -358,14 +356,8 @@ mod retry_status_tests {
     }
 }
 
-/// Static credentials for the proxy-mode upload path when no `AuthManager`
-/// is available (bins, tests, bare `TraceExportConfig` with no auth wrap).
-///
-/// SAFETY: only hit by bins/tests/no-AuthManager paths; the refresh-aware
-/// path uses the obfuscated shell impl (`GrokAuthCredentials::apply` via
-/// `ShellAuthCredentialProvider`). A future reader should not innocently
-/// make the static provider the production default -- the obfuscated
-/// routing + obfstr-protected literals only live in the shell impl.
+/// Static credentials for the proxy-mode upload path (bins, tests, bare
+/// `TraceExportConfig` with no auth wrap).
 pub struct StaticGrokAuth {
     pub user_token: Option<String>,
     pub deployment_key: Option<String>,
@@ -568,11 +560,7 @@ impl StorageClient {
     /// surface these values, making it easy to attribute 400/403 errors to
     /// specific client versions and products.
     ///
-    /// Preferred way to construct the client from the Grok shell/pager:
-    ///   `build_storage_client_for_proxy(..., client_identifier)`
-    /// (see `pi-shell/src/auth/credential_provider.rs`).
-    ///
-    /// Direct callers (tests, load-test binaries, etc.) can use:
+    /// Typical use:
     ///   `StorageClient::with_provider(...).with_client_identity(version, identifier)`
     pub fn with_client_identity(
         mut self,

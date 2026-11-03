@@ -46,10 +46,8 @@ pub enum Action {
     DeleteCurrentSessionAnswered {
         confirmed: bool,
     },
-    /// Open grok.com in the browser for SuperGrok subscription upsell.
+    /// Open the link of the access gate (`GateInfo::url`) in the browser.
     OpenSupergrokUrl,
-    /// Re-check subscription status via the shell's `legacy ext RPC`.
-    CheckSubscription,
     /// Open an arbitrary URL in the system browser (with scheme validation).
     OpenUrl(String),
     /// Open a semantic scrollback link.
@@ -971,19 +969,6 @@ pub enum Effect {
     /// poll stops instead of running until the code expires. `request_seq`
     /// scopes the cancel so a delayed RPC cannot tear down a successor login.
     CancelAuth { request_seq: u64 },
-    /// Re-check subscription status via `legacy ext RPC`.
-    /// `verify` scopes the result to a deferred-gate verification (see
-    /// [`crate::app::subscription`]); `None` for generic checks.
-    CheckSubscription { verify: Option<u64> },
-    /// One-shot subscription re-check triggered by a credit-limit 403.
-    /// If the tier changed, the stashed prompt is retried instead of
-    /// showing the upsell modal.
-    CreditLimitRecheck { agent_id: AgentId },
-    /// Schedule a 5s timer that fires `TaskResult::PaywallCheckTick`.
-    SchedulePaywallCheck,
-    /// Schedule `TaskResult::GateVerifyTimeout { generation }` after
-    /// [`crate::app::subscription::GATE_VERIFY_TIMEOUT`].
-    ScheduleGateVerifyTimeout { generation: u64 },
     /// Log out then authenticate sequentially in one task.
     SwitchAccount {
         request_seq: u64,
@@ -1009,16 +994,6 @@ pub enum Effect {
         cwd: String,
         after: AfterSessionDelete,
     },
-    /// Fetch billing/credit usage from the agent's `legacy ext RPC` extension.
-    /// When `silent` is true the result updates `credit_balance` without
-    /// pushing a system message into scrollback (used for automatic refreshes
-    /// on session init and after each turn).
-    FetchBilling { agent_id: AgentId, silent: bool },
-    /// Fetch billing data at the app level (no agent required).
-    /// Used on startup to populate the welcome-screen credit warning.
-    FetchAppBilling,
-    /// Re-fetch remote settings to check subscription gate.
-    RefreshGate,
     /// Probe the clipboard for an attachment off the event-loop thread
     /// (osascript image/file-url read + image decode + session persist), then
     /// attach the chip via [`TaskResult::ClipboardAttachmentProbed`]. Keeps the
@@ -1121,8 +1096,8 @@ pub enum TaskResult {
         agent_id: AgentId,
         result: Result<acp::PromptResponse, String>,
         /// HTTP status code from the upstream API error, if available.
-        /// Used by dispatch to show targeted UI (e.g. credit-limit
-        /// upsell on 403).
+        /// Used by dispatch to show targeted UI (e.g. the 401 re-auth
+        /// prompt).
         http_status: Option<u16>,
         /// The `prompt_id` the pager minted when it sent this `session/prompt`
         /// RPC. On `Ok` the agent echoes `promptId` back in PR meta, but an
@@ -1189,47 +1164,9 @@ pub enum TaskResult {
     LogoutComplete,
     /// Best-effort `legacy ext RPC` finished (no UI update; state already left Authenticating).
     AuthCancelComplete,
-    /// Shell responded to `legacy ext RPC`. `verify` echoes
-    /// the generation from `Effect::CheckSubscription` for deferred-gate
-    /// verifications.
-    CheckSubscriptionComplete {
-        verify: Option<u64>,
-        meta: Option<serde_json::Value>,
-    },
-    /// Result of the credit-limit subscription re-check. If the tier
-    /// changed the stashed prompt is retried; otherwise the upsell is shown.
-    CreditLimitRecheckComplete {
-        agent_id: AgentId,
-        meta: Option<serde_json::Value>,
-    },
-    /// 5s paywall check timer fired -- time to send another check.
-    PaywallCheckTick,
-    /// The deferred-gate verification window expired.
-    GateVerifyTimeout {
-        generation: u64,
-    },
     /// The 2-second auth copy feedback timer expired.
     AuthCopyFeedbackTimeout {
         generation: u64,
-    },
-    /// Billing data fetched from the agent.
-    BillingFetched {
-        agent_id: AgentId,
-        balance: Option<crate::views::credit_bar::CreditBalance>,
-        /// When true, update `credit_balance` silently (no scrollback message).
-        silent: bool,
-        /// Subscription tier piggybacked from remote settings.
-        subscription_tier: Option<String>,
-        /// Auto top-up rule fetch result; `Unchanged` keeps any cached rule.
-        autotopup: crate::views::credit_bar::AutoTopupFetch,
-    },
-    /// App-level billing data (welcome screen).
-    AppBillingFetched {
-        balance: Option<crate::views::credit_bar::CreditBalance>,
-        autotopup: crate::views::credit_bar::AutoTopupFetch,
-    },
-    GateRefreshed {
-        settings: Option<pi_shell::util::config::RemoteSettings>,
     },
     /// Setting persisted successfully. No reconciliation needed today.
     SettingPersisted {

@@ -1,7 +1,7 @@
 /// Apply auth headers to outbound visibility requests.
-/// Implemented by `pi-shell::util::grok_auth_credentials::GrokAuthCredentials`
-/// to keep credential construction owned by shell while letting data-collector
-/// build the request without reaching back into shell types.
+/// Implemented by the embedding application (for example
+/// `StaticAuthCredentialProvider`) to keep credential construction out of the
+/// data-collector code.
 pub trait HttpAuth: Send + Sync {
     fn apply(&self, builder: reqwest::RequestBuilder, base_url: &str) -> reqwest::RequestBuilder;
 }

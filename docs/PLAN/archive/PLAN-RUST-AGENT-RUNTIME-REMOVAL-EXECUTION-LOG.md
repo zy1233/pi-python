@@ -12,7 +12,7 @@
 
 ## 目录
 
-- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r34、r35、r36、r37）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29r30r31r32r34r35r36)
+- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r34、r35、r36、r37、r38）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29r30r31r32r34r35r36r37r38)
   - [10.1 范围、方法与规模](#101-范围方法与规模)
   - [10.2 `/model` 恢复（ADR3 r3）](#102-model-恢复adr3-r3)
   - [10.3 验证（r3 的实测）](#103-验证r3-的实测)
@@ -52,6 +52,7 @@
   - [10.37 r35 追加：D.6，删内嵌指南的查看器；死的 `plugins` 停在级联上](#1037-r35-追加d6删内嵌指南的查看器死的-plugins-停在级联上)
   - [10.38 r36 追加：D.1，`async-openai` 离开依赖图](#1038-r36-追加d1async-openai-离开依赖图)
   - [10.39 r37 追加：整批合并之后的重测与候选表](#1039-r37-追加整批合并之后的重测与候选表)
+  - [10.40 r38 追加：D.3，先验证，再删 xAI 的计费、升级与云同步代码](#1040-r38-追加d3先验证再删-xai-的计费升级与云同步代码)
 - [附录 A（摘录）：A.4](#附录-a摘录a4)
   - [A.4 r5 执行结果（对照 r5 时初稿里的「默认决策」；r9 的更新见 A.1）](#a4-r5-执行结果对照-r5-时初稿里的默认决策r9-的更新见-a1)
 - [附录 B：复现方法](#附录-b复现方法)
@@ -78,7 +79,7 @@
   - [F.10 修订记录摘要里的长条目](#f10-修订记录摘要里的长条目)
 - [修订记录](#修订记录)
 
-## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r34、r35、r36、r37）
+## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r34、r35、r36、r37、r38）
 
 r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）；r14 合入这两个 PR，并做决策 17：会话文件在第一条用户消息时才写（§10.17）；r15 做决策 10 的存储层一项：删 `pi-shell` 里的旧存储层（§10.18）；r16 合入 #25 与 #26，并删 `pi-shell` 里剩下的死代码（§10.19）；r17 检查测试之间的竞争，只改测试与工具（§10.20）；r18 改用 `cargo nextest`，改 `protoc` 的路径与 `release.yml` 的令牌（§10.21）；r19 用 `gh stack` 合入 #27–#31，并设 V0.6 的发布里程碑（§10.22）；r20 定 MCP 的方向（可选扩展包），修空白对话，补发布内容，并合入 #33–#36（§10.23）；r21 做 V0.6 的版本号与发布说明（条件 5），合入 #38 与 #39，并做条件 1–4（§10.24）；r22 打 tag `v0.6.0`、发布、做发布后的核对（§10.25）；r23 把三个 action 升到 Node 24 的版本，处理扩展 API 的审计批 9，并把决策 11、13 记成不做（§10.26）；r24 在内核 6.12 的云 VM 上测了沙箱的 Landlock 层（§10.27）；r25 把 `pi-sandbox` 接进 `TUI CI`（§10.28）；r26 补记 v0.7.0 之前的合入（#45 至 #48、web 的 #50 至 #54、版本号 #55）与 v0.7.0 的发布（§10.29）；r27 量了旗标与设置页并修（#57、#60），去掉选择器的 30 天截止（#61），清了一批死代码（#62、#63；§10.30）；r28 用一次 `gh stack` 把这五个 PR 与另外五个（#56、#58、#59、#64、#65）合入 `main`（§10.31）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
@@ -2546,6 +2547,59 @@ D.4 的细节。`pi-workspace` 有 59 个文件、39,670 行没有符号（上�
 
 **没有验证的。** 没有重跑 CI（不启动、不重跑工作流）；没有第二次发行构建，所以没有这一台机器上的重复误差，只有旧的几次；macOS 与 Windows；`flags_probe.py`、`settings_probe.py`；真实模型的 `net_audit.py`。`render_done_text`（`pi-pager`，测试配置下的死代码告警）在 #84 之前的 `main` 上就有，门禁只数消费者构建，所以仍是绿的；这一轮没有碰它。`tui_baseline.py release` 把产物写进 `tui/target`，不看 `CARGO_TARGET_DIR`。
 
+### 10.40 r38 追加：D.3，先验证，再删 xAI 的计费、升级与云同步代码
+
+这一节记 2026-11-03 的一轮。`main` 在 `b5bc147`（#87 与 #88 已合入；#87 只改 Python）。用户答复了 r37 的问题（「全按建议」）。这一轮做 D.3：**先验证哪些功能在 zycode 里真能用，只删能证明不能用的。** 分支 `refactor/tui-drop-dead-auth`，PR [#91](https://github.com/zy1233/pi-python/pull/91)。M = 这一轮实测；E = 估算。机器：Linux 6.12.94+，4 vCPU，rustc 1.94.0。
+
+**用户的决定（2026-11-03）。** （一）#88 已合入，`main` 是 `b5bc147`；#87 也已合入，只改 Python。（二）B.2 与 D.2：作废，关闭。（三）B.4：不做（收益小，旧 `config.toml` 的键有风险）。（四）D.4：`pi-agent` 留给将来的 pi-rust，不做 `pi-workspace` 的重构。这四项这一轮都没有动手；计划里它们的行首改成 `[-]`（关闭）。（五）D.3：先验证，只删不能用的；线上类型 `GateInfo` 与 `AuthMeta`，和 Python agent 的 ACP 交换还在读的东西，都留。
+
+**怎么验证。** 三步。（1）读代码：每个模块和每个调用点；「没有调用者」用 `rg` 在整个 `tui/crates` 里查（含 `use` 形式与裸函数名），不只查 pager。（2）真实的调用路径：从 `zypi`（`pi-pager-bin`）与 Python agent 出发走向功能。Python agent 的源码里没有 `auth_meta`、`retry_state`、`http_status`、`gate`、`subscription`、`credit`、`billing`（`rg` 查 `packages/pi-agent-cli/pi_agent_cli`，0 命中）；它只在 `agent.py` 的一处发 `authMethods`，且只发给能跑终端登录的客户端（`zypi` 拿到 `[]`）。（3）运行：发行构建（`14c476c` 的 `release-dist`；`b5bc147` 的 `tui/` 与它相同，只有文档与 Python 不同）在伪终端里跑，外面套 `bwrap --unshare-net`（只有回环；连别的地址立即失败，`strace -f` 照样记下），记每个 `connect`、每个 DNS 问题（命名空间里放一个 DNS sink）、每个 `open`、每个 `execve`。没有登录，没有真密钥（要密钥的地方用 `fake-key-not-real`），没有真模型（用 agent 的 mock，或一个对每个请求回 402 的回环服务器）。F8 用一个替身 agent（包住 Python agent，声明 `authMethods`，自己回答 `authenticate`）。限制：连不到 `api.x.ai`，所以语音没法从头到尾验证；只在 Linux 上；没有用真的 xAI 令牌测过。探针脚本（`d3_probe.py`、两个 sink、替身 agent）在我的存储里，没有进仓库。
+
+**判定表。** DEAD = 能证明在 zycode 里不可能工作（它要 xAI 的端点、令牌或账号，而 zycode 从来没有）；WORKS = 留；PRODUCT CALL = 用户有账号或 provider 时可能工作，或我不确定（不确定就归这一类）。行数是 `b5bc147` 上的 `wc -l`（M），含测试。
+
+| # | 功能 | 代码 | 判定 | 证据 |
+|---|---|---|---|---|
+| F1 | 计费、付费墙、升级界面：额度条、额度卡与弹窗、免费用量与受限命令的升级提示、订阅监视 | pager 5 个文件 3,047 行，另有约 15 个文件里的钩子 | DEAD | 输入全是桩，或是 Python agent 从不走的路：`FetchBilling` 与 `FetchAppBilling` 立即返回 `balance: None`；`send_check_subscription` 与 `send_credit_limit_recheck` 不发 ACP 调用；`retry_state` 只有别的 agent 会发；档位限制读 `subscription_tier`，只有 `AuthMeta` 带；输出指向 `grok.com/supergrok`。运行：菜单里没有 `/login`、`/usage`、`/supergrok`、`/billing`、`/upgrade`、`/voice`；provider 回 402 时只出一行 `Error: Error code: 402 - Insufficient Balance`；订阅监视每 60 s 响一次，什么也不做（165 s 里两条 `subscription.check.fired`、两条 `.complete` 日志，没有发给 agent 的请求） |
+| F2 | 闸门刷新：`Effect::RefreshGate`、`gate_poll`、`remote::fetch_settings_blocking` | 约 40 行与一个定时器 | DEAD（闸门屏幕留，见 F8） | 唯一来源 `gate_poll` 只在没有访问权时起；标准 ACP 模式启动时 `app.gate = None`，用 Python agent 时没有别的地方设闸门；它读 `<home>/auth.json`，zycode 里没有任何地方写它 |
+| F3 | 远端模型与设置拉取 | `pi-shell/src/remote/` 1,861 行，`agent/models*` 573 行 | DEAD | 入口 `start_early_prefetch*` 没有调用者，另一个入口是 F2；运行：关网络时 0 个 `connect`、0 个 DNS 名；把端点都指到回环 sink 也是 0 个请求（sink 的对照组确认它收得到请求） |
+| F4 | `managed_config` 的网络同步 | `managed_config.rs` 763 行加 `managed_config/` 746 行 | DEAD | 调用者只有 F3 与 F5。本地分层（`load_managed_config`、`load_merged_requirements`、`load_system_managed_config`）是另一回事，留 |
+| F5 | 遥测的凭据提供者与 xAI 的 OTEL 导出器 | `auth/{credential_provider,attribution}.rs` 与 `grok_auth_credentials.rs` 共 1,433 行，`pi-telemetry/src/otel_layer/` 1,410 行 | DEAD | 导出器只在 `is_session_metrics_enabled()` 为真时发；那个静态量只有 `client::init` 与 `init_if_needed` 会设，前者只有一个手动测试调用，后者没人调用，所以进程活着时恒为假。运行：回环 sink 0 个请求 |
+| F6 | 语音（xAI 语音转文字）与 `voice/auth.rs` | `pi-voice` 3,753 行，pager 约 320 行 | PRODUCT CALL | 默认开，快捷键 Ctrl+Space 或 F8；有 `PI_API_KEY` 时按键会连 `api.x.ai`（DNS sink 见到 2 次）；没有 key 时没有网络动作；要 `pw-record`、`parec` 或 `arecord` 之一。有 xAI key 的用户可能真在用，我连不到 `api.x.ai`，没法验证 |
+| F7 | xAI 登录机器与令牌库，`pi-shell/src/auth/` | 14,836 行（含 7,071 行测试） | PRODUCT CALL（与 F6 绑在一起） | 活着的使用者只有语音的 `AuthManager`（F2、F5 是死的）。zycode 自己从不建 `auth.json`，但把 `GROK_HOME` 指到官方 `grok` CLI 的 home 的用户有 |
+| F8 | pager 的登录界面与 ACP `authenticate` | 约 1.5k 行 | WORKS（留） | 通用的 ACP：agent 声明 `authMethods` 时 pager 发 `authenticate`，失败显示登录屏，按键重试；用替身 agent 验证过；对 Python agent（`authMethods: []`）不跑 |
+
+线上类型 `GateInfo` 与 `AuthMeta`（`auth/meta.rs`，63 行）在每种情形里都留。
+
+**删了什么（M；`.rs` 行数用 `wc -l` 对 `b5bc147` 与这一轮的树，每个 crate 的变化）。** `tui/` 共 1,006,529 → 987,708 行（**−18,821**）；`git diff` 对 `b5bc147`（只算 `tui/`，不含 `Cargo.lock`）：118 个文件，+329 / −19,164，其中 29 个文件整个删掉；`Cargo.lock` −8 行。
+
+| crate | 删的 | 变化 |
+|---|---|---|
+| `pi-pager` | `dispatch/billing.rs` 551、`app/subscription.rs` 493、`views/credit_bar.rs` 657、`scrollback/blocks/credit_limit.rs` 254、`dispatch/tests/billing.rs` 1,092；`Action`、`Effect`、`TaskResult` 里 15 个变体（F1 的清单；`Action::OpenSupergrokUrl` 留下，闸门屏幕还要它）；`apply_retry_state` 里的额度分支（现在额度类错误走普通错误行，并且不再保留在飞的 prompt）；语音快捷键不再查档位；`apply_auth_meta` 留下队伍字段、闸门、`subscription_tier`、`is_api_key_auth`、`show_resolved_model`；3 个 `open_url` 测试从 `billing.rs` 的测试文件搬进新文件 `dispatch/tests/open_url.rs`；加 1 个新测试（见下） | −5,026（296,671 → 291,645） |
+| `pi-shell` | `remote/`、`agent/models*`、`managed_config*`、`auth/{credential_provider,attribution,recovery}.rs`、`util/grok_auth_credentials.rs`、`instrumentation.rs`、`tier.rs`；`util/config/resolve/features.rs` 缩成 `resolve_zdr_access_enabled`；`ModelEntry`、`AuthProviderRef` 一族、`has_pi_api_key_env`、`AuthManager` 里只被它们调用的方法；4 个依赖加 1 个 dev 依赖 | −8,036（39,604 → 31,568；103 → 87 个文件；`auth/` 14,836 → 11,737） |
+| `pi-config` | `managed_cache`（托管配置云缓存的标记文件 `managed_config_cache.json`：不签名，有过期与失败即关的门）与 `signed_policy`（静态签名策略的 Ed25519 校验，「内嵌公钥」之后才起作用），连同测试；只有 xAI 的云同步写它们、用它们；依赖 `ring` | −4,269（12,461 → 8,192） |
+| `pi-telemetry` | `otel_layer/`；「Credit limit」事件；`SuperGrokUpsell` 缩成 `WelcomeScreen`；依赖 `tracing-opentelemetry` 与 `futures-executor` | −1,475（21,593 → 20,118） |
+| `pi-file-utils`、`pi-auth`、`pi-config-types` | 孤儿，和点名已删项的注释 | −12、−1、−2 |
+
+估算与实测的差。第一轮的报告估 F1–F5 约 1 万行（`pi-shell` 与 `pi-telemetry` 6,786 行是 M，pager 3,000 到 3,600 行是 E）。实测少了 18,821 行 `.rs`，差来自第二层孤儿：删完这些，编译器的告警与 `rg` 又找出只被它们用的代码，主要是 `pi-config` 的 `managed_cache` 与 `signed_policy`（4,269 行，其中约 3 千行是测试）、`auth/recovery.rs`（1,073 行）、`ModelEntry` 等类型，和只喂给 `remote` 的设置解析函数。做法是一轮一轮地删：`cargo check` 的死代码告警，加一个脚本在 `tui/crates` 里找没有使用者的 `pub` 项；每个项删之前先用 `rg` 确认。
+
+**依赖图、门禁与笔记（M）。** 图 954 → 954，没有包离开：删的是代码和 8 条依赖边（`pi-shell` 的 `blake3`、`reqwest-middleware`、`arc-swap`、`pi-extra-ca` 与一个 dev 依赖，`pi-config` 的 `ring`，`pi-telemetry` 的 `tracing-opentelemetry` 与 `futures-executor`），每个包都还有别的使用者。`tui/Cargo.lock` 少 8 行依赖边，包条目仍是 1,233 个；`tui_notices.py check` 964 / 964，不用改 `THIRD-PARTY-NOTICES`。残留词上限：`x.ai` 251 → 245，`leader` 214 → 213，`grok agent` 0。`tui_baseline.py check`（在最后的树上跑）：全部门禁通过，消费者构建 0 条告警，`--workspace --tests` 0 个错误。
+
+**测试（M）。** 清单的和 8,501 → 8,226（−275：删 276，加 1）；本地实跑 8,227 通过 / 0 失败 / 25 跳过（`pi-file-utils` 实跑 217，清单 216，同 CI）。每个 suite（`reference_passed`）：`pi-shell` 742 → 610（−132：`remote/` 的客户端 43、`managed_config` 16、`agent::models` 6、凭据提供者 9、`auth::{attribution,recovery}` 30、只被它们用的 `AuthManager` 方法 9、远端设置的解析函数 7、`tier` 2、`ModelEntry` 与内部 OTLP 端点解析的配置测试 10），`pi-pager` 5,638 → 5,514（−128 +3 +1：`dispatch/tests/billing.rs` 48、额度条 28、`dispatch/tests/task_result.rs` 16、`subscription.rs` 12、额度卡 7、斜杠注册表、语音与 prompt 测试、`app_view_tests.rs` 里的 17 个；加上搬进 `open_url.rs` 的 3 个，和新的 1 个），`pi-telemetry` 239 → 220（−19：`otel_layer` 的 11 个 `redact` 与 8 个 `mod`），其余 suite 不变（`pi-pager-render` 1,092，`pi-pager-minimal` 79，`pi-pager-bin` 33，`pi-acp-lib` 64，`pi-http` 13，`pi-file-utils` 216，`pi-sampling-types` 280，`pi-sandbox` 105）。`python_agent_e2e` 的 14 个用例通过。不在清单里的 `pi-config` 少了 87 个测试；`pi-config` 与 `pi-auth` 的测试合起来跑过一遍：130 通过 / 0 失败。第一遍 `tui_baseline.py test`（空的 `target`）退出 1，只因为清单的下限高于新的数（`pi-shell` 610 < 724，`pi-telemetry` 220 < 230）；我按新的数改了清单（`reference_passed` 610、5,514、220，`min_passed` 592、5,300、211，原因写在清单的注释里），没有别的失败；墙钟 25 m 21 s，不能与 r37 的 27 m 16 s 比（编译缓存的状态不同）。加了新测试之后又跑了一遍全部：退出 0，每个 suite 的表都是 ✅，墙钟 4 m 14 s（缓存是热的）。
+
+**新增的一个测试（M）。** `apply_retry_state_402_is_a_plain_failure_banner`（`pi-pager`，`app::acp_handler::tests::session_events`）。它钉住 F1 带来的行为变化：别的 ACP agent 发来带 HTTP 402 的 `retry_state`（`Failed` 与 `Exhausted` 两种），pager 显示普通的失败横幅（状态 402；文字里没有 `supergrok` 与 `grok.com`），并且不把这条 prompt 留在飞行中。以前这条路出额度卡与升级提示。Python agent 从不发这种 `retry_state`，所以这个测试守的是别的 agent 的路。
+
+**体积（M）。** 发行构建（`release-dist`，调试信息在内）：`zypi` 379,632,144 B → 335,114,440 B（−44,517,704 B，**−11.7 %**）。这个数大得出奇，所以查了：41.1 MB 在 `.debug_str`，那里是 `tracing_subscriber` 层栈的泛型类型名，名字里带着 `tracing_opentelemetry::layer::OpenTelemetryLayer`，删了这一层，名字就短了；代码（`.text`）只少 0.67 MB。`strip` 之后 49,286,952 B → 48,487,432 B（−799,520 B，**−1.62 %**）。`release.yml` 复制的是没 strip 的 `release-dist` 文件（只读了，没有跑），所以发布件应该缩小差不多同样多（E）；真正的代码体积只少了约 1.6 %。基线是 `/home/ubuntu/main-wt`（`b5bc147`）里的构建，11 m 22 s（空的目录）；这一轮的构建在 `/workspace`，5 m 23 s（依赖已经编译过）；两个时间不能比，调试信息里的路径也不同（`14c476c` 的 r37 数是 379,630,232 B，同一份 `tui/` 差 1,912 B，不是代码）。
+
+**PTY 脚本与探针，在新的 `release-dist` 构建上（M，Linux）。** `scripts/tui_pty/` 里不要密钥的脚本全部通过，数与 r37 相同：`smoke.py` 23/23；`smoke.py --sandbox workspace` 24/24；`exit_matrix.py` 12/12；`exit_matrix.py --sandbox workspace` 14/14；`print_exit.py` 四个信号都没有留下进程；`resume_matrix.py` 16 PASS / 0 GAP / 0 FIXED / 0 FAIL；`mode_probe.py` 四个被拒的值退出 2；`status_line_probe.py` 4/4；`net_audit.py --mock` 13/13，`--mock --no-network` 13/13。D.3 的 17 个探针场景在新的构建上重跑，输出与改前相同，只有这些差别：订阅监视的日志（`subscription.check.fired` 与 `.complete`）在 150 s 里一条也没有（改前各 2 条）；`unified.jsonl` 的条目 11 → 9，`AuthManager::new` 从 2 次变成 1 次；发给 agent 的 `_x.ai/log` 通知在两个场景里各少了 2 条（`watch_wire` 与 `authmethods_login`：5 → 3）。网络：每个场景 0 个到非回环地址的 `connect`；DNS 名只出现在语音有 key 的场景（`api.x.ai`，2 次，改前改后相同）；回环 sink 只收到对照用的那一个请求。provider 回 402 的场景：屏幕上还是一行 `Error: Error code: 402 - Insufficient Balance`，没有 `SuperGrok`、`grok.com`、`Upgrade`。F8 的替身 agent 场景（`authmethods_*`）：发给 agent 的 `authenticate` 序列改前改后相同。
+
+**给用户看的行为变化。** （1）用 Python agent 的用户：没有变化（探针对照，上一段）。（2）别的 ACP agent 发来带 HTTP 402 的 `retry_state`：现在是普通的失败横幅，不再是额度卡与升级提示（新测试钉住）。（3）日志：不再每 60 s 写 `subscription.check.fired` 与 `.complete`。（4）环境变量 `GROK_SUBSCRIPTION_WATCH_INTERVAL_SECS` 没有人读了。（5）`config.toml` 的键与变量 `GROK_MODELS_BASE_URL`、`GROK_MANAGED_CONFIG_URL`、`GROK_INTERNAL_OTLP_TRACES_ENDPOINT`、`GROK_CLI_CHAT_PROXY_BASE_URL`、`GROK_DEPLOYMENT_KEY` 仍被解析，再被忽略，旧配置照常加载（B.4 不做）。
+
+**留下的，有意没删。** F6 与 F7（等用户答复，见下）；F8；`GateInfo`、`AuthMeta`、闸门屏幕与它的 SuperGrok 默认链接（`dispatch_open_supergrok_url`）；`RemoteSettings` 类型（`pi-config-types`）与取 `None` 的 `resolve_*` 函数；`Config` 里的字段与变量（上一条）；`pi-http` 里现在只在 `pi-http` 内部用的几个项（`send_with_retry_escaping_pool`、`shared_startup_blocking_client`、`STARTUP_FETCH_TIMEOUT`、`SETTINGS_FETCH_MAX_ATTEMPTS`、`error_cause_chain`、`process_client_identifier`）；`pi-file-utils` 的几项；`pi-auth` 的接缝；`REMOTE_CRASH_HANDLER_ENABLED`（没人写）；`pi_telemetry::client`（714 行：`init` 与 `init_if_needed` 没有生产调用者，所以产品分析事件从不发，约 80 个事件类型已经是死的；候选，记作「D.3b」）；`pi-tools` 里 `video_gen` 的 `tier_restricted`；`internal_otlp_consumed_standard_vars`；`pi-shell/src/sampling/error.rs` 里的 `FREE_USAGE_USER_MESSAGE` 文案；`scripts/trim_pager_main.py` 与 `docs/AUDIT/AUDIT-PHASE4-PHASE5.md` 里对 `otel_layer` 的历史提及。
+
+**等用户答复的两件事（F6、F7，没有动手）。** 问：zycode 还要不要语音听写？选项与大小（M，现在的树）：（A）留着不动：0 行、0 个包。（B）留语音，只认 `PI_API_KEY`（`pi-voice` 已经有 `StaticVoiceAuth`）：删 `AuthManager` 与 `auth/`（现在 11,737 行，要留 `meta.rs` 与配置还点名的类型），pager 改用 `StaticVoiceAuth`；少 2 个包（`backon`、`pi-system-power`；E，图的计算）；丢两个来源：`auth.json` 里的会话令牌，和存在 `auth.json` 里的 API key。（C）不要语音：B 加 `pi-voice`（3,753 行）与 pager 的语音代码（约 290 行）；少 3 个包（再加 `pi-voice`）。我的倾向：A；语音是唯一一个活着的、可能真有用户的 xAI 功能，删它是产品决定，不是死代码清理。
+
+**没有验证的。** 没有 xAI 的令牌、账号与麦克风，语音没有从头到尾测过；macOS、Windows；没有启动、重跑或取消工作流，PR 上的 CI 以 PR 页面为准；没有第二个发行构建，所以没有这一台机器上的重复误差；`flags_probe.py`、`settings_probe.py` 与真实模型的 `net_audit.py` 没有跑（探针的 `flags` 与 `settings` 场景跑了，范围不同）；别的 ACP agent 没有用真的 agent 试过，只有代码与单元测试；`release.yml` 的 strip 行为只读了文件，没有下载发布件验证；探针脚本不在仓库里（要不要放进 `scripts/tui_pty/`，问用户）。
+
 ## 附录 A（摘录）：A.4
 
 附录 A 的 A.1–A.3（能力矩阵、ACP 版本配对、逐方法）是活的参考，留在[计划](../PLAN-RUST-AGENT-RUNTIME-REMOVAL.md)里。A.4 记 r5 的执行结果，搬到这里。
@@ -3575,3 +3629,4 @@ r12 续 8（2026-10-13）：PR [#18](https://github.com/zy1233/pi-python/pull/18
 - r35：D.6，删内嵌指南的查看器（2026-11-02；分支 `refactor/tui-drop-guide-viewer`）。`pi-pager` 少 1,018 行、14 个测试；`plugins`、`project_config`、`managed_config` 查过，都没有删。见 [§10.37][l10-37]。
 - r36：D.1（2026-11-02）：`async-openai` 离开依赖图，965 → 954；本地 `rs` 类型、旧会话夹具的往返测试、`pi-tools` 搜索客户端改写；`async-openai` 进 `deny_crates`。见 [§10.35](#1038-r36-追加d1async-openai-离开依赖图)。
 - r37：整批合并之后的重测（2026-11-02；`14c476c`；分支 `docs/tui-strip-remeasure`）。只读加量，没有改 `tui/`。依赖图 954，`zypi` 379,630,232 B，冷构建 684 s，测试 8,502 通过，PTY 脚本全过；`.rs` 少 6,491 行；B.2 与 D.2 的前提已不在；D.3 与 D.4 的大小与要问用户的事；勾 1.R4；改正 D.7 的记录链接（我在 #84 里改错的）。#82 与 #85 一并记在这里。
+- r38：D.3，先验证，再删 xAI 的计费、升级与云同步代码（2026-11-03；`b5bc147`；分支 `refactor/tui-drop-dead-auth`；PR #91）。验证了八项 xAI 功能（F1–F8），只删能证明不能用的五项：计费与升级界面、闸门刷新、远端模型与设置拉取、`managed_config` 的网络同步、遥测的凭据提供者与 xAI 的 OTEL 导出器。`tui/` 的 `.rs` 少 18,821 行，依赖图仍是 954，清单的测试 8,501 → 8,226（本地实跑 8,227），新增 1 个测试；未剥离的 `zypi` −11.7 %，`strip` 之后 −1.62 %。语音与 `auth/`（F6、F7）等用户答复，没有动。记用户的决定：B.2、D.2 关闭，B.4 不做，D.4 不做。

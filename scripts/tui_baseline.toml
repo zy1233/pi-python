@@ -35,8 +35,8 @@ tracked_crates = [
 # removes lines.
 [gates.residue]
 "grok agent" = 0
-"leader" = 214
-"x.ai" = 251
+"leader" = 213
+"x.ai" = 245
 
 # ADR1 (plan section 10.16): the pager asks the agent which sessions exist (`session/list`) and
 # reads no session files itself. Production code in these crates (paths under tui/crates) must
@@ -72,7 +72,8 @@ package = "pi-pager-bin"
 # elsewhere or raise this number on purpose. Then 965 (the removal of `pi-update`: it left, and
 # with it `indicatif`, `console` and `unit-prefix`; one local run on Linux). Then 954 (phase D.1:
 # `async-openai` and ten packages that only it used left; one local run on Linux, 965 on the same
-# base without the change).
+# base without the change). Phase D.3 (r38) left it at 954: it removed code and eight dependency
+# edges of three crates, and every package still has another user.
 x86_64-unknown-linux-gnu = 954
 
 [check]
@@ -132,8 +133,14 @@ targets = ["--lib", "--test", "sandbox_requirements_pin", "--test", "test_config
 # same distance as before (18).
 # Then plan B.3 moved `extensions::notification` and `extensions::prompt_meta` (42 tests) to
 # `pi-acp-lib`: 784 - 42 = 742 (one local run on Linux; the floor keeps the distance of 18).
-reference_passed = 742
-min_passed = 724
+# Then phase D.3 (r38) deleted the xAI features that cannot work with the Python agent and took 132
+# tests with the code: 43 of the client of `remote/`, 16 of `managed_config`, 6 of `agent::models`,
+# 9 of the credential provider, 30 of `auth::{attribution, recovery}`, 9 of `AuthManager` methods
+# that only these called, 7 of the remote-settings resolvers, 2 of `tier`, and 10 config tests of
+# `ModelEntry` and of the internal OTLP endpoint resolvers: 742 - 132 = 610 on Linux (one local
+# run; the floor keeps the distance of 18).
+reference_passed = 610
+min_passed = 592
 
 [[test.suite]]
 package = "pi-pager"
@@ -187,7 +194,16 @@ targets = [
 # Linux). Then -14 with the guide viewer (plan D.6): 15 tests went with `docs.rs`, `DocPicker`,
 # `DocViewer` and the welcome doc viewer, and one new integration test (`user_guide_pages`) keeps
 # the check that the pages name no stale product: 5,638 (hand count from 5,652; CI counts it).
-reference_passed = 5638
+# Then phase D.3 (r38): -128 with the billing, subscription, credit-bar and credit-limit code and
+# the hooks of the tier restrictions (48 tests of `dispatch/tests/billing.rs`, 28 of the credit bar,
+# 16 of `dispatch/tests/task_result.rs`, 12 of `subscription.rs`, 7 of the credit-limit card, and 17
+# smaller ones in the slash registry, the voice and prompt tests and `app_view_tests.rs`), and +3
+# (the `open_url` tests, which lived in the deleted `billing.rs` test file and moved to
+# `dispatch/tests/open_url.rs`), and +1 (`apply_retry_state_402_is_a_plain_failure_banner`: an agent
+# that is not the Python agent can still send a `retry_state` with HTTP 402, and the test pins that
+# the user sees the plain failure banner and not an upsell): 5,638 - 128 + 3 + 1 = 5,514 (one local
+# run on Linux).
+reference_passed = 5514
 min_passed = 5300
 
 # Lib tests only; they were outside the manifest until r8 (plan section 10.10: 1,092 passed,
@@ -243,8 +259,11 @@ min_passed = 13
 [[test.suite]]
 package = "pi-telemetry"
 targets = ["--lib"]
-reference_passed = 239
-min_passed = 230
+# 239 before phase D.3 (r38) deleted the xAI OTEL exporter (`otel_layer/`, 19 tests: 11 in
+# `redact.rs`, 8 in `mod.rs`): 239 - 19 = 220 on Linux (one local run; the floor keeps the distance
+# of 9).
+reference_passed = 220
+min_passed = 211
 
 [[test.suite]]
 package = "pi-file-utils"

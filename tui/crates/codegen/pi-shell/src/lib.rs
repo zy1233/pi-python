@@ -9,15 +9,11 @@ pub mod config;
 pub use pi_shell_base::env;
 pub mod heap_profile;
 pub use pi_http as http;
-pub(crate) mod instrumentation;
-pub mod managed_config;
 pub use pi_models as models;
-pub mod remote;
 pub mod sampling;
 pub mod session;
 pub(crate) use pi_shell_terminal as terminal;
 #[cfg(test)]
 pub(crate) mod test_support;
-pub mod tier;
 pub mod tools;
 pub mod util;

@@ -13,7 +13,6 @@
 //! otherwise); tests/ shares a fixture prelude via `use super::*;`.
 
 mod auth;
-mod billing;
 mod ctx;
 pub(crate) mod external_editor;
 mod modes;
@@ -32,7 +31,6 @@ mod voice;
 
 pub(crate) use auth::scrollback_has_recent_disk_full;
 pub(in crate::app) use auth::scrollback_has_recent_error_banner;
-pub(crate) use billing::{UPSELL_URL_PAYG, UPSELL_URL_UPGRADE, is_credit_limit_error};
 pub(crate) use modes::{
     downgrade_displayed_auto_if_gated, downgrade_displayed_default_if_gated, effective_auto,
 };
