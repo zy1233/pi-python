@@ -282,6 +282,10 @@ class AgentHarness:
         # files as they were before an earlier call changed them. A caller that judges calls by
         # the files sets ``"sequential"``: decide, run, decide, run. Read when a run starts.
         self.tool_execution: ToolExecutionMode = "parallel"
+        # Asked by the Bash tool of a workflow sub-agent, with the id of the call as the gate
+        # saw it, just before the command starts (see ``create_bash_tool``). Set by the owner of
+        # the permission layer that lets some calls through with no question; ``None`` is no limit.
+        self.bash_limits_for_call: Callable[[str], Any] | None = None
         self.compaction = (
             compaction
             if isinstance(compaction, CompactionSettings)
@@ -664,6 +668,10 @@ class AgentHarness:
             @property
             def tool_call_gate(self) -> Any:
                 return harness.check_tool_call
+
+            @property
+            def bash_limits_for_call(self) -> Any:
+                return harness.bash_limits_for_call
 
             def add_hook(self, event: str, handler: Any) -> None:
                 harness._hooks.setdefault(event, []).append(handler)

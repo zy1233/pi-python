@@ -216,7 +216,8 @@ async def create_session_harness(
 
     *bash_limits*: asked by the Bash tool, with the tool call id, just before it starts a
     command; the answer is the limits of that call (Auto's, for a call that it let through).
-    Not used with *tools*.
+    Not used with *tools*. The Bash tool of a workflow sub-agent asks it too, with the id that
+    the gate saw (``subagent-<run>:<id>``).
     """
     cwd_s = str(Path(normalize_host_path(str(cwd))).resolve())
     home_path = pi_home(home)
@@ -287,6 +288,7 @@ async def create_session_harness(
         extensions=extensions or [],
     )
     harness_holder["harness"] = harness
+    harness.bash_limits_for_call = bash_limits
     if on_tool_call is not None:
         harness.on("tool_call", on_tool_call)
     return harness

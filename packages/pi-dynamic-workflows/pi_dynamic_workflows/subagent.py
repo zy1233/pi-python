@@ -72,6 +72,11 @@ class HarnessSubagentExecutor(SubagentExecutor):
     other, each one asked about just before it runs: a verdict that looks at files (the
     Auto mode does) must not be given before an earlier call has changed them. With no gate
     there is no policy to inherit and sub-agents run unrestricted (and in parallel).
+
+    *bash_limits_for_call* is how the permission layer's time and output limits reach the Bash
+    tool of a sub-agent: the tool asks it, just before a command starts, with the id that the
+    gate was given for that call (``subagent-<run>:<id>``, the one the layer keyed its answer
+    by). Without it the tool has no limit.
     """
 
     def __init__(
@@ -84,6 +89,7 @@ class HarnessSubagentExecutor(SubagentExecutor):
         tiers: dict[str, str] | None = None,
         worktree_manager: Any | None = None,
         tool_call_gate: Any | None = None,
+        bash_limits_for_call: Any | None = None,
     ) -> None:
         self._stream_fn = stream_fn
         self._parent_model = parent_model
@@ -92,6 +98,7 @@ class HarnessSubagentExecutor(SubagentExecutor):
         self._tiers = tiers
         self._worktree_manager = worktree_manager
         self._tool_call_gate = tool_call_gate
+        self._bash_limits_for_call = bash_limits_for_call
 
     def with_worktree_manager(self, worktree_manager: Any) -> HarnessSubagentExecutor:
         """The same executor, with each sub-agent running in a worktree of *worktree_manager*.
@@ -103,16 +110,15 @@ class HarnessSubagentExecutor(SubagentExecutor):
         derived._worktree_manager = worktree_manager
         return derived
 
-    def _tool_call_hook(self, cwd: str, label: str | None) -> Any:
+    def _tool_call_hook(self, cwd: str, label: str | None, run_id: str) -> Any:
         """A ``tool_call`` hook that puts one sub-agent run's calls through the gate.
 
         Tool call ids come from the model (``call_1``, ...) and repeat across sub-agents
         and the parent session, while a permission prompt is keyed by id, so each run gets
-        its own prefix. The gate's verdict is returned as is; if it raises, the harness
+        its own prefix (*run_id*). The gate's verdict is returned as is; if it raises, the harness
         fails the call (an error result), so "no answer" is never taken as "allowed".
         """
         gate = self._tool_call_gate
-        run_id = f"subagent-{uuid.uuid4().hex[:8]}"
         origin: dict[str, Any] = {"kind": "subagent", "cwd": cwd}
         if label:
             origin["label"] = label
@@ -201,7 +207,7 @@ class HarnessSubagentExecutor(SubagentExecutor):
         start: float,
     ) -> AgentResult:
         """One sub-agent run in *effective_cwd* (the worktree, when *wt_path* is set)."""
-        from pi_agent_core.coding_tools import create_all_tools
+        from pi_agent_core.coding_tools import create_all_tools, create_bash_tool
         from pi_agent_harness.agent_harness import AgentHarness
         from pi_agent_harness.env import LocalExecutionEnv
         from pi_agent_harness.session.memory_storage import MemorySessionStorage
@@ -210,7 +216,16 @@ class HarnessSubagentExecutor(SubagentExecutor):
         storage = await MemorySessionStorage.create()
         session = Session(storage)
         env = LocalExecutionEnv(effective_cwd)
-        tools = list(create_all_tools(effective_cwd).values())
+        run_id = f"subagent-{uuid.uuid4().hex[:8]}"
+        tools_by_name = create_all_tools(effective_cwd)
+        limits_for_call = self._bash_limits_for_call
+        if self._tool_call_gate is not None and limits_for_call is not None:
+            # Only with a gate: the limits belong to the calls the gate let through.
+            def limits_for_run(tool_call_id: str) -> Any:
+                return limits_for_call(f"{run_id}:{tool_call_id}")
+
+            tools_by_name["bash"] = create_bash_tool(effective_cwd, limits_for_call=limits_for_run)
+        tools = list(tools_by_name.values())
 
         harness = AgentHarness(
             session=session,
@@ -221,7 +236,7 @@ class HarnessSubagentExecutor(SubagentExecutor):
             tools=tools,
         )
         if self._tool_call_gate is not None:
-            harness.on("tool_call", self._tool_call_hook(effective_cwd, label))
+            harness.on("tool_call", self._tool_call_hook(effective_cwd, label, run_id))
             # The gate judges a call by the files as they are when it is asked. In parallel
             # mode it is asked about every call of one assistant message before any of them
             # runs, so a later call is judged on files that an earlier call is about to change.

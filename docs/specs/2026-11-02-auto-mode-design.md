@@ -507,7 +507,6 @@ Auto guards what a call writes or runs. It does not guard what a call reads or s
 
 - Until PR 2, a `bash` command that does work in the project asks: `pytest`, `git commit`, `mkdir`, `ruff format .`, `make`, `npm test`. Auto runs only commands that it can show to be read-only, and edits inside the project folder.
 - Two workflow sub-agents run side by side. Each runs its calls one by one, but a call of one agent can be judged while the other changes the files (risk R4).
-- A `bash` call of a workflow sub-agent has no time or output limit yet. The follow-up is to give the Bash tool of a sub-agent the same limits.
 - `/auto-log` exists in every session, also in `ask`, and says that Auto made no decisions.
 - A session that is not in Auto shows the settings of `[auto]` that Auto cannot work with when it starts. A session in Auto shows them in its entry message.
 

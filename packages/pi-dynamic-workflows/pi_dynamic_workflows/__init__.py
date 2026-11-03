@@ -109,6 +109,7 @@ def _build_executor(pi: ExtensionAPI) -> tuple[Any, Any, str | None]:
             cwd=pi.cwd,
             get_api_key=getattr(bridge, "get_api_key_fn", None),
             tool_call_gate=tool_call_gate,
+            bash_limits_for_call=getattr(bridge, "bash_limits_for_call", None),
         )
         manager = WorkflowManager(bridge)
     except Exception as exc:
