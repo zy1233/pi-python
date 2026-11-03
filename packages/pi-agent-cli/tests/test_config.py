@@ -420,6 +420,28 @@ def test_a_time_limit_that_is_not_a_positive_number_falls_back_with_a_note(
     assert "bash_timeout_seconds" in note
 
 
+@pytest.mark.parametrize(
+    "value", ["1e300", "3000000", "2147483.648", "9" * 400, "99999999999999999999"]
+)
+def test_a_time_limit_that_the_bash_tool_would_refuse_falls_back_with_a_note(
+    tmp_path: Path, value: str
+):
+    """The Bash tool refuses a limit above its own maximum with an error, so every call that
+    Auto let through would fail. A whole number too big for a float used to stop the loading."""
+    config = _load(tmp_path, f"[auto]\nbash_timeout_seconds = {value}\n")
+
+    assert config.auto.bash_timeout_seconds == DEFAULT_AUTO_BASH_TIMEOUT_SECONDS
+    (note,) = config.auto.notes
+    assert "bash_timeout_seconds" in note
+
+
+def test_the_largest_time_limit_that_the_bash_tool_takes_is_kept(tmp_path: Path):
+    config = _load(tmp_path, "[auto]\nbash_timeout_seconds = 2147483\n")
+
+    assert config.auto.bash_timeout_seconds == 2147483.0
+    assert config.auto.notes == ()
+
+
 def test_a_time_limit_may_be_a_fraction_of_a_second(tmp_path: Path):
     assert _load(tmp_path, "[auto]\nbash_timeout_seconds = 0.5\n").auto.bash_timeout_seconds == 0.5
 

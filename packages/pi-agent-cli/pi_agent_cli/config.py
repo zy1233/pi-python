@@ -6,13 +6,13 @@ file with its own typed schema and stops on keys like ``permission = \"ask\"``.
 
 from __future__ import annotations
 
-import math
 import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
+from pi_agent_core.coding_tools.bash import MAX_TIMEOUT_SECONDS
 from pi_agent_core.home import pi_home
 from pi_agent_core.types import ThinkingLevel
 
@@ -509,13 +509,13 @@ def _auto_config(value: object) -> AutoConfig:
         if (
             isinstance(raw_timeout, (int, float))
             and not isinstance(raw_timeout, bool)
-            and math.isfinite(raw_timeout)
-            and raw_timeout > 0
+            and 0 < raw_timeout <= MAX_TIMEOUT_SECONDS
         ):
             timeout = float(raw_timeout)
         else:
             notes.append(
-                "bash_timeout_seconds in [auto] must be a number above 0. "
+                "bash_timeout_seconds in [auto] must be a number above 0 and not above "
+                f"{int(MAX_TIMEOUT_SECONDS)}. "
                 f"Auto uses {DEFAULT_AUTO_BASH_TIMEOUT_SECONDS:g} seconds."
             )
 
