@@ -2301,6 +2301,17 @@ RT2_MUTATIONS: list[Mutation] = [
     r2("timeout: a minute is a second", '"m": 60', '"m": 1'),
     r2("timeout: an hour is a second", '"h": 3600', '"h": 1'),
     r2("timeout: a day is a second", '"d": 86400', '"d": 1'),
+    # ---- R2-2: git reads the config of the repository
+    r2(
+        "git: a git read is not project code",
+        "        # In a project that nobody vouched for, that file is code of the project.\n        st.project_code = True\n",
+        "        # In a project that nobody vouched for, that file is code of the project.\n        pass\n",
+    ),
+    r2(
+        "git: the version of git is project code",
+        '    if sub != "version":  # only ``git version`` reads no repository setting',
+        "    if True:",
+    ),
     # ---- R2-3: the default protected list below the project root
     r2(
         "globs: the default list is not taken at any depth",

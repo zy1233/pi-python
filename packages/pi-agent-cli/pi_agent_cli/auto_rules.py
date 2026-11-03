@@ -1604,6 +1604,10 @@ def _git(args: list[_Word], st: _State) -> bool:
 
     if sub != "version":  # only ``git version`` reads no repository setting
         _git_repo_guard(chdirs, st)
+        # The ``config`` of the repository can name programs that git runs even for ``status``
+        # or ``diff`` (``core.fsmonitor``, ``diff.external``, a filter or a text converter).
+        # In a project that nobody vouched for, that file is code of the project.
+        st.project_code = True
 
     if sub in _GIT_LAUNCHERS:
         raise _Floor(Reason.HIDDEN_COMMAND, "bash.hidden.git_launcher")

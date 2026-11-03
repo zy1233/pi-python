@@ -206,6 +206,45 @@ def test_the_floor_of_the_program_is_named_before_the_way_out(world, command, re
     assert_ask(run_bash(world, command), reason)
 
 
+# ----------------------------------------------- R2-2: git reads the config of the repository
+#
+# ``.git/config`` can name a program that git runs for ``status`` and ``diff``
+# (``core.fsmonitor``, ``diff.external``, a text converter). In a project that nobody vouched
+# for, that file is code of the project (invariant 9). Before the fix: ALLOW.
+
+GIT_READS = [
+    "git status",
+    "git diff",
+    "git diff --textconv",
+    "git log --oneline -3",
+    "git show HEAD",
+    "git blame src/a.py",
+    "git ls-files",
+    "git branch --list",
+    "git -C src status",
+    "cd src && git status",
+    "/usr/bin/git status",
+    "env git status",
+    "git status | cat",
+]
+
+
+@pytest.mark.parametrize("command", GIT_READS)
+def test_git_asks_in_an_untrusted_project(world, command) -> None:
+    decision = run_bash(world, command, project_trusted=False)
+    assert_ask(decision, Reason.UNTRUSTED_PROJECT_CODE, "bash.untrusted_project_code")
+
+
+@pytest.mark.parametrize("command", GIT_READS)
+def test_git_reads_run_in_a_trusted_project(world, command) -> None:
+    assert run_bash(world, command, project_trusted=True).outcome is Outcome.ALLOW
+
+
+@pytest.mark.parametrize("command", ["git --version", "git version"])
+def test_the_version_of_git_reads_no_repository(world, command) -> None:
+    assert run_bash(world, command, project_trusted=False).outcome is Outcome.ALLOW
+
+
 # --------------------------------------- R2-3: the default protected list below the root
 #
 # The list was matched from the project root only: ``.husky/pre-commit`` asked, and

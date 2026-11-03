@@ -1192,7 +1192,7 @@ def test_code_of_a_trusted_project_is_left_to_a_judge(world, command) -> None:
     assert decision.outcome is Outcome.JUDGE, (command, decision)
 
 
-@pytest.mark.parametrize("command", ["ls -la", "git diff", "rg foo src", "cat src/a.py"])
+@pytest.mark.parametrize("command", ["ls -la", "rg foo src", "cat src/a.py"])
 def test_reads_still_run_in_an_untrusted_project(world, command) -> None:
     assert run_bash(world, command, project_trusted=False).outcome is Outcome.ALLOW
 
@@ -1963,11 +1963,20 @@ def test_the_floor_still_reads_the_arguments_of_a_file_of_the_project(
 
 @pytest.mark.parametrize(
     "command",
-    ["/usr/bin/git status", "/bin/ls", "/usr/local/bin/git --version", "/usr/bin/python --version"],
+    ["/bin/ls", "/usr/local/bin/git --version", "/usr/bin/python --version"],
 )
 def test_a_program_in_a_system_folder_is_the_program_it_is_called(rt_world, command) -> None:
     for trusted in (True, False):
         assert run_bash(rt_world, command, project_trusted=trusted).outcome is Outcome.ALLOW
+
+
+def test_git_in_a_system_folder_is_git_for_the_project_trust_rule(rt_world) -> None:
+    assert run_bash(rt_world, "/usr/bin/git status", project_trusted=True).outcome is Outcome.ALLOW
+    assert_ask(
+        run_bash(rt_world, "/usr/bin/git status", project_trusted=False),
+        Reason.UNTRUSTED_PROJECT_CODE,
+        "bash.untrusted_project_code",
+    )
 
 
 def test_a_folder_that_looks_like_a_bare_repository_is_not_read_only_for_git(rt_world) -> None:
