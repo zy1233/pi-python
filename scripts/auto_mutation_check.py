@@ -9,6 +9,7 @@
     python scripts/auto_mutation_check.py --only floor # run the mutations whose name contains "floor"
     python scripts/auto_mutation_check.py --only wiring # only the mutations of the wiring (PR 1b)
     python scripts/auto_mutation_check.py --only "d07 " # only the forms that the rules bar from the model
+    python scripts/auto_mutation_check.py --only "redteam3 " # only the protected folders, globs and folders on the way
     python scripts/auto_mutation_check.py --only "model " # only the model step (PR 2)
 
 Each mutation is an exact text replacement in one source file: ``auto_rules.py`` (or
@@ -32,7 +33,10 @@ paths of a session. The mutations that start with ``d07`` break the seven forms 
 rules bar from the model (an option that can run a program or write a file, an operand that is
 banned, a leading glob, ``git`` options, an endless device, a version flag, a disguise): each one
 lets a barred call pass as proven, so that it runs or reaches the model. The mutations that start with
-``model`` break the model step: the parser of the answer (only the exact line ``ALLOW`` allows),
+``redteam3`` break what the third review added to the protected set: the folder that a glob ends in
+(``.husky``), a shell glob that can expand to a protected name (``.mcp.js*``), and the folder on the
+way to a protected path (``.github``) that a call which is not read-only must not name. The mutations
+that start with ``model`` break the model step: the parser of the answer (only the exact line ``ALLOW`` allows),
 the data block (the token, the escapes, the limits), the request, the timeout, the cancel, the
 circuit breaker, the counters, the choice of the model, the wiring in the session and in the
 agent, the settings, and the eval harness (its gates and the cap on its spend). Run it again
@@ -129,8 +133,8 @@ MUTATIONS: list[Mutation] = [
     ),
     m(
         "order: outside check before protected check",
-        '        hit = self.protected_hit(real)\n        if hit is not None:\n            raise _Floor(*hit)\n        if not self.inside(real):\n            raise _Floor(Reason.OUTSIDE_PROJECT, "path.outside_project")',
-        '        if not self.inside(real):\n            raise _Floor(Reason.OUTSIDE_PROJECT, "path.outside_project")\n        hit = self.protected_hit(real)\n        if hit is not None:\n            raise _Floor(*hit)',
+        '        hit = self.protected_hit(real)\n        if hit is not None:\n            raise _Floor(*hit)\n        if leading and self.leading_hit(real):\n            raise _Floor(Reason.PROTECTED_PATH, "path.protected_leading")\n        if not self.inside(real):\n            raise _Floor(Reason.OUTSIDE_PROJECT, "path.outside_project")',
+        '        if not self.inside(real):\n            raise _Floor(Reason.OUTSIDE_PROJECT, "path.outside_project")\n        hit = self.protected_hit(real)\n        if hit is not None:\n            raise _Floor(*hit)\n        if leading and self.leading_hit(real):\n            raise _Floor(Reason.PROTECTED_PATH, "path.protected_leading")',
     ),
     m(
         "order: untrusted project check removed",
@@ -210,6 +214,7 @@ MUTATIONS: list[Mutation] = [
         "path: case not folded in component names",
         "parts = [name for name in map(_fold_name, names) if name]",
         "parts = [name for name in names if name]",
+        0,
     ),
     m("protected: secret folders", "if _SECRET_DIRS.intersection(parts):", "if False:"),
     m("protected: .env files", 'if base.startswith(".env"):', "if False:"),
@@ -244,7 +249,7 @@ MUTATIONS: list[Mutation] = [
     m("path: plain name that is a link", "if env.fs.lexists(candidate):", "if False:"),
     m(
         "path: value of --option=path",
-        '_check_path(text.split("=", 1)[1], word.glob, st, force=force)',
+        '_check_path(text.split("=", 1)[1], word.glob, st, force=force, leading=leading)',
         "pass",
     ),
     m("path: /dev/tcp", 'if text.startswith(("/dev/tcp/", "/dev/udp/")):', "if False:"),
@@ -560,8 +565,8 @@ MUTATIONS: list[Mutation] = [
     ),
     m(
         "prog: path arguments not checked",
-        '    if program not in ("cd", "pushd"):\n        for word in args_words:\n            _check_word(word, st)',
-        "    if False:\n        for word in args_words:\n            _check_word(word, st)",
+        '    if program not in ("cd", "pushd"):\n        for word in args_words:\n            _check_word(word, st, leading=not proven)',
+        "    if False:\n        for word in args_words:\n            _check_word(word, st, leading=not proven)",
     ),
     m(
         "prog: python arguments not checked",
@@ -985,6 +990,7 @@ MUTATIONS: list[Mutation] = [
         "redteam: the parts are not folded",
         "parts = [name for name in map(_fold_name, names) if name]",
         "parts = [name.lower() for name in names]",
+        0,
     ),
     m(
         "redteam: 8.3 names are not read",
@@ -1042,13 +1048,13 @@ MUTATIONS: list[Mutation] = [
     ),
     m(
         "redteam: a protected glob sees the folded name",
-        'forms = {real.replace("\\\\", "/").lower(), "/" + "/".join(parts)}',
-        'forms = {real.replace("\\\\", "/").lower()}',
+        'whole = {real.replace("\\\\", "/").lower(), "/" + "/".join(parts)}',
+        'whole = {real.replace("\\\\", "/").lower()}',
     ),
     m(
         "redteam: a protected glob sees the last name",
-        "        if parts:\n            forms.add(parts[-1])",
-        "        if False:\n            forms.add(parts[-1])",
+        "        forms = (whole | {parts[-1]}) if parts else whole",
+        "        forms = whole",
     ),
     m(
         "redteam: a protected glob is read below the project root",
@@ -2342,12 +2348,12 @@ RT2_MUTATIONS: list[Mutation] = [
     ),
     r2(
         "globs: no depth below the root",
-        '            if anywhere and any(fnmatch.fnmatchcase(form, "*/" + pattern) for form in below_root):\n                return True\n',
-        "            pass\n",
+        '                if anywhere and any(\n                    fnmatch.fnmatchcase(form, "*/" + pattern) for form in below_root\n                ):\n                    return True\n',
+        "                pass\n",
     ),
     r2(
         "globs: the path below the root is not tried",
-        "        forms |= below_root\n",
+        "        whole |= below_root\n",
         "        pass\n",
     ),
     # ---- R2-4: the project is the home folder
@@ -2512,6 +2518,12 @@ def d7(name: str, old: str, new: str) -> Mutation:
     return Mutation(f"d07 {name}", old, new, None, "auto_rules.py", "cli", _RULES_AND_MODEL)
 
 
+def r3(name: str, old: str, new: str, nth: int | None = None) -> Mutation:
+    """A mutation of the protected set that the third review changed (the folder itself, a glob in
+    a call, the folders on the way): the tests of the rules, the corpus and the model step."""
+    return Mutation(f"redteam3 {name}", old, new, nth, "auto_rules.py", "cli", _RULES_AND_MODEL)
+
+
 def mc(name: str, old: str, new: str, *, tests: tuple[str, ...] = _CLASSIFIER) -> Mutation:
     """A mutation of ``auto_classifier.py``."""
     return Mutation(f"model {name}", old, new, None, "auto_classifier.py", "cli", tests)
@@ -2633,6 +2645,135 @@ D07_MUTATIONS: list[Mutation] = [
         "a semicolon does not end a command of find",
         '            if follower.text == ";" or (',
         "            if False or (",
+    ),
+]
+
+
+REDTEAM3_MUTATIONS: list[Mutation] = [
+    # M-03: a glob that names a folder protects the folder as well.
+    r3(
+        "a glob that names a folder does not protect the folder",
+        '                folders = [pattern[:-2]] if pattern.endswith("/*") else []',
+        "                folders = []",
+    ),
+    r3(
+        "the folder is also tried with its last name",
+        "            for folder in folders:\n                if any(fnmatch.fnmatchcase(form, folder) for form in whole):",
+        "            for folder in folders:\n                if any(fnmatch.fnmatchcase(form, folder) for form in forms):",
+    ),
+    r3(
+        "a folder below a root is not tried at any depth",
+        '                if anywhere and any(\n                    fnmatch.fnmatchcase(form, "*/" + folder) for form in below_root\n                ):\n                    return True\n        return False',
+        "                pass\n        return False",
+    ),
+    # M-04: a glob in a call is tried against the names that the protected globs spell out.
+    r3(
+        "the names of the protected globs are not tried against a glob in a call",
+        "            for name in (*_GLOB_PROBES, *env.glob_names):",
+        "            for name in _GLOB_PROBES:",
+    ),
+    r3(
+        "the rest of the path is not tried for a name of a glob",
+        "                    if hit is None and rest:",
+        "                    if False:",
+    ),
+    r3(
+        "the names of the protected globs are kept folded only",
+        "                names[part] = None\n                names[folded] = None",
+        "                names[folded] = None",
+    ),
+    r3(
+        "the names of the protected globs are kept as written only",
+        "                names[part] = None\n                names[folded] = None",
+        "                names[part] = None",
+    ),
+    # M-05: a call that is not read-only and names a folder on the way to a protected glob.
+    r3(
+        "the folders on the way are not listed",
+        "        if prefix:\n            folders.append(prefix)",
+        "        if prefix:\n            pass",
+    ),
+    r3(
+        "a glob character does not end the folders on the way",
+        "        if _has_glob(part):\n            break\n        if index and not part:",
+        "        if False:\n            break\n        if index and not part:",
+    ),
+    r3(
+        "an empty part of a glob is a folder on the way",
+        "        if index and not part:\n            continue",
+        "        if False:\n            continue",
+    ),
+    r3(
+        "a folder on the way is a name and not a path",
+        '        prefix = f"{prefix}/{part}" if index else part',
+        "        prefix = part",
+    ),
+    r3(
+        "the names of a folder on the way are not folded",
+        "parts = [name for name in map(_fold_name, names) if name]",
+        "parts = [name for name in names if name]",
+        1,
+    ),
+    r3(
+        "the names of a folder on the way are only put in lower case",
+        "parts = [name for name in map(_fold_name, names) if name]",
+        "parts = [name.lower() for name in names]",
+        1,
+    ),
+    r3(
+        "the whole glob is tried for the folders on the way",
+        "            if leading:\n                folders = _leading_folders(pattern)\n            else:",
+        "            if False:\n                folders = _leading_folders(pattern)\n            else:",
+    ),
+    r3(
+        "a project root is a folder on the way",
+        "        if not any(_is_inside(real, root) and _key(real) != _key(root) for root in self.roots):",
+        "        if not any(_is_inside(real, root) for root in self.roots):",
+    ),
+    r3(
+        "a folder outside the project is a folder on the way",
+        "        if not any(_is_inside(real, root) and _key(real) != _key(root) for root in self.roots):",
+        "        if not any(_key(real) != _key(root) for root in self.roots):",
+    ),
+    r3(
+        "a folder on the way is asked before the protected set",
+        '        hit = self.protected_hit(real)\n        if hit is not None:\n            raise _Floor(*hit)\n        if leading and self.leading_hit(real):\n            raise _Floor(Reason.PROTECTED_PATH, "path.protected_leading")',
+        '        if leading and self.leading_hit(real):\n            raise _Floor(Reason.PROTECTED_PATH, "path.protected_leading")\n        hit = self.protected_hit(real)\n        if hit is not None:\n            raise _Floor(*hit)',
+    ),
+    r3(
+        "a call that is not read-only does not ask for a folder on the way",
+        "            _check_word(word, st, leading=not proven)",
+        "            _check_word(word, st)",
+    ),
+    r3(
+        "a read-only call asks for a folder on the way",
+        "            _check_word(word, st, leading=not proven)",
+        "            _check_word(word, st, leading=True)",
+    ),
+    r3(
+        "a glob in a call asks for a folder on the way",
+        '        text = _glob_prefix(text) or "."\n        leading = False',
+        '        text = _glob_prefix(text) or "."',
+    ),
+    r3(
+        "the value of an option is not read for a folder on the way",
+        '            _check_path(text.split("=", 1)[1], word.glob, st, force=force, leading=leading)',
+        '            _check_path(text.split("=", 1)[1], word.glob, st, force=force)',
+    ),
+    r3(
+        "the value that is glued to a short option is not read for a folder on the way",
+        "                _check_path(value, word.glob, st, force=force, leading=leading)",
+        "                _check_path(value, word.glob, st, force=force)",
+    ),
+    r3(
+        "a name of the folder that exists is not read for a folder on the way",
+        "            env.path_floor(env.fs.realpath(candidate), leading=leading)",
+        "            env.path_floor(env.fs.realpath(candidate))",
+    ),
+    r3(
+        "a path is not read for a folder on the way",
+        "            env.path_floor(_resolve(text, cwd, env), leading=leading)",
+        "            env.path_floor(_resolve(text, cwd, env))",
     ),
 ]
 
@@ -3362,6 +3503,7 @@ def main(argv: list[str] | None = None) -> int:
         *WIRING_MUTATIONS,
         *RT2_MUTATIONS,
         *D07_MUTATIONS,
+        *REDTEAM3_MUTATIONS,
         *MODEL_MUTATIONS,
     ]
     chosen = [mut for mut in everything if args.only in mut.name]

@@ -75,10 +75,13 @@ BARRED_KINDS = (
 # Files of a project that something else runs, or reads as instructions, after the agent wrote
 # them: a git hook, a task that an editor starts, a workflow of the CI, the settings of other
 # coding agents and their MCP servers. A write to one of them asks, in a project of any trust.
-# Each entry is a glob, tried as ``AutoContext.protected_globs`` are. ``Makefile``,
-# ``package.json`` and ``conftest.py`` are not in the list on purpose: the agent changes them in
-# ordinary work, and asking each time would make Auto useless in most projects. The user adds
-# more with ``[auto] protected`` in ``agent.toml``. To change this list, change this constant.
+# Each entry is a glob, tried as ``AutoContext.protected_globs`` are: a glob that ends in ``/*``
+# protects the folder as well (``mv hooks .husky`` makes ``.husky/pre-commit``), and a call that
+# is not read-only asks when it names a folder on the way to an entry (``.github``, ``.vscode``).
+# ``Makefile``, ``package.json`` and ``conftest.py`` are not in the list on purpose: the agent
+# changes them in ordinary work, and asking each time would make Auto useless in most projects.
+# The user adds more with ``[auto] protected`` in ``agent.toml``. To change this list, change this
+# constant.
 DEFAULT_PROTECTED_GLOBS: tuple[str, ...] = (
     ".husky/*",
     ".githooks/*",
@@ -169,8 +172,10 @@ class AutoContext:
     where relative paths go, and it has to be inside the roots. ``protected_paths`` are files
     or folders that always ask; ``protected_globs`` likewise. A glob is tried on the whole path,
     on the last name and on the path below a project root, so ``.github/workflows/*`` works as
-    it is written. ``pi_home`` is the agent's own home (config, trust store, sessions): all of
-    it is protected.
+    it is written. A glob that ends in ``/*`` protects the folder too. A shell glob in a call is
+    tried against the names that the protected globs spell out, and a call that is not read-only
+    asks when it names a folder in front of a protected glob (``.github``). ``pi_home`` is the
+    agent's own home (config, trust store, sessions): all of it is protected.
 
     Every folder and path in the context has to be absolute (the globs are patterns, not
     paths). With a relative or empty one the rules cannot know where it points, so every call
@@ -344,6 +349,36 @@ _SHELL_START = _words(
 )
 
 
+def _glob_names(globs: tuple[str, ...]) -> tuple[str, ...]:
+    """The names that the protected globs spell out (``.husky``, ``workflows``, ``.mcp.json``).
+    A glob in a call (``.hus*``) is tried against them as it is against ``_GLOB_PROBES``."""
+    names: dict[str, None] = {}
+    for glob in globs:
+        for part in re.split(r"[\\/]+", glob):
+            folded = _fold_name(part)
+            if folded and not _has_glob(part):
+                names[part] = None
+                names[folded] = None
+    return tuple(names)
+
+
+def _leading_folders(pattern: str) -> list[str]:
+    """The folders in front of the last name of a glob that the glob spells out: ``.github`` and
+    ``.github/workflows`` for ``.github/workflows/*``. The first glob character ends the list,
+    so ``*/Makefile`` has none."""
+    folders: list[str] = []
+    prefix = ""
+    for index, part in enumerate(pattern.rpartition("/")[0].split("/")):
+        if _has_glob(part):
+            break
+        if index and not part:
+            continue
+        prefix = f"{prefix}/{part}" if index else part
+        if prefix:
+            folders.append(prefix)
+    return folders
+
+
 class _Env:
     """The context with every path resolved once."""
 
@@ -357,6 +392,7 @@ class _Env:
         self.pi_home = ctx.fs.realpath(ctx.pi_home)
         self.protected = [ctx.fs.realpath(p) for p in ctx.protected_paths]
         self.globs = ctx.protected_globs
+        self.glob_names = _glob_names(ctx.protected_globs)
 
     def inside(self, real: str) -> bool:
         return any(_is_inside(real, root) for root in self.roots)
@@ -394,7 +430,17 @@ class _Env:
             return Reason.PROTECTED_PATH, "path.protected_glob"
         return None
 
-    def _glob_hit(self, real: str, parts: list[str]) -> bool:
+    def leading_hit(self, real: str) -> bool:
+        """Whether *real* is, as a whole, a folder in front of a protected glob (``.github`` for
+        ``.github/workflows/*``). A path below such a folder is not, and neither is a project root
+        or a folder above one: a glob with an absolute path has those in front of it too."""
+        if not any(_is_inside(real, root) and _key(real) != _key(root) for root in self.roots):
+            return False
+        names = [name for name in re.split(r"[\\/]+", real) if name]
+        parts = [name for name in map(_fold_name, names) if name]
+        return self._glob_hit(real, parts, leading=True)
+
+    def _glob_hit(self, real: str, parts: list[str], *, leading: bool = False) -> bool:
         """Whether a protected glob matches *real*. Each glob is tried on the whole path, on the
         path with every name folded (``Makefile.`` is ``makefile``), on the last name, and on the
         path below each project root, so ``.github/workflows/*`` works as it is written.
@@ -402,16 +448,20 @@ class _Env:
         A glob that starts with ``**/`` also matches at any depth below a project root:
         ``**/.husky/*`` is ``.husky/x`` and ``app/.husky/x``. Only the part of the path below
         the root is tried for that, so a project that lives in a folder with the same name is
-        not protected as a whole."""
-        forms = {real.replace("\\", "/").lower(), "/" + "/".join(parts)}
+        not protected as a whole.
+
+        A glob that ends in ``/*`` (or in ``/``) names a folder, and the folder is protected as
+        well: ``mv hooks .husky`` makes ``.husky/pre-commit`` and has no file of the set in it.
+        With *leading* the folders in front of the last name of a glob are tried instead, and
+        only for the path as a whole (``.github`` for ``.github/workflows/*``)."""
+        whole = {real.replace("\\", "/").lower(), "/" + "/".join(parts)}
         below_root: set[str] = set()
-        if parts:
-            forms.add(parts[-1])
         for root in self.roots:
             root_parts = [name for name in map(_fold_name, re.split(r"[\\/]+", root)) if name]
             if parts[: len(root_parts)] == root_parts:
                 below_root.add("/".join(parts[len(root_parts) :]))
-        forms |= below_root
+        whole |= below_root
+        forms = (whole | {parts[-1]}) if parts else whole
         for glob in self.globs:
             pattern = glob.replace("\\", "/").lower()
             anywhere = pattern.startswith("**/")
@@ -421,17 +471,33 @@ class _Env:
                 pattern = pattern[2:]
             if pattern.endswith("/"):
                 pattern += "*"
-            if any(fnmatch.fnmatchcase(form, pattern) for form in forms):
-                return True
-            if anywhere and any(fnmatch.fnmatchcase(form, "*/" + pattern) for form in below_root):
-                return True
+            if leading:
+                folders = _leading_folders(pattern)
+            else:
+                if any(fnmatch.fnmatchcase(form, pattern) for form in forms):
+                    return True
+                if anywhere and any(
+                    fnmatch.fnmatchcase(form, "*/" + pattern) for form in below_root
+                ):
+                    return True
+                folders = [pattern[:-2]] if pattern.endswith("/*") else []
+            for folder in folders:
+                if any(fnmatch.fnmatchcase(form, folder) for form in whole):
+                    return True
+                if anywhere and any(
+                    fnmatch.fnmatchcase(form, "*/" + folder) for form in below_root
+                ):
+                    return True
         return False
 
-    def path_floor(self, real: str) -> None:
-        """Raise ``_Floor`` when *real* is protected or outside the project roots."""
+    def path_floor(self, real: str, *, leading: bool = False) -> None:
+        """Raise ``_Floor`` when *real* is protected or outside the project roots. With *leading*
+        it also raises when *real* is a folder on the way to a protected glob (``leading_hit``)."""
         hit = self.protected_hit(real)
         if hit is not None:
             raise _Floor(*hit)
+        if leading and self.leading_hit(real):
+            raise _Floor(Reason.PROTECTED_PATH, "path.protected_leading")
         if not self.inside(real):
             raise _Floor(Reason.OUTSIDE_PROJECT, "path.outside_project")
 
@@ -1221,9 +1287,12 @@ def _glob_floor(text: str, st: _State, *, shell: bool = True) -> None:
             if not _has_glob(comp):
                 continue
             parent = os.path.join(base, *plain[:index])
-            for name in _GLOB_PROBES:
+            rest = plain[index + 1 :]
+            for name in (*_GLOB_PROBES, *env.glob_names):
                 if _glob_can_match(comp, name, shell=shell):
                     hit = env.protected_hit(os.path.join(parent, name))
+                    if hit is None and rest:
+                        hit = env.protected_hit(os.path.join(parent, name, *rest))
                     if hit is not None:
                         break
             if hit is None and _glob_reaches_key(comp):
@@ -1242,7 +1311,7 @@ def _attached_values(text: str) -> list[str]:
     return [value for value in values if value.strip("/\\")]
 
 
-def _check_path(text: str, glob: bool, st: _State, *, force: bool) -> None:
+def _check_path(text: str, glob: bool, st: _State, *, force: bool, leading: bool = False) -> None:
     env = st.env
     if not text or text in _DEV_OK:
         return
@@ -1254,29 +1323,32 @@ def _check_path(text: str, glob: bool, st: _State, *, force: bool) -> None:
     if glob:
         _glob_floor(text, st)
         text = _glob_prefix(text) or "."
+        leading = False
     if force or _looks_like_path(text):
         for cwd in st.cwds:
-            env.path_floor(_resolve(text, cwd, env))
+            env.path_floor(_resolve(text, cwd, env), leading=leading)
         return
     if len(text) > 255 or re.search(r"\s", text):
         return
     for cwd in st.cwds:  # a plain name can still be a symbolic link that leaves the project
         candidate = os.path.join(cwd, text)
         if env.fs.lexists(candidate):
-            env.path_floor(env.fs.realpath(candidate))
+            env.path_floor(env.fs.realpath(candidate), leading=leading)
 
 
-def _check_word(word: _Word, st: _State, *, force: bool = False) -> None:
-    """Floor when a word that names a path leaves the project or is protected."""
+def _check_word(word: _Word, st: _State, *, force: bool = False, leading: bool = False) -> None:
+    """Floor when a word that names a path leaves the project or is protected. With *leading* (the
+    program is not proven read-only) it is also a floor to name, as a whole, a folder on the way
+    to a protected glob."""
     text = word.text
     if not force and text.startswith("-"):
         if "=" in text:
-            _check_path(text.split("=", 1)[1], word.glob, st, force=force)
+            _check_path(text.split("=", 1)[1], word.glob, st, force=force, leading=leading)
         elif not text.startswith("--"):
             for value in _attached_values(text):
-                _check_path(value, word.glob, st, force=force)
+                _check_path(value, word.glob, st, force=force, leading=leading)
         return
-    _check_path(text, word.glob, st, force=force)
+    _check_path(text, word.glob, st, force=force, leading=leading)
 
 
 def _redirect(redirect: _Redirect, st: _State) -> None:
@@ -1921,7 +1993,7 @@ def _program_rules(words: list[_Word], dynamic: bool, st: _State, depth: int = 0
 
     if program not in ("cd", "pushd"):
         for word in args_words:
-            _check_word(word, st)
+            _check_word(word, st, leading=not proven)
     if not proven or dynamic:
         st.proven = False
 

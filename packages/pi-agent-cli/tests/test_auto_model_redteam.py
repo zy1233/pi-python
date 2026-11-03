@@ -7,6 +7,11 @@ and to the session with a scripted model. No command is run.
   (it has unknown arguments), and the form that it shows (D-07) must still ask by the floor
   with no model.
 * M-02: ``find`` may run one command for each of its ``-exec`` options. The floor reads each one.
+* M-03: a protected glob that names a folder (``.husky/*``) protects the folder as well, so a
+  move, a copy, a link or an unpack onto the folder asks by the floor.
+* M-04: a glob in a call (``.mcp.js*``) that can expand to a protected name asks by the floor.
+* M-05: a call that is not read-only and names, as a whole, a folder on the way to a protected
+  path (``.github``, ``.vscode``) asks by the floor. A call that only reads it does not.
 """
 
 from __future__ import annotations
@@ -28,6 +33,7 @@ from pi_agent_cli.auto_rules import (
     ToolCall,
     decide,
     decide_rules_only,
+    default_protected_globs,
 )
 
 
@@ -173,4 +179,310 @@ async def test_a_model_that_allows_everything_is_not_asked_about_these_calls(
     assert verdict.outcome is Outcome.ASK
     assert verdict.by == "floor"
     assert verdict.classifier == "rules"
+    assert script.calls == []
+
+
+@pytest.fixture
+def guarded(rules: SimpleNamespace) -> SimpleNamespace:
+    """The rules with the default protected list, as a session gives it."""
+    ctx = dataclasses.replace(rules.ctx, protected_globs=default_protected_globs())
+    return SimpleNamespace(ctx=ctx, root=Path(rules.ctx.cwd))
+
+
+def _asks(decision, rule_id: str) -> None:
+    assert decision.outcome is Outcome.ASK, decision
+    assert decision.by is By.FLOOR
+    assert decision.reason is Reason.PROTECTED_PATH
+    assert decision.rule_id == rule_id
+
+
+def _judged(decision) -> None:
+    assert decision.outcome is Outcome.JUDGE, decision
+    assert decision.rule_id == "bash.not_proven"
+
+
+# M-03. A call that names the protected folder itself. ``mv hooks .husky`` makes the folder from
+# a folder that the agent wrote, and no file of the protected set is named in the call.
+FOLDER_ITSELF = [
+    "mv hooks .husky",
+    "cp -r hooks .husky",
+    "ln -s hooks .husky",
+    "mkdir .husky",
+    "mkdir -p .githooks",
+    "git mv hooks .husky",
+    "tar -xf a.tar -C .husky",
+    "unzip a.zip -d .githooks",
+    "mv hooks .claude",
+    "cp -r hooks .cursor",
+    "mv hooks .github/workflows",
+    "mkdir -p .github/workflows",
+    "mv tmpl/workflows .github/workflows",
+    "mv hooks packages/app/.husky",
+    "mv hooks ./.husky/",
+    "mv hooks .HUSKY",
+    "mv hooks .husky.",
+    "cd .husky && mv ../hooks .",
+    "cd .github/workflows && cp -r ../../hooks .",
+]
+
+# The folder asks for a read as well, as a file in it does (``cat .husky/pre-commit``).
+FOLDER_READS = [
+    "ls .husky",
+    "ls -la .github/workflows",
+    "cd .claude",
+    "git log -- .cursor",
+    "find .githooks -name x",
+    "rg foo .husky",
+]
+
+# Names that look like a protected folder and are not one.
+NOT_THE_FOLDER = [
+    "mv hooks .husky2",
+    "mv hooks husky",
+    "mv hooks .githooks.d",
+    "mv hooks .cursorrules",
+    "mkdir -p .github/ISSUE_TEMPLATE",
+    "mkdir .github-old",
+    "cp x .github/CODEOWNERS",
+    "cp x .vscode/settings.json",
+    "cp x .github/*.md",
+    "mkdir .github/*",
+]
+
+
+@pytest.mark.parametrize("command", [*FOLDER_ITSELF, *FOLDER_READS])
+def test_a_call_that_names_a_protected_folder_asks_by_the_floor(guarded, command) -> None:
+    _asks(_decide(guarded, command), "path.protected_glob")
+
+
+def test_the_folder_asks_for_the_same_reason_as_a_file_in_it(guarded) -> None:
+    folder = _decide(guarded, "ls .husky")
+    child = _decide(guarded, "cat .husky/pre-commit")
+
+    assert (folder.reason, folder.rule_id) == (child.reason, child.rule_id)
+
+
+@pytest.mark.parametrize("command", NOT_THE_FOLDER)
+def test_a_name_that_only_looks_like_a_protected_folder_is_left_to_the_model(
+    guarded, command
+) -> None:
+    _judged(_decide(guarded, command))
+
+
+def test_a_project_in_a_folder_with_a_protected_name_is_not_protected_as_a_whole(
+    guarded, tmp_path
+) -> None:
+    odd = tmp_path / ".husky"
+    odd.mkdir()
+    ctx = dataclasses.replace(guarded.ctx, cwd=str(odd))
+    rules = SimpleNamespace(ctx=ctx)
+
+    assert _decide(rules, "ls").outcome is Outcome.ALLOW
+    _judged(_decide(rules, "mv a b"))
+    _asks(_decide(rules, "mv a .husky"), "path.protected_glob")
+
+
+@pytest.mark.parametrize(
+    ("globs", "command", "asks"),
+    [
+        (("deploy/*",), "mv x ./deploy", True),
+        (("deploy/*",), "mv x deploy/", True),
+        (("deploy/*",), "mv x ./deploy/.", True),
+        (("deploy/*",), "mv x deploy", True),
+        (("./scripts/",), "mv x ./scripts", True),
+        (("deploy/*",), "mv x ./deploy2", False),
+        (("deploy/*",), "mv x src/deploy", False),
+        (("**/deploy/*",), "mv x src/deploy", True),
+        (("deploy/*",), "mv x src", False),
+    ],
+)
+def test_a_glob_of_the_user_that_names_a_folder_protects_the_folder(
+    rules, globs, command, asks
+) -> None:
+    (Path(rules.ctx.cwd) / "deploy").mkdir()
+    decision = _decide(rules, command, protected_globs=globs)
+
+    if asks:
+        _asks(decision, "path.protected_glob")
+    else:
+        _judged(decision)
+
+
+# M-04. A glob in a call that can expand to a protected name. The shell expands it, so the call
+# writes the protected path, and the name is not spelled out.
+GLOB_TO_PROTECTED = [
+    "cp evil .mcp.js*",
+    "cp evil .mcp.jso?",
+    "cp evil .[m]cp.json",
+    "cp evil .mc*",
+    "echo x > .mcp.js*",
+    "mv hooks .hus*",
+    "mv hooks .cla*",
+    "mv hooks .cur?or",
+    "mv hooks packages/app/.hus*",
+    "cp -r hooks .git[h]ooks",
+    "cp evil .vscode/task*.json",
+    "tee .github/workf*/ci.yml < x",
+    "mv hooks .github/work*",
+    "git add .mcp.js*",
+]
+
+# A glob that cannot match a protected name is left alone.
+GLOB_TO_NOTHING = [
+    "cp x .hug*",
+    "cp x .mcp.js",
+    "cp x *.md",
+    "cp x src/*.py",
+    "cp x .mcp*.txt",
+    "cp x .vscode/sett*.json",
+    "tee .github/ISSUE*/bug.md < x",
+]
+
+
+@pytest.mark.parametrize("command", GLOB_TO_PROTECTED)
+def test_a_glob_that_can_expand_to_a_protected_name_asks_by_the_floor(guarded, command) -> None:
+    _asks(_decide(guarded, command), "path.protected_glob")
+
+
+@pytest.mark.parametrize("command", GLOB_TO_NOTHING)
+def test_a_glob_that_cannot_expand_to_a_protected_name_is_left_to_the_model(
+    guarded, command
+) -> None:
+    _judged(_decide(guarded, command))
+
+
+def test_a_glob_can_reach_a_name_of_a_glob_of_the_user(rules) -> None:
+    decision = _decide(rules, "cp x dep*/prod.env", protected_globs=("deploy/prod.env",))
+
+    _asks(decision, "path.protected_glob")
+
+
+@pytest.mark.parametrize("command", ["cp x ./Dep*", "cp x ./dep*", "cp x ./Dep*/a"])
+def test_a_glob_is_tried_against_the_names_as_the_user_wrote_them_and_folded(
+    rules, command
+) -> None:
+    _asks(_decide(rules, command, protected_globs=("Deploy/*",)), "path.protected_glob")
+
+
+# M-05. A call that is not read-only and names, as a whole, a folder on the way to a protected
+# path. A move, a copy, a link or an unpack onto it can bring the protected path with it.
+LEADING = [
+    "mv hooks .vscode",
+    "cp -r hooks .vscode",
+    "cp -r tmpl .github",
+    "cp -r tmpl/.github .",
+    "mv tmpl/.github x",
+    "cp x .github",
+    "cp x .github/",
+    "unzip a.zip -d .vscode",
+    "tar -xf a.tar -C .github",
+    "mkdir .vscode",
+    "mkdir -p .vscode",
+    "git add .github",
+    "git mv hooks .vscode",
+    "ln -s hooks .vscode",
+    "cp --target-directory=.github x",
+    "cp -t .github x",
+    "cp -t.github x",
+    "cp -r hooks packages/app/.vscode",
+    "mkdir .vscode.",
+    "mv hooks .VSCODE",
+    "cp -r tmpl .GitHub",
+    "mkdir tmpl/.github.",
+    "cd .vscode && mv ../hooks .",
+    "find . -exec cp x .github \\;",
+    "ls | xargs cp -t .github",
+]
+
+# A call that only reads the folder is left alone, and so is a path below it.
+LEADING_ALLOWED = [
+    "ls .github",
+    "ls -la .vscode",
+    "git log -- .github",
+    "git diff .vscode",
+    "git status .github",
+    "rg foo .github",
+    "find .github -name x",
+    "cat .github/CODEOWNERS",
+    "cd .github",
+]
+
+
+@pytest.mark.parametrize("command", LEADING)
+def test_a_call_that_is_not_read_only_and_names_a_folder_on_the_way_asks_by_the_floor(
+    guarded, command
+) -> None:
+    _asks(_decide(guarded, command), "path.protected_leading")
+
+
+@pytest.mark.parametrize("command", LEADING_ALLOWED)
+def test_a_call_that_only_reads_a_folder_on_the_way_is_not_asked(guarded, command) -> None:
+    decision = _decide(guarded, command)
+
+    assert decision.outcome is Outcome.ALLOW, decision
+
+
+def test_a_folder_on_the_way_to_a_glob_of_the_user_asks_for_a_call_that_may_write(rules) -> None:
+    root = rules.ctx.cwd
+    globs = ("deploy/prod/*", f"{root}/vault/keys/*", "ops//keys/*")
+    (Path(root) / "deploy").mkdir()
+
+    _asks(_decide(rules, "mv x ./deploy", protected_globs=globs), "path.protected_leading")
+    _asks(_decide(rules, "mv x deploy", protected_globs=globs), "path.protected_leading")
+    _asks(_decide(rules, "mv x ./deploy/prod", protected_globs=globs), "path.protected_glob")
+    _asks(_decide(rules, "mv x ./vault", protected_globs=globs), "path.protected_leading")
+    _asks(_decide(rules, "mv x ./vault/keys", protected_globs=globs), "path.protected_glob")
+    _asks(_decide(rules, "mv x ./ops", protected_globs=globs), "path.protected_leading")
+    _asks(_decide(rules, "mv x ./ops/keys", protected_globs=globs), "path.protected_leading")
+    # Only a folder with the whole path of the glob in front of it is on the way.
+    _judged(_decide(rules, "mv x ./prod", protected_globs=globs))
+    _judged(_decide(rules, "mv x ./keys", protected_globs=globs))
+    # The folders above a glob with an absolute path are not on the way: the project root is not.
+    _judged(_decide(rules, "git add .", protected_globs=globs))
+    _judged(_decide(rules, f"mv x {root}", protected_globs=globs))
+    outside = _decide(rules, f"mv x {Path(root).parent}", protected_globs=globs)
+    assert outside.rule_id == "path.outside_project", outside
+    assert _decide(rules, "ls deploy", protected_globs=globs).outcome is Outcome.ALLOW
+    _judged(_decide(rules, "mv x ./deployment", protected_globs=globs))
+    _judged(_decide(rules, "mv x src/deploy", protected_globs=globs))
+
+
+@pytest.mark.parametrize(
+    ("pattern", "command"),
+    [
+        ("*/Makefile", "mkdir src"),
+        ("src/*/hooks/x", "mkdir src/a"),
+        ("[ab]/c", "mkdir a"),
+        ("**/*.pem", "mkdir src"),
+    ],
+)
+def test_a_glob_character_ends_the_folders_on_the_way(rules, pattern, command) -> None:
+    _judged(_decide(rules, command, protected_globs=(pattern,)))
+
+
+def test_the_folders_in_front_of_a_glob_character_are_on_the_way(rules) -> None:
+    _asks(_decide(rules, "mkdir src", protected_globs=("src/*/hooks/x",)), "path.protected_leading")
+
+
+# The step in a session: a model that says ALLOW to everything is never asked, so it cannot allow.
+@pytest.mark.parametrize(
+    ("command", "rule_id"),
+    [
+        *((c, "path.protected_glob") for c in [*FOLDER_ITSELF, *GLOB_TO_PROTECTED]),
+        *((c, "path.protected_leading") for c in LEADING),
+    ],
+)
+async def test_a_model_that_allows_everything_is_not_asked_about_the_protected_folders(
+    world: _World, command: str, rule_id: str
+) -> None:
+    script = Script("ALLOW")
+    _, session, _ = _session(world, script)
+    await session.enter()
+
+    verdict = await session.decide(_bash(command))
+
+    assert verdict.outcome is Outcome.ASK
+    assert verdict.by == "floor"
+    assert verdict.classifier == "rules"
+    assert verdict.rule_id == rule_id
     assert script.calls == []
