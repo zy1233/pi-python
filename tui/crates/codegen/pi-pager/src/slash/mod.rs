@@ -349,10 +349,6 @@ pub struct SlashController {
     matcher: FuzzyMatcher,
     /// Offer `/announcements` when session announcements (critical or promo) exist.
     has_session_announcements: bool,
-    /// Consumer billing surface — gates `/usage` subcommands. Default `true`.
-    billing_surface_visible: bool,
-    /// Whether `/usage` is offered. Default `true`; cleared for external auth.
-    usage_command_visible: bool,
     /// Effective render mode of this process (immutable after startup — it only
     /// changes via a full `/minimal`-`/fullscreen` re-exec). Injected via
     /// [`Self::set_screen_mode`] wherever prompts are created; gates the
@@ -393,8 +389,6 @@ impl SlashController {
             registry,
             matcher: FuzzyMatcher::new(),
             has_session_announcements: false,
-            billing_surface_visible: true,
-            usage_command_visible: true,
             screen_mode: crate::app::ScreenMode::Fullscreen,
             current_title: None,
             mru,
@@ -426,14 +420,6 @@ impl SlashController {
 
     pub fn has_session_announcements(&self) -> bool {
         self.has_session_announcements
-    }
-
-    pub fn set_billing_surface_visible(&mut self, visible: bool) {
-        self.billing_surface_visible = visible;
-    }
-
-    pub fn set_usage_command_visible(&mut self, visible: bool) {
-        self.usage_command_visible = visible;
     }
 
     /// Record the process's effective screen mode (see the field doc).
@@ -1698,16 +1684,6 @@ mod tests {
         assert!(!is_complete_builtin_invocation("/", &reg));
     }
 
-    #[test]
-    fn is_complete_builtin_invocation_rejects_restricted_builtin() {
-        let mut reg = test_registry();
-        reg.set_restricted_commands(&["model".to_string()]);
-        assert!(
-            !is_complete_builtin_invocation("/model grok-4", &reg),
-            "a tier-gated command must stay saved as text, not run from a queue row"
-        );
-    }
-
     // -- Controller tests --
 
     #[test]
@@ -2164,30 +2140,6 @@ mod tests {
             .as_ref()
             .expect("ghost tracks selected row");
         assert_eq!(ghost.full_name, "privacy");
-    }
-
-    /// Tier-restricted commands stay in the dropdown (discoverability) even
-    /// though `get()` blocks execution — invoking one shows the SuperGrok
-    /// upsell (covered by the dispatch-level tests).
-    #[test]
-    fn restricted_commands_stay_visible_in_dropdown() {
-        let mut ctrl = SlashController::with_builtins();
-        ctrl.registry_mut()
-            .set_restricted_commands(&["theme".to_string()]);
-        assert!(
-            ctrl.registry().get("theme").is_none(),
-            "execution stays blocked"
-        );
-
-        let state = SlashState::default();
-        let models = ModelState::default();
-        ctrl.refresh(&state, "/the", 4, &models);
-        let snapshot = state.snapshot();
-        let top = snapshot.selection().expect("dropdown open").display.clone();
-        assert_eq!(
-            top, "/theme",
-            "restricted command stays discoverable in the dropdown"
-        );
     }
 
     #[test]

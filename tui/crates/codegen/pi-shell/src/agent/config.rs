@@ -73,10 +73,6 @@ pub enum EnvKeys {
     Many(Vec<String>),
 }
 impl EnvKeys {
-    /// Single-name convenience constructor.
-    pub(crate) fn single(name: impl Into<String>) -> Self {
-        Self::One(name.into())
-    }
     /// Construct from an ordered list (empty names dropped; 0/1/N → Many/One/Many).
     pub fn new(names: impl IntoIterator<Item = impl Into<String>>) -> Self {
         let names: Vec<String> = names
@@ -232,22 +228,7 @@ fn blank_as_unset(opt: &Option<String>) -> Option<String> {
         .filter(|s| !s.trim().is_empty())
         .map(str::to_owned)
 }
-/// Parse a `k=v,k2=v2` OTLP header list (the `OTEL_EXPORTER_OTLP_HEADERS`
-/// format, shared with `GROK_INTERNAL_OTLP_HEADERS`): split on `,`,
-/// `split_once('=')`, trim key/value, skip blank keys, keep empty values.
-fn parse_otlp_header_list(raw: &str) -> Vec<(String, String)> {
-    raw.split(',')
-        .filter_map(|kv| {
-            let (k, v) = kv.split_once('=')?;
-            let k = k.trim();
-            (!k.is_empty()).then(|| (k.to_string(), v.trim().to_string()))
-        })
-        .collect()
-}
 impl EndpointsConfig {
-    pub(crate) fn has_custom_endpoint(&self) -> bool {
-        self.models_base_url.is_some() || self.models_list_url.is_some()
-    }
     /// `default()` plus merged managed/requirements endpoint overrides, so
     /// startup fetches use the configured (not public) endpoints. Only merges
     /// layers — never derives one endpoint from another. Falls back to
@@ -283,50 +264,6 @@ impl EndpointsConfig {
         blank_as_unset(&self.cli_chat_proxy_base_url)
             .unwrap_or_else(|| CLI_CHAT_PROXY_BASE_URL_DEFAULT.to_owned())
     }
-    pub(crate) fn resolve_inference_base_url(&self) -> String {
-        self.models_base_url
-            .clone()
-            .unwrap_or_else(|| self.proxy_url())
-    }
-    /// Managed deployment-config URL (`grok setup`): explicit `managed_config_url`,
-    /// else `proxy_url` + `/deployment/config`. Never `pi_api_base_url`, so the
-    /// deployment key reaches the proxy, not the inference host.
-    pub(crate) fn resolve_managed_config_url(&self) -> String {
-        blank_as_unset(&self.managed_config_url).unwrap_or_else(|| {
-            format!(
-                "{}/deployment/config",
-                self.proxy_url().trim_end_matches('/')
-            )
-        })
-    }
-    /// INTERNAL OTLP traces endpoint. Precedence:
-    /// 1. `grok_internal_otlp_traces_endpoint` (verbatim)
-    /// 2. legacy `otel_exporter_otlp_traces_endpoint` (verbatim) >
-    ///    `otel_exporter_otlp_endpoint` + `/v1/traces` — ONLY when the
-    ///    external-OTEL master switch is unset (back-compat; deprecated)
-    /// 3. `proxy_url` + `/traces`.
-    /// Uses the proxy default (not the `pi_api_base_url` fallback) so
-    /// telemetry reports to pi even when inference is overridden. When the
-    /// master switch IS set, the standard `OTEL_EXPORTER_OTLP_*` values are
-    /// completely ignored here so the internally-authed firehose never lands
-    /// at an external collector.
-    pub(crate) fn resolve_otlp_traces_endpoint(&self) -> String {
-        if let Some(full) = blank_as_unset(&self.grok_internal_otlp_traces_endpoint) {
-            return full.trim_end_matches('/').to_string();
-        }
-        if !self.external_otel_master_switch
-            && let Some(legacy) = self.legacy_internal_otlp_traces_endpoint()
-        {
-            tracing::warn!(
-                "Repointing the internal trace pipeline via OTEL_EXPORTER_OTLP_ENDPOINT / \
-                 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is deprecated; use \
-                 GROK_INTERNAL_OTLP_TRACES_ENDPOINT instead — the standard OTEL_* vars will \
-                 route the external OTEL stream only in a future release"
-            );
-            return legacy;
-        }
-        format!("{}/traces", self.proxy_url().trim_end_matches('/'))
-    }
     /// Legacy (standard-OTEL-var) internal traces endpoint, if any:
     /// `otel_exporter_otlp_traces_endpoint` verbatim, else
     /// `otel_exporter_otlp_endpoint` + `/v1/traces`. Ignores the master switch.
@@ -336,20 +273,6 @@ impl EndpointsConfig {
         }
         blank_as_unset(&self.otel_exporter_otlp_endpoint)
             .map(|base| format!("{}/v1/traces", base.trim_end_matches('/')))
-    }
-    /// Extra headers for the INTERNAL export: `grok_internal_otlp_headers`
-    /// first; legacy fallback to `otel_exporter_otlp_headers` ONLY when the
-    /// external-OTEL master switch is unset (back-compat for existing users).
-    pub(crate) fn resolve_otlp_headers(&self) -> Vec<(String, String)> {
-        if let Some(headers) = blank_as_unset(&self.grok_internal_otlp_headers) {
-            return parse_otlp_header_list(&headers);
-        }
-        if !self.external_otel_master_switch {
-            return parse_otlp_header_list(
-                self.otel_exporter_otlp_headers.as_deref().unwrap_or(""),
-            );
-        }
-        Vec::new()
     }
     /// Whether the legacy fallback actually supplied the internal endpoint OR
     /// internal headers from the standard `OTEL_EXPORTER_OTLP_*` vars — i.e.
@@ -370,38 +293,6 @@ impl EndpointsConfig {
         let headers_consumed = blank_as_unset(&self.grok_internal_otlp_headers).is_none()
             && blank_as_unset(&self.otel_exporter_otlp_headers).is_some();
         endpoint_consumed || headers_consumed
-    }
-    /// Trace export enabled unless `OTEL_TRACES_EXPORTER=none`. Deliberately
-    /// still honored by the internal pipeline even with `GROK_EXTERNAL_OTEL`
-    /// set: disabling internal span export is the safe direction.
-    pub(crate) fn resolve_traces_export_enabled(&self) -> bool {
-        !matches!(
-            self.otel_traces_exporter.as_deref().map(str::trim),
-            Some("none")
-        )
-    }
-    /// `OTEL_BSP_SCHEDULE_DELAY` / `OTEL_TRACES_EXPORT_INTERVAL` — tuning-only,
-    /// deliberately shared between the internal and external pipelines.
-    pub(crate) fn resolve_otlp_export_interval(&self) -> Option<std::time::Duration> {
-        self.otel_traces_export_interval
-            .map(std::time::Duration::from_millis)
-    }
-    /// `OTEL_EXPORTER_OTLP_TIMEOUT` — tuning-only, deliberately shared between
-    /// the internal and external pipelines.
-    pub(crate) fn resolve_otlp_timeout(&self) -> Option<std::time::Duration> {
-        self.otel_exporter_otlp_timeout
-            .map(std::time::Duration::from_millis)
-    }
-    /// `models_list_url` > `{models_base_url}/models` > `{proxy_base_url}/models`.
-    pub(crate) fn resolve_models_list_url(&self) -> String {
-        if let Some(ref url) = self.models_list_url {
-            return url.clone();
-        }
-        let base = self
-            .models_base_url
-            .clone()
-            .unwrap_or_else(|| self.proxy_url());
-        format!("{}/models", base)
     }
 }
 impl Default for EndpointsConfig {
@@ -2161,10 +2052,6 @@ impl SyncBoolFlag {
         self.inherit = Some(resolver);
         self
     }
-    pub(crate) const fn default(mut self, val: bool) -> Self {
-        self.default = val;
-        self
-    }
     pub(crate) fn resolve(&self) -> bool {
         if let Some(enabled) = read_requirements_toml()
             .as_ref()
@@ -2203,16 +2090,6 @@ pub(crate) fn is_telemetry_disabled_sync() -> bool {
     !SyncBoolFlag::new(telemetry_enabled_from_toml)
         .disable_env("DISABLE_TELEMETRY")
         .enable_env(grok_telemetry_env_enabled)
-        .resolve()
-}
-/// Like [`is_telemetry_disabled_sync`] but only `true` when telemetry is
-/// *explicitly* off; absence is not disabled (`.default(true)`) so remote-only
-/// enablement still builds the OTLP exporter (the runtime gate then governs it).
-pub(crate) fn is_telemetry_explicitly_disabled_sync() -> bool {
-    !SyncBoolFlag::new(telemetry_enabled_from_toml)
-        .disable_env("DISABLE_TELEMETRY")
-        .enable_env(grok_telemetry_env_enabled)
-        .default(true)
         .resolve()
 }
 /// Sync sibling of [`is_telemetry_disabled_sync`] scoped to Sentry. Inherits
@@ -2662,68 +2539,6 @@ pub struct ModelInfo {
     #[serde(default)]
     pub laziness_detector: LazinessDetectorPerModelConfig,
 }
-impl ModelInfo {
-    /// Extract shared model metadata from a flat config entry.
-    pub(crate) fn from_config(entry: &ModelEntryConfig) -> Self {
-        ModelInfo {
-            user_selectable: true,
-            id: entry.id.clone(),
-            model: entry.model.clone(),
-            model_family: entry.model_family.clone(),
-            base_url: entry.base_url.clone(),
-            name: entry.name.clone(),
-            description: entry.description.clone(),
-            max_completion_tokens: entry.max_completion_tokens,
-            temperature: entry.temperature,
-            top_p: entry.top_p,
-            api_backend: entry.api_backend.clone(),
-            auth_scheme: entry.auth_scheme.unwrap_or_default(),
-            extra_headers: entry.extra_headers.clone(),
-            query_params: IndexMap::new(),
-            env_http_headers: IndexMap::new(),
-            context_window: entry.context_window,
-            auto_compact_threshold_percent: entry.auto_compact_threshold_percent,
-            system_prompt_label: entry.system_prompt_label.clone(),
-            use_concise: entry.use_concise,
-            agent_type: entry.agent_type.clone(),
-            inference_idle_timeout_secs: entry.inference_idle_timeout_secs,
-            max_retries: entry.max_retries,
-            subagent_rate_limit_max_attempts: entry.subagent_rate_limit_max_attempts,
-            hidden: entry.hidden,
-            supported_in_api: entry.supported_in_api,
-            reasoning_effort: entry.reasoning_effort,
-            supports_reasoning_effort: entry.supports_reasoning_effort,
-            reasoning_efforts: entry.reasoning_efforts.clone(),
-            supports_backend_search: entry.supports_backend_search,
-            compactions_remaining: entry.compactions_remaining,
-            compaction_at_tokens: entry.compaction_at_tokens,
-            show_model_fingerprint: entry.show_model_fingerprint,
-            stream_tool_calls: entry.stream_tool_calls,
-            laziness_detector: entry.laziness_detector.clone(),
-        }
-    }
-}
-/// Flat struct so credential and endpoint fields coexist after deep-merge.
-/// Routing reads fields, not provenance.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ModelEntry {
-    pub info: ModelInfo,
-    pub api_key: Option<String>,
-    pub env_key: Option<EnvKeys>,
-    /// Named credential helper (`[model.<id>] auth_provider = "<name>"`),
-    /// resolved against `[auth_provider.<name>]` by `resolve_model_list`.
-    /// Config-file models only: the built-in catalog never carries one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auth_provider: Option<crate::auth::AuthProviderRef>,
-    /// When set, `base_url` is used for session auth, `api_base_url` for API-key auth.
-    pub api_base_url: Option<String>,
-}
-impl std::ops::Deref for ModelEntry {
-    type Target = ModelInfo;
-    fn deref(&self) -> &ModelInfo {
-        &self.info
-    }
-}
 fn is_false(v: &bool) -> bool {
     !v
 }
@@ -3074,7 +2889,6 @@ impl<'de> Deserialize<'de> for FeatureEntries {
         deserializer.deserialize_map(EntriesVisitor)
     }
 }
-pub(crate) use pi_telemetry::config::deployment_id_from_key;
 /// Error code for model switch rejection due to agent type mismatch.
 pub(crate) const MODEL_SWITCH_INCOMPATIBLE_AGENT: &str = "MODEL_SWITCH_INCOMPATIBLE_AGENT";
 /// Structured error payload for model switch rejection due to agent type

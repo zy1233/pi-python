@@ -91,29 +91,6 @@ async fn lock_loss_revalidation_adopts_the_sibling_token() {
     assert_eq!(adopted.key, "fresh-key-from-sibling");
 }
 
-#[test]
-fn has_usable_token_covers_memory_and_disk() {
-    let dir = tempfile::tempdir().unwrap();
-    let cfg = GrokComConfig::default();
-    let mgr = Arc::new(AuthManager::new(dir.path(), cfg));
-
-    assert!(!mgr.has_usable_token(), "nothing in memory or on disk");
-
-    mgr.hot_swap(make_auth(Some(Utc::now() + Duration::hours(1)), Utc::now()));
-    assert!(!mgr.has_usable_disk_token(), "disk still empty");
-    assert!(mgr.has_usable_token(), "valid in-memory token is usable");
-
-    mgr.persist_and_swap(make_auth(Some(Utc::now() + Duration::hours(1)), Utc::now()));
-    mgr.hot_swap(make_auth(Some(Utc::now() - Duration::hours(1)), Utc::now()));
-    assert!(mgr.current().is_none(), "in-memory token is expired");
-    assert!(mgr.has_usable_token(), "fresh disk token keeps it usable");
-
-    mgr.persist_and_swap(make_auth(Some(Utc::now() - Duration::hours(1)), Utc::now()));
-    assert!(
-        !mgr.has_usable_token(),
-        "expired in memory and on disk is not usable"
-    );
-}
 
 #[test]
 fn auth_scope_uses_oauth2_when_present() {
@@ -1330,34 +1307,6 @@ async fn auth_returns_expired_api_key_consistently_with_current() {
     );
 }
 
-/// Reactive path: expired OIDC token -> try_recover_unauthorized ->
-/// refresh_chain(ServerRejected) -> refresher -> consumer sees fresh token.
-#[tokio::test]
-async fn reactive_401_recovery_produces_fresh_token_end_to_end() {
-    let dir = tempfile::tempdir().unwrap();
-    let mgr = Arc::new(AuthManager::new(dir.path(), GrokComConfig::default()));
-
-    mgr.hot_swap(GrokAuth {
-        key: "expired-bearer".into(),
-        auth_mode: AuthMode::Oidc,
-        refresh_token: Some("rt-valid".into()),
-        expires_at: Some(Utc::now() - Duration::minutes(10)),
-        ..GrokAuth::test_default()
-    });
-
-    let call_count = Arc::new(AtomicU32::new(0));
-    mgr.set_refresher(Arc::new(CountingRefresher {
-        call_count: call_count.clone(),
-        delay: StdDuration::from_millis(0),
-    }));
-
-    assert!(
-        mgr.try_recover_unauthorized(crate::auth::recovery::RecoverySource::Background)
-            .await
-    );
-    assert_eq!(call_count.load(Ordering::SeqCst), 1);
-    assert_eq!(mgr.get_valid_token().await.unwrap(), "fresh-token");
-}
 
 // refresh_chain permanent-failure short-circuit via recovery is tested
 // in recovery::tests::refresh_authority_short_circuits_on_cached_permanent_failure.
@@ -1886,7 +1835,10 @@ async fn oidc_refresh_not_blocked_by_model_api_key() {
     mgr.hot_swap(expired_oidc);
 
     // TokenType is OidcSession regardless of what models exist in config.
-    assert_eq!(mgr.token_type(), TokenType::OidcSession);
+    assert_eq!(
+        TokenType::from_auth(mgr.current_or_expired().as_ref()),
+        TokenType::OidcSession
+    );
 
     // auth() must attempt OIDC refresh, not short-circuit as ApiKey.
     let call_count = Arc::new(AtomicU32::new(0));
@@ -2723,172 +2675,12 @@ async fn auth_rejects_token_refreshed_into_wrong_team() {
     );
 }
 
-/// A sibling-written wrong-team token picked up by `force_reload_from_disk`
-/// (relay reconnect) is cleared, not just hidden.
-#[test]
-fn force_reload_clears_wrong_team_token() {
-    let dir = tempfile::tempdir().unwrap();
-    let cfg = pinned_cfg("team-good");
-    let scope = cfg.auth_scope();
-    let mgr = Arc::new(AuthManager::new(dir.path(), cfg)); // empty disk at startup
-
-    let mut store = AuthStore::new();
-    store.insert(scope, oidc_session_for_team("team-wrong"));
-    write_auth_json(&dir.path().join("auth.json"), &store).unwrap();
-
-    mgr.force_reload_from_disk();
-    assert!(
-        mgr.current_or_expired().is_none(),
-        "reloaded wrong-team token must be cleared, not just hidden"
-    );
-    assert!(
-        !dir.path().join("auth.json").exists(),
-        "force_reload must clear auth.json on a pin violation"
-    );
-}
 
 // -- force_reload_from_disk: transient disk anomaly vs real logout ----------
 
-/// A real incident in miniature: a live in-memory OIDC session (RT
-/// present, no permanent_failure) while `auth.json` transiently reads as
-/// missing — e.g. the first read right after wake-from-sleep resolves the path
-/// to `ENOENT`. The refresh token may exist nowhere else, so the reload must
-/// RETAIN it, not discard it (the discard previously kicked off a
-/// 401 -> reactive refresh -> suspend-straddle -> invalid_grant cascade).
-#[test]
-fn force_reload_retains_live_rt_on_transient_file_missing() {
-    let dir = tempfile::tempdir().unwrap();
-    let mgr = Arc::new(AuthManager::new(dir.path(), GrokComConfig::default()));
 
-    let session = GrokAuth {
-        key: "live-session".into(),
-        auth_mode: AuthMode::Oidc,
-        refresh_token: Some("live-rt".into()),
-        expires_at: Some(Utc::now() + Duration::hours(1)),
-        ..GrokAuth::test_default()
-    };
-    mgr.hot_swap(session);
-    assert!(mgr.permanent_failure().is_none());
 
-    // No auth.json on disk at all -> FileMissing on every read.
-    assert!(mgr.read_disk_auth().is_none());
 
-    // Zero backoff so the retry budget is exhausted instantly.
-    mgr.force_reload_from_disk_with(RELOAD_RETRY_TRIES, StdDuration::ZERO);
-
-    let retained = mgr.current_or_expired();
-    assert!(
-        retained.is_some(),
-        "a live RT must NOT be discarded on a transient FileMissing",
-    );
-    let retained = retained.unwrap();
-    assert_eq!(retained.key, "live-session");
-    assert_eq!(retained.refresh_token.as_deref(), Some("live-rt"));
-}
-
-/// Contrast with the retain case: once a `permanent_failure` is cached the RT
-/// is known-dead, so a persistent FileMissing must drop it (and clear the
-/// permanent_failure with it) so the next request reports `NotLoggedIn`.
-#[tokio::test]
-async fn force_reload_drops_rt_when_permanent_failure_set() {
-    let dir = tempfile::tempdir().unwrap();
-    let mgr = Arc::new(AuthManager::new(dir.path(), GrokComConfig::default()));
-
-    let session = GrokAuth {
-        key: "broken".into(),
-        auth_mode: AuthMode::Oidc,
-        refresh_token: Some("rt-revoked".into()),
-        expires_at: Some(Utc::now() - Duration::hours(1)),
-        ..GrokAuth::test_default()
-    };
-    mgr.hot_swap(session);
-    record_permanent_failure(
-        &mgr,
-        crate::auth::error::RefreshTokenFailedReason::RefreshTokenRejected,
-    );
-    assert!(mgr.permanent_failure().is_some());
-
-    mgr.force_reload_from_disk_with(RELOAD_RETRY_TRIES, StdDuration::ZERO);
-
-    assert!(
-        mgr.current_or_expired().is_none(),
-        "a known-dead RT (permanent_failure set) must be dropped",
-    );
-    assert!(
-        mgr.permanent_failure().is_none(),
-        "dropping creds must clear the cached permanent_failure",
-    );
-    assert!(matches!(
-        mgr.auth().await.unwrap_err(),
-        AuthError::NotLoggedIn
-    ));
-}
-
-/// A readable `auth.json` that simply lacks our scope is the trustworthy
-/// "logged out / scope removed" signal (distinct from a missing file), so the
-/// in-memory credentials are dropped even though an RT is present.
-#[test]
-fn force_reload_drops_creds_on_entry_missing() {
-    let dir = tempfile::tempdir().unwrap();
-    let mgr = Arc::new(AuthManager::new(dir.path(), GrokComConfig::default()));
-
-    let session = GrokAuth {
-        key: "live-session".into(),
-        auth_mode: AuthMode::Oidc,
-        refresh_token: Some("live-rt".into()),
-        expires_at: Some(Utc::now() + Duration::hours(1)),
-        ..GrokAuth::test_default()
-    };
-    mgr.hot_swap(session);
-
-    // auth.json exists and is readable, but holds only an unrelated scope ->
-    // EntryMissing for this manager's scope.
-    let mut store = AuthStore::new();
-    store.insert(
-        "https://example.invalid::nobody".to_string(),
-        make_auth(Some(Utc::now() + Duration::hours(1)), Utc::now()),
-    );
-    write_auth_json(&dir.path().join("auth.json"), &store).unwrap();
-
-    mgr.force_reload_from_disk_with(RELOAD_RETRY_TRIES, StdDuration::ZERO);
-
-    assert!(
-        mgr.current_or_expired().is_none(),
-        "scope absent on a readable auth.json is a real logout -> drop",
-    );
-}
-
-/// When disk holds a fresh token for our scope, the reload adopts it on the
-/// first read (no retry) — the healthy path is unchanged.
-#[test]
-fn force_reload_adopts_fresh_disk_token() {
-    let dir = tempfile::tempdir().unwrap();
-    let cfg = GrokComConfig::default();
-    let scope = cfg.auth_scope();
-    let mgr = Arc::new(AuthManager::new(dir.path(), cfg));
-
-    let expired = GrokAuth {
-        key: "stale".into(),
-        refresh_token: Some("old-rt".into()),
-        expires_at: Some(Utc::now() - Duration::hours(1)),
-        ..GrokAuth::test_default()
-    };
-    mgr.hot_swap(expired);
-
-    let fresh = GrokAuth {
-        key: "fresh-from-disk".into(),
-        refresh_token: Some("new-rt".into()),
-        expires_at: Some(Utc::now() + Duration::hours(1)),
-        ..GrokAuth::test_default()
-    };
-    let mut store = AuthStore::new();
-    store.insert(scope, fresh);
-    write_auth_json(&dir.path().join("auth.json"), &store).unwrap();
-
-    mgr.force_reload_from_disk_with(RELOAD_RETRY_TRIES, StdDuration::ZERO);
-
-    assert_eq!(mgr.current().unwrap().key, "fresh-from-disk");
-}
 
 /// A token carrying `principal_id` without `principal_type` is matched on the
 /// id alone: the pinned team is accepted, not falsely rejected.
@@ -3391,113 +3183,10 @@ fn is_dark_wake_env_override_forces_both_states() {
 
 // ── manual_auth KPI ──────────────────────────────────────────
 
-#[test]
-fn manual_auth_reason_maps_terminal_and_skips_non_forcing() {
-    use crate::auth::error::RefreshTokenFailedReason as Reason;
-    use crate::auth::recovery::manual_auth_reason;
-    use pi_telemetry::events::ManualAuthReason as R;
-
-    let permanent = |reason: Reason| manual_auth_reason(&AuthError::permanent(reason));
-    // A revoked refresh token forces a re-login -> counts.
-    assert_eq!(
-        permanent(Reason::RefreshTokenRejected),
-        Some(R::RefreshTokenRejected)
-    );
-    // Every terminal pipeline error maps to its own bucket (a swapped mapping
-    // would mis-attribute the KPI).
-    assert_eq!(
-        manual_auth_reason(&AuthError::ServerRejectedNoRecovery),
-        Some(R::NoRefreshAuthority)
-    );
-    assert_eq!(
-        manual_auth_reason(&AuthError::RecoveryExhausted),
-        Some(R::RecoveryExhausted)
-    );
-    assert_eq!(
-        manual_auth_reason(&AuthError::TokenExpiredNoRefresh),
-        Some(R::TokenExpiredNoRefresh)
-    );
-    assert_eq!(
-        manual_auth_reason(&AuthError::PinnedTeamMismatch {
-            message: String::new()
-        }),
-        Some(R::WrongTeam)
-    );
-    // Before this reason existed these lockouts hid under the self-healing
-    // `Other` bucket and never surfaced in the KPI at all.
-    assert_eq!(
-        permanent(Reason::ProviderInteractiveRequired),
-        Some(R::ProviderInteractiveRequired)
-    );
-    // Self-healing (TTL) reasons, transient / no-credential, and API-key
-    // lockouts (out of scope for this KPI) don't count.
-    assert_eq!(permanent(Reason::ClientRejected), None);
-    assert_eq!(permanent(Reason::Other), None);
-    assert_eq!(manual_auth_reason(&AuthError::transient("x")), None);
-    assert_eq!(manual_auth_reason(&AuthError::NotLoggedIn), None);
-    assert_eq!(manual_auth_reason(&AuthError::ApiKeyAuthDisabled), None);
-}
 
 // Async so `record` has a runtime for its telemetry `tokio::spawn`: another
 // test in the same process can enable the global telemetry client, which would
 // otherwise make this emit path panic under a plain `#[test]`.
-#[tokio::test]
-async fn manual_auth_capture_attributes_and_recorder_debounces() {
-    use crate::auth::recovery::{ManualAuthTracker, RejectedAuth};
-    use pi_telemetry::events::{AuthTokenKind, ManualAuthSurface};
-
-    let auth = GrokAuth {
-        key: "dead-token".into(),
-        user_id: "user-1".into(),
-        auth_mode: AuthMode::Oidc,
-        refresh_token: Some("rt".into()),
-        ..GrokAuth::test_default()
-    };
-    let snap = RejectedAuth::capture(Some(&auth));
-    assert_eq!(snap.principal_for_test(), Some("user-1"));
-    assert_eq!(snap.token_kind_for_test(), AuthTokenKind::OidcSession);
-
-    let rec = ManualAuthTracker::default();
-    let last = || rec.last_token_for_test();
-    // Records once; a repeat on the same credential debounces.
-    rec.record(
-        &snap,
-        &AuthError::RecoveryExhausted,
-        ManualAuthSurface::Turn,
-    );
-    let id = last();
-    assert!(id.is_some());
-    rec.record(
-        &snap,
-        &AuthError::PinnedTeamMismatch {
-            message: String::new(),
-        },
-        ManualAuthSurface::Turn,
-    );
-    assert_eq!(last(), id);
-
-    // A different credential re-arms.
-    let rearmed = GrokAuth {
-        key: "another-token".into(),
-        ..auth.clone()
-    };
-    let fresh = RejectedAuth::capture(Some(&rearmed));
-    rec.record(
-        &fresh,
-        &AuthError::RecoveryExhausted,
-        ManualAuthSurface::Turn,
-    );
-    assert!(last().is_some() && last() != id);
-
-    // A self-healing reason never emits — the KPI counts only forced re-logins.
-    let healing = ManualAuthTracker::default();
-    healing.record(
-        &snap,
-        &AuthError::permanent(crate::auth::error::RefreshTokenFailedReason::ClientRejected),
-        ManualAuthSurface::Turn,
-    );
-    assert!(healing.last_token_for_test().is_none());
-}
 
 // ── requires_manual_reauth: transient-vs-terminal authority ─────────
 

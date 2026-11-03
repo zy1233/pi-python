@@ -506,10 +506,8 @@ pub struct RemoteSettings {
     pub dream_min_sessions: Option<u64>,
     #[serde(default)]
     pub dream_check_interval_secs: Option<u64>,
-    /// Cadence (seconds) of the pager's free→paid subscription watch.
-    /// `0` disables it; the pager clamps and defaults (see its
-    /// `app::subscription` module). Forwarded from the `grok_build_settings`
-    /// remote settings flag via the CCP `/settings` flatten catch-all.
+    /// Not read. The pager's free→paid subscription watch is gone (plan D.3,
+    /// r38); the key stays so that stored remote settings still parse.
     #[serde(default)]
     pub subscription_watch_interval_secs: Option<u64>,
     #[serde(default)]

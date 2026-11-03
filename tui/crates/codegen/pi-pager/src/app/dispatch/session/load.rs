@@ -121,8 +121,6 @@ fn dispatch_load_session_ungated(
             restore_degree: None,
             rate_limited: false,
             model_incompatible: false,
-            credit_limit_blocked: false,
-            free_usage_blocked: false,
             available_commands: app.bootstrap_acp_commands.clone(),
             available_commands_generation: 1,
             available_tools: None,
@@ -157,13 +155,9 @@ fn dispatch_load_session_ungated(
     }
     agent_mut.apply_app_scoped_gates(
         app.sharing_enabled,
-        app.usage_visible,
-        !app.has_external_auth_provider,
         app.screen_mode,
         &app.active_announcements,
-        &app.tier_restricted_commands,
     );
-    agent_mut.apply_credit_balance(app.credit_balance.clone(), app.auto_topup.clone());
     switch_to_agent(app, agent_id, SwitchCause::Load);
     vec![Effect::LoadSession {
         agent_id,
@@ -451,10 +445,6 @@ pub(in crate::app::dispatch) fn handle_session_loaded(
         let drain = maybe_drain_queue(agent);
         effects.extend(drain.effects);
         agent.seed_prompt_history_from_scrollback();
-        effects.push(Effect::FetchBilling {
-            agent_id,
-            silent: true,
-        });
         if let Some(switch) = deferred {
             agent.session.model_switch_pending = true;
             effects.push(Effect::SwitchModel {

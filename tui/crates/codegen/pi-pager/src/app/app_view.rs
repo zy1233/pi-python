@@ -418,38 +418,6 @@ fn parse_esc_ttl(raw: Option<String>) -> Duration {
         .map(|ms| Duration::from_millis(ms.min(ESC_DOUBLE_PRESS_TEST_MS)))
         .unwrap_or(PendingAction::ESC_DOUBLE_PRESS_TTL)
 }
-/// Slash commands unavailable on the free and X Basic subscription tiers.
-///
-/// To restrict another command for these tiers, add its canonical name
-/// (no leading `/`) here — matching covers aliases automatically via
-/// [`crate::slash::registry::CommandRegistry::set_restricted_commands`].
-///
-/// Current set:
-/// - `usage` — coding credit / billing UI (alias: `/cost`)
-/// - `imagine` — image generation entry point
-/// - `imagine-video` — video generation entry point
-/// - `voice` — voice dictation entry point (the Ctrl+Space / F8 keybinding is
-///   gated separately in [`crate::app::dispatch::voice`], since it bypasses the
-///   slash registry)
-pub(crate) const TIER_RESTRICTED_COMMANDS: &[&str] =
-    &["usage", "imagine", "imagine-video", "voice"];
-/// Whether a subscription-tier display name is a tier with restricted
-/// commands: the free tier (no subscription ⇒ `None`, or an explicit
-/// "Free") and X Basic (CCP display name "X Basic"; JWT claim fallback
-/// "x_basic"). Everything else — paid tiers and unknown future names —
-/// is unrestricted (fail-open).
-///
-/// The string classification is shared with the shell's capability
-/// (toolset) gate via [`pi_shell::tier::is_restricted_tier_name`] so
-/// the two can't drift. The pager's *cosmetic* slash-command gate treats an
-/// absent tier (`None`) as restricted (it recovers live on the next settings
-/// update); the shell's capability gate treats absence as unrestricted.
-fn is_restricted_tier(tier: Option<&str>) -> bool {
-    match tier {
-        None => true,
-        Some(t) => pi_shell::tier::is_restricted_tier_name(t),
-    }
-}
 /// True for API-key labels from shell/CCP: `"ApiKey"`, `"API Key"`, `"api_key"`.
 pub(crate) fn is_api_key_label(s: &str) -> bool {
     s.trim().to_ascii_lowercase().replace([' ', '_', '-'], "") == "apikey"
@@ -562,26 +530,6 @@ pub struct AppView {
     /// Whether the `/share` slash command is available. Currently forced off
     /// while session share links are temporarily disabled in clients.
     pub sharing_enabled: bool,
-    /// Consumer billing surface (credit fetches / warnings). False for team
-    /// and API-key auth. `/usage` itself stays available for session token/cost
-    /// unless [`Self::has_external_auth_provider`].
-    pub usage_visible: bool,
-    /// External `auth_provider_command` deployment.
-    /// No grok.com billing session exists; `/usage` and credit UI stay off.
-    pub has_external_auth_provider: bool,
-    /// Slash commands denied for the current subscription tier
-    /// ([`TIER_RESTRICTED_COMMANDS`] when the user is on the free / X Basic
-    /// tier, empty otherwise). Recomputed by [`Self::apply_tier_restrictions`]
-    /// and fanned out to every slash registry (welcome prompt, agents);
-    /// deny wins over all other visibility gates.
-    pub tier_restricted_commands: Vec<String>,
-    /// App-level credit balance used to show the usage warning on the
-    /// welcome screen before any agent session exists.
-    pub credit_balance: Option<crate::views::credit_bar::CreditBalance>,
-    /// App-level auto top-up rule paired with `credit_balance` for the warning.
-    pub auto_topup: Option<crate::views::credit_bar::AutoTopupInfo>,
-    /// Periodic billing poll requested (credits >= 99%).
-    pub billing_poll_wanted: bool,
     /// Whether the session picker groups entries by repo name with
     /// non-selectable headers. Gated by `GROK_SESSION_PICKER_GROUPED` env var
     /// or remote settings `session_picker_grouped`; defaults to `false`.
@@ -670,8 +618,6 @@ pub struct AppView {
     pub welcome_announcement: WelcomeAnnouncementState,
     /// Hit-test rect for the "show full URL" fallback link.
     pub welcome_auth_fallback_rect: Option<ratatui::layout::Rect>,
-    /// Hit-test rect for the "[Refresh]" button on the paywall tier line.
-    pub welcome_refresh_rect: Option<ratatui::layout::Rect>,
     /// Hit-test rect for the gate URL link on the paywall CTA.
     pub welcome_gate_url_rect: Option<ratatui::layout::Rect>,
     /// Hit-test rect for the welcome hero upgrade CTA `[label]` button
@@ -868,11 +814,6 @@ pub struct AppView {
     /// Whether ZDR users are allowed to use the product.
     /// Server-controlled via RemoteSettings (remote settings). Default `false` (blocked) during beta.
     pub zdr_access_enabled: bool,
-    /// When set, `/usage` shows a link to this URL instead of fetching billing
-    /// data from the backend. Server-controlled via RemoteSettings (remote settings
-    /// `grok_build_usage_redirect_url`, targeted at personal-team users).
-    /// `None` (default) fetches usage from the backend.
-    pub usage_billing_redirect_url: Option<String>,
     pub access_gate_shown_logged: bool,
     /// (hide-key, surface) pairs whose `AnnouncementCtaShown` impression was
     /// already logged — once per pager process, cleared on logout. Keyed by
@@ -884,18 +825,6 @@ pub struct AppView {
     pub gate: Option<pi_shell::auth::GateInfo>,
     /// User-friendly subscription tier name (e.g. "SuperGrok", "Free").
     pub subscription_tier: Option<String>,
-    /// When the pager started auto-checking subscriptions (for 10-min timeout).
-    pub paywall_check_started: Option<std::time::Instant>,
-    /// Debounce stamp for watch/focus subscription checks (see
-    /// [`super::subscription`]).
-    pub last_subscription_check_at: Option<std::time::Instant>,
-    /// Server override (seconds) for the subscription-watch cadence.
-    pub subscription_watch_interval_secs: Option<u64>,
-    /// A stale-source gate held out of `gate` while a live check verifies
-    /// it (see [`super::subscription`]).
-    pub pending_gate_verification: Option<pi_shell::auth::GateInfo>,
-    /// Generation stamp of the current gate verification.
-    pub gate_verify_gen: u64,
     /// Structured startup warnings collected from the terminal diagnostics
     /// engine at launch. Empty when the environment is healthy.
     pub startup_warnings: Vec<crate::startup::StartupWarning>,
@@ -1046,7 +975,6 @@ impl AppView {
     }
     /// Apply typed auth metadata from the shell.
     pub fn apply_auth_meta(&mut self, meta: &pi_shell::auth::AuthMeta) {
-        self.pending_gate_verification = None;
         let was_gated = self.gate.is_some();
         self.team_id = meta.team_id.clone();
         self.team_name = meta.team_name.clone();
@@ -1055,49 +983,23 @@ impl AppView {
         self.coding_data_retention_opt_out = meta.coding_data_retention_opt_out;
         self.gate = meta.gate.clone();
         if was_gated && self.gate.is_none() {
-            self.paywall_check_started = None;
             pi_telemetry::session_ctx::log_event(pi_telemetry::events::SubscriptionActivated {
                 auth_method: self.login_method_id.as_ref().map(|id| id.0.to_string()),
                 upsell_shown_this_session: self.access_gate_shown_logged,
             });
         }
         self.subscription_tier = meta.subscription_tier.clone();
-        let was_api_key = self.is_api_key_auth;
         self.is_api_key_auth = meta.auth_mode.as_deref().is_some_and(is_api_key_label)
             || meta
                 .subscription_tier
                 .as_deref()
                 .is_some_and(is_api_key_label);
-        self.usage_visible =
-            meta.team_name.is_none() && !self.is_api_key_auth && !self.has_external_auth_provider;
-        self.sync_billing_surface_to_agents();
-        self.apply_tier_restrictions();
         if self.is_api_key_auth {
             self.ensure_voice_for_api_key();
-        } else if was_api_key && is_restricted_tier(self.subscription_tier.as_deref()) {
-            self.voice_reset();
-            self.voice_ui_active = false;
-            self.apply_voice_mode_enabled(false);
         }
         if let Some(show) = meta.show_resolved_model {
             self.show_resolved_model = show;
         }
-    }
-    /// Mirror billing + `/usage` gates onto every slash surface (agents,
-    /// welcome).
-    pub(crate) fn sync_billing_surface_to_agents(&mut self) {
-        let billing = self.usage_visible;
-        let usage_cmd = !self.has_external_auth_provider;
-        for agent in self.agents.values_mut() {
-            agent.set_billing_surface_visible(billing);
-            agent.set_usage_command_visible(usage_cmd);
-        }
-        self.welcome_prompt
-            .slash_controller
-            .set_billing_surface_visible(billing);
-        self.welcome_prompt
-            .slash_controller
-            .set_usage_command_visible(usage_cmd);
     }
     /// Force voice on for API-key sessions when only a remote rule left it off.
     /// Requirement / env / config pins still win.
@@ -1177,7 +1079,6 @@ impl AppView {
             welcome_on_auth_url: false,
             welcome_announcement: WelcomeAnnouncementState::default(),
             welcome_auth_fallback_rect: None,
-            welcome_refresh_rect: None,
             welcome_gate_url_rect: None,
             welcome_upgrade_cta_rect: None,
             welcome_privacy_banner_opt_in_rect: None,
@@ -1252,16 +1153,10 @@ impl AppView {
             show_tips: None,
             ask_user_question_timeout_enabled: None,
             zdr_access_enabled: false,
-            usage_billing_redirect_url: None,
             access_gate_shown_logged: false,
             announcement_cta_impressions_logged: Default::default(),
             gate: None,
             subscription_tier: None,
-            paywall_check_started: None,
-            last_subscription_check_at: None,
-            subscription_watch_interval_secs: None,
-            pending_gate_verification: None,
-            gate_verify_gen: 0,
             startup_warnings: Vec::new(),
             is_api_key_auth: false,
             relaunch: None,
@@ -1269,12 +1164,6 @@ impl AppView {
             pending_screen_mode_switch: None,
             show_resolved_model: true,
             sharing_enabled: false,
-            usage_visible: true,
-            has_external_auth_provider: false,
-            tier_restricted_commands: Vec::new(),
-            credit_balance: None,
-            auto_topup: None,
-            billing_poll_wanted: false,
             session_picker_grouped: false,
             scheduler_background_loops_seed: true,
             cancel_rewind_enabled: true,
@@ -1310,7 +1199,7 @@ impl AppView {
     }
     /// Whether launch may spawn the background STT pipeline (independent of
     /// `/voice`). Gated on the voice gate + a build that compiled in audio
-    /// capture. Free-tier upsell is separate ([`Self::is_voice_tier_restricted`]).
+    /// capture.
     pub fn voice_can_start_pipeline(&self) -> bool {
         self.voice_mode_enabled && pi_voice::AUDIO_SUPPORTED
     }
@@ -1346,42 +1235,6 @@ impl AppView {
             agent.prompt.set_auto_mode_available(available);
         }
         self.welcome_prompt.set_auto_mode_available(available);
-    }
-    /// Recompute the tier-restricted slash commands from the current auth
-    /// state and sync the deny list into every slash surface (welcome
-    /// prompt, all agents) so restricted commands hide/show in
-    /// lockstep. Mirrors [`Self::apply_voice_mode_enabled`].
-    ///
-    /// Called from [`Self::apply_auth_meta`] (startup / login) and from the
-    /// `legacy ext RPC` handler when the subscription tier changes, so
-    /// a mid-session upgrade lifts the restrictions without a restart.
-    pub fn apply_tier_restrictions(&mut self) {
-        let restricted = self.team_name.is_none()
-            && !self.is_api_key_auth
-            && !self.has_external_auth_provider
-            && is_restricted_tier(self.subscription_tier.as_deref());
-        let names: Vec<String> = if restricted {
-            TIER_RESTRICTED_COMMANDS
-                .iter()
-                .map(|n| (*n).to_string())
-                .collect()
-        } else {
-            Vec::new()
-        };
-        for agent in self.agents.values_mut() {
-            agent.set_restricted_commands(&names);
-        }
-        self.welcome_prompt.set_restricted_commands(&names);
-        self.tier_restricted_commands = names;
-    }
-    /// Whether voice mode is withheld for the current subscription tier
-    /// (free / X Basic personal accounts). Derived from the computed
-    /// [`Self::tier_restricted_commands`] deny list so it stays in lockstep
-    /// with the slash-command gate. Used to gate the Ctrl+Space / F8 voice
-    /// keybinding, which bypasses the slash registry entirely (see
-    /// [`crate::app::dispatch::voice`]).
-    pub fn is_voice_tier_restricted(&self) -> bool {
-        self.tier_restricted_commands.iter().any(|c| c == "voice")
     }
     /// Draw-time expiry can flip the live-announcement predicate between
     /// pushes; resync the slash gate only when it diverges from the stored
@@ -1812,7 +1665,6 @@ impl AppView {
                     prompt_rect: self.welcome_prompt_rect.as_ref(),
                     auth_url_rect: self.welcome_auth_url_rect.as_ref(),
                     auth_fallback_rect: self.welcome_auth_fallback_rect.as_ref(),
-                    refresh_rect: self.welcome_refresh_rect.as_ref(),
                     gate_url_rect: self.welcome_gate_url_rect.as_ref(),
                     upgrade_cta_rect: self.welcome_upgrade_cta_rect.as_ref(),
                     privacy_banner_opt_in_rect: self.welcome_privacy_banner_opt_in_rect.as_ref(),
@@ -2042,7 +1894,6 @@ struct WelcomeInputCtx<'a> {
     prompt_rect: Option<&'a ratatui::layout::Rect>,
     auth_url_rect: Option<&'a ratatui::layout::Rect>,
     auth_fallback_rect: Option<&'a ratatui::layout::Rect>,
-    refresh_rect: Option<&'a ratatui::layout::Rect>,
     gate_url_rect: Option<&'a ratatui::layout::Rect>,
     /// Hit-test rect for the welcome hero upgrade CTA `[label]` button
     /// (click → open the promo url).
@@ -2461,11 +2312,6 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                         }
                         return dispatch_menu_action(i);
                     }
-                }
-                if let Some(rect) = ctx.refresh_rect
-                    && rect.contains(ratatui::layout::Position::new(mouse.column, mouse.row))
-                {
-                    return InputOutcome::Action(Action::CheckSubscription);
                 }
                 if let Some(rect) = ctx.gate_url_rect
                     && rect.contains(ratatui::layout::Position::new(mouse.column, mouse.row))
@@ -2961,9 +2807,6 @@ impl AppView {
                             session_picker_pending_delete: self
                                 .session_picker_pending_delete
                                 .is_some(),
-                            credit_balance: self.credit_balance.as_ref(),
-                            auto_topup: self.auto_topup.as_ref(),
-                            usage_visible: self.usage_visible,
                             is_api_key_auth: self.is_api_key_auth,
                             welcome_announcement_expanded: self.welcome_announcement.expanded,
                             upgrade_cta: hero_cta.map(|(_owner, label, _)| label),
@@ -2980,7 +2823,6 @@ impl AppView {
                         self.welcome_prompt_rect = result.prompt_rect;
                         self.welcome_auth_url_rect = result.auth_url_rect;
                         self.welcome_auth_fallback_rect = result.auth_fallback_rect;
-                        self.welcome_refresh_rect = result.refresh_rect;
                         self.welcome_gate_url_rect = result.gate_url_rect;
                         self.welcome_upgrade_cta_rect = result.upgrade_cta_rect;
                         self.welcome_privacy_banner_opt_in_rect = result.privacy_banner_opt_in_rect;

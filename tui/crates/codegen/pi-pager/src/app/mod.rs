@@ -49,7 +49,6 @@ mod startup_failure;
 pub(crate) mod status_blocks;
 pub(crate) mod status_line;
 mod status_line_policy;
-pub(crate) mod subscription;
 mod turn_completion;
 mod xt_filter;
 pub(crate) use crate::terminal::{kitty_flags_pushed, kitty_releases_reported};
@@ -407,29 +406,6 @@ pub(crate) struct ExitSummary {
     pub last_prompt: Option<String>,
     /// `None` when the newest prompt is still unanswered.
     pub last_response: Option<String>,
-}
-/// Join early prefetch to get remote settings (with timeout).
-///
-/// Remote settings come from the product settings API and contain
-/// announcements, etc.  Waits up to 2 s for the background thread.
-pub fn join_early_prefetch(
-    handle: Option<pi_shell::agent::models::EarlyPrefetchHandle>,
-) -> Option<pi_shell::util::config::RemoteSettings> {
-    let handle = handle?;
-    if handle.is_finished() {
-        return match handle.join() {
-            Ok(r) => r.settings,
-            Err(_) => None,
-        };
-    }
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = tx.send(handle.join());
-    });
-    match rx.recv_timeout(std::time::Duration::from_secs(2)) {
-        Ok(Ok(r)) => r.settings,
-        _ => None,
-    }
 }
 /// First non-blank of CLI > env > config (precedence + blank-skip). `None` →
 /// nothing set; `acp::initialize` canonicalizes and applies the default.

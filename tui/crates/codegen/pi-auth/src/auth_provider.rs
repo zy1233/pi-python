@@ -1,6 +1,6 @@
 //! Credential dependency-inversion seam for outbound HTTP made by the
-//! data-collector. Shell installs `ShellAuthCredentialProvider` wrapping
-//! `AuthManager` + `TokenRefresher`; data-collector code holds an
+//! data-collector. The embedding application supplies an implementation (for
+//! example `StaticAuthCredentialProvider`); data-collector code holds an
 //! `Arc<dyn AuthCredentialProvider>`.
 
 use reqwest::RequestBuilder;
@@ -8,16 +8,15 @@ use reqwest::RequestBuilder;
 use crate::visibility::HttpAuth;
 
 /// Snapshot of the currently effective credentials. Used by callers
-/// that build their own header maps (the OTel OTLP exporter) or that
-/// need the bearer prefix for 401-attribution telemetry.
+/// that build their own header maps or that need the bearer prefix for
+/// 401-attribution telemetry.
 #[derive(Clone, Debug, Default)]
 pub struct CredentialSnapshot {
     /// Bearer token. `None` when no auth is configured (CI / `--api-key` headless).
     pub token: Option<String>,
     /// User identifier matching the bearer token's owner. `None` when no auth
     /// is configured or when the underlying provider has no concept of user
-    /// identity (`StaticAuthCredentialProvider`). Read by the OTel layer to
-    /// populate the `user.id` resource attribute.
+    /// identity (`StaticAuthCredentialProvider`).
     pub user_id: Option<String>,
     /// Team identifier from OAuth. `None` for personal accounts or when
     /// no auth is configured.

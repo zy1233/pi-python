@@ -639,7 +639,6 @@ impl AgentView {
                                 .hit_plan_approval_status
                                 .update_hover(mouse.column, mouse.row);
                             changed |= self.hit_context.update_hover(mouse.column, mouse.row);
-                            changed |= self.hit_credits.update_hover(mouse.column, mouse.row);
                         }
                         MouseEventKind::Down(MouseButton::Left) => {
                             if self.hit_voice_stop_button.contains(mouse.column, mouse.row) {

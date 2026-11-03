@@ -22,8 +22,7 @@
 //!   retention; this stream ships only to the customer's own collector under
 //!   the customer's own explicit double opt-in.
 //!
-//! This module is the second authoritative privacy boundary in this crate
-//! (alongside `otel_layer::redact`).
+//! This module is the authoritative privacy boundary in this crate.
 
 pub mod config;
 mod emit;

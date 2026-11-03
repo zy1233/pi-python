@@ -14,7 +14,7 @@ use pi_pager_diff::DiffHunk;
 
 use super::blocks::mermaid_content::DiagramAffordance;
 use super::blocks::{
-    AgentMessageBlock, BtwBlock, ContextInfoBlock, CreditLimitBlock, EditToolCallBlock,
+    AgentMessageBlock, BtwBlock, ContextInfoBlock, EditToolCallBlock,
     ExecuteToolCallBlock, LineRange, ListDirToolCallBlock, OtherToolCallBlock, ReadToolCallBlock,
     SearchFileMatch, SearchToolCallBlock, SessionEvent, SessionEventBlock, SystemMessageBlock,
     ThinkingBlock, ToolCallBlock, UserPromptBlock,
@@ -386,8 +386,6 @@ pub enum RenderBlock {
     Btw(BtwBlock),
     /// `/context` snapshot with categorical bar + breakdown.
     ContextInfo(ContextInfoBlock),
-    /// Credit-limit card for max-tier users (red accent, single action).
-    CreditLimit(CreditLimitBlock),
 }
 
 /// Delegate a method call to the inner block variant.
@@ -403,7 +401,6 @@ macro_rules! delegate_block {
             RenderBlock::SessionEvent(b) => b.$method($($arg),*),
             RenderBlock::Btw(b) => b.$method($($arg),*),
             RenderBlock::ContextInfo(b) => b.$method($($arg),*),
-            RenderBlock::CreditLimit(b) => b.$method($($arg),*),
         }
     };
 }
@@ -773,15 +770,6 @@ impl RenderBlock {
         RenderBlock::SessionEvent(SessionEventBlock::new(event))
     }
 
-    /// Create a credit-limit card (inline scrollback block for max-tier users).
-    pub fn credit_limit_card(
-        heading: impl Into<String>,
-        action: crate::scrollback::blocks::CreditLimitCardAction,
-        url: impl Into<String>,
-    ) -> Self {
-        RenderBlock::CreditLimit(CreditLimitBlock::new(heading, action, url))
-    }
-
     /// Get mutable access to a StubBlock if this is one.
     pub fn as_stub_mut(&mut self) -> Option<&mut StubBlock> {
         match self {
@@ -854,11 +842,6 @@ impl RenderBlock {
     /// Check if this block is an AgentMessage.
     pub fn is_agent_message(&self) -> bool {
         matches!(self, RenderBlock::AgentMessage(_))
-    }
-
-    /// Check if this block is a CreditLimit card.
-    pub fn is_credit_limit(&self) -> bool {
-        matches!(self, RenderBlock::CreditLimit(_))
     }
 
     /// Check if this block is a plan mode tool call (enter or exit).
@@ -946,8 +929,7 @@ impl RenderBlock {
             RenderBlock::Thinking(_) => Some(theme.accent_thinking),
             RenderBlock::System(_)
             | RenderBlock::SessionEvent(_)
-            | RenderBlock::ContextInfo(_)
-            | RenderBlock::CreditLimit(_) => None,
+            | RenderBlock::ContextInfo(_) => None,
             RenderBlock::Btw(_) => Some(theme.accent_plan),
             RenderBlock::Stub(block) => Some(block.accent_color),
         }
@@ -1068,9 +1050,6 @@ impl RenderBlock {
                 Some(b.content().rendered_plain_text()),
             ]),
             RenderBlock::ContextInfo(b) => join_searchable([Some(b.model.clone())]),
-            RenderBlock::CreditLimit(b) => {
-                join_searchable([Some(b.heading.clone()), Some(b.url.clone())])
-            }
             RenderBlock::ToolCall(tc) => tc.searchable_text(),
         }
     }
@@ -1435,18 +1414,6 @@ mod searchable_text_tests {
         let block = RenderBlock::context_info(snapshot, "grok-4.5");
         // Only the model name is source text; the rest is a numeric breakdown.
         assert_eq!(block.searchable_text().as_deref(), Some("grok-4.5"));
-    }
-
-    #[test]
-    fn credit_limit_indexes_heading_and_url() {
-        let block = RenderBlock::credit_limit_card(
-            "credit limit reached",
-            crate::scrollback::blocks::CreditLimitCardAction::EnablePayg,
-            "https://grok.com?_s=usage",
-        );
-        let text = block.searchable_text().expect("credit limit text");
-        assert!(text.contains("credit limit reached"), "got: {text:?}");
-        assert!(text.contains("https://grok.com?_s=usage"), "got: {text:?}");
     }
 
     #[test]

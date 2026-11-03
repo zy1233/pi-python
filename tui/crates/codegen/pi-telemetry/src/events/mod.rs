@@ -1658,13 +1658,6 @@ pub struct EventLoopStall {
 #[serde(rename_all = "snake_case")]
 pub enum SuperGrokUpsell {
     WelcomeScreen,
-    RateLimitError,
-    /// Free-usage-exhausted paywall modal (free-tier 429 with the
-    /// `subscription:free-usage-exhausted` well-known error code).
-    FreeUsagePaywall,
-    /// Upsell modal shown when a tier-restricted slash command
-    /// (`/usage`, `/imagine`, …) is invoked on the free / X Basic tiers.
-    RestrictedCommand,
 }
 
 #[derive(Serialize)]
@@ -2063,54 +2056,6 @@ pub struct StatusLineHealth {
 }
 
 // ---------------------------------------------------------------------------
-// Credit limit
-// ---------------------------------------------------------------------------
-
-/// 403 "run out of credits" — billing exhaustion (not request throttling).
-#[derive(Serialize)]
-pub struct CreditLimitHit {
-    pub model_id: String,
-}
-
-#[derive(Serialize, Clone, Copy)]
-#[serde(rename_all = "snake_case")]
-pub enum CreditLimitUpsellSurface {
-    /// Q&A modal with "Upgrade tier" + "Pay as you go" options (non-max-tier).
-    QuestionModal,
-    /// Inline scrollback card with PAYG link (max-tier / Heavy users).
-    InlineCard,
-}
-
-/// Credit-limit upsell displayed to the user.
-#[derive(Serialize)]
-pub struct CreditLimitUpsellShown {
-    pub surface: CreditLimitUpsellSurface,
-    pub max_tier: bool,
-    pub pay_as_you_go: bool,
-    /// User is on unified usage billing (buy-credits wording). When false,
-    /// legacy on-demand / PAYG wording was used.
-    #[serde(default)]
-    pub unified_billing: bool,
-}
-
-#[derive(Debug, Serialize, Clone, Copy)]
-#[serde(rename_all = "snake_case")]
-pub enum CreditLimitChoice {
-    UpgradeTier,
-    /// Covers both "Pay as you go" (enable) and "Increase limit" (raise cap).
-    PayAsYouGo,
-    /// Unified-billing / credits-pool users: purchase prepaid credits.
-    PurchaseCredits,
-}
-
-/// User clicked an option in the credit-limit upsell.
-#[derive(Serialize)]
-pub struct CreditLimitUpsellClicked {
-    pub surface: CreditLimitUpsellSurface,
-    pub choice: CreditLimitChoice,
-}
-
-// ---------------------------------------------------------------------------
 // Subscription conversion
 // ---------------------------------------------------------------------------
 
@@ -2441,9 +2386,6 @@ telemetry_event!(
     "rate_limit_hit",
     external = crate::external::schema::map_rate_limit_hit
 );
-telemetry_event!(CreditLimitHit, "credit_limit_hit");
-telemetry_event!(CreditLimitUpsellShown, "credit_limit_upsell_shown");
-telemetry_event!(CreditLimitUpsellClicked, "credit_limit_upsell_clicked");
 telemetry_event!(SubscriptionActivated, "subscription_activated");
 telemetry_event!(StatusLineConfigured, "status_line_configured");
 telemetry_event!(StatusLineHealth, "status_line_health");

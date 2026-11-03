@@ -7,7 +7,6 @@ pub(crate) mod block_viewer;
 pub mod btw_overlay;
 pub mod completion_dropdown;
 pub mod context_bar;
-pub(crate) mod credit_bar;
 pub(crate) mod debug_style;
 pub mod file_search;
 pub(crate) mod fps_hud;

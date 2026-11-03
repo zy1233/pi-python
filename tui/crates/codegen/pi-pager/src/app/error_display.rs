@@ -733,8 +733,8 @@ mod tests {
 
     #[test]
     fn recovers_status_from_own_banner_text() {
-        // PromptResponse race fallbacks (401 re-auth, 402 credit limit) sniff
-        // the already-formatted error text when the http_status field is
+        // PromptResponse race fallbacks (401 re-auth) sniff the
+        // already-formatted error text when the http_status field is
         // absent — our own headlines must parse.
         assert_eq!(
             parse_http_status("Request failed (402): usage balance exhausted"),

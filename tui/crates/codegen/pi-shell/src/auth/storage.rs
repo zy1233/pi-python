@@ -66,28 +66,6 @@ pub fn read_auth_json(auth_file: &Path) -> std::io::Result<AuthStore> {
     Ok(map)
 }
 
-/// Read auth.json, returning an empty map if the file does not exist.
-///
-/// Non-empty corrupt JSON, permission errors, etc. are returned as errors
-/// so the caller can decide whether to skip the write (to avoid clobbering
-/// sibling scopes).
-///
-/// Kept for the test-only `persist_and_swap` and as a strict reader.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "used from tests only; remove expect when wired in production"
-    )
-)]
-pub(crate) fn read_auth_json_or_empty(auth_file: &Path) -> std::io::Result<AuthStore> {
-    match read_auth_json(auth_file) {
-        Ok(map) => Ok(map),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(AuthStore::new()),
-        Err(e) => Err(e),
-    }
-}
-
 /// Best-effort backup of a corrupt (unparseable) auth.json.
 ///
 /// If the file exists and `read_auth_json` fails with `InvalidData`,

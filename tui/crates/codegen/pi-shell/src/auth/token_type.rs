@@ -33,17 +33,6 @@ impl TokenType {
         }
     }
 
-    /// Stable telemetry mirror for the `manual_auth` KPI.
-    pub(crate) fn telemetry_kind(self) -> pi_telemetry::events::AuthTokenKind {
-        use pi_telemetry::events::AuthTokenKind as K;
-        match self {
-            Self::OidcSession => K::OidcSession,
-            Self::ExternalBinary => K::ExternalBinary,
-            Self::LegacySession => K::LegacySession,
-            Self::ApiKey => K::ApiKey,
-            Self::None => K::None,
-        }
-    }
 }
 
 #[cfg(test)]

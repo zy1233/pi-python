@@ -1,9 +1,8 @@
 //! Top-level action router: maps actions and action results to handlers.
 use super::auth::{
-    dispatch_cancel_login, dispatch_login, dispatch_logout, dispatch_submit_auth_code,
-    dispatch_switch_account,
+    dispatch_cancel_login, dispatch_login, dispatch_logout, dispatch_open_supergrok_url,
+    dispatch_submit_auth_code, dispatch_switch_account,
 };
-use super::billing::dispatch_open_supergrok_url;
 use super::ctx::{
     navigate_clearing_selection, open_url_or_show, sync_sleep_inhibitor, with_active_agent,
     with_scrollback,
@@ -62,7 +61,6 @@ use crate::app::actions::{Action, Effect};
 use crate::app::agent_view::ActivePane;
 use crate::app::app_view::{ActiveView, AppView, AuthState};
 use crate::scrollback::types::DisplayMode;
-use pi_telemetry::session_ctx::log_event;
 pub(super) fn dispatch_copy_auth_url(
     app: &mut AppView,
     copy: impl FnOnce(&str) -> crate::clipboard::ClipboardDelivery,
@@ -286,34 +284,7 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             if group_toggled {
                 return vec![];
             }
-            let mut credit_card: Option<(String, pi_telemetry::events::CreditLimitChoice)> = None;
-            with_scrollback(app, |s| {
-                if let Some(idx) = s.selected()
-                    && let Some(entry) = s.entry(idx)
-                    && let crate::scrollback::block::RenderBlock::CreditLimit(ref blk) = entry.block
-                {
-                    use crate::scrollback::blocks::CreditLimitCardAction;
-                    let choice = match blk.action {
-                        CreditLimitCardAction::PurchaseCredits => {
-                            pi_telemetry::events::CreditLimitChoice::PurchaseCredits
-                        }
-                        CreditLimitCardAction::EnablePayg
-                        | CreditLimitCardAction::IncreasePaygLimit => {
-                            pi_telemetry::events::CreditLimitChoice::PayAsYouGo
-                        }
-                    };
-                    credit_card = Some((blk.url.clone(), choice));
-                }
-            });
-            if let Some((url, choice)) = credit_card {
-                log_event(pi_telemetry::events::CreditLimitUpsellClicked {
-                    surface: pi_telemetry::events::CreditLimitUpsellSurface::InlineCard,
-                    choice,
-                });
-                open_url_or_show(app, &url);
-            } else {
-                dispatch_open_block_viewer(app);
-            }
+            dispatch_open_block_viewer(app);
             vec![]
         }
         Action::NextModel => vec![],
@@ -428,7 +399,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::PermissionCancel => dispatch_permission_cancel(app),
         Action::Logout => dispatch_logout(app),
         Action::SwitchAccount => dispatch_switch_account(app),
-        Action::CheckSubscription => vec![Effect::CheckSubscription { verify: None }],
         Action::OpenSupergrokUrl => dispatch_open_supergrok_url(app),
         Action::OpenUrl(url) => {
             if url.starts_with("file://") {

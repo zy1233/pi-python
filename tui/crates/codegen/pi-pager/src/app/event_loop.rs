@@ -1143,7 +1143,7 @@ pub(crate) async fn run(
     // else: auth_state defaults to Done (already authenticated eagerly)
     // Effects stashed until after the initial render, so the user sees the
     // welcome/auth UI right away.
-    let mut post_render_effects = if standard_acp {
+    let post_render_effects = if standard_acp {
         app.auth_state = super::app_view::AuthState::Done;
         vec![]
     } else if needs_interactive_login {
@@ -1162,8 +1162,6 @@ pub(crate) async fn run(
         vec![]
     };
 
-    app.has_external_auth_provider = detect_external_auth_provider(&app.auth_methods);
-
     if let Some(meta) = connection.auth_meta.as_ref() {
         match serde_json::from_value::<pi_shell::auth::AuthMeta>(meta.clone()) {
             Ok(auth_meta) => app.apply_auth_meta(&auth_meta),
@@ -1175,12 +1173,6 @@ pub(crate) async fn run(
             .auth_methods
             .iter()
             .any(|m| m.id().0.as_ref() == pi_shell::agent::auth_method::PI_API_KEY_METHOD_ID);
-        // No AuthMeta on this path — API keys / external auth have no
-        // consumer billing surface. External auth also hides `/usage`.
-        if app.is_api_key_auth || app.has_external_auth_provider {
-            app.usage_visible = false;
-            app.sync_billing_surface_to_agents();
-        }
     }
 
     // After auth so API-key + managed policy resolve correctly.
@@ -1203,14 +1195,7 @@ pub(crate) async fn run(
         app.gate = AppView::gate_from_settings(rs);
     }
 
-    // Re-impose the startup gate through the chokepoint: cached auth meta
-    // and the settings prefetch are both possibly stale, so a consumer
-    // session's gate is deferred for live verification before first paint.
-    if !standard_acp {
-        if let Some(gate) = app.gate.take() {
-            post_render_effects.extend(app.impose_gate(gate));
-        }
-    } else {
+    if standard_acp {
         app.gate = None;
     }
 
@@ -1260,10 +1245,6 @@ pub(crate) async fn run(
         remote_settings.as_ref(),
     );
 
-    app.subscription_watch_interval_secs = remote_settings
-        .as_ref()
-        .and_then(|rs| rs.subscription_watch_interval_secs);
-
     // Full layered resolve (env/requirements/remote may beat plain `[ui]`).
     crate::appearance::cache::set_show_thinking_blocks(
         pi_shell::util::config::resolve_show_thinking_blocks(
@@ -1304,10 +1285,6 @@ pub(crate) async fn run(
                 .as_ref()
                 .and_then(|s| s.scheduler_background_loops),
         );
-
-    app.usage_billing_redirect_url = remote_settings
-        .as_ref()
-        .and_then(|s| s.usage_billing_redirect_url.clone());
 
     if app.is_access_blocked() {
         app.welcome_prompt_focused = false;
@@ -1749,9 +1726,6 @@ pub(crate) async fn run(
     // iteration so it is popped on every close path.
     let mut gboom_keyboard_pushed = false;
 
-    const BILLING_POLL_INTERVAL: Duration = Duration::from_secs(30);
-    let mut billing_poll_at: Option<Instant> = None;
-
     // `[ui.status_line] refresh_interval`: re-runs a command row on a timer.
     // Read once, like the section it comes from, so a future config reload
     // must run this arming again; unarmed while the config reserves no row.
@@ -1765,17 +1739,6 @@ pub(crate) async fn run(
     let mut status_line_refresh_at: Option<Instant> =
         status_line_refresh_interval.map(|interval| Instant::now() + interval);
 
-    const GATE_POLL_INTERVAL: Duration = Duration::from_secs(30);
-    let mut gate_poll_at: Option<Instant> = None;
-
-    // Free→paid subscription watch (see `app::subscription`).
-    let mut subscription_watch_at: Option<Instant> = if app.subscription_watch_wanted() {
-        app.subscription_watch_interval()
-            .map(|iv| Instant::now() + iv)
-    } else {
-        None
-    };
-
     // Folder trust is seeded earlier (before the reader thread) so the startup
     // type-ahead gate can consult it; see `seed_trust_state` above.
 
@@ -1788,20 +1751,6 @@ pub(crate) async fn run(
 
     // Initial render
     presenter.request_presentation(&mut app, terminal, false);
-
-    // status only; shell auto-syncs post-auth
-    if matches!(app.auth_state, AuthState::Done) {
-        // Fetch billing early so the welcome screen can show a credit warning.
-        if app.usage_visible {
-            let effs = vec![super::actions::Effect::FetchAppBilling];
-            if process_effects(effs, &mut tasks, &mut app) {
-                return Ok(finish_run(&mut app));
-            }
-        }
-        if !app.has_access() {
-            gate_poll_at = Some(Instant::now() + GATE_POLL_INTERVAL);
-        }
-    }
 
     if !post_render_effects.is_empty() && process_effects(post_render_effects, &mut tasks, &mut app)
     {
@@ -2006,10 +1955,6 @@ pub(crate) async fn run(
                 &mut animation_tick_at,
                 tick_interval,
                 &mut resize_debounce_at,
-                &mut billing_poll_at,
-                BILLING_POLL_INTERVAL,
-                &mut gate_poll_at,
-                GATE_POLL_INTERVAL,
                 &mut presenter,
             );
         }
@@ -2120,15 +2065,6 @@ pub(crate) async fn run(
             app.gboom_release_all_games();
         }
 
-        // (Re-)arm the subscription watch on the dormant→wanted transition
-        // and after each fired tick.
-        if subscription_watch_at.is_none()
-            && app.subscription_watch_wanted()
-            && let Some(iv) = app.subscription_watch_interval()
-        {
-            subscription_watch_at = Some(Instant::now() + iv);
-        }
-
         // Future that sleeps until the next animation tick, or waits forever if none.
         let animation_tick = async {
             match animation_tick_at {
@@ -2189,29 +2125,8 @@ pub(crate) async fn run(
             }
         };
 
-        let billing_poll = async {
-            match billing_poll_at {
-                Some(at) => sleep_until(at).await,
-                None => std::future::pending().await,
-            }
-        };
-
         let status_line_refresh = async {
             match status_line_refresh_at {
-                Some(at) => sleep_until(at).await,
-                None => std::future::pending().await,
-            }
-        };
-
-        let gate_poll = async {
-            match gate_poll_at {
-                Some(at) => sleep_until(at).await,
-                None => std::future::pending().await,
-            }
-        };
-
-        let subscription_watch = async {
-            match subscription_watch_at {
                 Some(at) => sleep_until(at).await,
                 None => std::future::pending().await,
             }
@@ -2372,10 +2287,6 @@ pub(crate) async fn run(
                             &mut animation_tick_at,
                             tick_interval,
                             &mut resize_debounce_at,
-                            &mut billing_poll_at,
-                            BILLING_POLL_INTERVAL,
-                            &mut gate_poll_at,
-                            GATE_POLL_INTERVAL,
                             &mut presenter,
                         );
                     }
@@ -2507,33 +2418,6 @@ pub(crate) async fn run(
                 schedule_tick(&mut animation_tick_at, &app, tick_interval);
             }
 
-            _ = billing_poll => {
-                billing_poll_at = None;
-                if let ActiveView::Agent(id) = app.active_view {
-                    let effs = vec![Effect::FetchBilling {
-                        agent_id: id,
-                        silent: true,
-                    }];
-                    if process_effects(effs, &mut tasks, &mut app) {
-                        break;
-                    }
-                }
-                if app.billing_poll_wanted {
-                    billing_poll_at = Some(Instant::now() + BILLING_POLL_INTERVAL);
-                }
-            }
-
-            _ = gate_poll => {
-                gate_poll_at = None;
-                let effs = vec![Effect::RefreshGate];
-                if process_effects(effs, &mut tasks, &mut app) {
-                    break;
-                }
-                if !app.has_access() {
-                    gate_poll_at = Some(Instant::now() + GATE_POLL_INTERVAL);
-                }
-            }
-
             _ = status_line_refresh => {
                 status_line_refresh_at = None;
                 // lands in `pending_effects`, drained below like every arm's.
@@ -2548,14 +2432,6 @@ pub(crate) async fn run(
                 // slow script from stacking runs behind the timer.
                 if let Some(interval) = status_line_refresh_interval {
                     status_line_refresh_at = Some(Instant::now() + interval);
-                }
-            }
-
-            _ = subscription_watch => {
-                subscription_watch_at = None;
-                let effs = app.fire_subscription_check("watch");
-                if process_effects(effs, &mut tasks, &mut app) {
-                    break;
                 }
             }
 
@@ -2733,62 +2609,16 @@ fn load_initial_config_session_bools() -> InitialConfigSessionBools {
     }
 }
 
-/// Detect external-auth installs once at pager startup.
-fn detect_external_auth_provider(auth_methods: &[agent_client_protocol::AuthMethod]) -> bool {
-    let method_is_external = |method: &agent_client_protocol::AuthMethod| {
-        method
-            .meta()
-            .as_ref()
-            .and_then(|v| v.get("external_provider"))
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-    };
-    let env_set = || {
-        std::env::var("GROK_AUTH_PROVIDER_COMMAND")
-            .ok()
-            .is_some_and(|s| !s.trim().is_empty())
-    };
-    let config_set = || {
-        let Ok(raw) = pi_shell::config::load_effective_config() else {
-            return false;
-        };
-        let Ok(cfg) = pi_shell::agent::config::Config::new_from_toml_cfg(&raw) else {
-            return false;
-        };
-        cfg.grok_com_config
-            .auth_provider_command
-            .as_deref()
-            .is_some_and(|s| !s.trim().is_empty())
-    };
-    auth_methods.iter().any(method_is_external) || env_set() || config_set()
-}
-
 /// Bookkeeping shared by the JoinSet arm and the deferred SessionLoaded drain.
-/// A deferred load that sets `billing_poll_wanted` must arm the poll here;
-/// waiting for an unrelated later event would stall billing/gate timers.
 fn after_task_complete_dispatch(
     app: &AppView,
     animation_tick_at: &mut Option<Instant>,
     tick_interval: Duration,
     resize_debounce_at: &mut Option<Instant>,
-    billing_poll_at: &mut Option<Instant>,
-    billing_poll_interval: Duration,
-    gate_poll_at: &mut Option<Instant>,
-    gate_poll_interval: Duration,
     presenter: &mut Presenter,
 ) {
     schedule_tick(animation_tick_at, app, tick_interval);
     *resize_debounce_at = None;
-    if app.billing_poll_wanted && billing_poll_at.is_none() {
-        *billing_poll_at = Some(Instant::now() + billing_poll_interval);
-    } else if !app.billing_poll_wanted {
-        *billing_poll_at = None;
-    }
-    if !app.has_access() && gate_poll_at.is_none() {
-        *gate_poll_at = Some(Instant::now() + gate_poll_interval);
-    } else if app.has_access() {
-        *gate_poll_at = None;
-    }
     presenter.request(false);
 }
 
@@ -3015,12 +2845,6 @@ async fn drain_and_process(
                     && crate::clipboard::clipboard_image_probe_supported()
                 {
                     crate::clipboard::prewarm_image_probe();
-                }
-                // The user may have just subscribed in the browser and
-                // tabbed back.
-                let effs = app.fire_subscription_check("focus");
-                if process_effects(effs, tasks, app) {
-                    return true;
                 }
                 // Restore Prompt on refocus: needs-input overlay always, else idle non-vim.
                 match app.active_view {

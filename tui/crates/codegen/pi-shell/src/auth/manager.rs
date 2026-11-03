@@ -26,7 +26,6 @@ use crate::util::dual_clock::DualClock;
 use crate::auth::config::GrokComConfig;
 use crate::auth::error::AuthError;
 use crate::auth::token_type::TokenType;
-use pi_telemetry::events::ManualAuthSurface;
 
 #[cfg(test)]
 use super::model::UserInfo;
@@ -38,8 +37,6 @@ use super::storage::{
     AuthFileLock, read_auth_json, read_auth_json_or_empty_recovering_corrupt, write_auth_json,
 };
 
-#[cfg(test)]
-use super::storage::read_auth_json_or_empty;
 #[cfg(test)]
 use chrono::DateTime;
 #[cfg(test)]
@@ -127,17 +124,7 @@ const _: () = assert!(
 /// giving the lock holder time to finish writing.
 const LOCK_TIMEOUT_WAIT: StdDuration = StdDuration::from_secs(2);
 
-/// `force_reload_from_disk` re-read budget. A single `auth.json` read can
-/// return `NotFound`/unreadable for reasons unrelated to logout — most
-/// notably the first read right after wake-from-sleep, where the filesystem
-/// briefly resolves the path to `ENOENT`. Retrying a few times absorbs that
-/// transient; a genuine deletion/logout stays missing across the budget.
-const RELOAD_RETRY_TRIES: usize = 3;
 
-/// Backoff between `force_reload_from_disk` re-reads. Short enough to keep the
-/// (sync) caller responsive, long enough to outlast a wake-time FS settle.
-/// Only paid on the disk-anomaly branch, never on a healthy read.
-const RELOAD_RETRY_BACKOFF: StdDuration = StdDuration::from_millis(50);
 
 /// Sticky permanent-refresh verdict, scoped to the credential that produced it
 /// (`token_key`). The scope is what makes invalidation automatic: any other
@@ -166,7 +153,7 @@ const PERMANENT_FAILURE_TTL: StdDuration = StdDuration::from_secs(300);
 /// Single source of truth for `auth.json` + the in-memory bearer.
 ///
 /// Lock order: `refresh_lock` (async) -> the sync locks (`inner` / `refresher`
-/// / `permanent_failure` / `manual_auth`), never co-held; `permanent_failure()`
+/// / `permanent_failure`), never co-held; `permanent_failure()`
 /// reads `permanent_failure` first and only then `inner` (via
 /// `attempted_verdict_key`, when a verdict is stored), never co-held. Never hold
 /// a `parking_lot` guard across `.await`. Refreshers return [`RefreshOutcome`]
@@ -225,9 +212,6 @@ pub struct AuthManager {
     refresh_drain_cv: parking_lot::Condvar,
     /// Idempotency guard for `start_system_power_listener`.
     power_listener_started: std::sync::atomic::AtomicBool,
-    /// Per-process `manual_auth` KPI debounce, shared by all recoveries on this
-    /// manager so repeated 401s on the most-recent dead credential emit once.
-    manual_auth: crate::auth::recovery::ManualAuthTracker,
     /// When the current unbroken run of dark-wake refresh deferrals began, on
     /// two clocks (see [`DualClock`]); `None` outside such a run. Bounds the
     /// deferral to [`sleep_gate::DARK_WAKE_DEFER_MAX`] so a machine stuck
@@ -442,7 +426,6 @@ impl AuthManager {
             refresh_drain_lock: parking_lot::Mutex::new(()),
             refresh_drain_cv: parking_lot::Condvar::new(),
             power_listener_started: std::sync::atomic::AtomicBool::new(false),
-            manual_auth: Default::default(),
             dark_wake_defer_since: parking_lot::RwLock::new(None),
             #[cfg(test)]
             dark_wake_override: parking_lot::Mutex::new(None),
@@ -531,118 +514,8 @@ impl AuthManager {
         *self.inner.write() = None;
     }
 
-    /// Re-read `auth.json` and reconcile the in-memory cache with it.
-    ///
-    /// A disk read returning "no usable token" has very different meanings that
-    /// must not be conflated:
-    ///
-    /// * [`DiskAuthState::EntryMissing`] — the file is readable but our scope is
-    ///   gone. This is the trustworthy "logged out / scope removed" signal, so
-    ///   the in-memory credentials (and any cached permanent_failure) are
-    ///   dropped together.
-    /// * [`DiskAuthState::FileMissing`] / [`DiskAuthState::Unreadable`] — a
-    ///   *disk anomaly*. The classic case is the first read after wake-from-
-    ///   sleep transiently resolving `auth.json` to `ENOENT`. This is **not**
-    ///   proof the credentials are gone, so we retry briefly and — if it
-    ///   persists — retain a still-live in-memory refresh token rather than
-    ///   discard the only copy. The server (a 401 driving `permanent_failure`)
-    ///   stays the authority on whether the token is actually dead.
-    pub(crate) fn force_reload_from_disk(&self) {
-        self.force_reload_from_disk_with(RELOAD_RETRY_TRIES, RELOAD_RETRY_BACKOFF);
-    }
 
-    /// Inner of [`force_reload_from_disk`] with the retry budget injectable so
-    /// the disk-anomaly branch is unit-testable without real sleeps.
-    fn force_reload_from_disk_with(&self, tries: usize, backoff: StdDuration) {
-        let mut last_state = DiskAuthState::FileMissing;
-        for attempt in 0..tries.max(1) {
-            if attempt > 0 && !backoff.is_zero() {
-                std::thread::sleep(backoff);
-            }
-            let (auth, state) = self.read_disk_auth_with_state();
-            last_state = state;
-            match state {
-                // Healthy entry on disk: regular swap. Do NOT clear the
-                // permanent_failure here -- the token may just be a re-export
-                // of the same broken refresh_token.
-                DiskAuthState::Ok => {
-                    *self.inner.write() = auth;
-                    // A re-read (e.g. relay reconnect) can adopt a wrong-team
-                    // token a sibling wrote; clear it here, mirroring `new()`.
-                    self.enforce_pin_on_loaded_token();
-                    return;
-                }
-                // File readable, our scope genuinely absent: the trustworthy
-                // logout / scope-removed signal.
-                DiskAuthState::EntryMissing => {
-                    self.drop_in_memory_credentials("scope absent on readable auth.json");
-                    self.enforce_pin_on_loaded_token();
-                    return;
-                }
-                // Disk anomaly: a transient (e.g. wake-time ENOENT) heals on a
-                // retry; a real loss persists across the budget.
-                DiskAuthState::FileMissing | DiskAuthState::Unreadable => {}
-            }
-        }
 
-        // Persistent disk anomaly. Discarding a live refresh token here is the
-        // step that turns a transient disk blip into irreversible credential
-        // loss (the RT may exist nowhere else), so retain it unless it is
-        // already known-dead or there is nothing to protect. "Known-dead"
-        // means a STICKY verdict (`RefreshTokenRejected` — the IdP rejected
-        // this very credential): a recoverable verdict (`ClientRejected` /
-        // escalated `Other`, e.g. three post-wake network blips) says nothing
-        // about the RT's validity, and a wake-time FS anomaly co-occurring
-        // with those blips must not forfeit the only copy of a live RT.
-        let in_mem = self.current_or_expired();
-        let sticky_verdict = matches!(
-            self.permanent_failure(),
-            Some(AuthError::Refresh(crate::auth::error::RefreshTokenError::Permanent(ref e)))
-                if e.reason.is_sticky()
-        );
-        let retain = in_mem.as_ref().is_some_and(|a| a.refresh_token.is_some()) && !sticky_verdict;
-        if let Some(a) = in_mem.filter(|_| retain) {
-            pi_telemetry::unified_log::warn(
-                "auth: disk anomaly, retaining in-memory credentials",
-                None,
-                Some(serde_json::json!({
-                    "disk_state": format!("{last_state:?}"),
-                    "retained_key_prefix": bearer_suffix(&a.key),
-                    "was_expired": is_expired(&a),
-                })),
-            );
-            // In-memory credentials kept as-is.
-        } else {
-            self.drop_in_memory_credentials(
-                "disk anomaly; no live refresh token to retain (missing RT or permanent failure)",
-            );
-        }
-        self.enforce_pin_on_loaded_token();
-    }
-
-    /// Drop the in-memory credentials, loudly. Logs the discard (with `reason`)
-    /// before routing through [`clear_inner`]. Also clears a sticky permanent
-    /// verdict so force-reload / disk-anomaly paths surface `NotLoggedIn`
-    /// rather than a retained `invalid_grant`. Permanent discard after a live
-    /// IdP rejection uses [`clear_inner`] alone so the sticky short-circuit
-    /// survives until login.
-    fn drop_in_memory_credentials(&self, reason: &str) {
-        if let Some(d) = self.current_or_expired() {
-            pi_telemetry::unified_log::warn(
-                "auth: in-memory credentials dropped (disk reload found none)",
-                None,
-                Some(serde_json::json!({
-                    "reason": reason,
-                    "dropped_key_prefix": bearer_suffix(&d.key),
-                    "had_refresh_token": d.refresh_token.is_some(),
-                    "was_expired": is_expired(&d),
-                    "disk_state": (*self.disk_state.read()).map(|s| format!("{s:?}")),
-                })),
-            );
-        }
-        self.clear_inner();
-        *self.permanent_failure.write() = None;
-    }
 
     // ── Read methods ─────────────────────────────────────────────────
     //
@@ -934,9 +807,6 @@ impl AuthManager {
         enrichment::spawn(Arc::clone(self), auth);
     }
 
-    pub(crate) fn grok_com_config(&self) -> &GrokComConfig {
-        &self.grok_com_config
-    }
 
     /// Run the external auth command and parse its output. Pure: no
     /// state mutation, no logging (refresher logs once on its arm).
@@ -1069,24 +939,6 @@ impl AuthManager {
         })
     }
 
-    /// Test-only hot_swap + disk write (skips proxy `/user`).
-    /// Production persistence routes through `update()`.
-    #[cfg(test)]
-    fn persist_and_swap(&self, auth: GrokAuth) -> Option<GrokAuth> {
-        self.hot_swap(auth.clone());
-        let mut map = match read_auth_json_or_empty(&self.path) {
-            Ok(m) => m,
-            Err(e) => {
-                tracing::warn!(error = %e, "auth: read failed in persist_and_swap, skipping disk write");
-                return Some(auth);
-            }
-        };
-        map.insert(self.scope.clone(), auth.clone());
-        if let Err(e) = write_auth_json(&self.path, &map) {
-            tracing::warn!(error = %e, "auth: failed to persist refreshed token to disk");
-        }
-        Some(auth)
-    }
 
     /// `true` when the refresh token on disk is present and differs from the
     /// one we actually spent — i.e. a sibling process rotated the RT while our
@@ -1148,23 +1000,7 @@ impl AuthManager {
             .and_then(|map| lookup_auth(&map, &self.scope))
     }
 
-    /// Wire-valid token present in on-disk `auth.json`, judged by actual expiry
-    /// ([`Self::is_token_hard_expired`]); never mutates in-memory state, unlike
-    /// [`Self::force_reload_from_disk`].
-    pub(crate) fn has_usable_disk_token(&self) -> bool {
-        self.read_disk_auth()
-            .is_some_and(|a| !self.is_token_hard_expired(&a))
-    }
 
-    /// Whether a wire-valid token is available in memory or on disk — a
-    /// credential worth a real outbound attempt. Judged by actual expiry so it
-    /// mirrors the `current_or_expired()` bearer the senders put on the wire; a
-    /// token inside the early-invalidation buffer still counts.
-    pub(crate) fn has_usable_token(&self) -> bool {
-        self.current_or_expired()
-            .is_some_and(|a| !self.is_token_hard_expired(&a))
-            || self.has_usable_disk_token()
-    }
 
     /// Like [`read_disk_auth`] but also returns the [`DiskAuthState`] so callers
     /// can tell a transient disk anomaly (`FileMissing`/`Unreadable`) apart from
@@ -1290,11 +1126,6 @@ impl AuthManager {
         self.refresher_configured.store(true, Ordering::SeqCst);
     }
 
-    /// `pub(super)` — for refresh dispatch only. External session
-    /// classification uses `is_session_based_method`.
-    pub(super) fn token_type(&self) -> TokenType {
-        TokenType::from_auth(self.inner.read().as_ref())
-    }
 
     // ── Pre-request dispatch ──────────────────────────────────────────
 
@@ -1884,71 +1715,8 @@ impl AuthManager {
 
     // ── 401 recovery entry point ──────────────────────────────────────
 
-    /// 401 recovery state machine driven by the `rejected` credential. For
-    /// one-shot recovery off the live bearer, use `try_recover_unauthorized()`.
-    pub(crate) fn unauthorized_recovery(
-        self: &Arc<Self>,
-        rejected: Option<GrokAuth>,
-        source: crate::auth::recovery::RecoverySource,
-    ) -> crate::auth::recovery::UnauthorizedRecovery {
-        crate::auth::recovery::UnauthorizedRecovery::new(self.clone(), rejected, source)
-    }
 
-    /// 401 recovery off the live bearer. Snapshots the rejected credential once
-    /// for KPI attribution. On **transient** refresh failure (network, 5xx,
-    /// sleep/dark-wake defer, lock timeout) retries with backoff before giving
-    /// up. Permanent failures and NotLoggedIn stop immediately.
-    ///
-    /// After a successful recovery the **caller** retries the original request
-    /// (turn-level may resubmit more than once; API resubmit is separate from
-    /// refresh retries).
-    pub(crate) async fn try_recover_unauthorized(
-        self: &Arc<Self>,
-        source: crate::auth::recovery::RecoverySource,
-    ) -> bool {
-        /// Bounded refresh attempts for non-permanent failures. Kept strictly
-        /// below OidcRefresher's consecutive-transient escalation threshold so
-        /// one 401 recovery cannot alone escalate a network blip to permanent
-        /// `Other`.
-        const MAX_TRANSIENT_ATTEMPTS: u32 = 2;
 
-        let cached = self.with_inner_read(|inner| inner.cloned());
-        let mut delay = StdDuration::from_millis(500);
-        for attempt in 0..MAX_TRANSIENT_ATTEMPTS {
-            match self
-                .unauthorized_recovery(cached.clone(), source)
-                .next()
-                .await
-            {
-                Ok(_) => return true,
-                Err(e) if e.is_transient() && attempt + 1 < MAX_TRANSIENT_ATTEMPTS => {
-                    pi_telemetry::unified_log::warn(
-                        "auth recovery: transient failure, retrying",
-                        None,
-                        Some(serde_json::json!({
-                            "attempt": attempt + 1,
-                            "max_attempts": MAX_TRANSIENT_ATTEMPTS,
-                            "delay_ms": delay.as_millis() as u64,
-                            "error": format!("{e}"),
-                        })),
-                    );
-                    tokio::time::sleep(delay).await;
-                    delay = (delay.saturating_mul(2)).min(StdDuration::from_secs(4));
-                }
-                Err(_) => return false,
-            }
-        }
-        false
-    }
-
-    pub(crate) fn record_manual_auth(
-        &self,
-        snapshot: &crate::auth::recovery::RejectedAuth,
-        err: &AuthError,
-        trigger: ManualAuthSurface,
-    ) {
-        self.manual_auth.record(snapshot, err, trigger);
-    }
 
     // ── Proactive refresh ─────────────────────────────────────────────
 }

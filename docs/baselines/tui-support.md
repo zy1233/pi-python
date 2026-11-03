@@ -2,7 +2,7 @@
 
 This file is generated. Do not edit it by hand.
 
-- Command: `python scripts/tui_callgraph.py keep`. Commit: `daa5ad9`.
+- Command: `python scripts/tui_callgraph.py keep`. Commit: `b5bc147`.
 - Run the command again after a change that moves code between modules or crates.
 - It replaces the hand-written list of examples in item 0.5 of
   [`PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`](../PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md).
@@ -25,7 +25,7 @@ This file is generated. Do not edit it by hand.
 
 | crate | non-test lines | live | dead | dead units | check first | provider-stack refs |
 |---|---|---|---|---|---|---|
-| `pi-shell` | 25,982 | 25,982 (100%) | 0 (0%) | 0 | 0 | 15 |
+| `pi-shell` | 20,293 | 20,293 (100%) | 0 (0%) | 0 | 0 | 6 |
 | `pi-sampling-types` | 11,596 | 11,596 (100%) | 0 (0%) | 0 | 0 | 0 |
 | `pi-tools` | 130,430 | 130,386 (100%) | 44 (0%) | 1 | 1 | 0 |
 | `pi-agent` | 22,877 | 22,877 (100%) | 0 (0%) | 0 | 0 | 5 |
@@ -37,67 +37,56 @@ This file is generated. Do not edit it by hand.
 
 ### `pi-shell`
 
-Non-test code: 25,982 lines in 51 units.
+Non-test code: 20,293 lines in 40 units.
 
 | | units | lines | share |
 |---|---|---|---|
-| live | 51 | 25,982 | 100% |
+| live | 40 | 20,293 | 100% |
 | dead | 0 | 0 | 0% |
 
-Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampling`): 7 live units, 7 files, 15 references: `agent::config` (1), `agent::model_providers` (1), `remote::client` (9), `sampling` (1), `sampling::conversation` (1), `sampling::types` (1), `util::config` (1).
+Provider stack (`pi_sampler`, `async_openai`, `pi_sampling_types`, `crate::sampling`): 6 live units, 6 files, 6 references: `agent::config` (1), `agent::model_providers` (1), `sampling` (1), `sampling::conversation` (1), `sampling::types` (1), `util::config` (1).
 
 <details><summary>Live units</summary>
 
 | unit | lines | references from live code outside |
 |---|---|---|
-| `util::config` | 5,970 | 91 |
-| `auth::manager` | 3,754 | 0 |
-| `agent::config` | 3,110 | 26 |
-| `config` | 1,361 | 17 |
-| `auth::recovery` | 1,073 | 0 |
+| `util::config` | 5,677 | 87 |
+| `auth::manager` | 3,522 | 0 |
+| `agent::config` | 2,924 | 24 |
+| `config` | 1,357 | 16 |
 | `auth::oidc` | 927 | 0 |
 | `agent::config_model_override_parse` | 860 | 0 |
-| `managed_config` | 763 | 0 |
-| `remote::client` | 748 | 0 |
 | `auth::refresh` | 723 | 0 |
-| `auth::attribution` | 708 | 0 |
-| `auth::credential_provider` | 647 | 1 |
-| `auth::storage` | 623 | 0 |
+| `auth::storage` | 601 | 0 |
 | `auth::config` | 507 | 0 |
-| `agent::models` | 457 | 1 |
 | `agent::model_providers` | 415 | 0 |
-| `auth::model` | 368 | 0 |
-| `managed_config::response` | 255 | 0 |
+| `auth::model` | 365 | 0 |
 | `util::subprocess` | 237 | 0 |
-| `sampling::error` | 234 | 8 |
+| `sampling::error` | 234 | 6 |
 | `session::acp_types` | 226 | 0 |
 | `heap_profile` | 202 | 4 |
 | `tools::config` | 184 | 0 |
-| `auth::error` | 171 | 0 |
+| `auth::error` | 166 | 0 |
 | `auth::external_auth` | 160 | 0 |
 | `auth::token_output` | 155 | 0 |
 | `session` | 155 | 16 |
 | `session::title` | 140 | 3 |
-| `auth::auth_provider` | 128 | 0 |
-| `agent::auth_method` | 104 | 4 |
-| `util::grok_auth_credentials` | 78 | 0 |
+| `agent::auth_method` | 99 | 4 |
 | `auth::meta` | 63 | 0 |
 | `session::result` | 58 | 0 |
-| `tier` | 57 | 1 |
-| `auth::token_type` | 52 | 0 |
 | `tools::todo` | 50 | 1 |
 | `util::dual_clock` | 46 | 0 |
-| `instrumentation` | 40 | 0 |
-| `auth` | 33 | 19 |
+| `auth::auth_provider` | 44 | 0 |
+| `auth::token_type` | 41 | 0 |
+| `auth` | 30 | 11 |
 | `auth::devbox_login_stub` | 25 | 0 |
-| `<root>` | 23 | 0 |
-| `util` | 16 | 59 |
+| `<root>` | 19 | 0 |
+| `util` | 15 | 58 |
 | `sampling` | 12 | 0 |
 | `agent::folder_trust` | 11 | 1 |
 | `tools` | 11 | 3 |
-| `agent` | 9 | 0 |
-| `remote` | 9 | 1 |
 | `session::handle` | 9 | 0 |
+| `agent` | 8 | 0 |
 | `session::workflow` | 8 | 0 |
 | `sampling::conversation` | 4 | 0 |
 | `sampling::types` | 3 | 18 |
@@ -113,7 +102,7 @@ Non-test code: 11,596 lines in 12 units.
 | live | 12 | 11,596 | 100% |
 | dead | 0 | 0 | 0% |
 
-Unresolved: 4 references from outside name nothing that is a unit here (an item of the root file, a glob re-export, or a macro): CompactionsRemaining::Dynamic (1), HostedTool::WebSearch (1), HostedTool::XSearch (1), DanglingToolCallReason::HarnessHalted (1).
+Unresolved: 3 references from outside name nothing that is a unit here (an item of the root file, a glob re-export, or a macro): HostedTool::WebSearch (1), HostedTool::XSearch (1), DanglingToolCallReason::HarnessHalted (1).
 
 <details><summary>Live units</summary>
 
@@ -129,7 +118,7 @@ Unresolved: 4 references from outside name nothing that is a unit here (an item 
 | `conversation::messages` | 399 | 0 |
 | `conversation::chat_completions` | 314 | 0 |
 | `rs` | 169 | 0 |
-| `<root>` | 34 | 57 |
+| `<root>` | 34 | 52 |
 | `serde_helpers` | 19 | 0 |
 
 </details>
@@ -151,7 +140,7 @@ Check these dead units first. Each has `impl` blocks for types that other units 
 
 | unit | lines | references from live code outside |
 |---|---|---|
-| `implementations::grok_build` | 48,252 | 83 |
+| `implementations::grok_build` | 48,252 | 79 |
 | `computer::local` | 9,788 | 6 |
 | `implementations::grok_build_hashline` | 8,402 | 0 |
 | `implementations::opencode` | 7,830 | 2 |

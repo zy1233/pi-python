@@ -1,10 +1,5 @@
 //! Async task-result application: routes task results into state.
 use super::auth::{ensure_login_method, handle_auth_complete, handle_auth_url_ready};
-use super::billing::{
-    PAYWALL_AUTO_CHECK_TIMEOUT, apply_auto_topup, handle_billing_fetched,
-    handle_check_subscription_complete, handle_credit_limit_recheck_complete,
-    handle_gate_refreshed, handle_gate_verify_timeout,
-};
 use super::ctx::get_active_agent_mut;
 use super::prompt::handle_prompt_response;
 use super::router::dispatch;
@@ -153,19 +148,6 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
         TaskResult::WorktreeSessionFailed { agent_id, error } => {
             handle_worktree_session_failed(app, agent_id, error)
         }
-        TaskResult::BillingFetched {
-            agent_id,
-            balance,
-            silent,
-            subscription_tier,
-            autotopup,
-        } => handle_billing_fetched(app, agent_id, balance, silent, subscription_tier, autotopup),
-        TaskResult::AppBillingFetched { balance, autotopup } => {
-            app.credit_balance = balance;
-            apply_auto_topup(&mut app.auto_topup, &autotopup);
-            vec![]
-        }
-        TaskResult::GateRefreshed { settings } => handle_gate_refreshed(app, settings),
         TaskResult::SessionLoaded {
             agent_id,
             session_id,
@@ -341,33 +323,11 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             }
             vec![]
         }
-        TaskResult::PaywallCheckTick => {
-            let timed_out = app
-                .paywall_check_started
-                .is_some_and(|t| t.elapsed() >= PAYWALL_AUTO_CHECK_TIMEOUT);
-            if !app.has_access() && !timed_out {
-                vec![
-                    Effect::CheckSubscription { verify: None },
-                    Effect::SchedulePaywallCheck,
-                ]
-            } else {
-                vec![]
-            }
-        }
-        TaskResult::CheckSubscriptionComplete { verify, meta } => {
-            handle_check_subscription_complete(app, verify, meta)
-        }
-        TaskResult::GateVerifyTimeout { generation } => handle_gate_verify_timeout(app, generation),
-        TaskResult::CreditLimitRecheckComplete { agent_id, meta } => {
-            handle_credit_limit_recheck_complete(app, agent_id, meta)
-        }
         TaskResult::LogoutComplete => {
             app.auth_state = AuthState::Pending { error: None };
             app.access_gate_shown_logged = false;
             app.announcement_cta_impressions_logged.clear();
             app.gate = None;
-            app.pending_gate_verification = None;
-            app.last_subscription_check_at = None;
             app.login_method_id = None;
             ensure_login_method(app);
             app.auth_clipboard_delivery = None;

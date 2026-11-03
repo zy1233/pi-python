@@ -144,7 +144,6 @@ impl AgentView {
             stashed_prompt: None,
             prompt_stash: None,
             draft_consumed: false,
-            credit_limit_stashed_prompt: None,
             reauth_stashed_prompt: None,
             active_modal: None,
             modal_buttons: Vec::new(),
@@ -153,8 +152,6 @@ impl AgentView {
             status_context: None,
             attached_at: Instant::now(),
             last_status_line_size: None,
-            credit_balance: None,
-            auto_topup: None,
             turn_start_ms: None,
             turn_start_ms_prompt: None,
             turn_started_at: None,
@@ -205,7 +202,6 @@ impl AgentView {
             last_context_click_at: None,
             hovered_prompt: false,
             hit_context: Default::default(),
-            hit_credits: Default::default(),
             hit_todo_close: Default::default(),
             hit_queue_close: Default::default(),
             hit_plan_button: Default::default(),
@@ -297,8 +293,6 @@ impl AgentView {
             timeline_hover_preview: None,
             sharing_enabled: false,
             scheduler_background_loops: None,
-            billing_surface_visible: false,
-            usage_command_visible: true,
             input_log: crate::input_log::InputRingBuffer::new(),
             esc_pressed_at: None,
             loading_placeholder_id: None,
@@ -603,15 +597,6 @@ impl AgentView {
             }
         }
     }
-    /// Apply the coding-credit balance and the auto top-up rule.
-    pub fn apply_credit_balance(
-        &mut self,
-        balance: Option<crate::views::credit_bar::CreditBalance>,
-        auto_topup: Option<crate::views::credit_bar::AutoTopupInfo>,
-    ) {
-        self.credit_balance = balance;
-        self.auto_topup = auto_topup;
-    }
     /// Record a key event to the input flight recorder.
     ///
     /// Zero heap allocations — stores raw `Copy` types in the ring buffer.
@@ -668,26 +653,6 @@ impl AgentView {
             .registry_mut()
             .set_share_visible(enabled);
     }
-    /// Set [`Self::billing_surface_visible`] (see the field doc) and mirror it
-    /// into this agent's slash controller, so the two can't drift.
-    pub fn set_billing_surface_visible(&mut self, visible: bool) {
-        self.billing_surface_visible = visible;
-        self.prompt
-            .slash_controller
-            .set_billing_surface_visible(visible);
-    }
-    pub fn set_usage_command_visible(&mut self, visible: bool) {
-        self.usage_command_visible = visible;
-        self.prompt
-            .slash_controller
-            .set_usage_command_visible(visible);
-    }
-    /// Replace the restricted slash-command deny list in this agent's
-    /// registry (e.g. `/usage` denied on the free / X Basic tiers). Deny
-    /// wins over every `set_*_visible` gate.
-    pub fn set_restricted_commands(&mut self, names: &[String]) {
-        self.prompt.set_restricted_commands(names);
-    }
     /// Offer `/announcements` when session announcements (critical or promo) exist.
     pub fn set_has_session_announcements(&mut self, has: bool) {
         self.prompt
@@ -698,20 +663,14 @@ impl AgentView {
     pub(crate) fn apply_app_scoped_gates(
         &mut self,
         sharing_enabled: bool,
-        billing_surface_visible: bool,
-        usage_command_visible: bool,
         screen_mode: crate::app::ScreenMode,
         announcements: &[pi_announcements::RemoteAnnouncement],
-        restricted_commands: &[String],
     ) {
         self.set_sharing_enabled(sharing_enabled);
-        self.set_billing_surface_visible(billing_surface_visible);
-        self.set_usage_command_visible(usage_command_visible);
         self.prompt.set_screen_mode(screen_mode);
         self.set_has_session_announcements(crate::views::announcements::has_session_announcements(
             announcements,
         ));
-        self.set_restricted_commands(restricted_commands);
     }
     /// Show or hide the `/voice` slash command in this agent's registry,
     /// gated on the runtime voice gate (GA default on; kill switch may hide).

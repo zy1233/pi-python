@@ -4,7 +4,6 @@ use agent_client_protocol as acp;
 use tokio::task::JoinSet;
 use pi_acp_lib::{AcpAgentTx, acp_send};
 use super::actions::{PermissionModePersist, TaskResult};
-use super::agent::AgentId;
 use crate::acp::model_state::MODEL_CONFIG_ID_META_KEY;
 use crate::acp::session_list::walk_session_list;
 use crate::unified_log as ulog;
@@ -582,29 +581,6 @@ pub(super) async fn send_auth_cancel(_tx: &AcpAgentTx, _request_seq: u64) -> Tas
     TaskResult::AuthCancelComplete
 }
 
-pub(super) async fn send_check_subscription(
-    _tx: &AcpAgentTx,
-    verify: Option<u64>,
-) -> TaskResult {
-    TaskResult::CheckSubscriptionComplete {
-        verify,
-        meta: None,
-    }
-}
-
-/// One-shot subscription re-check for the credit-limit retry flow.
-/// Same ACP call as `send_check_subscription` but returns a
-/// `CreditLimitRecheckComplete` so the dispatch layer can decide
-/// whether to retry the stashed prompt or show the upsell.
-pub(super) async fn send_credit_limit_recheck(
-    _tx: &AcpAgentTx,
-    agent_id: AgentId,
-) -> TaskResult {
-    TaskResult::CreditLimitRecheckComplete {
-        agent_id,
-        meta: None,
-    }
-}
 pub(super) async fn send_authenticate(
     tx: &AcpAgentTx,
     request_seq: u64,

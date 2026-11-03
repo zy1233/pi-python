@@ -585,7 +585,6 @@ pub(super) fn apply_retry_state(
     scrollback: &mut crate::scrollback::state::ScrollbackState,
     is_api_key_auth: bool,
 ) {
-    let mut is_credit_limit = false;
     let mut is_reauth = false;
     use pi_acp_lib::extensions::notification::RetryState;
     match retry {
@@ -618,14 +617,7 @@ pub(super) fn apply_retry_state(
                     attempts: *attempts,
                 });
             }
-            is_credit_limit = super::super::dispatch::is_credit_limit_error(None, reason);
-            let is_free_usage =
-                *rate_limited && pi_shell::sampling::error::is_free_usage_exhausted_error(reason);
-            if is_credit_limit {
-                session.credit_limit_blocked = true;
-            } else if is_free_usage {
-                session.free_usage_blocked = true;
-            } else if !*rate_limited && is_reauthable_failure(None, reason) {
+            if !*rate_limited && is_reauthable_failure(None, reason) {
                 is_reauth = true;
                 scrollback.push_block(RenderBlock::session_event(SessionEvent::ReAuthRequired));
             } else if *rate_limited {
@@ -652,10 +644,7 @@ pub(super) fn apply_retry_state(
             if wire == crate::app::error_display::WireErrorType::EncryptedContentMismatch {
                 session.model_incompatible = true;
             }
-            is_credit_limit = super::super::dispatch::is_credit_limit_error(None, message);
-            if is_credit_limit {
-                session.credit_limit_blocked = true;
-            } else if is_reauthable_failure(Some(error_type.as_str()), message) {
+            if is_reauthable_failure(Some(error_type.as_str()), message) {
                 is_reauth = true;
                 scrollback.push_block(RenderBlock::session_event(SessionEvent::ReAuthRequired));
             } else if wire == crate::app::error_display::WireErrorType::DiskFull {
@@ -686,16 +675,7 @@ pub(super) fn apply_retry_state(
             }
         }
     }
-    if is_credit_limit {
-        pi_telemetry::session_ctx::log_event(pi_telemetry::events::CreditLimitHit {
-            model_id: session
-                .models
-                .current
-                .as_ref()
-                .map(|m| m.0.to_string())
-                .unwrap_or_default(),
-        });
-    } else if !is_reauth {
+    if !is_reauth {
         session.in_flight_prompt = None;
     }
 }

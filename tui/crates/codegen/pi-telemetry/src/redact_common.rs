@@ -1,11 +1,9 @@
-//! Redaction helpers shared by the **internal** OTLP span pipeline
-//! ([`crate::otel_layer`]) and the **external** customer-collector pipeline
+//! Redaction helpers for the **external** customer-collector pipeline
 //! ([`crate::external`]).
 //!
-//! Both pipelines are authoritative privacy chokepoints (see the crate
-//! `AGENTS.md`); these helpers are the string-level scrubbing primitives they
-//! share. Changes here affect every byte that leaves the process on either
-//! pipeline.
+//! That pipeline is an authoritative privacy chokepoint (see the crate
+//! `AGENTS.md`); these helpers are the string-level scrubbing primitives it
+//! uses. Changes here affect every byte that leaves the process on it.
 
 use std::borrow::Cow;
 

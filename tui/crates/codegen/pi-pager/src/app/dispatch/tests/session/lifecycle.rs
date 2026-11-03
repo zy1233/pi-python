@@ -137,12 +137,8 @@ fn session_created_sets_session_id() {
         }),
         &mut app,
     );
-    assert_eq!(effects.len(), 2);
-    assert!(matches!(
-        &effects[0],
-        Effect::FetchBilling { silent: true, .. }
-    ));
-    assert!(matches!(&effects[1], Effect::RegisterActiveSession { .. }));
+    assert_eq!(effects.len(), 1);
+    assert!(matches!(&effects[0], Effect::RegisterActiveSession { .. }));
     assert_eq!(
         app.agents[&id]
             .session

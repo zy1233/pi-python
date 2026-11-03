@@ -101,31 +101,6 @@ pub(crate) fn execute(
             let tx = acp_tx.clone();
             tasks.spawn(async move { send_auth_cancel(&tx, request_seq).await });
         }
-        Effect::CheckSubscription { verify } => {
-            let tx = acp_tx.clone();
-            tasks.spawn(async move { send_check_subscription(&tx, verify).await });
-        }
-        Effect::CreditLimitRecheck { agent_id } => {
-            let tx = acp_tx.clone();
-            tasks.spawn(async move { send_credit_limit_recheck(&tx, agent_id).await });
-        }
-        Effect::SchedulePaywallCheck => {
-            tasks
-                .spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                    TaskResult::PaywallCheckTick
-                });
-        }
-        Effect::ScheduleGateVerifyTimeout { generation } => {
-            tasks
-                .spawn(async move {
-                    tokio::time::sleep(crate::app::subscription::GATE_VERIFY_TIMEOUT)
-                        .await;
-                    TaskResult::GateVerifyTimeout {
-                        generation,
-                    }
-                });
-        }
         Effect::SwitchAccount { request_seq, method_id, use_oauth } => {
             let tx = acp_tx.clone();
             let abort_handle = tasks
@@ -841,65 +816,6 @@ pub(crate) fn execute(
                         session_id,
                         error: sanitize_user_error(&error.to_string()),
                     },
-                }
-            });
-        }
-        Effect::FetchBilling { agent_id, silent } => {
-            tasks.spawn(async move {
-                TaskResult::BillingFetched {
-                    agent_id,
-                    balance: None,
-                    silent,
-                    subscription_tier: None,
-                    autotopup: crate::views::credit_bar::AutoTopupFetch::Cleared,
-                }
-            });
-        }
-        Effect::RefreshGate => {
-            tasks
-                .spawn(async move {
-                    let settings = tokio::task::spawn_blocking(|| {
-                            if !pi_shell::util::config::resolve_remote_fetch_enabled() {
-                                return None;
-                            }
-                            let grok_home = pi_shell::util::grok_home::grok_home();
-                            let store = pi_shell::auth::read_auth_json(
-                                    &grok_home.join("auth.json"),
-                                )
-                                .ok()?;
-                            let scope = pi_shell::auth::GrokComConfig::default()
-                                .auth_scope();
-                            let auth = pi_shell::auth::lookup_auth(
-                                &store,
-                                &scope,
-                            )?;
-                            let proxy_base = std::env::var(
-                                    "GROK_CLI_CHAT_PROXY_BASE_URL",
-                                )
-                                .unwrap_or_else(|_| {
-                                    pi_shell::agent::config::CLI_CHAT_PROXY_BASE_URL_DEFAULT
-                                        .to_owned()
-                                });
-                            pi_shell::remote::fetch_settings_blocking(
-                                    &proxy_base,
-                                    &auth,
-                                    None,
-                                )
-                                .into_option()
-                        })
-                        .await
-                        .ok()
-                        .flatten();
-                    TaskResult::GateRefreshed {
-                        settings,
-                    }
-                });
-        }
-        Effect::FetchAppBilling => {
-            tasks.spawn(async move {
-                TaskResult::AppBillingFetched {
-                    balance: None,
-                    autotopup: crate::views::credit_bar::AutoTopupFetch::Cleared,
                 }
             });
         }

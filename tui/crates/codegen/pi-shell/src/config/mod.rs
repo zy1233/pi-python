@@ -817,14 +817,10 @@ pub use crate::util::config::load_effective_config;
 pub(crate) use pi_config::ConfigLayers;
 pub use pi_config::{
     GROK_CONFIG_ENV, GROK_CONFIG_PATH_ENV, MDM_REQUIREMENTS_SOURCE, OverlaySource,
-    RequirementsLayer, RequirementsSource, ResolvedOverlay, ServingIdentity, SyncMarker,
-    claude_managed_settings_probe_path, confirmed_team_switch, confirmed_team_switch_at,
-    is_managed_config_hard_stale_for, is_managed_config_stale_for, load_config_file,
-    load_from_disk, load_managed_config, load_merged_requirements, load_system_managed_config,
-    load_toml_file, managed_config_identity_changed_at, managed_deployment_id,
-    managed_policy_compromised_for, mark_managed_config_synced, mark_managed_config_synced_at,
-    normalize_identity, requirements_layers, resolved_env_overlay, system_config_dir,
-    user_grok_home,
+    RequirementsLayer, RequirementsSource, ResolvedOverlay, claude_managed_settings_probe_path,
+    load_config_file, load_from_disk, load_managed_config, load_merged_requirements,
+    load_system_managed_config, load_toml_file, requirements_layers, resolved_env_overlay,
+    system_config_dir, user_grok_home,
 };
 /// Where a requirement or permission rule was loaded from.
 #[derive(Debug, Clone, PartialEq, Eq)]

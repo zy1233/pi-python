@@ -33,12 +33,10 @@ pi-announcements = { workspace = true }
 pi-version = { workspace = true }
 
 async-trait = { workspace = true }
-blake3 = { workspace = true }
 chrono = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 loom = { workspace = true, optional = true }
 reqwest = { workspace = true, features = ["stream", "blocking"] }
-reqwest-middleware = { workspace = true }
 serde = { workspace = true }
 serde_ignored = "0.1"
 serde_json = { workspace = true, features = ["preserve_order"] }
@@ -60,7 +58,6 @@ backon = { workspace = true }
 git2 = { version = "0.20", default-features = false, features = [
     "vendored-libgit2",
 ] }
-arc-swap = { workspace = true }
 image = { workspace = true, features = ["png", "jpeg", "gif", "webp"] }
 dhat = { workspace = true, optional = true }
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
@@ -72,7 +69,6 @@ pi-shared = { workspace = true }
 pi-status-line = { workspace = true }
 pi-sandbox = { path = "../pi-sandbox", default-features = false }
 pi-chat-state = { path = "../pi-chat-state" }
-pi-extra-ca = { workspace = true }
 pi-token-estimation = { workspace = true }
 pi-sampling-types = { path = "../pi-sampling-types" }
 pi-tools = { path = "../pi-tools" }
@@ -120,12 +116,6 @@ pi-shell-base = { workspace = true, features = ["test-support"] }
 pi-test-support = { workspace = true, features = [] }
 # Mock HTTP servers and tracing capture used by in-crate unit tests.
 axum = { workspace = true, features = ["ws", "multipart"] }
-tracing-subscriber = { workspace = true, features = [
-    "env-filter",
-    "fmt",
-    "json",
-    "time",
-] }
 # `test-util` enables `#[tokio::test(start_paused = true)]` (paused virtual
 # clock with auto-advance) so interval-driven loop tests in `auth::refresh`
 # can assert exact tick counts deterministically without real-time sleep.
