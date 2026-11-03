@@ -345,6 +345,14 @@ def test_the_model_classifier_is_the_default_and_can_be_named(tmp_path: Path):
     assert config.auto.problems == ()
 
 
+@pytest.mark.parametrize("toml", ["[auto]\n", '[auto]\nextra_roots = ["/srv"]\n'])
+def test_an_auto_table_that_names_no_classifier_keeps_the_model_step_on(tmp_path: Path, toml: str):
+    config = _load(tmp_path, toml)
+
+    assert config.auto.classifier == "model"
+    assert config.auto.notes == ()
+
+
 @pytest.mark.parametrize("value", ['"Model"', '" model "', '"RULES"'])
 def test_the_name_of_the_classifier_is_read_without_regard_to_case_and_spaces(
     tmp_path: Path, value: str

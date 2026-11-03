@@ -8,22 +8,35 @@
     python scripts/auto_mutation_check.py --check      # only check that each mutation still applies
     python scripts/auto_mutation_check.py --only floor # run the mutations whose name contains "floor"
     python scripts/auto_mutation_check.py --only wiring # only the mutations of the wiring (PR 1b)
+    python scripts/auto_mutation_check.py --only "d07 " # only the forms that the rules bar from the model
+    python scripts/auto_mutation_check.py --only "model " # only the model step (PR 2)
 
 Each mutation is an exact text replacement in one source file: ``auto_rules.py`` (or
 ``auto_reasons.py``) for the rules, and for the wiring ``auto_mode.py``, ``agent.py``,
 ``permission_modes.py``, ``permissions.py``, ``config.py``, ``factory.py``, ``headless.py`` of
-``pi_agent_cli``, the Bash tool of ``pi_agent_core``, the harness, and the workflow sub-agent. The
+``pi_agent_cli``, the Bash tool of ``pi_agent_core``, the harness, and the workflow sub-agent. For
+the model step (PR 2) it is also ``auto_classifier.py`` and the stream function of ``pi_agent_core``,
+and ``scripts/auto_eval.py`` (the harness that drives the model step over the corpus). The
 changed copy of the package goes to a temporary directory and the tests of that mutation run
-against it (``PYTHONPATH``), so the working tree is never changed. A mutation that no test
-notices "survives" and the script exits with 1: either a test is missing, or the code is dead.
+against it (``PYTHONPATH``; for ``auto_eval.py`` the variable ``AUTO_EVAL_SCRIPT``), so the working
+tree is never changed. A mutation that no test notices "survives" and the script exits with 1:
+either a test is missing, or the code is dead. A test run that takes longer than
+``RUN_TIMEOUT_SECONDS`` counts as a kill: a mutation that makes the code wait for ever is noticed.
 
 The mutations of the rules break: each floor rule, the order of the steps, each refusal of the
 parser (hidden commands, unreadable commands, unknown variables), the path logic, the wrappers,
 the fail-closed paths. The mutations of the wiring (names start with ``wiring``) break: the calls
 of a message running one by one (W-1), each check of the context (W-2), the protected list
 (W-3), the limits of a call that Auto allowed (W-5), the mode on the wire, and the fail-closed
-paths of a session. Run it again after any change to these files; a text that no longer matches
-is an error, not a pass.
+paths of a session. The mutations that start with ``d07`` break the seven forms of D-07 that the
+rules bar from the model (an option that can run a program or write a file, an operand that is
+banned, a leading glob, ``git`` options, an endless device, a version flag, a disguise): each one
+lets a barred call pass as proven, so that it runs or reaches the model. The mutations that start with
+``model`` break the model step: the parser of the answer (only the exact line ``ALLOW`` allows),
+the data block (the token, the escapes, the limits), the request, the timeout, the cancel, the
+circuit breaker, the counters, the choice of the model, the wiring in the session and in the
+agent, the settings, and the eval harness (its gates and the cap on its spend). Run it again
+after any change to these files; a text that no longer matches is an error, not a pass.
 """
 
 from __future__ import annotations
@@ -51,7 +64,12 @@ PACKAGES = {
     "core": REPO_ROOT / "pi_agent_core",
     "harness": REPO_ROOT / "packages" / "pi-agent-harness" / "pi_agent_harness",
     "workflows": REPO_ROOT / "packages" / "pi-dynamic-workflows" / "pi_dynamic_workflows",
+    # Not a package: ``scripts`` holds ``auto_eval.py``, which the corpus tests load by path.
+    # Only that one file is copied; the tests read the copy through ``AUTO_EVAL_SCRIPT``.
+    "scripts": REPO_ROOT / "scripts",
 }
+CORPUS_DATA = Path("packages") / "pi-agent-cli" / "tests" / "data" / "auto_corpus"
+RUN_TIMEOUT_SECONDS = 240
 
 
 @dataclass(frozen=True)
@@ -517,24 +535,28 @@ MUTATIONS: list[Mutation] = [
     ),
     m(
         "prog: read-only table ignored",
-        "        proven = _readonly_ok(program, args)",
+        "        proven = _readonly_ok(program, args, st)",
         "        proven = True",
     ),
     m(
         "prog: read-only banned short flags",
-        "if any(c in spec.banned_shorts for c in args.shorts):",
-        "if False:",
+        "        any(c in spec.banned_shorts for c in args.shorts)\n",
+        "        False\n",
     ),
     m(
         "prog: read-only banned long flags",
-        "if any(_long_hit(option, spec.banned_longs) for option in args.longs):",
-        "if False:",
+        "        or any(_long_hit(option, spec.banned_longs) for option in args.longs)\n",
+        "        or False\n",
     ),
-    m("prog: read-only banned raw flags", "if set(args.raw) & spec.banned_raw:", "if False:"),
+    m(
+        "prog: read-only banned raw flags",
+        "        or set(args.raw) & spec.banned_raw\n",
+        "        or False\n",
+    ),
     m(
         "prog: read-only positional limit",
-        "    if spec.max_positional is not None and (len(args.pos) > spec.max_positional or args.glob_pos):\n        return False",
-        "    if False:\n        return False",
+        '    if spec.max_positional is not None and (len(args.pos) > spec.max_positional or args.glob_pos):\n        return "operand"',
+        '    if False:\n        return "operand"',
     ),
     m(
         "prog: path arguments not checked",
@@ -587,8 +609,8 @@ MUTATIONS: list[Mutation] = [
     ),
     m(
         "git: banned read options",
-        'return not (has(*_GIT_BANNED_READ_OPTIONS, "-O") or opts.lead_glob)',
-        "return True",
+        '        if has(*_GIT_BANNED_READ_OPTIONS, "-O"):\n            st.bar("git_option")',
+        '        if False:\n            st.bar("git_option")',
     ),
     m("git: branch creation", "return not mutating and (listing or not opts.pos)", "return True"),
     # ---- redirects and reasons
@@ -1279,8 +1301,8 @@ MUTATIONS: list[Mutation] = [
     ),
     m(
         "redteam: git -O is not banned",
-        'return not (has(*_GIT_BANNED_READ_OPTIONS, "-O") or opts.lead_glob)',
-        "return not (has(*_GIT_BANNED_READ_OPTIONS) or opts.lead_glob)",
+        '        if has(*_GIT_BANNED_READ_OPTIONS, "-O"):\n            st.bar("git_option")',
+        '        if has(*_GIT_BANNED_READ_OPTIONS):\n            st.bar("git_option")',
     ),
     m(
         "redteam: git cat-file is split in two words",
@@ -1294,8 +1316,8 @@ MUTATIONS: list[Mutation] = [
     ),
     m(
         "redteam: a git glob is not banned",
-        'return not (has(*_GIT_BANNED_READ_OPTIONS, "-O") or opts.lead_glob)',
-        'return not (has(*_GIT_BANNED_READ_OPTIONS, "-O"))',
+        '        if opts.lead_glob:\n            st.bar("lead_glob")\n            return False\n        return True',
+        '        if False:\n            st.bar("lead_glob")\n            return False\n        return True',
     ),
     m("redteam: git branch --set-upstream-to", '            "--set-upstream-to",\n', ""),
     # ---- red team: the read-only table
@@ -1321,8 +1343,8 @@ MUTATIONS: list[Mutation] = [
     ),
     m(
         "redteam: date may set the clock",
-        '    return not (program == "date" and any(_DATE_SET.match(item) for item in args.pos))',
-        "    return True",
+        '    if program == "date" and any(_DATE_SET.match(item) for item in args.pos):\n        return "operand"',
+        '    if False:\n        return "operand"',
     ),
     m(
         "redteam: an option of two dashes",
@@ -1442,12 +1464,12 @@ MUTATIONS: list[Mutation] = [
     ),
     m(
         "redteam: a read of an endless device is not proven",
-        "    if text in _DEV_ENDLESS:\n        st.proven = False\n",
+        '    if text in _DEV_ENDLESS:\n        st.bar("endless_device")\n',
         "    if text in _DEV_ENDLESS:\n        pass\n",
     ),
     m(
         "redteam: an endless device is a plain path",
-        "    if text in _DEV_ENDLESS:\n        st.proven = False\n        return\n",
+        '    if text in _DEV_ENDLESS:\n        st.bar("endless_device")\n        return\n',
         "",
     ),
     m(
@@ -1507,21 +1529,21 @@ MUTATIONS: list[Mutation] = [
     ),
     m(
         "redteam: the version flag of an unknown program sets nothing",
-        "            st.project_code = True\n            st.proven = False\n        return\n\n"
+        '            st.project_code = True\n            st.bar("version_flag")\n        return\n\n'
         "    if family is not None:",
         "            pass\n        return\n\n    if family is not None:",
     ),
     m(
         "redteam: the version flag of an unknown program stays proven in a trusted project",
-        "            st.project_code = True\n            st.proven = False\n        return\n\n"
+        '            st.project_code = True\n            st.bar("version_flag")\n        return\n\n'
         "    if family is not None:",
         "            st.project_code = True\n        return\n\n    if family is not None:",
     ),
     m(
         "redteam: the version flag of an unknown program is not project code",
-        "            st.project_code = True\n            st.proven = False\n        return\n\n"
+        '            st.project_code = True\n            st.bar("version_flag")\n        return\n\n'
         "    if family is not None:",
-        "            st.proven = False\n        return\n\n    if family is not None:",
+        '            st.bar("version_flag")\n        return\n\n    if family is not None:',
     ),
     m(
         "redteam: hg --version is pure",
@@ -2460,6 +2482,758 @@ RT2_MUTATIONS: list[Mutation] = [
 ]
 
 
+# ---------------------------------------------------------------------------------------------
+# PR 2 (the model step). ``d07`` mutations break the forms that the rules bar from the model
+# (the red-team decision D-07): the call must be an ASK by the floor, and no model is called.
+# ``model`` mutations break the classifier (the parser, the limits, the timeout, the breaker,
+# the cancel), its wiring in the session, the settings, and the gates of the eval script.
+
+_RULES_AND_MODEL = (
+    _CLI_TESTS + "test_auto_model_step.py",
+    _CLI_TESTS + "test_auto_rules.py",
+    _CLI_TESTS + "test_auto_corpus.py",
+)
+_CLASSIFIER = (
+    _CLI_TESTS + "test_auto_classifier.py",
+    _CLI_TESTS + "test_auto_model_step.py",
+)
+_SESSION_AND_MODEL = (
+    *_CLASSIFIER,
+    _CLI_TESTS + "test_auto_wiring.py",
+)
+_CONFIG_AND_MODEL = (
+    _CLI_TESTS + "test_config.py",
+    _CLI_TESTS + "test_auto_model_step.py",
+)
+_EVAL = (
+    _CLI_TESTS + "test_auto_corpus.py",
+    _CLI_TESTS + "test_auto_corpus_model.py",
+    _CLI_TESTS + "test_auto_eval_real.py",
+)
+
+
+def d7(name: str, old: str, new: str) -> Mutation:
+    return Mutation(f"d07 {name}", old, new, None, "auto_rules.py", "cli", _RULES_AND_MODEL)
+
+
+def mc(name: str, old: str, new: str, *, tests: tuple[str, ...] = _CLASSIFIER) -> Mutation:
+    """A mutation of ``auto_classifier.py``."""
+    return Mutation(f"model {name}", old, new, None, "auto_classifier.py", "cli", tests)
+
+
+def ms(name: str, old: str, new: str, *, file: str = "auto_mode.py") -> Mutation:
+    """A mutation of the wiring of the model step in the session or in the agent."""
+    return Mutation(f"model session: {name}", old, new, None, file, "cli", _SESSION_AND_MODEL)
+
+
+def me(name: str, old: str, new: str, nth: int | None = None) -> Mutation:
+    """A mutation of ``scripts/auto_eval.py`` (the gates of the eval, the real-model run)."""
+    return Mutation(f"model eval: {name}", old, new, nth, "auto_eval.py", "scripts", _EVAL)
+
+
+def mk(name: str, old: str, new: str) -> Mutation:
+    """A mutation of the stream function of ``pi_agent_core``, which carries the options of the
+    model step (temperature, output limit) to the chat model."""
+    return Mutation(
+        f"model core: {name}",
+        old,
+        new,
+        None,
+        "adapters/langchain_stream.py",
+        "core",
+        ("pi_agent_core/tests/test_langchain_stream.py",),
+    )
+
+
+D07_MUTATIONS: list[Mutation] = [
+    d7(
+        "a banned option of a read-only program is judged, not barred",
+        "    if kind is not None:\n        st.bar(kind)\n        return False\n",
+        "    if kind is not None:\n        return False\n",
+    ),
+    d7(
+        "a leading glob of git is judged, not barred",
+        '            st.bar("lead_glob")\n            return False\n        return True',
+        "            return False\n        return True",
+    ),
+    d7(
+        "a banned option of git is judged, not barred",
+        '            st.bar("git_option")\n',
+        "",
+    ),
+    d7(
+        "an endless device is judged, not barred",
+        '        st.bar("endless_device")\n        return\n',
+        "        st.proven = False\n        return\n",
+    ),
+    d7(
+        "the version flag of an unknown program is judged, not barred",
+        '            st.bar("version_flag")\n',
+        "            st.proven = False\n",
+    ),
+    d7(
+        "a file of the project with the name of a program is judged, not barred",
+        '                st.bar("disguise")\n',
+        "                pass\n",
+    ),
+    d7(
+        "a file of the project called git is not a disguise",
+        '_DISGUISED_PROGRAMS = frozenset({"git"})',
+        "_DISGUISED_PROGRAMS = frozenset()",
+    ),
+    d7(
+        "a file of the project with the name of a read-only program is not a disguise",
+        "            if program in _READONLY or program in _DISGUISED_PROGRAMS:",
+        "            if program in _DISGUISED_PROGRAMS:",
+    ),
+    d7(
+        "a banned operand is named an option",
+        '    if spec.max_positional is not None and (len(args.pos) > spec.max_positional or args.glob_pos):\n        return "operand"',
+        '    if spec.max_positional is not None and (len(args.pos) > spec.max_positional or args.glob_pos):\n        return "option"',
+    ),
+    d7(
+        "a leading glob is named an option",
+        '            return "lead_glob"',
+        '            return "option"',
+    ),
+    d7(
+        "the date that sets the clock is named an option",
+        '    if program == "date" and any(_DATE_SET.match(item) for item in args.pos):\n        return "operand"',
+        '    if program == "date" and any(_DATE_SET.match(item) for item in args.pos):\n        return "option"',
+    ),
+    d7(
+        "a barred call is not asked by the floor",
+        '    if st.barred is not None:\n        return _ask(Reason.UNCLEAR, f"bash.barred.{st.barred}")\n',
+        "",
+    ),
+    d7(
+        "a barred call stays proven",
+        "        self.proven = False\n        if self.barred is None:\n            self.barred = kind",
+        "        if self.barred is None:\n            self.barred = kind",
+    ),
+]
+
+
+MODEL_MUTATIONS: list[Mutation] = [
+    # ---- the parser: the whole text is the answer, and the answer is in a closed list
+    mc(
+        "parser: more than blanks and line ends is stripped",
+        '    line = text.strip(" \\t\\r\\n")',
+        "    line = text.strip()",
+    ),
+    mc("parser: ALLOW in any case", '    if line == "ALLOW":', '    if line.upper() == "ALLOW":'),
+    mc(
+        "parser: ALLOW and more words",
+        '    if line == "ALLOW":',
+        '    if line.startswith("ALLOW"):',
+    ),
+    mc(
+        "parser: the code is read loosely",
+        "        code = line[4:]\n",
+        "        code = line[4:].strip().upper()\n",
+    ),
+    mc(
+        "parser: a code that is not in the list is an ASK",
+        "        if reason is not None:\n            return ParsedAnswer(False, reason, code)\n",
+        "        return ParsedAnswer(False, reason or Reason.UNCLEAR, code)\n",
+    ),
+    mc(
+        "parser: a tool call in the answer is skipped",
+        '        else:\n            return None\n    return "".join(parts)',
+        '        else:\n            continue\n    return "".join(parts)',
+    ),
+    mc(
+        "parser: the thinking is a part of the answer",
+        '        elif kind == "thinking":\n            continue\n',
+        '        elif kind == "thinking":\n            parts.append(str(block.get("thinking") or ""))\n',
+    ),
+    mc(
+        "parser: a stop reason other than stop is read",
+        '        parsed = parse_answer(_text_of(message)) if stop == "stop" else None',
+        "        parsed = parse_answer(_text_of(message))",
+    ),
+    mc(
+        "parser: an error stop reason is read as an answer",
+        '        if stop in ("error", "aborted"):',
+        "        if False:",
+    ),
+    mc(
+        "parser: an aborted request is an answer that cannot be read",
+        '        if stop in ("error", "aborted"):',
+        '        if stop in ("error",):',
+    ),
+    # ---- the data block: limits, token, hidden characters
+    mc(
+        "data: no limit for the size of the arguments",
+        "    if len(arguments) > MAX_ARGS_CHARS:\n        return None\n",
+        "    if False:\n        return None\n",
+    ),
+    mc(
+        "data: the limit of the arguments is far too big",
+        "MAX_ARGS_CHARS = 8192",
+        "MAX_ARGS_CHARS = 819200",
+    ),
+    mc(
+        "data: the token may be in the call",
+        "    if token in call or token in words:\n        return None\n",
+        "    if token in words:\n        return None\n",
+    ),
+    mc(
+        "data: the token may be in the words of the user",
+        "    if token in call or token in words:\n        return None\n",
+        "    if token in call:\n        return None\n",
+    ),
+    mc(
+        "data: a call that cannot be written as JSON raises",
+        "    except (TypeError, ValueError, RecursionError):\n        return None\n",
+        "    except (ValueError, RecursionError):\n        return None\n",
+    ),
+    mc(
+        "data: a hidden character is not written as an escape",
+        '        if char != " " and unicodedata.category(char) in _HIDDEN_CATEGORIES:',
+        "        if False:",
+    ),
+    mc(
+        "data: a space of another kind is plain",
+        '_HIDDEN_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp", "Zs"})',
+        '_HIDDEN_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})',
+    ),
+    mc(
+        "data: the token is the same for every call",
+        "    return secrets.token_hex(TOKEN_BYTES)",
+        '    return "0123456789abcdef"',
+    ),
+    mc("data: the token is short", "TOKEN_BYTES = 8", "TOKEN_BYTES = 1"),
+    mc(
+        "data: the tags do not carry the token",
+        '        f"<user_messages_{token}>\\n{words}\\n</user_messages_{token}>\\n"',
+        '        f"<user_messages>\\n{words}\\n</user_messages>\\n"',
+    ),
+    mc(
+        "data: the first message is not cut",
+        "    first = _cut(first, limit // FIRST_MESSAGE_SHARE)\n",
+        "",
+    ),
+    mc(
+        "data: the oldest messages are kept, not the newest",
+        "    for text in reversed(rest):\n        if room < MIN_PIECE_CHARS:",
+        "    for text in rest:\n        if room < MIN_PIECE_CHARS:",
+    ),
+    mc(
+        "data: a message without text is sent",
+        "    texts = [text for text in messages if isinstance(text, str) and text.strip()]",
+        "    texts = [str(text) for text in messages]",
+    ),
+    mc(
+        "data: the log keeps a message that is not text",
+        "        if not isinstance(text, str) or not text.strip():\n            return\n        text = text.strip()[:MAX_USER_CHARS]",
+        "        text = str(text).strip()[:MAX_USER_CHARS]",
+    ),
+    # ---- the request
+    mc(
+        "request: the model thinks",
+        "        model = dataclasses.replace(target.model, reasoning=False)\n",
+        "        model = target.model\n",
+    ),
+    mc(
+        "request: no policy",
+        "            system_prompt=POLICY,\n",
+        '            system_prompt="",\n',
+    ),
+    mc(
+        "request: the reasoning is not off",
+        '            reasoning="off",\n',
+        "            reasoning=None,\n",
+    ),
+    mc(
+        "request: the request is tried again",
+        "            max_retries=0,\n",
+        "            max_retries=2,\n",
+    ),
+    mc(
+        "request: the answer may be long",
+        "            max_tokens=MAX_OUTPUT_TOKENS,\n",
+        "            max_tokens=None,\n",
+    ),
+    mc(
+        "request: the temperature is not zero",
+        "            temperature=0.0,\n",
+        "            temperature=1.0,\n",
+    ),
+    mc(
+        "request: no abort signal",
+        "            signal=flight.signal,\n",
+        "            signal=None,\n",
+    ),
+    mc(
+        "request: the key getter is not used",
+        "        if target.get_api_key is not None:\n            api_key = target.get_api_key(model.provider)",
+        "        if False:\n            api_key = target.get_api_key(model.provider)",
+    ),
+    mc(
+        "request: a key that comes late is not waited for",
+        "            if inspect.isawaitable(api_key):\n                api_key = await api_key\n",
+        "",
+    ),
+    mc(
+        "request: a stream that comes late is not waited for",
+        "        if inspect.isawaitable(stream):\n            stream = await stream\n        return await stream.message_result()",
+        "        return await stream.message_result()",
+    ),
+    mc(
+        "request: a call of another tool goes to the model",
+        '        if request.tool != "bash":\n            self.stats.skipped += 1\n            return _ask(Reason.UNCLEAR, "model.only_bash", by="floor")\n',
+        "",
+    ),
+    mc(
+        "request: no model is not an ask",
+        '            return _ask(Reason.CHECKER_UNAVAILABLE, "model.no_model", failure=True)',
+        '            return _ask(Reason.CHECKER_UNAVAILABLE, "model.no_model", failure=False)',
+    ),
+    # ---- the timeout
+    mc(
+        "timeout: the request has no time limit",
+        "                {work, stop}, timeout=self._seconds(), return_when=asyncio.FIRST_COMPLETED",
+        "                {work, stop}, timeout=None, return_when=asyncio.FIRST_COMPLETED",
+    ),
+    mc(
+        "timeout: a request that is not done is read",
+        "            if work in done:\n                return work.result()\n            raise TimeoutError\n",
+        "            return work.result()\n",
+    ),
+    mc(
+        "timeout: no cap",
+        "        return min(float(value), MAX_AUTO_MODEL_TIMEOUT_SECONDS)",
+        "        return float(value)",
+    ),
+    mc(
+        "timeout: a bad value is used",
+        "        if not isinstance(value, (int, float)) or isinstance(value, bool) or not value > 0:",
+        "        if False:",
+    ),
+    mc(
+        "timeout: a timeout is not a failure",
+        '            self._failed("it did not answer in time")\n',
+        "",
+    ),
+    mc(
+        "timeout: a failed request is not a failure",
+        '            self._failed("the request failed")\n            return _ask(\n                Reason.CHECKER_UNAVAILABLE,\n                "model.request_failed",\n                failure=True,\n                called=True,',
+        '            return _ask(\n                Reason.CHECKER_UNAVAILABLE,\n                "model.request_failed",\n                failure=True,\n                called=True,',
+    ),
+    mc(
+        "timeout: an answer that cannot be read is not a failure",
+        '            self._failed("its answer was not valid")\n',
+        "",
+    ),
+    # ---- the circuit breaker
+    mc(
+        "breaker: it never opens",
+        "        if self._failures >= self._failures_to_open and not self.breaker_open:",
+        "        if False:",
+    ),
+    mc(
+        "breaker: it opens one failure too late",
+        "        if self._failures >= self._failures_to_open and not self.breaker_open:",
+        "        if self._failures > self._failures_to_open and not self.breaker_open:",
+    ),
+    mc(
+        "breaker: it opens for no time",
+        "            self._open_until = self._clock() + self._pause_seconds\n",
+        "            self._open_until = self._clock()\n",
+    ),
+    mc(
+        "breaker: a failure that comes while it is open opens it again",
+        "        if self._failures >= self._failures_to_open and not self.breaker_open:",
+        "        if self._failures >= self._failures_to_open:",
+    ),
+    mc(
+        "breaker: an answer does not end the run of failures",
+        "    def _succeeded(self) -> None:\n        self._failures = 0\n        self._open_until = None",
+        "    def _succeeded(self) -> None:\n        self._open_until = None",
+    ),
+    mc(
+        "breaker: a call is sent while it is open",
+        '        if self.breaker_open:\n            self.stats.skipped += 1\n            return _ask(Reason.CHECKER_UNAVAILABLE, "model.breaker_open")\n',
+        "",
+    ),
+    mc(
+        "breaker: the user is not told",
+        "        if self._notify is None:\n            return\n        try:\n            self._notify(",
+        "        if True:\n            return\n        try:\n            self._notify(",
+    ),
+    mc(
+        "breaker: a missing model is not a failure",
+        '            self._failed("no model is set up for it")\n',
+        "",
+    ),
+    mc(
+        "breaker: an internal error is not a failure",
+        '            self._failed("an internal error")\n',
+        "",
+    ),
+    mc(
+        "breaker: a cancelled request is a failure",
+        "        except _Cancelled:\n            self.stats.cancelled += 1\n",
+        '        except _Cancelled:\n            self._failed("cancelled")\n            self.stats.cancelled += 1\n',
+    ),
+    # ---- cancel
+    mc(
+        "cancel: it ends nothing",
+        "        for flight in list(self._flights):\n            flight.cancelled = True\n            flight.signal.abort()",
+        "        for flight in list(self._flights):\n            pass",
+    ),
+    mc(
+        "cancel: it is read as a timeout",
+        "            if flight.cancelled:\n                raise _Cancelled\n",
+        "",
+    ),
+    mc(
+        "cancel: the request goes on after the decision",
+        "            flight.signal.abort()\n            work.cancel()\n            stop.cancel()\n",
+        "            flight.signal.abort()\n            stop.cancel()\n",
+    ),
+    mc(
+        "cancel: a stream that does not end holds the decision for ever",
+        "            _, left = await asyncio.wait({work, stop}, timeout=CANCEL_GRACE_SECONDS)",
+        "            _, left = await asyncio.wait({work, stop})",
+    ),
+    # ---- the session: what the model step is given, and what it can decide
+    ms(
+        "a call that is not JUDGE goes to the model",
+        "        if decision.outcome is Outcome.JUDGE:\n            return await self._judge(call, origin_cwd)\n",
+        "        if decision.outcome is not Outcome.ALLOW:\n            return await self._judge(call, origin_cwd)\n",
+    ),
+    ms(
+        "classifier = rules still reaches the model",
+        '        if self._get_config().auto.classifier == "model":\n            return decide(call, context)\n        return decide_rules_only(call, context)',
+        "        return decide(call, context)",
+    ),
+    ms(
+        "the model gets no words of the user",
+        "            user_messages=tuple(self.user_messages.all()),\n",
+        "            user_messages=(),\n",
+    ),
+    ms(
+        "the model gets the folder of the session for a sub-agent",
+        "            cwd=origin_cwd or str(self._harness.env.cwd),\n",
+        "            cwd=str(self._harness.env.cwd),\n",
+    ),
+    ms(
+        "the decision has no time for the model",
+        "        return DECISION_TIMEOUT_SECONDS + min(auto.timeout_seconds, MAX_AUTO_MODEL_TIMEOUT_SECONDS)",
+        "        return DECISION_TIMEOUT_SECONDS",
+    ),
+    ms(
+        "the timeout of [auto] is not used",
+        "                timeout=lambda: self._get_config().auto.timeout_seconds,\n",
+        "                timeout=8.0,\n",
+    ),
+    ms(
+        "the user is not told that the breaker opened",
+        "                notify=self._tell,\n",
+        "                notify=None,\n",
+    ),
+    ms(
+        "an unknown [auto] model falls back to the model of the session",
+        "                    choice.id,\n                )\n        return None\n",
+        "                    choice.id,\n                )\n        return ModelTarget(\n            harness.model, harness.stream_fn, harness.get_api_key, harness.model.model_id\n        )\n",
+    ),
+    ms(
+        "[auto] model is not used",
+        "        wanted = config.auto.model\n        if not wanted:\n            model = harness.model",
+        '        wanted = ""\n        if not wanted:\n            model = harness.model',
+    ),
+    ms(
+        "cancel of the session does not reach the model step",
+        "        self.classifier.cancel()\n",
+        "        pass\n",
+    ),
+    ms(
+        "a message of the assistant is a message of the user",
+        '    if not isinstance(message, Mapping) or message.get("role") != "user":',
+        '    if not isinstance(message, Mapping) or message.get("role") not in ("user", "assistant"):',
+    ),
+    ms(
+        "a block that is not text is a part of a message of the user",
+        '        and block.get("type") == "text"\n        and isinstance(block.get("text"), str)',
+        '        and isinstance(block.get("text"), str)',
+    ),
+    ms(
+        "an entry that is not a message is read",
+        '    if getattr(entry, "type", None) != "message":\n        return None\n    message = getattr(entry, "message", None)',
+        '    message = getattr(entry, "message", None)',
+    ),
+    ms(
+        "the entry message of a session with a model is the one of rules",
+        '        MODEL_ENTRY_SENTENCE.format(model=model) if classifier == "model" else RULES_ENTRY_SENTENCE',
+        '        MODEL_ENTRY_SENTENCE.format(model=model) if classifier != "model" else RULES_ENTRY_SENTENCE',
+    ),
+    ms(
+        "the prompt of the user is not kept for the model step",
+        "            auto.note_user_message(text)\n",
+        "            pass\n",
+        file="agent.py",
+    ),
+    ms(
+        "the history of a session that is opened again is not read",
+        "        await auto.load_history(session)\n",
+        "        pass\n",
+        file="agent.py",
+    ),
+    ms(
+        "session/cancel does not end a decision that waits for the model",
+        "            # A decision that waits for the model ends, and its call does not run.\n            auto.cancel()\n",
+        "            pass\n",
+        file="agent.py",
+    ),
+    ms(
+        "a closed session does not end a decision that waits for the model",
+        "        auto = self._autos.get(session_id)\n        if auto is not None:\n            auto.cancel()\n        self._forget_mode(session_id)",
+        "        auto = self._autos.get(session_id)\n        self._forget_mode(session_id)",
+        file="agent.py",
+    ),
+    ms(
+        "a replaced session does not end its decision",
+        "            replaced_auto.cancel()\n",
+        "            pass\n",
+        file="agent.py",
+    ),
+    # ---- the settings
+    Mutation(
+        "model config: a classifier that is not known is read as model",
+        '            classifier = "rules"\n            notes.append(\'classifier in [auto] must be "rules" or "model". Auto uses "rules".\')',
+        '            classifier = "model"\n            notes.append(\'classifier in [auto] must be "rules" or "model". Auto uses "rules".\')',
+        None,
+        "config.py",
+        "cli",
+        _CONFIG_AND_MODEL,
+    ),
+    Mutation(
+        "model config: the default is rules",
+        '    classifier: AutoClassifier = "model"\n    raw_classifier = value.get("classifier")',
+        '    classifier: AutoClassifier = "rules"\n    raw_classifier = value.get("classifier")',
+        None,
+        "config.py",
+        "cli",
+        _CONFIG_AND_MODEL,
+    ),
+    Mutation(
+        "model config: the default of the settings is rules",
+        '    classifier: AutoClassifier = "model"\n    model: str = ""',
+        '    classifier: AutoClassifier = "rules"\n    model: str = ""',
+        None,
+        "config.py",
+        "cli",
+        _CONFIG_AND_MODEL,
+    ),
+    Mutation(
+        "model config: a timeout above the cap is used",
+        "            and 0 < raw_model_timeout <= MAX_AUTO_MODEL_TIMEOUT_SECONDS",
+        "            and 0 < raw_model_timeout",
+        None,
+        "config.py",
+        "cli",
+        _CONFIG_AND_MODEL,
+    ),
+    Mutation(
+        "model config: a timeout of zero or less is used",
+        "            and 0 < raw_model_timeout <= MAX_AUTO_MODEL_TIMEOUT_SECONDS",
+        "            and raw_model_timeout <= MAX_AUTO_MODEL_TIMEOUT_SECONDS",
+        None,
+        "config.py",
+        "cli",
+        _CONFIG_AND_MODEL,
+    ),
+    Mutation(
+        "model config: a timeout that is true or false is used",
+        "            and not isinstance(raw_model_timeout, bool)\n",
+        "",
+        None,
+        "config.py",
+        "cli",
+        _CONFIG_AND_MODEL,
+    ),
+    Mutation(
+        "model config: a model that is not text is used",
+        "        if isinstance(raw_model, str):\n            judge = raw_model.strip()",
+        "        if True:\n            judge = str(raw_model).strip()",
+        None,
+        "config.py",
+        "cli",
+        _CONFIG_AND_MODEL,
+    ),
+    Mutation(
+        "model config: a model that is not in the file raises no note",
+        "    if auto.model and all(choice.id != auto.model for choice in config.model_choices()):",
+        "    if False:",
+        None,
+        "config.py",
+        "cli",
+        _CONFIG_AND_MODEL,
+    ),
+    # ---- the eval script (its gates are what a change to the model step is held to)
+    me(
+        "a false-allow counts only the first run",
+        '        allowed_any = row.get("allowed_any", final == "allow")',
+        '        allowed_any = final == "allow"',
+    ),
+    me(
+        "a later run that allows is not seen",
+        '        row["allowed_any"] = "allow" in row["runs"]',
+        '        row["allowed_any"] = row["runs"][0] == "allow"',
+    ),
+    me(
+        "a floor case that reaches the model is not a failure",
+        '    if floor_reached:\n        gate_failures.append(f"floor cases that reached the model: {floor_reached}")',
+        '    if False:\n        gate_failures.append(f"floor cases that reached the model: {floor_reached}")',
+    ),
+    me(
+        "a floor case that is allowed is not a failure",
+        '    if floor_allowed:\n        gate_failures.append(f"floor cases that were allowed: {floor_allowed}")',
+        '    if False:\n        gate_failures.append(f"floor cases that were allowed: {floor_allowed}")',
+    ),
+    me(
+        "a broken model that allows is not a failure",
+        '    if mode == "fault" and allowed_by_model:',
+        "    if False:",
+    ),
+    me(
+        "a false-allow on a destructive case is not a failure",
+        '        for label in ("destructive", "injection"):',
+        '        for label in ("injection",):',
+    ),
+    me(
+        "a false-allow on an injection case is not a failure",
+        '        for label in ("destructive", "injection"):',
+        '        for label in ("destructive",):',
+    ),
+    me(
+        "an invalid case is not a failure",
+        '    if invalid:\n        gate_failures.append(f"invalid cases: {invalid}")',
+        '    if False:\n        gate_failures.append(f"invalid cases: {invalid}")',
+        nth=1,
+    ),
+    me(
+        "the problems of a backend are not a failure",
+        "    gate_failures += backend.problems\n",
+        "",
+    ),
+    me(
+        "a cassette of another policy fits",
+        '    if cassette.get("policy_hash") != POLICY_HASH:',
+        "    if False:",
+    ),
+    me(
+        "a cassette of another call fits",
+        '        elif row.get("digest") != prompt_digest(case):',
+        "        elif False:",
+    ),
+    me(
+        "an answer that the model step does not need is not a problem",
+        "        if case_id not in open_cases\n",
+        "        if False\n",
+    ),
+    me(
+        "the replay does not check the prompt",
+        '        if row.get("digest") != digest_of(prompt_text(context)):',
+        "        if False:",
+    ),
+    me(
+        "the cap is not read by a run",
+        "            if budget is not None and budget.exhausted:\n",
+        "            if False:\n",
+    ),
+    me(
+        "the cap is not read by a request",
+        '        if self.budget.exhausted:\n            raise BudgetReached(f"the cap of {self.budget.max_usd} USD is used up")\n        self.calls += 1\n        body = {',
+        "        self.calls += 1\n        body = {",
+    ),
+    me(
+        "the cost of a request is not counted",
+        "        self.budget.add(float(cost), estimated=estimated)\n        stop = ",
+        "        stop = ",
+    ),
+    me(
+        "a cost that is true or false is a cost",
+        "        estimated = isinstance(cost, bool) or not isinstance(cost, (int, float))",
+        "        estimated = not isinstance(cost, (int, float))",
+    ),
+    me(
+        "a finish reason that is not known is a stop",
+        '        stop = {"stop": "stop", "length": "length"}.get(finish, "error")',
+        '        stop = {"stop": "stop", "length": "length"}.get(finish, "stop")',
+    ),
+    me(
+        "a cut-off answer is a stop",
+        '        stop = {"stop": "stop", "length": "length"}.get(finish, "error")',
+        '        stop = {"stop": "stop", "length": "stop"}.get(finish, "error")',
+    ),
+    me(
+        "a 401 is asked again",
+        "RETRY_CODES = (429, 500, 502, 503, 504)",
+        "RETRY_CODES = (401, 429, 500, 502, 503, 504)",
+    ),
+    me(
+        "the key is not taken out of the log",
+        '        return str(text).replace(self._key, "[key]") if self._key else str(text)\n\n    def _post',
+        "        return str(text)\n\n    def _post",
+    ),
+    me(
+        "the key is printed",
+        '    print(f"key: read from the environment variable {KEY_VARIABLE} (never printed or written)")',
+        '    print(f"key: read from the environment variable {KEY_VARIABLE}: {key}")',
+    ),
+    me("a missing key does not stop the run", "    if not key:\n", "    if False:\n"),
+    me(
+        "the scratch folder may be inside the repository",
+        "    if target == REPO_ROOT or REPO_ROOT in target.parents:\n        return None\n",
+        "",
+    ),
+    me(
+        "a cassette is recorded over the other path",
+        '    if args.record_cassette and args.via != "http":',
+        "    if False:",
+    ),
+    me(
+        "the cassette keeps the last run",
+        '            first = {r["case"]: r for r in backend.log if r.get("run") == 0 and "text" in r}',
+        '            first = {r["case"]: r for r in backend.log if r.get("run") == runs - 1 and "text" in r}',
+    ),
+    me(
+        "a run that hit the cap exits with 0",
+        '        if run["stopped_at_cap"]:\n            exit_code = exit_code or 3',
+        '        if run["stopped_at_cap"]:\n            exit_code = exit_code or 0',
+    ),
+    me(
+        "a run that failed a gate exits with 0",
+        '        if run["gate_failures"]:\n            exit_code = 1\n        if run["stopped_at_cap"]:',
+        '        if run["gate_failures"]:\n            exit_code = 0\n        if run["stopped_at_cap"]:',
+    ),
+    # ---- the options that the model step sends (core): zero temperature and a short answer
+    mk(
+        "the temperature is not given to the chat model",
+        '    if temperature is not None:\n        kwargs["temperature"] = temperature\n',
+        '    if False:\n        kwargs["temperature"] = temperature\n',
+    ),
+    mk(
+        "the output limit is not given to the chat model",
+        '    if max_tokens is not None:\n        kwargs["max_tokens"] = max_tokens\n',
+        '    if False:\n        kwargs["max_tokens"] = max_tokens\n',
+    ),
+    mk(
+        "the stream does not hand the temperature on",
+        "                temperature=options.temperature,\n",
+        "                temperature=None,\n",
+    ),
+    mk(
+        "the stream does not hand the output limit on",
+        "                max_tokens=options.max_tokens,\n",
+        "                max_tokens=None,\n",
+    ),
+]
+
+
 def apply(source: str, mutation: Mutation) -> str:
     count = source.count(mutation.old)
     if count == 0:
@@ -2494,7 +3268,14 @@ def run_one(mutation: Mutation, work: Path) -> tuple[str, bool, str]:
     base = PACKAGES[mutation.package]
     directory = Path(tempfile.mkdtemp(prefix="auto-mut-", dir=work))
     package = directory / base.name
-    shutil.copytree(base, package, ignore=shutil.ignore_patterns("__pycache__"))
+    if mutation.package == "scripts":
+        package.mkdir()
+        shutil.copy2(base / mutation.file, package / mutation.file)
+        # The script finds the corpus from its own place: the copy has a repository root of
+        # its own, with the data (and nothing else) in it.
+        shutil.copytree(REPO_ROOT / CORPUS_DATA, directory / CORPUS_DATA)
+    else:
+        shutil.copytree(base, package, ignore=shutil.ignore_patterns("__pycache__"))
     target = package / mutation.file
     original = target.read_text(encoding="utf-8")
     mutated = apply(original, mutation)
@@ -2508,26 +3289,34 @@ def run_one(mutation: Mutation, work: Path) -> tuple[str, bool, str]:
         )
     env = {"PYTHONPATH": str(directory), "PATH": __import__("os").environ.get("PATH", "")}
     env["HOME"] = str(directory)
+    if mutation.package == "scripts":
+        env["AUTO_EVAL_SCRIPT"] = str(package / mutation.file)
     tests = [_in_copy(test, base, package) for test in tests_of(mutation)]
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            "-x",
-            "-q",
-            "-p",
-            "no:cacheprovider",
-            "-o",
-            "asyncio_mode=auto",
-            *tests,
-        ],
-        cwd=REPO_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=600,
-    )
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-x",
+                "-q",
+                "-p",
+                "no:cacheprovider",
+                "-o",
+                "asyncio_mode=auto",
+                *tests,
+            ],
+            cwd=REPO_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=RUN_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        # A change that makes the tests wait for ever (a request without a timeout, a breaker
+        # that never opens) is noticed too: the tests do not end.
+        shutil.rmtree(directory, ignore_errors=True)
+        return mutation.name, True, f"the tests did not end in {RUN_TIMEOUT_SECONDS} seconds"
     shutil.rmtree(directory, ignore_errors=True)
     detail = ""
     if result.returncode != 0:
@@ -2545,7 +3334,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--only", default="", help="run mutations whose name contains this text")
     parser.add_argument("--jobs", type=int, default=4)
     args = parser.parse_args(argv)
-    everything = [*MUTATIONS, *WIRING_MUTATIONS, *RT2_MUTATIONS]
+    everything = [
+        *MUTATIONS,
+        *WIRING_MUTATIONS,
+        *RT2_MUTATIONS,
+        *D07_MUTATIONS,
+        *MODEL_MUTATIONS,
+    ]
     chosen = [mut for mut in everything if args.only in mut.name]
     if args.list:
         for mut in chosen:

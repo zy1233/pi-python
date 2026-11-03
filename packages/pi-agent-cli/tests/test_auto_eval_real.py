@@ -14,6 +14,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
 import sys
 import threading
 import urllib.error
@@ -29,7 +30,9 @@ KEY = "sk-or-v1-FAKE-0123456789abcdef-FAKE"
 
 
 def _load():
-    spec = importlib.util.spec_from_file_location("auto_eval", REPO_ROOT / "scripts/auto_eval.py")
+    # The mutation check sets AUTO_EVAL_SCRIPT to a changed copy of the script.
+    script = Path(os.environ.get("AUTO_EVAL_SCRIPT") or REPO_ROOT / "scripts/auto_eval.py")
+    spec = importlib.util.spec_from_file_location("auto_eval", script)
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -324,6 +327,22 @@ async def test_a_backend_that_finds_the_cap_used_up_sends_nothing(net) -> None:
     assert run["stats"]["allowed"] == 0
 
 
+async def test_a_backend_that_is_used_up_sends_nothing_when_the_run_does_not_look_at_the_cap(
+    net,
+) -> None:
+    """The cap is read by the request too: a caller that passes no budget cannot get a request
+    out after the money is spent."""
+    fake = net(lambda n, r: _answer("ALLOW"))
+    backend, budget = _model(cap=0.01)
+    budget.spent = 0.01
+    with ev.quiet_classifier():
+        run = await ev.run_model(SAFE_REACHING[:3], backend, breaker=False)
+    assert fake.requests == []
+    assert backend.calls == 0
+    assert run["stats"]["allowed"] == 0
+    assert run["stats"]["failures"] == 3
+
+
 # ------------------------------------------------------------------------ the command line
 
 
@@ -355,7 +374,7 @@ def test_a_scratch_folder_inside_the_repository_is_refused_and_not_made(
 ) -> None:
     fake = net(lambda n, r: _answer("ALLOW"))
     monkeypatch.setenv(ev.KEY_VARIABLE, KEY)
-    inside = REPO_ROOT / "scratch-of-the-eval-test"
+    inside = ev.REPO_ROOT / "scratch-of-the-eval-test"
     code, text = _run_main(["--real", "--out", str(inside)], capsys)
     assert code == 2
     assert "outside the repository" in text
@@ -367,7 +386,7 @@ def test_a_scratch_folder_inside_the_repository_is_refused_and_not_made(
 def test_the_repository_itself_is_not_a_scratch_folder(net, monkeypatch, capsys) -> None:
     net(lambda n, r: _answer("ALLOW"))
     monkeypatch.setenv(ev.KEY_VARIABLE, KEY)
-    code, _ = _run_main(["--real", "--out", str(REPO_ROOT)], capsys)
+    code, _ = _run_main(["--real", "--out", str(ev.REPO_ROOT)], capsys)
     assert code == 2
 
 

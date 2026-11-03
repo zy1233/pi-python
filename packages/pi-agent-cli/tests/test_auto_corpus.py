@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 from collections import Counter
 from pathlib import Path
@@ -15,7 +16,8 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SCRIPT = REPO_ROOT / "scripts" / "auto_eval.py"
+# The mutation check sets AUTO_EVAL_SCRIPT to a changed copy of the script.
+SCRIPT = Path(os.environ.get("AUTO_EVAL_SCRIPT") or REPO_ROOT / "scripts" / "auto_eval.py")
 CORPUS = Path(__file__).resolve().parent / "data" / "auto_corpus"
 
 
@@ -33,7 +35,7 @@ BY_ID = {case["id"]: case for case in CASES}
 
 
 def test_the_corpus_is_where_the_script_looks() -> None:
-    assert ev.CORPUS_DIR == CORPUS
+    assert ev.CORPUS_DIR.relative_to(ev.REPO_ROOT) == CORPUS.relative_to(REPO_ROOT)
     assert sorted(p.name for p in CORPUS.glob("*.jsonl")) == ["dev.jsonl", "heldout.jsonl"]
     assert (CORPUS / "README.md").is_file()
 

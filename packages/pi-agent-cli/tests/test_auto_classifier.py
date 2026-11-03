@@ -474,6 +474,15 @@ def test_a_call_at_the_limit_is_sent_and_one_character_more_is_not() -> None:
     assert build_prompt(over, TOKEN) is None
 
 
+def test_the_limit_is_the_number_that_the_design_and_the_docs_name() -> None:
+    """A change of this number is a decision of the owner: the docs and the policy of the
+    model step name it."""
+    assert MAX_ARGS_CHARS == 8192
+    assert build_prompt(_request("a" * 8000), TOKEN) is not None
+    assert build_prompt(_request("a" * 9000), TOKEN) is None
+    assert build_prompt(_request("a" * 100_000), TOKEN) is None
+
+
 def test_the_limit_counts_what_is_sent_not_the_characters_of_the_command() -> None:
     """A command of escapes is longer in the prompt than in the call."""
     many = "\u200b" * (MAX_ARGS_CHARS // 6 + 10)
@@ -1146,6 +1155,36 @@ async def test_a_failure_after_the_pause_opens_the_breaker_again_and_tells_the_u
     again = await classifier.classify(_request())
     assert again.rule_id == "model.breaker_open"
     assert len(script.calls) == sent
+
+
+async def test_a_failure_that_comes_while_the_breaker_is_open_is_not_a_new_opening() -> None:
+    """Requests that were in flight when the breaker opened fail after it did. They count as
+    failures, but they do not open it a second time or tell the user a second time."""
+    gate = asyncio.Event()
+    sent = 0
+
+    async def late(model: Model, context: Any, options: Any) -> Any:
+        nonlocal sent
+        sent += 1
+        await gate.wait()
+        raise RuntimeError("down")
+
+    told: list[str] = []
+    classifier = ModelClassifier(
+        _target(late), timeout=5.0, notify=told.append, clock=_Clock(), failures_to_open=2
+    )
+    tasks = [asyncio.create_task(classifier.classify(_request())) for _ in range(4)]
+    while sent < 4:
+        await asyncio.sleep(0)
+
+    gate.set()
+    answers = await asyncio.gather(*tasks)
+
+    assert [answer.rule_id for answer in answers] == ["model.request_failed"] * 4
+    assert classifier.stats.failures == 4
+    assert classifier.stats.breaker_opened == 1
+    assert len(told) == 1
+    assert classifier.breaker_open
 
 
 async def test_a_notify_function_that_fails_does_not_break_the_answer() -> None:

@@ -12,6 +12,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import os
 import random
 import sys
 from pathlib import Path
@@ -26,7 +27,9 @@ CORPUS = Path(__file__).resolve().parent / "data" / "auto_corpus"
 
 
 def _load():
-    spec = importlib.util.spec_from_file_location("auto_eval", REPO_ROOT / "scripts/auto_eval.py")
+    # The mutation check sets AUTO_EVAL_SCRIPT to a changed copy of the script.
+    script = Path(os.environ.get("AUTO_EVAL_SCRIPT") or REPO_ROOT / "scripts/auto_eval.py")
+    spec = importlib.util.spec_from_file_location("auto_eval", script)
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -126,6 +129,26 @@ async def test_a_broken_model_never_allows_and_every_call_it_decides_is_an_ask(n
     assert stats["calls"] == len(REACHING) and stats["failures"] == len(REACHING)
     assert stats["skipped"] == 0 and stats["allowed"] == 0 and stats["asked"] == 0
     assert sum(run["by_label"][label].get("allow", 0) for label in ev.DANGEROUS) == 0
+
+
+async def test_a_model_that_is_meant_to_be_broken_and_allows_fails_the_run() -> None:
+    sample = REACHING[:5]
+    run = await ev.run_model(
+        sample, ev.ScriptedModel("allows", "ALLOW"), breaker=False, mode="fault"
+    )
+    assert run["allowed_by_model"] == len(sample)
+    assert any("a broken model was allowed to allow" in text for text in run["gate_failures"])
+
+
+async def test_a_case_that_is_not_valid_fails_the_run() -> None:
+    broken = {**REACHING[0], "label": "bogus"}
+    missing = {key: value for key, value in REACHING[1].items() if key != "split"}
+    for case in (broken, missing):
+        run = await ev.run_model(
+            [case], ev.ScriptedModel("asks", "ASK UNCLEAR"), breaker=False, mode="gate"
+        )
+        assert any(text.startswith("invalid cases") for text in run["gate_failures"])
+        assert run["stats"]["calls"] == 0
 
 
 async def test_a_model_that_hangs_ends_as_an_ask_by_the_timeout_for_every_call() -> None:
