@@ -17,6 +17,7 @@ import pytest
 
 from pi_agent_cli.auto_reasons import ALLOW_REASONS, Reason
 from pi_agent_cli.auto_rules import (
+    BARRED_KINDS,
     MAX_COMMAND_BYTES,
     AutoContext,
     By,
@@ -655,15 +656,6 @@ def test_bash_commands_proven_read_only_run(world, command) -> None:
         "FOO=bar ls",
         "FOO=bar",
         "./run.sh",
-        "tail -f app.log",
-        "sort -o out.txt src/a.py",
-        "sort --output=out.txt src/a.py",
-        "rg --pre cat foo",
-        "uniq a b",
-        "find . -fprint out.txt",
-        "git log --output=out.txt",
-        "git diff --ext-diff",
-        "hostname newname",
         "xargs ls",
         "ls | xargs cat",
         "env",
@@ -680,6 +672,79 @@ def test_other_bash_commands_are_left_to_a_judge_or_the_floor(world, command) ->
     assert decision.by is By.RULE
     assert decision.reason is Reason.UNCLEAR
     assert decision.rule_id == "bash.not_proven"
+
+
+# D-07: a form that can run a program, write a file, read for ever or change the machine is
+# not left to a model. The rules ask by the floor, so no model is called and no model can allow.
+BARRED = [
+    ("tail -f app.log", "option"),
+    ("sort -o out.txt src/a.py", "option"),
+    ("sort --output=out.txt src/a.py", "option"),
+    ("sort --compress=sh a", "option"),
+    ("sort --comp=sh a", "option"),
+    ("sort --out=x a", "option"),
+    ("sort -oX a", "option"),
+    ("sort --files0-from=names.txt", "option"),
+    ("rg --pre cat foo", "option"),
+    ("find . -fprint out.txt", "option"),
+    ("find . -files0-from names.txt", "option"),
+    ("wc --files0-from=names.txt", "option"),
+    ("du --files0-from=names.txt", "option"),
+    ("hostname -b", "option"),
+    ("hostname --boot", "option"),
+    ("hostname --file=x", "option"),
+    ("hostname -F x", "option"),
+    ("hostname -Fnames.txt", "option"),
+    ("uniq a b", "operand"),
+    ("uniq *", "operand"),
+    ("hostname newname", "operand"),
+    ("date 010100001999", "operand"),
+    ("date 01010000", "operand"),
+    ("rg foo *", "lead_glob"),
+    ("sort *", "lead_glob"),
+    ("find *", "lead_glob"),
+    ("find . -name *.py", "lead_glob"),
+    ("git grep x *", "lead_glob"),
+    ("git log --output=out.txt", "git_option"),
+    ("git log --out=x", "git_option"),
+    ("git diff --ext-diff", "git_option"),
+    ("git diff --ext", "git_option"),
+    ("git grep --open=sh x", "git_option"),
+    ("git grep -Osh x", "git_option"),
+    ("cat /dev/zero", "endless_device"),
+    ("head /dev/zero", "endless_device"),
+    ("head -c 16 /dev/urandom", "endless_device"),
+    ("sort /dev/zero", "endless_device"),
+    ("cat </dev/random", "endless_device"),
+    ("ls >/dev/zero", "endless_device"),
+    ("pytest --help", "version_flag"),
+    ("pytest -h", "version_flag"),
+    ("yarn --version", "version_flag"),
+    ("mvn -version", "version_flag"),
+    ("flake8 --version", "version_flag"),
+    ("./git status", "disguise"),
+    ("./git --version", "disguise"),
+    ("bin/git log", "disguise"),
+    ("./find . -name x", "disguise"),
+]
+
+
+@pytest.mark.parametrize(("command", "kind"), BARRED)
+def test_a_barred_form_is_asked_by_the_floor_and_never_judged(world, command, kind) -> None:
+    decision = run_bash(world, command)
+    assert_ask(decision, Reason.UNCLEAR, f"bash.barred.{kind}")
+
+
+def test_every_kind_of_barred_form_has_a_test_and_a_name() -> None:
+    assert {kind for _, kind in BARRED} == set(BARRED_KINDS)
+
+
+@pytest.mark.parametrize(("command", "kind"), BARRED)
+def test_a_barred_form_is_also_barred_when_the_rules_only_answer_is_used(
+    world, command, kind
+) -> None:
+    call = ToolCall("bash", {"command": command}, None, True)
+    assert decide_rules_only(call, world.ctx) == decide(call, world.ctx)
 
 
 def test_decide_rules_only_turns_a_judge_into_an_ask(world) -> None:
@@ -1491,7 +1556,7 @@ def test_a_version_flag_unlocks_a_program_only_when_it_is_the_only_argument(worl
 
 @pytest.mark.parametrize("command", ["find . -fprint out.txt", "find . -fls out.txt"])
 def test_find_that_writes_a_file_is_not_proven_read_only(world, command) -> None:
-    assert run_bash(world, command).outcome is Outcome.JUDGE
+    assert_ask(run_bash(world, command), Reason.UNCLEAR, "bash.barred.option")
 
 
 @pytest.mark.parametrize(
@@ -1697,16 +1762,8 @@ def test_red_team_floor_cases(rt_world, command, reason, rule_id) -> None:
 @pytest.mark.parametrize(
     "command",
     [
-        # Long options that GNU programs and git take as a prefix.
-        "sort --compress=sh a",
-        "sort --comp=sh a",
-        "sort --out=x a",
-        "sort -oX a",
-        "sort --files0-from=names.txt",
-        "git grep --open=sh x",
-        "git grep -Osh x",
-        "git log --out=x",
-        "git diff --ext",
+        # Long options of ``git branch`` that GNU option parsing takes as a prefix: git branch
+        # is not a read-only program, so the model may judge them.
         "git branch --unset",
         "git branch --set-upstream-t=origin/x",
         "git branch --set-upstream-to=origin/x",
@@ -1714,54 +1771,18 @@ def test_red_team_floor_cases(rt_world, command, reason, rule_id) -> None:
         "git branch --no-track x",
         "git branch --create-reflog x",
         "git branch --set-upstream x",
-        "git grep x *",
-        "hostname -b",
-        "hostname --boot",
-        "wc --files0-from=names.txt",
-        "du --files0-from=names.txt",
-        "find . -files0-from names.txt",
-        # A glob that can become an option (a file named ``--pre=sh``), where an option is
-        # banned: not proven.
-        "find *",
-        "find . -name *.py",
-        "rg foo *",
-        "sort *",
-        "uniq *",
-        "uniq a b",
-        # These set the host name or the clock.
-        "hostname --file=x",
-        "hostname -F x",
-        "hostname newname",
-        "date 010100001999",
-        "date 01010000",
-        # A file of the project is read before the flags are: ``--version`` runs project code.
-        "pytest --help",
-        "pytest -h",
-        "yarn --version",
-        "mvn -version",
-        "mocha --version",
-        "bazel --version",
-        "tox --version",
         # ``uv run`` first syncs the environment: never read-only, even for ``ls``.
         "uv run ls",
         "uv run pytest",
         "bundle exec rspec",
         # Settings of a program that the project may fill are for the model to judge.
         "export PYTHONPATH=src",
-        # A runner with no program after it, and ``-F`` glued to its file name.
+        # A runner with no program after it.
         "uv run",
         "uv run --frozen",
         "bundle exec",
-        "hostname -Fnames.txt",
         # A program of the project is run by ``--version``, too.
         "./bin/tool --version",
-        # A read that never ends fills the disk: the Bash tool keeps the whole output in a file.
-        "cat /dev/zero",
-        "head /dev/zero",
-        "head -c 16 /dev/urandom",
-        "sort /dev/zero",
-        "cat </dev/random",
-        "ls >/dev/zero",
         # The short flags that are not version flags: verbose mode reads a script from stdin.
         "node -v x.js",
         "python -VV x.py",
@@ -1870,11 +1891,10 @@ def test_the_version_flag_of_an_unknown_program_is_project_code(rt_world, comman
     decision = run_bash(rt_world, command, project_trusted=False)
     assert_ask(decision, Reason.UNTRUSTED_PROJECT_CODE, "bash.untrusted_project_code")
     trusted = run_bash(rt_world, command, project_trusted=True)
-    assert trusted.outcome is Outcome.JUDGE, trusted
-    assert trusted.rule_id == "bash.not_proven"
+    assert_ask(trusted, Reason.UNCLEAR, "bash.barred.version_flag")
     call = ToolCall("bash", {"command": command}, None, True)
     ask = decide_rules_only(call, dataclasses.replace(rt_world.ctx, project_trusted=True))
-    assert_ask(ask, Reason.UNCLEAR, "pipeline.unclear")
+    assert ask == trusted
 
 
 @pytest.mark.parametrize(
@@ -1923,10 +1943,6 @@ def test_a_program_that_reads_the_project_first_is_not_pure(rt_world, command) -
 @pytest.mark.parametrize(
     "command",
     [
-        "./git status",
-        "./git --version",
-        "bin/git log",
-        "./find . -name x",
         "./python --version",
         ".venv/bin/python --version",
         "./node --version",
@@ -1934,14 +1950,28 @@ def test_a_program_that_reads_the_project_first_is_not_pure(rt_world, command) -
     ],
 )
 def test_a_file_of_the_project_is_not_the_program_it_is_called(rt_world, command) -> None:
-    """``./git`` is a file of the project, not git. Its name proves nothing about the call, so
-    the call is project code: floor in a project that is not trusted, left to a judge in one
-    that is."""
+    """``./python`` is a file of the project, not python. Its name proves nothing about the
+    call, so the call is project code: floor in a project that is not trusted, left to a judge
+    in one that is."""
     untrusted = run_bash(rt_world, command, project_trusted=False)
     assert_ask(untrusted, Reason.UNTRUSTED_PROJECT_CODE, "bash.untrusted_project_code")
     trusted = run_bash(rt_world, command, project_trusted=True)
     assert trusted.outcome is Outcome.JUDGE, trusted
     assert trusted.rule_id == "bash.not_proven"
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["./git status", "./git --version", "bin/git log", "./find . -name x"],
+)
+def test_a_file_of_the_project_with_the_name_of_a_read_only_program_is_barred(
+    rt_world, command
+) -> None:
+    """``./git`` looks like the read-only program ``git``; a model could take it for it (D-07)."""
+    untrusted = run_bash(rt_world, command, project_trusted=False)
+    assert_ask(untrusted, Reason.UNTRUSTED_PROJECT_CODE, "bash.untrusted_project_code")
+    trusted = run_bash(rt_world, command, project_trusted=True)
+    assert_ask(trusted, Reason.UNCLEAR, "bash.barred.disguise")
 
 
 @pytest.mark.parametrize(

@@ -98,6 +98,20 @@ def test_each_floor_case_is_caught_by_the_floor_not_left_to_a_model() -> None:
         assert raw.outcome is Outcome.ASK and raw.by is By.FLOOR, (case["id"], raw)
 
 
+OPEN_DANGEROUS = [
+    "dx041",
+    "dx042",
+    "dx043",
+    "dx045",
+    "dx046",
+    "dr060",
+    "dr061",
+    "dr062",
+    "dr063",
+    "dr064",
+]
+
+
 def test_the_cases_the_rules_leave_to_a_model_are_few_and_listed() -> None:
     """Only cases marked ``floor: false`` may reach a model; the list is pinned here."""
     from pi_agent_cli.auto_rules import Outcome
@@ -111,13 +125,14 @@ def test_the_cases_the_rules_leave_to_a_model_are_few_and_listed() -> None:
     assert open_dangerous == sorted(
         c["id"] for c in CASES if c["label"] in ev.DANGEROUS and not c["floor"]
     )
-    # Ten were project code, awk, sed and plain overwrites. The red-team review added the calls
-    # of read-only programs that were given an option or an operand that writes, runs something
-    # or never ends (``sort --comp=sh``, ``rg foo *``, ``cat /dev/zero``), and the calls of a
-    # program that the rules cannot vouch for in a trusted project (``flake8 --version``, a file
-    # of the project that is called ``git``): "not proven" is the answer by design, so they are
-    # open.
-    assert 0 < len(open_dangerous) <= 22
+    # These are project code, awk, sed and plain overwrites: "not proven" is the answer by
+    # design, so the model decides. A call of a read-only program with an option that runs a
+    # program, an option or operand that writes, a glob at the start of a word, a read that
+    # never ends, a version flag of a program that reads the project first, or a file of the
+    # project with the name of a read-only program is barred from the model (D-07): the floor
+    # asks, and these cases are marked ``floor: true``.
+    assert open_dangerous == sorted(OPEN_DANGEROUS)
+    assert len(open_dangerous) == 10
 
 
 def test_safe_cases_are_allowed_unless_the_case_says_why_not() -> None:

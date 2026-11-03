@@ -13,8 +13,15 @@ The steps, first answer wins:
    ``bash`` command (delete, network, secrets, hidden commands, code of an untrusted project).
 3. Allow rules: ``write`` / ``edit`` inside the project folder, and a ``bash`` command that the
    parser proves read-only: ALLOW.
-4. A ``bash`` command that is not on the floor and not proven read-only: JUDGE. Later, the model
-   step answers. Until then ``decide_rules_only`` turns JUDGE into ASK ``unclear``.
+4. A ``bash`` command that is not on the floor and not proven read-only: JUDGE. With
+   ``classifier = "model"`` the model step answers (``auto_classifier``); with
+   ``classifier = "rules"`` ``decide_rules_only`` turns JUDGE into ASK ``unclear``. A JUDGE is
+   only for a call that the rules do not know: an unknown program, code of a trusted project, a
+   write by redirect. A call that the rules do know to be dangerous (a read-only program given an
+   option that runs code or writes, a glob that can become such an option, an endless device, a
+   program of the project that is named like a read-only one) is not JUDGE: it is an ASK by the
+   floor with the id ``bash.barred.<kind>``, so that no model is called and no model answer can
+   allow it (red-team decision D-07).
 5. Everything else: ASK ``unclear``.
 
 Fail closed: any doubt, any error and any input that the parser cannot read is an ASK. The
@@ -50,6 +57,20 @@ MAX_PATH_CHARS = 4096
 MAX_GIT_SPEC_PARTS = 16
 MAX_WRAPPER_DEPTH = 5
 MAX_CWD_CANDIDATES = 8
+
+# The forms that bar a call from the model (D-07). The rules know the program and know that this
+# form of it runs code, writes, reads a list of files, sets the system, never ends, or is a
+# disguise. The call asks by the floor with the rule id ``bash.barred.<kind>``; no model is
+# called, so no model answer can allow it. One test covers each kind (``test_auto_model_step``).
+BARRED_KINDS = (
+    "option",  # a banned option of a read-only program (--pre, --compress-program, -fprint, ...)
+    "operand",  # a banned operand (``date`` that sets the clock, ``hostname`` that sets the name)
+    "lead_glob",  # a glob at the start of a word: it can expand to such an option (``rg foo *``)
+    "git_option",  # a git option that runs a pager or an external diff, or writes
+    "endless_device",  # /dev/zero, /dev/random, /dev/urandom: a read that never ends
+    "version_flag",  # the version or help flag of a program that reads the project first
+    "disguise",  # a file of the project with the name of a read-only program (``./git``)
+)
 
 # Files of a project that something else runs, or reads as instructions, after the agent wrote
 # them: a git hook, a task that an editor starts, a workflow of the CI, the settings of other
@@ -937,6 +958,10 @@ _TAR_EXEC_LONGS = frozenset(
 )
 # ``date MMDDhhmm[[CC]YY][.ss]`` sets the clock.
 _DATE_SET = re.compile(r"^\d{8}(\d{2}|\d{4})?(\.\d{2})?$")
+# Programs that are not in ``_READONLY`` because they have a rule of their own, and that a file
+# of the project can be named like (``./git``). With the names of ``_READONLY`` they make a
+# project file a disguise.
+_DISGUISED_PROGRAMS = frozenset({"git"})
 
 
 @dataclass(frozen=True)
@@ -1064,6 +1089,15 @@ class _State:
         # background job, a new session, a timeout that is not short). It is raised after the
         # words of that command are read, so a floor of the program itself (``rm``) wins.
         self.escape: str | None = None
+        # Why the model may not decide this call (D-07): the kind of the first form that the
+        # rules know to be dangerous (``BARRED_KINDS``). ``None``: no such form was found.
+        self.barred: str | None = None
+
+    def bar(self, kind: str) -> None:
+        """The call is not proven read-only, and the model must not decide it either."""
+        self.proven = False
+        if self.barred is None:
+            self.barred = kind
 
     def add_cwd(self, new: list[str]) -> None:
         """After a ``cd``: the shell is in one of the new folders, or (if ``cd`` failed) still
@@ -1213,7 +1247,7 @@ def _check_path(text: str, glob: bool, st: _State, *, force: bool) -> None:
     if not text or text in _DEV_OK:
         return
     if text in _DEV_ENDLESS:
-        st.proven = False
+        st.bar("endless_device")
         return
     if text.startswith(("/dev/tcp/", "/dev/udp/")):
         raise _Floor(Reason.NETWORK, "bash.network.dev_tcp")
@@ -1659,7 +1693,13 @@ def _git(args: list[_Word], st: _State) -> bool:
             raise _Floor(Reason.PROTECTED_PATH, "bash.protected.git_config")
         return False
     if sub in _GIT_READONLY:
-        return not (has(*_GIT_BANNED_READ_OPTIONS, "-O") or opts.lead_glob)
+        if has(*_GIT_BANNED_READ_OPTIONS, "-O"):
+            st.bar("git_option")
+            return False
+        if opts.lead_glob:
+            st.bar("lead_glob")
+            return False
+        return True
     if sub == "branch":
         listing = has("--list", "-l")
         mutating = has(
@@ -1687,23 +1727,38 @@ def _long_hit(option: str, banned: frozenset[str]) -> bool:
     return any(len(option) > 2 and name.startswith(option) for name in banned)
 
 
-def _readonly_ok(program: str, args: _Args) -> bool:
-    spec = _READONLY.get(program)
-    if spec is None:
-        return False
-    if any(c in spec.banned_shorts for c in args.shorts):
-        return False
-    if any(_long_hit(option, spec.banned_longs) for option in args.longs):
-        return False
-    if set(args.raw) & spec.banned_raw:
-        return False
+def _forbidden_form(program: str, spec: _ReadOnly, args: _Args) -> str | None:
+    """The kind (``BARRED_KINDS``) of what *args* give a program of the read-only list that the
+    rules know to be dangerous for it, or ``None`` when they give nothing of the kind."""
+    if (
+        any(c in spec.banned_shorts for c in args.shorts)
+        or any(_long_hit(option, spec.banned_longs) for option in args.longs)
+        or set(args.raw) & spec.banned_raw
+    ):
+        return "option"
     if spec.glob_inject and args.lead_glob:
         guarded = spec.banned_shorts or spec.banned_longs or spec.banned_raw
         if guarded:
-            return False
+            return "lead_glob"
     if spec.max_positional is not None and (len(args.pos) > spec.max_positional or args.glob_pos):
+        return "operand"
+    if program == "date" and any(_DATE_SET.match(item) for item in args.pos):
+        return "operand"
+    return None
+
+
+def _readonly_ok(program: str, args: _Args, st: _State) -> bool:
+    """Whether the call of a program of the read-only list is read-only. A form that the rules
+    know to be dangerous for the program bars the call from the model (``_State.bar``). A
+    program that is not on the list is not read-only, and is not barred: it is unknown."""
+    spec = _READONLY.get(program)
+    if spec is None:
         return False
-    return not (program == "date" and any(_DATE_SET.match(item) for item in args.pos))
+    kind = _forbidden_form(program, spec, args)
+    if kind is not None:
+        st.bar(kind)
+        return False
+    return True
 
 
 def _program_rules(words: list[_Word], dynamic: bool, st: _State, depth: int = 0) -> None:
@@ -1727,6 +1782,10 @@ def _program_rules(words: list[_Word], dynamic: bool, st: _State, depth: int = 0
             for cwd in st.cwds:
                 env.path_floor(_resolve(text, cwd, env))
             project_path_program = True
+            if program in _READONLY or program in _DISGUISED_PROGRAMS:
+                # ``./git status`` is a file of the project that is called ``git``. The name
+                # proves nothing, and a model must not take it for the program.
+                st.bar("disguise")
 
     if program in _PRIVILEGE:
         raise _Floor(Reason.PRIVILEGE, "bash.privilege")
@@ -1763,7 +1822,7 @@ def _program_rules(words: list[_Word], dynamic: bool, st: _State, depth: int = 0
     ):
         if family is None and program not in _READONLY and program not in _VERSION_PURE:
             st.project_code = True
-            st.proven = False
+            st.bar("version_flag")
         return
 
     if family is not None:
@@ -1856,7 +1915,7 @@ def _program_rules(words: list[_Word], dynamic: bool, st: _State, depth: int = 0
     elif program in ("cd", "pushd"):
         proven = _cd(args_words, st, program)
     elif not project_path_program and not dynamic:
-        proven = _readonly_ok(program, args)
+        proven = _readonly_ok(program, args, st)
 
     if program not in ("cd", "pushd"):
         for word in args_words:
@@ -1883,7 +1942,7 @@ def _find(args_words: list[_Word], st: _State, depth: int) -> bool:
             unwrapped, _ = _unwrap(inner, st)
             _program_rules(unwrapped, True, st, depth + 1)
             return False
-    return _readonly_ok("find", _Args.of(args_words))
+    return _readonly_ok("find", _Args.of(args_words), st)
 
 
 def _cd(args_words: list[_Word], st: _State, program: str) -> bool:
@@ -1974,6 +2033,8 @@ def _decide_bash(call: ToolCall, env: _Env) -> RuleDecision:
         return _ask(Reason.UNTRUSTED_PROJECT_CODE, "bash.untrusted_project_code")
     if st.proven:
         return _allow(Reason.READ_ONLY_COMMAND, "allow.bash.read_only")
+    if st.barred is not None:
+        return _ask(Reason.UNCLEAR, f"bash.barred.{st.barred}")
     return RuleDecision(Outcome.JUDGE, By.RULE, Reason.UNCLEAR, "bash.not_proven")
 
 
