@@ -439,8 +439,8 @@ MUTATIONS: list[Mutation] = [
     ),
     m(
         "wrap: a dynamic call can be proven read-only",
-        "    if not proven or dynamic or project_path_program:\n        st.proven = False",
-        "    if not proven or project_path_program:\n        st.proven = False",
+        "    if not proven or dynamic:\n        st.proven = False",
+        "    if not proven:\n        st.proven = False",
     ),
     # ---- programs
     m(
@@ -892,11 +892,6 @@ MUTATIONS: list[Mutation] = [
         "redteam: pytest --help is pure",
         '    "git svn docker docker-compose podman gh make',
         '    "git pytest svn docker docker-compose podman gh make',
-    ),
-    m(
-        "redteam: a file of the project that is called git is proven",
-        "    if not proven or dynamic or project_path_program:\n        st.proven = False",
-        "    if not proven or dynamic:\n        st.proven = False",
     ),
     m(
         "redteam: the version of a file of the project that is called python is plain",

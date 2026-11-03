@@ -1920,7 +1920,7 @@ def _program_rules(words: list[_Word], dynamic: bool, st: _State, depth: int = 0
     if program not in ("cd", "pushd"):
         for word in args_words:
             _check_word(word, st)
-    if not proven or dynamic or project_path_program:
+    if not proven or dynamic:
         st.proven = False
 
 

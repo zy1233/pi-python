@@ -757,8 +757,8 @@ async def test_code_of_a_project_that_the_user_vouched_for_is_left_to_the_next_s
 
     verdict = await _verdict_of(agent, session_id)("bash", {"command": "pytest"})
 
-    # The rules cannot prove it harmless, and the model step is not built yet: it asks, but
-    # not for the reason of the first test.
+    # The rules cannot prove it harmless, and this session has no model step
+    # (``classifier = "rules"``): it asks, but not for the reason of the first test.
     assert verdict.outcome is Outcome.ASK
     assert verdict.reason is Reason.UNCLEAR
     assert verdict.rule_id == "pipeline.unclear"
