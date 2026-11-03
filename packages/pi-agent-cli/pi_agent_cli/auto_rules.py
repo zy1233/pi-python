@@ -1914,7 +1914,9 @@ def _program_rules(words: list[_Word], dynamic: bool, st: _State, depth: int = 0
         proven = _find(args_words, st, depth)
     elif program in ("cd", "pushd"):
         proven = _cd(args_words, st, program)
-    elif not project_path_program and not dynamic:
+    elif not project_path_program:
+        # Also for a program behind ``xargs`` or ``find -exec`` (``dynamic``): the form that the
+        # call shows is barred from the model there too. ``dynamic`` still ends the proof below.
         proven = _readonly_ok(program, args, st)
 
     if program not in ("cd", "pushd"):
@@ -1924,25 +1926,43 @@ def _program_rules(words: list[_Word], dynamic: bool, st: _State, depth: int = 0
         st.proven = False
 
 
+_FIND_EXEC_OPTIONS = ("-exec", "-execdir", "-ok", "-okdir")
+
+
 def _find(args_words: list[_Word], st: _State, depth: int) -> bool:
     raw = {w.text for w in args_words if w.text.startswith("-")}
     if "-delete" in raw:
         raise _Floor(Reason.DESTRUCTIVE, "bash.destructive.find_delete")
-    for index, word in enumerate(args_words):
-        if word.text in ("-exec", "-execdir", "-ok", "-okdir"):
-            inner: list[_Word] = []
-            for follower in args_words[index + 1 :]:
-                if follower.text in (";", "+"):
-                    break
-                inner.append(follower)
-            if not inner:
-                raise _Floor(Reason.UNCLEAR, "bash.unclear.find_exec")
-            if depth >= MAX_WRAPPER_DEPTH:
-                raise _Floor(Reason.UNCLEAR, "bash.unclear.wrapper_depth")
-            unwrapped, _ = _unwrap(inner, st)
-            _program_rules(unwrapped, True, st, depth + 1)
-            return False
-    return _readonly_ok("find", _Args.of(args_words), st)
+    own: list[_Word] = []  # what is for ``find`` itself, not for a command that it runs
+    clauses = 0
+    index = 0
+    while index < len(args_words):
+        word = args_words[index]
+        index += 1
+        if word.text not in _FIND_EXEC_OPTIONS:
+            own.append(word)
+            continue
+        # ``find`` ends a command at ``;``, or at ``+`` when ``{}`` comes right before it. A ``+``
+        # elsewhere is an argument of the command. ``find`` may run a command for each of its
+        # ``-exec`` options, and each one is read.
+        inner: list[_Word] = []
+        while index < len(args_words):
+            follower = args_words[index]
+            index += 1
+            if follower.text == ";" or (
+                follower.text == "+" and (not inner or inner[-1].text == "{}")
+            ):
+                break
+            inner.append(follower)
+        if not inner:
+            raise _Floor(Reason.UNCLEAR, "bash.unclear.find_exec")
+        if depth >= MAX_WRAPPER_DEPTH:
+            raise _Floor(Reason.UNCLEAR, "bash.unclear.wrapper_depth")
+        unwrapped, _ = _unwrap(inner, st)
+        _program_rules(unwrapped, True, st, depth + 1)
+        clauses += 1
+    proven = _readonly_ok("find", _Args.of(own), st)
+    return proven and not clauses
 
 
 def _cd(args_words: list[_Word], st: _State, program: str) -> bool:

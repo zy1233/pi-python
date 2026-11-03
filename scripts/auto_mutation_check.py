@@ -570,8 +570,8 @@ MUTATIONS: list[Mutation] = [
     ),
     # ---- find
     m("find: -delete", 'if "-delete" in raw:', "if False:"),
-    m("find: -exec", 'if word.text in ("-exec", "-execdir", "-ok", "-okdir"):', "if False:"),
-    m("find: -exec without a command", "            if not inner:", "            if False:"),
+    m("find: -exec", "        if word.text not in _FIND_EXEC_OPTIONS:", "        if True:"),
+    m("find: -exec without a command", "        if not inner:", "        if False:"),
     # ---- git
     m("git: -c", 'elif text == "-c" or text.startswith(("-c", "--config-env")):', "elif False:"),
     m(
@@ -2485,6 +2485,7 @@ RT2_MUTATIONS: list[Mutation] = [
 
 _RULES_AND_MODEL = (
     _CLI_TESTS + "test_auto_model_step.py",
+    _CLI_TESTS + "test_auto_model_redteam.py",
     _CLI_TESTS + "test_auto_rules.py",
     _CLI_TESTS + "test_auto_corpus.py",
 )
@@ -2605,6 +2606,33 @@ D07_MUTATIONS: list[Mutation] = [
         "a barred call stays proven",
         "        self.proven = False\n        if self.barred is None:\n            self.barred = kind",
         "        if self.barred is None:\n            self.barred = kind",
+    ),
+    # Round 3 (the model step): the bar and the floor also hold for a command that runs behind
+    # ``xargs`` or inside ``find -exec``, and ``find`` reads every command that it runs.
+    d7(
+        "a program behind xargs or find -exec is judged, not barred",
+        "    elif not project_path_program:\n        # Also for a program behind",
+        "    elif not project_path_program and not dynamic:\n        # Also for a program behind",
+    ),
+    d7(
+        "find reads only its first -exec clause",
+        "        clauses += 1\n",
+        "        clauses += 1\n        break\n",
+    ),
+    d7(
+        "the options of find itself are not read when it runs a command",
+        '    proven = _readonly_ok("find", _Args.of(own), st)\n    return proven and not clauses',
+        '    if clauses:\n        return False\n    return _readonly_ok("find", _Args.of(own), st)',
+    ),
+    d7(
+        "a plus that does not follow the braces ends a command of find",
+        '                follower.text == "+" and (not inner or inner[-1].text == "{}")',
+        '                follower.text == "+"',
+    ),
+    d7(
+        "a semicolon does not end a command of find",
+        '            if follower.text == ";" or (',
+        "            if False or (",
     ),
 ]
 
