@@ -105,7 +105,9 @@ command = "python -m pi_agent_cli"
 #                            # answers allow or ask. "rules": no model is called; such a command asks.
 # model = ""                 # the id of the [model] or [[models]] entry that judges (empty: the model
 #                            # of the session). A model that thinks before it answers cannot do this
-#                            # (it has 16 output tokens): every command would ask.
+#                            # (it has 16 output tokens): every command would ask. An id that no entry
+#                            # has: Auto says so when it starts (and logs a warning). No model judges,
+#                            # so such a command asks. Fix the id, or set classifier = "rules".
 # timeout_seconds = 8        # the time that the model has to answer (above 0, at most 120). No answer
 #                            # in time: you are asked. Three failures in a row stop the model step for
 #                            # five minutes.

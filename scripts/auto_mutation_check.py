@@ -9,7 +9,11 @@
     python scripts/auto_mutation_check.py --only floor # run the mutations whose name contains "floor"
     python scripts/auto_mutation_check.py --only wiring # only the mutations of the wiring (PR 1b)
     python scripts/auto_mutation_check.py --only "d07 " # only the forms that the rules bar from the model
+    python scripts/auto_mutation_check.py --only "redteam3 " # only the protected folders, globs and folders on the way
     python scripts/auto_mutation_check.py --only "model " # only the model step (PR 2)
+    python scripts/auto_mutation_check.py --only "comment " # only the rule for a shell comment (M-06)
+    python scripts/auto_mutation_check.py --only "network name" # only the names of decision 7
+    python scripts/auto_mutation_check.py --only "unknown judge" # only the notice for an [auto] model id that no entry has
 
 Each mutation is an exact text replacement in one source file: ``auto_rules.py`` (or
 ``auto_reasons.py``) for the rules, and for the wiring ``auto_mode.py``, ``agent.py``,
@@ -32,11 +36,24 @@ paths of a session. The mutations that start with ``d07`` break the seven forms 
 rules bar from the model (an option that can run a program or write a file, an operand that is
 banned, a leading glob, ``git`` options, an endless device, a version flag, a disguise): each one
 lets a barred call pass as proven, so that it runs or reaches the model. The mutations that start with
-``model`` break the model step: the parser of the answer (only the exact line ``ALLOW`` allows),
+``redteam3`` break what the third review added to the protected set: the folder that a glob ends in
+(``.husky``), a shell glob that can expand to a protected name (``.mcp.js*``), and the folder on the
+way to a protected path (``.github``) that a call which is not read-only must not name. The mutations
+that start with ``comment`` break the narrow rule that the third review added for M-06: the detector
+``may_hold_comment`` (where a word starts, the quotes and the backslash, the text that the scan cannot
+follow) and the step of ``_decide_bash`` that asks by the floor, with its own reason and rule id, for a
+call that no rule proves read-only and that may hold a shell comment (its place among the other steps
+too). The mutations that start with ``network name`` take one program of decision 7 (``rclone``, ``mail``, ``twine`` and the others
+that only send, publish or install) off the network floor list, one at a time, so that its call goes to the model again. The
+mutations that start with ``model`` break the model step: the parser of the answer (only the exact line ``ALLOW`` allows),
 the data block (the token, the escapes, the limits), the request, the timeout, the cancel, the
 circuit breaker, the counters, the choice of the model, the wiring in the session and in the
-agent, the settings, and the eval harness (its gates and the cap on its spend). Run it again
-after any change to these files; a text that no longer matches is an error, not a pass.
+agent, the settings, and the eval harness (its gates and the cap on its spend). The mutations that
+start with ``unknown judge`` break the start-up notice for an ``[auto] model`` id that no ``[model]``
+or ``[[models]]`` entry has: which id counts as unknown, when the notice is said (not when the rules
+are the switch), how the id is shown (one printable line, cut at 64 characters), the sentence, the
+warning of the agent, and the rule that the notice changes no decision (the call still asks). Run it
+again after any change to these files; a text that no longer matches is an error, not a pass.
 """
 
 from __future__ import annotations
@@ -129,8 +146,8 @@ MUTATIONS: list[Mutation] = [
     ),
     m(
         "order: outside check before protected check",
-        '        hit = self.protected_hit(real)\n        if hit is not None:\n            raise _Floor(*hit)\n        if not self.inside(real):\n            raise _Floor(Reason.OUTSIDE_PROJECT, "path.outside_project")',
-        '        if not self.inside(real):\n            raise _Floor(Reason.OUTSIDE_PROJECT, "path.outside_project")\n        hit = self.protected_hit(real)\n        if hit is not None:\n            raise _Floor(*hit)',
+        '        hit = self.protected_hit(real)\n        if hit is not None:\n            raise _Floor(*hit)\n        if leading and self.leading_hit(real):\n            raise _Floor(Reason.PROTECTED_PATH, "path.protected_leading")\n        if not self.inside(real):\n            raise _Floor(Reason.OUTSIDE_PROJECT, "path.outside_project")',
+        '        if not self.inside(real):\n            raise _Floor(Reason.OUTSIDE_PROJECT, "path.outside_project")\n        hit = self.protected_hit(real)\n        if hit is not None:\n            raise _Floor(*hit)\n        if leading and self.leading_hit(real):\n            raise _Floor(Reason.PROTECTED_PATH, "path.protected_leading")',
     ),
     m(
         "order: untrusted project check removed",
@@ -210,6 +227,7 @@ MUTATIONS: list[Mutation] = [
         "path: case not folded in component names",
         "parts = [name for name in map(_fold_name, names) if name]",
         "parts = [name for name in names if name]",
+        0,
     ),
     m("protected: secret folders", "if _SECRET_DIRS.intersection(parts):", "if False:"),
     m("protected: .env files", 'if base.startswith(".env"):', "if False:"),
@@ -244,7 +262,7 @@ MUTATIONS: list[Mutation] = [
     m("path: plain name that is a link", "if env.fs.lexists(candidate):", "if False:"),
     m(
         "path: value of --option=path",
-        '_check_path(text.split("=", 1)[1], word.glob, st, force=force)',
+        '_check_path(text.split("=", 1)[1], word.glob, st, force=force, leading=leading)',
         "pass",
     ),
     m("path: /dev/tcp", 'if text.startswith(("/dev/tcp/", "/dev/udp/")):', "if False:"),
@@ -320,7 +338,11 @@ MUTATIONS: list[Mutation] = [
         'if rest.startswith(("<<", "<(", ">(")):',
         "if False:",
     ),
-    m("lex: line continuation", 'if i + 1 >= n or command[i + 1] == "\\n":', "if False:"),
+    m(
+        "lex: line continuation",
+        'if i + 1 >= n or command[i + 1] == "\\n":\n                refuse(Reason.UNCLEAR, "bash.unclear.continuation")',
+        'if False:\n                refuse(Reason.UNCLEAR, "bash.unclear.continuation")',
+    ),
     m(
         "lex: unterminated single quote",
         '            if close < 0:\n                refuse(Reason.UNCLEAR, "bash.unclear.quote")\n            buf.append',
@@ -560,8 +582,8 @@ MUTATIONS: list[Mutation] = [
     ),
     m(
         "prog: path arguments not checked",
-        '    if program not in ("cd", "pushd"):\n        for word in args_words:\n            _check_word(word, st)',
-        "    if False:\n        for word in args_words:\n            _check_word(word, st)",
+        '    if program not in ("cd", "pushd"):\n        for word in args_words:\n            _check_word(word, st, leading=not proven)',
+        "    if False:\n        for word in args_words:\n            _check_word(word, st, leading=not proven)",
     ),
     m(
         "prog: python arguments not checked",
@@ -570,8 +592,8 @@ MUTATIONS: list[Mutation] = [
     ),
     # ---- find
     m("find: -delete", 'if "-delete" in raw:', "if False:"),
-    m("find: -exec", 'if word.text in ("-exec", "-execdir", "-ok", "-okdir"):', "if False:"),
-    m("find: -exec without a command", "            if not inner:", "            if False:"),
+    m("find: -exec", "        if word.text not in _FIND_EXEC_OPTIONS:", "        if True:"),
+    m("find: -exec without a command", "        if not inner:", "        if False:"),
     # ---- git
     m("git: -c", 'elif text == "-c" or text.startswith(("-c", "--config-env")):', "elif False:"),
     m(
@@ -985,6 +1007,7 @@ MUTATIONS: list[Mutation] = [
         "redteam: the parts are not folded",
         "parts = [name for name in map(_fold_name, names) if name]",
         "parts = [name.lower() for name in names]",
+        0,
     ),
     m(
         "redteam: 8.3 names are not read",
@@ -1042,13 +1065,13 @@ MUTATIONS: list[Mutation] = [
     ),
     m(
         "redteam: a protected glob sees the folded name",
-        'forms = {real.replace("\\\\", "/").lower(), "/" + "/".join(parts)}',
-        'forms = {real.replace("\\\\", "/").lower()}',
+        'whole = {real.replace("\\\\", "/").lower(), "/" + "/".join(parts)}',
+        'whole = {real.replace("\\\\", "/").lower()}',
     ),
     m(
         "redteam: a protected glob sees the last name",
-        "        if parts:\n            forms.add(parts[-1])",
-        "        if False:\n            forms.add(parts[-1])",
+        "        forms = (whole | {parts[-1]}) if parts else whole",
+        "        forms = whole",
     ),
     m(
         "redteam: a protected glob is read below the project root",
@@ -2342,12 +2365,12 @@ RT2_MUTATIONS: list[Mutation] = [
     ),
     r2(
         "globs: no depth below the root",
-        '            if anywhere and any(fnmatch.fnmatchcase(form, "*/" + pattern) for form in below_root):\n                return True\n',
-        "            pass\n",
+        '                if anywhere and any(\n                    fnmatch.fnmatchcase(form, "*/" + pattern) for form in below_root\n                ):\n                    return True\n',
+        "                pass\n",
     ),
     r2(
         "globs: the path below the root is not tried",
-        "        forms |= below_root\n",
+        "        whole |= below_root\n",
         "        pass\n",
     ),
     # ---- R2-4: the project is the home folder
@@ -2485,6 +2508,7 @@ RT2_MUTATIONS: list[Mutation] = [
 
 _RULES_AND_MODEL = (
     _CLI_TESTS + "test_auto_model_step.py",
+    _CLI_TESTS + "test_auto_model_redteam.py",
     _CLI_TESTS + "test_auto_rules.py",
     _CLI_TESTS + "test_auto_corpus.py",
 )
@@ -2509,6 +2533,12 @@ _EVAL = (
 
 def d7(name: str, old: str, new: str) -> Mutation:
     return Mutation(f"d07 {name}", old, new, None, "auto_rules.py", "cli", _RULES_AND_MODEL)
+
+
+def r3(name: str, old: str, new: str, nth: int | None = None) -> Mutation:
+    """A mutation of the protected set that the third review changed (the folder itself, a glob in
+    a call, the folders on the way): the tests of the rules, the corpus and the model step."""
+    return Mutation(f"redteam3 {name}", old, new, nth, "auto_rules.py", "cli", _RULES_AND_MODEL)
 
 
 def mc(name: str, old: str, new: str, *, tests: tuple[str, ...] = _CLASSIFIER) -> Mutation:
@@ -2538,6 +2568,19 @@ def mk(name: str, old: str, new: str) -> Mutation:
         "core",
         ("pi_agent_core/tests/test_langchain_stream.py",),
     )
+
+
+_COMMENT = (
+    _CLI_TESTS + "test_auto_comment_floor.py",
+    _CLI_TESTS + "test_auto_corpus.py",
+    _CLI_TESTS + "test_auto_reasons.py",
+)
+
+
+def cm(name: str, old: str, new: str, *, file: str = "auto_rules.py") -> Mutation:
+    """A mutation of the comment rule (M-06): the detector ``may_hold_comment``, or the step in
+    ``_decide_bash`` that asks. The tests of the rule, the corpus and the reasons run."""
+    return Mutation(f"comment {name}", old, new, None, file, "cli", _COMMENT)
 
 
 D07_MUTATIONS: list[Mutation] = [
@@ -2606,8 +2649,539 @@ D07_MUTATIONS: list[Mutation] = [
         "        self.proven = False\n        if self.barred is None:\n            self.barred = kind",
         "        if self.barred is None:\n            self.barred = kind",
     ),
+    # Round 3 (the model step): the bar and the floor also hold for a command that runs behind
+    # ``xargs`` or inside ``find -exec``, and ``find`` reads every command that it runs.
+    d7(
+        "a program behind xargs or find -exec is judged, not barred",
+        "    elif not project_path_program:\n        # Also for a program behind",
+        "    elif not project_path_program and not dynamic:\n        # Also for a program behind",
+    ),
+    d7(
+        "find reads only its first -exec clause",
+        "        clauses += 1\n",
+        "        clauses += 1\n        break\n",
+    ),
+    d7(
+        "the options of find itself are not read when it runs a command",
+        '    proven = _readonly_ok("find", _Args.of(own), st)\n    return proven and not clauses',
+        '    if clauses:\n        return False\n    return _readonly_ok("find", _Args.of(own), st)',
+    ),
+    d7(
+        "a plus that does not follow the braces ends a command of find",
+        '                follower.text == "+" and (not inner or inner[-1].text == "{}")',
+        '                follower.text == "+"',
+    ),
+    d7(
+        "a semicolon does not end a command of find",
+        '            if follower.text == ";" or (',
+        "            if False or (",
+    ),
 ]
 
+
+REDTEAM3_MUTATIONS: list[Mutation] = [
+    # M-03: a glob that names a folder protects the folder as well.
+    r3(
+        "a glob that names a folder does not protect the folder",
+        '                folders = [pattern[:-2]] if pattern.endswith("/*") else []',
+        "                folders = []",
+    ),
+    r3(
+        "the folder is also tried with its last name",
+        "            for folder in folders:\n                if any(fnmatch.fnmatchcase(form, folder) for form in whole):",
+        "            for folder in folders:\n                if any(fnmatch.fnmatchcase(form, folder) for form in forms):",
+    ),
+    r3(
+        "a folder below a root is not tried at any depth",
+        '                if anywhere and any(\n                    fnmatch.fnmatchcase(form, "*/" + folder) for form in below_root\n                ):\n                    return True\n        return False',
+        "                pass\n        return False",
+    ),
+    # M-04: a glob in a call is tried against the names that the protected globs spell out.
+    r3(
+        "the names of the protected globs are not tried against a glob in a call",
+        "            for name in (*_GLOB_PROBES, *env.glob_names):",
+        "            for name in _GLOB_PROBES:",
+    ),
+    r3(
+        "the rest of the path is not tried for a name of a glob",
+        "                    if hit is None and rest:",
+        "                    if False:",
+    ),
+    r3(
+        "the names of the protected globs are kept folded only",
+        "                names[part] = None\n                names[folded] = None",
+        "                names[folded] = None",
+    ),
+    r3(
+        "the names of the protected globs are kept as written only",
+        "                names[part] = None\n                names[folded] = None",
+        "                names[part] = None",
+    ),
+    # M-05: a call that is not read-only and names a folder on the way to a protected glob.
+    r3(
+        "the folders on the way are not listed",
+        "        if prefix:\n            folders.append(prefix)",
+        "        if prefix:\n            pass",
+    ),
+    r3(
+        "a glob character does not end the folders on the way",
+        "        if _has_glob(part):\n            break\n        if index and not part:",
+        "        if False:\n            break\n        if index and not part:",
+    ),
+    r3(
+        "an empty part of a glob is a folder on the way",
+        "        if index and not part:\n            continue",
+        "        if False:\n            continue",
+    ),
+    r3(
+        "a folder on the way is a name and not a path",
+        '        prefix = f"{prefix}/{part}" if index else part',
+        "        prefix = part",
+    ),
+    r3(
+        "the names of a folder on the way are not folded",
+        "parts = [name for name in map(_fold_name, names) if name]",
+        "parts = [name for name in names if name]",
+        1,
+    ),
+    r3(
+        "the names of a folder on the way are only put in lower case",
+        "parts = [name for name in map(_fold_name, names) if name]",
+        "parts = [name.lower() for name in names]",
+        1,
+    ),
+    r3(
+        "the whole glob is tried for the folders on the way",
+        "            if leading:\n                folders = _leading_folders(pattern)\n            else:",
+        "            if False:\n                folders = _leading_folders(pattern)\n            else:",
+    ),
+    r3(
+        "a project root is a folder on the way",
+        "        if not any(_is_inside(real, root) and _key(real) != _key(root) for root in self.roots):",
+        "        if not any(_is_inside(real, root) for root in self.roots):",
+    ),
+    r3(
+        "a folder outside the project is a folder on the way",
+        "        if not any(_is_inside(real, root) and _key(real) != _key(root) for root in self.roots):",
+        "        if not any(_key(real) != _key(root) for root in self.roots):",
+    ),
+    r3(
+        "a folder on the way is asked before the protected set",
+        '        hit = self.protected_hit(real)\n        if hit is not None:\n            raise _Floor(*hit)\n        if leading and self.leading_hit(real):\n            raise _Floor(Reason.PROTECTED_PATH, "path.protected_leading")',
+        '        if leading and self.leading_hit(real):\n            raise _Floor(Reason.PROTECTED_PATH, "path.protected_leading")\n        hit = self.protected_hit(real)\n        if hit is not None:\n            raise _Floor(*hit)',
+    ),
+    r3(
+        "a call that is not read-only does not ask for a folder on the way",
+        "            _check_word(word, st, leading=not proven)",
+        "            _check_word(word, st)",
+    ),
+    r3(
+        "a read-only call asks for a folder on the way",
+        "            _check_word(word, st, leading=not proven)",
+        "            _check_word(word, st, leading=True)",
+    ),
+    r3(
+        "a glob in a call asks for a folder on the way",
+        '        text = _glob_prefix(text) or "."\n        leading = False',
+        '        text = _glob_prefix(text) or "."',
+    ),
+    r3(
+        "the value of an option is not read for a folder on the way",
+        '            _check_path(text.split("=", 1)[1], word.glob, st, force=force, leading=leading)',
+        '            _check_path(text.split("=", 1)[1], word.glob, st, force=force)',
+    ),
+    r3(
+        "the value that is glued to a short option is not read for a folder on the way",
+        "                _check_path(value, word.glob, st, force=force, leading=leading)",
+        "                _check_path(value, word.glob, st, force=force)",
+    ),
+    r3(
+        "a name of the folder that exists is not read for a folder on the way",
+        "            env.path_floor(env.fs.realpath(candidate), leading=leading)",
+        "            env.path_floor(env.fs.realpath(candidate))",
+    ),
+    r3(
+        "a path is not read for a folder on the way",
+        "            env.path_floor(_resolve(text, cwd, env), leading=leading)",
+        "            env.path_floor(_resolve(text, cwd, env))",
+    ),
+]
+
+
+_ASK_COMMENT = (
+    '    if may_hold_comment(command):\n        return _ask(Reason.COMMENT, "bash.comment")\n'
+)
+
+COMMENT_MUTATIONS: list[Mutation] = [
+    # ---- the step in ``_decide_bash``
+    cm(
+        "the step is removed: a call with a comment goes to the model",
+        _ASK_COMMENT + "    return RuleDecision(Outcome.JUDGE",
+        "    return RuleDecision(Outcome.JUDGE",
+    ),
+    cm(
+        "the step asks about nothing",
+        "    if may_hold_comment(command):\n        return _ask(Reason.COMMENT",
+        "    if False:\n        return _ask(Reason.COMMENT",
+    ),
+    cm(
+        "the step asks about every call that no rule proves",
+        "    if may_hold_comment(command):\n        return _ask(Reason.COMMENT",
+        "    if True:\n        return _ask(Reason.COMMENT",
+    ),
+    cm(
+        "the reason is the one of a call that cannot be read",
+        '_ask(Reason.COMMENT, "bash.comment")',
+        '_ask(Reason.UNCLEAR, "bash.comment")',
+    ),
+    cm(
+        "the rule id is the one of a call that is left open",
+        '_ask(Reason.COMMENT, "bash.comment")',
+        '_ask(Reason.COMMENT, "bash.not_proven")',
+    ),
+    cm(
+        "a call with a comment is left to the model under its own id",
+        '        return _ask(Reason.COMMENT, "bash.comment")\n',
+        '        return RuleDecision(Outcome.JUDGE, By.RULE, Reason.COMMENT, "bash.comment")\n',
+    ),
+    cm(
+        "a call with a comment is asked by a rule, not by the floor",
+        '        return _ask(Reason.COMMENT, "bash.comment")\n',
+        '        return RuleDecision(Outcome.ASK, By.RULE, Reason.COMMENT, "bash.comment")\n',
+    ),
+    cm(
+        "the step runs before the allow of a read-only call",
+        '    if st.proven:\n        return _allow(Reason.READ_ONLY_COMMAND, "allow.bash.read_only")\n',
+        _ASK_COMMENT
+        + '    if st.proven:\n        return _allow(Reason.READ_ONLY_COMMAND, "allow.bash.read_only")\n',
+    ),
+    cm(
+        "the step runs before the bar of D-07",
+        '    if st.barred is not None:\n        return _ask(Reason.UNCLEAR, f"bash.barred.{st.barred}")\n',
+        _ASK_COMMENT
+        + '    if st.barred is not None:\n        return _ask(Reason.UNCLEAR, f"bash.barred.{st.barred}")\n',
+    ),
+    cm(
+        "the step runs before the floor of code of an untrusted project",
+        "    if st.project_code and not env.ctx.project_trusted:\n",
+        _ASK_COMMENT + "    if st.project_code and not env.ctx.project_trusted:\n",
+    ),
+    cm(
+        "the step runs before the rules read the call",
+        "    st = _State(env)\n    try:\n        simples = _parse(_lex(command, env))\n",
+        _ASK_COMMENT
+        + "    st = _State(env)\n    try:\n        simples = _parse(_lex(command, env))\n",
+    ),
+    # ---- the reason
+    cm(
+        "the reason has another value",
+        '    COMMENT = "comment"\n',
+        '    COMMENT = "comments"\n',
+        file="auto_reasons.py",
+    ),
+    cm(
+        "the sentence of the reason is another text",
+        '"has a shell comment and no rule proves it safe"',
+        '"has a comment and no rule proves it safe"',
+        file="auto_reasons.py",
+    ),
+    # ---- the detector: where a word starts
+    cm(
+        "a semicolon does not end a word",
+        '_COMMENT_BREAKS = frozenset(";&|()<>")',
+        '_COMMENT_BREAKS = frozenset("&|()<>")',
+    ),
+    cm(
+        "an ampersand does not end a word",
+        '_COMMENT_BREAKS = frozenset(";&|()<>")',
+        '_COMMENT_BREAKS = frozenset(";|()<>")',
+    ),
+    cm(
+        "a pipe does not end a word",
+        '_COMMENT_BREAKS = frozenset(";&|()<>")',
+        '_COMMENT_BREAKS = frozenset(";&()<>")',
+    ),
+    cm(
+        "an opening parenthesis does not end a word",
+        '_COMMENT_BREAKS = frozenset(";&|()<>")',
+        '_COMMENT_BREAKS = frozenset(";&|)<>")',
+    ),
+    cm(
+        "a closing parenthesis does not end a word",
+        '_COMMENT_BREAKS = frozenset(";&|()<>")',
+        '_COMMENT_BREAKS = frozenset(";&|(<>")',
+    ),
+    cm(
+        "a less-than sign does not end a word",
+        '_COMMENT_BREAKS = frozenset(";&|()<>")',
+        '_COMMENT_BREAKS = frozenset(";&|()>")',
+    ),
+    cm(
+        "a greater-than sign does not end a word",
+        '_COMMENT_BREAKS = frozenset(";&|()<>")',
+        '_COMMENT_BREAKS = frozenset(";&|()<")',
+    ),
+    cm(
+        "only a space ends a word, a tab and a line end do not",
+        "            word_start = ch.isspace() or ch in _COMMENT_BREAKS\n",
+        '            word_start = ch == " " or ch in _COMMENT_BREAKS\n',
+    ),
+    cm(
+        "only the three blanks of the lexer end a word",
+        "            word_start = ch.isspace() or ch in _COMMENT_BREAKS\n",
+        '            word_start = ch in " \\t\\n" or ch in _COMMENT_BREAKS\n',
+    ),
+    cm(
+        "no blank ends a word",
+        "            word_start = ch.isspace() or ch in _COMMENT_BREAKS\n",
+        "            word_start = ch in _COMMENT_BREAKS\n",
+    ),
+    cm(
+        "no break character ends a word",
+        "            word_start = ch.isspace() or ch in _COMMENT_BREAKS\n",
+        "            word_start = ch.isspace()\n",
+    ),
+    cm(
+        "the text does not start with a word",
+        "    word_start = True\n    while i < n:\n",
+        "    word_start = False\n    while i < n:\n",
+    ),
+    cm(
+        "a plain character is skipped with the next one",
+        "            word_start = ch.isspace() or ch in _COMMENT_BREAKS\n            i += 1\n",
+        "            word_start = ch.isspace() or ch in _COMMENT_BREAKS\n            i += 2\n",
+    ),
+    # ---- the detector: the hash
+    cm(
+        "a hash that starts a word is not a comment",
+        '        elif ch == "#":\n            if word_start:\n                return True\n            i += 1\n',
+        '        elif ch == "#":\n            i += 1\n',
+    ),
+    cm(
+        "every hash is a comment",
+        '        elif ch == "#":\n            if word_start:\n                return True\n            i += 1\n',
+        '        elif ch == "#":\n            return True\n',
+    ),
+    # ---- the detector: the backslash
+    cm(
+        "a backslash does not skip the next character",
+        '            i += 2\n            word_start = False\n        elif ch == "\'":',
+        '            i += 1\n            word_start = False\n        elif ch == "\'":',
+    ),
+    cm(
+        "a backslash keeps the start of the word",
+        '            i += 2\n            word_start = False\n        elif ch == "\'":',
+        '            i += 2\n        elif ch == "\'":',
+    ),
+    cm(
+        "a backslash at the end is read as a plain character",
+        '            if i + 1 >= n or command[i + 1] == "\\n":\n                return True\n',
+        "            if False:\n                return True\n",
+    ),
+    cm(
+        "a backslash before a line end is read as a plain character",
+        '            if i + 1 >= n or command[i + 1] == "\\n":\n                return True\n',
+        "            if i + 1 >= n:\n                return True\n",
+    ),
+    # ---- the detector: single quotes
+    cm(
+        "an open single quote is not a yes",
+        "            if end < 0:\n                return True\n",
+        "            if end < 0:\n                return False\n",
+    ),
+    cm(
+        "a single quote does not end at the next single quote",
+        "            i = end + 1\n            word_start = False\n        elif ch == '\"':",
+        "            i = end\n            word_start = False\n        elif ch == '\"':",
+    ),
+    cm(
+        "a single quote keeps the start of the word",
+        "            i = end + 1\n            word_start = False\n",
+        "            i = end + 1\n",
+    ),
+    # ---- the detector: double quotes
+    cm(
+        "a backslash in double quotes does not skip the next character",
+        '                if command[i] == "\\\\":\n                    i += 2\n',
+        '                if command[i] == "\\\\":\n                    i += 1\n',
+    ),
+    cm(
+        "an open double quote is not a yes",
+        "            if i >= n:\n                return True\n",
+        "            if i >= n:\n                return False\n",
+    ),
+    cm(
+        "a double quote keeps the start of the word",
+        '            i += 1\n            word_start = False\n        elif ch == "#":',
+        '            i += 1\n        elif ch == "#":',
+    ),
+    cm(
+        "text with a reading of its own is not read in double quotes",
+        "                elif _NESTED_TEXT_IN_QUOTES.match(command, i):\n                    return True\n",
+        "                elif False:\n                    return True\n",
+    ),
+    cm(
+        "text with a reading of its own is searched for in the rest of the command from double quotes",
+        "_NESTED_TEXT_IN_QUOTES.match(command, i)",
+        "_NESTED_TEXT_IN_QUOTES.search(command, i)",
+    ),
+    cm(
+        "a character in double quotes is skipped with the next one",
+        "                else:\n                    i += 1\n            if i >= n:",
+        "                else:\n                    i += 2\n            if i >= n:",
+    ),
+    # ---- the detector: text that the shell reads by rules of its own
+    cm(
+        "text with a reading of its own is not read outside quotes",
+        '            if ch in "$`<>" and _NESTED_TEXT.match(command, i):\n                return True\n',
+        "            if False:\n                return True\n",
+    ),
+    cm(
+        "text with a reading of its own is only read after a dollar sign",
+        '            if ch in "$`<>" and _NESTED_TEXT.match(command, i):',
+        '            if ch == "$" and _NESTED_TEXT.match(command, i):',
+    ),
+    cm(
+        "text with a reading of its own is not read after a back quote",
+        '            if ch in "$`<>" and _NESTED_TEXT.match(command, i):',
+        '            if ch in "$<>" and _NESTED_TEXT.match(command, i):',
+    ),
+    cm(
+        "text with a reading of its own is searched for in the rest of the command",
+        "_NESTED_TEXT.match(command, i)",
+        "_NESTED_TEXT.search(command, i)",
+    ),
+    cm(
+        "a command substitution is not text of its own",
+        r"""r"\$[(\[\'\"]|`|<<|<\(|>\(|" """.strip(),
+        r"""r"\$[\[\'\"]|`|<<|<\(|>\(|" """.strip(),
+    ),
+    cm(
+        "an arithmetic expansion of the old kind is not text of its own",
+        r"""r"\$[(\[\'\"]|`|<<|<\(|>\(|" """.strip(),
+        r"""r"\$[(\'\"]|`|<<|<\(|>\(|" """.strip(),
+    ),
+    cm(
+        "an ANSI-C quote is not text of its own",
+        r"""r"\$[(\[\'\"]|`|<<|<\(|>\(|" """.strip(),
+        r"""r"\$[(\[\"]|`|<<|<\(|>\(|" """.strip(),
+    ),
+    cm(
+        "a locale quote is not text of its own",
+        r"""r"\$[(\[\'\"]|`|<<|<\(|>\(|" """.strip(),
+        r"""r"\$[(\[\']|`|<<|<\(|>\(|" """.strip(),
+    ),
+    cm(
+        "a back quote is not text of its own",
+        r"""r"\$[(\[\'\"]|`|<<|<\(|>\(|" """.strip(),
+        r"""r"\$[(\[\'\"]|<<|<\(|>\(|" """.strip(),
+    ),
+    cm(
+        "a here-document is not text of its own",
+        r"""r"\$[(\[\'\"]|`|<<|<\(|>\(|" """.strip(),
+        r"""r"\$[(\[\'\"]|`|<\(|>\(|" """.strip(),
+    ),
+    cm(
+        "a process substitution to read is not text of its own",
+        r"""r"\$[(\[\'\"]|`|<<|<\(|>\(|" """.strip(),
+        r"""r"\$[(\[\'\"]|`|<<|>\(|" """.strip(),
+    ),
+    cm(
+        "a process substitution to write is not text of its own",
+        r"""r"\$[(\[\'\"]|`|<<|<\(|>\(|" """.strip(),
+        r"""r"\$[(\[\'\"]|`|<<|<\(|" """.strip(),
+    ),
+    cm(
+        "a command substitution is not text of its own in double quotes",
+        r"\$[(\[]|`|",
+        r"\$[\[]|`|",
+    ),
+    cm(
+        "an arithmetic expansion of the old kind is not text of its own in double quotes",
+        r"\$[(\[]|`|",
+        r"\$[(]|`|",
+    ),
+    cm(
+        "a back quote is not text of its own in double quotes",
+        r"\$[(\[]|`|",
+        r"\$[(\[]|",
+    ),
+    cm(
+        "a brace with more than a name is a plain word",
+        r'_BRACE_WITH_MORE_THAN_A_NAME = r"\$\{(?!#?[A-Za-z_][A-Za-z0-9_]*\})"',
+        r'_BRACE_WITH_MORE_THAN_A_NAME = r"\$\{(?!#?[A-Za-z_][A-Za-z0-9_]*)"',
+    ),
+    cm(
+        "every brace is text of its own",
+        r'_BRACE_WITH_MORE_THAN_A_NAME = r"\$\{(?!#?[A-Za-z_][A-Za-z0-9_]*\})"',
+        r'_BRACE_WITH_MORE_THAN_A_NAME = r"\$\{"',
+    ),
+    cm(
+        "the length of a name is text of its own",
+        r'_BRACE_WITH_MORE_THAN_A_NAME = r"\$\{(?!#?[A-Za-z_][A-Za-z0-9_]*\})"',
+        r'_BRACE_WITH_MORE_THAN_A_NAME = r"\$\{(?![A-Za-z_][A-Za-z0-9_]*\})"',
+    ),
+    cm(
+        "a name that starts with an underscore is text of its own",
+        r'_BRACE_WITH_MORE_THAN_A_NAME = r"\$\{(?!#?[A-Za-z_][A-Za-z0-9_]*\})"',
+        r'_BRACE_WITH_MORE_THAN_A_NAME = r"\$\{(?!#?[A-Za-z][A-Za-z0-9_]*\})"',
+    ),
+    cm(
+        "a name with a digit is text of its own",
+        r'_BRACE_WITH_MORE_THAN_A_NAME = r"\$\{(?!#?[A-Za-z_][A-Za-z0-9_]*\})"',
+        r'_BRACE_WITH_MORE_THAN_A_NAME = r"\$\{(?!#?[A-Za-z_][A-Za-z_]*\})"',
+    ),
+    cm(
+        "a name of one letter is text of its own",
+        r'_BRACE_WITH_MORE_THAN_A_NAME = r"\$\{(?!#?[A-Za-z_][A-Za-z0-9_]*\})"',
+        r'_BRACE_WITH_MORE_THAN_A_NAME = r"\$\{(?!#?[A-Za-z_][A-Za-z0-9_]+\})"',
+    ),
+]
+
+
+_NETWORK_TESTS = (
+    _CLI_TESTS + "test_auto_model_redteam.py",
+    _CLI_TESTS + "test_auto_corpus.py",
+)
+# The names that decision 7 added to ``_NETWORK``: the two lines of the source that hold them.
+_NETWORK_LINES = (
+    "rclone gsutil s3cmd azcopy mail mailx sendmail msmtp twine ngrok cloudflared tailscale ",
+    "lftp pscp ssh-copy-id mosquitto_pub grpcurl websocat",
+)
+
+
+def nn(name: str) -> Mutation:
+    """A mutation of the network floor list: the name of one program (decision 7) is not on it."""
+    for line in _NETWORK_LINES:
+        words = line.split()
+        if name in words:
+            rest = " ".join(word for word in words if word != name)
+            if line.endswith(" "):
+                rest += " "
+            return Mutation(
+                f"network name: {name} is not on the floor list",
+                f'"{line}"',
+                f'"{rest}"',
+                None,
+                "auto_rules.py",
+                "cli",
+                _NETWORK_TESTS,
+            )
+    raise ValueError(name)
+
+
+NETWORK_MUTATIONS: list[Mutation] = [
+    *(nn(name) for name in "".join(_NETWORK_LINES).split()),
+    Mutation(
+        "network name: a name that starts like a listed program is on the floor list too",
+        "    if program in _NETWORK:\n",
+        "    if any(program.startswith(name) for name in _NETWORK):\n",
+        None,
+        "auto_rules.py",
+        "cli",
+        _NETWORK_TESTS,
+    ),
+]
 
 MODEL_MUTATIONS: list[Mutation] = [
     # ---- the parser: the whole text is the answer, and the answer is in a closed list
@@ -2961,8 +3535,8 @@ MODEL_MUTATIONS: list[Mutation] = [
     ),
     ms(
         "the entry message of a session with a model is the one of rules",
-        '        MODEL_ENTRY_SENTENCE.format(model=model) if classifier == "model" else RULES_ENTRY_SENTENCE',
-        '        MODEL_ENTRY_SENTENCE.format(model=model) if classifier != "model" else RULES_ENTRY_SENTENCE',
+        '    if classifier != "model":\n        step = RULES_ENTRY_SENTENCE\n',
+        '    if classifier == "model":\n        step = RULES_ENTRY_SENTENCE\n',
     ),
     ms(
         "the prompt of the user is not kept for the model step",
@@ -3060,7 +3634,7 @@ MODEL_MUTATIONS: list[Mutation] = [
     ),
     Mutation(
         "model config: a model that is not in the file raises no note",
-        "    if auto.model and all(choice.id != auto.model for choice in config.model_choices()):",
+        "    if config.auto_model_is_unknown():",
         "    if False:",
         None,
         "config.py",
@@ -3228,6 +3802,166 @@ MODEL_MUTATIONS: list[Mutation] = [
     ),
 ]
 
+_UNKNOWN_MODEL = (_CLI_TESTS + "test_auto_unknown_model.py",)
+
+
+def uj(name: str, old: str, new: str, *, file: str = "auto_mode.py") -> Mutation:
+    """A mutation of the start-up notice for an ``[auto] model`` id that no model entry has: the
+    check in ``config.py``, the id as text and the sentence in ``auto_mode.py``, the call and
+    the warning in ``agent.py``. The tests of the notice run, and they hold the rule that the
+    notice changes no decision."""
+    return Mutation(f"unknown judge: {name}", old, new, None, file, "cli", _UNKNOWN_MODEL)
+
+
+UNKNOWN_JUDGE_MUTATIONS: list[Mutation] = [
+    # ---- which id is unknown (config.py)
+    uj(
+        "no id is unknown",
+        "        return bool(wanted) and all(choice.id != wanted for choice in self.model_choices())\n",
+        "        return False\n",
+        file="config.py",
+    ),
+    uj(
+        "an empty id is unknown",
+        "        return bool(wanted) and all(choice.id != wanted for choice in self.model_choices())\n",
+        "        return all(choice.id != wanted for choice in self.model_choices())\n",
+        file="config.py",
+    ),
+    uj(
+        "an id is unknown when one entry has another id",
+        "        return bool(wanted) and all(choice.id != wanted for choice in self.model_choices())\n",
+        "        return bool(wanted) and any(choice.id != wanted for choice in self.model_choices())\n",
+        file="config.py",
+    ),
+    uj(
+        "an id is matched in any case",
+        "        return bool(wanted) and all(choice.id != wanted for choice in self.model_choices())\n",
+        "        return bool(wanted) and all(\n            choice.id.lower() != wanted.lower() for choice in self.model_choices()\n        )\n",
+        file="config.py",
+    ),
+    uj(
+        "the id of the [model] table is not looked at",
+        "        return bool(wanted) and all(choice.id != wanted for choice in self.model_choices())\n",
+        "        return bool(wanted) and all(choice.id != wanted for choice in self.models)\n",
+        file="config.py",
+    ),
+    # ---- when the id is said (auto_mode.py)
+    uj(
+        "an unknown id is not reported",
+        '    if config.auto.classifier == "model" and config.auto_model_is_unknown():\n        return config.auto.model\n',
+        '    if config.auto.classifier == "model" and config.auto_model_is_unknown():\n        return None\n',
+    ),
+    uj(
+        "an unknown id is reported as an empty id",
+        '    if config.auto.classifier == "model" and config.auto_model_is_unknown():\n        return config.auto.model\n',
+        '    if config.auto.classifier == "model" and config.auto_model_is_unknown():\n        return ""\n',
+    ),
+    uj(
+        "an unknown id is reported when the rules are the switch",
+        '    if config.auto.classifier == "model" and config.auto_model_is_unknown():\n',
+        "    if config.auto_model_is_unknown():\n",
+    ),
+    uj(
+        "an unknown id is reported only when the rules are the switch",
+        '    if config.auto.classifier == "model" and config.auto_model_is_unknown():\n',
+        '    if config.auto.classifier != "model" and config.auto_model_is_unknown():\n',
+    ),
+    # ---- the id as text (auto_mode.py)
+    uj(
+        "the id is not cut",
+        "    if len(line) > _MAX_SHOWN_ID_CHARS:\n",
+        "    if False:\n",
+    ),
+    uj(
+        "the id is cut one character too late",
+        "_MAX_SHOWN_ID_CHARS = 64\n",
+        "_MAX_SHOWN_ID_CHARS = 65\n",
+    ),
+    uj(
+        "the cut id has no dots",
+        '        line = line[: _MAX_SHOWN_ID_CHARS - 3].rstrip() + "..."\n',
+        "        line = line[:_MAX_SHOWN_ID_CHARS]\n",
+    ),
+    uj(
+        "a character that is not printable stays in the id",
+        '    line = " ".join("".join(ch if ch.isprintable() else " " for ch in text).split())\n',
+        '    line = " ".join("".join(ch for ch in text).split())\n',
+    ),
+    uj(
+        "the blanks of the id are not joined",
+        '    line = " ".join("".join(ch if ch.isprintable() else " " for ch in text).split())\n',
+        '    line = "".join(ch if ch.isprintable() else " " for ch in text).strip()\n',
+    ),
+    # ---- the sentence (auto_mode.py)
+    uj(
+        "the sentence is not said",
+        "    elif unknown_model:\n",
+        "    elif False:\n",
+    ),
+    uj(
+        "the sentence names the model of the session",
+        "        step = UNKNOWN_MODEL_ENTRY_SENTENCE.format(model=shown_model_id(unknown_model))\n",
+        "        step = UNKNOWN_MODEL_ENTRY_SENTENCE.format(model=model)\n",
+    ),
+    uj(
+        "the sentence shows the id as it is",
+        "        step = UNKNOWN_MODEL_ENTRY_SENTENCE.format(model=shown_model_id(unknown_model))\n",
+        "        step = UNKNOWN_MODEL_ENTRY_SENTENCE.format(model=unknown_model)\n",
+    ),
+    uj(
+        "the sentence is said when the rules are the switch",
+        '    if classifier != "model":\n        step = RULES_ENTRY_SENTENCE\n    elif unknown_model:\n        step = UNKNOWN_MODEL_ENTRY_SENTENCE.format(model=shown_model_id(unknown_model))\n',
+        '    if unknown_model:\n        step = UNKNOWN_MODEL_ENTRY_SENTENCE.format(model=shown_model_id(unknown_model))\n    elif classifier != "model":\n        step = RULES_ENTRY_SENTENCE\n',
+    ),
+    uj(
+        "the sentence does not say what to do",
+        "    'you (fix the id, or set classifier = \"rules\" in [auto]).'\n",
+        "    'you.'\n",
+    ),
+    uj(
+        "the sentence says that the command runs",
+        '"[[models]]: no model judges, so a shell command that Auto cannot show to be safe asks "\n',
+        '"[[models]]: no model judges, so a shell command that Auto cannot show to be safe runs "\n',
+    ),
+    # ---- the agent: the call and the warning (agent.py)
+    uj(
+        "the agent does not look for an unknown id",
+        "        unknown = unknown_judge(self._config)\n",
+        "        unknown = None\n",
+        file="agent.py",
+    ),
+    uj(
+        "the warning is not a warning",
+        "        if unknown is not None:\n            logger.warning(\n",
+        "        if unknown is not None:\n            logger.debug(\n",
+        file="agent.py",
+    ),
+    uj(
+        "the warning shows the id as it is",
+        "                shown_model_id(unknown),\n                session_id,\n",
+        "                unknown,\n                session_id,\n",
+        file="agent.py",
+    ),
+    uj(
+        "the sentence is not in the message of a session with an Auto session",
+        "                    model=auto.model_description(),\n                    unknown_model=unknown,\n",
+        "                    model=auto.model_description(),\n",
+        file="agent.py",
+    ),
+    uj(
+        "the sentence is not in the message of a session without an Auto session",
+        "                    classifier=self._config.auto.classifier,\n                    unknown_model=unknown,\n",
+        "                    classifier=self._config.auto.classifier,\n",
+        file="agent.py",
+    ),
+    # ---- no decision changes: the model step has no model to ask
+    uj(
+        "an unknown id falls back to the model of the session",
+        "                    choice.id,\n                )\n        return None\n",
+        "                    choice.id,\n                )\n        return ModelTarget(\n            harness.model, harness.stream_fn, harness.get_api_key, harness.model.model_id\n        )\n",
+    ),
+]
+
 
 def apply(source: str, mutation: Mutation) -> str:
     count = source.count(mutation.old)
@@ -3334,7 +4068,11 @@ def main(argv: list[str] | None = None) -> int:
         *WIRING_MUTATIONS,
         *RT2_MUTATIONS,
         *D07_MUTATIONS,
+        *REDTEAM3_MUTATIONS,
+        *COMMENT_MUTATIONS,
+        *NETWORK_MUTATIONS,
         *MODEL_MUTATIONS,
+        *UNKNOWN_JUDGE_MUTATIONS,
     ]
     chosen = [mut for mut in everything if args.only in mut.name]
     if args.list:

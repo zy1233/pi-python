@@ -67,6 +67,8 @@ from pi_agent_cli.auto_mode import (
     config_problems_message,
     entry_message,
     problems_message,
+    shown_model_id,
+    unknown_judge,
 )
 from pi_agent_cli.auto_reasons import Reason
 from pi_agent_cli.client_mcp import client_mcp_servers, mcp_extension_installed
@@ -661,14 +663,26 @@ class PiAcpAgent(Agent):
 
     async def _send_auto_notice(self, session_id: str) -> None:
         """Tell the user that the session is in Auto: what it means, and what is wrong with the
-        session if anything is (then Auto asks about every call)."""
+        session if anything is (then Auto asks about every call). With ``classifier = "model"``
+        and a ``[auto] model`` that no model entry has, the message says that no model judges,
+        and the agent logs one warning for the notice. Neither changes a decision."""
         auto = self._autos.get(session_id)
+        unknown = unknown_judge(self._config)
+        if unknown is not None:
+            logger.warning(
+                'Auto is on with classifier = "model", and [auto] model is "%s", which is not the '
+                "id of a model in [model] or [[models]]. No model judges, and every shell command "
+                "that Auto cannot show to be safe asks (session %s).",
+                shown_model_id(unknown),
+                session_id,
+            )
         if auto is not None:
             parts = [
                 entry_message(
                     from_config=session_id in self._auto_from_config,
                     classifier=auto.classifier_name,
                     model=auto.model_description(),
+                    unknown_model=unknown,
                 )
             ]
         else:
@@ -676,6 +690,7 @@ class PiAcpAgent(Agent):
                 entry_message(
                     from_config=session_id in self._auto_from_config,
                     classifier=self._config.auto.classifier,
+                    unknown_model=unknown,
                 )
             ]
         self._auto_from_config.discard(session_id)
