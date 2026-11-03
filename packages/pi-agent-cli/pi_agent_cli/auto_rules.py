@@ -920,7 +920,9 @@ _NETWORK = _words(
     "traceroute tracepath mtr dig nslookup host whois aria2c lynx w3m links http https xh "
     "httpie gh hub glab aws gcloud az kubectl helm terraform tofu ansible ansible-playbook "
     "pulumi vercel netlify wrangler flyctl fly heroku firebase supabase doctl sam serverless "
-    "sls railway deno npx bunx pnpx mosh"
+    "sls railway deno npx bunx pnpx mosh "
+    "rclone gsutil s3cmd azcopy mail mailx sendmail msmtp twine ngrok cloudflared tailscale "
+    "lftp pscp ssh-copy-id mosquitto_pub grpcurl websocat"
 )
 _PACKAGE_MANAGERS = _words(
     "apt apt-get aptitude yum dnf zypper apk pacman snap flatpak choco winget scoop brew "

@@ -12,6 +12,8 @@ and to the session with a scripted model. No command is run.
 * M-04: a glob in a call (``.mcp.js*``) that can expand to a protected name asks by the floor.
 * M-05: a call that is not read-only and names, as a whole, a folder on the way to a protected
   path (``.github``, ``.vscode``) asks by the floor. A call that only reads it does not.
+* Decision 7: eighteen programs that only send, publish or install are on the network floor
+  (``bash.network.program``). Each of them went to the model before.
 """
 
 from __future__ import annotations
@@ -485,4 +487,148 @@ async def test_a_model_that_allows_everything_is_not_asked_about_the_protected_f
     assert verdict.by == "floor"
     assert verdict.classifier == "rules"
     assert verdict.rule_id == rule_id
+    assert script.calls == []
+
+
+# Decision 7. Programs that only send, publish or install. They have no read-only use, so every
+# call asks by the floor and no model is asked. Before, each of them went to the model: 103 of 117
+# such calls reached it in the review, and a model that allows everything allowed them.
+NETWORK_ONLY = {
+    "rclone": "rclone copy ./dist remote:bucket/dist",
+    "gsutil": "gsutil cp dist/app.tgz gs://releases/app.tgz",
+    "s3cmd": "s3cmd put dist/app.tgz s3://releases/app.tgz",
+    "azcopy": "azcopy copy dist https://acct.blob.core.windows.net/site --recursive",
+    "mail": "mail -s report team@example.invalid < report.txt",
+    "mailx": "mailx -s status team@example.invalid < status.txt",
+    "sendmail": "sendmail team@example.invalid < msg.txt",
+    "msmtp": "msmtp team@example.invalid < msg.txt",
+    "twine": "twine upload dist/*",
+    "ngrok": "ngrok http 8000",
+    "cloudflared": "cloudflared tunnel run dev",
+    "tailscale": "tailscale up",
+    "lftp": 'lftp -c "put dist/app.tgz" ftp://host.example.invalid',
+    "pscp": "pscp dist/app.tgz deploy@host.example.invalid:/srv/app/",
+    "ssh-copy-id": "ssh-copy-id deploy@host.example.invalid",
+    "mosquitto_pub": "mosquitto_pub -h broker.example.invalid -t site/status -m done",
+    "grpcurl": "grpcurl -plaintext api.example.invalid:443 list",
+    "websocat": "websocat ws://host.example.invalid/socket",
+}
+# The call behind each of these is still the program, so the floor reads it. A group, a brace
+# group and an ``if`` are not read by the rules at all: they ask for their own reason.
+NETWORK_WRAPPERS = [
+    ("{c}", "bash.network.program"),
+    ("env X=1 {c}", "bash.network.program"),
+    ("nice {c}", "bash.network.program"),
+    ("timeout 60 {c}", "bash.network.program"),
+    ("time {c}", "bash.network.program"),
+    ("nohup {c}", "bash.network.program"),
+    ("command {c}", "bash.network.program"),
+    ("exec {c}", "bash.network.program"),
+    ("cd src && {c}", "bash.network.program"),
+    ("true; {c}", "bash.network.program"),
+    ("echo x | {c}", "bash.network.program"),
+    ("ls | xargs {c}", "bash.network.program"),
+    ("find . -exec {c} \\;", "bash.network.program"),
+    ("/usr/bin/{c}", "bash.network.program"),
+    ("./{c}", "bash.network.program"),
+    ("({c})", "bash.unclear.group"),
+    ("{{ {c}; }}", "bash.unclear.compound"),
+    ("if true; then {c}; fi", "bash.unclear.compound"),
+]
+
+
+def _network(decision) -> None:
+    assert decision.outcome is Outcome.ASK, decision
+    assert decision.by is By.FLOOR
+    assert decision.reason is Reason.NETWORK
+    assert decision.rule_id == "bash.network.program"
+
+
+def test_the_decision_7_table_has_the_eighteen_names() -> None:
+    assert sorted(NETWORK_ONLY) == sorted(
+        [
+            *("rclone", "gsutil", "s3cmd", "azcopy", "mail", "mailx", "sendmail", "msmtp"),
+            *("twine", "ngrok", "cloudflared", "tailscale", "lftp", "pscp", "ssh-copy-id"),
+            *("mosquitto_pub", "grpcurl", "websocat"),
+        ]
+    )
+    assert all(call.split()[0] == name for name, call in NETWORK_ONLY.items())
+
+
+@pytest.mark.parametrize("name", sorted(NETWORK_ONLY))
+def test_a_program_that_only_sends_publishes_or_installs_asks_by_the_floor(rules, name) -> None:
+    _network(_decide(rules, NETWORK_ONLY[name]))
+
+
+@pytest.mark.parametrize("name", sorted(NETWORK_ONLY))
+def test_the_bare_name_of_such_a_program_asks_too(rules, name) -> None:
+    _network(_decide(rules, name))
+
+
+@pytest.mark.parametrize(("wrapper", "rule_id"), NETWORK_WRAPPERS)
+def test_such_a_program_behind_a_wrapper_still_asks_by_the_floor(rules, wrapper, rule_id) -> None:
+    failed = []
+    for name, call in NETWORK_ONLY.items():
+        decision = _decide(rules, wrapper.format(c=call))
+        if not (
+            decision.outcome is Outcome.ASK
+            and decision.by is By.FLOOR
+            and decision.rule_id == rule_id
+        ):
+            failed.append((name, decision.outcome.value, decision.rule_id))
+    assert failed == []
+
+
+@pytest.mark.parametrize("name", sorted(NETWORK_ONLY))
+def test_such_a_program_behind_sudo_asks_by_the_floor_too(rules, name) -> None:
+    decision = _decide(rules, f"sudo {NETWORK_ONLY[name]}")
+
+    assert decision.outcome is Outcome.ASK and decision.by is By.FLOOR, decision
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "rclone-mount-helper --all",
+        "mailer send report",
+        "twine2 upload dist/x",
+        "sendmail-queue flush",
+        "ngrokk http 80",
+        "tailscaled --state=mem:",
+        "gsutils cp a b",
+        "websocat2 ws://host.example.invalid/socket",
+    ],
+)
+def test_a_name_that_only_starts_like_a_listed_program_is_left_to_the_model(rules, command) -> None:
+    _judged(_decide(rules, command))
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "hg push",
+        "redis-cli -h cache.example.invalid get x",
+        "pre-commit install",
+        "fooctl upload dist",
+    ],
+)
+def test_a_program_that_the_rules_do_not_know_still_goes_to_the_model(rules, command) -> None:
+    """The list is a list. A program that sends and that it does not name is judged by a model."""
+    _judged(_decide(rules, command))
+
+
+@pytest.mark.parametrize("name", sorted(NETWORK_ONLY))
+async def test_a_model_that_allows_everything_is_not_asked_about_these_programs(
+    world: _World, name: str
+) -> None:
+    script = Script("ALLOW")
+    _, session, _ = _session(world, script)
+    await session.enter()
+
+    verdict = await session.decide(_bash(NETWORK_ONLY[name]))
+
+    assert verdict.outcome is Outcome.ASK
+    assert verdict.by == "floor"
+    assert verdict.classifier == "rules"
+    assert verdict.rule_id == "bash.network.program"
     assert script.calls == []

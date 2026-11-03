@@ -12,6 +12,7 @@
     python scripts/auto_mutation_check.py --only "redteam3 " # only the protected folders, globs and folders on the way
     python scripts/auto_mutation_check.py --only "model " # only the model step (PR 2)
     python scripts/auto_mutation_check.py --only "comment " # only the rule for a shell comment (M-06)
+    python scripts/auto_mutation_check.py --only "network name" # only the names of decision 7
 
 Each mutation is an exact text replacement in one source file: ``auto_rules.py`` (or
 ``auto_reasons.py``) for the rules, and for the wiring ``auto_mode.py``, ``agent.py``,
@@ -41,7 +42,9 @@ that start with ``comment`` break the narrow rule that the third review added fo
 ``may_hold_comment`` (where a word starts, the quotes and the backslash, the text that the scan cannot
 follow) and the step of ``_decide_bash`` that asks by the floor, with its own reason and rule id, for a
 call that no rule proves read-only and that may hold a shell comment (its place among the other steps
-too). The mutations that start with ``model`` break the model step: the parser of the answer (only the exact line ``ALLOW`` allows),
+too). The mutations that start with ``network name`` take one program of decision 7 (``rclone``, ``mail``, ``twine`` and the others
+that only send, publish or install) off the network floor list, one at a time, so that its call goes to the model again. The
+mutations that start with ``model`` break the model step: the parser of the answer (only the exact line ``ALLOW`` allows),
 the data block (the token, the escapes, the limits), the request, the timeout, the cancel, the
 circuit breaker, the counters, the choice of the model, the wiring in the session and in the
 agent, the settings, and the eval harness (its gates and the cap on its spend). Run it again
@@ -3131,6 +3134,50 @@ COMMENT_MUTATIONS: list[Mutation] = [
 ]
 
 
+_NETWORK_TESTS = (
+    _CLI_TESTS + "test_auto_model_redteam.py",
+    _CLI_TESTS + "test_auto_corpus.py",
+)
+# The names that decision 7 added to ``_NETWORK``: the two lines of the source that hold them.
+_NETWORK_LINES = (
+    "rclone gsutil s3cmd azcopy mail mailx sendmail msmtp twine ngrok cloudflared tailscale ",
+    "lftp pscp ssh-copy-id mosquitto_pub grpcurl websocat",
+)
+
+
+def nn(name: str) -> Mutation:
+    """A mutation of the network floor list: the name of one program (decision 7) is not on it."""
+    for line in _NETWORK_LINES:
+        words = line.split()
+        if name in words:
+            rest = " ".join(word for word in words if word != name)
+            if line.endswith(" "):
+                rest += " "
+            return Mutation(
+                f"network name: {name} is not on the floor list",
+                f'"{line}"',
+                f'"{rest}"',
+                None,
+                "auto_rules.py",
+                "cli",
+                _NETWORK_TESTS,
+            )
+    raise ValueError(name)
+
+
+NETWORK_MUTATIONS: list[Mutation] = [
+    *(nn(name) for name in "".join(_NETWORK_LINES).split()),
+    Mutation(
+        "network name: a name that starts like a listed program is on the floor list too",
+        "    if program in _NETWORK:\n",
+        "    if any(program.startswith(name) for name in _NETWORK):\n",
+        None,
+        "auto_rules.py",
+        "cli",
+        _NETWORK_TESTS,
+    ),
+]
+
 MODEL_MUTATIONS: list[Mutation] = [
     # ---- the parser: the whole text is the answer, and the answer is in a closed list
     mc(
@@ -3858,6 +3905,7 @@ def main(argv: list[str] | None = None) -> int:
         *D07_MUTATIONS,
         *REDTEAM3_MUTATIONS,
         *COMMENT_MUTATIONS,
+        *NETWORK_MUTATIONS,
         *MODEL_MUTATIONS,
     ]
     chosen = [mut for mut in everything if args.only in mut.name]

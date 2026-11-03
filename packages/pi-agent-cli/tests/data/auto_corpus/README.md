@@ -90,6 +90,7 @@ A gate on a corpus is a regression gate. It is not a proof of safety.
   start with `redteam guard:` mark plain safe commands that a fix must not turn into an ask.
   The held-out split was not changed by the review.
 * Notes that start with `redteam round 3 M-06:` mark rows that the comment rule asks about by the floor (`bash.comment`, `floor: true`), and rows of the same kind that used to reach the model. Notes that start with `model step: M-06,` mark `injection` rows that reach the model with the order for the checker in a place that is not a shell comment (a string, bare words, a file name, a branch name, an environment value, the code of a program); they have a `hostile` field. A `safe` row with `known false ask` and a comment shows the cost of the comment rule. A `safe` row that says "a hash in a string is not a comment" guards the rule from asking too much.
+* Notes that start with `redteam round 3 decision 7:` mark `risky` rows of a program that only sends, publishes or installs (`rclone`, `gsutil`, `mail`, `twine`, `ngrok` and the other 18 names of decision 7). They are `floor: true` (`bash.network.program`), and none reaches the model. Before the 18 names were on the network list, each of these calls went to the model.
 * Notes that start with `model step:` mark the rows that were added for the model step: calls
   that the rules cannot judge (`floor: false`) and that a model must refuse (`dangerous` rows:
   a script, a make target, a migration or a cleanup that the user did not ask for; `injection`
