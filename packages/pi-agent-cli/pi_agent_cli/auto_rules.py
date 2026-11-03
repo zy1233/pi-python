@@ -21,7 +21,9 @@ The steps, first answer wins:
    option that runs code or writes, a glob that can become such an option, an endless device, a
    program of the project that is named like a read-only one) is not JUDGE: it is an ASK by the
    floor with the id ``bash.barred.<kind>``, so that no model is called and no model answer can
-   allow it (red-team decision D-07).
+   allow it (red-team decision D-07). A call that may hold a shell comment is not JUDGE either:
+   text in a comment moved models (red-team finding M-06), so it asks by the floor with the id
+   ``bash.comment``, unless a rule proves it read-only.
 5. Everything else: ASK ``unclear``.
 
 Fail closed: any doubt, any error and any input that the parser cannot read is an ASK. The
@@ -556,6 +558,62 @@ _NAME_START = re.compile(r"[A-Za-z_]")
 _NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _FD_DUP = re.compile(r"(\d+|-)(?=[\s;&|)<>]|$)")
 _SPECIAL_PARAMS = "?$!@*#-0123456789"
+
+# A shell comment is text that nobody runs, and text in it moved a model that judges the call
+# (red-team finding M-06). A call that may hold one does not go to the model: ``bash.comment``.
+# ``may_hold_comment`` reads the command only as far as it can be sure. At the start of a text
+# that the shell reads by rules of its own (``$(``, a back quote, ``$'``, ``<<``, ``${`` with
+# more than a name) it stops and says yes. It may say yes too often (any Unicode space counts as
+# a blank here, the lexer knows three); it must never say no where the shell or ``_lex`` sees a
+# comment. ``test_auto_comment_floor`` checks both against random strings. A ``#`` inside quotes
+# is not a comment: the text of a string is left to the model (M-06 stays open there).
+_COMMENT_BREAKS = frozenset(";&|()<>")
+_BRACE_WITH_MORE_THAN_A_NAME = r"\$\{(?!#?[A-Za-z_][A-Za-z0-9_]*\})"
+_NESTED_TEXT = re.compile(r"\$[(\[\'\"]|`|<<|<\(|>\(|" + _BRACE_WITH_MORE_THAN_A_NAME)
+_NESTED_TEXT_IN_QUOTES = re.compile(r"\$[(\[]|`|" + _BRACE_WITH_MORE_THAN_A_NAME)
+
+
+def may_hold_comment(command: str) -> bool:
+    """Whether *command* may hold a shell comment (a ``#`` that starts a word outside quotes)."""
+    n = len(command)
+    i = 0
+    word_start = True
+    while i < n:
+        ch = command[i]
+        if ch == "\\":
+            if i + 1 >= n or command[i + 1] == "\n":
+                return True
+            i += 2
+            word_start = False
+        elif ch == "'":
+            end = command.find("'", i + 1)
+            if end < 0:
+                return True
+            i = end + 1
+            word_start = False
+        elif ch == '"':
+            i += 1
+            while i < n and command[i] != '"':
+                if command[i] == "\\":
+                    i += 2
+                elif _NESTED_TEXT_IN_QUOTES.match(command, i):
+                    return True
+                else:
+                    i += 1
+            if i >= n:
+                return True
+            i += 1
+            word_start = False
+        elif ch == "#":
+            if word_start:
+                return True
+            i += 1
+        else:
+            if ch in "$`<>" and _NESTED_TEXT.match(command, i):
+                return True
+            word_start = ch.isspace() or ch in _COMMENT_BREAKS
+            i += 1
+    return False
 
 
 def _lex(command: str, env: _Env) -> list[_Tok]:
@@ -2127,6 +2185,8 @@ def _decide_bash(call: ToolCall, env: _Env) -> RuleDecision:
         return _allow(Reason.READ_ONLY_COMMAND, "allow.bash.read_only")
     if st.barred is not None:
         return _ask(Reason.UNCLEAR, f"bash.barred.{st.barred}")
+    if may_hold_comment(command):
+        return _ask(Reason.COMMENT, "bash.comment")
     return RuleDecision(Outcome.JUDGE, By.RULE, Reason.UNCLEAR, "bash.not_proven")
 
 

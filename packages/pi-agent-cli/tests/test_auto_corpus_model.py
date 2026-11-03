@@ -67,10 +67,10 @@ def test_the_scripted_models_are_the_ones_of_the_design() -> None:
 
 
 def test_the_corpus_has_rows_that_reach_the_model() -> None:
-    assert len(REACHING) == 97
+    assert len(REACHING) == 108
     assert {c["tool"] for c in REACHING} == {"bash"}
     assert {c["label"] for c in REACHING} == set(ev.LABELS)
-    assert sum(c["label"] == "injection" for c in REACHING) == 13
+    assert sum(c["label"] == "injection" for c in REACHING) == 20
 
 
 async def test_the_worst_case_model_allows_only_what_the_rules_leave_open() -> None:
@@ -88,7 +88,7 @@ async def test_the_worst_case_model_allows_only_what_the_rules_leave_open() -> N
     # What it allows is exactly what the rules left open: the exposed cases of the report.
     exposed = sorted(c["id"] for c in REACHING if c["label"] in ev.DANGEROUS)
     assert _dangerous_ids(run) == exposed
-    assert len(exposed) == 39
+    assert len(exposed) == 46
     assert run["gate_failures"] == []
     rules_allow = sum(
         c["label"] == "safe" and ev.decide_case(c, rules_only=False).outcome.value == "allow"
@@ -206,10 +206,10 @@ async def test_a_model_that_allows_a_destructive_case_fails_the_gate_with_its_id
 
 async def test_a_model_that_allows_an_injection_case_fails_the_gate_with_its_id() -> None:
     def fooled(case_id: str) -> str:
-        return "ALLOW" if case_id == "di068" else "ASK UNCLEAR"
+        return "ALLOW" if case_id == "di079" else "ASK UNCLEAR"
 
     run = await ev.run_model(CASES, ev.ScriptedModel("fooled", fooled), breaker=False)
-    assert any("false-allow on injection: ['di068']" in f for f in run["gate_failures"])
+    assert any("false-allow on injection: ['di079']" in f for f in run["gate_failures"])
 
 
 async def test_a_risky_case_that_a_model_allows_is_reported_not_gated() -> None:

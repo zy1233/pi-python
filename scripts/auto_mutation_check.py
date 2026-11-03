@@ -11,6 +11,7 @@
     python scripts/auto_mutation_check.py --only "d07 " # only the forms that the rules bar from the model
     python scripts/auto_mutation_check.py --only "redteam3 " # only the protected folders, globs and folders on the way
     python scripts/auto_mutation_check.py --only "model " # only the model step (PR 2)
+    python scripts/auto_mutation_check.py --only "comment " # only the rule for a shell comment (M-06)
 
 Each mutation is an exact text replacement in one source file: ``auto_rules.py`` (or
 ``auto_reasons.py``) for the rules, and for the wiring ``auto_mode.py``, ``agent.py``,
@@ -36,7 +37,11 @@ lets a barred call pass as proven, so that it runs or reaches the model. The mut
 ``redteam3`` break what the third review added to the protected set: the folder that a glob ends in
 (``.husky``), a shell glob that can expand to a protected name (``.mcp.js*``), and the folder on the
 way to a protected path (``.github``) that a call which is not read-only must not name. The mutations
-that start with ``model`` break the model step: the parser of the answer (only the exact line ``ALLOW`` allows),
+that start with ``comment`` break the narrow rule that the third review added for M-06: the detector
+``may_hold_comment`` (where a word starts, the quotes and the backslash, the text that the scan cannot
+follow) and the step of ``_decide_bash`` that asks by the floor, with its own reason and rule id, for a
+call that no rule proves read-only and that may hold a shell comment (its place among the other steps
+too). The mutations that start with ``model`` break the model step: the parser of the answer (only the exact line ``ALLOW`` allows),
 the data block (the token, the escapes, the limits), the request, the timeout, the cancel, the
 circuit breaker, the counters, the choice of the model, the wiring in the session and in the
 agent, the settings, and the eval harness (its gates and the cap on its spend). Run it again
@@ -325,7 +330,11 @@ MUTATIONS: list[Mutation] = [
         'if rest.startswith(("<<", "<(", ">(")):',
         "if False:",
     ),
-    m("lex: line continuation", 'if i + 1 >= n or command[i + 1] == "\\n":', "if False:"),
+    m(
+        "lex: line continuation",
+        'if i + 1 >= n or command[i + 1] == "\\n":\n                refuse(Reason.UNCLEAR, "bash.unclear.continuation")',
+        'if False:\n                refuse(Reason.UNCLEAR, "bash.unclear.continuation")',
+    ),
     m(
         "lex: unterminated single quote",
         '            if close < 0:\n                refuse(Reason.UNCLEAR, "bash.unclear.quote")\n            buf.append',
@@ -2553,6 +2562,19 @@ def mk(name: str, old: str, new: str) -> Mutation:
     )
 
 
+_COMMENT = (
+    _CLI_TESTS + "test_auto_comment_floor.py",
+    _CLI_TESTS + "test_auto_corpus.py",
+    _CLI_TESTS + "test_auto_reasons.py",
+)
+
+
+def cm(name: str, old: str, new: str, *, file: str = "auto_rules.py") -> Mutation:
+    """A mutation of the comment rule (M-06): the detector ``may_hold_comment``, or the step in
+    ``_decide_bash`` that asks. The tests of the rule, the corpus and the reasons run."""
+    return Mutation(f"comment {name}", old, new, None, file, "cli", _COMMENT)
+
+
 D07_MUTATIONS: list[Mutation] = [
     d7(
         "a banned option of a read-only program is judged, not barred",
@@ -2774,6 +2796,337 @@ REDTEAM3_MUTATIONS: list[Mutation] = [
         "a path is not read for a folder on the way",
         "            env.path_floor(_resolve(text, cwd, env), leading=leading)",
         "            env.path_floor(_resolve(text, cwd, env))",
+    ),
+]
+
+
+_ASK_COMMENT = (
+    '    if may_hold_comment(command):\n        return _ask(Reason.COMMENT, "bash.comment")\n'
+)
+
+COMMENT_MUTATIONS: list[Mutation] = [
+    # ---- the step in ``_decide_bash``
+    cm(
+        "the step is removed: a call with a comment goes to the model",
+        _ASK_COMMENT + "    return RuleDecision(Outcome.JUDGE",
+        "    return RuleDecision(Outcome.JUDGE",
+    ),
+    cm(
+        "the step asks about nothing",
+        "    if may_hold_comment(command):\n        return _ask(Reason.COMMENT",
+        "    if False:\n        return _ask(Reason.COMMENT",
+    ),
+    cm(
+        "the step asks about every call that no rule proves",
+        "    if may_hold_comment(command):\n        return _ask(Reason.COMMENT",
+        "    if True:\n        return _ask(Reason.COMMENT",
+    ),
+    cm(
+        "the reason is the one of a call that cannot be read",
+        '_ask(Reason.COMMENT, "bash.comment")',
+        '_ask(Reason.UNCLEAR, "bash.comment")',
+    ),
+    cm(
+        "the rule id is the one of a call that is left open",
+        '_ask(Reason.COMMENT, "bash.comment")',
+        '_ask(Reason.COMMENT, "bash.not_proven")',
+    ),
+    cm(
+        "a call with a comment is left to the model under its own id",
+        '        return _ask(Reason.COMMENT, "bash.comment")\n',
+        '        return RuleDecision(Outcome.JUDGE, By.RULE, Reason.COMMENT, "bash.comment")\n',
+    ),
+    cm(
+        "a call with a comment is asked by a rule, not by the floor",
+        '        return _ask(Reason.COMMENT, "bash.comment")\n',
+        '        return RuleDecision(Outcome.ASK, By.RULE, Reason.COMMENT, "bash.comment")\n',
+    ),
+    cm(
+        "the step runs before the allow of a read-only call",
+        '    if st.proven:\n        return _allow(Reason.READ_ONLY_COMMAND, "allow.bash.read_only")\n',
+        _ASK_COMMENT
+        + '    if st.proven:\n        return _allow(Reason.READ_ONLY_COMMAND, "allow.bash.read_only")\n',
+    ),
+    cm(
+        "the step runs before the bar of D-07",
+        '    if st.barred is not None:\n        return _ask(Reason.UNCLEAR, f"bash.barred.{st.barred}")\n',
+        _ASK_COMMENT
+        + '    if st.barred is not None:\n        return _ask(Reason.UNCLEAR, f"bash.barred.{st.barred}")\n',
+    ),
+    cm(
+        "the step runs before the floor of code of an untrusted project",
+        "    if st.project_code and not env.ctx.project_trusted:\n",
+        _ASK_COMMENT + "    if st.project_code and not env.ctx.project_trusted:\n",
+    ),
+    cm(
+        "the step runs before the rules read the call",
+        "    st = _State(env)\n    try:\n        simples = _parse(_lex(command, env))\n",
+        _ASK_COMMENT
+        + "    st = _State(env)\n    try:\n        simples = _parse(_lex(command, env))\n",
+    ),
+    # ---- the reason
+    cm(
+        "the reason has another value",
+        '    COMMENT = "comment"\n',
+        '    COMMENT = "comments"\n',
+        file="auto_reasons.py",
+    ),
+    cm(
+        "the sentence of the reason is another text",
+        '"has a shell comment and no rule proves it safe"',
+        '"has a comment and no rule proves it safe"',
+        file="auto_reasons.py",
+    ),
+    # ---- the detector: where a word starts
+    cm(
+        "a semicolon does not end a word",
+        '_COMMENT_BREAKS = frozenset(";&|()<>")',
+        '_COMMENT_BREAKS = frozenset("&|()<>")',
+    ),
+    cm(
+        "an ampersand does not end a word",
+        '_COMMENT_BREAKS = frozenset(";&|()<>")',
+        '_COMMENT_BREAKS = frozenset(";|()<>")',
+    ),
+    cm(
+        "a pipe does not end a word",
+        '_COMMENT_BREAKS = frozenset(";&|()<>")',
+        '_COMMENT_BREAKS = frozenset(";&()<>")',
+    ),
+    cm(
+        "an opening parenthesis does not end a word",
+        '_COMMENT_BREAKS = frozenset(";&|()<>")',
+        '_COMMENT_BREAKS = frozenset(";&|)<>")',
+    ),
+    cm(
+        "a closing parenthesis does not end a word",
+        '_COMMENT_BREAKS = frozenset(";&|()<>")',
+        '_COMMENT_BREAKS = frozenset(";&|(<>")',
+    ),
+    cm(
+        "a less-than sign does not end a word",
+        '_COMMENT_BREAKS = frozenset(";&|()<>")',
+        '_COMMENT_BREAKS = frozenset(";&|()>")',
+    ),
+    cm(
+        "a greater-than sign does not end a word",
+        '_COMMENT_BREAKS = frozenset(";&|()<>")',
+        '_COMMENT_BREAKS = frozenset(";&|()<")',
+    ),
+    cm(
+        "only a space ends a word, a tab and a line end do not",
+        "            word_start = ch.isspace() or ch in _COMMENT_BREAKS\n",
+        '            word_start = ch == " " or ch in _COMMENT_BREAKS\n',
+    ),
+    cm(
+        "only the three blanks of the lexer end a word",
+        "            word_start = ch.isspace() or ch in _COMMENT_BREAKS\n",
+        '            word_start = ch in " \\t\\n" or ch in _COMMENT_BREAKS\n',
+    ),
+    cm(
+        "no blank ends a word",
+        "            word_start = ch.isspace() or ch in _COMMENT_BREAKS\n",
+        "            word_start = ch in _COMMENT_BREAKS\n",
+    ),
+    cm(
+        "no break character ends a word",
+        "            word_start = ch.isspace() or ch in _COMMENT_BREAKS\n",
+        "            word_start = ch.isspace()\n",
+    ),
+    cm(
+        "the text does not start with a word",
+        "    word_start = True\n    while i < n:\n",
+        "    word_start = False\n    while i < n:\n",
+    ),
+    cm(
+        "a plain character is skipped with the next one",
+        "            word_start = ch.isspace() or ch in _COMMENT_BREAKS\n            i += 1\n",
+        "            word_start = ch.isspace() or ch in _COMMENT_BREAKS\n            i += 2\n",
+    ),
+    # ---- the detector: the hash
+    cm(
+        "a hash that starts a word is not a comment",
+        '        elif ch == "#":\n            if word_start:\n                return True\n            i += 1\n',
+        '        elif ch == "#":\n            i += 1\n',
+    ),
+    cm(
+        "every hash is a comment",
+        '        elif ch == "#":\n            if word_start:\n                return True\n            i += 1\n',
+        '        elif ch == "#":\n            return True\n',
+    ),
+    # ---- the detector: the backslash
+    cm(
+        "a backslash does not skip the next character",
+        '            i += 2\n            word_start = False\n        elif ch == "\'":',
+        '            i += 1\n            word_start = False\n        elif ch == "\'":',
+    ),
+    cm(
+        "a backslash keeps the start of the word",
+        '            i += 2\n            word_start = False\n        elif ch == "\'":',
+        '            i += 2\n        elif ch == "\'":',
+    ),
+    cm(
+        "a backslash at the end is read as a plain character",
+        '            if i + 1 >= n or command[i + 1] == "\\n":\n                return True\n',
+        "            if False:\n                return True\n",
+    ),
+    cm(
+        "a backslash before a line end is read as a plain character",
+        '            if i + 1 >= n or command[i + 1] == "\\n":\n                return True\n',
+        "            if i + 1 >= n:\n                return True\n",
+    ),
+    # ---- the detector: single quotes
+    cm(
+        "an open single quote is not a yes",
+        "            if end < 0:\n                return True\n",
+        "            if end < 0:\n                return False\n",
+    ),
+    cm(
+        "a single quote does not end at the next single quote",
+        "            i = end + 1\n            word_start = False\n        elif ch == '\"':",
+        "            i = end\n            word_start = False\n        elif ch == '\"':",
+    ),
+    cm(
+        "a single quote keeps the start of the word",
+        "            i = end + 1\n            word_start = False\n",
+        "            i = end + 1\n",
+    ),
+    # ---- the detector: double quotes
+    cm(
+        "a backslash in double quotes does not skip the next character",
+        '                if command[i] == "\\\\":\n                    i += 2\n',
+        '                if command[i] == "\\\\":\n                    i += 1\n',
+    ),
+    cm(
+        "an open double quote is not a yes",
+        "            if i >= n:\n                return True\n",
+        "            if i >= n:\n                return False\n",
+    ),
+    cm(
+        "a double quote keeps the start of the word",
+        '            i += 1\n            word_start = False\n        elif ch == "#":',
+        '            i += 1\n        elif ch == "#":',
+    ),
+    cm(
+        "text with a reading of its own is not read in double quotes",
+        "                elif _NESTED_TEXT_IN_QUOTES.match(command, i):\n                    return True\n",
+        "                elif False:\n                    return True\n",
+    ),
+    cm(
+        "text with a reading of its own is searched for in the rest of the command from double quotes",
+        "_NESTED_TEXT_IN_QUOTES.match(command, i)",
+        "_NESTED_TEXT_IN_QUOTES.search(command, i)",
+    ),
+    cm(
+        "a character in double quotes is skipped with the next one",
+        "                else:\n                    i += 1\n            if i >= n:",
+        "                else:\n                    i += 2\n            if i >= n:",
+    ),
+    # ---- the detector: text that the shell reads by rules of its own
+    cm(
+        "text with a reading of its own is not read outside quotes",
+        '            if ch in "$`<>" and _NESTED_TEXT.match(command, i):\n                return True\n',
+        "            if False:\n                return True\n",
+    ),
+    cm(
+        "text with a reading of its own is only read after a dollar sign",
+        '            if ch in "$`<>" and _NESTED_TEXT.match(command, i):',
+        '            if ch == "$" and _NESTED_TEXT.match(command, i):',
+    ),
+    cm(
+        "text with a reading of its own is not read after a back quote",
+        '            if ch in "$`<>" and _NESTED_TEXT.match(command, i):',
+        '            if ch in "$<>" and _NESTED_TEXT.match(command, i):',
+    ),
+    cm(
+        "text with a reading of its own is searched for in the rest of the command",
+        "_NESTED_TEXT.match(command, i)",
+        "_NESTED_TEXT.search(command, i)",
+    ),
+    cm(
+        "a command substitution is not text of its own",
+        r"""r"\$[(\[\'\"]|`|<<|<\(|>\(|" """.strip(),
+        r"""r"\$[\[\'\"]|`|<<|<\(|>\(|" """.strip(),
+    ),
+    cm(
+        "an arithmetic expansion of the old kind is not text of its own",
+        r"""r"\$[(\[\'\"]|`|<<|<\(|>\(|" """.strip(),
+        r"""r"\$[(\'\"]|`|<<|<\(|>\(|" """.strip(),
+    ),
+    cm(
+        "an ANSI-C quote is not text of its own",
+        r"""r"\$[(\[\'\"]|`|<<|<\(|>\(|" """.strip(),
+        r"""r"\$[(\[\"]|`|<<|<\(|>\(|" """.strip(),
+    ),
+    cm(
+        "a locale quote is not text of its own",
+        r"""r"\$[(\[\'\"]|`|<<|<\(|>\(|" """.strip(),
+        r"""r"\$[(\[\']|`|<<|<\(|>\(|" """.strip(),
+    ),
+    cm(
+        "a back quote is not text of its own",
+        r"""r"\$[(\[\'\"]|`|<<|<\(|>\(|" """.strip(),
+        r"""r"\$[(\[\'\"]|<<|<\(|>\(|" """.strip(),
+    ),
+    cm(
+        "a here-document is not text of its own",
+        r"""r"\$[(\[\'\"]|`|<<|<\(|>\(|" """.strip(),
+        r"""r"\$[(\[\'\"]|`|<\(|>\(|" """.strip(),
+    ),
+    cm(
+        "a process substitution to read is not text of its own",
+        r"""r"\$[(\[\'\"]|`|<<|<\(|>\(|" """.strip(),
+        r"""r"\$[(\[\'\"]|`|<<|>\(|" """.strip(),
+    ),
+    cm(
+        "a process substitution to write is not text of its own",
+        r"""r"\$[(\[\'\"]|`|<<|<\(|>\(|" """.strip(),
+        r"""r"\$[(\[\'\"]|`|<<|<\(|" """.strip(),
+    ),
+    cm(
+        "a command substitution is not text of its own in double quotes",
+        r"\$[(\[]|`|",
+        r"\$[\[]|`|",
+    ),
+    cm(
+        "an arithmetic expansion of the old kind is not text of its own in double quotes",
+        r"\$[(\[]|`|",
+        r"\$[(]|`|",
+    ),
+    cm(
+        "a back quote is not text of its own in double quotes",
+        r"\$[(\[]|`|",
+        r"\$[(\[]|",
+    ),
+    cm(
+        "a brace with more than a name is a plain word",
+        r'_BRACE_WITH_MORE_THAN_A_NAME = r"\$\{(?!#?[A-Za-z_][A-Za-z0-9_]*\})"',
+        r'_BRACE_WITH_MORE_THAN_A_NAME = r"\$\{(?!#?[A-Za-z_][A-Za-z0-9_]*)"',
+    ),
+    cm(
+        "every brace is text of its own",
+        r'_BRACE_WITH_MORE_THAN_A_NAME = r"\$\{(?!#?[A-Za-z_][A-Za-z0-9_]*\})"',
+        r'_BRACE_WITH_MORE_THAN_A_NAME = r"\$\{"',
+    ),
+    cm(
+        "the length of a name is text of its own",
+        r'_BRACE_WITH_MORE_THAN_A_NAME = r"\$\{(?!#?[A-Za-z_][A-Za-z0-9_]*\})"',
+        r'_BRACE_WITH_MORE_THAN_A_NAME = r"\$\{(?![A-Za-z_][A-Za-z0-9_]*\})"',
+    ),
+    cm(
+        "a name that starts with an underscore is text of its own",
+        r'_BRACE_WITH_MORE_THAN_A_NAME = r"\$\{(?!#?[A-Za-z_][A-Za-z0-9_]*\})"',
+        r'_BRACE_WITH_MORE_THAN_A_NAME = r"\$\{(?!#?[A-Za-z][A-Za-z0-9_]*\})"',
+    ),
+    cm(
+        "a name with a digit is text of its own",
+        r'_BRACE_WITH_MORE_THAN_A_NAME = r"\$\{(?!#?[A-Za-z_][A-Za-z0-9_]*\})"',
+        r'_BRACE_WITH_MORE_THAN_A_NAME = r"\$\{(?!#?[A-Za-z_][A-Za-z_]*\})"',
+    ),
+    cm(
+        "a name of one letter is text of its own",
+        r'_BRACE_WITH_MORE_THAN_A_NAME = r"\$\{(?!#?[A-Za-z_][A-Za-z0-9_]*\})"',
+        r'_BRACE_WITH_MORE_THAN_A_NAME = r"\$\{(?!#?[A-Za-z_][A-Za-z0-9_]+\})"',
     ),
 ]
 
@@ -3504,6 +3857,7 @@ def main(argv: list[str] | None = None) -> int:
         *RT2_MUTATIONS,
         *D07_MUTATIONS,
         *REDTEAM3_MUTATIONS,
+        *COMMENT_MUTATIONS,
         *MODEL_MUTATIONS,
     ]
     chosen = [mut for mut in everything if args.only in mut.name]

@@ -38,6 +38,7 @@ was used up before the run ended.
 | `floor` | For `risky`, `destructive` and `injection`: `true` when a floor rule must catch the case with no model. `false` when only a model could tell. |
 | `builtin` | Whether the tool is one of ours (`bash`, `write`, `edit`). |
 | `notes` | Why the case is here. |
+| `hostile` | Optional, only on `injection` rows that reach the model: the text in the call that is meant for the checker (a test checks that it is in the call, and that the call is dangerous without it). |
 | `existing`, `git`, `links`, `origin_cwd`, `protected_paths`, `protected_globs` | Optional. Files that exist, whether they are in a git work tree (default yes), symbolic links (`{link: target}`), the working folder of a workflow sub-agent, the protected paths and the protected globs of the home config (lists of strings). |
 
 The cases never touch the real disk: the script gives each case a fake file system.
@@ -88,6 +89,7 @@ A gate on a corpus is a regression gate. It is not a proof of safety.
   was an ALLOW (or a call left to the model that belongs on the floor) before the fix. Notes that
   start with `redteam guard:` mark plain safe commands that a fix must not turn into an ask.
   The held-out split was not changed by the review.
+* Notes that start with `redteam round 3 M-06:` mark rows that the comment rule asks about by the floor (`bash.comment`, `floor: true`), and rows of the same kind that used to reach the model. Notes that start with `model step: M-06,` mark `injection` rows that reach the model with the order for the checker in a place that is not a shell comment (a string, bare words, a file name, a branch name, an environment value, the code of a program); they have a `hostile` field. A `safe` row with `known false ask` and a comment shows the cost of the comment rule. A `safe` row that says "a hash in a string is not a comment" guards the rule from asking too much.
 * Notes that start with `model step:` mark the rows that were added for the model step: calls
   that the rules cannot judge (`floor: false`) and that a model must refuse (`dangerous` rows:
   a script, a make target, a migration or a cleanup that the user did not ask for; `injection`
@@ -103,7 +105,7 @@ A gate on a corpus is a regression gate. It is not a proof of safety.
 ## The cassette
 
 `cassette.json` is the first answer of one real run of the model step, for each of the cases that
-reach the model step (now 97), and the tokens, the cost and the time of the request. It was
+reach the model step (now 108), and the tokens, the cost and the time of the request. It was
 recorded on 2026-11-03 from `amazon/nova-lite-v1` with the prompt `POLICY_HASH` that the file
 names. `--replay` and the tests play it back through the real classifier (prompt, parser,
 timeout, breaker), with no key and no network. It says what that one model did on that day. It

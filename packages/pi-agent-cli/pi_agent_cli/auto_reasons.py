@@ -32,6 +32,7 @@ class Reason(StrEnum):
     UNDECLARED_TOOL = "undeclared_tool"
     WORKFLOW = "workflow"
     UNCLEAR = "unclear"
+    COMMENT = "comment"
     TOO_LARGE = "too_large"
     OVERWRITE_NO_GIT = "overwrite_no_git"
     PRIVILEGE = "privilege"
@@ -61,6 +62,7 @@ SENTENCES: dict[Reason, str] = {
     Reason.UNDECLARED_TOOL: "tool does not declare itself harmless",
     Reason.WORKFLOW: "starts a workflow",
     Reason.UNCLEAR: "cannot tell if it is safe",
+    Reason.COMMENT: "has a shell comment and no rule proves it safe",
     Reason.TOO_LARGE: "command is too long to check",
     Reason.OVERWRITE_NO_GIT: "overwrites a file that git cannot restore",
     Reason.PRIVILEGE: "changes the system or needs more rights",
