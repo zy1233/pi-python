@@ -107,17 +107,21 @@ def permission_tool_call(
 
 
 def outcome_allows(outcome: AllowedOutcome | DeniedOutcome | Any) -> bool:
-    if isinstance(outcome, DeniedOutcome):
+    """Whether the user said yes: a selected option whose id is not a ``reject`` one.
+
+    This is not a strict reader like ``trust_prompt.trust_outcome_grants``: the pager adds
+    options of its own to a question (``enable-always-approve``) and answers with their ids,
+    which are yes. An answer that does not say ``selected`` (a cancelled question), has no
+    option id, or has a shape that is not known is no (invariant 9b): an odd answer never
+    runs a call.
+    """
+    if isinstance(outcome, Mapping):
+        kind = outcome.get("outcome")
+        option_id = outcome.get("optionId", outcome.get("option_id"))
+    else:
+        kind = getattr(outcome, "outcome", None)
+        option_id = getattr(outcome, "option_id", None)
+    if kind != "selected" or not isinstance(option_id, str):
         return False
-    if isinstance(outcome, AllowedOutcome):
-        return not str(outcome.option_id).startswith("reject")
-    if isinstance(outcome, dict):
-        if outcome.get("outcome") == "cancelled":
-            return False
-        option_id = str(outcome.get("optionId") or outcome.get("option_id") or "")
-        return not option_id.startswith("reject")
-    option_id = str(getattr(outcome, "option_id", "") or "")
-    kind = str(getattr(outcome, "outcome", "") or "")
-    if kind == "cancelled":
-        return False
-    return not option_id.startswith("reject")
+    option_id = option_id.strip().lower()
+    return bool(option_id) and not option_id.startswith("reject")

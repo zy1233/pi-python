@@ -27,7 +27,7 @@ import asyncio
 import logging
 import os
 import time
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,13 +35,13 @@ from typing import Any
 
 from pi_agent_cli.auto_reasons import Reason
 from pi_agent_cli.auto_rules import (
-    DEFAULT_PROTECTED_GLOBS,
     AutoContext,
     Outcome,
     RuleDecision,
     ToolCall,
     build_context,
     decide_rules_only,
+    default_protected_globs,
     is_absolute_folder,
 )
 from pi_agent_cli.config import AutoConfig, CliConfig
@@ -297,7 +297,7 @@ class AutoSession:
         self._active = False
         self._start_problems: tuple[str, ...] | None = None
         self._check_lock = asyncio.Lock()
-        self._open_calls: set[str] = set()
+        self._open_calls: Counter[str] = Counter()
         self._saved_execution: Any = None
         self._toggled: dict[int, tuple[Any, Any]] = {}
         harness.subscribe(self._on_event)
@@ -409,20 +409,35 @@ class AutoSession:
                 logger.debug("Could not restore execution_mode of a tool", exc_info=True)
         self._toggled.clear()
 
+    def _other_calls_open(self, call_id: str) -> bool:
+        """Whether a call other than this one has started and not ended. The id comes from the
+        model, so two calls of one message can have the same id: the count of an id above one
+        is another call too."""
+        return any(count > (1 if key == call_id else 0) for key, count in self._open_calls.items())
+
     def _on_event(self, event: Any, signal: Any | None = None) -> None:
         kind = getattr(event, "type", None)
         if kind == "tool_execution_start":
-            self._open_calls.add(event.tool_call_id)
+            self._open_calls[event.tool_call_id] += 1
         elif kind == "tool_execution_end":
-            self._open_calls.discard(event.tool_call_id)
+            self._open_calls[event.tool_call_id] -= 1
+            if self._open_calls[event.tool_call_id] <= 0:
+                del self._open_calls[event.tool_call_id]
         elif kind in {"agent_start", "agent_end", "turn_start", "turn_end"}:
             self._open_calls.clear()
 
     # ---- the checks of the session
 
     def _live_problems(self) -> list[str]:
+        """What is read again before every call. The values of ``[auto]`` are in it: the
+        agent reads ``agent.toml`` again when it could not run a turn (``--setup`` while it was
+        up), and the new file can hold a value that Auto cannot work with."""
         path_value = (self._environ if self._environ is not None else os.environ).get("PATH")
-        return [*path_problems(path_value), *shell_problems(self._resolve_shell)]
+        return [
+            *self._get_config().auto.problems,
+            *path_problems(path_value),
+            *shell_problems(self._resolve_shell),
+        ]
 
     def _make_context(self, origin_cwd: str | None = None) -> AutoContext:
         auto = self._get_config().auto
@@ -431,15 +446,13 @@ class AutoSession:
             project_trusted=self._trusted(),
             pi_home_dir=str(self._home),
             extra_roots=auto.extra_roots,
-            protected_globs=(*DEFAULT_PROTECTED_GLOBS, *auto.protected),
+            protected_globs=(*default_protected_globs(), *auto.protected),
             config=self._get_config(),
             origin_cwd=origin_cwd,
         )
 
     def _check_blocking(self) -> tuple[str, ...]:
-        problems = list(self._get_config().auto.problems)
-        problems.extend(context_problems(self._make_context()))
-        return tuple(problems)
+        return tuple(context_problems(self._make_context()))
 
     async def _ensure_checked(self) -> None:
         async with self._check_lock:
@@ -503,7 +516,7 @@ class AutoSession:
         self._apply_sequential(True)
         if self._start_problems or await asyncio.to_thread(self._live_problems):
             return _ask(Reason.UNCLEAR, "session.check_failed", by="floor")
-        if not origin and self._open_calls - {str(event.toolCallId)}:
+        if not origin and self._other_calls_open(str(event.toolCallId)):
             # An earlier call of this message has not finished: the harness runs this batch
             # in parallel (Auto was switched on while it was being prepared). This call would
             # be judged on files that the earlier one may still change.

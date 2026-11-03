@@ -247,8 +247,8 @@ MUTATIONS: list[Mutation] = [
     ),
     m(
         "write: floor not applied",
-        "    try:\n        env.path_floor(real)\n    except _Floor as floor:\n        return _ask(floor.reason, floor.rule_id)\n    if env.fs.lexists(real)",
-        "    if env.fs.lexists(real)",
+        "    try:\n        env.path_floor(real)\n    except _Floor as floor:\n        return _ask(floor.reason, floor.rule_id)\n    hit = env.home_persistence_hit(real)",
+        "    hit = env.home_persistence_hit(real)",
     ),
     m(
         "write: overwrite outside git",
@@ -1662,29 +1662,29 @@ WIRING_MUTATIONS: list[Mutation] = [
     w(
         "one by one: a call that comes while an earlier call is open does not ask",
         _AUTO_MODE,
-        "        if not origin and self._open_calls - {str(event.toolCallId)}:",
+        "        if not origin and self._other_calls_open(str(event.toolCallId)):",
         "        if False:",
         tests=_WIRING,
     ),
     w(
         "one by one: the start of a call is not noted",
         _AUTO_MODE,
-        "            self._open_calls.add(event.tool_call_id)",
+        "            self._open_calls[event.tool_call_id] += 1",
         "            pass",
         tests=_WIRING,
     ),
     w(
         "one by one: the end of a call is not noted",
         _AUTO_MODE,
-        "            self._open_calls.discard(event.tool_call_id)",
+        "            self._open_calls[event.tool_call_id] -= 1\n            if self._open_calls[event.tool_call_id] <= 0:\n                del self._open_calls[event.tool_call_id]",
         "            pass",
         tests=_WIRING,
     ),
     w(
         "one by one: a sub-agent call asks while the workflow call is open",
         _AUTO_MODE,
-        "        if not origin and self._open_calls - {str(event.toolCallId)}:",
-        "        if self._open_calls - {str(event.toolCallId)}:",
+        "        if not origin and self._other_calls_open(str(event.toolCallId)):",
+        "        if self._other_calls_open(str(event.toolCallId)):",
         tests=_WIRING,
     ),
     w(
@@ -1800,15 +1800,15 @@ WIRING_MUTATIONS: list[Mutation] = [
     w(
         "context: the values of [auto] that cannot be used are not read",
         _AUTO_MODE,
-        "        problems = list(self._get_config().auto.problems)",
-        "        problems = []",
+        "            *self._get_config().auto.problems,\n",
+        "            *(),\n",
         tests=_WIRING,
     ),
     w(
         "context: the folders of the session are not checked",
         _AUTO_MODE,
-        "        problems.extend(context_problems(self._make_context()))",
-        "        pass",
+        "        return tuple(context_problems(self._make_context()))",
+        "        return ()",
         tests=_WIRING,
     ),
     w(
@@ -1956,15 +1956,15 @@ WIRING_MUTATIONS: list[Mutation] = [
     w(
         "protected: the list is not given to the rules",
         _AUTO_MODE,
-        "            protected_globs=(*DEFAULT_PROTECTED_GLOBS, *auto.protected),",
+        "            protected_globs=(*default_protected_globs(), *auto.protected),",
         "            protected_globs=(*auto.protected,),",
         tests=_WIRING,
     ),
     w(
         "protected: the globs of the user are not given to the rules",
         _AUTO_MODE,
-        "            protected_globs=(*DEFAULT_PROTECTED_GLOBS, *auto.protected),",
-        "            protected_globs=DEFAULT_PROTECTED_GLOBS,",
+        "            protected_globs=(*default_protected_globs(), *auto.protected),",
+        "            protected_globs=default_protected_globs(),",
         tests=_WIRING,
     ),
     # ---- W-5: limits for a call that Auto allowed, and only for that call
@@ -2201,6 +2201,254 @@ WIRING_MUTATIONS: list[Mutation] = [
 ]
 
 
+# ---------------------------------------------------------------------------------------------
+# Round 2 of the red team (the wiring and the rules together). Names start with ``rt2``. Each
+# mutation breaks one of the fixes of that round; the tests are the ones of the round, the
+# rules tests, and the corpus.
+
+_REDTEAM2 = (_CLI_TESTS + "test_auto_wiring_redteam.py", *TESTS)
+
+
+def r2(
+    name: str,
+    old: str,
+    new: str,
+    *,
+    file: str = "auto_rules.py",
+    tests: tuple[str, ...] = _REDTEAM2,
+    nth: int | None = None,
+) -> Mutation:
+    return Mutation(f"rt2 {name}", old, new, nth, file, "cli", tests)
+
+
+RT2_MUTATIONS: list[Mutation] = [
+    # ---- R2-1 (W-5): a way out of the limits of the Bash tool
+    r2(
+        "background: a job in the background is not noted",
+        '    if simple.op_after == "&" and st.escape is None:\n        st.escape = "bash.persistence.background"\n',
+        "    pass\n",
+    ),
+    r2(
+        "background: the way out is not raised",
+        "    if st.escape is not None:\n        return _ask(Reason.PERSISTENCE, st.escape)\n",
+        "    pass\n",
+    ),
+    r2(
+        "background: the way out is raised before the floor of the program",
+        "        for simple in simples:\n            _analyze_simple(simple, st)\n    except _Floor as floor:",
+        '        for simple in simples:\n            if simple.op_after == "&":\n                raise _Floor(Reason.PERSISTENCE, "bash.persistence.background")\n            _analyze_simple(simple, st)\n    except _Floor as floor:',
+    ),
+    r2(
+        "setsid: a new session is not noted",
+        'if program == "setsid" and st.escape is None:',
+        "if False:",
+    ),
+    r2(
+        "timeout: the time is not checked",
+        "            if not foreground:\n                _timeout_escape(limit_words[0], kill_after, st)\n",
+        "            pass\n",
+    ),
+    r2(
+        "timeout: --foreground is not read",
+        'foreground = foreground or text == "--foreground"',
+        "foreground = False",
+    ),
+    r2(
+        "timeout: --foreground is read for every option",
+        'foreground = foreground or text == "--foreground"',
+        "foreground = True",
+    ),
+    r2(
+        "timeout: the limit is far too long",
+        "MAX_TIMEOUT_WRAPPER_SECONDS = 300",
+        "MAX_TIMEOUT_WRAPPER_SECONDS = 300000",
+    ),
+    r2(
+        "timeout: the limit is too short",
+        "MAX_TIMEOUT_WRAPPER_SECONDS = 300",
+        "MAX_TIMEOUT_WRAPPER_SECONDS = 5",
+    ),
+    r2(
+        "timeout: zero is not a way out",
+        "if (seconds == 0 or longest > MAX_TIMEOUT_WRAPPER_SECONDS) and st.escape is None:",
+        "if longest > MAX_TIMEOUT_WRAPPER_SECONDS and st.escape is None:",
+    ),
+    r2(
+        "timeout: a time that cannot be read passes",
+        '    seconds = _duration_seconds(duration)\n    if seconds is None:\n        raise _Floor(Reason.UNCLEAR, "bash.unclear.wrapper_option")\n',
+        "    seconds = _duration_seconds(duration)\n    if seconds is None:\n        return\n",
+    ),
+    r2(
+        "timeout: the time after the kill is not added",
+        "        longest += extra\n",
+        "        longest += 0\n",
+    ),
+    r2(
+        "timeout: the time after the kill that cannot be read passes",
+        '        extra = _duration_seconds(text)\n        if extra is None:\n            raise _Floor(Reason.UNCLEAR, "bash.unclear.wrapper_option")\n',
+        "        extra = _duration_seconds(text)\n        if extra is None:\n            continue\n",
+    ),
+    r2(
+        "timeout: -k is not read",
+        'if text in ("-k", "--kill-after") and index + 1 < len(rest):',
+        "if False:",
+    ),
+    r2(
+        "timeout: --kill-after= is not read",
+        'if text.startswith("--kill-after="):',
+        "if False:",
+    ),
+    r2("timeout: a minute is a second", '"m": 60', '"m": 1'),
+    r2("timeout: an hour is a second", '"h": 3600', '"h": 1'),
+    r2("timeout: a day is a second", '"d": 86400', '"d": 1'),
+    # ---- R2-3: the default protected list below the project root
+    r2(
+        "globs: the default list is not taken at any depth",
+        '    return tuple(f"**/{glob}" for glob in DEFAULT_PROTECTED_GLOBS)',
+        "    return DEFAULT_PROTECTED_GLOBS",
+    ),
+    r2(
+        "globs: two stars are not read",
+        '            anywhere = pattern.startswith("**/")',
+        "            anywhere = False",
+    ),
+    r2(
+        "globs: no depth below the root",
+        '            if anywhere and any(fnmatch.fnmatchcase(form, "*/" + pattern) for form in below_root):\n                return True\n',
+        "            pass\n",
+    ),
+    r2(
+        "globs: the path below the root is not tried",
+        "        forms |= below_root\n",
+        "        pass\n",
+    ),
+    # ---- R2-4: the project is the home folder
+    r2(
+        "home: the write rule is not asked",
+        "    hit = env.home_persistence_hit(real)\n    if hit is not None:\n        return _ask(*hit)\n",
+        "    pass\n",
+    ),
+    r2(
+        "home: a hidden name is not a place",
+        '        if below[0].startswith(".") or any(',
+        "        if any(",
+    ),
+    *[
+        r2(
+            f"home: {place} is not a place",
+            '_HOME_PERSISTENCE_DIRS = ("bin", "go/bin", "library", "applications", "appdata")',
+            "_HOME_PERSISTENCE_DIRS = ("
+            + ", ".join(
+                f'"{other}"'
+                for other in ("bin", "go/bin", "library", "applications", "appdata")
+                if other != place
+            )
+            + ")",
+        )
+        for place in ("bin", "go/bin", "library", "applications", "appdata")
+    ],
+    r2(
+        "home: only the folder itself is a place",
+        '            joined == place or joined.startswith(place + "/") for place in _HOME_PERSISTENCE_DIRS',
+        "            joined == place for place in _HOME_PERSISTENCE_DIRS",
+    ),
+    r2(
+        "home: a project below the home folder is not honoured",
+        "            if len(root_parts) > len(home_parts) and parts[: len(root_parts)] == root_parts:\n                return None\n",
+        "            pass\n",
+    ),
+    r2(
+        "home: a folder outside the home folder is a place",
+        "        if len(parts) <= len(home_parts) or parts[: len(home_parts)] != home_parts:\n            return None\n",
+        "        if len(parts) <= len(home_parts):\n            return None\n",
+    ),
+    # ---- W-1: two calls of one message with one id
+    r2(
+        "ids: a repeated id is not another call",
+        "        return any(count > (1 if key == call_id else 0) for key, count in self._open_calls.items())",
+        "        return any(key != call_id for key in self._open_calls)",
+        file="auto_mode.py",
+    ),
+    r2(
+        "ids: the call itself counts as another call",
+        "        return any(count > (1 if key == call_id else 0) for key, count in self._open_calls.items())",
+        "        return any(count > 0 for key, count in self._open_calls.items())",
+        file="auto_mode.py",
+    ),
+    r2(
+        "ids: a call that ended stays open",
+        "            if self._open_calls[event.tool_call_id] <= 0:\n                del self._open_calls[event.tool_call_id]",
+        "            if False:\n                del self._open_calls[event.tool_call_id]",
+        file="auto_mode.py",
+    ),
+    # ---- the limit of the time that a user can write
+    r2(
+        "config: a time above the maximum of the Bash tool is kept",
+        "            and 0 < raw_timeout <= MAX_TIMEOUT_SECONDS\n",
+        "            and 0 < raw_timeout\n",
+        file="config.py",
+        tests=(_CLI_TESTS + "test_config.py",),
+    ),
+    r2(
+        "config: the maximum is one second too low",
+        "            and 0 < raw_timeout <= MAX_TIMEOUT_SECONDS\n",
+        "            and 0 < raw_timeout < MAX_TIMEOUT_SECONDS - 1\n",
+        file="config.py",
+        tests=(_CLI_TESTS + "test_config.py",),
+    ),
+    # ---- W-9: the answer to a question
+    r2(
+        "answer: an answer that is not selected is read",
+        '    if kind != "selected" or not isinstance(option_id, str):\n        return False\n',
+        "    if not isinstance(option_id, str):\n        return False\n",
+        file="permissions.py",
+    ),
+    r2(
+        "answer: an id that is not text is read",
+        '    if kind != "selected" or not isinstance(option_id, str):\n        return False\n    option_id = option_id.strip().lower()\n',
+        '    if kind != "selected":\n        return False\n    option_id = str(option_id).strip().lower()\n',
+        file="permissions.py",
+    ),
+    r2(
+        "answer: an empty id is yes",
+        '    return bool(option_id) and not option_id.startswith("reject")',
+        '    return not option_id.startswith("reject")',
+        file="permissions.py",
+    ),
+    r2(
+        "answer: the id is read with its case",
+        "    option_id = option_id.strip().lower()\n",
+        "    option_id = option_id.strip()\n",
+        file="permissions.py",
+    ),
+    r2(
+        "answer: the id is not stripped",
+        "    option_id = option_id.strip().lower()\n",
+        "    option_id = option_id.lower()\n",
+        file="permissions.py",
+    ),
+    r2(
+        "answer: reject is not read",
+        '    return bool(option_id) and not option_id.startswith("reject")',
+        "    return bool(option_id)",
+        file="permissions.py",
+    ),
+    r2(
+        "answer: a dict is not read",
+        "    if isinstance(outcome, Mapping):\n        kind = outcome.get",
+        "    if False:\n        kind = outcome.get",
+        file="permissions.py",
+    ),
+    # ---- W-2: the settings of Auto are read again for every call
+    r2(
+        "config: the settings of Auto are read once, when the session is built",
+        "        self._get_config = get_config\n",
+        "        self._get_config = (lambda frozen: lambda: frozen)(get_config())\n",
+        file="auto_mode.py",
+    ),
+]
+
+
 def apply(source: str, mutation: Mutation) -> str:
     count = source.count(mutation.old)
     if count == 0:
@@ -2286,7 +2534,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--only", default="", help="run mutations whose name contains this text")
     parser.add_argument("--jobs", type=int, default=4)
     args = parser.parse_args(argv)
-    everything = [*MUTATIONS, *WIRING_MUTATIONS]
+    everything = [*MUTATIONS, *WIRING_MUTATIONS, *RT2_MUTATIONS]
     chosen = [mut for mut in everything if args.only in mut.name]
     if args.list:
         for mut in chosen:

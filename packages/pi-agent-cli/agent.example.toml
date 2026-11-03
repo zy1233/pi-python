@@ -98,8 +98,10 @@ command = "python -m pi_agent_cli"
 # Settings of the `auto` mode. Only this file sets them, never a config inside the project.
 # classifier = "rules"       # "rules" is the one that works. "model" is read, and decides as "rules".
 # extra_roots = []           # absolute folders that count like the project folder
-# protected = []             # more globs that always ask, for example ["deploy/*"]. Built in:
-#                            # .husky/*, .githooks/*, .claude/*, .cursor/*, .mcp.json,
-#                            # .vscode/tasks.json, .github/workflows/*
-# bash_timeout_seconds = 300 # a shell command that Auto let through stops after this time ...
+# protected = []             # more globs that always ask, for example ["deploy/*", "**/secrets/*"].
+#                            # A glob that starts with **/ matches at any depth below the project.
+#                            # Built in, at any depth: .husky/*, .githooks/*, .claude/*, .cursor/*,
+#                            # .mcp.json, .vscode/tasks.json, .github/workflows/*
+# bash_timeout_seconds = 300 # a shell command that Auto let through stops after this time (at most
+#                            # 2147483; a command that leaves the process group asks) ...
 # bash_max_output_mb = 64    # ... or after it has printed this much
