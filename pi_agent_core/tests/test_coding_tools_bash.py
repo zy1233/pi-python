@@ -11,6 +11,7 @@ import pytest
 from pi_agent_core.adapters.langchain_convert import default_convert_to_llm
 from pi_agent_core.agent_loop import run_agent_loop
 from pi_agent_core.coding_tools.bash import (
+    BashLimits,
     BashParams,
     ShellConfig,
     _format_output,
@@ -223,6 +224,18 @@ def test_accumulator_append_after_finish_raises():
         acc.append(b"x")
 
 
+def test_accumulator_counts_every_raw_byte_even_when_the_tail_drops_them():
+    acc = OutputAccumulator(max_lines=2, max_bytes=16)
+    assert acc.total_raw_bytes == 0
+    acc.append(b"a" * 10)
+    assert acc.total_raw_bytes == 10
+    acc.append(b"b\n" * 500)
+    assert acc.total_raw_bytes == 1010
+    assert len(acc.snapshot().content.encode()) < 1010
+    acc.finish()
+    assert acc.total_raw_bytes == 1010
+
+
 # --- bash end-to-end (requires a bash shell) ---
 
 
@@ -395,6 +408,152 @@ def test_shell_config_is_frozen_dataclass():
     assert config.command_transport == "argv"
     with pytest.raises(AttributeError):
         config.shell = "bash"  # type: ignore[misc]
+
+
+# --- limits that a permission layer asks for (BashLimits, limits_for_call) ---
+
+
+def test_bash_limits_default_to_no_limit_and_are_frozen():
+    limits = BashLimits()
+    assert limits.timeout_seconds is None
+    assert limits.max_output_bytes is None
+    with pytest.raises(AttributeError):
+        limits.timeout_seconds = 1.0  # type: ignore[misc]
+
+
+@needs_bash
+async def test_bash_limits_are_asked_once_per_call_with_the_call_id(tmp_path):
+    asked: list[str] = []
+
+    def limits_for_call(tool_call_id: str) -> BashLimits | None:
+        asked.append(tool_call_id)
+        return None
+
+    tool = create_bash_tool(str(tmp_path), limits_for_call=limits_for_call)
+    await tool.execute("call-a", BashParams(command="echo one"))
+    await tool.execute("call-b", BashParams(command="echo two"))
+    assert asked == ["call-a", "call-b"]
+
+
+@needs_bash
+async def test_bash_without_limits_for_call_has_no_limit(tmp_path):
+    tool = create_bash_tool(str(tmp_path))
+    result = await tool.execute("t1", BashParams(command="sleep 0.4; echo done"))
+    assert _text(result) == "done\n"
+
+
+@needs_bash
+async def test_bash_limits_none_means_no_limit(tmp_path):
+    tool = create_bash_tool(str(tmp_path), limits_for_call=lambda _id: None)
+    result = await tool.execute("t1", BashParams(command="sleep 0.4; echo done"))
+    assert _text(result) == "done\n"
+
+
+@needs_bash
+async def test_bash_limit_timeout_stops_a_call_that_sets_no_timeout(tmp_path):
+    tool = create_bash_tool(
+        str(tmp_path), limits_for_call=lambda _id: BashLimits(timeout_seconds=0.5)
+    )
+    start = time.monotonic()
+    with pytest.raises(RuntimeError, match=r"Command timed out after 0\.5 seconds$"):
+        await tool.execute("t1", BashParams(command="sleep 5"))
+    assert time.monotonic() - start < 4
+
+
+@needs_bash
+async def test_bash_limit_timeout_wins_over_a_longer_timeout_from_the_model(tmp_path):
+    tool = create_bash_tool(
+        str(tmp_path), limits_for_call=lambda _id: BashLimits(timeout_seconds=0.5)
+    )
+    with pytest.raises(RuntimeError, match=r"Command timed out after 0\.5 seconds$"):
+        await tool.execute("t1", BashParams(command="sleep 5", timeout=60))
+
+
+@needs_bash
+async def test_bash_shorter_timeout_from_the_model_wins_over_the_limit(tmp_path):
+    tool = create_bash_tool(
+        str(tmp_path), limits_for_call=lambda _id: BashLimits(timeout_seconds=60)
+    )
+    with pytest.raises(RuntimeError, match=r"Command timed out after 0\.5 seconds$"):
+        await tool.execute("t1", BashParams(command="sleep 5", timeout=0.5))
+
+
+@needs_bash
+async def test_bash_a_call_that_ends_before_the_limit_is_not_touched(tmp_path):
+    tool = create_bash_tool(
+        str(tmp_path),
+        limits_for_call=lambda _id: BashLimits(timeout_seconds=30, max_output_bytes=1_000_000),
+    )
+    result = await tool.execute("t1", BashParams(command="echo fine"))
+    assert _text(result) == "fine\n"
+
+
+@needs_bash
+async def test_bash_limit_timeout_value_is_checked_like_the_model_timeout(tmp_path):
+    tool = create_bash_tool(
+        str(tmp_path), limits_for_call=lambda _id: BashLimits(timeout_seconds=0)
+    )
+    with pytest.raises(ValueError, match="Invalid timeout"):
+        await tool.execute("t1", BashParams(command="echo hi"))
+
+
+@needs_bash
+async def test_bash_limit_timeout_kills_the_process_tree(tmp_path):
+    tool = create_bash_tool(
+        str(tmp_path), limits_for_call=lambda _id: BashLimits(timeout_seconds=0.3)
+    )
+    with pytest.raises(RuntimeError, match="Command timed out"):
+        await tool.execute("t1", BashParams(command="(sleep 1 && echo x > marker.txt) & wait"))
+    await asyncio.sleep(1.5)
+    assert not (tmp_path / "marker.txt").exists()
+
+
+@needs_bash
+async def test_bash_output_limit_stops_a_command_that_never_stops_printing(tmp_path):
+    tool = create_bash_tool(
+        str(tmp_path), limits_for_call=lambda _id: BashLimits(max_output_bytes=50_000)
+    )
+    start = time.monotonic()
+    with pytest.raises(RuntimeError) as excinfo:
+        await tool.execute("t1", BashParams(command="yes 0123456789"))
+    assert time.monotonic() - start < 10
+    message = str(excinfo.value)
+    assert message.endswith("Command stopped: its output passed the limit of 48.8KB")
+    assert "0123456789" in message
+
+
+@needs_bash
+async def test_bash_output_limit_leaves_output_under_the_limit_alone(tmp_path):
+    tool = create_bash_tool(
+        str(tmp_path), limits_for_call=lambda _id: BashLimits(max_output_bytes=10_000)
+    )
+    result = await tool.execute("t1", BashParams(command="seq 1 100"))
+    assert _text(result).startswith("1\n2\n")
+
+
+@needs_bash
+async def test_bash_output_limit_counts_the_bytes_that_the_tail_drops(tmp_path):
+    tool = create_bash_tool(
+        str(tmp_path), limits_for_call=lambda _id: BashLimits(max_output_bytes=100_000)
+    )
+    with pytest.raises(RuntimeError, match="Command stopped: its output passed the limit"):
+        await tool.execute("t1", BashParams(command="seq 1 200000"))
+
+
+@needs_bash
+async def test_bash_output_limit_does_not_apply_to_a_call_that_gets_no_limits(tmp_path):
+    seen: list[str] = []
+
+    def limits_for_call(tool_call_id: str) -> BashLimits | None:
+        seen.append(tool_call_id)
+        return BashLimits(max_output_bytes=1_000) if tool_call_id == "limited" else None
+
+    tool = create_bash_tool(str(tmp_path), limits_for_call=limits_for_call)
+    result = await tool.execute("free", BashParams(command="seq 1 2000"))
+    assert "2000" in _text(result)
+    with pytest.raises(RuntimeError, match="Command stopped"):
+        await tool.execute("limited", BashParams(command="seq 1 2000"))
+    assert seen == ["free", "limited"]
 
 
 # --- agent-loop integration (create_coding_tools group incl. bash) ---

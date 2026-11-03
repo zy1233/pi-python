@@ -343,7 +343,7 @@ def make_agent(
     agent = PiAcpAgent(
         stream_fn=model or mock_text_stream,
         home=world.pi_home,
-        config=CliConfig(permission="auto", provider="mock", model_id="mock"),  # type: ignore[arg-type]
+        config=CliConfig(permission="always-approve", provider="mock", model_id="mock"),  # type: ignore[arg-type]
         extensions=list(extensions),
     )
     client = Client()

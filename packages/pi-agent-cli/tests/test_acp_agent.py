@@ -431,12 +431,12 @@ async def test_permission_ask_denies_bash(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_permission_auto_skips_request(tmp_path):
-    agent = _agent(tmp_path, stream_fn=mock_text_stream, permission="auto")
-    client = FakeClient(allow=False)
+async def test_permission_always_approve_skips_request(tmp_path):
+    agent = _agent(tmp_path, stream_fn=_bash_once_stream, permission="always-approve")
+    client = FakeClient(allow=False)  # would refuse, if it were asked
     agent.on_connect(client)
     created = await agent.new_session(cwd=str(tmp_path.resolve()))
-    await agent.prompt(session_id=created.session_id, prompt=[text_block("hi")])
+    await agent.prompt(session_id=created.session_id, prompt=[text_block("run")])
     assert client.permission_calls == []
 
 
@@ -448,7 +448,7 @@ async def test_permission_mode_notification_updates_live_session_policy(tmp_path
     created = await agent.new_session(cwd=str(tmp_path.resolve()))
     await agent.ext_notification(
         "x.ai/yolo_mode_changed",
-        {"permission_mode": "auto"},
+        {"permission_mode": "always-approve"},
     )
     await agent.prompt(session_id=created.session_id, prompt=[text_block("run")])
     assert client.permission_calls == []
@@ -721,7 +721,7 @@ def _agent_with_ext(tmp_path: Path) -> PiAcpAgent:
     return PiAcpAgent(
         stream_fn=mock_text_stream,
         home=tmp_path,
-        config=CliConfig(permission="auto", provider="mock", model_id="mock"),
+        config=CliConfig(permission="always-approve", provider="mock", model_id="mock"),
         extensions=[_cmd_ext],
     )
 
@@ -801,10 +801,11 @@ async def test_slash_command_unknown_falls_through_via_acp(tmp_path):
 # sub-agent makes goes through the same permission layer the session itself uses.
 
 
-def test_workflow_needs_permission_in_ask_mode_only():
+def test_workflow_needs_permission_unless_the_mode_approves_everything():
     workflow = pytest.importorskip("pi_dynamic_workflows.workflow_tool").create_workflow_tool()
     assert needs_permission("ask", workflow.annotations)
-    assert not needs_permission("auto", workflow.annotations)
+    # In ``auto`` the call goes to the Auto rules, which ask about it (it declares nothing).
+    assert needs_permission("auto", workflow.annotations)
     assert not needs_permission("always-approve", workflow.annotations)
 
 
@@ -1002,7 +1003,7 @@ async def test_subagent_write_runs_once_the_user_allows_it(tmp_path, monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_permission_auto_lets_workflow_subagents_run_without_prompts(tmp_path, monkeypatch):
+async def test_always_approve_lets_workflow_subagents_run_without_prompts(tmp_path, monkeypatch):
     target = tmp_path / "a.txt"
     client = _PickyClient(reject={"workflow", "write"})  # would refuse, if it were asked
 
@@ -1012,7 +1013,7 @@ async def test_permission_auto_lets_workflow_subagents_run_without_prompts(tmp_p
         script=_ONE_WRITER,
         args={"paths": [str(target)]},
         client=client,
-        permission="auto",
+        permission="always-approve",
     )
 
     assert client.permission_calls == []

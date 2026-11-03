@@ -1,22 +1,29 @@
 #!/usr/bin/env python3
 # The mutation texts are exact source lines, so they can be long.
 # ruff: noqa: E501
-"""Mutation check for the Auto rules: break one rule at a time; a test must notice each break.
+"""Mutation check for Auto: break one rule or one wiring step at a time; a test must notice each break.
 
-    python scripts/auto_mutation_check.py              # run every mutation (about eight minutes on four cores)
+    python scripts/auto_mutation_check.py              # run every mutation (about twenty minutes on four cores)
     python scripts/auto_mutation_check.py --list       # print the mutations
     python scripts/auto_mutation_check.py --check      # only check that each mutation still applies
     python scripts/auto_mutation_check.py --only floor # run the mutations whose name contains "floor"
+    python scripts/auto_mutation_check.py --only wiring # only the mutations of the wiring (PR 1b)
 
-Each mutation is an exact text replacement in ``auto_rules.py`` (or ``auto_reasons.py``). The
-changed copy of the package goes to a temporary directory and the Auto tests run against it
-(``PYTHONPATH``), so the working tree is never changed. A mutation that no test notices
-"survives" and the script exits with 1: either a test is missing, or the code is dead.
+Each mutation is an exact text replacement in one source file: ``auto_rules.py`` (or
+``auto_reasons.py``) for the rules, and for the wiring ``auto_mode.py``, ``agent.py``,
+``permission_modes.py``, ``permissions.py``, ``config.py``, ``factory.py``, ``headless.py`` of
+``pi_agent_cli``, the Bash tool of ``pi_agent_core``, the harness, and the workflow sub-agent. The
+changed copy of the package goes to a temporary directory and the tests of that mutation run
+against it (``PYTHONPATH``), so the working tree is never changed. A mutation that no test
+notices "survives" and the script exits with 1: either a test is missing, or the code is dead.
 
-The mutations break: each floor rule, the order of the steps, each refusal of the parser (hidden
-commands, unreadable commands, unknown variables), the path logic, the wrappers, the fail-closed
-paths. Run it again after any change to ``auto_rules.py``; a text that no longer matches is an
-error, not a pass.
+The mutations of the rules break: each floor rule, the order of the steps, each refusal of the
+parser (hidden commands, unreadable commands, unknown variables), the path logic, the wrappers,
+the fail-closed paths. The mutations of the wiring (names start with ``wiring``) break: the calls
+of a message running one by one (W-1), each check of the context (W-2), the protected list
+(W-3), the limits of a call that Auto allowed (W-5), the mode on the wire, and the fail-closed
+paths of a session. Run it again after any change to these files; a text that no longer matches
+is an error, not a pass.
 """
 
 from __future__ import annotations
@@ -37,6 +44,14 @@ TESTS = [
     "packages/pi-agent-cli/tests/test_auto_reasons.py",
     "packages/pi-agent-cli/tests/test_auto_corpus.py",
 ]
+# The packages that a mutation can change. The key is the ``package`` of a mutation, and the
+# value is the folder that is copied (its name is the name of the package).
+PACKAGES = {
+    "cli": PACKAGE_DIR / "pi_agent_cli",
+    "core": REPO_ROOT / "pi_agent_core",
+    "harness": REPO_ROOT / "packages" / "pi-agent-harness" / "pi_agent_harness",
+    "workflows": REPO_ROOT / "packages" / "pi-dynamic-workflows" / "pi_dynamic_workflows",
+}
 
 
 @dataclass(frozen=True)
@@ -45,11 +60,27 @@ class Mutation:
     old: str
     new: str
     nth: int | None = None  # which match to change when the text appears more than once
-    file: str = "auto_rules.py"
+    file: str = "auto_rules.py"  # relative to the folder of the package
+    package: str = "cli"  # a key of PACKAGES
+    tests: tuple[str, ...] | None = None  # None: TESTS. A path, or a pytest node id
 
 
 def m(name: str, old: str, new: str, nth: int | None = None, file: str = "auto_rules.py"):
     return Mutation(name, old, new, nth, file)
+
+
+def w(
+    name: str,
+    file: str,
+    old: str,
+    new: str,
+    *,
+    tests: tuple[str, ...],
+    package: str = "cli",
+    nth: int | None = None,
+) -> Mutation:
+    """A mutation of the wiring: its name starts with ``wiring`` and it names its own tests."""
+    return Mutation(f"wiring {name}", old, new, nth, file, package, tests)
 
 
 MUTATIONS: list[Mutation] = [
@@ -216,8 +247,8 @@ MUTATIONS: list[Mutation] = [
     ),
     m(
         "write: floor not applied",
-        "    try:\n        env.path_floor(real)\n    except _Floor as floor:\n        return _ask(floor.reason, floor.rule_id)\n    if env.fs.lexists(real)",
-        "    if env.fs.lexists(real)",
+        "    try:\n        env.path_floor(real)\n    except _Floor as floor:\n        return _ask(floor.reason, floor.rule_id)\n    hit = env.home_persistence_hit(real)",
+        "    hit = env.home_persistence_hit(real)",
     ),
     m(
         "write: overwrite outside git",
@@ -1566,6 +1597,869 @@ MUTATIONS: list[Mutation] = [
 ]
 
 
+# ---------------------------------------------------------------------------------------------
+# The wiring (PR 1b): what the session around the rules has to do. The rules alone are safe only
+# if these hold, so each is broken here and a test has to fail.
+
+_CLI_TESTS = "packages/pi-agent-cli/tests/"
+_WIRING = (_CLI_TESTS + "test_auto_wiring.py",)
+_CHECKS = (_CLI_TESTS + "test_auto_mode_checks.py",)
+_CHECKS_AND_WIRING = (*_CHECKS, *_WIRING)
+_WIRE = (_CLI_TESTS + "test_permission_mode_wire.py",)
+_AUTO_MODE = "auto_mode.py"
+
+WIRING_MUTATIONS: list[Mutation] = [
+    # ---- W-1: the calls of one assistant message run one by one (decide, run, decide, run)
+    w(
+        "one by one: the harness mode is not set",
+        _AUTO_MODE,
+        '            harness.tool_execution = "sequential"\n',
+        "            harness.tool_execution = harness.tool_execution\n",
+        tests=_WIRING,
+    ),
+    w(
+        "one by one: no tool is set to sequential",
+        _AUTO_MODE,
+        "            for tool in harness.get_tools():\n",
+        "            for tool in ():\n",
+        tests=_WIRING,
+    ),
+    w(
+        "one by one: entering Auto does not set it",
+        _AUTO_MODE,
+        "        self._active = True\n        self._apply_sequential(True)\n",
+        "        self._active = True\n",
+        tests=_WIRING,
+    ),
+    w(
+        "one by one: a decision does not set it again",
+        _AUTO_MODE,
+        "        self._apply_sequential(True)\n        if self._start_problems or",
+        "        if self._start_problems or",
+        tests=_WIRING,
+    ),
+    w(
+        "one by one: leaving Auto does not put the harness back",
+        _AUTO_MODE,
+        "        self._active = False\n        self._apply_sequential(False)\n",
+        "        self._active = False\n",
+        tests=_WIRING,
+    ),
+    w(
+        "one by one: leaving Auto keeps the harness mode",
+        _AUTO_MODE,
+        "            harness.tool_execution = self._saved_execution\n",
+        '            harness.tool_execution = "sequential"\n',
+        tests=_WIRING,
+    ),
+    w(
+        "one by one: leaving Auto keeps the tool modes",
+        _AUTO_MODE,
+        "                tool.execution_mode = previous\n",
+        '                tool.execution_mode = "sequential"\n',
+        tests=_WIRING,
+    ),
+    w(
+        "one by one: a call that comes while an earlier call is open does not ask",
+        _AUTO_MODE,
+        "        if not origin and self._other_calls_open(str(event.toolCallId)):",
+        "        if False:",
+        tests=_WIRING,
+    ),
+    w(
+        "one by one: the start of a call is not noted",
+        _AUTO_MODE,
+        "            self._open_calls[event.tool_call_id] += 1",
+        "            pass",
+        tests=_WIRING,
+    ),
+    w(
+        "one by one: the end of a call is not noted",
+        _AUTO_MODE,
+        "            self._open_calls[event.tool_call_id] -= 1\n            if self._open_calls[event.tool_call_id] <= 0:\n                del self._open_calls[event.tool_call_id]",
+        "            pass",
+        tests=_WIRING,
+    ),
+    w(
+        "one by one: a sub-agent call asks while the workflow call is open",
+        _AUTO_MODE,
+        "        if not origin and self._other_calls_open(str(event.toolCallId)):",
+        "        if self._other_calls_open(str(event.toolCallId)):",
+        tests=_WIRING,
+    ),
+    w(
+        "one by one: a gated sub-agent runs its calls together",
+        "subagent.py",
+        '            harness.tool_execution = "sequential"',
+        '            harness.tool_execution = "parallel"',
+        package="workflows",
+        tests=(
+            "packages/pi-dynamic-workflows/tests/test_dynamic_workflows.py::TestSubagentToolCallGate",
+        ),
+    ),
+    w(
+        "one by one: the harness ignores its mode",
+        "agent_harness.py",
+        "            tool_execution=self.tool_execution,",
+        '            tool_execution="parallel",',
+        package="harness",
+        tests=("packages/pi-agent-harness/tests/test_harness_tool_execution.py",),
+    ),
+    # ---- W-2: the context is checked at the start and before each call
+    w(
+        "context: the project folder may be relative",
+        _AUTO_MODE,
+        '    if not is_absolute_folder(ctx.cwd):\n        problems.append("The project folder is not an absolute path.")',
+        '    if False:\n        problems.append("The project folder is not an absolute path.")',
+        tests=_CHECKS_AND_WIRING,
+    ),
+    w(
+        "context: the project folder may be missing",
+        _AUTO_MODE,
+        "    elif not os.path.isdir(ctx.cwd):",
+        "    elif False:",
+        tests=_CHECKS_AND_WIRING,
+    ),
+    w(
+        "context: the home folder may be relative",
+        _AUTO_MODE,
+        "    if not is_absolute_folder(ctx.home_dir):",
+        "    if False:",
+        tests=_CHECKS_AND_WIRING,
+    ),
+    w(
+        "context: the agent home may be relative",
+        _AUTO_MODE,
+        "    if not is_absolute_folder(ctx.pi_home):",
+        "    if False:",
+        tests=_CHECKS_AND_WIRING,
+    ),
+    w(
+        "context: an extra root may be relative",
+        _AUTO_MODE,
+        "        if not is_absolute_folder(root)\n",
+        "        if False\n",
+        tests=_CHECKS_AND_WIRING,
+    ),
+    w(
+        "context: a protected path may be relative",
+        _AUTO_MODE,
+        "    if not all(is_absolute_folder(path) for path in ctx.protected_paths):",
+        "    if False:",
+        tests=_CHECKS_AND_WIRING,
+    ),
+    w(
+        "context: PATH may have a relative entry",
+        _AUTO_MODE,
+        "    if all(is_absolute_folder(entry) for entry in path_value.split(os.pathsep)):\n        return []",
+        "    if True:\n        return []",
+        tests=_CHECKS_AND_WIRING,
+    ),
+    w(
+        "context: an unset PATH is a problem",
+        _AUTO_MODE,
+        "    if path_value is None:\n        return []",
+        "    if False:\n        return []",
+        tests=_CHECKS_AND_WIRING,
+    ),
+    w(
+        "context: the Bash tool may run another shell",
+        _AUTO_MODE,
+        '    if name != "bash":',
+        "    if False:",
+        tests=_CHECKS_AND_WIRING,
+    ),
+    w(
+        "context: bash.exe is not bash",
+        _AUTO_MODE,
+        '    if name.endswith(".exe"):',
+        "    if False:",
+        tests=_CHECKS_AND_WIRING,
+    ),
+    w(
+        "context: a Bash tool with no shell is fine",
+        _AUTO_MODE,
+        '        return ["The Bash tool cannot find a shell to run."]',
+        "        return []",
+        tests=_CHECKS_AND_WIRING,
+    ),
+    w(
+        "context: the problems of the start are not read",
+        _AUTO_MODE,
+        "        if self._start_problems or await asyncio.to_thread(self._live_problems):",
+        "        if await asyncio.to_thread(self._live_problems):",
+        tests=_WIRING,
+    ),
+    w(
+        "context: the problems of PATH and shell are not read before a call",
+        _AUTO_MODE,
+        "        if self._start_problems or await asyncio.to_thread(self._live_problems):",
+        "        if self._start_problems:",
+        tests=_WIRING,
+    ),
+    w(
+        "context: the values of [auto] that cannot be used are not read",
+        _AUTO_MODE,
+        "            *self._get_config().auto.problems,\n",
+        "            *(),\n",
+        tests=_WIRING,
+    ),
+    w(
+        "context: the folders of the session are not checked",
+        _AUTO_MODE,
+        "        return tuple(context_problems(self._make_context()))",
+        "        return ()",
+        tests=_WIRING,
+    ),
+    w(
+        "context: a check that fails is no problem",
+        _AUTO_MODE,
+        '                self._start_problems = ("Auto could not read the state of the session.",)',
+        "                self._start_problems = ()",
+        tests=_WIRING,
+    ),
+    w(
+        "context: a tool is ours by its name",
+        _AUTO_MODE,
+        "            builtin=tool is not None and tool is self._builtin.get(name),",
+        "            builtin=tool is not None and name in self._builtin,",
+        tests=_WIRING,
+    ),
+    w(
+        "context: every tool is ours",
+        _AUTO_MODE,
+        "            builtin=tool is not None and tool is self._builtin.get(name),",
+        "            builtin=True,",
+        tests=_WIRING,
+    ),
+    w(
+        "context: the extra roots are not given to the rules",
+        _AUTO_MODE,
+        "            extra_roots=auto.extra_roots,",
+        "            extra_roots=(),",
+        tests=_WIRING,
+    ),
+    w(
+        "context: the project is always trusted",
+        _AUTO_MODE,
+        "            project_trusted=self._trusted(),",
+        "            project_trusted=True,",
+        tests=_WIRING,
+    ),
+    w(
+        "context: the session is told that the project is always trusted",
+        "agent.py",
+        "            trusted=lambda: state.trust.trusted,\n            limits=limits,",
+        "            trusted=lambda: True,\n            limits=limits,",
+        tests=_WIRING,
+    ),
+    w(
+        "context: the session is told that the project is never trusted",
+        "agent.py",
+        "            trusted=lambda: state.trust.trusted,\n            limits=limits,",
+        "            trusted=lambda: False,\n            limits=limits,",
+        tests=_WIRING,
+    ),
+    # ---- fail closed: an error, a timeout, a state that cannot be read, an origin that is not known
+    w(
+        "fail closed: a timeout allows",
+        _AUTO_MODE,
+        '            verdict = _ask(Reason.CHECKER_UNAVAILABLE, "session.timeout")',
+        '            verdict = AutoVerdict(Outcome.ALLOW, "rule", Reason.CHECKER_UNAVAILABLE, "x")',
+        tests=_WIRING,
+    ),
+    w(
+        "fail closed: an error allows",
+        _AUTO_MODE,
+        '            verdict = _ask(Reason.INTERNAL_ERROR, "session.error")',
+        '            verdict = AutoVerdict(Outcome.ALLOW, "rule", Reason.INTERNAL_ERROR, "x")',
+        tests=_WIRING,
+    ),
+    w(
+        "fail closed: an origin that is not a sub-agent is judged",
+        _AUTO_MODE,
+        '            if not isinstance(origin, Mapping) or origin.get("kind") != "subagent":',
+        "            if False:",
+        tests=_WIRING,
+    ),
+    w(
+        "fail closed: a sub-agent without a folder is judged",
+        _AUTO_MODE,
+        "            if not isinstance(cwd, str) or not cwd:",
+        "            if False:",
+        tests=_WIRING,
+    ),
+    w(
+        "fail closed: a session without Auto state allows",
+        "agent.py",
+        "                auto_reason = Reason.INTERNAL_ERROR  # no Auto state for the session: ask",
+        "                return None",
+        tests=_WIRING,
+    ),
+    w(
+        "fail closed: every verdict allows",
+        "agent.py",
+        "                if verdict.allows:\n                    return None",
+        "                if True:\n                    return None",
+        tests=_WIRING,
+    ),
+    w(
+        "fail closed: Auto does not decide in its own mode",
+        "agent.py",
+        '        auto_reason: Reason | None = None\n        if mode == "auto":',
+        "        auto_reason: Reason | None = None\n        if False:",
+        tests=_WIRING,
+    ),
+    w(
+        "fail closed: the title does not say why Auto asks",
+        "agent.py",
+        "            auto_reason=auto_reason,\n        )\n        # One prompt at a time",
+        "            auto_reason=None,\n        )\n        # One prompt at a time",
+        tests=_WIRING,
+    ),
+    w(
+        "fail closed: Auto never asks, as before",
+        "permissions.py",
+        '    if mode == "always-approve":\n        return False',
+        '    if mode in ("always-approve", "auto"):\n        return False',
+        tests=_WIRING,
+    ),
+    # ---- W-3: the protected list, one entry at a time, and what must stay free
+    *[
+        w(
+            f"protected: {entry} is not on the list",
+            "auto_rules.py",
+            f'    "{entry}",\n',
+            "",
+            tests=_WIRING,
+        )
+        for entry in (
+            ".husky/*",
+            ".githooks/*",
+            ".claude/*",
+            ".cursor/*",
+            ".mcp.json",
+            ".vscode/tasks.json",
+            ".github/workflows/*",
+        )
+    ],
+    *[
+        w(
+            f"protected: {entry} is on the list",
+            "auto_rules.py",
+            '    ".github/workflows/*",\n)',
+            f'    ".github/workflows/*",\n    "{entry}",\n)',
+            tests=_WIRING,
+        )
+        for entry in ("Makefile", "package.json", "conftest.py")
+    ],
+    w(
+        "protected: the list is not given to the rules",
+        _AUTO_MODE,
+        "            protected_globs=(*default_protected_globs(), *auto.protected),",
+        "            protected_globs=(*auto.protected,),",
+        tests=_WIRING,
+    ),
+    w(
+        "protected: the globs of the user are not given to the rules",
+        _AUTO_MODE,
+        "            protected_globs=(*default_protected_globs(), *auto.protected),",
+        "            protected_globs=default_protected_globs(),",
+        tests=_WIRING,
+    ),
+    # ---- W-5: limits for a call that Auto allowed, and only for that call
+    w(
+        "limits: a call that asks gets limits too",
+        _AUTO_MODE,
+        '        if verdict.allows and name == "bash" and not origin:',
+        '        if name == "bash" and not origin:',
+        tests=_WIRING,
+    ),
+    w(
+        "limits: no time limit",
+        _AUTO_MODE,
+        "            timeout_seconds=auto.bash_timeout_seconds,",
+        "            timeout_seconds=None,",
+        tests=_WIRING,
+    ),
+    w(
+        "limits: no output limit",
+        _AUTO_MODE,
+        "            max_output_bytes=auto.bash_max_output_mb * 1024 * 1024,",
+        "            max_output_bytes=None,",
+        tests=_WIRING,
+    ),
+    w(
+        "limits: a limit is not taken",
+        _AUTO_MODE,
+        "        return self._held.pop(tool_call_id, None)",
+        "        return self._held.get(tool_call_id)",
+        tests=_CHECKS,
+    ),
+    w(
+        "limits: the registry grows without end",
+        _AUTO_MODE,
+        "        while len(self._held) > _MAX_LIMITS_HELD:",
+        "        while False:",
+        tests=_CHECKS,
+    ),
+    w(
+        "limits: the session does not give them to the Bash tool",
+        "agent.py",
+        "            bash_limits=limits.take,",
+        "            bash_limits=None,",
+        tests=_WIRING,
+    ),
+    w(
+        "limits: the factory does not give them to the Bash tool",
+        "factory.py",
+        "        limits_for_call=bash_limits,",
+        "        limits_for_call=None,",
+        tests=_WIRING,
+    ),
+    w(
+        "limits: the longer timeout wins",
+        "coding_tools/bash.py",
+        "timeout = limit_timeout if timeout is None else min(timeout, limit_timeout)",
+        "timeout = limit_timeout if timeout is None else max(timeout, limit_timeout)",
+        package="core",
+        tests=("pi_agent_core/tests/test_coding_tools_bash.py",),
+    ),
+    w(
+        "limits: the output limit is not looked at",
+        "coding_tools/bash.py",
+        "                if max_output is not None and output.total_raw_bytes > max_output:",
+        "                if max_output is not None and output.total_raw_bytes > max_output + 5_000_000:",
+        package="core",
+        tests=("pi_agent_core/tests/test_coding_tools_bash.py",),
+    ),
+    w(
+        "limits: the output limit counts what the tail keeps",
+        "coding_tools/output_accumulator.py",
+        "        self._total_raw_bytes += len(data)",
+        "        self._total_raw_bytes = len(data)",
+        package="core",
+        tests=("pi_agent_core/tests/test_coding_tools_bash.py",),
+    ),
+    w(
+        "limits: the default time limit is not 300 seconds",
+        "config.py",
+        "DEFAULT_AUTO_BASH_TIMEOUT_SECONDS = 300.0",
+        "DEFAULT_AUTO_BASH_TIMEOUT_SECONDS = 3000.0",
+        tests=(_CLI_TESTS + "test_config.py",),
+    ),
+    w(
+        "limits: the default output limit is not 64 MB",
+        "config.py",
+        "DEFAULT_AUTO_BASH_MAX_OUTPUT_MB = 64",
+        "DEFAULT_AUTO_BASH_MAX_OUTPUT_MB = 640",
+        tests=(_CLI_TESTS + "test_config.py",),
+    ),
+    # ---- the mode on the wire, and the old items of the pager
+    w(
+        "wire: always-approve can be chosen with the standard items",
+        "permission_modes.py",
+        'SELECTABLE_MODES: tuple[PermissionMode, ...] = ("ask", "auto")',
+        'SELECTABLE_MODES: tuple[PermissionMode, ...] = ("ask", "auto", "always-approve")',
+        tests=_WIRE,
+    ),
+    w(
+        "wire: a session in always-approve does not list it",
+        "permission_modes.py",
+        "    if current not in modes:",
+        "    if False:",
+        tests=_WIRE,
+    ),
+    w(
+        "wire: a flag that is false sets the mode",
+        "permission_modes.py",
+        '    if meta.get("yoloMode") is True:',
+        '    if meta.get("yoloMode") is not None:',
+        tests=_WIRE,
+    ),
+    w(
+        "wire: autoMode wins over yoloMode",
+        "permission_modes.py",
+        '    if meta.get("yoloMode") is True:\n        return "always-approve"\n    if meta.get("autoMode") is True:\n        return "auto"',
+        '    if meta.get("autoMode") is True:\n        return "auto"\n    if meta.get("yoloMode") is True:\n        return "always-approve"',
+        tests=_WIRE,
+    ),
+    w(
+        "wire: the notification takes any value",
+        "permission_modes.py",
+        "    if normalized not in _VALID:",
+        "    if False:",
+        tests=_WIRE,
+    ),
+    w(
+        "wire: the mode option takes any value",
+        "agent.py",
+        '            raise RequestError.invalid_params({**detail, "reason": "unknown mode"})',
+        "            return",
+        tests=_WIRE,
+    ),
+    w(
+        "wire: the notification does not set the start mode",
+        "agent.py",
+        "        self._config = replace(self._config, permission=mode)",
+        "        pass",
+        tests=_WIRE,
+    ),
+    w(
+        "wire: a mode that is set again says its entry message again",
+        "agent.py",
+        "            if registered and mode == previous:\n                return False",
+        "            if False:\n                return False",
+        tests=_WIRE,
+    ),
+    w(
+        "wire: switching to Auto does not start it",
+        "agent.py",
+        '            if mode == "auto" and auto is not None:\n                await auto.enter()',
+        "            if False:\n                pass",
+        tests=_WIRING + _WIRE,
+    ),
+    w(
+        "wire: leaving Auto does not stop it",
+        "agent.py",
+        '            if mode != "auto" and auto is not None:\n                auto.leave()',
+        "            if False:\n                pass",
+        tests=_WIRING + _WIRE,
+    ),
+    w(
+        "wire: a session that starts in Auto does not start it",
+        "agent.py",
+        '        if mode == "auto":\n            await auto.enter()\n        return mode',
+        "        return mode",
+        tests=_WIRING + _WIRE,
+    ),
+    w(
+        "wire: a closed session keeps its mode",
+        "agent.py",
+        "        self._session_modes.pop(session_id, None)\n        self._autos.pop(session_id, None)",
+        "        self._autos.pop(session_id, None)",
+        tests=_WIRE,
+    ),
+    w(
+        "wire: a session that is not in Auto does not say what Auto cannot work with",
+        "agent.py",
+        "        elif self._config.auto.problems:",
+        "        elif False:",
+        tests=_WIRING,
+    ),
+    w(
+        "wire: headless runs ask in Auto",
+        "headless.py",
+        '    config = replace(load_config(home_path), permission="always-approve")',
+        '    config = replace(load_config(home_path), permission="auto")',
+        tests=(_CLI_TESTS + "test_headless.py",),
+    ),
+    # ---- the values of [auto]
+    w(
+        "config: a protected entry that is not text is dropped without a word",
+        "config.py",
+        '                problems.append("An entry of protected in [auto] is not text.")',
+        "                pass",
+        tests=(_CLI_TESTS + "test_config.py",),
+    ),
+    w(
+        "config: protected that is not a list is dropped without a word",
+        "config.py",
+        '        problems.append("protected in [auto] must be a list of globs.")',
+        "        pass",
+        tests=(_CLI_TESTS + "test_config.py",),
+    ),
+    w(
+        "config: a permission that is not known becomes auto",
+        "config.py",
+        '        )\n        permission = "ask"',
+        '        )\n        permission = "auto"',
+        tests=(_CLI_TESTS + "test_config.py",),
+    ),
+    # ---- W-4: what the user is told about the limits of Auto
+    w(
+        "message: the entry message does not say that Auto is not a sandbox",
+        _AUTO_MODE,
+        '    "grep, find, ls, fetch_url, web_search). A sandbox is the boundary, not Auto. "\n',
+        '    "grep, find, ls, fetch_url, web_search). "\n',
+        tests=_CHECKS,
+    ),
+    w(
+        "message: the entry message does not say that fetch_url is not guarded",
+        _AUTO_MODE,
+        '"grep, find, ls, fetch_url, web_search). A sandbox',
+        '"grep, find, ls, web_search). A sandbox',
+        tests=_CHECKS,
+    ),
+    w(
+        "message: the entry message does not say that Auto never refuses",
+        _AUTO_MODE,
+        'Auto never refuses a call by itself: "\n    "you can always say yes. ',
+        'Auto never refuses a call by itself: "\n    "',
+        tests=_CHECKS,
+    ),
+]
+
+
+# ---------------------------------------------------------------------------------------------
+# Round 2 of the red team (the wiring and the rules together). Names start with ``rt2``. Each
+# mutation breaks one of the fixes of that round; the tests are the ones of the round, the
+# rules tests, and the corpus.
+
+_REDTEAM2 = (_CLI_TESTS + "test_auto_wiring_redteam.py", *TESTS)
+
+
+def r2(
+    name: str,
+    old: str,
+    new: str,
+    *,
+    file: str = "auto_rules.py",
+    tests: tuple[str, ...] = _REDTEAM2,
+    nth: int | None = None,
+) -> Mutation:
+    return Mutation(f"rt2 {name}", old, new, nth, file, "cli", tests)
+
+
+RT2_MUTATIONS: list[Mutation] = [
+    # ---- R2-1 (W-5): a way out of the limits of the Bash tool
+    r2(
+        "background: a job in the background is not noted",
+        '    if simple.op_after == "&" and st.escape is None:\n        st.escape = "bash.persistence.background"\n',
+        "    pass\n",
+    ),
+    r2(
+        "background: the way out is not raised",
+        "    if st.escape is not None:\n        return _ask(Reason.PERSISTENCE, st.escape)\n",
+        "    pass\n",
+    ),
+    r2(
+        "background: the way out is raised before the floor of the program",
+        "        for simple in simples:\n            _analyze_simple(simple, st)\n    except _Floor as floor:",
+        '        for simple in simples:\n            if simple.op_after == "&":\n                raise _Floor(Reason.PERSISTENCE, "bash.persistence.background")\n            _analyze_simple(simple, st)\n    except _Floor as floor:',
+    ),
+    r2(
+        "setsid: a new session is not noted",
+        'if program == "setsid" and st.escape is None:',
+        "if False:",
+    ),
+    r2(
+        "timeout: the time is not checked",
+        "            if not foreground:\n                _timeout_escape(limit_words[0], kill_after, st)\n",
+        "            pass\n",
+    ),
+    r2(
+        "timeout: --foreground is not read",
+        'foreground = foreground or text == "--foreground"',
+        "foreground = False",
+    ),
+    r2(
+        "timeout: --foreground is read for every option",
+        'foreground = foreground or text == "--foreground"',
+        "foreground = True",
+    ),
+    r2(
+        "timeout: the limit is far too long",
+        "MAX_TIMEOUT_WRAPPER_SECONDS = 300",
+        "MAX_TIMEOUT_WRAPPER_SECONDS = 300000",
+    ),
+    r2(
+        "timeout: the limit is too short",
+        "MAX_TIMEOUT_WRAPPER_SECONDS = 300",
+        "MAX_TIMEOUT_WRAPPER_SECONDS = 5",
+    ),
+    r2(
+        "timeout: zero is not a way out",
+        "if (seconds == 0 or longest > MAX_TIMEOUT_WRAPPER_SECONDS) and st.escape is None:",
+        "if longest > MAX_TIMEOUT_WRAPPER_SECONDS and st.escape is None:",
+    ),
+    r2(
+        "timeout: a time that cannot be read passes",
+        '    seconds = _duration_seconds(duration)\n    if seconds is None:\n        raise _Floor(Reason.UNCLEAR, "bash.unclear.wrapper_option")\n',
+        "    seconds = _duration_seconds(duration)\n    if seconds is None:\n        return\n",
+    ),
+    r2(
+        "timeout: the time after the kill is not added",
+        "        longest += extra\n",
+        "        longest += 0\n",
+    ),
+    r2(
+        "timeout: the time after the kill that cannot be read passes",
+        '        extra = _duration_seconds(text)\n        if extra is None:\n            raise _Floor(Reason.UNCLEAR, "bash.unclear.wrapper_option")\n',
+        "        extra = _duration_seconds(text)\n        if extra is None:\n            continue\n",
+    ),
+    r2(
+        "timeout: -k is not read",
+        'if text in ("-k", "--kill-after") and index + 1 < len(rest):',
+        "if False:",
+    ),
+    r2(
+        "timeout: --kill-after= is not read",
+        'if text.startswith("--kill-after="):',
+        "if False:",
+    ),
+    r2("timeout: a minute is a second", '"m": 60', '"m": 1'),
+    r2("timeout: an hour is a second", '"h": 3600', '"h": 1'),
+    r2("timeout: a day is a second", '"d": 86400', '"d": 1'),
+    # ---- R2-2: git reads the config of the repository
+    r2(
+        "git: a git read is not project code",
+        "        # In a project that nobody vouched for, that file is code of the project.\n        st.project_code = True\n",
+        "        # In a project that nobody vouched for, that file is code of the project.\n        pass\n",
+    ),
+    r2(
+        "git: the version of git is project code",
+        '    if sub != "version":  # only ``git version`` reads no repository setting',
+        "    if True:",
+    ),
+    # ---- R2-3: the default protected list below the project root
+    r2(
+        "globs: the default list is not taken at any depth",
+        '    return tuple(f"**/{glob}" for glob in DEFAULT_PROTECTED_GLOBS)',
+        "    return DEFAULT_PROTECTED_GLOBS",
+    ),
+    r2(
+        "globs: two stars are not read",
+        '            anywhere = pattern.startswith("**/")',
+        "            anywhere = False",
+    ),
+    r2(
+        "globs: no depth below the root",
+        '            if anywhere and any(fnmatch.fnmatchcase(form, "*/" + pattern) for form in below_root):\n                return True\n',
+        "            pass\n",
+    ),
+    r2(
+        "globs: the path below the root is not tried",
+        "        forms |= below_root\n",
+        "        pass\n",
+    ),
+    # ---- R2-4: the project is the home folder
+    r2(
+        "home: the write rule is not asked",
+        "    hit = env.home_persistence_hit(real)\n    if hit is not None:\n        return _ask(*hit)\n",
+        "    pass\n",
+    ),
+    r2(
+        "home: a hidden name is not a place",
+        '        if below[0].startswith(".") or any(',
+        "        if any(",
+    ),
+    *[
+        r2(
+            f"home: {place} is not a place",
+            '_HOME_PERSISTENCE_DIRS = ("bin", "go/bin", "library", "applications", "appdata")',
+            "_HOME_PERSISTENCE_DIRS = ("
+            + ", ".join(
+                f'"{other}"'
+                for other in ("bin", "go/bin", "library", "applications", "appdata")
+                if other != place
+            )
+            + ")",
+        )
+        for place in ("bin", "go/bin", "library", "applications", "appdata")
+    ],
+    r2(
+        "home: only the folder itself is a place",
+        '            joined == place or joined.startswith(place + "/") for place in _HOME_PERSISTENCE_DIRS',
+        "            joined == place for place in _HOME_PERSISTENCE_DIRS",
+    ),
+    r2(
+        "home: a project below the home folder is not honoured",
+        "            if len(root_parts) > len(home_parts) and parts[: len(root_parts)] == root_parts:\n                return None\n",
+        "            pass\n",
+    ),
+    r2(
+        "home: a folder outside the home folder is a place",
+        "        if len(parts) <= len(home_parts) or parts[: len(home_parts)] != home_parts:\n            return None\n",
+        "        if len(parts) <= len(home_parts):\n            return None\n",
+    ),
+    # ---- W-1: two calls of one message with one id
+    r2(
+        "ids: a repeated id is not another call",
+        "        return any(count > (1 if key == call_id else 0) for key, count in self._open_calls.items())",
+        "        return any(key != call_id for key in self._open_calls)",
+        file="auto_mode.py",
+    ),
+    r2(
+        "ids: the call itself counts as another call",
+        "        return any(count > (1 if key == call_id else 0) for key, count in self._open_calls.items())",
+        "        return any(count > 0 for key, count in self._open_calls.items())",
+        file="auto_mode.py",
+    ),
+    r2(
+        "ids: a call that ended stays open",
+        "            if self._open_calls[event.tool_call_id] <= 0:\n                del self._open_calls[event.tool_call_id]",
+        "            if False:\n                del self._open_calls[event.tool_call_id]",
+        file="auto_mode.py",
+    ),
+    # ---- the limit of the time that a user can write
+    r2(
+        "config: a time above the maximum of the Bash tool is kept",
+        "            and 0 < raw_timeout <= MAX_TIMEOUT_SECONDS\n",
+        "            and 0 < raw_timeout\n",
+        file="config.py",
+        tests=(_CLI_TESTS + "test_config.py",),
+    ),
+    r2(
+        "config: the maximum is one second too low",
+        "            and 0 < raw_timeout <= MAX_TIMEOUT_SECONDS\n",
+        "            and 0 < raw_timeout < MAX_TIMEOUT_SECONDS - 1\n",
+        file="config.py",
+        tests=(_CLI_TESTS + "test_config.py",),
+    ),
+    # ---- W-9: the answer to a question
+    r2(
+        "answer: an answer that is not selected is read",
+        '    if kind != "selected" or not isinstance(option_id, str):\n        return False\n',
+        "    if not isinstance(option_id, str):\n        return False\n",
+        file="permissions.py",
+    ),
+    r2(
+        "answer: an id that is not text is read",
+        '    if kind != "selected" or not isinstance(option_id, str):\n        return False\n    option_id = option_id.strip().lower()\n',
+        '    if kind != "selected":\n        return False\n    option_id = str(option_id).strip().lower()\n',
+        file="permissions.py",
+    ),
+    r2(
+        "answer: an empty id is yes",
+        '    return bool(option_id) and not option_id.startswith("reject")',
+        '    return not option_id.startswith("reject")',
+        file="permissions.py",
+    ),
+    r2(
+        "answer: the id is read with its case",
+        "    option_id = option_id.strip().lower()\n",
+        "    option_id = option_id.strip()\n",
+        file="permissions.py",
+    ),
+    r2(
+        "answer: the id is not stripped",
+        "    option_id = option_id.strip().lower()\n",
+        "    option_id = option_id.lower()\n",
+        file="permissions.py",
+    ),
+    r2(
+        "answer: reject is not read",
+        '    return bool(option_id) and not option_id.startswith("reject")',
+        "    return bool(option_id)",
+        file="permissions.py",
+    ),
+    r2(
+        "answer: a dict is not read",
+        "    if isinstance(outcome, Mapping):\n        kind = outcome.get",
+        "    if False:\n        kind = outcome.get",
+        file="permissions.py",
+    ),
+    # ---- W-2: the settings of Auto are read again for every call
+    r2(
+        "config: the settings of Auto are read once, when the session is built",
+        "        self._get_config = get_config\n",
+        "        self._get_config = (lambda frozen: lambda: frozen)(get_config())\n",
+        file="auto_mode.py",
+    ),
+]
+
+
 def apply(source: str, mutation: Mutation) -> str:
     count = source.count(mutation.old)
     if count == 0:
@@ -1580,30 +2474,66 @@ def apply(source: str, mutation: Mutation) -> str:
     return source[:position] + mutation.new + source[position + len(mutation.old) :]
 
 
-def run_one(mutation: Mutation, base: Path, work: Path) -> tuple[str, bool, str]:
+def tests_of(mutation: Mutation) -> list[str]:
+    return list(mutation.tests) if mutation.tests is not None else list(TESTS)
+
+
+def _in_copy(test: str, base: Path, copy: Path) -> str:
+    """A test that lies in the package that is changed is read from the copy: pytest would
+    otherwise import the real file, and refuse the copy of the package as the wrong one."""
+    path, separator, node = test.partition("::")
+    try:
+        relative = (REPO_ROOT / path).relative_to(base)
+    except ValueError:
+        return test
+    return str(copy / relative) + separator + node
+
+
+def run_one(mutation: Mutation, work: Path) -> tuple[str, bool, str]:
     """Returns ``(name, killed, detail)``."""
+    base = PACKAGES[mutation.package]
     directory = Path(tempfile.mkdtemp(prefix="auto-mut-", dir=work))
-    package = directory / "pi_agent_cli"
+    package = directory / base.name
     shutil.copytree(base, package, ignore=shutil.ignore_patterns("__pycache__"))
     target = package / mutation.file
     original = target.read_text(encoding="utf-8")
     mutated = apply(original, mutation)
     compile(mutated, str(target), "exec")  # a mutation must stay valid Python
     target.write_text(mutated, encoding="utf-8")
+    if mutation.package == "core":
+        # ``pi_agent_core`` lies in the root of the repository, which pytest puts first on
+        # ``sys.path``. Import the copy before that, so every later import finds it.
+        (directory / "sitecustomize.py").write_text(
+            "import importlib\nimportlib.import_module('pi_agent_core')\n", encoding="utf-8"
+        )
     env = {"PYTHONPATH": str(directory), "PATH": __import__("os").environ.get("PATH", "")}
     env["HOME"] = str(directory)
+    tests = [_in_copy(test, base, package) for test in tests_of(mutation)]
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", "-x", "-q", "-p", "no:cacheprovider", *TESTS],
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-x",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "-o",
+            "asyncio_mode=auto",
+            *tests,
+        ],
         cwd=REPO_ROOT,
         env=env,
         capture_output=True,
         text=True,
-        timeout=300,
+        timeout=600,
     )
     shutil.rmtree(directory, ignore_errors=True)
     detail = ""
     if result.returncode != 0:
-        failed = [line for line in result.stdout.splitlines() if line.startswith("FAILED")]
+        failed = [
+            line for line in result.stdout.splitlines() if line.startswith(("FAILED", "ERROR"))
+        ]
         detail = failed[0][:150] if failed else result.stdout.strip().splitlines()[-1][:150]
     return mutation.name, result.returncode != 0, detail
 
@@ -1615,8 +2545,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--only", default="", help="run mutations whose name contains this text")
     parser.add_argument("--jobs", type=int, default=4)
     args = parser.parse_args(argv)
-    chosen = [mut for mut in MUTATIONS if args.only in mut.name]
-    base = PACKAGE_DIR / "pi_agent_cli"
+    everything = [*MUTATIONS, *WIRING_MUTATIONS, *RT2_MUTATIONS]
+    chosen = [mut for mut in everything if args.only in mut.name]
     if args.list:
         for mut in chosen:
             print(mut.name)
@@ -1624,10 +2554,10 @@ def main(argv: list[str] | None = None) -> int:
     problems = []
     for mut in chosen:
         try:
-            apply((base / mut.file).read_text(encoding="utf-8"), mut)
-        except ValueError as error:
+            apply((PACKAGES[mut.package] / mut.file).read_text(encoding="utf-8"), mut)
+        except (ValueError, OSError) as error:
             problems.append(str(error))
-    names = [mut.name for mut in MUTATIONS]
+    names = [mut.name for mut in everything]
     problems += [f"{name}: name used twice" for name in set(names) if names.count(name) > 1]
     if problems:
         print("\n".join(problems))
@@ -1635,8 +2565,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.check:
         print(f"{len(chosen)} mutations apply")
         return 0
+    # The tests of every chosen mutation must pass before any change, in one run.
+    baseline_tests = sorted({test.partition("::")[0] for mut in chosen for test in tests_of(mut)})
     baseline = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *TESTS],
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *baseline_tests],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -1649,7 +2581,7 @@ def main(argv: list[str] | None = None) -> int:
         tempfile.TemporaryDirectory(prefix="auto-mut-work-") as tmp,
         ThreadPoolExecutor(max_workers=args.jobs) as pool,
     ):
-        futures = [pool.submit(run_one, mut, base, Path(tmp)) for mut in chosen]
+        futures = [pool.submit(run_one, mut, Path(tmp)) for mut in chosen]
         for future in futures:
             name, killed, detail = future.result()
             print(

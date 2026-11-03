@@ -117,7 +117,9 @@ fn use_cli_agent(python: &str) {
 
 /// The scripted agent of the tool tests (`tests/_tool_agent.py`): the real stdio loop with an LLM
 /// whose first turn calls one tool. `call` is `{"name": ..., "arguments": {...}}`; without it the
-/// call is a `bash` command that records its pid in `pidfile` and then sleeps.
+/// call is a `bash` command that records its pid in `pidfile` and then sleeps. `permission` is the
+/// agent's mode: `ask` for the tests about the question, `always-approve` when nobody answers. Not
+/// `auto`: its rules cannot prove that `bash` command, so Auto asks about it.
 fn use_tool_agent(python: &str, permission: &str, call: Option<serde_json::Value>, pidfile: &Path) {
     let script = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../../packages/pi-agent-cli/tests/_tool_agent.py");
@@ -883,7 +885,7 @@ async fn cancel_ends_a_running_tool_as_cancelled_and_reaps_it() {
     let Some(python) = python() else { return };
     let cwd = tempfile::tempdir().unwrap();
     let pidfile = cwd.path().join("tool.pid");
-    use_tool_agent(&python, "auto", None, &pidfile);
+    use_tool_agent(&python, "always-approve", None, &pidfile);
 
     let live = Live::start(Answer::Cancelled).await;
     let session = new_session(&live.tx, cwd.path()).await.session_id;
@@ -995,7 +997,7 @@ async fn an_agent_that_dies_mid_turn_ends_the_requests_and_fires_cancel() {
     let Some(python) = python() else { return };
     let cwd = tempfile::tempdir().unwrap();
     let pidfile = cwd.path().join("tool.pid");
-    use_tool_agent(&python, "auto", None, &pidfile);
+    use_tool_agent(&python, "always-approve", None, &pidfile);
 
     let mut live = Live::start(Answer::Cancelled).await;
     let session = new_session(&live.tx, cwd.path()).await.session_id;

@@ -146,7 +146,7 @@ async def _open_session(
     agent = PiAcpAgent(
         stream_fn=mock_text_stream,
         home=world.pi_home,
-        config=config if config is not None else CliConfig(permission="auto"),
+        config=config if config is not None else CliConfig(permission="always-approve"),
         extensions=extensions,
     )
     client = _RecordingClient()
@@ -195,7 +195,7 @@ async def test_the_untrusted_project_notice_and_the_failure_notice_both_arrive(w
     (shipped / "from_repo.py").write_text("def activate(pi):\n    pass\n", encoding="utf-8")
 
     # ``never``: an untrusted project, settled without a question (this client answers none).
-    config = CliConfig(permission="auto", default_project_trust="never")
+    config = CliConfig(permission="always-approve", default_project_trust="never")
     client = await _open_session(world, [broken_extension], config)
 
     text = "\n".join(client.agent_messages())

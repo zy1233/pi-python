@@ -44,6 +44,7 @@ from pi_agent_core.types import (
     StreamOptions,
     TextDeltaEvent,
     ThinkingLevel,
+    ToolExecutionMode,
     TurnEndEvent,
     TurnStartEvent,
 )
@@ -276,6 +277,11 @@ class AgentHarness:
         )
         self.max_turns = max_turns
         self.tool_timeout = tool_timeout
+        # How the calls of one assistant message run. ``"parallel"`` decides every call (the
+        # ``tool_call`` hooks run) before it starts any, so a hook judges a later call on the
+        # files as they were before an earlier call changed them. A caller that judges calls by
+        # the files sets ``"sequential"``: decide, run, decide, run. Read when a run starts.
+        self.tool_execution: ToolExecutionMode = "parallel"
         self.compaction = (
             compaction
             if isinstance(compaction, CompactionSettings)
@@ -1340,6 +1346,7 @@ class AgentHarness:
             ),
             before_tool_call=before_tool_call,
             after_tool_call=after_tool_call,
+            tool_execution=self.tool_execution,
             thinking_level=(
                 None if turn_state.thinking_level == "off" else turn_state.thinking_level
             ),
@@ -1560,6 +1567,19 @@ class AgentHarness:
 
     async def set_active_tools(self, tool_names: list[str]) -> None:
         await self.set_tools(list(self._tools.values()), tool_names)
+
+    def get_tool(self, name: str) -> AgentTool | None:
+        """The tool object that a call to *name* would run, or ``None``.
+
+        It is the object itself, not a copy, so a caller can tell whether it is the one it knows
+        (``is``): a name says nothing, because an extension may register a tool under the name
+        of a built-in one and replace it.
+        """
+        return self._tools.get(name)
+
+    def get_tools(self) -> list[AgentTool]:
+        """The tool objects themselves, active or not, as ``get_tool`` returns them."""
+        return list(self._tools.values())
 
     def get_resources(self) -> AgentHarnessResources:
         return self.resources.model_copy(deep=True)

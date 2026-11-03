@@ -68,7 +68,7 @@ class World:
         self.project.mkdir()
         self.agents: list[PiAcpAgent] = []
 
-    def agent(self, llm: Any, client: Client, *, permission: str = "auto") -> PiAcpAgent:
+    def agent(self, llm: Any, client: Client, *, permission: str = "always-approve") -> PiAcpAgent:
         agent = PiAcpAgent(
             stream_fn=llm,
             home=self.tmp_path / "pi-home",
@@ -124,7 +124,12 @@ async def tool_results(agent: PiAcpAgent, session_id: str) -> list[str]:
 
 
 async def open_session(
-    world: World, llm: Any, servers: list[Any], *, permission: str = "auto", allow: bool = True
+    world: World,
+    llm: Any,
+    servers: list[Any],
+    *,
+    permission: str = "always-approve",
+    allow: bool = True,
 ) -> tuple[PiAcpAgent, Client, str]:
     client = Client(allow=allow)
     agent = world.agent(llm, client, permission=permission)

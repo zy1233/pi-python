@@ -10,6 +10,17 @@ permission = "ask" # ask | auto | always-approve
 # `ask` asks before each tool call, except for tools that declare themselves harmless: read-only
 # or only keeping the agent's own notes (read, grep, find, ls, web_search, fetch_url, goal_*).
 # A tool that declares nothing is asked about; bash, edit, write and workflow always are.
+# `auto` runs those harmless calls too, and the calls that its rules show to be safe: an edit in
+# the project folder, a shell command that only reads. It asks about the rest: a path outside the
+# project, a delete, the network, a command that hides what it does, a tool that declares
+# nothing, workflow, and any command that its rules cannot judge. It never refuses a call by
+# itself. This version has rules only (see [auto] at the end of this file).
+# `auto` is not a sandbox. read, grep, find, ls, fetch_url and web_search run with no question
+# for any path or URL, and so does a recursive read in a shell command (grep -r, git grep, cat *).
+# They can show a secret to the model, and fetch_url can send it to a server. Use a sandbox
+# (zypi --sandbox, a container or a VM) when that matters.
+# `always-approve` asks about nothing. Headless (-p) runs always use it. Before this version,
+# `auto` meant "ask about nothing": use `always-approve` for that.
 
 thinking_level = "off" # off | minimal | low | medium | high | xhigh
 max_turns = 50
@@ -82,3 +93,15 @@ command = "python -m pi_agent_cli"
 # trust_project_extensions = false      # older switch: true means default_project_trust = "always"
 #                                       # (an explicit default_project_trust wins)
 # One-off alternatives: --trust-project-extensions, or PI_TRUST_PROJECT_EXTENSIONS=1
+
+[auto]
+# Settings of the `auto` mode. Only this file sets them, never a config inside the project.
+# classifier = "rules"       # "rules" is the one that works. "model" is read, and decides as "rules".
+# extra_roots = []           # absolute folders that count like the project folder
+# protected = []             # more globs that always ask, for example ["deploy/*", "**/secrets/*"].
+#                            # A glob that starts with **/ matches at any depth below the project.
+#                            # Built in, at any depth: .husky/*, .githooks/*, .claude/*, .cursor/*,
+#                            # .mcp.json, .vscode/tasks.json, .github/workflows/*
+# bash_timeout_seconds = 300 # a shell command that Auto let through stops after this time (at most
+#                            # 2147483; a command that leaves the process group asks) ...
+# bash_max_output_mb = 64    # ... or after it has printed this much

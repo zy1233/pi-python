@@ -1,7 +1,8 @@
 """Rules of the Auto permission mode: the part that needs no model.
 
-Not wired in yet: nothing in the agent calls this module. ``decide`` takes one tool call and
-the session facts (``AutoContext``) and gives back one ``RuleDecision``. Design and reasons:
+``decide`` takes one tool call and the session facts (``AutoContext``) and gives back one
+``RuleDecision``. The agent calls it through ``pi_agent_cli.auto_mode``, which builds the
+context, checks it and keeps the audit record. Design and reasons:
 ``docs/specs/2026-11-02-auto-mode-design.md`` (sections 2, 3.2, 3.3).
 
 The steps, first answer wins:
@@ -23,6 +24,11 @@ this parser could read a command in two ways, the parser refuses.
 Known gaps (the same as for the ``read`` and ``grep`` tools, which ``ask`` mode allows): a glob
 such as ``cat *`` or a recursive ``grep -r`` can read a protected file that is not named. What
 the kernel sandbox stops is the sandbox's job.
+
+What these rules do not protect at all: a tool that declares itself harmless (step 1) is not
+looked at. ``read``, ``grep``, ``find``, ``ls``, ``fetch_url`` and ``web_search`` can read a
+secret, and ``fetch_url`` can send it in a URL. Auto asks about no more than ``ask`` mode does.
+A sandbox is the boundary for these; Auto is not.
 """
 
 from __future__ import annotations
@@ -44,6 +50,29 @@ MAX_PATH_CHARS = 4096
 MAX_GIT_SPEC_PARTS = 16
 MAX_WRAPPER_DEPTH = 5
 MAX_CWD_CANDIDATES = 8
+
+# Files of a project that something else runs, or reads as instructions, after the agent wrote
+# them: a git hook, a task that an editor starts, a workflow of the CI, the settings of other
+# coding agents and their MCP servers. A write to one of them asks, in a project of any trust.
+# Each entry is a glob, tried as ``AutoContext.protected_globs`` are. ``Makefile``,
+# ``package.json`` and ``conftest.py`` are not in the list on purpose: the agent changes them in
+# ordinary work, and asking each time would make Auto useless in most projects. The user adds
+# more with ``[auto] protected`` in ``agent.toml``. To change this list, change this constant.
+DEFAULT_PROTECTED_GLOBS: tuple[str, ...] = (
+    ".husky/*",
+    ".githooks/*",
+    ".claude/*",
+    ".cursor/*",
+    ".mcp.json",
+    ".vscode/tasks.json",
+    ".github/workflows/*",
+)
+
+
+def default_protected_globs() -> tuple[str, ...]:
+    """``DEFAULT_PROTECTED_GLOBS`` as the rules take it: each entry at any depth below a project
+    root, because a monorepo keeps ``packages/app/.husky`` and ``app/.claude`` as well."""
+    return tuple(f"**/{glob}" for glob in DEFAULT_PROTECTED_GLOBS)
 
 
 def _words(text: str) -> frozenset[str]:
@@ -229,6 +258,12 @@ def _is_absolute(path: object) -> bool:
     return os.path.isabs(text) or (os.name == "nt" and text[:1] in ("/", "\\"))
 
 
+def is_absolute_folder(path: object) -> bool:
+    """Whether *path* is text that names a folder with no base (the test that the rules apply
+    to every folder of the context). ``~`` is not expanded; ``""`` and ``"."`` are not absolute."""
+    return _is_absolute(path)
+
+
 def _context_is_absolute(ctx: AutoContext) -> bool:
     folders = [ctx.cwd, ctx.home_dir, ctx.pi_home, *ctx.extra_roots, *ctx.protected_paths]
     if ctx.origin_cwd:
@@ -255,6 +290,10 @@ _DEV_ENDLESS = _words("/dev/zero /dev/random /dev/urandom")
 
 _SECRET_DIRS = frozenset({".ssh", ".aws", ".gnupg", ".kube"})
 _HOME_SECRET_DIRS = (".docker", ".azure", ".oci", ".terraform.d", ".password-store")
+# Visible places below the home folder where a new file is run later: folders of commands that
+# are on the PATH of many users, and the folders of the system for programs that start at login.
+# Every hidden name below the home folder is covered by ``home_persistence_hit`` as a whole.
+_HOME_PERSISTENCE_DIRS = ("bin", "go/bin", "library", "applications", "appdata")
 _SECRET_NAME = re.compile(
     r"^(id_(rsa|dsa|ecdsa|ed25519)(\.pub)?|.*\.(pem|key|p12|pfx|ppk|kdbx|keystore|jks)"
     r"|.*\.tfvars(\.json)?|terraform\.tfstate(\.backup)?"
@@ -337,21 +376,33 @@ class _Env:
     def _glob_hit(self, real: str, parts: list[str]) -> bool:
         """Whether a protected glob matches *real*. Each glob is tried on the whole path, on the
         path with every name folded (``Makefile.`` is ``makefile``), on the last name, and on the
-        path below each project root, so ``.github/workflows/*`` works as it is written."""
+        path below each project root, so ``.github/workflows/*`` works as it is written.
+
+        A glob that starts with ``**/`` also matches at any depth below a project root:
+        ``**/.husky/*`` is ``.husky/x`` and ``app/.husky/x``. Only the part of the path below
+        the root is tried for that, so a project that lives in a folder with the same name is
+        not protected as a whole."""
         forms = {real.replace("\\", "/").lower(), "/" + "/".join(parts)}
+        below_root: set[str] = set()
         if parts:
             forms.add(parts[-1])
         for root in self.roots:
             root_parts = [name for name in map(_fold_name, re.split(r"[\\/]+", root)) if name]
             if parts[: len(root_parts)] == root_parts:
-                forms.add("/".join(parts[len(root_parts) :]))
+                below_root.add("/".join(parts[len(root_parts) :]))
+        forms |= below_root
         for glob in self.globs:
             pattern = glob.replace("\\", "/").lower()
+            anywhere = pattern.startswith("**/")
+            if anywhere:
+                pattern = pattern[3:]
             if pattern.startswith("./"):
                 pattern = pattern[2:]
             if pattern.endswith("/"):
                 pattern += "*"
             if any(fnmatch.fnmatchcase(form, pattern) for form in forms):
+                return True
+            if anywhere and any(fnmatch.fnmatchcase(form, "*/" + pattern) for form in below_root):
                 return True
         return False
 
@@ -362,6 +413,31 @@ class _Env:
             raise _Floor(*hit)
         if not self.inside(real):
             raise _Floor(Reason.OUTSIDE_PROJECT, "path.outside_project")
+
+    def home_persistence_hit(self, real: str) -> tuple[Reason, str] | None:
+        """Why a write to *real* sets up something in the user's own environment, or ``None``.
+
+        This is for a project that is the home folder (or has it as a root): there, a new file
+        ``~/.local/bin/git``, ``~/.vimrc`` or ``~/Library/LaunchAgents/x.plist`` is inside the
+        project, but it is run later by the shell, an editor or the system. Every hidden name
+        directly below the home folder is such a place, and so are a few visible ones. A
+        project folder that is itself below the home folder keeps its own hidden folders:
+        ``~/work/app/.config/x`` is a file of that project."""
+        home_parts = [name for name in map(_fold_name, re.split(r"[\\/]+", self.home)) if name]
+        parts = [name for name in map(_fold_name, re.split(r"[\\/]+", real)) if name]
+        if len(parts) <= len(home_parts) or parts[: len(home_parts)] != home_parts:
+            return None
+        for root in self.roots:
+            root_parts = [name for name in map(_fold_name, re.split(r"[\\/]+", root)) if name]
+            if len(root_parts) > len(home_parts) and parts[: len(root_parts)] == root_parts:
+                return None
+        below = parts[len(home_parts) :]
+        joined = "/".join(below)
+        if below[0].startswith(".") or any(
+            joined == place or joined.startswith(place + "/") for place in _HOME_PERSISTENCE_DIRS
+        ):
+            return Reason.PERSISTENCE, "path.home_persistence"
+        return None
 
     def expand_home(self, text: str) -> str:
         if text == "~":
@@ -984,6 +1060,10 @@ class _State:
         self.moved = False  # a ``cd`` or ``pushd`` was read: $PWD no longer names the start folder
         self.op_after = ""
         self.fallback: list[str] | None = None
+        # The id of the first rule that found a way out of the limits of the Bash tool (a
+        # background job, a new session, a timeout that is not short). It is raised after the
+        # words of that command are read, so a floor of the program itself (``rm``) wins.
+        self.escape: str | None = None
 
     def add_cwd(self, new: list[str]) -> None:
         """After a ``cd``: the shell is in one of the new folders, or (if ``cd`` failed) still
@@ -1256,6 +1336,40 @@ def _env_assign_floor(assign: str, *, strict_only: bool = False) -> None:
         raise _Floor(Reason.HIDDEN_COMMAND, "bash.hidden.env_assign")
 
 
+# The Bash tool ends a command at its time limit by killing the process group of the shell.
+# ``timeout`` puts its command in a group of its own (unless ``--foreground``), so the kill
+# does not reach it: it lives on for the time that ``timeout`` names. A short time is fine, as
+# the command ends soon after the limit. 300 seconds is the default limit of Auto.
+MAX_TIMEOUT_WRAPPER_SECONDS = 300
+_DURATION = re.compile(r"^(\d+(?:\.\d*)?|\.\d+)([smhd]?)$")
+_DURATION_UNITS = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
+
+
+def _duration_seconds(text: str) -> float | None:
+    match = _DURATION.match(text)
+    if match is None:
+        return None
+    return float(match.group(1)) * _DURATION_UNITS[match.group(2)]
+
+
+def _timeout_escape(duration: str, kill_after: list[str], st: _State) -> None:
+    """Note a ``timeout`` that lets its command run longer than the limit of the Bash tool.
+
+    ``0`` means "no time limit" to ``timeout``. A time that cannot be read (``inf``, a hex
+    number) is not guessed: the call asks."""
+    seconds = _duration_seconds(duration)
+    if seconds is None:
+        raise _Floor(Reason.UNCLEAR, "bash.unclear.wrapper_option")
+    longest = seconds
+    for text in kill_after:
+        extra = _duration_seconds(text)
+        if extra is None:
+            raise _Floor(Reason.UNCLEAR, "bash.unclear.wrapper_option")
+        longest += extra
+    if (seconds == 0 or longest > MAX_TIMEOUT_WRAPPER_SECONDS) and st.escape is None:
+        st.escape = "bash.persistence.timeout"
+
+
 def _unwrap(words: list[_Word], st: _State) -> tuple[list[_Word], bool]:
     """Strip wrappers (``env``, ``timeout``, ``xargs`` ...) down to the program that really runs.
 
@@ -1294,6 +1408,8 @@ def _unwrap(words: list[_Word], st: _State) -> tuple[list[_Word], bool]:
             if not rest:
                 return words, dynamic
         elif program in ("builtin", "exec", "nohup", "setsid", "time"):
+            if program == "setsid" and st.escape is None:
+                st.escape = "bash.persistence.setsid"
             if rest and rest[0].text == "--":
                 rest = rest[1:]
             if program == "time" and rest and rest[0].text == "-p":
@@ -1311,21 +1427,31 @@ def _unwrap(words: list[_Word], st: _State) -> tuple[list[_Word], bool]:
                 raise _Floor(Reason.UNCLEAR, "bash.unclear.wrapper_option")
         elif program == "timeout":
             index = 0
+            foreground = False
+            kill_after: list[str] = []
             while index < len(rest) and rest[index].text.startswith("-"):
                 text = rest[index].text
                 if text in ("-s", "-k", "--signal", "--kill-after"):
+                    if text in ("-k", "--kill-after") and index + 1 < len(rest):
+                        kill_after.append(rest[index + 1].text)
                     index += 2
                 elif text in ("--preserve-status", "--foreground", "-v", "--verbose") or (
                     text.startswith(("--signal=", "--kill-after="))
                 ):
+                    foreground = foreground or text == "--foreground"
+                    if text.startswith("--kill-after="):
+                        kill_after.append(text.split("=", 1)[1])
                     index += 1
                 else:
                     raise _Floor(Reason.UNCLEAR, "bash.unclear.wrapper_option")
+            limit_words = [rest[index].text] if index < len(rest) else []
             rest = rest[index + 1 :]
             if rest and rest[0].text == "--":
                 rest = rest[1:]
             if not rest:
                 raise _Floor(Reason.UNCLEAR, "bash.unclear.wrapper_option")
+            if not foreground:
+                _timeout_escape(limit_words[0], kill_after, st)
         elif program == "stdbuf":
             index = 0
             while index < len(rest) and re.match(r"^-[ioe]", rest[index].text):
@@ -1478,6 +1604,10 @@ def _git(args: list[_Word], st: _State) -> bool:
 
     if sub != "version":  # only ``git version`` reads no repository setting
         _git_repo_guard(chdirs, st)
+        # The ``config`` of the repository can name programs that git runs even for ``status``
+        # or ``diff`` (``core.fsmonitor``, ``diff.external``, a filter or a text converter).
+        # In a project that nobody vouched for, that file is code of the project.
+        st.project_code = True
 
     if sub in _GIT_LAUNCHERS:
         raise _Floor(Reason.HIDDEN_COMMAND, "bash.hidden.git_launcher")
@@ -1793,6 +1923,8 @@ def _cd(args_words: list[_Word], st: _State, program: str) -> bool:
 
 def _analyze_simple(simple: _Simple, st: _State) -> None:
     st.op_after = simple.op_after
+    if simple.op_after == "&" and st.escape is None:
+        st.escape = "bash.persistence.background"
     _analyze_words(simple, st)
     st.settle()
 
@@ -1836,6 +1968,8 @@ def _decide_bash(call: ToolCall, env: _Env) -> RuleDecision:
         return _ask(floor.reason, floor.rule_id)
     if not st.seen_command:
         return _ask(Reason.UNCLEAR, "bash.unclear.empty")
+    if st.escape is not None:
+        return _ask(Reason.PERSISTENCE, st.escape)
     if st.project_code and not env.ctx.project_trusted:
         return _ask(Reason.UNTRUSTED_PROJECT_CODE, "bash.untrusted_project_code")
     if st.proven:
@@ -1860,6 +1994,9 @@ def _decide_edit(call: ToolCall, env: _Env) -> RuleDecision:
         env.path_floor(real)
     except _Floor as floor:
         return _ask(floor.reason, floor.rule_id)
+    hit = env.home_persistence_hit(real)
+    if hit is not None:
+        return _ask(*hit)
     if env.fs.lexists(real) and not env.fs.in_git_worktree(real):
         return _ask(Reason.OVERWRITE_NO_GIT, "edit.overwrite_no_git")
     return _allow(Reason.IN_PROJECT_EDIT, "allow.edit.in_project")

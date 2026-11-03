@@ -1365,6 +1365,36 @@ def _write_once_stream(path: str, replies: list[tuple[bool, str]] | None = None)
     return stream
 
 
+def _write_twice_stream(first: str, second: str):
+    """A sub-agent LLM that asks to write two files in ONE assistant message, then answers."""
+    from pi_agent_core.event_stream import AssistantMessageEventStream
+    from pi_agent_core.tests.mock_stream import _base_partial, mock_text_stream
+    from pi_agent_core.types import DoneEvent, StartEvent
+
+    async def stream(model, context, options=None):
+        if any(getattr(m, "role", None) == "toolResult" for m in context.messages):
+            return await mock_text_stream(model, context, options)
+        calls = [
+            {
+                "type": "toolCall",
+                "id": f"call_{n}",
+                "name": "write",
+                "arguments": {"path": path, "content": "written\n"},
+            }
+            for n, path in ((1, first), (2, second))
+        ]
+        partial = _base_partial(model, calls)
+        partial.stopReason = "toolUse"
+        events = AssistantMessageEventStream()
+        events.push(StartEvent(partial=partial.model_copy(deep=True)))
+        events.push(DoneEvent(partial=partial.model_copy(deep=True), reason="toolUse"))
+        events.set_final_message(partial)
+        events.end()
+        return events
+
+    return stream
+
+
 def _gated_executor(stream_fn: Any, cwd: Path, gate: Any = None) -> Any:
     from pi_dynamic_workflows.subagent import HarnessSubagentExecutor
 
@@ -1436,6 +1466,63 @@ class TestSubagentToolCallGate:
         await executor.run_agent("write it")
 
         assert target.read_text(encoding="utf-8") == "written\n"
+
+    async def test_a_call_is_asked_about_after_the_call_before_it_has_run(self, tmp_path: Path):
+        """A verdict that looks at files must see them as the earlier call left them."""
+        first, second = tmp_path / "first.txt", tmp_path / "second.txt"
+        asked: list[tuple[str, bool, bool]] = []
+
+        async def gate(tool_call_id, tool_name, tool_input, *, origin=None):
+            asked.append((tool_call_id.rsplit("_", 1)[-1], first.exists(), second.exists()))
+            return None
+
+        executor = _gated_executor(_write_twice_stream(str(first), str(second)), tmp_path, gate)
+        result = await executor.run_agent("write both")
+
+        assert result.error is None
+        assert asked == [("1", False, False), ("2", True, False)]
+        assert second.read_text(encoding="utf-8") == "written\n"
+
+    async def test_a_gated_subagent_runs_its_calls_one_by_one(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        from pi_agent_harness.agent_harness import AgentHarness
+
+        modes: list[str] = []
+        original = AgentHarness.prompt
+
+        async def spy(self, *args: Any, **kwargs: Any):
+            modes.append(self.tool_execution)
+            return await original(self, *args, **kwargs)
+
+        monkeypatch.setattr(AgentHarness, "prompt", spy)
+
+        async def gate(tool_call_id, tool_name, tool_input, *, origin=None):
+            return None
+
+        executor = _gated_executor(_write_once_stream(str(tmp_path / "x.txt")), tmp_path, gate)
+        await executor.run_agent("write it")
+
+        assert modes == ["sequential"]
+
+    async def test_a_subagent_without_a_gate_keeps_the_default_parallel_mode(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        from pi_agent_harness.agent_harness import AgentHarness
+
+        modes: list[str] = []
+        original = AgentHarness.prompt
+
+        async def spy(self, *args: Any, **kwargs: Any):
+            modes.append(self.tool_execution)
+            return await original(self, *args, **kwargs)
+
+        monkeypatch.setattr(AgentHarness, "prompt", spy)
+
+        executor = _gated_executor(_write_once_stream(str(tmp_path / "x.txt")), tmp_path)
+        await executor.run_agent("write it")
+
+        assert modes == ["parallel"]
 
     async def test_a_failing_gate_fails_closed(self, tmp_path: Path):
         target = tmp_path / "unknown.txt"

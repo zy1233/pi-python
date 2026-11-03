@@ -114,7 +114,7 @@ async def run_print(
     sessions_dir = home_path / "sessions"
     sessions_dir.mkdir(parents=True, exist_ok=True)
     cwd_s = str(Path(cwd).resolve() if cwd is not None else Path.cwd())
-    config = replace(load_config(home_path), permission="auto")
+    config = replace(load_config(home_path), permission="always-approve")
     if prompt_overrides is not None:
         config = apply_prompt_overrides(config, prompt_overrides)
     repo = JsonlSessionRepo(sessions_dir)

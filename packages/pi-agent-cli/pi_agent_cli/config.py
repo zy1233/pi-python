@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
+from pi_agent_core.coding_tools.bash import MAX_TIMEOUT_SECONDS
 from pi_agent_core.home import pi_home
 from pi_agent_core.types import ThinkingLevel
 
@@ -140,6 +141,40 @@ class ModelChoice:
     supports_images: bool | None = None
 
 
+AutoClassifier = Literal["rules", "model"]
+
+# What a ``bash`` call that Auto let through is held to (``[auto] bash_timeout_seconds`` and
+# ``bash_max_output_mb``). Auto runs only commands that it can show to be harmless, and none of
+# those should take minutes or print without end; the limits are what stops one that does.
+DEFAULT_AUTO_BASH_TIMEOUT_SECONDS = 300.0
+DEFAULT_AUTO_BASH_MAX_OUTPUT_MB = 64
+
+
+@dataclass(frozen=True)
+class AutoConfig:
+    """The ``[auto]`` table of ``agent.toml``: settings of the Auto permission mode.
+
+    It is read from the home file only, never from a file of the project: what a project can
+    set, a project can loosen (invariant 9). ``classifier`` is ``"rules"`` or ``"model"``; only
+    ``"rules"`` works in this version, and ``"model"`` is read and then decided as ``"rules"``
+    (``notes`` says so). ``extra_roots`` are folders that count like the project folder;
+    ``protected`` are globs that always ask, on top of the built-in list. A folder that is not
+    absolute is kept as it is, so that Auto can see it is wrong and ask about every call.
+    ``notes`` are values of ``agent.toml`` that were read and not used (also a ``permission``
+    that is not one of the three modes), as sentences for the user. ``problems``
+    are values that Auto cannot work with safely (an entry of ``protected`` that is not text,
+    for example): while there is one, Auto asks about every call.
+    """
+
+    classifier: AutoClassifier = "rules"
+    extra_roots: tuple[str, ...] = ()
+    protected: tuple[str, ...] = ()
+    bash_timeout_seconds: float = DEFAULT_AUTO_BASH_TIMEOUT_SECONDS
+    bash_max_output_mb: int = DEFAULT_AUTO_BASH_MAX_OUTPUT_MB
+    notes: tuple[str, ...] = ()
+    problems: tuple[str, ...] = ()
+
+
 @dataclass(frozen=True)
 class CliConfig:
     permission: PermissionMode = "ask"
@@ -172,6 +207,7 @@ class CliConfig:
     # on), and otherwise the answer is "ask". See ``extension_trust.effective_default_trust``.
     default_project_trust: DefaultProjectTrust | None = None
     models: tuple[ModelChoice, ...] = ()
+    auto: AutoConfig = field(default_factory=AutoConfig)
 
     @property
     def model_reasoning(self) -> bool:
@@ -300,7 +336,12 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
     extensions = data.get("extensions") if isinstance(data.get("extensions"), dict) else {}
 
     permission = data.get("permission", "ask")
-    if permission not in _VALID_PERMISSION:
+    permission_note: str | None = None
+    if not isinstance(permission, str) or permission not in _VALID_PERMISSION:
+        permission_note = (
+            'permission in agent.toml must be "ask", "auto" or "always-approve". '
+            'The agent uses "ask".'
+        )
         permission = "ask"
     thinking = data.get("thinking_level", "off")
     if thinking not in _VALID_THINKING:
@@ -360,6 +401,10 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
                 )
             )
 
+    auto = _auto_config(data.get("auto"))
+    if permission_note is not None:
+        auto = replace(auto, notes=(permission_note, *auto.notes))
+
     return CliConfig(
         permission=permission,  # type: ignore[arg-type]
         provider=str(model.get("provider") or data.get("provider") or MOCK_PROVIDER),
@@ -384,6 +429,115 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         trusted_projects=trusted_projects,
         default_project_trust=_default_project_trust(extensions.get("default_project_trust")),
         models=tuple(models),
+        auto=auto,
+    )
+
+
+_AUTO_KEYS = frozenset(
+    {"classifier", "extra_roots", "protected", "bash_timeout_seconds", "bash_max_output_mb"}
+)
+
+# Keys of the model step (design section 3.8). They are known so that a file written after the
+# design is not told "not known", but nothing reads them yet.
+_AUTO_MODEL_STEP_KEYS = frozenset({"model", "timeout_seconds"})
+
+
+def _auto_config(value: object) -> AutoConfig:
+    """The ``[auto]`` table. A value that cannot be used is dropped, and ``notes`` names it.
+
+    Dropping is the safe side for what loosens Auto (a folder in ``extra_roots``, a limit). What
+    tightens Auto (an entry of ``protected``) is not dropped silently: it goes to ``problems``,
+    and Auto asks about every call until the file is right.
+    """
+    if value is None:
+        return AutoConfig()
+    if not isinstance(value, dict):
+        return AutoConfig(notes=("auto in agent.toml is not a table, and it is ignored.",))
+    notes: list[str] = []
+    problems: list[str] = []
+    for key in value:
+        if key in _AUTO_MODEL_STEP_KEYS:
+            notes.append(
+                f'The key "{key}" in [auto] is for the model step, which does not exist yet. '
+                "It is ignored."
+            )
+        elif key not in _AUTO_KEYS:
+            notes.append(f'The key "{key}" in [auto] is not known, and it is ignored.')
+
+    classifier: AutoClassifier = "rules"
+    raw_classifier = value.get("classifier")
+    if raw_classifier is not None:
+        name = raw_classifier.strip().lower() if isinstance(raw_classifier, str) else ""
+        if name == "model":
+            classifier = "model"
+            notes.append(
+                'classifier = "model" does not work yet. Auto uses the rules only, and it asks '
+                "you about a command that the rules cannot prove."
+            )
+        elif name != "rules":
+            notes.append('classifier in [auto] must be "rules" or "model". Auto uses "rules".')
+
+    extra_roots: list[str] = []
+    raw_roots = value.get("extra_roots")
+    if isinstance(raw_roots, list):
+        for item in raw_roots:
+            if isinstance(item, str) and item.strip():
+                extra_roots.append(os.path.expanduser(item.strip()))
+            else:
+                notes.append(
+                    "An entry of extra_roots in [auto] is not a folder, and it is ignored."
+                )
+    elif raw_roots is not None:
+        notes.append("extra_roots in [auto] must be a list of folders, and it is ignored.")
+
+    protected: list[str] = []
+    raw_protected = value.get("protected")
+    if isinstance(raw_protected, list):
+        for item in raw_protected:
+            if not isinstance(item, str):
+                problems.append("An entry of protected in [auto] is not text.")
+            elif item.strip():
+                protected.append(os.path.expanduser(item.strip()))
+            else:
+                notes.append("An entry of protected in [auto] is empty, and it is ignored.")
+    elif raw_protected is not None:
+        problems.append("protected in [auto] must be a list of globs.")
+
+    timeout = DEFAULT_AUTO_BASH_TIMEOUT_SECONDS
+    raw_timeout = value.get("bash_timeout_seconds")
+    if raw_timeout is not None:
+        if (
+            isinstance(raw_timeout, (int, float))
+            and not isinstance(raw_timeout, bool)
+            and 0 < raw_timeout <= MAX_TIMEOUT_SECONDS
+        ):
+            timeout = float(raw_timeout)
+        else:
+            notes.append(
+                "bash_timeout_seconds in [auto] must be a number above 0 and not above "
+                f"{int(MAX_TIMEOUT_SECONDS)}. "
+                f"Auto uses {DEFAULT_AUTO_BASH_TIMEOUT_SECONDS:g} seconds."
+            )
+
+    max_output_mb = DEFAULT_AUTO_BASH_MAX_OUTPUT_MB
+    raw_output = value.get("bash_max_output_mb")
+    if raw_output is not None:
+        if isinstance(raw_output, int) and not isinstance(raw_output, bool) and raw_output >= 1:
+            max_output_mb = raw_output
+        else:
+            notes.append(
+                "bash_max_output_mb in [auto] must be a whole number of 1 or more. "
+                f"Auto uses {DEFAULT_AUTO_BASH_MAX_OUTPUT_MB} MB."
+            )
+
+    return AutoConfig(
+        classifier=classifier,
+        extra_roots=tuple(extra_roots),
+        protected=tuple(protected),
+        bash_timeout_seconds=timeout,
+        bash_max_output_mb=max_output_mb,
+        notes=tuple(notes),
+        problems=tuple(problems),
     )
 
 

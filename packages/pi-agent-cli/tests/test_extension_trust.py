@@ -461,7 +461,9 @@ async def _open_session(world: Any, config: CliConfig) -> _RecordingClient:
 @pytest.mark.asyncio
 async def test_the_acp_client_is_told_which_project_extensions_were_skipped(world: Any):
     # ``never``: an untrusted project, settled without a question (this client answers none).
-    client = await _open_session(world, CliConfig(permission="auto", default_project_trust="never"))
+    client = await _open_session(
+        world, CliConfig(permission="always-approve", default_project_trust="never")
+    )
 
     text = client.agent_text()
     assert "shipped.py" in text
@@ -471,7 +473,7 @@ async def test_the_acp_client_is_told_which_project_extensions_were_skipped(worl
 
 @pytest.mark.asyncio
 async def test_the_acp_client_hears_nothing_when_the_project_is_trusted(world: Any):
-    config = CliConfig(permission="auto", trusted_projects=(str(world.project),))
+    config = CliConfig(permission="always-approve", trusted_projects=(str(world.project),))
 
     client = await _open_session(world, config)
 
@@ -483,7 +485,7 @@ async def test_the_acp_client_hears_nothing_when_the_project_is_trusted(world: A
 async def test_the_acp_client_hears_nothing_when_there_is_nothing_to_skip(world: Any):
     (world.project / ".pi-python" / "extensions" / "shipped.py").unlink()
 
-    client = await _open_session(world, CliConfig(permission="auto"))
+    client = await _open_session(world, CliConfig(permission="always-approve"))
 
     assert client.agent_text() == ""
 

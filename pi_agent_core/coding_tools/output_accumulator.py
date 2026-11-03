@@ -123,6 +123,11 @@ class OutputAccumulator:
     def get_last_line_bytes(self) -> int:
         return self._current_line_bytes
 
+    @property
+    def total_raw_bytes(self) -> int:
+        """Every byte appended so far, kept or not (the spill file holds all of them)."""
+        return self._total_raw_bytes
+
     # --- internals ---
 
     def _append_decoded_text(self, text: str) -> None:

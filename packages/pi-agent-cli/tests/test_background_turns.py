@@ -70,7 +70,7 @@ async def _session(tmp_path: Path, model: _HeldModel) -> tuple[PiAcpAgent, _Clie
     agent = PiAcpAgent(
         stream_fn=model.stream,
         home=tmp_path,
-        config=CliConfig(permission="auto", provider="mock", model_id="mock"),
+        config=CliConfig(permission="always-approve", provider="mock", model_id="mock"),
         extensions=[extension],
     )
     client = _Client()
@@ -232,7 +232,7 @@ async def test_the_agent_never_claims_the_v2_draft(tmp_path):
     agent = PiAcpAgent(
         stream_fn=mock_text_stream,
         home=tmp_path,
-        config=CliConfig(permission="auto", provider="mock", model_id="mock"),
+        config=CliConfig(permission="always-approve", provider="mock", model_id="mock"),
     )
 
     response = await agent.initialize(protocol_version=2)
