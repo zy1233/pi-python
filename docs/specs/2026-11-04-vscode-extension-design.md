@@ -15,6 +15,7 @@
 - **Three parts, one rule.** The *host* (extension host, Node) owns the agent process and the ACP connection. The *webview* only draws and sends messages. The *core* (ACP client, state, diff) has no `vscode` import, so it runs in unit tests without VS Code.
 - **Who decides what.** The agent decides what needs a question. The extension shows the question and sends the answer. It never answers for the user.
 - **Two kinds of trust.** VS Code Workspace Trust decides if the extension starts at all. The agent's own project trust decides if the project may load its extensions. The text of the two prompts says so.
+- **Publishing.** Open VSX first, then the Marketplace. The first upload to each is a hand upload of a VSIX that the packaging script made. The publish workflow (a draft in section 11, not yet a file) runs from `main` by `workflow_dispatch`, with Trusted Publishing and the environment `vscode-publish`.
 - **Not in Phase 1.** Session list and resume, model choice, images, `@file`, MCP servers, fallback package, and everything of report section 3.3 from Phase 2 on (section 12).
 
 ## 1. Facts the design rests on
@@ -332,13 +333,29 @@ Activation events: `onView:zycode.chat`, `onCommand:*` of the commands above. No
 
 No `alpine-*` (the binary needs glibc), no `linux-armhf` (no binary), no `win32-arm64` (not tested).
 
-**Local script** (`scripts/package.mjs <target>|all`): check `zycodeAgentVersion == agent-assets.json version`; download the asset (HTTPS from GitHub Releases) to a cache folder; compare size and sha256 with the pin; extract the one file; set mode `0755` (POSIX targets); run the build (esbuild bundles host and webview); generate `THIRD-PARTY-NOTICES`; run `vsce package --target <t> --pre-release`; run `check-vsix`. The check opens the VSIX and verifies: the binary is there, with the exec bit (the bit survives only when packaging on Linux, so the script refuses to package on Windows); `LICENSE`, `THIRD-PARTY-NOTICES` and the PNG icon are there; there is no `node_modules`, no source map, no `.env`; the manifest has the right target and the pre-release flag.
+**Local script** (`scripts/package.mjs <target>|all`): check `zycodeAgentVersion == agent-assets.json version`; download the asset (HTTPS from GitHub Releases) to a cache folder; compare size and sha256 with the pin; extract the one file; set mode `0755` (POSIX targets); run the build (esbuild bundles host and webview); generate `THIRD-PARTY-NOTICES`; run `vsce package --target <t> --pre-release --out out/zycode-<t>-<version>.vsix`; run `check-vsix`; write `out/SHA256SUMS`, and print the path, size and sha256 of each file, so that a person can upload a file by hand (see "Publishing order and the first upload"). The check opens the VSIX and verifies: the binary is there, with the exec bit (the bit survives only when packaging on Linux, so the script refuses to package on Windows); `LICENSE`, `THIRD-PARTY-NOTICES` and the PNG icon are there; there is no `node_modules`, no source map, no `.env`; the manifest has the right target and the pre-release flag.
 
 **`THIRD-PARTY-NOTICES`.** One file with two parts. Part 1: the Python distributions in the agent binary. The script makes a clean virtual environment, installs the same packages as the agent build (`pi-agent-cli-lc` at `zycodeAgentVersion` and its extras that `packaging/agent/zycode-agent.spec` includes), and reads name, version, license and license files from each distribution's metadata (`importlib.metadata`). It adds a fixed entry for CPython (PSF-2.0) and for PyInstaller's bootloader (GPL-2.0 with the bootloader exception), and a line for the native libraries that CPython links in. Part 2: the npm packages that esbuild bundled into `dist/extension.js` (from the esbuild metafile), with their license files. A distribution with no license text is listed with a note, and the script fails the build if a license is "UNKNOWN" and is not on a reviewed allow list. The file is not committed.
 
 **Other files.** `LICENSE` is a copy of the repository's `LICENSE` (MIT). The README first screen says "unofficial; not affiliated with pi or Microsoft". The README also says: the binary is not code-signed; it holds only the OpenAI-format provider; Linux needs glibc 2.35 or newer; the first start takes a few seconds; Auto is not a sandbox. `.vscodeignore` leaves out everything that is not `dist/`, `bin/`, `media/`, `package.json`, the README, the CHANGELOG, the LICENSE and the notices.
 
-**Draft of the publish workflow.** It lives here as text. It becomes `.github/workflows/vscode-extension.yml` only when the user approves a change under `.github/workflows/`. The name of the file and the environment name are the ones that the Trusted Publishing policies will use.
+**Publishing order and the first upload.** Facts from the user-side setup guide (`vscode-publishing-setup-guide.md`, sections 0.1, A, 3.1 to 3.3, C):
+
+1. **Open VSX first, then the Marketplace.** Open VSX holds a new extension "under review" when an extension of the same name exists on the Marketplace and the publisher is not the owner of the Open VSX namespace. So the extension goes to Open VSX first. The same order is used in the workflow.
+2. **The first upload to each registry is a manual web upload of one VSIX by the user.** Open VSX Trusted Publishing is registered for one extension, and only after that extension exists and is active. The first publish to the Marketplace with `vsce publish --oidc` has not been tried for an extension that does not exist yet (the guide, section C.1). The workflow takes over after the first upload.
+3. **The environment `vscode-publish` allows deployments from `main` only.** The user is the required reviewer. The environment holds no secret. A run from another branch, or from a tag, is refused by GitHub until a rule for it is added. So the publish job must run from `main`.
+4. **Commands and permissions.** `vsce publish --oidc` and `ovsx publish --trusted-publishing`; the job has `permissions: id-token: write` and `environment: vscode-publish`. Both registry policies name the workflow by file name only: `vscode-extension.yml` (not the path). They use the same repository (`zy1233/pi-python`) and the same environment.
+
+What this means for the package (PR 4 of the chain):
+
+- The packaging script makes VSIX files that a person can upload by hand: `zycode-<target>-<version>.vsix` in `packages/pi-vscode/out/`, each built with `--pre-release` (the pre-release flag is in the VSIX manifest, so it stays in a web upload), plus a `SHA256SUMS` file. The script prints the path, size and sha256 of each file. A file is the same whether the workflow or a person uploads it.
+- The web upload may take one target at a time, and whether it merges targets into one version is not verified (guide, section C.2). The plan is to upload `linux-x64` by hand to Open VSX, then to the Marketplace, and to let the workflow publish the other targets. The workflow therefore has a `targets` input (default: all five): after a hand upload of `linux-x64`, the first workflow run uses the other four, because a registry refuses a second upload of the same version and target.
+- After the first upload the user registers the Open VSX trusted publisher (extension `zycode`, workflow `vscode-extension.yml`, environment `vscode-publish`). The Marketplace policy for the publisher can exist earlier.
+- Not verified: if the Open VSX web upload keeps the pre-release flag from the VSIX manifest, and if the web upload of the Marketplace accepts a platform VSIX. The user checks the listing after the upload.
+
+**Which trigger runs on `main`.** `workflow_dispatch` runs on the branch or tag that the user chooses. The "Run workflow" button offers any branch, and the environment rule refuses all but `main`. A `workflow_run` run always uses the default branch: GitHub sets `GITHUB_REF` to the default branch and `GITHUB_SHA` to its last commit (GitHub Docs, "Events that trigger workflows", `workflow_run`), so it passes the environment rule, but it builds the last commit of `main`, not the commit of the run that triggered it. The extension version is not the agent version, and a new agent Release must not publish an extension by itself. So the draft uses `workflow_dispatch` only, and the publish job also checks `github.ref == 'refs/heads/main'` so that a wrong choice fails at once with a clear message, before the reviewer is asked.
+
+**Draft of the publish workflow.** It lives here as text. It becomes `.github/workflows/vscode-extension.yml` only when the user approves a change under `.github/workflows/`. The name of the file and the environment name are the ones that the Trusted Publishing policies use.
 
 ```yaml
 name: VS Code extension
@@ -351,9 +368,18 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: "Publish to Marketplace and Open VSX (needs approval of the environment)"
+        description: "Publish (runs from main only; the environment vscode-publish needs the approval of its reviewer)"
         type: boolean
         default: false
+      registries:
+        description: "Where to publish, in this order"
+        type: choice
+        options: [both, open-vsx, marketplace]
+        default: both
+      targets:
+        description: "Targets to build and publish, separated by spaces"
+        type: string
+        default: "linux-x64 linux-arm64 darwin-arm64 darwin-x64 win32-x64"
 
 permissions:
   contents: read
@@ -370,13 +396,28 @@ jobs:
       - run: npm run check        # type check, lint, unit tests
         working-directory: packages/pi-vscode
 
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      targets: ${{ steps.targets.outputs.json }}
+    steps:
+      - id: targets
+        env:
+          TARGETS: ${{ github.event.inputs.targets || 'linux-x64 linux-arm64 darwin-arm64 darwin-x64 win32-x64' }}
+        run: |
+          set -eu
+          for t in $TARGETS; do
+            case "$t" in linux-x64|linux-arm64|darwin-arm64|darwin-x64|win32-x64) ;; *) echo "unknown target: $t" >&2; exit 1 ;; esac
+          done
+          echo "json=$(printf '%s\n' $TARGETS | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
+
   package:
-    needs: test
+    needs: [test, plan]
     runs-on: ubuntu-24.04            # Linux: the exec bit of the binary survives only here
     strategy:
       fail-fast: false
       matrix:
-        target: [linux-x64, linux-arm64, darwin-arm64, darwin-x64, win32-x64]
+        target: ${{ fromJSON(needs.plan.outputs.targets) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -390,7 +431,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: vsix-${{ matrix.target }}
-          path: packages/pi-vscode/*.vsix
+          path: packages/pi-vscode/out/*.vsix
           if-no-files-found: error
 
   smoke:
@@ -401,21 +442,29 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - uses: actions/download-artifact@v4
-        with: { name: vsix-linux-x64, path: vsix }
+        with: { pattern: vsix-linux-x64, path: vsix, merge-multiple: true }
+        continue-on-error: true      # linux-x64 may be left out of `targets`
       - run: npm ci
         working-directory: packages/pi-vscode
-      - run: node scripts/smoke-vsix.mjs ../../vsix/*.vsix   # unpack, start the bundled binary, initialize over ACP, check agentInfo.version
-        working-directory: packages/pi-vscode
+      - run: |
+          if ls ../../vsix/*.vsix >/dev/null 2>&1; then node scripts/smoke-vsix.mjs ../../vsix/*.vsix; fi
+        working-directory: packages/pi-vscode   # unpack, start the bundled binary, initialize over ACP, check agentInfo.version
 
   publish:
+    # One job, so that the reviewer approves once. Open VSX first, then the Marketplace.
     if: github.event_name == 'workflow_dispatch' && inputs.publish
     needs: [package, smoke]
     runs-on: ubuntu-24.04
-    environment: vscode-publish        # required reviewers
+    environment: vscode-publish        # required reviewer; deployments from main only; no secrets
     permissions:
       contents: read
       id-token: write                  # Trusted Publishing (OIDC)
     steps:
+      - name: Refuse a run that is not from main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Publish runs from main only (the environment vscode-publish refuses other refs)." >&2
+          exit 1
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
@@ -423,27 +472,32 @@ jobs:
         with: { pattern: vsix-*, path: vsix, merge-multiple: true }
       - run: npm ci
         working-directory: packages/pi-vscode
+      - name: Open VSX
+        if: inputs.registries != 'marketplace'
+        working-directory: packages/pi-vscode
+        run: |
+          for f in ../../vsix/*.vsix; do
+            npx ovsx publish --trusted-publishing --pre-release "$f"
+          done
       - name: Visual Studio Marketplace
+        if: inputs.registries != 'open-vsx'
         working-directory: packages/pi-vscode
         run: |
           for f in ../../vsix/*.vsix; do
             npx @vscode/vsce publish --oidc --pre-release --packagePath "$f"
           done
-      - name: Open VSX
-        working-directory: packages/pi-vscode
-        run: |
-          for f in ../../vsix/*.vsix; do
-            npx ovsx publish --trusted-publishing --pre-release "$f"   # flag as in ovsx 1.3.0: check before the first use
-          done
 ```
 
 Notes on the draft:
 
-- It has **no** `workflow_run` and no tag trigger. The extension version is not the agent version, so a new agent Release must not publish by itself. A person starts a publish, and the environment `vscode-publish` makes a second person (or the same one, by choice) approve it.
-- No token is stored. `vsce publish --oidc` needs a Marketplace policy: owner `zy1233`, repository `pi-python`, workflow `vscode-extension.yml`, environment `vscode-publish`. Open VSX needs the equivalent trusted publisher in the user settings of open-vsx.org. The user creates both. Whether the very first publish of a new extension can use OIDC is unknown (report section 10); if it cannot, the first publish is a manual one by the user.
+- It has **no** `workflow_run` and no tag trigger (see "Which trigger runs on `main`"). A person starts a publish from `main`, and the user approves it in the environment `vscode-publish`.
+- No token is stored. The Marketplace policy: owner `zy1233`, repository `pi-python`, workflow `vscode-extension.yml`, environment `vscode-publish`. The Open VSX trusted publisher: namespace `zycode`, publisher GitHub, extension `zycode`, the same owner, repository, workflow file and environment. The user creates both. The Open VSX one can only be created after the first upload (point 2 above).
+- Open VSX shows that a trusted publisher accepts a workflow from any branch or tag. The `main`-only rule of the environment is the only branch limit, so it must stay (and no tag rule is added yet).
+- The first run after a hand upload of one target uses `targets`, so that it does not upload that target twice. A failed half (for example the Marketplace step after Open VSX succeeded) is repeated with `registries`.
 - The `package` job runs on Linux for every target. It does not run the Windows or macOS binary. Only the Linux x64 binary is started (`smoke`).
-- The `smoke` step is a script of this package (`scripts/smoke-vsix.mjs`). It is written in PR 4 and is not a Python test.
-- The Open VSX flags must be checked against `ovsx` at the time of use. The Marketplace flags are from the report (`vsce` 4.1.0).
+- `scripts/smoke-vsix.mjs` is a script of this package, written in PR 4. It is not a Python test.
+- `ovsx publish --trusted-publishing` is from `ovsx` 1.3.0 and `vsce publish --oidc` from `vsce` 4.x. Both are checked again before the first use. Whether the very first Marketplace publish can use OIDC is unknown, so the first upload is a hand upload.
+- Writing the file is a change under `.github/workflows/`. It is not part of the pull requests of this chain.
 
 ## 12. Out of Phase 1
 
@@ -493,6 +547,8 @@ From the report, section 3.3 (Phase 2 and later), and from the limits above:
 | D7 | The permission setting wins over `agent.toml`, and `always-approve` is not offered. | One clear rule. `ask` and `auto` are both at least as strict as `always-approve`. |
 | D8 | `zycodeAgentVersion` is pinned with sha256 in the repository (`agent-assets.json`). | A changed Release asset must not enter a VSIX unseen. |
 | D9 | No telemetry. | User decision. |
-| D10 | The publish workflow is a draft in this record, and it has no automatic trigger. | The user approves changes under `.github/workflows/` first; an agent Release is not an extension release. |
+| D10 | The publish workflow is a draft in this record, and it runs only by `workflow_dispatch` from `main`. | The user approves changes under `.github/workflows/` first; an agent Release is not an extension release; the environment `vscode-publish` allows `main` only. |
+| D13 | Open VSX first, then the Marketplace. | Open VSX holds a new extension under review when the same name exists on the Marketplace and the publisher is not the namespace owner. |
+| D14 | The first upload to each registry is a hand upload of a VSIX that the packaging script made. The workflow takes over after it. | Open VSX Trusted Publishing needs an existing extension; the first Marketplace publish with OIDC is untested. |
 | D11 | `extensionKind: ["workspace"]`. | The agent must run where the files are. |
 | D12 | The first start with no key uses `--setup` in a terminal, not `SecretStorage`. | One place for the key; the same flow as `zypi` and Zed (report section 5). |
