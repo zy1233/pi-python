@@ -9,13 +9,25 @@ from __future__ import annotations
 import asyncio
 import importlib
 import sys
+from collections.abc import Iterator
 
 import pytest
 
+from pi_agent_core.adapters.deepseek_replay import replaying_chat_deepseek
 from pi_agent_core.frozen import is_frozen
 from pi_agent_core.types import LlmContext, Model, StreamOptions
 
 ls_mod = importlib.import_module("pi_agent_core.adapters.langchain_stream")
+
+
+@pytest.fixture(autouse=True)
+def _no_class_is_kept_from_an_earlier_test() -> Iterator[None]:
+    """``replaying_chat_deepseek`` keeps the class that it builds. With ``langchain-deepseek``
+    installed, a test that ran before this file has built it, and then the blocked import below
+    is never tried."""
+    replaying_chat_deepseek.cache_clear()
+    yield
+    replaying_chat_deepseek.cache_clear()
 
 
 @pytest.fixture

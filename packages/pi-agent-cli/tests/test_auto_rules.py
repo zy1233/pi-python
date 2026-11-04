@@ -2179,7 +2179,13 @@ def test_a_protected_name_is_found_in_the_forms_that_a_file_system_treats_as_the
     """Windows drops trailing dots and spaces and reads ``name::$DATA``; macOS ignores case;
     Unicode has look-alike and invisible characters."""
     assert run_edit(world, "write", path).outcome is Outcome.ASK
-    assert run_edit(world, "write", path).rule_id == rule_id
+    expected = {rule_id}
+    if sys.platform == "win32" and path == "GIT~1/config":
+        # NTFS gives the ``.git`` folder of the project the short name ``GIT~1`` (where the
+        # volume makes short names). The path then resolves to ``.git``, and the rule for that
+        # folder is the first one that fits. Both rules ask.
+        expected.add("path.git_dir")
+    assert run_edit(world, "write", path).rule_id in expected
 
 
 @pytest.mark.parametrize(
