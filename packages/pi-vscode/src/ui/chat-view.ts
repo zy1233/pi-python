@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 
 import type { ChatController } from "../core/chat-controller.js";
+import type { DiffInfo } from "../core/diff-tracker.js";
 import {
   isSafeLink,
   parseWebviewMessage,
@@ -28,7 +29,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly controller: ChatController,
-    private readonly actions: { showLog(): void },
+    private readonly actions: { showLog(): void; showDiff(info: DiffInfo): Promise<void>; notify(text: string): void },
   ) {
     this.subscription = controller.onMessage((message) => this.post(message));
   }
@@ -98,8 +99,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       case "openLink":
         if (isSafeLink(message.url)) await vscode.env.openExternal(vscode.Uri.parse(message.url, true));
         return;
-      case "showDiff":
+      case "showDiff": {
+        const info = controller.diffFor(message.toolCallId);
+        if (info) await this.actions.showDiff(info);
+        else this.actions.notify("zycode: no diff is available for this call.");
         return;
+      }
     }
   }
 

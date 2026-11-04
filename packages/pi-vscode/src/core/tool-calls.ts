@@ -49,6 +49,12 @@ export class ToolCallStore {
     this.calls.clear();
   }
 
+  /** Replaces the stored view of a call (the controller adds `canDiff`). Returns the view that is kept. */
+  update(id: string, view: ToolCallView): ToolCallView {
+    this.calls.set(id, view);
+    return view;
+  }
+
   /** Applies one update and returns the call as it is now, or `undefined` for an update with no id. */
   apply(update: RawToolUpdate): ToolCallView | undefined {
     if (typeof update.toolCallId !== "string" || update.toolCallId === "") return undefined;

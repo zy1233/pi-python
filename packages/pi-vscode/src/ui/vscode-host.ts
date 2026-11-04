@@ -24,6 +24,8 @@ class ChannelLogger implements Logger {
   }
 }
 
+const MAX_DIFF_FILE_BYTES = 2 * 1024 * 1024;
+
 function underFolder(file: string, folder: string): boolean {
   const relative = path.relative(folder, file);
   return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
@@ -55,6 +57,7 @@ export class VsCodeHost implements Host {
       agentPath: config.get<string>("agentPath", ""),
       agentArgs: config.get<string[]>("agentArgs", []).filter((arg) => typeof arg === "string"),
       permissionMode,
+      showThinking: config.get<boolean>("showThinking", true),
     };
   }
 
@@ -70,6 +73,17 @@ export class VsCodeHost implements Host {
     return vscode.workspace.textDocuments
       .filter((doc) => doc.isDirty && doc.uri.scheme === "file" && underFolder(doc.uri.fsPath, folder))
       .map((doc) => doc.uri.fsPath);
+  }
+
+  async readFile(file: string): Promise<string | null | undefined> {
+    try {
+      const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(file));
+      if (bytes.byteLength > MAX_DIFF_FILE_BYTES) return undefined;
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch (error) {
+      if (error instanceof vscode.FileSystemError && error.code === "FileNotFound") return null;
+      return undefined;
+    }
   }
 
   runSetupTerminal(request: SetupTerminalRequest): Promise<{ exitCode: number | undefined }> {

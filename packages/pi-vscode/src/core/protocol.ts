@@ -36,6 +36,8 @@ export interface StateMessage {
   mode?: ModeState;
   model?: string;
   canRestart: boolean;
+  /** `zycode.showThinking`: show the thinking blocks (collapsed). */
+  showThinking?: boolean;
 }
 
 export type ToolStatus = "pending" | "in_progress" | "completed" | "failed";
@@ -49,6 +51,8 @@ export interface ToolCallView {
   /** The last text block of the latest update. For `bash` it is the whole output so far. */
   text?: string;
   terminal?: { output: string; exitCode?: number };
+  /** The host can show a diff for this call (`showDiff` with `id`). */
+  canDiff?: boolean;
 }
 
 export interface PermissionOptionView {
@@ -66,6 +70,8 @@ export interface PermissionRequestView {
   summary: string;
   options: PermissionOptionView[];
   canDiff: boolean;
+  /** Why there is no diff, for a `write` or `edit` call that has none. */
+  diffNote?: string;
 }
 
 export type PermissionOutcome = "selected" | "cancelled";

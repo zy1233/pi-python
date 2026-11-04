@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 
 import { ChatController } from "./core/chat-controller.js";
 import { CHAT_VIEW_ID, ChatViewProvider } from "./ui/chat-view.js";
+import { DIFF_SCHEME, DiffDocuments } from "./ui/diff-documents.js";
 import { StatusBar } from "./ui/status-bar.js";
 import { VsCodeHost } from "./ui/vscode-host.js";
 
@@ -20,8 +21,18 @@ export function activate(context: vscode.ExtensionContext): void {
   const status = new StatusBar("zycode.openChat");
   context.subscriptions.push(channel, status);
 
-  const view = new ChatViewProvider(context.extensionUri, chat, { showLog: () => host.showLog() });
-  context.subscriptions.push(view, vscode.window.registerWebviewViewProvider(CHAT_VIEW_ID, view));
+  const diffs = new DiffDocuments(() => chat.diffStore);
+  const view = new ChatViewProvider(context.extensionUri, chat, {
+    showLog: () => host.showLog(),
+    showDiff: (info) => diffs.open(info),
+    notify: (text) => host.notify("info", text),
+  });
+  context.subscriptions.push(
+    view,
+    diffs,
+    vscode.window.registerWebviewViewProvider(CHAT_VIEW_ID, view),
+    vscode.workspace.registerTextDocumentContentProvider(DIFF_SCHEME, diffs),
+  );
 
   context.subscriptions.push(
     chat.onMessage((message) => {
@@ -46,6 +57,7 @@ export function activate(context: vscode.ExtensionContext): void {
       if (event.affectsConfiguration("zycode.permissionMode")) {
         void chat.applyPermissionMode(host.settings().permissionMode);
       }
+      if (event.affectsConfiguration("zycode.showThinking")) chat.refreshSettings();
       if (event.affectsConfiguration("zycode.agentPath") || event.affectsConfiguration("zycode.agentArgs")) {
         void vscode.window
           .showInformationMessage("zycode: the agent program changed. Restart the agent to use it.", "Restart agent")
