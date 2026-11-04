@@ -384,9 +384,10 @@ pub struct PagerArgs {
         hide = true
     )]
     pub max_turns: Option<u32>,
-    /// Permission mode: `default` (ask before tool calls) or `bypassPermissions` (same as
-    /// `--always-approve`). The agent acts on no other mode, so `plan`, `auto`, `acceptEdits`
-    /// and `dontAsk` are rejected rather than accepted and ignored.
+    /// Permission mode: `default` (ask before tool calls), `auto` (run the calls that are clearly
+    /// in scope, ask about the rest) or `bypassPermissions` (same as `--always-approve`). The
+    /// agent acts on no other mode, so `plan`, `acceptEdits` and `dontAsk` are rejected rather
+    /// than accepted and ignored.
     #[arg(
         long = "permission-mode",
         value_name = "MODE",
@@ -697,11 +698,11 @@ mod tests {
         let err = PagerArgs::try_parse_from(["zypi", "--minimal", "--fullscreen"]).unwrap_err();
         assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
     }
-    /// `--permission-mode` takes the two values the agent acts on: `default` (ask) and
+    /// `--permission-mode` takes the three values the agent acts on: `default` (ask), `auto` and
     /// `bypassPermissions` (always approve). Bare, it stays unset.
     #[test]
     fn permission_mode_flag_accepts_only_what_the_agent_acts_on() {
-        for accepted in ["default", "bypassPermissions"] {
+        for accepted in ["default", "auto", "bypassPermissions"] {
             let args = PagerArgs::try_parse_from(["zypi", "--permission-mode", accepted])
                 .unwrap_or_else(|e| panic!("{accepted} must parse: {e}"));
             assert_eq!(args.permission_mode_flag.as_deref(), Some(accepted));
@@ -720,11 +721,12 @@ mod tests {
             None
         );
     }
-    /// The four values that used to be accepted and ignored now fail with exit code 2, naming the
-    /// value, why, and what does work. Unknown values get the same list.
+    /// The three values that used to be accepted and ignored and that the agent still ignores fail
+    /// with exit code 2, naming the value, why, and what does work. Unknown values get the same
+    /// list.
     #[test]
     fn permission_mode_flag_rejects_modes_the_agent_ignores() {
-        for rejected in ["plan", "auto", "acceptEdits", "dontAsk"] {
+        for rejected in ["plan", "acceptEdits", "dontAsk"] {
             let err = PagerArgs::try_parse_from(["zypi", "--permission-mode", rejected])
                 .expect_err("a mode the agent ignores must be rejected");
             assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
@@ -733,7 +735,7 @@ mod tests {
             assert!(
                 message.contains(&format!("`{rejected}`"))
                     && message.contains("would change nothing")
-                    && message.contains("valid values: default, bypassPermissions"),
+                    && message.contains("valid values: default, bypassPermissions, auto"),
                 "{rejected}: {message}"
             );
         }
@@ -743,7 +745,7 @@ mod tests {
             assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
             assert!(
                 err.to_string()
-                    .contains("unknown mode (valid values: default, bypassPermissions)"),
+                    .contains("unknown mode (valid values: default, bypassPermissions, auto)"),
                 "{unknown:?}: {err}"
             );
         }

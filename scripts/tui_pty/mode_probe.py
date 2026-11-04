@@ -2,21 +2,24 @@
 
     mode_probe.py [--zypi PATH] [--python PATH] [--only N] [--show]
 
-Plan 0.8 / 1.P3. The TUI cycles through modes with Shift+Tab (Normal, Always-Approve) and takes
-``--always-approve`` and ``--permission-mode default|bypassPermissions`` on the command line. It
-used to offer Plan, Auto and the settings page's Default as well, and four more
-``--permission-mode`` values; the Python agent honoured none of them (section 10.11) and 1.P3 (a)
-hid them (section 10.13). While the session runs the TUI tells the agent about a change with a
-``pi/yolo_mode_changed`` notification (Normal / Always-Approve); at the start it puts the mode in
-the ``_meta`` of ``session/new`` (``yoloMode``, ``autoMode``), which the agent does not read. This
-script puts that to the test: for each way of choosing a mode (Shift+Tab, a flag, the choice an
-earlier zypi saved in ``config.toml``) it starts a fresh zypi with ``tests/_tool_agent.py``
+Plan 0.8 / 1.P3; Auto design 2026-11-02, PR 3. The TUI cycles through modes with Shift+Tab
+(Normal, Auto, Always-Approve) and takes ``--always-approve`` and
+``--permission-mode default|auto|bypassPermissions`` on the command line. It used to offer Plan and
+the settings page's Default as well, and two more ``--permission-mode`` values (``acceptEdits``,
+``dontAsk``); the Python agent honours none of them (section 10.11) and 1.P3 (a) hid them (section
+10.13). Auto was hidden too, because the agent treated ``auto`` like ``always-approve``; it has been
+a real mode of the agent since PR #89, and the TUI offers it again. While the session runs the TUI
+tells the agent about a change with a ``pi/yolo_mode_changed`` notification; at the start it puts
+the mode in the ``_meta`` of ``session/new`` (``yoloMode``, ``autoMode``), which the agent reads.
+This script puts that to the test: for each way of choosing a mode (Shift+Tab, a flag, the choice
+an earlier zypi saved in ``config.toml``) it starts a fresh zypi with ``tests/_tool_agent.py``
 (permission mode ``ask``, its first turn calls ``write``) and records the label the status bar
 showed, whether a permission question appeared and whether the file was written without anybody
-answering. The values ``--permission-mode`` no longer takes are run
-too, each on its own: they must be refused at once, with the reason, instead of starting a TUI.
-Last, the settings page (``/settings``): whether a search for "plan" finds a "Plan mode" row, and
-which choices the Permission mode picker lists.
+answering. The ``write`` is inside the working directory, except in the scenarios that say
+"outside": there it is in a folder next to it, which Auto must ask about. The values
+``--permission-mode`` does not take are run too, each on its own: they must be refused at once,
+with the reason, instead of starting a TUI. Last, the settings page (``/settings``): whether a
+search for "plan" finds a "Plan mode" row, and which choices the Permission mode picker lists.
 
 It judges nothing: the table is what the plan (section 10.11, appendix A) cites, and what a change
 to the mode mapping has to be compared with. Linux only (it needs a pty); the table of scenarios
@@ -42,13 +45,15 @@ AGENT = env.AGENT_TESTS / "_tool_agent.py"
 # What the Python agent's question looks like on the screen (its option names are "Allow once" and
 # "Reject", ``pi_agent_cli.permissions.PERMISSION_OPTIONS``).
 QUESTION = re.compile(r"Allow once")
-# What ``zypi --permission-mode`` takes: "default" is ask, "bypassPermissions" is always-approve.
-ACCEPTED_PERMISSION_MODES = ("default", "bypassPermissions")
+# What ``zypi --permission-mode`` takes: "default" is ask, "auto" is Auto, "bypassPermissions" is
+# always-approve.
+ACCEPTED_PERMISSION_MODES = ("default", "auto", "bypassPermissions")
 # The rest of the six values it used to take. The agent acts on none of them (``acceptEdits`` and
-# ``dontAsk`` name modes that exist nowhere), so the flag refuses them instead of ignoring them.
-REJECTED_PERMISSION_MODES = ("acceptEdits", "auto", "dontAsk", "plan")
+# ``dontAsk`` name modes that exist nowhere, ``plan`` has no handler), so the flag refuses them
+# instead of ignoring them.
+REJECTED_PERMISSION_MODES = ("acceptEdits", "dontAsk", "plan")
 # The choices the settings page's Permission mode picker could list, in its order. "Default" (the
-# agent drops it) and "Auto" (the agent treats it as always-approve) are the two it no longer lists.
+# agent drops it) is the one it no longer lists.
 PICKER_CHOICES = ("Default", "Ask", "Auto", "Always approve")
 
 
@@ -58,6 +63,12 @@ class Scenario:
     keys: tuple[str, ...] = ()  # sent in order after the welcome page is up
     flags: tuple[str, ...] = ()  # zypi's command line
     config: str = ""  # what $PI_HOME/config.toml holds at the start (an earlier run's choice)
+    outside: bool = False  # the write is in a folder next to the working directory, not in it
+    # The call is ``mkdir probe-dir`` (``bash``), a command that no rule of Auto decides: with the
+    # model step (the default) it goes to a model, and the model of ``_tool_agent.py`` answers
+    # with a tool call, which Auto cannot read.
+    shell: bool = False
+    classifier: str = ""  # ``[auto] classifier`` for the agent: "rules", "model", or "" (default)
 
 
 def saved(mode: str) -> Scenario:
@@ -68,21 +79,40 @@ def saved(mode: str) -> Scenario:
 
 
 SCENARIOS: list[Scenario] = [
+    # Nothing chosen: a fresh zypi starts in Normal (ask), not in Auto (decision D5b).
     Scenario("Normal (nothing chosen)"),
     Scenario("--always-approve", flags=("--always-approve",)),
-    Scenario("Shift+Tab x1: Always-Approve", keys=(SHIFT_TAB,)),
-    Scenario("Shift+Tab x2: Normal again", keys=(SHIFT_TAB,) * 2),
-    # The ring used to go on to Plan and Auto here; now it comes round to Always-Approve.
-    Scenario("Shift+Tab x3: Always-Approve", keys=(SHIFT_TAB,) * 3),
+    # The ring is Normal, Auto, Always-Approve, and round again.
+    Scenario("Shift+Tab x1: Auto", keys=(SHIFT_TAB,)),
+    Scenario("Shift+Tab x2: Always-Approve", keys=(SHIFT_TAB,) * 2),
+    Scenario("Shift+Tab x3: Normal again", keys=(SHIFT_TAB,) * 3),
+    Scenario("Shift+Tab x4: Auto again", keys=(SHIFT_TAB,) * 4),
     *(
         Scenario(f"--permission-mode {mode}", flags=("--permission-mode", mode))
         for mode in ACCEPTED_PERMISSION_MODES
     ),
-    # What an earlier zypi may have saved: Auto and Default are no longer offered, so a start
-    # that finds them must come up asking (Normal); Always-Approve is still honoured.
+    # What an earlier zypi may have saved: Default is no longer offered, so a start that finds it
+    # must come up asking (Normal); Auto and Always-Approve are honoured.
     saved("auto"),
     saved("default"),
     saved("always-approve"),
+    # The same write, outside the working directory: Auto asks about it, as Normal does.
+    Scenario("Normal, write outside", outside=True),
+    Scenario("Shift+Tab x1: Auto, write outside", keys=(SHIFT_TAB,), outside=True),
+    # A shell command that no rule decides. With the model step on (the default since the model
+    # step was merged) the judge cannot answer here, so the call asks; with ``classifier =
+    # "rules"`` it asks without a judge. What the user sees must be the same question.
+    Scenario(
+        "Auto, shell command, the judge cannot answer",
+        keys=(SHIFT_TAB,),
+        shell=True,
+    ),
+    Scenario(
+        "Auto, shell command, classifier = rules",
+        keys=(SHIFT_TAB,),
+        shell=True,
+        classifier="rules",
+    ),
 ]
 
 
@@ -90,10 +120,15 @@ SCENARIOS: list[Scenario] = [
 class Observation:
     scenario: Scenario
     ready: bool = False
-    label: str = ""  # the status bar's frame, e.g. "mock · plan"
+    label: str = ""  # the status bar's frame before the first message, e.g. "mock · auto"
+    label_in_turn: str = ""  # the same, once the first message is sent (a session exists then)
     asked: bool = False  # a permission question reached the screen
     written_unasked: bool = False  # the file was there before anyone answered
     written_after_answer: bool | None = None  # None: nobody was asked
+    question: str = ""  # what the question says (its lines inside the bar on the left)
+    # Auto's record of the call, from the session file: "by=error reason=model.unreadable ..."
+    # (empty: the session file has none, for example when the mode was not Auto)
+    record: str = ""
 
 
 @dataclass
@@ -123,13 +158,56 @@ def status_label(screen: str) -> str:
     return ""
 
 
+def question_text(screen: str) -> str:
+    """The lines of the permission question: what sits behind the bar (``┃``) on the left."""
+    lines = [line.strip().lstrip("┃").strip() for line in screen.splitlines() if "┃" in line]
+    return " | ".join(line for line in lines if line)
+
+
+def auto_records(session_text: str) -> list[str]:
+    """What ``pi.auto_decision`` entries of a session file say, one short text for each.
+
+    The entry holds ``outcome``, ``by`` (``rule``, ``floor``, ``model``, ``error``), ``reason`` and
+    ``rule_id``; the line with the entry is found by its fields, not by its place in the file.
+    """
+    found: list[str] = []
+    for line in session_text.splitlines():
+        if "pi.auto_decision" not in line:
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        stack = [entry]
+        while stack:
+            node = stack.pop()
+            if isinstance(node, dict):
+                if "tool_call_id" in node and "by" in node:
+                    found.append(
+                        f"{node.get('tool', '?')} {node.get('outcome', '?')} by={node['by']} "
+                        f"reason={node.get('reason', '?')} rule={node.get('rule_id', '?')} "
+                        f"classifier={node.get('classifier', '?')}"
+                    )
+                else:
+                    stack.extend(node.values())
+            elif isinstance(node, list):
+                stack.extend(node)
+    return found
+
+
 def format_row(obs: Observation) -> str:
     answered = {None: "-", True: "yes", False: "NO"}[obs.written_after_answer]
-    return (
+    row = (
         f"{obs.scenario.name:36} label={obs.label or '(none)':26} "
+        f"in turn={obs.label_in_turn or '(none)':26} "
         f"asked={'yes' if obs.asked else 'no':3}  written without an answer="
         f"{'yes' if obs.written_unasked else 'no':3}  written after an answer={answered}"
     )
+    if obs.question:
+        row += f"\n    question: {obs.question}"
+    if obs.record:
+        row += f"\n    Auto record: {obs.record}"
+    return row
 
 
 def picker_choices(screen: str) -> list[str]:
@@ -207,13 +285,21 @@ def observe(scenario: Scenario, zypi: str, python: str, show: bool) -> Observati
 
     root = env.scratch("pi-mode-probe-")
     marker = env.marker(root)
-    target = root / "work" / "probe.txt"
-    call = {"name": "write", "arguments": {"path": str(target), "content": "probe"}}
+    if scenario.outside:
+        (root / "outside").mkdir()
+    if scenario.shell:
+        target = root / "work" / "probe-dir"
+        call = {"name": "bash", "arguments": {"command": "mkdir probe-dir"}}
+    else:
+        target = root / ("outside" if scenario.outside else "work") / "probe.txt"
+        call = {"name": "write", "arguments": {"path": str(target), "content": "probe"}}
+    extra = {"PI_TEST_AUTO_CLASSIFIER": scenario.classifier} if scenario.classifier else {}
     run_env = env.base_env(
         root,
         PI_AGENT_COMMAND=f"{python} {AGENT}",
         PI_TEST_PERMISSION="ask",
         PI_TEST_TOOL_CALL=json.dumps(call),
+        **extra,
     )
     obs = Observation(scenario)
     if scenario.config:
@@ -237,11 +323,18 @@ def observe(scenario: Scenario, zypi: str, python: str, show: bool) -> Observati
             obs.asked = bool(QUESTION.search(screen))
             obs.written_unasked = target.exists()
         if obs.asked:
+            obs.question = question_text(screen)
             if show:
                 print("----- the question\n" + screen + "\n-----")
             term.send("\r")  # the default option: allow once
             term.pump(2.0)
             obs.written_after_answer = target.exists()
+        else:
+            term.pump(1.0)
+        obs.label_in_turn = status_label(term.text())
+        sessions = sorted((root / "home" / "sessions").glob("*.jsonl"))
+        if sessions:
+            obs.record = "; ".join(auto_records(sessions[-1].read_text(encoding="utf-8")))
     finally:
         term.kill_group()
         pt.kill_marked(marker)

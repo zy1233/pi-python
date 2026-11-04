@@ -27,7 +27,7 @@ This repository is a monorepo containing:
 
 **Rust TUI** (beta — prebuilt binary in [GitHub Releases](https://github.com/zy1233/pi-python/releases)):
 
-- `zypi`: full-screen terminal UI for interactive coding-agent sessions. Vendored fork of [grok-build](https://github.com/xai-org/grok-build) (Apache-2.0), with all `x.ai/*` vendor extensions removed. See [TUI & Code-Agent Guide](docs/TUI-AND-CODE-AGENT.md) for details.
+- `zypi`: full-screen terminal UI for interactive coding-agent sessions. Vendored fork of [grok-build](https://github.com/xai-org/grok-build) (Apache-2.0), with all `x.ai/*` vendor extensions removed. It offers three permission modes (Shift+Tab): Normal (`ask`, the start mode), Auto and Always-Approve. See [TUI & Code-Agent Guide](docs/TUI-AND-CODE-AGENT.md) for details.
 
 ## Status
 

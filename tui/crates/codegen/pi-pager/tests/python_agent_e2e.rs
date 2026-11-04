@@ -119,7 +119,9 @@ fn use_cli_agent(python: &str) {
 /// whose first turn calls one tool. `call` is `{"name": ..., "arguments": {...}}`; without it the
 /// call is a `bash` command that records its pid in `pidfile` and then sleeps. `permission` is the
 /// agent's mode: `ask` for the tests about the question, `always-approve` when nobody answers. Not
-/// `auto`: its rules cannot prove that `bash` command, so Auto asks about it.
+/// `auto`: its rules cannot prove that `bash` command, so Auto asks about it (or, with the model
+/// step, asks a judge that cannot answer). `PI_TEST_AUTO_CLASSIFIER` is cleared here: a test that
+/// wants `[auto] classifier = "rules"` sets it after this call.
 fn use_tool_agent(python: &str, permission: &str, call: Option<serde_json::Value>, pidfile: &Path) {
     let script = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../../packages/pi-agent-cli/tests/_tool_agent.py");
@@ -138,6 +140,7 @@ fn use_tool_agent(python: &str, permission: &str, call: Option<serde_json::Value
             None => std::env::remove_var("PI_TEST_TOOL_CALL"),
         }
         std::env::remove_var("PI_TEST_STUCK_THREAD");
+        std::env::remove_var("PI_TEST_AUTO_CLASSIFIER");
     }
 }
 
@@ -876,6 +879,224 @@ async fn a_permission_question_reaches_the_client_and_its_answer_decides() {
     assert!(!target.exists(), "a refused tool call must not run");
     assert_eq!(live.traffic.questions.lock().unwrap().len(), 2);
     live.stop().await;
+}
+
+/// `session/new` with the `_meta` that the pager's `SessionFlags::to_meta` sends for a launch in
+/// the given mode: both keys are always there, and `autoMode` is false under `yoloMode`.
+async fn new_session_launched_in(tx: &AcpAgentTx, cwd: &Path, mode: &str) -> acp::NewSessionResponse {
+    let mut meta = acp::Meta::new();
+    meta.insert("yoloMode".into(), serde_json::json!(mode == "always-approve"));
+    meta.insert("autoMode".into(), serde_json::json!(mode == "auto"));
+    wire(
+        "session/new with the launch mode",
+        acp_send(
+            acp::NewSessionRequest::new(cwd.to_path_buf()).meta(meta),
+            tx,
+        ),
+    )
+    .await
+}
+
+/// The mode a session response says the session is in: the standard `mode` config option and the
+/// older `modes` state must agree, and the pager reads neither (it keeps its own copy).
+fn mode_of(response: &acp::NewSessionResponse) -> String {
+    let json = serde_json::to_value(response).unwrap();
+    let from_modes = json["modes"]["currentModeId"].as_str().map(str::to_owned);
+    let from_option = json["configOptions"]
+        .as_array()
+        .and_then(|options| options.iter().find(|option| option["id"] == "mode"))
+        .and_then(|option| option["currentValue"].as_str().map(str::to_owned));
+    assert_eq!(from_modes, from_option, "the two spellings disagree: {json}");
+    from_modes.unwrap_or_else(|| panic!("the response names no mode: {json}"))
+}
+
+/// What the pager tells the agent when the user changes the mode in a running session.
+async fn announce_mode(live: &Live, canonical: &str) {
+    let params = serde_json::json!({
+        "yolo_mode": canonical == "always-approve",
+        "auto_mode": canonical == "auto",
+        "permission_mode": canonical,
+    });
+    let notification = acp::ExtNotification::new(
+        "pi/yolo_mode_changed",
+        serde_json::value::to_raw_value(&params).unwrap().into(),
+    );
+    wire("pi/yolo_mode_changed", acp_send(notification, &live.tx)).await;
+}
+
+/// A session that opens in `mode`, once the agent has taken the pager's notification (it is a
+/// notification: nothing answers it, so ask the agent until it says the new mode).
+async fn session_in(live: &Live, cwd: &Path, mode: &str) -> acp::SessionId {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let response = new_session(&live.tx, cwd).await;
+        if mode_of(&response) == mode {
+            return response.session_id;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "a new session never came up in {mode}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// Auto, offered since the pager sets `agent_modes::AUTO`: a session that the pager launches in
+/// Auto (`_meta.autoMode`) runs a `write` inside its project with no question, and the pager's
+/// notification moves the mode both ways while the agent runs (Auto, Ask, Auto).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial(pi_agent)]
+async fn a_session_launched_in_auto_runs_a_call_in_scope_unasked_and_follows_the_pagers_notice() {
+    let Some(python) = python() else { return };
+    let cwd = tempfile::tempdir().unwrap();
+    let target = cwd.path().join("written.txt");
+    // The agent's own mode is `ask`, as when `zypi` starts it: only the pager's word moves it.
+    use_tool_agent(
+        &python,
+        "ask",
+        Some(write_call(&target)),
+        &cwd.path().join("tool.pid"),
+    );
+    // Whoever is asked says no, so a question that should not have come shows as a missing file.
+    let live = Live::start(Answer::RejectOnce).await;
+
+    // 1. A launch in Ask: the agent asks, the answer is no, nothing is written.
+    let asking = new_session_launched_in(&live.tx, cwd.path(), "ask").await;
+    assert_eq!(mode_of(&asking), "ask");
+    prompt(&live.tx, &asking.session_id, "write it").await;
+    assert!(!target.exists(), "Ask must have asked, and the answer was no");
+    assert_eq!(live.traffic.questions.lock().unwrap().len(), 1);
+
+    // 2. A launch in Auto: the write is inside the project and the file is new, so it runs.
+    let auto = new_session_launched_in(&live.tx, cwd.path(), "auto").await;
+    assert_eq!(mode_of(&auto), "auto", "the agent did not read _meta.autoMode");
+    let reply = prompt(&live.tx, &auto.session_id, "write it").await;
+    assert_eq!(reply.stop_reason, acp::StopReason::EndTurn);
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "the tool ran");
+    assert_eq!(
+        live.traffic.questions.lock().unwrap().len(),
+        1,
+        "Auto asked about a call that is in scope"
+    );
+
+    // 3. The user leaves Auto with Shift+Tab: the pager's notice moves the agent to Ask.
+    std::fs::remove_file(&target).unwrap();
+    announce_mode(&live, "ask").await;
+    let session = session_in(&live, cwd.path(), "ask").await;
+    prompt(&live.tx, &session, "write it").await;
+    assert!(!target.exists());
+    assert_eq!(live.traffic.questions.lock().unwrap().len(), 2);
+
+    // 4. And back into Auto: no question again.
+    announce_mode(&live, "auto").await;
+    let session = session_in(&live, cwd.path(), "auto").await;
+    prompt(&live.tx, &session, "write it").await;
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "the tool ran");
+    assert_eq!(live.traffic.questions.lock().unwrap().len(), 2);
+    live.stop().await;
+}
+
+/// In Auto a call that leaves the project asks, through the same `session/request_permission` as in
+/// Ask: the same two options, and a title that adds one fixed sentence. A no still stops the call.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial(pi_agent)]
+async fn in_auto_a_call_outside_the_project_asks_like_ask_does() {
+    let Some(python) = python() else { return };
+    let cwd = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let target = elsewhere.path().join("outside.txt");
+    use_tool_agent(
+        &python,
+        "ask",
+        Some(write_call(&target)),
+        &cwd.path().join("tool.pid"),
+    );
+    let live = Live::start(Answer::RejectOnce).await;
+    let auto = new_session_launched_in(&live.tx, cwd.path(), "auto").await;
+    assert_eq!(mode_of(&auto), "auto");
+    let reply = prompt(&live.tx, &auto.session_id, "write it").await;
+    assert_eq!(reply.stop_reason, acp::StopReason::EndTurn);
+    assert!(!target.exists(), "a refused tool call must not run");
+    {
+        let questions = live.traffic.questions.lock().unwrap();
+        assert_eq!(questions.len(), 1, "one question for one call");
+        let kinds: Vec<_> = questions[0].options.iter().map(|o| o.kind).collect();
+        assert_eq!(
+            kinds,
+            [
+                acp::PermissionOptionKind::AllowOnce,
+                acp::PermissionOptionKind::RejectOnce
+            ],
+            "the options are those of Ask"
+        );
+        let call = serde_json::to_value(&questions[0].tool_call).unwrap();
+        assert_eq!(call["toolCallId"], "call_write", "{call}");
+        assert_eq!(
+            call["title"], "write (Auto: leaves the project folder)",
+            "{call}"
+        );
+        assert_eq!(call["rawInput"]["path"], serde_json::json!(target), "{call}");
+    }
+
+    // A yes runs it: Auto never decides for the user, it only asks less than Ask.
+    live.answer_with(Answer::AllowOnce);
+    let again = new_session_launched_in(&live.tx, cwd.path(), "auto").await;
+    prompt(&live.tx, &again.session_id, "write it").await;
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "the tool ran");
+    assert_eq!(live.traffic.questions.lock().unwrap().len(), 2);
+    live.stop().await;
+}
+
+/// A `bash` command that no rule of Auto decides goes to the model step (the default). The model of
+/// the test agent answers with a tool call, which Auto cannot read, so the call asks: the client
+/// gets the same question as in Ask, with the same two options. With `classifier = "rules"` no
+/// model is asked at all, and the call asks too. A no stops it in both.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial(pi_agent)]
+async fn in_auto_a_shell_command_no_rule_decides_asks_when_the_judge_cannot_answer() {
+    let Some(python) = python() else { return };
+    for classifier in ["model", "rules"] {
+        let cwd = tempfile::tempdir().unwrap();
+        let made = cwd.path().join("probe-dir");
+        let call = serde_json::json!({
+            "id": "call_mkdir",
+            "name": "bash",
+            "arguments": { "command": "mkdir probe-dir" },
+        });
+        use_tool_agent(&python, "ask", Some(call), &cwd.path().join("tool.pid"));
+        // SAFETY: see `env`; the tests are serial.
+        unsafe { std::env::set_var("PI_TEST_AUTO_CLASSIFIER", classifier) };
+        let live = Live::start(Answer::RejectOnce).await;
+        let auto = new_session_launched_in(&live.tx, cwd.path(), "auto").await;
+        assert_eq!(mode_of(&auto), "auto");
+        let reply = prompt(&live.tx, &auto.session_id, "make it").await;
+        assert_eq!(reply.stop_reason, acp::StopReason::EndTurn);
+        assert!(!made.exists(), "{classifier}: a refused tool call must not run");
+        {
+            let questions = live.traffic.questions.lock().unwrap();
+            assert_eq!(questions.len(), 1, "{classifier}: one question for one call");
+            let kinds: Vec<_> = questions[0].options.iter().map(|o| o.kind).collect();
+            assert_eq!(
+                kinds,
+                [
+                    acp::PermissionOptionKind::AllowOnce,
+                    acp::PermissionOptionKind::RejectOnce
+                ],
+                "{classifier}: the options are those of Ask"
+            );
+            let call = serde_json::to_value(&questions[0].tool_call).unwrap();
+            assert_eq!(call["toolCallId"], "call_mkdir", "{call}");
+            assert_eq!(call["rawInput"]["command"], "mkdir probe-dir", "{call}");
+        }
+
+        // A yes runs it.
+        live.answer_with(Answer::AllowOnce);
+        let again = new_session_launched_in(&live.tx, cwd.path(), "auto").await;
+        prompt(&live.tx, &again.session_id, "make it").await;
+        assert!(made.is_dir(), "{classifier}: a yes must run the command");
+        assert_eq!(live.traffic.questions.lock().unwrap().len(), 2);
+        live.stop().await;
+    }
 }
 
 #[cfg(target_os = "linux")]

@@ -2126,24 +2126,34 @@ fn set_plan_mode_idempotency_uses_pending_over_active() {
 // ── The modes the agent behind the pager honours (`app::agent_modes`) ────────
 //
 // The fixtures above offer every mode (`test_app` turns all three gates on) so the Plan / Auto /
-// Default tests keep running; the tests below turn the gates off, as a real launch has them.
+// Default tests keep running; the tests below turn the gates off, as a real launch has them
+// (Auto is the exception: a launch offers it, and `app_without_plan` closes its gate to test the
+// ring that has no Auto stop, which is the ring while the Auto gate is closed by configuration).
 
-/// A freshly built app — what a launch starts from — offers neither Plan, Auto nor Default.
+/// A freshly built app — what a launch starts from — offers Auto, and neither Plan nor Default.
 #[test]
-fn a_new_app_offers_neither_plan_auto_nor_default() {
+fn a_new_app_offers_auto_and_neither_plan_nor_default() {
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let app = AppView::new(tx, ModelState::default(), Vec::new());
     assert!(!app.plan_mode_gate, "Plan hidden");
-    assert!(!app.auto_mode_gate, "Auto hidden");
+    assert!(app.auto_mode_gate, "Auto offered");
     assert!(!app.default_mode_gate, "Default hidden");
 }
 
-/// The test fixture with the gates a launch has (Plan hidden, Auto hidden, Default hidden).
+/// The test fixture with the Plan and Default gates a launch has (both hidden) and the Auto gate
+/// closed, as it is while `[auto_mode] enabled = false` or the remote kill switch says so.
 fn app_without_plan() -> AppView {
     let mut app = test_app_with_agent();
     app.plan_mode_gate = false;
     app.auto_mode_gate = false;
     app.default_mode_gate = false;
+    app
+}
+
+/// The test fixture with the gates a launch has: Auto offered, Plan and Default hidden.
+fn app_as_launched() -> AppView {
+    let mut app = app_without_plan();
+    app.auto_mode_gate = crate::app::agent_modes::AUTO;
     app
 }
 
@@ -2430,8 +2440,24 @@ fn cycle_without_plan_leaves_always_approve_under_policy_pin() {
     assert_eq!(agent_toast(&app), None);
 }
 
-/// Auto is a stop only while its own gate is on (a hypothetical agent that classifies): Normal →
-/// Auto → Always-Approve → Normal, and under a pin Auto falls back to Normal with the reason.
+/// With the gates a launch has, the ring is Normal → Auto → Always-Approve → Normal, and each
+/// stop is persisted and announced to the session.
+#[test]
+fn a_launch_ring_is_normal_auto_always_approve() {
+    let mut app = app_as_launched();
+    assert!(app.auto_mode_gate, "the launch offers Auto");
+    let mut seen = Vec::new();
+    for _ in 0..4 {
+        let effects = dispatch(Action::CycleMode, &mut app);
+        seen.push(persisted(&effects)[0]);
+    }
+    assert_eq!(seen, ["auto", "always-approve", "ask", "auto"]);
+    assert_eq!(app.current_ui.permission_mode.as_deref(), Some("auto"));
+    assert!(app.agents[&AgentId(0)].session.is_auto());
+}
+
+/// Auto is a stop only while its own gate is on: Normal → Auto → Always-Approve → Normal, and
+/// under a pin Auto falls back to Normal with the reason.
 #[test]
 fn cycle_without_plan_visits_auto_only_while_the_auto_gate_is_on() {
     let mut app = app_without_plan();
