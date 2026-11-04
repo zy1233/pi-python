@@ -43,11 +43,12 @@ def test_an_allow_reason_has_no_question_title(reason: Reason) -> None:
         ask_title("bash", reason)
 
 
-def test_allow_reasons_are_exactly_the_three_allow_codes() -> None:
+def test_allow_reasons_are_exactly_the_four_allow_codes() -> None:
     assert {
         Reason.HARMLESS,
         Reason.IN_PROJECT_EDIT,
         Reason.READ_ONLY_COMMAND,
+        Reason.MODEL_ALLOWED,
     } == ALLOW_REASONS
 
 

@@ -13,8 +13,17 @@ The steps, first answer wins:
    ``bash`` command (delete, network, secrets, hidden commands, code of an untrusted project).
 3. Allow rules: ``write`` / ``edit`` inside the project folder, and a ``bash`` command that the
    parser proves read-only: ALLOW.
-4. A ``bash`` command that is not on the floor and not proven read-only: JUDGE. Later, the model
-   step answers. Until then ``decide_rules_only`` turns JUDGE into ASK ``unclear``.
+4. A ``bash`` command that is not on the floor and not proven read-only: JUDGE. With
+   ``classifier = "model"`` the model step answers (``auto_classifier``); with
+   ``classifier = "rules"`` ``decide_rules_only`` turns JUDGE into ASK ``unclear``. A JUDGE is
+   only for a call that the rules do not know: an unknown program, code of a trusted project, a
+   write by redirect. A call that the rules do know to be dangerous (a read-only program given an
+   option that runs code or writes, a glob that can become such an option, an endless device, a
+   program of the project that is named like a read-only one) is not JUDGE: it is an ASK by the
+   floor with the id ``bash.barred.<kind>``, so that no model is called and no model answer can
+   allow it (red-team decision D-07). A call that may hold a shell comment is not JUDGE either:
+   text in a comment moved models (red-team finding M-06), so it asks by the floor with the id
+   ``bash.comment``, unless a rule proves it read-only.
 5. Everything else: ASK ``unclear``.
 
 Fail closed: any doubt, any error and any input that the parser cannot read is an ASK. The
@@ -51,13 +60,30 @@ MAX_GIT_SPEC_PARTS = 16
 MAX_WRAPPER_DEPTH = 5
 MAX_CWD_CANDIDATES = 8
 
+# The forms that bar a call from the model (D-07). The rules know the program and know that this
+# form of it runs code, writes, reads a list of files, sets the system, never ends, or is a
+# disguise. The call asks by the floor with the rule id ``bash.barred.<kind>``; no model is
+# called, so no model answer can allow it. One test covers each kind (``test_auto_model_step``).
+BARRED_KINDS = (
+    "option",  # a banned option of a read-only program (--pre, --compress-program, -fprint, ...)
+    "operand",  # a banned operand (``date`` that sets the clock, ``hostname`` that sets the name)
+    "lead_glob",  # a glob at the start of a word: it can expand to such an option (``rg foo *``)
+    "git_option",  # a git option that runs a pager or an external diff, or writes
+    "endless_device",  # /dev/zero, /dev/random, /dev/urandom: a read that never ends
+    "version_flag",  # the version or help flag of a program that reads the project first
+    "disguise",  # a file of the project with the name of a read-only program (``./git``)
+)
+
 # Files of a project that something else runs, or reads as instructions, after the agent wrote
 # them: a git hook, a task that an editor starts, a workflow of the CI, the settings of other
 # coding agents and their MCP servers. A write to one of them asks, in a project of any trust.
-# Each entry is a glob, tried as ``AutoContext.protected_globs`` are. ``Makefile``,
-# ``package.json`` and ``conftest.py`` are not in the list on purpose: the agent changes them in
-# ordinary work, and asking each time would make Auto useless in most projects. The user adds
-# more with ``[auto] protected`` in ``agent.toml``. To change this list, change this constant.
+# Each entry is a glob, tried as ``AutoContext.protected_globs`` are: a glob that ends in ``/*``
+# protects the folder as well (``mv hooks .husky`` makes ``.husky/pre-commit``), and a call that
+# is not read-only asks when it names a folder on the way to an entry (``.github``, ``.vscode``).
+# ``Makefile``, ``package.json`` and ``conftest.py`` are not in the list on purpose: the agent
+# changes them in ordinary work, and asking each time would make Auto useless in most projects.
+# The user adds more with ``[auto] protected`` in ``agent.toml``. To change this list, change this
+# constant.
 DEFAULT_PROTECTED_GLOBS: tuple[str, ...] = (
     ".husky/*",
     ".githooks/*",
@@ -148,8 +174,10 @@ class AutoContext:
     where relative paths go, and it has to be inside the roots. ``protected_paths`` are files
     or folders that always ask; ``protected_globs`` likewise. A glob is tried on the whole path,
     on the last name and on the path below a project root, so ``.github/workflows/*`` works as
-    it is written. ``pi_home`` is the agent's own home (config, trust store, sessions): all of
-    it is protected.
+    it is written. A glob that ends in ``/*`` protects the folder too. A shell glob in a call is
+    tried against the names that the protected globs spell out, and a call that is not read-only
+    asks when it names a folder in front of a protected glob (``.github``). ``pi_home`` is the
+    agent's own home (config, trust store, sessions): all of it is protected.
 
     Every folder and path in the context has to be absolute (the globs are patterns, not
     paths). With a relative or empty one the rules cannot know where it points, so every call
@@ -323,6 +351,36 @@ _SHELL_START = _words(
 )
 
 
+def _glob_names(globs: tuple[str, ...]) -> tuple[str, ...]:
+    """The names that the protected globs spell out (``.husky``, ``workflows``, ``.mcp.json``).
+    A glob in a call (``.hus*``) is tried against them as it is against ``_GLOB_PROBES``."""
+    names: dict[str, None] = {}
+    for glob in globs:
+        for part in re.split(r"[\\/]+", glob):
+            folded = _fold_name(part)
+            if folded and not _has_glob(part):
+                names[part] = None
+                names[folded] = None
+    return tuple(names)
+
+
+def _leading_folders(pattern: str) -> list[str]:
+    """The folders in front of the last name of a glob that the glob spells out: ``.github`` and
+    ``.github/workflows`` for ``.github/workflows/*``. The first glob character ends the list,
+    so ``*/Makefile`` has none."""
+    folders: list[str] = []
+    prefix = ""
+    for index, part in enumerate(pattern.rpartition("/")[0].split("/")):
+        if _has_glob(part):
+            break
+        if index and not part:
+            continue
+        prefix = f"{prefix}/{part}" if index else part
+        if prefix:
+            folders.append(prefix)
+    return folders
+
+
 class _Env:
     """The context with every path resolved once."""
 
@@ -336,6 +394,7 @@ class _Env:
         self.pi_home = ctx.fs.realpath(ctx.pi_home)
         self.protected = [ctx.fs.realpath(p) for p in ctx.protected_paths]
         self.globs = ctx.protected_globs
+        self.glob_names = _glob_names(ctx.protected_globs)
 
     def inside(self, real: str) -> bool:
         return any(_is_inside(real, root) for root in self.roots)
@@ -373,7 +432,17 @@ class _Env:
             return Reason.PROTECTED_PATH, "path.protected_glob"
         return None
 
-    def _glob_hit(self, real: str, parts: list[str]) -> bool:
+    def leading_hit(self, real: str) -> bool:
+        """Whether *real* is, as a whole, a folder in front of a protected glob (``.github`` for
+        ``.github/workflows/*``). A path below such a folder is not, and neither is a project root
+        or a folder above one: a glob with an absolute path has those in front of it too."""
+        if not any(_is_inside(real, root) and _key(real) != _key(root) for root in self.roots):
+            return False
+        names = [name for name in re.split(r"[\\/]+", real) if name]
+        parts = [name for name in map(_fold_name, names) if name]
+        return self._glob_hit(real, parts, leading=True)
+
+    def _glob_hit(self, real: str, parts: list[str], *, leading: bool = False) -> bool:
         """Whether a protected glob matches *real*. Each glob is tried on the whole path, on the
         path with every name folded (``Makefile.`` is ``makefile``), on the last name, and on the
         path below each project root, so ``.github/workflows/*`` works as it is written.
@@ -381,16 +450,20 @@ class _Env:
         A glob that starts with ``**/`` also matches at any depth below a project root:
         ``**/.husky/*`` is ``.husky/x`` and ``app/.husky/x``. Only the part of the path below
         the root is tried for that, so a project that lives in a folder with the same name is
-        not protected as a whole."""
-        forms = {real.replace("\\", "/").lower(), "/" + "/".join(parts)}
+        not protected as a whole.
+
+        A glob that ends in ``/*`` (or in ``/``) names a folder, and the folder is protected as
+        well: ``mv hooks .husky`` makes ``.husky/pre-commit`` and has no file of the set in it.
+        With *leading* the folders in front of the last name of a glob are tried instead, and
+        only for the path as a whole (``.github`` for ``.github/workflows/*``)."""
+        whole = {real.replace("\\", "/").lower(), "/" + "/".join(parts)}
         below_root: set[str] = set()
-        if parts:
-            forms.add(parts[-1])
         for root in self.roots:
             root_parts = [name for name in map(_fold_name, re.split(r"[\\/]+", root)) if name]
             if parts[: len(root_parts)] == root_parts:
                 below_root.add("/".join(parts[len(root_parts) :]))
-        forms |= below_root
+        whole |= below_root
+        forms = (whole | {parts[-1]}) if parts else whole
         for glob in self.globs:
             pattern = glob.replace("\\", "/").lower()
             anywhere = pattern.startswith("**/")
@@ -400,17 +473,33 @@ class _Env:
                 pattern = pattern[2:]
             if pattern.endswith("/"):
                 pattern += "*"
-            if any(fnmatch.fnmatchcase(form, pattern) for form in forms):
-                return True
-            if anywhere and any(fnmatch.fnmatchcase(form, "*/" + pattern) for form in below_root):
-                return True
+            if leading:
+                folders = _leading_folders(pattern)
+            else:
+                if any(fnmatch.fnmatchcase(form, pattern) for form in forms):
+                    return True
+                if anywhere and any(
+                    fnmatch.fnmatchcase(form, "*/" + pattern) for form in below_root
+                ):
+                    return True
+                folders = [pattern[:-2]] if pattern.endswith("/*") else []
+            for folder in folders:
+                if any(fnmatch.fnmatchcase(form, folder) for form in whole):
+                    return True
+                if anywhere and any(
+                    fnmatch.fnmatchcase(form, "*/" + folder) for form in below_root
+                ):
+                    return True
         return False
 
-    def path_floor(self, real: str) -> None:
-        """Raise ``_Floor`` when *real* is protected or outside the project roots."""
+    def path_floor(self, real: str, *, leading: bool = False) -> None:
+        """Raise ``_Floor`` when *real* is protected or outside the project roots. With *leading*
+        it also raises when *real* is a folder on the way to a protected glob (``leading_hit``)."""
         hit = self.protected_hit(real)
         if hit is not None:
             raise _Floor(*hit)
+        if leading and self.leading_hit(real):
+            raise _Floor(Reason.PROTECTED_PATH, "path.protected_leading")
         if not self.inside(real):
             raise _Floor(Reason.OUTSIDE_PROJECT, "path.outside_project")
 
@@ -469,6 +558,62 @@ _NAME_START = re.compile(r"[A-Za-z_]")
 _NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _FD_DUP = re.compile(r"(\d+|-)(?=[\s;&|)<>]|$)")
 _SPECIAL_PARAMS = "?$!@*#-0123456789"
+
+# A shell comment is text that nobody runs, and text in it moved a model that judges the call
+# (red-team finding M-06). A call that may hold one does not go to the model: ``bash.comment``.
+# ``may_hold_comment`` reads the command only as far as it can be sure. At the start of a text
+# that the shell reads by rules of its own (``$(``, a back quote, ``$'``, ``<<``, ``${`` with
+# more than a name) it stops and says yes. It may say yes too often (any Unicode space counts as
+# a blank here, the lexer knows three); it must never say no where the shell or ``_lex`` sees a
+# comment. ``test_auto_comment_floor`` checks both against random strings. A ``#`` inside quotes
+# is not a comment: the text of a string is left to the model (M-06 stays open there).
+_COMMENT_BREAKS = frozenset(";&|()<>")
+_BRACE_WITH_MORE_THAN_A_NAME = r"\$\{(?!#?[A-Za-z_][A-Za-z0-9_]*\})"
+_NESTED_TEXT = re.compile(r"\$[(\[\'\"]|`|<<|<\(|>\(|" + _BRACE_WITH_MORE_THAN_A_NAME)
+_NESTED_TEXT_IN_QUOTES = re.compile(r"\$[(\[]|`|" + _BRACE_WITH_MORE_THAN_A_NAME)
+
+
+def may_hold_comment(command: str) -> bool:
+    """Whether *command* may hold a shell comment (a ``#`` that starts a word outside quotes)."""
+    n = len(command)
+    i = 0
+    word_start = True
+    while i < n:
+        ch = command[i]
+        if ch == "\\":
+            if i + 1 >= n or command[i + 1] == "\n":
+                return True
+            i += 2
+            word_start = False
+        elif ch == "'":
+            end = command.find("'", i + 1)
+            if end < 0:
+                return True
+            i = end + 1
+            word_start = False
+        elif ch == '"':
+            i += 1
+            while i < n and command[i] != '"':
+                if command[i] == "\\":
+                    i += 2
+                elif _NESTED_TEXT_IN_QUOTES.match(command, i):
+                    return True
+                else:
+                    i += 1
+            if i >= n:
+                return True
+            i += 1
+            word_start = False
+        elif ch == "#":
+            if word_start:
+                return True
+            i += 1
+        else:
+            if ch in "$`<>" and _NESTED_TEXT.match(command, i):
+                return True
+            word_start = ch.isspace() or ch in _COMMENT_BREAKS
+            i += 1
+    return False
 
 
 def _lex(command: str, env: _Env) -> list[_Tok]:
@@ -775,7 +920,9 @@ _NETWORK = _words(
     "traceroute tracepath mtr dig nslookup host whois aria2c lynx w3m links http https xh "
     "httpie gh hub glab aws gcloud az kubectl helm terraform tofu ansible ansible-playbook "
     "pulumi vercel netlify wrangler flyctl fly heroku firebase supabase doctl sam serverless "
-    "sls railway deno npx bunx pnpx mosh"
+    "sls railway deno npx bunx pnpx mosh "
+    "rclone gsutil s3cmd azcopy mail mailx sendmail msmtp twine ngrok cloudflared tailscale "
+    "lftp pscp ssh-copy-id mosquitto_pub grpcurl websocat"
 )
 _PACKAGE_MANAGERS = _words(
     "apt apt-get aptitude yum dnf zypper apk pacman snap flatpak choco winget scoop brew "
@@ -937,6 +1084,10 @@ _TAR_EXEC_LONGS = frozenset(
 )
 # ``date MMDDhhmm[[CC]YY][.ss]`` sets the clock.
 _DATE_SET = re.compile(r"^\d{8}(\d{2}|\d{4})?(\.\d{2})?$")
+# Programs that are not in ``_READONLY`` because they have a rule of their own, and that a file
+# of the project can be named like (``./git``). With the names of ``_READONLY`` they make a
+# project file a disguise.
+_DISGUISED_PROGRAMS = frozenset({"git"})
 
 
 @dataclass(frozen=True)
@@ -1064,6 +1215,15 @@ class _State:
         # background job, a new session, a timeout that is not short). It is raised after the
         # words of that command are read, so a floor of the program itself (``rm``) wins.
         self.escape: str | None = None
+        # Why the model may not decide this call (D-07): the kind of the first form that the
+        # rules know to be dangerous (``BARRED_KINDS``). ``None``: no such form was found.
+        self.barred: str | None = None
+
+    def bar(self, kind: str) -> None:
+        """The call is not proven read-only, and the model must not decide it either."""
+        self.proven = False
+        if self.barred is None:
+            self.barred = kind
 
     def add_cwd(self, new: list[str]) -> None:
         """After a ``cd``: the shell is in one of the new folders, or (if ``cd`` failed) still
@@ -1187,9 +1347,12 @@ def _glob_floor(text: str, st: _State, *, shell: bool = True) -> None:
             if not _has_glob(comp):
                 continue
             parent = os.path.join(base, *plain[:index])
-            for name in _GLOB_PROBES:
+            rest = plain[index + 1 :]
+            for name in (*_GLOB_PROBES, *env.glob_names):
                 if _glob_can_match(comp, name, shell=shell):
                     hit = env.protected_hit(os.path.join(parent, name))
+                    if hit is None and rest:
+                        hit = env.protected_hit(os.path.join(parent, name, *rest))
                     if hit is not None:
                         break
             if hit is None and _glob_reaches_key(comp):
@@ -1208,41 +1371,44 @@ def _attached_values(text: str) -> list[str]:
     return [value for value in values if value.strip("/\\")]
 
 
-def _check_path(text: str, glob: bool, st: _State, *, force: bool) -> None:
+def _check_path(text: str, glob: bool, st: _State, *, force: bool, leading: bool = False) -> None:
     env = st.env
     if not text or text in _DEV_OK:
         return
     if text in _DEV_ENDLESS:
-        st.proven = False
+        st.bar("endless_device")
         return
     if text.startswith(("/dev/tcp/", "/dev/udp/")):
         raise _Floor(Reason.NETWORK, "bash.network.dev_tcp")
     if glob:
         _glob_floor(text, st)
         text = _glob_prefix(text) or "."
+        leading = False
     if force or _looks_like_path(text):
         for cwd in st.cwds:
-            env.path_floor(_resolve(text, cwd, env))
+            env.path_floor(_resolve(text, cwd, env), leading=leading)
         return
     if len(text) > 255 or re.search(r"\s", text):
         return
     for cwd in st.cwds:  # a plain name can still be a symbolic link that leaves the project
         candidate = os.path.join(cwd, text)
         if env.fs.lexists(candidate):
-            env.path_floor(env.fs.realpath(candidate))
+            env.path_floor(env.fs.realpath(candidate), leading=leading)
 
 
-def _check_word(word: _Word, st: _State, *, force: bool = False) -> None:
-    """Floor when a word that names a path leaves the project or is protected."""
+def _check_word(word: _Word, st: _State, *, force: bool = False, leading: bool = False) -> None:
+    """Floor when a word that names a path leaves the project or is protected. With *leading* (the
+    program is not proven read-only) it is also a floor to name, as a whole, a folder on the way
+    to a protected glob."""
     text = word.text
     if not force and text.startswith("-"):
         if "=" in text:
-            _check_path(text.split("=", 1)[1], word.glob, st, force=force)
+            _check_path(text.split("=", 1)[1], word.glob, st, force=force, leading=leading)
         elif not text.startswith("--"):
             for value in _attached_values(text):
-                _check_path(value, word.glob, st, force=force)
+                _check_path(value, word.glob, st, force=force, leading=leading)
         return
-    _check_path(text, word.glob, st, force=force)
+    _check_path(text, word.glob, st, force=force, leading=leading)
 
 
 def _redirect(redirect: _Redirect, st: _State) -> None:
@@ -1659,7 +1825,13 @@ def _git(args: list[_Word], st: _State) -> bool:
             raise _Floor(Reason.PROTECTED_PATH, "bash.protected.git_config")
         return False
     if sub in _GIT_READONLY:
-        return not (has(*_GIT_BANNED_READ_OPTIONS, "-O") or opts.lead_glob)
+        if has(*_GIT_BANNED_READ_OPTIONS, "-O"):
+            st.bar("git_option")
+            return False
+        if opts.lead_glob:
+            st.bar("lead_glob")
+            return False
+        return True
     if sub == "branch":
         listing = has("--list", "-l")
         mutating = has(
@@ -1687,23 +1859,38 @@ def _long_hit(option: str, banned: frozenset[str]) -> bool:
     return any(len(option) > 2 and name.startswith(option) for name in banned)
 
 
-def _readonly_ok(program: str, args: _Args) -> bool:
-    spec = _READONLY.get(program)
-    if spec is None:
-        return False
-    if any(c in spec.banned_shorts for c in args.shorts):
-        return False
-    if any(_long_hit(option, spec.banned_longs) for option in args.longs):
-        return False
-    if set(args.raw) & spec.banned_raw:
-        return False
+def _forbidden_form(program: str, spec: _ReadOnly, args: _Args) -> str | None:
+    """The kind (``BARRED_KINDS``) of what *args* give a program of the read-only list that the
+    rules know to be dangerous for it, or ``None`` when they give nothing of the kind."""
+    if (
+        any(c in spec.banned_shorts for c in args.shorts)
+        or any(_long_hit(option, spec.banned_longs) for option in args.longs)
+        or set(args.raw) & spec.banned_raw
+    ):
+        return "option"
     if spec.glob_inject and args.lead_glob:
         guarded = spec.banned_shorts or spec.banned_longs or spec.banned_raw
         if guarded:
-            return False
+            return "lead_glob"
     if spec.max_positional is not None and (len(args.pos) > spec.max_positional or args.glob_pos):
+        return "operand"
+    if program == "date" and any(_DATE_SET.match(item) for item in args.pos):
+        return "operand"
+    return None
+
+
+def _readonly_ok(program: str, args: _Args, st: _State) -> bool:
+    """Whether the call of a program of the read-only list is read-only. A form that the rules
+    know to be dangerous for the program bars the call from the model (``_State.bar``). A
+    program that is not on the list is not read-only, and is not barred: it is unknown."""
+    spec = _READONLY.get(program)
+    if spec is None:
         return False
-    return not (program == "date" and any(_DATE_SET.match(item) for item in args.pos))
+    kind = _forbidden_form(program, spec, args)
+    if kind is not None:
+        st.bar(kind)
+        return False
+    return True
 
 
 def _program_rules(words: list[_Word], dynamic: bool, st: _State, depth: int = 0) -> None:
@@ -1727,6 +1914,10 @@ def _program_rules(words: list[_Word], dynamic: bool, st: _State, depth: int = 0
             for cwd in st.cwds:
                 env.path_floor(_resolve(text, cwd, env))
             project_path_program = True
+            if program in _READONLY or program in _DISGUISED_PROGRAMS:
+                # ``./git status`` is a file of the project that is called ``git``. The name
+                # proves nothing, and a model must not take it for the program.
+                st.bar("disguise")
 
     if program in _PRIVILEGE:
         raise _Floor(Reason.PRIVILEGE, "bash.privilege")
@@ -1763,7 +1954,7 @@ def _program_rules(words: list[_Word], dynamic: bool, st: _State, depth: int = 0
     ):
         if family is None and program not in _READONLY and program not in _VERSION_PURE:
             st.project_code = True
-            st.proven = False
+            st.bar("version_flag")
         return
 
     if family is not None:
@@ -1855,35 +2046,55 @@ def _program_rules(words: list[_Word], dynamic: bool, st: _State, depth: int = 0
         proven = _find(args_words, st, depth)
     elif program in ("cd", "pushd"):
         proven = _cd(args_words, st, program)
-    elif not project_path_program and not dynamic:
-        proven = _readonly_ok(program, args)
+    elif not project_path_program:
+        # Also for a program behind ``xargs`` or ``find -exec`` (``dynamic``): the form that the
+        # call shows is barred from the model there too. ``dynamic`` still ends the proof below.
+        proven = _readonly_ok(program, args, st)
 
     if program not in ("cd", "pushd"):
         for word in args_words:
-            _check_word(word, st)
-    if not proven or dynamic or project_path_program:
+            _check_word(word, st, leading=not proven)
+    if not proven or dynamic:
         st.proven = False
+
+
+_FIND_EXEC_OPTIONS = ("-exec", "-execdir", "-ok", "-okdir")
 
 
 def _find(args_words: list[_Word], st: _State, depth: int) -> bool:
     raw = {w.text for w in args_words if w.text.startswith("-")}
     if "-delete" in raw:
         raise _Floor(Reason.DESTRUCTIVE, "bash.destructive.find_delete")
-    for index, word in enumerate(args_words):
-        if word.text in ("-exec", "-execdir", "-ok", "-okdir"):
-            inner: list[_Word] = []
-            for follower in args_words[index + 1 :]:
-                if follower.text in (";", "+"):
-                    break
-                inner.append(follower)
-            if not inner:
-                raise _Floor(Reason.UNCLEAR, "bash.unclear.find_exec")
-            if depth >= MAX_WRAPPER_DEPTH:
-                raise _Floor(Reason.UNCLEAR, "bash.unclear.wrapper_depth")
-            unwrapped, _ = _unwrap(inner, st)
-            _program_rules(unwrapped, True, st, depth + 1)
-            return False
-    return _readonly_ok("find", _Args.of(args_words))
+    own: list[_Word] = []  # what is for ``find`` itself, not for a command that it runs
+    clauses = 0
+    index = 0
+    while index < len(args_words):
+        word = args_words[index]
+        index += 1
+        if word.text not in _FIND_EXEC_OPTIONS:
+            own.append(word)
+            continue
+        # ``find`` ends a command at ``;``, or at ``+`` when ``{}`` comes right before it. A ``+``
+        # elsewhere is an argument of the command. ``find`` may run a command for each of its
+        # ``-exec`` options, and each one is read.
+        inner: list[_Word] = []
+        while index < len(args_words):
+            follower = args_words[index]
+            index += 1
+            if follower.text == ";" or (
+                follower.text == "+" and (not inner or inner[-1].text == "{}")
+            ):
+                break
+            inner.append(follower)
+        if not inner:
+            raise _Floor(Reason.UNCLEAR, "bash.unclear.find_exec")
+        if depth >= MAX_WRAPPER_DEPTH:
+            raise _Floor(Reason.UNCLEAR, "bash.unclear.wrapper_depth")
+        unwrapped, _ = _unwrap(inner, st)
+        _program_rules(unwrapped, True, st, depth + 1)
+        clauses += 1
+    proven = _readonly_ok("find", _Args.of(own), st)
+    return proven and not clauses
 
 
 def _cd(args_words: list[_Word], st: _State, program: str) -> bool:
@@ -1974,6 +2185,10 @@ def _decide_bash(call: ToolCall, env: _Env) -> RuleDecision:
         return _ask(Reason.UNTRUSTED_PROJECT_CODE, "bash.untrusted_project_code")
     if st.proven:
         return _allow(Reason.READ_ONLY_COMMAND, "allow.bash.read_only")
+    if st.barred is not None:
+        return _ask(Reason.UNCLEAR, f"bash.barred.{st.barred}")
+    if may_hold_comment(command):
+        return _ask(Reason.COMMENT, "bash.comment")
     return RuleDecision(Outcome.JUDGE, By.RULE, Reason.UNCLEAR, "bash.not_proven")
 
 

@@ -119,6 +119,57 @@ def test_resolve_passes_base_url(monkeypatch):
     assert captured["kwargs"]["base_url"] == "https://api.siliconflow.cn/v1"
 
 
+def _capture_init_chat_model(monkeypatch) -> dict[str, Any]:
+    captured: dict[str, Any] = {}
+
+    def fake_init_chat_model(model: str, *, model_provider: str | None = None, **kwargs: Any):
+        captured["kwargs"] = kwargs
+        return object()
+
+    fake_pkg = types.ModuleType("langchain")
+    fake_mod = types.ModuleType("langchain.chat_models")
+    fake_mod.init_chat_model = fake_init_chat_model
+    fake_pkg.chat_models = fake_mod
+    monkeypatch.setitem(sys.modules, "langchain", fake_pkg)
+    monkeypatch.setitem(sys.modules, "langchain.chat_models", fake_mod)
+    return captured
+
+
+def test_resolve_passes_temperature_and_max_tokens_when_set(monkeypatch):
+    """A classifier asks for a short, repeatable answer: both limits reach the chat model."""
+    captured = _capture_init_chat_model(monkeypatch)
+    ls_mod.resolve_chat_model(
+        Model(provider="other", model_id="m"), api_key="k", temperature=0.0, max_tokens=16
+    )
+    assert captured["kwargs"]["temperature"] == 0.0
+    assert captured["kwargs"]["max_tokens"] == 16
+
+
+def test_resolve_leaves_temperature_and_max_tokens_to_the_provider_by_default(monkeypatch):
+    captured = _capture_init_chat_model(monkeypatch)
+    ls_mod.resolve_chat_model(Model(provider="other", model_id="m"), api_key="k")
+    assert "temperature" not in captured["kwargs"]
+    assert "max_tokens" not in captured["kwargs"]
+
+
+async def test_stream_options_temperature_and_max_tokens_reach_the_chat_model(monkeypatch):
+    seen: dict[str, Any] = {}
+
+    def fake_resolve(model, api_key=None, reasoning=None, **kwargs):
+        seen.update(kwargs)
+        return _FakeListContentModel()
+
+    monkeypatch.setattr(ls_mod, "resolve_chat_model", fake_resolve)
+    stream = await ls_mod.langchain_stream(
+        Model(provider="anthropic", model_id="claude-x"),
+        LlmContext(system_prompt=None, messages=[]),
+        StreamOptions(temperature=0.0, max_tokens=16),
+    )
+    async for _ in stream:
+        pass
+    assert seen == {"temperature": 0.0, "max_tokens": 16}
+
+
 def test_resolve_fallback_missing_langchain(monkeypatch):
     """B5: missing 'langchain' package must raise a clear ImportError, not 'Unsupported'."""
     monkeypatch.setitem(sys.modules, "langchain", None)

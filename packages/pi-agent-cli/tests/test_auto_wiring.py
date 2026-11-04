@@ -126,7 +126,7 @@ def _agent(
         permission=permission,  # type: ignore[arg-type]
         provider="mock",
         model_id="mock",
-        auto=auto or AutoConfig(),
+        auto=auto or AutoConfig(classifier="rules"),
         default_project_trust=project_trust,  # type: ignore[arg-type]
     )
     return PiAcpAgent(
@@ -305,7 +305,7 @@ def _tool(name: str) -> Any:
 
 def _fake_session(world: _World, tools: list[Any] | None = None, **kwargs: Any):
     harness = _FakeHarness(world.project, tools if tools is not None else [_tool("write")])
-    config = CliConfig(permission="auto", auto=kwargs.pop("auto", AutoConfig()))
+    config = CliConfig(permission="auto", auto=kwargs.pop("auto", AutoConfig(classifier="rules")))
     session = AutoSession(
         harness=harness,
         get_config=lambda: config,
@@ -499,7 +499,9 @@ async def test_a_tool_of_an_extension_with_the_name_of_ours_is_not_ours(world: _
 
 
 async def test_a_folder_in_extra_roots_that_is_not_absolute_makes_every_call_ask(world: _World):
-    agent, client, session_id = await _open(world, auto=AutoConfig(extra_roots=("relative/dir",)))
+    agent, client, session_id = await _open(
+        world, auto=AutoConfig(classifier="rules", extra_roots=("relative/dir",))
+    )
 
     verdict = await _verdict_of(agent, session_id)("bash", {"command": "ls"})
 
@@ -508,7 +510,9 @@ async def test_a_folder_in_extra_roots_that_is_not_absolute_makes_every_call_ask
 
 
 async def test_a_value_of_auto_that_cannot_be_used_makes_every_call_ask(world: _World):
-    auto = AutoConfig(problems=("An entry of protected in [auto] is not text.",))
+    auto = AutoConfig(
+        classifier="rules", problems=("An entry of protected in [auto] is not text.",)
+    )
     agent, client, session_id = await _open(world, auto=auto)
 
     verdict = await _verdict_of(agent, session_id)("bash", {"command": "ls"})
@@ -522,7 +526,9 @@ async def test_a_value_of_auto_that_cannot_be_used_is_told_when_the_session_is_n
     world: _World, permission: str
 ):
     """The user sees it when the config loads, not first when Auto is turned on."""
-    auto = AutoConfig(problems=("An entry of protected in [auto] is not text.",))
+    auto = AutoConfig(
+        classifier="rules", problems=("An entry of protected in [auto] is not text.",)
+    )
     _, client, _ = await _open(world, permission=permission, auto=auto)
 
     (text,) = client.messages()
@@ -533,7 +539,9 @@ async def test_a_value_of_auto_that_cannot_be_used_is_told_when_the_session_is_n
 async def test_a_value_of_auto_that_cannot_be_used_is_told_once_when_the_session_is_in_auto(
     world: _World,
 ):
-    auto = AutoConfig(problems=("An entry of protected in [auto] is not text.",))
+    auto = AutoConfig(
+        classifier="rules", problems=("An entry of protected in [auto] is not text.",)
+    )
     _, client, _ = await _open(world, auto=auto)
 
     (text,) = client.messages()
@@ -559,7 +567,7 @@ async def test_a_failed_check_does_not_make_auto_ask_more_than_ask_mode_does(wor
     """A tool that declares itself harmless is never asked about (rule A0), checks or not."""
     note = world.project / "note.txt"
     note.write_text("hello\n", encoding="utf-8")
-    auto = AutoConfig(extra_roots=("relative/dir",))
+    auto = AutoConfig(classifier="rules", extra_roots=("relative/dir",))
     agent, client, session_id = await _open(
         world,
         _calls_stream(("c1", "read", {"path": str(note)})),
@@ -628,7 +636,7 @@ async def test_a_write_to_makefile_package_json_or_conftest_does_not_ask(
 
 
 async def test_the_users_own_protected_globs_come_on_top_of_the_default_list(world: _World):
-    auto = AutoConfig(protected=("secrets/*",))
+    auto = AutoConfig(classifier="rules", protected=("secrets/*",))
     agent, _, session_id = await _open(world, auto=auto)
     decide = _verdict_of(agent, session_id)
 
@@ -749,8 +757,8 @@ async def test_code_of_a_project_that_the_user_vouched_for_is_left_to_the_next_s
 
     verdict = await _verdict_of(agent, session_id)("bash", {"command": "pytest"})
 
-    # The rules cannot prove it harmless, and the model step is not built yet: it asks, but
-    # not for the reason of the first test.
+    # The rules cannot prove it harmless, and this session has no model step
+    # (``classifier = "rules"``): it asks, but not for the reason of the first test.
     assert verdict.outcome is Outcome.ASK
     assert verdict.reason is Reason.UNCLEAR
     assert verdict.rule_id == "pipeline.unclear"
@@ -1087,7 +1095,7 @@ async def test_a_session_without_auto_state_asks_when_it_is_in_auto(world: _Worl
 
 async def test_a_bash_call_that_auto_allowed_stops_at_the_time_limit(world: _World):
     stream = _calls_stream(("c1", "bash", {"command": "sleep 30"}))
-    auto = AutoConfig(bash_timeout_seconds=0.5)
+    auto = AutoConfig(classifier="rules", bash_timeout_seconds=0.5)
     agent, client, session_id = await _open(world, stream, auto=auto, client=_Client(allow=False))
     results: list[Any] = []
     agent._harnesses[session_id].subscribe(_collect_results(results))
@@ -1104,7 +1112,7 @@ async def test_a_bash_call_that_auto_allowed_stops_at_the_time_limit(world: _Wor
 
 async def test_a_bash_call_that_auto_allowed_stops_at_the_output_limit(world: _World):
     stream = _calls_stream(("c1", "bash", {"command": "seq 1 100000000"}))
-    auto = AutoConfig(bash_max_output_mb=1)
+    auto = AutoConfig(classifier="rules", bash_max_output_mb=1)
     agent, _, session_id = await _open(world, stream, auto=auto, client=_Client(allow=False))
     results: list[Any] = []
     agent._harnesses[session_id].subscribe(_collect_results(results))
@@ -1121,7 +1129,7 @@ async def test_a_bash_call_that_the_user_allowed_has_no_limit_of_auto(world: _Wo
     # Auto asks (the command writes), the user says yes: the user chose it, no limit applies.
     command = f"sleep 1.2; touch {marker}"
     stream = _calls_stream(("c1", "bash", {"command": command}))
-    auto = AutoConfig(bash_timeout_seconds=0.3)
+    auto = AutoConfig(classifier="rules", bash_timeout_seconds=0.3)
     agent, client, session_id = await _open(world, stream, auto=auto, client=_Client(allow=True))
 
     await _prompt(agent, session_id)

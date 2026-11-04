@@ -227,6 +227,11 @@ class StreamOptions:
     # others get schema instructions appended to the system prompt. The final
     # text is parsed into AssistantMessage.structured_output.
     response_schema: dict[str, Any] | type | None = None
+    # Sampling limits for a call that wants a short, repeatable answer (a classifier). ``None``
+    # leaves the provider's default. A model that does not take them (some reasoning models)
+    # fails the request like any other request error.
+    temperature: float | None = None
+    max_tokens: int | None = None
 
 
 ConvertToLlmFn = Callable[[list[AgentMessage]], list[Message] | Awaitable[list[Message]]]

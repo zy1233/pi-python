@@ -148,6 +148,10 @@ AutoClassifier = Literal["rules", "model"]
 # those should take minutes or print without end; the limits are what stops one that does.
 DEFAULT_AUTO_BASH_TIMEOUT_SECONDS = 300.0
 DEFAULT_AUTO_BASH_MAX_OUTPUT_MB = 64
+# The model step (``[auto] timeout_seconds``): the seconds that one question to the model may
+# take. A model that does not answer in this time is an ASK.
+DEFAULT_AUTO_MODEL_TIMEOUT_SECONDS = 8.0
+MAX_AUTO_MODEL_TIMEOUT_SECONDS = 120.0
 
 
 @dataclass(frozen=True)
@@ -155,18 +159,22 @@ class AutoConfig:
     """The ``[auto]`` table of ``agent.toml``: settings of the Auto permission mode.
 
     It is read from the home file only, never from a file of the project: what a project can
-    set, a project can loosen (invariant 9). ``classifier`` is ``"rules"`` or ``"model"``; only
-    ``"rules"`` works in this version, and ``"model"`` is read and then decided as ``"rules"``
-    (``notes`` says so). ``extra_roots`` are folders that count like the project folder;
-    ``protected`` are globs that always ask, on top of the built-in list. A folder that is not
-    absolute is kept as it is, so that Auto can see it is wrong and ask about every call.
-    ``notes`` are values of ``agent.toml`` that were read and not used (also a ``permission``
-    that is not one of the three modes), as sentences for the user. ``problems``
-    are values that Auto cannot work with safely (an entry of ``protected`` that is not text,
-    for example): while there is one, Auto asks about every call.
+    set, a project can loosen (invariant 9). ``classifier`` is ``"model"`` (the default) or
+    ``"rules"``: with ``"model"`` a ``bash`` command that the rules cannot prove is judged by a
+    model; with ``"rules"`` no model is called and such a command asks. ``model`` is the ``id`` of
+    the ``[model]`` or ``[[models]]`` entry that judges (empty: the model of the session) and
+    ``timeout_seconds`` is the time that it has to answer. ``extra_roots`` are folders that count
+    like the project folder; ``protected`` are globs that always ask, on top of the built-in
+    list. A folder that is not absolute is kept as it is, so that Auto can see it is wrong and
+    ask about every call. ``notes`` are values of ``agent.toml`` that were read and not used
+    (also a ``permission`` that is not one of the three modes), as sentences for the user.
+    ``problems`` are values that Auto cannot work with safely (an entry of ``protected`` that
+    is not text, for example): while there is one, Auto asks about every call.
     """
 
-    classifier: AutoClassifier = "rules"
+    classifier: AutoClassifier = "model"
+    model: str = ""
+    timeout_seconds: float = DEFAULT_AUTO_MODEL_TIMEOUT_SECONDS
     extra_roots: tuple[str, ...] = ()
     protected: tuple[str, ...] = ()
     bash_timeout_seconds: float = DEFAULT_AUTO_BASH_TIMEOUT_SECONDS
@@ -258,6 +266,13 @@ class CliConfig:
                 )
             )
         return tuple(out)
+
+    def auto_model_is_unknown(self) -> bool:
+        """``[auto] model`` names an id that no ``[model]`` or ``[[models]]`` entry has. Empty
+        means the model of the session, and that is never unknown. With such an id the model
+        step has no model to ask, and every call that needs a judge asks (``model.no_model``)."""
+        wanted = self.auto.model
+        return bool(wanted) and all(choice.id != wanted for choice in self.model_choices())
 
 
 def load_config(home: Path | str | None = None) -> CliConfig:
@@ -405,7 +420,7 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
     if permission_note is not None:
         auto = replace(auto, notes=(permission_note, *auto.notes))
 
-    return CliConfig(
+    config = CliConfig(
         permission=permission,  # type: ignore[arg-type]
         provider=str(model.get("provider") or data.get("provider") or MOCK_PROVIDER),
         model_id=str(model.get("id") or model.get("model_id") or data.get("model_id") or "mock"),
@@ -431,15 +446,27 @@ def _from_toml(data: dict[str, Any]) -> CliConfig:
         models=tuple(models),
         auto=auto,
     )
+    if config.auto_model_is_unknown():
+        note = (
+            f'model in [auto] is "{auto.model}", which is not the id of a model in [model] or '
+            "[[models]]. The model step cannot run, and Auto asks about every command that the "
+            "rules cannot prove."
+        )
+        config = replace(config, auto=replace(auto, notes=(*auto.notes, note)))
+    return config
 
 
 _AUTO_KEYS = frozenset(
-    {"classifier", "extra_roots", "protected", "bash_timeout_seconds", "bash_max_output_mb"}
+    {
+        "classifier",
+        "model",
+        "timeout_seconds",
+        "extra_roots",
+        "protected",
+        "bash_timeout_seconds",
+        "bash_max_output_mb",
+    }
 )
-
-# Keys of the model step (design section 3.8). They are known so that a file written after the
-# design is not told "not known", but nothing reads them yet.
-_AUTO_MODEL_STEP_KEYS = frozenset({"model", "timeout_seconds"})
 
 
 def _auto_config(value: object) -> AutoConfig:
@@ -456,26 +483,47 @@ def _auto_config(value: object) -> AutoConfig:
     notes: list[str] = []
     problems: list[str] = []
     for key in value:
-        if key in _AUTO_MODEL_STEP_KEYS:
-            notes.append(
-                f'The key "{key}" in [auto] is for the model step, which does not exist yet. '
-                "It is ignored."
-            )
-        elif key not in _AUTO_KEYS:
+        if key not in _AUTO_KEYS:
             notes.append(f'The key "{key}" in [auto] is not known, and it is ignored.')
 
-    classifier: AutoClassifier = "rules"
+    # A value that is not one of the two names is read as "rules": the side that sends nothing
+    # to a model.
+    classifier: AutoClassifier = "model"
     raw_classifier = value.get("classifier")
     if raw_classifier is not None:
         name = raw_classifier.strip().lower() if isinstance(raw_classifier, str) else ""
-        if name == "model":
-            classifier = "model"
-            notes.append(
-                'classifier = "model" does not work yet. Auto uses the rules only, and it asks '
-                "you about a command that the rules cannot prove."
-            )
-        elif name != "rules":
+        if name in ("model", "rules"):
+            classifier = name  # type: ignore[assignment]
+        else:
+            classifier = "rules"
             notes.append('classifier in [auto] must be "rules" or "model". Auto uses "rules".')
+
+    judge = ""
+    raw_model = value.get("model")
+    if raw_model is not None:
+        if isinstance(raw_model, str):
+            judge = raw_model.strip()
+        else:
+            notes.append(
+                "model in [auto] must be the id of a model of this file, as text. Auto uses the "
+                "model of the session."
+            )
+
+    model_timeout = DEFAULT_AUTO_MODEL_TIMEOUT_SECONDS
+    raw_model_timeout = value.get("timeout_seconds")
+    if raw_model_timeout is not None:
+        if (
+            isinstance(raw_model_timeout, (int, float))
+            and not isinstance(raw_model_timeout, bool)
+            and 0 < raw_model_timeout <= MAX_AUTO_MODEL_TIMEOUT_SECONDS
+        ):
+            model_timeout = float(raw_model_timeout)
+        else:
+            notes.append(
+                "timeout_seconds in [auto] must be a number above 0 and not above "
+                f"{int(MAX_AUTO_MODEL_TIMEOUT_SECONDS)}. "
+                f"Auto uses {DEFAULT_AUTO_MODEL_TIMEOUT_SECONDS:g} seconds."
+            )
 
     extra_roots: list[str] = []
     raw_roots = value.get("extra_roots")
@@ -532,6 +580,8 @@ def _auto_config(value: object) -> AutoConfig:
 
     return AutoConfig(
         classifier=classifier,
+        model=judge,
+        timeout_seconds=model_timeout,
         extra_roots=tuple(extra_roots),
         protected=tuple(protected),
         bash_timeout_seconds=timeout,

@@ -10,6 +10,8 @@ import pytest
 from pi_agent_cli.config import (
     DEFAULT_AUTO_BASH_MAX_OUTPUT_MB,
     DEFAULT_AUTO_BASH_TIMEOUT_SECONDS,
+    DEFAULT_AUTO_MODEL_TIMEOUT_SECONDS,
+    MAX_AUTO_MODEL_TIMEOUT_SECONDS,
     AutoConfig,
     CliConfig,
     expand_config_path,
@@ -282,7 +284,9 @@ def test_without_an_auto_table_the_defaults_are_used(tmp_path: Path):
     config = _load(tmp_path, 'permission = "auto"\n')
 
     assert config.auto == AutoConfig()
-    assert config.auto.classifier == "rules"
+    assert config.auto.classifier == "model"
+    assert config.auto.model == ""
+    assert config.auto.timeout_seconds == DEFAULT_AUTO_MODEL_TIMEOUT_SECONDS == 8.0
     assert config.auto.bash_timeout_seconds == DEFAULT_AUTO_BASH_TIMEOUT_SECONDS == 300.0
     assert config.auto.bash_max_output_mb == DEFAULT_AUTO_BASH_MAX_OUTPUT_MB == 64
     assert config.auto.notes == ()
@@ -295,15 +299,22 @@ def test_the_auto_table_is_read(tmp_path: Path):
         """
 [auto]
 classifier = "rules"
+model = "judge-small"
+timeout_seconds = 3.5
 extra_roots = ["/srv/shared", "/data/work"]
 protected = ["secrets/*", "*.pem"]
 bash_timeout_seconds = 90
 bash_max_output_mb = 8
+
+[[models]]
+id = "judge-small"
 """,
     )
 
     assert config.auto == AutoConfig(
         classifier="rules",
+        model="judge-small",
+        timeout_seconds=3.5,
         extra_roots=("/srv/shared", "/data/work"),
         protected=("secrets/*", "*.pem"),
         bash_timeout_seconds=90.0,
@@ -326,13 +337,37 @@ def test_a_folder_that_is_not_absolute_is_kept_so_that_auto_can_see_it_is_wrong(
     assert config.auto.extra_roots == ("relative/dir",)
 
 
-def test_the_model_classifier_is_read_and_says_it_does_not_work_yet(tmp_path: Path):
+def test_the_model_classifier_is_the_default_and_can_be_named(tmp_path: Path):
     config = _load(tmp_path, '[auto]\nclassifier = "model"\n')
 
     assert config.auto.classifier == "model"
-    (note,) = config.auto.notes
-    assert "does not work yet" in note
+    assert config.auto.notes == ()
     assert config.auto.problems == ()
+
+
+@pytest.mark.parametrize("toml", ["[auto]\n", '[auto]\nextra_roots = ["/srv"]\n'])
+def test_an_auto_table_that_names_no_classifier_keeps_the_model_step_on(tmp_path: Path, toml: str):
+    config = _load(tmp_path, toml)
+
+    assert config.auto.classifier == "model"
+    assert config.auto.notes == ()
+
+
+@pytest.mark.parametrize("value", ['"Model"', '" model "', '"RULES"'])
+def test_the_name_of_the_classifier_is_read_without_regard_to_case_and_spaces(
+    tmp_path: Path, value: str
+):
+    config = _load(tmp_path, f"[auto]\nclassifier = {value}\n")
+
+    assert config.auto.classifier == value.strip('" ').lower()
+    assert config.auto.notes == ()
+
+
+def test_the_rules_classifier_is_the_switch_that_turns_the_model_step_off(tmp_path: Path):
+    config = _load(tmp_path, '[auto]\nclassifier = "rules"\n')
+
+    assert config.auto.classifier == "rules"
+    assert config.auto.notes == ()
 
 
 @pytest.mark.parametrize("value", ['"bogus"', "3", "true", '""'])
@@ -354,19 +389,85 @@ def test_a_key_that_is_not_known_is_named_in_a_note(tmp_path: Path):
     assert "not known" in note
 
 
-@pytest.mark.parametrize("key", ["model", "timeout_seconds"])
-def test_a_key_of_the_model_step_is_read_and_says_that_nothing_uses_it_yet(
-    tmp_path: Path, key: str
-):
-    """The design lists these keys. A file that follows it must not be told that they are not
-    known, only that nothing uses them yet."""
-    config = _load(tmp_path, f'[auto]\n{key} = "x"\n')
+def test_the_model_of_the_model_step_is_read_and_may_be_a_model_of_the_file(tmp_path: Path):
+    config = _load(
+        tmp_path,
+        """
+[model]
+provider = "openai"
+id = "main"
 
-    (note,) = config.auto.notes
-    assert key in note
-    assert "model step" in note
-    assert "not known" not in note
+[auto]
+model = "judge-small"
+
+[[models]]
+id = "judge-small"
+""",
+    )
+
+    assert config.auto.model == "judge-small"
+    assert config.auto.notes == ()
     assert config.auto.problems == ()
+
+
+def test_the_model_of_the_model_step_may_be_the_default_model(tmp_path: Path):
+    config = _load(tmp_path, '[model]\nid = "main"\n[auto]\nmodel = " main "\n')
+
+    assert config.auto.model == "main"
+    assert config.auto.notes == ()
+
+
+def test_a_model_of_the_model_step_that_is_not_in_the_file_is_named_in_a_note(tmp_path: Path):
+    """The step cannot run without it. It does not fall back to the session's model: the user
+    named another one on purpose (it may be the one that they trust with their commands)."""
+    config = _load(tmp_path, '[model]\nid = "main"\n[auto]\nmodel = "ghost"\n')
+
+    assert config.auto.model == "ghost"
+    (note,) = config.auto.notes
+    assert '"ghost"' in note
+    assert "[[models]]" in note
+    assert "asks about every command" in note
+
+
+@pytest.mark.parametrize("value", ["3", "true", "[1]"])
+def test_a_model_of_the_model_step_that_is_not_text_is_dropped_with_a_note(
+    tmp_path: Path, value: str
+):
+    config = _load(tmp_path, f"[auto]\nmodel = {value}\n")
+
+    assert config.auto.model == ""
+    (note,) = config.auto.notes
+    assert "model in [auto]" in note
+
+
+def test_an_empty_model_of_the_model_step_means_the_model_of_the_session(tmp_path: Path):
+    config = _load(tmp_path, '[auto]\nmodel = "  "\n')
+
+    assert config.auto.model == ""
+    assert config.auto.notes == ()
+
+
+@pytest.mark.parametrize("value", ["1", "2.5", str(int(MAX_AUTO_MODEL_TIMEOUT_SECONDS)), "0.5"])
+def test_the_time_for_the_model_step_is_read(tmp_path: Path, value: str):
+    config = _load(tmp_path, f"[auto]\ntimeout_seconds = {value}\n")
+
+    assert config.auto.timeout_seconds == float(value)
+    assert config.auto.notes == ()
+
+
+@pytest.mark.parametrize(
+    "value", ["0", "-1", "121", "1e9", '"8"', "true", "nan", "inf", "-inf", "[8]"]
+)
+def test_a_time_for_the_model_step_that_cannot_be_used_is_dropped_with_a_note(
+    tmp_path: Path, value: str
+):
+    config = _load(tmp_path, f"[auto]\ntimeout_seconds = {value}\n")
+
+    assert config.auto.timeout_seconds == DEFAULT_AUTO_MODEL_TIMEOUT_SECONDS
+    (note,) = config.auto.notes
+    assert "timeout_seconds in [auto]" in note
+    assert "not above 120" in note
+    assert "8 seconds" in note
 
 
 def test_a_value_that_loosens_auto_is_dropped_with_a_note(tmp_path: Path):

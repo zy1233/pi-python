@@ -6,8 +6,9 @@ sentences are fixed text: no model output, no command text and no file name ever
 them. This keeps the title safe to show in any client, and it keeps a hostile command from
 writing its own explanation.
 
-Model answers (``ASK <CODE>``, used from the model step on) map to the same codes through
-``from_model_code``; a code that is not in the closed list gives ``None``.
+Model answers (``ASK <CODE>``) map to the same codes through ``from_model_code``; a code that
+is not in the closed list gives ``None``. A model ``ALLOW`` has one reason of its own,
+``MODEL_ALLOWED``.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ class Reason(StrEnum):
     HARMLESS = "harmless"
     IN_PROJECT_EDIT = "in_project_edit"
     READ_ONLY_COMMAND = "read_only_command"
+    MODEL_ALLOWED = "model_allowed"
 
     OUTSIDE_PROJECT = "outside_project"
     PROTECTED_PATH = "protected_path"
@@ -30,6 +32,7 @@ class Reason(StrEnum):
     UNDECLARED_TOOL = "undeclared_tool"
     WORKFLOW = "workflow"
     UNCLEAR = "unclear"
+    COMMENT = "comment"
     TOO_LARGE = "too_large"
     OVERWRITE_NO_GIT = "overwrite_no_git"
     PRIVILEGE = "privilege"
@@ -40,12 +43,15 @@ class Reason(StrEnum):
     INTERNAL_ERROR = "internal_error"
 
 
-ALLOW_REASONS = frozenset({Reason.HARMLESS, Reason.IN_PROJECT_EDIT, Reason.READ_ONLY_COMMAND})
+ALLOW_REASONS = frozenset(
+    {Reason.HARMLESS, Reason.IN_PROJECT_EDIT, Reason.READ_ONLY_COMMAND, Reason.MODEL_ALLOWED}
+)
 
 SENTENCES: dict[Reason, str] = {
     Reason.HARMLESS: "tool declares itself harmless",
     Reason.IN_PROJECT_EDIT: "edit inside the project folder",
     Reason.READ_ONLY_COMMAND: "read-only command",
+    Reason.MODEL_ALLOWED: "the checker found it safe",
     Reason.OUTSIDE_PROJECT: "leaves the project folder",
     Reason.PROTECTED_PATH: "touches a protected file",
     Reason.DESTRUCTIVE: "deletes or overwrites data",
@@ -56,6 +62,7 @@ SENTENCES: dict[Reason, str] = {
     Reason.UNDECLARED_TOOL: "tool does not declare itself harmless",
     Reason.WORKFLOW: "starts a workflow",
     Reason.UNCLEAR: "cannot tell if it is safe",
+    Reason.COMMENT: "has a shell comment and no rule proves it safe",
     Reason.TOO_LARGE: "command is too long to check",
     Reason.OVERWRITE_NO_GIT: "overwrites a file that git cannot restore",
     Reason.PRIVILEGE: "changes the system or needs more rights",

@@ -439,6 +439,9 @@ def resolve_chat_model(
     model: Model,
     api_key: str | None = None,
     reasoning: ThinkingLevel | None = None,
+    *,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
 ) -> Any:
     """Resolve LangChain chat model from pi Model config."""
     kwargs: dict[str, Any] = {"model": model.model_id}
@@ -447,6 +450,10 @@ def resolve_chat_model(
     if model.base_url:
         kwargs["base_url"] = model.base_url
     kwargs = _apply_reasoning_params(kwargs, model, reasoning)
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+    if max_tokens is not None:
+        kwargs["max_tokens"] = max_tokens
 
     provider = model.provider.lower()
     if provider == "openai":
@@ -514,7 +521,13 @@ async def langchain_stream(
         signal = options.signal
         usage_meta_acc: dict[str, Any] = {}
         try:
-            chat = resolve_chat_model(model, options.api_key, options.reasoning)
+            chat = resolve_chat_model(
+                model,
+                options.api_key,
+                options.reasoning,
+                temperature=options.temperature,
+                max_tokens=options.max_tokens,
+            )
             transformed = transform_messages(context.messages, model)
 
             # Structured output (#7): schema instructions go into the system
