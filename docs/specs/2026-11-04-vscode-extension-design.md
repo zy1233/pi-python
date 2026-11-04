@@ -82,7 +82,7 @@ packages/pi-vscode/
 
 `resolveAgentCommand(host)` returns `{command, args, source}` in this order:
 
-1. `zycode.agentPath` (a non-empty string), with `zycode.agentArgs` (default `[]`). `source = "setting"`. Example for a Python install: path `python`, args `["-m", "pi_agent_cli"]`. A relative path is an error: the setting is read from the user settings only (section 9), and a relative path would depend on the working folder.
+1. `zycode.agentPath` (a non-empty string), with `zycode.agentArgs` (default `[]`). `source = "setting"`. Example for a Python install: path `python`, args `["-m", "pi_agent_cli"]`. The value is an absolute path, or a bare program name that the operating system finds on `PATH` (the user named it). A relative path with a folder part (`./agent`, `bin/agent`) is an error: it would depend on the working folder.
 2. The bundled binary: `<extension>/bin/zycode-agent` (`.exe` on Windows). `source = "bundled"`.
 3. Neither exists (a development checkout, or an unknown platform): state `unavailable`, with the text that says what to do (set `zycode.agentPath`). The extension does not search `PATH`: a program that the user did not name is not started.
 
