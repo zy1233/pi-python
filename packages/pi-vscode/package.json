@@ -4,6 +4,11 @@
   "description": "Chat with the zycode coding agent in VS Code. Unofficial; not affiliated with pi or Microsoft.",
   "version": "0.1.0",
   "publisher": "zycode",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#15140f",
+    "theme": "dark"
+  },
   "license": "MIT",
   "homepage": "https://zycode.dev",
   "repository": {
@@ -109,7 +114,7 @@
           ],
           "default": "ask",
           "scope": "application",
-          "markdownDescription": "Which tool calls the agent runs without asking. This overrides `permission` in `agent.toml` for sessions of this extension, including `always-approve`, which this extension never uses."
+          "markdownDescription": "Which tool calls the agent runs without asking. When the agent offers a `mode` option, this overrides `permission` in `agent.toml`, including `always-approve`, which this extension never sets. The bundled agent 0.8.0 has no such option: it reads `permission` from `agent.toml`."
         },
         "zycode.showThinking": {
           "type": "boolean",
@@ -145,7 +150,12 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:agent": "ZYCODE_REAL_AGENT=1 vitest run test/real-agent.test.ts",
-    "check": "npm run typecheck && npm run lint && npm test"
+    "check": "npm run typecheck && npm run lint && npm test",
+    "package": "node scripts/package.mjs",
+    "package:all": "node scripts/package.mjs all",
+    "notices": "node esbuild.mjs --production --metafile && node scripts/notices.mjs",
+    "smoke:vsix": "node scripts/smoke-vsix.mjs",
+    "icon": "node scripts/make-icon.mjs"
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "2.4.0",
