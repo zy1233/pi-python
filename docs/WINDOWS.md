@@ -66,7 +66,7 @@ On Windows, **prefer pointing at your venv** — the Store `python` stub is unre
 
 ## Bash tool on Windows
 
-The `bash` coding tool runs **Git Bash** (`bash.exe` on `PATH`) or an override from harness env config. Install [Git for Windows](https://gitforwindows.org/) for shell tool support. With no override, the tool looks for `Git\bin\bash.exe` in `%ProgramFiles%` and `%ProgramFiles(x86)%`, then for `bash` on `PATH`. If it finds no bash, it falls back to `cmd /c`, so the command runs in `cmd.exe` and not in bash.
+The `bash` coding tool runs **Git Bash** (`bash.exe` on `PATH`). Install [Git for Windows](https://gitforwindows.org/) for shell tool support. The tool looks for `Git\bin\bash.exe` in `%ProgramFiles%` and `%ProgramFiles(x86)%`, then for `bash` on `PATH`. If it finds no bash, it falls back to `cmd /c`, so the command runs in `cmd.exe` and not in bash.
 
 ## Rust TUI (`zypi`)
 
