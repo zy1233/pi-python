@@ -4,8 +4,8 @@
 > `binary` entry of the [ACP registry](https://github.com/agentclientprotocol/registry).
 > Decision: 2026-10-31. The user chose the `binary` route, PyInstaller one-file, five targets,
 > no signing in the first version, and a workflow of its own. Release 0.8.0 is the first release
-> that has the archives (section 7). The registry entry is binary only (section 4); the user
-> submits the registry pull request by hand.
+> that has the archives (section 7). The registry entry is binary only (section 4); the registry
+> pull request is [#735](https://github.com/agentclientprotocol/registry/pull/735) (opened on 2026-10-31; still open on 2026-11-04).
 >
 > Code: `packaging/agent/{build.py,zycode-agent.spec,entry.py,smoke.py}`,
 > `.github/workflows/agent-binaries.yml`. Changes for a frozen build:
@@ -100,10 +100,11 @@ Each build job runs, on its own platform:
 The `platform-tests` job (pull request and manual run) runs the tests of the changed code on
 Windows and on macOS (Apple silicon and Intel), where the sandbox layers differ from Linux.
 
-## 4. Registry entry (final for 0.8.0, not submitted)
+## 4. Registry entry (final for 0.8.0; submitted as registry pull request #735)
 
-Directory `zycode/` in the registry, files `agent.json` and `icon.svg`. The user submits the pull
-request by hand. The entry is binary only. `sha256` is set for each archive (the digest of the
+Directory `zycode/` in the registry, files `agent.json` and `icon.svg`. The pull request is
+[#735](https://github.com/agentclientprotocol/registry/pull/735) (opened on 2026-10-31; on 2026-11-04 it is open, with no
+comment, no review and no check). The entry is binary only. `sha256` is set for each archive (the digest of the
 release asset). There is no `icon` field: the registry build makes it from `icon.svg`
 (16x16, monochrome, `currentColor` only).
 
@@ -218,7 +219,7 @@ meta package) and a new release; it is not planned.
 ## 6. Release steps
 
 Order, as the workflow files define it (the user decided on 2026-10-31: publish first, then the
-registry pull request; that pull request is not submitted).
+registry pull request; that pull request is #735, opened on 2026-10-31).
 
 **Before the tag.**
 
