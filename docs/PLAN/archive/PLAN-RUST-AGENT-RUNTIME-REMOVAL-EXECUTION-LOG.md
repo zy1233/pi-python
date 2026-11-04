@@ -12,7 +12,7 @@
 
 ## 目录
 
-- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r33、r34、r35、r36、r37、r38、r39、r40、r41、r42）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29r30r31r32r33r34r35r36r37r38r39r40r41r42)
+- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r33、r34、r35、r36、r37、r38、r39、r40、r41、r42、r43）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29r30r31r32r33r34r35r36r37r38r39r40r41r42r43)
   - [10.1 范围、方法与规模](#101-范围方法与规模)
   - [10.2 `/model` 恢复（ADR3 r3）](#102-model-恢复adr3-r3)
   - [10.3 验证（r3 的实测）](#103-验证r3-的实测)
@@ -58,6 +58,7 @@
   - [10.43 r40 追加：Auto 的 PR 2，模型步骤（补记）](#1043-r40-追加auto-的-pr-2模型步骤补记)
   - [10.44 r41 追加：Auto 的 PR 3，zypi 提供 Auto（补记）](#1044-r41-追加auto-的-pr-3zypi-提供-auto补记)
   - [10.45 r42 追加：补记 v0.8.0 的发布与 r28 之后没有轮次的合入，同步计划，归档已发布的里程碑](#1045-r42-追加补记-v080-的发布与-r28-之后没有轮次的合入同步计划归档已发布的里程碑)
+  - [10.46 r43 追加：收尾计划（最后七项），记 #105 与 Windows、WSL 的整套 pytest](#1046-r43-追加收尾计划最后七项记-105-与-windowswsl-的整套-pytest)
 - [附录 A（摘录）：A.4](#附录-a摘录a4)
   - [A.4 r5 执行结果（对照 r5 时初稿里的「默认决策」；r9 的更新见 A.1）](#a4-r5-执行结果对照-r5-时初稿里的默认决策r9-的更新见-a1)
 - [附录 B：复现方法](#附录-b复现方法)
@@ -92,7 +93,7 @@
   - [G.7 待决策里决策 7 的状态](#g7-待决策里决策-7-的状态)
 - [修订记录](#修订记录)
 
-## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r33、r34、r35、r36、r37、r38、r39、r40、r41、r42）
+## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r33、r34、r35、r36、r37、r38、r39、r40、r41、r42、r43）
 
 r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）；r14 合入这两个 PR，并做决策 17：会话文件在第一条用户消息时才写（§10.17）；r15 做决策 10 的存储层一项：删 `pi-shell` 里的旧存储层（§10.18）；r16 合入 #25 与 #26，并删 `pi-shell` 里剩下的死代码（§10.19）；r17 检查测试之间的竞争，只改测试与工具（§10.20）；r18 改用 `cargo nextest`，改 `protoc` 的路径与 `release.yml` 的令牌（§10.21）；r19 用 `gh stack` 合入 #27–#31，并设 V0.6 的发布里程碑（§10.22）；r20 定 MCP 的方向（可选扩展包），修空白对话，补发布内容，并合入 #33–#36（§10.23）；r21 做 V0.6 的版本号与发布说明（条件 5），合入 #38 与 #39，并做条件 1–4（§10.24）；r22 打 tag `v0.6.0`、发布、做发布后的核对（§10.25）；r23 把三个 action 升到 Node 24 的版本，处理扩展 API 的审计批 9，并把决策 11、13 记成不做（§10.26）；r24 在内核 6.12 的云 VM 上测了沙箱的 Landlock 层（§10.27）；r25 把 `pi-sandbox` 接进 `TUI CI`（§10.28）；r26 补记 v0.7.0 之前的合入（#45 至 #48、web 的 #50 至 #54、版本号 #55）与 v0.7.0 的发布（§10.29）；r27 量了旗标与设置页并修（#57、#60），去掉选择器的 30 天截止（#61），清了一批死代码（#62、#63；§10.30）；r28 用一次 `gh stack` 把这五个 PR 与另外五个（#56、#58、#59、#64、#65）合入 `main`（§10.31）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
@@ -2721,6 +2722,57 @@ D.4 的细节。`pi-workspace` 有 59 个文件、39,670 行没有符号（上�
 
 **没有验证的。** 我没有重跑任何 PR 正文里的数字；没有运行 Auto 的任何代码，也没有在 Windows 与 WSL 上跑 pytest（Auto 的 PR 正文都把它列为没做；见「还没有验证的」）；registry 的 PR #735 只看了 PR 页面，没有看 registry 一侧的 CI 与维护者的动作；`docs/baselines/tui.md` 里别的数（行数表、体积表）没有重量，只改了和 #94 的清单有关的几处。
 
+### 10.46 r43 追加：收尾计划（最后七项），记 #105 与 Windows、WSL 的整套 pytest
+
+这一节记 2026-11-04 的一轮。用户的话：「剥离计划现在执行到什么阶段了，是否可以收尾了？」我的答复：可以收尾。§7 还有七项没勾（0.9、1.P3、1.P5、1.P6、1.R2、1.R3、1.R5），都是小事，没有一项会改变架构；要用户定四件事。用户用表单答复，四项都按我的倾向。随后用户又说：「我想了下，发布0.9版前我来做实测。」这一轮只改文档：分支 `docs/plan-r43-close`，PR [#106](https://github.com/zy1233/pi-python/pull/106)。我没有运行产品代码：只读源码，跑文档检查脚本、`ruff` 与渲染检查。下面「#105」里的 Windows 与 WSL 的 pytest，是同一个会话在这一轮之前跑的。
+
+**用户的答复（2026-11-04）。**
+- 1.P3 的收尾：保留旧通知 `pi/yolo_mode_changed`；1.P3 记为关闭（`[-]`）。
+- `-p` 的旗标：保持现状（打印「已忽略」）；勾掉 1.P6。
+- 其余：1.R2 关闭；1.P5 勾掉；1.R5 不做；0.9 勾掉，余下的（macOS、Windows、内核 5.13 到 6.11）记为已知缺口；1.R3 关闭，Windows 与 MCP 子进程记为已知缺口。
+- 次序：先收尾计划（r43），再发版。
+- 发版：版本是 0.9；发布之前，用户自己做实测。日期与里程碑还没有定。我没有替用户做这些实测。
+
+**阶段（r43 之后）。** 0 完成（含已知缺口）；A 完成；1 完成（1.P3、1.R2、1.R3、1.R5 关闭）；B 完成（B.2 关闭，B.4 不做）；C 完成；D 关闭（r38）。待决策二十一项都已答复。§7 没有 `[ ]`。
+
+**仓库的状态（只读核对）。**
+- `main` 在 `2235210`（#100），它在 `9570297`（#105）之上；比 v0.8.0 多 30 个提交（`git rev-list --count v0.8.0..origin/main`）。没有 open 的 PR 与 issue。
+- `main` 上的 `CI`：`2235210` 成功（[run 41806536369](https://github.com/zy1233/pi-python/actions/runs/41806536369)）；`9570297` 上的那次被下一次推送取消（[run 41805790795](https://github.com/zy1233/pi-python/actions/runs/41805790795)）。
+- `TUI CI`（[run 41756994539](https://github.com/zy1233/pi-python/actions/runs/41756994539)）与 `TUI E2E`（[run 41756994649](https://github.com/zy1233/pi-python/actions/runs/41756994649)）最后一次在 `6f568e3`（#94）上成功。之后的四个提交（`9c763c8`、`f2c6c09`、`9570297`、`2235210`）没有改 `tui/`（`git diff --stat 6f568e3..origin/main -- tui/` 为空），所以它们没有再跑。
+
+**#105：Windows 的整套 pytest（补记）。** 用户在 r42 之后要我补跑 Windows 的 pytest。`main`（`f2c6c09`）上有 9 个失败。没有一个是产品代码的错：每个测试都假设了 Linux。我只改测试，另加一个 `.gitattributes`，开 PR [#105](https://github.com/zy1233/pi-python/pull/105)；用户在 2026-11-04 09:14 UTC 合入（`9570297`；7 个文件，+42/−15）。9 个失败的原因：
+- Git Bash 删掉没有引号的路径里的反斜杠（`touch C:\x\a.txt` 造出 `Cxa.txt`）：3 个测试。路径改用 `Path.as_posix()`。另有 7 个测试断言「文件不存在」，以前在 Windows 上因为错的原因通过（命令真的运行了，文件只是在别处）；它们现在也用真实的路径。
+- 给模型的提示里，路径是 JSON 文本，反斜杠成对出现：2 个测试。改成找 `json.dumps(path)`。
+- NTFS 给 `.git` 目录一个短名 `GIT~1`。路径解析成 `.git`，`path.git_dir` 先于 `path.short_name` 判定，两条规则都会问：1 个测试。在 Windows 上，这一个路径两个规则号都收。
+- `core.autocrlf=true` 的检出写 CRLF：1 个测试（`test_the_files_are_utf8_lf_json_lines_with_a_fixed_field_order`）。`.gitattributes` 让 `*.jsonl` 与 `*.sh` 保持 LF（`git ls-files --eol`：`w/crlf` 变成 `w/lf`）。
+- `replaying_chat_deepseek` 缓存了它的类。装了 `langchain-deepseek`（CI 不装）时，前一个测试造出这个类，挡住导入的测试就不再试：1 个测试。每个测试前后清缓存。
+- 0.3 s 的限额小于 Git Bash 的启动时间（约 0.2 s），测试不稳（10 次里 8 次通过）：1 个测试。这个测试用 1.0 s。
+
+Windows 10，Python 3.12，Git Bash。之前（`main`，`f2c6c09`）：`9 failed, 6075 passed, 87 skipped, 31 deselected in 761.56s`。之后（PR 的头 `cc9d90a`，同一台机器）：`6084 passed, 87 skipped, 31 deselected in 807.96s`。
+
+WSL（Ubuntu on WSL2，Python 3.12，PR 的头 `cc9d90a`；一份放在 tmpfs 的副本；清空的环境：没有 `PI_HOME`、没有密钥、没有代理，`PATH` 只有 Linux 的）：`5957 passed, 22 skipped, 31 deselected in 385.94s`。Windows 那次跳过的 87 个测试需要 POSIX（信号、符号链接、文件模式、git 钩子、资源限制、`/proc`）：其中 82 个在 WSL 里跑并通过，另 5 个需要 `pyte`，两个 venv 都没有。WSL 的 22 个跳过：13 个是给 Windows 或不区分大小写的文件系统的，5 个需要 `pyte`，4 个需要 `rg`（不在 `PATH` 里）。`packages/pi-mcp/tests`（192 个）在 WSL 里没有收集：那个 venv 没有 `mcp`、`langchain_mcp_adapters` 与 `pi_mcp`；CI 的 job 跑它们。第一次跑与第二次的总数相同；第二次还核对了每个包都从分支的副本加载。PR 的 CI 全绿。合入后的 `9570297` 与 `2235210` 没有再跑 Windows 与 WSL（后者只改文档）。
+
+**没有修的一个发现。** `LocalExecutionEnv.exec`（`packages/pi-agent-harness/pi_agent_harness/env.py`）在 Windows 上超时或被中止时，只终止 shell，不终止它的子进程。`_kill_process_tree` 在 Windows 上调 `proc.kill()`（`TerminateProcess`）；它的文档字符串说这会终止进程树，但它只终止那一个进程。子进程还握着管道，所以 `exec` 要等到子进程自己结束。两个 harness 测试（`test_local_execution_env_exec_timeout`、`test_local_execution_env_exec_signal_abort_mid_execution`）通过，但各等 30 s。谁用 `exec`：扩展的 `pi.exec`（`agent_harness.py` 里的扩展 API）；`packages/` 的非测试 Python 代码里没有调用它的地方（搜 `\.exec\(`：除了这个转发，没有命中）。模型的 `bash` 工具用核心的 Bash 工具（`pi_agent_core/coding_tools/bash.py`：Windows 上 `taskkill /F /T` 与 Job Object），不经这条路。所以只有第三方扩展会遇到。修复是产品改动，要单开 PR；用户的答复里没有它，我没有做。
+
+**七项的核对（只读；Rust 的数是文本搜索，是估计）。**
+- 0.9：六项在 Linux 与 WSL2 上有记录（[§10.10](#1010-r8-追加linux-补测wsl2)）；Landlock 层在内核 6.12 上有记录（[§10.27](#1027-r24-追加landlock-层的实测)）；`pi-sandbox` 在 CI 里（[§10.28](#1028-r25-追加pi-sandbox-进-ci)）。没做：内核 5.13 到 6.11；macOS 与 Windows 上的对应各项。勾掉；余下的记入计划的「还没有验证的」。
+- 1.P3：pager 发 `pi/yolo_mode_changed` 的非测试引用有 6 处：`pi-pager` 的 `app/effects/helpers.rs`（3）与 `app/agent_modes.rs`（2），`pi-workspace` 的 `permission/prompter.rs`（1）；测试里还有 6 处（`app/effects/tests.rs` 2、`app/dispatch/tests/modes.rs` 2、`tests/python_agent_e2e.rs` 2）。agent 一侧：`permission_modes.py` 3 处、`agent.py` 2 处；r39 起也认标准的 `mode` 配置项与 `session/set_mode`。关闭，pager 一侧不改。
+- 1.P5：`agent.py` 的 `initialize` 回 `protocol_version`、`agent_capabilities`（`load_session`；`prompt_capabilities` 的 `image`、`audio`、`embedded_context`；`mcp_capabilities`；`session_capabilities.{list, resume, close}`）、`auth_methods`、`agent_info`，没有 `_meta`。`test_acp_agent.py` 断言 `load_session` 与 `session_capabilities.{list, resume, close}`。没有自定义键要登记。勾掉。
+- 1.P6：`-p` 的路径是 `pi-pager-bin/src/main.rs` 的 `run_python_print`。带沙箱：拒绝，退出码 2（1.R4）。转给 agent 的：`-p`（`--single`、`--print`）、`--prompt-json`、`--prompt-file`、`--cwd`、`--system-prompt-override`（`--system-prompt`）、`--system-prompt-file`、`--rules`（`--append-system-prompt`）、`--append-system-prompt-file`、`--no-context-files`。`print_mode::ignored_flags` 列 23 个 agent 兑现不了的旗标：`--model`、`--reasoning-effort`、`--output-format`（不是默认值时）、`--include-partial-messages`、`--json-schema`、`--verbatim`、`--always-approve`、`--allow`、`--deny`、`--permission-mode`、`--max-turns`、`--resume`、`--load`、`--continue`、`--session-id`、`--worktree`、`--no-plan`、`--no-subagents`、`--agent`、`--agents`、`--tools`、`--disallowed-tools`、`--disable-web-search`；每个在 stderr 打印 `warning: <旗标> has no effect with -p and was ignored`，然后继续运行。这和交互模式不同（交互模式以退出码 2 拒绝，`interactive_flags.rs`）；用户选了保持。单测在 `print_mode.rs`（`flags_the_agent_receives_are_not_reported`、`flags_the_agent_does_not_receive_are_reported` 等）。这三组之外的旗标（隐藏的兼容旗标、只管界面的旗标）我没有逐个核对；`zypi -p` 我没有在发行构建上运行。勾掉。
+- 1.R2：A.3 的表：pager 发的方法，agent 都路由，或 pager 不发。`session/set_mode` 从 r39 起有处理器；`session/set_model` 只在 agent 没公布 `model` 配置项时才发，agent 总会公布；`session/fork` 与 `authenticate` pager 不发。method-not-found 时 pager 的行为我没有再核对。关闭（前提已不在）。
+- 1.R3：做了的部分在 §10.6、§10.7、§10.10、§10.11。没做：Windows 上的行为（没有 `zypi` 二进制）；agent 被强杀或 `zypi` 退出时的 MCP 子进程。上面还有一个相关的发现（Windows 上的 `exec`）。关闭，两处记为已知缺口。
+- 1.R5：Python 的 `initialize` 响应没有 `_meta`。pager 里读 `modelState`、`grokShell`、`availableCommands`、`cancelRewind`、`sessionRecap`、`feedbackTraceOffer` 的解码（`acp/mod.rs`、`notifications/config.rs`）总是落到缺省。不做（两部分都不做）。
+
+**附录 A.1 的三行。** compaction：仍是「未定」，标了 owner（用户）与日期（2026-11-04）；Python 一侧 `factory.py` 仍由 `max_turns >= 30` 推导 `auto_compact`（我核对了）；pager 一侧的触发与展示我没有核对，记为已知缺口。`initialize._meta` 的响应键：「未定」改为「已定，不做」（1.R5）。`initialize._meta` 的请求键：「提议」改为「已做」（决定 8，r27，PR #60：交互模式下 `--system-prompt-override` 与 `--rules` 被拒绝；`-p` 把它们放进 agent 的命令行，不经 `initialize`）。图例里「未定」的说明也改了。
+
+**收尾后仍然存在的缺口（计划的「还没有验证的」有全文）。** macOS 的 `zypi` 二进制没有人运行过；没有 Windows 的 `zypi` 二进制；Landlock 层只在内核 6.12 上测过；Rust 的 e2e 与 PTY 脚本只在 Linux 上跑过；Auto 没在 Zed、JetBrains 与真的 `zypi` 会话里用真模型试过；agent 的单文件程序只在 CI 里启动过；registry 的 PR #735 没有人回复；Windows 上的 `exec` 不终止子进程；MCP 子进程在 agent 被强杀时的下场；compaction 一行；`-p` 的旗标只有单测。用户说发布 0.9 之前由他自己做实测；这些没有验证的事是他的范围。另有一个缺口不是实测：扩展的登记（P2 的第 ③ 条）还在 `packages/pi-agent-cli/AGENTS.md`，没有迁到 `docs/specs/`（r43 核对 `docs/DESIGN.md` 时发现；计划里没有它的条目，owner 待用户确认）。
+
+**这一轮改了什么。** 计划：头部与「当前状态」（含阶段表的阶段 0 与阶段 1 两行）改到 r43；「下一步」（次序，版本，实测，已定不做）；「还没有验证的」（一句引言，四条新的，三条改过）；「待决策」（决策 7 与 8 的状态，「已定，不做」一条）；§7 的七项与阶段 0、阶段 1 的退出条件；附录 A.1（图例与三行）；§10 索引（加 §10.46；§10.45 一行里的「本 PR」改成 #100）；修订记录（摘要）加 r43；链接定义加 `pr-105`、`pr-106`、`l10-46`。计划从 718 行变成 729 行，仍高于提醒线（600 至 700）；这一轮没有再缩：计划已经完成，不会再长。本文：新增 §10.46；目录、「10.」的标题与修订记录跟着改。另外两个文件：`docs/DESIGN.md` 的 §8.5「现状」一段（它说把登记迁到 `docs/specs/` 是 1.P5 与 B.3 的事，又说以后由 pager 改走标准通道；两句都与 r43 的状态不符，已改）；`docs/specs/2026-11-02-auto-mode-design.md` 的头部状态加一句（用户保留旧通知，不改走标准通道）。没有改代码，没有改 `CHANGELOG.md`（#105 只改测试），没有改 `web/`。
+
+**核对。** `check_plan_docs.py`（两个文件的锚点，计划里的引用与定义）；一个检查（本文里的引用式链接都有定义；本文没有链接定义）；用 GitHub 的 `markdown` 接口（`mode=gfm`）渲染改过的部分，找多余的 `**`；`ruff check .` 与 `ruff format --check .`；PR 的 CI。
+
+**没有验证的。** 我没有在发行构建上运行 `zypi -p`，也没有运行 Rust 的测试；Rust 一侧的引用数是文本搜索；pager 一侧的 compaction 没有核对；`-p` 里三组之外的旗标没有逐个核对；Windows 与 WSL 的 pytest 测的是 PR 的头 `cc9d90a`，合入后的树没有再跑；macOS 上什么也没有跑。
+
 ## 附录 A（摘录）：A.4
 
 附录 A 的 A.1–A.3（能力矩阵、ACP 版本配对、逐方法）是活的参考，留在[计划](../PLAN-RUST-AGENT-RUNTIME-REMOVAL.md)里。A.4 记 r5 的执行结果，搬到这里。
@@ -3854,3 +3906,4 @@ r42 把计划里已发布的发布里程碑（V0.5 至 V0.7）、头部的状态
 - r40：Auto 的 PR 2（2026-11-03）：模型步骤接进 Python agent。规则判不了的 `bash` 调用（`Outcome.JUDGE`）交给一次短请求（会话的模型，或 `[auto] model` 指的那个），只有逐字的 `ALLOW` 放行，其余一律询问；连续 3 次失败后停 5 分钟；红队报告的 D-07（带能执行程序的选项、前导通配符等七种形式）由 floor 直接询问，不叫模型。`[auto] classifier` 默认 `"model"`，`"rules"` 关掉模型步骤。语料增加到 670 行（新增 34 行），有脚本化的坏模型、重放用的 cassette、一次真模型评估（一个模型网关，总花费上限 USD 0.50，实际约 USD 0.23）和 129 个新变异（共 661 个：一个旧变异因 D-07 使它所测的子句成了死代码，连同该子句一起删掉）。pager 没有改：`AUTO` 仍是 `false`，PR 3 翻转。设计与线上准入记录：[Auto 模式设计](../../specs/2026-11-02-auto-mode-design.md) 第 12 节。合入：PR [#95](https://github.com/zy1233/pi-python/pull/95)（含第三次红队 [#98](https://github.com/zy1233/pi-python/pull/98)），2026-11-04（补记于 r42）。见 [§10.43](#1043-r40-追加auto-的-pr-2模型步骤补记)。
 - r41：Auto 的 PR 3（2026-11-04，在 PR 2 之后合入，D9）：`zypi` 提供 Auto（`AUTO = true`），干净的启动仍是 Normal（D5b）。附录 A 的「模式切换」按这个改了；`mode_probe.py` 与 `python_agent_e2e.rs` 有 Auto 的用例（agent 的 `[auto] classifier` 是默认的 `"model"`；要看只有规则的 Auto 的用例设了 `"rules"`）。合入：PR [#94](https://github.com/zy1233/pi-python/pull/94)，2026-11-04（补记于 r42）。见 [§10.44](#1044-r41-追加auto-的-pr-3zypi-提供-auto补记)。
 - r42：补记 v0.8.0 的发布、r33 与 r39 至 r41 的执行记录和 r28 之后没有轮次的合入；同步计划的状态；已发布的里程碑（V0.5 至 V0.7）与整理前的头部、「当前状态」的一段、「下一步」、决策 7 的状态存入附录 G，并加 V0.8（2026-11-04；`f2c6c09`；分支 `docs/plan-r42-sync`；PR [#100](https://github.com/zy1233/pi-python/pull/100)）。同一批改了 `docs/baselines/tui.md` 的测试数、设计记录的状态与 registry 的状态，和本文修订记录里三处坏的链接。只改文档。见 [§10.45](#1045-r42-追加补记-v080-的发布与-r28-之后没有轮次的合入同步计划归档已发布的里程碑)。
+- r43：收尾计划（2026-11-04；`2235210`；分支 `docs/plan-r43-close`；PR [#106](https://github.com/zy1233/pi-python/pull/106)）。用户答复 §7 的最后七项：0.9、1.P5、1.P6 勾掉；1.P3、1.R2、1.R3、1.R5 关闭；pager 继续用旧的 `pi/yolo_mode_changed`；`-p` 保持「已忽略」的警告。先收尾再发版：版本是 0.9，发布前用户自己做实测。补记 PR [#105](https://github.com/zy1233/pi-python/pull/105)（修 Windows 整套 pytest 的 9 个失败）与 Windows、WSL 的整套 pytest（Windows：9 失败 → 0；WSL：0 失败）；记下 Windows 上 `LocalExecutionEnv.exec` 不终止子进程这个没修的发现。计划里过时的事实（30 个提交；Auto 的 pytest 一条）与附录 A.1 的三行改了；`docs/DESIGN.md` 的 §8.5 与 Auto 设计的头部状态同步（扩展的登记记为已知缺口）。只改文档。见 [§10.46](#1046-r43-追加收尾计划最后七项记-105-与-windowswsl-的整套-pytest)。

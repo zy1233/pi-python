@@ -319,7 +319,7 @@ TUI 与 agent 之间的线上协议是标准 ACP，加上登记在册的 `pi/` �
 
 五条缺一，就不加；已有的、不满足的，按「降级 / 隐藏 / 删除」处理（计划 ADR3）。TUI 一侧不实现 `x.ai/*`：入口处丢弃以 `x.ai/` 或 `_x.ai/` 开头的扩展通知。
 
-现状：登记处还不完整。已在用的扩展（`_meta.sessionId`、`_meta["pi/cwd"]`、`pi/session/delete`、`pi/yolo_mode_changed`）目前写在 `packages/pi-agent-cli/AGENTS.md` 的各小节里（例如「Two things the TUI and the agent agree on beyond ACP v1」）；迁到 `docs/specs/` 是计划条目 1.P5 与 B.3。其中 `pi/yolo_mode_changed` 与 `_meta.autoMode`、`_meta.yoloMode` 已在 [Auto 模式设计](specs/2026-11-02-auto-mode-design.md)（§4.2）登记为旧项：它们过不了第 ① 条（标准的 `mode` 配置项是等价物），但在用，Python 将读它们；以后由 pager 改走标准通道。
+现状：登记处还不完整。已在用的扩展（`_meta.sessionId`、`_meta["pi/cwd"]`、`pi/session/delete`、`pi/yolo_mode_changed`）目前写在 `packages/pi-agent-cli/AGENTS.md` 的各小节里（例如「Two things the TUI and the agent agree on beyond ACP v1」）；迁到 `docs/specs/` 还没有做，计划里也没有它的条目（剥离计划在 r43 收尾；1.P5 只管 `initialize` 公布的键，B.3 只管 wire 类型放在哪，都已完成）。其中 `pi/yolo_mode_changed` 与 `_meta.autoMode`、`_meta.yoloMode` 已在 [Auto 模式设计](specs/2026-11-02-auto-mode-design.md)（§4.2）登记为旧项：它们过不了第 ① 条（标准的 `mode` 配置项是等价物），但在用，Python 读它们；pager 继续用它们，不改走标准通道（用户，2026-11-04；计划 1.P3 关闭）。
 
 ---
 
