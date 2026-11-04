@@ -42,22 +42,40 @@
       "description": "zycode runs a program on the machine that holds your folder. A virtual workspace has no such folder."
     }
   },
+  "activationEvents": [
+    "onView:zycode.chat"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
+      {
+        "command": "zycode.openChat",
+        "title": "Open chat",
+        "category": "zycode"
+      },
+      {
+        "command": "zycode.newChat",
+        "title": "New chat",
+        "category": "zycode"
+      },
+      {
+        "command": "zycode.stop",
+        "title": "Stop",
+        "category": "zycode"
+      },
       {
         "command": "zycode.restartAgent",
         "title": "Restart agent",
         "category": "zycode"
       },
       {
-        "command": "zycode.showLog",
-        "title": "Show log",
+        "command": "zycode.runSetup",
+        "title": "Run setup",
         "category": "zycode"
       },
       {
-        "command": "zycode.runSetup",
-        "title": "Run setup",
+        "command": "zycode.showLog",
+        "title": "Show log",
         "category": "zycode"
       }
     ],
@@ -94,11 +112,30 @@
           "markdownDescription": "Which tool calls the agent runs without asking. This overrides `permission` in `agent.toml` for sessions of this extension, including `always-approve`, which this extension never uses."
         }
       }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "zycode",
+          "title": "zycode",
+          "icon": "media/zycode.svg"
+        }
+      ]
+    },
+    "views": {
+      "zycode": [
+        {
+          "type": "webview",
+          "id": "zycode.chat",
+          "name": "Chat",
+          "icon": "media/zycode.svg"
+        }
+      ]
     }
   },
   "scripts": {
     "build": "node esbuild.mjs",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p src/webview/tsconfig.json",
     "lint": "eslint .",
     "test": "vitest run",
     "test:agent": "ZYCODE_REAL_AGENT=1 vitest run test/real-agent.test.ts",
