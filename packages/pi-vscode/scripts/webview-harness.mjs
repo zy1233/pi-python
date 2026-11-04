@@ -49,9 +49,9 @@ host({ type: "agentText", messageId: "a1", text: "I will create \`hello.txt\` fi
 host({ type: "toolCall", toolCall: { id: "t1", title: "write hello.txt", kind: "edit", status: "pending", rawInput: { path: "hello.txt" } } });
 host({ type: "permission", requestId: "p1", kind: "tool", toolCallId: "t1", title: "write hello.txt", summary: "hello.txt", canDiff: false, options: [{ id: "allow-once", name: "Allow once", kind: "allow_once" }, { id: "reject-once", name: "Reject", kind: "reject_once" }] });
 host({ type: "permissionDone", requestId: "p1", outcome: "selected", optionId: "allow-once" });
-host({ type: "toolCall", toolCall: { id: "t1", title: "write hello.txt", kind: "edit", status: "completed", text: "Successfully wrote 6 bytes to hello.txt" } });
+host({ type: "toolCall", toolCall: { id: "t1", title: "write hello.txt", kind: "edit", status: "completed", text: "Successfully wrote 6 bytes to hello.txt", canDiff: true } });
 host({ type: "toolCall", toolCall: { id: "t2", title: "date", kind: "execute", status: "completed", rawInput: { command: "date" }, terminal: { output: "Wed Nov  4 07:30:00 UTC 2026\\n", exitCode: 0 } } });
-host({ type: "permission", requestId: "p2", kind: "tool", toolCallId: "t3", title: "bash", summary: "rm -rf build && make", canDiff: false, options: [{ id: "allow-once", name: "Allow once", kind: "allow_once" }, { id: "reject-once", name: "Reject", kind: "reject_once" }] });
+host({ type: "permission", requestId: "p2", kind: "tool", toolCallId: "t3", title: "edit src/app.ts", summary: "src/app.ts", canDiff: true, options: [{ id: "allow-once", name: "Allow once", kind: "allow_once" }, { id: "reject-once", name: "Reject", kind: "reject_once" }] });
 host({ type: "notice", level: "info", text: "2 files have unsaved changes. The agent reads the files on disk." });
 state({ status: "busy" });
 `;

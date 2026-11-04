@@ -131,6 +131,9 @@ function renderComposer(): void {
 
 function applyState(next: StateMessage): void {
   state = next;
+  for (const entry of messageEls.values()) {
+    (entry.thought.parentElement as HTMLElement).hidden = entry.raw.thought === "" || state.showThinking === false;
+  }
   renderHeader();
   renderBanner();
   renderComposer();
@@ -167,7 +170,7 @@ function setAgentText(id: string, text: string, thought: string): void {
   entry.raw.thought = thought;
   fill(entry.text, text);
   const details = entry.thought.parentElement as HTMLElement;
-  details.hidden = thought === "";
+  details.hidden = thought === "" || state.showThinking === false;
   entry.thought.textContent = thought;
 }
 
@@ -183,6 +186,9 @@ function upsertTool(call: ToolCallView): void {
     const output = el("details", { class: "tool-output" }, el("summary", { text: call.terminal?.exitCode !== undefined ? `Output (exit code ${call.terminal.exitCode})` : "Output" }), el("pre", { text: body }));
     if (call.status === "failed" || body.length < 400) output.setAttribute("open", "");
     parts.push(output);
+  }
+  if (call.canDiff) {
+    parts.push(el("div", { class: "actions" }, button("Show diff", () => send({ type: "showDiff", toolCallId: call.id }))));
   }
   let node = toolEls.get(call.id);
   if (!node) {
@@ -210,6 +216,12 @@ function renderPermission(request: PermissionRequestView, done?: { outcome: stri
   const parts: Node[] = [el("div", { class: "perm-title", text: request.kind === "trust" ? `Project trust: ${request.title}` : `Allow: ${request.title}` })];
   if (request.kind === "trust") parts.push(el("p", { class: "perm-note", text: request.summary }));
   else if (request.summary !== "") parts.push(el("pre", { class: "perm-summary", text: request.summary }));
+  if (request.canDiff && request.toolCallId !== undefined) {
+    const toolCallId = request.toolCallId;
+    parts.push(el("div", { class: "actions left" }, button("Show diff", () => send({ type: "showDiff", toolCallId }))));
+  } else if (request.diffNote) {
+    parts.push(el("div", { class: "perm-note", text: request.diffNote }));
+  }
   if (done) {
     parts.push(el("div", { class: "perm-done", text: describeAnswer(done, request) }));
   } else {

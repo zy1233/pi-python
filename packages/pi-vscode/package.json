@@ -110,6 +110,12 @@
           "default": "ask",
           "scope": "application",
           "markdownDescription": "Which tool calls the agent runs without asking. This overrides `permission` in `agent.toml` for sessions of this extension, including `always-approve`, which this extension never uses."
+        },
+        "zycode.showThinking": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "Show the thinking blocks of the model in the chat (collapsed)."
         }
       }
     },

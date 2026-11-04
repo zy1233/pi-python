@@ -132,4 +132,43 @@ describe.skipIf(!chrome || !built)("webview in headless Chrome", () => {
       window.__result = { link: window.__posted.find((m) => m.type === "openLink") };`);
     expect(out).toMatchObject({ ok: true, link: { type: "openLink", url: "https://example.com/x" } });
   });
+
+  it("offers Show diff on a permission card and on a finished tool card, and says why there is none", () => {
+    const out = run(`${state}
+      state({});
+      const opts = [{ id: "allow-once", name: "Allow once", kind: "allow_once" }];
+      host({ type: "permission", requestId: "p1", kind: "tool", toolCallId: "t1", title: "write a", summary: "a", canDiff: true, options: opts });
+      host({ type: "permission", requestId: "p2", kind: "tool", toolCallId: "t2", title: "edit b", summary: "b", canDiff: false, diffNote: "diff not available", options: opts });
+      host({ type: "toolCall", toolCall: { id: "t3", title: "write c", kind: "edit", status: "completed", canDiff: true } });
+      host({ type: "toolCall", toolCall: { id: "t4", title: "write d", kind: "edit", status: "completed" } });
+      const labels = [...document.querySelectorAll("button")].filter((b) => b.textContent === "Show diff");
+      labels[0].click(); labels[1].click();
+      window.__result = {
+        count: labels.length,
+        posted: window.__posted.filter((m) => m.type === "showDiff"),
+        note: document.querySelectorAll(".perm-note")[0].textContent,
+      };`);
+    expect(out).toMatchObject({
+      ok: true,
+      count: 2,
+      posted: [
+        { type: "showDiff", toolCallId: "t1" },
+        { type: "showDiff", toolCallId: "t3" },
+      ],
+      note: "diff not available",
+    });
+  });
+
+  it("hides the thinking block when showThinking is false, and shows it again", () => {
+    const out = run(`${state}
+      state({ showThinking: true });
+      host({ type: "agentThought", messageId: "a", text: "hmm" });
+      const hidden = () => document.querySelector(".thought").hidden;
+      const shown = !hidden();
+      state({ showThinking: false });
+      const afterOff = hidden();
+      state({ showThinking: true });
+      window.__result = { shown, afterOff, afterOn: hidden() };`);
+    expect(out).toMatchObject({ ok: true, shown: true, afterOff: true, afterOn: false });
+  });
 });

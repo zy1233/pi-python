@@ -10,6 +10,7 @@ import type {
   SessionNotification,
 } from "./acp-connection.js";
 import { AgentProcess, type StopTimings } from "./agent-process.js";
+import { DiffTracker, type DiffInfo } from "./diff-tracker.js";
 import type { Host } from "./host.js";
 import {
   prepareBundledBinary,
@@ -26,6 +27,7 @@ import type {
   PermissionRequestView,
   StateMessage,
   Status,
+  ToolCallView,
   TranscriptItem,
 } from "./protocol.js";
 import { ToolCallStore, summarizeInput } from "./tool-calls.js";
@@ -97,6 +99,7 @@ export class ChatController {
 
   private items: TranscriptItem[] = [];
   private readonly tools = new ToolCallStore();
+  private readonly diffs: DiffTracker;
   private readonly pending = new Map<string, PendingPermission>();
   private readonly listeners = new Set<(message: HostMessage) => void>();
   private readonly ignoredKinds = new Set<string>();
@@ -104,7 +107,9 @@ export class ChatController {
   constructor(
     private readonly host: Host,
     private readonly options: ControllerOptions = {},
-  ) {}
+  ) {
+    this.diffs = new DiffTracker(host, () => this.cwd);
+  }
 
   // ----- subscription and snapshots
 
@@ -118,6 +123,7 @@ export class ChatController {
       type: "state",
       status: this.status,
       canRestart: this.status !== "starting",
+      showThinking: this.host.settings().showThinking,
     };
     if (this.detail !== undefined) message.detail = this.detail;
     if (this.initResult && this.command) {
@@ -134,6 +140,21 @@ export class ChatController {
 
   transcript(): TranscriptItem[] {
     return this.items.map((item) => structuredClone(item));
+  }
+
+  /** The diff of a tool call (the result if the call has run, else the proposal), or `undefined`. */
+  diffFor(toolCallId: string): DiffInfo | undefined {
+    return this.diffs.info(toolCallId);
+  }
+
+  /** The texts of the diffs: the view reads them through a content provider. */
+  get diffStore(): DiffTracker["store"] {
+    return this.diffs.store;
+  }
+
+  /** A setting that the view shows changed (`zycode.showThinking`). */
+  refreshSettings(): void {
+    this.emit(this.stateMessage());
   }
 
   get currentStatus(): Status {
@@ -491,6 +512,7 @@ export class ChatController {
   private resetTranscript(): void {
     this.items = [];
     this.tools.clear();
+    this.diffs.clear();
     this.segmentId = undefined;
     this.emit({ type: "reset", transcript: [] });
   }
@@ -603,22 +625,43 @@ export class ChatController {
   }
 
   private onToolUpdate(update: Record<string, unknown>): void {
+    this.diffs.observe(update);
     const view = this.tools.apply(update);
     if (!view) return;
     this.segmentId = undefined;
-    const index = this.items.findIndex((item) => item.type === "tool" && item.toolCall.id === view.id);
-    if (index >= 0) this.items[index] = { type: "tool", toolCall: view };
-    else this.items.push({ type: "tool", toolCall: view });
-    this.emit({ type: "toolCall", toolCall: view });
+    this.putToolItem(view);
+    if (view.status === "completed" || view.status === "failed") {
+      const generation = this.generation;
+      void this.diffs
+        .finish(view.id, view.status, update.rawOutput)
+        .then((available) => {
+          if (generation !== this.generation) return;
+          const current = this.tools.get(view.id);
+          if (!current || current.canDiff === available) return;
+          this.putToolItem({ ...current, canDiff: available });
+        })
+        .catch((error: unknown) => this.host.log.warn(`diff failed: ${messageOf(error)}`));
+    }
   }
 
-  private onPermissionRequest(
+  private putToolItem(view: ToolCallView): void {
+    const stored = this.tools.update(view.id, view);
+    const index = this.items.findIndex((item) => item.type === "tool" && item.toolCall.id === stored.id);
+    if (index >= 0) this.items[index] = { type: "tool", toolCall: stored };
+    else this.items.push({ type: "tool", toolCall: stored });
+    this.emit({ type: "toolCall", toolCall: stored });
+  }
+
+  private async onPermissionRequest(
     request: RequestPermissionRequest,
     signal: AbortSignal,
   ): Promise<RequestPermissionResponse> {
-    if (request.sessionId !== this.sessionId) return Promise.resolve(cancelled());
+    if (request.sessionId !== this.sessionId) return cancelled();
+    // The pre-image of a write is read before the card shows, so in `ask` mode it is taken before the tool runs.
+    const proposal = await this.diffs.propose(request.toolCall.toolCallId).catch(() => undefined);
+    if (request.sessionId !== this.sessionId) return cancelled();
     const requestId = this.nextId("permission");
-    const view = this.permissionView(requestId, request);
+    const view = this.permissionView(requestId, request, proposal);
     return new Promise<RequestPermissionResponse>((resolve) => {
       const entry: PendingPermission = {
         resolve,
@@ -637,7 +680,11 @@ export class ChatController {
     });
   }
 
-  private permissionView(requestId: string, request: RequestPermissionRequest): PermissionRequestView {
+  private permissionView(
+    requestId: string,
+    request: RequestPermissionRequest,
+    proposal?: { canDiff: boolean; note?: string },
+  ): PermissionRequestView {
     const toolCall = request.toolCall;
     const known = this.tools.get(toolCall.toolCallId);
     const rawInput = toolCall.rawInput ?? known?.rawInput;
@@ -646,12 +693,13 @@ export class ChatController {
       name: option.name,
       kind: option.kind,
     }));
-    const base = {
+    const base: Pick<PermissionRequestView, "requestId" | "toolCallId" | "options" | "canDiff" | "diffNote"> = {
       requestId,
       toolCallId: toolCall.toolCallId,
       options,
-      canDiff: false,
+      canDiff: proposal?.canDiff ?? false,
     };
+    if (proposal?.note !== undefined) base.diffNote = proposal.note;
     const title = known?.title ?? toolCall.title ?? "Tool call";
     if (looksLikeTrustRequest(toolCall.toolCallId, rawInput)) {
       if (hasTrustOptions(options)) {

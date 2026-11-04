@@ -1,6 +1,6 @@
 // Runs the controller against the real Python agent (the scripted `_tool_agent.py` of pi-agent-cli,
 // which needs no model). Off by default: `npm run test:agent`, or set ZYCODE_REAL_AGENT_PYTHON.
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
@@ -100,6 +100,49 @@ describe.skipIf(!enabled)("real agent", () => {
     const last = ofType(messages, "toolCall").at(-1)!.toolCall;
     expect(last.terminal?.output).toContain("hi");
     expect(last.terminal?.exitCode).toBe(3);
+  }, 60_000);
+
+  it("builds the diff of a real edit from the patch the agent sends", async () => {
+    const { controller, messages, host } = start(
+      { id: "call_e", name: "edit", arguments: { path: "e.txt", edits: [{ oldText: "line 3\n", newText: "line three\nextra\n" }] } },
+      "ask",
+    );
+    const file = path.join(host.sessionFolder()!, "e.txt");
+    const original = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join("\n") + "\n";
+    writeFileSync(file, original);
+    await controller.start();
+    const turn = controller.send("go");
+    await waitFor(() => ofType(messages, "permission").length === 1, "the permission card", 30_000);
+    const card = ofType(messages, "permission")[0]!;
+    expect(card.canDiff).toBe(true);
+    const proposed = controller.diffFor("call_e")!;
+    expect(controller.diffStore.get(proposed.key, "before")).toBe(original);
+    expect(controller.diffStore.get(proposed.key, "after")).toContain("line three\nextra\n");
+    controller.answerPermission(card.requestId, "allow-once");
+    await turn;
+    await waitFor(() => ofType(messages, "toolCall").at(-1)?.toolCall.canDiff === true, "the diff flag", 10_000);
+    const result = controller.diffFor("call_e")!;
+    expect(result.title).toBe("e.txt (edited)");
+    expect(result.note).toBeUndefined();
+    expect(controller.diffStore.get(result.key, "before")).toBe(original);
+    expect(controller.diffStore.get(result.key, "after")).toBe(readFileSync(file, "utf8"));
+  }, 60_000);
+
+  it("builds the diff of a real write over an existing file", async () => {
+    const { controller, messages, host } = start(
+      { id: "call_w", name: "write", arguments: { path: "w.txt", content: "new\n" } },
+      "ask",
+    );
+    writeFileSync(path.join(host.sessionFolder()!, "w.txt"), "old\n");
+    await controller.start();
+    const turn = controller.send("go");
+    await waitFor(() => ofType(messages, "permission").length === 1, "the permission card", 30_000);
+    controller.answerPermission(ofType(messages, "permission")[0]!.requestId, "allow-once");
+    await turn;
+    await waitFor(() => ofType(messages, "toolCall").at(-1)?.toolCall.canDiff === true, "the diff flag", 10_000);
+    const result = controller.diffFor("call_w")!;
+    expect(controller.diffStore.get(result.key, "before")).toBe("old\n");
+    expect(controller.diffStore.get(result.key, "after")).toBe("new\n");
   }, 60_000);
 
   it("stops the process on stop()", async () => {

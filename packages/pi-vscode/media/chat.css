@@ -74,3 +74,4 @@ pre.code code { background: none; padding: 0; }
 .composer { padding: 8px 10px 10px; border-top: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent)); }
 .input { width: 100%; box-sizing: border-box; resize: vertical; min-height: 4em; max-height: 40vh; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent); border-radius: 2px; padding: 6px; }
 .input:disabled { opacity: 0.6; }
+.actions.left { justify-content: flex-start; }

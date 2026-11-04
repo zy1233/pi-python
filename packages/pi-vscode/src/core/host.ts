@@ -15,6 +15,7 @@ export interface Settings {
   agentPath: string;
   agentArgs: string[];
   permissionMode: PermissionModeName;
+  showThinking: boolean;
 }
 
 export interface SetupTerminalRequest {
@@ -39,6 +40,11 @@ export interface Host {
   sessionFolder(): string | undefined;
   /** Paths of open documents under `folder` that have unsaved changes. */
   dirtyFiles(folder: string): string[];
+  /**
+   * The text of a file, `null` if it does not exist, `undefined` if it cannot be shown (too large,
+   * not UTF-8, unreadable). The diff view reads files with it. `path` is absolute.
+   */
+  readFile(path: string): Promise<string | null | undefined>;
   /** Runs the setup program in a terminal and resolves when the terminal closes. */
   runSetupTerminal(request: SetupTerminalRequest): Promise<{ exitCode: number | undefined }>;
   /** Shows a notification that has no chat to go to (for example a version warning). */

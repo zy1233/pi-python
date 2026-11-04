@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,6 +29,7 @@ export interface TestHostOptions {
   dirty?: string[];
   pin?: string;
   extensionPath?: string;
+  readFile?: (file: string) => Promise<string | null | undefined>;
   setup?: (request: SetupTerminalRequest) => Promise<{ exitCode: number | undefined }>;
 }
 
@@ -56,7 +57,7 @@ export class TestHost implements Host {
   }
 
   settings(): Settings {
-    return { agentPath: process.execPath, agentArgs: [FAKE_AGENT], permissionMode: "ask", ...this.options.settings };
+    return { agentPath: process.execPath, agentArgs: [FAKE_AGENT], permissionMode: "ask", showThinking: true, ...this.options.settings };
   }
   isTrusted(): boolean {
     return this.options.trusted ?? true;
@@ -66,6 +67,12 @@ export class TestHost implements Host {
   }
   dirtyFiles(): string[] {
     return this.options.dirty ?? [];
+  }
+  async readFile(file: string): Promise<string | null | undefined> {
+    if (this.options.readFile) return this.options.readFile(file);
+    if (!existsSync(file)) return null;
+    if (statSync(file).size > 2 * 1024 * 1024) return undefined;
+    return readFileSync(file, "utf8");
   }
   async runSetupTerminal(request: SetupTerminalRequest): Promise<{ exitCode: number | undefined }> {
     this.setupRequests.push(request);

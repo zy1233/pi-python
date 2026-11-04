@@ -6,7 +6,8 @@
 //   FAKE_NO_MODE=1          no `mode` config option (the v0.8.0 binary)
 //   FAKE_EXIT_AT_START=<n>  exit with this code at once, after a line on stderr
 //   FAKE_LOG=<file>         append one line for each request or notification the agent gets
-import { existsSync, appendFileSync } from "node:fs";
+import { existsSync, appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 
@@ -20,6 +21,7 @@ const record = (line) => env.FAKE_LOG && appendFileSync(env.FAKE_LOG, line + "\n
 let mode = "ask";
 const cancelled = new Set();
 let sessionCounter = 0;
+const cwds = new Map();
 
 function configOptions() {
   const options = [
@@ -109,8 +111,39 @@ async function runPrompt(ctx, sessionId, prompt) {
     process.stderr.write("fake agent: crashing\n");
     process.exit(3);
   }
+  if (prompt.startsWith("file:")) return runFileTool(ctx, sessionId, JSON.parse(prompt.slice("file:".length)));
   if (prompt === "refuse") return "refusal";
   await notify(text(sessionId, "agent_message_chunk", "echo: " + prompt));
+  return "end_turn";
+}
+
+// A write or edit that really changes a file under the session folder.
+// {tool: "write"|"edit", path, content | edits, ask: bool, patch: string | undefined, late: bool}
+async function runFileTool(ctx, sessionId, spec) {
+  const notify = (n) => ctx.client.notify(acp.methods.client.session.update, n);
+  const file = path.resolve(cwds.get(sessionId), spec.path);
+  const rawInput = spec.tool === "write" ? { path: spec.path, content: spec.content } : { path: spec.path, edits: spec.edits };
+  await notify({ sessionId, update: { sessionUpdate: "tool_call", toolCallId: "call_f", title: `${spec.tool} ${spec.path}`, kind: "edit", status: "pending", rawInput } });
+  let allowed = true;
+  if (spec.ask) {
+    const outcome = await ask(ctx, sessionId, { toolCallId: "call_f", kind: "edit", status: "pending", title: spec.tool, rawInput }, allowReject);
+    allowed = outcome.outcome === "selected" && outcome.optionId === "allow-once";
+  }
+  if (!allowed) {
+    await notify({ sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "call_f", status: "failed", content: [{ type: "content", content: { type: "text", text: "Permission denied" } }] } });
+    return "end_turn";
+  }
+  if (spec.late) await sleep(spec.late);
+  const old = existsSync(file) ? readFileSync(file, "utf8") : "";
+  let next = spec.content;
+  if (spec.tool === "edit") {
+    next = old;
+    for (const edit of spec.edits) next = next.replace(edit.oldText, edit.newText);
+  }
+  writeFileSync(file, next);
+  const update = { sessionUpdate: "tool_call_update", toolCallId: "call_f", status: "completed", content: [{ type: "content", content: { type: "text", text: "done" } }] };
+  if (spec.tool === "edit") update.rawOutput = { content: [], details: spec.patch === undefined ? {} : { diff: spec.patch, patch: spec.patch } };
+  await notify({ sessionId, update });
   return "end_turn";
 }
 
@@ -134,6 +167,7 @@ const app = acp
       throw new acp.RequestError(-32000, "Authentication required", { authMethods: ["pi-setup"] });
     }
     const sessionId = `fake-${++sessionCounter}`;
+    cwds.set(sessionId, ctx.params.cwd);
     return {
       sessionId,
       configOptions: configOptions(),
