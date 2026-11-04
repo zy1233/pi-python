@@ -96,7 +96,9 @@ class WorkflowParams(BaseModel):
         default=False,
         description=(
             "Run each subagent in an isolated git worktree. "
-            "Requires the project to be inside a git repository. "
+            "Requires the project to be inside a git repository and to be trusted "
+            "(git runs the hooks and programs that the repository names); "
+            "in a project that is not trusted the call is refused. "
             "Worktrees are created per subagent and cleaned up after use."
         ),
     )
@@ -244,12 +246,37 @@ def _resolve_journal(run_id: str, *, resume: bool = False, home: Path | str | No
     return Journal(path)
 
 
+def _isolation_refusal(executor: Any, project_trusted: bool) -> str | None:
+    """Why ``isolation=True`` cannot run, or ``None`` when it can.
+
+    ``git worktree add`` runs the project's ``post-checkout`` hook, and other ``git`` calls
+    run programs that ``.git/config`` names, so isolation is a way to run project code. The
+    call is refused, never run without isolation: a caller who asked for isolation must not
+    get a run that writes into the real tree.
+    """
+    if project_trusted is not True:
+        return (
+            "The workflow was not run: `isolation` is refused because this project is not "
+            "trusted. Isolation makes a git worktree, and git runs the hooks and programs "
+            "that the repository names. Run the workflow without isolation, or ask the user "
+            "to trust the project (`trusted_projects` in the home agent.toml, or "
+            "`--trust-project-extensions`)."
+        )
+    if not hasattr(executor, "with_worktree_manager"):
+        return (
+            "The workflow was not run: this session's sub-agent executor cannot isolate "
+            "sub-agents in a worktree. Run the workflow without isolation."
+        )
+    return None
+
+
 def _make_workflow_execute(
     executor: SubagentExecutor | None = None,
     cwd: str = ".",
     manager: Any | None = None,
     *,
     home: Path | str | None = None,
+    project_trusted: bool = False,
 ) -> Any:
     """Build the workflow tool's execute function.
 
@@ -277,6 +304,11 @@ def _make_workflow_execute(
                     }
                 ]
             )
+
+        if params.isolation:
+            refusal = _isolation_refusal(_executor, project_trusted)
+            if refusal is not None:
+                return AgentToolResult(content=[{"type": "text", "text": refusal}])
 
         script: str | None = None
         script_name = "workflow"
@@ -319,10 +351,10 @@ def _make_workflow_execute(
         # Wire up worktree isolation when requested.
         run_executor = _executor
         wt_mgr = None
-        if params.isolation and hasattr(_executor, "with_worktree_manager"):
+        if params.isolation:
             from pi_dynamic_workflows.worktree import WorktreeManager
 
-            wt_mgr = WorktreeManager(cwd)
+            wt_mgr = WorktreeManager(cwd, project_trusted=True)
             run_executor = _executor.with_worktree_manager(wt_mgr)
 
         runtime = WorkflowRuntime(
@@ -416,9 +448,12 @@ def create_workflow_tool(
     manager: Any | None = None,
     *,
     home: Path | str | None = None,
+    project_trusted: bool = False,
 ) -> Any:
     """Return a ToolDefinition for the workflow tool.
 
+    ``project_trusted`` must be ``True`` for ``isolation`` to work; any other value (the
+    default) means the project is not trusted and ``isolation`` is refused.
     ``home`` is the pi-python home directory (``PI_HOME`` / ``~/.pi-python`` when omitted);
     run journals are written below it. ``executor=None`` uses the mock executor (tests).
     """
@@ -431,7 +466,9 @@ def create_workflow_tool(
             "agent(), optionally composing calls with parallel() and pipeline()."
         ),
         parameters=WorkflowParams,
-        execute=_make_workflow_execute(executor, cwd, manager, home=home),
+        execute=_make_workflow_execute(
+            executor, cwd, manager, home=home, project_trusted=project_trusted is True
+        ),
         label="Workflow",
         prompt_snippet=(
             "Delegate substantive independent or staged work to subagents with "

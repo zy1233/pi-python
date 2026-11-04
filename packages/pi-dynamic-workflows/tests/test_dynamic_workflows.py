@@ -1282,7 +1282,7 @@ class TestWorktreeSnapshotBaseline:
 
         (git_repo / "a.txt").write_text("dirty\n")
 
-        mgr = WorktreeManager(str(git_repo))
+        mgr = WorktreeManager(str(git_repo), project_trusted=True)
         wt = await mgr.create(session_id=f"dirty-{uuid.uuid4().hex[:8]}")
 
         assert (Path(wt) / "a.txt").read_text() == "dirty\n"
@@ -1305,7 +1305,7 @@ class TestWorktreeSnapshotBaseline:
 
         from pi_dynamic_workflows.worktree import WorktreeManager
 
-        mgr = WorktreeManager(str(git_repo))
+        mgr = WorktreeManager(str(git_repo), project_trusted=True)
         wt = await mgr.create(session_id=f"clean-{uuid.uuid4().hex[:8]}")
 
         (Path(wt) / "a.txt").write_text("agent-only\n")
@@ -1602,7 +1602,7 @@ class TestSubagentToolCallGate:
             return {"block": True, "reason": "User denied permission"}
 
         executor = _gated_executor(_write_once_stream("note.txt"), repo, gate)
-        tool = create_workflow_tool(executor=executor, cwd=str(repo))
+        tool = create_workflow_tool(executor=executor, cwd=str(repo), project_trusted=True)
         result = await tool.execute("tc-1", WorkflowParams(script=_ONE_AGENT, isolation=True))
 
         assert "completed" in result.content[0]["text"]
