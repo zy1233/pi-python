@@ -1,0 +1,118 @@
+{
+  "name": "zycode",
+  "displayName": "zycode",
+  "description": "Chat with the zycode coding agent in VS Code. Unofficial; not affiliated with pi or Microsoft.",
+  "version": "0.1.0",
+  "publisher": "zycode",
+  "license": "MIT",
+  "homepage": "https://zycode.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zy1233/pi-python.git",
+    "directory": "packages/pi-vscode"
+  },
+  "bugs": {
+    "url": "https://github.com/zy1233/pi-python/issues"
+  },
+  "zycodeAgentVersion": "0.8.0",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "AI",
+    "Chat"
+  ],
+  "keywords": [
+    "zycode",
+    "agent",
+    "acp",
+    "coding agent",
+    "langchain"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "zycode runs an agent that reads and writes files and runs commands in your folder."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "zycode runs a program on the machine that holds your folder. A virtual workspace has no such folder."
+    }
+  },
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "zycode.restartAgent",
+        "title": "Restart agent",
+        "category": "zycode"
+      },
+      {
+        "command": "zycode.showLog",
+        "title": "Show log",
+        "category": "zycode"
+      },
+      {
+        "command": "zycode.runSetup",
+        "title": "Run setup",
+        "category": "zycode"
+      }
+    ],
+    "configuration": {
+      "title": "zycode",
+      "properties": {
+        "zycode.agentPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Absolute path of a program (or a program name found on `PATH`) to run instead of the `zycode-agent` binary in this extension. Leave empty to use the bundled binary."
+        },
+        "zycode.agentArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "machine",
+          "markdownDescription": "Arguments for `#zycode.agentPath#`. For a Python install: path `python`, arguments `[\"-m\", \"pi_agent_cli\"]`."
+        },
+        "zycode.permissionMode": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "auto"
+          ],
+          "enumDescriptions": [
+            "Ask before every action that is not read-only.",
+            "Run actions that are clearly in scope. Ask about the rest. Auto is not a sandbox: it guards what a call writes or runs, not what it reads or sends."
+          ],
+          "default": "ask",
+          "scope": "application",
+          "markdownDescription": "Which tool calls the agent runs without asking. This overrides `permission` in `agent.toml` for sessions of this extension, including `always-approve`, which this extension never uses."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:agent": "ZYCODE_REAL_AGENT=1 vitest run test/real-agent.test.ts",
+    "check": "npm run typecheck && npm run lint && npm test"
+  },
+  "devDependencies": {
+    "@agentclientprotocol/sdk": "2.4.0",
+    "@types/node": "^22.20.5",
+    "@types/vscode": "~1.90.0",
+    "@vscode/vsce": "^4.1.0",
+    "esbuild": "^0.25.12",
+    "eslint": "^9.39.5",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^3.2.7"
+  }
+}
