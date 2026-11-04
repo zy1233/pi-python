@@ -10,8 +10,8 @@ What is asserted here is what the red-team report asked of the wiring:
   While a check fails, every call that is not harmless asks, and the user is told.
 * W-3: the default protected list is one constant; a write to each of its entries asks, and a
   write to ``Makefile``, ``package.json`` or ``conftest.py`` does not.
-* W-5: a ``bash`` call that Auto let through has a time limit and an output limit; a call
-  that the user allowed has none.
+* W-5: a ``bash`` call that Auto let through has a time limit and an output limit, in the
+  session and in a workflow sub-agent; a call that the user allowed has none.
 
 The rule layer itself is tested in ``test_auto_rules.py`` and ``test_auto_corpus.py``.
 """
@@ -1136,6 +1136,137 @@ async def test_a_bash_call_that_the_user_allowed_has_no_limit_of_auto(world: _Wo
 
     assert len(client.requests) == 1
     assert marker.exists()
+
+
+class _SubagentBash:
+    """A model for a session that runs one workflow, and for its one sub-agent.
+
+    The session calls ``workflow`` once. The sub-agent makes one ``bash`` call per turn: the
+    ``(id, command)`` pairs of *turns*, one after the other. ``results`` holds the text of each
+    result that the sub-agent got back, and ``errors`` whether it was an error.
+    """
+
+    def __init__(self, *turns: tuple[str, str]) -> None:
+        self._turns = turns
+        self.results: list[str] = []
+        self.errors: list[bool] = []
+
+    async def stream(self, model, context, options=None):
+        done = [m for m in context.messages if getattr(m, "role", None) == "toolResult"]
+        if "workflow" in {tool.name for tool in context.tools or []}:
+            if done:
+                return await mock_text_stream(model, context, options)
+            return await _calls_stream(
+                ("w1", "workflow", {"script": _LinkInASubagent.SCRIPT, "args": {}})
+            )(model, context, options)
+        self.results = ["".join(b.get("text", "") for b in m.content) for m in done]
+        self.errors = [bool(m.isError) for m in done]
+        if len(done) >= len(self._turns):
+            return await mock_text_stream(model, context, options)
+        call_id, command = self._turns[len(done)]
+        events = AssistantMessageEventStream()
+        content: list[ToolCallContent] = [
+            {"type": "toolCall", "id": call_id, "name": "bash", "arguments": {"command": command}}
+        ]
+        partial = _base_partial(model, content)
+        partial.stopReason = "toolUse"
+        events.push(StartEvent(partial=partial.model_copy(deep=True)))
+        events.push(DoneEvent(partial=partial.model_copy(deep=True), reason="toolUse"))
+        events.set_final_message(partial)
+        events.end()
+        return events
+
+
+async def _run_subagent_bash(
+    world: _World,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    model: _SubagentBash,
+    *,
+    allow: bool = True,
+    **kwargs: Any,
+) -> _Client:
+    pytest.importorskip("pi_dynamic_workflows")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    agent, client, session_id = await _open(
+        world, model.stream, client=_Client(allow=allow), **kwargs
+    )
+    await _prompt(agent, session_id)
+    return client
+
+
+async def test_a_subagent_bash_call_that_auto_allowed_stops_at_the_time_limit(
+    world: _World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    model = _SubagentBash(("c1", "sleep 30"))
+    auto = AutoConfig(bash_timeout_seconds=0.5)
+
+    started = asyncio.get_running_loop().time()
+    client = await _run_subagent_bash(world, tmp_path, monkeypatch, model, auto=auto)
+
+    assert asyncio.get_running_loop().time() - started < 15
+    assert [t.split()[0] for t in client.titles()] == ["workflow"]  # sleep: no question
+    assert model.errors == [True]
+    assert "timed out" in model.results[0]
+
+
+async def test_a_subagent_bash_call_that_auto_allowed_stops_at_the_output_limit(
+    world: _World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    model = _SubagentBash(("c1", "seq 1 100000000"))
+    auto = AutoConfig(bash_max_output_mb=1)
+
+    client = await _run_subagent_bash(world, tmp_path, monkeypatch, model, auto=auto)
+
+    assert [t.split()[0] for t in client.titles()] == ["workflow"]
+    assert model.errors == [True]
+    assert "limit" in model.results[0]
+
+
+_LONG_AND_LOUD = "sleep 1.2; seq 1 400000; touch marker.txt"  # > 0.3 s, > 1 MB, and it writes
+
+
+async def test_a_subagent_bash_call_that_the_user_allowed_has_no_limit_of_auto(
+    world: _World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    model = _SubagentBash(("c1", _LONG_AND_LOUD))
+    auto = AutoConfig(bash_timeout_seconds=0.3, bash_max_output_mb=1)
+
+    client = await _run_subagent_bash(world, tmp_path, monkeypatch, model, auto=auto)
+
+    assert [t.split()[0] for t in client.titles()] == ["workflow", "bash"]
+    assert model.errors == [False]
+    assert (world.project / "marker.txt").exists()
+
+
+@pytest.mark.parametrize("permission", ["ask", "always-approve"])
+async def test_a_subagent_bash_call_outside_auto_has_no_limit(
+    world: _World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, permission: str
+):
+    model = _SubagentBash(("c1", _LONG_AND_LOUD))
+    auto = AutoConfig(bash_timeout_seconds=0.3, bash_max_output_mb=1)
+
+    await _run_subagent_bash(world, tmp_path, monkeypatch, model, auto=auto, permission=permission)
+
+    assert model.errors == [False]
+    assert (world.project / "marker.txt").exists()
+
+
+async def test_the_limits_of_a_subagent_call_are_taken_once_for_an_id_that_comes_again(
+    world: _World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Ids come from the model and repeat. Auto lets the first call ``c1`` through (it has
+    limits, and the Bash tool takes them); the user allows the second call ``c1``, which has
+    none. The entry of the first must not still be there for the second."""
+    model = _SubagentBash(("c1", "sleep 0.1"), ("c1", _LONG_AND_LOUD))
+    auto = AutoConfig(bash_timeout_seconds=0.3, bash_max_output_mb=1)
+
+    client = await _run_subagent_bash(world, tmp_path, monkeypatch, model, auto=auto)
+
+    assert [t.split()[0] for t in client.titles()] == ["workflow", "bash"]
+    assert model.errors == [False, False]
+    assert (world.project / "marker.txt").exists()
 
 
 def _collect_results(results: list[Any]):

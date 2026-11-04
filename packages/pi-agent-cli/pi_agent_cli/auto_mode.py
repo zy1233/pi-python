@@ -114,7 +114,8 @@ def _verdict(decision: RuleDecision) -> AutoVerdict:
 class BashLimitRegistry:
     """The limits for the ``bash`` calls that Auto let through, by tool call id.
 
-    The Bash tool asks for the limits of a call just before it starts it (``take``). A call
+    The Bash tool (of the session or of a workflow sub-agent) asks for the limits of a call
+    just before it starts it (``take``), once: an id that comes again finds nothing. A call
     that Auto did not let through (the user said yes to a question) has none: the user chose it.
     An entry that is never taken (the call was blocked later, or cancelled) is dropped when
     newer ones push it out.
@@ -630,7 +631,9 @@ class AutoSession:
             logger.warning("Auto failed to decide a call of tool %s", name, exc_info=True)
             verdict = _ask(Reason.INTERNAL_ERROR, "session.error")
         verdict = dataclasses.replace(verdict, ms=int((time.monotonic() - started) * 1000))
-        if verdict.allows and name == "bash" and not origin:
+        # A sub-agent's id is ``subagent-<run>:<id>`` (the gate adds the prefix), so its entry
+        # cannot be the one of a call of the session. Any other origin asks, never allows.
+        if verdict.allows and name == "bash":
             self.limits.put(call_id, self._bash_limits())
         self._record(call_id, name, origin, verdict)
         return verdict
