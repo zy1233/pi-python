@@ -18,6 +18,7 @@ The model is a scripted stream function; no network and no key.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from collections.abc import Callable
 from pathlib import Path
@@ -352,7 +353,7 @@ async def test_a_command_that_the_rules_leave_open_goes_to_the_model_and_runs_on
     data = _data_of(call)
     assert "please run the tests" in data
     assert "make test" in data
-    assert str(world.project) in data
+    assert json.dumps(str(world.project), ensure_ascii=False) in data  # a path is JSON text there
     assert call.model.model_id == "session-model"
     assert call.options.temperature == 0.0
     assert call.options.max_tokens == 16
@@ -508,7 +509,7 @@ async def test_a_call_of_a_subagent_is_judged_in_the_folder_of_the_subagent(
 
     assert verdict.allows
     folder = _data_of(script.calls[0]).splitlines()[4]
-    assert f'"folder": "{other}"' in folder
+    assert f'"folder": {json.dumps(str(other), ensure_ascii=False)}' in folder
 
 
 async def test_nothing_is_kept_between_two_decisions(world: _World) -> None:
@@ -900,7 +901,7 @@ async def test_a_command_that_the_model_allows_runs_with_no_question(world: _Wor
 async def test_a_command_that_the_model_will_not_allow_is_put_to_the_user(
     world: _World,
 ) -> None:
-    _script_file(world.project, f"touch {world.project / 'marker.txt'}\n")
+    _script_file(world.project, f"touch {(world.project / 'marker.txt').as_posix()}\n")
     judge = Script("ASK NETWORK")
     turn = _calls_stream(("c1", "bash", {"command": "./scripts/run.sh"}))
     client = _Client(allow=False)
@@ -917,7 +918,7 @@ async def test_a_command_that_the_model_will_not_allow_is_put_to_the_user(
 async def test_the_user_can_say_yes_to_a_command_that_the_model_did_not_allow(
     world: _World,
 ) -> None:
-    _script_file(world.project, f"touch {world.project / 'marker.txt'}\n")
+    _script_file(world.project, f"touch {(world.project / 'marker.txt').as_posix()}\n")
     judge = Script("ASK UNCLEAR")
     turn = _calls_stream(("c1", "bash", {"command": "./scripts/run.sh"}))
     client = _Client(allow=True)
@@ -943,7 +944,7 @@ async def test_the_user_can_say_yes_to_a_command_that_the_model_did_not_allow(
 async def test_a_model_that_fails_leaves_the_question_to_the_user_with_a_fixed_sentence(
     world: _World, reply: Any, reason: Reason
 ) -> None:
-    _script_file(world.project, f"touch {world.project / 'marker.txt'}\n")
+    _script_file(world.project, f"touch {(world.project / 'marker.txt').as_posix()}\n")
     judge = Script(reply)
     turn = _calls_stream(("c1", "bash", {"command": "./scripts/run.sh"}))
     client = _Client(allow=False)
@@ -962,7 +963,7 @@ async def test_session_cancel_during_the_model_step_blocks_the_call_and_asks_not
     world: _World,
 ) -> None:
     marker = world.project / "marker.txt"
-    _script_file(world.project, f"touch {marker}\n")
+    _script_file(world.project, f"touch {marker.as_posix()}\n")
     judge = Script(HANG)
     turn = _calls_stream(("c1", "bash", {"command": "./scripts/run.sh"}))
     client = _Client(allow=True)

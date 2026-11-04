@@ -425,7 +425,7 @@ def test_a_call_that_only_reads_a_folder_on_the_way_is_not_asked(guarded, comman
 
 
 def test_a_folder_on_the_way_to_a_glob_of_the_user_asks_for_a_call_that_may_write(rules) -> None:
-    root = rules.ctx.cwd
+    root = Path(rules.ctx.cwd).as_posix()  # bash would eat the backslashes of a Windows path
     globs = ("deploy/prod/*", f"{root}/vault/keys/*", "ops//keys/*")
     (Path(root) / "deploy").mkdir()
 
@@ -442,7 +442,7 @@ def test_a_folder_on_the_way_to_a_glob_of_the_user_asks_for_a_call_that_may_writ
     # The folders above a glob with an absolute path are not on the way: the project root is not.
     _judged(_decide(rules, "git add .", protected_globs=globs))
     _judged(_decide(rules, f"mv x {root}", protected_globs=globs))
-    outside = _decide(rules, f"mv x {Path(root).parent}", protected_globs=globs)
+    outside = _decide(rules, f"mv x {Path(root).parent.as_posix()}", protected_globs=globs)
     assert outside.rule_id == "path.outside_project", outside
     assert _decide(rules, "ls deploy", protected_globs=globs).outcome is Outcome.ALLOW
     _judged(_decide(rules, "mv x ./deployment", protected_globs=globs))

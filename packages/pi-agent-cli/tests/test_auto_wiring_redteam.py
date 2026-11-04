@@ -589,7 +589,7 @@ async def test_a_value_of_auto_that_is_mended_by_a_new_configuration_asks_no_mor
 async def test_a_background_job_asks_through_the_agent_and_nothing_runs(tmp_path: Path) -> None:
     world = _World(tmp_path)
     marker = world.project / "marker.txt"
-    stream = _calls_stream(("c1", "bash", {"command": f"sleep 30 & touch {marker}"}))
+    stream = _calls_stream(("c1", "bash", {"command": f"sleep 30 & touch {marker.as_posix()}"}))
     agent, client, session_id = await _open(world, stream, client=_Client(allow=False))
 
     await asyncio.wait_for(_prompt(agent, session_id), timeout=15)
@@ -687,7 +687,7 @@ async def test_a_question_that_gets_an_answer_without_an_id_does_not_run_the_cal
 ) -> None:
     world = _World(tmp_path)
     target = world.project / "new.txt"
-    stream = _calls_stream(("c1", "bash", {"command": f"echo x > {target}"}))
+    stream = _calls_stream(("c1", "bash", {"command": f"echo x > {target.as_posix()}"}))
     agent, client, session_id = await _open(world, stream, client=_EmptyIdClient())
 
     await _prompt(agent, session_id)

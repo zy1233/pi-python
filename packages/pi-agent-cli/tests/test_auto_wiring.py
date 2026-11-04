@@ -691,7 +691,7 @@ async def test_a_bash_call_that_the_rules_cannot_prove_asks_the_user(world: _Wor
 
 async def test_a_refused_call_does_not_run(world: _World):
     marker = world.project / "marker.txt"
-    stream = _calls_stream(("c1", "bash", {"command": f"touch {marker}"}))
+    stream = _calls_stream(("c1", "bash", {"command": f"touch {marker.as_posix()}"}))
     agent, client, session_id = await _open(world, stream, client=_Client(allow=False))
 
     await _prompt(agent, session_id)
@@ -726,7 +726,7 @@ async def test_auto_runs_a_call_the_user_would_not_be_asked_about_in_ask_mode(wo
 
 async def test_with_no_client_to_ask_a_call_that_asks_is_blocked(world: _World):
     marker = world.project / "marker.txt"
-    stream = _calls_stream(("c1", "bash", {"command": f"touch {marker}"}))
+    stream = _calls_stream(("c1", "bash", {"command": f"touch {marker.as_posix()}"}))
     agent = _agent(world, stream)
     created = await agent.new_session(cwd=str(world.project))  # no client connected
 
@@ -1127,7 +1127,7 @@ async def test_a_bash_call_that_auto_allowed_stops_at_the_output_limit(world: _W
 async def test_a_bash_call_that_the_user_allowed_has_no_limit_of_auto(world: _World):
     marker = world.project / "marker.txt"
     # Auto asks (the command writes), the user says yes: the user chose it, no limit applies.
-    command = f"sleep 1.2; touch {marker}"
+    command = f"sleep 1.2; touch {marker.as_posix()}"
     stream = _calls_stream(("c1", "bash", {"command": command}))
     auto = AutoConfig(classifier="rules", bash_timeout_seconds=0.3)
     agent, client, session_id = await _open(world, stream, auto=auto, client=_Client(allow=True))
@@ -1260,7 +1260,9 @@ async def test_the_limits_of_a_subagent_call_are_taken_once_for_an_id_that_comes
     limits, and the Bash tool takes them); the user allows the second call ``c1``, which has
     none. The entry of the first must not still be there for the second."""
     model = _SubagentBash(("c1", "sleep 0.1"), ("c1", _LONG_AND_LOUD))
-    auto = AutoConfig(bash_timeout_seconds=0.3, bash_max_output_mb=1)
+    # The first call must end inside its limit: the limit is more than the start-up of the shell
+    # (Git Bash needs about 0.2 s) and less than the sleep of the second call.
+    auto = AutoConfig(bash_timeout_seconds=1.0, bash_max_output_mb=1)
 
     client = await _run_subagent_bash(world, tmp_path, monkeypatch, model, auto=auto)
 

@@ -1,0 +1,6 @@
+# A file whose bytes matter keeps LF on every platform, whatever core.autocrlf says.
+# Git for Windows sets it to true, and then a checkout writes CRLF.
+#   *.jsonl  test data that a test reads byte for byte (the test of the Auto corpus checks for LF)
+#   *.sh     bash cannot run a script that has CRLF (a Windows checkout can be used from WSL)
+*.jsonl text eol=lf
+*.sh text eol=lf
