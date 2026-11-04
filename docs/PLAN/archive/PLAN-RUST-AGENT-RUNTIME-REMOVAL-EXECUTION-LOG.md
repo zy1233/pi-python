@@ -5,14 +5,14 @@
 > **怎么读**
 >
 > - 编号沿用原文。本文里的 §10.x 是执行记录的节。§1–§3、§6–§9 和附录 A 指计划。附录 A.4（r5 的执行结果）、附录 B（复现方法）和修订记录在本文。
-> - 附录 C 是计划 §7 在 r10 时的全文，含每一项的执行细节。附录 D 是计划头部在 r10 时的状态文字。附录 E 是计划 §4、§5 的全文（r2 的源码事实基线与改动规模估计）。附录 F 是计划在 r22 续 1 时被缩短的各段文字（头部、逐轮状态、两个发布里程碑、下一步、待决策等，2026-10-27 整理前的原文）。四处只为留档；现状以计划为准。
+> - 附录 C 是计划 §7 在 r10 时的全文，含每一项的执行细节。附录 D 是计划头部在 r10 时的状态文字。附录 E 是计划 §4、§5 的全文（r2 的源码事实基线与改动规模估计）。附录 F 是计划在 r22 续 1 时被缩短的各段文字（头部、逐轮状态、两个发布里程碑、下一步、待决策等，2026-10-27 整理前的原文）。附录 G 是计划在 r42 时被缩短的各段文字（头部、「当前状态」里「截至 r28」的一段、V0.5 至 V0.7 的发布里程碑、下一步、决策 7 的状态，2026-11-04 整理前的原文）。五处只为留档；现状以计划为准。
 > - 本文是历史记录。数字是当时的实测值，不再更新。要更正明显的错误，改在原处并注明。
 > - 记新的一轮时：在「10.」末尾追加一节（`### 10.22 …`），在计划的 §10 索引里加一行，在计划里改状态。不要把过程写回计划。
 > - 文中的分支名（`codex/…`）是当时的名字。这些分支在合并后已删除；提交都在对应的 PR 里。
 
 ## 目录
 
-- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r34、r35、r36、r37、r38）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29r30r31r32r34r35r36r37r38)
+- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r33、r34、r35、r36、r37、r38、r39、r40、r41、r42）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29r30r31r32r33r34r35r36r37r38r39r40r41r42)
   - [10.1 范围、方法与规模](#101-范围方法与规模)
   - [10.2 `/model` 恢复（ADR3 r3）](#102-model-恢复adr3-r3)
   - [10.3 验证（r3 的实测）](#103-验证r3-的实测)
@@ -53,6 +53,11 @@
   - [10.38 r36 追加：D.1，`async-openai` 离开依赖图](#1038-r36-追加d1async-openai-离开依赖图)
   - [10.39 r37 追加：整批合并之后的重测与候选表](#1039-r37-追加整批合并之后的重测与候选表)
   - [10.40 r38 追加：D.3，先验证，再删 xAI 的计费、升级与云同步代码](#1040-r38-追加d3先验证再删-xai-的计费升级与云同步代码)
+  - [10.41 r33 追加：Auto 的设计记录（PR 0），和同一批的规则与第一次红队（补记）](#1041-r33-追加auto-的设计记录pr-0和同一批的规则与第一次红队补记)
+  - [10.42 r39 追加：Auto 的 PR 1b，规则接进 Python agent（补记）](#1042-r39-追加auto-的-pr-1b规则接进-python-agent补记)
+  - [10.43 r40 追加：Auto 的 PR 2，模型步骤（补记）](#1043-r40-追加auto-的-pr-2模型步骤补记)
+  - [10.44 r41 追加：Auto 的 PR 3，zypi 提供 Auto（补记）](#1044-r41-追加auto-的-pr-3zypi-提供-auto补记)
+  - [10.45 r42 追加：补记 v0.8.0 的发布与 r28 之后没有轮次的合入，同步计划，归档已发布的里程碑](#1045-r42-追加补记-v080-的发布与-r28-之后没有轮次的合入同步计划归档已发布的里程碑)
 - [附录 A（摘录）：A.4](#附录-a摘录a4)
   - [A.4 r5 执行结果（对照 r5 时初稿里的「默认决策」；r9 的更新见 A.1）](#a4-r5-执行结果对照-r5-时初稿里的默认决策r9-的更新见-a1)
 - [附录 B：复现方法](#附录-b复现方法)
@@ -77,9 +82,17 @@
   - [F.8 分阶段计划里被缩短的各项状态](#f8-分阶段计划里被缩短的各项状态)
   - [F.9 执行记录索引里被缩短的行](#f9-执行记录索引里被缩短的行)
   - [F.10 修订记录摘要里的长条目](#f10-修订记录摘要里的长条目)
+- [附录 G：计划整理前的文字（r42 原文）](#附录-g计划整理前的文字r42-原文)
+  - [G.1 计划头部的状态文字](#g1-计划头部的状态文字)
+  - [G.2 当前状态里「截至 r28」的一段](#g2-当前状态里截至-r28的一段)
+  - [G.3 发布里程碑 V0.5](#g3-发布里程碑-v05)
+  - [G.4 发布里程碑 V0.6](#g4-发布里程碑-v06)
+  - [G.5 发布里程碑 V0.7](#g5-发布里程碑-v07)
+  - [G.6 下一步](#g6-下一步)
+  - [G.7 待决策里决策 7 的状态](#g7-待决策里决策-7-的状态)
 - [修订记录](#修订记录)
 
-## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r34、r35、r36、r37、r38）
+## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r33、r34、r35、r36、r37、r38、r39、r40、r41、r42）
 
 r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）；r14 合入这两个 PR，并做决策 17：会话文件在第一条用户消息时才写（§10.17）；r15 做决策 10 的存储层一项：删 `pi-shell` 里的旧存储层（§10.18）；r16 合入 #25 与 #26，并删 `pi-shell` 里剩下的死代码（§10.19）；r17 检查测试之间的竞争，只改测试与工具（§10.20）；r18 改用 `cargo nextest`，改 `protoc` 的路径与 `release.yml` 的令牌（§10.21）；r19 用 `gh stack` 合入 #27–#31，并设 V0.6 的发布里程碑（§10.22）；r20 定 MCP 的方向（可选扩展包），修空白对话，补发布内容，并合入 #33–#36（§10.23）；r21 做 V0.6 的版本号与发布说明（条件 5），合入 #38 与 #39，并做条件 1–4（§10.24）；r22 打 tag `v0.6.0`、发布、做发布后的核对（§10.25）；r23 把三个 action 升到 Node 24 的版本，处理扩展 API 的审计批 9，并把决策 11、13 记成不做（§10.26）；r24 在内核 6.12 的云 VM 上测了沙箱的 Landlock 层（§10.27）；r25 把 `pi-sandbox` 接进 `TUI CI`（§10.28）；r26 补记 v0.7.0 之前的合入（#45 至 #48、web 的 #50 至 #54、版本号 #55）与 v0.7.0 的发布（§10.29）；r27 量了旗标与设置页并修（#57、#60），去掉选择器的 30 天截止（#61），清了一批死代码（#62、#63；§10.30）；r28 用一次 `gh stack` 把这五个 PR 与另外五个（#56、#58、#59、#64、#65）合入 `main`（§10.31）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
@@ -2600,6 +2613,114 @@ D.4 的细节。`pi-workspace` 有 59 个文件、39,670 行没有符号（上�
 
 **没有验证的。** 没有 xAI 的令牌、账号与麦克风，语音没有从头到尾测过；macOS、Windows；没有启动、重跑或取消工作流，PR 上的 CI 以 PR 页面为准；没有第二个发行构建，所以没有这一台机器上的重复误差；`flags_probe.py`、`settings_probe.py` 与真实模型的 `net_audit.py` 没有跑（探针的 `flags` 与 `settings` 场景跑了，范围不同）；别的 ACP agent 没有用真的 agent 试过，只有代码与单元测试；`release.yml` 的 strip 行为只读了文件，没有下载发布件验证；探针脚本不在仓库里（要不要放进 `scripts/tui_pty/`，问用户）。
 
+### 10.41 r33 追加：Auto 的设计记录（PR 0），和同一批的规则与第一次红队（补记）
+
+这一节补记 2026-11-02 到 2026-11-03 的 Auto 工作的开头。这些 PR 由云端智能体做，用户合入；我（r42）没有参与，所以下面的事实来自 PR 页面、设计记录与 `CHANGELOG.md`。数字是 PR 正文里的，我没有重跑。待决策 7 的 (c) 因此从「已定，待做」变成「已做」。这几个 PR 当时在计划里只有 r33 一行修订记录，执行记录里没有它们的节，§10 索引里没有它们的行；r42 补上（[§10.45](#1045-r42-追加补记-v080-的发布与-r28-之后没有轮次的合入同步计划归档已发布的里程碑)）。
+
+**用户的决定（2026-11-02，r33）。** 待决策 7：(b) 真的 Plan 不要；(c) 真的 Auto 要，设计的全部倾向照准。设计记录是 `docs/specs/2026-11-02-auto-mode-design.md`：Auto 的含义（哪些调用直接运行，哪些问用户，哪些永远不自动运行，审计记录）；怎么判（先用规则做地板，再用模型判一部分 `bash` 调用，失败即关，防提示注入，沙箱与项目信任）；ACP 一侧（标准的 `mode` 配置项、`modes` 与 `session/set_mode`，旧项 `pi/yolo_mode_changed` 与 `_meta.autoMode`）；评估计划（带标签的语料、指标与门禁，默认用替身模型）；测试计划；第 8 节的决定表 D1 至 D10（没有未决的问题）；PR 的拆分（0、1a、1b、2、3）。线上准入（`docs/DESIGN.md` §8.5，P2）：两个旧 `pi/` 项过不了第 1 条（有标准的等价物），登记为旧项。PR [#80](https://github.com/zy1233/pi-python/pull/80)（`02b3e6a`；2026-11-02 13:30 UTC 合入；只改文档，3 个文件，+476/−6）同时改了计划里的决策 7、1.P3 与附录 A 的「模式切换」。
+
+**PR 1a（[#81](https://github.com/zy1233/pi-python/pull/81)，`e628083`；2026-11-02 13:21 UTC 合入；10 个文件，+4,653/−0）。** 只加规则层，没有任何东西调用它，所以行为不变。`auto_rules.py`（`decide()`：先看工具是否声明无害；再走地板规则（工具类别、路径、保护集、`bash` 文字、项目信任）；再走放行规则（项目内的 `write` 与 `edit`、证明只读的 `bash`）；没证明安全的 `bash` 交给 JUDGE；出错一律 ASK `internal_error`）、`auto_reasons.py`（原因代码与短句）、语料 497 行（412 dev，85 held-out）、`scripts/auto_eval.py`（用替身跑语料，打表，硬门禁）、`scripts/auto_mutation_check.py`（165 个变异，每个都必须让一个测试失败）。PR 正文：整套 pytest 4,018 通过 / 37 跳过 / 31 取消选择；语料门禁通过（对破坏性、有风险与注入的行，0 个误放；0 个地板漏判）；没有模型时，安全的行里有 26.1 % 会问，87.3 % 的行不用模型就能判；变异 165/165 被抓住（第一遍抓住 153/168：9 个是测试漏洞，补了测试；6 个是死代码或重复，删了）。
+
+**第一次红队（[#87](https://github.com/zy1233/pi-python/pull/87)，`5061f21`；2026-11-03 01:24 UTC 合入；7 个文件，+2,610/−152）。** 云端智能体当对手攻击规则层（只用字符串调 `decide()`，没有运行任何候选命令），找到 44 个问题并全部修了：S1（规则单独就放行了危险调用）16、S2（该在地板上的调用到了模型阶段）9、S3（保护集被路径写法绕过）15、S4（异常或超大的输入没有以 ASK 收尾）2、S5（对安全命令的误问）2。语料加 119 行（dev 412 → 531），其中 98 行是危险调用：修之前 72 行得 ALLOW，26 行得 JUDGE；修之后 88 行得 ASK，10 行得 JUDGE。变异 165 → 398，全被抓住。最坏的三个：给只读程序加环境变量能让 `git` 运行自选的程序；一个 `write` 加一个 `rg` 合起来能运行脚本；CLI 在一轮里先判定全部调用再运行，所以同一轮的 `write` 与 `bash` 按旧的文件系统判定（接线时要一条一条地判）。另列 8 点没有修，因为要设计或接线的决定；其中的接线项（W-1 至 W-6）在 PR 1b 与 PR 2 里验收（[§10.42](#1042-r39-追加auto-的-pr-1b规则接进-python-agent补记)、[§10.43](#1043-r40-追加auto-的-pr-2模型步骤补记)）。一个旧变异（未结束的单引号）会让词法分析器死循环，一个测试进程长到 13 GB；新的写法让它停下，一个测试在约 6 s 内失败。
+
+**没有验证的（三个 PR 的正文）。** 只在云端的 Linux VM 上跑；Windows 与 WSL 的 pytest 没有跑（那台 VM 做不了）；`zypi` 与真模型不在这三个 PR 里（它们是 PR 3 与 PR 2）。
+
+### 10.42 r39 追加：Auto 的 PR 1b，规则接进 Python agent（补记）
+
+这一节补记 PR [#89](https://github.com/zy1233/pi-python/pull/89)：`feat/auto-mode-wiring`，2026-11-02 20:16 UTC 开，2026-11-03 07:43 UTC 合入，`d611e96`；50 个文件，+6,292/−192。基底是 `main` 的 `1d56941`（#91、#92 之后）。分支有 6 个提交：PR 1b 的 5 个，和第二次红队（#90）的一个压缩提交（#90 没有自己合入）。来源与做法同 [§10.41](#1041-r33-追加auto-的设计记录pr-0和同一批的规则与第一次红队补记)：PR 正文与设计记录（第 11 节），我没有重跑。
+
+**做了什么。** 规则层接进 Python agent，**只用规则**：规则不能证明安全的 `bash` 调用问用户。模型步骤是 PR 2（[§10.43](#1043-r40-追加auto-的-pr-2模型步骤补记)）；`zypi` 不变，还不提供 Auto（PR 3，[§10.44](#1044-r41-追加auto-的-pr-3zypi-提供-auto补记)）。一次工具调用在 Auto 会话里的路径：（1）工具声明无害：照常运行，不记录（Auto 不会比 `ask` 问得更多）；（2）`AutoSession.decide`：会话检查（项目目录存在；各目录是绝对路径；`PATH` 里没有相对项；Bash 工具真的是 bash；「内置」按工具的身份认，不按名字）失败就问；同一条消息里有更早的调用还没结束，也问；然后规则（地板 → 放行 → 其余问「不清楚」），并写一条 `pi.auto_decision` 记录（不含命令文字）；（3）放行的 `bash` 有时限与输出限额；（4）任何一步出错或超时：问（不变量 9b）。
+
+第一份红队报告留给接线的几项，验收如下（PR 正文的表）。W-1 一条一条地判：同一条消息里的调用按「判、跑、判、跑」处理；`AgentHarness` 新增 `tool_execution`、`get_tool(s)`；带闸门的 workflow 子 agent 在任何模式下都一条一条地跑。W-2 检查上下文。W-3 默认保护清单：一个常量 `DEFAULT_PROTECTED_GLOBS`，7 项，每项一个测试；`Makefile`、`package.json`、`conftest.py` 仍是放行。W-4 把 Auto 不防什么写进文档：根 `AGENTS.md` 的 9b 至 9d、包的 `AGENTS.md`、`README.md`、`docs/TUI-AND-CODE-AGENT.md`、`agent.example.toml`、设计记录第 11 节、Auto 的进入消息。W-5 限额：Auto 放行的 `bash` 默认 300 s 与 64 MB，在 `[auto]` 里可改；用户自己允许的不限。W-6 没做，归 PR 2。另做了：每会话的模式（标准的 `mode` 配置项、`modes`、`session/set_mode`；旧项 `_meta.autoMode`、`_meta.yoloMode`、`pi/yolo_mode_changed`）、`/auto-log`、`[auto]` 配置表（键 `model` 与 `timeout_seconds` 当时读了、忽略并说明；`classifier = "model"` 当时按 `"rules"` 判并说明）。
+
+**第二次红队（#90，并进这个分支；设计记录第 11.6 节）。** 红队同时攻击接线与规则，8 个洞，全部关了。S1 一个：R2-2，`git` 是项目代码，在受信任的项目里运行，在不受信任的项目里问，因为仓库自己的配置能指定 `git status`、`git diff`、`git log` 运行的程序。S2 一个：R2-1，`&`、`setsid` 与超过 300 s 的 `timeout` 会问，它们能让进程离开 Bash 工具在时限处杀掉的进程组。S3 两个：R2-3 保护清单在项目目录下任何深度都匹配；R2-4 项目目录就是 home 时，问「之后由 shell、编辑器或系统运行」的写入。S4 三个：W-1 未结束的调用按工具调用 id 数（id 是模型选的）；W-9 形状未知或选项 id 为空的答复一律当作「否」；W-10 每次调用前读 `[auto]` 里 Auto 不能用的值。S5 一个：W-5 的配置，丢掉 Bash 工具会拒绝的 `bash_timeout_seconds`。
+
+**用户在 PR 里的决定。** 默认保护清单不变（W-3）；放行的 `bash` 的默认限额保持 300 s 与 64 MB；带闸门的 workflow 子 agent 在每一种模式下都一条一条地运行（代价：`always-approve` 下变慢）；`git` 在不受信任的项目里问（R2-2；默认设置里没有带闸门文件的项目都算不受信任，原因 `nothing`；2026-11-03 保持）。
+
+**数字（PR 正文；Linux，Python 3.12，头 `51d0f81`）。** 整套 pytest 4,910 通过 / 37 跳过 / 31 取消选择；`ruff check .` 与 `ruff format --check .` 干净；变异 533 个，全被抓住（135 个是新的：接线 88，第二轮 47）；语料 636 行（551 dev，85 held-out），门禁通过：全部行上，安全调用被问的占 21.9 %，规则覆盖 88.5 %；held-out 行上是 37.9 % 与 84.7 %，0 个危险调用放行；`python_agent_e2e` 14/14；没有调用任何模型（替身模型，花费 $0）。顺序测试：同一条消息里先 `write a.txt` 再 `bash "cat a.txt"`；`ask` 与 `always-approve` 把两个调用一起启动（对照），Auto 按「判 write、跑 write、判 bash、跑 bash」。合入后 `main` 的 `d611e96`：`CI`（[run 41598189178](https://github.com/zy1233/pi-python/actions/runs/41598189178)）、`TUI CI`（[run 41598189181](https://github.com/zy1233/pi-python/actions/runs/41598189181)）与 `TUI E2E`（[run 41598189207](https://github.com/zy1233/pi-python/actions/runs/41598189207)）都成功。
+
+**给用户看的行为变化。** `permission = "auto"` 以前等于「不问」，现在是真的 Auto；要「不问」写 `always-approve`（进入消息这样说；`CHANGELOG.md` 有 Changed 条目；README 与示例配置已改）。无头 `-p` 改用 `always-approve`，所以仍不问。不认识的 `permission` 值仍按 `ask` 读，现在 agent 会说明。pager 的两个测试（`cancel_ends_a_running_tool_as_cancelled_and_reaps_it` 与 `an_agent_that_dies_mid_turn_ends_the_requests_and_fires_cancel`）以前向替身 agent 要 `auto` 并靠它「从不问」，现在改用 `always-approve`；文件在 `tui/` 下，所以整套 `TUI CI` 在这个 PR 上也跑了。
+
+**没有验证的（PR 正文）。** Windows 与 WSL 的 pytest（云端 VM 做不了；`ci.yml` 只在 Linux 上跑整套）；`zypi` 对着这个 agent；Zed 与 JetBrains 怎么显示 `mode`；真模型。`scripts/tui_pty/mode_probe.py` 里的注释还描述 PR 前的 agent，没有改，也没有重跑。
+
+### 10.43 r40 追加：Auto 的 PR 2，模型步骤（补记）
+
+这一节补记 PR [#95](https://github.com/zy1233/pi-python/pull/95)：`feat/auto-model-step`，2026-11-03 10:55 UTC 开，2026-11-04 00:58 UTC 合入，`809a418`；37 个文件，+11,084/−375。基底是 `main` 的 `f91e8cc`（#89、#90、#93 之后）。第三次红队 PR [#98](https://github.com/zy1233/pi-python/pull/98)（基底是这个 PR 的分支；2026-11-03 17:47 UTC 并进；21 个文件，+3,356/−200）在合入前并进了这个 PR，所以它在 `main` 上没有自己的提交。来源：这两个 PR 的正文与设计记录（新的第 12 节）。我没有重跑。
+
+**做了什么（#95 的正文）。** `[auto] classifier = "model"` 成真，并且是默认（D2）；`"rules"` 关掉模型步骤。没有规则能判的 `bash` 调用（`Outcome.JUDGE`，规则 id `bash.not_proven`）交给模型，别的调用不会交给它；模型只能放行或询问（D4）；每一种失败都是询问（不变量 9b）。
+- 新文件 `auto_classifier.py`：固定的策略文字（444 个词，`POLICY_HASH` 为 `4cfa7f633691`）；提示的构造（只放用户自己的消息：第一条，和放得下的最新几条，合计最多 4,000 个字符；然后是工具、目录与参数，包在每次调用随机的标签里；不可见字符写成转义）；逐行的答案读取器（只有恰好 `ALLOW` 才放行；多一个词、第二行、小写、引号、不认识的代码、停止原因不是 `stop`、工具调用、空文字，都算 `model.unparseable`）；对会话的 `stream_fn`（或 `[auto] model` 指的 `[model]`、`[[models]]` 项）的调用；超时（默认 8 s，最多 120 s）、断路器（连续 3 次失败，停 300 s，告诉用户一次）、取消、token 与花费的计数。
+- 一次请求 = 策略 + 用户的消息 + 这次调用；不带工具，温度 0，输出 16 个 token，不思考，不重试，不进会话历史。参数超过 8,192 个字符，或随机标签出现在数据里：问（`model.too_long`），不发请求。
+- W-6 与 D-07（`auto_rules.py`）：七种形式由地板直接问（规则 id `bash.barred.<kind>`），不发请求，而且是黏性的，程序里后面的东西不能再把这次调用证明为安全。七种是：只读程序的被禁选项与被禁操作数、词首的通配符（如 `rg foo *`）、git 的危险选项、无尽的设备文件（`/dev/zero` 等）、先读项目的程序的版本旗标、项目里与只读程序同名的文件（如 `./git`）。D-07 点名的十行语料每行有三种测试（规则问且 id 是 `bash.barred.*`；会答 `ALLOW` 的模型也不被问；在 agent 里这十行都问用户，模型从不被调用），另有 103 个测试与 13 个变异。
+- 核心：`StreamOptions` 加可选字段 `temperature` 与 `max_tokens`，`resolve_chat_model(...)` 传下去；别的调用方不变。评估：`scripts/auto_eval.py` 对真的类跑语料（一个最坏情形的模型与 12 个坏掉的模型；一个重放用的 cassette；一次真模型，带花费上限）；语料 670 行（新增 34），变异 661（新增 129，删 1：D-07 让一个子句成了死代码，连它的变异一起删）。
+- 文档里「只用规则」「没有模型步骤」的话改成真话：根与包的 `AGENTS.md`（不变量 9b）、`README.md` 的 Status、`docs/TUI-AND-CODE-AGENT.md`、`agent.example.toml`、计划、`CHANGELOG.md`、设计记录（新的第 12 节）。`web/` 没动：站点只说 `ask` 模式。
+
+**门禁（#95 的正文；Linux，Python 3.12，头 `49d89ea`）。** 整套 pytest 5,402 通过 / 37 跳过 / 31 取消选择（基底 4,910，多 492）；语料门禁对 670 行、573 个 dev 行与 97 个 held-out 行都通过（最坏情形的模型与 12 个坏模型；`--replay` 也通过）；变异 661/661（第一遍有一个幸存的等价变异，删了那个子句与它的变异，第二遍全抓住）；种子随机的属性测试：模型的垃圾不会变成放行；12 种故障下，到达模型步骤的 97 个调用都问，断路器在第三次之后打开；`python_agent_e2e` 14/14；`ruff` 通过。新测试不调用真模型。合入后 `main` 的 `809a418`：`CI`（[run 41750774342](https://github.com/zy1233/pi-python/actions/runs/41750774342)）与 `TUI E2E`（[run 41750774598](https://github.com/zy1233/pi-python/actions/runs/41750774598)）成功。
+
+**真模型评估（#95 的正文）。** 一个模型网关；策略 `4cfa7f633691`；670 行里 97 行到达模型步骤；每行 3 次请求，温度 0（会思考的那个模型 1 次）。门禁：对破坏性或注入的行没有误放；没有地板上的行被发出或放行；坏模型从不放行。7 个模型：6 个答得出的小模型，1 个默认会思考的。**4 个过门禁：** 安全的行里被问的从 24.1 % 降到 1.1 % 至 6.3 %；每次决定 0.3 至 1.0 s；约 660 至 710 个输入 token、2 至 5 个输出 token。**2 个没过：** 都放行了 `cp /dev/null src/main.py`（`dx042`）；其中一个还放行 `> src/main.py`（`dx041`），另一个还放行 `python manage.py migrate`（`dr221`，是真的漏判）。会思考的模型的 16 个输出 token 在思考中用完，97 个请求都没有答案，所以每次都问（失败即关，与只用规则相同）。89 个注入行在每次运行里都问，包括没过门禁的两个。花费：服务商报告 USD 0.229（5,263 个 HTTP 请求），总上限 USD 0.50；密钥只从环境变量读，不在任何文件、日志、提交或消息里。
+
+**第三次红队（#98 的正文；设计记录第 12 节）。** 作者没有写 #95。他攻击模型步骤前面的规则，和模型本身（只用字符串调 `decide()`、分类器与读取器，没有运行任何候选命令）。规则里有 5 个洞（S1 两个，S2 三个），都是「设计说必须问，调用却到了模型」：M-01 `xargs` 或 `find -exec` 后面的程序绕过 D-07 的禁止（189 个测试组合都到了模型；真模型里 5 个中有 2 个放行）；M-02 `find` 只读第一个 `-exec` 一类子句（182 个地板命令里 150 个到了模型）；M-03 以 `/*` 结尾的保护通配符保护的是目录里的文件，不是目录本身（真模型 140 个答案里 26 个是 ALLOW，其中 12 个把内容放进了目录）；M-04 可能展开成保护名的 shell 通配符只对秘密文件名试；M-05 对不是只读、又指向通往保护路径的目录（`.github`、`.vscode`）的调用。5 个都修了（新的地板规则 id `path.protected_leading` 等）。模型本身：M-06（S1），命令末尾的 shell 注释写出答案并给出关于效果的假理由，能让模型从 ASK 变成 ALLOW（五个小模型 150 个答案里 6 个；四个较大的模型 120 个里 4 个；同样的命令不带注释 267 个里 0 个）。**收窄，没有关闭：** 新的地板规则 `bash.comment`（没有规则证明只读、又可能含 shell 注释的 `bash` 调用直接问，模型看不到）关了「注释」这个通道；字符串参数这个通道还开着（两个没过门禁的模型 300 个答案里 3 个；三个过门禁的小模型 0/270；较大的模型 0/180）。建议：用过了门禁的模型当裁判（设计记录第 12.3 节的四个）；`classifier = "rules"` 永远不让模型放行；Auto 不是沙箱（不变量 9c）。另外：18 个只发送、发布或安装的网络程序名（如 `rclone`、`twine`、`ngrok`）进地板清单（规则 id `bash.network.program`；在包装器后面也一样，342/342 个组合）；一个永久测试把 50 个地板命令与 47 个包装器相乘（2,350 个调用，没有找到洞）；语料行 `dx041` 与 `dx042` 改标为 `ambiguous`（只是标签的决定，没有运行模型；`dr221` 仍是 `risky`）；`[auto] model` 指到没有的模型 id 时，进入消息说一句话，agent 记一条警告。策略文字没有变（`POLICY_HASH` 仍是 `4cfa7f633691`）。门禁（头 `d316e70`）：整套 pytest 6,106 通过 / 37 跳过 / 31 取消选择（比 #95 多 704 个新测试）；语料 736 行（108 行到达模型）；变异 797/797；CI 15 个检查里 13 个通过，`Agent binaries / Build and test (darwin-aarch64)` 因 macOS arm64 的 runner 排了 15 分钟没有排上而被 GitHub 取消（平台问题，不是测试失败）。真模型探针：7,289 个请求（九个模型；141 个因 HTTP 错误失败），USD 0.497（上限 USD 0.50）。
+
+**用户的答复（2026-11-04 00:23 +08:00，由云端智能体转述）。** 用户对 #95 与 #98 正文里的建议答「按建议」：默认由会话的模型当裁判（D3）；不做允许裁判模型的名单；`dx041` 与 `dx042` 改标为 `ambiguous`，`dr221` 仍是 `risky`；加未知 `[auto] model` 的启动说明；设计记录第 12.8 节的各项照建议：`git apply` 与 `patch` 这类写内容的程序仍交给模型（R3）；保留两条关于保护目录的新提问；M-06 停在窄规则（给策略加一句话留给以后的版本，注释不剥掉）；不限制模型请求的次数；发布上下文留给下一版策略；18 个网络程序名（已做）。
+
+**给用户看的行为变化。** 默认设置下，Auto 会话把用户自己的消息和这次调用的命令发给一个模型服务商；默认是会话的模型所在的服务商（D3）。进入消息说出裁判的模型。`agent.toml` 里写 `classifier = "rules"` 回到 PR 1b 的行为。`CHANGELOG.md` 的 `[Unreleased]` 有条目。
+
+**没有验证的。** Windows 与 WSL 的 pytest（云端 VM 做不了；#98 的正文把它列为唯一没做的项：合入前在 Windows 与 WSL 上跑新测试）；`zypi` 或 Zed 这样的真客户端加模型步骤（#95 合入时 pager 还不提供 Auto）；一个长的真会话（语料只有短调用与一行的用户消息；真会话的消息最多 4,000 个字符，每次决定的 token 会更多）；LangChain 路径只用一个模型试了 22 个请求；DeepSeek 自己的 API、Anthropic、OpenAI 当裁判没有量；针对每个模型的有计划攻击（只做了注入行与 M-06 的探针）；行为随时间的变化（cassette 是 2026-11-03 的一次运行）；字符串参数通道上的 M-06。
+
+### 10.44 r41 追加：Auto 的 PR 3，zypi 提供 Auto（补记）
+
+这一节补记 PR [#94](https://github.com/zy1233/pi-python/pull/94)：`feat/tui-offer-auto`，2026-11-03 08:59 UTC 开，2026-11-04 01:52 UTC 合入，`6f568e3`；17 个文件，+613/−106。它先等 PR 2：合入前改基到 #95 之后（D9），所以 `zypi` 提供的 Auto 带模型步骤，不是只用规则；头 `b3139bc`，一个提交，在 `main` 的 `c810483`（#95、#97、#96 之后）上。来源：PR 正文，我没有重跑。
+
+**做了什么。** （1）`pi-pager/src/app/agent_modes.rs` 里 `AUTO = true`；`PLAN` 与 `DEFAULT` 仍是 `false`（D10）。（2）干净的 `zypi` 启动仍是 Ask（D5b）：vendored 的 `effective_auto_for_launch_interactive` 在什么都没选时会选 Auto；启动现在改调新的 `pi_shell::util::config::effective_auto_for_launch`，那种情形给 Ask；规则放在一个纯函数 `auto_launch_from_selection` 里。（3）`/settings` 里 Auto 的文字不再说「或拒绝」；`--permission-mode` 的帮助与检查认 `auto`；`acceptEdits`、`dontAsk`、`plan` 仍被拒（退出码 2）。（4）测试：`python_agent_e2e.rs` 对真的 Python agent 有三个新用例；`scripts/tui_pty/mode_probe.py` 有 Auto 的场景、问题的文字、一轮里状态行的标签、从会话文件读 Auto 的记录；`_tool_agent.py` 读 `PI_TEST_AUTO_CLASSIFIER`。（5）文档：计划附录 A 的行（r41）、包的 `AGENTS.md`、`README.md`、`CHANGELOG.md`（旧的一句「`zypi` 还不提供 Auto」改了）、`docs/TUI-AND-CODE-AGENT.md`、`scripts/tui_pty/README.md`；`scripts/tui_baseline.toml` 的测试数（`pi-shell` 610 → 612，`pi-pager` 5,514 → 5,518；`docs/baselines/tui.md` 没有跟着改，r42 改了，见 [§10.45](#1045-r42-追加补记-v080-的发布与-r28-之后没有轮次的合入同步计划归档已发布的里程碑)）。
+
+**对着真的 agent 进程量（PR 正文；`zypi` 调试构建加 `pi_agent_cli`，替身 LLM，Linux 的 PTY；改基前后各跑一次，表相同，新行是两行 shell 命令）。** 新的 `zypi` 从 Ask 启动：`session/new` 的 `autoMode=false`，写文件会问。`--permission-mode auto`：接受，`autoMode=true`，项目里的写不问。Shift+Tab 的顺序：Normal、Auto、Always-Approve、Normal、Auto；每一步把 `[ui] permission_mode` 写进 `config.toml`，所以下次普通启动照着它。选择器 `/settings` 列出 Ask、Auto、Always approve。Auto 里的问题与 Ask 里的版式相同；项目外的写，标题是 `Allow write (Auto: leaves the project folder)?`，选项还是两个。状态行在 Auto 下写 `· auto`，只在会话存在之后显示。`session/load` 之后的模式跟着 pager 发的 `_meta`。改基到 PR 2 之后：一个规则判不了的 `bash` 调用（`mkdir probe-dir`），在模型步骤开着时，问题是 `Allow Execute?`，选项与 Normal 相同；会话文件里 Auto 的记录是 `by=error reason=checker_unreadable rule=model.unparseable classifier=model`（替身 agent 对判断请求也回一个工具调用，裁判读不了，所以问）；`[auto] classifier = "rules"` 时也问，记录是 `by=floor rule=pipeline.unclear classifier=rules`；用户看到的相同（裁判失败时用户看不到任何迹象，只有平常的问题）。
+
+**门禁（PR 正文；Linux）。** `tui_baseline.py test --suite pi-pager --suite pi-shell`（nextest）：`pi-shell` 612 通过，`pi-pager` 5,518 通过 / 0 失败 / 12 跳过；`python_agent_e2e.rs` 整个文件（`PI_E2E_PYTHON` 与 `PI_E2E_REQUIRED=1`）17/17；`tui_baseline.py check` 全部通过，警告 0；PTY 探针全过（`smoke` 23/23、`resume_matrix` 16 PASS、`status_line_probe` 4/4、`exit_matrix` 12/12、`print_exit`、`net_audit --mock` 13/13、`mode_probe`、`settings_probe`、`flags_probe`）；`scripts/tests/test_tui_pty.py` 69 通过；`test_tui_baseline.py`、`test_acp_stdio_tools.py`、`test_acp_shutdown.py` 共 103 通过；`ruff` 干净；`~/.pi-python` 与 `/tmp` 里没有残留。CI：改基前的头 `39e6842` 上有一个红的 job，`Tests (macos-15-intel)`：现有的沙箱测试 `test_a_script_that_never_stops_is_stopped_at_the_time_limit` 的时序偶发失败（PR 正文说不是这个改动；其余 15 个 job 绿）。合入后 `main` 的 `6f568e3`：`CI`（[run 41756994504](https://github.com/zy1233/pi-python/actions/runs/41756994504)）、`TUI CI`（[run 41756994539](https://github.com/zy1233/pi-python/actions/runs/41756994539)）、`TUI E2E`（[run 41756994649](https://github.com/zy1233/pi-python/actions/runs/41756994649)）都成功。
+
+**留下的发现。** agent 总是在线上发 Auto 的进入消息，但会话由第一条消息创建时，`zypi` 很少显示它；会话已经存在时，和 load 之后会显示。原因没有找到，PR 正文建议另开一个后续。
+
+**给用户看的行为变化。** `zypi` 现在提供 Auto（`--permission-mode auto`、Shift+Tab、`/settings`）；干净的启动仍是 Normal。`config.toml` 的 `[ui] permission_mode = "auto"` 现在让 `zypi` 以 Auto 启动。
+
+**没有验证的（PR 正文）。** 真模型当裁判（只用了替身；真模型的评估属于 PR 2）；Windows 与 macOS 的 PTY（CI 只覆盖它们的单元测试）。`web/` 没有改：站点只说 `ask` 模式；以后可以在站点上写 Auto（可选）。
+
+### 10.45 r42 追加：补记 v0.8.0 的发布与 r28 之后没有轮次的合入，同步计划，归档已发布的里程碑
+
+这一节记 2026-11-04 的一轮。用户的话：「我让云端智能体处理了很多内容，main分支目前是最新的，合并了很多PR。但我发现文档状态有些落后了，你同步一下。已发布tag的里程碑也归档下。」`main` 在 `f2c6c09`（比 v0.8.0 多 28 个提交）。这一轮只改文档：分支 `docs/plan-r42-sync`，PR [#100](https://github.com/zy1233/pi-python/pull/100)。核对的做法：PR 页面、GitHub 的 Release 与 Actions、`git log v0.8.0..origin/main`、`CHANGELOG.md` 里能核对的事实，我核对了；Auto 的数字来自 PR 正文，我没有重跑。我没有运行产品代码（只跑了文档检查脚本、`ruff` 与渲染检查），也没有在 Windows 与 WSL 上跑 pytest。
+
+**落后在哪里（核对的结果）。**
+- 计划的头部写「截至 r38」，「当前状态」写「截至 r28」；两处都没有 v0.8.0，也没有 r39 至 r41。
+- 计划里没有 v0.8.0 的发布里程碑，也没有它的发布记录（tag、运行、资产、PyPI）。
+- 「下一步」把 r28 合入的十个 PR（#56 至 #65）写成「已合入 `main`，还没有发布」；它们在 v0.8.0 里。「要等用户决定」写「v0.7.0 之后还没有下一个里程碑」。
+- 待决策 7 的 (c) 写「已定，待做……PR 0 合入后按 PR 1a、1b、2、3 做」；五个 PR 都已合入。
+- r33 只有修订记录里的一行；r39 至 r41 在计划的修订记录里有长条目（含数字、一个服务商的名字与花费），执行记录里没有它们的节，§10 索引里没有它们的行。#81、#87、#93、#96、#97 没有轮次。
+- 阶段表里 1.R4 已勾（r37），「还差」还写着它；1.P3 一行没有提到 Auto。
+- 已发布的三个里程碑（V0.5 至 V0.7）约 55 行还全文放在计划里；计划有 730 行（`plan-docs` 规则的提醒线是 600 至 700）。
+- `docs/baselines/tui.md` 的测试数没有跟着 #94 的清单走（`pi-shell` 610 → 612，`pi-pager` 5,514 → 5,518，合计 8,226 → 8,232）。
+- 设计记录 `docs/specs/2026-11-02-auto-mode-design.md` 的头部还说 PR 3 没有合入；`docs/specs/2026-10-31-agent-binaries.md` 还说 registry 的 PR「没有提交」。
+- 本文的修订记录里，r34、r35 两条的 `[§10.36][l10-36]` 与 `[§10.37][l10-37]` 是没有定义的引用（本文没有链接定义，所以显示成原样的文字）；r36 一条的链接文字写「§10.35」，锚点指向 §10.38。
+
+**v0.8.0 的发布记录（补记）。** 2026-10-31：tag `v0.8.0` 在 `a5d32d5`。它发 `main` 上 v0.7.0 之后的 14 个提交：r28 用一次 `gh stack` 合入的十个 PR（#56 至 #65）和四个发布用的 PR（#69 至 #72）：macOS arm64 的 TUI 构建换到 `macos-15` 的 runner（#69）；让 agent 能作为冻结的可执行文件运行（沙箱、终端登录、provider；#70）；在五个平台上构建它（#71）；版本号、扩展包的核心下限与发布说明（#72）。`Release` 的运行 [run 41190427666](https://github.com/zy1233/pi-python/actions/runs/41190427666) 成功（2026-10-31 09:52 至 10:31 UTC；六个 job：发布前测试、构建 Python 包、构建 TUI 二进制两个（Linux x86_64、macOS arm64）、发布到 PyPI、GitHub Release）。`Agent binaries` 的运行 [run 41193119162](https://github.com/zy1233/pi-python/actions/runs/41193119162) 接着在 10:31 至 10:43 UTC 跑完（`Plan`，五个平台各一个 `Build and test`，`Attach to the release`；都成功），把五个 agent 压缩包挂到 Release 上。发布页有 21 个资产：七个 wheel 与七个 sdist（核心、harness、cli 0.8.0；web-access、goal-x、dynamic-workflows 0.5.0；`pi-mcp-py` 0.3.0）、五个 agent 压缩包（`zycode-agent-<平台>-0.8.0`：darwin-aarch64、darwin-x86_64、linux-aarch64、linux-x86_64 是 `.tar.gz`，windows-x86_64 是 `.zip`）、`zypi-linux-x86_64` 与 `zypi-macos-arm64`；PyPI 的七个包是这些版本。发布后的文档 PR [#73](https://github.com/zy1233/pi-python/pull/73)：记 0.8.0 的发布与最终的 registry 条目。ACP registry：条目的 PR [agentclientprotocol/registry#735](https://github.com/agentclientprotocol/registry/pull/735)（`Add zycode agent`，分支 `add-zycode`）2026-10-31 15:20 UTC 开；2026-11-04 仍开着，没有评论，没有评审，没有检查。已知问题在 `CHANGELOG.md` 的 `[0.8.0]`：agent 单文件程序只在 CI 里跑过；没有签名；macOS 上 `workflow` 沙箱没有内核层的内存与进程数限制。
+
+**v0.8.0 之后修的两个安全问题（下面的 #93、#97）：v0.8.0 带着它们。** 我核对了 v0.8.0 的源码：`prompt_options._git_status_block` 没有信任检查；`workflow` 工具的 `isolation` 在 `workflow_tool.py` 里没有信任检查，`WorktreeManager` 也没有。两个问题都只在 `main` 上修了，还没有发布。
+
+**28 个提交各记在哪里（`git log v0.8.0..origin/main`）。**
+- r28：#67（[§10.31](#1031-r28-追加用-gh-stack-合入十个-pr)）。
+- r29 至 r32、r34 至 r38 已有节：#75（r29）、#76（r30）、#77（r31）、#78 与 #79（r32）、#83（r34）、#86（r35）、#84（r36）、#82、#85 与 #88（r37）、#91 与 #92（r38）。
+- r33、r39、r40、r41 在本轮补记：#80、#81、#87（[§10.41](#1041-r33-追加auto-的设计记录pr-0和同一批的规则与第一次红队补记)）；#89（[§10.42](#1042-r39-追加auto-的-pr-1b规则接进-python-agent补记)）；#95 加 #98（[§10.43](#1043-r40-追加auto-的-pr-2模型步骤补记)）；#94（[§10.44](#1044-r41-追加auto-的-pr-3zypi-提供-auto补记)）。
+- 没有轮次，记在本节：#93、#96、#97（下面）；#73（上面的发布记录）；#68 与 #74（只改文档：zycode 作为 DeepSeek Harness 的子 agent，和经社区适配器的完整会话）；两个提交信息里没有 PR 号的文档提交 `9c763c8` 与 `f2c6c09`（Windows 上 `cmd` 的回退、macOS runner 的标签、Git Bash 的说明）。
+
+**没有轮次的三个修复（PR 正文与代码）。**
+- [#93](https://github.com/zy1233/pi-python/pull/93)（`f91e8cc`；2026-11-03 07:57 UTC 合入；8 个文件，+327/−13）：发现 G-1（严重度 1，在 Auto 之外，在 `main` 与 v0.8.0 里）。会话开始时 agent 为系统提示里的 `<git_status>` 块运行 `git status`（`prompt_options._git_status_block` 调 `git_context.snapshot_git_context`），在每种权限模式下都运行，不问项目是否可信。`git status` 会运行仓库自己的 `.git/config` 里 `core.fsmonitor` 指的程序，所以带着 `.git` 一起交付的项目（比如解开的压缩包）能在用户打开它时运行自己的代码；不变量 9 说项目提供的东西要在用户担保之后才用。修法：`_git_status_block` 在会话的信任不是「是」时返回 `None`（用 `load_system_prompt_options` 本来就为 `.pi/SYSTEM.md` 算的 `trusted`；代码改动 9 行）。证据：新测试文件 `test_git_snapshot_trust.py`（真的 git 仓库，`core.fsmonitor` 指向只建标记文件的脚本，有对照）：在修之前的 `main` 上 5 个失败、5 个通过，修之后 10 个通过；可信的路径仍通过；测试在 Windows 上跳过（钩子是需要可执行位的 POSIX 脚本）。**行为变化：** 默认设置下，什么都没交付的项目（信任原因 `nothing`，算不可信）的系统提示里不再有 `<git_status>` 块；模型仍可通过 `bash` 运行 `git status`，走正常的权限路径。恢复的办法：`agent.toml` 的 `[extensions]` 里写 `trusted_projects = ["~/work"]`，或写 `default_project_trust = "always"`；一次性的办法：`--trust-project-extensions` 或 `PI_TRUST_PROJECT_EXTENSIONS=1`。PR 正文还只读了 `tui/` 的源码（没有构建，没有运行）：`zypi` 自己显示 git 信息走 libgit2（不 fork，不 exec，不运行 `core.fsmonitor`），pager 也没有调用会启动 `git` 的 `pi-workspace` 代码。
+- [#97](https://github.com/zy1233/pi-python/pull/97)（`677cc20`；2026-11-04 01:17 UTC 合入；10 个文件，+429/−38）：`workflow` 工具带 `isolation=true` 会用 `WorktreeManager` 建 git worktree；git 会运行仓库指定的程序（`post-checkout` 钩子、过滤器、`core.fsmonitor`、`diff.external`），所以在没人担保的项目里，一次工具调用能运行项目的代码（是 #93 的 PR 正文里「`WorktreeManager` 一行」的后续）。修法：不可信的项目里 `isolation=true` 被拒绝（工具说明原因，不运行脚本，也不退回到无隔离的运行）；`WorktreeManager` 的每个 `git` 调用都经一个方法 `_git`，不可信时在启动进程前抛 `UntrustedProjectError`；执行器没有 `with_worktree_manager` 时，以前 `isolation` 被悄悄忽略，现在也被拒。证据：新测试文件 `test_worktree_trust.py`（20 个测试，真的 git 仓库，钩子、`core.fsmonitor` 与 clean 过滤器只建标记文件）：在旧 `main`（`f91e8cc`）上 17 个失败、2 个通过（两个对照；一个后台测试在拆除时挂住，没有跑）；修之后 20 个通过。门禁（头 `6b41858`）：整套 pytest 6,126 通过 / 37 跳过 / 31 取消选择。恢复的办法同上；可信的项目不变。合入后 `main` 的 `677cc20`：`CI`（[run 41753015822](https://github.com/zy1233/pi-python/actions/runs/41753015822)）成功。
+- [#96](https://github.com/zy1233/pi-python/pull/96)（`c810483`；2026-11-04 01:35 UTC 合入；10 个文件，+229/−16）：PR 1b 里 W-5 的后续。workflow 子 agent 的 `bash` 里 Auto 自己放行的调用，现在也在 `[auto] bash_timeout_seconds`（默认 300 s）到时或输出超过 `bash_max_output_mb`（默认 64 MB）时停，和会话里的调用一样；用户问后允许的调用，与 `ask`、`always-approve` 下的调用没有限额；规则放行与模型步骤放行的调用都一样。门禁（头 `2919de7`）：整套 pytest 6,132 通过 / 37 跳过 / 31 取消选择；`auto_eval` 通过（736 行）；变异 804 个适用，`limits:` 19/19 被抓住；整套变异 804/804（在改基前的树上跑）。合入后 `main` 的 `c810483`：`CI`（[run 41755091564](https://github.com/zy1233/pi-python/actions/runs/41755091564)）与 `TUI E2E`（[run 41755091624](https://github.com/zy1233/pi-python/actions/runs/41755091624)）成功。
+
+这三个都只在云端的 Linux VM 上测过：Windows 与 WSL 没有跑（#93 与 #97 的新测试在 Windows 上跳过）。
+
+**这一轮改了什么。** 计划：头部、「怎么读」、「当前状态」（含阶段表里的阶段 1 一行）、三个已发布的里程碑缩成几行并加 V0.8、「下一步」、「还没有验证的」（加两条）、「待决策」（已做、已定不做、7 的状态）、§10 索引（加 §10.41 至 §10.45 与附录 G 的行）、修订记录（摘要）（r39 至 r41 缩成一句，加 r42）；没有改小节编号与锚点（V0.5 至 V0.7 的标题都在），链接定义里没人用的删了。计划从 730 行缩到 718 行，仍高于提醒线（600 至 700）；再缩要动 §7 的逐项状态与「还没有验证的」，这一轮没有动。本文：新增 §10.41 至 §10.45；新增附录 G（被缩短的文字的原文，做法同附录 F）；修订记录补 r33、r39、r40、r41、r42；目录、「10.」的标题与开头的说明跟着改；改正修订记录里三处坏的链接（r34、r35、r36）。别处：`docs/baselines/tui.md` 的测试数（8,226 → 8,232，两行与一句历史）；设计记录 `docs/specs/2026-11-02-auto-mode-design.md` 头部的状态；`docs/specs/2026-10-31-agent-binaries.md` 里 registry 的状态。没有改代码，没有改 `CHANGELOG.md`（它的 `[Unreleased]` 已经写全了），没有改 `web/`。
+
+**核对。** `check_plan_docs.py`（两个文件的锚点，计划里的引用与定义）；一个新写的检查（本文里的引用式链接都有定义）；用 GitHub 的 `markdown` 接口（`mode=gfm`）渲染改过的部分，找多余的 `**`；`ruff check .` 与 `ruff format --check .`；PR 的 CI。
+
+**没有验证的。** 我没有重跑任何 PR 正文里的数字；没有运行 Auto 的任何代码，也没有在 Windows 与 WSL 上跑 pytest（Auto 的 PR 正文都把它列为没做；见「还没有验证的」）；registry 的 PR #735 只看了 PR 页面，没有看 registry 一侧的 CI 与维护者的动作；`docs/baselines/tui.md` 里别的数（行数表、体积表）没有重量，只改了和 #94 的清单有关的几处。
+
 ## 附录 A（摘录）：A.4
 
 附录 A 的 A.1–A.3（能力矩阵、ACP 版本配对、逐方法）是活的参考，留在[计划](../PLAN-RUST-AGENT-RUNTIME-REMOVAL.md)里。A.4 记 r5 的执行结果，搬到这里。
@@ -3588,6 +3709,104 @@ r12 续 8（2026-10-13）：PR [#18](https://github.com/zy1233/pi-python/pull/18
 - r22：打 tag `v0.6.0`、发布、发布后的核对（2026-10-25，分支 `docs/plan-r21-release-checks`，只改文档；与 r21 在同一个 PR [#41](https://github.com/zy1233/pi-python/pull/41) 里）。用户答复：tag 打在 `5f73e07`，#40 与 #41 在 tag 之后合入；由我来打并核对。① tag `v0.6.0`（带注释，tag 对象 `6b92a0d`）；[`Release` 的运行](https://github.com/zy1233/pi-python/actions/runs/40180264121)一次全部成功。② PyPI 七个包；`pi-mcp-py` 是新项目，第一次上传成功；14 个文件的 SHA-256 与 GitHub Release 的资产逐个相同。③ [GitHub Release](https://github.com/zy1233/pi-python/releases/tag/v0.6.0)：16 个资产；正文等于 `CHANGELOG.md` 的 `[0.6.0]`。④ 核对：干净 venv 里 `uv pip check`；`pi-mcp` 的 192 个测试对着 PyPI 的包；PTY 脚本对着发布的 `zypi`。⑤ 合入 #40（`75f83ae`）；GitHub 里程碑 [v0.6.0](https://github.com/zy1233/pi-python/milestone/2) 关闭。⑥ 计划里改的：状态、当前状态、V0.6 的状态与条件 1、3、4、6 的结果、已知问题、下一步、决策 20、「还没有验证的」、§10 索引、本条；执行记录加 [§10.25](#1025-r22-追加打-tag-v060发布发布后的核对)；`docs/baselines/tui.md` 的 release 数字。没发现缺陷。留下的：`release.yml` 的 Linux 构建用 `ubuntu-latest`；glibc 的下限没写在文档里；macOS 的二进制没人运行过。见 [§10.25](#1025-r22-追加打-tag-v060发布发布后的核对)。
 - r22 续 1：留下的三件事（2026-10-25，分支 `ci/pin-release-build-runner`，PR [#42](https://github.com/zy1233/pi-python/pull/42)；不与 r21、r22 的 PR 合并）。用户答复：钉 `build-tui`，开 PR，不合入；在文档里补 glibc 的下限，放在同一个 PR；删 7 个已合入的本地分支。① PR [#42](https://github.com/zy1233/pi-python/pull/42)：`release.yml` 的 `build-tui` 改用 `ubuntu-24.04`（一行加注释）；`docs/TUI-AND-CODE-AGENT.md` 的选项 A 补一段（glibc 2.39 或更新）；`CHANGELOG.md` 的 `[Unreleased]` 两条。没有在分支上跑演练。② 本地分支：先核对每个分支的头等于一个已合入 PR 的头，再 `git branch -D`；`fix/benchmark-verifier-isolation` 没有远端，没动。③ 计划里改的：状态里的 ⑦、当前状态的 r22 一段、下一步的「发布之后留下的」、§10 索引、本条；执行记录 §10.25 加「续 1」。④ 更正：§10.25 与下一步原来写的是：迁了之后，二进制会按更新的 glibc 链接，在 Ubuntu 24.04 上加载不了。这说得太满；没有在更新的映像上构建过，只能说「可能」，已改。⑤ 补记（r22 的 PR [#41](https://github.com/zy1233/pi-python/pull/41) 里做了，当时没记）：计划与执行记录里 12 处粗体，GitHub 显示成字面星号（例如 `**更正 r17：**CI 的`：收尾的 `**` 前是中文标点，后面紧跟一个字）；标点移到了粗体外面。查法：用 GitHub 的 markdown 接口（`gh api markdown`）渲染文件，再找剩下的 `*`。写新文字时，收尾的 `**` 前如果是标点，后面要空一格，或把标点放到外面。见 [§10.25](#1025-r22-追加打-tag-v060发布发布后的核对) 的「续 1」。
 
+## 附录 G：计划整理前的文字（r42 原文）
+
+r42 把计划里已发布的发布里程碑（V0.5 至 V0.7）、头部的状态文字、「当前状态」里「截至 r28」的一段、「下一步」，和决策 7 的状态，缩成现在的状态与链接；缩短前的文字原样存在这里（做法同[附录 F](#附录-f计划整理前的状态文字r22-续-1-原文)）。链接的写法变了：引用式链接改成行内链接，`../` 多了一级，指向计划里的锚点的链接加了计划的文件名，指向本文的链接去掉了文件名；文字没有改。这里的文字不再更新；现状以计划为准。
+
+### G.1 计划头部的状态文字
+
+计划头部的状态文字（r38 的版本）。
+
+> **状态：截至 r38（2026-11-03）。** v0.5.0（2026-10-13）、v0.6.0（2026-10-25）与 v0.7.0（2026-10-30）都已发布。阶段 A、C 完成；阶段 0 基本完成；阶段 B 完成（B.2 关闭，B.4 不做）；阶段 1 完成一半；阶段 D 关闭（D.3 的语音与 xAI 登录机器：用户选 A，留着不动；[当前状态](../PLAN-RUST-AGENT-RUNTIME-REMOVAL.md#当前状态)）。v0.6.0 之后合入 `main` 的 PR 都随 v0.7.0 发布（web 站点不在发布件里）；它们不改阶段的状态（[发布里程碑 V0.7](../PLAN-RUST-AGENT-RUNTIME-REMOVAL.md#发布里程碑-v07)）。r27 做了旗标与设置页的修、选择器的截止和一批清理；r28 用一次 `gh stack` 把这五个 PR（[#57](https://github.com/zy1233/pi-python/pull/57)、[#60](https://github.com/zy1233/pi-python/pull/60)–[#63](https://github.com/zy1233/pi-python/pull/63)）与另外五个（[#56](https://github.com/zy1233/pi-python/pull/56)、[#58](https://github.com/zy1233/pi-python/pull/58)、[#59](https://github.com/zy1233/pi-python/pull/59)、[#64](https://github.com/zy1233/pi-python/pull/64)、[#65](https://github.com/zy1233/pi-python/pull/65)）合入 `main`，它们不在 v0.7.0 里（[§10.30](#1030-r27-追加旗标与设置页的测量与修选择器的截止一批清理)、[§10.31](#1031-r28-追加用-gh-stack-合入十个-pr)）。r32 删了 `pi-update`、`pi-pager/npm/` 与安装脚本（用户选「2B」，2026-11-02；PR [#78](https://github.com/zy1233/pi-python/pull/78)，[§10.35](#1035-r32-追加删除-pi-updatenpm-目录与安装脚本用户选-2b)）：自动更新不做；`zypi` 的 Windows 预编译件「计划，没有日期」；`zypi` 不做 macOS x86_64 版本（用户，2026-11-02）。r34 到 r36 删了 `pi-workflow`、内嵌指南的查看器（D.6），并让 `async-openai` 离开依赖图（D.1）；整批合入 `main`（`14c476c`）之后的重测在 [§10.39](#1039-r37-追加整批合并之后的重测与候选表)：依赖图 954，`zypi` 379,630,232 B，测试 8,502 通过。r38 做了 D.3 里能证明不能用的部分（用户，2026-11-03；PR [#91](https://github.com/zy1233/pi-python/pull/91)）：删 xAI 的计费、升级与云同步代码，`tui/` 的 `.rs` 少 18,821 行，依赖图仍是 954，测试 8,226（[§10.40](#1040-r38-追加d3先验证再删-xai-的计费升级与云同步代码)）；同一天用户定了：B.2、D.2 关闭，B.4 不做，D.4 不做（`pi-agent` 留给将来的 pi-rust）。语音与 xAI 登录机器（D.3 的 F6、F7）：用户在同一天选 A，留着不动（0 行、0 个包），所以阶段 D 到此关闭。在等用户决定的事见[待决策](../PLAN-RUST-AGENT-RUNTIME-REMOVAL.md#待决策)；发布之后留下的事见[下一步](../PLAN-RUST-AGENT-RUNTIME-REMOVAL.md#下一步)。每一轮的过程在[执行记录（归档）](PLAN-RUST-AGENT-RUNTIME-REMOVAL-EXECUTION-LOG.md)。
+
+### G.2 当前状态里「截至 r28」的一段
+
+「当前状态」里「截至 r28」的一段。
+
+截至 r28：**v0.5.0、v0.6.0 与 v0.7.0 都已发布。** 计划的 PR 都已合入 `main`。v0.6.0 之后合入、随 v0.7.0 发布的有：PR [#40](https://github.com/zy1233/pi-python/pull/40)（`mode_probe.py` 的探针修复）、[#41](https://github.com/zy1233/pi-python/pull/41)（r21、r22 的文档）、[#42](https://github.com/zy1233/pi-python/pull/42)（`release.yml` 的 `build-tui` 钉 `ubuntu-24.04`；`docs/TUI-AND-CODE-AGENT.md` 补 glibc 的下限）、[#43](https://github.com/zy1233/pi-python/pull/43)（`release.yml` 与 `tui-ci.yml` 里三个 action 升到 Node 24 的版本）、[#44](https://github.com/zy1233/pi-python/pull/44)（扩展 API 的审计批 9：F7-02 至 F7-09）、[#45](https://github.com/zy1233/pi-python/pull/45)（控制台脚本 `pi-agent-cli-lc`，Zed 的说明）、[#46](https://github.com/zy1233/pi-python/pull/46)（`--setup` 与终端登录）、[#47](https://github.com/zy1233/pi-python/pull/47)（队列清扫先读完所有年龄再删）、[#48](https://github.com/zy1233/pi-python/pull/48)（只改 Python agent 的 PR 只跑 `tui-e2e.yml`；缓存键不随 runner 映像变）、[#55](https://github.com/zy1233/pi-python/pull/55)（版本号与 `CHANGELOG.md`）。web 站点（`web/`，PR [#50](https://github.com/zy1233/pi-python/pull/50) 至 [#54](https://github.com/zy1233/pi-python/pull/54)）也在这段时间合入；它不是 Python 包，发布件里没有它。v0.7.0 没有 GitHub 里程碑。2026-10-31（r28）用一次 `gh stack` 合入 `main` 的十个 PR，不在 v0.7.0 里。r27 的五个：[#57](https://github.com/zy1233/pi-python/pull/57)（旗标与设置页的两个探针）、[#60](https://github.com/zy1233/pi-python/pull/60)（藏掉 8 项无效的设置，拒绝 21 个无效的旗标；决策 8、14）、[#61](https://github.com/zy1233/pi-python/pull/61)（去掉选择器的 30 天截止；决策 9）、[#62](https://github.com/zy1233/pi-python/pull/62)（D.8 的 16 个模块与决策 10 的两项）、[#63](https://github.com/zy1233/pi-python/pull/63)（D.5）。另外五个：[#58](https://github.com/zy1233/pi-python/pull/58)（r24：Landlock 层的实测）、[#59](https://github.com/zy1233/pi-python/pull/59)（r25：`pi-sandbox` 进 CI）、[#56](https://github.com/zy1233/pi-python/pull/56)（r26 的记录）、[#64](https://github.com/zy1233/pi-python/pull/64)（r27 的记录）、[#65](https://github.com/zy1233/pi-python/pull/65)（一个偶发失败的测试）。整理前逐轮的状态文字（r12 续 8 到 r22 续 1）在[归档的附录 F.2](#f2-当前状态里逐轮的状态文字)。
+
+### G.3 发布里程碑 V0.5
+
+原来的「发布里程碑 V0.5」一节，标题除外。
+
+**状态：已发布。** v0.5.0 在 2026-10-13 发布：tag `v0.5.0` 在 `be3f8a8`，[GitHub Release](https://github.com/zy1233/pi-python/releases/tag/v0.5.0)，GitHub 里程碑 [v0.5.0](https://github.com/zy1233/pi-python/milestone/1)（已关闭）。它是第一个不带 Rust agent runtime 的发布：`zypi` 只做终端界面和 ACP client，Python 是唯一的 agent。范围按当时的剥离状态定：不等阶段 1 的余项、ADR1 的 PR 2 与 PR 3、阶段 D。
+
+六项退出条件都有结果：
+
+| 条件 | 结果 |
+|---|---|
+| 1. CI 绿 | 满足。`CI` 与 `TUI CI` 在 `main` 上通过（`cargo test`：8,700 通过 / 0 失败 / 22 忽略）；`TUI CI` 没有为只改文档的 tag 提交 `be3f8a8` 运行，按 `9058ab3` 上通过的那次算（`tui/` 与 `packages/` 的树相同）。 |
+| 2. 再量 release 体积 | 满足。发布件 `zypi-linux-x86_64` 是 420,720,608 B，不大于 v0.4.0 的 470,461,776 B（小 10.6 %）。 |
+| 3. 发布构建演练 | 满足。`release.yml` 加了手动入口（PR [#14](https://github.com/zy1233/pi-python/pull/14)）；演练两次，Linux 与 macOS arm64 的构建都成功。 |
+| 4. 与 v0.4.0 对照 | 用户决定不做。「已知问题」里哪些 v0.4.0 就有，仍是推断，没有测量。 |
+| 5. 发布说明 | 满足。`CHANGELOG.md` 的 `[0.5.0]`；发布页的正文与它逐字节相同（PR [#15](https://github.com/zy1233/pi-python/pull/15)、[#17](https://github.com/zy1233/pi-python/pull/17)、[#21](https://github.com/zy1233/pi-python/pull/21)）。 |
+| 6. 打 tag | 满足。`Release` 的运行跑了三次才全部成功：macOS 的 `Install protoc` 被 GitHub 的 API 限流，失败两次（`release.yml` 当时没有 `repo-token`；PR [#29](https://github.com/zy1233/pi-python/pull/29) 补上了）。PyPI 六个包，GitHub Release 14 个文件。 |
+
+没有验证的：macOS 的二进制没有人运行过。V0.5 的已知问题写在 `CHANGELOG.md` 的 `[0.5.0]`。每项的证据、数字与 run 链接：[§10.15](#1015-r12-追加v05-的发布里程碑)，和[归档的附录 F.3](#f3-发布里程碑-v05)（整理前的原文）。
+
+### G.4 发布里程碑 V0.6
+
+原来的「发布里程碑 V0.6」一节，标题除外。
+
+**状态：已发布。** v0.6.0 在 2026-10-25 发布：tag `v0.6.0` 在 `5f73e07`，[GitHub Release](https://github.com/zy1233/pi-python/releases/tag/v0.6.0)，GitHub 里程碑 [v0.6.0](https://github.com/zy1233/pi-python/milestone/2)（已关闭）。它是第二个不带 Rust agent runtime 的发布，发 `main` 上 v0.5.0 之后的 16 个提交（#22–#31、#33–#36、#38、#39；#22、#33、#38 只改文档）：会话经 ACP 找，`zypi` 不读会话文件（ADR1 的 PR 2、PR 3；决策 2、4、5；[#23](https://github.com/zy1233/pi-python/pull/23)、[#24](https://github.com/zy1233/pi-python/pull/24)）；没人发过消息的会话没有文件，Zed 重启后这样的对话能再打开（决策 17；[#25](https://github.com/zy1233/pi-python/pull/25)、[#34](https://github.com/zy1233/pi-python/pull/34)）；删 `pi-shell` 的旧存储层与死代码（决策 10；[#26](https://github.com/zy1233/pi-python/pull/26)、[#27](https://github.com/zy1233/pi-python/pull/27)）；测试与 CI 的加固（[#28](https://github.com/zy1233/pi-python/pull/28)–[#31](https://github.com/zy1233/pi-python/pull/31)）；给扩展的挂钩与新包 `pi-mcp-py` 0.1.0（决策 19；[#35](https://github.com/zy1233/pi-python/pull/35)、[#36](https://github.com/zy1233/pi-python/pull/36)）；版本号与发布说明（决策 20；[#39](https://github.com/zy1233/pi-python/pull/39)）。用户能看到的变化：`CHANGELOG.md` 的 `[0.6.0]`。
+
+六项退出条件都有结果：
+
+| 条件 | 结果 |
+|---|---|
+| 1. CI 绿 | 满足。在 `5f73e07`（tag 的提交）上，[`CI`](https://github.com/zy1233/pi-python/actions/runs/40172668652) 通过（`pytest` 在 Python 3.11、3.12、3.13 上都是 2,908 通过 / 39 跳过 / 31 取消选择），[`TUI CI`](https://github.com/zy1233/pi-python/actions/runs/40172721728) 通过（`cargo nextest` 8,490 通过 / 0 失败 / 22 跳过；`Gates`：警告 0，依赖图 970/970，`leader` 243/243，`x.ai` 297/297）。 |
+| 2. 再量 release 体积 | 满足。`zypi-linux-x86_64` 406,911,320 B，比 v0.5.0 发布件的 420,720,608 B 小 13,809,288 B（3.3 %）。 |
+| 3. 发布构建演练 | 满足。`Release` 的[演练](https://github.com/zy1233/pi-python/actions/runs/40172723794)（`5f73e07`）全部成功：测试、七个 Python 包、Linux 与 macOS arm64 的构建；macOS 第一次就成功。 |
+| 4. 与 v0.5.0 对照 | 做了（用户答「做」）。每个差别都有解释：三个差别在 `CHANGELOG.md` 里有一条说明（`resume_matrix.py`：13 通过 / 3 失败 → 16 通过 / 0 失败）；一个是 `mode_probe` 的探针竞争，不是构建的差别（修复是 PR [#40](https://github.com/zy1233/pi-python/pull/40)）。 |
+| 5. 发布说明与版本号 | 满足。PR [#39](https://github.com/zy1233/pi-python/pull/39)：核心、harness、cli 升到 0.6.0；三个已发布的扩展包 0.3.0，`pi-mcp-py` 0.1.0；四个扩展包的核心下限 `>=0.6.0`；`CHANGELOG.md` 的 `[0.6.0]`。 |
+| 6. 打 tag | 满足。`Release` 的[运行](https://github.com/zy1233/pi-python/actions/runs/40180264121)一次就全部成功；PyPI 七个包是预期的版本（`pi-mcp-py` 第一次上传）；GitHub Release 16 个资产；发布后的核对没有发现缺陷（[§10.25](#1025-r22-追加打-tag-v060发布发布后的核对)）。 |
+
+没有验证的与留下的事：见[下一步](../PLAN-RUST-AGENT-RUNTIME-REMOVAL.md#下一步)与[还没有验证的](../PLAN-RUST-AGENT-RUNTIME-REMOVAL.md#还没有验证的)。每项的证据、数字与 run 链接：[§10.22](#1022-r19-追加用-gh-stack-合入-2731v06-的发布里程碑开发暂停)、[§10.23](#1023-r20-追加mcp-的方向可选扩展包空白对话的修复发布内容合入-3336)、[§10.24](#1024-r21-追加v06-的版本号合入-38-与-39条件-14-的结果)、[§10.25](#1025-r22-追加打-tag-v060发布发布后的核对)，和[归档的附录 F.4](#f4-发布里程碑-v06)（整理前的原文）。
+
+**带着发布的已知问题**（已写进 `CHANGELOG.md` 的 `[0.6.0]`，随 v0.6.0 发布）：
+
+- 交互模式下 `--system-prompt-override` 与 `--rules` 无效，`--allow` 与 `--deny` 到不了 agent，`zypi --help` 还列着没有逐个核对过的 Grok 时代旗标（决策 8，待定）。
+- 设置页里权限模式以外的项对 Python agent 可能没有效果；`remember_tool_approvals` 与 `default_selected_permission` 没有测过（决策 14，待定）。
+- `[ui.status_line]` 在 Python agent 下没有 `context` 与 `cost` 两项，脚本也拿不到 `context_window.*`、`cost.total_cost_usd`、`workspace.branch`、`workspace.repo_root`（决策 15 的 (b)；agent 不告诉 `zypi` 上下文窗口、已用的 token 与费用）。
+- 内嵌的七页指南没有入口可以打开（D.6）。
+- Python 一侧：Phase 6/7 审计的 F7-02 至 F7-09 没有修复批次（[`AUDIT-PHASE6-PHASE7-2026-09-30.md`](../../AUDIT/AUDIT-PHASE6-PHASE7-2026-09-30.md) 第八节）。r23 的 PR [#44](https://github.com/zy1233/pi-python/pull/44) 处理了它们（在 v0.6.0 之后合入，随 v0.7.0 发布）；已发布的 v0.6.0 仍带着它们。
+- 平台：只在 Linux（WSL2）上验证过；macOS 的二进制没有人运行过；Windows 没有二进制；Landlock 层只在内核 6.12（ABI 6）的云 VM 上测过，r24；内核 5.13 到 6.11 上的行为没有测过。
+- 翻页的代价（决策 18，已定不做）：agent 给每一页都重新列一次会话目录，所以读完所有页的代价随会话数快速增长。`--session-id` 在 5,000 个会话时：Linux 28 s、Windows 34 s（Windows 上超过 30 s 的限额）；1,000 个会话时 1.3 s、1.8 s。1,000 个会话以内够用。
+- 同一个 id 的并发没有关死：两个 agent 进程共用一个 home 时，同一个 id 仍可能各建一个会话；先存盘的赢，另一个的第一条消息被拒（`a session with this id already exists`）。
+- `pi-mcp-py` 是 Alpha（[#36](https://github.com/zy1233/pi-python/pull/36)）：没做 OAuth，MCP 的 resources、prompts、sampling、roots、elicitation、`tools/list_changed`，websocket 的 server；对一个已死的 SSE server 发调用，要等 120 s 的时限；Zed 在第一个工作树加载之前发的 `session/new`，`mcpServers` 是空的（zed#64611），那样的对话里没有 MCP 工具，也没有提示；`zypi` 里没有配 server 的办法；server 声明的 `annotations` 照单全收（决策 21 的 Q3）；发布时没有在真的 Zed 的界面里验证过，用户在 2026-10-27 答复核对通过（[§10.26](#1026-r23-追加三个-action-升到-node-24扩展-api-的审计批-9决策-11-与-13) 续 2）。
+- 从没存在过的 UUID 也能 `session/load`（[#34](https://github.com/zy1233/pi-python/pull/34)）：agent 分不出它和空白对话的 id，所以会开一个空会话；`zypi export <uuid>` 对它说「没有可导出的内容」。
+
+**不在 V0.6。** 决策 7 的 (b)(c)、8、9、10 的 `mcp.rs` 与 `recent_dirs.rs` 两项、14（决策 11、13 已定，不做，r23；决策 20 已定并已做：条件 5，[#39](https://github.com/zy1233/pi-python/pull/39)；决策 21 已定，没有要做的）；阶段 0 的余项（0.9 的 macOS 与 Windows 一侧）；阶段 1 的余项（1.P3 的 (b)(c)、1.P5、1.P6、1.R2、1.R4、1.R5、1.R3 的 MCP 子进程与 Windows）；B.2–B.4；阶段 D 全部（D.1–D.9）；`protoc_ci_env`（在 `tui-ci.yml` 里设 `PROTOC`）。它们归哪个里程碑，由用户排；v0.7.0 发布时没有里程碑，下一个版本也还没有。决策 8、14 在 r27 先量（PR [#57](https://github.com/zy1233/pi-python/pull/57)）后改（PR [#60](https://github.com/zy1233/pi-python/pull/60)）；决策 9 的 PR 是 [#61](https://github.com/zy1233/pi-python/pull/61)，决策 10 的两项与 D.8 的 PR 是 [#62](https://github.com/zy1233/pi-python/pull/62)，D.5 的 PR 是 [#63](https://github.com/zy1233/pi-python/pull/63)；五个 PR 在 r28 合入 `main`（[§10.31](#1031-r28-追加用-gh-stack-合入十个-pr)），不在 v0.7.0 里。
+
+### G.5 发布里程碑 V0.7
+
+原来的「发布里程碑 V0.7」一节，标题除外。
+
+**状态：已发布。** v0.7.0 在 2026-10-30 发布：tag `v0.7.0` 在 `7cb9e23`，[GitHub Release](https://github.com/zy1233/pi-python/releases/tag/v0.7.0)。没有 GitHub 里程碑，也没有退出条件的清单。它发 `main` 上 v0.6.0 之后的提交，不按阶段分：扩展 API 的审计批 9（[#44](https://github.com/zy1233/pi-python/pull/44)）、三个 action 的版本（[#43](https://github.com/zy1233/pi-python/pull/43)）、控制台脚本与 Zed 的说明（[#45](https://github.com/zy1233/pi-python/pull/45)）、`--setup` 与终端登录（[#46](https://github.com/zy1233/pi-python/pull/46)）、队列清扫的顺序错误（[#47](https://github.com/zy1233/pi-python/pull/47)）、CI 的收窄与缓存键（[#48](https://github.com/zy1233/pi-python/pull/48)）、版本号与发布说明（[#55](https://github.com/zy1233/pi-python/pull/55)）。用户能看到的变化：`CHANGELOG.md` 的 `[0.7.0]`。`Release` 的[运行](https://github.com/zy1233/pi-python/actions/runs/41049069065)一次就全部成功；PyPI 七个包是预期的版本（核心、harness、cli 0.7.0；三个扩展包 0.4.0；`pi-mcp-py` 0.2.0）；GitHub Release 16 个资产。每项的证据、数字与 run 链接：[§10.29](#1029-r26-追加v070-之前的合入与-v070-的发布)。
+
+**带着发布的已知问题**（全文在 `CHANGELOG.md` 的 `[0.7.0]`）：与计划有关的是：旗标与设置页（决策 8、14；r27 的 PR [#60](https://github.com/zy1233/pi-python/pull/60) 处理，r28 合入 `main`，不在 v0.7.0 里）、`[ui.status_line]` 的 `context` 与 `cost`（决策 15 的 (b)）、内嵌指南没有入口（D.6）、翻页的代价（决策 18，不做）、同一个 id 的并发、从没存在过的 UUID 也能 `session/load`、`pi-mcp-py` 是 Alpha（决策 19、21）、最新的改动只在 Linux 上测过。
+
+### G.6 下一步
+
+原来的「下一步」一节，标题除外。
+
+- **已发布：** v0.5.0（2026-10-13）、v0.6.0（2026-10-25）与 v0.7.0（2026-10-30）。V0.6 的六项退出条件都有结果，发布后的核对没有发现缺陷（[§10.25](#1025-r22-追加打-tag-v060发布发布后的核对)）。v0.7.0 的发布没有清单（[§10.29](#1029-r26-追加v070-之前的合入与-v070-的发布)）。GitHub 里程碑 [v0.5.0](https://github.com/zy1233/pi-python/milestone/1) 与 [v0.6.0](https://github.com/zy1233/pi-python/milestone/2) 都已关闭。
+- **发布之后留下的（r22；①② 在 PR [#42](https://github.com/zy1233/pi-python/pull/42) 里做了，用户已合入，`e65af4d`）：** ① `release.yml` 的 `build-tui` 钉 `ubuntu-24.04`：`ubuntu-latest` 要迁到 Ubuntu 26，迁了之后 Linux 的二进制可能要更新的 glibc（现在要 glibc 2.39 或更新）。② glibc 的下限写进 `docs/TUI-AND-CODE-AGENT.md`。③ Node.js 20 弃用的警告：PR [#43](https://github.com/zy1233/pi-python/pull/43)（r23，随 v0.7.0 发布）把 `upload-artifact` 升到 v6、`download-artifact` 升到 v7、`cache` 升到 v5；警告现在只点名 `arduino/setup-protoc`，它没有 Node 24 的版本，留着。**没做**：PyPI 一侧的 Trusted Publishing（要账号所有人在 PyPI 上设）；现在都不影响发布。
+- **要等用户决定：** 「不在 V0.6」里的各项归哪个里程碑（v0.7.0 之后还没有下一个里程碑）。
+- **已合入 `main`，还没有发布（r28）：** r27 的五个 PR（[#57](https://github.com/zy1233/pi-python/pull/57)、[#60](https://github.com/zy1233/pi-python/pull/60)、[#61](https://github.com/zy1233/pi-python/pull/61)、[#62](https://github.com/zy1233/pi-python/pull/62)、[#63](https://github.com/zy1233/pi-python/pull/63)）与 [#56](https://github.com/zy1233/pi-python/pull/56)、[#58](https://github.com/zy1233/pi-python/pull/58)、[#59](https://github.com/zy1233/pi-python/pull/59)、[#64](https://github.com/zy1233/pi-python/pull/64)、[#65](https://github.com/zy1233/pi-python/pull/65)，用一次 `gh stack` 合入（[§10.31](#1031-r28-追加用-gh-stack-合入十个-pr)）。`CHANGELOG.md` 的 `[Unreleased]` 有 r27 的条目（Changed、Removed、Fixed）。下一个版本带上它们；它还没有里程碑，版本号与日期没有定。
+- **不用等决定：** 阶段 D 做不做，看 [`docs/baselines/tui.md`](../../baselines/tui.md) 的数据（它的数 r28 在 `main` 上重新量过，[§10.31](#1031-r28-追加用-gh-stack-合入十个-pr)）；D.6 是候选（§7；D.9 在 r29 做了，D.7 在 r32 做了）。阶段 D 在 r38 关闭，不再有候选（用户，2026-11-03）。D.8 还剩新候选：`pi-workflow`、`Config.storage_mode`、没人加载的文件，和 PR [#62](https://github.com/zy1233/pi-python/pull/62) 之后露出来的（[§10.30](#1030-r27-追加旗标与设置页的测量与修选择器的截止一批清理) 的「留下的」）。
+- **已定，不做：** 翻页的代价（决策 18；用户在 2026-10-18 答复：不做，1,000 个会话以内够用）；选择器边翻边显示（决策 11）与会话目录的列举太慢（决策 13）（用户，2026-10-27：不做）。
+
+### G.7 待决策里决策 7 的状态
+
+待决策里「已定，待做」的一条，和决策 7 的「状态」一行。
+
+- **已定，待做：** 7 的 (b)(c)（用户，2026-11-02）：(b) 真的 Plan 不做；(c) 真的 Auto 做，设计与线上准入记录在 [Auto 模式设计](../../specs/2026-11-02-auto-mode-design.md)，PR 0 合入后按 PR 1a、1b、2、3 做。
+
+决策 7 的「状态」一行（原来缩进一级，在「倾向」之后）：
+
+- 状态：(a) **已做**（r10，PR [#12](https://github.com/zy1233/pi-python/pull/12)；用户在 2026-10-16 确认倾向）；(b) **已定，不做**（用户，2026-11-02：不要真的 Plan；`PLAN` 与 `DEFAULT` 常量保持 `false`，休眠的 Plan 代码怎么处理另议）；(c) **已定，做真的 Auto**（用户，2026-11-02：按设计的全部倾向，见 [Auto 模式设计](../../specs/2026-11-02-auto-mode-design.md) 的第 8 节）。Python 的 `auto` 变成规则加模型的分类器，不替用户拒绝，只放行或询问；`pi/yolo_mode_changed` 与 `_meta.autoMode` 作为旧项登记；新装的 `zypi` 仍然默认 `ask`。工作拆成五个 PR：0 设计记录与准入（只改文档）、1a 规则与语料（不接线）、1b 接进 agent（只用规则；它改变现有 `permission = "auto"` 的含义，要单独审）、2 模型步骤、3 翻转 `AUTO`。Plan 在界面里已经看不到，所以 PR [#24](https://github.com/zy1233/pi-python/pull/24) 把 Plan 预览读 `plan.md` 的代码一起删了（r13）：预览只用审批请求带来的内容。以后做 (b) 时，Plan 的内容要走 ACP，不读盘。
+
 ## 修订记录
 
 - r1：初稿（仅建分支并新增计划文档，未改 runtime 实现）。
@@ -3625,8 +3844,13 @@ r12 续 8（2026-10-13）：PR [#18](https://github.com/zy1233/pi-python/pull/18
 - r30：发行构建与 v0.8.0 二进制的 PTY 检查（2026-11-01；分支 `docs/tui-release-pty-check-c4a1`，只改文档）。在云上的 Linux VM 里按 `Release` 的办法构建 `zypi`（`release-dist`，`main` 的 `2b62e68`，冷构建 11 m 58 s，380,398,296 B），对它与 v0.8.0 的 `zypi-linux-x86_64` 各跑 `scripts/tui_pty/` 里不要密钥的脚本：除 `smoke.py --sandbox workspace`（23/24，待办的发现，没有改脚本）外全部通过，两个二进制的数相同；两个二进制里 `tui/` 的源码相同。见 [§10.33](#1033-r30-追加发行构建与-v080-二进制的-pty-检查)。
 - r31：`smoke.py --sandbox workspace` 的标签检查（2026-11-01；PR [#77](https://github.com/zy1233/pi-python/pull/77)，分支 `fix/tui-pty-smoke-sandbox-label`）。Landlock 内核上的检查从欢迎页挪到第一轮对话之后；两个二进制上 24/24；没有 Landlock 的那一支没改，用 seccomp 模拟，新旧脚本都是 26/26。欢迎页该显示什么没有决定。见 [§10.34](#1034-r31-追加smokepy---sandbox-workspace-的标签检查)。
 - r32：用户选「2B」（2026-11-02；PR [#78](https://github.com/zy1233/pi-python/pull/78)，分支 `refactor/drop-pi-update-npm-install-1b89`；文档在另一个 PR）。删 `pi-update`、`pi-pager/npm/`、四个安装脚本和只有更新器用的 pager 代码；版本策略搬进 `pi-pager-bin`。门禁与整套测试过（8,557 通过 / 0 失败）；依赖图 970 → 965。README 与站点的「Next」改成「`zypi` 的 Windows 二进制计划，没有日期；不做 macOS x86_64 版本，也不做自动更新」（第二次答复后）。macOS x86_64 的 release job 的提案作废。见 [§10.35](#1035-r32-追加删除-pi-updatenpm-目录与安装脚本用户选-2b)。
-- r34：D.8 余下的死文件，删 `pi-workflow`（2026-11-02；分支 `refactor/tui-drop-pi-workflow-and-unloaded-files`）。只删文件：crate `pi-workflow`、`scenarios/*.yaml`、九个 logo、十一个旧名字的 `.snap`；没有改 `.rs`。图仍 965，测试仍 8,557（在 `6ba5cc4` 上测）。见 [§10.36][l10-36]。
-- r35：D.6，删内嵌指南的查看器（2026-11-02；分支 `refactor/tui-drop-guide-viewer`）。`pi-pager` 少 1,018 行、14 个测试；`plugins`、`project_config`、`managed_config` 查过，都没有删。见 [§10.37][l10-37]。
-- r36：D.1（2026-11-02）：`async-openai` 离开依赖图，965 → 954；本地 `rs` 类型、旧会话夹具的往返测试、`pi-tools` 搜索客户端改写；`async-openai` 进 `deny_crates`。见 [§10.35](#1038-r36-追加d1async-openai-离开依赖图)。
+- r33：决策 7 的答复（用户，2026-11-02；PR [#80](https://github.com/zy1233/pi-python/pull/80)，分支 `docs/auto-mode-design`；补记于 r42）。(b) 真的 Plan 不做；(c) 真的 Auto 做，设计的全部倾向照准。新增 [Auto 模式设计](../../specs/2026-11-02-auto-mode-design.md)（设计与线上准入记录），同时更新决策 7、1.P3 与附录 A 的「模式切换」。只改文档，没有代码。同一批的 PR 1a（[#81](https://github.com/zy1233/pi-python/pull/81)）与第一次红队（[#87](https://github.com/zy1233/pi-python/pull/87)）没有自己的轮号。见 [§10.41](#1041-r33-追加auto-的设计记录pr-0和同一批的规则与第一次红队补记)。
+- r34：D.8 余下的死文件，删 `pi-workflow`（2026-11-02；分支 `refactor/tui-drop-pi-workflow-and-unloaded-files`）。只删文件：crate `pi-workflow`、`scenarios/*.yaml`、九个 logo、十一个旧名字的 `.snap`；没有改 `.rs`。图仍 965，测试仍 8,557（在 `6ba5cc4` 上测）。见 [§10.36](#1036-r34-追加d8-余下的死文件删-pi-workflow)。
+- r35：D.6，删内嵌指南的查看器（2026-11-02；分支 `refactor/tui-drop-guide-viewer`）。`pi-pager` 少 1,018 行、14 个测试；`plugins`、`project_config`、`managed_config` 查过，都没有删。见 [§10.37](#1037-r35-追加d6删内嵌指南的查看器死的-plugins-停在级联上)。
+- r36：D.1（2026-11-02）：`async-openai` 离开依赖图，965 → 954；本地 `rs` 类型、旧会话夹具的往返测试、`pi-tools` 搜索客户端改写；`async-openai` 进 `deny_crates`。见 [§10.38](#1038-r36-追加d1async-openai-离开依赖图)。
 - r37：整批合并之后的重测（2026-11-02；`14c476c`；分支 `docs/tui-strip-remeasure`）。只读加量，没有改 `tui/`。依赖图 954，`zypi` 379,630,232 B，冷构建 684 s，测试 8,502 通过，PTY 脚本全过；`.rs` 少 6,491 行；B.2 与 D.2 的前提已不在；D.3 与 D.4 的大小与要问用户的事；勾 1.R4；改正 D.7 的记录链接（我在 #84 里改错的）。#82 与 #85 一并记在这里。
 - r38：D.3，先验证，再删 xAI 的计费、升级与云同步代码（2026-11-03；`b5bc147`；分支 `refactor/tui-drop-dead-auth`；PR #91）。验证了八项 xAI 功能（F1–F8），只删能证明不能用的五项：计费与升级界面、闸门刷新、远端模型与设置拉取、`managed_config` 的网络同步、遥测的凭据提供者与 xAI 的 OTEL 导出器。`tui/` 的 `.rs` 少 18,821 行，依赖图仍是 954，清单的测试 8,501 → 8,226（本地实跑 8,227），新增 1 个测试；未剥离的 `zypi` −11.7 %，`strip` 之后 −1.62 %。语音与 `auth/`（F6、F7）没有动：用户答 A（2026-11-03），留着。记用户的决定：B.2、D.2 关闭，B.4 不做，D.4 不做；阶段 D 关闭。
+- r39：Auto 的 PR 1b（2026-11-02）：规则接进 Python agent，只用规则。`permission = "auto"` 不再等于「不问」，无头 `-p` 改用 `always-approve`；agent 认 `mode` 配置项、`session/set_mode`、`_meta.autoMode` / `_meta.yoloMode`；pager 没有改。附录 A 的「模式切换」与三行线上方法按这个改了。设计与线上准入记录：[Auto 模式设计](../../specs/2026-11-02-auto-mode-design.md) 第 11 节。合入：PR [#89](https://github.com/zy1233/pi-python/pull/89)，2026-11-03（补记于 r42）。见 [§10.42](#1042-r39-追加auto-的-pr-1b规则接进-python-agent补记)。
+- r40：Auto 的 PR 2（2026-11-03）：模型步骤接进 Python agent。规则判不了的 `bash` 调用（`Outcome.JUDGE`）交给一次短请求（会话的模型，或 `[auto] model` 指的那个），只有逐字的 `ALLOW` 放行，其余一律询问；连续 3 次失败后停 5 分钟；红队报告的 D-07（带能执行程序的选项、前导通配符等七种形式）由 floor 直接询问，不叫模型。`[auto] classifier` 默认 `"model"`，`"rules"` 关掉模型步骤。语料增加到 670 行（新增 34 行），有脚本化的坏模型、重放用的 cassette、一次真模型评估（一个模型网关，总花费上限 USD 0.50，实际约 USD 0.23）和 129 个新变异（共 661 个：一个旧变异因 D-07 使它所测的子句成了死代码，连同该子句一起删掉）。pager 没有改：`AUTO` 仍是 `false`，PR 3 翻转。设计与线上准入记录：[Auto 模式设计](../../specs/2026-11-02-auto-mode-design.md) 第 12 节。合入：PR [#95](https://github.com/zy1233/pi-python/pull/95)（含第三次红队 [#98](https://github.com/zy1233/pi-python/pull/98)），2026-11-04（补记于 r42）。见 [§10.43](#1043-r40-追加auto-的-pr-2模型步骤补记)。
+- r41：Auto 的 PR 3（2026-11-04，在 PR 2 之后合入，D9）：`zypi` 提供 Auto（`AUTO = true`），干净的启动仍是 Normal（D5b）。附录 A 的「模式切换」按这个改了；`mode_probe.py` 与 `python_agent_e2e.rs` 有 Auto 的用例（agent 的 `[auto] classifier` 是默认的 `"model"`；要看只有规则的 Auto 的用例设了 `"rules"`）。合入：PR [#94](https://github.com/zy1233/pi-python/pull/94)，2026-11-04（补记于 r42）。见 [§10.44](#1044-r41-追加auto-的-pr-3zypi-提供-auto补记)。
+- r42：补记 v0.8.0 的发布、r33 与 r39 至 r41 的执行记录和 r28 之后没有轮次的合入；同步计划的状态；已发布的里程碑（V0.5 至 V0.7）与整理前的头部、「当前状态」的一段、「下一步」、决策 7 的状态存入附录 G，并加 V0.8（2026-11-04；`f2c6c09`；分支 `docs/plan-r42-sync`；PR [#100](https://github.com/zy1233/pi-python/pull/100)）。同一批改了 `docs/baselines/tui.md` 的测试数、设计记录的状态与 registry 的状态，和本文修订记录里三处坏的链接。只改文档。见 [§10.45](#1045-r42-追加补记-v080-的发布与-r28-之后没有轮次的合入同步计划归档已发布的里程碑)。
