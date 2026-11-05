@@ -313,13 +313,13 @@ TUI 与 agent 之间的线上协议是标准 ACP，加上登记在册的 `pi/` �
 
 1. **没有标准等价。** 以 ACP 现行 schema / RFD 为准。例如模型选择走 Session Config Options，`session/set_model` 已被上游移除，所以不能再为它造 `pi/` 方法。
 2. **Python 侧有生产者与测试。**
-3. **在 `docs/specs/` 登记**方法名、方向、schema 和能力键。
+3. **在 `docs/specs/` 登记**方法名、方向、schema 和能力键（登记处：[ACP 扩展登记](specs/2026-11-05-acp-extension-registry.md)）。
 4. **wire 类型只定义一次**，放在 `pi-acp-lib`（或同级的协议 crate），不留在 runtime crate 里。
 5. **经 `initialize` 协商**，对 Zed 等第三方客户端无害：Python agent 仍是通用的 ACP agent。
 
 五条缺一，就不加；已有的、不满足的，按「降级 / 隐藏 / 删除」处理（计划 ADR3）。TUI 一侧不实现 `x.ai/*`：入口处丢弃以 `x.ai/` 或 `_x.ai/` 开头的扩展通知。
 
-现状：登记处还不完整。已在用的扩展（`_meta.sessionId`、`_meta["pi/cwd"]`、`pi/session/delete`、`pi/yolo_mode_changed`）目前写在 `packages/pi-agent-cli/AGENTS.md` 的各小节里（例如「Two things the TUI and the agent agree on beyond ACP v1」）；迁到 `docs/specs/` 还没有做，计划里也没有它的条目（剥离计划在 r43 收尾；1.P5 只管 `initialize` 公布的键，B.3 只管 wire 类型放在哪，都已完成）。其中 `pi/yolo_mode_changed` 与 `_meta.autoMode`、`_meta.yoloMode` 已在 [Auto 模式设计](specs/2026-11-02-auto-mode-design.md)（§4.2）登记为旧项：它们过不了第 ① 条（标准的 `mode` 配置项是等价物），但在用，Python 读它们；pager 继续用它们，不改走标准通道（用户，2026-11-04；计划 1.P3 关闭）。
+现状：登记处是 [ACP 扩展登记](specs/2026-11-05-acp-extension-registry.md)（r44）。它登记八项在用的扩展（X1–X8：`pi/session/delete`、`_meta.sessionId`、`_meta["pi/cwd"]`、模型提示键、`_meta.isReplay`、终端的 `_meta` 键、`_meta.yoloMode` 与 `_meta.autoMode`、`pi/yolo_mode_changed`），每项写了名字、方向、schema、发送方、读取方、测试与状态，并逐条对照五条。结果：四项过不了第 ① 条（X1、X4、X7、X8），它们都有保留的决定（X1 与 X4 是计划的 ADR4；X7 与 X8 是 [Auto 模式设计](specs/2026-11-02-auto-mode-design.md)的 D5，加上用户在 2026-11-04 的决定：pager 继续用它们，不改走标准通道，计划 1.P3 关闭）；没有一项在 `initialize` 里协商（第 ⑤ 条）；有 Rust 一侧的六项，类型都不在 `pi-acp-lib`（第 ④ 条）。第 ④、⑤ 条只对新项适用；已在用的这八项保持原样，登记就是缺口的记录（用户，2026-11-05；登记的 §7 Q1）。`packages/pi-agent-cli/AGENTS.md` 只留 agent 一侧的实现说明（「Extensions beyond ACP v1」一节）。
 
 ---
 

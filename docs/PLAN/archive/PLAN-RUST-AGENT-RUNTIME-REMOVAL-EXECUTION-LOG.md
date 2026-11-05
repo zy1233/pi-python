@@ -12,7 +12,7 @@
 
 ## 目录
 
-- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r33、r34、r35、r36、r37、r38、r39、r40、r41、r42、r43）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29r30r31r32r33r34r35r36r37r38r39r40r41r42r43)
+- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r33、r34、r35、r36、r37、r38、r39、r40、r41、r42、r43、r44）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29r30r31r32r33r34r35r36r37r38r39r40r41r42r43r44)
   - [10.1 范围、方法与规模](#101-范围方法与规模)
   - [10.2 `/model` 恢复（ADR3 r3）](#102-model-恢复adr3-r3)
   - [10.3 验证（r3 的实测）](#103-验证r3-的实测)
@@ -59,6 +59,7 @@
   - [10.44 r41 追加：Auto 的 PR 3，zypi 提供 Auto（补记）](#1044-r41-追加auto-的-pr-3zypi-提供-auto补记)
   - [10.45 r42 追加：补记 v0.8.0 的发布与 r28 之后没有轮次的合入，同步计划，归档已发布的里程碑](#1045-r42-追加补记-v080-的发布与-r28-之后没有轮次的合入同步计划归档已发布的里程碑)
   - [10.46 r43 追加：收尾计划（最后七项），记 #105 与 Windows、WSL 的整套 pytest](#1046-r43-追加收尾计划最后七项记-105-与-windowswsl-的整套-pytest)
+  - [10.47 r44 追加：修 Windows 上的 pi.exec，把扩展的登记迁到 docs/specs](#1047-r44-追加修-windows-上的-piexec把扩展的登记迁到-docsspecs)
 - [附录 A（摘录）：A.4](#附录-a摘录a4)
   - [A.4 r5 执行结果（对照 r5 时初稿里的「默认决策」；r9 的更新见 A.1）](#a4-r5-执行结果对照-r5-时初稿里的默认决策r9-的更新见-a1)
 - [附录 B：复现方法](#附录-b复现方法)
@@ -93,7 +94,7 @@
   - [G.7 待决策里决策 7 的状态](#g7-待决策里决策-7-的状态)
 - [修订记录](#修订记录)
 
-## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r33、r34、r35、r36、r37、r38、r39、r40、r41、r42、r43）
+## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r33、r34、r35、r36、r37、r38、r39、r40、r41、r42、r43、r44）
 
 r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）；r14 合入这两个 PR，并做决策 17：会话文件在第一条用户消息时才写（§10.17）；r15 做决策 10 的存储层一项：删 `pi-shell` 里的旧存储层（§10.18）；r16 合入 #25 与 #26，并删 `pi-shell` 里剩下的死代码（§10.19）；r17 检查测试之间的竞争，只改测试与工具（§10.20）；r18 改用 `cargo nextest`，改 `protoc` 的路径与 `release.yml` 的令牌（§10.21）；r19 用 `gh stack` 合入 #27–#31，并设 V0.6 的发布里程碑（§10.22）；r20 定 MCP 的方向（可选扩展包），修空白对话，补发布内容，并合入 #33–#36（§10.23）；r21 做 V0.6 的版本号与发布说明（条件 5），合入 #38 与 #39，并做条件 1–4（§10.24）；r22 打 tag `v0.6.0`、发布、做发布后的核对（§10.25）；r23 把三个 action 升到 Node 24 的版本，处理扩展 API 的审计批 9，并把决策 11、13 记成不做（§10.26）；r24 在内核 6.12 的云 VM 上测了沙箱的 Landlock 层（§10.27）；r25 把 `pi-sandbox` 接进 `TUI CI`（§10.28）；r26 补记 v0.7.0 之前的合入（#45 至 #48、web 的 #50 至 #54、版本号 #55）与 v0.7.0 的发布（§10.29）；r27 量了旗标与设置页并修（#57、#60），去掉选择器的 30 天截止（#61），清了一批死代码（#62、#63；§10.30）；r28 用一次 `gh stack` 把这五个 PR 与另外五个（#56、#58、#59、#64、#65）合入 `main`（§10.31）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
@@ -2773,6 +2774,81 @@ WSL（Ubuntu on WSL2，Python 3.12，PR 的头 `cc9d90a`；一份放在 tmpfs �
 
 **没有验证的。** 我没有在发行构建上运行 `zypi -p`，也没有运行 Rust 的测试；Rust 一侧的引用数是文本搜索；pager 一侧的 compaction 没有核对；`-p` 里三组之外的旗标没有逐个核对；Windows 与 WSL 的 pytest 测的是 PR 的头 `cc9d90a`，合入后的树没有再跑；macOS 上什么也没有跑。
 
+### 10.47 r44 追加：修 Windows 上的 pi.exec，把扩展的登记迁到 docs/specs
+
+这一节记 2026-11-05 的一轮。r43（[§10.46](#1046-r43-追加收尾计划最后七项记-105-与-windowswsl-的整套-pytest)）结束时，我问用户下一步做什么。用户用表单答复，两项都选：（1）修 Windows 上 `LocalExecutionEnv.exec` 不终止子进程的问题：新 PR，加测试，在 Windows 与 WSL 上跑 pytest；（2）把在用的 `pi/` 扩展的登记从 `packages/pi-agent-cli/AGENTS.md` 迁到 `docs/specs/`：文档 PR。这一轮有两个 PR：[#107](https://github.com/zy1233/pi-python/pull/107)（修复；分支 `fix/windows-exec-kill-tree`；基于 `main` 的 `2235210`）与本 PR [#108](https://github.com/zy1233/pi-python/pull/108)（登记与文档；分支 `docs/acp-extension-registry`；开的时候基于 #106 的分支 `docs/plan-r43-close`；用户合入 #106 之后，分支改基到 `main`，PR 的 base 也成了 `main`）。用户说过，发布 0.9 之前由他自己做实测；我没有做那些实测。两个 PR 我都没有合入。
+
+**仓库的状态（只读核对）。** 这一轮开始时，`main` 在 `2235210`，#106 开着（头 `080c5ac`，可合并）。#107 与 #108 开好、CI 通过之后，用户合入了 #106（2026-11-05 10:28 +08:00；squash；`main` 到 `2426452`，那是 r43 的一个只改文档的提交）。`main` 现在比 v0.8.0 多 31 个提交（`git rev-list --count v0.8.0..origin/main`）。#108 的分支随后被改基到 `main`：我没有推送这次改基；改基后的提交的 committer 与合入 #106 的是同一人，时间在合入之后 4 秒；我认为它是合入那一步的一部分（没有向用户确认）。改基前后的树相同（我核对过）。#107 的分支基于 `2235210`，还开着。
+
+**#107：修 `LocalExecutionEnv.exec`（Windows）。**
+
+原因。`exec`（`packages/pi-agent-harness/pi_agent_harness/env.py`）用 `asyncio.create_subprocess_shell` 起命令。在 Windows 上，被起的进程是 `cmd.exe`，真正的程序是它的子进程。超时或被中止时，旧的 `_kill_process_tree` 在 Windows 上调 `proc.kill()`，只终止 `cmd.exe`。子进程仍握着 stdout 与 stderr 的管道。asyncio 的 `Process.wait()` 在进程退出、所有管道也关闭之后才返回，所以 `exec` 要等到子进程自己结束。旧函数的文档字符串说 `TerminateProcess` 终止进程树，这不对。r43 记过这个发现。那两个旧的 harness 测试通过，是因为 30 s 的 sleep 自己结束，`exec` 才返回并抛出正确的错误；测试不限耗时。
+
+修复。`exec` 改用核心 Bash 工具的 `ProcessTreeKiller`（`pi_agent_core/coding_tools/bash.py`）：进程一起来就建一个。Windows 上它把进程放进 Job Object，`kill()` 终止整个 Job（放不进去时回退到 `taskkill /F /T`）。POSIX 上它调 `killpg`，和以前一样（`SIGKILL`；`exec` 本来就用 `start_new_session=True`）。超时、中止、取消三条路径调 `killer.kill()`；`finally` 里调 `killer.close()`。`_ProcessTreeKiller` 改名为 `ProcessTreeKiller`（公开）；Bash 工具不变。`env.py` 的 `_kill_process_tree` 删了。
+
+测试。两个新测试在 `packages/pi-agent-harness/tests/test_harness_h4_resources_env.py`。一个 Python 子程序每 0.05 s 往一个文件写一个递增的数，持续 20 s。第一个测试用 `timeout=3` 调 `exec`；第二个等文件出现后置位中止信号。两个测试都断言：错误码是 `timeout` 或 `aborted`；`exec` 在 10 s 内返回；之后文件 0.5 s 内不再变（子程序死了）。杀不掉时，测试不会挂住，只会因为 10 s 的限额失败。
+
+数字（Windows 10，Python 3.12）：
+- 修复之前，只跑这个文件的 `-k exec`：`2 failed, 11 passed in 111.86s`。两个新测试失败（`exec` 在 20 s 后、子程序自己结束时才返回）；两个旧测试各等 30 s。
+- 修复之后：`13 passed, 14 deselected in 7.47s`；重跑一次是 `5.61s`。两个旧测试各从 30 s 降到 0.3 s；新的超时测试 3.5 s（`timeout=3`），新的中止测试 0.6 s。
+- 整套 pytest（头 `7a8aafe`）：`6086 passed, 87 skipped, 31 deselected in 626.30s`。r43 在 `cc9d90a` 上量到 6084；之后 `main` 只改了文档（`2235210`）。多出的 2 个是两个新测试。每个包都从分支的副本加载（我用 `PYTHONPATH` 指向副本，因为开发用的虚拟环境从主检出安装；运行前清掉 `PI_HOME` 与 `REAL_LLM_API_KEY`）。
+
+WSL（Ubuntu on WSL2，Python 3.12，头 `7a8aafe`）的跑法：一份放在 tmpfs（`/dev/shm`）里的副本；清空的环境（`env -i`：没有 `PI_HOME`、没有密钥、没有代理，`PATH` 只有 Linux 的）；用 WSL 里已有的虚拟环境，我没有改它；`PYTHONPATH` 指向副本的根与六个包目录，脚本打印每个包的加载路径，都在副本里。副本由 `git -c core.autocrlf=false archive` 生成，文件是 LF。第一次我用的是没有这个选项的 `git archive`：系统的 `core.autocrlf=true` 对它也生效，副本里有 344 个文件是 CRLF。脚本的 CR 计数发现了；我停掉那次运行（只停我自己的进程），没有用它的结果，改用 LF 的归档重跑；重跑的副本里 CR 是 0。结果：`5959 passed, 22 skipped, 31 deselected in 303.71s`。r43 的数是 `5957 passed, 22 skipped, 31 deselected`；多出的 2 个是两个新测试，跳过数相同。`packages/pi-mcp/tests` 在 WSL 里没有收集（那个虚拟环境没有 `mcp`、`langchain_mcp_adapters` 与 `pi_mcp`；CI 的 job 跑它们），和 r43 一样。跑完后 `/dev/shm` 里没有留下东西。
+
+CI。PR 的头 `7a8aafe` 上，[CI](https://github.com/zy1233/pi-python/actions/runs/41952622476)（Ruff；Python 3.11、3.12、3.13 的 pytest）与 [Agent binaries](https://github.com/zy1233/pi-python/actions/runs/41952622339)（五个平台的构建与测试 job，加三个 `Tests` job）都成功；`Attach to the release` 跳过（这不是发布）。
+
+没有覆盖的。有意离开进程组或 Job 的程序（POSIX 上用 `setsid`）仍可能占着管道，`exec` 仍可能等。Windows 上，从进程创建到放进 Job 之间有一个很短的窗口；窗口里造出的孙进程不在 Job 里。Bash 工具有同样的限制，我没有测。没有真的第三方扩展在 Windows 上调用过 `pi.exec`；`packages/` 里没有代码调用它。
+
+**#108：扩展的登记。**
+
+背景。r43 核对 `docs/DESIGN.md` 时发现，准入规则的第 ③ 条（在 `docs/specs/` 登记）没有做：在用的扩展写在 `packages/pi-agent-cli/AGENTS.md`，两个旧项写在 Auto 设计的 §4.2。这一轮建登记处，对每一项核对五条准入规则，改对指针。没有改代码，没有改行为：每一项在这一轮之前就在线上。
+
+怎么核对。只读。agent 一侧：`agent.py`（`ext_method`、`ext_notification`、`_session_response_meta`、`_chosen_session_id`）、`events.py`（`project_event`、`project_message_replay`）、`permission_modes.py`、`auth_methods.py`。pager 一侧：`app/effects/{mod,helpers}.rs`、`acp/meta.rs`、`acp/mod.rs`、`app/dispatch/`、`app/agent_view/mod.rs`、`tests/python_agent_e2e.rs`。SDK：开发用虚拟环境里装的 `agent-client-protocol` 0.12.1 的 `schema.py`（`schema-v1.19.0`）、`meta.py`、`agent/router.py`、`agent/connection.py`、`router.py`。测试名用文本搜索核对过，我没有运行它们。Zed 怎么读终端键，我读了 Zed 的源码（`crates/agent_servers/src/acp.rs`），没有运行 Zed。
+
+新文件 `docs/specs/2026-11-05-acp-extension-registry.md`（英文，STE）：§1 规则（什么是扩展；五条准入规则）；§2 登记表；§3 每一项的条目（线上名、参数、结果、错误、效果、谁发、谁读、测试、状态）；§4 对五条规则的核对表；§5 不在登记里的键；§6 怎么加、改、删；§7 一个问题与没有核对的事实。八项（编号不复用）：
+
+| 编号 | 项 | 方向 | 状态 |
+|---|---|---|---|
+| X1 | `pi/session/delete`（请求） | 客户端到 agent | 旧项，保留（ADR4） |
+| X2 | `session/new` 的 `_meta.sessionId` | 客户端到 agent | 在用（决策 3） |
+| X3 | 会话响应的 `_meta["pi/cwd"]` | agent 到客户端 | 在用，仓库里没有读它的代码 |
+| X4 | 会话响应的 `_meta["pi/currentModelId"]`、`["pi/currentModelDisplayName"]`、`["pi/provider"]` | agent 到客户端 | 旧项，保留（ADR4） |
+| X5 | `session/update` 的 `_meta.isReplay` | agent 到客户端 | 在用 |
+| X6 | `tool_call` 与 `tool_call_update` 的 `_meta.terminal_info`、`terminal_output`、`terminal_exit` | agent 到客户端 | 在用（Zed 的约定） |
+| X7 | `session/new`、`session/load` 的 `_meta.yoloMode`、`_meta.autoMode` | 客户端到 agent | 旧项，保留（D5；用户，2026-11-04） |
+| X8 | `pi/yolo_mode_changed`（通知） | 客户端到 agent | 旧项，保留（D5；用户，2026-11-04） |
+
+核对到的事实：
+- 扩展的方法与通知，线上的名字带前导下划线（`_pi/session/delete`）。SDK 发送时加上，接收时去掉（`acp/router.py`、`acp/agent/connection.py`）。登记与代码都用不带下划线的名字。
+- X1。标准的 `session/delete` 在 schema `schema-v1.19.0` 里（参数 `sessionId`；能力 `sessionCapabilities.delete`）。SDK 0.12.1 有它的类型与方法名，但 `acp/agent/router.py` 没有路由：标准请求会得到 `method_not_found`，agent 现在不能服务它。所以 X1 要等 SDK 补上路由才能换成标准方法；ADR4 原来就这么写。
+- X2。`NewSessionRequest` 没有 id 字段，没有标准等价物。
+- X3。会话响应没有 `cwd` 字段。pager 不读它；仓库里没有代码读它。
+- X4。agent 总是发标准的 `model` 配置项，所以 pager 用不到这三个键：它只在响应既没有 `models` 又没有 `model` 配置项时才读它们。
+- X5。`SessionNotification` 没有回放字段。pager 需要这个标记，因为回放的更新可能在 `session/load` 的响应之后才到。
+- X6。ACP 有 `terminal/*` 方法，但那里是客户端执行命令；这里是 agent 执行，没有标准等价物。键的约定是 Zed 的。agent 不读 Zed 的能力 `_meta.terminal_output`，对所有客户端都发这些键。
+- X7、X8。标准等价物是 `mode` 配置项与 `session/set_mode`，agent 也服务它们。pager 对每个 `session/new` 与 `session/load` 发两个键（模式关时是 `false`）；agent 只认 JSON `true`；两个都是 `true` 时 `yoloMode` 赢。`pi/yolo_mode_changed` 没有会话 id：agent 把模式设给所有打开的会话，也把它作为以后新会话的起始模式；agent 只读 `permission_mode`。
+
+对五条准入规则的核对结果（登记 §4）：
+- 第 ① 条（无标准等价物）：X1、X4、X7、X8 不满足。每一项有保留它的决定：X1、X4 是 ADR4；X7、X8 是决定 D5 与用户（2026-11-04）。
+- 第 ④ 条（类型只定义一次，放在 `pi-acp-lib`）：有 Rust 一方的六项（X1、X2、X4、X5、X7、X8）没有一项满足。pager 在 `app/effects/mod.rs`、`app/effects/helpers.rs`、`acp/meta.rs` 里自己拼或解 JSON；在 `pi-acp-lib` 里搜这些键名，没有命中（`sessionId` 只命中无关的子 agent 通知）。X3 与 X6 没有 Rust 一方。
+- 第 ⑤ 条（经 `initialize` 协商，对第三方客户端无害）：没有一项在 `initialize` 里协商：agent 的 `initialize` 响应没有 `_meta`（1.P5）。八项对不认识它们的客户端都无害：客户端忽略键；agent 没有这些键也能工作。
+- 第 ② 条与第 ③ 条：都满足（第 ③ 条由这份登记满足）。X3 与 X6 只有生产者的测试。
+
+登记 §5 列了 pager 发或读、而 agent 不用的键（`initialize` 请求的 `clientType` 等；`session/new` 的 `agentProfile`、`askUserQuestion`、`modelId`；`session/prompt` 的 `screenMode`；`initialize` 响应的 `modelState` 等六个解码；`session/update` 的 `totalTokens` 等六个；`x.ai/` 方法）。它们不在契约里。这份清单来自对计划点名的键的文本搜索，不是对 pager 的完整审计。
+
+**用户的答复（Q1）。** 登记 §7 有一个问题：第 ④、⑤ 条是为新项写的；对在用的八项，它们要不要也适用？`docs/DESIGN.md` 的 §8.5 说，在用而不满足规则的项要「降级、隐藏或删除」；但没有一项满足第 ⑤ 条，六项不满足第 ④ 条，照字面执行会动到所有八项，包括用户在 r43 决定保留的四项。我提议：只对新项适用，八项保留，登记就是这个缺口的记录。#107 与 #108 开好、CI 通过之后，我用表单问了用户；用户在 2026-11-05 选了这个提议。我没有替用户定这件事：答复来了以后，才把它写成「已定」（#108 的第二个提交）：登记的头部、§0、§1.2、§4 与 §7；`docs/DESIGN.md` 的 §8.5；计划里「还没有验证的」的「扩展的登记」一条、「待决策」的「已定，不做」一条与修订记录（摘要）。这件事没有待办了。
+
+**这一轮改了什么。**
+- #107（4 个文件，+97/−20）：`pi_agent_core/coding_tools/bash.py`（改名，文档字符串）；`packages/pi-agent-harness/pi_agent_harness/env.py`；`packages/pi-agent-harness/tests/test_harness_h4_resources_env.py`（两个新测试）；`CHANGELOG.md`（`[Unreleased]` 的 `### Fixed` 一条）。
+- #108：新文件 `docs/specs/2026-11-05-acp-extension-registry.md`；`docs/DESIGN.md` 的 §8.5（第 3 条加登记处的链接；「现状」一段改成 r44 的状态）；`packages/pi-agent-cli/AGENTS.md`（「Two things the TUI and the agent agree on beyond ACP v1」改名为「Extensions beyond ACP v1」，加一段：登记处在哪、各项的说明在哪一节；X2 与 X3 加编号）；根 `AGENTS.md`（模块表里 `pi-agent-cli` 一行加登记处；改掉一句过时的话：它说 pager 只提供 `ask` 与 `always-approve`，r41 起 pager 提供三个，干净的启动是 `ask`）；`docs/specs/2026-11-02-auto-mode-design.md`（头部状态加一句：§4.2 的两个旧项自 r44 起在登记里，表里的「不在登记里」是 2026-11-02 的状态）。第二个提交只记 Q1 的答复：登记（头部、§0、§1.2、§4、§7）与 `docs/DESIGN.md` 的 §8.5 里「用户还没有答复」的句子改成了答复。
+- 计划：头部与「当前状态」改到 r44（各一句；`main` 的提交号与提交数改成 `2426452` 与 31）；「下一步」里 0.9 的一句；「还没有验证的」改两条（`pi.exec`；扩展的登记）；「待决策」的「已定，不做」加一句（Q1）；§10 索引（加 §10.47；§10.46 一行里的「本 PR」改成 #106）；修订记录（摘要）加 r44；链接定义加 `pr-107`、`pr-108`、`l10-47`。计划从 729 行变成 734 行，仍高于提醒线（600 至 700）；这一轮没有再缩：计划已经完成，不会再长。
+- 本文：新增 §10.47；目录、「10.」的标题与修订记录跟着改。
+- 没有改 `web/`；#108 没有改代码，没有改 `CHANGELOG.md`。
+
+**核对。** `check_plan_docs.py`（两个文件的锚点，计划里的引用与定义）；一个检查（本文里的引用式链接都有定义；本文没有链接定义）；CR 检查（改过的文件里没有 CR）；用 GitHub 的 `markdown` 接口（`mode=gfm`）渲染改过的部分，找多余的 `**`（没有；七处粗体都渲染成了 `<strong>`）；新标题的锚点按 GitHub 的规则算出来，接口的输出不带锚点，所以没有在页面上核对；`ruff check .` 与 `ruff format --check .`；PR 的 CI。
+
+**没有验证的。** 登记的事实是读树得来的，没有运行；它点名的测试在 CI 里跑。pager 的 Rust 库（`agent-client-protocol` 0.10.4，schema 0.11.4）有没有 `session/delete`，我没有查：没有的话，pager 发不出标准请求，X1 要等库升级才能去掉。Zed 读 X6 的键，来自源码，不是运行；Zed 把 `exit_code` 读成无符号整数，agent 只有在 `bash` 工具报出负数时才会发负数，工具会不会报负数，没有查。别的客户端读不读 X3 与 X4，不知道。§5 的清单不是完整的审计。Rust 的文档注释 `tui/crates/codegen/pi-pager/src/app/session_startup.rs` 第 164 行还写着「plan item 1.P6 removes the rest」，与 r43 的状态不符；它在代码里，这一轮没有动（只改文档）。r43 的附录 A.1 里 compaction 一行写 owner 是「用户」：用户没有这样说过，这是我的记法；它在等用户决定，这一点没有变。macOS 上什么也没有跑。
+
 ## 附录 A（摘录）：A.4
 
 附录 A 的 A.1–A.3（能力矩阵、ACP 版本配对、逐方法）是活的参考，留在[计划](../PLAN-RUST-AGENT-RUNTIME-REMOVAL.md)里。A.4 记 r5 的执行结果，搬到这里。
@@ -3907,3 +3983,4 @@ r42 把计划里已发布的发布里程碑（V0.5 至 V0.7）、头部的状态
 - r41：Auto 的 PR 3（2026-11-04，在 PR 2 之后合入，D9）：`zypi` 提供 Auto（`AUTO = true`），干净的启动仍是 Normal（D5b）。附录 A 的「模式切换」按这个改了；`mode_probe.py` 与 `python_agent_e2e.rs` 有 Auto 的用例（agent 的 `[auto] classifier` 是默认的 `"model"`；要看只有规则的 Auto 的用例设了 `"rules"`）。合入：PR [#94](https://github.com/zy1233/pi-python/pull/94)，2026-11-04（补记于 r42）。见 [§10.44](#1044-r41-追加auto-的-pr-3zypi-提供-auto补记)。
 - r42：补记 v0.8.0 的发布、r33 与 r39 至 r41 的执行记录和 r28 之后没有轮次的合入；同步计划的状态；已发布的里程碑（V0.5 至 V0.7）与整理前的头部、「当前状态」的一段、「下一步」、决策 7 的状态存入附录 G，并加 V0.8（2026-11-04；`f2c6c09`；分支 `docs/plan-r42-sync`；PR [#100](https://github.com/zy1233/pi-python/pull/100)）。同一批改了 `docs/baselines/tui.md` 的测试数、设计记录的状态与 registry 的状态，和本文修订记录里三处坏的链接。只改文档。见 [§10.45](#1045-r42-追加补记-v080-的发布与-r28-之后没有轮次的合入同步计划归档已发布的里程碑)。
 - r43：收尾计划（2026-11-04；`2235210`；分支 `docs/plan-r43-close`；PR [#106](https://github.com/zy1233/pi-python/pull/106)）。用户答复 §7 的最后七项：0.9、1.P5、1.P6 勾掉；1.P3、1.R2、1.R3、1.R5 关闭；pager 继续用旧的 `pi/yolo_mode_changed`；`-p` 保持「已忽略」的警告。先收尾再发版：版本是 0.9，发布前用户自己做实测。补记 PR [#105](https://github.com/zy1233/pi-python/pull/105)（修 Windows 整套 pytest 的 9 个失败）与 Windows、WSL 的整套 pytest（Windows：9 失败 → 0；WSL：0 失败）；记下 Windows 上 `LocalExecutionEnv.exec` 不终止子进程这个没修的发现。计划里过时的事实（30 个提交；Auto 的 pytest 一条）与附录 A.1 的三行改了；`docs/DESIGN.md` 的 §8.5 与 Auto 设计的头部状态同步（扩展的登记记为已知缺口）。只改文档。见 [§10.46](#1046-r43-追加收尾计划最后七项记-105-与-windowswsl-的整套-pytest)。
+- r44：修 `pi.exec`，建扩展的登记处（2026-11-05；`2235210`，#106 合入后是 `2426452`；分支 `fix/windows-exec-kill-tree` 与 `docs/acp-extension-registry`；PR [#107](https://github.com/zy1233/pi-python/pull/107)、[#108](https://github.com/zy1233/pi-python/pull/108)）。用户答复跟进的问题，两项都选。#107：Windows 上 `LocalExecutionEnv.exec` 超时或被中止时，终止整个进程树（`ProcessTreeKiller`），加两个测试；Windows 与 WSL 的整套 pytest 通过（6086 与 5959 个通过）。#108：把在用的 `pi/` 扩展的登记迁到新的 `docs/specs/2026-11-05-acp-extension-registry.md`（八项）；核对五条准入规则：四项不满足第 ① 条，没有一项在 `initialize` 里协商，六项的类型不在 `pi-acp-lib`；用户答复了登记里的问题（Q1）：第 ④、⑤ 条只对新项适用，八项保持原样（2026-11-05）。`docs/DESIGN.md` 的 §8.5、两个 `AGENTS.md` 与 Auto 设计的头部同步。#107 改代码；#108 只改文档。见 [§10.47](#1047-r44-追加修-windows-上的-piexec把扩展的登记迁到-docsspecs)。
