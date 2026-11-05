@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import sys
+import time
+from pathlib import Path
 
 import pytest
 
@@ -523,6 +525,84 @@ async def test_local_execution_env_exec_signal_abort_mid_execution():
     abort_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await abort_task
+
+
+# ---------------------------------------------------------------------------
+# LocalExecutionEnv: a timeout or an abort kills the child process, not only the shell
+#
+# The command runs in a shell (``cmd.exe`` on Windows), and the shell starts the real program.
+# Killing only the shell leaves the program alive with the output pipes open, and asyncio's
+# ``Process.wait()`` returns only after every pipe is closed: ``exec`` then waits for the program
+# to end by itself. The program here ends by itself after 20 s, so a kill that fails makes these
+# tests fail on the time limit. It does not make them hang.
+# ---------------------------------------------------------------------------
+
+_HEARTBEAT_SCRIPT = """\
+import pathlib
+import sys
+import time
+
+beat = pathlib.Path(sys.argv[1])
+deadline = time.monotonic() + 20
+count = 0
+while time.monotonic() < deadline:
+    count += 1
+    beat.write_text(str(count))
+    time.sleep(0.05)
+"""
+
+
+def _heartbeat_command(tmp_path: Path) -> tuple[str, Path]:
+    """A command whose program writes a growing number to a file until it is killed."""
+    script = tmp_path / "heartbeat.py"
+    script.write_text(_HEARTBEAT_SCRIPT, encoding="utf-8")
+    beat = tmp_path / "heartbeat.txt"
+    return f'"{PYTHON}" "{script}" "{beat}"', beat
+
+
+async def _assert_program_is_dead(beat: Path) -> None:
+    assert beat.exists(), "the program never started"
+    first = beat.read_text(encoding="utf-8")
+    await asyncio.sleep(0.5)
+    assert beat.read_text(encoding="utf-8") == first, "the program still runs"
+
+
+@pytest.mark.asyncio
+async def test_local_execution_env_exec_timeout_kills_the_child_process(tmp_path):
+    command, beat = _heartbeat_command(tmp_path)
+    env = LocalExecutionEnv(tmp_path)
+
+    started = time.monotonic()
+    with pytest.raises(ExecutionError) as exc_info:
+        await env.exec(command, timeout=3)
+    elapsed = time.monotonic() - started
+
+    assert exc_info.value.code == "timeout"
+    assert elapsed < 10, f"exec waited {elapsed:.1f} s: the program was not killed"
+    await _assert_program_is_dead(beat)
+
+
+@pytest.mark.asyncio
+async def test_local_execution_env_exec_abort_kills_the_child_process(tmp_path):
+    command, beat = _heartbeat_command(tmp_path)
+    env = LocalExecutionEnv(tmp_path)
+    signal = _AbortSignal()
+
+    run = asyncio.create_task(env.exec(command, signal=signal))
+    deadline = time.monotonic() + 15
+    while not beat.exists():
+        assert time.monotonic() < deadline, "the program never started"
+        await asyncio.sleep(0.05)
+
+    aborted_at = time.monotonic()
+    signal.abort()
+    with pytest.raises(ExecutionError) as exc_info:
+        await run
+    elapsed = time.monotonic() - aborted_at
+
+    assert exc_info.value.code == "aborted"
+    assert elapsed < 10, f"exec waited {elapsed:.1f} s after the abort: the program was not killed"
+    await _assert_program_is_dead(beat)
 
 
 # ---------------------------------------------------------------------------

@@ -191,12 +191,16 @@ if sys.platform == "win32":
         return job
 
 
-class _ProcessTreeKiller:
+class ProcessTreeKiller:
     """Terminates the whole subprocess tree; kill-switch only, never on success.
 
     Background children deliberately survive normal completion (pi allows
     ``server &`` to outlive the command): no kill-on-close limit is set, so
     ``close()`` merely releases the job handle.
+
+    Create it right after the spawn. On POSIX the child must be a session
+    leader (``start_new_session=True``): the kill is a ``killpg``. The harness
+    uses it too, for ``LocalExecutionEnv.exec``.
     """
 
     def __init__(self, pid: int) -> None:
@@ -413,7 +417,7 @@ def create_bash_tool(
             spawn_kwargs["start_new_session"] = True
 
         proc = await asyncio.create_subprocess_exec(*argv, **spawn_kwargs)
-        killer = _ProcessTreeKiller(proc.pid)
+        killer = ProcessTreeKiller(proc.pid)
         over_output_limit = asyncio.Event()
 
         async def pump() -> None:

@@ -12,26 +12,12 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from pi_agent_core.coding_tools.bash import ProcessTreeKiller
 from pi_agent_core.coding_tools.path_utils import normalize_host_path
 from pi_agent_harness.text_lines import read_head_lines
 from pi_agent_harness.types import ExecResult, ExecutionError, FileError, FileInfo
 
 _IS_WINDOWS = sys.platform == "win32"
-
-
-def _kill_process_tree(proc: asyncio.subprocess.Process) -> None:
-    """Kill process and its children.
-
-    On Unix (when started with ``start_new_session=True``), kills the entire
-    process group so child processes are not orphaned.  On Windows,
-    ``proc.kill()`` already calls ``TerminateProcess`` which terminates the
-    process tree.
-    """
-    with contextlib.suppress(ProcessLookupError, OSError):
-        if not _IS_WINDOWS and proc.pid is not None:
-            os.killpg(proc.pid, 9)  # SIGKILL
-        else:
-            proc.kill()
 
 
 class LocalExecutionEnv:
@@ -197,6 +183,11 @@ class LocalExecutionEnv:
             stderr=asyncio.subprocess.PIPE,
             **kwargs,
         )
+        # A timeout or an abort must end the program that the shell started, not only the shell:
+        # that program holds the output pipes, and ``proc.wait()`` returns only after they close.
+        # On POSIX this is a ``killpg`` of the session started above; on Windows it is a job
+        # object (the shell is ``cmd.exe``, and ``kill`` of the shell alone leaves its children).
+        killer = ProcessTreeKiller(proc.pid)
         abort_task: asyncio.Task[None] | None = None
         aborted = False
 
@@ -204,7 +195,7 @@ class LocalExecutionEnv:
             nonlocal aborted
             await signal.wait_aborted()
             aborted = True
-            _kill_process_tree(proc)
+            killer.kill()
 
         if signal is not None and hasattr(signal, "wait_aborted"):
             abort_task = asyncio.create_task(_watch_signal())
@@ -234,11 +225,11 @@ class LocalExecutionEnv:
             )
             await proc.wait()
         except TimeoutError as exc:
-            _kill_process_tree(proc)
+            killer.kill()
             await proc.wait()
             raise ExecutionError("timeout", f"Command timed out after {timeout}s", exc) from exc
         except asyncio.CancelledError:
-            _kill_process_tree(proc)
+            killer.kill()
             await proc.wait()
             raise
         finally:
@@ -246,6 +237,7 @@ class LocalExecutionEnv:
                 abort_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await abort_task
+            killer.close()
         if aborted:
             await proc.wait()
             raise ExecutionError("aborted", "Execution aborted by signal")
