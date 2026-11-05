@@ -2,7 +2,7 @@
 
 > Scope: every item on the ACP wire that is not standard ACP, between a client (`zypi`, Zed, or another client) and `pi_agent_cli`. For each item the register gives the name, the direction, the schema, who sends it, who reads it, the tests, and the status. It also says how to add, change or remove an item.
 > Decided: 2026-11-05, in round r44 of the plan `docs/PLAN/PLAN-RUST-AGENT-RUNTIME-REMOVAL.md`. After round r43 the user asked to move the register out of `packages/pi-agent-cli/AGENTS.md`. This document is the register that rule 3 of `docs/DESIGN.md` section 8.5 asks for. No item is new and no behaviour changes: each item was on the wire before this document.
-> Status: **Written.** It lists eight items (X1 to X8) and points to one more spec. Section 4 says which of the five admission rules each item meets. Section 7 has one question for the owner. The question is not answered.
+> Status: **Written.** It lists eight items (X1 to X8) and points to one more spec. Section 4 says which of the five admission rules each item meets. Section 7 has one question for the owner. The owner answered it on 2026-11-05: rules 4 and 5 apply to new items only.
 > Base of the facts: `origin/main` at `2235210`. Python SDK `agent-client-protocol` 0.12.1, with the ACP schema `schema-v1.19.0`. The facts were read in the tree. Nothing was run for this document. The tests that section 3 names run in CI.
 > Code: `packages/pi-agent-cli/pi_agent_cli/{agent,events,permission_modes,auth_methods}.py`. In the pager: `tui/crates/codegen/pi-pager/src/app/effects/{mod,helpers}.rs` and `tui/crates/codegen/pi-pager/src/acp/meta.rs`.
 > Tests: the files in `packages/pi-agent-cli/tests/` that section 3 names, and `tui/crates/codegen/pi-pager/tests/python_agent_e2e.rs`.
@@ -13,7 +13,7 @@
 
 - **What is here.** Eight items. Four have a standard equivalent and stay as legacy items: X1, X4, X7 and X8. Four have none: X2, X3, X5 and X6.
 - **Who reads what.** The agent reads X1, X2, X7 and X8. The pager reads X4 and X5. Zed reads X6. No code in this repository reads X3 or X6.
-- **The gap.** No item is negotiated in `initialize` (rule 5). No item that has a Rust party has its type in `pi-acp-lib` (rule 4). Section 4 has the facts. Section 7 asks the owner what to do. This document changes no behaviour.
+- **The gap.** No item is negotiated in `initialize` (rule 5). No item that has a Rust party has its type in `pi-acp-lib` (rule 4). Section 4 has the facts. The owner decided on 2026-11-05 that rules 4 and 5 apply to new items only (section 7), so the eight items stay as they are. This document changes no behaviour.
 - **Not in the register.** The pager sends and reads keys that the agent does not use (section 5). They are not part of the contract.
 
 ## 1. The rules
@@ -39,7 +39,7 @@ A new extension must meet all five rules (`docs/DESIGN.md` section 8.5; principl
 | 4 | The wire type is defined once, in `pi-acp-lib` or in a protocol crate next to it. It is not in a runtime crate. |
 | 5 | The item is negotiated in `initialize`, and it does no harm to a third-party client such as Zed. |
 
-For an item that is in use and fails a rule, `docs/DESIGN.md` section 8.5 says: lower it, hide it or delete it (plan ADR3). This register records each such item and the decision that keeps it.
+For an item that is in use and fails a rule, `docs/DESIGN.md` section 8.5 says: lower it, hide it or delete it (plan ADR3). This register records each such item and the decision that keeps it. Rules 4 and 5 apply to new items only (the owner, 2026-11-05; section 7).
 
 ## 2. The register
 
@@ -163,7 +163,7 @@ Each cell says how the item stands against the five rules. "Harmless" means: a c
 | X7 | **fails**: the `mode` config option | yes | yes | no: the pager builds it in `app/effects/helpers.rs` | not negotiated; harmless |
 | X8 | **fails**: `session/set_config_option` and `session/set_mode` | yes | yes | no: the pager builds it in `app/effects/helpers.rs` | not negotiated; harmless |
 
-Result. Four items fail rule 1 (X1, X4, X7, X8). Each of them has a decision that keeps it (section 3). Six items have a Rust party (X1, X2, X4, X5, X7, X8) and none of them has its type in `pi-acp-lib`. No item is negotiated in `initialize`: the `initialize` response of the agent has no `_meta` (plan item 1.P5). Rule 3 is met by this document.
+Result. Four items fail rule 1 (X1, X4, X7, X8). Each of them has a decision that keeps it (section 3). Six items have a Rust party (X1, X2, X4, X5, X7, X8) and none of them has its type in `pi-acp-lib`. No item is negotiated in `initialize`: the `initialize` response of the agent has no `_meta` (plan item 1.P5). Rule 3 is met by this document. The owner decided on 2026-11-05 that rules 4 and 5 apply to new items only (section 7), so the gap in rules 4 and 5 does not change any item.
 
 ## 5. What is not in the register
 
@@ -190,11 +190,11 @@ The pager sends and reads more keys than the agent uses. The agent neither reads
 
 ## 7. Question and facts not checked
 
-**Question for the owner.** It is not answered. Until it is answered, all eight items stay as they are.
+**Question for the owner.** The owner answered on 2026-11-05 and chose the proposal. All eight items stay as they are.
 
-| # | Question | Proposal |
+| # | Question | Answer (the owner, 2026-11-05) |
 |---|----------|----------|
-| Q1 | Rules 4 and 5 are written for a new item. For an item that is in use, `docs/DESIGN.md` section 8.5 says: if it fails a rule, lower it, hide it or delete it. No item meets rule 5, and six items fail rule 4. Do rules 4 and 5 apply to these eight items? | No. Apply rules 4 and 5 to new items only. Keep the eight items, and keep this register as the record of the gap. |
+| Q1 | Rules 4 and 5 are written for a new item. For an item that is in use, `docs/DESIGN.md` section 8.5 says: if it fails a rule, lower it, hide it or delete it. No item meets rule 5, and six items fail rule 4. Do rules 4 and 5 apply to these eight items? | No. Rules 4 and 5 apply to new items only. The eight items stay, and this register is the record of the gap (section 4). |
 
 **Facts not checked.**
 

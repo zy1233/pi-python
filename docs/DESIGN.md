@@ -319,7 +319,7 @@ TUI 与 agent 之间的线上协议是标准 ACP，加上登记在册的 `pi/` �
 
 五条缺一，就不加；已有的、不满足的，按「降级 / 隐藏 / 删除」处理（计划 ADR3）。TUI 一侧不实现 `x.ai/*`：入口处丢弃以 `x.ai/` 或 `_x.ai/` 开头的扩展通知。
 
-现状：登记处是 [ACP 扩展登记](specs/2026-11-05-acp-extension-registry.md)（r44）。它登记八项在用的扩展（X1–X8：`pi/session/delete`、`_meta.sessionId`、`_meta["pi/cwd"]`、模型提示键、`_meta.isReplay`、终端的 `_meta` 键、`_meta.yoloMode` 与 `_meta.autoMode`、`pi/yolo_mode_changed`），每项写了名字、方向、schema、发送方、读取方、测试与状态，并逐条对照五条。结果：四项过不了第 ① 条（X1、X4、X7、X8），它们都有保留的决定（X1 与 X4 是计划的 ADR4；X7 与 X8 是 [Auto 模式设计](specs/2026-11-02-auto-mode-design.md)的 D5，加上用户在 2026-11-04 的决定：pager 继续用它们，不改走标准通道，计划 1.P3 关闭）；没有一项在 `initialize` 里协商（第 ⑤ 条）；有 Rust 一侧的六项，类型都不在 `pi-acp-lib`（第 ④ 条）。第 ④、⑤ 条对已在用的项适用与否，登记的 §7 Q1 问了用户，提议只对新项适用，用户还没有答复。`packages/pi-agent-cli/AGENTS.md` 只留 agent 一侧的实现说明（「Extensions beyond ACP v1」一节）。
+现状：登记处是 [ACP 扩展登记](specs/2026-11-05-acp-extension-registry.md)（r44）。它登记八项在用的扩展（X1–X8：`pi/session/delete`、`_meta.sessionId`、`_meta["pi/cwd"]`、模型提示键、`_meta.isReplay`、终端的 `_meta` 键、`_meta.yoloMode` 与 `_meta.autoMode`、`pi/yolo_mode_changed`），每项写了名字、方向、schema、发送方、读取方、测试与状态，并逐条对照五条。结果：四项过不了第 ① 条（X1、X4、X7、X8），它们都有保留的决定（X1 与 X4 是计划的 ADR4；X7 与 X8 是 [Auto 模式设计](specs/2026-11-02-auto-mode-design.md)的 D5，加上用户在 2026-11-04 的决定：pager 继续用它们，不改走标准通道，计划 1.P3 关闭）；没有一项在 `initialize` 里协商（第 ⑤ 条）；有 Rust 一侧的六项，类型都不在 `pi-acp-lib`（第 ④ 条）。第 ④、⑤ 条只对新项适用；已在用的这八项保持原样，登记就是缺口的记录（用户，2026-11-05；登记的 §7 Q1）。`packages/pi-agent-cli/AGENTS.md` 只留 agent 一侧的实现说明（「Extensions beyond ACP v1」一节）。
 
 ---
 
