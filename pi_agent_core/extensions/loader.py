@@ -96,15 +96,11 @@ class ExtensionLoader:
         """Discover extensions declared via ``entry_points``."""
         results: list[ActivateFn] = []
         try:
-            if sys.version_info >= (3, 12):
-                from importlib.metadata import entry_points
+            from importlib.metadata import entry_points
 
-                eps = entry_points(group=ENTRY_POINT_GROUP)
-            else:
-                from importlib.metadata import entry_points
-
-                all_eps = entry_points()
-                eps = all_eps.get(ENTRY_POINT_GROUP, [])  # type: ignore[union-attr]
+            # Select by group, on every version. On 3.11 a bare ``entry_points()`` returns the
+            # mapping of all groups, and reading that mapping raises a DeprecationWarning.
+            eps = entry_points(group=ENTRY_POINT_GROUP)
         except Exception:
             logger.debug("entry_points discovery unavailable", exc_info=True)
             return results

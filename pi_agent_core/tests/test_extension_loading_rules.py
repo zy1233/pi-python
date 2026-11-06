@@ -54,12 +54,12 @@ class _EntryPoint:
 
 
 def _entry_points(*declared: _EntryPoint) -> Callable[..., Any]:
-    """A stand-in for ``importlib.metadata.entry_points`` (3.12 selects by ``group=``;
-    3.11 returns a mapping of groups)."""
+    """A stand-in for ``importlib.metadata.entry_points`` that selects by ``group=`` only.
 
-    def entry_points(group: str | None = None) -> Any:
-        if group is None:
-            return {ENTRY_POINT_GROUP: list(declared)}
+    A bare call is a ``TypeError`` here. It would return the mapping of all groups on 3.11, and
+    reading that mapping warns, so a loader that makes one finds nothing and the tests fail."""
+
+    def entry_points(*, group: str) -> Any:
         return list(declared) if group == ENTRY_POINT_GROUP else []
 
     return entry_points
@@ -360,6 +360,30 @@ class TestLoadFailures:
             ("directory", "RuntimeError"),  # the module raised as it was imported
         }
         assert set(loader.registry.get_tools()) == {"tool_from_b"}
+
+
+# ---------------------------------------------------------------------------
+# Entry points are selected by group, on every Python version
+# ---------------------------------------------------------------------------
+
+
+class TestEntryPointSelection:
+    def test_discovery_asks_for_its_group_and_never_for_the_whole_table(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """On 3.11 a bare ``entry_points()`` returns a mapping that warns each time it is read
+        ("SelectableGroups dict interface is deprecated")."""
+        asked: list[dict[str, Any]] = []
+
+        def entry_points(**selection: Any) -> list[Any]:
+            asked.append(selection)
+            return []
+
+        monkeypatch.setattr(importlib.metadata, "entry_points", entry_points)
+
+        assert ExtensionLoader().discover_entry_points() == []
+
+        assert asked == [{"group": ENTRY_POINT_GROUP}]
 
 
 # ---------------------------------------------------------------------------
