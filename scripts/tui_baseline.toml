@@ -75,6 +75,20 @@ patterns = [
     "session::session_dir",
 ]
 
+# Audit F-4 (AUDIT-RUST-RUNTIME-REMOVAL): the permission manager of `pi-workspace` (in
+# `permission/`, with the Auto mode: a classifier that asks a model) is code that nothing starts.
+# The agent in Python decides every permission (plan principle P1). The manager runs only when
+# something calls `spawn_permission_manager` or `spawn_permission_manager_with_hub`, and no code
+# outside `permission/` does. The code stays (the user decided not to refactor `pi-workspace`,
+# plan D.4). This gate keeps it from coming alive: a caller outside `permission/` would put a
+# second engine in the pager process that decides permissions with its own rules.
+# Skipped: test files, inline `#[cfg(test)] mod ... {}` blocks, and comment lines. A symbol is a
+# plain substring. If the manager is deleted, delete this gate with it.
+[[gates.no_callers]]
+name = "the Rust permission manager"
+symbols = ["spawn_permission_manager"]
+allowed = ["codegen/pi-workspace/src/permission"]
+
 [graph]
 package = "pi-pager-bin"
 

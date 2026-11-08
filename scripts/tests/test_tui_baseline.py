@@ -511,6 +511,118 @@ def test_session_disk_read_gate_catches_a_path_built_in_the_sessions_directory(t
     assert len(hits) == 1 and "images.rs:2" in hits[0]
 
 
+# ---- no-callers gate (audit F-4) --------------------------------------------------------------
+
+ALLOWED = ["codegen/pi-workspace/src/permission"]
+
+
+def _tree(tmp_path: Path, files: dict[str, str]) -> Path:
+    """A fake `tui/` with the given files under `tui/crates`; returns the `tui` directory."""
+    for name, text in files.items():
+        path = tmp_path / "tui" / "crates" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return tmp_path / "tui"
+
+
+def _callers(tui: Path) -> list[str]:
+    return tb.scan_callers(tui, ["spawn_permission_manager"], ALLOWED)
+
+
+def test_caller_scan_reports_a_caller_outside_the_allowed_directory(tmp_path):
+    call = "fn start() {\n    let h = spawn_permission_manager_with_hub(a, b);\n}\n"
+    tui = _tree(
+        tmp_path,
+        {
+            "codegen/pi-pager/src/app/start.rs": call,
+            "codegen/pi-workspace/src/lib.rs": "pub fn other() { spawn_permission_manager(); }\n",
+        },
+    )
+    assert _callers(tui) == [
+        "crates/codegen/pi-pager/src/app/start.rs:2: "
+        "let h = spawn_permission_manager_with_hub(a, b);",
+        "crates/codegen/pi-workspace/src/lib.rs:1: pub fn other() { spawn_permission_manager(); }",
+    ]
+
+
+def test_caller_scan_lets_the_allowed_directory_name_the_symbol(tmp_path):
+    text = "pub fn spawn_permission_manager() {}\npub use manager::spawn_permission_manager;\n"
+    tui = _tree(
+        tmp_path,
+        {
+            "codegen/pi-workspace/src/permission/manager/mod.rs": text,
+            "codegen/pi-workspace/src/permission/mod.rs": text,
+        },
+    )
+    assert _callers(tui) == []
+
+
+def test_caller_scan_does_not_treat_a_similar_directory_name_as_allowed(tmp_path):
+    """`permission_ui/` is not `permission/`: the match is on whole path parts."""
+    tui = _tree(
+        tmp_path,
+        {"codegen/pi-workspace/src/permission_ui/a.rs": "fn x() { spawn_permission_manager(); }\n"},
+    )
+    assert len(_callers(tui)) == 1
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "codegen/pi-pager/src/app/dispatch/tests/mod.rs",
+        "codegen/pi-pager/src/app/effects/tests.rs",
+        "codegen/pi-pager/src/test_util.rs",
+        "codegen/pi-pager/tests/e2e.rs",  # outside `src`: an integration test
+        "codegen/pi-pager/examples/demo.rs",
+    ],
+)
+def test_caller_scan_skips_test_code_and_files_outside_src(tmp_path, name):
+    tui = _tree(tmp_path, {name: "fn t() { spawn_permission_manager(); }\n"})
+    assert _callers(tui) == []
+
+
+def test_caller_scan_skips_comments_and_inline_test_modules(tmp_path):
+    text = (
+        "// spawn_permission_manager used to start here\n"
+        "/// See `spawn_permission_manager`.\n"
+        "fn live() {}\n"
+        "#[cfg(test)]\n"
+        "mod tests {\n"
+        "    fn t() {\n"
+        "        spawn_permission_manager();\n"
+        "    }\n"
+        "}\n"
+        "fn after() {\n"
+        "    spawn_permission_manager();\n"
+        "}\n"
+    )
+    tui = _tree(tmp_path, {"codegen/pi-pager/src/a.rs": text})
+    assert _callers(tui) == ["crates/codegen/pi-pager/src/a.rs:11: spawn_permission_manager();"]
+
+
+def test_caller_scan_with_no_symbols_finds_nothing(tmp_path):
+    tui = _tree(tmp_path, {"codegen/pi-pager/src/a.rs": "fn t() { spawn_permission_manager(); }\n"})
+    assert tb.scan_callers(tui, [], ALLOWED) == []
+
+
+def test_manifest_no_callers_gate_is_well_formed():
+    gates = _manifest()["gates"]["no_callers"]
+    assert gates, "the audit F-4 gate is gone"
+    for gate in gates:
+        assert gate["name"] and gate["symbols"] and gate["allowed"]
+        assert all(isinstance(s, str) and s for s in gate["symbols"])
+        for allowed in gate["allowed"]:
+            assert (REPO_ROOT / "tui" / "crates" / allowed).is_dir(), allowed
+    assert "spawn_permission_manager" in {s for g in gates for s in g["symbols"]}
+
+
+def test_nothing_outside_permission_starts_the_rust_permission_manager():
+    """The same gate as `tui_baseline.py gates`, so the Python CI job also sees a regression."""
+    for gate in _manifest()["gates"]["no_callers"]:
+        hits = tb.scan_callers(REPO_ROOT / "tui", gate["symbols"], gate["allowed"])
+        assert not hits, f"{gate['name']} has a caller (audit F-4): " + "; ".join(hits[:5])
+
+
 # ---- suite evaluation -------------------------------------------------------------------------
 
 
