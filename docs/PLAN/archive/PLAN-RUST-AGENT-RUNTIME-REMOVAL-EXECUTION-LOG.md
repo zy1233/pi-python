@@ -12,7 +12,7 @@
 
 ## 目录
 
-- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r33、r34、r35、r36、r37、r38、r39、r40、r41、r42、r43、r44）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29r30r31r32r33r34r35r36r37r38r39r40r41r42r43r44)
+- [10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r33、r34、r35、r36、r37、r38、r39、r40、r41、r42、r43、r44、r45）](#10-执行记录r3r4r5r6r7r8r9r10r11r12r13r14r15r16r17r18r19r20r21r22r23r24r25r26r27r28r29r30r31r32r33r34r35r36r37r38r39r40r41r42r43r44r45)
   - [10.1 范围、方法与规模](#101-范围方法与规模)
   - [10.2 `/model` 恢复（ADR3 r3）](#102-model-恢复adr3-r3)
   - [10.3 验证（r3 的实测）](#103-验证r3-的实测)
@@ -60,6 +60,7 @@
   - [10.45 r42 追加：补记 v0.8.0 的发布与 r28 之后没有轮次的合入，同步计划，归档已发布的里程碑](#1045-r42-追加补记-v080-的发布与-r28-之后没有轮次的合入同步计划归档已发布的里程碑)
   - [10.46 r43 追加：收尾计划（最后七项），记 #105 与 Windows、WSL 的整套 pytest](#1046-r43-追加收尾计划最后七项记-105-与-windowswsl-的整套-pytest)
   - [10.47 r44 追加：修 Windows 上的 pi.exec，把扩展的登记迁到 docs/specs](#1047-r44-追加修-windows-上的-piexec把扩展的登记迁到-docsspecs)
+  - [10.48 r45 追加：审计计划与代码的偏差，修 x.ai/log、图片缓存的位置，加权限管理器的门禁](#1048-r45-追加审计计划与代码的偏差修-xailog图片缓存的位置加权限管理器的门禁)
 - [附录 A（摘录）：A.4](#附录-a摘录a4)
   - [A.4 r5 执行结果（对照 r5 时初稿里的「默认决策」；r9 的更新见 A.1）](#a4-r5-执行结果对照-r5-时初稿里的默认决策r9-的更新见-a1)
 - [附录 B：复现方法](#附录-b复现方法)
@@ -94,7 +95,7 @@
   - [G.7 待决策里决策 7 的状态](#g7-待决策里决策-7-的状态)
 - [修订记录](#修订记录)
 
-## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r33、r34、r35、r36、r37、r38、r39、r40、r41、r42、r43、r44）
+## 10. 执行记录（r3、r4、r5、r6、r7、r8、r9、r10、r11、r12、r13、r14、r15、r16、r17、r18、r19、r20、r21、r22、r23、r24、r25、r26、r27、r28、r29、r30、r31、r32、r33、r34、r35、r36、r37、r38、r39、r40、r41、r42、r43、r44、r45）
 
 r3 执行了「拆除 Rust runtime + 恢复 `/model`」；r4 在其上补了阶段 0 的 CI / 基线、清理 leader 的 UI 残留和生命周期命名；r5 把分支推上远端、在 Linux 上启用基线，执行入口审计并完成阶段 A（§10.7）；r6 清理品牌残留（§10.8）；r7 合并 `main`（§10.9）；r8 在 WSL2 上补 Linux 一侧的实测（§10.10）；r9 补阶段 0 的收尾与阶段 1 里不需要拍板的部分（§10.11）；r10 做 ADR1 的 PR 1（§10.12）与 1.P3 的 (a)（§10.13）；r11 做 0.5 与阶段 C（§10.14）；r12 定 V0.5 的发布里程碑，并做了决策 16（§10.15）；r13 做 ADR1 的 PR 2 与 PR 3，并加了读盘门禁（§10.16）；r14 合入这两个 PR，并做决策 17：会话文件在第一条用户消息时才写（§10.17）；r15 做决策 10 的存储层一项：删 `pi-shell` 里的旧存储层（§10.18）；r16 合入 #25 与 #26，并删 `pi-shell` 里剩下的死代码（§10.19）；r17 检查测试之间的竞争，只改测试与工具（§10.20）；r18 改用 `cargo nextest`，改 `protoc` 的路径与 `release.yml` 的令牌（§10.21）；r19 用 `gh stack` 合入 #27–#31，并设 V0.6 的发布里程碑（§10.22）；r20 定 MCP 的方向（可选扩展包），修空白对话，补发布内容，并合入 #33–#36（§10.23）；r21 做 V0.6 的版本号与发布说明（条件 5），合入 #38 与 #39，并做条件 1–4（§10.24）；r22 打 tag `v0.6.0`、发布、做发布后的核对（§10.25）；r23 把三个 action 升到 Node 24 的版本，处理扩展 API 的审计批 9，并把决策 11、13 记成不做（§10.26）；r24 在内核 6.12 的云 VM 上测了沙箱的 Landlock 层（§10.27）；r25 把 `pi-sandbox` 接进 `TUI CI`（§10.28）；r26 补记 v0.7.0 之前的合入（#45 至 #48、web 的 #50 至 #54、版本号 #55）与 v0.7.0 的发布（§10.29）；r27 量了旗标与设置页并修（#57、#60），去掉选择器的 30 天截止（#61），清了一批死代码（#62、#63；§10.30）；r28 用一次 `gh stack` 把这五个 PR 与另外五个（#56、#58、#59、#64、#65）合入 `main`（§10.31）。下表是 r3、r4 的提交，按当时的状态保留（当时都是本地提交、**未 push**），分支是 `codex/rust-agent-runtime-removal-plan`：
 
@@ -2849,6 +2850,106 @@ CI。PR 的头 `7a8aafe` 上，[CI](https://github.com/zy1233/pi-python/actions/
 
 **没有验证的。** 登记的事实是读树得来的，没有运行；它点名的测试在 CI 里跑。pager 的 Rust 库（`agent-client-protocol` 0.10.4，schema 0.11.4）有没有 `session/delete`，我没有查：没有的话，pager 发不出标准请求，X1 要等库升级才能去掉。Zed 读 X6 的键，来自源码，不是运行；Zed 把 `exit_code` 读成无符号整数，agent 只有在 `bash` 工具报出负数时才会发负数，工具会不会报负数，没有查。别的客户端读不读 X3 与 X4，不知道。§5 的清单不是完整的审计。Rust 的文档注释 `tui/crates/codegen/pi-pager/src/app/session_startup.rs` 第 164 行还写着「plan item 1.P6 removes the rest」，与 r43 的状态不符；它在代码里，这一轮没有动（只改文档）。r43 的附录 A.1 里 compaction 一行写 owner 是「用户」：用户没有这样说过，这是我的记法；它在等用户决定，这一点没有变。macOS 上什么也没有跑。
 
+### 10.48 r45 追加：审计计划与代码的偏差，修 x.ai/log、图片缓存的位置，加权限管理器的门禁
+
+这一节记 2026-11-08 的一轮。用户要我审计 Rust runtime 剥离计划的代码实现与设计有没有偏差。计划在 r44 的状态，`main` 在 `26ffb9b`。我读了代码，对照原则 P1 至 P7、ADR1、ADR3 至 ADR5、阶段 C 的退出条件、D.4 与附录 A，在聊天里报告了五处偏差（F-1 至 F-5）。那份报告的原文没有保留；本节与审计报告里的事实，是改动之前对着代码重新核对的。用户用表单选下一步，五项都选：写审计报告；给 F-4 加门禁；改文档（F-3 的文字、F-5 的过期行、ADR4 与 ADR5 的状态、重生成 `tui-support.md`）；修 F-2；修 F-1。这一轮没有 PR：用户没有要求推送，我没有推送。改动在本地分支 `fix/audit-rust-runtime-findings`，基于 `origin/main` 的 `26ffb9b`（#111；`git fetch --dry-run` 没有报告新的提交），每个主题一个提交。五处发现的详情在[审计报告](../../AUDIT/AUDIT-RUST-RUNTIME-REMOVAL-2026-11-08.md)；本节记过程、数字与没有验证的事。用户说过，发布 0.9 之前由他自己做实测；我没有做那些实测。
+
+**我定的，与我没有问用户的。**
+- 交付的方式：一个本地分支，每个主题一个提交，不推送。用户没有说怎样交付；我选了最小的一种。推送与开 PR 由用户决定。
+- F-2：旧版本已经写进 `sessions/<目录>/<会话号>/{images,mermaid}` 的文件，不迁移，也不清理。用户选的 F-2 一项只说了：缓存移出 `sessions/`，删会话时清理，扩大读盘门禁。清不清旧文件，我没有问。
+- F-1：用户的选项里有「加一个端到端断言，做不到就在文档里说明」。做不到：修复之后 pager 不再发任何 `x.ai` 的扩展，线上没有可以断言的现象。守卫由 `pi-acp-lib` 的单元测试覆盖。我把这一点写在审计报告与本节里。
+- 代码里过期的注释不动（r44 的先例：文档的一轮不改代码）。两条在审计报告的 F-5 里点了名。
+- 顺手核对了计划里 `main` 的提交数：31 → 35，多出的是 #107、#108、#110、#111。这不在用户选的范围里；我只改了头部、「当前状态」与「下一步」三处。#110 与 #111 计划里没有记过，我只读了它们的提交说明。
+
+**F-1：pager 把自己的日志当作 `x.ai/log` 通知发给 agent，守卫不触发**（提交 `7cf33bf`）
+
+原因。`pi-pager/src/unified_log.rs` 把每条日志放进内存缓冲区，每秒（或满 16 条）作为通知 `x.ai/log` 发给 agent（线上是 `_x.ai/log`）。Python 的 `ext_notification` 对不认识的方法什么也不做，所以转发的日志在 agent 一侧被丢掉。旧的 Rust shell 会把它们写进 `unified.jsonl`；现在没有人写。（`write_direct_info` 不走转发，直接写 `unified.jsonl`；它没有变。）`pi-acp-lib` 的 `acp_send` 有一道守卫，要丢掉 `x.ai/*` 的扩展，但它读的是序列化之后的请求：`acp::ExtRequest` 与 `acp::ExtNotification` 的 `method` 带 `#[serde(skip)]`（`agent-client-protocol-schema` 0.11.4），序列化的结果只有参数，守卫读不到名字，从不触发。守卫的测试 `vendor_x_ai_ext_is_dropped_without_sending` 因此永远等一个回答（请求真的发出去了，没有人答），清单用 `--skip` 把它去掉。本文的 [§10.4](#104-未验证与残留) 记过这个挂起；当时没有人把它看成「守卫失效」。
+
+修复。
+1. `pi-acp-lib`：`AcpMethod` 加 `ext_name()`；`ExtRequest` 与 `ExtNotification` 从类型本身返回名字；`acp_send` 丢掉以 `x.ai/` 或 `_x.ai/` 开头的扩展，别的（`pi/yolo_mode_changed`、`pi/session/delete`、不带前缀的名字）照发。
+2. pager：删了转发。`unified_log` 的 `info`、`warn`、`error`、`debug` 还在，条目写进 `tracing`（目标 `pi_pager::unified_log`）；`init` 与 `flush_blocking` 没有人再调，删了。
+3. `pi-telemetry`：删了 `LogNotificationParams`、`LOG_METHOD` 与它们的 2 个测试。
+4. 清单：去掉 `--skip`；`x.ai` 的上限 245 → 240（我改了几行带这个词的注释、日志文字与测试里的字面量，没有改行为）。
+5. 测试：恢复守卫的测试，并让它不等回答（`answer_at_once`：只轮询一次，守卫坏了就失败，不会挂住）；加 3 个（通知的丢弃；该照发的名字；读名字的函数）。
+
+变异检查：把守卫改回读序列化之后的值，丢弃用例失败，没有挂住。数字：`pi-acp-lib` 64 → 68（恢复 1 个，加 3 个；清单里的 `skip` 没了，所以「跳过」25 → 24）；`pi-telemetry` 220 → 218。
+
+**F-2：图片与图表的缓存写在 agent 的会话目录里**（提交 `163b9a1`）
+
+原因。`pi-pager-render/src/prompt_images.rs` 用 `pi_shared::session::session_dir` 算出 `<home>/sessions/<编码后的目录>/<会话号>/`，在里面放 `images/`（粘贴的图片）与 `mermaid/`（渲染的图表 PNG）。agent 的 `pi/session/delete` 只删会话文件（平的：`sessions/<时间>-<id>.jsonl`），不知道这个目录，所以删了会话，图片还留在磁盘上；粘贴的图片可能是任何东西的截图。读盘门禁（`[gates.session_disk_reads]`）只看 `pi-pager` 与 `pi-pager-bin`；拼路径的两个 crate（`pi-pager-render`、`pi-shared`）不在里面，所以没有报。
+
+修复。
+1. 新位置 `<home>/pager-cache/<会话号>/{images,mermaid}`。`<home>` 是 `$PI_HOME`（或 `$GROK_HOME`），都没设时是 `~/.pi-python`。
+2. 会话号来自 agent，而清理用 `remove_dir_all`，所以规则从严：1 至 128 个字符，每个字符是 `A-Z a-z 0-9 - _ .` 之一，不能全是点。别的会话号不给它建目录（图片只留在内存里）。
+3. 新建的目录在 Unix 上是 `0700`；已有的目录不改权限。（我先写的函数会改已有目录的权限，没有提交；换成了只管新目录的 `create_dir_all_private`。）
+4. pager 在 agent 确认 `pi/session/delete` 之后删 `pager-cache/<会话号>`（`effects/mod.rs` 的 `forget_session_cache`）。agent 拒绝时不删；删不掉只写日志，不让删会话失败。
+5. 门禁：加 `pi-pager-render` 与 `pi-shared`；加模式 `sessions_cwd_dir`（也匹配 `ensure_sessions_cwd_dir`）与 `session::session_dir`。`pi-shared` 里没有人用的 `session_dir` 删了。
+
+测试。`pi-pager-render`：1 个换成 6 个。`pi-pager`：`delete_session_removes_the_pager_cache_after_the_agent_confirms`（对着假的 agent：确认的会话清掉缓存；拒绝的与别的会话保留；它设 `PI_HOME`，所以在自己的进程里跑）。`scripts/tests`：2 个门禁用例。变异检查：去掉 `forget_session_cache` 的调用，新用例失败。
+
+一个小插曲：`pi-pager-render --lib` 第一遍有一个已知会受负载影响的计时用例失败（`tmux_probe::tests::successful_near_deadline_exit_still_returns_captured_output`，在清单的 `known_failures` 里）；单独重跑通过。
+
+**F-4：Rust 的权限管理器没有调用者，没有门禁**（提交 `3263aef`）
+
+原因。`pi-workspace` 的 `permission/`（35,166 行）里有一个完整的权限管理器，含 Auto：一个让模型来判断的分类器（调模型的函数由调用者装上，`set_classifier_with_side_query`）。启动它的两个公开函数 `spawn_permission_manager` 与 `spawn_permission_manager_with_hub`，在 `permission/` 之外没有调用者：它们只在 `permission/manager/mod.rs` 定义（第 1404、1442 行），在 `permission/mod.rs` 再导出（第 79、80 行）。pager 用的是 `permission/` 的类型与辅助函数。所以 r37 写的「`permission/` 是活的」只对类型与辅助函数成立。用户在 r38 定了不重构 `pi-workspace`，代码留着；但没有门禁防它被接回去。一个调用者就会在 pager 进程里放进第二个决定权限的引擎，用它自己的规则；再给它一个调模型的函数，它的 Auto 分类器就会自己去问模型。
+
+修复。`scripts/tui_baseline.py` 加一种门禁 `no_callers`（`scan_callers`）：清单里的 `[[gates.no_callers]]` 给一个名字、一组符号（子串）和允许的目录；符号在允许的目录之外出现就失败。扫描跳过测试文件、`#[cfg(test)]` 模块与注释行。现在只有一条：符号 `spawn_permission_manager`，允许 `codegen/pi-workspace/src/permission`。符号是子串，所以 `_with_hub` 也被挡；第三个 `spawn_permission_manager_with_pin` 是私有函数，只在 `manager/mod.rs` 里用。`scripts/tests` 加 8 个测试函数：扫描的几种情形、清单条目的形状、一个对着真实的树跑的用例。变异检查：在 `permission/` 之外加一个调用，门禁与真实树的用例都失败。
+
+**F-3 与 F-5：只改文档**（本节所在的提交）
+
+计划里改了这些，每处带「r45」：
+- 原则 P6 一行：写明真实的退出协议。pager 关闭 agent 的 stdin（EOF 就是停止请求），等 3 秒，agent 还没有退出就杀掉它并回收；不发 `session/close`，不发 SIGTERM；agent 一侧把 SIGTERM 与 SIGHUP 接到 EOF 的同一条退出路径。这是 r5 的 1.P2 做的（[§10.7](#107-r5-追加linux-ci入口审计与阶段-a-收口)），P6 一行没有跟着改。原来的写法留着，标明是 r2 的设计。
+- ADR4、ADR5：加状态（核对代码的结果）。ADR4：① 做了；② 找到 `x.ai/log` 这一处漏的，已修；③ 不做（1.R5，用户，2026-11-04）；`session/delete` 的迁移等 SDK。ADR5：忽略未知键成立；首次启动告警没做，现有的是一条进日志的 `tracing` 警告；字段清单没出，因为 B.4 已定不做（用户，2026-11-03）。
+- 阶段 C 的退出条件：`leader` 213、`x.ai` 240（数以清单为准）。
+- D.4：加 r45 的状态与门禁。
+- 附录 A 七行：A.1 的模型选择、模式切换、登录；A.3 的 `initialize`、`authenticate`、`session/set_config_option`、`session/set_mode`。每一行写明原来写的是什么、代码现在怎样。
+- 头部、「当前状态」、「下一步」：`main` 的提交号与提交数（`26ffb9b`，多 35 个）。「已合入 `main`，还没有发布」一条加：r45 的分支合入时，`[Unreleased]` 里多两条。
+- 「还没有验证的」加一条；§10 索引加 §10.48；修订记录（摘要）加 r45；链接定义加 `l10-48`。
+
+`docs/baselines/tui.md`：改了测试数、清单里各 suite 的行、两条门禁（读盘、调用者）与「去掉的 skip」的说明。`docs/baselines/tui-support.md`：重新生成（`python scripts/tui_callgraph.py keep --out docs/baselines/tui-support.md`）。上一次生成在 `b5bc147`。之后 #94（Auto）改了 `pi-shell`（+69 行；`util::config` 5,677 → 5,746），这与 r45 无关；r45 只让 `util::grok_home` 的使用点 13 → 12。我在 `26ffb9b` 上另生成了一份，用它分开这两件事。
+
+**数字。**
+
+| 项 | r44 | r45 |
+|---|---|---|
+| 清单合计（`reference_passed` 的和） | 8,232 通过，25 跳过 | 8,240 通过，24 跳过 |
+| `pi-acp-lib` | 64（`--skip` 1 个） | 68 |
+| `pi-telemetry` | 220 | 218 |
+| `pi-pager-render` | 1,092 | 1,097 |
+| `pi-pager` | 5,518 | 5,519 |
+| 残留词 `x.ai` 的上限 | 245 | 240 |
+| `scripts/tests`（本机） | 没有记 | 275 通过，8 跳过 |
+
+清单里 `pi-pager-render` 的 1,097 与 `pi-pager` 的 5,519 是 Linux 的旧数加上净增的个数（+5、+1），不是量出来的。`scripts/tests` 比只带 F-1 的那一遍（261）多 14 个用例。
+
+macOS 上量到的（`HOME=/tmp/tui-test-home`；没有 nextest，用 `cargo test`；`PI_E2E_PYTHON` 指向 `.venv` 的 Python，`PI_E2E_REQUIRED=1`）：
+- `pi-acp-lib`：68 通过（67 个 lib 测试，1 个 `ext_wire_golden`）。`pi-telemetry --lib`：218。`pi-pager-render --lib`：1,094 通过，2 忽略。`pi-pager --lib`：5,243 通过，12 忽略。`pi-pager` 的五个集成目标：272 通过（`settings_e2e` 252，`python_agent_e2e` 15，`grok_home_paths` 2，`selection_model_public_api` 2，`user_guide_pages` 1）；`python_agent_e2e` 的 15 个对着真的 Python agent 跑了，没有跳过。`pi-pager-minimal --lib`：79 通过。`pi-pager-bin --bin zypi`：33 通过。
+- `python scripts/tui_baseline.py check --out /tmp/…`：消费者构建 0 条告警（上限 0）；`cargo check --workspace --tests` 0 个错误。`gates --out /tmp/…`：全部通过（依赖图 954 个包，上限 954；残留 `grok agent` 0、`leader` 213、`x.ai` 240）。
+- `.venv/bin/python -m pytest scripts/tests`：275 通过，8 跳过。`ruff check .` 与 `ruff format --check .` 通过。
+
+**这一轮改了什么。**
+- 提交（本地分支，没有推送；`git log 26ffb9b..fix/audit-rust-runtime-findings`）：`7cf33bf`（F-1；8 个文件，+194/−206）；`163b9a1`（F-2；9 个文件，+355/−60）；`2697cd1`（F-4 的门禁；3 个文件，+172）；`6785b0e`（审计报告；1 个文件，+174）；还有本节所在的提交（文档：计划、本文、`docs/baselines/tui.md`、`docs/baselines/tui-support.md`）。
+- `CHANGELOG.md`：`[Unreleased]` 加两条，在 F-1 与 F-2 的提交里：`### Changed` 一条（缓存的新位置），`### Fixed` 一条（不再发 `x.ai/log`）。F-4 与文档没有加条目：它们不改用户看到的东西。
+- 计划从 733 行变成 739 行，仍高于提醒线（600 至 700）；这一轮没有再缩：计划已经完成，不会再长。
+- 本文：新增 §10.48；目录、「10.」的标题与修订记录跟着改。
+- 没有改 `web/`，没有改 Python 代码。
+
+**怎么拆成提交的。** 清单、它的测试文件与 `CHANGELOG.md` 是几个主题共用的，所以我按主题拆了它们的改动：把工作树放到每个提交的状态（只有这个提交和它之前的主题），对那个状态跑 `gates`、`scripts/tests` 与 Ruff；改了 Rust 的两个提交另外跑 `cargo check --locked --tests`（F-1：`pi-acp-lib`、`pi-telemetry`、`pi-pager`；F-2：`pi-pager-render`、`pi-shared`、`pi-pager`），F-1 那一步跑了 `pi-acp-lib` 与 `pi-telemetry` 的 lib 测试，F-2 那一步跑了 `pi-pager-render` 里 `prompt_images` 的测试（161 个）。拆好以后，我把 20 个文件逐个与拆之前整棵树的内容做了 `cmp`：相同。之后又改了两处：清单里 F-4 的注释和审计报告原来说权限管理器「有它自己的模型调用」，这不对（Auto 的分类器要调用者装上调模型的函数），我改了这两处和本节、`docs/baselines/tui.md`，并重做了 F-4 与报告两个提交（它们没有推送过，所以没有人拿到旧的）。
+
+**核对。** `check_plan_docs.py`（计划与本文的锚点；计划里的引用式链接都有定义，定义都有人用；指向本文的定义，锚点都在本文里；本文「10.」的标题与目录一致）；一个检查（改过的五个文档里，相对路径的文件链接都存在）；CR 检查（改过的文件里没有 CR）；用 GitHub 的 `markdown` 接口（`mode=gfm`）渲染改过的部分里带粗体的行，找多余的 `**`（没有；计划 21 处、本文 9 处、`tui.md` 15 处、审计报告 50 处，都渲染成了 `<strong>`）；`ruff check .` 与 `ruff format --check .`；`gates` 与 `scripts/tests`（数在上面）。新标题的锚点按 GitHub 的规则算出来，接口的输出不带锚点，所以没有在页面上核对。
+
+**没有验证的。**
+- 只在 macOS 上跑过。Linux 与 Windows 没有跑；清单里 `pi-pager-render` 的 1,097 与 `pi-pager` 的 5,519 是推出来的。
+- 分支没有推送，所以 TUI CI 没有跑。本机没有 `cargo-nextest`，用的是 `cargo test`：同一个测试二进制里的测试是线程，环境变量与 `static` 的竞争可能只在某些运行里出现。新加的 `pi-pager` 用例设 `PI_HOME`，所以用 `in_own_process` 在自己的进程里跑。
+- `scripts/tui_pty/` 的 PTY 脚本没有跑；真模型没有用；Python 一侧的整套 pytest 没有跑（没有改 Python 代码）。
+- 清单里别的 suite（`pi-shell`、`pi-http`、`pi-file-utils`、`pi-sampling-types`、`pi-sandbox`）没有运行；它们编译过（`cargo check --workspace --tests`）。这一轮没有改它们的代码。
+- 在 `zypi` 里粘一张图、再删会话，看缓存目录有没有被清：没有做。缓存的路径与清理只有单元测试与对着假 agent 的测试看过。
+- F-4 的门禁认的是函数名。我没有查管理器里的类型能不能被 `permission/` 之外的代码直接构造并启动，绕过那两个函数。
+- 旧版本写进 `sessions/` 的缓存文件：不迁移，也不清理。
+- 两条过期的代码注释（`agent_modes.rs` 开头；`session_startup.rs` 第 164 行）没有动。
+- `pi-chat-state` 的 `ChatStateActor::spawn` 与 `spawn_with_pruning` 在这个 crate 之外没有调用者（`src/` 14,254 行；`pi-shell` 的 `Cargo.toml` 依赖它，源码里没有引用）。这是观察：没有门禁，也没有决定要不要动。
+- `python_agent_e2e.rs` 里 `Env.mark` 没人读，测试目标编译时有一条 `dead_code` 告警。这个文件这一轮没有改。
+
 ## 附录 A（摘录）：A.4
 
 附录 A 的 A.1–A.3（能力矩阵、ACP 版本配对、逐方法）是活的参考，留在[计划](../PLAN-RUST-AGENT-RUNTIME-REMOVAL.md)里。A.4 记 r5 的执行结果，搬到这里。
@@ -3984,3 +4085,4 @@ r42 把计划里已发布的发布里程碑（V0.5 至 V0.7）、头部的状态
 - r42：补记 v0.8.0 的发布、r33 与 r39 至 r41 的执行记录和 r28 之后没有轮次的合入；同步计划的状态；已发布的里程碑（V0.5 至 V0.7）与整理前的头部、「当前状态」的一段、「下一步」、决策 7 的状态存入附录 G，并加 V0.8（2026-11-04；`f2c6c09`；分支 `docs/plan-r42-sync`；PR [#100](https://github.com/zy1233/pi-python/pull/100)）。同一批改了 `docs/baselines/tui.md` 的测试数、设计记录的状态与 registry 的状态，和本文修订记录里三处坏的链接。只改文档。见 [§10.45](#1045-r42-追加补记-v080-的发布与-r28-之后没有轮次的合入同步计划归档已发布的里程碑)。
 - r43：收尾计划（2026-11-04；`2235210`；分支 `docs/plan-r43-close`；PR [#106](https://github.com/zy1233/pi-python/pull/106)）。用户答复 §7 的最后七项：0.9、1.P5、1.P6 勾掉；1.P3、1.R2、1.R3、1.R5 关闭；pager 继续用旧的 `pi/yolo_mode_changed`；`-p` 保持「已忽略」的警告。先收尾再发版：版本是 0.9，发布前用户自己做实测。补记 PR [#105](https://github.com/zy1233/pi-python/pull/105)（修 Windows 整套 pytest 的 9 个失败）与 Windows、WSL 的整套 pytest（Windows：9 失败 → 0；WSL：0 失败）；记下 Windows 上 `LocalExecutionEnv.exec` 不终止子进程这个没修的发现。计划里过时的事实（30 个提交；Auto 的 pytest 一条）与附录 A.1 的三行改了；`docs/DESIGN.md` 的 §8.5 与 Auto 设计的头部状态同步（扩展的登记记为已知缺口）。只改文档。见 [§10.46](#1046-r43-追加收尾计划最后七项记-105-与-windowswsl-的整套-pytest)。
 - r44：修 `pi.exec`，建扩展的登记处（2026-11-05；`2235210`，#106 合入后是 `2426452`；分支 `fix/windows-exec-kill-tree` 与 `docs/acp-extension-registry`；PR [#107](https://github.com/zy1233/pi-python/pull/107)、[#108](https://github.com/zy1233/pi-python/pull/108)）。用户答复跟进的问题，两项都选。#107：Windows 上 `LocalExecutionEnv.exec` 超时或被中止时，终止整个进程树（`ProcessTreeKiller`），加两个测试；Windows 与 WSL 的整套 pytest 通过（6086 与 5959 个通过）。#108：把在用的 `pi/` 扩展的登记迁到新的 `docs/specs/2026-11-05-acp-extension-registry.md`（八项）；核对五条准入规则：四项不满足第 ① 条，没有一项在 `initialize` 里协商，六项的类型不在 `pi-acp-lib`；用户答复了登记里的问题（Q1）：第 ④、⑤ 条只对新项适用，八项保持原样（2026-11-05）。`docs/DESIGN.md` 的 §8.5、两个 `AGENTS.md` 与 Auto 设计的头部同步。#107 改代码；#108 只改文档。见 [§10.47](#1047-r44-追加修-windows-上的-piexec把扩展的登记迁到-docsspecs)。
+- r45：审计计划与代码的偏差（2026-11-08；`26ffb9b`；本地分支 `fix/audit-rust-runtime-findings`；没有推送，没有 PR）。用户要我审计代码与设计有没有偏差；我报告了五处（F-1 至 F-5），用户五项都选：写报告、给 F-4 加门禁、改文档、修 F-2、修 F-1。F-1：pager 把自己的日志当作 `x.ai/log` 通知发给 agent；`acp_send` 里挡它的守卫读的是序列化之后的请求，扩展的方法名不在里面，所以从不触发；删了转发，守卫改读类型里的名字，被清单 `--skip` 的测试恢复了。F-2：图片与图表的缓存写在 agent 的会话目录里，删会话时留在磁盘上；移到 `<home>/pager-cache/<会话号>/`，agent 确认删会话之后清掉，读盘门禁多看两个 crate。F-4：Rust 的权限管理器没有调用者，加了门禁 `no_callers`。F-3 与 F-5：P6、ADR4、ADR5、附录 A 与几处状态的文字对齐代码。数：清单合计 8,232 → 8,240，跳过 25 → 24，`x.ai` 的上限 245 → 240。审计报告：[`AUDIT-RUST-RUNTIME-REMOVAL-2026-11-08.md`](../../AUDIT/AUDIT-RUST-RUNTIME-REMOVAL-2026-11-08.md)。见 [§10.48](#1048-r45-追加审计计划与代码的偏差修-xailog图片缓存的位置加权限管理器的门禁)。
