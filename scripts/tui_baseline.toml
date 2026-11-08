@@ -47,8 +47,21 @@ tracked_crates = [
 # decision 10); the patterns stay as a guard against writing it back. `session::title` is not
 # listed: `sanitize_and_cap_title` and `is_forbidden_title_char` are pure string helpers that the
 # pager uses on purpose.
+#
+# The pager also writes nothing into the sessions directory (audit AUDIT-RUST-RUNTIME-REMOVAL
+# F-2): the agent owns that directory, and it deletes a session without knowing the files of the
+# pager. The pasted images and the diagram cache were there until r45, and this gate did not look
+# at the two crates that built their path (`pi-pager-render`, `pi-shared`). They are in the list
+# now, with the helpers that build a path in the sessions directory (`sessions_cwd_dir`, which
+# also matches `ensure_sessions_cwd_dir`, and `session::session_dir`). The files of the pager are
+# in `<home>/pager-cache/<session id>`, and the pager removes them when it deletes a session.
 [gates.session_disk_reads]
-crates = ["codegen/pi-pager", "codegen/pi-pager-bin"]
+crates = [
+    "codegen/pi-pager",
+    "codegen/pi-pager-bin",
+    "codegen/pi-pager-render",
+    "codegen/pi-shared",
+]
 patterns = [
     "list_summaries",
     "resolve_local_session",
@@ -58,6 +71,8 @@ patterns = [
     "session::storage",
     "persistence::session_dir",
     'join("sessions")',
+    "sessions_cwd_dir",
+    "session::session_dir",
 ]
 
 [graph]
@@ -208,11 +223,18 @@ targets = [
 # = 5,517 (one local run on Linux; the test of `agent_modes` and the two of `cli` were rewritten,
 # not added). Then +1 for a third Auto case of `python_agent_e2e` (a shell command that no rule
 # decides, with the model step on and with `classifier = "rules"`): 5,518 (one local run on Linux).
-reference_passed = 5518
-min_passed = 5300
+# Then +1 in r45 (audit F-2): `delete_session_removes_the_pager_cache_after_the_agent_confirms`,
+# which pins that the delete effect removes the cache of the session that the agent deleted, and
+# only that one: 5,519 (derived from 5,518; the r45 run was on macOS: `--lib` 5,243 passed, 12
+# ignored, and the five integration targets 272 passed, with `PI_E2E_PYTHON` set and
+# `PI_E2E_REQUIRED=1`, so the 15 cases of `python_agent_e2e` ran and were not skipped).
+reference_passed = 5519
+min_passed = 5301
 
 # Lib tests only; they were outside the manifest until r8 (plan section 10.10: 1,092 passed,
-# 2 ignored on Linux, 1.4 s).
+# 2 ignored on Linux, 1.4 s). r45 (audit F-2) replaced 1 test of `prompt_images` with 6, so the
+# reference is 1,097 (1,092 + 5; the Linux number is derived, not measured: the r45 run was on
+# macOS, 1,094 passed, 2 ignored).
 [[test.suite]]
 package = "pi-pager-render"
 targets = ["--lib"]
@@ -222,8 +244,8 @@ targets = ["--lib"]
 # idle or with every core busy. Tolerated rather than skipped: the report still names it when it
 # fails, so a test that fails on every run is visible, but it does not block.
 known_failures = ["tmux_probe::tests::successful_near_deadline_exit_still_returns_captured_output"]
-reference_passed = 1092
-min_passed = 1040
+reference_passed = 1097
+min_passed = 1045
 
 # Lib tests only (79 passed on Linux). Its diff-background test used to fail under the default
 # thread count for want of the theme lock; with the lock it is stable (40/40 in each mode).

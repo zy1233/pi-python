@@ -604,7 +604,7 @@ pub struct PastedImage {
     /// directory. Cleaned up when the chip is removed or on send.
     pub staged_temp_path: Option<PathBuf>,
 
-    /// Final durable path under `session_dir(info)/images/`. Once set, this
+    /// Final durable path under [`session_images_dir`]. Once set, this
     /// is the canonical on-disk location and [`encoded_bytes`](Self::encoded_bytes)
     /// may be released.
     pub session_image_path: Option<PathBuf>,
@@ -1341,7 +1341,7 @@ pub fn persist_to_session(
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("no encoded bytes to persist"))?;
 
-    std::fs::create_dir_all(session_images_dir)?;
+    create_dir_all_private(session_images_dir)?;
 
     let ext = extension_for_mime(&img.mime_type);
     let filename = format!("image-{}.{}", uuid::Uuid::new_v4(), ext);
@@ -1367,37 +1367,94 @@ pub fn persist_to_session(
     Ok(())
 }
 
+// -------------------------------------------------------------------------
+// Per-session cache directory
+// -------------------------------------------------------------------------
+
+/// Name of the directory, under the home directory, where the pager keeps what it writes for
+/// a session (pasted images, rendered diagrams).
+///
+/// It is not under `sessions/`. That directory is the session store of the agent, and the
+/// agent deletes a session without knowing about files of the pager. The pager removes this
+/// directory itself when it deletes a session ([`remove_session_cache`]).
+pub const PAGER_CACHE_DIR: &str = "pager-cache";
+
+/// A session id names one directory only when it has no path syntax in it.
+///
+/// The id comes from the agent, and [`remove_session_cache`] runs `remove_dir_all` on the
+/// result. So the rule is strict: 1 to 128 characters of `A-Z a-z 0-9 - _ .`, and not only
+/// dots. Any other id gets no directory (the pager then keeps the data in memory).
+fn is_one_dir_name(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        && id.chars().any(|c| c != '.')
+}
+
+/// `<home>/pager-cache/<session id>`, or `None` when the id is not one directory name.
+pub fn session_cache_dir_in(home: &std::path::Path, session_id: &str) -> Option<PathBuf> {
+    is_one_dir_name(session_id).then(|| home.join(PAGER_CACHE_DIR).join(session_id))
+}
+
+/// `create_dir_all`, but on Unix every directory it makes is born `0700` (no umask window).
+/// A directory that exists keeps its mode.
+///
+/// Use it for what the pager writes into the cache: a pasted image can be a screenshot of
+/// anything, and nobody else on the machine needs to read it.
+pub fn create_dir_all_private(dir: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt as _;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(dir)
+    }
+}
+
 /// Derive the `images/` directory for a session.
 ///
 /// Returns `None` if session identity is not yet known.
 pub fn session_images_dir(
     session_id: Option<&agent_client_protocol::SessionId>,
-    cwd: &std::path::Path,
 ) -> Option<PathBuf> {
-    let sid = session_id?;
-    let info = pi_shared::session::info::Info {
-        id: sid.clone(),
-        cwd: cwd.to_string_lossy().into_owned(),
-    };
-    Some(pi_shared::session::session_dir(&info).join("images"))
+    let id = session_id?.to_string();
+    Some(session_cache_dir_in(&pi_config::grok_home(), &id)?.join("images"))
 }
 
 /// Derive the `mermaid/` cache directory for a session.
 ///
-/// Mirrors [`session_images_dir`]: rendered diagram PNGs live alongside the
-/// session's other artifacts (`events.jsonl`, `images/`) so they are owned by
-/// the session and torn down with it. Returns `None` until session identity is
-/// known (no diagrams are cached on disk before then).
+/// Sits next to [`session_images_dir`], so [`remove_session_cache`] removes both. Returns
+/// `None` until session identity is known (no diagrams are cached on disk before then).
 pub fn session_mermaid_dir(
     session_id: Option<&agent_client_protocol::SessionId>,
-    cwd: &std::path::Path,
 ) -> Option<PathBuf> {
-    let sid = session_id?;
-    let info = pi_shared::session::info::Info {
-        id: sid.clone(),
-        cwd: cwd.to_string_lossy().into_owned(),
+    let id = session_id?.to_string();
+    Some(session_cache_dir_in(&pi_config::grok_home(), &id)?.join("mermaid"))
+}
+
+/// Remove the cache directory of a session. No directory is not an error.
+///
+/// Call it after the agent has deleted the session. Pass the home explicitly in a test.
+pub fn remove_session_cache_in(home: &std::path::Path, session_id: &str) -> std::io::Result<()> {
+    let Some(dir) = session_cache_dir_in(home, session_id) else {
+        return Ok(());
     };
-    Some(pi_shared::session::session_dir(&info).join("mermaid"))
+    match std::fs::remove_dir_all(&dir) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        result => result,
+    }
+}
+
+/// [`remove_session_cache_in`] for the home of this process.
+pub fn remove_session_cache(session_id: &str) -> std::io::Result<()> {
+    remove_session_cache_in(&pi_config::grok_home(), session_id)
 }
 
 // -------------------------------------------------------------------------
@@ -1939,20 +1996,124 @@ pub fn extract_video_refs(text: &str) -> Vec<ScrollbackVideoRef> {
 mod tests {
     use super::*;
 
-    /// The image dir is keyed off the session's cwd — the glue the cross-cwd
-    /// resume fix relies on: with `AgentSession.cwd` anchored to the origin cwd,
-    /// pasted images land under that origin, not the process cwd.
+    /// The files of the pager for a session are not in the session store of the agent. They are
+    /// in `<home>/pager-cache/<id>`, and not under `<home>/sessions`.
     #[test]
-    fn session_images_dir_keys_off_the_passed_cwd() {
+    fn session_cache_dir_is_outside_the_session_store() {
+        let home = std::path::Path::new("/h");
+        let dir = session_cache_dir_in(home, "sid-xyz").unwrap();
+        assert_eq!(dir, home.join("pager-cache").join("sid-xyz"));
+        assert!(!dir.starts_with(home.join("sessions")));
+    }
+
+    #[test]
+    fn session_images_and_mermaid_dirs_share_one_session_dir() {
         let id = agent_client_protocol::SessionId::new("sid-xyz");
-        let a = session_images_dir(Some(&id), std::path::Path::new("/origin/a")).unwrap();
-        let b = session_images_dir(Some(&id), std::path::Path::new("/origin/b")).unwrap();
-        assert_ne!(
-            a, b,
-            "same id under different cwd must map to different image dirs"
+        let tail = std::path::Path::new(PAGER_CACHE_DIR).join("sid-xyz");
+        let images = session_images_dir(Some(&id)).unwrap();
+        let mermaid = session_mermaid_dir(Some(&id)).unwrap();
+        assert!(images.ends_with(tail.join("images")));
+        assert!(mermaid.ends_with(tail.join("mermaid")));
+        assert_eq!(images.parent(), mermaid.parent());
+        // No session id yet: no directory.
+        assert!(session_images_dir(None).is_none());
+        assert!(session_mermaid_dir(None).is_none());
+    }
+
+    /// The id comes from the agent. Only an id that is one plain name gets a directory.
+    #[test]
+    fn session_cache_dir_needs_an_id_that_is_one_name() {
+        let home = std::path::Path::new("/h");
+        let too_long = "x".repeat(129);
+        for bad in [
+            "",
+            ".",
+            "..",
+            "...",
+            "a/b",
+            "a\\b",
+            "../x",
+            "x/..",
+            "C:x",
+            "a b",
+            "a\0b",
+            "\u{e9}",
+            too_long.as_str(),
+        ] {
+            assert!(session_cache_dir_in(home, bad).is_none(), "{bad:?}");
+        }
+        for good in [
+            "sid-xyz",
+            "0191a2b3-7c4d-7e5f-8a9b-0c1d2e3f4a5b",
+            "s_1",
+            "a.b",
+            ".hidden",
+        ] {
+            assert!(session_cache_dir_in(home, good).is_some(), "{good:?}");
+        }
+    }
+
+    #[test]
+    fn remove_session_cache_removes_that_session_only() {
+        let home = tempfile::tempdir().unwrap();
+        let make = |id: &str| {
+            let dir = session_cache_dir_in(home.path(), id).unwrap();
+            for sub in ["images", "mermaid"] {
+                std::fs::create_dir_all(dir.join(sub)).unwrap();
+                std::fs::write(dir.join(sub).join("a.png"), b"x").unwrap();
+            }
+            dir
+        };
+        let gone = make("s1");
+        let kept = make("s2");
+        remove_session_cache_in(home.path(), "s1").unwrap();
+        assert!(!gone.exists());
+        assert!(kept.join("images").join("a.png").exists());
+        assert!(kept.join("mermaid").join("a.png").exists());
+        // Nothing there is not an error.
+        remove_session_cache_in(home.path(), "s1").unwrap();
+    }
+
+    /// An id that climbs out of the cache directory must remove nothing: `remove_dir_all` runs
+    /// on it.
+    #[test]
+    fn remove_session_cache_ignores_an_id_that_climbs_out() {
+        let home = tempfile::tempdir().unwrap();
+        let session_file = home.path().join("sessions").join("keep.jsonl");
+        std::fs::create_dir_all(session_file.parent().unwrap()).unwrap();
+        std::fs::write(&session_file, b"x").unwrap();
+        std::fs::create_dir_all(home.path().join(PAGER_CACHE_DIR)).unwrap();
+        for bad in ["..", ".", "../sessions", "../../x"] {
+            remove_session_cache_in(home.path(), bad).unwrap();
+        }
+        assert!(session_file.exists());
+        assert!(home.path().join(PAGER_CACHE_DIR).exists());
+    }
+
+    /// Every directory that `persist_to_session` makes is owner only; one that exists keeps its
+    /// mode.
+    #[cfg(unix)]
+    #[test]
+    fn persist_to_session_makes_owner_only_directories() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode =
+            |path: &std::path::Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        let home = tempfile::tempdir().unwrap();
+        let cache_dir = home.path().join(PAGER_CACHE_DIR);
+        std::fs::create_dir(&cache_dir).unwrap();
+        std::fs::set_permissions(&cache_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let images_dir = session_cache_dir_in(home.path(), "s1")
+            .unwrap()
+            .join("images");
+        let mut img = make_persistable_image(b"abc".to_vec());
+        persist_to_session(&mut img, &images_dir).unwrap();
+        assert_eq!(mode(&images_dir), 0o700);
+        assert_eq!(mode(images_dir.parent().unwrap()), 0o700);
+        assert_eq!(
+            mode(&cache_dir),
+            0o755,
+            "a directory that was there keeps its mode"
         );
-        assert!(a.ends_with(std::path::Path::new("sid-xyz").join("images")));
-        assert!(session_images_dir(None, std::path::Path::new("/x")).is_none());
     }
 
     #[test]

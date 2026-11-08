@@ -490,6 +490,27 @@ def test_no_pager_code_reads_session_files_in_this_tree():
     assert not hits, "the pager reads session files again (ADR1): " + "; ".join(hits[:5])
 
 
+def test_session_disk_read_gate_covers_the_crates_that_build_session_paths():
+    """F-2: the pager wrote its images into the sessions directory, and this gate did not look."""
+    gate = _manifest()["gates"]["session_disk_reads"]
+    assert {"codegen/pi-pager-render", "codegen/pi-shared"} <= set(gate["crates"])
+    assert {"sessions_cwd_dir", "session::session_dir"} <= set(gate["patterns"])
+
+
+def test_session_disk_read_gate_catches_a_path_built_in_the_sessions_directory(tmp_path):
+    gate = _manifest()["gates"]["session_disk_reads"]
+    crate = tmp_path / "tui" / "crates" / "codegen" / "pi-pager-render" / "src"
+    crate.mkdir(parents=True)
+    (crate / "images.rs").write_text(
+        "fn dir(cwd: &str) -> PathBuf {\n    pi_config::sessions_cwd_dir(cwd).join(id)\n}\n",
+        encoding="utf-8",
+    )
+    hits = tb.scan_session_disk_reads(
+        tmp_path / "tui", ["codegen/pi-pager-render"], gate["patterns"]
+    )
+    assert len(hits) == 1 and "images.rs:2" in hits[0]
+
+
 # ---- suite evaluation -------------------------------------------------------------------------
 
 
