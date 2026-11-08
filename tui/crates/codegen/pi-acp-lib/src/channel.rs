@@ -8,18 +8,18 @@ use crate::{
     message::{AcpAgentMessage, AcpArgs, AcpClientMessage, AcpMethod, AcpRequest},
 };
 
-/// Vendor grok-build extensions. pi-python speaks standard ACP only.
-fn vendor_ext_method(rpc_method: &str, request: &impl serde::Serialize) -> Option<String> {
-    if rpc_method != "ext_method" && rpc_method != "ext_notification" {
-        return None;
-    }
-    let value = serde_json::to_value(request).ok()?;
-    let method = value.get("method")?.as_str()?;
-    if method.starts_with("x.ai/") || method.starts_with("_x.ai/") {
-        Some(method.to_owned())
-    } else {
-        None
-    }
+/// The name of the vendor extension that `request` carries, if it carries one.
+///
+/// The vendor extensions belong to the old Rust runtime. pi-python speaks standard ACP and its
+/// own `pi/*` extensions only, so it sends nothing under the vendor prefix. The prefix comes
+/// with and without the `_` that the wire adds to an extension name.
+///
+/// The name comes from the typed value ([`AcpMethod::ext_name`]). It cannot come from the
+/// serialized form: `ExtRequest` and `ExtNotification` serialize their params only, and skip
+/// the method name.
+fn vendor_ext_method(request: &impl AcpMethod) -> Option<&str> {
+    let method = request.ext_name()?;
+    (method.starts_with("x.ai/") || method.starts_with("_x.ai/")).then_some(method)
 }
 
 fn dummy_vendor_response<R: 'static>() -> AcpResult<R> {
@@ -68,8 +68,8 @@ where
     R: From<AcpArgs<T>> + fmt::Debug,
 {
     let method = request.method_name();
-    if let Some(vendor) = vendor_ext_method(method, &request) {
-        tracing::debug!(method = %vendor, "dropping x.ai/* ACP extension (standard ACP only)");
+    if let Some(vendor) = vendor_ext_method(&request) {
+        tracing::debug!(method = %vendor, "dropping a vendor ACP extension (standard ACP only)");
         return dummy_vendor_response();
     }
 
@@ -96,10 +96,11 @@ where
 
 #[cfg(test)]
 mod acp_send_failure_tests {
-    use super::acp_send;
-    use crate::common::{AcpChannelFailure, acp_channel_failure};
-    use crate::message::AcpAgentMessage;
+    use super::{acp_send, vendor_ext_method};
+    use crate::common::{AcpChannelFailure, AcpResult, acp_channel_failure};
+    use crate::message::{AcpAgentMessage, AcpArgs, AcpRequest};
     use agent_client_protocol as acp;
+    use std::task::Poll;
     use tokio::sync::mpsc;
 
     fn ext_request() -> acp::ExtRequest {
@@ -111,24 +112,114 @@ mod acp_send_failure_tests {
         )
     }
 
+    /// A vendor name, as the pager wrote it and as the wire shows it (with the `_`).
+    const VENDOR_NAMES: [&str; 2] = ["x.ai/log", "_x.ai/log"];
+
     fn vendor_ext_request() -> acp::ExtRequest {
         acp::ExtRequest::new(
-            "x.ai/session/list",
+            VENDOR_NAMES[0],
             serde_json::value::to_raw_value(&serde_json::json!({}))
                 .unwrap()
                 .into(),
         )
     }
 
+    fn ext_notification(method: &str) -> acp::ExtNotification {
+        acp::ExtNotification::new(
+            method,
+            serde_json::value::to_raw_value(&serde_json::json!({}))
+                .unwrap()
+                .into(),
+        )
+    }
+
+    /// The answer of `acp_send`, if it has one at once.
+    ///
+    /// A message that goes to the agent waits for the agent. A test must not `.await` it: if
+    /// the drop of the vendor extensions broke, the test would wait for ever and not fail. A
+    /// message that is dropped has its answer on the first poll.
+    async fn answer_at_once<T>(
+        request: T,
+        tx: &mpsc::UnboundedSender<AcpAgentMessage>,
+    ) -> Option<AcpResult<T::Response>>
+    where
+        T: AcpRequest,
+        AcpAgentMessage: From<AcpArgs<T>>,
+    {
+        let mut send = Box::pin(acp_send(request, tx));
+        match futures::poll!(send.as_mut()) {
+            Poll::Ready(answer) => Some(answer),
+            Poll::Pending => None,
+        }
+    }
+
     #[tokio::test]
     async fn vendor_x_ai_ext_is_dropped_without_sending() {
         let (tx, mut rx) = mpsc::unbounded_channel::<AcpAgentMessage>();
-        let result = acp_send(vendor_ext_request(), &tx).await;
-        assert!(result.is_ok(), "vendor ext should dummy-succeed: {result:?}");
+        let result = answer_at_once(vendor_ext_request(), &tx)
+            .await
+            .expect("a dropped vendor request is answered at once");
+        assert!(
+            result.is_ok(),
+            "vendor ext should dummy-succeed: {result:?}"
+        );
         assert!(
             rx.try_recv().is_err(),
-            "x.ai/* must never be enqueued toward the agent"
+            "a vendor extension must never be enqueued toward the agent"
         );
+    }
+
+    /// The pager sent its log lines as a vendor notification once a second, and nothing dropped
+    /// them: the guard read the method name from the serialized request, and `ExtNotification`
+    /// serializes its params only.
+    #[tokio::test]
+    async fn vendor_x_ai_notification_is_dropped_without_sending() {
+        let (tx, mut rx) = mpsc::unbounded_channel::<AcpAgentMessage>();
+        for method in VENDOR_NAMES {
+            let result = answer_at_once(ext_notification(method), &tx)
+                .await
+                .unwrap_or_else(|| panic!("{method}: a dropped notification is answered at once"));
+            assert!(result.is_ok(), "{method} should dummy-succeed: {result:?}");
+        }
+        assert!(
+            rx.try_recv().is_err(),
+            "a vendor extension must never be enqueued toward the agent"
+        );
+    }
+
+    #[tokio::test]
+    async fn other_extensions_are_still_sent() {
+        // `pi/*` is ours. The others only contain the vendor prefix, or are close to it.
+        let near_misses = ["custom/x.ai/log", "x.ai", "x.aix/log"];
+        for method in ["pi/yolo_mode_changed", "pi/session/delete", "custom/test"]
+            .into_iter()
+            .chain(near_misses)
+        {
+            let (tx, mut rx) = mpsc::unbounded_channel::<AcpAgentMessage>();
+            let mut send_fut = Box::pin(acp_send(ext_notification(method), &tx));
+            assert!(
+                futures::poll!(send_fut.as_mut()).is_pending(),
+                "{method}: the request waits for its answer"
+            );
+            assert!(
+                rx.try_recv().is_ok(),
+                "{method} must be enqueued toward the agent"
+            );
+        }
+    }
+
+    #[test]
+    fn vendor_ext_method_reads_the_typed_name() {
+        for name in VENDOR_NAMES {
+            assert_eq!(vendor_ext_method(&ext_notification(name)), Some(name));
+        }
+        assert_eq!(
+            vendor_ext_method(&vendor_ext_request()),
+            Some(VENDOR_NAMES[0])
+        );
+        assert_eq!(vendor_ext_method(&ext_notification("pi/follow_ups")), None);
+        // A standard ACP message carries no extension name.
+        assert_eq!(vendor_ext_method(&acp::CancelNotification::new("s1")), None);
     }
 
     #[tokio::test]

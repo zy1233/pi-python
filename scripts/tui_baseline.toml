@@ -36,7 +36,7 @@ tracked_crates = [
 [gates.residue]
 "grok agent" = 0
 "leader" = 213
-"x.ai" = 245
+"x.ai" = 240
 
 # ADR1 (plan section 10.16): the pager asks the agent which sessions exist (`session/list`) and
 # reads no session files itself. Production code in these crates (paths under tui/crates) must
@@ -247,13 +247,17 @@ min_passed = 33
 [[test.suite]]
 package = "pi-acp-lib"
 targets = ["--lib", "--test", "ext_wire_golden"]
-# The x.ai drop test hangs forever: acp::ExtRequest serialises `method` away, so the drop logic
-# never fires and the queued request is never answered (docs/PLAN/... section 10.4).
-skip = ["vendor_x_ai_ext_is_dropped_without_sending"]
 # 21 + 42 tests that came with the extension types in plan B.3 + 1 golden decode test
-# (`ext_wire_golden`): 64 (one local run on Linux).
-reference_passed = 64
-min_passed = 64
+# (`ext_wire_golden`): 64 (one local run on Linux). Then 68 (r45, audit F-1): the drop test of the
+# vendor extensions (`vendor_x_ai_ext_is_dropped_without_sending`) was skipped until then, because
+# it hung: `acp::ExtRequest` serialises `method` away, so the guard never fired and the queued
+# request was never answered (docs/PLAN/... section 10.4). `acp_send` now reads the name from the
+# typed value (`AcpMethod::ext_name`), the test runs (+1), and it no longer waits for an answer, so
+# a broken guard fails the test instead of hanging it. Three more tests: the notification case, the
+# `pi/*` and near-miss names that must still go out, and the name reader (+3). 64 + 1 + 3 = 68
+# (one local run on macOS; the floor keeps no distance, as before).
+reference_passed = 68
+min_passed = 68
 
 [[test.suite]]
 package = "pi-http"
@@ -266,8 +270,10 @@ package = "pi-telemetry"
 targets = ["--lib"]
 # 239 before phase D.3 (r38) deleted the xAI OTEL exporter (`otel_layer/`, 19 tests: 11 in
 # `redact.rs`, 8 in `mod.rs`): 239 - 19 = 220 on Linux (one local run; the floor keeps the distance
-# of 9).
-reference_passed = 220
+# of 9). Then 218 (r45, audit F-1): the pager does not send its log over ACP any more, and the two
+# tests of the wire type of that notification (`LogNotificationParams`) went with the type:
+# 220 - 2 = 218 (the floor stays).
+reference_passed = 218
 min_passed = 211
 
 [[test.suite]]

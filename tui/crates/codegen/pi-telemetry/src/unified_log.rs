@@ -1,8 +1,8 @@
 //! Centralized unified log for cross-component session observability.
 //!
-//! Shell writes directly via [`emit()`]. Pager and desktop forward entries
-//! over ACP (`x.ai/log` notifications); shell receives them in
-//! [`ingest_client_entries()`] and writes on their behalf.
+//! Shell writes directly via [`emit()`]. The pager hands an entry that must reach the file
+//! to [`ingest_client_entries()`], which stamps the source and writes it. Pager entries no
+//! longer travel over ACP: the agent is a Python process with no handler for them.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, Write};
@@ -28,9 +28,6 @@ pub fn set_version(ver: &str) {
 pub const LOG_DIR: &str = "logs";
 const LOG_FILE: &str = "unified.jsonl";
 pub const MAX_SIZE: u64 = 5 * 1024 * 1024; // 5 MB
-
-/// ACP method name for unified log notifications.
-pub const LOG_METHOD: &str = "x.ai/log";
 
 // ---------------------------------------------------------------------------
 // Log entry types
@@ -96,23 +93,14 @@ pub struct LogEntry {
     pub ctx: Option<serde_json::Value>,
 }
 
-/// Wire format for the `x.ai/log` ACP notification params.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LogNotificationParams {
-    /// Source component identifier.
-    pub src: LogSource,
-    pub entries: Vec<ClientLogEntry>,
-}
-
-/// Entry as sent by a client (no `src` field -- shell stamps it).
+/// Entry as handed in by a client (no `src` field -- [`ingest_client_entries()`] stamps it).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientLogEntry {
     pub ts: String,
     /// Client process id. Stamped by the client when the entry is
-    /// created; preserved through ACP forwarding so the on-disk log
-    /// reflects the originating process.
+    /// created, so the on-disk log reflects the originating process.
     ///
-    /// Optional only for wire compatibility with clients that predate
+    /// Optional only for compatibility with entries that predate
     /// this field; in-tree clients always populate it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
@@ -470,9 +458,10 @@ pub fn emit(lvl: LogLevel, msg: &str, sid: Option<&str>, ctx: Option<serde_json:
     write_entry(&entry);
 }
 
-/// Ingest a batch of log entries from a client (pager or desktop).
+/// Ingest a batch of log entries from a client (the pager).
 ///
-/// Called by the `x.ai/log` notification handler. Entries from
+/// The pager calls it for the entries that must reach the file at once
+/// (`pi_pager::unified_log::write_direct_info`). Entries from
 /// [`LogSource::Shell`] are rejected to prevent spoofing.
 pub fn ingest_client_entries(src: LogSource, entries: &[ClientLogEntry]) {
     if matches!(src, LogSource::Shell) || entries.is_empty() {
@@ -991,48 +980,5 @@ mod tests {
                 ctx: None,
             }],
         );
-    }
-
-    #[test]
-    fn unknown_src_rejected_at_deserialization() {
-        for bad in &[
-            r#"{"src":"evil","entries":[]}"#,
-            r#"{"src":"","entries":[]}"#,
-            r#"{"src":"GROK-PAGER","entries":[]}"#,
-        ] {
-            assert!(serde_json::from_str::<LogNotificationParams>(bad).is_err());
-        }
-    }
-
-    #[test]
-    fn notification_params_round_trip() {
-        let params = LogNotificationParams {
-            src: LogSource::GrokPager,
-            entries: vec![
-                ClientLogEntry {
-                    ts: "2025-07-14T10:30:00.123Z".into(),
-                    pid: Some(1234),
-                    ver: None,
-                    lvl: LogLevel::Info,
-                    sid: Some("s1".into()),
-                    msg: "first".into(),
-                    ctx: None,
-                },
-                ClientLogEntry {
-                    ts: "2025-07-14T10:30:00.456Z".into(),
-                    pid: Some(1234),
-                    ver: Some("0.1.211".into()),
-                    lvl: LogLevel::Error,
-                    sid: None,
-                    msg: "second".into(),
-                    ctx: Some(serde_json::json!({"code": 42})),
-                },
-            ],
-        };
-        let json = serde_json::to_string(&params).unwrap();
-        let parsed: LogNotificationParams = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.entries.len(), 2);
-        assert_eq!(parsed.entries[0].msg, "first");
-        assert_eq!(parsed.entries[1].msg, "second");
     }
 }
