@@ -8,6 +8,7 @@ can be wrong (missing, corrupt, hand-edited into the wrong shape, unwritable) ha
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
@@ -175,7 +176,12 @@ def test_a_path_that_is_not_valid_text_can_still_be_saved(tmp_path: Path):
     a plain UTF-8 write refuses."""
     store = TrustStore(tmp_path)
     project = tmp_path / os.fsdecode(b"caf\xe9")
-    project.mkdir()
+    try:
+        project.mkdir()
+    except OSError as error:
+        if error.errno != errno.EILSEQ:
+            raise
+        pytest.skip("this file system refuses a file name that is not valid UTF-8 (macOS)")
 
     store.remember(project, FINGERPRINT)
 
